@@ -191,6 +191,29 @@ USERNAME_PREFIX = fbsd-
 	})
 }
 
+func TestLoadServiceDefaultAllowCreateOrganization(t *testing.T) {
+	defer test.MockProtect(&Service)()
+
+	t.Run("Default disabled", func(t *testing.T) {
+		cfg, err := NewConfigProviderFromData(`
+[service]
+`)
+		require.NoError(t, err)
+		loadServiceFrom(cfg)
+		assert.False(t, Service.DefaultAllowCreateOrganization)
+	})
+
+	t.Run("Enabled", func(t *testing.T) {
+		cfg, err := NewConfigProviderFromData(`
+[service]
+DEFAULT_ALLOW_CREATE_ORGANIZATION = true
+`)
+		require.NoError(t, err)
+		loadServiceFrom(cfg)
+		assert.True(t, Service.DefaultAllowCreateOrganization)
+	})
+}
+
 func TestLoadServiceVisibilityModes(t *testing.T) {
 	oldService := Service
 	defer func() {
