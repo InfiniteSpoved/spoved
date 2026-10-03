@@ -62,8 +62,10 @@
 				{{if .IsOrganizationOwner}}
 					<div class="ui attached segment">
 						<form class="ui form ignore-dirty tw-flex tw-flex-wrap tw-gap-2" action="{{$.OrgLink}}/teams/{{$.Team.LowerName | PathEscape}}/action/group/link" method="post">
-							<div class="ui input tw-mr-2">
-								<input name="group_name" placeholder="{{ctx.Locale.Tr "org.teams.user_groups.name_placeholder"}}" aria-label="{{ctx.Locale.Tr "org.teams.user_groups.name_placeholder"}}" autocomplete="off" required>
+							<div id="search-user-group-box" class="ui search tw-mr-2" data-url="{{$.OrgLink}}/teams/{{$.Team.LowerName | PathEscape}}/groups/search">
+								<div class="ui input">
+									<input class="prompt" name="group_name" placeholder="{{ctx.Locale.Tr "org.teams.user_groups.name_placeholder"}}" aria-label="{{ctx.Locale.Tr "org.teams.user_groups.name_placeholder"}}" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" required>
+								</div>
 							</div>
 							<button class="ui primary button">{{ctx.Locale.Tr "org.teams.user_groups.link"}}</button>
 						</form>

@@ -1106,6 +1106,7 @@ func registerRoutes(m *web.Route) {
 			m.Post("/teams/{team}/action/{action}", org.TeamsAction)
 			m.Post("/teams/{team}/action/repo/{action}", org.TeamsRepoAction)
 			m.Post("/teams/{team}/action/group/{action}", org.TeamsUserGroupAction)
+			m.Get("/teams/{team}/groups/search", org.SearchTeamUserGroups)
 		}, context.OrgAssignment(true, false, true))
 
 		// require admin permission

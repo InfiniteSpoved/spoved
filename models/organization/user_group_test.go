@@ -96,6 +96,13 @@ func TestUserGroupMembersAndTeams(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, viaGroup)
 
+	linkable, _, err := organization.SearchUserGroups(ctx, &organization.SearchUserGroupOptions{NotLinkedToTeamID: team.ID})
+	require.NoError(t, err)
+	assert.Empty(t, linkable)
+	linkable, _, err = organization.SearchUserGroups(ctx, &organization.SearchUserGroupOptions{NotLinkedToTeamID: 1})
+	require.NoError(t, err)
+	assert.Len(t, linkable, 1)
+
 	groups, err := organization.GetTeamUserGroups(ctx, team.ID)
 	require.NoError(t, err)
 	require.Len(t, groups, 1)

@@ -165,12 +165,18 @@ func GetUserGroupByName(ctx context.Context, name string) (*UserGroup, error) {
 type SearchUserGroupOptions struct {
 	db.ListOptions
 	Keyword string
+	// NotLinkedToTeamID excludes the groups already linked to this team.
+	NotLinkedToTeamID int64
 }
 
 func (opts SearchUserGroupOptions) ToConds() builder.Cond {
 	cond := builder.NewCond()
 	if opts.Keyword != "" {
 		cond = cond.And(builder.Like{"lower_name", strings.ToLower(opts.Keyword)})
+	}
+	if opts.NotLinkedToTeamID > 0 {
+		cond = cond.And(builder.NotIn("id",
+			builder.Select("group_id").From("user_group_team").Where(builder.Eq{"team_id": opts.NotLinkedToTeamID})))
 	}
 	return cond
 }

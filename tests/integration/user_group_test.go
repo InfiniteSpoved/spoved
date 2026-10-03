@@ -53,6 +53,23 @@ func TestUserGroupSharedAcrossOrganizations(t *testing.T) {
 	}), http.StatusNotFound)
 	unittest.AssertNotExistsBean(t, &organization.UserGroupTeam{GroupID: group.ID})
 
+	// the link form autocompletes group names, for owners only
+	searchURL := "/org/org3/teams/team1/groups/search?q=release"
+	resp = admin.MakeRequest(t, NewRequest(t, "GET", searchURL), http.StatusOK)
+	var search struct {
+		Data []struct {
+			ID          int64  `json:"id"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		} `json:"data"`
+	}
+	DecodeJSON(t, resp, &search)
+	require.Len(t, search.Data, 1)
+	assert.Equal(t, group.ID, search.Data[0].ID)
+	assert.Equal(t, "release-managers", search.Data[0].Name)
+	assert.Equal(t, "People who cut releases", search.Data[0].Description)
+	loginUser(t, "user4").MakeRequest(t, NewRequest(t, "GET", searchURL), http.StatusNotFound)
+
 	// link the same group to teams of two different organizations
 	for _, teamURL := range []string{"/org/org3/teams/team1", "/org/org17/teams/test_team"} {
 		resp = admin.MakeRequest(t, NewRequestWithValues(t, "POST", teamURL+"/action/group/link", map[string]string{
@@ -64,6 +81,11 @@ func TestUserGroupSharedAcrossOrganizations(t *testing.T) {
 		tu := unittest.AssertExistsAndLoadBean(t, &organization.TeamUser{TeamID: teamID, UID: 5})
 		assert.Equal(t, organization.MembershipReasonAddedByUserGroup, tu.Reason)
 	}
+
+	// a group that is already linked is no longer suggested
+	resp = admin.MakeRequest(t, NewRequest(t, "GET", searchURL), http.StatusOK)
+	DecodeJSON(t, resp, &search)
+	assert.Empty(t, search.Data)
 
 	// the member now has the access of the team
 	member.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3"), http.StatusOK)

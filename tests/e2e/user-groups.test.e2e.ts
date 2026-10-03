@@ -40,7 +40,10 @@ test('User group shared by teams of several organizations', async ({browser, pag
   // link the group to a team in two different organizations
   for (const teamURL of ['/org/org3/teams/team1', '/org/org17/teams/test_team']) {
     await page.goto(teamURL);
-    await page.getByPlaceholder('User group name').fill(groupName);
+    // type part of the name and pick the group from the suggestions
+    await page.getByPlaceholder('User group name').fill(groupName.slice(0, 20));
+    await page.locator('#search-user-group-box .results .result', {hasText: groupName}).click();
+    await expect(page.getByPlaceholder('User group name')).toHaveValue(groupName);
     await page.getByRole('button', {name: 'Link user group'}).click();
     await expect(page.locator('#team-user-groups + .segment + .segment')).toContainText(groupName);
     await expect(page.locator('.flex-item', {hasText: username})).toContainText('joined via a user group');

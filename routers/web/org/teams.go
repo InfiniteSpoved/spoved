@@ -303,6 +303,36 @@ func TeamsUserGroupAction(ctx *context.Context) {
 	ctx.Redirect(teamLink)
 }
 
+// SearchTeamUserGroups returns the user groups matching a keyword that can be
+// linked to the current team, for the autocompletion of the link form
+func SearchTeamUserGroups(ctx *context.Context) {
+	if !ctx.Org.IsOwner {
+		ctx.Error(http.StatusNotFound)
+		return
+	}
+
+	groups, _, err := org_model.SearchUserGroups(ctx, &org_model.SearchUserGroupOptions{
+		ListOptions:       db.ListOptions{Page: 1, PageSize: 10},
+		Keyword:           ctx.FormTrim("q"),
+		NotLinkedToTeamID: ctx.Org.Team.ID,
+	})
+	if err != nil {
+		ctx.ServerError("SearchUserGroups", err)
+		return
+	}
+
+	type userGroup struct {
+		ID          int64  `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	data := make([]userGroup, 0, len(groups))
+	for _, g := range groups {
+		data = append(data, userGroup{ID: g.ID, Name: g.Name, Description: g.Description})
+	}
+	ctx.JSON(http.StatusOK, map[string]any{"ok": true, "data": data})
+}
+
 func checkIsOrgMemberAndRedirect(ctx *context.Context, defaultRedirect string) {
 	if isOrgMember, err := org_model.IsOrganizationMember(ctx, ctx.Org.Organization.ID, ctx.Doer.ID); err != nil {
 		ctx.ServerError("IsOrganizationMember", err)
