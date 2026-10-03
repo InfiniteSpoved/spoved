@@ -37,6 +37,7 @@ type preReceiveContext struct {
 	user                *user_model.User // it's the org user if a DeployKey is used
 	userPerm            access_model.Permission
 	deployKeyAccessMode perm_model.AccessMode
+	deployKeyKeyID      int64 // public key ID of the deploy key in use
 
 	protectedTags    []*git_model.ProtectedTag
 	gotProtectedTags bool
@@ -365,7 +366,7 @@ func preReceiveBranch(ctx *preReceiveContext, oldCommitID, newCommitID string, r
 	// 5. Check if the doer is allowed to push
 	var canPush bool
 	if ctx.opts.DeployKeyID != 0 {
-		canPush = !changedProtectedfiles && protectBranch.CanPush && (!protectBranch.EnableWhitelist || protectBranch.WhitelistDeployKeys)
+		canPush = !changedProtectedfiles && protectBranch.CanDeployKeyPush(ctx.deployKeyKeyID)
 	} else {
 		user, err := user_model.GetUserByID(ctx, ctx.opts.UserID)
 		if err != nil {
@@ -511,7 +512,14 @@ func preReceiveTag(ctx *preReceiveContext, oldCommitID, newCommitID string, refF
 		ctx.gotProtectedTags = true
 	}
 
-	isAllowed, err := git_model.IsUserAllowedToControlTag(ctx, ctx.protectedTags, tagName, ctx.opts.UserID)
+	var isAllowed bool
+	var err error
+	if ctx.opts.DeployKeyID != 0 {
+		// ctx.opts.UserID is the repository owner for deploy keys, so only the key itself decides.
+		isAllowed, err = git_model.IsDeployKeyAllowedToControlTag(ctx.protectedTags, tagName, ctx.deployKeyKeyID)
+	} else {
+		isAllowed, err = git_model.IsUserAllowedToControlTag(ctx, ctx.protectedTags, tagName, ctx.opts.UserID)
+	}
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, private.Response{
 			Err: err.Error(),
@@ -698,6 +706,7 @@ func (ctx *preReceiveContext) loadPusherAndPermission() bool {
 			return false
 		}
 		ctx.deployKeyAccessMode = deployKey.Mode
+		ctx.deployKeyKeyID = deployKey.KeyID
 	}
 
 	ctx.loadedPusher = true

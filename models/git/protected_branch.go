@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	asymkey_model "forgejo.org/models/asymkey"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
@@ -42,6 +43,7 @@ type ProtectedBranch struct {
 	WhitelistTeamIDs              []int64  `xorm:"JSON TEXT"`
 	EnableMergeWhitelist          bool     `xorm:"NOT NULL DEFAULT false"`
 	WhitelistDeployKeys           bool     `xorm:"NOT NULL DEFAULT false"`
+	WhitelistDeployKeyIDs         []int64  `xorm:"JSON TEXT"` // public key IDs of the deploy keys allowed to push
 	MergeWhitelistUserIDs         []int64  `xorm:"JSON TEXT"`
 	MergeWhitelistTeamIDs         []int64  `xorm:"JSON TEXT"`
 	EnableStatusCheck             bool     `xorm:"NOT NULL DEFAULT false"`
@@ -148,6 +150,20 @@ func (protectBranch *ProtectedBranch) CanUserPush(ctx context.Context, user *use
 		return false
 	}
 	return in
+}
+
+// CanDeployKeyPush returns if the deploy key with the given public key ID could push to this protected branch.
+// The caller must check that the deploy key has write access to the repository.
+func (protectBranch *ProtectedBranch) CanDeployKeyPush(keyID int64) bool {
+	if !protectBranch.CanPush {
+		return false
+	}
+
+	if !protectBranch.EnableWhitelist {
+		return true
+	}
+
+	return protectBranch.WhitelistDeployKeys || slices.Contains(protectBranch.WhitelistDeployKeyIDs, keyID)
 }
 
 // IsUserMergeWhitelisted checks if some user is whitelisted to merge to this branch
@@ -305,8 +321,9 @@ func GetProtectedBranchRuleByID(ctx context.Context, repoID, ruleID int64) (*Pro
 
 // WhitelistOptions represent all sorts of whitelists used for protected branches
 type WhitelistOptions struct {
-	UserIDs []int64
-	TeamIDs []int64
+	UserIDs      []int64
+	TeamIDs      []int64
+	DeployKeyIDs []int64
 
 	MergeUserIDs []int64
 	MergeTeamIDs []int64
@@ -365,6 +382,12 @@ func UpdateProtectBranch(ctx context.Context, repo *repo_model.Repository, prote
 		return err
 	}
 	protectBranch.ApprovalsWhitelistTeamIDs = whitelist
+
+	whitelist, err = updateDeployKeyWhitelist(ctx, repo, protectBranch.WhitelistDeployKeyIDs, opts.DeployKeyIDs)
+	if err != nil {
+		return err
+	}
+	protectBranch.WhitelistDeployKeyIDs = whitelist
 
 	// Make sure protectBranch.ID is not 0 for whitelists
 	if protectBranch.ID == 0 {
@@ -454,6 +477,42 @@ func updateTeamWhitelist(ctx context.Context, repo *repo_model.Repository, curre
 	return whitelist, err
 }
 
+// updateDeployKeyWhitelist checks whether the deploy key whitelist changed and returns a whitelist with
+// the public key IDs from newWhitelist which belong to a write deploy key of the repo.
+func updateDeployKeyWhitelist(ctx context.Context, repo *repo_model.Repository, currentWhitelist, newWhitelist []int64) (whitelist []int64, err error) {
+	hasKeysChanged := !util.SliceSortedEqual(currentWhitelist, newWhitelist)
+	if !hasKeysChanged {
+		return currentWhitelist, nil
+	}
+
+	return FilterWriteDeployKeyIDs(ctx, repo.ID, newWhitelist)
+}
+
+// FilterWriteDeployKeyIDs returns the public key IDs from keyIDs which belong to a deploy key
+// of the repository with write access.
+func FilterWriteDeployKeyIDs(ctx context.Context, repoID int64, keyIDs []int64) ([]int64, error) {
+	filtered := make([]int64, 0, len(keyIDs))
+	if len(keyIDs) == 0 {
+		return filtered, nil
+	}
+
+	keys, err := db.Find[asymkey_model.DeployKey](ctx, asymkey_model.ListDeployKeysOptions{
+		ListOptions: db.ListOptionsAll,
+		RepoID:      repoID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ListDeployKeys [repo_id: %d]: %w", repoID, err)
+	}
+
+	for _, key := range keys {
+		if key.Mode >= perm.AccessModeWrite && slices.Contains(keyIDs, key.KeyID) && !slices.Contains(filtered, key.KeyID) {
+			filtered = append(filtered, key.KeyID)
+		}
+	}
+
+	return filtered, nil
+}
+
 // DeleteProtectedBranch removes ProtectedBranch relation between the user and repository.
 func DeleteProtectedBranch(ctx context.Context, repo *repo_model.Repository, id int64) (err error) {
 	err = repo.MustNotBeArchived()
@@ -511,6 +570,39 @@ func RemoveTeamIDFromProtectedBranch(ctx context.Context, p *ProtectedBranch, te
 			"approvals_whitelist_team_i_ds",
 		).Update(p); err != nil {
 			return fmt.Errorf("updateProtectedBranches: %v", err)
+		}
+	}
+	return nil
+}
+
+// RemoveDeployKeyIDFromProtectionRules removes the public key ID of a deleted deploy key
+// from the branch and tag protection rules of the repository.
+func RemoveDeployKeyIDFromProtectionRules(ctx context.Context, repoID, keyID int64) error {
+	branches, err := FindRepoProtectedBranchRules(ctx, repoID)
+	if err != nil {
+		return err
+	}
+	for _, p := range branches {
+		if !slices.Contains(p.WhitelistDeployKeyIDs, keyID) {
+			continue
+		}
+		p.WhitelistDeployKeyIDs = util.SliceRemoveAll(p.WhitelistDeployKeyIDs, keyID)
+		if _, err := db.GetEngine(ctx).ID(p.ID).Cols("whitelist_deploy_key_i_ds").Update(p); err != nil {
+			return fmt.Errorf("update protected branch: %w", err)
+		}
+	}
+
+	tags, err := GetProtectedTags(ctx, repoID)
+	if err != nil {
+		return err
+	}
+	for _, pt := range tags {
+		if !slices.Contains(pt.AllowlistDeployKeyIDs, keyID) {
+			continue
+		}
+		pt.AllowlistDeployKeyIDs = util.SliceRemoveAll(pt.AllowlistDeployKeyIDs, keyID)
+		if _, err := db.GetEngine(ctx).ID(pt.ID).Cols("allowlist_deploy_key_i_ds").Update(pt); err != nil {
+			return fmt.Errorf("update protected tag: %w", err)
 		}
 	}
 	return nil
