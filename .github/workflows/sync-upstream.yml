@@ -1,0 +1,78 @@
+name: Sync from upstream Forgejo
+
+# Mirrors the `forgejo` branch of https://codeberg.org/forgejo/forgejo
+# into `main` of this repository. Feature work happens on `develop`, which
+# merges `main` in manually to pick up upstream changes.
+#
+# Scheduled runs only fire from the repository's default branch, so this
+# file must live on the default branch (`develop`).
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # nightly, 03:17 UTC
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - .github/workflows/sync-upstream.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_URL: https://codeberg.org/forgejo/forgejo.git
+  UPSTREAM_BRANCH: forgejo
+  TARGET_BRANCH: main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out target branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if git fetch --no-tags "$UPSTREAM_URL" "$UPSTREAM_BRANCH"; then
+              exit 0
+            fi
+            echo "Fetch attempt $attempt failed, retrying in $((attempt * 30))s"
+            sleep $((attempt * 30))
+          done
+          echo "::error::Could not fetch $UPSTREAM_URL after 5 attempts"
+          exit 1
+
+      - name: Fast-forward target branch
+        run: |
+          before=$(git rev-parse HEAD)
+          after=$(git rev-parse FETCH_HEAD)
+
+          if [ "$before" = "$after" ]; then
+            echo "Already up to date at $after" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if ! git merge-base --is-ancestor "$before" "$after"; then
+            echo "::error::$TARGET_BRANCH has diverged from upstream $UPSTREAM_BRANCH; refusing to overwrite it"
+            exit 1
+          fi
+
+          git push origin "$after:refs/heads/$TARGET_BRANCH"
+
+          {
+            echo "Synced \`$TARGET_BRANCH\` from ${before:0:10} to ${after:0:10}"
+            echo
+            echo '```'
+            git log --oneline "$before..$after" | head -n 50
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
