@@ -78,3 +78,17 @@ type swaggerResponseTeamInvite struct {
 	// in:body
 	Body api.TeamInvite `json:"body"`
 }
+
+// UserGroup
+// swagger:response UserGroup
+type swaggerResponseUserGroup struct {
+	// in:body
+	Body api.UserGroup `json:"body"`
+}
+
+// UserGroupList
+// swagger:response UserGroupList
+type swaggerResponseUserGroupList struct {
+	// in:body
+	Body []api.UserGroup `json:"body"`
+}

@@ -190,13 +190,17 @@ func SearchUserGroups(ctx context.Context, opts *SearchUserGroupOptions) ([]*Use
 	return db.FindAndCount[UserGroup](ctx, opts)
 }
 
-// GetUserGroupMembers returns the users of a user group.
-func GetUserGroupMembers(ctx context.Context, groupID int64) ([]*user_model.User, error) {
+// GetUserGroupMembers returns the users of a user group, all of them when
+// listOptions has no page size.
+func GetUserGroupMembers(ctx context.Context, groupID int64, listOptions db.ListOptions) ([]*user_model.User, error) {
 	users := make([]*user_model.User, 0, 10)
-	return users, db.GetEngine(ctx).
+	sess := db.GetEngine(ctx).
 		In("id", builder.Select("uid").From("user_group_user").Where(builder.Eq{"group_id": groupID})).
-		OrderBy("lower_name").
-		Find(&users)
+		OrderBy("lower_name")
+	if listOptions.PageSize > 0 {
+		sess = db.SetSessionPagination(sess, &listOptions)
+	}
+	return users, sess.Find(&users)
 }
 
 // GetUserGroupMemberIDs returns the IDs of the users of a user group.

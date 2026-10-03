@@ -1,0 +1,35 @@
+// Copyright 2026 The Forgejo Authors. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package structs
+
+import "time"
+
+// UserGroup is an instance-wide group of users. Organizations link it to
+// their teams, and its members become members of those teams.
+type UserGroup struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Number of users in the group
+	MembersCount int `json:"members_count"`
+	// Number of teams the group is linked to
+	TeamsCount int `json:"teams_count"`
+	// swagger:strfmt date-time
+	Created time.Time `json:"created_at"`
+	// swagger:strfmt date-time
+	Updated time.Time `json:"updated_at"`
+}
+
+// CreateUserGroupOption options for creating a user group
+type CreateUserGroupOption struct {
+	// required: true
+	Name        string `json:"name" binding:"Required;AlphaDashDot;MaxSize(255)"`
+	Description string `json:"description" binding:"MaxSize(255)"`
+}
+
+// EditUserGroupOption options for editing a user group
+type EditUserGroupOption struct {
+	Name        *string `json:"name" binding:"AlphaDashDot;MaxSize(255)"`
+	Description *string `json:"description" binding:"MaxSize(255)"`
+}

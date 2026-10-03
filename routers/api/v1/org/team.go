@@ -534,9 +534,21 @@ func RemoveTeamMember(ctx *context.APIContext) {
 	//     "$ref": "#/responses/empty"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
 
 	u := user.GetUserByParams(ctx)
 	if ctx.Written() {
+		return
+	}
+
+	// a member coming from a linked user group would be added back by the group
+	viaGroup, err := organization.IsTeamMemberViaUserGroup(ctx, ctx.Org().Team.ID, u.ID)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "IsTeamMemberViaUserGroup", err)
+		return
+	} else if viaGroup {
+		ctx.Error(http.StatusUnprocessableEntity, "", errors.New("the user is a member of the team through a linked user group: remove them from the group or unlink the group instead"))
 		return
 	}
 
