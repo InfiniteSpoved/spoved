@@ -3,74 +3,214 @@
 
 // @watch start
 // templates/admin/user_group/**
+// templates/admin/navbar.tmpl
 // templates/org/team/members.tmpl
+// templates/org/team/membership_origin.tmpl
 // routers/web/admin/user_groups.go
 // routers/web/org/teams.go
 // services/usergroup/**
+// models/organization/user_group.go
+// web_src/js/features/org-team.js
+// tests/e2e/shared/fake-data.ts
 // @watch end
 
-import {expect} from '@playwright/test';
-import {test, create_temp_user, dynamic_id} from './utils_e2e.ts';
+// Everything here is created from scratch by the administrator configured in
+// E2E_ADMIN_USERNAME / E2E_ADMIN_PASSWORD (see shared/fake-data.ts), so the
+// tests do not depend on the fixture data.
 
-test.use({user: 'user1'});
+import {expect, type Page} from '@playwright/test';
+import {test} from './utils_e2e.ts';
+import {FakeData, fakeName, loginAs, loginAsAdmin, repoPermissions, adminAuth, type FakeTeam} from './shared/fake-data.ts';
 
-test('User group shared by teams of several organizations', async ({browser, page, request}, workerInfo) => {
-  const {context: memberContext, username} = await create_temp_user(browser, workerInfo, request);
-  const memberPage = await memberContext.newPage();
-  const groupName = dynamic_id();
+const teamURL = (team: FakeTeam) => `/org/${team.org}/teams/${team.name}`;
 
-  // org3/repo3 is private: the new user cannot see it yet
-  expect((await memberPage.goto('/org3/repo3'))?.status()).toBe(404);
+async function linkGroup(page: Page, team: FakeTeam, group: string) {
+  await page.goto(teamURL(team));
+  // type part of the name and pick the group from the suggestions
+  await page.getByPlaceholder('User group name').fill(group.slice(0, -2));
+  await page.locator('#search-user-group-box .results .result', {hasText: group}).click();
+  await expect(page.getByPlaceholder('User group name')).toHaveValue(group);
+  await page.getByRole('button', {name: 'Link user group'}).click();
+  await expect(page.locator('#team-user-groups + .segment + .segment')).toContainText(group);
+}
 
-  // create the group
-  await page.goto('/admin/groups');
-  await page.getByRole('link', {name: 'Create user group'}).click();
-  await page.getByLabel('Group name').fill(groupName);
-  await page.getByLabel('Description').fill('Shared release managers');
-  await page.getByRole('button', {name: 'Create user group'}).click();
-  await expect(page.locator('.flash-success')).toContainText(`User group "${groupName}" has been created.`);
-  const groupURL = page.url();
+let data: FakeData;
 
-  // add the user to the group
-  await page.getByPlaceholder('Search users…').fill(username);
-  await page.getByRole('button', {name: 'Add member'}).click();
-  await expect(page.locator('.flash-success')).toContainText(`${username} has been added to the group.`);
-  await expect(page.locator('#user-group-members + .segment + .segment')).toContainText(username);
+test.beforeEach(({request}) => {
+  data = new FakeData(request);
+});
 
-  // link the group to a team in two different organizations
-  for (const teamURL of ['/org/org3/teams/team1', '/org/org17/teams/test_team']) {
-    await page.goto(teamURL);
-    // type part of the name and pick the group from the suggestions
-    await page.getByPlaceholder('User group name').fill(groupName.slice(0, 20));
-    await page.locator('#search-user-group-box .results .result', {hasText: groupName}).click();
-    await expect(page.getByPlaceholder('User group name')).toHaveValue(groupName);
-    await page.getByRole('button', {name: 'Link user group'}).click();
-    await expect(page.locator('#team-user-groups + .segment + .segment')).toContainText(groupName);
-    await expect(page.locator('.flex-item', {hasText: username})).toContainText('joined via a user group');
+test.afterEach(async () => {
+  await data.cleanup();
+});
+
+test('One user group grants access to teams of several organizations', async ({browser, request}) => {
+  test.setTimeout(180000);
+
+  // two users, and two private organizations with a read-only team on every
+  // repository of the first and a write team on one repository of the second
+  const alice = await data.createUser();
+  const bob = await data.createUser();
+  const orgA = await data.createOrg();
+  const repoA = await data.createRepo(orgA);
+  const orgB = await data.createOrg();
+  const repoB1 = await data.createRepo(orgB);
+  const repoB2 = await data.createRepo(orgB);
+  const readers = await data.createTeam(orgA, 'read');
+  const writers = await data.createTeam(orgB, 'write', [repoB1]);
+
+  for (const user of [alice, bob]) {
+    expect(await repoPermissions(request, user, orgA, repoA)).toBeNull();
+    expect(await repoPermissions(request, user, orgB, repoB1)).toBeNull();
   }
 
-  // the member got the access of the team
-  expect((await memberPage.goto('/org3/repo3'))?.status()).toBe(200);
+  const admin = await (await loginAsAdmin(browser)).newPage();
+  const group = fakeName('group');
+  data.trackGroup(group);
 
-  // the group page lists both teams
-  await page.goto(groupURL);
-  const linkedTeams = page.locator('#user-group-teams + .segment');
-  await expect(linkedTeams.getByRole('link', {name: 'team1'})).toBeVisible();
-  await expect(linkedTeams.getByRole('link', {name: 'test_team'})).toBeVisible();
+  await test.step('create the user group', async () => {
+    await admin.goto('/admin/groups');
+    await admin.getByRole('link', {name: 'Create user group'}).click();
+    await admin.getByLabel('Group name').fill(group);
+    await admin.getByLabel('Description').fill('Created by the end-to-end tests');
+    await admin.getByRole('button', {name: 'Create user group'}).click();
+    await expect(admin.locator('.flash-success')).toContainText(`User group "${group}" has been created.`);
+  });
 
-  // unlinking from org3 revokes access there
-  await page.goto('/org/org3/teams/team1');
-  await page.locator('#team-user-groups + .segment + .segment .flex-item', {hasText: groupName}).getByRole('button', {name: 'Unlink'}).click();
-  await expect(page.locator('#team-user-groups + .segment + .segment')).not.toContainText(groupName);
-  await expect(page.locator('.flex-item', {hasText: username})).toHaveCount(0);
-  expect((await memberPage.goto('/org3/repo3'))?.status()).toBe(404);
+  const groupURL = admin.url();
 
-  // deleting the group cleans up the remaining team
-  await page.goto(groupURL);
-  await page.getByRole('button', {name: 'Delete user group'}).click();
-  await page.locator('#delete-user-group').getByRole('button', {name: 'Yes'}).click();
-  await expect(page).toHaveURL(/\/admin\/groups$/);
-  await expect(page.locator('.flash-success')).toContainText(`User group "${groupName}" has been deleted.`);
-  await page.goto('/org/org17/teams/test_team');
-  await expect(page.locator('.flex-item', {hasText: username})).toHaveCount(0);
+  await test.step('group names are unique', async () => {
+    await admin.goto('/admin/groups/new');
+    await admin.getByLabel('Group name').fill(group.toUpperCase());
+    await admin.getByRole('button', {name: 'Create user group'}).click();
+    await expect(admin.getByText('A user group with this name already exists.')).toBeVisible();
+  });
+
+  await test.step('add the users to the group', async () => {
+    await admin.goto(groupURL);
+    for (const user of [alice, bob]) {
+      await admin.getByPlaceholder('Search users…').fill(user.username);
+      await admin.getByRole('button', {name: 'Add member'}).click();
+      await expect(admin.locator('.flash-success')).toContainText(`${user.username} has been added to the group.`);
+    }
+    await admin.getByPlaceholder('Search users…').fill(orgA);
+    await admin.getByRole('button', {name: 'Add member'}).click();
+    await expect(admin.locator('.flash-error')).toContainText('An organization cannot be a member of a user group.');
+
+    const members = admin.locator('#user-group-members + .segment + .segment');
+    await expect(members).toContainText(alice.username);
+    await expect(members).toContainText(bob.username);
+    await expect(members).not.toContainText(orgA);
+  });
+
+  await test.step('link the group to a team in each organization', async () => {
+    for (const team of [readers, writers]) {
+      await linkGroup(admin, team, group);
+      for (const user of [alice, bob]) {
+        const row = admin.locator('.flex-item', {hasText: user.username});
+        await expect(row).toContainText('joined via a user group');
+        // a member coming from a group can only be removed through the group
+        await expect(row.getByRole('button', {name: 'Remove'})).toHaveCount(0);
+      }
+    }
+
+    await admin.goto(groupURL);
+    const linkedTeams = admin.locator('#user-group-teams + .segment');
+    await expect(linkedTeams.getByRole('link', {name: readers.name})).toBeVisible();
+    await expect(linkedTeams.getByRole('link', {name: writers.name})).toBeVisible();
+  });
+
+  await test.step('members get exactly the access of the linked teams', async () => {
+    for (const user of [alice, bob]) {
+      expect(await repoPermissions(request, user, orgA, repoA)).toMatchObject({pull: true, push: false});
+      expect(await repoPermissions(request, user, orgB, repoB1)).toMatchObject({pull: true, push: true});
+      expect(await repoPermissions(request, user, orgB, repoB2)).toBeNull();
+    }
+
+    const alicePage = await (await loginAs(browser, alice.username, alice.password)).newPage();
+    expect((await alicePage.goto(`/${orgA}/${repoA}`))?.status()).toBe(200);
+    expect((await alicePage.goto(`/${orgB}/${repoB1}`))?.status()).toBe(200);
+    expect((await alicePage.goto(`/${orgB}/${repoB2}`))?.status()).toBe(404);
+    await alicePage.context().close();
+  });
+
+  await test.step('removing a member from the group revokes their access everywhere', async () => {
+    await admin.goto(groupURL);
+    await admin.locator('.flex-item', {hasText: bob.username}).getByRole('button', {name: 'Remove'}).click();
+    await expect(admin.locator('.flash-success')).toContainText('The member has been removed from the group.');
+
+    expect(await repoPermissions(request, bob, orgA, repoA)).toBeNull();
+    expect(await repoPermissions(request, bob, orgB, repoB1)).toBeNull();
+    expect(await repoPermissions(request, alice, orgA, repoA)).not.toBeNull();
+  });
+
+  await test.step('unlinking the group from a team revokes the access of that team only', async () => {
+    await admin.goto(teamURL(readers));
+    await admin.locator('#team-user-groups + .segment + .segment .flex-item', {hasText: group}).getByRole('button', {name: 'Unlink'}).click();
+    await expect(admin.locator('#team-user-groups + .segment + .segment')).toContainText('No user groups are linked to this team.');
+    await expect(admin.locator('.flex-item', {hasText: alice.username})).toHaveCount(0);
+
+    expect(await repoPermissions(request, alice, orgA, repoA)).toBeNull();
+    expect(await repoPermissions(request, alice, orgB, repoB1)).toMatchObject({pull: true, push: true});
+  });
+
+  const renamed = fakeName('group');
+
+  await test.step('rename the group', async () => {
+    await admin.goto(groupURL);
+    await admin.getByLabel('Group name').fill(renamed);
+    await admin.getByRole('button', {name: 'Update user group'}).click();
+    await expect(admin.locator('.flash-success')).toContainText('User group has been updated.');
+    data.trackGroup(renamed);
+
+    await admin.goto(teamURL(writers));
+    await expect(admin.locator('#team-user-groups + .segment + .segment')).toContainText(renamed);
+  });
+
+  await test.step('deleting the group revokes the remaining access', async () => {
+    await admin.goto(groupURL);
+    await admin.getByRole('button', {name: 'Delete user group'}).click();
+    await admin.locator('#delete-user-group').getByRole('button', {name: 'Yes'}).click();
+    await expect(admin).toHaveURL(/\/admin\/groups$/);
+    await expect(admin.locator('.flash-success')).toContainText(`User group "${renamed}" has been deleted.`);
+
+    expect(await repoPermissions(request, alice, orgB, repoB1)).toBeNull();
+    await admin.goto(teamURL(writers));
+    await expect(admin.locator('.flex-item', {hasText: alice.username})).toHaveCount(0);
+  });
+});
+
+test('Only site administrators manage user groups and only owners link them', async ({browser, request}) => {
+  test.setTimeout(120000);
+
+  // carol is a direct member of a team, but neither a site administrator nor an organization owner
+  const carol = await data.createUser();
+  const org = await data.createOrg();
+  const team = await data.createTeam(org, 'read');
+  const added = await request.put(`/api/v1/teams/${team.id}/members/${carol.username}`, {headers: adminAuth()});
+  expect(added.status()).toBe(204);
+
+  const group = fakeName('group');
+  const created = await request.post('/api/v1/admin/groups', {headers: adminAuth(), data: {name: group}});
+  expect(created.status()).toBe(201);
+  data.trackGroup(group);
+  const linked = await request.put(`/api/v1/teams/${team.id}/groups/${group}`, {headers: adminAuth()});
+  expect(linked.status()).toBe(204);
+
+  const page = await (await loginAs(browser, carol.username, carol.password)).newPage();
+
+  // the administration pages are refused
+  for (const url of ['/admin/groups', '/admin/groups/new']) {
+    expect((await page.goto(url))?.status(), url).toBe(403);
+  }
+
+  // the team page lists the linked group, without the controls to change it
+  expect((await page.goto(teamURL(team)))?.status()).toBe(200);
+  await expect(page.locator('#team-user-groups + .segment')).toContainText(group);
+  await expect(page.getByPlaceholder('User group name')).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Link user group'})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Unlink'})).toHaveCount(0);
+
+  // and the group search used by the link form is refused
+  expect((await page.goto(`${teamURL(team)}/groups/search?q=${group}`))?.status()).toBe(404);
 });
