@@ -654,6 +654,345 @@
         }
       }
     },
+    "/admin/groups": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "List user groups",
+        "operationId": "adminListUserGroups",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "keyword to filter the group names with",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/UserGroupList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          }
+        }
+      },
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create a user group",
+        "operationId": "adminCreateUserGroup",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/CreateUserGroupOption"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "$ref": "#/responses/UserGroup"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "409": {
+            "$ref": "#/responses/error"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/admin/groups/{groupname}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get a user group",
+        "operationId": "adminGetUserGroup",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the user group",
+            "name": "groupname",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/UserGroup"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "delete": {
+        "description": "The group is unlinked from all teams first. Its members lose the team memberships they only had through the group.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete a user group",
+        "operationId": "adminDeleteUserGroup",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the user group",
+            "name": "groupname",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/error"
+          }
+        }
+      },
+      "patch": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Edit a user group",
+        "operationId": "adminEditUserGroup",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the user group",
+            "name": "groupname",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/EditUserGroupOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/UserGroup"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/error"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/admin/groups/{groupname}/members": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "List the members of a user group",
+        "operationId": "adminListUserGroupMembers",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the user group",
+            "name": "groupname",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/UserList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/admin/groups/{groupname}/members/{username}": {
+      "put": {
+        "description": "The user is also added to every team the group is linked to. Adding a user who is already a member does nothing.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Add a user to a user group",
+        "operationId": "adminAddUserGroupMember",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the user group",
+            "name": "groupname",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "username of the user to add",
+            "name": "username",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      },
+      "delete": {
+        "description": "The user is also removed from the teams they were only a member of through this group.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Remove a user from a user group",
+        "operationId": "adminRemoveUserGroupMember",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the user group",
+            "name": "groupname",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "username of the user to remove",
+            "name": "username",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/admin/groups/{groupname}/teams": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "List the teams a user group is linked to",
+        "operationId": "adminListUserGroupTeams",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the user group",
+            "name": "groupname",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/TeamList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
     "/admin/hooks": {
       "get": {
         "produces": [
@@ -19616,6 +19955,113 @@
         }
       }
     },
+    "/teams/{id}/groups": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "List the user groups linked to a team",
+        "operationId": "orgListTeamUserGroups",
+        "parameters": [
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the team",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/UserGroupList"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/teams/{id}/groups/{groupname}": {
+      "put": {
+        "description": "The members of the group become members of the team. Linking a group that is already linked does nothing.",
+        "tags": [
+          "organization"
+        ],
+        "summary": "Link a user group to a team",
+        "operationId": "orgLinkTeamUserGroup",
+        "parameters": [
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the team",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the user group",
+            "name": "groupname",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "delete": {
+        "description": "The members of the group who were only members of the team through this group are removed from the team.",
+        "tags": [
+          "organization"
+        ],
+        "summary": "Unlink a user group from a team",
+        "operationId": "orgUnlinkTeamUserGroup",
+        "parameters": [
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the team",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the user group",
+            "name": "groupname",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
     "/teams/{id}/members": {
       "get": {
         "produces": [
@@ -19764,6 +20210,9 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -26187,6 +26636,24 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "CreateUserGroupOption": {
+      "description": "CreateUserGroupOption options for creating a user group",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "x-go-name": "Description"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "CreateUserOption": {
       "description": "CreateUserOption create user options",
       "type": "object",
@@ -27266,6 +27733,21 @@
             "repo.releases": "none",
             "repo.wiki": "admin"
           }
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "EditUserGroupOption": {
+      "description": "EditUserGroupOption options for editing a user group",
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string",
+          "x-go-name": "Description"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -31637,6 +32119,48 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "UserGroup": {
+      "description": "UserGroup is an instance-wide group of users. Organizations link it to\ntheir teams, and its members become members of those teams.",
+      "type": "object",
+      "properties": {
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Created"
+        },
+        "description": {
+          "type": "string",
+          "x-go-name": "Description"
+        },
+        "id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "members_count": {
+          "description": "Number of users in the group",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MembersCount"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "teams_count": {
+          "description": "Number of teams the group is linked to",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "TeamsCount"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Updated"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "UserHeatmapData": {
       "description": "UserHeatmapData represents the data needed to create a heatmap",
       "type": "object",
@@ -33314,6 +33838,21 @@
       "description": "User",
       "schema": {
         "$ref": "#/definitions/User"
+      }
+    },
+    "UserGroup": {
+      "description": "UserGroup",
+      "schema": {
+        "$ref": "#/definitions/UserGroup"
+      }
+    },
+    "UserGroupList": {
+      "description": "UserGroupList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/UserGroup"
+        }
       }
     },
     "UserHeatmapData": {

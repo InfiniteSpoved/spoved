@@ -110,7 +110,7 @@ func prepareUserGroupView(ctx *context.Context, group *org_model.UserGroup) {
 	ctx.Data["Group"] = group
 	ctx.Data["GroupLink"] = userGroupLink(group)
 
-	members, err := org_model.GetUserGroupMembers(ctx, group.ID)
+	members, err := org_model.GetUserGroupMembers(ctx, group.ID, db.ListOptions{})
 	if err != nil {
 		ctx.ServerError("GetUserGroupMembers", err)
 		return

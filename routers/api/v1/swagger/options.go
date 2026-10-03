@@ -234,6 +234,12 @@ type swaggerParameterBodies struct {
 	CreateQuotaGroupOptions api.CreateQuotaGroupOptions
 
 	// in:body
+	CreateUserGroupOption api.CreateUserGroupOption
+
+	// in:body
+	EditUserGroupOption api.EditUserGroupOption
+
+	// in:body
 	CreateQuotaRuleOptions api.CreateQuotaRuleOptions
 
 	// in:body

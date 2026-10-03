@@ -1356,6 +1356,12 @@ func Routes() *web.Route {
 					Put(reqToken(), reqOrgOwnership(), org.AddTeamMember).
 					Delete(reqToken(), reqOrgOwnership(), org.RemoveTeamMember)
 			})
+			m.Group("/groups", func() {
+				m.Get("", reqToken(), org.ListTeamUserGroups)
+				m.Combo("/{groupname}").
+					Put(reqToken(), reqOrgOwnership(), org.LinkTeamUserGroup).
+					Delete(reqToken(), reqOrgOwnership(), org.UnlinkTeamUserGroup)
+			})
 			m.Group("/invitations", func() {
 				m.Get("", reqToken(), org.GetTeamInvitations)
 				m.Combo("/{inviteid}").
@@ -1415,6 +1421,20 @@ func Routes() *web.Route {
 						})
 					}
 				}, context.UserAssignmentAPI())
+			})
+			m.Group("/groups", func() {
+				m.Combo("").Get(admin.ListUserGroups).
+					Post(bind(api.CreateUserGroupOption{}), admin.CreateUserGroup)
+				m.Group("/{groupname}", func() {
+					m.Combo("").Get(admin.GetUserGroup).
+						Patch(bind(api.EditUserGroupOption{}), admin.EditUserGroup).
+						Delete(admin.DeleteUserGroup)
+					m.Get("/members", admin.ListUserGroupMembers)
+					m.Combo("/members/{username}").
+						Put(admin.AddUserGroupMember).
+						Delete(admin.RemoveUserGroupMember)
+					m.Get("/teams", admin.ListUserGroupTeams)
+				})
 			})
 			m.Group("/emails", func() {
 				m.Get("", admin.GetAllEmails)
