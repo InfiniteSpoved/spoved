@@ -85,6 +85,11 @@ type AuthenticationForm struct {
 	GroupTeamMap                  string `binding:"ValidGroupTeamMap"`
 	GroupTeamMapRemoval           bool
 	AllowUsernameChange           bool
+
+	GroupUserGroupMap              string `binding:"ValidQuotaGroupMap"`
+	GroupUserGroupMapRemoval       bool
+	Oauth2GroupUserGroupMap        string `binding:"ValidQuotaGroupMap"`
+	Oauth2GroupUserGroupMapRemoval bool
 }
 
 // Validate validates fields

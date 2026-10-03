@@ -122,6 +122,14 @@
 		<input name="oauth2_group_team_map_removal" type="checkbox" {{if .oauth2_group_team_map_removal}}checked{{end}}>
 	</div>
 	<div class="field">
+		<label>{{ctx.Locale.Tr "admin.auths.oauth2_map_group_to_user_group"}}</label>
+		<textarea name="oauth2_group_user_group_map" rows="5" placeholder='{"Developer": ["my-user-group"]}'>{{.oauth2_group_user_group_map}}</textarea>
+	</div>
+	<div class="ui checkbox">
+		<label>{{ctx.Locale.Tr "admin.auths.oauth2_map_group_to_user_group_removal"}}</label>
+		<input name="oauth2_group_user_group_map_removal" type="checkbox" {{if .oauth2_group_user_group_map_removal}}checked{{end}}>
+	</div>
+	<div class="field">
 		<label>{{ctx.Locale.Tr "admin.auths.oauth2_dyn_group_maps"}}</label>
 		<textarea name="oauth2_dyn_group_maps" rows="5" placeholder='["group-{org}-{team}", "other-{org}-{team}"]'>{{.oauth2_dyn_group_maps}}</textarea>
 	</div>

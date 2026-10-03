@@ -16,11 +16,14 @@ package usergroup
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"forgejo.org/models"
 	"forgejo.org/models/db"
 	org_model "forgejo.org/models/organization"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/container"
+	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
 )
 
@@ -35,6 +38,11 @@ var (
 
 // AddMember adds a user to a user group and to every team the group is linked to.
 func AddMember(ctx context.Context, group *org_model.UserGroup, user *user_model.User) error {
+	return addMember(ctx, group, user, 0)
+}
+
+// addMember is AddMember recording the login source that synced the membership (0 for none).
+func addMember(ctx context.Context, group *org_model.UserGroup, user *user_model.User, loginSourceID int64) error {
 	if user.IsOrganization() {
 		return ErrOrganizationCannotBeMember
 	}
@@ -45,7 +53,7 @@ func AddMember(ctx context.Context, group *org_model.UserGroup, user *user_model
 		} else if isMember {
 			return ErrAlreadyMember
 		}
-		if err := org_model.InsertUserGroupMember(ctx, group.ID, user.ID); err != nil {
+		if err := org_model.InsertUserGroupMember(ctx, group.ID, user.ID, loginSourceID); err != nil {
 			return err
 		}
 		return syncUserForGroupTeams(ctx, group.ID, user.ID)
@@ -61,6 +69,78 @@ func RemoveMember(ctx context.Context, group *org_model.UserGroup, userID int64)
 		}
 		return syncUserForGroupTeams(ctx, group.ID, userID)
 	})
+}
+
+// SyncDirectoryGroups syncs the user group memberships of a user from the
+// directory groups reported by a login source. mapping maps a directory group
+// to the names of user groups. The user is added to every group mapped from
+// one of their directory groups. With remove, the user is also removed from
+// the other mapped groups, but only where this login source added them.
+// Memberships added by an admin or another source are never touched.
+func SyncDirectoryGroups(ctx context.Context, user *user_model.User, loginSourceID int64, userDirectoryGroups container.Set[string], mapping map[string]container.Set[string], remove bool) error {
+	toAdd, toRemove := make(container.Set[string]), make(container.Set[string])
+	for dirGroup, names := range mapping {
+		target := toRemove
+		if userDirectoryGroups.Contains(dirGroup) {
+			target = toAdd
+		}
+		for name := range names {
+			target.Add(strings.ToLower(name))
+		}
+	}
+
+	for name := range toAdd {
+		toRemove.Remove(name) // still mapped from another directory group of the user
+	}
+
+	addGroups, err := loadGroupsForSync(ctx, toAdd)
+	if err != nil {
+		return err
+	}
+	for _, group := range addGroups {
+		if err := addMember(ctx, group, user, loginSourceID); err != nil && !errors.Is(err, ErrAlreadyMember) {
+			return err
+		}
+	}
+
+	if !remove {
+		return nil
+	}
+	removeGroups, err := loadGroupsForSync(ctx, toRemove)
+	if err != nil {
+		return err
+	}
+	for _, group := range removeGroups {
+		err := db.WithTx(ctx, func(ctx context.Context) error {
+			deleted, err := org_model.DeleteSyncedUserGroupMember(ctx, group.ID, user.ID, loginSourceID)
+			if err != nil || !deleted {
+				return err
+			}
+			return syncUserForGroupTeams(ctx, group.ID, user.ID)
+		})
+		if org_model.IsErrLastOrgOwner(err) {
+			log.Warn("user group sync: keeping %s in user group %s: %v", user.Name, group.Name, err)
+		} else if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// loadGroupsForSync returns the user groups with the given names, skipping the ones that do not exist.
+func loadGroupsForSync(ctx context.Context, names container.Set[string]) ([]*org_model.UserGroup, error) {
+	groups := make([]*org_model.UserGroup, 0, len(names))
+	for name := range names {
+		group, err := org_model.GetUserGroupByName(ctx, name)
+		if org_model.IsErrUserGroupNotExist(err) {
+			log.Warn("user group sync: user group %s does not exist", name)
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		groups = append(groups, group)
+	}
+	return groups, nil
 }
 
 // LinkTeam links a user group to a team and adds the members of the group to the team.

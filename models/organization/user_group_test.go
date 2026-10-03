@@ -68,8 +68,8 @@ func TestUserGroupMembersAndTeams(t *testing.T) {
 
 	g := &organization.UserGroup{Name: "devs"}
 	require.NoError(t, organization.InsertUserGroup(ctx, g))
-	require.NoError(t, organization.InsertUserGroupMember(ctx, g.ID, 5))
-	require.NoError(t, organization.InsertUserGroupMember(ctx, g.ID, 4))
+	require.NoError(t, organization.InsertUserGroupMember(ctx, g.ID, 5, 0))
+	require.NoError(t, organization.InsertUserGroupMember(ctx, g.ID, 4, 0))
 
 	members, err := organization.GetUserGroupMembers(ctx, g.ID, db.ListOptions{})
 	require.NoError(t, err)

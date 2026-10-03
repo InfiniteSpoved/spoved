@@ -57,6 +57,9 @@ type Source struct {
 	UserUID               string // User Attribute listed in Group
 	SkipLocalTwoFA        bool   `json:",omitempty"` // Skip Local 2fa for users authenticated with this source
 
+	GroupUserGroupMap        string // Map LDAP groups to user groups
+	GroupUserGroupMapRemoval bool   // Remove user from user groups which are synchronized and user is not a member of the corresponding LDAP group
+
 	// reference to the authSource
 	authSource *auth.Source
 }

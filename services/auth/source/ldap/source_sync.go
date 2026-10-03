@@ -18,6 +18,7 @@ import (
 	"forgejo.org/modules/optional"
 	source_service "forgejo.org/services/auth/source"
 	user_service "forgejo.org/services/user"
+	usergroup_service "forgejo.org/services/usergroup"
 )
 
 // Sync causes this ldap source to synchronize its users with the db
@@ -67,6 +68,10 @@ func (source *Source) Sync(ctx context.Context, updateExisting bool) error {
 	teamCache := make(map[string]*organization.Team)
 
 	groupTeamMapping, err := auth_module.UnmarshalGroupTeamMapping(source.GroupTeamMap)
+	if err != nil {
+		return err
+	}
+	groupUserGroupMapping, err := auth_module.UnmarshalQuotaGroupMapping(source.GroupUserGroupMap)
 	if err != nil {
 		return err
 	}
@@ -195,6 +200,13 @@ func (source *Source) Sync(ctx context.Context, updateExisting bool) error {
 				nil, false, orgCache, teamCache,
 			); err != nil {
 				log.Error("SyncGroupsToTeamsCached: %v", err)
+			}
+		}
+		if source.GroupsEnabled && source.GroupUserGroupMap != "" {
+			if err := usergroup_service.SyncDirectoryGroups(ctx,
+				usr, source.authSource.ID, su.Groups, groupUserGroupMapping, source.GroupUserGroupMapRemoval,
+			); err != nil {
+				log.Error("SyncDirectoryGroups: %v", err)
 			}
 		}
 	}
