@@ -235,7 +235,7 @@ func loadServiceFrom(rootCfg ConfigProvider) {
 	Service.McaptchaSecret = sec.Key("MCAPTCHA_SECRET").MustString("")
 	Service.McaptchaSitekey = sec.Key("MCAPTCHA_SITEKEY").MustString("")
 	Service.DefaultKeepEmailPrivate = sec.Key("DEFAULT_KEEP_EMAIL_PRIVATE").MustBool()
-	Service.DefaultAllowCreateOrganization = sec.Key("DEFAULT_ALLOW_CREATE_ORGANIZATION").MustBool(true)
+	Service.DefaultAllowCreateOrganization = sec.Key("DEFAULT_ALLOW_CREATE_ORGANIZATION").MustBool(false)
 	Service.DefaultUserIsRestricted = sec.Key("DEFAULT_USER_IS_RESTRICTED").MustBool(false)
 	Service.AllowDotsInUsernames = sec.Key("ALLOW_DOTS_IN_USERNAMES").MustBool(true)
 	Service.EnableTimetracking = sec.Key("ENABLE_TIMETRACKING").MustBool(true)
