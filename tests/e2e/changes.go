@@ -37,6 +37,7 @@ func initChangedFiles() {
 		"playwright.config.ts",
 		".forgejo/workflows/testing.yml",
 		".github/workflows/ci.yml",
+		".github/ci/*",
 		"tests/e2e/*.go",
 		"tests/e2e/shared/*",
 		// frontend files

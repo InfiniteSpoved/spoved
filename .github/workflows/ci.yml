@@ -5,6 +5,11 @@ name: CI
 # .forgejo/workflows/testing.yml (which GitHub does not run) using the same
 # make targets, on GitHub-hosted runners with SQLite.
 #
+# To keep the wall-clock time low, the test jobs do not wait for the checks,
+# and the long suites are split into shards that run in parallel. Each shard
+# takes a round-robin share of the packages, tests or test files (see
+# .github/ci/shard.sh); changing a matrix's shard list changes the split.
+#
 # main is a mirror of upstream Forgejo and is not tested here.
 
 on:
@@ -48,10 +53,19 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
+      - name: Cache golangci-lint results
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml') }}-${{ github.sha }}
+          restore-keys: |
+            golangci-lint-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml') }}-
+            golangci-lint-${{ runner.os }}-
       # lint-renovate needs node_modules
       - run: make deps-frontend
-      # golangci-lint, go vet, locale, editorconfig, swagger and format checks, then a build
-      - run: make pr-go
+      # golangci-lint, go vet, locale, editorconfig, swagger and format checks,
+      # then a build; cimake.sh runs the independent targets in parallel
+      - run: ./tools/cimake.sh pr-go
 
   frontend-checks:
     name: Frontend checks
@@ -76,53 +90,89 @@ jobs:
           retention-days: 1
 
   test-unit:
-    name: Unit tests
-    needs: [backend-checks, frontend-checks]
+    name: Unit tests (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-      - run: make test-backend
+      - name: Unit tests
+        run: |
+          # the packages `make test-backend` tests, as computed by the Makefile
+          packages=$(make -s --eval='ci-list-test-packages: compute-go-test-packages ; @echo $(GO_TEST_PACKAGES)' ci-list-test-packages \
+            | tr ' ' '\n' | .github/ci/shard.sh "$SHARD" "$SHARDS" | paste -sd' ')
+          echo "Testing $(wc -w <<< "$packages") packages"
+          make test-backend GO_TEST_PACKAGES="$packages"
         env:
           RACE_ENABLED: 'true'
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ strategy.job-total }}
       - name: Check the tests left the source tree untouched
         run: make test-check
 
-  test-sqlite:
-    name: Integration tests (SQLite)
-    needs: [backend-checks, frontend-checks]
+  test-migrations:
+    name: Migration tests (SQLite)
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-      - name: Migration tests
-        run: make test-sqlite-migration
-        env:
-          USE_REPO_TEST_DIR: 1
-      - name: Integration tests
-        run: make test-sqlite
+      - run: make test-sqlite-migration
         env:
           USE_REPO_TEST_DIR: 1
 
-  test-e2e:
-    name: End-to-end tests (${{ matrix.browser }})
-    needs: [backend-checks, frontend-checks]
+  test-sqlite:
+    name: Integration tests (SQLite, ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Build the integration tests
+        run: make integrations.sqlite.test generate-ini-sqlite
+      - name: Integration tests
+        run: |
+          export PROJECT_ROOT="$PWD" PROJECT_CONF=tests/sqlite.ini
+          # the binary lists its own tests, so build tags and new files are always accounted for
+          tests=$(./integrations.sqlite.test -test.list '.*' | grep -E '^Test' | .github/ci/shard.sh "$SHARD" "$SHARDS" | paste -sd'|')
+          echo "Running $(tr '|' '\n' <<< "$tests" | wc -l) tests"
+          ./integrations.sqlite.test -test.run "^(${tests})\$"
+        env:
+          USE_REPO_TEST_DIR: 1
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ strategy.job-total }}
+
+  test-e2e:
+    name: End-to-end tests (${{ matrix.browser }}, ${{ matrix.shard }}/3)
+    # only the frontend build is needed
+    needs: [frontend-checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         # Firefox only, like Forgejo's own CI: its timing-sensitive tests are
         # tuned for it. To also test Chromium, add `chromium` to this list.
         browser: [firefox]
+        # keep the job name above in line with the number of shards
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -188,18 +238,23 @@ jobs:
           else
             export RUN_ALL=1
           fi
-          PROJECT_ROOT="$PWD" PROJECT_CONF=tests/sqlite.ini ./e2e.sqlite.test -test.run TestE2e
+          # this shard's test files, e.g. ^TestE2e$/^(login\.test\.e2e|...)$
+          files=$(ls tests/e2e/*.test.e2e.ts | xargs -n1 basename | sed 's/\.ts$//' \
+            | .github/ci/shard.sh "$SHARD" "$SHARDS" | sed 's/\./\\./g' | paste -sd'|')
+          PROJECT_ROOT="$PWD" PROJECT_CONF=tests/sqlite.ini ./e2e.sqlite.test -test.run "^TestE2e\$/^(${files})\$"
         env:
           DISPLAY: ''
           USE_REPO_TEST_DIR: 1
           PLAYWRIGHT_PROJECT: ${{ matrix.browser }}
+          SHARD: ${{ matrix.shard }}
+          SHARDS: 3
           E2E_MODE: ${{ steps.select.outputs.mode }}
           CHANGED_E2E_FILES: ${{ steps.select.outputs.changed-files }}
       - name: Upload screenshots and traces of failed tests
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-test-artifacts-${{ matrix.browser }}
+          name: e2e-test-artifacts-${{ matrix.browser }}-${{ matrix.shard }}
           path: tests/e2e/test-artifacts/
           retention-days: 7
 
@@ -207,7 +262,7 @@ jobs:
   ci-success:
     name: CI success
     if: always()
-    needs: [backend-checks, frontend-checks, test-unit, test-sqlite, test-e2e]
+    needs: [backend-checks, frontend-checks, test-unit, test-migrations, test-sqlite, test-e2e]
     runs-on: ubuntu-latest
     steps:
       - name: All jobs passed
