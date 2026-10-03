@@ -1,0 +1,76 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin edit announcement")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{if .Announcement}}{{ctx.Locale.Tr "admin.announcements.edit"}}{{else}}{{ctx.Locale.Tr "admin.announcements.new"}}{{end}}
+		</h4>
+		<div class="ui attached segment">
+			<form class="ui form" action="{{.Link}}" method="post">
+				<div class="required field {{if .Err_Message}}error{{end}}">
+					<label>{{ctx.Locale.Tr "admin.announcements.message"}}</label>
+					{{template "shared/combomarkdowneditor" (dict
+						"MarkdownPreviewUrl" (print AppSubUrl "/admin/announcements/markup")
+						"MarkdownPreviewContext" AppSubUrl
+						"TextareaName" "message"
+						"TextareaContent" .message
+						"TextareaAriaLabel" (ctx.Locale.Tr "admin.announcements.message")
+					)}}
+					<span class="help">{{ctx.Locale.Tr "admin.announcements.message_helper"}}</span>
+				</div>
+				<div class="required field {{if .Err_Type}}error{{end}}">
+					<label for="type">{{ctx.Locale.Tr "admin.announcements.type"}}</label>
+					<select id="type" name="type">
+						{{range .AnnouncementTypes}}
+							<option value="{{.}}" {{if eq (print .) $.type}}selected{{end}}>{{ctx.Locale.Tr (printf "admin.announcements.type.%s" .)}}</option>
+						{{end}}
+					</select>
+					<span class="help">{{ctx.Locale.Tr "admin.announcements.type_helper"}}</span>
+				</div>
+				<div class="required field {{if .Err_Audience}}error{{end}}">
+					<label for="audience">{{ctx.Locale.Tr "admin.announcements.audience"}}</label>
+					<select id="audience" name="audience">
+						{{range .AnnouncementAudiences}}
+							<option value="{{.}}" {{if eq (print .) $.audience}}selected{{end}}>{{ctx.Locale.Tr (printf "admin.announcements.audience.%s" .)}}</option>
+						{{end}}
+					</select>
+				</div>
+				<div class="two fields">
+					<div class="field {{if .Err_StartTime}}error{{end}}">
+						<label for="start_time">{{ctx.Locale.Tr "admin.announcements.start_time"}}</label>
+						<input id="start_time" name="start_time" type="datetime-local" value="{{.start_time}}">
+					</div>
+					<div class="field {{if .Err_EndTime}}error{{end}}">
+						<label for="end_time">{{ctx.Locale.Tr "admin.announcements.end_time"}}</label>
+						<input id="end_time" name="end_time" type="datetime-local" value="{{.end_time}}">
+					</div>
+				</div>
+				<p class="help">{{ctx.Locale.Tr "admin.announcements.time_helper" .TimeZone}}</p>
+				<div class="field">
+					<div class="ui checkbox">
+						<input id="dismissible" name="dismissible" type="checkbox" {{if .dismissible}}checked{{end}}>
+						<label for="dismissible">{{ctx.Locale.Tr "admin.announcements.dismissible"}}</label>
+					</div>
+					<span class="help">{{ctx.Locale.Tr "admin.announcements.dismissible_helper"}}</span>
+				</div>
+				<div class="tw-flex tw-gap-2">
+					<button class="ui primary button">{{if .Announcement}}{{ctx.Locale.Tr "admin.announcements.update"}}{{else}}{{ctx.Locale.Tr "admin.announcements.new"}}{{end}}</button>
+					{{if .Announcement}}
+						<button type="button" class="ui red button delete-button" data-url="{{.AnnouncementLink}}/delete" data-id="{{.Announcement.ID}}" data-modal-id="delete-announcement">{{ctx.Locale.Tr "admin.announcements.delete"}}</button>
+					{{end}}
+				</div>
+			</form>
+		</div>
+	</div>
+
+{{if .Announcement}}
+<div class="ui g-modal-confirm delete modal" id="delete-announcement">
+	<div class="header">
+		{{svg "octicon-trash"}}
+		{{ctx.Locale.Tr "admin.announcements.delete"}}
+	</div>
+	<div class="content">
+		<p>{{ctx.Locale.Tr "admin.announcements.delete_desc"}}</p>
+	</div>
+	{{template "base/modal_actions_confirm" .}}
+</div>
+{{end}}
+{{template "admin/layout_footer" .}}

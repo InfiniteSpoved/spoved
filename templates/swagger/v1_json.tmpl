@@ -517,6 +517,178 @@
         }
       }
     },
+    "/admin/announcements": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "List all announcements, including inactive ones",
+        "operationId": "adminListAnnouncements",
+        "parameters": [
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/AnnouncementList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          }
+        }
+      },
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create an announcement",
+        "operationId": "adminCreateAnnouncement",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/CreateAnnouncementOption"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "$ref": "#/responses/Announcement"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/admin/announcements/{id}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get an announcement",
+        "operationId": "adminGetAnnouncement",
+        "parameters": [
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the announcement",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/Announcement"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete an announcement",
+        "operationId": "adminDeleteAnnouncement",
+        "parameters": [
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the announcement",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "patch": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Edit an announcement",
+        "operationId": "adminEditAnnouncement",
+        "parameters": [
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the announcement",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/EditAnnouncementOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/Announcement"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/admin/cron": {
       "get": {
         "produces": [
@@ -2525,6 +2697,24 @@
           },
           "422": {
             "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/announcements": {
+      "get": {
+        "description": "Announcements the user dismissed are left out. The most severe ones come first.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "miscellaneous"
+        ],
+        "summary": "List the announcements currently shown to the authenticated user, or to anonymous visitors",
+        "operationId": "listActiveAnnouncements",
+        "responses": {
+          "200": {
+            "$ref": "#/responses/AnnouncementList"
           }
         }
       }
@@ -24776,6 +24966,69 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "Announcement": {
+      "description": "Announcement is a message site administrators show as a banner on every page",
+      "type": "object",
+      "properties": {
+        "audience": {
+          "description": "Who sees the announcement",
+          "type": "string",
+          "enum": [
+            "everyone",
+            "signed_in",
+            "admins"
+          ],
+          "x-go-name": "Audience"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Created"
+        },
+        "dismissible": {
+          "description": "Whether signed-in users can close the announcement. Critical announcements are never dismissible.",
+          "type": "boolean",
+          "x-go-name": "Dismissible"
+        },
+        "end_at": {
+          "description": "When the announcement stops being shown, null if never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "EndAt"
+        },
+        "id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "message": {
+          "description": "Markdown message",
+          "type": "string",
+          "x-go-name": "Message"
+        },
+        "start_at": {
+          "description": "When the announcement starts being shown, null if right away",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "StartAt"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warning",
+            "critical"
+          ],
+          "x-go-name": "Type"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Updated"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "Attachment": {
       "description": "Attachment a generic attachment",
       "type": "object",
@@ -25601,6 +25854,55 @@
             "read:repository",
             "read:user"
           ]
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "CreateAnnouncementOption": {
+      "description": "CreateAnnouncementOption options for creating an announcement",
+      "type": "object",
+      "required": [
+        "message",
+        "type",
+        "audience"
+      ],
+      "properties": {
+        "audience": {
+          "type": "string",
+          "enum": [
+            "everyone",
+            "signed_in",
+            "admins"
+          ],
+          "x-go-name": "Audience"
+        },
+        "dismissible": {
+          "type": "boolean",
+          "x-go-name": "Dismissible"
+        },
+        "end_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "EndAt"
+        },
+        "message": {
+          "description": "Markdown message",
+          "type": "string",
+          "x-go-name": "Message"
+        },
+        "start_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "StartAt"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warning",
+            "critical"
+          ],
+          "x-go-name": "Type"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -26976,6 +27278,51 @@
       "type": "integer",
       "format": "int64",
       "x-go-package": "time"
+    },
+    "EditAnnouncementOption": {
+      "type": "object",
+      "title": "EditAnnouncementOption options for editing an announcement. Fields left out are not changed.",
+      "properties": {
+        "audience": {
+          "type": "string",
+          "enum": [
+            "everyone",
+            "signed_in",
+            "admins"
+          ],
+          "x-go-name": "Audience"
+        },
+        "dismissible": {
+          "type": "boolean",
+          "x-go-name": "Dismissible"
+        },
+        "end_at": {
+          "description": "Set to 0001-01-01T00:00:00Z to remove the end time",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "EndAt"
+        },
+        "message": {
+          "type": "string",
+          "x-go-name": "Message"
+        },
+        "start_at": {
+          "description": "Set to 0001-01-01T00:00:00Z to remove the start time",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "StartAt"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warning",
+            "critical"
+          ],
+          "x-go-name": "Type"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
     },
     "EditAttachmentOptions": {
       "description": "EditAttachmentOptions options for editing attachments",
@@ -32591,6 +32938,21 @@
       "description": "AnnotatedTag",
       "schema": {
         "$ref": "#/definitions/AnnotatedTag"
+      }
+    },
+    "Announcement": {
+      "description": "Announcement",
+      "schema": {
+        "$ref": "#/definitions/Announcement"
+      }
+    },
+    "AnnouncementList": {
+      "description": "AnnouncementList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/Announcement"
+        }
       }
     },
     "Attachment": {

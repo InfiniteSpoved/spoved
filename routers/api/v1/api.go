@@ -610,6 +610,7 @@ func Routes() *web.Route {
 		// Misc (public accessible)
 		m.Group("", func() {
 			m.Get("/version", misc.Version)
+			m.Get("/announcements", misc.ListActiveAnnouncements)
 			m.Get("/signing-key.gpg", misc.SigningKey)
 			m.Get("/signing-key.ssh", misc.SSHSigningKey)
 			m.Post("/markup", reqToken(), bind(api.MarkupOption{}), misc.Markup)
@@ -1421,6 +1422,13 @@ func Routes() *web.Route {
 						})
 					}
 				}, context.UserAssignmentAPI())
+			})
+			m.Group("/announcements", func() {
+				m.Combo("").Get(admin.ListAnnouncements).
+					Post(bind(api.CreateAnnouncementOption{}), admin.CreateAnnouncement)
+				m.Combo("/{id}").Get(admin.GetAnnouncement).
+					Patch(bind(api.EditAnnouncementOption{}), admin.EditAnnouncement).
+					Delete(admin.DeleteAnnouncement)
 			})
 			m.Group("/groups", func() {
 				m.Combo("").Get(admin.ListUserGroups).

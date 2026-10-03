@@ -1,0 +1,16 @@
+{{$announcements := and .SiteAnnouncements (call .SiteAnnouncements)}}
+{{if $announcements}}
+	<div id="site-announcements" class="site-announcements">
+		{{range $announcements}}
+			<div class="ui {{if eq .Type "critical"}}negative{{else if eq .Type "warning"}}warning{{else}}info{{end}} message site-announcement tw-flex tw-items-start tw-gap-2" data-announcement-id="{{.ID}}" data-announcement-type="{{.Type}}">
+				<div class="render-content markup tw-flex-1">{{.RenderedMessage}}</div>
+				{{if and $.IsSigned .CanBeDismissed}}
+					<form class="tw-shrink-0" method="post" action="{{AppSubUrl}}/-/announcements/{{.ID}}/dismiss">
+						<input type="hidden" name="redirect_to" value="{{$.CurrentURL}}">
+						<button class="ui mini basic icon button" type="submit" data-tooltip-content="{{ctx.Locale.Tr "announcements.dismiss"}}" aria-label="{{ctx.Locale.Tr "announcements.dismiss"}}">{{svg "octicon-x"}}</button>
+					</form>
+				{{end}}
+			</div>
+		{{end}}
+	</div>
+{{end}}
