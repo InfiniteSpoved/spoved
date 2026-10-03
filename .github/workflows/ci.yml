@@ -6,9 +6,15 @@ name: CI
 # make targets, on GitHub-hosted runners with SQLite.
 #
 # To keep the wall-clock time low, the test jobs do not wait for the checks,
-# and the long suites are split into shards that run in parallel. Each shard
-# takes a round-robin share of the packages, tests or test files (see
-# .github/ci/shard.sh); changing a matrix's shard list changes the split.
+# and the unit and end-to-end tests are split into shards that run in
+# parallel. Each shard takes a round-robin share of the packages or test files
+# (see .github/ci/shard.sh); changing a matrix's shard list changes the split.
+# The integration tests depend on running in their own order and are not split.
+#
+# Pull requests that only change files the Go tests cannot depend on (frontend
+# code and tooling, end-to-end tests, Markdown documentation) skip the unit, migration
+# and integration tests; see the "changes" job. Pushes to develop and manual
+# runs always run everything.
 #
 # main is a mirror of upstream Forgejo and is not tested here.
 
@@ -39,6 +45,40 @@ env:
   TEST_TAGS: sqlite sqlite_unlock_notify
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: filter
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "Not a pull request: running every test suite"
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+          echo "Changed files:"
+          echo "$files"
+          # Files that cannot affect the Go unit, migration and integration
+          # tests. Anything else, or an empty diff, runs them.
+          safe='^(web_src/|tests/e2e/|\.github/ISSUE_TEMPLATE/|(.*/)?[^/]+\.md$|package(-lock)?\.json$|\.npmrc$|tsconfig\.json$|eslint\.config\.mjs$|stylelint\.config\.js$|vitest\.config\.ts$|webpack\.config\.js$|tailwind\.config\.js$|playwright\.config\.ts$)'
+          if [ -n "$files" ] && ! grep -qvE "$safe" <<< "$files"; then
+            echo "Only frontend, end-to-end or documentation files changed: skipping the Go test suites"
+            echo "backend=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
   backend-checks:
     name: Backend checks
     runs-on: ubuntu-latest
@@ -91,6 +131,8 @@ jobs:
 
   test-unit:
     name: Unit tests (${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: [changes]
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -119,6 +161,8 @@ jobs:
 
   test-migrations:
     name: Migration tests (SQLite)
+    needs: [changes]
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -132,32 +176,23 @@ jobs:
           USE_REPO_TEST_DIR: 1
 
   test-sqlite:
-    name: Integration tests (SQLite, ${{ matrix.shard }}/${{ strategy.job-total }})
+    # One job, in the suite's own order: the integration tests share global
+    # settings (e.g. LFS, federation queues) that earlier tests set up, so
+    # running them in a different order or split across jobs breaks them.
+    name: Integration tests (SQLite)
+    needs: [changes]
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-      - name: Build the integration tests
-        run: make integrations.sqlite.test generate-ini-sqlite
-      - name: Integration tests
-        run: |
-          export PROJECT_ROOT="$PWD" PROJECT_CONF=tests/sqlite.ini
-          # the binary lists its own tests, so build tags and new files are always accounted for
-          tests=$(./integrations.sqlite.test -test.list '.*' | grep -E '^Test' | .github/ci/shard.sh "$SHARD" "$SHARDS" | paste -sd'|')
-          echo "Running $(tr '|' '\n' <<< "$tests" | wc -l) tests"
-          ./integrations.sqlite.test -test.run "^(${tests})\$"
+      - run: make test-sqlite
         env:
           USE_REPO_TEST_DIR: 1
-          SHARD: ${{ matrix.shard }}
-          SHARDS: ${{ strategy.job-total }}
 
   test-e2e:
     name: End-to-end tests (${{ matrix.browser }}, ${{ matrix.shard }}/3)
@@ -262,14 +297,16 @@ jobs:
   ci-success:
     name: CI success
     if: always()
-    needs: [backend-checks, frontend-checks, test-unit, test-migrations, test-sqlite, test-e2e]
+    needs: [changes, backend-checks, frontend-checks, test-unit, test-migrations, test-sqlite, test-e2e]
     runs-on: ubuntu-latest
     steps:
+      # A job is only skipped when the changes job decided its tests are not
+      # needed, or when a job it depends on failed, which is caught here too.
       - name: All jobs passed
-        if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}
-        run: echo "All CI jobs passed"
+        if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+        run: echo "All CI jobs passed or were not needed"
       - name: Some jobs failed
-        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: |
           echo '${{ toJSON(needs) }}'
           exit 1
