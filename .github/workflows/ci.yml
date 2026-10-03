@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       run-all-e2e:
-        description: Run every end-to-end test instead of only those covering changed files
+        description: Run every end-to-end test. When unchecked, only the tests covering the files changed compared with develop run.
         type: boolean
         default: true
 
@@ -120,8 +120,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Forgejo's own CI runs the end-to-end tests in Firefox, which its
-        # timing-sensitive tests are tuned for. Add chromium here to test both.
+        # Firefox only, like Forgejo's own CI: its timing-sensitive tests are
+        # tuned for it. To also test Chromium, add `chromium` to this list.
         browser: [firefox]
     steps:
       - uses: actions/checkout@v5
@@ -153,31 +153,47 @@ jobs:
       - name: Select the tests to run
         id: select
         run: |
-          # On pull requests only the tests whose `@watch` patterns match the
-          # changed files run (see tests/e2e/changes.go); pushes to develop and
-          # manual runs execute all of them.
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            # tests/e2e/changes.go splits the list on a literal "\n"
-            changed=$(git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" | awk 'NR > 1 {printf "\\n"} {printf "%s", $0}')
-            echo "Changed files:"
-            git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
-            echo "changed-files=$changed" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.run-all-e2e }}" = "true" ]; then
-            echo "run-all=1" >> "$GITHUB_OUTPUT"
+          # Pull requests, and manual runs with run-all-e2e unchecked, only run
+          # the tests whose `@watch` patterns match the changed files (see
+          # tests/e2e/changes.go). Pushes to develop and the other manual runs
+          # execute all of them.
+          if [ "$EVENT" = "pull_request" ]; then
+            range="$BASE_SHA...$HEAD_SHA"
+          elif [ "$EVENT" = "workflow_dispatch" ] && [ "$RUN_ALL_INPUT" != "true" ]; then
+            range="origin/develop...HEAD"
+          else
+            echo "Running all end-to-end tests"
+            echo "mode=all" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "Files changed in $range:"
+          git diff --name-only "$range"
+          # tests/e2e/changes.go splits the list on a literal "\n"
+          changed=$(git diff --name-only "$range" | awk 'NR > 1 {printf "\\n"} {printf "%s", $0}')
+          echo "mode=changed" >> "$GITHUB_OUTPUT"
+          echo "changed-files=$changed" >> "$GITHUB_OUTPUT"
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ALL_INPUT: ${{ inputs.run-all-e2e }}
 
       - name: Build the end-to-end test server
         run: make e2e.sqlite.test generate-ini-sqlite
       - name: End-to-end tests
         run: |
-          if [ -n "$RUN_ALL_E2E" ]; then export RUN_ALL=1; fi
-          if [ -n "$CHANGED_E2E_FILES" ]; then export CHANGED_FILES="$CHANGED_E2E_FILES"; fi
+          # an empty CHANGED_FILES is meaningful: nothing relevant changed, so no test runs
+          if [ "$E2E_MODE" = "changed" ]; then
+            export CHANGED_FILES="$CHANGED_E2E_FILES"
+          else
+            export RUN_ALL=1
+          fi
           PROJECT_ROOT="$PWD" PROJECT_CONF=tests/sqlite.ini ./e2e.sqlite.test -test.run TestE2e
         env:
           DISPLAY: ''
           USE_REPO_TEST_DIR: 1
           PLAYWRIGHT_PROJECT: ${{ matrix.browser }}
-          RUN_ALL_E2E: ${{ steps.select.outputs.run-all }}
+          E2E_MODE: ${{ steps.select.outputs.mode }}
           CHANGED_E2E_FILES: ${{ steps.select.outputs.changed-files }}
       - name: Upload screenshots and traces of failed tests
         if: failure()
