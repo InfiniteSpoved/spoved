@@ -37,6 +37,8 @@ type UserGroupUser struct {
 	ID      int64 `xorm:"pk autoincr"`
 	GroupID int64 `xorm:"UNIQUE(s) INDEX NOT NULL"`
 	UID     int64 `xorm:"UNIQUE(s) INDEX NOT NULL"`
+	// LoginSourceID is the login source that synced this membership, 0 if an admin added it.
+	LoginSourceID int64 `xorm:"NOT NULL DEFAULT 0"`
 }
 
 // UserGroupTeam represents a user group linked to an organization team.
@@ -214,9 +216,33 @@ func IsUserGroupMember(ctx context.Context, groupID, uid int64) (bool, error) {
 	return db.GetEngine(ctx).Exist(&UserGroupUser{GroupID: groupID, UID: uid})
 }
 
-// InsertUserGroupMember adds a user to a user group. It does not update team memberships.
-func InsertUserGroupMember(ctx context.Context, groupID, uid int64) error {
-	return db.Insert(ctx, &UserGroupUser{GroupID: groupID, UID: uid})
+// InsertUserGroupMember adds a user to a user group. loginSourceID is the
+// login source syncing the membership, 0 if an admin adds it. It does not
+// update team memberships.
+func InsertUserGroupMember(ctx context.Context, groupID, uid, loginSourceID int64) error {
+	return db.Insert(ctx, &UserGroupUser{GroupID: groupID, UID: uid, LoginSourceID: loginSourceID})
+}
+
+// DeleteSyncedUserGroupMember removes a user from a user group if the given
+// login source synced the membership, and reports whether it did. It does not
+// update team memberships.
+func DeleteSyncedUserGroupMember(ctx context.Context, groupID, uid, loginSourceID int64) (bool, error) {
+	n, err := db.GetEngine(ctx).Where("group_id=? AND uid=? AND login_source_id=?", groupID, uid, loginSourceID).Delete(new(UserGroupUser))
+	return n > 0, err
+}
+
+// GetUserGroupMemberLoginSources returns the login source ID of each member of
+// a user group that a login source synced, keyed by user ID.
+func GetUserGroupMemberLoginSources(ctx context.Context, groupID int64) (map[int64]int64, error) {
+	rows := make([]*UserGroupUser, 0, 10)
+	if err := db.GetEngine(ctx).Where("group_id=? AND login_source_id>0", groupID).Find(&rows); err != nil {
+		return nil, err
+	}
+	sources := make(map[int64]int64, len(rows))
+	for _, r := range rows {
+		sources[r.UID] = r.LoginSourceID
+	}
+	return sources, nil
 }
 
 // DeleteUserGroupMember removes a user from a user group. It does not update team memberships.

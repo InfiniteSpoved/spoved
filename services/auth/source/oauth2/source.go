@@ -36,6 +36,9 @@ type Source struct {
 	SkipLocalTwoFA        bool `json:",omitempty"`
 	AllowUsernameChange   bool
 
+	GroupUserGroupMap        string
+	GroupUserGroupMapRemoval bool
+
 	// reference to the authSource
 	authSource *auth.Source
 }

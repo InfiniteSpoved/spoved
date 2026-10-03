@@ -503,6 +503,35 @@ func TestLDAPGroupTeamSyncRemoveMember(t *testing.T) {
 	assert.False(t, isMember, "User membership should have been removed from team")
 }
 
+func TestLDAPGroupUserGroupSync(t *testing.T) {
+	if skipLDAPTests() {
+		t.Skip()
+		return
+	}
+	defer tests.PrepareTestEnv(t)()
+	crew := &organization.UserGroup{Name: "crew"}
+	require.NoError(t, organization.InsertUserGroup(db.DefaultContext, crew))
+	payload := buildAuthSourceLDAPPayload("", "", "", "", "", "off")
+	payload["group_user_group_map"] = `{"cn=ship_crew,ou=people,dc=planetexpress,dc=com": ["crew"]}`
+	payload["group_user_group_map_removal"] = "on"
+	loginUser(t, "user1").MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/auths/new", payload), http.StatusSeeOther)
+	loginSource := unittest.AssertExistsAndLoadBean(t, &auth_model.Source{Name: "ldap"})
+
+	// the scheduled sync adds the members of "cn=ship_crew" to the user group
+	auth.SyncExternalUsers(t.Context(), true)
+	for _, gitLDAPUser := range gitLDAPUsers {
+		user := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: gitLDAPUser.UserName})
+		inCrew := user.Name == "fry" || user.Name == "leela" || user.Name == "bender"
+		assert.Equal(t, inCrew, unittest.BeanExists(t, &organization.UserGroupUser{GroupID: crew.ID, UID: user.ID, LoginSourceID: loginSource.ID}), user.Name)
+	}
+
+	// signing in removes a membership synced from this source the user no longer has in LDAP
+	professor := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: gitLDAPUsers[0].UserName})
+	require.NoError(t, organization.InsertUserGroupMember(db.DefaultContext, crew.ID, professor.ID, loginSource.ID))
+	loginUserWithPassword(t, gitLDAPUsers[0].UserName, gitLDAPUsers[0].Password)
+	unittest.AssertNotExistsBean(t, &organization.UserGroupUser{GroupID: crew.ID, UID: professor.ID})
+}
+
 func TestLDAPPreventInvalidGroupTeamMap(t *testing.T) {
 	if skipLDAPTests() {
 		t.Skip()

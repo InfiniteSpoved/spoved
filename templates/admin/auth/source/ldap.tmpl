@@ -116,6 +116,14 @@
 			<label>{{ctx.Locale.Tr "admin.auths.map_group_to_team_removal"}}</label>
 			<input name="group_team_map_removal" type="checkbox" {{if .group_team_map_removal}}checked{{end}}>
 		</div>
+		<div class="field">
+			<label>{{ctx.Locale.Tr "admin.auths.map_group_to_user_group"}}</label>
+			<textarea name="group_user_group_map" rows="5" placeholder='{"cn=my-group,cn=groups,dc=example,dc=org": ["my-user-group"]}'>{{.group_user_group_map}}</textarea>
+		</div>
+		<div class="ui checkbox">
+			<label>{{ctx.Locale.Tr "admin.auths.map_group_to_user_group_removal"}}</label>
+			<input name="group_user_group_map_removal" type="checkbox" {{if .group_user_group_map_removal}}checked{{end}}>
+		</div>
 	</div>
 	<!-- ldap group end -->
 

@@ -40,6 +40,7 @@ import (
 	"forgejo.org/services/forms"
 	remote_service "forgejo.org/services/remote"
 	user_service "forgejo.org/services/user"
+	usergroup_service "forgejo.org/services/usergroup"
 
 	"code.forgejo.org/go-chi/binding"
 	"github.com/golang-jwt/jwt/v5"
@@ -1168,6 +1169,11 @@ func SignInOAuthCallback(ctx *context.Context) {
 				return
 			}
 
+			if err := syncGroupsToUserGroups(ctx, authSource, &gothUser, u); err != nil {
+				ctx.ServerError("SyncDirectoryGroups", err)
+				return
+			}
+
 			if err := syncGroupsToQuotaGroups(ctx, source, &gothUser, u); err != nil {
 				ctx.ServerError("SyncGroupsToQuotaGroups", err)
 				return
@@ -1225,6 +1231,18 @@ func syncGroupsToTeams(ctx *context.Context, authSource *auth.Source, gothUser *
 	}
 
 	return nil
+}
+
+func syncGroupsToUserGroups(ctx *context.Context, authSource *auth.Source, gothUser *goth.User, u *user_model.User) error {
+	source := authSource.Cfg.(*oauth2.Source)
+	if source.GroupUserGroupMap == "" {
+		return nil
+	}
+	mapping, err := auth_module.UnmarshalQuotaGroupMapping(source.GroupUserGroupMap)
+	if err != nil {
+		return err
+	}
+	return usergroup_service.SyncDirectoryGroups(ctx, u, authSource.ID, getClaimedGroups(source, gothUser), mapping, source.GroupUserGroupMapRemoval)
 }
 
 func syncGroupsToQuotaGroups(ctx *context.Context, source *oauth2.Source, gothUser *goth.User, u *user_model.User) error {
@@ -1428,6 +1446,11 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 			}
 		}
 
+		if err := syncGroupsToUserGroups(ctx, source, &gothUser, u); err != nil {
+			ctx.ServerError("SyncDirectoryGroups", err)
+			return
+		}
+
 		if oauth2Source.QuotaGroupMap != "" || oauth2Source.QuotaGroupMapRemoval {
 			if err := source_service.SyncGroupsToQuotaGroups(ctx, u, quotaGroups, quotaGroupMapping, oauth2Source.QuotaGroupMapRemoval); err != nil {
 				ctx.ServerError("SyncGroupsToQuotaGroups", err)
@@ -1475,6 +1498,11 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 			ctx.ServerError("SyncGroupsToTeams", err)
 			return
 		}
+	}
+
+	if err := syncGroupsToUserGroups(ctx, source, &gothUser, u); err != nil {
+		ctx.ServerError("SyncDirectoryGroups", err)
+		return
 	}
 
 	if oauth2Source.QuotaGroupMap != "" || oauth2Source.QuotaGroupMapRemoval {

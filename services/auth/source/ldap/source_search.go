@@ -487,7 +487,7 @@ func (source *Source) SearchEntries() ([]*SearchResult, error) {
 				}
 			}
 
-			if source.GroupTeamMap != "" || source.GroupTeamMapRemoval {
+			if source.GroupTeamMap != "" || source.GroupTeamMapRemoval || source.GroupUserGroupMap != "" {
 				usersLdapGroups = source.listLdapGroupMemberships(l, userAttributeListedInGroup, false)
 			}
 		}

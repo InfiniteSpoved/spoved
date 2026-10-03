@@ -278,5 +278,10 @@ func LinkAccountPostRegister(ctx *context.Context) {
 		return
 	}
 
+	if err := syncGroupsToUserGroups(ctx, authSource, &gothUser, u); err != nil {
+		ctx.ServerError("SyncDirectoryGroups", err)
+		return
+	}
+
 	handleSignIn(ctx, u, false)
 }

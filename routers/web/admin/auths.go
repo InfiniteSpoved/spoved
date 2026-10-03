@@ -12,6 +12,8 @@ import (
 
 	"forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	org_model "forgejo.org/models/organization"
+	auth_module "forgejo.org/modules/auth"
 	"forgejo.org/modules/auth/pam"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/log"
@@ -135,6 +137,9 @@ func parseLDAPConfig(form forms.AuthenticationForm) *ldap.Source {
 		AllowDeactivateAll:    form.AllowDeactivateAll,
 		Enabled:               true,
 		SkipLocalTwoFA:        form.SkipLocalTwoFA,
+
+		GroupUserGroupMap:        form.GroupUserGroupMap,
+		GroupUserGroupMapRemoval: form.GroupUserGroupMapRemoval,
 	}
 }
 
@@ -196,7 +201,37 @@ func parseOAuth2Config(form forms.AuthenticationForm) *oauth2.Source {
 		QuotaGroupClaimName:           form.Oauth2QuotaGroupClaimName,
 		QuotaGroupMap:                 form.Oauth2QuotaGroupMap,
 		QuotaGroupMapRemoval:          form.Oauth2QuotaGroupMapRemoval,
+
+		GroupUserGroupMap:        form.Oauth2GroupUserGroupMap,
+		GroupUserGroupMapRemoval: form.Oauth2GroupUserGroupMapRemoval,
 	}
+}
+
+// checkGroupUserGroupMap renders an error and returns false if the directory
+// group to user group mapping of the form names a user group that does not exist.
+func checkGroupUserGroupMap(ctx *context.Context, form forms.AuthenticationForm, tpl base.TplName) bool {
+	raw := form.GroupUserGroupMap
+	if auth.Type(form.Type) == auth.OAuth2 {
+		raw = form.Oauth2GroupUserGroupMap
+	}
+	mapping, err := auth_module.UnmarshalQuotaGroupMapping(raw)
+	if err != nil {
+		ctx.ServerError("UnmarshalQuotaGroupMapping", err) // the form binding already validated it
+		return false
+	}
+	for _, names := range mapping {
+		for name := range names {
+			if _, err := org_model.GetUserGroupByName(ctx, name); org_model.IsErrUserGroupNotExist(err) {
+				ctx.Data["Err_GroupUserGroupMap"] = true
+				ctx.RenderWithErr(ctx.Tr("admin.auths.user_group_not_exist", name), tpl, form)
+				return false
+			} else if err != nil {
+				ctx.ServerError("GetUserGroupByName", err)
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // NewAuthSourcePost response for adding an auth source
@@ -247,6 +282,9 @@ func NewAuthSourcePost(ctx *context.Context) {
 
 	if ctx.HasError() {
 		ctx.HTML(http.StatusOK, tplAuthNew)
+		return
+	}
+	if !checkGroupUserGroupMap(ctx, form, tplAuthNew) {
 		return
 	}
 
@@ -357,6 +395,10 @@ func EditAuthSourcePost(ctx *context.Context) {
 		}
 	default:
 		ctx.Error(http.StatusBadRequest)
+		return
+	}
+
+	if !checkGroupUserGroupMap(ctx, form, tplAuthEdit) {
 		return
 	}
 

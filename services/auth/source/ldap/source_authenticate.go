@@ -15,6 +15,7 @@ import (
 	"forgejo.org/modules/optional"
 	source_service "forgejo.org/services/auth/source"
 	user_service "forgejo.org/services/user"
+	usergroup_service "forgejo.org/services/usergroup"
 )
 
 // Authenticate queries if login/password is valid against the LDAP directory pool,
@@ -114,6 +115,16 @@ func (source *Source) Authenticate(ctx context.Context, user *user_model.User, u
 			user, source.authSource.ID, sr.Groups, groupTeamMapping, source.GroupTeamMapRemoval,
 			nil, false,
 		); err != nil {
+			return user, err
+		}
+	}
+
+	if source.GroupsEnabled && source.GroupUserGroupMap != "" {
+		mapping, err := auth_module.UnmarshalQuotaGroupMapping(source.GroupUserGroupMap)
+		if err != nil {
+			return user, err
+		}
+		if err := usergroup_service.SyncDirectoryGroups(ctx, user, source.authSource.ID, sr.Groups, mapping, source.GroupUserGroupMapRemoval); err != nil {
 			return user, err
 		}
 	}

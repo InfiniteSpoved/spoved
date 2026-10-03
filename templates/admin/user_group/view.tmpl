@@ -36,6 +36,7 @@
 						</div>
 						<div class="flex-item-main">
 							<div class="flex-item-title">{{template "shared/user/name" .}}</div>
+							{{with index $.MemberSources .ID}}<div class="flex-item-body">{{ctx.Locale.Tr "admin.user_groups.synced_from" .}}</div>{{end}}
 						</div>
 						<div class="flex-item-trailing">
 							<form action="{{$.GroupLink}}/members/remove" method="post">

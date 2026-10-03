@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	org_model "forgejo.org/models/organization"
 	user_model "forgejo.org/models/user"
@@ -116,6 +117,31 @@ func prepareUserGroupView(ctx *context.Context, group *org_model.UserGroup) {
 		return
 	}
 	ctx.Data["Members"] = members
+
+	memberSourceIDs, err := org_model.GetUserGroupMemberLoginSources(ctx, group.ID)
+	if err != nil {
+		ctx.ServerError("GetUserGroupMemberLoginSources", err)
+		return
+	}
+	sourceNames := make(map[int64]string)
+	memberSources := make(map[int64]string, len(memberSourceIDs))
+	for uid, sourceID := range memberSourceIDs {
+		name, ok := sourceNames[sourceID]
+		if !ok {
+			source, err := auth_model.GetSourceByID(ctx, sourceID)
+			if err != nil && !auth_model.IsErrSourceNotExist(err) {
+				ctx.ServerError("GetSourceByID", err)
+				return
+			} else if err == nil {
+				name = source.Name
+			}
+			sourceNames[sourceID] = name
+		}
+		if name != "" {
+			memberSources[uid] = name
+		}
+	}
+	ctx.Data["MemberSources"] = memberSources
 
 	teams, err := org_model.GetUserGroupTeams(ctx, group.ID)
 	if err != nil {

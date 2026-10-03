@@ -141,6 +141,14 @@
 							<label>{{ctx.Locale.Tr "admin.auths.map_group_to_team_removal"}}</label>
 							<input name="group_team_map_removal" type="checkbox" {{if $cfg.GroupTeamMapRemoval}}checked{{end}}>
 						</div>
+						<div class="field">
+							<label>{{ctx.Locale.Tr "admin.auths.map_group_to_user_group"}}</label>
+							<textarea name="group_user_group_map" rows="5" placeholder='{"cn=my-group,cn=groups,dc=example,dc=org": ["my-user-group"]}'>{{$cfg.GroupUserGroupMap}}</textarea>
+						</div>
+						<div class="ui checkbox">
+							<label>{{ctx.Locale.Tr "admin.auths.map_group_to_user_group_removal"}}</label>
+							<input name="group_user_group_map_removal" type="checkbox" {{if $cfg.GroupUserGroupMapRemoval}}checked{{end}}>
+						</div>
 					</div>
 					<!-- ldap group end -->
 
@@ -383,6 +391,14 @@
 					<div class="ui checkbox">
 						<label>{{ctx.Locale.Tr "admin.auths.oauth2_map_group_to_team_removal"}}</label>
 						<input name="oauth2_group_team_map_removal" type="checkbox" {{if $cfg.GroupTeamMapRemoval}}checked{{end}}>
+					</div>
+					<div class="field">
+						<label>{{ctx.Locale.Tr "admin.auths.oauth2_map_group_to_user_group"}}</label>
+						<textarea name="oauth2_group_user_group_map" rows="5" placeholder='{"Developer": ["my-user-group"]}'>{{$cfg.GroupUserGroupMap}}</textarea>
+					</div>
+					<div class="ui checkbox">
+						<label>{{ctx.Locale.Tr "admin.auths.oauth2_map_group_to_user_group_removal"}}</label>
+						<input name="oauth2_group_user_group_map_removal" type="checkbox" {{if $cfg.GroupUserGroupMapRemoval}}checked{{end}}>
 					</div>
 					<div class="field">
 						<label>{{ctx.Locale.Tr "admin.auths.oauth2_dyn_group_maps"}}</label>
