@@ -229,6 +229,7 @@ func (repo *Repository) GitAttributeChecker(treeish string, attributes ...string
 	stdoutReader, stdoutWriter := io.Pipe() // closed in goroutine
 
 	ac := AttributeChecker{
+		ctx:             cmd.parentContext,
 		removeTempFiles: removeTempFiles, // called on ac.Close
 		stdinWriter:     stdinWriter,
 		readStdout:      newCheckAttrStdoutReader(stdoutReader, len(attributes)),
@@ -262,6 +263,7 @@ func (repo *Repository) GitAttributeChecker(treeish string, attributes ...string
 }
 
 type AttributeChecker struct {
+	ctx             context.Context
 	removeTempFiles context.CancelFunc
 	stdinWriter     io.WriteCloser
 	readStdout      func() (map[string]GitAttribute, error)
@@ -270,6 +272,11 @@ type AttributeChecker struct {
 
 func (ac AttributeChecker) CheckPath(path string) (map[string]GitAttribute, error) {
 	if _, err := ac.stdinWriter.Write([]byte(path + "\x00")); err != nil {
+		// git was killed because the context was cancelled: report that rather
+		// than the "broken pipe" it causes, which wins the race once git has exited
+		if ctxErr := ac.ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("git check-attr: %w", ctxErr)
+		}
 		// try to return the Run error if available, since it is likely more helpful
 		// than just "broken pipe"
 		if aerr, _ := ac.err.Load().(error); aerr != nil {
