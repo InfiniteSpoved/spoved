@@ -5,6 +5,8 @@
 			{{ctx.Locale.Tr "org.membership_origin.founded_org" $formattedDate}}
 		{{else if .IsMembershipAddedByUser}}
 			{{ctx.Locale.Tr "org.membership_origin.added_by_user" (HTMLFormat `<a href="%[1]s">%[2]s</a>` .CreatedByUser.HomeLink .CreatedByUser.Name) $formattedDate}}
+		{{else if .IsMembershipAddedByUserGroup}}
+			{{ctx.Locale.Tr "org.membership_origin.via_user_group" $formattedDate}}
 		{{else if .IsMembershipAddedByLoginSource}}
 			{{if .CreatedByLoginSource}}
 				{{ctx.Locale.Tr "org.membership_origin.via_login_source" (HTMLFormat `<strong>%s</strong>` .CreatedByLoginSource.Name) $formattedDate}}

@@ -74,3 +74,15 @@ func (f *CreateTeamForm) Validate(req *http.Request, errs binding.Errors) bindin
 	ctx := context.GetValidateContext(req)
 	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
+
+// UserGroupForm form for creating or editing a user group
+type UserGroupForm struct {
+	Name        string `binding:"Required;AlphaDashDot;MaxSize(255)" locale:"admin.user_groups.name"`
+	Description string `binding:"MaxSize(255)" locale:"admin.user_groups.description"`
+}
+
+// Validate validates the fields
+func (f *UserGroupForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
+	ctx := context.GetValidateContext(req)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
+}

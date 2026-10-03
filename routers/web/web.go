@@ -943,6 +943,18 @@ func registerRoutes(m *web.Route) {
 			m.Get("", admin.Organizations)
 		})
 
+		m.Group("/groups", func() {
+			m.Get("", admin.UserGroups)
+			m.Combo("/new").Get(admin.NewUserGroup).Post(web.Bind(forms.UserGroupForm{}), admin.NewUserGroupPost)
+			m.Group("/{id}", func() {
+				m.Get("", admin.ViewUserGroup)
+				m.Post("/edit", web.Bind(forms.UserGroupForm{}), admin.EditUserGroupPost)
+				m.Post("/delete", admin.DeleteUserGroup)
+				m.Post("/members/add", admin.AddUserGroupMember)
+				m.Post("/members/remove", admin.RemoveUserGroupMember)
+			})
+		})
+
 		m.Group("/repos", func() {
 			m.Get("", admin.Repos)
 			m.Combo("/unadopted").Get(admin.UnadoptedRepos).Post(admin.AdoptOrDeleteRepository)
@@ -1093,6 +1105,8 @@ func registerRoutes(m *web.Route) {
 			m.Get("/teams/{team}/repositories", org.TeamRepositories)
 			m.Post("/teams/{team}/action/{action}", org.TeamsAction)
 			m.Post("/teams/{team}/action/repo/{action}", org.TeamsRepoAction)
+			m.Post("/teams/{team}/action/group/{action}", org.TeamsUserGroupAction)
+			m.Get("/teams/{team}/groups/search", org.SearchTeamUserGroups)
 		}, context.OrgAssignment(true, false, true))
 
 		// require admin permission

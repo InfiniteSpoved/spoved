@@ -5,6 +5,7 @@
 package org
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -31,6 +32,7 @@ import (
 	"forgejo.org/services/forms"
 	org_service "forgejo.org/services/org"
 	repo_service "forgejo.org/services/repository"
+	usergroup_service "forgejo.org/services/usergroup"
 )
 
 const (
@@ -87,6 +89,9 @@ func TeamsAction(ctx *context.Context) {
 		}
 		err = models.AddTeamMemberByCooptation(ctx, ctx.Org.Team, ctx.Doer.ID, ctx.Doer.ID)
 	case "leave":
+		if rejectRemovalOfUserGroupMember(ctx, ctx.Doer.ID) {
+			return
+		}
 		err = models.RemoveTeamMember(ctx, ctx.Org.Team, ctx.Doer.ID)
 		if err != nil {
 			if org_model.IsErrLastOrgOwner(err) {
@@ -111,6 +116,10 @@ func TeamsAction(ctx *context.Context) {
 		uid := ctx.FormInt64("uid")
 		if uid == 0 {
 			ctx.Redirect(ctx.Org.OrgLink + "/teams")
+			return
+		}
+
+		if rejectRemovalOfUserGroupMember(ctx, uid) {
 			return
 		}
 
@@ -223,6 +232,105 @@ func TeamsAction(ctx *context.Context) {
 	default:
 		ctx.Redirect(ctx.Org.OrgLink + "/teams")
 	}
+}
+
+// rejectRemovalOfUserGroupMember refuses to remove a user from the current team
+// while they are a member of a user group linked to it, since the group would
+// add them back. It returns true if the removal was rejected.
+func rejectRemovalOfUserGroupMember(ctx *context.Context, uid int64) bool {
+	viaGroup, err := org_model.IsTeamMemberViaUserGroup(ctx, ctx.Org.Team.ID, uid)
+	if err != nil {
+		ctx.ServerError("IsTeamMemberViaUserGroup", err)
+		return true
+	}
+	if !viaGroup {
+		return false
+	}
+	ctx.Flash.Error(ctx.Tr("org.teams.user_groups.member_via_group"))
+	ctx.JSONRedirect(ctx.Org.OrgLink + "/teams/" + url.PathEscape(ctx.Org.Team.LowerName))
+	return true
+}
+
+// TeamsUserGroupAction links or unlinks a user group to the current team
+func TeamsUserGroupAction(ctx *context.Context) {
+	if !ctx.Org.IsOwner {
+		ctx.Error(http.StatusNotFound)
+		return
+	}
+	teamLink := ctx.Org.OrgLink + "/teams/" + url.PathEscape(ctx.Org.Team.LowerName)
+
+	var group *org_model.UserGroup
+	var err error
+	if name := ctx.FormTrim("group_name"); name != "" {
+		group, err = org_model.GetUserGroupByName(ctx, name)
+	} else {
+		group, err = org_model.GetUserGroupByID(ctx, ctx.FormInt64("group_id"))
+	}
+	if err != nil {
+		if org_model.IsErrUserGroupNotExist(err) {
+			ctx.Flash.Error(ctx.Tr("org.teams.user_groups.not_exist"))
+			ctx.Redirect(teamLink)
+			return
+		}
+		ctx.ServerError("GetUserGroup", err)
+		return
+	}
+
+	switch ctx.Params(":action") {
+	case "link":
+		err = usergroup_service.LinkTeam(ctx, group, ctx.Org.Team)
+		if errors.Is(err, usergroup_service.ErrAlreadyLinked) {
+			ctx.Flash.Error(ctx.Tr("org.teams.user_groups.already_linked", group.Name))
+			ctx.Redirect(teamLink)
+			return
+		}
+	case "unlink":
+		err = usergroup_service.UnlinkTeam(ctx, group, ctx.Org.Team)
+	default:
+		ctx.Error(http.StatusNotFound)
+		return
+	}
+
+	if err != nil {
+		if org_model.IsErrLastOrgOwner(err) {
+			ctx.Flash.Error(ctx.Tr("form.last_org_owner"))
+			ctx.Redirect(teamLink)
+			return
+		}
+		ctx.ServerError("TeamsUserGroupAction", err)
+		return
+	}
+	ctx.Redirect(teamLink)
+}
+
+// SearchTeamUserGroups returns the user groups matching a keyword that can be
+// linked to the current team, for the autocompletion of the link form
+func SearchTeamUserGroups(ctx *context.Context) {
+	if !ctx.Org.IsOwner {
+		ctx.Error(http.StatusNotFound)
+		return
+	}
+
+	groups, _, err := org_model.SearchUserGroups(ctx, &org_model.SearchUserGroupOptions{
+		ListOptions:       db.ListOptions{Page: 1, PageSize: 10},
+		Keyword:           ctx.FormTrim("q"),
+		NotLinkedToTeamID: ctx.Org.Team.ID,
+	})
+	if err != nil {
+		ctx.ServerError("SearchUserGroups", err)
+		return
+	}
+
+	type userGroup struct {
+		ID          int64  `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	data := make([]userGroup, 0, len(groups))
+	for _, g := range groups {
+		data = append(data, userGroup{ID: g.ID, Name: g.Name, Description: g.Description})
+	}
+	ctx.JSON(http.StatusOK, map[string]any{"ok": true, "data": data})
 }
 
 func checkIsOrgMemberAndRedirect(ctx *context.Context, defaultRedirect string) {
@@ -410,6 +518,13 @@ func TeamMembers(ctx *context.Context) {
 	}
 	ctx.Data["Memberships"] = memberships
 	ctx.Data["Page"] = pager
+
+	userGroups, err := org_model.GetTeamUserGroups(ctx, ctx.Org.Team.ID)
+	if err != nil {
+		ctx.ServerError("GetTeamUserGroups", err)
+		return
+	}
+	ctx.Data["UserGroups"] = userGroups
 	ctx.Data["Units"] = unit_model.Units
 
 	invites, err := org_model.GetInvitesByTeamID(ctx, ctx.Org.Team.ID)

@@ -1,0 +1,14 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin new user-group")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.user_groups.new"}}
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.user_groups.desc"}}</p>
+			<form class="ui form" action="{{.Link}}" method="post">
+				{{template "admin/user_group/form_fields" .}}
+				<button class="ui primary button">{{ctx.Locale.Tr "admin.user_groups.new"}}</button>
+			</form>
+		</div>
+	</div>
+{{template "admin/layout_footer" .}}

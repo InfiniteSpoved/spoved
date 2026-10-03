@@ -61,7 +61,7 @@ import {
 } from './features/repo-settings.js';
 import {initRepoDiffView} from './features/repo-diff.js';
 import {initRepoSuggestionApply} from './features/repo-suggestion.js';
-import {initOrgTeamSearchRepoBox} from './features/org-team.js';
+import {initOrgTeamSearchRepoBox, initOrgTeamSearchUserGroupBox} from './features/org-team.js';
 import {initUserAuthWebAuthn, initUserAuthWebAuthnRegister} from './features/user-auth-webauthn.js';
 import {initRepoRelease, initRepoReleaseNew} from './features/repo-release.js';
 import {initRepoEditor} from './features/repo-editor.js';
@@ -146,6 +146,7 @@ onDomReady(() => {
   initNotificationsTable();
 
   initOrgTeamSearchRepoBox();
+  initOrgTeamSearchUserGroupBox();
 
   initRepoActivityTopAuthorsChart();
   initRepoArchiveLinks();
