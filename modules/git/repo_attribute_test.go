@@ -260,6 +260,29 @@ func TestGitAttributeCheckerError(t *testing.T) {
 		}
 	})
 
+	t.Run("Cancelled/AfterExit", func(t *testing.T) {
+		gitRepo := prepareRepo(t)
+		defer gitRepo.Close()
+
+		var cancel context.CancelFunc
+		gitRepo.Ctx, cancel = context.WithCancel(gitRepo.Ctx)
+
+		ac, err := gitRepo.GitAttributeChecker("8fee858da5796dfb37704761701bb8e800ad9ef3", "linguist-language")
+		require.NoError(t, err)
+		defer ac.Close()
+
+		_, err = ac.CheckPath("i-am-a-python.p")
+		require.NoError(t, err)
+
+		// once git has exited, writing the next path fails with a broken pipe,
+		// which must still be reported as the cancellation that caused it
+		cancel()
+		time.Sleep(500 * time.Millisecond)
+
+		_, err = ac.CheckPath("i-am-a-python.p")
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
 	t.Run("Cancelled/DuringRun", func(t *testing.T) {
 		gitRepo := prepareRepo(t)
 		defer gitRepo.Close()
