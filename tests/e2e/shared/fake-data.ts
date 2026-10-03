@@ -10,14 +10,17 @@
 //   E2E_ADMIN_PASSWORD (default: password)
 // and the instance from GITEA_URL (see playwright.config.ts).
 
+import {Buffer} from 'node:buffer';
 import {expect, type APIRequestContext, type Browser, type BrowserContext} from '@playwright/test';
 import {test_context} from '../utils_e2e.ts';
 
 export const ADMIN_USERNAME = process.env.E2E_ADMIN_USERNAME || 'user1';
 export const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD || 'password';
 
+// Credentials are encoded as UTF-8, like the sign-in form sends them: btoa()
+// only handles Latin-1 and would break on passwords such as "pässwörd€".
 export function basicAuth(username: string, password: string) {
-  return {Authorization: `Basic ${btoa(`${username}:${password}`)}`};
+  return {Authorization: `Basic ${Buffer.from(`${username}:${password}`, 'utf8').toString('base64')}`};
 }
 
 export const adminAuth = () => basicAuth(ADMIN_USERNAME, ADMIN_PASSWORD);
@@ -45,7 +48,8 @@ export class FakeData {
   constructor(private request: APIRequestContext) {}
 
   async createUser(): Promise<FakeUser> {
-    const user = {username: fakeName('user'), password: `pw-${globalThis.crypto.randomUUID()}`};
+    // non-ASCII characters so that every login and API call checks they are encoded correctly
+    const user = {username: fakeName('user'), password: `pässwörd€-${globalThis.crypto.randomUUID()}`};
     await ok(await this.request.post('/api/v1/admin/users', {
       headers: adminAuth(),
       data: {
