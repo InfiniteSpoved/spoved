@@ -36,6 +36,7 @@ func initChangedFiles() {
 		"Makefile",
 		"playwright.config.ts",
 		".forgejo/workflows/testing.yml",
+		".github/workflows/ci.yml",
 		"tests/e2e/*.go",
 		"tests/e2e/shared/*",
 		// frontend files
@@ -68,6 +69,10 @@ func canSkipTest(testFile string) bool {
 	}
 
 	for _, changedFile := range changesetFiles {
+		// an empty entry (e.g. from a trailing separator) would match every test file
+		if changedFile == "" {
+			continue
+		}
 		if strings.HasSuffix(testFile, changedFile) {
 			return false
 		}
