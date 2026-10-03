@@ -431,6 +431,7 @@ func DeleteOrganization(ctx context.Context, org *Organization) error {
 		&TeamUser{OrgID: org.ID},
 		&TeamUnit{OrgID: org.ID},
 		&TeamInvite{OrgID: org.ID},
+		&UserGroupTeam{OrgID: org.ID},
 		&secret_model.Secret{OwnerID: org.ID},
 		&actions_model.ActionRunner{OwnerID: org.ID},
 		&actions_model.ActionRunnerToken{OwnerID: optional.Some(org.ID)},

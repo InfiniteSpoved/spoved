@@ -114,6 +114,7 @@ func deleteUser(ctx context.Context, u *user_model.User, purge bool) (err error)
 		&user_model.UserOpenID{UID: u.ID},
 		&issues_model.Reaction{UserID: u.ID},
 		&organization.TeamUser{UID: u.ID},
+		&organization.UserGroupUser{UID: u.ID},
 		&organization.TeamInvite{InviterID: u.ID},
 		&organization.TeamInvite{InvitedID: optional.Some(u.ID)},
 		&issues_model.Stopwatch{UserID: u.ID},

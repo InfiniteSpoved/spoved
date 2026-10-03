@@ -32,6 +32,9 @@ const (
 
 	// MembershipReasonAddedByAuthProvider represents a membership created by an authentication source whose metadata was mapped to team membership
 	MembershipReasonAddedByAuthProvider // 3
+
+	// MembershipReasonAddedByUserGroup represents a membership created because the user is a member of a user group linked to the team
+	MembershipReasonAddedByUserGroup // 4
 )
 
 // TeamUser represents an team-user relation.
@@ -171,4 +174,8 @@ func (t *TeamUser) IsMembershipAddedByUser() bool {
 
 func (t *TeamUser) IsMembershipAddedByLoginSource() bool {
 	return t.Reason == MembershipReasonAddedByAuthProvider
+}
+
+func (t *TeamUser) IsMembershipAddedByUserGroup() bool {
+	return t.Reason == MembershipReasonAddedByUserGroup
 }

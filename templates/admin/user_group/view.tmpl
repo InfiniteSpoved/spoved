@@ -1,0 +1,90 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin view user-group")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{.Group.Name}}
+		</h4>
+		<div class="ui attached segment">
+			<form class="ui form" action="{{.GroupLink}}/edit" method="post">
+				{{template "admin/user_group/form_fields" .}}
+				<div class="tw-flex tw-gap-2">
+					<button class="ui primary button">{{ctx.Locale.Tr "admin.user_groups.update"}}</button>
+					<button type="button" class="ui red button delete-button" data-url="{{.GroupLink}}/delete" data-id="{{.Group.ID}}" data-modal-id="delete-user-group">{{ctx.Locale.Tr "admin.user_groups.delete"}}</button>
+				</div>
+			</form>
+		</div>
+
+		<h4 class="ui top attached header" id="user-group-members">
+			{{ctx.Locale.Tr "admin.user_groups.members"}}
+			<div class="ui right">{{len .Members}}</div>
+		</h4>
+		<div class="ui attached segment">
+			<form class="ui form ignore-dirty tw-flex tw-flex-wrap tw-gap-2" action="{{.GroupLink}}/members/add" method="post">
+				<div id="search-user-box" class="ui search tw-mr-2">
+					<div class="ui input">
+						<input class="prompt" name="uname" placeholder="{{ctx.Locale.Tr "search.user_kind"}}" aria-label="{{ctx.Locale.Tr "search.user_kind"}}" autocomplete="off" required>
+					</div>
+				</div>
+				<button class="ui primary button">{{ctx.Locale.Tr "admin.user_groups.add_member"}}</button>
+			</form>
+		</div>
+		<div class="ui attached segment">
+			<div class="flex-list">
+				{{range .Members}}
+					<div class="flex-item tw-items-center">
+						<div class="flex-item-leading">
+							<a href="{{.HomeLink}}">{{ctx.AvatarUtils.Avatar . 32}}</a>
+						</div>
+						<div class="flex-item-main">
+							<div class="flex-item-title">{{template "shared/user/name" .}}</div>
+						</div>
+						<div class="flex-item-trailing">
+							<form action="{{$.GroupLink}}/members/remove" method="post">
+								<input type="hidden" name="uid" value="{{.ID}}">
+								<button class="ui red button">{{ctx.Locale.Tr "admin.user_groups.remove_member"}}</button>
+							</form>
+						</div>
+					</div>
+				{{else}}
+					<div class="flex-item">
+						<span class="text grey tw-italic">{{ctx.Locale.Tr "admin.user_groups.no_members"}}</span>
+					</div>
+				{{end}}
+			</div>
+		</div>
+
+		<h4 class="ui top attached header" id="user-group-teams">
+			{{ctx.Locale.Tr "admin.user_groups.teams"}}
+			<div class="ui right">{{len .LinkedTeams}}</div>
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.user_groups.teams_desc"}}</p>
+			<div class="flex-list">
+				{{range .LinkedTeams}}
+					<div class="flex-item tw-items-center">
+						<div class="flex-item-main">
+							<div class="flex-item-title">
+								<a href="{{.Org.HomeLink}}">{{.Org.Name}}</a> /
+								<a href="{{.Org.OrganisationLink}}/teams/{{.Team.LowerName | PathEscape}}">{{.Team.Name}}</a>
+							</div>
+						</div>
+					</div>
+				{{else}}
+					<div class="flex-item">
+						<span class="text grey tw-italic">{{ctx.Locale.Tr "admin.user_groups.no_teams"}}</span>
+					</div>
+				{{end}}
+			</div>
+		</div>
+	</div>
+
+<div class="ui g-modal-confirm delete modal" id="delete-user-group">
+	<div class="header">
+		{{svg "octicon-trash"}}
+		{{ctx.Locale.Tr "admin.user_groups.delete"}}
+	</div>
+	<div class="content">
+		<p>{{ctx.Locale.Tr "admin.user_groups.delete_desc"}}</p>
+	</div>
+	{{template "base/modal_actions_confirm" .}}
+</div>
+{{template "admin/layout_footer" .}}
