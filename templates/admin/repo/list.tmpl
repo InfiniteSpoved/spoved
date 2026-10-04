@@ -37,6 +37,10 @@
 							{{ctx.Locale.Tr "admin.repos.lfs_size"}}
 							{{SortArrow "lfssize" "reverselfssize" $.SortType false}}
 						</th>
+						<th  data-sortt-asc="size" data-sortt-desc="reversesize">
+							{{ctx.Locale.Tr "admin.repos.total_size"}}
+							{{SortArrow "size" "reversesize" $.SortType false}}
+						</th>
 						<th>{{ctx.Locale.Tr "admin.auths.updated"}}</th>
 						<th>{{ctx.Locale.Tr "admin.users.created"}}</th>
 						<th>{{ctx.Locale.Tr "admin.notices.op"}}</th>
@@ -82,12 +86,13 @@
 							<td>{{.NumIssues ctx}}</td>
 							<td>{{ctx.Locale.TrSize .GitSize}}</td>
 							<td>{{ctx.Locale.TrSize .LFSSize}}</td>
+							<td>{{ctx.Locale.TrSize .Size}}</td>
 							<td>{{DateUtils.AbsoluteShort .UpdatedUnix}}</td>
 							<td>{{DateUtils.AbsoluteShort .CreatedUnix}}</td>
 							<td><a class="delete-button" href="" data-url="{{$.Link}}/delete?page={{$.Page.Paginater.Current}}&sort={{$.SortType}}" data-id="{{.ID}}" data-name="{{.Name}}" data-modal-id="delete-repo">{{svg "octicon-trash"}}</a></td>
 						</tr>
 					{{else}}
-						<tr><td class="tw-text-center" colspan="12">{{ctx.Locale.Tr "repo.pulls.no_results"}}</td></tr>
+						<tr><td class="tw-text-center" colspan="13">{{ctx.Locale.Tr "repo.pulls.no_results"}}</td></tr>
 					{{end}}
 				</tbody>
 			</table>
