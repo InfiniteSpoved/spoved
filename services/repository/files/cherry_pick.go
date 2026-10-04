@@ -210,6 +210,17 @@ func RevertPullRequest(ctx context.Context, doer *user_model.User, gitRepo *git.
 	if err := pull.NewPullRequest(ctx, repo, issue, nil, nil, revert, nil); err != nil {
 		return nil, err
 	}
+	if _, err := issues_model.CreateComment(ctx, &issues_model.CreateCommentOptions{
+		Type:       issues_model.CommentTypeRevertOpened,
+		Doer:       doer,
+		Repo:       repo,
+		Issue:      pr.Issue,
+		RefRepoID:  repo.ID,
+		RefIssueID: issue.ID,
+		RefIsPull:  true,
+	}); err != nil {
+		log.Error("CreateComment revert opened for %-v: %v", pr, err)
+	}
 	revert.Issue = issue
 	return revert, nil
 }

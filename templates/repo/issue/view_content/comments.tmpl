@@ -711,6 +711,22 @@
 					{{else}}{{ctx.Locale.Tr "repo.issues.unpin_comment" $createdStr}}{{end}}
 				</span>
 			</div>
+		{{else if eq .Type 39 40}}
+			<div class="timeline-item event" id="{{.HashTag}}">
+				<span class="badge">{{svg "octicon-history"}}</span>
+				{{template "shared/user/avatarlink" dict "user" .Poster}}
+				<span class="text grey muted-links">
+					{{template "shared/user/authorlink" .Poster}}
+					{{if eq .Type 39}}
+						{{ctx.Locale.Tr "repo.pulls.revert.timeline_opened" $createdStr}}
+					{{else}}
+						{{ctx.Locale.Tr "repo.pulls.revert.timeline_reverted" $createdStr}}
+					{{end}}
+				</span>
+				<div class="detail flex-text-block">
+					<span class="text grey muted-links"><a href="{{.RefIssueLink ctx}}"><b>{{RenderRefIssueTitle $.Context (.RefIssueTitle ctx)}}</b> {{.RefIssueIdent ctx}}</a></span>
+				</div>
+			</div>
 		{{else if eq .Type 38}}
 			<div class="timeline-item event" id="{{.HashTag}}">
 				<span class="badge">{{svg "octicon-list-unordered" 16}}</span>

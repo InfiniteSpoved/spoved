@@ -46,10 +46,12 @@ Add a line here when you hit something the next person should know.
 - Grouped counts: use one `GROUP BY` query per list (see `countGroupedBy` in `models/organization/user_group.go`), not one query per row.
 - Deploy keys are referenced by `PublicKey` ID (`DeployKey.KeyID`) in protection rules, so org deploy keys can reuse the same lists later.
 - A deploy-key push runs with `opts.UserID` set to the repository owner; decide deploy-key permissions from the key (`ctx.deployKeyKeyID` in the pre-receive hook), never from that user ID.
+- `make 'test-sqlite#A|B'` breaks on the pipe; after one build, run `PROJECT_ROOT=$PWD PROJECT_CONF=tests/sqlite.ini ./integrations.sqlite.test -test.run 'A|B'`.
 - Integration tests: build expected absolute links from `setting.AppURL`, not from the `onApplicationRun` callback URL; the hosts differ (`localhost` vs `127.0.0.1`).
 - The container's /usr/local/bin/golangci-lint is built with an older Go and can't load the config ("Go language version ... lower than targeted"). Build the Makefile-pinned version once: `GOTOOLCHAIN=go1.27.1 GOBIN=<scratch> go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@<GOLANGCI_LINT_PACKAGE version>`, then run it with `--build-tags 'sqlite sqlite_unlock_notify'`.
 - Integration tests that call the runner RPC (`newMockRunner`/`Register`) need `onApplicationRun`; with only `tests.PrepareTestEnv`, nothing listens on the port and you get "connection refused".
 - `make lint-css` runs stylelint on every file under `web_src/css`, including `.js`, so JS tests for CSS (e.g. `web_src/js/company-contrast.test.js`) must live under `web_src/js`.
+- Integration tests run the queues `immediate`, so `StartPRCheckAndAutoMerge` merges synchronously: assert right after the call (no `Eventually`), and mock the clock with `timeutil.MockSet`/`defer timeutil.MockUnset()`.
 - `git log --format=%B` cuts a commit message at the first NUL byte, so message checks only see the text before it.
 - To check the files a merge commit introduces itself (an "evil merge"), run `git diff-tree --stdin -r --diff-merges=first-parent` over all new SHAs, merges included.
 - E2E under a git worktree in the long scratchpad path fails with "bind: invalid argument" (the unix socket path is too long). Run e2e in the main checkout.

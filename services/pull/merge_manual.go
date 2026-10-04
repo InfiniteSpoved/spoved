@@ -86,6 +86,7 @@ func MergedManually(ctx context.Context, pr *issues_model.PullRequest, doer *use
 	notify_service.MergePullRequest(baseGitRepo.Ctx, doer, pr)
 	log.Info("manuallyMerged[%d]: Marked as manually merged into %s/%s by commit id: %s", pr.ID, pr.BaseRepo.Name, pr.BaseBranch, commitID)
 
+	createRevertedComment(ctx, pr, doer)
 	return handleCloseCrossReferences(ctx, pr, doer)
 }
 

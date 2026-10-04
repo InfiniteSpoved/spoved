@@ -220,7 +220,13 @@
 						{{$hasPendingPullRequestMergeTip := ""}}
 						{{if .HasPendingPullRequestMerge}}
 							{{$createdPRMergeStr := DateUtils.TimeSince .PendingPullRequestMerge.CreatedUnix}}
-							{{$hasPendingPullRequestMergeTip = ctx.Locale.Tr "repo.pulls.auto_merge_has_pending_schedule" .PendingPullRequestMerge.Doer.Name $createdPRMergeStr}}
+							{{if .PendingPullRequestMerge.ScheduledAfterUnix}}
+								{{$hasPendingPullRequestMergeTip = ctx.Locale.Tr "repo.pulls.auto_merge.has_pending_schedule_after" .PendingPullRequestMerge.Doer.Name $createdPRMergeStr (DateUtils.FullTime .PendingPullRequestMerge.ScheduledAfterUnix) (ShortSha .PendingPullRequestMerge.HeadCommitID)}}
+							{{else if .PendingPullRequestMerge.HeadCommitID}}
+								{{$hasPendingPullRequestMergeTip = ctx.Locale.Tr "repo.pulls.auto_merge.has_pending_schedule_pinned" .PendingPullRequestMerge.Doer.Name $createdPRMergeStr (ShortSha .PendingPullRequestMerge.HeadCommitID)}}
+							{{else}}
+								{{$hasPendingPullRequestMergeTip = ctx.Locale.Tr "repo.pulls.auto_merge_has_pending_schedule" .PendingPullRequestMerge.Doer.Name $createdPRMergeStr}}
+							{{end}}
 						{{end}}
 						<div class="divider"></div>
 						<script type="module">
@@ -235,6 +241,8 @@
 								'textAutoMergeButtonWhenSucceed': {{ctx.Locale.Tr "repo.pulls.auto_merge_button_when_succeed"}},
 								'textAutoMergeWhenSucceed': {{ctx.Locale.Tr "repo.pulls.auto_merge_when_succeed"}},
 								'textAutoMergeCancelSchedule': {{ctx.Locale.Tr "repo.pulls.auto_merge_cancel_schedule"}},
+								'textScheduledAfter': {{ctx.Locale.Tr "repo.pulls.auto_merge.scheduled_after"}},
+								'textAutoMergeButtonScheduled': {{ctx.Locale.Tr "repo.pulls.auto_merge.button_scheduled"}},
 								'textClearMergeMessage': {{ctx.Locale.Tr "repo.pulls.clear_merge_message"}},
 								'textClearMergeMessageHint': {{ctx.Locale.Tr "repo.pulls.clear_merge_message_hint"}},
 								'textMergeCommitId': {{ctx.Locale.Tr "repo.pulls.merge_commit_id"}},
