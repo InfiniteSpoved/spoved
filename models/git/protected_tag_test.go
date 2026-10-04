@@ -10,7 +10,9 @@ import (
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	"forgejo.org/models/perm"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -227,7 +229,10 @@ func TestDeployKeyAllowlists(t *testing.T) {
 	})
 
 	t.Run("RemoveDeployKeyIDFromProtectionRules", func(t *testing.T) {
-		branch := &git_model.ProtectedBranch{RepoID: 1, RuleName: "main", WhitelistDeployKeyIDs: []int64{100, 104}}
+		branch := &git_model.ProtectedBranch{
+			RepoID: 1, RuleName: "main", WhitelistDeployKeyIDs: []int64{100, 104},
+			DeleteAllowlistDeployKeyIDs: []int64{100}, ForcePushAllowlistDeployKeyIDs: []int64{104, 100},
+		}
 		otherBranch := &git_model.ProtectedBranch{RepoID: 2, RuleName: "main", WhitelistDeployKeyIDs: []int64{100}}
 		tag := &git_model.ProtectedTag{RepoID: 1, NamePattern: "v*", AllowlistDeployKeyIDs: []int64{104, 100}}
 		require.NoError(t, db.Insert(db.DefaultContext, branch))
@@ -238,10 +243,90 @@ func TestDeployKeyAllowlists(t *testing.T) {
 
 		branch = unittest.AssertExistsAndLoadBean(t, &git_model.ProtectedBranch{ID: branch.ID})
 		assert.Equal(t, []int64{104}, branch.WhitelistDeployKeyIDs)
+		assert.Empty(t, branch.DeleteAllowlistDeployKeyIDs)
+		assert.Equal(t, []int64{104}, branch.ForcePushAllowlistDeployKeyIDs)
 		tag = unittest.AssertExistsAndLoadBean(t, &git_model.ProtectedTag{ID: tag.ID})
 		assert.Equal(t, []int64{104}, tag.AllowlistDeployKeyIDs)
 		// rules of other repositories are left alone
 		otherBranch = unittest.AssertExistsAndLoadBean(t, &git_model.ProtectedBranch{ID: otherBranch.ID})
 		assert.Equal(t, []int64{100}, otherBranch.WhitelistDeployKeyIDs)
+	})
+}
+
+func TestProtectedBranchDeleteForcePushAllowlists(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	user4 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})
+	user5 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5})
+
+	t.Run("empty lists block everyone", func(t *testing.T) {
+		rule := &git_model.ProtectedBranch{}
+		assert.False(t, rule.CanUserDelete(db.DefaultContext, user2))
+		assert.False(t, rule.CanUserForcePush(db.DefaultContext, user2))
+		assert.False(t, rule.CanDeployKeyDelete(1))
+		assert.False(t, rule.CanDeployKeyForcePush(1))
+	})
+
+	t.Run("lists are separate", func(t *testing.T) {
+		rule := &git_model.ProtectedBranch{
+			DeleteAllowlistUserIDs:         []int64{2},
+			DeleteAllowlistDeployKeyIDs:    []int64{10},
+			ForcePushAllowlistTeamIDs:      []int64{2}, // team 2 has users 2 and 4
+			ForcePushAllowlistDeployKeyIDs: []int64{11},
+		}
+		assert.True(t, rule.CanUserDelete(db.DefaultContext, user2))
+		assert.False(t, rule.CanUserDelete(db.DefaultContext, user4))
+		assert.True(t, rule.CanUserForcePush(db.DefaultContext, user2))
+		assert.True(t, rule.CanUserForcePush(db.DefaultContext, user4))
+		assert.False(t, rule.CanUserForcePush(db.DefaultContext, user5))
+		assert.True(t, rule.CanDeployKeyDelete(10))
+		assert.False(t, rule.CanDeployKeyDelete(11))
+		assert.True(t, rule.CanDeployKeyForcePush(11))
+		assert.False(t, rule.CanDeployKeyForcePush(10))
+	})
+
+	t.Run("allowing push does not allow delete or force push", func(t *testing.T) {
+		rule := &git_model.ProtectedBranch{CanPush: true, WhitelistDeployKeys: true}
+		assert.False(t, rule.CanUserDelete(db.DefaultContext, user2))
+		assert.False(t, rule.CanDeployKeyForcePush(1))
+	})
+
+	t.Run("RemoveUserIDFromProtectedBranch", func(t *testing.T) {
+		p := &git_model.ProtectedBranch{RepoID: 1, RuleName: "rm-user", DeleteAllowlistUserIDs: []int64{2, 4}, ForcePushAllowlistUserIDs: []int64{2}}
+		require.NoError(t, db.Insert(db.DefaultContext, p))
+		require.NoError(t, git_model.RemoveUserIDFromProtectedBranch(db.DefaultContext, p, 2))
+		p = unittest.AssertExistsAndLoadBean(t, &git_model.ProtectedBranch{ID: p.ID})
+		assert.Equal(t, []int64{4}, p.DeleteAllowlistUserIDs)
+		assert.Empty(t, p.ForcePushAllowlistUserIDs)
+	})
+
+	t.Run("RemoveTeamIDFromProtectedBranch", func(t *testing.T) {
+		p := &git_model.ProtectedBranch{RepoID: 3, RuleName: "rm-team", DeleteAllowlistTeamIDs: []int64{1}, ForcePushAllowlistTeamIDs: []int64{1, 2}}
+		require.NoError(t, db.Insert(db.DefaultContext, p))
+		require.NoError(t, git_model.RemoveTeamIDFromProtectedBranch(db.DefaultContext, p, 1))
+		p = unittest.AssertExistsAndLoadBean(t, &git_model.ProtectedBranch{ID: p.ID})
+		assert.Empty(t, p.DeleteAllowlistTeamIDs)
+		assert.Equal(t, []int64{2}, p.ForcePushAllowlistTeamIDs)
+	})
+
+	t.Run("UpdateProtectBranch filters the lists", func(t *testing.T) {
+		repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3}) // org3/repo3
+		key := &asymkey_model.DeployKey{KeyID: 200, RepoID: 3, Name: "write", Mode: perm.AccessModeWrite}
+		require.NoError(t, db.Insert(db.DefaultContext, key))
+
+		p := &git_model.ProtectedBranch{RepoID: repo.ID, RuleName: "update"}
+		require.NoError(t, git_model.UpdateProtectBranch(db.DefaultContext, repo, p, git_model.WhitelistOptions{
+			DeleteUserIDs:         []int64{2, 5}, // user 5 can't write to repo3
+			DeleteTeamIDs:         []int64{1, 9999},
+			DeleteDeployKeyIDs:    []int64{200, 201},
+			ForcePushUserIDs:      []int64{2},
+			ForcePushDeployKeyIDs: []int64{200},
+		}))
+		p = unittest.AssertExistsAndLoadBean(t, &git_model.ProtectedBranch{ID: p.ID})
+		assert.Equal(t, []int64{2}, p.DeleteAllowlistUserIDs)
+		assert.Equal(t, []int64{1}, p.DeleteAllowlistTeamIDs)
+		assert.Equal(t, []int64{200}, p.DeleteAllowlistDeployKeyIDs)
+		assert.Equal(t, []int64{2}, p.ForcePushAllowlistUserIDs)
+		assert.Equal(t, []int64{200}, p.ForcePushAllowlistDeployKeyIDs)
 	})
 }

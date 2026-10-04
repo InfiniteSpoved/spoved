@@ -50,6 +50,7 @@ func CreateNewBranch(ctx context.Context, doer *user_model.User, repo *repo_mode
 type Branch struct {
 	DBBranch          *git_model.Branch
 	IsProtected       bool
+	CanDelete         bool // the branch isn't protected, or the doer is in the rule's delete allow-list
 	IsIncluded        bool
 	CommitsAhead      int
 	CommitsBehind     int
@@ -58,7 +59,7 @@ type Branch struct {
 }
 
 // LoadBranches loads branches from the repository limited by page & pageSize.
-func LoadBranches(ctx context.Context, repo *repo_model.Repository, gitRepo *git.Repository, isDeletedBranch optional.Option[bool], keyword string, page, pageSize int) (*Branch, []*Branch, int64, error) {
+func LoadBranches(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, gitRepo *git.Repository, isDeletedBranch optional.Option[bool], keyword string, page, pageSize int) (*Branch, []*Branch, int64, error) {
 	defaultDBBranch, err := git_model.GetBranch(ctx, repo.ID, repo.DefaultBranch)
 	if err != nil {
 		return nil, nil, 0, err
@@ -100,7 +101,7 @@ func LoadBranches(ctx context.Context, repo *repo_model.Repository, gitRepo *git
 
 	branches := make([]*Branch, 0, len(dbBranches))
 	for i := range dbBranches {
-		branch, err := loadOneBranch(ctx, repo, dbBranches[i], &rules, repoIDToRepo, repoIDToGitRepo)
+		branch, err := loadOneBranch(ctx, doer, repo, dbBranches[i], &rules, repoIDToRepo, repoIDToGitRepo)
 		if err != nil {
 			log.Error("loadOneBranch() on repo #%d, branch '%s' failed: %v", repo.ID, dbBranches[i].Name, err)
 
@@ -116,7 +117,7 @@ func LoadBranches(ctx context.Context, repo *repo_model.Repository, gitRepo *git
 
 	// Always add the default branch
 	log.Debug("loadOneBranch: load default: '%s'", defaultDBBranch.Name)
-	defaultBranch, err := loadOneBranch(ctx, repo, defaultDBBranch, &rules, repoIDToRepo, repoIDToGitRepo)
+	defaultBranch, err := loadOneBranch(ctx, doer, repo, defaultDBBranch, &rules, repoIDToRepo, repoIDToGitRepo)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("loadOneBranch: %v", err)
 	}
@@ -124,7 +125,7 @@ func LoadBranches(ctx context.Context, repo *repo_model.Repository, gitRepo *git
 	return defaultBranch, branches, totalNumOfBranches, nil
 }
 
-func loadOneBranch(ctx context.Context, repo *repo_model.Repository, dbBranch *git_model.Branch, protectedBranches *git_model.ProtectedBranchRules,
+func loadOneBranch(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, dbBranch *git_model.Branch, protectedBranches *git_model.ProtectedBranchRules,
 	repoIDToRepo map[int64]*repo_model.Repository,
 	repoIDToGitRepo map[int64]*git.Repository,
 ) (*Branch, error) {
@@ -133,6 +134,7 @@ func loadOneBranch(ctx context.Context, repo *repo_model.Repository, dbBranch *g
 	branchName := dbBranch.Name
 	p := protectedBranches.GetFirstMatched(branchName)
 	isProtected := p != nil
+	canDelete := !isProtected || doer != nil && p.CanUserDelete(ctx, doer)
 
 	var divergence *git.DivergeObject
 
@@ -196,6 +198,7 @@ func loadOneBranch(ctx context.Context, repo *repo_model.Repository, dbBranch *g
 	return &Branch{
 		DBBranch:          dbBranch,
 		IsProtected:       isProtected,
+		CanDelete:         canDelete,
 		IsIncluded:        isIncluded,
 		CommitsAhead:      divergence.Ahead,
 		CommitsBehind:     divergence.Behind,
@@ -426,11 +429,11 @@ func DeleteBranch(ctx context.Context, doer *user_model.User, repo *repo_model.R
 		return ErrBranchIsDefault
 	}
 
-	isProtected, err := git_model.IsBranchProtected(ctx, repo.ID, branchName)
+	protectBranch, err := git_model.GetFirstMatchProtectedBranchRule(ctx, repo.ID, branchName)
 	if err != nil {
 		return err
 	}
-	if isProtected {
+	if protectBranch != nil && !protectBranch.CanUserDelete(ctx, doer) {
 		return git_model.ErrBranchIsProtected
 	}
 

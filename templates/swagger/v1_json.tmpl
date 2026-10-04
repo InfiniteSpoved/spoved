@@ -25183,6 +25183,29 @@
           "format": "date-time",
           "x-go-name": "Created"
         },
+        "delete_allowlist_deploy_key_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "DeleteAllowlistDeployKeyIDs"
+        },
+        "delete_allowlist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "DeleteAllowlistTeams"
+        },
+        "delete_allowlist_usernames": {
+          "description": "Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.\nThe default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "DeleteAllowlistUsernames"
+        },
         "dismiss_stale_approvals": {
           "type": "boolean",
           "x-go-name": "DismissStaleApprovals"
@@ -25206,6 +25229,29 @@
         "enable_status_check": {
           "type": "boolean",
           "x-go-name": "EnableStatusCheck"
+        },
+        "force_push_allowlist_deploy_key_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "ForcePushAllowlistDeployKeyIDs"
+        },
+        "force_push_allowlist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ForcePushAllowlistTeams"
+        },
+        "force_push_allowlist_usernames": {
+          "description": "Users, teams and deploy keys (public key IDs) allowed to force-push matching branches. Empty lists block everyone.\nA force push must still pass the other checks of the rule. IDs which are not write deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ForcePushAllowlistUsernames"
         },
         "ignore_stale_approvals": {
           "type": "boolean",
@@ -25955,6 +26001,29 @@
           "x-deprecated": true,
           "x-go-name": "BranchName"
         },
+        "delete_allowlist_deploy_key_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "DeleteAllowlistDeployKeyIDs"
+        },
+        "delete_allowlist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "DeleteAllowlistTeams"
+        },
+        "delete_allowlist_usernames": {
+          "description": "Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.\nThe default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "DeleteAllowlistUsernames"
+        },
         "dismiss_stale_approvals": {
           "type": "boolean",
           "x-go-name": "DismissStaleApprovals"
@@ -25978,6 +26047,29 @@
         "enable_status_check": {
           "type": "boolean",
           "x-go-name": "EnableStatusCheck"
+        },
+        "force_push_allowlist_deploy_key_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "ForcePushAllowlistDeployKeyIDs"
+        },
+        "force_push_allowlist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ForcePushAllowlistTeams"
+        },
+        "force_push_allowlist_usernames": {
+          "description": "Users, teams and deploy keys (public key IDs) allowed to force-push matching branches. Empty lists block everyone.\nA force push must still pass the other checks of the rule. IDs which are not write deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ForcePushAllowlistUsernames"
         },
         "ignore_stale_approvals": {
           "type": "boolean",
@@ -27411,6 +27503,29 @@
           "type": "boolean",
           "x-go-name": "BlockOnRejectedReviews"
         },
+        "delete_allowlist_deploy_key_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "DeleteAllowlistDeployKeyIDs"
+        },
+        "delete_allowlist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "DeleteAllowlistTeams"
+        },
+        "delete_allowlist_usernames": {
+          "description": "Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.\nThe default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "DeleteAllowlistUsernames"
+        },
         "dismiss_stale_approvals": {
           "type": "boolean",
           "x-go-name": "DismissStaleApprovals"
@@ -27434,6 +27549,29 @@
         "enable_status_check": {
           "type": "boolean",
           "x-go-name": "EnableStatusCheck"
+        },
+        "force_push_allowlist_deploy_key_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "ForcePushAllowlistDeployKeyIDs"
+        },
+        "force_push_allowlist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ForcePushAllowlistTeams"
+        },
+        "force_push_allowlist_usernames": {
+          "description": "Users, teams and deploy keys (public key IDs) allowed to force-push matching branches. Empty lists block everyone.\nA force push must still pass the other checks of the rule. IDs which are not write deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ForcePushAllowlistUsernames"
         },
         "ignore_stale_approvals": {
           "type": "boolean",
