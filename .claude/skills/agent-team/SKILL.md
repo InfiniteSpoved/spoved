@@ -259,8 +259,9 @@ Phase 1, DESIGN ONLY. Write no code. Read the issue and its comments, then send
 - open questions, each with your recommendation
 Then wait.
 
-Phase 2, only after <TL> approves. Implement exactly the approved design with the
-ponytail skill at FULL. Ask <TL> before deviating. Branch feat/<short-name> from
+Phase 2, only after <TL> approves. Before writing any code, invoke the ponytail
+skill through the Skill tool (skill "ponytail", args "full"). Reading its file
+with cat doesn't count. Implement exactly the approved design. Ask <TL> before deviating. Branch feat/<short-name> from
 develop. Commit and push early. Run the CLAUDE.md Testing stages that cover your
 change. Open a PR to develop whose body says "Fixes #<N>", then send <TL> the PR
 number and the 40-character head SHA. Fix every must-fix item <TL> sends, and
@@ -339,7 +340,9 @@ checkout <SHA>). Rerun the stages <TL> names, or all of them if it doesn't name 
 - The auto-mode classifier blocks some actions for some sessions: a TL renaming
   workers, or the supervisor merging its own docs PR without a review. Route the
   first through the supervisor. Ask the user before the second.
-- Coders invoked ponytail at FULL, and it led to reuse: DeleteRun and the cleanup
+- 6 of 7 coders invoked ponytail through the Skill tool at FULL. The #45 coder only
+  read the file. That's why the coder brief now names the Skill tool. Ponytail led
+  to reuse: DeleteRun and the cleanup
   cron (#93), the existing admin repo list and /repos/search (#80), the auto-merge
   queue and existing comment type (#81), and one PushRule.Compile() for save and
   hook (#19).
