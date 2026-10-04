@@ -15,6 +15,7 @@ import (
 	"forgejo.org/models/unit"
 	"forgejo.org/modules/git"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/api/v1/utils"
 	"forgejo.org/services/context"
@@ -295,6 +296,58 @@ func CreateRelease(ctx *context.APIContext) {
 		}
 	}
 	ctx.JSON(http.StatusCreated, convert.ToAPIRelease(ctx, ctx.Repo().Repository, rel, ctx.AcceptsGithubResponse()))
+}
+
+// GenerateReleaseNotes generate release notes from the pull requests merged since the previous tag
+func GenerateReleaseNotes(ctx *context.APIContext) {
+	// swagger:operation POST /repos/{owner}/{repo}/releases/generate-notes repository repoGenerateReleaseNotes
+	// ---
+	// summary: Generate release notes from the pull requests merged since the previous tag
+	// consumes:
+	// - application/json
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: body
+	//   in: body
+	//   schema:
+	//     "$ref": "#/definitions/GenerateReleaseNotesOption"
+	// responses:
+	//   "200":
+	//     "$ref": "#/responses/GeneratedReleaseNotes"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
+
+	form := web.GetForm(ctx).(*api.GenerateReleaseNotesOption)
+	body, err := release_service.GenerateReleaseNotes(ctx, ctx.Repo().Repository, ctx.Repo().GitRepo, release_service.GenerateNotesOptions{
+		TagName:         form.TagName,
+		Target:          form.Target,
+		PreviousTagName: form.PreviousTagName,
+		ConfigFilePath:  form.ConfigurationFilePath,
+	})
+	if errors.Is(err, util.ErrNotExist) {
+		ctx.Error(http.StatusNotFound, "GenerateReleaseNotes", err)
+		return
+	} else if errors.Is(err, util.ErrInvalidArgument) {
+		ctx.Error(http.StatusUnprocessableEntity, "GenerateReleaseNotes", err)
+		return
+	} else if err != nil {
+		ctx.InternalServerError(err)
+		return
+	}
+	ctx.JSON(http.StatusOK, api.GeneratedReleaseNotes{Name: form.TagName, Body: body})
 }
 
 // EditRelease edit a release
