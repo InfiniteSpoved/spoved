@@ -42,6 +42,11 @@ type preReceiveContext struct {
 	protectedTags    []*git_model.ProtectedTag
 	gotProtectedTags bool
 
+	pushRule            *git_model.PushRule
+	gotPushRule         bool
+	pushRuleCheckedTips []string // branch tips that passed the push rule in this request
+	pushRulePaths       int      // changed paths read for the push rule in this request
+
 	env []string
 
 	opts *private.HookOptions
@@ -266,6 +271,10 @@ func preReceiveBranch(ctx *preReceiveContext, oldCommitID, newCommitID string, r
 		ctx.JSON(http.StatusForbidden, private.Response{
 			UserMsg: fmt.Sprintf("branch %s is the default branch and cannot be deleted", branchName),
 		})
+		return
+	}
+
+	if !ctx.checkPushRules(oldCommitID, newCommitID, branchName) {
 		return
 	}
 
