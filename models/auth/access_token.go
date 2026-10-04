@@ -56,6 +56,26 @@ func (err ErrAccessTokenEmpty) Unwrap() error {
 	return util.ErrInvalidArgument
 }
 
+// ErrAccessTokenExpired represents an access token whose expiry date has passed.
+type ErrAccessTokenExpired struct {
+	Name    string
+	Expires timeutil.TimeStamp
+}
+
+// IsErrAccessTokenExpired checks if an error is a ErrAccessTokenExpired.
+func IsErrAccessTokenExpired(err error) bool {
+	_, ok := err.(ErrAccessTokenExpired)
+	return ok
+}
+
+func (err ErrAccessTokenExpired) Error() string {
+	return fmt.Sprintf("access token %q expired on %s", err.Name, err.Expires.FormatDate())
+}
+
+func (err ErrAccessTokenExpired) Unwrap() error {
+	return util.ErrPermissionDenied
+}
+
 var successfulAccessTokenCache *lru.Cache[string, any]
 
 // AccessToken represents a personal access token.
@@ -73,6 +93,8 @@ type AccessToken struct {
 	UpdatedUnix       timeutil.TimeStamp `xorm:"INDEX updated"`
 	HasRecentActivity bool               `xorm:"-"`
 	HasUsed           bool               `xorm:"-"`
+
+	ExpiresUnix timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"` // 0 = never
 
 	ResourceAllRepos bool `xorm:"NOT NULL DEFAULT TRUE"` // flag for whether AccessTokenResourceRepo instances will limit the resources this access token can access (false) or won't limit them (true).
 }
@@ -111,6 +133,11 @@ func generateAccessToken(t *AccessToken) {
 	t.Token = hex.EncodeToString(util.CryptoRandomBytes(20))
 	t.TokenHash = HashToken(t.Token, t.TokenSalt)
 	t.TokenLastEight = t.Token[len(t.Token)-8:]
+}
+
+// IsExpired reports whether the token has an expiry date that has passed.
+func (t *AccessToken) IsExpired() bool {
+	return t.ExpiresUnix != 0 && timeutil.TimeStampNow() >= t.ExpiresUnix
 }
 
 // DisplayPublicOnly whether to display this as a public-only token.
@@ -171,7 +198,7 @@ func GetAccessTokenBySHA(ctx context.Context, token string) (*AccessToken, error
 			return nil, err
 		}
 		if has {
-			return accessToken, nil
+			return checkAccessTokenExpiry(accessToken)
 		}
 		successfulAccessTokenCache.Remove(token)
 	}
@@ -190,10 +217,17 @@ func GetAccessTokenBySHA(ctx context.Context, token string) (*AccessToken, error
 			if successfulAccessTokenCache != nil {
 				successfulAccessTokenCache.Add(token, t.ID)
 			}
-			return &t, nil
+			return checkAccessTokenExpiry(&t)
 		}
 	}
 	return nil, ErrAccessTokenNotExist{token}
+}
+
+func checkAccessTokenExpiry(t *AccessToken) (*AccessToken, error) {
+	if t.IsExpired() {
+		return nil, ErrAccessTokenExpired{Name: t.Name, Expires: t.ExpiresUnix}
+	}
+	return t, nil
 }
 
 // AccessTokenByNameExists checks if a token name has been used already by a user.

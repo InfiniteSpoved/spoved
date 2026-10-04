@@ -33,7 +33,8 @@ type DeployKey struct {
 	Fingerprint string
 	Content     string `xorm:"-"`
 
-	Mode perm.AccessMode `xorm:"NOT NULL DEFAULT 1"`
+	Mode        perm.AccessMode    `xorm:"NOT NULL DEFAULT 1"`
+	ExpiresUnix timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"` // 0 = never; per repo, the shared PublicKey row has none
 
 	CreatedUnix       timeutil.TimeStamp `xorm:"created"`
 	UpdatedUnix       timeutil.TimeStamp `xorm:"updated"`
@@ -45,6 +46,11 @@ type DeployKey struct {
 func (key *DeployKey) AfterLoad() {
 	key.HasUsed = key.UpdatedUnix > key.CreatedUnix
 	key.HasRecentActivity = key.UpdatedUnix.AddDuration(7*24*time.Hour) > timeutil.TimeStampNow()
+}
+
+// IsExpired reports whether the deploy key has an expiry date that has passed.
+func (key *DeployKey) IsExpired() bool {
+	return key.ExpiresUnix != 0 && timeutil.TimeStampNow() >= key.ExpiresUnix
 }
 
 // GetContent gets associated public key content.
@@ -90,7 +96,7 @@ func checkDeployKey(ctx context.Context, keyID, repoID int64, name string) error
 }
 
 // addDeployKey adds new key-repo relation.
-func addDeployKey(ctx context.Context, keyID, repoID int64, name, fingerprint string, mode perm.AccessMode) (*DeployKey, error) {
+func addDeployKey(ctx context.Context, keyID, repoID int64, name, fingerprint string, mode perm.AccessMode, expires timeutil.TimeStamp) (*DeployKey, error) {
 	if err := checkDeployKey(ctx, keyID, repoID, name); err != nil {
 		return nil, err
 	}
@@ -101,12 +107,13 @@ func addDeployKey(ctx context.Context, keyID, repoID int64, name, fingerprint st
 		Name:        name,
 		Fingerprint: fingerprint,
 		Mode:        mode,
+		ExpiresUnix: expires,
 	}
 	return key, db.Insert(ctx, key)
 }
 
 // AddDeployKey add new deploy key to database and authorized_keys file.
-func AddDeployKey(ctx context.Context, repoID int64, name, content string, readOnly bool) (*DeployKey, error) {
+func AddDeployKey(ctx context.Context, repoID int64, name, content string, readOnly bool, expires timeutil.TimeStamp) (*DeployKey, error) {
 	fingerprint, err := CalcFingerprint(content)
 	if err != nil {
 		return nil, err
@@ -144,7 +151,7 @@ func AddDeployKey(ctx context.Context, repoID int64, name, content string, readO
 		}
 	}
 
-	key, err := addDeployKey(ctx, pkey.ID, repoID, name, pkey.Fingerprint, accessMode)
+	key, err := addDeployKey(ctx, pkey.ID, repoID, name, pkey.Fingerprint, accessMode, expires)
 	if err != nil {
 		return nil, err
 	}

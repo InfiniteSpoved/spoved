@@ -70,6 +70,8 @@ func CreateUserAccessToken(ctx *context.APIContext) {
 	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
 
 	utils.CreateAccessToken(ctx)
 }

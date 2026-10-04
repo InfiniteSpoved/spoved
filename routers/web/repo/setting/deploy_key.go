@@ -4,6 +4,7 @@
 package setting
 
 import (
+	"html/template"
 	"net/http"
 
 	asymkey_model "forgejo.org/models/asymkey"
@@ -11,6 +12,7 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/web"
+	"forgejo.org/routers/web/shared/user"
 	asymkey_service "forgejo.org/services/asymkey"
 	"forgejo.org/services/context"
 	"forgejo.org/services/forms"
@@ -21,6 +23,7 @@ func DeployKeys(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("repo.settings.deploy_keys") + " / " + ctx.Tr("secrets.secrets")
 	ctx.Data["PageIsSettingsKeys"] = true
 	ctx.Data["DisableSSH"] = setting.SSH.Disabled
+	user.SetExpiryFormData(ctx.Base, setting.DeployKeyExpiry)
 
 	keys, err := db.Find[asymkey_model.DeployKey](ctx, asymkey_model.ListDeployKeysOptions{RepoID: ctx.Repo.Repository.ID})
 	if err != nil {
@@ -38,6 +41,7 @@ func DeployKeysPost(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("repo.settings.deploy_keys")
 	ctx.Data["PageIsSettingsKeys"] = true
 	ctx.Data["DisableSSH"] = setting.SSH.Disabled
+	user.SetExpiryFormData(ctx.Base, setting.DeployKeyExpiry)
 
 	keys, err := db.Find[asymkey_model.DeployKey](ctx, asymkey_model.ListDeployKeysOptions{RepoID: ctx.Repo.Repository.ID})
 	if err != nil {
@@ -70,7 +74,15 @@ func DeployKeysPost(ctx *context.Context) {
 		return
 	}
 
-	key, err := asymkey_model.AddDeployKey(ctx, ctx.Repo.Repository.ID, form.Title, content, !form.IsWritable)
+	expires, expiryErr := user.ParseExpiryForm(ctx.Base, setting.DeployKeyExpiry, form.ExpiresAt)
+	if has, msg := expiryErr.Get(); has {
+		ctx.Data["HasError"] = true
+		ctx.Data["Err_ExpiresAt"] = true
+		ctx.RenderWithErr(template.HTML(template.HTMLEscapeString(msg)), tplDeployKeys, &form)
+		return
+	}
+
+	key, err := asymkey_model.AddDeployKey(ctx, ctx.Repo.Repository.ID, form.Title, content, !form.IsWritable, expires)
 	if err != nil {
 		ctx.Data["HasError"] = true
 		switch {

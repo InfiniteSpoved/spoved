@@ -268,6 +268,7 @@ func ToPublicKey(apiLink string, key *asymkey_model.PublicKey) *api.PublicKey {
 		Created:     key.CreatedUnix.AsTime(),
 		Updated:     key.UpdatedUnix.AsTime(),
 		Verified:    key.Verified,
+		Expires:     OptionalTime(key.ExpiresUnix),
 	}
 }
 
@@ -338,6 +339,7 @@ func ToDeployKey(apiLink string, key *asymkey_model.DeployKey) *api.DeployKey {
 		Title:       key.Name,
 		Created:     key.CreatedUnix.AsTime(),
 		ReadOnly:    key.Mode == perm.AccessModeRead, // All deploy keys are read-only.
+		Expires:     OptionalTime(key.ExpiresUnix),
 	}
 }
 
