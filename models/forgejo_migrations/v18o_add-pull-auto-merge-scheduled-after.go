@@ -16,16 +16,16 @@ func init() {
 	})
 }
 
-type v18kAutoMerge struct {
+type v18oAutoMerge struct {
 	ScheduledAfterUnix timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"`
 	HeadCommitID       string             `xorm:"VARCHAR(64)"`
 }
 
-func (v18kAutoMerge) TableName() string {
+func (v18oAutoMerge) TableName() string {
 	return "pull_auto_merge"
 }
 
 func addPullAutoMergeScheduledAfter(x *xorm.Engine) error {
-	_, err := x.SyncWithOptions(xorm.SyncOptions{IgnoreDropIndices: true}, new(v18kAutoMerge))
+	_, err := x.SyncWithOptions(xorm.SyncOptions{IgnoreDropIndices: true}, new(v18oAutoMerge))
 	return err
 }
