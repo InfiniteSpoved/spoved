@@ -52,4 +52,7 @@ Add a line here when you hit something the next person should know.
 - Integration tests that call the runner RPC (`newMockRunner`/`Register`) need `onApplicationRun`; with only `tests.PrepareTestEnv`, nothing listens on the port and you get "connection refused".
 - `make lint-css` runs stylelint on every file under `web_src/css`, including `.js`, so JS tests for CSS (e.g. `web_src/js/company-contrast.test.js`) must live under `web_src/js`.
 - Integration tests run the queues `immediate`, so `StartPRCheckAndAutoMerge` merges synchronously: assert right after the call (no `Eventually`), and mock the clock with `timeutil.MockSet`/`defer timeutil.MockUnset()`.
+- E2E under a git worktree in the long scratchpad path fails with "bind: invalid argument" (the unix socket path is too long). Run e2e in the main checkout.
+- After switching branches across a migration, delete `tests/e2e/forgejo-e2e-sqlite` before running e2e, or the server refuses the newer database.
+- E2E `repo-settings.test.e2e.ts` › `deploy key pickers › tag protection` [Mobile Chrome] also fails on develop in containers (a cell intercepts the Remove click); it's environmental.
 - `make lint`/`make frontend` run npm with the container's older Node and rewrite package-lock.json. Stage files by name (never `git add -A`) and keep package-lock.json out of commits unless you changed package files.

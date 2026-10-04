@@ -17,6 +17,7 @@
 				<label for="ssh-key-content">{{ctx.Locale.Tr "settings.key_content"}}</label>
 				<textarea id="ssh-key-content" name="content" class="js-quick-submit" placeholder="{{ctx.Locale.Tr "settings.key_content_ssh_placeholder"}}" required>{{.content}}</textarea>
 			</div>
+			{{template "shared/expiry_input" .}}
 			<input name="type" type="hidden" value="ssh">
 			<button class="ui primary button">
 				{{ctx.Locale.Tr "settings.add_key"}}
@@ -52,7 +53,7 @@
 								{{.Fingerprint}}
 						</div>
 						<div class="flex-item-body">
-								<p>{{ctx.Locale.Tr "settings.added_on" (DateUtils.AbsoluteShort .CreatedUnix)}} —	{{svg "octicon-info"}} {{if .HasUsed}}{{ctx.Locale.Tr "settings.last_used"}} <span {{if .HasRecentActivity}}class="text green"{{end}}>{{DateUtils.AbsoluteShort .UpdatedUnix}}</span>{{else}}{{ctx.Locale.Tr "settings.no_activity"}}{{end}}</p>
+								<p>{{ctx.Locale.Tr "settings.added_on" (DateUtils.AbsoluteShort .CreatedUnix)}} —	{{svg "octicon-info"}} {{if .HasUsed}}{{ctx.Locale.Tr "settings.last_used"}} <span {{if .HasRecentActivity}}class="text green"{{end}}>{{DateUtils.AbsoluteShort .UpdatedUnix}}</span>{{else}}{{ctx.Locale.Tr "settings.no_activity"}}{{end}}{{template "shared/expiry_label" .}}</p>
 						</div>
 				</div>
 				<div class="flex-item-trailing">

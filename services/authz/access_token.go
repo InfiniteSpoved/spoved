@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	auth_model "forgejo.org/models/auth"
+	"forgejo.org/modules/setting"
 )
 
 func GetAuthorizationReducerForAccessToken(ctx context.Context, token *auth_model.AccessToken) (AuthorizationReducer, error) {
@@ -36,7 +37,9 @@ func GetAuthorizationReducerForAccessToken(ctx context.Context, token *auth_mode
 // Validate that an access token's state is valid for creation.  For example, that it doesn't have a conflicting set of
 // resources (public-only and specific repositories), and other similar checks.
 func ValidateAccessToken(token *auth_model.AccessToken, repoResources []*auth_model.AccessTokenResourceRepo) error {
-	// Other validations may be added here in the future.
+	if err := ValidateExpiry(setting.AccessTokenExpiry, token.ExpiresUnix); err != nil {
+		return err
+	}
 	return ValidateRepositoryResource(token.ResourceAllRepos, token.Scope, len(repoResources))
 }
 
