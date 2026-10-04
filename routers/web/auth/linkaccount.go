@@ -13,9 +13,11 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
+	"forgejo.org/routers/common"
 	auth_method "forgejo.org/services/auth/method"
 	"forgejo.org/services/context"
 	"forgejo.org/services/externalaccount"
@@ -127,11 +129,16 @@ func LinkAccountPostSignIn(ctx *context.Context) {
 		return
 	}
 
+	attempt := common.StartAuthAttempt(ctx, ratelimit.UserKey(signInForm.UserName))
+	if attempt == nil {
+		return
+	}
 	u, _, err := auth_method.UserSignIn(ctx, signInForm.UserName, signInForm.Password)
 	if err != nil {
 		handleSignInError(ctx, signInForm.UserName, &signInForm, tplLinkAccount, "UserLinkAccount", err)
 		return
 	}
+	attempt.Succeeded()
 
 	linkAccount(ctx, u, gothUser.(goth.User), signInForm.Remember)
 }

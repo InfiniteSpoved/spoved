@@ -19,6 +19,8 @@ type UserGroup struct {
 	GrantsSiteAdmin bool `json:"grants_site_admin"`
 	// Members of the group may create organizations
 	GrantsCreateOrganization bool `json:"grants_create_organization"`
+	// Members of the group can read every repository
+	GrantsAuditor bool `json:"grants_auditor"`
 	// swagger:strfmt date-time
 	Created time.Time `json:"created_at"`
 	// swagger:strfmt date-time
@@ -34,6 +36,8 @@ type CreateUserGroupOption struct {
 	GrantsSiteAdmin bool `json:"grants_site_admin"`
 	// Members of the group may create organizations
 	GrantsCreateOrganization bool `json:"grants_create_organization"`
+	// Members of the group can read every repository
+	GrantsAuditor bool `json:"grants_auditor"`
 }
 
 // EditUserGroupOption options for editing a user group
@@ -44,4 +48,6 @@ type EditUserGroupOption struct {
 	GrantsSiteAdmin *bool `json:"grants_site_admin"`
 	// Members of the group may create organizations
 	GrantsCreateOrganization *bool `json:"grants_create_organization"`
+	// Members of the group can read every repository
+	GrantsAuditor *bool `json:"grants_auditor"`
 }

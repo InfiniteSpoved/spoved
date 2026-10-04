@@ -28,11 +28,13 @@ import (
 	"forgejo.org/modules/jwtx"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
+	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	"forgejo.org/modules/web/middleware"
+	"forgejo.org/routers/common"
 	source_service "forgejo.org/services/auth/source"
 	"forgejo.org/services/auth/source/oauth2"
 	"forgejo.org/services/context"
@@ -701,6 +703,17 @@ func OIDCKeys(ctx *context.Context) {
 
 // AccessTokenOAuth manages all access token requests by the client
 func AccessTokenOAuth(ctx *context.Context) {
+	// only failed token requests count against the auth rate limit
+	attempt := ratelimit.StartAuth(ctx.RemoteAddr())
+	if common.WriteIfRateLimited(ctx.Base, attempt.Err(), true) {
+		return
+	}
+	defer func() {
+		if ctx.Resp.WrittenStatus() == http.StatusOK {
+			attempt.Succeeded()
+		}
+	}()
+
 	form := *web.GetForm(ctx).(*forms.AccessTokenForm)
 	// if there is no ClientID or ClientSecret in the request body, fill these fields by the Authorization header and ensure the provided field matches the Authorization header
 	if form.ClientID == "" || form.ClientSecret == "" {

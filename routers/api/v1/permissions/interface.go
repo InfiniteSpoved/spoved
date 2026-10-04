@@ -37,6 +37,8 @@ type Context interface {
 
 	IsSigned() bool
 
+	IsReadOnlyMethod() bool
+
 	PublicOnly() bool
 	SetPublicOnly(bool)
 

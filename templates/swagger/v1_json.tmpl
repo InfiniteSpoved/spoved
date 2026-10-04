@@ -1901,6 +1901,81 @@
         }
       }
     },
+    "/admin/storage/owners": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "List the storage used per repository owner",
+        "operationId": "adminListStorageOwners",
+        "parameters": [
+          {
+            "enum": [
+              "git",
+              "lfs",
+              "total"
+            ],
+            "type": "string",
+            "description": "sort owners by git, LFS or total size (default)",
+            "name": "sort",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string",
+            "description": "sort order, \"asc\" or \"desc\" (default)",
+            "name": "order",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/OwnerStorageList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          }
+        }
+      }
+    },
+    "/admin/storage/summary": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get the storage used by all repositories",
+        "operationId": "adminGetStorageSummary",
+        "responses": {
+          "200": {
+            "$ref": "#/responses/StorageSummary"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          }
+        }
+      }
+    },
     "/admin/unadopted": {
       "get": {
         "produces": [
@@ -16092,6 +16167,9 @@
           "413": {
             "$ref": "#/responses/quotaExceeded"
           },
+          "422": {
+            "$ref": "#/responses/validationError"
+          },
           "423": {
             "$ref": "#/responses/repoArchivedError"
           }
@@ -27224,6 +27302,11 @@
           "type": "string",
           "x-go-name": "Description"
         },
+        "grants_auditor": {
+          "description": "Members of the group can read every repository",
+          "type": "boolean",
+          "x-go-name": "GrantsAuditor"
+        },
         "grants_create_organization": {
           "description": "Members of the group may create organizations",
           "type": "boolean",
@@ -28446,6 +28529,11 @@
         "description": {
           "type": "string",
           "x-go-name": "Description"
+        },
+        "grants_auditor": {
+          "description": "Members of the group can read every repository",
+          "type": "boolean",
+          "x-go-name": "GrantsAuditor"
         },
         "grants_create_organization": {
           "description": "Members of the group may create organizations",
@@ -29858,6 +29946,12 @@
         "merge_when_checks_succeed": {
           "type": "boolean",
           "x-go-name": "MergeWhenChecksSucceed"
+        },
+        "scheduled_after": {
+          "description": "do not merge before this time, only with merge_when_checks_succeed; the merge is pinned to the current head",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ScheduledAfter"
         }
       },
       "x-go-name": "MergePullRequestForm",
@@ -30389,6 +30483,53 @@
         "is_owner": {
           "type": "boolean",
           "x-go-name": "IsOwner"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "OwnerStorage": {
+      "description": "OwnerStorage is the storage used by the repositories of one owner, in bytes",
+      "type": "object",
+      "properties": {
+        "git_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "GitSize"
+        },
+        "lfs_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "LFSSize"
+        },
+        "owner_id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "OwnerID"
+        },
+        "owner_name": {
+          "type": "string",
+          "x-go-name": "OwnerName"
+        },
+        "owner_type": {
+          "description": "\"user\" or \"org\"",
+          "type": "string",
+          "x-go-name": "OwnerType"
+        },
+        "percent": {
+          "description": "share of the instance's total size, in percent",
+          "type": "number",
+          "format": "double",
+          "x-go-name": "Percent"
+        },
+        "repo_count": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "RepoCount"
+        },
+        "total_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "TotalSize"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -32141,6 +32282,38 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "StorageSummary": {
+      "description": "StorageSummary is the storage used by all repositories of the instance, in bytes",
+      "type": "object",
+      "properties": {
+        "average_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "AverageSize"
+        },
+        "git_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "GitSize"
+        },
+        "lfs_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "LFSSize"
+        },
+        "repo_count": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "RepoCount"
+        },
+        "total_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "TotalSize"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "SubmitPullReviewOptions": {
       "description": "SubmitPullReviewOptions are options to submit a pending pull review",
       "type": "object",
@@ -32913,6 +33086,11 @@
         "description": {
           "type": "string",
           "x-go-name": "Description"
+        },
+        "grants_auditor": {
+          "description": "Members of the group can read every repository",
+          "type": "boolean",
+          "x-go-name": "GrantsAuditor"
         },
         "grants_create_organization": {
           "description": "Members of the group may create organizations",
@@ -34099,6 +34277,22 @@
         "$ref": "#/definitions/ForgeOutbox"
       }
     },
+    "OwnerStorageList": {
+      "description": "OwnerStorageList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/OwnerStorage"
+        }
+      },
+      "headers": {
+        "X-Total-Count": {
+          "type": "integer",
+          "format": "int64",
+          "description": "The total number of owners"
+        }
+      }
+    },
     "Package": {
       "description": "Package",
       "schema": {
@@ -34477,6 +34671,12 @@
           "format": "int64",
           "description": "The total number of stop watches"
         }
+      }
+    },
+    "StorageSummary": {
+      "description": "StorageSummary",
+      "schema": {
+        "$ref": "#/definitions/StorageSummary"
       }
     },
     "StringSlice": {

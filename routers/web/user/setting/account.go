@@ -15,10 +15,12 @@ import (
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
+	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/validation"
 	"forgejo.org/modules/web"
+	"forgejo.org/routers/common"
 	auth_method "forgejo.org/services/auth/method"
 	"forgejo.org/services/auth/source/db"
 	"forgejo.org/services/auth/source/smtp"
@@ -62,9 +64,13 @@ func AccountPost(ctx *context.Context) {
 		return
 	}
 
+	attempt := common.StartAuthAttempt(ctx, ratelimit.UserKey(ctx.Doer.Name))
+	if attempt == nil {
+		return
+	}
 	if ctx.Doer.IsPasswordSet() && !ctx.Doer.ValidatePassword(ctx, form.OldPassword) {
 		ctx.Flash.Error(ctx.Tr("settings.password_incorrect"))
-	} else if form.Password != form.Retype {
+	} else if attempt.Succeeded(); form.Password != form.Retype { // only a wrong old password counts against the limit
 		ctx.Flash.Error(ctx.Tr("form.password_not_match"))
 	} else {
 		opts := &user.UpdateAuthOptions{
@@ -274,6 +280,10 @@ func DeleteAccount(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("settings")
 	ctx.Data["PageIsSettingsAccount"] = true
 
+	attempt := common.StartAuthAttempt(ctx, ratelimit.UserKey(ctx.Doer.Name))
+	if attempt == nil {
+		return
+	}
 	if _, _, err := auth_method.UserSignIn(ctx, ctx.Doer.Name, ctx.FormString("password")); err != nil {
 		switch {
 		case user_model.IsErrUserNotExist(err):
@@ -297,6 +307,7 @@ func DeleteAccount(ctx *context.Context) {
 		}
 		return
 	}
+	attempt.Succeeded()
 
 	// admin should not delete themself
 	if ctx.Doer.IsAdmin {

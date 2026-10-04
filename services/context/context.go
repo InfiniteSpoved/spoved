@@ -226,6 +226,12 @@ func Contexter() func(next http.Handler) http.Handler {
 
 // HasError returns true if error occurs in form validation.
 // Attention: this function changes ctx.Data and ctx.Flash
+// IsAuditorView reports whether the auditor role applies to the request: a read-only request by an auditor, made with
+// their own credentials.
+func (ctx *Context) IsAuditorView() bool {
+	return ctx.IsSigned && ctx.Doer.IsAuditor && ctx.IsReadOnlyMethod() && auth.IsHeldByUser(ctx.Authentication)
+}
+
 func (ctx *Context) HasError() bool {
 	hasErr, ok := ctx.Data["HasError"]
 	if !ok {

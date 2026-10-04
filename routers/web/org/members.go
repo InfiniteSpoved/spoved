@@ -43,7 +43,7 @@ func Members(ctx *context.Context) {
 			ctx.Error(http.StatusInternalServerError, "IsOrgMember")
 			return
 		}
-		opts.IsDoerMember = isMember
+		opts.IsDoerMember = isMember || ctx.IsAuditorView() // the auditor role lists concealed members too
 	}
 	ctx.Data["PublicOnly"] = opts.PublicOnly()
 

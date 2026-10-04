@@ -174,18 +174,63 @@ func GetUserRepoPermissionWithReducer(ctx context.Context, repo *repo_model.Repo
 	if err != nil {
 		return perm, err
 	}
-	perm.AccessMode, err = reducer.ReduceRepoAccess(ctx, repo, perm.AccessMode)
+	return perm, perm.reduce(ctx, repo, reducer)
+}
+
+func (p *Permission) reduce(ctx context.Context, repo *repo_model.Repository, reducer authz.AuthorizationReducer) (err error) {
+	p.AccessMode, err = reducer.ReduceRepoAccess(ctx, repo, p.AccessMode)
 	if err != nil {
-		return perm, fmt.Errorf("failure in ReduceRepoAccess: %w", err)
+		return fmt.Errorf("failure in ReduceRepoAccess: %w", err)
 	}
-	for unit, currentAccessMode := range perm.UnitsMode {
+	for unit, currentAccessMode := range p.UnitsMode {
 		reduced, err := reducer.ReduceRepoAccess(ctx, repo, currentAccessMode)
 		if err != nil {
-			return perm, fmt.Errorf("failure in ReduceRepoAccess: %w", err)
+			return fmt.Errorf("failure in ReduceRepoAccess: %w", err)
 		}
-		perm.UnitsMode[unit] = reduced
+		if reduced == perm_model.AccessModeNone {
+			// so that HasAccess is false once no unit is left
+			delete(p.UnitsMode, unit)
+		} else {
+			p.UnitsMode[unit] = reduced
+		}
 	}
-	return perm, nil
+	return nil
+}
+
+// GetUserRepoReadPermission is GetUserRepoPermission raised to read on every enabled unit for a user with the
+// auditor role, then reduced by the reducer, if any. Only use it to serve read-only requests: the raised permission
+// must never authorize a write, which is why GetUserRepoPermission itself never raises it.
+func GetUserRepoReadPermission(ctx context.Context, repo *repo_model.Repository, user *user_model.User, reducer authz.AuthorizationReducer) (Permission, error) {
+	perm, err := GetUserRepoPermission(ctx, repo, user)
+	if err != nil {
+		return perm, err
+	}
+	if user != nil && user.IsAuditor {
+		if err := repo.LoadUnits(ctx); err != nil {
+			return perm, err
+		}
+		perm.raiseToRead(repo.Units)
+	}
+	if reducer == nil {
+		return perm, nil
+	}
+	return perm, perm.reduce(ctx, repo, reducer)
+}
+
+// raiseToRead gives at least read access to the units, and nothing above read.
+func (p *Permission) raiseToRead(units []*repo_model.RepoUnit) {
+	if p.UnitsMode == nil {
+		if p.AccessMode < perm_model.AccessModeRead {
+			p.AccessMode = perm_model.AccessModeRead
+		}
+	} else {
+		for _, u := range units {
+			if p.UnitsMode[u.Type] < perm_model.AccessModeRead {
+				p.UnitsMode[u.Type] = perm_model.AccessModeRead
+			}
+		}
+	}
+	p.Units = units
 }
 
 // GetUserRepoPermission returns the user permissions to the repository.

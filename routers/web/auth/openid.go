@@ -15,8 +15,10 @@ import (
 	"forgejo.org/modules/auth/password"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/web"
+	"forgejo.org/routers/common"
 	"forgejo.org/services/auth"
 	auth_method "forgejo.org/services/auth/method"
 	"forgejo.org/services/context"
@@ -267,11 +269,16 @@ func ConnectOpenIDPost(ctx *context.Context) {
 	ctx.Data["EnableOpenIDSignUp"] = setting.Service.EnableOpenIDSignUp
 	ctx.Data["OpenID"] = oid
 
+	attempt := common.StartAuthAttempt(ctx, ratelimit.UserKey(form.UserName))
+	if attempt == nil {
+		return
+	}
 	u, source, err := auth_method.UserSignIn(ctx, form.UserName, form.Password)
 	if err != nil {
 		handleSignInError(ctx, form.UserName, &form, tplConnectOID, "ConnectOpenIDPost", err)
 		return
 	}
+	attempt.Succeeded()
 
 	// Check if OID is already in use.
 	if used, err := user_model.IsOpenIDUsed(ctx, oid); err != nil {
