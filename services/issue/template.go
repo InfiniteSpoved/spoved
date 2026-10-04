@@ -4,16 +4,22 @@
 package issue
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 
-	"forgejo.org/models/repo"
+	"forgejo.org/models/organization"
+	repo_model "forgejo.org/models/repo"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
+	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/issue/template"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 
 	"go.yaml.in/yaml/v3"
@@ -44,6 +50,102 @@ var templateConfigCandidates = []string{
 	".github/issue_template/config",
 	"docs/ISSUE_TEMPLATE/config",
 	"docs/issue_template/config",
+}
+
+// generateIssueTemplateLocations generates all the file paths where we
+// look for an issue template, e.g. ".forgejo/ISSUE_TEMPLATE.md".
+func generateIssueTemplateLocations() []string {
+	var result []string
+	prefixes := []string{"", ".forgejo/", ".gitea/", ".github/", "docs/"}
+	filenames := []string{"ISSUE_TEMPLATE", "issue_template"}
+	extensions := []string{".md", ".yaml", ".yml"}
+
+	for _, prefix := range prefixes {
+		for _, filename := range filenames {
+			for _, extension := range extensions {
+				result = append(result, prefix+filename+extension)
+			}
+		}
+	}
+
+	return result
+}
+
+// IssueTemplateCandidates are the single-file issue template paths.
+var IssueTemplateCandidates = generateIssueTemplateLocations()
+
+// IsTemplateDirFile reports whether name is a template file directly inside an issue template directory.
+// path.Dir cleans name, so "ISSUE_TEMPLATE/../x.md" is rejected.
+func IsTemplateDirFile(name string) bool {
+	return slices.Contains(templateDirCandidates, path.Dir(name)) && template.CouldBe(path.Base(name))
+}
+
+// TemplateCommit returns the default-branch commit of the first template source for which has is true:
+// the repo itself, then the owner's ".forgejo" repo, then [repository] DEFAULT_TEMPLATES_REPO.
+// own reports whether the commit is the repo's own. closer must always be called once the commit is no longer used.
+// Fallback files are read on the server: callers must only read fixed template paths from them.
+func TemplateCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.Repository, has func(*git.Commit) bool) (commit *git.Commit, own bool, closer func()) {
+	if gitRepo != nil && !repo.IsEmpty {
+		if c, err := gitRepo.GetBranchCommit(repo.DefaultBranch); err == nil && has(c) {
+			return c, true, func() {}
+		}
+	}
+
+	var sources []*repo_model.Repository
+	if r, err := repo_model.GetRepositoryByName(ctx, repo.OwnerID, ".forgejo"); err == nil {
+		sources = append(sources, r)
+	}
+	if r := defaultTemplatesRepo(ctx); r != nil {
+		sources = append(sources, r)
+	}
+
+	seen := map[int64]bool{repo.ID: true}
+	for _, src := range sources {
+		if seen[src.ID] || src.IsEmpty {
+			continue
+		}
+		seen[src.ID] = true
+		srcGitRepo, err := gitrepo.OpenRepository(ctx, src)
+		if err != nil {
+			log.Error("OpenRepository(%s): %v", src.FullName(), err)
+			continue
+		}
+		if c, err := srcGitRepo.GetBranchCommit(src.DefaultBranch); err == nil && has(c) {
+			return c, false, func() { srcGitRepo.Close() }
+		}
+		srcGitRepo.Close()
+	}
+	return nil, false, func() {}
+}
+
+// defaultTemplatesRepo returns the DEFAULT_TEMPLATES_REPO if it is owned by a site admin, or by an organization
+// with a site admin in its Owners team, so that no other user can supply templates to the whole instance.
+func defaultTemplatesRepo(ctx context.Context) *repo_model.Repository {
+	name := setting.Repository.DefaultTemplatesRepo
+	if name == "" {
+		return nil
+	}
+	ownerName, repoName, _ := strings.Cut(name, "/")
+	r, err := repo_model.GetRepositoryByOwnerAndName(ctx, ownerName, repoName)
+	if err == nil {
+		err = r.LoadOwner(ctx)
+	}
+	if err != nil {
+		log.Warn("[repository] DEFAULT_TEMPLATES_REPO %q is ignored: %v", name, err)
+		return nil
+	}
+
+	trusted := r.Owner.IsAdmin
+	if r.Owner.IsOrganization() {
+		if team, err := organization.GetOwnerTeam(ctx, r.OwnerID); err == nil && team.LoadMembers(ctx) == nil {
+			trusted = slices.ContainsFunc(team.Members, func(u *user_model.User) bool { return u.IsAdmin })
+		}
+	}
+	if !trusted {
+		log.Warn("[repository] DEFAULT_TEMPLATES_REPO %q is ignored: its owner is neither a site admin nor an organization with a site admin among its owners", name)
+		return nil
+	}
+	return r
 }
 
 func GetDefaultTemplateConfig() api.IssueConfig {
@@ -115,20 +217,30 @@ func IsTemplateConfig(path string) bool {
 	return false
 }
 
-// GetTemplatesFromDefaultBranch checks for issue templates in the repo's default branch,
+// GetTemplatesFromDefaultBranch checks for issue templates in the default branch of the repo or its fallback source,
 // returns valid templates and the errors of invalid template files.
-func GetTemplatesFromDefaultBranch(repo *repo.Repository, gitRepo *git.Repository) ([]*api.IssueTemplate, map[string]error) {
+func GetTemplatesFromDefaultBranch(ctx context.Context, repo *repo_model.Repository, gitRepo *git.Repository) ([]*api.IssueTemplate, map[string]error) {
+	commit, _, closer := TemplateCommit(ctx, repo, gitRepo, HasIssueTemplates)
+	defer closer()
+	if commit == nil {
+		return nil, map[string]error{}
+	}
+	return templatesFromCommit(commit)
+}
+
+// HasIssueTemplates reports whether commit has issue templates, in a template directory or as a single file.
+func HasIssueTemplates(commit *git.Commit) bool {
+	if templates, errs := templatesFromCommit(commit); len(templates)+len(errs) > 0 {
+		return true
+	}
+	return slices.ContainsFunc(IssueTemplateCandidates, func(name string) bool {
+		ok, _ := commit.HasFile(name)
+		return ok
+	})
+}
+
+func templatesFromCommit(commit *git.Commit) ([]*api.IssueTemplate, map[string]error) {
 	var issueTemplates []*api.IssueTemplate
-
-	if repo.IsEmpty {
-		return issueTemplates, nil
-	}
-
-	commit, err := gitRepo.GetBranchCommit(repo.DefaultBranch)
-	if err != nil {
-		return issueTemplates, nil
-	}
-
 	invalidFiles := map[string]error{}
 	for _, dirName := range templateDirCandidates {
 		tree, err := commit.SubTree(dirName)
@@ -139,7 +251,7 @@ func GetTemplatesFromDefaultBranch(repo *repo.Repository, gitRepo *git.Repositor
 		entries, err := tree.ListEntries()
 		if err != nil {
 			log.Debug("list entries in %s: %v", dirName, err)
-			return issueTemplates, nil
+			return issueTemplates, invalidFiles
 		}
 		for _, entry := range entries {
 			if !template.CouldBe(entry.Name()) {
@@ -159,37 +271,35 @@ func GetTemplatesFromDefaultBranch(repo *repo.Repository, gitRepo *git.Repositor
 	return issueTemplates, invalidFiles
 }
 
-// GetTemplateConfigFromDefaultBranch returns the issue config for this repo.
+// GetTemplateConfigFromDefaultBranch returns the issue config for this repo, or of its fallback source.
 // It never returns a nil config.
-func GetTemplateConfigFromDefaultBranch(repo *repo.Repository, gitRepo *git.Repository) (api.IssueConfig, error) {
-	if repo.IsEmpty {
+func GetTemplateConfigFromDefaultBranch(ctx context.Context, repo *repo_model.Repository, gitRepo *git.Repository) (api.IssueConfig, error) {
+	commit, _, closer := TemplateCommit(ctx, repo, gitRepo, func(c *git.Commit) bool { return templateConfigPath(c) != "" })
+	defer closer()
+	if commit == nil {
 		return GetDefaultTemplateConfig(), nil
 	}
-
-	commit, err := gitRepo.GetBranchCommit(repo.DefaultBranch)
-	if err != nil {
-		return GetDefaultTemplateConfig(), err
-	}
-
-	for _, configName := range templateConfigCandidates {
-		if _, err := commit.GetTreeEntryByPath(configName + ".yaml"); err == nil {
-			return GetTemplateConfig(gitRepo, configName+".yaml", commit)
-		}
-
-		if _, err := commit.GetTreeEntryByPath(configName + ".yml"); err == nil {
-			return GetTemplateConfig(gitRepo, configName+".yml", commit)
-		}
-	}
-
-	return GetDefaultTemplateConfig(), nil
+	return GetTemplateConfig(gitRepo, templateConfigPath(commit), commit)
 }
 
-func HasTemplatesOrContactLinks(repo *repo.Repository, gitRepo *git.Repository) bool {
-	ret, _ := GetTemplatesFromDefaultBranch(repo, gitRepo)
+// templateConfigPath returns the path of the issue config file in commit, or "".
+func templateConfigPath(commit *git.Commit) string {
+	for _, configName := range templateConfigCandidates {
+		for _, ext := range []string{".yaml", ".yml"} {
+			if _, err := commit.GetTreeEntryByPath(configName + ext); err == nil {
+				return configName + ext
+			}
+		}
+	}
+	return ""
+}
+
+func HasTemplatesOrContactLinks(ctx context.Context, repo *repo_model.Repository, gitRepo *git.Repository) bool {
+	ret, _ := GetTemplatesFromDefaultBranch(ctx, repo, gitRepo)
 	if len(ret) > 0 {
 		return true
 	}
 
-	issueConfig, _ := GetTemplateConfigFromDefaultBranch(repo, gitRepo)
+	issueConfig, _ := GetTemplateConfigFromDefaultBranch(ctx, repo, gitRepo)
 	return len(issueConfig.ContactLinks) > 0
 }
