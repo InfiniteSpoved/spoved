@@ -301,6 +301,24 @@ liberapay: example
 custom: "http://localhost:3003/"
 `},
 	}}, nil)
+	newRepo(t, 2, "drawio-test", nil, []FileChanges{
+		{
+			Filename: "docs/arch.drawio",
+			Versions: []string{`<mxfile><diagram id="d" name="Page-1"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>` +
+				`<mxCell id="2" value="Hello drawio" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="120" height="60" as="geometry"/></mxCell>` +
+				`<mxCell id="3" value="&lt;img src=x onerror=&quot;document.title='pwned'&quot;&gt;xss" style="html=1;" vertex="1" parent="1"><mxGeometry x="200" y="40" width="120" height="60" as="geometry"/></mxCell>` +
+				`<mxCell id="4" value="" style="shape=image;image=https://example.com/x.png;" vertex="1" parent="1"><mxGeometry x="360" y="40" width="60" height="60" as="geometry"/></mxCell>` +
+				`</root></mxGraphModel></diagram></mxfile>`},
+		},
+		{
+			Filename: "arch.drawio.svg",
+			Versions: []string{`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60"><rect width="120" height="60" fill="#ccc"/></svg>`},
+		},
+		{
+			Filename: "diagram.md",
+			Versions: []string{"![arch](arch.drawio.svg)\n"},
+		},
+	}, nil)
 	// add your repo declarations here
 }
 
