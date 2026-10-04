@@ -1275,6 +1275,7 @@
 	"org.teams.user_groups": "User groups",
 	"org.teams.user_groups.name_placeholder": "User group name",
 	"org.teams.user_groups.link": "Link user group",
+	"org.teams.user_groups.no_invitation": "Members of linked user groups join the team directly, without an invitation.",
 	"org.teams.user_groups.unlink": "Unlink",
 	"org.teams.user_groups.none": "No user groups are linked to this team.",
 	"org.teams.user_groups.not_exist": "The user group does not exist.",

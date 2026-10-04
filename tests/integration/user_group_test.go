@@ -11,6 +11,7 @@ import (
 
 	"forgejo.org/models/organization"
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/tests"
 
@@ -160,6 +161,28 @@ func TestUserGroupSharedAcrossOrganizations(t *testing.T) {
 	admin.MakeRequest(t, NewRequest(t, "POST", groupURL+"/delete"), http.StatusOK)
 	unittest.AssertNotExistsBean(t, &organization.UserGroup{ID: group.ID})
 	unittest.AssertNotExistsBean(t, &organization.TeamUser{TeamID: 8, UID: 5})
+}
+
+func TestUserGroupAddMembersByInvitations(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+
+	admin := loginUser(t, "user1")
+	hint := "Members of linked user groups join the team directly, without an invitation."
+
+	resp := admin.MakeRequest(t, NewRequest(t, "GET", "/org/org3/teams/team1"), http.StatusOK)
+	assert.NotContains(t, resp.Body.String(), hint)
+
+	defer test.MockVariableValue(&setting.Service.AddMembersByInvitations, true)()
+	resp = admin.MakeRequest(t, NewRequest(t, "GET", "/org/org3/teams/team1"), http.StatusOK)
+	assert.Contains(t, resp.Body.String(), hint)
+
+	// linking a group still adds its members directly, without an invitation
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/groups/new", map[string]string{"name": "qa"}), http.StatusSeeOther)
+	group := unittest.AssertExistsAndLoadBean(t, &organization.UserGroup{LowerName: "qa"})
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/admin/groups/%d/members/add", group.ID), map[string]string{"uname": "user5"}), http.StatusSeeOther)
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/teams/team1/action/group/link", map[string]string{"group_name": "qa"}), http.StatusSeeOther)
+	unittest.AssertExistsAndLoadBean(t, &organization.TeamUser{TeamID: 2, UID: 5})
+	unittest.AssertNotExistsBean(t, &organization.TeamInvite{TeamID: 2})
 }
 
 func TestUserGroupAdminPages(t *testing.T) {

@@ -69,6 +69,9 @@
 							</div>
 							<button class="ui primary button">{{ctx.Locale.Tr "org.teams.user_groups.link"}}</button>
 						</form>
+						{{if $.AddMembersByInvitations}}
+							<div class="text grey tw-mt-2">{{ctx.Locale.Tr "org.teams.user_groups.no_invitation"}}</div>
+						{{end}}
 					</div>
 				{{end}}
 				<div class="ui attached segment">
