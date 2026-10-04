@@ -15,6 +15,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/cache"
+	"forgejo.org/modules/container"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
@@ -584,6 +585,32 @@ func UpdateRun(ctx context.Context, run *ActionRun, cols ...string) error {
 func DeleteRun(ctx context.Context, runID int64) error {
 	_, err := db.GetEngine(ctx).Delete(&ActionRun{ID: runID})
 	return err
+}
+
+// GetLatestDefaultBranchRunIDs returns the ID of the latest run of each workflow on the default branch of its
+// repository, for all repositories.
+func GetLatestDefaultBranchRunIDs(ctx context.Context) (container.Set[int64], error) {
+	var ids []int64
+	err := db.GetEngine(ctx).Table("action_run").
+		Join("INNER", "repository", "repository.id = action_run.repo_id").
+		Where("action_run.ref = concat('refs/heads/', repository.default_branch)").
+		GroupBy("action_run.repo_id, action_run.workflow_id").
+		Select("MAX(action_run.id)").
+		Find(&ids)
+	return container.SetOf(ids...), err
+}
+
+// FindOldDoneRunIDs returns the IDs, greater than afterID and in ascending order, of completed runs created before
+// olderThan.
+func FindOldDoneRunIDs(ctx context.Context, olderThan timeutil.TimeStamp, afterID int64, limit int) ([]int64, error) {
+	var ids []int64
+	return ids, db.GetEngine(ctx).Table("action_run").
+		Where("id > ? AND created < ?", afterID, olderThan).
+		In("status", DoneStatuses()).
+		OrderBy("id").
+		Limit(limit).
+		Cols("id").
+		Find(&ids)
 }
 
 type ActionRunIndex db.ResourceIndex

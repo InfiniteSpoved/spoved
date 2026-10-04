@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/setting"
+	"forgejo.org/modules/test"
 	"forgejo.org/tests"
 
 	"github.com/stretchr/testify/assert"
@@ -61,4 +63,15 @@ func TestActionRunsList(t *testing.T) {
 		runDescriptions.Eq(2).Find("a").Eq(0).AttrOr("href", ""))
 	assert.Equal(t, "/user1",
 		runDescriptions.Eq(2).Find("a").Eq(1).AttrOr("href", ""))
+}
+
+func TestActionRunsListRetentionNotice(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+
+	resp := MakeRequest(t, NewRequest(t, "GET", "/user5/repo4/actions"), http.StatusOK)
+	NewHTMLParser(t, resp.Body).AssertElement(t, ".ui.info.message", false)
+
+	defer test.MockVariableValue(&setting.Actions.RunRetentionDays, 30)()
+	resp = MakeRequest(t, NewRequest(t, "GET", "/user5/repo4/actions"), http.StatusOK)
+	assert.Contains(t, NewHTMLParser(t, resp.Body).Find(".ui.info.message").Text(), "Runs older than 30 days are deleted automatically.")
 }

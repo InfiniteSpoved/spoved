@@ -1319,6 +1319,9 @@ func registerRoutes(m *web.Route) {
 				m.Post("/{id}", web.Bind(forms.ProtectTagForm{}), context.RepoMustNotBeArchived(), repo_setting.EditProtectedTagPost)
 			})
 
+			m.Combo("/push_rules").Get(repo_setting.PushRules).
+				Post(web.Bind(forms.PushRuleForm{}), context.RepoMustNotBeArchived(), repo_setting.PushRulesPost)
+
 			m.Group("/hooks/git", func() {
 				m.Get("", repo_setting.GitHooks)
 				m.Combo("/{name}").Get(repo_setting.GitHooksEdit).
