@@ -10,11 +10,14 @@ import (
 	"strings"
 
 	"forgejo.org/models"
+	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/base"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/structs"
+	"forgejo.org/modules/util"
 	"forgejo.org/services/pull"
 )
 
@@ -75,6 +78,9 @@ func CherryPick(ctx context.Context, repo *repo_model.Repository, doer *user_mod
 	}
 
 	base, right := parent.String(), commit.ID.String()
+	if opts.ParentCommitID != "" {
+		base = opts.ParentCommitID
+	}
 
 	if revert {
 		right, base = base, right
@@ -89,7 +95,7 @@ func CherryPick(ctx context.Context, repo *repo_model.Repository, doer *user_mod
 		}
 
 		if conflict {
-			return nil, errors.New("failed to merge due to conflicts")
+			return nil, models.ErrMergeConflicts{Err: errors.New("failed to merge due to conflicts")}
 		}
 	} else {
 		description := fmt.Sprintf("CherryPick %s onto %s", right, opts.OldBranch)
@@ -99,7 +105,7 @@ func CherryPick(ctx context.Context, repo *repo_model.Repository, doer *user_mod
 		}
 
 		if conflict {
-			return nil, errors.New("failed to merge due to conflicts")
+			return nil, models.ErrMergeConflicts{Err: errors.New("failed to merge due to conflicts")}
 		}
 
 		treeHash, err = t.WriteTree()
@@ -138,4 +144,72 @@ func CherryPick(ctx context.Context, repo *repo_model.Repository, doer *user_mod
 	}
 
 	return fileResponse, nil
+}
+
+// RevertPullRequest pushes a branch that reverts the merged pull request pr onto the current
+// tip of its base branch, and opens a pull request from it. Nothing is created on conflicts.
+func RevertPullRequest(ctx context.Context, doer *user_model.User, gitRepo *git.Repository, pr *issues_model.PullRequest) (*issues_model.PullRequest, error) {
+	if err := pr.LoadBaseRepo(ctx); err != nil {
+		return nil, err
+	}
+	if err := pr.LoadIssue(ctx); err != nil {
+		return nil, err
+	}
+	repo := pr.BaseRepo
+	if err := repo.MustNotBeArchived(); err != nil {
+		return nil, err
+	}
+	if !repo.CanCreateBranch() {
+		return nil, util.NewPermissionDeniedErrorf("cannot create branches in this repository")
+	}
+
+	revertBase, err := pull.GetRevertBase(gitRepo, pr)
+	if err != nil {
+		return nil, err
+	}
+	if revertBase == "" {
+		return nil, util.NewInvalidArgumentErrorf("pull request can't be reverted automatically")
+	}
+	if ok, err := gitRepo.IsCommitInBranch(pr.MergedCommitID, pr.BaseBranch); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, util.NewInvalidArgumentErrorf("pull request can't be reverted automatically: its merge commit is not in %s", pr.BaseBranch)
+	}
+
+	// Keep the whole title within the 255 runes an issue title may have.
+	title := `Revert "` + base.EllipsisString(pr.Issue.Title, 255-len(`Revert ""`)) + `"`
+	branch := pull.RevertBranchName(pr)
+	if _, err := CherryPick(ctx, repo, doer, true, &ApplyDiffPatchOptions{
+		OldBranch:      pr.BaseBranch,
+		NewBranch:      branch,
+		Content:        pr.MergedCommitID,
+		ParentCommitID: revertBase,
+		Message:        fmt.Sprintf("%s\n\nThis reverts pull request #%d (%s).", title, pr.Index, pr.MergedCommitID),
+	}); err != nil {
+		return nil, err
+	}
+
+	issue := &issues_model.Issue{
+		RepoID:   repo.ID,
+		Repo:     repo,
+		Title:    title,
+		PosterID: doer.ID,
+		Poster:   doer,
+		IsPull:   true,
+		Content:  fmt.Sprintf("This reverts #%d.\n\nReason: ", pr.Index),
+	}
+	revert := &issues_model.PullRequest{
+		HeadRepoID: repo.ID,
+		BaseRepoID: repo.ID,
+		HeadRepo:   repo,
+		BaseRepo:   repo,
+		HeadBranch: branch,
+		BaseBranch: pr.BaseBranch,
+		Type:       issues_model.PullRequestGitea,
+	}
+	if err := pull.NewPullRequest(ctx, repo, issue, nil, nil, revert, nil); err != nil {
+		return nil, err
+	}
+	revert.Issue = issue
+	return revert, nil
 }

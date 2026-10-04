@@ -370,6 +370,7 @@ func handlePullRequestMerging(ctx *app_context.PrivateContext, opts *private.Hoo
 	}
 
 	pr.MergedCommitID = updates[len(updates)-1].NewCommitID
+	pr.MergedBaseCommitID = updates[len(updates)-1].OldCommitID
 	pr.MergedUnix = timeutil.TimeStampNow()
 	pr.Merger = pusher
 	pr.MergerID = pusher.ID
