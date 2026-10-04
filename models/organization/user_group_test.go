@@ -118,3 +118,55 @@ func TestUserGroupMembersAndTeams(t *testing.T) {
 	assert.Equal(t, 1, g.NumMembers)
 	assert.Equal(t, 0, g.NumTeams)
 }
+
+func TestUserGroupTeamCounts(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	a := &organization.UserGroup{Name: "platform-devs"}
+	b := &organization.UserGroup{Name: "release-managers"}
+	empty := &organization.UserGroup{Name: "empty"}
+	for _, g := range []*organization.UserGroup{a, b, empty} {
+		require.NoError(t, organization.InsertUserGroup(ctx, g))
+	}
+	for _, uid := range []int64{2, 4, 5} {
+		require.NoError(t, organization.InsertUserGroupMember(ctx, a.ID, uid, 0))
+	}
+	require.NoError(t, organization.InsertUserGroupMember(ctx, b.ID, 5, 0))
+	require.NoError(t, organization.InsertUserGroupMember(ctx, b.ID, 8, 0))
+
+	team2 := unittest.AssertExistsAndLoadBean(t, &organization.Team{ID: 2})
+	team11 := unittest.AssertExistsAndLoadBean(t, &organization.Team{ID: 11})
+	team1 := unittest.AssertExistsAndLoadBean(t, &organization.Team{ID: 1})
+	for _, g := range []*organization.UserGroup{a, b, empty} {
+		require.NoError(t, organization.InsertUserGroupTeam(ctx, g.ID, team2))
+	}
+	require.NoError(t, organization.InsertUserGroupTeam(ctx, b.ID, team11))
+
+	groups := []*organization.UserGroup{a, b, empty}
+	require.NoError(t, organization.LoadUserGroupsNumMembers(ctx, groups))
+	assert.Equal(t, []int{3, 2, 0}, []int{a.NumMembers, b.NumMembers, empty.NumMembers})
+
+	teams := []*organization.Team{team1, team2, team11}
+	require.NoError(t, organization.LoadTeamsNumUserGroups(ctx, teams))
+	assert.Equal(t, []int{0, 3, 1}, []int{team1.NumUserGroups, team2.NumUserGroups, team11.NumUserGroups})
+
+	byUser, err := organization.GetTeamMembersUserGroups(ctx, team2.ID, []int64{2, 5, 8, 9})
+	require.NoError(t, err)
+	names := func(uid int64) (n []string) {
+		for _, g := range byUser[uid] {
+			n = append(n, g.Name)
+		}
+		return n
+	}
+	assert.Equal(t, []string{"platform-devs"}, names(2))
+	assert.Equal(t, []string{"platform-devs", "release-managers"}, names(5))
+	assert.Equal(t, []string{"release-managers"}, names(8))
+	assert.Empty(t, names(9))
+	assert.NotContains(t, byUser, int64(4), "user 4 was not asked for")
+
+	byUser, err = organization.GetTeamMembersUserGroups(ctx, team11.ID, []int64{2, 5})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"release-managers"}, names(5))
+	assert.Empty(t, names(2))
+}

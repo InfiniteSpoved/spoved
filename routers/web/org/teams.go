@@ -7,6 +7,7 @@ package org
 import (
 	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
 	"net/url"
 	"path"
@@ -24,6 +25,7 @@ import (
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/templates"
 	"forgejo.org/modules/validation"
 	"forgejo.org/modules/web"
 	shared_user "forgejo.org/routers/web/shared/user"
@@ -64,6 +66,10 @@ func Teams(ctx *context.Context) {
 		// the user is a member simply by looking for them in the returned members.
 		// TODO: compute this information via org.GetUserTeams once we limit the number of loaded users, for https://codeberg.org/forgejo/forgejo/issues/12448
 		doerIsMember[t.ID] = slices.IndexFunc(t.Members, func(u *user_model.User) bool { return u.ID == ctx.Doer.ID }) != -1
+	}
+	if err := org_model.LoadTeamsNumUserGroups(ctx, ctx.Org.Teams); err != nil {
+		ctx.ServerError("LoadTeamsNumUserGroups", err)
+		return
 	}
 	ctx.Data["Teams"] = ctx.Org.Teams
 	ctx.Data["DoerIsMember"] = doerIsMember
@@ -519,11 +525,36 @@ func TeamMembers(ctx *context.Context) {
 	ctx.Data["Memberships"] = memberships
 	ctx.Data["Page"] = pager
 
+	uids := make([]int64, len(memberships))
+	for i, m := range memberships {
+		uids[i] = m.UID
+	}
+	memberGroups, err := org_model.GetTeamMembersUserGroups(ctx, ctx.Org.Team.ID, uids)
+	if err != nil {
+		ctx.ServerError("GetTeamMembersUserGroups", err)
+		return
+	}
+	// the user groups each member comes from, as a list of names, linked for site admins
+	memberGroupLinks := make(map[int64]template.HTML, len(memberGroups))
+	for uid, groups := range memberGroups {
+		links := make([]string, len(groups))
+		for i, g := range groups {
+			links[i] = string(userGroupLink(ctx, g))
+		}
+		memberGroupLinks[uid] = template.HTML(strings.Join(links, ", "))
+	}
+	ctx.Data["MemberUserGroups"] = memberGroupLinks
+
 	userGroups, err := org_model.GetTeamUserGroups(ctx, ctx.Org.Team.ID)
 	if err != nil {
 		ctx.ServerError("GetTeamUserGroups", err)
 		return
 	}
+	if err := org_model.LoadUserGroupsNumMembers(ctx, userGroups); err != nil {
+		ctx.ServerError("LoadUserGroupsNumMembers", err)
+		return
+	}
+	ctx.Org.Team.NumUserGroups = len(userGroups)
 	ctx.Data["UserGroups"] = userGroups
 	ctx.Data["Units"] = unit_model.Units
 
@@ -552,6 +583,14 @@ func TeamMembers(ctx *context.Context) {
 	ctx.HTML(http.StatusOK, tplTeamMembers)
 }
 
+// userGroupLink returns the name of a user group, linked to its admin page for site admins.
+func userGroupLink(ctx *context.Context, g *org_model.UserGroup) template.HTML {
+	if ctx.Doer.IsAdmin {
+		return templates.HTMLFormat(`<a href="%s/admin/groups/%d">%s</a>`, setting.AppSubURL, g.ID, g.Name)
+	}
+	return templates.HTMLFormat("%s", g.Name)
+}
+
 // TeamRepositories show the repositories of team
 func TeamRepositories(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Org.Team.Name
@@ -572,6 +611,10 @@ func TeamRepositories(ctx *context.Context) {
 
 	if err := ctx.Org.Team.LoadPaginatedRepositories(ctx, opts); err != nil {
 		ctx.ServerError("GetRepositories", err)
+		return
+	}
+	if err := org_model.LoadTeamsNumUserGroups(ctx, []*org_model.Team{ctx.Org.Team}); err != nil {
+		ctx.ServerError("LoadTeamsNumUserGroups", err)
 		return
 	}
 	ctx.Data["Page"] = pager

@@ -6,10 +6,12 @@ package integration
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"forgejo.org/models/organization"
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/tests"
 
@@ -90,11 +92,51 @@ func TestUserGroupSharedAcrossOrganizations(t *testing.T) {
 	// the member now has the access of the team
 	member.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3"), http.StatusOK)
 
-	// the team page shows the linked group and where the membership comes from
+	// a second group linked to the same team, sharing user5
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/groups/new", map[string]string{"name": "platform-devs"}), http.StatusSeeOther)
+	group2 := unittest.AssertExistsAndLoadBean(t, &organization.UserGroup{LowerName: "platform-devs"})
+	for _, uname := range []string{"user5", "user10"} {
+		admin.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/admin/groups/%d/members/add", group2.ID), map[string]string{"uname": uname}), http.StatusSeeOther)
+	}
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/teams/team1/action/group/link", map[string]string{"group_name": "platform-devs"}), http.StatusSeeOther)
+	unittest.AssertExistsAndLoadBean(t, &organization.TeamUser{TeamID: 2, UID: 10})
+
+	// the team page shows the linked groups with their member counts, and which groups each membership comes from
 	resp = admin.MakeRequest(t, NewRequest(t, "GET", "/org/org3/teams/team1"), http.StatusOK)
-	assert.Contains(t, resp.Body.String(), "joined via a user group")
 	doc := NewHTMLParser(t, resp.Body)
-	assert.Contains(t, doc.Find("#team-user-groups + .segment + .segment").Text(), "release-managers")
+	groups := doc.Find("#team-user-groups + .segment + .segment .flex-item-title")
+	require.Equal(t, 2, groups.Length())
+	assert.Equal(t, "platform-devs · 2 members", strings.Join(strings.Fields(groups.Eq(0).Text()), " "))
+	assert.Equal(t, "release-managers · 1 member", strings.Join(strings.Fields(groups.Eq(1).Text()), " "))
+	assert.Contains(t, doc.Find(".org-team-navbar").Text(), "2 user groups")
+	memberLine := func(doc *HTMLDoc, uname string) string {
+		return strings.Join(strings.Fields(doc.Find(fmt.Sprintf(`.flex-item:has(a[href="/%s"]) .flex-item-main > div:last-child`, uname)).Text()), " ")
+	}
+	assert.Contains(t, memberLine(doc, "user5"), "joined via platform-devs, release-managers on")
+	assert.Contains(t, memberLine(doc, "user10"), "joined via platform-devs on")
+	doc.AssertElement(t, fmt.Sprintf(`#team-user-groups + .segment + .segment a[href="/admin/groups/%d"]`, group2.ID), true)
+	doc.AssertElement(t, fmt.Sprintf(`.flex-item:has(a[href="/user5"]) a[href="/admin/groups/%d"]`, group.ID), true)
+
+	// the teams overview hints at the linked groups
+	resp = admin.MakeRequest(t, NewRequest(t, "GET", "/org/org3/teams"), http.StatusOK)
+	assert.Contains(t, NewHTMLParser(t, resp.Body).Find(`.team-meta:has(a[href="/org/org3/teams/team1"])`).Text(), "· 2 user groups")
+
+	// an organization owner who is not a site admin sees the names, not the admin links
+	resp = loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/org/org3/teams/team1"), http.StatusOK)
+	doc = NewHTMLParser(t, resp.Body)
+	assert.Contains(t, memberLine(doc, "user5"), "joined via platform-devs, release-managers on")
+	doc.AssertElement(t, `a[href^="/admin/groups/"]`, false)
+
+	// unlinking the second group keeps the memberships the first group grants
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/teams/team1/action/group/unlink", map[string]string{
+		"group_id": fmt.Sprint(group2.ID),
+	}), http.StatusSeeOther)
+	unittest.AssertNotExistsBean(t, &organization.TeamUser{TeamID: 2, UID: 10})
+	unittest.AssertExistsAndLoadBean(t, &organization.TeamUser{TeamID: 2, UID: 5})
+	resp = admin.MakeRequest(t, NewRequest(t, "GET", "/org/org3/teams/team1"), http.StatusOK)
+	doc = NewHTMLParser(t, resp.Body)
+	assert.Contains(t, memberLine(doc, "user5"), "joined via release-managers on")
+	assert.Contains(t, doc.Find(".org-team-navbar").Text(), "1 user group")
 
 	// the group page lists both teams
 	resp = admin.MakeRequest(t, NewRequest(t, "GET", groupURL), http.StatusOK)
@@ -119,6 +161,28 @@ func TestUserGroupSharedAcrossOrganizations(t *testing.T) {
 	admin.MakeRequest(t, NewRequest(t, "POST", groupURL+"/delete"), http.StatusOK)
 	unittest.AssertNotExistsBean(t, &organization.UserGroup{ID: group.ID})
 	unittest.AssertNotExistsBean(t, &organization.TeamUser{TeamID: 8, UID: 5})
+}
+
+func TestUserGroupAddMembersByInvitations(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+
+	admin := loginUser(t, "user1")
+	hint := "Members of linked user groups join the team directly, without an invitation."
+
+	resp := admin.MakeRequest(t, NewRequest(t, "GET", "/org/org3/teams/team1"), http.StatusOK)
+	assert.NotContains(t, resp.Body.String(), hint)
+
+	defer test.MockVariableValue(&setting.Service.AddMembersByInvitations, true)()
+	resp = admin.MakeRequest(t, NewRequest(t, "GET", "/org/org3/teams/team1"), http.StatusOK)
+	assert.Contains(t, resp.Body.String(), hint)
+
+	// linking a group still adds its members directly, without an invitation
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/groups/new", map[string]string{"name": "qa"}), http.StatusSeeOther)
+	group := unittest.AssertExistsAndLoadBean(t, &organization.UserGroup{LowerName: "qa"})
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/admin/groups/%d/members/add", group.ID), map[string]string{"uname": "user5"}), http.StatusSeeOther)
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/teams/team1/action/group/link", map[string]string{"group_name": "qa"}), http.StatusSeeOther)
+	unittest.AssertExistsAndLoadBean(t, &organization.TeamUser{TeamID: 2, UID: 5})
+	unittest.AssertNotExistsBean(t, &organization.TeamInvite{TeamID: 2})
 }
 
 func TestUserGroupAdminPages(t *testing.T) {

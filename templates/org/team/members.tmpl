@@ -37,7 +37,7 @@
 									<div class="flex-item-title">
 										{{template "shared/user/name" .User}}
 									</div>
-									{{template "org/team/membership_origin" .}}
+									{{template "org/team/membership_origin" dict "Membership" . "UserGroups" (index $.MemberUserGroups .UID)}}
 								</div>
 								<div class="flex-item-trailing">
 									{{if and $.IsOrganizationOwner (not .IsMembershipAddedByUserGroup) (not (and ($.Team.IsOwnerTeam) (eq (len $.Team.Members) 1)))}}
@@ -69,6 +69,9 @@
 							</div>
 							<button class="ui primary button">{{ctx.Locale.Tr "org.teams.user_groups.link"}}</button>
 						</form>
+						{{if $.AddMembersByInvitations}}
+							<div class="text grey tw-mt-2">{{ctx.Locale.Tr "org.teams.user_groups.no_invitation"}}</div>
+						{{end}}
 					</div>
 				{{end}}
 				<div class="ui attached segment">
@@ -77,7 +80,10 @@
 							<div class="flex-item tw-items-center">
 								<div class="flex-item-leading">{{svg "octicon-people" 32}}</div>
 								<div class="flex-item-main">
-									<div class="flex-item-title">{{.Name}}</div>
+									<div class="flex-item-title">
+										{{if $.IsAdmin}}<a href="{{AppSubUrl}}/admin/groups/{{.ID}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}
+										<span class="text grey">· {{ctx.Locale.TrPluralString .NumMembers "org.teams.user_groups.num_members" .NumMembers}}</span>
+									</div>
 									{{if .Description}}<div class="flex-item-body">{{.Description}}</div>{{end}}
 								</div>
 								{{if $.IsOrganizationOwner}}

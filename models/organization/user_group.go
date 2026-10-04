@@ -291,6 +291,88 @@ func GetTeamUserGroups(ctx context.Context, teamID int64) ([]*UserGroup, error) 
 		Find(&groups)
 }
 
+// LoadUserGroupsNumMembers sets NumMembers of the given groups in one query.
+func LoadUserGroupsNumMembers(ctx context.Context, groups []*UserGroup) error {
+	if len(groups) == 0 {
+		return nil
+	}
+	ids := make([]int64, len(groups))
+	for i, g := range groups {
+		ids[i] = g.ID
+	}
+	counts, err := countGroupedBy(ctx, "user_group_user", "group_id", ids)
+	if err != nil {
+		return err
+	}
+	for _, g := range groups {
+		g.NumMembers = counts[g.ID]
+	}
+	return nil
+}
+
+// LoadTeamsNumUserGroups sets NumUserGroups of the given teams in one query.
+func LoadTeamsNumUserGroups(ctx context.Context, teams []*Team) error {
+	if len(teams) == 0 {
+		return nil
+	}
+	ids := make([]int64, len(teams))
+	for i, t := range teams {
+		ids[i] = t.ID
+	}
+	counts, err := countGroupedBy(ctx, "user_group_team", "team_id", ids)
+	if err != nil {
+		return err
+	}
+	for _, t := range teams {
+		t.NumUserGroups = counts[t.ID]
+	}
+	return nil
+}
+
+// countGroupedBy counts the rows of table for each of the given values of col.
+func countGroupedBy(ctx context.Context, table, col string, ids []int64) (map[int64]int, error) {
+	rows := make([]struct {
+		ID    int64 `xorm:"id"`
+		Count int   `xorm:"cnt"`
+	}, 0, len(ids))
+	if err := db.GetEngine(ctx).Table(table).Select(col+" AS id, COUNT(*) AS cnt").
+		In(col, ids).GroupBy(col).Find(&rows); err != nil {
+		return nil, err
+	}
+	counts := make(map[int64]int, len(rows))
+	for _, r := range rows {
+		counts[r.ID] = r.Count
+	}
+	return counts, nil
+}
+
+// GetTeamMembersUserGroups returns, for each of the given users, the user
+// groups linked to the team that the user is a member of, ordered by name.
+func GetTeamMembersUserGroups(ctx context.Context, teamID int64, uids []int64) (map[int64][]*UserGroup, error) {
+	if len(uids) == 0 {
+		return map[int64][]*UserGroup{}, nil
+	}
+	rows := make([]struct {
+		UID       int64 `xorm:"uid"`
+		UserGroup `xorm:"extends"`
+	}, 0, len(uids))
+	if err := db.GetEngine(ctx).Table("user_group_user").
+		Join("INNER", "user_group_team", "user_group_team.group_id = user_group_user.group_id").
+		Join("INNER", "user_group", "user_group.id = user_group_user.group_id").
+		Where("user_group_team.team_id = ?", teamID).
+		In("user_group_user.uid", uids).
+		Select("user_group_user.uid, user_group.*").
+		OrderBy("user_group.lower_name").
+		Find(&rows); err != nil {
+		return nil, err
+	}
+	groups := make(map[int64][]*UserGroup, len(rows))
+	for i := range rows {
+		groups[rows[i].UID] = append(groups[rows[i].UID], &rows[i].UserGroup)
+	}
+	return groups, nil
+}
+
 // IsUserGroupLinkedToTeam returns true if the user group is linked to the team.
 func IsUserGroupLinkedToTeam(ctx context.Context, groupID, teamID int64) (bool, error) {
 	return db.GetEngine(ctx).Exist(&UserGroupTeam{GroupID: groupID, TeamID: teamID})

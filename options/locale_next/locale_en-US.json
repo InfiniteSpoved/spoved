@@ -1279,12 +1279,22 @@
 	"org.teams.user_groups": "User groups",
 	"org.teams.user_groups.name_placeholder": "User group name",
 	"org.teams.user_groups.link": "Link user group",
+	"org.teams.user_groups.no_invitation": "Members of linked user groups join the team directly, without an invitation.",
 	"org.teams.user_groups.unlink": "Unlink",
 	"org.teams.user_groups.none": "No user groups are linked to this team.",
 	"org.teams.user_groups.not_exist": "The user group does not exist.",
 	"org.teams.user_groups.already_linked": "User group \"%s\" is already linked to this team.",
 	"org.teams.user_groups.member_via_group": "This user is a member of the team through a linked user group. Remove them from the group or unlink the group instead.",
 	"org.membership_origin.via_user_group": "joined via a user group on %s",
+	"org.membership_origin.via_user_groups": "joined via %[1]s on %[2]s",
+	"org.teams.user_groups.num_members": {
+		"one": "%d member",
+		"other": "%d members"
+	},
+	"org.teams.num_user_groups": {
+		"one": "%d user group",
+		"other": "%d user groups"
+	},
 	"admin.announcements": "Announcements",
 	"admin.announcements.manage_panel": "Manage announcements",
 	"admin.announcements.desc": "Announcements are shown as a banner at the top of every page while they are active. Several active announcements are stacked, critical ones first.",

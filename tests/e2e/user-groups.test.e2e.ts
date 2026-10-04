@@ -6,6 +6,8 @@
 // templates/admin/navbar.tmpl
 // templates/org/team/members.tmpl
 // templates/org/team/membership_origin.tmpl
+// templates/org/team/navbar.tmpl
+// templates/org/team/teams.tmpl
 // routers/web/admin/user_groups.go
 // routers/web/org/teams.go
 // services/usergroup/**
@@ -106,13 +108,20 @@ test('One user group grants access to teams of several organizations', async ({b
   await test.step('link the group to a team in each organization', async () => {
     for (const team of [readers, writers]) {
       await linkGroup(admin, team, group);
+      await expect(admin.locator('#team-user-groups + .segment + .segment .flex-item', {hasText: group})).toContainText(`${group} · 2 members`);
+      await expect(admin.locator('.org-team-navbar')).toContainText('1 user group');
       for (const user of [alice, bob]) {
         const row = admin.locator('.flex-item', {hasText: user.username});
-        await expect(row).toContainText('joined via a user group');
+        await expect(row).toContainText(`joined via ${group} on`);
+        // site admins get a link to the group
+        await expect(row.getByRole('link', {name: group})).toHaveAttribute('href', new URL(groupURL).pathname);
         // a member coming from a group can only be removed through the group
         await expect(row.getByRole('button', {name: 'Remove'})).toHaveCount(0);
       }
     }
+
+    await admin.goto(`/org/${readers.org}/teams`);
+    await expect(admin.locator('.team-meta', {has: admin.locator(`a[href$="/teams/${readers.name}"]`)})).toContainText('· 1 user group');
 
     await admin.goto(groupURL);
     const linkedTeams = admin.locator('#user-group-teams + .segment');
