@@ -19,11 +19,10 @@ import (
 )
 
 // listMembers list an organization's members
-func listMembers(ctx *context.APIContext, isMember, auditorView bool) {
+func listMembers(ctx *context.APIContext, isMember bool) {
 	opts := &organization.FindOrgMembersOpts{
 		Doer:         ctx.Doer(),
 		IsDoerMember: isMember,
-		AuditorView:  auditorView,
 		OrgID:        ctx.Org().Organization.ID,
 		ListOptions:  utils.GetListOptions(ctx),
 	}
@@ -88,7 +87,8 @@ func ListMembers(ctx *context.APIContext) {
 			return
 		}
 	}
-	listMembers(ctx, isMember, auth.IsHeldByUser(ctx.Authentication()))
+	// the auditor role lists concealed members too
+	listMembers(ctx, isMember || (ctx.Doer() != nil && ctx.Doer().IsAuditor && auth.IsHeldByUser(ctx.Authentication())))
 }
 
 // ListPublicMembers list an organization's public members
@@ -118,7 +118,7 @@ func ListPublicMembers(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	listMembers(ctx, false, false)
+	listMembers(ctx, false)
 }
 
 // IsMember check if a user is a member of an organization

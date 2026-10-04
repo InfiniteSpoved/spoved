@@ -33,9 +33,8 @@ func Members(ctx *context.Context) {
 	page := max(ctx.FormInt("page"), 1)
 
 	opts := &organization.FindOrgMembersOpts{
-		Doer:        ctx.Doer,
-		OrgID:       org.ID,
-		AuditorView: ctx.IsAuditorView(),
+		Doer:  ctx.Doer,
+		OrgID: org.ID,
 	}
 
 	if ctx.Doer != nil {
@@ -44,7 +43,7 @@ func Members(ctx *context.Context) {
 			ctx.Error(http.StatusInternalServerError, "IsOrgMember")
 			return
 		}
-		opts.IsDoerMember = isMember
+		opts.IsDoerMember = isMember || ctx.IsAuditorView() // the auditor role lists concealed members too
 	}
 	ctx.Data["PublicOnly"] = opts.PublicOnly()
 

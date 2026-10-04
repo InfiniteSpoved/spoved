@@ -215,14 +215,11 @@ type FindOrgMembersOpts struct {
 	db.ListOptions
 	Doer         *user_model.User
 	IsDoerMember bool
-	// AuditorView lists concealed members to a Doer with the auditor role. Only set it for read-only requests made
-	// with the Doer's own credentials.
-	AuditorView bool
-	OrgID       int64
+	OrgID        int64
 }
 
 func (opts FindOrgMembersOpts) PublicOnly() bool {
-	return opts.Doer == nil || (!opts.IsDoerMember && !opts.Doer.IsAdmin && !(opts.AuditorView && opts.Doer.IsAuditor))
+	return opts.Doer == nil || (!opts.IsDoerMember && !opts.Doer.IsAdmin)
 }
 
 // CountOrgMembers counts the organization's members

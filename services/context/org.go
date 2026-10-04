@@ -193,8 +193,7 @@ func HandleOrgAssignment(ctx *Context, args ...bool) {
 	opts := &organization.FindOrgMembersOpts{
 		Doer:         ctx.Doer,
 		OrgID:        org.ID,
-		IsDoerMember: ctx.Org.IsMember,
-		AuditorView:  ctx.IsAuditorView(),
+		IsDoerMember: ctx.Org.IsMember || ctx.IsAuditorView(), // the auditor role lists concealed members too
 	}
 	ctx.Data["NumMembers"], err = organization.CountOrgMembers(ctx, opts)
 	if err != nil {
