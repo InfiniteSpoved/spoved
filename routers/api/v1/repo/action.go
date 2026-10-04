@@ -511,6 +511,8 @@ func (Action) GetRegistrationToken(ctx *context.APIContext) {
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/RegistrationToken"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
 
 	shared.GetRegistrationToken(ctx, 0, ctx.Repo().Repository.ID)
 }
@@ -619,6 +621,8 @@ func (Action) RegisterRunner(ctx *context.APIContext) {
 	//     "$ref": "#/responses/error"
 	//   "401":
 	//     "$ref": "#/responses/unauthorized"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
