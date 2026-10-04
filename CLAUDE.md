@@ -48,3 +48,4 @@ Add a line here when you hit something the next person should know.
 - A deploy-key push runs with `opts.UserID` set to the repository owner; decide deploy-key permissions from the key (`ctx.deployKeyKeyID` in the pre-receive hook), never from that user ID.
 - `make 'test-sqlite#A|B'` breaks on the pipe; after one build, run `PROJECT_ROOT=$PWD PROJECT_CONF=tests/sqlite.ini ./integrations.sqlite.test -test.run 'A|B'`.
 - The preinstalled `golangci-lint` is too old for go.mod; use `GOTOOLCHAIN=go1.27.1 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run --build-tags 'sqlite sqlite_unlock_notify' <pkgs>`.
+- `make lint-css` runs stylelint on every file under `web_src/css`, including `.js`, so JS tests for CSS (e.g. `web_src/js/company-contrast.test.js`) must live under `web_src/js`.
