@@ -205,6 +205,8 @@ func innerToRepo(ctx stdCtx.Context, repo *repo_model.Repository, permissionInRe
 		Empty:                         repo.IsEmpty,
 		Archived:                      repo.IsArchived,
 		Size:                          int(repo.Size / 1024),
+		GitSize:                       repo.GitSize,
+		LFSSize:                       repo.LFSSize,
 		Fork:                          repo.IsFork,
 		Parent:                        parent,
 		Mirror:                        repo.IsMirror,

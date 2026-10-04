@@ -11,6 +11,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/sitemap"
 	"forgejo.org/services/context"
@@ -25,6 +26,7 @@ const (
 // RepoSearchOptions when calling search repositories
 type RepoSearchOptions struct {
 	OwnerID          int64
+	Exclusive        bool // only repositories owned by OwnerID
 	Private          bool
 	Restricted       bool
 	PageSize         int
@@ -95,6 +97,11 @@ func RenderRepoSearch(ctx *context.Context, opts *RepoSearchOptions) {
 	private := ctx.FormOptionalBool("private")
 	ctx.Data["IsPrivate"] = private
 
+	collaborate := optional.None[bool]()
+	if opts.Exclusive {
+		collaborate = optional.Some(false)
+	}
+
 	repos, count, err = repo_model.SearchRepository(ctx, &repo_model.SearchRepoOptions{
 		ListOptions: db.ListOptions{
 			Page:     page,
@@ -105,12 +112,13 @@ func RenderRepoSearch(ctx *context.Context, opts *RepoSearchOptions) {
 		Private:            opts.Private,
 		Keyword:            keyword,
 		OwnerID:            opts.OwnerID,
-		AllPublic:          true,
-		AllLimited:         true,
+		AllPublic:          !opts.Exclusive,
+		AllLimited:         !opts.Exclusive,
 		TopicOnly:          topicOnly,
 		Language:           language,
 		IncludeDescription: setting.UI.SearchRepoDescription,
 		OnlyShowRelevant:   opts.OnlyShowRelevant,
+		Collaborate:        collaborate,
 		Archived:           archived,
 		Fork:               fork,
 		Mirror:             mirror,
@@ -143,6 +151,9 @@ func RenderRepoSearch(ctx *context.Context, opts *RepoSearchOptions) {
 	pager.AddParam(ctx, "topic", "TopicOnly")
 	pager.AddParam(ctx, "language", "Language")
 	pager.AddParamString(relevantReposOnlyParam, fmt.Sprint(opts.OnlyShowRelevant))
+	if opts.Exclusive {
+		pager.AddParamString("uid", fmt.Sprint(opts.OwnerID))
+	}
 	if has, value := archived.Get(); has {
 		pager.AddParamString("archived", fmt.Sprint(value))
 	}
