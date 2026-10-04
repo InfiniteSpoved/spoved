@@ -78,27 +78,6 @@ const (
 	issueTemplateTitleKey = "IssueTemplateTitle"
 )
 
-// generateIssueTemplateLocations generates all the file paths where we
-// look for an issue template, e.g. ".forgejo/ISSUE_TEMPLATE.md".
-func generateIssueTemplateLocations() []string {
-	var result []string
-	prefixes := []string{"", ".forgejo/", ".gitea/", ".github/", "docs/"}
-	filenames := []string{"ISSUE_TEMPLATE", "issue_template"}
-	extensions := []string{".md", ".yaml", ".yml"}
-
-	for _, prefix := range prefixes {
-		for _, filename := range filenames {
-			for _, extension := range extensions {
-				result = append(result, prefix+filename+extension)
-			}
-		}
-	}
-
-	return result
-}
-
-var issueTemplateCandidates = generateIssueTemplateLocations()
-
 // MustAllowUserComment checks to make sure if an issue is locked.
 // If locked and user has permissions to write to the repository,
 // then the comment is allowed, else it is blocked
@@ -530,7 +509,7 @@ func Issues(ctx *context.Context) {
 		}
 		ctx.Data["Title"] = ctx.Tr("repo.issues")
 		ctx.Data["PageIsIssueList"] = true
-		ctx.Data["NewIssueChooseTemplate"] = issue_service.HasTemplatesOrContactLinks(ctx.Repo.Repository, ctx.Repo.GitRepo)
+		ctx.Data["NewIssueChooseTemplate"] = issue_service.HasTemplatesOrContactLinks(ctx, ctx.Repo.Repository, ctx.Repo.GitRepo)
 	}
 
 	issues(ctx, ctx.FormInt64("milestone"), ctx.FormInt64("project"), optional.Some(isPullList))
@@ -887,15 +866,29 @@ func RetrieveRepoMetas(ctx *context.Context, repo *repo_model.Repository, isPull
 	return labels
 }
 
-// Tries to load and set an issue template. The first return value indicates if a template was loaded.
+// Tries to load and set an issue template, from the repo or its fallback source. The first return value indicates if a template was loaded.
 func setTemplateIfExists(ctx *context.Context, ctxDataKey string, possibleFiles []string) (bool, map[string]error) {
-	commit, err := ctx.Repo.GitRepo.GetBranchCommit(ctx.Repo.Repository.DefaultBranch)
-	if err != nil {
+	t := ctx.FormString("template")
+	has := issue_service.HasIssueTemplates
+	if ctxDataKey == pullRequestTemplateKey {
+		has = func(c *git.Commit) bool {
+			// ?template= names a file of the repo itself (compare requires code access), so it never falls back.
+			return t != "" || slices.ContainsFunc(possibleFiles, func(name string) bool {
+				ok, _ := c.HasFile(name)
+				return ok
+			})
+		}
+	}
+	commit, own, closer := issue_service.TemplateCommit(ctx, ctx.Repo.Repository, ctx.Repo.GitRepo, has)
+	defer closer()
+	if commit == nil {
 		return false, nil
 	}
 
 	templateCandidates := make([]string, 0, 1+len(possibleFiles))
-	if t := ctx.FormString("template"); t != "" {
+	// Issue templates may only be chosen from the template directories, so ?template= can't read other files.
+	// A fallback source is never read by a user-supplied path for PR templates.
+	if t != "" && (ctxDataKey == pullRequestTemplateKey && own || ctxDataKey != pullRequestTemplateKey && issue_service.IsTemplateDirFile(t)) {
 		templateCandidates = append(templateCandidates, t)
 	}
 	templateCandidates = append(templateCandidates, possibleFiles...) // Append files to the end because they should be fallback
@@ -960,8 +953,8 @@ func setTemplateIfExists(ctx *context.Context, ctxDataKey string, possibleFiles 
 
 // NewIssue render creating issue page
 func NewIssue(ctx *context.Context) {
-	issueConfig, _ := issue_service.GetTemplateConfigFromDefaultBranch(ctx.Repo.Repository, ctx.Repo.GitRepo)
-	hasTemplates := issue_service.HasTemplatesOrContactLinks(ctx.Repo.Repository, ctx.Repo.GitRepo)
+	issueConfig, _ := issue_service.GetTemplateConfigFromDefaultBranch(ctx, ctx.Repo.Repository, ctx.Repo.GitRepo)
+	hasTemplates := issue_service.HasTemplatesOrContactLinks(ctx, ctx.Repo.Repository, ctx.Repo.GitRepo)
 
 	ctx.Data["Title"] = ctx.Tr("repo.issues.new")
 	ctx.Data["PageIsIssueList"] = true
@@ -1017,8 +1010,8 @@ func NewIssue(ctx *context.Context) {
 	}
 	ctx.Data["Tags"] = tags
 
-	_, templateErrs := issue_service.GetTemplatesFromDefaultBranch(ctx.Repo.Repository, ctx.Repo.GitRepo)
-	templateLoaded, errs := setTemplateIfExists(ctx, issueTemplateKey, issueTemplateCandidates)
+	_, templateErrs := issue_service.GetTemplatesFromDefaultBranch(ctx, ctx.Repo.Repository, ctx.Repo.GitRepo)
+	templateLoaded, errs := setTemplateIfExists(ctx, issueTemplateKey, issue_service.IssueTemplateCandidates)
 	maps.Copy(templateErrs, errs)
 	if ctx.Written() {
 		return
@@ -1068,20 +1061,20 @@ func NewIssueChooseTemplate(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("repo.issues.new")
 	ctx.Data["PageIsIssueList"] = true
 
-	issueTemplates, errs := issue_service.GetTemplatesFromDefaultBranch(ctx.Repo.Repository, ctx.Repo.GitRepo)
+	issueTemplates, errs := issue_service.GetTemplatesFromDefaultBranch(ctx, ctx.Repo.Repository, ctx.Repo.GitRepo)
 	ctx.Data["IssueTemplates"] = issueTemplates
 
 	if len(errs) > 0 {
 		ctx.Flash.Warning(renderErrorOfTemplates(ctx, errs), true)
 	}
 
-	if !issue_service.HasTemplatesOrContactLinks(ctx.Repo.Repository, ctx.Repo.GitRepo) {
+	if !issue_service.HasTemplatesOrContactLinks(ctx, ctx.Repo.Repository, ctx.Repo.GitRepo) {
 		// The "issues/new" and "issues/new/choose" share the same query parameters "project" and "milestone", if no template here, just redirect to the "issues/new" page with these parameters.
 		ctx.Redirect(fmt.Sprintf("%s/issues/new?%s", ctx.Repo.Repository.Link(), ctx.Req.URL.RawQuery), http.StatusSeeOther)
 		return
 	}
 
-	issueConfig, err := issue_service.GetTemplateConfigFromDefaultBranch(ctx.Repo.Repository, ctx.Repo.GitRepo)
+	issueConfig, err := issue_service.GetTemplateConfigFromDefaultBranch(ctx, ctx.Repo.Repository, ctx.Repo.GitRepo)
 	ctx.Data["IssueConfig"] = issueConfig
 	ctx.Data["IssueConfigError"] = err // ctx.Flash.Err makes problems here
 
@@ -1222,7 +1215,7 @@ func NewIssuePost(ctx *context.Context) {
 	form := web.GetForm(ctx).(*forms.CreateIssueForm)
 	ctx.Data["Title"] = ctx.Tr("repo.issues.new")
 	ctx.Data["PageIsIssueList"] = true
-	ctx.Data["NewIssueChooseTemplate"] = issue_service.HasTemplatesOrContactLinks(ctx.Repo.Repository, ctx.Repo.GitRepo)
+	ctx.Data["NewIssueChooseTemplate"] = issue_service.HasTemplatesOrContactLinks(ctx, ctx.Repo.Repository, ctx.Repo.GitRepo)
 	ctx.Data["PullRequestWorkInProgressPrefixes"] = setting.Repository.PullRequest.WorkInProgressPrefixes
 	ctx.Data["IsAttachmentEnabled"] = setting.Attachment.Enabled
 	upload.AddUploadContext(ctx, "comment")
@@ -1252,10 +1245,14 @@ func NewIssuePost(ctx *context.Context) {
 	}
 
 	content := form.Content
-	if filename := ctx.Req.Form.Get("template-file"); filename != "" {
-		if template, err := issue_template.UnmarshalFromRepo(ctx.Repo.GitRepo, ctx.Repo.Repository.DefaultBranch, filename); err == nil {
-			content = issue_template.RenderToMarkdown(template, ctx.Req.Form)
+	if filename := ctx.Req.Form.Get("template-file"); issue_service.IsTemplateDirFile(filename) || slices.Contains(issue_service.IssueTemplateCandidates, filename) {
+		commit, _, closer := issue_service.TemplateCommit(ctx, ctx.Repo.Repository, ctx.Repo.GitRepo, issue_service.HasIssueTemplates)
+		if commit != nil {
+			if template, err := issue_template.UnmarshalFromCommit(commit, filename); err == nil {
+				content = issue_template.RenderToMarkdown(template, ctx.Req.Form)
+			}
 		}
+		closer()
 	}
 
 	issue := &issues_model.Issue{
@@ -1470,7 +1467,7 @@ func ViewIssue(ctx *context.Context) {
 			return
 		}
 		ctx.Data["PageIsIssueList"] = true
-		ctx.Data["NewIssueChooseTemplate"] = issue_service.HasTemplatesOrContactLinks(ctx.Repo.Repository, ctx.Repo.GitRepo)
+		ctx.Data["NewIssueChooseTemplate"] = issue_service.HasTemplatesOrContactLinks(ctx, ctx.Repo.Repository, ctx.Repo.GitRepo)
 	}
 
 	if issue.IsPull && !ctx.Repo.CanRead(unit.TypeIssues) {
