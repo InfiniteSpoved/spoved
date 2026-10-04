@@ -431,6 +431,9 @@ func TestAPIViewRepo(t *testing.T) {
 	assert.Equal(t, 2, repo.Releases)
 	assert.Equal(t, 1, repo.OpenIssues)
 	assert.Equal(t, 3, repo.OpenPulls)
+	repo1 := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
+	assert.Equal(t, repo1.GitSize, repo.GitSize)
+	assert.Equal(t, repo1.LFSSize, repo.LFSSize)
 
 	req = NewRequest(t, "GET", "/api/v1/repos/user12/repo10")
 	resp = MakeRequest(t, req, http.StatusOK)

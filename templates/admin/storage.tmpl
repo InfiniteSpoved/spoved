@@ -1,0 +1,92 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.storage"}}
+		</h4>
+		<div class="ui attached segment">
+			<table class="ui very basic table">
+				<tbody>
+					<tr><td>{{ctx.Locale.Tr "admin.storage.git_size"}}</td><td>{{ctx.Locale.TrSize .Totals.GitSize}}</td></tr>
+					<tr><td>{{ctx.Locale.Tr "admin.storage.lfs_size"}}</td><td>{{ctx.Locale.TrSize .Totals.LFSSize}}</td></tr>
+					<tr><td>{{ctx.Locale.Tr "admin.storage.total_size"}}</td><td>{{ctx.Locale.TrSize .Totals.Size}}</td></tr>
+					<tr><td>{{ctx.Locale.Tr "admin.storage.repos"}}</td><td>{{.Totals.NumRepos}}</td></tr>
+					<tr><td>{{ctx.Locale.Tr "admin.storage.average_size"}}</td><td>{{ctx.Locale.TrSize .AverageSize}}</td></tr>
+				</tbody>
+			</table>
+			<p>
+				<a href="{{AppSubUrl}}/admin/repos?sort=reversegitsize">{{ctx.Locale.Tr "admin.storage.largest_git"}}</a>
+				·
+				<a href="{{AppSubUrl}}/admin/repos?sort=reverselfssize">{{ctx.Locale.Tr "admin.storage.largest_lfs"}}</a>
+			</p>
+		</div>
+
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.storage.manage_panel"}} ({{ctx.Locale.Tr "admin.total" .Total}})
+			<div class="ui right">
+				<a class="ui primary tiny button" href="?format=csv&q={{.Keyword}}&type={{.OwnerType}}&sort={{.SortType}}">{{ctx.Locale.Tr "admin.storage.export_csv"}}</a>
+			</div>
+		</h4>
+		<div class="ui attached segment">
+			<div class="ui secondary filter menu tw-items-center tw-mx-0">
+				<form class="ui form ignore-dirty tw-flex-1">
+					<input type="hidden" name="type" value="{{.OwnerType}}">
+					<input type="hidden" name="sort" value="{{.SortType}}">
+					{{template "shared/search/combo" dict "Value" .Keyword "Placeholder" (ctx.Locale.Tr "admin.storage.search")}}
+				</form>
+				<div class="ui dropdown type jump item tw-mr-0">
+					<span class="text">{{ctx.Locale.Tr "filter"}}</span>
+					{{svg "octicon-triangle-down" 14 "dropdown icon"}}
+					<div class="menu">
+						<a class="{{if not .OwnerType}}active {{end}}item" href="?q={{.Keyword}}&sort={{.SortType}}">{{ctx.Locale.Tr "filter.clear"}}</a>
+						<a class="{{if eq .OwnerType "user"}}active {{end}}item" href="?type=user&q={{.Keyword}}&sort={{.SortType}}">{{ctx.Locale.Tr "admin.users"}}</a>
+						<a class="{{if eq .OwnerType "org"}}active {{end}}item" href="?type=org&q={{.Keyword}}&sort={{.SortType}}">{{ctx.Locale.Tr "admin.organizations"}}</a>
+					</div>
+				</div>
+			</div>
+		</div>
+		<div class="ui attached table segment">
+			<table class="ui very basic striped table unstackable">
+				<thead>
+					<tr>
+						<th>{{ctx.Locale.Tr "admin.repos.owner"}}</th>
+						<th>{{ctx.Locale.Tr "admin.storage.type"}}</th>
+						<th data-sortt-asc="fewestrepos" data-sortt-desc="mostrepos">
+							{{ctx.Locale.Tr "admin.storage.repos"}}
+							{{SortArrow "fewestrepos" "mostrepos" $.SortType false}}
+						</th>
+						<th data-sortt-asc="gitsize" data-sortt-desc="reversegitsize">
+							{{ctx.Locale.Tr "admin.storage.git_size"}}
+							{{SortArrow "gitsize" "reversegitsize" $.SortType false}}
+						</th>
+						<th data-sortt-asc="lfssize" data-sortt-desc="reverselfssize">
+							{{ctx.Locale.Tr "admin.storage.lfs_size"}}
+							{{SortArrow "lfssize" "reverselfssize" $.SortType false}}
+						</th>
+						<th data-sortt-asc="size" data-sortt-desc="reversesize">
+							{{ctx.Locale.Tr "admin.storage.total_size"}}
+							{{SortArrow "size" "reversesize" $.SortType false}}
+						</th>
+						<th>{{ctx.Locale.Tr "admin.storage.share"}}</th>
+					</tr>
+				</thead>
+				<tbody>
+					{{range .Owners}}
+						<tr>
+							<td><a class="tw-break-anywhere" href="{{AppSubUrl}}/admin/repos?uid={{.OwnerID}}&sort=reversesize">{{.Owner.Name}}</a></td>
+							<td>{{if .Owner.IsOrganization}}{{ctx.Locale.Tr "admin.storage.type.org"}}{{else}}{{ctx.Locale.Tr "admin.storage.type.user"}}{{end}}</td>
+							<td>{{.NumRepos}}</td>
+							<td>{{ctx.Locale.TrSize .GitSize}}</td>
+							<td>{{ctx.Locale.TrSize .LFSSize}}</td>
+							<td>{{ctx.Locale.TrSize .Size}}</td>
+							<td>{{printf "%.1f" (.Percent $.Totals)}}%</td>
+						</tr>
+					{{else}}
+						<tr><td class="tw-text-center" colspan="7">{{ctx.Locale.Tr "repo.pulls.no_results"}}</td></tr>
+					{{end}}
+				</tbody>
+			</table>
+		</div>
+
+		{{template "base/paginate" .}}
+	</div>
+{{template "admin/layout_footer" .}}
