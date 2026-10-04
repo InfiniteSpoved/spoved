@@ -20,6 +20,7 @@ var (
 		LogCompression               logCompression    `ini:"LOG_COMPRESSION"`
 		ArtifactStorage              *Storage          // how the created artifacts should be stored
 		ArtifactRetentionDays        int64             `ini:"ARTIFACT_RETENTION_DAYS"`
+		RunRetentionDays             int64             `ini:"RUN_RETENTION_DAYS"`
 		DefaultActionsURL            defaultActionsURL `ini:"DEFAULT_ACTIONS_URL"`
 		ZombieTaskTimeout            time.Duration     `ini:"ZOMBIE_TASK_TIMEOUT"`
 		EndlessTaskTimeout           time.Duration     `ini:"ENDLESS_TASK_TIMEOUT"`
@@ -110,6 +111,11 @@ func loadActionsFrom(rootCfg ConfigProvider) error {
 	// default to 90 days in Github Actions
 	if Actions.ArtifactRetentionDays <= 0 {
 		Actions.ArtifactRetentionDays = 90
+	}
+
+	// default to keeping runs forever
+	if Actions.RunRetentionDays < 0 {
+		Actions.RunRetentionDays = 0
 	}
 
 	Actions.ZombieTaskTimeout, err = sec.Key("ZOMBIE_TASK_TIMEOUT").MustDuration(10 * time.Minute)

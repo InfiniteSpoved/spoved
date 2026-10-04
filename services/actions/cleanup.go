@@ -21,8 +21,13 @@ import (
 	"xorm.io/builder"
 )
 
-// Cleanup removes expired actions logs, data, artifacts and used ephemeral runners
+// Cleanup removes expired actions runs, logs, data, artifacts and used ephemeral runners
 func Cleanup(ctx context.Context) error {
+	// clean up old runs first, so that the artifacts they leave pending deletion are removed below
+	if err := CleanupRuns(ctx); err != nil {
+		return fmt.Errorf("failed to clean up runs: %w", err)
+	}
+
 	// clean up expired artifacts
 	if err := CleanupArtifacts(ctx); err != nil {
 		return fmt.Errorf("failed to clean up artifacts: %w", err)
@@ -95,6 +100,52 @@ func cleanNeedDeleteArtifacts(taskCtx context.Context) error {
 			break
 		}
 	}
+	return nil
+}
+
+const deleteRunBatchSize = 100
+
+// CleanupRuns removes completed runs which are older than the configured retention time, except the latest run of
+// each workflow on the default branch.
+func CleanupRuns(ctx context.Context) error {
+	if setting.Actions.RunRetentionDays <= 0 {
+		return nil
+	}
+	olderThan := timeutil.TimeStampNow().AddDuration(-time.Duration(setting.Actions.RunRetentionDays) * 24 * time.Hour)
+
+	keep, err := actions_model.GetLatestDefaultBranchRunIDs(ctx)
+	if err != nil {
+		return fmt.Errorf("could not retrieve latest runs: %w", err)
+	}
+
+	count := 0
+	var afterID int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		ids, err := actions_model.FindOldDoneRunIDs(ctx, olderThan, afterID, deleteRunBatchSize)
+		if err != nil {
+			return fmt.Errorf("could not retrieve runs to delete: %w", err)
+		}
+		for _, id := range ids {
+			afterID = id
+			if keep.Contains(id) {
+				continue
+			}
+			if err := DeleteRun(ctx, id); err != nil {
+				log.Error("Failed to delete run %d: %v", id, err)
+				// do not return error here, continue to next run
+				continue
+			}
+			count++
+		}
+		if len(ids) < deleteRunBatchSize {
+			break
+		}
+	}
+
+	log.Info("Removed %d runs", count)
 	return nil
 }
 

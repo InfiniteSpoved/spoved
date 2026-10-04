@@ -928,6 +928,7 @@
 	"access_token.error.specified_repos_none": "Access tokens with specified repositories must have at least one repository.",
 	"access_token.error.specified_repos_and_public_only": "Access tokens with specified repositories cannot be combined with the public-only scope.",
 	"access_token.error.specified_repos_and_invalid_scope": "Access tokens with specified repositories can only be used with the read:issue, write:issue, read:repository, and write:repository scopes.",
+	"actions.runs.retention_notice": "Runs older than %d days are deleted automatically.",
 	"actions.status.info.blocked": "Blocked for %[1]s",
 	"actions.status.info.cancelled": "Cancelled %[1]s after %[2]s",
 	"actions.status.info.failure": "Failed %[1]s after %[2]s",
