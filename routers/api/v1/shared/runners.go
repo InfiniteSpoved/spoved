@@ -27,7 +27,28 @@ type RegistrationToken struct {
 	Token string `json:"token"`
 }
 
+// requireRegistrationAllowed responds with an error and returns false unless [actions].RUNNER_REGISTRATION allows
+// registering runners for the scope. adminBypass lets site admins create runners directly in any scope; registration
+// tokens never get it because they don't record who created them.
+func requireRegistrationAllowed(ctx *context.APIContext, ownerID, repoID int64, adminBypass bool) bool {
+	if adminBypass && ctx.Doer().IsAdmin {
+		return true
+	}
+	allowed, err := actions_model.RunnerScopeAllowsRegistration(ctx, ownerID, repoID)
+	if err != nil {
+		ctx.InternalServerError(err)
+		return false
+	}
+	if !allowed {
+		ctx.Error(http.StatusForbidden, "RunnerRegistration", "runner registration for this scope is restricted by the site administrator")
+	}
+	return allowed
+}
+
 func GetRegistrationToken(ctx *context.APIContext, ownerID, repoID int64) {
+	if !requireRegistrationAllowed(ctx, ownerID, repoID, false) {
+		return
+	}
 	optOwnerID := optional.None[int64]()
 	if ownerID != 0 {
 		optOwnerID = optional.Some(ownerID)
@@ -152,6 +173,9 @@ func GetRunner(ctx *context.APIContext, ownerID, repoID, runnerID int64) {
 func RegisterRunner(ctx *context.APIContext, ownerID, repoID int64) {
 	if ownerID != 0 && repoID != 0 {
 		ctx.Error(http.StatusUnprocessableEntity, "RegisterRunner", fmt.Errorf("ownerID '%d' and repoID '%d' cannot be set simultaneously", ownerID, repoID))
+		return
+	}
+	if !requireRegistrationAllowed(ctx, ownerID, repoID, true) {
 		return
 	}
 
