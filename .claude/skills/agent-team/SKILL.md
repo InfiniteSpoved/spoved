@@ -124,8 +124,8 @@ min (send_later):
 - The issue list is too big for one call. Write it to a file, print a compact
   index (number, state, labels, title), then read only the new or updated issues.
 - TLs file follow-up issues without a label. Label them at your next intake.
-- A TL's split of scope the user wrote is not settled until the user agrees. Tell
-  the supervisor straight away.
+- When a TL splits scope into a follow-up issue (user decision: allowed, including
+  scope from the user's comments), label it and queue it by effort.
 
 Queue order: bugs and security first, then lowest effort, while respecting
 dependencies.
@@ -173,10 +173,10 @@ Pipeline, per ticket, up to 3 tickets at once:
    exist, can it reuse existing code, can it touch fewer files or tables, can it
    expose less API? Resolve every open question yourself, taking the issue's
    recommended option and the smallest correct scope. File the deferred items as
-   one follow-up issue. Ponytail trims the code, never the requirements: if you
-   want to defer anything the user wrote in the issue or its comments, send the
-   proposed split to the supervisor now. Don't approve until the user has
-   answered.
+   one follow-up issue. The user decided that deferred scope, including
+   requirements from the user's own comments, goes into follow-up issues. No
+   sign-off is needed, but list every split in the approved-design comment and
+   tell the OL so it queues the follow-up.
 3. Security review, when the ticket touches auth, permissions or roles, input
    reaching HTML/SQL/git/shell, tokens/keys/secrets, uploads, redirects,
    webhooks/outbound requests, or rate limits. Create a security reviewer. Its
@@ -333,7 +333,7 @@ checkout <SHA>). Rerun the stages <TL> names, or all of them if it doesn't name 
   forced a resync and a retest on each open PR. Narrowed reruns (TL step 7) cut
   this down the most.
 - Leads applied "smallest correct scope" to requirements the user wrote in issue
-  comments (#29 to #112, #19 to #114). That has to go to the user first.
+  comments (#29 to #112, #19 to #114). The user confirmed: split into follow-ups.
 - Check that every merge had a tester pass on the merged head, or on a head whose
   only difference is a develop merge that doesn't overlap the PR.
 - The auto-mode classifier blocks some actions for some sessions: a TL renaming
