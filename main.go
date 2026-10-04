@@ -18,6 +18,7 @@ import (
 	_ "forgejo.org/modules/markup/asciicast"
 	_ "forgejo.org/modules/markup/console"
 	_ "forgejo.org/modules/markup/csv"
+	_ "forgejo.org/modules/markup/drawio"
 	_ "forgejo.org/modules/markup/markdown"
 	_ "forgejo.org/modules/markup/orgmode"
 
