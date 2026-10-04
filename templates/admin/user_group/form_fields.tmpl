@@ -7,3 +7,17 @@
 	<label for="description">{{ctx.Locale.Tr "admin.user_groups.description"}}</label>
 	<input id="description" name="description" value="{{.description}}" maxlength="255">
 </div>
+<div class="inline field">
+	<div class="ui checkbox">
+		<label>{{ctx.Locale.Tr "admin.user_groups.grants_site_admin"}}</label>
+		<input name="grants_site_admin" type="checkbox" {{if .grants_site_admin}}checked{{end}}>
+	</div>
+	<span class="help tw-block">{{ctx.Locale.Tr "admin.user_groups.grants_site_admin.description"}}</span>
+</div>
+<div class="inline field">
+	<div class="ui checkbox">
+		<label>{{ctx.Locale.Tr "admin.user_groups.grants_create_organization"}}</label>
+		<input name="grants_create_organization" type="checkbox" {{if .grants_create_organization}}checked{{end}}>
+	</div>
+	<span class="help tw-block">{{ctx.Locale.Tr "admin.user_groups.grants_create_organization.description"}}</span>
+</div>

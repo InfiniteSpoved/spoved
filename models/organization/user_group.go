@@ -25,8 +25,12 @@ type UserGroup struct {
 	LowerName   string `xorm:"UNIQUE NOT NULL"`
 	Name        string `xorm:"NOT NULL"`
 	Description string
-	CreatedUnix timeutil.TimeStamp `xorm:"INDEX created"`
-	UpdatedUnix timeutil.TimeStamp `xorm:"INDEX updated"`
+	// GrantsSiteAdmin makes every member of the group a site administrator.
+	GrantsSiteAdmin bool `xorm:"NOT NULL DEFAULT false"`
+	// GrantsCreateOrganization lets every member of the group create organizations.
+	GrantsCreateOrganization bool               `xorm:"NOT NULL DEFAULT false"`
+	CreatedUnix              timeutil.TimeStamp `xorm:"INDEX created"`
+	UpdatedUnix              timeutil.TimeStamp `xorm:"INDEX updated"`
 
 	NumMembers int `xorm:"-"`
 	NumTeams   int `xorm:"-"`
@@ -49,10 +53,36 @@ type UserGroupTeam struct {
 	OrgID   int64 `xorm:"INDEX NOT NULL"`
 }
 
+// UserGroupRole is an instance-level role a user group can grant to its members.
+type UserGroupRole string
+
+const (
+	UserGroupRoleSiteAdmin          UserGroupRole = "site_admin"
+	UserGroupRoleCreateOrganization UserGroupRole = "create_organization"
+)
+
+// UserGroupRoles lists every role a user group can grant.
+var UserGroupRoles = []UserGroupRole{UserGroupRoleSiteAdmin, UserGroupRoleCreateOrganization}
+
+// groupColumn is the user_group column that grants the role.
+func (r UserGroupRole) groupColumn() string {
+	return "grants_" + string(r)
+}
+
+// UserGroupRoleGrant records that a user group turned on the user flag of a
+// role (IsAdmin, AllowCreateOrganization). A flag without a grant was set by
+// other means and is never turned off by a user group.
+type UserGroupRoleGrant struct {
+	ID   int64         `xorm:"pk autoincr"`
+	UID  int64         `xorm:"UNIQUE(s) NOT NULL"`
+	Role UserGroupRole `xorm:"UNIQUE(s) VARCHAR(50) NOT NULL"`
+}
+
 func init() {
 	db.RegisterModel(new(UserGroup))
 	db.RegisterModel(new(UserGroupUser))
 	db.RegisterModel(new(UserGroupTeam))
+	db.RegisterModel(new(UserGroupRoleGrant))
 }
 
 // ErrUserGroupAlreadyExist represents a "UserGroupAlreadyExist" kind of error.
@@ -123,7 +153,7 @@ func InsertUserGroup(ctx context.Context, g *UserGroup) error {
 	})
 }
 
-// UpdateUserGroup updates the name and description of a user group.
+// UpdateUserGroup updates the name, description and roles of a user group.
 func UpdateUserGroup(ctx context.Context, g *UserGroup) error {
 	g.Name = strings.TrimSpace(g.Name)
 	g.LowerName = strings.ToLower(g.Name)
@@ -134,7 +164,7 @@ func UpdateUserGroup(ctx context.Context, g *UserGroup) error {
 		} else if has {
 			return ErrUserGroupAlreadyExist{Name: g.Name}
 		}
-		_, err = db.GetEngine(ctx).ID(g.ID).Cols("lower_name", "name", "description").Update(g)
+		_, err = db.GetEngine(ctx).ID(g.ID).Cols("lower_name", "name", "description", "grants_site_admin", "grants_create_organization").Update(g)
 		return err
 	})
 }
@@ -406,4 +436,45 @@ func GetTeamUser(ctx context.Context, teamID, uid int64) (*TeamUser, error) {
 		return nil, err
 	}
 	return tu, nil
+}
+
+// GetUserRoleGroups returns the user groups of a user that grant the role.
+func GetUserRoleGroups(ctx context.Context, uid int64, role UserGroupRole) ([]*UserGroup, error) {
+	groups := make([]*UserGroup, 0, 2)
+	return groups, db.GetEngine(ctx).
+		In("id", builder.Select("group_id").From("user_group_user").Where(builder.Eq{"uid": uid})).
+		And(builder.Eq{role.groupColumn(): true}).
+		OrderBy("lower_name").
+		Find(&groups)
+}
+
+// GetUsersGrantedRoleGroups returns, for each user a user group turned a role
+// flag on for (the given user only, unless uid is 0), and for each such role,
+// the names of the user's groups that grant it, joined by commas.
+func GetUsersGrantedRoleGroups(ctx context.Context, uid int64) (map[int64]map[string]string, error) {
+	grants := make([]*UserGroupRoleGrant, 0, 10)
+	sess := db.GetEngine(ctx)
+	if uid > 0 {
+		sess = sess.Where("uid=?", uid)
+	}
+	if err := sess.Find(&grants); err != nil {
+		return nil, err
+	}
+	result := make(map[int64]map[string]string, len(grants))
+	// ponytail: loads every grant and one query per grant; grants only exist for users with a group-granted role
+	for _, g := range grants {
+		groups, err := GetUserRoleGroups(ctx, g.UID, g.Role)
+		if err != nil {
+			return nil, err
+		}
+		names := make([]string, len(groups))
+		for i, group := range groups {
+			names[i] = group.Name
+		}
+		if result[g.UID] == nil {
+			result[g.UID] = make(map[string]string)
+		}
+		result[g.UID][string(g.Role)] = strings.Join(names, ", ")
+	}
+	return result, nil
 }
