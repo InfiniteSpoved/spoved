@@ -144,9 +144,9 @@ var UI = struct {
 		Description string
 		Keywords    string
 	}{
-		Author:      "GitHat",
-		Description: "GitHat is a self-hosted Git forge built with SOC 2 and ISO 27001 controls in mind.",
-		Keywords:    "git,forge,githat",
+		Author:      "Forgejo – Beyond coding. We forge.",
+		Description: "Forgejo is a self-hosted lightweight software forge. Easy to install and low maintenance, it just does the job.",
+		Keywords:    "git,forge,forgejo",
 	},
 }
 
