@@ -350,7 +350,7 @@ func countGroupedBy(ctx context.Context, table, col string, ids []int64) (map[in
 // groups linked to the team that the user is a member of, ordered by name.
 func GetTeamMembersUserGroups(ctx context.Context, teamID int64, uids []int64) (map[int64][]*UserGroup, error) {
 	if len(uids) == 0 {
-		return nil, nil
+		return map[int64][]*UserGroup{}, nil
 	}
 	rows := make([]struct {
 		UID       int64 `xorm:"uid"`
