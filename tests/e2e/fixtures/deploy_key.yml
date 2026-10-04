@@ -1,0 +1,19 @@
+-
+  id: 1001
+  key_id: 1001
+  repo_id: 1
+  name: e2e-write-key
+  fingerprint: SHA256:e2e-write-key
+  mode: 2 # write
+  created_unix: 946684800
+  updated_unix: 946684800
+
+-
+  id: 1002
+  key_id: 1002
+  repo_id: 1
+  name: e2e-read-key
+  fingerprint: SHA256:e2e-read-key
+  mode: 1 # read
+  created_unix: 946684800
+  updated_unix: 946684800

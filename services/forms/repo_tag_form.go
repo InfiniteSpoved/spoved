@@ -17,6 +17,8 @@ type ProtectTagForm struct {
 	NamePattern    string `binding:"Required;GlobOrRegexPattern"`
 	AllowlistUsers string
 	AllowlistTeams string
+	// public key IDs of the allowed deploy keys
+	AllowlistDeployKeyIDs string `form:"allowlist_deploy_key_ids"`
 }
 
 // Validate validates the fields

@@ -695,6 +695,7 @@ func CreateBranchProtection(ctx *context.APIContext) {
 		MergeTeamIDs:     mergeWhitelistTeams,
 		ApprovalsUserIDs: approvalsWhitelistUsers,
 		ApprovalsTeamIDs: approvalsWhitelistTeams,
+		DeployKeyIDs:     form.PushWhitelistDeployKeyIDs,
 	})
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "UpdateProtectBranch", err)
@@ -963,6 +964,11 @@ func EditBranchProtection(ctx *context.APIContext) {
 		}
 	}
 
+	whitelistDeployKeys := protectBranch.WhitelistDeployKeyIDs
+	if form.PushWhitelistDeployKeyIDs != nil {
+		whitelistDeployKeys = form.PushWhitelistDeployKeyIDs
+	}
+
 	err = git_model.UpdateProtectBranch(ctx, ctx.Repo().Repository, protectBranch, git_model.WhitelistOptions{
 		UserIDs:          whitelistUsers,
 		TeamIDs:          whitelistTeams,
@@ -970,6 +976,7 @@ func EditBranchProtection(ctx *context.APIContext) {
 		MergeTeamIDs:     mergeWhitelistTeams,
 		ApprovalsUserIDs: approvalsWhitelistUsers,
 		ApprovalsTeamIDs: approvalsWhitelistTeams,
+		DeployKeyIDs:     whitelistDeployKeys,
 	})
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "UpdateProtectBranch", err)

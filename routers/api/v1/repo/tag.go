@@ -449,8 +449,8 @@ func CreateTagProtection(ctx *context.APIContext) {
 		return
 	}
 
-	if len(form.WhitelistUsernames) == 0 && len(form.WhitelistTeams) == 0 {
-		ctx.Error(http.StatusBadRequest, "both whitelist_usernames and whitelist_teams are empty", "both whitelist_usernames and whitelist_teams are empty")
+	if len(form.WhitelistUsernames) == 0 && len(form.WhitelistTeams) == 0 && len(form.AllowlistDeployKeyIDs) == 0 {
+		ctx.Error(http.StatusBadRequest, "whitelist_usernames, whitelist_teams and allowlist_deploy_key_ids are empty", "whitelist_usernames, whitelist_teams and allowlist_deploy_key_ids are empty")
 		return
 	}
 
@@ -486,11 +486,18 @@ func CreateTagProtection(ctx *context.APIContext) {
 		}
 	}
 
+	allowlistDeployKeys, err := git_model.FilterWriteDeployKeyIDs(ctx, repo.ID, form.AllowlistDeployKeyIDs)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "FilterWriteDeployKeyIDs", err)
+		return
+	}
+
 	protectTag := &git_model.ProtectedTag{
-		RepoID:           repo.ID,
-		NamePattern:      strings.TrimSpace(namePattern),
-		AllowlistUserIDs: whitelistUsers,
-		AllowlistTeamIDs: whitelistTeams,
+		RepoID:                repo.ID,
+		NamePattern:           strings.TrimSpace(namePattern),
+		AllowlistUserIDs:      whitelistUsers,
+		AllowlistTeamIDs:      whitelistTeams,
+		AllowlistDeployKeyIDs: allowlistDeployKeys,
 	}
 	if err := git_model.InsertProtectedTag(ctx, protectTag); err != nil {
 		ctx.Error(http.StatusInternalServerError, "InsertProtectedTag", err)
@@ -597,6 +604,14 @@ func EditTagProtection(ctx *context.APIContext) {
 			return
 		}
 		pt.AllowlistUserIDs = whitelistUsers
+	}
+
+	if form.AllowlistDeployKeyIDs != nil {
+		pt.AllowlistDeployKeyIDs, err = git_model.FilterWriteDeployKeyIDs(ctx, repo.ID, form.AllowlistDeployKeyIDs)
+		if err != nil {
+			ctx.Error(http.StatusInternalServerError, "FilterWriteDeployKeyIDs", err)
+			return
+		}
 	}
 
 	err = git_model.UpdateProtectedTag(ctx, pt)

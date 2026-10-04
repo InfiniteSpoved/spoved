@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
+	asymkey_model "forgejo.org/models/asymkey"
+	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
@@ -80,6 +83,13 @@ func SettingsProtectedBranch(c *context.Context) {
 	c.Data["whitelist_users"] = strings.Join(base.Int64sToStrings(rule.WhitelistUserIDs), ",")
 	c.Data["merge_whitelist_users"] = strings.Join(base.Int64sToStrings(rule.MergeWhitelistUserIDs), ",")
 	c.Data["approvals_whitelist_users"] = strings.Join(base.Int64sToStrings(rule.ApprovalsWhitelistUserIDs), ",")
+	deployKeys, err := getWriteDeployKeys(c)
+	if err != nil {
+		c.ServerError("getWriteDeployKeys", err)
+		return
+	}
+	c.Data["DeployKeys"] = deployKeys
+	c.Data["whitelist_deploy_key_ids"] = strings.Join(base.Int64sToStrings(rule.WhitelistDeployKeyIDs), ",")
 	c.Data["status_check_contexts"] = strings.Join(rule.StatusCheckContexts, "\n")
 	contexts, _ := git_model.FindRepoRecentCommitStatusContexts(c, c.Repo.Repository.ID, 7*24*time.Hour) // Find last week status check contexts
 	c.Data["recent_status_checks"] = contexts
@@ -153,6 +163,7 @@ func SettingsProtectedBranchPost(ctx *context.Context) {
 		}
 	}
 
+	var whitelistDeployKeys []int64
 	var whitelistUsers, whitelistTeams, mergeWhitelistUsers, mergeWhitelistTeams, approvalsWhitelistUsers, approvalsWhitelistTeams []int64
 	protectBranch.RuleName = f.RuleName
 	if f.RequiredApprovals < 0 {
@@ -175,6 +186,9 @@ func SettingsProtectedBranchPost(ctx *context.Context) {
 		}
 		if strings.TrimSpace(f.WhitelistTeams) != "" {
 			whitelistTeams, _ = base.StringsToInt64s(strings.Split(f.WhitelistTeams, ","))
+		}
+		if strings.TrimSpace(f.WhitelistDeployKeyIDs) != "" {
+			whitelistDeployKeys, _ = base.StringsToInt64s(strings.Split(f.WhitelistDeployKeyIDs, ","))
 		}
 	default:
 		protectBranch.CanPush = false
@@ -242,6 +256,7 @@ func SettingsProtectedBranchPost(ctx *context.Context) {
 	err = git_model.UpdateProtectBranch(ctx, ctx.Repo.Repository, protectBranch, git_model.WhitelistOptions{
 		UserIDs:          whitelistUsers,
 		TeamIDs:          whitelistTeams,
+		DeployKeyIDs:     whitelistDeployKeys,
 		MergeUserIDs:     mergeWhitelistUsers,
 		MergeTeamIDs:     mergeWhitelistTeams,
 		ApprovalsUserIDs: approvalsWhitelistUsers,
@@ -344,4 +359,17 @@ func RenameBranchPost(ctx *context.Context) {
 
 	ctx.Flash.Success(ctx.Tr("repo.settings.rename_branch_success", form.From, form.To))
 	ctx.Redirect(fmt.Sprintf("%s/branches", ctx.Repo.RepoLink))
+}
+
+// getWriteDeployKeys returns the deploy keys of the repository which have write access,
+// the ones which can be selected in branch and tag protection rules.
+func getWriteDeployKeys(ctx *context.Context) ([]*asymkey_model.DeployKey, error) {
+	keys, err := db.Find[asymkey_model.DeployKey](ctx, asymkey_model.ListDeployKeysOptions{
+		ListOptions: db.ListOptionsAll,
+		RepoID:      ctx.Repo.Repository.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(keys, func(key *asymkey_model.DeployKey) bool { return key.IsReadOnly() }), nil
 }

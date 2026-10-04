@@ -75,6 +75,21 @@
 							</div>
 						{{end}}
 						<div class="checkbox-sub-item field">
+							<label>{{ctx.Locale.Tr "repo.settings.protect_whitelist_deploy_key_ids"}}</label>
+							<div class="ui multiple search selection dropdown" id="whitelist_deploy_key_ids">
+								<input type="hidden" name="whitelist_deploy_key_ids" value="{{.whitelist_deploy_key_ids}}">
+								<div class="default text">{{ctx.Locale.Tr "search.deploy_key_kind"}}</div>
+								<div class="menu">
+									{{range .DeployKeys}}
+										<div class="item" data-value="{{.KeyID}}">
+											{{svg "octicon-key"}}
+											{{.Name}}
+										</div>
+									{{end}}
+								</div>
+							</div>
+						</div>
+						<div class="checkbox-sub-item field">
 							<div class="ui checkbox">
 								<input type="checkbox" name="whitelist_deploy_keys" {{if .Rule.WhitelistDeployKeys}}checked{{end}}>
 								<label>{{ctx.Locale.Tr "repo.settings.protect_whitelist_deploy_keys"}}</label>

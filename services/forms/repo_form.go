@@ -224,6 +224,7 @@ type ProtectBranchForm struct {
 	WhitelistUsers                string
 	WhitelistTeams                string
 	WhitelistDeployKeys           bool
+	WhitelistDeployKeyIDs         string `form:"whitelist_deploy_key_ids"`
 	EnableMergeWhitelist          bool
 	MergeWhitelistUsers           string
 	MergeWhitelistTeams           string

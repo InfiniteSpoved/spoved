@@ -23,13 +23,16 @@ type Branch struct {
 // BranchProtection represents a branch protection for a repository
 type BranchProtection struct {
 	// Deprecated: true
-	BranchName                    string   `json:"branch_name"`
-	RuleName                      string   `json:"rule_name"`
-	EnablePush                    bool     `json:"enable_push"`
-	EnablePushWhitelist           bool     `json:"enable_push_whitelist"`
-	PushWhitelistUsernames        []string `json:"push_whitelist_usernames"`
-	PushWhitelistTeams            []string `json:"push_whitelist_teams"`
-	PushWhitelistDeployKeys       bool     `json:"push_whitelist_deploy_keys"`
+	BranchName              string   `json:"branch_name"`
+	RuleName                string   `json:"rule_name"`
+	EnablePush              bool     `json:"enable_push"`
+	EnablePushWhitelist     bool     `json:"enable_push_whitelist"`
+	PushWhitelistUsernames  []string `json:"push_whitelist_usernames"`
+	PushWhitelistTeams      []string `json:"push_whitelist_teams"`
+	PushWhitelistDeployKeys bool     `json:"push_whitelist_deploy_keys"`
+	// Public key IDs (`key_id` of a deploy key) of the deploy keys allowed to push. IDs which are not
+	// write deploy keys of the repository are ignored.
+	PushWhitelistDeployKeyIDs     []int64  `json:"push_whitelist_deploy_key_ids"`
 	EnableMergeWhitelist          bool     `json:"enable_merge_whitelist"`
 	MergeWhitelistUsernames       []string `json:"merge_whitelist_usernames"`
 	MergeWhitelistTeams           []string `json:"merge_whitelist_teams"`
@@ -57,13 +60,16 @@ type BranchProtection struct {
 // CreateBranchProtectionOption options for creating a branch protection
 type CreateBranchProtectionOption struct {
 	// Deprecated: true
-	BranchName                    string   `json:"branch_name"`
-	RuleName                      string   `json:"rule_name"`
-	EnablePush                    bool     `json:"enable_push"`
-	EnablePushWhitelist           bool     `json:"enable_push_whitelist"`
-	PushWhitelistUsernames        []string `json:"push_whitelist_usernames"`
-	PushWhitelistTeams            []string `json:"push_whitelist_teams"`
-	PushWhitelistDeployKeys       bool     `json:"push_whitelist_deploy_keys"`
+	BranchName              string   `json:"branch_name"`
+	RuleName                string   `json:"rule_name"`
+	EnablePush              bool     `json:"enable_push"`
+	EnablePushWhitelist     bool     `json:"enable_push_whitelist"`
+	PushWhitelistUsernames  []string `json:"push_whitelist_usernames"`
+	PushWhitelistTeams      []string `json:"push_whitelist_teams"`
+	PushWhitelistDeployKeys bool     `json:"push_whitelist_deploy_keys"`
+	// Public key IDs (`key_id` of a deploy key) of the deploy keys allowed to push. IDs which are not
+	// write deploy keys of the repository are ignored.
+	PushWhitelistDeployKeyIDs     []int64  `json:"push_whitelist_deploy_key_ids"`
 	EnableMergeWhitelist          bool     `json:"enable_merge_whitelist"`
 	MergeWhitelistUsernames       []string `json:"merge_whitelist_usernames"`
 	MergeWhitelistTeams           []string `json:"merge_whitelist_teams"`
@@ -86,11 +92,14 @@ type CreateBranchProtectionOption struct {
 
 // EditBranchProtectionOption options for editing a branch protection
 type EditBranchProtectionOption struct {
-	EnablePush                    *bool    `json:"enable_push"`
-	EnablePushWhitelist           *bool    `json:"enable_push_whitelist"`
-	PushWhitelistUsernames        []string `json:"push_whitelist_usernames"`
-	PushWhitelistTeams            []string `json:"push_whitelist_teams"`
-	PushWhitelistDeployKeys       *bool    `json:"push_whitelist_deploy_keys"`
+	EnablePush              *bool    `json:"enable_push"`
+	EnablePushWhitelist     *bool    `json:"enable_push_whitelist"`
+	PushWhitelistUsernames  []string `json:"push_whitelist_usernames"`
+	PushWhitelistTeams      []string `json:"push_whitelist_teams"`
+	PushWhitelistDeployKeys *bool    `json:"push_whitelist_deploy_keys"`
+	// Public key IDs (`key_id` of a deploy key) of the deploy keys allowed to push. IDs which are not
+	// write deploy keys of the repository are ignored.
+	PushWhitelistDeployKeyIDs     []int64  `json:"push_whitelist_deploy_key_ids"`
 	EnableMergeWhitelist          *bool    `json:"enable_merge_whitelist"`
 	MergeWhitelistUsernames       []string `json:"merge_whitelist_usernames"`
 	MergeWhitelistTeams           []string `json:"merge_whitelist_teams"`

@@ -25229,6 +25229,15 @@
           "type": "string",
           "x-go-name": "ProtectedFilePatterns"
         },
+        "push_whitelist_deploy_key_ids": {
+          "description": "Public key IDs (`key_id` of a deploy key) of the deploy keys allowed to push. IDs which are not\nwrite deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "PushWhitelistDeployKeyIDs"
+        },
         "push_whitelist_deploy_keys": {
           "type": "boolean",
           "x-go-name": "PushWhitelistDeployKeys"
@@ -25991,6 +26000,15 @@
         "protected_file_patterns": {
           "type": "string",
           "x-go-name": "ProtectedFilePatterns"
+        },
+        "push_whitelist_deploy_key_ids": {
+          "description": "Public key IDs (`key_id` of a deploy key) of the deploy keys allowed to push. IDs which are not\nwrite deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "PushWhitelistDeployKeyIDs"
         },
         "push_whitelist_deploy_keys": {
           "type": "boolean",
@@ -26842,6 +26860,15 @@
       "description": "CreateTagProtectionOption options for creating a tag protection",
       "type": "object",
       "properties": {
+        "allowlist_deploy_key_ids": {
+          "description": "Public key IDs (`key_id` of a deploy key) of the deploy keys allowed to control the tags. IDs which are not\nwrite deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "AllowlistDeployKeyIDs"
+        },
         "name_pattern": {
           "type": "string",
           "x-go-name": "NamePattern"
@@ -27420,6 +27447,15 @@
           "type": "string",
           "x-go-name": "ProtectedFilePatterns"
         },
+        "push_whitelist_deploy_key_ids": {
+          "description": "Public key IDs (`key_id` of a deploy key) of the deploy keys allowed to push. IDs which are not\nwrite deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "PushWhitelistDeployKeyIDs"
+        },
         "push_whitelist_deploy_keys": {
           "type": "boolean",
           "x-go-name": "PushWhitelistDeployKeys"
@@ -27990,6 +28026,15 @@
       "description": "EditTagProtectionOption options for editing a tag protection",
       "type": "object",
       "properties": {
+        "allowlist_deploy_key_ids": {
+          "description": "Public key IDs (`key_id` of a deploy key) of the deploy keys allowed to control the tags. IDs which are not\nwrite deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "AllowlistDeployKeyIDs"
+        },
         "name_pattern": {
           "type": "string",
           "x-go-name": "NamePattern"
@@ -31807,6 +31852,15 @@
       "description": "TagProtection represents a tag protection",
       "type": "object",
       "properties": {
+        "allowlist_deploy_key_ids": {
+          "description": "Public key IDs (`key_id` of a deploy key) of the deploy keys allowed to control the tags. IDs which are not\nwrite deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "AllowlistDeployKeyIDs"
+        },
         "created_at": {
           "type": "string",
           "format": "date-time",

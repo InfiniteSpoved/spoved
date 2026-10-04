@@ -70,6 +70,61 @@ test.describe('repo branch protection settings', () => {
   });
 });
 
+test.describe('deploy key pickers', () => {
+  test('branch protection', async ({page}) => {
+    const ruleName = `deploy-keys-${dynamic_id()}`;
+    const response = await page.goto('/user2/repo1/settings/branches/edit');
+    expect(response?.status()).toBe(200);
+
+    await page.locator('input[name="rule_name"]').fill(ruleName);
+    await page.locator('input[name="enable_push"][value="whitelist"]').click();
+
+    const picker = page.locator('#whitelist_deploy_key_ids');
+    await picker.click();
+    // only write deploy keys are offered
+    await expect(picker.locator('.menu .item', {hasText: 'e2e-read-key'})).toHaveCount(0);
+    await picker.locator('.menu .item', {hasText: 'e2e-write-key'}).click();
+    await expect(picker.locator('input[name="whitelist_deploy_key_ids"]')).toHaveValue('1001');
+    await screenshot(page);
+
+    await page.locator('button:text("Save rule")').click();
+    await page.waitForLoadState('domcontentloaded');
+
+    await page.goto(`/user2/repo1/settings/branches/edit?rule_name=${ruleName}`);
+    await expect(picker.locator('input[name="whitelist_deploy_key_ids"]')).toHaveValue('1001');
+    await expect(picker.locator('a.label', {hasText: 'e2e-write-key'})).toBeVisible();
+
+    // clean up
+    await page.goto('/user2/repo1/settings/branches/');
+    const deleteButton = page.locator('.flex-item', {hasText: ruleName}).locator('.delete-button');
+    await deleteButton.click();
+    await page.locator('#delete-protected-branch .actions .ok').click();
+    await expect(deleteButton).toHaveCount(0);
+  });
+
+  test('tag protection', async ({page}) => {
+    const pattern = `deploy-keys-${dynamic_id()}-*`;
+    const response = await page.goto('/user2/repo1/settings/tags');
+    expect(response?.status()).toBe(200);
+
+    await page.locator('input[name="name_pattern"]').fill(pattern);
+    const picker = page.locator('#allowlist_deploy_key_ids');
+    await picker.click();
+    await expect(picker.locator('.menu .item', {hasText: 'e2e-read-key'})).toHaveCount(0);
+    await picker.locator('.menu .item', {hasText: 'e2e-write-key'}).click();
+    await screenshot(page);
+    await page.getByRole('button', {name: 'Add rule'}).click();
+    await page.waitForLoadState('domcontentloaded');
+
+    const row = page.locator('tr', {hasText: pattern});
+    await expect(row.locator('.label', {hasText: 'e2e-write-key'})).toBeVisible();
+
+    // clean up
+    await row.getByRole('button', {name: 'Remove'}).click();
+    await expect(row).toHaveCount(0);
+  });
+});
+
 test.describe('repo actions secrets settings', () => {
   const secretName = dynamic_id().replaceAll('-', '_').toUpperCase();
 

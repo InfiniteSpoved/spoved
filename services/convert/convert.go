@@ -164,6 +164,7 @@ func ToBranchProtection(ctx context.Context, bp *git_model.ProtectedBranch, repo
 		PushWhitelistUsernames:        pushWhitelistUsernames,
 		PushWhitelistTeams:            pushWhitelistTeams,
 		PushWhitelistDeployKeys:       bp.WhitelistDeployKeys,
+		PushWhitelistDeployKeyIDs:     append([]int64{}, bp.WhitelistDeployKeyIDs...),
 		EnableMergeWhitelist:          bp.EnableMergeWhitelist,
 		MergeWhitelistUsernames:       mergeWhitelistUsernames,
 		MergeWhitelistTeams:           mergeWhitelistTeams,
@@ -464,12 +465,13 @@ func ToTagProtection(ctx context.Context, pt *git_model.ProtectedTag, repo *repo
 	whitelistTeams := getWhitelistEntities(teamReaders, pt.AllowlistTeamIDs)
 
 	return &api.TagProtection{
-		ID:                 pt.ID,
-		NamePattern:        pt.NamePattern,
-		WhitelistUsernames: whitelistUsernames,
-		WhitelistTeams:     whitelistTeams,
-		Created:            pt.CreatedUnix.AsTime(),
-		Updated:            pt.UpdatedUnix.AsTime(),
+		ID:                    pt.ID,
+		NamePattern:           pt.NamePattern,
+		WhitelistUsernames:    whitelistUsernames,
+		WhitelistTeams:        whitelistTeams,
+		AllowlistDeployKeyIDs: append([]int64{}, pt.AllowlistDeployKeyIDs...),
+		Created:               pt.CreatedUnix.AsTime(),
+		Updated:               pt.UpdatedUnix.AsTime(),
 	}
 }
 
