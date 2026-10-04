@@ -1452,6 +1452,10 @@ func Routes() *web.Route {
 				m.Get("", admin.GetAllEmails)
 				m.Get("/search", admin.SearchEmail)
 			})
+			m.Group("/storage", func() {
+				m.Get("/summary", admin.GetStorageSummary)
+				m.Get("/owners", admin.ListStorageOwners)
+			})
 			m.Group("/unadopted", func() {
 				m.Get("", admin.ListUnadoptedRepositories)
 				m.Post("/{username}/{reponame}", admin.AdoptRepository)
