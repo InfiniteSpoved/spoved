@@ -43,6 +43,25 @@ type CreateReleaseOption struct {
 	HideArchiveLinks bool   `json:"hide_archive_links"`
 }
 
+// GenerateReleaseNotesOption options when generating release notes
+type GenerateReleaseNotesOption struct {
+	// tag of the release, existing or not
+	// required: true
+	TagName string `json:"tag_name" binding:"Required;GitRefName;MaxSize(255)"`
+	// commit-ish the tag will point to if it does not exist yet, defaults to the default branch
+	Target string `json:"target_commitish" binding:"MaxSize(255)"`
+	// tag to start from, defaults to the nearest earlier tag
+	PreviousTagName string `json:"previous_tag_name" binding:"GitRefName;MaxSize(255)"`
+	// configuration file, defaults to .forgejo/release.yml or .github/release.yml
+	ConfigurationFilePath string `json:"configuration_file_path" binding:"MaxSize(255)"`
+}
+
+// GeneratedReleaseNotes generated release notes
+type GeneratedReleaseNotes struct {
+	Name string `json:"name"`
+	Body string `json:"body"`
+}
+
 // EditReleaseOption options when editing a release
 type EditReleaseOption struct {
 	TagName          string `json:"tag_name"`

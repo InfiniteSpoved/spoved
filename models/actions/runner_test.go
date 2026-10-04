@@ -13,6 +13,8 @@ import (
 	"forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/setting"
+	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
 
 	"github.com/stretchr/testify/assert"
@@ -594,4 +596,45 @@ func TestUpdateRunner(t *testing.T) {
 		assert.Zero(t, runner.RepoID)
 		assert.Equal(t, "old name", runner.Name)
 	})
+}
+
+func TestScopeAllowsRegistration(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockProtect(&setting.Actions.RunnerRegistration)()
+	org := &user_model.User{ID: 3, Type: user_model.UserTypeOrganization}
+	user := &user_model.User{ID: 2, Type: user_model.UserTypeIndividual}
+
+	cases := []struct {
+		name                           string
+		runner                         *ActionRunner
+		everyone, orgOwners, adminOnly bool
+	}{
+		{"global", &ActionRunner{}, true, true, true},
+		{"org", &ActionRunner{OwnerID: 3, Owner: org}, true, true, false},
+		{"user", &ActionRunner{OwnerID: 2, Owner: user}, true, false, false},
+		{"repo", &ActionRunner{RepoID: 1}, true, false, false},
+		{"unloaded owner", &ActionRunner{OwnerID: 3}, true, false, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			for mode, want := range map[string]bool{
+				setting.RunnerRegistrationEveryone:          c.everyone,
+				setting.RunnerRegistrationAdminAndOrgOwners: c.orgOwners,
+				setting.RunnerRegistrationAdmin:             c.adminOnly,
+			} {
+				setting.Actions.RunnerRegistration = mode
+				assert.Equal(t, want, c.runner.ScopeAllowsRegistration(), mode)
+			}
+		})
+	}
+
+	setting.Actions.RunnerRegistration = setting.RunnerRegistrationAdminAndOrgOwners
+	for _, c := range []struct {
+		ownerID, repoID int64
+		want            bool
+	}{{0, 0, true}, {3, 0, true}, {2, 0, false}, {0, 1, false}, {999999, 0, false}} {
+		allowed, err := RunnerScopeAllowsRegistration(db.DefaultContext, c.ownerID, c.repoID)
+		require.NoError(t, err)
+		assert.Equal(t, c.want, allowed, "owner %d repo %d", c.ownerID, c.repoID)
+	}
 }

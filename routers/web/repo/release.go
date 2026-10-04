@@ -658,6 +658,31 @@ func NewReleasePost(ctx *context.Context) {
 	ctx.Redirect(ctx.Repo.RepoLink + "/releases")
 }
 
+// GenerateReleaseNotes returns release notes generated from the pull requests merged since the previous tag
+func GenerateReleaseNotes(ctx *context.Context) {
+	form := web.GetForm(ctx).(*forms.GenerateReleaseNotesForm)
+	if ctx.HasError() {
+		ctx.JSONError(ctx.GetErrMsg())
+		return
+	}
+	body, err := release_service.GenerateReleaseNotes(ctx, ctx.Repo.Repository, ctx.Repo.GitRepo, release_service.GenerateNotesOptions{
+		TagName:         form.TagName,
+		Target:          form.Target,
+		PreviousTagName: form.PreviousTagName,
+	})
+	if errors.Is(err, util.ErrNotExist) {
+		ctx.JSONError(ctx.Tr("repo.release.generate_notes_not_found"))
+		return
+	} else if errors.Is(err, util.ErrInvalidArgument) {
+		ctx.JSONError(ctx.Tr("repo.release.generate_notes_invalid_config"))
+		return
+	} else if err != nil {
+		ctx.ServerError("GenerateReleaseNotes", err)
+		return
+	}
+	ctx.JSON(http.StatusOK, map[string]any{"body": body})
+}
+
 // EditRelease render release edit page
 func EditRelease(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("repo.release.edit_release")

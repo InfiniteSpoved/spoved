@@ -18,6 +18,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/translation"
 	"forgejo.org/modules/util"
@@ -148,6 +149,29 @@ func (r *ActionRunner) Editable(ownerID, repoID int64) bool {
 		return true
 	}
 	return repoID > 0 && r.RepoID == repoID
+}
+
+// ScopeAllowsRegistration reports whether [actions].RUNNER_REGISTRATION lets users other than site admins register
+// runners in the runner's scope. Attributes must be loaded; an unloaded or missing owner counts as not allowed.
+func (r *ActionRunner) ScopeAllowsRegistration() bool {
+	switch setting.Actions.RunnerRegistration {
+	case setting.RunnerRegistrationAdmin:
+		return r.OwnerID == 0 && r.RepoID == 0
+	case setting.RunnerRegistrationAdminAndOrgOwners:
+		return r.RepoID == 0 && (r.OwnerID == 0 || r.Owner != nil && r.Owner.IsOrganization())
+	}
+	return true
+}
+
+// RunnerScopeAllowsRegistration is ScopeAllowsRegistration for a scope that may have no runner yet.
+func RunnerScopeAllowsRegistration(ctx context.Context, ownerID, repoID int64) (bool, error) {
+	r := &ActionRunner{OwnerID: ownerID, RepoID: repoID}
+	if setting.Actions.RunnerRegistration != setting.RunnerRegistrationEveryone {
+		if err := r.LoadAttributes(ctx); err != nil {
+			return false, err
+		}
+	}
+	return r.ScopeAllowsRegistration(), nil
 }
 
 // LoadAttributes loads the attributes of the runner
