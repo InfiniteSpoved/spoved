@@ -176,7 +176,7 @@ func Repos(ctx *context.Context) {
 	ctx.Data["IsRepoIndexerEnabled"] = setting.Indexer.RepoIndexerEnabled
 
 	var ownerID int64
-	if ctx.Doer != nil && !ctx.Doer.IsAdmin {
+	if ctx.Doer != nil && !ctx.Doer.IsAdmin && !(ctx.Doer.IsAuditor && auth.IsHeldByUser(ctx.Authentication)) {
 		ownerID = ctx.Doer.ID
 	}
 

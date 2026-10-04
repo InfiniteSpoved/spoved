@@ -230,7 +230,11 @@ func Search(ctx *context.APIContext) {
 			})
 			return
 		}
-		permission, err := access_model.GetUserRepoPermissionWithReducer(ctx, repo, ctx.Doer(), ctx.Reducer())
+		getPermission := access_model.GetUserRepoPermissionWithReducer
+		if opts.AuditorView {
+			getPermission = access_model.GetUserRepoReadPermission
+		}
+		permission, err := getPermission(ctx, repo, ctx.Doer(), ctx.Reducer())
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, api.SearchError{
 				OK:    false,

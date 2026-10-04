@@ -29,7 +29,6 @@ type Permissions struct {
 	team                    *org_model.Team
 	org                     *org_model.Organization
 	isSigned                bool
-	readOnlyMethod          bool
 	authentication          auth.AuthenticationResult
 	requiredScopeCategories []auth_model.AccessTokenScopeCategory
 	reducer                 authz.AuthorizationReducer
@@ -131,12 +130,9 @@ func (o *Permissions) SetIsSigned(isSigned bool) {
 	o.isSigned = isSigned
 }
 
+// IsReadOnlyMethod is false: without a request, the auditor role never applies.
 func (o *Permissions) IsReadOnlyMethod() bool {
-	return o.readOnlyMethod
-}
-
-func (o *Permissions) SetReadOnlyMethod(readOnlyMethod bool) {
-	o.readOnlyMethod = readOnlyMethod
+	return false
 }
 
 func (o *Permissions) PublicOnly() bool {

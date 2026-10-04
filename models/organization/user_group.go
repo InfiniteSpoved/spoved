@@ -73,8 +73,8 @@ func (r UserGroupRole) groupColumn() string {
 }
 
 // UserGroupRoleGrant records that a user group turned on the user flag of a
-// role (IsAdmin, AllowCreateOrganization, IsAuditor). A flag without a grant was set by
-// other means and is never turned off by a user group.
+// role (IsAdmin, AllowCreateOrganization, IsAuditor). A flag without a grant
+// was set by other means and is never turned off by a user group.
 type UserGroupRoleGrant struct {
 	ID   int64         `xorm:"pk autoincr"`
 	UID  int64         `xorm:"UNIQUE(s) NOT NULL"`
