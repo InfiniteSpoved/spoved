@@ -11,7 +11,8 @@ import (
 	"forgejo.org/modules/timeutil"
 )
 
-func optionalTime(ts timeutil.TimeStamp) *time.Time {
+// OptionalTime converts a timestamp to a time, nil when it is 0.
+func OptionalTime(ts timeutil.TimeStamp) *time.Time {
 	if ts == 0 {
 		return nil
 	}
@@ -27,8 +28,8 @@ func ToAnnouncement(a *system_model.Announcement) *api.Announcement {
 		Type:        string(a.Type),
 		Audience:    string(a.Audience),
 		Dismissible: a.Dismissible,
-		StartAt:     optionalTime(a.StartUnix),
-		EndAt:       optionalTime(a.EndUnix),
+		StartAt:     OptionalTime(a.StartUnix),
+		EndAt:       OptionalTime(a.EndUnix),
 		Created:     a.CreatedUnix.AsTime(),
 		Updated:     a.UpdatedUnix.AsTime(),
 	}

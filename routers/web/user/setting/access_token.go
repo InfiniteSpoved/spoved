@@ -76,6 +76,7 @@ func getSelectedRepos(ctx *context.Context, selectedReposRaw []string) ([]*repo_
 }
 
 func loadAccessTokenCreateData(ctx *context.Context) {
+	user.SetExpiryFormData(ctx.Base, setting.AccessTokenExpiry)
 	ctx.Data["AccessTokenScopePublicOnly"] = string(auth_model.AccessTokenScopePublicOnly) // note: SliceUtils.Contains won't work in the template if this is a `auth_model.AccessTokenScope`, so it's cast to a string here
 
 	categories := []string{
@@ -249,10 +250,17 @@ func AccessTokenCreatePost(ctx *context.Context) {
 		return
 	}
 
+	expires, err := authz.ParseExpiryDate(form.ExpiresAt)
+	if err != nil {
+		renderWithError(template.HTML(template.HTMLEscapeString(user.TranslateExpiryError(ctx.Base, err, setting.AccessTokenExpiry).ValueOrZeroValue())))
+		return
+	}
+
 	t := &auth_model.AccessToken{
-		UID:   ctx.Doer.ID,
-		Name:  form.Name,
-		Scope: scope,
+		UID:         ctx.Doer.ID,
+		Name:        form.Name,
+		Scope:       scope,
+		ExpiresUnix: expires,
 	}
 
 	var resourceRepos []*auth_model.AccessTokenResourceRepo

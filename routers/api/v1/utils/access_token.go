@@ -22,6 +22,7 @@ import (
 	"forgejo.org/routers/web/shared/user"
 	"forgejo.org/services/authz"
 	"forgejo.org/services/context"
+	"forgejo.org/services/convert"
 )
 
 // DeleteAccessToken deletes an access token for a user identified by ctx.ContextUser.
@@ -119,6 +120,7 @@ func ListAccessTokens(ctx *context.APIContext) {
 			Scopes:         tokens[i].Scope.StringSlice(),
 			Created:        tokens[i].CreatedUnix.AsTime(),
 			Repositories:   reposByTokenID[tokens[i].ID],
+			Expires:        convert.OptionalTime(tokens[i].ExpiresUnix),
 		}
 		// Provide a consistent sort order on repositories, helpful for test consistency.  Hard to do any earlier
 		// because of the bulk loading maps.
@@ -137,8 +139,9 @@ func CreateAccessToken(ctx *context.APIContext) {
 	form := web.GetForm(ctx).(*api.CreateAccessTokenOption)
 
 	t := &auth_model.AccessToken{
-		UID:  ctx.User().ID,
-		Name: form.Name,
+		UID:         ctx.User().ID,
+		Name:        form.Name,
+		ExpiresUnix: ExpiryTimeStamp(form.ExpiresAt),
 	}
 
 	exist, err := auth_model.AccessTokenByNameExists(ctx, t)
@@ -205,6 +208,10 @@ func CreateAccessToken(ctx *context.APIContext) {
 	}
 
 	if err := authz.ValidateAccessToken(t, resourceRepos); err != nil {
+		if IsExpiryError(err) {
+			ctx.Error(http.StatusUnprocessableEntity, "ValidateAccessToken", err)
+			return
+		}
 		s := user.TranslateAccessTokenValidationError(ctx.Base, err)
 		if has, str := s.Get(); has {
 			ctx.Error(http.StatusBadRequest, "ValidateAccessToken", str)
@@ -232,5 +239,6 @@ func CreateAccessToken(ctx *context.APIContext) {
 		Scopes:         t.Scope.StringSlice(),
 		Created:        t.CreatedUnix.AsTime(),
 		Repositories:   tokenRepositories,
+		Expires:        convert.OptionalTime(t.ExpiresUnix),
 	})
 }

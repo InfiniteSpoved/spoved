@@ -10,6 +10,7 @@
 				<label for="name">{{ctx.Locale.Tr "settings.token_name"}}</label>
 				<input id="name" name="name" value="{{.name}}" {{if eq .Autofocus "name"}}autofocus{{end}} required maxlength="255">
 			</div>
+			{{template "shared/expiry_input" .}}
 			<div class="field">
 				<fieldset>
 					<label>{{ctx.Locale.Tr "settings.repo_and_org_access"}}</label>

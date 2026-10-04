@@ -1366,5 +1366,13 @@
 	"admin.announcements.updated": "The announcement has been updated.",
 	"admin.announcements.deleted": "The announcement has been deleted.",
 	"announcements.dismiss": "Dismiss",
+	"credential.expires_at": "Expiry date",
+	"credential.expires_at.help": "Leave empty for no expiry.",
+	"credential.expires_on": "Expires %s",
+	"credential.expired_on": "Expired %s",
+	"credential.error.expiry_invalid": "The expiry date is invalid.",
+	"credential.error.expiry_required": "An expiry date is required.",
+	"credential.error.expiry_in_past": "The expiry date must be in the future.",
+	"credential.error.expiry_too_late": "The expiry date can be at most %d days from today.",
 	"meta.last_line": "Thank you for translating Forgejo! This line isn't seen by the users but it serves other purposes in the translation management. You can place a fun fact in the translation instead of translating it."
 }

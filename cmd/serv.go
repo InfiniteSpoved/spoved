@@ -31,6 +31,7 @@ import (
 	"forgejo.org/modules/process"
 	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/timeutil"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/kballard/go-shellquote"
@@ -163,6 +164,15 @@ func getKeyCheckMessage(
 		authenticatedWith = "key named " + key.Name
 	}
 	return fmt.Sprintf(msgTmpl, username, authenticatedWith, instanceName, instanceName)
+}
+
+// lfsTokenExpiry doesn't let the LFS token outlive the SSH key (keyExpires, 0 = never) it is issued for.
+func lfsTokenExpiry(now time.Time, keyExpires timeutil.TimeStamp) time.Time {
+	expiry := now.Add(setting.LFS.HTTPAuthExpiry)
+	if keyExpires != 0 && expiry.After(keyExpires.AsTime()) {
+		return keyExpires.AsTime()
+	}
+	return expiry
 }
 
 func runServ(ctx context.Context, c *cli.Command) error {
@@ -302,7 +312,7 @@ func runServ(ctx context.Context, c *cli.Command) error {
 		now := time.Now()
 		claims := lfs.Claims{
 			RegisteredClaims: jwt.RegisteredClaims{
-				ExpiresAt: jwt.NewNumericDate(now.Add(setting.LFS.HTTPAuthExpiry)),
+				ExpiresAt: jwt.NewNumericDate(lfsTokenExpiry(now, results.ExpiresUnix)),
 				NotBefore: jwt.NewNumericDate(now),
 			},
 			RepoID: results.RepoID,
