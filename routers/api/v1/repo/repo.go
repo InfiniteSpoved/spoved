@@ -1305,9 +1305,11 @@ func GetIssueTemplates(ctx *context.APIContext) {
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/IssueTemplates"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
-	ret, _ := issue.GetTemplatesFromDefaultBranch(ctx.Repo().Repository, ctx.Repo().GitRepo)
+	ret, _ := issue.GetTemplatesFromDefaultBranch(ctx, ctx.Repo().Repository, ctx.Repo().GitRepo)
 	ctx.JSON(http.StatusOK, ret)
 }
 
@@ -1332,9 +1334,11 @@ func GetIssueConfig(ctx *context.APIContext) {
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/RepoIssueConfig"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
-	issueConfig, _ := issue.GetTemplateConfigFromDefaultBranch(ctx.Repo().Repository, ctx.Repo().GitRepo)
+	issueConfig, _ := issue.GetTemplateConfigFromDefaultBranch(ctx, ctx.Repo().Repository, ctx.Repo().GitRepo)
 	ctx.JSON(http.StatusOK, issueConfig)
 }
 
@@ -1359,9 +1363,11 @@ func ValidateIssueConfig(ctx *context.APIContext) {
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/RepoIssueConfigValidation"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
-	_, err := issue.GetTemplateConfigFromDefaultBranch(ctx.Repo().Repository, ctx.Repo().GitRepo)
+	_, err := issue.GetTemplateConfigFromDefaultBranch(ctx, ctx.Repo().Repository, ctx.Repo().GitRepo)
 
 	if err == nil {
 		ctx.JSON(http.StatusOK, api.IssueConfigValidation{Valid: true, Message: ""})
