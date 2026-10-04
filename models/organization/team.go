@@ -78,6 +78,7 @@ type Team struct {
 	Members                 []*user_model.User       `xorm:"-"`
 	NumRepos                int
 	NumMembers              int
+	NumUserGroups           int         `xorm:"-"`
 	Units                   []*TeamUnit `xorm:"-"`
 	IncludesAllRepositories bool        `xorm:"NOT NULL DEFAULT false"`
 	CanCreateOrgRepo        bool        `xorm:"NOT NULL DEFAULT false"`
