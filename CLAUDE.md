@@ -46,3 +46,4 @@ Add a line here when you hit something the next person should know.
 - Grouped counts: use one `GROUP BY` query per list (see `countGroupedBy` in `models/organization/user_group.go`), not one query per row.
 - Deploy keys are referenced by `PublicKey` ID (`DeployKey.KeyID`) in protection rules, so org deploy keys can reuse the same lists later.
 - A deploy-key push runs with `opts.UserID` set to the repository owner; decide deploy-key permissions from the key (`ctx.deployKeyKeyID` in the pre-receive hook), never from that user ID.
+- To backdate Actions rows in tests, insert them and then run `UPDATE action_run SET created = ?`. `ActionRun.Created` is `xorm:"created"`, so a value set on insert is overwritten. Also give each inserted `ActionRunJob` its own `Handle`, because that column is unique.
