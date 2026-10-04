@@ -12,13 +12,21 @@ import (
 	"testing"
 
 	auth_model "forgejo.org/models/auth"
+	"forgejo.org/models/db"
+	org_model "forgejo.org/models/organization"
+	"forgejo.org/models/perm"
 	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/services/forms"
+	release_service "forgejo.org/services/release"
+	files_service "forgejo.org/services/repository/files"
 	"forgejo.org/tests"
+	"forgejo.org/tests/forgery"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -680,4 +688,140 @@ func TestAPIReleaseGithubFormat(t *testing.T) {
 	DecodeJSON(t, resp, &apiRelease)
 
 	assert.True(t, strings.HasSuffix(apiRelease.UploadURL, "/api/v1/repos/user2/repo1/releases/1/assets{?name,label}"), apiRelease.UploadURL)
+}
+
+func TestAPIGenerateReleaseNotes(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		owner := forgery.CreateUser(t, nil)
+		org := forgery.CreateOrganisation(t, owner)
+		repo := forgery.CreateRepository(t, org.AsUser(), &forgery.CreateRepositoryOptions{Files: forgery.FilesInit{}})
+		ctx := NewAPITestContext(t, owner.Name, repo.Name, auth_model.AccessTokenScopeWriteRepository)
+		link := fmt.Sprintf("/api/v1/repos/%s/%s/releases/generate-notes", org.Name, repo.Name)
+
+		commitFile := func(branch, newBranch, path, content string) {
+			_, err := files_service.ChangeRepoFiles(t.Context(), repo, owner, &files_service.ChangeRepoFilesOptions{
+				Files:     []*files_service.ChangeRepoFile{{Operation: "create", TreePath: path, ContentReader: strings.NewReader(content)}},
+				OldBranch: branch,
+				NewBranch: newBranch,
+			})
+			require.NoError(t, err)
+		}
+		mergePR := func(branch string, style repo_model.MergeStyle) int64 {
+			commitFile("main", branch, branch+".txt", branch)
+			pr, err := doAPICreatePullRequest(ctx, org.Name, repo.Name, "main", branch)(t)
+			require.NoError(t, err)
+			doAPIMergePullRequestForm(t, ctx, org.Name, repo.Name, pr.Index, &forms.MergePullRequestForm{Do: string(style)})
+			return pr.Index
+		}
+		tag := func(name string) {
+			require.NoError(t, release_service.CreateNewTag(t.Context(), owner, repo, "main", name, ""))
+		}
+		generate := func(token string, opts api.GenerateReleaseNotesOption, status int) string {
+			resp := MakeRequest(t, NewRequestWithJSON(t, "POST", link, opts).AddTokenAuth(token), status)
+			if status != http.StatusOK {
+				return resp.Body.String()
+			}
+			var notes api.GeneratedReleaseNotes
+			DecodeJSON(t, resp, &notes)
+			assert.Equal(t, opts.TagName, notes.Name)
+			return notes.Body
+		}
+		line := func(index int64) string {
+			return fmt.Sprintf("by @%s in #%d\n", owner.Name, index)
+		}
+
+		pr1 := mergePR("b1", repo_model.MergeStyleMerge)
+		tag("v1")
+		pr2 := mergePR("b2", repo_model.MergeStyleSquash)
+		pr3 := mergePR("b3", repo_model.MergeStyleRebase)
+		tag("v2")
+		pr4 := mergePR("b4", repo_model.MergeStyleMerge)
+
+		t.Run("between tags", func(t *testing.T) {
+			body := generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v2"}, http.StatusOK)
+			assert.NotContains(t, body, line(pr1))
+			assert.Contains(t, body, line(pr2))
+			assert.Contains(t, body, line(pr3))
+			assert.NotContains(t, body, line(pr4))
+			assert.Contains(t, body, fmt.Sprintf("**Full Changelog**: %s%s/%s/compare/v1...v2\n", u.String(), org.Name, repo.Name))
+		})
+
+		t.Run("first release", func(t *testing.T) {
+			body := generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v1"}, http.StatusOK)
+			assert.Contains(t, body, line(pr1))
+			assert.NotContains(t, body, line(pr2))
+			assert.Contains(t, body, "/commits/tag/v1\n")
+		})
+
+		t.Run("new tag and explicit previous tag", func(t *testing.T) {
+			body := generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v3"}, http.StatusOK)
+			assert.Equal(t, []bool{false, false, false, true}, []bool{strings.Contains(body, line(pr1)), strings.Contains(body, line(pr2)), strings.Contains(body, line(pr3)), strings.Contains(body, line(pr4))})
+
+			body = generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v3", Target: "main", PreviousTagName: "v1"}, http.StatusOK)
+			assert.Equal(t, []bool{false, true, true, true}, []bool{strings.Contains(body, line(pr1)), strings.Contains(body, line(pr2)), strings.Contains(body, line(pr3)), strings.Contains(body, line(pr4))})
+			assert.Contains(t, body, "/compare/v1...v3\n")
+		})
+
+		t.Run("config", func(t *testing.T) {
+			commitFile("main", "", ".github/release.yml", "changelog:\n  categories:\n    - title: GitHub\n      labels: [\"*\"]\n")
+			commitFile("main", "", "custom.yml", "changelog:\n  categories:\n    - title: Custom\n      labels: [\"*\"]\n")
+			commitFile("main", "", "broken.yml", "changelog: [secret-detail\n")
+
+			body := generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v3"}, http.StatusOK)
+			assert.Contains(t, body, "### GitHub\n* ")
+			body = generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v3", ConfigurationFilePath: "custom.yml"}, http.StatusOK)
+			assert.Contains(t, body, "### Custom\n* ")
+
+			body = generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v3", ConfigurationFilePath: "missing.yml"}, http.StatusUnprocessableEntity)
+			assert.Contains(t, body, "release notes configuration file not found")
+			body = generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v3", ConfigurationFilePath: "broken.yml"}, http.StatusUnprocessableEntity)
+			assert.Contains(t, body, "invalid release notes configuration")
+			assert.NotContains(t, body, "secret-detail")
+			assert.NotContains(t, body, "yaml")
+		})
+
+		t.Run("validation", func(t *testing.T) {
+			generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "bad..tag"}, http.StatusUnprocessableEntity)
+			generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v3", PreviousTagName: "--exec"}, http.StatusNotFound)
+			generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v3", PreviousTagName: "missing"}, http.StatusNotFound)
+			generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v3", Target: "missing"}, http.StatusNotFound)
+		})
+
+		t.Run("permissions", func(t *testing.T) {
+			MakeRequest(t, NewRequestWithJSON(t, "POST", link, api.GenerateReleaseNotesOption{TagName: "v2"}), http.StatusUnauthorized)
+
+			reader := forgery.CreateUser(t, nil)
+			forgery.CreateTeam(t, org, &forgery.CreateTeamOptions{Mode: perm.AccessModeRead, Members: []*user_model.User{reader}})
+			generate(getUserToken(t, reader.Name, auth_model.AccessTokenScopeWriteRepository), api.GenerateReleaseNotesOption{TagName: "v2"}, http.StatusForbidden)
+
+			setUnits := func(name string, units map[unit.Type]perm.AccessMode) *user_model.User {
+				user := forgery.CreateUser(t, nil)
+				team := forgery.CreateTeam(t, org, &forgery.CreateTeamOptions{Name: name, Mode: perm.AccessModeWrite, Members: []*user_model.User{user}})
+				for tp, mode := range units {
+					_, err := db.GetEngine(t.Context()).Where("team_id = ? AND `type` = ?", team.ID, tp).Cols("access_mode").Update(&org_model.TeamUnit{AccessMode: mode})
+					require.NoError(t, err)
+				}
+				return user
+			}
+			noCode := setUnits("no-code", map[unit.Type]perm.AccessMode{unit.TypeCode: perm.AccessModeNone})
+			generate(getUserToken(t, noCode.Name, auth_model.AccessTokenScopeWriteRepository), api.GenerateReleaseNotesOption{TagName: "v2"}, http.StatusForbidden)
+			loginUser(t, noCode.Name).MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/%s/%s/releases/generate-notes", org.Name, repo.Name), map[string]string{"tag_name": "v2"}), http.StatusNotFound)
+
+			noPulls := setUnits("no-pulls", map[unit.Type]perm.AccessMode{unit.TypePullRequests: perm.AccessModeNone})
+			generate(getUserToken(t, noPulls.Name, auth_model.AccessTokenScopeWriteRepository), api.GenerateReleaseNotesOption{TagName: "v2"}, http.StatusForbidden)
+		})
+
+		t.Run("web", func(t *testing.T) {
+			session := loginUser(t, owner.Name)
+			webLink := fmt.Sprintf("/%s/%s/releases/generate-notes", org.Name, repo.Name)
+			resp := session.MakeRequest(t, NewRequestWithValues(t, "POST", webLink, map[string]string{"tag_name": "v2"}), http.StatusOK)
+			var notes struct{ Body string }
+			DecodeJSON(t, resp, &notes)
+			assert.Contains(t, notes.Body, line(pr2))
+			assert.NotContains(t, notes.Body, line(pr4))
+
+			session.MakeRequest(t, NewRequestWithValues(t, "POST", webLink, map[string]string{"tag_name": "bad..tag"}), http.StatusBadRequest)
+			session.MakeRequest(t, NewRequestWithValues(t, "POST", webLink, map[string]string{"tag_name": "v3", "previous_tag_name": "missing"}), http.StatusBadRequest)
+		})
+	})
 }
