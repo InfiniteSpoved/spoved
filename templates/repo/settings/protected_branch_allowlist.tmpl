@@ -1,0 +1,50 @@
+<fieldset>
+	<legend>{{ctx.Locale.Tr .Legend}}</legend>
+	<p class="help tw-ml-0">{{ctx.Locale.Tr .Help}}</p>
+	<div class="field">
+		<label>{{ctx.Locale.Tr "tag_protection.allowed.users"}}</label>
+		<div class="ui multiple search selection dropdown" id="{{.Name}}_users">
+			<input type="hidden" name="{{.Name}}_users" value="{{.UserIDs}}">
+			<div class="default text">{{ctx.Locale.Tr "search.user_kind"}}</div>
+			<div class="menu">
+				{{range .Users}}
+					<div class="item" data-value="{{.ID}}">
+						{{ctx.AvatarUtils.Avatar . 28 "mini"}}{{template "repo/search_name" .}}
+					</div>
+				{{end}}
+			</div>
+		</div>
+	</div>
+	{{if .IsOrganization}}
+		<div class="field">
+			<label>{{ctx.Locale.Tr "tag_protection.allowed.teams"}}</label>
+			<div class="ui multiple search selection dropdown" id="{{.Name}}_teams">
+				<input type="hidden" name="{{.Name}}_teams" value="{{.TeamIDs}}">
+				<div class="default text">{{ctx.Locale.Tr "search.team_kind"}}</div>
+				<div class="menu">
+					{{range .Teams}}
+						<div class="item" data-value="{{.ID}}">
+							{{svg "octicon-people"}}
+							{{.Name}}
+						</div>
+					{{end}}
+				</div>
+			</div>
+		</div>
+	{{end}}
+	<div class="field">
+		<label>{{ctx.Locale.Tr "tag_protection.allowed.deploy_keys"}}</label>
+		<div class="ui multiple search selection dropdown" id="{{.Name}}_deploy_key_ids">
+			<input type="hidden" name="{{.Name}}_deploy_key_ids" value="{{.DeployKeyIDs}}">
+			<div class="default text">{{ctx.Locale.Tr "search.deploy_key_kind"}}</div>
+			<div class="menu">
+				{{range .DeployKeys}}
+					<div class="item" data-value="{{.KeyID}}">
+						{{svg "octicon-key"}}
+						{{.Name}}
+					</div>
+				{{end}}
+			</div>
+		</div>
+	</div>
+</fieldset>

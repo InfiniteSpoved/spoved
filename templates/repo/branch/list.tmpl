@@ -181,14 +181,14 @@
 										{{svg "octicon-pencil"}}
 									</button>
 								{{end}}
-								{{if and $.IsWriter (not $.IsMirror) (not $.Repository.IsArchived) (not .IsProtected)}}
-									{{if .DBBranch.IsDeleted}}
+								{{if and $.IsWriter (not $.IsMirror) (not $.Repository.IsArchived)}}
+									{{if and .DBBranch.IsDeleted (not .IsProtected)}}
 										<button class="btn interact-bg tw-p-2 link-action restore-branch-button" data-url="{{$.Link}}/restore?branch_id={{.DBBranch.ID}}&name={{.DBBranch.Name}}&page={{$.Page.Paginater.Current}}" data-tooltip-content="{{ctx.Locale.Tr "repo.branch.restore" (.DBBranch.Name)}}">
 											<span class="text blue">
 												{{svg "octicon-reply"}}
 											</span>
 										</button>
-									{{else}}
+									{{else if and (not .DBBranch.IsDeleted) .CanDelete}}
 										<button class="btn interact-bg tw-p-2 delete-button delete-branch-button" data-url="{{$.Link}}/delete?name={{.DBBranch.Name}}&page={{$.Page.Paginater.Current}}" data-tooltip-content="{{ctx.Locale.Tr "repo.branch.delete" (.DBBranch.Name)}}" data-name="{{.DBBranch.Name}}" data-modal-id="delete-branch">
 											{{svg "octicon-trash"}}
 										</button>

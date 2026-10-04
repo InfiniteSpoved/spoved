@@ -51,6 +51,17 @@ type BranchProtection struct {
 	ProtectedFilePatterns         string   `json:"protected_file_patterns"`
 	UnprotectedFilePatterns       string   `json:"unprotected_file_patterns"`
 	ApplyToAdmins                 bool     `json:"apply_to_admins"`
+
+	// Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.
+	// The default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.
+	DeleteAllowlistUsernames    []string `json:"delete_allowlist_usernames"`
+	DeleteAllowlistTeams        []string `json:"delete_allowlist_teams"`
+	DeleteAllowlistDeployKeyIDs []int64  `json:"delete_allowlist_deploy_key_ids"`
+	// Users, teams and deploy keys (public key IDs) allowed to force-push matching branches. Empty lists block everyone.
+	// A force push must still pass the other checks of the rule. IDs which are not write deploy keys of the repository are ignored.
+	ForcePushAllowlistUsernames    []string `json:"force_push_allowlist_usernames"`
+	ForcePushAllowlistTeams        []string `json:"force_push_allowlist_teams"`
+	ForcePushAllowlistDeployKeyIDs []int64  `json:"force_push_allowlist_deploy_key_ids"`
 	// swagger:strfmt date-time
 	Created time.Time `json:"created_at"`
 	// swagger:strfmt date-time
@@ -88,6 +99,17 @@ type CreateBranchProtectionOption struct {
 	ProtectedFilePatterns         string   `json:"protected_file_patterns"`
 	UnprotectedFilePatterns       string   `json:"unprotected_file_patterns"`
 	ApplyToAdmins                 bool     `json:"apply_to_admins"`
+
+	// Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.
+	// The default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.
+	DeleteAllowlistUsernames    []string `json:"delete_allowlist_usernames"`
+	DeleteAllowlistTeams        []string `json:"delete_allowlist_teams"`
+	DeleteAllowlistDeployKeyIDs []int64  `json:"delete_allowlist_deploy_key_ids"`
+	// Users, teams and deploy keys (public key IDs) allowed to force-push matching branches. Empty lists block everyone.
+	// A force push must still pass the other checks of the rule. IDs which are not write deploy keys of the repository are ignored.
+	ForcePushAllowlistUsernames    []string `json:"force_push_allowlist_usernames"`
+	ForcePushAllowlistTeams        []string `json:"force_push_allowlist_teams"`
+	ForcePushAllowlistDeployKeyIDs []int64  `json:"force_push_allowlist_deploy_key_ids"`
 }
 
 // EditBranchProtectionOption options for editing a branch protection
@@ -118,4 +140,15 @@ type EditBranchProtectionOption struct {
 	ProtectedFilePatterns         *string  `json:"protected_file_patterns"`
 	UnprotectedFilePatterns       *string  `json:"unprotected_file_patterns"`
 	ApplyToAdmins                 *bool    `json:"apply_to_admins"`
+
+	// Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.
+	// The default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.
+	DeleteAllowlistUsernames    []string `json:"delete_allowlist_usernames"`
+	DeleteAllowlistTeams        []string `json:"delete_allowlist_teams"`
+	DeleteAllowlistDeployKeyIDs []int64  `json:"delete_allowlist_deploy_key_ids"`
+	// Users, teams and deploy keys (public key IDs) allowed to force-push matching branches. Empty lists block everyone.
+	// A force push must still pass the other checks of the rule. IDs which are not write deploy keys of the repository are ignored.
+	ForcePushAllowlistUsernames    []string `json:"force_push_allowlist_usernames"`
+	ForcePushAllowlistTeams        []string `json:"force_push_allowlist_teams"`
+	ForcePushAllowlistDeployKeyIDs []int64  `json:"force_push_allowlist_deploy_key_ids"`
 }

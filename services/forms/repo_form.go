@@ -243,6 +243,13 @@ type ProtectBranchForm struct {
 	ProtectedFilePatterns         string
 	UnprotectedFilePatterns       string
 	ApplyToAdmins                 bool
+
+	DeleteAllowlistUsers           string `form:"delete_allowlist_users"`
+	DeleteAllowlistTeams           string `form:"delete_allowlist_teams"`
+	DeleteAllowlistDeployKeyIDs    string `form:"delete_allowlist_deploy_key_ids"`
+	ForcePushAllowlistUsers        string `form:"force_push_allowlist_users"`
+	ForcePushAllowlistTeams        string `form:"force_push_allowlist_teams"`
+	ForcePushAllowlistDeployKeyIDs string `form:"force_push_allowlist_deploy_key_ids"`
 }
 
 // Validate validates the fields

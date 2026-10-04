@@ -102,6 +102,8 @@
 					<span class="help">{{ctx.Locale.Tr "repo.settings.require_signed_commits_desc"}}</span>
 				</label>
 			</fieldset>
+			{{template "repo/settings/protected_branch_allowlist" dict "Name" "delete_allowlist" "Legend" "repo.settings.protect_delete_allowlist" "Help" "repo.settings.protect_delete_allowlist_desc" "Users" .Users "Teams" .Teams "DeployKeys" .DeployKeys "IsOrganization" .Owner.IsOrganization "UserIDs" .delete_allowlist_users "TeamIDs" .delete_allowlist_teams "DeployKeyIDs" .delete_allowlist_deploy_key_ids}}
+			{{template "repo/settings/protected_branch_allowlist" dict "Name" "force_push_allowlist" "Legend" "repo.settings.protect_force_push_allowlist" "Help" "repo.settings.protect_force_push_allowlist_desc" "Users" .Users "Teams" .Teams "DeployKeys" .DeployKeys "IsOrganization" .Owner.IsOrganization "UserIDs" .force_push_allowlist_users "TeamIDs" .force_push_allowlist_teams "DeployKeyIDs" .force_push_allowlist_deploy_key_ids}}
 			<fieldset>
 				<legend>{{ctx.Locale.Tr "repo.settings.event_pull_request_approvals"}}</legend>
 				<label>
