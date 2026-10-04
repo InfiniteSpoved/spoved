@@ -989,6 +989,7 @@ func Routes() *web.Route {
 					m.Combo("").Get(repo.ListReleases).
 						Post(reqToken(), reqRepoWriter(unit.TypeReleases), context.ReferencesGitRepo(), bind(api.CreateReleaseOption{}), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeReposAll, context.QuotaTargetRepo), repo.CreateRelease)
 					m.Combo("/latest").Get(repo.GetLatestRelease)
+					m.Post("/generate-notes", reqToken(), reqRepoWriter(unit.TypeReleases), reqRepoReader(unit.TypeCode), reqRepoReader(unit.TypePullRequests), context.ReferencesGitRepo(), bind(api.GenerateReleaseNotesOption{}), repo.GenerateReleaseNotes)
 					m.Group("/{id}", func() {
 						m.Combo("").Get(repo.GetRelease).
 							Patch(reqToken(), reqRepoWriter(unit.TypeReleases), context.ReferencesGitRepo(), bind(api.EditReleaseOption{}), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeReposAll, context.QuotaTargetRepo), repo.EditRelease).
@@ -1032,6 +1033,7 @@ func Routes() *web.Route {
 						m.Combo("/merge").Get(repo.IsPullRequestMerged).
 							Post(reqToken(), mustNotBeArchived(), bind(forms.MergePullRequestForm{}), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.MergePullRequest).
 							Delete(reqToken(), mustNotBeArchived(), repo.CancelScheduledAutoMerge)
+						m.Post("/revert", reqToken(), mustNotBeArchived(), reqRepoWriter(unit.TypeCode), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.RevertPullRequest)
 						m.Group("/reviews", func() {
 							m.Combo("").
 								Get(repo.ListPullReviews).

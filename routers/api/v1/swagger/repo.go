@@ -159,6 +159,13 @@ type swaggerResponseRelease struct {
 	Body api.Release `json:"body"`
 }
 
+// GeneratedReleaseNotes
+// swagger:response GeneratedReleaseNotes
+type swaggerResponseGeneratedReleaseNotes struct {
+	// in:body
+	Body api.GeneratedReleaseNotes `json:"body"`
+}
+
 // ReleaseList
 // swagger:response ReleaseList
 type swaggerResponseReleaseList struct {

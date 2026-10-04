@@ -1,0 +1,32 @@
+@import "./theme-forgejo-dark.css";
+@import "../tokens.css";
+
+:root {
+  --surface: var(--neutral-900);
+  --surface-raised: var(--neutral-800);
+  --surface-sunken: var(--neutral-950);
+  --text: var(--neutral-100);
+  --text-muted: var(--neutral-400);
+  --text-on-primary: var(--neutral-950);
+  --border: var(--neutral-700);
+  --border-strong: var(--neutral-400);
+  --primary: var(--blue-400);
+  --primary-hover: var(--blue-300);
+  --primary-active: var(--blue-200);
+  --danger: var(--red-400);
+  --danger-bg: var(--red-900);
+  --danger-text: var(--red-100);
+  --warning: var(--amber-400);
+  --warning-bg: var(--amber-900);
+  --warning-text: var(--amber-100);
+  --success: var(--green-400);
+  --success-bg: var(--green-900);
+  --success-text: var(--green-100);
+  --focus-ring: var(--blue-400);
+  --code-bg: var(--neutral-950);
+  --diff-add-bg: var(--green-900);
+  --diff-add-word: var(--green-700);
+  --diff-del-bg: var(--red-900);
+  --diff-del-word: var(--red-700);
+  --label-bg: var(--neutral-700);
+}

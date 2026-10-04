@@ -370,6 +370,12 @@ func RenameBranchPost(ctx *context.Context) {
 		return
 	}
 
+	if msg == "push_rule" {
+		ctx.Flash.Error(ctx.Tr("repo.settings.push_rules.rename_branch_failed", form.To))
+		ctx.Redirect(fmt.Sprintf("%s/branches", ctx.Repo.RepoLink))
+		return
+	}
+
 	ctx.Flash.Success(ctx.Tr("repo.settings.rename_branch_success", form.From, form.To))
 	ctx.Redirect(fmt.Sprintf("%s/branches", ctx.Repo.RepoLink))
 }

@@ -3,6 +3,7 @@
 	<h4 class="ui top attached header">
 		{{ctx.Locale.Tr "actions.runners.runner_manage_panel"}} ({{ctx.Locale.Tr "admin.total" .Total}})
 		<div class="ui right">
+			{{if not .RegistrationRestricted}}
 			<div class="ui top right pointing dropdown">
 				<button class="ui basic tiny button">
 					{{ctx.Locale.Tr "actions.runners.show_registration_token"}}
@@ -28,11 +29,20 @@
 					</div>
 				</div>
 			</div>
+			{{end}}
+			{{if .CanCreateRunner}}
 			<a class="ui primary tiny button" href="{{$.Link}}/new" tabindex="0">
 				{{ctx.Locale.Tr "actions.runners.new"}}
 			</a>
+			{{end}}
 		</div>
 	</h4>
+	{{if .RegistrationRestricted}}
+	<div class="ui attached info message">{{ctx.Locale.Tr "actions.runners.registration_restricted"}}</div>
+	{{end}}
+	{{if .RunnerRegistrationMode}}
+	<div class="ui attached info message">{{ctx.Locale.Tr "actions.runners.registration_mode" .RunnerRegistrationMode}}</div>
+	{{end}}
 	<div class="ui attached segment">
 		<form class="ui form ignore-dirty" id="user-list-search-form" action="{{$.Link}}">
 			{{template "shared/search/combo" dict "Value" .Keyword "Placeholder" (ctx.Locale.Tr "search.runner_kind")}}
@@ -86,6 +96,10 @@
 						{{if and $.PageIsAdmin .BelongsToOwnerName}}
 							<br>
 							<small>{{.BelongsToOwnerName}}</small>
+						{{end}}
+						{{if and $.PageIsAdmin (not .ScopeAllowsRegistration)}}
+							<br>
+							<span class="ui small red label">{{ctx.Locale.Tr "actions.runners.scope_not_allowed"}}</span>
 						{{end}}
 					</td>
 					<td>

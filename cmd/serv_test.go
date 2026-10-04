@@ -5,10 +5,16 @@ package cmd
 
 import (
 	"testing"
+	"time"
 
 	asymkey_model "forgejo.org/models/asymkey"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/setting"
+	"forgejo.org/modules/test"
+	"forgejo.org/modules/timeutil"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestGetKeyCheckMessage(t *testing.T) {
@@ -74,4 +80,13 @@ func TestGetKeyCheckMessage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLFSTokenExpiry(t *testing.T) {
+	defer test.MockVariableValue(&setting.LFS.HTTPAuthExpiry, 24*time.Hour)()
+	now := time.Unix(1_800_000_000, 0)
+
+	assert.Equal(t, now.Add(24*time.Hour).Unix(), lfsTokenExpiry(now, 0).Unix(), "key without expiry")
+	assert.Equal(t, now.Add(time.Hour).Unix(), lfsTokenExpiry(now, timeutil.TimeStamp(now.Add(time.Hour).Unix())).Unix(), "capped at the key expiry")
+	assert.Equal(t, now.Add(24*time.Hour).Unix(), lfsTokenExpiry(now, timeutil.TimeStamp(now.Add(48*time.Hour).Unix())).Unix(), "key expires after the token")
 }

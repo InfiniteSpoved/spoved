@@ -321,6 +321,7 @@ type AddKeyForm struct {
 	KeyID       string `binding:"OmitEmpty"`
 	Fingerprint string `binding:"OmitEmpty"`
 	IsWritable  bool
+	ExpiresAt   string
 }
 
 // Validate validates the fields
@@ -347,6 +348,7 @@ type NewAccessTokenGetForm struct {
 	Resource     string // all, public-only, repo-specific
 	Scope        []string
 	SelectedRepo []string // slice of ownername/reponame
+	ExpiresAt    string
 
 	// Transient form values, not part of the final data for the access token form
 	RepoSearch         string
@@ -368,6 +370,7 @@ type NewAccessTokenPostForm struct {
 	Resource     string `binding:"Required" locale:"settings.repo_and_org_access"` // all, public-only, repo-specific
 	Scope        []string
 	SelectedRepo []string // slice of ownername/reponame
+	ExpiresAt    string
 }
 
 // Validate validates the fields

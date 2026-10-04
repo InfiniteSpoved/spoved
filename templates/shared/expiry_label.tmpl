@@ -1,0 +1,1 @@
+{{if .ExpiresUnix}} — {{if .IsExpired}}<span class="text red">{{ctx.Locale.Tr "credential.expired_on" (DateUtils.AbsoluteShort .ExpiresUnix)}}</span>{{else}}{{ctx.Locale.Tr "credential.expires_on" (DateUtils.AbsoluteShort .ExpiresUnix)}}{{end}}{{end}}

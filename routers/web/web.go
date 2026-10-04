@@ -969,6 +969,8 @@ func registerRoutes(m *web.Route) {
 			m.Post("/delete", admin.DeleteRepo)
 		})
 
+		m.Get("/storage", admin.Storage)
+
 		m.Group("/packages", func() {
 			m.Get("", admin.Packages)
 			m.Post("/delete", admin.DeletePackageVersion)
@@ -1317,6 +1319,9 @@ func registerRoutes(m *web.Route) {
 				m.Post("/{id}", web.Bind(forms.ProtectTagForm{}), context.RepoMustNotBeArchived(), repo_setting.EditProtectedTagPost)
 			})
 
+			m.Combo("/push_rules").Get(repo_setting.PushRules).
+				Post(web.Bind(forms.PushRuleForm{}), context.RepoMustNotBeArchived(), repo_setting.PushRulesPost)
+
 			m.Group("/hooks/git", func() {
 				m.Get("", repo_setting.GitHooks)
 				m.Combo("/{name}").Get(repo_setting.GitHooksEdit).
@@ -1570,6 +1575,7 @@ func registerRoutes(m *web.Route) {
 				Get(repo.NewRelease).
 				Post(web.Bind(forms.NewReleaseForm{}), repo.NewReleasePost)
 			m.Post("/delete", repo.DeleteRelease)
+			m.Post("/generate-notes", reqRepoCodeReader, reqRepoPullsReader, web.Bind(forms.GenerateReleaseNotesForm{}), repo.GenerateReleaseNotes)
 			m.Post("/attachments", context.EnforceQuotaWeb(quota_model.LimitSubjectSizeAssetsAttachmentsReleases, context.QuotaTargetRepo), repo.UploadReleaseAttachment)
 			m.Post("/attachments/remove", repo.DeleteAttachment)
 		}, reqSignIn, repo.MustBeNotEmpty, context.RepoMustNotBeArchived(), reqRepoReleaseWriter, context.RepoRef())
@@ -1776,6 +1782,7 @@ func registerRoutes(m *web.Route) {
 			})
 			m.Post("/merge", context.RepoMustNotBeArchived(), web.Bind(forms.MergePullRequestForm{}), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.MergePullRequest)
 			m.Post("/cancel_auto_merge", context.RepoMustNotBeArchived(), repo.CancelAutoMergePullRequest)
+			m.Post("/revert", context.RepoMustNotBeArchived(), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.RevertPullRequest)
 			m.Post("/update", repo.UpdatePullRequest)
 			m.Post("/set_allow_maintainer_edit", web.Bind(forms.UpdateAllowEditsForm{}), repo.SetAllowEdits)
 			m.Post("/cleanup", context.RepoMustNotBeArchived(), context.RepoRef(), repo.CleanUpPullRequest)

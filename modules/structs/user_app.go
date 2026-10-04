@@ -20,6 +20,9 @@ type AccessToken struct {
 	// Indicates that an access token only has access to the specified repositories.  Will be null if the access token
 	// is not limited to a set of specified repositories.
 	Repositories []*RepositoryMeta `json:"repositories"`
+	// When the token expires, omitted if never
+	// swagger:strfmt date-time
+	Expires *time.Time `json:"expires_at,omitempty"`
 }
 
 // AccessTokenList represents a list of API access token.
@@ -34,6 +37,9 @@ type CreateAccessTokenOption struct {
 	Scopes []string `json:"scopes"`
 	// If provided and not-empty, creates an access token with access only to specified repositories.
 	Repositories []*RepoTargetOption `json:"repositories"`
+	// When the token expires, omit for never
+	// swagger:strfmt date-time
+	ExpiresAt *time.Time `json:"expires_at"`
 }
 
 // CreateOAuth2ApplicationOptions holds options to create an oauth2 application

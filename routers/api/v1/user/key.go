@@ -219,7 +219,12 @@ func CreateUserPublicKey(ctx *context.APIContext, form api.CreateKeyOption, uid 
 		return
 	}
 
-	key, err := asymkey_model.AddPublicKey(ctx, uid, form.Title, content, 0)
+	expires, ok := utils.ValidateExpiry(ctx, setting.SSHKeyExpiry, form.ExpiresAt)
+	if !ok {
+		return
+	}
+
+	key, err := asymkey_model.AddPublicKey(ctx, uid, form.Title, content, 0, expires)
 	if err != nil {
 		repo.HandleAddKeyError(ctx, err)
 		return
