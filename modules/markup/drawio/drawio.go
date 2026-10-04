@@ -4,7 +4,7 @@
 package drawio
 
 import (
-	"encoding/json"
+	"encoding/json" //nolint:depguard // modules/json has no SetEscapeHTML
 	"errors"
 	"fmt"
 	"html"

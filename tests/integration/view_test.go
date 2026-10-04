@@ -11,12 +11,14 @@ import (
 	"testing"
 
 	unit_model "forgejo.org/models/unit"
+	"forgejo.org/modules/markup"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/tests"
 	"forgejo.org/tests/forgery"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRenderFileSVGIsInImgTag(t *testing.T) {
@@ -31,6 +33,85 @@ func TestRenderFileSVGIsInImgTag(t *testing.T) {
 	src, exists := doc.doc.Find(".file-view img").Attr("src")
 	assert.True(t, exists, "The SVG image should be in an <img> tag so that scripts in the SVG are not run")
 	assert.Equal(t, "/user2/repo2/raw/branch/master/line.svg", src)
+}
+
+func TestRenderDrawio(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		const diagram = `<mxfile><diagram name="Page-1"><mxGraphModel><root><mxCell id="0"/></root></mxGraphModel></diagram></mxfile>`
+		user := forgery.CreateUser(t, nil)
+		repo := forgery.CreateRepository(t, user, &forgery.CreateRepositoryOptions{
+			Files: forgery.MapFS{
+				"docs/a.drawio": forgery.MapFile(diagram),
+				"b.drawio.xml":  forgery.MapFile(diagram),
+				"c.drawio.svg":  forgery.MapFile(`<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg"></svg>`),
+			},
+		})
+		srcLink := repo.Link() + "/src/branch/" + repo.DefaultBranch + "/"
+		renderLink := repo.Link() + "/render/branch/" + repo.DefaultBranch + "/"
+
+		checkViewer := func(t *testing.T, treePath string) {
+			resp := MakeRequest(t, NewRequest(t, "GET", srcLink+treePath), http.StatusOK)
+			src, ok := NewHTMLParser(t, resp.Body).Find(".file-view iframe.external-render").Attr("src")
+			require.True(t, ok)
+			assert.Equal(t, renderLink+url.PathEscape(treePath), src)
+
+			resp = MakeRequest(t, NewRequest(t, "GET", src), http.StatusOK)
+			assert.Contains(t, resp.Body.String(), `<div class="mxgraph" data-mxgraph=`)
+			assert.Contains(t, resp.Body.String(), "/assets/vendor/drawio/viewer-static-32.0.2.min.js")
+			assert.Contains(t, resp.Header().Values("Content-Security-Policy"), "frame-src 'self'; sandbox allow-scripts")
+			assert.Contains(t, strings.Join(resp.Header().Values("Content-Security-Policy"), "\n"), "default-src 'none'; script-src 'self' 'unsafe-inline';")
+		}
+
+		t.Run("Drawio", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			checkViewer(t, "docs/a.drawio")
+		})
+
+		t.Run("DrawioXML", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			checkViewer(t, "b.drawio.xml")
+		})
+
+		t.Run("Source", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			resp := MakeRequest(t, NewRequest(t, "GET", srcLink+"docs/a.drawio?display=source"), http.StatusOK)
+			doc := NewHTMLParser(t, resp.Body)
+			assert.Equal(t, 0, doc.Find("iframe.external-render").Length())
+			assert.Equal(t, 1, doc.Find(".file-view.code-view").Length())
+		})
+
+		t.Run("SVGIsImage", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			resp := MakeRequest(t, NewRequest(t, "GET", srcLink+"c.drawio.svg"), http.StatusOK)
+			src, ok := NewHTMLParser(t, resp.Body).Find(".file-view img").Attr("src")
+			require.True(t, ok)
+			assert.Equal(t, repo.Link()+"/raw/branch/"+repo.DefaultBranch+"/c.drawio.svg", src)
+		})
+
+		t.Run("Disabled", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			defer markup.Init(nil)
+			defer test.MockVariableValue(&setting.DrawioEnabled, false)()
+			markup.Init(nil)
+
+			resp := MakeRequest(t, NewRequest(t, "GET", srcLink+"docs/a.drawio"), http.StatusOK)
+			doc := NewHTMLParser(t, resp.Body)
+			assert.Equal(t, 0, doc.Find("iframe.external-render").Length())
+			assert.Equal(t, 1, doc.Find(".file-view.code-view").Length())
+		})
+
+		t.Run("ProfileReadme", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			forgery.CreateRepository(t, user, &forgery.CreateRepositoryOptions{
+				Name:  ".profile",
+				Files: forgery.MapFS{"README.drawio": forgery.MapFile(diagram)},
+			})
+
+			resp := MakeRequest(t, NewRequest(t, "GET", "/"+user.Name), http.StatusOK)
+			assert.NotContains(t, resp.Body.String(), "viewer-static")
+			assert.NotContains(t, resp.Body.String(), "mxgraph")
+		})
+	})
 }
 
 func TestAmbiguousCharacterDetection(t *testing.T) {
