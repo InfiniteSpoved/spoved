@@ -656,3 +656,38 @@ func TestUpdateRun(t *testing.T) {
 		assert.Zero(t, RepoNumOpenActions(t.Context(), run.RepoID))
 	})
 }
+
+func TestGetLatestDefaultBranchRunIDs(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+
+	ids, err := GetLatestDefaultBranchRunIDs(t.Context())
+	require.NoError(t, err)
+
+	// latest run of each workflow on the default branch
+	assert.True(t, ids.Contains(792))
+	assert.True(t, ids.Contains(896))
+	assert.True(t, ids.Contains(892))
+	// older runs of the same workflow
+	assert.False(t, ids.Contains(791))
+	assert.False(t, ids.Contains(793))
+	// runs on other branches
+	assert.False(t, ids.Contains(794))
+	assert.False(t, ids.Contains(891))
+	assert.False(t, ids.Contains(893))
+}
+
+func TestFindOldDoneRunIDs(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+
+	ids, err := FindOldDoneRunIDs(t.Context(), timeutil.TimeStampNow(), 0, 100)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{791, 792, 891, 892, 893, 896}, ids)
+
+	ids, err = FindOldDoneRunIDs(t.Context(), timeutil.TimeStampNow(), 792, 2)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{891, 892}, ids)
+
+	ids, err = FindOldDoneRunIDs(t.Context(), 1683636108, 0, 100)
+	require.NoError(t, err)
+	assert.Empty(t, ids)
+}

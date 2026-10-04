@@ -56,3 +56,4 @@ Add a line here when you hit something the next person should know.
 - After switching branches across a migration, delete `tests/e2e/forgejo-e2e-sqlite` before running e2e, or the server refuses the newer database.
 - E2E `repo-settings.test.e2e.ts` › `deploy key pickers › tag protection` [Mobile Chrome] also fails on develop in containers (a cell intercepts the Remove click); it's environmental.
 - `make lint`/`make frontend` run npm with the container's older Node and rewrite package-lock.json. Stage files by name (never `git add -A`) and keep package-lock.json out of commits unless you changed package files.
+- To backdate Actions rows in tests, insert them and then run `UPDATE action_run SET created = ?`. `ActionRun.Created` is `xorm:"created"`, so a value set on insert is overwritten. Also give each inserted `ActionRunJob` its own `Handle`, because that column is unique.
