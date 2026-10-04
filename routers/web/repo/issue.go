@@ -2029,6 +2029,14 @@ func ViewIssue(ctx *context.Context) {
 		}
 		ctx.Data["IsPullBranchDeletable"] = isPullBranchDeletable
 
+		if pull.HasMerged && ctx.IsSigned && ctx.Repo.CanCreateBranch() && !ctx.Repo.Repository.IsArchived {
+			revertBase, err := pull_service.GetRevertBase(ctx.Repo.GitRepo, pull)
+			if err != nil {
+				log.Error("GetRevertBase: %v", err)
+			}
+			ctx.Data["CanRevertPull"] = revertBase != ""
+		}
+
 		stillCanManualMerge := func() bool {
 			if pull.HasMerged || issue.IsClosed || !ctx.IsSigned {
 				return false
