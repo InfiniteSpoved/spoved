@@ -54,20 +54,11 @@ func (b *Basic) Verify(req *http.Request, w http.ResponseWriter, _ auth.SessionS
 	if !attempt.Allowed {
 		return &auth.AuthenticationAttemptedIncorrectCredential{Error: attempt.Err()}
 	}
-	// only a wrong password or OTP counts against the auth rate limit
-	failed := false
-	defer func() {
-		if !failed {
-			attempt.Succeeded()
-		}
-	}()
-
 	log.Trace("Basic Authorization: Attempting SignIn for %s", uname)
 	u, source, err := UserSignIn(req.Context(), uname, passwd)
 	if err != nil {
 		if user_model.IsErrUserNotExist(err) || user_model.IsErrUserProhibitLogin(err) ||
 			errors.As(err, &db.ErrUserPasswordInvalid{}) || errors.As(err, &db.ErrUserPasswordNotSet{}) {
-			failed = true
 			return &auth.AuthenticationAttemptedIncorrectCredential{Error: err}
 		}
 		return &auth.AuthenticationError{Error: fmt.Errorf("basic auth UserSignIn: %w", err)}
@@ -84,12 +75,13 @@ func (b *Basic) Verify(req *http.Request, w http.ResponseWriter, _ auth.SessionS
 
 	if skipper, ok := source.Cfg.(auth.LocalTwoFASkipper); !ok || !skipper.IsSkipLocalTwoFA() {
 		if err := validateTOTP(req, u); err != nil {
-			failed = true
 			return &auth.AuthenticationAttemptedIncorrectCredential{Error: err}
 		}
 	}
 
 	log.Trace("Basic Authorization: Logged in user %-v", u)
+	// only a successful sign-in gives the auth rate limit tokens back
+	attempt.Succeeded()
 	return &auth.AuthenticationSuccess{Result: &basicPaswordAuthenticationResult{user: u}}
 }
 

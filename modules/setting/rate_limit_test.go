@@ -19,7 +19,7 @@ func TestLoadRateLimit(t *testing.T) {
 	assert.True(t, RateLimit.ExemptCIDRs.IsEmpty())
 	assert.Equal(t, RateLimitClass{60, 600, 5, 50}, RateLimit.Classes["api"])
 	assert.Equal(t, RateLimitClass{10, 100, 0, 0}, RateLimit.Classes["api_write"])
-	assert.Equal(t, RateLimitClass{1, 10, 0, 0}, RateLimit.Classes["auth"])
+	assert.Equal(t, RateLimitClass{0.0167, 10, 0, 0}, RateLimit.Classes["auth"])
 
 	cfg, err = NewConfigProviderFromData(`
 [rate_limit]

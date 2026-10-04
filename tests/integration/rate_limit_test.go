@@ -248,6 +248,13 @@ func TestRateLimitSignIn(t *testing.T) {
 		assert.Contains(t, resp.Header.Get("Content-Type"), "text/plain")
 		basic("192.0.2.12", "/api/packages/user2/generic/pkg/1.0/file.txt", "user4", userPassword, http.StatusTooManyRequests)
 
+		// unknown email-style names count too, so guesses aren't free and unknown addresses look like known ones
+		// (an unknown email address currently answers 500 rather than 401, independently of rate limiting)
+		for _, ip := range []string{"192.0.2.20", "192.0.2.21"} {
+			assert.NotEqual(t, http.StatusTooManyRequests, basic(ip, "/api/v1/user", "nobody@example.com", "wrong", NoExpectedStatus).StatusCode)
+		}
+		basic("192.0.2.22", "/api/v1/user", "nobody@example.com", "wrong", http.StatusTooManyRequests)
+
 		// another user name from an exhausted IP
 		basic("192.0.2.10", "/api/v1/user", "user8", "wrong", http.StatusUnauthorized)
 		basic("192.0.2.10", "/api/v1/user", "user8", userPassword, http.StatusTooManyRequests)

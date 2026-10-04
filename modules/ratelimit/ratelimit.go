@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,10 +28,7 @@ const (
 	Auth     = "auth"
 )
 
-const (
-	maxKeys     = 100_000
-	overflowKey = "overflow"
-)
+const maxKeys = 100_000
 
 // Result describes the state of the bucket that decided a request. Limit is 0 when no limit applies.
 type Result struct {
@@ -98,8 +96,8 @@ func getStore(class string, authenticated bool) *store {
 	return s
 }
 
-// get returns the refilled bucket of key. The caller holds s.mu.
-func (s *store) get(key string, t time.Time) *bucket {
+// get returns the refilled bucket of key for a client. The caller holds s.mu.
+func (s *store) get(key, remoteAddr string, t time.Time) *bucket {
 	b, ok := s.buckets[key]
 	if !ok {
 		// A full bucket is the same as a missing one, so dropping full buckets loses nothing. Sweep once a minute,
@@ -107,8 +105,10 @@ func (s *store) get(key string, t time.Time) *bucket {
 		if t.Sub(s.lastSweep) >= time.Minute || (len(s.buckets) >= maxKeys && t.Sub(s.lastSweep) >= time.Second) {
 			s.sweep(t)
 		}
+		// When the map is still full, new keys share a bucket per network of the client, so that whoever filled
+		// the map only limits their own network. These keys may exceed the cap.
 		if len(s.buckets) >= maxKeys {
-			key = overflowKey
+			key = overflowKey(remoteAddr)
 			b, ok = s.buckets[key]
 		}
 		if !ok {
@@ -143,15 +143,15 @@ func (s *store) result(b *bucket, allowed bool) Result {
 	return r
 }
 
-// Check takes one token from the bucket of key in a traffic class.
-func Check(class, key string, authenticated bool) Result {
+// Check takes one token from the bucket of key in a traffic class, for a client at remoteAddr.
+func Check(class, remoteAddr, key string, authenticated bool) Result {
 	s := getStore(class, authenticated)
 	if s == nil {
 		return Result{Allowed: true}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	b := s.get(key, now())
+	b := s.get(key, remoteAddr, now())
 	if b.tokens < 1 {
 		return s.result(b, false)
 	}
@@ -162,7 +162,7 @@ func Check(class, key string, authenticated bool) Result {
 // AuthAttempt is a credential check counted against the auth class.
 type AuthAttempt struct {
 	Result
-	keys []string
+	buckets []*bucket
 }
 
 // StartAuth takes one token from the auth buckets of the client IP and of each key before a credential check, so
@@ -177,28 +177,31 @@ func StartAuth(remoteAddr string, keys ...string) *AuthAttempt {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t := now()
+	buckets := make([]*bucket, 0, len(keys))
 	for _, k := range keys {
-		if b := s.get(k, t); b.tokens < 1 {
+		b := s.get(k, remoteAddr, t)
+		if b.tokens < 1 {
 			return &AuthAttempt{Result: s.result(b, false)}
 		}
+		if !slices.Contains(buckets, b) { // keys may share an overflow bucket
+			buckets = append(buckets, b)
+		}
 	}
-	for _, k := range keys {
-		s.get(k, t).tokens--
+	for _, b := range buckets {
+		b.tokens--
 	}
-	return &AuthAttempt{Result: Result{Allowed: true}, keys: keys}
+	return &AuthAttempt{Result: Result{Allowed: true}, buckets: buckets}
 }
 
 // Succeeded gives back the tokens taken by StartAuth.
 func (a *AuthAttempt) Succeeded() {
 	s := getStore(Auth, true)
-	if s == nil || len(a.keys) == 0 {
+	if s == nil || len(a.buckets) == 0 {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t := now()
-	for _, k := range a.keys {
-		b := s.get(k, t)
+	for _, b := range a.buckets {
 		b.tokens = min(float64(s.burst), b.tokens+1)
 	}
 }
@@ -229,6 +232,18 @@ func IPKey(remoteAddr string) string {
 		return "ip:" + ip4.String()
 	}
 	return "ip:" + ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
+}
+
+// overflowKey returns the shared bucket key of the IPv4 /24 or IPv6 /48 of a client.
+func overflowKey(remoteAddr string) string {
+	ip := parseIP(remoteAddr)
+	if ip == nil {
+		return "overflow:invalid"
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		return "overflow:" + ip4.Mask(net.CIDRMask(24, 32)).String() + "/24"
+	}
+	return "overflow:" + ip.Mask(net.CIDRMask(48, 128)).String() + "/48"
 }
 
 // UserKey returns the auth bucket key of a sign-in name. It is hashed so that its size doesn't depend on the input.

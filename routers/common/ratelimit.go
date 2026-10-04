@@ -42,7 +42,7 @@ func checkRateLimit(b *context.Base, class string, doer *user_model.User, ar aut
 			class = ratelimit.APIWrite
 		}
 	}
-	r := ratelimit.Check(class, key, authenticated)
+	r := ratelimit.Check(class, b.RemoteAddr(), key, authenticated)
 	setRateLimitHeaders(b, r)
 	if !r.Allowed {
 		log.Debug("Rate limit %s exceeded by %s", class, key)
@@ -106,7 +106,7 @@ func RateLimitAuthIP(ctx *context.Context) {
 	if ratelimit.IsExempt(ctx.RemoteAddr()) {
 		return
 	}
-	if r := ratelimit.Check(ratelimit.Auth, ratelimit.IPKey(ctx.RemoteAddr()), true); !r.Allowed {
+	if r := ratelimit.Check(ratelimit.Auth, ctx.RemoteAddr(), ratelimit.IPKey(ctx.RemoteAddr()), true); !r.Allowed {
 		renderRateLimited(ctx, r)
 	}
 }
