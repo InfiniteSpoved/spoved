@@ -38,6 +38,9 @@
 			<a class="{{if .PageIsSettingsTags}}active {{end}}item" href="{{.RepoLink}}/settings/tags">
 				{{ctx.Locale.Tr "repo.settings.tags"}}
 			</a>
+			<a class="{{if .PageIsSettingsPushRules}}active {{end}}item" href="{{.RepoLink}}/settings/push_rules">
+				{{ctx.Locale.Tr "repo.settings.push_rules"}}
+			</a>
 			{{if .SignedUser.CanEditGitHook}}
 				<a class="{{if .PageIsSettingsGitHooks}}active {{end}}item" href="{{.RepoLink}}/settings/hooks/git">
 					{{ctx.Locale.Tr "repo.settings.githooks"}}

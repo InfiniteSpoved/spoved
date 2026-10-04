@@ -456,6 +456,10 @@ func UpdateBranch(ctx *context.APIContext) {
 		ctx.Error(http.StatusNotFound, "", "Branch doesn't exist.")
 		return
 	}
+	if msg == "push_rule" {
+		ctx.Error(http.StatusUnprocessableEntity, "", "The new branch name does not match the repository's push rule.")
+		return
+	}
 
 	ctx.Status(http.StatusNoContent)
 }
