@@ -1572,6 +1572,7 @@ func registerRoutes(m *web.Route) {
 				Get(repo.NewRelease).
 				Post(web.Bind(forms.NewReleaseForm{}), repo.NewReleasePost)
 			m.Post("/delete", repo.DeleteRelease)
+			m.Post("/generate-notes", reqRepoCodeReader, reqRepoPullsReader, web.Bind(forms.GenerateReleaseNotesForm{}), repo.GenerateReleaseNotes)
 			m.Post("/attachments", context.EnforceQuotaWeb(quota_model.LimitSubjectSizeAssetsAttachmentsReleases, context.QuotaTargetRepo), repo.UploadReleaseAttachment)
 			m.Post("/attachments/remove", repo.DeleteAttachment)
 		}, reqSignIn, repo.MustBeNotEmpty, context.RepoMustNotBeArchived(), reqRepoReleaseWriter, context.RepoRef())

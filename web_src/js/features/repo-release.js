@@ -1,5 +1,7 @@
 import {hideElem, showElem} from '../utils/dom.js';
-import {initComboMarkdownEditor} from './comp/ComboMarkdownEditor.js';
+import {getComboMarkdownEditor, initComboMarkdownEditor} from './comp/ComboMarkdownEditor.js';
+import {POST} from '../modules/fetch.js';
+import {showErrorToast} from '../modules/toast.js';
 
 export function initRepoRelease() {
   for (const el of document.querySelectorAll('.remove-rel-attach')) {
@@ -19,6 +21,7 @@ export function initRepoReleaseNew() {
   initTagNameEditor();
   initRepoReleaseEditor();
   initAddExternalLinkButton();
+  initGenerateNotesButton();
 }
 
 function initTagNameEditor() {
@@ -98,5 +101,26 @@ function initAddExternalLinkButton() {
       newAttachment,
       attachmentTemplate,
     );
+  });
+}
+
+function initGenerateNotesButton() {
+  const button = document.getElementById('generate-release-notes');
+  if (!button) return;
+
+  button.addEventListener('click', async () => {
+    const editor = getComboMarkdownEditor(document.querySelector('.repository.new.release .combo-markdown-editor'));
+    if (editor.value() && !window.confirm(button.getAttribute('data-confirm'))) return;
+
+    const data = new FormData();
+    data.append('tag_name', button.getAttribute('data-tag-name') ?? document.getElementById('tag-name').value);
+    data.append('tag_target', button.getAttribute('data-tag-target') ?? document.querySelector('input[name="tag_target"]').value);
+    const resp = await POST(button.getAttribute('data-url'), {data});
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      showErrorToast(json.errorMessage ?? `server error: ${resp.status}`, {useHtmlBody: json.renderFormat === 'html'});
+      return;
+    }
+    editor.value(json.body);
   });
 }
