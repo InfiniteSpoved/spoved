@@ -29,7 +29,6 @@ import (
 	"forgejo.org/routers/web/feed"
 	"forgejo.org/routers/web/org"
 	shared_user "forgejo.org/routers/web/shared/user"
-	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	funding_service "forgejo.org/services/funding"
 	user_service "forgejo.org/services/user"
@@ -342,7 +341,7 @@ func prepareUserProfileTabData(ctx *context.Context, showPrivate bool, profileDb
 				Page:     page,
 			},
 			Actor:              ctx.Doer,
-			AuditorView:        auth.IsHeldByUser(ctx.Authentication),
+			AuditorView:        ctx.IsAuditorView(),
 			Keyword:            keyword,
 			OwnerID:            ctx.ContextUser.ID,
 			OrderBy:            orderBy,

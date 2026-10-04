@@ -13,15 +13,17 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/routers/api/v1/user"
 	"forgejo.org/routers/api/v1/utils"
+	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 )
 
 // listMembers list an organization's members
-func listMembers(ctx *context.APIContext, isMember bool) {
+func listMembers(ctx *context.APIContext, isMember, auditorView bool) {
 	opts := &organization.FindOrgMembersOpts{
 		Doer:         ctx.Doer(),
 		IsDoerMember: isMember,
+		AuditorView:  auditorView,
 		OrgID:        ctx.Org().Organization.ID,
 		ListOptions:  utils.GetListOptions(ctx),
 	}
@@ -86,7 +88,7 @@ func ListMembers(ctx *context.APIContext) {
 			return
 		}
 	}
-	listMembers(ctx, isMember)
+	listMembers(ctx, isMember, auth.IsHeldByUser(ctx.Authentication()))
 }
 
 // ListPublicMembers list an organization's public members
@@ -116,7 +118,7 @@ func ListPublicMembers(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	listMembers(ctx, false)
+	listMembers(ctx, false, false)
 }
 
 // IsMember check if a user is a member of an organization

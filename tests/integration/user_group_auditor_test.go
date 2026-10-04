@@ -30,6 +30,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// orgMemberNames lists the members of an organization as the API returns them for the token.
+func orgMemberNames(t *testing.T, link, token string) []string {
+	t.Helper()
+	var members []*api.User
+	DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", link).AddTokenAuth(token), http.StatusOK), &members)
+	names := make([]string, 0, len(members))
+	for _, m := range members {
+		names = append(names, m.UserName)
+	}
+	return names
+}
+
 // TestAuditorRole checks that a member of a user group granting the auditor role can read every repository and see
 // private organizations, and that the role never lets them change anything.
 func TestAuditorRole(t *testing.T) {
@@ -175,6 +187,10 @@ func TestAuditorRole(t *testing.T) {
 			DecodeJSON(t, resp, &result)
 			assert.Len(t, result.Data, 1)
 
+			// user4 is a concealed member of org3
+			assert.Contains(t, orgMemberNames(t, "/api/v1/orgs/org3/members", token), "user4")
+			assert.NotContains(t, orgMemberNames(t, "/api/v1/orgs/org3/public_members", token), "user4")
+
 			publicOnly := getUserToken(t, "user8", auth_model.AccessTokenScopePublicOnly, auth_model.AccessTokenScopeReadRepository)
 			resp = MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1").AddTokenAuth(publicOnly), NoExpectedStatus)
 			assert.NotEqual(t, http.StatusOK, resp.Code)
@@ -200,8 +216,9 @@ func TestAuditorRole(t *testing.T) {
 		})
 
 		t.Run("credentials held by others get no raise", func(t *testing.T) {
-			oauthToken := createOAuth2Token(t, auditor, []auth_model.AccessTokenScope{auth_model.AccessTokenScopeReadRepository})
+			oauthToken := createOAuth2Token(t, auditor, []auth_model.AccessTokenScope{auth_model.AccessTokenScopeReadRepository, auth_model.AccessTokenScopeReadOrganization})
 			MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/org3/repo3").AddTokenAuth(oauthToken), http.StatusNotFound)
+			assert.NotContains(t, orgMemberNames(t, "/api/v1/orgs/org3/members", oauthToken), "user4")
 		})
 
 		t.Run("git clone, no push", func(t *testing.T) {

@@ -13,7 +13,6 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/sitemap"
-	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 )
 
@@ -102,7 +101,7 @@ func RenderRepoSearch(ctx *context.Context, opts *RepoSearchOptions) {
 			PageSize: opts.PageSize,
 		},
 		Actor:              ctx.Doer,
-		AuditorView:        auth.IsHeldByUser(ctx.Authentication),
+		AuditorView:        ctx.IsAuditorView(),
 		OrderBy:            orderBy,
 		Private:            opts.Private,
 		Keyword:            keyword,
@@ -176,7 +175,7 @@ func Repos(ctx *context.Context) {
 	ctx.Data["IsRepoIndexerEnabled"] = setting.Indexer.RepoIndexerEnabled
 
 	var ownerID int64
-	if ctx.Doer != nil && !ctx.Doer.IsAdmin && !(ctx.Doer.IsAuditor && auth.IsHeldByUser(ctx.Authentication)) {
+	if ctx.Doer != nil && !ctx.Doer.IsAdmin && !ctx.IsAuditorView() {
 		ownerID = ctx.Doer.ID
 	}
 
