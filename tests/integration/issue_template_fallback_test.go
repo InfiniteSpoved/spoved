@@ -204,12 +204,11 @@ func TestIssueTemplateFallback(t *testing.T) {
 			// The org's .forgejo still wins over the instance repo.
 			assert.Equal(t, []string{"Org bug v2"}, templateNames(t, plain))
 
+			// Repos not owned by a site admin user are ignored, even an org with a site admin among its owners.
 			adminOrg := forgery.CreateOrganisation(t, admin)
 			adminOrgRepo := forgery.CreateRepository(t, adminOrg.AsUser(), &forgery.CreateRepositoryOptions{Files: instanceFiles})
 			defer test.MockVariableValue(&setting.Repository.DefaultTemplatesRepo, adminOrgRepo.FullName())()
-			assert.Equal(t, []string{"Instance"}, templateNames(t, repo))
-
-			// Repos not owned by a site admin, or an org with one among its owners, are ignored.
+			assert.Empty(t, templateNames(t, repo))
 			userRepo := forgery.CreateRepository(t, outsider, &forgery.CreateRepositoryOptions{Files: instanceFiles})
 			defer test.MockVariableValue(&setting.Repository.DefaultTemplatesRepo, userRepo.FullName())()
 			assert.Empty(t, templateNames(t, repo))

@@ -12,9 +12,7 @@ import (
 	"slices"
 	"strings"
 
-	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
-	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/issue/template"
@@ -117,8 +115,9 @@ func TemplateCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *g
 	return nil, false, func() {}
 }
 
-// defaultTemplatesRepo returns the DEFAULT_TEMPLATES_REPO if it is owned by a site admin, or by an organization
-// with a site admin in its Owners team, so that no other user can supply templates to the whole instance.
+// defaultTemplatesRepo returns the DEFAULT_TEMPLATES_REPO if it is owned by a site admin user, so that no other user
+// can supply templates to the whole instance. Organizations are never trusted: anyone can create one under a freed
+// name and add a site admin to its Owners team without the admin's consent.
 func defaultTemplatesRepo(ctx context.Context) *repo_model.Repository {
 	name := setting.Repository.DefaultTemplatesRepo
 	if name == "" {
@@ -134,14 +133,8 @@ func defaultTemplatesRepo(ctx context.Context) *repo_model.Repository {
 		return nil
 	}
 
-	trusted := r.Owner.IsAdmin
-	if r.Owner.IsOrganization() {
-		if team, err := organization.GetOwnerTeam(ctx, r.OwnerID); err == nil && team.LoadMembers(ctx) == nil {
-			trusted = slices.ContainsFunc(team.Members, func(u *user_model.User) bool { return u.IsAdmin })
-		}
-	}
-	if !trusted {
-		log.Warn("[repository] DEFAULT_TEMPLATES_REPO %q is ignored: its owner is neither a site admin nor an organization with a site admin among its owners", name)
+	if !r.Owner.IsAdmin || r.Owner.IsOrganization() {
+		log.Warn("[repository] DEFAULT_TEMPLATES_REPO %q is ignored: its owner is not a site admin user", name)
 		return nil
 	}
 	return r
