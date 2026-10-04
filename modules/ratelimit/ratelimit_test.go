@@ -126,48 +126,66 @@ func TestUserKey(t *testing.T) {
 }
 
 func TestSweepAndOverflow(t *testing.T) {
-	clock := setup(t, map[string]setting.RateLimitClass{Web: {AuthenticatedRate: 1, AuthenticatedBurst: 2}, Auth: {AuthenticatedRate: 1, AuthenticatedBurst: 2}})
-	s := getStore(Web, true)
+	clock := setup(t, map[string]setting.RateLimitClass{Web: {AnonymousRate: 1, AnonymousBurst: 2}})
+	s := getStore(Web, false)
 
 	for i := range maxKeys {
-		Check(Web, "203.0.113.1:1", fmt.Sprint("u:", i), true)
+		Check(Web, "203.0.113.1:1", fmt.Sprint("ip:", i), false)
 	}
 	assert.Len(t, s.buckets, maxKeys)
 
-	// the map is full and nothing has refilled yet: new keys share an overflow bucket per client network
-	assert.True(t, Check(Web, "198.51.100.1:1", "u:new1", true).Allowed)
-	assert.True(t, Check(Web, "198.51.100.2:1", "u:new2", true).Allowed)
-	assert.False(t, Check(Web, "198.51.100.3:1", "u:new3", true).Allowed, "same /24 shares the overflow bucket")
-	assert.True(t, Check(Web, "192.0.2.1:1", "u:new3", true).Allowed, "other /24 has its own overflow bucket")
-	assert.True(t, Check(Web, "[2001:db8:1:2::1]:1", "u:new4", true).Allowed)
-	assert.True(t, Check(Web, "[2001:db8:1:3::1]:1", "u:new5", true).Allowed)
-	assert.False(t, Check(Web, "[2001:db8:1:4::1]:1", "u:new6", true).Allowed, "same /48 shares the overflow bucket")
-	assert.True(t, Check(Web, "[2001:db8:2::1]:1", "u:new6", true).Allowed)
+	// the map is full and nothing has refilled yet: new IP keys share an overflow bucket per client network
+	anon := func(addr string) bool { return Check(Web, addr, IPKey(addr), false).Allowed }
+	assert.True(t, anon("198.51.100.1:1"))
+	assert.True(t, anon("198.51.100.2:1"))
+	assert.False(t, anon("198.51.100.3:1"), "same /24 shares the overflow bucket")
+	assert.True(t, anon("192.0.2.1:1"), "other /24 has its own overflow bucket")
+	assert.True(t, anon("[2001:db8:1:2::1]:1"))
+	assert.True(t, anon("[2001:db8:1:3::1]:1"))
+	assert.False(t, anon("[2001:db8:1:4::1]:1"), "same /48 shares the overflow bucket")
+	assert.True(t, anon("[2001:db8:2::1]:1"))
 	assert.Contains(t, s.buckets, "overflow:198.51.100.0/24")
 	assert.Contains(t, s.buckets, "overflow:2001:db8:1::/48")
-	assert.NotContains(t, s.buckets, "u:new1")
+	assert.NotContains(t, s.buckets, "ip:198.51.100.1")
 	// existing keys keep their own bucket
-	assert.Equal(t, 0, Check(Web, "198.51.100.1:1", "u:1", true).Remaining)
+	assert.Equal(t, 0, Check(Web, "198.51.100.1:1", "ip:1", false).Remaining)
 
 	// once buckets are full again, the next new key sweeps them; partly used buckets stay
 	*clock = clock.Add(2 * time.Second)
-	Check(Web, "192.0.2.1:1", "u:1", true)
-	Check(Web, "192.0.2.1:1", "u:1", true)
-	assert.True(t, Check(Web, "192.0.2.1:1", "u:new7", true).Allowed)
+	Check(Web, "192.0.2.1:1", "ip:1", false)
+	Check(Web, "192.0.2.1:1", "ip:1", false)
+	assert.True(t, anon("192.0.2.7:1"))
 	assert.Len(t, s.buckets, 2)
-	assert.Contains(t, s.buckets, "u:1")
-	assert.Contains(t, s.buckets, "u:new7")
+	assert.Contains(t, s.buckets, "ip:1")
+	assert.Contains(t, s.buckets, "ip:192.0.2.7")
+}
 
-	// StartAuth falls back to the overflow bucket of the client too, and gives back what it took
+func TestOverflowKeepsUserKeys(t *testing.T) {
+	clock := setup(t, map[string]setting.RateLimitClass{Auth: {AuthenticatedRate: 0.0001, AuthenticatedBurst: 2}})
 	a := getStore(Auth, true)
 	for i := range maxKeys {
-		a.buckets[fmt.Sprint("user:", i)] = &bucket{tokens: 0, last: *clock}
+		a.buckets[fmt.Sprint("ip:", i)] = &bucket{tokens: 0, last: *clock}
 	}
 	a.lastSweep = *clock
-	attempt := StartAuth("198.51.100.1:1", UserKey("alice"))
+	alice := UserKey("alice")
+
+	// the map is full: the IPs fall back to their overflow bucket, but alice keeps her own bucket past the cap
+	require.True(t, StartAuth("198.51.100.1:1", alice).Allowed)
+	require.True(t, StartAuth("100.64.0.1:1", alice).Allowed)
+	assert.Contains(t, a.buckets, alice)
+	assert.InDelta(t, 0.0, a.buckets[alice].tokens, 0.001)
+	assert.False(t, StartAuth("203.0.113.1:1", alice).Allowed, "a fresh network is still limited by the user bucket")
+
+	// a successful attempt gives back exactly what it took
+	attempt := StartAuth("203.0.113.1:1", UserKey("bob"))
 	require.True(t, attempt.Allowed)
-	assert.InDelta(t, 1.0, a.buckets["overflow:198.51.100.0/24"].tokens, 0.001, "a shared overflow bucket is charged once")
+	assert.InDelta(t, 1.0, a.buckets["overflow:203.0.113.0/24"].tokens, 0.001)
 	attempt.Succeeded()
-	assert.InDelta(t, 2.0, a.buckets["overflow:198.51.100.0/24"].tokens, 0.001)
-	assert.True(t, StartAuth("192.0.2.1:1", UserKey("bob")).Allowed)
+	assert.InDelta(t, 2.0, a.buckets["overflow:203.0.113.0/24"].tokens, 0.001)
+	assert.InDelta(t, 2.0, a.buckets[UserKey("bob")].tokens, 0.001)
+
+	// user keys aren't created when the client's network is exhausted
+	require.True(t, StartAuth("198.51.100.2:1", UserKey("erin")).Allowed)
+	require.False(t, StartAuth("198.51.100.3:1", UserKey("carol")).Allowed)
+	assert.NotContains(t, a.buckets, UserKey("carol"))
 }

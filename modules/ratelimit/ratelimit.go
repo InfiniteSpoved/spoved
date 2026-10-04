@@ -105,9 +105,11 @@ func (s *store) get(key, remoteAddr string, t time.Time) *bucket {
 		if t.Sub(s.lastSweep) >= time.Minute || (len(s.buckets) >= maxKeys && t.Sub(s.lastSweep) >= time.Second) {
 			s.sweep(t)
 		}
-		// When the map is still full, new keys share a bucket per network of the client, so that whoever filled
-		// the map only limits their own network. These keys may exceed the cap.
-		if len(s.buckets) >= maxKeys {
+		// When the map is still full, new IP keys share a bucket per network of the client, so that whoever filled
+		// the map only limits their own network. User, 2FA and task keys always get their own bucket, or a full map
+		// would let attackers bypass the per-user limit. Both may exceed the cap: per-user keys are only created
+		// after the IP or overflow bucket of the client allowed the request.
+		if len(s.buckets) >= maxKeys && strings.HasPrefix(key, "ip:") {
 			key = overflowKey(remoteAddr)
 			b, ok = s.buckets[key]
 		}
