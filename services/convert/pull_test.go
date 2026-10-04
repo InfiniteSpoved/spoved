@@ -10,11 +10,13 @@ import (
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
+	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/structs"
+	"forgejo.org/modules/timeutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -48,6 +50,45 @@ func TestPullRequest_APIFormat(t *testing.T) {
 	assert.NotNil(t, apiPullRequest)
 	assert.Nil(t, apiPullRequest.Head.Repository)
 	assert.EqualValues(t, -1, apiPullRequest.Head.RepoID)
+}
+
+func TestToAPIPullRequestScheduledAfter(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	scheduled := timeutil.TimeStamp(2000000000)
+
+	toAPI := func(t *testing.T, pullID int64, doer *user_model.User) *structs.PullRequest {
+		t.Helper()
+		pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pullID})
+		apiPR := ToAPIPullRequest(git.DefaultContext, pr, doer)
+		require.NotNil(t, apiPR)
+		return apiPR
+	}
+	schedule := func(t *testing.T, pullID int64, after timeutil.TimeStamp) {
+		t.Helper()
+		require.NoError(t, db.Insert(db.DefaultContext, &pull_model.AutoMerge{PullID: pullID, DoerID: 2, ScheduledAfterUnix: after}))
+	}
+
+	t.Run("Not scheduled", func(t *testing.T) {
+		assert.Nil(t, toAPI(t, 2, user2).ScheduledAfter)
+	})
+	t.Run("Scheduled", func(t *testing.T) {
+		schedule(t, 2, scheduled)
+		assert.Equal(t, scheduled.AsTimePtr(), toAPI(t, 2, user2).ScheduledAfter)
+	})
+	t.Run("Auto merge without time", func(t *testing.T) {
+		schedule(t, 5, 0)
+		assert.Nil(t, toAPI(t, 5, user2).ScheduledAfter)
+	})
+	t.Run("Merged", func(t *testing.T) {
+		schedule(t, 1, scheduled)
+		assert.Nil(t, toAPI(t, 1, user2).ScheduledAfter)
+	})
+	t.Run("Private repo", func(t *testing.T) {
+		schedule(t, 6, scheduled)
+		assert.Equal(t, scheduled.AsTimePtr(), toAPI(t, 6, user2).ScheduledAfter)
+		assert.Nil(t, toAPI(t, 6, nil).ScheduledAfter)
+	})
 }
 
 func TestPullReviewList(t *testing.T) {

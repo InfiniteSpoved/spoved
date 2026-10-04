@@ -24,6 +24,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
+	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/services/automerge"
 	app_context "forgejo.org/services/context"
@@ -366,6 +367,109 @@ func TestPullScheduledAutoMerge(t *testing.T) {
 			assert.Contains(t, resp.Body.String(), "The pull request was updated.")
 			assert.False(t, isMerged(pr))
 			assert.Equal(t, am, unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID}))
+		})
+	})
+}
+
+func TestAPIPullScheduledAfter(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		reader := forgery.CreateUser(t, nil)
+		outsider := forgery.CreateUser(t, nil)
+		repo := forgery.CreateRepository(t, nil, &forgery.CreateRepositoryOptions{
+			Files:         forgery.FilesInit{},
+			IsPrivate:     true,
+			Collaborators: map[*user_model.User]perm.AccessMode{reader: perm.AccessModeRead},
+		})
+		forgery.EnableRepoUnits(t, repo, unit_model.TypeCode, unit_model.TypePullRequests)
+		owner := repo.Owner
+		session := loginUser(t, owner.Name)
+		apiCtx := NewAPITestContext(t, owner.Name, repo.Name, auth_model.AccessTokenScopeWriteRepository)
+		readerToken := getUserToken(t, reader.Name, auth_model.AccessTokenScopeReadRepository)
+		outsiderToken := getUserToken(t, outsider.Name, auth_model.AccessTokenScopeReadRepository)
+
+		now := time.Now()
+		defer timeutil.MockUnset()
+		timeutil.MockSet(now)
+		scheduledAfter := now.Add(time.Hour).Truncate(time.Second)
+
+		newPull := func(t *testing.T, branch string) *issues_model.PullRequest {
+			testEditFileToNewBranch(t, session, owner.Name, repo.Name, "main", branch, "README.md", branch)
+			testPullCreate(t, session, owner.Name, repo.Name, true, "main", branch, branch)
+			return unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, HeadBranch: branch})
+		}
+		getPull := func(t *testing.T, pr *issues_model.PullRequest, token string, expectedCode int) *api.PullRequest {
+			t.Helper()
+			req := NewRequestf(t, "GET", "/api/v1/repos/%s/pulls/%d", repo.FullName(), pr.Index).AddTokenAuth(token)
+			resp := MakeRequest(t, req, expectedCode)
+			if expectedCode != http.StatusOK {
+				return nil
+			}
+			var apiPR api.PullRequest
+			DecodeJSON(t, resp, &apiPR)
+			return &apiPR
+		}
+
+		scheduled := newPull(t, "scheduled")
+		unscheduled := newPull(t, "unscheduled")
+		apiCtx.ExpectedCode = http.StatusCreated
+		doAPIMergePullRequestForm(t, apiCtx, owner.Name, repo.Name, scheduled.Index, &forms.MergePullRequestForm{
+			Do:                     "merge",
+			MergeWhenChecksSucceed: true,
+			ScheduledAfter:         scheduledAfter.Format(time.RFC3339),
+		})
+
+		t.Run("Single", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			apiPR := getPull(t, scheduled, apiCtx.Token, http.StatusOK)
+			require.NotNil(t, apiPR.ScheduledAfter)
+			assert.Equal(t, scheduledAfter.Unix(), apiPR.ScheduledAfter.Unix())
+			assert.Nil(t, getPull(t, unscheduled, apiCtx.Token, http.StatusOK).ScheduledAfter)
+		})
+
+		t.Run("List", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			req := NewRequestf(t, "GET", "/api/v1/repos/%s/pulls?state=open", repo.FullName()).AddTokenAuth(apiCtx.Token)
+			var apiPRs []*api.PullRequest
+			DecodeJSON(t, MakeRequest(t, req, http.StatusOK), &apiPRs)
+			require.Len(t, apiPRs, 2)
+			for _, apiPR := range apiPRs {
+				if apiPR.ID == scheduled.ID {
+					require.NotNil(t, apiPR.ScheduledAfter)
+					assert.Equal(t, scheduledAfter.Unix(), apiPR.ScheduledAfter.Unix())
+				} else {
+					assert.Nil(t, apiPR.ScheduledAfter)
+				}
+			}
+		})
+
+		t.Run("Readers only", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			apiPR := getPull(t, scheduled, readerToken, http.StatusOK)
+			require.NotNil(t, apiPR.ScheduledAfter)
+			assert.Equal(t, scheduledAfter.Unix(), apiPR.ScheduledAfter.Unix())
+			getPull(t, scheduled, outsiderToken, http.StatusNotFound)
+		})
+
+		t.Run("Cancelled", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			doAPIMergePullRequestForm(t, apiCtx, owner.Name, repo.Name, unscheduled.Index, &forms.MergePullRequestForm{
+				Do:                     "merge",
+				MergeWhenChecksSucceed: true,
+				ScheduledAfter:         scheduledAfter.Format(time.RFC3339),
+			})
+			require.NotNil(t, getPull(t, unscheduled, apiCtx.Token, http.StatusOK).ScheduledAfter)
+			req := NewRequestf(t, "DELETE", "/api/v1/repos/%s/pulls/%d/merge", repo.FullName(), unscheduled.Index).AddTokenAuth(apiCtx.Token)
+			MakeRequest(t, req, http.StatusNoContent)
+			assert.Nil(t, getPull(t, unscheduled, apiCtx.Token, http.StatusOK).ScheduledAfter)
+		})
+
+		t.Run("Merged", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			timeutil.MockSet(now.Add(2 * time.Hour))
+			require.NoError(t, automerge.StartDueScheduledAutoMerges(t.Context()))
+			apiPR := getPull(t, scheduled, apiCtx.Token, http.StatusOK)
+			assert.True(t, apiPR.HasMerged)
+			assert.Nil(t, apiPR.ScheduledAfter)
 		})
 	})
 }

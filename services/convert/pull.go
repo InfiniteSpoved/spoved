@@ -10,12 +10,15 @@ import (
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
+	pull_model "forgejo.org/models/pull"
+	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/cache"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/log"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/timeutil"
 )
 
 // ToAPIPullRequest assumes following fields have been assigned with valid values:
@@ -135,6 +138,19 @@ func ToAPIPullRequest(ctx context.Context, pr *issues_model.PullRequest, doer *u
 
 	if pr.Issue.ClosedUnix != 0 {
 		apiPullRequest.Closed = pr.Issue.ClosedUnix.AsTimePtr()
+	}
+
+	if !pr.HasMerged && p.CanRead(unit.TypePullRequests) {
+		const repoScheduledAfterCacheKey = "repo_scheduled_after_cache"
+		scheduledAfter, err := cache.GetWithContextCache(ctx, repoScheduledAfterCacheKey, pr.BaseRepoID,
+			func() (map[int64]timeutil.TimeStamp, error) {
+				return pull_model.GetScheduledAfterByBaseRepoID(ctx, pr.BaseRepoID)
+			})
+		if err != nil {
+			log.Error("GetScheduledAfterByBaseRepoID[%d]: %v", pr.BaseRepoID, err)
+		} else if t := scheduledAfter[pr.ID]; t > 0 {
+			apiPullRequest.ScheduledAfter = t.AsTimePtr()
+		}
 	}
 
 	gitRepo, err := gitrepo.OpenRepository(ctx, pr.BaseRepo)

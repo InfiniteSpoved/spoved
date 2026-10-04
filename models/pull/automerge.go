@@ -130,3 +130,19 @@ func TakeDueScheduledAutoMerges(ctx context.Context, now timeutil.TimeStamp) ([]
 	}
 	return pullIDs, nil
 }
+
+// GetScheduledAfterByBaseRepoID returns the times of the scheduled merges still waiting in a repository, keyed by pull ID
+func GetScheduledAfterByBaseRepoID(ctx context.Context, repoID int64) (map[int64]timeutil.TimeStamp, error) {
+	var rows []*AutoMerge
+	if err := db.GetEngine(ctx).Select("pull_auto_merge.pull_id, pull_auto_merge.scheduled_after_unix").
+		Join("INNER", "pull_request", "pull_request.id = pull_auto_merge.pull_id").
+		Where("pull_request.base_repo_id = ? AND pull_auto_merge.scheduled_after_unix > 0", repoID).
+		Find(&rows); err != nil {
+		return nil, err
+	}
+	scheduledAfter := make(map[int64]timeutil.TimeStamp, len(rows))
+	for _, am := range rows {
+		scheduledAfter[am.PullID] = am.ScheduledAfterUnix
+	}
+	return scheduledAfter, nil
+}
