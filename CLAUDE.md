@@ -28,7 +28,7 @@ These fail in containers for environment reasons only. They also fail on develop
 - E2E: `webauthn.test.e2e.ts`.
 Before calling any other failure environmental, rerun it on `origin/develop`.
 
-GitHub Actions credits are exhausted. PR jobs fail within seconds and their logs return 404. They never got a runner, so ignore them and rely on the local run.
+GitHub Actions minutes are limited. PR CI runs only the lints, frontend checks and unit tests. Migration, integration and E2E tests run on GitHub only when someone starts the CI workflow by hand, so the local run stays the gate for them. Never start that manual run without the user's OK, and push as few times per PR as you can: every push uses about an hour of CI.
 
 ## Conventions
 

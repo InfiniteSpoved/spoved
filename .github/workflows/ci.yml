@@ -11,18 +11,19 @@ name: CI
 # (see .github/ci/shard.sh); changing a matrix's shard list changes the split.
 # The integration tests depend on running in their own order and are not split.
 #
+# To save Actions minutes, pull requests run only the checks and the unit tests.
+# The migration, integration and end-to-end tests run only on a manual run
+# (Actions → CI → Run workflow), and pushes to develop run nothing. The team's
+# local test run (CLAUDE.md) stays the gate for those suites.
+#
 # Pull requests that only change files the Go tests cannot depend on (frontend
-# code and tooling, end-to-end tests, Markdown documentation) skip the unit, migration
-# and integration tests; see the "changes" job. Pushes to develop and manual
-# runs always run everything.
+# code and tooling, end-to-end tests, Markdown documentation) also skip the unit
+# tests; see the "changes" job.
 #
 # main is a mirror of upstream Forgejo and is not tested here.
 
 on:
   pull_request:
-    branches:
-      - develop
-  push:
     branches:
       - develop
   workflow_dispatch:
@@ -162,7 +163,7 @@ jobs:
   test-migrations:
     name: Migration tests (SQLite)
     needs: [changes]
-    if: needs.changes.outputs.backend == 'true'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -181,7 +182,7 @@ jobs:
     # running them in a different order or split across jobs breaks them.
     name: Integration tests (SQLite)
     needs: [changes]
-    if: needs.changes.outputs.backend == 'true'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -198,6 +199,7 @@ jobs:
     name: End-to-end tests (${{ matrix.browser }}, ${{ matrix.shard }}/3)
     # only the frontend build is needed
     needs: [frontend-checks]
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
