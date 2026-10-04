@@ -23,7 +23,7 @@ func TestPushRuleCompile(t *testing.T) {
 		{BannedFilePatterns: strings.Repeat("a", git_model.PushRuleMaxPatternLength+1)},
 		{MaxFileSizeMB: -1},
 	} {
-		assert.Error(t, rule.Compile(), "%+v", rule)
+		require.Error(t, rule.Compile(), "%+v", rule)
 	}
 
 	rule := git_model.PushRule{CommitMessageRegex: "^ABC-", BannedFilePatterns: " *.EXE ; id_rsa;secrets/**;"}

@@ -24,8 +24,8 @@ import (
 
 // Limits per hook request, so a huge push can't stall the hook. Vars so tests can lower them.
 var (
-	pushRuleMaxCommits = 1000
-	pushRuleMaxPaths   = 100_000
+	PushRuleMaxCommits = 1000
+	PushRuleMaxPaths   = 100_000
 )
 
 const pushRuleMaxOutput = 16 << 20 // bytes buffered from one git command
@@ -119,7 +119,7 @@ func (ctx *preReceiveContext) checkPushRule(rule *git_model.PushRule, isCreate b
 	// New commits are those not on any branch yet, so commits that only a tag or a pull request ref points to are
 	// checked when they enter a branch. Tips already checked in this request are excluded with their history.
 	cmd := git.NewCommand(ctx, "log", "-z", "--format=%H%x00%ae%x00%B").
-		AddOptionFormat("--max-count=%d", pushRuleMaxCommits+1).AddDynamicArguments(newCommitID)
+		AddOptionFormat("--max-count=%d", PushRuleMaxCommits+1).AddDynamicArguments(newCommitID)
 	for _, tip := range ctx.pushRuleCheckedTips {
 		cmd.AddDynamicArguments("^" + tip)
 	}
@@ -133,8 +133,8 @@ func (ctx *preReceiveContext) checkPushRule(rule *git_model.PushRule, isCreate b
 		return nil
 	} else if len(fields)%3 != 0 {
 		return fmt.Errorf("unexpected git log output (%d fields)", len(fields))
-	} else if len(fields)/3 > pushRuleMaxCommits {
-		return pushRuleError(fmt.Sprintf("the push contains more than %d new commits, push them in smaller batches", pushRuleMaxCommits))
+	} else if len(fields)/3 > PushRuleMaxCommits {
+		return pushRuleError(fmt.Sprintf("the push contains more than %d new commits, push them in smaller batches", PushRuleMaxCommits))
 	}
 
 	var allowedEmails map[string]bool
@@ -251,8 +251,8 @@ func (ctx *preReceiveContext) readPushRuleDiffTree(rule *git_model.PushRule, rd 
 		filePath = strings.TrimSuffix(filePath, "\x00")
 
 		ctx.pushRulePaths++
-		if ctx.pushRulePaths > pushRuleMaxPaths {
-			return pushRuleError(fmt.Sprintf("the push changes more than %d files, push it in smaller batches", pushRuleMaxPaths))
+		if ctx.pushRulePaths > PushRuleMaxPaths {
+			return pushRuleError(fmt.Sprintf("the push changes more than %d files, push it in smaller batches", PushRuleMaxPaths))
 		}
 		if rule.IsBannedFile(filePath) {
 			return pushRuleError(fmt.Sprintf("commit %.10s: file %q matches a banned file pattern", commit, filePath))

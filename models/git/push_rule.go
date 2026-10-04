@@ -45,14 +45,16 @@ func init() {
 	db.RegisterModel(new(PushRule))
 }
 
-func compilePushRuleRegex(s string) (*regexp.Regexp, error) {
+func compilePushRuleRegex(re **regexp.Regexp, s string) (err error) {
+	*re = nil
 	if s == "" {
-		return nil, nil
+		return nil
 	}
 	if len(s) > PushRuleMaxPatternLength {
-		return nil, fmt.Errorf("regular expression is longer than %d characters", PushRuleMaxPatternLength)
+		return fmt.Errorf("regular expression is longer than %d characters", PushRuleMaxPatternLength)
 	}
-	return regexp.Compile(s)
+	*re, err = regexp.Compile(s)
+	return err
 }
 
 // Compile validates the rule and compiles its patterns. Unlike protected file patterns, an invalid glob is an error.
@@ -60,13 +62,13 @@ func (r *PushRule) Compile() (err error) {
 	if r.MaxFileSizeMB < 0 {
 		return fmt.Errorf("maximum file size must not be negative")
 	}
-	if r.CommitMessageRe, err = compilePushRuleRegex(r.CommitMessageRegex); err != nil {
+	if err = compilePushRuleRegex(&r.CommitMessageRe, r.CommitMessageRegex); err != nil {
 		return err
 	}
-	if r.CommitMessageBannedRe, err = compilePushRuleRegex(r.CommitMessageBannedRegex); err != nil {
+	if err = compilePushRuleRegex(&r.CommitMessageBannedRe, r.CommitMessageBannedRegex); err != nil {
 		return err
 	}
-	if r.BranchNameRe, err = compilePushRuleRegex(r.BranchNameRegex); err != nil {
+	if err = compilePushRuleRegex(&r.BranchNameRe, r.BranchNameRegex); err != nil {
 		return err
 	}
 	if len(r.BannedFilePatterns) > PushRuleMaxPatternLength {

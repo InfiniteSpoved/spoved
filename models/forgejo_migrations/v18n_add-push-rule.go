@@ -18,14 +18,14 @@ func init() {
 
 func addPushRule(x *xorm.Engine) error {
 	type PushRule struct {
-		ID                         int64  `xorm:"pk autoincr"`
-		RepoID                     int64  `xorm:"UNIQUE NOT NULL"`
-		CommitMessageRegex         string `xorm:"TEXT"`
-		CommitMessageBannedRegex   string `xorm:"TEXT"`
-		BranchNameRegex            string `xorm:"TEXT"`
-		RequireVerifiedAuthorEmail bool   `xorm:"NOT NULL DEFAULT false"`
-		MaxFileSizeMB              int64  `xorm:"NOT NULL DEFAULT 0"`
-		BannedFilePatterns         string `xorm:"TEXT"`
+		ID                         int64              `xorm:"pk autoincr"`
+		RepoID                     int64              `xorm:"UNIQUE NOT NULL"`
+		CommitMessageRegex         string             `xorm:"TEXT"`
+		CommitMessageBannedRegex   string             `xorm:"TEXT"`
+		BranchNameRegex            string             `xorm:"TEXT"`
+		RequireVerifiedAuthorEmail bool               `xorm:"NOT NULL DEFAULT false"`
+		MaxFileSizeMB              int64              `xorm:"NOT NULL DEFAULT 0"`
+		BannedFilePatterns         string             `xorm:"TEXT"`
 		CreatedUnix                timeutil.TimeStamp `xorm:"created"`
 		UpdatedUnix                timeutil.TimeStamp `xorm:"updated"`
 	}
