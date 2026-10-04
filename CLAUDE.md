@@ -53,3 +53,4 @@ Add a line here when you hit something the next person should know.
 - E2E under a git worktree in the long scratchpad path fails with "bind: invalid argument" (the unix socket path is too long). Run e2e in the main checkout.
 - After switching branches across a migration, delete `tests/e2e/forgejo-e2e-sqlite` before running e2e, or the server refuses the newer database.
 - E2E `repo-settings.test.e2e.ts` › `deploy key pickers › tag protection` [Mobile Chrome] also fails on develop in containers (a cell intercepts the Remove click); it's environmental.
+- `make lint`/`make frontend` run npm with the container's older Node and rewrite package-lock.json. Stage files by name (never `git add -A`) and keep package-lock.json out of commits unless you changed package files.
