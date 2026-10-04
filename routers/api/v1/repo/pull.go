@@ -899,6 +899,8 @@ func MergePullRequest(ctx *context.APIContext) {
 	//     "$ref": "#/responses/error"
 	//   "413":
 	//     "$ref": "#/responses/quotaExceeded"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
 	//   "423":
 	//     "$ref": "#/responses/repoArchivedError"
 
@@ -942,6 +944,12 @@ func MergePullRequest(ctx *context.APIContext) {
 	}
 	if manuallyMerged {
 		mergeCheckType = pull_service.MergeCheckTypeManually
+	}
+
+	scheduledAfter, err := form.ScheduledAfterTimeStamp()
+	if err != nil {
+		ctx.Error(http.StatusUnprocessableEntity, "ScheduledAfter", err)
+		return
 	}
 
 	// start with merging by checking
@@ -1003,9 +1011,9 @@ func MergePullRequest(ctx *context.APIContext) {
 	}
 
 	if form.MergeWhenChecksSucceed {
-		scheduled, err := automerge.ScheduleAutoMerge(ctx, ctx.Doer(), pr, repo_model.MergeStyle(form.Do), message, form.DeleteBranchAfterMerge)
+		scheduled, err := automerge.ScheduleAutoMerge(ctx, ctx.Doer(), pr, repo_model.MergeStyle(form.Do), message, form.DeleteBranchAfterMerge, scheduledAfter, form.HeadCommitID)
 		if err != nil {
-			if pull_model.IsErrAlreadyScheduledToAutoMerge(err) {
+			if pull_model.IsErrAlreadyScheduledToAutoMerge(err) || models.IsErrSHADoesNotMatch(err) {
 				ctx.Error(http.StatusConflict, "ScheduleAutoMerge", err)
 				return
 			}

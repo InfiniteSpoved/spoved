@@ -1392,6 +1392,12 @@ func MergePullRequest(ctx *context.Context) {
 		mergeCheckType = pull_service.MergeCheckTypeManually
 	}
 
+	scheduledAfter, err := form.ScheduledAfterTimeStamp()
+	if err != nil {
+		ctx.JSONError(ctx.Tr("repo.pulls.auto_merge.invalid_time"))
+		return
+	}
+
 	// start with merging by checking
 	if err := pull_service.CheckPullMergeable(ctx, ctx.Doer, &ctx.Repo.Permission, pr, mergeCheckType, form.ForceMerge, mergeStyle); err != nil {
 		switch {
@@ -1460,8 +1466,11 @@ func MergePullRequest(ctx *context.Context) {
 		// delete all scheduled auto merges
 		_ = pull_model.DeleteScheduledAutoMerge(ctx, pr.ID)
 		// schedule auto merge
-		scheduled, err := automerge.ScheduleAutoMerge(ctx, ctx.Doer, pr, repo_model.MergeStyle(form.Do), message, form.DeleteBranchAfterMerge)
-		if err != nil {
+		scheduled, err := automerge.ScheduleAutoMerge(ctx, ctx.Doer, pr, repo_model.MergeStyle(form.Do), message, form.DeleteBranchAfterMerge, scheduledAfter, form.HeadCommitID)
+		if models.IsErrSHADoesNotMatch(err) {
+			ctx.JSONError(ctx.Tr("repo.pulls.auto_merge.head_changed"))
+			return
+		} else if err != nil {
 			ctx.ServerError("ScheduleAutoMerge", err)
 			return
 		} else if scheduled {

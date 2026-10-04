@@ -6,18 +6,21 @@
 package forms
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"forgejo.org/models"
 	issues_model "forgejo.org/models/issues"
 	webhook_model "forgejo.org/models/webhook"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
+	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/web/middleware"
 	"forgejo.org/services/context"
 
@@ -475,6 +478,27 @@ type MergePullRequestForm struct {
 	ForceMerge             bool   `json:"force_merge,omitempty"`
 	MergeWhenChecksSucceed bool   `json:"merge_when_checks_succeed,omitempty"`
 	DeleteBranchAfterMerge bool   `json:"delete_branch_after_merge,omitempty"`
+	// do not merge before this time, only with merge_when_checks_succeed; the merge is pinned to the current head
+	// swagger:strfmt date-time
+	ScheduledAfter string `json:"scheduled_after,omitempty"`
+}
+
+// ScheduledAfterTimeStamp parses ScheduledAfter, which must be in the future. It returns 0 if it is empty.
+func (f *MergePullRequestForm) ScheduledAfterTimeStamp() (timeutil.TimeStamp, error) {
+	if f.ScheduledAfter == "" {
+		return 0, nil
+	}
+	if !f.MergeWhenChecksSucceed {
+		return 0, errors.New("scheduled_after requires merge_when_checks_succeed")
+	}
+	t, err := time.Parse(time.RFC3339, f.ScheduledAfter)
+	if err != nil {
+		return 0, err
+	}
+	if !t.After(timeutil.TimeStampNow().AsTime()) {
+		return 0, errors.New("scheduled_after must be in the future")
+	}
+	return timeutil.TimeStamp(t.Unix()), nil
 }
 
 // Validate validates the fields

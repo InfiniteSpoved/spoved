@@ -46,3 +46,5 @@ Add a line here when you hit something the next person should know.
 - Grouped counts: use one `GROUP BY` query per list (see `countGroupedBy` in `models/organization/user_group.go`), not one query per row.
 - Deploy keys are referenced by `PublicKey` ID (`DeployKey.KeyID`) in protection rules, so org deploy keys can reuse the same lists later.
 - A deploy-key push runs with `opts.UserID` set to the repository owner; decide deploy-key permissions from the key (`ctx.deployKeyKeyID` in the pre-receive hook), never from that user ID.
+- `make 'test-sqlite#A|B'` breaks on the pipe; after one build, run `PROJECT_ROOT=$PWD PROJECT_CONF=tests/sqlite.ini ./integrations.sqlite.test -test.run 'A|B'`.
+- The preinstalled `golangci-lint` is too old for go.mod; use `GOTOOLCHAIN=go1.27.1 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run --build-tags 'sqlite sqlite_unlock_notify' <pkgs>`.
