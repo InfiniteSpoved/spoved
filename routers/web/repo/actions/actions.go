@@ -64,6 +64,7 @@ func MustEnableActions(ctx *context.Context) {
 func List(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("actions.actions")
 	ctx.Data["PageIsActions"] = true
+	ctx.Data["RunRetentionDays"] = setting.Actions.RunRetentionDays
 
 	curWorkflow := ctx.FormString("workflow")
 	ctx.Data["CurWorkflow"] = curWorkflow

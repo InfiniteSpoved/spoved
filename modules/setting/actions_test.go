@@ -242,3 +242,19 @@ func Test_getIDTokenSettingsForActions(t *testing.T) {
 	err = loadActionsFrom(cfg)
 	require.ErrorContains(t, err, "[actions] Unexpected algorithm: ID_TOKEN_KEYS_ACCEPTED = HS384, needs to be one of [RS256 RS384 RS512 ES256 ES384 ES512 EdDSA]")
 }
+
+func Test_getRunRetentionDaysForActions(t *testing.T) {
+	defer test.MockVariableValue(&Actions, Actions)()
+
+	for iniStr, want := range map[string]int64{
+		"[actions]\n":                          0,
+		"[actions]\nRUN_RETENTION_DAYS = 30\n": 30,
+		"[actions]\nRUN_RETENTION_DAYS = -5\n": 0,
+	} {
+		Actions.RunRetentionDays = 0
+		cfg, err := NewConfigProviderFromData(iniStr)
+		require.NoError(t, err)
+		require.NoError(t, loadActionsFrom(cfg))
+		assert.Equal(t, want, Actions.RunRetentionDays, iniStr)
+	}
+}
