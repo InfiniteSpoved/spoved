@@ -91,17 +91,16 @@ func TemplateCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *g
 		}
 	}
 
-	var sources []*repo_model.Repository
-	if r, err := repo_model.GetRepositoryByName(ctx, repo.OwnerID, ".forgejo"); err == nil {
-		sources = append(sources, r)
-	}
-	if r := defaultTemplatesRepo(ctx); r != nil {
-		sources = append(sources, r)
-	}
-
 	seen := map[int64]bool{repo.ID: true}
-	for _, src := range sources {
-		if seen[src.ID] || src.IsEmpty {
+	for _, source := range []func() *repo_model.Repository{
+		func() *repo_model.Repository {
+			r, _ := repo_model.GetRepositoryByName(ctx, repo.OwnerID, ".forgejo")
+			return r
+		},
+		func() *repo_model.Repository { return defaultTemplatesRepo(ctx) },
+	} {
+		src := source()
+		if src == nil || seen[src.ID] || src.IsEmpty {
 			continue
 		}
 		seen[src.ID] = true
