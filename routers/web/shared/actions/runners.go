@@ -126,6 +126,24 @@ func getRunnersCtx(ctx *context.Context) (*runnersCtx, error) {
 	return nil, errors.New("unable to set Runners context")
 }
 
+// requireRegistrationAllowed responds with an error and returns false unless [actions].RUNNER_REGISTRATION allows
+// registering runners in rCtx's scope. adminBypass lets site admins create runners directly in any scope; registration
+// tokens never get it because they don't record who created them.
+func requireRegistrationAllowed(ctx *context.Context, rCtx *runnersCtx, adminBypass bool) bool {
+	if adminBypass && ctx.Doer.IsAdmin {
+		return true
+	}
+	allowed, err := actions_model.RunnerScopeAllowsRegistration(ctx, rCtx.OwnerID, rCtx.RepoID)
+	if err != nil {
+		ctx.ServerError("RunnerScopeAllowsRegistration", err)
+		return false
+	}
+	if !allowed {
+		ctx.Error(http.StatusForbidden, ctx.Locale.TrString("actions.runners.registration_restricted"))
+	}
+	return allowed
+}
+
 // RunnersList renders the list of runners.
 func RunnersList(ctx *context.Context) {
 	rCtx, err := getRunnersCtx(ctx)
@@ -162,27 +180,41 @@ func RunnersList(ctx *context.Context) {
 		return
 	}
 
-	// ownid=0,repo_id=0,means this token is used for global
-	ownerID := optional.None[int64]()
-	if opts.OwnerID != 0 {
-		ownerID = optional.Some(opts.OwnerID)
+	allowed, err := actions_model.RunnerScopeAllowsRegistration(ctx, opts.OwnerID, opts.RepoID)
+	if err != nil {
+		ctx.ServerError("RunnerScopeAllowsRegistration", err)
+		return
 	}
-	repoID := optional.None[int64]()
-	if opts.RepoID != 0 {
-		repoID = optional.Some(opts.RepoID)
-	}
+	if allowed {
+		// ownid=0,repo_id=0,means this token is used for global
+		ownerID := optional.None[int64]()
+		if opts.OwnerID != 0 {
+			ownerID = optional.Some(opts.OwnerID)
+		}
+		repoID := optional.None[int64]()
+		if opts.RepoID != 0 {
+			repoID = optional.Some(opts.RepoID)
+		}
 
-	var token *actions_model.ActionRunnerToken
-	token, err = actions_model.GetLatestRunnerToken(ctx, ownerID, repoID)
-	if errors.Is(err, util.ErrNotExist) || (token != nil && !token.IsActive) {
-		token, err = actions_model.NewRunnerToken(ctx, ownerID, repoID)
-		if err != nil {
-			ctx.ServerError("CreateRunnerToken", err)
+		var token *actions_model.ActionRunnerToken
+		token, err = actions_model.GetLatestRunnerToken(ctx, ownerID, repoID)
+		if errors.Is(err, util.ErrNotExist) || (token != nil && !token.IsActive) {
+			token, err = actions_model.NewRunnerToken(ctx, ownerID, repoID)
+			if err != nil {
+				ctx.ServerError("CreateRunnerToken", err)
+				return
+			}
+		} else if err != nil {
+			ctx.ServerError("GetLatestRunnerToken", err)
 			return
 		}
-	} else if err != nil {
-		ctx.ServerError("GetLatestRunnerToken", err)
-		return
+		ctx.Data["RegistrationToken"] = token.Token
+	} else {
+		ctx.Data["RegistrationRestricted"] = true
+	}
+	ctx.Data["CanCreateRunner"] = allowed || ctx.Doer.IsAdmin
+	if rCtx.IsAdmin && setting.Actions.RunnerRegistration != setting.RunnerRegistrationEveryone {
+		ctx.Data["RunnerRegistrationMode"] = setting.Actions.RunnerRegistration
 	}
 
 	ctx.Data["PageIsSharedSettingsRunners"] = true
@@ -191,7 +223,6 @@ func RunnersList(ctx *context.Context) {
 	ctx.Data["Keyword"] = opts.Filter
 	ctx.Data["Runners"] = runners
 	ctx.Data["Total"] = count
-	ctx.Data["RegistrationToken"] = token.Token
 	ctx.Data["RunnerOwnerID"] = opts.OwnerID
 	ctx.Data["RunnerRepoID"] = opts.RepoID
 	ctx.Data["SortType"] = opts.Sort
@@ -273,6 +304,9 @@ func RunnerCreate(ctx *context.Context) {
 		ctx.ServerError("getRunnersCtx", err)
 		return
 	}
+	if !requireRegistrationAllowed(ctx, rCtx, true) {
+		return
+	}
 
 	ctx.Data["PageIsSharedSettingsRunners"] = true
 	ctx.Data["Title"] = ctx.Tr("actions.runners.create_runner.page_title")
@@ -285,6 +319,9 @@ func RunnerCreatePost(ctx *context.Context) {
 	rCtx, err := getRunnersCtx(ctx)
 	if err != nil {
 		ctx.ServerError("getRunnersCtx", err)
+		return
+	}
+	if !requireRegistrationAllowed(ctx, rCtx, true) {
 		return
 	}
 
@@ -416,6 +453,9 @@ func RunnerEditPost(ctx *context.Context) {
 		return
 	}
 
+	if !requireRegistrationAllowed(ctx, rCtx, true) {
+		return
+	}
 	runner.GenerateToken()
 	err = actions_model.UpdateRunner(ctx, runner, "name", "description", "token_hash", "token_salt")
 	if err != nil {
@@ -433,6 +473,9 @@ func RunnerResetRegistrationToken(ctx *context.Context) {
 	rCtx, err := getRunnersCtx(ctx)
 	if err != nil {
 		ctx.ServerError("getRunnersCtx", err)
+		return
+	}
+	if !requireRegistrationAllowed(ctx, rCtx, false) {
 		return
 	}
 

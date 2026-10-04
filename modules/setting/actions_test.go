@@ -242,3 +242,24 @@ func Test_getIDTokenSettingsForActions(t *testing.T) {
 	err = loadActionsFrom(cfg)
 	require.ErrorContains(t, err, "[actions] Unexpected algorithm: ID_TOKEN_KEYS_ACCEPTED = HS384, needs to be one of [RS256 RS384 RS512 ES256 ES384 ES512 EdDSA]")
 }
+
+func Test_getRunnerRegistrationForActions(t *testing.T) {
+	oldActions := Actions
+	defer func() {
+		Actions = oldActions
+	}()
+
+	cfg, err := NewConfigProviderFromData("[actions]\n")
+	require.NoError(t, err)
+	require.NoError(t, loadActionsFrom(cfg))
+	assert.Equal(t, RunnerRegistrationEveryone, Actions.RunnerRegistration)
+
+	cfg, err = NewConfigProviderFromData("[actions]\nRUNNER_REGISTRATION = admin_and_org_owners\n")
+	require.NoError(t, err)
+	require.NoError(t, loadActionsFrom(cfg))
+	assert.Equal(t, RunnerRegistrationAdminAndOrgOwners, Actions.RunnerRegistration)
+
+	cfg, err = NewConfigProviderFromData("[actions]\nRUNNER_REGISTRATION = nobody\n")
+	require.NoError(t, err)
+	require.ErrorContains(t, loadActionsFrom(cfg), "RUNNER_REGISTRATION")
+}
