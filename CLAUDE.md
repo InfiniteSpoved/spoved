@@ -47,3 +47,4 @@ Add a line here when you hit something the next person should know.
 - Deploy keys are referenced by `PublicKey` ID (`DeployKey.KeyID`) in protection rules, so org deploy keys can reuse the same lists later.
 - A deploy-key push runs with `opts.UserID` set to the repository owner; decide deploy-key permissions from the key (`ctx.deployKeyKeyID` in the pre-receive hook), never from that user ID.
 - Integration tests: build expected absolute links from `setting.AppURL`, not from the `onApplicationRun` callback URL; the hosts differ (`localhost` vs `127.0.0.1`).
+- `make lint-css` runs stylelint on every file under `web_src/css`, including `.js`, so JS tests for CSS (e.g. `web_src/js/company-contrast.test.js`) must live under `web_src/js`.

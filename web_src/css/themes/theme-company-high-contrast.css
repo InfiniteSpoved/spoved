@@ -1,0 +1,17 @@
+@import "./theme-company-light.css";
+
+:root {
+  --surface-raised: var(--neutral-0);
+  --text: var(--neutral-950);
+  --text-muted: var(--neutral-800);
+  --border: var(--neutral-500);
+  --border-strong: var(--neutral-900);
+  --primary: var(--blue-900);
+  --primary-hover: var(--neutral-950);
+  --primary-active: var(--neutral-950);
+  --danger: var(--red-900);
+  --warning: var(--amber-900);
+  --success: var(--green-900);
+  --focus-ring: var(--neutral-950);
+  --label-bg: var(--neutral-100);
+}
