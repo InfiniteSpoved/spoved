@@ -86,7 +86,7 @@ Planned work is tracked in [issues](https://github.com/GitHatOrg/GitHat/issues),
 
 ## Naming
 
-The product is GitHat, but some internals still carry Forgejo's name to keep merging upstream changes easy: the `forgejo` binary, the `forgejo.org` Go module path, configuration and file paths, and the default site name. Set `APP_NAME = GitHat` at the top of `app.ini` to show GitHat in the interface.
+GitHat is the project's name. The application itself still uses Forgejo's name, logo and interface text, so it doesn't show a mix of both names. A complete rename of the interface is planned. Set `APP_NAME` in `app.ini` to show your own site name.
 
 ## Documentation
 
