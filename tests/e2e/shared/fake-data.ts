@@ -44,6 +44,7 @@ export class FakeData {
   private orgs: string[] = [];
   private repos: string[] = [];
   private groups: string[] = [];
+  private announcements: number[] = [];
 
   constructor(private request: APIRequestContext) {}
 
@@ -110,8 +111,14 @@ export class FakeData {
     this.groups.push(name);
   }
 
+  // Remembers an announcement created by the test through the UI, so that it is deleted afterwards.
+  trackAnnouncement(id: number) {
+    this.announcements.push(id);
+  }
+
   async cleanup() {
     const headers = adminAuth();
+    for (const id of this.announcements) await this.request.delete(`/api/v1/admin/announcements/${id}`, {headers});
     for (const group of this.groups) await this.request.delete(`/api/v1/admin/groups/${group}`, {headers});
     for (const repo of this.repos) await this.request.delete(`/api/v1/repos/${repo}`, {headers});
     for (const org of this.orgs) await this.request.delete(`/api/v1/orgs/${org}`, {headers});

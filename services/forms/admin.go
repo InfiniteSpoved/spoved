@@ -73,3 +73,19 @@ func (f *AdminDashboardForm) Validate(req *http.Request, errs binding.Errors) bi
 	ctx := context.GetValidateContext(req)
 	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
+
+// AnnouncementForm form for creating or editing an announcement
+type AnnouncementForm struct {
+	Message     string `binding:"Required;MaxSize(65535)" locale:"admin.announcements.message"`
+	Type        string `binding:"Required;In(info,warning,critical)" locale:"admin.announcements.type"`
+	Audience    string `binding:"Required;In(everyone,signed_in,admins)" locale:"admin.announcements.audience"`
+	Dismissible bool
+	StartTime   string `locale:"admin.announcements.start_time"`
+	EndTime     string `locale:"admin.announcements.end_time"`
+}
+
+// Validate validates the fields
+func (f *AnnouncementForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
+	ctx := context.GetValidateContext(req)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
+}

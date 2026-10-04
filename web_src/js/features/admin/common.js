@@ -3,6 +3,7 @@ import {checkAppUrl} from '../common-global.js';
 import {hideElem, showElem, toggleElem} from '../../utils/dom.js';
 import {POST} from '../../modules/fetch.js';
 import {showModal} from '../../modules/modal.ts';
+import {initComboMarkdownEditor} from '../comp/ComboMarkdownEditor.js';
 
 const {appSubUrl} = window.config;
 
@@ -19,6 +20,9 @@ export function initAdminCommon() {
 
   // check whether appUrl(ROOT_URL) is correct, if not, show an error message
   checkAppUrl();
+
+  const announcementEditor = document.querySelector('.admin.announcement .combo-markdown-editor');
+  if (announcementEditor) initComboMarkdownEditor(announcementEditor);
 
   // New user
   if ($('.admin.new.user').length > 0 || $('.admin.edit.user').length > 0) {

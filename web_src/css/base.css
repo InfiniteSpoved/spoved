@@ -797,6 +797,11 @@ img.ui.avatar,
   text-align: center;
 }
 
+.site-announcements .ui.message.site-announcement {
+  margin: 0;
+  border-radius: 0;
+}
+
 .ui .message > ul {
   margin-inline: auto;
   display: table;

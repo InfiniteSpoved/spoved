@@ -413,7 +413,7 @@ func Routes() *web.Route {
 		},
 		gzipMid, sessioner, context.Contexter(), webAuth(buildAuthGroup()),
 		// TODO: GetNotificationCount & GetActiveStopwatch really seem like things that could be folded into Contexter or as helper functions
-		user.GetNotificationCount, repo.GetActiveStopwatch,
+		user.GetNotificationCount, repo.GetActiveStopwatch, user.GetAnnouncements,
 		goGet)
 	routes.Group("",
 		func() {
@@ -441,7 +441,7 @@ func Routes() *web.Route {
 	routes.NotFound(
 		gzipMid, sessioner, context.Contexter(), webAuth(buildAuthGroup()),
 		// TODO: GetNotificationCount & GetActiveStopwatch really seem like things that could be folded into Contexter or as helper functions
-		user.GetNotificationCount, repo.GetActiveStopwatch,
+		user.GetNotificationCount, repo.GetActiveStopwatch, user.GetAnnouncements,
 		goGet,
 		func(w http.ResponseWriter, req *http.Request) {
 			ctx := context.GetWebContext(req)
@@ -941,6 +941,14 @@ func registerRoutes(m *web.Route) {
 
 		m.Group("/orgs", func() {
 			m.Get("", admin.Organizations)
+		})
+
+		m.Group("/announcements", func() {
+			m.Get("", admin.Announcements)
+			m.Combo("/new").Get(admin.NewAnnouncement).Post(web.Bind(forms.AnnouncementForm{}), admin.NewAnnouncementPost)
+			m.Post("/markup", web.Bind(structs.MarkupOption{}), misc.Markup)
+			m.Combo("/{id}").Get(admin.EditAnnouncement).Post(web.Bind(forms.AnnouncementForm{}), admin.EditAnnouncementPost)
+			m.Post("/{id}/delete", admin.DeleteAnnouncement)
 		})
 
 		m.Group("/groups", func() {
@@ -1886,6 +1894,8 @@ func registerRoutes(m *web.Route) {
 		m.Post("/purge", user.NotificationPurgePost)
 		m.Get("/new", user.NewAvailable)
 	}, reqSignIn)
+
+	m.Post("/-/announcements/{id}/dismiss", reqSignIn, user.DismissAnnouncement)
 
 	if setting.API.EnableSwagger {
 		m.Get("/swagger.v1.json", SwaggerV1Json)

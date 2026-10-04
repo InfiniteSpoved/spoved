@@ -1,0 +1,56 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin announcements")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.announcements.manage_panel"}} ({{ctx.Locale.Tr "admin.total" .Total}})
+			<div class="ui right">
+				<a class="ui primary tiny button" href="{{AppSubUrl}}/admin/announcements/new">{{ctx.Locale.Tr "admin.announcements.new"}}</a>
+			</div>
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.announcements.desc"}}</p>
+		</div>
+		<div class="ui attached table segment">
+			<table class="ui very basic striped table unstackable">
+				<thead>
+					<tr>
+						<th>ID</th>
+						<th>{{ctx.Locale.Tr "admin.announcements.message"}}</th>
+						<th>{{ctx.Locale.Tr "admin.announcements.type"}}</th>
+						<th>{{ctx.Locale.Tr "admin.announcements.audience"}}</th>
+						<th>{{ctx.Locale.Tr "admin.announcements.start_time"}}</th>
+						<th>{{ctx.Locale.Tr "admin.announcements.end_time"}}</th>
+						<th>{{ctx.Locale.Tr "admin.announcements.status"}}</th>
+						<th>{{ctx.Locale.Tr "admin.notices.op"}}</th>
+					</tr>
+				</thead>
+				<tbody>
+					{{range .Announcements}}
+						<tr>
+							<td>{{.ID}}</td>
+							<td class="tw-break-anywhere">{{StringUtils.EllipsisString .Message 80}}</td>
+							<td>{{ctx.Locale.Tr (printf "admin.announcements.type.%s" .Type)}}</td>
+							<td>{{ctx.Locale.Tr (printf "admin.announcements.audience.%s" .Audience)}}</td>
+							<td>{{if .StartUnix}}{{DateUtils.AbsoluteShort .StartUnix}}{{else}}-{{end}}</td>
+							<td>{{if .EndUnix}}{{DateUtils.AbsoluteShort .EndUnix}}{{else}}-{{end}}</td>
+							<td>
+								{{if .IsActiveAt $.Now}}
+									<span class="ui green label">{{ctx.Locale.Tr "admin.announcements.status.active"}}</span>
+								{{else if and .EndUnix (ge $.Now .EndUnix)}}
+									<span class="ui label">{{ctx.Locale.Tr "admin.announcements.status.ended"}}</span>
+								{{else}}
+									<span class="ui label">{{ctx.Locale.Tr "admin.announcements.status.scheduled"}}</span>
+								{{end}}
+							</td>
+							<td>
+								<a href="{{AppSubUrl}}/admin/announcements/{{.ID}}" data-tooltip-content="{{ctx.Locale.Tr "admin.announcements.edit"}}" aria-label="{{ctx.Locale.Tr "admin.announcements.edit"}}">{{svg "octicon-pencil"}}</a>
+							</td>
+						</tr>
+					{{else}}
+						<tr><td class="tw-text-center" colspan="8">{{ctx.Locale.Tr "admin.announcements.none"}}</td></tr>
+					{{end}}
+				</tbody>
+			</table>
+		</div>
+		{{template "base/paginate" .}}
+	</div>
+{{template "admin/layout_footer" .}}

@@ -69,3 +69,17 @@ type swaggerResponseBoolean struct {
 	// in:body
 	Body bool `json:"body"`
 }
+
+// Announcement
+// swagger:response Announcement
+type swaggerResponseAnnouncement struct {
+	// in:body
+	Body api.Announcement `json:"body"`
+}
+
+// AnnouncementList
+// swagger:response AnnouncementList
+type swaggerResponseAnnouncementList struct {
+	// in:body
+	Body []api.Announcement `json:"body"`
+}
