@@ -969,6 +969,8 @@ func registerRoutes(m *web.Route) {
 			m.Post("/delete", admin.DeleteRepo)
 		})
 
+		m.Get("/storage", admin.Storage)
+
 		m.Group("/packages", func() {
 			m.Get("", admin.Packages)
 			m.Post("/delete", admin.DeletePackageVersion)
