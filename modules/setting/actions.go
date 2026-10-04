@@ -20,6 +20,7 @@ var (
 		LogCompression               logCompression    `ini:"LOG_COMPRESSION"`
 		ArtifactStorage              *Storage          // how the created artifacts should be stored
 		ArtifactRetentionDays        int64             `ini:"ARTIFACT_RETENTION_DAYS"`
+		RunRetentionDays             int64             `ini:"RUN_RETENTION_DAYS"`
 		DefaultActionsURL            defaultActionsURL `ini:"DEFAULT_ACTIONS_URL"`
 		ZombieTaskTimeout            time.Duration     `ini:"ZOMBIE_TASK_TIMEOUT"`
 		EndlessTaskTimeout           time.Duration     `ini:"ENDLESS_TASK_TIMEOUT"`
@@ -28,6 +29,7 @@ var (
 		LimitDispatchInputs          int64             `ini:"LIMIT_DISPATCH_INPUTS"`
 		ConcurrencyGroupQueueEnabled bool              `ini:"CONCURRENCY_GROUP_QUEUE_ENABLED"`
 		IDTokenExpirationTime        int64             `ini:"ID_TOKEN_EXPIRATION_TIME"`
+		RunnerRegistration           string            `ini:"RUNNER_REGISTRATION"`
 
 		IDTokenKeyCfg *jwtx.KeyCfg
 	}{
@@ -37,7 +39,15 @@ var (
 		LimitDispatchInputs:          100,
 		ConcurrencyGroupQueueEnabled: true,
 		IDTokenExpirationTime:        3600,
+		RunnerRegistration:           RunnerRegistrationEveryone,
 	}
+)
+
+// Values of [actions].RUNNER_REGISTRATION
+const (
+	RunnerRegistrationEveryone          = "everyone"
+	RunnerRegistrationAdminAndOrgOwners = "admin_and_org_owners"
+	RunnerRegistrationAdmin             = "admin"
 )
 
 type defaultActionsURL string
@@ -103,6 +113,11 @@ func loadActionsFrom(rootCfg ConfigProvider) error {
 		Actions.ArtifactRetentionDays = 90
 	}
 
+	// default to keeping runs forever
+	if Actions.RunRetentionDays < 0 {
+		Actions.RunRetentionDays = 0
+	}
+
 	Actions.ZombieTaskTimeout, err = sec.Key("ZOMBIE_TASK_TIMEOUT").MustDuration(10 * time.Minute)
 	if err != nil {
 		return fmt.Errorf("failed to parse duration for [actions].ZOMBIE_TASK_TIMEOUT: %w", err)
@@ -120,6 +135,12 @@ func loadActionsFrom(rootCfg ConfigProvider) error {
 
 	if !Actions.LogCompression.IsValid() {
 		return fmt.Errorf("invalid [actions] LOG_COMPRESSION: %q", Actions.LogCompression)
+	}
+
+	switch Actions.RunnerRegistration {
+	case RunnerRegistrationEveryone, RunnerRegistrationAdminAndOrgOwners, RunnerRegistrationAdmin:
+	default:
+		return fmt.Errorf("invalid [actions] RUNNER_REGISTRATION: %q", Actions.RunnerRegistration)
 	}
 
 	Actions.IDTokenKeyCfg, err = loadKeyCfg(rootCfg, secName, "ID_TOKEN_", "RS256", "actions_id_token/private.pem", onlyAsymmetric())

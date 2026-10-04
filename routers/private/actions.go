@@ -44,6 +44,20 @@ func GenerateActionsRunnerToken(ctx *context.PrivateContext) {
 		return
 	}
 
+	allowed, err := actions_model.RunnerScopeAllowsRegistration(ctx, owner, repo)
+	if err != nil {
+		log.Error("RunnerScopeAllowsRegistration failed: %v", err)
+		ctx.JSON(http.StatusInternalServerError, private.Response{
+			Err: err.Error(),
+		})
+		return
+	}
+	if !allowed {
+		msg := "[actions].RUNNER_REGISTRATION does not allow registration tokens for this scope; use `forgejo-cli actions register` to create the runner instead"
+		ctx.JSON(http.StatusForbidden, private.Response{Err: msg, UserMsg: msg})
+		return
+	}
+
 	ownerID := optional.None[int64]()
 	if owner != 0 {
 		ownerID = optional.Some(owner)

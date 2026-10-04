@@ -11,6 +11,8 @@ import (
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/setting"
+	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
 
 	"github.com/stretchr/testify/assert"
@@ -132,5 +134,66 @@ func TestCleanupEphemeralRunners(t *testing.T) {
 		require.NoError(t, CleanupEphemeralRunners(db.DefaultContext))
 
 		unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRunner{ID: 2008})
+	})
+}
+
+func TestCleanupRuns(t *testing.T) {
+	const old = timeutil.TimeStamp(1683636108)
+	insertRun := func(t *testing.T, id int64, ref, workflowID string, status actions_model.Status, created timeutil.TimeStamp) {
+		t.Helper()
+		unittest.AssertSuccessfulInsert(t, &actions_model.ActionRun{ID: id, Index: id, RepoID: 4, OwnerID: 5, Ref: ref, WorkflowID: workflowID, Status: status})
+		_, err := db.GetEngine(t.Context()).Exec("UPDATE action_run SET created = ? WHERE id = ?", created, id)
+		require.NoError(t, err)
+	}
+
+	t.Run("Keeps everything when disabled", func(t *testing.T) {
+		require.NoError(t, unittest.PrepareTestDatabase())
+		defer test.MockVariableValue(&setting.Actions.RunRetentionDays, 0)()
+
+		insertRun(t, 500001, "refs/heads/feature", "a.yaml", actions_model.StatusSuccess, old)
+
+		require.NoError(t, CleanupRuns(t.Context()))
+
+		unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRun{ID: 500001})
+	})
+
+	t.Run("Deletes old runs", func(t *testing.T) {
+		require.NoError(t, unittest.PrepareTestDatabase())
+		defer test.MockVariableValue(&setting.Actions.RunRetentionDays, 30)()
+
+		// old, with a job and an artifact
+		insertRun(t, 500001, "refs/heads/master", "a.yaml", actions_model.StatusSuccess, old)
+		unittest.AssertSuccessfulInsert(t, &actions_model.ActionRunJob{ID: 500001, Handle: "500001", RunID: 500001, RepoID: 4, OwnerID: 5, Status: actions_model.StatusSuccess})
+		unittest.AssertSuccessfulInsert(t, &actions_model.ActionArtifact{RunID: 500001, RepoID: 4, OwnerID: 5, ArtifactName: "a", Status: int64(actions_model.ArtifactStatusUploadConfirmed)})
+		// latest run of a.yaml on the default branch
+		insertRun(t, 500002, "refs/heads/master", "a.yaml", actions_model.StatusSuccess, old)
+		// newer, but not on the default branch
+		insertRun(t, 500003, "refs/heads/feature", "a.yaml", actions_model.StatusSuccess, old)
+		// not done
+		insertRun(t, 500004, "refs/heads/feature", "a.yaml", actions_model.StatusRunning, old)
+		// done, but DeleteRun fails because its job is still running
+		insertRun(t, 500005, "refs/heads/feature", "a.yaml", actions_model.StatusSuccess, old)
+		unittest.AssertSuccessfulInsert(t, &actions_model.ActionRunJob{ID: 500005, Handle: "500005", RunID: 500005, RepoID: 4, OwnerID: 5, Status: actions_model.StatusRunning})
+		// recent
+		insertRun(t, 500006, "refs/heads/feature", "a.yaml", actions_model.StatusSuccess, timeutil.TimeStampNow())
+		// more than one batch after the failing run, the last one is the latest of b.yaml
+		for id := int64(500100); id <= 500100+deleteRunBatchSize; id++ {
+			insertRun(t, id, "refs/heads/master", "b.yaml", actions_model.StatusFailure, old)
+		}
+
+		require.NoError(t, CleanupRuns(t.Context()))
+
+		unittest.AssertNotExistsBean(t, &actions_model.ActionRun{ID: 500001})
+		unittest.AssertNotExistsBean(t, &actions_model.ActionRunJob{ID: 500001})
+		unittest.AssertCount(t, &actions_model.ActionArtifact{RunID: 500001, Status: int64(actions_model.ArtifactStatusPendingDeletion)}, 1)
+		unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRun{ID: 500002})
+		unittest.AssertNotExistsBean(t, &actions_model.ActionRun{ID: 500003})
+		unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRun{ID: 500004})
+		unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRun{ID: 500005})
+		unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRun{ID: 500006})
+		for id := int64(500100); id < 500100+deleteRunBatchSize; id++ {
+			unittest.AssertNotExistsBean(t, &actions_model.ActionRun{ID: id})
+		}
+		unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRun{ID: 500100 + deleteRunBatchSize})
 	})
 }

@@ -2655,6 +2655,9 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -3486,6 +3489,9 @@
           "401": {
             "$ref": "#/responses/unauthorized"
           },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
           "404": {
             "$ref": "#/responses/notFound"
           }
@@ -3551,6 +3557,9 @@
         "responses": {
           "200": {
             "$ref": "#/responses/RegistrationToken"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
           }
         }
       }
@@ -6638,6 +6647,9 @@
           "401": {
             "$ref": "#/responses/unauthorized"
           },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
           "404": {
             "$ref": "#/responses/notFound"
           }
@@ -6717,6 +6729,9 @@
         "responses": {
           "200": {
             "$ref": "#/responses/RegistrationToken"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
           }
         }
       }
@@ -17419,6 +17434,55 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/releases/generate-notes": {
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Generate release notes from the pull requests merged since the previous tag",
+        "operationId": "repoGenerateReleaseNotes",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/GenerateReleaseNotesOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/GeneratedReleaseNotes"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/releases/latest": {
       "get": {
         "produces": [
@@ -20932,6 +20996,9 @@
           "401": {
             "$ref": "#/responses/unauthorized"
           },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
           "404": {
             "$ref": "#/responses/notFound"
           }
@@ -24102,6 +24169,9 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -24320,6 +24390,12 @@
           "type": "string",
           "format": "date-time",
           "x-go-name": "Created"
+        },
+        "expires_at": {
+          "description": "When the token expires, omitted if never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Expires"
         },
         "id": {
           "type": "integer",
@@ -25948,6 +26024,12 @@
         "name"
       ],
       "properties": {
+        "expires_at": {
+          "description": "When the token expires, omit for never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ExpiresAt"
+        },
         "name": {
           "type": "string",
           "x-go-name": "Name"
@@ -26491,6 +26573,12 @@
         "key"
       ],
       "properties": {
+        "expires_at": {
+          "description": "When the key expires, omit for never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ExpiresAt"
+        },
         "key": {
           "description": "An armored SSH key to add",
           "type": "string",
@@ -27362,6 +27450,12 @@
           "type": "string",
           "format": "date-time",
           "x-go-name": "Created"
+        },
+        "expires_at": {
+          "description": "When the key expires, omitted if never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Expires"
         },
         "fingerprint": {
           "type": "string",
@@ -28848,6 +28942,36 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "GenerateReleaseNotesOption": {
+      "description": "GenerateReleaseNotesOption options when generating release notes",
+      "type": "object",
+      "required": [
+        "tag_name"
+      ],
+      "properties": {
+        "configuration_file_path": {
+          "description": "configuration file, defaults to .forgejo/release.yml or .github/release.yml",
+          "type": "string",
+          "x-go-name": "ConfigurationFilePath"
+        },
+        "previous_tag_name": {
+          "description": "tag to start from, defaults to the nearest earlier tag",
+          "type": "string",
+          "x-go-name": "PreviousTagName"
+        },
+        "tag_name": {
+          "description": "tag of the release, existing or not",
+          "type": "string",
+          "x-go-name": "TagName"
+        },
+        "target_commitish": {
+          "description": "commit-ish the tag will point to if it does not exist yet, defaults to the default branch",
+          "type": "string",
+          "x-go-name": "Target"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "GenerateRepoOption": {
       "description": "GenerateRepoOption options when creating repository using a template",
       "type": "object",
@@ -28916,6 +29040,21 @@
           "description": "include webhooks in template repo",
           "type": "boolean",
           "x-go-name": "Webhooks"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "GeneratedReleaseNotes": {
+      "description": "GeneratedReleaseNotes generated release notes",
+      "type": "object",
+      "properties": {
+        "body": {
+          "type": "string",
+          "x-go-name": "Body"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -30489,6 +30628,12 @@
           "format": "date-time",
           "x-go-name": "Created"
         },
+        "expires_at": {
+          "description": "When the key expires, omitted if never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Expires"
+        },
         "fingerprint": {
           "type": "string",
           "x-go-name": "Fingerprint"
@@ -31661,6 +31806,11 @@
           "type": "string",
           "x-go-name": "FullName"
         },
+        "git_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "GitSize"
+        },
         "globally_editable_wiki": {
           "type": "boolean",
           "x-go-name": "GloballyEditableWiki"
@@ -31726,6 +31876,11 @@
         "languages_url": {
           "type": "string",
           "x-go-name": "LanguagesURL"
+        },
+        "lfs_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "LFSSize"
         },
         "link": {
           "type": "string",
@@ -33086,6 +33241,11 @@
           "type": "string",
           "format": "date-time"
         },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the token expires, omitted if never"
+        },
         "id": {
           "type": "integer",
           "format": "int64"
@@ -33570,6 +33730,12 @@
       "description": "GeneralUISettings",
       "schema": {
         "$ref": "#/definitions/GeneralUISettings"
+      }
+    },
+    "GeneratedReleaseNotes": {
+      "description": "GeneratedReleaseNotes",
+      "schema": {
+        "$ref": "#/definitions/GeneratedReleaseNotes"
       }
     },
     "GitBlob": {

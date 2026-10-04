@@ -70,6 +70,16 @@ func (*Service) Register(
 		}
 	}
 
+	// Tokens don't record who created them, so a token for a scope [actions].RUNNER_REGISTRATION no longer allows is
+	// rejected even if it was issued before the setting changed.
+	allowed, err := actions_model.RunnerScopeAllowsRegistration(ctx, runnerToken.OwnerID.ValueOrDefault(0), runnerToken.RepoID.ValueOrDefault(0))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("can't check runner registration scope"))
+	}
+	if !allowed {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("runner registration for this scope is restricted by the site administrator"))
+	}
+
 	labels := req.Msg.Labels
 
 	// create new runner

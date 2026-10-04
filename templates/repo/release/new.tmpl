@@ -47,6 +47,11 @@
 				<div class="field {{if .Err_Title}}error{{end}}">
 					<input id="release-title" name="title" aria-label="{{ctx.Locale.Tr "repo.release.title"}}" placeholder="{{ctx.Locale.Tr "repo.release.title"}}" value="{{if .PageIsEditRelease}}{{.title}}{{else}}{{.tag_name}}{{end}}" autofocus maxlength="255">
 				</div>
+				{{if and (.Permission.CanRead $.UnitTypeCode) (.Permission.CanRead $.UnitTypePullRequests)}}
+					<button type="button" class="ui mini button tw-float-right" id="generate-release-notes" data-url="{{$.RepoLink}}/releases/generate-notes" data-confirm="{{ctx.Locale.Tr "repo.release.generate_notes_confirm"}}"{{if .PageIsEditRelease}} data-tag-name="{{.tag_name}}" data-tag-target="{{.tag_target}}"{{end}}>
+						{{ctx.Locale.Tr "repo.release.generate_notes"}}
+					</button>
+				{{end}}
 				<div class="field">
 					{{template "shared/combomarkdowneditor" (dict
 						"MarkdownPreviewUrl" (print .Repository.Link "/markup")

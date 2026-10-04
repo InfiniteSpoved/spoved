@@ -19,6 +19,9 @@ type DeployKey struct {
 	Created    time.Time   `json:"created_at"`
 	ReadOnly   bool        `json:"read_only"`
 	Repository *Repository `json:"repository,omitempty"`
+	// When the key expires, omitted if never
+	// swagger:strfmt date-time
+	Expires *time.Time `json:"expires_at,omitempty"`
 }
 
 // CreateKeyOption options when creating a key
@@ -37,4 +40,7 @@ type CreateKeyOption struct {
 	//
 	// required: false
 	ReadOnly bool `json:"read_only"`
+	// When the key expires, omit for never
+	// swagger:strfmt date-time
+	ExpiresAt *time.Time `json:"expires_at"`
 }

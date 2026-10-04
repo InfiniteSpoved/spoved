@@ -133,6 +133,8 @@ func (Action) RegisterRunner(ctx *context.APIContext) {
 	//     "$ref": "#/responses/error"
 	//   "401":
 	//     "$ref": "#/responses/unauthorized"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 

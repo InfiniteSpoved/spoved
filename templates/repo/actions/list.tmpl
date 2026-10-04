@@ -3,6 +3,9 @@
 	{{template "repo/header" .}}
 	<div class="ui container">
 		{{template "base/alert" .}}
+		{{if .RunRetentionDays}}
+			<div class="ui info message">{{ctx.Locale.Tr "actions.runs.retention_notice" .RunRetentionDays}}</div>
+		{{end}}
 
 		{{/* Refresh the list every interval (30s) unless the document isn't visible or a dropdown is open; refresh
 		if visibility changes as well. simulate-polling-interval is a custom event used for e2e tests to mimic
