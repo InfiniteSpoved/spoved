@@ -53,9 +53,10 @@ type PublicKey struct {
 	ExpiresUnix       timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"` // 0 = never; unused for deploy keys, see DeployKey.ExpiresUnix
 }
 
-// IsExpired reports whether the key has an expiry date that has passed.
+// IsExpired reports whether the key has an expiry date that has passed. Always false for deploy keys, whose expiry
+// is per repository: see DeployKey.IsExpired.
 func (key *PublicKey) IsExpired() bool {
-	return key.ExpiresUnix != 0 && timeutil.TimeStampNow() >= key.ExpiresUnix
+	return key.Type != KeyTypeDeploy && key.ExpiresUnix != 0 && timeutil.TimeStampNow() >= key.ExpiresUnix
 }
 
 func init() {

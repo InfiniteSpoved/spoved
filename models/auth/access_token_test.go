@@ -86,6 +86,40 @@ func TestGetAccessTokenBySHA(t *testing.T) {
 	assert.True(t, auth_model.IsErrAccessTokenEmpty(err))
 }
 
+func TestGetAccessTokenBySHAExpired(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+
+	t.Run("cached", func(t *testing.T) {
+		// A first, successful lookup puts the token in the cache.
+		token, err := auth_model.GetAccessTokenBySHA(db.DefaultContext, "d2c6c1ba3890b309189a8e618c72a162e4efbf36")
+		require.NoError(t, err)
+
+		token.ExpiresUnix = timeutil.TimeStampNow().Add(-1)
+		_, err = db.GetEngine(db.DefaultContext).ID(token.ID).Cols("expires_unix").Update(token)
+		require.NoError(t, err)
+
+		_, err = auth_model.GetAccessTokenBySHA(db.DefaultContext, "d2c6c1ba3890b309189a8e618c72a162e4efbf36")
+		require.ErrorContains(t, err, `access token "Token A" expired on`)
+		assert.True(t, auth_model.IsErrAccessTokenExpired(err))
+	})
+
+	t.Run("not cached", func(t *testing.T) {
+		token := &auth_model.AccessToken{UID: 2, Name: "expired", ExpiresUnix: timeutil.TimeStampNow().Add(-1)}
+		require.NoError(t, auth_model.NewAccessToken(db.DefaultContext, token))
+
+		_, err := auth_model.GetAccessTokenBySHA(db.DefaultContext, token.Token)
+		assert.True(t, auth_model.IsErrAccessTokenExpired(err))
+	})
+
+	t.Run("not yet expired", func(t *testing.T) {
+		token := &auth_model.AccessToken{UID: 2, Name: "valid", ExpiresUnix: timeutil.TimeStampNow().Add(3600)}
+		require.NoError(t, auth_model.NewAccessToken(db.DefaultContext, token))
+
+		_, err := auth_model.GetAccessTokenBySHA(db.DefaultContext, token.Token)
+		require.NoError(t, err)
+	})
+}
+
 func TestListAccessTokens(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	tokens, err := db.Find[auth_model.AccessToken](db.DefaultContext, auth_model.ListAccessTokensOptions{UserID: 1})
