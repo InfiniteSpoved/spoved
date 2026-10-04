@@ -369,6 +369,20 @@ func RenameBranch(ctx context.Context, repo *repo_model.Repository, doer *user_m
 		return "from_not_exist", nil
 	}
 
+	// the default branch is exempt from the push rule's branch name, as on push
+	if from != repo.DefaultBranch {
+		rule, err := git_model.GetPushRule(ctx, repo.ID)
+		if err == nil && rule != nil {
+			err = rule.Compile()
+		}
+		if err != nil {
+			return "", err
+		}
+		if rule != nil && rule.BranchNameRe != nil && !rule.BranchNameRe.MatchString(to) {
+			return "push_rule", nil
+		}
+	}
+
 	if err := git_model.RenameBranch(ctx, repo, from, to, func(ctx context.Context, isDefault bool) error {
 		err2 := gitRepo.RenameBranch(from, to)
 		if err2 != nil {

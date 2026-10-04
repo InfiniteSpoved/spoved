@@ -1,0 +1,46 @@
+{{template "repo/settings/layout_head" (dict "ctxData" . "pageClass" "repository settings edit")}}
+	<div class="repo-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "repo.settings.push_rules"}}
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "repo.settings.push_rules.desc"}}</p>
+			<form class="ui form" action="{{.Link}}" method="post">
+				<div class="field">
+					<label for="commit_message_regex">{{ctx.Locale.Tr "repo.settings.push_rules.commit_message_regex"}}</label>
+					<input id="commit_message_regex" name="commit_message_regex" value="{{.Rule.CommitMessageRegex}}" maxlength="1024">
+					<p class="help">{{ctx.Locale.Tr "repo.settings.push_rules.commit_message_regex_desc"}}</p>
+				</div>
+				<div class="field">
+					<label for="commit_message_banned_regex">{{ctx.Locale.Tr "repo.settings.push_rules.commit_message_banned_regex"}}</label>
+					<input id="commit_message_banned_regex" name="commit_message_banned_regex" value="{{.Rule.CommitMessageBannedRegex}}" maxlength="1024">
+				</div>
+				<div class="field">
+					<label for="branch_name_regex">{{ctx.Locale.Tr "repo.settings.push_rules.branch_name_regex"}}</label>
+					<input id="branch_name_regex" name="branch_name_regex" value="{{.Rule.BranchNameRegex}}" maxlength="1024">
+					<p class="help">{{ctx.Locale.Tr "repo.settings.push_rules.branch_name_regex_desc"}}</p>
+				</div>
+				<div class="field">
+					<div class="ui checkbox">
+						<input id="require_verified_author_email" name="require_verified_author_email" type="checkbox" {{if .Rule.RequireVerifiedAuthorEmail}}checked{{end}}>
+						<label for="require_verified_author_email">{{ctx.Locale.Tr "repo.settings.push_rules.require_verified_author_email"}}</label>
+						<p class="help">{{ctx.Locale.Tr "repo.settings.push_rules.require_verified_author_email_desc"}}</p>
+					</div>
+				</div>
+				<div class="field">
+					<label for="max_file_size_mb">{{ctx.Locale.Tr "repo.settings.push_rules.max_file_size_mb"}}</label>
+					<input id="max_file_size_mb" name="max_file_size_mb" type="number" min="0" value="{{.Rule.MaxFileSizeMB}}">
+					<p class="help">{{ctx.Locale.Tr "repo.settings.push_rules.max_file_size_mb_desc"}}</p>
+				</div>
+				<div class="field">
+					<label for="banned_file_patterns">{{ctx.Locale.Tr "repo.settings.push_rules.banned_file_patterns"}}</label>
+					<input id="banned_file_patterns" name="banned_file_patterns" value="{{.Rule.BannedFilePatterns}}" maxlength="1024" placeholder="*.exe;*.pfx;id_rsa">
+					<p class="help">{{ctx.Locale.Tr "repo.settings.push_rules.banned_file_patterns_desc"}}</p>
+				</div>
+				<div class="field">
+					<button class="ui primary button">{{ctx.Locale.Tr "repo.settings.update_settings"}}</button>
+				</div>
+			</form>
+		</div>
+	</div>
+{{template "repo/settings/layout_footer" .}}
