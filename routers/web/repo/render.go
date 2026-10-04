@@ -7,12 +7,15 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"net/url"
 	"path"
 
 	"forgejo.org/modules/charset"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/markup"
+	"forgejo.org/modules/markup/drawio"
+	"forgejo.org/modules/setting"
 	"forgejo.org/services/context"
 )
 
@@ -38,7 +41,16 @@ func RenderFile(ctx *context.Context) {
 	rd := charset.ToUTF8WithFallbackReader(io.MultiReader(bytes.NewReader(buf), dataRc), charset.ConvertOpts{})
 	ctx.Resp.Header().Add("Content-Security-Policy", "frame-src 'self'; sandbox allow-scripts")
 
-	if markupType := markup.Type(blob.Name()); markupType == "" {
+	markupType := markup.Type(blob.Name())
+	if markupType == (drawio.Renderer{}).Name() {
+		// keep the draw.io viewer from fetching anything outside Forgejo
+		scriptSrc := "'self' 'unsafe-inline'"
+		if u, err := url.Parse(setting.StaticURLPrefix); err == nil && u.Host != "" {
+			scriptSrc += " " + u.Scheme + "://" + u.Host
+		}
+		ctx.Resp.Header().Add("Content-Security-Policy", "default-src 'none'; script-src "+scriptSrc+"; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:")
+	}
+	if markupType == "" {
 		if fInfo.isTextFile {
 			_, _ = io.Copy(ctx.Resp, rd)
 		} else {
