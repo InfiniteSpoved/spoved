@@ -176,6 +176,9 @@ forgejo.org/modules/queue/lqinternal
 	QueueItemKeyBytes
 	ListLevelQueueKeys
 
+forgejo.org/modules/ratelimit
+	ResetForTest
+
 forgejo.org/modules/setting
 	NewConfigProviderFromData
 	GitConfigType.GetOption
