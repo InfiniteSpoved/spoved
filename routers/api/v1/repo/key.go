@@ -238,7 +238,12 @@ func CreateDeployKey(ctx *context.APIContext) {
 		return
 	}
 
-	key, err := asymkey_model.AddDeployKey(ctx, ctx.Repo().Repository.ID, form.Title, content, form.ReadOnly)
+	expires, ok := utils.ValidateExpiry(ctx, setting.DeployKeyExpiry, form.ExpiresAt)
+	if !ok {
+		return
+	}
+
+	key, err := asymkey_model.AddDeployKey(ctx, ctx.Repo().Repository.ID, form.Title, content, form.ReadOnly, expires)
 	if err != nil {
 		HandleAddKeyError(ctx, err)
 		return

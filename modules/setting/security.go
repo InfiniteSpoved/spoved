@@ -41,7 +41,24 @@ var (
 	PasswordCheckPwn                   bool
 	SuccessfulTokensCacheSize          int
 	DisableQueryAuthToken              bool
+
+	SSHKeyExpiry      CredentialExpiryPolicy
+	DeployKeyExpiry   CredentialExpiryPolicy
+	AccessTokenExpiry CredentialExpiryPolicy
 )
+
+// CredentialExpiryPolicy is the instance policy for the expiry date of new credentials.
+type CredentialExpiryPolicy struct {
+	Required        bool
+	MaxLifetimeDays int // 0 = no maximum
+}
+
+func loadCredentialExpiryPolicy(sec ConfigSection, prefix string) CredentialExpiryPolicy {
+	return CredentialExpiryPolicy{
+		Required:        sec.Key(prefix + "_EXPIRY_REQUIRED").MustBool(false),
+		MaxLifetimeDays: sec.Key(prefix + "_MAX_LIFETIME_DAYS").MustInt(0),
+	}
+}
 
 /*
  * key loading is a two-stage process to avoid complications for unit tests:
@@ -517,6 +534,9 @@ func loadSecurityFrom(rootCfg ConfigProvider) {
 
 	PasswordCheckPwn = sec.Key("PASSWORD_CHECK_PWN").MustBool(false)
 	SuccessfulTokensCacheSize = sec.Key("SUCCESSFUL_TOKENS_CACHE_SIZE").MustInt(20)
+	SSHKeyExpiry = loadCredentialExpiryPolicy(sec, "SSH_KEY")
+	DeployKeyExpiry = loadCredentialExpiryPolicy(sec, "DEPLOY_KEY")
+	AccessTokenExpiry = loadCredentialExpiryPolicy(sec, "ACCESS_TOKEN")
 
 	cfgdata := sec.Key("PASSWORD_COMPLEXITY").Strings(",")
 	if len(cfgdata) == 0 {

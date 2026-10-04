@@ -2655,6 +2655,9 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -24108,6 +24111,9 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -24326,6 +24332,12 @@
           "type": "string",
           "format": "date-time",
           "x-go-name": "Created"
+        },
+        "expires_at": {
+          "description": "When the token expires, omitted if never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Expires"
         },
         "id": {
           "type": "integer",
@@ -25954,6 +25966,12 @@
         "name"
       ],
       "properties": {
+        "expires_at": {
+          "description": "When the token expires, omit for never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ExpiresAt"
+        },
         "name": {
           "type": "string",
           "x-go-name": "Name"
@@ -26497,6 +26515,12 @@
         "key"
       ],
       "properties": {
+        "expires_at": {
+          "description": "When the key expires, omit for never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ExpiresAt"
+        },
         "key": {
           "description": "An armored SSH key to add",
           "type": "string",
@@ -27368,6 +27392,12 @@
           "type": "string",
           "format": "date-time",
           "x-go-name": "Created"
+        },
+        "expires_at": {
+          "description": "When the key expires, omitted if never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Expires"
         },
         "fingerprint": {
           "type": "string",
@@ -30495,6 +30525,12 @@
           "format": "date-time",
           "x-go-name": "Created"
         },
+        "expires_at": {
+          "description": "When the key expires, omitted if never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Expires"
+        },
         "fingerprint": {
           "type": "string",
           "x-go-name": "Fingerprint"
@@ -33091,6 +33127,11 @@
         "created_at": {
           "type": "string",
           "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the token expires, omitted if never"
         },
         "id": {
           "type": "integer",

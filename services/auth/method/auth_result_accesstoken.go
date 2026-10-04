@@ -7,6 +7,7 @@ import (
 	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
+	"forgejo.org/modules/timeutil"
 	"forgejo.org/services/auth"
 	"forgejo.org/services/authz"
 )
@@ -18,6 +19,7 @@ type accessTokenAuthenticationResult struct {
 	user    *user_model.User
 	scope   auth_model.AccessTokenScope
 	reducer authz.AuthorizationReducer
+	expires timeutil.TimeStamp
 }
 
 func (r *accessTokenAuthenticationResult) User() *user_model.User {
@@ -30,4 +32,11 @@ func (r *accessTokenAuthenticationResult) Scope() optional.Option[auth_model.Acc
 
 func (r *accessTokenAuthenticationResult) Reducer() authz.AuthorizationReducer {
 	return r.reducer
+}
+
+func (r *accessTokenAuthenticationResult) ExpiresAt() optional.Option[timeutil.TimeStamp] {
+	if r.expires == 0 {
+		return optional.None[timeutil.TimeStamp]()
+	}
+	return optional.Some(r.expires)
 }

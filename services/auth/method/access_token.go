@@ -33,7 +33,7 @@ func (a *AccessToken) Verify(req *http.Request, w http.ResponseWriter, _ auth.Se
 
 	// check personal access token
 	token, err := auth_model.GetAccessTokenBySHA(req.Context(), authToken)
-	if auth_model.IsErrAccessTokenNotExist(err) || auth_model.IsErrAccessTokenEmpty(err) {
+	if auth_model.IsErrAccessTokenNotExist(err) || auth_model.IsErrAccessTokenEmpty(err) || auth_model.IsErrAccessTokenExpired(err) {
 		return &auth.AuthenticationAttemptedIncorrectCredential{Error: err}
 	} else if err != nil {
 		return &auth.AuthenticationError{Error: fmt.Errorf("access token GetAccessTokenBySHA: %w", err)}
@@ -54,7 +54,7 @@ func (a *AccessToken) Verify(req *http.Request, w http.ResponseWriter, _ auth.Se
 		return &auth.AuthenticationError{Error: fmt.Errorf("access token GetAuthorizationReducerForAccessToken: %w", err)}
 	}
 
-	return &auth.AuthenticationSuccess{Result: &accessTokenAuthenticationResult{user: u, scope: token.Scope, reducer: reducer}}
+	return &auth.AuthenticationSuccess{Result: &accessTokenAuthenticationResult{user: u, scope: token.Scope, reducer: reducer, expires: token.ExpiresUnix}}
 }
 
 func (a *AccessToken) getTokenFromRequest(req *http.Request) optional.Option[string] {

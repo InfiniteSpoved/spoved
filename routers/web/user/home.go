@@ -747,8 +747,8 @@ func ShowSSHKeys(ctx *context.Context) {
 
 	var buf bytes.Buffer
 	for i := range keys {
-		if keys[i].Type == asymkey_model.KeyTypePrincipal {
-			continue // Don't display SSH principals, only public keys
+		if keys[i].Type == asymkey_model.KeyTypePrincipal || keys[i].IsExpired() {
+			continue // Don't display SSH principals or expired keys, only usable public keys
 		}
 		buf.WriteString(keys[i].OmitEmail())
 		buf.WriteString("\n")

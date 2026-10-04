@@ -6,6 +6,7 @@ package setting
 
 import (
 	"errors"
+	"html/template"
 	"net/http"
 
 	asymkey_model "forgejo.org/models/asymkey"
@@ -14,6 +15,7 @@ import (
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/web"
+	"forgejo.org/routers/web/shared/user"
 	asymkey_service "forgejo.org/services/asymkey"
 	"forgejo.org/services/context"
 	"forgejo.org/services/forms"
@@ -181,7 +183,16 @@ func KeysPost(ctx *context.Context) {
 			return
 		}
 
-		if _, err = asymkey_model.AddPublicKey(ctx, ctx.Doer.ID, form.Title, content, 0); err != nil {
+		expires, expiryErr := user.ParseExpiryForm(ctx.Base, setting.SSHKeyExpiry, form.ExpiresAt)
+		if has, msg := expiryErr.Get(); has {
+			ctx.Data["HasSSHError"] = true
+			loadKeysData(ctx)
+			ctx.Data["Err_ExpiresAt"] = true
+			ctx.RenderWithErr(template.HTML(template.HTMLEscapeString(msg)), tplSettingsKeys, &form)
+			return
+		}
+
+		if _, err = asymkey_model.AddPublicKey(ctx, ctx.Doer.ID, form.Title, content, 0, expires); err != nil {
 			ctx.Data["HasSSHError"] = true
 			switch {
 			case asymkey_model.IsErrKeyAlreadyExist(err):
@@ -289,6 +300,8 @@ func DeleteKey(ctx *context.Context) {
 }
 
 func loadKeysData(ctx *context.Context) {
+	user.SetExpiryFormData(ctx.Base, setting.SSHKeyExpiry)
+
 	keys, err := db.Find[asymkey_model.PublicKey](ctx, asymkey_model.FindPublicKeyOptions{
 		OwnerID:    ctx.Doer.ID,
 		NotKeytype: asymkey_model.KeyTypePrincipal,

@@ -22,4 +22,7 @@ type PublicKey struct {
 	// swagger:strfmt date-time
 	Updated  time.Time `json:"updated_at,omitzero"`
 	Verified bool      `json:"verified"`
+	// When the key expires, omitted if never
+	// swagger:strfmt date-time
+	Expires *time.Time `json:"expires_at,omitempty"`
 }

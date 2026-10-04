@@ -50,6 +50,12 @@ type PublicKey struct {
 	HasRecentActivity bool               `xorm:"-"`
 	HasUsed           bool               `xorm:"-"`
 	Verified          bool               `xorm:"NOT NULL DEFAULT false"`
+	ExpiresUnix       timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"` // 0 = never; unused for deploy keys, see DeployKey.ExpiresUnix
+}
+
+// IsExpired reports whether the key has an expiry date that has passed.
+func (key *PublicKey) IsExpired() bool {
+	return key.ExpiresUnix != 0 && timeutil.TimeStampNow() >= key.ExpiresUnix
 }
 
 func init() {
@@ -91,7 +97,7 @@ func addKey(ctx context.Context, key *PublicKey) (err error) {
 }
 
 // AddPublicKey adds new public key to database and authorized_keys file.
-func AddPublicKey(ctx context.Context, ownerID int64, name, content string, authSourceID int64) (*PublicKey, error) {
+func AddPublicKey(ctx context.Context, ownerID int64, name, content string, authSourceID int64, expires timeutil.TimeStamp) (*PublicKey, error) {
 	log.Trace(content)
 
 	fingerprint, err := CalcFingerprint(content)
@@ -127,6 +133,7 @@ func AddPublicKey(ctx context.Context, ownerID int64, name, content string, auth
 		Mode:          perm.AccessModeWrite,
 		Type:          KeyTypeUser,
 		LoginSourceID: authSourceID,
+		ExpiresUnix:   expires,
 	}
 	if err = addKey(ctx, key); err != nil {
 		return nil, fmt.Errorf("addKey: %w", err)
@@ -337,7 +344,7 @@ func AddPublicKeysBySource(ctx context.Context, usr *user_model.User, s *auth.So
 			marshalled = marshalled[:len(marshalled)-1]
 			sshKeyName := fmt.Sprintf("%s-%s", s.Name, ssh.FingerprintSHA256(out))
 
-			if _, err := AddPublicKey(ctx, usr.ID, sshKeyName, marshalled, s.ID); err != nil {
+			if _, err := AddPublicKey(ctx, usr.ID, sshKeyName, marshalled, s.ID, 0); err != nil {
 				if IsErrKeyAlreadyExist(err) {
 					log.Trace("AddPublicKeysBySource[%s]: Public SSH Key %s already exists for user", sshKeyName, usr.Name)
 				} else {

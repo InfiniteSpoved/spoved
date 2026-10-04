@@ -37,7 +37,7 @@ func (a *Auth) Verify(req *http.Request, w http.ResponseWriter, sess auth.Sessio
 	}
 	token, err := auth_model.GetAccessTokenBySHA(req.Context(), apiKey)
 	if err != nil {
-		if !auth_model.IsErrAccessTokenNotExist(err) && !auth_model.IsErrAccessTokenEmpty(err) {
+		if !auth_model.IsErrAccessTokenNotExist(err) && !auth_model.IsErrAccessTokenEmpty(err) && !auth_model.IsErrAccessTokenExpired(err) {
 			return &auth.AuthenticationError{Error: fmt.Errorf("nuget auth GetAccessTokenBySHA: %w", err)}
 		}
 		return &auth.AuthenticationAttemptedIncorrectCredential{Error: err}
