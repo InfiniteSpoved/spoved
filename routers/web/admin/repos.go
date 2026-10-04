@@ -30,7 +30,12 @@ func Repos(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("admin.repositories")
 	ctx.Data["PageIsAdminRepositories"] = true
 
+	ownerID := max(ctx.FormInt64("uid"), 0)
+	ctx.Data["RepoOwnerID"] = ownerID
+
 	explore.RenderRepoSearch(ctx, &explore.RepoSearchOptions{
+		OwnerID:          ownerID,
+		Exclusive:        ownerID > 0,
 		Private:          true,
 		PageSize:         setting.UI.Admin.RepoPagingNum,
 		TplName:          tplRepos,
