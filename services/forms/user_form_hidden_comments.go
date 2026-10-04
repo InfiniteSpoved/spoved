@@ -20,6 +20,8 @@ var hiddenCommentTypeGroups = hiddenCommentTypeGroupsType{
 		/*4*/ issues_model.CommentTypeCommitRef,
 		/*5*/ issues_model.CommentTypeCommentRef,
 		/*6*/ issues_model.CommentTypePullRef,
+		/*39*/ issues_model.CommentTypeRevertOpened,
+		/*40*/ issues_model.CommentTypeReverted,
 	},
 	"label": {
 		/*7*/ issues_model.CommentTypeLabel,
