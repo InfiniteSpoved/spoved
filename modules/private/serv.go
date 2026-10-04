@@ -12,6 +12,7 @@ import (
 	asymkey_model "forgejo.org/models/asymkey"
 	"forgejo.org/models/perm"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/timeutil"
 )
 
 // KeyAndOwner is the response from ServNoCommand
@@ -43,6 +44,7 @@ type ServCommandResults struct {
 	OwnerName   string
 	RepoName    string
 	RepoID      int64
+	ExpiresUnix timeutil.TimeStamp // expiry of the key (deploy key or public key) used, 0 = never
 }
 
 // ServCommand preps for a serv call
