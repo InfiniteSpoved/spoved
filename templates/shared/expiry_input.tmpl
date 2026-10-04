@@ -1,0 +1,5 @@
+<div class="field {{if .Err_ExpiresAt}}error{{end}}">
+	<label for="expires-at">{{ctx.Locale.Tr "credential.expires_at"}}</label>
+	<input id="expires-at" name="expires_at" type="date" value="{{.expires_at}}"{{if .ExpiryMaxDate}} max="{{.ExpiryMaxDate}}"{{end}}{{if .ExpiryRequired}} required{{end}}>
+	{{if not .ExpiryRequired}}<span class="help">{{ctx.Locale.Tr "credential.expires_at.help"}}</span>{{end}}
+</div>
