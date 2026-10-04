@@ -23,6 +23,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
 	shared_user "forgejo.org/routers/web/shared/user"
+	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	funding_service "forgejo.org/services/funding"
 )
@@ -107,6 +108,7 @@ func Home(ctx *context.Context) {
 		OrderBy:            orderBy,
 		Private:            ctx.IsSigned,
 		Actor:              ctx.Doer,
+		AuditorView:        auth.IsHeldByUser(ctx.Authentication),
 		Language:           language,
 		IncludeDescription: setting.UI.SearchRepoDescription,
 		Archived:           archived,

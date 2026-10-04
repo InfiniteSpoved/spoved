@@ -127,6 +127,8 @@ type User struct {
 	// true: the user is only allowed to see organizations/repositories that they has explicit rights to.
 	// (ex: in private Gitea instances user won't be allowed to see even organizations/repositories that are set as public)
 	IsRestricted bool `xorm:"NOT NULL DEFAULT false"`
+	// IsAuditor gives read access to every repository, set only by a user group granting the auditor role.
+	IsAuditor bool `xorm:"NOT NULL DEFAULT false"`
 
 	AllowGitHook            bool
 	AllowImportLocal        bool // Allow migrate repository by local path

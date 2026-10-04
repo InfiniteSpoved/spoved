@@ -330,6 +330,9 @@ func ServCommand(ctx *context.PrivateContext) {
 				return
 			}
 		} else {
+			// The auditor role only applies to reads: decide before the mode is lowered for pushes.
+			isRead := mode == perm.AccessModeRead
+
 			// We don't know yet which references the Git client wants to write to,
 			// but for AGit flow we have to degrade this check to a read permission.
 			// So if we support proc-receive (needed for AGit flow) and the unit type
@@ -341,7 +344,12 @@ func ServCommand(ctx *context.PrivateContext) {
 				mode = perm.AccessModeRead
 			}
 
-			perm, err := access_model.GetUserRepoPermission(ctx, repo, user)
+			var perm access_model.Permission
+			if isRead {
+				perm, err = access_model.GetUserRepoReadPermission(ctx, repo, user, nil)
+			} else {
+				perm, err = access_model.GetUserRepoPermission(ctx, repo, user)
+			}
 			if err != nil {
 				sshLogger.Error("Unable to get permissions for %-v with key %d in %-v Error: %v", user, key.ID, repo, err)
 				ctx.JSON(http.StatusInternalServerError, private.Response{

@@ -33,6 +33,7 @@ import (
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/api/v1/utils"
 	actions_service "forgejo.org/services/actions"
+	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 	"forgejo.org/services/issue"
@@ -142,6 +143,7 @@ func Search(ctx *context.APIContext) {
 	opts := &repo_model.SearchRepoOptions{
 		ListOptions:        utils.GetListOptions(ctx),
 		Actor:              ctx.Doer(),
+		AuditorView:        auth.IsHeldByUser(ctx.Authentication()),
 		Keyword:            ctx.FormTrim("q"),
 		OwnerID:            ctx.FormInt64("uid"),
 		PriorityOwnerID:    ctx.FormInt64("priority_owner_id"),

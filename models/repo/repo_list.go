@@ -193,6 +193,9 @@ type SearchRepoOptions struct {
 	OwnerAndName [][2]string
 	// Filter to repositories with this unit enabled.
 	EnabledUnit optional.Option[unit.Type]
+	// List every repository to an Actor with the auditor role. Only set it for read-only listings requested with the
+	// Actor's own credentials.
+	AuditorView bool
 }
 
 // UserOwnedRepoCond returns user ownered repositories
@@ -329,7 +332,7 @@ func SearchRepositoryCondition(opts *SearchRepoOptions) builder.Cond {
 	cond := builder.NewCond()
 
 	if opts.Private {
-		if opts.Actor != nil && !opts.Actor.IsAdmin && opts.Actor.ID != opts.OwnerID {
+		if opts.Actor != nil && !opts.Actor.IsAdmin && !(opts.AuditorView && opts.Actor.IsAuditor) && opts.Actor.ID != opts.OwnerID {
 			// OK we're in the context of a User
 			cond = cond.And(AccessibleRepositoryCondition(opts.Actor, unit.TypeInvalid))
 		}

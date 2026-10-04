@@ -219,7 +219,7 @@ type FindOrgMembersOpts struct {
 }
 
 func (opts FindOrgMembersOpts) PublicOnly() bool {
-	return opts.Doer == nil || (!opts.IsDoerMember && !opts.Doer.IsAdmin)
+	return opts.Doer == nil || (!opts.IsDoerMember && !opts.Doer.IsAdmin && !opts.Doer.IsAuditor)
 }
 
 // CountOrgMembers counts the organization's members

@@ -13,6 +13,7 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/sitemap"
+	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 )
 
@@ -101,6 +102,7 @@ func RenderRepoSearch(ctx *context.Context, opts *RepoSearchOptions) {
 			PageSize: opts.PageSize,
 		},
 		Actor:              ctx.Doer,
+		AuditorView:        auth.IsHeldByUser(ctx.Authentication),
 		OrderBy:            orderBy,
 		Private:            opts.Private,
 		Keyword:            keyword,

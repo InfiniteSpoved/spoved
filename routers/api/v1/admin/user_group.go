@@ -120,6 +120,7 @@ func CreateUserGroup(ctx *context.APIContext) {
 		Description:              form.Description,
 		GrantsSiteAdmin:          form.GrantsSiteAdmin,
 		GrantsCreateOrganization: form.GrantsCreateOrganization,
+		GrantsAuditor:            form.GrantsAuditor,
 	}
 	if err := org_model.InsertUserGroup(ctx, group); err != nil {
 		if org_model.IsErrUserGroupAlreadyExist(err) {
@@ -211,6 +212,9 @@ func EditUserGroup(ctx *context.APIContext) {
 	}
 	if form.GrantsCreateOrganization != nil {
 		group.GrantsCreateOrganization = *form.GrantsCreateOrganization
+	}
+	if form.GrantsAuditor != nil {
+		group.GrantsAuditor = *form.GrantsAuditor
 	}
 	if err := usergroup_service.UpdateGroup(ctx, group); err != nil {
 		if org_model.IsErrUserGroupAlreadyExist(err) || models.IsErrDeleteLastAdminUser(err) {

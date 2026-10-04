@@ -16,6 +16,7 @@ import (
 	"forgejo.org/modules/markup/markdown"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
+	"forgejo.org/services/auth"
 	redirect_service "forgejo.org/services/redirect"
 )
 
@@ -125,7 +126,9 @@ func HandleOrgAssignment(ctx *Context, args ...bool) {
 		return
 	}
 
-	if org.Visibility == structs.VisibleTypePrivate {
+	// The auditor role shows private organizations read-only, but never makes the user a member.
+	auditorView := ctx.IsSigned && ctx.Doer.IsAuditor && ctx.IsReadOnlyMethod() && auth.IsHeldByUser(ctx.Authentication)
+	if org.Visibility == structs.VisibleTypePrivate && !auditorView {
 		requireMember = true
 	} else if ctx.IsSigned && ctx.Doer.IsRestricted {
 		requireMember = true

@@ -87,6 +87,7 @@ func NewUserGroupPost(ctx *context.Context) {
 		Description:              form.Description,
 		GrantsSiteAdmin:          form.GrantsSiteAdmin,
 		GrantsCreateOrganization: form.GrantsCreateOrganization,
+		GrantsAuditor:            form.GrantsAuditor,
 	}
 	if err := org_model.InsertUserGroup(ctx, group); err != nil {
 		if org_model.IsErrUserGroupAlreadyExist(err) {
@@ -171,6 +172,7 @@ func ViewUserGroup(ctx *context.Context) {
 	ctx.Data["description"] = group.Description
 	ctx.Data["grants_site_admin"] = group.GrantsSiteAdmin
 	ctx.Data["grants_create_organization"] = group.GrantsCreateOrganization
+	ctx.Data["grants_auditor"] = group.GrantsAuditor
 	ctx.HTML(http.StatusOK, tplUserGroupView)
 }
 
@@ -195,6 +197,7 @@ func EditUserGroupPost(ctx *context.Context) {
 	group.Description = form.Description
 	group.GrantsSiteAdmin = form.GrantsSiteAdmin
 	group.GrantsCreateOrganization = form.GrantsCreateOrganization
+	group.GrantsAuditor = form.GrantsAuditor
 	if err := usergroup_service.UpdateGroup(ctx, group); err != nil {
 		switch {
 		case org_model.IsErrUserGroupAlreadyExist(err):

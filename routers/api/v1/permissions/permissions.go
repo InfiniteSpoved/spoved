@@ -29,6 +29,7 @@ type Permissions struct {
 	team                    *org_model.Team
 	org                     *org_model.Organization
 	isSigned                bool
+	readOnlyMethod          bool
 	authentication          auth.AuthenticationResult
 	requiredScopeCategories []auth_model.AccessTokenScopeCategory
 	reducer                 authz.AuthorizationReducer
@@ -128,6 +129,14 @@ func (o *Permissions) IsSigned() bool {
 
 func (o *Permissions) SetIsSigned(isSigned bool) {
 	o.isSigned = isSigned
+}
+
+func (o *Permissions) IsReadOnlyMethod() bool {
+	return o.readOnlyMethod
+}
+
+func (o *Permissions) SetReadOnlyMethod(readOnlyMethod bool) {
+	o.readOnlyMethod = readOnlyMethod
 }
 
 func (o *Permissions) PublicOnly() bool {
