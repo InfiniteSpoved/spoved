@@ -43,6 +43,7 @@ import (
 	notify_service "forgejo.org/services/notify"
 	pull_service "forgejo.org/services/pull"
 	repo_service "forgejo.org/services/repository"
+	files_service "forgejo.org/services/repository/files"
 )
 
 // ListPullRequests returns a list of all PRs
@@ -1234,6 +1235,76 @@ func parseCompareInfo(ctx *context.APIContext, form api.CreatePullRequestOption)
 	}
 
 	return headRepo, headGitRepo, compareInfo, baseBranch, headBranch
+}
+
+// RevertPullRequest opens a pull request that reverts a merged pull request
+func RevertPullRequest(ctx *context.APIContext) {
+	// swagger:operation POST /repos/{owner}/{repo}/pulls/{index}/revert repository repoRevertPullRequest
+	// ---
+	// summary: Open a pull request that reverts a merged pull request
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: index
+	//   in: path
+	//   description: index of the merged pull request to revert
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// responses:
+	//   "201":
+	//     "$ref": "#/responses/PullRequest"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+	//   "409":
+	//     "$ref": "#/responses/error"
+	//   "413":
+	//     "$ref": "#/responses/quotaExceeded"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
+	//   "423":
+	//     "$ref": "#/responses/repoArchivedError"
+
+	pr, err := issues_model.GetPullRequestByIndex(ctx, ctx.Repo().Repository.ID, ctx.ParamsInt64(":index"))
+	if err != nil {
+		if issues_model.IsErrPullRequestNotExist(err) {
+			ctx.NotFound("GetPullRequestByIndex", err)
+		} else {
+			ctx.Error(http.StatusInternalServerError, "GetPullRequestByIndex", err)
+		}
+		return
+	}
+
+	revert, err := files_service.RevertPullRequest(ctx, ctx.Doer(), ctx.Repo().GitRepo, pr)
+	if err != nil {
+		switch {
+		case models.IsErrMergeConflicts(err):
+			base, _ := pull_service.GetRevertBase(ctx.Repo().GitRepo, pr)
+			ctx.Error(http.StatusConflict, "RevertPullRequest", "This pull request can't be reverted automatically because later changes conflict. Revert it locally:\n"+pull_service.RevertInstructions(ctx.Repo().GitRepo, pr, base))
+		case git_model.IsErrBranchAlreadyExists(err):
+			ctx.Error(http.StatusConflict, "RevertPullRequest", err)
+		case errors.Is(err, util.ErrInvalidArgument):
+			ctx.Error(http.StatusUnprocessableEntity, "RevertPullRequest", err)
+		case errors.Is(err, util.ErrPermissionDenied), errors.Is(err, user_model.ErrBlockedByUser):
+			ctx.Error(http.StatusForbidden, "RevertPullRequest", err)
+		default:
+			ctx.Error(http.StatusInternalServerError, "RevertPullRequest", err)
+		}
+		return
+	}
+	ctx.JSON(http.StatusCreated, convert.ToAPIPullRequest(ctx, revert, ctx.Doer()))
 }
 
 // UpdatePullRequest merge PR's baseBranch into headBranch
