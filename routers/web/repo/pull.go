@@ -58,6 +58,7 @@ import (
 	notify_service "forgejo.org/services/notify"
 	pull_service "forgejo.org/services/pull"
 	repo_service "forgejo.org/services/repository"
+	files_service "forgejo.org/services/repository/files"
 
 	"github.com/gobwas/glob"
 )
@@ -1745,6 +1746,50 @@ func CompareAndPullRequestPost(ctx *context.Context) {
 
 	log.Trace("Pull request created: %d/%d", repo.ID, pullIssue.ID)
 	ctx.JSONRedirect(pullIssue.Link())
+}
+
+// RevertPullRequest opens a pull request that reverts a merged pull request
+func RevertPullRequest(ctx *context.Context) {
+	issue, ok := getPullInfo(ctx)
+	if !ok {
+		return
+	}
+	if ctx.Doer == nil || !ctx.Repo.CanCreateBranch() {
+		ctx.NotFound("RevertPullRequest", nil)
+		return
+	}
+	pr := issue.PullRequest
+
+	revert, err := files_service.RevertPullRequest(ctx, ctx.Doer, ctx.Repo.GitRepo, pr)
+	if err != nil {
+		switch {
+		case models.IsErrMergeConflicts(err):
+			base, _ := pull_service.GetRevertBase(ctx.Repo.GitRepo, pr)
+			flashError, err := ctx.RenderToHTML(tplAlertDetails, map[string]any{
+				"Message": ctx.Tr("repo.pulls.revert.conflict"),
+				"Summary": ctx.Tr("repo.pulls.revert.instructions"),
+				"Details": strings.ReplaceAll(html.EscapeString(pull_service.RevertInstructions(ctx.Repo.GitRepo, pr, base)), "\n", "<br>"),
+			})
+			if err != nil {
+				ctx.ServerError("RevertPullRequest.HTMLString", err)
+				return
+			}
+			ctx.Flash.Error(flashError)
+		case git_model.IsErrBranchAlreadyExists(err):
+			ctx.Flash.Error(ctx.Tr("repo.editor.branch_already_exists", pull_service.RevertBranchName(pr)))
+		case errors.Is(err, util.ErrInvalidArgument):
+			ctx.Flash.Error(ctx.Tr("repo.pulls.revert.not_possible"))
+		case errors.Is(err, util.ErrPermissionDenied), errors.Is(err, user_model.ErrBlockedByUser):
+			ctx.NotFound("RevertPullRequest", err)
+			return
+		default:
+			ctx.ServerError("RevertPullRequest", err)
+			return
+		}
+		ctx.Redirect(issue.Link())
+		return
+	}
+	ctx.Redirect(revert.Issue.Link())
 }
 
 // CleanUpPullRequest responses for delete merged branch when PR has been merged
