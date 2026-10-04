@@ -124,6 +124,9 @@ func TestPullRevert(t *testing.T) {
 				revertPR := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, Index: revert.Index})
 				orig := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, Index: 1})
 				unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{Type: issues_model.CommentTypePullRef, IssueID: orig.IssueID, RefIssueID: revertPR.IssueID})
+				unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{Type: issues_model.CommentTypeRevertOpened, IssueID: orig.IssueID, RefIssueID: revertPR.IssueID})
+				// Merging a pull request that is no revert adds no "reverted" entry.
+				unittest.AssertNotExistsBean(t, &issues_model.Comment{Type: issues_model.CommentTypeReverted})
 
 				// Reverting again: the branch exists.
 				ctx.Session.MakeRequest(t, NewRequest(t, "POST", revertTestURL(name, 1)).AddTokenAuth(ctx.Token), http.StatusConflict)
@@ -141,6 +144,23 @@ func TestPullRevert(t *testing.T) {
 			revertPR := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, Index: 2, HeadBranch: "revert-1-feature"})
 			require.NoError(t, revertPR.LoadIssue(db.DefaultContext))
 			assert.Equal(t, `Revert "`+strings.Repeat("x", 243)+`..."`, revertPR.Issue.Title)
+
+			// The original pull request's timeline links to the revert when it is opened and merged.
+			timeline := func(index int) string {
+				page := NewHTMLParser(t, ctx.Session.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/user2/revert-web/pulls/%d", index)), http.StatusOK).Body)
+				return page.Find(`.timeline-item:has(a[href="/user2/revert-web/pulls/2"])`).Text()
+			}
+			assert.Contains(t, timeline(1), "opened a revert of this pull request")
+			assert.NotContains(t, timeline(1), "reverted this pull request")
+
+			doAPIMergePullRequest(ctx, "user2", "revert-web", 2)(t)
+			assert.Contains(t, timeline(1), "reverted this pull request")
+			orig := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, Index: 1})
+			unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{Type: issues_model.CommentTypeReverted, IssueID: orig.IssueID, RefIssueID: revertPR.IssueID})
+			// The revert pull request itself gets neither entry.
+			body := ctx.Session.MakeRequest(t, NewRequest(t, "GET", "/user2/revert-web/pulls/2"), http.StatusOK).Body.String()
+			assert.NotContains(t, body, "opened a revert of this pull request")
+			assert.NotContains(t, body, "reverted this pull request")
 		})
 
 		t.Run("conflict", func(t *testing.T) {
