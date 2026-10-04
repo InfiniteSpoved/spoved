@@ -21,6 +21,7 @@ import (
 	"forgejo.org/modules/httplib"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
+	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/session"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
@@ -28,6 +29,7 @@ import (
 	"forgejo.org/modules/validation"
 	"forgejo.org/modules/web"
 	"forgejo.org/modules/web/middleware"
+	"forgejo.org/routers/common"
 	auth_service "forgejo.org/services/auth"
 	auth_method "forgejo.org/services/auth/method"
 	"forgejo.org/services/auth/source/oauth2"
@@ -249,6 +251,10 @@ func SignInPost(ctx *context.Context) {
 		}
 	}
 
+	attempt := common.StartAuthAttempt(ctx, ratelimit.UserKey(form.UserName))
+	if attempt == nil {
+		return
+	}
 	u, source, err := auth_method.UserSignIn(ctx, form.UserName, form.Password)
 	if err != nil {
 		if errors.Is(err, util.ErrNotExist) || errors.Is(err, util.ErrInvalidArgument) {
@@ -266,6 +272,7 @@ func SignInPost(ctx *context.Context) {
 		}
 		return
 	}
+	attempt.Succeeded()
 
 	// Now handle 2FA:
 

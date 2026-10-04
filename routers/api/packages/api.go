@@ -13,6 +13,7 @@ import (
 	"forgejo.org/models/perm"
 	quota_model "forgejo.org/models/quota"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/api/packages/alpine"
@@ -38,6 +39,7 @@ import (
 	"forgejo.org/routers/api/packages/rubygems"
 	"forgejo.org/routers/api/packages/swift"
 	"forgejo.org/routers/api/packages/vagrant"
+	"forgejo.org/routers/common"
 	"forgejo.org/services/auth"
 	auth_method "forgejo.org/services/auth/method"
 	"forgejo.org/services/context"
@@ -131,6 +133,9 @@ func verifyAuth(r *web.Route, authMethods []auth.Method) {
 			ctx.ServerError("authentication error", v.Error)
 			return
 		case *auth.AuthenticationAttemptedIncorrectCredential:
+			if common.WriteIfRateLimited(ctx.Base, v.Error, false) {
+				return
+			}
 			ctx.Error(http.StatusUnauthorized, "authGroup.Verify")
 			return
 		default:
@@ -145,6 +150,7 @@ func verifyAuth(r *web.Route, authMethods []auth.Method) {
 		ctx.IsSigned = ctx.Doer != nil
 		ctx.Authentication = ar
 	})
+	r.Use(common.RateLimit(ratelimit.API))
 }
 
 func verifyContainerAuth(r *web.Route, authMethods []auth.Method) {
@@ -165,6 +171,9 @@ func verifyContainerAuth(r *web.Route, authMethods []auth.Method) {
 			ctx.ServerError("authentication error", v.Error)
 			return
 		case *auth.AuthenticationAttemptedIncorrectCredential:
+			if common.WriteIfRateLimited(ctx.Base, v.Error, false) {
+				return
+			}
 			log.Info("Failed to verify user: %v", v.Error)
 			container.APIUnauthorizedError(ctx)
 			ctx.Error(http.StatusUnauthorized, "authGroup.Verify")
@@ -181,6 +190,7 @@ func verifyContainerAuth(r *web.Route, authMethods []auth.Method) {
 		ctx.IsSigned = ctx.Doer != nil
 		ctx.Authentication = ar
 	})
+	r.Use(common.RateLimit(ratelimit.API))
 }
 
 // CommonRoutes provide endpoints for most package managers (except containers - see below)

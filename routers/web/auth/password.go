@@ -14,10 +14,12 @@ import (
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
+	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/web"
 	"forgejo.org/modules/web/middleware"
+	"forgejo.org/routers/common"
 	"forgejo.org/services/context"
 	"forgejo.org/services/forms"
 	"forgejo.org/services/mailer"
@@ -189,6 +191,10 @@ func ResetPasswdPost(ctx *context.Context) {
 	// Handle two-factor
 	regenerateScratchToken := false
 	if twofa != nil {
+		attempt := common.StartAuthAttempt(ctx, ratelimit.TwoFactorKey(u.ID))
+		if attempt == nil {
+			return
+		}
 		if ctx.FormBool("scratch_code") {
 			if !twofa.VerifyScratchToken(ctx.FormString("token")) {
 				ctx.Data["IsResetForm"] = true
@@ -217,6 +223,7 @@ func ResetPasswdPost(ctx *context.Context) {
 				return
 			}
 		}
+		attempt.Succeeded()
 	}
 
 	opts := &user_service.UpdateAuthOptions{
