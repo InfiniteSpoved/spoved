@@ -122,6 +122,10 @@ const (
 	CommentTypeUnpin // 37 unpin Issue
 
 	CommentTypeAggregator // 38 Aggregator of comments
+
+	// append only; values are persisted
+	CommentTypeRevertOpened // 39 a pull request reverting this one was opened (RefIssueID)
+	CommentTypeReverted     // 40 the pull request reverting this one was merged (RefIssueID)
 )
 
 var commentStrings = []string{
@@ -164,6 +168,8 @@ var commentStrings = []string{
 	"pin",
 	"unpin",
 	"action_aggregator",
+	"revert_opened",
+	"reverted",
 }
 
 func (t CommentType) String() string {
@@ -1254,6 +1260,13 @@ func GetCommentByID(ctx context.Context, id int64) (*Comment, error) {
 		return nil, ErrCommentNotExist{id, 0}
 	}
 	return c, nil
+}
+
+// GetRevertedIssueID returns the ID of the issue that the pull request revertIssueID reverts, or 0.
+func GetRevertedIssueID(ctx context.Context, revertIssueID int64) (int64, error) {
+	var issueID int64
+	_, err := db.GetEngine(ctx).Table("comment").Where("type = ? AND ref_issue_id = ?", CommentTypeRevertOpened, revertIssueID).Cols("issue_id").Get(&issueID)
+	return issueID, err
 }
 
 // FindCommentsOptions describes the conditions to Find comments

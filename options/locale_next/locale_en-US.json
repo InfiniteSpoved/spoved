@@ -150,6 +150,8 @@
 	"repo.pulls.revert.conflict": "This pull request can't be reverted automatically because later changes conflict. Revert it locally:",
 	"repo.pulls.revert.instructions": "Git commands",
 	"repo.pulls.revert.not_possible": "This pull request can't be reverted automatically.",
+	"repo.pulls.revert.timeline_opened": "opened a revert of this pull request %s",
+	"repo.pulls.revert.timeline_reverted": "reverted this pull request %s",
 	"repo.pulls.poster_requires_approval": "Some workflows are <a href=\"%[1]s\">waiting to be reviewed</a>.",
 	"repo.pulls.poster_requires_approval.tooltip": "The author of this pull request is not trusted to run workflows triggered by a pull request created from a forked repository or with AGit. The workflows triggered by a `pull_request` event will not run until they are approved.",
 	"repo.pulls.poster_is_trusted": "The author of this pull request is <a href=\"%[1]s\">always trusted to run workflows</a>.",

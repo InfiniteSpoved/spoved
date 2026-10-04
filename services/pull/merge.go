@@ -282,7 +282,37 @@ func Merge(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.U
 	// Reset cached commit count
 	cache.Remove(pr.Issue.Repo.GetCommitsCountCacheKey(pr.BaseBranch, true))
 
+	createRevertedComment(ctx, pr, doer)
 	return handleCloseCrossReferences(ctx, pr, doer)
+}
+
+// createRevertedComment adds a timeline entry to the pull request that the merged pr reverts, if any.
+func createRevertedComment(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User) {
+	issueID, err := issues_model.GetRevertedIssueID(ctx, pr.IssueID)
+	if err != nil {
+		log.Error("GetRevertedIssueID for %-v: %v", pr, err)
+		return
+	} else if issueID == 0 {
+		return
+	}
+	issue, err := issues_model.GetIssueByID(ctx, issueID)
+	if err == nil {
+		err = issue.LoadRepo(ctx)
+	}
+	if err == nil {
+		_, err = issues_model.CreateComment(ctx, &issues_model.CreateCommentOptions{
+			Type:       issues_model.CommentTypeReverted,
+			Doer:       doer,
+			Repo:       issue.Repo,
+			Issue:      issue,
+			RefRepoID:  pr.BaseRepoID,
+			RefIssueID: pr.IssueID,
+			RefIsPull:  true,
+		})
+	}
+	if err != nil {
+		log.Error("CreateComment reverted for %-v: %v", pr, err)
+	}
 }
 
 func handleCloseCrossReferences(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User) error {
