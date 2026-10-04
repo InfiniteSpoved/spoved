@@ -28,9 +28,11 @@ type UserGroup struct {
 	// GrantsSiteAdmin makes every member of the group a site administrator.
 	GrantsSiteAdmin bool `xorm:"NOT NULL DEFAULT false"`
 	// GrantsCreateOrganization lets every member of the group create organizations.
-	GrantsCreateOrganization bool               `xorm:"NOT NULL DEFAULT false"`
-	CreatedUnix              timeutil.TimeStamp `xorm:"INDEX created"`
-	UpdatedUnix              timeutil.TimeStamp `xorm:"INDEX updated"`
+	GrantsCreateOrganization bool `xorm:"NOT NULL DEFAULT false"`
+	// GrantsAuditor gives every member of the group read access to every repository.
+	GrantsAuditor bool               `xorm:"NOT NULL DEFAULT false"`
+	CreatedUnix   timeutil.TimeStamp `xorm:"INDEX created"`
+	UpdatedUnix   timeutil.TimeStamp `xorm:"INDEX updated"`
 
 	NumMembers int `xorm:"-"`
 	NumTeams   int `xorm:"-"`
@@ -59,10 +61,11 @@ type UserGroupRole string
 const (
 	UserGroupRoleSiteAdmin          UserGroupRole = "site_admin"
 	UserGroupRoleCreateOrganization UserGroupRole = "create_organization"
+	UserGroupRoleAuditor            UserGroupRole = "auditor"
 )
 
 // UserGroupRoles lists every role a user group can grant.
-var UserGroupRoles = []UserGroupRole{UserGroupRoleSiteAdmin, UserGroupRoleCreateOrganization}
+var UserGroupRoles = []UserGroupRole{UserGroupRoleSiteAdmin, UserGroupRoleCreateOrganization, UserGroupRoleAuditor}
 
 // groupColumn is the user_group column that grants the role.
 func (r UserGroupRole) groupColumn() string {
@@ -70,8 +73,8 @@ func (r UserGroupRole) groupColumn() string {
 }
 
 // UserGroupRoleGrant records that a user group turned on the user flag of a
-// role (IsAdmin, AllowCreateOrganization). A flag without a grant was set by
-// other means and is never turned off by a user group.
+// role (IsAdmin, AllowCreateOrganization, IsAuditor). A flag without a grant
+// was set by other means and is never turned off by a user group.
 type UserGroupRoleGrant struct {
 	ID   int64         `xorm:"pk autoincr"`
 	UID  int64         `xorm:"UNIQUE(s) NOT NULL"`
@@ -164,7 +167,7 @@ func UpdateUserGroup(ctx context.Context, g *UserGroup) error {
 		} else if has {
 			return ErrUserGroupAlreadyExist{Name: g.Name}
 		}
-		_, err = db.GetEngine(ctx).ID(g.ID).Cols("lower_name", "name", "description", "grants_site_admin", "grants_create_organization").Update(g)
+		_, err = db.GetEngine(ctx).ID(g.ID).Cols("lower_name", "name", "description", "grants_site_admin", "grants_create_organization", "grants_auditor").Update(g)
 		return err
 	})
 }

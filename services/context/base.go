@@ -147,6 +147,11 @@ func (b *Base) JSONWithContentType(status int, contentType string, content any) 
 	}
 }
 
+// IsReadOnlyMethod reports whether the request is a GET or HEAD, which must never change anything.
+func (b *Base) IsReadOnlyMethod() bool {
+	return b.Req.Method == http.MethodGet || b.Req.Method == http.MethodHead
+}
+
 // RemoteAddr returns the client machine ip address
 func (b *Base) RemoteAddr() string {
 	return b.Req.RemoteAddr

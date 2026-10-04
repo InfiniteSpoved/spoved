@@ -23,6 +23,8 @@ type AutoMerge struct {
 	MergeStyle             repo_model.MergeStyle `xorm:"varchar(30)"`
 	Message                string                `xorm:"LONGTEXT"`
 	DeleteBranchAfterMerge bool                  `xorm:"NOT NULL DEFAULT false"`
+	ScheduledAfterUnix     timeutil.TimeStamp    `xorm:"NOT NULL DEFAULT 0"` // 0 = merge as soon as possible
+	HeadCommitID           string                `xorm:"VARCHAR(64)"`        // only merge this head; set for scheduled merges
 	CreatedUnix            timeutil.TimeStamp    `xorm:"created"`
 }
 
@@ -51,7 +53,7 @@ func IsErrAlreadyScheduledToAutoMerge(err error) bool {
 }
 
 // ScheduleAutoMerge schedules a pull request to be merged when all checks succeed
-func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pullID int64, style repo_model.MergeStyle, message string, deleteBranch bool) error {
+func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pullID int64, style repo_model.MergeStyle, message string, deleteBranch bool, scheduledAfter timeutil.TimeStamp, headCommitID string) error {
 	// Check if we already have a merge scheduled for that pull request
 	if exists, _, err := GetScheduledMergeByPullID(ctx, pullID); err != nil {
 		return err
@@ -65,6 +67,8 @@ func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pullID int64,
 		MergeStyle:             style,
 		Message:                message,
 		DeleteBranchAfterMerge: deleteBranch,
+		ScheduledAfterUnix:     scheduledAfter,
+		HeadCommitID:           headCommitID,
 	})
 	log.Trace("ScheduleAutoMerge %+v for PR %d", scheduledPRM, pullID)
 
@@ -103,4 +107,26 @@ func DeleteScheduledAutoMerge(ctx context.Context, pullID int64) error {
 
 	_, err = db.GetEngine(ctx).ID(scheduledPRM.ID).Delete(&AutoMerge{})
 	return err
+}
+
+// TakeDueScheduledAutoMerges clears the time of the scheduled merges that are due and returns their pull IDs,
+// so they become normal auto merges. A row is only returned by the caller that cleared it.
+func TakeDueScheduledAutoMerges(ctx context.Context, now timeutil.TimeStamp) ([]int64, error) {
+	var due []*AutoMerge
+	if err := db.GetEngine(ctx).Where("scheduled_after_unix > 0 AND scheduled_after_unix <= ?", now).Find(&due); err != nil {
+		return nil, err
+	}
+	pullIDs := make([]int64, 0, len(due))
+	for _, am := range due {
+		affected, err := db.GetEngine(ctx).Table("pull_auto_merge").
+			Where("id = ? AND scheduled_after_unix = ?", am.ID, am.ScheduledAfterUnix).
+			Update(map[string]any{"scheduled_after_unix": 0})
+		if err != nil {
+			return nil, err
+		}
+		if affected == 1 {
+			pullIDs = append(pullIDs, am.PullID)
+		}
+	}
+	return pullIDs, nil
 }

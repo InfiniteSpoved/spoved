@@ -2655,6 +2655,9 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -10969,6 +10972,9 @@
           "200": {
             "$ref": "#/responses/RepoIssueConfig"
           },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
           "404": {
             "$ref": "#/responses/notFound"
           }
@@ -11005,6 +11011,9 @@
           "200": {
             "$ref": "#/responses/RepoIssueConfigValidation"
           },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
           "404": {
             "$ref": "#/responses/notFound"
           }
@@ -11040,6 +11049,9 @@
         "responses": {
           "200": {
             "$ref": "#/responses/IssueTemplates"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
           },
           "404": {
             "$ref": "#/responses/notFound"
@@ -16079,6 +16091,9 @@
           },
           "413": {
             "$ref": "#/responses/quotaExceeded"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           },
           "423": {
             "$ref": "#/responses/repoArchivedError"
@@ -24157,6 +24172,9 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -24375,6 +24393,12 @@
           "type": "string",
           "format": "date-time",
           "x-go-name": "Created"
+        },
+        "expires_at": {
+          "description": "When the token expires, omitted if never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Expires"
         },
         "id": {
           "type": "integer",
@@ -26003,6 +26027,12 @@
         "name"
       ],
       "properties": {
+        "expires_at": {
+          "description": "When the token expires, omit for never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ExpiresAt"
+        },
         "name": {
           "type": "string",
           "x-go-name": "Name"
@@ -26546,6 +26576,12 @@
         "key"
       ],
       "properties": {
+        "expires_at": {
+          "description": "When the key expires, omit for never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ExpiresAt"
+        },
         "key": {
           "description": "An armored SSH key to add",
           "type": "string",
@@ -27191,6 +27227,11 @@
           "type": "string",
           "x-go-name": "Description"
         },
+        "grants_auditor": {
+          "description": "Members of the group can read every repository",
+          "type": "boolean",
+          "x-go-name": "GrantsAuditor"
+        },
         "grants_create_organization": {
           "description": "Members of the group may create organizations",
           "type": "boolean",
@@ -27417,6 +27458,12 @@
           "type": "string",
           "format": "date-time",
           "x-go-name": "Created"
+        },
+        "expires_at": {
+          "description": "When the key expires, omitted if never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Expires"
         },
         "fingerprint": {
           "type": "string",
@@ -28407,6 +28454,11 @@
         "description": {
           "type": "string",
           "x-go-name": "Description"
+        },
+        "grants_auditor": {
+          "description": "Members of the group can read every repository",
+          "type": "boolean",
+          "x-go-name": "GrantsAuditor"
         },
         "grants_create_organization": {
           "description": "Members of the group may create organizations",
@@ -29819,6 +29871,12 @@
         "merge_when_checks_succeed": {
           "type": "boolean",
           "x-go-name": "MergeWhenChecksSucceed"
+        },
+        "scheduled_after": {
+          "description": "do not merge before this time, only with merge_when_checks_succeed; the merge is pinned to the current head",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ScheduledAfter"
         }
       },
       "x-go-name": "MergePullRequestForm",
@@ -30588,6 +30646,12 @@
           "type": "string",
           "format": "date-time",
           "x-go-name": "Created"
+        },
+        "expires_at": {
+          "description": "When the key expires, omitted if never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Expires"
         },
         "fingerprint": {
           "type": "string",
@@ -32869,6 +32933,11 @@
           "type": "string",
           "x-go-name": "Description"
         },
+        "grants_auditor": {
+          "description": "Members of the group can read every repository",
+          "type": "boolean",
+          "x-go-name": "GrantsAuditor"
+        },
         "grants_create_organization": {
           "description": "Members of the group may create organizations",
           "type": "boolean",
@@ -33195,6 +33264,11 @@
         "created_at": {
           "type": "string",
           "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the token expires, omitted if never"
         },
         "id": {
           "type": "integer",

@@ -47,6 +47,10 @@ func checkTwoFactor(ctx *context.PrivateContext, user *user_model.User) {
 	}
 }
 
+func expiredKeyMsg(key *asymkey_model.PublicKey) string {
+	return fmt.Sprintf("SSH key %q expired on %s. Add a new key in your settings.", key.Name, key.ExpiresUnix.FormatDate())
+}
+
 // ServNoCommand returns information about the provided keyid
 func ServNoCommand(ctx *context.PrivateContext) {
 	keyID := ctx.ParamsInt64(":keyid")
@@ -73,6 +77,13 @@ func ServNoCommand(ctx *context.PrivateContext) {
 		return
 	}
 	results.Key = key
+
+	if key.IsExpired() {
+		ctx.JSON(http.StatusUnauthorized, private.Response{
+			UserMsg: expiredKeyMsg(key),
+		})
+		return
+	}
 
 	if key.Type == asymkey_model.KeyTypeUser || key.Type == asymkey_model.KeyTypePrincipal {
 		user, err := user_model.GetUserByID(ctx, key.OwnerID)
@@ -230,6 +241,14 @@ func ServCommand(ctx *context.PrivateContext) {
 	results.KeyName = key.Name
 	results.KeyID = key.ID
 	results.UserID = key.OwnerID
+	results.ExpiresUnix = key.ExpiresUnix
+
+	if key.IsExpired() {
+		ctx.JSON(http.StatusUnauthorized, private.Response{
+			UserMsg: expiredKeyMsg(key),
+		})
+		return
+	}
 
 	// If repo doesn't exist, deploy key doesn't make sense
 	if !repoExist && key.Type == asymkey_model.KeyTypeDeploy {
@@ -260,8 +279,15 @@ func ServCommand(ctx *context.PrivateContext) {
 			})
 			return
 		}
+		if deployKey.IsExpired() {
+			ctx.JSON(http.StatusUnauthorized, private.Response{
+				UserMsg: fmt.Sprintf("Deploy key %q expired on %s.", deployKey.Name, deployKey.ExpiresUnix.FormatDate()),
+			})
+			return
+		}
 		results.DeployKeyID = deployKey.ID
 		results.KeyName = deployKey.Name
+		results.ExpiresUnix = deployKey.ExpiresUnix
 
 		// FIXME: Deploy keys aren't really the owner of the repo pushing changes
 		// however we don't have good way of representing deploy keys in hook.go
@@ -330,6 +356,9 @@ func ServCommand(ctx *context.PrivateContext) {
 				return
 			}
 		} else {
+			// The auditor role only applies to reads: decide before the mode is lowered for pushes.
+			isRead := mode == perm.AccessModeRead
+
 			// We don't know yet which references the Git client wants to write to,
 			// but for AGit flow we have to degrade this check to a read permission.
 			// So if we support proc-receive (needed for AGit flow) and the unit type
@@ -341,7 +370,12 @@ func ServCommand(ctx *context.PrivateContext) {
 				mode = perm.AccessModeRead
 			}
 
-			perm, err := access_model.GetUserRepoPermission(ctx, repo, user)
+			var perm access_model.Permission
+			if isRead {
+				perm, err = access_model.GetUserRepoReadPermission(ctx, repo, user, nil)
+			} else {
+				perm, err = access_model.GetUserRepoPermission(ctx, repo, user)
+			}
 			if err != nil {
 				sshLogger.Error("Unable to get permissions for %-v with key %d in %-v Error: %v", user, key.ID, repo, err)
 				ctx.JSON(http.StatusInternalServerError, private.Response{

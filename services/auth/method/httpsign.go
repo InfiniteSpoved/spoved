@@ -95,6 +95,9 @@ func VerifyPubKey(r *http.Request) (*asymkey_model.PublicKey, error) {
 	if len(publicKeys) == 0 {
 		return nil, fmt.Errorf("no public key found for keyid %s", keyID)
 	}
+	if publicKeys[0].IsExpired() {
+		return nil, fmt.Errorf("public key %d expired on %s", publicKeys[0].ID, publicKeys[0].ExpiresUnix.FormatDate())
+	}
 
 	sshPublicKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(publicKeys[0].Content))
 	if err != nil {

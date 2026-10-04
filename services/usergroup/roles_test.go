@@ -4,6 +4,7 @@
 package usergroup
 
 import (
+	"slices"
 	"testing"
 
 	"forgejo.org/models"
@@ -11,6 +12,8 @@ import (
 	org_model "forgejo.org/models/organization"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/container"
+	"forgejo.org/modules/test"
 	user_service "forgejo.org/services/user"
 
 	"github.com/stretchr/testify/assert"
@@ -193,4 +196,38 @@ func TestDirectoryAdminWithoutGrantRow(t *testing.T) {
 	isAdmin, err := DirectoryAdmin(ctx, loadUser(t, 2), false)
 	require.NoError(t, err)
 	assert.True(t, isAdmin)
+}
+
+func TestRolesAuditor(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	group := &org_model.UserGroup{Name: "auditors", GrantsAuditor: true}
+	require.NoError(t, org_model.InsertUserGroup(ctx, group))
+	user := loadUser(t, 5)
+	assert.False(t, user.IsAuditor)
+
+	require.NoError(t, AddMember(ctx, group, user))
+	assert.True(t, loadUser(t, 5).IsAuditor)
+	assertRoles(t, 5, false, false)
+	assert.Equal(t, 1, grantCount(t, 5))
+
+	require.NoError(t, RemoveMember(ctx, group, 5))
+	assert.False(t, loadUser(t, 5).IsAuditor)
+	assert.Equal(t, 0, grantCount(t, 5))
+
+	const sourceID = 7
+	mapping := map[string]container.Set[string]{"cn=auditors": container.SetOf("auditors")}
+	require.NoError(t, SyncDirectoryGroups(ctx, user, sourceID, container.SetOf("cn=auditors"), mapping, true))
+	assert.True(t, loadUser(t, 5).IsAuditor)
+	require.NoError(t, SyncDirectoryGroups(ctx, user, sourceID, container.SetOf[string](), mapping, true))
+	assert.False(t, loadUser(t, 5).IsAuditor)
+}
+
+func TestRolesUnknownRole(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&org_model.UserGroupRoles, append(slices.Clone(org_model.UserGroupRoles), "unknown"))()
+
+	require.Error(t, syncRoles(db.DefaultContext, 5))
+	assertRoles(t, 5, false, false)
 }

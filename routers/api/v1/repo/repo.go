@@ -33,6 +33,7 @@ import (
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/api/v1/utils"
 	actions_service "forgejo.org/services/actions"
+	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 	"forgejo.org/services/issue"
@@ -142,6 +143,7 @@ func Search(ctx *context.APIContext) {
 	opts := &repo_model.SearchRepoOptions{
 		ListOptions:        utils.GetListOptions(ctx),
 		Actor:              ctx.Doer(),
+		AuditorView:        auth.IsHeldByUser(ctx.Authentication()),
 		Keyword:            ctx.FormTrim("q"),
 		OwnerID:            ctx.FormInt64("uid"),
 		PriorityOwnerID:    ctx.FormInt64("priority_owner_id"),
@@ -228,7 +230,11 @@ func Search(ctx *context.APIContext) {
 			})
 			return
 		}
-		permission, err := access_model.GetUserRepoPermissionWithReducer(ctx, repo, ctx.Doer(), ctx.Reducer())
+		getPermission := access_model.GetUserRepoPermissionWithReducer
+		if opts.AuditorView {
+			getPermission = access_model.GetUserRepoReadPermission
+		}
+		permission, err := getPermission(ctx, repo, ctx.Doer(), ctx.Reducer())
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, api.SearchError{
 				OK:    false,
@@ -1299,9 +1305,11 @@ func GetIssueTemplates(ctx *context.APIContext) {
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/IssueTemplates"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
-	ret, _ := issue.GetTemplatesFromDefaultBranch(ctx.Repo().Repository, ctx.Repo().GitRepo)
+	ret, _ := issue.GetTemplatesFromDefaultBranch(ctx, ctx.Repo().Repository, ctx.Repo().GitRepo)
 	ctx.JSON(http.StatusOK, ret)
 }
 
@@ -1326,9 +1334,11 @@ func GetIssueConfig(ctx *context.APIContext) {
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/RepoIssueConfig"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
-	issueConfig, _ := issue.GetTemplateConfigFromDefaultBranch(ctx.Repo().Repository, ctx.Repo().GitRepo)
+	issueConfig, _ := issue.GetTemplateConfigFromDefaultBranch(ctx, ctx.Repo().Repository, ctx.Repo().GitRepo)
 	ctx.JSON(http.StatusOK, issueConfig)
 }
 
@@ -1353,9 +1363,11 @@ func ValidateIssueConfig(ctx *context.APIContext) {
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/RepoIssueConfigValidation"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
-	_, err := issue.GetTemplateConfigFromDefaultBranch(ctx.Repo().Repository, ctx.Repo().GitRepo)
+	_, err := issue.GetTemplateConfigFromDefaultBranch(ctx, ctx.Repo().Repository, ctx.Repo().GitRepo)
 
 	if err == nil {
 		ctx.JSON(http.StatusOK, api.IssueConfigValidation{Valid: true, Message: ""})

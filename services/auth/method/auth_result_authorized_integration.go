@@ -22,6 +22,10 @@ type authorizedIntegrationAuthenticationResult struct {
 	expiresAt optional.Option[timeutil.TimeStamp]
 }
 
+func (*authorizedIntegrationAuthenticationResult) IsAuthorizedIntegration() bool {
+	return true
+}
+
 func (r *authorizedIntegrationAuthenticationResult) User() *user_model.User {
 	return r.user
 }

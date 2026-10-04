@@ -26,6 +26,7 @@ func ToUserGroup(ctx context.Context, group *org_model.UserGroup) (*api.UserGrou
 
 		GrantsSiteAdmin:          group.GrantsSiteAdmin,
 		GrantsCreateOrganization: group.GrantsCreateOrganization,
+		GrantsAuditor:            group.GrantsAuditor,
 	}, nil
 }
 

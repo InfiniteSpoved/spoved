@@ -104,6 +104,9 @@ type AuthenticationResult interface {
 	// Identifies if the authentication was performed by a reverse proxy.
 	IsReverseProxyAuthentication() bool
 
+	// Identifies if the authentication was performed by an authorized integration.
+	IsAuthorizedIntegration() bool
+
 	// Defined scopes of the [OAuth2Grant] as a comma-separated string, if authenticated via an OAuth access token JWT.
 	// Otherwise, None.
 	OAuth2GrantScopes() optional.Option[string]
@@ -117,6 +120,12 @@ type AuthenticationResult interface {
 	ExpiresAt() optional.Option[timeutil.TimeStamp]
 }
 
+// IsHeldByUser reports whether the user authenticated with a credential of their own, rather than one another party
+// holds on their behalf (an OAuth2 grant or an authorized integration).
+func IsHeldByUser(r AuthenticationResult) bool {
+	return r != nil && !r.OAuth2GrantScopes().Has() && !r.IsAuthorizedIntegration()
+}
+
 type BaseAuthenticationResult struct{}
 
 func (*BaseAuthenticationResult) OAuth2GrantScopes() optional.Option[string] {
@@ -128,6 +137,10 @@ func (*BaseAuthenticationResult) IsPasswordAuthentication() bool {
 }
 
 func (*BaseAuthenticationResult) IsReverseProxyAuthentication() bool {
+	return false
+}
+
+func (*BaseAuthenticationResult) IsAuthorizedIntegration() bool {
 	return false
 }
 

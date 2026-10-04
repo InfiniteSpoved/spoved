@@ -263,3 +263,19 @@ func Test_getRunnerRegistrationForActions(t *testing.T) {
 	require.NoError(t, err)
 	require.ErrorContains(t, loadActionsFrom(cfg), "RUNNER_REGISTRATION")
 }
+
+func Test_getRunRetentionDaysForActions(t *testing.T) {
+	defer test.MockVariableValue(&Actions, Actions)()
+
+	for iniStr, want := range map[string]int64{
+		"[actions]\n":                          0,
+		"[actions]\nRUN_RETENTION_DAYS = 30\n": 30,
+		"[actions]\nRUN_RETENTION_DAYS = -5\n": 0,
+	} {
+		Actions.RunRetentionDays = 0
+		cfg, err := NewConfigProviderFromData(iniStr)
+		require.NoError(t, err)
+		require.NoError(t, loadActionsFrom(cfg))
+		assert.Equal(t, want, Actions.RunRetentionDays, iniStr)
+	}
+}

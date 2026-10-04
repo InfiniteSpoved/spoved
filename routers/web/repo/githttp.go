@@ -31,6 +31,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
+	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	redirect_service "forgejo.org/services/redirect"
 	repo_service "forgejo.org/services/repository"
@@ -209,7 +210,13 @@ func httpBase(ctx *context.Context) *serviceHandler {
 
 				environ = append(environ, fmt.Sprintf("%s=%d", repo_module.EnvActionPerm, p.AccessMode))
 			} else {
-				p, err := access_model.GetUserRepoPermission(ctx, repo, ctx.Doer)
+				var p access_model.Permission
+				// isPull, not accessMode: accessMode is lowered to read for pushes above.
+				if isPull && auth.IsHeldByUser(ctx.Authentication) {
+					p, err = access_model.GetUserRepoReadPermission(ctx, repo, ctx.Doer, nil)
+				} else {
+					p, err = access_model.GetUserRepoPermission(ctx, repo, ctx.Doer)
+				}
 				if err != nil {
 					ctx.ServerError("GetUserRepoPermission", err)
 					return nil

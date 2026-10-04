@@ -14,6 +14,7 @@ import (
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/setting"
 	"forgejo.org/services/auth"
+	automerge_service "forgejo.org/services/automerge"
 	"forgejo.org/services/migrations"
 	mirror_service "forgejo.org/services/mirror"
 	packages_cleanup_service "forgejo.org/services/packages/cleanup"
@@ -156,6 +157,16 @@ func registerCleanupPackages() {
 	})
 }
 
+func registerStartScheduledAutoMerges() {
+	RegisterTaskFatal("start_scheduled_auto_merges", &BaseConfig{
+		Enabled:    true,
+		RunAtStart: true,
+		Schedule:   "@every 1m",
+	}, func(ctx context.Context, _ *user_model.User, _ Config) error {
+		return automerge_service.StartDueScheduledAutoMerges(ctx)
+	})
+}
+
 func initBasicTasks() {
 	if setting.Mirror.Enabled {
 		registerUpdateMirrorTask()
@@ -169,6 +180,7 @@ func initBasicTasks() {
 		registerUpdateMigrationPosterID()
 	}
 	registerCleanupHookTaskTable()
+	registerStartScheduledAutoMerges()
 	if setting.Packages.Enabled {
 		registerCleanupPackages()
 	}

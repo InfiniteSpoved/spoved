@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 
+	"forgejo.org/models"
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
@@ -20,6 +21,7 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/process"
 	"forgejo.org/modules/queue"
+	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 	notify_service "forgejo.org/services/notify"
 	pull_service "forgejo.org/services/pull"
@@ -53,10 +55,29 @@ func handler(items ...string) []string {
 	return nil
 }
 
-// ScheduleAutoMerge if schedule is false and no error, pull can be merged directly
-func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pull *issues_model.PullRequest, style repo_model.MergeStyle, message string, deleteBranch bool) (scheduled bool, err error) {
+// ScheduleAutoMerge if schedule is false and no error, pull can be merged directly.
+// A merge scheduled for a later time is pinned to the current head, so commits pushed before that time are not merged.
+func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pull *issues_model.PullRequest, style repo_model.MergeStyle, message string, deleteBranch bool, scheduledAfter timeutil.TimeStamp, expectedHeadCommitID string) (scheduled bool, err error) {
+	var headCommitID string
+	if scheduledAfter != 0 {
+		if err := pull.LoadBaseRepo(ctx); err != nil {
+			return false, err
+		}
+		gitRepo, err := gitrepo.OpenRepository(ctx, pull.BaseRepo)
+		if err != nil {
+			return false, err
+		}
+		defer gitRepo.Close()
+		if headCommitID, err = gitRepo.GetRefCommitID(pull.GetGitRefName()); err != nil {
+			return false, err
+		}
+		if expectedHeadCommitID != "" && expectedHeadCommitID != headCommitID {
+			return false, models.ErrSHADoesNotMatch{GivenSHA: expectedHeadCommitID, CurrentSHA: headCommitID}
+		}
+	}
+
 	err = db.WithTx(ctx, func(ctx context.Context) error {
-		if err := pull_model.ScheduleAutoMerge(ctx, doer, pull.ID, style, message, deleteBranch); err != nil {
+		if err := pull_model.ScheduleAutoMerge(ctx, doer, pull.ID, style, message, deleteBranch, scheduledAfter, headCommitID); err != nil {
 			return err
 		}
 		scheduled = true
@@ -97,6 +118,23 @@ func RemoveScheduledAutoMerge(ctx context.Context, doer *user_model.User, pull *
 	})
 }
 
+// StartDueScheduledAutoMerges turns the scheduled merges that are due into normal auto merges and checks them now
+func StartDueScheduledAutoMerges(ctx context.Context) error {
+	pullIDs, err := pull_model.TakeDueScheduledAutoMerges(ctx, timeutil.TimeStampNow())
+	if err != nil {
+		return err
+	}
+	for _, id := range pullIDs {
+		pr, err := issues_model.GetPullRequestByID(ctx, id)
+		if err != nil {
+			log.Error("GetPullRequestByID[%d]: %v", id, err)
+			continue
+		}
+		StartPRCheckAndAutoMerge(ctx, pr)
+	}
+	return nil
+}
+
 // StartPRCheckAndAutoMergeBySHA start an automerge check and auto merge task for all pull requests of repository and SHA
 func StartPRCheckAndAutoMergeBySHA(ctx context.Context, sha string, repo *repo_model.Repository) error {
 	return shared_automerge.StartPRCheckAndAutoMergeBySHA(ctx, sha, repo)
@@ -129,6 +167,10 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 		log.Trace("GetScheduledMergeByPullID found nothing for PR %d", pullID)
 		return
 	}
+	if scheduledPRM.ScheduledAfterUnix > timeutil.TimeStampNow() {
+		log.Trace("Scheduled auto merge %-v waits until %v", pr, scheduledPRM.ScheduledAfterUnix)
+		return
+	}
 
 	if err = pr.LoadBaseRepo(ctx); err != nil {
 		log.Error("%-v LoadBaseRepo: %v", pr, err)
@@ -146,6 +188,10 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 	headCommitID, err := baseGitRepo.GetRefCommitID(pr.GetGitRefName())
 	if err != nil {
 		log.Error("GetRefCommitID: %v", err)
+		return
+	}
+	if scheduledPRM.HeadCommitID != "" && headCommitID != scheduledPRM.HeadCommitID {
+		log.Info("Scheduled auto merge %-v is pinned to %s but the head is now %s, not merging", pr, scheduledPRM.HeadCommitID, headCommitID)
 		return
 	}
 	if headCommitID != sha {
@@ -228,7 +274,7 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 		log.Error("DeleteScheduledAutoMerge[%d]: %v", pr.ID, err)
 	}
 
-	if err := pull_service.Merge(ctx, pr, doer, baseGitRepo, scheduledPRM.MergeStyle, "", scheduledPRM.Message, true); err != nil {
+	if err := pull_service.Merge(ctx, pr, doer, baseGitRepo, scheduledPRM.MergeStyle, scheduledPRM.HeadCommitID, scheduledPRM.Message, true); err != nil {
 		log.Error("pull_service.Merge: %v", err)
 		// FIXME: if merge failed, we should display some error message to the pull request page.
 		// The resolution is add a new column on automerge table named `error_message` to store the error message and displayed

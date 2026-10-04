@@ -13,15 +13,16 @@
 // authentication source) are never touched.
 //
 // A user group can also grant instance-level roles (site administrator,
-// creating organizations). They are synced into the user's IsAdmin and
-// AllowCreateOrganization flags, and a UserGroupRoleGrant records the flags a
-// group turned on. A flag is only turned off again when such a grant exists
-// and no remaining group of the user grants the role.
+// creating organizations, auditor). They are synced into the user's IsAdmin,
+// AllowCreateOrganization and IsAuditor flags, and a UserGroupRoleGrant
+// records the flags a group turned on. A flag is only turned off again when
+// such a grant exists and no remaining group of the user grants the role.
 package usergroup
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"forgejo.org/models"
@@ -255,9 +256,17 @@ func syncRoles(ctx context.Context, uids ...int64) error {
 			return err
 		}
 		for _, role := range org_model.UserGroupRoles {
-			flag, col := &user.IsAdmin, "is_admin"
-			if role == org_model.UserGroupRoleCreateOrganization {
+			var flag *bool
+			var col string
+			switch role {
+			case org_model.UserGroupRoleSiteAdmin:
+				flag, col = &user.IsAdmin, "is_admin"
+			case org_model.UserGroupRoleCreateOrganization:
 				flag, col = &user.AllowCreateOrganization, "allow_create_organization"
+			case org_model.UserGroupRoleAuditor:
+				flag, col = &user.IsAuditor, "is_auditor"
+			default:
+				return fmt.Errorf("user group role %q has no user flag", role)
 			}
 			granted, err := HasRoleViaGroup(ctx, uid, role)
 			if err != nil {

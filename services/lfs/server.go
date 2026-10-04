@@ -31,6 +31,7 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/storage"
+	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 )
 
@@ -551,7 +552,13 @@ func authenticate(ctx *context.Context, repository *repo_model.Repository, requi
 	// ctx.IsSigned is unnecessary here, this will be checked in perm.CanAccess. Usage of ctx.Authentication.Reducer()
 	// or .Scope() is also unnecessary here in `authenticate` -- context.CheckRepoScopedToken is used after
 	// authentication to provide authorization checks.
-	repoPerm, err := access_model.GetUserRepoPermission(ctx, repository, ctx.Doer)
+	var repoPerm access_model.Permission
+	var err error
+	if !requireWrite && auth.IsHeldByUser(ctx.Authentication) {
+		repoPerm, err = access_model.GetUserRepoReadPermission(ctx, repository, ctx.Doer, nil)
+	} else {
+		repoPerm, err = access_model.GetUserRepoPermission(ctx, repository, ctx.Doer)
+	}
 	if err != nil {
 		log.Error("Unable to GetUserRepoPermission for user %-v in repo %-v Error: %v", ctx.Doer, repository, err)
 		return false

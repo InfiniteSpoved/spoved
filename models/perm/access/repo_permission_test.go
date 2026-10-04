@@ -195,3 +195,96 @@ func TestGetUserRepoPermissionOrganization(t *testing.T) {
 		assert.Equal(t, perm_model.AccessModeNone, perm.UnitAccessMode(unit.TypeActions))
 	})
 }
+
+func TestGetUserRepoReadPermission(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := t.Context()
+
+	loadAuditor := func(id int64) *user_model.User {
+		u := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: id})
+		u.IsAuditor = true
+		return u
+	}
+	// user 8 has no own access to these private repositories of a user, a public org and a private org,
+	// nor to the public repository of the private org.
+	repoIDs := []int64{2, 3, 40, 41}
+
+	t.Run("GetUserRepoPermission ignores the role", func(t *testing.T) {
+		user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8})
+		for _, id := range repoIDs {
+			repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: id})
+			perm, err := access.GetUserRepoPermission(ctx, repo, user)
+			require.NoError(t, err)
+			assert.False(t, perm.HasAccess(), "repo %d", id)
+			auditorPerm, err := access.GetUserRepoPermission(ctx, repo, loadAuditor(8))
+			require.NoError(t, err)
+			assert.Equal(t, perm, auditorPerm, "repo %d", id)
+		}
+	})
+
+	t.Run("read on every enabled unit, nothing more", func(t *testing.T) {
+		for _, id := range repoIDs {
+			repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: id})
+			perm, err := access.GetUserRepoReadPermission(ctx, repo, loadAuditor(8), nil)
+			require.NoError(t, err)
+			require.NoError(t, repo.LoadUnits(ctx))
+			assert.Equal(t, repo.Units, perm.Units, "repo %d", id)
+			for _, u := range repo.Units {
+				assert.Equal(t, perm_model.AccessModeRead, perm.UnitAccessMode(u.Type), "repo %d unit %s", id, u.Type)
+			}
+			assert.False(t, perm.IsAdmin(), "repo %d", id)
+		}
+	})
+
+	t.Run("disabled units stay inaccessible", func(t *testing.T) {
+		// repo 2 has no pull requests unit
+		repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 2})
+		perm, err := access.GetUserRepoReadPermission(ctx, repo, loadAuditor(8), nil)
+		require.NoError(t, err)
+		assert.True(t, perm.CanRead(unit.TypeCode))
+		assert.False(t, perm.CanRead(unit.TypePullRequests))
+	})
+
+	t.Run("own access is kept", func(t *testing.T) {
+		// user 15 can write issues of repo 32 through a team, and only read its code
+		repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 32})
+		perm, err := access.GetUserRepoReadPermission(ctx, repo, loadAuditor(15), nil)
+		require.NoError(t, err)
+		assert.True(t, perm.CanWrite(unit.TypeIssues))
+		assert.True(t, perm.CanRead(unit.TypeCode))
+		assert.False(t, perm.CanWrite(unit.TypeCode))
+	})
+
+	t.Run("no role, no raise", func(t *testing.T) {
+		repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})
+		perm, err := access.GetUserRepoReadPermission(ctx, repo, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8}), nil)
+		require.NoError(t, err)
+		assert.False(t, perm.HasAccess())
+		perm, err = access.GetUserRepoReadPermission(ctx, repo, nil, nil)
+		require.NoError(t, err)
+		assert.False(t, perm.HasAccess())
+	})
+
+	t.Run("the reducer applies after the raise", func(t *testing.T) {
+		repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})
+		reducer := authz.NewMockAuthorizationReducer(t)
+		reducer.On("ReduceRepoAccess", mock.Anything, mock.Anything, mock.Anything).Return(perm_model.AccessModeNone, nil)
+		perm, err := access.GetUserRepoReadPermission(ctx, repo, loadAuditor(8), reducer)
+		require.NoError(t, err)
+		assert.False(t, perm.HasAccess())
+	})
+}
+
+func TestGetUserRepoPermissionWithReducerToNone(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+
+	// user 15 has unit-level access to repo 32 through a team
+	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 32})
+	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 15})
+	reducer := authz.NewMockAuthorizationReducer(t)
+	reducer.On("ReduceRepoAccess", mock.Anything, mock.Anything, mock.Anything).Return(perm_model.AccessModeNone, nil)
+
+	perm, err := access.GetUserRepoPermissionWithReducer(t.Context(), repo, user, reducer)
+	require.NoError(t, err)
+	assert.False(t, perm.HasAccess())
+}

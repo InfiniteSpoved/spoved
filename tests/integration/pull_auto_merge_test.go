@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,11 +17,14 @@ import (
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
+	"forgejo.org/models/perm"
 	pull_model "forgejo.org/models/pull"
 	unit_model "forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
+	"forgejo.org/modules/gitrepo"
+	"forgejo.org/modules/timeutil"
 	"forgejo.org/services/automerge"
 	app_context "forgejo.org/services/context"
 	"forgejo.org/services/forms"
@@ -217,5 +221,151 @@ func TestPullAutoMergeFromFork(t *testing.T) {
 		automerge.StartPRCheckAndAutoMerge(t.Context(), pullRequest)
 		pullRequest = unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pullRequest.ID})
 		assert.NotEmpty(t, pullRequest.MergedCommitID)
+	})
+}
+
+func TestPullScheduledAutoMerge(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		reviewer := forgery.CreateUser(t, nil)
+		repo := forgery.CreateRepository(t, nil, &forgery.CreateRepositoryOptions{
+			Files:         forgery.FilesInit{},
+			Collaborators: map[*user_model.User]perm.AccessMode{reviewer: perm.AccessModeWrite},
+		})
+		forgery.EnableRepoUnits(t, repo, unit_model.TypeCode, unit_model.TypePullRequests)
+		owner := repo.Owner
+		session := loginUser(t, owner.Name)
+		reviewerSession := loginUser(t, reviewer.Name)
+		apiCtx := NewAPITestContext(t, owner.Name, repo.Name, auth_model.AccessTokenScopeWriteRepository)
+
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/%s/settings/branches/edit", repo.FullName()), map[string]string{
+			"rule_name":                 "main",
+			"required_approvals":        "1",
+			"block_on_rejected_reviews": "true",
+		}), http.StatusSeeOther)
+
+		gitRepo, err := gitrepo.OpenRepository(t.Context(), repo)
+		require.NoError(t, err)
+		defer gitRepo.Close()
+
+		now := time.Now()
+		defer timeutil.MockUnset()
+		timeutil.MockSet(now)
+		passTime := func() {
+			now = now.Add(2 * time.Hour)
+			timeutil.MockSet(now)
+			require.NoError(t, automerge.StartDueScheduledAutoMerges(t.Context()))
+		}
+
+		newPull := func(t *testing.T, branch string) (*issues_model.PullRequest, string) {
+			testEditFileToNewBranch(t, session, owner.Name, repo.Name, "main", branch, "README.md", branch)
+			testPullCreate(t, session, owner.Name, repo.Name, true, "main", branch, branch)
+			pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, HeadBranch: branch})
+			sha, err := gitRepo.GetRefCommitID(pr.GetGitRefName())
+			require.NoError(t, err)
+			return pr, sha
+		}
+		review := func(t *testing.T, pr *issues_model.PullRequest, sha, typ string) {
+			testSubmitReview(t, reviewerSession, owner.Name, repo.Name, strconv.FormatInt(pr.Index, 10), sha, typ, http.StatusOK)
+		}
+		schedule := func(t *testing.T, pr *issues_model.PullRequest, expectedCode int) {
+			apiCtx.ExpectedCode = expectedCode
+			doAPIMergePullRequestForm(t, apiCtx, owner.Name, repo.Name, pr.Index, &forms.MergePullRequestForm{
+				Do:                     "merge",
+				MergeWhenChecksSucceed: true,
+				ScheduledAfter:         now.Add(time.Hour).Format(time.RFC3339),
+			})
+		}
+		isMerged := func(pr *issues_model.PullRequest) bool {
+			return unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID}).HasMerged
+		}
+
+		t.Run("Invalid time", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, _ := newPull(t, "invalid-time")
+			apiCtx.ExpectedCode = http.StatusUnprocessableEntity
+			for _, form := range []*forms.MergePullRequestForm{
+				{Do: "merge", MergeWhenChecksSucceed: true, ScheduledAfter: now.Add(-time.Minute).Format(time.RFC3339)},
+				{Do: "merge", MergeWhenChecksSucceed: true, ScheduledAfter: "tomorrow"},
+				{Do: "merge", ScheduledAfter: now.Add(time.Hour).Format(time.RFC3339)},
+			} {
+				doAPIMergePullRequestForm(t, apiCtx, owner.Name, repo.Name, pr.Index, form)
+			}
+			unittest.AssertNotExistsBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+			assert.False(t, isMerged(pr))
+		})
+
+		t.Run("Approved merges at the time", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t, "approved")
+			review(t, pr, sha, "approve")
+			schedule(t, pr, http.StatusCreated)
+			am := unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+			assert.Equal(t, timeutil.TimeStamp(now.Add(time.Hour).Unix()), am.ScheduledAfterUnix)
+			assert.Equal(t, sha, am.HeadCommitID)
+
+			automerge.StartPRCheckAndAutoMerge(t.Context(), pr)
+			require.NoError(t, automerge.StartDueScheduledAutoMerges(t.Context()))
+			assert.False(t, isMerged(pr))
+
+			passTime()
+			assert.True(t, isMerged(pr))
+			unittest.AssertNotExistsBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+		})
+
+		t.Run("Approved after the time", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t, "approved-later")
+			testPullMergeForm(t, session, http.StatusOK, owner.Name, repo.Name, strconv.FormatInt(pr.Index, 10), optionsPullMerge{
+				"do":                        "merge",
+				"merge_when_checks_succeed": "true",
+				"head_commit_id":            sha,
+				"scheduled_after":           now.Add(time.Hour).Format(time.RFC3339),
+			})
+			passTime()
+			assert.False(t, isMerged(pr))
+
+			review(t, pr, sha, "approve")
+			assert.True(t, isMerged(pr))
+		})
+
+		t.Run("Changes requested", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t, "changes-requested")
+			review(t, pr, sha, "approve")
+			schedule(t, pr, http.StatusCreated)
+			review(t, pr, sha, "reject")
+			passTime()
+			assert.False(t, isMerged(pr))
+			unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+		})
+
+		t.Run("New push is not merged", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t, "pushed")
+			review(t, pr, sha, "approve")
+			schedule(t, pr, http.StatusCreated)
+
+			testEditFile(t, session, owner.Name, repo.Name, "pushed", "README.md", "unreviewed")
+			newSHA, err := gitRepo.GetRefCommitID(pr.GetGitRefName())
+			require.NoError(t, err)
+			require.NotEqual(t, sha, newSHA)
+
+			passTime()
+			automerge.StartPRCheckAndAutoMerge(t.Context(), unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID}))
+			assert.False(t, isMerged(pr))
+			am := unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+			assert.Equal(t, sha, am.HeadCommitID)
+
+			// a merge box loaded before the push cannot schedule the new head
+			resp := testPullMergeForm(t, session, http.StatusBadRequest, owner.Name, repo.Name, strconv.FormatInt(pr.Index, 10), optionsPullMerge{
+				"do":                        "merge",
+				"merge_when_checks_succeed": "true",
+				"head_commit_id":            sha,
+				"scheduled_after":           now.Add(time.Hour).Format(time.RFC3339),
+			})
+			assert.Contains(t, resp.Body.String(), "The pull request was updated.")
+			assert.False(t, isMerged(pr))
+			assert.Equal(t, am, unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID}))
+		})
 	})
 }

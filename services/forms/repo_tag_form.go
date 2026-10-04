@@ -26,3 +26,19 @@ func (f *ProtectTagForm) Validate(req *http.Request, errs binding.Errors) bindin
 	ctx := context.GetValidateContext(req)
 	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
+
+// PushRuleForm is the repository push rule form. git_model.PushRule.Compile validates it.
+type PushRuleForm struct {
+	CommitMessageRegex         string
+	CommitMessageBannedRegex   string
+	BranchNameRegex            string
+	RequireVerifiedAuthorEmail bool
+	MaxFileSizeMB              int64 `form:"max_file_size_mb"`
+	BannedFilePatterns         string
+}
+
+// Validate validates the fields
+func (f *PushRuleForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
+	ctx := context.GetValidateContext(req)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
+}
