@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	auth_model "forgejo.org/models/auth"
+	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/hostmatcher"
 	"forgejo.org/modules/ratelimit"
@@ -261,6 +263,10 @@ func TestRateLimitTwoFactor(t *testing.T) {
 	mockRateLimit(t, map[string]setting.RateLimitClass{
 		ratelimit.Auth: {AuthenticatedRate: slow, AuthenticatedBurst: 2},
 	}, "")
+	// successful 2FA sign-ins never consume
+	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "user2"})
+	loginUserWithTOTP(t, user2)
+
 	session = loginUser(t, "user2") // stops at the 2FA page
 	twoFactor := func(ip string, status int) {
 		t.Helper()
@@ -315,4 +321,39 @@ func TestRateLimitAuthIPEndpoints(t *testing.T) {
 	for _, path := range []string{"/user/forgot_password", "/user/sign_up", "/user/activate", "/user/recover_account"} {
 		MakeRequest(t, fromIP(NewRequest(t, "POST", path), "192.0.2.1"), http.StatusTooManyRequests)
 	}
+}
+
+func TestRateLimitOAuthToken(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	mockRateLimit(t, map[string]setting.RateLimitClass{
+		ratelimit.Auth: {AuthenticatedRate: slow, AuthenticatedBurst: 1},
+	}, "")
+	tokenRequest := func(values map[string]string, status int) map[string]any {
+		t.Helper()
+		values["client_id"] = "da7da3ba-9a13-4167-856f-3899de0b0138"
+		values["client_secret"] = "4MK8Na6R55smdCY0WuCCumZ6hjRPnGY5saWVRHHjJiA="
+		resp := MakeRequest(t, fromIP(NewRequestWithValues(t, "POST", "/login/oauth/access_token", values), "192.0.2.1"), status)
+		var parsed map[string]any
+		DecodeJSON(t, resp, &parsed)
+		return parsed
+	}
+
+	// successful exchanges never consume the only token
+	parsed := tokenRequest(map[string]string{
+		"grant_type":    "authorization_code",
+		"redirect_uri":  "a",
+		"code":          "authcode",
+		"code_verifier": "N1Zo9-8Rfwhkt68r1r29ty8YwIraXR8eh_1Qwxg7yQXsonBt",
+	}, http.StatusOK)
+	for range 2 {
+		parsed = tokenRequest(map[string]string{
+			"grant_type":    "refresh_token",
+			"refresh_token": parsed["refresh_token"].(string),
+		}, http.StatusOK)
+	}
+
+	// failures do
+	tokenRequest(map[string]string{"grant_type": "authorization_code", "redirect_uri": "a", "code": "wrong"}, http.StatusBadRequest)
+	parsed = tokenRequest(map[string]string{"grant_type": "authorization_code", "redirect_uri": "a", "code": "wrong"}, http.StatusTooManyRequests)
+	assert.Contains(t, parsed["message"], "rate limit exceeded")
 }
