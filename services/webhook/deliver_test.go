@@ -140,7 +140,7 @@ func TestWebhookDeliverHookTask(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, `{"data": 42}`, string(body))
 
-		case "/webhook/Le5CqY5h6_wPgbUm8YkjQV1tML1yIs_VhIyk8RjQox4":
+		case "/webhook/EdYrsWVUTeKkffk64f6lXMOujbswzhZ7b4wz1UL1RyQ":
 			// Version 2
 			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 			body, err := io.ReadAll(r.Body)
