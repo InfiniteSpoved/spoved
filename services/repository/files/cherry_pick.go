@@ -13,6 +13,7 @@ import (
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/base"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/structs"
@@ -162,11 +163,11 @@ func RevertPullRequest(ctx context.Context, doer *user_model.User, gitRepo *git.
 		return nil, util.NewPermissionDeniedErrorf("cannot create branches in this repository")
 	}
 
-	base, err := pull.GetRevertBase(gitRepo, pr)
+	revertBase, err := pull.GetRevertBase(gitRepo, pr)
 	if err != nil {
 		return nil, err
 	}
-	if base == "" {
+	if revertBase == "" {
 		return nil, util.NewInvalidArgumentErrorf("pull request can't be reverted automatically")
 	}
 	if ok, err := gitRepo.IsCommitInBranch(pr.MergedCommitID, pr.BaseBranch); err != nil {
@@ -175,13 +176,14 @@ func RevertPullRequest(ctx context.Context, doer *user_model.User, gitRepo *git.
 		return nil, util.NewInvalidArgumentErrorf("pull request can't be reverted automatically: its merge commit is not in %s", pr.BaseBranch)
 	}
 
-	title := `Revert "` + pr.Issue.Title + `"`
+	// Keep the whole title within the 255 runes an issue title may have.
+	title := `Revert "` + base.EllipsisString(pr.Issue.Title, 255-len(`Revert ""`)) + `"`
 	branch := pull.RevertBranchName(pr)
 	if _, err := CherryPick(ctx, repo, doer, true, &ApplyDiffPatchOptions{
 		OldBranch:      pr.BaseBranch,
 		NewBranch:      branch,
 		Content:        pr.MergedCommitID,
-		ParentCommitID: base,
+		ParentCommitID: revertBase,
 		Message:        fmt.Sprintf("%s\n\nThis reverts pull request #%d (%s).", title, pr.Index, pr.MergedCommitID),
 	}); err != nil {
 		return nil, err

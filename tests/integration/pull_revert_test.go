@@ -132,9 +132,15 @@ func TestPullRevert(t *testing.T) {
 
 		t.Run("web", func(t *testing.T) {
 			repo, _ := revertTestRepo(t, ctx, "revert-web", repo_model.MergeStyleSquash)
+			// The revert title must stay within the 255 runes allowed for issue titles.
+			_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE issue SET name = ? WHERE repo_id = ? AND `index` = 1", strings.Repeat("x", 255), repo.ID)
+			require.NoError(t, err)
+
 			resp := ctx.Session.MakeRequest(t, NewRequest(t, "POST", "/user2/revert-web/pulls/1/revert"), http.StatusSeeOther)
 			assert.Equal(t, "/user2/revert-web/pulls/2", test.RedirectURL(resp))
-			unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, Index: 2, HeadBranch: "revert-1-feature"})
+			revertPR := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, Index: 2, HeadBranch: "revert-1-feature"})
+			require.NoError(t, revertPR.LoadIssue(db.DefaultContext))
+			assert.Equal(t, `Revert "`+strings.Repeat("x", 243)+`..."`, revertPR.Issue.Title)
 		})
 
 		t.Run("conflict", func(t *testing.T) {
