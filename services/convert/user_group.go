@@ -23,6 +23,9 @@ func ToUserGroup(ctx context.Context, group *org_model.UserGroup) (*api.UserGrou
 		TeamsCount:   group.NumTeams,
 		Created:      group.CreatedUnix.AsTime(),
 		Updated:      group.UpdatedUnix.AsTime(),
+
+		GrantsSiteAdmin:          group.GrantsSiteAdmin,
+		GrantsCreateOrganization: group.GrantsCreateOrganization,
 	}, nil
 }
 

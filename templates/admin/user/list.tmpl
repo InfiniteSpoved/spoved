@@ -89,6 +89,7 @@
 								<a href="{{.HomeLink}}">{{.Name}}</a>
 								{{if .IsAdmin}}
 									<span class="ui mini label">{{ctx.Locale.Tr "admin.users.admin"}}</span>
+									{{with index $.RoleGroups .ID}}{{with index . "site_admin"}}<span class="text small grey">{{ctx.Locale.Tr "admin.users.via_group" .}}</span>{{end}}{{end}}
 								{{else if eq 2 .Type}}{{/* Reserved user */}}
 									<span class="ui mini label">{{ctx.Locale.Tr "admin.users.reserved"}}</span>
 								{{else if eq 4 .Type}}{{/* Bot "user" */}}

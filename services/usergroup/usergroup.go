@@ -11,6 +11,12 @@
 // removed again once the user is no longer in any group linked to the team.
 // Memberships created any other way (directly, by invitation, by an
 // authentication source) are never touched.
+//
+// A user group can also grant instance-level roles (site administrator,
+// creating organizations). They are synced into the user's IsAdmin and
+// AllowCreateOrganization flags, and a UserGroupRoleGrant records the flags a
+// group turned on. A flag is only turned off again when such a grant exists
+// and no remaining group of the user grants the role.
 package usergroup
 
 import (
@@ -56,6 +62,9 @@ func addMember(ctx context.Context, group *org_model.UserGroup, user *user_model
 		if err := org_model.InsertUserGroupMember(ctx, group.ID, user.ID, loginSourceID); err != nil {
 			return err
 		}
+		if err := syncRoles(ctx, user.ID); err != nil {
+			return err
+		}
 		return syncUserForGroupTeams(ctx, group.ID, user.ID)
 	})
 }
@@ -65,6 +74,9 @@ func addMember(ctx context.Context, group *org_model.UserGroup, user *user_model
 func RemoveMember(ctx context.Context, group *org_model.UserGroup, userID int64) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
 		if err := org_model.DeleteUserGroupMember(ctx, group.ID, userID); err != nil {
+			return err
+		}
+		if err := syncRoles(ctx, userID); err != nil {
 			return err
 		}
 		return syncUserForGroupTeams(ctx, group.ID, userID)
@@ -116,9 +128,12 @@ func SyncDirectoryGroups(ctx context.Context, user *user_model.User, loginSource
 			if err != nil || !deleted {
 				return err
 			}
+			if err := syncRoles(ctx, user.ID); err != nil {
+				return err
+			}
 			return syncUserForGroupTeams(ctx, group.ID, user.ID)
 		})
-		if org_model.IsErrLastOrgOwner(err) {
+		if org_model.IsErrLastOrgOwner(err) || models.IsErrDeleteLastAdminUser(err) {
 			log.Warn("user group sync: keeping %s in user group %s: %v", user.Name, group.Name, err)
 		} else if err != nil {
 			return err
@@ -170,9 +185,28 @@ func UnlinkTeam(ctx context.Context, group *org_model.UserGroup, team *org_model
 	})
 }
 
+// UpdateGroup updates the name, description and roles of a user group, and
+// the role flags of its members.
+func UpdateGroup(ctx context.Context, group *org_model.UserGroup) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if err := org_model.UpdateUserGroup(ctx, group); err != nil {
+			return err
+		}
+		memberIDs, err := org_model.GetUserGroupMemberIDs(ctx, group.ID)
+		if err != nil {
+			return err
+		}
+		return syncRoles(ctx, memberIDs...)
+	})
+}
+
 // DeleteGroup unlinks a user group from all teams and deletes it.
 func DeleteGroup(ctx context.Context, group *org_model.UserGroup) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
+		memberIDs, err := org_model.GetUserGroupMemberIDs(ctx, group.ID)
+		if err != nil {
+			return err
+		}
 		linked, err := org_model.GetUserGroupTeams(ctx, group.ID)
 		if err != nil {
 			return err
@@ -182,11 +216,87 @@ func DeleteGroup(ctx context.Context, group *org_model.UserGroup) error {
 				return err
 			}
 		}
-		return db.DeleteBeans(ctx,
+		if err := db.DeleteBeans(ctx,
 			&org_model.UserGroupUser{GroupID: group.ID},
 			&org_model.UserGroup{ID: group.ID},
-		)
+		); err != nil {
+			return err
+		}
+		return syncRoles(ctx, memberIDs...)
 	})
+}
+
+// HasRoleViaGroup returns true if a user group of the user grants the role.
+func HasRoleViaGroup(ctx context.Context, uid int64, role org_model.UserGroupRole) (bool, error) {
+	groups, err := org_model.GetUserRoleGroups(ctx, uid, role)
+	return len(groups) > 0, err
+}
+
+// DirectoryAdmin returns the admin flag a login source should set for a user
+// it reports as admin or not. A user group granting site administrator wins
+// over the directory: such a user is never demoted.
+func DirectoryAdmin(ctx context.Context, user *user_model.User, directoryIsAdmin bool) (bool, error) {
+	if directoryIsAdmin || !user.IsAdmin {
+		return directoryIsAdmin, nil
+	}
+	return HasRoleViaGroup(ctx, user.ID, org_model.UserGroupRoleSiteAdmin)
+}
+
+// syncRoles makes the role flags of the users match the roles their user
+// groups grant. A flag is turned on when a group grants the role, and turned
+// off only when a group turned it on and none grants it anymore. It refuses
+// to remove the last site administrator with models.ErrDeleteLastAdminUser.
+func syncRoles(ctx context.Context, uids ...int64) error {
+	for _, uid := range uids {
+		user, err := user_model.GetUserByID(ctx, uid)
+		if user_model.IsErrUserNotExist(err) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		for _, role := range org_model.UserGroupRoles {
+			flag, col := &user.IsAdmin, "is_admin"
+			if role == org_model.UserGroupRoleCreateOrganization {
+				flag, col = &user.AllowCreateOrganization, "allow_create_organization"
+			}
+			granted, err := HasRoleViaGroup(ctx, uid, role)
+			if err != nil {
+				return err
+			}
+			grant := &org_model.UserGroupRoleGrant{UID: uid, Role: role}
+			hasGrant, err := db.GetEngine(ctx).Exist(grant)
+			if err != nil {
+				return err
+			}
+
+			switch {
+			case granted && !*flag:
+				*flag = true
+				if err := user_model.UpdateUserCols(ctx, user, col); err != nil {
+					return err
+				}
+				if !hasGrant {
+					if err := db.Insert(ctx, grant); err != nil {
+						return err
+					}
+				}
+			case !granted && hasGrant:
+				if *flag {
+					if role == org_model.UserGroupRoleSiteAdmin && user_model.IsLastAdminUser(ctx, user) {
+						return models.ErrDeleteLastAdminUser{UID: uid}
+					}
+					*flag = false
+					if err := user_model.UpdateUserCols(ctx, user, col); err != nil {
+						return err
+					}
+				}
+				if _, err := db.DeleteByBean(ctx, grant); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // syncUserForGroupTeams updates the membership of a user in all teams the group is linked to.

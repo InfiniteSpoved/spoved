@@ -134,6 +134,7 @@
 						<label>{{ctx.Locale.Tr "admin.users.is_admin"}}</label>
 						<input name="admin" type="checkbox" {{if .User.IsAdmin}}checked{{end}}>
 					</div>
+					{{with index $.RoleGroups "site_admin"}}<span class="help tw-block">{{ctx.Locale.Tr "admin.users.via_group" .}}</span>{{end}}
 					<span class="help tw-block">{{ctx.Locale.Tr "admin.users.admin.description"}}</span>
 				</div>
 				<div class="inline field">
@@ -163,6 +164,7 @@
 						<label>{{ctx.Locale.Tr "admin.users.allow_create_organization"}}</label>
 						<input name="allow_create_organization" type="checkbox" {{if .User.CanCreateOrganization}}checked{{end}}>
 					</div>
+					{{with index $.RoleGroups "create_organization"}}<span class="help tw-block">{{ctx.Locale.Tr "admin.users.via_group" .}}</span>{{end}}
 					<span class="help tw-block">{{ctx.Locale.Tr "admin.users.organization_creation.description"}}</span>
 				</div>
 				{{end}}

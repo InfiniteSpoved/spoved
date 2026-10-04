@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 
+	"forgejo.org/models"
 	org_model "forgejo.org/models/organization"
 	user_model "forgejo.org/models/user"
 	api "forgejo.org/modules/structs"
@@ -114,7 +115,12 @@ func CreateUserGroup(ctx *context.APIContext) {
 	//     "$ref": "#/responses/validationError"
 
 	form := web.GetForm(ctx).(*api.CreateUserGroupOption)
-	group := &org_model.UserGroup{Name: form.Name, Description: form.Description}
+	group := &org_model.UserGroup{
+		Name:                     form.Name,
+		Description:              form.Description,
+		GrantsSiteAdmin:          form.GrantsSiteAdmin,
+		GrantsCreateOrganization: form.GrantsCreateOrganization,
+	}
 	if err := org_model.InsertUserGroup(ctx, group); err != nil {
 		if org_model.IsErrUserGroupAlreadyExist(err) {
 			ctx.Error(http.StatusConflict, "", err)
@@ -200,11 +206,17 @@ func EditUserGroup(ctx *context.APIContext) {
 	if form.Description != nil {
 		group.Description = *form.Description
 	}
-	if err := org_model.UpdateUserGroup(ctx, group); err != nil {
-		if org_model.IsErrUserGroupAlreadyExist(err) {
+	if form.GrantsSiteAdmin != nil {
+		group.GrantsSiteAdmin = *form.GrantsSiteAdmin
+	}
+	if form.GrantsCreateOrganization != nil {
+		group.GrantsCreateOrganization = *form.GrantsCreateOrganization
+	}
+	if err := usergroup_service.UpdateGroup(ctx, group); err != nil {
+		if org_model.IsErrUserGroupAlreadyExist(err) || models.IsErrDeleteLastAdminUser(err) {
 			ctx.Error(http.StatusConflict, "", err)
 		} else {
-			ctx.Error(http.StatusInternalServerError, "UpdateUserGroup", err)
+			ctx.Error(http.StatusInternalServerError, "UpdateGroup", err)
 		}
 		return
 	}
@@ -238,7 +250,7 @@ func DeleteUserGroup(ctx *context.APIContext) {
 		return
 	}
 	if err := usergroup_service.DeleteGroup(ctx, group); err != nil {
-		if org_model.IsErrLastOrgOwner(err) {
+		if org_model.IsErrLastOrgOwner(err) || models.IsErrDeleteLastAdminUser(err) {
 			ctx.Error(http.StatusConflict, "", err)
 		} else {
 			ctx.Error(http.StatusInternalServerError, "DeleteGroup", err)
@@ -390,7 +402,7 @@ func RemoveUserGroupMember(ctx *context.APIContext) {
 	}
 
 	if err := usergroup_service.RemoveMember(ctx, group, user.ID); err != nil {
-		if org_model.IsErrLastOrgOwner(err) {
+		if org_model.IsErrLastOrgOwner(err) || models.IsErrDeleteLastAdminUser(err) {
 			ctx.Error(http.StatusConflict, "", err)
 		} else {
 			ctx.Error(http.StatusInternalServerError, "RemoveMember", err)

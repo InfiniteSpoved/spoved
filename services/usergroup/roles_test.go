@@ -1,0 +1,196 @@
+// Copyright 2026 The Forgejo Authors. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package usergroup
+
+import (
+	"testing"
+
+	"forgejo.org/models"
+	"forgejo.org/models/db"
+	org_model "forgejo.org/models/organization"
+	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
+	user_service "forgejo.org/services/user"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func newRoleGroup(t *testing.T, name string, admin, createOrg bool) *org_model.UserGroup {
+	t.Helper()
+	g := &org_model.UserGroup{Name: name, GrantsSiteAdmin: admin, GrantsCreateOrganization: createOrg}
+	require.NoError(t, org_model.InsertUserGroup(db.DefaultContext, g))
+	return g
+}
+
+func assertRoles(t *testing.T, uid int64, admin, createOrg bool) {
+	t.Helper()
+	u := loadUser(t, uid)
+	assert.Equal(t, admin, u.IsAdmin, "IsAdmin")
+	assert.Equal(t, createOrg, u.AllowCreateOrganization, "AllowCreateOrganization")
+}
+
+func grantCount(t *testing.T, uid int64) int {
+	t.Helper()
+	return unittest.GetCount(t, &org_model.UserGroupRoleGrant{UID: uid})
+}
+
+func setUserFlags(t *testing.T, uid int64, admin, createOrg bool) {
+	t.Helper()
+	u := loadUser(t, uid)
+	u.IsAdmin, u.AllowCreateOrganization = admin, createOrg
+	require.NoError(t, user_model.UpdateUserCols(db.DefaultContext, u, "is_admin", "allow_create_organization"))
+}
+
+func TestRolesGrantAndRevoke(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	// user 5 is neither admin nor allowed to create organizations
+	assertRoles(t, 5, false, false)
+	group := newRoleGroup(t, "admins", true, true)
+
+	require.NoError(t, AddMember(ctx, group, loadUser(t, 5)))
+	assertRoles(t, 5, true, true)
+	assert.Equal(t, 2, grantCount(t, 5))
+
+	require.NoError(t, RemoveMember(ctx, group, 5))
+	assertRoles(t, 5, false, false)
+	assert.Equal(t, 0, grantCount(t, 5))
+}
+
+func TestRolesManualFlagIsKept(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	setUserFlags(t, 5, true, true)
+	group := newRoleGroup(t, "admins", true, true)
+
+	require.NoError(t, AddMember(ctx, group, loadUser(t, 5)))
+	assert.Equal(t, 0, grantCount(t, 5), "a flag set by hand is not recorded as granted")
+
+	require.NoError(t, RemoveMember(ctx, group, 5))
+	assertRoles(t, 5, true, true)
+}
+
+func TestRolesSeveralGroups(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	a, b := newRoleGroup(t, "admins-a", true, false), newRoleGroup(t, "admins-b", true, false)
+	require.NoError(t, AddMember(ctx, a, loadUser(t, 5)))
+	require.NoError(t, AddMember(ctx, b, loadUser(t, 5)))
+	assertRoles(t, 5, true, false)
+	assert.Equal(t, 1, grantCount(t, 5))
+
+	require.NoError(t, RemoveMember(ctx, a, 5))
+	assertRoles(t, 5, true, false)
+
+	require.NoError(t, RemoveMember(ctx, b, 5))
+	assertRoles(t, 5, false, false)
+	assert.Equal(t, 0, grantCount(t, 5))
+}
+
+func TestRolesChangeAndDeleteGroup(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	group := newRoleGroup(t, "staff", false, false)
+	require.NoError(t, AddMember(ctx, group, loadUser(t, 5)))
+	assertRoles(t, 5, false, false)
+
+	group.GrantsCreateOrganization = true
+	require.NoError(t, UpdateGroup(ctx, group))
+	assertRoles(t, 5, false, true)
+
+	group.GrantsCreateOrganization, group.GrantsSiteAdmin = false, true
+	require.NoError(t, UpdateGroup(ctx, group))
+	assertRoles(t, 5, true, false)
+
+	require.NoError(t, DeleteGroup(ctx, group))
+	assertRoles(t, 5, false, false)
+	assert.Equal(t, 0, grantCount(t, 5))
+}
+
+func TestRolesLastAdminGuard(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	group := newRoleGroup(t, "admins", true, false)
+	require.NoError(t, AddMember(ctx, group, loadUser(t, 5)))
+	// user 1 is the only other admin: user 5 becomes the last one
+	setUserFlags(t, 1, false, true)
+
+	err := RemoveMember(ctx, group, 5)
+	assert.True(t, models.IsErrDeleteLastAdminUser(err), "%v", err)
+	unittest.AssertExistsAndLoadBean(t, &org_model.UserGroupUser{GroupID: group.ID, UID: 5})
+
+	group.GrantsSiteAdmin = false
+	err = UpdateGroup(ctx, group)
+	assert.True(t, models.IsErrDeleteLastAdminUser(err), "%v", err)
+	unittest.AssertExistsAndLoadBean(t, &org_model.UserGroup{ID: group.ID, GrantsSiteAdmin: true})
+
+	err = DeleteGroup(ctx, group)
+	assert.True(t, models.IsErrDeleteLastAdminUser(err), "%v", err)
+	unittest.AssertExistsAndLoadBean(t, &org_model.UserGroup{ID: group.ID})
+
+	assertRoles(t, 5, true, false)
+	assert.Equal(t, 1, grantCount(t, 5))
+
+	// with another admin around, the change goes through
+	setUserFlags(t, 1, true, true)
+	require.NoError(t, RemoveMember(ctx, group, 5))
+	assertRoles(t, 5, false, false)
+}
+
+func TestRolesUserDeletionRemovesGrants(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	group := newRoleGroup(t, "admins", true, false)
+	require.NoError(t, AddMember(ctx, group, loadUser(t, 9)))
+	assert.Equal(t, 1, grantCount(t, 9))
+
+	require.NoError(t, user_service.DeleteUser(ctx, loadUser(t, 9), false))
+	assert.Equal(t, 0, grantCount(t, 9))
+}
+
+func TestDirectoryAdmin(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	check := func(uid int64, directoryIsAdmin, expected bool) {
+		t.Helper()
+		isAdmin, err := DirectoryAdmin(ctx, loadUser(t, uid), directoryIsAdmin)
+		require.NoError(t, err)
+		assert.Equal(t, expected, isAdmin)
+	}
+
+	// without a group, the directory decides
+	check(1, false, false)
+	check(5, true, true)
+
+	group := newRoleGroup(t, "admins", true, false)
+	require.NoError(t, AddMember(ctx, group, loadUser(t, 5)))
+	// the group grant wins over the directory
+	check(5, false, true)
+	check(5, true, true)
+}
+
+func TestDirectoryAdminWithoutGrantRow(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	// user 2 is already an admin through the directory when they join the group,
+	// so the group records no grant
+	setUserFlags(t, 2, true, true)
+	group := newRoleGroup(t, "admins", true, false)
+	require.NoError(t, AddMember(ctx, group, loadUser(t, 2)))
+	assert.Equal(t, 0, grantCount(t, 2))
+
+	// the directory drops the admin attribute: the group still keeps them admin
+	isAdmin, err := DirectoryAdmin(ctx, loadUser(t, 2), false)
+	require.NoError(t, err)
+	assert.True(t, isAdmin)
+}

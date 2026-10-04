@@ -82,6 +82,13 @@ func Users(ctx *context.Context) {
 		"SortType":        sortType,
 	}
 
+	roleGroups, err := org_model.GetUsersGrantedRoleGroups(ctx, 0)
+	if err != nil {
+		ctx.ServerError("GetUsersGrantedRoleGroups", err)
+		return
+	}
+	ctx.Data["RoleGroups"] = roleGroups
+
 	explore.RenderUserSearch(ctx, &user_model.SearchUserOptions{
 		Actor: ctx.Doer,
 		Type:  user_model.UserTypeIndividual,
@@ -243,6 +250,13 @@ func prepareUserInfo(ctx *context.Context) *user_model.User {
 
 	ctx.Data["User"] = u
 	ctx.Data["ContextUser"] = u
+
+	roleGroups, err := org_model.GetUsersGrantedRoleGroups(ctx, u.ID)
+	if err != nil {
+		ctx.ServerError("GetUsersGrantedRoleGroups", err)
+		return nil
+	}
+	ctx.Data["RoleGroups"] = roleGroups[u.ID]
 
 	if u.LoginSource > 0 {
 		ctx.Data["LoginSource"], err = auth.GetSourceByID(ctx, u.LoginSource)

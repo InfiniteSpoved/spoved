@@ -15,6 +15,10 @@ type UserGroup struct {
 	MembersCount int `json:"members_count"`
 	// Number of teams the group is linked to
 	TeamsCount int `json:"teams_count"`
+	// Members of the group are site administrators
+	GrantsSiteAdmin bool `json:"grants_site_admin"`
+	// Members of the group may create organizations
+	GrantsCreateOrganization bool `json:"grants_create_organization"`
 	// swagger:strfmt date-time
 	Created time.Time `json:"created_at"`
 	// swagger:strfmt date-time
@@ -26,10 +30,18 @@ type CreateUserGroupOption struct {
 	// required: true
 	Name        string `json:"name" binding:"Required;AlphaDashDot;MaxSize(255)"`
 	Description string `json:"description" binding:"MaxSize(255)"`
+	// Members of the group are site administrators
+	GrantsSiteAdmin bool `json:"grants_site_admin"`
+	// Members of the group may create organizations
+	GrantsCreateOrganization bool `json:"grants_create_organization"`
 }
 
 // EditUserGroupOption options for editing a user group
 type EditUserGroupOption struct {
 	Name        *string `json:"name" binding:"AlphaDashDot;MaxSize(255)"`
 	Description *string `json:"description" binding:"MaxSize(255)"`
+	// Members of the group are site administrators
+	GrantsSiteAdmin *bool `json:"grants_site_admin"`
+	// Members of the group may create organizations
+	GrantsCreateOrganization *bool `json:"grants_create_organization"`
 }

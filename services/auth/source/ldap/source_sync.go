@@ -158,6 +158,16 @@ func (source *Source) Sync(ctx context.Context, updateExisting bool) error {
 				sshKeysNeedUpdate = true
 			}
 
+			if len(source.AdminFilter) > 0 {
+				// a user group granting site admin wins over AdminFilter
+				if isAdmin, err := usergroup_service.DirectoryAdmin(ctx, usr, su.IsAdmin); err != nil {
+					log.Error("SyncExternalUsers[%s]: Error checking user groups of %s: %v", source.authSource.Name, usr.Name, err)
+					su.IsAdmin = usr.IsAdmin
+				} else {
+					su.IsAdmin = isAdmin
+				}
+			}
+
 			// Check if user data has changed
 			if (len(source.AdminFilter) > 0 && usr.IsAdmin != su.IsAdmin) ||
 				(len(source.RestrictedFilter) > 0 && usr.IsRestricted != su.IsRestricted) ||
