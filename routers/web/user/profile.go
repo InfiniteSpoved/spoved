@@ -341,6 +341,7 @@ func prepareUserProfileTabData(ctx *context.Context, showPrivate bool, profileDb
 				Page:     page,
 			},
 			Actor:              ctx.Doer,
+			AuditorView:        ctx.IsAuditorView(),
 			Keyword:            keyword,
 			OwnerID:            ctx.ContextUser.ID,
 			OrderBy:            orderBy,

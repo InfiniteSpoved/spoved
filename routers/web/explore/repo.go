@@ -108,6 +108,7 @@ func RenderRepoSearch(ctx *context.Context, opts *RepoSearchOptions) {
 			PageSize: opts.PageSize,
 		},
 		Actor:              ctx.Doer,
+		AuditorView:        ctx.IsAuditorView(),
 		OrderBy:            orderBy,
 		Private:            opts.Private,
 		Keyword:            keyword,
@@ -185,7 +186,7 @@ func Repos(ctx *context.Context) {
 	ctx.Data["IsRepoIndexerEnabled"] = setting.Indexer.RepoIndexerEnabled
 
 	var ownerID int64
-	if ctx.Doer != nil && !ctx.Doer.IsAdmin {
+	if ctx.Doer != nil && !ctx.Doer.IsAdmin && !ctx.IsAuditorView() {
 		ownerID = ctx.Doer.ID
 	}
 

@@ -19,6 +19,7 @@ import (
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/api/v1/user"
 	"forgejo.org/routers/api/v1/utils"
+	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 	"forgejo.org/services/org"
@@ -301,7 +302,8 @@ func Get(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	if !organization.HasOrgOrUserVisible(ctx, ctx.Org().Organization.AsUser(), ctx.Doer()) {
+	auditorView := ctx.Doer() != nil && ctx.Doer().IsAuditor && auth.IsHeldByUser(ctx.Authentication())
+	if !auditorView && !organization.HasOrgOrUserVisible(ctx, ctx.Org().Organization.AsUser(), ctx.Doer()) {
 		ctx.NotFound("HasOrgOrUserVisible", nil)
 		return
 	}

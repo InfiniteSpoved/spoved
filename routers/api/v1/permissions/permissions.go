@@ -130,6 +130,11 @@ func (o *Permissions) SetIsSigned(isSigned bool) {
 	o.isSigned = isSigned
 }
 
+// IsReadOnlyMethod is false: without a request, the auditor role never applies.
+func (o *Permissions) IsReadOnlyMethod() bool {
+	return false
+}
+
 func (o *Permissions) PublicOnly() bool {
 	return o.publicOnly
 }

@@ -17,6 +17,7 @@ import (
 	"forgejo.org/modules/storage"
 	"forgejo.org/routers/common"
 	"forgejo.org/services/attachment"
+	auth_service "forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	"forgejo.org/services/context/upload"
 	repo_service "forgejo.org/services/repository"
@@ -141,7 +142,9 @@ func ServeAttachment(ctx *context.Context, uuid string) {
 		reducer := ctx.Authentication.Reducer()
 		var perm access_model.Permission
 		var err error
-		if reducer != nil {
+		if auth_service.IsHeldByUser(ctx.Authentication) {
+			perm, err = access_model.GetUserRepoReadPermission(ctx, repository, ctx.Doer, reducer)
+		} else if reducer != nil {
 			perm, err = access_model.GetUserRepoPermissionWithReducer(ctx, repository, ctx.Doer, reducer)
 		} else {
 			perm, err = access_model.GetUserRepoPermission(ctx, repository, ctx.Doer)

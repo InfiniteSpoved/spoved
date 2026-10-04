@@ -107,6 +107,7 @@ func Home(ctx *context.Context) {
 		OrderBy:            orderBy,
 		Private:            ctx.IsSigned,
 		Actor:              ctx.Doer,
+		AuditorView:        ctx.IsAuditorView(),
 		Language:           language,
 		IncludeDescription: setting.UI.SearchRepoDescription,
 		Archived:           archived,
@@ -123,7 +124,7 @@ func Home(ctx *context.Context) {
 	opts := &organization.FindOrgMembersOpts{
 		Doer:         ctx.Doer,
 		OrgID:        org.ID,
-		IsDoerMember: ctx.Org.IsMember,
+		IsDoerMember: ctx.Org.IsMember || ctx.IsAuditorView(), // the auditor role lists concealed members too
 		ListOptions:  db.ListOptions{Page: 1, PageSize: 25},
 	}
 
