@@ -28,6 +28,7 @@ var (
 		LimitDispatchInputs          int64             `ini:"LIMIT_DISPATCH_INPUTS"`
 		ConcurrencyGroupQueueEnabled bool              `ini:"CONCURRENCY_GROUP_QUEUE_ENABLED"`
 		IDTokenExpirationTime        int64             `ini:"ID_TOKEN_EXPIRATION_TIME"`
+		RunnerRegistration           string            `ini:"RUNNER_REGISTRATION"`
 
 		IDTokenKeyCfg *jwtx.KeyCfg
 	}{
@@ -37,7 +38,15 @@ var (
 		LimitDispatchInputs:          100,
 		ConcurrencyGroupQueueEnabled: true,
 		IDTokenExpirationTime:        3600,
+		RunnerRegistration:           RunnerRegistrationEveryone,
 	}
+)
+
+// Values of [actions].RUNNER_REGISTRATION
+const (
+	RunnerRegistrationEveryone          = "everyone"
+	RunnerRegistrationAdminAndOrgOwners = "admin_and_org_owners"
+	RunnerRegistrationAdmin             = "admin"
 )
 
 type defaultActionsURL string
@@ -120,6 +129,12 @@ func loadActionsFrom(rootCfg ConfigProvider) error {
 
 	if !Actions.LogCompression.IsValid() {
 		return fmt.Errorf("invalid [actions] LOG_COMPRESSION: %q", Actions.LogCompression)
+	}
+
+	switch Actions.RunnerRegistration {
+	case RunnerRegistrationEveryone, RunnerRegistrationAdminAndOrgOwners, RunnerRegistrationAdmin:
+	default:
+		return fmt.Errorf("invalid [actions] RUNNER_REGISTRATION: %q", Actions.RunnerRegistration)
 	}
 
 	Actions.IDTokenKeyCfg, err = loadKeyCfg(rootCfg, secName, "ID_TOKEN_", "RS256", "actions_id_token/private.pem", onlyAsymmetric())
