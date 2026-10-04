@@ -4,7 +4,7 @@
 {{$manualMergeStyleAllowed := $prConfig.AllowManualMerge}}
 {{$hasUnsignedMergeStyle := or $fastForwardStyleAllowed $manualMergeStyleAllowed}}
 {{$signingBlocksAllMergeStyles := and .AllowMerge .RequireSigned (not .WillSign) (not $hasUnsignedMergeStyle)}}
-{{if or (not .Issue.PullRequest.HasMerged) .IsPullBranchDeletable .SomePullRequestRunsNeedApproval}}
+{{if or (not .Issue.PullRequest.HasMerged) .IsPullBranchDeletable .CanRevertPull .SomePullRequestRunsNeedApproval}}
 <div class="timeline-item comment merge box">
 	<div class="timeline-avatar text {{if .Issue.PullRequest.HasMerged}}purple
 	{{- else if .Issue.IsClosed}}grey
@@ -38,18 +38,27 @@
 		{{$showGeneralMergeForm := false}}
 		<div class="ui attached segment merge-section {{if not $.LatestCommitStatus}}no-header{{end}} flex-items-block">
 			{{if .Issue.PullRequest.HasMerged}}
-				{{if .IsPullBranchDeletable}}
+				{{if or .IsPullBranchDeletable .CanRevertPull}}
 					<div class="item item-section text tw-flex-1">
 						<div>
 							<h3 class="tw-mb-2">
 								{{ctx.Locale.Tr "repo.pulls.merged_success"}}
 							</h3>
+							{{if .IsPullBranchDeletable}}
 							<div class="merge-section-info">
 								{{ctx.Locale.Tr "repo.pulls.merged_info_text" (HTMLFormat "<code>%s</code>" .HeadTarget)}}
 							</div>
+							{{end}}
 						</div>
-						<div>
+						<div class="tw-flex tw-gap-2">
+							{{if .IsPullBranchDeletable}}
 							<button class="delete-button ui button" data-url="{{.DeleteBranchLink}}" data-modal-id="delete-branch">{{ctx.Locale.Tr "repo.branch.delete_html"}}</button>
+							{{end}}
+							{{if .CanRevertPull}}
+							<form method="post" action="{{.Issue.Link}}/revert">
+								<button class="ui button" id="revert-pull-request">{{ctx.Locale.Tr "repo.pulls.revert"}}</button>
+							</form>
+							{{end}}
 						</div>
 					</div>
 				{{end}}
