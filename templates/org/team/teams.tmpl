@@ -43,7 +43,7 @@
 						{{end}}
 					</div>
 					<div class="ui bottom attached header">
-						<p class="team-meta"><a class="muted" href="{{$.OrgLink}}/teams/{{.LowerName | PathEscape}}">{{.NumMembers}} {{ctx.Locale.Tr "org.lower_members"}}</a> · <a class="muted" href="{{$.OrgLink}}/teams/{{.LowerName | PathEscape}}/repositories">{{.NumRepos}} {{ctx.Locale.Tr "org.lower_repositories"}}</a></p>
+						<p class="team-meta"><a class="muted" href="{{$.OrgLink}}/teams/{{.LowerName | PathEscape}}">{{.NumMembers}} {{ctx.Locale.Tr "org.lower_members"}}</a> · <a class="muted" href="{{$.OrgLink}}/teams/{{.LowerName | PathEscape}}/repositories">{{.NumRepos}} {{ctx.Locale.Tr "org.lower_repositories"}}</a>{{if .NumUserGroups}} · <a class="muted" href="{{$.OrgLink}}/teams/{{.LowerName | PathEscape}}#team-user-groups">{{ctx.Locale.TrPluralString .NumUserGroups "org.teams.num_user_groups" .NumUserGroups}}</a>{{end}}</p>
 					</div>
 					{{else}}
 					<div class="ui attached segment">

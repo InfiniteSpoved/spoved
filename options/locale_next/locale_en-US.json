@@ -1281,5 +1281,14 @@
 	"org.teams.user_groups.already_linked": "User group \"%s\" is already linked to this team.",
 	"org.teams.user_groups.member_via_group": "This user is a member of the team through a linked user group. Remove them from the group or unlink the group instead.",
 	"org.membership_origin.via_user_group": "joined via a user group on %s",
+	"org.membership_origin.via_user_groups": "joined via %[1]s on %[2]s",
+	"org.teams.user_groups.num_members": {
+		"one": "%d member",
+		"other": "%d members"
+	},
+	"org.teams.num_user_groups": {
+		"one": "%d user group",
+		"other": "%d user groups"
+	},
 	"meta.last_line": "Thank you for translating Forgejo! This line isn't seen by the users but it serves other purposes in the translation management. You can place a fun fact in the translation instead of translating it."
 }
