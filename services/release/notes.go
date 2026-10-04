@@ -149,7 +149,7 @@ func loadNotesConfig(commit *git.Commit, path string) (*notesConfig, error) {
 	if path != "" {
 		return nil, util.NewInvalidArgumentErrorf("release notes configuration file not found")
 	}
-	return nil, nil
+	return &notesConfig{}, nil
 }
 
 var markdownPunct = regexp.MustCompile("[!-/:-@\\[-`{-~]")

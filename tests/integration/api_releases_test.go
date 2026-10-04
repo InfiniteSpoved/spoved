@@ -21,6 +21,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
+	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/services/forms"
 	release_service "forgejo.org/services/release"
@@ -691,7 +692,7 @@ func TestAPIReleaseGithubFormat(t *testing.T) {
 }
 
 func TestAPIGenerateReleaseNotes(t *testing.T) {
-	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+	onApplicationRun(t, func(t *testing.T, _ *url.URL) {
 		owner := forgery.CreateUser(t, nil)
 		org := forgery.CreateOrganisation(t, owner)
 		repo := forgery.CreateRepository(t, org.AsUser(), &forgery.CreateRepositoryOptions{Files: forgery.FilesInit{}})
@@ -713,8 +714,8 @@ func TestAPIGenerateReleaseNotes(t *testing.T) {
 			doAPIMergePullRequestForm(t, ctx, org.Name, repo.Name, pr.Index, &forms.MergePullRequestForm{Do: string(style)})
 			return pr.Index
 		}
-		tag := func(name string) {
-			require.NoError(t, release_service.CreateNewTag(t.Context(), owner, repo, "main", name, ""))
+		tag := func(name, msg string) {
+			require.NoError(t, release_service.CreateNewTag(t.Context(), owner, repo, "main", name, msg))
 		}
 		generate := func(token string, opts api.GenerateReleaseNotesOption, status int) string {
 			resp := MakeRequest(t, NewRequestWithJSON(t, "POST", link, opts).AddTokenAuth(token), status)
@@ -731,10 +732,10 @@ func TestAPIGenerateReleaseNotes(t *testing.T) {
 		}
 
 		pr1 := mergePR("b1", repo_model.MergeStyleMerge)
-		tag("v1")
+		tag("v1", "")
 		pr2 := mergePR("b2", repo_model.MergeStyleSquash)
 		pr3 := mergePR("b3", repo_model.MergeStyleRebase)
-		tag("v2")
+		tag("v2", "annotated")
 		pr4 := mergePR("b4", repo_model.MergeStyleMerge)
 
 		t.Run("between tags", func(t *testing.T) {
@@ -743,7 +744,7 @@ func TestAPIGenerateReleaseNotes(t *testing.T) {
 			assert.Contains(t, body, line(pr2))
 			assert.Contains(t, body, line(pr3))
 			assert.NotContains(t, body, line(pr4))
-			assert.Contains(t, body, fmt.Sprintf("**Full Changelog**: %s%s/%s/compare/v1...v2\n", u.String(), org.Name, repo.Name))
+			assert.Contains(t, body, fmt.Sprintf("**Full Changelog**: %s%s/%s/compare/v1...v2\n", setting.AppURL, org.Name, repo.Name))
 		})
 
 		t.Run("first release", func(t *testing.T) {

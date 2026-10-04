@@ -582,7 +582,7 @@ func (f *NewReleaseForm) Validate(req *http.Request, errs binding.Errors) bindin
 
 // GenerateReleaseNotesForm form for generating release notes
 type GenerateReleaseNotesForm struct {
-	TagName         string `binding:"Required;GitRefName;MaxSize(255)"`
+	TagName         string `binding:"Required;GitRefName;MaxSize(255)" locale:"repo.release.tag_name"`
 	Target          string `form:"tag_target" binding:"MaxSize(255)"`
 	PreviousTagName string `binding:"GitRefName;MaxSize(255)"`
 }
