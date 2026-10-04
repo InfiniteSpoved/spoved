@@ -102,6 +102,40 @@ test.describe('deploy key pickers', () => {
     await expect(deleteButton).toHaveCount(0);
   });
 
+  test('branch deletion and force push allow-lists', async ({page}) => {
+    const ruleName = `delete-force-push-${dynamic_id()}`;
+    const response = await page.goto('/user2/repo1/settings/branches/edit');
+    expect(response?.status()).toBe(200);
+
+    await page.locator('input[name="rule_name"]').fill(ruleName);
+    for (const name of ['delete_allowlist', 'force_push_allowlist']) {
+      await page.locator(`#${name}_users`).click();
+      await page.locator(`#${name}_users .menu .item[data-value="2"]`).click();
+      const keys = page.locator(`#${name}_deploy_key_ids`);
+      await keys.click();
+      // only write deploy keys are offered
+      await expect(keys.locator('.menu .item', {hasText: 'e2e-read-key'})).toHaveCount(0);
+      await keys.locator('.menu .item', {hasText: 'e2e-write-key'}).click();
+    }
+    await screenshot(page);
+
+    await page.locator('button:text("Save rule")').click();
+    await page.waitForLoadState('domcontentloaded');
+
+    await page.goto(`/user2/repo1/settings/branches/edit?rule_name=${ruleName}`);
+    for (const name of ['delete_allowlist', 'force_push_allowlist']) {
+      await expect(page.locator(`input[name="${name}_users"]`)).toHaveValue('2');
+      await expect(page.locator(`input[name="${name}_deploy_key_ids"]`)).toHaveValue('1001');
+    }
+
+    // clean up
+    await page.goto('/user2/repo1/settings/branches/');
+    const deleteButton = page.locator('.flex-item', {hasText: ruleName}).locator('.delete-button');
+    await deleteButton.click();
+    await page.locator('#delete-protected-branch .actions .ok').click();
+    await expect(deleteButton).toHaveCount(0);
+  });
+
   test('tag protection', async ({page}) => {
     const pattern = `deploy-keys-${dynamic_id()}-*`;
     const response = await page.goto('/user2/repo1/settings/tags');

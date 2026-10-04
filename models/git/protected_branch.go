@@ -62,6 +62,15 @@ type ProtectedBranch struct {
 	UnprotectedFilePatterns       string   `xorm:"TEXT"`
 	ApplyToAdmins                 bool     `xorm:"NOT NULL DEFAULT false"`
 
+	// Users, teams and deploy keys (public key IDs) allowed to delete or force-push matching branches.
+	// Empty lists block everyone.
+	DeleteAllowlistUserIDs         []int64 `xorm:"JSON TEXT"`
+	DeleteAllowlistTeamIDs         []int64 `xorm:"JSON TEXT"`
+	DeleteAllowlistDeployKeyIDs    []int64 `xorm:"JSON TEXT"`
+	ForcePushAllowlistUserIDs      []int64 `xorm:"JSON TEXT"`
+	ForcePushAllowlistTeamIDs      []int64 `xorm:"JSON TEXT"`
+	ForcePushAllowlistDeployKeyIDs []int64 `xorm:"JSON TEXT"`
+
 	CreatedUnix timeutil.TimeStamp `xorm:"created"`
 	UpdatedUnix timeutil.TimeStamp `xorm:"updated"`
 }
@@ -164,6 +173,45 @@ func (protectBranch *ProtectedBranch) CanDeployKeyPush(keyID int64) bool {
 	}
 
 	return protectBranch.WhitelistDeployKeys || slices.Contains(protectBranch.WhitelistDeployKeyIDs, keyID)
+}
+
+// CanUserDelete returns if the user is in the delete allow-list of this protected branch.
+// The caller must check that the user has write access to the repository.
+func (protectBranch *ProtectedBranch) CanUserDelete(ctx context.Context, user *user_model.User) bool {
+	return isUserInAllowlist(ctx, user, protectBranch.DeleteAllowlistUserIDs, protectBranch.DeleteAllowlistTeamIDs)
+}
+
+// CanUserForcePush returns if the user is in the force push allow-list of this protected branch.
+// The caller must still check that the user may push to the branch.
+func (protectBranch *ProtectedBranch) CanUserForcePush(ctx context.Context, user *user_model.User) bool {
+	return isUserInAllowlist(ctx, user, protectBranch.ForcePushAllowlistUserIDs, protectBranch.ForcePushAllowlistTeamIDs)
+}
+
+// CanDeployKeyDelete returns if the deploy key with the given public key ID may delete this protected branch.
+// The caller must check that the deploy key has write access to the repository.
+func (protectBranch *ProtectedBranch) CanDeployKeyDelete(keyID int64) bool {
+	return slices.Contains(protectBranch.DeleteAllowlistDeployKeyIDs, keyID)
+}
+
+// CanDeployKeyForcePush returns if the deploy key with the given public key ID may force-push this protected branch.
+// The caller must still check that the deploy key may push to the branch.
+func (protectBranch *ProtectedBranch) CanDeployKeyForcePush(keyID int64) bool {
+	return slices.Contains(protectBranch.ForcePushAllowlistDeployKeyIDs, keyID)
+}
+
+func isUserInAllowlist(ctx context.Context, user *user_model.User, userIDs, teamIDs []int64) bool {
+	if slices.Contains(userIDs, user.ID) {
+		return true
+	}
+	if len(teamIDs) == 0 {
+		return false
+	}
+	in, err := organization.IsUserInTeams(ctx, user.ID, teamIDs)
+	if err != nil {
+		log.Error("IsUserInTeams: %v", err)
+		return false
+	}
+	return in
 }
 
 // IsUserMergeWhitelisted checks if some user is whitelisted to merge to this branch
@@ -330,6 +378,14 @@ type WhitelistOptions struct {
 
 	ApprovalsUserIDs []int64
 	ApprovalsTeamIDs []int64
+
+	DeleteUserIDs      []int64
+	DeleteTeamIDs      []int64
+	DeleteDeployKeyIDs []int64
+
+	ForcePushUserIDs      []int64
+	ForcePushTeamIDs      []int64
+	ForcePushDeployKeyIDs []int64
 }
 
 // UpdateProtectBranch saves branch protection options of repository.
@@ -388,6 +444,25 @@ func UpdateProtectBranch(ctx context.Context, repo *repo_model.Repository, prote
 		return err
 	}
 	protectBranch.WhitelistDeployKeyIDs = whitelist
+
+	if protectBranch.DeleteAllowlistUserIDs, err = updateUserWhitelist(ctx, repo, protectBranch.DeleteAllowlistUserIDs, opts.DeleteUserIDs); err != nil {
+		return err
+	}
+	if protectBranch.DeleteAllowlistTeamIDs, err = updateTeamWhitelist(ctx, repo, protectBranch.DeleteAllowlistTeamIDs, opts.DeleteTeamIDs); err != nil {
+		return err
+	}
+	if protectBranch.DeleteAllowlistDeployKeyIDs, err = updateDeployKeyWhitelist(ctx, repo, protectBranch.DeleteAllowlistDeployKeyIDs, opts.DeleteDeployKeyIDs); err != nil {
+		return err
+	}
+	if protectBranch.ForcePushAllowlistUserIDs, err = updateUserWhitelist(ctx, repo, protectBranch.ForcePushAllowlistUserIDs, opts.ForcePushUserIDs); err != nil {
+		return err
+	}
+	if protectBranch.ForcePushAllowlistTeamIDs, err = updateTeamWhitelist(ctx, repo, protectBranch.ForcePushAllowlistTeamIDs, opts.ForcePushTeamIDs); err != nil {
+		return err
+	}
+	if protectBranch.ForcePushAllowlistDeployKeyIDs, err = updateDeployKeyWhitelist(ctx, repo, protectBranch.ForcePushAllowlistDeployKeyIDs, opts.ForcePushDeployKeyIDs); err != nil {
+		return err
+	}
 
 	// Make sure protectBranch.ID is not 0 for whitelists
 	if protectBranch.ID == 0 {
@@ -536,17 +611,14 @@ func DeleteProtectedBranch(ctx context.Context, repo *repo_model.Repository, id 
 
 // RemoveUserIDFromProtectedBranch remove all user ids from protected branch options
 func RemoveUserIDFromProtectedBranch(ctx context.Context, p *ProtectedBranch, userID int64) error {
-	lenIDs, lenApprovalIDs, lenMergeIDs := len(p.WhitelistUserIDs), len(p.ApprovalsWhitelistUserIDs), len(p.MergeWhitelistUserIDs)
-	p.WhitelistUserIDs = util.SliceRemoveAll(p.WhitelistUserIDs, userID)
-	p.ApprovalsWhitelistUserIDs = util.SliceRemoveAll(p.ApprovalsWhitelistUserIDs, userID)
-	p.MergeWhitelistUserIDs = util.SliceRemoveAll(p.MergeWhitelistUserIDs, userID)
-
-	if lenIDs != len(p.WhitelistUserIDs) || lenApprovalIDs != len(p.ApprovalsWhitelistUserIDs) ||
-		lenMergeIDs != len(p.MergeWhitelistUserIDs) {
+	if removeFromLists(userID, &p.WhitelistUserIDs, &p.ApprovalsWhitelistUserIDs, &p.MergeWhitelistUserIDs,
+		&p.DeleteAllowlistUserIDs, &p.ForcePushAllowlistUserIDs) {
 		if _, err := db.GetEngine(ctx).ID(p.ID).Cols(
 			"whitelist_user_i_ds",
 			"merge_whitelist_user_i_ds",
 			"approvals_whitelist_user_i_ds",
+			"delete_allowlist_user_i_ds",
+			"force_push_allowlist_user_i_ds",
 		).Update(p); err != nil {
 			return fmt.Errorf("updateProtectedBranches: %v", err)
 		}
@@ -556,23 +628,30 @@ func RemoveUserIDFromProtectedBranch(ctx context.Context, p *ProtectedBranch, us
 
 // RemoveTeamIDFromProtectedBranch remove all team ids from protected branch options
 func RemoveTeamIDFromProtectedBranch(ctx context.Context, p *ProtectedBranch, teamID int64) error {
-	lenIDs, lenApprovalIDs, lenMergeIDs := len(p.WhitelistTeamIDs), len(p.ApprovalsWhitelistTeamIDs), len(p.MergeWhitelistTeamIDs)
-	p.WhitelistTeamIDs = util.SliceRemoveAll(p.WhitelistTeamIDs, teamID)
-	p.ApprovalsWhitelistTeamIDs = util.SliceRemoveAll(p.ApprovalsWhitelistTeamIDs, teamID)
-	p.MergeWhitelistTeamIDs = util.SliceRemoveAll(p.MergeWhitelistTeamIDs, teamID)
-
-	if lenIDs != len(p.WhitelistTeamIDs) ||
-		lenApprovalIDs != len(p.ApprovalsWhitelistTeamIDs) ||
-		lenMergeIDs != len(p.MergeWhitelistTeamIDs) {
+	if removeFromLists(teamID, &p.WhitelistTeamIDs, &p.ApprovalsWhitelistTeamIDs, &p.MergeWhitelistTeamIDs,
+		&p.DeleteAllowlistTeamIDs, &p.ForcePushAllowlistTeamIDs) {
 		if _, err := db.GetEngine(ctx).ID(p.ID).Cols(
 			"whitelist_team_i_ds",
 			"merge_whitelist_team_i_ds",
 			"approvals_whitelist_team_i_ds",
+			"delete_allowlist_team_i_ds",
+			"force_push_allowlist_team_i_ds",
 		).Update(p); err != nil {
 			return fmt.Errorf("updateProtectedBranches: %v", err)
 		}
 	}
 	return nil
+}
+
+// removeFromLists removes id from each list and reports whether any list changed.
+func removeFromLists(id int64, lists ...*[]int64) bool {
+	changed := false
+	for _, list := range lists {
+		n := len(*list)
+		*list = util.SliceRemoveAll(*list, id)
+		changed = changed || n != len(*list)
+	}
+	return changed
 }
 
 // RemoveDeployKeyIDFromProtectionRules removes the public key ID of a deleted deploy key
@@ -583,11 +662,14 @@ func RemoveDeployKeyIDFromProtectionRules(ctx context.Context, repoID, keyID int
 		return err
 	}
 	for _, p := range branches {
-		if !slices.Contains(p.WhitelistDeployKeyIDs, keyID) {
+		if !removeFromLists(keyID, &p.WhitelistDeployKeyIDs, &p.DeleteAllowlistDeployKeyIDs, &p.ForcePushAllowlistDeployKeyIDs) {
 			continue
 		}
-		p.WhitelistDeployKeyIDs = util.SliceRemoveAll(p.WhitelistDeployKeyIDs, keyID)
-		if _, err := db.GetEngine(ctx).ID(p.ID).Cols("whitelist_deploy_key_i_ds").Update(p); err != nil {
+		if _, err := db.GetEngine(ctx).ID(p.ID).Cols(
+			"whitelist_deploy_key_i_ds",
+			"delete_allowlist_deploy_key_i_ds",
+			"force_push_allowlist_deploy_key_i_ds",
+		).Update(p); err != nil {
 			return fmt.Errorf("update protected branch: %w", err)
 		}
 	}

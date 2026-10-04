@@ -90,6 +90,10 @@ func SettingsProtectedBranch(c *context.Context) {
 	}
 	c.Data["DeployKeys"] = deployKeys
 	c.Data["whitelist_deploy_key_ids"] = strings.Join(base.Int64sToStrings(rule.WhitelistDeployKeyIDs), ",")
+	c.Data["delete_allowlist_users"] = strings.Join(base.Int64sToStrings(rule.DeleteAllowlistUserIDs), ",")
+	c.Data["delete_allowlist_deploy_key_ids"] = strings.Join(base.Int64sToStrings(rule.DeleteAllowlistDeployKeyIDs), ",")
+	c.Data["force_push_allowlist_users"] = strings.Join(base.Int64sToStrings(rule.ForcePushAllowlistUserIDs), ",")
+	c.Data["force_push_allowlist_deploy_key_ids"] = strings.Join(base.Int64sToStrings(rule.ForcePushAllowlistDeployKeyIDs), ",")
 	c.Data["status_check_contexts"] = strings.Join(rule.StatusCheckContexts, "\n")
 	contexts, _ := git_model.FindRepoRecentCommitStatusContexts(c, c.Repo.Repository.ID, 7*24*time.Hour) // Find last week status check contexts
 	c.Data["recent_status_checks"] = contexts
@@ -104,6 +108,8 @@ func SettingsProtectedBranch(c *context.Context) {
 		c.Data["whitelist_teams"] = strings.Join(base.Int64sToStrings(rule.WhitelistTeamIDs), ",")
 		c.Data["merge_whitelist_teams"] = strings.Join(base.Int64sToStrings(rule.MergeWhitelistTeamIDs), ",")
 		c.Data["approvals_whitelist_teams"] = strings.Join(base.Int64sToStrings(rule.ApprovalsWhitelistTeamIDs), ",")
+		c.Data["delete_allowlist_teams"] = strings.Join(base.Int64sToStrings(rule.DeleteAllowlistTeamIDs), ",")
+		c.Data["force_push_allowlist_teams"] = strings.Join(base.Int64sToStrings(rule.ForcePushAllowlistTeamIDs), ",")
 	}
 
 	c.Data["Rule"] = rule
@@ -261,6 +267,13 @@ func SettingsProtectedBranchPost(ctx *context.Context) {
 		MergeTeamIDs:     mergeWhitelistTeams,
 		ApprovalsUserIDs: approvalsWhitelistUsers,
 		ApprovalsTeamIDs: approvalsWhitelistTeams,
+
+		DeleteUserIDs:         parseIDList(f.DeleteAllowlistUsers),
+		DeleteTeamIDs:         parseIDList(f.DeleteAllowlistTeams),
+		DeleteDeployKeyIDs:    parseIDList(f.DeleteAllowlistDeployKeyIDs),
+		ForcePushUserIDs:      parseIDList(f.ForcePushAllowlistUsers),
+		ForcePushTeamIDs:      parseIDList(f.ForcePushAllowlistTeams),
+		ForcePushDeployKeyIDs: parseIDList(f.ForcePushAllowlistDeployKeyIDs),
 	})
 	if err != nil {
 		ctx.ServerError("UpdateProtectBranch", err)
@@ -372,4 +385,13 @@ func getWriteDeployKeys(ctx *context.Context) ([]*asymkey_model.DeployKey, error
 		return nil, err
 	}
 	return slices.DeleteFunc(keys, func(key *asymkey_model.DeployKey) bool { return key.IsReadOnly() }), nil
+}
+
+// parseIDList parses the comma-separated IDs of a dropdown. An invalid list gives no IDs.
+func parseIDList(s string) []int64 {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	ids, _ := base.StringsToInt64s(strings.Split(s, ","))
+	return ids
 }

@@ -666,6 +666,15 @@ func CreateBranchProtection(ctx *context.APIContext) {
 		}
 	}
 
+	deleteUsers, deleteTeams, ok := getAllowlistIDs(ctx, form.DeleteAllowlistUsernames, form.DeleteAllowlistTeams, nil, nil)
+	if !ok {
+		return
+	}
+	forcePushUsers, forcePushTeams, ok := getAllowlistIDs(ctx, form.ForcePushAllowlistUsernames, form.ForcePushAllowlistTeams, nil, nil)
+	if !ok {
+		return
+	}
+
 	protectBranch = &git_model.ProtectedBranch{
 		RepoID:                        ctx.Repo().Repository.ID,
 		RuleName:                      ruleName,
@@ -696,6 +705,13 @@ func CreateBranchProtection(ctx *context.APIContext) {
 		ApprovalsUserIDs: approvalsWhitelistUsers,
 		ApprovalsTeamIDs: approvalsWhitelistTeams,
 		DeployKeyIDs:     form.PushWhitelistDeployKeyIDs,
+
+		DeleteUserIDs:         deleteUsers,
+		DeleteTeamIDs:         deleteTeams,
+		DeleteDeployKeyIDs:    form.DeleteAllowlistDeployKeyIDs,
+		ForcePushUserIDs:      forcePushUsers,
+		ForcePushTeamIDs:      forcePushTeams,
+		ForcePushDeployKeyIDs: form.ForcePushAllowlistDeployKeyIDs,
 	})
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "UpdateProtectBranch", err)
@@ -969,6 +985,25 @@ func EditBranchProtection(ctx *context.APIContext) {
 		whitelistDeployKeys = form.PushWhitelistDeployKeyIDs
 	}
 
+	deleteUsers, deleteTeams, ok := getAllowlistIDs(ctx, form.DeleteAllowlistUsernames, form.DeleteAllowlistTeams,
+		protectBranch.DeleteAllowlistUserIDs, protectBranch.DeleteAllowlistTeamIDs)
+	if !ok {
+		return
+	}
+	forcePushUsers, forcePushTeams, ok := getAllowlistIDs(ctx, form.ForcePushAllowlistUsernames, form.ForcePushAllowlistTeams,
+		protectBranch.ForcePushAllowlistUserIDs, protectBranch.ForcePushAllowlistTeamIDs)
+	if !ok {
+		return
+	}
+	deleteDeployKeys := protectBranch.DeleteAllowlistDeployKeyIDs
+	if form.DeleteAllowlistDeployKeyIDs != nil {
+		deleteDeployKeys = form.DeleteAllowlistDeployKeyIDs
+	}
+	forcePushDeployKeys := protectBranch.ForcePushAllowlistDeployKeyIDs
+	if form.ForcePushAllowlistDeployKeyIDs != nil {
+		forcePushDeployKeys = form.ForcePushAllowlistDeployKeyIDs
+	}
+
 	err = git_model.UpdateProtectBranch(ctx, ctx.Repo().Repository, protectBranch, git_model.WhitelistOptions{
 		UserIDs:          whitelistUsers,
 		TeamIDs:          whitelistTeams,
@@ -977,6 +1012,13 @@ func EditBranchProtection(ctx *context.APIContext) {
 		ApprovalsUserIDs: approvalsWhitelistUsers,
 		ApprovalsTeamIDs: approvalsWhitelistTeams,
 		DeployKeyIDs:     whitelistDeployKeys,
+
+		DeleteUserIDs:         deleteUsers,
+		DeleteTeamIDs:         deleteTeams,
+		DeleteDeployKeyIDs:    deleteDeployKeys,
+		ForcePushUserIDs:      forcePushUsers,
+		ForcePushTeamIDs:      forcePushTeams,
+		ForcePushDeployKeyIDs: forcePushDeployKeys,
 	})
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "UpdateProtectBranch", err)
@@ -1085,4 +1127,32 @@ func DeleteBranchProtection(ctx *context.APIContext) {
 	}
 
 	ctx.Status(http.StatusNoContent)
+}
+
+// getAllowlistIDs resolves the usernames and team names of an allow-list to IDs. A nil list keeps
+// the current IDs. On error it writes the response and returns false.
+func getAllowlistIDs(ctx *context.APIContext, usernames, teams []string, userIDs, teamIDs []int64) ([]int64, []int64, bool) {
+	var err error
+	if usernames != nil {
+		if userIDs, err = user_model.GetUserIDsByNames(ctx, usernames, false); err != nil {
+			if user_model.IsErrUserNotExist(err) {
+				ctx.Error(http.StatusUnprocessableEntity, "User does not exist", err)
+			} else {
+				ctx.Error(http.StatusInternalServerError, "GetUserIDsByNames", err)
+			}
+			return nil, nil, false
+		}
+	}
+	repo := ctx.Repo().Repository
+	if teams != nil && repo.Owner.IsOrganization() {
+		if teamIDs, err = organization.GetTeamIDsByNames(ctx, repo.OwnerID, teams, false); err != nil {
+			if organization.IsErrTeamNotExist(err) {
+				ctx.Error(http.StatusUnprocessableEntity, "Team does not exist", err)
+			} else {
+				ctx.Error(http.StatusInternalServerError, "GetTeamIDsByNames", err)
+			}
+			return nil, nil, false
+		}
+	}
+	return userIDs, teamIDs, true
 }

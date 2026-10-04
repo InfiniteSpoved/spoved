@@ -293,8 +293,12 @@ func preReceiveBranch(ctx *preReceiveContext, oldCommitID, newCommitID string, r
 	//
 	// First of all we need to enforce absolutely:
 	//
-	// 1. Detect and prevent deletion of the branch
+	// 1. Detect and prevent deletion of the branch, unless the pusher is in the delete allow-list
 	if newCommitID == objectFormat.EmptyObjectID().String() {
+		if ctx.opts.DeployKeyID != 0 && protectBranch.CanDeployKeyDelete(ctx.deployKeyKeyID) ||
+			ctx.opts.DeployKeyID == 0 && protectBranch.CanUserDelete(ctx, ctx.user) {
+			return
+		}
 		log.Warn("Forbidden: Branch: %s in %-v is protected from deletion", branchName, repo)
 		ctx.JSON(http.StatusForbidden, private.Response{
 			UserMsg: fmt.Sprintf("branch %s is protected from deletion", branchName),
@@ -302,7 +306,8 @@ func preReceiveBranch(ctx *preReceiveContext, oldCommitID, newCommitID string, r
 		return
 	}
 
-	// 2. Disallow force pushes to protected branches
+	// 2. Disallow force pushes to protected branches, unless the pusher is in the force push allow-list.
+	// An allowed force push still goes through the checks below.
 	if oldCommitID != objectFormat.EmptyObjectID().String() {
 		output, _, err := git.NewCommand(ctx, "rev-list", "--max-count=1").AddDynamicArguments(oldCommitID, "^"+newCommitID).RunStdString(&git.RunOpts{Dir: repo.RepoPath(), Env: ctx.env})
 		if err != nil {
@@ -311,7 +316,8 @@ func preReceiveBranch(ctx *preReceiveContext, oldCommitID, newCommitID string, r
 				Err: fmt.Sprintf("Fail to detect force push: %v", err),
 			})
 			return
-		} else if len(output) > 0 {
+		} else if len(output) > 0 && !(ctx.opts.DeployKeyID != 0 && protectBranch.CanDeployKeyForcePush(ctx.deployKeyKeyID) ||
+			ctx.opts.DeployKeyID == 0 && protectBranch.CanUserForcePush(ctx, ctx.user)) {
 			log.Warn("Forbidden: Branch: %s in %-v is protected from force push", branchName, repo)
 			ctx.JSON(http.StatusForbidden, private.Response{
 				UserMsg: fmt.Sprintf("branch %s is protected from force push", branchName),
