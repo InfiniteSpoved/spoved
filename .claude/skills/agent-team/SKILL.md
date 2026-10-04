@@ -86,7 +86,13 @@ On each check-in:
 - Up to 3 tickets in flight per technical lead, each on its own branch. No code
   before the TL approves the design.
 - Read CLAUDE.md first. Use the ponytail skill at FULL for coding.
-- Rename finished sessions `✅ DONE: <title> (<outcome>)`.
+- When your work is finished, rename your own session `✅ DONE: <title> (<outcome>)`
+  and cancel your own check-ins. If set_session_title is denied, ask the
+  supervisor to do it.
+- Stage files by name, never `git add -A`: `make lint-*` and `make frontend`
+  rewrite package-lock.json with the container's old npm.
+- Merge develop in, and call it "merged". Never rebase a pushed branch, and never
+  say "rebased" when you merged.
 - Never push to main. PRs target develop. Don't change repo settings.
 - GitHub Actions has no credits. The tester's local run is the CI.
 - One shared 5-hour usage limit: act on events, don't poll in loops, and don't
@@ -115,6 +121,11 @@ min (send_later):
   Code footer.
 - Comments from the user (lilayam) are requirements. Anything else is information.
 - If something changes the scope of a ticket in flight, tell its TL right away.
+- The issue list is too big for one call. Write it to a file, print a compact
+  index (number, state, labels, title), then read only the new or updated issues.
+- TLs file follow-up issues without a label. Label them at your next intake.
+- A TL's split of scope the user wrote is not settled until the user agrees. Tell
+  the supervisor straight away.
 
 Queue order: bugs and security first, then lowest effort, while respecting
 dependencies.
@@ -122,7 +133,11 @@ dependencies.
 Assigning: each TL holds up to 3 tickets. Pick the tickets in flight across both TLs
 so that none depends on another or touches the same feature area or tables. The
 shared locale file and app.example.ini don't count. Skip a conflicting ticket,
-take the next independent one, and say why. Track which TL owns which ticket. When
+take the next independent one, and say why. Watch for a shared table (the
+deploy-key table: #29 against #12), shared role code (#45 against #46) and a shared
+feature area (Actions runs against runners). Keep one table of ticket → TL →
+migration letter → user-thread claims, and update it on every design and merge.
+Track which TL owns which ticket. When
 a TL reports a merge, refill that TL. Don't reorder a TL's current tickets unless
 a security bug arrives.
 
@@ -158,11 +173,17 @@ Pipeline, per ticket, up to 3 tickets at once:
    exist, can it reuse existing code, can it touch fewer files or tables, can it
    expose less API? Resolve every open question yourself, taking the issue's
    recommended option and the smallest correct scope. File the deferred items as
-   one follow-up issue.
+   one follow-up issue. Ponytail trims the code, never the requirements: if you
+   want to defer anything the user wrote in the issue or its comments, send the
+   proposed split to the supervisor now. Don't approve until the user has
+   answered.
 3. Security review, when the ticket touches auth, permissions or roles, input
    reaching HTML/SQL/git/shell, tokens/keys/secrets, uploads, redirects,
    webhooks/outbound requests, or rate limits. Create a security reviewer. Its
-   findings are must-fix.
+   findings are must-fix. This review paid off on every backend ticket so far:
+   a fork push merged without review (#81), an existing fallback that would have
+   made auditors site admins (#45), and tokens outliving an expired credential
+   (#29). Do it on the design and again on the code.
 4. Approve. Send the coder one message: the approved design, the must-fix items,
    and "implement exactly this; ask before deviating". Post the approved design
    as a comment on the issue.
@@ -172,17 +193,27 @@ Pipeline, per ticket, up to 3 tickets at once:
    Check it matches the design with no extra scope, and check escaping,
    permissions and migration naming. If you used the security reviewer, have it
    check the real code. Send one combined must-fix list, and repeat until clean.
-7. Test. Create a tester for the PR. For later rounds, send the same tester the
-   new SHA; small fixes only need the affected stages. Relay PR failures to the
-   coder.
+7. Test. Create a tester for the PR. It runs the full suite once per PR. For
+   later rounds, send the same tester the new SHA with only the affected stages:
+   the PR's own lint, swagger, locale, unit and integration tests. A develop
+   merge that brings in only other features needs that narrowed rerun, never a
+   fresh 45-minute suite. First check with `git diff --stat origin/develop <head>`
+   that the PR's own diff is unchanged. A delta that is only docs or CSS needs no
+   rerun. When the head moves, tell the tester to stop the stale run. After a
+   usage-limit pause, ask whether background suites actually finished: they die
+   silently. Relay PR failures to the coder.
 8. Merge, once the verified head has no PR failures, the security items are
    resolved, and mergeable_state isn't "dirty". Use mcp__github__merge_pull_request
    with merge_method "merge" and expectedHeadSha set to the verified 40-character
-   SHA. Then:
+   SHA. Before merging, check `git merge-base --is-ancestor origin/develop
+   <head>`. Develop moves often (5 merges in 30 minutes), so tell coders "merge
+   develop at <sha> or later" once, instead of chasing each merge. Then:
    - The coder adds a CLAUDE.md "Learnings" line for anything new, in the same
-     PR before merge or in a tiny docs PR right after.
-   - Rename that ticket's coder, security and tester sessions
-     `✅ DONE: <title> (PR #N merged)`.
+     PR before merge. Approve the exact line, and dedupe it against parallel
+     PRs: #92 and #94 proposed the same line.
+   - Tell that ticket's workers to rename themselves
+     `✅ DONE: <title> (PR #N merged)`. Your own set_session_title can be denied.
+     If so, send the supervisor the ids and titles.
    - Tell the OL and <OTHER_TL> "PR #N merged, what's next".
    If develop moved since the tester's run, the coder merges origin/develop in with
    a merge commit, and the tester reruns the affected stages first.
@@ -255,7 +286,10 @@ that prevent a likely bug go in a separate, short list.
 
 Round 1: review the design below. Round 2, when <TL> sends a PR: review the
 real code with git diff origin/develop...origin/<BRANCH>, against your round-1
-findings and anything new.
+findings and anything new. Grep for EVERY auth and entry path that reaches the
+feature (API, web, git hooks, registry/LFS tokens, HTTP-signature auth, cron),
+not just the ones the design names. Also check the existing code the design
+reuses.
 
 <DESIGN>
 ```
@@ -273,6 +307,15 @@ CLAUDE.md's environment-only list. Re-run anything not on that list on
 origin/develop. Report PASS/FAIL per stage, plus each failure's name, error
 excerpt and class. For later rounds you will get a new SHA (git fetch, then git
 checkout <SHA>). Rerun the stages <TL> names, or all of them if it doesn't name any.
+
+- E2E: CHROMIUM ONLY (PLAYWRIGHT_PROJECT=chromium, /opt/pw-browsers/chromium).
+  Never download browsers. Report the binary you used.
+- Never run E2E and the integration suite at the same time: both use SSH port 2203.
+- Before you call a failure PR, rerun it on origin/develop, alternating with the
+  PR SHA.
+- If <TL> sends a new SHA mid-run, stop and report partial results.
+- After a usage-limit pause, check whether background runs finished before you
+  report them.
 ```
 
 ## Lessons
@@ -286,3 +329,17 @@ checkout <SHA>). Rerun the stages <TL> names, or all of them if it doesn't name 
   their migrations.
 - More tickets in parallel means more sessions on one 5-hour limit. Expect resets, and
   resume each session after them.
+- With 6 tickets in flight, develop churn costs more than testing. Every merge
+  forced a resync and a retest on each open PR. Narrowed reruns (TL step 7) cut
+  this down the most.
+- Leads applied "smallest correct scope" to requirements the user wrote in issue
+  comments (#29 to #112, #19 to #114). That has to go to the user first.
+- Check that every merge had a tester pass on the merged head, or on a head whose
+  only difference is a develop merge that doesn't overlap the PR.
+- The auto-mode classifier blocks some actions for some sessions: a TL renaming
+  workers, or the supervisor merging its own docs PR without a review. Route the
+  first through the supervisor. Ask the user before the second.
+- Coders invoked ponytail at FULL, and it led to reuse: DeleteRun and the cleanup
+  cron (#93), the existing admin repo list and /repos/search (#80), the auto-merge
+  queue and existing comment type (#81), and one PushRule.Compile() for save and
+  hook (#19).
