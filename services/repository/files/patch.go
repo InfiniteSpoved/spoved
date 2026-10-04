@@ -32,6 +32,8 @@ type ApplyDiffPatchOptions struct {
 	Committer    *IdentityOptions
 	Dates        *CommitDateOptions
 	Signoff      bool
+	// ParentCommitID makes CherryPick apply the changes between it and Content, instead of Content's first parent.
+	ParentCommitID string
 }
 
 // Validate validates the provided options

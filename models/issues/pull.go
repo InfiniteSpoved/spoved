@@ -178,11 +178,13 @@ type PullRequest struct {
 	MergeBase           string `xorm:"VARCHAR(64)"`
 	AllowMaintainerEdit bool   `xorm:"NOT NULL DEFAULT false"`
 
-	HasMerged      bool               `xorm:"INDEX"`
-	MergedCommitID string             `xorm:"VARCHAR(64)"`
-	MergerID       int64              `xorm:"INDEX"`
-	Merger         *user_model.User   `xorm:"-"`
-	MergedUnix     timeutil.TimeStamp `xorm:"updated INDEX"`
+	HasMerged      bool   `xorm:"INDEX"`
+	MergedCommitID string `xorm:"VARCHAR(64)"`
+	// MergedBaseCommitID is the base branch tip just before Forgejo merged the PR, empty for other merges.
+	MergedBaseCommitID string             `xorm:"VARCHAR(64)"`
+	MergerID           int64              `xorm:"INDEX"`
+	Merger             *user_model.User   `xorm:"-"`
+	MergedUnix         timeutil.TimeStamp `xorm:"updated INDEX"`
 
 	isHeadRepoLoaded bool `xorm:"-"`
 
@@ -569,7 +571,7 @@ func (pr *PullRequest) SetMerged(ctx context.Context) (bool, error) {
 	pr.ConflictedFiles = []string{}
 
 	// We need to save all of the data used to compute this merge as it may have already been changed by TestPatch. FIXME: need to set some state to prevent TestPatch from running whilst we are merging.
-	if _, err := sess.Where("id = ?", pr.ID).Cols("has_merged, status, merge_base, merged_commit_id, merger_id, merged_unix, conflicted_files").Update(pr); err != nil {
+	if _, err := sess.Where("id = ?", pr.ID).Cols("has_merged, status, merge_base, merged_commit_id, merged_base_commit_id, merger_id, merged_unix, conflicted_files").Update(pr); err != nil {
 		return false, fmt.Errorf("Failed to update pr[%d]: %w", pr.ID, err)
 	}
 
