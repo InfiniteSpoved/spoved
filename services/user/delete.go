@@ -22,6 +22,7 @@ import (
 	access_model "forgejo.org/models/perm/access"
 	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
+	system_model "forgejo.org/models/system"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
@@ -130,6 +131,7 @@ func deleteUser(ctx context.Context, u *user_model.User, purge bool) (err error)
 		&actions_model.ActionRunnerToken{OwnerID: optional.Some(u.ID)},
 		&auth_model.AuthorizationToken{UID: u.ID},
 		&auth_model.AuthorizedIntegration{UserID: u.ID},
+		&system_model.AnnouncementDismissal{UserID: u.ID},
 	); err != nil {
 		return fmt.Errorf("deleteBeans: %w", err)
 	}
