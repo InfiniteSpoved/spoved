@@ -365,6 +365,7 @@ func TestPullScheduledAutoMerge(t *testing.T) {
 			})
 			assert.Contains(t, resp.Body.String(), "The pull request was updated.")
 			assert.False(t, isMerged(pr))
+			assert.Equal(t, am, unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID}))
 		})
 	})
 }

@@ -1463,6 +1463,18 @@ func MergePullRequest(ctx *context.Context) {
 	}
 
 	if form.MergeWhenChecksSucceed {
+		// a merge box loaded before a push must not replace the existing schedule
+		if scheduledAfter != 0 && form.HeadCommitID != "" {
+			headCommitID, err := ctx.Repo.GitRepo.GetRefCommitID(pr.GetGitRefName())
+			if err != nil {
+				ctx.ServerError("GetRefCommitID", err)
+				return
+			}
+			if headCommitID != form.HeadCommitID {
+				ctx.JSONError(ctx.Tr("repo.pulls.auto_merge.head_changed"))
+				return
+			}
+		}
 		// delete all scheduled auto merges
 		_ = pull_model.DeleteScheduledAutoMerge(ctx, pr.ID)
 		// schedule auto merge
