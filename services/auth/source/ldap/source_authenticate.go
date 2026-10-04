@@ -51,6 +51,12 @@ func (source *Source) Authenticate(ctx context.Context, user *user_model.User, u
 		}
 		if user != nil && !user.ProhibitLogin {
 			opts := &user_service.UpdateOptions{}
+			if len(source.AdminFilter) > 0 {
+				// a user group granting site admin wins over AdminFilter
+				if sr.IsAdmin, err = usergroup_service.DirectoryAdmin(ctx, user, sr.IsAdmin); err != nil {
+					return nil, err
+				}
+			}
 			if len(source.AdminFilter) > 0 && user.IsAdmin != sr.IsAdmin {
 				// Change existing admin flag only if AdminFilter option is set
 				opts.IsAdmin = optional.Some(sr.IsAdmin)

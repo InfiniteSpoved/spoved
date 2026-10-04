@@ -19,6 +19,7 @@ import (
 	"forgejo.org/modules/translation"
 	"forgejo.org/services/auth"
 	"forgejo.org/services/auth/source/ldap"
+	usergroup_service "forgejo.org/services/usergroup"
 	"forgejo.org/tests"
 
 	"github.com/stretchr/testify/assert"
@@ -372,6 +373,35 @@ func TestLDAPUserSyncWithGroupFilter(t *testing.T) {
 			assert.False(t, user.IsActive, "User %s should be inactive", gitLDAPUser.UserName)
 		}
 	}
+}
+
+func TestLDAPUserGroupAdminWinsOverAdminFilter(t *testing.T) {
+	if skipLDAPTests() {
+		t.Skip()
+		return
+	}
+	defer tests.PrepareTestEnv(t)()
+	addAuthSourceLDAP(t, "", "", "", "")
+	auth.SyncExternalUsers(t.Context(), true)
+
+	// fry is not matched by the admin filter
+	fry := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "fry"})
+	assert.False(t, fry.IsAdmin)
+
+	group := &organization.UserGroup{Name: "ldap-admins", GrantsSiteAdmin: true}
+	require.NoError(t, organization.InsertUserGroup(db.DefaultContext, group))
+	require.NoError(t, usergroup_service.AddMember(db.DefaultContext, group, fry))
+	assert.True(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "fry"}).IsAdmin)
+
+	// neither the sync nor a sign-in demotes them
+	auth.SyncExternalUsers(t.Context(), true)
+	assert.True(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "fry"}).IsAdmin)
+	loginUserWithPassword(t, "fry", "fry")
+	assert.True(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "fry"}).IsAdmin)
+
+	// once out of the group, the admin filter applies again
+	require.NoError(t, usergroup_service.RemoveMember(db.DefaultContext, group, fry.ID))
+	assert.False(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "fry"}).IsAdmin)
 }
 
 func TestLDAPUserSigninFailed(t *testing.T) {

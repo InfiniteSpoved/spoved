@@ -77,8 +77,10 @@ func (f *CreateTeamForm) Validate(req *http.Request, errs binding.Errors) bindin
 
 // UserGroupForm form for creating or editing a user group
 type UserGroupForm struct {
-	Name        string `binding:"Required;AlphaDashDot;MaxSize(255)" locale:"admin.user_groups.name"`
-	Description string `binding:"MaxSize(255)" locale:"admin.user_groups.description"`
+	Name                     string `binding:"Required;AlphaDashDot;MaxSize(255)" locale:"admin.user_groups.name"`
+	Description              string `binding:"MaxSize(255)" locale:"admin.user_groups.description"`
+	GrantsSiteAdmin          bool
+	GrantsCreateOrganization bool
 }
 
 // Validate validates the fields
