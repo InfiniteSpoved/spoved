@@ -11,6 +11,7 @@ import (
 	access_model "forgejo.org/models/perm/access"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/services/auth"
 )
 
 func RepoAccess(ctx Context) {
@@ -42,7 +43,11 @@ func RepoAccess(ctx Context) {
 			ctx.Permission().UnitsMode[u.Type] = ctx.Permission().AccessMode
 		}
 	} else {
-		permission, err := access_model.GetUserRepoPermissionWithReducer(ctx.Context(), ctx.Repository(), ctx.Doer(), ctx.Reducer())
+		getPermission := access_model.GetUserRepoPermissionWithReducer
+		if ctx.IsReadOnlyMethod() && auth.IsHeldByUser(ctx.Authentication()) {
+			getPermission = access_model.GetUserRepoReadPermission
+		}
+		permission, err := getPermission(ctx.Context(), ctx.Repository(), ctx.Doer(), ctx.Reducer())
 		if err != nil {
 			ctx.Error(http.StatusInternalServerError, "GetUserRepoPermissionWithReducer", err)
 			return

@@ -1320,6 +1320,8 @@
 	"admin.user_groups.grants_site_admin.description": "Every member of this group is made a site administrator, and loses it on leaving the group unless they were an administrator before.",
 	"admin.user_groups.grants_create_organization": "Members can create organizations",
 	"admin.user_groups.grants_create_organization.description": "Every member of this group may create organizations, and loses it on leaving the group unless they had it before.",
+	"admin.user_groups.grants_auditor": "Members are auditors (read all)",
+	"admin.user_groups.grants_auditor.description": "Every member of this group can read every repository and see every organization, but cannot change anything through this role. It ends on leaving the group.",
 	"admin.users.via_group": "via group %s",
 	"org.teams.user_groups": "User groups",
 	"org.teams.user_groups.name_placeholder": "User group name",

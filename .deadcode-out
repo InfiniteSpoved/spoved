@@ -251,6 +251,7 @@ forgejo.org/routers/api/v1/permissions
 	Permissions.SetPermission
 	Permissions.IsSigned
 	Permissions.SetIsSigned
+	Permissions.IsReadOnlyMethod
 	Permissions.PublicOnly
 	Permissions.SetPublicOnly
 	Permissions.Reducer

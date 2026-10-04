@@ -125,7 +125,8 @@ func HandleOrgAssignment(ctx *Context, args ...bool) {
 		return
 	}
 
-	if org.Visibility == structs.VisibleTypePrivate {
+	// The auditor role shows private organizations read-only, but never makes the user a member.
+	if org.Visibility == structs.VisibleTypePrivate && !ctx.IsAuditorView() {
 		requireMember = true
 	} else if ctx.IsSigned && ctx.Doer.IsRestricted {
 		requireMember = true
@@ -192,7 +193,7 @@ func HandleOrgAssignment(ctx *Context, args ...bool) {
 	opts := &organization.FindOrgMembersOpts{
 		Doer:         ctx.Doer,
 		OrgID:        org.ID,
-		IsDoerMember: ctx.Org.IsMember,
+		IsDoerMember: ctx.Org.IsMember || ctx.IsAuditorView(), // the auditor role lists concealed members too
 	}
 	ctx.Data["NumMembers"], err = organization.CountOrgMembers(ctx, opts)
 	if err != nil {

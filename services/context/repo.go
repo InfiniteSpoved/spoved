@@ -36,6 +36,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
 	asymkey_service "forgejo.org/services/asymkey"
+	"forgejo.org/services/auth"
 	funding_service "forgejo.org/services/funding"
 	redirect_service "forgejo.org/services/redirect"
 
@@ -383,7 +384,9 @@ func repoAssignment(ctx *Context, repo *repo_model.Repository) {
 	// but, some paths like `/user/repo/raw/...` can be accessed with API authentication mechanisms.  In those edge
 	// cases, initialize `ctx.Repo.Permission` based upon the reduced permission set available.
 	authorizationReducer := ctx.Authentication.Reducer()
-	if authorizationReducer == nil {
+	if ctx.IsReadOnlyMethod() && auth.IsHeldByUser(ctx.Authentication) {
+		ctx.Repo.Permission, err = access_model.GetUserRepoReadPermission(ctx, repo, ctx.Doer, authorizationReducer)
+	} else if authorizationReducer == nil {
 		ctx.Repo.Permission, err = access_model.GetUserRepoPermission(ctx, repo, ctx.Doer)
 	} else {
 		ctx.Repo.Permission, err = access_model.GetUserRepoPermissionWithReducer(ctx, repo, ctx.Doer, authorizationReducer)

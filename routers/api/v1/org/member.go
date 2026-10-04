@@ -13,6 +13,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/routers/api/v1/user"
 	"forgejo.org/routers/api/v1/utils"
+	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 )
@@ -86,7 +87,8 @@ func ListMembers(ctx *context.APIContext) {
 			return
 		}
 	}
-	listMembers(ctx, isMember)
+	// the auditor role lists concealed members too
+	listMembers(ctx, isMember || (ctx.Doer() != nil && ctx.Doer().IsAuditor && auth.IsHeldByUser(ctx.Authentication())))
 }
 
 // ListPublicMembers list an organization's public members
