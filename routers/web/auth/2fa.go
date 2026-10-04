@@ -10,8 +10,10 @@ import (
 	"forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
+	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/web"
+	"forgejo.org/routers/common"
 	"forgejo.org/services/context"
 	"forgejo.org/services/externalaccount"
 	"forgejo.org/services/forms"
@@ -52,6 +54,10 @@ func TwoFactorPost(ctx *context.Context) {
 	}
 
 	id := idSess.(int64)
+	attempt := common.StartAuthAttempt(ctx, ratelimit.TwoFactorKey(id))
+	if attempt == nil {
+		return
+	}
 	twofa, err := auth.GetTwoFactorByUID(ctx, id)
 	if err != nil {
 		ctx.ServerError("UserSignIn", err)
@@ -66,6 +72,7 @@ func TwoFactorPost(ctx *context.Context) {
 	}
 
 	if ok && twofa.LastUsedPasscode != form.Passcode {
+		attempt.Succeeded()
 		remember := ctx.Session.Get("twofaRemember").(bool)
 		u, err := user_model.GetUserByID(ctx, id)
 		if err != nil {
@@ -132,6 +139,10 @@ func TwoFactorScratchPost(ctx *context.Context) {
 	}
 
 	id := idSess.(int64)
+	attempt := common.StartAuthAttempt(ctx, ratelimit.TwoFactorKey(id))
+	if attempt == nil {
+		return
+	}
 	twofa, err := auth.GetTwoFactorByUID(ctx, id)
 	if err != nil {
 		ctx.ServerError("UserSignIn", err)
@@ -140,6 +151,7 @@ func TwoFactorScratchPost(ctx *context.Context) {
 
 	// Validate the passcode with the stored TOTP secret.
 	if twofa.VerifyScratchToken(form.Token) {
+		attempt.Succeeded()
 		// Invalidate the scratch token.
 		twofa.GenerateScratchToken()
 		if err = auth.UpdateTwoFactor(ctx, twofa); err != nil {

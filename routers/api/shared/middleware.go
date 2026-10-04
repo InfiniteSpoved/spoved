@@ -39,6 +39,7 @@ func Middlewares() (stack []any) {
 		checkDeprecatedAuthMethods,
 		// Get user from session if logged in.
 		apiAuthentication(buildAuthGroup()),
+		common.RateLimitAPI,
 		apiAuthorization(),
 		verifyAuthWithOptions(&common.VerifyOptions{
 			SignInRequired: func() bool { return setting.Service.RequireSignInView },
@@ -79,6 +80,9 @@ func apiAuthentication(authMethod auth.Method) func(*context.APIContext) {
 		case *auth.AuthenticationNotAttempted:
 			ar = &auth.UnauthenticatedResult{}
 		case *auth.AuthenticationAttemptedIncorrectCredential:
+			if common.WriteIfRateLimited(ctx.Base, v.Error, true) {
+				return
+			}
 			ctx.Error(http.StatusUnauthorized, "APIAuth", v.Error)
 			return
 		case *auth.AuthenticationError:

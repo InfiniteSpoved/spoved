@@ -20,6 +20,7 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/metrics"
 	"forgejo.org/modules/public"
+	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/storage"
 	"forgejo.org/modules/structs"
@@ -210,6 +211,9 @@ func webAuth(authMethod auth_service.Method) func(*context.Context) {
 		case *auth_service.AuthenticationNotAttempted:
 			ar = &auth_service.UnauthenticatedResult{}
 		case *auth_service.AuthenticationAttemptedIncorrectCredential:
+			if common.WriteIfRateLimited(ctx.Base, v.Error, false) {
+				return
+			}
 			ctx.Error(http.StatusUnauthorized, ctx.Locale.TrString("auth.unauthorized_credentials", "https://codeberg.org/forgejo/forgejo/issues/2809"))
 			return
 		case *auth_service.AuthenticationError:
@@ -411,22 +415,22 @@ func Routes() *web.Route {
 		func() {
 			registerRoutes(routes)
 		},
-		gzipMid, sessioner, context.Contexter(), webAuth(buildAuthGroup()),
+		gzipMid, sessioner, context.Contexter(), webAuth(buildAuthGroup()), common.RateLimit(ratelimit.Web),
 		// TODO: GetNotificationCount & GetActiveStopwatch really seem like things that could be folded into Contexter or as helper functions
 		user.GetNotificationCount, repo.GetActiveStopwatch, user.GetAnnouncements,
 		goGet)
 	routes.Group("",
 		func() {
 			registerMixedRoutes(routes)
-		}, gzipMid, sessioner, context.Contexter(), webAuth(buildMixedAuthGroup()), goGet)
+		}, gzipMid, sessioner, context.Contexter(), webAuth(buildMixedAuthGroup()), common.RateLimit(ratelimit.Web), goGet)
 	routes.Group("",
 		func() {
 			registerGitLFSRoutes(routes)
-		}, gzipMid, sessioner, context.Contexter(), webAuth(buildGitLfsAuthGroup()), goGet)
+		}, gzipMid, sessioner, context.Contexter(), webAuth(buildGitLfsAuthGroup()), common.RateLimit(ratelimit.Git), goGet)
 	routes.Group("",
 		func() {
 			registerGitRoutes(routes)
-		}, gzipMid, sessioner, context.Contexter(), webAuth(buildGitAuthGroup()), goGet)
+		}, gzipMid, sessioner, context.Contexter(), webAuth(buildGitAuthGroup()), common.RateLimit(ratelimit.Git), goGet)
 
 	// The only endpoint which can only be accessed with the OAuth2 authentication method is /userinfo, extracted here
 	// so that other auth methods can't be applied to it
@@ -439,7 +443,7 @@ func Routes() *web.Route {
 	)
 
 	routes.NotFound(
-		gzipMid, sessioner, context.Contexter(), webAuth(buildAuthGroup()),
+		gzipMid, sessioner, context.Contexter(), webAuth(buildAuthGroup()), common.RateLimit(ratelimit.Web),
 		// TODO: GetNotificationCount & GetActiveStopwatch really seem like things that could be folded into Contexter or as helper functions
 		user.GetNotificationCount, repo.GetActiveStopwatch, user.GetAnnouncements,
 		goGet,
@@ -701,7 +705,7 @@ func registerRoutes(m *web.Route) {
 			}, openIDSignUpEnabled)
 		}, openIDSignInEnabled)
 		m.Get("/sign_up", auth.SignUp)
-		m.Post("/sign_up", web.Bind(forms.RegisterForm{}), auth.SignUpPost)
+		m.Post("/sign_up", common.RateLimitAuthIP, web.Bind(forms.RegisterForm{}), auth.SignUpPost)
 		m.Get("/link_account", linkAccountEnabled, auth.LinkAccount)
 		m.Post("/link_account_signin", linkAccountEnabled, web.Bind(forms.SignInForm{}), auth.LinkAccountPostSignIn)
 		m.Post("/link_account_signup", linkAccountEnabled, web.Bind(forms.RegisterForm{}), auth.LinkAccountPostRegister)
@@ -869,13 +873,13 @@ func registerRoutes(m *web.Route) {
 
 	m.Group("/user", func() {
 		m.Get("/activate", auth.Activate)
-		m.Post("/activate", auth.ActivatePost)
+		m.Post("/activate", common.RateLimitAuthIP, auth.ActivatePost)
 		m.Any("/activate_email", auth.ActivateEmail)
 		m.Get("/avatar/{username}/{size}", user.AvatarByUserName)
 		m.Get("/recover_account", auth.ResetPasswd)
-		m.Post("/recover_account", auth.ResetPasswdPost)
+		m.Post("/recover_account", common.RateLimitAuthIP, auth.ResetPasswdPost)
 		m.Get("/forgot_password", auth.ForgotPasswd)
-		m.Post("/forgot_password", auth.ForgotPasswdPost)
+		m.Post("/forgot_password", common.RateLimitAuthIP, auth.ForgotPasswdPost)
 		m.Post("/logout", auth.SignOut)
 		m.Get("/task/{task}", reqSignIn, user.TaskStatus)
 		m.Get("/stopwatches", reqSignIn, user.GetStopwatches)

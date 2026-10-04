@@ -287,6 +287,8 @@
 	"themes.names.company-dark": "Company dark",
 	"themes.names.company-high-contrast": "Company high contrast",
 	"error.not_found.title": "Page not found",
+	"error.rate_limited.title": "Too many requests",
+	"error.rate_limited.message": "You have sent too many requests. Please wait a moment and try again.",
 	"warning.repository.out_of_sync": "The database representation of this repository is out of synchronization. If this warning is still shown after pushing a commit to this repository contact the administrator.",
 	"alert.asset_load_failed": "Failed to load asset files from {path}. Please make sure the asset files can be accessed.",
 	"alert.range_error": " must be a number between %[1]s and %[2]s.",

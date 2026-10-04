@@ -14,6 +14,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
 	"forgejo.org/services/auth"
@@ -49,6 +50,10 @@ func (b *Basic) Verify(req *http.Request, w http.ResponseWriter, _ auth.SessionS
 		return &auth.AuthenticationAttemptedIncorrectCredential{Error: errors.New("basic authentication by username & password is disabled")}
 	}
 
+	attempt := ratelimit.StartAuth(req.RemoteAddr, ratelimit.UserKey(uname))
+	if !attempt.Allowed {
+		return &auth.AuthenticationAttemptedIncorrectCredential{Error: attempt.Err()}
+	}
 	log.Trace("Basic Authorization: Attempting SignIn for %s", uname)
 	u, source, err := UserSignIn(req.Context(), uname, passwd)
 	if err != nil {
@@ -75,6 +80,8 @@ func (b *Basic) Verify(req *http.Request, w http.ResponseWriter, _ auth.SessionS
 	}
 
 	log.Trace("Basic Authorization: Logged in user %-v", u)
+	// only a successful sign-in gives the auth rate limit tokens back
+	attempt.Succeeded()
 	return &auth.AuthenticationSuccess{Result: &basicPaswordAuthenticationResult{user: u}}
 }
 
