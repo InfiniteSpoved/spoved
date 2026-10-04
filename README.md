@@ -62,8 +62,8 @@ Each feature links to the pull request that added it.
 | **Rate limiting** ([#133](https://github.com/GitHatOrg/GitHat/pull/133)) | Limits for API, git, web and sign-in traffic per user and per IP, with standard 429 responses. Strict limits on failed sign-ins. Off until enabled in `[rate_limit]`. |
 | **Restrict who can register CI runners** ([#106](https://github.com/GitHatOrg/GitHat/pull/106)) | `[actions] RUNNER_REGISTRATION = admin`, `admin_and_org_owners` or `everyone`, so jobs and their secrets only run on approved machines. |
 | **Actions run retention** ([#107](https://github.com/GitHatOrg/GitHat/pull/107)) | `[actions] RUN_RETENTION_DAYS` deletes old CI runs, keeping the latest run of each workflow. |
-| **Storage report** ([#109](https://github.com/GitHatOrg/GitHat/pull/109), API [#141](https://github.com/GitHatOrg/GitHat/pull/141)) | Site administration → Storage: git and LFS size in total, per owner and per repository, with CSV export and admin API endpoints. |
-| **Announcement banners** ([#49](https://github.com/GitHatOrg/GitHat/pull/49)) | Site-wide banners (info, warning, critical) with schedules and audiences, for maintenance and policy notices. |
+| **Storage report** ([#109](https://github.com/GitHatOrg/GitHat/pull/109), API [#141](https://github.com/GitHatOrg/GitHat/pull/141)) | Site administration → Storage: git and LFS size in total, per owner and per repository, with a CSV export of the per-owner table and admin API endpoints. |
+| **Announcement banners** ([#49](https://github.com/GitHatOrg/GitHat/pull/49)) | Site-wide banners (info, warning, critical) with schedules, shown to everyone, signed-in users or admins, for maintenance and policy notices. |
 
 ### Interface
 
@@ -74,7 +74,7 @@ Each feature links to the pull request that added it.
 
 ### Development and quality
 
-- CI for every pull request: lint, unit, migration, integration and end-to-end tests, sharded to run in parallel ([#11](https://github.com/GitHatOrg/GitHat/pull/11), [#36](https://github.com/GitHatOrg/GitHat/pull/36), [#27](https://github.com/GitHatOrg/GitHat/pull/27)).
+- CI on every pull request runs the lints, frontend checks and unit tests. The migration, integration and end-to-end suites run on a manual run of the CI workflow ([#11](https://github.com/GitHatOrg/GitHat/pull/11), [#36](https://github.com/GitHatOrg/GitHat/pull/36), [#27](https://github.com/GitHatOrg/GitHat/pull/27), [#146](https://github.com/GitHatOrg/GitHat/pull/146)).
 - Fix for a cancellation race in git attribute checks ([#42](https://github.com/GitHatOrg/GitHat/pull/42)).
 - Contributor and agent guidance in [`CLAUDE.md`](CLAUDE.md) and [`.claude/skills`](.claude/skills) ([#47](https://github.com/GitHatOrg/GitHat/pull/47), [#70](https://github.com/GitHatOrg/GitHat/pull/70), [#105](https://github.com/GitHatOrg/GitHat/pull/105), [#117](https://github.com/GitHatOrg/GitHat/pull/117), [#123](https://github.com/GitHatOrg/GitHat/pull/123), [#144](https://github.com/GitHatOrg/GitHat/pull/144)).
 
