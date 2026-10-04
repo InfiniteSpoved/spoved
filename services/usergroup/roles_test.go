@@ -177,3 +177,20 @@ func TestDirectoryAdmin(t *testing.T) {
 	check(5, false, true)
 	check(5, true, true)
 }
+
+func TestDirectoryAdminWithoutGrantRow(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	// user 2 is already an admin through the directory when they join the group,
+	// so the group records no grant
+	setUserFlags(t, 2, true, true)
+	group := newRoleGroup(t, "admins", true, false)
+	require.NoError(t, AddMember(ctx, group, loadUser(t, 2)))
+	assert.Equal(t, 0, grantCount(t, 2))
+
+	// the directory drops the admin attribute: the group still keeps them admin
+	isAdmin, err := DirectoryAdmin(ctx, loadUser(t, 2), false)
+	require.NoError(t, err)
+	assert.True(t, isAdmin)
+}
