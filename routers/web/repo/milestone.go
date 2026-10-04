@@ -291,7 +291,7 @@ func MilestoneIssuesAndPulls(ctx *context.Context) {
 
 	issues(ctx, milestoneID, projectID, optional.None[bool]())
 
-	ret, _ := issue.GetTemplatesFromDefaultBranch(ctx.Repo.Repository, ctx.Repo.GitRepo)
+	ret, _ := issue.GetTemplatesFromDefaultBranch(ctx, ctx.Repo.Repository, ctx.Repo.GitRepo)
 	ctx.Data["NewIssueChooseTemplate"] = len(ret) > 0
 
 	ctx.Data["CanWriteIssues"] = ctx.Repo.CanWriteIssuesOrPulls(false)
