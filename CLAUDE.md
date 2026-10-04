@@ -52,3 +52,4 @@ Add a line here when you hit something the next person should know.
 - `make lint-css` runs stylelint on every file under `web_src/css`, including `.js`, so JS tests for CSS (e.g. `web_src/js/company-contrast.test.js`) must live under `web_src/js`.
 - `git log --format=%B` cuts a commit message at the first NUL byte, so message checks only see the text before it.
 - To check the files a merge commit introduces itself (an "evil merge"), run `git diff-tree --stdin -r --diff-merges=first-parent` over all new SHAs, merges included.
+- `make lint`/`make frontend` run npm with the container's older Node and rewrite package-lock.json. Stage files by name (never `git add -A`) and keep package-lock.json out of commits unless you changed package files.
