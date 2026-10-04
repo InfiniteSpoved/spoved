@@ -55,6 +55,9 @@ type TagProtection struct {
 	NamePattern        string   `json:"name_pattern"`
 	WhitelistUsernames []string `json:"whitelist_usernames"`
 	WhitelistTeams     []string `json:"whitelist_teams"`
+	// Public key IDs (`key_id` of a deploy key) of the deploy keys allowed to control the tags. IDs which are not
+	// write deploy keys of the repository are ignored.
+	AllowlistDeployKeyIDs []int64 `json:"allowlist_deploy_key_ids"`
 	// swagger:strfmt date-time
 	Created time.Time `json:"created_at"`
 	// swagger:strfmt date-time
@@ -66,6 +69,9 @@ type CreateTagProtectionOption struct {
 	NamePattern        string   `json:"name_pattern"`
 	WhitelistUsernames []string `json:"whitelist_usernames"`
 	WhitelistTeams     []string `json:"whitelist_teams"`
+	// Public key IDs (`key_id` of a deploy key) of the deploy keys allowed to control the tags. IDs which are not
+	// write deploy keys of the repository are ignored.
+	AllowlistDeployKeyIDs []int64 `json:"allowlist_deploy_key_ids"`
 }
 
 // EditTagProtectionOption options for editing a tag protection
@@ -73,4 +79,7 @@ type EditTagProtectionOption struct {
 	NamePattern        *string  `json:"name_pattern"`
 	WhitelistUsernames []string `json:"whitelist_usernames"`
 	WhitelistTeams     []string `json:"whitelist_teams"`
+	// Public key IDs (`key_id` of a deploy key) of the deploy keys allowed to control the tags. IDs which are not
+	// write deploy keys of the repository are ignored.
+	AllowlistDeployKeyIDs []int64 `json:"allowlist_deploy_key_ids"`
 }

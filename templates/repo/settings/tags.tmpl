@@ -54,6 +54,21 @@
 										</div>
 									</div>
 								{{end}}
+								<div class="whitelist field">
+									<label>{{ctx.Locale.Tr "tag_protection.allowed.deploy_keys"}}</label>
+									<div class="ui multiple search selection dropdown" id="allowlist_deploy_key_ids">
+										<input type="hidden" name="allowlist_deploy_key_ids" value="{{.allowlist_deploy_key_ids}}">
+										<div class="default text">{{ctx.Locale.Tr "search.deploy_key_kind"}}</div>
+										<div class="menu">
+											{{range .DeployKeys}}
+												<div class="item" data-value="{{.KeyID}}">
+													{{svg "octicon-key"}}
+													{{.Name}}
+												</div>
+											{{end}}
+										</div>
+									</div>
+								</div>
 								<div class="field">
 									{{if .PageIsEditProtectedTag}}
 									<button class="ui primary button">
@@ -84,7 +99,7 @@
 									<tr>
 										<td><pre>{{.NamePattern}}</pre></td>
 										<td>
-											{{if or .AllowlistUserIDs (and $.Owner.IsOrganization .AllowlistTeamIDs)}}
+											{{if or .AllowlistUserIDs (and $.Owner.IsOrganization .AllowlistTeamIDs) .AllowlistDeployKeyIDs}}
 												{{$userIDs := .AllowlistUserIDs}}
 												{{range $.Users}}
 													{{if SliceUtils.Contains $userIDs .ID}}
@@ -97,6 +112,12 @@
 														{{if SliceUtils.Contains $teamIDs .ID}}
 															<a class="ui basic label" href="{{$.Owner.OrganisationLink}}/teams/{{PathEscape .LowerName}}">{{.Name}}</a>
 														{{end}}
+													{{end}}
+												{{end}}
+												{{$deployKeyIDs := .AllowlistDeployKeyIDs}}
+												{{range $.DeployKeys}}
+													{{if SliceUtils.Contains $deployKeyIDs .KeyID}}
+														<span class="ui basic label">{{svg "octicon-key"}} {{.Name}}</span>
 													{{end}}
 												{{end}}
 											{{else}}

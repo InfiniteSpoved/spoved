@@ -67,3 +67,25 @@ func TestBranchRuleMatch(t *testing.T) {
 		assert.Equal(t, kase.ExpectedMatch, pb.Match(kase.BranchName), "%s - %s", kase.BranchName, kase.Rule)
 	}
 }
+
+func TestCanDeployKeyPush(t *testing.T) {
+	cases := []struct {
+		name    string
+		rule    ProtectedBranch
+		keyID   int64
+		allowed bool
+	}{
+		{"push disabled", ProtectedBranch{CanPush: false}, 1, false},
+		{"push enabled without allow-list", ProtectedBranch{CanPush: true}, 1, true},
+		{"allow-list without deploy keys", ProtectedBranch{CanPush: true, EnableWhitelist: true}, 1, false},
+		{"allow-list with all deploy keys", ProtectedBranch{CanPush: true, EnableWhitelist: true, WhitelistDeployKeys: true}, 1, true},
+		{"allow-list with listed key", ProtectedBranch{CanPush: true, EnableWhitelist: true, WhitelistDeployKeyIDs: []int64{1, 2}}, 2, true},
+		{"allow-list with unlisted key", ProtectedBranch{CanPush: true, EnableWhitelist: true, WhitelistDeployKeyIDs: []int64{1, 2}}, 3, false},
+		{"listed key but push disabled", ProtectedBranch{CanPush: false, EnableWhitelist: true, WhitelistDeployKeyIDs: []int64{1}}, 1, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.allowed, c.rule.CanDeployKeyPush(c.keyID))
+		})
+	}
+}

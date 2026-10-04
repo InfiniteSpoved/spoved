@@ -25,6 +25,8 @@ type ProtectedTag struct {
 	GlobPattern      glob.Glob      `xorm:"-"`
 	AllowlistUserIDs []int64        `xorm:"JSON TEXT"`
 	AllowlistTeamIDs []int64        `xorm:"JSON TEXT"`
+	// public key IDs of the deploy keys allowed to control the tags
+	AllowlistDeployKeyIDs []int64 `xorm:"JSON TEXT"`
 
 	CreatedUnix timeutil.TimeStamp `xorm:"created"`
 	UpdatedUnix timeutil.TimeStamp `xorm:"updated"`
@@ -141,6 +143,29 @@ func IsUserAllowedToControlTag(ctx context.Context, tags []*ProtectedTag, tagNam
 		if err != nil {
 			return false, err
 		}
+		if isAllowed {
+			break
+		}
+	}
+
+	return isAllowed, nil
+}
+
+// IsDeployKeyAllowedToControlTag checks if the deploy key with the given public key ID can control the specific tag.
+// It returns true if the tag name is not protected or the deploy key is allowed to control it.
+// The caller must check that the deploy key has write access to the repository.
+func IsDeployKeyAllowedToControlTag(tags []*ProtectedTag, tagName string, keyID int64) (bool, error) {
+	isAllowed := true
+	for _, tag := range tags {
+		if err := tag.EnsureCompiledPattern(); err != nil {
+			return false, err
+		}
+
+		if !tag.matchString(tagName) {
+			continue
+		}
+
+		isAllowed = slices.Contains(tag.AllowlistDeployKeyIDs, keyID)
 		if isAllowed {
 			break
 		}

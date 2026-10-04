@@ -57,6 +57,9 @@ func NewProtectedTagPost(ctx *context.Context) {
 	if strings.TrimSpace(form.AllowlistTeams) != "" {
 		pt.AllowlistTeamIDs, _ = base.StringsToInt64s(strings.Split(form.AllowlistTeams, ","))
 	}
+	if !setAllowlistDeployKeyIDs(ctx, pt, form.AllowlistDeployKeyIDs) {
+		return
+	}
 
 	if err := git_model.InsertProtectedTag(ctx, pt); err != nil {
 		ctx.ServerError("InsertProtectedTag", err)
@@ -83,6 +86,7 @@ func EditProtectedTag(ctx *context.Context) {
 	ctx.Data["name_pattern"] = pt.NamePattern
 	ctx.Data["allowlist_users"] = strings.Join(base.Int64sToStrings(pt.AllowlistUserIDs), ",")
 	ctx.Data["allowlist_teams"] = strings.Join(base.Int64sToStrings(pt.AllowlistTeamIDs), ",")
+	ctx.Data["allowlist_deploy_key_ids"] = strings.Join(base.Int64sToStrings(pt.AllowlistDeployKeyIDs), ",")
 
 	ctx.HTML(http.StatusOK, tplTags)
 }
@@ -110,6 +114,9 @@ func EditProtectedTagPost(ctx *context.Context) {
 	pt.NamePattern = strings.TrimSpace(form.NamePattern)
 	pt.AllowlistUserIDs, _ = base.StringsToInt64s(strings.Split(form.AllowlistUsers, ","))
 	pt.AllowlistTeamIDs, _ = base.StringsToInt64s(strings.Split(form.AllowlistTeams, ","))
+	if !setAllowlistDeployKeyIDs(ctx, pt, form.AllowlistDeployKeyIDs) {
+		return
+	}
 
 	if err := git_model.UpdateProtectedTag(ctx, pt); err != nil {
 		ctx.ServerError("UpdateProtectedTag", err)
@@ -154,6 +161,13 @@ func setTagsContext(ctx *context.Context) error {
 	}
 	ctx.Data["Users"] = users
 
+	deployKeys, err := getWriteDeployKeys(ctx)
+	if err != nil {
+		ctx.ServerError("getWriteDeployKeys", err)
+		return err
+	}
+	ctx.Data["DeployKeys"] = deployKeys
+
 	if ctx.Repo.Owner.IsOrganization() {
 		teams, err := organization.OrgFromUser(ctx.Repo.Owner).TeamsWithAccessToRepo(ctx, ctx.Repo.Repository.ID, perm.AccessModeRead)
 		if err != nil {
@@ -164,6 +178,19 @@ func setTagsContext(ctx *context.Context) error {
 	}
 
 	return nil
+}
+
+// setAllowlistDeployKeyIDs sets the deploy keys allowed by the protected tag, keeping only the write
+// deploy keys of the repository. It returns false if an error response was written.
+func setAllowlistDeployKeyIDs(ctx *context.Context, pt *git_model.ProtectedTag, keyIDs string) bool {
+	ids, _ := base.StringsToInt64s(strings.Split(keyIDs, ","))
+	var err error
+	pt.AllowlistDeployKeyIDs, err = git_model.FilterWriteDeployKeyIDs(ctx, ctx.Repo.Repository.ID, ids)
+	if err != nil {
+		ctx.ServerError("FilterWriteDeployKeyIDs", err)
+		return false
+	}
+	return true
 }
 
 func selectProtectedTagByContext(ctx *context.Context) *git_model.ProtectedTag {

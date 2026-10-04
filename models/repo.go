@@ -13,6 +13,7 @@ import (
 
 	asymkey_model "forgejo.org/models/asymkey"
 	"forgejo.org/models/db"
+	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
@@ -293,6 +294,10 @@ func DeleteDeployKey(ctx context.Context, id, repoID int64) error {
 
 	if _, err := db.DeleteByID[asymkey_model.DeployKey](ctx, key.ID); err != nil {
 		return fmt.Errorf("delete deploy key [%d]: %w", key.ID, err)
+	}
+
+	if err := git_model.RemoveDeployKeyIDFromProtectionRules(ctx, key.RepoID, key.KeyID); err != nil {
+		return fmt.Errorf("remove deploy key [%d] from protection rules: %w", key.ID, err)
 	}
 
 	// Check if this is the last reference to same key content.
