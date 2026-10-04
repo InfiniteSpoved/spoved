@@ -13,6 +13,7 @@ export default {
     mergeMessageFieldValue: '',
     deleteBranchAfterMerge: false,
     autoMergeWhenSucceed: false,
+    scheduledAfter: '',
 
     mergeStyle: '',
     mergeStyleDetail: { // dummy only, these values will come from one of the mergeForm.mergeStyles
@@ -30,7 +31,11 @@ export default {
   computed: {
     mergeButtonStyleClass() {
       if (this.mergeForm.allOverridableChecksOk) return 'primary';
-      return this.autoMergeWhenSucceed ? 'primary' : 'red';
+      return this.autoMergeWhenSucceed || this.scheduledAfterISO ? 'primary' : 'red';
+    },
+    scheduledAfterISO() {
+      if (!this.scheduledAfter || this.mergeStyle === 'manually-merged') return '';
+      return new Date(this.scheduledAfter).toISOString();
     },
     forceMerge() {
       return this.mergeForm.canMergeNow && !this.mergeForm.allOverridableChecksOk;
@@ -68,6 +73,7 @@ export default {
       this.showActionForm = show;
       if (!show) return;
       this.deleteBranchAfterMerge = this.mergeForm.defaultDeleteBranchAfterMerge;
+      this.scheduledAfter = '';
       this.mergeTitleFieldValue = this.mergeStyleDetail.mergeTitleFieldText;
       this.mergeMessageFieldValue = this.mergeStyleDetail.mergeMessageFieldText;
     },
@@ -99,7 +105,8 @@ export default {
     <!-- another similar form is in pull.tmpl (manual merge)-->
     <form class="ui form form-fetch-action" v-if="showActionForm" :action="mergeForm.baseLink+'/merge'" method="post">
       <input type="hidden" name="head_commit_id" v-model="mergeForm.pullHeadCommitID">
-      <input type="hidden" name="merge_when_checks_succeed" v-model="autoMergeWhenSucceed">
+      <input type="hidden" name="merge_when_checks_succeed" :value="autoMergeWhenSucceed || Boolean(scheduledAfterISO)">
+      <input type="hidden" name="scheduled_after" :value="scheduledAfterISO">
       <input type="hidden" name="force_merge" v-model="forceMerge">
 
       <template v-if="!mergeStyleDetail.hideMergeMessageTexts">
@@ -119,10 +126,17 @@ export default {
       <div class="field" v-if="mergeStyle === 'manually-merged'">
         <input type="text" name="merge_commit_id" :placeholder="mergeForm.textMergeCommitId">
       </div>
+      <div class="field" v-else>
+        <label for="scheduled-after">{{ mergeForm.textScheduledAfter }}</label>
+        <input type="datetime-local" id="scheduled-after" v-model="scheduledAfter">
+      </div>
 
       <button class="ui button" :class="mergeButtonStyleClass" type="submit" name="do" :value="mergeStyle">
         {{ mergeStyleDetail.textDoMerge }}
-        <template v-if="autoMergeWhenSucceed">
+        <template v-if="scheduledAfterISO">
+          {{ mergeForm.textAutoMergeButtonScheduled }}
+        </template>
+        <template v-else-if="autoMergeWhenSucceed">
           {{ mergeForm.textAutoMergeButtonWhenSucceed }}
         </template>
       </button>

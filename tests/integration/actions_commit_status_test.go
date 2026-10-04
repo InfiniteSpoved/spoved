@@ -37,7 +37,7 @@ func TestActionsAutomerge(t *testing.T) {
 		assert.False(t, pr.HasMerged, "PR should not be merged")
 		assert.Equal(t, issues_model.PullRequestStatusMergeable, pr.Status, "PR should be mergeable")
 
-		scheduled, err := automerge.ScheduleAutoMerge(ctx, user, pr, repo_model.MergeStyleMerge, "Dummy", false)
+		scheduled, err := automerge.ScheduleAutoMerge(ctx, user, pr, repo_model.MergeStyleMerge, "Dummy", false, 0, "")
 
 		require.NoError(t, err, "PR should be scheduled for automerge")
 		assert.True(t, scheduled, "PR should be scheduled for automerge")

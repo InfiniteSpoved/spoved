@@ -16092,6 +16092,9 @@
           "413": {
             "$ref": "#/responses/quotaExceeded"
           },
+          "422": {
+            "$ref": "#/responses/validationError"
+          },
           "423": {
             "$ref": "#/responses/repoArchivedError"
           }
@@ -29858,6 +29861,12 @@
         "merge_when_checks_succeed": {
           "type": "boolean",
           "x-go-name": "MergeWhenChecksSucceed"
+        },
+        "scheduled_after": {
+          "description": "do not merge before this time, only with merge_when_checks_succeed; the merge is pinned to the current head",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ScheduledAfter"
         }
       },
       "x-go-name": "MergePullRequestForm",
