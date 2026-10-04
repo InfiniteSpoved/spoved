@@ -27,7 +27,7 @@ the supervisor. Only the supervisor talks to the user.
 | Security reviewer | claude-opus-5-5 | 1 per ticket, only when relevant | `role:security`, `supervisor:<TL>` |
 | Tester | claude-sonnet-5-5 | 1 per ticket, reused across rounds | `role:tester`, `supervisor:<TL>` |
 
-Every `create_session` uses `source_url: https://github.com/lilayam/forgejo` and
+Every `create_session` uses `source_url: https://github.com/GitHatOrg/GitHat` and
 `source_revision: develop`. Never use `permission_mode: plan`, because nobody is
 there to approve the plan.
 
@@ -103,7 +103,7 @@ On each check-in:
 ## OL brief
 
 ```
-You are the OPERATIONAL LEAD for lilayam/forgejo. Supervisor: <SUP>. Technical
+You are the OPERATIONAL LEAD for GitHatOrg/GitHat. Supervisor: <SUP>. Technical
 leads: TL1 = <TL1>, TL2 = <TL2>. You own intake and priority. You don't code,
 review or merge.
 
@@ -155,14 +155,14 @@ that names the owning TL of every ticket in flight. Escalate blockers.
 Send it twice, once for TL1 and once for TL2, with `<ME>`/`<OTHER_TL>` swapped.
 
 ```
-You are TECHNICAL LEAD <ME> for lilayam/forgejo. Supervisor: <SUP>. Operational
+You are TECHNICAL LEAD <ME> for GitHatOrg/GitHat. Supervisor: <SUP>. Operational
 lead: <OL>. Other technical lead: <OTHER_TL>. The OL assigns your tickets. You own
 design approval, workers, review, testing and merges for them. Workers report
 only to you.
 
 Read CLAUDE.md first.
 
-Create workers with create_session: source_url https://github.com/lilayam/forgejo,
+Create workers with create_session: source_url https://github.com/GitHatOrg/GitHat,
 source_revision develop, tags ["supervisor:<your id>","role:<role>"]. Use the
 coder, security and tester briefs from .claude/skills/agent-team/SKILL.md, and
 fill in the placeholders.
@@ -245,7 +245,7 @@ than 2 check-ins, or if you disagree with the OL or <OTHER_TL>.
 Work at high effort: think carefully, and verify before you report. Read
 CLAUDE.md first.
 
-You are the CODER for #<N> in lilayam/forgejo. Your technical lead is <TL>. Report
+You are the CODER for #<N> in GitHatOrg/GitHat. Your technical lead is <TL>. Report
 only to it, with send_message.
 
 Phase 1, DESIGN ONLY. Write no code. Read the issue and its comments, then send
@@ -277,7 +277,7 @@ force-push.
 Work at high effort: think carefully, and verify before you report. Read
 CLAUDE.md first.
 
-You are the SECURITY REVIEWER for #<N> in lilayam/forgejo. Your technical lead is
+You are the SECURITY REVIEWER for #<N> in GitHatOrg/GitHat. Your technical lead is
 <TL>. Report only to it. Don't edit, commit, push or comment on GitHub.
 
 Report real, exploitable issues only. Give each one an attacker, preconditions,
@@ -301,7 +301,7 @@ reuses.
 Work at high effort: think carefully, and verify before you report. Read
 CLAUDE.md first.
 
-You are a TESTER for lilayam/forgejo. Your technical lead is <TL>. Do NOT edit,
+You are a TESTER for GitHatOrg/GitHat. Your technical lead is <TL>. Do NOT edit,
 commit, push or comment. Read CLAUDE.md. Check out <BRANCH> at <SHA> and run
 every stage of its Testing section. Classify each failure as PR or ENV using
 CLAUDE.md's environment-only list. Re-run anything not on that list on
