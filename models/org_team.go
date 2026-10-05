@@ -331,8 +331,9 @@ func DeleteTeam(ctx context.Context, t *organization.Team) error {
 	// update branch protections
 	{
 		protections := make([]*git_model.ProtectedBranch, 0, 10)
-		err := db.GetEngine(ctx).In("repo_id",
+		err := db.GetEngine(ctx).Where(builder.In("repo_id",
 			builder.Select("id").From("repository").Where(builder.Eq{"owner_id": t.OrgID})).
+			Or(builder.Eq{"repo_id": 0, "org_id": t.OrgID})).
 			Find(&protections)
 		if err != nil {
 			return fmt.Errorf("findProtectedBranches: %w", err)

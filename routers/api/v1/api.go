@@ -1302,6 +1302,15 @@ func Routes() *web.Route {
 			m.Post("/rename", reqToken(), reqOrgOwnership(), bind(api.RenameOrgOption{}), org.Rename)
 			m.Combo("/branch-workflow").Get(reqToken(), reqOrgOwnership(), org.GetBranchWorkflow).
 				Put(reqToken(), reqOrgOwnership(), bind(api.OrgBranchWorkflow{}), org.EditBranchWorkflow)
+			m.Group("/branch_protections", func() {
+				m.Get("", org.ListBranchProtections)
+				m.Post("", bind(api.CreateOrgBranchProtectionOption{}), org.CreateBranchProtection)
+				m.Group("/{name}", func() {
+					m.Get("", org.GetBranchProtection)
+					m.Patch("", bind(api.EditOrgBranchProtectionOption{}), org.EditBranchProtection)
+					m.Delete("", org.DeleteBranchProtection)
+				})
+			}, reqToken(), reqOrgOwnership())
 			m.Combo("/repos").Get(user.ListOrgRepos).
 				Post(reqToken(), bind(api.CreateRepoOption{}), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeReposAll, context.QuotaTargetOrg), repo.CreateOrgRepo)
 			m.Group("/members", func() {

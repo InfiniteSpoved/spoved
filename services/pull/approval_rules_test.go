@@ -119,10 +119,10 @@ func TestCheckPullBranchProtectionsApprovalRules(t *testing.T) {
 	require.NoError(t, git_model.UpdateProtectBranch(t.Context(), f.pr.BaseRepo, f.pb, git_model.WhitelistOptions{}))
 	f.pr.BaseBranch = "master"
 
-	_, err := pull_service.CheckPullBranchProtections(t.Context(), f.pr, true)
+	_, err := pull_service.CheckPullBranchProtections(t.Context(), f.pr, true, nil)
 	require.ErrorContains(t, err, `Security`)
 	f.review(t, 4, issues_model.ReviewTypeApprove, false)
-	_, err = pull_service.CheckPullBranchProtections(t.Context(), f.pr, true)
+	_, err = pull_service.CheckPullBranchProtections(t.Context(), f.pr, true, nil)
 	require.NoError(t, err)
 }
 

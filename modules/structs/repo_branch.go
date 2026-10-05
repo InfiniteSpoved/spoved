@@ -193,3 +193,29 @@ type EditBranchProtectionOption struct {
 	// ApprovalRules are the named approval requirements. On edit, null keeps them and an empty list removes them. At most 20.
 	ApprovalRules []*ApprovalRule `json:"approval_rules"`
 }
+
+// OrgBranchProtection represents a branch protection rule of an organization. It applies to the
+// repositories of the organization in addition to their own rules.
+type OrgBranchProtection struct {
+	BranchProtection
+	// Apply the rule to the repositories in `repos` only, instead of all repositories of the organization
+	ApplyToSelectedRepos bool `json:"apply_to_selected_repos"`
+	// Names of the selected repositories
+	Repos []string `json:"repos"`
+}
+
+// CreateOrgBranchProtectionOption options for creating a branch protection rule of an organization.
+// Deploy keys are not supported.
+type CreateOrgBranchProtectionOption struct {
+	CreateBranchProtectionOption
+	ApplyToSelectedRepos bool     `json:"apply_to_selected_repos"`
+	Repos                []string `json:"repos"`
+}
+
+// EditOrgBranchProtectionOption options for editing a branch protection rule of an organization.
+// Only fields that are set are changed.
+type EditOrgBranchProtectionOption struct {
+	EditBranchProtectionOption
+	ApplyToSelectedRepos *bool    `json:"apply_to_selected_repos"`
+	Repos                []string `json:"repos"`
+}

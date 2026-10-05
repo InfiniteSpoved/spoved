@@ -397,11 +397,11 @@ func ValidatePullRequest(ctx context.Context, pr *issues_model.PullRequest, newC
 			log.Error("MarkReviewsAsStale: %v", err)
 		}
 
-		pb, err := git_model.GetFirstMatchProtectedBranchRule(ctx, pr.BaseRepoID, pr.BaseBranch)
+		rules, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
 		if err != nil {
-			log.Error("GetFirstMatchProtectedBranchRule: %v", err)
+			log.Error("GetMatchedProtectedBranchRules: %v", err)
 		}
-		if pb != nil && pb.DismissStaleApprovals {
+		if slices.ContainsFunc(rules, func(pb *git_model.ProtectedBranch) bool { return pb.DismissStaleApprovals }) {
 			if err := DismissApprovalReviews(ctx, doer, pr); err != nil {
 				log.Error("DismissApprovalReviews: %v", err)
 			}

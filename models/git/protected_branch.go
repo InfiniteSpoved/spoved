@@ -32,7 +32,8 @@ var ErrBranchIsProtected = errors.New("branch is protected")
 // ProtectedBranch struct
 type ProtectedBranch struct {
 	ID                            int64                  `xorm:"pk autoincr"`
-	RepoID                        int64                  `xorm:"UNIQUE(s)"`
+	RepoID                        int64                  `xorm:"UNIQUE(s)"`                          // 0 for organization rules
+	OrgID                         int64                  `xorm:"UNIQUE(s) INDEX NOT NULL DEFAULT 0"` // set for organization rules only
 	Repo                          *repo_model.Repository `xorm:"-"`
 	RuleName                      string                 `xorm:"'branch_name' UNIQUE(s)"` // a branch name or a glob match to branch name
 	globRule                      glob.Glob              `xorm:"-"`
@@ -77,12 +78,23 @@ type ProtectedBranch struct {
 	ForcePushAllowlistTeamIDs      []int64 `xorm:"JSON TEXT"`
 	ForcePushAllowlistDeployKeyIDs []int64 `xorm:"JSON TEXT"`
 
+	// Organization rules only: apply to the repositories in protected_branch_repo instead of all repositories of the organization.
+	ApplyToSelectedRepos bool `xorm:"NOT NULL DEFAULT false"`
+
 	CreatedUnix timeutil.TimeStamp `xorm:"created"`
 	UpdatedUnix timeutil.TimeStamp `xorm:"updated"`
 }
 
+// ProtectedBranchRepo is a repository an organization rule with ApplyToSelectedRepos applies to.
+type ProtectedBranchRepo struct {
+	ID                int64 `xorm:"pk autoincr"`
+	ProtectedBranchID int64 `xorm:"UNIQUE(s) INDEX NOT NULL"`
+	RepoID            int64 `xorm:"UNIQUE(s) INDEX NOT NULL"`
+}
+
 func init() {
 	db.RegisterModel(new(ProtectedBranch))
+	db.RegisterModel(new(ProtectedBranchRepo))
 }
 
 // IsRuleNameSpecial return true if it contains special character
@@ -126,6 +138,9 @@ func (protectBranch *ProtectedBranch) Match(branchName string) bool {
 func (protectBranch *ProtectedBranch) LoadRepo(ctx context.Context) (err error) {
 	if protectBranch.Repo != nil {
 		return nil
+	}
+	if protectBranch.RepoID == 0 {
+		return fmt.Errorf("organization rule %d has no repository loaded", protectBranch.ID)
 	}
 	protectBranch.Repo, err = repo_model.GetRepositoryByID(ctx, protectBranch.RepoID)
 	return err
@@ -220,6 +235,18 @@ func isUserInAllowlist(ctx context.Context, user *user_model.User, userIDs, team
 	return in
 }
 
+// IsAdminExempt returns whether user may skip the rule because it doesn't apply to admins:
+// repository admins for a repository rule, organization owners for an organization rule.
+func (protectBranch *ProtectedBranch) IsAdminExempt(ctx context.Context, user *user_model.User, isRepoAdmin bool) (bool, error) {
+	if protectBranch.ApplyToAdmins || user == nil {
+		return false, nil
+	}
+	if protectBranch.OrgID == 0 {
+		return isRepoAdmin, nil
+	}
+	return organization.IsOrganizationOwner(ctx, protectBranch.OrgID, user.ID)
+}
+
 // IsUserMergeWhitelisted checks if some user is whitelisted to merge to this branch
 func IsUserMergeWhitelisted(ctx context.Context, protectBranch *ProtectedBranch, userID int64, permissionInRepo access_model.Permission) bool {
 	if !protectBranch.EnableMergeWhitelist {
@@ -245,18 +272,17 @@ func IsUserMergeWhitelisted(ctx context.Context, protectBranch *ProtectedBranch,
 
 // IsUserOfficialReviewer check if user is official reviewer for the branch (counts towards required approvals)
 func IsUserOfficialReviewer(ctx context.Context, protectBranch *ProtectedBranch, user *user_model.User) (bool, error) {
-	repo, err := repo_model.GetRepositoryByID(ctx, protectBranch.RepoID)
-	if err != nil {
+	if err := protectBranch.LoadRepo(ctx); err != nil {
 		return false, err
 	}
 
 	if !protectBranch.EnableApprovalsWhitelist {
-		// Anyone with write access is considered official reviewer
-		writeAccess, err := access_model.HasAccessUnit(ctx, user, repo, unit.TypeCode, perm.AccessModeWrite)
-		if err != nil {
-			return false, err
+		// Anyone with write access is considered official reviewer, for an organization rule only members of the organization
+		writeAccess, err := access_model.HasAccessUnit(ctx, user, protectBranch.Repo, unit.TypeCode, perm.AccessModeWrite)
+		if err != nil || !writeAccess || protectBranch.OrgID == 0 {
+			return writeAccess, err
 		}
-		return writeAccess, nil
+		return organization.IsOrganizationMember(ctx, protectBranch.OrgID, user.ID)
 	}
 
 	if slices.Contains(protectBranch.ApprovalsWhitelistUserIDs, user.ID) {
@@ -294,6 +320,15 @@ func getFilePatterns(filePatterns string) []glob.Glob {
 		}
 	}
 	return extarr
+}
+
+// ChangedProtectedFiles returns the files of changedFiles that this rule protects.
+func (protectBranch *ProtectedBranch) ChangedProtectedFiles(changedFiles []string) []string {
+	patterns := protectBranch.GetProtectedFilePatterns()
+	if len(patterns) == 0 {
+		return nil
+	}
+	return slices.DeleteFunc(slices.Clone(changedFiles), func(file string) bool { return !protectBranch.IsProtectedFile(patterns, file) })
 }
 
 // MergeBlockedByProtectedFiles returns true if merge is blocked by protected files change

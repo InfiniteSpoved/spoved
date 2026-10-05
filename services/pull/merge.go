@@ -507,34 +507,46 @@ func IsUserAllowedToMerge(ctx context.Context, pr *issues_model.PullRequest, p a
 		return false, nil
 	}
 
-	pb, err := git_model.GetFirstMatchProtectedBranchRule(ctx, pr.BaseRepoID, pr.BaseBranch)
+	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
 	if err != nil {
 		return false, err
 	}
-
-	if (p.CanWrite(unit.TypeCode) && pb == nil) || (pb != nil && git_model.IsUserMergeWhitelisted(ctx, pb, user.ID, p)) {
-		return true, nil
+	if len(rules) == 0 {
+		return p.CanWrite(unit.TypeCode), nil
 	}
-
-	return false, nil
+	for _, pb := range rules {
+		if !git_model.IsUserMergeWhitelisted(ctx, pb, user.ID, p) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
-// CheckPullBranchProtections checks whether the PR is ready to be merged (reviews and status checks).
-// Returns the protected branch rule when `ErrDisallowedToMerge` is returned as error.
-func CheckPullBranchProtections(ctx context.Context, pr *issues_model.PullRequest, skipProtectedFilesCheck bool) (protectedBranchRule *git_model.ProtectedBranch, err error) {
+// CheckPullBranchProtections checks whether the PR is ready to be merged (reviews and status checks) under every
+// matching rule, except the rules exempt (may be nil) returns true for.
+// Returns the failing protected branch rule when `ErrDisallowedToMerge` is returned as error.
+func CheckPullBranchProtections(ctx context.Context, pr *issues_model.PullRequest, skipProtectedFilesCheck bool, exempt func(*git_model.ProtectedBranch) bool) (protectedBranchRule *git_model.ProtectedBranch, err error) {
 	if err = pr.LoadBaseRepo(ctx); err != nil {
 		return nil, fmt.Errorf("LoadBaseRepo: %w", err)
 	}
 
-	pb, err := git_model.GetFirstMatchProtectedBranchRule(ctx, pr.BaseRepoID, pr.BaseBranch)
+	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
 	if err != nil {
 		return nil, fmt.Errorf("LoadProtectedBranch: %v", err)
 	}
-	if pb == nil {
-		return nil, nil
+	for _, pb := range rules {
+		if exempt != nil && exempt(pb) {
+			continue
+		}
+		if pb, err := checkPullBranchProtection(ctx, pr, pb, skipProtectedFilesCheck); err != nil {
+			return pb, err
+		}
 	}
+	return nil, nil
+}
 
-	isPass, err := IsPullCommitStatusPass(ctx, pr)
+func checkPullBranchProtection(ctx context.Context, pr *issues_model.PullRequest, pb *git_model.ProtectedBranch, skipProtectedFilesCheck bool) (*git_model.ProtectedBranch, error) {
+	isPass, err := isPullCommitStatusPass(ctx, pr, pb)
 	if err != nil {
 		return nil, err
 	}
@@ -591,7 +603,7 @@ func CheckPullBranchProtections(ctx context.Context, pr *issues_model.PullReques
 		return nil, nil
 	}
 
-	if pb.MergeBlockedByProtectedFiles(pr.ChangedProtectedFiles) {
+	if pb.MergeBlockedByProtectedFiles(pb.ChangedProtectedFiles(pr.ChangedProtectedFiles)) {
 		return pb, models.ErrDisallowedToMerge{
 			Reason: "Changed protected files",
 		}
