@@ -182,45 +182,50 @@ func loadPullGitInfo(ctx context.Context, pr *issues_model.PullRequest, withOwne
 	return files, owners, err
 }
 
-// countUncoveredFiles counts the changed files in the scope of the rule that have code owners, none of which approved.
+// countUncoveredFiles counts the changed files in the scope of the rule where a matching CODEOWNERS line has no approving owner.
+// Every matching line is required, so a catch-all line can't cover a file that a more specific line gives to other owners.
 func countUncoveredFiles(ctx context.Context, rule *git_model.ApprovalRule, files []string, codeOwners []*issues_model.CodeOwnerRule, approvers []*user_model.User) (int, error) {
 	uncovered := 0
-	covered := map[string]bool{} // by owners, most files share them
+	covered := map[*issues_model.CodeOwnerRule]bool{} // lines are shared by many files
 	for _, f := range files {
 		if !rule.AppliesTo([]string{f}) {
 			continue
 		}
-		users, teams := issue_service.CodeOwnersOfFile(codeOwners, f)
-		if len(users)+len(teams) == 0 {
-			continue
-		}
-		userIDs, teamIDs := make([]int64, len(users)), make([]int64, len(teams))
-		for i, u := range users {
-			userIDs[i] = u.ID
-		}
-		for i, t := range teams {
-			teamIDs[i] = t.ID
-		}
-		key := fmt.Sprint(userIDs, teamIDs)
-		ok, seen := covered[key]
-		for _, a := range approvers {
-			if seen || ok {
-				break
-			}
-			ok = slices.Contains(userIDs, a.ID)
-			if !ok && len(teamIDs) > 0 {
+		for _, line := range issue_service.CodeOwnerRulesOfFile(codeOwners, f) {
+			ok, seen := covered[line]
+			if !seen {
 				var err error
-				if ok, err = organization.IsUserInTeams(ctx, a.ID, teamIDs); err != nil {
+				if ok, err = lineApproved(ctx, line, approvers); err != nil {
 					return 0, err
 				}
+				covered[line] = ok
 			}
-		}
-		covered[key] = ok
-		if !ok {
-			uncovered++
+			if !ok {
+				uncovered++
+				break
+			}
 		}
 	}
 	return uncovered, nil
+}
+
+// lineApproved returns true if one of the approvers is an owner named on the line, directly or through a team.
+func lineApproved(ctx context.Context, line *issues_model.CodeOwnerRule, approvers []*user_model.User) (bool, error) {
+	teamIDs := make([]int64, len(line.Teams))
+	for i, t := range line.Teams {
+		teamIDs[i] = t.ID
+	}
+	for _, a := range approvers {
+		if slices.ContainsFunc(line.Users, func(u *user_model.User) bool { return u.ID == a.ID }) {
+			return true, nil
+		}
+		if len(teamIDs) > 0 {
+			if ok, err := organization.IsUserInTeams(ctx, a.ID, teamIDs); err != nil || ok {
+				return ok, err
+			}
+		}
+	}
+	return false, nil
 }
 
 // ApprovalRulesFromAPI resolves the user and team names of the rules. Unknown names return

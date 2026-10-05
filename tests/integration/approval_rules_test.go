@@ -233,6 +233,18 @@ func TestApprovalRulesMerge(t *testing.T) {
 			e.apiMerge(e.owner, index, false, http.StatusOK)
 		})
 
+		// every CODEOWNERS line matching a file must have an approving owner, a catch-all line doesn't cover the rest
+		t.Run("CodeOwnersEveryLine", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			e.base("ar-co-lines", create("CODEOWNERS", ".* @user5\nsrc/auth/.* @user4\n"))
+			e.protect("ar-co-lines", true, &api.ApprovalRule{Name: "Code owners", RequiredCount: 1, RequireCodeOwners: true})
+			index := e.pr("ar-co-lines", create("src/auth/x.go", "x"))
+			e.approve("user5", index)
+			e.apiMerge(e.owner, index, false, http.StatusMethodNotAllowed)
+			e.approve("user4", index)
+			e.apiMerge(e.owner, index, false, http.StatusOK)
+		})
+
 		// AC7: legacy rules keep working, with and without approval rules.
 		t.Run("Legacy", func(t *testing.T) {
 			defer tests.PrintCurrentTest(t)()

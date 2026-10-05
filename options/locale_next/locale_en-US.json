@@ -1471,5 +1471,6 @@
 	"repo.pulls.approval_rule_status": "%s: %d/%d",
 	"repo.pulls.approval_rule_uncovered": "(%d changed files are not approved by a code owner)",
 	"repo.pulls.approval_rule_eligible": "Can approve: %s",
+	"repo.pulls.approval_rules_error": "Approval rules could not be evaluated",
 	"meta.last_line": "Thank you for translating Forgejo! This line isn't seen by the users but it serves other purposes in the translation management. You can place a fun fact in the translation instead of translating it."
 }

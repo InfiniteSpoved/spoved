@@ -45,15 +45,14 @@ func LoadCodeOwnerRules(ctx context.Context, commit *git.Commit) (rules []*issue
 	return nil, false, nil
 }
 
-// CodeOwnersOfFile returns the users and teams owning the file, the way PullRequestCodeOwnersReview matches the rules.
-func CodeOwnersOfFile(rules []*issues_model.CodeOwnerRule, file string) (users []*user_model.User, teams []*org_model.Team) {
+// CodeOwnerRulesOfFile returns the CODEOWNERS lines that apply to the file, the way PullRequestCodeOwnersReview matches them.
+func CodeOwnerRulesOfFile(rules []*issues_model.CodeOwnerRule, file string) (matching []*issues_model.CodeOwnerRule) {
 	for _, rule := range rules {
 		if rule.Rule.MatchString(file) != rule.Negative {
-			users = append(users, rule.Users...)
-			teams = append(teams, rule.Teams...)
+			matching = append(matching, rule)
 		}
 	}
-	return users, teams
+	return matching
 }
 
 func PullRequestCodeOwnersReview(ctx context.Context, issue *issues_model.Issue, pr *issues_model.PullRequest) ([]*ReviewRequestNotifier, error) {

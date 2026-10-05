@@ -2002,8 +2002,10 @@ func ViewIssue(ctx *context.Context) {
 			ctx.Data["GrantedApprovals"] = issues_model.GetGrantedApprovalsCount(ctx, pb, pull)
 			// the required approvals of the protection have their own line, a branch without approval rules looks as before
 			if rules, err := pull_service.EvaluateApprovalRules(ctx, pb, pull); err != nil {
-				ctx.ServerError("EvaluateApprovalRules", err)
-				return
+				// the merge fails closed in CheckPullBranchProtections, the page still has to render
+				log.Error("EvaluateApprovalRules for %-v: %v", pull, err)
+				ctx.Data["ApprovalRulesError"] = true
+				ctx.Data["IsBlockedByApprovalRules"] = true
 			} else if len(rules) > 0 {
 				ctx.Data["ApprovalRules"] = rules
 				if ctx.Repo.IsAdmin() {

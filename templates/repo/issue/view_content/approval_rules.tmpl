@@ -1,3 +1,9 @@
+{{if .ApprovalRulesError}}
+	<div class="item text red">
+		{{svg "octicon-x"}}
+		{{ctx.Locale.Tr "repo.pulls.approval_rules_error"}}
+	</div>
+{{end}}
 {{if .ApprovalRules}}
 	<div class="item">
 		<ul class="tw-list-none tw-m-0 tw-p-0">
