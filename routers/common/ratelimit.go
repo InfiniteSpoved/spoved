@@ -12,6 +12,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/ratelimit"
+	"forgejo.org/modules/setting"
 	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 )
@@ -24,6 +25,9 @@ var rateLimitHeaders = []string{"X-RateLimit-Limit", "X-RateLimit-Remaining", "X
 // Authenticated requests count per user (or per Actions task), anonymous ones per client IP.
 func checkRateLimit(b *context.Base, class string, doer *user_model.User, ar auth.AuthenticationResult) ratelimit.Result {
 	if ratelimit.IsExempt(b.RemoteAddr()) {
+		return ratelimit.Result{Allowed: true}
+	}
+	if setting.RateLimit.ExemptAdmins && doer != nil && doer.IsAdmin && doer.IsActive && !doer.ProhibitLogin {
 		return ratelimit.Result{Allowed: true}
 	}
 	key, authenticated := ratelimit.IPKey(b.RemoteAddr()), false
