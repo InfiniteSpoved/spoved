@@ -4,6 +4,7 @@
 package convert
 
 import (
+	"context"
 	"testing"
 
 	"forgejo.org/models/db"
@@ -14,6 +15,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/cache"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/structs"
 	"forgejo.org/modules/timeutil"
@@ -99,6 +101,40 @@ func TestToAPIPullRequestScheduledAfter(t *testing.T) {
 		assert.Nil(t, toAPI(t, 6, nil).ScheduledAfter)
 		assert.Nil(t, toAPI(t, 6, nil).GiveUpAfter)
 	})
+}
+
+func TestToAPIPullRequestScheduleCache(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	scheduled := timeutil.TimeStamp(2000000000)
+
+	// PRs 2 and 5 are unmerged and share base repo 1.
+	toAPI := func(ctx context.Context, pullID int64) *structs.PullRequest {
+		pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pullID})
+		apiPR := ToAPIPullRequest(ctx, pr, user2)
+		require.NotNil(t, apiPR)
+		return apiPR
+	}
+	schedule := func(pullID int64) {
+		require.NoError(t, db.Insert(db.DefaultContext, &pull_model.AutoMerge{PullID: pullID, DoerID: 2, ScheduledAfterUnix: scheduled, GiveUpAfterUnix: scheduled}))
+	}
+
+	ctx := cache.WithCacheContext(db.DefaultContext)
+	schedule(2)
+	apiPR := toAPI(ctx, 2)
+	assert.Equal(t, scheduled.AsTimePtr(), apiPR.ScheduledAfter)
+	assert.Equal(t, scheduled.AsTimePtr(), apiPR.GiveUpAfter)
+
+	// The repo's schedule was loaded once for this request, so the new row is not seen.
+	schedule(5)
+	apiPR = toAPI(ctx, 5)
+	assert.Nil(t, apiPR.ScheduledAfter)
+	assert.Nil(t, apiPR.GiveUpAfter)
+
+	// Control: a fresh request sees it.
+	apiPR = toAPI(cache.WithCacheContext(db.DefaultContext), 5)
+	assert.Equal(t, scheduled.AsTimePtr(), apiPR.ScheduledAfter)
+	assert.Equal(t, scheduled.AsTimePtr(), apiPR.GiveUpAfter)
 }
 
 func TestPullReviewList(t *testing.T) {
