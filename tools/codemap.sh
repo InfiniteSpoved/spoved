@@ -30,9 +30,9 @@ fi
 [ "$(git -C "$CACHE" rev-parse HEAD)" = "$PIN" ] && [ -z "$(git -C "$CACHE" status --porcelain -- graphify pyproject.toml uv.lock)" ] ||
 	{ echo "codemap: cache $CACHE is not the pinned, clean graphify $PIN; delete it and re-run" >&2; exit 1; }
 
-[ -x "$CACHE/.venv/bin/python" ] || (cd "$CACHE" && UV_PYTHON_DOWNLOADS=never uv sync --frozen --no-dev --no-install-project --no-build --no-config) ||
+(cd "$CACHE" && UV_PYTHON_DOWNLOADS=never uv sync --frozen --no-dev --no-install-project --no-build --no-config) ||
 	{ echo "codemap: uv sync failed (a system python satisfying graphify's requires-python is needed; no downloads)" >&2; exit 1; }
 
-cd "$(git rev-parse --show-toplevel)"
+cd "$(dirname "$0")/.."
 env -i PATH="$PATH" HOME="$HOME" LANG=C.UTF-8 PYTHONPATH="$CACHE" GRAPHIFY_NO_AUTO_REFRESH=1 \
 	"$CACHE/.venv/bin/python" -m graphify "${args[@]}"
