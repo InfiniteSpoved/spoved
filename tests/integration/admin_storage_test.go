@@ -160,6 +160,9 @@ func TestAdminStorage(t *testing.T) {
 	})
 
 	t.Run("RepoExportAbort", func(t *testing.T) {
+		if !setting.Database.Type.IsSQLite3() {
+			t.Skip("needs SQLite-specific SQL to force a mid-stream scan error")
+		}
 		// a num_stars that can't be scanned makes the query fail after the rows sorted before it were written
 		_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET num_stars = 'x' WHERE id = 3")
 		require.NoError(t, err)
