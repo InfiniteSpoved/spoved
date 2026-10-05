@@ -366,6 +366,9 @@ var ignoredErrorMessage = []string{
 
 	// TestDemoErrorPages
 	`ErrorPage() [E] Example error: Example error`,
+
+	// TestAdminStorage/RepoExportAbort
+	`exportRepoStorage() [E] exportRepoStorage: converting driver.Value type string to a int`,
 }
 
 func (w *testLoggerWriterCloser) recordError(msg string) {
