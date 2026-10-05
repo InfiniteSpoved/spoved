@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -90,10 +91,15 @@ func bwPutRepoAPI(t *testing.T, ctx APITestContext, owner, repo, mode string, ex
 func bwPR(t *testing.T, s *TestSession, owner, repo, base, head string) string {
 	t.Helper()
 	if !git.IsBranchExist(t.Context(), repo_model.RepoPath(owner, repo), head) {
-		testEditFileToNewBranch(t, s, owner, repo, base, head, "README.md", "edited on "+head+"\n")
+		testNewFileToNewBranch(t, s, owner, repo, base, head, head+".txt", "edited on "+head+"\n")
 	}
 	resp := testPullCreate(t, s, owner, repo, true, base, head, "PR from "+head)
 	return strings.Split(test.RedirectURL(resp), "/")[4]
+}
+
+// bwFlag matches `'key':  value ,` as rendered into the page's script.
+func bwFlag(body, key string, value bool) bool {
+	return regexp.MustCompile(`'` + key + `':\s+` + strconv.FormatBool(value) + `\b`).MatchString(body)
 }
 
 func bwFlash(s *TestSession) string {
@@ -223,8 +229,8 @@ func TestBranchWorkflowInheritance(t *testing.T) {
 		DecodeJSON(t, ctx.Session.MakeRequest(t, req, http.StatusOK), &org)
 		assert.Equal(t, "off", org["delete_branch_after_merge"])
 		assert.Equal(t, false, org["enforce_delete_branch_after_merge"])
-		// unlocked again: the repo's own value (always, set above) is back
-		assert.Equal(t, "always", bwGetRepoAPI(t, ctx, "org3", repo)["effective_delete_branch_after_merge"])
+		// unlocked again: the repo's own value (off, written through the legacy field above) is back
+		assert.Equal(t, "off", bwGetRepoAPI(t, ctx, "org3", repo)["effective_delete_branch_after_merge"])
 	})
 }
 
@@ -252,7 +258,10 @@ func TestBranchWorkflowLegacyBool(t *testing.T) {
 		s.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/settings/units", map[string]string{
 			"enable_pulls": "on", "pulls_allow_merge": "on", "pulls_default_merge_style": "merge",
 		}), http.StatusSeeOther)
-		assert.Equal(t, "default-on", bwGetRepoAPI(t, ctx, "user2", "repo1")["effective_delete_branch_after_merge"])
+		repo = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{OwnerName: "user2", Name: "repo1"})
+		u, err = repo.GetUnit(db.DefaultContext, unit.TypePullRequests)
+		require.NoError(t, err)
+		assert.Equal(t, repo_model.DeleteBranchDefaultOn, u.PullRequestsConfig().GetDeleteBranchAfterMerge())
 	})
 }
 
@@ -267,17 +276,19 @@ func TestBranchWorkflowMergeBox(t *testing.T) {
 			return owner.MakeRequest(t, NewRequest(t, "GET", path.Join("org3", repo, "pulls", idx)), http.StatusOK).Body.String()
 		}
 
-		assert.Contains(t, page(), "'defaultDeleteBranchAfterMerge': false")
-		assert.Contains(t, page(), "'deleteBranchForced': false")
+		body := page()
+		assert.True(t, bwFlag(body, "defaultDeleteBranchAfterMerge", false))
+		assert.True(t, bwFlag(body, "deleteBranchForced", false))
 
 		bwRepoPost(t, owner, "org3", repo, "default-on", http.StatusSeeOther)
-		assert.Contains(t, page(), "'defaultDeleteBranchAfterMerge': true")
-		assert.Contains(t, page(), "'deleteBranchForced': false")
+		body = page()
+		assert.True(t, bwFlag(body, "defaultDeleteBranchAfterMerge", true))
+		assert.True(t, bwFlag(body, "deleteBranchForced", false))
 
 		bwOrgPost(t, owner, "always", true, http.StatusSeeOther)
-		body := page()
-		assert.Contains(t, body, "'defaultDeleteBranchAfterMerge': true")
-		assert.Contains(t, body, "'deleteBranchForced': true")
+		body = page()
+		assert.True(t, bwFlag(body, "defaultDeleteBranchAfterMerge", true))
+		assert.True(t, bwFlag(body, "deleteBranchForced", true))
 		assert.Contains(t, body, "Set by organization org3")
 	})
 }
@@ -341,26 +352,28 @@ func TestBranchWorkflowKeptBranches(t *testing.T) {
 		bwOrgPost(t, owner, "always", true, http.StatusSeeOther)
 
 		// protected branch: kept with reason. Forced: merge succeeds (200). Requested: web flashes the reason, API 403.
-		bwProtect(t, ctx, repo, "prot-*", parameterProtectBranch{"enable_push": "true"})
-		idx := bwPR(t, owner, "org3", repo, "master", "prot-forced")
-		testPullMerge(t, owner, "org3", repo, idx, repo_model.MergeStyleMerge, false)
+		forcedIdx := bwPR(t, owner, "org3", repo, "master", "prot-forced")
+		apiIdx := bwPR(t, owner, "org3", repo, "master", "prot-api")
+		api2Idx := bwPR(t, owner, "org3", repo, "master", "prot-api2")
+		for _, b := range []string{"prot-forced", "prot-api", "prot-api2"} {
+			bwProtect(t, ctx, repo, b, parameterProtectBranch{"enable_push": "true"})
+		}
+		testPullMerge(t, owner, "org3", repo, forcedIdx, repo_model.MergeStyleMerge, false)
 		assert.True(t, bwBranchExists("org3", repo, "prot-forced"))
 		assert.Contains(t, bwFlash(owner), "protected branch")
 
-		idx = bwPR(t, owner, "org3", repo, "master", "prot-api")
-		n, _ := strconv.ParseInt(idx, 10, 64)
+		n, _ := strconv.ParseInt(apiIdx, 10, 64)
 		doAPIMergePullRequestForm(t, ctx, "org3", repo, n, &forms.MergePullRequestForm{Do: "merge"}) // forced: 200
 		assert.True(t, bwBranchExists("org3", repo, "prot-api"))
-		idx = bwPR(t, owner, "org3", repo, "master", "prot-api2")
-		n, _ = strconv.ParseInt(idx, 10, 64)
+		n, _ = strconv.ParseInt(api2Idx, 10, 64)
 		ctx.ExpectedCode = http.StatusForbidden
 		doAPIMergePullRequestForm(t, ctx, "org3", repo, n, &forms.MergePullRequestForm{Do: "merge", DeleteBranchAfterMerge: true})
 		ctx.ExpectedCode = 0
 		assert.True(t, bwBranchExists("org3", repo, "prot-api2"))
 
 		// another open PR with the same head
-		testEditFileToNewBranch(t, owner, "org3", repo, "master", "dev", "README.md", "dev\n")
-		testEditFileToNewBranch(t, owner, "org3", repo, "master", "shared", "README.md", "shared\n")
+		testNewFileToNewBranch(t, owner, "org3", repo, "master", "dev", "dev.txt", "dev\n")
+		testNewFileToNewBranch(t, owner, "org3", repo, "master", "shared", "shared.txt", "shared\n")
 		first := bwPR(t, owner, "org3", repo, "master", "shared")
 		testPullCreate(t, owner, "org3", repo, true, "dev", "shared", "second PR from shared")
 		testPullMerge(t, owner, "org3", repo, first, repo_model.MergeStyleMerge, false)

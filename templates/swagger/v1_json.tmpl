@@ -28406,6 +28406,21 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "EditRepoBranchWorkflowOption": {
+      "description": "EditRepoBranchWorkflowOption options to change the branch workflow settings of a repository",
+      "type": "object",
+      "required": [
+        "delete_branch_after_merge"
+      ],
+      "properties": {
+        "delete_branch_after_merge": {
+          "description": "DeleteBranchAfterMerge is one of inherit, off, default-on and always",
+          "type": "string",
+          "x-go-name": "DeleteBranchAfterMerge"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "EditRepoOption": {
       "description": "EditRepoOption options when editing a repository's properties",
       "type": "object",
