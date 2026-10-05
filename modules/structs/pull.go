@@ -59,6 +59,9 @@ type PullRequest struct {
 	// time after which the pending scheduled auto merge may run; absent when none is scheduled
 	// swagger:strfmt date-time
 	ScheduledAfter *time.Time `json:"scheduled_after,omitempty"`
+	// time after which the pending scheduled auto merge is cancelled if it has not merged; may remain after scheduled_after is gone
+	// swagger:strfmt date-time
+	GiveUpAfter *time.Time `json:"give_up_after,omitempty"`
 
 	PinOrder int   `json:"pin_order"`
 	Flow     int64 `json:"flow"`

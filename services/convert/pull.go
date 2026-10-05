@@ -18,7 +18,6 @@ import (
 	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/log"
 	api "forgejo.org/modules/structs"
-	"forgejo.org/modules/timeutil"
 )
 
 // ToAPIPullRequest assumes following fields have been assigned with valid values:
@@ -141,15 +140,20 @@ func ToAPIPullRequest(ctx context.Context, pr *issues_model.PullRequest, doer *u
 	}
 
 	if !pr.HasMerged && p.CanRead(unit.TypePullRequests) {
-		const repoScheduledAfterCacheKey = "repo_scheduled_after_cache"
-		scheduledAfter, err := cache.GetWithContextCache(ctx, repoScheduledAfterCacheKey, pr.BaseRepoID,
-			func() (map[int64]timeutil.TimeStamp, error) {
-				return pull_model.GetScheduledAfterByBaseRepoID(ctx, pr.BaseRepoID)
+		const repoScheduleCacheKey = "repo_schedule_cache"
+		schedule, err := cache.GetWithContextCache(ctx, repoScheduleCacheKey, pr.BaseRepoID,
+			func() (map[int64]*pull_model.AutoMerge, error) {
+				return pull_model.GetScheduleByBaseRepoID(ctx, pr.BaseRepoID)
 			})
 		if err != nil {
-			log.Error("GetScheduledAfterByBaseRepoID[%d]: %v", pr.BaseRepoID, err)
-		} else if t := scheduledAfter[pr.ID]; t > 0 {
-			apiPullRequest.ScheduledAfter = t.AsTimePtr()
+			log.Error("GetScheduleByBaseRepoID[%d]: %v", pr.BaseRepoID, err)
+		} else if am := schedule[pr.ID]; am != nil {
+			if am.ScheduledAfterUnix > 0 {
+				apiPullRequest.ScheduledAfter = am.ScheduledAfterUnix.AsTimePtr()
+			}
+			if am.GiveUpAfterUnix > 0 {
+				apiPullRequest.GiveUpAfter = am.GiveUpAfterUnix.AsTimePtr()
+			}
 		}
 	}
 
