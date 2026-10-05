@@ -397,31 +397,31 @@ func TestActionsAPIGetActionRun(t *testing.T) {
 		req.AddTokenAuth(token)
 
 		res := MakeRequest(t, req, http.StatusOK)
-		var receivedRun map[string]any
+		var receivedRun api.ActionRun
 		DecodeJSON(t, res, &receivedRun)
 
-		assert.EqualValues(t, run.ID, receivedRun["id"])
-		assert.Equal(t, "Update README.md", receivedRun["title"])
-		assert.NotNil(t, receivedRun["repository"])
-		assert.Equal(t, "test.yaml", receivedRun["workflow_id"])
-		assert.EqualValues(t, 4, receivedRun["index_in_repo"])
-		assert.NotNil(t, receivedRun["trigger_user"])
-		assert.Equal(t, "main", receivedRun["prettyref"])
-		assert.Equal(t, false, receivedRun["is_ref_deleted"])
-		assert.Equal(t, "dd7ec6d7d24b0718cf1832984dadfad4b7113620", receivedRun["commit_sha"])
-		assert.Equal(t, true, receivedRun["is_fork_pull_request"])
-		assert.Equal(t, true, receivedRun["need_approval"])
-		assert.EqualValues(t, 28, receivedRun["approved_by"])
-		assert.Equal(t, "push", receivedRun["event"])
-		assert.Equal(t, `{"payload":true}`, receivedRun["event_payload"])
-		assert.Equal(t, "push", receivedRun["trigger_event"])
-		assert.Equal(t, "waiting", receivedRun["status"])
-		assert.Nil(t, receivedRun["started"])
-		assert.Nil(t, receivedRun["stopped"])
-		assert.Equal(t, run.Created.AsLocalTime().Format(time.RFC3339), receivedRun["created"])
-		assert.Equal(t, run.Updated.AsLocalTime().Format(time.RFC3339), receivedRun["updated"])
-		assert.Nil(t, receivedRun["duration"])
-		assert.Equal(t, setting.AppURL+"user2/test_action_run_search/actions/runs/4", receivedRun["html_url"])
+		assert.Equal(t, run.ID, receivedRun.ID)
+		assert.Equal(t, "Update README.md", receivedRun.Title)
+		assert.NotNil(t, receivedRun.Repo)
+		assert.Equal(t, "test.yaml", receivedRun.WorkflowID)
+		assert.Equal(t, int64(4), receivedRun.Index)
+		assert.NotNil(t, receivedRun.TriggerUser)
+		assert.Equal(t, "main", receivedRun.PrettyRef)
+		assert.False(t, receivedRun.IsRefDeleted)
+		assert.Equal(t, "dd7ec6d7d24b0718cf1832984dadfad4b7113620", receivedRun.CommitSHA)
+		assert.True(t, receivedRun.IsForkPullRequest)
+		assert.True(t, receivedRun.NeedApproval)
+		assert.Equal(t, int64(28), receivedRun.ApprovedBy)
+		assert.Equal(t, "push", receivedRun.Event)
+		assert.Equal(t, `{"payload":true}`, receivedRun.EventPayload)
+		assert.Equal(t, "push", receivedRun.TriggerEvent)
+		assert.Equal(t, "waiting", receivedRun.Status)
+		assert.False(t, receivedRun.Started.Has())
+		assert.False(t, receivedRun.Stopped.Has())
+		assert.Equal(t, run.Created.AsLocalTime().Format(time.RFC3339), receivedRun.Created.Format(time.RFC3339))
+		assert.Equal(t, run.Updated.AsLocalTime().Format(time.RFC3339), receivedRun.Updated.Format(time.RFC3339))
+		assert.Zero(t, receivedRun.Duration)
+		assert.Equal(t, setting.AppURL+"user2/test_action_run_search/actions/runs/4", receivedRun.HTMLURL)
 	})
 
 	t.Run("Completed run", func(t *testing.T) {
@@ -443,19 +443,19 @@ func TestActionsAPIGetActionRun(t *testing.T) {
 		req.AddTokenAuth(token)
 
 		res := MakeRequest(t, req, http.StatusOK)
-		var receivedRun map[string]any
+		var receivedRun api.ActionRun
 		DecodeJSON(t, res, &receivedRun)
 
-		assert.EqualValues(t, run.ID, receivedRun["id"])
-		assert.Equal(t, "Update package.json", receivedRun["title"])
-		assert.NotNil(t, receivedRun["repository"])
-		assert.Equal(t, "build.yaml", receivedRun["workflow_id"])
-		assert.Equal(t, "failure", receivedRun["status"])
-		assert.Equal(t, run.Started.AsLocalTime().Format(time.RFC3339), receivedRun["started"])
-		assert.Equal(t, run.Stopped.AsLocalTime().Format(time.RFC3339), receivedRun["stopped"])
-		assert.Equal(t, run.Created.AsLocalTime().Format(time.RFC3339), receivedRun["created"])
-		assert.Equal(t, run.Updated.AsLocalTime().Format(time.RFC3339), receivedRun["updated"])
-		assert.InEpsilon(t, 491*10e8 /* 491 seconds */, receivedRun["duration"], 1.0)
+		assert.Equal(t, run.ID, receivedRun.ID)
+		assert.Equal(t, "Update package.json", receivedRun.Title)
+		assert.NotNil(t, receivedRun.Repo)
+		assert.Equal(t, "build.yaml", receivedRun.WorkflowID)
+		assert.Equal(t, "failure", receivedRun.Status)
+		assert.Equal(t, run.Started.AsLocalTime().Format(time.RFC3339), receivedRun.Started.ValueOrZeroValue().Format(time.RFC3339))
+		assert.Equal(t, run.Stopped.AsLocalTime().Format(time.RFC3339), receivedRun.Stopped.ValueOrZeroValue().Format(time.RFC3339))
+		assert.Equal(t, run.Created.AsLocalTime().Format(time.RFC3339), receivedRun.Created.Format(time.RFC3339))
+		assert.Equal(t, run.Updated.AsLocalTime().Format(time.RFC3339), receivedRun.Updated.Format(time.RFC3339))
+		assert.InEpsilon(t, 491*10e8 /* 491 seconds */, receivedRun.Duration, 1.0)
 	})
 
 	t.Run("Wrong repository", func(t *testing.T) {
@@ -472,6 +472,48 @@ func TestActionsAPIGetActionRun(t *testing.T) {
 		req.AddTokenAuth(token)
 
 		MakeRequest(t, req, http.StatusNotFound)
+	})
+
+	t.Run("ID above 2^53", func(t *testing.T) {
+		const bigID = 1<<53 + 1
+		run := &actions_model.ActionRun{
+			ID:         bigID,
+			Title:      "Big ID",
+			RepoID:     repo.ID,
+			OwnerID:    user.ID,
+			WorkflowID: "big.yaml",
+			Index:      6,
+			Status:     actions_model.StatusWaiting,
+		}
+		unittest.AssertSuccessfulInsert(t, run)
+		// Don't leave the auto-increment counter at 2^53 for the tests that follow.
+		defer func() {
+			_, err := db.GetEngine(t.Context()).ID(bigID).Delete(&actions_model.ActionRun{})
+			require.NoError(t, err)
+			switch {
+			case setting.Database.Type.IsSQLite3():
+				_, err = db.GetEngine(t.Context()).Exec("UPDATE sqlite_sequence SET seq = (SELECT COALESCE(MAX(id), 0) FROM action_run) WHERE name = 'action_run'")
+			case setting.Database.Type.IsMySQL():
+				_, err = db.GetEngine(t.Context()).Exec("ALTER TABLE action_run AUTO_INCREMENT = 1")
+			case setting.Database.Type.IsPostgreSQL():
+				_, err = db.GetEngine(t.Context()).Exec("SELECT setval(pg_get_serial_sequence('action_run', 'id'), COALESCE((SELECT MAX(id) FROM action_run), 1))")
+			}
+			require.NoError(t, err)
+			next := &actions_model.ActionRun{Title: "Next", RepoID: repo.ID, OwnerID: user.ID, WorkflowID: "next.yaml", Index: 7}
+			unittest.AssertSuccessfulInsert(t, next)
+			assert.Less(t, next.ID, int64(1)<<32)
+			_, err = db.GetEngine(t.Context()).ID(next.ID).Delete(&actions_model.ActionRun{})
+			require.NoError(t, err)
+		}()
+
+		req := NewRequest(t, http.MethodGet, fmt.Sprintf("/api/v1/repos/%s/actions/runs/%d", repo.FullName(), bigID))
+		req.AddTokenAuth(token)
+
+		res := MakeRequest(t, req, http.StatusOK)
+		assert.Contains(t, res.Body.String(), `"id":9007199254740993,`)
+		var receivedRun api.ActionRun
+		DecodeJSON(t, res, &receivedRun)
+		assert.Equal(t, int64(bigID), receivedRun.ID)
 	})
 }
 
