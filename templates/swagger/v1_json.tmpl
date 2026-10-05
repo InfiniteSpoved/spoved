@@ -17033,6 +17033,231 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/pulls/{index}/tasks": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "List the tasks of a pull request",
+        "operationId": "repoListPullTasks",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "index of the pull request",
+            "name": "index",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/PullTaskList"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Add a task to a pull request, standalone or from one of its comments",
+        "operationId": "repoCreatePullTask",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "index of the pull request",
+            "name": "index",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/CreatePullTaskOption"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "$ref": "#/responses/PullTask"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/pulls/{index}/tasks/{id}": {
+      "delete": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Delete a task of a pull request",
+        "operationId": "repoDeletePullTask",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "index of the pull request",
+            "name": "index",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the task",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "patch": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Mark a task of a pull request done or reopen it",
+        "operationId": "repoEditPullTask",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "index of the pull request",
+            "name": "index",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the task",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/EditPullTaskOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/PullTask"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/pulls/{index}/update": {
       "post": {
         "produces": [
@@ -25383,6 +25608,11 @@
           },
           "x-go-name": "ApprovalsWhitelistUsernames"
         },
+        "block_on_incomplete_tasks": {
+          "description": "Block merging while tasks of the pull request are open.",
+          "type": "boolean",
+          "x-go-name": "BlockOnIncompleteTasks"
+        },
         "block_on_official_review_requests": {
           "type": "boolean",
           "x-go-name": "BlockOnOfficialReviewRequests"
@@ -26221,6 +26451,11 @@
           },
           "x-go-name": "ApprovalsWhitelistUsernames"
         },
+        "block_on_incomplete_tasks": {
+          "description": "Block merging while tasks of the pull request are open.",
+          "type": "boolean",
+          "x-go-name": "BlockOnIncompleteTasks"
+        },
         "block_on_official_review_requests": {
           "type": "boolean",
           "x-go-name": "BlockOnOfficialReviewRequests"
@@ -26952,6 +27187,26 @@
         },
         "event": {
           "$ref": "#/definitions/ReviewStateType"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "CreatePullTaskOption": {
+      "description": "CreatePullTaskOption options for creating a pull request task",
+      "type": "object",
+      "required": [
+        "content"
+      ],
+      "properties": {
+        "comment_id": {
+          "description": "ID of a comment of the pull request to create the task from",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "CommentID"
+        },
+        "content": {
+          "type": "string",
+          "x-go-name": "Content"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -27754,6 +28009,11 @@
           },
           "x-go-name": "ApprovalsWhitelistUsernames"
         },
+        "block_on_incomplete_tasks": {
+          "description": "Block merging while tasks of the pull request are open.",
+          "type": "boolean",
+          "x-go-name": "BlockOnIncompleteTasks"
+        },
         "block_on_official_review_requests": {
           "type": "boolean",
           "x-go-name": "BlockOnOfficialReviewRequests"
@@ -28199,6 +28459,24 @@
         "unset_due_date": {
           "type": "boolean",
           "x-go-name": "RemoveDeadline"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "EditPullTaskOption": {
+      "description": "EditPullTaskOption options for changing the status of a pull request task",
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "done"
+          ],
+          "x-go-name": "Status"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -31233,6 +31511,52 @@
             "type": "string"
           },
           "x-go-name": "TeamReviewers"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "PullTask": {
+      "description": "PullTask is a to-do item on a pull request",
+      "type": "object",
+      "properties": {
+        "assignee": {
+          "$ref": "#/definitions/User"
+        },
+        "comment_id": {
+          "description": "ID of the comment the task was created from, 0 for a standalone task",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "CommentID"
+        },
+        "content": {
+          "type": "string",
+          "x-go-name": "Content"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Created"
+        },
+        "creator": {
+          "$ref": "#/definitions/User"
+        },
+        "id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "done"
+          ],
+          "x-go-name": "Status"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Updated"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -34450,6 +34774,21 @@
         "type": "array",
         "items": {
           "$ref": "#/definitions/PullReview"
+        }
+      }
+    },
+    "PullTask": {
+      "description": "PullTask",
+      "schema": {
+        "$ref": "#/definitions/PullTask"
+      }
+    },
+    "PullTaskList": {
+      "description": "PullTaskList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/PullTask"
         }
       }
     },

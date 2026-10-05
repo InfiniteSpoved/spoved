@@ -249,6 +249,7 @@ type ProtectBranchForm struct {
 
 	BlockOnUnresolvedConversations bool
 	IgnoreOutdatedConversations    bool
+	BlockOnIncompleteTasks         bool
 
 	DeleteAllowlistUsers           string `form:"delete_allowlist_users"`
 	DeleteAllowlistTeams           string `form:"delete_allowlist_teams"`
@@ -377,6 +378,18 @@ type CreateCommentForm struct {
 
 // Validate validates the fields
 func (f *CreateCommentForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
+	ctx := context.GetValidateContext(req)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
+}
+
+// PullTaskForm form for adding a task to a pull request
+type PullTaskForm struct {
+	Content   string `binding:"Required;MaxSize(255)"`
+	CommentID int64  `form:"comment_id"`
+}
+
+// Validate validates the fields
+func (f *PullTaskForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetValidateContext(req)
 	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }

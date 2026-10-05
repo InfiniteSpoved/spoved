@@ -197,6 +197,20 @@ type swaggerResponsePullReview struct {
 	Body api.PullReview `json:"body"`
 }
 
+// PullTask
+// swagger:response PullTask
+type swaggerResponsePullTask struct {
+	// in:body
+	Body api.PullTask `json:"body"`
+}
+
+// PullTaskList
+// swagger:response PullTaskList
+type swaggerResponsePullTaskList struct {
+	// in:body
+	Body []api.PullTask `json:"body"`
+}
+
 // PullReviewList
 // swagger:response PullReviewList
 type swaggerResponsePullReviewList struct {

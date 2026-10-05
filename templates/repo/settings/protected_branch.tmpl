@@ -273,6 +273,11 @@
 					{{ctx.Locale.Tr "repo.settings.ignore_outdated_conversations"}}
 					<span class="help">{{ctx.Locale.Tr "repo.settings.ignore_outdated_conversations_desc"}}</span>
 				</label>
+				<label>
+					<input name="block_on_incomplete_tasks" type="checkbox" {{if .Rule.BlockOnIncompleteTasks}}checked{{end}}>
+					{{ctx.Locale.Tr "repo.settings.block_on_incomplete_tasks"}}
+					<span class="help">{{ctx.Locale.Tr "repo.settings.block_on_incomplete_tasks_desc"}}</span>
+				</label>
 			</fieldset>
 			<fieldset>
 				<legend>{{ctx.Locale.Tr "repo.settings.event_pull_request_enforcement"}}</legend>

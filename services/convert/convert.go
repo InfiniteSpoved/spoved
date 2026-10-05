@@ -179,6 +179,7 @@ func ToBranchProtection(ctx context.Context, bp *git_model.ProtectedBranch, repo
 		BlockOnOutdatedBranch:          bp.BlockOnOutdatedBranch,
 		BlockOnUnresolvedConversations: bp.BlockOnUnresolvedConversations,
 		IgnoreOutdatedConversations:    bp.IgnoreOutdatedConversations,
+		BlockOnIncompleteTasks:         bp.BlockOnIncompleteTasks,
 		DismissStaleApprovals:          bp.DismissStaleApprovals,
 		IgnoreStaleApprovals:           bp.IgnoreStaleApprovals,
 		RequireSignedCommits:           bp.RequireSignedCommits,

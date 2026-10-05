@@ -254,6 +254,9 @@ func GetPullRequest(ctx *context.APIContext) {
 	if pb != nil && issues_model.MergeBlockedByUnresolvedConversations(ctx, pb, pr) {
 		apiPR.MergeableReasons = append(apiPR.MergeableReasons, "unresolved_conversations")
 	}
+	if pb != nil && issues_model.MergeBlockedByIncompleteTasks(ctx, pb, pr) {
+		apiPR.MergeableReasons = append(apiPR.MergeableReasons, "incomplete_tasks")
+	}
 	ctx.JSON(http.StatusOK, apiPR)
 }
 

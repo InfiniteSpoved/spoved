@@ -1034,6 +1034,14 @@ func Routes() *web.Route {
 							Post(reqToken(), mustNotBeArchived(), bind(forms.MergePullRequestForm{}), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.MergePullRequest).
 							Delete(reqToken(), mustNotBeArchived(), repo.CancelScheduledAutoMerge)
 						m.Post("/revert", reqToken(), mustNotBeArchived(), reqRepoWriter(unit.TypeCode), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.RevertPullRequest)
+						m.Group("/tasks", func() {
+							m.Combo("").
+								Get(repo.ListPullTasks).
+								Post(reqToken(), mustNotBeArchived(), bind(api.CreatePullTaskOption{}), repo.CreatePullTask)
+							m.Combo("/{id}").
+								Patch(reqToken(), mustNotBeArchived(), bind(api.EditPullTaskOption{}), repo.EditPullTask).
+								Delete(reqToken(), mustNotBeArchived(), repo.DeletePullTask)
+						})
 						m.Group("/reviews", func() {
 							m.Combo("").
 								Get(repo.ListPullReviews).

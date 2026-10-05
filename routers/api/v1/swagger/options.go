@@ -182,6 +182,12 @@ type swaggerParameterBodies struct {
 	SubmitPullReviewOptions api.SubmitPullReviewOptions
 
 	// in:body
+	CreatePullTaskOption api.CreatePullTaskOption
+
+	// in:body
+	EditPullTaskOption api.EditPullTaskOption
+
+	// in:body
 	DismissPullReviewOptions api.DismissPullReviewOptions
 
 	// in:body

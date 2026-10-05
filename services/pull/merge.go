@@ -572,6 +572,12 @@ func CheckPullBranchProtections(ctx context.Context, pr *issues_model.PullReques
 		}
 	}
 
+	if issues_model.MergeBlockedByIncompleteTasks(ctx, pb, pr) {
+		return pb, models.ErrDisallowedToMerge{
+			Reason: "There are incomplete tasks",
+		}
+	}
+
 	if skipProtectedFilesCheck {
 		return nil, nil
 	}

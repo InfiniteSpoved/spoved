@@ -287,3 +287,21 @@ func ToAPIPullRequest(ctx context.Context, pr *issues_model.PullRequest, doer *u
 
 	return apiPullRequest
 }
+
+// ToAPIPullTask converts a pull request task to its API format
+func ToAPIPullTask(ctx context.Context, task *issues_model.PullTask, doer *user_model.User) *api.PullTask {
+	status := "open"
+	if task.IsDone {
+		status = "done"
+	}
+	return &api.PullTask{
+		ID:        task.ID,
+		Content:   task.Content,
+		CommentID: task.CommentID,
+		Creator:   ToUser(ctx, task.Creator, doer),
+		Assignee:  ToUser(ctx, task.Assignee, doer),
+		Status:    status,
+		Created:   task.CreatedUnix.AsTime(),
+		Updated:   task.UpdatedUnix.AsTime(),
+	}
+}

@@ -1908,6 +1908,21 @@ func ViewIssue(ctx *context.Context) {
 
 		ctx.Data["AllowMerge"] = allowMerge
 
+		tasks, err := issues_model.FindPullTasks(ctx, issue.ID)
+		if err != nil {
+			ctx.ServerError("FindPullTasks", err)
+			return
+		}
+		tasksDone := 0
+		for _, task := range tasks {
+			if task.IsDone {
+				tasksDone++
+			}
+		}
+		ctx.Data["PullTasks"] = tasks
+		ctx.Data["PullTasksDone"] = tasksDone
+		ctx.Data["CanCreatePullTask"] = ctx.IsSigned && !ctx.Repo.Repository.IsArchived && issues_model.CanCreatePullTask(ctx, ctx.Doer, issue, ctx.Repo.Permission)
+
 		prUnit, err := repo.GetUnit(ctx, unit.TypePullRequests)
 		if err != nil {
 			ctx.ServerError("GetUnit", err)
@@ -1998,6 +2013,7 @@ func ViewIssue(ctx *context.Context) {
 				ctx.Data["UnresolvedConversations"] = unresolved
 				ctx.Data["IsBlockedByUnresolvedConversations"] = len(unresolved) > 0
 			}
+			ctx.Data["IsBlockedByIncompleteTasks"] = pb.BlockOnIncompleteTasks && tasksDone < len(tasks)
 			ctx.Data["GrantedApprovals"] = issues_model.GetGrantedApprovalsCount(ctx, pb, pull)
 			ctx.Data["RequireSigned"] = pb.RequireSignedCommits
 			ctx.Data["ChangedProtectedFiles"] = pull.ChangedProtectedFiles

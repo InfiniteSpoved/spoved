@@ -1,0 +1,39 @@
+<div id="pull-tasks" class="pull-tasks">
+	<span class="text"><strong>{{ctx.Locale.Tr "repo.pulls.tasks.title"}}</strong></span>
+	{{if .PullTasks}}
+		<ul class="tw-list-none tw-p-0">
+			{{range .PullTasks}}
+				<li class="pull-task flex-text-block{{if .IsDone}} done{{end}}">
+					{{if and $.IsSigned (not $.Repository.IsArchived) (or (eq $.SignedUserID $.Issue.PosterID) (eq $.SignedUserID .CreatorID) $.HasIssuesOrPullsWritePermission)}}
+						<form method="post" action="{{$.Issue.Link}}/tasks/{{.ID}}/status">
+							<input type="hidden" name="done" value="{{not .IsDone}}">
+							<button class="btn interact-fg" data-tooltip-content="{{if .IsDone}}{{ctx.Locale.Tr "repo.pulls.tasks.reopen"}}{{else}}{{ctx.Locale.Tr "repo.pulls.tasks.mark_done"}}{{end}}" aria-label="{{if .IsDone}}{{ctx.Locale.Tr "repo.pulls.tasks.reopen"}}{{else}}{{ctx.Locale.Tr "repo.pulls.tasks.mark_done"}}{{end}}">
+								{{if .IsDone}}{{svg "octicon-check-circle-fill"}}{{else}}{{svg "octicon-circle"}}{{end}}
+							</button>
+						</form>
+					{{else}}
+						{{if .IsDone}}{{svg "octicon-check-circle-fill"}}{{else}}{{svg "octicon-circle"}}{{end}}
+					{{end}}
+					<span class="pull-task-content tw-flex-1 tw-break-anywhere" data-tooltip-content="{{ctx.Locale.Tr "repo.pulls.tasks.assignee" .Assignee.GetDisplayName}}">{{.Content}}</span>
+					{{if .CommentID}}
+						<a class="muted" href="{{$.Issue.Link}}#issuecomment-{{.CommentID}}" aria-label="{{ctx.Locale.Tr "repo.pulls.tasks.from_comment"}}">{{svg "octicon-comment"}}</a>
+					{{end}}
+					{{if and $.IsSigned (not $.Repository.IsArchived) (or (eq $.SignedUserID .CreatorID) $.Permission.IsAdmin)}}
+						<form method="post" action="{{$.Issue.Link}}/tasks/{{.ID}}/delete">
+							<button class="btn interact-fg" aria-label="{{ctx.Locale.Tr "repo.pulls.tasks.delete"}}" data-tooltip-content="{{ctx.Locale.Tr "repo.pulls.tasks.delete"}}">{{svg "octicon-trash"}}</button>
+						</form>
+					{{end}}
+				</li>
+			{{end}}
+		</ul>
+	{{else}}
+		<p class="text grey">{{ctx.Locale.Tr "repo.pulls.tasks.empty"}}</p>
+	{{end}}
+	{{if .CanCreatePullTask}}
+		<form method="post" action="{{$.Issue.Link}}/tasks/new" class="ui form flex-text-block">
+			<input name="content" required maxlength="255" placeholder="{{ctx.Locale.Tr "repo.pulls.tasks.add_placeholder"}}" aria-label="{{ctx.Locale.Tr "repo.pulls.tasks.add_placeholder"}}">
+			<button class="ui tiny button">{{ctx.Locale.Tr "repo.pulls.tasks.add"}}</button>
+		</form>
+	{{end}}
+</div>
+<div class="divider"></div>
