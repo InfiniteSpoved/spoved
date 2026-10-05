@@ -93,9 +93,11 @@ func TestToAPIPullRequestScheduledAfter(t *testing.T) {
 		assert.Nil(t, toAPI(t, 1, user2).GiveUpAfter)
 	})
 	t.Run("Private repo", func(t *testing.T) {
-		schedule(t, 6, scheduled)
+		require.NoError(t, db.Insert(db.DefaultContext, &pull_model.AutoMerge{PullID: 6, DoerID: 2, ScheduledAfterUnix: scheduled, GiveUpAfterUnix: scheduled}))
 		assert.Equal(t, scheduled.AsTimePtr(), toAPI(t, 6, user2).ScheduledAfter)
+		assert.Equal(t, scheduled.AsTimePtr(), toAPI(t, 6, user2).GiveUpAfter)
 		assert.Nil(t, toAPI(t, 6, nil).ScheduledAfter)
+		assert.Nil(t, toAPI(t, 6, nil).GiveUpAfter)
 	})
 }
 
