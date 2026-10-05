@@ -481,3 +481,53 @@ func GetUsersGrantedRoleGroups(ctx context.Context, uid int64) (map[int64]map[st
 	}
 	return result, nil
 }
+
+// CountUserGroupRoleLosses returns, for each of the given roles, the number of
+// members of the group who would lose the role's user flag if the group no
+// longer granted it: the flag is on, a user group turned it on, and no other
+// group of the member grants the role. It runs one query.
+func CountUserGroupRoleLosses(ctx context.Context, groupID int64, roles ...UserGroupRole) (map[UserGroupRole]int, error) {
+	counts := make(map[UserGroupRole]int, len(roles))
+	if len(roles) == 0 {
+		return counts, nil
+	}
+	cond := builder.NewCond()
+	for _, role := range roles {
+		var flag, grants string
+		switch role {
+		case UserGroupRoleSiteAdmin:
+			flag, grants = "`user`.is_admin", "user_group.grants_site_admin"
+		case UserGroupRoleCreateOrganization:
+			flag, grants = "`user`.allow_create_organization", "user_group.grants_create_organization"
+		case UserGroupRoleAuditor:
+			flag, grants = "`user`.is_auditor", "user_group.grants_auditor"
+		default:
+			return nil, fmt.Errorf("user group role %q has no user flag", role)
+		}
+		cond = cond.Or(builder.Eq{"user_group_role_grant.role": role, flag: true}.And(builder.NotExists(
+			builder.Select("1").From("user_group_user").
+				Join("INNER", "user_group", "user_group.id = user_group_user.group_id").
+				Where(builder.Expr("user_group_user.uid = user_group_role_grant.uid").
+					And(builder.Neq{"user_group.id": groupID}, builder.Eq{grants: true})),
+		)))
+	}
+	rows := make([]struct {
+		Role  UserGroupRole `xorm:"role"`
+		Count int           `xorm:"cnt"`
+	}, 0, len(roles))
+	if err := db.GetEngine(ctx).Table("user_group_role_grant").
+		Join("INNER", "user_group_user", "user_group_user.uid = user_group_role_grant.uid").
+		Join("INNER", "`user`", "`user`.id = user_group_role_grant.uid").
+		Where(builder.Eq{"user_group_user.group_id": groupID}).
+		And(builder.In("user_group_role_grant.role", roles)).
+		And(cond).
+		Select("user_group_role_grant.role AS role, COUNT(*) AS cnt").
+		GroupBy("user_group_role_grant.role").
+		Find(&rows); err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		counts[r.Role] = r.Count
+	}
+	return counts, nil
+}
