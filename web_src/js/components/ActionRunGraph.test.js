@@ -3,8 +3,8 @@ import ActionRunGraph from './ActionRunGraph.vue';
 
 const locale = {
   graphTitle: 'Job graph',
-  graphMatrixCount: '%[1]d jobs: %[2]d passed, %[3]d failed',
-  status: {success: 'ok', failure: 'bad', waiting: 'wait', blocked: 'blocked', running: 'run'},
+  graphMatrixCount: '%[1]d jobs',
+  status: {success: 'Success', failure: 'Failure', waiting: 'Waiting', blocked: 'Blocked', running: 'Running'},
 };
 const job = (id, name, groupKey, needs = [], status = 'success') => ({id, name, groupKey, needs, status, duration: '1s'});
 const mountGraph = (jobs) => mount(ActionRunGraph, {props: {jobs, runLink: '/o/r/actions/runs/1', currentJobIndex: 0, locale}});
@@ -29,27 +29,33 @@ test('boxes in dependency columns with arrows, status and duration', async () =>
   const deploy = wrapper.findAll('.action-run-graph-column')[2];
   expect(deploy.text()).toContain('deploy');
   expect(deploy.text()).toContain('1s');
-  expect(deploy.find('[data-tooltip-content="blocked"]').exists()).toBe(true);
+  expect(deploy.find('[data-tooltip-content="Blocked"]').exists()).toBe(true);
 });
 
 // criterion 3: statuses update live
 test('re-renders when the jobs change', async () => {
   const wrapper = mountGraph(pipeline());
-  expect(wrapper.findAll('.action-run-graph-column')[0].find('[data-tooltip-content="ok"]').exists()).toBe(true);
+  expect(wrapper.findAll('.action-run-graph-column')[0].find('[data-tooltip-content="Success"]').exists()).toBe(true);
   await wrapper.setProps({jobs: [job(1, 'build', '/build', [], 'running'), ...pipeline().slice(1)]});
-  expect(wrapper.findAll('.action-run-graph-column')[0].find('[data-tooltip-content="run"]').exists()).toBe(true);
+  expect(wrapper.findAll('.action-run-graph-column')[0].find('[data-tooltip-content="Running"]').exists()).toBe(true);
 });
 
 // criterion 4
 test('matrix jobs share a box with per-status counts and expand to links', async () => {
   const wrapper = mountGraph(pipeline());
   const matrix = wrapper.findAll('.action-run-graph-column')[1];
-  expect(matrix.text()).toContain('2 jobs: 1 passed, 1 failed');
+  expect(matrix.text()).toContain('2 jobs: 1 failure, 1 success');
   expect(matrix.find('.action-run-graph-children').exists()).toBe(false);
   await matrix.get('button').trigger('click');
   const links = matrix.findAll('.action-run-graph-children a');
   expect(links.map((a) => a.attributes('href'))).toEqual(['/o/r/actions/runs/1/jobs/1', '/o/r/actions/runs/1/jobs/2']);
   expect(links.map((a) => a.text())).toEqual(['test (a)1s', 'test (b)1s']); // name and duration
+});
+
+test('the matrix count line counts every status', () => {
+  const jobs = [job(1, 't (1)', '/t', [], 'failure'), job(2, 't (2)', '/t', [], 'running'), job(3, 't (3)', '/t', [], 'waiting'),
+    job(4, 't (4)', '/t', [], 'waiting'), job(5, 't (5)', '/t', [], 'waiting'), job(6, 't (6)', '/t', [], 'running')];
+  expect(mountGraph(jobs).get('.action-run-graph-count').text()).toBe('6 jobs: 1 failure, 2 running, 3 waiting');
 });
 
 // criterion 5

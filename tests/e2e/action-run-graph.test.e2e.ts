@@ -15,7 +15,7 @@ test('job graph shows the dependency levels and links to the job', async ({page}
   await expect(graph.locator('.action-run-graph-column')).toHaveCount(3);
   await expect(graph.locator('.action-run-graph-column').nth(0)).toContainText('build');
   await expect(graph.locator('.action-run-graph-column').nth(1)).toContainText('test');
-  await expect(graph.locator('.action-run-graph-column').nth(1)).toContainText('2 jobs');
+  await expect(graph.locator('.action-run-graph-column').nth(1)).toContainText('2 jobs: 2 blocked');
   await expect(graph.locator('.action-run-graph-column').nth(2)).toContainText('deploy');
   await expect(graph.locator('.action-run-graph-lines path')).toHaveCount(2);
 

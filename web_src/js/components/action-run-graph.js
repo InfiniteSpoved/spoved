@@ -1,5 +1,5 @@
 // Worst status first: a group shows the most urgent status of its jobs.
-const statusOrder = ['failure', 'running', 'waiting', 'blocked', 'cancelled', 'skipped', 'success'];
+export const statusOrder = ['failure', 'running', 'waiting', 'blocked', 'cancelled', 'skipped', 'success'];
 
 // Groups matrix jobs by groupKey and puts each group in a column one past the deepest group it needs.
 // Returns {columns: node[][], edges: [fromKey, toKey][]}, a node being {key, name, status, jobs: [{...job, index}]}.

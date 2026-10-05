@@ -1,7 +1,7 @@
 <script>
 import {SvgIcon} from '../svg.js';
 import ActionRunStatus from './ActionRunStatus.vue';
-import {layoutGraph} from './action-run-graph.js';
+import {layoutGraph, statusOrder} from './action-run-graph.js';
 
 const collapsedStorageKey = 'actions-run-graph-collapsed';
 
@@ -59,10 +59,11 @@ export default {
       this.$nextTick(this.measure);
     },
     countLine(node) {
-      return this.locale.graphMatrixCount
-        .replace('%[1]d', node.jobs.length)
-        .replace('%[2]d', node.jobs.filter((j) => j.status === 'success').length)
-        .replace('%[3]d', node.jobs.filter((j) => j.status === 'failure').length);
+      const counts = statusOrder
+        .map((status) => [status, node.jobs.filter((j) => j.status === status).length])
+        .filter(([, n]) => n > 0)
+        .map(([status, n]) => `${n} ${(this.locale.status[status] ?? status).toLowerCase()}`);
+      return `${this.locale.graphMatrixCount.replace('%[1]d', node.jobs.length)}: ${counts.join(', ')}`;
     },
     // Draw the arrows between the boxes as they are laid out by the browser.
     measure() {
