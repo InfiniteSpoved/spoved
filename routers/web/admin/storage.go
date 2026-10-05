@@ -230,6 +230,7 @@ func exportRepoStorage(ctx *context.Context, format string) {
 		ctx.ServerError("exportRepoStorage", err)
 		return
 	}
-	// the body has started: the download stays truncated (JSON lacks its closing "]") and the log records why
+	// the body has started: the log records why
 	log.Error("exportRepoStorage: %v", err)
+	panic(http.ErrAbortHandler) // abort so the client sees a failed download, not a short file
 }
