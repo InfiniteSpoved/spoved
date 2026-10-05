@@ -947,7 +947,7 @@ func MergePullRequest(ctx *context.APIContext) {
 		mergeCheckType = pull_service.MergeCheckTypeManually
 	}
 
-	scheduledAfter, err := form.ScheduledAfterTimeStamp()
+	scheduledAfter, giveUpAfter, err := form.ScheduleTimeStamps()
 	if err != nil {
 		ctx.Error(http.StatusUnprocessableEntity, "ScheduledAfter", err)
 		return
@@ -1012,7 +1012,7 @@ func MergePullRequest(ctx *context.APIContext) {
 	}
 
 	if form.MergeWhenChecksSucceed {
-		scheduled, err := automerge.ScheduleAutoMerge(ctx, ctx.Doer(), pr, repo_model.MergeStyle(form.Do), message, form.DeleteBranchAfterMerge, scheduledAfter, form.HeadCommitID)
+		scheduled, err := automerge.ScheduleAutoMerge(ctx, ctx.Doer(), pr, repo_model.MergeStyle(form.Do), message, form.DeleteBranchAfterMerge, scheduledAfter, giveUpAfter, form.HeadCommitID)
 		if err != nil {
 			if pull_model.IsErrAlreadyScheduledToAutoMerge(err) || models.IsErrSHADoesNotMatch(err) {
 				ctx.Error(http.StatusConflict, "ScheduleAutoMerge", err)

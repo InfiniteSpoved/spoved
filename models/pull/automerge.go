@@ -25,6 +25,7 @@ type AutoMerge struct {
 	DeleteBranchAfterMerge bool                  `xorm:"NOT NULL DEFAULT false"`
 	ScheduledAfterUnix     timeutil.TimeStamp    `xorm:"NOT NULL DEFAULT 0"` // 0 = merge as soon as possible
 	HeadCommitID           string                `xorm:"VARCHAR(64)"`        // only merge this head; set for scheduled merges
+	GiveUpAfterUnix        timeutil.TimeStamp    `xorm:"NOT NULL DEFAULT 0"` // 0 = no deadline; cancelled when it passes
 	CreatedUnix            timeutil.TimeStamp    `xorm:"created"`
 }
 
@@ -53,7 +54,7 @@ func IsErrAlreadyScheduledToAutoMerge(err error) bool {
 }
 
 // ScheduleAutoMerge schedules a pull request to be merged when all checks succeed
-func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pullID int64, style repo_model.MergeStyle, message string, deleteBranch bool, scheduledAfter timeutil.TimeStamp, headCommitID string) error {
+func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pullID int64, style repo_model.MergeStyle, message string, deleteBranch bool, scheduledAfter, giveUpAfter timeutil.TimeStamp, headCommitID string) error {
 	// Check if we already have a merge scheduled for that pull request
 	if exists, _, err := GetScheduledMergeByPullID(ctx, pullID); err != nil {
 		return err
@@ -69,6 +70,7 @@ func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pullID int64,
 		DeleteBranchAfterMerge: deleteBranch,
 		ScheduledAfterUnix:     scheduledAfter,
 		HeadCommitID:           headCommitID,
+		GiveUpAfterUnix:        giveUpAfter,
 	})
 	log.Trace("ScheduleAutoMerge %+v for PR %d", scheduledPRM, pullID)
 
@@ -129,6 +131,26 @@ func TakeDueScheduledAutoMerges(ctx context.Context, now timeutil.TimeStamp) ([]
 		}
 	}
 	return pullIDs, nil
+}
+
+// TakeExpiredScheduledAutoMerges deletes the scheduled merges whose deadline has passed and returns them.
+// A row is only returned by the caller that deleted it.
+func TakeExpiredScheduledAutoMerges(ctx context.Context, now timeutil.TimeStamp) ([]*AutoMerge, error) {
+	var expired []*AutoMerge
+	if err := db.GetEngine(ctx).Where("give_up_after_unix > 0 AND give_up_after_unix <= ?", now).Find(&expired); err != nil {
+		return nil, err
+	}
+	taken := make([]*AutoMerge, 0, len(expired))
+	for _, am := range expired {
+		affected, err := db.GetEngine(ctx).Where("id = ? AND give_up_after_unix = ?", am.ID, am.GiveUpAfterUnix).Delete(&AutoMerge{})
+		if err != nil {
+			return nil, err
+		}
+		if affected == 1 {
+			taken = append(taken, am)
+		}
+	}
+	return taken, nil
 }
 
 // GetScheduledAfterByBaseRepoID returns the times of the scheduled merges still waiting in a repository, keyed by pull ID

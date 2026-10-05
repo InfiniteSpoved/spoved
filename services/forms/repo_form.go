@@ -481,24 +481,44 @@ type MergePullRequestForm struct {
 	// do not merge before this time, only with merge_when_checks_succeed; the merge is pinned to the current head
 	// swagger:strfmt date-time
 	ScheduledAfter string `json:"scheduled_after,omitempty"`
+	// cancel the scheduled merge if it has not merged by this time, only with scheduled_after and after it
+	// swagger:strfmt date-time
+	GiveUpAfter string `json:"give_up_after,omitempty"`
 }
 
-// ScheduledAfterTimeStamp parses ScheduledAfter, which must be in the future. It returns 0 if it is empty.
-func (f *MergePullRequestForm) ScheduledAfterTimeStamp() (timeutil.TimeStamp, error) {
+// ErrInvalidGiveUpAfter is returned for a give_up_after without scheduled_after, or not after it
+var ErrInvalidGiveUpAfter = errors.New("give_up_after requires scheduled_after and must be after it")
+
+// ScheduleTimeStamps parses ScheduledAfter, which must be in the future, and GiveUpAfter, which must be after it.
+// Each is 0 if it is empty.
+func (f *MergePullRequestForm) ScheduleTimeStamps() (scheduledAfter, giveUpAfter timeutil.TimeStamp, err error) {
 	if f.ScheduledAfter == "" {
-		return 0, nil
+		if f.GiveUpAfter != "" {
+			return 0, 0, ErrInvalidGiveUpAfter
+		}
+		return 0, 0, nil
 	}
 	if !f.MergeWhenChecksSucceed {
-		return 0, errors.New("scheduled_after requires merge_when_checks_succeed")
+		return 0, 0, errors.New("scheduled_after requires merge_when_checks_succeed")
 	}
 	t, err := time.Parse(time.RFC3339, f.ScheduledAfter)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if !t.After(timeutil.TimeStampNow().AsTime()) {
-		return 0, errors.New("scheduled_after must be in the future")
+		return 0, 0, errors.New("scheduled_after must be in the future")
 	}
-	return timeutil.TimeStamp(t.Unix()), nil
+	if f.GiveUpAfter == "" {
+		return timeutil.TimeStamp(t.Unix()), 0, nil
+	}
+	g, err := time.Parse(time.RFC3339, f.GiveUpAfter)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%w: %w", ErrInvalidGiveUpAfter, err)
+	}
+	if !g.After(t) {
+		return 0, 0, ErrInvalidGiveUpAfter
+	}
+	return timeutil.TimeStamp(t.Unix()), timeutil.TimeStamp(g.Unix()), nil
 }
 
 // Validate validates the fields

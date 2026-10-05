@@ -227,6 +227,9 @@
 							{{else}}
 								{{$hasPendingPullRequestMergeTip = ctx.Locale.Tr "repo.pulls.auto_merge_has_pending_schedule" .PendingPullRequestMerge.Doer.Name $createdPRMergeStr}}
 							{{end}}
+							{{if .PendingPullRequestMerge.GiveUpAfterUnix}}
+								{{$hasPendingPullRequestMergeTip = HTMLFormat "%s %s" $hasPendingPullRequestMergeTip (ctx.Locale.Tr "repo.pulls.auto_merge.gives_up_after" (DateUtils.FullTime .PendingPullRequestMerge.GiveUpAfterUnix))}}
+							{{end}}
 						{{end}}
 						<div class="divider"></div>
 						<script type="module">
@@ -243,6 +246,7 @@
 								'textAutoMergeCancelSchedule': {{ctx.Locale.Tr "repo.pulls.auto_merge_cancel_schedule"}},
 								'textScheduledAfter': {{ctx.Locale.Tr "repo.pulls.auto_merge.scheduled_after"}},
 								'textAutoMergeButtonScheduled': {{ctx.Locale.Tr "repo.pulls.auto_merge.button_scheduled"}},
+								'textGiveUpAfter': {{ctx.Locale.Tr "repo.pulls.auto_merge.give_up_after"}},
 								'textClearMergeMessage': {{ctx.Locale.Tr "repo.pulls.clear_merge_message"}},
 								'textClearMergeMessageHint': {{ctx.Locale.Tr "repo.pulls.clear_merge_message_hint"}},
 								'textMergeCommitId': {{ctx.Locale.Tr "repo.pulls.merge_commit_id"}},
