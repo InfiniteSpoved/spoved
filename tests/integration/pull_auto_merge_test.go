@@ -510,7 +510,11 @@ func TestAPIPullScheduledAfter(t *testing.T) {
 			apiPR := getPull(t, scheduled, apiCtx.Token, http.StatusOK)
 			require.NotNil(t, apiPR.ScheduledAfter)
 			assert.Equal(t, scheduledAfter.Unix(), apiPR.ScheduledAfter.Unix())
-			assert.Nil(t, getPull(t, unscheduled, apiCtx.Token, http.StatusOK).ScheduledAfter)
+			require.NotNil(t, apiPR.GiveUpAfter)
+			assert.Equal(t, giveUpAfter.Unix(), apiPR.GiveUpAfter.Unix())
+			apiPR = getPull(t, unscheduled, apiCtx.Token, http.StatusOK)
+			assert.Nil(t, apiPR.ScheduledAfter)
+			assert.Nil(t, apiPR.GiveUpAfter)
 		})
 
 		t.Run("List", func(t *testing.T) {
@@ -523,8 +527,11 @@ func TestAPIPullScheduledAfter(t *testing.T) {
 				if apiPR.ID == scheduled.ID {
 					require.NotNil(t, apiPR.ScheduledAfter)
 					assert.Equal(t, scheduledAfter.Unix(), apiPR.ScheduledAfter.Unix())
+					require.NotNil(t, apiPR.GiveUpAfter)
+					assert.Equal(t, giveUpAfter.Unix(), apiPR.GiveUpAfter.Unix())
 				} else {
 					assert.Nil(t, apiPR.ScheduledAfter)
+					assert.Nil(t, apiPR.GiveUpAfter)
 				}
 			}
 		})
