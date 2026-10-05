@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tools/codemap.sh)",
+      "Bash(tools/codemap.sh:*)",
+      "Bash(./tools/codemap.sh)",
+      "Bash(./tools/codemap.sh:*)"
+    ]
+  }
+}
