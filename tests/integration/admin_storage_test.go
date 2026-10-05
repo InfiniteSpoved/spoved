@@ -15,6 +15,7 @@ import (
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
+	"forgejo.org/modules/translation"
 	"forgejo.org/services/convert"
 	"forgejo.org/tests"
 
@@ -167,6 +168,80 @@ func TestAdminStorage(t *testing.T) {
 		resp = admin.MakeRequest(t, NewRequest(t, "GET", "/admin/repos?sort=reversesize"), http.StatusOK)
 		htmlDoc = NewHTMLParser(t, resp.Body)
 		assert.Equal(t, "/org3/repo3", htmlDoc.Find("table tbody tr").First().Find("td").Eq(2).Find("a").AttrOr("href", ""))
+	})
+
+	t.Run("MedianAndRecalculation", func(t *testing.T) {
+		totals, err := repo_model.GetStorageTotals(db.DefaultContext)
+		require.NoError(t, err)
+		median, err := repo_model.GetMedianRepoSize(db.DefaultContext, totals.NumRepos)
+		require.NoError(t, err)
+
+		resp := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/storage"), http.StatusOK)
+		htmlDoc := NewHTMLParser(t, resp.Body)
+		row := htmlDoc.Find("table tbody tr").FilterFunction(func(_ int, s *goquery.Selection) bool {
+			return s.Find("td").First().Text() == "Median per repository"
+		})
+		assert.Equal(t, translation.NewLocale("en-US").TrSize(median).String(), row.Find("td").Eq(1).Text())
+		recalc := htmlDoc.Find(".size-recalculation")
+		assert.Contains(t, recalc.Text(), "git_gc_repos")
+		assert.Equal(t, 1, recalc.Find("a[href='/admin/monitor/cron']").Length())
+	})
+
+	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 1, 10, 2<<20)) // user2/repo1
+	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 4, 5<<20, 0))  // user5/repo4
+	repoLinks := func(t *testing.T, query string) []string {
+		t.Helper()
+		resp := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/repos?"+query), http.StatusOK)
+		return NewHTMLParser(t, resp.Body).Find("table tbody tr td:nth-child(3) > a").Map(func(_ int, s *goquery.Selection) string {
+			return s.AttrOr("href", "")
+		})
+	}
+
+	t.Run("SizeFilter", func(t *testing.T) {
+		assert.Equal(t, []string{"/user2/repo1", "/org3/repo3"}, repoLinks(t, "sizefield=lfs&minsize=1MiB&sort=reverselfssize"))
+		assert.Equal(t, []string{"/org3/repo3", "/user2/repo1"}, repoLinks(t, "sizefield=lfs&minsize=1MiB&sort=lfssize"))
+		assert.Equal(t, []string{"/org3/repo3"}, repoLinks(t, "sizefield=lfs&minsize=1MiB&maxsize=1.5MiB"))
+		assert.Equal(t, []string{"/org3/repo3", "/user5/repo4"}, repoLinks(t, "sizefield=total&minsize=3MiB&sort=reversesize"))
+		assert.Equal(t, []string{"/org3/repo3", "/user5/repo4"}, repoLinks(t, "sizefield=git&minsize=5+MB&sort=reversegitsize"))
+		assert.Equal(t, []string{"/org3/repo3"}, repoLinks(t, "uid=3&sizefield=total&minsize=1MiB"))
+		assert.Empty(t, repoLinks(t, "uid=2&sizefield=total&minsize=1GB"))
+
+		// the exports honour the filter
+		rows := repoCSV(t, "&sizefield=lfs&minsize=1MiB&sort=reverselfssize")
+		require.Len(t, rows, 2)
+		assert.Equal(t, []string{"1", "3"}, []string{rows[0][0], rows[1][0]})
+		empty, err := db.GetEngine(db.DefaultContext).Where("git_size + lfs_size = 0").Count(new(repo_model.Repository))
+		require.NoError(t, err)
+		assert.Len(t, repoJSON(t, "&sizefield=total&maxsize=0"), int(empty))
+
+		// the pager keeps the filter
+		defer test.MockVariableValue(&setting.UI.Admin.RepoPagingNum, 1)()
+		resp := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/repos?sizefield=lfs&minsize=1MiB"), http.StatusOK)
+		next := NewHTMLParser(t, resp.Body).Find(".pagination a.navigation").Last().AttrOr("href", "")
+		assert.Contains(t, next, "sizefield=lfs")
+		assert.Contains(t, next, "minsize=1MiB")
+	})
+
+	t.Run("SizeFilterInvalid", func(t *testing.T) {
+		all := len(repoLinks(t, ""))
+		for _, query := range []string{
+			"sizefield=lfs&minsize=abc",
+			"sizefield=evil&minsize=1",
+			"sizefield=lfs&minsize=2MB&maxsize=1MB",
+			"sizefield=git&minsize=-1",
+			"sizefield=git&minsize=1%3BDROP+TABLE+repository",
+			"minsize=1MB",
+			"sizefield=git&maxsize=%3Cscript%3Ealert(1)%3C%2Fscript%3E",
+		} {
+			resp := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/repos?"+query), http.StatusOK)
+			assert.NotContains(t, resp.Body.String(), "<script>alert(1)</script>", query)
+			htmlDoc := NewHTMLParser(t, resp.Body)
+			assert.Contains(t, htmlDoc.Find(".flash-error").Text(), "The size filter is invalid", query)
+			assert.Len(t, htmlDoc.Find("table tbody tr td:nth-child(3) > a").Nodes, all, "%s lists the repositories unfiltered", query)
+
+			admin.MakeRequest(t, NewRequest(t, "GET", "/admin/repos?format=csv&"+query), http.StatusBadRequest)
+			admin.MakeRequest(t, NewRequest(t, "GET", "/admin/repos?format=json&"+query), http.StatusBadRequest)
+		}
 	})
 
 	t.Run("HostileNames", func(t *testing.T) {

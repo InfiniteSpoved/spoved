@@ -11,8 +11,21 @@
 					<tr><td>{{ctx.Locale.Tr "admin.storage.total_size"}}</td><td>{{ctx.Locale.TrSize .Totals.Size}}</td></tr>
 					<tr><td>{{ctx.Locale.Tr "admin.storage.repos"}}</td><td>{{.Totals.NumRepos}}</td></tr>
 					<tr><td>{{ctx.Locale.Tr "admin.storage.average_size"}}</td><td>{{ctx.Locale.TrSize .AverageSize}}</td></tr>
+					<tr><td>{{ctx.Locale.Tr "admin.storage.median_size"}}</td><td>{{ctx.Locale.TrSize .MedianSize}}</td></tr>
 				</tbody>
 			</table>
+			<p class="size-recalculation">
+				{{if and .SizeCronTask (ne .SizeCronTask.Spec "-")}}
+					{{if gt .SizeCronTask.Prev.Year 1}}
+						{{ctx.Locale.Tr "admin.storage.recalculated" "git_gc_repos" .SizeCronTask.Spec (DateUtils.FullTime .SizeCronTask.Prev) (DateUtils.FullTime .SizeCronTask.Next)}}
+					{{else}}
+						{{ctx.Locale.Tr "admin.storage.recalculated" "git_gc_repos" .SizeCronTask.Spec (ctx.Locale.Tr "admin.storage.not_run_yet") (DateUtils.FullTime .SizeCronTask.Next)}}
+					{{end}}
+				{{else}}
+					{{ctx.Locale.Tr "admin.storage.recalculated_unscheduled" "git_gc_repos"}}
+				{{end}}
+				<a href="{{AppSubUrl}}/admin/monitor/cron">{{ctx.Locale.Tr "admin.monitor.cron"}}</a>
+			</p>
 			<p>
 				<a href="{{AppSubUrl}}/admin/repos?sort=reversegitsize">{{ctx.Locale.Tr "admin.storage.largest_git"}}</a>
 				·

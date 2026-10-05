@@ -3,12 +3,26 @@
 		<h4 class="ui top attached header">
 			{{ctx.Locale.Tr "admin.repos.repo_manage_panel"}} ({{ctx.Locale.Tr "admin.total" .Total}})
 			<div class="ui right">
-				<a class="ui primary tiny button" href="?format=csv&uid={{.RepoOwnerID}}&sort={{.SortType}}">{{ctx.Locale.Tr "admin.storage.export_csv"}}</a>
+				<a class="ui primary tiny button" href="?format=csv&uid={{.RepoOwnerID}}&sort={{.SortType}}{{if .SizeField}}&sizefield={{.SizeField}}&minsize={{.MinSize}}&maxsize={{.MaxSize}}{{end}}">{{ctx.Locale.Tr "admin.storage.export_csv"}}</a>
 				<a class="ui primary tiny button" href="{{AppSubUrl}}/admin/repos/unadopted">{{ctx.Locale.Tr "admin.repos.unadopted"}}</a>
 			</div>
 		</h4>
 		<div class="ui attached segment">
 			{{template "shared/repo_search" .}}
+			<form class="ui form ignore-dirty tw-flex tw-flex-wrap tw-items-center tw-gap-2 tw-mt-2">
+				{{if .RepoOwnerID}}<input type="hidden" name="uid" value="{{.RepoOwnerID}}">{{end}}
+				<input type="hidden" name="sort" value="{{.SortType}}">
+				{{if .Keyword}}<input type="hidden" name="q" value="{{.Keyword}}">{{end}}
+				<label for="sizefield">{{ctx.Locale.Tr "admin.repos.size_filter"}}</label>
+				<select id="sizefield" name="sizefield" class="ui compact dropdown">
+					<option value="git" {{if eq .SizeField "git"}}selected{{end}}>{{ctx.Locale.Tr "admin.storage.git_size"}}</option>
+					<option value="lfs" {{if eq .SizeField "lfs"}}selected{{end}}>{{ctx.Locale.Tr "admin.storage.lfs_size"}}</option>
+					<option value="total" {{if eq .SizeField "total"}}selected{{end}}>{{ctx.Locale.Tr "admin.storage.total_size"}}</option>
+				</select>
+				<input name="minsize" value="{{.MinSize}}" aria-label="{{ctx.Locale.Tr "admin.repos.size_filter.min"}}" placeholder="{{ctx.Locale.Tr "admin.repos.size_filter.min"}} ({{ctx.Locale.Tr "admin.repos.size_filter.placeholder"}})" class="tw-w-48">
+				<input name="maxsize" value="{{.MaxSize}}" aria-label="{{ctx.Locale.Tr "admin.repos.size_filter.max"}}" placeholder="{{ctx.Locale.Tr "admin.repos.size_filter.max"}}" class="tw-w-48">
+				<button class="ui small button">{{ctx.Locale.Tr "filter"}}</button>
+			</form>
 		</div>
 		<div class="ui attached table segment">
 			<table class="ui very basic striped table unstackable">

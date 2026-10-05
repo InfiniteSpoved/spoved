@@ -196,6 +196,8 @@ type SearchRepoOptions struct {
 	// List every repository to an Actor with the auditor role. Only set it for read-only listings requested with the
 	// Actor's own credentials.
 	AuditorView bool
+	// Filter to repositories in a size range.
+	SizeFilter SizeFilter
 }
 
 // UserOwnedRepoCond returns user ownered repositories
@@ -526,6 +528,10 @@ func SearchRepositoryCondition(opts *SearchRepoOptions) builder.Cond {
 
 	if has, unit := opts.EnabledUnit.Get(); has {
 		cond = cond.And(builder.In("`repository`.id", builder.Select("`repo_unit`.repo_id").From("repo_unit").Where(builder.Eq{"`repo_unit`.type": unit})))
+	}
+
+	if opts.SizeFilter.Field != "" {
+		cond = cond.And(opts.SizeFilter.Cond())
 	}
 
 	return cond

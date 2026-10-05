@@ -32,6 +32,7 @@ type RepoSearchOptions struct {
 	PageSize         int
 	OnlyShowRelevant bool
 	TplName          base.TplName
+	SizeFilter       repo_model.SizeFilter
 }
 
 // RenderRepoSearch render repositories search page
@@ -125,6 +126,7 @@ func RenderRepoSearch(ctx *context.Context, opts *RepoSearchOptions) {
 		Mirror:             mirror,
 		Template:           template,
 		IsPrivate:          private,
+		SizeFilter:         opts.SizeFilter,
 	})
 	if err != nil {
 		ctx.ServerError("SearchRepository", err)
@@ -169,6 +171,11 @@ func RenderRepoSearch(ctx *context.Context, opts *RepoSearchOptions) {
 	}
 	if has, value := private.Get(); has {
 		pager.AddParamString("private", fmt.Sprint(value))
+	}
+	if opts.SizeFilter.Field != "" {
+		for _, param := range []string{"sizefield", "minsize", "maxsize"} {
+			pager.AddParamString(param, ctx.FormString(param))
+		}
 	}
 	ctx.Data["Page"] = pager
 

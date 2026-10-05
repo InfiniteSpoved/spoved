@@ -38,6 +38,14 @@ func Repos(ctx *context.Context) {
 	ownerID := max(ctx.FormInt64("uid"), 0)
 	ctx.Data["RepoOwnerID"] = ownerID
 
+	sizeFilter, err := repo_model.ParseSizeFilter(ctx.FormString("sizefield"), ctx.FormTrim("minsize"), ctx.FormTrim("maxsize"))
+	if err != nil {
+		ctx.Flash.Error(ctx.Tr("admin.repos.size_filter.invalid"), true)
+	}
+	ctx.Data["SizeField"] = sizeFilter.Field
+	ctx.Data["MinSize"] = ctx.FormTrim("minsize")
+	ctx.Data["MaxSize"] = ctx.FormTrim("maxsize")
+
 	explore.RenderRepoSearch(ctx, &explore.RepoSearchOptions{
 		OwnerID:          ownerID,
 		Exclusive:        ownerID > 0,
@@ -45,6 +53,7 @@ func Repos(ctx *context.Context) {
 		PageSize:         setting.UI.Admin.RepoPagingNum,
 		TplName:          tplRepos,
 		OnlyShowRelevant: false,
+		SizeFilter:       sizeFilter,
 	})
 }
 

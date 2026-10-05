@@ -4,6 +4,7 @@
 package repo_test
 
 import (
+	"slices"
 	"testing"
 
 	"forgejo.org/models/db"
@@ -99,4 +100,72 @@ func TestStorageReport(t *testing.T) {
 		assert.EqualValues(t, len(want), count)
 		assert.Len(t, owners, 2)
 	})
+}
+
+func TestMedianRepoSize(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	// distinct sizes, with git and LFS both counted
+	_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET git_size = id * 10, lfs_size = id")
+	require.NoError(t, err)
+
+	median := func(t *testing.T) (got, want int64) {
+		t.Helper()
+		var all []*repo_model.Repository
+		require.NoError(t, db.GetEngine(db.DefaultContext).Find(&all))
+		sizes := make([]int64, len(all))
+		for i, r := range all {
+			sizes[i] = r.GitSize + r.LFSSize
+		}
+		slices.Sort(sizes)
+		if n := len(sizes); n%2 == 1 {
+			want = sizes[n/2]
+		} else if n > 0 {
+			want = (sizes[n/2-1] + sizes[n/2]) / 2
+		}
+		got, err := repo_model.GetMedianRepoSize(db.DefaultContext, int64(len(all)))
+		require.NoError(t, err)
+		return got, want
+	}
+
+	got, want := median(t)
+	assert.Equal(t, want, got)
+
+	// flip the parity of the repository count
+	require.NoError(t, db.Insert(db.DefaultContext, &repo_model.Repository{OwnerID: 2, OwnerName: "user2", Name: "median", LowerName: "median", GitSize: 1 << 20}))
+	got2, want2 := median(t)
+	assert.Equal(t, want2, got2)
+	assert.NotEqual(t, want, want2, "the second median is taken at the other parity")
+
+	got, err = repo_model.GetMedianRepoSize(db.DefaultContext, 0)
+	require.NoError(t, err)
+	assert.Zero(t, got)
+}
+
+func TestParseSizeFilter(t *testing.T) {
+	f, err := repo_model.ParseSizeFilter("", "", "")
+	require.NoError(t, err)
+	assert.Empty(t, f.Field)
+
+	f, err = repo_model.ParseSizeFilter("lfs", "10GB", "")
+	require.NoError(t, err)
+	assert.Equal(t, repo_model.SizeFilter{Field: "lfs", Min: optional.Some[int64](10_000_000_000)}, f)
+
+	f, err = repo_model.ParseSizeFilter("total", "123", "10 GiB")
+	require.NoError(t, err)
+	assert.Equal(t, repo_model.SizeFilter{Field: "total", Min: optional.Some[int64](123), Max: optional.Some[int64](10 << 30)}, f)
+
+	for _, bad := range [][3]string{
+		{"git", "abc", ""},
+		{"git", "-1", ""},
+		{"git", "1;DROP TABLE repository", ""},
+		{"git", "", "99999999999EB"},
+		{"git", "", "16EiB"},
+		{"git", "2MB", "1MB"},
+		{"size; --", "1", ""},
+		{"", "1MB", ""},
+		{"GIT", "1MB", ""},
+	} {
+		_, err := repo_model.ParseSizeFilter(bad[0], bad[1], bad[2])
+		assert.Error(t, err, "%q", bad)
+	}
 }
