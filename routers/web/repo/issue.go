@@ -2016,6 +2016,38 @@ func ViewIssue(ctx *context.Context) {
 			}
 			ctx.Data["IsBlockedByIncompleteTasks"] = pb.BlockOnIncompleteTasks && tasksDone < len(tasks)
 			ctx.Data["GrantedApprovals"] = issues_model.GetGrantedApprovalsCount(ctx, pb, pull)
+			// the required approvals of the protection have their own line, a branch without approval rules looks as before
+			if rules, err := pull_service.EvaluateApprovalRules(ctx, pb, pull); err != nil {
+				// the merge fails closed in CheckPullBranchProtections, the page still has to render
+				log.Error("EvaluateApprovalRules for %-v: %v", pull, err)
+				ctx.Data["ApprovalRulesError"] = true
+				ctx.Data["IsBlockedByApprovalRules"] = true
+			} else if len(rules) > 0 {
+				ctx.Data["ApprovalRules"] = rules
+				if ctx.Repo.IsAdmin() {
+					// who can approve is shown to repository admins only
+					eligible := make(map[int64]string, len(rules))
+					for _, r := range rules {
+						names := []string{}
+						users, err := user_model.GetUserByIDs(ctx, r.Rule.UserIDs)
+						if err != nil {
+							ctx.ServerError("GetUserByIDs", err)
+							return
+						}
+						for _, u := range users {
+							names = append(names, u.Name)
+						}
+						for _, id := range r.Rule.TeamIDs {
+							if t, err := organization.GetTeamByID(ctx, id); err == nil {
+								names = append(names, "@"+t.Name)
+							}
+						}
+						eligible[r.Rule.ID] = strings.Join(names, ", ")
+					}
+					ctx.Data["ApprovalRuleEligible"] = eligible
+				}
+				ctx.Data["IsBlockedByApprovalRules"] = slices.ContainsFunc(rules, func(s *pull_service.ApprovalRuleStatus) bool { return !s.Satisfied })
+			}
 			ctx.Data["RequireSigned"] = pb.RequireSignedCommits
 			ctx.Data["ChangedProtectedFiles"] = pull.ChangedProtectedFiles
 			ctx.Data["IsBlockedByChangedProtectedFiles"] = len(pull.ChangedProtectedFiles) != 0

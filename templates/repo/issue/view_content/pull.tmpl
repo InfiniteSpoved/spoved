@@ -12,6 +12,7 @@
 	{{- else if .IsFilesConflicted}}grey
 	{{- else if .IsPullRequestBroken}}red
 	{{- else if .IsBlockedByApprovals}}red
+	{{- else if .IsBlockedByApprovalRules}}red
 	{{- else if .IsBlockedByRejection}}red
 	{{- else if .IsBlockedByOfficialReviewRequests}}red
 	{{- else if .IsBlockedByOutdatedBranch}}red
@@ -130,6 +131,7 @@
 					{{ctx.Locale.Tr "repo.pulls.is_ancestor"}}
 				</div>
 			{{else if or .Issue.PullRequest.CanAutoMerge .Issue.PullRequest.IsEmpty}}
+				{{template "repo/issue/view_content/approval_rules" .}}
 				{{if .IsBlockedByApprovals}}
 					<div class="item">
 						{{svg "octicon-x"}}
@@ -196,7 +198,7 @@
 					</div>
 				{{end}}
 
-				{{$notAllOverridableChecksOk := or .IsBlockedByApprovals .IsBlockedByRejection .IsBlockedByOfficialReviewRequests .IsBlockedByOutdatedBranch .IsBlockedByUnresolvedConversations .IsBlockedByIncompleteTasks .IsBlockedByChangedProtectedFiles (and .EnableStatusCheck (not .RequiredStatusCheckState.IsSuccess))}}
+				{{$notAllOverridableChecksOk := or .IsBlockedByApprovals .IsBlockedByApprovalRules .IsBlockedByRejection .IsBlockedByOfficialReviewRequests .IsBlockedByOutdatedBranch .IsBlockedByUnresolvedConversations .IsBlockedByIncompleteTasks .IsBlockedByChangedProtectedFiles (and .EnableStatusCheck (not .RequiredStatusCheckState.IsSuccess))}}
 
 				{{/* admin can merge without checks, writer can merge when checks succeed */}}
 				{{$canMergeNow := and (or (and $.IsRepoAdmin (not .ProtectedBranch.ApplyToAdmins)) (not $notAllOverridableChecksOk)) (or (not .AllowMerge) (not $signingBlocksAllMergeStyles))}}

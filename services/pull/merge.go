@@ -549,6 +549,15 @@ func CheckPullBranchProtections(ctx context.Context, pr *issues_model.PullReques
 			Reason: "Does not have enough approvals",
 		}
 	}
+	statuses, err := EvaluateApprovalRules(ctx, pb, pr)
+	if err != nil {
+		return nil, fmt.Errorf("EvaluateApprovalRules: %w", err)
+	}
+	for _, s := range statuses {
+		if !s.Satisfied {
+			return pb, models.ErrDisallowedToMerge{Reason: s.Reason()}
+		}
+	}
 	if issues_model.MergeBlockedByRejectedReview(ctx, pb, pr) {
 		return pb, models.ErrDisallowedToMerge{
 			Reason: "There are requested changes",

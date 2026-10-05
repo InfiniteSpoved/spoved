@@ -151,6 +151,22 @@ func ToBranchProtection(ctx context.Context, bp *git_model.ProtectedBranch, repo
 	mergeWhitelistTeams := getWhitelistEntities(teamReaders, bp.MergeWhitelistTeamIDs)
 	approvalsWhitelistTeams := getWhitelistEntities(teamReaders, bp.ApprovalsWhitelistTeamIDs)
 
+	var approvalRules []*api.ApprovalRule
+	rules, err := git_model.GetApprovalRules(ctx, bp.ID)
+	if err != nil {
+		log.Error("GetApprovalRules: %v", err)
+	}
+	for _, r := range rules {
+		approvalRules = append(approvalRules, &api.ApprovalRule{
+			Name:              r.Name,
+			RequiredCount:     r.RequiredCount,
+			Usernames:         getWhitelistEntities(readers, r.UserIDs),
+			Teams:             getWhitelistEntities(teamReaders, r.TeamIDs),
+			PathPatterns:      r.PathPatterns,
+			RequireCodeOwners: r.RequireCodeOwners,
+		})
+	}
+
 	branchName := ""
 	if !git_model.IsRuleNameSpecial(bp.RuleName) {
 		branchName = bp.RuleName
@@ -192,6 +208,7 @@ func ToBranchProtection(ctx context.Context, bp *git_model.ProtectedBranch, repo
 		ForcePushAllowlistUsernames:    getWhitelistEntities(readers, bp.ForcePushAllowlistUserIDs),
 		ForcePushAllowlistTeams:        getWhitelistEntities(teamReaders, bp.ForcePushAllowlistTeamIDs),
 		ForcePushAllowlistDeployKeyIDs: append([]int64{}, bp.ForcePushAllowlistDeployKeyIDs...),
+		ApprovalRules:                  approvalRules,
 		Created:                        bp.CreatedUnix.AsTime(),
 		Updated:                        bp.UpdatedUnix.AsTime(),
 	}
