@@ -77,7 +77,7 @@ export default {
       if (show && this.mergeStyleAllowedCount === 0) return;
       this.showActionForm = show;
       if (!show) return;
-      this.deleteBranchAfterMerge = this.mergeForm.defaultDeleteBranchAfterMerge;
+      this.deleteBranchAfterMerge = this.mergeForm.defaultDeleteBranchAfterMerge || this.mergeForm.deleteBranchForced;
       this.scheduledAfter = '';
       this.giveUpAfter = '';
       this.mergeTitleFieldValue = this.mergeStyleDetail.mergeTitleFieldText;
@@ -157,8 +157,9 @@ export default {
       </button>
 
       <div class="ui checkbox tw-ml-1" v-if="mergeForm.isPullBranchDeletable">
-        <input name="delete_branch_after_merge" type="checkbox" v-model="deleteBranchAfterMerge" id="delete-branch-after-merge">
+        <input name="delete_branch_after_merge" type="checkbox" v-model="deleteBranchAfterMerge" id="delete-branch-after-merge" :disabled="mergeForm.deleteBranchForced">
         <label for="delete-branch-after-merge">{{ mergeForm.textDeleteBranch }}</label>
+        <div v-if="mergeForm.deleteBranchForced" class="delete-branch-forced help">{{ mergeForm.textDeleteBranchForced }}</div>
       </div>
     </form>
 

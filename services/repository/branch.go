@@ -25,6 +25,7 @@ import (
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/queue"
 	repo_module "forgejo.org/modules/repository"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 	webhook_module "forgejo.org/modules/webhook"
@@ -429,7 +430,9 @@ func RenameBranch(ctx context.Context, repo *repo_model.Repository, doer *user_m
 
 // enmuerates all branch related errors
 var (
-	ErrBranchIsDefault = errors.New("branch is default")
+	ErrBranchIsDefault     = errors.New("branch is default")
+	ErrBranchInUse         = errors.New("branch is used by another open pull request")
+	ErrBranchHasNewCommits = errors.New("branch has new commits")
 )
 
 // DeleteBranch delete branch
@@ -498,15 +501,37 @@ func DeleteBranch(ctx context.Context, doer *user_model.User, repo *repo_model.R
 	return nil
 }
 
+// IsBranchKept tells if err only says that the head branch was kept on purpose after a successful merge.
+func IsBranchKept(err error) bool {
+	return errors.Is(err, ErrBranchIsDefault) || errors.Is(err, ErrBranchInUse) || errors.Is(err, ErrBranchHasNewCommits) ||
+		errors.Is(err, git_model.ErrBranchIsProtected) || errors.Is(err, util.ErrPermissionDenied)
+}
+
 // DeleteBranchAfterMerge deletes the head branch after a PR was merged associated with the head branch.
 func DeleteBranchAfterMerge(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest, headRepo *git.Repository) error {
+	// The head branch of an AGit pull request ("<user>/<topic>") is not a real branch and can match an unrelated one.
+	if pr.Flow == issues_model.PullRequestFlowAGit {
+		return nil
+	}
+
 	// Don't cleanup when there are other PR's that use this branch as head branch.
 	exist, err := issues_model.HasUnmergedPullRequestsByHeadInfo(ctx, pr.HeadRepoID, pr.HeadBranch)
 	if err != nil {
 		return err
 	}
 	if exist {
-		return nil
+		return ErrBranchInUse
+	}
+
+	// Open PRs based on this branch are retargeted when it's deleted, but only if that is enabled.
+	if !setting.Repository.PullRequest.RetargetChildrenOnMerge || pr.BaseRepoID != pr.HeadRepoID {
+		children, err := issues_model.GetUnmergedPullRequestsByBaseInfo(ctx, pr.HeadRepoID, pr.HeadBranch)
+		if err != nil {
+			return err
+		}
+		if len(children) > 0 {
+			return ErrBranchInUse
+		}
 	}
 
 	// Ensure the doer has write permissions to the head repository of the branch it wants to delete.
@@ -516,6 +541,29 @@ func DeleteBranchAfterMerge(ctx context.Context, doer *user_model.User, pr *issu
 	}
 	if !perm.CanWrite(unit.TypeCode) {
 		return util.NewPermissionDeniedErrorf("Must have write permission to the head repository")
+	}
+
+	// Don't delete a branch that was pushed to after the merge; the PR ref lives in the base repository.
+	baseRepo := headRepo
+	if pr.BaseRepoID != pr.HeadRepoID {
+		if err := pr.LoadBaseRepo(ctx); err != nil {
+			return err
+		}
+		if baseRepo, err = gitrepo.OpenRepository(ctx, pr.BaseRepo); err != nil {
+			return err
+		}
+		defer baseRepo.Close()
+	}
+	prHead, err := baseRepo.GetRefCommitID(pr.GetGitRefName())
+	if err != nil {
+		return err
+	}
+	branchHead, err := headRepo.GetBranchCommitID(pr.HeadBranch)
+	if err != nil {
+		return err
+	}
+	if prHead != branchHead {
+		return ErrBranchHasNewCommits
 	}
 
 	if err := pull_service.RetargetChildrenOnMerge(ctx, doer, pr); err != nil {

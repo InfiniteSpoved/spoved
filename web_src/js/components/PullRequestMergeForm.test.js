@@ -3,7 +3,7 @@
 import {flushPromises, mount} from '@vue/test-utils';
 import PullRequestMergeForm from './PullRequestMergeForm.vue';
 
-async function renderMergeForm(branchName) {
+async function renderMergeForm(branchName, extra = {}) {
   window.config.pageData.pullRequestMergeForm = {
     textDeleteBranch: `Delete branch "${branchName}"`,
     textDoMerge: 'Merge',
@@ -18,6 +18,7 @@ async function renderMergeForm(branchName) {
       'mergeMessageFieldText': 'Description',
       'hideAutoMerge': 'Hide this message',
     }],
+    ...extra,
   };
   const mergeform = mount(PullRequestMergeForm);
   mergeform.get('.merge-button').trigger('click');
@@ -31,6 +32,30 @@ test('renders escaped branch name', async () => {
 
   mergeform = await renderMergeForm('<script class="evil">alert("evil message");</script>');
   expect(mergeform.get('label[for="delete-branch-after-merge"]').text()).toBe('Delete branch "<script class="evil">alert("evil message");</script>"');
+});
+
+test('delete branch checkbox follows the configured default', async () => {
+  let mergeform = await renderMergeForm('feature', {defaultDeleteBranchAfterMerge: false});
+  expect(mergeform.get('#delete-branch-after-merge').element.checked).toBe(false);
+  expect(mergeform.get('#delete-branch-after-merge').element.disabled).toBe(false);
+
+  mergeform = await renderMergeForm('feature', {defaultDeleteBranchAfterMerge: true});
+  expect(mergeform.get('#delete-branch-after-merge').element.checked).toBe(true);
+  expect(mergeform.get('#delete-branch-after-merge').element.disabled).toBe(false);
+  await mergeform.get('#delete-branch-after-merge').setValue(false);
+  expect(mergeform.get('#delete-branch-after-merge').element.checked).toBe(false);
+});
+
+test('delete branch checkbox is ticked and disabled with an explanation when forced', async () => {
+  const mergeform = await renderMergeForm('feature', {
+    defaultDeleteBranchAfterMerge: true,
+    deleteBranchForced: true,
+    textDeleteBranchForced: 'Set by organization org3',
+  });
+  const checkbox = mergeform.get('#delete-branch-after-merge');
+  expect(checkbox.element.checked).toBe(true);
+  expect(checkbox.element.disabled).toBe(true);
+  expect(mergeform.get('.delete-branch-forced').text()).toBe('Set by organization org3');
 });
 
 test('hides merge controls when no merge style is allowed', () => {

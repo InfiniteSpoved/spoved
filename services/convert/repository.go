@@ -15,6 +15,7 @@ import (
 	unit_model "forgejo.org/models/unit"
 	"forgejo.org/modules/log"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/services/branchworkflow"
 	"forgejo.org/services/context"
 )
 
@@ -114,7 +115,9 @@ func innerToRepo(ctx stdCtx.Context, repo *repo_model.Repository, permissionInRe
 		allowSquash = config.AllowSquash
 		allowFastForwardOnly = config.AllowFastForwardOnly
 		allowRebaseUpdate = config.AllowRebaseUpdate
-		defaultDeleteBranchAfterMerge = config.DefaultDeleteBranchAfterMerge
+		if eff, err := branchworkflow.GetEffective(ctx, repo); err == nil {
+			defaultDeleteBranchAfterMerge = eff.Mode >= repo_model.DeleteBranchDefaultOn
+		}
 		defaultMergeStyle = config.GetDefaultMergeStyle()
 		defaultUpdateStyle = config.GetDefaultUpdateStyle()
 		defaultAllowMaintainerEdit = config.DefaultAllowMaintainerEdit

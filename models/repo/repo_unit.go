@@ -149,6 +149,35 @@ func (cfg *IssuesConfig) ToDB() ([]byte, error) {
 	return json.Marshal(cfg)
 }
 
+// DeleteBranchMode tells if the head branch is deleted after a merge. The zero value inherits from the organization or the instance.
+type DeleteBranchMode int
+
+const (
+	DeleteBranchInherit DeleteBranchMode = iota
+	DeleteBranchOff
+	DeleteBranchDefaultOn
+	DeleteBranchAlways
+)
+
+var deleteBranchModeNames = [...]string{"inherit", "off", "default-on", "always"}
+
+func (m DeleteBranchMode) String() string {
+	if m < 0 || int(m) >= len(deleteBranchModeNames) {
+		return deleteBranchModeNames[DeleteBranchInherit]
+	}
+	return deleteBranchModeNames[m]
+}
+
+// ParseDeleteBranchMode parses the names returned by String.
+func ParseDeleteBranchMode(s string) (DeleteBranchMode, bool) {
+	for i, name := range deleteBranchModeNames {
+		if name == s {
+			return DeleteBranchMode(i), true
+		}
+	}
+	return DeleteBranchInherit, false
+}
+
 // PullRequestsConfig describes pull requests config
 type PullRequestsConfig struct {
 	IgnoreWhitespaceConflicts     bool
@@ -160,7 +189,8 @@ type PullRequestsConfig struct {
 	AllowManualMerge              bool
 	AutodetectManualMerge         bool
 	AllowRebaseUpdate             bool
-	DefaultDeleteBranchAfterMerge bool
+	DefaultDeleteBranchAfterMerge bool // legacy, read through GetDeleteBranchAfterMerge
+	DeleteBranchAfterMerge        DeleteBranchMode
 	DefaultMergeStyle             MergeStyle
 	DefaultUpdateStyle            UpdateStyle
 	DefaultAllowMaintainerEdit    bool
@@ -176,6 +206,14 @@ func (cfg *PullRequestsConfig) FromDB(bs []byte) error {
 // ToDB exports a PullRequestsConfig to a serialized format.
 func (cfg *PullRequestsConfig) ToDB() ([]byte, error) {
 	return json.Marshal(cfg)
+}
+
+// GetDeleteBranchAfterMerge returns the repository's own mode. Repositories that only have the legacy bool count as "Default on".
+func (cfg *PullRequestsConfig) GetDeleteBranchAfterMerge() DeleteBranchMode {
+	if cfg.DeleteBranchAfterMerge == DeleteBranchInherit && cfg.DefaultDeleteBranchAfterMerge {
+		return DeleteBranchDefaultOn
+	}
+	return cfg.DeleteBranchAfterMerge
 }
 
 // IsMergeStyleAllowed returns if merge style is allowed

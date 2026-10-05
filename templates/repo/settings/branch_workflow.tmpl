@@ -1,0 +1,27 @@
+{{template "repo/settings/layout_head" (dict "ctxData" . "pageClass" "repository settings branch-workflow")}}
+	<div class="repo-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "repo.settings.branch_workflow"}}
+		</h4>
+		<div class="ui attached segment">
+			<form class="ui form" action="{{.Link}}" method="post">
+				<div class="field">
+					<label for="delete_after_merge">{{ctx.Locale.Tr "repo.settings.branch_workflow.delete_after_merge"}}</label>
+					<select id="delete_after_merge" name="delete_after_merge" class="ui dropdown" {{if .Locked}}disabled{{end}}>
+						<option value="inherit" {{if eq .DeleteAfterMerge "inherit"}}selected{{end}}>{{if .OwnerIsOrg}}{{ctx.Locale.Tr "repo.settings.branch_workflow.inherit_org"}}{{else}}{{ctx.Locale.Tr "org.settings.branch_workflow.inherit"}}{{end}}</option>
+						<option value="off" {{if eq .DeleteAfterMerge "off"}}selected{{end}}>{{ctx.Locale.Tr "repo.settings.branch_workflow.off"}}</option>
+						<option value="default-on" {{if eq .DeleteAfterMerge "default-on"}}selected{{end}}>{{ctx.Locale.Tr "repo.settings.branch_workflow.default_on"}}</option>
+						<option value="always" {{if eq .DeleteAfterMerge "always"}}selected{{end}}>{{ctx.Locale.Tr "repo.settings.branch_workflow.always"}}</option>
+					</select>
+					<p class="help">{{ctx.Locale.Tr "repo.settings.branch_workflow.delete_after_merge_desc"}}</p>
+					{{if .Locked}}<p class="help">{{.SetBy}}</p>{{end}}
+				</div>
+				{{if not .Locked}}
+				<div class="field">
+					<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+				</div>
+				{{end}}
+			</form>
+		</div>
+	</div>
+{{template "repo/settings/layout_footer" .}}
