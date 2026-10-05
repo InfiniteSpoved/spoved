@@ -535,6 +535,7 @@ func TestAPIPullScheduledAfter(t *testing.T) {
 			require.NotNil(t, apiPR.ScheduledAfter)
 			assert.Equal(t, scheduledAfter.Unix(), apiPR.ScheduledAfter.Unix())
 			require.NotNil(t, apiPR.GiveUpAfter)
+			assert.Equal(t, giveUpAfter.Unix(), apiPR.GiveUpAfter.Unix())
 			getPull(t, scheduled, outsiderToken, http.StatusNotFound)
 		})
 
