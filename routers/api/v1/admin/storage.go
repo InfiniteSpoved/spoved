@@ -10,6 +10,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/routers/api/v1/utils"
 	"forgejo.org/services/context"
+	"forgejo.org/services/convert"
 )
 
 // GetStorageSummary returns the storage used by all repositories
@@ -89,20 +90,7 @@ func ListStorageOwners(ctx *context.APIContext) {
 
 	result := make([]*api.OwnerStorage, len(owners))
 	for i, o := range owners {
-		ownerType := "user"
-		if o.Owner.IsOrganization() {
-			ownerType = "org"
-		}
-		result[i] = &api.OwnerStorage{
-			OwnerID:   o.OwnerID,
-			OwnerName: o.Owner.Name,
-			OwnerType: ownerType,
-			RepoCount: o.NumRepos,
-			GitSize:   o.GitSize,
-			LFSSize:   o.LFSSize,
-			TotalSize: o.Size(),
-			Percent:   o.Percent(totals),
-		}
+		result[i] = convert.ToOwnerStorage(o, totals)
 	}
 
 	ctx.SetLinkHeader(int(count), listOptions.PageSize)

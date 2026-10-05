@@ -27,6 +27,11 @@ const (
 
 // Repos show all the repositories
 func Repos(ctx *context.Context) {
+	if format := ctx.FormString("format"); format == "csv" || format == "json" {
+		exportRepoStorage(ctx, format)
+		return
+	}
+
 	ctx.Data["Title"] = ctx.Tr("admin.repositories")
 	ctx.Data["PageIsAdminRepositories"] = true
 
