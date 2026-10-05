@@ -6,12 +6,14 @@ package integration
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	auth_model "forgejo.org/models/auth"
+	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
@@ -181,6 +183,69 @@ func TestRateLimitWebAndGit(t *testing.T) {
 	// a signed in user has their own bucket
 	session.MakeRequest(t, fromIP(NewRequest(t, "GET", "/explore/repos"), "192.0.2.1"), http.StatusOK)
 	session.MakeRequest(t, fromIP(NewRequest(t, "GET", "/explore/repos"), "192.0.2.1"), http.StatusTooManyRequests)
+}
+
+func TestRateLimitExemptAdmins(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	adminToken := getUserToken(t, "user1", auth_model.AccessTokenScopeAll)
+	userToken := getUserToken(t, "user2", auth_model.AccessTokenScopeAll)
+	adminSession := loginUser(t, "user1")
+	one := setting.RateLimitClass{AuthenticatedRate: slow, AuthenticatedBurst: 1, AnonymousRate: slow, AnonymousBurst: 1}
+	mockRateLimit(t, map[string]setting.RateLimitClass{
+		ratelimit.API: one, ratelimit.APIWrite: one, ratelimit.Git: one, ratelimit.Web: one,
+		ratelimit.Auth: {AuthenticatedRate: slow, AuthenticatedBurst: 2},
+	}, "")
+	get := func(rw *RequestWrapper, status int) *httptest.ResponseRecorder {
+		return MakeRequest(t, fromIP(rw, "192.0.2.1"), status)
+	}
+	gitRefs := func(status int) {
+		req := NewRequest(t, "GET", "/user2/repo1.git/info/refs?service=git-upload-pack")
+		req.Request.SetBasicAuth("user1", userPassword)
+		get(req, status)
+	}
+
+	t.Run("off by default", func(t *testing.T) {
+		get(NewRequest(t, "GET", "/api/v1/user").AddTokenAuth(adminToken), http.StatusOK)
+		get(NewRequest(t, "GET", "/api/v1/user").AddTokenAuth(adminToken), http.StatusTooManyRequests)
+	})
+
+	t.Run("on", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.RateLimit.ExemptAdmins, true)()
+		ratelimit.ResetForTest()
+		for range 3 {
+			resp := get(NewRequest(t, "GET", "/api/v1/user").AddTokenAuth(adminToken), http.StatusOK)
+			assert.Empty(t, resp.Header().Get("X-RateLimit-Limit"))
+			req := NewRequestWithJSON(t, "POST", "/api/v1/markdown", map[string]string{"Text": "hi"})
+			get(req.AddTokenAuth(adminToken), http.StatusOK)
+			adminSession.MakeRequest(t, fromIP(NewRequest(t, "GET", "/explore/repos"), "192.0.2.1"), http.StatusOK)
+			gitRefs(http.StatusOK)
+		}
+
+		// everyone else is still limited
+		get(NewRequest(t, "GET", "/api/v1/user").AddTokenAuth(userToken), http.StatusOK)
+		get(NewRequest(t, "GET", "/api/v1/user").AddTokenAuth(userToken), http.StatusTooManyRequests)
+		get(NewRequest(t, "GET", "/api/v1/version"), http.StatusOK)
+		get(NewRequest(t, "GET", "/api/v1/version"), http.StatusTooManyRequests)
+
+		// the auth class still applies to the admin account
+		signIn := func(ip, password string, status int) {
+			req := NewRequestWithValues(t, "POST", "/user/login", map[string]string{"user_name": "user1", "password": password})
+			MakeRequest(t, fromIP(req, ip), status)
+		}
+		signIn("192.0.2.2", "wrong", http.StatusOK)
+		signIn("192.0.2.3", "wrong", http.StatusOK)
+		signIn("192.0.2.4", userPassword, http.StatusTooManyRequests)
+	})
+
+	t.Run("prohibit login admin is limited", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.RateLimit.ExemptAdmins, true)()
+		ratelimit.ResetForTest()
+		_, err := db.GetEngine(t.Context()).ID(1).Cols("prohibit_login").Update(&user_model.User{ProhibitLogin: true})
+		require.NoError(t, err)
+		resp := get(NewRequest(t, "GET", "/api/v1/user").AddTokenAuth(adminToken), NoExpectedStatus)
+		assert.NotEmpty(t, resp.Header().Get("X-RateLimit-Limit"))
+		get(NewRequest(t, "GET", "/api/v1/user").AddTokenAuth(adminToken), http.StatusTooManyRequests)
+	})
 }
 
 func TestRateLimitGitClone(t *testing.T) {

@@ -17,15 +17,17 @@ type RateLimitClass struct {
 
 // RateLimit settings
 var RateLimit = struct {
-	Enabled     bool
-	ExemptCIDRs *hostmatcher.HostMatchList
-	Classes     map[string]RateLimitClass
+	Enabled      bool
+	ExemptCIDRs  *hostmatcher.HostMatchList
+	ExemptAdmins bool
+	Classes      map[string]RateLimitClass
 }{}
 
 func loadRateLimitFrom(rootCfg ConfigProvider) {
 	sec := rootCfg.Section("rate_limit")
 	RateLimit.Enabled = sec.Key("ENABLED").MustBool(false)
 	RateLimit.ExemptCIDRs = hostmatcher.ParseHostMatchList("rate_limit.EXEMPT_CIDRS", sec.Key("EXEMPT_CIDRS").String())
+	RateLimit.ExemptAdmins = sec.Key("EXEMPT_ADMINS").MustBool(false)
 
 	defaults := map[string]RateLimitClass{
 		"api":       {60, 600, 5, 50},
