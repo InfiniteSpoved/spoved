@@ -8,6 +8,8 @@ import (
 
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
+	issues_model "forgejo.org/models/issues"
+	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
@@ -120,6 +122,43 @@ func TestPushCommits(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(hookTask.PayloadContent), &payloadContent))
 		assert.Len(t, payloadContent.Commits, 1)
 		assert.Equal(t, "2c54faec6c45d31c1abfaecdab471eac6633738a", payloadContent.Commits[0].ID)
+	})
+}
+
+func TestPullRequestScheduleFields(t *testing.T) {
+	defer unittest.OverrideFixtures("services/webhook/TestPullRequestSchedule")()
+	require.NoError(t, unittest.PrepareTestDatabase())
+
+	scheduled := timeutil.TimeStamp(2000000000)
+	pullPayload := func(t *testing.T) map[string]any {
+		t.Helper()
+		pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: 2})
+		NewNotifier().NewPullRequest(db.DefaultContext, pr, nil)
+		hookTask := unittest.AssertExistsAndLoadBean(t, &webhook_model.HookTask{HookID: 1001})
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal([]byte(hookTask.PayloadContent), &payload))
+		unittest.AssertSuccessfulDelete(t, &webhook_model.HookTask{ID: hookTask.ID})
+		return payload
+	}
+
+	t.Run("Without auto merge", func(t *testing.T) {
+		pullRequest, ok := pullPayload(t)["pull_request"].(map[string]any)
+		require.True(t, ok)
+		assert.NotContains(t, pullRequest, "scheduled_after")
+		assert.NotContains(t, pullRequest, "give_up_after")
+	})
+
+	t.Run("With auto merge", func(t *testing.T) {
+		require.NoError(t, db.Insert(db.DefaultContext, &pull_model.AutoMerge{PullID: 2, DoerID: 2, ScheduledAfterUnix: scheduled, GiveUpAfterUnix: scheduled}))
+		raw, err := json.Marshal(pullPayload(t))
+		require.NoError(t, err)
+		var payload structs.PullRequestPayload
+		require.NoError(t, json.Unmarshal(raw, &payload))
+		require.NotNil(t, payload.PullRequest)
+		require.NotNil(t, payload.PullRequest.ScheduledAfter)
+		require.NotNil(t, payload.PullRequest.GiveUpAfter)
+		assert.Equal(t, int64(scheduled), payload.PullRequest.ScheduledAfter.Unix())
+		assert.Equal(t, int64(scheduled), payload.PullRequest.GiveUpAfter.Unix())
 	})
 }
 
