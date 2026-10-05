@@ -167,6 +167,8 @@ func baseExpectedViewResponse() *ViewResponse {
 						Status:   "success",
 						CanRerun: false,
 						Duration: "1m38s",
+						GroupKey: "/job_2",
+						Needs:    []int64{},
 					},
 				},
 				Commit: ViewCommit{
@@ -263,19 +265,25 @@ func TestActionsViewViewPost(t *testing.T) {
 				resp.State.Run.EstimatedOutcome = "unknown"
 				resp.State.Run.Jobs = []*ViewJob{
 					{
-						ID:     194,
-						Name:   "job1 (1)",
-						Status: "success",
+						ID:       194,
+						Name:     "job1 (1)",
+						Status:   "success",
+						GroupKey: "/job1",
+						Needs:    []int64{},
 					},
 					{
-						ID:     195,
-						Name:   "job1 (2)",
-						Status: "success",
+						ID:       195,
+						Name:     "job1 (2)",
+						Status:   "success",
+						GroupKey: "/job1",
+						Needs:    []int64{},
 					},
 					{
-						ID:     196,
-						Name:   "job2",
-						Status: "waiting",
+						ID:       196,
+						Name:     "job2",
+						Status:   "waiting",
+						GroupKey: "/job2",
+						Needs:    []int64{194, 195},
 					},
 				}
 				resp.State.CurrentJob.Title = "job1 (1)"
@@ -333,9 +341,11 @@ func TestActionsViewViewPost(t *testing.T) {
 				resp.State.Run.Done = false
 				resp.State.Run.Jobs = []*ViewJob{
 					{
-						ID:     396,
-						Name:   "job_2",
-						Status: "waiting",
+						ID:       396,
+						Name:     "job_2",
+						Status:   "waiting",
+						GroupKey: "/job_2",
+						Needs:    []int64{},
 					},
 				}
 				resp.State.Run.Commit.Branch = ViewBranch{
@@ -926,4 +936,14 @@ func TestActionsViewStatusDiagnostics(t *testing.T) {
 			assert.Equal(t, testCase.expected, statusDiagnostics(ctx, testCase.status, testCase.task, testCase.job))
 		})
 	}
+}
+
+func TestViewJobNeeds(t *testing.T) {
+	ids := map[actions_model.NamespacedJobIdentifier][]int64{
+		{Identifier: "build"}: {1},
+		{Identifier: "test"}:  {2, 3}, // matrix
+	}
+	deploy := &actions_model.ActionRunJob{Needs: []actions_model.LocalJobIdentifier{"build", "test", "gone"}}
+	assert.Equal(t, []int64{1, 2, 3}, viewJobNeeds(deploy, ids))
+	assert.Equal(t, []int64{}, viewJobNeeds(&actions_model.ActionRunJob{}, ids))
 }

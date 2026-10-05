@@ -560,6 +560,8 @@ test('view non-picked action run job', async () => {
                 status: 'waiting',
                 canRerun: false,
                 duration: '0s',
+                groupKey: '/check-1',
+                needs: [],
               },
               {
                 id: 162,
@@ -567,6 +569,8 @@ test('view non-picked action run job', async () => {
                 status: 'waiting',
                 canRerun: false,
                 duration: '0s',
+                groupKey: '/check-2',
+                needs: [],
               },
               {
                 id: 163,
@@ -574,6 +578,8 @@ test('view non-picked action run job', async () => {
                 status: 'waiting',
                 canRerun: false,
                 duration: '0s',
+                groupKey: '/check-3',
+                needs: [],
               },
             ],
           },
