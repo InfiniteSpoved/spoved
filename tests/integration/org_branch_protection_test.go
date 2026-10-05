@@ -398,6 +398,22 @@ func TestOrgBranchProtectionMerge(t *testing.T) {
 			MakeRequest(t, req, http.StatusNoContent)
 		})
 
+		// a pending or comment review doesn't answer a review request, only an approval or rejection does
+		t.Run("UserReviewRequest", func(t *testing.T) {
+			req := NewRequestWithJSON(t, "POST", fmt.Sprintf("%s/%d/requested_reviewers", link, pr.Index), &api.PullReviewRequestOptions{Reviewers: []string{"user28"}}).AddTokenAuth(repo.Token)
+			MakeRequest(t, req, http.StatusCreated)
+			assert.Contains(t, merge(pr.Index, http.StatusMethodNotAllowed), "There are official review requests")
+
+			// a pending review keeps the request, and so does submitting it as a comment
+			id := review(user28, pr.Index, api.ReviewStatePending)
+			assert.Contains(t, merge(pr.Index, http.StatusMethodNotAllowed), "There are official review requests")
+			req = NewRequestWithJSON(t, "POST", fmt.Sprintf("%s/%d/reviews/%d", link, pr.Index, id), &api.SubmitPullReviewOptions{Event: api.ReviewStateComment, Body: "comment"}).AddTokenAuth(user28.Token)
+			MakeRequest(t, req, http.StatusOK)
+			assert.Contains(t, merge(pr.Index, http.StatusMethodNotAllowed), "There are official review requests")
+
+			review(user28, pr.Index, api.ReviewStateApproved)
+		})
+
 		t.Run("Merged", func(t *testing.T) {
 			merge(pr.Index, http.StatusOK)
 		})

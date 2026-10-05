@@ -378,8 +378,10 @@ func orgRuleReviewers(ctx context.Context, pb *git_model.ProtectedBranch, pr *Pu
 
 // orgRuleHasReviewRequests returns whether a pending review request goes to an official reviewer or team of the organization rule.
 func orgRuleHasReviewRequests(ctx context.Context, pb *git_model.ProtectedBranch, pr *PullRequest) (bool, error) {
+	// only an approval or rejection answers a request, a comment or pending review doesn't
 	var reviews []*Review
-	if err := db.GetEngine(ctx).Where("issue_id = ?", pr.IssueID).OrderBy("id").Find(&reviews); err != nil {
+	if err := db.GetEngine(ctx).Where("issue_id = ?", pr.IssueID).
+		In("type", ReviewTypeApprove, ReviewTypeReject, ReviewTypeRequest).OrderBy("id").Find(&reviews); err != nil {
 		return false, err
 	}
 	latest := make(map[int64]*Review, len(reviews))
