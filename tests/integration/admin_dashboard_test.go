@@ -4,9 +4,12 @@
 package integration
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
+	"reflect"
 	"testing"
+	"unsafe"
 
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/system"
@@ -104,13 +107,38 @@ func TestAdminDashboard(t *testing.T) {
 }
 
 // The update checker is off by default: a result stored by an earlier run (e.g. Forgejo's) must not show a banner.
-func TestAdminDashboardIgnoresStaleUpdateCheck(t *testing.T) {
+func TestAdminDashboardUpdateCheck(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	defer test.MockVariableValue(&setting.AppVer, "16.0.0")()
-	require.NoError(t, system.AppState.Set(t.Context(), &updatechecker.CheckerState{SupportedVersions: []string{"99.0.0"}}))
 	defer func() { require.NoError(t, system.AppState.Set(t.Context(), &updatechecker.CheckerState{})) }()
-	assert.False(t, cron.GetTask("update_checker").IsEnabled())
 
-	resp := loginUser(t, "user1").MakeRequest(t, NewRequest(t, "GET", "/admin"), http.StatusOK)
-	assert.NotContains(t, resp.Body.String(), "99.0.0")
+	task := cron.GetTask("update_checker")
+	cfg := reflect.NewAt(reflect.TypeFor[cron.Config](), unsafe.Pointer(reflect.ValueOf(task).Elem().FieldByName("config").UnsafeAddr())).Elem().Interface().(*cron.UpdateCheckerConfig)
+	defer test.MockVariableValue(&cfg.Enabled, false)()
+	session := loginUser(t, "user1")
+
+	dashboard := func(t *testing.T, state updatechecker.CheckerState) (string, *HTMLDoc) {
+		t.Helper()
+		require.NoError(t, system.AppState.Set(t.Context(), &state))
+		resp := session.MakeRequest(t, NewRequest(t, "GET", "/admin"), http.StatusOK)
+		return resp.Body.String(), NewHTMLParser(t, bytes.NewBuffer(resp.Body.Bytes()))
+	}
+
+	t.Run("disabled ignores a stale result", func(t *testing.T) {
+		body, _ := dashboard(t, updatechecker.CheckerState{SupportedVersions: []string{"99.0.0"}})
+		assert.NotContains(t, body, "99.0.0")
+	})
+
+	cfg.Enabled = true
+	for name, state := range map[string]updatechecker.CheckerState{
+		"minor": {SupportedVersions: []string{"16.0.1"}},
+		"major": {SupportedVersions: []string{"99.0.0"}},
+		"error": {Error: "boom"},
+	} {
+		t.Run("enabled "+name, func(t *testing.T) {
+			body, doc := dashboard(t, state)
+			doc.AssertSelection(t, doc.Find(`.flash-error a[href="https://github.com/GitHatOrg/GitHat/releases"]`), true)
+			assert.NotContains(t, body, "forgejo.org/releases")
+		})
+	}
 }
