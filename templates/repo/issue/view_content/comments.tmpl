@@ -727,6 +727,21 @@
 					<span class="text grey muted-links"><a href="{{.RefIssueLink ctx}}"><b>{{RenderRefIssueTitle $.Context (.RefIssueTitle ctx)}}</b> {{.RefIssueIdent ctx}}</a></span>
 				</div>
 			</div>
+		{{else if eq .Type 41 42 43 44}}
+			<div class="timeline-item event" id="{{.HashTag}}">
+				<span class="badge">{{svg "octicon-checklist"}}</span>
+				{{template "shared/user/avatarlink" dict "user" .Poster}}
+				<span class="text grey muted-links">
+					{{template "shared/user/authorlink" .Poster}}
+					{{if eq .Type 41}}{{ctx.Locale.Tr "repo.issues.pull_task_created" $createdStr}}
+					{{else if eq .Type 42}}{{ctx.Locale.Tr "repo.issues.pull_task_done" $createdStr}}
+					{{else if eq .Type 43}}{{ctx.Locale.Tr "repo.issues.pull_task_reopened" $createdStr}}
+					{{else}}{{ctx.Locale.Tr "repo.issues.pull_task_deleted" $createdStr}}{{end}}
+				</span>
+				<div class="detail flex-text-block">
+					<span class="text pull-task-content">{{.Content}}</span>
+				</div>
+			</div>
 		{{else if eq .Type 38}}
 			<div class="timeline-item event" id="{{.HashTag}}">
 				<span class="badge">{{svg "octicon-list-unordered" 16}}</span>

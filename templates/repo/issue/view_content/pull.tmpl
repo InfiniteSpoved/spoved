@@ -16,6 +16,7 @@
 	{{- else if .IsBlockedByOfficialReviewRequests}}red
 	{{- else if .IsBlockedByOutdatedBranch}}red
 	{{- else if .IsBlockedByUnresolvedConversations}}red
+	{{- else if .IsBlockedByIncompleteTasks}}red
 	{{- else if .IsBlockedByChangedProtectedFiles}}red
 	{{- else if and .EnableStatusCheck (or .RequiredStatusCheckState.IsFailure .RequiredStatusCheckState.IsError)}}red
 	{{- else if and .EnableStatusCheck (or (not $.LatestCommitStatus) .RequiredStatusCheckState.IsPending .RequiredStatusCheckState.IsWarning)}}yellow
@@ -34,6 +35,11 @@
 			"ShowHideChecks" true
 			"is_context_required" .is_context_required
 		)}}
+		</div>
+		{{end}}
+		{{if .PullTasks}}
+		<div class="ui attached segment pull-tasks-progress">
+			{{svg "octicon-checklist"}} <a href="#pull-tasks">{{ctx.Locale.Tr "repo.pulls.tasks.progress" .PullTasksDone (len .PullTasks)}}</a>
 		</div>
 		{{end}}
 		{{$showGeneralMergeForm := false}}
@@ -154,6 +160,11 @@
 						<li><a href="{{$.Issue.Link}}#{{.HashTag}}">{{.TreePath}}</a></li>
 						{{end}}
 					</ul>
+				{{else if .IsBlockedByIncompleteTasks}}
+					<div class="item">
+						{{svg "octicon-x"}}
+						<a href="#pull-tasks">{{ctx.Locale.Tr "repo.pulls.blocked_by_incomplete_tasks"}}</a>
+					</div>
 				{{else if .IsBlockedByChangedProtectedFiles}}
 					<div class="item">
 						{{svg "octicon-x"}}
@@ -185,7 +196,7 @@
 					</div>
 				{{end}}
 
-				{{$notAllOverridableChecksOk := or .IsBlockedByApprovals .IsBlockedByRejection .IsBlockedByOfficialReviewRequests .IsBlockedByOutdatedBranch .IsBlockedByUnresolvedConversations .IsBlockedByChangedProtectedFiles (and .EnableStatusCheck (not .RequiredStatusCheckState.IsSuccess))}}
+				{{$notAllOverridableChecksOk := or .IsBlockedByApprovals .IsBlockedByRejection .IsBlockedByOfficialReviewRequests .IsBlockedByOutdatedBranch .IsBlockedByUnresolvedConversations .IsBlockedByIncompleteTasks .IsBlockedByChangedProtectedFiles (and .EnableStatusCheck (not .RequiredStatusCheckState.IsSuccess))}}
 
 				{{/* admin can merge without checks, writer can merge when checks succeed */}}
 				{{$canMergeNow := and (or (and $.IsRepoAdmin (not .ProtectedBranch.ApplyToAdmins)) (not $notAllOverridableChecksOk)) (or (not .AllowMerge) (not $signingBlocksAllMergeStyles))}}
@@ -383,6 +394,11 @@
 						<li><a href="{{$.Issue.Link}}#{{.HashTag}}">{{.TreePath}}</a></li>
 						{{end}}
 					</ul>
+				{{else if .IsBlockedByIncompleteTasks}}
+					<div class="item text red">
+						{{svg "octicon-x"}}
+						<a href="#pull-tasks">{{ctx.Locale.Tr "repo.pulls.blocked_by_incomplete_tasks"}}</a>
+					</div>
 				{{else if .IsBlockedByChangedProtectedFiles}}
 					<div class="item text red">
 						{{svg "octicon-x"}}

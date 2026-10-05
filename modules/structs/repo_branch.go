@@ -55,6 +55,8 @@ type BranchProtection struct {
 	// Block merging while code review conversations are unresolved, optionally not counting outdated ones.
 	BlockOnUnresolvedConversations bool `json:"block_on_unresolved_conversations"`
 	IgnoreOutdatedConversations    bool `json:"ignore_outdated_conversations"`
+	// Block merging while tasks of the pull request are open.
+	BlockOnIncompleteTasks bool `json:"block_on_incomplete_tasks"`
 
 	// Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.
 	// The default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.
@@ -107,6 +109,8 @@ type CreateBranchProtectionOption struct {
 	// Block merging while code review conversations are unresolved, optionally not counting outdated ones.
 	BlockOnUnresolvedConversations bool `json:"block_on_unresolved_conversations"`
 	IgnoreOutdatedConversations    bool `json:"ignore_outdated_conversations"`
+	// Block merging while tasks of the pull request are open.
+	BlockOnIncompleteTasks bool `json:"block_on_incomplete_tasks"`
 
 	// Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.
 	// The default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.
@@ -152,6 +156,8 @@ type EditBranchProtectionOption struct {
 	// Block merging while code review conversations are unresolved, optionally not counting outdated ones.
 	BlockOnUnresolvedConversations *bool `json:"block_on_unresolved_conversations"`
 	IgnoreOutdatedConversations    *bool `json:"ignore_outdated_conversations"`
+	// Block merging while tasks of the pull request are open.
+	BlockOnIncompleteTasks *bool `json:"block_on_incomplete_tasks"`
 
 	// Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.
 	// The default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.
