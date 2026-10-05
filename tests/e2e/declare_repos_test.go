@@ -319,6 +319,46 @@ custom: "http://localhost:3003/"
 			Versions: []string{"![arch](arch.drawio.svg)\n"},
 		},
 	}, nil)
+	newRepo(t, 2, "actions-graph-test", map[unit_model.Type]convert.Conversion{
+		unit_model.TypeCode:    nil,
+		unit_model.TypeActions: &repo_model.ActionsConfig{},
+	}, nil, func(user *user_model.User, repo *repo_model.Repository) {
+		// The jobs stay unscheduled (no runner in e2e): "build" waits and the rest is blocked on it.
+		workflows, err := jobparser.Parse([]byte(`
+name: graph
+on: push
+jobs:
+  build:
+    runs-on: docker
+    steps:
+      - run: true
+  test:
+    needs: [build]
+    runs-on: docker
+    strategy:
+      matrix:
+        shard: [a, b]
+    steps:
+      - run: true
+  deploy:
+    needs: [test]
+    runs-on: docker
+    steps:
+      - run: true
+`), false)
+		require.NoError(t, err)
+		require.NoError(t, actions_service.InsertRun(db.DefaultContext, &actions_model.ActionRun{
+			Title:         "graph run",
+			RepoID:        repo.ID,
+			OwnerID:       user.ID,
+			WorkflowID:    "graph.yml",
+			TriggerUserID: user.ID,
+			Ref:           "refs/heads/main",
+			Event:         "push",
+			EventPayload:  "{}",
+			Status:        actions_model.StatusWaiting,
+		}, workflows))
+	})
 	// add your repo declarations here
 }
 

@@ -2,6 +2,7 @@
 import {SvgIcon} from '../svg.js';
 import ActionRunStatus from './ActionRunStatus.vue';
 import ActionJobStepList from './ActionJobStepList.vue';
+import ActionRunGraph from './ActionRunGraph.vue';
 import {toggleElem} from '../utils/dom.js';
 import {GET, POST, DELETE} from '../modules/fetch.js';
 import {initMarkupContent} from '../markup/content.js';
@@ -13,6 +14,7 @@ export default {
     SvgIcon,
     ActionRunStatus,
     ActionJobStepList,
+    ActionRunGraph,
   },
   props: {
     initialJobData: {
@@ -101,6 +103,8 @@ export default {
           //   status: '',
           //   canRerun: false,
           //   duration: '',
+          //   groupKey: '',
+          //   needs: [], // IDs of the jobs this one waits for
           // },
         ],
         commit: {
@@ -554,6 +558,7 @@ export default {
         <div v-for="warning in run.preExecutionWarnings" :key="warning" v-html="warning"/>
       </div>
     </div>
+    <ActionRunGraph v-if="run.jobs?.length > 1" :jobs="run.jobs" :run-link="run.link" :current-job-index="parseInt(jobIndex)" :locale="locale"/>
     <div class="action-view-body">
       <div class="action-view-left" v-if="displayOtherJobs">
         <div class="job-group-section">
