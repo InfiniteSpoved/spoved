@@ -466,3 +466,37 @@ MINIO_BASE_PATH = /lfs
 	assert.True(t, LFS.Storage.MinioConfig.UseSSL)
 	assert.Equal(t, "/lfs", LFS.Storage.MinioConfig.BasePath)
 }
+
+func Test_getStorageAzureBlob(t *testing.T) {
+	cfg, err := NewConfigProviderFromData(`
+[storage]
+STORAGE_TYPE = azureblob
+AZURE_BLOB_ENDPOINT = https://account.blob.core.windows.net/
+AZURE_BLOB_ACCOUNT_NAME = account
+AZURE_BLOB_ACCOUNT_KEY = my_account_key
+AZURE_BLOB_BASE_PATH = /prefix
+
+[storage.lfs]
+AZURE_BLOB_CONTAINER = lfs-container
+SERVE_DIRECT = true
+`)
+	require.NoError(t, err)
+
+	require.NoError(t, loadPackagesFrom(cfg))
+	assert.EqualValues(t, "azureblob", Packages.Storage.Type)
+	assert.Equal(t, "gitea", Packages.Storage.AzureBlobConfig.Container)
+	assert.Equal(t, "/prefix/packages/", Packages.Storage.AzureBlobConfig.BasePath)
+	assert.False(t, Packages.Storage.ServeDirect())
+
+	require.NoError(t, loadLFSFrom(cfg))
+	assert.EqualValues(t, "azureblob", LFS.Storage.Type)
+	assert.Equal(t, "https://account.blob.core.windows.net/", LFS.Storage.AzureBlobConfig.Endpoint)
+	assert.Equal(t, "account", LFS.Storage.AzureBlobConfig.AccountName)
+	assert.Equal(t, "lfs-container", LFS.Storage.AzureBlobConfig.Container)
+	assert.Equal(t, "/prefix", LFS.Storage.AzureBlobConfig.BasePath) // like minio, [storage.lfs] keeps the inherited base path
+	assert.True(t, LFS.Storage.ServeDirect())
+
+	cp := LFS.Storage.ToShadowCopy()
+	assert.Equal(t, "******", cp.AzureBlobConfig.AccountKey)
+	assert.Equal(t, "my_account_key", LFS.Storage.AzureBlobConfig.AccountKey)
+}

@@ -539,7 +539,7 @@ func (r *artifactV4Routes) getSignedArtifactURL(ctx *ArtifactContext) {
 
 	respData := GetSignedArtifactURLResponse{}
 
-	if setting.Actions.ArtifactStorage.MinioConfig.ServeDirect {
+	if setting.Actions.ArtifactStorage.ServeDirect() {
 		u, err := storage.ActionsArtifacts.URL(artifact.StoragePath, artifact.ArtifactPath, nil)
 		if u != nil && err == nil {
 			respData.SignedUrl = u.String()
