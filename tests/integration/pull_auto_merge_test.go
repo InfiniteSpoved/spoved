@@ -410,6 +410,8 @@ func TestPullScheduledAutoMerge(t *testing.T) {
 			})
 			am := unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID})
 			assert.Equal(t, timeutil.TimeStamp(now.Add(3*time.Hour).Unix()), am.GiveUpAfterUnix)
+			resp := session.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/%s/pulls/%d", repo.FullName(), pr.Index)), http.StatusOK)
+			assert.Contains(t, resp.Body.String(), "It is canceled if it has not merged by")
 
 			// started at its time, then waiting for an approval
 			passTime()
