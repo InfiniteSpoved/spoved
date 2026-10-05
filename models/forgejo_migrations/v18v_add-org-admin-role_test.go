@@ -12,25 +12,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type v18tUserGroupBefore struct {
+type v18vUserGroupBefore struct {
 	ID        int64  `xorm:"pk autoincr"`
 	LowerName string `xorm:"UNIQUE NOT NULL"`
 }
 
-func (v18tUserGroupBefore) TableName() string { return "user_group" }
+func (v18vUserGroupBefore) TableName() string { return "user_group" }
 
-type v18tUserGroupTeamBefore struct {
+type v18vUserGroupTeamBefore struct {
 	ID      int64 `xorm:"pk autoincr"`
 	GroupID int64 `xorm:"UNIQUE(s) NOT NULL"`
 	TeamID  int64 `xorm:"UNIQUE(s) NOT NULL"`
 	OrgID   int64 `xorm:"NOT NULL"`
 }
 
-func (v18tUserGroupTeamBefore) TableName() string { return "user_group_team" }
+func (v18vUserGroupTeamBefore) TableName() string { return "user_group_team" }
 
 // AC9: the role column, the managed flag and the exclusion table are added; existing groups and links keep working.
 func Test_addOrgAdminRole(t *testing.T) {
-	x, deferable := migration_tests.PrepareTestEnv(t, 0, new(v18tUserGroupBefore), new(v18tUserGroupTeamBefore))
+	x, deferable := migration_tests.PrepareTestEnv(t, 0, new(v18vUserGroupBefore), new(v18vUserGroupTeamBefore))
 	defer deferable()
 	require.NotNil(t, x)
 
