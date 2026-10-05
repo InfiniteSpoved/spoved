@@ -9,6 +9,7 @@ import (
 
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
+	"forgejo.org/modules/translation"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,4 +50,24 @@ PROPORTION_TO_CHECK_PER_REPO = 0.1
 	assert.Equal(t, 7*time.Hour, config.LastUpdatedMoreThanAgo)
 	assert.Equal(t, int64(10), config.NumberToCheckPerRepo)
 	assert.InDelta(t, 0.1, config.ProportionToCheckPerRepo, 0.001)
+}
+
+func Test_UpdateCheckerDefaults(t *testing.T) {
+	cfg, err := setting.NewConfigProviderFromData(``)
+	require.NoError(t, err)
+	defer test.MockVariableValue(&setting.CfgProvider, cfg)()
+	defer test.MockVariableValue(&setting.StaticRootPath, "../..")()
+	defer test.MockVariableValue(&setting.AppWorkPath, "../..")()
+	defer test.MockVariableValue(&setting.Langs, []string{"en-US"})()
+	defer test.MockVariableValue(&setting.Names, []string{"English"})()
+	translation.InitLocales(t.Context())
+	defer test.MockVariableValue(&tasks, []*Task{})()
+	defer test.MockVariableValue(&tasksMap, map[string]*Task{})()
+
+	registerUpdateGiteaChecker()
+
+	task := GetTask("update_checker")
+	require.NotNil(t, task)
+	assert.False(t, task.IsEnabled())
+	assert.Equal(t, "https://api.github.com/repos/GitHatOrg/GitHat/releases/latest", task.config.(*UpdateCheckerConfig).HTTPEndpoint)
 }

@@ -15,3 +15,6 @@ relativetime.
 # templates/repo/settings/webhook/link_menu.tmpl, templates/webhook/new.tmpl: repo.settings.web_hook_name_
 # tests/integration/repo_archive_text_test.go
 repo.settings.
+
+# templates/status/500.tmpl uses the GitHat key error.report_message_githat; the upstream string stays untouched to keep merges cheap
+error.report_message

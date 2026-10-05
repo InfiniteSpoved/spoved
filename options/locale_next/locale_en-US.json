@@ -704,6 +704,7 @@
 	"webauthn.error.empty": "You must set a name for this key.",
 	"webauthn.error.timeout": "Timeout reached before your key could be read. Please reload this page and retry.",
 	"webauthn.unsupported_browser": "Your browser does not currently support WebAuthn.",
+	"error.report_message_githat": "If you believe that this is a bug, please search for issues on <a href=\"%s\" target=\"_blank\" rel=\"noopener noreferrer\">the issue tracker</a> or open a new issue if necessary.",
 	"error.must_enable_2fa": "This Forgejo instance requires users to enable two-factor authentication before they can access their accounts. Enable it at: %s",
 	"avatar.constraints_hint": "Custom avatar may not exceed %[1]s in size or be larger than %[2]dx%[3]d pixels",
 	"user.activitypub_feed.feed": "Fediverse Feed",
