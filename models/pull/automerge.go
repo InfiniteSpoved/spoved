@@ -153,18 +153,18 @@ func TakeExpiredScheduledAutoMerges(ctx context.Context, now timeutil.TimeStamp)
 	return taken, nil
 }
 
-// GetScheduledAfterByBaseRepoID returns the times of the scheduled merges still waiting in a repository, keyed by pull ID
-func GetScheduledAfterByBaseRepoID(ctx context.Context, repoID int64) (map[int64]timeutil.TimeStamp, error) {
+// GetScheduleByBaseRepoID returns the auto merges of a repository that have a time or a deadline, keyed by pull ID
+func GetScheduleByBaseRepoID(ctx context.Context, repoID int64) (map[int64]*AutoMerge, error) {
 	var rows []*AutoMerge
-	if err := db.GetEngine(ctx).Select("pull_auto_merge.pull_id, pull_auto_merge.scheduled_after_unix").
+	if err := db.GetEngine(ctx).Select("pull_auto_merge.pull_id, pull_auto_merge.scheduled_after_unix, pull_auto_merge.give_up_after_unix").
 		Join("INNER", "pull_request", "pull_request.id = pull_auto_merge.pull_id").
-		Where("pull_request.base_repo_id = ? AND pull_auto_merge.scheduled_after_unix > 0", repoID).
+		Where("pull_request.base_repo_id = ? AND (pull_auto_merge.scheduled_after_unix > 0 OR pull_auto_merge.give_up_after_unix > 0)", repoID).
 		Find(&rows); err != nil {
 		return nil, err
 	}
-	scheduledAfter := make(map[int64]timeutil.TimeStamp, len(rows))
+	schedule := make(map[int64]*AutoMerge, len(rows))
 	for _, am := range rows {
-		scheduledAfter[am.PullID] = am.ScheduledAfterUnix
+		schedule[am.PullID] = am
 	}
-	return scheduledAfter, nil
+	return schedule, nil
 }

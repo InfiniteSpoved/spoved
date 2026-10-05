@@ -30898,6 +30898,12 @@
           "format": "int64",
           "x-go-name": "Flow"
         },
+        "give_up_after": {
+          "description": "time after which the pending scheduled auto merge is cancelled if it has not merged; may remain after scheduled_after is gone",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "GiveUpAfter"
+        },
         "head": {
           "$ref": "#/definitions/PRBranchInfo"
         },
