@@ -122,6 +122,30 @@ func TestGetUserByName(t *testing.T) {
 	}
 }
 
+func TestIsLastAdminUser(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	// user 1 is the only admin in the fixtures; user 2 becomes the second one
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	other := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	assert.False(t, user_model.IsLastAdminUser(ctx, other), "non-admin")
+	assert.True(t, user_model.IsLastAdminUser(ctx, admin), "only admin")
+
+	other.IsAdmin = true
+	require.NoError(t, user_model.UpdateUserCols(ctx, other, "is_admin"))
+	assert.False(t, user_model.IsLastAdminUser(ctx, admin), "two usable admins")
+
+	for _, col := range []string{"is_active", "prohibit_login"} {
+		t.Run(col, func(t *testing.T) {
+			other.IsActive, other.ProhibitLogin = col != "is_active", col == "prohibit_login"
+			require.NoError(t, user_model.UpdateUserCols(ctx, other, "is_active", "prohibit_login"))
+			assert.True(t, user_model.IsLastAdminUser(ctx, admin), "the other admin is disabled")
+			assert.False(t, user_model.IsLastAdminUser(ctx, other), "a usable admin remains")
+		})
+	}
+}
+
 func TestCanCreateOrganization(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 
