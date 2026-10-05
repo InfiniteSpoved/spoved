@@ -11,6 +11,23 @@ name: Release image
 # read:packages, or import it into Azure Container Registry:
 #   az acr import --name <registry> --source ghcr.io/githatorg/githat:<tag> \
 #     --username <github user> --password <token>
+#
+# Azure Container Registry push (push-to-acr, needs a version): the acr job
+# copies the scanned digest, attestations included, to <ACR_NAME>.azurecr.io/githat
+# with the same tags. It logs in with GitHub OIDC, so no secret is stored, and
+# runs only after the image job passed. Set up once, outside this workflow:
+#   1. A user-assigned managed identity (or app registration) with the role
+#      AcrPush on the registry only.
+#   2. A federated credential on it: issuer https://token.actions.githubusercontent.com,
+#      subject repo:GitHatOrg/GitHat:environment:release, audience api://AzureADTokenExchange.
+#      Renaming or moving the repository changes the subject; update it then.
+#   3. Repository variable ACR_NAME (registry name, not the login server). Unset
+#      means push-to-acr does nothing.
+#   4. Variables AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID in the
+#      `release` environment. None of them is secret.
+#   5. Required reviewers on the `release` environment: otherwise anyone who can
+#      run this workflow can push any ref to ACR. Deployment-branch rules only
+#      check the branch the workflow runs from, not `ref`, so they are an extra.
 
 on:
   workflow_dispatch:
@@ -29,6 +46,10 @@ on:
           - CRITICAL,HIGH
           - CRITICAL,HIGH,MEDIUM,LOW
         default: CRITICAL
+      push-to-acr:
+        description: Also copy the scanned image to Azure Container Registry. Needs a version, the repository variable ACR_NAME and the release environment.
+        type: boolean
+        default: false
 
 jobs:
   image:
@@ -36,6 +57,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      sha: ${{ steps.version.outputs.sha }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -47,7 +71,12 @@ jobs:
         id: version
         env:
           VERSION: ${{ inputs.version }}
+          PUSH_ACR: ${{ inputs.push-to-acr }}
         run: |
+          if [ "$PUSH_ACR" = true ] && [ -z "$VERSION" ]; then
+            echo "::error::push-to-acr needs a version"
+            exit 1
+          fi
           if [ -n "$VERSION" ]; then
             if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
               echo "::error::The version must be semver, e.g. 16.0.0-githat.1"
@@ -150,3 +179,61 @@ jobs:
           VERSION: ${{ inputs.version }}
         # Copies the scanned index, attestations included; the digest stays the same.
         run: docker buildx imagetools create --tag "$IMAGE:$VERSION" --tag "$IMAGE:latest" "$IMAGE@$DIGEST"
+
+  # Separate from the image job: that one builds the ref's code, so it must never
+  # hold the OIDC token or the release environment. This job checks out nothing.
+  acr:
+    needs: image
+    if: ${{ inputs.push-to-acr && vars.ACR_NAME != '' }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: none
+      packages: read
+      id-token: write
+    env:
+      ACR_NAME: ${{ vars.ACR_NAME }}
+      DIGEST: ${{ needs.image.outputs.digest }}
+      SHA: ${{ needs.image.outputs.sha }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Check the inputs
+        run: |
+          [[ "$ACR_NAME" =~ ^[a-zA-Z0-9]{5,50}$ ]] || { echo "::error::ACR_NAME must be 5-50 letters or digits"; exit 1; }
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::Bad image digest"; exit 1; }
+          [[ "$SHA" =~ ^[0-9a-f]{12}$ ]] || { echo "::error::Bad commit sha"; exit 1; }
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]] || { echo "::error::The version must be semver"; exit 1; }
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Copy the image to ACR
+        run: |
+          az acr login --name "$ACR_NAME"
+          SRC="ghcr.io/${GITHUB_REPOSITORY,,}"
+          DST="${ACR_NAME,,}.azurecr.io/${GITHUB_REPOSITORY#*/}"
+          DST="${DST,,}"
+          # Copies the scanned index, attestations included, without changing it.
+          docker buildx imagetools create --tag "$DST:sha-$SHA" --tag "$DST:$VERSION" --tag "$DST:latest" "$SRC@$DIGEST"
+          for tag in "sha-$SHA" "$VERSION" latest; do
+            got=$(docker buildx imagetools inspect "$DST:$tag" --format '{{.Manifest.Digest}}')
+            if [ "$got" != "$DIGEST" ]; then
+              echo "::error::$DST:$tag has digest $got, expected $DIGEST"
+              exit 1
+            fi
+          done
+          {
+            echo "### Pushed to ACR"
+            echo "- Source: \`$SRC@$DIGEST\`"
+            echo "- Copy: \`$DST@$DIGEST\`"
+            echo "- Tags: \`sha-$SHA\`, \`$VERSION\`, \`latest\`"
+          } >> "$GITHUB_STEP_SUMMARY"
