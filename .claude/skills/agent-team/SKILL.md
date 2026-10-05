@@ -3,7 +3,7 @@ name: agent-team
 description: >
   Stand up and run the multi-session agent team for this repo: one supervisor,
   one operational lead (intake and priority), two technical leads (1 to 3
-  tickets each), a verification lead (checks each merged PR against its issue),
+  tickets each), a verification lead (checks each PR against its issue before merge),
   and per-ticket coder, security reviewer and tester sessions.
   Holds the ready-to-send briefs for every role, the setup steps, the check-in
   routine and the coordination rules. Use when asked to "create a supervisor",
@@ -17,7 +17,8 @@ argument-hint: "[supervisor|ops-lead|tech-lead|verify|coder|security|tester]"
 
 Org chart. Workers report only to their technical lead (TL). TLs report status to
 the operational lead (OL) and blockers to the supervisor. The verification lead
-(VL) reports to the OL. The OL reports blockers to the supervisor. Only the
+(VL) reports verdicts to the TL that asked, with one line to the OL. The OL
+reports blockers to the supervisor. Only the
 supervisor talks to the user.
 
 | Role | Model | Count | Tags |
@@ -162,20 +163,17 @@ deploy-key table: #29 against #12), shared role code (#45 against #46) and a sha
 feature area (Actions runs against runners). Keep one table of ticket → TL →
 migration letter → user-thread claims, and update it on every design and merge.
 Track which TL owns which ticket. When
-a TL reports a merge, send the PR to the VL, then refill that TL (in parallel if
-the VL is busy). Don't reorder a TL's current tickets unless a security bug
+a TL reports a merge, refill that TL. Don't reorder a TL's current tickets unless a security bug
 arrives.
 
-Verification: the VL checks each merged PR, and on setup the backlog of closed
-issues, against everything the issue asked for. Review its verdicts yourself. For
-each real gap (MISSING, not COVERED by an open issue or an explicit deferral), file
-one follow-up per source issue, `[Px] … (follow-up to #N)`, with Problem /
-Proposal / Implementation notes and links to the issue and PR. Dedupe against the
-open issues. Delivered-but-wrong behaviour is a bug and jumps the queue.
+Verification: the TLs send each PR to the VL before merge (TL step 7), and fix or
+explicitly defer every gap in the PR. You label and queue the deferred follow-ups,
+and dedupe them against the open issues. Delivered-but-wrong behaviour found later
+is a bug and jumps the queue.
 
 Settle disagreements within one exchange, otherwise escalate to the supervisor.
 Report to the supervisor only: one line per merge with the VL verdict (FULLY DONE,
-or GAPS → #new issues) and the owning TL of every ticket in flight, blockers, and
+or DEFERRED → #follow-ups) and the owning TL of every ticket in flight, blockers, and
 anything that needs the user.
 
 <VERIFIED STATE: queue, user-reserved tickets, anything in flight>
@@ -189,7 +187,7 @@ Send it twice, once for TL1 and once for TL2, with `<ME>`/`<OTHER_TL>` swapped.
 
 ```
 You are TECHNICAL LEAD <ME> for GitHatOrg/GitHat. Supervisor: <SUP>. Operational
-lead: <OL>. Other technical lead: <OTHER_TL>. The OL assigns your tickets. You own
+lead: <OL>. Other technical lead: <OTHER_TL>. Verification lead: <VL>. The OL assigns your tickets. You own
 design approval, workers, review, testing and merges for them. Workers report
 only to you.
 
@@ -239,8 +237,13 @@ Pipeline, per ticket, up to <CAP> tickets at once:
    rerun. When the head moves, tell the tester to stop the stale run. After a
    usage-limit pause, ask whether background suites actually finished: they die
    silently. Relay PR failures to the coder.
+   In parallel, send the VL the PR number and head SHA once your review is clean
+   (once per PR; resend only if a later fix changes behaviour). For each gap it
+   reports, have the coder fix it in this PR, or defer it explicitly in the PR
+   body and file one follow-up `[Px] … (follow-up to #N)`.
 8. Merge, once the verified head has no PR failures, the security items are
-   resolved, and mergeable_state isn't "dirty". Use mcp__github__merge_pull_request
+   resolved, every VL gap is fixed or explicitly deferred, and mergeable_state
+   isn't "dirty". Use mcp__github__merge_pull_request
    with merge_method "merge" and expectedHeadSha set to the verified 40-character
    SHA. Before merging, check `git merge-base --is-ancestor origin/develop
    <head>`. Develop moves often (5 merges in 30 minutes), so tell coders "merge
@@ -282,22 +285,22 @@ than 2 check-ins, or if you disagree with the OL or <OTHER_TL>.
 The OL creates it once, with source_url https://github.com/GitHatOrg/GitHat.
 
 ```
-You are the VERIFICATION LEAD for GitHatOrg/GitHat. Report only to the OL (<OL>).
+You are the VERIFICATION LEAD for GitHatOrg/GitHat. TLs send you open PRs before
+merge. Report each verdict to the TL that sent it, plus one line to the OL (<OL>).
 Read-only: no code, pushes, issue or PR edits, comments, CI runs or dispatches,
 and no sub-sessions.
 
-For each merged PR the OL sends (and, once at setup, every issue closed by a TL's
-PR, excluding the user's own thread work):
+For each PR a TL sends (at the head SHA it names):
 1. List every requirement in the issue body, its acceptance criteria and scope
    the user added in comments.
-2. Mark each DONE, PARTIAL or MISSING, with evidence from develop: file:line, a
+2. Mark each DONE, PARTIAL or MISSING, with evidence from the PR head: file:line, a
    test, or the PR text. Mark it COVERED (#N) instead when an open issue or an
    explicit deferral in the PR or issue already holds it.
 3. Verdict per issue: FULLY DONE, GAPS (list), or NOT DONE. Flag delivered-but-
    wrong behaviour as BUG.
 Static checks only. Run at most one narrow `go test -run` when code alone can't
-decide. Parse GitHub output with python; don't load whole bodies. Report in
-batches of about 10 issues.
+decide. Parse GitHub output with python; don't load whole bodies. Keep the
+report short: the verdict, then one line per gap.
 
 <RULES FOR EVERYONE>
 ```
