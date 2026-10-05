@@ -43,6 +43,13 @@ func GetStorageTotals(ctx context.Context) (StorageStats, error) {
 	return stats, err
 }
 
+// GetOwnerStorageTotals returns the storage used by the repositories of one owner.
+func GetOwnerStorageTotals(ctx context.Context, ownerID int64) (StorageStats, error) {
+	var stats StorageStats
+	_, err := db.GetEngine(ctx).Table("repository").Where("owner_id = ?", ownerID).Select(storageStatsSelect).Get(&stats)
+	return stats, err
+}
+
 // OwnerStorage is the storage used by the repositories of one owner.
 type OwnerStorage struct {
 	OwnerID      int64 `xorm:"owner_id"`

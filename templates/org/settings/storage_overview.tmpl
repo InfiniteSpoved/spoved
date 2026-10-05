@@ -1,5 +1,46 @@
 {{template "org/settings/layout_head" (dict "ctxData" . "pageClass" "organization settings size-overview")}}
 <div class="org-setting-content">
-	{{template "shared/quota_overview" .}}
+	{{if .QuotaGroups}}
+		{{template "shared/quota_overview" .}}
+	{{end}}
+	<h4 class="ui top attached header">
+		{{ctx.Locale.Tr "settings.repos"}} ({{ctx.Locale.Tr "admin.storage.total_size"}}: {{ctx.Locale.TrSize .OrgStorage.Size}})
+	</h4>
+	<div class="ui attached table segment">
+		<table class="ui very basic striped table unstackable">
+			<thead>
+				<tr>
+					<th>{{ctx.Locale.Tr "admin.repos.name"}}</th>
+					<th data-sortt-asc="gitsize" data-sortt-desc="reversegitsize">
+						{{ctx.Locale.Tr "admin.storage.git_size"}}
+						{{SortArrow "gitsize" "reversegitsize" $.SortType false}}
+					</th>
+					<th data-sortt-asc="lfssize" data-sortt-desc="reverselfssize">
+						{{ctx.Locale.Tr "admin.storage.lfs_size"}}
+						{{SortArrow "lfssize" "reverselfssize" $.SortType false}}
+					</th>
+					<th data-sortt-asc="size" data-sortt-desc="reversesize">
+						{{ctx.Locale.Tr "admin.storage.total_size"}}
+						{{SortArrow "size" "reversesize" $.SortType false}}
+					</th>
+					<th>{{ctx.Locale.Tr "admin.storage.share"}}</th>
+				</tr>
+			</thead>
+			<tbody>
+				{{range .RepoStorage}}
+					<tr>
+						<td><a class="tw-break-anywhere" href="{{.Repo.Link}}">{{.Repo.Name}}</a></td>
+						<td>{{ctx.Locale.TrSize .GitSize}}</td>
+						<td>{{ctx.Locale.TrSize .LFSSize}}</td>
+						<td>{{ctx.Locale.TrSize .Size}}</td>
+						<td>{{printf "%.1f" (.Percent $.OrgStorage)}}%</td>
+					</tr>
+				{{else}}
+					<tr><td class="tw-text-center" colspan="5">{{ctx.Locale.Tr "repo.pulls.no_results"}}</td></tr>
+				{{end}}
+			</tbody>
+		</table>
+	</div>
+	{{template "base/paginate" .}}
 </div>
 {{template "org/settings/layout_footer" .}}
