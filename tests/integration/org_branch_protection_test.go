@@ -259,6 +259,22 @@ func TestOrgBranchProtectionPush(t *testing.T) {
 			assert.Contains(t, stderr, "Not allowed to push to protected branch lock-b")
 		})
 
+		// AC3, AC9: updating a pull request pushes to its head branch, which must pass every matching rule
+		t.Run("UpdatePullRequest", func(t *testing.T) {
+			commitOnBranch(t, dstPath, "lock-c", "master", "lock-c.txt")
+			_, err := user2.push(t, dstPath, "lock-c")
+			require.NoError(t, err)
+			e.repoRule("obp-push", api.CreateBranchProtectionOption{
+				RuleName: "lock-c", EnablePush: true, EnablePushWhitelist: true, PushWhitelistUsernames: []string{"user4"},
+			})
+			pr, err := doAPICreatePullRequest(repo, "org3", "obp-push", "master", "lock-c")(t)
+			require.NoError(t, err)
+
+			writer := userCtx(t, "user4", auth_model.AccessTokenScopeWriteRepository)
+			req := NewRequestf(t, "POST", "/api/v1/repos/org3/obp-push/pulls/%d/update", pr.Index).AddTokenAuth(writer.Token)
+			MakeRequest(t, req, http.StatusForbidden)
+		})
+
 		// AC3: a repository admin can't change or delete the organization rule
 		t.Run("RepoAdminCantChangeOrgRule", func(t *testing.T) {
 			admin := userCtx(t, "user5", auth_model.AccessTokenScopeWriteRepository, auth_model.AccessTokenScopeWriteOrganization)
