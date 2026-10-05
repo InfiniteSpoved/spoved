@@ -133,3 +133,18 @@ func TestEvaluateApprovalRulesNone(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, statuses)
 }
+
+// AC3: IgnoreStaleApprovals and dismissals apply to every rule.
+func TestEvaluateApprovalRulesStalePerRule(t *testing.T) {
+	f := newApprovalFixture(t, rule("Backend", 2), rule("Security", 4))
+	f.review(t, 2, issues_model.ReviewTypeApprove, true)
+	f.review(t, 4, issues_model.ReviewTypeApprove, false)
+	assert.Equal(t, map[string]int64{"Backend": 1, "Security": 1}, f.granted(t))
+
+	f.pb.IgnoreStaleApprovals = true
+	assert.Equal(t, map[string]int64{"Backend": 0, "Security": 1}, f.granted(t), "only the stale approval of user2 is ignored")
+
+	_, err := db.GetEngine(t.Context()).Where("reviewer_id = 4").Cols("dismissed").Update(&issues_model.Review{Dismissed: true})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int64{"Backend": 0, "Security": 0}, f.granted(t))
+}

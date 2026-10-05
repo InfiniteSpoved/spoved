@@ -218,6 +218,21 @@ func TestApprovalRulesMerge(t *testing.T) {
 			e.apiMerge(e.owner, index, false, http.StatusOK)
 		})
 
+		// the CODEOWNERS a PR itself edits doesn't count
+		t.Run("CodeOwnersEditedByPR", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			fr := e.base("ar-co-edit", create("CODEOWNERS", "docs/.* @user4\n"))
+			e.protect("ar-co-edit", true, &api.ApprovalRule{Name: "Code owners", RequiredCount: 1, RequireCodeOwners: true})
+			index := e.pr("ar-co-edit", create("docs/a.md", "a"), &api.ChangeFileOperation{
+				Operation: "update", Path: "CODEOWNERS", SHA: fr.Files[0].SHA,
+				ContentBase64: base64.StdEncoding.EncodeToString([]byte("docs/.* @user5\n")),
+			})
+			e.approve("user5", index) // the owner the PR proposes
+			e.apiMerge(e.owner, index, false, http.StatusMethodNotAllowed)
+			e.approve("user4", index) // the owner of the target branch
+			e.apiMerge(e.owner, index, false, http.StatusOK)
+		})
+
 		// AC7: legacy rules keep working, with and without approval rules.
 		t.Run("Legacy", func(t *testing.T) {
 			defer tests.PrintCurrentTest(t)()
@@ -240,14 +255,20 @@ func TestApprovalRulesMerge(t *testing.T) {
 			index := e.pr("ar-status", create("a.txt", "a"))
 			e.approve("user4", index)
 
-			box := func() string {
-				resp := e.owner.Session.MakeRequest(t, NewRequestf(t, "GET", "/user2/repo1/pulls/%d", index), http.StatusOK)
+			box := func(ctx APITestContext) string {
+				resp := ctx.Session.MakeRequest(t, NewRequestf(t, "GET", "/user2/repo1/pulls/%d", index), http.StatusOK)
 				return strings.Join(strings.Fields(NewHTMLParser(t, resp.Body).doc.Find(".merge-section").Text()), " ")
 			}
-			text := box()
+			text := box(e.owner)
 			assert.Contains(t, text, "Security: 1/1")
 			assert.Contains(t, text, "Backend: 0/1")
 			assert.NotContains(t, text, "DBA")
+			assert.Contains(t, text, "Can approve: user5", "repo admins see who can approve")
+
+			text = box(e.writer["user5"])
+			assert.Contains(t, text, "Security: 1/1")
+			assert.Contains(t, text, "Backend: 0/1")
+			assert.NotContains(t, text, "Can approve", "writers only see the status")
 
 			rules := e.approvals(index)
 			require.Len(t, rules, 2, "DBA doesn't apply")
