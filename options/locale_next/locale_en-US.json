@@ -1337,6 +1337,17 @@
 	"admin.user_groups.grants_site_admin.description": "Every member of this group is made a site administrator, and loses it on leaving the group unless they were an administrator before.",
 	"admin.user_groups.grants_create_organization": "Members can create organizations",
 	"admin.user_groups.grants_create_organization.description": "Every member of this group may create organizations, and loses it on leaving the group unless they had it before.",
+	"admin.user_groups.role_grant_limit": "Known limit: only rights a group turned on are tracked. If a member's administrator flag is set by hand while a group grants it, the member loses it when the group is removed.",
+	"admin.user_groups.confirm_role_loss": "This change takes rights away from members",
+	"admin.user_groups.confirm_update": "Update anyway",
+	"admin.user_groups.lose_site_admin": {
+		"one": "%d member will lose site administrator rights.",
+		"other": "%d members will lose site administrator rights."
+	},
+	"admin.user_groups.lose_create_organization": {
+		"one": "%d member will lose the right to create organizations.",
+		"other": "%d members will lose the right to create organizations."
+	},
 	"admin.user_groups.grants_auditor": "Members are auditors (read all)",
 	"admin.user_groups.grants_auditor.description": "Every member of this group can read every repository and see every organization, but cannot change anything through this role. It ends on leaving the group.",
 	"admin.users.via_group": "via group %s",

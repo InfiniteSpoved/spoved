@@ -223,3 +223,26 @@ test('Only site administrators manage user groups and only owners link them', as
   // and the group search used by the link form is refused
   expect((await page.goto(`${teamURL(team)}/groups/search?q=${group}`))?.status()).toBe(404);
 });
+
+test('Switching off a role a group grants asks first', async ({browser, request}) => {
+  const erin = await data.createUser();
+  const group = fakeName('group');
+  const created = await request.post('/api/v1/admin/groups', {headers: adminAuth(), data: {name: group, grants_site_admin: true}});
+  expect(created.status()).toBe(201);
+  data.trackGroup(group);
+  expect((await request.put(`/api/v1/admin/groups/${group}/members/${erin.username}`, {headers: adminAuth()})).status()).toBe(204);
+
+  const admin = await (await loginAsAdmin(browser)).newPage();
+  await admin.goto('/admin/groups');
+  await admin.getByRole('link', {name: group}).click();
+  await admin.getByText('Members are site administrators', {exact: true}).click();
+  await expect(admin.locator('input[name="grants_site_admin"]')).not.toBeChecked();
+  await admin.getByRole('button', {name: 'Update user group'}).click();
+
+  const warning = admin.locator('.user-group-role-loss');
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText('1 member will lose site administrator rights');
+  await admin.getByRole('link', {name: 'Cancel'}).click();
+  await expect(admin.locator('input[name="grants_site_admin"]')).toBeChecked();
+  await expect(warning).toHaveCount(0);
+});

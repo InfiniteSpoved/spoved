@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 
 	"forgejo.org/models"
 	auth_model "forgejo.org/models/auth"
@@ -112,7 +114,9 @@ func getUserGroup(ctx *context.Context) *org_model.UserGroup {
 	return group
 }
 
-func prepareUserGroupView(ctx *context.Context, group *org_model.UserGroup) {
+// prepareUserGroupView loads the page data of a user group, and returns how
+// many members would lose each role the group grants without it.
+func prepareUserGroupView(ctx *context.Context, group *org_model.UserGroup) map[org_model.UserGroupRole]int {
 	ctx.Data["Title"] = group.Name
 	ctx.Data["PageIsAdminUserGroups"] = true
 	ctx.Data["Group"] = group
@@ -121,14 +125,14 @@ func prepareUserGroupView(ctx *context.Context, group *org_model.UserGroup) {
 	members, err := org_model.GetUserGroupMembers(ctx, group.ID, db.ListOptions{})
 	if err != nil {
 		ctx.ServerError("GetUserGroupMembers", err)
-		return
+		return nil
 	}
 	ctx.Data["Members"] = members
 
 	memberSourceIDs, err := org_model.GetUserGroupMemberLoginSources(ctx, group.ID)
 	if err != nil {
 		ctx.ServerError("GetUserGroupMemberLoginSources", err)
-		return
+		return nil
 	}
 	sourceNames := make(map[int64]string)
 	memberSources := make(map[int64]string, len(memberSourceIDs))
@@ -138,7 +142,7 @@ func prepareUserGroupView(ctx *context.Context, group *org_model.UserGroup) {
 			source, err := auth_model.GetSourceByID(ctx, sourceID)
 			if err != nil && !auth_model.IsErrSourceNotExist(err) {
 				ctx.ServerError("GetSourceByID", err)
-				return
+				return nil
 			} else if err == nil {
 				name = source.Name
 			}
@@ -153,9 +157,25 @@ func prepareUserGroupView(ctx *context.Context, group *org_model.UserGroup) {
 	teams, err := org_model.GetUserGroupTeams(ctx, group.ID)
 	if err != nil {
 		ctx.ServerError("GetUserGroupTeams", err)
-		return
+		return nil
 	}
 	ctx.Data["LinkedTeams"] = teams
+
+	var roles []org_model.UserGroupRole
+	if group.GrantsSiteAdmin {
+		roles = append(roles, org_model.UserGroupRoleSiteAdmin)
+	}
+	if group.GrantsCreateOrganization {
+		roles = append(roles, org_model.UserGroupRoleCreateOrganization)
+	}
+	losses, err := org_model.CountUserGroupRoleLosses(ctx, group.ID, roles...)
+	if err != nil {
+		ctx.ServerError("CountUserGroupRoleLosses", err)
+		return nil
+	}
+	ctx.Data["LoseSiteAdmin"] = losses[org_model.UserGroupRoleSiteAdmin]
+	ctx.Data["LoseCreateOrganization"] = losses[org_model.UserGroupRoleCreateOrganization]
+	return losses
 }
 
 // ViewUserGroup shows a user group with its members and linked teams
@@ -183,12 +203,34 @@ func EditUserGroupPost(ctx *context.Context) {
 	if ctx.Written() {
 		return
 	}
-	prepareUserGroupView(ctx, group)
+	losses := prepareUserGroupView(ctx, group)
 	if ctx.Written() {
 		return
 	}
 
 	if ctx.HasError() {
+		ctx.HTML(http.StatusOK, tplUserGroupView)
+		return
+	}
+
+	// Ask before taking a role away from members, again for each role not yet confirmed.
+	var warned []string
+	confirm := false
+	confirmed := strings.Split(form.ConfirmRoles, ",")
+	for role, off := range map[org_model.UserGroupRole]bool{
+		org_model.UserGroupRoleSiteAdmin:          group.GrantsSiteAdmin && !form.GrantsSiteAdmin,
+		org_model.UserGroupRoleCreateOrganization: group.GrantsCreateOrganization && !form.GrantsCreateOrganization,
+	} {
+		if off && losses[role] > 0 {
+			warned = append(warned, string(role))
+			confirm = confirm || !slices.Contains(confirmed, string(role))
+		}
+	}
+	if confirm {
+		slices.Sort(warned)
+		ctx.Data["ConfirmRoles"] = strings.Join(warned, ",")
+		ctx.Data["WarnSiteAdmin"] = slices.Contains(warned, string(org_model.UserGroupRoleSiteAdmin))
+		ctx.Data["WarnCreateOrganization"] = slices.Contains(warned, string(org_model.UserGroupRoleCreateOrganization))
 		ctx.HTML(http.StatusOK, tplUserGroupView)
 		return
 	}
