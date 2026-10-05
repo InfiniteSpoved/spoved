@@ -523,8 +523,8 @@ func DeleteBranchAfterMerge(ctx context.Context, doer *user_model.User, pr *issu
 		return ErrBranchInUse
 	}
 
-	// Open PRs based on this branch are retargeted when it's deleted, but only if that is enabled.
-	if !setting.Repository.PullRequest.RetargetChildrenOnMerge || pr.BaseRepoID != pr.HeadRepoID {
+	// Open PRs based on this branch are retargeted (or closed, across repositories) when it's deleted, but only if retargeting is enabled.
+	if !setting.Repository.PullRequest.RetargetChildrenOnMerge {
 		children, err := issues_model.GetUnmergedPullRequestsByBaseInfo(ctx, pr.HeadRepoID, pr.HeadBranch)
 		if err != nil {
 			return err

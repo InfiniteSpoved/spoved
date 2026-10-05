@@ -40,7 +40,12 @@ func BranchWorkflow(ctx *context.Context) {
 // BranchWorkflowPost saves the repository's branch workflow settings.
 func BranchWorkflowPost(ctx *context.Context) {
 	form := web.GetForm(ctx).(*forms.BranchWorkflowForm)
-	mode, _ := repo_model.ParseDeleteBranchMode(form.DeleteAfterMerge)
+	mode, ok := repo_model.ParseDeleteBranchMode(form.DeleteAfterMerge)
+	if !ok {
+		ctx.Flash.Error(ctx.Tr("repo.settings.branch_workflow.invalid_value"))
+		ctx.Redirect(ctx.Repo.RepoLink + "/settings/branch_workflow")
+		return
+	}
 	switch err := branchworkflow.SetRepo(ctx, ctx.Repo.Repository, mode); {
 	case errors.Is(err, branchworkflow.ErrLocked):
 		ctx.Error(http.StatusForbidden, ctx.Locale.TrString("repo.settings.branch_workflow.locked"))

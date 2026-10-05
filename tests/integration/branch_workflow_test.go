@@ -182,6 +182,14 @@ func TestBranchWorkflowInheritance(t *testing.T) {
 		DecodeJSON(t, ctx.Session.MakeRequest(t, req, http.StatusOK), &legacy)
 		assert.True(t, legacy.DefaultDeleteBranchAfterMerge)
 
+		// an unknown value changes nothing
+		bwOrgPost(t, owner, "bogus", true, http.StatusSeeOther)
+		bwRepoPost(t, owner, "org3", repo, "bogus", http.StatusSeeOther)
+		got = bwGetRepoAPI(t, ctx, "org3", repo)
+		assert.Equal(t, "default-on", got["effective_delete_branch_after_merge"])
+		assert.Equal(t, "inherit", got["delete_branch_after_merge"])
+		assert.Equal(t, false, got["locked"])
+
 		// unlocked: the repo can override, via web and API
 		bwRepoPost(t, owner, "org3", repo, "off", http.StatusSeeOther)
 		got = bwGetRepoAPI(t, ctx, "org3", repo)
