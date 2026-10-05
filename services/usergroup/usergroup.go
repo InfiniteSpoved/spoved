@@ -530,6 +530,7 @@ func SetOrgAdminExclusions(ctx context.Context, orgIDs []int64) error {
 // It returns user_model.ErrUserNotExist for an unknown name and
 // ErrNotOrganization for a name that is not an organization.
 func ResolveOrgIDs(ctx context.Context, names []string) ([]int64, error) {
+	seen := make(container.Set[int64], len(names))
 	ids := make([]int64, 0, len(names))
 	for _, name := range names {
 		u, err := user_model.GetUserByName(ctx, name)
@@ -538,7 +539,9 @@ func ResolveOrgIDs(ctx context.Context, names []string) ([]int64, error) {
 		} else if !u.IsOrganization() {
 			return nil, fmt.Errorf("%s: %w", name, ErrNotOrganization)
 		}
-		ids = append(ids, u.ID)
+		if seen.Add(u.ID) {
+			ids = append(ids, u.ID)
+		}
 	}
 	return ids, nil
 }

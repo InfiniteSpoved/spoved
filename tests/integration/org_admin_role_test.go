@@ -178,7 +178,7 @@ func TestOrgAdminRoleFlow(t *testing.T) {
 	unittest.AssertExistsAndLoadBean(t, &organization.OrgUser{OrgID: 3, UID: member.ID})
 
 	// AC8: exclusions, API and web page
-	MakeRequest(t, NewRequestWithJSON(t, "PUT", "/api/v1/admin/roles/org-admin/exclusions", &api.SetOrgAdminExclusionsOption{Orgs: []string{"org3"}}).AddTokenAuth(adminToken), http.StatusNoContent)
+	MakeRequest(t, NewRequestWithJSON(t, "PUT", "/api/v1/admin/roles/org-admin/exclusions", &api.SetOrgAdminExclusionsOption{Orgs: []string{"org3", "org3"}}).AddTokenAuth(adminToken), http.StatusNoContent)
 	assert.Equal(t, -1, orgAdminLink(t, group.ID, 1))
 	isOwner, err := organization.IsOrganizationOwner(db.DefaultContext, 3, member.ID)
 	require.NoError(t, err)
@@ -198,7 +198,7 @@ func TestOrgAdminRoleFlow(t *testing.T) {
 	assert.Equal(t, organization.LinkManaged, orgAdminLink(t, group.ID, 3))
 	MakeRequest(t, NewRequestWithJSON(t, "PUT", "/api/v1/admin/roles/org-admin/exclusions", &api.SetOrgAdminExclusionsOption{Orgs: []string{"org3"}}).AddTokenAuth(getUserToken(t, "user2", auth_model.AccessTokenScopeWriteAdmin)), http.StatusForbidden)
 	// web
-	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/roles/org-admin/exclusions", map[string]string{"orgs": "org6\norg7"}), http.StatusSeeOther)
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/roles/org-admin/exclusions", map[string]string{"orgs": "org6\norg7\norg6"}), http.StatusSeeOther)
 	assert.Equal(t, organization.LinkManaged, orgAdminLink(t, group.ID, 1)) // org3 included again
 	assert.Equal(t, -1, orgAdminLink(t, group.ID, 3))
 	assert.Equal(t, -1, orgAdminLink(t, group.ID, 4))
@@ -293,4 +293,22 @@ func TestOrgAdminRoleLastOwnerRefused(t *testing.T) {
 	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/roles/org-admin/exclusions", map[string]string{"orgs": "org3 limited_org"}), http.StatusSeeOther)
 	nothingChanged()
 	assert.Contains(t, admin.MakeRequest(t, NewRequest(t, "GET", "/admin/roles/org-admin"), http.StatusOK).Body.String(), "limited_org")
+}
+
+// The Owners team is found by its lower-case name: a case-renamed team is still protected.
+func TestOrgAdminRoleCaseRenamedOwnersTeam(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	adminToken := getUserToken(t, "user1", auth_model.AccessTokenScopeWriteAdmin, auth_model.AccessTokenScopeWriteOrganization)
+	// organization 22 has no owner but the group; its Owners team (15) is renamed in the database
+	_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE team SET name='owners', lower_name='owners' WHERE id=15")
+	require.NoError(t, err)
+	group := createOrgAdminGroupAPI(t, adminToken, "platform-admins", true)
+	MakeRequest(t, NewRequest(t, "PUT", "/api/v1/admin/groups/platform-admins/members/"+orgAdminMember).AddTokenAuth(adminToken), http.StatusNoContent)
+	assert.Equal(t, organization.LinkManaged, orgAdminLink(t, group.ID, 15))
+
+	MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/teams/15").AddTokenAuth(adminToken), http.StatusUnprocessableEntity)
+	unittest.AssertExistsAndLoadBean(t, &organization.Team{ID: 15})
+	patchOrgAdminRole(t, adminToken, "platform-admins", false, http.StatusConflict)
+	MakeRequest(t, NewRequestWithJSON(t, "PUT", "/api/v1/admin/roles/org-admin/exclusions", &api.SetOrgAdminExclusionsOption{Orgs: []string{"limited_org"}}).AddTokenAuth(adminToken), http.StatusConflict)
+	assert.Equal(t, organization.LinkManaged, orgAdminLink(t, group.ID, 15))
 }
