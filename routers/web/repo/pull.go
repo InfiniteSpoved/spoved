@@ -1393,8 +1393,11 @@ func MergePullRequest(ctx *context.Context) {
 		mergeCheckType = pull_service.MergeCheckTypeManually
 	}
 
-	scheduledAfter, err := form.ScheduledAfterTimeStamp()
-	if err != nil {
+	scheduledAfter, giveUpAfter, err := form.ScheduleTimeStamps()
+	if errors.Is(err, forms.ErrInvalidGiveUpAfter) {
+		ctx.JSONError(ctx.Tr("repo.pulls.auto_merge.invalid_give_up"))
+		return
+	} else if err != nil {
 		ctx.JSONError(ctx.Tr("repo.pulls.auto_merge.invalid_time"))
 		return
 	}
@@ -1479,7 +1482,7 @@ func MergePullRequest(ctx *context.Context) {
 		// delete all scheduled auto merges
 		_ = pull_model.DeleteScheduledAutoMerge(ctx, pr.ID)
 		// schedule auto merge
-		scheduled, err := automerge.ScheduleAutoMerge(ctx, ctx.Doer, pr, repo_model.MergeStyle(form.Do), message, form.DeleteBranchAfterMerge, scheduledAfter, form.HeadCommitID)
+		scheduled, err := automerge.ScheduleAutoMerge(ctx, ctx.Doer, pr, repo_model.MergeStyle(form.Do), message, form.DeleteBranchAfterMerge, scheduledAfter, giveUpAfter, form.HeadCommitID)
 		if models.IsErrSHADoesNotMatch(err) {
 			ctx.JSONError(ctx.Tr("repo.pulls.auto_merge.head_changed"))
 			return

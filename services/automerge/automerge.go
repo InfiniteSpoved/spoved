@@ -57,7 +57,7 @@ func handler(items ...string) []string {
 
 // ScheduleAutoMerge if schedule is false and no error, pull can be merged directly.
 // A merge scheduled for a later time is pinned to the current head, so commits pushed before that time are not merged.
-func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pull *issues_model.PullRequest, style repo_model.MergeStyle, message string, deleteBranch bool, scheduledAfter timeutil.TimeStamp, expectedHeadCommitID string) (scheduled bool, err error) {
+func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pull *issues_model.PullRequest, style repo_model.MergeStyle, message string, deleteBranch bool, scheduledAfter, giveUpAfter timeutil.TimeStamp, expectedHeadCommitID string) (scheduled bool, err error) {
 	var headCommitID string
 	if scheduledAfter != 0 {
 		if err := pull.LoadBaseRepo(ctx); err != nil {
@@ -77,7 +77,7 @@ func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pull *issues_
 	}
 
 	err = db.WithTx(ctx, func(ctx context.Context) error {
-		if err := pull_model.ScheduleAutoMerge(ctx, doer, pull.ID, style, message, deleteBranch, scheduledAfter, headCommitID); err != nil {
+		if err := pull_model.ScheduleAutoMerge(ctx, doer, pull.ID, style, message, deleteBranch, scheduledAfter, giveUpAfter, headCommitID); err != nil {
 			return err
 		}
 		scheduled = true
@@ -118,9 +118,32 @@ func RemoveScheduledAutoMerge(ctx context.Context, doer *user_model.User, pull *
 	})
 }
 
-// StartDueScheduledAutoMerges turns the scheduled merges that are due into normal auto merges and checks them now
+// StartDueScheduledAutoMerges cancels the scheduled merges whose deadline has passed, then turns the ones that are due
+// into normal auto merges and checks them now
 func StartDueScheduledAutoMerges(ctx context.Context) error {
-	pullIDs, err := pull_model.TakeDueScheduledAutoMerges(ctx, timeutil.TimeStampNow())
+	now := timeutil.TimeStampNow()
+	// cancel first, so a merge whose time and deadline have both passed is cancelled, not started
+	expired, err := pull_model.TakeExpiredScheduledAutoMerges(ctx, now)
+	if err != nil {
+		return err
+	}
+	for _, am := range expired {
+		pr, err := issues_model.GetPullRequestByID(ctx, am.PullID)
+		if err != nil {
+			log.Error("GetPullRequestByID[%d]: %v", am.PullID, err)
+			continue
+		}
+		doer, err := user_model.GetPossibleUserByID(ctx, am.DoerID)
+		if err != nil {
+			log.Error("GetPossibleUserByID[%d]: %v", am.DoerID, err)
+			continue
+		}
+		if _, err := issues_model.CreateAutoMergeComment(ctx, issues_model.CommentTypePRUnScheduledToAutoMerge, pr, doer); err != nil {
+			log.Error("CreateAutoMergeComment[%d]: %v", pr.ID, err)
+		}
+	}
+
+	pullIDs, err := pull_model.TakeDueScheduledAutoMerges(ctx, now)
 	if err != nil {
 		return err
 	}
@@ -169,6 +192,10 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 	}
 	if scheduledPRM.ScheduledAfterUnix > timeutil.TimeStampNow() {
 		log.Trace("Scheduled auto merge %-v waits until %v", pr, scheduledPRM.ScheduledAfterUnix)
+		return
+	}
+	if scheduledPRM.GiveUpAfterUnix > 0 && scheduledPRM.GiveUpAfterUnix <= timeutil.TimeStampNow() {
+		log.Trace("Scheduled auto merge %-v gave up at %v", pr, scheduledPRM.GiveUpAfterUnix)
 		return
 	}
 

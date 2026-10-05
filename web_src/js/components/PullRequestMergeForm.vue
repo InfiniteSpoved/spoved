@@ -14,6 +14,7 @@ export default {
     deleteBranchAfterMerge: false,
     autoMergeWhenSucceed: false,
     scheduledAfter: '',
+    giveUpAfter: '',
 
     mergeStyle: '',
     mergeStyleDetail: { // dummy only, these values will come from one of the mergeForm.mergeStyles
@@ -36,6 +37,10 @@ export default {
     scheduledAfterISO() {
       if (!this.scheduledAfter || this.mergeStyle === 'manually-merged') return '';
       return new Date(this.scheduledAfter).toISOString();
+    },
+    giveUpAfterISO() {
+      if (!this.scheduledAfterISO || !this.giveUpAfter) return '';
+      return new Date(this.giveUpAfter).toISOString();
     },
     forceMerge() {
       return this.mergeForm.canMergeNow && !this.mergeForm.allOverridableChecksOk;
@@ -74,6 +79,7 @@ export default {
       if (!show) return;
       this.deleteBranchAfterMerge = this.mergeForm.defaultDeleteBranchAfterMerge;
       this.scheduledAfter = '';
+      this.giveUpAfter = '';
       this.mergeTitleFieldValue = this.mergeStyleDetail.mergeTitleFieldText;
       this.mergeMessageFieldValue = this.mergeStyleDetail.mergeMessageFieldText;
     },
@@ -107,6 +113,7 @@ export default {
       <input type="hidden" name="head_commit_id" v-model="mergeForm.pullHeadCommitID">
       <input type="hidden" name="merge_when_checks_succeed" :value="autoMergeWhenSucceed || Boolean(scheduledAfterISO)">
       <input type="hidden" name="scheduled_after" :value="scheduledAfterISO">
+      <input type="hidden" name="give_up_after" :value="giveUpAfterISO">
       <input type="hidden" name="force_merge" v-model="forceMerge">
 
       <template v-if="!mergeStyleDetail.hideMergeMessageTexts">
@@ -129,6 +136,10 @@ export default {
       <div class="field" v-else>
         <label for="scheduled-after">{{ mergeForm.textScheduledAfter }}</label>
         <input type="datetime-local" id="scheduled-after" v-model="scheduledAfter">
+      </div>
+      <div class="field" v-if="mergeStyle !== 'manually-merged' && scheduledAfter">
+        <label for="give-up-after">{{ mergeForm.textGiveUpAfter }}</label>
+        <input type="datetime-local" id="give-up-after" v-model="giveUpAfter" :min="scheduledAfter">
       </div>
 
       <button class="ui button" :class="mergeButtonStyleClass" type="submit" name="do" :value="mergeStyle">

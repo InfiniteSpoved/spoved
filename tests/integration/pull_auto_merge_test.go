@@ -368,6 +368,89 @@ func TestPullScheduledAutoMerge(t *testing.T) {
 			assert.False(t, isMerged(pr))
 			assert.Equal(t, am, unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID}))
 		})
+
+		scheduleWithDeadline := func(t *testing.T, pr *issues_model.PullRequest) {
+			apiCtx.ExpectedCode = http.StatusCreated
+			doAPIMergePullRequestForm(t, apiCtx, owner.Name, repo.Name, pr.Index, &forms.MergePullRequestForm{
+				Do:                     "merge",
+				MergeWhenChecksSucceed: true,
+				ScheduledAfter:         now.Add(time.Hour).Format(time.RFC3339),
+				GiveUpAfter:            now.Add(3 * time.Hour).Format(time.RFC3339),
+			})
+		}
+		isCancelled := func(t *testing.T, pr *issues_model.PullRequest) bool {
+			return unittest.GetCount(t, &issues_model.Comment{IssueID: pr.IssueID, Type: issues_model.CommentTypePRUnScheduledToAutoMerge}) > 0
+		}
+
+		t.Run("Invalid give up time", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, _ := newPull(t, "invalid-give-up")
+			apiCtx.ExpectedCode = http.StatusUnprocessableEntity
+			after := now.Add(time.Hour)
+			for _, giveUp := range []string{after.Add(-time.Minute).Format(time.RFC3339), after.Format(time.RFC3339), "later"} {
+				doAPIMergePullRequestForm(t, apiCtx, owner.Name, repo.Name, pr.Index, &forms.MergePullRequestForm{
+					Do: "merge", MergeWhenChecksSucceed: true, ScheduledAfter: after.Format(time.RFC3339), GiveUpAfter: giveUp,
+				})
+			}
+			doAPIMergePullRequestForm(t, apiCtx, owner.Name, repo.Name, pr.Index, &forms.MergePullRequestForm{
+				Do: "merge", MergeWhenChecksSucceed: true, GiveUpAfter: after.Format(time.RFC3339),
+			})
+			unittest.AssertNotExistsBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+		})
+
+		t.Run("Gives up at the deadline", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t, "gives-up")
+			testPullMergeForm(t, session, http.StatusOK, owner.Name, repo.Name, strconv.FormatInt(pr.Index, 10), optionsPullMerge{
+				"do":                        "merge",
+				"merge_when_checks_succeed": "true",
+				"head_commit_id":            sha,
+				"scheduled_after":           now.Add(time.Hour).Format(time.RFC3339),
+				"give_up_after":             now.Add(3 * time.Hour).Format(time.RFC3339),
+			})
+			am := unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+			assert.Equal(t, timeutil.TimeStamp(now.Add(3*time.Hour).Unix()), am.GiveUpAfterUnix)
+
+			// started at its time, then waiting for an approval
+			passTime()
+			am = unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+			assert.Zero(t, am.ScheduledAfterUnix)
+			assert.False(t, isCancelled(t, pr))
+
+			// an approval after the deadline does not merge, even before the cron cancels it
+			now = now.Add(2 * time.Hour)
+			timeutil.MockSet(now)
+			review(t, pr, sha, "approve")
+			assert.False(t, isMerged(pr))
+
+			require.NoError(t, automerge.StartDueScheduledAutoMerges(t.Context()))
+			unittest.AssertNotExistsBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+			assert.True(t, isCancelled(t, pr))
+			assert.False(t, isMerged(pr))
+		})
+
+		t.Run("Merged before the deadline", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t, "merged-before-deadline")
+			review(t, pr, sha, "approve")
+			scheduleWithDeadline(t, pr)
+			passTime()
+			assert.True(t, isMerged(pr))
+			passTime()
+			assert.False(t, isCancelled(t, pr))
+		})
+
+		t.Run("Time and deadline both passed", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t, "both-passed")
+			review(t, pr, sha, "approve")
+			scheduleWithDeadline(t, pr)
+			now = now.Add(4 * time.Hour)
+			timeutil.MockSet(now)
+			require.NoError(t, automerge.StartDueScheduledAutoMerges(t.Context()))
+			assert.False(t, isMerged(pr))
+			assert.True(t, isCancelled(t, pr))
+		})
 	})
 }
 

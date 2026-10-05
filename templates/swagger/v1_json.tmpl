@@ -29939,6 +29939,12 @@
           "type": "boolean",
           "x-go-name": "ForceMerge"
         },
+        "give_up_after": {
+          "description": "cancel the scheduled merge if it has not merged by this time, only with scheduled_after and after it",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "GiveUpAfter"
+        },
         "head_commit_id": {
           "type": "string",
           "x-go-name": "HeadCommitID"

@@ -81,3 +81,32 @@ func TestTakeDueScheduledAutoMerges(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, pullIDs)
 }
+
+func TestTakeExpiredScheduledAutoMerges(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer timeutil.MockUnset()
+	timeutil.MockSet(time.Unix(1771800000, 0))
+	now := timeutil.TimeStampNow()
+
+	for pullID, giveUp := range map[int64]timeutil.TimeStamp{1: 0, 2: now + 3600, 3: now - 60, 4: now} {
+		require.NoError(t, db.Insert(t.Context(), &pull_model.AutoMerge{PullID: pullID, DoerID: 2, GiveUpAfterUnix: giveUp}))
+	}
+
+	expired, err := pull_model.TakeExpiredScheduledAutoMerges(t.Context(), now)
+	require.NoError(t, err)
+	pullIDs := make([]int64, 0, len(expired))
+	for _, am := range expired {
+		pullIDs = append(pullIDs, am.PullID)
+	}
+	assert.ElementsMatch(t, []int64{3, 4}, pullIDs)
+
+	unittest.AssertExistsIf(t, true, &pull_model.AutoMerge{PullID: 1})
+	unittest.AssertExistsIf(t, true, &pull_model.AutoMerge{PullID: 2})
+	unittest.AssertExistsIf(t, false, &pull_model.AutoMerge{PullID: 3})
+	unittest.AssertExistsIf(t, false, &pull_model.AutoMerge{PullID: 4})
+
+	// already taken
+	expired, err = pull_model.TakeExpiredScheduledAutoMerges(t.Context(), now)
+	require.NoError(t, err)
+	assert.Empty(t, expired)
+}
