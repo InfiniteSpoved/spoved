@@ -64,7 +64,7 @@ func AccountPost(ctx *context.Context) {
 		return
 	}
 
-	attempt := common.StartAuthAttempt(ctx, ratelimit.UserKey(ctx.Doer.Name))
+	attempt := common.StartAuthAttempt(ctx, ratelimit.UserIDKey(ctx.Doer.ID))
 	if attempt == nil {
 		return
 	}
@@ -280,7 +280,7 @@ func DeleteAccount(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("settings")
 	ctx.Data["PageIsSettingsAccount"] = true
 
-	attempt := common.StartAuthAttempt(ctx, ratelimit.UserKey(ctx.Doer.Name))
+	attempt := common.StartAuthAttempt(ctx, ratelimit.UserIDKey(ctx.Doer.ID))
 	if attempt == nil {
 		return
 	}
