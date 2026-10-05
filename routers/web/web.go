@@ -1173,6 +1173,9 @@ func registerRoutes(m *web.Route) {
 
 				m.Get("/repos", org_setting.Repos)
 
+				m.Combo("/branch_workflow").Get(org_setting.BranchWorkflow).
+					Post(web.Bind(forms.BranchWorkflowForm{}), org_setting.BranchWorkflowPost)
+
 				m.Group("/actions", func() {
 					m.Get("", org_setting.RedirectToDefaultSetting)
 					addSettingsRunnersRoutes()
@@ -1322,6 +1325,9 @@ func registerRoutes(m *web.Route) {
 				m.Get("/{id}", repo_setting.EditProtectedTag)
 				m.Post("/{id}", web.Bind(forms.ProtectTagForm{}), context.RepoMustNotBeArchived(), repo_setting.EditProtectedTagPost)
 			})
+
+			m.Combo("/branch_workflow").Get(repo_setting.BranchWorkflow).
+				Post(web.Bind(forms.BranchWorkflowForm{}), context.RepoMustNotBeArchived(), repo_setting.BranchWorkflowPost)
 
 			m.Combo("/push_rules").Get(repo_setting.PushRules).
 				Post(web.Bind(forms.PushRuleForm{}), context.RepoMustNotBeArchived(), repo_setting.PushRulesPost)

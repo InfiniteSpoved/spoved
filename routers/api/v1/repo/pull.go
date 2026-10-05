@@ -35,6 +35,7 @@ import (
 	"forgejo.org/routers/api/v1/utils"
 	asymkey_service "forgejo.org/services/asymkey"
 	"forgejo.org/services/automerge"
+	"forgejo.org/services/branchworkflow"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 	"forgejo.org/services/forms"
@@ -1069,7 +1070,12 @@ func MergePullRequest(ctx *context.APIContext) {
 	}
 	log.Trace("Pull request merged: %d", pr.ID)
 
-	if form.DeleteBranchAfterMerge {
+	alwaysDelete, err := branchworkflow.IsAlways(ctx, ctx.Repo().Repository)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "IsAlways", err)
+		return
+	}
+	if form.DeleteBranchAfterMerge || alwaysDelete {
 		var headRepo *git.Repository
 		if ctx.Repo() != nil && ctx.Repo().Repository != nil && ctx.Repo().Repository.ID == pr.HeadRepoID && ctx.Repo().GitRepo != nil {
 			headRepo = ctx.Repo().GitRepo
@@ -1083,6 +1089,12 @@ func MergePullRequest(ctx *context.APIContext) {
 		}
 
 		if err := repo_service.DeleteBranchAfterMerge(ctx, ctx.Doer(), pr, headRepo); err != nil {
+			if !form.DeleteBranchAfterMerge && repo_service.IsBranchKept(err) {
+				// deletion was forced by the setting: a kept branch never fails the merge
+				log.Info("Head branch of %-v kept after merge: %v", pr, err)
+				ctx.Status(http.StatusOK)
+				return
+			}
 			switch {
 			case errors.Is(err, repo_service.ErrBranchIsDefault):
 				ctx.Error(http.StatusForbidden, "DefaultBranch", errors.New("the head branch is the default branch"))
@@ -1090,6 +1102,10 @@ func MergePullRequest(ctx *context.APIContext) {
 				ctx.Error(http.StatusForbidden, "IsProtectedBranch", errors.New("the head branch is protected"))
 			case errors.Is(err, util.ErrPermissionDenied):
 				ctx.Error(http.StatusForbidden, "HeadBranch", errors.New("insufficient permission to delete head branch"))
+			case errors.Is(err, repo_service.ErrBranchInUse):
+				ctx.Error(http.StatusForbidden, "HeadBranch", errors.New("the head branch is used by another open pull request"))
+			case errors.Is(err, repo_service.ErrBranchHasNewCommits):
+				ctx.Error(http.StatusForbidden, "HeadBranch", errors.New("the head branch has new commits"))
 			default:
 				ctx.Error(http.StatusInternalServerError, "DeleteBranchAfterMerge", err)
 			}

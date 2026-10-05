@@ -1,0 +1,31 @@
+{{template "org/settings/layout_head" (dict "ctxData" . "pageClass" "organization settings branch-workflow")}}
+<div class="org-setting-content">
+	<h4 class="ui top attached header">
+		{{ctx.Locale.Tr "org.settings.branch_workflow"}}
+	</h4>
+	<div class="ui attached segment">
+		<form class="ui form" action="{{.OrgLink}}/settings/branch_workflow" method="post">
+			<div class="field">
+				<label for="delete_after_merge">{{ctx.Locale.Tr "repo.settings.branch_workflow.delete_after_merge"}}</label>
+				<select id="delete_after_merge" name="delete_after_merge" class="ui dropdown">
+					<option value="inherit" {{if eq .DeleteAfterMerge "inherit"}}selected{{end}}>{{ctx.Locale.Tr "org.settings.branch_workflow.inherit"}}</option>
+					<option value="off" {{if eq .DeleteAfterMerge "off"}}selected{{end}}>{{ctx.Locale.Tr "repo.settings.branch_workflow.off"}}</option>
+					<option value="default-on" {{if eq .DeleteAfterMerge "default-on"}}selected{{end}}>{{ctx.Locale.Tr "repo.settings.branch_workflow.default_on"}}</option>
+					<option value="always" {{if eq .DeleteAfterMerge "always"}}selected{{end}}>{{ctx.Locale.Tr "repo.settings.branch_workflow.always"}}</option>
+				</select>
+				<p class="help">{{ctx.Locale.Tr "repo.settings.branch_workflow.delete_after_merge_desc"}}</p>
+			</div>
+			<div class="field">
+				<div class="ui checkbox">
+					<input id="enforce" name="enforce" type="checkbox" {{if .Enforce}}checked{{end}}>
+					<label for="enforce">{{ctx.Locale.Tr "org.settings.branch_workflow.enforce"}}</label>
+					<p class="help">{{ctx.Locale.Tr "org.settings.branch_workflow.enforce_desc"}}</p>
+				</div>
+			</div>
+			<div class="field">
+				<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+			</div>
+		</form>
+	</div>
+</div>
+{{template "org/settings/layout_footer" .}}

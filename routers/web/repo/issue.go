@@ -53,6 +53,7 @@ import (
 	"forgejo.org/routers/utils"
 	"forgejo.org/routers/web/feed"
 	asymkey_service "forgejo.org/services/asymkey"
+	"forgejo.org/services/branchworkflow"
 	"forgejo.org/services/context"
 	"forgejo.org/services/context/upload"
 	"forgejo.org/services/convert"
@@ -2023,6 +2024,7 @@ func ViewIssue(ctx *context.Context) {
 		}
 
 		isPullBranchDeletable := canDelete &&
+			pull.Flow != issues_model.PullRequestFlowAGit && // its head "<user>/<topic>" is not a real branch
 			pull.HeadRepo != nil &&
 			git.IsBranchExist(ctx, pull.HeadRepo.RepoPath(), pull.HeadBranch) &&
 			(!pull.HasMerged || ctx.Data["HeadBranchCommitID"] == ctx.Data["PullHeadCommitID"])
@@ -2037,6 +2039,15 @@ func ViewIssue(ctx *context.Context) {
 			isPullBranchDeletable = !exist
 		}
 		ctx.Data["IsPullBranchDeletable"] = isPullBranchDeletable
+
+		deleteBranch, err := branchworkflow.GetEffective(ctx, ctx.Repo.Repository)
+		if err != nil {
+			ctx.ServerError("GetEffective", err)
+			return
+		}
+		ctx.Data["DefaultDeleteBranchAfterMerge"] = deleteBranch.Mode >= repo_model.DeleteBranchDefaultOn
+		ctx.Data["DeleteBranchForced"] = deleteBranch.Mode == repo_model.DeleteBranchAlways
+		ctx.Data["DeleteBranchSetBy"] = branchworkflow.SetByText(ctx.Locale, deleteBranch)
 
 		if pull.HasMerged && ctx.IsSigned && ctx.Repo.CanCreateBranch() && !ctx.Repo.Repository.IsArchived {
 			revertBase, err := pull_service.GetRevertBase(ctx.Repo.GitRepo, pull)

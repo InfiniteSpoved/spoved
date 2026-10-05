@@ -23,6 +23,7 @@ import (
 	"forgejo.org/modules/queue"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
+	"forgejo.org/services/branchworkflow"
 	notify_service "forgejo.org/services/notify"
 	pull_service "forgejo.org/services/pull"
 	repo_service "forgejo.org/services/repository"
@@ -309,7 +310,11 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 		return
 	}
 
-	if scheduledPRM.DeleteBranchAfterMerge {
+	alwaysDelete, err := branchworkflow.IsAlways(ctx, pr.BaseRepo)
+	if err != nil {
+		log.Error("%d branchworkflow.IsAlways: %v", pr.ID, err)
+	}
+	if scheduledPRM.DeleteBranchAfterMerge || alwaysDelete {
 		err := repo_service.DeleteBranchAfterMerge(ctx, doer, pr, headGitRepo)
 		if err != nil {
 			log.Error("%d repo_service.DeleteBranchIfUnused: %v", pr.ID, err)

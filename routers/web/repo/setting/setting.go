@@ -253,6 +253,11 @@ func UnitsPost(ctx *context.Context) {
 	}
 
 	if form.EnablePulls && !unit_model.TypePullRequests.UnitGlobalDisabled() {
+		// the branch workflow page owns the delete-branch setting; keep it when this form is saved
+		oldPulls := &repo_model.PullRequestsConfig{}
+		if u, err := repo.GetUnit(ctx, unit_model.TypePullRequests); err == nil {
+			oldPulls = u.PullRequestsConfig()
+		}
 		units = append(units, repo_model.RepoUnit{
 			RepoID: repo.ID,
 			Type:   unit_model.TypePullRequests,
@@ -266,7 +271,8 @@ func UnitsPost(ctx *context.Context) {
 				AllowManualMerge:              form.PullsAllowManualMerge,
 				AutodetectManualMerge:         form.EnableAutodetectManualMerge,
 				AllowRebaseUpdate:             form.PullsAllowRebaseUpdate,
-				DefaultDeleteBranchAfterMerge: form.DefaultDeleteBranchAfterMerge,
+				DefaultDeleteBranchAfterMerge: oldPulls.DefaultDeleteBranchAfterMerge,
+				DeleteBranchAfterMerge:        oldPulls.DeleteBranchAfterMerge,
 				DefaultMergeStyle:             repo_model.MergeStyle(form.PullsDefaultMergeStyle),
 				DefaultUpdateStyle:            repo_model.UpdateStyle(form.PullsDefaultUpdateStyle),
 				DefaultAllowMaintainerEdit:    form.DefaultAllowMaintainerEdit,

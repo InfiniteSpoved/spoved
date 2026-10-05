@@ -199,7 +199,6 @@ type RepoUnitSettingForm struct {
 	PullsDefaultUpdateStyle               string `binding:"In(merge,rebase)"`
 	EnableAutodetectManualMerge           bool
 	PullsAllowRebaseUpdate                bool
-	DefaultDeleteBranchAfterMerge         bool
 	DefaultAllowMaintainerEdit            bool
 	EnableTimetracker                     bool
 	AllowOnlyContributorsToTrackTime      bool

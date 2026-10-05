@@ -100,6 +100,10 @@ var (
 			RetargetChildrenOnMerge                  bool
 		} `ini:"repository.pull-request"`
 
+		BranchWorkflow struct {
+			DeleteSourceBranchAfterMerge string // off, default-on or always
+		} `ini:"repository.branch_workflow"`
+
 		// Issue Setting
 		Issue struct {
 			LockReasons []string
@@ -326,6 +330,8 @@ func loadRepositoryFrom(rootCfg ConfigProvider) {
 		log.Fatal("Failed to map Repository.Local settings: %v", err)
 	} else if err = rootCfg.Section("repository.pull-request").MapTo(&Repository.PullRequest); err != nil {
 		log.Fatal("Failed to map Repository.PullRequest settings: %v", err)
+	} else if err = rootCfg.Section("repository.branch_workflow").MapTo(&Repository.BranchWorkflow); err != nil {
+		log.Fatal("Failed to map Repository.BranchWorkflow settings: %v", err)
 	}
 
 	if !rootCfg.Section("packages").Key("ENABLED").MustBool(Packages.Enabled) {

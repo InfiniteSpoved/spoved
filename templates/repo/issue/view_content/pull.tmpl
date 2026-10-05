@@ -268,7 +268,9 @@
 								'pullHeadCommitID': {{.PullHeadCommitID}},
 								'isPullBranchDeletable': {{.IsPullBranchDeletable}},
 								'defaultMergeStyle': {{.MergeStyle}},
-								'defaultDeleteBranchAfterMerge': {{$prConfig.DefaultDeleteBranchAfterMerge}},
+								'defaultDeleteBranchAfterMerge': {{.DefaultDeleteBranchAfterMerge}},
+								'deleteBranchForced': {{.DeleteBranchForced}},
+								'textDeleteBranchForced': {{.DeleteBranchSetBy}},
 								'mergeMessageFieldPlaceHolder': {{ctx.Locale.Tr "repo.editor.commit_message_desc"}},
 								'defaultMergeMessage': defaultMergeMessage,
 
