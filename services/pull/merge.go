@@ -566,6 +566,12 @@ func CheckPullBranchProtections(ctx context.Context, pr *issues_model.PullReques
 		}
 	}
 
+	if issues_model.MergeBlockedByUnresolvedConversations(ctx, pb, pr) {
+		return pb, models.ErrDisallowedToMerge{
+			Reason: "There are unresolved conversations",
+		}
+	}
+
 	if skipProtectedFilesCheck {
 		return nil, nil
 	}

@@ -245,7 +245,16 @@ func GetPullRequest(ctx *context.APIContext) {
 		ctx.Error(http.StatusInternalServerError, "LoadHeadRepo", err)
 		return
 	}
-	ctx.JSON(http.StatusOK, convert.ToAPIPullRequest(ctx, pr, ctx.Doer()))
+	apiPR := convert.ToAPIPullRequest(ctx, pr, ctx.Doer())
+	pb, err := git_model.GetFirstMatchProtectedBranchRule(ctx, pr.BaseRepoID, pr.BaseBranch)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "GetFirstMatchProtectedBranchRule", err)
+		return
+	}
+	if pb != nil && issues_model.MergeBlockedByUnresolvedConversations(ctx, pb, pr) {
+		apiPR.MergeableReasons = append(apiPR.MergeableReasons, "unresolved_conversations")
+	}
+	ctx.JSON(http.StatusOK, apiPR)
 }
 
 // GetPullRequest returns a single PR based on index

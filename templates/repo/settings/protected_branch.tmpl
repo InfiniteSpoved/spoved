@@ -263,6 +263,16 @@
 					{{ctx.Locale.Tr "repo.settings.block_outdated_branch"}}
 					<span class="help">{{ctx.Locale.Tr "repo.settings.block_outdated_branch_desc"}}</span>
 				</label>
+				<label>
+					<input name="block_on_unresolved_conversations" type="checkbox" {{if .Rule.BlockOnUnresolvedConversations}}checked{{end}}>
+					{{ctx.Locale.Tr "repo.settings.block_on_unresolved_conversations"}}
+					<span class="help">{{ctx.Locale.Tr "repo.settings.block_on_unresolved_conversations_desc"}}</span>
+				</label>
+				<label>
+					<input name="ignore_outdated_conversations" type="checkbox" {{if .Rule.IgnoreOutdatedConversations}}checked{{end}}>
+					{{ctx.Locale.Tr "repo.settings.ignore_outdated_conversations"}}
+					<span class="help">{{ctx.Locale.Tr "repo.settings.ignore_outdated_conversations_desc"}}</span>
+				</label>
 			</fieldset>
 			<fieldset>
 				<legend>{{ctx.Locale.Tr "repo.settings.event_pull_request_enforcement"}}</legend>

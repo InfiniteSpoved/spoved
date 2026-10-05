@@ -119,7 +119,7 @@
 				{{end}}
 			</div>
 			<div class="button-sequence tw-justify-end">
-				{{if and $.CanMarkConversation $isNotPending}}
+				{{if and (or $.CanMarkConversation (and $.IsSigned (eq $.SignedUserID (index .comments 0).PosterID))) $isNotPending}}
 					<button class="ui tiny basic button resolve-conversation" data-origin="timeline" data-action="{{if not $resolved}}Resolve{{else}}UnResolve{{end}}" data-comment-id="{{(index .comments 0).ID}}" data-update-url="{{$.RepoLink}}/issues/resolve_conversation">
 						{{if $resolved}}
 							{{ctx.Locale.Tr "repo.issues.review.un_resolve_conversation"}}

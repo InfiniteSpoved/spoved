@@ -36,7 +36,10 @@ type PullRequest struct {
 	PatchURL string `json:"patch_url"`
 
 	Mergeable bool `json:"mergeable"`
-	HasMerged bool `json:"merged"`
+	// Branch protection checks that block merging, e.g. "unresolved_conversations".
+	// Only reported when getting a single pull request.
+	MergeableReasons []string `json:"mergeable_reasons,omitempty"`
+	HasMerged        bool     `json:"merged"`
 	// swagger:strfmt date-time
 	Merged              *time.Time `json:"merged_at"`
 	MergedCommitID      *string    `json:"merge_commit_sha"`

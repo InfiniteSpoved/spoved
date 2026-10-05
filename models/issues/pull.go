@@ -963,6 +963,64 @@ func MergeBlockedByOutdatedBranch(protectBranch *git_model.ProtectedBranch, pr *
 	return protectBranch.BlockOnOutdatedBranch && pr.CommitsBehind > 0
 }
 
+// FindUnresolvedConversations returns the first comment of each unresolved code conversation of the issue,
+// in creation order. A conversation is the code comments sharing review, path and line, and it is
+// resolved when any of them is. Comments of pending reviews don't count, and outdated conversations
+// are left out when ignoreOutdated is set.
+func FindUnresolvedConversations(ctx context.Context, issueID int64, ignoreOutdated bool) (CommentList, error) {
+	var comments CommentList
+	if err := db.GetEngine(ctx).
+		Where(builder.Eq{"issue_id": issueID, "type": CommentTypeCode}).
+		And(builder.Or(
+			builder.IsNull{"review_id"},
+			builder.NotIn("review_id", builder.Select("id").From("review").Where(builder.Eq{"issue_id": issueID, "type": ReviewTypePending})),
+		)).
+		Asc("created_unix").Asc("id").
+		Find(&comments); err != nil {
+		return nil, err
+	}
+
+	type conversationKey struct {
+		reviewID int64
+		treePath string
+		line     int64
+	}
+	first := make(map[conversationKey]*Comment)
+	resolved := make(map[conversationKey]bool)
+	var keys []conversationKey
+	for _, c := range comments {
+		key := conversationKey{c.ReviewID, c.TreePath, c.Line}
+		if _, ok := first[key]; !ok {
+			first[key] = c
+			keys = append(keys, key)
+		}
+		if c.ResolveDoerID != 0 {
+			resolved[key] = true
+		}
+	}
+
+	unresolved := make(CommentList, 0, len(keys))
+	for _, key := range keys {
+		if !resolved[key] && !(ignoreOutdated && first[key].Invalidated) {
+			unresolved = append(unresolved, first[key])
+		}
+	}
+	return unresolved, nil
+}
+
+// MergeBlockedByUnresolvedConversations returns true if merge is blocked by unresolved code conversations
+func MergeBlockedByUnresolvedConversations(ctx context.Context, protectBranch *git_model.ProtectedBranch, pr *PullRequest) bool {
+	if !protectBranch.BlockOnUnresolvedConversations {
+		return false
+	}
+	unresolved, err := FindUnresolvedConversations(ctx, pr.IssueID, protectBranch.IgnoreOutdatedConversations)
+	if err != nil {
+		log.Error("MergeBlockedByUnresolvedConversations: %v", err)
+		return true
+	}
+	return len(unresolved) > 0
+}
+
 // GetCodeOwnersFromReader returns the code owners configuration
 // Return warning messages on parsing errors
 // We're trying to do the best we can when parsing a file.
