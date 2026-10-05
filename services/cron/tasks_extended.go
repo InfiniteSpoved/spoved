@@ -135,15 +135,18 @@ type UpdateCheckerConfig struct {
 	HTTPEndpoint string
 }
 
+// UpdateCheckerSettings is the config the update_checker task is registered with.
+var UpdateCheckerSettings = &UpdateCheckerConfig{
+	BaseConfig: BaseConfig{
+		Enabled:    false,
+		RunAtStart: false,
+		Schedule:   "@every 168h",
+	},
+	HTTPEndpoint: "https://api.github.com/repos/GitHatOrg/GitHat/releases/latest",
+}
+
 func registerUpdateGiteaChecker() {
-	RegisterTaskFatal("update_checker", &UpdateCheckerConfig{
-		BaseConfig: BaseConfig{
-			Enabled:    false,
-			RunAtStart: false,
-			Schedule:   "@every 168h",
-		},
-		HTTPEndpoint: "https://api.github.com/repos/GitHatOrg/GitHat/releases/latest",
-	}, func(ctx context.Context, _ *user_model.User, config Config) error {
+	RegisterTaskFatal("update_checker", UpdateCheckerSettings, func(ctx context.Context, _ *user_model.User, config Config) error {
 		return updatechecker.GiteaUpdateChecker(config.(*UpdateCheckerConfig).HTTPEndpoint)
 	})
 }

@@ -7,9 +7,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
-	"reflect"
 	"testing"
-	"unsafe"
 
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/system"
@@ -112,9 +110,7 @@ func TestAdminDashboardUpdateCheck(t *testing.T) {
 	defer test.MockVariableValue(&setting.AppVer, "16.0.0")()
 	defer func() { require.NoError(t, system.AppState.Set(t.Context(), &updatechecker.CheckerState{})) }()
 
-	task := cron.GetTask("update_checker")
-	cfg := reflect.NewAt(reflect.TypeFor[cron.Config](), unsafe.Pointer(reflect.ValueOf(task).Elem().FieldByName("config").UnsafeAddr())).Elem().Interface().(*cron.UpdateCheckerConfig)
-	defer test.MockVariableValue(&cfg.Enabled, false)()
+	defer test.MockVariableValue(&cron.UpdateCheckerSettings.Enabled, false)()
 	session := loginUser(t, "user1")
 
 	dashboard := func(t *testing.T, state updatechecker.CheckerState) (string, *HTMLDoc) {
@@ -129,7 +125,7 @@ func TestAdminDashboardUpdateCheck(t *testing.T) {
 		assert.NotContains(t, body, "99.0.0")
 	})
 
-	cfg.Enabled = true
+	cron.UpdateCheckerSettings.Enabled = true
 	for name, state := range map[string]updatechecker.CheckerState{
 		"minor": {SupportedVersions: []string{"16.0.1"}},
 		"major": {SupportedVersions: []string{"99.0.0"}},
