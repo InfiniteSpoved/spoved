@@ -306,6 +306,9 @@ func (a *AzureBlobStorage) userDelegationCredential(now time.Time) (*service.Use
 // URL gets a read-only SAS URL for a single blob. The link is valid for 5 minutes.
 func (a *AzureBlobStorage) URL(path, name string, reqParams url.Values) (*url.URL, error) {
 	blobName := a.buildAzureBlobPath(path)
+	if blobName == "" {
+		return nil, os.ErrNotExist // an empty blob name would sign a container SAS (sr=c)
+	}
 	now := time.Now().UTC()
 	name = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {

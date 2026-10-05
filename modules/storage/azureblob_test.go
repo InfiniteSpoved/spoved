@@ -113,6 +113,11 @@ func TestAzureBlobStorageURL(t *testing.T) {
 	assert.Equal(t, "content", string(body))
 	assert.Equal(t, `attachment; filename="ab\".txt"`, resp.Header.Get("Content-Disposition"))
 	assert.Equal(t, "text/plain", resp.Header.Get("Content-Type"))
+
+	root, err := NewStorage(setting.AzureBlobStorageType, azuriteStorageConfig(t, "test-url", ""))
+	require.NoError(t, err)
+	_, err = root.URL("", "name", nil)
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestAzureBlobCredential(t *testing.T) {
