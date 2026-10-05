@@ -1,0 +1,4 @@
+# Vulnerabilities accepted for the release image (.github/workflows/release-image.yml).
+# One entry per line, with the reason in a comment above it and a review date:
+#   CVE-2026-12345 exp:2027-01-31
+# After the exp date Trivy reports the finding again, so the run fails until it is reviewed.
