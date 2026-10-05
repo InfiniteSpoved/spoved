@@ -69,7 +69,8 @@ export default {
       const root = this.$refs.canvas;
       if (!root) return;
       const origin = root.getBoundingClientRect();
-      const box = (key) => root.querySelector(`[data-key="${CSS.escape(key)}"]`)?.getBoundingClientRect();
+      const nodes = Array.from(root.querySelectorAll('[data-key]'));
+      const box = (key) => nodes.find((el) => el.dataset.key === key)?.getBoundingClientRect();
       this.lines = this.graph.edges.flatMap(([from, to]) => {
         const a = box(from), b = box(to);
         if (!a || !b) return [];
@@ -110,7 +111,7 @@ export default {
             <button class="action-run-graph-job" type="button" @click="toggleGroup(node.key)" :aria-expanded="!!expanded[node.key]">
               <ActionRunStatus :locale-status="locale.status[node.status]" :status="node.status"/>
               <span class="gt-ellipsis">{{ node.name }}</span>
-              <SvgIcon :name="expanded[node.key] ? 'octicon-chevron-up' : 'octicon-chevron-down'" :size="14"/>
+              <SvgIcon :name="expanded[node.key] ? 'octicon-chevron-down' : 'octicon-chevron-right'" :size="14"/>
             </button>
             <div class="action-run-graph-count">
               {{ countLine(node) }}

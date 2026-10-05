@@ -595,6 +595,7 @@ test('view non-picked action run job', async () => {
   });
   await flushPromises();
 
+  expect(wrapper.find('.action-run-graph').exists()).toBe(true); // more than one job
   expect(wrapper.get('.job-info-header-detail li:first-child').text()).toEqual('Waiting');
   expect(wrapper.get('.job-brief-list .job-brief-item:nth-of-type(1) .job-brief-name').text()).toEqual('check-1');
   expect(wrapper.get('.job-brief-list .job-brief-item:nth-of-type(2) .job-brief-name').text()).toEqual('check-2');
@@ -707,4 +708,22 @@ test('markup renderer are initialized on changes to the step-summary', async () 
   wrapper.vm.loadJob();
   await flushPromises();
   expect(initMarkupContent).toHaveBeenCalledTimes(2);
+});
+
+test('a run with a single job shows no graph', async () => {
+  Object.defineProperty(document.documentElement, 'lang', {value: 'en'});
+  const wrapper = mount(RepoActionView, {
+    props: {
+      ...defaultTestProps,
+      initialJobData: {
+        ...minimalInitialJobData,
+        state: {
+          ...minimalInitialJobData.state,
+          run: {...minimalInitialJobData.state.run, jobs: [{id: 1, name: 'only', status: 'success', duration: '1s', groupKey: '/only', needs: []}]},
+        },
+      },
+    },
+  });
+  await flushPromises();
+  expect(wrapper.find('.action-run-graph').exists()).toBe(false);
 });

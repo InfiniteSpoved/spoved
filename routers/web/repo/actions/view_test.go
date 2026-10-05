@@ -947,3 +947,13 @@ func TestViewJobNeeds(t *testing.T) {
 	assert.Equal(t, []int64{1, 2, 3}, viewJobNeeds(deploy, ids))
 	assert.Equal(t, []int64{}, viewJobNeeds(&actions_model.ActionRunJob{}, ids))
 }
+
+func TestViewJobJSONKeys(t *testing.T) {
+	raw, err := json.Marshal(&ViewJob{Needs: []int64{}})
+	require.NoError(t, err)
+	var keys map[string]any
+	require.NoError(t, json.Unmarshal(raw, &keys))
+	assert.Contains(t, keys, "needs")
+	assert.Contains(t, keys, "groupKey")
+	assert.Len(t, keys, 7) // id, name, status, canRerun, duration + needs, groupKey
+}
