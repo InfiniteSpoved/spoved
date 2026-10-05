@@ -134,17 +134,20 @@ func Dashboard(ctx *context.Context) {
 	updateSystemStatus()
 	ctx.Data["SysStatus"] = sysStatus
 
-	update, err := updatechecker.GetReleaseState(ctx)
-	if err != nil {
-		ctx.Data["UpdateCheckerError"] = err.Error()
-	} else {
-		if update.MajorReleaseState == updatechecker.MajorReleaseUnsupported {
-			ctx.Data["NeedMajorUpdate"] = true
-		} else if update.MinorReleaseState == updatechecker.MinorReleaseOutOfDate {
-			ctx.Data["NeedMinorUpdate"] = true
-		}
-		if hasRec, rec := update.RecommendedUpgrade.Get(); hasRec {
-			ctx.Data["RemoteVersion"] = rec
+	// A result stored while the checker was enabled (or by Forgejo's) is stale once it is off.
+	if task := cron.GetTask("update_checker"); task != nil && task.IsEnabled() {
+		update, err := updatechecker.GetReleaseState(ctx)
+		if err != nil {
+			ctx.Data["UpdateCheckerError"] = err.Error()
+		} else {
+			if update.MajorReleaseState == updatechecker.MajorReleaseUnsupported {
+				ctx.Data["NeedMajorUpdate"] = true
+			} else if update.MinorReleaseState == updatechecker.MinorReleaseOutOfDate {
+				ctx.Data["NeedMinorUpdate"] = true
+			}
+			if hasRec, rec := update.RecommendedUpgrade.Get(); hasRec {
+				ctx.Data["RemoteVersion"] = rec
+			}
 		}
 	}
 

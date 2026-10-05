@@ -86,3 +86,18 @@ func TestUnixSocketAbstractNamespace(t *testing.T) {
 
 	assert.Equal(t, "@forgejo", HTTPAddr)
 }
+
+func TestIssueTrackerURL(t *testing.T) {
+	cfg, err := NewConfigProviderFromData(``)
+	require.NoError(t, err)
+	loadServerFrom(cfg)
+	assert.Equal(t, "https://github.com/GitHatOrg/GitHat/issues", IssueTrackerURL)
+
+	cfg, err = NewConfigProviderFromData(`
+[server]
+ISSUE_TRACKER_URL = https://example.com/tracker
+`)
+	require.NoError(t, err)
+	loadServerFrom(cfg)
+	assert.Equal(t, "https://example.com/tracker", IssueTrackerURL)
+}

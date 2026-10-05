@@ -4,16 +4,21 @@
 package integration
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"testing"
 
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/system"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/translation"
+	"forgejo.org/modules/updatechecker"
+	"forgejo.org/services/cron"
 	"forgejo.org/tests"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var commonEntries = []string{
@@ -97,4 +102,39 @@ func TestAdminDashboard(t *testing.T) {
 		page = NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", url), http.StatusOK).Body)
 		assert.Contains(t, page.Find(selector).Text(), "МиБ")
 	})
+}
+
+// The update checker is off by default: a result stored by an earlier run (e.g. Forgejo's) must not show a banner.
+func TestAdminDashboardUpdateCheck(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer test.MockVariableValue(&setting.AppVer, "16.0.0")()
+	defer func() { require.NoError(t, system.AppState.Set(t.Context(), &updatechecker.CheckerState{})) }()
+
+	defer test.MockVariableValue(&cron.UpdateCheckerSettings.Enabled, false)()
+	session := loginUser(t, "user1")
+
+	dashboard := func(t *testing.T, state updatechecker.CheckerState) (string, *HTMLDoc) {
+		t.Helper()
+		require.NoError(t, system.AppState.Set(t.Context(), &state))
+		resp := session.MakeRequest(t, NewRequest(t, "GET", "/admin"), http.StatusOK)
+		return resp.Body.String(), NewHTMLParser(t, bytes.NewBuffer(resp.Body.Bytes()))
+	}
+
+	t.Run("disabled ignores a stale result", func(t *testing.T) {
+		body, _ := dashboard(t, updatechecker.CheckerState{SupportedVersions: []string{"99.0.0"}})
+		assert.NotContains(t, body, "99.0.0")
+	})
+
+	cron.UpdateCheckerSettings.Enabled = true
+	for name, state := range map[string]updatechecker.CheckerState{
+		"minor": {SupportedVersions: []string{"16.0.1"}},
+		"major": {SupportedVersions: []string{"99.0.0"}},
+		"error": {Error: "boom"},
+	} {
+		t.Run("enabled "+name, func(t *testing.T) {
+			body, doc := dashboard(t, state)
+			doc.AssertSelection(t, doc.Find(`.flash-error a[href="https://github.com/GitHatOrg/GitHat/releases"]`), true)
+			assert.NotContains(t, body, "forgejo.org/releases")
+		})
+	}
 }

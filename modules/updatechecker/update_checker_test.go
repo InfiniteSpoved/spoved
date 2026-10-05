@@ -5,7 +5,10 @@ package updatechecker
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"forgejo.org/modules/setting"
@@ -18,59 +21,76 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDNSUpdate(t *testing.T) {
-	t.Run("empty", func(t *testing.T) {
-		defer test.MockVariableValue(&lookupTXT, func(domain string) ([]string, error) {
-			assert.Equal(t, "release.forgejo.org", domain)
-			return []string{}, nil
-		})()
-		_, err := getVersionDNS("release.forgejo.org")
-		require.ErrorContains(t, err, "no TXT record")
-	})
+func TestGetVersionHTTP(t *testing.T) {
+	serve := func(t *testing.T, status int, body string) (string, *int) {
+		hits := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
+		}))
+		t.Cleanup(srv.Close)
+		return srv.URL, &hits
+	}
 
-	t.Run("unrelated TXT", func(t *testing.T) {
-		defer test.MockVariableValue(&lookupTXT, func(domain string) ([]string, error) {
-			assert.Equal(t, "release.forgejo.org", domain)
-			return []string{
-				"v=spf1 -all",
-			}, nil
-		})()
-		_, err := getVersionDNS("release.forgejo.org")
-		require.ErrorContains(t, err, "no TXT record")
-	})
-
-	t.Run("single response, single value", func(t *testing.T) {
-		defer test.MockVariableValue(&lookupTXT, func(domain string) ([]string, error) {
-			assert.Equal(t, "release.forgejo.org", domain)
-			return []string{"forgejo_versions=16.0.3"}, nil
-		})()
-		versions, err := getVersionDNS("release.forgejo.org")
+	t.Run("tag_name", func(t *testing.T) {
+		url, hits := serve(t, http.StatusOK, `{"tag_name": "v16.0.0-githat.2"}`)
+		v, err := getVersionHTTP(url)
 		require.NoError(t, err)
-		assert.Equal(t, []string{"16.0.3"}, versions)
+		assert.Equal(t, "16.0.0-githat.2", v)
+		assert.Equal(t, 1, *hits) // only the configured endpoint is contacted
 	})
 
-	t.Run("single response, multiple values", func(t *testing.T) {
-		defer test.MockVariableValue(&lookupTXT, func(domain string) ([]string, error) {
-			assert.Equal(t, "release.forgejo.org", domain)
-			return []string{"forgejo_versions=16.0.3, 15.0.7"}, nil
-		})()
-		versions, err := getVersionDNS("release.forgejo.org")
-		require.NoError(t, err)
-		assert.Equal(t, []string{"16.0.3", "15.0.7"}, versions)
+	t.Run("errors", func(t *testing.T) {
+		for name, tc := range map[string]struct {
+			status int
+			body   string
+			msg    string
+		}{
+			"not found":  {http.StatusNotFound, `{}`, "404"},
+			"bad json":   {http.StatusOK, `<html>`, "error found"},
+			"empty tag":  {http.StatusOK, `{"tag_name": ""}`, "no tag_name"},
+			"too large":  {http.StatusOK, `{"tag_name": "1.0.0", "x": "` + strings.Repeat("a", maxResponseSize) + `"}`, "too large"},
+			"empty body": {http.StatusOK, ``, ""},
+		} {
+			t.Run(name, func(t *testing.T) {
+				url, _ := serve(t, tc.status, tc.body)
+				_, err := getVersionHTTP(url)
+				require.ErrorContains(t, err, tc.msg)
+			})
+		}
 	})
+}
 
-	t.Run("multiple responses, multiple values", func(t *testing.T) {
-		defer test.MockVariableValue(&lookupTXT, func(domain string) ([]string, error) {
-			assert.Equal(t, "blah.forgejo.org", domain)
-			return []string{
-				"forgejo_versions=16.0.3",
-				"forgejo_versions=15.0.7",
-			}, nil
-		})()
-		versions, err := getVersionDNS("blah.forgejo.org")
-		require.NoError(t, err)
-		assert.Equal(t, []string{"16.0.3", "15.0.7"}, versions)
-	})
+func TestGiteaUpdateCheckerStoresHTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	state := system.NewMockStateStore(t)
+	state.On("Set", mock.Anything, mock.MatchedBy(func(item system.StateItem) bool {
+		cs, ok := item.(*CheckerState)
+		require.True(t, ok)
+		return cs.Error != "" && cs.SupportedVersions == nil
+	})).Return(nil)
+	defer test.MockVariableValue[system.StateStore](&system.AppState, state)()
+
+	require.NoError(t, GiteaUpdateChecker(srv.URL))
+}
+
+func TestGetReleaseStateGitHatVersions(t *testing.T) {
+	defer test.MockVariableValue(&setting.AppVer, "16.0.0-githat.1")()
+	state := system.NewMockStateStore(t)
+	state.On("Get", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		args.Get(1).(*CheckerState).SupportedVersions = []string{"16.0.0-githat.2"}
+	}).Return(nil)
+	defer test.MockVariableValue[system.StateStore](&system.AppState, state)()
+
+	rs, err := GetReleaseState(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, MinorReleaseOutOfDate, rs.MinorReleaseState)
+	assert.Equal(t, "16.0.0-githat.2", rs.RecommendedUpgrade.ValueOrZeroValue())
 }
 
 func TestUpdateRemoteVersion(t *testing.T) {
