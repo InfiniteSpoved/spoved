@@ -32,7 +32,7 @@ Only the supervisor talks to the user.
 Token budget: every session rereads its own growing history each turn, and all
 sessions share one 5-hour limit. Run the fewest sessions on the cheapest model
 that can do the job, retire long-lived ones, and drive work by events, not polling.
-Retire any lead whose context passes ~100k tokens (get_session
+Retire any lead whose context passes ~200k tokens (get_session
 `context_usage.used_tokens`) or that has merged 3–5 tickets; see Lessons.
 
 Every `create_session` uses `source_url: https://github.com/GitHatOrg/GitHat` and
@@ -72,7 +72,7 @@ TL yourself, or two leads end up on the same one (#136).
 ```
 Supervisor check-in. OL = <OL>, TL1 = <TL1>, TL2 = <TL2>. Run
 get_session on the leads and read only status_bucket and
-context_usage.used_tokens; retire a lead past ~100k. Run list_events (kinds
+context_usage.used_tokens; retire a lead past ~200k. Run list_events (kinds
 [assistant, result], limit 20) only on a session that is failed, blocked, or
 unchanged for more than 2 h with work in flight. Handle usage limits,
 stalls over 2 h, OL/TL loops, and rule violations: more than <CAP> tickets in
@@ -198,8 +198,12 @@ Verification, when a TL sends a PR number and head SHA (TL step 7). Read-only:
    from the PR head: file:line plus the test that covers it. Mark it COVERED (#N)
    when an open issue or an explicit deferral in the PR already holds it.
 2. A criterion without a test is PARTIAL. Flag delivered-but-wrong behaviour as BUG.
-3. Reply to the TL: FULLY DONE, or one line per gap. Static checks only; run at
-   most one narrow `go test -run` when code alone can't decide.
+3. First post the verdict as a PR comment "OL AC check @<40-char SHA>: AC1 ✅ …
+   / DEFERRED → #N / VERDICT: FULLY DONE|GAPS", then reply to the TL. Static
+   checks only; run at most one narrow `go test -run` when code alone can't decide.
+4. Any non-merge commit after the checked SHA needs a fresh check
+   (`git log --no-merges <SHA>..<head>` must be empty). On 05 Oct, #214 and #218
+   merged before the check and #213 merged two commits past it.
 Label and queue the follow-ups the TLs file, deduped against the open issues.
 Delivered-but-wrong behaviour found after merge is a bug and jumps the queue.
 Nightly develop failures (from the nightly run) are bugs: queue them first.
@@ -280,7 +284,9 @@ Pipeline, per ticket, up to <CAP> tickets at once:
    the acceptance criteria. For each gap it
    reports, have the coder fix it in this PR, or defer it explicitly in the PR
    body and file one follow-up `[Px] … (follow-up to #N)`.
-8. Merge, once the verified head has no PR failures, the security items are
+8. Merge, once the PR carries the OL's "OL AC check @<SHA> … FULLY DONE" comment
+   and the head is that SHA plus develop merges only (`git log --no-merges
+   <SHA>..<head>` empty), the head has no PR failures, the security items are
    resolved, every OL gap is fixed or explicitly deferred, and mergeable_state
    isn't "dirty". Use mcp__github__merge_pull_request
    with merge_method "merge" and expectedHeadSha set to the verified 40-character
@@ -447,7 +453,7 @@ checkout <SHA>). Rerun the stages <TL> names, or all of them if it doesn't name 
   per TL, security review only where it applies, event-driven leads with 2-hour
   safety nets, a 4-hour supervisor check-in, one-line reports, archiving finished
   workers, and retiring leads (below).
-- Retire a lead after 3–5 merged tickets, past ~100k tokens of context, or when
+- Retire a lead after 3–5 merged tickets, past ~200k tokens of context, or when
   its replies slow down (the first OL reread ~160M cached tokens, $42, in 19 h):
   1. Ask it for a hand-off of at most 15 lines: tickets in flight, branches, PRs,
      workers, open decisions.
