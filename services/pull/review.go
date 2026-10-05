@@ -128,6 +128,18 @@ func ValidateCodeCommentSuggestions(content string) error {
 }
 
 // CreateCodeComment creates a comment on the code line
+// checkCanReview refuses users blocked by the poster of the pull request or by the owner of the repository,
+// like CreateIssueComment does for plain comments.
+func checkCanReview(ctx context.Context, doer *user_model.User, issue *issues_model.Issue) error {
+	if err := issue.LoadRepo(ctx); err != nil {
+		return err
+	}
+	if user_model.IsBlockedMultiple(ctx, []int64{issue.PosterID, issue.Repo.OwnerID}, doer.ID) {
+		return user_model.ErrBlockedByUser
+	}
+	return nil
+}
+
 func CreateCodeComment(ctx context.Context, doer *user_model.User, gitRepo *git.Repository,
 	issue *issues_model.Issue, line, extraLinesCount int64, content, treePath string, pendingReview bool,
 	replyReviewID int64, beforeCommitID, latestCommitID string, attachments []string,
@@ -136,6 +148,10 @@ func CreateCodeComment(ctx context.Context, doer *user_model.User, gitRepo *git.
 		existsReview bool
 		err          error
 	)
+
+	if err := checkCanReview(ctx, doer, issue); err != nil {
+		return nil, err
+	}
 
 	// CreateCodeComment() is used for:
 	// - Single comments
@@ -234,6 +250,10 @@ func CreateCodeCommentKnownReviewID(ctx context.Context, doer *user_model.User, 
 	issue *issues_model.Issue, content, treePath, beforeCommitID, afterCommitID string,
 	line, extraLinesCount, reviewID int64, attachments []string,
 ) (*issues_model.Comment, error) {
+	if err := checkCanReview(ctx, doer, issue); err != nil {
+		return nil, err
+	}
+
 	var commitID, blamedCommitID, patch string
 	blamedLine := line
 	if err := issue.LoadPullRequest(ctx); err != nil {
@@ -394,6 +414,10 @@ func CreateCodeCommentKnownReviewID(ctx context.Context, doer *user_model.User, 
 
 // SubmitReview creates a review out of the existing pending review or creates a new one if no pending review exist
 func SubmitReview(ctx context.Context, doer *user_model.User, gitRepo *git.Repository, issue *issues_model.Issue, reviewType issues_model.ReviewType, content, commitID string, attachmentUUIDs []string) (*issues_model.Review, *issues_model.Comment, error) {
+	if err := checkCanReview(ctx, doer, issue); err != nil {
+		return nil, nil, err
+	}
+
 	if err := issue.LoadPullRequest(ctx); err != nil {
 		return nil, nil, err
 	}

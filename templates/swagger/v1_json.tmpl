@@ -25395,6 +25395,11 @@
           "type": "boolean",
           "x-go-name": "BlockOnRejectedReviews"
         },
+        "block_on_unresolved_conversations": {
+          "description": "Block merging while code review conversations are unresolved, optionally not counting outdated ones.",
+          "type": "boolean",
+          "x-go-name": "BlockOnUnresolvedConversations"
+        },
         "branch_name": {
           "type": "string",
           "x-deprecated": true,
@@ -25474,6 +25479,10 @@
             "type": "string"
           },
           "x-go-name": "ForcePushAllowlistUsernames"
+        },
+        "ignore_outdated_conversations": {
+          "type": "boolean",
+          "x-go-name": "IgnoreOutdatedConversations"
         },
         "ignore_stale_approvals": {
           "type": "boolean",
@@ -26224,6 +26233,11 @@
           "type": "boolean",
           "x-go-name": "BlockOnRejectedReviews"
         },
+        "block_on_unresolved_conversations": {
+          "description": "Block merging while code review conversations are unresolved, optionally not counting outdated ones.",
+          "type": "boolean",
+          "x-go-name": "BlockOnUnresolvedConversations"
+        },
         "branch_name": {
           "type": "string",
           "x-deprecated": true,
@@ -26298,6 +26312,10 @@
             "type": "string"
           },
           "x-go-name": "ForcePushAllowlistUsernames"
+        },
+        "ignore_outdated_conversations": {
+          "type": "boolean",
+          "x-go-name": "IgnoreOutdatedConversations"
         },
         "ignore_stale_approvals": {
           "type": "boolean",
@@ -27748,6 +27766,11 @@
           "type": "boolean",
           "x-go-name": "BlockOnRejectedReviews"
         },
+        "block_on_unresolved_conversations": {
+          "description": "Block merging while code review conversations are unresolved, optionally not counting outdated ones.",
+          "type": "boolean",
+          "x-go-name": "BlockOnUnresolvedConversations"
+        },
         "delete_allowlist_deploy_key_ids": {
           "type": "array",
           "items": {
@@ -27817,6 +27840,10 @@
             "type": "string"
           },
           "x-go-name": "ForcePushAllowlistUsernames"
+        },
+        "ignore_outdated_conversations": {
+          "type": "boolean",
+          "x-go-name": "IgnoreOutdatedConversations"
         },
         "ignore_stale_approvals": {
           "type": "boolean",
@@ -30938,6 +30965,14 @@
         "mergeable": {
           "type": "boolean",
           "x-go-name": "Mergeable"
+        },
+        "mergeable_reasons": {
+          "description": "Branch protection checks that block merging, e.g. \"unresolved_conversations\".\nOnly reported when getting a single pull request.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "MergeableReasons"
         },
         "merged": {
           "type": "boolean",

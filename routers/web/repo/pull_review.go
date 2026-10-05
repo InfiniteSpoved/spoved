@@ -12,12 +12,14 @@ import (
 	issues_model "forgejo.org/models/issues"
 	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
+	"forgejo.org/services/automerge"
 	"forgejo.org/services/context"
 	"forgejo.org/services/context/upload"
 	"forgejo.org/services/forms"
@@ -144,7 +146,10 @@ func CreateCodeComment(ctx *context.Context) {
 		form.LatestCommitID,
 		attachments,
 	)
-	if err != nil {
+	if errors.Is(err, user_model.ErrBlockedByUser) {
+		ctx.Error(http.StatusForbidden)
+		return
+	} else if err != nil {
 		ctx.ServerError("CreateCodeComment", err)
 		return
 	}
@@ -188,8 +193,20 @@ func UpdateResolveConversation(ctx *context.Context) {
 		return
 	}
 	if !permResult {
-		ctx.Error(http.StatusForbidden)
-		return
+		// The author of a conversation may mark it too, unless they can no longer comment on the pull request.
+		conversation, err := issues_model.FetchCodeConversation(ctx, comment, ctx.Doer)
+		if err != nil {
+			ctx.ServerError("FetchCodeConversation", err)
+			return
+		}
+		if len(conversation) == 0 || conversation[0].PosterID != ctx.Doer.ID ||
+			user_model.IsBlockedMultiple(ctx, []int64{comment.Issue.PosterID, ctx.Repo.Repository.OwnerID}, ctx.Doer.ID) ||
+			(comment.Issue.IsLocked && !ctx.Repo.CanWriteIssuesOrPulls(true)) {
+			ctx.Error(http.StatusForbidden)
+			return
+		}
+		conversation[0].Issue = comment.Issue
+		comment = conversation[0]
 	}
 
 	if !comment.Issue.IsPull {
@@ -202,6 +219,14 @@ func UpdateResolveConversation(ctx *context.Context) {
 		if err != nil {
 			ctx.ServerError("MarkConversation", err)
 			return
+		}
+		if action == "Resolve" {
+			// an unresolved conversation could have blocked a pending auto merge
+			if err := comment.Issue.LoadPullRequest(ctx); err != nil {
+				ctx.ServerError("LoadPullRequest", err)
+				return
+			}
+			automerge.StartPRCheckAndAutoMerge(ctx, comment.Issue.PullRequest)
 		}
 	} else {
 		ctx.Error(http.StatusBadRequest)
@@ -357,6 +382,7 @@ func ApplySuggestion(ctx *context.Context) {
 			log.Error("ApplySuggestion: resolve conversation for comment %d: %v", comment.ID, err)
 		}
 	}
+	automerge.StartPRCheckAndAutoMerge(ctx, pr)
 
 	ctx.JSONOK()
 }
@@ -424,6 +450,8 @@ func SubmitReview(ctx *context.Context) {
 		if issues_model.IsContentEmptyErr(err) {
 			ctx.Flash.Error(ctx.Tr("repo.issues.review.content.empty"))
 			ctx.JSONRedirect(fmt.Sprintf("%s/pulls/%d/files", ctx.Repo.RepoLink, issue.Index))
+		} else if errors.Is(err, user_model.ErrBlockedByUser) {
+			ctx.Error(http.StatusForbidden)
 		} else {
 			ctx.ServerError("SubmitReview", err)
 		}

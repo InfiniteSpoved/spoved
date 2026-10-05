@@ -359,7 +359,10 @@ func CreatePullReviewComment(ctx *context.APIContext) {
 		review.ID,
 		nil,
 	)
-	if err != nil {
+	if errors.Is(err, user_model.ErrBlockedByUser) {
+		ctx.Error(http.StatusForbidden, "CreateCodeComment", err)
+		return
+	} else if err != nil {
 		ctx.InternalServerError(err)
 		return
 	}
@@ -540,7 +543,10 @@ func CreatePullReview(ctx *context.APIContext) {
 			pr.MergeBase,
 			opts.CommitID,
 			nil,
-		); err != nil {
+		); errors.Is(err, user_model.ErrBlockedByUser) {
+			ctx.Error(http.StatusForbidden, "CreateCodeComment", err)
+			return
+		} else if err != nil {
 			ctx.Error(http.StatusInternalServerError, "CreateCodeComment", err)
 			return
 		}
@@ -548,7 +554,10 @@ func CreatePullReview(ctx *context.APIContext) {
 
 	// create review and associate all pending review comments
 	review, _, err := pull_service.SubmitReview(ctx, ctx.Doer(), ctx.Repo().GitRepo, pr.Issue, reviewType, opts.Body, opts.CommitID, nil)
-	if err != nil {
+	if errors.Is(err, user_model.ErrBlockedByUser) {
+		ctx.Error(http.StatusForbidden, "SubmitReview", err)
+		return
+	} else if err != nil {
 		ctx.Error(http.StatusInternalServerError, "SubmitReview", err)
 		return
 	}
@@ -636,7 +645,10 @@ func SubmitPullReview(ctx *context.APIContext) {
 
 	// create review and associate all pending review comments
 	review, _, err = pull_service.SubmitReview(ctx, ctx.Doer(), ctx.Repo().GitRepo, pr.Issue, reviewType, opts.Body, headCommitID, nil)
-	if err != nil {
+	if errors.Is(err, user_model.ErrBlockedByUser) {
+		ctx.Error(http.StatusForbidden, "SubmitReview", err)
+		return
+	} else if err != nil {
 		ctx.Error(http.StatusInternalServerError, "SubmitReview", err)
 		return
 	}

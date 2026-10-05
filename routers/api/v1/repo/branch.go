@@ -700,6 +700,8 @@ func CreateBranchProtection(ctx *context.APIContext) {
 		BlockOnOutdatedBranch:         form.BlockOnOutdatedBranch,
 		ApplyToAdmins:                 form.ApplyToAdmins,
 	}
+	protectBranch.BlockOnUnresolvedConversations = form.BlockOnUnresolvedConversations
+	protectBranch.IgnoreOutdatedConversations = form.IgnoreOutdatedConversations
 
 	err = git_model.UpdateProtectBranch(ctx, ctx.Repo().Repository, protectBranch, git_model.WhitelistOptions{
 		UserIDs:          whitelistUsers,
@@ -892,6 +894,14 @@ func EditBranchProtection(ctx *context.APIContext) {
 
 	if form.BlockOnOutdatedBranch != nil {
 		protectBranch.BlockOnOutdatedBranch = *form.BlockOnOutdatedBranch
+	}
+
+	if form.BlockOnUnresolvedConversations != nil {
+		protectBranch.BlockOnUnresolvedConversations = *form.BlockOnUnresolvedConversations
+	}
+
+	if form.IgnoreOutdatedConversations != nil {
+		protectBranch.IgnoreOutdatedConversations = *form.IgnoreOutdatedConversations
 	}
 
 	if form.ApplyToAdmins != nil {

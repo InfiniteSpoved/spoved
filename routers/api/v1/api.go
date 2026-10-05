@@ -1037,7 +1037,7 @@ func Routes() *web.Route {
 						m.Group("/reviews", func() {
 							m.Combo("").
 								Get(repo.ListPullReviews).
-								Post(reqToken(), bind(api.CreatePullReviewOptions{}), repo.CreatePullReview)
+								Post(reqToken(), reqIssueUnlockedOrCanWrite(":index"), bind(api.CreatePullReviewOptions{}), repo.CreatePullReview)
 							m.Group("/{id}", func() {
 								m.Combo("").
 									Get(repo.GetPullReview).
@@ -1046,7 +1046,7 @@ func Routes() *web.Route {
 								m.Group("/comments", func() {
 									m.Combo("").
 										Get(repo.GetPullReviewComments).
-										Post(reqToken(), bind(api.CreatePullReviewCommentOptions{}), repo.CreatePullReviewComment)
+										Post(reqToken(), reqIssueUnlockedOrCanWrite(":index"), bind(api.CreatePullReviewCommentOptions{}), repo.CreatePullReviewComment)
 									m.Group("/{comment}", func() {
 										m.Combo("").
 											Get(repo.GetPullReviewComment).

@@ -1429,5 +1429,13 @@
 	"credential.error.expiry_required": "An expiry date is required.",
 	"credential.error.expiry_in_past": "The expiry date must be in the future.",
 	"credential.error.expiry_too_late": "The expiry date can be at most %d days from today.",
+	"repo.settings.block_on_unresolved_conversations": "Block merge while review conversations are unresolved",
+	"repo.settings.block_on_unresolved_conversations_desc": "Merging will not be possible while a conversation on the code is unresolved. Top-level comments don't count.",
+	"repo.settings.ignore_outdated_conversations": "Ignore outdated conversations",
+	"repo.settings.ignore_outdated_conversations_desc": "Unresolved conversations on code that has since changed do not block merging.",
+	"repo.pulls.blocked_by_unresolved_conversations": {
+		"one": "This pull request has %d unresolved conversation.",
+		"other": "This pull request has %d unresolved conversations."
+	},
 	"meta.last_line": "Thank you for translating Forgejo! This line isn't seen by the users but it serves other purposes in the translation management. You can place a fun fact in the translation instead of translating it."
 }
