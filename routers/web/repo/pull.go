@@ -51,6 +51,7 @@ import (
 	actions_service "forgejo.org/services/actions"
 	asymkey_service "forgejo.org/services/asymkey"
 	"forgejo.org/services/automerge"
+	"forgejo.org/services/branchworkflow"
 	"forgejo.org/services/context"
 	"forgejo.org/services/context/upload"
 	"forgejo.org/services/forms"
@@ -1584,7 +1585,12 @@ func MergePullRequest(ctx *context.Context) {
 
 	log.Trace("Pull request merged: %d", pr.ID)
 
-	if form.DeleteBranchAfterMerge {
+	alwaysDelete, err := branchworkflow.IsAlways(workCtx, ctx.Repo.Repository)
+	if err != nil {
+		ctx.ServerError("IsAlways", err)
+		return
+	}
+	if form.DeleteBranchAfterMerge || alwaysDelete {
 		var headRepo *git.Repository
 		if ctx.Repo != nil && ctx.Repo.Repository != nil && pr.HeadRepoID == ctx.Repo.Repository.ID && ctx.Repo.GitRepo != nil {
 			headRepo = ctx.Repo.GitRepo
@@ -1599,13 +1605,21 @@ func MergePullRequest(ctx *context.Context) {
 		}
 
 		if err := repo_service.DeleteBranchAfterMerge(workCtx, ctx.Doer, pr, headRepo); err != nil {
+			flash := ctx.Flash.Error
+			if !form.DeleteBranchAfterMerge {
+				flash = ctx.Flash.Info // deletion was forced by the setting: a kept branch is not an error
+			}
 			switch {
 			case errors.Is(err, repo_service.ErrBranchIsDefault):
-				ctx.Flash.Error(ctx.Tr("repo.pulls.delete_after_merge.head_branch.is_default"))
+				flash(ctx.Tr("repo.pulls.delete_after_merge.head_branch.is_default"))
 			case errors.Is(err, git_model.ErrBranchIsProtected):
-				ctx.Flash.Error(ctx.Tr("repo.pulls.delete_after_merge.head_branch.is_protected"))
+				flash(ctx.Tr("repo.pulls.delete_after_merge.head_branch.is_protected"))
 			case errors.Is(err, util.ErrPermissionDenied):
-				ctx.Flash.Error(ctx.Tr("repo.pulls.delete_after_merge.head_branch.insufficient_branch"))
+				flash(ctx.Tr("repo.pulls.delete_after_merge.head_branch.insufficient_branch"))
+			case errors.Is(err, repo_service.ErrBranchInUse):
+				flash(ctx.Tr("repo.pulls.delete_after_merge.head_branch.in_use"))
+			case errors.Is(err, repo_service.ErrBranchHasNewCommits):
+				flash(ctx.Tr("repo.pulls.delete_after_merge.head_branch.has_new_commits"))
 			default:
 				ctx.ServerError("DeleteBranchAfterMerge", err)
 				return
@@ -1825,8 +1839,8 @@ func CleanUpPullRequest(ctx *context.Context) {
 
 	pr := issue.PullRequest
 
-	// Don't cleanup unmerged and unclosed PRs
-	if !pr.HasMerged && !issue.IsClosed {
+	// Don't cleanup unmerged and unclosed PRs, nor AGit ones: their head "<user>/<topic>" is not a real branch
+	if (!pr.HasMerged && !issue.IsClosed) || pr.Flow == issues_model.PullRequestFlowAGit {
 		ctx.NotFound("CleanUpPullRequest", nil)
 		return
 	}

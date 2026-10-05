@@ -4218,6 +4218,82 @@
         }
       }
     },
+    "/orgs/{org}/branch-workflow": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Get the branch workflow settings of an organization",
+        "operationId": "orgGetBranchWorkflow",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/OrgBranchWorkflow"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "put": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Change the branch workflow settings of an organization",
+        "operationId": "orgEditBranchWorkflow",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/OrgBranchWorkflow"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/OrgBranchWorkflow"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/orgs/{org}/hooks": {
       "get": {
         "produces": [
@@ -8122,6 +8198,93 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/branch-workflow": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Get the branch workflow settings of a repository, with the effective value and where it comes from",
+        "operationId": "repoGetBranchWorkflow",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/RepoBranchWorkflow"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "put": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Change the branch workflow settings of a repository",
+        "operationId": "repoEditBranchWorkflow",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/EditRepoBranchWorkflowOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/RepoBranchWorkflow"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -28548,6 +28711,21 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "EditRepoBranchWorkflowOption": {
+      "description": "EditRepoBranchWorkflowOption options to change the branch workflow settings of a repository",
+      "type": "object",
+      "required": [
+        "delete_branch_after_merge"
+      ],
+      "properties": {
+        "delete_branch_after_merge": {
+          "description": "DeleteBranchAfterMerge is one of inherit, off, default-on and always",
+          "type": "string",
+          "x-go-name": "DeleteBranchAfterMerge"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "EditRepoOption": {
       "description": "EditRepoOption options when editing a repository's properties",
       "type": "object",
@@ -30713,6 +30891,23 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "OrgBranchWorkflow": {
+      "description": "OrgBranchWorkflow represents the branch workflow settings of an organization, and the body to change them",
+      "type": "object",
+      "properties": {
+        "delete_branch_after_merge": {
+          "description": "DeleteBranchAfterMerge is one of inherit, off, default-on and always",
+          "type": "string",
+          "x-go-name": "DeleteBranchAfterMerge"
+        },
+        "enforce_delete_branch_after_merge": {
+          "description": "EnforceDeleteBranchAfterMerge locks the value for all repositories of the organization",
+          "type": "boolean",
+          "x-go-name": "EnforceDeleteBranchAfterMerge"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "Organization": {
       "description": "Organization represents an organization",
       "type": "object",
@@ -32123,6 +32318,38 @@
             "type": "string"
           },
           "x-go-name": "Flags"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "RepoBranchWorkflow": {
+      "description": "RepoBranchWorkflow represents the branch workflow settings of a repository",
+      "type": "object",
+      "properties": {
+        "delete_branch_after_merge": {
+          "description": "DeleteBranchAfterMerge is the repository's own value: inherit, off, default-on or always",
+          "type": "string",
+          "x-go-name": "DeleteBranchAfterMerge"
+        },
+        "effective_delete_branch_after_merge": {
+          "description": "EffectiveDeleteBranchAfterMerge is the value that applies: off, default-on or always",
+          "type": "string",
+          "x-go-name": "EffectiveDeleteBranchAfterMerge"
+        },
+        "locked": {
+          "description": "Locked is true when the organization enforces the value",
+          "type": "boolean",
+          "x-go-name": "Locked"
+        },
+        "locked_by": {
+          "description": "LockedBy is the organization that enforces the value",
+          "type": "string",
+          "x-go-name": "LockedBy"
+        },
+        "source": {
+          "description": "Source tells where the effective value comes from: instance, org or repo",
+          "type": "string",
+          "x-go-name": "Source"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -34611,6 +34838,12 @@
         }
       }
     },
+    "OrgBranchWorkflow": {
+      "description": "OrgBranchWorkflow",
+      "schema": {
+        "$ref": "#/definitions/OrgBranchWorkflow"
+      }
+    },
     "Organization": {
       "description": "Organization",
       "schema": {
@@ -34943,6 +35176,12 @@
           "format": "int64",
           "description": "The total number of releases"
         }
+      }
+    },
+    "RepoBranchWorkflow": {
+      "description": "RepoBranchWorkflow",
+      "schema": {
+        "$ref": "#/definitions/RepoBranchWorkflow"
       }
     },
     "RepoCollaboratorPermission": {

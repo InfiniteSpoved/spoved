@@ -568,3 +568,10 @@ type swaggerActionArtifact struct {
 	// in:body
 	Body api.ActionArtifact `json:"body"`
 }
+
+// RepoBranchWorkflow
+// swagger:response RepoBranchWorkflow
+type swaggerResponseRepoBranchWorkflow struct {
+	// in:body
+	Body api.RepoBranchWorkflow `json:"body"`
+}

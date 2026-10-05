@@ -14,6 +14,13 @@ type swaggerResponseOrganization struct {
 	Body api.Organization `json:"body"`
 }
 
+// OrgBranchWorkflow
+// swagger:response OrgBranchWorkflow
+type swaggerResponseOrgBranchWorkflow struct {
+	// in:body
+	Body api.OrgBranchWorkflow `json:"body"`
+}
+
 // OrganizationList
 // swagger:response OrganizationList
 type swaggerResponseOrganizationList struct {

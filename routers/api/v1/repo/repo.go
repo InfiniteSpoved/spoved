@@ -34,6 +34,7 @@ import (
 	"forgejo.org/routers/api/v1/utils"
 	actions_service "forgejo.org/services/actions"
 	"forgejo.org/services/auth"
+	"forgejo.org/services/branchworkflow"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 	"forgejo.org/services/issue"
@@ -676,6 +677,19 @@ func Edit(ctx *context.APIContext) {
 
 	opts := *web.GetForm(ctx).(*api.EditRepoOption)
 
+	// refuse before anything is saved
+	if opts.DefaultDeleteBranchAfterMerge != nil {
+		eff, err := branchworkflow.GetEffective(ctx, ctx.Repo().Repository)
+		if err != nil {
+			ctx.Error(http.StatusInternalServerError, "GetEffective", err)
+			return
+		}
+		if eff.Locked && *opts.DefaultDeleteBranchAfterMerge != (eff.Mode >= repo_model.DeleteBranchDefaultOn) {
+			ctx.Error(http.StatusForbidden, "DefaultDeleteBranchAfterMerge", "enforced by the organization")
+			return
+		}
+	}
+
 	if err := updateBasicProperties(ctx, opts); err != nil {
 		return
 	}
@@ -1043,7 +1057,18 @@ func updateRepoUnits(ctx *context.APIContext, owner string, repo *repo_model.Rep
 				config.AllowRebaseUpdate = *opts.AllowRebaseUpdate
 			}
 			if opts.DefaultDeleteBranchAfterMerge != nil {
-				config.DefaultDeleteBranchAfterMerge = *opts.DefaultDeleteBranchAfterMerge
+				// the legacy field maps to Off/Default on; an unchanged value keeps e.g. Always or an inherited value
+				eff, err := branchworkflow.GetEffective(ctx, repo)
+				if err != nil {
+					ctx.Error(http.StatusInternalServerError, "GetEffective", err)
+					return err
+				}
+				if *opts.DefaultDeleteBranchAfterMerge != (eff.Mode >= repo_model.DeleteBranchDefaultOn) {
+					config.DeleteBranchAfterMerge, config.DefaultDeleteBranchAfterMerge = repo_model.DeleteBranchOff, false
+					if *opts.DefaultDeleteBranchAfterMerge {
+						config.DeleteBranchAfterMerge = repo_model.DeleteBranchDefaultOn
+					}
+				}
 			}
 			if opts.DefaultMergeStyle != nil {
 				config.DefaultMergeStyle = repo_model.MergeStyle(*opts.DefaultMergeStyle)
