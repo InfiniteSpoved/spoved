@@ -7,10 +7,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
+	"forgejo.org/models"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	issues_model "forgejo.org/models/issues"
+	org_model "forgejo.org/models/organization"
+	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	unit_model "forgejo.org/models/unit"
@@ -19,8 +24,11 @@ import (
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/services/forms"
 	repo_service "forgejo.org/services/repository"
+	files_service "forgejo.org/services/repository/files"
 	"forgejo.org/tests"
+	"forgejo.org/tests/forgery"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1271,6 +1279,54 @@ func TestAPIRepoCommitPull(t *testing.T) {
 
 	req = NewRequest(t, "GET", "/api/v1/repos/user2/repo1/commits/not-a-commit/pull")
 	MakeRequest(t, req, http.StatusNotFound)
+}
+
+func TestAPIRepoCommitPullPermissions(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, _ *url.URL) {
+		owner := forgery.CreateUser(t, nil)
+		org := forgery.CreateOrganisation(t, owner)
+		repo := forgery.CreateRepository(t, org.AsUser(), &forgery.CreateRepositoryOptions{Files: forgery.FilesInit{}, IsPrivate: true})
+		ctx := NewAPITestContext(t, owner.Name, repo.Name, auth_model.AccessTokenScopeWriteRepository)
+
+		_, err := files_service.ChangeRepoFiles(t.Context(), repo, owner, &files_service.ChangeRepoFilesOptions{
+			Files:     []*files_service.ChangeRepoFile{{Operation: "create", TreePath: "b1.txt", ContentReader: strings.NewReader("b1")}},
+			OldBranch: "main",
+			NewBranch: "b1",
+		})
+		require.NoError(t, err)
+		apiPR, err := doAPICreatePullRequest(ctx, org.Name, repo.Name, "main", "b1")(t)
+		require.NoError(t, err)
+		doAPIMergePullRequestForm(t, ctx, org.Name, repo.Name, apiPR.Index, &forms.MergePullRequestForm{Do: string(repo_model.MergeStyleMerge)})
+		pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: apiPR.ID})
+		link := fmt.Sprintf("/api/v1/repos/%s/%s/commits/%s/pull", org.Name, repo.Name, pr.MergedCommitID)
+
+		withUnits := func(units map[unit_model.Type]perm.AccessMode) string {
+			user := forgery.CreateUser(t, nil)
+			team := forgery.CreateTeam(t, org, &forgery.CreateTeamOptions{Mode: perm.AccessModeRead, Members: []*user_model.User{user}})
+			require.NoError(t, models.AddRepository(t.Context(), team, repo))
+			for tp, mode := range units {
+				_, err := db.GetEngine(t.Context()).Where("team_id = ? AND `type` = ?", team.ID, tp).Cols("access_mode").Update(&org_model.TeamUnit{AccessMode: mode})
+				require.NoError(t, err)
+			}
+			return getUserToken(t, user.Name, auth_model.AccessTokenScopeReadRepository)
+		}
+		get := func(token string, status int) {
+			resp := MakeRequest(t, NewRequest(t, "GET", link).AddTokenAuth(token), status)
+			if status == http.StatusOK {
+				var got api.PullRequest
+				DecodeJSON(t, resp, &got)
+				assert.Equal(t, apiPR.Index, got.Index)
+			}
+		}
+
+		get(ctx.Token, http.StatusOK)
+		get(withUnits(nil), http.StatusOK)
+		get(withUnits(map[unit_model.Type]perm.AccessMode{unit_model.TypePullRequests: perm.AccessModeNone}), http.StatusNotFound)
+		get(withUnits(map[unit_model.Type]perm.AccessMode{unit_model.TypeCode: perm.AccessModeNone}), http.StatusForbidden)
+
+		forgery.DisableRepoUnits(t, repo, unit_model.TypePullRequests)
+		get(ctx.Token, http.StatusNotFound)
+	})
 }
 
 func TestAPIListOwnRepoSorting(t *testing.T) {
