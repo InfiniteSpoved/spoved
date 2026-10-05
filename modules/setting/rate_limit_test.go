@@ -17,6 +17,7 @@ func TestLoadRateLimit(t *testing.T) {
 	loadRateLimitFrom(cfg)
 	assert.False(t, RateLimit.Enabled)
 	assert.True(t, RateLimit.ExemptCIDRs.IsEmpty())
+	assert.False(t, RateLimit.ExemptAdmins)
 	assert.Equal(t, RateLimitClass{60, 600, 5, 50}, RateLimit.Classes["api"])
 	assert.Equal(t, RateLimitClass{10, 100, 0, 0}, RateLimit.Classes["api_write"])
 	assert.Equal(t, RateLimitClass{0.0167, 10, 0, 0}, RateLimit.Classes["auth"])
@@ -25,6 +26,7 @@ func TestLoadRateLimit(t *testing.T) {
 [rate_limit]
 ENABLED = true
 EXEMPT_CIDRS = 10.0.0.0/8, 192.0.2.1
+EXEMPT_ADMINS = true
 [rate_limit.git]
 AUTHENTICATED_RATE = 0.5
 ANONYMOUS_BURST = 3
@@ -37,6 +39,7 @@ BURST = 4
 	require.NoError(t, err)
 	loadRateLimitFrom(cfg)
 	assert.True(t, RateLimit.Enabled)
+	assert.True(t, RateLimit.ExemptAdmins)
 	assert.True(t, RateLimit.ExemptCIDRs.MatchIPAddr(net.ParseIP("10.1.2.3")))
 	assert.True(t, RateLimit.ExemptCIDRs.MatchIPAddr(net.ParseIP("192.0.2.1")))
 	assert.False(t, RateLimit.ExemptCIDRs.MatchIPAddr(net.ParseIP("192.0.2.2")))
