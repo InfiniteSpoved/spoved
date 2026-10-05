@@ -209,3 +209,12 @@ func TestDeleteOrphanedProtectedBranches(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, n)
 }
+
+// must-fix 10: each rule checks the changed files against its own protected file patterns.
+func TestChangedProtectedFiles(t *testing.T) {
+	files := []string{"a.txt", "docs/b.md"}
+	assert.Equal(t, []string{"docs/b.md"}, (&ProtectedBranch{ProtectedFilePatterns: "docs/*.md"}).ChangedProtectedFiles(files))
+	assert.Empty(t, (&ProtectedBranch{ProtectedFilePatterns: "c.txt"}).ChangedProtectedFiles(files))
+	assert.Empty(t, (&ProtectedBranch{}).ChangedProtectedFiles(files))
+	assert.True(t, (&ProtectedBranch{ProtectedFilePatterns: "docs/*.md"}).MergeBlockedByProtectedFiles([]string{"docs/b.md"}))
+}

@@ -922,7 +922,7 @@ func ApplyEditBranchProtectionOption(ctx *context.APIContext, owner *user_model.
 			}
 		}
 	}
-	setIfNotNil := func(dst *bool, src *bool) {
+	setIfNotNil := func(dst, src *bool) {
 		if src != nil {
 			*dst = *src
 		}

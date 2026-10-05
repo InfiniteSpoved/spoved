@@ -4294,6 +4294,207 @@
         }
       }
     },
+    "/orgs/{org}/branch_protections": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "List the branch protection rules of an organization",
+        "operationId": "orgListBranchProtection",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/OrgBranchProtectionList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Create a branch protection rule of an organization. It applies to the repositories of the organization in addition to their own rules.",
+        "operationId": "orgCreateBranchProtection",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/CreateOrgBranchProtectionOption"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "$ref": "#/responses/OrgBranchProtection"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/branch_protections/{name}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Get a branch protection rule of an organization",
+        "operationId": "orgGetBranchProtection",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the rule",
+            "name": "name",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/OrgBranchProtection"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "delete": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Delete a branch protection rule of an organization",
+        "operationId": "orgDeleteBranchProtection",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the rule",
+            "name": "name",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "patch": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Edit a branch protection rule of an organization. Only fields that are set will be changed",
+        "operationId": "orgEditBranchProtection",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the rule",
+            "name": "name",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/EditOrgBranchProtectionOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/OrgBranchProtection"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/orgs/{org}/hooks": {
       "get": {
         "produces": [
@@ -27295,6 +27496,225 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "CreateOrgBranchProtectionOption": {
+      "description": "Deploy keys are not supported.",
+      "type": "object",
+      "title": "CreateOrgBranchProtectionOption options for creating a branch protection rule of an organization.",
+      "properties": {
+        "apply_to_admins": {
+          "type": "boolean",
+          "x-go-name": "ApplyToAdmins"
+        },
+        "apply_to_selected_repos": {
+          "type": "boolean",
+          "x-go-name": "ApplyToSelectedRepos"
+        },
+        "approval_rules": {
+          "description": "ApprovalRules are the named approval requirements. On edit, null keeps them and an empty list removes them. At most 20.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ApprovalRule"
+          },
+          "x-go-name": "ApprovalRules"
+        },
+        "approvals_whitelist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ApprovalsWhitelistTeams"
+        },
+        "approvals_whitelist_username": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ApprovalsWhitelistUsernames"
+        },
+        "block_on_incomplete_tasks": {
+          "description": "Block merging while tasks of the pull request are open.",
+          "type": "boolean",
+          "x-go-name": "BlockOnIncompleteTasks"
+        },
+        "block_on_official_review_requests": {
+          "type": "boolean",
+          "x-go-name": "BlockOnOfficialReviewRequests"
+        },
+        "block_on_outdated_branch": {
+          "type": "boolean",
+          "x-go-name": "BlockOnOutdatedBranch"
+        },
+        "block_on_rejected_reviews": {
+          "type": "boolean",
+          "x-go-name": "BlockOnRejectedReviews"
+        },
+        "block_on_unresolved_conversations": {
+          "description": "Block merging while code review conversations are unresolved, optionally not counting outdated ones.",
+          "type": "boolean",
+          "x-go-name": "BlockOnUnresolvedConversations"
+        },
+        "branch_name": {
+          "type": "string",
+          "x-deprecated": true,
+          "x-go-name": "BranchName"
+        },
+        "delete_allowlist_deploy_key_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "DeleteAllowlistDeployKeyIDs"
+        },
+        "delete_allowlist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "DeleteAllowlistTeams"
+        },
+        "delete_allowlist_usernames": {
+          "description": "Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.\nThe default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "DeleteAllowlistUsernames"
+        },
+        "dismiss_stale_approvals": {
+          "type": "boolean",
+          "x-go-name": "DismissStaleApprovals"
+        },
+        "enable_approvals_whitelist": {
+          "type": "boolean",
+          "x-go-name": "EnableApprovalsWhitelist"
+        },
+        "enable_merge_whitelist": {
+          "type": "boolean",
+          "x-go-name": "EnableMergeWhitelist"
+        },
+        "enable_push": {
+          "type": "boolean",
+          "x-go-name": "EnablePush"
+        },
+        "enable_push_whitelist": {
+          "type": "boolean",
+          "x-go-name": "EnablePushWhitelist"
+        },
+        "enable_status_check": {
+          "type": "boolean",
+          "x-go-name": "EnableStatusCheck"
+        },
+        "force_push_allowlist_deploy_key_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "ForcePushAllowlistDeployKeyIDs"
+        },
+        "force_push_allowlist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ForcePushAllowlistTeams"
+        },
+        "force_push_allowlist_usernames": {
+          "description": "Users, teams and deploy keys (public key IDs) allowed to force-push matching branches. Empty lists block everyone.\nA force push must still pass the other checks of the rule. IDs which are not write deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ForcePushAllowlistUsernames"
+        },
+        "ignore_outdated_conversations": {
+          "type": "boolean",
+          "x-go-name": "IgnoreOutdatedConversations"
+        },
+        "ignore_stale_approvals": {
+          "type": "boolean",
+          "x-go-name": "IgnoreStaleApprovals"
+        },
+        "merge_whitelist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "MergeWhitelistTeams"
+        },
+        "merge_whitelist_usernames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "MergeWhitelistUsernames"
+        },
+        "protected_file_patterns": {
+          "type": "string",
+          "x-go-name": "ProtectedFilePatterns"
+        },
+        "push_whitelist_deploy_key_ids": {
+          "description": "Public key IDs (`key_id` of a deploy key) of the deploy keys allowed to push. IDs which are not\nwrite deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "PushWhitelistDeployKeyIDs"
+        },
+        "push_whitelist_deploy_keys": {
+          "type": "boolean",
+          "x-go-name": "PushWhitelistDeployKeys"
+        },
+        "push_whitelist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "PushWhitelistTeams"
+        },
+        "push_whitelist_usernames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "PushWhitelistUsernames"
+        },
+        "repos": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Repos"
+        },
+        "require_signed_commits": {
+          "type": "boolean",
+          "x-go-name": "RequireSignedCommits"
+        },
+        "required_approvals": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "RequiredApprovals"
+        },
+        "rule_name": {
+          "type": "string",
+          "x-go-name": "RuleName"
+        },
+        "status_check_contexts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "StatusCheckContexts"
+        },
+        "unprotected_file_patterns": {
+          "type": "string",
+          "x-go-name": "UnprotectedFilePatterns"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "CreateOrgOption": {
       "description": "CreateOrgOption options for creating an organization",
       "type": "object",
@@ -28632,6 +29052,216 @@
         "title": {
           "type": "string",
           "x-go-name": "Title"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "EditOrgBranchProtectionOption": {
+      "description": "Only fields that are set are changed.",
+      "type": "object",
+      "title": "EditOrgBranchProtectionOption options for editing a branch protection rule of an organization.",
+      "properties": {
+        "apply_to_admins": {
+          "type": "boolean",
+          "x-go-name": "ApplyToAdmins"
+        },
+        "apply_to_selected_repos": {
+          "type": "boolean",
+          "x-go-name": "ApplyToSelectedRepos"
+        },
+        "approval_rules": {
+          "description": "ApprovalRules are the named approval requirements. On edit, null keeps them and an empty list removes them. At most 20.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ApprovalRule"
+          },
+          "x-go-name": "ApprovalRules"
+        },
+        "approvals_whitelist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ApprovalsWhitelistTeams"
+        },
+        "approvals_whitelist_username": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ApprovalsWhitelistUsernames"
+        },
+        "block_on_incomplete_tasks": {
+          "description": "Block merging while tasks of the pull request are open.",
+          "type": "boolean",
+          "x-go-name": "BlockOnIncompleteTasks"
+        },
+        "block_on_official_review_requests": {
+          "type": "boolean",
+          "x-go-name": "BlockOnOfficialReviewRequests"
+        },
+        "block_on_outdated_branch": {
+          "type": "boolean",
+          "x-go-name": "BlockOnOutdatedBranch"
+        },
+        "block_on_rejected_reviews": {
+          "type": "boolean",
+          "x-go-name": "BlockOnRejectedReviews"
+        },
+        "block_on_unresolved_conversations": {
+          "description": "Block merging while code review conversations are unresolved, optionally not counting outdated ones.",
+          "type": "boolean",
+          "x-go-name": "BlockOnUnresolvedConversations"
+        },
+        "delete_allowlist_deploy_key_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "DeleteAllowlistDeployKeyIDs"
+        },
+        "delete_allowlist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "DeleteAllowlistTeams"
+        },
+        "delete_allowlist_usernames": {
+          "description": "Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.\nThe default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "DeleteAllowlistUsernames"
+        },
+        "dismiss_stale_approvals": {
+          "type": "boolean",
+          "x-go-name": "DismissStaleApprovals"
+        },
+        "enable_approvals_whitelist": {
+          "type": "boolean",
+          "x-go-name": "EnableApprovalsWhitelist"
+        },
+        "enable_merge_whitelist": {
+          "type": "boolean",
+          "x-go-name": "EnableMergeWhitelist"
+        },
+        "enable_push": {
+          "type": "boolean",
+          "x-go-name": "EnablePush"
+        },
+        "enable_push_whitelist": {
+          "type": "boolean",
+          "x-go-name": "EnablePushWhitelist"
+        },
+        "enable_status_check": {
+          "type": "boolean",
+          "x-go-name": "EnableStatusCheck"
+        },
+        "force_push_allowlist_deploy_key_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "ForcePushAllowlistDeployKeyIDs"
+        },
+        "force_push_allowlist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ForcePushAllowlistTeams"
+        },
+        "force_push_allowlist_usernames": {
+          "description": "Users, teams and deploy keys (public key IDs) allowed to force-push matching branches. Empty lists block everyone.\nA force push must still pass the other checks of the rule. IDs which are not write deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ForcePushAllowlistUsernames"
+        },
+        "ignore_outdated_conversations": {
+          "type": "boolean",
+          "x-go-name": "IgnoreOutdatedConversations"
+        },
+        "ignore_stale_approvals": {
+          "type": "boolean",
+          "x-go-name": "IgnoreStaleApprovals"
+        },
+        "merge_whitelist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "MergeWhitelistTeams"
+        },
+        "merge_whitelist_usernames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "MergeWhitelistUsernames"
+        },
+        "protected_file_patterns": {
+          "type": "string",
+          "x-go-name": "ProtectedFilePatterns"
+        },
+        "push_whitelist_deploy_key_ids": {
+          "description": "Public key IDs (`key_id` of a deploy key) of the deploy keys allowed to push. IDs which are not\nwrite deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "PushWhitelistDeployKeyIDs"
+        },
+        "push_whitelist_deploy_keys": {
+          "type": "boolean",
+          "x-go-name": "PushWhitelistDeployKeys"
+        },
+        "push_whitelist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "PushWhitelistTeams"
+        },
+        "push_whitelist_usernames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "PushWhitelistUsernames"
+        },
+        "repos": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Repos"
+        },
+        "require_signed_commits": {
+          "type": "boolean",
+          "x-go-name": "RequireSignedCommits"
+        },
+        "required_approvals": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "RequiredApprovals"
+        },
+        "status_check_contexts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "StatusCheckContexts"
+        },
+        "unprotected_file_patterns": {
+          "type": "string",
+          "x-go-name": "UnprotectedFilePatterns"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -30998,6 +31628,236 @@
             "type": "string"
           },
           "x-go-name": "RedirectURIs"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "OrgBranchProtection": {
+      "description": "OrgBranchProtection represents a branch protection rule of an organization. It applies to the\nrepositories of the organization in addition to their own rules.",
+      "type": "object",
+      "properties": {
+        "apply_to_admins": {
+          "type": "boolean",
+          "x-go-name": "ApplyToAdmins"
+        },
+        "apply_to_selected_repos": {
+          "description": "Apply the rule to the repositories in `repos` only, instead of all repositories of the organization",
+          "type": "boolean",
+          "x-go-name": "ApplyToSelectedRepos"
+        },
+        "approval_rules": {
+          "description": "ApprovalRules are the named approval requirements.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ApprovalRule"
+          },
+          "x-go-name": "ApprovalRules"
+        },
+        "approvals_whitelist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ApprovalsWhitelistTeams"
+        },
+        "approvals_whitelist_username": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ApprovalsWhitelistUsernames"
+        },
+        "block_on_incomplete_tasks": {
+          "description": "Block merging while tasks of the pull request are open.",
+          "type": "boolean",
+          "x-go-name": "BlockOnIncompleteTasks"
+        },
+        "block_on_official_review_requests": {
+          "type": "boolean",
+          "x-go-name": "BlockOnOfficialReviewRequests"
+        },
+        "block_on_outdated_branch": {
+          "type": "boolean",
+          "x-go-name": "BlockOnOutdatedBranch"
+        },
+        "block_on_rejected_reviews": {
+          "type": "boolean",
+          "x-go-name": "BlockOnRejectedReviews"
+        },
+        "block_on_unresolved_conversations": {
+          "description": "Block merging while code review conversations are unresolved, optionally not counting outdated ones.",
+          "type": "boolean",
+          "x-go-name": "BlockOnUnresolvedConversations"
+        },
+        "branch_name": {
+          "type": "string",
+          "x-deprecated": true,
+          "x-go-name": "BranchName"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Created"
+        },
+        "delete_allowlist_deploy_key_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "DeleteAllowlistDeployKeyIDs"
+        },
+        "delete_allowlist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "DeleteAllowlistTeams"
+        },
+        "delete_allowlist_usernames": {
+          "description": "Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.\nThe default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "DeleteAllowlistUsernames"
+        },
+        "dismiss_stale_approvals": {
+          "type": "boolean",
+          "x-go-name": "DismissStaleApprovals"
+        },
+        "enable_approvals_whitelist": {
+          "type": "boolean",
+          "x-go-name": "EnableApprovalsWhitelist"
+        },
+        "enable_merge_whitelist": {
+          "type": "boolean",
+          "x-go-name": "EnableMergeWhitelist"
+        },
+        "enable_push": {
+          "type": "boolean",
+          "x-go-name": "EnablePush"
+        },
+        "enable_push_whitelist": {
+          "type": "boolean",
+          "x-go-name": "EnablePushWhitelist"
+        },
+        "enable_status_check": {
+          "type": "boolean",
+          "x-go-name": "EnableStatusCheck"
+        },
+        "force_push_allowlist_deploy_key_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "ForcePushAllowlistDeployKeyIDs"
+        },
+        "force_push_allowlist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ForcePushAllowlistTeams"
+        },
+        "force_push_allowlist_usernames": {
+          "description": "Users, teams and deploy keys (public key IDs) allowed to force-push matching branches. Empty lists block everyone.\nA force push must still pass the other checks of the rule. IDs which are not write deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ForcePushAllowlistUsernames"
+        },
+        "ignore_outdated_conversations": {
+          "type": "boolean",
+          "x-go-name": "IgnoreOutdatedConversations"
+        },
+        "ignore_stale_approvals": {
+          "type": "boolean",
+          "x-go-name": "IgnoreStaleApprovals"
+        },
+        "merge_whitelist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "MergeWhitelistTeams"
+        },
+        "merge_whitelist_usernames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "MergeWhitelistUsernames"
+        },
+        "protected_file_patterns": {
+          "type": "string",
+          "x-go-name": "ProtectedFilePatterns"
+        },
+        "push_whitelist_deploy_key_ids": {
+          "description": "Public key IDs (`key_id` of a deploy key) of the deploy keys allowed to push. IDs which are not\nwrite deploy keys of the repository are ignored.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "PushWhitelistDeployKeyIDs"
+        },
+        "push_whitelist_deploy_keys": {
+          "type": "boolean",
+          "x-go-name": "PushWhitelistDeployKeys"
+        },
+        "push_whitelist_teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "PushWhitelistTeams"
+        },
+        "push_whitelist_usernames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "PushWhitelistUsernames"
+        },
+        "repos": {
+          "description": "Names of the selected repositories",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Repos"
+        },
+        "require_signed_commits": {
+          "type": "boolean",
+          "x-go-name": "RequireSignedCommits"
+        },
+        "required_approvals": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "RequiredApprovals"
+        },
+        "rule_name": {
+          "type": "string",
+          "x-go-name": "RuleName"
+        },
+        "status_check_contexts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "StatusCheckContexts"
+        },
+        "unprotected_file_patterns": {
+          "type": "string",
+          "x-go-name": "UnprotectedFilePatterns"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Updated"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -34983,6 +35843,21 @@
         "type": "array",
         "items": {
           "$ref": "#/definitions/OAuth2Application"
+        }
+      }
+    },
+    "OrgBranchProtection": {
+      "description": "OrgBranchProtection",
+      "schema": {
+        "$ref": "#/definitions/OrgBranchProtection"
+      }
+    },
+    "OrgBranchProtectionList": {
+      "description": "OrgBranchProtectionList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/OrgBranchProtection"
         }
       }
     },

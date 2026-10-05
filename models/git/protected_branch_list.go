@@ -85,7 +85,8 @@ func findProtectedBranchRulesForRepo(ctx context.Context, repoID int64) (Protect
 		builder.Eq{"repo_id": 0},
 		builder.In("org_id", builder.Select("owner_id").From("repository").Where(builder.Eq{"id": repoID})),
 		builder.Eq{"apply_to_selected_repos": false}.Or(
-			builder.In("id", builder.Select("protected_branch_id").From("protected_branch_repo").Where(builder.Eq{"repo_id": repoID}))),
+			builder.In("id", builder.Select("protected_branch_id").From("protected_branch_repo").Where(builder.Eq{"repo_id": repoID})),
+		),
 	))).Asc("created_unix").Find(&rules)
 	if err != nil {
 		return nil, err
