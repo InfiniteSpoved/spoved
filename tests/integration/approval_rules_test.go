@@ -64,6 +64,20 @@ func (e *approvalRulesEnv) base(name string, files ...*api.ChangeFileOperation) 
 	return e.changeFiles(name, "", files...)
 }
 
+// setFile creates or replaces a file on a branch (master may already have a CODEOWNERS the new branch inherits).
+func (e *approvalRulesEnv) setFile(branch, path, content string) *api.FilesResponse {
+	req := NewRequestf(e.t, "GET", "/api/v1/repos/user2/repo1/contents/%s?ref=%s", path, branch).AddTokenAuth(e.owner.Token)
+	resp := e.owner.Session.MakeRequest(e.t, req, NoExpectedStatus)
+	if resp.Code == http.StatusNotFound {
+		return e.changeFiles(branch, "", create(path, content))
+	}
+	var existing api.ContentsResponse
+	DecodeJSON(e.t, resp, &existing)
+	return e.changeFiles(branch, "", &api.ChangeFileOperation{
+		Operation: "update", Path: path, SHA: existing.SHA, ContentBase64: base64.StdEncoding.EncodeToString([]byte(content)),
+	})
+}
+
 func (e *approvalRulesEnv) protect(base string, applyToAdmins bool, rules ...*api.ApprovalRule) {
 	req := NewRequestWithJSON(e.t, "POST", "/api/v1/repos/user2/repo1/branch_protections", &api.CreateBranchProtectionOption{
 		RuleName: base, ApplyToAdmins: applyToAdmins, ApprovalRules: rules,
@@ -221,7 +235,8 @@ func TestApprovalRulesMerge(t *testing.T) {
 		// the CODEOWNERS a PR itself edits doesn't count
 		t.Run("CodeOwnersEditedByPR", func(t *testing.T) {
 			defer tests.PrintCurrentTest(t)()
-			fr := e.base("ar-co-edit", create("CODEOWNERS", "docs/.* @user4\n"))
+			e.base("ar-co-edit")
+			fr := e.setFile("ar-co-edit", "CODEOWNERS", "docs/.* @user4\n")
 			e.protect("ar-co-edit", true, &api.ApprovalRule{Name: "Code owners", RequiredCount: 1, RequireCodeOwners: true})
 			index := e.pr("ar-co-edit", create("docs/a.md", "a"), &api.ChangeFileOperation{
 				Operation: "update", Path: "CODEOWNERS", SHA: fr.Files[0].SHA,
@@ -236,7 +251,8 @@ func TestApprovalRulesMerge(t *testing.T) {
 		// every CODEOWNERS line matching a file must have an approving owner, a catch-all line doesn't cover the rest
 		t.Run("CodeOwnersEveryLine", func(t *testing.T) {
 			defer tests.PrintCurrentTest(t)()
-			e.base("ar-co-lines", create("CODEOWNERS", ".* @user5\nsrc/auth/.* @user4\n"))
+			e.base("ar-co-lines")
+			e.setFile("ar-co-lines", "CODEOWNERS", ".* @user5\nsrc/auth/.* @user4\n")
 			e.protect("ar-co-lines", true, &api.ApprovalRule{Name: "Code owners", RequiredCount: 1, RequireCodeOwners: true})
 			index := e.pr("ar-co-lines", create("src/auth/x.go", "x"))
 			e.approve("user5", index)
