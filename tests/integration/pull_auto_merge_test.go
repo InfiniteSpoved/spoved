@@ -476,6 +476,7 @@ func TestAPIPullScheduledAfter(t *testing.T) {
 		defer timeutil.MockUnset()
 		timeutil.MockSet(now)
 		scheduledAfter := now.Add(time.Hour).Truncate(time.Second)
+		giveUpAfter := now.Add(3 * time.Hour).Truncate(time.Second)
 
 		newPull := func(t *testing.T, branch string) *issues_model.PullRequest {
 			testEditFileToNewBranch(t, session, owner.Name, repo.Name, "main", branch, "README.md", branch)
@@ -501,6 +502,7 @@ func TestAPIPullScheduledAfter(t *testing.T) {
 			Do:                     "merge",
 			MergeWhenChecksSucceed: true,
 			ScheduledAfter:         scheduledAfter.Format(time.RFC3339),
+			GiveUpAfter:            giveUpAfter.Format(time.RFC3339),
 		})
 
 		t.Run("Single", func(t *testing.T) {
@@ -532,6 +534,7 @@ func TestAPIPullScheduledAfter(t *testing.T) {
 			apiPR := getPull(t, scheduled, readerToken, http.StatusOK)
 			require.NotNil(t, apiPR.ScheduledAfter)
 			assert.Equal(t, scheduledAfter.Unix(), apiPR.ScheduledAfter.Unix())
+			require.NotNil(t, apiPR.GiveUpAfter)
 			getPull(t, scheduled, outsiderToken, http.StatusNotFound)
 		})
 
@@ -555,6 +558,7 @@ func TestAPIPullScheduledAfter(t *testing.T) {
 			apiPR := getPull(t, scheduled, apiCtx.Token, http.StatusOK)
 			assert.True(t, apiPR.HasMerged)
 			assert.Nil(t, apiPR.ScheduledAfter)
+			assert.Nil(t, apiPR.GiveUpAfter)
 		})
 	})
 }

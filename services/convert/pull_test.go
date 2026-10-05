@@ -71,6 +71,13 @@ func TestToAPIPullRequestScheduledAfter(t *testing.T) {
 
 	t.Run("Not scheduled", func(t *testing.T) {
 		assert.Nil(t, toAPI(t, 2, user2).ScheduledAfter)
+		assert.Nil(t, toAPI(t, 2, user2).GiveUpAfter)
+	})
+	t.Run("Deadline after the time is cleared", func(t *testing.T) {
+		require.NoError(t, db.Insert(db.DefaultContext, &pull_model.AutoMerge{PullID: 3, DoerID: 2, GiveUpAfterUnix: scheduled}))
+		apiPR := toAPI(t, 3, user2)
+		assert.Nil(t, apiPR.ScheduledAfter)
+		assert.Equal(t, scheduled.AsTimePtr(), apiPR.GiveUpAfter)
 	})
 	t.Run("Scheduled", func(t *testing.T) {
 		schedule(t, 2, scheduled)
@@ -83,6 +90,7 @@ func TestToAPIPullRequestScheduledAfter(t *testing.T) {
 	t.Run("Merged", func(t *testing.T) {
 		schedule(t, 1, scheduled)
 		assert.Nil(t, toAPI(t, 1, user2).ScheduledAfter)
+		assert.Nil(t, toAPI(t, 1, user2).GiveUpAfter)
 	})
 	t.Run("Private repo", func(t *testing.T) {
 		schedule(t, 6, scheduled)
