@@ -92,8 +92,8 @@ func TestSyncDirectoryGroupsLastOwner(t *testing.T) {
 	require.NoError(t, SyncDirectoryGroups(ctx, user, 7, container.SetOf("cn=owners"), mapping, true))
 	assertTeamMember(t, owners, user.ID, org_model.MembershipReasonAddedByUserGroup)
 
-	// removing the last owner is logged and skipped, not an error
+	// the directory wins: the user leaves the group, but stays the last owner of the organization
 	require.NoError(t, SyncDirectoryGroups(ctx, user, 7, nil, mapping, true))
-	unittest.AssertExistsAndLoadBean(t, &org_model.UserGroupUser{GroupID: group.ID, UID: user.ID, LoginSourceID: 7})
-	assertTeamMember(t, owners, user.ID, org_model.MembershipReasonAddedByUserGroup)
+	unittest.AssertNotExistsBean(t, &org_model.UserGroupUser{GroupID: group.ID, UID: user.ID})
+	assertTeamMember(t, owners, user.ID, org_model.MembershipReasonAddedByUser)
 }

@@ -22,8 +22,9 @@ import (
 	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
-	"forgejo.org/services/org"
+	org_service "forgejo.org/services/org"
 	user_service "forgejo.org/services/user"
+	usergroup_service "forgejo.org/services/usergroup"
 )
 
 func listUserOrgs(ctx *context.APIContext, u *user_model.User) {
@@ -268,7 +269,7 @@ func Create(ctx *context.APIContext) {
 		Visibility:                visibility,
 		RepoAdminChangeTeamAccess: form.RepoAdminChangeTeamAccess,
 	}
-	if err := organization.CreateOrganization(ctx, org, ctx.Doer()); err != nil {
+	if err := usergroup_service.CreateOrganization(ctx, org, ctx.Doer()); err != nil {
 		if user_model.IsErrUserAlreadyExist(err) ||
 			db.IsErrNameReserved(err) ||
 			db.IsErrNameCharsNotAllowed(err) ||
@@ -446,7 +447,7 @@ func Delete(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	if err := org.DeleteOrganization(ctx, ctx.Org().Organization, false); err != nil {
+	if err := org_service.DeleteOrganization(ctx, ctx.Org().Organization, false); err != nil {
 		ctx.Error(http.StatusInternalServerError, "DeleteOrganization", err)
 		return
 	}

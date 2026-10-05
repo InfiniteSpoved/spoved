@@ -16,6 +16,7 @@ import (
 	unit_model "forgejo.org/models/unit"
 	"forgejo.org/modules/log"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/api/v1/user"
 	"forgejo.org/routers/api/v1/utils"
@@ -284,6 +285,8 @@ func EditTeam(ctx *context.APIContext) {
 	//     "$ref": "#/responses/Team"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
 
 	form := web.GetForm(ctx).(*api.EditTeamOption)
 	team := ctx.Org().Team
@@ -335,6 +338,10 @@ func EditTeam(ctx *context.APIContext) {
 	}
 
 	if err := models.UpdateTeam(ctx, team, isAuthChanged, isIncludeAllChanged); err != nil {
+		if errors.Is(err, util.ErrInvalidArgument) {
+			ctx.Error(http.StatusUnprocessableEntity, "EditTeam", err)
+			return
+		}
 		ctx.Error(http.StatusInternalServerError, "EditTeam", err)
 		return
 	}
@@ -364,8 +371,14 @@ func DeleteTeam(ctx *context.APIContext) {
 	//     description: team deleted
 	//   "404":
 	//     "$ref": "#/responses/notFound"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
 
 	if err := models.DeleteTeam(ctx, ctx.Org().Team); err != nil {
+		if errors.Is(err, util.ErrInvalidArgument) {
+			ctx.Error(http.StatusUnprocessableEntity, "DeleteTeam", err)
+			return
+		}
 		ctx.Error(http.StatusInternalServerError, "DeleteTeam", err)
 		return
 	}

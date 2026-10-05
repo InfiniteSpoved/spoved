@@ -17,6 +17,7 @@ import (
 	"forgejo.org/modules/web"
 	"forgejo.org/services/context"
 	"forgejo.org/services/forms"
+	usergroup_service "forgejo.org/services/usergroup"
 )
 
 const (
@@ -61,7 +62,7 @@ func CreatePost(ctx *context.Context) {
 		RepoAdminChangeTeamAccess: form.RepoAdminChangeTeamAccess,
 	}
 
-	if err := organization.CreateOrganization(ctx, org, ctx.Doer); err != nil {
+	if err := usergroup_service.CreateOrganization(ctx, org, ctx.Doer); err != nil {
 		ctx.Data["Err_OrgName"] = true
 		switch {
 		case user_model.IsErrUserAlreadyExist(err):

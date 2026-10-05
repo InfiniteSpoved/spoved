@@ -253,6 +253,13 @@ func UpdateTeam(ctx context.Context, t *organization.Team, authChanged, includeA
 	}
 	defer committer.Close()
 
+	// The Owners team is found by its name, so it can't be renamed.
+	if old, err := organization.GetTeamByID(ctx, t.ID); err != nil {
+		return err
+	} else if old.IsOwnerTeam() && old.Name != t.Name {
+		return util.NewInvalidArgumentErrorf("the Owners team cannot be renamed")
+	}
+
 	t.LowerName = strings.ToLower(t.Name)
 	has, err := db.Exist[organization.Team](ctx, builder.Eq{
 		"org_id":     t.OrgID,
@@ -314,6 +321,10 @@ func UpdateTeam(ctx context.Context, t *organization.Team, authChanged, includeA
 // DeleteTeam deletes given team.
 // It's caller's responsibility to assign organization ID.
 func DeleteTeam(ctx context.Context, t *organization.Team) error {
+	if t.IsOwnerTeam() {
+		return util.NewInvalidArgumentErrorf("the Owners team cannot be deleted")
+	}
+
 	ctx, committer, err := db.TxContext(ctx)
 	if err != nil {
 		return err
@@ -469,7 +480,7 @@ func removeTeamMember(ctx context.Context, team *organization.Team, userID int64
 
 	// Check if the user to delete is the last member in owner team.
 	if team.IsOwnerTeam() && team.NumMembers == 1 {
-		return organization.ErrLastOrgOwner{UID: userID}
+		return organization.ErrLastOrgOwner{UID: userID, OrgID: team.OrgID}
 	}
 
 	team.NumMembers--

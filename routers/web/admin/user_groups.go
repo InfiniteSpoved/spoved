@@ -90,8 +90,9 @@ func NewUserGroupPost(ctx *context.Context) {
 		GrantsSiteAdmin:          form.GrantsSiteAdmin,
 		GrantsCreateOrganization: form.GrantsCreateOrganization,
 		GrantsAuditor:            form.GrantsAuditor,
+		GrantsOrgAdmin:           form.GrantsOrgAdmin,
 	}
-	if err := org_model.InsertUserGroup(ctx, group); err != nil {
+	if err := usergroup_service.CreateGroup(ctx, group); err != nil {
 		if org_model.IsErrUserGroupAlreadyExist(err) {
 			ctx.Data["Err_Name"] = true
 			ctx.RenderWithErr(ctx.Tr("admin.user_groups.name_taken"), tplUserGroupNew, form)
@@ -193,6 +194,7 @@ func ViewUserGroup(ctx *context.Context) {
 	ctx.Data["grants_site_admin"] = group.GrantsSiteAdmin
 	ctx.Data["grants_create_organization"] = group.GrantsCreateOrganization
 	ctx.Data["grants_auditor"] = group.GrantsAuditor
+	ctx.Data["grants_org_admin"] = group.GrantsOrgAdmin
 	ctx.HTML(http.StatusOK, tplUserGroupView)
 }
 
@@ -240,6 +242,7 @@ func EditUserGroupPost(ctx *context.Context) {
 	group.GrantsSiteAdmin = form.GrantsSiteAdmin
 	group.GrantsCreateOrganization = form.GrantsCreateOrganization
 	group.GrantsAuditor = form.GrantsAuditor
+	group.GrantsOrgAdmin = form.GrantsOrgAdmin
 	if err := usergroup_service.UpdateGroup(ctx, group); err != nil {
 		switch {
 		case org_model.IsErrUserGroupAlreadyExist(err):
@@ -247,6 +250,9 @@ func EditUserGroupPost(ctx *context.Context) {
 			ctx.RenderWithErr(ctx.Tr("admin.user_groups.name_taken"), tplUserGroupView, form)
 		case models.IsErrDeleteLastAdminUser(err):
 			ctx.Flash.Error(ctx.Tr("auth.last_admin"))
+			ctx.Redirect(userGroupLink(group))
+		case org_model.IsErrLastOrgOwner(err):
+			ctx.Flash.Error(lastOrgOwnerMessage(ctx, err))
 			ctx.Redirect(userGroupLink(group))
 		default:
 			ctx.ServerError("UpdateGroup", err)
@@ -267,7 +273,7 @@ func DeleteUserGroup(ctx *context.Context) {
 
 	if err := usergroup_service.DeleteGroup(ctx, group); err != nil {
 		if org_model.IsErrLastOrgOwner(err) {
-			ctx.Flash.Error(ctx.Tr("admin.user_groups.last_org_owner"))
+			ctx.Flash.Error(lastOrgOwnerMessage(ctx, err))
 			ctx.JSONRedirect(userGroupLink(group))
 			return
 		}
@@ -325,7 +331,7 @@ func RemoveUserGroupMember(ctx *context.Context) {
 
 	if err := usergroup_service.RemoveMember(ctx, group, ctx.FormInt64("uid")); err != nil {
 		if org_model.IsErrLastOrgOwner(err) {
-			ctx.Flash.Error(ctx.Tr("admin.user_groups.last_org_owner"))
+			ctx.Flash.Error(lastOrgOwnerMessage(ctx, err))
 			ctx.Redirect(userGroupLink(group))
 			return
 		}

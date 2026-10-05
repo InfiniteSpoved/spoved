@@ -10,6 +10,7 @@ import (
 
 	"forgejo.org/models/db"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/container"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 
@@ -30,9 +31,13 @@ type UserGroup struct {
 	// GrantsCreateOrganization lets every member of the group create organizations.
 	GrantsCreateOrganization bool `xorm:"NOT NULL DEFAULT false"`
 	// GrantsAuditor gives every member of the group read access to every repository.
-	GrantsAuditor bool               `xorm:"NOT NULL DEFAULT false"`
-	CreatedUnix   timeutil.TimeStamp `xorm:"INDEX created"`
-	UpdatedUnix   timeutil.TimeStamp `xorm:"INDEX updated"`
+	GrantsAuditor bool `xorm:"NOT NULL DEFAULT false"`
+	// GrantsOrgAdmin makes every member of the group an owner of every
+	// organization that is not excluded (see OrgAdminExclusion), through a
+	// managed link to the Owners team. It has no user flag.
+	GrantsOrgAdmin bool               `xorm:"NOT NULL DEFAULT false"`
+	CreatedUnix    timeutil.TimeStamp `xorm:"INDEX created"`
+	UpdatedUnix    timeutil.TimeStamp `xorm:"INDEX updated"`
 
 	NumMembers int `xorm:"-"`
 	NumTeams   int `xorm:"-"`
@@ -53,6 +58,22 @@ type UserGroupTeam struct {
 	GroupID int64 `xorm:"UNIQUE(s) INDEX NOT NULL"`
 	TeamID  int64 `xorm:"UNIQUE(s) INDEX NOT NULL"`
 	OrgID   int64 `xorm:"INDEX NOT NULL"`
+	// Managed tells who created the link: LinkManual, LinkManaged (the
+	// org-admin policy) or LinkManualManaged (a manual link the policy also covers).
+	Managed int `xorm:"NOT NULL DEFAULT 0"`
+}
+
+// Values of UserGroupTeam.Managed.
+const (
+	LinkManual        = 0
+	LinkManaged       = 1
+	LinkManualManaged = 2
+)
+
+// OrgAdminExclusion excludes an organization from the org-admin role of user groups.
+type OrgAdminExclusion struct {
+	ID    int64 `xorm:"pk autoincr"`
+	OrgID int64 `xorm:"UNIQUE NOT NULL"`
 }
 
 // UserGroupRole is an instance-level role a user group can grant to its members.
@@ -86,6 +107,7 @@ func init() {
 	db.RegisterModel(new(UserGroupUser))
 	db.RegisterModel(new(UserGroupTeam))
 	db.RegisterModel(new(UserGroupRoleGrant))
+	db.RegisterModel(new(OrgAdminExclusion))
 }
 
 // ErrUserGroupAlreadyExist represents a "UserGroupAlreadyExist" kind of error.
@@ -167,7 +189,7 @@ func UpdateUserGroup(ctx context.Context, g *UserGroup) error {
 		} else if has {
 			return ErrUserGroupAlreadyExist{Name: g.Name}
 		}
-		_, err = db.GetEngine(ctx).ID(g.ID).Cols("lower_name", "name", "description", "grants_site_admin", "grants_create_organization", "grants_auditor").Update(g)
+		_, err = db.GetEngine(ctx).ID(g.ID).Cols("lower_name", "name", "description", "grants_site_admin", "grants_create_organization", "grants_auditor", "grants_org_admin").Update(g)
 		return err
 	})
 }
@@ -286,8 +308,9 @@ func DeleteUserGroupMember(ctx context.Context, groupID, uid int64) error {
 
 // LinkedTeam is a team a user group is linked to, along with its organization.
 type LinkedTeam struct {
-	Team *Team
-	Org  *Organization
+	Team    *Team
+	Org     *Organization
+	Managed int
 }
 
 // GetUserGroupTeams returns the teams a user group is linked to.
@@ -298,6 +321,14 @@ func GetUserGroupTeams(ctx context.Context, groupID int64) ([]*LinkedTeam, error
 		OrderBy("org_id, lower_name").
 		Find(&teams); err != nil {
 		return nil, err
+	}
+	links := make([]*UserGroupTeam, 0, len(teams))
+	if err := db.GetEngine(ctx).Where("group_id=?", groupID).Find(&links); err != nil {
+		return nil, err
+	}
+	managed := make(map[int64]int, len(links))
+	for _, l := range links {
+		managed[l.TeamID] = l.Managed
 	}
 	orgs := make(map[int64]*Organization)
 	linked := make([]*LinkedTeam, 0, len(teams))
@@ -310,7 +341,7 @@ func GetUserGroupTeams(ctx context.Context, groupID int64) ([]*LinkedTeam, error
 			}
 			orgs[t.OrgID] = org
 		}
-		linked = append(linked, &LinkedTeam{Team: t, Org: org})
+		linked = append(linked, &LinkedTeam{Team: t, Org: org, Managed: managed[t.ID]})
 	}
 	return linked, nil
 }
@@ -412,8 +443,61 @@ func IsUserGroupLinkedToTeam(ctx context.Context, groupID, teamID int64) (bool, 
 }
 
 // InsertUserGroupTeam links a user group to a team. It does not update team memberships.
-func InsertUserGroupTeam(ctx context.Context, groupID int64, team *Team) error {
-	return db.Insert(ctx, &UserGroupTeam{GroupID: groupID, TeamID: team.ID, OrgID: team.OrgID})
+func InsertUserGroupTeam(ctx context.Context, groupID int64, team *Team, managed int) error {
+	return db.Insert(ctx, &UserGroupTeam{GroupID: groupID, TeamID: team.ID, OrgID: team.OrgID, Managed: managed})
+}
+
+// IsTeamUserGroupManaged returns true if a user group link to the team is covered by the org-admin policy.
+func IsTeamUserGroupManaged(ctx context.Context, groupID, teamID int64) (bool, error) {
+	return db.GetEngine(ctx).Where("group_id=? AND team_id=? AND managed>0", groupID, teamID).Exist(new(UserGroupTeam))
+}
+
+// GetTeamManagedUserGroupIDs returns the IDs of the user groups linked to the team that the org-admin policy covers.
+func GetTeamManagedUserGroupIDs(ctx context.Context, teamID int64) (map[int64]bool, error) {
+	ids := make([]int64, 0, 2)
+	if err := db.GetEngine(ctx).Table("user_group_team").Where("team_id=? AND managed>0", teamID).Cols("group_id").Find(&ids); err != nil {
+		return nil, err
+	}
+	managed := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		managed[id] = true
+	}
+	return managed, nil
+}
+
+// IsUserInOrgUserGroupTeam returns true if the user is a member of a user group linked to a team of the organization.
+func IsUserInOrgUserGroupTeam(ctx context.Context, orgID, uid int64) (bool, error) {
+	return db.GetEngine(ctx).Table("user_group_user").
+		Join("INNER", "user_group_team", "user_group_team.group_id = user_group_user.group_id").
+		Where("user_group_team.org_id=?", orgID).And("user_group_user.uid=?", uid).Exist()
+}
+
+// GetOrgAdminGroups returns the user groups that grant the org-admin role.
+func GetOrgAdminGroups(ctx context.Context) ([]*UserGroup, error) {
+	groups := make([]*UserGroup, 0, 2)
+	return groups, db.GetEngine(ctx).Where("grants_org_admin=?", true).OrderBy("lower_name").Find(&groups)
+}
+
+// GetOrgAdminExclusionOrgIDs returns the IDs of the organizations excluded from the org-admin role.
+func GetOrgAdminExclusionOrgIDs(ctx context.Context) (container.Set[int64], error) {
+	ids := make([]int64, 0, 2)
+	if err := db.GetEngine(ctx).Table("org_admin_exclusion").Cols("org_id").Find(&ids); err != nil {
+		return nil, err
+	}
+	return container.SetOf(ids...), nil
+}
+
+// SetOrgAdminExclusions replaces the excluded organizations. It does not update links.
+func SetOrgAdminExclusions(ctx context.Context, orgIDs []int64) error {
+	if _, err := db.GetEngine(ctx).Where("1=1").Delete(new(OrgAdminExclusion)); err != nil {
+		return err
+	}
+	for _, id := range orgIDs {
+		if err := db.Insert(ctx, &OrgAdminExclusion{OrgID: id}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DeleteUserGroupTeam unlinks a user group from a team. It does not update team memberships.

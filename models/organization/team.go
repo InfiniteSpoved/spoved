@@ -138,7 +138,7 @@ func (t *Team) GetUnitsMap() map[string]string {
 
 // IsOwnerTeam returns true if team is owner team.
 func (t *Team) IsOwnerTeam() bool {
-	return t.Name == OwnerTeamName
+	return t.LowerName == strings.ToLower(OwnerTeamName)
 }
 
 // IsMember returns true if given user is a member of team.

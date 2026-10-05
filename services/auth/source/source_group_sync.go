@@ -331,6 +331,12 @@ func syncGroupsToTeamsCached(ctx context.Context, user *user_model.User, loginSo
 					return err
 				}
 			} else if action == syncRemove && isMember {
+				// memberships created by a user group are removed by the group, not by this mapping
+				if membership, err := organization.GetTeamUser(ctx, team.ID, user.ID); err != nil {
+					return err
+				} else if membership != nil && membership.IsMembershipAddedByUserGroup() {
+					continue
+				}
 				if err := models.RemoveTeamMember(ctx, team, user.ID); err != nil {
 					log.Error("group sync: Could not remove user from team: %v", err)
 					return err

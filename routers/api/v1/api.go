@@ -1456,6 +1456,8 @@ func Routes() *web.Route {
 					Patch(bind(api.EditAnnouncementOption{}), admin.EditAnnouncement).
 					Delete(admin.DeleteAnnouncement)
 			})
+			m.Combo("/roles/org-admin/exclusions").Get(admin.ListOrgAdminExclusions).
+				Put(bind(api.SetOrgAdminExclusionsOption{}), admin.SetOrgAdminExclusions)
 			m.Group("/groups", func() {
 				m.Combo("").Get(admin.ListUserGroups).
 					Post(bind(api.CreateUserGroupOption{}), admin.CreateUserGroup)

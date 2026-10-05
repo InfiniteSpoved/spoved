@@ -24,6 +24,9 @@
 				<a class="{{if .PageIsAdminUserGroups}}active {{end}}item" href="{{AppSubUrl}}/admin/groups">
 					{{ctx.Locale.Tr "admin.user_groups"}}
 				</a>
+				<a class="{{if .PageIsAdminOrgAdminRole}}active {{end}}item" href="{{AppSubUrl}}/admin/roles/org-admin">
+					{{ctx.Locale.Tr "admin.roles"}}
+				</a>
 				<a class="{{if .PageIsAdminEmails}}active {{end}}item" href="{{AppSubUrl}}/admin/emails">
 					{{ctx.Locale.Tr "admin.emails"}}
 				</a>

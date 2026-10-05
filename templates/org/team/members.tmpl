@@ -83,10 +83,11 @@
 									<div class="flex-item-title">
 										{{if $.IsAdmin}}<a href="{{AppSubUrl}}/admin/groups/{{.ID}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}
 										<span class="text grey">· {{ctx.Locale.TrPluralString .NumMembers "org.teams.user_groups.num_members" .NumMembers}}</span>
+										{{if index $.ManagedUserGroups .ID}}<span class="ui mini basic label">{{ctx.Locale.Tr "org.teams.user_groups.managed_by_policy"}}</span>{{end}}
 									</div>
 									{{if .Description}}<div class="flex-item-body">{{.Description}}</div>{{end}}
 								</div>
-								{{if $.IsOrganizationOwner}}
+								{{if and $.IsOrganizationOwner (not (index $.ManagedUserGroups .ID))}}
 									<div class="flex-item-trailing">
 										<form action="{{$.OrgLink}}/teams/{{$.Team.LowerName | PathEscape}}/action/group/unlink" method="post">
 											<input type="hidden" name="group_id" value="{{.ID}}">

@@ -111,6 +111,18 @@ func MembersAction(ctx *context.Context) {
 			ctx.Error(http.StatusNotFound)
 			return
 		}
+		// a member of a user group linked to a team of the organization would be added back by the group
+		if uid != ctx.Doer.ID {
+			viaGroup, err := organization.IsUserInOrgUserGroupTeam(ctx, org.ID, uid)
+			if err != nil {
+				ctx.ServerError("IsUserInOrgUserGroupTeam", err)
+				return
+			} else if viaGroup {
+				ctx.Flash.Error(ctx.Tr("org.teams.user_groups.member_via_group"))
+				ctx.JSONRedirect(ctx.Org.OrgLink + "/members")
+				return
+			}
+		}
 		err = models.RemoveOrgUser(ctx, org.ID, uid)
 		if organization.IsErrLastOrgOwner(err) {
 			ctx.Flash.Error(ctx.Tr("form.last_org_owner"))

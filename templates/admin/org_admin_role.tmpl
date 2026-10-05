@@ -1,0 +1,41 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin org-admin-role")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">{{ctx.Locale.Tr "admin.roles.org_admin"}}</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.roles.org_admin.desc"}}</p>
+		</div>
+		<h4 class="ui top attached header">{{ctx.Locale.Tr "admin.roles.org_admin.groups"}}</h4>
+		<div class="ui attached segment">
+			<div class="flex-list">
+				{{range .Groups}}
+					<div class="flex-item">
+						<a href="{{AppSubUrl}}/admin/groups/{{.ID}}">{{.Name}}</a>
+						<span class="text grey">· {{ctx.Locale.TrPluralString .NumMembers "org.teams.user_groups.num_members" .NumMembers}}</span>
+					</div>
+				{{else}}
+					<span class="text grey tw-italic">{{ctx.Locale.Tr "admin.roles.org_admin.no_groups"}}</span>
+				{{end}}
+			</div>
+		</div>
+		<h4 class="ui top attached header">{{ctx.Locale.Tr "admin.roles.org_admin.members"}}</h4>
+		<div class="ui attached segment">
+			<div class="flex-list">
+				{{range .Members}}
+					<div class="flex-item"><a href="{{AppSubUrl}}/admin/users/{{.ID}}">{{.Name}}</a></div>
+				{{else}}
+					<span class="text grey tw-italic">{{ctx.Locale.Tr "admin.roles.org_admin.no_members"}}</span>
+				{{end}}
+			</div>
+		</div>
+		<h4 class="ui top attached header">{{ctx.Locale.Tr "admin.roles.org_admin.exclusions"}}</h4>
+		<div class="ui attached segment">
+			<form class="ui form" action="{{AppSubUrl}}/admin/roles/org-admin/exclusions" method="post">
+				<div class="field">
+					<label for="orgs">{{ctx.Locale.Tr "admin.roles.org_admin.exclusions_help"}}</label>
+					<textarea id="orgs" name="orgs" rows="5" spellcheck="false">{{.Exclusions}}</textarea>
+				</div>
+				<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+			</form>
+		</div>
+	</div>
+{{template "admin/layout_footer" .}}

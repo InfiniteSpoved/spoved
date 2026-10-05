@@ -15,6 +15,7 @@ import (
 	"forgejo.org/routers/api/v1/utils"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
+	usergroup_service "forgejo.org/services/usergroup"
 )
 
 // CreateOrg api for create organization
@@ -62,7 +63,7 @@ func CreateOrg(ctx *context.APIContext) {
 		Visibility:  visibility,
 	}
 
-	if err := organization.CreateOrganization(ctx, org, ctx.User()); err != nil {
+	if err := usergroup_service.CreateOrganization(ctx, org, ctx.User()); err != nil {
 		if user_model.IsErrUserAlreadyExist(err) ||
 			db.IsErrNameReserved(err) ||
 			db.IsErrNameCharsNotAllowed(err) ||
