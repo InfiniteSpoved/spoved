@@ -39,7 +39,7 @@ func ServeArtifact(base *context.Base, artifacts []*actions_model.ActionArtifact
 }
 
 func serveV4Artifact(base *context.Base, art *actions_model.ActionArtifact) error {
-	if setting.Actions.ArtifactStorage.MinioConfig.ServeDirect {
+	if setting.Actions.ArtifactStorage.ServeDirect() {
 		u, err := storage.ActionsArtifacts.URL(art.StoragePath, art.ArtifactPath, nil)
 		if u != nil && err == nil {
 			base.Redirect(u.String())

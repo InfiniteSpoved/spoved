@@ -45,7 +45,7 @@ func cmdMigrateStorage() *cli.Command {
 				Name:    "storage",
 				Aliases: []string{"s"},
 				Value:   "",
-				Usage:   "New storage type: local (default) or minio",
+				Usage:   "New storage type: local (default), minio or azureblob",
 			},
 			&cli.StringFlag{
 				Name:    "path",
@@ -95,6 +95,31 @@ func cmdMigrateStorage() *cli.Command {
 				Name:  "minio-checksum-algorithm",
 				Value: "",
 				Usage: "Minio checksum algorithm (default/md5)",
+			},
+			&cli.StringFlag{
+				Name:  "azureblob-endpoint",
+				Value: "",
+				Usage: "Azure Blob storage endpoint",
+			},
+			&cli.StringFlag{
+				Name:  "azureblob-account-name",
+				Value: "",
+				Usage: "Azure Blob storage account name",
+			},
+			&cli.StringFlag{
+				Name:  "azureblob-account-key",
+				Value: "",
+				Usage: "Azure Blob storage account key (leave blank to use managed identity)",
+			},
+			&cli.StringFlag{
+				Name:  "azureblob-container",
+				Value: "",
+				Usage: "Azure Blob storage container",
+			},
+			&cli.StringFlag{
+				Name:  "azureblob-base-path",
+				Value: "",
+				Usage: "Azure Blob storage base path on the container",
 			},
 		},
 	}
@@ -241,6 +266,19 @@ func runMigrateStorage(stdCtx context.Context, ctx *cli.Command) error {
 					UseSSL:             ctx.Bool("minio-use-ssl"),
 					InsecureSkipVerify: ctx.Bool("minio-insecure-skip-verify"),
 					ChecksumAlgorithm:  ctx.String("minio-checksum-algorithm"),
+				},
+			},
+		)
+	case string(setting.AzureBlobStorageType):
+		dstStorage, err = storage.NewAzureBlobStorage(
+			stdCtx,
+			&setting.Storage{
+				AzureBlobConfig: setting.AzureBlobStorageConfig{
+					Endpoint:    ctx.String("azureblob-endpoint"),
+					AccountName: ctx.String("azureblob-account-name"),
+					AccountKey:  ctx.String("azureblob-account-key"),
+					Container:   ctx.String("azureblob-container"),
+					BasePath:    ctx.String("azureblob-base-path"),
 				},
 			},
 		)
