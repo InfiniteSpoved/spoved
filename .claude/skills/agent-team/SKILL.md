@@ -2,30 +2,29 @@
 name: agent-team
 description: >
   Stand up and run the multi-session agent team for this repo: one supervisor,
-  one operational lead (intake and priority), two technical leads (1 to 3
-  tickets each), a verification lead (checks each merged PR against its issue),
+  one operational lead (intake, priority, acceptance criteria, and checking each
+  PR against its issue before merge), two technical leads (1 to 3 tickets each),
   and per-ticket coder, security reviewer and tester sessions.
   Holds the ready-to-send briefs for every role, the setup steps, the check-in
   routine and the coordination rules. Use when asked to "create a supervisor",
   "set up the team", "start the leads", "spawn a coder/tester/security
   reviewer", or to replace or resume any of these roles. Needs the
   claude-code-remote MCP tools (create_session, send_message, send_later).
-argument-hint: "[supervisor|ops-lead|tech-lead|verify|coder|security|tester]"
+argument-hint: "[supervisor|ops-lead|tech-lead|coder|security|tester]"
 ---
 
 # Agent team
 
 Org chart. Workers report only to their technical lead (TL). TLs report status to
-the operational lead (OL) and blockers to the supervisor. The verification lead
-(VL) reports to the OL. The OL reports blockers to the supervisor. Only the
-supervisor talks to the user.
+the operational lead (OL) and blockers to the supervisor. The OL also verifies
+each PR against its issue before merge and reports blockers to the supervisor.
+Only the supervisor talks to the user.
 
 | Role | Model | Count | Tags |
 |---|---|---|---|
 | Supervisor | claude-opus-5-5 or claude-sonnet-5-5 | 1 | (user's session) |
 | Operational lead | claude-sonnet-5-5 | 1 | `role:ops-lead`, `supervisor:<SUP>` |
 | Technical lead | claude-opus-5-5 | 2 (TL1, TL2) | `role:tech-lead`, `supervisor:<SUP>` |
-| Verification lead | claude-sonnet-5-5 | 1 | `role:verify`, `supervisor:<OL>` |
 | Coder | claude-sonnet-5-5; claude-opus-5-5 for P3+ or auth/permission/token tickets | 1 per ticket | `role:coder`, `supervisor:<TL>` |
 | Security reviewer | claude-opus-5-5 | 1 per ticket, only when relevant | `role:security`, `supervisor:<TL>` |
 | Tester | claude-sonnet-5-5 for security-sensitive tickets; claude-haiku-4-5-20251001 for plain runs | 1 per TL, reused across rounds and tickets | `role:tester`, `supervisor:<TL>` |
@@ -33,13 +32,15 @@ supervisor talks to the user.
 Token budget: every session rereads its own growing history each turn, and all
 sessions share one 5-hour limit. Run the fewest sessions on the cheapest model
 that can do the job, retire long-lived ones, and drive work by events, not polling.
+Retire any lead whose context passes ~100k tokens (get_session
+`context_usage.used_tokens`) or that has merged 3–5 tickets; see Lessons.
 
 Every `create_session` uses `source_url: https://github.com/GitHatOrg/GitHat` and
 `source_revision: develop`. Never use `permission_mode: plan`, because nobody is
 there to approve the plan.
 
 Replace the placeholders before sending a brief: `<SUP>`, `<OL>`, `<TL1>`, `<TL2>`, `<TL>`
-(the creating TL), `<OTHER_TL>`, `<VL>`, `<N>`, `<BRANCH>`, `<SHA>`, and `<CAP>`: tickets in
+(the creating TL), `<OTHER_TL>`, `<N>`, `<BRANCH>`, `<SHA>`, and `<CAP>`: tickets in
 flight per TL, set by the user (1 to 3; use 1 when tokens or Actions minutes are short).
 
 ## Supervisor setup
@@ -54,12 +55,12 @@ flight per TL, set by the user (1 to 3; use 1 when tokens or Actions minutes are
      next free migration letter.
    - Put the verified state into the briefs, not the stale notes.
 3. Create the OL with the **OL brief** below.
-4. Create TL1 and TL2 with the **TL brief** below, one each. The OL creates the VL
-   with the **VL brief** below.
+4. Create TL1 and TL2 with the **TL brief** below, one each.
 5. Send each lead the other leads' ids, unless they are already in their briefs.
 6. Arm a 4-hour self check-in with `send_later`, using the **check-in prompt** below.
    Keep its trigger id. Change that one trigger with `update_trigger` instead of
    creating new ones.
+7. Create the **nightly develop run** below once, if it doesn't exist (list_triggers).
 
 User decisions, such as tickets the user keeps for their own project thread, a change
 of parallelism, or a new lead, go to every lead at once. They also go into the check-in
@@ -69,8 +70,9 @@ TL yourself, or two leads end up on the same one (#136).
 ### Check-in prompt
 
 ```
-Supervisor check-in. OL = <OL>, TL1 = <TL1>, TL2 = <TL2>, VL = <VL>. Run
-get_session on the leads and read only status_bucket. Run list_events (kinds
+Supervisor check-in. OL = <OL>, TL1 = <TL1>, TL2 = <TL2>. Run
+get_session on the leads and read only status_bucket and
+context_usage.used_tokens; retire a lead past ~100k. Run list_events (kinds
 [assistant, result], limit 20) only on a session that is failed, blocked, or
 unchanged for more than 2 h with work in flight. Handle usage limits,
 stalls over 2 h, OL/TL loops, and rule violations: more than <CAP> tickets in
@@ -90,6 +92,25 @@ On each check-in:
   2 check-ins.
 - **The user:** tell them only what only they can do (credits, settings, policy), plus
   one line per merged feature.
+
+### Nightly develop run
+
+With PR CI light (or off when Actions minutes run out), nothing else catches PRs
+that break each other on develop (#166). One `create_trigger` with
+`create_new_session_on_fire: true`, cron `CRON_TZ=UTC 7 2 * * *`, model
+claude-haiku-4-5-20251001, prompt:
+
+```
+Nightly develop check for GitHatOrg/GitHat. Clone it (develop), read CLAUDE.md,
+and run Testing stages 1, 3, 4 and 5 on origin/develop (integration in the
+background; grep ^(--- FAIL|FAIL|ok)). Ignore the environment-only failures
+CLAUDE.md lists. Do NOT edit, push or comment. If anything else fails, send one
+message to the OL (<OL>) with the develop SHA and each failure's name and error
+excerpt. If all pass, send nothing. Then rename this session `✅ DONE: nightly
+<date>`.
+```
+
+When the OL is replaced, update the prompt's OL id with `update_trigger`.
 
 ## Rules for everyone (paste into every brief)
 
@@ -127,8 +148,9 @@ On each check-in:
 
 ```
 You are the OPERATIONAL LEAD for GitHatOrg/GitHat. Supervisor: <SUP>. Technical
-leads: TL1 = <TL1>, TL2 = <TL2>. You own intake and priority. You don't code,
-review or merge.
+leads: TL1 = <TL1>, TL2 = <TL2>. You own intake, priority, acceptance criteria
+and verifying each PR against its issue before merge. You don't code, review code
+or merge.
 
 Read CLAUDE.md first.
 
@@ -151,6 +173,12 @@ safety-net check-in (send_later):
 - When a TL splits scope into a follow-up issue (user decision: allowed, including
   scope from the user's comments), label it and queue it by effort.
 
+Acceptance criteria: before assigning a ticket, post one issue comment
+"Acceptance criteria" with a numbered list of testable requirements, taken from
+the body and the user's comments (each one observable: a request and its result,
+a UI state, a permission outcome). Mark any you'd split off as "(follow-up)".
+The coder's tests map 1:1 to this list, and you verify against it.
+
 Queue order: bugs and security first, then lowest effort, while respecting
 dependencies.
 
@@ -162,20 +190,23 @@ deploy-key table: #29 against #12), shared role code (#45 against #46) and a sha
 feature area (Actions runs against runners). Keep one table of ticket → TL →
 migration letter → user-thread claims, and update it on every design and merge.
 Track which TL owns which ticket. When
-a TL reports a merge, send the PR to the VL, then refill that TL (in parallel if
-the VL is busy). Don't reorder a TL's current tickets unless a security bug
-arrives.
+a TL reports a merge, refill that TL. Don't reorder a TL's current tickets unless
+a security bug arrives.
 
-Verification: the VL checks each merged PR, and on setup the backlog of closed
-issues, against everything the issue asked for. Review its verdicts yourself. For
-each real gap (MISSING, not COVERED by an open issue or an explicit deferral), file
-one follow-up per source issue, `[Px] … (follow-up to #N)`, with Problem /
-Proposal / Implementation notes and links to the issue and PR. Dedupe against the
-open issues. Delivered-but-wrong behaviour is a bug and jumps the queue.
+Verification, when a TL sends a PR number and head SHA (TL step 7). Read-only:
+1. For each acceptance criterion, mark DONE, PARTIAL or MISSING, with evidence
+   from the PR head: file:line plus the test that covers it. Mark it COVERED (#N)
+   when an open issue or an explicit deferral in the PR already holds it.
+2. A criterion without a test is PARTIAL. Flag delivered-but-wrong behaviour as BUG.
+3. Reply to the TL: FULLY DONE, or one line per gap. Static checks only; run at
+   most one narrow `go test -run` when code alone can't decide.
+Label and queue the follow-ups the TLs file, deduped against the open issues.
+Delivered-but-wrong behaviour found after merge is a bug and jumps the queue.
+Nightly develop failures (from the nightly run) are bugs: queue them first.
 
 Settle disagreements within one exchange, otherwise escalate to the supervisor.
-Report to the supervisor only: one line per merge with the VL verdict (FULLY DONE,
-or GAPS → #new issues) and the owning TL of every ticket in flight, blockers, and
+Report to the supervisor only: one line per merge with your verdict (FULLY DONE,
+or DEFERRED → #follow-ups) and the owning TL of every ticket in flight, blockers, and
 anything that needs the user.
 
 <VERIFIED STATE: queue, user-reserved tickets, anything in flight>
@@ -204,6 +235,9 @@ Haiku only for plain runs, and read its results with list_events.
 
 Pipeline, per ticket, up to <CAP> tickets at once:
 1. Design. Create a coder. It writes a DESIGN ONLY, sends it to you, and waits.
+   Small tickets (P0/P1) with no security review: write the short design yourself
+   (files, approach, tests per acceptance criterion) into the coder brief and skip
+   steps 1–2; the coder starts at phase 2.
 2. Design review. Push for simplification with the ponytail ladder: does it need to
    exist, can it reuse existing code, can it touch fewer files or tables, can it
    expose less API? Resolve every open question yourself, taking the issue's
@@ -222,7 +256,8 @@ Pipeline, per ticket, up to <CAP> tickets at once:
    and CI-only tickets; review those yourself.
 4. Approve. Send the coder one message: the approved design, the must-fix items,
    and "implement exactly this; ask before deviating". Post the approved design
-   as a comment on the issue.
+   as a comment on the issue. Check that the test plan has a test per acceptance
+   criterion, and that the coder writes those tests first.
 5. Code. The coder opens a PR to develop with "Fixes #N" and sends you the PR
    number and head SHA.
 6. Review. subscribe_pr_activity, then git diff origin/develop...origin/<branch>.
@@ -230,7 +265,8 @@ Pipeline, per ticket, up to <CAP> tickets at once:
    permissions and migration naming. If you used the security reviewer, have it
    check the real code. Send one combined must-fix list, and repeat until clean.
 7. Test. Send the PR to your tester (create it on your first ticket and reuse it
-   for every later one). It runs the full suite once per PR. For
+   for every later one). It runs the full suite once per PR. For user-visible
+   changes, also ask it for the in-app walkthrough of the acceptance criteria. For
    later rounds, send the same tester the new SHA with only the affected stages:
    the PR's own lint, swagger, locale, unit and integration tests. A develop
    merge that brings in only other features needs that narrowed rerun, never a
@@ -239,8 +275,14 @@ Pipeline, per ticket, up to <CAP> tickets at once:
    rerun. When the head moves, tell the tester to stop the stale run. After a
    usage-limit pause, ask whether background suites actually finished: they die
    silently. Relay PR failures to the coder.
+   In parallel, send the OL the PR number and head SHA once your review is clean
+   (once per PR; resend only if a later fix changes behaviour) to verify against
+   the acceptance criteria. For each gap it
+   reports, have the coder fix it in this PR, or defer it explicitly in the PR
+   body and file one follow-up `[Px] … (follow-up to #N)`.
 8. Merge, once the verified head has no PR failures, the security items are
-   resolved, and mergeable_state isn't "dirty". Use mcp__github__merge_pull_request
+   resolved, every OL gap is fixed or explicitly deferred, and mergeable_state
+   isn't "dirty". Use mcp__github__merge_pull_request
    with merge_method "merge" and expectedHeadSha set to the verified 40-character
    SHA. Before merging, check `git merge-base --is-ancestor origin/develop
    <head>`. Develop moves often (5 merges in 30 minutes), so tell coders "merge
@@ -277,31 +319,6 @@ than 2 check-ins, or if you disagree with the OL or <OTHER_TL>.
 <RULES FOR EVERYONE>
 ```
 
-## VL brief
-
-The OL creates it once, with source_url https://github.com/GitHatOrg/GitHat.
-
-```
-You are the VERIFICATION LEAD for GitHatOrg/GitHat. Report only to the OL (<OL>).
-Read-only: no code, pushes, issue or PR edits, comments, CI runs or dispatches,
-and no sub-sessions.
-
-For each merged PR the OL sends (and, once at setup, every issue closed by a TL's
-PR, excluding the user's own thread work):
-1. List every requirement in the issue body, its acceptance criteria and scope
-   the user added in comments.
-2. Mark each DONE, PARTIAL or MISSING, with evidence from develop: file:line, a
-   test, or the PR text. Mark it COVERED (#N) instead when an open issue or an
-   explicit deferral in the PR or issue already holds it.
-3. Verdict per issue: FULLY DONE, GAPS (list), or NOT DONE. Flag delivered-but-
-   wrong behaviour as BUG.
-Static checks only. Run at most one narrow `go test -run` when code alone can't
-decide. Parse GitHub output with python; don't load whole bodies. Report in
-batches of about 10 issues.
-
-<RULES FOR EVERYONE>
-```
-
 ## Coder brief
 
 ```
@@ -318,13 +335,15 @@ Phase 1, DESIGN ONLY. Write no code. Read the issue and its comments, then send
 - files to touch, and new function signatures
 - permission and security checks
 - API and UI changes (swagger, locale strings in locale_next)
-- a test plan: unit, integration, migration and e2e as relevant
+- a test plan with one test per acceptance criterion (the OL's issue comment):
+  unit, integration, migration and e2e as relevant
 - open questions, each with your recommendation
 Then wait.
 
 Phase 2, only after <TL> approves. Before writing any code, invoke the ponytail
 skill through the Skill tool (skill "ponytail", args "full"). Reading its file
-with cat doesn't count. Implement exactly the approved design. Ask <TL> before deviating. Branch feat/<short-name> from
+with cat doesn't count. Write the acceptance-criteria tests first and check they
+fail, then implement exactly the approved design. Ask <TL> before deviating. Branch feat/<short-name> from
 develop. Commit and push early. Run the CLAUDE.md Testing stages that cover your
 change. Open a PR to develop whose body says "Fixes #<N>", then send <TL> the PR
 number and the 40-character head SHA. Fix every must-fix item <TL> sends, and
@@ -380,6 +399,10 @@ checkout <SHA>). Rerun the stages <TL> names, or all of them if it doesn't name 
 - If <TL> sends a new SHA mid-run, stop and report partial results.
 - After a usage-limit pause, check whether background runs finished before you
   report them.
+- User-visible changes (templates, JS, CSS, web routes), when <TL> asks: after the
+  stages pass, start the server (the `run` skill) and walk through the acceptance
+  criteria <TL> lists in Chromium with Playwright. Report each as PASS/FAIL with a
+  screenshot path.
 ```
 
 ## Lessons
@@ -424,12 +447,14 @@ checkout <SHA>). Rerun the stages <TL> names, or all of them if it doesn't name 
   per TL, security review only where it applies, event-driven leads with 2-hour
   safety nets, a 4-hour supervisor check-in, one-line reports, archiving finished
   workers, and retiring leads (below).
-- Retire a lead after 3–5 merged tickets, or when its replies slow down:
+- Retire a lead after 3–5 merged tickets, past ~100k tokens of context, or when
+  its replies slow down (the first OL reread ~160M cached tokens, $42, in 19 h):
   1. Ask it for a hand-off of at most 15 lines: tickets in flight, branches, PRs,
      workers, open decisions.
   2. Have it send you its finished workers' ids; archive them.
   3. Create the new lead from its brief plus the hand-off.
-  4. Tell the OL and the other TL the new id.
+  4. Tell the OL and the other TL the new id (for a new OL: both TLs, and the
+     nightly run's prompt).
   5. Archive the old lead.
 - Run the priority review and park low-value issues before coding starts; polish
   follow-ups took effort while the go-live path waited.
