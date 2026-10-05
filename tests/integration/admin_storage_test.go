@@ -6,12 +6,16 @@ package integration
 import (
 	"encoding/csv"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/json"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
@@ -153,6 +157,50 @@ func TestAdminStorage(t *testing.T) {
 	t.Run("RepoExportBadUID", func(t *testing.T) {
 		admin.MakeRequest(t, NewRequest(t, "GET", "/admin/repos?format=csv&uid=abc"), http.StatusBadRequest)
 		admin.MakeRequest(t, NewRequest(t, "GET", "/admin/repos?format=json&uid=2%20OR%201=1"), http.StatusBadRequest)
+	})
+
+	t.Run("RepoExportAbort", func(t *testing.T) {
+		if !setting.Database.Type.IsSQLite3() {
+			t.Skip("needs SQLite-specific SQL to force a mid-stream scan error")
+		}
+		// a num_stars that can't be scanned makes the query fail after the rows sorted before it were written
+		_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET num_stars = 'x' WHERE id = 3")
+		require.NoError(t, err)
+		defer func() {
+			_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET num_stars = 0 WHERE id = 3")
+			require.NoError(t, err)
+		}()
+
+		// the CSV writer buffers 4 KiB: pad the names so the first rows reach the client before the error
+		_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET name = name || printf('%0300d', 0)")
+		require.NoError(t, err)
+		defer func() {
+			_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET name = substr(name, 1, length(name) - 300)")
+			require.NoError(t, err)
+		}()
+
+		export := func(format string) *httptest.ResponseRecorder {
+			req := NewRequest(t, "GET", "/admin/repos?sort=gitsize&format="+format).Request
+			req.RemoteAddr = "test-mock:12345"
+			baseURL, err := url.Parse(setting.AppURL)
+			require.NoError(t, err)
+			for _, c := range admin.jar.Cookies(baseURL) {
+				req.AddCookie(c)
+			}
+			recorder := httptest.NewRecorder()
+			assert.PanicsWithValue(t, http.ErrAbortHandler, func() { testWebRoutes.ServeHTTP(recorder, req) })
+			return recorder
+		}
+
+		resp := export("csv")
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.Greater(t, strings.Count(resp.Body.String(), "\n"), 1, "header and at least one row")
+		assert.NotContains(t, resp.Body.String(), "<html")
+
+		resp = export("json")
+		assert.Equal(t, http.StatusOK, resp.Code)
+		assert.True(t, strings.HasPrefix(resp.Body.String(), `[{"repo_id":`))
+		assert.False(t, json.Valid(resp.Body.Bytes()))
 	})
 
 	t.Run("RepoListOwnerFilter", func(t *testing.T) {

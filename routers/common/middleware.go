@@ -31,6 +31,9 @@ func ProtocolMiddlewares() (handlers []any) {
 		return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
 			defer func() {
 				if err := recover(); err != nil {
+					if err == http.ErrAbortHandler {
+						panic(err) // net/http cuts the connection; an error page would end the started body normally
+					}
 					RenderPanicErrorPage(resp, req, err) // it should never panic
 				}
 			}()
