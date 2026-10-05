@@ -1032,6 +1032,7 @@ func Routes() *web.Route {
 						m.Post("/update", reqToken(), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.UpdatePullRequest)
 						m.Get("/commits", repo.GetPullRequestCommits)
 						m.Get("/files", repo.GetPullRequestFiles)
+						m.Get("/approvals", reqRepoReader(unit.TypePullRequests), repo.GetPullRequestApprovals)
 						m.Combo("/merge").Get(repo.IsPullRequestMerged).
 							Post(reqToken(), mustNotBeArchived(), bind(forms.MergePullRequestForm{}), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.MergePullRequest).
 							Delete(reqToken(), mustNotBeArchived(), repo.CancelScheduledAutoMerge)

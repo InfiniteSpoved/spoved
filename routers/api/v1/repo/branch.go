@@ -18,6 +18,7 @@ import (
 	"forgejo.org/modules/optional"
 	repo_module "forgejo.org/modules/repository"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/api/v1/utils"
 	"forgejo.org/services/context"
@@ -679,6 +680,11 @@ func CreateBranchProtection(ctx *context.APIContext) {
 		return
 	}
 
+	approvalRules, ok := approvalRulesFromAPI(ctx, form.ApprovalRules)
+	if !ok {
+		return
+	}
+
 	protectBranch = &git_model.ProtectedBranch{
 		RepoID:                        ctx.Repo().Repository.ID,
 		RuleName:                      ruleName,
@@ -718,8 +724,12 @@ func CreateBranchProtection(ctx *context.APIContext) {
 		ForcePushUserIDs:      forcePushUsers,
 		ForcePushTeamIDs:      forcePushTeams,
 		ForcePushDeployKeyIDs: form.ForcePushAllowlistDeployKeyIDs,
+		ApprovalRules:         approvalRules,
 	})
-	if err != nil {
+	if errors.Is(err, util.ErrInvalidArgument) {
+		ctx.Error(http.StatusUnprocessableEntity, "Invalid approval rule", err)
+		return
+	} else if err != nil {
 		ctx.Error(http.StatusInternalServerError, "UpdateProtectBranch", err)
 		return
 	}
@@ -1018,6 +1028,14 @@ func EditBranchProtection(ctx *context.APIContext) {
 		forcePushDeployKeys = form.ForcePushAllowlistDeployKeyIDs
 	}
 
+	var approvalRules []*git_model.ApprovalRule
+	if form.ApprovalRules != nil {
+		var ok bool
+		if approvalRules, ok = approvalRulesFromAPI(ctx, form.ApprovalRules); !ok {
+			return
+		}
+	}
+
 	err = git_model.UpdateProtectBranch(ctx, ctx.Repo().Repository, protectBranch, git_model.WhitelistOptions{
 		UserIDs:          whitelistUsers,
 		TeamIDs:          whitelistTeams,
@@ -1026,6 +1044,7 @@ func EditBranchProtection(ctx *context.APIContext) {
 		ApprovalsUserIDs: approvalsWhitelistUsers,
 		ApprovalsTeamIDs: approvalsWhitelistTeams,
 		DeployKeyIDs:     whitelistDeployKeys,
+		ApprovalRules:    approvalRules,
 
 		DeleteUserIDs:         deleteUsers,
 		DeleteTeamIDs:         deleteTeams,
@@ -1034,7 +1053,10 @@ func EditBranchProtection(ctx *context.APIContext) {
 		ForcePushTeamIDs:      forcePushTeams,
 		ForcePushDeployKeyIDs: forcePushDeployKeys,
 	})
-	if err != nil {
+	if errors.Is(err, util.ErrInvalidArgument) {
+		ctx.Error(http.StatusUnprocessableEntity, "Invalid approval rule", err)
+		return
+	} else if err != nil {
 		ctx.Error(http.StatusInternalServerError, "UpdateProtectBranch", err)
 		return
 	}
@@ -1169,4 +1191,18 @@ func getAllowlistIDs(ctx *context.APIContext, usernames, teams []string, userIDs
 		}
 	}
 	return userIDs, teamIDs, true
+}
+
+// approvalRulesFromAPI resolves the names of the approval rules. On error it writes the response and returns false.
+func approvalRulesFromAPI(ctx *context.APIContext, rules []*api.ApprovalRule) ([]*git_model.ApprovalRule, bool) {
+	resolved, err := pull_service.ApprovalRulesFromAPI(ctx, ctx.Repo().Repository, rules)
+	switch {
+	case user_model.IsErrUserNotExist(err):
+		ctx.Error(http.StatusUnprocessableEntity, "User does not exist", err)
+	case organization.IsErrTeamNotExist(err), errors.Is(err, util.ErrInvalidArgument):
+		ctx.Error(http.StatusUnprocessableEntity, "Invalid approval rule", err)
+	case err != nil:
+		ctx.Error(http.StatusInternalServerError, "ApprovalRulesFromAPI", err)
+	}
+	return resolved, err == nil
 }

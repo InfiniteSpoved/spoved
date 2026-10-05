@@ -2000,6 +2000,14 @@ func ViewIssue(ctx *context.Context) {
 				ctx.Data["IsBlockedByUnresolvedConversations"] = len(unresolved) > 0
 			}
 			ctx.Data["GrantedApprovals"] = issues_model.GetGrantedApprovalsCount(ctx, pb, pull)
+			// the required approvals of the protection have their own line, a branch without approval rules looks as before
+			if rules, err := pull_service.EvaluateApprovalRules(ctx, pb, pull); err != nil {
+				ctx.ServerError("EvaluateApprovalRules", err)
+				return
+			} else if len(rules) > 0 {
+				ctx.Data["ApprovalRules"] = rules
+				ctx.Data["IsBlockedByApprovalRules"] = slices.ContainsFunc(rules, func(s *pull_service.ApprovalRuleStatus) bool { return !s.Satisfied })
+			}
 			ctx.Data["RequireSigned"] = pb.RequireSignedCommits
 			ctx.Data["ChangedProtectedFiles"] = pull.ChangedProtectedFiles
 			ctx.Data["IsBlockedByChangedProtectedFiles"] = len(pull.ChangedProtectedFiles) != 0

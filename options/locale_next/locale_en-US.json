@@ -1457,5 +1457,18 @@
 		"one": "This pull request has %d unresolved conversation.",
 		"other": "This pull request has %d unresolved conversations."
 	},
+	"repo.settings.approval_rules": "Approval rules",
+	"repo.settings.approval_rules_desc": "Every rule that applies needs its number of approvals from its users or teams, on top of the required approvals above. Separate user names and team names with commas. A rule with path patterns (separated by semicolons; `*` does not match `/`, use `**`) applies only if the pull request changes a matching file. Clear the name of a rule to remove it. At most %d rules.",
+	"repo.settings.approval_rule_name": "Name",
+	"repo.settings.approval_rule_count": "Approvals",
+	"repo.settings.approval_rule_users": "Users",
+	"repo.settings.approval_rule_teams": "Teams",
+	"repo.settings.approval_rule_paths": "Path patterns",
+	"repo.settings.approval_rule_code_owners": "Code owners",
+	"repo.settings.approval_rule_code_owners_no": "Not required",
+	"repo.settings.approval_rule_code_owners_yes": "Every changed file needs a code owner's approval",
+	"repo.settings.approval_rules_invalid": "Invalid approval rule: %s",
+	"repo.pulls.approval_rule_status": "%s: %d/%d",
+	"repo.pulls.approval_rule_uncovered": "(%d changed files are not approved by a code owner)",
 	"meta.last_line": "Thank you for translating Forgejo! This line isn't seen by the users but it serves other purposes in the translation management. You can place a fun fact in the translation instead of translating it."
 }

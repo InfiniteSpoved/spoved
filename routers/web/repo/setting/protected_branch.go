@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,9 +20,12 @@ import (
 	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
 	"forgejo.org/modules/base"
+	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/web/repo"
 	"forgejo.org/services/context"
+	"forgejo.org/services/convert"
 	"forgejo.org/services/forms"
 	pull_service "forgejo.org/services/pull"
 	"forgejo.org/services/repository"
@@ -111,6 +115,17 @@ func SettingsProtectedBranch(c *context.Context) {
 		c.Data["delete_allowlist_teams"] = strings.Join(base.Int64sToStrings(rule.DeleteAllowlistTeamIDs), ",")
 		c.Data["force_push_allowlist_teams"] = strings.Join(base.Int64sToStrings(rule.ForcePushAllowlistTeamIDs), ",")
 	}
+
+	// the existing approval rules, followed by empty rows to add more
+	rows := []*api.ApprovalRule{}
+	if rule.ID != 0 {
+		rows = convert.ToBranchProtection(c, rule, c.Repo.Repository).ApprovalRules
+	}
+	for range min(3, git_model.MaxApprovalRules-len(rows)) {
+		rows = append(rows, &api.ApprovalRule{RequiredCount: 1})
+	}
+	c.Data["ApprovalRules"] = rows
+	c.Data["MaxApprovalRules"] = git_model.MaxApprovalRules
 
 	c.Data["Rule"] = rule
 	c.HTML(http.StatusOK, tplProtectedBranch)
@@ -261,7 +276,15 @@ func SettingsProtectedBranchPost(ctx *context.Context) {
 	protectBranch.IgnoreOutdatedConversations = f.IgnoreOutdatedConversations
 	protectBranch.ApplyToAdmins = f.ApplyToAdmins
 
+	approvalRules, err := approvalRulesFromForm(ctx)
+	if err != nil {
+		ctx.Flash.Error(ctx.Tr("repo.settings.approval_rules_invalid", err.Error()))
+		ctx.Redirect(fmt.Sprintf("%s/settings/branches/edit?rule_name=%s", ctx.Repo.RepoLink, url.QueryEscape(protectBranch.RuleName)))
+		return
+	}
+
 	err = git_model.UpdateProtectBranch(ctx, ctx.Repo.Repository, protectBranch, git_model.WhitelistOptions{
+		ApprovalRules:    approvalRules,
 		UserIDs:          whitelistUsers,
 		TeamIDs:          whitelistTeams,
 		DeployKeyIDs:     whitelistDeployKeys,
@@ -277,7 +300,11 @@ func SettingsProtectedBranchPost(ctx *context.Context) {
 		ForcePushTeamIDs:      parseIDList(f.ForcePushAllowlistTeams),
 		ForcePushDeployKeyIDs: parseIDList(f.ForcePushAllowlistDeployKeyIDs),
 	})
-	if err != nil {
+	if errors.Is(err, util.ErrInvalidArgument) {
+		ctx.Flash.Error(ctx.Tr("repo.settings.approval_rules_invalid", err.Error()))
+		ctx.Redirect(fmt.Sprintf("%s/settings/branches/edit?rule_name=%s", ctx.Repo.RepoLink, url.QueryEscape(protectBranch.RuleName)))
+		return
+	} else if err != nil {
 		ctx.ServerError("UpdateProtectBranch", err)
 		return
 	}
@@ -402,4 +429,43 @@ func parseIDList(s string) []int64 {
 	}
 	ids, _ := base.StringsToInt64s(strings.Split(s, ","))
 	return ids
+}
+
+// approvalRulesFromForm reads the rows approval_rule_* of the form, one value per row. A row without a name is
+// dropped. nil keeps the rules, for a form that has no rows at all.
+func approvalRulesFromForm(ctx *context.Context) ([]*git_model.ApprovalRule, error) {
+	form := ctx.Req.PostForm
+	names, sent := form["approval_rule_name"]
+	if !sent {
+		return nil, nil
+	}
+	field := func(key string, i int) string {
+		if values := form[key]; i < len(values) {
+			return strings.TrimSpace(values[i])
+		}
+		return ""
+	}
+	list := func(value string) (items []string) {
+		for item := range strings.SplitSeq(value, ",") {
+			if item = strings.TrimSpace(item); item != "" {
+				items = append(items, item)
+			}
+		}
+		return items
+	}
+	rules := []*api.ApprovalRule{}
+	for i, name := range names {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		count, _ := strconv.ParseInt(field("approval_rule_count", i), 10, 64)
+		rules = append(rules, &api.ApprovalRule{
+			Name: name, RequiredCount: count,
+			Usernames:         list(field("approval_rule_users", i)),
+			Teams:             list(field("approval_rule_teams", i)),
+			PathPatterns:      field("approval_rule_paths", i),
+			RequireCodeOwners: field("approval_rule_code_owners", i) == "true",
+		})
+	}
+	return pull_service.ApprovalRulesFromAPI(ctx, ctx.Repo.Repository, rules)
 }

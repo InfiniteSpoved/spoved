@@ -1,0 +1,14 @@
+{{if .ApprovalRules}}
+	<div class="item">
+		<ul class="tw-list-none tw-m-0 tw-p-0">
+			{{range .ApprovalRules}}
+				<li class="flex-text-block {{if not .Satisfied}}text red{{end}}">
+					{{if .Satisfied}}{{svg "octicon-check"}}{{else}}{{svg "octicon-x"}}{{end}}
+					{{ctx.Locale.Tr "repo.pulls.approval_rule_status" .Name .Granted .Required}}
+					{{if .UncoveredFiles}}{{ctx.Locale.Tr "repo.pulls.approval_rule_uncovered" .UncoveredFiles}}{{end}}
+					{{if .Approvers}}<span class="text grey">({{range $i, $u := .Approvers}}{{if $i}}, {{end}}{{$u.Name}}{{end}})</span>{{end}}
+				</li>
+			{{end}}
+		</ul>
+	</div>
+{{end}}

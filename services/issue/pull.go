@@ -25,6 +25,37 @@ type ReviewRequestNotifier struct {
 	ReviewTeam *org_model.Team
 }
 
+// LoadCodeOwnerRules reads the CODEOWNERS file of the commit. truncated is true when the file is too big and was only read in part.
+func LoadCodeOwnerRules(ctx context.Context, commit *git.Commit) (rules []*issues_model.CodeOwnerRule, truncated bool, err error) {
+	for _, file := range []string{"CODEOWNERS", "docs/CODEOWNERS", ".gitea/CODEOWNERS", ".forgejo/CODEOWNERS"} {
+		blob, err := commit.GetBlobByPath(file)
+		if git.IsErrNotExist(err) {
+			continue
+		} else if err != nil {
+			return nil, false, err
+		}
+		rc, size, err := blob.NewTruncatedReader(setting.UI.MaxDisplayFileSize)
+		if err != nil {
+			return nil, false, err
+		}
+		truncated = size > setting.UI.MaxDisplayFileSize
+		rules, _ = issues_model.GetCodeOwnersFromReader(ctx, rc, truncated)
+		return rules, truncated, nil
+	}
+	return nil, false, nil
+}
+
+// CodeOwnersOfFile returns the users and teams owning the file, the way PullRequestCodeOwnersReview matches the rules.
+func CodeOwnersOfFile(rules []*issues_model.CodeOwnerRule, file string) (users []*user_model.User, teams []*org_model.Team) {
+	for _, rule := range rules {
+		if rule.Rule.MatchString(file) != rule.Negative {
+			users = append(users, rule.Users...)
+			teams = append(teams, rule.Teams...)
+		}
+	}
+	return users, teams
+}
+
 func PullRequestCodeOwnersReview(ctx context.Context, issue *issues_model.Issue, pr *issues_model.PullRequest) ([]*ReviewRequestNotifier, error) {
 	if pr.IsWorkInProgress(ctx) {
 		return nil, nil
@@ -53,16 +84,7 @@ func PullRequestCodeOwnersReview(ctx context.Context, issue *issues_model.Issue,
 		return nil, err
 	}
 
-	var rules []*issues_model.CodeOwnerRule
-	for _, file := range []string{"CODEOWNERS", "docs/CODEOWNERS", ".gitea/CODEOWNERS", ".forgejo/CODEOWNERS"} {
-		if blob, err := commit.GetBlobByPath(file); err == nil {
-			rc, size, err := blob.NewTruncatedReader(setting.UI.MaxDisplayFileSize)
-			if err == nil {
-				rules, _ = issues_model.GetCodeOwnersFromReader(ctx, rc, size > setting.UI.MaxDisplayFileSize)
-				break
-			}
-		}
-	}
+	rules, _, _ := LoadCodeOwnerRules(ctx, commit)
 
 	mergeBase, err := repo.GetMergeBaseSimple(git.BranchPrefix+pr.BaseBranch, pr.GetGitRefName())
 	if err != nil {

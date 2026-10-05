@@ -390,6 +390,9 @@ type WhitelistOptions struct {
 	ForcePushUserIDs      []int64
 	ForcePushTeamIDs      []int64
 	ForcePushDeployKeyIDs []int64
+
+	// ApprovalRules replace the approval rules, nil keeps them
+	ApprovalRules []*ApprovalRule
 }
 
 // UpdateProtectBranch saves branch protection options of repository.
@@ -468,19 +471,21 @@ func UpdateProtectBranch(ctx context.Context, repo *repo_model.Repository, prote
 		return err
 	}
 
-	// Make sure protectBranch.ID is not 0 for whitelists
-	if protectBranch.ID == 0 {
-		if _, err = db.GetEngine(ctx).Insert(protectBranch); err != nil {
-			return fmt.Errorf("Insert: %v", err)
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		// Make sure protectBranch.ID is not 0 for whitelists
+		if protectBranch.ID == 0 {
+			if _, err = db.GetEngine(ctx).Insert(protectBranch); err != nil {
+				return fmt.Errorf("Insert: %v", err)
+			}
+		} else if _, err = db.GetEngine(ctx).ID(protectBranch.ID).AllCols().Update(protectBranch); err != nil {
+			return fmt.Errorf("Update: %v", err)
 		}
-		return nil
-	}
 
-	if _, err = db.GetEngine(ctx).ID(protectBranch.ID).AllCols().Update(protectBranch); err != nil {
-		return fmt.Errorf("Update: %v", err)
-	}
-
-	return nil
+		if opts.ApprovalRules == nil {
+			return nil
+		}
+		return SetApprovalRules(ctx, repo, protectBranch.ID, opts.ApprovalRules)
+	})
 }
 
 // updateApprovalWhitelist checks whether the user whitelist changed and returns a whitelist with
@@ -610,7 +615,8 @@ func DeleteProtectedBranch(ctx context.Context, repo *repo_model.Repository, id 
 		return fmt.Errorf("delete protected branch ID(%v) failed", id)
 	}
 
-	return nil
+	_, err = db.GetEngine(ctx).Where("protected_branch_id = ?", id).Delete(new(ApprovalRule))
+	return err
 }
 
 // RemoveUserIDFromProtectedBranch remove all user ids from protected branch options

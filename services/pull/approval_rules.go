@@ -1,0 +1,256 @@
+// Copyright 2026 The Forgejo Authors. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package pull
+
+import (
+	"context"
+	"fmt"
+	"slices"
+
+	"forgejo.org/models/db"
+	git_model "forgejo.org/models/git"
+	issues_model "forgejo.org/models/issues"
+	"forgejo.org/models/organization"
+	"forgejo.org/models/perm"
+	access_model "forgejo.org/models/perm/access"
+	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
+	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/git"
+	"forgejo.org/modules/gitrepo"
+	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/util"
+	issue_service "forgejo.org/services/issue"
+)
+
+// ApprovalRuleStatus is the state of one approval rule of a pull request.
+type ApprovalRuleStatus struct {
+	Rule      *git_model.ApprovalRule // nil for the RequiredApprovals of the protected branch rule
+	Name      string
+	Required  int64
+	Granted   int64
+	Approvers []*user_model.User
+	// UncoveredFiles counts changed files with code owners that none of their owners approved (RequireCodeOwners)
+	UncoveredFiles int
+	Satisfied      bool
+}
+
+// Reason says why the rule is not satisfied.
+func (s *ApprovalRuleStatus) Reason() string {
+	if s.Granted < s.Required {
+		return fmt.Sprintf("Approval rule %q needs %d approval(s), has %d", s.Name, s.Required, s.Granted)
+	}
+	return fmt.Sprintf("Approval rule %q: %d changed file(s) are not approved by a code owner", s.Name, s.UncoveredFiles)
+}
+
+// ApprovalRuleStatuses returns the status of the RequiredApprovals of the protected branch rule, if set,
+// followed by the status of its applicable approval rules.
+func ApprovalRuleStatuses(ctx context.Context, pb *git_model.ProtectedBranch, pr *issues_model.PullRequest) ([]*ApprovalRuleStatus, error) {
+	statuses, err := EvaluateApprovalRules(ctx, pb, pr)
+	if err != nil || pb.RequiredApprovals == 0 {
+		return statuses, err
+	}
+	granted := issues_model.GetGrantedApprovalsCount(ctx, pb, pr)
+	def := &ApprovalRuleStatus{Name: "Default", Required: pb.RequiredApprovals, Granted: granted, Satisfied: granted >= pb.RequiredApprovals}
+	return append([]*ApprovalRuleStatus{def}, statuses...), nil
+}
+
+// EvaluateApprovalRules returns the status of every approval rule of the protected branch rule that applies to the pull request.
+// The RequiredApprovals of the protected branch rule are not part of it, HasEnoughApprovals checks them.
+func EvaluateApprovalRules(ctx context.Context, pb *git_model.ProtectedBranch, pr *issues_model.PullRequest) ([]*ApprovalRuleStatus, error) {
+	rules, err := git_model.GetApprovalRules(ctx, pb.ID)
+	if err != nil || len(rules) == 0 {
+		return nil, err
+	}
+	if err := pr.LoadIssue(ctx); err != nil {
+		return nil, err
+	}
+	if err := pr.LoadBaseRepo(ctx); err != nil {
+		return nil, err
+	}
+	approvers, err := validApprovers(ctx, pb, pr)
+	if err != nil {
+		return nil, err
+	}
+
+	var files []string
+	var codeOwners []*issues_model.CodeOwnerRule
+	needFiles := slices.ContainsFunc(rules, func(r *git_model.ApprovalRule) bool { return r.PathPatterns != "" || r.RequireCodeOwners })
+	if needFiles {
+		needOwners := slices.ContainsFunc(rules, func(r *git_model.ApprovalRule) bool { return r.RequireCodeOwners })
+		if files, codeOwners, err = loadPullGitInfo(ctx, pr, needOwners); err != nil {
+			return nil, err
+		}
+	}
+
+	statuses := make([]*ApprovalRuleStatus, 0, len(rules))
+	for _, rule := range rules {
+		if !rule.AppliesTo(files) {
+			continue
+		}
+		s := &ApprovalRuleStatus{Rule: rule, Name: rule.Name, Required: rule.RequiredCount}
+		for _, u := range approvers {
+			// without listed approvers (code owner rules only) any valid approver is eligible
+			eligible := !rule.HasApprovers()
+			if !eligible {
+				if eligible, err = rule.IsApprover(ctx, u.ID); err != nil {
+					return nil, err
+				}
+			}
+			if eligible {
+				s.Approvers = append(s.Approvers, u)
+			}
+		}
+		s.Granted = int64(len(s.Approvers))
+		s.Satisfied = s.Granted >= s.Required
+		if rule.RequireCodeOwners {
+			if s.UncoveredFiles, err = countUncoveredFiles(ctx, rule, files, codeOwners, s.Approvers); err != nil {
+				return nil, err
+			}
+			s.Satisfied = s.Satisfied && s.UncoveredFiles == 0
+		}
+		statuses = append(statuses, s)
+	}
+	return statuses, nil
+}
+
+// validApprovers returns the reviewers whose latest approval or rejection is a valid approval, in review order.
+// They are not official reviewers: the rules decide who is eligible, evaluated now instead of when the review
+// was made. A reviewer must be able to log in and still have write access, and never is the author.
+func validApprovers(ctx context.Context, pb *git_model.ProtectedBranch, pr *issues_model.PullRequest) ([]*user_model.User, error) {
+	var reviews []*issues_model.Review
+	if err := db.GetEngine(ctx).Where("issue_id = ? AND reviewer_id > 0", pr.IssueID).
+		In("type", issues_model.ReviewTypeApprove, issues_model.ReviewTypeReject).OrderBy("id").Find(&reviews); err != nil {
+		return nil, err
+	}
+	latest := make(map[int64]*issues_model.Review, len(reviews))
+	for _, r := range reviews {
+		latest[r.ReviewerID] = r
+	}
+
+	var approvers []*user_model.User
+	for _, r := range reviews {
+		if latest[r.ReviewerID] != r || r.Type != issues_model.ReviewTypeApprove || r.Dismissed ||
+			(pb.IgnoreStaleApprovals && r.Stale) || r.ReviewerID == pr.Issue.PosterID {
+			continue
+		}
+		u, err := user_model.GetUserByID(ctx, r.ReviewerID)
+		if user_model.IsErrUserNotExist(err) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		if !u.IsActive || u.ProhibitLogin {
+			continue
+		}
+		if write, err := access_model.HasAccessUnit(ctx, u, pr.BaseRepo, unit.TypeCode, perm.AccessModeWrite); err != nil {
+			return nil, err
+		} else if write {
+			approvers = append(approvers, u)
+		}
+	}
+	return approvers, nil
+}
+
+// loadPullGitInfo returns the files the pull request changes since the merge base and, if wanted, the CODEOWNERS
+// rules of the target branch. The head of the pull request must never decide who the owners are, and a CODEOWNERS
+// file that can't be read in full fails the check.
+func loadPullGitInfo(ctx context.Context, pr *issues_model.PullRequest, withOwners bool) (files []string, owners []*issues_model.CodeOwnerRule, err error) {
+	gitRepo, err := gitrepo.OpenRepository(ctx, pr.BaseRepo)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer gitRepo.Close()
+
+	mergeBase, err := gitRepo.GetMergeBaseSimple(git.BranchPrefix+pr.BaseBranch, pr.GetGitRefName())
+	if err != nil {
+		return nil, nil, err
+	}
+	if files, err = gitRepo.GetFilesChangedBetween(mergeBase, pr.GetGitRefName()); err != nil || !withOwners {
+		return files, nil, err
+	}
+
+	commit, err := gitRepo.GetBranchCommit(pr.BaseBranch)
+	if err != nil {
+		return nil, nil, err
+	}
+	owners, truncated, err := issue_service.LoadCodeOwnerRules(ctx, commit)
+	if err == nil && truncated {
+		err = fmt.Errorf("CODEOWNERS of %s is too big", pr.BaseBranch)
+	}
+	return files, owners, err
+}
+
+// countUncoveredFiles counts the changed files in the scope of the rule that have code owners, none of which approved.
+func countUncoveredFiles(ctx context.Context, rule *git_model.ApprovalRule, files []string, codeOwners []*issues_model.CodeOwnerRule, approvers []*user_model.User) (int, error) {
+	uncovered := 0
+	covered := map[string]bool{} // by owners, most files share them
+	for _, f := range files {
+		if !rule.AppliesTo([]string{f}) {
+			continue
+		}
+		users, teams := issue_service.CodeOwnersOfFile(codeOwners, f)
+		if len(users)+len(teams) == 0 {
+			continue
+		}
+		userIDs, teamIDs := make([]int64, len(users)), make([]int64, len(teams))
+		for i, u := range users {
+			userIDs[i] = u.ID
+		}
+		for i, t := range teams {
+			teamIDs[i] = t.ID
+		}
+		key := fmt.Sprint(userIDs, teamIDs)
+		ok, seen := covered[key]
+		for _, a := range approvers {
+			if seen || ok {
+				break
+			}
+			ok = slices.Contains(userIDs, a.ID)
+			if !ok && len(teamIDs) > 0 {
+				var err error
+				if ok, err = organization.IsUserInTeams(ctx, a.ID, teamIDs); err != nil {
+					return 0, err
+				}
+			}
+		}
+		covered[key] = ok
+		if !ok {
+			uncovered++
+		}
+	}
+	return uncovered, nil
+}
+
+// ApprovalRulesFromAPI resolves the user and team names of the rules. Unknown names return
+// user_model.ErrUserNotExist or organization.ErrTeamNotExist.
+func ApprovalRulesFromAPI(ctx context.Context, repo *repo_model.Repository, apiRules []*api.ApprovalRule) ([]*git_model.ApprovalRule, error) {
+	rules := make([]*git_model.ApprovalRule, 0, len(apiRules))
+	for _, r := range apiRules {
+		if r == nil {
+			return nil, util.NewInvalidArgumentErrorf("approval rule is null")
+		}
+		userIDs, err := user_model.GetUserIDsByNames(ctx, r.Usernames, false)
+		if err != nil {
+			return nil, err
+		}
+		var teamIDs []int64
+		if len(r.Teams) > 0 {
+			if err := repo.LoadOwner(ctx); err != nil {
+				return nil, err
+			}
+			if !repo.Owner.IsOrganization() {
+				return nil, util.NewInvalidArgumentErrorf("teams only exist in repositories of organizations")
+			}
+			if teamIDs, err = organization.GetTeamIDsByNames(ctx, repo.OwnerID, r.Teams, false); err != nil {
+				return nil, err
+			}
+		}
+		rules = append(rules, &git_model.ApprovalRule{
+			Name: r.Name, RequiredCount: r.RequiredCount, UserIDs: userIDs, TeamIDs: teamIDs,
+			PathPatterns: r.PathPatterns, RequireCodeOwners: r.RequireCodeOwners,
+		})
+	}
+	return rules, nil
+}
