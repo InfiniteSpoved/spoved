@@ -6,11 +6,11 @@
 			</div>
 		{{else if .NeedMinorUpdate}}
 			<div class="ui negative message flash-error">
-				<p>{{ctx.Locale.Tr "admin.dashboard.new_minor_version_hint" .RemoteVersion AppVer "https://forgejo.org/releases/"}}</p>
+				<p>{{ctx.Locale.Tr "admin.dashboard.new_minor_version_hint" .RemoteVersion AppVer "https://github.com/GitHatOrg/GitHat/releases"}}</p>
 			</div>
 		{{else if .UpdateCheckerError}}
 			<div class="ui negative message flash-error">
-				<p>{{ctx.Locale.Tr "admin.dashboard.update_checker_error" .UpdateCheckerError "https://forgejo.org/releases/"}}</p>
+				<p>{{ctx.Locale.Tr "admin.dashboard.update_checker_error" .UpdateCheckerError "https://github.com/GitHatOrg/GitHat/releases"}}</p>
 			</div>
 		{{end}}
 		<h4 class="ui top attached header">
