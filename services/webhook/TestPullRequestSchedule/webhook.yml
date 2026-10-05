@@ -1,0 +1,9 @@
+-
+  id: 1001
+  repo_id: 1
+  type: forgejo
+  url: http://www.example.com/schedule
+  http_method: POST
+  content_type: 1 # json
+  events: '{"send_everything":true}'
+  is_active: true
