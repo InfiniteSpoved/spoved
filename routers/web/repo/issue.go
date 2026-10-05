@@ -1990,6 +1990,15 @@ func ViewIssue(ctx *context.Context) {
 			ctx.Data["IsBlockedByRejection"] = issues_model.MergeBlockedByRejectedReview(ctx, pb, pull)
 			ctx.Data["IsBlockedByOfficialReviewRequests"] = issues_model.MergeBlockedByOfficialReviewRequests(ctx, pb, pull)
 			ctx.Data["IsBlockedByOutdatedBranch"] = issues_model.MergeBlockedByOutdatedBranch(pb, pull)
+			if pb.BlockOnUnresolvedConversations {
+				unresolved, err := issues_model.FindUnresolvedConversations(ctx, pull.IssueID, pb.IgnoreOutdatedConversations)
+				if err != nil {
+					ctx.ServerError("FindUnresolvedConversations", err)
+					return
+				}
+				ctx.Data["UnresolvedConversations"] = unresolved
+				ctx.Data["IsBlockedByUnresolvedConversations"] = len(unresolved) > 0
+			}
 			ctx.Data["GrantedApprovals"] = issues_model.GetGrantedApprovalsCount(ctx, pb, pull)
 			ctx.Data["RequireSigned"] = pb.RequireSignedCommits
 			ctx.Data["ChangedProtectedFiles"] = pull.ChangedProtectedFiles

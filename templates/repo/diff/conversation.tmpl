@@ -46,7 +46,7 @@
 					{{svg "octicon-arrow-down" 12 "icon"}} {{ctx.Locale.Tr "repo.issues.next"}}
 				</button>
 			</div>
-			{{if and $.CanMarkConversation $isNotPending}}
+			{{if and (or $.CanMarkConversation (and $.IsSigned (eq $.SignedUserID (index .comments 0).PosterID))) $isNotPending}}
 				<button class="ui icon tiny basic button resolve-conversation" data-origin="diff" data-action="{{if not $resolved}}Resolve{{else}}UnResolve{{end}}" data-comment-id="{{(index .comments 0).ID}}" data-update-url="{{$.RepoLink}}/issues/resolve_conversation">
 					{{if $resolved}}
 						{{ctx.Locale.Tr "repo.issues.review.un_resolve_conversation"}}

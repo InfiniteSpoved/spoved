@@ -246,6 +246,9 @@ type ProtectBranchForm struct {
 	UnprotectedFilePatterns       string
 	ApplyToAdmins                 bool
 
+	BlockOnUnresolvedConversations bool
+	IgnoreOutdatedConversations    bool
+
 	DeleteAllowlistUsers           string `form:"delete_allowlist_users"`
 	DeleteAllowlistTeams           string `form:"delete_allowlist_teams"`
 	DeleteAllowlistDeployKeyIDs    string `form:"delete_allowlist_deploy_key_ids"`

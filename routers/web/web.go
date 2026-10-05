@@ -1783,7 +1783,7 @@ func registerRoutes(m *web.Route) {
 				m.Get("/list", context.RepoRef(), repo.GetPullCommits)
 				m.Group("/{sha:[a-f0-9]{4,64}}", func() {
 					m.Get("", context.RepoRef(), repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.SetShowOutdatedComments, repo.ViewPullFilesForSingleCommit)
-					m.Post("/reviews/submit", context.RepoMustNotBeArchived(), web.Bind(forms.SubmitReviewForm{}), repo.SubmitReview)
+					m.Post("/reviews/submit", context.RepoMustNotBeArchived(), reqSignIn, repo.MustAllowUserComment, web.Bind(forms.SubmitReviewForm{}), repo.SubmitReview)
 				})
 				m.Group("/{sha:([a-f0-9]{4,64})$}/notes", func() {
 					m.Post("", context.RepoMustNotBeArchived(), web.Bind(forms.CommitNotesForm{}), repo.SetCommitNotesPullRequest)
@@ -1802,8 +1802,8 @@ func registerRoutes(m *web.Route) {
 				m.Get("/{shaFrom:[a-f0-9]{4,64}}..{shaTo:[a-f0-9]{4,64}}", context.RepoRef(), repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.SetShowOutdatedComments, repo.ViewPullFilesForRange)
 				m.Group("/reviews", func() {
 					m.Get("/new_comment", repo.RenderNewCodeCommentForm)
-					m.Post("/comments", web.Bind(forms.CodeCommentForm{}), repo.SetShowOutdatedComments, repo.CreateCodeComment)
-					m.Post("/submit", web.Bind(forms.SubmitReviewForm{}), repo.SubmitReview)
+					m.Post("/comments", reqSignIn, repo.MustAllowUserComment, web.Bind(forms.CodeCommentForm{}), repo.SetShowOutdatedComments, repo.CreateCodeComment)
+					m.Post("/submit", reqSignIn, repo.MustAllowUserComment, web.Bind(forms.SubmitReviewForm{}), repo.SubmitReview)
 					m.Post("/apply_suggestion", reqSignIn, repo.ApplySuggestion)
 				}, context.RepoMustNotBeArchived())
 			})

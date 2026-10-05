@@ -15,6 +15,7 @@
 	{{- else if .IsBlockedByRejection}}red
 	{{- else if .IsBlockedByOfficialReviewRequests}}red
 	{{- else if .IsBlockedByOutdatedBranch}}red
+	{{- else if .IsBlockedByUnresolvedConversations}}red
 	{{- else if .IsBlockedByChangedProtectedFiles}}red
 	{{- else if and .EnableStatusCheck (or .RequiredStatusCheckState.IsFailure .RequiredStatusCheckState.IsError)}}red
 	{{- else if and .EnableStatusCheck (or (not $.LatestCommitStatus) .RequiredStatusCheckState.IsPending .RequiredStatusCheckState.IsWarning)}}yellow
@@ -143,6 +144,16 @@
 						{{svg "octicon-x"}}
 						{{ctx.Locale.Tr "repo.pulls.blocked_by_outdated_branch"}}
 					</div>
+				{{else if .IsBlockedByUnresolvedConversations}}
+					<div class="item">
+						{{svg "octicon-x"}}
+						{{ctx.Locale.TrPluralString (len .UnresolvedConversations) "repo.pulls.blocked_by_unresolved_conversations" (len .UnresolvedConversations)}}
+					</div>
+					<ul class="unresolved-conversations">
+						{{range .UnresolvedConversations}}
+						<li><a href="{{$.Issue.Link}}#{{.HashTag}}">{{.TreePath}}</a></li>
+						{{end}}
+					</ul>
 				{{else if .IsBlockedByChangedProtectedFiles}}
 					<div class="item">
 						{{svg "octicon-x"}}
@@ -174,7 +185,7 @@
 					</div>
 				{{end}}
 
-				{{$notAllOverridableChecksOk := or .IsBlockedByApprovals .IsBlockedByRejection .IsBlockedByOfficialReviewRequests .IsBlockedByOutdatedBranch .IsBlockedByChangedProtectedFiles (and .EnableStatusCheck (not .RequiredStatusCheckState.IsSuccess))}}
+				{{$notAllOverridableChecksOk := or .IsBlockedByApprovals .IsBlockedByRejection .IsBlockedByOfficialReviewRequests .IsBlockedByOutdatedBranch .IsBlockedByUnresolvedConversations .IsBlockedByChangedProtectedFiles (and .EnableStatusCheck (not .RequiredStatusCheckState.IsSuccess))}}
 
 				{{/* admin can merge without checks, writer can merge when checks succeed */}}
 				{{$canMergeNow := and (or (and $.IsRepoAdmin (not .ProtectedBranch.ApplyToAdmins)) (not $notAllOverridableChecksOk)) (or (not .AllowMerge) (not $signingBlocksAllMergeStyles))}}
@@ -362,6 +373,16 @@
 						{{svg "octicon-x"}}
 						{{ctx.Locale.Tr "repo.pulls.blocked_by_outdated_branch"}}
 					</div>
+				{{else if .IsBlockedByUnresolvedConversations}}
+					<div class="item text red">
+						{{svg "octicon-x"}}
+						{{ctx.Locale.TrPluralString (len .UnresolvedConversations) "repo.pulls.blocked_by_unresolved_conversations" (len .UnresolvedConversations)}}
+					</div>
+					<ul class="unresolved-conversations">
+						{{range .UnresolvedConversations}}
+						<li><a href="{{$.Issue.Link}}#{{.HashTag}}">{{.TreePath}}</a></li>
+						{{end}}
+					</ul>
 				{{else if .IsBlockedByChangedProtectedFiles}}
 					<div class="item text red">
 						{{svg "octicon-x"}}

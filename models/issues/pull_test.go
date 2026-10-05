@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"forgejo.org/models/db"
+	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
@@ -535,4 +536,51 @@ func TestMigrate_InsertPullRequests(t *testing.T) {
 	_ = unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{IssueID: i.ID})
 
 	unittest.CheckConsistencyFor(t, &issues_model.Issue{}, &issues_model.PullRequest{})
+}
+
+func TestFindUnresolvedConversations(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{IssueID: 2})
+	pb := &git_model.ProtectedBranch{}
+
+	ids := func(ignoreOutdated bool) []int64 {
+		t.Helper()
+		comments, err := issues_model.FindUnresolvedConversations(db.DefaultContext, 2, ignoreOutdated)
+		require.NoError(t, err)
+		var ids []int64
+		for _, c := range comments {
+			ids = append(ids, c.ID)
+		}
+		return ids
+	}
+
+	// comment 4 is in a pending review and doesn't count; comments 5 and 6 form one
+	// conversation, linked by its first comment
+	assert.Equal(t, []int64{5}, ids(false))
+	assert.Equal(t, []int64{5}, ids(true))
+
+	// the option is off: no block
+	assert.False(t, issues_model.MergeBlockedByUnresolvedConversations(db.DefaultContext, pb, pr))
+	pb.BlockOnUnresolvedConversations = true
+	assert.True(t, issues_model.MergeBlockedByUnresolvedConversations(db.DefaultContext, pb, pr))
+
+	// an outdated conversation counts unless outdated conversations are ignored
+	_, err := db.GetEngine(db.DefaultContext).ID(5).Cols("invalidated").Update(&issues_model.Comment{Invalidated: true})
+	require.NoError(t, err)
+	assert.Equal(t, []int64{5}, ids(false))
+	assert.Empty(t, ids(true))
+	pb.IgnoreOutdatedConversations = true
+	assert.False(t, issues_model.MergeBlockedByUnresolvedConversations(db.DefaultContext, pb, pr))
+	pb.IgnoreOutdatedConversations = false
+
+	// a resolved comment resolves the conversation
+	_, err = db.GetEngine(db.DefaultContext).ID(6).Cols("resolve_doer_id").Update(&issues_model.Comment{ResolveDoerID: 1})
+	require.NoError(t, err)
+	assert.Empty(t, ids(false))
+	assert.False(t, issues_model.MergeBlockedByUnresolvedConversations(db.DefaultContext, pb, pr))
+
+	// once the pending review is submitted, its conversation counts
+	_, err = db.GetEngine(db.DefaultContext).ID(4).Cols("type").Update(&issues_model.Review{Type: issues_model.ReviewTypeComment})
+	require.NoError(t, err)
+	assert.Equal(t, []int64{4}, ids(false))
 }

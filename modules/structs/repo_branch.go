@@ -52,6 +52,10 @@ type BranchProtection struct {
 	UnprotectedFilePatterns       string   `json:"unprotected_file_patterns"`
 	ApplyToAdmins                 bool     `json:"apply_to_admins"`
 
+	// Block merging while code review conversations are unresolved, optionally not counting outdated ones.
+	BlockOnUnresolvedConversations bool `json:"block_on_unresolved_conversations"`
+	IgnoreOutdatedConversations    bool `json:"ignore_outdated_conversations"`
+
 	// Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.
 	// The default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.
 	DeleteAllowlistUsernames    []string `json:"delete_allowlist_usernames"`
@@ -100,6 +104,10 @@ type CreateBranchProtectionOption struct {
 	UnprotectedFilePatterns       string   `json:"unprotected_file_patterns"`
 	ApplyToAdmins                 bool     `json:"apply_to_admins"`
 
+	// Block merging while code review conversations are unresolved, optionally not counting outdated ones.
+	BlockOnUnresolvedConversations bool `json:"block_on_unresolved_conversations"`
+	IgnoreOutdatedConversations    bool `json:"ignore_outdated_conversations"`
+
 	// Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.
 	// The default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.
 	DeleteAllowlistUsernames    []string `json:"delete_allowlist_usernames"`
@@ -140,6 +148,10 @@ type EditBranchProtectionOption struct {
 	ProtectedFilePatterns         *string  `json:"protected_file_patterns"`
 	UnprotectedFilePatterns       *string  `json:"unprotected_file_patterns"`
 	ApplyToAdmins                 *bool    `json:"apply_to_admins"`
+
+	// Block merging while code review conversations are unresolved, optionally not counting outdated ones.
+	BlockOnUnresolvedConversations *bool `json:"block_on_unresolved_conversations"`
+	IgnoreOutdatedConversations    *bool `json:"ignore_outdated_conversations"`
 
 	// Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.
 	// The default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.
