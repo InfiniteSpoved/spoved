@@ -107,13 +107,13 @@ func IsUserAllowedToUpdate(ctx context.Context, pull *issues_model.PullRequest, 
 		BaseBranch: pull.HeadBranch,
 	}
 
-	pb, err := git_model.GetFirstMatchProtectedBranchRule(ctx, pr.BaseRepoID, pr.BaseBranch)
+	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
 	if err != nil {
 		return false, false, err
 	}
 
 	// can't do rebase on protected branch because need force push
-	if pb == nil {
+	if len(rules) == 0 {
 		if err := pr.LoadBaseRepo(ctx); err != nil {
 			return false, false, err
 		}
@@ -128,8 +128,8 @@ func IsUserAllowedToUpdate(ctx context.Context, pull *issues_model.PullRequest, 
 		rebaseAllowed = prUnit.PullRequestsConfig().AllowRebaseUpdate
 	}
 
-	// Update function need push permission
-	if pb != nil {
+	// Update function need push permission under every matching rule
+	for _, pb := range rules {
 		pb.Repo = pull.HeadRepo
 		if !pb.CanUserPush(ctx, user) {
 			return false, false, nil

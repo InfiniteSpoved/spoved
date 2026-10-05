@@ -6,6 +6,7 @@ package git
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"forgejo.org/models/db"
@@ -367,7 +368,20 @@ func RenameBranch(ctx context.Context, repo *repo_model.Repository, from, to str
 		}
 	}
 
-	// 3. Update protected branch if needed
+	// 3. Update protected branch if needed. The rename runs without the pre-receive hook, so the new
+	// name must not be protected, and an organization rule protecting the old name can't be moved.
+	if protected, err := IsBranchProtected(ctx, repo.ID, to); err != nil {
+		return err
+	} else if protected {
+		return ErrBranchIsProtected
+	}
+	rules, err := GetMatchedProtectedBranchRules(ctx, repo.ID, from)
+	if err != nil {
+		return err
+	}
+	if slices.ContainsFunc(rules, func(rule *ProtectedBranch) bool { return rule.OrgID != 0 }) {
+		return ErrBranchIsProtected
+	}
 	protectedBranch, err := GetProtectedBranchRuleByName(ctx, repo.ID, from)
 	if err != nil {
 		return err

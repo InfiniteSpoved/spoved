@@ -9,6 +9,7 @@ import (
 
 	"forgejo.org/models"
 	"forgejo.org/models/db"
+	git_model "forgejo.org/models/git"
 	org_model "forgejo.org/models/organization"
 	packages_model "forgejo.org/models/packages"
 	repo_model "forgejo.org/models/repo"
@@ -46,6 +47,10 @@ func DeleteOrganization(ctx context.Context, org *org_model.Organization, purge 
 		return fmt.Errorf("HasOwnerPackages: %w", err)
 	} else if ownsPackages {
 		return models.ErrUserOwnPackages{UID: org.ID}
+	}
+
+	if err := git_model.DeleteOrgProtectedBranches(ctx, org.ID); err != nil {
+		return fmt.Errorf("DeleteOrgProtectedBranches: %w", err)
 	}
 
 	if err := org_model.DeleteOrganization(ctx, org); err != nil {

@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"forgejo.org/models"
@@ -565,19 +566,23 @@ func checkPullFilesProtection(ctx context.Context, pr *issues_model.PullRequest,
 		return nil
 	}
 
-	pb, err := git_model.GetFirstMatchProtectedBranchRule(ctx, pr.BaseRepoID, pr.BaseBranch)
+	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
 	if err != nil {
 		return err
 	}
 
-	if pb == nil {
-		pr.ChangedProtectedFiles = nil
-		return nil
-	}
-
-	pr.ChangedProtectedFiles, err = CheckFileProtection(testPatchCtx.gitRepo, pr.MergeBase, testPatchCtx.headRev, pb.GetProtectedFilePatterns(), 10, testPatchCtx.env)
-	if err != nil && !models.IsErrFilePathProtected(err) {
-		return err
+	// the files of every rule, each rule checks its own in ChangedProtectedFiles
+	pr.ChangedProtectedFiles = nil
+	for _, pb := range rules {
+		files, err := CheckFileProtection(testPatchCtx.gitRepo, pr.MergeBase, testPatchCtx.headRev, pb.GetProtectedFilePatterns(), 10, testPatchCtx.env)
+		if err != nil && !models.IsErrFilePathProtected(err) {
+			return err
+		}
+		for _, file := range files {
+			if !slices.Contains(pr.ChangedProtectedFiles, file) {
+				pr.ChangedProtectedFiles = append(pr.ChangedProtectedFiles, file)
+			}
+		}
 	}
 	return nil
 }

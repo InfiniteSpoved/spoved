@@ -54,9 +54,10 @@ func ToEmailSearch(email *user_model.SearchEmailResult) *api.Email {
 	}
 }
 
-// ToBranch convert a git.Commit and git.Branch to an api.Branch
-func ToBranch(ctx context.Context, repo *repo_model.Repository, branchName string, c *git.Commit, bp *git_model.ProtectedBranch, user *user_model.User, isRepoAdmin bool) (*api.Branch, error) {
-	if bp == nil {
+// ToBranch convert a git.Commit and git.Branch to an api.Branch. rules are the matching protected branch rules,
+// the first one is shown and the user must pass all of them.
+func ToBranch(ctx context.Context, repo *repo_model.Repository, branchName string, c *git.Commit, rules git_model.ProtectedBranchRules, user *user_model.User, isRepoAdmin bool) (*api.Branch, error) {
+	if len(rules) == 0 {
 		var hasPerm bool
 		var canPush bool
 		var err error
@@ -85,6 +86,7 @@ func ToBranch(ctx context.Context, repo *repo_model.Repository, branchName strin
 		}, nil
 	}
 
+	bp := rules[0]
 	branch := &api.Branch{
 		Name:                branchName,
 		Commit:              ToPayloadCommit(ctx, repo, c),
@@ -103,9 +105,12 @@ func ToBranch(ctx context.Context, repo *repo_model.Repository, branchName strin
 		if err != nil {
 			return nil, err
 		}
-		bp.Repo = repo
-		branch.UserCanPush = bp.CanUserPush(ctx, user)
-		branch.UserCanMerge = git_model.IsUserMergeWhitelisted(ctx, bp, user.ID, permission)
+		branch.UserCanPush, branch.UserCanMerge = true, true
+		for _, bp := range rules {
+			bp.Repo = repo
+			branch.UserCanPush = branch.UserCanPush && bp.CanUserPush(ctx, user)
+			branch.UserCanMerge = branch.UserCanMerge && git_model.IsUserMergeWhitelisted(ctx, bp, user.ID, permission)
+		}
 	}
 
 	return branch, nil
@@ -138,14 +143,49 @@ func ToBranchProtection(ctx context.Context, bp *git_model.ProtectedBranch, repo
 		log.Error("GetRepoReaders: %v", err)
 	}
 
-	pushWhitelistUsernames := getWhitelistEntities(readers, bp.WhitelistUserIDs)
-	mergeWhitelistUsernames := getWhitelistEntities(readers, bp.MergeWhitelistUserIDs)
-	approvalsWhitelistUsernames := getWhitelistEntities(readers, bp.ApprovalsWhitelistUserIDs)
-
 	teamReaders, err := organization.OrgFromUser(repo.Owner).TeamsWithAccessToRepo(ctx, repo.ID, perm.AccessModeRead)
 	if err != nil {
 		log.Error("Repo.Owner.TeamsWithAccessToRepo: %v", err)
 	}
+	return toBranchProtection(ctx, bp, readers, teamReaders)
+}
+
+// ToOrgBranchProtection converts an organization rule with its selected repositories to api.OrgBranchProtection
+func ToOrgBranchProtection(ctx context.Context, bp *git_model.ProtectedBranch, repos []*repo_model.Repository) *api.OrgBranchProtection {
+	var userIDs []int64
+	for _, ids := range [][]int64{bp.WhitelistUserIDs, bp.MergeWhitelistUserIDs, bp.ApprovalsWhitelistUserIDs, bp.DeleteAllowlistUserIDs, bp.ForcePushAllowlistUserIDs} {
+		userIDs = append(userIDs, ids...)
+	}
+	rules, err := git_model.GetApprovalRules(ctx, bp.ID)
+	if err != nil {
+		log.Error("GetApprovalRules: %v", err)
+	}
+	for _, r := range rules {
+		userIDs = append(userIDs, r.UserIDs...)
+	}
+	users, err := user_model.GetUserByIDs(ctx, userIDs)
+	if err != nil {
+		log.Error("GetUserByIDs: %v", err)
+	}
+	teams, err := organization.FindOrgTeams(ctx, bp.OrgID)
+	if err != nil {
+		log.Error("FindOrgTeams: %v", err)
+	}
+	repoNames := make([]string, 0, len(repos))
+	for _, repo := range repos {
+		repoNames = append(repoNames, repo.Name)
+	}
+	return &api.OrgBranchProtection{
+		BranchProtection:     *toBranchProtection(ctx, bp, users, teams),
+		ApplyToSelectedRepos: bp.ApplyToSelectedRepos,
+		Repos:                repoNames,
+	}
+}
+
+func toBranchProtection(ctx context.Context, bp *git_model.ProtectedBranch, readers []*user_model.User, teamReaders []*organization.Team) *api.BranchProtection {
+	pushWhitelistUsernames := getWhitelistEntities(readers, bp.WhitelistUserIDs)
+	mergeWhitelistUsernames := getWhitelistEntities(readers, bp.MergeWhitelistUserIDs)
+	approvalsWhitelistUsernames := getWhitelistEntities(readers, bp.ApprovalsWhitelistUserIDs)
 
 	pushWhitelistTeams := getWhitelistEntities(teamReaders, bp.WhitelistTeamIDs)
 	mergeWhitelistTeams := getWhitelistEntities(teamReaders, bp.MergeWhitelistTeamIDs)

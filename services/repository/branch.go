@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"forgejo.org/models"
@@ -89,7 +90,7 @@ func LoadBranches(ctx context.Context, doer *user_model.User, repo *repo_model.R
 		return nil, nil, 0, err
 	}
 
-	rules, err := git_model.FindRepoProtectedBranchRules(ctx, repo.ID)
+	rules, err := git_model.FindProtectedBranchRulesForRepo(ctx, repo)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -133,9 +134,9 @@ func loadOneBranch(ctx context.Context, doer *user_model.User, repo *repo_model.
 	log.Trace("loadOneBranch: '%s'", dbBranch.Name)
 
 	branchName := dbBranch.Name
-	p := protectedBranches.GetFirstMatched(branchName)
-	isProtected := p != nil
-	canDelete := !isProtected || doer != nil && p.CanUserDelete(ctx, doer)
+	matched := protectedBranches.GetMatched(branchName)
+	isProtected := len(matched) > 0
+	canDelete := !slices.ContainsFunc(matched, func(p *git_model.ProtectedBranch) bool { return doer == nil || !p.CanUserDelete(ctx, doer) })
 
 	var divergence *git.DivergeObject
 
@@ -446,12 +447,14 @@ func DeleteBranch(ctx context.Context, doer *user_model.User, repo *repo_model.R
 		return ErrBranchIsDefault
 	}
 
-	protectBranch, err := git_model.GetFirstMatchProtectedBranchRule(ctx, repo.ID, branchName)
+	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, repo.ID, branchName)
 	if err != nil {
 		return err
 	}
-	if protectBranch != nil && !protectBranch.CanUserDelete(ctx, doer) {
-		return git_model.ErrBranchIsProtected
+	for _, protectBranch := range rules {
+		if !protectBranch.CanUserDelete(ctx, doer) {
+			return git_model.ErrBranchIsProtected
+		}
 	}
 
 	rawBranch, err := git_model.GetBranch(ctx, repo.ID, branchName)

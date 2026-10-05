@@ -10,6 +10,7 @@ import (
 	activities_model "forgejo.org/models/activities"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	git_model "forgejo.org/models/git"
 	"forgejo.org/models/gitea_migrations"
 	issues_model "forgejo.org/models/issues"
 	org_model "forgejo.org/models/organization"
@@ -207,9 +208,14 @@ func checkDBConsistency(ctx context.Context, logger log.Logger, autofix bool) er
 	}
 
 	consistencyChecks = append(consistencyChecks,
-		// find protected branches without existing repository
-		genericOrphanCheck("Protected Branches without existing repository",
-			"protected_branch", "repository", "protected_branch.repo_id=repository.id"),
+		// find protected branches without existing repository or organization
+		consistencyCheck{
+			Name:    "Protected Branches without existing repository or organization",
+			Counter: git_model.CountOrphanedProtectedBranches,
+			Fixer: func(ctx context.Context) (int64, error) {
+				return -1, git_model.DeleteOrphanedProtectedBranches(ctx)
+			},
+		},
 		// find branches without existing repository
 		genericOrphanCheck("Branches without existing repository",
 			"branch", "repository", "branch.repo_id=repository.id"),

@@ -121,16 +121,16 @@ type CanCommitToBranchResults struct {
 //
 // and branch is not protected for push
 func (r *Repository) CanCommitToBranch(ctx context.Context, doer *user_model.User) (CanCommitToBranchResults, error) {
-	protectedBranch, err := git_model.GetFirstMatchProtectedBranchRule(ctx, r.Repository.ID, r.BranchName)
+	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, r.Repository.ID, r.BranchName)
 	if err != nil {
 		return CanCommitToBranchResults{}, err
 	}
 	userCanPush := true
 	requireSigned := false
-	if protectedBranch != nil {
+	for _, protectedBranch := range rules {
 		protectedBranch.Repo = r.Repository
-		userCanPush = protectedBranch.CanUserPush(ctx, doer)
-		requireSigned = protectedBranch.RequireSignedCommits
+		userCanPush = userCanPush && protectedBranch.CanUserPush(ctx, doer)
+		requireSigned = requireSigned || protectedBranch.RequireSignedCommits
 	}
 
 	sign, keyID, _, err := asymkey_service.SignCRUDAction(ctx, r.Repository.RepoPath(), doer, r.Repository.RepoPath(), git.BranchPrefix+r.BranchName)
