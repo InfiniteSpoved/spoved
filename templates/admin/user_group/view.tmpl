@@ -4,11 +4,24 @@
 			{{.Group.Name}}
 		</h4>
 		<div class="ui attached segment">
-			<form class="ui form" action="{{.GroupLink}}/edit" method="post">
+			<form class="ui form{{if .ConfirmRoles}} warning{{end}}" action="{{.GroupLink}}/edit" method="post">
 				{{template "admin/user_group/form_fields" .}}
+				{{if .ConfirmRoles}}
+					<div class="ui warning message user-group-role-loss">
+						<div class="header">{{ctx.Locale.Tr "admin.user_groups.confirm_role_loss"}}</div>
+						{{if .WarnSiteAdmin}}<p>{{ctx.Locale.TrPluralString .LoseSiteAdmin "admin.user_groups.lose_site_admin" .LoseSiteAdmin}}</p>{{end}}
+						{{if .WarnCreateOrganization}}<p>{{ctx.Locale.TrPluralString .LoseCreateOrganization "admin.user_groups.lose_create_organization" .LoseCreateOrganization}}</p>{{end}}
+					</div>
+					<input type="hidden" name="confirm_roles" value="{{.ConfirmRoles}}">
+				{{end}}
 				<div class="tw-flex tw-gap-2">
-					<button class="ui primary button">{{ctx.Locale.Tr "admin.user_groups.update"}}</button>
-					<button type="button" class="ui red button delete-button" data-url="{{.GroupLink}}/delete" data-id="{{.Group.ID}}" data-modal-id="delete-user-group">{{ctx.Locale.Tr "admin.user_groups.delete"}}</button>
+					{{if .ConfirmRoles}}
+						<button class="ui red button">{{ctx.Locale.Tr "admin.user_groups.confirm_update"}}</button>
+						<a class="ui button" href="{{.GroupLink}}">{{ctx.Locale.Tr "cancel"}}</a>
+					{{else}}
+						<button class="ui primary button">{{ctx.Locale.Tr "admin.user_groups.update"}}</button>
+						<button type="button" class="ui red button delete-button" data-url="{{.GroupLink}}/delete" data-id="{{.Group.ID}}" data-modal-id="delete-user-group">{{ctx.Locale.Tr "admin.user_groups.delete"}}</button>
+					{{end}}
 				</div>
 			</form>
 		</div>
@@ -85,6 +98,8 @@
 	</div>
 	<div class="content">
 		<p>{{ctx.Locale.Tr "admin.user_groups.delete_desc"}}</p>
+		{{if .LoseSiteAdmin}}<p>{{ctx.Locale.TrPluralString .LoseSiteAdmin "admin.user_groups.lose_site_admin" .LoseSiteAdmin}}</p>{{end}}
+		{{if .LoseCreateOrganization}}<p>{{ctx.Locale.TrPluralString .LoseCreateOrganization "admin.user_groups.lose_create_organization" .LoseCreateOrganization}}</p>{{end}}
 	</div>
 	{{template "base/modal_actions_confirm" .}}
 </div>

@@ -6,6 +6,7 @@ package integration
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -74,6 +75,7 @@ func TestUserGroupRolesWeb(t *testing.T) {
 	admin.MakeRequest(t, NewRequestWithValues(t, "POST", groupURL+"/edit", map[string]string{
 		"name":              "platform-admins",
 		"grants_site_admin": "on",
+		"confirm_roles":     "create_organization",
 	}), http.StatusSeeOther)
 	assertUserRoles(t, 5, true, false)
 
@@ -82,7 +84,7 @@ func TestUserGroupRolesWeb(t *testing.T) {
 	member.MakeRequest(t, NewRequestWithValues(t, "POST", groupURL+"/members/remove", map[string]string{"uid": "5"}), http.StatusSeeOther)
 	resp = member.MakeRequest(t, NewRequest(t, "GET", groupURL), http.StatusOK)
 	assert.Contains(t, resp.Body.String(), "You cannot remove the last admin.")
-	member.MakeRequest(t, NewRequestWithValues(t, "POST", groupURL+"/edit", map[string]string{"name": "platform-admins"}), http.StatusSeeOther)
+	member.MakeRequest(t, NewRequestWithValues(t, "POST", groupURL+"/edit", map[string]string{"name": "platform-admins", "confirm_roles": "site_admin"}), http.StatusSeeOther)
 	member.MakeRequest(t, NewRequest(t, "POST", groupURL+"/delete"), http.StatusOK)
 	assert.True(t, unittest.AssertExistsAndLoadBean(t, &organization.UserGroup{ID: group.ID}).GrantsSiteAdmin)
 	unittest.AssertExistsAndLoadBean(t, &organization.UserGroupUser{GroupID: group.ID, UID: 5})
@@ -141,4 +143,88 @@ func TestUserGroupRolesAPI(t *testing.T) {
 	MakeRequest(t, NewRequest(t, "DELETE", groupURL).AddTokenAuth(token), http.StatusNoContent)
 	assertUserRoles(t, 5, false, false)
 	assert.True(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1}).IsAdmin)
+}
+
+func TestUserGroupRoleLossWarning(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	admin := loginUser(t, "user1")
+
+	newGroup := func(name string, grants bool, members ...string) string {
+		values := map[string]string{"name": name}
+		if grants {
+			values["grants_site_admin"] = "on"
+			values["grants_create_organization"] = "on"
+		}
+		admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/groups/new", values), http.StatusSeeOther)
+		group := unittest.AssertExistsAndLoadBean(t, &organization.UserGroup{LowerName: name})
+		groupURL := fmt.Sprintf("/admin/groups/%d", group.ID)
+		for _, m := range members {
+			admin.MakeRequest(t, NewRequestWithValues(t, "POST", groupURL+"/members/add", map[string]string{"uname": m}), http.StatusSeeOther)
+		}
+		return groupURL
+	}
+	const lossAdmin = "1 member will lose site administrator rights"
+	const lossCreateOrg = "1 member will lose the right to create organizations"
+
+	// user5 has both roles only through "admins", user4 also through
+	// "other-admins", user1 is an administrator by other means.
+	newGroup("other-admins", true, "user4")
+	groupURL := newGroup("admins", true, "user4", "user5", "user1")
+	assertUserRoles(t, 5, true, true)
+
+	// the delete modal names what deleting the group takes away, and the form states the limit
+	resp := admin.MakeRequest(t, NewRequest(t, "GET", groupURL), http.StatusOK)
+	htmlDoc := NewHTMLParser(t, resp.Body)
+	modal := htmlDoc.Find("#delete-user-group").Text()
+	assert.Contains(t, modal, lossAdmin)
+	assert.Contains(t, modal, lossCreateOrg)
+	assert.Contains(t, htmlDoc.Find("form").Text(), "only rights a group turned on are tracked")
+
+	// switching site admin off asks first and changes nothing
+	edit := func(confirmRoles string, grantsCreateOrg bool) *httptest.ResponseRecorder {
+		values := map[string]string{"name": "admins", "confirm_roles": confirmRoles}
+		if grantsCreateOrg {
+			values["grants_create_organization"] = "on"
+		}
+		return admin.MakeRequest(t, NewRequestWithValues(t, "POST", groupURL+"/edit", values), NoExpectedStatus)
+	}
+	resp = edit("", true)
+	require.Equal(t, http.StatusOK, resp.Code)
+	htmlDoc = NewHTMLParser(t, resp.Body)
+	warning := htmlDoc.Find(".user-group-role-loss").Text()
+	assert.Contains(t, warning, lossAdmin)
+	assert.NotContains(t, warning, lossCreateOrg)
+	htmlDoc.AssertElement(t, `input[name="confirm_roles"][value="site_admin"]`, true)
+	htmlDoc.AssertElement(t, `input[name="grants_site_admin"]:not([checked])`, true)
+	assert.True(t, unittest.AssertExistsAndLoadBean(t, &organization.UserGroup{LowerName: "admins"}).GrantsSiteAdmin)
+	assertUserRoles(t, 5, true, true)
+
+	// a role switched off after the first warning is warned about too
+	resp = edit("site_admin", false)
+	require.Equal(t, http.StatusOK, resp.Code)
+	warning = NewHTMLParser(t, resp.Body).Find(".user-group-role-loss").Text()
+	assert.Contains(t, warning, lossAdmin)
+	assert.Contains(t, warning, lossCreateOrg)
+	assertUserRoles(t, 5, true, true)
+
+	// confirming applies the change
+	assert.Equal(t, http.StatusSeeOther, edit("site_admin,create_organization", false).Code)
+	assertUserRoles(t, 5, false, false)
+	assertUserRoles(t, 4, true, true)
+	assertUserRoles(t, 1, true, true)
+
+	// switching roles on asks nothing; deleting the group still revokes them
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", groupURL+"/edit", map[string]string{
+		"name": "admins", "grants_site_admin": "on", "grants_create_organization": "on",
+	}), http.StatusSeeOther)
+	assertUserRoles(t, 5, true, true)
+	admin.MakeRequest(t, NewRequest(t, "POST", groupURL+"/delete"), http.StatusOK)
+	assertUserRoles(t, 5, false, false)
+	assertUserRoles(t, 4, true, true)
+
+	// a group that grants nothing shows no warning
+	groupURL = newGroup("plain", false, "user2")
+	resp = admin.MakeRequest(t, NewRequest(t, "GET", groupURL), http.StatusOK)
+	assert.NotContains(t, resp.Body.String(), "will lose")
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", groupURL+"/edit", map[string]string{"name": "plain2"}), http.StatusSeeOther)
 }

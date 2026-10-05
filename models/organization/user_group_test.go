@@ -9,6 +9,7 @@ import (
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
 	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -169,4 +170,50 @@ func TestUserGroupTeamCounts(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"release-managers"}, names(5))
 	assert.Empty(t, names(2))
+}
+
+func TestCountUserGroupRoleLosses(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	group := &organization.UserGroup{Name: "admins", GrantsSiteAdmin: true, GrantsCreateOrganization: true}
+	require.NoError(t, organization.InsertUserGroup(ctx, group))
+	other := &organization.UserGroup{Name: "other-admins", GrantsSiteAdmin: true, GrantsCreateOrganization: true}
+	require.NoError(t, organization.InsertUserGroup(ctx, other))
+
+	setFlags := func(uid int64, admin, createOrg bool, roles ...organization.UserGroupRole) {
+		_, err := db.GetEngine(ctx).ID(uid).Cols("is_admin", "allow_create_organization").
+			Update(&user_model.User{IsAdmin: admin, AllowCreateOrganization: createOrg})
+		require.NoError(t, err)
+		for _, role := range roles {
+			require.NoError(t, db.Insert(ctx, &organization.UserGroupRoleGrant{UID: uid, Role: role}))
+		}
+	}
+	both := []organization.UserGroupRole{organization.UserGroupRoleSiteAdmin, organization.UserGroupRoleCreateOrganization}
+	// user2 has both roles only through this group: counted.
+	setFlags(2, true, true, both...)
+	// user4 has both roles through this group and another group: not counted.
+	setFlags(4, true, true, both...)
+	require.NoError(t, organization.InsertUserGroupMember(ctx, other.ID, 4, 0))
+	// user1 has both flags set by hand, without a grant row: not counted.
+	// user5 has grant rows but both flags are already off: not counted.
+	setFlags(5, false, false, both...)
+	for _, uid := range []int64{1, 2, 4, 5} {
+		require.NoError(t, organization.InsertUserGroupMember(ctx, group.ID, uid, 0))
+	}
+
+	counts, err := organization.CountUserGroupRoleLosses(ctx, group.ID, both...)
+	require.NoError(t, err)
+	assert.Equal(t, map[organization.UserGroupRole]int{
+		organization.UserGroupRoleSiteAdmin:          1,
+		organization.UserGroupRoleCreateOrganization: 1,
+	}, counts)
+
+	counts, err = organization.CountUserGroupRoleLosses(ctx, group.ID, organization.UserGroupRoleSiteAdmin)
+	require.NoError(t, err)
+	assert.Equal(t, map[organization.UserGroupRole]int{organization.UserGroupRoleSiteAdmin: 1}, counts)
+
+	counts, err = organization.CountUserGroupRoleLosses(ctx, group.ID)
+	require.NoError(t, err)
+	assert.Empty(t, counts)
 }

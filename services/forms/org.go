@@ -82,6 +82,8 @@ type UserGroupForm struct {
 	GrantsSiteAdmin          bool
 	GrantsCreateOrganization bool
 	GrantsAuditor            bool
+	// ConfirmRoles lists, comma separated, the roles the admin was warned members lose.
+	ConfirmRoles string
 }
 
 // Validate validates the fields
