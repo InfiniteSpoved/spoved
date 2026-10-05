@@ -44,11 +44,9 @@
 		<a class="{{if .PageIsSettingsBlockedUsers}}active {{end}}item" href="{{.OrgLink}}/settings/blocked_users">
 			{{ctx.Locale.Tr "settings.blocked_users"}}
 		</a>
-		{{if .EnableQuota}}
-			<a class="{{if .PageIsSettingsStorageOverview}}active {{end}}item" href="{{.OrgLink}}/settings/storage_overview">
-				{{ctx.Locale.Tr "settings.storage_overview"}}
-			</a>
-		{{end}}
+		<a class="{{if .PageIsStorageOverview}}active {{end}}item" href="{{.OrgLink}}/settings/storage_overview">
+			{{ctx.Locale.Tr "settings.storage_overview"}}
+		</a>
 		<a class="{{if .PageIsSettingsDelete}}active {{end}}item" href="{{.OrgLink}}/settings/delete">
 			{{ctx.Locale.Tr "org.settings.delete"}}
 		</a>
