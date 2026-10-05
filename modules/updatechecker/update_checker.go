@@ -8,9 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
@@ -33,59 +33,24 @@ func (r *CheckerState) Name() string {
 	return "update-checker"
 }
 
-// GiteaUpdateChecker returns error when new version of Gitea is available
-func GiteaUpdateChecker(httpEndpoint, domainEndpoint string) error {
-	var version []string
-	var err error
-	if domainEndpoint != "" {
-		version, err = getVersionDNS(domainEndpoint)
-	} else {
-		v, err := getVersionHTTP(httpEndpoint)
-		if err != nil {
-			return nil
-		}
-		version = []string{v}
+// GiteaUpdateChecker stores the latest GitHat release (or the error) for the admin dashboard.
+func GiteaUpdateChecker(httpEndpoint string) error {
+	v, err := getVersionHTTP(httpEndpoint)
+	var versions []string
+	if err == nil {
+		versions = []string{v}
 	}
-
-	return UpdateRemoteVersion(context.Background(), version, err)
+	return UpdateRemoteVersion(context.Background(), versions, err)
 }
 
-var lookupTXT = net.LookupTXT
+const maxResponseSize = 1 << 20
 
-// getVersionDNS will request the TXT records for the domain. If a record starts
-// with "forgejo_versions=" everything after that will be used as the latest
-// version available.
-func getVersionDNS(domainEndpoint string) (version []string, err error) {
-	records, err := lookupTXT(domainEndpoint)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(records) == 0 {
-		return nil, errors.New("no TXT records were found")
-	}
-
-	var supportedVersions []string
-	for _, record := range records {
-		if after, ok := strings.CutPrefix(record, "forgejo_versions="); ok {
-			// Get all supported versions, separated by a comma.
-			for v := range strings.SplitSeq(after, ",") {
-				supportedVersions = append(supportedVersions, strings.TrimSpace(v))
-			}
-		}
-	}
-	if len(supportedVersions) == 0 {
-		return nil, errors.New("there is no TXT record with a valid value")
-	}
-
-	return supportedVersions, nil
-}
-
-// getVersionHTTP will make an HTTP request to the endpoint, and the returned
-// content is JSON. The "latest.version" path's value will be used as the latest
-// version available.
-func getVersionHTTP(httpEndpoint string) (version string, err error) {
+// getVersionHTTP requests the endpoint, which must return JSON like the GitHub
+// "latest release" API. The "tag_name" value (without a leading "v") is the latest version.
+// It is only compared as a version, never rendered.
+func getVersionHTTP(httpEndpoint string) (string, error) {
 	httpClient := &http.Client{
+		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
 			Proxy: proxy.Proxy(),
 		},
@@ -95,27 +60,35 @@ func getVersionHTTP(httpEndpoint string) (version string, err error) {
 	if err != nil {
 		return "", err
 	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "GitHat-update-checker")
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected response status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize+1))
 	if err != nil {
 		return "", err
+	}
+	if len(body) > maxResponseSize {
+		return "", errors.New("response too large")
 	}
 
-	type respType struct {
-		Latest struct {
-			Version string `json:"version"`
-		} `json:"latest"`
+	var respData struct {
+		TagName string `json:"tag_name"`
 	}
-	respData := respType{}
-	err = json.Unmarshal(body, &respData)
-	if err != nil {
+	if err := json.Unmarshal(body, &respData); err != nil {
 		return "", err
 	}
-	return respData.Latest.Version, nil
+	tag := strings.TrimPrefix(respData.TagName, "v")
+	if tag == "" {
+		return "", errors.New("response has no tag_name")
+	}
+	return tag, nil
 }
 
 // UpdateRemoteVersion updates the latest available version of Gitea

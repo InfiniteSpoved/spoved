@@ -127,6 +127,9 @@ func NewFuncMap() template.FuncMap {
 			version, _, _ := strings.Cut(setting.AppVer, "+")
 			return version
 		},
+		"IssueTrackerURL": func() string { // plain string: Tr escapes it
+			return setting.IssueTrackerURL
+		},
 		"AppDocsURL": setting.AppDocsURL,
 		"AppNextDocsURL": func(path string) string {
 			return setting.AppVersionDocsURL("next", path)

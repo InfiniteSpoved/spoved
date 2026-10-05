@@ -57,6 +57,9 @@ var (
 	AppDisplayNameFormat string
 	// AppDisplayName is the display name for the application, defined following AppDisplayNameFormat
 	AppDisplayName string
+	// IssueTrackerURL is where users are sent to report bugs.
+	// It maps to ini:"ISSUE_TRACKER_URL" in [server]
+	IssueTrackerURL string
 	// AppURL is the Application ROOT_URL. It always has a '/' suffix
 	// It maps to ini:"ROOT_URL"
 	AppURL string
@@ -150,6 +153,7 @@ func loadServerFrom(rootCfg ConfigProvider) {
 	AppSlogan = rootCfg.Section("").Key("APP_SLOGAN").MustString("")
 	AppDisplayNameFormat = rootCfg.Section("").Key("APP_DISPLAY_NAME_FORMAT").MustString("{APP_NAME}: {APP_SLOGAN}")
 	AppDisplayName = generateDisplayName()
+	IssueTrackerURL = sec.Key("ISSUE_TRACKER_URL").MustString("https://github.com/GitHatOrg/GitHat/issues")
 	Domain = sec.Key("DOMAIN").MustString("localhost")
 	HTTPAddr = sec.Key("HTTP_ADDR").MustString("0.0.0.0")
 	HTTPPort = sec.Key("HTTP_PORT").MustString("3000")

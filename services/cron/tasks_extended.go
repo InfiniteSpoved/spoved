@@ -130,23 +130,24 @@ func registerDeleteOldActions() {
 	})
 }
 
+type UpdateCheckerConfig struct {
+	BaseConfig
+	HTTPEndpoint string
+}
+
+// UpdateCheckerSettings is the config the update_checker task is registered with.
+var UpdateCheckerSettings = &UpdateCheckerConfig{
+	BaseConfig: BaseConfig{
+		Enabled:    false,
+		RunAtStart: false,
+		Schedule:   "@every 168h",
+	},
+	HTTPEndpoint: "https://api.github.com/repos/GitHatOrg/GitHat/releases/latest",
+}
+
 func registerUpdateGiteaChecker() {
-	type UpdateCheckerConfig struct {
-		BaseConfig
-		HTTPEndpoint   string
-		DomainEndpoint string
-	}
-	RegisterTaskFatal("update_checker", &UpdateCheckerConfig{
-		BaseConfig: BaseConfig{
-			Enabled:    true,
-			RunAtStart: false,
-			Schedule:   "@every 168h",
-		},
-		HTTPEndpoint:   "https://dl.gitea.com/gitea/version.json",
-		DomainEndpoint: "release.forgejo.org",
-	}, func(ctx context.Context, _ *user_model.User, config Config) error {
-		updateCheckerConfig := config.(*UpdateCheckerConfig)
-		return updatechecker.GiteaUpdateChecker(updateCheckerConfig.HTTPEndpoint, updateCheckerConfig.DomainEndpoint)
+	RegisterTaskFatal("update_checker", UpdateCheckerSettings, func(ctx context.Context, _ *user_model.User, config Config) error {
+		return updatechecker.GiteaUpdateChecker(config.(*UpdateCheckerConfig).HTTPEndpoint)
 	})
 }
 

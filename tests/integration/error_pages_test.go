@@ -10,6 +10,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/routers"
+	"forgejo.org/tests"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -38,6 +39,19 @@ func TestDemoErrorPages(t *testing.T) {
 		doc := NewHTMLParser(t, resp.Body)
 		assert.Equal(t, "500", doc.Find(".error-code").Text())
 		assert.Contains(t, doc.Find("head title").Text(), "Internal server error")
+	})
+
+	t.Run("Server error reports to the issue tracker", func(t *testing.T) {
+		defer tests.PrepareTestEnv(t)()
+		defer test.MockVariableValue(&setting.IssueTrackerURL, "https://example.com/tracker")()
+
+		req := NewRequest(t, "GET", "/-/demo/error/500")
+		resp := loginUser(t, "user1").MakeRequest(t, req, http.StatusInternalServerError)
+		body := resp.Body.String()
+		doc := NewHTMLParser(t, resp.Body)
+		href, _ := doc.Find(".status-page-500 p a[target=_blank]").Attr("href")
+		assert.Equal(t, "https://example.com/tracker", href)
+		assert.NotContains(t, body, "codeberg.org")
 	})
 
 	t.Run("Page not found",
