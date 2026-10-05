@@ -49,6 +49,7 @@ test('matrix jobs share a box with per-status counts and expand to links', async
   await matrix.get('button').trigger('click');
   const links = matrix.findAll('.action-run-graph-children a');
   expect(links.map((a) => a.attributes('href'))).toEqual(['/o/r/actions/runs/1/jobs/1', '/o/r/actions/runs/1/jobs/2']);
+  expect(links.map((a) => a.text())).toEqual(['test (a)1s', 'test (b)1s']); // name and duration
 });
 
 // criterion 5

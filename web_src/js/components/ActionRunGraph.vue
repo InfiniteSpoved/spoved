@@ -120,6 +120,7 @@ export default {
               <a v-for="job in node.jobs" :key="job.id" :href="`${runLink}/jobs/${job.index}`" :class="{selected: job.index === currentJobIndex}">
                 <ActionRunStatus :locale-status="locale.status[job.status]" :status="job.status" :size="14"/>
                 <span class="gt-ellipsis">{{ job.name }}</span>
+                <span class="action-run-graph-duration">{{ job.duration }}</span>
               </a>
             </div>
           </template>
