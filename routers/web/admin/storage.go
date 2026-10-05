@@ -20,6 +20,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
+	"forgejo.org/services/cron"
 
 	"xorm.io/builder"
 )
@@ -99,6 +100,15 @@ func Storage(ctx *context.Context) {
 	ctx.Data["PageIsAdminStorage"] = true
 	ctx.Data["Totals"] = totals
 	ctx.Data["AverageSize"] = totals.Size() / max(totals.NumRepos, 1)
+	if ctx.Data["MedianSize"], err = repo_model.GetMedianRepoSize(ctx, totals.NumRepos); err != nil {
+		ctx.ServerError("GetMedianRepoSize", err)
+		return
+	}
+	for _, task := range cron.ListTasks() {
+		if task.Name == "git_gc_repos" { // its git gc also recalculates the repository sizes
+			ctx.Data["SizeCronTask"] = task
+		}
+	}
 	ctx.Data["Total"] = count
 	ctx.Data["Owners"] = owners
 	ctx.Data["Keyword"] = opts.Keyword
@@ -146,6 +156,12 @@ func exportRepoStorage(ctx *context.Context, format string) {
 			cond = builder.Eq{"owner_id": ownerID}
 		}
 	}
+	sizeFilter, err := repo_model.ParseSizeFilter(ctx.FormString("sizefield"), ctx.FormTrim("minsize"), ctx.FormTrim("maxsize"))
+	if err != nil {
+		ctx.Error(http.StatusBadRequest, "invalid size filter")
+		return
+	}
+	cond = cond.And(sizeFilter.Cond())
 	orderBy, ok := repo_model.OrderByFlatMap[ctx.FormString("sort")]
 	if !ok {
 		orderBy = repo_model.OrderByFlatMap["reversesize"]

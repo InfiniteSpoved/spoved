@@ -5,12 +5,15 @@ package repo
 
 import (
 	"context"
+	"errors"
+	"math"
 	"strings"
 
 	"forgejo.org/models/db"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
 
+	"github.com/dustin/go-humanize"
 	"xorm.io/builder"
 )
 
@@ -48,6 +51,91 @@ func GetOwnerStorageTotals(ctx context.Context, ownerID int64) (StorageStats, er
 	var stats StorageStats
 	_, err := db.GetEngine(ctx).Table("repository").Where("owner_id = ?", ownerID).Select(storageStatsSelect).Get(&stats)
 	return stats, err
+}
+
+// GetMedianRepoSize returns the median git and LFS size of all repositories, rounded down to whole bytes.
+func GetMedianRepoSize(ctx context.Context, numRepos int64) (int64, error) {
+	if numRepos == 0 {
+		return 0, nil
+	}
+	offset, limit := (numRepos-1)/2, 1
+	if numRepos%2 == 0 {
+		offset, limit = numRepos/2-1, 2
+	}
+	var sizes []int64
+	if err := db.GetEngine(ctx).Table("repository").Select("git_size + lfs_size AS total_size").
+		OrderBy("git_size + lfs_size, id").Limit(limit, int(offset)).Find(&sizes); err != nil {
+		return 0, err
+	}
+	var sum int64
+	for _, size := range sizes {
+		sum += size
+	}
+	return sum / int64(max(len(sizes), 1)), nil
+}
+
+// sizeFilterColumns maps the fields of a SizeFilter to their SQL expression.
+var sizeFilterColumns = map[string]string{
+	"git":   "git_size",
+	"lfs":   "lfs_size",
+	"total": "git_size + lfs_size",
+}
+
+// SizeFilter limits repositories to a size range of one field, in bytes. A zero Field filters nothing.
+type SizeFilter struct {
+	Field    string // a key of sizeFilterColumns
+	Min, Max optional.Option[int64]
+}
+
+// ParseSizeFilter parses a field ("git", "lfs" or "total") and inclusive bounds such as "10 GB"; empty bounds are open.
+func ParseSizeFilter(field, minSize, maxSize string) (SizeFilter, error) {
+	if field == "" && minSize == "" && maxSize == "" {
+		return SizeFilter{}, nil
+	}
+	if _, ok := sizeFilterColumns[field]; !ok {
+		return SizeFilter{}, errors.New("unknown size field")
+	}
+	parse := func(s string) (optional.Option[int64], error) {
+		if s == "" {
+			return optional.None[int64](), nil
+		}
+		n, err := humanize.ParseBytes(s)
+		if err != nil {
+			return optional.None[int64](), err
+		}
+		if n > math.MaxInt64 {
+			return optional.None[int64](), errors.New("size too large")
+		}
+		return optional.Some(int64(n)), nil
+	}
+	f := SizeFilter{Field: field}
+	var err error
+	if f.Min, err = parse(minSize); err != nil {
+		return SizeFilter{}, err
+	}
+	if f.Max, err = parse(maxSize); err != nil {
+		return SizeFilter{}, err
+	}
+	if f.Min.Has() && f.Max.Has() && f.Min.ValueOrDefault(0) > f.Max.ValueOrDefault(0) {
+		return SizeFilter{}, errors.New("minimum size is above the maximum")
+	}
+	return f, nil
+}
+
+// Cond returns the condition of the filter.
+func (f SizeFilter) Cond() builder.Cond {
+	cond := builder.NewCond()
+	column, ok := sizeFilterColumns[f.Field]
+	if !ok {
+		return cond
+	}
+	if has, v := f.Min.Get(); has {
+		cond = cond.And(builder.Expr(column+" >= ?", v))
+	}
+	if has, v := f.Max.Get(); has {
+		cond = cond.And(builder.Expr(column+" <= ?", v))
+	}
+	return cond
 }
 
 // OwnerStorage is the storage used by the repositories of one owner.
