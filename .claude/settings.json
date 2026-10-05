@@ -4,7 +4,8 @@
       "Bash(tools/codemap.sh)",
       "Bash(tools/codemap.sh:*)",
       "Bash(./tools/codemap.sh)",
-      "Bash(./tools/codemap.sh:*)"
+      "Bash(./tools/codemap.sh:*)",
+      "mcp__claude-code-remote__archive_session"
     ]
   }
 }
