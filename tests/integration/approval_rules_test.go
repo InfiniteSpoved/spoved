@@ -87,9 +87,8 @@ func (e *approvalRulesEnv) approve(user string, index int64) {
 }
 
 func (e *approvalRulesEnv) apiMerge(ctx APITestContext, index int64, force bool, expected int) string {
-	ctx.ExpectedCode = expected
-	resp := doAPIMergePullRequestForm(e.t, ctx, "user2", "repo1", index, &forms.MergePullRequestForm{Do: "merge", ForceMerge: force})
-	return resp.Body.String()
+	req := NewRequestWithJSON(e.t, "POST", fmt.Sprintf("/api/v1/repos/user2/repo1/pulls/%d/merge", index), &forms.MergePullRequestForm{Do: "merge", ForceMerge: force}).AddTokenAuth(ctx.Token)
+	return ctx.Session.MakeRequest(e.t, req, expected).Body.String()
 }
 
 func (e *approvalRulesEnv) approvals(index int64) []*api.PullApprovalRule {
@@ -142,8 +141,8 @@ func TestApprovalRulesMerge(t *testing.T) {
 			e.protect("ar-auto", true, ruleOf("Security", 1, "user4"))
 			index := e.pr("ar-auto", create("a.txt", "a"))
 
-			e.owner.ExpectedCode = http.StatusOK
-			doAPIMergePullRequestForm(t, e.owner, "user2", "repo1", index, &forms.MergePullRequestForm{Do: "merge", MergeWhenChecksSucceed: true})
+			req := NewRequestWithJSON(t, "POST", fmt.Sprintf("/api/v1/repos/user2/repo1/pulls/%d/merge", index), &forms.MergePullRequestForm{Do: "merge", MergeWhenChecksSucceed: true}).AddTokenAuth(e.owner.Token)
+			e.owner.Session.MakeRequest(t, req, http.StatusCreated)
 			pr := doAPIGetPullRequest(e.owner, "user2", "repo1", index)(t)
 			assert.False(t, pr.HasMerged)
 			e.approve("user4", index)
@@ -271,8 +270,8 @@ func TestApprovalRulesMerge(t *testing.T) {
 			e.base("ar-edit")
 			e.protect("ar-edit", false, ruleOf("Security", 2, "user4", "user5"))
 
-			get := func() []*api.ApprovalRule {
-				resp := e.owner.Session.MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1/branch_protections/ar-edit").AddTokenAuth(e.owner.Token), http.StatusOK)
+			get := func(rule ...string) []*api.ApprovalRule {
+				resp := e.owner.Session.MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1/branch_protections/"+append(rule, "ar-edit")[0]).AddTokenAuth(e.owner.Token), http.StatusOK)
 				var bp api.BranchProtection
 				DecodeJSON(t, resp, &bp)
 				return bp.ApprovalRules
@@ -298,11 +297,13 @@ func TestApprovalRulesMerge(t *testing.T) {
 			assert.Empty(t, get())
 
 			// web form: a repo admin creates a rule, a writer can't
-			form := map[string]string{"rule_name": "ar-edit", "approval_rule_name": "Web", "approval_rule_count": "1", "approval_rule_users": "user4"}
+			form := map[string]string{"rule_name": "ar-edit-web", "approval_rule_name": "Web", "approval_rule_count": "1", "approval_rule_users": "user4"}
 			e.writer["user4"].Session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/settings/branches/edit", form), http.StatusNotFound)
-			assert.Empty(t, get())
+			e.owner.Session.MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1/branch_protections/ar-edit-web").AddTokenAuth(e.owner.Token), http.StatusNotFound)
 			e.owner.Session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/settings/branches/edit", form), http.StatusSeeOther)
-			require.Len(t, get(), 1)
+			rules = get("ar-edit-web")
+			require.Len(t, rules, 1)
+			assert.Equal(t, []string{"user4"}, rules[0].Usernames)
 		})
 	})
 }
