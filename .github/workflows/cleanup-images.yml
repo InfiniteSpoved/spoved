@@ -1,0 +1,67 @@
+name: Cleanup images
+
+# Deletes old test images from this repository's GitHub Container Registry package,
+# the one release-image.yml pushes to. Runs weekly (Monday 03:17 UTC) and on demand.
+# A version tagged latest or with a semver (the regex matches release-image.yml) is
+# never deleted. Only versions tagged sha-<12 hex> alone are candidates, plus untagged
+# orphans. Platform and attestation manifests go only together with their index.
+# Scheduled runs are dry runs. Manual runs default to dry-run too: check the job
+# summary first. The repository needs the Admin role on the package
+# (Package settings → Manage Actions access) before a real run can delete.
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Only list what would be deleted.
+        type: boolean
+        default: true
+      keep-days:
+        description: Keep sha-only images younger than this many days (at least 1).
+        default: '30'
+      keep-last:
+        description: Also keep this many of the newest older sha-only images.
+        default: '10'
+
+# The action is not safe to run twice against the same package.
+concurrency:
+  group: cleanup-images
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Check the inputs
+        id: args
+        env:
+          KEEP_DAYS: ${{ inputs.keep-days || '30' }}
+          KEEP_LAST: ${{ inputs.keep-last || '10' }}
+          DRY_RUN: ${{ github.event_name != 'workflow_dispatch' || inputs.dry-run }}
+        run: |
+          [[ "$KEEP_DAYS" =~ ^[1-9][0-9]{0,3}$ ]] || { echo "::error::keep-days must be a whole number from 1 to 9999"; exit 1; }
+          [[ "$KEEP_LAST" =~ ^(0|[1-9][0-9]{0,3})$ ]] || { echo "::error::keep-last must be a whole number from 0 to 9999"; exit 1; }
+          {
+            echo "keep-days=$KEEP_DAYS"
+            echo "keep-last=$KEEP_LAST"
+            echo "dry-run=$DRY_RUN"
+            # The same image name release-image.yml derives from the repository.
+            echo "owner=${GITHUB_REPOSITORY_OWNER,,}"
+            echo "package=${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]'
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          owner: ${{ steps.args.outputs.owner }}
+          package: ${{ steps.args.outputs.package }}
+          dry-run: ${{ steps.args.outputs.dry-run }}
+          use-regex: true
+          delete-tags: ^sha-[0-9a-f]{12}$
+          exclude-tags: ^(latest|[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?)$
+          older-than: ${{ steps.args.outputs.keep-days }} days
+          keep-n-tagged: ${{ steps.args.outputs.keep-last }}
+          delete-untagged: true
+          validate: true
