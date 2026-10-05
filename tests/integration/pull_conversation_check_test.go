@@ -36,14 +36,19 @@ type conversationCheckPR struct {
 	headSHA string
 }
 
-func prepareConversationCheckPR(t *testing.T, collaborators map[*user_model.User]perm.AccessMode) *conversationCheckPR {
+// prepareConversationCheckPR creates a repository with a pull request by the given author, or by the owner.
+func prepareConversationCheckPR(t *testing.T, collaborators map[*user_model.User]perm.AccessMode, author ...*user_model.User) *conversationCheckPR {
 	t.Helper()
 	repo := forgery.CreateRepository(t, nil, &forgery.CreateRepositoryOptions{
 		Files:         forgery.FilesInit{},
 		Collaborators: collaborators,
 	})
 	forgery.EnableRepoUnits(t, repo, unit_model.TypeCode, unit_model.TypePullRequests)
-	pr := createPullRequest(t, repo.Owner, repo, "feature", "conversation check")
+	poster := repo.Owner
+	if len(author) > 0 {
+		poster = author[0]
+	}
+	pr := createPullRequest(t, poster, repo, "feature", "conversation check")
 
 	gitRepo, err := gitrepo.OpenRepository(t.Context(), repo)
 	require.NoError(t, err)
@@ -361,5 +366,30 @@ func TestPullConversationCheckOptionsOffUnchanged(t *testing.T) {
 
 		testPullMerge(t, ownerSession, owner.Name, c.repo.Name, strconv.FormatInt(c.pr.Index, 10), repo_model.MergeStyleMerge, false)
 		assert.True(t, c.hasMerged(t))
+	})
+}
+
+// A block by the PR author, unlike one by the repository owner, doesn't keep a reviewer
+// from requesting changes.
+func TestPullConversationCheckAuthorBlockKeepsReviews(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		author := forgery.CreateUser(t, nil)
+		reviewer := forgery.CreateUser(t, nil)
+		c := prepareConversationCheckPR(t, map[*user_model.User]perm.AccessMode{
+			author:   perm.AccessModeWrite,
+			reviewer: perm.AccessModeWrite,
+		}, author)
+		BlockUser(t, author, reviewer)
+		reviewerSession := loginUser(t, reviewer.Name)
+		token := getTokenForLoggedInUser(t, reviewerSession, auth_model.AccessTokenScopeWriteRepository)
+
+		testSubmitReview(t, reviewerSession, c.repo.OwnerName, c.repo.Name, strconv.FormatInt(c.pr.Index, 10), c.headSHA, "reject", http.StatusOK)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", c.apiLink()+"/reviews", &api.CreatePullReviewOptions{
+			Event:    api.ReviewStateRequestChanges,
+			Body:     "please change this",
+			CommitID: c.headSHA,
+			Comments: []api.CreatePullReviewComment{{Path: "README.md", Body: "here", NewLineNum: 1}},
+		}).AddTokenAuth(token), http.StatusOK)
+		assert.Equal(t, 2, unittest.GetCount(t, &issues_model.Review{IssueID: c.pr.IssueID, ReviewerID: reviewer.ID, Type: issues_model.ReviewTypeReject}))
 	})
 }

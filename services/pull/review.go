@@ -127,13 +127,13 @@ func ValidateCodeCommentSuggestions(content string) error {
 	return nil
 }
 
-// checkCanReview refuses users blocked by the poster of the pull request or by the owner of the repository,
-// like CreateIssueComment does for plain comments.
+// checkCanReview refuses users blocked by the owner of the repository. A block by the poster of the
+// pull request doesn't count: it must not keep a reviewer from requesting changes.
 func checkCanReview(ctx context.Context, doer *user_model.User, issue *issues_model.Issue) error {
 	if err := issue.LoadRepo(ctx); err != nil {
 		return err
 	}
-	if user_model.IsBlockedMultiple(ctx, []int64{issue.PosterID, issue.Repo.OwnerID}, doer.ID) {
+	if user_model.IsBlocked(ctx, issue.Repo.OwnerID, doer.ID) {
 		return user_model.ErrBlockedByUser
 	}
 	return nil
