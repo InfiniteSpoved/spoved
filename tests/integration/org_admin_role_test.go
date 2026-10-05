@@ -167,6 +167,7 @@ func TestOrgAdminRoleFlow(t *testing.T) {
 	// S1: the Owners team can be neither deleted nor renamed
 	MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/teams/1").AddTokenAuth(org3Owner), http.StatusUnprocessableEntity)
 	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/teams/1", &api.EditTeamOption{Name: "Bosses"}).AddTokenAuth(org3Owner), http.StatusUnprocessableEntity)
+	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/teams/1", &api.EditTeamOption{Name: "owners"}).AddTokenAuth(org3Owner), http.StatusUnprocessableEntity)
 	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/teams/1", &api.EditTeamOption{Name: "Owners"}).AddTokenAuth(org3Owner), http.StatusOK)
 	user2.MakeRequest(t, NewRequest(t, "POST", "/org/org3/teams/owners/delete"), http.StatusOK)
 	unittest.AssertExistsAndLoadBean(t, &organization.Team{ID: 1, Name: "Owners"})
