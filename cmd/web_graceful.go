@@ -35,17 +35,27 @@ func NoInstallListener() {
 	graceful.GetManager().InformCleanup()
 }
 
+func fcgiHandler(m http.Handler) http.Handler {
+	return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
+		defer func() {
+			// net/http/fcgi doesn't recover panics; under fcgi an aborted stream just ends here.
+			if r := recover(); r != nil && r != http.ErrAbortHandler {
+				panic(r)
+			}
+		}()
+		if setting.AppSubURL != "" {
+			req.URL.Path = strings.TrimPrefix(req.URL.Path, setting.AppSubURL)
+		}
+		m.ServeHTTP(resp, req)
+	})
+}
+
 func runFCGI(network, listenAddr, name string, m http.Handler, useProxyProtocol bool) error {
 	// This needs to handle stdin as fcgi point
 	fcgiServer := graceful.NewServer(network, listenAddr, name)
 
 	err := fcgiServer.ListenAndServe(func(listener net.Listener) error {
-		return fcgi.Serve(listener, http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
-			if setting.AppSubURL != "" {
-				req.URL.Path = strings.TrimPrefix(req.URL.Path, setting.AppSubURL)
-			}
-			m.ServeHTTP(resp, req)
-		}))
+		return fcgi.Serve(listener, fcgiHandler(m))
 	}, useProxyProtocol)
 	if err != nil {
 		log.Fatal("Failed to start FCGI main server: %v", err)
