@@ -205,6 +205,10 @@ type ViewJob struct {
 	Status   string `json:"status"`
 	CanRerun bool   `json:"canRerun"`
 	Duration string `json:"duration"`
+	// GroupKey is shared by the matrix jobs generated from one workflow job. Needs holds the IDs of the jobs this one
+	// waits for, matrix siblings included.
+	GroupKey string  `json:"groupKey"`
+	Needs    []int64 `json:"needs"`
 }
 
 type ViewCommit struct {
@@ -312,6 +316,10 @@ func getViewResponse(ctx *app_context.Context, req *ViewRequest, runIndex, jobIn
 	resp.State.Run.Done = run.Status.IsDone()
 	resp.State.Run.CanCancel = !run.Status.IsDone() && ctx.Repo.CanWrite(unit.TypeActions)
 
+	idsByWorkflowJob := map[actions_model.NamespacedJobIdentifier][]int64{}
+	for _, v := range jobs {
+		idsByWorkflowJob[v.NamespacedJobID()] = append(idsByWorkflowJob[v.NamespacedJobID()], v.ID)
+	}
 	for _, v := range jobs {
 		canBeRerun, err := v.CanBeRerun(ctx)
 		if err != nil {
@@ -324,6 +332,8 @@ func getViewResponse(ctx *app_context.Context, req *ViewRequest, runIndex, jobIn
 			Status:   v.Status.String(),
 			CanRerun: canBeRerun && ctx.Repo.CanWrite(unit.TypeActions),
 			Duration: v.Duration().String(),
+			GroupKey: fmt.Sprintf("%s/%s", v.JobNamespace, v.JobID),
+			Needs:    viewJobNeeds(v, idsByWorkflowJob),
 		})
 	}
 
@@ -907,6 +917,15 @@ func disableOrEnableWorkflowFile(ctx *app_context.Context, isEnable bool) {
 	redirectURL := fmt.Sprintf("%s/actions?workflow=%s&actor=%s&status=%s", ctx.Repo.RepoLink, url.QueryEscape(workflow),
 		url.QueryEscape(ctx.FormString("actor")), url.QueryEscape(ctx.FormString("status")))
 	ctx.JSONRedirect(redirectURL)
+}
+
+// viewJobNeeds resolves job.Needs to the IDs of the jobs they refer to. Unknown needs are dropped.
+func viewJobNeeds(job *actions_model.ActionRunJob, idsByWorkflowJob map[actions_model.NamespacedJobIdentifier][]int64) []int64 {
+	needs := []int64{} // marshal to '[]' instead of 'null' in json
+	for _, need := range job.NamespacedNeeds() {
+		needs = append(needs, idsByWorkflowJob[need]...)
+	}
+	return needs
 }
 
 // statusDiagnostics returns optional diagnostic information to display to the user. It should help the user understand

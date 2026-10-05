@@ -1053,6 +1053,8 @@
 	"actions.runs.run_attempt_label": "Run attempt #%[1]s (%[2]s)",
 	"actions.runs.viewing_out_of_date_run": "You are viewing an out-of-date run of this job that was executed %[1]s.",
 	"actions.runs.view_most_recent_run": "View most recent run",
+	"actions.runs.graph_title": "Job graph",
+	"actions.runs.graph_matrix_count": "%[1]d jobs",
 	"actions.runs.all_workflows": "All workflows",
 	"actions.runs.scheduled_description": "Scheduled run of commit <a href=\"%[1]s\">%[2]s</a>",
 	"actions.runs.workflow_dispatch_description": "Run of commit <a href=\"%[1]s\">%[2]s</a> triggered by <a href=\"%[3]s\">%[4]s</a>",
