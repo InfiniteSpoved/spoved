@@ -127,7 +127,6 @@ func ValidateCodeCommentSuggestions(content string) error {
 	return nil
 }
 
-// CreateCodeComment creates a comment on the code line
 // checkCanReview refuses users blocked by the poster of the pull request or by the owner of the repository,
 // like CreateIssueComment does for plain comments.
 func checkCanReview(ctx context.Context, doer *user_model.User, issue *issues_model.Issue) error {
@@ -140,6 +139,7 @@ func checkCanReview(ctx context.Context, doer *user_model.User, issue *issues_mo
 	return nil
 }
 
+// CreateCodeComment creates a comment on the code line
 func CreateCodeComment(ctx context.Context, doer *user_model.User, gitRepo *git.Repository,
 	issue *issues_model.Issue, line, extraLinesCount int64, content, treePath string, pendingReview bool,
 	replyReviewID int64, beforeCommitID, latestCommitID string, attachments []string,
