@@ -1852,6 +1852,63 @@
         }
       }
     },
+    "/admin/roles/org-admin/exclusions": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "List the organizations excluded from the organization administrator role",
+        "operationId": "adminListOrgAdminExclusions",
+        "responses": {
+          "200": {
+            "$ref": "#/responses/OrganizationList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          }
+        }
+      },
+      "put": {
+        "description": "Nothing is changed if an organization is unknown, a name is not an organization, or the change would leave an organization without an owner.",
+        "consumes": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Replace the organizations excluded from the organization administrator role",
+        "operationId": "adminSetOrgAdminExclusions",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/SetOrgAdminExclusionsOption"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/error"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/admin/runners/jobs": {
       "get": {
         "description": "This operation has been deprecated in Forgejo 15. Use [`/admin/actions/runners/jobs`](#/admin/adminGetActionRunJobs) instead.\n",
@@ -4844,6 +4901,9 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/error"
           }
         }
       }
@@ -20696,6 +20756,9 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       },
@@ -20734,6 +20797,9 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -20890,6 +20956,9 @@
           },
           "409": {
             "$ref": "#/responses/error"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -27851,6 +27920,11 @@
           "type": "boolean",
           "x-go-name": "GrantsCreateOrganization"
         },
+        "grants_org_admin": {
+          "description": "Members of the group are owners of every organization that is not excluded",
+          "type": "boolean",
+          "x-go-name": "GrantsOrgAdmin"
+        },
         "grants_site_admin": {
           "description": "Members of the group are site administrators",
           "type": "boolean",
@@ -29133,6 +29207,11 @@
           "description": "Members of the group may create organizations",
           "type": "boolean",
           "x-go-name": "GrantsCreateOrganization"
+        },
+        "grants_org_admin": {
+          "description": "Members of the group are owners of every organization that is not excluded",
+          "type": "boolean",
+          "x-go-name": "GrantsOrgAdmin"
         },
         "grants_site_admin": {
           "description": "Members of the group are site administrators",
@@ -32973,6 +33052,24 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "SetOrgAdminExclusionsOption": {
+      "description": "SetOrgAdminExclusionsOption options for replacing the organizations excluded from the org-admin role",
+      "type": "object",
+      "required": [
+        "orgs"
+      ],
+      "properties": {
+        "orgs": {
+          "description": "names of the excluded organizations",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Orgs"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "SetUserQuotaGroupsOptions": {
       "description": "SetUserQuotaGroupsOptions represents the quota groups of a user",
       "type": "object",
@@ -33848,6 +33945,11 @@
           "description": "Members of the group may create organizations",
           "type": "boolean",
           "x-go-name": "GrantsCreateOrganization"
+        },
+        "grants_org_admin": {
+          "description": "Members of the group are owners of every organization that is not excluded",
+          "type": "boolean",
+          "x-go-name": "GrantsOrgAdmin"
         },
         "grants_site_admin": {
           "description": "Members of the group are site administrators",

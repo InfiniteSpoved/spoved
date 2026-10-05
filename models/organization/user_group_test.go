@@ -87,7 +87,7 @@ func TestUserGroupMembersAndTeams(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, viaGroup)
 
-	require.NoError(t, organization.InsertUserGroupTeam(ctx, g.ID, team))
+	require.NoError(t, organization.InsertUserGroupTeam(ctx, g.ID, team, organization.LinkManual))
 	unittest.AssertExistsAndLoadBean(t, &organization.UserGroupTeam{GroupID: g.ID, TeamID: team.ID, OrgID: team.OrgID})
 
 	viaGroup, err = organization.IsTeamMemberViaUserGroup(ctx, team.ID, 5)
@@ -140,9 +140,9 @@ func TestUserGroupTeamCounts(t *testing.T) {
 	team11 := unittest.AssertExistsAndLoadBean(t, &organization.Team{ID: 11})
 	team1 := unittest.AssertExistsAndLoadBean(t, &organization.Team{ID: 1})
 	for _, g := range []*organization.UserGroup{a, b, empty} {
-		require.NoError(t, organization.InsertUserGroupTeam(ctx, g.ID, team2))
+		require.NoError(t, organization.InsertUserGroupTeam(ctx, g.ID, team2, organization.LinkManual))
 	}
-	require.NoError(t, organization.InsertUserGroupTeam(ctx, b.ID, team11))
+	require.NoError(t, organization.InsertUserGroupTeam(ctx, b.ID, team11, organization.LinkManual))
 
 	groups := []*organization.UserGroup{a, b, empty}
 	require.NoError(t, organization.LoadUserGroupsNumMembers(ctx, groups))

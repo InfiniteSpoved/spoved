@@ -3,6 +3,7 @@ package source
 import (
 	"testing"
 
+	"forgejo.org/models"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	org_model "forgejo.org/models/organization"
@@ -463,4 +464,19 @@ func TestSyncGroupsToTeams(t *testing.T) {
 		Reason:                 org_model.MembershipReasonAddedByAuthProvider,
 		CreatedByLoginSourceID: optional.Some(loginSourceID),
 	})
+}
+
+// A mapping only removes memberships that an authentication source made: one made by a user group stays.
+func TestSyncGroupsToTeamsKeepsUserGroupMembership(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8})
+	team := unittest.AssertExistsAndLoadBean(t, &org_model.Team{ID: 2})
+	org := unittest.AssertExistsAndLoadBean(t, &org_model.Organization{ID: team.OrgID})
+	_, err := models.InsertTeamMember(t.Context(), team, user.ID, org_model.MembershipReasonAddedByUserGroup, optional.None[int64](), optional.None[int64]())
+	require.NoError(t, err)
+	mapping := map[string]map[string][]string{"some-group": {org.Name: {team.Name}}}
+
+	require.NoError(t, SyncGroupsToTeams(t.Context(), user, 1, container.SetOf[string](), mapping, true, nil, false))
+
+	unittest.AssertExistsAndLoadBean(t, &org_model.TeamUser{UID: user.ID, TeamID: team.ID, Reason: org_model.MembershipReasonAddedByUserGroup})
 }

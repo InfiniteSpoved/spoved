@@ -251,6 +251,9 @@ type swaggerParameterBodies struct {
 	EditUserGroupOption api.EditUserGroupOption
 
 	// in:body
+	SetOrgAdminExclusionsOption api.SetOrgAdminExclusionsOption
+
+	// in:body
 	CreateAnnouncementOption api.CreateAnnouncementOption
 
 	// in:body

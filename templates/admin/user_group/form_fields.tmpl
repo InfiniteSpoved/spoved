@@ -29,3 +29,10 @@
 	</div>
 	<span class="help tw-block">{{ctx.Locale.Tr "admin.user_groups.grants_auditor.description"}}</span>
 </div>
+<div class="inline field">
+	<div class="ui checkbox">
+		<label>{{ctx.Locale.Tr "admin.user_groups.grants_org_admin"}}</label>
+		<input name="grants_org_admin" type="checkbox" {{if .grants_org_admin}}checked{{end}}>
+	</div>
+	<span class="help tw-block">{{ctx.Locale.Tr "admin.user_groups.grants_org_admin.description"}}</span>
+</div>

@@ -121,8 +121,9 @@ func CreateUserGroup(ctx *context.APIContext) {
 		GrantsSiteAdmin:          form.GrantsSiteAdmin,
 		GrantsCreateOrganization: form.GrantsCreateOrganization,
 		GrantsAuditor:            form.GrantsAuditor,
+		GrantsOrgAdmin:           form.GrantsOrgAdmin,
 	}
-	if err := org_model.InsertUserGroup(ctx, group); err != nil {
+	if err := usergroup_service.CreateGroup(ctx, group); err != nil {
 		if org_model.IsErrUserGroupAlreadyExist(err) {
 			ctx.Error(http.StatusConflict, "", err)
 		} else {
@@ -216,8 +217,11 @@ func EditUserGroup(ctx *context.APIContext) {
 	if form.GrantsAuditor != nil {
 		group.GrantsAuditor = *form.GrantsAuditor
 	}
+	if form.GrantsOrgAdmin != nil {
+		group.GrantsOrgAdmin = *form.GrantsOrgAdmin
+	}
 	if err := usergroup_service.UpdateGroup(ctx, group); err != nil {
-		if org_model.IsErrUserGroupAlreadyExist(err) || models.IsErrDeleteLastAdminUser(err) {
+		if org_model.IsErrUserGroupAlreadyExist(err) || models.IsErrDeleteLastAdminUser(err) || org_model.IsErrLastOrgOwner(err) {
 			ctx.Error(http.StatusConflict, "", err)
 		} else {
 			ctx.Error(http.StatusInternalServerError, "UpdateGroup", err)

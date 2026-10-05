@@ -21,6 +21,8 @@ type UserGroup struct {
 	GrantsCreateOrganization bool `json:"grants_create_organization"`
 	// Members of the group can read every repository
 	GrantsAuditor bool `json:"grants_auditor"`
+	// Members of the group are owners of every organization that is not excluded
+	GrantsOrgAdmin bool `json:"grants_org_admin"`
 	// swagger:strfmt date-time
 	Created time.Time `json:"created_at"`
 	// swagger:strfmt date-time
@@ -38,6 +40,8 @@ type CreateUserGroupOption struct {
 	GrantsCreateOrganization bool `json:"grants_create_organization"`
 	// Members of the group can read every repository
 	GrantsAuditor bool `json:"grants_auditor"`
+	// Members of the group are owners of every organization that is not excluded
+	GrantsOrgAdmin bool `json:"grants_org_admin"`
 }
 
 // EditUserGroupOption options for editing a user group
@@ -50,4 +54,13 @@ type EditUserGroupOption struct {
 	GrantsCreateOrganization *bool `json:"grants_create_organization"`
 	// Members of the group can read every repository
 	GrantsAuditor *bool `json:"grants_auditor"`
+	// Members of the group are owners of every organization that is not excluded
+	GrantsOrgAdmin *bool `json:"grants_org_admin"`
+}
+
+// SetOrgAdminExclusionsOption options for replacing the organizations excluded from the org-admin role
+type SetOrgAdminExclusionsOption struct {
+	// names of the excluded organizations
+	// required: true
+	Orgs []string `json:"orgs"`
 }

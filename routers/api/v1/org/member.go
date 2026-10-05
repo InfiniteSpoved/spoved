@@ -319,10 +319,22 @@ func DeleteMember(ctx *context.APIContext) {
 	//     description: member removed
 	//   "404":
 	//     "$ref": "#/responses/notFound"
+	//   "409":
+	//     "$ref": "#/responses/error"
 
 	member := user.GetUserByParams(ctx)
 	if ctx.Written() {
 		return
+	}
+	if member.ID != ctx.Doer().ID {
+		// a member of a user group linked to a team of the organization would be added back by the group
+		if viaGroup, err := organization.IsUserInOrgUserGroupTeam(ctx, ctx.Org().Organization.ID, member.ID); err != nil {
+			ctx.Error(http.StatusInternalServerError, "IsUserInOrgUserGroupTeam", err)
+			return
+		} else if viaGroup {
+			ctx.Error(http.StatusConflict, "", "the user is a member through a user group linked to a team of the organization")
+			return
+		}
 	}
 	if err := models.RemoveOrgUser(ctx, ctx.Org().Organization.ID, member.ID); err != nil {
 		ctx.Error(http.StatusInternalServerError, "RemoveOrgUser", err)

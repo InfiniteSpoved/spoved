@@ -955,6 +955,11 @@ func registerRoutes(m *web.Route) {
 			m.Post("/{id}/delete", admin.DeleteAnnouncement)
 		})
 
+		m.Group("/roles/org-admin", func() {
+			m.Get("", admin.OrgAdminRole)
+			m.Post("/exclusions", admin.OrgAdminRoleExclusionsPost)
+		})
+
 		m.Group("/groups", func() {
 			m.Get("", admin.UserGroups)
 			m.Combo("/new").Get(admin.NewUserGroup).Post(web.Bind(forms.UserGroupForm{}), admin.NewUserGroupPost)

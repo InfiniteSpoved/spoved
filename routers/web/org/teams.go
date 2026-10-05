@@ -291,6 +291,15 @@ func TeamsUserGroupAction(ctx *context.Context) {
 			return
 		}
 	case "unlink":
+		managed, managedErr := org_model.IsTeamUserGroupManaged(ctx, group.ID, ctx.Org.Team.ID)
+		if managedErr != nil {
+			ctx.ServerError("IsTeamUserGroupManaged", managedErr)
+			return
+		} else if managed {
+			ctx.Flash.Error(ctx.Tr("org.teams.user_groups.managed_cannot_unlink", group.Name))
+			ctx.Redirect(teamLink)
+			return
+		}
 		err = usergroup_service.UnlinkTeam(ctx, group, ctx.Org.Team)
 	default:
 		ctx.Error(http.StatusNotFound)
@@ -556,6 +565,10 @@ func TeamMembers(ctx *context.Context) {
 	}
 	ctx.Org.Team.NumUserGroups = len(userGroups)
 	ctx.Data["UserGroups"] = userGroups
+	if ctx.Data["ManagedUserGroups"], err = org_model.GetTeamManagedUserGroupIDs(ctx, ctx.Org.Team.ID); err != nil {
+		ctx.ServerError("GetTeamManagedUserGroupIDs", err)
+		return
+	}
 	ctx.Data["Units"] = unit_model.Units
 
 	invites, err := org_model.GetInvitesByTeamID(ctx, ctx.Org.Team.ID)

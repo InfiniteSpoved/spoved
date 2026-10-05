@@ -50,7 +50,8 @@ func (err ErrOrgNotExist) Unwrap() error {
 
 // ErrLastOrgOwner represents a "LastOrgOwner" kind of error.
 type ErrLastOrgOwner struct {
-	UID int64
+	UID   int64
+	OrgID int64 // 0 if unknown
 }
 
 // IsErrLastOrgOwner checks if an error is a ErrLastOrgOwner.
@@ -60,7 +61,7 @@ func IsErrLastOrgOwner(err error) bool {
 }
 
 func (err ErrLastOrgOwner) Error() string {
-	return fmt.Sprintf("user is the last member of owner team [uid: %d]", err.UID)
+	return fmt.Sprintf("user is the last member of owner team [uid: %d, org: %d]", err.UID, err.OrgID)
 }
 
 // ErrUserNotAllowedCreateOrg represents a "UserNotAllowedCreateOrg" kind of error.
@@ -432,6 +433,7 @@ func DeleteOrganization(ctx context.Context, org *Organization) error {
 		&TeamUnit{OrgID: org.ID},
 		&TeamInvite{OrgID: org.ID},
 		&UserGroupTeam{OrgID: org.ID},
+		&OrgAdminExclusion{OrgID: org.ID},
 		&secret_model.Secret{OwnerID: org.ID},
 		&actions_model.ActionRunner{OwnerID: org.ID},
 		&actions_model.ActionRunnerToken{OwnerID: optional.Some(org.ID)},

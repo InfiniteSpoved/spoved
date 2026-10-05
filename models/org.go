@@ -46,7 +46,7 @@ func RemoveOrgUser(ctx context.Context, orgID, userID int64) error {
 				return err
 			}
 			if t.Members[0].ID == userID {
-				return organization.ErrLastOrgOwner{UID: userID}
+				return organization.ErrLastOrgOwner{UID: userID, OrgID: orgID}
 			}
 		}
 	}

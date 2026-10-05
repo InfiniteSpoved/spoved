@@ -134,6 +134,8 @@ func UnlinkTeamUserGroup(ctx *context.APIContext) {
 	//     "$ref": "#/responses/notFound"
 	//   "409":
 	//     "$ref": "#/responses/error"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
 
 	group := getTeamUserGroupFromParams(ctx)
 	if ctx.Written() {
@@ -145,6 +147,13 @@ func UnlinkTeamUserGroup(ctx *context.APIContext) {
 		return
 	} else if !linked {
 		ctx.NotFound()
+		return
+	}
+	if managed, err := organization.IsTeamUserGroupManaged(ctx, group.ID, ctx.Org().Team.ID); err != nil {
+		ctx.Error(http.StatusInternalServerError, "IsTeamUserGroupManaged", err)
+		return
+	} else if managed {
+		ctx.Error(http.StatusUnprocessableEntity, "", "the link is managed by the organization administrator role and cannot be removed")
 		return
 	}
 

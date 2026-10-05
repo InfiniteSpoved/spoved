@@ -39,6 +39,8 @@ var (
 	ErrOrganizationCannotBeMember = errors.New("an organization cannot be a member of a user group")
 	// ErrAlreadyMember is returned when adding a user who is already a member of the group.
 	ErrAlreadyMember = errors.New("user is already a member of the user group")
+	// ErrNotOrganization is returned when an organization name names a user.
+	ErrNotOrganization = errors.New("not an organization")
 	// ErrAlreadyLinked is returned when linking a group to a team it is already linked to.
 	ErrAlreadyLinked = errors.New("user group is already linked to the team")
 )
@@ -66,7 +68,7 @@ func addMember(ctx context.Context, group *org_model.UserGroup, user *user_model
 		if err := syncRoles(ctx, user.ID); err != nil {
 			return err
 		}
-		return syncUserForGroupTeams(ctx, group.ID, user.ID)
+		return syncUserForGroupTeams(ctx, group.ID, user.ID, false)
 	})
 }
 
@@ -80,7 +82,7 @@ func RemoveMember(ctx context.Context, group *org_model.UserGroup, userID int64)
 		if err := syncRoles(ctx, userID); err != nil {
 			return err
 		}
-		return syncUserForGroupTeams(ctx, group.ID, userID)
+		return syncUserForGroupTeams(ctx, group.ID, userID, false)
 	})
 }
 
@@ -132,9 +134,9 @@ func SyncDirectoryGroups(ctx context.Context, user *user_model.User, loginSource
 			if err := syncRoles(ctx, user.ID); err != nil {
 				return err
 			}
-			return syncUserForGroupTeams(ctx, group.ID, user.ID)
+			return syncUserForGroupTeams(ctx, group.ID, user.ID, true)
 		})
-		if org_model.IsErrLastOrgOwner(err) || models.IsErrDeleteLastAdminUser(err) {
+		if models.IsErrDeleteLastAdminUser(err) {
 			log.Warn("user group sync: keeping %s in user group %s: %v", user.Name, group.Name, err)
 		} else if err != nil {
 			return err
@@ -168,7 +170,7 @@ func LinkTeam(ctx context.Context, group *org_model.UserGroup, team *org_model.T
 		} else if linked {
 			return ErrAlreadyLinked
 		}
-		if err := org_model.InsertUserGroupTeam(ctx, group.ID, team); err != nil {
+		if err := org_model.InsertUserGroupTeam(ctx, group.ID, team, org_model.LinkManual); err != nil {
 			return err
 		}
 		return syncGroupMembersForTeam(ctx, group.ID, team)
@@ -186,10 +188,40 @@ func UnlinkTeam(ctx context.Context, group *org_model.UserGroup, team *org_model
 	})
 }
 
+// CreateOrganization creates an organization owned by owner, and makes the
+// members of the user groups granting the org-admin role its owners. It lives
+// here, not in services/org, which services/user imports.
+func CreateOrganization(ctx context.Context, org *org_model.Organization, owner *user_model.User) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if err := org_model.CreateOrganization(ctx, org, owner); err != nil {
+			return err
+		}
+		return SyncOrgAdminLinks(ctx, org.ID)
+	})
+}
+
+// CreateGroup creates a user group. A group granting the org-admin role is
+// linked to the Owners team of every organization right away.
+func CreateGroup(ctx context.Context, group *org_model.UserGroup) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if err := org_model.InsertUserGroup(ctx, group); err != nil {
+			return err
+		}
+		if !group.GrantsOrgAdmin {
+			return nil
+		}
+		return SyncOrgAdminLinks(ctx)
+	})
+}
+
 // UpdateGroup updates the name, description and roles of a user group, and
 // the role flags of its members.
 func UpdateGroup(ctx context.Context, group *org_model.UserGroup) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
+		old, err := org_model.GetUserGroupByID(ctx, group.ID)
+		if err != nil {
+			return err
+		}
 		if err := org_model.UpdateUserGroup(ctx, group); err != nil {
 			return err
 		}
@@ -197,7 +229,13 @@ func UpdateGroup(ctx context.Context, group *org_model.UserGroup) error {
 		if err != nil {
 			return err
 		}
-		return syncRoles(ctx, memberIDs...)
+		if err := syncRoles(ctx, memberIDs...); err != nil {
+			return err
+		}
+		if old.GrantsOrgAdmin == group.GrantsOrgAdmin {
+			return nil
+		}
+		return SyncOrgAdminLinks(ctx)
 	})
 }
 
@@ -309,13 +347,13 @@ func syncRoles(ctx context.Context, uids ...int64) error {
 }
 
 // syncUserForGroupTeams updates the membership of a user in all teams the group is linked to.
-func syncUserForGroupTeams(ctx context.Context, groupID, userID int64) error {
+func syncUserForGroupTeams(ctx context.Context, groupID, userID int64, keepLastOwner bool) error {
 	linked, err := org_model.GetUserGroupTeams(ctx, groupID)
 	if err != nil {
 		return err
 	}
 	for _, l := range linked {
-		if err := syncTeamMembership(ctx, l.Team, userID); err != nil {
+		if err := syncTeamMembership(ctx, l.Team, userID, keepLastOwner); err != nil {
 			return err
 		}
 	}
@@ -329,7 +367,7 @@ func syncGroupMembersForTeam(ctx context.Context, groupID int64, team *org_model
 		return err
 	}
 	for _, uid := range memberIDs {
-		if err := syncTeamMembership(ctx, team, uid); err != nil {
+		if err := syncTeamMembership(ctx, team, uid, false); err != nil {
 			return err
 		}
 	}
@@ -338,7 +376,10 @@ func syncGroupMembersForTeam(ctx context.Context, groupID int64, team *org_model
 
 // syncTeamMembership makes the membership of a user in a team match the user
 // groups linked to the team. Memberships not created by a user group are left alone.
-func syncTeamMembership(ctx context.Context, team *org_model.Team, userID int64) error {
+// Removing the last owner of an organization returns ErrLastOrgOwner and
+// changes nothing, unless keepLastOwner is set (a directory removed the user
+// from the group): then the user stays owner, as if added by a user.
+func syncTeamMembership(ctx context.Context, team *org_model.Team, userID int64, keepLastOwner bool) error {
 	viaGroup, err := org_model.IsTeamMemberViaUserGroup(ctx, team.ID, userID)
 	if err != nil {
 		return err
@@ -355,5 +396,149 @@ func syncTeamMembership(ctx context.Context, team *org_model.Team, userID int64)
 	if membership == nil || !membership.IsMembershipAddedByUserGroup() {
 		return nil
 	}
+	if team.IsOwnerTeam() && team.NumMembers == 1 {
+		if !keepLastOwner {
+			return org_model.ErrLastOrgOwner{UID: userID, OrgID: team.OrgID}
+		}
+		log.Warn("user group sync: keeping user %d as the last owner of organization %d", userID, team.OrgID)
+		membership.Reason = org_model.MembershipReasonAddedByUser
+		_, err := db.GetEngine(ctx).ID(membership.ID).Cols("reason").Update(membership)
+		return err
+	}
 	return models.RemoveTeamMember(ctx, team, userID)
+}
+
+// SyncOrgAdminLinks makes the links between the groups granting the org-admin
+// role and the Owners team of each organization (all of them if none is
+// given) match the role and the exclusions: it adds missing managed links,
+// turns a manual link of a granting group into a manual+managed one, and
+// removes links the policy created (or turns manual+managed ones back into
+// manual) once the group no longer grants the role or the organization is
+// excluded. Memberships follow the links, so only memberships created by a
+// user group change. It returns ErrLastOrgOwner, with nothing applied, if an
+// organization would be left without an owner.
+func SyncOrgAdminLinks(ctx context.Context, orgIDs ...int64) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		groups, err := org_model.GetOrgAdminGroups(ctx)
+		if err != nil {
+			return err
+		}
+		excluded, err := org_model.GetOrgAdminExclusionOrgIDs(ctx)
+		if err != nil {
+			return err
+		}
+		if len(orgIDs) == 0 {
+			if err := db.GetEngine(ctx).Table("user").Where("type=?", user_model.UserTypeOrganization).Cols("id").Find(&orgIDs); err != nil {
+				return err
+			}
+		}
+		for _, orgID := range orgIDs {
+			if err := syncOrgAdminLinks(ctx, orgID, groups, excluded.Contains(orgID)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func syncOrgAdminLinks(ctx context.Context, orgID int64, groups []*org_model.UserGroup, excluded bool) error {
+	team, err := org_model.GetOwnerTeam(ctx, orgID)
+	if org_model.IsErrTeamNotExist(err) {
+		log.Warn("org-admin role: organization %d has no Owners team", orgID)
+		return nil
+	} else if err != nil {
+		return err
+	}
+	links := make([]*org_model.UserGroupTeam, 0, 4)
+	if err := db.GetEngine(ctx).Where("team_id=?", team.ID).Find(&links); err != nil {
+		return err
+	}
+	want := make(container.Set[int64], len(groups))
+	if !excluded {
+		for _, g := range groups {
+			want.Add(g.ID)
+		}
+	}
+	var changed []int64 // groups whose members' membership of the Owners team may change
+	e := db.GetEngine(ctx)
+	for _, l := range links {
+		switch {
+		case want.Contains(l.GroupID):
+			want.Remove(l.GroupID)
+			if l.Managed == org_model.LinkManual {
+				if _, err := e.ID(l.ID).Cols("managed").Update(&org_model.UserGroupTeam{Managed: org_model.LinkManualManaged}); err != nil {
+					return err
+				}
+			}
+		case l.Managed == org_model.LinkManaged:
+			if _, err := e.ID(l.ID).Delete(new(org_model.UserGroupTeam)); err != nil {
+				return err
+			}
+			changed = append(changed, l.GroupID)
+		case l.Managed == org_model.LinkManualManaged:
+			if _, err := e.ID(l.ID).Cols("managed").Update(&org_model.UserGroupTeam{Managed: org_model.LinkManual}); err != nil {
+				return err
+			}
+		}
+	}
+	for groupID := range want {
+		if err := org_model.InsertUserGroupTeam(ctx, groupID, team, org_model.LinkManaged); err != nil {
+			return err
+		}
+		changed = append(changed, groupID)
+	}
+	// the same team is used for every member, so its member count stays current
+	for _, groupID := range changed {
+		if err := syncGroupMembersForTeam(ctx, groupID, team); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetOrgAdminExclusions replaces the organizations excluded from the org-admin
+// role and updates the links of the organizations that changed.
+func SetOrgAdminExclusions(ctx context.Context, orgIDs []int64) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		old, err := org_model.GetOrgAdminExclusionOrgIDs(ctx)
+		if err != nil {
+			return err
+		}
+		next := container.SetOf(orgIDs...)
+		var changed []int64
+		for id := range old {
+			if !next.Contains(id) {
+				changed = append(changed, id)
+			}
+		}
+		for id := range next {
+			if !old.Contains(id) {
+				changed = append(changed, id)
+			}
+		}
+		if err := org_model.SetOrgAdminExclusions(ctx, orgIDs); err != nil {
+			return err
+		}
+		if len(changed) == 0 {
+			return nil
+		}
+		return SyncOrgAdminLinks(ctx, changed...)
+	})
+}
+
+// ResolveOrgIDs returns the IDs of the organizations with the given names.
+// It returns user_model.ErrUserNotExist for an unknown name and
+// ErrNotOrganization for a name that is not an organization.
+func ResolveOrgIDs(ctx context.Context, names []string) ([]int64, error) {
+	ids := make([]int64, 0, len(names))
+	for _, name := range names {
+		u, err := user_model.GetUserByName(ctx, name)
+		if err != nil {
+			return nil, err
+		} else if !u.IsOrganization() {
+			return nil, fmt.Errorf("%s: %w", name, ErrNotOrganization)
+		}
+		ids = append(ids, u.ID)
+	}
+	return ids, nil
 }
