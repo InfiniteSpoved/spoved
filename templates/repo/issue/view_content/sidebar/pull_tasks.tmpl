@@ -4,7 +4,7 @@
 		<ul class="tw-list-none tw-p-0">
 			{{range .PullTasks}}
 				<li class="pull-task flex-text-block{{if .IsDone}} done{{end}}">
-					{{if and $.IsSigned (not $.Repository.IsArchived) (or (eq $.SignedUserID $.Issue.PosterID) (eq $.SignedUserID .CreatorID) $.HasIssuesOrPullsWritePermission)}}
+					{{if and $.IsSigned (not $.Repository.IsArchived) (or (eq $.SignedUserID $.Issue.PosterID) (and (eq $.SignedUserID .CreatorID) $.CanCreatePullTask) $.HasIssuesOrPullsWritePermission)}}
 						<form method="post" action="{{$.Issue.Link}}/tasks/{{.ID}}/status">
 							<input type="hidden" name="done" value="{{not .IsDone}}">
 							<button class="btn interact-fg" data-tooltip-content="{{if .IsDone}}{{ctx.Locale.Tr "repo.pulls.tasks.reopen"}}{{else}}{{ctx.Locale.Tr "repo.pulls.tasks.mark_done"}}{{end}}" aria-label="{{if .IsDone}}{{ctx.Locale.Tr "repo.pulls.tasks.reopen"}}{{else}}{{ctx.Locale.Tr "repo.pulls.tasks.mark_done"}}{{end}}">

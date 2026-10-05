@@ -185,6 +185,18 @@ func TestPullTaskPermissions(t *testing.T) {
 		loginUser(t, author.Name).MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("%s/tasks/%d/status", c.link(), first.ID), map[string]string{"done": "false"}), http.StatusSeeOther)
 		assert.False(t, taskDone(t, first.ID))
 
+		// a creator blocked by the owner can no longer change their task
+		blockedCreator := forgery.CreateUser(t, nil)
+		blockedTask := c.apiCreateTask(t, token(blockedCreator), "blocked creator's task", http.StatusCreated)
+		c.apiSetTaskStatus(t, adminToken, blockedTask.ID, "done", http.StatusOK)
+		BlockUser(t, c.repo.Owner, blockedCreator)
+		blockedSession := loginUser(t, blockedCreator.Name)
+		c.apiSetTaskStatus(t, getTokenForLoggedInUser(t, blockedSession, auth_model.AccessTokenScopeWriteRepository), blockedTask.ID, "open", http.StatusForbidden)
+		blockedSession.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("%s/tasks/%d/status", c.link(), blockedTask.ID), map[string]string{"done": "false"}), http.StatusForbidden)
+		assert.True(t, taskDone(t, blockedTask.ID))
+		resp = blockedSession.MakeRequest(t, NewRequest(t, "GET", c.link()), http.StatusOK)
+		assert.Zero(t, NewHTMLParser(t, resp.Body).Find(fmt.Sprintf(`form[action$="/tasks/%d/status"]`, blockedTask.ID)).Length())
+
 		// delete
 		c.apiDeleteTask(t, otherToken, first.ID, http.StatusForbidden)
 		c.apiDeleteTask(t, authorToken, first.ID, http.StatusForbidden)

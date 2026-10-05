@@ -201,7 +201,7 @@ func EditPullTask(ctx *context.APIContext) {
 	if task == nil {
 		return
 	}
-	if !issues_model.CanChangePullTaskStatus(ctx.Doer(), issue, task, ctx.Repo().Permission) {
+	if !issues_model.CanChangePullTaskStatus(ctx, ctx.Doer(), issue, task, ctx.Repo().Permission) {
 		ctx.Error(http.StatusForbidden, "CanChangePullTaskStatus", "You cannot change this task.")
 		return
 	}

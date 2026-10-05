@@ -86,9 +86,11 @@ func CanCreatePullTask(ctx context.Context, doer *user_model.User, issue *Issue,
 	return !user_model.IsBlocked(ctx, issue.Repo.OwnerID, doer.ID)
 }
 
-// CanChangePullTaskStatus returns whether doer may mark the task done or reopen it.
-func CanChangePullTaskStatus(doer *user_model.User, issue *Issue, task *PullTask, perm access_model.Permission) bool {
-	return doer.ID == issue.PosterID || doer.ID == task.CreatorID || perm.CanWrite(unit.TypePullRequests)
+// CanChangePullTaskStatus returns whether doer may mark the task done or reopen it. The creator may
+// only while they can still add tasks, so a blocked creator can't keep reopening their task.
+func CanChangePullTaskStatus(ctx context.Context, doer *user_model.User, issue *Issue, task *PullTask, perm access_model.Permission) bool {
+	return doer.ID == issue.PosterID || perm.CanWrite(unit.TypePullRequests) ||
+		(doer.ID == task.CreatorID && CanCreatePullTask(ctx, doer, issue, perm))
 }
 
 // CanDeletePullTask returns whether doer may delete the task.

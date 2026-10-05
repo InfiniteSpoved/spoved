@@ -71,7 +71,7 @@ func UpdatePullTaskStatus(ctx *context.Context) {
 	if task == nil {
 		return
 	}
-	if !issues_model.CanChangePullTaskStatus(ctx.Doer, issue, task, ctx.Repo.Permission) {
+	if !issues_model.CanChangePullTaskStatus(ctx, ctx.Doer, issue, task, ctx.Repo.Permission) {
 		ctx.Error(http.StatusForbidden)
 		return
 	}
