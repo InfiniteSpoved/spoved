@@ -30976,6 +30976,12 @@
           "format": "int64",
           "x-go-name": "ReviewComments"
         },
+        "scheduled_after": {
+          "description": "time after which the pending scheduled auto merge may run; absent when none is scheduled",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ScheduledAfter"
+        },
         "state": {
           "$ref": "#/definitions/StateType"
         },
