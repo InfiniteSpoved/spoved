@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -26,6 +27,8 @@ import (
 	"forgejo.org/modules/queue"
 	asymkey_service "forgejo.org/services/asymkey"
 	shared_automerge "forgejo.org/services/shared/automerge"
+
+	"xorm.io/builder"
 )
 
 // prPatchCheckerQueue represents a queue to handle update pull request tests
@@ -102,36 +105,37 @@ func CheckPullMergeable(stdCtx context.Context, doer *user_model.User, perm *acc
 			return ErrIsChecking
 		}
 
-		if pb, err := CheckPullBranchProtections(ctx, pr, false); err != nil {
+		// if the doer is admin, they could skip the check of a rule that doesn't apply to admins
+		var exempt func(*git_model.ProtectedBranch) bool
+		if adminSkipProtectionCheck {
+			if err := pr.LoadBaseRepo(ctx); err != nil {
+				return err
+			}
+			isRepoAdmin, err := access_model.IsUserRepoAdmin(ctx, pr.BaseRepo, doer)
+			if err != nil {
+				log.Error("Unable to check if %-v is a repo admin in %-v: %v", doer, pr.BaseRepo, err)
+				return err
+			}
+			exempt = func(pb *git_model.ProtectedBranch) bool {
+				if doer.IsAdmin {
+					return true // instance admin can skip the check
+				}
+				ok, err := pb.IsAdminExempt(ctx, doer, isRepoAdmin)
+				if err != nil {
+					log.Error("IsAdminExempt: %v", err)
+				}
+				return ok
+			}
+		}
+
+		if _, err := CheckPullBranchProtections(ctx, pr, false, exempt); err != nil {
 			if !models.IsErrDisallowedToMerge(err) {
 				log.Error("Error whilst checking pull branch protection for %-v: %v", pr, err)
 				return err
 			}
 
-			// Now the branch protection check failed, check whether the failure could be skipped (skip by setting err = nil)
-
-			// * when doing Auto Merge (Scheduled Merge After Checks Succeed), skip the branch protection check
-			if mergeCheckType == MergeCheckTypeAuto {
-				err = nil
-			}
-
-			// * if the doer is admin, they could skip the branch protection check,
-			// if that's allowed by the protected branch rule.
-			if adminSkipProtectionCheck {
-				if doer.IsAdmin {
-					err = nil // instance admin can skip the check, so clear the error
-				} else if !pb.ApplyToAdmins {
-					if isRepoAdmin, errCheckAdmin := access_model.IsUserRepoAdmin(ctx, pr.BaseRepo, doer); errCheckAdmin != nil {
-						log.Error("Unable to check if %-v is a repo admin in %-v: %v", doer, pr.BaseRepo, errCheckAdmin)
-						return errCheckAdmin
-					} else if isRepoAdmin {
-						err = nil // repo admin can skip the check, so clear the error
-					}
-				}
-			}
-
-			// If there is still a branch protection check error, return it
-			if err != nil {
+			// when doing Auto Merge (Scheduled Merge After Checks Succeed), skip the branch protection check
+			if mergeCheckType != MergeCheckTypeAuto {
 				return err
 			}
 		}
@@ -152,12 +156,12 @@ func CheckPullMergeable(stdCtx context.Context, doer *user_model.User, perm *acc
 
 // isSignedIfRequired check if merge will be signed if required
 func isSignedIfRequired(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, mergeStyle repo_model.MergeStyle) (bool, error) {
-	pb, err := git_model.GetFirstMatchProtectedBranchRule(ctx, pr.BaseRepoID, pr.BaseBranch)
+	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
 	if err != nil {
 		return false, err
 	}
 
-	if pb == nil || !pb.RequireSignedCommits {
+	if !slices.ContainsFunc(rules, func(pb *git_model.ProtectedBranch) bool { return pb.RequireSignedCommits }) {
 		return true, nil
 	}
 
@@ -363,5 +367,26 @@ func Init() error {
 
 	go graceful.GetManager().RunWithCancel(prPatchCheckerQueue)
 	go graceful.GetManager().RunWithShutdownContext(InitializePullRequests)
+	return nil
+}
+
+// CheckPRsForOrgRule rechecks the open pull requests whose base branch the organization rule protects,
+// so their changed protected files follow the rule.
+func CheckPRsForOrgRule(ctx context.Context, rule *git_model.ProtectedBranch) error {
+	repoIDs := builder.Select("id").From("repository").Where(builder.Eq{"owner_id": rule.OrgID})
+	if rule.ApplyToSelectedRepos {
+		repoIDs = builder.Select("repo_id").From("protected_branch_repo").Where(builder.Eq{"protected_branch_id": rule.ID})
+	}
+	var prs []*issues_model.PullRequest
+	if err := db.GetEngine(ctx).Join("INNER", "issue", "issue.id = pull_request.issue_id").
+		Where(builder.Eq{"pull_request.has_merged": false, "issue.is_closed": false}).
+		And(builder.In("pull_request.base_repo_id", repoIDs)).Find(&prs); err != nil {
+		return err
+	}
+	for _, pr := range prs {
+		if rule.Match(pr.BaseBranch) {
+			AddToTaskQueue(ctx, pr)
+		}
+	}
 	return nil
 }

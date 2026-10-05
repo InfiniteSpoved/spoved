@@ -468,5 +468,5 @@ func approvalRulesFromForm(ctx *context.Context) ([]*git_model.ApprovalRule, err
 			RequireCodeOwners: field("approval_rule_code_owners", i) == "true",
 		})
 	}
-	return pull_service.ApprovalRulesFromAPI(ctx, ctx.Repo.Repository, rules)
+	return pull_service.ApprovalRulesFromAPI(ctx, ctx.Repo.Owner, rules)
 }

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"forgejo.org/models"
@@ -70,11 +71,11 @@ func (opts *ApplyDiffPatchOptions) Validate(ctx context.Context, repo *repo_mode
 			return err
 		}
 	} else {
-		protectedBranch, err := git_model.GetFirstMatchProtectedBranchRule(ctx, repo.ID, opts.OldBranch)
+		rules, err := git_model.GetMatchedProtectedBranchRules(ctx, repo.ID, opts.OldBranch)
 		if err != nil {
 			return err
 		}
-		if protectedBranch != nil {
+		for _, protectedBranch := range rules {
 			protectedBranch.Repo = repo
 			if !protectedBranch.CanUserPush(ctx, doer) {
 				return models.ErrUserCannotCommit{
@@ -82,7 +83,7 @@ func (opts *ApplyDiffPatchOptions) Validate(ctx context.Context, repo *repo_mode
 				}
 			}
 		}
-		if protectedBranch != nil && protectedBranch.RequireSignedCommits {
+		if slices.ContainsFunc(rules, func(pb *git_model.ProtectedBranch) bool { return pb.RequireSignedCommits }) {
 			_, _, _, err := asymkey_service.SignCRUDAction(ctx, repo.RepoPath(), doer, repo.RepoPath(), opts.OldBranch)
 			if err != nil {
 				if !asymkey_service.IsErrWontSign(err) {

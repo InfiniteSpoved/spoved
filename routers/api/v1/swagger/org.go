@@ -99,3 +99,17 @@ type swaggerResponseUserGroupList struct {
 	// in:body
 	Body []api.UserGroup `json:"body"`
 }
+
+// OrgBranchProtection
+// swagger:response OrgBranchProtection
+type swaggerResponseOrgBranchProtection struct {
+	// in:body
+	Body api.OrgBranchProtection `json:"body"`
+}
+
+// OrgBranchProtectionList
+// swagger:response OrgBranchProtectionList
+type swaggerResponseOrgBranchProtectionList struct {
+	// in:body
+	Body []api.OrgBranchProtection `json:"body"`
+}

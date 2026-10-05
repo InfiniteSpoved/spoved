@@ -300,11 +300,123 @@ func IsOfficialReviewerTeam(ctx context.Context, issue *Issue, team *organizatio
 		return false, nil
 	}
 
+	return isOfficialReviewerTeamOf(ctx, pb, team), nil
+}
+
+// isOfficialReviewerTeamOf returns whether reviewers in this team can make official reviews under the rule.
+func isOfficialReviewerTeamOf(ctx context.Context, pb *git_model.ProtectedBranch, team *organization.Team) bool {
 	if !pb.EnableApprovalsWhitelist {
-		return team.UnitAccessMode(ctx, unit.TypeCode) >= perm.AccessModeWrite, nil
+		return team.UnitAccessMode(ctx, unit.TypeCode) >= perm.AccessModeWrite
+	}
+	return slices.Contains(pb.ApprovalsWhitelistTeamIDs, team.ID)
+}
+
+// ValidReviewers returns the reviewers whose latest approval or rejection has reviewType and is valid, in review order.
+// They are not official reviewers: the caller decides who is eligible, evaluated now instead of when the review
+// was made. A reviewer must be able to log in and still have write access, and never is the author.
+// pr.Issue and pr.BaseRepo must be loaded.
+func ValidReviewers(ctx context.Context, pb *git_model.ProtectedBranch, pr *PullRequest, reviewType ReviewType) ([]*user_model.User, error) {
+	var reviews []*Review
+	if err := db.GetEngine(ctx).Where("issue_id = ? AND reviewer_id > 0", pr.IssueID).
+		In("type", ReviewTypeApprove, ReviewTypeReject).OrderBy("id").Find(&reviews); err != nil {
+		return nil, err
+	}
+	latest := make(map[int64]*Review, len(reviews))
+	for _, r := range reviews {
+		latest[r.ReviewerID] = r
 	}
 
-	return slices.Contains(pb.ApprovalsWhitelistTeamIDs, team.ID), nil
+	// an organization rule that dismisses stale approvals never counts them, even when undismissed
+	skipStale := reviewType == ReviewTypeApprove && (pb.IgnoreStaleApprovals || pb.OrgID != 0 && pb.DismissStaleApprovals)
+	var reviewers []*user_model.User
+	for _, r := range reviews {
+		if latest[r.ReviewerID] != r || r.Type != reviewType || r.Dismissed ||
+			(skipStale && r.Stale) || r.ReviewerID == pr.Issue.PosterID {
+			continue
+		}
+		u, err := user_model.GetUserByID(ctx, r.ReviewerID)
+		if user_model.IsErrUserNotExist(err) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		if !u.IsActive || u.ProhibitLogin {
+			continue
+		}
+		if write, err := access_model.HasAccessUnit(ctx, u, pr.BaseRepo, unit.TypeCode, perm.AccessModeWrite); err != nil {
+			return nil, err
+		} else if write {
+			reviewers = append(reviewers, u)
+		}
+	}
+	return reviewers, nil
+}
+
+// orgRuleReviewers returns the valid reviewers of reviewType who are official reviewers under the organization rule.
+// Organization rules don't use the stored official flag, which is computed for the first matching rule only.
+func orgRuleReviewers(ctx context.Context, pb *git_model.ProtectedBranch, pr *PullRequest, reviewType ReviewType) ([]*user_model.User, error) {
+	if err := pr.LoadIssue(ctx); err != nil {
+		return nil, err
+	}
+	if err := pr.LoadBaseRepo(ctx); err != nil {
+		return nil, err
+	}
+	reviewers, err := ValidReviewers(ctx, pb, pr, reviewType)
+	if err != nil {
+		return nil, err
+	}
+	official := reviewers[:0]
+	for _, u := range reviewers {
+		if ok, err := git_model.IsUserOfficialReviewer(ctx, pb, u); err != nil {
+			return nil, err
+		} else if ok {
+			official = append(official, u)
+		}
+	}
+	return official, nil
+}
+
+// orgRuleHasReviewRequests returns whether a pending review request goes to an official reviewer or team of the organization rule.
+func orgRuleHasReviewRequests(ctx context.Context, pb *git_model.ProtectedBranch, pr *PullRequest) (bool, error) {
+	// only an approval or rejection answers a request, a comment or pending review doesn't
+	var reviews []*Review
+	if err := db.GetEngine(ctx).Where("issue_id = ?", pr.IssueID).
+		In("type", ReviewTypeApprove, ReviewTypeReject, ReviewTypeRequest).OrderBy("id").Find(&reviews); err != nil {
+		return false, err
+	}
+	latest := make(map[int64]*Review, len(reviews))
+	for _, r := range reviews {
+		if r.ReviewerID > 0 {
+			latest[r.ReviewerID] = r
+		}
+	}
+	for _, r := range reviews {
+		switch {
+		case r.Type != ReviewTypeRequest:
+			continue
+		case r.ReviewerTeamID > 0:
+			team, err := organization.GetTeamByID(ctx, r.ReviewerTeamID)
+			if organization.IsErrTeamNotExist(err) {
+				continue
+			} else if err != nil {
+				return false, err
+			}
+			if isOfficialReviewerTeamOf(ctx, pb, team) {
+				return true, nil
+			}
+		case r.ReviewerID > 0 && latest[r.ReviewerID] == r: // a later review by the reviewer answers the request
+			u, err := user_model.GetUserByID(ctx, r.ReviewerID)
+			if user_model.IsErrUserNotExist(err) {
+				continue
+			} else if err != nil {
+				return false, err
+			}
+			if ok, err := git_model.IsUserOfficialReviewer(ctx, pb, u); err != nil || ok {
+				return ok, err
+			}
+		}
+	}
+	return false, nil
 }
 
 // CreateReview creates a new review based on opts

@@ -8,14 +8,9 @@ import (
 	"fmt"
 	"slices"
 
-	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/organization"
-	"forgejo.org/models/perm"
-	access_model "forgejo.org/models/perm/access"
-	repo_model "forgejo.org/models/repo"
-	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
@@ -69,7 +64,7 @@ func EvaluateApprovalRules(ctx context.Context, pb *git_model.ProtectedBranch, p
 	if err := pr.LoadBaseRepo(ctx); err != nil {
 		return nil, err
 	}
-	approvers, err := validApprovers(ctx, pb, pr)
+	approvers, err := issues_model.ValidReviewers(ctx, pb, pr, issues_model.ReviewTypeApprove)
 	if err != nil {
 		return nil, err
 	}
@@ -113,44 +108,6 @@ func EvaluateApprovalRules(ctx context.Context, pb *git_model.ProtectedBranch, p
 		statuses = append(statuses, s)
 	}
 	return statuses, nil
-}
-
-// validApprovers returns the reviewers whose latest approval or rejection is a valid approval, in review order.
-// They are not official reviewers: the rules decide who is eligible, evaluated now instead of when the review
-// was made. A reviewer must be able to log in and still have write access, and never is the author.
-func validApprovers(ctx context.Context, pb *git_model.ProtectedBranch, pr *issues_model.PullRequest) ([]*user_model.User, error) {
-	var reviews []*issues_model.Review
-	if err := db.GetEngine(ctx).Where("issue_id = ? AND reviewer_id > 0", pr.IssueID).
-		In("type", issues_model.ReviewTypeApprove, issues_model.ReviewTypeReject).OrderBy("id").Find(&reviews); err != nil {
-		return nil, err
-	}
-	latest := make(map[int64]*issues_model.Review, len(reviews))
-	for _, r := range reviews {
-		latest[r.ReviewerID] = r
-	}
-
-	var approvers []*user_model.User
-	for _, r := range reviews {
-		if latest[r.ReviewerID] != r || r.Type != issues_model.ReviewTypeApprove || r.Dismissed ||
-			(pb.IgnoreStaleApprovals && r.Stale) || r.ReviewerID == pr.Issue.PosterID {
-			continue
-		}
-		u, err := user_model.GetUserByID(ctx, r.ReviewerID)
-		if user_model.IsErrUserNotExist(err) {
-			continue
-		} else if err != nil {
-			return nil, err
-		}
-		if !u.IsActive || u.ProhibitLogin {
-			continue
-		}
-		if write, err := access_model.HasAccessUnit(ctx, u, pr.BaseRepo, unit.TypeCode, perm.AccessModeWrite); err != nil {
-			return nil, err
-		} else if write {
-			approvers = append(approvers, u)
-		}
-	}
-	return approvers, nil
 }
 
 // loadPullGitInfo returns the files the pull request changes since the merge base and, if wanted, the CODEOWNERS
@@ -230,7 +187,7 @@ func lineApproved(ctx context.Context, line *issues_model.CodeOwnerRule, approve
 
 // ApprovalRulesFromAPI resolves the user and team names of the rules. Unknown names return
 // user_model.ErrUserNotExist or organization.ErrTeamNotExist.
-func ApprovalRulesFromAPI(ctx context.Context, repo *repo_model.Repository, apiRules []*api.ApprovalRule) ([]*git_model.ApprovalRule, error) {
+func ApprovalRulesFromAPI(ctx context.Context, owner *user_model.User, apiRules []*api.ApprovalRule) ([]*git_model.ApprovalRule, error) {
 	rules := make([]*git_model.ApprovalRule, 0, len(apiRules))
 	for _, r := range apiRules {
 		if r == nil {
@@ -242,13 +199,10 @@ func ApprovalRulesFromAPI(ctx context.Context, repo *repo_model.Repository, apiR
 		}
 		var teamIDs []int64
 		if len(r.Teams) > 0 {
-			if err := repo.LoadOwner(ctx); err != nil {
-				return nil, err
-			}
-			if !repo.Owner.IsOrganization() {
+			if !owner.IsOrganization() {
 				return nil, util.NewInvalidArgumentErrorf("teams only exist in repositories of organizations")
 			}
-			if teamIDs, err = organization.GetTeamIDsByNames(ctx, repo.OwnerID, r.Teams, false); err != nil {
+			if teamIDs, err = organization.GetTeamIDsByNames(ctx, owner.ID, r.Teams, false); err != nil {
 				return nil, err
 			}
 		}

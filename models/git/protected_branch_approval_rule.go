@@ -50,6 +50,17 @@ func GetApprovalRules(ctx context.Context, protectedBranchID int64) ([]*Approval
 // SetApprovalRules replaces the approval rules of a protected branch rule. Users without write access to
 // the repository and teams without access to it are dropped, an invalid rule returns util.ErrInvalidArgument.
 func SetApprovalRules(ctx context.Context, repo *repo_model.Repository, protectedBranchID int64, rules []*ApprovalRule) error {
+	return setApprovalRules(ctx, protectedBranchID, rules, func(r *ApprovalRule) (err error) {
+		if r.UserIDs, err = updateUserWhitelist(ctx, repo, nil, r.UserIDs); err != nil {
+			return err
+		}
+		r.TeamIDs, err = updateTeamWhitelist(ctx, repo, nil, r.TeamIDs)
+		return err
+	})
+}
+
+// setApprovalRules validates the rules, checks their approvers with checkApprovers and replaces the rules of the protected branch rule.
+func setApprovalRules(ctx context.Context, protectedBranchID int64, rules []*ApprovalRule, checkApprovers func(*ApprovalRule) error) error {
 	if len(rules) > MaxApprovalRules {
 		return util.NewInvalidArgumentErrorf("at most %d approval rules are allowed", MaxApprovalRules)
 	}
@@ -70,11 +81,7 @@ func SetApprovalRules(ctx context.Context, repo *repo_model.Repository, protecte
 				return util.NewInvalidArgumentErrorf("approval rule %q: invalid path pattern %q", r.Name, expr)
 			}
 		}
-		var err error
-		if r.UserIDs, err = updateUserWhitelist(ctx, repo, nil, r.UserIDs); err != nil {
-			return err
-		}
-		if r.TeamIDs, err = updateTeamWhitelist(ctx, repo, nil, r.TeamIDs); err != nil {
+		if err := checkApprovers(r); err != nil {
 			return err
 		}
 		if len(r.UserIDs) == 0 && len(r.TeamIDs) == 0 && !r.RequireCodeOwners {

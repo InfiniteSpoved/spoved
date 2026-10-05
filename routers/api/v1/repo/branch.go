@@ -74,7 +74,7 @@ func GetBranch(ctx *context.APIContext) {
 		return
 	}
 
-	branchProtection, err := git_model.GetFirstMatchProtectedBranchRule(ctx, ctx.Repo().Repository.ID, branchName)
+	branchProtection, err := git_model.GetMatchedProtectedBranchRules(ctx, ctx.Repo().Repository.ID, branchName)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "GetBranchProtection", err)
 		return
@@ -273,7 +273,7 @@ func CreateBranch(ctx *context.APIContext) {
 		return
 	}
 
-	branchProtection, err := git_model.GetFirstMatchProtectedBranchRule(ctx, ctx.Repo().Repository.ID, branch.Name)
+	branchProtection, err := git_model.GetMatchedProtectedBranchRules(ctx, ctx.Repo().Repository.ID, branch.Name)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "GetBranchProtection", err)
 		return
@@ -348,7 +348,7 @@ func ListBranches(ctx *context.APIContext) {
 			}
 		}
 
-		rules, err := git_model.FindRepoProtectedBranchRules(ctx, ctx.Repo().Repository.ID)
+		rules, err := git_model.FindProtectedBranchRulesForRepo(ctx, ctx.Repo().Repository)
 		if err != nil {
 			ctx.Error(http.StatusInternalServerError, "FindMatchedProtectedBranchRules", err)
 			return
@@ -373,7 +373,7 @@ func ListBranches(ctx *context.APIContext) {
 				return
 			}
 
-			branchProtection := rules.GetFirstMatched(branches[i].Name)
+			branchProtection := rules.GetMatched(branches[i].Name)
 			apiBranch, err := convert.ToBranch(ctx, ctx.Repo().Repository, branches[i].Name, c, branchProtection, ctx.Doer(), ctx.IsUserRepoAdmin())
 			if err != nil {
 				ctx.Error(http.StatusInternalServerError, "convert.ToBranch", err)
@@ -445,7 +445,10 @@ func UpdateBranch(ctx *context.APIContext) {
 	}
 
 	msg, err := repo_service.RenameBranch(ctx, repo, ctx.Doer(), ctx.Repo().GitRepo, oldName, opt.Name)
-	if err != nil {
+	if errors.Is(err, git_model.ErrBranchIsProtected) {
+		ctx.Error(http.StatusForbidden, "", "The branch or the new branch name is protected.")
+		return
+	} else if err != nil {
 		ctx.Error(http.StatusInternalServerError, "RenameBranch", err)
 		return
 	}
@@ -608,125 +611,12 @@ func CreateBranchProtection(ctx *context.APIContext) {
 		return
 	}
 
-	var requiredApprovals int64
-	if form.RequiredApprovals > 0 {
-		requiredApprovals = form.RequiredApprovals
-	}
-
-	whitelistUsers, err := user_model.GetUserIDsByNames(ctx, form.PushWhitelistUsernames, false)
-	if err != nil {
-		if user_model.IsErrUserNotExist(err) {
-			ctx.Error(http.StatusUnprocessableEntity, "User does not exist", err)
-			return
-		}
-		ctx.Error(http.StatusInternalServerError, "GetUserIDsByNames", err)
-		return
-	}
-	mergeWhitelistUsers, err := user_model.GetUserIDsByNames(ctx, form.MergeWhitelistUsernames, false)
-	if err != nil {
-		if user_model.IsErrUserNotExist(err) {
-			ctx.Error(http.StatusUnprocessableEntity, "User does not exist", err)
-			return
-		}
-		ctx.Error(http.StatusInternalServerError, "GetUserIDsByNames", err)
-		return
-	}
-	approvalsWhitelistUsers, err := user_model.GetUserIDsByNames(ctx, form.ApprovalsWhitelistUsernames, false)
-	if err != nil {
-		if user_model.IsErrUserNotExist(err) {
-			ctx.Error(http.StatusUnprocessableEntity, "User does not exist", err)
-			return
-		}
-		ctx.Error(http.StatusInternalServerError, "GetUserIDsByNames", err)
-		return
-	}
-	var whitelistTeams, mergeWhitelistTeams, approvalsWhitelistTeams []int64
-	if repo.Owner.IsOrganization() {
-		whitelistTeams, err = organization.GetTeamIDsByNames(ctx, repo.OwnerID, form.PushWhitelistTeams, false)
-		if err != nil {
-			if organization.IsErrTeamNotExist(err) {
-				ctx.Error(http.StatusUnprocessableEntity, "Team does not exist", err)
-				return
-			}
-			ctx.Error(http.StatusInternalServerError, "GetTeamIDsByNames", err)
-			return
-		}
-		mergeWhitelistTeams, err = organization.GetTeamIDsByNames(ctx, repo.OwnerID, form.MergeWhitelistTeams, false)
-		if err != nil {
-			if organization.IsErrTeamNotExist(err) {
-				ctx.Error(http.StatusUnprocessableEntity, "Team does not exist", err)
-				return
-			}
-			ctx.Error(http.StatusInternalServerError, "GetTeamIDsByNames", err)
-			return
-		}
-		approvalsWhitelistTeams, err = organization.GetTeamIDsByNames(ctx, repo.OwnerID, form.ApprovalsWhitelistTeams, false)
-		if err != nil {
-			if organization.IsErrTeamNotExist(err) {
-				ctx.Error(http.StatusUnprocessableEntity, "Team does not exist", err)
-				return
-			}
-			ctx.Error(http.StatusInternalServerError, "GetTeamIDsByNames", err)
-			return
-		}
-	}
-
-	deleteUsers, deleteTeams, ok := getAllowlistIDs(ctx, form.DeleteAllowlistUsernames, form.DeleteAllowlistTeams, nil, nil)
+	protectBranch, opts, ok := BranchProtectionFromCreateOption(ctx, repo.Owner, ruleName, form)
 	if !ok {
 		return
 	}
-	forcePushUsers, forcePushTeams, ok := getAllowlistIDs(ctx, form.ForcePushAllowlistUsernames, form.ForcePushAllowlistTeams, nil, nil)
-	if !ok {
-		return
-	}
-
-	approvalRules, ok := approvalRulesFromAPI(ctx, form.ApprovalRules)
-	if !ok {
-		return
-	}
-
-	protectBranch = &git_model.ProtectedBranch{
-		RepoID:                        ctx.Repo().Repository.ID,
-		RuleName:                      ruleName,
-		CanPush:                       form.EnablePush,
-		EnableWhitelist:               form.EnablePush && form.EnablePushWhitelist,
-		EnableMergeWhitelist:          form.EnableMergeWhitelist,
-		WhitelistDeployKeys:           form.EnablePush && form.EnablePushWhitelist && form.PushWhitelistDeployKeys,
-		EnableStatusCheck:             form.EnableStatusCheck,
-		StatusCheckContexts:           form.StatusCheckContexts,
-		EnableApprovalsWhitelist:      form.EnableApprovalsWhitelist,
-		RequiredApprovals:             requiredApprovals,
-		BlockOnRejectedReviews:        form.BlockOnRejectedReviews,
-		BlockOnOfficialReviewRequests: form.BlockOnOfficialReviewRequests,
-		DismissStaleApprovals:         form.DismissStaleApprovals,
-		IgnoreStaleApprovals:          form.IgnoreStaleApprovals,
-		RequireSignedCommits:          form.RequireSignedCommits,
-		ProtectedFilePatterns:         form.ProtectedFilePatterns,
-		UnprotectedFilePatterns:       form.UnprotectedFilePatterns,
-		BlockOnOutdatedBranch:         form.BlockOnOutdatedBranch,
-		ApplyToAdmins:                 form.ApplyToAdmins,
-	}
-	protectBranch.BlockOnUnresolvedConversations = form.BlockOnUnresolvedConversations
-	protectBranch.IgnoreOutdatedConversations = form.IgnoreOutdatedConversations
-	protectBranch.BlockOnIncompleteTasks = form.BlockOnIncompleteTasks
-
-	err = git_model.UpdateProtectBranch(ctx, ctx.Repo().Repository, protectBranch, git_model.WhitelistOptions{
-		UserIDs:          whitelistUsers,
-		TeamIDs:          whitelistTeams,
-		MergeUserIDs:     mergeWhitelistUsers,
-		MergeTeamIDs:     mergeWhitelistTeams,
-		ApprovalsUserIDs: approvalsWhitelistUsers,
-		ApprovalsTeamIDs: approvalsWhitelistTeams,
-		DeployKeyIDs:     form.PushWhitelistDeployKeyIDs,
-
-		DeleteUserIDs:         deleteUsers,
-		DeleteTeamIDs:         deleteTeams,
-		DeleteDeployKeyIDs:    form.DeleteAllowlistDeployKeyIDs,
-		ForcePushUserIDs:      forcePushUsers,
-		ForcePushTeamIDs:      forcePushTeams,
-		ForcePushDeployKeyIDs: form.ForcePushAllowlistDeployKeyIDs,
-		ApprovalRules:         approvalRules,
-	})
+	protectBranch.RepoID = repo.ID
+	err = git_model.UpdateProtectBranch(ctx, repo, protectBranch, opts)
 	if errors.Is(err, util.ErrInvalidArgument) {
 		ctx.Error(http.StatusUnprocessableEntity, "Invalid approval rule", err)
 		return
@@ -834,230 +724,11 @@ func EditBranchProtection(ctx *context.APIContext) {
 		return
 	}
 
-	if form.EnablePush != nil {
-		if !*form.EnablePush {
-			protectBranch.CanPush = false
-			protectBranch.EnableWhitelist = false
-			protectBranch.WhitelistDeployKeys = false
-		} else {
-			protectBranch.CanPush = true
-			if form.EnablePushWhitelist != nil {
-				if !*form.EnablePushWhitelist {
-					protectBranch.EnableWhitelist = false
-					protectBranch.WhitelistDeployKeys = false
-				} else {
-					protectBranch.EnableWhitelist = true
-					if form.PushWhitelistDeployKeys != nil {
-						protectBranch.WhitelistDeployKeys = *form.PushWhitelistDeployKeys
-					}
-				}
-			}
-		}
-	}
-
-	if form.EnableMergeWhitelist != nil {
-		protectBranch.EnableMergeWhitelist = *form.EnableMergeWhitelist
-	}
-
-	if form.EnableStatusCheck != nil {
-		protectBranch.EnableStatusCheck = *form.EnableStatusCheck
-	}
-
-	if form.StatusCheckContexts != nil {
-		protectBranch.StatusCheckContexts = form.StatusCheckContexts
-	}
-
-	if form.RequiredApprovals != nil && *form.RequiredApprovals >= 0 {
-		protectBranch.RequiredApprovals = *form.RequiredApprovals
-	}
-
-	if form.EnableApprovalsWhitelist != nil {
-		protectBranch.EnableApprovalsWhitelist = *form.EnableApprovalsWhitelist
-	}
-
-	if form.BlockOnRejectedReviews != nil {
-		protectBranch.BlockOnRejectedReviews = *form.BlockOnRejectedReviews
-	}
-
-	if form.BlockOnOfficialReviewRequests != nil {
-		protectBranch.BlockOnOfficialReviewRequests = *form.BlockOnOfficialReviewRequests
-	}
-
-	if form.DismissStaleApprovals != nil {
-		protectBranch.DismissStaleApprovals = *form.DismissStaleApprovals
-	}
-
-	if form.IgnoreStaleApprovals != nil {
-		protectBranch.IgnoreStaleApprovals = *form.IgnoreStaleApprovals
-	}
-
-	if form.RequireSignedCommits != nil {
-		protectBranch.RequireSignedCommits = *form.RequireSignedCommits
-	}
-
-	if form.ProtectedFilePatterns != nil {
-		protectBranch.ProtectedFilePatterns = *form.ProtectedFilePatterns
-	}
-
-	if form.UnprotectedFilePatterns != nil {
-		protectBranch.UnprotectedFilePatterns = *form.UnprotectedFilePatterns
-	}
-
-	if form.BlockOnOutdatedBranch != nil {
-		protectBranch.BlockOnOutdatedBranch = *form.BlockOnOutdatedBranch
-	}
-
-	if form.BlockOnUnresolvedConversations != nil {
-		protectBranch.BlockOnUnresolvedConversations = *form.BlockOnUnresolvedConversations
-	}
-
-	if form.IgnoreOutdatedConversations != nil {
-		protectBranch.IgnoreOutdatedConversations = *form.IgnoreOutdatedConversations
-	}
-
-	if form.BlockOnIncompleteTasks != nil {
-		protectBranch.BlockOnIncompleteTasks = *form.BlockOnIncompleteTasks
-	}
-
-	if form.ApplyToAdmins != nil {
-		protectBranch.ApplyToAdmins = *form.ApplyToAdmins
-	}
-
-	var whitelistUsers []int64
-	if form.PushWhitelistUsernames != nil {
-		whitelistUsers, err = user_model.GetUserIDsByNames(ctx, form.PushWhitelistUsernames, false)
-		if err != nil {
-			if user_model.IsErrUserNotExist(err) {
-				ctx.Error(http.StatusUnprocessableEntity, "User does not exist", err)
-				return
-			}
-			ctx.Error(http.StatusInternalServerError, "GetUserIDsByNames", err)
-			return
-		}
-	} else {
-		whitelistUsers = protectBranch.WhitelistUserIDs
-	}
-	var mergeWhitelistUsers []int64
-	if form.MergeWhitelistUsernames != nil {
-		mergeWhitelistUsers, err = user_model.GetUserIDsByNames(ctx, form.MergeWhitelistUsernames, false)
-		if err != nil {
-			if user_model.IsErrUserNotExist(err) {
-				ctx.Error(http.StatusUnprocessableEntity, "User does not exist", err)
-				return
-			}
-			ctx.Error(http.StatusInternalServerError, "GetUserIDsByNames", err)
-			return
-		}
-	} else {
-		mergeWhitelistUsers = protectBranch.MergeWhitelistUserIDs
-	}
-	var approvalsWhitelistUsers []int64
-	if form.ApprovalsWhitelistUsernames != nil {
-		approvalsWhitelistUsers, err = user_model.GetUserIDsByNames(ctx, form.ApprovalsWhitelistUsernames, false)
-		if err != nil {
-			if user_model.IsErrUserNotExist(err) {
-				ctx.Error(http.StatusUnprocessableEntity, "User does not exist", err)
-				return
-			}
-			ctx.Error(http.StatusInternalServerError, "GetUserIDsByNames", err)
-			return
-		}
-	} else {
-		approvalsWhitelistUsers = protectBranch.ApprovalsWhitelistUserIDs
-	}
-
-	var whitelistTeams, mergeWhitelistTeams, approvalsWhitelistTeams []int64
-	if repo.Owner.IsOrganization() {
-		if form.PushWhitelistTeams != nil {
-			whitelistTeams, err = organization.GetTeamIDsByNames(ctx, repo.OwnerID, form.PushWhitelistTeams, false)
-			if err != nil {
-				if organization.IsErrTeamNotExist(err) {
-					ctx.Error(http.StatusUnprocessableEntity, "Team does not exist", err)
-					return
-				}
-				ctx.Error(http.StatusInternalServerError, "GetTeamIDsByNames", err)
-				return
-			}
-		} else {
-			whitelistTeams = protectBranch.WhitelistTeamIDs
-		}
-		if form.MergeWhitelistTeams != nil {
-			mergeWhitelistTeams, err = organization.GetTeamIDsByNames(ctx, repo.OwnerID, form.MergeWhitelistTeams, false)
-			if err != nil {
-				if organization.IsErrTeamNotExist(err) {
-					ctx.Error(http.StatusUnprocessableEntity, "Team does not exist", err)
-					return
-				}
-				ctx.Error(http.StatusInternalServerError, "GetTeamIDsByNames", err)
-				return
-			}
-		} else {
-			mergeWhitelistTeams = protectBranch.MergeWhitelistTeamIDs
-		}
-		if form.ApprovalsWhitelistTeams != nil {
-			approvalsWhitelistTeams, err = organization.GetTeamIDsByNames(ctx, repo.OwnerID, form.ApprovalsWhitelistTeams, false)
-			if err != nil {
-				if organization.IsErrTeamNotExist(err) {
-					ctx.Error(http.StatusUnprocessableEntity, "Team does not exist", err)
-					return
-				}
-				ctx.Error(http.StatusInternalServerError, "GetTeamIDsByNames", err)
-				return
-			}
-		} else {
-			approvalsWhitelistTeams = protectBranch.ApprovalsWhitelistTeamIDs
-		}
-	}
-
-	whitelistDeployKeys := protectBranch.WhitelistDeployKeyIDs
-	if form.PushWhitelistDeployKeyIDs != nil {
-		whitelistDeployKeys = form.PushWhitelistDeployKeyIDs
-	}
-
-	deleteUsers, deleteTeams, ok := getAllowlistIDs(ctx, form.DeleteAllowlistUsernames, form.DeleteAllowlistTeams,
-		protectBranch.DeleteAllowlistUserIDs, protectBranch.DeleteAllowlistTeamIDs)
+	opts, ok := ApplyEditBranchProtectionOption(ctx, repo.Owner, protectBranch, form)
 	if !ok {
 		return
 	}
-	forcePushUsers, forcePushTeams, ok := getAllowlistIDs(ctx, form.ForcePushAllowlistUsernames, form.ForcePushAllowlistTeams,
-		protectBranch.ForcePushAllowlistUserIDs, protectBranch.ForcePushAllowlistTeamIDs)
-	if !ok {
-		return
-	}
-	deleteDeployKeys := protectBranch.DeleteAllowlistDeployKeyIDs
-	if form.DeleteAllowlistDeployKeyIDs != nil {
-		deleteDeployKeys = form.DeleteAllowlistDeployKeyIDs
-	}
-	forcePushDeployKeys := protectBranch.ForcePushAllowlistDeployKeyIDs
-	if form.ForcePushAllowlistDeployKeyIDs != nil {
-		forcePushDeployKeys = form.ForcePushAllowlistDeployKeyIDs
-	}
-
-	var approvalRules []*git_model.ApprovalRule
-	if form.ApprovalRules != nil {
-		var ok bool
-		if approvalRules, ok = approvalRulesFromAPI(ctx, form.ApprovalRules); !ok {
-			return
-		}
-	}
-
-	err = git_model.UpdateProtectBranch(ctx, ctx.Repo().Repository, protectBranch, git_model.WhitelistOptions{
-		UserIDs:          whitelistUsers,
-		TeamIDs:          whitelistTeams,
-		MergeUserIDs:     mergeWhitelistUsers,
-		MergeTeamIDs:     mergeWhitelistTeams,
-		ApprovalsUserIDs: approvalsWhitelistUsers,
-		ApprovalsTeamIDs: approvalsWhitelistTeams,
-		DeployKeyIDs:     whitelistDeployKeys,
-		ApprovalRules:    approvalRules,
-
-		DeleteUserIDs:         deleteUsers,
-		DeleteTeamIDs:         deleteTeams,
-		DeleteDeployKeyIDs:    deleteDeployKeys,
-		ForcePushUserIDs:      forcePushUsers,
-		ForcePushTeamIDs:      forcePushTeams,
-		ForcePushDeployKeyIDs: forcePushDeployKeys,
-	})
+	err = git_model.UpdateProtectBranch(ctx, repo, protectBranch, opts)
 	if errors.Is(err, util.ErrInvalidArgument) {
 		ctx.Error(http.StatusUnprocessableEntity, "Invalid approval rule", err)
 		return
@@ -1170,9 +841,162 @@ func DeleteBranchProtection(ctx *context.APIContext) {
 	ctx.Status(http.StatusNoContent)
 }
 
-// getAllowlistIDs resolves the usernames and team names of an allow-list to IDs. A nil list keeps
-// the current IDs. On error it writes the response and returns false.
-func getAllowlistIDs(ctx *context.APIContext, usernames, teams []string, userIDs, teamIDs []int64) ([]int64, []int64, bool) {
+// BranchProtectionFromCreateOption builds a new rule without RepoID and its allow-lists from form,
+// looking teams up in owner. On error it writes the response and returns false.
+func BranchProtectionFromCreateOption(ctx *context.APIContext, owner *user_model.User, ruleName string, form *api.CreateBranchProtectionOption) (*git_model.ProtectedBranch, git_model.WhitelistOptions, bool) {
+	var opts git_model.WhitelistOptions
+	lists := []struct {
+		usernames, teams []string
+		userIDs, teamIDs *[]int64
+	}{
+		{form.PushWhitelistUsernames, form.PushWhitelistTeams, &opts.UserIDs, &opts.TeamIDs},
+		{form.MergeWhitelistUsernames, form.MergeWhitelistTeams, &opts.MergeUserIDs, &opts.MergeTeamIDs},
+		{form.ApprovalsWhitelistUsernames, form.ApprovalsWhitelistTeams, &opts.ApprovalsUserIDs, &opts.ApprovalsTeamIDs},
+		{form.DeleteAllowlistUsernames, form.DeleteAllowlistTeams, &opts.DeleteUserIDs, &opts.DeleteTeamIDs},
+		{form.ForcePushAllowlistUsernames, form.ForcePushAllowlistTeams, &opts.ForcePushUserIDs, &opts.ForcePushTeamIDs},
+	}
+	for _, l := range lists {
+		var ok bool
+		if *l.userIDs, *l.teamIDs, ok = getAllowlistIDs(ctx, owner, l.usernames, l.teams, nil, nil); !ok {
+			return nil, opts, false
+		}
+	}
+	opts.DeployKeyIDs = form.PushWhitelistDeployKeyIDs
+	opts.DeleteDeployKeyIDs = form.DeleteAllowlistDeployKeyIDs
+	opts.ForcePushDeployKeyIDs = form.ForcePushAllowlistDeployKeyIDs
+
+	var ok bool
+	if opts.ApprovalRules, ok = approvalRulesFromAPI(ctx, owner, form.ApprovalRules); !ok {
+		return nil, opts, false
+	}
+
+	var requiredApprovals int64
+	if form.RequiredApprovals > 0 {
+		requiredApprovals = form.RequiredApprovals
+	}
+	return &git_model.ProtectedBranch{
+		RuleName:                       ruleName,
+		CanPush:                        form.EnablePush,
+		EnableWhitelist:                form.EnablePush && form.EnablePushWhitelist,
+		EnableMergeWhitelist:           form.EnableMergeWhitelist,
+		WhitelistDeployKeys:            form.EnablePush && form.EnablePushWhitelist && form.PushWhitelistDeployKeys,
+		EnableStatusCheck:              form.EnableStatusCheck,
+		StatusCheckContexts:            form.StatusCheckContexts,
+		EnableApprovalsWhitelist:       form.EnableApprovalsWhitelist,
+		RequiredApprovals:              requiredApprovals,
+		BlockOnRejectedReviews:         form.BlockOnRejectedReviews,
+		BlockOnOfficialReviewRequests:  form.BlockOnOfficialReviewRequests,
+		DismissStaleApprovals:          form.DismissStaleApprovals,
+		IgnoreStaleApprovals:           form.IgnoreStaleApprovals,
+		RequireSignedCommits:           form.RequireSignedCommits,
+		ProtectedFilePatterns:          form.ProtectedFilePatterns,
+		UnprotectedFilePatterns:        form.UnprotectedFilePatterns,
+		BlockOnOutdatedBranch:          form.BlockOnOutdatedBranch,
+		ApplyToAdmins:                  form.ApplyToAdmins,
+		BlockOnUnresolvedConversations: form.BlockOnUnresolvedConversations,
+		IgnoreOutdatedConversations:    form.IgnoreOutdatedConversations,
+		BlockOnIncompleteTasks:         form.BlockOnIncompleteTasks,
+	}, opts, true
+}
+
+// ApplyEditBranchProtectionOption changes protectBranch by the fields set in form and returns its allow-lists,
+// looking teams up in owner. On error it writes the response and returns false.
+func ApplyEditBranchProtectionOption(ctx *context.APIContext, owner *user_model.User, protectBranch *git_model.ProtectedBranch, form *api.EditBranchProtectionOption) (git_model.WhitelistOptions, bool) {
+	if form.EnablePush != nil {
+		if !*form.EnablePush {
+			protectBranch.CanPush = false
+			protectBranch.EnableWhitelist = false
+			protectBranch.WhitelistDeployKeys = false
+		} else {
+			protectBranch.CanPush = true
+			if form.EnablePushWhitelist != nil {
+				if !*form.EnablePushWhitelist {
+					protectBranch.EnableWhitelist = false
+					protectBranch.WhitelistDeployKeys = false
+				} else {
+					protectBranch.EnableWhitelist = true
+					if form.PushWhitelistDeployKeys != nil {
+						protectBranch.WhitelistDeployKeys = *form.PushWhitelistDeployKeys
+					}
+				}
+			}
+		}
+	}
+	setIfNotNil := func(dst, src *bool) {
+		if src != nil {
+			*dst = *src
+		}
+	}
+	setIfNotNil(&protectBranch.EnableMergeWhitelist, form.EnableMergeWhitelist)
+	setIfNotNil(&protectBranch.EnableStatusCheck, form.EnableStatusCheck)
+	if form.StatusCheckContexts != nil {
+		protectBranch.StatusCheckContexts = form.StatusCheckContexts
+	}
+	if form.RequiredApprovals != nil && *form.RequiredApprovals >= 0 {
+		protectBranch.RequiredApprovals = *form.RequiredApprovals
+	}
+	setIfNotNil(&protectBranch.EnableApprovalsWhitelist, form.EnableApprovalsWhitelist)
+	setIfNotNil(&protectBranch.BlockOnRejectedReviews, form.BlockOnRejectedReviews)
+	setIfNotNil(&protectBranch.BlockOnOfficialReviewRequests, form.BlockOnOfficialReviewRequests)
+	setIfNotNil(&protectBranch.DismissStaleApprovals, form.DismissStaleApprovals)
+	setIfNotNil(&protectBranch.IgnoreStaleApprovals, form.IgnoreStaleApprovals)
+	setIfNotNil(&protectBranch.RequireSignedCommits, form.RequireSignedCommits)
+	if form.ProtectedFilePatterns != nil {
+		protectBranch.ProtectedFilePatterns = *form.ProtectedFilePatterns
+	}
+	if form.UnprotectedFilePatterns != nil {
+		protectBranch.UnprotectedFilePatterns = *form.UnprotectedFilePatterns
+	}
+	setIfNotNil(&protectBranch.BlockOnOutdatedBranch, form.BlockOnOutdatedBranch)
+	setIfNotNil(&protectBranch.BlockOnUnresolvedConversations, form.BlockOnUnresolvedConversations)
+	setIfNotNil(&protectBranch.IgnoreOutdatedConversations, form.IgnoreOutdatedConversations)
+	setIfNotNil(&protectBranch.BlockOnIncompleteTasks, form.BlockOnIncompleteTasks)
+	setIfNotNil(&protectBranch.ApplyToAdmins, form.ApplyToAdmins)
+
+	opts := git_model.WhitelistOptions{
+		DeployKeyIDs:          protectBranch.WhitelistDeployKeyIDs,
+		DeleteDeployKeyIDs:    protectBranch.DeleteAllowlistDeployKeyIDs,
+		ForcePushDeployKeyIDs: protectBranch.ForcePushAllowlistDeployKeyIDs,
+	}
+	lists := []struct {
+		usernames, teams       []string
+		curUserIDs, curTeamIDs []int64
+		userIDs, teamIDs       *[]int64
+	}{
+		{form.PushWhitelistUsernames, form.PushWhitelistTeams, protectBranch.WhitelistUserIDs, protectBranch.WhitelistTeamIDs, &opts.UserIDs, &opts.TeamIDs},
+		{form.MergeWhitelistUsernames, form.MergeWhitelistTeams, protectBranch.MergeWhitelistUserIDs, protectBranch.MergeWhitelistTeamIDs, &opts.MergeUserIDs, &opts.MergeTeamIDs},
+		{form.ApprovalsWhitelistUsernames, form.ApprovalsWhitelistTeams, protectBranch.ApprovalsWhitelistUserIDs, protectBranch.ApprovalsWhitelistTeamIDs, &opts.ApprovalsUserIDs, &opts.ApprovalsTeamIDs},
+		{form.DeleteAllowlistUsernames, form.DeleteAllowlistTeams, protectBranch.DeleteAllowlistUserIDs, protectBranch.DeleteAllowlistTeamIDs, &opts.DeleteUserIDs, &opts.DeleteTeamIDs},
+		{form.ForcePushAllowlistUsernames, form.ForcePushAllowlistTeams, protectBranch.ForcePushAllowlistUserIDs, protectBranch.ForcePushAllowlistTeamIDs, &opts.ForcePushUserIDs, &opts.ForcePushTeamIDs},
+	}
+	for _, l := range lists {
+		var ok bool
+		if *l.userIDs, *l.teamIDs, ok = getAllowlistIDs(ctx, owner, l.usernames, l.teams, l.curUserIDs, l.curTeamIDs); !ok {
+			return opts, false
+		}
+	}
+	if form.PushWhitelistDeployKeyIDs != nil {
+		opts.DeployKeyIDs = form.PushWhitelistDeployKeyIDs
+	}
+	if form.DeleteAllowlistDeployKeyIDs != nil {
+		opts.DeleteDeployKeyIDs = form.DeleteAllowlistDeployKeyIDs
+	}
+	if form.ForcePushAllowlistDeployKeyIDs != nil {
+		opts.ForcePushDeployKeyIDs = form.ForcePushAllowlistDeployKeyIDs
+	}
+
+	if form.ApprovalRules != nil {
+		var ok bool
+		if opts.ApprovalRules, ok = approvalRulesFromAPI(ctx, owner, form.ApprovalRules); !ok {
+			return opts, false
+		}
+	}
+	return opts, true
+}
+
+// getAllowlistIDs resolves the user and team names, keeping userIDs or teamIDs for a nil list.
+// Teams are looked up in owner. On error it writes the response and returns false.
+func getAllowlistIDs(ctx *context.APIContext, owner *user_model.User, usernames, teams []string, userIDs, teamIDs []int64) ([]int64, []int64, bool) {
 	var err error
 	if usernames != nil {
 		if userIDs, err = user_model.GetUserIDsByNames(ctx, usernames, false); err != nil {
@@ -1184,9 +1008,8 @@ func getAllowlistIDs(ctx *context.APIContext, usernames, teams []string, userIDs
 			return nil, nil, false
 		}
 	}
-	repo := ctx.Repo().Repository
-	if teams != nil && repo.Owner.IsOrganization() {
-		if teamIDs, err = organization.GetTeamIDsByNames(ctx, repo.OwnerID, teams, false); err != nil {
+	if teams != nil && owner.IsOrganization() {
+		if teamIDs, err = organization.GetTeamIDsByNames(ctx, owner.ID, teams, false); err != nil {
 			if organization.IsErrTeamNotExist(err) {
 				ctx.Error(http.StatusUnprocessableEntity, "Team does not exist", err)
 			} else {
@@ -1198,9 +1021,9 @@ func getAllowlistIDs(ctx *context.APIContext, usernames, teams []string, userIDs
 	return userIDs, teamIDs, true
 }
 
-// approvalRulesFromAPI resolves the names of the approval rules. On error it writes the response and returns false.
-func approvalRulesFromAPI(ctx *context.APIContext, rules []*api.ApprovalRule) ([]*git_model.ApprovalRule, bool) {
-	resolved, err := pull_service.ApprovalRulesFromAPI(ctx, ctx.Repo().Repository, rules)
+// approvalRulesFromAPI resolves the names of the approval rules, teams in owner. On error it writes the response and returns false.
+func approvalRulesFromAPI(ctx *context.APIContext, owner *user_model.User, rules []*api.ApprovalRule) ([]*git_model.ApprovalRule, bool) {
+	resolved, err := pull_service.ApprovalRulesFromAPI(ctx, owner, rules)
 	switch {
 	case user_model.IsErrUserNotExist(err):
 		ctx.Error(http.StatusUnprocessableEntity, "User does not exist", err)

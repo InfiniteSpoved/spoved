@@ -906,6 +906,14 @@ func HasEnoughApprovals(ctx context.Context, protectBranch *git_model.ProtectedB
 
 // GetGrantedApprovalsCount returns the number of granted approvals for pr. A granted approval must be authored by a user in an approval whitelist.
 func GetGrantedApprovalsCount(ctx context.Context, protectBranch *git_model.ProtectedBranch, pr *PullRequest) int64 {
+	if protectBranch.OrgID != 0 {
+		approvers, err := orgRuleReviewers(ctx, protectBranch, pr, ReviewTypeApprove)
+		if err != nil {
+			log.Error("GetGrantedApprovalsCount: %v", err)
+			return 0
+		}
+		return int64(len(approvers))
+	}
 	sess := db.GetEngine(ctx).Where("issue_id = ?", pr.IssueID).
 		And("type = ?", ReviewTypeApprove).
 		And("official = ?", true).
@@ -927,6 +935,14 @@ func MergeBlockedByRejectedReview(ctx context.Context, protectBranch *git_model.
 	if !protectBranch.BlockOnRejectedReviews {
 		return false
 	}
+	if protectBranch.OrgID != 0 {
+		rejecters, err := orgRuleReviewers(ctx, protectBranch, pr, ReviewTypeReject)
+		if err != nil {
+			log.Error("MergeBlockedByRejectedReview: %v", err)
+			return true
+		}
+		return len(rejecters) > 0
+	}
 	rejectExist, err := db.GetEngine(ctx).Where("issue_id = ?", pr.IssueID).
 		And("type = ?", ReviewTypeReject).
 		And("official = ?", true).
@@ -945,6 +961,14 @@ func MergeBlockedByRejectedReview(ctx context.Context, protectBranch *git_model.
 func MergeBlockedByOfficialReviewRequests(ctx context.Context, protectBranch *git_model.ProtectedBranch, pr *PullRequest) bool {
 	if !protectBranch.BlockOnOfficialReviewRequests {
 		return false
+	}
+	if protectBranch.OrgID != 0 {
+		has, err := orgRuleHasReviewRequests(ctx, protectBranch, pr)
+		if err != nil {
+			log.Error("MergeBlockedByOfficialReviewRequests: %v", err)
+			return true
+		}
+		return has
 	}
 	has, err := db.GetEngine(ctx).Where("issue_id = ?", pr.IssueID).
 		And("type = ?", ReviewTypeRequest).

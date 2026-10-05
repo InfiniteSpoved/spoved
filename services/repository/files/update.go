@@ -464,11 +464,11 @@ func CreateOrUpdateFile(ctx context.Context, t *TemporaryUploadRepository, file 
 
 // VerifyBranchProtection verify the branch protection for modifying the given treePath on the given branch
 func VerifyBranchProtection(ctx context.Context, repo *repo_model.Repository, doer *user_model.User, branchName string, treePaths []string) error {
-	protectedBranch, err := git_model.GetFirstMatchProtectedBranchRule(ctx, repo.ID, branchName)
+	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, repo.ID, branchName)
 	if err != nil {
 		return err
 	}
-	if protectedBranch != nil {
+	for _, protectedBranch := range rules {
 		protectedBranch.Repo = repo
 		globUnprotected := protectedBranch.GetUnprotectedFilePatterns()
 		globProtected := protectedBranch.GetProtectedFilePatterns()
