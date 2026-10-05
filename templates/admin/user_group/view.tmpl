@@ -4,7 +4,7 @@
 			{{.Group.Name}}
 		</h4>
 		<div class="ui attached segment">
-			<form class="ui form" action="{{.GroupLink}}/edit" method="post">
+			<form class="ui form{{if .ConfirmRoles}} warning{{end}}" action="{{.GroupLink}}/edit" method="post">
 				{{template "admin/user_group/form_fields" .}}
 				{{if .ConfirmRoles}}
 					<div class="ui warning message user-group-role-loss">
