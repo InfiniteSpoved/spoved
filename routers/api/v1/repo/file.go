@@ -202,7 +202,7 @@ func GetRawFileOrLFS(ctx *context.APIContext) {
 		return
 	}
 
-	if setting.LFS.Storage.MinioConfig.ServeDirect {
+	if setting.LFS.Storage.ServeDirect() {
 		// If we have a signed url (S3, object storage), redirect to this directly.
 		u, err := storage.LFS.URL(pointer.RelativePath(), blob.Name(), nil)
 		if u != nil && err == nil {
@@ -334,7 +334,7 @@ func download(ctx *context.APIContext, archiveName string, archiver *repo_model.
 	))
 
 	rPath := archiver.RelativePath()
-	if setting.RepoArchive.Storage.MinioConfig.ServeDirect {
+	if setting.RepoArchive.Storage.ServeDirect() {
 		// If we have a signed url (S3, object storage), redirect to this directly.
 		u, err := storage.RepoArchives.URL(rPath, downloadName, nil)
 		if u != nil && err == nil {

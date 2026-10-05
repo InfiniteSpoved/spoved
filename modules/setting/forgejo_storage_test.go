@@ -29,6 +29,9 @@ func testStorageGetPath(storage *Storage) string {
 	if storage.Type == MinioStorageType {
 		return storage.MinioConfig.BasePath
 	}
+	if storage.Type == AzureBlobStorageType {
+		return storage.AzureBlobConfig.BasePath
+	}
 	return storage.Path
 }
 
@@ -85,6 +88,9 @@ func testLegacyPath(t StorageType, section string) string {
 func testStorageTypeToSetting(t StorageType) string {
 	if t == LocalStorageType {
 		return "PATH"
+	}
+	if t == AzureBlobStorageType {
+		return "AZURE_BLOB_BASE_PATH"
 	}
 	return "MINIO_BASE_PATH"
 }

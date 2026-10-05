@@ -132,3 +132,45 @@ func TestMigrateActionsArtifacts(t *testing.T) {
 	_, err = dstStorage.Stat(notFound)
 	require.Error(t, err)
 }
+
+func TestMigrateActionsArtifactsToAzureBlob(t *testing.T) {
+	endpoint := os.Getenv("TEST_AZURITE_URL")
+	if endpoint == "" {
+		t.Skip("TEST_AZURITE_URL not set")
+	}
+	require.NoError(t, unittest.PrepareTestDatabase())
+
+	srcStorage, _ := createLocalStorage(t)
+	defer test.MockVariableValue(&storage.ActionsArtifacts, srcStorage)()
+
+	storagePath := "/azureblob"
+	_, err := db.GetEngine(db.DefaultContext).Insert(&actions.ActionArtifact{
+		ID:           142,
+		ArtifactName: storagePath,
+		StoragePath:  storagePath,
+		Status:       int64(actions.ArtifactStatusUploadConfirmed),
+	})
+	require.NoError(t, err)
+	_, err = srcStorage.Save(storagePath, strings.NewReader("content"), -1)
+	require.NoError(t, err)
+
+	dstStorage, err := storage.NewAzureBlobStorage(t.Context(), &setting.Storage{
+		AzureBlobConfig: setting.AzureBlobStorageConfig{
+			Endpoint:    "http://" + endpoint + "/devstoreaccount1/",
+			AccountName: "devstoreaccount1",
+			AccountKey:  "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==", // Azurite's well-known key
+			Container:   "test-migrate",
+			BasePath:    "actions_artifacts/",
+		},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, migrateActionsArtifacts(db.DefaultContext, dstStorage))
+
+	object, err := dstStorage.Open(storagePath)
+	require.NoError(t, err)
+	defer object.Close()
+	buf, err := io.ReadAll(object)
+	require.NoError(t, err)
+	assert.Equal(t, "content", string(buf))
+}
