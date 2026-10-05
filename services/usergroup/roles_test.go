@@ -173,6 +173,23 @@ func TestRolesLastUsableAdminGuard(t *testing.T) {
 	}
 }
 
+func TestRolesLastAdminGuardSameTransaction(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	// users 1 and 5 are the only admins, both through the same group
+	setUserFlags(t, 1, false, false)
+	group := newRoleGroup(t, "admins", true, false)
+	require.NoError(t, AddMember(ctx, group, loadUser(t, 1)))
+	require.NoError(t, AddMember(ctx, group, loadUser(t, 5)))
+
+	err := DeleteGroup(ctx, group)
+	assert.True(t, models.IsErrDeleteLastAdminUser(err), "%v", err)
+	unittest.AssertExistsAndLoadBean(t, &org_model.UserGroup{ID: group.ID})
+	assertRoles(t, 1, true, false)
+	assertRoles(t, 5, true, false)
+}
+
 func TestRolesUserDeletionRemovesGrants(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	ctx := db.DefaultContext
