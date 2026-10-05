@@ -1647,6 +1647,69 @@ func GetPullRequestCommits(ctx *context.APIContext) {
 	ctx.JSON(http.StatusOK, &apiCommits)
 }
 
+// GetPullRequestApprovals gets the status of the approval rules of a pull request
+func GetPullRequestApprovals(ctx *context.APIContext) {
+	// swagger:operation GET /repos/{owner}/{repo}/pulls/{index}/approvals repository repoGetPullRequestApprovals
+	// ---
+	// summary: Get the approval rules of a pull request and whether each is satisfied
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: index
+	//   in: path
+	//   description: index of the pull request
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// responses:
+	//   "200":
+	//     "$ref": "#/responses/PullApprovalRuleList"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+
+	pr, err := issues_model.GetPullRequestByIndex(ctx, ctx.Repo().Repository.ID, ctx.ParamsInt64(":index"))
+	if err != nil {
+		if issues_model.IsErrPullRequestNotExist(err) {
+			ctx.NotFound()
+		} else {
+			ctx.Error(http.StatusInternalServerError, "GetPullRequestByIndex", err)
+		}
+		return
+	}
+
+	rules := []*api.PullApprovalRule{}
+	pb, err := git_model.GetFirstMatchProtectedBranchRule(ctx, pr.BaseRepoID, pr.BaseBranch)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "GetFirstMatchProtectedBranchRule", err)
+		return
+	}
+	if pb != nil {
+		statuses, err := pull_service.ApprovalRuleStatuses(ctx, pb, pr)
+		if err != nil {
+			ctx.Error(http.StatusInternalServerError, "ApprovalRuleStatuses", err)
+			return
+		}
+		for _, s := range statuses {
+			approvers := make([]string, len(s.Approvers))
+			for i, u := range s.Approvers {
+				approvers[i] = u.Name
+			}
+			rules = append(rules, &api.PullApprovalRule{Name: s.Name, Required: s.Required, Granted: s.Granted, Satisfied: s.Satisfied, Approvers: approvers})
+		}
+	}
+	ctx.JSON(http.StatusOK, rules)
+}
+
 // GetPullRequestFiles gets all changed files associated with a given PR
 func GetPullRequestFiles(ctx *context.APIContext) {
 	// swagger:operation GET /repos/{owner}/{repo}/pulls/{index}/files repository repoGetPullRequestFiles

@@ -1,0 +1,125 @@
+// Copyright 2026 The Forgejo Authors. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package git
+
+import (
+	"context"
+	"slices"
+	"strings"
+
+	"forgejo.org/models/db"
+	"forgejo.org/models/organization"
+	repo_model "forgejo.org/models/repo"
+	"forgejo.org/modules/timeutil"
+	"forgejo.org/modules/util"
+
+	"github.com/gobwas/glob"
+)
+
+// MaxApprovalRules is the number of approval rules a protected branch rule can have.
+const MaxApprovalRules = 20
+
+// ApprovalRule is a named approval requirement of a protected branch rule. Every applicable rule must be
+// satisfied before a pull request can be merged, on top of the RequiredApprovals of the protected branch rule.
+type ApprovalRule struct {
+	ID                int64   `xorm:"pk autoincr"`
+	ProtectedBranchID int64   `xorm:"INDEX UNIQUE(s) NOT NULL"`
+	Name              string  `xorm:"VARCHAR(255) UNIQUE(s) NOT NULL"`
+	RequiredCount     int64   `xorm:"NOT NULL DEFAULT 1"`
+	UserIDs           []int64 `xorm:"JSON TEXT"`
+	TeamIDs           []int64 `xorm:"JSON TEXT"`
+	// PathPatterns is a semicolon separated list of globs like ProtectedBranch.ProtectedFilePatterns.
+	// The rule only applies when the pull request changes a matching file.
+	PathPatterns      string             `xorm:"TEXT"`
+	RequireCodeOwners bool               `xorm:"NOT NULL DEFAULT false"`
+	CreatedUnix       timeutil.TimeStamp `xorm:"created"`
+	UpdatedUnix       timeutil.TimeStamp `xorm:"updated"`
+}
+
+func init() {
+	db.RegisterModel(new(ApprovalRule))
+}
+
+// GetApprovalRules returns the approval rules of a protected branch rule, oldest first.
+func GetApprovalRules(ctx context.Context, protectedBranchID int64) ([]*ApprovalRule, error) {
+	rules := make([]*ApprovalRule, 0, 2)
+	return rules, db.GetEngine(ctx).Where("protected_branch_id = ?", protectedBranchID).OrderBy("id").Find(&rules)
+}
+
+// SetApprovalRules replaces the approval rules of a protected branch rule. Users without write access to
+// the repository and teams without access to it are dropped, an invalid rule returns util.ErrInvalidArgument.
+func SetApprovalRules(ctx context.Context, repo *repo_model.Repository, protectedBranchID int64, rules []*ApprovalRule) error {
+	if len(rules) > MaxApprovalRules {
+		return util.NewInvalidArgumentErrorf("at most %d approval rules are allowed", MaxApprovalRules)
+	}
+	names := make(map[string]bool, len(rules))
+	for _, r := range rules {
+		r.ID, r.ProtectedBranchID, r.Name = 0, protectedBranchID, strings.TrimSpace(r.Name)
+		switch {
+		case r.Name == "" || len(r.Name) > 255:
+			return util.NewInvalidArgumentErrorf("an approval rule needs a name of at most 255 characters")
+		case names[r.Name]:
+			return util.NewInvalidArgumentErrorf("approval rule %q exists twice", r.Name)
+		case r.RequiredCount < 1:
+			return util.NewInvalidArgumentErrorf("approval rule %q needs at least 1 approval", r.Name)
+		}
+		names[r.Name] = true
+		for expr := range strings.SplitSeq(r.PathPatterns, ";") {
+			if _, err := glob.Compile(strings.TrimSpace(expr), '.', '/'); err != nil {
+				return util.NewInvalidArgumentErrorf("approval rule %q: invalid path pattern %q", r.Name, expr)
+			}
+		}
+		var err error
+		if r.UserIDs, err = updateUserWhitelist(ctx, repo, nil, r.UserIDs); err != nil {
+			return err
+		}
+		if r.TeamIDs, err = updateTeamWhitelist(ctx, repo, nil, r.TeamIDs); err != nil {
+			return err
+		}
+		if len(r.UserIDs) == 0 && len(r.TeamIDs) == 0 && !r.RequireCodeOwners {
+			return util.NewInvalidArgumentErrorf("approval rule %q needs approvers or the code owner option", r.Name)
+		}
+	}
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if _, err := db.GetEngine(ctx).Where("protected_branch_id = ?", protectedBranchID).Delete(new(ApprovalRule)); err != nil {
+			return err
+		}
+		for _, r := range rules {
+			if _, err := db.GetEngine(ctx).Insert(r); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// HasApprovers returns true if the rule names users or teams. Without them any user able to approve is eligible,
+// which only happens with RequireCodeOwners.
+func (r *ApprovalRule) HasApprovers() bool {
+	return len(r.UserIDs) > 0 || len(r.TeamIDs) > 0
+}
+
+// IsApprover returns true if the user is listed or a member of a listed team. Write access is checked by the caller.
+func (r *ApprovalRule) IsApprover(ctx context.Context, userID int64) (bool, error) {
+	if slices.Contains(r.UserIDs, userID) {
+		return true, nil
+	}
+	return organization.IsUserInTeams(ctx, userID, r.TeamIDs)
+}
+
+// AppliesTo returns true if the rule has no path patterns or one of the changed files matches.
+func (r *ApprovalRule) AppliesTo(changedFiles []string) bool {
+	patterns := getFilePatterns(r.PathPatterns)
+	// patterns that don't compile to any glob must not switch the rule off
+	if len(patterns) == 0 {
+		return true
+	}
+	return slices.ContainsFunc(changedFiles, func(f string) bool { return MatchesAnyGlob(patterns, f) })
+}
+
+// MatchesAnyGlob returns true if the lowercased path matches one of the patterns.
+func MatchesAnyGlob(patterns []glob.Glob, path string) bool {
+	lpath := strings.ToLower(strings.TrimSpace(path))
+	return slices.ContainsFunc(patterns, func(g glob.Glob) bool { return g.Match(lpath) })
+}

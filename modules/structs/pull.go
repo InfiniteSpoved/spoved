@@ -127,3 +127,17 @@ type ChangedFile struct {
 	ContentsURL      string `json:"contents_url,omitempty"`
 	RawURL           string `json:"raw_url,omitempty"`
 }
+
+// PullApprovalRule is the status of an approval rule of a pull request
+type PullApprovalRule struct {
+	// Name of the rule; "Default" is the required approvals of the branch protection
+	Name string `json:"name"`
+	// Required is the number of approvals needed
+	Required int64 `json:"required"`
+	// Granted is the number of valid approvals from eligible users
+	Granted int64 `json:"granted"`
+	// Satisfied is true if the rule allows merging
+	Satisfied bool `json:"satisfied"`
+	// Approvers are the logins of the users whose approvals count; empty for "Default"
+	Approvers []string `json:"approvers"`
+}

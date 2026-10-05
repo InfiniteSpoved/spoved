@@ -16089,6 +16089,50 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/pulls/{index}/approvals": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Get the approval rules of a pull request and whether each is satisfied",
+        "operationId": "repoGetPullRequestApprovals",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "index of the pull request",
+            "name": "index",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/PullApprovalRuleList"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/pulls/{index}/commits": {
       "get": {
         "produces": [
@@ -25639,6 +25683,49 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "ApprovalRule": {
+      "type": "object",
+      "title": "ApprovalRule is a named approval requirement of a branch protection. All applicable rules must be satisfied to merge.",
+      "properties": {
+        "name": {
+          "description": "Name of the rule, unique within the branch protection",
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "path_patterns": {
+          "description": "PathPatterns are globs separated by semicolons; the rule applies only if the pull request changes a matching file.\n`*` does not match `/`, use `**`. Empty applies to every pull request.",
+          "type": "string",
+          "x-go-name": "PathPatterns"
+        },
+        "require_code_owners": {
+          "description": "RequireCodeOwners also requires that for every changed file with owners in CODEOWNERS of the target branch, one of its owners approved",
+          "type": "boolean",
+          "x-go-name": "RequireCodeOwners"
+        },
+        "required_count": {
+          "description": "RequiredCount is the number of approvals needed, at least 1",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "RequiredCount"
+        },
+        "teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Teams"
+        },
+        "usernames": {
+          "description": "Usernames of the users who can approve. Teams are the teams (of the owning organization) whose members can approve.\nBoth may be empty only with RequireCodeOwners, then any user with write access can approve.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Usernames"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "Attachment": {
       "description": "Attachment a generic attachment",
       "type": "object",
@@ -25756,6 +25843,14 @@
         "apply_to_admins": {
           "type": "boolean",
           "x-go-name": "ApplyToAdmins"
+        },
+        "approval_rules": {
+          "description": "ApprovalRules are the named approval requirements.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ApprovalRule"
+          },
+          "x-go-name": "ApprovalRules"
         },
         "approvals_whitelist_teams": {
           "type": "array",
@@ -26599,6 +26694,14 @@
         "apply_to_admins": {
           "type": "boolean",
           "x-go-name": "ApplyToAdmins"
+        },
+        "approval_rules": {
+          "description": "ApprovalRules are the named approval requirements. On edit, null keeps them and an empty list removes them. At most 20.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ApprovalRule"
+          },
+          "x-go-name": "ApprovalRules"
         },
         "approvals_whitelist_teams": {
           "type": "array",
@@ -28157,6 +28260,14 @@
         "apply_to_admins": {
           "type": "boolean",
           "x-go-name": "ApplyToAdmins"
+        },
+        "approval_rules": {
+          "description": "ApprovalRules are the named approval requirements. On edit, null keeps them and an empty list removes them. At most 20.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ApprovalRule"
+          },
+          "x-go-name": "ApprovalRules"
         },
         "approvals_whitelist_teams": {
           "type": "array",
@@ -31321,6 +31432,43 @@
         "verified": {
           "type": "boolean",
           "x-go-name": "Verified"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "PullApprovalRule": {
+      "description": "PullApprovalRule is the status of an approval rule of a pull request",
+      "type": "object",
+      "properties": {
+        "approvers": {
+          "description": "Approvers are the logins of the users whose approvals count; empty for \"Default\"",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Approvers"
+        },
+        "granted": {
+          "description": "Granted is the number of valid approvals from eligible users",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Granted"
+        },
+        "name": {
+          "description": "Name of the rule; \"Default\" is the required approvals of the branch protection",
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "required": {
+          "description": "Required is the number of approvals needed",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Required"
+        },
+        "satisfied": {
+          "description": "Satisfied is true if the rule allows merging",
+          "type": "boolean",
+          "x-go-name": "Satisfied"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -34946,6 +35094,15 @@
         "type": "array",
         "items": {
           "$ref": "#/definitions/PublicKey"
+        }
+      }
+    },
+    "PullApprovalRuleList": {
+      "description": "PullApprovalRuleList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/PullApprovalRule"
         }
       }
     },
