@@ -147,6 +147,32 @@ func TestRolesLastAdminGuard(t *testing.T) {
 	assertRoles(t, 5, false, false)
 }
 
+func TestRolesLastUsableAdminGuard(t *testing.T) {
+	ctx := db.DefaultContext
+	for _, col := range []string{"is_active", "prohibit_login"} {
+		t.Run(col, func(t *testing.T) {
+			require.NoError(t, unittest.PrepareTestDatabase())
+			group := newRoleGroup(t, "admins", true, false)
+			require.NoError(t, AddMember(ctx, group, loadUser(t, 5)))
+			// user 1 stays an admin but cannot sign in: user 5 is the last usable one
+			admin := loadUser(t, 1)
+			admin.IsActive, admin.ProhibitLogin = col != "is_active", col == "prohibit_login"
+			require.NoError(t, user_model.UpdateUserCols(ctx, admin, "is_active", "prohibit_login"))
+
+			err := RemoveMember(ctx, group, 5)
+			assert.True(t, models.IsErrDeleteLastAdminUser(err), "%v", err)
+			assertRoles(t, 5, true, false)
+
+			// the disabled admin loses a group grant while user 5 remains usable
+			setUserFlags(t, 1, false, false)
+			disabled := newRoleGroup(t, "disabled-admins", true, false)
+			require.NoError(t, AddMember(ctx, disabled, loadUser(t, 1)))
+			require.NoError(t, RemoveMember(ctx, disabled, 1))
+			assertRoles(t, 1, false, false)
+		})
+	}
+}
+
 func TestRolesUserDeletionRemovesGrants(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	ctx := db.DefaultContext

@@ -469,3 +469,57 @@ func TestDeleteUserCleansUpMembershipProvenance(t *testing.T) {
 
 	unittest.AssertExistsAndLoadBean(t, &organization.TeamUser{UID: 28, TeamID: 1, Reason: organization.MembershipReasonAddedByUser, CreatedByUserID: optional.None[int64]()})
 }
+
+func TestLastUsableAdmin(t *testing.T) {
+	ctx := db.DefaultContext
+	// user 1 is the only admin in the fixtures; user 8 becomes the second one
+	setFlags := func(t *testing.T, id int64, admin, active, prohibitLogin bool) *user_model.User {
+		t.Helper()
+		u := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: id})
+		u.IsAdmin, u.IsActive, u.ProhibitLogin = admin, active, prohibitLogin
+		require.NoError(t, user_model.UpdateUserCols(ctx, u, "is_admin", "is_active", "prohibit_login"))
+		return u
+	}
+
+	for _, disabled := range []struct {
+		name                  string
+		active, prohibitLogin bool
+	}{{"inactive", false, false}, {"prohibit login", true, true}} {
+		t.Run(disabled.name, func(t *testing.T) {
+			require.NoError(t, unittest.PrepareTestDatabase())
+			setFlags(t, 1, true, disabled.active, disabled.prohibitLogin)
+			last := setFlags(t, 8, true, true, false)
+
+			err := UpdateUser(ctx, last, &UpdateOptions{IsAdmin: optional.Some(false)})
+			assert.True(t, models.IsErrDeleteLastAdminUser(err), "%v", err)
+			last = unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8})
+			// deactivating in the same edit does not get around the check
+			err = UpdateUser(ctx, last, &UpdateOptions{IsActive: optional.Some(false), IsAdmin: optional.Some(false)})
+			assert.True(t, models.IsErrDeleteLastAdminUser(err), "%v", err)
+			last = unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8})
+			err = DeleteUser(ctx, last, false)
+			assert.True(t, models.IsErrDeleteLastAdminUser(err), "%v", err)
+			unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8, IsAdmin: true})
+
+			// the disabled admin can be demoted while a usable admin remains
+			disabledAdmin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+			require.NoError(t, UpdateUser(ctx, disabledAdmin, &UpdateOptions{IsAdmin: optional.Some(false)}))
+			unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1, IsAdmin: false})
+			// and deleted: swap them, so user 1 is usable and user 8 disabled
+			setFlags(t, 1, true, true, false)
+			disabledAdmin = setFlags(t, 8, true, disabled.active, disabled.prohibitLogin)
+			require.NoError(t, DeleteUser(ctx, disabledAdmin, false))
+			unittest.AssertNotExistsBean(t, &user_model.User{ID: 8})
+		})
+	}
+
+	t.Run("two usable admins", func(t *testing.T) {
+		require.NoError(t, unittest.PrepareTestDatabase())
+		u := setFlags(t, 8, true, true, false)
+		require.NoError(t, UpdateUser(ctx, u, &UpdateOptions{IsAdmin: optional.Some(false)}))
+		unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8, IsAdmin: false})
+		u = setFlags(t, 8, true, true, false)
+		require.NoError(t, DeleteUser(ctx, u, false))
+		unittest.AssertNotExistsBean(t, &user_model.User{ID: 8})
+	})
+}

@@ -893,12 +893,22 @@ func createUser(ctx context.Context, u *User, createdByAdmin bool, overwriteDefa
 	return committer.Commit()
 }
 
-// IsLastAdminUser check whether user is the last admin
+// IsLastAdminUser check whether user is an admin and no other admin who can sign in exists
 func IsLastAdminUser(ctx context.Context, user *User) bool {
-	if user.IsAdmin && CountUsers(ctx, &CountUserFilter{IsAdmin: optional.Some(true)}) <= 1 {
+	if !user.IsAdmin {
+		return false
+	}
+	others, err := db.GetEngine(ctx).Where(builder.Eq{
+		"is_admin":       true,
+		"is_active":      true,
+		"prohibit_login": false,
+		"type":           UserTypeIndividual,
+	}.And(builder.Neq{"id": user.ID})).Count(new(User))
+	if err != nil {
+		log.Error("user.IsLastAdminUser: %v", err)
 		return true
 	}
-	return false
+	return others == 0
 }
 
 // CountUserFilter represent optional filters for CountUsers
