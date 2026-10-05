@@ -65,6 +65,8 @@ type ProtectedBranch struct {
 	// Block merging while code review conversations are unresolved, optionally not counting outdated ones.
 	BlockOnUnresolvedConversations bool `xorm:"NOT NULL DEFAULT false"`
 	IgnoreOutdatedConversations    bool `xorm:"NOT NULL DEFAULT false"`
+	// Block merging while tasks of the pull request are open.
+	BlockOnIncompleteTasks bool `xorm:"NOT NULL DEFAULT false"`
 
 	// Users, teams and deploy keys (public key IDs) allowed to delete or force-push matching branches.
 	// Empty lists block everyone.

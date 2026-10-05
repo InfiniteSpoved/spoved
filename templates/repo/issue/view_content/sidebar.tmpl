@@ -3,6 +3,7 @@
 	{{if .Issue.IsPull}}
 		{{template "repo/issue/view_content/sidebar/pull_review" .}}
 		{{template "repo/issue/view_content/sidebar/pull_wip" .}}
+		{{template "repo/issue/view_content/sidebar/pull_tasks" .}}
 		<div class="divider"></div>
 	{{end}}
 

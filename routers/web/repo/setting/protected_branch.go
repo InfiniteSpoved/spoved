@@ -274,6 +274,7 @@ func SettingsProtectedBranchPost(ctx *context.Context) {
 	protectBranch.BlockOnOutdatedBranch = f.BlockOnOutdatedBranch
 	protectBranch.BlockOnUnresolvedConversations = f.BlockOnUnresolvedConversations
 	protectBranch.IgnoreOutdatedConversations = f.IgnoreOutdatedConversations
+	protectBranch.BlockOnIncompleteTasks = f.BlockOnIncompleteTasks
 	protectBranch.ApplyToAdmins = f.ApplyToAdmins
 
 	approvalRules, err := approvalRulesFromForm(ctx)

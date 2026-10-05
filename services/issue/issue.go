@@ -280,6 +280,7 @@ func deleteIssue(ctx context.Context, issue *issues_model.Issue) error {
 		&project_model.ProjectIssue{IssueID: issue.ID},
 		&repo_model.Attachment{IssueID: issue.ID},
 		&issues_model.PullRequest{IssueID: issue.ID},
+		&issues_model.PullTask{IssueID: issue.ID},
 		&issues_model.Comment{RefIssueID: issue.ID},
 		&issues_model.IssueDependency{DependencyID: issue.ID},
 		&issues_model.Comment{DependentIssueID: issue.ID},

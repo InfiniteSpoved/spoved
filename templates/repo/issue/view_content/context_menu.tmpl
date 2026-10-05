@@ -31,6 +31,15 @@
 					</button>
 				</li>
 
+				{{if and .ctxData.CanCreatePullTask (ne .item .ctxData.Issue) (eq .item.Type 0 21)}}
+					<li>
+						<form method="post" action="{{.ctxData.Issue.Link}}/tasks/new" class="create-pull-task">
+							<input type="hidden" name="comment_id" value="{{.item.ID}}">
+							<input name="content" required maxlength="255" placeholder="{{ctx.Locale.Tr "repo.pulls.tasks.create_from_comment"}}" aria-label="{{ctx.Locale.Tr "repo.pulls.tasks.create_from_comment"}}">
+						</form>
+					</li>
+				{{end}}
+
 				{{if not .ctxData.UnitIssuesGlobalDisabled}}
 					<li>
 						<button type="button" class="reference-issue" data-target="{{.item.HashTag}}-raw" data-modal="#reference-issue-modal" data-poster="{{.item.Poster.GetDisplayName}}" data-poster-username="{{.item.Poster.Name}}" data-reference="{{$referenceUrl}}">

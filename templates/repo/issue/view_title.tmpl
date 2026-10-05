@@ -130,6 +130,9 @@
 						</div>
 					</span>
 				{{end}}
+				{{if .PullTasks}}
+					<a class="pull-tasks-progress muted" href="#pull-tasks">{{ctx.Locale.Tr "repo.pulls.tasks.progress" .PullTasksDone (len .PullTasks)}}</a>
+				{{end}}
 			{{else}}
 				{{$createdStr:= DateUtils.TimeSince .Issue.CreatedUnix}}
 				<span class="time-desc">

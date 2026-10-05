@@ -126,6 +126,11 @@ const (
 	// append only; values are persisted
 	CommentTypeRevertOpened // 39 a pull request reverting this one was opened (RefIssueID)
 	CommentTypeReverted     // 40 the pull request reverting this one was merged (RefIssueID)
+
+	CommentTypePullTaskCreated  // 41 a pull request task was created (Content is the task)
+	CommentTypePullTaskDone     // 42 a pull request task was marked done
+	CommentTypePullTaskReopened // 43 a pull request task was reopened
+	CommentTypePullTaskDeleted  // 44 a pull request task was deleted
 )
 
 var commentStrings = []string{
@@ -170,6 +175,10 @@ var commentStrings = []string{
 	"action_aggregator",
 	"revert_opened",
 	"reverted",
+	"pull_task_created",
+	"pull_task_done",
+	"pull_task_reopened",
+	"pull_task_deleted",
 }
 
 func (t CommentType) String() string {

@@ -55,7 +55,7 @@ function initRepoDiffFileViewToggle() {
 }
 
 function initRepoDiffConversationForm() {
-  $(document).on('submit', '.conversation-holder form', async (e) => {
+  $(document).on('submit', '.conversation-holder form:not(.create-pull-task)', async (e) => {
     e.preventDefault();
 
     const $form = $(e.target);

@@ -1796,6 +1796,11 @@ func registerRoutes(m *web.Route) {
 			m.Post("/update", repo.UpdatePullRequest)
 			m.Post("/set_allow_maintainer_edit", web.Bind(forms.UpdateAllowEditsForm{}), repo.SetAllowEdits)
 			m.Post("/cleanup", context.RepoMustNotBeArchived(), context.RepoRef(), repo.CleanUpPullRequest)
+			m.Group("/tasks", func() {
+				m.Post("/new", web.Bind(forms.PullTaskForm{}), repo.CreatePullTask)
+				m.Post("/{id}/status", repo.UpdatePullTaskStatus)
+				m.Post("/{id}/delete", repo.DeletePullTask)
+			}, reqSignIn, context.RepoMustNotBeArchived())
 			m.Group("/files", func() {
 				m.Get("", context.RepoRef(), repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.SetShowOutdatedComments, repo.ViewPullFilesForAllCommitsOfPr)
 				m.Get("/{sha:[a-f0-9]{4,64}}", context.RepoRef(), repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.SetShowOutdatedComments, repo.ViewPullFilesStartingFromCommit)
