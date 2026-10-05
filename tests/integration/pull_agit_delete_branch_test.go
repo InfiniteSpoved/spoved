@@ -4,6 +4,8 @@
 package integration
 
 import (
+	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"path"
@@ -60,6 +62,10 @@ func TestPullAgitMergeKeepsSameNamedBranch(t *testing.T) {
 			pr := agitPR(t, "2.0")
 			testPullMerge(t, maintainer, "user2", "repo1", strconv.FormatInt(pr.Index, 10), repo_model.MergeStyleMerge, true)
 			assert.True(t, bwBranchExists("user2", "repo1", "release/2.0"), "unrelated branch release/2.0 was deleted")
+
+			// the cleanup button must not delete it either
+			maintainer.MakeRequest(t, NewRequest(t, "POST", fmt.Sprintf("/user2/repo1/pulls/%d/cleanup", pr.Index)), http.StatusNotFound)
+			assert.True(t, bwBranchExists("user2", "repo1", "release/2.0"), "cleanup deleted unrelated branch release/2.0")
 		})
 
 		t.Run("api", func(t *testing.T) {

@@ -1839,8 +1839,8 @@ func CleanUpPullRequest(ctx *context.Context) {
 
 	pr := issue.PullRequest
 
-	// Don't cleanup unmerged and unclosed PRs
-	if !pr.HasMerged && !issue.IsClosed {
+	// Don't cleanup unmerged and unclosed PRs, nor AGit ones: their head "<user>/<topic>" is not a real branch
+	if (!pr.HasMerged && !issue.IsClosed) || pr.Flow == issues_model.PullRequestFlowAGit {
 		ctx.NotFound("CleanUpPullRequest", nil)
 		return
 	}
