@@ -93,9 +93,14 @@ func (c *conversationCheckPR) codeComment(t *testing.T, session *TestSession, co
 
 func (c *conversationCheckPR) resolve(t *testing.T, session *TestSession, comment *issues_model.Comment, expectedStatus int) {
 	t.Helper()
+	c.markConversation(t, session, comment, "Resolve", expectedStatus)
+}
+
+func (c *conversationCheckPR) markConversation(t *testing.T, session *TestSession, comment *issues_model.Comment, action string, expectedStatus int) {
+	t.Helper()
 	session.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/%s/issues/resolve_conversation", c.repo.FullName()), map[string]string{
 		"origin":     "timeline",
-		"action":     "Resolve",
+		"action":     action,
 		"comment_id": strconv.FormatInt(comment.ID, 10),
 	}), expectedStatus)
 }
@@ -313,5 +318,48 @@ func TestPullConversationCheckLockedAndBlocked(t *testing.T) {
 			c.resolve(t, readerSession, readerComment, http.StatusForbidden)
 			assert.Zero(t, unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ID: readerComment.ID}).ResolveDoerID)
 		})
+	})
+}
+
+// With both options off, resolving, unresolving, editing and deleting code comments
+// work as before for the users allowed to, and an unresolved thread doesn't block merging.
+func TestPullConversationCheckOptionsOffUnchanged(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		reviewer := forgery.CreateUser(t, nil)
+		writer := forgery.CreateUser(t, nil)
+		c := prepareConversationCheckPR(t, map[*user_model.User]perm.AccessMode{writer: perm.AccessModeWrite})
+		owner := c.repo.Owner
+		ownerSession := loginUser(t, owner.Name)
+		reviewerSession := loginUser(t, reviewer.Name)
+		writerSession := loginUser(t, writer.Name)
+		token := getTokenForLoggedInUser(t, ownerSession, auth_model.AccessTokenScopeReadRepository)
+		c.protect(t, git_model.ProtectedBranch{})
+
+		comment := c.codeComment(t, reviewerSession, "a thread", http.StatusOK)
+		resolveDoer := func() int64 {
+			return unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ID: comment.ID}).ResolveDoerID
+		}
+		for _, s := range []struct {
+			session *TestSession
+			user    *user_model.User
+		}{{writerSession, writer}, {ownerSession, owner}} {
+			c.markConversation(t, s.session, comment, "Resolve", http.StatusOK)
+			assert.Equal(t, s.user.ID, resolveDoer())
+			c.markConversation(t, s.session, comment, "UnResolve", http.StatusOK)
+			assert.Zero(t, resolveDoer())
+		}
+		assert.Empty(t, c.mergeableReasons(t, token))
+
+		reviewerSession.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/%s/comments/%d", c.repo.FullName(), comment.ID), map[string]string{
+			"content": "an edited thread",
+		}), http.StatusOK)
+		assert.Equal(t, "an edited thread", unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ID: comment.ID}).Content)
+
+		other := c.codeComment(t, reviewerSession, "another thread", http.StatusOK)
+		reviewerSession.MakeRequest(t, NewRequest(t, "POST", fmt.Sprintf("/%s/comments/%d/delete", c.repo.FullName(), other.ID)), http.StatusOK)
+		unittest.AssertNotExistsBean(t, &issues_model.Comment{ID: other.ID})
+
+		testPullMerge(t, ownerSession, owner.Name, c.repo.Name, strconv.FormatInt(c.pr.Index, 10), repo_model.MergeStyleMerge, false)
+		assert.True(t, c.hasMerged(t))
 	})
 }
