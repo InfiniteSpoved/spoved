@@ -86,6 +86,10 @@ func Set(ctx context.Context, doer *user_model.User, s setting.IPAllowlistState)
 		if !ok {
 			return util.NewInvalidArgumentErrorf("exempt token %d does not exist", s.ExemptTokens[i].ID)
 		}
+		// a token keeps the owner it was exempted for; only tokens new to the list take it from the database
+		if j := slices.IndexFunc(old.ExemptTokens, func(o setting.IPAllowlistToken) bool { return o.ID == t.ID }); j >= 0 && old.ExemptTokens[j].UID != t.UID {
+			return util.NewInvalidArgumentErrorf("token %d now belongs to another user; remove it from the exemptions", t.ID)
+		}
 		s.ExemptTokens[i].UID = t.UID
 	}
 

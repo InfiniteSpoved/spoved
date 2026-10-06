@@ -172,11 +172,19 @@ func TestIPAllowlistExemptions(t *testing.T) {
 	// the password isn't the token
 	MakeRequest(t, from(ipBlocked, NewRequest(t, "GET", "/user2/repo1.git/info/refs?service=git-upload-pack")).AddBasicAuth("user2"), http.StatusForbidden)
 
+	// a listed token that changed owner isn't silently moved to the new owner
+	_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE access_token SET uid = 4 WHERE id = ?", tokenID(t, user2Token))
+	require.NoError(t, err)
+	err = ipallowlist_service.Set(db.DefaultContext, nil, setting.GetIPAllowlist(db.DefaultContext))
+	require.ErrorContains(t, err, "now belongs to another user")
+	_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE access_token SET uid = 2 WHERE id = ?", tokenID(t, user2Token))
+	require.NoError(t, err)
+
 	setIPAllowlist(t, func(s *setting.IPAllowlistState) { s.ExemptAdmins = false })
 	get(adminToken, http.StatusForbidden)
 
 	// exemptions must exist
-	err := ipallowlist_service.Set(db.DefaultContext, nil, setting.IPAllowlistState{ExemptUserIDs: []int64{99999}})
+	err = ipallowlist_service.Set(db.DefaultContext, nil, setting.IPAllowlistState{ExemptUserIDs: []int64{99999}})
 	require.Error(t, err)
 	err = ipallowlist_service.Set(db.DefaultContext, nil, setting.IPAllowlistState{ExemptTokens: []setting.IPAllowlistToken{{ID: 99999}}})
 	require.Error(t, err)

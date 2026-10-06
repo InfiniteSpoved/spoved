@@ -1585,7 +1585,7 @@
 	"admin.security": "Security",
 	"admin.ip_allowlist": "IP allowlist",
 	"admin.ip_allowlist.desc": "Only clients from these networks can use the selected kinds of access. Exempt users and tokens can connect from anywhere. The sign-in page stays reachable, health checks and assets are never blocked, and Actions runners aren't checked yet.",
-	"admin.ip_allowlist.proxy_note": "The client address comes from the connection, or from X-Forwarded-For / X-Real-IP only when the connection comes from a proxy in [security] REVERSE_PROXY_TRUSTED_PROXIES, so that proxy must set these headers. PROXY protocol ports must be reachable only from the load balancer. Container registry logins don't carry the token exemption.",
+	"admin.ip_allowlist.proxy_note": "The client address comes from the connection, or from X-Forwarded-For / X-Real-IP only when the connection comes from a proxy in [security] REVERSE_PROXY_TRUSTED_PROXIES. That proxy must set X-Real-IP to the client address and/or set or append X-Forwarded-For; if the two disagree, the allowlist refuses the request. PROXY protocol ports must be reachable only from the load balancer. Container registry logins don't carry the token exemption.",
 	"admin.ip_allowlist.your_ip": "Your current IP: %s",
 	"admin.ip_allowlist.enabled": "Enforce the IP allowlist",
 	"admin.ip_allowlist.surfaces": "Enforce on",

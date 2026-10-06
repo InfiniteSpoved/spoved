@@ -14,6 +14,7 @@ import (
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
+	"forgejo.org/routers/common"
 	"forgejo.org/services/context"
 	ipallowlist_service "forgejo.org/services/ipallowlist"
 )
@@ -24,7 +25,7 @@ func renderIPAllowlist(ctx *context.Context, s setting.IPAllowlistState, entries
 	ctx.Data["Title"] = ctx.Tr("admin.ip_allowlist")
 	ctx.Data["PageIsAdminIPAllowlist"] = true
 	ctx.Data["State"] = s
-	ctx.Data["ClientIP"] = setting.IPFromRemoteAddr(ctx.Req.RemoteAddr).String()
+	ctx.Data["ClientIP"] = common.ClientIP(ctx.Req).String()
 	ctx.Data["Entries"] = entries
 	ctx.Data["ExemptUsers"] = users
 	ctx.Data["ExemptTokens"] = tokens
@@ -94,7 +95,7 @@ func parseIPAllowlistForm(ctx *context.Context) (setting.IPAllowlistState, error
 func IPAllowlistPost(ctx *context.Context) {
 	link := setting.AppSubURL + "/admin/ip-allowlist"
 	s, err := parseIPAllowlistForm(ctx)
-	if err == nil && s.WouldBlock(setting.IPFromRemoteAddr(ctx.Req.RemoteAddr)) && !ctx.FormBool("force") {
+	if err == nil && s.WouldBlock(common.ClientIP(ctx.Req)) && !ctx.FormBool("force") {
 		ctx.Data["LockoutWarning"] = true
 		renderIPAllowlist(ctx, s, ctx.FormString("entries"), ctx.FormString("exempt_users"), ctx.FormString("exempt_tokens"))
 		return

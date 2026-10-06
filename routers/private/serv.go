@@ -342,7 +342,7 @@ func ServCommand(ctx *context.PrivateContext) {
 	}
 
 	// the IP allowlist: cmd/serv sends the client address from SSH_CONNECTION, refused if missing or unparsable
-	if ip, refused := common.IPAllowlistRefused(ctx, net.JoinHostPort(ctx.FormString("ip"), "0"), setting.IPAllowlistSurfaceSSH, user, nil); refused {
+	if ip, refused := common.IPAllowlistRefused(ctx, setting.IPFromRemoteAddr(net.JoinHostPort(ctx.FormString("ip"), "0")), setting.IPAllowlistSurfaceSSH, user, nil); refused {
 		ctx.JSON(http.StatusForbidden, private.Response{UserMsg: common.IPAllowlistRefusal(ip)})
 		return
 	}

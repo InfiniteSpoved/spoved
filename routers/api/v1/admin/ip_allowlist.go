@@ -12,6 +12,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
+	"forgejo.org/routers/common"
 	"forgejo.org/services/context"
 	ipallowlist_service "forgejo.org/services/ipallowlist"
 )
@@ -24,7 +25,7 @@ func toAPIIPAllowlist(ctx *context.APIContext, s setting.IPAllowlistState) *api.
 		Entries:       []*api.IPAllowlistEntry{},
 		ExemptUserIDs: append([]int64{}, s.ExemptUserIDs...),
 		ExemptTokens:  []*api.IPAllowlistToken{},
-		YourIP:        setting.IPFromRemoteAddr(ctx.Req.RemoteAddr).String(),
+		YourIP:        common.ClientIP(ctx.Req).String(),
 		FromConfig:    s.FromConfig,
 	}
 	for _, e := range s.Entries {
@@ -97,7 +98,7 @@ func EditIPAllowlist(ctx *context.APIContext) {
 	for _, id := range form.ExemptTokenIDs {
 		s.ExemptTokens = append(s.ExemptTokens, setting.IPAllowlistToken{ID: id})
 	}
-	if ip := setting.IPFromRemoteAddr(ctx.Req.RemoteAddr); s.WouldBlock(ip) && !ctx.FormBool("force") {
+	if ip := common.ClientIP(ctx.Req); s.WouldBlock(ip) && !ctx.FormBool("force") {
 		ctx.Error(http.StatusConflict, "", "the new IP allowlist blocks your address "+ip.String()+"; set force=true to save it anyway")
 		return
 	}

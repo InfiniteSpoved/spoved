@@ -6,6 +6,7 @@ package common
 import (
 	"context"
 	"net/http"
+	"net/netip"
 	"slices"
 
 	user_model "forgejo.org/models/user"
@@ -41,12 +42,11 @@ func IPAllowlistExempt(s setting.IPAllowlistState, doer *user_model.User, ar aut
 
 // IPAllowlistRefused checks the client against the IP allowlist of the surface. It returns the address to show, and
 // whether the client is refused: neither in the list nor exempt. An address that can't be parsed is refused.
-func IPAllowlistRefused(ctx context.Context, remoteAddr, surface string, doer *user_model.User, ar auth.AuthenticationResult) (string, bool) {
+func IPAllowlistRefused(ctx context.Context, ip netip.Addr, surface string, doer *user_model.User, ar auth.AuthenticationResult) (string, bool) {
 	s := setting.GetIPAllowlist(ctx)
 	if !s.Enforced(surface) {
 		return "", false
 	}
-	ip := setting.IPFromRemoteAddr(remoteAddr)
 	if s.Allows(ip) || IPAllowlistExempt(s, doer, ar) {
 		return "", false
 	}
@@ -62,7 +62,7 @@ func IPAllowlistWeb(ctx *app_context.Context) {
 	if MaintenanceSignInRoutes.Contains(maintenanceRoute(ctx.Req)) {
 		return
 	}
-	if ip, refused := IPAllowlistRefused(ctx, ctx.Req.RemoteAddr, setting.IPAllowlistSurfaceWeb, ctx.Doer, ctx.Authentication); refused {
+	if ip, refused := IPAllowlistRefused(ctx, ClientIP(ctx.Req), setting.IPAllowlistSurfaceWeb, ctx.Doer, ctx.Authentication); refused {
 		ctx.Data["Title"] = ctx.Tr("ip_allowlist.title")
 		ctx.Data["ClientIP"] = ip
 		ctx.HTML(http.StatusForbidden, tplIPBlocked)
@@ -72,7 +72,7 @@ func IPAllowlistWeb(ctx *app_context.Context) {
 // IPAllowlistAPI refuses API requests from refused clients. It runs before sudo, so the check is on the credential's
 // own user.
 func IPAllowlistAPI(ctx *app_context.APIContext) {
-	if ip, refused := IPAllowlistRefused(ctx, ctx.Req.RemoteAddr, setting.IPAllowlistSurfaceAPI, ctx.Doer(), ctx.Authentication()); refused {
+	if ip, refused := IPAllowlistRefused(ctx, ClientIP(ctx.Req), setting.IPAllowlistSurfaceAPI, ctx.Doer(), ctx.Authentication()); refused {
 		ctx.JSON(http.StatusForbidden, map[string]string{"message": "IP address not allowed", "ip": ip})
 	}
 }
@@ -80,7 +80,7 @@ func IPAllowlistAPI(ctx *app_context.APIContext) {
 // IPAllowlistPlain refuses refused clients with a plain text message, for git over HTTP, LFS and packages.
 func IPAllowlistPlain(surface string) func(*app_context.Context) {
 	return func(ctx *app_context.Context) {
-		if ip, refused := IPAllowlistRefused(ctx, ctx.Req.RemoteAddr, surface, ctx.Doer, ctx.Authentication); refused {
+		if ip, refused := IPAllowlistRefused(ctx, ClientIP(ctx.Req), surface, ctx.Doer, ctx.Authentication); refused {
 			ctx.PlainText(http.StatusForbidden, IPAllowlistRefusal(ip))
 		}
 	}
@@ -93,7 +93,7 @@ func IPAllowlistMixed(ctx *app_context.Context) {
 		IPAllowlistWeb(ctx)
 		return
 	}
-	if ip, refused := IPAllowlistRefused(ctx, ctx.Req.RemoteAddr, setting.IPAllowlistSurfaceAPI, ctx.Doer, ctx.Authentication); refused {
+	if ip, refused := IPAllowlistRefused(ctx, ClientIP(ctx.Req), setting.IPAllowlistSurfaceAPI, ctx.Doer, ctx.Authentication); refused {
 		ctx.JSON(http.StatusForbidden, map[string]string{"message": "IP address not allowed", "ip": ip})
 	}
 }
