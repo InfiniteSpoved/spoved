@@ -14,5 +14,5 @@ const tplSettingsAccessReport base.TplName = "org/settings/access_report"
 // AccessReport shows who can access the organization's repositories, with what access, and through what.
 func AccessReport(ctx *context.Context) {
 	ctx.Data["PageIsSettingsAccessReport"] = true
-	shared.AccessReport(ctx, ctx.Org.Organization.AsUser(), tplSettingsAccessReport)
+	shared.AccessReport(ctx, ctx.Org.Organization.ID, tplSettingsAccessReport)
 }

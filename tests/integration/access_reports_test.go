@@ -392,3 +392,51 @@ func TestReportQueriesDontGrowWithUsersAndRepos(t *testing.T) {
 	small := count(2)
 	assert.Equal(t, small, count(6))
 }
+
+// S1: the API report keeps to the repositories the token can read. S2: a site admin's restricted token doesn't act
+// as a site admin.
+func TestAccessReportRestrictedTokens(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	prepareAccessReport(t)
+	ctx := db.DefaultContext
+	setAccessReportPeople(t)
+	// user1, a site admin, is also an owner of org3
+	require.NoError(t, db.Insert(ctx, &organization.TeamUser{OrgID: 3, TeamID: 1, UID: 1}))
+	require.NoError(t, db.Insert(ctx, &organization.OrgUser{OrgID: 3, UID: 1}))
+	require.NoError(t, access_model.RecalculateAccesses(ctx, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})))
+
+	repos := func(token string) map[string]bool {
+		_, lines := jsonLines(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3/access-report").AddTokenAuth(token), http.StatusOK))
+		m := map[string]bool{}
+		for _, l := range lines {
+			m[l.Repository] = true
+		}
+		return m
+	}
+	publicOnly := getUserToken(t, "user2", auth_model.AccessTokenScopePublicOnly, auth_model.AccessTokenScopeReadOrganization)
+	assert.Equal(t, map[string]bool{"org3/repo21": true}, repos(publicOnly))
+	specific := createFineGrainedRepoAccessToken(t, "user2", []auth_model.AccessTokenScope{auth_model.AccessTokenScopeReadOrganization}, []int64{32})
+	assert.Equal(t, map[string]bool{"org3/repo21": true}, repos(specific))
+	specific = createFineGrainedRepoAccessToken(t, "user2", []auth_model.AccessTokenScope{auth_model.AccessTokenScopeReadOrganization}, []int64{3})
+	assert.Equal(t, map[string]bool{"org3/repo3": true, "org3/repo21": true}, repos(specific))
+	_, all, _ := csvLines(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3/access-report?format=csv").AddTokenAuth(specific), http.StatusOK))
+	assert.NotContains(t, strings.Join(all, "\n"), "org3/repo5")
+
+	adminToken := createFineGrainedRepoAccessToken(t, "user1", []auth_model.AccessTokenScope{auth_model.AccessTokenScopeReadOrganization, auth_model.AccessTokenScopeReadRepository}, []int64{3})
+	resp := MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3/access-report").AddTokenAuth(adminToken), http.StatusOK)
+	var raw []map[string]any
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &raw))
+	require.NotEmpty(t, raw)
+	var instanceRoles bool
+	for _, l := range raw {
+		for _, k := range []string{"last_login", "last_push", "two_factor", "account_source", "suspended"} {
+			assert.NotContains(t, l, k)
+		}
+		assert.NotEqual(t, "site_admin", l["path"], "F1")
+		instanceRoles = instanceRoles || l["path"] == "instance_roles"
+	}
+	assert.True(t, instanceRoles)
+
+	// the repository access API needs repo admin, which a restricted token never has
+	MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/org3/repo3/access").AddTokenAuth(adminToken), http.StatusForbidden)
+}

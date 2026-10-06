@@ -11,18 +11,20 @@ import (
 	"forgejo.org/models/db"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/timeutil"
+
+	"xorm.io/builder"
 )
 
 // Person is what site admins see about a user in a report.
 type Person struct {
-	LastPush      timeutil.TimeStamp // to the repositories of the report
+	LastPush      timeutil.TimeStamp // to the repositories of the report owner
 	TwoFactor     bool
 	AccountSource string
 }
 
 // People returns the person columns of the users of the rows, with their last push to the repositories of the
-// report. For site admins only: anyone can create an org and add any user to it.
-func People(ctx context.Context, rows []*Row, repoIDs []int64) (map[int64]*Person, error) {
+// owner, or to any repository if ownerID is 0. For site admins only: anyone can create an org and add any user to it.
+func People(ctx context.Context, rows []*Row, ownerID int64) (map[int64]*Person, error) {
 	users := user_model.UserList{}
 	people := map[int64]*Person{}
 	sourceIDs := []int64{}
@@ -41,9 +43,12 @@ func People(ctx context.Context, rows []*Row, repoIDs []int64) (map[int64]*Perso
 		ActUserID int64
 		Last      timeutil.TimeStamp
 	}, 0, len(users))
-	if err := db.GetEngine(ctx).Table("action").Select("act_user_id, MAX(created_unix) AS last").
-		In("op_type", activities_model.ActionCommitRepo, activities_model.ActionPushTag).
-		In("act_user_id", users.GetUserIDs()).In("repo_id", repoIDs).
+	cond := builder.In("op_type", activities_model.ActionCommitRepo, activities_model.ActionPushTag).
+		And(builder.In("act_user_id", users.GetUserIDs()))
+	if ownerID > 0 {
+		cond = cond.And(builder.In("repo_id", builder.Select("id").From("repository").Where(builder.Eq{"owner_id": ownerID})))
+	}
+	if err := db.GetEngine(ctx).Table("action").Select("act_user_id, MAX(created_unix) AS last").Where(cond).
 		GroupBy("act_user_id").Find(&pushes); err != nil {
 		return nil, err
 	}

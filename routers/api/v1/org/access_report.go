@@ -65,7 +65,10 @@ func GetAccessReport(ctx *context.APIContext) {
 	if format != "csv" {
 		format = "json"
 	}
-	report := &common.AccessReport{Owner: ctx.Org().Organization.AsUser(), Doer: ctx.Doer(), Filter: accessreport.ParseFilter(ctx.FormString)}
+	report := &common.AccessReport{
+		OwnerID: ctx.Org().Organization.ID, Doer: ctx.Doer(), Admin: ctx.IsUserSiteAdmin(),
+		Filter: accessreport.ParseFilter(ctx.FormString), Repos: ctx.Reducer().RepoReadAccessFilter(),
+	}
 	if err := report.Export(ctx.Base, format); err != nil {
 		ctx.InternalServerError(err)
 	}

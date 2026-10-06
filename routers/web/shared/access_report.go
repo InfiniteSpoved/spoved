@@ -7,17 +7,16 @@ import (
 	"net/http"
 
 	"forgejo.org/models/unit"
-	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
 	"forgejo.org/routers/common"
 	"forgejo.org/services/accessreport"
 	"forgejo.org/services/context"
 )
 
-// AccessReport shows who can access the repositories of the owner, or of the instance if owner is nil, paged by
+// AccessReport shows who can access the repositories of the owner, or of the instance if ownerID is 0, paged by
 // repository, or exports every page with ?format=csv|json.
-func AccessReport(ctx *context.Context, owner *user_model.User, tpl base.TplName) {
-	report := &common.AccessReport{Owner: owner, Doer: ctx.Doer, Filter: accessreport.ParseFilter(ctx.FormString)}
+func AccessReport(ctx *context.Context, ownerID int64, tpl base.TplName) {
+	report := &common.AccessReport{OwnerID: ownerID, Doer: ctx.Doer, Admin: ctx.Doer.IsAdmin, Filter: accessreport.ParseFilter(ctx.FormString)}
 	if format := ctx.FormString("format"); format == "csv" || format == "json" {
 		if err := report.Export(ctx.Base, format); err != nil {
 			ctx.ServerError("AccessReport", err)

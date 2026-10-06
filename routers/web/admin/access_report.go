@@ -14,5 +14,5 @@ const tplAccessReports base.TplName = "admin/access_reports"
 // AccessReports shows who can access every repository, with what access, and through what.
 func AccessReports(ctx *context.Context) {
 	ctx.Data["PageIsAdminAccessReports"] = true
-	shared.AccessReport(ctx, nil, tplAccessReports)
+	shared.AccessReport(ctx, 0, tplAccessReports)
 }

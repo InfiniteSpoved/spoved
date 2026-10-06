@@ -24,45 +24,49 @@ import (
 	"xorm.io/builder"
 )
 
-// AccessReport is the access report of the repositories of an org, or of every repository if Owner is nil, which
+// AccessReport is the access report of the repositories of an org, or of every repository if OwnerID is 0, which
 // only site admins may see. It is paged by repository.
 type AccessReport struct {
-	Owner  *user_model.User
-	Doer   *user_model.User
+	OwnerID int64
+	Doer    *user_model.User
+	// Admin says whether the doer acts as a site admin, which a restricted token doesn't
+	Admin  bool
 	Filter accessreport.Filter
+	// Repos, if set, limits the repositories, e.g. to those an access token can read
+	Repos builder.Cond
 }
 
 const accessReportBatch = 100
 
 func (r *AccessReport) cond() builder.Cond {
-	if r.Owner == nil {
-		return builder.NewCond()
+	cond := builder.NewCond()
+	if r.OwnerID > 0 {
+		cond = cond.And(builder.Eq{"owner_id": r.OwnerID})
 	}
-	return builder.Eq{"owner_id": r.Owner.ID}
+	if r.Repos != nil {
+		cond = cond.And(r.Repos)
+	}
+	return cond
 }
 
-func (r *AccessReport) repos(ctx *context.Base, page, size int) ([]*repo_model.Repository, error) {
-	repos := make([]*repo_model.Repository, 0, size)
-	return repos, db.GetEngine(ctx).Where(r.cond()).OrderBy("id").Limit(size, (page-1)*size).Find(&repos)
+func (r *AccessReport) repos(ctx *context.Base, page, size int) ([]int64, error) {
+	ids := make([]int64, 0, size)
+	return ids, db.GetEngine(ctx).Table("repository").Where(r.cond()).Cols("id").OrderBy("id").Limit(size, (page-1)*size).Find(&ids)
 }
 
 // lines returns the lines of the repositories, with the person columns for site admins only.
-func (r *AccessReport) lines(ctx *context.Base, repos []*repo_model.Repository) ([]*api.AccessReportLine, bool, error) {
-	rows, activity, err := accessreport.ForRepos(ctx, r.Owner, repos, r.Doer, r.Filter)
+func (r *AccessReport) lines(ctx *context.Base, repoIDs []int64) ([]*api.AccessReportLine, bool, error) {
+	rows, activity, err := accessreport.ForRepos(ctx, repoIDs, r.Admin, r.Doer, r.Filter)
 	if err != nil {
 		return nil, false, err
 	}
 	var people map[int64]*accessreport.Person
-	if r.Doer.IsAdmin {
-		repoIDs := make([]int64, 0, len(repos))
-		for _, repo := range repos {
-			repoIDs = append(repoIDs, repo.ID)
-		}
-		if people, err = accessreport.People(ctx, rows, repoIDs); err != nil {
+	if r.Admin {
+		if people, err = accessreport.People(ctx, rows, r.OwnerID); err != nil {
 			return nil, false, err
 		}
 	}
-	return convert.ToAccessReportLines(ctx, rows, r.Doer, people), activity, nil
+	return convert.ToAccessReportLines(ctx, rows, accessreport.AsAdmin(r.Doer, r.Admin), people), activity, nil
 }
 
 // Page returns the lines of a page of repositories, at most 100 per page, and how many repositories there are.
@@ -101,7 +105,7 @@ func (r *AccessReport) Export(ctx *context.Base, format string) error {
 		ctx.SetServeHeaders(&context.ServeHeaderOptions{ContentType: "text/csv", ContentTypeCharset: "utf-8", Filename: "access-report.csv"})
 		w := csv.NewWriter(ctx.Resp)
 		header := []string{"type", "name", "full_name", "repository", "unit", "access", "path", "team", "user_groups", "grant", "applied"}
-		if r.Doer.IsAdmin {
+		if r.Admin {
 			header = append(header, "last_sign_in", "last_push", "two_factor", "account_source", "suspended")
 		}
 		if err := w.Write(header); err != nil {
@@ -117,11 +121,14 @@ func (r *AccessReport) Export(ctx *context.Base, format string) error {
 				}
 			}
 			rec := []string{
-				l.Type, util.CSVSafe(l.Name), util.CSVSafe(l.FullName), util.CSVSafe(l.Repository), l.Unit, l.Access, l.Path,
-				util.CSVSafe(l.Team), util.CSVSafe(strings.Join(groups, "; ")), l.Grant, strconv.FormatBool(l.Applied),
+				l.Type, l.Name, l.FullName, l.Repository, l.Unit, l.Access, l.Path,
+				l.Team, strings.Join(groups, "; "), l.Grant, strconv.FormatBool(l.Applied),
 			}
-			if r.Doer.IsAdmin {
-				rec = append(rec, csvTime(l.LastLogin), csvTime(l.LastPush), csvBool(l.TwoFactor), util.CSVSafe(l.AccountSource), csvBool(l.Suspended))
+			if r.Admin {
+				rec = append(rec, csvTime(l.LastLogin), csvTime(l.LastPush), csvBool(l.TwoFactor), l.AccountSource, csvBool(l.Suspended))
+			}
+			for i := range rec {
+				rec[i] = util.CSVSafe(rec[i])
 			}
 			return w.Write(rec)
 		}
