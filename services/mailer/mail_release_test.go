@@ -11,6 +11,7 @@ import (
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/gitrepo"
+	"forgejo.org/modules/test"
 	"forgejo.org/services/mailer"
 	notify_service "forgejo.org/services/notify"
 	release_service "forgejo.org/services/release"
@@ -45,6 +46,7 @@ func TestMailNewRelease(t *testing.T) {
 			}
 
 			assert.Equal(t, "v0.1 in user2/repo1 released", msgs[0].Subject)
+			assert.Empty(t, test.BrandMentions(msgs[0].Body))
 			called = true
 		})()
 

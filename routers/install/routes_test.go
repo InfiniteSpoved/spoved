@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/test"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -21,6 +22,7 @@ func TestRoutes(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), `class="page-content install"`)
+	assert.Empty(t, test.BrandMentions(w.Body.String()))
 
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest("GET", "/no-such", nil)

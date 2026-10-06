@@ -11,6 +11,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/test"
 	"forgejo.org/modules/translation"
 	"forgejo.org/services/mailer"
 	user_service "forgejo.org/services/user"
@@ -29,6 +30,8 @@ func TestPasswordChangeMail(t *testing.T) {
 		assert.Equal(t, user.EmailTo(), msgs[0].To)
 		assert.EqualValues(t, translation.NewLocale("en-US").Tr("mail.password_change.subject"), msgs[0].Subject)
 		mailer.AssertTranslatedLocale(t, msgs[0].Body, "mail.password_change.text_1", "mail.password_change.text_2", "mail.password_change.text_3")
+		assert.Empty(t, test.BrandMentions(msgs[0].Subject))
+		assert.Empty(t, test.BrandMentions(msgs[0].Body))
 		called = true
 	})()
 
