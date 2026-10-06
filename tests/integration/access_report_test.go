@@ -218,8 +218,10 @@ func TestRepoAccessOverviewFilters(t *testing.T) {
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"user4", "release-bot"}, rowNames(apiAccessRows(t, token, "?inactive_days=30")))
 
-	// N3: only site admins and org owners can filter by last sign-in
-	assert.ElementsMatch(t, []string{"user4", "release-bot"}, rowNames(apiAccessRows(t, getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository), "?inactive_days=30")), "org owner")
+	// N3: only site admins can filter by last sign-in; anyone can create an org and add any user to it
+	ownerToken := getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository)
+	assert.Equal(t, rowNames(apiAccessRows(t, ownerToken, "")), rowNames(apiAccessRows(t, ownerToken, "?inactive_days=30")), "org owner")
+	assert.Equal(t, 0, accessRows(t, loginUser(t, "user2"), "/org3/repo3/settings/access").Find(`input[name="inactive_days"]`).Length())
 	require.NoError(t, db.Insert(db.DefaultContext, &repo_model.Collaboration{RepoID: 3, UserID: 10, Mode: perm_model.AccessModeAdmin}))
 	require.NoError(t, access_model.RecalculateUserAccess(db.DefaultContext, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3}), 10))
 	outsiderToken := getUserToken(t, "user10", auth_model.AccessTokenScopeReadRepository)

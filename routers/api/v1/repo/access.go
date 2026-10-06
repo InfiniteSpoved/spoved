@@ -51,7 +51,7 @@ func GetAccess(ctx *context.APIContext) {
 	//   type: boolean
 	// - name: inactive_days
 	//   in: query
-	//   description: only users who haven't signed in for this many days; applies only for site admins and owners of the owner organization
+	//   description: only users who haven't signed in for this many days; applies only for site admins
 	//   type: integer
 	// - name: page
 	//   in: query

@@ -38,8 +38,8 @@ func Highest(p access_model.Permission) perm_model.AccessMode {
 // ForRepo returns the rows of the repository access overview, as the doer may see them, filtered: site admins and
 // auditors are named to site admins only, user groups to site admins and org owners, login sources to site admins
 // only; a viewer outside the owner org sees each team as one row and no team or org membership. The inactive-days
-// filter, which tells last sign-ins apart, applies only for site admins and owners of the owner org; activity
-// says whether it did.
+// filter, which tells last sign-ins apart, applies only for site admins: anyone can create an org and add any user
+// to it. activity says whether it did.
 func ForRepo(ctx context.Context, repo *repo_model.Repository, doer *user_model.User, f Filter) (rows []*Row, activity bool, err error) {
 	opts := Options{RepoIDs: []int64{repo.ID}, Plain: !doer.IsAdmin}
 	isOwner := false
@@ -65,7 +65,7 @@ func ForRepo(ctx context.Context, repo *repo_model.Repository, doer *user_model.
 			hideGroups(r, !isOwner)
 		}
 	}
-	activity = doer.IsAdmin || isOwner
+	activity = doer.IsAdmin
 	if !activity {
 		f.InactiveDays = 0
 	}
