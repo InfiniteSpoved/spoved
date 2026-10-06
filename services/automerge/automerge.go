@@ -204,6 +204,10 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 		log.Error("%-v LoadBaseRepo: %v", pr, err)
 		return
 	}
+	if pr.BaseRepo.IsArchived {
+		log.Trace("Scheduled auto merge %-v waits: the repository is archived", pr)
+		return
+	}
 
 	// check the sha is the same as pull request head commit id
 	baseGitRepo, err := gitrepo.OpenRepository(ctx, pr.BaseRepo)

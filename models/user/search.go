@@ -34,6 +34,7 @@ type SearchUserOptions struct {
 	SupportedSortOrders container.Set[string] // if not nil, only allow to use the sort orders in this set
 
 	IsActive           optional.Option[bool]
+	IsArchived         optional.Option[bool] // organizations
 	IsAdmin            optional.Option[bool]
 	IsRestricted       optional.Option[bool]
 	IsTwoFactorEnabled optional.Option[bool]
@@ -110,6 +111,10 @@ func (opts *SearchUserOptions) toSearchQueryBase(ctx context.Context) *xorm.Sess
 
 	if has, value := opts.IsActive.Get(); has {
 		cond = cond.And(builder.Eq{"is_active": value})
+	}
+
+	if has, value := opts.IsArchived.Get(); has {
+		cond = cond.And(builder.Eq{"is_archived": value})
 	}
 
 	if has, value := opts.IsAdmin.Get(); has {

@@ -151,6 +151,9 @@ type User struct {
 	// For organization
 	NumTeams                  int
 	NumMembers                int
+	IsArchived                bool                `xorm:"NOT NULL DEFAULT false"` // organizations only
+	ArchivedUnix              timeutil.TimeStamp  `xorm:"NOT NULL DEFAULT 0"`
+	ArchivedByID              int64               `xorm:"NOT NULL DEFAULT 0"`
 	Visibility                structs.VisibleType `xorm:"NOT NULL DEFAULT 0"`
 	RepoAdminChangeTeamAccess bool                `xorm:"NOT NULL DEFAULT false"`
 

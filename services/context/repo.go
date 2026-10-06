@@ -559,6 +559,11 @@ func RepoAssignment(ctx *Context) context.CancelFunc {
 	if ctx.Written() {
 		return nil
 	}
+	// Every repository of an archived organization is read-only, whatever the repository's own settings say.
+	if IsArchivedOrgWrite(ctx.Req, owner) {
+		ctx.Error(http.StatusForbidden, ctx.Locale.TrString("org.archived.readonly"))
+		return nil
+	}
 
 	ctx.Repo.RepoLink = repo.Link()
 	ctx.Data["RepoLink"] = ctx.Repo.RepoLink

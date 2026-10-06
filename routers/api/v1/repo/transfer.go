@@ -115,7 +115,7 @@ func Transfer(ctx *context.APIContext) {
 	oldFullname := ctx.Repo().Repository.FullName()
 
 	if err := repo_service.StartRepositoryTransfer(ctx, ctx.Doer(), newOwner, ctx.Repo().Repository, teams); err != nil {
-		if errors.Is(err, user_model.ErrBlockedByUser) {
+		if errors.Is(err, user_model.ErrBlockedByUser) || organization.IsErrOrgArchived(err) {
 			ctx.Error(http.StatusForbidden, "StartRepositoryTransfer", err)
 			return
 		}
@@ -174,6 +174,10 @@ func AcceptTransfer(ctx *context.APIContext) {
 
 	err := acceptOrRejectRepoTransfer(ctx, true)
 	if ctx.Written() {
+		return
+	}
+	if organization.IsErrOrgArchived(err) {
+		ctx.Error(http.StatusForbidden, "acceptOrRejectRepoTransfer", err)
 		return
 	}
 	if err != nil {

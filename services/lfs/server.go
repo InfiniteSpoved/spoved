@@ -530,6 +530,9 @@ func writeStatusMessage(ctx *context.Context, status int, message string) {
 func authenticate(ctx *context.Context, repository *repo_model.Repository, requireSigned, requireWrite bool) bool {
 	accessMode := perm.AccessModeRead
 	if requireWrite {
+		if repository.IsArchived {
+			return false
+		}
 		accessMode = perm.AccessModeWrite
 	}
 

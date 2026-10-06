@@ -157,7 +157,9 @@ type Repository struct {
 	IsPrivate  bool `xorm:"INDEX"`
 	IsEmpty    bool `xorm:"INDEX"`
 	IsArchived bool `xorm:"INDEX"`
-	IsMirror   bool `xorm:"INDEX"`
+	// ArchivedByOrg is set when the owning organization's archive made the repository read-only.
+	ArchivedByOrg bool `xorm:"NOT NULL DEFAULT false"`
+	IsMirror      bool `xorm:"INDEX"`
 
 	Status RepositoryStatus `xorm:"NOT NULL DEFAULT 0"`
 

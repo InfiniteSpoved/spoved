@@ -11,6 +11,7 @@ import (
 	"forgejo.org/models/db"
 	"forgejo.org/models/perm"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/optional"
 	"forgejo.org/modules/structs"
 
 	"xorm.io/builder"
@@ -28,6 +29,7 @@ type FindOrgOptions struct {
 	UserID         int64
 	IncludeLimited bool
 	IncludePrivate bool
+	IsArchived     optional.Option[bool]
 }
 
 func queryUserOrgIDs(userID int64, includePrivate bool) *builder.Builder {
@@ -49,6 +51,9 @@ func (opts FindOrgOptions) ToConds() builder.Cond {
 		} else {
 			cond = cond.And(builder.In("`user`.visibility", structs.VisibleTypePublic, structs.VisibleTypeLimited))
 		}
+	}
+	if has, value := opts.IsArchived.Get(); has {
+		cond = cond.And(builder.Eq{"`user`.is_archived": value})
 	}
 	return cond
 }
@@ -86,6 +91,7 @@ func GetUserOrgsList(ctx context.Context, user *user_model.User) ([]*Organizatio
 		"avatar",
 		"avatar_email",
 		"use_custom_avatar",
+		"is_archived",
 	}
 
 	selectColumns := &strings.Builder{}

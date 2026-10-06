@@ -86,6 +86,8 @@ type swaggerParameterBodies struct {
 	CreateOrgOption api.CreateOrgOption
 	// in:body
 	EditOrgOption api.EditOrgOption
+	// in:body
+	ArchiveOrgOption api.ArchiveOrgOption
 
 	// in:body
 	EditRepoBranchWorkflowOption api.EditRepoBranchWorkflowOption

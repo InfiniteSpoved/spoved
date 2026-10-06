@@ -1128,6 +1128,12 @@ func registerRoutes(m *web.Route) {
 			m.Get("/teams/{team}/groups/search", org.SearchTeamUserGroups)
 		}, context.OrgAssignment(true, false, true))
 
+		// owner or site admin; the handlers answer 403 (not 404) for visible organizations
+		m.Group("/{org}/settings", func() {
+			m.Post("/archive", org.ArchivePost)
+			m.Post("/unarchive", org.UnarchivePost)
+		}, context.OrgAssignment())
+
 		// require admin permission
 		m.Group("/{org}", func() {
 			m.Get("/teams/-/search", org.SearchTeam)

@@ -12,6 +12,7 @@ import (
 	"forgejo.org/models"
 	admin_model "forgejo.org/models/admin"
 	"forgejo.org/models/db"
+	"forgejo.org/models/organization"
 	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
@@ -82,6 +83,8 @@ func handleMigrateError(ctx *context.Context, owner *user_model.User, err error,
 		ctx.RenderWithErr(ctx.Tr("form.visit_rate_limit"), tpl, form)
 	case migrations.IsTwoFactorAuthError(err):
 		ctx.RenderWithErr(ctx.Tr("form.2fa_auth_required"), tpl, form)
+	case organization.IsErrOrgArchived(err):
+		ctx.RenderWithErr(ctx.Tr("org.archived.readonly"), tpl, form)
 	case repo_model.IsErrReachLimitOfRepo(err):
 		maxCreationLimit := owner.MaxCreationLimit()
 		msg := ctx.TrN(maxCreationLimit, "repo.form.reach_limit_of_creation_1", "repo.form.reach_limit_of_creation_n", maxCreationLimit)
