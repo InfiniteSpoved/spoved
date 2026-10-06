@@ -1,27 +1,6 @@
 <svg viewBox="0 0 212 212" xmlns="http://www.w3.org/2000/svg">
-  <style type="text/css">
-    circle {
-      fill: none;
-      stroke: #000;
-      stroke-width: 15;
-    }
-    path {
-      fill: none;
-      stroke: #000;
-      stroke-width: 25;
-    }
-    .orange {
-      stroke:#ff6600;
-    }
-    .red {
-      stroke:#d40000;
-    }
-  </style>
-  <g transform="translate(6,6)">
-    <path d="M58 168 v-98 a50 50 0 0 1 50-50 h20" class="orange" />
-    <path d="M58 168 v-30 a50 50 0 0 1 50-50 h20" class="red" />
-    <circle cx="142" cy="20" r="18" class="orange" />
-    <circle cx="142" cy="88" r="18" class="red" />
-    <circle cx="58" cy="180" r="18" class="red" />
-  </g>
+  <!-- CodeHat mark: a hat whose crown holds a code chevron pair -->
+  <path d="M46 150 L56 52 Q58 34 76 34 H136 Q154 34 156 52 L166 150 Z" fill="#1d4ed8" />
+  <rect x="10" y="146" width="192" height="30" rx="15" fill="#60a5fa" />
+  <path d="M90 70 L68 94 L90 118 M122 70 L144 94 L122 118" fill="none" stroke="#fff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" />
 </svg>

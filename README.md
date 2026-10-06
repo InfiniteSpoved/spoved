@@ -1,28 +1,30 @@
-# GitHat
+# CodeHat
 
-GitHat is a self-hosted Git forge for companies that need to pass security and compliance audits. It is built with **SOC 2** and **ISO/IEC 27001** controls in mind: who can access what, how credentials are managed, how changes reach protected branches, and how the platform is operated.
+**CodeHat: a self-hosted Git forge, based on Forgejo.**
 
-GitHat started as a fork of [Forgejo](https://forgejo.org) and keeps everything Forgejo offers: Git hosting, issues, pull requests, wikis, project boards, Actions (GitHub-compatible CI), a package registry for about 20 formats, LDAP and OAuth2/OIDC sign-in, and more. On top of that it adds the features listed below.
+CodeHat is a self-hosted Git forge for companies that need to pass security and compliance audits. It is built with **SOC 2** and **ISO/IEC 27001** controls in mind: who can access what, how credentials are managed, how changes reach protected branches, and how the platform is operated.
 
-> GitHat helps you meet SOC 2 and ISO 27001 controls; it does not make an organization compliant or certified by itself. Certification covers your organization, processes and evidence, not a single tool.
+CodeHat started as a fork of [Forgejo](https://forgejo.org) and keeps everything Forgejo offers: Git hosting, issues, pull requests, wikis, project boards, Actions (GitHub-compatible CI), a package registry for about 20 formats, LDAP and OAuth2/OIDC sign-in, and more. On top of that it adds the features listed below.
+
+> CodeHat helps you meet SOC 2 and ISO 27001 controls; it does not make an organization compliant or certified by itself. Certification covers your organization, processes and evidence, not a single tool.
 
 ## Why a separate project
 
-GitHat was inspired by teams moving off **Bitbucket Data Center**, and by features from **GitLab Premium/Ultimate**, **Azure DevOps** and **GitHub Enterprise** that self-hosted forges lack: directory-synced groups, read-only auditor access, push rules, credential expiry, rate limiting and admin reporting.
+CodeHat was inspired by teams moving off **Bitbucket Data Center**, and by features from **GitLab Premium/Ultimate**, **Azure DevOps** and **GitHub Enterprise** that self-hosted forges lack: directory-synced groups, read-only auditor access, push rules, credential expiry, rate limiting and admin reporting.
 
-GitHat's goals have diverged from Forgejo's:
+CodeHat's goals have diverged from Forgejo's:
 
 - **Compliance-first.** Features are chosen for audit and enterprise needs (access reviews, least privilege, credential policy, change control), not general-purpose or community hosting.
-- **AI-assisted development.** GitHat is built with AI coding agents (Claude Code) working alongside people, with review, security review and testing on every change. Forgejo doesn't accept AI-generated contributions, so GitHat's changes are not offered back upstream.
-- **Independent roadmap.** GitHat still merges Forgejo's changes regularly to keep its fixes and security updates.
+- **AI-assisted development.** CodeHat is built with AI coding agents (Claude Code) working alongside people, with review, security review and testing on every change. Forgejo doesn't accept AI-generated contributions, so CodeHat's changes are not offered back upstream.
+- **Independent roadmap.** CodeHat still merges Forgejo's changes regularly to keep its fixes and security updates.
 
 ## Credits
 
-GitHat is a fork of **[Forgejo](https://codeberg.org/forgejo/forgejo)**, its predecessor, which is itself a fork of [Gitea](https://gitea.com) and [Gogs](https://gogs.io). Almost all of GitHat's code is their work. Thank you to the Forgejo, Gitea and Gogs contributors.
+CodeHat is a fork of **[Forgejo](https://codeberg.org/forgejo/forgejo)**, its predecessor, which is itself a fork of [Gitea](https://gitea.com) and [Gogs](https://gogs.io). Almost all of CodeHat's code is their work. Thank you to the Forgejo, Gitea and Gogs contributors.
 
-"Forgejo" is the name of the Forgejo project. GitHat is not affiliated with or endorsed by it.
+CodeHat is a modified version of Forgejo, changed by the CodeHat contributors since 2026 (see the git history for each change). It is not affiliated with or endorsed by Forgejo or Codeberg e.V. "Forgejo" is a trademark of Codeberg e.V. and names the Forgejo project only.
 
-## Features GitHat adds
+## Features CodeHat adds
 
 Each feature links to the pull request that added it.
 
@@ -86,11 +88,11 @@ Planned work is tracked in [issues](https://github.com/GitHatOrg/GitHat/issues),
 
 ## Naming
 
-GitHat is the project's name. The application itself still uses Forgejo's name, logo and interface text, so it doesn't show a mix of both names. A complete rename of the interface is planned. Set `APP_NAME` in `app.ini` to show your own site name.
+CodeHat was called GitHat until October 2026; it was renamed because the Git trademark policy doesn't allow "Git" in a third-party product name. The interface, emails, logo and default settings say CodeHat, and a "based on Forgejo" link in the footer credits the upstream project. Set `APP_NAME` in `app.ini` to show your own site name. [`docs/branding.md`](docs/branding.md) lists what the rename changes and how to keep it across upstream merges.
 
 ## Documentation
 
-Forgejo's [documentation](https://forgejo.org/docs/latest/) applies to everything GitHat inherits. GitHat's additions are described in their pull requests and in [`docs/`](docs).
+Forgejo's [documentation](https://forgejo.org/docs/latest/) applies to everything CodeHat inherits. CodeHat's additions are described in their pull requests and in [`docs/`](docs).
 
 ## Contributing
 
@@ -98,4 +100,4 @@ Changes go through pull requests into `develop` on this repository. See [`CLAUDE
 
 ## License
 
-GitHat is distributed under the terms of the [GPL version 3.0](LICENSE) or any later version, the same license as Forgejo. Forgejo versions before v9.0 were distributed under the MIT license. Copyright notices of the original authors are kept in the source files.
+CodeHat is distributed under the terms of the [GPL version 3.0](LICENSE) or any later version, the same license as Forgejo. Forgejo versions before v9.0 were distributed under the MIT license. Copyright notices of the original authors are kept in the source files.

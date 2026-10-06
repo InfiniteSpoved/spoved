@@ -41,18 +41,17 @@ npx vitest run web_src/js/company-contrast.test.js
 
 When you add a semantic token that is drawn as text or as a UI boundary, add its pair to the test.
 
-## Enabling the themes
+## Default themes
 
-In the deployment's `app.ini`:
+The company themes are the default: `[ui] DEFAULT_THEME` is `company-auto`, and `THEMES` lists the four company themes first, followed by the upstream Forgejo and Gitea themes. To go back to the upstream look, set in the deployment's `app.ini`:
 
 ```ini
 [ui]
-DEFAULT_THEME = company-auto
-THEMES = company-auto,company-light,company-dark,company-high-contrast,forgejo-auto,forgejo-light,forgejo-dark,gitea-auto,gitea-light,gitea-dark,forgejo-auto-deuteranopia-protanopia,forgejo-light-deuteranopia-protanopia,forgejo-dark-deuteranopia-protanopia,forgejo-auto-tritanopia,forgejo-light-tritanopia,forgejo-dark-tritanopia
+DEFAULT_THEME = forgejo-auto
 ```
 
 Users choose a theme in Settings → Appearance.
 
 ## Branding
 
-Logo, favicon and app name stay deployment settings: put `logo.svg`, `logo.png`, `favicon.svg` and `favicon.png` in `custom/public/assets/img/`, and set `APP_NAME` in `app.ini`.
+The default logo, favicon and app name are CodeHat's (see [`branding.md`](branding.md)). To use your own, put `logo.svg`, `logo.png`, `favicon.svg` and `favicon.png` in `custom/public/assets/img/`, and set `APP_NAME` in `app.ini`.

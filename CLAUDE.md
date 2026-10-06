@@ -1,6 +1,6 @@
 # Working on this fork
 
-`GitHatOrg/GitHat` is a private fork of Codeberg `forgejo/forgejo`.
+`GitHatOrg/GitHat` is the repository of CodeHat, a private fork of Codeberg `forgejo/forgejo`.
 
 - `main` mirrors upstream. `.github/workflows/sync-upstream.yml` fast-forwards it nightly, so never push to it.
 - `develop` is the default branch. All PRs target `develop`. Merge `origin/develop` into feature branches with a merge commit; don't rebase pushed branches.
@@ -77,3 +77,4 @@ Add a line here when you hit something the next person should know.
 - Org branch protection rules live in protected_branch with repo_id=0 and org_id set; enforcement must use GetMatchedProtectedBranchRules and pass every returned rule, and a by-ID query on protected_branch must always include repo_id or org_id (xorm drops zero fields).
 - Inside a shared tx, `models.RemoveTeamMember` failing with `ErrLastOrgOwner` aborts the whole outer tx (its `db.TxContext` closer rolls back) even if you handle the error: check `team.IsOwnerTeam() && team.NumMembers == 1` first, and reuse one `*Team` per org so `NumMembers` stays current.
 - Org archive: `context.IsArchivedOrgWrite` refuses non-GET requests to an archived org and its repos in `HandleOrgAssignment`/`orgAssignment` and `RepoAssignment`/API `RepoAccess`, with route-pattern exemptions (unarchive, org delete); repo creation and transfers are checked in `CreateRepositoryByExample` and `TransferOwnership`. Group/LDAP/OAuth sync skips adds to archived orgs but still applies removals, and callers run `usergroup.SyncOrgTeams` after unarchive (`services/org` can't import `services/usergroup`).
+- Product name: to make an English ini string say CodeHat, add the same key to `options/locale_next/locale_en-US.json` (locale_next wins over the ini), never edit the ini; list it in `codehatShadowKeys` (`modules/translation/codehat_test.go`) and `docs/branding.md`. `test.BrandMentions` (used by `TestBranding` and the install/500/mail tests) fails on any visible "Forgejo"/"GitHat"; allow a legitimate upstream one only by exact phrase in `brandAllowed`, with a comment.

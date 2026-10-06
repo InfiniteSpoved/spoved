@@ -210,8 +210,8 @@ enabled=1`,
 					}
 
 					assert.Equal(t, "classic", result.Component)
-					assert.Equal(t, "Forgejo", result.Origin)
-					assert.Equal(t, "Forgejo", result.Label)
+					assert.Equal(t, setting.AppName, result.Origin)
+					assert.Equal(t, setting.AppName, result.Label)
 					assert.Equal(t, "x86_64", result.Architecture)
 					assert.False(t, result.NotAutomatic)
 					assert.NotEmpty(t, result.Archive)
@@ -293,8 +293,8 @@ enabled=1`,
 						}
 					}
 
-					assert.Equal(t, "Forgejo", result.Origin)
-					assert.Equal(t, "Forgejo", result.Label)
+					assert.Equal(t, setting.AppName, result.Origin)
+					assert.Equal(t, setting.AppName, result.Label)
 					assert.Equal(t, "Unknown", result.Suite)
 					assert.Equal(t, "x86_64", result.Architectures)
 

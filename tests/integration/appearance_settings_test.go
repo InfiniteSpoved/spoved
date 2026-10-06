@@ -21,7 +21,7 @@ func TestThemeChange(t *testing.T) {
 	user := loginUser(t, "user2")
 
 	// Verify default theme
-	testSelectedTheme(t, user, "forgejo-auto", "Forgejo (follow system theme)", "")
+	testSelectedTheme(t, user, "company-auto", "Company (follow system theme)", "")
 
 	// Change theme to forgejo-dark and verify it works fine
 	testChangeTheme(t, user, "forgejo-dark")
@@ -46,7 +46,7 @@ func TestUserHasNonExistentTheme(t *testing.T) {
 	user := loginUser(t, "user40")
 
 	// Verify that the UI falls back to the default theme
-	testSelectedTheme(t, user, "forgejo-auto", "Forgejo (follow system theme)", "")
+	testSelectedTheme(t, user, "company-auto", "Company (follow system theme)", "")
 }
 
 // testSelectedTheme checks that the expected theme is used in html[data-theme]
