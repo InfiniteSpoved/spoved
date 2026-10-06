@@ -99,7 +99,7 @@ func runIPAllowlistRemove(ctx context.Context, c *cli.Command) error {
 		if err != nil {
 			return err
 		}
-		p = ipallowlist_service.Normalize(p)
+		p = setting.NormalizeIPPrefix(p)
 		n := len(s.Entries)
 		s.Entries = slices.DeleteFunc(slices.Clone(s.Entries), func(e setting.IPAllowlistEntry) bool { return e.CIDR == p })
 		if len(s.Entries) == n {

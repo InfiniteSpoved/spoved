@@ -6,7 +6,6 @@ package ipallowlist
 import (
 	"context"
 	"errors"
-	"net/netip"
 	"slices"
 	"time"
 	"unicode/utf8"
@@ -26,14 +25,6 @@ const MaxItems = 500
 
 // ErrSetByConfig is returned when [ip_allowlist] ENABLED = false in app.ini turns the list off.
 var ErrSetByConfig = errors.New("the IP allowlist is turned off in the configuration file")
-
-// Normalize returns the network of a CIDR with the host bits cleared, and IPv4-mapped IPv6 networks as IPv4.
-func Normalize(p netip.Prefix) netip.Prefix {
-	if p.Addr().Is4In6() && p.Bits() >= 96 {
-		return netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96).Masked()
-	}
-	return p.Masked()
-}
 
 // Set validates and stores the IP allowlist. A nil doer means the command line. Entries keep who added them and when,
 // and the owners of exempt tokens are looked up.
@@ -59,7 +50,7 @@ func Set(ctx context.Context, doer *user_model.User, s setting.IPAllowlistState)
 		if utf8.RuneCountInString(e.Description) > 255 {
 			return util.NewInvalidArgumentErrorf("the description of %s must be at most 255 characters", e.CIDR)
 		}
-		e.CIDR = Normalize(e.CIDR)
+		e.CIDR = setting.NormalizeIPPrefix(e.CIDR)
 		e.CreatedByID, e.CreatedUnix = doerID, time.Now().Unix()
 		if j := slices.IndexFunc(old.Entries, func(o setting.IPAllowlistEntry) bool { return o.CIDR == e.CIDR }); j >= 0 {
 			e.CreatedByID, e.CreatedUnix = old.Entries[j].CreatedByID, old.Entries[j].CreatedUnix

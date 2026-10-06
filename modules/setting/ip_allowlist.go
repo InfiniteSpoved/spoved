@@ -111,6 +111,15 @@ func (s IPAllowlistState) WouldBlock(ip netip.Addr) bool {
 	return slices.ContainsFunc(surfaces, s.Enforced) && !s.Allows(ip)
 }
 
+// NormalizeIPPrefix returns the network with the host bits cleared, and IPv4-mapped IPv6 networks as IPv4, so that it
+// contains unmapped addresses.
+func NormalizeIPPrefix(p netip.Prefix) netip.Prefix {
+	if p.Addr().Is4In6() && p.Bits() >= 96 {
+		return netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96).Masked()
+	}
+	return p.Masked()
+}
+
 // IPFromRemoteAddr parses the "host:port" of a client; the address is invalid if it can't be parsed.
 func IPFromRemoteAddr(remoteAddr string) netip.Addr {
 	host, _, err := net.SplitHostPort(remoteAddr)

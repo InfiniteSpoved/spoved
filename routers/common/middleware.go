@@ -97,9 +97,9 @@ func joinForwardedFor(trusted []string) func(http.Handler) http.Handler {
 		if n == "*" {
 			trustAll = true
 		} else if p, err := netip.ParsePrefix(n); err == nil {
-			prefixes = append(prefixes, p)
+			prefixes = append(prefixes, setting.NormalizeIPPrefix(p))
 		} else if a, err := netip.ParseAddr(n); err == nil {
-			prefixes = append(prefixes, netip.PrefixFrom(a, a.BitLen()))
+			prefixes = append(prefixes, setting.NormalizeIPPrefix(netip.PrefixFrom(a, a.BitLen())))
 		}
 	}
 	return func(next http.Handler) http.Handler {

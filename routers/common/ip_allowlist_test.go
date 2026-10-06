@@ -71,6 +71,15 @@ func TestClientIPFromTrustedProxyOnly(t *testing.T) {
 		assert.Equal(t, "invalid IP", client)
 	}
 
+	// IPv4-mapped entries trust the IPv4 peer, as proxy.ForwardedHeaders does
+	for _, trusted := range []string{"::ffff:127.0.0.1", "::ffff:127.0.0.0/104"} {
+		r := newRoute(trusted)
+		assertIP(r, "198.51.100.7", "127.0.0.1:1234", http.Header{"X-Forwarded-For": {"10.1.2.3", "198.51.100.7"}})
+		remote, client := clientIP(r, "127.0.0.1:1234", http.Header{"X-Forwarded-For": {"198.51.100.7"}, "X-Real-Ip": {"10.1.2.3"}})
+		assert.Equal(t, "10.1.2.3", remote, trusted)
+		assert.Equal(t, "invalid IP", client, trusted)
+	}
+
 	// "*" trusts every peer
 	r = newRoute("*")
 	assertIP(r, "198.51.100.7", "203.0.113.9:1234", http.Header{"X-Forwarded-For": {"10.1.2.3", "198.51.100.7"}})
