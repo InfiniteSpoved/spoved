@@ -3384,6 +3384,12 @@
         "operationId": "orgGetAll",
         "parameters": [
           {
+            "type": "boolean",
+            "description": "only list archived (true) or non-archived (false) organizations; both when omitted",
+            "name": "archived",
+            "in": "query"
+          },
+          {
             "type": "integer",
             "description": "page number of results to return (1-based)",
             "name": "page",
@@ -4166,6 +4172,48 @@
         "responses": {
           "200": {
             "$ref": "#/responses/ActivityFeedsList"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/archive": {
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Archive an organization, making it and all of its repositories read-only",
+        "operationId": "orgArchive",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization to archive",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/ArchiveOrgOption"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
           },
           "404": {
             "$ref": "#/responses/notFound"
@@ -5735,6 +5783,41 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/unarchive": {
+      "post": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Unarchive an organization, restoring the repositories its archive made read-only",
+        "operationId": "orgUnarchive",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization to unarchive",
+            "name": "org",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -23402,6 +23485,12 @@
         "operationId": "orgListCurrentUserOrgs",
         "parameters": [
           {
+            "type": "boolean",
+            "description": "only list archived (true) or non-archived (false) organizations; both when omitted",
+            "name": "archived",
+            "in": "query"
+          },
+          {
             "type": "integer",
             "description": "page number of results to return (1-based)",
             "name": "page",
@@ -24680,6 +24769,12 @@
             "name": "username",
             "in": "path",
             "required": true
+          },
+          {
+            "type": "boolean",
+            "description": "only list archived (true) or non-archived (false) organizations; both when omitted",
+            "name": "archived",
+            "in": "query"
           },
           {
             "type": "integer",
@@ -31962,6 +32057,11 @@
       "description": "Organization represents an organization",
       "type": "object",
       "properties": {
+        "archived": {
+          "description": "whether the organization is archived (read-only)",
+          "type": "boolean",
+          "x-go-name": "Archived"
+        },
         "avatar_url": {
           "type": "string",
           "x-go-name": "AvatarURL"
