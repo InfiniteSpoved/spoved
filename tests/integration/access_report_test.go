@@ -147,10 +147,16 @@ func TestRepoAccessOverviewHidesInstanceRoles(t *testing.T) {
 func TestRepoAccessOverviewOutsider(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	prepareAccessReport(t)
-	require.NoError(t, db.Insert(db.DefaultContext, &repo_model.Collaboration{RepoID: 3, UserID: 10, Mode: perm_model.AccessModeAdmin}))
-	require.NoError(t, access_model.RecalculateUserAccess(db.DefaultContext, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3}), 10))
+	ctx := db.DefaultContext
+	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})
+	require.NoError(t, db.Insert(ctx, &repo_model.Collaboration{RepoID: 3, UserID: 10, Mode: perm_model.AccessModeAdmin}))
+	// user5 reads as a collaborator, and writes through team1, which an outsider must not learn
+	_, err := db.GetEngine(ctx).Exec("UPDATE collaboration SET mode = ? WHERE repo_id = 3 AND user_id = 5", perm_model.AccessModeRead)
+	require.NoError(t, err)
+	require.NoError(t, access_model.RecalculateAccesses(ctx, repo))
 
 	doc := accessRows(t, loginUser(t, "user10"), "/org3/repo3/settings/access")
+	assert.Contains(t, doc.Find(`tr[data-user="user5"] td`).Eq(1).Text(), "Read")
 	body := doc.Find("table.access-report").Text()
 	assert.Equal(t, 0, doc.Find(`tr[data-user="user4"]`).Length(), "user4 has repo3 only through team1")
 	assert.Equal(t, 1, doc.Find(`tr[data-user="user5"]`).Length(), "user5 is a collaborator")
@@ -161,6 +167,21 @@ func TestRepoAccessOverviewOutsider(t *testing.T) {
 	rows := apiAccessRows(t, getUserToken(t, "user10", auth_model.AccessTokenScopeReadRepository), "")
 	assert.NotContains(t, rowNames(rows), "user4")
 	assert.Contains(t, rowNames(rows), "team:team1")
+	var persons []string
+	for _, r := range rows {
+		if r.Type == "person" {
+			persons = append(persons, r.User.UserName)
+		}
+		if r.User != nil && r.User.UserName == "user5" {
+			assert.Equal(t, "read", r.Access)
+			assert.Equal(t, "read", r.Units["repo.code"])
+			for _, p := range r.Paths {
+				assert.True(t, p.Applied, p.Kind)
+			}
+		}
+	}
+	// N2: external-only can't tell the org members apart
+	assert.ElementsMatch(t, persons, rowNames(apiAccessRows(t, getUserToken(t, "user10", auth_model.AccessTokenScopeReadRepository), "?external=true")))
 	for _, r := range rows {
 		for _, p := range r.Paths {
 			assert.Empty(t, p.UserGroups)
@@ -173,12 +194,19 @@ func TestRepoAccessOverviewFilters(t *testing.T) {
 	prepareAccessReport(t)
 	token := getUserToken(t, "user1", auth_model.AccessTokenScopeReadRepository)
 
+	bot := &user_model.User{Name: "release-bot", LowerName: "release-bot", Email: "release-bot@example.com", Type: user_model.UserTypeBot, IsActive: true}
+	require.NoError(t, db.Insert(db.DefaultContext, bot))
+	require.NoError(t, db.Insert(db.DefaultContext, &repo_model.Collaboration{RepoID: 3, UserID: bot.ID, Mode: perm_model.AccessModeWrite}))
+	require.NoError(t, access_model.RecalculateUserAccess(db.DefaultContext, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3}), bot.ID))
+
 	assert.ElementsMatch(t, []string{"ci-push", "prod-deploy"}, rowNames(apiAccessRows(t, token, "?type=key")))
+	assert.Equal(t, []string{"release-bot"}, rowNames(apiAccessRows(t, token, "?type=bot")))
+	assert.ElementsMatch(t, []string{"user1", "user2", "user4", "user5"}, rowNames(apiAccessRows(t, token, "?type=person")))
 	assert.ElementsMatch(t, []string{"user1", "user2"}, rowNames(apiAccessRows(t, token, "?mode=admin")))
 	assert.NotContains(t, rowNames(apiAccessRows(t, token, "?mode=write")), "prod-deploy")
-	assert.ElementsMatch(t, []string{"user1", "user2", "user4", "user5", "ci-push", "prod-deploy"}, rowNames(apiAccessRows(t, token, "?unit=repo.code")))
+	assert.ElementsMatch(t, []string{"user1", "user2", "user4", "user5", "release-bot", "ci-push", "prod-deploy"}, rowNames(apiAccessRows(t, token, "?unit=repo.code")))
 	assert.NotContains(t, rowNames(apiAccessRows(t, token, "?unit=repo.issues")), "prod-deploy")
-	assert.Equal(t, []string{"user5"}, rowNames(apiAccessRows(t, token, "?external=true")))
+	assert.ElementsMatch(t, []string{"user5", "release-bot"}, rowNames(apiAccessRows(t, token, "?external=true")))
 
 	// inactive: user4 signed in 40 days ago, user5 yesterday, the others never
 	defer timeutil.MockUnset()
@@ -188,11 +216,20 @@ func TestRepoAccessOverviewFilters(t *testing.T) {
 	require.NoError(t, err)
 	_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE `user` SET last_login_unix = ? WHERE id IN (1, 2, 5)", now.Add(-86400))
 	require.NoError(t, err)
-	assert.Equal(t, []string{"user4"}, rowNames(apiAccessRows(t, token, "?inactive_days=30")))
+	assert.ElementsMatch(t, []string{"user4", "release-bot"}, rowNames(apiAccessRows(t, token, "?inactive_days=30")))
+
+	// N3: only site admins and org owners can filter by last sign-in
+	assert.ElementsMatch(t, []string{"user4", "release-bot"}, rowNames(apiAccessRows(t, getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository), "?inactive_days=30")), "org owner")
+	require.NoError(t, db.Insert(db.DefaultContext, &repo_model.Collaboration{RepoID: 3, UserID: 10, Mode: perm_model.AccessModeAdmin}))
+	require.NoError(t, access_model.RecalculateUserAccess(db.DefaultContext, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3}), 10))
+	outsiderToken := getUserToken(t, "user10", auth_model.AccessTokenScopeReadRepository)
+	assert.Equal(t, rowNames(apiAccessRows(t, outsiderToken, "")), rowNames(apiAccessRows(t, outsiderToken, "?inactive_days=30")), "repo admin outside the org")
+	assert.Equal(t, 0, accessRows(t, loginUser(t, "user10"), "/org3/repo3/settings/access").Find(`input[name="inactive_days"]`).Length())
 
 	// the page filters the same way
 	doc := accessRows(t, loginUser(t, "user1"), "/org3/repo3/settings/access?type=key")
 	assert.Equal(t, 2, doc.Find("table.access-report tbody tr").Length())
+	assert.Equal(t, 1, doc.Find(`input[name="inactive_days"]`).Length())
 }
 
 func TestAPIRepoAccess(t *testing.T) {

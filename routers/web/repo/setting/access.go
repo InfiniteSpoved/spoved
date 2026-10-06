@@ -21,12 +21,12 @@ func Access(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("access_report.title")
 	ctx.Data["PageIsSettingsAccess"] = true
 
-	rows, err := accessreport.ForRepo(ctx, ctx.Repo.Repository, ctx.Doer)
+	rows, activity, err := accessreport.ForRepo(ctx, ctx.Repo.Repository, ctx.Doer, accessreport.ParseFilter(ctx.FormString))
 	if err != nil {
 		ctx.ServerError("ForRepo", err)
 		return
 	}
-	rows = accessreport.ParseFilter(ctx.FormString).Apply(rows)
+	ctx.Data["ShowActivity"] = activity
 
 	page := max(ctx.FormInt("page"), 1)
 	limit := ctx.FormInt("limit")

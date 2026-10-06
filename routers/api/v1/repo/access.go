@@ -51,7 +51,7 @@ func GetAccess(ctx *context.APIContext) {
 	//   type: boolean
 	// - name: inactive_days
 	//   in: query
-	//   description: only users who haven't signed in for this many days
+	//   description: only users who haven't signed in for this many days; applies only for site admins and owners of the owner organization
 	//   type: integer
 	// - name: page
 	//   in: query
@@ -69,12 +69,11 @@ func GetAccess(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	rows, err := accessreport.ForRepo(ctx, ctx.Repo().Repository, ctx.Doer())
+	rows, _, err := accessreport.ForRepo(ctx, ctx.Repo().Repository, ctx.Doer(), accessreport.ParseFilter(ctx.FormString))
 	if err != nil {
 		ctx.InternalServerError(err)
 		return
 	}
-	rows = accessreport.ParseFilter(ctx.FormString).Apply(rows)
 	opts := utils.GetListOptions(ctx)
 	ctx.SetTotalCountHeader(int64(len(rows)))
 	ctx.JSON(http.StatusOK, convert.ToAccessRows(ctx, util.PaginateSlice(rows, opts.Page, opts.PageSize).([]*accessreport.Row), ctx.Doer()))

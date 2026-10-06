@@ -6,6 +6,7 @@ package accessreport
 
 import (
 	"context"
+	"maps"
 	"math"
 	"sort"
 
@@ -78,6 +79,9 @@ type Options struct {
 	User *user_model.User
 	// Plain computes users as if they were neither site admins nor auditors, and leaves out site admins and auditors.
 	Plain bool
+	// Outsider computes for a viewer outside the owner org: users as if they were in no team and in no org, and
+	// one row per team instead of its members.
+	Outsider bool
 }
 
 type key struct{ a, b int64 }
@@ -128,6 +132,13 @@ func Compute(ctx context.Context, opts Options) ([]*Row, error) {
 		repo.Owner = owner
 		if opts.User == nil && !repo.IsPrivate {
 			rows = append(rows, d.pseudoRows(repo, owner)...)
+		}
+		if opts.Outsider {
+			for _, tid := range d.repoTeams[repo.ID] {
+				if t := d.teams[tid]; t != nil && t.OrgID == repo.OwnerID {
+					rows = append(rows, teamRow(repo, t))
+				}
+			}
 		}
 		for _, uid := range d.candidates(repo, opts) {
 			u := d.users[uid]
@@ -227,15 +238,22 @@ func load(ctx context.Context, repos repo_model.RepositoryList, opts Options) (*
 	for _, c := range collabs {
 		d.collab[key{c.UserID, c.RepoID}] = c.Mode
 	}
+	// what the membership queries match: nobody for an outsider, who is shown no team or org membership
+	memberCond := userCond
+	if opts.Outsider {
+		memberCond = func(string) builder.Cond { return builder.Expr("1=0") }
+		// without teams, the access table would hold the collaboration
+		maps.Copy(d.access, d.collab)
+	}
 	accesses := make([]*access_model.Access, 0, 10)
-	if err := e.In("repo_id", repoIDs).And(userCond("user_id")).Find(&accesses); err != nil {
+	if err := e.In("repo_id", repoIDs).And(memberCond("user_id")).Find(&accesses); err != nil {
 		return nil, err
 	}
 	for _, a := range accesses {
 		d.access[key{a.UserID, a.RepoID}] = a.Mode
 	}
 	orgUsers := make([]*organization.OrgUser, 0, 10)
-	if err := e.In("org_id", ownerIDs).And(userCond("uid")).Find(&orgUsers); err != nil {
+	if err := e.In("org_id", ownerIDs).And(memberCond("uid")).Find(&orgUsers); err != nil {
 		return nil, err
 	}
 	for _, ou := range orgUsers {
@@ -269,7 +287,7 @@ func load(ctx context.Context, repos repo_model.RepositoryList, opts Options) (*
 		}
 	}
 	teamUsers := make([]*organization.TeamUser, 0, 10)
-	if err := e.In("team_id", teamIDs).And(userCond("uid")).Find(&teamUsers); err != nil {
+	if err := e.In("team_id", teamIDs).And(memberCond("uid")).Find(&teamUsers); err != nil {
 		return nil, err
 	}
 	for _, tu := range teamUsers {
@@ -285,7 +303,7 @@ func load(ctx context.Context, repos repo_model.RepositoryList, opts Options) (*
 	}, 0, 10)
 	if err := e.Table("user_group_user").
 		Join("INNER", "user_group_team", "user_group_team.group_id = user_group_user.group_id").
-		In("user_group_team.team_id", teamIDs).And(userCond("user_group_user.uid")).
+		In("user_group_team.team_id", teamIDs).And(memberCond("user_group_user.uid")).
 		Select("user_group_user.uid, user_group_team.team_id, user_group_user.group_id, user_group_user.login_source_id").
 		Find(&links); err != nil {
 		return nil, err
@@ -518,18 +536,8 @@ func (d *data) paths(repo *repo_model.Repository, u *user_model.User) []*Path {
 		paths = append(paths, &Path{Kind: KindOwnerUser, Mode: perm_model.AccessModeOwner})
 	}
 	for _, t := range d.userRepoTeams(repo, u) {
-		p := &Path{Kind: KindTeam, Mode: t.AccessMode, Team: t, Groups: d.groups[key{t.ID, u.ID}]}
-		switch {
-		case t.IsOwnerTeam():
-			p.Kind = KindOrgOwner
-		case t.AccessMode >= perm_model.AccessModeAdmin:
-			p.Kind = KindAdminTeam
-		default:
-			p.Units = map[unit.Type]perm_model.AccessMode{}
-			for _, tu := range t.Units {
-				p.Units[tu.Type] = tu.AccessMode
-			}
-		}
+		p := teamPath(t)
+		p.Groups = d.groups[key{t.ID, u.ID}]
 		paths = append(paths, p)
 	}
 	if _, ok := d.collab[key{u.ID, repo.ID}]; ok {
@@ -547,6 +555,38 @@ func (d *data) paths(repo *repo_model.Repository, u *user_model.User) []*Path {
 		paths = append(paths, d.visibilityPath(repo, owner))
 	}
 	return paths
+}
+
+func teamPath(t *organization.Team) *Path {
+	p := &Path{Kind: KindTeam, Mode: t.AccessMode, Team: t}
+	switch {
+	case t.IsOwnerTeam():
+		p.Kind = KindOrgOwner
+	case t.AccessMode >= perm_model.AccessModeAdmin:
+		p.Kind = KindAdminTeam
+	default:
+		p.Units = map[unit.Type]perm_model.AccessMode{}
+		for _, tu := range t.Units {
+			p.Units[tu.Type] = tu.AccessMode
+		}
+	}
+	return p
+}
+
+// teamRow is the access a team gives to its members, as one row.
+func teamRow(repo *repo_model.Repository, t *organization.Team) *Row {
+	p := teamPath(t)
+	p.Applied = true
+	r := &Row{Team: t, Repo: repo, Perm: access_model.Permission{AccessMode: t.AccessMode, Units: repo.Units}, Paths: []*Path{p}}
+	if p.Units != nil {
+		r.Perm.UnitsMode = map[unit.Type]perm_model.AccessMode{}
+		for _, ru := range repo.Units {
+			if m := p.Units[ru.Type]; m > perm_model.AccessModeNone {
+				r.Perm.UnitsMode[ru.Type] = m
+			}
+		}
+	}
+	return r
 }
 
 // setApplied marks the paths that explain the effective access of at least one unit.

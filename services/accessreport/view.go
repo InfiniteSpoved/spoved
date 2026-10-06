@@ -35,41 +35,41 @@ func Highest(p access_model.Permission) perm_model.AccessMode {
 	return m
 }
 
-func isTeamKind(k Kind) bool {
-	return k == KindOrgOwner || k == KindAdminTeam || k == KindTeam
-}
-
-func isVisibilityKind(k Kind) bool {
-	return k == KindPublic || k == KindInternal || k == KindOrgMember
-}
-
-// ForRepo returns the rows of the repository access overview, as the doer may see them: site admins and auditors
-// are named to site admins only, user groups to site admins and org owners, login sources to site admins only,
-// and team members to org members and site admins only.
-func ForRepo(ctx context.Context, repo *repo_model.Repository, doer *user_model.User) ([]*Row, error) {
-	rows, err := Compute(ctx, Options{RepoIDs: []int64{repo.ID}, Plain: !doer.IsAdmin})
-	if err != nil || doer.IsAdmin {
-		return rows, err
+// ForRepo returns the rows of the repository access overview, as the doer may see them, filtered: site admins and
+// auditors are named to site admins only, user groups to site admins and org owners, login sources to site admins
+// only; a viewer outside the owner org sees each team as one row and no team or org membership. The inactive-days
+// filter, which tells last sign-ins apart, applies only for site admins and owners of the owner org; activity
+// says whether it did.
+func ForRepo(ctx context.Context, repo *repo_model.Repository, doer *user_model.User, f Filter) (rows []*Row, activity bool, err error) {
+	opts := Options{RepoIDs: []int64{repo.ID}, Plain: !doer.IsAdmin}
+	isOwner := false
+	if err := repo.LoadOwner(ctx); err != nil {
+		return nil, false, err
 	}
-	rows = append(rows, &Row{Repo: repo, Paths: []*Path{{Kind: KindInstanceRoles, Applied: true}}})
-	if err := repo.LoadOwner(ctx); err != nil || !repo.Owner.IsOrganization() {
-		return rows, err
+	if !doer.IsAdmin && repo.Owner.IsOrganization() {
+		if isOwner, err = organization.IsOrganizationOwner(ctx, repo.OwnerID, doer.ID); err != nil {
+			return nil, false, err
+		}
+		isMember, err := organization.IsOrganizationMember(ctx, repo.OwnerID, doer.ID)
+		if err != nil {
+			return nil, false, err
+		}
+		opts.Outsider = !isMember
 	}
-	isOwner, err := organization.IsOrganizationOwner(ctx, repo.OwnerID, doer.ID)
-	if err != nil {
-		return nil, err
+	if rows, err = Compute(ctx, opts); err != nil {
+		return nil, false, err
 	}
-	isMember, err := organization.IsOrganizationMember(ctx, repo.OwnerID, doer.ID)
-	if err != nil {
-		return nil, err
+	if !doer.IsAdmin {
+		rows = append(rows, &Row{Repo: repo, Paths: []*Path{{Kind: KindInstanceRoles, Applied: true}}})
+		for _, r := range rows {
+			hideGroups(r, !isOwner)
+		}
 	}
-	for _, r := range rows {
-		hideGroups(r, !isOwner)
+	activity = doer.IsAdmin || isOwner
+	if !activity {
+		f.InactiveDays = 0
 	}
-	if isMember {
-		return rows, nil
-	}
-	return collapseTeams(rows, repo), nil
+	return f.Apply(rows), activity, nil
 }
 
 // hideGroups removes the login sources from the paths of the row, and the groups too if all is set.
@@ -87,57 +87,6 @@ func hideGroups(r *Row, all bool) {
 		}
 		r.Paths[i] = &cp
 	}
-}
-
-// collapseTeams replaces the team members by one row per team, and leaves out the users who have no other path
-// than a team or the org membership.
-func collapseTeams(rows []*Row, repo *repo_model.Repository) []*Row {
-	out := make([]*Row, 0, len(rows))
-	var teams []*Row
-	seen := map[int64]bool{}
-	for _, r := range rows {
-		if r.User == nil {
-			out = append(out, r)
-			continue
-		}
-		var kept []*Path
-		other := false
-		for _, p := range r.Paths {
-			switch {
-			case isTeamKind(p.Kind):
-				if !seen[p.Team.ID] {
-					seen[p.Team.ID] = true
-					teams = append(teams, teamRow(p, repo))
-				}
-			case isVisibilityKind(p.Kind):
-				kept = append(kept, p)
-			default:
-				kept = append(kept, p)
-				other = true
-			}
-		}
-		if other {
-			cp := *r
-			cp.Paths = kept
-			out = append(out, &cp)
-		}
-	}
-	return append(out, teams...)
-}
-
-func teamRow(p *Path, repo *repo_model.Repository) *Row {
-	t := p.Team
-	r := &Row{Team: t, Repo: repo, Perm: access_model.Permission{AccessMode: t.AccessMode, Units: repo.Units}}
-	if p.Units != nil {
-		r.Perm.UnitsMode = map[unit.Type]perm_model.AccessMode{}
-		for _, ru := range repo.Units {
-			if m := p.Units[ru.Type]; m > perm_model.AccessModeNone {
-				r.Perm.UnitsMode[ru.Type] = m
-			}
-		}
-	}
-	r.Paths = []*Path{{Kind: p.Kind, Mode: p.Mode, Units: p.Units, Team: t, Applied: true}}
-	return r
 }
 
 // Type is the type of identity of the row: person, bot or key, or "" for the other rows.
