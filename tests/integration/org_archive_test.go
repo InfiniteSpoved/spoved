@@ -338,6 +338,14 @@ func TestOrgArchiveListing(t *testing.T) {
 	assert.Contains(t, list("?archived=true"), "org3")
 	assert.NotContains(t, list("?archived=false"), "org3")
 
+	// AC7: the dashboard switcher hides the archived org (except as the current context) and links to Explore
+	user2 := loginUser(t, "user2")
+	switcher := NewHTMLParser(t, user2.MakeRequest(t, NewRequest(t, "GET", "/"), http.StatusOK).Body)
+	assert.Zero(t, switcher.Find(`.dropdown a.item[title="org3"]`).Length())
+	assert.Equal(t, 1, switcher.Find(`a.item[href$="/explore/organizations?archived=true"]`).Length())
+	inContext := NewHTMLParser(t, user2.MakeRequest(t, NewRequest(t, "GET", "/org/org3/dashboard"), http.StatusOK).Body)
+	assert.Equal(t, 1, inContext.Find(`.dropdown a.item[title="org3"]`).Length())
+
 	// AC10: a site admin unarchives from the admin page's form (same endpoint)
 	webUnarchiveOrg(t, "user1", http.StatusSeeOther)
 	assert.False(t, archivedOrg(t).IsArchived)

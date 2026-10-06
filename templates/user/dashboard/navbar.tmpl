@@ -34,6 +34,9 @@
 								</span>
 							</a>
 						{{end}}
+						{{if .HasHiddenArchivedOrgs}}
+							<a class="item" href="{{AppSubUrl}}/explore/organizations?archived=true">{{svg "octicon-archive"}} {{ctx.Locale.Tr "org.archived.link"}}</a>
+						{{end}}
 					</div>
 				</div>
 			</div>

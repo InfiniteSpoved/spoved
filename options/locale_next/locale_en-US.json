@@ -16,6 +16,7 @@
 	"repo.settings.branch_workflow.locked": "This setting is enforced by the organization and cannot be changed here.",
 	"repo.settings.branch_workflow.pulls_disabled": "Pull requests are not enabled for this repository.",
 	"org.archived.badge": "Archived",
+	"org.archived.link": "Archived organizations",
 	"org.archived.banner": "This organization is archived. It and its repositories are read-only.",
 	"org.archived.readonly": "This organization is archived and read-only.",
 	"org.settings.archive.header": "Archive this organization",

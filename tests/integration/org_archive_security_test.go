@@ -293,6 +293,15 @@ func TestOrgArchiveGroupSyncOwners(t *testing.T) {
 		require.Error(t, err)
 		assert.True(t, organization.IsErrLastOrgOwner(err), "%v", err)
 		assert.True(t, inOwners(2))
+
+		// the same for a login-source mapping removal
+		_, err = db.GetEngine(t.Context()).Exec("UPDATE team_user SET reason = ? WHERE team_id = 1 AND uid = 2", organization.MembershipReasonAddedByAuthProvider)
+		require.NoError(t, err)
+		loginSource := createRemoteAuthSource(t, "archive-owner-source", "https://example.com", "")
+		err = source.SyncGroupsToTeams(t.Context(), unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), loginSource.ID, container.SetOf[string](),
+			map[string]map[string][]string{"admins": {"org3": {"Owners"}}}, true, nil, false)
+		require.Error(t, err)
+		assert.True(t, inOwners(2))
 	})
 }
 
@@ -337,4 +346,20 @@ func TestOrgArchiveMirrorSync(t *testing.T) {
 	require.NoError(t, repo_model.SetArchiveRepoState(t.Context(), mirrorRepo, false))
 	assert.True(t, mirror_service.SyncPullMirror(t.Context(), mirrorRepo.ID))
 	assert.Equal(t, before+1, tags())
+}
+
+// AC6 + AC4: a reader can still clone an archived org's repository over HTTP; a push is refused.
+func TestOrgArchiveGitHTTP(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		archiveOrg3(t, false)
+		cloneURL := *u
+		cloneURL.Path = "/org3/repo3.git"
+		cloneURL.User = url.UserPassword("user2", userPassword)
+
+		dst := t.TempDir()
+		require.NoError(t, git.CloneWithArgs(t.Context(), git.AllowLFSFiltersArgs(), cloneURL.String(), dst, git.CloneRepoOptions{}))
+		doGitSetRemoteURL(dst, "origin", &cloneURL)(t)
+		doGitAddSomeCommits(dst, "master")(t)
+		doGitPushTestRepositoryFail(t, dst, "origin", "master")
+	})
 }
