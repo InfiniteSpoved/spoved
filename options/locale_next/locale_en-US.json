@@ -1622,6 +1622,8 @@
 	"access_report.who.anyone": "Anyone, signed in or not",
 	"access_report.who.signed_in": "Any signed-in user",
 	"access_report.who.instance_roles": "Site administrators and auditors",
+	"access_report.who.org_members": "Any member of the organization",
+	"access_report.private_org_line": "Member of the private organization %s: reads its public repositories, unless restricted.",
 	"access_report.mode.none": "None",
 	"access_report.mode.read": "Read",
 	"access_report.mode.write": "Write",

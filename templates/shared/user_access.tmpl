@@ -21,6 +21,11 @@
 		{{range .Access.UserGroups}}<span class="ui basic label">{{.Name}}{{if .LoginSource}} ({{ctx.Locale.Tr "access_report.synced_by" .LoginSource}}){{end}}</span>{{else}}<span class="text grey">{{ctx.Locale.Tr "access_report.none"}}</span>{{end}}
 	</div>
 {{end}}
+{{if .Access.PrivateOrgs}}
+	<div class="ui attached segment private-orgs">
+		{{range .Access.PrivateOrgs}}<div>{{ctx.Locale.Tr "access_report.private_org_line" .}}</div>{{end}}
+	</div>
+{{end}}
 <h4 class="ui top attached header">{{ctx.Locale.Tr "access_report.teams"}}</h4>
 <div class="ui attached segment user-teams">
 	{{range .Access.Teams}}<span class="ui basic label">{{.}}</span>{{else}}<span class="text grey">{{ctx.Locale.Tr "access_report.none"}}</span>{{end}}

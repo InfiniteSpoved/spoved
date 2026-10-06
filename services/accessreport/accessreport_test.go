@@ -82,9 +82,11 @@ func addPathCases(t *testing.T) (auditorID, groupMemberID int64) {
 	return 8, 5
 }
 
-// effective finds the access of the user (nil for anonymous) to the repo in the rows.
-func effective(rows []*Row, repo *repo_model.Repository, u *user_model.User) access_model.Permission {
-	var signedIn *Row
+// effective finds the access of the user (nil for anonymous) to the repo in the rows: their own row, or else the
+// pseudo-row that applies to them.
+func effective(t *testing.T, rows []*Row, repo *repo_model.Repository, u *user_model.User) access_model.Permission {
+	t.Helper()
+	var pseudo *Row
 	for _, r := range rows {
 		if r.Repo.ID != repo.ID || r.DeployKey != nil {
 			continue
@@ -95,13 +97,20 @@ func effective(rows []*Row, repo *repo_model.Repository, u *user_model.User) acc
 		case u != nil && r.User != nil && r.User.ID == u.ID:
 			return r.Perm
 		case r.User == nil && !r.Anonymous:
-			signedIn = r
+			pseudo = r
 		}
 	}
-	if u != nil && signedIn != nil && !u.IsRestricted {
-		return signedIn.Perm
+	if u == nil || pseudo == nil || u.IsRestricted {
+		return access_model.Permission{}
 	}
-	return access_model.Permission{}
+	if pseudo.Paths[0].Kind == KindOrgMember {
+		isMember, err := organization.IsOrganizationMember(db.DefaultContext, repo.OwnerID, u.ID)
+		require.NoError(t, err)
+		if !isMember {
+			return access_model.Permission{}
+		}
+	}
+	return pseudo.Perm
 }
 
 func assertSamePerm(t *testing.T, expected, actual access_model.Permission, msg string) {
@@ -145,7 +154,7 @@ func TestComputeMatchesGetUserRepoPermission(t *testing.T) {
 	for _, repo := range repos {
 		expected, err := access_model.GetUserRepoPermission(ctx, repo, nil)
 		require.NoError(t, err)
-		assertSamePerm(t, expected, effective(rows, repo, nil), fmt.Sprintf("anonymous on repo %d", repo.ID))
+		assertSamePerm(t, expected, effective(t, rows, repo, nil), fmt.Sprintf("anonymous on repo %d", repo.ID))
 
 		for _, u := range users {
 			if u.ID == auditorID {
@@ -154,7 +163,7 @@ func TestComputeMatchesGetUserRepoPermission(t *testing.T) {
 				expected, err = access_model.GetUserRepoPermission(ctx, repo, u)
 			}
 			require.NoError(t, err)
-			assertSamePerm(t, expected, effective(rows, repo, u), fmt.Sprintf("user %d on repo %d", u.ID, repo.ID))
+			assertSamePerm(t, expected, effective(t, rows, repo, u), fmt.Sprintf("user %d on repo %d", u.ID, repo.ID))
 
 			// the per-user report (user view) gives the same answer
 			if u.ID%7 == 0 || u.ID == 5 || u.ID == 29 {
@@ -269,7 +278,7 @@ func TestPathThrough(t *testing.T) {
 		}
 		assert.ElementsMatch(t, []Kind{KindPublic, KindPublic}, kinds[1], "anyone and any signed-in user")
 		assert.Empty(t, kinds[3], "private repo")
-		assert.Empty(t, kinds[privateOrgRepo.ID], "private org")
+		assert.Equal(t, []Kind{KindOrgMember}, kinds[privateOrgRepo.ID], "private org: any member")
 		limited := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 38})
 		owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: limited.OwnerID})
 		if owner.Visibility == structs.VisibleTypeLimited && !limited.IsPrivate {
@@ -277,10 +286,8 @@ func TestPathThrough(t *testing.T) {
 		}
 	})
 
-	t.Run("member of a private org", func(t *testing.T) {
-		r := findRow(rows, privateOrgRepo.ID, 10)
-		require.NotNil(t, r)
-		assert.True(t, findPath(r, KindOrgMember).Applied)
+	t.Run("member of a private org has no row of their own", func(t *testing.T) {
+		assert.Nil(t, findRow(rows, privateOrgRepo.ID, 10))
 	})
 
 	t.Run("site admin", func(t *testing.T) {

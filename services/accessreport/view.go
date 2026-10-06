@@ -185,17 +185,13 @@ func (f Filter) Apply(rows []*Row) []*Row {
 }
 
 // UserRepoIDs returns the repositories where the user has a path other than visibility or an instance role:
-// the repositories they own, collaborate on or have through a team, and the public repositories of the private
-// orgs they are a member of. If orgID is set, only the repositories of that org.
+// the repositories they own, collaborate on or have through a team. If orgID is set, only those of that org.
 func UserRepoIDs(ctx context.Context, uid, orgID int64) ([]int64, error) {
 	cond := builder.Or(
 		builder.Eq{"owner_id": uid},
 		builder.In("id", builder.Select("repo_id").From("collaboration").Where(builder.Eq{"user_id": uid})),
 		builder.In("id", builder.Select("team_repo.repo_id").From("team_repo").
 			Join("INNER", "team_user", "team_user.team_id = team_repo.team_id").Where(builder.Eq{"team_user.uid": uid})),
-		builder.Eq{"is_private": false}.And(builder.In("owner_id", builder.Select("org_user.org_id").From("org_user").
-			Join("INNER", "`user`", "`user`.id = org_user.org_id").
-			Where(builder.Eq{"org_user.uid": uid, "`user`.visibility": structs.VisibleTypePrivate}))),
 	)
 	if orgID > 0 {
 		cond = builder.And(cond, builder.Eq{"owner_id": orgID})
@@ -210,6 +206,7 @@ type UserAccess struct {
 	SiteAdminVia string // the user groups that made the user a site admin, "" if it was set directly
 	AuditorVia   string
 	Orgs         []*organization.Organization
+	PrivateOrgs  []*organization.Organization // whose public repositories the user reads as a member
 	Teams        []*organization.Team
 	Groups       []*Group
 	Rows         []*Row
@@ -241,6 +238,15 @@ func ForUser(ctx context.Context, u *user_model.User, org *organization.Organiza
 		for _, r := range ua.Rows {
 			hideGroups(r, false)
 		}
+		if org.Visibility == structs.VisibleTypePrivate && !u.IsRestricted {
+			isMember, err := organization.IsOrganizationMember(ctx, org.ID, u.ID)
+			if err != nil {
+				return nil, err
+			}
+			if isMember {
+				ua.PrivateOrgs = []*organization.Organization{org}
+			}
+		}
 		ua.Teams, err = organization.GetUserOrgTeams(ctx, org.ID, u.ID)
 		return ua, err
 	}
@@ -255,6 +261,11 @@ func ForUser(ctx context.Context, u *user_model.User, org *organization.Organiza
 	}
 	if ua.Orgs, err = db.Find[organization.Organization](ctx, organization.FindOrgOptions{UserID: u.ID, IncludePrivate: true}); err != nil {
 		return nil, err
+	}
+	for _, o := range ua.Orgs {
+		if o.Visibility == structs.VisibleTypePrivate && !u.IsRestricted {
+			ua.PrivateOrgs = append(ua.PrivateOrgs, o)
+		}
 	}
 	if ua.Teams, err = organization.GetUserTeams(ctx, u.ID); err != nil {
 		return nil, err

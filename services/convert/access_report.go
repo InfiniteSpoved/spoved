@@ -46,6 +46,8 @@ func ToAccessRows(ctx context.Context, rows []*accessreport.Row, doer *user_mode
 			ar.Team = &api.AccessTeam{ID: r.Team.ID, Name: r.Team.Name, NumMembers: r.Team.NumMembers}
 		case r.Anonymous:
 			ar.Type = "anyone"
+		case r.Paths[0].Kind == accessreport.KindOrgMember:
+			ar.Type = "org_members"
 		case r.Paths[0].Kind == accessreport.KindInstanceRoles:
 			ar.Type = "instance_roles"
 			ar.Access, ar.Units = "", nil
@@ -76,12 +78,15 @@ func ToUserAccess(ctx context.Context, ua *accessreport.UserAccess, doer *user_m
 	out := &api.UserAccess{
 		SiteAdmin: ua.User.IsAdmin, SiteAdminVia: ua.SiteAdminVia,
 		Auditor: ua.User.IsAuditor, AuditorVia: ua.AuditorVia,
-		Orgs: []string{}, Teams: []string{}, UserGroups: []*api.AccessUserGroup{},
+		Orgs: []string{}, PrivateOrgs: []string{}, Teams: []string{}, UserGroups: []*api.AccessUserGroup{},
 		Rows:        ToAccessRows(ctx, ua.Rows, doer),
 		Credentials: []*api.AccessCredential{},
 	}
 	for _, o := range ua.Orgs {
 		out.Orgs = append(out.Orgs, o.Name)
+	}
+	for _, o := range ua.PrivateOrgs {
+		out.PrivateOrgs = append(out.PrivateOrgs, o.Name)
 	}
 	for _, t := range ua.Teams {
 		out.Teams = append(out.Teams, t.Name)

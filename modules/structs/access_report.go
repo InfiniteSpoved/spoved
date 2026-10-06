@@ -77,12 +77,14 @@ type AccessCredential struct {
 type UserAccess struct {
 	SiteAdmin bool `json:"site_admin"`
 	// user groups that granted the role, empty if it was set directly
-	SiteAdminVia string              `json:"site_admin_via,omitempty"`
-	Auditor      bool                `json:"auditor"`
-	AuditorVia   string              `json:"auditor_via,omitempty"`
-	Orgs         []string            `json:"organizations"`
-	Teams        []string            `json:"teams"`
-	UserGroups   []*AccessUserGroup  `json:"user_groups"`
-	Rows         []*AccessRow        `json:"repositories"`
-	Credentials  []*AccessCredential `json:"credentials"`
+	SiteAdminVia string   `json:"site_admin_via,omitempty"`
+	Auditor      bool     `json:"auditor"`
+	AuditorVia   string   `json:"auditor_via,omitempty"`
+	Orgs         []string `json:"organizations"`
+	// private organizations whose public repositories the user reads as a member
+	PrivateOrgs []string            `json:"private_organizations"`
+	Teams       []string            `json:"teams"`
+	UserGroups  []*AccessUserGroup  `json:"user_groups"`
+	Rows        []*AccessRow        `json:"repositories"`
+	Credentials []*AccessCredential `json:"credentials"`
 }

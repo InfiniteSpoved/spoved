@@ -268,6 +268,7 @@ func TestAPIAdminUserAccess(t *testing.T) {
 	DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/users/user5/access").AddTokenAuth(getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin)), http.StatusOK), &ua)
 	assert.False(t, ua.SiteAdmin)
 	assert.Contains(t, ua.Orgs, "org7")
+	assert.Equal(t, []string{"privated_org"}, ua.PrivateOrgs)
 	require.Len(t, ua.UserGroups, 1)
 	assert.Equal(t, "corp-ldap", ua.UserGroups[0].LoginSource)
 	assert.Contains(t, rowNames(ua.Rows), "user5")

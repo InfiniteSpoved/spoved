@@ -6,6 +6,7 @@ package accessreport
 
 import (
 	"context"
+	"math"
 	"sort"
 
 	asymkey_model "forgejo.org/models/asymkey"
@@ -61,7 +62,7 @@ type Path struct {
 // Row is the access of one identity to one repository.
 type Row struct {
 	User      *user_model.User // nil for the pseudo-rows and deploy keys
-	Anonymous bool             // pseudo-row for anyone, signed in or not; otherwise a nil User means any signed-in user
+	Anonymous bool             // pseudo-row for anyone, signed in or not; otherwise a pseudo-row is for any signed-in user, or any member of the private owner org (KindOrgMember)
 	DeployKey *asymkey_model.DeployKey
 	Team      *organization.Team // a team shown as one row, for viewers outside the org
 	OrgMember bool               // the user is a member of the repository's owner org
@@ -97,8 +98,8 @@ type data struct {
 }
 
 // Compute returns the access rows of the repositories: one per user who has a path to the repository, the
-// pseudo-rows for anyone and any signed-in user, and the deploy keys. A user without a row has the access of the
-// "any signed-in user" row, or none if they are restricted or there is no such row.
+// pseudo-rows (any member of a private owner org, any signed-in user, anyone), and the deploy keys. A user without
+// a row has the access of the pseudo-row that applies to them, or none if they are restricted or none applies.
 //
 // It loads with a fixed number of queries, then repeats the decision order of access_model.GetUserRepoPermission
 // (and of GetUserRepoReadPermission for auditors). TestComputeMatchesGetUserRepoPermission keeps them in step.
@@ -125,18 +126,8 @@ func Compute(ctx context.Context, opts Options) ([]*Row, error) {
 			continue
 		}
 		repo.Owner = owner
-		if opts.User == nil && !repo.IsPrivate && owner.Visibility != structs.VisibleTypePrivate {
-			// a user ID of 0 has no collaboration, team or membership
-			signedIn := &Row{Repo: repo, Perm: d.permission(repo, &user_model.User{})}
-			signedIn.Paths = []*Path{d.visibilityPath(repo, owner)}
-			setApplied(signedIn)
-			rows = append(rows, signedIn)
-			if owner.Visibility == structs.VisibleTypePublic {
-				anyone := &Row{Repo: repo, Anonymous: true, Perm: access_model.Permission{AccessMode: perm_model.AccessModeRead, Units: repo.Units}}
-				anyone.Paths = []*Path{{Kind: KindPublic, Mode: perm_model.AccessModeRead}}
-				setApplied(anyone)
-				rows = append(rows, anyone)
-			}
+		if opts.User == nil && !repo.IsPrivate {
+			rows = append(rows, d.pseudoRows(repo, owner)...)
 		}
 		for _, uid := range d.candidates(repo, opts) {
 			u := d.users[uid]
@@ -172,6 +163,33 @@ func Compute(ctx context.Context, opts Options) ([]*Row, error) {
 		})
 	}
 	return rows, nil
+}
+
+// memberID stands for any non-restricted member of a private org, in the replay.
+const memberID = math.MinInt64
+
+// pseudoRows returns the rows of the users who have no path to the public repository: any member of its private
+// owner org, or any signed-in user, and anyone if the owner is public too.
+func (d *data) pseudoRows(repo *repo_model.Repository, owner *user_model.User) []*Row {
+	if owner.Visibility == structs.VisibleTypePrivate {
+		if !owner.IsOrganization() {
+			return nil
+		}
+		d.orgMember[key{owner.ID, memberID}] = true
+		r := &Row{Repo: repo, Perm: d.permission(repo, &user_model.User{ID: memberID}), Paths: []*Path{d.visibilityPath(repo, owner)}}
+		setApplied(r)
+		return []*Row{r}
+	}
+	// a user ID of 0 has no collaboration, team or membership
+	signedIn := &Row{Repo: repo, Perm: d.permission(repo, &user_model.User{}), Paths: []*Path{d.visibilityPath(repo, owner)}}
+	setApplied(signedIn)
+	if owner.Visibility != structs.VisibleTypePublic {
+		return []*Row{signedIn}
+	}
+	anyone := &Row{Repo: repo, Anonymous: true, Perm: access_model.Permission{AccessMode: perm_model.AccessModeRead, Units: repo.Units}}
+	anyone.Paths = []*Path{{Kind: KindPublic, Mode: perm_model.AccessModeRead}}
+	setApplied(anyone)
+	return []*Row{signedIn, anyone}
 }
 
 func load(ctx context.Context, repos repo_model.RepositoryList, opts Options) (*data, error) {
@@ -297,15 +315,12 @@ func load(ctx context.Context, repos repo_model.RepositoryList, opts Options) (*
 	if opts.User != nil {
 		users = append(users, opts.User)
 	} else {
-		uids := make([]int64, 0, len(collabs)+len(teamUsers)+len(orgUsers))
+		uids := make([]int64, 0, len(collabs)+len(teamUsers))
 		for _, c := range collabs {
 			uids = append(uids, c.UserID)
 		}
 		for _, tu := range teamUsers {
 			uids = append(uids, tu.UID)
-		}
-		for _, ou := range orgUsers {
-			uids = append(uids, ou.UID)
 		}
 		roles := builder.NewCond()
 		if !opts.Plain {
@@ -345,13 +360,6 @@ func (d *data) candidates(repo *repo_model.Repository, opts Options) []int64 {
 	}
 	for _, tid := range d.repoTeams[repo.ID] {
 		set.AddMultiple(d.teamMembers[tid]...)
-	}
-	if !repo.IsPrivate && d.owners[repo.OwnerID].Visibility == structs.VisibleTypePrivate {
-		for k := range d.orgMember {
-			if k.a == repo.OwnerID {
-				set.Add(k.b)
-			}
-		}
 	}
 	uids := set.Values()
 	sort.Slice(uids, func(i, j int) bool {
@@ -531,8 +539,8 @@ func (d *data) paths(repo *repo_model.Repository, u *user_model.User) []*Path {
 	if u.IsAuditor {
 		paths = append(paths, &Path{Kind: KindAuditor, Mode: perm_model.AccessModeRead})
 	}
-	if len(paths) == 0 && (repo.IsPrivate || owner.Visibility != structs.VisibleTypePrivate) {
-		// nothing beyond the "any signed-in user" row
+	if len(paths) == 0 {
+		// nothing beyond the pseudo-rows
 		return nil
 	}
 	if !repo.IsPrivate && !u.IsRestricted && d.ownerVisible(owner, u) {
