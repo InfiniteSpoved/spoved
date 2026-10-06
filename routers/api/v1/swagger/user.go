@@ -48,3 +48,10 @@ type swaggerResponseUserSettings struct {
 	// in:body
 	Body api.UserSettings `json:"body"`
 }
+
+// UserAccess
+// swagger:response UserAccess
+type swaggerResponseUserAccess struct {
+	// in:body
+	Body api.UserAccess `json:"body"`
+}

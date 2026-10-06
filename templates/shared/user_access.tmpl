@@ -1,0 +1,58 @@
+{{/* Access: *api.UserAccess; Full: show instance roles, orgs, user groups and credentials (site admins only) */}}
+{{if .Full}}
+	<h4 class="ui top attached header">{{ctx.Locale.Tr "access_report.roles"}}</h4>
+	<div class="ui attached segment">
+		<div class="site-admin-status">
+			{{ctx.Locale.Tr "access_report.site_admin"}}:
+			{{if .Access.SiteAdmin}}{{if .Access.SiteAdminVia}}{{ctx.Locale.Tr "access_report.via_groups" .Access.SiteAdminVia}}{{else}}{{ctx.Locale.Tr "access_report.directly"}}{{end}} ({{ctx.Locale.Tr "access_report.all_repositories"}}){{else}}{{ctx.Locale.Tr "access_report.no"}}{{end}}
+		</div>
+		<div class="auditor-status">
+			{{ctx.Locale.Tr "access_report.auditor"}}:
+			{{if .Access.Auditor}}{{if .Access.AuditorVia}}{{ctx.Locale.Tr "access_report.via_groups" .Access.AuditorVia}}{{else}}{{ctx.Locale.Tr "access_report.directly"}}{{end}} ({{ctx.Locale.Tr "access_report.all_repositories_read"}}){{else}}{{ctx.Locale.Tr "access_report.no"}}{{end}}
+		</div>
+		<div class="text grey">{{ctx.Locale.Tr "access_report.visibility_line"}}</div>
+	</div>
+	<h4 class="ui top attached header">{{ctx.Locale.Tr "access_report.organizations"}}</h4>
+	<div class="ui attached segment user-orgs">
+		{{range .Access.Orgs}}<a class="ui basic label" href="{{AppSubUrl}}/{{PathEscape .}}">{{.}}</a>{{else}}<span class="text grey">{{ctx.Locale.Tr "access_report.none"}}</span>{{end}}
+	</div>
+	<h4 class="ui top attached header">{{ctx.Locale.Tr "access_report.user_groups"}}</h4>
+	<div class="ui attached segment user-groups">
+		{{range .Access.UserGroups}}<span class="ui basic label">{{.Name}}{{if .LoginSource}} ({{ctx.Locale.Tr "access_report.synced_by" .LoginSource}}){{end}}</span>{{else}}<span class="text grey">{{ctx.Locale.Tr "access_report.none"}}</span>{{end}}
+	</div>
+{{end}}
+<h4 class="ui top attached header">{{ctx.Locale.Tr "access_report.teams"}}</h4>
+<div class="ui attached segment user-teams">
+	{{range .Access.Teams}}<span class="ui basic label">{{.}}</span>{{else}}<span class="text grey">{{ctx.Locale.Tr "access_report.none"}}</span>{{end}}
+</div>
+<h4 class="ui top attached header">{{ctx.Locale.Tr "access_report.repositories"}}</h4>
+<div class="ui attached segment">
+	{{template "shared/access_rows" (dict "Rows" .Access.Rows "ShowRepo" true)}}
+</div>
+{{if .Full}}
+	<h4 class="ui top attached header">{{ctx.Locale.Tr "access_report.credentials"}}</h4>
+	<div class="ui attached segment">
+		<table class="ui very basic striped table unstackable user-credentials">
+			<thead>
+				<tr>
+					<th>{{ctx.Locale.Tr "access_report.credential"}}</th>
+					<th>{{ctx.Locale.Tr "access_report.name"}}</th>
+					<th>{{ctx.Locale.Tr "access_report.created"}}</th>
+					<th>{{ctx.Locale.Tr "access_report.last_used"}}</th>
+					<th>{{ctx.Locale.Tr "access_report.expires"}}</th>
+				</tr>
+			</thead>
+			<tbody>
+				{{range .Access.Credentials}}
+					<tr data-kind="{{.Kind}}">
+						<td>{{ctx.Locale.Tr (print "access_report.credential." .Kind)}}</td>
+						<td>{{.Name}}{{if .Fingerprint}} <span class="text grey">{{.Fingerprint}}</span>{{end}}{{if .LastEight}} <span class="text grey">…{{.LastEight}}</span>{{end}}</td>
+						<td>{{.Created.Format "2006-01-02"}}</td>
+						<td>{{.LastUsed.Format "2006-01-02"}}</td>
+						<td>{{if .Expires}}{{.Expires.Format "2006-01-02"}}{{else}}–{{end}}</td>
+					</tr>
+				{{end}}
+			</tbody>
+		</table>
+	</div>
+{{end}}

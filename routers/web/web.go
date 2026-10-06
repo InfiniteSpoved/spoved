@@ -933,6 +933,7 @@ func registerRoutes(m *web.Route) {
 			m.Get("", admin.Users)
 			m.Combo("/new").Get(admin.NewUser).Post(web.Bind(forms.AdminCreateUserForm{}), admin.NewUserPost)
 			m.Get("/{userid}", admin.ViewUser)
+			m.Get("/{userid}/access", admin.UserAccess)
 			m.Combo("/{userid}/edit").Get(admin.EditUser).Post(web.Bind(forms.AdminEditUserForm{}), admin.EditUserPost)
 			m.Post("/{userid}/delete", admin.DeleteUser)
 			m.Post("/{userid}/avatar", web.Bind(forms.AvatarForm{}), admin.AvatarPost)
@@ -1143,6 +1144,7 @@ func registerRoutes(m *web.Route) {
 
 		// require owner permission
 		m.Group("/{org}", func() {
+			m.Get("/members/{username}/access", org.MemberAccess)
 			m.Get("/teams/new", org.NewTeam)
 			m.Post("/teams/new", web.Bind(forms.CreateTeamForm{}), org.NewTeamPost)
 			m.Get("/teams/{team}/edit", org.EditTeam)
@@ -1315,6 +1317,7 @@ func registerRoutes(m *web.Route) {
 			m.Post("/avatar", web.Bind(forms.AvatarForm{}), repo_setting.SettingsAvatar)
 			m.Post("/avatar/delete", repo_setting.SettingsDeleteAvatar)
 
+			m.Get("/access", repo_setting.Access)
 			m.Group("/collaboration", func() {
 				m.Combo("").Get(repo_setting.Collaboration).Post(repo_setting.CollaborationPost)
 				m.Post("/access_mode", repo_setting.ChangeCollaborationAccessMode)

@@ -8,8 +8,8 @@ import (
 	"context"
 	"sort"
 
-	auth_model "forgejo.org/models/auth"
 	asymkey_model "forgejo.org/models/asymkey"
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
 	perm_model "forgejo.org/models/perm"
@@ -38,6 +38,8 @@ const (
 	KindInternal     Kind = "internal"
 	KindOrgMember    Kind = "org_member"
 	KindDeployKey    Kind = "deploy_key"
+	// KindInstanceRoles stands for the site admins and auditors, whom only site admins see by name.
+	KindInstanceRoles Kind = "instance_roles"
 )
 
 // Group is a user group that made the user a member of a team.
@@ -61,6 +63,8 @@ type Row struct {
 	User      *user_model.User // nil for the pseudo-rows and deploy keys
 	Anonymous bool             // pseudo-row for anyone, signed in or not; otherwise a nil User means any signed-in user
 	DeployKey *asymkey_model.DeployKey
+	Team      *organization.Team // a team shown as one row, for viewers outside the org
+	OrgMember bool               // the user is a member of the repository's owner org
 	Repo      *repo_model.Repository
 	Perm      access_model.Permission
 	Paths     []*Path
@@ -139,7 +143,7 @@ func Compute(ctx context.Context, opts Options) ([]*Row, error) {
 			if u == nil {
 				continue
 			}
-			row := &Row{User: u, Repo: repo, Perm: d.permission(repo, u), Paths: d.paths(repo, u)}
+			row := &Row{User: u, Repo: repo, Perm: d.permission(repo, u), Paths: d.paths(repo, u), OrgMember: d.orgMember[key{repo.OwnerID, u.ID}]}
 			if len(row.Paths) == 0 {
 				continue
 			}

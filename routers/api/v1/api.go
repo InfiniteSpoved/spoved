@@ -872,6 +872,7 @@ func Routes() *web.Route {
 						m.Post("/tests", context.ReferencesGitRepo(), context.RepoRefForAPI, repo.TestHook)
 					})
 				}, reqToken(), reqAdmin(), reqWebhooksEnabled())
+				m.Get("/access", reqToken(), reqAdmin(), repo.GetAccess)
 				m.Group("/collaborators", func() {
 					m.Get("", reqAnyRepoReader(), repo.ListCollaborators)
 					m.Group("/{collaborator}", func() {
@@ -1445,6 +1446,7 @@ func Routes() *web.Route {
 						m.Delete("/{id}", admin.DeleteUserPublicKey)
 					})
 					m.Get("/orgs", org.ListUserOrgs)
+					m.Get("/access", admin.GetUserAccess)
 					m.Post("/orgs", bind(api.CreateOrgOption{}), admin.CreateOrg)
 					m.Post("/repos", bind(api.CreateRepoOption{}), admin.CreateRepo)
 					m.Post("/rename", bind(api.RenameUserOption{}), admin.RenameUser)
