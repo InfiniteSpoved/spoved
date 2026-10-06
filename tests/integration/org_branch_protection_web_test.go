@@ -120,6 +120,19 @@ func TestOrgBranchProtectionWeb(t *testing.T) {
 		unittest.AssertNotExistsBean(t, &git_model.ProtectedBranch{RuleName: "taken"})
 	})
 
+	// an archived organization's rules can't be changed
+	t.Run("ArchivedOrg", func(t *testing.T) {
+		bp := rule("obp-web-*")
+		id := strconv.FormatInt(bp.ID, 10)
+		archiveOrg3(t, false)
+		post(owner, editURL, map[string]string{"rule_id": id, "rule_name": "obp-web-*", "required_approvals": "7"}, http.StatusForbidden)
+		post(owner, "/org/org3/settings/branches/"+id+"/delete", nil, http.StatusForbidden)
+		after := rule("obp-web-*")
+		require.NotNil(t, after)
+		assert.Equal(t, bp.RequiredApprovals, after.RequiredApprovals)
+		webUnarchiveOrg(t, "user2", http.StatusSeeOther)
+	})
+
 	t.Run("Delete", func(t *testing.T) {
 		post(owner, fmt.Sprintf("/org/org3/settings/branches/%d/delete", rule("obp-web-*").ID), nil, http.StatusOK)
 		assert.Nil(t, rule("obp-web-*"))
