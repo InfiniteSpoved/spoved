@@ -103,7 +103,7 @@ New key: `based_on_forgejo` (footer credit).
 
 ## Repository URLs
 
-These link to `github.com/GitHatOrg/GitHat` and must be updated after the GitHub org and repository rename (GitHub redirects the old URLs until then): the footer, the home page, the admin dashboard update hints, `ISSUE_TRACKER_URL` and the update checker's `HTTP_ENDPOINT` defaults (`modules/setting/server.go`, `services/cron/tasks_extended.go`, `custom/conf/app.example.ini` and their tests), README links, and the ACR OIDC subject comment in `.github/workflows/release-image.yml` (the subject itself is set in Azure). The image path is derived from the repository name, so the workflows need no change.
+These link to `github.com/GitHatOrg/GitHat` and must be updated after the GitHub org and repository rename (GitHub redirects the old URLs until then): the footer, the home page (`startpage.install_desc` links to the releases, container package and repository; `startpage.license_desc` to the repository and its issues), the admin dashboard update hints, `ISSUE_TRACKER_URL` and the update checker's `HTTP_ENDPOINT` defaults (`modules/setting/server.go`, `services/cron/tasks_extended.go`, `custom/conf/app.example.ini` and their tests), README links, and the ACR OIDC subject comment in `.github/workflows/release-image.yml` (the subject itself is set in Azure). The image path is derived from the repository name, so the workflows need no change.
 
 ## Merging upstream
 

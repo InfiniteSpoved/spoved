@@ -27,7 +27,7 @@ var brandAllowed = []string{
 	"Forgejo documentation",
 }
 
-// webhookTypeForgejo is the "Forgejo" webhook type name in the webhook type menu and form header.
+// webhookTypeForgejo is the "Forgejo" webhook type name in the webhook type menu and form header; it applies only to webhook pages.
 var webhookTypeForgejo = regexp.MustCompile(`>\s*Forgejo\s*</(a|div)>`)
 
 func assertNoBrandMentions(t *testing.T, session *TestSession, url string) {
@@ -39,7 +39,9 @@ func assertNoBrandMentions(t *testing.T, session *TestSession, url string) {
 	} else {
 		body = session.MakeRequest(t, req, http.StatusOK).Body.String()
 	}
-	body = webhookTypeForgejo.ReplaceAllString(body, "><")
+	if strings.Contains(url, "/settings/hooks") {
+		body = webhookTypeForgejo.ReplaceAllString(body, "><")
+	}
 	for _, phrase := range brandAllowed {
 		body = strings.ReplaceAll(body, phrase, "")
 	}
