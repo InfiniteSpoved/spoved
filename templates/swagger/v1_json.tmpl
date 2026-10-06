@@ -1311,6 +1311,62 @@
         }
       }
     },
+    "/admin/maintenance": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get the read-only or maintenance mode",
+        "operationId": "adminGetMaintenance",
+        "responses": {
+          "200": {
+            "$ref": "#/responses/Maintenance"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          }
+        }
+      },
+      "put": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Turn the read-only or maintenance mode on or off",
+        "operationId": "adminEditMaintenance",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/EditMaintenanceOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/Maintenance"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "409": {
+            "$ref": "#/responses/error"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/admin/orgs": {
       "get": {
         "produces": [
@@ -29213,6 +29269,36 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "EditMaintenanceOption": {
+      "description": "EditMaintenanceOption options for changing the maintenance mode",
+      "type": "object",
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "message": {
+          "description": "Message shown to users",
+          "type": "string",
+          "x-go-name": "Message"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "off",
+            "read-only",
+            "maintenance"
+          ],
+          "x-go-name": "Mode"
+        },
+        "until": {
+          "description": "When the mode turns itself off, must be in the future; null for never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Until"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "EditMilestoneOption": {
       "description": "EditMilestoneOption options for editing a milestone",
       "type": "object",
@@ -31256,6 +31342,43 @@
             "$ref": "#/definitions/ActionRun"
           },
           "x-go-name": "Entries"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "Maintenance": {
+      "description": "Maintenance is the instance's read-only or maintenance mode",
+      "type": "object",
+      "properties": {
+        "from_config": {
+          "description": "Whether [maintenance] MODE in the configuration file sets the mode, so it can't be changed",
+          "type": "boolean",
+          "x-go-name": "FromConfig"
+        },
+        "message": {
+          "description": "Message shown to users",
+          "type": "string",
+          "x-go-name": "Message"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "off",
+            "read-only",
+            "maintenance"
+          ],
+          "x-go-name": "Mode"
+        },
+        "set_by": {
+          "description": "Who last changed the mode",
+          "type": "string",
+          "x-go-name": "SetBy"
+        },
+        "until": {
+          "description": "When the mode turns itself off, null if never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Until"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -35935,6 +36058,12 @@
         "items": {
           "$ref": "#/definitions/LicensesTemplateListEntry"
         }
+      }
+    },
+    "Maintenance": {
+      "description": "Maintenance",
+      "schema": {
+        "$ref": "#/definitions/Maintenance"
       }
     },
     "MarkdownRender": {

@@ -18,8 +18,10 @@ import (
 	"syscall"
 
 	"forgejo.org/models/db"
+	system_model "forgejo.org/models/system"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/setting/config"
 	"forgejo.org/modules/util"
 
 	"github.com/urfave/cli/v3"
@@ -91,6 +93,7 @@ If this is the intended configuration file complete the [database] section.`, se
 	if err := db.InitEngine(ctx); err != nil {
 		return fmt.Errorf("unable to initialize the database using the configuration in %q. Error: %w", setting.CustomConf, err)
 	}
+	config.SetDynGetter(system_model.NewDatabaseDynKeyGetter())
 	return nil
 }
 

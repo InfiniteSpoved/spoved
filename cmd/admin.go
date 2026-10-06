@@ -29,6 +29,7 @@ func cmdAdmin() *cli.Command {
 			subcmdRegenerate(),
 			subcmdAuth(),
 			subcmdSendMail(),
+			subcmdMaintenance(),
 		},
 	}
 }

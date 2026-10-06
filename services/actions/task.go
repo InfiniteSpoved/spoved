@@ -29,6 +29,11 @@ import (
 var ErrEphemeralRunnerHasAssignedTask = errors.New("ephemeral runner already has an assigned task")
 
 func PickTask(ctx context.Context, runner *actions_model.ActionRunner, requestKey, handle *string) (*runnerv1.Task, error) {
+	// no new jobs start while maintenance mode is on, running ones finish
+	if setting.GetMaintenance(ctx).ReadOnly() {
+		return nil, actions_model.ErrNoMatchingJobFound
+	}
+
 	var (
 		task *runnerv1.Task
 		job  *actions_model.ActionRunJob

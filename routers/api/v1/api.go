@@ -82,6 +82,7 @@ import (
 	"forgejo.org/routers/api/v1/repo"
 	"forgejo.org/routers/api/v1/settings"
 	"forgejo.org/routers/api/v1/user"
+	"forgejo.org/routers/common"
 	"forgejo.org/services/actions"
 	"forgejo.org/services/context"
 	"forgejo.org/services/forms"
@@ -1463,6 +1464,8 @@ func Routes() *web.Route {
 					}
 				}, context.UserAssignmentAPI())
 			})
+			m.Combo("/maintenance").Get(admin.GetMaintenance).
+				Put(bind(api.EditMaintenanceOption{}), admin.EditMaintenance)
 			m.Group("/announcements", func() {
 				m.Combo("").Get(admin.ListAnnouncements).
 					Post(bind(api.CreateAnnouncementOption{}), admin.CreateAnnouncement)
@@ -1555,7 +1558,7 @@ func Routes() *web.Route {
 		m.Group("/topics", func() {
 			m.Get("/search", repo.TopicSearch)
 		}, tokenRequiresScopes(auth_model.AccessTokenScopeCategoryRepository))
-	}, sudo())
+	}, sudo(), common.MaintenanceAPI)
 
 	return m
 }

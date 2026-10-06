@@ -210,6 +210,11 @@ func (ctx *preReceiveContext) quotaExceeded() {
 func HookPreReceive(ctx *app_context.PrivateContext) {
 	opts := web.GetForm(ctx).(*private.HookOptions)
 
+	if s := setting.GetMaintenance(ctx); s.ReadOnly() {
+		ctx.JSON(http.StatusForbidden, private.Response{UserMsg: s.Refusal()})
+		return
+	}
+
 	ourCtx := &preReceiveContext{
 		PrivateContext: ctx,
 		env:            generateGitEnv(opts), // Generate git environment for checking commits

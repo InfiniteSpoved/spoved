@@ -170,6 +170,11 @@ func waitForUpdates(ctx context.Context, c *client.Client) error {
 
 // processMessages searches unread mails and processes them.
 func processMessages(ctx context.Context, c *client.Client) error {
+	// leave the messages unseen while maintenance mode is on, they are handled after it
+	if setting.GetMaintenance(ctx).ReadOnly() {
+		return nil
+	}
+
 	criteria := imap.NewSearchCriteria()
 	criteria.WithoutFlags = []string{imap.SeenFlag}
 	criteria.Smaller = setting.IncomingEmail.MaximumMessageSize

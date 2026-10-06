@@ -10,9 +10,14 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/setting"
 )
 
 func SyncGroupsToQuotaGroups(ctx context.Context, user *user_model.User, sourceUserGroups container.Set[string], sourceGroupQuotaGroupMapping map[string]container.Set[string], performRemoval bool) error {
+	// group syncs wait while maintenance mode is on and run at the next sign-in or sync after it
+	if setting.GetMaintenance(ctx).ReadOnly() {
+		return nil
+	}
 	qgroupCache := make(map[string]*quota.Group)
 	qgroupsToAdd, qgroupsToRemove := resolveMappedQuotaGroups(sourceUserGroups, sourceGroupQuotaGroupMapping)
 	if performRemoval {

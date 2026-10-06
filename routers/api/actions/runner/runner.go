@@ -188,6 +188,10 @@ func (s *Service) FetchTask(
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	// PickTask starts no job while maintenance mode is on: version 0 makes the runner ask again after it
+	if setting.GetMaintenance(ctx).ReadOnly() {
+		latestVersion = 0
+	}
 
 	var task *runnerv1.Task
 	var additionalTasks []*runnerv1.Task
@@ -256,6 +260,10 @@ func (*Service) FetchSingleTask(
 	latestVersion, err := getLatestTasksVersion(ctx, runner.OwnerID, runner.RepoID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	// PickTask starts no job while maintenance mode is on: version 0 makes the runner ask again after it
+	if setting.GetMaintenance(ctx).ReadOnly() {
+		latestVersion = 0
 	}
 
 	var task *runnerv1.Task

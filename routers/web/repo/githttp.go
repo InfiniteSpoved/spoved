@@ -91,6 +91,11 @@ func httpBase(ctx *context.Context) *serviceHandler {
 		accessMode = perm.AccessModeWrite
 	}
 
+	if s := setting.GetMaintenance(ctx); !isPull && s.ReadOnly() {
+		ctx.PlainText(http.StatusServiceUnavailable, s.Refusal())
+		return nil
+	}
+
 	isWiki := false
 	unitType := unit.TypeCode
 

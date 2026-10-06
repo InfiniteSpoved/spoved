@@ -19,6 +19,7 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/private"
 	"forgejo.org/modules/setting"
+	"forgejo.org/routers/common"
 	"forgejo.org/services/context"
 	repo_service "forgejo.org/services/repository"
 	wiki_service "forgejo.org/services/wiki"
@@ -135,6 +136,12 @@ func ServCommand(ctx *context.PrivateContext) {
 	modeString := "read"
 	if mode > perm.AccessModeRead {
 		modeString = "write to"
+	}
+
+	maintenance := setting.GetMaintenance(ctx)
+	if mode > perm.AccessModeRead && maintenance.ReadOnly() {
+		ctx.JSON(http.StatusForbidden, private.Response{UserMsg: maintenance.Refusal()})
+		return
 	}
 
 	// The default unit we're trying to look at is code
@@ -331,6 +338,12 @@ func ServCommand(ctx *context.PrivateContext) {
 		if !user.KeepEmailPrivate {
 			results.UserEmail = user.Email
 		}
+	}
+
+	// in full maintenance mode only site admins can use git, deploy keys included
+	if maintenance.Full() && !common.IsMaintenanceAdmin(user) {
+		ctx.JSON(http.StatusForbidden, private.Response{UserMsg: maintenance.Refusal()})
+		return
 	}
 
 	// Don't allow pushing if the repo is archived

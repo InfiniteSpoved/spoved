@@ -77,6 +77,13 @@ type swaggerResponseAnnouncement struct {
 	Body api.Announcement `json:"body"`
 }
 
+// Maintenance
+// swagger:response Maintenance
+type swaggerResponseMaintenance struct {
+	// in:body
+	Body api.Maintenance `json:"body"`
+}
+
 // AnnouncementList
 // swagger:response AnnouncementList
 type swaggerResponseAnnouncementList struct {
