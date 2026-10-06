@@ -13,6 +13,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,6 +57,26 @@ func getExitStatusFromError(err error) int {
 	return waitStatus.ExitStatus()
 }
 
+// servEnv is the environment of `forgejo serv`. SSH_CONNECTION carries the client address for the IP allowlist, like
+// OpenSSH sets it; it is always set, after the inherited environment so that it wins, and empty if the address is
+// unknown, so that serv fails closed.
+func servEnv(command, gitProtocol string, remote, local net.Addr) []string {
+	sshConnection := ""
+	if host, port, err := net.SplitHostPort(remote.String()); err == nil {
+		if _, err := netip.ParseAddr(host); err == nil {
+			lhost, lport, _ := net.SplitHostPort(local.String())
+			sshConnection = host + " " + port + " " + lhost + " " + lport
+		}
+	}
+	return append(
+		os.Environ(),
+		"SSH_ORIGINAL_COMMAND="+command,
+		"SKIP_MINWINSVC=1",
+		"GIT_PROTOCOL="+gitProtocol,
+		"SSH_CONNECTION="+sshConnection,
+	)
+}
+
 func sessionHandler(session ssh.Session) {
 	keyID := session.ConnPermissions().Extensions["forgejo-key-id"]
 
@@ -91,12 +112,7 @@ func sessionHandler(session ssh.Session) {
 	}
 
 	cmd := exec.CommandContext(ctx, setting.AppPath, args...)
-	cmd.Env = append(
-		os.Environ(),
-		"SSH_ORIGINAL_COMMAND="+command,
-		"SKIP_MINWINSVC=1",
-		"GIT_PROTOCOL="+gitProtocol,
-	)
+	cmd.Env = servEnv(command, gitProtocol, session.RemoteAddr(), session.LocalAddr())
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

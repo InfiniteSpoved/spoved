@@ -68,11 +68,11 @@ func TestCredentialExpiryServ(t *testing.T) {
 			require.Error(t, err)
 
 			// Refused even for a read of a public repository.
-			_, extra := private.ServCommand(ctx, key.ID, "user2", "repo1", perm.AccessModeRead, "git-upload-pack", "")
+			_, extra := private.ServCommand(ctx, key.ID, "user2", "repo1", perm.AccessModeRead, "", "git-upload-pack", "")
 			require.Error(t, extra.Error)
 			assert.Equal(t, fmt.Sprintf(`SSH key "expired-laptop" expired on %s. Add a new key in your settings.`, past.FormatDate()), extra.UserMsg)
 
-			_, extra = private.ServCommand(ctx, key.ID, "user2", "repo1", perm.AccessModeWrite, "git-receive-pack", "")
+			_, extra = private.ServCommand(ctx, key.ID, "user2", "repo1", perm.AccessModeWrite, "", "git-receive-pack", "")
 			require.Error(t, extra.Error)
 			assert.Contains(t, extra.UserMsg, "expired on")
 		})
@@ -85,7 +85,7 @@ func TestCredentialExpiryServ(t *testing.T) {
 			_, _, err = private.ServNoCommand(ctx, key.ID)
 			require.NoError(t, err)
 
-			results, extra := private.ServCommand(ctx, key.ID, "user2", "repo1", perm.AccessModeWrite, "git-receive-pack", "")
+			results, extra := private.ServCommand(ctx, key.ID, "user2", "repo1", perm.AccessModeWrite, "", "git-receive-pack", "")
 			require.NoError(t, extra.Error)
 			assert.Equal(t, future, results.ExpiresUnix)
 		})
@@ -102,11 +102,11 @@ func TestCredentialExpiryServ(t *testing.T) {
 			pkey := unittest.AssertExistsAndLoadBean(t, &asymkey_model.PublicKey{ID: expired.KeyID})
 			assert.Zero(t, pkey.ExpiresUnix)
 
-			_, extra := private.ServCommand(ctx, expired.KeyID, "user2", "repo1", perm.AccessModeRead, "git-upload-pack", "")
+			_, extra := private.ServCommand(ctx, expired.KeyID, "user2", "repo1", perm.AccessModeRead, "", "git-upload-pack", "")
 			require.Error(t, extra.Error)
 			assert.Equal(t, fmt.Sprintf(`Deploy key "expired-ci" expired on %s.`, past.FormatDate()), extra.UserMsg)
 
-			results, extra := private.ServCommand(ctx, valid.KeyID, "user2", "repo2", perm.AccessModeRead, "git-upload-pack", "")
+			results, extra := private.ServCommand(ctx, valid.KeyID, "user2", "repo2", perm.AccessModeRead, "", "git-upload-pack", "")
 			require.NoError(t, extra.Error)
 			assert.Equal(t, valid.ID, results.DeployKeyID)
 			assert.Equal(t, future, results.ExpiresUnix)

@@ -56,6 +56,7 @@ type ConfigStruct struct {
 	Picture     *PictureStruct
 	Repository  *RepositoryStruct
 	Maintenance *config.Value[MaintenanceState]
+	IPAllowlist *config.Value[IPAllowlistState]
 }
 
 var (
@@ -74,6 +75,7 @@ func initDefaultConfig() {
 			OpenWithEditorApps: config.ValueJSON[OpenWithEditorAppsType]("repository.open-with.editor-apps"),
 		},
 		Maintenance: config.ValueJSON[MaintenanceState]("maintenance.state"),
+		IPAllowlist: config.ValueJSON[IPAllowlistState]("ip_allowlist.state").WithDefault(IPAllowlistState{ExemptAdmins: true}),
 	}
 }
 

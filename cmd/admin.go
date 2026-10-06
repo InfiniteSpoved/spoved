@@ -30,6 +30,7 @@ func cmdAdmin() *cli.Command {
 			subcmdAuth(),
 			subcmdSendMail(),
 			subcmdMaintenance(),
+			subcmdIPAllowlist(),
 		},
 	}
 }

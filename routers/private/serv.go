@@ -5,6 +5,7 @@ package private
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -338,6 +339,12 @@ func ServCommand(ctx *context.PrivateContext) {
 		if !user.KeepEmailPrivate {
 			results.UserEmail = user.Email
 		}
+	}
+
+	// the IP allowlist: cmd/serv sends the client address from SSH_CONNECTION, refused if missing or unparsable
+	if ip, refused := common.IPAllowlistRefused(ctx, net.JoinHostPort(ctx.FormString("ip"), "0"), setting.IPAllowlistSurfaceSSH, user, nil); refused {
+		ctx.JSON(http.StatusForbidden, private.Response{UserMsg: common.IPAllowlistRefusal(ip)})
+		return
 	}
 
 	// in full maintenance mode only site admins can use git, deploy keys included

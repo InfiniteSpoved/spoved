@@ -6,7 +6,9 @@ package common
 import (
 	"fmt"
 	"net/http"
+	"net/netip"
 	"runtime/trace"
+	"slices"
 	"strings"
 
 	"forgejo.org/modules/cache"
@@ -68,7 +70,7 @@ func ProtocolMiddlewares() (handlers []any) {
 				opt.AddTrustedNetwork(n)
 			}
 		}
-		handlers = append(handlers, proxy.ForwardedHeaders(opt))
+		handlers = append(handlers, joinForwardedFor(setting.ReverseProxyTrustedProxies), proxy.ForwardedHeaders(opt))
 	}
 
 	if setting.IsRouteLogEnabled() {
@@ -80,6 +82,38 @@ func ProtocolMiddlewares() (handlers []any) {
 	}
 
 	return handlers
+}
+
+// joinForwardedFor makes proxy.ForwardedHeaders see the address a trusted proxy appended: that reads only the first
+// X-Forwarded-For line and prefers X-Real-IP, both of which a client can send through a proxy that only appends
+// X-Forwarded-For. So when a trusted peer sends any X-Forwarded-For, all its lines are joined and X-Real-IP is dropped.
+func joinForwardedFor(trusted []string) func(http.Handler) http.Handler {
+	var prefixes []netip.Prefix
+	for _, n := range trusted {
+		if p, err := netip.ParsePrefix(n); err == nil {
+			prefixes = append(prefixes, p)
+		} else if a, err := netip.ParseAddr(n); err == nil {
+			prefixes = append(prefixes, netip.PrefixFrom(a, a.BitLen()))
+		}
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
+			xff := req.Header.Values("X-Forwarded-For")
+			if len(xff) == 0 {
+				next.ServeHTTP(resp, req)
+				return
+			}
+			peer := setting.IPFromRemoteAddr(req.RemoteAddr)
+			if req.RemoteAddr == "@" { // a unix socket, which proxy.ForwardedHeaders trusts as 127.0.0.1
+				peer = netip.AddrFrom4([4]byte{127, 0, 0, 1})
+			}
+			if slices.ContainsFunc(prefixes, func(p netip.Prefix) bool { return p.Contains(peer.Unmap()) }) {
+				req.Header.Set("X-Forwarded-For", strings.Join(xff, ", "))
+				req.Header.Del("X-Real-IP")
+			}
+			next.ServeHTTP(resp, req)
+		})
+	}
 }
 
 func stripSlashesMiddleware(next http.Handler) http.Handler {

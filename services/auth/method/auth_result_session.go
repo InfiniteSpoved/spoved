@@ -18,3 +18,9 @@ type sessionAuthenticationResult struct {
 func (r *sessionAuthenticationResult) User() *user_model.User {
 	return r.user
 }
+
+// IsSession reports whether the user signed in with the web session.
+func IsSession(r auth.AuthenticationResult) bool {
+	_, ok := r.(*sessionAuthenticationResult)
+	return ok
+}

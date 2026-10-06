@@ -1466,6 +1466,8 @@ func Routes() *web.Route {
 			})
 			m.Combo("/maintenance").Get(admin.GetMaintenance).
 				Put(bind(api.EditMaintenanceOption{}), admin.EditMaintenance)
+			m.Combo("/ip-allowlist").Get(admin.GetIPAllowlist).
+				Put(bind(api.EditIPAllowlistOption{}), admin.EditIPAllowlist)
 			m.Group("/announcements", func() {
 				m.Combo("").Get(admin.ListAnnouncements).
 					Post(bind(api.CreateAnnouncementOption{}), admin.CreateAnnouncement)
@@ -1558,7 +1560,7 @@ func Routes() *web.Route {
 		m.Group("/topics", func() {
 			m.Get("/search", repo.TopicSearch)
 		}, tokenRequiresScopes(auth_model.AccessTokenScopeCategoryRepository))
-	}, sudo(), common.MaintenanceAPI)
+	}, common.IPAllowlistAPI, sudo(), common.MaintenanceAPI)
 
 	return m
 }

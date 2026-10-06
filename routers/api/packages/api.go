@@ -156,6 +156,7 @@ func verifyAuth(r *web.Route, authMethods []auth.Method) {
 	})
 	r.Use(common.RateLimit(ratelimit.API))
 	r.Use(common.MaintenanceGit)
+	r.Use(common.IPAllowlistPlain(setting.IPAllowlistSurfacePackages))
 }
 
 func verifyContainerAuth(r *web.Route, authMethods []auth.Method) {
@@ -197,6 +198,7 @@ func verifyContainerAuth(r *web.Route, authMethods []auth.Method) {
 	})
 	r.Use(common.RateLimit(ratelimit.API))
 	r.Use(common.MaintenanceGit)
+	r.Use(common.IPAllowlistPlain(setting.IPAllowlistSurfacePackages))
 }
 
 // CommonRoutes provide endpoints for most package managers (except containers - see below)

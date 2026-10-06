@@ -1311,6 +1311,68 @@
         }
       }
     },
+    "/admin/ip-allowlist": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get the instance IP allowlist",
+        "operationId": "adminGetIPAllowlist",
+        "responses": {
+          "200": {
+            "$ref": "#/responses/IPAllowlist"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          }
+        }
+      },
+      "put": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Replace the instance IP allowlist",
+        "operationId": "adminEditIPAllowlist",
+        "parameters": [
+          {
+            "type": "boolean",
+            "description": "save even if the new list blocks the address of this request",
+            "name": "force",
+            "in": "query"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/EditIPAllowlistOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/IPAllowlist"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "409": {
+            "$ref": "#/responses/error"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/admin/maintenance": {
       "get": {
         "produces": [
@@ -29164,6 +29226,49 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "EditIPAllowlistOption": {
+      "description": "EditIPAllowlistOption replaces the instance IP allowlist",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "x-go-name": "Enabled"
+        },
+        "entries": {
+          "description": "At most 500 entries, descriptions of at most 255 characters",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IPAllowlistEntry"
+          },
+          "x-go-name": "Entries"
+        },
+        "exempt_admins": {
+          "description": "Whether site admins are exempt; true if omitted",
+          "type": "boolean",
+          "x-go-name": "ExemptAdmins"
+        },
+        "exempt_token_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "ExemptTokenIDs"
+        },
+        "exempt_user_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "ExemptUserIDs"
+        },
+        "surfaces": {
+          "$ref": "#/definitions/IPAllowlistSurfaces"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "EditIssueCommentOption": {
       "description": "EditIssueCommentOption options for editing a comment",
       "type": "object",
@@ -30853,6 +30958,116 @@
         "url": {
           "type": "string",
           "x-go-name": "URL"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "IPAllowlist": {
+      "description": "IPAllowlist is the instance IP allowlist",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "x-go-name": "Enabled"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IPAllowlistEntry"
+          },
+          "x-go-name": "Entries"
+        },
+        "exempt_admins": {
+          "type": "boolean",
+          "x-go-name": "ExemptAdmins"
+        },
+        "exempt_tokens": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IPAllowlistToken"
+          },
+          "x-go-name": "ExemptTokens"
+        },
+        "exempt_user_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "ExemptUserIDs"
+        },
+        "from_config": {
+          "description": "Whether [ip_allowlist] ENABLED = false in the configuration file turns the list off, so it can't be changed",
+          "type": "boolean",
+          "x-go-name": "FromConfig"
+        },
+        "surfaces": {
+          "$ref": "#/definitions/IPAllowlistSurfaces"
+        },
+        "your_ip": {
+          "description": "The address of the client making this request, as the allowlist sees it",
+          "type": "string",
+          "x-go-name": "YourIP"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "IPAllowlistEntry": {
+      "description": "IPAllowlistEntry is an allowed network",
+      "type": "object",
+      "properties": {
+        "cidr": {
+          "description": "IPv4 or IPv6 network, e.g. 10.0.0.0/8",
+          "type": "string",
+          "x-go-name": "CIDR"
+        },
+        "description": {
+          "type": "string",
+          "x-go-name": "Description"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "IPAllowlistSurfaces": {
+      "description": "IPAllowlistSurfaces are the kinds of access the IP allowlist is enforced on",
+      "type": "object",
+      "properties": {
+        "api": {
+          "type": "boolean",
+          "x-go-name": "API"
+        },
+        "git": {
+          "type": "boolean",
+          "x-go-name": "Git"
+        },
+        "packages": {
+          "type": "boolean",
+          "x-go-name": "Packages"
+        },
+        "ssh": {
+          "type": "boolean",
+          "x-go-name": "SSH"
+        },
+        "web": {
+          "type": "boolean",
+          "x-go-name": "Web"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "IPAllowlistToken": {
+      "description": "IPAllowlistToken is an exempt personal access token",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "user_id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "UserID"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -35945,6 +36160,12 @@
         "items": {
           "$ref": "#/definitions/Hook"
         }
+      }
+    },
+    "IPAllowlist": {
+      "description": "IPAllowlist",
+      "schema": {
+        "$ref": "#/definitions/IPAllowlist"
       }
     },
     "Issue": {
