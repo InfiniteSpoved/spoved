@@ -207,13 +207,13 @@ func UnarchivePost(ctx *context.Context) {
 		ctx.Error(http.StatusForbidden)
 		return
 	}
-	err := org_service.UnarchiveOrganization(ctx, ctx.Org.Organization)
-	if err == nil {
-		err = usergroup_service.SyncOrgTeams(ctx, ctx.Org.Organization.ID)
-	}
-	if err != nil {
+	if err := org_service.UnarchiveOrganization(ctx, ctx.Org.Organization); err != nil {
 		ctx.Error(archiveErrorStatus(err), err.Error())
 		return
+	}
+	// the org is unarchived already; the next sync heals any membership this missed
+	if err := usergroup_service.SyncOrgTeams(ctx, ctx.Org.Organization.ID); err != nil {
+		log.Error("SyncOrgTeams(%d) after unarchive: %v", ctx.Org.Organization.ID, err)
 	}
 	ctx.Flash.Success(ctx.Tr("org.settings.unarchive.success"))
 	ctx.Redirect(ctx.Org.OrgLink + "/settings/delete")

@@ -14,6 +14,7 @@ import (
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
@@ -502,13 +503,13 @@ func Unarchive(ctx *context.APIContext) {
 	//   "422":
 	//     "$ref": "#/responses/validationError"
 
-	err := org_service.UnarchiveOrganization(ctx, ctx.Org().Organization)
-	if err == nil {
-		err = usergroup_service.SyncOrgTeams(ctx, ctx.Org().Organization.ID)
-	}
-	if err != nil {
+	if err := org_service.UnarchiveOrganization(ctx, ctx.Org().Organization); err != nil {
 		archiveError(ctx, err)
 		return
+	}
+	// the org is unarchived already; the next sync heals any membership this missed
+	if err := usergroup_service.SyncOrgTeams(ctx, ctx.Org().Organization.ID); err != nil {
+		log.Error("SyncOrgTeams(%d) after unarchive: %v", ctx.Org().Organization.ID, err)
 	}
 	ctx.Status(http.StatusNoContent)
 }
