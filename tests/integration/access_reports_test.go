@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	activities_model "forgejo.org/models/activities"
 	auth_model "forgejo.org/models/auth"
@@ -159,7 +160,7 @@ func TestInstanceAccessReport(t *testing.T) {
 }
 
 // setAccessReportPeople gives user5 TOTP and suspends them, makes user4 an LDAP user, and records pushes:
-// user4 to org3/repo3, and later to user2/repo2, a private repository outside org3.
+// user4 to org3/repo3, later to org3/repo5, and later still to user2/repo2, a private repository outside org3.
 func setAccessReportPeople(t *testing.T) (push int64) {
 	t.Helper()
 	ctx := db.DefaultContext
@@ -170,12 +171,12 @@ func setAccessReportPeople(t *testing.T) (push int64) {
 	_, err = db.GetEngine(ctx).Exec("UPDATE `user` SET login_type = ?, login_source = ?, last_login_unix = ? WHERE id = 4", auth_model.LDAP, source.ID, 1700000000)
 	require.NoError(t, err)
 
-	push = 1710000000
+	push = 1710000500
 	for _, a := range []struct {
 		repo int64
 		op   activities_model.ActionType
 		when int64
-	}{{3, activities_model.ActionCommitRepo, push - 100}, {3, activities_model.ActionPushTag, push}, {2, activities_model.ActionCommitRepo, push + 1000}} {
+	}{{3, activities_model.ActionCommitRepo, push - 600}, {3, activities_model.ActionPushTag, push - 500}, {5, activities_model.ActionCommitRepo, push}, {2, activities_model.ActionCommitRepo, push + 1000}} {
 		action := &activities_model.Action{UserID: 4, ActUserID: 4, RepoID: a.repo, OpType: a.op}
 		require.NoError(t, db.Insert(ctx, action))
 		_, err := db.GetEngine(ctx).Exec("UPDATE action SET created_unix = ? WHERE id = ?", a.when, action.ID)
@@ -221,6 +222,11 @@ func TestAccessReportPersonColumns(t *testing.T) {
 
 		doc := accessRows(t, loginUser(t, "user1"), orgAccessReportLink)
 		assert.Positive(t, doc.Find("th.person-column").Length())
+		// M3: the page with org3/repo3 only shows the push to org3/repo5 too
+		date, _ := accessRows(t, loginUser(t, "user1"), orgAccessReportLink+"?limit=1").Find(`tr[data-name="user4"][data-repo="org3/repo3"] td.last-push absolute-date`).First().Attr("date")
+		when, err := time.Parse(time.RFC3339, date)
+		require.NoError(t, err)
+		assert.Equal(t, push, when.Unix())
 		assert.Contains(t, doc.Find(`tr[data-name="user4"] td.account-source`).First().Text(), "corp-ldap")
 
 		header, _, _ := csvLines(t, loginUser(t, "user1").MakeRequest(t, NewRequest(t, "GET", orgAccessReportLink+"?format=csv"), http.StatusOK))

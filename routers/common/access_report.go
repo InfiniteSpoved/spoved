@@ -62,7 +62,7 @@ func (r *AccessReport) lines(ctx *context.Base, repoIDs []int64) ([]*api.AccessR
 	}
 	var people map[int64]*accessreport.Person
 	if r.Admin {
-		if people, err = accessreport.People(ctx, rows, r.OwnerID); err != nil {
+		if people, err = accessreport.People(ctx, rows, r.cond()); err != nil {
 			return nil, false, err
 		}
 	}

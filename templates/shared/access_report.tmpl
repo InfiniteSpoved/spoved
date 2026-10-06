@@ -93,7 +93,7 @@
 						{{if $.ShowPeople}}
 							{{if .Suspended}}{{/* set for users only; printing a *bool prints its value */}}
 								<td>{{DateUtils.AbsoluteShort .LastLogin}}</td>
-								<td>{{DateUtils.AbsoluteShort .LastPush}}</td>
+								<td class="last-push">{{DateUtils.AbsoluteShort .LastPush}}</td>
 								<td>{{.TwoFactor}}</td>
 								<td class="account-source">{{.AccountSource}}</td>
 								<td>{{.Suspended}}</td>
