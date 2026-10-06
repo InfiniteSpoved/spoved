@@ -19,6 +19,8 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	"forgejo.org/services/mailer"
+	repo_service "forgejo.org/services/repository"
+	user_service "forgejo.org/services/user"
 	"forgejo.org/tests"
 
 	"github.com/stretchr/testify/assert"
@@ -204,9 +206,7 @@ func TestEmailRepoOverridePage(t *testing.T) {
 	unittest.AssertNotExistsBean(t, &user_model.NotificationSetting{UserID: 2, RepoID: 6})
 
 	// reset
-	req = NewRequestWithBody(t, "POST", "/user/settings/notifications", strings.NewReader(url.Values{"repo": {"1"}, "reset": {"1"}}.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	session.MakeRequest(t, req, http.StatusSeeOther)
+	session.MakeRequest(t, NewRequest(t, "POST", "/user/settings/notifications?repo=1&reset=1"), http.StatusSeeOther) // as the watch menu posts it
 	unittest.AssertNotExistsBean(t, &user_model.NotificationSetting{UserID: 2, RepoID: 1})
 
 	// unwatch deletes the rows
@@ -226,4 +226,22 @@ func TestEmailSettingsNotForcedByOrgOwner(t *testing.T) {
 	u := &user_model.User{Name: "newmailuser", Email: "newmailuser@example.com", Passwd: "password1234!@#", MustChangePassword: false}
 	require.NoError(t, user_model.CreateUser(db.DefaultContext, u))
 	assert.Equal(t, "custom", u.EmailNotificationsPreference)
+}
+
+// AC8: deleting the repo removes the overrides on it, deleting the user removes all their rows.
+func TestEmailSettingsDeletedWithRepoAndUser(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	ctx := db.DefaultContext
+	events := map[user_model.NotifyEvent]bool{user_model.NotifyEventPRComment: false}
+	require.NoError(t, user_model.SaveNotificationSettings(ctx, 8, 0, events))
+	require.NoError(t, user_model.SaveNotificationSettings(ctx, 8, 1, events))
+	require.NoError(t, user_model.SaveNotificationSettings(ctx, 2, 0, events))
+
+	require.NoError(t, repo_service.DeleteRepositoryDirectly(ctx, 1, repo_service.DeleteRepositoryOpts{}))
+	unittest.AssertNotExistsBean(t, &user_model.NotificationSetting{RepoID: 1})
+	unittest.AssertExistsAndLoadBean(t, &user_model.NotificationSetting{UserID: 8, RepoID: 0})
+
+	require.NoError(t, user_service.DeleteUser(ctx, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8}), false))
+	unittest.AssertNotExistsBean(t, &user_model.NotificationSetting{UserID: 8})
+	unittest.AssertExistsAndLoadBean(t, &user_model.NotificationSetting{UserID: 2, RepoID: 0})
 }
