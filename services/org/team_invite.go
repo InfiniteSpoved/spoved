@@ -47,6 +47,11 @@ func AcceptInvite(ctx context.Context, team *org_model.Team, invite *org_model.T
 	if team.ID != invite.TeamID {
 		return org_model.ErrTeamInviteNotFound{}
 	}
+	if org, err := org_model.GetOrgByID(ctx, team.OrgID); err != nil {
+		return err
+	} else if org.IsArchived {
+		return org_model.ErrOrgArchived{Name: org.Name}
+	}
 	linkedToUser, invitedUserID := invite.InvitedID.Get()
 	if linkedToUser && invitedUserID != doer.ID {
 		return org_model.ErrTeamInviteNotFound{}

@@ -63,7 +63,8 @@ func getDashboardContextUser(ctx *context.Context) *user_model.User {
 		ctx.ServerError("GetUserOrgsList", err)
 		return nil
 	}
-	ctx.Data["Orgs"] = orgs
+	// archived organizations are hidden from the dashboard switcher, unless one is the current context
+	ctx.Data["Orgs"] = slices.DeleteFunc(orgs, func(o *organization.Organization) bool { return o.IsArchived && o.ID != ctxUser.ID })
 
 	return ctxUser
 }

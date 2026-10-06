@@ -828,6 +828,8 @@ func TeamInvitePost(ctx *context.Context) {
 	if err := org_service.AcceptInvite(ctx, team, invite, ctx.Doer, hideMembership); err != nil {
 		if org_model.IsErrTeamInviteNotFound(err) || org_model.IsErrTeamInviteExpired(err) {
 			ctx.NotFound("ErrTeamInviteNotFound", err)
+		} else if org_model.IsErrOrgArchived(err) {
+			ctx.Error(http.StatusForbidden, ctx.Locale.TrString("org.archived.readonly"))
 		} else {
 			ctx.ServerError("AcceptInvite", err)
 		}

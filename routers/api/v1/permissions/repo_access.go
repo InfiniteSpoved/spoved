@@ -59,4 +59,9 @@ func RepoAccess(ctx Context) {
 		ctx.NotFound()
 		return
 	}
+
+	// Every repository of an archived organization is read-only, whatever the repository's own settings say.
+	if owner := ctx.Repository().Owner; !ctx.IsReadOnlyMethod() && owner.IsOrganization() && owner.IsArchived {
+		ctx.Error(http.StatusForbidden, "OrgArchived", "the organization is archived and read-only")
+	}
 }

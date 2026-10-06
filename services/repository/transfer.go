@@ -28,8 +28,24 @@ import (
 // TODO: use clustered lock (unique queue? or *abuse* cache)
 var repoWorkingPool = sync.MutexMap{}
 
+// checkNotArchivedOrg refuses moving a repository out of or into an archived organization. The owners are
+// loaded fresh: a pending transfer may be accepted long after the organization was archived.
+func checkNotArchivedOrg(ctx context.Context, repo *repo_model.Repository, newOwner *user_model.User) error {
+	for _, id := range []int64{repo.OwnerID, newOwner.ID} {
+		if owner, err := user_model.GetUserByID(ctx, id); err != nil {
+			return err
+		} else if owner.IsOrganization() && owner.IsArchived {
+			return organization.ErrOrgArchived{Name: owner.Name}
+		}
+	}
+	return nil
+}
+
 // TransferOwnership transfers all corresponding setting from old user to new one.
 func TransferOwnership(ctx context.Context, doer, newOwner *user_model.User, repo *repo_model.Repository, teams []*organization.Team) error {
+	if err := checkNotArchivedOrg(ctx, repo, newOwner); err != nil {
+		return err
+	}
 	if err := repo.LoadOwner(ctx); err != nil {
 		return err
 	}
@@ -362,6 +378,9 @@ func ChangeRepositoryName(ctx context.Context, doer *user_model.User, repo *repo
 // StartRepositoryTransfer transfer a repo from one owner to a new one.
 // it make repository into pending transfer state, if doer can not create repo for new owner.
 func StartRepositoryTransfer(ctx context.Context, doer, newOwner *user_model.User, repo *repo_model.Repository, teams []*organization.Team) error {
+	if err := checkNotArchivedOrg(ctx, repo, newOwner); err != nil {
+		return err
+	}
 	if user_model.IsBlocked(ctx, newOwner.ID, doer.ID) {
 		return user_model.ErrBlockedByUser
 	}

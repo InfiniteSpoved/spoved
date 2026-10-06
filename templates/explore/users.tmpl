@@ -3,6 +3,9 @@
 	{{template "explore/navbar" .}}
 	<div class="ui container">
 		{{template "explore/search" .}}
+		{{if .PageIsExploreOrganizations}}
+			<p><a href="?archived={{if .ShowArchived}}false{{else}}true{{end}}">{{ctx.Locale.Tr "explore.show_archived_orgs"}}{{if .ShowArchived}} ✓{{end}}</a></p>
+		{{end}}
 		{{template "explore/user_list" .}}
 		{{template "base/paginate" .}}
 	</div>

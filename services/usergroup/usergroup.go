@@ -164,6 +164,11 @@ func loadGroupsForSync(ctx context.Context, names container.Set[string]) ([]*org
 // LinkTeam links a user group to a team and adds the members of the group to the team.
 func LinkTeam(ctx context.Context, group *org_model.UserGroup, team *org_model.Team) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
+		if org, err := org_model.GetOrgByID(ctx, team.OrgID); err != nil {
+			return err
+		} else if org.IsArchived {
+			return org_model.ErrOrgArchived{Name: org.Name}
+		}
 		linked, err := org_model.IsUserGroupLinkedToTeam(ctx, group.ID, team.ID)
 		if err != nil {
 			return err
@@ -181,6 +186,11 @@ func LinkTeam(ctx context.Context, group *org_model.UserGroup, team *org_model.T
 // group that were only members of the team because of the group.
 func UnlinkTeam(ctx context.Context, group *org_model.UserGroup, team *org_model.Team) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
+		if org, err := org_model.GetOrgByID(ctx, team.OrgID); err != nil {
+			return err
+		} else if org.IsArchived {
+			return org_model.ErrOrgArchived{Name: org.Name}
+		}
 		if err := org_model.DeleteUserGroupTeam(ctx, group.ID, team.ID); err != nil {
 			return err
 		}
@@ -385,6 +395,10 @@ func syncTeamMembership(ctx context.Context, team *org_model.Team, userID int64,
 		return err
 	}
 	if viaGroup {
+		// Adds wait while the organization is archived (see SyncOrgTeams); removals below always apply.
+		if org, err := org_model.GetOrgByID(ctx, team.OrgID); err != nil || org.IsArchived {
+			return err
+		}
 		_, err := models.InsertTeamMember(ctx, team, userID, org_model.MembershipReasonAddedByUserGroup, optional.None[int64](), optional.None[int64]())
 		return err
 	}
@@ -406,6 +420,27 @@ func syncTeamMembership(ctx context.Context, team *org_model.Team, userID int64,
 		return err
 	}
 	return models.RemoveTeamMember(ctx, team, userID)
+}
+
+// SyncOrgTeams re-applies the user groups linked to the teams of an organization, adding the members
+// that were skipped while it was archived.
+func SyncOrgTeams(ctx context.Context, orgID int64) error {
+	teams, err := org_model.FindOrgTeams(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	for _, team := range teams {
+		groups, err := org_model.GetTeamUserGroups(ctx, team.ID)
+		if err != nil {
+			return err
+		}
+		for _, group := range groups {
+			if err := syncGroupMembersForTeam(ctx, group.ID, team); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // SyncOrgAdminLinks makes the links between the groups granting the org-admin

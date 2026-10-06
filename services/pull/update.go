@@ -28,6 +28,17 @@ func Update(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.
 		return errors.New("update of agit flow pull request's head branch is unsupported")
 	}
 
+	if err := pr.LoadBaseRepo(ctx); err != nil {
+		return err
+	} else if err := pr.LoadHeadRepo(ctx); err != nil {
+		return err
+	}
+	for _, r := range []*repo_model.Repository{pr.BaseRepo, pr.HeadRepo} {
+		if r != nil && r.IsArchived {
+			return repo_model.ErrRepoIsArchived{Repo: r}
+		}
+	}
+
 	defer pullWorkingPool.Lock(fmt.Sprint(pr.ID))()
 
 	diffCount, err := GetDiverging(ctx, pr)
@@ -96,6 +107,11 @@ func IsUserAllowedToUpdate(ctx context.Context, pull *issues_model.PullRequest, 
 
 	if err := pull.LoadBaseRepo(ctx); err != nil {
 		return false, false, err
+	} else if err := pull.LoadHeadRepo(ctx); err != nil {
+		return false, false, err
+	}
+	if pull.BaseRepo.IsArchived || (pull.HeadRepo != nil && pull.HeadRepo.IsArchived) {
+		return false, false, nil
 	}
 
 	pr := &issues_model.PullRequest{

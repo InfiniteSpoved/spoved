@@ -1,3 +1,8 @@
+{{if .Org.IsArchived}}
+<div class="ui container">
+	<div class="ui warning message org-archived-banner">{{svg "octicon-archive"}} {{ctx.Locale.Tr "org.archived.banner"}}</div>
+</div>
+{{end}}
 <div class="ui container tw-flex tw-gap-x-4">
 	{{ctx.AvatarUtils.Avatar .Org 100 "org-avatar"}}
 	<div id="org-info" class="tw-flex tw-flex-col">
@@ -5,6 +10,7 @@
 			<div class="org-title">
 				<h1>{{.Org.DisplayName}}</h1>
 				<span class="org-visibility">
+					{{if .Org.IsArchived}}<span class="ui large horizontal label">{{ctx.Locale.Tr "org.archived.badge"}}</span>{{end}}
 					{{if .Org.Visibility.IsLimited}}<span class="ui large horizontal label">{{ctx.Locale.Tr "org.settings.visibility.limited_shortname"}}</span>{{end}}
 					{{if .Org.Visibility.IsPrivate}}<span class="ui large horizontal label">{{ctx.Locale.Tr "org.settings.visibility.private_shortname"}}</span>{{end}}
 				</span>

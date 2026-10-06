@@ -5,12 +5,14 @@
 package org
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"time"
 
 	"forgejo.org/models"
 	"forgejo.org/models/db"
+	org_model "forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/models/webhook"
@@ -19,6 +21,7 @@ import (
 	"forgejo.org/modules/optional"
 	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	shared_user "forgejo.org/routers/web/shared/user"
 	user_setting "forgejo.org/routers/web/user/setting"
@@ -181,6 +184,44 @@ func SettingsDeleteAvatar(ctx *context.Context) {
 	}
 
 	ctx.JSONRedirect(ctx.Org.OrgLink + "/settings")
+}
+
+// ArchivePost archives the organization.
+func ArchivePost(ctx *context.Context) {
+	if !ctx.Org.IsOwner {
+		ctx.Error(http.StatusForbidden)
+		return
+	}
+	if err := org_service.ArchiveOrganization(ctx, ctx.Org.Organization, ctx.Doer, ctx.FormBool("remove_members")); err != nil {
+		ctx.Error(archiveErrorStatus(err), err.Error())
+		return
+	}
+	ctx.Flash.Success(ctx.Tr("org.settings.archive.success"))
+	ctx.Redirect(ctx.Org.OrgLink + "/settings/delete")
+}
+
+// UnarchivePost unarchives the organization.
+func UnarchivePost(ctx *context.Context) {
+	if !ctx.Org.IsOwner {
+		ctx.Error(http.StatusForbidden)
+		return
+	}
+	if err := org_service.UnarchiveOrganization(ctx, ctx.Org.Organization); err != nil {
+		ctx.Error(archiveErrorStatus(err), err.Error())
+		return
+	}
+	ctx.Flash.Success(ctx.Tr("org.settings.unarchive.success"))
+	ctx.Redirect(ctx.Org.OrgLink + "/settings/delete")
+}
+
+func archiveErrorStatus(err error) int {
+	switch {
+	case org_model.IsErrOrgArchived(err):
+		return http.StatusForbidden
+	case errors.Is(err, util.ErrInvalidArgument):
+		return http.StatusUnprocessableEntity
+	}
+	return http.StatusInternalServerError
 }
 
 // SettingsDelete response for deleting an organization

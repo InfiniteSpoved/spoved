@@ -443,6 +443,15 @@ func orgAssignment(ctx *context.APIContext) {
 	} else {
 		ctx.Org().Organization = org
 		ctx.SetUser(ctx.Org().Organization.AsUser())
+		refuseArchivedOrgWrite(ctx, org.AsUser())
+	}
+}
+
+// refuseArchivedOrgWrite answers 403 to writes to an archived organization, except the routes in
+// context.ArchivedOrgOpenRoutes.
+func refuseArchivedOrgWrite(ctx *context.APIContext, owner *user_model.User) {
+	if context.IsArchivedOrgWrite(ctx.Req, owner, context.ArchivedOrgOpenRoutes...) {
+		ctx.Error(http.StatusForbidden, "OrgArchived", "the organization is archived and read-only")
 	}
 }
 
@@ -466,8 +475,11 @@ func orgTeamAssignment(ctx *context.APIContext) {
 		} else {
 			ctx.Error(http.StatusInternalServerError, "GetTeamById", err)
 		}
+	} else if org, err := organization.GetOrgByID(ctx, team.OrgID); err != nil {
+		ctx.Error(http.StatusInternalServerError, "GetOrgByID", err)
 	} else {
 		ctx.Org().Team = team
+		refuseArchivedOrgWrite(ctx, org.AsUser())
 	}
 }
 
@@ -1300,6 +1312,8 @@ func Routes() *web.Route {
 				Patch(reqToken(), reqOrgOwnership(), bind(api.EditOrgOption{}), org.Edit).
 				Delete(reqToken(), reqOrgOwnership(), org.Delete)
 			m.Post("/rename", reqToken(), reqOrgOwnership(), bind(api.RenameOrgOption{}), org.Rename)
+			m.Post("/archive", reqToken(), reqOrgOwnership(), bind(api.ArchiveOrgOption{}), org.Archive)
+			m.Post("/unarchive", reqToken(), reqOrgOwnership(), org.Unarchive)
 			m.Combo("/branch-workflow").Get(reqToken(), reqOrgOwnership(), org.GetBranchWorkflow).
 				Put(reqToken(), reqOrgOwnership(), bind(api.OrgBranchWorkflow{}), org.EditBranchWorkflow)
 			m.Group("/branch_protections", func() {

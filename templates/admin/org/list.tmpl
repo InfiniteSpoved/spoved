@@ -56,6 +56,12 @@
 								{{if .Visibility.IsPrivate}}
 									<span class="text gold">{{svg "octicon-lock"}}</span>
 								{{end}}
+								{{if .IsArchived}}
+									<span class="ui mini label">{{ctx.Locale.Tr "org.archived.badge"}}</span>
+									<form class="tw-inline" action="{{.OrganisationLink}}/settings/unarchive" method="post">
+										<button class="ui mini button">{{ctx.Locale.Tr "org.settings.unarchive.button"}}</button>
+									</form>
+								{{end}}
 								{{if eq .Type 3}}{{/* Reserved organization */}}
 									<span class="ui mini label">{{ctx.Locale.Tr "admin.users.reserved"}}</span>
 								{{end}}
