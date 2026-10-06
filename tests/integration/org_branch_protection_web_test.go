@@ -18,6 +18,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/tests"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -129,8 +130,12 @@ func TestOrgBranchProtectionWeb(t *testing.T) {
 func TestOrgBranchProtectionRepoSettings(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	e := newOrgRuleEnv(t)
-	e.repo("obp-web-repo", map[string]perm.AccessMode{"user5": perm.AccessModeAdmin})
+	repo := e.repo("obp-web-repo", map[string]perm.AccessMode{"user5": perm.AccessModeAdmin})
 	bwRepo(t, "obp-web-elsewhere")
+	for _, branch := range []string{"obp-org-rule", "obp-unmatched"} {
+		req := NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/obp-web-repo/branches", &api.CreateBranchRepoOption{BranchName: branch, OldRefName: "master"}).AddTokenAuth(repo.Token)
+		MakeRequest(t, req, http.StatusCreated)
+	}
 	e.create(api.CreateOrgBranchProtectionOption{CreateBranchProtectionOption: api.CreateBranchProtectionOption{
 		RuleName: "obp-org-rule", EnablePush: true, EnablePushWhitelist: true, PushWhitelistUsernames: []string{"user4"},
 		ApprovalRules: []*api.ApprovalRule{{Name: "SecretApprovers", RequiredCount: 1, Usernames: []string{"user2"}}},
@@ -151,6 +156,17 @@ func TestOrgBranchProtectionRepoSettings(t *testing.T) {
 	assert.NotContains(t, body, fmt.Sprintf("/settings/branches/%d/delete", id))
 	assert.NotContains(t, body, "SecretApprovers", "the rule's settings stay private")
 	assert.NotContains(t, body, "obp-org-elsewhere")
+
+	// the branch list marks a branch protected by the organization rule only
+	resp = loginUser(t, "user5").MakeRequest(t, NewRequest(t, "GET", "/org3/obp-web-repo/branches"), http.StatusOK)
+	doc = NewHTMLParser(t, resp.Body)
+	shield := func(branch string) int {
+		return doc.Find(".flex-text-block").FilterFunction(func(_ int, s *goquery.Selection) bool {
+			return s.Find("a.gt-ellipsis").Text() == branch
+		}).Find(".octicon-shield-lock").Length()
+	}
+	assert.Equal(t, 1, shield("obp-org-rule"))
+	assert.Equal(t, 0, shield("obp-unmatched"))
 }
 
 // AC6: the merge box, the approvals API and mergeable_reasons follow every matching rule.
