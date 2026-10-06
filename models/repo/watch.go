@@ -163,6 +163,13 @@ func updateWatchRepo(ctx context.Context, oldWatch Watch, source WatchSource, wa
 	// We could do that in the case of an automatic source and none selection.
 	// But that would only save some db space and we never go into that state when we've been in a different one at some point.
 
+	if !watchSelection.IsWatching() {
+		// per-repo notification settings only make sense while watching
+		if err := user_model.DeleteRepoNotificationSettings(ctx, oldWatch.UserID, oldWatch.RepoID); err != nil {
+			return err
+		}
+	}
+
 	if repodiff != 0 {
 		_, err = db.GetEngine(ctx).Exec("UPDATE `repository` SET num_watches = num_watches + ? WHERE id = ?", repodiff, oldWatch.RepoID)
 	}

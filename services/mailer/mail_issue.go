@@ -6,6 +6,7 @@ package mailer
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	activities_model "forgejo.org/models/activities"
 	issues_model "forgejo.org/models/issues"
@@ -44,6 +45,7 @@ type mailCommentContext struct {
 	Content               string
 	Comment               *issues_model.Comment
 	ForceDoerNotification bool
+	ReviewType            issues_model.ReviewType // set for a review, tells approve and changes requested apart
 	ActionAdditionalData  ActionAdditionalData
 }
 
@@ -80,6 +82,13 @@ func mailIssueCommentToParticipants(ctx *mailCommentContext, mentions []*user_mo
 		return fmt.Errorf("GetAssigneeIDsByIssue(%d): %w", ctx.Issue.ID, err)
 	}
 	unfiltered = append(unfiltered, ids...)
+	rec := &mailRecipients{assignees: container.SetOf(ids...)}
+
+	reviewerIDs, err := issues_model.GetRequestedReviewerIDs(ctx, ctx.Issue.ID)
+	if err != nil {
+		return fmt.Errorf("GetRequestedReviewerIDs(%d): %w", ctx.Issue.ID, err)
+	}
+	rec.reviewers = container.SetOf(reviewerIDs...)
 
 	// =========== Participants (i.e. commenters, reviewers) ===========
 	ids, err = issues_model.GetParticipantsIDsByIssueID(ctx, ctx.Issue.ID)
@@ -107,13 +116,22 @@ func mailIssueCommentToParticipants(ctx *mailCommentContext, mentions []*user_mo
 
 	visited := make(container.Set[int64], len(unfiltered)+len(mentions)+1)
 
+	// One settings load for every possible recipient, the doer included.
+	filterIDs := slices.Concat(unfiltered, []int64{ctx.Doer.ID})
+	for _, m := range mentions {
+		filterIDs = append(filterIDs, m.ID)
+	}
+	if rec.filter, err = newEmailFilter(ctx, ctx.Issue.RepoID, filterIDs...); err != nil {
+		return fmt.Errorf("newEmailFilter: %w", err)
+	}
+
 	// Avoid mailing the doer
-	if ctx.Doer.EmailNotificationsPreference != user_model.EmailNotificationsAndYourOwn && !ctx.ForceDoerNotification {
+	if !rec.filter.sendsOwnActions(ctx.Doer) && !ctx.ForceDoerNotification {
 		visited.Add(ctx.Doer.ID)
 	}
 
 	// =========== Mentions ===========
-	if err = mailIssueCommentBatch(ctx, mentions, visited, true); err != nil {
+	if err = mailIssueCommentBatch(ctx, mentions, visited, true, rec); err != nil {
 		return fmt.Errorf("mailIssueCommentBatch() mentions: %w", err)
 	}
 
@@ -128,14 +146,14 @@ func mailIssueCommentToParticipants(ctx *mailCommentContext, mentions []*user_mo
 	if err != nil {
 		return err
 	}
-	if err = mailIssueCommentBatch(ctx, unfilteredUsers, visited, false); err != nil {
+	if err = mailIssueCommentBatch(ctx, unfilteredUsers, visited, false, rec); err != nil {
 		return fmt.Errorf("mailIssueCommentBatch(): %w", err)
 	}
 
 	return nil
 }
 
-func mailIssueCommentBatch(ctx *mailCommentContext, users []*user_model.User, visited container.Set[int64], fromMention bool) error {
+func mailIssueCommentBatch(ctx *mailCommentContext, users []*user_model.User, visited container.Set[int64], fromMention bool, rec *mailRecipients) error {
 	checkUnit := unit.TypeIssues
 	if ctx.Issue.IsPull {
 		checkUnit = unit.TypePullRequests
@@ -147,10 +165,12 @@ func mailIssueCommentBatch(ctx *mailCommentContext, users []*user_model.User, vi
 			// Exclude deactivated users
 			continue
 		}
-		// At this point we exclude:
-		// user that don't have all mails enabled or users only get mail on mention and this is one ...
-		if user.EmailNotificationsPreference != user_model.EmailNotificationsEnabled &&
-			user.EmailNotificationsPreference != user_model.EmailNotificationsAndYourOwn && (!fromMention || user.EmailNotificationsPreference != user_model.EmailNotificationsOnMention) {
+		// Exclude users that don't want this event: by preset, or by their Custom or per-repo settings.
+		event := user_model.NotifyEventMention
+		if !fromMention {
+			event = eventFor(ctx, rec.roleOf(ctx.Issue, user.ID))
+		}
+		if !rec.filter.ShouldEmail(user, event) {
 			continue
 		}
 

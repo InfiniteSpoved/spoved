@@ -376,6 +376,13 @@ func orgRuleReviewers(ctx context.Context, pb *git_model.ProtectedBranch, pr *Pu
 	return official, nil
 }
 
+// GetRequestedReviewerIDs returns the users with an open review request on the issue.
+func GetRequestedReviewerIDs(ctx context.Context, issueID int64) ([]int64, error) {
+	ids := make([]int64, 0, 2)
+	return ids, db.GetEngine(ctx).Table("review").Cols("reviewer_id").
+		Where("issue_id = ? AND type = ? AND reviewer_id > 0", issueID, ReviewTypeRequest).Find(&ids)
+}
+
 // orgRuleHasReviewRequests returns whether a pending review request goes to an official reviewer or team of the organization rule.
 func orgRuleHasReviewRequests(ctx context.Context, pb *git_model.ProtectedBranch, pr *PullRequest) (bool, error) {
 	// only an approval or rejection answers a request, a comment or pending review doesn't
