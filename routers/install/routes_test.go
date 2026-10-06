@@ -5,9 +5,11 @@ package install
 
 import (
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 
 	"github.com/stretchr/testify/assert"
@@ -22,7 +24,8 @@ func TestRoutes(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), `class="page-content install"`)
-	assert.Empty(t, test.BrandMentions(w.Body.String()))
+	// the config path shown on the page comes from the checkout directory, which may be named GitHat
+	assert.Empty(t, test.BrandMentions(strings.ReplaceAll(w.Body.String(), setting.CustomConf, "")))
 
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest("GET", "/no-such", nil)

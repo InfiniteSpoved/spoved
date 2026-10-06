@@ -6,6 +6,7 @@ package integration
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -20,15 +21,14 @@ import (
 
 // brandAllowed are visible phrases that legitimately name Forgejo, the upstream project.
 var brandAllowed = []string{
-	// the "Forgejo" webhook type
-	`>Forgejo<`,
 	// group-map placeholders of the upstream LDAP/OAuth2 auth source templates
 	"MyForgejoOrganization", "MyForgejoTeam1", "MyForgejoTeam2",
 	// the push mirror branch filter help links to Forgejo's documentation
 	"Forgejo documentation",
-	// the Actions feature and its runner keep their upstream names
-	"Forgejo Actions", "Forgejo runner", "Forgejo Runner",
 }
+
+// webhookTypeForgejo is the "Forgejo" webhook type name in the webhook type menu and form header.
+var webhookTypeForgejo = regexp.MustCompile(`>\s*Forgejo\s*</(a|div)>`)
 
 func assertNoBrandMentions(t *testing.T, session *TestSession, url string) {
 	t.Helper()
@@ -39,6 +39,7 @@ func assertNoBrandMentions(t *testing.T, session *TestSession, url string) {
 	} else {
 		body = session.MakeRequest(t, req, http.StatusOK).Body.String()
 	}
+	body = webhookTypeForgejo.ReplaceAllString(body, "><")
 	for _, phrase := range brandAllowed {
 		body = strings.ReplaceAll(body, phrase, "")
 	}
@@ -53,7 +54,7 @@ func TestBranding(t *testing.T) {
 			assertNoBrandMentions(t, nil, url)
 		}
 
-		page := NewHTMLParser(t, MakeRequest(t, NewRequest(t, "GET", "/user/login"), http.StatusOK).Body)
+		page := NewHTMLParser(t, MakeRequest(t, NewRequest(t, "GET", "/"), http.StatusOK).Body)
 		assert.Contains(t, page.Find("title").Text(), "CodeHat")
 		assert.Contains(t, page.Find("footer").Text(), "Powered by CodeHat")
 		page.AssertElement(t, `footer a.codehat-credit[href="https://forgejo.org"]`, true)

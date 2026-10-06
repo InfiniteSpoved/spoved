@@ -60,7 +60,7 @@ func TestPublicOrgHome(t *testing.T) {
 
 	// Verify that in org pages, default theme get properly assigned to guest users
 	page := NewHTMLParser(t, MakeRequest(t, NewRequest(t, "GET", "/org41"), http.StatusOK).Body)
-	page.AssertElement(t, "html head link[rel='stylesheet'][href^='/assets/css/theme-forgejo-auto.css']", true)
+	page.AssertElement(t, "html head link[rel='stylesheet'][href^='/assets/css/theme-company-auto.css']", true)
 }
 
 func TestLimitedOrg(t *testing.T) {

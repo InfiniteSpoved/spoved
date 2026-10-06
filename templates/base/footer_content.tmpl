@@ -1,7 +1,8 @@
 <footer class="page-footer" role="group" aria-label="{{ctx.Locale.Tr "aria.footer"}}">
 	<div class="left-links" role="contentinfo" aria-label="{{ctx.Locale.Tr "aria.footer.software"}}">
 		{{if ShowFooterPoweredBy}}
-			<a target="_blank" rel="noopener noreferrer" href="https://forgejo.org">{{ctx.Locale.Tr "powered_by" "Forgejo"}}</a>
+			<a target="_blank" rel="noopener noreferrer" href="https://github.com/GitHatOrg/GitHat">{{ctx.Locale.Tr "powered_by" "CodeHat"}}</a>
+			<a class="codehat-credit" target="_blank" rel="noopener noreferrer" href="https://forgejo.org">{{ctx.Locale.Tr "based_on_forgejo"}}</a>
 		{{end}}
 		{{if (or .ShowFooterVersion .PageIsAdmin)}}
 			{{ctx.Locale.Tr "version"}}:

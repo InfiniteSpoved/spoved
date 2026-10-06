@@ -87,8 +87,8 @@ var UI = struct {
 	MaxCodeCommentLines: 50,
 	ReactionMaxUserNum:  10,
 	MaxDisplayFileSize:  8388608,
-	DefaultTheme:        `forgejo-auto`,
-	Themes:              []string{`forgejo-auto`, `forgejo-light`, `forgejo-dark`, `gitea-auto`, `gitea-light`, `gitea-dark`, `forgejo-auto-deuteranopia-protanopia`, `forgejo-light-deuteranopia-protanopia`, `forgejo-dark-deuteranopia-protanopia`, `forgejo-auto-tritanopia`, `forgejo-light-tritanopia`, `forgejo-dark-tritanopia`},
+	DefaultTheme:        `company-auto`,
+	Themes:              []string{`company-auto`, `company-light`, `company-dark`, `company-high-contrast`, `forgejo-auto`, `forgejo-light`, `forgejo-dark`, `gitea-auto`, `gitea-light`, `gitea-dark`, `forgejo-auto-deuteranopia-protanopia`, `forgejo-light-deuteranopia-protanopia`, `forgejo-dark-deuteranopia-protanopia`, `forgejo-auto-tritanopia`, `forgejo-light-tritanopia`, `forgejo-dark-tritanopia`},
 	Reactions:           []string{`+1`, `-1`, `laugh`, `hooray`, `confused`, `heart`, `rocket`, `eyes`},
 	CustomEmojis:        []string{`git`, `gitea`, `codeberg`, `gitlab`, `github`, `gogs`, `forgejo`},
 	ExploreDefaultSort:  "recentupdate",
@@ -144,9 +144,9 @@ var UI = struct {
 		Description string
 		Keywords    string
 	}{
-		Author:      "Forgejo – Beyond coding. We forge.",
-		Description: "Forgejo is a self-hosted lightweight software forge. Easy to install and low maintenance, it just does the job.",
-		Keywords:    "git,forge,forgejo",
+		Author:      "CodeHat",
+		Description: "CodeHat is a self-hosted Git forge.",
+		Keywords:    "git,forge,codehat",
 	},
 }
 

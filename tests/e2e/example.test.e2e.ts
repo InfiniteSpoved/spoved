@@ -11,7 +11,7 @@ import {screenshot} from './shared/screenshots.ts';
 test('Load Homepage', async ({page}) => {
   const response = await page.goto('/');
   expect(response?.status()).toBe(200); // Status OK
-  await expect(page).toHaveTitle(/^Forgejo: Beyond coding. We Forge.\s*$/);
+  await expect(page).toHaveTitle(/^CodeHat: Beyond coding. We Forge.\s*$/);
   await expect(page.locator('.logo')).toHaveAttribute('src', '/assets/img/logo.svg');
 });
 

@@ -59,6 +59,11 @@
   gap: 0.25em;
 }
 
+.page-footer .codehat-credit {
+  font-size: 0.85em;
+  margin-inline-end: 0.5em;
+}
+
 .page-footer .right-links {
   min-width: 180px; /* make sure the menu dropdown doesn't overflow horizontally when language name is short */
   display: flex;

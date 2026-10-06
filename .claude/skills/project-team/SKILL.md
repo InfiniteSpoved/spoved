@@ -1,7 +1,7 @@
 ---
 name: project-team
 description: >
-  Run the GitHat agent team inside a Claude project, where the project's main
+  Run the CodeHat agent team inside a Claude project, where the project's main
   session can't create sessions and opens threads instead. One thread per
   ticket: its lead runs the coder, security reviewer and tester as in-session
   subagents. The main session is the supervisor and talks to the user. Use when

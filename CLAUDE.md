@@ -1,6 +1,6 @@
 # Working on this fork
 
-`GitHatOrg/GitHat` is a private fork of Codeberg `forgejo/forgejo`.
+`GitHatOrg/GitHat` is the repository of CodeHat, a private fork of Codeberg `forgejo/forgejo`.
 
 - `main` mirrors upstream. `.github/workflows/sync-upstream.yml` fast-forwards it nightly, so never push to it.
 - `develop` is the default branch. All PRs target `develop`. Merge `origin/develop` into feature branches with a merge commit; don't rebase pushed branches.

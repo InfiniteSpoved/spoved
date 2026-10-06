@@ -66,7 +66,7 @@ func SendTestMail(email string) error {
 		// No mail service configured
 		return nil
 	}
-	return gomail.Send(Sender, NewMessage(email, "Forgejo Test Email!", "Forgejo Test Email!").ToMessage())
+	return gomail.Send(Sender, NewMessage(email, "CodeHat Test Email!", "CodeHat Test Email!").ToMessage())
 }
 
 // sendUserMail sends a mail to the user

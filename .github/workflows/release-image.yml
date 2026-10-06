@@ -1,7 +1,8 @@
 name: Release image
 
 # Builds the container image from Dockerfile.rootless and pushes it to the
-# GitHub Container Registry as ghcr.io/githatorg/githat. It runs only on demand:
+# GitHub Container Registry as ghcr.io/<owner>/<repo>, lowercased from the
+# repository name (today ghcr.io/githatorg/githat). It runs only on demand:
 # Actions → Release image → Run workflow.
 #
 # Tags: sha-<commit> always. <version> and latest are added to the same digest
@@ -9,11 +10,11 @@ name: Release image
 # Accepted risks go in .trivyignore; the run prints them in its summary.
 # The package is private like the repository. Pull it with a token that has
 # read:packages, or import it into Azure Container Registry:
-#   az acr import --name <registry> --source ghcr.io/githatorg/githat:<tag> \
+#   az acr import --name <registry> --source ghcr.io/<owner>/<repo>:<tag> \
 #     --username <github user> --password <token>
 #
 # Azure Container Registry push (push-to-acr, needs a version): the acr job
-# copies the scanned digest, attestations included, to <ACR_NAME>.azurecr.io/githat
+# copies the scanned digest, attestations included, to <ACR_NAME>.azurecr.io/<repo>
 # with the same tags. It logs in with GitHub OIDC, so no secret is stored, and
 # runs only after the image job passed. Set up once, outside this workflow:
 #   1. A user-assigned managed identity (or app registration) with the role
@@ -36,7 +37,7 @@ on:
         description: Branch, tag or commit to build.
         default: develop
       version:
-        description: Release version, semver (e.g. 16.0.0-githat.1). Also tags the image as latest. Leave empty for a test build tagged with the commit only.
+        description: Release version, semver (e.g. 16.0.0-codehat.1). Also tags the image as latest. Leave empty for a test build tagged with the commit only.
         default: ''
       fail-on:
         description: Fail the run on fixable vulnerabilities of these severities.
@@ -79,7 +80,7 @@ jobs:
           fi
           if [ -n "$VERSION" ]; then
             if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
-              echo "::error::The version must be semver, e.g. 16.0.0-githat.1"
+              echo "::error::The version must be semver, e.g. 16.0.0-codehat.1"
               exit 1
             fi
             # The Makefile takes the version from this file instead of git tags.
