@@ -242,9 +242,9 @@ func TestAuditorRole(t *testing.T) {
 		t.Run("ssh serv: upload-pack, no receive-pack", func(t *testing.T) {
 			key, err := asymkey_model.AddPublicKey(ctx, 8, "auditor", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINDRDoephkaFELacrNNe2fqAwedhRB1MKOpLEHlPuczO nocomment", 0, 0)
 			require.NoError(t, err)
-			_, extra := private.ServCommand(ctx, key.ID, "user2", "repo1", perm.AccessModeRead, "git-upload-pack", "")
+			_, extra := private.ServCommand(ctx, key.ID, "user2", "repo1", perm.AccessModeRead, "", "git-upload-pack", "")
 			require.NoError(t, extra.Error)
-			_, extra = private.ServCommand(ctx, key.ID, "user2", "repo1", perm.AccessModeWrite, "git-receive-pack", "")
+			_, extra = private.ServCommand(ctx, key.ID, "user2", "repo1", perm.AccessModeWrite, "", "git-receive-pack", "")
 			require.Error(t, extra.Error)
 		})
 

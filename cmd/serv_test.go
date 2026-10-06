@@ -90,3 +90,11 @@ func TestLFSTokenExpiry(t *testing.T) {
 	assert.Equal(t, now.Add(time.Hour).Unix(), lfsTokenExpiry(now, timeutil.TimeStamp(now.Add(time.Hour).Unix())).Unix(), "capped at the key expiry")
 	assert.Equal(t, now.Add(24*time.Hour).Unix(), lfsTokenExpiry(now, timeutil.TimeStamp(now.Add(48*time.Hour).Unix())).Unix(), "key expires after the token")
 }
+
+// AC7: SSH takes the client IP from SSH_CONNECTION, which sshd and the built-in server set
+func TestSSHClientIP(t *testing.T) {
+	assert.Equal(t, "198.51.100.7", sshClientIP("198.51.100.7 51234 10.0.0.1 22"))
+	assert.Equal(t, "2001:db8::1", sshClientIP("2001:db8::1 51234 2001:db8::2 22"))
+	assert.Empty(t, sshClientIP(""))
+	assert.Empty(t, sshClientIP("   "))
+}

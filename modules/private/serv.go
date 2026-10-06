@@ -48,13 +48,15 @@ type ServCommandResults struct {
 }
 
 // ServCommand preps for a serv call
-func ServCommand(ctx context.Context, keyID int64, ownerName, repoName string, mode perm.AccessMode, verbs ...string) (*ServCommandResults, ResponseExtra) {
+// clientIP is the SSH client address, for the IP allowlist.
+func ServCommand(ctx context.Context, keyID int64, ownerName, repoName string, mode perm.AccessMode, clientIP string, verbs ...string) (*ServCommandResults, ResponseExtra) {
 	var reqURL strings.Builder
-	fmt.Fprintf(&reqURL, "/api/internal/serv/command/%d/%s/%s?mode=%d",
+	fmt.Fprintf(&reqURL, "/api/internal/serv/command/%d/%s/%s?mode=%d&ip=%s",
 		keyID,
 		url.PathEscape(ownerName),
 		url.PathEscape(repoName),
-		mode)
+		mode,
+		url.QueryEscape(clientIP))
 	for _, verb := range verbs {
 		if verb != "" {
 			fmt.Fprintf(&reqURL, "&verb=%s", url.QueryEscape(verb))

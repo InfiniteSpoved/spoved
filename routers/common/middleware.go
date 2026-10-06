@@ -4,9 +4,12 @@
 package common
 
 import (
+	gocontext "context"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"runtime/trace"
+	"slices"
 	"strings"
 
 	"forgejo.org/modules/cache"
@@ -68,7 +71,7 @@ func ProtocolMiddlewares() (handlers []any) {
 				opt.AddTrustedNetwork(n)
 			}
 		}
-		handlers = append(handlers, proxy.ForwardedHeaders(opt))
+		handlers = append(handlers, joinForwardedFor(setting.ReverseProxyTrustedProxies), proxy.ForwardedHeaders(opt))
 	}
 
 	if setting.IsRouteLogEnabled() {
@@ -80,6 +83,60 @@ func ProtocolMiddlewares() (handlers []any) {
 	}
 
 	return handlers
+}
+
+// joinForwardedFor makes proxy.ForwardedHeaders see the address a trusted proxy appended: that reads only the first
+// X-Forwarded-For line and prefers X-Real-IP, both of which a client can send through a proxy that sets only the other
+// header. So for a trusted peer, all X-Forwarded-For lines are joined and X-Real-IP is dropped, unless X-Real-IP
+// disagrees with the last X-Forwarded-For address: then the headers are left as they are and the client IP is marked
+// ambiguous, which the IP allowlist refuses.
+func joinForwardedFor(trusted []string) func(http.Handler) http.Handler {
+	var prefixes []netip.Prefix
+	trustAll := false
+	for _, n := range trusted {
+		if n == "*" {
+			trustAll = true
+		} else if p, err := netip.ParsePrefix(n); err == nil {
+			prefixes = append(prefixes, setting.NormalizeIPPrefix(p))
+		} else if a, err := netip.ParseAddr(n); err == nil {
+			prefixes = append(prefixes, setting.NormalizeIPPrefix(netip.PrefixFrom(a, a.BitLen())))
+		}
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
+			xff := req.Header.Values("X-Forwarded-For")
+			if len(xff) == 0 {
+				next.ServeHTTP(resp, req)
+				return
+			}
+			peer := setting.IPFromRemoteAddr(req.RemoteAddr)
+			if req.RemoteAddr == "@" { // a unix socket, which proxy.ForwardedHeaders trusts as 127.0.0.1
+				peer = netip.AddrFrom4([4]byte{127, 0, 0, 1})
+			}
+			if trustAll || slices.ContainsFunc(prefixes, func(p netip.Prefix) bool { return p.Contains(peer.Unmap()) }) {
+				joined := strings.Join(xff, ", ")
+				last := strings.TrimSpace(joined[strings.LastIndex(joined, ",")+1:])
+				if realIP := req.Header.Get("X-Real-IP"); realIP == "" || strings.TrimSpace(realIP) == last {
+					req.Header.Set("X-Forwarded-For", joined)
+					req.Header.Del("X-Real-IP")
+				} else {
+					req = req.WithContext(gocontext.WithValue(req.Context(), ambiguousClientIPKey{}, true))
+				}
+			}
+			next.ServeHTTP(resp, req)
+		})
+	}
+}
+
+type ambiguousClientIPKey struct{}
+
+// ClientIP returns the client address of the request, invalid if it can't be parsed or a trusted proxy sent
+// disagreeing X-Real-IP and X-Forwarded-For headers.
+func ClientIP(req *http.Request) netip.Addr {
+	if ambiguous, _ := req.Context().Value(ambiguousClientIPKey{}).(bool); ambiguous {
+		return netip.Addr{}
+	}
+	return setting.IPFromRemoteAddr(req.RemoteAddr)
 }
 
 func stripSlashesMiddleware(next http.Handler) http.Handler {

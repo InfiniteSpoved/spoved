@@ -118,6 +118,10 @@ type AuthenticationResult interface {
 	// If the authentication method used has a limited time validity, such as a JWT with an `exp` claim, that expiry
 	// time can be accessed through this method.  Otherwise, returns None.
 	ExpiresAt() optional.Option[timeutil.TimeStamp]
+
+	// The ID of the personal access token used, or 0 for any other credential, including OAuth2, Actions and
+	// authorized integration tokens.
+	AccessTokenID() int64
 }
 
 // IsHeldByUser reports whether the user authenticated with a credential of their own, rather than one another party
@@ -158,6 +162,10 @@ func (*BaseAuthenticationResult) Scope() optional.Option[auth_model.AccessTokenS
 
 func (*BaseAuthenticationResult) ExpiresAt() optional.Option[timeutil.TimeStamp] {
 	return optional.None[timeutil.TimeStamp]()
+}
+
+func (*BaseAuthenticationResult) AccessTokenID() int64 {
+	return 0
 }
 
 type UnauthenticatedResult struct {

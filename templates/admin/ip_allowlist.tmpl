@@ -1,0 +1,69 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin ip-allowlist")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.ip_allowlist"}}
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.ip_allowlist.desc"}}</p>
+			<p class="help">{{ctx.Locale.Tr "admin.ip_allowlist.proxy_note"}}</p>
+			<p><strong>{{ctx.Locale.Tr "admin.ip_allowlist.your_ip" .ClientIP}}</strong></p>
+			{{if .State.FromConfig}}
+				<div class="ui warning message">{{ctx.Locale.Tr "admin.ip_allowlist.from_config"}}</div>
+			{{end}}
+			{{if .LockoutWarning}}
+				<div class="ui warning message">{{ctx.Locale.Tr "admin.ip_allowlist.lockout" .ClientIP}}</div>
+			{{end}}
+			<form class="ui form" action="{{AppSubUrl}}/admin/ip-allowlist" method="post">
+				<fieldset {{if .State.FromConfig}}disabled{{end}}>
+					<div class="field">
+						<div class="ui checkbox">
+							<input id="enabled" name="enabled" type="checkbox" {{if .State.Enabled}}checked{{end}}>
+							<label for="enabled">{{ctx.Locale.Tr "admin.ip_allowlist.enabled"}}</label>
+						</div>
+					</div>
+					<div class="grouped fields">
+						<label>{{ctx.Locale.Tr "admin.ip_allowlist.surfaces"}}</label>
+						{{range $name, $on := dict "web" .State.Web "api" .State.API "git" .State.Git "ssh" .State.SSH "packages" .State.Packages}}
+							<div class="field">
+								<div class="ui checkbox">
+									<input id="surface-{{$name}}" name="{{$name}}" type="checkbox" {{if $on}}checked{{end}}>
+									<label for="surface-{{$name}}">{{ctx.Locale.Tr (printf "admin.ip_allowlist.surface.%s" $name)}}</label>
+								</div>
+							</div>
+						{{end}}
+					</div>
+					<div class="field">
+						<div class="ui checkbox">
+							<input id="exempt_admins" name="exempt_admins" type="checkbox" {{if .State.ExemptAdmins}}checked{{end}}>
+							<label for="exempt_admins">{{ctx.Locale.Tr "admin.ip_allowlist.exempt_admins"}}</label>
+						</div>
+					</div>
+					<div class="field">
+						<label for="entries">{{ctx.Locale.Tr "admin.ip_allowlist.entries"}}</label>
+						<textarea id="entries" name="entries" rows="8">{{.Entries}}</textarea>
+						<span class="help">{{ctx.Locale.Tr "admin.ip_allowlist.entries_helper"}}</span>
+					</div>
+					<div class="field">
+						<label for="exempt_users">{{ctx.Locale.Tr "admin.ip_allowlist.exempt_users"}}</label>
+						<input id="exempt_users" name="exempt_users" value="{{.ExemptUsers}}">
+						<span class="help">{{ctx.Locale.Tr "admin.ip_allowlist.exempt_users_helper"}}</span>
+					</div>
+					<div class="field">
+						<label for="exempt_tokens">{{ctx.Locale.Tr "admin.ip_allowlist.exempt_tokens"}}</label>
+						<input id="exempt_tokens" name="exempt_tokens" value="{{.ExemptTokens}}">
+						<span class="help">{{ctx.Locale.Tr "admin.ip_allowlist.exempt_tokens_helper"}}</span>
+					</div>
+					{{if .LockoutWarning}}
+						<div class="field">
+							<div class="ui checkbox">
+								<input id="force" name="force" type="checkbox">
+								<label for="force">{{ctx.Locale.Tr "admin.ip_allowlist.force"}}</label>
+							</div>
+						</div>
+					{{end}}
+					<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+				</fieldset>
+			</form>
+		</div>
+	</div>
+{{template "admin/layout_footer" .}}

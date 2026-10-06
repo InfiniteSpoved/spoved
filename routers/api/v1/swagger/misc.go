@@ -84,6 +84,13 @@ type swaggerResponseMaintenance struct {
 	Body api.Maintenance `json:"body"`
 }
 
+// IPAllowlist
+// swagger:response IPAllowlist
+type swaggerResponseIPAllowlist struct {
+	// in:body
+	Body api.IPAllowlist `json:"body"`
+}
+
 // AnnouncementList
 // swagger:response AnnouncementList
 type swaggerResponseAnnouncementList struct {

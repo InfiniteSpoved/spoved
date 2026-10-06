@@ -271,6 +271,9 @@ type swaggerParameterBodies struct {
 	EditMaintenanceOption api.EditMaintenanceOption
 
 	// in:body
+	EditIPAllowlistOption api.EditIPAllowlistOption
+
+	// in:body
 	CreateQuotaRuleOptions api.CreateQuotaRuleOptions
 
 	// in:body

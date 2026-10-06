@@ -289,18 +289,18 @@ func TestMaintenanceGitPush(t *testing.T) {
 		}
 
 		// SSH: serv refuses writes and allows reads; the hook refuses pushes that get that far
-		_, extra := private.ServCommand(t.Context(), 1, "user2", "repo1", perm.AccessModeWrite, "git-receive-pack")
+		_, extra := private.ServCommand(t.Context(), 1, "user2", "repo1", perm.AccessModeWrite, "", "git-receive-pack")
 		assert.Equal(t, "This instance is in read-only mode: "+maintenanceMessage, extra.UserMsg)
-		_, extra = private.ServCommand(t.Context(), 1, "user2", "repo1.wiki", perm.AccessModeWrite, "git-receive-pack")
+		_, extra = private.ServCommand(t.Context(), 1, "user2", "repo1.wiki", perm.AccessModeWrite, "", "git-receive-pack")
 		assert.Equal(t, "This instance is in read-only mode: "+maintenanceMessage, extra.UserMsg)
-		_, extra = private.ServCommand(t.Context(), 1, "user2", "repo1", perm.AccessModeRead, "git-upload-pack")
+		_, extra = private.ServCommand(t.Context(), 1, "user2", "repo1", perm.AccessModeRead, "", "git-upload-pack")
 		require.NoError(t, extra.Error)
 		extra = private.HookPreReceive(t.Context(), "user2", "repo1", private.HookOptions{UserID: 2, RefFullNames: []git.RefName{"refs/heads/master"}, OldCommitIDs: []string{"a"}, NewCommitIDs: []string{"b"}})
 		assert.Equal(t, "This instance is in read-only mode: "+maintenanceMessage, extra.UserMsg)
 
 		// full maintenance: non-admins can't use git at all
 		setMaintenance(t, setting.MaintenanceFull, time.Time{})
-		_, extra = private.ServCommand(t.Context(), 1, "user2", "repo1", perm.AccessModeRead, "git-upload-pack")
+		_, extra = private.ServCommand(t.Context(), 1, "user2", "repo1", perm.AccessModeRead, "", "git-upload-pack")
 		assert.Equal(t, "This instance is in maintenance mode: "+maintenanceMessage, extra.UserMsg)
 		MakeRequest(t, NewRequest(t, "GET", "/user2/repo1.git/info/refs?service=git-upload-pack").AddBasicAuth("user2"), http.StatusServiceUnavailable)
 		MakeRequest(t, NewRequest(t, "GET", "/user2/repo1.git/info/refs?service=git-upload-pack").AddBasicAuth("user1"), http.StatusOK)

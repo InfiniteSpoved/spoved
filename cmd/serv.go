@@ -175,6 +175,14 @@ func lfsTokenExpiry(now time.Time, keyExpires timeutil.TimeStamp) time.Time {
 	return expiry
 }
 
+// sshClientIP returns the client address from SSH_CONNECTION, or "" so that the IP allowlist fails closed
+func sshClientIP(sshConnection string) string {
+	if f := strings.Fields(sshConnection); len(f) > 0 {
+		return f[0]
+	}
+	return ""
+}
+
 func runServ(ctx context.Context, c *cli.Command) error {
 	ctx, cancel := installSignals(ctx)
 	defer cancel()
@@ -300,7 +308,7 @@ func runServ(ctx context.Context, c *cli.Command) error {
 		}
 	}
 
-	results, extra := private.ServCommand(ctx, keyID, username, reponame, requestedMode, verb, lfsVerb)
+	results, extra := private.ServCommand(ctx, keyID, username, reponame, requestedMode, sshClientIP(os.Getenv("SSH_CONNECTION")), verb, lfsVerb)
 	if extra.HasError() {
 		return fail(ctx, extra.UserMsg, "ServCommand failed: %s", extra.Error)
 	}

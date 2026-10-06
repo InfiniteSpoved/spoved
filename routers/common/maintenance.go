@@ -51,6 +51,7 @@ var MaintenanceReadRoutes = container.SetOf(
 // MaintenanceAdminRoutes are the admin settings a site admin can still change in read-only mode.
 var MaintenanceAdminRoutes = container.SetOf(
 	"POST /admin/maintenance",
+	"POST /admin/ip-allowlist",
 	"POST /admin/config",
 	"POST /admin/config/test_mail",
 	"POST /admin/config/test_cache",
@@ -60,6 +61,7 @@ var MaintenanceAdminRoutes = container.SetOf(
 	"POST /admin/announcements/{id}/delete",
 	"POST /admin/monitor/stacktrace/cancel/{pid}",
 	"PUT /api/v1/admin/maintenance",
+	"PUT /api/v1/admin/ip-allowlist",
 	"POST /api/v1/admin/announcements",
 	"PATCH /api/v1/admin/announcements/{id}",
 	"DELETE /api/v1/admin/announcements/{id}",
