@@ -19,9 +19,12 @@ import (
 // With removeMembers, everybody but the owners is removed from the organization.
 func ArchiveOrganization(ctx context.Context, org *org_model.Organization, doer *user_model.User, removeMembers bool) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
-		org, err := org_model.GetOrgByID(ctx, org.ID) // fresh row; fails for anything that is not an organization
+		org, err := org_model.GetOrgByID(ctx, org.ID) // fresh row
 		if err != nil {
 			return err
+		}
+		if !org.AsUser().IsOrganization() {
+			return util.NewInvalidArgumentErrorf("%s is not an organization", org.Name)
 		}
 		if org.IsArchived {
 			return org_model.ErrOrgArchived{Name: org.Name}
@@ -62,8 +65,8 @@ func UnarchiveOrganization(ctx context.Context, org *org_model.Organization) err
 		if err != nil {
 			return err
 		}
-		if !org.IsArchived {
-			return util.NewInvalidArgumentErrorf("organization %s is not archived", org.Name)
+		if !org.AsUser().IsOrganization() || !org.IsArchived {
+			return util.NewInvalidArgumentErrorf("%s is not an archived organization", org.Name)
 		}
 		if _, err := db.GetEngine(ctx).Table("repository").NoAutoTime().
 			Where("owner_id = ? AND archived_by_org = ?", org.ID, true).

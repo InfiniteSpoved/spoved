@@ -17,6 +17,7 @@ import (
 	user_model "forgejo.org/models/user"
 	repo_module "forgejo.org/modules/repository"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/util"
 	org_service "forgejo.org/services/org"
 	"forgejo.org/tests"
 
@@ -346,6 +347,15 @@ func TestOrgArchiveListing(t *testing.T) {
 	loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/admin/orgs"), http.StatusForbidden)
 }
 
+// N5: only organizations can be archived.
+func TestOrgArchiveRejectsUser(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	require.ErrorIs(t, org_service.ArchiveOrganization(t.Context(), organization.OrgFromUser(user2), user2, false), util.ErrInvalidArgument)
+	require.ErrorIs(t, org_service.UnarchiveOrganization(t.Context(), organization.OrgFromUser(user2)), util.ErrInvalidArgument)
+	assert.False(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}).IsArchived)
+}
+
 // O1: an archived org can still be deleted by its owner.
 func TestOrgArchiveDeleteAllowed(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
@@ -359,5 +369,15 @@ func TestOrgArchiveDeleteAllowed(t *testing.T) {
 	require.NoError(t, org_service.ArchiveOrganization(t.Context(), organization.OrgFromUser(org), unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1}), false))
 	token := orgArchiveToken(t, "user1")
 	MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/orgs/"+org.Name).AddTokenAuth(token), http.StatusNoContent)
+	unittest.AssertNotExistsBean(t, &user_model.User{ID: orgID})
+
+	// the web route is exempt as well
+	has, err = db.GetEngine(t.Context()).Table("user").Select("id").Where("type = ? AND id NOT IN (SELECT owner_id FROM repository) AND id NOT IN (SELECT owner_id FROM package)", user_model.UserTypeOrganization).Get(&orgID)
+	require.NoError(t, err)
+	require.True(t, has)
+	org, err = user_model.GetUserByID(t.Context(), orgID)
+	require.NoError(t, err)
+	require.NoError(t, org_service.ArchiveOrganization(t.Context(), organization.OrgFromUser(org), unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1}), false))
+	loginUser(t, "user1").MakeRequest(t, NewRequestWithValues(t, "POST", "/org/"+org.Name+"/settings/delete", map[string]string{"org_name": org.Name}), http.StatusSeeOther)
 	unittest.AssertNotExistsBean(t, &user_model.User{ID: orgID})
 }
