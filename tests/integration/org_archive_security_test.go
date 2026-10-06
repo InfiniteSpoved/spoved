@@ -137,7 +137,7 @@ func TestOrgArchivePullUpdate(t *testing.T) {
 
 	err := pull_service.Update(t.Context(), pr, doer, "msg", false)
 	require.Error(t, err)
-	assert.ErrorAs(t, err, &repo_model.ErrRepoIsArchived{})
+	require.ErrorAs(t, err, &repo_model.ErrRepoIsArchived{})
 
 	mergeAllowed, rebaseAllowed, err := pull_service.IsUserAllowedToUpdate(t.Context(), pr, doer, access_model.Permission{}, access_model.Permission{})
 	require.NoError(t, err)
@@ -238,6 +238,6 @@ func TestOrgArchiveGroupSync(t *testing.T) {
 	assert.False(t, inTeam(stay.ID))
 
 	// the skipped add applies after unarchive
-	require.NoError(t, org_service.UnarchiveOrganization(t.Context(), organization.OrgFromUser(archivedOrg(t))))
+	loginUser(t, "user2").MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/settings/unarchive", nil), http.StatusSeeOther)
 	assert.True(t, inTeam(newcomer.ID))
 }

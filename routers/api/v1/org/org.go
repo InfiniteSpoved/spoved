@@ -502,7 +502,11 @@ func Unarchive(ctx *context.APIContext) {
 	//   "422":
 	//     "$ref": "#/responses/validationError"
 
-	if err := org_service.UnarchiveOrganization(ctx, ctx.Org().Organization); err != nil {
+	err := org_service.UnarchiveOrganization(ctx, ctx.Org().Organization)
+	if err == nil {
+		err = usergroup_service.SyncOrgTeams(ctx, ctx.Org().Organization.ID)
+	}
+	if err != nil {
 		archiveError(ctx, err)
 		return
 	}

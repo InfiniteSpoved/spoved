@@ -239,7 +239,7 @@ func TestOrgArchiveBlocksOrgWrites(t *testing.T) {
 	membersAfter, err := organization.GetOrgUsersByOrgID(t.Context(), &organization.FindOrgMembersOpts{OrgID: 3, Doer: archivedOrg(t), IsDoerMember: true})
 	require.NoError(t, err)
 	assert.Len(t, membersAfter, len(membersBefore))
-	assert.EqualValues(t, reposBefore, unittest.GetCount(t, &repo_model.Repository{OwnerID: 3}))
+	assert.Equal(t, reposBefore, unittest.GetCount(t, &repo_model.Repository{OwnerID: 3}))
 	assert.Equal(t, nameBefore, archivedOrg(t).FullName)
 	unittest.AssertNotExistsBean(t, &repo_model.Repository{OwnerID: 3, Name: "new-web"})
 	unittest.AssertNotExistsBean(t, &repo_model.Repository{OwnerID: 3, Name: "new-in-archived"})

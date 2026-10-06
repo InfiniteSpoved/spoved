@@ -12,7 +12,6 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
-	"forgejo.org/services/usergroup"
 )
 
 // ArchiveOrganization makes the organization and every active repository of it read-only. Repositories that
@@ -54,10 +53,11 @@ func ArchiveOrganization(ctx context.Context, org *org_model.Organization, doer 
 	})
 }
 
-// UnarchiveOrganization reactivates the organization and the repositories its archive made read-only,
-// then adds the user-group members whose team membership was skipped meanwhile.
+// UnarchiveOrganization reactivates the organization and the repositories its archive made read-only.
+// Callers then run usergroup.SyncOrgTeams (services/usergroup imports this package's dependents, so it
+// cannot be called from here) to add the user-group members skipped while it was archived.
 func UnarchiveOrganization(ctx context.Context, org *org_model.Organization) error {
-	err := db.WithTx(ctx, func(ctx context.Context) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
 		org, err := org_model.GetOrgByID(ctx, org.ID)
 		if err != nil {
 			return err
@@ -74,8 +74,4 @@ func UnarchiveOrganization(ctx context.Context, org *org_model.Organization) err
 		_, err = db.GetEngine(ctx).ID(org.ID).Cols("is_archived", "archived_unix", "archived_by_id").NoAutoTime().Update(org)
 		return err
 	})
-	if err != nil {
-		return err
-	}
-	return usergroup.SyncOrgTeams(ctx, org.ID)
 }

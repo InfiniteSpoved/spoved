@@ -26091,6 +26091,18 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "ArchiveOrgOption": {
+      "description": "ArchiveOrgOption options for archiving an organization",
+      "type": "object",
+      "properties": {
+        "remove_members": {
+          "description": "also remove all members except owners",
+          "type": "boolean",
+          "x-go-name": "RemoveMembers"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "Attachment": {
       "description": "Attachment a generic attachment",
       "type": "object",

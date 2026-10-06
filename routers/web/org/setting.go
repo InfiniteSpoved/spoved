@@ -30,6 +30,7 @@ import (
 	org_service "forgejo.org/services/org"
 	repo_service "forgejo.org/services/repository"
 	user_service "forgejo.org/services/user"
+	usergroup_service "forgejo.org/services/usergroup"
 	webhook_service "forgejo.org/services/webhook"
 )
 
@@ -206,7 +207,11 @@ func UnarchivePost(ctx *context.Context) {
 		ctx.Error(http.StatusForbidden)
 		return
 	}
-	if err := org_service.UnarchiveOrganization(ctx, ctx.Org.Organization); err != nil {
+	err := org_service.UnarchiveOrganization(ctx, ctx.Org.Organization)
+	if err == nil {
+		err = usergroup_service.SyncOrgTeams(ctx, ctx.Org.Organization.ID)
+	}
+	if err != nil {
 		ctx.Error(archiveErrorStatus(err), err.Error())
 		return
 	}
