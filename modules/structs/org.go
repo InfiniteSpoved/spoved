@@ -7,17 +7,19 @@ import "time"
 
 // Organization represents an organization
 type Organization struct {
-	ID                        int64     `json:"id"`
-	Name                      string    `json:"name"`
-	FullName                  string    `json:"full_name"`
-	Email                     string    `json:"email"`
-	AvatarURL                 string    `json:"avatar_url"`
-	Description               string    `json:"description"`
-	Website                   string    `json:"website"`
-	Location                  string    `json:"location"`
-	Visibility                string    `json:"visibility"`
-	RepoAdminChangeTeamAccess bool      `json:"repo_admin_change_team_access"`
-	Created                   time.Time `json:"created"`
+	ID                        int64  `json:"id"`
+	Name                      string `json:"name"`
+	FullName                  string `json:"full_name"`
+	Email                     string `json:"email"`
+	AvatarURL                 string `json:"avatar_url"`
+	Description               string `json:"description"`
+	Website                   string `json:"website"`
+	Location                  string `json:"location"`
+	Visibility                string `json:"visibility"`
+	RepoAdminChangeTeamAccess bool   `json:"repo_admin_change_team_access"`
+	// whether the organization is archived (read-only)
+	Archived bool      `json:"archived"`
+	Created  time.Time `json:"created"`
 	// deprecated
 	UserName string `json:"username"`
 }
@@ -66,4 +68,10 @@ type RenameOrgOption struct {
 	// required: true
 	// unique: true
 	NewName string `json:"new_name" binding:"Required"`
+}
+
+// ArchiveOrgOption options for archiving an organization
+type ArchiveOrgOption struct {
+	// also remove all members except owners
+	RemoveMembers bool `json:"remove_members"`
 }

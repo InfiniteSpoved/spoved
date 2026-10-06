@@ -7,6 +7,7 @@ package organization
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -78,6 +79,24 @@ func (err ErrUserNotAllowedCreateOrg) Error() string {
 }
 
 func (err ErrUserNotAllowedCreateOrg) Unwrap() error {
+	return util.ErrPermissionDenied
+}
+
+// ErrOrgArchived is returned when a write is refused because the organization is archived.
+type ErrOrgArchived struct {
+	Name string
+}
+
+// IsErrOrgArchived checks if an error is an ErrOrgArchived.
+func IsErrOrgArchived(err error) bool {
+	return errors.As(err, &ErrOrgArchived{})
+}
+
+func (err ErrOrgArchived) Error() string {
+	return fmt.Sprintf("organization is archived [name: %s]", err.Name)
+}
+
+func (err ErrOrgArchived) Unwrap() error {
 	return util.ErrPermissionDenied
 }
 

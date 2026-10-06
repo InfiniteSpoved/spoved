@@ -931,7 +931,9 @@ func SettingsPost(ctx *context.Context) {
 
 		oldFullname := repo.FullName()
 		if err := repo_service.StartRepositoryTransfer(ctx, ctx.Doer, newOwner, repo, nil); err != nil {
-			if errors.Is(err, user_model.ErrBlockedByUser) {
+			if organization.IsErrOrgArchived(err) {
+				ctx.RenderWithErr(ctx.Tr("org.archived.readonly"), tplSettingsOptions, nil)
+			} else if errors.Is(err, user_model.ErrBlockedByUser) {
 				ctx.RenderWithErr(ctx.Tr("repo.settings.new_owner_blocked_doer"), tplSettingsOptions, nil)
 			} else if repo_model.IsErrRepoAlreadyExist(err) {
 				ctx.RenderWithErr(ctx.Tr("repo.settings.new_owner_has_same_repo"), tplSettingsOptions, nil)

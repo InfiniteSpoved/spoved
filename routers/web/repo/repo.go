@@ -190,6 +190,8 @@ func Create(ctx *context.Context) {
 
 func handleCreateError(ctx *context.Context, owner *user_model.User, err error, name string, tpl base.TplName, form any) {
 	switch {
+	case organization.IsErrOrgArchived(err):
+		ctx.RenderWithErr(ctx.Tr("org.archived.readonly"), tpl, form)
 	case repo_model.IsErrReachLimitOfRepo(err):
 		maxCreationLimit := owner.MaxCreationLimit()
 		msg := ctx.TrN(maxCreationLimit, "repo.form.reach_limit_of_creation_1", "repo.form.reach_limit_of_creation_n", maxCreationLimit)
@@ -394,6 +396,10 @@ func ActionTransfer(accept bool) func(ctx *context.Context) {
 		}
 
 		ok, err := acceptOrRejectRepoTransfer(ctx, accept)
+		if organization.IsErrOrgArchived(err) {
+			ctx.Error(http.StatusForbidden, err.Error())
+			return
+		}
 		if err != nil {
 			ctx.ServerError(fmt.Sprintf("Action (%s)", action), err)
 			return

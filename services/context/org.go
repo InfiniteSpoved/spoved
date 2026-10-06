@@ -6,6 +6,8 @@
 package context
 
 import (
+	"net/http"
+	"slices"
 	"strings"
 
 	"forgejo.org/models/organization"
@@ -17,7 +19,31 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 	redirect_service "forgejo.org/services/redirect"
+
+	"github.com/go-chi/chi/v5"
 )
+
+// IsArchivedOrgWrite reports whether req writes to the archived organization owner. Routes listed in exempt
+// ("METHOD /route/{pattern}", as the router registered them) stay open; matching the route pattern means a
+// differently spelled path cannot slip past or into the exemption.
+func IsArchivedOrgWrite(req *http.Request, owner *user_model.User, exempt ...string) bool {
+	if !owner.IsOrganization() || !owner.IsArchived {
+		return false
+	}
+	switch req.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	}
+	return !slices.Contains(exempt, req.Method+" "+chi.RouteContext(req.Context()).RoutePattern())
+}
+
+// ArchivedOrgOpenRoutes are the org routes that stay writable while the organization is archived.
+var ArchivedOrgOpenRoutes = []string{
+	"POST /org/{org}/settings/unarchive",
+	"POST /org/{org}/settings/delete",
+	"POST /api/v1/orgs/{org}/unarchive",
+	"DELETE /api/v1/orgs/{org}",
+}
 
 // Organization contains organization context
 type Organization struct {
@@ -173,6 +199,10 @@ func HandleOrgAssignment(ctx *Context, args ...bool) {
 	if (requireMember && !ctx.Org.IsMember) ||
 		(requireOwner && !ctx.Org.IsOwner) {
 		ctx.NotFound("OrgAssignment", err)
+		return
+	}
+	if IsArchivedOrgWrite(ctx.Req, org.AsUser(), ArchivedOrgOpenRoutes...) {
+		ctx.Error(http.StatusForbidden, ctx.Locale.TrString("org.archived.readonly"))
 		return
 	}
 	ctx.Data["IsOrganizationOwner"] = ctx.Org.IsOwner

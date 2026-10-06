@@ -287,7 +287,9 @@ func CreateUserRepo(ctx *context.APIContext, owner *user_model.User, opt api.Cre
 		ObjectFormatName: opt.ObjectFormatName,
 	})
 	if err != nil {
-		if repo_model.IsErrRepoAlreadyExist(err) {
+		if organization.IsErrOrgArchived(err) {
+			ctx.Error(http.StatusForbidden, "", err)
+		} else if repo_model.IsErrRepoAlreadyExist(err) {
 			ctx.Error(http.StatusConflict, "", "The repository with the same name already exists.")
 		} else if db.IsErrNameReserved(err) ||
 			db.IsErrNamePatternNotAllowed(err) ||

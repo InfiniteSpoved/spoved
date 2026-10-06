@@ -5,6 +5,7 @@
 package org
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -13,8 +14,10 @@ import (
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/util"
 	"forgejo.org/modules/validation"
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/api/v1/user"
@@ -35,6 +38,7 @@ func listUserOrgs(ctx *context.APIContext, u *user_model.User) {
 		ListOptions:    listOptions,
 		UserID:         u.ID,
 		IncludePrivate: showPrivate,
+		IsArchived:     ctx.FormOptionalBool("archived"),
 	}
 	orgs, maxResults, err := db.FindAndCount[organization.Organization](ctx, opts)
 	if err != nil {
@@ -60,6 +64,10 @@ func ListMyOrgs(ctx *context.APIContext) {
 	// produces:
 	// - application/json
 	// parameters:
+	// - name: archived
+	//   in: query
+	//   description: only list archived (true) or non-archived (false) organizations; both when omitted
+	//   type: boolean
 	// - name: page
 	//   in: query
 	//   description: page number of results to return (1-based)
@@ -94,6 +102,10 @@ func ListUserOrgs(ctx *context.APIContext) {
 	//   description: username of user
 	//   type: string
 	//   required: true
+	// - name: archived
+	//   in: query
+	//   description: only list archived (true) or non-archived (false) organizations; both when omitted
+	//   type: boolean
 	// - name: page
 	//   in: query
 	//   description: page number of results to return (1-based)
@@ -186,6 +198,10 @@ func GetAll(ctx *context.APIContext) {
 	// produces:
 	// - application/json
 	// parameters:
+	// - name: archived
+	//   in: query
+	//   description: only list archived (true) or non-archived (false) organizations; both when omitted
+	//   type: boolean
 	// - name: page
 	//   in: query
 	//   description: page number of results to return (1-based)
@@ -214,6 +230,7 @@ func GetAll(ctx *context.APIContext) {
 		Type:        user_model.UserTypeOrganization,
 		OrderBy:     db.SearchOrderByAlphabetically,
 		Visible:     vMode,
+		IsArchived:  ctx.FormOptionalBool("archived"),
 	})
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "SearchOrganizations", err)
@@ -426,6 +443,86 @@ func Edit(ctx *context.APIContext) {
 	}
 
 	ctx.JSON(http.StatusOK, convert.ToOrganization(ctx, ctx.Org().Organization))
+}
+
+// Archive makes an organization and its repositories read-only
+func Archive(ctx *context.APIContext) {
+	// swagger:operation POST /orgs/{org}/archive organization orgArchive
+	// ---
+	// summary: Archive an organization, making it and all of its repositories read-only
+	// consumes:
+	// - application/json
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: org
+	//   in: path
+	//   description: name of the organization to archive
+	//   type: string
+	//   required: true
+	// - name: body
+	//   in: body
+	//   schema:
+	//     "$ref": "#/definitions/ArchiveOrgOption"
+	// responses:
+	//   "204":
+	//     "$ref": "#/responses/empty"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+
+	form := web.GetForm(ctx).(*api.ArchiveOrgOption)
+	if err := org_service.ArchiveOrganization(ctx, ctx.Org().Organization, ctx.Doer(), form.RemoveMembers); err != nil {
+		archiveError(ctx, err)
+		return
+	}
+	ctx.Status(http.StatusNoContent)
+}
+
+// Unarchive restores an archived organization and the repositories its archive made read-only
+func Unarchive(ctx *context.APIContext) {
+	// swagger:operation POST /orgs/{org}/unarchive organization orgUnarchive
+	// ---
+	// summary: Unarchive an organization, restoring the repositories its archive made read-only
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: org
+	//   in: path
+	//   description: name of the organization to unarchive
+	//   type: string
+	//   required: true
+	// responses:
+	//   "204":
+	//     "$ref": "#/responses/empty"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
+
+	if err := org_service.UnarchiveOrganization(ctx, ctx.Org().Organization); err != nil {
+		archiveError(ctx, err)
+		return
+	}
+	// the org is unarchived already; the next sync heals any membership this missed
+	if err := usergroup_service.SyncOrgTeams(ctx, ctx.Org().Organization.ID); err != nil {
+		log.Error("SyncOrgTeams(%d) after unarchive: %v", ctx.Org().Organization.ID, err)
+	}
+	ctx.Status(http.StatusNoContent)
+}
+
+func archiveError(ctx *context.APIContext, err error) {
+	switch {
+	case organization.IsErrOrgArchived(err):
+		ctx.Error(http.StatusForbidden, "OrgArchived", err)
+	case errors.Is(err, util.ErrInvalidArgument):
+		ctx.Error(http.StatusUnprocessableEntity, "OrgNotArchived", err)
+	default:
+		ctx.Error(http.StatusInternalServerError, "ArchiveOrganization", err)
+	}
 }
 
 // Delete an organization

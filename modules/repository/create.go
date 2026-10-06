@@ -32,6 +32,9 @@ import (
 
 // CreateRepositoryByExample creates a repository for the user/organization.
 func CreateRepositoryByExample(ctx context.Context, doer, u *user_model.User, repo *repo_model.Repository, overwriteOrAdopt, isFork bool) (err error) {
+	if u.IsArchived {
+		return organization.ErrOrgArchived{Name: u.Name}
+	}
 	if err = repo_model.IsUsableRepoName(repo.Name); err != nil {
 		return err
 	}
@@ -251,7 +254,7 @@ func UpdateRepository(ctx context.Context, repo *repo_model.Repository, visibili
 		return err
 	}
 
-	if _, err = e.ID(repo.ID).AllCols().Update(repo); err != nil {
+	if _, err = e.ID(repo.ID).AllCols().Omit("is_archived", "archived_unix", "archived_by_org").Update(repo); err != nil {
 		return fmt.Errorf("update: %w", err)
 	}
 

@@ -2,6 +2,30 @@
 
 			<div class="org-setting-content">
 				<h4 class="ui top attached error header">
+					{{ctx.Locale.Tr "org.settings.archive.header"}}
+				</h4>
+				<div class="ui attached error segment">
+					<p>{{ctx.Locale.Tr "org.settings.archive.text"}}</p>
+					{{if .Org.IsArchived}}
+						<form class="ui form ignore-dirty" action="{{.OrgLink}}/settings/unarchive" method="post">
+							<button class="ui red button">{{ctx.Locale.Tr "org.settings.unarchive.button"}}</button>
+						</form>
+					{{else}}
+						<form class="ui form ignore-dirty" action="{{.OrgLink}}/settings/archive" method="post">
+							<div class="inline field">
+								<div class="ui checkbox">
+									<input id="remove_members" name="remove_members" type="checkbox">
+									<label for="remove_members">{{ctx.Locale.Tr "org.settings.archive.remove_members"}}</label>
+								</div>
+							</div>
+							<button class="ui red button">{{ctx.Locale.Tr "org.settings.archive.button"}}</button>
+						</form>
+					{{end}}
+				</div>
+			</div>
+
+			<div class="org-setting-content">
+				<h4 class="ui top attached error header">
 					{{ctx.Locale.Tr "org.settings.delete_account"}}
 				</h4>
 				<div class="ui attached error segment">

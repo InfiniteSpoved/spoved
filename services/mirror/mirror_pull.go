@@ -549,6 +549,14 @@ func SyncPullMirror(ctx context.Context, repoID int64) bool {
 	}
 	_ = m.GetRepository(ctx) // force load repository of mirror
 
+	if m.Repo.IsArchived { // read-only repositories are not synced, like push mirrors
+		log.Trace("SyncMirrors [repo: %-v]: archived, skipping", m.Repo)
+		if err = repo_model.TouchMirror(ctx, m); err != nil {
+			log.Error("SyncMirrors [repo: %-v]: failed to TouchMirror: %v", m.Repo, err)
+		}
+		return false
+	}
+
 	ctx, _, finished := process.GetManager().AddContext(ctx, fmt.Sprintf("Syncing Mirror %s/%s", m.Repo.OwnerName, m.Repo.Name))
 	defer finished()
 

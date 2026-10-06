@@ -7,6 +7,7 @@ import (
 	"forgejo.org/models/db"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/container"
+	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 	"forgejo.org/services/context"
@@ -47,12 +48,18 @@ func Organizations(ctx *context.Context) {
 		ctx.SetFormString("sort", sortOrder)
 	}
 
-	RenderUserSearch(ctx, &user_model.SearchUserOptions{
+	showArchived := ctx.FormBool("archived")
+	ctx.Data["ShowArchived"] = showArchived
+	opts := &user_model.SearchUserOptions{
 		Actor:       ctx.Doer,
 		Type:        user_model.UserTypeOrganization,
 		ListOptions: db.ListOptions{PageSize: setting.UI.ExplorePagingNum},
 		Visible:     visibleTypes,
 
 		SupportedSortOrders: supportedSortOrders,
-	}, tplExploreUsers)
+	}
+	if !showArchived {
+		opts.IsArchived = optional.Some(false)
+	}
+	RenderUserSearch(ctx, opts, tplExploreUsers)
 }

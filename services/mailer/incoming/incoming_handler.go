@@ -66,6 +66,9 @@ func (h *ReplyHandler) Handle(ctx context.Context, content *MailContent, doer *u
 	if err := issue.LoadRepo(ctx); err != nil {
 		return err
 	}
+	if issue.Repo.IsArchived {
+		return nil // replies to issues of archived repositories are dropped
+	}
 
 	perm, err := access_model.GetUserRepoPermission(ctx, issue.Repo, doer)
 	if err != nil {
