@@ -1,0 +1,9 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin view user access")}}
+<div class="admin-setting-content">
+	<h4 class="ui top attached header">
+		{{.Title}}: <a href="{{AppSubUrl}}/admin/users/{{.User.ID}}">{{.User.Name}}</a>
+	</h4>
+	<div class="ui attached segment"></div>
+	{{template "shared/user_access" (dict "Access" .Access "Full" true)}}
+</div>
+{{template "admin/layout_footer" .}}

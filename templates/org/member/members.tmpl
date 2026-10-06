@@ -72,6 +72,9 @@
 								</a>
 							{{end}}
 						{{end}}
+						{{if $.IsOrganizationOwner}}
+							<a class="small secondary button" href="{{$.OrgLink}}/members/{{.Name}}/access">{{ctx.Locale.Tr "access_report.title"}}</a>
+						{{end}}
 						{{if eq $.SignedUser.ID .ID}}
 							<button class="small danger button delete-button" data-modal-id="leave-organization"
 								data-url="{{$.OrgLink}}/members/action/leave" data-datauid="{{.ID}}"

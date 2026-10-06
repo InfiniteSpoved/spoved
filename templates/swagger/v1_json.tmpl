@@ -2451,6 +2451,38 @@
         }
       }
     },
+    "/admin/users/{username}/access": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "List everything that gives a user access",
+        "operationId": "adminGetUserAccess",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "username of the user",
+            "name": "username",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/UserAccess"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
     "/admin/users/{username}/emails": {
       "get": {
         "produces": [
@@ -6754,6 +6786,97 @@
           },
           "422": {
             "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/access": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "List who can access a repository, with what access, and through what",
+        "operationId": "repoGetAccess",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "enum": [
+              "read",
+              "write",
+              "admin"
+            ],
+            "type": "string",
+            "description": "only rows with at least this access",
+            "name": "mode",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "only rows with access to this unit, e.g. repo.code",
+            "name": "unit",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "person",
+              "bot",
+              "key"
+            ],
+            "type": "string",
+            "description": "only this type of identity",
+            "name": "type",
+            "in": "query"
+          },
+          {
+            "type": "boolean",
+            "description": "only collaborators who aren't members of the owner organization",
+            "name": "external",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "only users who haven't signed in for this many days; applies only for site admins",
+            "name": "inactive_days",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/AccessRowList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
           }
         }
       }
@@ -25375,6 +25498,183 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "AccessCredential": {
+      "description": "AccessCredential is an SSH key, access token or OAuth2 grant of a user",
+      "type": "object",
+      "properties": {
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Created"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Expires"
+        },
+        "fingerprint": {
+          "description": "SSH key fingerprint",
+          "type": "string",
+          "x-go-name": "Fingerprint"
+        },
+        "kind": {
+          "description": "ssh_key, access_token or oauth2_grant",
+          "type": "string",
+          "x-go-name": "Kind"
+        },
+        "last_eight": {
+          "description": "last eight characters of an access token",
+          "type": "string",
+          "x-go-name": "LastEight"
+        },
+        "last_used_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "LastUsed"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Scopes"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "AccessDeployKey": {
+      "description": "AccessDeployKey is a deploy key in an access report",
+      "type": "object",
+      "properties": {
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Expires"
+        },
+        "fingerprint": {
+          "type": "string",
+          "x-go-name": "Fingerprint"
+        },
+        "id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "AccessPath": {
+      "description": "AccessPath is one source of access",
+      "type": "object",
+      "properties": {
+        "access": {
+          "type": "string",
+          "x-go-name": "Access"
+        },
+        "applied": {
+          "description": "false when the permission checks don't use this path for any unit",
+          "type": "boolean",
+          "x-go-name": "Applied"
+        },
+        "kind": {
+          "description": "owner, site_admin, auditor, org_owner, admin_team, team, collaborator, public, internal, org_member,\ndeploy_key or instance_roles",
+          "type": "string",
+          "x-go-name": "Kind"
+        },
+        "team": {
+          "type": "string",
+          "x-go-name": "Team"
+        },
+        "units": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "x-go-name": "Units"
+        },
+        "user_groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AccessUserGroup"
+          },
+          "x-go-name": "UserGroups"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "AccessRow": {
+      "description": "AccessRow is the access of one identity to a repository, and every path that gives it",
+      "type": "object",
+      "properties": {
+        "access": {
+          "description": "highest access on any unit: none, read, write, admin or owner",
+          "type": "string",
+          "x-go-name": "Access"
+        },
+        "deploy_key": {
+          "$ref": "#/definitions/AccessDeployKey"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AccessPath"
+          },
+          "x-go-name": "Paths"
+        },
+        "repository": {
+          "type": "string",
+          "x-go-name": "Repository"
+        },
+        "team": {
+          "$ref": "#/definitions/AccessTeam"
+        },
+        "type": {
+          "description": "person, bot, key, team, anyone, signed_in or instance_roles",
+          "type": "string",
+          "x-go-name": "Type"
+        },
+        "units": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "x-go-name": "Units"
+        },
+        "user": {
+          "$ref": "#/definitions/User"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "AccessTeam": {
+      "description": "AccessTeam is a team shown as one row, to a viewer outside the organization",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "num_members": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "NumMembers"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "AccessToken": {
       "description": "AccessToken represents an API access token",
       "type": "object",
@@ -25421,6 +25721,22 @@
         "token_last_eight": {
           "type": "string",
           "x-go-name": "TokenLastEight"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "AccessUserGroup": {
+      "description": "AccessUserGroup is a user group that made a user a member of a team",
+      "type": "object",
+      "properties": {
+        "login_source": {
+          "description": "the login source that synced the membership",
+          "type": "string",
+          "x-go-name": "LoginSource"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -35233,6 +35549,73 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "UserAccess": {
+      "description": "UserAccess is everything that gives a user access",
+      "type": "object",
+      "properties": {
+        "auditor": {
+          "type": "boolean",
+          "x-go-name": "Auditor"
+        },
+        "auditor_via": {
+          "type": "string",
+          "x-go-name": "AuditorVia"
+        },
+        "credentials": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AccessCredential"
+          },
+          "x-go-name": "Credentials"
+        },
+        "organizations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Orgs"
+        },
+        "private_organizations": {
+          "description": "private organizations whose public repositories the user reads as a member",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "PrivateOrgs"
+        },
+        "repositories": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AccessRow"
+          },
+          "x-go-name": "Rows"
+        },
+        "site_admin": {
+          "type": "boolean",
+          "x-go-name": "SiteAdmin"
+        },
+        "site_admin_via": {
+          "description": "user groups that granted the role, empty if it was set directly",
+          "type": "string",
+          "x-go-name": "SiteAdminVia"
+        },
+        "teams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Teams"
+        },
+        "user_groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AccessUserGroup"
+          },
+          "x-go-name": "UserGroups"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "UserGroup": {
       "description": "UserGroup is an instance-wide group of users. Organizations link it to\ntheir teams, and its members become members of those teams.",
       "type": "object",
@@ -35576,6 +35959,15 @@
     }
   },
   "responses": {
+    "AccessRowList": {
+      "description": "AccessRowList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/AccessRow"
+        }
+      }
+    },
     "AccessToken": {
       "description": "AccessToken represents an API access token",
       "headers": {
@@ -37083,6 +37475,12 @@
       "description": "User",
       "schema": {
         "$ref": "#/definitions/User"
+      }
+    },
+    "UserAccess": {
+      "description": "UserAccess",
+      "schema": {
+        "$ref": "#/definitions/UserAccess"
       }
     },
     "UserGroup": {

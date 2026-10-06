@@ -1,0 +1,59 @@
+{{template "repo/settings/layout_head" (dict "ctxData" . "pageClass" "repository settings access")}}
+	<div class="repo-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "access_report.title"}}
+		</h4>
+		<div class="ui attached segment">
+			<form class="ui form" method="get">
+				<div class="fields">
+					<div class="field">
+						<label for="access-mode">{{ctx.Locale.Tr "access_report.access"}}</label>
+						<select id="access-mode" name="mode">
+							<option value="">{{ctx.Locale.Tr "access_report.filter.any"}}</option>
+							{{range $m := StringUtils.Make "read" "write" "admin"}}
+								<option value="{{$m}}"{{if eq ($.Filter.Get "mode") $m}} selected{{end}}>{{ctx.Locale.Tr (print "access_report.mode." $m)}}</option>
+							{{end}}
+						</select>
+					</div>
+					<div class="field">
+						<label for="access-unit">{{ctx.Locale.Tr "access_report.unit"}}</label>
+						<select id="access-unit" name="unit">
+							<option value="">{{ctx.Locale.Tr "access_report.filter.any"}}</option>
+							{{range $.Repository.Units}}
+								<option value="{{.Unit.NameKey}}"{{if eq ($.Filter.Get "unit") .Unit.NameKey}} selected{{end}}>{{ctx.Locale.Tr .Unit.NameKey}}</option>
+							{{end}}
+						</select>
+					</div>
+					<div class="field">
+						<label for="access-type">{{ctx.Locale.Tr "access_report.type"}}</label>
+						<select id="access-type" name="type">
+							<option value="">{{ctx.Locale.Tr "access_report.filter.any"}}</option>
+							{{range $t := StringUtils.Make "person" "bot" "key"}}
+								<option value="{{$t}}"{{if eq ($.Filter.Get "type") $t}} selected{{end}}>{{ctx.Locale.Tr (print "access_report.type." $t)}}</option>
+							{{end}}
+						</select>
+					</div>
+					{{if .ShowActivity}}
+						<div class="field">
+							<label for="access-inactive">{{ctx.Locale.Tr "access_report.inactive_days"}}</label>
+							<input id="access-inactive" name="inactive_days" type="number" min="0" value="{{$.Filter.Get "inactive_days"}}">
+						</div>
+					{{end}}
+					<div class="field">
+						<label>&nbsp;</label>
+						<div class="ui checkbox">
+							<input id="access-external" name="external" type="checkbox" value="true"{{if eq ($.Filter.Get "external") "true"}} checked{{end}}>
+							<label for="access-external">{{ctx.Locale.Tr "access_report.external"}}</label>
+						</div>
+					</div>
+					<div class="field">
+						<label>&nbsp;</label>
+						<button class="ui primary button">{{ctx.Locale.Tr "access_report.filter"}}</button>
+					</div>
+				</div>
+			</form>
+			{{template "shared/access_rows" (dict "Rows" .Rows)}}
+			{{template "base/paginate" .}}
+		</div>
+	</div>
+{{template "repo/settings/layout_footer" .}}
