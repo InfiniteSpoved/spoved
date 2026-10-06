@@ -233,9 +233,8 @@ Read CLAUDE.md first.
 Create workers with create_session: source_url https://github.com/GitHatOrg/GitHat,
 source_revision develop, tags ["supervisor:<your id>","role:<role>"]. Use the
 coder, security and tester briefs from .claude/skills/agent-team/SKILL.md, and
-fill in the placeholders. Testers: Sonnet when the ticket needs a security review
-(Haiku stalls on permission prompts for send_message and injection strings);
-Haiku only for plain runs, and read its results with list_events.
+fill in the placeholders. Testers: Sonnet only (Haiku stalls on permission prompts
+for send_message and injection strings).
 
 Pipeline, per ticket, up to <CAP> tickets at once:
 1. Design. Create a coder. It writes a DESIGN ONLY, sends it to you, and waits.
@@ -262,14 +261,21 @@ Pipeline, per ticket, up to <CAP> tickets at once:
    and "implement exactly this; ask before deviating". Post the approved design
    as a comment on the issue. Check that the test plan has a test per acceptance
    criterion, and that the coder writes those tests first.
-5. Code. The coder opens a PR to develop with "Fixes #N" and sends you the PR
-   number and head SHA.
-6. Review. subscribe_pr_activity, then git diff origin/develop...origin/<branch>.
-   Check it matches the design with no extra scope, and check escaping,
-   permissions and migration naming. If you used the security reviewer, have it
-   check the real code. Send one combined must-fix list, and repeat until clean.
-7. Test. Send the PR to your tester (create it on your first ticket and reuse it
-   for every later one). It runs the full suite once per PR. For user-visible
+5. Code. The coder opens a PR to develop with "Fixes #N" and sends the PR number
+   and head SHA to you, the OL and (if used) the security reviewer in one go, so
+   the three checks start at once without a relay through you.
+6. Review, before any full test run. subscribe_pr_activity, then
+   git diff origin/develop...origin/<branch>. Check it matches the design with no
+   extra scope, and check escaping, permissions and migration naming. In parallel,
+   the security reviewer checks the real code and the OL checks the acceptance
+   criteria. Send the coder one combined must-fix list (yours, security's and the
+   OL's gaps, plus the Learnings line), and repeat until all three are clean. The
+   OL posts "OL AC check @<SHA> … FULLY DONE" on that final SHA.
+7. Test, once, on the final SHA. Only now send the PR to your tester (create it on
+   your first ticket and reuse it for every later one). It runs the full suite
+   once per PR, after review, so a review fix never forces a second full run. A
+   fix the tester's run requires is a new non-merge commit: it needs a fresh OL
+   check, and the tester reruns the affected stages. For user-visible
    changes, also ask it for the in-app walkthrough of the acceptance criteria. For
    later rounds, send the same tester the new SHA with only the affected stages:
    the PR's own lint, swagger, locale, unit and integration tests. A develop
@@ -279,11 +285,13 @@ Pipeline, per ticket, up to <CAP> tickets at once:
    rerun. When the head moves, tell the tester to stop the stale run. After a
    usage-limit pause, ask whether background suites actually finished: they die
    silently. Relay PR failures to the coder.
-   In parallel, send the OL the PR number and head SHA once your review is clean
-   (once per PR; resend only if a later fix changes behaviour) to verify against
-   the acceptance criteria. For each gap it
-   reports, have the coder fix it in this PR, or defer it explicitly in the PR
-   body and file one follow-up `[Px] … (follow-up to #N)`.
+   For each OL gap, the coder fixes it in this PR, or defers it explicitly in
+   the PR body and files one follow-up `[Px] … (follow-up to #N)` with the
+   label "no-agent".
+   Overlap: while the tester's full run goes, ask the OL for your next ticket
+   and run its steps 1–4 (design, design review, security review of the design,
+   approval). No code for the next ticket until the current PR merges: one PR in
+   flight at a time.
 8. Merge, once the PR carries the OL's "OL AC check @<SHA> … FULLY DONE" comment
    and the head is that SHA plus develop merges only (`git log --no-merges
    <SHA>..<head>` empty), the head has no PR failures, the security items are
@@ -351,8 +359,9 @@ skill through the Skill tool (skill "ponytail", args "full"). Reading its file
 with cat doesn't count. Write the acceptance-criteria tests first and check they
 fail, then implement exactly the approved design. Ask <TL> before deviating. Branch feat/<short-name> from
 develop. Commit and push early. Run the CLAUDE.md Testing stages that cover your
-change. Open a PR to develop whose body says "Fixes #<N>", then send <TL> the PR
-number and the 40-character head SHA. Fix every must-fix item <TL> sends, and
+change. Open a PR to develop whose body says "Fixes #<N>", then send the PR
+number and the 40-character head SHA to <TL>, the OL (<OL>) and, if <TL> named
+one, the security reviewer, in one go. Fix every must-fix item <TL> sends, and
 merge origin/develop in with a merge commit when asked. Never rebase or
 force-push.
 
