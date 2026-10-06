@@ -60,6 +60,30 @@
 					{{end}}
 				</div>
 			</div>
+
+			{{if .OrgProtectedBranches}}
+				<h4 class="ui top attached header">
+					{{ctx.Locale.Tr "repo.settings.org_protected_branches"}}
+					<div class="ui right">
+						<a class="ui tiny button" href="{{AppSubUrl}}/org/{{.Owner.Name}}/settings/branches">{{ctx.Locale.Tr "org.settings.branches"}}</a>
+					</div>
+				</h4>
+				<div class="ui attached segment org-protected-branches">
+					<p class="help">{{ctx.Locale.Tr "repo.settings.org_protected_branches_desc"}}</p>
+					<div class="flex-list">
+						{{range .OrgProtectedBranches}}
+							<div class="flex-item tw-items-center">
+								<div class="flex-item-main">
+									<div class="flex-item-title">
+										<div class="ui basic primary label">{{.RuleName}}</div>
+										<span class="ui basic label">{{ctx.Locale.Tr "repo.settings.org_rule_badge"}}</span>
+									</div>
+								</div>
+							</div>
+						{{end}}
+					</div>
+				</div>
+			{{end}}
 		{{end}}
 	</div>
 

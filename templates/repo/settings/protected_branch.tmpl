@@ -1,5 +1,10 @@
+{{if .IsOrgRule}}
+{{template "org/settings/layout_head" (dict "ctxData" . "pageClass" "organization settings repository branches")}}
+	<div class="org-setting-content">
+{{else}}
 {{template "repo/settings/layout_head" (dict "ctxData" . "pageClass" "repository settings branches")}}
 	<div class="repo-setting-content">
+{{end}}
 		<h4 class="ui top attached header">
 			{{if .Rule.RuleName}}
 				{{ctx.Locale.Tr "repo.settings.branch_protection" .Rule.RuleName}}
@@ -9,6 +14,30 @@
 		</h4>
 		<form class="ui form attached segment" action="{{.Link}}" method="post">
 			<input name="rule_id" type="hidden" value="{{.Rule.ID}}">
+			{{if .IsOrgRule}}
+			<fieldset>
+				<legend>{{ctx.Locale.Tr "repo.settings.protect_scope"}}</legend>
+				<label>
+					<input name="apply_to_selected_repos" type="radio" value="" class="toggle-target-disabled" data-target="#selected_repos_box" {{if not .Rule.ApplyToSelectedRepos}}checked{{end}}>
+					{{ctx.Locale.Tr "repo.settings.protect_scope_all"}}
+				</label>
+				<label>
+					<input name="apply_to_selected_repos" type="radio" value="on" class="toggle-target-enabled" data-target="#selected_repos_box" {{if .Rule.ApplyToSelectedRepos}}checked{{end}}>
+					{{ctx.Locale.Tr "repo.settings.protect_scope_selected"}}
+				</label>
+				<div id="selected_repos_box" class="checkbox-sub-item field {{if not .Rule.ApplyToSelectedRepos}}disabled{{end}}">
+					<div class="ui multiple search selection dropdown">
+						<input type="hidden" name="selected_repo_ids" value="{{.selected_repo_ids}}">
+						<div class="default text">{{ctx.Locale.Tr "repo.settings.protect_scope"}}</div>
+						<div class="menu">
+							{{range .Repos}}
+								<div class="item" data-value="{{.ID}}">{{svg "octicon-repo"}} {{.Name}}</div>
+							{{end}}
+						</div>
+					</div>
+				</div>
+			</fieldset>
+			{{end}}
 			<fieldset class="branch-protection">
 				<legend>{{ctx.Locale.Tr "repo.settings.protect_patterns"}}</legend>
 				<label>{{ctx.Locale.Tr "repo.settings.protect_branch_name_pattern"}}
@@ -74,6 +103,7 @@
 								</div>
 							</div>
 						{{end}}
+						{{if not .IsOrgRule}}
 						<div class="checkbox-sub-item field">
 							<label>{{ctx.Locale.Tr "repo.settings.protect_whitelist_deploy_key_ids"}}</label>
 							<div class="ui multiple search selection dropdown" id="whitelist_deploy_key_ids">
@@ -95,6 +125,7 @@
 								<label>{{ctx.Locale.Tr "repo.settings.protect_whitelist_deploy_keys"}}</label>
 							</div>
 						</div>
+						{{end}}
 					</div>
 				<label>
 					<input name="require_signed_commits" type="checkbox" {{if .Rule.RequireSignedCommits}}checked{{end}}>
@@ -102,8 +133,8 @@
 					<span class="help">{{ctx.Locale.Tr "repo.settings.require_signed_commits_desc"}}</span>
 				</label>
 			</fieldset>
-			{{template "repo/settings/protected_branch_allowlist" dict "Name" "delete_allowlist" "Legend" "repo.settings.protect_delete_allowlist" "Help" "repo.settings.protect_delete_allowlist_desc" "Users" .Users "Teams" .Teams "DeployKeys" .DeployKeys "IsOrganization" .Owner.IsOrganization "UserIDs" .delete_allowlist_users "TeamIDs" .delete_allowlist_teams "DeployKeyIDs" .delete_allowlist_deploy_key_ids}}
-			{{template "repo/settings/protected_branch_allowlist" dict "Name" "force_push_allowlist" "Legend" "repo.settings.protect_force_push_allowlist" "Help" "repo.settings.protect_force_push_allowlist_desc" "Users" .Users "Teams" .Teams "DeployKeys" .DeployKeys "IsOrganization" .Owner.IsOrganization "UserIDs" .force_push_allowlist_users "TeamIDs" .force_push_allowlist_teams "DeployKeyIDs" .force_push_allowlist_deploy_key_ids}}
+			{{template "repo/settings/protected_branch_allowlist" dict "Name" "delete_allowlist" "Legend" "repo.settings.protect_delete_allowlist" "Help" "repo.settings.protect_delete_allowlist_desc" "Users" .Users "Teams" .Teams "DeployKeys" .DeployKeys "IsOrganization" .Owner.IsOrganization "HideDeployKeys" .IsOrgRule "UserIDs" .delete_allowlist_users "TeamIDs" .delete_allowlist_teams "DeployKeyIDs" .delete_allowlist_deploy_key_ids}}
+			{{template "repo/settings/protected_branch_allowlist" dict "Name" "force_push_allowlist" "Legend" "repo.settings.protect_force_push_allowlist" "Help" "repo.settings.protect_force_push_allowlist_desc" "Users" .Users "Teams" .Teams "DeployKeys" .DeployKeys "IsOrganization" .Owner.IsOrganization "HideDeployKeys" .IsOrgRule "UserIDs" .force_push_allowlist_users "TeamIDs" .force_push_allowlist_teams "DeployKeyIDs" .force_push_allowlist_deploy_key_ids}}
 			<fieldset>
 				<legend>{{ctx.Locale.Tr "repo.settings.event_pull_request_approvals"}}</legend>
 				<label>
@@ -319,4 +350,8 @@
 			<button class="ui primary button">{{ctx.Locale.Tr "repo.settings.protected_branch.save_rule"}}</button>
 		</form>
 	</div>
+{{if .IsOrgRule}}
+{{template "org/settings/layout_footer" .}}
+{{else}}
 {{template "repo/settings/layout_footer" .}}
+{{end}}

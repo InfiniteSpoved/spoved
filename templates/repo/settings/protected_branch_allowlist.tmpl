@@ -32,6 +32,7 @@
 			</div>
 		</div>
 	{{end}}
+	{{if not .HideDeployKeys}}
 	<div class="field">
 		<label>{{ctx.Locale.Tr "tag_protection.allowed.deploy_keys"}}</label>
 		<div class="ui multiple search selection dropdown" id="{{.Name}}_deploy_key_ids">
@@ -47,4 +48,5 @@
 			</div>
 		</div>
 	</div>
+	{{end}}
 </fieldset>

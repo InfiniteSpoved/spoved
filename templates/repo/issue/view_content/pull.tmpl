@@ -201,7 +201,7 @@
 				{{$notAllOverridableChecksOk := or .IsBlockedByApprovals .IsBlockedByApprovalRules .IsBlockedByRejection .IsBlockedByOfficialReviewRequests .IsBlockedByOutdatedBranch .IsBlockedByUnresolvedConversations .IsBlockedByIncompleteTasks .IsBlockedByChangedProtectedFiles (and .EnableStatusCheck (not .RequiredStatusCheckState.IsSuccess))}}
 
 				{{/* admin can merge without checks, writer can merge when checks succeed */}}
-				{{$canMergeNow := and (or (and $.IsRepoAdmin (not .ProtectedBranch.ApplyToAdmins)) (not $notAllOverridableChecksOk)) (or (not .AllowMerge) (not $signingBlocksAllMergeStyles))}}
+				{{$canMergeNow := and (or .AdminCanOverride (not $notAllOverridableChecksOk)) (or (not .AllowMerge) (not $signingBlocksAllMergeStyles))}}
 				{{/* admin and writer both can make an auto merge schedule */}}
 
 				{{if $canMergeNow}}

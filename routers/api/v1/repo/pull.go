@@ -247,15 +247,19 @@ func GetPullRequest(ctx *context.APIContext) {
 		return
 	}
 	apiPR := convert.ToAPIPullRequest(ctx, pr, ctx.Doer())
-	pb, err := git_model.GetFirstMatchProtectedBranchRule(ctx, pr.BaseRepoID, pr.BaseBranch)
+	pbs, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
 	if err != nil {
-		ctx.Error(http.StatusInternalServerError, "GetFirstMatchProtectedBranchRule", err)
+		ctx.Error(http.StatusInternalServerError, "GetMatchedProtectedBranchRules", err)
 		return
 	}
-	if pb != nil && issues_model.MergeBlockedByUnresolvedConversations(ctx, pb, pr) {
+	if slices.ContainsFunc(pbs, func(pb *git_model.ProtectedBranch) bool {
+		return issues_model.MergeBlockedByUnresolvedConversations(ctx, pb, pr)
+	}) {
 		apiPR.MergeableReasons = append(apiPR.MergeableReasons, "unresolved_conversations")
 	}
-	if pb != nil && issues_model.MergeBlockedByIncompleteTasks(ctx, pb, pr) {
+	if slices.ContainsFunc(pbs, func(pb *git_model.ProtectedBranch) bool {
+		return issues_model.MergeBlockedByIncompleteTasks(ctx, pb, pr)
+	}) {
 		apiPR.MergeableReasons = append(apiPR.MergeableReasons, "incomplete_tasks")
 	}
 	ctx.JSON(http.StatusOK, apiPR)
@@ -1688,12 +1692,12 @@ func GetPullRequestApprovals(ctx *context.APIContext) {
 	}
 
 	rules := []*api.PullApprovalRule{}
-	pb, err := git_model.GetFirstMatchProtectedBranchRule(ctx, pr.BaseRepoID, pr.BaseBranch)
+	pbs, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
 	if err != nil {
-		ctx.Error(http.StatusInternalServerError, "GetFirstMatchProtectedBranchRule", err)
+		ctx.Error(http.StatusInternalServerError, "GetMatchedProtectedBranchRules", err)
 		return
 	}
-	if pb != nil {
+	for _, pb := range pbs {
 		statuses, err := pull_service.ApprovalRuleStatuses(ctx, pb, pr)
 		if err != nil {
 			ctx.Error(http.StatusInternalServerError, "ApprovalRuleStatuses", err)

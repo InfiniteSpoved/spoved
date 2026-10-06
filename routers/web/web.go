@@ -1181,6 +1181,13 @@ func registerRoutes(m *web.Route) {
 				m.Combo("/branch_workflow").Get(org_setting.BranchWorkflow).
 					Post(web.Bind(forms.BranchWorkflowForm{}), org_setting.BranchWorkflowPost)
 
+				m.Group("/branches", func() {
+					m.Get("", org_setting.ProtectedBranchRules)
+					m.Combo("/edit").Get(org_setting.SettingsProtectedBranch).
+						Post(web.Bind(forms.ProtectBranchForm{}), org_setting.SettingsProtectedBranchPost)
+					m.Post("/{id}/delete", org_setting.DeleteProtectedBranchRulePost)
+				})
+
 				m.Group("/actions", func() {
 					m.Get("", org_setting.RedirectToDefaultSetting)
 					addSettingsRunnersRoutes()

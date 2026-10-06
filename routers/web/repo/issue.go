@@ -1988,46 +1988,64 @@ func ViewIssue(ctx *context.Context) {
 		ctx.Data["DefaultSquashMergeMessage"] = defaultSquashMergeMessage
 		ctx.Data["DefaultSquashMergeBody"] = defaultSquashMergeBody
 
-		pb, err := git_model.GetFirstMatchProtectedBranchRule(ctx, pull.BaseRepoID, pull.BaseBranch)
+		// the merge box shows what every matching rule (repository and organization) still needs
+		pbs, err := git_model.GetMatchedProtectedBranchRules(ctx, pull.BaseRepoID, pull.BaseBranch)
 		if err != nil {
 			ctx.ServerError("LoadProtectedBranch", err)
 			return
 		}
 		ctx.Data["ShowMergeInstructions"] = true
-		if pb != nil {
-			pb.Repo = pull.BaseRepo
-			var showMergeInstructions bool
-			if ctx.Doer != nil {
-				showMergeInstructions = pb.CanUserPush(ctx, ctx.Doer)
-			}
-			ctx.Data["ProtectedBranch"] = pb
-			ctx.Data["IsBlockedByApprovals"] = !issues_model.HasEnoughApprovals(ctx, pb, pull)
-			ctx.Data["IsBlockedByRejection"] = issues_model.MergeBlockedByRejectedReview(ctx, pb, pull)
-			ctx.Data["IsBlockedByOfficialReviewRequests"] = issues_model.MergeBlockedByOfficialReviewRequests(ctx, pb, pull)
-			ctx.Data["IsBlockedByOutdatedBranch"] = issues_model.MergeBlockedByOutdatedBranch(pb, pull)
-			if pb.BlockOnUnresolvedConversations {
-				unresolved, err := issues_model.FindUnresolvedConversations(ctx, pull.IssueID, pb.IgnoreOutdatedConversations)
-				if err != nil {
-					ctx.ServerError("FindUnresolvedConversations", err)
-					return
+		if len(pbs) > 0 {
+			showMergeInstructions := ctx.Doer != nil
+			var approvalRules []*pull_service.ApprovalRuleStatus
+			var changedProtectedFiles []string
+			// the approvals line counts for the first rule that lacks approvals
+			ctx.Data["ProtectedBranch"] = pbs[0]
+			for _, pb := range pbs {
+				pb.Repo = pull.BaseRepo
+				if ctx.Doer != nil {
+					showMergeInstructions = showMergeInstructions && pb.CanUserPush(ctx, ctx.Doer)
 				}
-				ctx.Data["UnresolvedConversations"] = unresolved
-				ctx.Data["IsBlockedByUnresolvedConversations"] = len(unresolved) > 0
+				if ctx.Data["IsBlockedByApprovals"] != true && !issues_model.HasEnoughApprovals(ctx, pb, pull) {
+					ctx.Data["ProtectedBranch"] = pb
+					ctx.Data["IsBlockedByApprovals"] = true
+				}
+				ctx.Data["IsBlockedByRejection"] = ctx.Data["IsBlockedByRejection"] == true || issues_model.MergeBlockedByRejectedReview(ctx, pb, pull)
+				ctx.Data["IsBlockedByOfficialReviewRequests"] = ctx.Data["IsBlockedByOfficialReviewRequests"] == true || issues_model.MergeBlockedByOfficialReviewRequests(ctx, pb, pull)
+				ctx.Data["IsBlockedByOutdatedBranch"] = ctx.Data["IsBlockedByOutdatedBranch"] == true || issues_model.MergeBlockedByOutdatedBranch(pb, pull)
+				if pb.BlockOnUnresolvedConversations && ctx.Data["IsBlockedByUnresolvedConversations"] != true {
+					unresolved, err := issues_model.FindUnresolvedConversations(ctx, pull.IssueID, pb.IgnoreOutdatedConversations)
+					if err != nil {
+						ctx.ServerError("FindUnresolvedConversations", err)
+						return
+					}
+					ctx.Data["UnresolvedConversations"] = unresolved
+					ctx.Data["IsBlockedByUnresolvedConversations"] = len(unresolved) > 0
+				}
+				ctx.Data["IsBlockedByIncompleteTasks"] = ctx.Data["IsBlockedByIncompleteTasks"] == true || pb.BlockOnIncompleteTasks && tasksDone < len(tasks)
+				ctx.Data["RequireSigned"] = ctx.Data["RequireSigned"] == true || pb.RequireSignedCommits
+				for _, file := range pb.ChangedProtectedFiles(pull.ChangedProtectedFiles) {
+					if !slices.Contains(changedProtectedFiles, file) {
+						changedProtectedFiles = append(changedProtectedFiles, file)
+					}
+				}
+				// the required approvals of the protection have their own line, a branch without approval rules looks as before
+				rules, err := pull_service.EvaluateApprovalRules(ctx, pb, pull)
+				if err != nil {
+					// the merge fails closed in CheckPullBranchProtections, the page still has to render
+					log.Error("EvaluateApprovalRules for %-v: %v", pull, err)
+					ctx.Data["ApprovalRulesError"] = true
+					ctx.Data["IsBlockedByApprovalRules"] = true
+				}
+				approvalRules = append(approvalRules, rules...)
 			}
-			ctx.Data["IsBlockedByIncompleteTasks"] = pb.BlockOnIncompleteTasks && tasksDone < len(tasks)
-			ctx.Data["GrantedApprovals"] = issues_model.GetGrantedApprovalsCount(ctx, pb, pull)
-			// the required approvals of the protection have their own line, a branch without approval rules looks as before
-			if rules, err := pull_service.EvaluateApprovalRules(ctx, pb, pull); err != nil {
-				// the merge fails closed in CheckPullBranchProtections, the page still has to render
-				log.Error("EvaluateApprovalRules for %-v: %v", pull, err)
-				ctx.Data["ApprovalRulesError"] = true
-				ctx.Data["IsBlockedByApprovalRules"] = true
-			} else if len(rules) > 0 {
-				ctx.Data["ApprovalRules"] = rules
+			ctx.Data["GrantedApprovals"] = issues_model.GetGrantedApprovalsCount(ctx, ctx.Data["ProtectedBranch"].(*git_model.ProtectedBranch), pull)
+			if len(approvalRules) > 0 {
+				ctx.Data["ApprovalRules"] = approvalRules
 				if ctx.Repo.IsAdmin() {
 					// who can approve is shown to repository admins only
-					eligible := make(map[int64]string, len(rules))
-					for _, r := range rules {
+					eligible := make(map[int64]string, len(approvalRules))
+					for _, r := range approvalRules {
 						names := []string{}
 						users, err := user_model.GetUserByIDs(ctx, r.Rule.UserIDs)
 						if err != nil {
@@ -2046,13 +2064,23 @@ func ViewIssue(ctx *context.Context) {
 					}
 					ctx.Data["ApprovalRuleEligible"] = eligible
 				}
-				ctx.Data["IsBlockedByApprovalRules"] = slices.ContainsFunc(rules, func(s *pull_service.ApprovalRuleStatus) bool { return !s.Satisfied })
+				ctx.Data["IsBlockedByApprovalRules"] = ctx.Data["IsBlockedByApprovalRules"] == true || slices.ContainsFunc(approvalRules, func(s *pull_service.ApprovalRuleStatus) bool { return !s.Satisfied })
 			}
-			ctx.Data["RequireSigned"] = pb.RequireSignedCommits
-			ctx.Data["ChangedProtectedFiles"] = pull.ChangedProtectedFiles
-			ctx.Data["IsBlockedByChangedProtectedFiles"] = len(pull.ChangedProtectedFiles) != 0
-			ctx.Data["ChangedProtectedFilesNum"] = len(pull.ChangedProtectedFiles)
+			ctx.Data["ChangedProtectedFiles"] = changedProtectedFiles
+			ctx.Data["IsBlockedByChangedProtectedFiles"] = len(changedProtectedFiles) != 0
+			ctx.Data["ChangedProtectedFilesNum"] = len(changedProtectedFiles)
 			ctx.Data["ShowMergeInstructions"] = showMergeInstructions
+		}
+		// an admin may merge when every blocking rule lets them skip it, as in CheckPullMergeable
+		if ctx.Doer != nil && ctx.Repo.IsAdmin() {
+			_, err := pull_service.CheckPullBranchProtections(ctx, pull, false, func(pb *git_model.ProtectedBranch) bool {
+				exempt, err := pb.IsAdminExempt(ctx, ctx.Doer, true)
+				if err != nil {
+					log.Error("IsAdminExempt: %v", err)
+				}
+				return exempt
+			})
+			ctx.Data["AdminCanOverride"] = err == nil
 		}
 		ctx.Data["WillSign"] = false
 		if ctx.Doer != nil {
