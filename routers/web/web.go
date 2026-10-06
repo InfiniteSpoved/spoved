@@ -982,6 +982,7 @@ func registerRoutes(m *web.Route) {
 		})
 
 		m.Get("/storage", admin.Storage)
+		m.Get("/access-reports", admin.AccessReports)
 
 		m.Group("/packages", func() {
 			m.Get("", admin.Packages)
@@ -1213,6 +1214,7 @@ func registerRoutes(m *web.Route) {
 					m.Post("/unblock", org_setting.BlockedUsersUnblock)
 				})
 				m.Get("/storage_overview", org_setting.StorageOverview)
+				m.Get("/access-report", org_setting.AccessReport)
 
 				m.Group("/packages", func() {
 					m.Get("", org.Packages)

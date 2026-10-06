@@ -4,7 +4,10 @@
 package convert
 
 import (
+	"cmp"
 	"context"
+	"maps"
+	"slices"
 
 	perm_model "forgejo.org/models/perm"
 	"forgejo.org/models/unit"
@@ -69,6 +72,44 @@ func ToAccessRows(ctx context.Context, rows []*accessreport.Row, doer *user_mode
 			ar.Paths = append(ar.Paths, ap)
 		}
 		out = append(out, ar)
+	}
+	return out
+}
+
+// ToAccessReportLines converts access report rows to one line per path to each unit with access, or to all the
+// repository if none; people, if set, fills the person columns of the users.
+func ToAccessReportLines(ctx context.Context, rows []*accessreport.Row, doer *user_model.User, people map[int64]*accessreport.Person) []*api.AccessReportLine {
+	var out []*api.AccessReportLine
+	for i, ar := range ToAccessRows(ctx, rows, doer) {
+		base := api.AccessReportLine{Type: ar.Type, Repository: ar.Repository}
+		switch {
+		case ar.User != nil:
+			base.Name, base.FullName = ar.User.UserName, ar.User.FullName
+			if u, p := rows[i].User, people[rows[i].User.ID]; p != nil {
+				suspended := u.ProhibitLogin || !u.IsActive
+				base.LastLogin, base.LastPush, base.TwoFactor, base.AccountSource, base.Suspended = OptionalTime(u.LastLoginUnix), OptionalTime(p.LastPush), &p.TwoFactor, p.AccountSource, &suspended
+			}
+		case ar.DeployKey != nil:
+			base.Name = ar.DeployKey.Name
+		case ar.Team != nil:
+			base.Name = ar.Team.Name
+		}
+		units := slices.Sorted(maps.Keys(ar.Units))
+		if len(units) == 0 {
+			ar.Units = map[string]string{"*": ar.Access}
+			units = []string{"*"}
+		}
+		for _, u := range units {
+			for _, p := range ar.Paths {
+				l := base
+				l.Unit, l.Access, l.Path, l.Team, l.UserGroups, l.Applied = u, ar.Units[u], p.Kind, p.Team, p.UserGroups, p.Applied
+				l.Grant = p.Access
+				if p.Units != nil {
+					l.Grant = cmp.Or(p.Units[u], perm_model.AccessModeNone.String())
+				}
+				out = append(out, &l)
+			}
+		}
 	}
 	return out
 }

@@ -4,6 +4,7 @@
 package accessreport
 
 import (
+	"cmp"
 	"context"
 	"slices"
 	"strconv"
@@ -41,16 +42,25 @@ func Highest(p access_model.Permission) perm_model.AccessMode {
 // filter, which tells last sign-ins apart, applies only for site admins: anyone can create an org and add any user
 // to it. activity says whether it did.
 func ForRepo(ctx context.Context, repo *repo_model.Repository, doer *user_model.User, f Filter) (rows []*Row, activity bool, err error) {
-	opts := Options{RepoIDs: []int64{repo.ID}, Plain: !doer.IsAdmin}
-	isOwner := false
 	if err := repo.LoadOwner(ctx); err != nil {
 		return nil, false, err
 	}
-	if !doer.IsAdmin && repo.Owner.IsOrganization() {
-		if isOwner, err = organization.IsOrganizationOwner(ctx, repo.OwnerID, doer.ID); err != nil {
+	return ForRepos(ctx, repo.Owner, []*repo_model.Repository{repo}, doer, f)
+}
+
+// ForRepos is ForRepo for repositories of the owner, in ID order; for a site admin, of any owner.
+func ForRepos(ctx context.Context, owner *user_model.User, repos []*repo_model.Repository, doer *user_model.User, f Filter) (rows []*Row, activity bool, err error) {
+	repoIDs := make([]int64, 0, len(repos))
+	for _, r := range repos {
+		repoIDs = append(repoIDs, r.ID)
+	}
+	opts := Options{RepoIDs: repoIDs, Plain: !doer.IsAdmin}
+	isOwner := false
+	if !doer.IsAdmin && owner.IsOrganization() {
+		if isOwner, err = organization.IsOrganizationOwner(ctx, owner.ID, doer.ID); err != nil {
 			return nil, false, err
 		}
-		isMember, err := organization.IsOrganizationMember(ctx, repo.OwnerID, doer.ID)
+		isMember, err := organization.IsOrganizationMember(ctx, owner.ID, doer.ID)
 		if err != nil {
 			return nil, false, err
 		}
@@ -60,11 +70,15 @@ func ForRepo(ctx context.Context, repo *repo_model.Repository, doer *user_model.
 		return nil, false, err
 	}
 	if !doer.IsAdmin {
-		rows = append(rows, &Row{Repo: repo, Paths: []*Path{{Kind: KindInstanceRoles, Applied: true}}})
+		for _, repo := range repos {
+			rows = append(rows, &Row{Repo: repo, Paths: []*Path{{Kind: KindInstanceRoles, Applied: true}}})
+		}
 		for _, r := range rows {
 			hideGroups(r, !isOwner)
 		}
 	}
+	// Compute lists the deploy keys after all the repositories
+	slices.SortStableFunc(rows, func(a, b *Row) int { return cmp.Compare(a.Repo.ID, b.Repo.ID) })
 	activity = doer.IsAdmin
 	if !activity {
 		f.InactiveDays = 0

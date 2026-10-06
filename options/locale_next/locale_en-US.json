@@ -1671,5 +1671,15 @@
 	"access_report.created": "Created",
 	"access_report.last_used": "Last used",
 	"access_report.expires": "Expires",
+	"access_report.report": "Access report",
+	"access_report.export_csv": "Export CSV",
+	"access_report.export_json": "Export JSON",
+	"access_report.grant": "Grant",
+	"access_report.all_units": "All units",
+	"access_report.last_sign_in": "Last sign-in",
+	"access_report.last_push": "Last push",
+	"access_report.two_factor": "2FA",
+	"access_report.account_source": "Account source",
+	"access_report.suspended": "Suspended",
 	"meta.last_line": "Thank you for translating Forgejo! This line isn't seen by the users but it serves other purposes in the translation management. You can place a fun fact in the translation instead of translating it."
 }
