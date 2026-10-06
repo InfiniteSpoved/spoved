@@ -73,6 +73,11 @@ func (t *Task) Run() {
 
 // RunWithUser will run the task incrementing the cron counter at the time with User
 func (t *Task) RunWithUser(doer *user_model.User, config Config) {
+	// jobs that change data wait while maintenance mode is on, and run on their next schedule after it
+	if setting.GetMaintenance(graceful.GetManager().ShutdownContext()).ReadOnly() {
+		log.Info("Skipping cron task %s: maintenance mode is on", t.Name)
+		return
+	}
 	if !taskStatusTable.StartIfNotRunning(t.Name) {
 		return
 	}

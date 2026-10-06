@@ -11,6 +11,7 @@ import (
 
 	system_model "forgejo.org/models/system"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/setting"
 	announcement_service "forgejo.org/services/announcement"
 	"forgejo.org/services/context"
 )
@@ -21,6 +22,7 @@ func GetAnnouncements(ctx *context.Context) {
 		return
 	}
 
+	ctx.Data["Maintenance"] = setting.GetMaintenance(ctx)
 	ctx.Data["SiteAnnouncements"] = func() []*announcement_service.Banner {
 		banners, err := announcement_service.ActiveForUser(ctx, ctx.Doer)
 		if err != nil {

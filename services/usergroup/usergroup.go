@@ -32,6 +32,7 @@ import (
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
+	"forgejo.org/modules/setting"
 )
 
 var (
@@ -93,6 +94,10 @@ func RemoveMember(ctx context.Context, group *org_model.UserGroup, userID int64)
 // the other mapped groups, but only where this login source added them.
 // Memberships added by an admin or another source are never touched.
 func SyncDirectoryGroups(ctx context.Context, user *user_model.User, loginSourceID int64, userDirectoryGroups container.Set[string], mapping map[string]container.Set[string], remove bool) error {
+	// group syncs wait while maintenance mode is on and run at the next sign-in or sync after it
+	if setting.GetMaintenance(ctx).ReadOnly() {
+		return nil
+	}
 	toAdd, toRemove := make(container.Set[string]), make(container.Set[string])
 	for dirGroup, names := range mapping {
 		target := toRemove

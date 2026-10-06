@@ -47,6 +47,10 @@ import (
 
 func reqPackageAccess(accessMode perm.AccessMode) func(ctx *context.Context) {
 	return func(ctx *context.Context) {
+		if s := setting.GetMaintenance(ctx); accessMode >= perm.AccessModeWrite && s.ReadOnly() {
+			ctx.PlainText(http.StatusServiceUnavailable, s.Refusal())
+			return
+		}
 		if hasScope, scope := ctx.Authentication.Scope().Get(); hasScope {
 			scopeMatched := false
 			var err error
@@ -151,6 +155,7 @@ func verifyAuth(r *web.Route, authMethods []auth.Method) {
 		ctx.Authentication = ar
 	})
 	r.Use(common.RateLimit(ratelimit.API))
+	r.Use(common.MaintenanceGit)
 }
 
 func verifyContainerAuth(r *web.Route, authMethods []auth.Method) {
@@ -191,6 +196,7 @@ func verifyContainerAuth(r *web.Route, authMethods []auth.Method) {
 		ctx.Authentication = ar
 	})
 	r.Use(common.RateLimit(ratelimit.API))
+	r.Use(common.MaintenanceGit)
 }
 
 // CommonRoutes provide endpoints for most package managers (except containers - see below)

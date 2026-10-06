@@ -733,6 +733,11 @@ func AdminCreateUser(ctx context.Context, u *User, overwriteDefault ...*CreateUs
 
 // createUser creates record of a new user.
 func createUser(ctx context.Context, u *User, createdByAdmin bool, overwriteDefault ...*CreateUserOverwriteOptions) (err error) {
+	// no new accounts while maintenance mode is on, whatever the sign-up or sign-in path
+	if m := setting.GetMaintenance(ctx); m.ReadOnly() {
+		return util.NewPermissionDeniedErrorf("%s", m.Refusal())
+	}
+
 	overwriteDefaultPresent := len(overwriteDefault) != 0 && overwriteDefault[0] != nil
 
 	// Apply username prefix for non-admin user creation if configured.

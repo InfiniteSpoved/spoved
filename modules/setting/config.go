@@ -53,8 +53,9 @@ type RepositoryStruct struct {
 }
 
 type ConfigStruct struct {
-	Picture    *PictureStruct
-	Repository *RepositoryStruct
+	Picture     *PictureStruct
+	Repository  *RepositoryStruct
+	Maintenance *config.Value[MaintenanceState]
 }
 
 var (
@@ -72,6 +73,7 @@ func initDefaultConfig() {
 		Repository: &RepositoryStruct{
 			OpenWithEditorApps: config.ValueJSON[OpenWithEditorAppsType]("repository.open-with.editor-apps"),
 		},
+		Maintenance: config.ValueJSON[MaintenanceState]("maintenance.state"),
 	}
 }
 

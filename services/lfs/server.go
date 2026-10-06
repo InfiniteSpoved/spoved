@@ -143,6 +143,15 @@ func DownloadHandler(ctx *context.Context) {
 	}
 }
 
+// refuseInReadOnly refuses LFS writes in read-only and full maintenance mode
+func refuseInReadOnly(ctx *context.Context) bool {
+	s := setting.GetMaintenance(ctx)
+	if s.ReadOnly() {
+		writeStatusMessage(ctx, http.StatusServiceUnavailable, s.Refusal())
+	}
+	return s.ReadOnly()
+}
+
 // BatchHandler provides the batch api
 func BatchHandler(ctx *context.Context) {
 	var br lfs_module.BatchRequest
@@ -161,6 +170,10 @@ func BatchHandler(ctx *context.Context) {
 	default:
 		log.Trace("Attempt to BATCH with invalid operation: %s", br.Operation)
 		writeStatus(ctx, http.StatusBadRequest)
+		return
+	}
+
+	if isUpload && refuseInReadOnly(ctx) {
 		return
 	}
 
@@ -280,6 +293,9 @@ func BatchHandler(ctx *context.Context) {
 
 // UploadHandler receives data from the client and puts it into the content store
 func UploadHandler(ctx *context.Context) {
+	if refuseInReadOnly(ctx) {
+		return
+	}
 	rc := getRequestContext(ctx)
 
 	p := lfs_module.Pointer{Oid: ctx.Params("oid")}

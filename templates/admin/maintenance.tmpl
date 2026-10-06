@@ -1,0 +1,40 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin maintenance")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.maintenance"}}
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.maintenance.desc"}}</p>
+			{{if .State.FromConfig}}
+				<div class="ui warning message">{{ctx.Locale.Tr "admin.maintenance.from_config"}}</div>
+			{{else if .State.SetByName}}
+				<p class="help">{{ctx.Locale.Tr "admin.maintenance.set_by" .State.SetByName}}</p>
+			{{end}}
+			<form class="ui form" action="{{AppSubUrl}}/admin/maintenance" method="post">
+				<fieldset {{if .State.FromConfig}}disabled{{end}}>
+					<div class="grouped fields">
+						<label>{{ctx.Locale.Tr "admin.maintenance.mode"}}</label>
+						{{range .MaintenanceModes}}
+							<div class="field">
+								<div class="ui radio checkbox">
+									<input id="mode-{{.}}" name="mode" type="radio" value="{{.}}" {{if or (eq . $.State.Mode) (and (eq . "off") (not $.State.Mode))}}checked{{end}}>
+									<label for="mode-{{.}}">{{ctx.Locale.Tr (printf "admin.maintenance.mode.%s" .)}}</label>
+								</div>
+							</div>
+						{{end}}
+					</div>
+					<div class="field">
+						<label for="message">{{ctx.Locale.Tr "admin.maintenance.message"}}</label>
+						<input id="message" name="message" value="{{.State.Message}}" maxlength="255">
+					</div>
+					<div class="field">
+						<label for="until">{{ctx.Locale.Tr "admin.maintenance.until"}}</label>
+						<input id="until" name="until" type="datetime-local" value="{{.until}}">
+						<span class="help">{{ctx.Locale.Tr "admin.maintenance.until_helper" .TimeZone}}</span>
+					</div>
+					<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+				</fieldset>
+			</form>
+		</div>
+	</div>
+{{template "admin/layout_footer" .}}

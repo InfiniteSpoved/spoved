@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"forgejo.org/modules/setting"
+	"forgejo.org/modules/test"
+
 	"github.com/emersion/go-imap"
 	"github.com/jhillyerd/enmime/v2"
 	"github.com/stretchr/testify/assert"
@@ -384,4 +387,10 @@ func TestGetContentFromMailReader(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Equal(t, expectedAttachment, content.Attachments[0].Content)
+}
+
+func TestProcessMessagesPausedInMaintenance(t *testing.T) {
+	defer test.MockVariableValue(&setting.Maintenance.Mode, setting.MaintenanceReadOnly)()
+	// a nil client would panic if the messages were fetched
+	require.NoError(t, processMessages(t.Context(), nil))
 }

@@ -16,6 +16,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/setting"
 )
 
 type syncType int
@@ -57,6 +58,10 @@ func SyncGroupsToTeamsCached(
 	orgCache map[string]*organization.Organization,
 	teamCache map[string]*organization.Team,
 ) error {
+	// group syncs wait while maintenance mode is on and run at the next sign-in or sync after it
+	if setting.GetMaintenance(ctx).ReadOnly() {
+		return nil
+	}
 	membershipsToAdd, membershipsToRemove := resolveMappedMemberships(
 		ctx, user,
 		sourceUserGroups, sourceGroupTeamMapping,

@@ -1,3 +1,12 @@
+{{if and .Maintenance .Maintenance.ReadOnly}}
+	<div class="ui warning message site-announcement tw-flex tw-items-start tw-gap-2" id="maintenance-banner">
+		<div class="tw-flex-1">
+			<strong>{{if .Maintenance.Full}}{{ctx.Locale.Tr "maintenance.full"}}{{else}}{{ctx.Locale.Tr "maintenance.read_only"}}{{end}}</strong>
+			{{if .Maintenance.Message}}: {{.Maintenance.Message}}{{end}}
+			{{if .Maintenance.Until}}<br>{{ctx.Locale.Tr "maintenance.until" (DateUtils.FullTime .Maintenance.Until)}}{{end}}
+		</div>
+	</div>
+{{end}}
 {{$announcements := and .SiteAnnouncements (call .SiteAnnouncements)}}
 {{if $announcements}}
 	<div id="site-announcements" class="site-announcements">

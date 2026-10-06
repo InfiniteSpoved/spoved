@@ -21,6 +21,7 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/process"
 	"forgejo.org/modules/queue"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 	"forgejo.org/services/branchworkflow"
@@ -44,6 +45,10 @@ func Init() error {
 
 // handle passed PR IDs and test the PRs
 func handler(items ...string) []string {
+	// the queue retries unhandled items, so auto merges wait while maintenance mode is on
+	if setting.GetMaintenance(graceful.GetManager().ShutdownContext()).ReadOnly() {
+		return items
+	}
 	for _, s := range items {
 		var id int64
 		var sha string
