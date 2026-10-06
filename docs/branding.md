@@ -95,7 +95,7 @@ New key: `based_on_forgejo` (footer credit).
 
 - `modules/setting/server.go`: `APP_NAME` defaults to `CodeHat`; `ISSUE_TRACKER_URL` to the CodeHat issues.
 - `modules/setting/ui.go`: `[ui.meta]` `AUTHOR`, `DESCRIPTION`, `KEYWORDS`; `DEFAULT_THEME = company-auto`, and the company themes come first in `THEMES`.
-- `routers/install/install.go`: the installer's default site title is `CodeHat`.
+- `routers/install/install.go`: the installer's default site title is `CodeHat` and its default slogan `A self-hosted Git forge` (upstream: Forgejo's slogan).
 - `services/mailer/mail.go`: the admin test email's subject and body.
 - `modules/updatechecker`: the `CodeHat-update-checker` User-Agent; `services/cron` checks the CodeHat GitHub releases.
 - `assets/logo.svg`, `assets/favicon.svg`: the CodeHat mark. `make generate-images` writes `public/assets/img/{logo,favicon}.{svg,png}`, `apple-touch-icon.png` and `avatar_default.png`; the PWA manifest uses `logo.png`/`logo.svg`.
