@@ -13,6 +13,7 @@ import (
 
 	"forgejo.org/models"
 	auth_model "forgejo.org/models/auth"
+	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
@@ -26,6 +27,7 @@ import (
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/lfs"
+	"forgejo.org/modules/migration"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
@@ -35,8 +37,11 @@ import (
 	"forgejo.org/services/forms"
 	"forgejo.org/services/mailer/incoming"
 	incoming_payload "forgejo.org/services/mailer/incoming/payload"
+	mirror_service "forgejo.org/services/mirror"
 	org_service "forgejo.org/services/org"
 	pull_service "forgejo.org/services/pull"
+	release_service "forgejo.org/services/release"
+	repo_service "forgejo.org/services/repository"
 	"forgejo.org/services/usergroup"
 	"forgejo.org/tests"
 	"forgejo.org/tests/forgery"
@@ -240,4 +245,96 @@ func TestOrgArchiveGroupSync(t *testing.T) {
 	// the skipped add applies after unarchive
 	loginUser(t, "user2").MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/settings/unarchive", nil), http.StatusSeeOther)
 	assert.True(t, inTeam(newcomer.ID))
+}
+
+// S6 (b)+(c): the Owners team reached through the org-admin role follows the same rules, and removing the
+// last owner stays refused for sync removals.
+func TestOrgArchiveGroupSyncOwners(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	owners := unittest.AssertExistsAndLoadBean(t, &organization.Team{ID: 1}) // org3 Owners
+	inOwners := func(uid int64) bool {
+		is, err := organization.IsTeamMember(t.Context(), 3, owners.ID, uid)
+		require.NoError(t, err)
+		return is
+	}
+	stay := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 10})
+	newcomer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 11})
+
+	group := &organization.UserGroup{Name: "archive-admins", LowerName: "archive-admins", GrantsOrgAdmin: true}
+	require.NoError(t, usergroup.CreateGroup(t.Context(), group))
+	require.NoError(t, usergroup.AddMember(t.Context(), group, stay))
+	require.True(t, inOwners(stay.ID))
+
+	archiveOrg3(t, false)
+	require.NoError(t, usergroup.AddMember(t.Context(), group, newcomer))
+	assert.False(t, inOwners(newcomer.ID)) // the add is skipped
+	require.NoError(t, usergroup.RemoveMember(t.Context(), group, stay.ID))
+	assert.False(t, inOwners(stay.ID)) // the removal is applied
+
+	loginUser(t, "user2").MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/settings/unarchive", nil), http.StatusSeeOther)
+	assert.True(t, inOwners(newcomer.ID)) // the skipped add arrives
+
+	t.Run("last owner", func(t *testing.T) {
+		defer tests.PrintCurrentTest(t)()
+		// make user2 the only owner, and an owner only because of a user group
+		_, err := db.GetEngine(t.Context()).Exec("DELETE FROM team_user WHERE team_id = 1 AND uid <> 2")
+		require.NoError(t, err)
+		_, err = db.GetEngine(t.Context()).Exec("UPDATE team SET num_members = 1 WHERE id = 1")
+		require.NoError(t, err)
+		_, err = db.GetEngine(t.Context()).Exec("UPDATE team_user SET reason = ? WHERE team_id = 1 AND uid = 2", organization.MembershipReasonAddedByUserGroup)
+		require.NoError(t, err)
+		sole := &organization.UserGroup{Name: "archive-sole", LowerName: "archive-sole"}
+		require.NoError(t, organization.InsertUserGroup(t.Context(), sole))
+		require.NoError(t, organization.InsertUserGroupMember(t.Context(), sole.ID, 2, 0))
+		require.NoError(t, organization.InsertUserGroupTeam(t.Context(), sole.ID, owners, organization.LinkManual))
+
+		archiveOrg3(t, false)
+		err = usergroup.RemoveMember(t.Context(), sole, 2)
+		require.Error(t, err)
+		assert.True(t, organization.IsErrLastOrgOwner(err), "%v", err)
+		assert.True(t, inOwners(2))
+	})
+}
+
+// AC4: pull-mirror sync is skipped for an archived repository.
+func TestOrgArchiveMirrorSync(t *testing.T) {
+	defer test.MockVariableValue(&setting.Migrations.AllowUnencrypted, true)()
+	defer tests.PrepareTestEnv(t)()
+	defer test.MockVariableValue(&setting.ImportLocalPaths, true)()
+
+	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	source := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
+	_, err := db.GetEngine(t.Context()).ID(user.ID).SetExpr("allow_import_local", true).Update(user)
+	require.NoError(t, err)
+
+	mirrorRepo, err := repo_service.CreateRepositoryDirectly(t.Context(), user, user, repo_service.CreateRepoOptions{
+		Name: "archived_mirror", IsMirror: true, Status: repo_model.RepositoryBeingMigrated,
+	})
+	require.NoError(t, err)
+	mirrorRepo, err = repo_service.MigrateRepositoryGitData(t.Context(), user, mirrorRepo, migration.MigrateOptions{
+		RepoName: "archived_mirror", Mirror: true, CloneAddr: repo_model.RepoPath(user.Name, source.Name),
+	}, nil)
+	require.NoError(t, err)
+
+	gitRepo, err := gitrepo.OpenRepository(t.Context(), source)
+	require.NoError(t, err)
+	defer gitRepo.Close()
+	require.NoError(t, release_service.CreateRelease(gitRepo, &repo_model.Release{
+		RepoID: source.ID, Repo: source, PublisherID: user.ID, Publisher: user,
+		TagName: "v0.2", Target: "master", Title: "t", Note: "n", IsTag: true,
+	}, "", []*release_service.AttachmentChange{}))
+	tags := func() int64 {
+		n, err := db.Count[repo_model.Release](t.Context(), repo_model.FindReleasesOptions{IncludeDrafts: true, IncludeTags: true, RepoID: mirrorRepo.ID})
+		require.NoError(t, err)
+		return n
+	}
+	before := tags()
+
+	require.NoError(t, repo_model.SetArchiveRepoState(t.Context(), mirrorRepo, true))
+	assert.False(t, mirror_service.SyncPullMirror(t.Context(), mirrorRepo.ID))
+	assert.Equal(t, before, tags())
+
+	require.NoError(t, repo_model.SetArchiveRepoState(t.Context(), mirrorRepo, false))
+	assert.True(t, mirror_service.SyncPullMirror(t.Context(), mirrorRepo.ID))
+	assert.Equal(t, before+1, tags())
 }
