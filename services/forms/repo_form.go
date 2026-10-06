@@ -256,6 +256,10 @@ type ProtectBranchForm struct {
 	ForcePushAllowlistUsers        string `form:"force_push_allowlist_users"`
 	ForcePushAllowlistTeams        string `form:"force_push_allowlist_teams"`
 	ForcePushAllowlistDeployKeyIDs string `form:"force_push_allowlist_deploy_key_ids"`
+
+	// Organization rules only
+	ApplyToSelectedRepos bool
+	SelectedRepoIDs      string `form:"selected_repo_ids"`
 }
 
 // Validate validates the fields

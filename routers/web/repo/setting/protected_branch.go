@@ -6,6 +6,7 @@ package setting
 import (
 	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
 	"net/url"
 	"slices"
@@ -19,6 +20,7 @@ import (
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
@@ -48,6 +50,14 @@ func ProtectedBranchRules(ctx *context.Context) {
 		return
 	}
 	ctx.Data["ProtectedBranches"] = rules
+
+	// the organization rules that apply to the repository, shown read-only
+	applying, err := git_model.FindProtectedBranchRulesForRepo(ctx, ctx.Repo.Repository)
+	if err != nil {
+		ctx.ServerError("FindProtectedBranchRulesForRepo", err)
+		return
+	}
+	ctx.Data["OrgProtectedBranches"] = slices.DeleteFunc(applying, func(rule *git_model.ProtectedBranch) bool { return rule.OrgID == 0 })
 
 	repo.PrepareBranchList(ctx)
 	if ctx.Written() {
@@ -184,13 +194,47 @@ func SettingsProtectedBranchPost(ctx *context.Context) {
 		}
 	}
 
+	opts, errMsg := ProtectBranchFromForm(ctx, f, protectBranch, ctx.Repo.Owner)
+	if errMsg != "" {
+		ctx.Flash.Error(errMsg)
+		ctx.Redirect(fmt.Sprintf("%s/settings/branches/edit?rule_name=%s", ctx.Repo.RepoLink, url.QueryEscape(f.RuleName)))
+		return
+	}
+	err = git_model.UpdateProtectBranch(ctx, ctx.Repo.Repository, protectBranch, opts)
+	if errors.Is(err, util.ErrInvalidArgument) {
+		ctx.Flash.Error(ctx.Tr("repo.settings.approval_rules_invalid", err.Error()))
+		ctx.Redirect(fmt.Sprintf("%s/settings/branches/edit?rule_name=%s", ctx.Repo.RepoLink, url.QueryEscape(protectBranch.RuleName)))
+		return
+	} else if err != nil {
+		ctx.ServerError("UpdateProtectBranch", err)
+		return
+	}
+
+	// FIXME: since we only need to recheck files protected rules, we could improve this
+	matchedBranches, err := git_model.FindAllMatchedBranches(ctx, ctx.Repo.Repository.ID, protectBranch.RuleName)
+	if err != nil {
+		ctx.ServerError("FindAllMatchedBranches", err)
+		return
+	}
+	for _, branchName := range matchedBranches {
+		if err = pull_service.CheckPRsForBaseBranch(ctx, ctx.Repo.Repository, branchName); err != nil {
+			ctx.ServerError("CheckPRsForBaseBranch", err)
+			return
+		}
+	}
+
+	ctx.Flash.Success(ctx.Tr("repo.settings.update_protect_branch_success", protectBranch.RuleName))
+	ctx.Redirect(fmt.Sprintf("%s/settings/branches?rule_name=%s", ctx.Repo.RepoLink, protectBranch.RuleName))
+}
+
+// ProtectBranchFromForm sets the fields of protectBranch from the form and returns its allow-lists, teams and
+// approval rules looked up in owner. It returns a message instead if the form is invalid.
+func ProtectBranchFromForm(ctx *context.Context, f *forms.ProtectBranchForm, protectBranch *git_model.ProtectedBranch, owner *user_model.User) (opts git_model.WhitelistOptions, errMsg template.HTML) {
 	var whitelistDeployKeys []int64
 	var whitelistUsers, whitelistTeams, mergeWhitelistUsers, mergeWhitelistTeams, approvalsWhitelistUsers, approvalsWhitelistTeams []int64
 	protectBranch.RuleName = f.RuleName
 	if f.RequiredApprovals < 0 {
-		ctx.Flash.Error(ctx.Tr("repo.settings.protected_branch_required_approvals_min"))
-		ctx.Redirect(fmt.Sprintf("%s/settings/branches/edit?rule_name=%s", ctx.Repo.RepoLink, f.RuleName))
-		return
+		return opts, ctx.Tr("repo.settings.protected_branch_required_approvals_min")
 	}
 
 	switch f.EnablePush {
@@ -237,17 +281,13 @@ func SettingsProtectedBranchPost(ctx *context.Context) {
 				continue
 			}
 			if _, err := glob.Compile(trimmed); err != nil {
-				ctx.Flash.Error(ctx.Tr("repo.settings.protect_invalid_status_check_pattern", pattern))
-				ctx.Redirect(fmt.Sprintf("%s/settings/branches/edit?rule_name=%s", ctx.Repo.RepoLink, url.QueryEscape(protectBranch.RuleName)))
-				return
+				return opts, ctx.Tr("repo.settings.protect_invalid_status_check_pattern", pattern)
 			}
 			validPatterns = append(validPatterns, trimmed)
 		}
 		if len(validPatterns) == 0 {
 			// if status check is enabled, patterns slice is not allowed to be empty
-			ctx.Flash.Error(ctx.Tr("repo.settings.protect_no_valid_status_check_patterns"))
-			ctx.Redirect(fmt.Sprintf("%s/settings/branches/edit?rule_name=%s", ctx.Repo.RepoLink, url.QueryEscape(protectBranch.RuleName)))
-			return
+			return opts, ctx.Tr("repo.settings.protect_no_valid_status_check_patterns")
 		}
 		protectBranch.StatusCheckContexts = validPatterns
 	} else {
@@ -277,14 +317,12 @@ func SettingsProtectedBranchPost(ctx *context.Context) {
 	protectBranch.BlockOnIncompleteTasks = f.BlockOnIncompleteTasks
 	protectBranch.ApplyToAdmins = f.ApplyToAdmins
 
-	approvalRules, err := approvalRulesFromForm(ctx)
+	approvalRules, err := approvalRulesFromForm(ctx, owner)
 	if err != nil {
-		ctx.Flash.Error(ctx.Tr("repo.settings.approval_rules_invalid", err.Error()))
-		ctx.Redirect(fmt.Sprintf("%s/settings/branches/edit?rule_name=%s", ctx.Repo.RepoLink, url.QueryEscape(protectBranch.RuleName)))
-		return
+		return opts, ctx.Tr("repo.settings.approval_rules_invalid", err.Error())
 	}
 
-	err = git_model.UpdateProtectBranch(ctx, ctx.Repo.Repository, protectBranch, git_model.WhitelistOptions{
+	return git_model.WhitelistOptions{
 		ApprovalRules:    approvalRules,
 		UserIDs:          whitelistUsers,
 		TeamIDs:          whitelistTeams,
@@ -300,31 +338,7 @@ func SettingsProtectedBranchPost(ctx *context.Context) {
 		ForcePushUserIDs:      parseIDList(f.ForcePushAllowlistUsers),
 		ForcePushTeamIDs:      parseIDList(f.ForcePushAllowlistTeams),
 		ForcePushDeployKeyIDs: parseIDList(f.ForcePushAllowlistDeployKeyIDs),
-	})
-	if errors.Is(err, util.ErrInvalidArgument) {
-		ctx.Flash.Error(ctx.Tr("repo.settings.approval_rules_invalid", err.Error()))
-		ctx.Redirect(fmt.Sprintf("%s/settings/branches/edit?rule_name=%s", ctx.Repo.RepoLink, url.QueryEscape(protectBranch.RuleName)))
-		return
-	} else if err != nil {
-		ctx.ServerError("UpdateProtectBranch", err)
-		return
-	}
-
-	// FIXME: since we only need to recheck files protected rules, we could improve this
-	matchedBranches, err := git_model.FindAllMatchedBranches(ctx, ctx.Repo.Repository.ID, protectBranch.RuleName)
-	if err != nil {
-		ctx.ServerError("FindAllMatchedBranches", err)
-		return
-	}
-	for _, branchName := range matchedBranches {
-		if err = pull_service.CheckPRsForBaseBranch(ctx, ctx.Repo.Repository, branchName); err != nil {
-			ctx.ServerError("CheckPRsForBaseBranch", err)
-			return
-		}
-	}
-
-	ctx.Flash.Success(ctx.Tr("repo.settings.update_protect_branch_success", protectBranch.RuleName))
-	ctx.Redirect(fmt.Sprintf("%s/settings/branches?rule_name=%s", ctx.Repo.RepoLink, protectBranch.RuleName))
+	}, ""
 }
 
 // DeleteProtectedBranchRulePost delete protected branch rule by id
@@ -434,7 +448,7 @@ func parseIDList(s string) []int64 {
 
 // approvalRulesFromForm reads the rows approval_rule_* of the form, one value per row. A row without a name is
 // dropped. nil keeps the rules, for a form that has no rows at all.
-func approvalRulesFromForm(ctx *context.Context) ([]*git_model.ApprovalRule, error) {
+func approvalRulesFromForm(ctx *context.Context, owner *user_model.User) ([]*git_model.ApprovalRule, error) {
 	form := ctx.Req.PostForm
 	names, sent := form["approval_rule_name"]
 	if !sent {
@@ -468,5 +482,5 @@ func approvalRulesFromForm(ctx *context.Context) ([]*git_model.ApprovalRule, err
 			RequireCodeOwners: field("approval_rule_code_owners", i) == "true",
 		})
 	}
-	return pull_service.ApprovalRulesFromAPI(ctx, ctx.Repo.Owner, rules)
+	return pull_service.ApprovalRulesFromAPI(ctx, owner, rules)
 }

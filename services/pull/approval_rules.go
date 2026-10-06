@@ -47,7 +47,11 @@ func ApprovalRuleStatuses(ctx context.Context, pb *git_model.ProtectedBranch, pr
 		return statuses, err
 	}
 	granted := issues_model.GetGrantedApprovalsCount(ctx, pb, pr)
-	def := &ApprovalRuleStatus{Name: "Default", Required: pb.RequiredApprovals, Granted: granted, Satisfied: granted >= pb.RequiredApprovals}
+	name := "Default"
+	if pb.OrgID != 0 {
+		name = "Default (organization)"
+	}
+	def := &ApprovalRuleStatus{Name: name, Required: pb.RequiredApprovals, Granted: granted, Satisfied: granted >= pb.RequiredApprovals}
 	return append([]*ApprovalRuleStatus{def}, statuses...), nil
 }
 

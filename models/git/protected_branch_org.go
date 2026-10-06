@@ -43,6 +43,17 @@ func GetOrgProtectedBranchRuleByName(ctx context.Context, orgID int64, ruleName 
 	return rule, nil
 }
 
+// GetOrgProtectedBranchRuleByID returns the organization rule with this ID, or nil if the organization has none.
+func GetOrgProtectedBranchRuleByID(ctx context.Context, orgID, id int64) (*ProtectedBranch, error) {
+	cond := orgRuleCond(orgID)
+	cond["id"] = id
+	rule, exist, err := db.Get[ProtectedBranch](ctx, cond)
+	if err != nil || !exist {
+		return nil, err
+	}
+	return rule, nil
+}
+
 // GetOrgProtectedBranchRuleRepoIDs returns the selected repositories of an organization rule.
 func GetOrgProtectedBranchRuleRepoIDs(ctx context.Context, ruleID int64) ([]int64, error) {
 	ids := []int64{}
