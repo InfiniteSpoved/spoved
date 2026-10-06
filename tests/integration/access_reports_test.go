@@ -198,7 +198,7 @@ func TestAccessReportPersonColumns(t *testing.T) {
 			case "user4":
 				seen4 = true
 				require.NotNil(t, l.LastPush, "P2: the push outside org3 doesn't count")
-				assert.EqualValues(t, push, l.LastPush.Unix())
+				assert.Equal(t, push, l.LastPush.Unix())
 				require.NotNil(t, l.LastLogin)
 				assert.EqualValues(t, 1700000000, l.LastLogin.Unix())
 				assert.Equal(t, "LDAP (via BindDN): corp-ldap", l.AccountSource)
