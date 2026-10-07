@@ -32,7 +32,7 @@ type RepoIndexerStatus struct { //revive:disable-line:exported
 }
 
 // RepoIndexerBranch is the commit a non-default branch was last indexed at
-type RepoIndexerBranch struct {
+type RepoIndexerBranch struct { //revive:disable-line:exported
 	ID        int64  `xorm:"pk autoincr"`
 	RepoID    int64  `xorm:"UNIQUE(s) NOT NULL"`
 	Branch    string `xorm:"UNIQUE(s) VARCHAR(255) NOT NULL"`

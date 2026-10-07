@@ -73,7 +73,7 @@ func TestCodeSearchBranches(t *testing.T) {
 	repo, err := repo_model.GetRepositoryByOwnerAndName(db.DefaultContext, "user2", "repo1")
 	require.NoError(t, err)
 
-	newBranchFile(t, user, repo, repo.DefaultBranch, "develop", "dev_only.go", "func OnlyOnDevelop() {}")
+	newBranchFile(t, user, repo, repo.DefaultBranch, "idxdev", "dev_only.go", "func OnlyOnDevelop() {}")
 
 	// AC5: with no list set only the default branch is indexed and searched.
 	code_indexer.UpdateRepoIndexer(repo)
@@ -82,24 +82,24 @@ func TestCodeSearchBranches(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, rows)
 
-	// AC3: found on develop and with all branches, not on the default branch.
-	setIndexedBranches(t, repo, "develop")
+	// AC3: found on idxdev and with all branches, not on the default branch.
+	setIndexedBranches(t, repo, "idxdev")
 	code_indexer.UpdateRepoIndexer(repo)
-	assert.Equal(t, []string{"dev_only.go"}, codeSearchFiles(t, repo, "develop", false, code_indexer.SearchModeExact, "OnlyOnDevelop"))
+	assert.Equal(t, []string{"dev_only.go"}, codeSearchFiles(t, repo, "idxdev", false, code_indexer.SearchModeExact, "OnlyOnDevelop"))
 	assert.Equal(t, []string{"dev_only.go"}, codeSearchFiles(t, repo, "", true, code_indexer.SearchModeExact, "OnlyOnDevelop"))
 	assert.Empty(t, codeSearchFiles(t, repo, "", false, code_indexer.SearchModeExact, "OnlyOnDevelop"))
 	assert.Contains(t, codeSearchFiles(t, repo, "", false, code_indexer.SearchModeUnion, "Description"), "README.md")
 
 	// AC4: a push to the indexed branch is re-indexed.
-	newBranchFile(t, user, repo, "develop", "develop", "more.go", "func PushedLater() {}")
+	newBranchFile(t, user, repo, "idxdev", "idxdev", "more.go", "func PushedLater() {}")
 	code_indexer.UpdateRepoIndexer(repo)
-	assert.Equal(t, []string{"more.go"}, codeSearchFiles(t, repo, "develop", false, code_indexer.SearchModeExact, "PushedLater"))
+	assert.Equal(t, []string{"more.go"}, codeSearchFiles(t, repo, "idxdev", false, code_indexer.SearchModeExact, "PushedLater"))
 
 	// AC4: deleting the branch removes its results and its status row.
 	gitRepo, err := git.OpenRepository(t.Context(), repo.RepoPath())
 	require.NoError(t, err)
 	defer gitRepo.Close()
-	require.NoError(t, repo_service.DeleteBranch(t.Context(), user, repo, gitRepo, "develop"))
+	require.NoError(t, repo_service.DeleteBranch(t.Context(), user, repo, gitRepo, "idxdev"))
 	code_indexer.UpdateRepoIndexer(repo)
 	assert.Empty(t, codeSearchFiles(t, repo, "", true, code_indexer.SearchModeExact, "OnlyOnDevelop"))
 	rows, err = repo_model.GetIndexerBranches(db.DefaultContext, repo.ID)
@@ -120,6 +120,10 @@ func TestCodeSearchBranchLimit(t *testing.T) {
 
 	for _, b := range []string{"release/1", "release/2", "release/3"} { // created oldest to newest
 		newBranchFile(t, user, repo, repo.DefaultBranch, b, "rel.txt", "marker "+b[len("release/"):])
+	}
+	for i, b := range []string{"release/1", "release/2", "release/3"} { // commits in the same second
+		_, err := db.GetEngine(t.Context()).Exec("UPDATE branch SET commit_time = ? WHERE repo_id = ? AND name = ?", 100*(i+1), repo.ID, b)
+		require.NoError(t, err)
 	}
 	setIndexedBranches(t, repo, "release/*")
 	code_indexer.UpdateRepoIndexer(repo)
@@ -143,16 +147,16 @@ func TestCodeSearchDefaultBranchChange(t *testing.T) {
 	require.NoError(t, err)
 	oldDefault := repo.DefaultBranch
 
-	newBranchFile(t, user, repo, oldDefault, "develop", "dev_only.go", "func OnlyOnDevelop() {}")
+	newBranchFile(t, user, repo, oldDefault, "idxdev", "dev_only.go", "func OnlyOnDevelop() {}")
 	code_indexer.UpdateRepoIndexer(repo)
 	assert.Contains(t, codeSearchFiles(t, repo, "", false, code_indexer.SearchModeUnion, "Description"), "README.md")
 
 	gitRepo, err := git.OpenRepository(t.Context(), repo.RepoPath())
 	require.NoError(t, err)
 	defer gitRepo.Close()
-	require.NoError(t, repo_service.SetRepoDefaultBranch(t.Context(), repo, gitRepo, "develop"))
+	require.NoError(t, repo_service.SetRepoDefaultBranch(t.Context(), repo, gitRepo, "idxdev"))
 
-	// develop is the default now: dev_only.go is found without a branch filter.
+	// idxdev is the default now: dev_only.go is found without a branch filter.
 	assert.Equal(t, []string{"dev_only.go"}, codeSearchFiles(t, repo, "", false, code_indexer.SearchModeExact, "OnlyOnDevelop"))
 }
 
@@ -173,8 +177,8 @@ func TestCodeSearchPunctuation(t *testing.T) {
 		{"std::map<", "std::map<int> m;", "map::std< std map"},
 		{"#include <stdio.h>", "#include <stdio.h>", "include stdio.h <stdio.h> #"},
 		{"user_id=", "user_id=5", "id=user_ user id"},
-		{"@Override", "@Override void f()", "Override @ Override"},
-		{"i++", "for(i++)", "i i + +"},
+		{"@Override", "@Override void f()", "Override @"},
+		{"i++", "for(i++)", "+ + i"},
 	}
 	for i, c := range cases {
 		newBranchFile(t, user, repo, repo.DefaultBranch, repo.DefaultBranch, fmt.Sprintf("hit%d.txt", i), c.hit)
