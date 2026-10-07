@@ -24184,6 +24184,62 @@
         }
       }
     },
+    "/user/settings/notifications": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "user"
+        ],
+        "summary": "Get the email notification settings of the current user",
+        "operationId": "getNotificationSettings",
+        "responses": {
+          "200": {
+            "$ref": "#/responses/NotificationSettings"
+          },
+          "401": {
+            "$ref": "#/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          }
+        }
+      },
+      "put": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "user"
+        ],
+        "summary": "Update the email notification settings of the current user",
+        "operationId": "putNotificationSettings",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/NotificationSettings"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/NotificationSettings"
+          },
+          "401": {
+            "$ref": "#/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/user/starred": {
       "get": {
         "produces": [
@@ -32531,6 +32587,26 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "NotificationSettings": {
+      "type": "object",
+      "title": "NotificationSettings represents the email notification preset of the authenticated user and which events send mail.",
+      "properties": {
+        "events": {
+          "description": "events that send mail when the preset is custom; events missing from an update keep their value",
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "x-go-name": "Events"
+        },
+        "preset": {
+          "description": "one of enabled, onmention, andyourown, disabled, custom",
+          "type": "string",
+          "x-go-name": "Preset"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "NotificationSubject": {
       "description": "NotificationSubject contains the notification subject (Issue/Pull/Commit)",
       "type": "object",
@@ -36910,6 +36986,12 @@
       "description": "Number of unread notifications",
       "schema": {
         "$ref": "#/definitions/NotificationCount"
+      }
+    },
+    "NotificationSettings": {
+      "description": "NotificationSettings",
+      "schema": {
+        "$ref": "#/definitions/NotificationSettings"
       }
     },
     "NotificationThread": {

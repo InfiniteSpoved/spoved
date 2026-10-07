@@ -88,6 +88,15 @@ type UserSettings struct {
 	HideActivity bool `json:"hide_activity"`
 }
 
+// NotificationSettings represents the email notification preset of the authenticated user and which events send mail.
+// swagger:model
+type NotificationSettings struct {
+	// one of enabled, onmention, andyourown, disabled, custom
+	Preset string `json:"preset"`
+	// events that send mail when the preset is custom; events missing from an update keep their value
+	Events map[string]bool `json:"events"`
+}
+
 // UserSettingsOptions represents options to change user settings
 // swagger:model
 type UserSettingsOptions struct {

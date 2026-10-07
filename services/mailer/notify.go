@@ -110,7 +110,7 @@ func (m *mailNotifier) PullRequestReview(ctx context.Context, pr *issues_model.P
 	case issues_model.CommentTypeComment:
 		act = activities_model.ActionCommentPull
 	}
-	if err := MailParticipantsComment(ctx, comment, act, pr.Issue, mentions); err != nil {
+	if err := mailParticipantsComment(ctx, comment, act, pr.Issue, mentions, r.Type); err != nil {
 		log.Error("MailParticipantsComment: %v", err)
 	}
 }
@@ -121,9 +121,17 @@ func (m *mailNotifier) PullRequestCodeComment(ctx context.Context, pr *issues_mo
 	}
 }
 
+func mailsEvent(ctx context.Context, issue *issues_model.Issue, user *user_model.User, event user_model.NotifyEvent) bool {
+	if err := issue.LoadRepo(ctx); err != nil {
+		log.Error("LoadRepo: %v", err)
+		return false
+	}
+	return ShouldEmail(ctx, user, issue.Repo, event)
+}
+
 func (m *mailNotifier) IssueChangeAssignee(ctx context.Context, doer *user_model.User, issue *issues_model.Issue, assignee *user_model.User, removed bool, comment *issues_model.Comment) {
 	// mail only sent to added assignees and not self-assignee
-	if !removed && doer.ID != assignee.ID && assignee.EmailNotificationsPreference != user_model.EmailNotificationsDisabled {
+	if !removed && doer.ID != assignee.ID && mailsEvent(ctx, issue, assignee, user_model.NotifyEventIssueAssigned) {
 		ct := fmt.Sprintf("Assigned #%d.", issue.Index)
 		if err := SendIssueAssignedMail(ctx, issue, doer, ct, comment, []*user_model.User{assignee}); err != nil {
 			log.Error("Error in SendIssueAssignedMail for issue[%d] to assignee[%d]: %v", issue.ID, assignee.ID, err)
@@ -132,7 +140,7 @@ func (m *mailNotifier) IssueChangeAssignee(ctx context.Context, doer *user_model
 }
 
 func (m *mailNotifier) PullRequestReviewRequest(ctx context.Context, doer *user_model.User, issue *issues_model.Issue, reviewer *user_model.User, isRequest bool, comment *issues_model.Comment) {
-	if isRequest && doer.ID != reviewer.ID && reviewer.EmailNotificationsPreference != user_model.EmailNotificationsDisabled {
+	if isRequest && doer.ID != reviewer.ID && mailsEvent(ctx, issue, reviewer, user_model.NotifyEventReviewRequestedMe) {
 		ct := fmt.Sprintf("Requested to review %s.", issue.HTMLURL())
 		if err := SendIssueAssignedMail(ctx, issue, doer, ct, comment, []*user_model.User{reviewer}); err != nil {
 			log.Error("Error in SendIssueAssignedMail for issue[%d] to reviewer[%d]: %v", issue.ID, reviewer.ID, err)

@@ -752,6 +752,7 @@ func registerRoutes(m *web.Route) {
 			m.Post("/email/delete", user_setting.DeleteEmail)
 			m.Post("/delete", user_setting.DeleteAccount)
 		})
+		m.Combo("/notifications").Get(user_setting.Notifications).Post(user_setting.NotificationsPost)
 		m.Group("/appearance", func() {
 			m.Get("", user_setting.Appearance)
 			m.Post("/language", web.Bind(forms.UpdateLanguageForm{}), user_setting.UpdateUserLang)

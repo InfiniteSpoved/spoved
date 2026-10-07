@@ -45,8 +45,17 @@ func MailNewRelease(ctx context.Context, rel *repo_model.Release) {
 
 	// Users are not eligible to receive this mail if they are not active or
 	// they don't have permissions to read releases.
+	ids := make([]int64, len(recipients))
+	for i, u := range recipients {
+		ids[i] = u.ID
+	}
+	filter, err := newEmailFilter(ctx, rel.RepoID, ids...)
+	if err != nil {
+		log.Error("newEmailFilter: %v", err)
+		return
+	}
 	recipients = slices.DeleteFunc(recipients, func(u *user_model.User) bool {
-		return !u.IsActive || !access_model.CheckRepoUnitUser(ctx, rel.Repo, u, unit.TypeReleases)
+		return !u.IsActive || !filter.ShouldEmail(u, user_model.NotifyEventWatchRelease) || !access_model.CheckRepoUnitUser(ctx, rel.Repo, u, unit.TypeReleases)
 	})
 
 	langMap := make(map[string][]*user_model.User)

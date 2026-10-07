@@ -714,6 +714,7 @@ func Routes() *web.Route {
 			m.Group("/settings", func() {
 				m.Get("", user.GetUserSettings)
 				m.Patch("", bind(api.UserSettingsOptions{}), user.UpdateUserSettings)
+				m.Combo("/notifications").Get(user.GetNotificationSettings).Put(bind(api.NotificationSettings{}), user.PutNotificationSettings)
 			}, reqToken())
 			m.Combo("/emails").
 				Get(user.ListEmails).

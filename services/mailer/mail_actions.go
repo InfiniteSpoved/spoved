@@ -42,7 +42,7 @@ var sendActionRunJobFailureNotification = func(ctx context.Context, job *actions
 		return nil
 	}
 
-	if user.EmailNotificationsPreference == user_model.EmailNotificationsDisabled {
+	if !ShouldEmail(ctx, user, job.Run.Repo, user_model.NotifyEventActionsFailed) {
 		return nil
 	}
 

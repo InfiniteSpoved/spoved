@@ -1,0 +1,55 @@
+{{template "user/settings/layout_head" (dict "ctxData" . "pageClass" "user settings notifications")}}
+	<div class="user-setting-content">
+		<h4 class="ui top attached header">
+			{{if .NotificationRepo}}{{ctx.Locale.Tr "settings.notifications.repo_title" .NotificationRepo.FullName}}{{else}}{{ctx.Locale.Tr "settings.notifications"}}{{end}}
+		</h4>
+		<div class="ui attached segment">
+			<p>{{if .NotificationRepo}}{{ctx.Locale.Tr "settings.notifications.repo_desc"}}{{else}}{{ctx.Locale.Tr "settings.notifications.desc"}}{{end}}</p>
+			<form class="ui form" method="post" action="{{AppSubUrl}}/user/settings/notifications">
+				{{if .NotificationRepo}}
+					<input type="hidden" name="repo" value="{{.NotificationRepo.ID}}">
+				{{else}}
+					<div class="field">
+						<label>{{ctx.Locale.Tr "settings.notifications.preset"}}</label>
+						<div class="ui selection dropdown">
+							<input name="preference" type="hidden" value="{{.EmailNotificationsPreference}}">
+							{{svg "octicon-triangle-down" 14 "dropdown icon"}}
+							<div class="text"></div>
+							<div class="menu">
+								<div data-value="enabled" class="{{if eq .EmailNotificationsPreference "enabled"}}active selected {{end}}item">{{ctx.Locale.Tr "settings.email_notifications.enable"}}</div>
+								<div data-value="andyourown" class="{{if eq .EmailNotificationsPreference "andyourown"}}active selected {{end}}item">{{ctx.Locale.Tr "settings.email_notifications.andyourown"}}</div>
+								<div data-value="onmention" class="{{if eq .EmailNotificationsPreference "onmention"}}active selected {{end}}item">{{ctx.Locale.Tr "settings.email_notifications.onmention"}}</div>
+								<div data-value="custom" class="{{if eq .EmailNotificationsPreference "custom"}}active selected {{end}}item">{{ctx.Locale.Tr "settings.notifications.preset_custom"}}</div>
+								<div data-value="disabled" class="{{if eq .EmailNotificationsPreference "disabled"}}active selected {{end}}item">{{ctx.Locale.Tr "settings.email_notifications.disable"}}</div>
+							</div>
+						</div>
+					</div>
+				{{end}}
+				<table class="ui table">
+					<thead><tr><th>{{ctx.Locale.Tr "settings.notifications.events"}}</th></tr></thead>
+					{{range .Groups}}
+						<tbody>
+							<tr><th>{{.Title}}</th></tr>
+							{{range .Rows}}
+								<tr><td>
+									<label>
+										<input type="checkbox" name="event_{{.Event}}" {{if .Checked}}checked{{end}}>
+										{{.Label}}
+									</label>
+								</td></tr>
+							{{end}}
+						</tbody>
+					{{end}}
+				</table>
+				<button class="ui primary button">{{ctx.Locale.Tr "settings.email_notifications.submit"}}</button>
+			</form>
+			{{if .NotificationRepo}}
+				<form class="tw-mt-3" method="post" action="{{AppSubUrl}}/user/settings/notifications">
+					<input type="hidden" name="repo" value="{{.NotificationRepo.ID}}">
+					<input type="hidden" name="reset" value="1">
+					<button class="ui button">{{ctx.Locale.Tr "settings.notifications.reset"}}</button>
+				</form>
+			{{end}}
+		</div>
+	</div>
+{{template "user/settings/layout_footer" .}}
