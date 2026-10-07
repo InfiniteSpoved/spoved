@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setTrashed(t *testing.T, id int64, unix int64) {
+func setTrashed(t *testing.T, id, unix int64) {
 	t.Helper()
 	_, err := db.GetEngine(t.Context()).Exec("UPDATE `repository` SET trashed_unix = ? WHERE id = ?", unix, id)
 	require.NoError(t, err)
@@ -55,7 +55,7 @@ func TestRestore(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, Restore(t.Context(), owner, repo.ID))
-	assert.ErrorIs(t, Restore(t.Context(), owner, repo.ID), ErrTrashConflict)
+	require.ErrorIs(t, Restore(t.Context(), owner, repo.ID), ErrTrashConflict)
 
 	restored, err := repo_model.GetRepositoryByID(t.Context(), repo.ID)
 	require.NoError(t, err)
