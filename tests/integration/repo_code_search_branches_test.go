@@ -154,6 +154,11 @@ func TestCodeSearchDefaultBranchChange(t *testing.T) {
 	gitRepo, err := git.OpenRepository(t.Context(), repo.RepoPath())
 	require.NoError(t, err)
 	defer gitRepo.Close()
+	// PrepareTestEnv restores the DB but not the on-disk index: switch back through the same path,
+	// which resets the index and indexes the original default branch again.
+	defer func() {
+		require.NoError(t, repo_service.SetRepoDefaultBranch(t.Context(), repo, gitRepo, oldDefault))
+	}()
 	require.NoError(t, repo_service.SetRepoDefaultBranch(t.Context(), repo, gitRepo, "idxdev"))
 
 	// idxdev is the default now: dev_only.go is found without a branch filter.
