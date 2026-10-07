@@ -114,3 +114,20 @@ func TestRemoveAllStr(t *testing.T) {
 		})
 	}
 }
+
+func TestCSVSafe(t *testing.T) {
+	for in, out := range map[string]string{
+		"":          "",
+		"repo1":     "repo1",
+		"=1+2":      "'=1+2",
+		"+cmd":      "'+cmd",
+		"-1":        "'-1",
+		"@SUM(A1)":  "'@SUM(A1)",
+		"\tx":       "'\tx",
+		"\rx":       "'\rx",
+		"a=b":       "a=b",
+		"'=already": "'=already",
+	} {
+		assert.Equal(t, out, CSVSafe(in), in)
+	}
+}

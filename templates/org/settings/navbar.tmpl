@@ -53,6 +53,9 @@
 		<a class="{{if .PageIsStorageOverview}}active {{end}}item" href="{{.OrgLink}}/settings/storage_overview">
 			{{ctx.Locale.Tr "settings.storage_overview"}}
 		</a>
+		<a class="{{if .PageIsSettingsAccessReport}}active {{end}}item" href="{{.OrgLink}}/settings/access-report">
+			{{ctx.Locale.Tr "access_report.report"}}
+		</a>
 		<a class="{{if .PageIsSettingsDelete}}active {{end}}item" href="{{.OrgLink}}/settings/delete">
 			{{ctx.Locale.Tr "org.settings.delete"}}
 		</a>

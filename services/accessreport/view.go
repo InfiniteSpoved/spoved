@@ -4,6 +4,7 @@
 package accessreport
 
 import (
+	"cmp"
 	"context"
 	"slices"
 	"strconv"
@@ -39,37 +40,62 @@ func Highest(p access_model.Permission) perm_model.AccessMode {
 // auditors are named to site admins only, user groups to site admins and org owners, login sources to site admins
 // only; a viewer outside the owner org sees each team as one row and no team or org membership. The inactive-days
 // filter, which tells last sign-ins apart, applies only for site admins: anyone can create an org and add any user
-// to it. activity says whether it did.
-func ForRepo(ctx context.Context, repo *repo_model.Repository, doer *user_model.User, f Filter) (rows []*Row, activity bool, err error) {
-	opts := Options{RepoIDs: []int64{repo.ID}, Plain: !doer.IsAdmin}
-	isOwner := false
-	if err := repo.LoadOwner(ctx); err != nil {
-		return nil, false, err
+// to it. activity says whether it did. admin says whether the doer acts as a site admin, which a restricted token
+// doesn't.
+func ForRepo(ctx context.Context, repo *repo_model.Repository, admin bool, doer *user_model.User, f Filter) (rows []*Row, activity bool, err error) {
+	return ForRepos(ctx, []int64{repo.ID}, admin, doer, f)
+}
+
+// ForRepos is ForRepo for repositories of one owner, in ID order; for a site admin, of any owners.
+func ForRepos(ctx context.Context, repoIDs []int64, admin bool, doer *user_model.User, f Filter) (rows []*Row, activity bool, err error) {
+	repos := make(repo_model.RepositoryList, 0, len(repoIDs))
+	if err := db.GetEngine(ctx).In("id", repoIDs).OrderBy("id").Find(&repos); err != nil || len(repos) == 0 {
+		return nil, admin, err
 	}
-	if !doer.IsAdmin && repo.Owner.IsOrganization() {
-		if isOwner, err = organization.IsOrganizationOwner(ctx, repo.OwnerID, doer.ID); err != nil {
+	opts := Options{RepoIDs: repoIDs, Plain: !admin}
+	isOwner := false
+	if !admin {
+		if err := repos[0].LoadOwner(ctx); err != nil {
 			return nil, false, err
 		}
-		isMember, err := organization.IsOrganizationMember(ctx, repo.OwnerID, doer.ID)
-		if err != nil {
-			return nil, false, err
+		if owner := repos[0].Owner; owner.IsOrganization() {
+			if isOwner, err = organization.IsOrganizationOwner(ctx, owner.ID, doer.ID); err != nil {
+				return nil, false, err
+			}
+			isMember, err := organization.IsOrganizationMember(ctx, owner.ID, doer.ID)
+			if err != nil {
+				return nil, false, err
+			}
+			opts.Outsider = !isMember
 		}
-		opts.Outsider = !isMember
 	}
 	if rows, err = Compute(ctx, opts); err != nil {
 		return nil, false, err
 	}
-	if !doer.IsAdmin {
-		rows = append(rows, &Row{Repo: repo, Paths: []*Path{{Kind: KindInstanceRoles, Applied: true}}})
+	if !admin {
+		for _, repo := range repos {
+			rows = append(rows, &Row{Repo: repo, Paths: []*Path{{Kind: KindInstanceRoles, Applied: true}}})
+		}
 		for _, r := range rows {
 			hideGroups(r, !isOwner)
 		}
 	}
-	activity = doer.IsAdmin
-	if !activity {
+	// Compute lists the deploy keys after all the repositories
+	slices.SortStableFunc(rows, func(a, b *Row) int { return cmp.Compare(a.Repo.ID, b.Repo.ID) })
+	if !admin {
 		f.InactiveDays = 0
 	}
-	return f.Apply(rows), activity, nil
+	return f.Apply(rows), admin, nil
+}
+
+// AsAdmin returns the doer, as a site admin only if admin is set, for the conversions that read IsAdmin.
+func AsAdmin(doer *user_model.User, admin bool) *user_model.User {
+	if doer.IsAdmin == admin {
+		return doer
+	}
+	u := *doer
+	u.IsAdmin = admin
+	return &u
 }
 
 // hideGroups removes the login sources from the paths of the row, and the groups too if all is set.

@@ -113,3 +113,10 @@ type swaggerResponseOrgBranchProtectionList struct {
 	// in:body
 	Body []api.OrgBranchProtection `json:"body"`
 }
+
+// AccessReportLineList
+// swagger:response AccessReportLineList
+type swaggerResponseAccessReportLineList struct {
+	// in:body
+	Body []api.AccessReportLine `json:"body"`
+}
