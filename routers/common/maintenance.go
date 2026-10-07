@@ -52,6 +52,7 @@ var MaintenanceReadRoutes = container.SetOf(
 var MaintenanceAdminRoutes = container.SetOf(
 	"POST /admin/maintenance",
 	"POST /admin/ip-allowlist",
+	"POST /admin/applications/policy",
 	"POST /admin/config",
 	"POST /admin/config/test_mail",
 	"POST /admin/config/test_cache",

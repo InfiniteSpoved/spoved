@@ -10,6 +10,7 @@
 				<p>
 					<b>{{ctx.Locale.Tr "auth.authorize_application_description"}}</b><br>
 					{{ctx.Locale.Tr "auth.authorize_application_created_by" .ApplicationCreatorLinkHTML}}
+					{{if .ApplicationByAdmin}}<br><span class="oauth2-admin-mark">{{ctx.Locale.Tr "auth.authorize_application_by_admin"}}</span>{{end}}
 				</p>
 				<p>With scopes: {{.Scope}}.</p>
 			</div>

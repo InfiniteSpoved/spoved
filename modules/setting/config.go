@@ -53,10 +53,11 @@ type RepositoryStruct struct {
 }
 
 type ConfigStruct struct {
-	Picture     *PictureStruct
-	Repository  *RepositoryStruct
-	Maintenance *config.Value[MaintenanceState]
-	IPAllowlist *config.Value[IPAllowlistState]
+	Picture         *PictureStruct
+	Repository      *RepositoryStruct
+	Maintenance     *config.Value[MaintenanceState]
+	IPAllowlist     *config.Value[IPAllowlistState]
+	OAuth2AppPolicy *config.Value[OAuth2AppPolicyState]
 }
 
 var (
@@ -74,8 +75,9 @@ func initDefaultConfig() {
 		Repository: &RepositoryStruct{
 			OpenWithEditorApps: config.ValueJSON[OpenWithEditorAppsType]("repository.open-with.editor-apps"),
 		},
-		Maintenance: config.ValueJSON[MaintenanceState]("maintenance.state"),
-		IPAllowlist: config.ValueJSON[IPAllowlistState]("ip_allowlist.state").WithDefault(IPAllowlistState{ExemptAdmins: true}),
+		Maintenance:     config.ValueJSON[MaintenanceState]("maintenance.state"),
+		IPAllowlist:     config.ValueJSON[IPAllowlistState]("ip_allowlist.state").WithDefault(IPAllowlistState{ExemptAdmins: true}),
+		OAuth2AppPolicy: config.ValueJSON[OAuth2AppPolicyState]("oauth2.app_policy"),
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/tests"
 
@@ -19,6 +20,7 @@ import (
 
 func TestOAuth2Application(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	setOAuth2AppPolicy(t, setting.OAuth2AppPolicyState{Mode: setting.OAuth2AppPolicyEveryone}) // the default is site admins only
 	testAPICreateOAuth2Application(t)
 	testAPIListOAuth2Applications(t)
 	testAPIGetOAuth2Application(t)

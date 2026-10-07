@@ -557,6 +557,8 @@ func AuthorizeOAuth(ctx *context.Context) {
 
 	// show authorize page to grant access
 	ctx.Data["Application"] = app
+	// the mark comes from the owner, never from the editable app name
+	ctx.Data["ApplicationByAdmin"] = app.UID == 0 || (user.IsIndividual() && user.IsAdmin && user.IsActive && !user.ProhibitLogin)
 	ctx.Data["RedirectURI"] = form.RedirectURI
 	ctx.Data["State"] = form.State
 	ctx.Data["Scope"] = form.Scope

@@ -47,6 +47,7 @@
 	</div>
 </div>
 
+{{if .CanCreateOAuth2App}}
 <div class="ui attached bottom segment">
 	<h5 class="ui top header">
 		{{ctx.Locale.Tr "settings.create_oauth2_application"}}
@@ -71,3 +72,8 @@
 		</button>
 	</form>
 </div>
+{{else}}
+<div class="ui attached bottom segment">
+	<p>{{ctx.Locale.Tr "settings.oauth2_application_admin_only"}}</p>
+</div>
+{{end}}
