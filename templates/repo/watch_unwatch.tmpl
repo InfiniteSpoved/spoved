@@ -34,6 +34,7 @@
 					<div class="small button-sequence tw-mt-3">
 						<button type="submit" class="primary button">{{ctx.Locale.Tr "save"}}</button>
 						{{if $.RepoWatchSelection.IsWatching}}
+							<a class="secondary button" href="{{AppSubUrl}}/user/settings/notifications?repo={{$.Repository.ID}}">{{ctx.Locale.Tr "repo.watch.notifications_custom"}}</a>
 							<button type="button" class="secondary button" hx-post="{{$.RepoLink}}/action/unwatch" hx-target="#watch-button" hx-swap="outerHTML">
 								{{ctx.Locale.Tr "repo.unwatch"}}
 							</button>
@@ -41,6 +42,12 @@
 					</div>
 				</fieldset>
 			</form>
+			{{if $.RepoWatchSelection.IsWatching}}
+				{{/* a plain form of its own: the watch form above is submitted by htmx */}}
+				<form class="tw-px-3 tw-pb-3" method="post" action="{{AppSubUrl}}/user/settings/notifications?repo={{$.Repository.ID}}&amp;reset=1">
+					<button type="submit" class="secondary small button">{{ctx.Locale.Tr "repo.watch.notifications_defaults"}}</button>
+				</form>
+			{{end}}
 		</dialog>
 	</div>
 {{else}}

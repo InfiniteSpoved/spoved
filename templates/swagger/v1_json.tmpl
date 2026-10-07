@@ -3690,6 +3690,93 @@
         }
       }
     },
+    "/orgs/{org}/access-report": {
+      "get": {
+        "description": "The last sign-in, last push, 2FA, account source and suspended fields are only for site admins.",
+        "produces": [
+          "application/json",
+          "text/csv"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Export who can access the organization's repositories, one line per path to a unit",
+        "operationId": "orgGetAccessReport",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "enum": [
+              "json",
+              "csv"
+            ],
+            "type": "string",
+            "description": "format of the export",
+            "name": "format",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "read",
+              "write",
+              "admin"
+            ],
+            "type": "string",
+            "description": "only identities with at least this access",
+            "name": "mode",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "only identities with access to this unit, e.g. repo.code",
+            "name": "unit",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "person",
+              "bot",
+              "key"
+            ],
+            "type": "string",
+            "description": "only this type of identity",
+            "name": "type",
+            "in": "query"
+          },
+          {
+            "type": "boolean",
+            "description": "only collaborators who aren't members of the organization",
+            "name": "external",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "only users who haven't signed in for this many days; applies only for site admins",
+            "name": "inactive_days",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/AccessReportLineList"
+          },
+          "401": {
+            "$ref": "#/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
     "/orgs/{org}/actions/runners": {
       "get": {
         "produces": [
@@ -24097,6 +24184,62 @@
         }
       }
     },
+    "/user/settings/notifications": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "user"
+        ],
+        "summary": "Get the email notification settings of the current user",
+        "operationId": "getNotificationSettings",
+        "responses": {
+          "200": {
+            "$ref": "#/responses/NotificationSettings"
+          },
+          "401": {
+            "$ref": "#/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          }
+        }
+      },
+      "put": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "user"
+        ],
+        "summary": "Update the email notification settings of the current user",
+        "operationId": "putNotificationSettings",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/NotificationSettings"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/NotificationSettings"
+          },
+          "401": {
+            "$ref": "#/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/user/starred": {
       "get": {
         "produces": [
@@ -25599,6 +25742,91 @@
             "type": "string"
           },
           "x-go-name": "Units"
+        },
+        "user_groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AccessUserGroup"
+          },
+          "x-go-name": "UserGroups"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "AccessReportLine": {
+      "description": "AccessReportLine is one path that gives an identity access to one unit of a repository",
+      "type": "object",
+      "properties": {
+        "access": {
+          "description": "effective access to the unit",
+          "type": "string",
+          "x-go-name": "Access"
+        },
+        "account_source": {
+          "description": "login type, and the name of the login source",
+          "type": "string",
+          "x-go-name": "AccountSource"
+        },
+        "applied": {
+          "description": "false when the permission checks don't use this path for any unit",
+          "type": "boolean",
+          "x-go-name": "Applied"
+        },
+        "full_name": {
+          "type": "string",
+          "x-go-name": "FullName"
+        },
+        "grant": {
+          "description": "access this path grants to the unit",
+          "type": "string",
+          "x-go-name": "Grant"
+        },
+        "last_login": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "LastLogin"
+        },
+        "last_push": {
+          "description": "last push to a repository of the report",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "LastPush"
+        },
+        "name": {
+          "description": "user, deploy key or team name",
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "path": {
+          "type": "string",
+          "x-go-name": "Path"
+        },
+        "repository": {
+          "type": "string",
+          "x-go-name": "Repository"
+        },
+        "suspended": {
+          "description": "the user can't sign in, or isn't activated",
+          "type": "boolean",
+          "x-go-name": "Suspended"
+        },
+        "team": {
+          "type": "string",
+          "x-go-name": "Team"
+        },
+        "two_factor": {
+          "type": "boolean",
+          "x-go-name": "TwoFactor"
+        },
+        "type": {
+          "description": "person, bot, key, team, anyone, signed_in, org_members or instance_roles",
+          "type": "string",
+          "x-go-name": "Type"
+        },
+        "unit": {
+          "description": "unit, e.g. repo.code, or * for all units",
+          "type": "string",
+          "x-go-name": "Unit"
         },
         "user_groups": {
           "type": "array",
@@ -32359,6 +32587,26 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "NotificationSettings": {
+      "type": "object",
+      "title": "NotificationSettings represents the email notification preset of the authenticated user and which events send mail.",
+      "properties": {
+        "events": {
+          "description": "events that send mail when the preset is custom; events missing from an update keep their value",
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "x-go-name": "Events"
+        },
+        "preset": {
+          "description": "one of enabled, onmention, andyourown, disabled, custom",
+          "type": "string",
+          "x-go-name": "Preset"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "NotificationSubject": {
       "description": "NotificationSubject contains the notification subject (Issue/Pull/Commit)",
       "type": "object",
@@ -35959,6 +36207,15 @@
     }
   },
   "responses": {
+    "AccessReportLineList": {
+      "description": "AccessReportLineList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/AccessReportLine"
+        }
+      }
+    },
     "AccessRowList": {
       "description": "AccessRowList",
       "schema": {
@@ -36729,6 +36986,12 @@
       "description": "Number of unread notifications",
       "schema": {
         "$ref": "#/definitions/NotificationCount"
+      }
+    },
+    "NotificationSettings": {
+      "description": "NotificationSettings",
+      "schema": {
+        "$ref": "#/definitions/NotificationSettings"
       }
     },
     "NotificationThread": {

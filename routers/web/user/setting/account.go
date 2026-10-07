@@ -186,31 +186,6 @@ func EmailPost(ctx *context.Context) {
 		ctx.Redirect(setting.AppSubURL + "/user/settings/account")
 		return
 	}
-	// Set Email Notification Preference
-	if ctx.FormString("_method") == "NOTIFICATION" {
-		preference := ctx.FormString("preference")
-		if preference != user_model.EmailNotificationsEnabled &&
-			preference != user_model.EmailNotificationsOnMention &&
-			preference != user_model.EmailNotificationsDisabled &&
-			preference != user_model.EmailNotificationsAndYourOwn {
-			log.Error("Email notifications preference change returned unrecognized option %s: %s", preference, ctx.Doer.Name)
-			ctx.ServerError("SetEmailPreference", errors.New("option unrecognized"))
-			return
-		}
-		opts := &user.UpdateOptions{
-			EmailNotificationsPreference: optional.Some(preference),
-		}
-		if err := user.UpdateUser(ctx, ctx.Doer, opts); err != nil {
-			log.Error("Set Email Notifications failed: %v", err)
-			ctx.ServerError("UpdateUser", err)
-			return
-		}
-		log.Trace("Email notifications preference made %s: %s", preference, ctx.Doer.Name)
-		ctx.Flash.Success(ctx.Tr("settings.email_preference_set_success"))
-		ctx.Redirect(setting.AppSubURL + "/user/settings/account")
-		return
-	}
-
 	if ctx.HasError() {
 		loadAccountData(ctx)
 
@@ -358,7 +333,6 @@ func loadAccountData(ctx *context.Context) {
 		emails[i] = &email
 	}
 	ctx.Data["Emails"] = emails
-	ctx.Data["EmailNotificationsPreference"] = ctx.Doer.EmailNotificationsPreference
 	ctx.Data["ActivationsPending"] = pendingActivation
 	ctx.Data["CanAddEmails"] = !pendingActivation || !setting.Service.RegisterEmailConfirm
 	ctx.Data["UserDisabledFeatures"] = user_model.DisabledFeaturesWithLoginType(ctx.Doer)

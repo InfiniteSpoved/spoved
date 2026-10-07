@@ -49,6 +49,13 @@ type swaggerResponseUserSettings struct {
 	Body api.UserSettings `json:"body"`
 }
 
+// NotificationSettings
+// swagger:response NotificationSettings
+type swaggerResponseNotificationSettings struct {
+	// in:body
+	Body api.NotificationSettings `json:"body"`
+}
+
 // UserAccess
 // swagger:response UserAccess
 type swaggerResponseUserAccess struct {

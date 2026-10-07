@@ -198,6 +198,7 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepo
 			&repo_model.Redirect{RedirectRepoID: repoID},
 			&repo_model.Star{RepoID: repoID},
 			&repo_model.Watch{RepoID: repoID},
+			&user_model.NotificationSetting{RepoID: repoID},
 			&webhook.Webhook{RepoID: repoID},
 			&secret_model.Secret{RepoID: repoID},
 			&actions_model.ActionTaskStepSummary{RepoID: repoID},

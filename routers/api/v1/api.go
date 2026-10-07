@@ -714,6 +714,7 @@ func Routes() *web.Route {
 			m.Group("/settings", func() {
 				m.Get("", user.GetUserSettings)
 				m.Patch("", bind(api.UserSettingsOptions{}), user.UpdateUserSettings)
+				m.Combo("/notifications").Get(user.GetNotificationSettings).Put(bind(api.NotificationSettings{}), user.PutNotificationSettings)
 			}, reqToken())
 			m.Combo("/emails").
 				Get(user.ListEmails).
@@ -1316,6 +1317,7 @@ func Routes() *web.Route {
 			m.Post("/rename", reqToken(), reqOrgOwnership(), bind(api.RenameOrgOption{}), org.Rename)
 			m.Post("/archive", reqToken(), reqOrgOwnership(), bind(api.ArchiveOrgOption{}), org.Archive)
 			m.Post("/unarchive", reqToken(), reqOrgOwnership(), org.Unarchive)
+			m.Get("/access-report", reqToken(), reqOrgOwnership(), org.GetAccessReport)
 			m.Combo("/branch-workflow").Get(reqToken(), reqOrgOwnership(), org.GetBranchWorkflow).
 				Put(reqToken(), reqOrgOwnership(), bind(api.OrgBranchWorkflow{}), org.EditBranchWorkflow)
 			m.Group("/branch_protections", func() {

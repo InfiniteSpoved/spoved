@@ -155,3 +155,11 @@ func hasAny(s string, prefix bool, all ...string) bool {
 	}
 	return false
 }
+
+// CSVSafe keeps a spreadsheet from reading a CSV cell as a formula
+func CSVSafe(s string) string {
+	if s != "" && strings.ContainsRune("=+-@\t\r", rune(s[0])) {
+		return "'" + s
+	}
+	return s
+}

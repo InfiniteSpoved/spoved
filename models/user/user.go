@@ -79,6 +79,8 @@ const (
 	EmailNotificationsDisabled = "disabled"
 	// EmailNotificationsAndYourOwn indicates that the user would like to receive all email notifications and your own
 	EmailNotificationsAndYourOwn = "andyourown"
+	// EmailNotificationsCustom indicates that the user picked the events themselves, see NotificationSettings.
+	EmailNotificationsCustom = "custom"
 )
 
 // User represents the object of individual and member of organization.
@@ -1163,7 +1165,7 @@ func GetMaileableUsersByIDs(ctx context.Context, ids []int64, isMention bool) ([
 			Where("`type` = ?", UserTypeIndividual).
 			And("`prohibit_login` = ?", false).
 			And("`is_active` = ?", true).
-			In("`email_notifications_preference`", EmailNotificationsEnabled, EmailNotificationsOnMention, EmailNotificationsAndYourOwn).
+			In("`email_notifications_preference`", EmailNotificationsEnabled, EmailNotificationsOnMention, EmailNotificationsAndYourOwn, EmailNotificationsCustom).
 			Find(&ous)
 	}
 
@@ -1172,7 +1174,7 @@ func GetMaileableUsersByIDs(ctx context.Context, ids []int64, isMention bool) ([
 		Where("`type` = ?", UserTypeIndividual).
 		And("`prohibit_login` = ?", false).
 		And("`is_active` = ?", true).
-		In("`email_notifications_preference`", EmailNotificationsEnabled, EmailNotificationsAndYourOwn).
+		In("`email_notifications_preference`", EmailNotificationsEnabled, EmailNotificationsAndYourOwn, EmailNotificationsCustom).
 		Find(&ous)
 }
 
