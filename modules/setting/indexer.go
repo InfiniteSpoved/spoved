@@ -166,7 +166,7 @@ func loadIndexerFrom(rootCfg ConfigProvider) {
 	Indexer.ExcludePatterns = IndexerGlobFromString(sec.Key("REPO_INDEXER_EXCLUDE").MustString(""))
 	Indexer.ExcludeVendored = sec.Key("REPO_INDEXER_EXCLUDE_VENDORED").MustBool(true)
 	Indexer.MaxIndexerFileSize = sec.Key("MAX_FILE_SIZE").MustInt64(1024 * 1024)
-	Indexer.MaxIndexedBranchesPerRepo = max(sec.Key("MAX_INDEXED_BRANCHES_PER_REPO").MustInt(5), 1)
+	Indexer.MaxIndexedBranchesPerRepo = min(max(sec.Key("MAX_INDEXED_BRANCHES_PER_REPO").MustInt(5), 1), 64) // 64: zoekt's limit of branches per shard
 	var err error
 	Indexer.StartupTimeout, err = sec.Key("STARTUP_TIMEOUT").MustDuration(30 * time.Second)
 	if err != nil {

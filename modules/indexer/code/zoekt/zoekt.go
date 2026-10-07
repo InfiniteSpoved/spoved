@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/analyze"
@@ -58,23 +59,22 @@ func NewIndexer(indexDir string) *Indexer {
 	}
 }
 
-func newZoektIndexBuilder(indexDir string, repo *repo_model.Repository, targetSHA string) (*index.Builder, error) {
-	opts := index.Options{
+func zoektOptions(indexDir string, repoID int64, branches []zoekt.RepositoryBranch, isDelta bool) index.Options {
+	return index.Options{
 		IndexDir: indexDir,
 		SizeMax:  int(setting.Indexer.MaxIndexerFileSize),
 		ShardMax: 512 * 1024 * 1024, // 512 MB max shard
-		IsDelta:  true,
+		IsDelta:  isDelta,
 		RepositoryDescription: zoekt.Repository{
-			ID:   uint32(repo.ID),
-			Name: strconv.FormatInt(repo.ID, 10),
-			Branches: []zoekt.RepositoryBranch{
-				{
-					Name:    "HEAD",
-					Version: targetSHA,
-				},
-			},
+			ID:       uint32(repoID),
+			Name:     strconv.FormatInt(repoID, 10),
+			Branches: branches,
 		},
 	}
+}
+
+func newZoektIndexBuilder(indexDir string, repo *repo_model.Repository, targetSHA string) (*index.Builder, error) {
+	opts := zoektOptions(indexDir, repo.ID, []zoekt.RepositoryBranch{{Name: "HEAD", Version: targetSHA}}, true)
 
 	if opts.IncrementalSkipIndexing() {
 		return nil, errSkipIndexing
@@ -94,7 +94,7 @@ func (b *Indexer) addDelete(builder *index.Builder, filename string) {
 	builder.MarkFileAsChangedOrRemoved(filename)
 }
 
-func (b *Indexer) addUpdate(ctx context.Context, builder *index.Builder, batchWriter io.Writer, batchReader *bufio.Reader, update internal.FileUpdate, repo *repo_model.Repository) error {
+func (b *Indexer) addUpdate(ctx context.Context, builder *index.Builder, batchWriter io.Writer, batchReader *bufio.Reader, update internal.FileUpdate, repo *repo_model.Repository, branches []string) error {
 	// Ignore vendored files in code search
 	if setting.Indexer.ExcludeVendored && analyze.IsVendor(update.Filename) {
 		return nil
@@ -140,8 +140,6 @@ func (b *Indexer) addUpdate(ctx context.Context, builder *index.Builder, batchWr
 
 	builder.MarkFileAsChangedOrRemoved(update.Filename)
 
-	branches := []string{"HEAD"}
-
 	err = builder.Add(
 		index.Document{
 			Name:     update.Filename,
@@ -164,10 +162,7 @@ func detectLanguage(filename string, content []byte) string {
 
 // Index will save the index data
 func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, branch, sha string, isDefault bool, changes *internal.RepoChanges) error {
-	// ponytail: zoekt only indexes the default branch (HEAD); multi-branch needs a full rebuild with per-branch documents
-	if !isDefault {
-		return nil
-	}
+	// the delta index is for repos that only have the default branch, see IndexBranches for the others
 	builder, err := newZoektIndexBuilder(b.indexDir, repo, sha)
 	if errors.Is(err, errSkipIndexing) {
 		return nil
@@ -186,14 +181,14 @@ func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, branch
 
 		if err := r.WithCatFileBatch(ctx, func(w io.Writer, r *bufio.Reader) error {
 			for _, update := range changes.Updates {
-				err := b.addUpdate(ctx, builder, w, r, update, repo)
+				err := b.addUpdate(ctx, builder, w, r, update, repo, []string{"HEAD"})
 				if err != nil {
 					return err
 				}
 			}
 			return nil
 		}); err != nil {
-			return nil
+			return err
 		}
 	}
 
@@ -204,9 +199,79 @@ func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, branch
 	return builder.Finish()
 }
 
-// DeleteBranch does nothing: only the default branch is indexed.
+// DeleteBranch does nothing: IndexBranches rebuilds the repo without the branch.
 func (b *Indexer) DeleteBranch(_ context.Context, _ int64, _ string) error {
 	return nil
+}
+
+// SupportsRegex implements internal.RegexSearcher.
+func (b *Indexer) SupportsRegex() bool {
+	return true
+}
+
+type branchDoc struct {
+	update   internal.FileUpdate
+	branches []string
+}
+
+// groupBranchFiles lists each file once per (path, blob) with the branches it is on, so identical
+// files on several branches are a single document. The default branch is HEAD.
+func groupBranchFiles(branches []internal.BranchFiles, defaultBranch string) []*branchDoc {
+	var docs []*branchDoc
+	byKey := map[[2]string]*branchDoc{}
+	for _, br := range branches {
+		name := br.Name
+		if name == defaultBranch {
+			name = "HEAD"
+		}
+		for _, f := range br.Files {
+			key := [2]string{f.Filename, f.BlobSha}
+			doc, ok := byKey[key]
+			if !ok {
+				doc = &branchDoc{update: f}
+				byKey[key] = doc
+				docs = append(docs, doc)
+			}
+			doc.branches = append(doc.branches, name)
+		}
+	}
+	return docs
+}
+
+// IndexBranches implements internal.BranchIndexer: a full, non-delta build, which replaces the
+// shards of the repo, with the files of every branch.
+func (b *Indexer) IndexBranches(ctx context.Context, repo *repo_model.Repository, defaultBranch string, branches []internal.BranchFiles) error {
+	description := make([]zoekt.RepositoryBranch, 0, len(branches))
+	for _, br := range branches {
+		name := br.Name
+		if name == defaultBranch {
+			name = "HEAD"
+		}
+		description = append(description, zoekt.RepositoryBranch{Name: name, Version: br.CommitID})
+	}
+	opts := zoektOptions(b.indexDir, repo.ID, description, false)
+	opts.SetDefaults()
+	builder, err := index.NewBuilder(opts)
+	if err != nil {
+		return fmt.Errorf("index.NewBuilder: %w", err)
+	}
+
+	r, err := gitrepo.OpenRepository(ctx, repo)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	if err := r.WithCatFileBatch(ctx, func(w io.Writer, r *bufio.Reader) error {
+		for _, doc := range groupBranchFiles(branches, defaultBranch) {
+			if err := b.addUpdate(ctx, builder, w, r, doc.update, repo, doc.branches); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return builder.Finish()
 }
 
 func (b *Indexer) Delete(ctx context.Context, repoID int64) error {
@@ -250,10 +315,21 @@ func (b *Indexer) generateZoektQuery(opts *internal.SearchOptions) (query.Q, err
 	var contentQuery query.Q
 	var err error
 
+	if len(keyword) > internal.MaxKeywordLength {
+		return nil, fmt.Errorf("%w: longer than %d characters", internal.ErrInvalidQuery, internal.MaxKeywordLength)
+	}
+
 	// Zoekt does not support true fuzzy search.
 	// CodeSearchModeFuzzy is therefore treated as a union (OR) search
 	// to preserve previous behavior.
 	switch opts.Mode {
+	case internal.CodeSearchModeRegex:
+		// built directly: the keyword never goes through the query parser
+		re, err := syntax.Parse(keyword, syntax.Perl)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", internal.ErrInvalidQuery, err)
+		}
+		contentQuery = &query.Regexp{Regexp: re, Content: true}
 	case internal.CodeSearchModeUnion, internal.CodeSearchModeFuzzy:
 		fields := strings.Fields(keyword)
 		if len(fields) == 0 {
@@ -294,7 +370,18 @@ func (b *Indexer) generateZoektQuery(opts *internal.SearchOptions) (query.Q, err
 		finalQuery = query.NewAnd(finalQuery, query.NewRepoIDs(repoIDs...))
 	}
 
+	switch {
+	case opts.AllBranches:
+	case opts.Branch != "":
+		finalQuery = query.NewAnd(finalQuery, &query.Branch{Pattern: opts.Branch, Exact: true})
+	default:
+		finalQuery = query.NewAnd(finalQuery, &query.Branch{Pattern: "HEAD", Exact: true})
+	}
+
 	if opts.Filename != "" {
+		if len(opts.Filename) > internal.MaxKeywordLength {
+			return nil, fmt.Errorf("%w: path longer than %d characters", internal.ErrInvalidQuery, internal.MaxKeywordLength)
+		}
 		prefix := strings.TrimPrefix(opts.Filename, "/")
 
 		re, err := syntax.Parse(
@@ -412,6 +499,7 @@ func convertZoektResult(files []zoekt.FileMatch) []*internal.SearchResult {
 
 		results = append(results, &internal.SearchResult{
 			RepoID:      int64(f.RepositoryID),
+			Branch:      firstBranch(f.Branches),
 			Filename:    f.FileName,
 			CommitID:    f.Version,
 			Content:     strings.Join(contentLines, "\n"),
@@ -426,6 +514,13 @@ func convertZoektResult(files []zoekt.FileMatch) []*internal.SearchResult {
 	return results
 }
 
+func firstBranch(branches []string) string {
+	if len(branches) == 0 {
+		return ""
+	}
+	return branches[0]
+}
+
 func normalizeLanguage(lang string) string {
 	if lang == "" {
 		return "Plain Text"
@@ -433,29 +528,41 @@ func normalizeLanguage(lang string) string {
 	return lang
 }
 
+const (
+	shardMaxMatchCount = 100000
+	totalMaxMatchCount = 10000
+	regexTimeout       = 5 * time.Second
+)
+
 func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int64, []*internal.SearchResult, []*internal.SearchResultLanguages, error) {
 	q, err := b.generateZoektQuery(opts)
 	if err != nil {
 		return 0, nil, nil, err
 	}
 
+	if opts.Mode == internal.CodeSearchModeRegex {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, regexTimeout)
+		defer cancel()
+	}
+
+	skip, take := opts.GetSkipTake()
 	result, err := b.inner.Searcher.Search(ctx, q, &zoekt.SearchOptions{
-		Whole: true,
+		Whole:              true, // only the displayed documents are loaded, see MaxDocDisplayCount
+		ShardMaxMatchCount: shardMaxMatchCount,
+		TotalMaxMatchCount: totalMaxMatchCount,
+		MaxDocDisplayCount: min(skip+take, internal.MaxSearchWindow),
 	})
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return 0, nil, nil, internal.ErrQueryTooExpensive
+		}
 		return 0, nil, nil, err
 	}
 
-	allHits := convertZoektResult(result.Files)
+	pagedHits := convertZoektResult(paginateResults(result.Files, skip, take))
 
-	searchResultsLanguages := getSearchResultLanguages(result)
-
-	skip, take := opts.GetSkipTake()
-	pagedHits := paginateResults(allHits, skip, take)
-
-	total := int64(len(allHits))
-
-	return total, pagedHits, searchResultsLanguages, nil
+	return int64(result.FileCount), pagedHits, getSearchResultLanguages(result), nil
 }
 
 func (b *Indexer) Formatter() internal.ResultFormatter {
@@ -569,6 +676,7 @@ func (f *zoektFormatter) Format(r *internal.SearchResult) (*internal.Result, err
 	// Return the final search result
 	return &internal.Result{
 		RepoID:      r.RepoID,
+		Branch:      r.Branch,
 		Filename:    r.Filename,
 		CommitID:    r.CommitID,
 		UpdatedUnix: r.UpdatedUnix,

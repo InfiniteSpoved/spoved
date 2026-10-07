@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
@@ -19,6 +20,7 @@ import (
 	"forgejo.org/modules/indexer/code/bleve"
 	"forgejo.org/modules/indexer/code/elasticsearch"
 	"forgejo.org/modules/indexer/code/internal"
+	"forgejo.org/modules/indexer/code/zoekt"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -320,4 +322,40 @@ func testBranches(t *testing.T, indexer internal.Indexer, repoID int64) {
 	require.NoError(t, indexer.DeleteBranch(t.Context(), repoID, "idxbranch"))
 	assert.Empty(t, contents("idxbranch", false))
 	assert.Equal(t, []string{"defaultcontent marker"}, contents("", true))
+}
+
+// zoekt indexes all branches in one go: a file that only exists on another branch is found there and
+// with all branches, never on the default branch, and the files of the default branch stay as before.
+func TestZoektBranches(t *testing.T) {
+	unittest.PrepareTestEnv(t)
+
+	idx := zoekt.NewIndexer(t.TempDir())
+	if _, err := idx.Init(t.Context()); err != nil {
+		t.Skipf("zoekt is not available: %v", err)
+	}
+	defer idx.Close()
+	const repoID = 1
+	setPatterns(t, repoID, "branch2")
+	require.NoError(t, index(git.DefaultContext, idx, repoID))
+
+	found := func(branch string, all bool, keyword string) []string {
+		var names []string
+		require.Eventually(t, func() bool { // the shards are picked up asynchronously
+			_, res, _, err := idx.Search(t.Context(), &internal.SearchOptions{
+				RepoIDs: []int64{repoID}, Keyword: keyword, Mode: SearchModeExact, Branch: branch, AllBranches: all,
+				Paginator: &db.ListOptions{Page: 1, PageSize: 20},
+			})
+			require.NoError(t, err)
+			names = names[:0]
+			for _, r := range res {
+				names = append(names, r.Filename)
+			}
+			return len(names) > 0
+		}, 5*time.Second, 50*time.Millisecond, keyword)
+		return names
+	}
+
+	assert.Equal(t, []string{"README.md"}, found("", false, "Description"))
+	assert.Contains(t, found("", true, "Description"), "README.md")
+	assert.Contains(t, found("branch2", false, "Description"), "README.md")
 }

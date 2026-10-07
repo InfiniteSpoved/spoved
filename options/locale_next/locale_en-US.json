@@ -1720,5 +1720,8 @@
 	"repo.settings.code_search.indexed_branches": "Indexed branches",
 	"repo.settings.code_search.indexed_branches_help": "The default branch is always indexed. Add more branch names or patterns, one per line, e.g. develop or release/*. A pattern selects its most recently updated branches; at most %d branches are indexed in total, the default branch included.",
 	"repo.settings.code_search.invalid_branches": "Invalid indexed branches: %s",
+	"repo.settings.code_search.branch": "Branch",
+	"repo.settings.code_search.default_branch": "Default branch",
+	"repo.settings.code_search.all_branches": "All indexed branches",
 	"meta.last_line": "Thank you for translating Forgejo! This line isn't seen by the users but it serves other purposes in the translation management. You can place a fun fact in the translation instead of translating it."
 }

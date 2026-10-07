@@ -5,7 +5,9 @@
 package repo
 
 import (
+	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"forgejo.org/models/db"
@@ -48,6 +50,9 @@ func (m searchMode) ToIndexer() code_indexer.SearchMode {
 	if setting.Indexer.RepoIndexerEnableFuzzy && m == FuzzySearchMode {
 		return code_indexer.SearchModeFuzzy
 	}
+	if m == RegExpSearchMode && code_indexer.SupportsRegex() {
+		return code_indexer.SearchModeRegex
+	}
 	return code_indexer.SearchModeUnion
 }
 
@@ -60,6 +65,30 @@ func (m searchMode) ToGitGrep() git.GrepMode {
 	default:
 		return git.FixedGrepMode
 	}
+}
+
+// searchBranch reads the branch to search from the form and sets the data of the selector. Only
+// indexed branches are accepted, anything else is the default branch.
+func searchBranch(ctx *context.Context) (branch string, all, ok bool) {
+	branches, err := code_indexer.IndexedBranchNames(ctx, ctx.Repo.Repository)
+	if err != nil {
+		ctx.ServerError("IndexedBranchNames", err)
+		return "", false, false
+	}
+	ctx.Data["SearchBranches"] = branches
+
+	switch b := ctx.FormTrim("branch"); {
+	case b == "all":
+		all = true
+	case slices.Contains(branches, b):
+		branch = b
+	}
+	if all {
+		ctx.Data["SearchBranch"] = "all"
+	} else {
+		ctx.Data["SearchBranch"] = branch
+	}
+	return branch, all, true
 }
 
 // Search render repository search page
@@ -79,6 +108,17 @@ func Search(ctx *context.Context) {
 		ctx.Data["CodeSearchOptions"] = code_indexer.CodeSearchOptions
 	} else {
 		ctx.Data["CodeSearchOptions"] = git.GrepSearchOptions
+	}
+
+	var (
+		branch      string
+		allBranches bool
+	)
+	if setting.Indexer.RepoIndexerEnabled {
+		var ok bool
+		if branch, allBranches, ok = searchBranch(ctx); !ok {
+			return
+		}
 	}
 
 	if opts.Keyword == "" {
@@ -105,17 +145,21 @@ func Search(ctx *context.Context) {
 
 		var err error
 		total, searchResults, searchResultLanguages, err = code_indexer.PerformSearch(ctx, &code_indexer.SearchOptions{
-			RepoIDs:  []int64{ctx.Repo.Repository.ID},
-			Keyword:  opts.Keyword,
-			Mode:     m,
-			Language: opts.Language,
-			Filename: opts.Path,
+			RepoIDs:     []int64{ctx.Repo.Repository.ID},
+			Keyword:     opts.Keyword,
+			Mode:        m,
+			Language:    opts.Language,
+			Filename:    opts.Path,
+			Branch:      branch,
+			AllBranches: allBranches,
 			Paginator: &db.ListOptions{
 				Page:     page,
 				PageSize: setting.UI.RepoSearchPagingNum,
 			},
 		})
-		if err != nil {
+		if errors.Is(err, code_indexer.ErrInvalidQuery) {
+			ctx.Data["CodeSearchError"] = err.Error()
+		} else if err != nil {
 			if code_indexer.IsAvailable(ctx) {
 				ctx.ServerError("SearchResults", err)
 				return
@@ -123,6 +167,11 @@ func Search(ctx *context.Context) {
 			ctx.Data["CodeIndexerUnavailable"] = true
 		} else {
 			ctx.Data["CodeIndexerUnavailable"] = !code_indexer.IsAvailable(ctx)
+		}
+		for _, r := range searchResults {
+			if r.Branch == ctx.Repo.Repository.DefaultBranch || r.Branch == "HEAD" {
+				r.Branch = "" // results on the default branch stay as they were
+			}
 		}
 	} else {
 		m := mode.ToGitGrep()
@@ -168,6 +217,7 @@ func Search(ctx *context.Context) {
 	pager.AddParam(ctx, "l", "Language")
 	pager.AddParam(ctx, "mode", "CodeSearchMode")
 	pager.AddParam(ctx, "path", "CodeSearchPath")
+	pager.AddParam(ctx, "branch", "SearchBranch")
 	ctx.Data["Page"] = pager
 
 	ctx.HTML(http.StatusOK, tplSearch)
