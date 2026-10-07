@@ -232,6 +232,8 @@ func applyRepoConditions(sess *xorm.Session, opts *IssuesOptions) {
 }
 
 func applyConditions(sess *xorm.Session, opts *IssuesOptions) {
+	sess.And("`repository`.trashed_unix = 0")
+
 	if len(opts.IssueIDs) > 0 {
 		sess.In("issue.id", opts.IssueIDs)
 	}

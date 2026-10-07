@@ -176,11 +176,14 @@ func updateForkRepositoryInContext(ctx *context.Context, forkRepo *repo_model.Re
 		if !traverseParentRepo.IsFork {
 			break
 		}
-		traverseParentRepo, err = repo_model.GetRepositoryByID(ctx, traverseParentRepo.ForkID)
-		if err != nil {
+		parentRepo, err := repo_model.GetRepositoryByID(ctx, traverseParentRepo.ForkID)
+		if repo_model.IsErrRepoNotExist(err) { // the parent is in the trash: the chain ends here
+			break
+		} else if err != nil {
 			ctx.ServerError("GetRepositoryByID", err)
 			return false
 		}
+		traverseParentRepo = parentRepo
 	}
 
 	ctx.Data["CanForkToUser"] = canForkToUser
@@ -280,11 +283,14 @@ func ForkPost(ctx *context.Context) {
 		if !traverseParentRepo.IsFork {
 			break
 		}
-		traverseParentRepo, err = repo_model.GetRepositoryByID(ctx, traverseParentRepo.ForkID)
-		if err != nil {
+		parentRepo, err := repo_model.GetRepositoryByID(ctx, traverseParentRepo.ForkID)
+		if repo_model.IsErrRepoNotExist(err) { // the parent is in the trash: the chain ends here
+			break
+		} else if err != nil {
 			ctx.ServerError("GetRepositoryByID", err)
 			return
 		}
+		traverseParentRepo = parentRepo
 	}
 
 	// Check if user is allowed to create repo's on the organization.

@@ -297,6 +297,12 @@ func (u *User) MaxCreationLimit() int {
 // CanCreateRepo returns if user login can create a repository
 // NOTE: functions calling this assume a failure due to repository count limit; if new checks are added, those functions should be revised
 func (u *User) CanCreateRepo() bool {
+	return u.CanCreateRepoWithTrashed(0)
+}
+
+// CanCreateRepoWithTrashed is CanCreateRepo with the given number of repositories in the trash added to the
+// count, as they still use up the limit.
+func (u *User) CanCreateRepoWithTrashed(trashed int) bool {
 	if u.IsAdmin {
 		return true
 	}
@@ -304,9 +310,9 @@ func (u *User) CanCreateRepo() bool {
 		if setting.Repository.MaxCreationLimit <= -1 {
 			return true
 		}
-		return u.NumRepos < setting.Repository.MaxCreationLimit
+		return u.NumRepos+trashed < setting.Repository.MaxCreationLimit
 	}
-	return u.NumRepos < u.MaxRepoCreation
+	return u.NumRepos+trashed < u.MaxRepoCreation
 }
 
 // CanCreateOrganization returns true if user can create organisation.

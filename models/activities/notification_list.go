@@ -32,7 +32,8 @@ type FindNotificationOptions struct {
 
 // ToCond will convert each condition into a xorm-Cond
 func (opts FindNotificationOptions) ToConds() builder.Cond {
-	cond := builder.NewCond()
+	// notifications of a trashed repository are hidden, as the repository's Repository would load as nil
+	cond := builder.NotIn("notification.repo_id", builder.Select("id").From("repository").Where(builder.Neq{"trashed_unix": 0}))
 	if opts.UserID != 0 {
 		cond = cond.And(builder.Eq{"notification.user_id": opts.UserID})
 	}

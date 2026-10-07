@@ -40,7 +40,7 @@ func TestTrashSSHServ(t *testing.T) {
 
 	key := unittest.AssertExistsAndLoadBean(t, &asymkey_model.PublicKey{ID: 1})
 	_, extra := private.ServCommand(t.Context(), key.ID, "user2", "repo1", perm.AccessModeRead, "127.0.0.1", "git-upload-pack")
-	assert.Equal(t, http.StatusNotFound, extra.HTTPStatusCode())
+	assert.Equal(t, http.StatusNotFound, extra.StatusCode)
 }
 
 // LFS: a batch download for a trashed repository is refused.
@@ -89,7 +89,7 @@ func TestTrashWebhooks(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	hook := &webhook_model.Webhook{RepoID: trashRepoID, URL: "http://127.0.0.1:1/hook", HTTPMethod: "POST", ContentType: webhook_model.ContentTypeJSON, IsActive: true, Type: webhook_module.GITEA}
 	hook.HookEvent = &webhook_module.HookEvent{PushOnly: true}
-	require.NoError(t, webhook_model.CreateWebhook(t.Context(), hook))
+	require.NoError(t, webhook_model.CreateWebhook(t.Context(), hook, ""))
 
 	moveToTrash(t)
 
@@ -154,7 +154,7 @@ func TestTrashReferencesAndLists(t *testing.T) {
 	body = loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/issues"), http.StatusOK).Body.String()
 	assert.NotContains(t, body, "user2/repo1")
 
-	repos, err := repo_model.GetRepositoriesByIDs(t.Context(), []int64{trashRepoID})
+	repos, err := repo_model.GetRepositoriesMapByIDs(t.Context(), []int64{trashRepoID})
 	require.NoError(t, err)
 	assert.Empty(t, repos)
 }

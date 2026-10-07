@@ -32,7 +32,7 @@
 				</a>
 			</div>
 		</details>
-		<details class="item toggleable-item" {{if or .PageIsAdminRepositories .PageIsAdminStorage .PageIsAdminAccessReports (and .EnablePackages .PageIsAdminPackages)}}open{{end}}>
+		<details class="item toggleable-item" {{if or .PageIsAdminRepositories .PageIsAdminStorage .PageIsAdminAccessReports .PageIsAdminTrash (and .EnablePackages .PageIsAdminPackages)}}open{{end}}>
 			<summary>{{ctx.Locale.Tr "admin.assets"}}</summary>
 			<div class="menu">
 				{{if .EnablePackages}}
@@ -42,6 +42,9 @@
 				{{end}}
 				<a class="{{if .PageIsAdminRepositories}}active {{end}}item" href="{{AppSubUrl}}/admin/repos">
 					{{ctx.Locale.Tr "admin.repositories"}}
+				</a>
+				<a class="{{if .PageIsAdminTrash}}active {{end}}item" href="{{AppSubUrl}}/admin/trash">
+					{{ctx.Locale.Tr "admin.trash"}}
 				</a>
 				<a class="{{if .PageIsAdminStorage}}active {{end}}item" href="{{AppSubUrl}}/admin/storage">
 					{{ctx.Locale.Tr "admin.storage"}}

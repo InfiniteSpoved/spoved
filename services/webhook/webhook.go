@@ -237,6 +237,9 @@ func PrepareTestWebhook(ctx context.Context, w *webhook_model.Webhook, p api.Pay
 
 // PrepareWebhooks adds new webhooks to task queue for given payload.
 func PrepareWebhooks(ctx context.Context, source EventSource, event webhook_module.HookEventType, p api.Payloader) error {
+	if source.Repository != nil && source.Repository.IsTrashed() {
+		return nil
+	}
 	owner := source.Owner
 
 	var ws []*webhook_model.Webhook

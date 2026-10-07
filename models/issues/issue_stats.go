@@ -139,6 +139,8 @@ func getIssueStatsChunk(ctx context.Context, opts *IssuesOptions, issueIDs []int
 }
 
 func applyIssuesOptions(sess *xorm.Session, opts *IssuesOptions, issueIDs []int64) *xorm.Session {
+	sess.And(builder.NotIn("issue.repo_id", builder.Select("id").From("repository").Where(builder.Neq{"trashed_unix": 0})))
+
 	if len(opts.RepoIDs) > 1 {
 		sess.In("issue.repo_id", opts.RepoIDs)
 	} else if len(opts.RepoIDs) == 1 {

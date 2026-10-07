@@ -138,6 +138,7 @@ type SearchRepoOptions struct {
 	TeamID          int64
 	OrderBy         db.SearchOrderBy
 	Private         bool // Include private repositories in results
+	IncludeTrashed  bool // Include repositories in the trash; only for the owner's delete and adopt paths
 	StarredByID     int64
 	WatchedByID     int64
 	AllPublic       bool // Include also all public repositories of users and public organisations
@@ -332,6 +333,9 @@ func UserOrgPublicUnitRepoCond(userID, orgID int64) builder.Cond {
 // SearchRepositoryCondition creates a query condition according search repository options
 func SearchRepositoryCondition(opts *SearchRepoOptions) builder.Cond {
 	cond := builder.NewCond()
+	if !opts.IncludeTrashed {
+		cond = builder.Eq{"`repository`.trashed_unix": 0}
+	}
 
 	if opts.Private {
 		if opts.Actor != nil && !opts.Actor.IsAdmin && !(opts.AuditorView && opts.Actor.IsAuditor) && opts.Actor.ID != opts.OwnerID {
@@ -671,7 +675,7 @@ func AccessibleRepositoryCondition(user *user_model.User, unitType unit.Type) bu
 		}
 	}
 
-	return cond
+	return builder.And(cond, builder.Eq{"`repository`.trashed_unix": 0})
 }
 
 // SearchRepositoryByName takes keyword and part of repository name to search,

@@ -26,6 +26,8 @@ func SyncFork(ctx context.Context, doer *user_model.User, repo *repo_model.Repos
 	err = repo.GetBaseRepo(ctx)
 	if err != nil {
 		return err
+	} else if repo.BaseRepo == nil {
+		return repo_model.ErrRepoNotExist{ID: repo.ForkID}
 	}
 
 	err = git.Push(ctx, repo.BaseRepo.RepoPath(), git.PushOptions{
@@ -52,6 +54,8 @@ func GetSyncForkInfo(ctx context.Context, repo *repo_model.Repository, branch st
 	err := repo.GetBaseRepo(ctx)
 	if err != nil {
 		return nil, err
+	} else if repo.BaseRepo == nil {
+		return nil, repo_model.ErrRepoNotExist{ID: repo.ForkID}
 	}
 
 	forkBranch, err := git_model.GetBranch(ctx, repo.ID, branch)

@@ -52,8 +52,22 @@ func CreateRepository(ctx context.Context, doer, owner *user_model.User, opts Cr
 	return repo, nil
 }
 
-// DeleteRepository deletes a repository for a user or organization.
+// DeleteRepository deletes a repository for a user or organization: it moves it to the trash, or deletes it
+// for good when [trash] RETENTION_DAYS is 0.
 func DeleteRepository(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, notify bool) error {
+	if setting.Trash.RetentionDays == 0 {
+		return DeleteRepositoryPermanently(ctx, doer, repo, notify)
+	}
+	if notify {
+		// If the repo itself has webhooks, we need to trigger them before deleting it...
+		notify_service.DeleteRepository(ctx, doer, repo)
+	}
+	// A trashed repository can be restored, so its pull requests stay as they are.
+	return TrashRepository(ctx, doer, repo)
+}
+
+// DeleteRepositoryPermanently deletes a repository for a user or organization, bypassing the trash.
+func DeleteRepositoryPermanently(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, notify bool) error {
 	if err := pull_service.CloseRepoBranchesPulls(ctx, doer, repo); err != nil {
 		log.Error("CloseRepoBranchesPulls failed: %v", err)
 	}

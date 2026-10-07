@@ -41,6 +41,7 @@ func GetStarredRepos(ctx context.Context, userID int64, private bool, listOption
 func GetWatchedRepos(ctx context.Context, userID int64, private bool, listOptions db.ListOptions, reducer RepositoryAuthorizationReducer) ([]*Repository, int64, error) {
 	sess := db.GetEngine(ctx).
 		Where("watch.user_id=?", userID).
+		And("`repository`.trashed_unix = 0").
 		And(BuilderWatchAnything()).
 		Join("LEFT", "watch", "`repository`.id=`watch`.repo_id")
 	if !private {

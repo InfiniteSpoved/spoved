@@ -1,0 +1,54 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.trash"}} ({{ctx.Locale.Tr "admin.total" .Total}}, {{ctx.Locale.Tr "admin.trash.total_size" (ctx.Locale.TrSize .TotalSize)}})
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.trash.desc" .RetentionDays}}</p>
+			<form class="ui form ignore-dirty tw-flex tw-items-center tw-gap-2">
+				<input name="q" value="{{.Keyword}}" aria-label="{{ctx.Locale.Tr "search"}}" placeholder="{{ctx.Locale.Tr "search"}}">
+				<button class="ui small button">{{ctx.Locale.Tr "search"}}</button>
+			</form>
+		</div>
+		<div class="ui attached table segment">
+			<table class="ui very basic striped table unstackable">
+				<thead>
+					<tr>
+						<th>{{ctx.Locale.Tr "admin.trash.repo"}}</th>
+						<th>{{ctx.Locale.Tr "admin.trash.deleted_by"}}</th>
+						<th>{{ctx.Locale.Tr "admin.trash.deleted_at"}}</th>
+						<th>{{ctx.Locale.Tr "admin.trash.days_remaining"}}</th>
+						<th>{{ctx.Locale.Tr "admin.trash.size"}}</th>
+						<th></th>
+					</tr>
+				</thead>
+				<tbody>
+					{{range .Items}}
+						<tr>
+							<td class="tw-break-anywhere">{{.Repo.TrashedOwnerName}}/{{.Repo.TrashedName}}</td>
+							<td>{{.Repo.TrashedByName}}</td>
+							<td>{{DateUtils.AbsoluteShort .Repo.TrashedUnix}}</td>
+							<td>{{if .Purging}}{{ctx.Locale.Tr "admin.trash.purging"}}{{else}}{{.DaysRemaining}}{{end}}</td>
+							<td>{{ctx.Locale.TrSize .Repo.Size}}</td>
+							<td>
+								{{if not .Purging}}
+									<form class="tw-inline-block" method="post" action="{{AppSubUrl}}/admin/trash/{{.Repo.ID}}/restore">
+										<button class="ui small primary button">{{ctx.Locale.Tr "admin.trash.restore"}}</button>
+									</form>
+									<form class="tw-inline-flex tw-items-center tw-gap-1" method="post" action="{{AppSubUrl}}/admin/trash/{{.Repo.ID}}/purge">
+										<input name="confirm_name" required autocomplete="off" aria-label="{{ctx.Locale.Tr "admin.trash.purge_confirm" (print .Repo.TrashedOwnerName "/" .Repo.TrashedName)}}" placeholder="{{.Repo.TrashedOwnerName}}/{{.Repo.TrashedName}}">
+										<button class="ui small red button">{{ctx.Locale.Tr "admin.trash.purge"}}</button>
+									</form>
+								{{end}}
+							</td>
+						</tr>
+					{{else}}
+						<tr><td class="tw-text-center" colspan="6">{{ctx.Locale.Tr "admin.trash.empty"}}</td></tr>
+					{{end}}
+				</tbody>
+			</table>
+		</div>
+
+		{{template "base/paginate" .}}
+	</div>
+{{template "admin/layout_footer" .}}

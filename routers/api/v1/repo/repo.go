@@ -808,7 +808,9 @@ func updateBasicProperties(ctx *context.APIContext, opts api.EditRepoOption) err
 				ctx.Error(http.StatusInternalServerError, "Unable to load base repository", err)
 				return err
 			}
-			*opts.Private = repo.BaseRepo.IsPrivate
+			if repo.BaseRepo != nil {
+				*opts.Private = repo.BaseRepo.IsPrivate
+			}
 		}
 
 		visibilityChanged = repo.IsPrivate != *opts.Private

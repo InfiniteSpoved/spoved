@@ -258,7 +258,7 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 						})
 						return
 					}
-					if repo.BaseRepo.AllowsPulls(ctx) {
+					if repo.BaseRepo != nil && repo.BaseRepo.AllowsPulls(ctx) {
 						baseRepo = repo.BaseRepo
 					}
 				}

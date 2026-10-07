@@ -345,6 +345,7 @@ func GetAvailableJobsForRunner(e db.Engine, runner *ActionRunner) ([]*ActionRunJ
 		Join("INNER", "repo_unit", "action_run_job.repo_id = repo_unit.repo_id").
 		Where("task_id=? AND action_run_job.status=? AND `repo_unit`.type=?", 0, StatusWaiting, unit.TypeActions).
 		And(jobCond).
+		And(builder.NotIn("action_run_job.repo_id", builder.Select("id").From("repository").Where(builder.Neq{"trashed_unix": 0}))).
 		Desc("action_run.priority").
 		Asc("action_run_job.updated", "action_run_job.id").
 		Find(&jobs); err != nil {

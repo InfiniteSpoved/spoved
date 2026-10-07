@@ -5,7 +5,6 @@ package integration
 
 import (
 	"net/http"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -19,7 +18,6 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
-	repo_service "forgejo.org/services/repository"
 	trash_service "forgejo.org/services/trash"
 	user_service "forgejo.org/services/user"
 	"forgejo.org/tests"
@@ -99,7 +97,8 @@ func TestTrashRetention(t *testing.T) {
 	t.Run("changed days apply to trashed items", func(t *testing.T) {
 		defer tests.PrepareTestEnv(t)()
 		moveToTrash(t)
-		defer timeutil.MockSet(time.Now().Add(100 * 24 * time.Hour))()
+		timeutil.MockSet(time.Now().Add(100 * 24 * time.Hour))
+	defer timeutil.MockUnset()
 
 		defer test.MockVariableValue(&setting.Trash.RetentionDays, 365)()
 		require.NoError(t, trash_service.PurgeExpired(t.Context()))
@@ -152,9 +151,8 @@ func TestTrashInvisible(t *testing.T) {
 
 	t.Run("owner counters", func(t *testing.T) {
 		user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
-		count, err := repo_model.CountRepositories(t.Context(), repo_model.CountRepositoryOptions{OwnerID: 2})
-		require.NoError(t, err)
-		assert.Equal(t, int64(user.NumRepos), count)
+		live := unittest.GetCount(t, &repo_model.Repository{OwnerID: 2}, "trashed_unix = 0")
+		assert.Equal(t, live, user.NumRepos)
 	})
 }
 
@@ -173,18 +171,17 @@ func TestTrashNameReserved(t *testing.T) {
 		MakeRequest(t, req, http.StatusUnprocessableEntity)
 	})
 	t.Run("transfer", func(t *testing.T) {
-		// user4 has a repo named like a trashed one under user2 only after the move; transferring a repo
-		// called repo1 from another owner to user2 must fail.
-		other, err := repo_service.CreateRepositoryDirectly(t.Context(), user_model.NewActionsUser(), nil, repo_service.CreateRepoOptions{Name: "repo1"}, true)
-		if err == nil {
-			assert.Error(t, repo_service.TransferOwnership(t.Context(), user_model.NewActionsUser(), unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), other, nil))
-		}
+		// user4 creates repo1; moving it to user2 must fail while user2/repo1 is in the trash
+		user4 := getUserToken(t, "user4", auth_model.AccessTokenScopeAll)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/user/repos", &api.CreateRepoOption{Name: "repo1"}).AddTokenAuth(user4), http.StatusCreated)
+		admin := adminTrashToken(t)
+		req := NewRequestWithJSON(t, "POST", "/api/v1/repos/user4/repo1/transfer", &api.TransferRepoOption{NewOwner: "user2"}).AddTokenAuth(admin)
+		resp := MakeRequest(t, req, NoExpectedStatus)
+		assert.Contains(t, []int{http.StatusConflict, http.StatusUnprocessableEntity}, resp.Code)
 	})
 	t.Run("fork", func(t *testing.T) {
-		stranger := getUserToken(t, "user4", auth_model.AccessTokenScopeAll)
-		// forking another repo named repo1 into user2 is refused: user2/repo1 is taken.
-		req := NewRequestWithJSON(t, "POST", "/api/v1/repos/user5/repo4/forks", &api.CreateForkOption{Name: new("repo1")}).AddTokenAuth(stranger)
-		MakeRequest(t, req, http.StatusNotFound) // user4 can't see it; the owner-level check is covered in the service test
+		req := NewRequestWithJSON(t, "POST", "/api/v1/repos/user5/repo4/forks", &api.CreateForkOption{Name: new("repo1")}).AddTokenAuth(token)
+		MakeRequest(t, req, http.StatusConflict)
 	})
 }
 
@@ -207,7 +204,7 @@ func TestTrashAdminList(t *testing.T) {
 	DecodeJSON(t, resp, &list)
 	assert.Empty(t, list)
 
-	body := loginUser(t, "user1").MakeRequest(t, NewRequest(t, "GET", "/-/admin/trash?q=repo1"), http.StatusOK).Body.String()
+	body := loginUser(t, "user1").MakeRequest(t, NewRequest(t, "GET", "/admin/trash?q=repo1"), http.StatusOK).Body.String()
 	assert.Contains(t, body, "user2/repo1")
 }
 
@@ -220,7 +217,7 @@ func TestTrashRestore(t *testing.T) {
 	numRepos := owner.NumRepos
 
 	moveToTrash(t)
-	loginUser(t, "user1").MakeRequest(t, NewRequest(t, "POST", "/-/admin/trash/1/restore"), http.StatusSeeOther)
+	loginUser(t, "user1").MakeRequest(t, NewRequest(t, "POST", "/admin/trash/1/restore"), http.StatusSeeOther)
 
 	after := trashRepo(t)
 	assert.False(t, after.IsTrashed())
@@ -245,10 +242,10 @@ func TestTrashPurge(t *testing.T) {
 	moveToTrash(t)
 	admin := loginUser(t, "user1")
 
-	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/-/admin/trash/1/purge", map[string]string{"confirm_name": "user2/other"}), http.StatusSeeOther)
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/trash/1/purge", map[string]string{"confirm_name": "user2/other"}), http.StatusSeeOther)
 	assert.True(t, trashRepo(t).IsTrashed(), "wrong name must not purge")
 
-	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/-/admin/trash/1/purge", map[string]string{"confirm_name": "user2/repo1"}), http.StatusSeeOther)
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/trash/1/purge", map[string]string{"confirm_name": "user2/repo1"}), http.StatusSeeOther)
 	unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: trashRepoID})
 	assert.NoDirExists(t, repo_model.RepoPath("user2", "repo1"))
 
@@ -267,9 +264,9 @@ func TestTrashAdminOnly(t *testing.T) {
 		}
 		session := loginUser(t, user)
 		token := getUserToken(t, user, auth_model.AccessTokenScopeAll)
-		session.MakeRequest(t, NewRequest(t, "GET", "/-/admin/trash"), http.StatusForbidden)
-		session.MakeRequest(t, NewRequest(t, "POST", "/-/admin/trash/1/restore"), http.StatusForbidden)
-		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/-/admin/trash/1/purge", map[string]string{"confirm_name": "user2/repo1"}), http.StatusForbidden)
+		session.MakeRequest(t, NewRequest(t, "GET", "/admin/trash"), http.StatusForbidden)
+		session.MakeRequest(t, NewRequest(t, "POST", "/admin/trash/1/restore"), http.StatusForbidden)
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/trash/1/purge", map[string]string{"confirm_name": "user2/repo1"}), http.StatusForbidden)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/trash").AddTokenAuth(token), http.StatusForbidden)
 		MakeRequest(t, NewRequest(t, "POST", "/api/v1/admin/trash/repo/1/restore").AddTokenAuth(token), http.StatusForbidden)
 		MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/admin/trash/repo/1").AddTokenAuth(token), http.StatusForbidden)
@@ -309,7 +306,7 @@ func TestTrashDeleteDialog(t *testing.T) {
 	assert.Contains(t, body, "https://helpdesk.example.org/restore")
 
 	// Owners see no trash in the UI.
-	loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/-/admin/trash"), http.StatusForbidden)
+	loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/admin/trash"), http.StatusForbidden)
 }
 
 // AC13: the cron job purges items past retention and leaves younger ones; maintenance mode pauses it.
@@ -318,7 +315,8 @@ func TestTrashPurgeExpired(t *testing.T) {
 	defer test.MockVariableValue(&setting.Trash.RetentionDays, 365)()
 	moveToTrash(t)
 
-	defer timeutil.MockSet(time.Now().Add(364 * 24 * time.Hour))()
+	timeutil.MockSet(time.Now().Add(364 * 24 * time.Hour))
+	defer timeutil.MockUnset()
 	require.NoError(t, trash_service.PurgeExpired(t.Context()))
 	assert.True(t, trashRepo(t).IsTrashed())
 
@@ -383,7 +381,7 @@ func TestTrashOwnerLifecycle(t *testing.T) {
 	unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 
 	t.Run("renamed owner purges the right dir", func(t *testing.T) {
-		require.NoError(t, user_model.ChangeUserName(ctx, user, "user2-renamed"))
+		require.NoError(t, user_service.RenameUser(ctx, user, "user2-renamed"))
 		require.NoError(t, trash_service.Purge(ctx, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1}), trashRepoID))
 		assert.NoDirExists(t, repo_model.RepoPath("user2-renamed", "repo1"))
 	})
@@ -401,7 +399,7 @@ func TestTrashCreationLimit(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	token := getUserToken(t, "user2", auth_model.AccessTokenScopeAll)
 	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
-	total, err := repo_model.CountRepositoriesIncludingTrashed(t.Context(), owner.ID)
+	total, err := repo_model.CountRepositories(t.Context(), repo_model.CountRepositoryOptions{OwnerID: owner.ID})
 	require.NoError(t, err)
 	defer test.MockVariableValue(&setting.Repository.MaxCreationLimit, int(total))()
 	owner.MaxRepoCreation = -1

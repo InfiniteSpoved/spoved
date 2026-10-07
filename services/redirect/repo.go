@@ -20,7 +20,9 @@ func LookupRepoRedirect(ctx context.Context, doer *user_model.User, ownerID int6
 	}
 
 	redirectRepo, err := repo_model.GetRepositoryByID(ctx, redirectID)
-	if err != nil {
+	if repo_model.IsErrRepoNotExist(err) { // e.g. in the trash
+		return 0, repo_model.ErrRedirectNotExist{OwnerID: ownerID, RepoName: repoName}
+	} else if err != nil {
 		return 0, err
 	}
 

@@ -81,7 +81,8 @@ type FindRunOptions struct {
 }
 
 func (opts FindRunOptions) ToConds() builder.Cond {
-	cond := builder.NewCond()
+	// runs of a trashed repository are not listed, and their Repo would load as nil
+	cond := builder.NotIn("repo_id", builder.Select("id").From("repository").Where(builder.Neq{"trashed_unix": 0}))
 	if opts.RepoID > 0 {
 		cond = cond.And(builder.Eq{"repo_id": opts.RepoID})
 	}

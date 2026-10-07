@@ -3765,7 +3765,10 @@ func filterXRefComments(ctx *context.Context, issue *issues_model.Issue) error {
 			var err error
 			// Set RefRepo for description in template
 			c.RefRepo, err = repo_model.GetRepositoryByID(ctx, c.RefRepoID)
-			if err != nil {
+			if repo_model.IsErrRepoNotExist(err) { // e.g. in the trash
+				issue.Comments = append(issue.Comments[:i], issue.Comments[i+1:]...)
+				continue
+			} else if err != nil {
 				return err
 			}
 			perm, err := access_model.GetUserRepoPermission(ctx, c.RefRepo, ctx.Doer)

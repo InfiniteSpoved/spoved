@@ -524,7 +524,7 @@
 				<div class="flex-item">
 					<div class="flex-item-main">
 						<div class="flex-item-title">{{ctx.Locale.Tr "repo.settings.delete"}}</div>
-						<div class="flex-item-body">{{ctx.Locale.Tr "repo.settings.delete_desc"}}</div>
+						<div class="flex-item-body">{{if .TrashRetentionDays}}{{template "repo/settings/trash_notice" .}}{{else}}{{ctx.Locale.Tr "repo.settings.delete_desc"}}{{end}}</div>
 					</div>
 					<div class="flex-item-trailing">
 						<button class="danger button show-modal" data-modal="#delete-repo-modal">{{ctx.Locale.Tr "repo.settings.delete"}}</button>
@@ -662,10 +662,14 @@
 			<header>{{ctx.Locale.Tr "repo.settings.delete"}}</header>
 			<div class="content">
 				<div class="ui warning message">
-					{{ctx.Locale.Tr "repo.settings.delete_notices_1"}}<br>
-					{{ctx.Locale.Tr "repo.settings.delete_notices_2" .Repository.FullName}}
-					{{if .Repository.NumForks}}<br>
-					{{ctx.Locale.Tr "repo.settings.delete_notices_fork_1"}}
+					{{if .TrashRetentionDays}}
+						{{template "repo/settings/trash_notice" .}}
+					{{else}}
+						{{ctx.Locale.Tr "repo.settings.delete_notices_1"}}<br>
+						{{ctx.Locale.Tr "repo.settings.delete_notices_2" .Repository.FullName}}
+						{{if .Repository.NumForks}}<br>
+						{{ctx.Locale.Tr "repo.settings.delete_notices_fork_1"}}
+						{{end}}
 					{{end}}
 				</div>
 			</div>
