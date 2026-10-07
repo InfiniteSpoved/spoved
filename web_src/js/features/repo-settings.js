@@ -164,7 +164,7 @@ function initApprovalRules() {
       }
       let error;
       let invalid = [];
-      if (!name || name.length > 255) [error, invalid] = ['name', ['approval_rule_name']];
+      if (!name || new TextEncoder().encode(name).length > 255) [error, invalid] = ['name', ['approval_rule_name']];
       else if (seen.has(name)) [error, invalid] = ['duplicate', ['approval_rule_name']];
       else if (!(Number.isInteger(Number(value('approval_rule_count'))) && Number(value('approval_rule_count')) >= 1)) [error, invalid] = ['count', ['approval_rule_count']];
       else if (!hasApprovers) [error, invalid] = ['approvers', ['approval_rule_users', 'approval_rule_teams']];

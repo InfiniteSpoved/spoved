@@ -1554,7 +1554,7 @@
 		"other": "This pull request has %d unresolved conversations."
 	},
 	"repo.settings.approval_rules": "Approval rules",
-	"repo.settings.approval_rules_desc": "Approvals needed on top of the required approvals above. A rule applies only when its path patterns match a changed file.",
+	"repo.settings.approval_rules_desc": "Approvals needed on top of the required approvals above. A rule applies only when its path patterns match a changed file. At most %d rules.",
 	"repo.settings.approval_rule_new": "New approval rule",
 	"repo.settings.approval_rule_add": "Add approval rule",
 	"repo.settings.approval_rule_remove": "Remove",

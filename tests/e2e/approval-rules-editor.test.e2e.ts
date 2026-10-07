@@ -111,6 +111,11 @@ for (const {name, base, team} of forms) {
         await expect(card.locator(`.approval-rule-error[data-error="${check.error}"]`)).toBeVisible();
         await expect(card.locator('.field.error').first()).toBeVisible();
         await expect(cards(page)).toHaveCount(count);
+        // the other cards keep their input and show no error
+        if (check.second) {
+          await expect(cards(page).first().locator('input[name="approval_rule_name"]')).toHaveValue('Same');
+          await expect(cards(page).first().locator('.field.error')).toHaveCount(0);
+        }
         await expect(page).toHaveURL(`${base}/edit`);
       });
     }

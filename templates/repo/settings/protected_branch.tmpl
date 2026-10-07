@@ -184,7 +184,7 @@
 				</fieldset>
 				<fieldset class="approval-rules" data-max="{{.MaxApprovalRules}}">
 					<legend>{{ctx.Locale.Tr "repo.settings.approval_rules"}}</legend>
-					<p class="help">{{ctx.Locale.Tr "repo.settings.approval_rules_desc"}}</p>
+					<p class="help">{{ctx.Locale.Tr "repo.settings.approval_rules_desc" .MaxApprovalRules}}</p>
 					<div class="approval-rule-cards">
 						{{range .ApprovalRules}}
 							{{template "repo/settings/approval_rule_card" (dict "Rule" . "Users" $.Users "Teams" $.Teams "ShowTeams" $.Owner.IsOrganization)}}
