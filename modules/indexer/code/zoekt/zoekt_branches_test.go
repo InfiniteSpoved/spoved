@@ -158,6 +158,23 @@ func TestSearchRegexTimeout(t *testing.T) {
 	require.ErrorIs(t, err, internal.ErrQueryTooExpensive)
 }
 
+// A file shared by the default branch and the searched branch is reported on the searched branch.
+func TestSearchResultBranchOfSharedFile(t *testing.T) {
+	f := matchFile("a.go")
+	f.Branches = []string{"HEAD", "dev"}
+	b := &Indexer{inner: &inner_zoekt.Indexer{Searcher: &stubSearcher{files: []zoekt.FileMatch{f}}}}
+	page := &db.ListOptions{Page: 1, PageSize: 10}
+
+	_, res, _, err := b.Search(t.Context(), &internal.SearchOptions{Keyword: "x", Branch: "dev", Paginator: page})
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	assert.Equal(t, "dev", res[0].Branch)
+
+	_, res, _, err = b.Search(t.Context(), &internal.SearchOptions{Keyword: "x", AllBranches: true, Paginator: page})
+	require.NoError(t, err)
+	assert.Equal(t, "HEAD", res[0].Branch) // PerformSearch turns it into the unlabeled default branch
+}
+
 func TestSearchResultBranch(t *testing.T) {
 	f := matchFile("a.go")
 	f.Branches = []string{"HEAD", "dev"}

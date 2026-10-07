@@ -164,6 +164,10 @@ func PerformSearch(ctx context.Context, opts *SearchOptions) (int, Results, []*S
 	displayResults := make([]*Result, len(results))
 
 	for i, result := range results {
+		// the default branch is the unlabeled one, and zoekt calls it HEAD
+		if result.Branch == "HEAD" || (!opts.AllBranches && opts.Branch == "") {
+			result.Branch = ""
+		}
 		startIndex, endIndex := indices(result.Content, result.StartIndex, result.EndIndex)
 		displayResults[i], err = searchResult(result, startIndex, endIndex)
 		if err != nil {

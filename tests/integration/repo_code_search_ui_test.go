@@ -65,6 +65,9 @@ func TestRepoCodeSearchBranchUI(t *testing.T) {
 	doc = get("/user2/repo1/search?q=Description")
 	href, _ = doc.doc.Find(".repo-search-result a.file-link").Attr("href")
 	assert.Contains(t, href, "/src/commit/")
+	assert.Zero(t, doc.doc.Find(".repo-search-result .ui.basic.label").Length(), "no branch label on the default branch")
+	viewFile, _ := doc.doc.Find(".repo-search-result a.button").Attr("href")
+	assert.Contains(t, viewFile, "/src/commit/")
 	_, hasDefault := doc.doc.Find(`select[name="branch"] option[value=""]`).Attr("selected")
 	assert.True(t, hasDefault)
 

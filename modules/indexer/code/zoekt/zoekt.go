@@ -561,6 +561,11 @@ func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int
 	}
 
 	pagedHits := convertZoektResult(paginateResults(result.Files, skip, take))
+	if opts.Branch != "" && !opts.AllBranches {
+		for _, hit := range pagedHits { // a file shared with another branch lists both
+			hit.Branch = opts.Branch
+		}
+	}
 
 	return int64(result.FileCount), pagedHits, getSearchResultLanguages(result), nil
 }

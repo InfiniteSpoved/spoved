@@ -88,3 +88,37 @@ func TestPerformSearchWindow(t *testing.T) {
 	assert.Equal(t, 10, skip)
 	assert.Equal(t, 10, take)
 }
+
+type resultRecorder struct {
+	searchRecorder
+	results []*internal.SearchResult
+}
+
+func (r *resultRecorder) Search(context.Context, *internal.SearchOptions) (int64, []*internal.SearchResult, []*internal.SearchResultLanguages, error) {
+	return int64(len(r.results)), r.results, nil, nil
+}
+
+// AC5: results on the default branch carry no branch, whatever the indexer calls it; other
+// branches keep theirs.
+func TestPerformSearchResultBranch(t *testing.T) {
+	page := &db.ListOptions{Page: 1, PageSize: 10}
+	run := func(opts *SearchOptions) []string {
+		useIndexer(t, &resultRecorder{searchRecorder: searchRecorder{Indexer: internal.NewDummyIndexer()}, results: []*internal.SearchResult{
+			{Filename: "a.go", Content: "x", Branch: "main"},
+			{Filename: "b.go", Content: "x", Branch: "HEAD"},
+			{Filename: "c.go", Content: "x", Branch: "dev"},
+		}})
+		opts.Keyword, opts.Paginator = "x", page
+		_, res, _, err := PerformSearch(context.Background(), opts)
+		require.NoError(t, err)
+		branches := make([]string, 0, len(res))
+		for _, r := range res {
+			branches = append(branches, r.Branch)
+		}
+		return branches
+	}
+
+	assert.Equal(t, []string{"", "", ""}, run(&SearchOptions{}), "default branch search")
+	assert.Equal(t, []string{"main", "", "dev"}, run(&SearchOptions{AllBranches: true}))
+	assert.Equal(t, []string{"main", "", "dev"}, run(&SearchOptions{Branch: "dev"}))
+}

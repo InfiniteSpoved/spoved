@@ -168,11 +168,6 @@ func Search(ctx *context.Context) {
 		} else {
 			ctx.Data["CodeIndexerUnavailable"] = !code_indexer.IsAvailable(ctx)
 		}
-		for _, r := range searchResults {
-			if r.Branch == ctx.Repo.Repository.DefaultBranch || r.Branch == "HEAD" {
-				r.Branch = "" // results on the default branch stay as they were
-			}
-		}
 	} else {
 		m := mode.ToGitGrep()
 		ctx.Data["CodeSearchMode"] = m.String()
