@@ -136,3 +136,12 @@ func Test_indexerURLConstruction(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestMaxIndexedBranchesPerRepoIsClamped(t *testing.T) {
+	for value, want := range map[string]int{"": 5, "0": 1, "-3": 1, "3": 3, "64": 64, "65": 64, "100000": 64} {
+		cfg, err := NewConfigProviderFromData("[indexer]\nMAX_INDEXED_BRANCHES_PER_REPO = " + value + "\n")
+		require.NoError(t, err)
+		loadIndexerFrom(cfg)
+		assert.Equal(t, want, Indexer.MaxIndexedBranchesPerRepo, "value %q", value)
+	}
+}

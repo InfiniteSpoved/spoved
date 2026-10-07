@@ -231,16 +231,24 @@ func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, branch
 		reqs = append(reqs, b.addDelete(branch, filename, repo))
 	}
 
-	if len(reqs) > 0 {
-		esBatchSize := 50
+	return b.sendBulk(ctx, reqs)
+}
 
-		for i := 0; i < len(reqs); i += esBatchSize {
-			_, err := b.inner.Client.Bulk().
-				Index(b.inner.VersionedIndexName()).
-				Add(reqs[i:min(i+esBatchSize, len(reqs))]...).
-				Do(ctx)
-			if err != nil {
-				return err
+// sendBulk sends the requests in batches. A refused document (e.g. an ID over 512 bytes) fails the
+// whole call, so that the indexed commit isn't stored.
+func (b *Indexer) sendBulk(ctx context.Context, reqs []elastic.BulkableRequest) error {
+	const esBatchSize = 50
+	for i := 0; i < len(reqs); i += esBatchSize {
+		resp, err := b.inner.Client.Bulk().
+			Index(b.inner.VersionedIndexName()).
+			Add(reqs[i:min(i+esBatchSize, len(reqs))]...).
+			Do(ctx)
+		if err != nil {
+			return err
+		}
+		if resp.Errors {
+			for _, item := range resp.Failed() {
+				return fmt.Errorf("elasticsearch refused document %q: %v", item.Id, item.Error)
 			}
 		}
 	}

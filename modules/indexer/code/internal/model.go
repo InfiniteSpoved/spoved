@@ -22,6 +22,13 @@ type RepoChanges struct {
 	RemovedFilenames []string
 }
 
+// BranchFiles are all indexable files of a branch.
+type BranchFiles struct {
+	Name     string
+	CommitID string
+	Files    []FileUpdate
+}
+
 // IndexerData represents data stored in the code indexer
 type IndexerData struct {
 	RepoID int64
@@ -60,6 +67,7 @@ type SearchResultLanguages struct {
 
 type Result struct {
 	RepoID      int64
+	Branch      string
 	Filename    string
 	CommitID    string
 	UpdatedUnix timeutil.TimeStamp

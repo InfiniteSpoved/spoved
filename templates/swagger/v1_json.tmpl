@@ -19367,6 +19367,90 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/search/code": {
+      "get": {
+        "description": "Only the default branch and the branches repo admins chose for code search are indexed.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Search the code of a repository",
+        "operationId": "repoSearchCode",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "the search term, at most 256 characters",
+            "name": "q",
+            "in": "query",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "an indexed branch, or \"all\" for every indexed branch. Default is the default branch.",
+            "name": "branch",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "exact",
+              "union",
+              "fuzzy",
+              "regex"
+            ],
+            "type": "string",
+            "default": "exact",
+            "description": "how to match the term. \"fuzzy\" needs fuzzy search to be enabled, \"regex\" a code indexer that supports it.",
+            "name": "mode",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/CodeSearchResults"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          },
+          "503": {
+            "description": "the code indexer is not available"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/signing-key.gpg": {
       "get": {
         "produces": [
@@ -27356,6 +27440,42 @@
         "status": {
           "type": "string",
           "x-go-name": "Status"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "CodeSearchResult": {
+      "description": "CodeSearchResult is a file the code search found",
+      "type": "object",
+      "properties": {
+        "branch": {
+          "description": "the branch the file was found on",
+          "type": "string",
+          "x-go-name": "Branch"
+        },
+        "commit_id": {
+          "description": "the commit of the indexed file",
+          "type": "string",
+          "x-go-name": "CommitID"
+        },
+        "filename": {
+          "description": "the path of the file",
+          "type": "string",
+          "x-go-name": "Filename"
+        },
+        "language": {
+          "description": "the language of the file",
+          "type": "string",
+          "x-go-name": "Language"
+        },
+        "line_numbers": {
+          "description": "the numbers of the lines shown for the match",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x-go-name": "LineNumbers"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -36678,6 +36798,15 @@
           "type": "integer",
           "format": "int64",
           "description": "Commits per page"
+        }
+      }
+    },
+    "CodeSearchResults": {
+      "description": "CodeSearchResults",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/CodeSearchResult"
         }
       }
     },

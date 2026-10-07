@@ -5,6 +5,7 @@
 package user
 
 import (
+	"errors"
 	"net/http"
 
 	"forgejo.org/models/db"
@@ -82,7 +83,9 @@ func CodeSearch(ctx *context.Context) {
 				PageSize: setting.UI.RepoSearchPagingNum,
 			},
 		})
-		if err != nil {
+		if errors.Is(err, code_indexer.ErrInvalidQuery) {
+			ctx.Data["CodeSearchError"] = err.Error()
+		} else if err != nil {
 			if code_indexer.IsAvailable(ctx) {
 				ctx.ServerError("SearchResults", err)
 				return

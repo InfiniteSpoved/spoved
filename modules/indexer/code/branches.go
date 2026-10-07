@@ -98,6 +98,9 @@ func expandIndexedBranches(ctx context.Context, repo *repo_model.Repository) ([]
 	infos := make([]BranchInfo, 0, len(rows))
 	byName := make(map[string]BranchInfo, len(rows))
 	for _, r := range rows {
+		if r.Name == "HEAD" { // zoekt's name for the default branch
+			continue
+		}
 		bi := BranchInfo{Name: r.Name, CommitID: r.CommitID, CommitTime: int64(r.CommitTime)}
 		infos = append(infos, bi)
 		byName[r.Name] = bi
@@ -135,4 +138,20 @@ func ParseIndexedBranchPatterns(text string) ([]string, error) {
 		return nil, fmt.Errorf("more than %d patterns", maxBranchPatterns)
 	}
 	return patterns, nil
+}
+
+// IndexedBranchNames returns the indexed branches of a repo besides the default one, sorted.
+func IndexedBranchNames(ctx context.Context, repo *repo_model.Repository) ([]string, error) {
+	stored, err := repo_model.GetIndexerBranches(ctx, repo.ID)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(stored))
+	for name := range stored {
+		if name != repo.DefaultBranch {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names, nil
 }

@@ -41,6 +41,8 @@ func CodeSearchIndexerMode(ctx *context.Context) (mode code_indexer.SearchMode) 
 	mode = code_indexer.SearchModeExact
 	if m := ctx.FormTrim("mode"); m == "union" {
 		mode = code_indexer.SearchModeUnion
+	} else if m == "regexp" && code_indexer.SupportsRegex() {
+		mode = code_indexer.SearchModeRegex
 	} else if m == "fuzzy" || ctx.FormBool("fuzzy") {
 		if setting.Indexer.RepoIndexerEnableFuzzy {
 			mode = code_indexer.SearchModeFuzzy

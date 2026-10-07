@@ -6,9 +6,11 @@ package code
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 
+	"forgejo.org/models/db"
 	"forgejo.org/modules/indexer/code/internal"
 )
 
@@ -29,7 +31,17 @@ const (
 	SearchModeExact = internal.CodeSearchModeExact
 	SearchModeUnion = internal.CodeSearchModeUnion
 	SearchModeFuzzy = internal.CodeSearchModeFuzzy
+	SearchModeRegex = internal.CodeSearchModeRegex
 )
+
+// ErrInvalidQuery is wrapped by the errors of a query that can't be searched for.
+var ErrInvalidQuery = internal.ErrInvalidQuery
+
+// SupportsRegex tells if the indexer in use can search by regular expression.
+func SupportsRegex() bool {
+	r, ok := (*globalIndexer.Load()).(internal.RegexSearcher)
+	return ok && r.SupportsRegex()
+}
 
 type Results []*Result
 
@@ -113,6 +125,7 @@ func searchResultCommon(result *internal.SearchResult, startIndex, endIndex int)
 
 	return &Result{
 		RepoID:      result.RepoID,
+		Branch:      result.Branch,
 		Filename:    result.Filename,
 		CommitID:    result.CommitID,
 		UpdatedUnix: result.UpdatedUnix,
@@ -127,6 +140,21 @@ func PerformSearch(ctx context.Context, opts *SearchOptions) (int, Results, []*S
 	if opts == nil || len(opts.Keyword) == 0 {
 		return 0, nil, nil, nil
 	}
+	if len(opts.Keyword) > internal.MaxKeywordLength || len(opts.Filename) > internal.MaxKeywordLength {
+		return 0, nil, nil, fmt.Errorf("%w: longer than %d characters", internal.ErrInvalidQuery, internal.MaxKeywordLength)
+	}
+	if opts.Mode == SearchModeRegex && !SupportsRegex() {
+		return 0, nil, nil, internal.ErrRegexNotSupported
+	}
+	if opts.Paginator != nil {
+		skip, take := opts.GetSkipTake()
+		if skip >= internal.MaxSearchWindow {
+			return 0, nil, nil, nil
+		}
+		if skip+take > internal.MaxSearchWindow {
+			opts.Paginator = db.NewAbsoluteListOptions(skip, internal.MaxSearchWindow-skip)
+		}
+	}
 
 	total, results, resultLanguages, err := (*globalIndexer.Load()).Search(ctx, opts)
 	if err != nil {
@@ -136,6 +164,10 @@ func PerformSearch(ctx context.Context, opts *SearchOptions) (int, Results, []*S
 	displayResults := make([]*Result, len(results))
 
 	for i, result := range results {
+		// the default branch is the unlabeled one, and zoekt calls it HEAD
+		if result.Branch == "HEAD" || (!opts.AllBranches && opts.Branch == "") {
+			result.Branch = ""
+		}
 		startIndex, endIndex := indices(result.Content, result.StartIndex, result.EndIndex)
 		displayResults[i], err = searchResult(result, startIndex, endIndex)
 		if err != nil {
