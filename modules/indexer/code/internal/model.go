@@ -37,6 +37,7 @@ type Match struct {
 // SearchResult result of performing a search in a repo
 type SearchResult struct {
 	RepoID      int64
+	Branch      string
 	StartIndex  int
 	EndIndex    int
 	Filename    string

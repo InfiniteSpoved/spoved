@@ -99,6 +99,22 @@ func (cfg *UnitConfig) ToDB() ([]byte, error) {
 	return json.Marshal(cfg)
 }
 
+// CodeConfig describes code config
+type CodeConfig struct {
+	// IndexedBranches are names or glob patterns of branches, besides the default one, that code search indexes
+	IndexedBranches []string
+}
+
+// FromDB fills up a CodeConfig from serialized format.
+func (cfg *CodeConfig) FromDB(bs []byte) error {
+	return json.UnmarshalHandleDoubleEncode(bs, &cfg)
+}
+
+// ToDB exports a CodeConfig to a serialized format.
+func (cfg *CodeConfig) ToDB() ([]byte, error) {
+	return json.Marshal(cfg)
+}
+
 // ExternalWikiConfig describes external wiki config
 type ExternalWikiConfig struct {
 	ExternalWikiURL string
@@ -340,7 +356,9 @@ func (r *RepoUnit) BeforeSet(colName string, val xorm.Cell) {
 			r.Config = new(IssuesConfig)
 		case unit.TypeActions:
 			r.Config = new(ActionsConfig)
-		case unit.TypeCode, unit.TypeReleases, unit.TypeWiki, unit.TypeProjects, unit.TypePackages:
+		case unit.TypeCode:
+			r.Config = new(CodeConfig)
+		case unit.TypeReleases, unit.TypeWiki, unit.TypeProjects, unit.TypePackages:
 			fallthrough
 		default:
 			r.Config = new(UnitConfig)
@@ -354,8 +372,8 @@ func (r *RepoUnit) Unit() unit.Unit {
 }
 
 // CodeConfig returns config for unit.TypeCode
-func (r *RepoUnit) CodeConfig() *UnitConfig {
-	return r.Config.(*UnitConfig)
+func (r *RepoUnit) CodeConfig() *CodeConfig {
+	return r.Config.(*CodeConfig)
 }
 
 // PullRequestsConfig returns config for unit.TypePullRequests

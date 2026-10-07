@@ -13,6 +13,7 @@ import (
 
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
+	"forgejo.org/modules/container"
 	"forgejo.org/modules/graceful"
 	"forgejo.org/modules/indexer/code/bleve"
 	"forgejo.org/modules/indexer/code/elasticsearch"
@@ -79,18 +80,95 @@ func index(ctx context.Context, indexer internal.Indexer, repoID int64) error {
 	if err != nil {
 		return err
 	}
-	changes, err := getRepoChanges(ctx, repo, sha)
+	status, err := repo_model.GetIndexerStatus(ctx, repo, repo_model.RepoIndexerTypeCode)
+	if err != nil {
+		return err
+	}
+	changes, err := getRepoChanges(ctx, repo, repo.DefaultBranch, status.CommitSha, sha)
 	if err != nil {
 		return err
 	} else if changes == nil {
 		return nil
 	}
 
-	if err := indexer.Index(ctx, repo, sha, changes); err != nil {
+	if err := indexer.Index(ctx, repo, repo.DefaultBranch, sha, true, changes); err != nil {
 		return err
 	}
 
-	return repo_model.UpdateIndexerStatus(ctx, repo, repo_model.RepoIndexerTypeCode, sha)
+	if err := repo_model.UpdateIndexerStatus(ctx, repo, repo_model.RepoIndexerTypeCode, sha); err != nil {
+		return err
+	}
+	return indexExtraBranches(ctx, indexer, repo)
+}
+
+// indexExtraBranches brings the indexed non-default branches up to date, and drops the ones
+// that were deleted, no longer match a pattern or are over the limit.
+func indexExtraBranches(ctx context.Context, indexer internal.Indexer, repo *repo_model.Repository) error {
+	stored, err := repo_model.GetIndexerBranches(ctx, repo.ID)
+	if err != nil {
+		return err
+	}
+	wanted, err := expandIndexedBranches(ctx, repo)
+	if err != nil {
+		return err
+	}
+
+	keep := make(container.Set[string], len(wanted))
+	for _, b := range wanted {
+		keep.Add(b.Name)
+	}
+	for name := range stored {
+		if keep.Contains(name) {
+			continue
+		}
+		if name != repo.DefaultBranch { // the default branch's documents are not the extra ones
+			if err := indexer.DeleteBranch(ctx, repo.ID, name); err != nil {
+				return err
+			}
+		}
+		if err := repo_model.DeleteIndexerBranches(ctx, repo.ID, name); err != nil {
+			return err
+		}
+	}
+
+	for _, b := range wanted {
+		if stored[b.Name] == b.CommitID {
+			continue
+		}
+		changes, err := getRepoChanges(ctx, repo, b.Name, stored[b.Name], b.CommitID)
+		if err != nil {
+			return err
+		}
+		if changes != nil {
+			if err := indexer.Index(ctx, repo, b.Name, b.CommitID, false, changes); err != nil {
+				return err
+			}
+		}
+		if err := repo_model.SetIndexerBranch(ctx, repo.ID, b.Name, b.CommitID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ResetRepoIndexer drops everything indexed of a repo and indexes it again, for changes
+// that make the stored documents wrong as a whole, like another default branch.
+func ResetRepoIndexer(ctx context.Context, repo *repo_model.Repository) error {
+	if !setting.Indexer.RepoIndexerEnabled {
+		return nil
+	}
+	if err := (*globalIndexer.Load()).Delete(ctx, repo.ID); err != nil {
+		return err
+	}
+	if err := repo_model.DeleteIndexerBranches(ctx, repo.ID); err != nil {
+		return err
+	}
+	if _, err := db.GetEngine(ctx).Where("repo_id = ? AND indexer_type = ?", repo.ID, repo_model.RepoIndexerTypeCode).Delete(new(repo_model.RepoIndexerStatus)); err != nil {
+		return err
+	}
+	repo.CodeIndexerStatus = nil
+	UpdateRepoIndexer(repo)
+	return nil
 }
 
 func setSearchOption(set bool, val string) {
@@ -300,8 +378,10 @@ func populateRepoIndexer(ctx context.Context) {
 	// if there is any existing repo indexer metadata in the DB, delete it
 	// since we are starting afresh. Also, xorm requires deletes to have a
 	// condition, and we want to delete everything, thus 1=1.
-	if err := db.DeleteAllRecords("repo_indexer_status"); err != nil {
-		log.Fatal("System error: %v", err)
+	for _, table := range []string{"repo_indexer_status", "repo_indexer_branch"} {
+		if err := db.DeleteAllRecords(table); err != nil {
+			log.Fatal("System error: %v", err)
+		}
 	}
 
 	var maxRepoID int64

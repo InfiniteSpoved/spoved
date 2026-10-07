@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	esRepoIndexerLatestVersion = 2
+	esRepoIndexerLatestVersion = 3
 	// multi-match-types, currently only 2 types are used
 	// Reference: https://www.elastic.co/guide/en/elasticsearch/reference/7.0/query-dsl-multi-match-query.html#multi-match-types
 	esMultiMatchTypeBestFields = "best_fields"
@@ -62,9 +62,18 @@ const (
 				"analyzer": {
 					"custom_path_tree": {
 						"tokenizer": "custom_hierarchy"
+					},
+					"code": {
+						"tokenizer": "code_tokens",
+						"filter": ["lowercase"]
 					}
 				},
 				"tokenizer": {
+					"code_tokens": {
+						"type": "pattern",
+						"pattern": "\\w+|[^\\w\\s]",
+						"group": 0
+					},
 					"custom_hierarchy": {
 						"type": "path_hierarchy",
 						"delimiter": "/"
@@ -81,7 +90,21 @@ const (
 				"content": {
 					"type": "text",
 					"term_vector": "with_positions_offsets",
+					"index": true,
+					"fields": {
+						"code": {
+							"type": "text",
+							"analyzer": "code",
+							"term_vector": "with_positions_offsets"
+						}
+					}
+				},
+				"branch": {
+					"type": "keyword",
 					"index": true
+				},
+				"is_default": {
+					"type": "boolean"
 				},
 				"commit_id": {
 					"type": "keyword",
@@ -109,7 +132,7 @@ const (
 	}`
 )
 
-func (b *Indexer) addUpdate(ctx context.Context, batchWriter io.Writer, batchReader *bufio.Reader, sha string, update internal.FileUpdate, repo *repo_model.Repository) ([]elastic.BulkableRequest, error) {
+func (b *Indexer) addUpdate(ctx context.Context, batchWriter io.Writer, batchReader *bufio.Reader, branch, sha string, isDefault bool, update internal.FileUpdate, repo *repo_model.Repository) ([]elastic.BulkableRequest, error) {
 	// Ignore vendored files in code search
 	if setting.Indexer.ExcludeVendored && analyze.IsVendor(update.Filename) {
 		return nil, nil
@@ -129,7 +152,7 @@ func (b *Indexer) addUpdate(ctx context.Context, batchWriter io.Writer, batchRea
 	}
 
 	if size > setting.Indexer.MaxIndexerFileSize {
-		return []elastic.BulkableRequest{b.addDelete(update.Filename, repo)}, nil
+		return []elastic.BulkableRequest{b.addDelete(branch, update.Filename, repo)}, nil
 	}
 
 	if _, err := batchWriter.Write([]byte(update.BlobSha + "\n")); err != nil {
@@ -152,7 +175,7 @@ func (b *Indexer) addUpdate(ctx context.Context, batchWriter io.Writer, batchRea
 	if _, err = batchReader.Discard(1); err != nil {
 		return nil, err
 	}
-	id := internal.FilenameIndexerID(repo.ID, update.Filename)
+	id := internal.FilenameIndexerID(repo.ID, branch, update.Filename)
 
 	return []elastic.BulkableRequest{
 		elastic.NewBulkIndexRequest().
@@ -160,6 +183,8 @@ func (b *Indexer) addUpdate(ctx context.Context, batchWriter io.Writer, batchRea
 			Id(id).
 			Doc(map[string]any{
 				"repo_id":    repo.ID,
+				"branch":     branch,
+				"is_default": isDefault,
 				"content":    string(charset.ToUTF8DropErrors(fileContents, charset.ConvertOpts{})),
 				"commit_id":  sha,
 				"filename":   update.Filename,
@@ -169,15 +194,15 @@ func (b *Indexer) addUpdate(ctx context.Context, batchWriter io.Writer, batchRea
 	}, nil
 }
 
-func (b *Indexer) addDelete(filename string, repo *repo_model.Repository) elastic.BulkableRequest {
-	id := internal.FilenameIndexerID(repo.ID, filename)
+func (b *Indexer) addDelete(branch, filename string, repo *repo_model.Repository) elastic.BulkableRequest {
+	id := internal.FilenameIndexerID(repo.ID, branch, filename)
 	return elastic.NewBulkDeleteRequest().
 		Index(b.inner.VersionedIndexName()).
 		Id(id)
 }
 
 // Index will save the index data
-func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, sha string, changes *internal.RepoChanges) error {
+func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, branch, sha string, isDefault bool, changes *internal.RepoChanges) error {
 	reqs := make([]elastic.BulkableRequest, 0)
 	if len(changes.Updates) > 0 {
 		r, err := gitrepo.OpenRepository(ctx, repo)
@@ -188,7 +213,7 @@ func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, sha st
 
 		if err := r.WithCatFileBatch(ctx, func(w io.Writer, r *bufio.Reader) error {
 			for _, update := range changes.Updates {
-				updateReqs, err := b.addUpdate(ctx, w, r, sha, update, repo)
+				updateReqs, err := b.addUpdate(ctx, w, r, branch, sha, isDefault, update, repo)
 				if err != nil {
 					return err
 				}
@@ -203,7 +228,7 @@ func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, sha st
 	}
 
 	for _, filename := range changes.RemovedFilenames {
-		reqs = append(reqs, b.addDelete(filename, repo))
+		reqs = append(reqs, b.addDelete(branch, filename, repo))
 	}
 
 	if len(reqs) > 0 {
@@ -224,13 +249,22 @@ func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, sha st
 
 // Delete entries by repoId
 func (b *Indexer) Delete(ctx context.Context, repoID int64) error {
-	if err := b.doDelete(ctx, repoID); err != nil {
+	return b.deleteWithRetry(ctx, repoID, "")
+}
+
+// DeleteBranch deletes the entries of a branch, found by their fields and never by an ID prefix
+func (b *Indexer) DeleteBranch(ctx context.Context, repoID int64, branch string) error {
+	return b.deleteWithRetry(ctx, repoID, branch)
+}
+
+func (b *Indexer) deleteWithRetry(ctx context.Context, repoID int64, branch string) error {
+	if err := b.doDelete(ctx, repoID, branch); err != nil {
 		// Maybe there is a conflict during the delete operation, so we should retry after a refresh
 		log.Warn("Deletion of entries of repo %v within index %v was erroneous. Trying to refresh index before trying again", repoID, b.inner.VersionedIndexName(), err)
 		if err := b.refreshIndex(ctx); err != nil {
 			return err
 		}
-		if err := b.doDelete(ctx, repoID); err != nil {
+		if err := b.doDelete(ctx, repoID, branch); err != nil {
 			log.Error("Could not delete entries of repo %v within index %v", repoID, b.inner.VersionedIndexName())
 			return err
 		}
@@ -248,9 +282,13 @@ func (b *Indexer) refreshIndex(ctx context.Context) error {
 }
 
 // Delete entries by repoId
-func (b *Indexer) doDelete(ctx context.Context, repoID int64) error {
+func (b *Indexer) doDelete(ctx context.Context, repoID int64, branch string) error {
+	query := elastic.NewBoolQuery().Filter(elastic.NewTermsQuery("repo_id", repoID))
+	if branch != "" {
+		query = query.Filter(elastic.NewTermQuery("branch", branch))
+	}
 	_, err := b.inner.Client.DeleteByQuery(b.inner.VersionedIndexName()).
-		Query(elastic.NewTermsQuery("repo_id", repoID)).
+		Query(query).
 		Do(ctx)
 	return err
 }
@@ -271,14 +309,14 @@ func indexPos(content, start, end string) (int, int) {
 	return startIdx, startIdx + len(start) + endIdx + len(end)
 }
 
-func convertResult(searchResult *elastic.SearchResult, kw string, pageSize int) (int64, []*internal.SearchResult, []*internal.SearchResultLanguages, error) {
+func convertResult(searchResult *elastic.SearchResult, kw, hlField string, pageSize int) (int64, []*internal.SearchResult, []*internal.SearchResultLanguages, error) {
 	hits := make([]*internal.SearchResult, 0, pageSize)
 	for _, hit := range searchResult.Hits.Hits {
 		// FIXME: There is no way to get the position the keyword on the content currently on the same request.
 		// So we get it from content, this may made the query slower. See
 		// https://discuss.elastic.co/t/fetching-position-of-keyword-in-matched-document/94291
 		var startIndex, endIndex int
-		c, ok := hit.Highlight["content"]
+		c, ok := hit.Highlight[hlField]
 		if ok && len(c) > 0 {
 			// FIXME: Since the highlighting content will include <em> and </em> for the keywords,
 			// now we should find the positions. But how to avoid html content which contains the
@@ -300,6 +338,7 @@ func convertResult(searchResult *elastic.SearchResult, kw string, pageSize int) 
 
 		hits = append(hits, &internal.SearchResult{
 			RepoID:      int64(res["repo_id"].(float64)),
+			Branch:      res["branch"].(string),
 			Filename:    res["filename"].(string),
 			CommitID:    res["commit_id"].(string),
 			Content:     res["content"].(string),
@@ -338,7 +377,14 @@ func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int
 		searchType = esMultiMatchTypeBestFields
 	}
 
-	kwQuery := elastic.NewMultiMatchQuery(opts.Keyword, "content").Type(searchType)
+	// Keywords with punctuation are matched as a phrase of words and single
+	// punctuation characters, the others like before (camel case aware).
+	contentField := "content"
+	if opts.Mode == internal.CodeSearchModeExact && internal.HasPunctuation(opts.Keyword) {
+		contentField = "content.code"
+	}
+
+	kwQuery := elastic.NewMultiMatchQuery(opts.Keyword, contentField).Type(searchType)
 	if opts.Mode == internal.CodeSearchModeFuzzy {
 		kwQuery = kwQuery.Fuzziness("AUTO")
 	}
@@ -351,6 +397,13 @@ func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int
 		}
 		repoQuery := elastic.NewTermsQuery("repo_id", repoStrs...)
 		query = query.Must(repoQuery)
+	}
+	switch {
+	case opts.AllBranches:
+	case opts.Branch != "":
+		query = query.Filter(elastic.NewTermQuery("branch", opts.Branch))
+	default:
+		query = query.Filter(elastic.NewTermQuery("is_default", true))
 	}
 	if len(opts.Filename) > 0 {
 		query = query.Filter(elastic.NewTermsQuery("filename.tree", opts.Filename))
@@ -369,7 +422,7 @@ func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int
 			Query(query).
 			Highlight(
 				elastic.NewHighlight().
-					Field("content").
+					Field(contentField).
 					NumOfFragments(0). // return all highting content on fragments
 					HighlighterType("fvh"),
 			).
@@ -381,7 +434,7 @@ func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int
 			return 0, nil, nil, err
 		}
 
-		return convertResult(searchResult, kw, pageSize)
+		return convertResult(searchResult, kw, contentField, pageSize)
 	}
 
 	langQuery := elastic.NewMatchQuery("language", opts.Language)
@@ -401,7 +454,7 @@ func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int
 		Query(query).
 		Highlight(
 			elastic.NewHighlight().
-				Field("content").
+				Field(contentField).
 				NumOfFragments(0). // return all highting content on fragments
 				HighlighterType("fvh"),
 		).
@@ -413,7 +466,7 @@ func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int
 		return 0, nil, nil, err
 	}
 
-	total, hits, _, err := convertResult(searchResult, kw, pageSize)
+	total, hits, _, err := convertResult(searchResult, kw, contentField, pageSize)
 
 	return total, hits, extractAggs(countResult), err
 }

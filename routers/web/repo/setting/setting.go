@@ -75,6 +75,10 @@ func SettingsCtxData(ctx *context.Context) {
 	ctx.Data["SigningKeyAvailable"] = len(signing) > 0
 	ctx.Data["SigningSettings"] = setting.Repository.Signing
 	ctx.Data["CodeIndexerEnabled"] = setting.Indexer.RepoIndexerEnabled
+	ctx.Data["MaxIndexedBranches"] = setting.Indexer.MaxIndexedBranchesPerRepo
+	if ru, err := ctx.Repo.Repository.GetUnit(ctx, unit_model.TypeCode); err == nil {
+		ctx.Data["IndexedBranches"] = ru.CodeConfig().IndexedBranches
+	}
 
 	if ctx.Doer.IsAdmin {
 		if setting.Indexer.RepoIndexerEnabled {
@@ -135,6 +139,7 @@ func UnitsPost(ctx *context.Context) {
 		units = append(units, repo_model.RepoUnit{
 			RepoID: repo.ID,
 			Type:   unit_model.TypeCode,
+			Config: repo.MustGetUnit(ctx, unit_model.TypeCode).Config, // keep the indexed branches
 		})
 	} else if !unit_model.TypeCode.UnitGlobalDisabled() {
 		deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeCode)
@@ -1155,4 +1160,43 @@ func selectPushMirrorByForm(ctx *context.Context, form *forms.RepoSettingForm, r
 	}
 
 	return nil, fmt.Errorf("PushMirror[%v] not associated to repository %v", id, repo)
+}
+
+// CodeSearchPost saves the branches, besides the default one, that code search indexes
+func CodeSearchPost(ctx *context.Context) {
+	form := web.GetForm(ctx).(*forms.RepoCodeSearchForm)
+	repo := ctx.Repo.Repository
+	redirect := repo.Link() + "/settings"
+
+	if !repo.UnitEnabled(ctx, unit_model.TypeCode) {
+		ctx.NotFound("CodeSearchPost", nil)
+		return
+	}
+	if ctx.HasError() {
+		ctx.Redirect(redirect)
+		return
+	}
+	patterns, err := code.ParseIndexedBranchPatterns(form.IndexedBranches)
+	if err != nil {
+		ctx.Flash.Error(ctx.Tr("repo.settings.code_search.invalid_branches", err.Error()))
+		ctx.Redirect(redirect)
+		return
+	}
+
+	codeUnit := repo.MustGetUnit(ctx, unit_model.TypeCode)
+	if err := repo_service.UpdateRepositoryUnits(ctx, repo, []repo_model.RepoUnit{{
+		RepoID:             repo.ID,
+		Type:               unit_model.TypeCode,
+		Config:             &repo_model.CodeConfig{IndexedBranches: patterns},
+		DefaultPermissions: codeUnit.DefaultPermissions,
+	}}, nil); err != nil {
+		ctx.ServerError("UpdateRepositoryUnits", err)
+		return
+	}
+	if setting.Indexer.RepoIndexerEnabled {
+		code.UpdateRepoIndexer(repo)
+	}
+
+	ctx.Flash.Success(ctx.Tr("repo.settings.update_settings_success"))
+	ctx.Redirect(redirect)
 }

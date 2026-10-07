@@ -4,6 +4,7 @@
 package integration
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"testing"
@@ -188,7 +189,11 @@ func TestOrgAdminRoleFlow(t *testing.T) {
 	DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/roles/org-admin/exclusions").AddTokenAuth(adminToken), http.StatusOK), &excluded)
 	require.Len(t, excluded, 1)
 	assert.Equal(t, "org3", excluded[0].Name)
-	body := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/roles/org-admin"), http.StatusOK).Body.String()
+	rolesPage := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/roles/org-admin"), http.StatusOK)
+	// the navbar group holding the Roles link is open on this page
+	_, open := NewHTMLParser(t, bytes.NewBuffer(rolesPage.Body.Bytes())).doc.Find(`a[href$="/admin/roles/org-admin"]`).Closest("details").Attr("open")
+	assert.True(t, open, "Identity & access is open on the Roles page")
+	body := rolesPage.Body.String()
 	assert.Contains(t, body, "platform-admins")
 	assert.Contains(t, body, orgAdminMember)
 	assert.Contains(t, body, "org3")

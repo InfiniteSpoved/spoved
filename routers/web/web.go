@@ -1323,6 +1323,7 @@ func registerRoutes(m *web.Route) {
 			}, repo_setting.SettingsCtxData)
 			m.Combo("/units").Get(repo_setting.Units).
 				Post(web.Bind(forms.RepoUnitSettingForm{}), repo_setting.UnitsPost)
+			m.Post("/code_search", web.Bind(forms.RepoCodeSearchForm{}), repo_setting.CodeSearchPost)
 			m.Post("/avatar", web.Bind(forms.AvatarForm{}), repo_setting.SettingsAvatar)
 			m.Post("/avatar/delete", repo_setting.SettingsDeleteAvatar)
 

@@ -23,16 +23,11 @@ func getDefaultBranchSha(ctx context.Context, repo *repo_model.Repository) (stri
 	return strings.TrimSpace(stdout), nil
 }
 
-// getRepoChanges returns changes to repo since last indexer update
-func getRepoChanges(ctx context.Context, repo *repo_model.Repository, revision string) (*internal.RepoChanges, error) {
-	status, err := repo_model.GetIndexerStatus(ctx, repo, repo_model.RepoIndexerTypeCode)
-	if err != nil {
-		return nil, err
-	}
-
-	needGenesis := len(status.CommitSha) == 0
+// getRepoChanges returns changes to a branch since lastSha, the commit it was last indexed at
+func getRepoChanges(ctx context.Context, repo *repo_model.Repository, branch, lastSha, revision string) (*internal.RepoChanges, error) {
+	needGenesis := len(lastSha) == 0
 	if !needGenesis {
-		hasAncestorCmd := git.NewCommand(ctx, "merge-base").AddDynamicArguments(status.CommitSha, revision)
+		hasAncestorCmd := git.NewCommand(ctx, "merge-base").AddDynamicArguments(lastSha, revision)
 		stdout, _, _ := hasAncestorCmd.RunStdString(&git.RunOpts{Dir: repo.RepoPath()})
 		needGenesis = len(stdout) == 0
 	}
@@ -40,7 +35,7 @@ func getRepoChanges(ctx context.Context, repo *repo_model.Repository, revision s
 	if needGenesis {
 		return genesisChanges(ctx, repo, revision)
 	}
-	return nonGenesisChanges(ctx, repo, revision)
+	return nonGenesisChanges(ctx, repo, branch, lastSha, revision)
 }
 
 func isIndexable(entry *git.TreeEntry) bool {
@@ -97,14 +92,14 @@ func genesisChanges(ctx context.Context, repo *repo_model.Repository, revision s
 }
 
 // nonGenesisChanges get changes since the previous indexer update
-func nonGenesisChanges(ctx context.Context, repo *repo_model.Repository, revision string) (*internal.RepoChanges, error) {
-	diffCmd := git.NewCommand(ctx, "diff", "--name-status").AddDynamicArguments(repo.CodeIndexerStatus.CommitSha, revision)
+func nonGenesisChanges(ctx context.Context, repo *repo_model.Repository, branch, lastSha, revision string) (*internal.RepoChanges, error) {
+	diffCmd := git.NewCommand(ctx, "diff", "--name-status").AddDynamicArguments(lastSha, revision)
 	stdout, _, runErr := diffCmd.RunStdString(&git.RunOpts{Dir: repo.RepoPath()})
 	if runErr != nil {
 		// previous commit sha may have been removed by a force push, so
-		// try rebuilding from scratch
+		// try rebuilding the branch from scratch
 		log.Warn("git diff: %v", runErr)
-		if err := (*globalIndexer.Load()).Delete(ctx, repo.ID); err != nil {
+		if err := (*globalIndexer.Load()).DeleteBranch(ctx, repo.ID, branch); err != nil {
 			return nil, err
 		}
 		return genesisChanges(ctx, repo, revision)

@@ -31,6 +31,7 @@ import (
 	"github.com/blevesearch/bleve/v2/analysis/token/camelcase"
 	"github.com/blevesearch/bleve/v2/analysis/token/lowercase"
 	"github.com/blevesearch/bleve/v2/analysis/token/unicodenorm"
+	tokenizer_regexp "github.com/blevesearch/bleve/v2/analysis/tokenizer/regexp"
 	"github.com/blevesearch/bleve/v2/analysis/tokenizer/unicode"
 	"github.com/blevesearch/bleve/v2/mapping"
 	"github.com/blevesearch/bleve/v2/search/query"
@@ -52,11 +53,15 @@ func addUnicodeNormalizeTokenFilter(m *mapping.IndexMappingImpl) error {
 // RepoIndexerData data stored in the repo indexer
 type RepoIndexerData struct {
 	RepoID    int64
+	Branch    string
+	IsDefault bool
 	CommitID  string
 	Filename  string
 	Content   string
-	Language  string
-	UpdatedAt time.Time
+	// ContentCode is Content again, tokenized into words and single punctuation characters
+	ContentCode string
+	Language    string
+	UpdatedAt   time.Time
 }
 
 // Type returns the document type, for bleve's mapping.Classifier interface.
@@ -68,7 +73,9 @@ const (
 	repoIndexerAnalyzer      = "repoIndexerAnalyzer"
 	repoIndexerDocType       = "repoIndexerDocType"
 	pathHierarchyAnalyzer    = "pathHierarchyAnalyzer"
-	repoIndexerLatestVersion = 7
+	codeAnalyzer             = "codeAnalyzer"
+	codeTokenizer            = "codeTokenizer"
+	repoIndexerLatestVersion = 8
 )
 
 // generateBleveIndexMapping generates a bleve index mapping for the repo indexer
@@ -87,6 +94,17 @@ func generateBleveIndexMapping() (mapping.IndexMapping, error) {
 	termFieldMapping.Analyzer = analyzer_keyword.Name
 	docMapping.AddFieldMappingsAt("Language", termFieldMapping)
 	docMapping.AddFieldMappingsAt("CommitID", termFieldMapping)
+	docMapping.AddFieldMappingsAt("Branch", termFieldMapping)
+
+	boolFieldMapping := bleve.NewBooleanFieldMapping()
+	boolFieldMapping.IncludeInAll = false
+	docMapping.AddFieldMappingsAt("IsDefault", boolFieldMapping)
+
+	codeFieldMapping := bleve.NewTextFieldMapping()
+	codeFieldMapping.IncludeInAll = false
+	codeFieldMapping.Store = false
+	codeFieldMapping.Analyzer = codeAnalyzer
+	docMapping.AddFieldMappingsAt("ContentCode", codeFieldMapping)
 
 	pathFieldMapping := bleve.NewTextFieldMapping()
 	pathFieldMapping.IncludeInAll = false
@@ -105,6 +123,18 @@ func generateBleveIndexMapping() (mapping.IndexMapping, error) {
 		"char_filters":  []string{},
 		"tokenizer":     unicode.Name,
 		"token_filters": []string{unicodeNormalizeName, camelcase.Name, lowercase.Name},
+	}); err != nil {
+		return nil, err
+	} else if err := mapping.AddCustomTokenizer(codeTokenizer, map[string]any{
+		"type":   tokenizer_regexp.Name,
+		"regexp": `\w+|[^\w\s]`,
+	}); err != nil {
+		return nil, err
+	} else if err := mapping.AddCustomAnalyzer(codeAnalyzer, map[string]any{
+		"type":          analyzer_custom.Name,
+		"char_filters":  []string{},
+		"tokenizer":     codeTokenizer,
+		"token_filters": []string{unicodeNormalizeName, lowercase.Name},
 	}); err != nil {
 		return nil, err
 	} else if err := mapping.AddCustomAnalyzer(pathHierarchyAnalyzer, map[string]any{
@@ -139,7 +169,7 @@ func NewIndexer(indexDir string) *Indexer {
 	}
 }
 
-func (b *Indexer) addUpdate(ctx context.Context, batchWriter io.Writer, batchReader *bufio.Reader, commitSha string,
+func (b *Indexer) addUpdate(ctx context.Context, batchWriter io.Writer, batchReader *bufio.Reader, branch, commitSha string, isDefault bool,
 	update internal.FileUpdate, repo *repo_model.Repository, batch *inner_bleve.FlushingBatch,
 ) error {
 	// Ignore vendored files in code search
@@ -162,7 +192,7 @@ func (b *Indexer) addUpdate(ctx context.Context, batchWriter io.Writer, batchRea
 	}
 
 	if size > setting.Indexer.MaxIndexerFileSize {
-		return b.addDelete(update.Filename, repo, batch)
+		return b.addDelete(branch, update.Filename, repo, batch)
 	}
 
 	if _, err := batchWriter.Write([]byte(update.BlobSha + "\n")); err != nil {
@@ -186,24 +216,27 @@ func (b *Indexer) addUpdate(ctx context.Context, batchWriter io.Writer, batchRea
 	if _, err = batchReader.Discard(1); err != nil {
 		return err
 	}
-	id := internal.FilenameIndexerID(repo.ID, update.Filename)
+	id := internal.FilenameIndexerID(repo.ID, branch, update.Filename)
+	content := string(charset.ToUTF8DropErrors(fileContents, charset.ConvertOpts{}))
 	return batch.Index(id, &RepoIndexerData{
-		RepoID:    repo.ID,
-		CommitID:  commitSha,
-		Filename:  update.Filename,
-		Content:   string(charset.ToUTF8DropErrors(fileContents, charset.ConvertOpts{})),
-		Language:  analyze.GetCodeLanguage(update.Filename, fileContents),
-		UpdatedAt: time.Now().UTC(),
+		RepoID:      repo.ID,
+		Branch:      branch,
+		IsDefault:   isDefault,
+		CommitID:    commitSha,
+		Filename:    update.Filename,
+		Content:     content,
+		ContentCode: content,
+		Language:    analyze.GetCodeLanguage(update.Filename, fileContents),
+		UpdatedAt:   time.Now().UTC(),
 	})
 }
 
-func (b *Indexer) addDelete(filename string, repo *repo_model.Repository, batch *inner_bleve.FlushingBatch) error {
-	id := internal.FilenameIndexerID(repo.ID, filename)
-	return batch.Delete(id)
+func (b *Indexer) addDelete(branch, filename string, repo *repo_model.Repository, batch *inner_bleve.FlushingBatch) error {
+	return batch.Delete(internal.FilenameIndexerID(repo.ID, branch, filename))
 }
 
 // Index indexes the data
-func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, sha string, changes *internal.RepoChanges) error {
+func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, branch, sha string, isDefault bool, changes *internal.RepoChanges) error {
 	batch := inner_bleve.NewFlushingBatch(b.inner.Indexer, maxBatchSize)
 	if len(changes.Updates) > 0 {
 		r, err := gitrepo.OpenRepository(ctx, repo)
@@ -214,7 +247,7 @@ func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, sha st
 
 		if err := r.WithCatFileBatch(ctx, func(w io.Writer, r *bufio.Reader) error {
 			for _, update := range changes.Updates {
-				if err := b.addUpdate(ctx, w, r, sha, update, repo, batch); err != nil {
+				if err := b.addUpdate(ctx, w, r, branch, sha, isDefault, update, repo, batch); err != nil {
 					return err
 				}
 			}
@@ -224,16 +257,27 @@ func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, sha st
 		}
 	}
 	for _, filename := range changes.RemovedFilenames {
-		if err := b.addDelete(filename, repo, batch); err != nil {
+		if err := b.addDelete(branch, filename, repo, batch); err != nil {
 			return err
 		}
 	}
 	return batch.Flush()
 }
 
-// Delete deletes indexes by ids
+// Delete deletes all documents of a repo
 func (b *Indexer) Delete(_ context.Context, repoID int64) error {
-	query := inner_bleve.NumericEqualityQuery(repoID, "RepoID")
+	return b.deleteByQuery(inner_bleve.NumericEqualityQuery(repoID, "RepoID"))
+}
+
+// DeleteBranch deletes the documents of a branch, found by their fields and never by an ID prefix
+func (b *Indexer) DeleteBranch(_ context.Context, repoID int64, branch string) error {
+	return b.deleteByQuery(bleve.NewConjunctionQuery(
+		inner_bleve.NumericEqualityQuery(repoID, "RepoID"),
+		inner_bleve.MatchQuery(branch, "Branch", analyzer_keyword.Name, 0),
+	))
+}
+
+func (b *Indexer) deleteByQuery(query query.Query) error {
 	searchRequest := bleve.NewSearchRequestOptions(query, 2147483647, 0, false)
 	result, err := b.inner.Indexer.Search(searchRequest)
 	if err != nil {
@@ -256,7 +300,16 @@ func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int
 		keywordQuery query.Query
 	)
 
-	if opts.Mode == internal.CodeSearchModeUnion {
+	// Keywords with punctuation are matched as a phrase of words and single
+	// punctuation characters, the others like before (camel case aware).
+	contentField := "Content"
+	if opts.Mode == internal.CodeSearchModeExact && internal.HasPunctuation(opts.Keyword) {
+		contentField = "ContentCode"
+	}
+
+	if contentField == "ContentCode" {
+		keywordQuery = inner_bleve.MatchPhraseQuery(opts.Keyword, contentField, codeAnalyzer, false, 1.0)
+	} else if opts.Mode == internal.CodeSearchModeUnion {
 		query := bleve.NewDisjunctionQuery()
 		for field := range strings.FieldsSeq(opts.Keyword) {
 			query.AddQuery(inner_bleve.MatchPhraseQuery(field, "Content", repoIndexerAnalyzer, false, 1.0))
@@ -264,7 +317,7 @@ func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int
 		keywordQuery = query
 	} else {
 		keywordQuery = inner_bleve.MatchPhraseQuery(opts.Keyword,
-			"Content",
+			contentField,
 			repoIndexerAnalyzer,
 			opts.Mode == internal.CodeSearchModeFuzzy,
 			1.0)
@@ -282,6 +335,14 @@ func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int
 		)
 	} else {
 		indexerQuery = keywordQuery
+	}
+
+	switch {
+	case opts.AllBranches:
+	case opts.Branch != "":
+		indexerQuery = bleve.NewConjunctionQuery(indexerQuery, inner_bleve.MatchQuery(opts.Branch, "Branch", analyzer_keyword.Name, 0))
+	default:
+		indexerQuery = bleve.NewConjunctionQuery(indexerQuery, inner_bleve.BoolFieldQuery(true, "IsDefault"))
 	}
 
 	opts.Filename = strings.Trim(opts.Filename, "/")
@@ -307,7 +368,7 @@ func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int
 
 	from, pageSize := opts.GetSkipTake()
 	searchRequest := bleve.NewSearchRequestOptions(indexerQuery, pageSize, from, false)
-	searchRequest.Fields = []string{"Content", "RepoID", "Filename", "Language", "CommitID", "UpdatedAt"}
+	searchRequest.Fields = []string{"Content", "RepoID", "Branch", "Filename", "Language", "CommitID", "UpdatedAt"}
 	searchRequest.IncludeLocations = true
 
 	if len(opts.Language) == 0 {
@@ -326,7 +387,7 @@ func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int
 	searchResults := make([]*internal.SearchResult, len(result.Hits))
 	for i, hit := range result.Hits {
 		startIndex, endIndex := -1, -1
-		for _, locations := range hit.Locations["Content"] {
+		for _, locations := range hit.Locations[contentField] {
 			if startIndex != -1 && endIndex != -1 {
 				break
 			}
@@ -347,6 +408,7 @@ func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int
 		}
 		searchResults[i] = &internal.SearchResult{
 			RepoID:      int64(hit.Fields["RepoID"].(float64)),
+			Branch:      hit.Fields["Branch"].(string),
 			StartIndex:  startIndex,
 			EndIndex:    endIndex,
 			Filename:    hit.Fields["Filename"].(string),
