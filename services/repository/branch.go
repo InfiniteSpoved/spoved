@@ -385,7 +385,9 @@ func RenameBranch(ctx context.Context, repo *repo_model.Repository, doer *user_m
 		}
 	}
 
+	renamedDefault := false
 	if err := git_model.RenameBranch(ctx, repo, from, to, func(ctx context.Context, isDefault bool) error {
+		renamedDefault = isDefault
 		err2 := gitRepo.RenameBranch(from, to)
 		if err2 != nil {
 			return err2
@@ -425,6 +427,9 @@ func RenameBranch(ctx context.Context, repo *repo_model.Repository, doer *user_m
 
 	notify_service.DeleteRef(ctx, doer, repo, git.RefNameFromBranch(from))
 	notify_service.CreateRef(ctx, doer, repo, refNameTo, refID)
+	if renamedDefault {
+		notify_service.ChangeDefaultBranch(ctx, repo)
+	}
 
 	return "", nil
 }

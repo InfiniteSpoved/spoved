@@ -9,6 +9,7 @@ import (
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/git"
 	code_indexer "forgejo.org/modules/indexer/code"
 	issue_indexer "forgejo.org/modules/indexer/issues"
 	stats_indexer "forgejo.org/modules/indexer/stats"
@@ -93,7 +94,7 @@ func (r *indexerNotifier) PushCommits(ctx context.Context, pusher *user_model.Us
 		return
 	}
 
-	if setting.Indexer.RepoIndexerEnabled && opts.RefFullName.BranchName() == repo.DefaultBranch {
+	if setting.Indexer.RepoIndexerEnabled && code_indexer.IsIndexedBranchName(ctx, repo, opts.RefFullName.BranchName()) {
 		code_indexer.UpdateRepoIndexer(repo)
 	}
 	if err := stats_indexer.UpdateRepoIndexer(repo); err != nil {
@@ -106,7 +107,7 @@ func (r *indexerNotifier) SyncPushCommits(ctx context.Context, pusher *user_mode
 		return
 	}
 
-	if setting.Indexer.RepoIndexerEnabled && opts.RefFullName.BranchName() == repo.DefaultBranch {
+	if setting.Indexer.RepoIndexerEnabled && code_indexer.IsIndexedBranchName(ctx, repo, opts.RefFullName.BranchName()) {
 		code_indexer.UpdateRepoIndexer(repo)
 	}
 	if err := stats_indexer.UpdateRepoIndexer(repo); err != nil {
@@ -114,9 +115,41 @@ func (r *indexerNotifier) SyncPushCommits(ctx context.Context, pusher *user_mode
 	}
 }
 
+func (r *indexerNotifier) CreateRef(ctx context.Context, _ *user_model.User, repo *repo_model.Repository, refFullName git.RefName, _ string) {
+	if setting.Indexer.RepoIndexerEnabled && refFullName.IsBranch() && code_indexer.IsIndexedBranchName(ctx, repo, refFullName.BranchName()) {
+		code_indexer.UpdateRepoIndexer(repo)
+	}
+}
+
+func (r *indexerNotifier) DeleteRef(ctx context.Context, _ *user_model.User, repo *repo_model.Repository, refFullName git.RefName) {
+	r.deleteBranch(ctx, repo, refFullName)
+}
+
+func (r *indexerNotifier) SyncDeleteRef(ctx context.Context, _ *user_model.User, repo *repo_model.Repository, refFullName git.RefName) {
+	r.deleteBranch(ctx, repo, refFullName)
+}
+
+// deleteBranch updates the index if the deleted branch was indexed: the patterns may have changed since.
+func (r *indexerNotifier) deleteBranch(ctx context.Context, repo *repo_model.Repository, refFullName git.RefName) {
+	if !setting.Indexer.RepoIndexerEnabled || !refFullName.IsBranch() {
+		return
+	}
+	branches, err := repo_model.GetIndexerBranches(ctx, repo.ID)
+	if err != nil {
+		log.Error("GetIndexerBranches(%d) failed: %v", repo.ID, err)
+		return
+	}
+	if _, ok := branches[refFullName.BranchName()]; ok {
+		code_indexer.UpdateRepoIndexer(repo)
+	}
+}
+
 func (r *indexerNotifier) ChangeDefaultBranch(ctx context.Context, repo *repo_model.Repository) {
 	if setting.Indexer.RepoIndexerEnabled && !repo.IsEmpty {
-		code_indexer.UpdateRepoIndexer(repo)
+		// every document carries whether its branch is the default one
+		if err := code_indexer.ResetRepoIndexer(ctx, repo); err != nil {
+			log.Error("ResetRepoIndexer(%d) failed: %v", repo.ID, err)
+		}
 	}
 	if err := stats_indexer.UpdateRepoIndexer(repo); err != nil {
 		log.Error("stats_indexer.UpdateRepoIndexer(%d) failed: %v", repo.ID, err)

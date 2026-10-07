@@ -33,9 +33,11 @@ var Indexer = struct {
 	RepoConnStr            string
 	RepoIndexerName        string
 	MaxIndexerFileSize     int64
-	IncludePatterns        []Glob
-	ExcludePatterns        []Glob
-	ExcludeVendored        bool
+	// MaxIndexedBranchesPerRepo caps the branches code search indexes per repo, the default branch included
+	MaxIndexedBranchesPerRepo int
+	IncludePatterns           []Glob
+	ExcludePatterns           []Glob
+	ExcludeVendored           bool
 }{
 	IssueType:        "bleve",
 	IssuePath:        "indexers/issues.bleve",
@@ -43,15 +45,16 @@ var Indexer = struct {
 	IssueConnAuth:    "",
 	IssueIndexerName: "gitea_issues",
 
-	RepoIndexerEnabled:     false,
-	RepoIndexerRepoTypes:   []string{"sources", "forks", "mirrors", "templates"},
-	RepoIndexerEnableFuzzy: false,
-	RepoType:               "bleve",
-	RepoPath:               "indexers/repos.bleve",
-	RepoConnStr:            "",
-	RepoIndexerName:        "gitea_codes",
-	MaxIndexerFileSize:     1024 * 1024,
-	ExcludeVendored:        true,
+	RepoIndexerEnabled:        false,
+	RepoIndexerRepoTypes:      []string{"sources", "forks", "mirrors", "templates"},
+	RepoIndexerEnableFuzzy:    false,
+	RepoType:                  "bleve",
+	RepoPath:                  "indexers/repos.bleve",
+	RepoConnStr:               "",
+	RepoIndexerName:           "gitea_codes",
+	MaxIndexerFileSize:        1024 * 1024,
+	MaxIndexedBranchesPerRepo: 5,
+	ExcludeVendored:           true,
 }
 
 type Glob struct {
@@ -163,6 +166,7 @@ func loadIndexerFrom(rootCfg ConfigProvider) {
 	Indexer.ExcludePatterns = IndexerGlobFromString(sec.Key("REPO_INDEXER_EXCLUDE").MustString(""))
 	Indexer.ExcludeVendored = sec.Key("REPO_INDEXER_EXCLUDE_VENDORED").MustBool(true)
 	Indexer.MaxIndexerFileSize = sec.Key("MAX_FILE_SIZE").MustInt64(1024 * 1024)
+	Indexer.MaxIndexedBranchesPerRepo = max(sec.Key("MAX_INDEXED_BRANCHES_PER_REPO").MustInt(5), 1)
 	var err error
 	Indexer.StartupTimeout, err = sec.Key("STARTUP_TIMEOUT").MustDuration(30 * time.Second)
 	if err != nil {

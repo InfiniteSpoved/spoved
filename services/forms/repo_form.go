@@ -169,6 +169,11 @@ func (f *RepoSettingForm) Validate(req *http.Request, errs binding.Errors) bindi
 	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
+// RepoCodeSearchForm form for the branches code search indexes, one name or pattern per line
+type RepoCodeSearchForm struct {
+	IndexedBranches string `form:"indexed_branches" binding:"MaxSize(4096)"`
+}
+
 // RepoUnitSettingForm form for changing repository unit settings
 type RepoUnitSettingForm struct {
 	EnableCode                            bool

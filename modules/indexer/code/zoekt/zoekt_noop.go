@@ -28,7 +28,12 @@ func NewIndexer(_ string) *Indexer {
 }
 
 // Index will save the index data
-func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, sha string, changes *internal.RepoChanges) error {
+func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, branch, sha string, isDefault bool, changes *internal.RepoChanges) error {
+	return inner_zoekt.ErrNotImplemented
+}
+
+// DeleteBranch is not implemented
+func (b *Indexer) DeleteBranch(_ context.Context, _ int64, _ string) error {
 	return inner_zoekt.ErrNotImplemented
 }
 

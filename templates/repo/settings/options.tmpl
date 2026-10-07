@@ -379,6 +379,25 @@
 			</form>
 		</div>
 
+		{{if and .CodeIndexerEnabled (.Repository.UnitEnabled $.Context $.UnitTypeCode)}}
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "repo.settings.code_search.title"}}
+		</h4>
+		<div class="ui attached segment">
+			<form class="ui form" action="{{.RepoLink}}/settings/code_search" method="post">
+				<div class="field">
+					<label for="indexed_branches">{{ctx.Locale.Tr "repo.settings.code_search.indexed_branches"}}</label>
+					<textarea id="indexed_branches" name="indexed_branches" rows="4" maxlength="4096" placeholder="develop&#10;release/*">{{range $i, $p := .IndexedBranches}}{{if $i}}
+{{end}}{{$p}}{{end}}</textarea>
+					<p class="help">{{ctx.Locale.Tr "repo.settings.code_search.indexed_branches_help" .MaxIndexedBranches}}</p>
+				</div>
+				<div class="field">
+					<button class="ui primary button">{{ctx.Locale.Tr "repo.settings.update_settings"}}</button>
+				</div>
+			</form>
+		</div>
+		{{end}}
+
 		{{if .IsAdmin}}
 		<h4 class="ui top attached header">
 			{{ctx.Locale.Tr "repo.settings.admin_settings"}}

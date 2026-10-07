@@ -31,8 +31,50 @@ type RepoIndexerStatus struct { //revive:disable-line:exported
 	IndexerType RepoIndexerType `xorm:"INDEX(s) NOT NULL DEFAULT 0"`
 }
 
+// RepoIndexerBranch is the commit a non-default branch was last indexed at
+type RepoIndexerBranch struct { //revive:disable-line:exported
+	ID        int64  `xorm:"pk autoincr"`
+	RepoID    int64  `xorm:"UNIQUE(s) NOT NULL"`
+	Branch    string `xorm:"UNIQUE(s) VARCHAR(255) NOT NULL"`
+	CommitSha string `xorm:"VARCHAR(64)"`
+}
+
 func init() {
 	db.RegisterModel(new(RepoIndexerStatus))
+	db.RegisterModel(new(RepoIndexerBranch))
+}
+
+// GetIndexerBranches returns the indexed commit of each non-default branch of a repo
+func GetIndexerBranches(ctx context.Context, repoID int64) (map[string]string, error) {
+	rows := make([]*RepoIndexerBranch, 0, 5)
+	if err := db.GetEngine(ctx).Where("repo_id = ?", repoID).Find(&rows); err != nil {
+		return nil, err
+	}
+	branches := make(map[string]string, len(rows))
+	for _, row := range rows {
+		branches[row.Branch] = row.CommitSha
+	}
+	return branches, nil
+}
+
+// SetIndexerBranch records the indexed commit of a branch
+func SetIndexerBranch(ctx context.Context, repoID int64, branch, sha string) error {
+	n, err := db.GetEngine(ctx).Where("repo_id = ? AND branch = ?", repoID, branch).Cols("commit_sha").Update(&RepoIndexerBranch{CommitSha: sha})
+	if err != nil || n > 0 {
+		return err
+	}
+	_, err = db.GetEngine(ctx).Insert(&RepoIndexerBranch{RepoID: repoID, Branch: branch, CommitSha: sha})
+	return err
+}
+
+// DeleteIndexerBranches forgets the given branches, or all branches of the repo if none are given
+func DeleteIndexerBranches(ctx context.Context, repoID int64, branches ...string) error {
+	sess := db.GetEngine(ctx).Where("repo_id = ?", repoID)
+	if len(branches) > 0 {
+		sess = sess.In("branch", branches)
+	}
+	_, err := sess.Delete(new(RepoIndexerBranch))
+	return err
 }
 
 // GetUnindexedRepos returns repos which do not have an indexer status
