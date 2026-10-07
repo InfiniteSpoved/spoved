@@ -20,9 +20,7 @@ import (
 	user_model "forgejo.org/models/user"
 	webhook_model "forgejo.org/models/webhook"
 	"forgejo.org/modules/private"
-	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
-	"forgejo.org/modules/test"
 	webhook_module "forgejo.org/modules/webhook"
 	webhook_service "forgejo.org/services/webhook"
 
@@ -162,14 +160,20 @@ func TestTrashFork(t *testing.T) {
 	defer prepareTrash(t)()
 	fork := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 11})
 	require.Equal(t, int64(10), fork.ForkID)
-	defer test.MockVariableValue(&setting.Trash.RetentionDays, 365)()
+	session := loginUser(t, "user13")
+	pages := []string{"/user13/repo11", "/user13/repo11/pulls", "/api/v1/repos/user13/repo11", "/api/v1/repos/user13/repo11/pulls"}
 
-	loginUser(t, "user13").MakeRequest(t, NewRequest(t, "GET", "/user13/repo11"), http.StatusOK)
+	before := map[string]int{}
+	for _, page := range pages {
+		before[page] = session.MakeRequest(t, NewRequest(t, "GET", page), NoExpectedStatus).Code
+	}
+	assert.Equal(t, http.StatusOK, before["/user13/repo11"])
+
 	// trash the base (repo 10 of user12)
 	MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/repos/user12/repo10").AddTokenAuth(getUserToken(t, "user12", auth_model.AccessTokenScopeAll)), http.StatusNoContent)
+	require.True(t, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 10}).IsTrashed())
 
-	loginUser(t, "user13").MakeRequest(t, NewRequest(t, "GET", "/user13/repo11"), http.StatusOK)
-	loginUser(t, "user13").MakeRequest(t, NewRequest(t, "GET", "/user13/repo11/pulls"), http.StatusOK)
-	MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user13/repo11"), http.StatusOK)
-	MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user13/repo11/pulls"), http.StatusOK)
+	for _, page := range pages {
+		assert.Equal(t, before[page], session.MakeRequest(t, NewRequest(t, "GET", page), NoExpectedStatus).Code, page)
+	}
 }

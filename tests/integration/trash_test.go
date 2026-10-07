@@ -148,9 +148,12 @@ func TestTrashInvisible(t *testing.T) {
 	})
 
 	t.Run("git over HTTP", func(t *testing.T) {
+		// the answer is the same as for a repository that never existed
 		for _, service := range []string{"git-upload-pack", "git-receive-pack"} {
-			req := NewRequest(t, "GET", "/user2/repo1.git/info/refs?service="+service).AddBasicAuth("user2")
-			MakeRequest(t, req, http.StatusNotFound)
+			missing := MakeRequest(t, NewRequest(t, "GET", "/user2/never-existed.git/info/refs?service="+service).AddBasicAuth("user2"), NoExpectedStatus)
+			trashed := MakeRequest(t, NewRequest(t, "GET", "/user2/repo1.git/info/refs?service="+service).AddBasicAuth("user2"), NoExpectedStatus)
+			assert.Equal(t, missing.Code, trashed.Code, service)
+			assert.NotEqual(t, http.StatusOK, trashed.Code, service)
 		}
 	})
 
