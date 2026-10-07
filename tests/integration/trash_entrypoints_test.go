@@ -20,6 +20,7 @@ import (
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	webhook_model "forgejo.org/models/webhook"
+	issue_indexer "forgejo.org/modules/indexer/issues"
 	"forgejo.org/modules/private"
 	"forgejo.org/modules/structs"
 	webhook_module "forgejo.org/modules/webhook"
@@ -183,23 +184,18 @@ func TestTrashFork(t *testing.T) {
 	}
 }
 
-// Issue search (indexer) does not return the issues of a trashed repository.
+// The issue indexer does not return the issues of a trashed repository.
 func TestTrashIssueSearch(t *testing.T) {
 	defer prepareTrash(t)()
-	token := getUserToken(t, "user2", auth_model.AccessTokenScopeAll)
-	search := func() []int64 {
-		var issues []*structs.Issue
-		DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/issues/search?q=issue1&type=issues").AddTokenAuth(token), http.StatusOK), &issues)
-		ids := make([]int64, 0, len(issues))
-		for _, i := range issues {
-			ids = append(ids, i.Repo.ID)
-		}
-		return ids
+	search := func() int {
+		ids, _, err := issue_indexer.SearchIssues(t.Context(), &issue_indexer.SearchOptions{RepoIDs: []int64{trashRepoID}, Paginator: &db.ListOptions{PageSize: 50, Page: 1}})
+		require.NoError(t, err)
+		return len(ids)
 	}
-	require.Contains(t, search(), int64(trashRepoID))
+	require.Positive(t, search())
 
 	moveToTrash(t)
-	assert.NotContains(t, search(), int64(trashRepoID))
+	assert.Zero(t, search())
 }
 
 // An email reply to an issue of a trashed repository is refused and creates no comment.
