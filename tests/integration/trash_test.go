@@ -153,8 +153,9 @@ func TestTrashInvisible(t *testing.T) {
 			missing := MakeRequest(t, NewRequest(t, "GET", "/user2/never-existed.git/info/refs?service="+service).AddBasicAuth("user2"), NoExpectedStatus)
 			trashed := MakeRequest(t, NewRequest(t, "GET", "/user2/repo1.git/info/refs?service="+service).AddBasicAuth("user2"), NoExpectedStatus)
 			assert.Equal(t, missing.Code, trashed.Code, service)
-			assert.NotEqual(t, http.StatusOK, trashed.Code, service)
 		}
+		// receive-pack may answer for a missing repository when push-to-create is on; reading is always refused
+		MakeRequest(t, NewRequest(t, "GET", "/user2/repo1.git/info/refs?service=git-upload-pack").AddBasicAuth("user2"), http.StatusNotFound)
 	})
 
 	t.Run("owner counters", func(t *testing.T) {
