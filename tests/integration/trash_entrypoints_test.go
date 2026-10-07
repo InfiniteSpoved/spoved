@@ -13,6 +13,7 @@ import (
 	asymkey_model "forgejo.org/models/asymkey"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/packages"
 	"forgejo.org/models/perm"
 	repo_model "forgejo.org/models/repo"
@@ -22,6 +23,8 @@ import (
 	"forgejo.org/modules/private"
 	"forgejo.org/modules/structs"
 	webhook_module "forgejo.org/modules/webhook"
+	"forgejo.org/services/mailer/incoming"
+	incoming_payload "forgejo.org/services/mailer/incoming/payload"
 	webhook_service "forgejo.org/services/webhook"
 
 	"github.com/stretchr/testify/assert"
@@ -142,8 +145,10 @@ func TestTrashReferencesAndLists(t *testing.T) {
 	defer prepareTrash(t)()
 	moveToTrash(t)
 
-	// repo1's issue 1 is referenced from other issues in the fixtures; the page of a referencing issue still renders.
-	loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/user2/repo2/issues"), http.StatusOK)
+	// F2: an issue of repo2 that repo1 references still renders, on the web and in the API
+	require.NoError(t, db.Insert(t.Context(), &issues_model.Comment{Type: issues_model.CommentTypeIssueRef, IssueID: 4, PosterID: 2, RefRepoID: trashRepoID, RefIssueID: 1}))
+	loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/user2/repo2/issues/1"), http.StatusOK)
+	MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo2/issues/1/comments").AddTokenAuth(getUserToken(t, "user2", auth_model.AccessTokenScopeAll)), http.StatusOK)
 
 	body := loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/notifications/subscriptions"), http.StatusOK).Body.String()
 	assert.NotContains(t, body, `/user2/repo1"`)
@@ -176,4 +181,37 @@ func TestTrashFork(t *testing.T) {
 	for _, page := range pages {
 		assert.Equal(t, before[page], session.MakeRequest(t, NewRequest(t, "GET", page), NoExpectedStatus).Code, page)
 	}
+}
+
+// Issue search (indexer) does not return the issues of a trashed repository.
+func TestTrashIssueSearch(t *testing.T) {
+	defer prepareTrash(t)()
+	token := getUserToken(t, "user2", auth_model.AccessTokenScopeAll)
+	search := func() []int64 {
+		var issues []*structs.Issue
+		DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/issues/search?q=issue1&type=issues").AddTokenAuth(token), http.StatusOK), &issues)
+		ids := make([]int64, 0, len(issues))
+		for _, i := range issues {
+			ids = append(ids, i.Repo.ID)
+		}
+		return ids
+	}
+	require.Contains(t, search(), int64(trashRepoID))
+
+	moveToTrash(t)
+	assert.NotContains(t, search(), int64(trashRepoID))
+}
+
+// An email reply to an issue of a trashed repository is refused and creates no comment.
+func TestTrashEmailReply(t *testing.T) {
+	defer prepareTrash(t)()
+	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	issue := unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: 1})
+	payload, err := incoming_payload.CreateReferencePayload(issue)
+	require.NoError(t, err)
+
+	moveToTrash(t)
+	before := unittest.GetCount(t, &issues_model.Comment{IssueID: issue.ID})
+	require.Error(t, (&incoming.ReplyHandler{}).Handle(t.Context(), &incoming.MailContent{Content: "reply"}, user, payload))
+	assert.Equal(t, before, unittest.GetCount(t, &issues_model.Comment{IssueID: issue.ID}))
 }

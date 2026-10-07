@@ -9,6 +9,7 @@ import (
 
 	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 
@@ -92,4 +93,21 @@ func TestIterateLFSMetaObjectsForRepo(t *testing.T) {
 			assert.Equal(t, expectedIDs, actualIDs)
 		})
 	})
+}
+
+// F5: an LFS object of a trashed repository is not accessible, so it can't be linked into another repository.
+func TestLFSObjectAccessibleTrashed(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})
+	const oid = "0b8d8b5f15046343fd32f451df93acc2bdd9e6373be478b968e4cad6b6647351" // user2/lfs, repository 54
+
+	accessible, err := LFSObjectAccessible(t.Context(), user, oid)
+	require.NoError(t, err)
+	require.True(t, accessible)
+
+	_, err = db.GetEngine(t.Context()).Exec("UPDATE `repository` SET trashed_unix = 1 WHERE id = 54")
+	require.NoError(t, err)
+	accessible, err = LFSObjectAccessible(t.Context(), user, oid)
+	require.NoError(t, err)
+	assert.False(t, accessible)
 }

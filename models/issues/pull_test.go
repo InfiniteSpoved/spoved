@@ -584,3 +584,17 @@ func TestFindUnresolvedConversations(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []int64{4}, ids(false))
 }
+
+// A pull request whose head repository is in the trash is shown like one whose head repository was deleted.
+func TestPullRequest_LoadHeadRepoTrashed(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	_, err := db.GetEngine(t.Context()).Exec("UPDATE `repository` SET trashed_unix = 1 WHERE id = 11")
+	require.NoError(t, err)
+
+	pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: 3})
+	require.Equal(t, int64(11), pr.HeadRepoID)
+	require.NoError(t, pr.LoadHeadRepo(t.Context()))
+	assert.Nil(t, pr.HeadRepo)
+	require.NoError(t, pr.LoadBaseRepo(t.Context()))
+	assert.EqualValues(t, 10, pr.BaseRepo.ID)
+}
