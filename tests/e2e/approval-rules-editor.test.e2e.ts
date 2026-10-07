@@ -4,7 +4,7 @@
 // web_src/js/features/repo-settings.js
 // @watch end
 
-import {expect, type Page} from '@playwright/test';
+import {expect, type Locator, type Page} from '@playwright/test';
 import {test, dynamic_id} from './utils_e2e.ts';
 import {screenshot} from './shared/screenshots.ts';
 
@@ -40,7 +40,7 @@ for (const {name, base, team} of forms) {
       await page.goto(`${base}/edit`);
       await expect(cards(page)).toHaveCount(0);
       await expect(add(page)).toBeEnabled();
-      await expect(page.locator('.approval-rule-limit')).toBeHidden();
+      await expect(page.locator('.approval-rule-limit')).toContainText('At most 20 rules');
       await screenshot(page);
 
       await page.locator('input[name="rule_name"]').fill(rule);
@@ -82,12 +82,38 @@ for (const {name, base, team} of forms) {
       for (let i = 0; i < 20; i++) await add(page).click();
       await expect(cards(page)).toHaveCount(20);
       await expect(add(page)).toBeDisabled();
-      await expect(page.locator('.approval-rule-limit')).toBeVisible();
-      await expect(page.locator('.approval-rule-limit')).toContainText('At most 20 rules');
       await cards(page).last().locator('.approval-rule-remove').click();
       await expect(add(page)).toBeEnabled();
-      await expect(page.locator('.approval-rule-limit')).toBeHidden();
     });
+
+    // every client check on its own: the error shows in the offending card and nothing is submitted
+    const checks = [
+      {error: 'name', fill: async (c: Locator) => { await c.locator('input[name="approval_rule_name"]').fill('') }},
+      {error: 'approvers', fill: async (_c: Locator) => {}, noUser: true},
+      {error: 'duplicate', second: true},
+      {error: 'count', fill: async (c: Locator) => { await c.locator('input[name="approval_rule_count"]').fill('0') }},
+      {error: 'name', long: true, fill: async (c: Locator) => { await c.locator('input[name="approval_rule_name"]').evaluate((el: HTMLInputElement) => { el.value = 'x'.repeat(256) }) }},
+    ];
+    for (const check of checks) {
+      test(`client check: ${check.error}${check.long ? ' (too long)' : ''}`, async ({page}) => {
+        await page.goto(`${base}/edit`);
+        await page.locator('input[name="rule_name"]').fill(`ar-check-${dynamic_id()}`);
+        const count = check.second ? 2 : 1;
+        for (let i = 0; i < count; i++) {
+          await add(page).click();
+          await cards(page).nth(i).locator('input[name="approval_rule_name"]').fill('Same');
+          // a duplicate needs a valid first card; the invalid card is the last one
+          if (!check.noUser) await pickUser(page, i, 'user2');
+        }
+        const card = cards(page).last();
+        await check.fill?.(card);
+        await save(page).click();
+        await expect(card.locator(`.approval-rule-error[data-error="${check.error}"]`)).toBeVisible();
+        await expect(card.locator('.field.error').first()).toBeVisible();
+        await expect(cards(page)).toHaveCount(count);
+        await expect(page).toHaveURL(`${base}/edit`);
+      });
+    }
 
     test('half-filled card is not submitted, empty new card is ignored', async ({page}) => {
       const rule = `ar-editor-${dynamic_id()}`;
@@ -98,7 +124,7 @@ for (const {name, base, team} of forms) {
 
       // a name without users, teams or code owners
       await save(page).click();
-      await expect(cards(page).first().locator('.approval-rule-error')).toBeVisible();
+      await expect(cards(page).first().locator('.approval-rule-error[data-error="approvers"]')).toBeVisible();
       await expect(cards(page).first().locator('.field.error').first()).toBeVisible();
       await expect(page).toHaveURL(`${base}/edit`);
       await screenshot(page);

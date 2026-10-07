@@ -193,7 +193,7 @@
 					{{/* keeps the field in the form when all rules are removed; it has no name, so the parser drops it */}}
 					<input type="hidden" name="approval_rule_name" value="">
 					<button type="button" class="ui button approval-rule-add tw-hidden tw-mt-2" data-js-only>{{ctx.Locale.Tr "repo.settings.approval_rule_add"}}</button>
-					<div class="approval-rule-limit tw-hidden"><span class="help">{{ctx.Locale.Tr "repo.settings.approval_rule_limit" .MaxApprovalRules}}</span></div>
+					<div class="approval-rule-limit"><span class="help">{{ctx.Locale.Tr "repo.settings.approval_rule_limit" .MaxApprovalRules}}</span></div>
 					<template>
 						{{template "repo/settings/approval_rule_card" (dict "Rule" (dict "RequiredCount" 1) "Users" $.Users "Teams" $.Teams "ShowTeams" $.Owner.IsOrganization)}}
 					</template>

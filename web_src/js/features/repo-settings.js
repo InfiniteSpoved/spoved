@@ -118,6 +118,8 @@ const setTitle = (card) => {
   title.textContent = card.querySelector('[name="approval_rule_name"]').value.trim() || title.getAttribute('data-default');
 };
 
+const ruleValue = (card, name) => card.querySelector(`[name="${name}"]`)?.value.trim() ?? '';
+
 // Cards of approval rules: add, remove and validate in the browser. Without JS the existing cards still save as before.
 function initApprovalRules() {
   const rules = document.querySelector('.approval-rules');
@@ -128,7 +130,6 @@ function initApprovalRules() {
   const update = () => {
     const full = cards().length >= Number(rules.getAttribute('data-max'));
     addButton.disabled = full;
-    toggleElem(rules.querySelector('.approval-rule-limit'), full);
   };
 
   showJsOnly(rules);
@@ -149,20 +150,29 @@ function initApprovalRules() {
     if (e.target.name === 'approval_rule_name') setTitle(e.target.closest('.approval-rule-card'));
   });
 
-  // drop empty cards, refuse half-filled ones
+  // drop empty cards; refuse invalid ones with the checks of the model, the server still reports the rest (path globs, unknown names)
   rules.closest('form').addEventListener('submit', (e) => {
+    const seen = new Set();
     let firstBad;
     for (const card of cards()) {
-      const value = (name) => card.querySelector(`[name="${name}"]`)?.value.trim() ?? '';
+      const value = (name) => ruleValue(card, name);
+      const name = value('approval_rule_name');
       const hasApprovers = value('approval_rule_users') || value('approval_rule_teams') || value('approval_rule_code_owners') === 'true';
-      if (!value('approval_rule_name') && !hasApprovers && !value('approval_rule_paths') && value('approval_rule_count') === '1') {
+      if (!name && !hasApprovers && !value('approval_rule_paths') && value('approval_rule_count') === '1') {
         card.remove();
         continue;
       }
-      const bad = !value('approval_rule_name') || !hasApprovers;
-      toggleElem(card.querySelector('.approval-rule-error'), bad);
-      for (const field of card.querySelectorAll('.field')) field.classList.toggle('error', bad);
-      if (bad) firstBad ??= card;
+      let error;
+      let invalid = [];
+      if (!name || name.length > 255) [error, invalid] = ['name', ['approval_rule_name']];
+      else if (seen.has(name)) [error, invalid] = ['duplicate', ['approval_rule_name']];
+      else if (!(Number.isInteger(Number(value('approval_rule_count'))) && Number(value('approval_rule_count')) >= 1)) [error, invalid] = ['count', ['approval_rule_count']];
+      else if (!hasApprovers) [error, invalid] = ['approvers', ['approval_rule_users', 'approval_rule_teams']];
+      seen.add(name);
+      for (const el of card.querySelectorAll('.field')) el.classList.remove('error');
+      for (const el of card.querySelectorAll('.approval-rule-error')) toggleElem(el, el.getAttribute('data-error') === error);
+      for (const n of invalid) card.querySelector(`[name="${n}"]`)?.closest('.field').classList.add('error');
+      if (error) firstBad ??= card;
     }
     update();
     if (firstBad) {

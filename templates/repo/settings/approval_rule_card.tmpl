@@ -5,7 +5,10 @@
 		<h5 class="ui header tw-m-0 approval-rule-title" data-default="{{ctx.Locale.Tr "repo.settings.approval_rule_new"}}">{{if $rule.Name}}{{$rule.Name}}{{else}}{{ctx.Locale.Tr "repo.settings.approval_rule_new"}}{{end}}</h5>
 		<button type="button" class="ui red tiny button approval-rule-remove tw-hidden" data-js-only>{{ctx.Locale.Tr "repo.settings.approval_rule_remove"}}</button>
 	</div>
-	<div class="ui red message approval-rule-error tw-hidden">{{ctx.Locale.Tr "repo.settings.approval_rule_incomplete"}}</div>
+	<div class="ui red message approval-rule-error tw-hidden" data-error="name">{{ctx.Locale.Tr "repo.settings.approval_rule_error_name"}}</div>
+	<div class="ui red message approval-rule-error tw-hidden" data-error="duplicate">{{ctx.Locale.Tr "repo.settings.approval_rule_error_duplicate"}}</div>
+	<div class="ui red message approval-rule-error tw-hidden" data-error="count">{{ctx.Locale.Tr "repo.settings.approval_rule_error_count"}}</div>
+	<div class="ui red message approval-rule-error tw-hidden" data-error="approvers">{{ctx.Locale.Tr "repo.settings.approval_rule_error_approvers"}}</div>
 	<div class="field">
 		<label>{{ctx.Locale.Tr "repo.settings.approval_rule_name"}}</label>
 		<input name="approval_rule_name" value="{{$rule.Name}}" maxlength="255">
@@ -13,7 +16,7 @@
 	</div>
 	<div class="field">
 		<label>{{ctx.Locale.Tr "repo.settings.approval_rule_count"}}</label>
-		<input name="approval_rule_count" type="number" min="1" value="{{$rule.RequiredCount}}">
+		<input name="approval_rule_count" type="number" value="{{$rule.RequiredCount}}">
 		<span class="help">{{ctx.Locale.Tr "repo.settings.approval_rule_count_help"}}</span>
 	</div>
 	<div class="field">
