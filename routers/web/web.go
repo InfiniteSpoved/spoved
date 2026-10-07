@@ -1028,6 +1028,7 @@ func registerRoutes(m *web.Route) {
 
 		m.Group("/applications", func() {
 			m.Get("", admin.Applications)
+			m.Post("/policy", admin.ApplicationsPolicyPost)
 			m.Post("/oauth2", web.Bind(forms.EditOAuth2ApplicationForm{}), admin.ApplicationsPost)
 			m.Group("/oauth2/{id}", func() {
 				m.Combo("").Get(admin.EditApplication).Post(web.Bind(forms.EditOAuth2ApplicationForm{}), admin.EditApplicationPost)

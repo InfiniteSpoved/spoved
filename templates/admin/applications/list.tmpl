@@ -1,6 +1,58 @@
 {{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin config")}}
 	<div class="admin-setting-content">
 		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.oauth2_app_policy"}}
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.oauth2_app_policy.desc"}}</p>
+			<form class="ui form" action="{{AppSubUrl}}/admin/applications/policy" method="post">
+				<div class="grouped fields">
+					{{range $mode := StringUtils.Split "admins,orgs,everyone" ","}}
+						<div class="field">
+							<div class="ui radio checkbox">
+								<input id="policy-{{$mode}}" name="mode" type="radio" value="{{$mode}}" {{if eq $.Policy.Mode $mode}}checked{{end}}>
+								<label for="policy-{{$mode}}">{{ctx.Locale.Tr (printf "admin.oauth2_app_policy.mode.%s" $mode)}}</label>
+							</div>
+						</div>
+					{{end}}
+				</div>
+				<div class="field">
+					<label for="policy-org-names">{{ctx.Locale.Tr "admin.oauth2_app_policy.orgs"}}</label>
+					<textarea id="policy-org-names" name="org_names" rows="3">{{.PolicyOrgNames}}</textarea>
+					<p class="help">{{ctx.Locale.Tr "admin.oauth2_app_policy.orgs_help"}}</p>
+				</div>
+				<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+			</form>
+		</div>
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.oauth2_app_review"}}
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.oauth2_app_review.desc"}}</p>
+			<div class="flex-list">
+				{{range .Review}}
+					<div class="flex-item tw-items-center {{if not .Owner}}owner-deleted{{end}} {{if not .Allowed}}owner-not-allowed{{end}}">
+						<div class="flex-item-main">
+							<div class="flex-item-title">{{.App.Name}}</div>
+							<div class="flex-item-body">
+								{{if .Owner}}{{ctx.Locale.Tr "admin.oauth2_app_review.owner"}} <a href="{{.Owner.HomeLink}}">{{.Owner.Name}}</a>{{else}}<span class="ui basic label">{{ctx.Locale.Tr "admin.oauth2_app_review.owner_deleted"}}</span>{{end}}
+								· {{DateUtils.AbsoluteShort .App.CreatedUnix}}
+								{{if not .Allowed}}<span class="ui basic orange label">{{ctx.Locale.Tr "admin.oauth2_app_review.not_allowed"}}</span>{{end}}
+							</div>
+						</div>
+						<div class="flex-item-trailing">
+							<button class="ui red tiny button delete-button" data-modal-id="remove-gitea-oauth2-application" data-url="{{AppSubUrl}}/admin/applications/oauth2/{{.App.ID}}/delete">
+								{{svg "octicon-trash" 16 "tw-mr-1"}}
+								{{ctx.Locale.Tr "settings.delete_key"}}
+							</button>
+						</div>
+					</div>
+				{{else}}
+					<div class="flex-item">{{ctx.Locale.Tr "admin.oauth2_app_review.none"}}</div>
+				{{end}}
+			</div>
+		</div>
+		<h4 class="ui top attached header">
 				{{ctx.Locale.Tr "settings.applications"}}
 		</h4>
 		{{template "user/settings/applications_oauth2_list" .}}

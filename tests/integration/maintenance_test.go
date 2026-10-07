@@ -265,6 +265,14 @@ func TestMaintenanceReadOnlyWrites(t *testing.T) {
 }
 
 // AC8: git pushes over HTTP and SSH are refused early and in the pre-receive hook
+// the OAuth2 application policy stays changeable by a site admin in read-only mode
+func TestMaintenanceOAuth2AppPolicy(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer setMaintenance(t, setting.MaintenanceReadOnly, time.Now().Add(time.Hour))()
+	loginUser(t, "user1").MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/applications/policy", map[string]string{"mode": "everyone"}), http.StatusSeeOther)
+	assert.Equal(t, setting.OAuth2AppPolicyEveryone, setting.Config().OAuth2AppPolicy.Value(db.DefaultContext).Mode)
+}
+
 func TestMaintenanceGitPush(t *testing.T) {
 	onApplicationRun(t, func(t *testing.T, u *url.URL) {
 		u.Path = "user2/repo1.git"

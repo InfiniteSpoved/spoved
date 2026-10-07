@@ -12,6 +12,7 @@ import (
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	shared_user "forgejo.org/routers/web/shared/user"
+	"forgejo.org/services/auth/oauth2app"
 	"forgejo.org/services/context"
 	"forgejo.org/services/forms"
 )
@@ -23,8 +24,35 @@ type OAuth2CommonHandlers struct {
 	TplAppEdit         base.TplName // the template for the application edit page
 }
 
+// SetCanCreateOAuth2App tells the template whether to offer the create form; the POST handlers decide again.
+func SetCanCreateOAuth2App(ctx *context.Context, ownerID int64) bool {
+	ok, err := oauth2app.MayManage(ctx, ctx.Doer, ownerID)
+	if err != nil {
+		ctx.ServerError("MayManage", err)
+		return false
+	}
+	ctx.Data["CanCreateOAuth2App"] = ok
+	return true
+}
+
+// mayManage answers 403 unless the doer may create or change applications of ownerID.
+func mayManage(ctx *context.Context, ownerID int64) bool {
+	ok, err := oauth2app.MayManage(ctx, ctx.Doer, ownerID)
+	if err != nil {
+		ctx.ServerError("MayManage", err)
+		return false
+	}
+	if !ok {
+		ctx.Error(http.StatusForbidden, ctx.Locale.TrString("settings.oauth2_application_admin_only"))
+	}
+	return ok
+}
+
 func (oa *OAuth2CommonHandlers) renderEditPage(ctx *context.Context) {
 	app := ctx.Data["App"].(*auth.OAuth2Application)
+	if !SetCanCreateOAuth2App(ctx, app.UID) {
+		return
+	}
 	ctx.Data["FormActionPath"] = fmt.Sprintf("%s/%d", oa.BasePathEditPrefix, app.ID)
 
 	if ctx.ContextUser != nil && ctx.ContextUser.IsOrganization() {
@@ -39,6 +67,9 @@ func (oa *OAuth2CommonHandlers) renderEditPage(ctx *context.Context) {
 
 // AddApp adds an oauth2 application
 func (oa *OAuth2CommonHandlers) AddApp(ctx *context.Context) {
+	if !mayManage(ctx, oa.OwnerID) {
+		return
+	}
 	form := web.GetForm(ctx).(*forms.EditOAuth2ApplicationForm)
 	if ctx.HasError() {
 		ctx.Flash.Error(ctx.GetErrMsg())
@@ -91,6 +122,9 @@ func (oa *OAuth2CommonHandlers) EditShow(ctx *context.Context) {
 
 // EditSave saves the oauth2 application
 func (oa *OAuth2CommonHandlers) EditSave(ctx *context.Context) {
+	if !mayManage(ctx, oa.OwnerID) {
+		return
+	}
 	form := web.GetForm(ctx).(*forms.EditOAuth2ApplicationForm)
 
 	if ctx.HasError() {
@@ -141,6 +175,9 @@ func (oa *OAuth2CommonHandlers) RegenerateSecret(ctx *context.Context) {
 	}
 	if app.UID != oa.OwnerID {
 		ctx.NotFound("Application not found", nil)
+		return
+	}
+	if !mayManage(ctx, app.UID) {
 		return
 	}
 	ctx.Data["App"] = app

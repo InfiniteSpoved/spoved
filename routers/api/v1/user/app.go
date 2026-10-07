@@ -12,6 +12,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/api/v1/utils"
+	"forgejo.org/services/auth/oauth2app"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 )
@@ -113,6 +114,19 @@ func DeleteAccessToken(ctx *context.APIContext) {
 	utils.DeleteAccessToken(ctx)
 }
 
+// mayManageOAuth2Apps answers 403 unless the doer may create or change their own OAuth2 applications.
+func mayManageOAuth2Apps(ctx *context.APIContext) bool {
+	ok, err := oauth2app.MayManage(ctx, ctx.Doer(), ctx.Doer().ID)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "MayManage", err)
+		return false
+	}
+	if !ok {
+		ctx.Error(http.StatusForbidden, "", "only site admins may create or change OAuth2 applications")
+	}
+	return ok
+}
+
 // CreateOauth2Application is the handler to create a new OAuth2 Application for the authenticated user
 func CreateOauth2Application(ctx *context.APIContext) {
 	// swagger:operation POST /user/applications/oauth2 user userCreateOAuth2Application
@@ -136,6 +150,9 @@ func CreateOauth2Application(ctx *context.APIContext) {
 	//   "403":
 	//     "$ref": "#/responses/forbidden"
 
+	if !mayManageOAuth2Apps(ctx) {
+		return
+	}
 	data := web.GetForm(ctx).(*api.CreateOAuth2ApplicationOptions)
 
 	app, err := auth_model.CreateOAuth2Application(ctx, auth_model.CreateOAuth2ApplicationOptions{
@@ -308,6 +325,9 @@ func UpdateOauth2Application(ctx *context.APIContext) {
 	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
+	if !mayManageOAuth2Apps(ctx) {
+		return
+	}
 	appID := ctx.ParamsInt64(":id")
 
 	data := web.GetForm(ctx).(*api.CreateOAuth2ApplicationOptions)

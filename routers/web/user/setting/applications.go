@@ -71,6 +71,9 @@ func loadApplicationsData(ctx *context.Context) {
 	ctx.Data["EnableOAuth2"] = setting.OAuth2.Enabled
 	ctx.Data["IsAdmin"] = ctx.Doer.IsAdmin
 	if setting.OAuth2.Enabled {
+		if !SetCanCreateOAuth2App(ctx, ctx.Doer.ID) {
+			return
+		}
 		ctx.Data["Applications"], err = db.Find[auth_model.OAuth2Application](ctx, auth_model.FindOAuth2ApplicationsOptions{
 			OwnerID: ctx.Doer.ID,
 		})

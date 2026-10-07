@@ -1758,5 +1758,21 @@
 	"repo.settings.code_search.branch": "Branch",
 	"repo.settings.code_search.default_branch": "Default branch",
 	"repo.settings.code_search.all_branches": "All indexed branches",
-	"meta.last_line": "Thank you for translating Forgejo! This line isn't seen by the users but it serves other purposes in the translation management. You can place a fun fact in the translation instead of translating it."
+	"meta.last_line": "Thank you for translating Forgejo! This line isn't seen by the users but it serves other purposes in the translation management. You can place a fun fact in the translation instead of translating it.",
+	"settings.oauth2_application_admin_only": "A site admin manages OAuth2 applications on this instance. You can view and delete existing ones, but not create or change them.",
+	"auth.authorize_application_by_admin": "This application was registered by a site admin.",
+	"admin.oauth2_app_policy": "Who can register OAuth2 applications",
+	"admin.oauth2_app_policy.desc": "Creating and changing OAuth2 applications (name, redirect URIs, secret) is restricted to site admins by default. Existing applications keep working whatever you choose.",
+	"admin.oauth2_app_policy.mode.admins": "Site admins only",
+	"admin.oauth2_app_policy.mode.orgs": "Site admins and the owners of selected organizations (for applications owned by that organization)",
+	"admin.oauth2_app_policy.mode.everyone": "Everyone",
+	"admin.oauth2_app_policy.orgs": "Selected organizations",
+	"admin.oauth2_app_policy.orgs_help": "Organization names, one per line. Only used in the selected organizations mode.",
+	"admin.oauth2_app_policy.saved": "The OAuth2 application policy was saved.",
+	"admin.oauth2_app_review": "OAuth2 applications of users and organizations",
+	"admin.oauth2_app_review.desc": "Existing applications keep working. Review them here; owners marked as no longer allowed can't create or change applications under the current policy.",
+	"admin.oauth2_app_review.owner": "Owner:",
+	"admin.oauth2_app_review.owner_deleted": "owner deleted",
+	"admin.oauth2_app_review.not_allowed": "owner no longer allowed",
+	"admin.oauth2_app_review.none": "No applications."
 }

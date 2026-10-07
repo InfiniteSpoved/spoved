@@ -44,6 +44,9 @@ func Applications(ctx *context.Context) {
 		return
 	}
 	ctx.Data["Applications"] = apps
+	if !user_setting.SetCanCreateOAuth2App(ctx, ctx.Org.Organization.ID) {
+		return
+	}
 
 	err = shared_user.LoadHeaderCount(ctx)
 	if err != nil {

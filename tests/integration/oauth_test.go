@@ -1275,6 +1275,7 @@ func TestOAuthIntrospection(t *testing.T) {
 
 func TestOAuth_GrantScopesReadUser(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	setOAuth2AppPolicy(t, setting.OAuth2AppPolicyState{Mode: setting.OAuth2AppPolicyEveryone}) // the default is site admins only
 
 	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 	appBody := api.CreateOAuth2ApplicationOptions{
@@ -1352,6 +1353,7 @@ func TestOAuth_GrantScopesReadUser(t *testing.T) {
 
 func TestOAuth_GrantScopesFailReadRepository(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	setOAuth2AppPolicy(t, setting.OAuth2AppPolicyState{Mode: setting.OAuth2AppPolicyEveryone}) // the default is site admins only
 
 	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 	appBody := api.CreateOAuth2ApplicationOptions{
@@ -1427,6 +1429,7 @@ func TestOAuth_GrantScopesFailReadRepository(t *testing.T) {
 
 func TestOAuth_GrantScopesReadRepository(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	setOAuth2AppPolicy(t, setting.OAuth2AppPolicyState{Mode: setting.OAuth2AppPolicyEveryone}) // the default is site admins only
 
 	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 	appBody := api.CreateOAuth2ApplicationOptions{
@@ -1503,6 +1506,7 @@ func TestOAuth_GrantScopesReadRepository(t *testing.T) {
 
 func TestOAuth_GrantScopesReadPrivateGroups(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	setOAuth2AppPolicy(t, setting.OAuth2AppPolicyState{Mode: setting.OAuth2AppPolicyEveryone}) // the default is site admins only
 
 	// setting.OAuth2.EnableAdditionalGrantScopes = true
 	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "user5"})
@@ -1581,6 +1585,7 @@ func TestOAuth_GrantScopesReadPrivateGroups(t *testing.T) {
 
 func TestOAuth_GrantScopesReadOnlyPublicGroups(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	setOAuth2AppPolicy(t, setting.OAuth2AppPolicyState{Mode: setting.OAuth2AppPolicyEveryone}) // the default is site admins only
 
 	setting.OAuth2.EnableAdditionalGrantScopes = true
 	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "user5"})
@@ -1673,6 +1678,7 @@ func TestOAuth_GrantScopesReadOnlyPublicGroups(t *testing.T) {
 
 func TestOAuth_GrantScopesReadPublicGroupsWithTheReadScope(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	setOAuth2AppPolicy(t, setting.OAuth2AppPolicyState{Mode: setting.OAuth2AppPolicyEveryone}) // the default is site admins only
 
 	setting.OAuth2.EnableAdditionalGrantScopes = true
 	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "user5"})
