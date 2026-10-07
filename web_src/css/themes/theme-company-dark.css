@@ -8,6 +8,7 @@
   --text: var(--neutral-100);
   --text-muted: var(--neutral-400);
   --text-on-primary: var(--neutral-950);
+  --text-on-danger: var(--neutral-950);
   --border: var(--neutral-700);
   --border-strong: var(--neutral-400);
   --primary: var(--blue-400);

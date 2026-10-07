@@ -192,6 +192,7 @@ It needs some tricks to tweak the left/right borders with active state */
 .ui.red.button,
 .ui.red.buttons .button {
   background: var(--color-red);
+  color: var(--color-red-contrast, var(--color-white));
 }
 
 .ui.red.button:hover,
@@ -199,6 +200,7 @@ It needs some tricks to tweak the left/right borders with active state */
 .ui.red.button:focus,
 .ui.red.buttons .button:focus {
   background: var(--color-red-dark-1);
+  color: var(--color-white);
 }
 
 .ui.red.button:active,
@@ -479,11 +481,13 @@ It needs some tricks to tweak the left/right borders with active state */
 .ui.negative.buttons .button:focus,
 .ui.negative.button:focus {
   background: var(--color-red);
+  color: var(--color-red-contrast, var(--color-white));
 }
 
 .ui.negative.buttons .button:hover,
 .ui.negative.button:hover {
   background: var(--color-red-dark-1);
+  color: var(--color-white);
 }
 
 .ui.negative.buttons .button:active,
