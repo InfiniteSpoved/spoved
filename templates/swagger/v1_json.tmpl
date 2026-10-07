@@ -2151,6 +2151,132 @@
         }
       }
     },
+    "/admin/trash": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "List the deleted repositories in the trash",
+        "operationId": "adminListTrash",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "keyword to match in the owner or repository name",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/TrashItemList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          }
+        }
+      }
+    },
+    "/admin/trash/{type}/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete a repository in the trash permanently",
+        "operationId": "adminPurgeTrash",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "the kind of item, \"repo\"",
+            "name": "type",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the item",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "400": {
+            "$ref": "#/responses/error"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/admin/trash/{type}/{id}/restore": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Restore a deleted repository from the trash",
+        "operationId": "adminRestoreTrash",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "the kind of item, \"repo\"",
+            "name": "type",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the item",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "400": {
+            "$ref": "#/responses/error"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
     "/admin/unadopted": {
       "get": {
         "produces": [
@@ -35551,6 +35677,55 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "TrashItem": {
+      "description": "TrashItem is a deleted repository in the trash, restorable by site admins until it is purged",
+      "type": "object",
+      "properties": {
+        "days_remaining": {
+          "description": "days left before it is deleted permanently",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "DaysRemaining"
+        },
+        "deleted": {
+          "description": "when the repository was moved to the trash",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Deleted"
+        },
+        "deleted_by": {
+          "type": "string",
+          "x-go-name": "DeletedBy"
+        },
+        "full_name": {
+          "description": "the owner and name the repository had when it was deleted",
+          "type": "string",
+          "x-go-name": "FullName"
+        },
+        "id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "purging": {
+          "description": "true while a permanent deletion is in progress",
+          "type": "boolean",
+          "x-go-name": "Purging"
+        },
+        "size": {
+          "description": "size of the repository in bytes",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Size"
+        },
+        "type": {
+          "description": "the kind of item, \"repo\"",
+          "type": "string",
+          "x-go-name": "Type"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "UpdateBranchRepoOption": {
       "description": "UpdateBranchRepoOption options when updating a branch in a repository",
       "type": "object",
@@ -37731,6 +37906,22 @@
         "type": "array",
         "items": {
           "$ref": "#/definitions/TrackedTime"
+        }
+      }
+    },
+    "TrashItemList": {
+      "description": "TrashItemList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/TrashItem"
+        }
+      },
+      "headers": {
+        "X-Total-Count": {
+          "type": "integer",
+          "format": "int64",
+          "description": "The total number of items in the trash"
         }
       }
     },

@@ -37,10 +37,20 @@ func trashRepo(t *testing.T) *repo_model.Repository {
 	return repo
 }
 
-// moveToTrash deletes repo 1 as its owner through the web UI, with retention on.
+// prepareTrash prepares the test environment with the trash on (the test configs turn it off).
+func prepareTrash(t *testing.T) func() {
+	t.Helper()
+	cleanup := tests.PrepareTestEnv(t)
+	reset := test.MockVariableValue(&setting.Trash.RetentionDays, 365)
+	return func() {
+		reset()
+		cleanup()
+	}
+}
+
+// moveToTrash deletes repo 1 as its owner through the web UI.
 func moveToTrash(t *testing.T) {
 	t.Helper()
-	defer test.MockVariableValue(&setting.Trash.RetentionDays, 365)()
 	loginUser(t, "user2").MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/settings", map[string]string{
 		"action":    "delete",
 		"repo_name": "user2/repo1",
@@ -56,8 +66,7 @@ func adminTrashToken(t *testing.T) string {
 // AC1: deleting via web and via API moves the repository to the trash and keeps its data; there is no
 // repo-delete CLI command, so these are the only entry points besides the admin page.
 func TestTrashDelete(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
-	defer test.MockVariableValue(&setting.Trash.RetentionDays, 365)()
+	defer prepareTrash(t)()
 
 	issues := unittest.GetCount(t, &issues_model.Issue{RepoID: trashRepoID})
 	before := time.Now().Unix()
@@ -82,37 +91,33 @@ func TestTrashDelete(t *testing.T) {
 	})
 }
 
-// AC2: RETENTION_DAYS=0 deletes immediately as before; a changed value applies to items already trashed.
-func TestTrashRetention(t *testing.T) {
+// AC2: RETENTION_DAYS=0 deletes immediately as before.
+func TestTrashRetentionZero(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	loginUser(t, "user2").MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/settings", map[string]string{
+		"action": "delete", "repo_name": "user2/repo1",
+	}), http.StatusSeeOther)
+	unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: trashRepoID})
+}
 
-	t.Run("zero deletes immediately", func(t *testing.T) {
-		defer test.MockVariableValue(&setting.Trash.RetentionDays, 0)()
-		loginUser(t, "user2").MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/settings", map[string]string{
-			"action": "delete", "repo_name": "user2/repo1",
-		}), http.StatusSeeOther)
-		unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: trashRepoID})
-	})
-
-	t.Run("changed days apply to trashed items", func(t *testing.T) {
-		defer tests.PrepareTestEnv(t)()
-		moveToTrash(t)
-		timeutil.MockSet(time.Now().Add(100 * 24 * time.Hour))
+// AC2: a changed retention applies to items already in the trash, counted from their deletion date.
+func TestTrashRetentionChanged(t *testing.T) {
+	defer prepareTrash(t)()
+	moveToTrash(t)
+	timeutil.MockSet(time.Now().Add(100 * 24 * time.Hour))
 	defer timeutil.MockUnset()
 
-		defer test.MockVariableValue(&setting.Trash.RetentionDays, 365)()
-		require.NoError(t, trash_service.PurgeExpired(t.Context()))
-		assert.True(t, trashRepo(t).IsTrashed())
+	require.NoError(t, trash_service.PurgeExpired(t.Context()))
+	assert.True(t, trashRepo(t).IsTrashed())
 
-		setting.Trash.RetentionDays = 30
-		require.NoError(t, trash_service.PurgeExpired(t.Context()))
-		unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: trashRepoID})
-	})
+	setting.Trash.RetentionDays = 30
+	require.NoError(t, trash_service.PurgeExpired(t.Context()))
+	unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: trashRepoID})
 }
 
 // AC3: a trashed repository is invisible to everyone but site admins, on web and API.
 func TestTrashInvisible(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
+	defer prepareTrash(t)()
 	moveToTrash(t)
 
 	for _, user := range []string{"user2", "user4", "user5"} { // owner, stranger, collaborator or member
@@ -137,16 +142,16 @@ func TestTrashInvisible(t *testing.T) {
 			assert.NotEqual(t, int64(trashRepoID), r.ID)
 		}
 		body := loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/explore/repos?q=repo1"), http.StatusOK).Body.String()
-		assert.NotContains(t, body, "user2/repo1")
+		assert.NotContains(t, body, `/user2/repo1"`)
 		body = loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/"), http.StatusOK).Body.String()
-		assert.NotContains(t, body, "user2/repo1")
+		assert.NotContains(t, body, `/user2/repo1"`)
 	})
 
 	t.Run("git over HTTP", func(t *testing.T) {
-		req := NewRequest(t, "GET", "/user2/repo1.git/info/refs?service=git-upload-pack")
-		MakeRequest(t, req, http.StatusNotFound)
-		req = NewRequest(t, "GET", "/user2/repo1.git/info/refs?service=git-receive-pack")
-		loginUser(t, "user2").MakeRequest(t, req, http.StatusNotFound)
+		for _, service := range []string{"git-upload-pack", "git-receive-pack"} {
+			req := NewRequest(t, "GET", "/user2/repo1.git/info/refs?service="+service).AddBasicAuth("user2")
+			MakeRequest(t, req, http.StatusNotFound)
+		}
 	})
 
 	t.Run("owner counters", func(t *testing.T) {
@@ -158,7 +163,7 @@ func TestTrashInvisible(t *testing.T) {
 
 // AC4: the name stays reserved for create, fork, transfer, rename and adopt.
 func TestTrashNameReserved(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
+	defer prepareTrash(t)()
 	moveToTrash(t)
 	token := getUserToken(t, "user2", auth_model.AccessTokenScopeAll)
 
@@ -187,7 +192,7 @@ func TestTrashNameReserved(t *testing.T) {
 
 // AC5: the admin trash lists items with the data of the record, a total size and keyword search.
 func TestTrashAdminList(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
+	defer prepareTrash(t)()
 	moveToTrash(t)
 	token := adminTrashToken(t)
 
@@ -210,7 +215,7 @@ func TestTrashAdminList(t *testing.T) {
 
 // AC6: restore brings the repository back unchanged: same ID, owner, name, issues and counters.
 func TestTrashRestore(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
+	defer prepareTrash(t)()
 	before := trashRepo(t)
 	issues := unittest.GetCount(t, &issues_model.Issue{RepoID: trashRepoID})
 	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
@@ -238,7 +243,7 @@ func TestTrashRestore(t *testing.T) {
 
 // AC7: purge needs the typed name; afterwards the data is gone and the name is free.
 func TestTrashPurge(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
+	defer prepareTrash(t)()
 	moveToTrash(t)
 	admin := loginUser(t, "user1")
 
@@ -255,7 +260,7 @@ func TestTrashPurge(t *testing.T) {
 
 // AC9: no non-admin reaches any trash endpoint.
 func TestTrashAdminOnly(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
+	defer prepareTrash(t)()
 	moveToTrash(t)
 
 	for _, user := range []string{"user2", "user4", "org3-owner"} {
@@ -277,7 +282,7 @@ func TestTrashAdminOnly(t *testing.T) {
 
 // AC10: the API list, restore and delete need a site admin token with the admin scope.
 func TestTrashAPI(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
+	defer prepareTrash(t)()
 	moveToTrash(t)
 
 	noAdminScope := getUserToken(t, "user1", auth_model.AccessTokenScopeWriteRepository)
@@ -293,8 +298,7 @@ func TestTrashAPI(t *testing.T) {
 
 // AC12: the delete dialog tells owners about the trash; the help link is optional.
 func TestTrashDeleteDialog(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
-	defer test.MockVariableValue(&setting.Trash.RetentionDays, 365)()
+	defer prepareTrash(t)()
 
 	body := loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/settings"), http.StatusOK).Body.String()
 	assert.Contains(t, body, "365")
@@ -311,8 +315,7 @@ func TestTrashDeleteDialog(t *testing.T) {
 
 // AC13: the cron job purges items past retention and leaves younger ones; maintenance mode pauses it.
 func TestTrashPurgeExpired(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
-	defer test.MockVariableValue(&setting.Trash.RetentionDays, 365)()
+	defer prepareTrash(t)()
 	moveToTrash(t)
 
 	timeutil.MockSet(time.Now().Add(364 * 24 * time.Hour))
@@ -327,7 +330,7 @@ func TestTrashPurgeExpired(t *testing.T) {
 
 // AC14: a second purge or restore of an item that is already claimed fails.
 func TestTrashRace(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
+	defer prepareTrash(t)()
 	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
 
 	t.Run("sequential", func(t *testing.T) {
@@ -341,38 +344,40 @@ func TestTrashRace(t *testing.T) {
 		require.Error(t, trash_service.Restore(t.Context(), admin, trashRepoID))
 		require.Error(t, trash_service.Purge(t.Context(), admin, trashRepoID))
 	})
+}
 
-	t.Run("concurrent", func(t *testing.T) {
-		defer tests.PrepareTestEnv(t)()
-		moveToTrash(t)
-		var wg sync.WaitGroup
-		results := make([]error, 4)
-		for i := range results {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				if i%2 == 0 {
-					results[i] = trash_service.Restore(t.Context(), admin, trashRepoID)
-				} else {
-					results[i] = trash_service.Purge(t.Context(), admin, trashRepoID)
-				}
-			}()
-		}
-		wg.Wait()
-		wins := 0
-		for _, err := range results {
-			if err == nil {
-				wins++
+// AC14: of concurrent restores and purges of one item exactly one wins.
+func TestTrashRaceConcurrent(t *testing.T) {
+	defer prepareTrash(t)()
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	moveToTrash(t)
+	var wg sync.WaitGroup
+	results := make([]error, 4)
+	for i := range results {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if i%2 == 0 {
+				results[i] = trash_service.Restore(t.Context(), admin, trashRepoID)
+			} else {
+				results[i] = trash_service.Purge(t.Context(), admin, trashRepoID)
 			}
+		}()
+	}
+	wg.Wait()
+	wins := 0
+	for _, err := range results {
+		if err == nil {
+			wins++
 		}
-		assert.Equal(t, 1, wins, "exactly one claim wins: %v", results)
-	})
+	}
+	assert.Equal(t, 1, wins, "exactly one claim wins: %v", results)
 }
 
 // F1: a user or org that still has trashed repos is not deleted without a purge, and the purge path
 // uses the current owner name.
 func TestTrashOwnerLifecycle(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
+	defer prepareTrash(t)()
 	moveToTrash(t)
 	ctx := t.Context()
 
@@ -385,29 +390,31 @@ func TestTrashOwnerLifecycle(t *testing.T) {
 		require.NoError(t, trash_service.Purge(ctx, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1}), trashRepoID))
 		assert.NoDirExists(t, repo_model.RepoPath("user2-renamed", "repo1"))
 	})
+}
 
-	t.Run("purge user deletion removes trashed repos", func(t *testing.T) {
-		defer tests.PrepareTestEnv(t)()
-		moveToTrash(t)
-		require.NoError(t, deleteUserForTrashTest(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), true))
-		unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: trashRepoID})
-	})
+// F1: the purge user deletion removes the owner's trashed repositories too.
+func TestTrashPurgeUserDeletion(t *testing.T) {
+	defer prepareTrash(t)()
+	moveToTrash(t)
+	require.NoError(t, deleteUserForTrashTest(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), true))
+	unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: trashRepoID})
 }
 
 // F4: the creation limit still counts trashed repositories.
 func TestTrashCreationLimit(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
-	token := getUserToken(t, "user2", auth_model.AccessTokenScopeAll)
+	defer prepareTrash(t)()
 	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 	total, err := repo_model.CountRepositories(t.Context(), repo_model.CountRepositoryOptions{OwnerID: owner.ID})
 	require.NoError(t, err)
 	defer test.MockVariableValue(&setting.Repository.MaxCreationLimit, int(total))()
 	owner.MaxRepoCreation = -1
 	require.NoError(t, user_model.UpdateUserCols(t.Context(), owner, "max_repo_creation"))
+	doer := &user_model.User{ID: 99} // not an admin
 
 	moveToTrash(t)
-	req := NewRequestWithJSON(t, "POST", "/api/v1/user/repos", &api.CreateRepoOption{Name: "over-limit"}).AddTokenAuth(token)
-	MakeRequest(t, req, http.StatusForbidden)
+	owner = unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	require.Equal(t, int(total)-1, owner.NumRepos)
+	assert.True(t, repo_model.IsErrReachLimitOfRepo(repo_model.CheckRepoCreationLimit(t.Context(), doer, owner)), "the trashed repository still counts")
 }
 
 func deleteUserForTrashTest(t *testing.T, u *user_model.User, purge bool) error {
