@@ -105,4 +105,69 @@ export function initRepoSettingBranches() {
   };
   markMatchedStatusChecks();
   document.getElementById('status_check_contexts').addEventListener('input', onInputDebounce(markMatchedStatusChecks));
+
+  initApprovalRules();
+}
+
+const showJsOnly = (root) => {
+  for (const el of root.querySelectorAll('[data-js-only]')) toggleElem(el, true);
+};
+
+const setTitle = (card) => {
+  const title = card.querySelector('.approval-rule-title');
+  title.textContent = card.querySelector('[name="approval_rule_name"]').value.trim() || title.getAttribute('data-default');
+};
+
+// Cards of approval rules: add, remove and validate in the browser. Without JS the existing cards still save as before.
+function initApprovalRules() {
+  const rules = document.querySelector('.approval-rules');
+  if (!rules) return;
+  const list = rules.querySelector('.approval-rule-cards');
+  const addButton = rules.querySelector('.approval-rule-add');
+  const cards = () => list.querySelectorAll('.approval-rule-card');
+  const update = () => {
+    const full = cards().length >= Number(rules.getAttribute('data-max'));
+    addButton.disabled = full;
+    toggleElem(rules.querySelector('.approval-rule-limit'), full);
+  };
+
+  showJsOnly(rules);
+  update();
+
+  addButton.addEventListener('click', () => {
+    const card = rules.querySelector('template').content.firstElementChild.cloneNode(true);
+    showJsOnly(card);
+    list.append(card);
+    $(card).find('.ui.dropdown').dropdown();
+    update();
+  });
+  list.addEventListener('click', (e) => {
+    e.target.closest('.approval-rule-remove')?.closest('.approval-rule-card').remove();
+    update();
+  });
+  list.addEventListener('input', (e) => {
+    if (e.target.name === 'approval_rule_name') setTitle(e.target.closest('.approval-rule-card'));
+  });
+
+  // drop empty cards, refuse half-filled ones
+  rules.closest('form').addEventListener('submit', (e) => {
+    let firstBad;
+    for (const card of cards()) {
+      const value = (name) => card.querySelector(`[name="${name}"]`)?.value.trim() ?? '';
+      const hasApprovers = value('approval_rule_users') || value('approval_rule_teams') || value('approval_rule_code_owners') === 'true';
+      if (!value('approval_rule_name') && !hasApprovers && !value('approval_rule_paths') && value('approval_rule_count') === '1') {
+        card.remove();
+        continue;
+      }
+      const bad = !value('approval_rule_name') || !hasApprovers;
+      toggleElem(card.querySelector('.approval-rule-error'), bad);
+      for (const field of card.querySelectorAll('.field')) field.classList.toggle('error', bad);
+      if (bad) firstBad ??= card;
+    }
+    update();
+    if (firstBad) {
+      e.preventDefault();
+      firstBad.scrollIntoView({block: 'center'});
+    }
+  });
 }

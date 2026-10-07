@@ -1,0 +1,73 @@
+{{/* One approval rule: .Rule (an api.ApprovalRule, or a dict for a new one), .Users, .Teams, .ShowTeams */}}
+{{$rule := .Rule}}
+<div class="ui segment approval-rule-card">
+	<div class="tw-flex tw-justify-between tw-items-center tw-mb-3">
+		<h5 class="ui header tw-m-0 approval-rule-title" data-default="{{ctx.Locale.Tr "repo.settings.approval_rule_new"}}">{{if $rule.Name}}{{$rule.Name}}{{else}}{{ctx.Locale.Tr "repo.settings.approval_rule_new"}}{{end}}</h5>
+		<button type="button" class="ui red tiny button approval-rule-remove tw-hidden" data-js-only>{{ctx.Locale.Tr "repo.settings.approval_rule_remove"}}</button>
+	</div>
+	<div class="ui red message approval-rule-error tw-hidden">{{ctx.Locale.Tr "repo.settings.approval_rule_incomplete"}}</div>
+	<div class="field">
+		<label>{{ctx.Locale.Tr "repo.settings.approval_rule_name"}}</label>
+		<input name="approval_rule_name" value="{{$rule.Name}}" maxlength="255">
+		<span class="help">{{ctx.Locale.Tr "repo.settings.approval_rule_name_help"}}</span>
+	</div>
+	<div class="field">
+		<label>{{ctx.Locale.Tr "repo.settings.approval_rule_count"}}</label>
+		<input name="approval_rule_count" type="number" min="1" value="{{$rule.RequiredCount}}">
+		<span class="help">{{ctx.Locale.Tr "repo.settings.approval_rule_count_help"}}</span>
+	</div>
+	<div class="field">
+		<label>{{ctx.Locale.Tr "repo.settings.approval_rule_users"}}</label>
+		<div class="ui multiple search selection dropdown">
+			<input type="hidden" name="approval_rule_users" value="{{StringUtils.Join $rule.Usernames ","}}">
+			<div class="default text">{{ctx.Locale.Tr "search.user_kind"}}</div>
+			<div class="menu">
+			{{/* selected users stay in the menu even if they are not listed any more */}}
+			{{range $rule.Usernames}}
+				<div class="item" data-value="{{.}}">{{.}}</div>
+			{{end}}
+			{{range $.Users}}
+				{{if not (SliceUtils.Contains $rule.Usernames .Name)}}
+				<div class="item" data-value="{{.Name}}">
+					{{ctx.AvatarUtils.Avatar . 28 "mini"}}{{template "repo/search_name" .}}
+				</div>
+				{{end}}
+			{{end}}
+			</div>
+		</div>
+		<span class="help">{{ctx.Locale.Tr "repo.settings.approval_rule_users_help"}}</span>
+	</div>
+	{{if .ShowTeams}}
+	<div class="field">
+		<label>{{ctx.Locale.Tr "repo.settings.approval_rule_teams"}}</label>
+		<div class="ui multiple search selection dropdown">
+			<input type="hidden" name="approval_rule_teams" value="{{StringUtils.Join $rule.Teams ","}}">
+			<div class="default text">{{ctx.Locale.Tr "search.team_kind"}}</div>
+			<div class="menu">
+			{{range $rule.Teams}}
+				<div class="item" data-value="{{.}}">{{svg "octicon-people"}}{{.}}</div>
+			{{end}}
+			{{range $.Teams}}
+				{{if not (SliceUtils.Contains $rule.Teams .Name)}}
+				<div class="item" data-value="{{.Name}}">{{svg "octicon-people"}}{{.Name}}</div>
+				{{end}}
+			{{end}}
+			</div>
+		</div>
+		<span class="help">{{ctx.Locale.Tr "repo.settings.approval_rule_teams_help"}}</span>
+	</div>
+	{{end}}
+	<div class="field">
+		<label>{{ctx.Locale.Tr "repo.settings.approval_rule_paths"}}</label>
+		<input name="approval_rule_paths" value="{{$rule.PathPatterns}}">
+		<span class="help">{{ctx.Locale.Tr "repo.settings.approval_rule_paths_help"}}</span>
+	</div>
+	<div class="field">
+		<label>{{ctx.Locale.Tr "repo.settings.approval_rule_code_owners"}}</label>
+		<select name="approval_rule_code_owners">
+			<option value="false">{{ctx.Locale.Tr "repo.settings.approval_rule_code_owners_no"}}</option>
+			<option value="true" {{if $rule.RequireCodeOwners}}selected{{end}}>{{ctx.Locale.Tr "repo.settings.approval_rule_code_owners_yes"}}</option>
+		</select>
+		<span class="help">{{ctx.Locale.Tr "repo.settings.approval_rule_code_owners_help"}}</span>
+	</div>
+</div>

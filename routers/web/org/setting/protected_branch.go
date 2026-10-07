@@ -86,9 +86,6 @@ func SettingsProtectedBranch(ctx *context.Context) {
 		}
 		rows = convert.ToOrgBranchProtection(ctx, rule, nil).ApprovalRules
 	}
-	for range min(3, git_model.MaxApprovalRules-len(rows)) {
-		rows = append(rows, &api.ApprovalRule{RequiredCount: 1})
-	}
 
 	ids := func(list []int64) string { return strings.Join(base.Int64sToStrings(list), ",") }
 	ctx.Data["Users"] = users

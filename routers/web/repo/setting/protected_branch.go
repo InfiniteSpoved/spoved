@@ -126,13 +126,10 @@ func SettingsProtectedBranch(c *context.Context) {
 		c.Data["force_push_allowlist_teams"] = strings.Join(base.Int64sToStrings(rule.ForcePushAllowlistTeamIDs), ",")
 	}
 
-	// the existing approval rules, followed by empty rows to add more
+	// the existing approval rules; the form adds new ones in the browser
 	rows := []*api.ApprovalRule{}
 	if rule.ID != 0 {
 		rows = convert.ToBranchProtection(c, rule, c.Repo.Repository).ApprovalRules
-	}
-	for range min(3, git_model.MaxApprovalRules-len(rows)) {
-		rows = append(rows, &api.ApprovalRule{RequiredCount: 1})
 	}
 	c.Data["ApprovalRules"] = rows
 	c.Data["MaxApprovalRules"] = git_model.MaxApprovalRules

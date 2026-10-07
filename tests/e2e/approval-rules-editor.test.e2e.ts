@@ -32,7 +32,7 @@ for (const {name, base, team} of forms) {
     async function pickUser(page: Page, card: number, user: string) {
       const dropdown = cards(page).nth(card).locator('.ui.dropdown', {has: page.locator('input[name="approval_rule_users"]')});
       await dropdown.click();
-      await dropdown.locator('.menu .item', {hasText: user}).first().click();
+      await dropdown.locator(`.menu .item[data-value="${user}"]`).click();
     }
 
     test('no blank rows, add, remove, save and reload', async ({page}) => {
@@ -40,13 +40,14 @@ for (const {name, base, team} of forms) {
       await page.goto(`${base}/edit`);
       await expect(cards(page)).toHaveCount(0);
       await expect(add(page)).toBeEnabled();
+      await expect(page.locator('.approval-rule-limit')).toBeHidden();
       await screenshot(page);
 
       await page.locator('input[name="rule_name"]').fill(rule);
       for (const ruleName of ['First', 'Second']) {
         await add(page).click();
         await cards(page).last().locator('input[name="approval_rule_name"]').fill(ruleName);
-        await pickUser(page, (await cards(page).count()) - 1, 'user4');
+        await pickUser(page, (await cards(page).count()) - 1, 'user2');
       }
       await expect(cards(page)).toHaveCount(2);
       // the card header follows the name
@@ -63,7 +64,7 @@ for (const {name, base, team} of forms) {
       await page.goto(`${base}/edit?rule_name=${rule}`);
       await expect(cards(page)).toHaveCount(1);
       await expect(cards(page).first().locator('input[name="approval_rule_name"]')).toHaveValue('Second');
-      await expect(cards(page).first().locator('input[name="approval_rule_users"]')).toHaveValue('user4');
+      await expect(cards(page).first().locator('input[name="approval_rule_users"]')).toHaveValue('user2');
       await screenshot(page);
 
       // removing the last card saves "no rules"
@@ -81,9 +82,11 @@ for (const {name, base, team} of forms) {
       for (let i = 0; i < 20; i++) await add(page).click();
       await expect(cards(page)).toHaveCount(20);
       await expect(add(page)).toBeDisabled();
+      await expect(page.locator('.approval-rule-limit')).toBeVisible();
       await expect(page.locator('.approval-rule-limit')).toContainText('At most 20 rules');
       await cards(page).last().locator('.approval-rule-remove').click();
       await expect(add(page)).toBeEnabled();
+      await expect(page.locator('.approval-rule-limit')).toBeHidden();
     });
 
     test('half-filled card is not submitted, empty new card is ignored', async ({page}) => {
@@ -105,7 +108,7 @@ for (const {name, base, team} of forms) {
       await add(page).click();
       await expect(cards(page)).toHaveCount(2);
       await save(page).click();
-      await page.waitForURL(`${base}/`);
+      await page.waitForURL(/\/settings\/branches(\?|$)/);
       await page.goto(`${base}/edit?rule_name=${rule}`);
       await expect(cards(page)).toHaveCount(0);
 
