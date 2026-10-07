@@ -4,10 +4,14 @@
 package code
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/indexer/code/bleve"
@@ -162,8 +166,70 @@ func testIndexer(name string, t *testing.T, indexer internal.Indexer) {
 			}
 		})
 
+		t.Run("Punctuation", func(t *testing.T) { testPunctuation(t, indexer, repoID) })
+
 		require.NoError(t, indexer.Delete(t.Context(), repoID))
 	})
+}
+
+// pushFiles commits the files to the default branch of the repo, the way a push would.
+func pushFiles(t *testing.T, repoID int64, files map[string]string) {
+	t.Helper()
+	repo, err := repo_model.GetRepositoryByID(t.Context(), repoID)
+	require.NoError(t, err)
+	dir := t.TempDir()
+	run := func(args ...string) {
+		cmd := exec.CommandContext(t.Context(), "git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(out))
+	}
+	run("clone", "-q", "-b", repo.DefaultBranch, repo.RepoPath(), ".")
+	for name, content := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644))
+	}
+	run("add", ".")
+	run("commit", "-q", "-m", "files")
+	run("push", "-q", "origin", "HEAD:"+repo.DefaultBranch)
+}
+
+// testPunctuation: exact mode keeps punctuation, files with the same words in
+// another order or without the punctuation don't match.
+func testPunctuation(t *testing.T, indexer internal.Indexer, repoID int64) {
+	cases := []struct{ query, hit, miss string }{
+		{"foo.bar(", "x=foo.bar(y)", "bar.foo( foo bar"},
+		{"a->b", "if(a->b)", "b->a a b"},
+		{"std::map<", "std::map<int> m;", "map::std< std map"},
+		{"#include <stdio.h>", "#include <stdio.h>", "include stdio.h <stdio.h> #"},
+		{"user_id=", "user_id=5", "id=user_ user id"},
+		{"@Override", "@Override void f()", "Override @"},
+		{"i++", "for(i++)", "+ + i"},
+	}
+	files := map[string]string{}
+	for i, c := range cases {
+		files[fmt.Sprintf("hit%d.txt", i)] = c.hit
+		files[fmt.Sprintf("miss%d.txt", i)] = c.miss
+	}
+	pushFiles(t, repoID, files)
+	require.NoError(t, index(git.DefaultContext, indexer, repoID))
+
+	for i, c := range cases {
+		t.Run(c.query, func(t *testing.T) {
+			_, res, _, err := indexer.Search(t.Context(), &internal.SearchOptions{
+				RepoIDs:   []int64{repoID},
+				Keyword:   c.query,
+				Mode:      SearchModeExact,
+				Paginator: &db.ListOptions{Page: 1, PageSize: 20},
+			})
+			require.NoError(t, err)
+			names := make([]string, 0, len(res))
+			for _, r := range res {
+				names = append(names, r.Filename)
+			}
+			assert.Equal(t, []string{fmt.Sprintf("hit%d.txt", i)}, names)
+		})
+	}
 }
 
 func TestBleveIndexAndSearch(t *testing.T) {
