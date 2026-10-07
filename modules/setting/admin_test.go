@@ -31,3 +31,17 @@ func Test_loadAdminFrom(t *testing.T) {
 	assert.Equal(t, container.SetOf("a", "b"), Admin.UserDisabledFeatures)
 	assert.Equal(t, container.SetOf("x", "y"), Admin.ExternalUserDisableFeatures)
 }
+
+// AC9: DEFAULT_EMAIL_NOTIFICATION_EVENTS is the instance default event list for Custom.
+func Test_loadAdminDefaultEmailEvents(t *testing.T) {
+	cfg, err := NewConfigProviderFromData("[admin]\nDEFAULT_EMAIL_NOTIFICATIONS = custom\nDEFAULT_EMAIL_NOTIFICATION_EVENTS = pr_approved, mention\n")
+	require.NoError(t, err)
+	loadAdminFrom(cfg)
+	assert.Equal(t, "custom", Admin.DefaultEmailNotification)
+	assert.Equal(t, []string{"pr_approved", "mention"}, Admin.DefaultEmailNotificationEvents)
+
+	cfg, err = NewConfigProviderFromData("[admin]\n")
+	require.NoError(t, err)
+	loadAdminFrom(cfg)
+	assert.Empty(t, Admin.DefaultEmailNotificationEvents)
+}

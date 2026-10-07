@@ -369,10 +369,16 @@ func TestAccessReportWritesNothing(t *testing.T) {
 		}
 		return s
 	}
+	token := getUserToken(t, "user2", auth_model.AccessTokenScopeReadOrganization)
 	before := count()
 	session := loginUser(t, "user1")
 	accessRows(t, session, "/org3/repo3/settings/access")
 	accessRows(t, session, "/admin/users/5/access")
 	accessRows(t, session, "/org/org3/members/user4/access")
+	accessRows(t, session, "/org/org3/settings/access-report")
+	accessRows(t, session, "/admin/access-reports")
+	session.MakeRequest(t, NewRequest(t, "GET", "/org/org3/settings/access-report?format=csv"), http.StatusOK)
+	session.MakeRequest(t, NewRequest(t, "GET", "/admin/access-reports?format=json"), http.StatusOK)
+	MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3/access-report").AddTokenAuth(token), http.StatusOK)
 	assert.Equal(t, before, count())
 }

@@ -69,12 +69,14 @@ func GetAccess(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	rows, _, err := accessreport.ForRepo(ctx, ctx.Repo().Repository, ctx.Doer(), accessreport.ParseFilter(ctx.FormString))
+	// a restricted token doesn't act as a site admin
+	admin := ctx.IsUserSiteAdmin()
+	rows, _, err := accessreport.ForRepo(ctx, ctx.Repo().Repository, admin, ctx.Doer(), accessreport.ParseFilter(ctx.FormString))
 	if err != nil {
 		ctx.InternalServerError(err)
 		return
 	}
 	opts := utils.GetListOptions(ctx)
 	ctx.SetTotalCountHeader(int64(len(rows)))
-	ctx.JSON(http.StatusOK, convert.ToAccessRows(ctx, util.PaginateSlice(rows, opts.Page, opts.PageSize).([]*accessreport.Row), ctx.Doer()))
+	ctx.JSON(http.StatusOK, convert.ToAccessRows(ctx, util.PaginateSlice(rows, opts.Page, opts.PageSize).([]*accessreport.Row), accessreport.AsAdmin(ctx.Doer(), admin)))
 }

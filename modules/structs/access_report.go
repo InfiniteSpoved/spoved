@@ -88,3 +88,37 @@ type UserAccess struct {
 	Rows        []*AccessRow        `json:"repositories"`
 	Credentials []*AccessCredential `json:"credentials"`
 }
+
+// AccessReportLine is one path that gives an identity access to one unit of a repository
+type AccessReportLine struct {
+	// person, bot, key, team, anyone, signed_in, org_members or instance_roles
+	Type string `json:"type"`
+	// user, deploy key or team name
+	Name       string `json:"name,omitempty"`
+	FullName   string `json:"full_name,omitempty"`
+	Repository string `json:"repository"`
+	// unit, e.g. repo.code, or * for all units
+	Unit string `json:"unit"`
+	// effective access to the unit
+	Access     string             `json:"access"`
+	Path       string             `json:"path"`
+	Team       string             `json:"team,omitempty"`
+	UserGroups []*AccessUserGroup `json:"user_groups,omitempty"`
+	// access this path grants to the unit
+	Grant string `json:"grant"`
+	// false when the permission checks don't use this path for any unit
+	Applied bool `json:"applied"`
+
+	// the fields below are only for users, and only for site admins
+
+	// swagger:strfmt date-time
+	LastLogin *time.Time `json:"last_login,omitempty"`
+	// last push to a repository of the report
+	// swagger:strfmt date-time
+	LastPush  *time.Time `json:"last_push,omitempty"`
+	TwoFactor *bool      `json:"two_factor,omitempty"`
+	// login type, and the name of the login source
+	AccountSource string `json:"account_source,omitempty"`
+	// the user can't sign in, or isn't activated
+	Suspended *bool `json:"suspended,omitempty"`
+}

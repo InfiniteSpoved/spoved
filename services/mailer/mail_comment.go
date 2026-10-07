@@ -16,6 +16,10 @@ import (
 
 // MailParticipantsComment sends new comment emails to repository watchers and mentioned people.
 func MailParticipantsComment(ctx context.Context, c *issues_model.Comment, opType activities_model.ActionType, issue *issues_model.Issue, mentions []*user_model.User) error {
+	return mailParticipantsComment(ctx, c, opType, issue, mentions, issues_model.ReviewTypePending)
+}
+
+func mailParticipantsComment(ctx context.Context, c *issues_model.Comment, opType activities_model.ActionType, issue *issues_model.Issue, mentions []*user_model.User, reviewType issues_model.ReviewType) error {
 	if setting.MailService == nil {
 		// No mail service configured
 		return nil
@@ -33,6 +37,7 @@ func MailParticipantsComment(ctx context.Context, c *issues_model.Comment, opTyp
 			ActionType: opType,
 			Content:    content,
 			Comment:    c,
+			ReviewType: reviewType,
 		}, mentions,
 	); err != nil {
 		log.Error("mailIssueCommentToParticipants: %v", err)
@@ -49,6 +54,14 @@ func MailMentionsComment(ctx context.Context, pr *issues_model.PullRequest, c *i
 
 	visited := make(container.Set[int64], len(mentions)+1)
 	visited.Add(c.Poster.ID)
+	ids := make([]int64, len(mentions))
+	for i, m := range mentions {
+		ids[i] = m.ID
+	}
+	filter, err := newEmailFilter(ctx, pr.Issue.RepoID, ids...)
+	if err != nil {
+		return err
+	}
 	if err = mailIssueCommentBatch(
 		&mailCommentContext{
 			Context:    ctx,
@@ -57,7 +70,7 @@ func MailMentionsComment(ctx context.Context, pr *issues_model.PullRequest, c *i
 			ActionType: activities_model.ActionCommentPull,
 			Content:    c.Content,
 			Comment:    c,
-		}, mentions, visited, true,
+		}, mentions, visited, true, &mailRecipients{filter: filter},
 	); err != nil {
 		log.Error("mailIssueCommentBatch: %v", err)
 	}
