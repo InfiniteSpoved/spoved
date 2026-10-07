@@ -92,10 +92,11 @@ for (const {name, base, team} of forms) {
       {error: 'approvers', fill: async (_c: Locator) => {}, noUser: true},
       {error: 'duplicate', second: true},
       {error: 'count', fill: async (c: Locator) => { await c.locator('input[name="approval_rule_count"]').fill('0') }},
-      {error: 'name', long: true, fill: async (c: Locator) => { await c.locator('input[name="approval_rule_name"]').evaluate((el: HTMLInputElement) => { el.value = 'x'.repeat(256) }) }},
+      {error: 'name', long: '256 characters', fill: async (c: Locator) => { await c.locator('input[name="approval_rule_name"]').evaluate((el: HTMLInputElement) => { el.value = 'x'.repeat(256) }) }},
+      {error: 'name', long: '128 characters, 256 bytes', fill: async (c: Locator) => { await c.locator('input[name="approval_rule_name"]').evaluate((el: HTMLInputElement) => { el.value = 'é'.repeat(128) }) }},
     ];
     for (const check of checks) {
-      test(`client check: ${check.error}${check.long ? ' (too long)' : ''}`, async ({page}) => {
+      test(`client check: ${check.error}${check.long ? ` (${check.long})` : ''}`, async ({page}) => {
         await page.goto(`${base}/edit`);
         await page.locator('input[name="rule_name"]').fill(`ar-check-${dynamic_id()}`);
         const count = check.second ? 2 : 1;
