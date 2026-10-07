@@ -51,7 +51,14 @@ func TrashRepository(ctx context.Context, doer *user_model.User, repo *repo_mode
 		if _, err := db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos-1 WHERE id=?", repo.OwnerID); err != nil {
 			return err
 		}
-		return models.DeleteRepositoryTransfer(ctx, repo.ID)
+		if err := models.DeleteRepositoryTransfer(ctx, repo.ID); err != nil {
+			return err
+		}
+		// forget what was indexed, so that a restore indexes the code again
+		if _, err := db.GetEngine(ctx).Where("repo_id = ? AND indexer_type = ?", repo.ID, repo_model.RepoIndexerTypeCode).Delete(new(repo_model.RepoIndexerStatus)); err != nil {
+			return err
+		}
+		return repo_model.DeleteIndexerBranches(ctx, repo.ID)
 	}); err != nil {
 		return err
 	}
