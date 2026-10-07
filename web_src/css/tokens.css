@@ -89,6 +89,7 @@
   --text: var(--neutral-900);
   --text-muted: var(--neutral-600);
   --text-on-primary: var(--neutral-0);
+  --text-on-danger: var(--neutral-0);
   --border: var(--neutral-200);
   --border-strong: var(--neutral-500);
   --primary: var(--blue-700);
@@ -151,6 +152,7 @@
   --color-text-light-3: var(--text-muted);
   --color-secondary: var(--border);
   --color-red: var(--danger);
+  --color-red-contrast: var(--text-on-danger);
   --color-yellow: var(--warning);
   --color-green: var(--success);
   --color-error-bg: var(--danger-bg);

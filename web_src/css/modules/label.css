@@ -144,7 +144,7 @@ a.ui.ui.ui.basic.primary.label:hover {
 .ui.ui.ui.red.label {
   background: var(--color-red);
   border-color: var(--color-red);
-  color: var(--color-white);
+  color: var(--color-red-contrast, var(--color-white));
 }
 a.ui.ui.ui.red.label:hover {
   background: var(--color-red-dark-1);
