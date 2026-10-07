@@ -353,6 +353,23 @@ func TestApprovalRulesMerge(t *testing.T) {
 			rules = get("ar-edit-web")
 			require.Len(t, rules, 1)
 			assert.Equal(t, []string{"user4"}, rules[0].Usernames)
+
+			// no JS: the editor renders no blank rows, only the trailing empty approval_rule_name
+			names := func() int {
+				resp := e.owner.Session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/settings/branches/edit?rule_name=ar-edit-web"), http.StatusOK)
+				return NewHTMLParser(t, resp.Body).Find(`form input[name="approval_rule_name"]`).Length()
+			}
+			assert.Equal(t, 2, names()) // the rule and the trailing field
+			// existing rows are saved, the trailing field is dropped as nameless
+			values := url.Values{"rule_name": {"ar-edit-web"}, "approval_rule_name": {"Web2", ""}, "approval_rule_count": {"2"}, "approval_rule_users": {"user5"}}
+			e.owner.Session.MakeRequest(t, NewRequestWithURLValues(t, "POST", "/user2/repo1/settings/branches/edit", values), http.StatusSeeOther)
+			rules = get("ar-edit-web")
+			require.Len(t, rules, 1)
+			assert.Equal(t, "Web2", rules[0].Name)
+			// only the trailing empty field: the rules are cleared
+			e.owner.Session.MakeRequest(t, NewRequestWithURLValues(t, "POST", "/user2/repo1/settings/branches/edit", url.Values{"rule_name": {"ar-edit-web"}, "approval_rule_name": {""}}), http.StatusSeeOther)
+			assert.Empty(t, get("ar-edit-web"))
+			assert.Equal(t, 1, names())
 		})
 	})
 }
