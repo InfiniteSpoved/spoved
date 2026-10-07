@@ -428,6 +428,13 @@ type swaggerTopicNames struct {
 	Body api.TopicName `json:"body"`
 }
 
+// CodeSearchResults
+// swagger:response CodeSearchResults
+type swaggerCodeSearchResults struct {
+	// in: body
+	Body []api.CodeSearchResult `json:"body"`
+}
+
 // LanguageStatistics
 // swagger:response LanguageStatistics
 type swaggerLanguageStatistics struct {

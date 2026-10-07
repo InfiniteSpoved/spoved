@@ -6,6 +6,7 @@ package internal
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
@@ -28,7 +29,35 @@ const (
 	CodeSearchModeExact CodeSearchMode = iota
 	CodeSearchModeUnion
 	CodeSearchModeFuzzy
+	CodeSearchModeRegex
 )
+
+const (
+	// MaxKeywordLength caps the keyword and the path of a search, for every mode.
+	MaxKeywordLength = 256
+	// MaxSearchWindow caps skip+take of a search: results past it are not reachable.
+	MaxSearchWindow = 1000
+)
+
+var (
+	// ErrInvalidQuery is wrapped by the errors of a query that can't be searched for.
+	ErrInvalidQuery = errors.New("invalid query")
+	// ErrRegexNotSupported is returned for the regex mode on an indexer that has none.
+	ErrRegexNotSupported = fmt.Errorf("%w: regex search is not supported by this indexer", ErrInvalidQuery)
+	// ErrQueryTooExpensive is returned when a search runs into its time limit.
+	ErrQueryTooExpensive = fmt.Errorf("%w: query too expensive", ErrInvalidQuery)
+)
+
+// RegexSearcher is implemented by indexers that can search by regular expression.
+type RegexSearcher interface {
+	SupportsRegex() bool
+}
+
+// BranchIndexer is implemented by indexers that index all branches of a repo in one go,
+// instead of one Index call per branch. The default branch comes first.
+type BranchIndexer interface {
+	IndexBranches(ctx context.Context, repo *repo_model.Repository, defaultBranch string, branches []BranchFiles) error
+}
 
 func (mode CodeSearchMode) String() string {
 	switch mode {
@@ -36,6 +65,8 @@ func (mode CodeSearchMode) String() string {
 		return "fuzzy"
 	case CodeSearchModeUnion:
 		return "union"
+	case CodeSearchModeRegex:
+		return "regexp"
 	default:
 		return "exact"
 	}

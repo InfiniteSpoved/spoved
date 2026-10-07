@@ -7,7 +7,21 @@
 			"Placeholder" (ctx.Locale.Tr "search.code_kind")
 			"Selected" $.CodeSearchMode
 			"Options" $.CodeSearchOptions}}
+	{{if .SearchBranches}}
+		<select class="ui dropdown tw-mt-2" name="branch" aria-label="{{ctx.Locale.Tr "repo.settings.code_search.branch"}}">
+			<option value=""{{if not .SearchBranch}} selected{{end}}>{{ctx.Locale.Tr "repo.settings.code_search.default_branch"}}</option>
+			<option value="all"{{if eq .SearchBranch "all"}} selected{{end}}>{{ctx.Locale.Tr "repo.settings.code_search.all_branches"}}</option>
+			{{range $name := .SearchBranches}}
+				<option value="{{$name}}"{{if eq $.SearchBranch $name}} selected{{end}}>{{$name}}</option>
+			{{end}}
+		</select>
+	{{end}}
 </form>
+{{if .CodeSearchError}}
+	<div class="ui error message tw-mt-2">
+		<p>{{.CodeSearchError}}</p>
+	</div>
+{{end}}
 <div class="ui user list">
 	{{if .CodeIndexerUnavailable}}
 		<div class="ui error message">
@@ -17,7 +31,7 @@
 		{{if .CodeSearchPath}}
 			<div class="tw-mb-4">
 				<span class="breadcrumb">
-					<a class="section" href="?q={{.Keyword}}&mode={{.CodeSearchMode}}">@</a>
+					<a class="section" href="?q={{.Keyword}}&mode={{.CodeSearchMode}}{{if .SearchBranch}}&branch={{.SearchBranch | QueryEscape}}{{end}}">@</a>
 					{{$href := ""}}
 					{{- range $i, $path := StringUtils.Split .CodeSearchPath "/" -}}
 						{{if eq $i 0}}
@@ -26,7 +40,7 @@
 							{{$href = StringUtils.Join (StringUtils.Make $href $path) "/"}}
 						{{end}}
 						<span class="breadcrumb-divider">/</span>
-						<span class="section"><a href="?q={{$.Keyword}}&mode={{$.CodeSearchMode}}&path={{$href}}">{{$path}}</a></span>
+						<span class="section"><a href="?q={{$.Keyword}}&mode={{$.CodeSearchMode}}{{if $.SearchBranch}}&branch={{$.SearchBranch | QueryEscape}}{{end}}&path={{$href}}">{{$path}}</a></span>
 					{{- end -}}
 				</span>
 			</div>

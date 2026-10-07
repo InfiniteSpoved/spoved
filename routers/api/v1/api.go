@@ -1036,6 +1036,7 @@ func Routes() *web.Route {
 				}, reqAdmin(), reqToken())
 
 				m.Get("/editorconfig/{filename}", context.ReferencesGitRepo(), context.RepoRefForAPI, reqRepoReader(unit.TypeCode), repo.GetEditorconfig)
+				m.Get("/search/code", reqRepoReader(unit.TypeCode), repo.SearchCode)
 				m.Group("/pulls", func() {
 					m.Combo("").Get(repo.ListPullRequests).
 						Post(reqToken(), mustNotBeArchived(), bind(api.CreatePullRequestOption{}), repo.CreatePullRequest)

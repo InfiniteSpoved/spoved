@@ -84,6 +84,19 @@ func index(ctx context.Context, indexer internal.Indexer, repoID int64) error {
 	if err != nil {
 		return err
 	}
+	wanted, err := expandIndexedBranches(ctx, repo)
+	if err != nil {
+		return err
+	}
+	stored, err := repo_model.GetIndexerBranches(ctx, repo.ID)
+	if err != nil {
+		return err
+	}
+	// an indexer that indexes whole repos only does so once there are other branches to index or to drop
+	if bi, ok := indexer.(internal.BranchIndexer); ok && (len(wanted) > 0 || len(stored) > 0) {
+		return indexAllBranches(ctx, bi, repo, sha, status, stored, wanted)
+	}
+
 	changes, err := getRepoChanges(ctx, repo, repo.DefaultBranch, status.CommitSha, sha)
 	if err != nil {
 		return err
@@ -98,21 +111,62 @@ func index(ctx context.Context, indexer internal.Indexer, repoID int64) error {
 	if err := repo_model.UpdateIndexerStatus(ctx, repo, repo_model.RepoIndexerTypeCode, sha); err != nil {
 		return err
 	}
-	return indexExtraBranches(ctx, indexer, repo)
+	return indexExtraBranches(ctx, indexer, repo, stored, wanted)
+}
+
+// indexAllBranches hands the default branch and the wanted ones to an indexer that indexes a
+// repo as a whole, when any of them has a new commit or a branch has to go.
+func indexAllBranches(ctx context.Context, bi internal.BranchIndexer, repo *repo_model.Repository, sha string,
+	status *repo_model.RepoIndexerStatus, stored map[string]string, wanted []BranchInfo,
+) error {
+	changed := status.CommitSha != sha || len(stored) != len(wanted)
+	for _, b := range wanted {
+		changed = changed || stored[b.Name] != b.CommitID
+	}
+	if !changed {
+		return nil
+	}
+
+	all := append([]BranchInfo{{Name: repo.DefaultBranch, CommitID: sha}}, wanted...)
+	branches := make([]internal.BranchFiles, 0, len(all))
+	for _, b := range all {
+		changes, err := genesisChanges(ctx, repo, b.CommitID)
+		if err != nil {
+			return err
+		}
+		bf := internal.BranchFiles{Name: b.Name, CommitID: b.CommitID}
+		if changes != nil {
+			bf.Files = changes.Updates
+		}
+		branches = append(branches, bf)
+	}
+	if err := bi.IndexBranches(ctx, repo, repo.DefaultBranch, branches); err != nil {
+		return err
+	}
+
+	if err := repo_model.UpdateIndexerStatus(ctx, repo, repo_model.RepoIndexerTypeCode, sha); err != nil {
+		return err
+	}
+	keep := make(container.Set[string], len(wanted))
+	for _, b := range wanted {
+		keep.Add(b.Name)
+		if err := repo_model.SetIndexerBranch(ctx, repo.ID, b.Name, b.CommitID); err != nil {
+			return err
+		}
+	}
+	for name := range stored {
+		if !keep.Contains(name) {
+			if err := repo_model.DeleteIndexerBranches(ctx, repo.ID, name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // indexExtraBranches brings the indexed non-default branches up to date, and drops the ones
 // that were deleted, no longer match a pattern or are over the limit.
-func indexExtraBranches(ctx context.Context, indexer internal.Indexer, repo *repo_model.Repository) error {
-	stored, err := repo_model.GetIndexerBranches(ctx, repo.ID)
-	if err != nil {
-		return err
-	}
-	wanted, err := expandIndexedBranches(ctx, repo)
-	if err != nil {
-		return err
-	}
-
+func indexExtraBranches(ctx context.Context, indexer internal.Indexer, repo *repo_model.Repository, stored map[string]string, wanted []BranchInfo) error {
 	keep := make(container.Set[string], len(wanted))
 	for _, b := range wanted {
 		keep.Add(b.Name)
@@ -188,6 +242,7 @@ func Init() {
 		return
 	}
 	setSearchOption(setting.Indexer.RepoIndexerEnableFuzzy, "fuzzy")
+	setSearchOption(setting.Indexer.RepoType == "zoekt", "regexp")
 
 	ctx, cancel, finished := process.GetManager().AddTypedContext(context.Background(), "Service: CodeIndexer", process.SystemProcessType, false)
 
