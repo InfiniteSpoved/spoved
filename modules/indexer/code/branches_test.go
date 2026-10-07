@@ -43,4 +43,6 @@ func TestIsIndexedBranchName(t *testing.T) {
 	assert.True(t, isIndexedBranchName("main", patterns, "release/1.0"))
 	assert.False(t, isIndexedBranchName("main", patterns, "feature/x"))
 	assert.False(t, isIndexedBranchName("main", nil, "develop"))
+	// a pattern that compiles but panics in glob's Match counts as no match
+	assert.NotPanics(t, func() { assert.False(t, isIndexedBranchName("main", []string{"?a{}{,*"}, "xa")) })
 }

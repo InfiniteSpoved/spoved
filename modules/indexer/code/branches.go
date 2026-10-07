@@ -36,11 +36,23 @@ func indexedBranchPatterns(ctx context.Context, repo *repo_model.Repository) []s
 
 func matchesAny(patterns []string, name string) bool {
 	for _, p := range patterns {
-		if g, err := glob.Compile(p, '/'); err == nil && g.Match(name) {
+		if matches(p, name) {
 			return true
 		}
 	}
 	return false
+}
+
+// matches compiles and matches in one place: gobwas/glob can panic in Match on a pattern that
+// compiles (e.g. "?a{}{,*"), and a panic here would drop whole queue batches, so it counts as no match.
+func matches(pattern, name string) (matched bool) {
+	defer func() {
+		if recover() != nil {
+			matched = false
+		}
+	}()
+	g, err := glob.Compile(pattern, '/')
+	return err == nil && g.Match(name)
 }
 
 // isIndexedBranchName tells if a branch is, or may be, indexed: it is the default branch or matches a pattern.
