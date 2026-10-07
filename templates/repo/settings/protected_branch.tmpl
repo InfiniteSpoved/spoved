@@ -182,34 +182,21 @@
 						{{end}}
 					</div>
 				</fieldset>
-				<fieldset>
+				<fieldset class="approval-rules" data-max="{{.MaxApprovalRules}}">
 					<legend>{{ctx.Locale.Tr "repo.settings.approval_rules"}}</legend>
 					<p class="help">{{ctx.Locale.Tr "repo.settings.approval_rules_desc" .MaxApprovalRules}}</p>
-					{{range .ApprovalRules}}
-						<div class="field tw-flex tw-flex-wrap tw-gap-2 tw-items-end">
-							<label>{{ctx.Locale.Tr "repo.settings.approval_rule_name"}}
-								<input name="approval_rule_name" value="{{.Name}}" maxlength="255">
-							</label>
-							<label>{{ctx.Locale.Tr "repo.settings.approval_rule_count"}}
-								<input name="approval_rule_count" type="number" min="1" value="{{.RequiredCount}}">
-							</label>
-							<label>{{ctx.Locale.Tr "repo.settings.approval_rule_users"}}
-								<input name="approval_rule_users" value="{{StringUtils.Join .Usernames ", "}}">
-							</label>
-							<label>{{ctx.Locale.Tr "repo.settings.approval_rule_teams"}}
-								<input name="approval_rule_teams" value="{{StringUtils.Join .Teams ", "}}">
-							</label>
-							<label>{{ctx.Locale.Tr "repo.settings.approval_rule_paths"}}
-								<input name="approval_rule_paths" value="{{.PathPatterns}}">
-							</label>
-							<label>{{ctx.Locale.Tr "repo.settings.approval_rule_code_owners"}}
-								<select name="approval_rule_code_owners">
-									<option value="false">{{ctx.Locale.Tr "repo.settings.approval_rule_code_owners_no"}}</option>
-									<option value="true" {{if .RequireCodeOwners}}selected{{end}}>{{ctx.Locale.Tr "repo.settings.approval_rule_code_owners_yes"}}</option>
-								</select>
-							</label>
-						</div>
-					{{end}}
+					<div class="approval-rule-cards">
+						{{range .ApprovalRules}}
+							{{template "repo/settings/approval_rule_card" (dict "Rule" . "Users" $.Users "Teams" $.Teams "ShowTeams" $.Owner.IsOrganization)}}
+						{{end}}
+					</div>
+					{{/* keeps the field in the form when all rules are removed; it has no name, so the parser drops it */}}
+					<input type="hidden" name="approval_rule_name" value="">
+					<button type="button" class="ui button approval-rule-add tw-hidden tw-mt-2" data-js-only>{{ctx.Locale.Tr "repo.settings.approval_rule_add"}}</button>
+					<div class="approval-rule-limit"><span class="help">{{ctx.Locale.Tr "repo.settings.approval_rule_limit" .MaxApprovalRules}}</span></div>
+					<template>
+						{{template "repo/settings/approval_rule_card" (dict "Rule" (dict "RequiredCount" 1) "Users" $.Users "Teams" $.Teams "ShowTeams" $.Owner.IsOrganization)}}
+					</template>
 				</fieldset>
 				<label>
 					<input id="dismiss_stale_approvals" name="dismiss_stale_approvals" type="checkbox" {{if .Rule.DismissStaleApprovals}}checked{{end}}>

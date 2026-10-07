@@ -105,4 +105,79 @@ export function initRepoSettingBranches() {
   };
   markMatchedStatusChecks();
   document.getElementById('status_check_contexts').addEventListener('input', onInputDebounce(markMatchedStatusChecks));
+
+  initApprovalRules();
+}
+
+const showJsOnly = (root) => {
+  for (const el of root.querySelectorAll('[data-js-only]')) toggleElem(el, true);
+};
+
+const setTitle = (card) => {
+  const title = card.querySelector('.approval-rule-title');
+  title.textContent = card.querySelector('[name="approval_rule_name"]').value.trim() || title.getAttribute('data-default');
+};
+
+const ruleValue = (card, name) => card.querySelector(`[name="${name}"]`)?.value.trim() ?? '';
+
+// Cards of approval rules: add, remove and validate in the browser. Without JS the existing cards still save as before.
+function initApprovalRules() {
+  const rules = document.querySelector('.approval-rules');
+  if (!rules) return;
+  const list = rules.querySelector('.approval-rule-cards');
+  const addButton = rules.querySelector('.approval-rule-add');
+  const cards = () => list.querySelectorAll('.approval-rule-card');
+  const update = () => {
+    const full = cards().length >= Number(rules.getAttribute('data-max'));
+    addButton.disabled = full;
+  };
+
+  showJsOnly(rules);
+  update();
+
+  addButton.addEventListener('click', () => {
+    const card = rules.querySelector('template').content.firstElementChild.cloneNode(true);
+    showJsOnly(card);
+    list.append(card);
+    $(card).find('.ui.dropdown').dropdown();
+    update();
+  });
+  list.addEventListener('click', (e) => {
+    e.target.closest('.approval-rule-remove')?.closest('.approval-rule-card').remove();
+    update();
+  });
+  list.addEventListener('input', (e) => {
+    if (e.target.name === 'approval_rule_name') setTitle(e.target.closest('.approval-rule-card'));
+  });
+
+  // drop empty cards; refuse invalid ones with the checks of the model, the server still reports the rest (path globs, unknown names)
+  rules.closest('form').addEventListener('submit', (e) => {
+    const seen = new Set();
+    let firstBad;
+    for (const card of cards()) {
+      const value = (name) => ruleValue(card, name);
+      const name = value('approval_rule_name');
+      const hasApprovers = value('approval_rule_users') || value('approval_rule_teams') || value('approval_rule_code_owners') === 'true';
+      if (!name && !hasApprovers && !value('approval_rule_paths') && value('approval_rule_count') === '1') {
+        card.remove();
+        continue;
+      }
+      let error;
+      let invalid = [];
+      if (!name || new TextEncoder().encode(name).length > 255) [error, invalid] = ['name', ['approval_rule_name']];
+      else if (seen.has(name)) [error, invalid] = ['duplicate', ['approval_rule_name']];
+      else if (!(Number.isInteger(Number(value('approval_rule_count'))) && Number(value('approval_rule_count')) >= 1)) [error, invalid] = ['count', ['approval_rule_count']];
+      else if (!hasApprovers) [error, invalid] = ['approvers', ['approval_rule_users', 'approval_rule_teams']];
+      seen.add(name);
+      for (const el of card.querySelectorAll('.field')) el.classList.remove('error');
+      for (const el of card.querySelectorAll('.approval-rule-error')) toggleElem(el, el.getAttribute('data-error') === error);
+      for (const n of invalid) card.querySelector(`[name="${n}"]`)?.closest('.field').classList.add('error');
+      if (error) firstBad ??= card;
+    }
+    update();
+    if (firstBad) {
+      e.preventDefault();
+      firstBad.scrollIntoView({block: 'center'});
+    }
+  });
 }
