@@ -22,8 +22,11 @@ import (
 	webhook_model "forgejo.org/models/webhook"
 	issue_indexer "forgejo.org/modules/indexer/issues"
 	"forgejo.org/modules/private"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
+	"forgejo.org/modules/test"
 	webhook_module "forgejo.org/modules/webhook"
+	"forgejo.org/routers"
 	"forgejo.org/services/mailer/incoming"
 	incoming_payload "forgejo.org/services/mailer/incoming/payload"
 	webhook_service "forgejo.org/services/webhook"
@@ -210,4 +213,41 @@ func TestTrashEmailReply(t *testing.T) {
 	before := unittest.GetCount(t, &issues_model.Comment{IssueID: issue.ID})
 	require.Error(t, (&incoming.ReplyHandler{}).Handle(t.Context(), &incoming.MailContent{Content: "reply"}, user, payload))
 	assert.Equal(t, before, unittest.GetCount(t, &issues_model.Comment{IssueID: issue.ID}))
+}
+
+// The quota lists of an owner still answer when one of their repositories is in the trash: the packages,
+// attachments and artifacts of the trashed repository are left out of the lists (the totals still count them).
+func TestTrashQuotaLists(t *testing.T) {
+	defer prepareTrash(t)()
+	defer test.MockVariableValue(&setting.Quota.Enabled, true)()
+	defer test.MockVariableValue(&testWebRoutes, routers.NormalRoutes())()
+	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+
+	MakeRequest(t, NewRequestWithBody(t, "PUT", fmt.Sprintf("/api/packages/%s/generic/quota-linked/1.0.0/file.bin", user.Name), bytes.NewReader([]byte{1, 2, 3})).AddBasicAuth(user.Name), http.StatusCreated)
+	pkg, err := packages.GetPackageByName(t.Context(), user.ID, packages.TypeGeneric, "quota-linked")
+	require.NoError(t, err)
+	require.NoError(t, packages.SetRepositoryLink(t.Context(), pkg.ID, trashRepoID))
+
+	run := &actions_model.ActionRun{RepoID: trashRepoID, OwnerID: user.ID, Index: 9002, Status: actions_model.StatusSuccess, WorkflowID: "q.yml", Ref: "refs/heads/master", CommitSHA: "0000000000000000000000000000000000000000", TriggerUserID: user.ID}
+	require.NoError(t, db.Insert(t.Context(), run))
+	require.NoError(t, db.Insert(t.Context(), &actions_model.ActionArtifact{RunID: run.ID, RepoID: trashRepoID, OwnerID: user.ID, ArtifactName: "a", ArtifactPath: "a", StoragePath: "a", FileSize: 5, FileCompressedSize: 5, Status: int64(actions_model.ArtifactStatusUploadConfirmed)}))
+
+	token := getUserToken(t, "user2", auth_model.AccessTokenScopeAll)
+	lengths := func(list string) int {
+		var items []map[string]any
+		DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/user/quota/"+list).AddTokenAuth(token), http.StatusOK), &items)
+		return len(items)
+	}
+	inTrashedRepo := map[string]int{"packages": 1, "attachments": unittest.GetCount(t, &repo_model.Attachment{RepoID: trashRepoID}), "artifacts": 1}
+	before := map[string]int{}
+	for list, n := range inTrashedRepo {
+		before[list] = lengths(list)
+		require.GreaterOrEqual(t, before[list], n, list+" before trashing")
+	}
+
+	moveToTrash(t)
+
+	for list, n := range inTrashedRepo {
+		assert.Equal(t, before[list]-n, lengths(list), list+" after trashing")
+	}
 }

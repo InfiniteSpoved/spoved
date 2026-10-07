@@ -258,6 +258,18 @@ func TestTrashRestore(t *testing.T) {
 		MakeRequest(t, NewRequest(t, "POST", "/api/v1/admin/trash/repo/1/restore").AddTokenAuth(adminTrashToken(t)), http.StatusNoContent)
 		assert.False(t, trashRepo(t).IsTrashed())
 	})
+
+	t.Run("team links", func(t *testing.T) {
+		admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+		repo3 := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3}) // org3's, in teams
+		links := unittest.GetCount(t, &organization.TeamRepo{RepoID: repo3.ID})
+		require.Positive(t, links)
+
+		require.NoError(t, repo_service.TrashRepository(t.Context(), admin, repo3))
+		assert.Equal(t, links, unittest.GetCount(t, &organization.TeamRepo{RepoID: repo3.ID}), "trashing keeps the team links")
+		require.NoError(t, trash_service.Restore(t.Context(), admin, repo3.ID))
+		assert.Equal(t, links, unittest.GetCount(t, &organization.TeamRepo{RepoID: repo3.ID}))
+	})
 }
 
 // AC7: purge needs the typed name; afterwards the data is gone and the name is free.
