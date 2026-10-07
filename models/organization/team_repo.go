@@ -38,6 +38,13 @@ type SearchTeamRepoOptions struct {
 	AuthorizationReducer repo_model.RepositoryAuthorizationReducer
 }
 
+// AddTeamRepoCounts adds delta to num_repos of every team that has the repository: -1 when it is trashed and +1
+// when it is restored, as the count leaves trashed repositories out.
+func AddTeamRepoCounts(ctx context.Context, repoID int64, delta int) error {
+	_, err := db.GetEngine(ctx).Exec("UPDATE `team` SET num_repos = num_repos + ? WHERE id IN (SELECT team_id FROM team_repo WHERE repo_id = ?)", delta, repoID)
+	return err
+}
+
 // GetRepositories returns paginated repositories in team of organization.
 func GetTeamRepositories(ctx context.Context, opts *SearchTeamRepoOptions) (repo_model.RepositoryList, error) {
 	sess := db.GetEngine(ctx).Where("repository.trashed_unix = 0")

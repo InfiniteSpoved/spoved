@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 
 	"code.forgejo.org/xorm/xorm"
 	"xorm.io/builder"
@@ -139,7 +140,7 @@ func getIssueStatsChunk(ctx context.Context, opts *IssuesOptions, issueIDs []int
 }
 
 func applyIssuesOptions(sess *xorm.Session, opts *IssuesOptions, issueIDs []int64) *xorm.Session {
-	sess.And(builder.NotIn("issue.repo_id", builder.Select("id").From("repository").Where(builder.Neq{"trashed_unix": 0})))
+	sess.And(repo_model.NotTrashedCond("issue.repo_id"))
 
 	if len(opts.RepoIDs) > 1 {
 		sess.In("issue.repo_id", opts.RepoIDs)

@@ -267,8 +267,9 @@ func Repos(ctx *context.Context) {
 		}
 
 		userRepos, _, err := repo_model.GetUserRepositories(ctx, &repo_model.SearchRepoOptions{
-			Actor:   ctxUser,
-			Private: true,
+			Actor:          ctxUser,
+			Private:        true,
+			IncludeTrashed: true, // a trashed repository's directory is not unadopted
 			ListOptions: db.ListOptions{
 				Page:     1,
 				PageSize: setting.UI.Admin.UserPagingNum,

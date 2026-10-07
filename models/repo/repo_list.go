@@ -330,6 +330,12 @@ func UserOrgPublicUnitRepoCond(userID, orgID int64) builder.Cond {
 		And(builder.Eq{"`repository`.owner_id": orgID})
 }
 
+// NotTrashedCond matches rows whose repository id column is not a repository in the trash. Use it in queries that
+// reach repositories by id instead of through SearchRepositoryCondition.
+func NotTrashedCond(col string) builder.Cond {
+	return builder.NotIn(col, builder.Select("id").From("repository").Where(builder.Neq{"trashed_unix": 0}))
+}
+
 // SearchRepositoryCondition creates a query condition according search repository options
 func SearchRepositoryCondition(opts *SearchRepoOptions) builder.Cond {
 	cond := builder.NewCond()

@@ -51,8 +51,8 @@ func registerPurgeTrash() {
 		Enabled:    true,
 		RunAtStart: false,
 		Schedule:   "@daily",
-	}, func(ctx context.Context, _ *user_model.User, _ Config) error {
-		return trash_service.PurgeExpired(ctx)
+	}, func(ctx context.Context, doer *user_model.User, _ Config) error {
+		return trash_service.PurgeExpired(ctx, doer)
 	})
 }
 

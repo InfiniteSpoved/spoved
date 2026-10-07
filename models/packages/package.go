@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/util"
 
 	"code.forgejo.org/xorm/xorm"
@@ -276,11 +277,6 @@ func GetPackageByID(ctx context.Context, packageID int64) (*Package, error) {
 	return p, nil
 }
 
-// notInTrashedRepoCond hides packages whose linked repository is in the trash.
-func notInTrashedRepoCond() builder.Cond {
-	return builder.NotIn("package.repo_id", builder.Select("id").From("repository").Where(builder.Neq{"trashed_unix": 0}))
-}
-
 // GetPackageByName gets a package by name
 func GetPackageByName(ctx context.Context, ownerID int64, packageType Type, name string) (*Package, error) {
 	var cond builder.Cond = builder.Eq{
@@ -289,7 +285,7 @@ func GetPackageByName(ctx context.Context, ownerID int64, packageType Type, name
 		"package.lower_name":  ResolvePackageName(name, packageType),
 		"package.is_internal": false,
 	}
-	cond = cond.And(notInTrashedRepoCond())
+	cond = cond.And(repo_model.NotTrashedCond("package.repo_id"))
 
 	p := &Package{}
 
@@ -312,7 +308,7 @@ func GetPackagesByType(ctx context.Context, ownerID int64, packageType Type) ([]
 		"package.type":        packageType,
 		"package.is_internal": false,
 	}
-	cond = cond.And(notInTrashedRepoCond())
+	cond = cond.And(repo_model.NotTrashedCond("package.repo_id"))
 
 	ps := make([]*Package, 0, 10)
 	return ps, db.GetEngine(ctx).

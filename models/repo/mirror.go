@@ -16,8 +16,6 @@ import (
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
-
-	"xorm.io/builder"
 )
 
 // ErrMirrorNotExist mirror does not exist error
@@ -182,7 +180,7 @@ func MirrorsIterate(ctx context.Context, limit int, f func(idx int, bean any) er
 	sess := db.GetEngine(ctx).
 		Where("next_update_unix<=?", time.Now().Unix()).
 		And("next_update_unix!=0").
-		And(builder.NotIn("repo_id", builder.Select("id").From("repository").Where(builder.Neq{"trashed_unix": 0}))).
+		And(NotTrashedCond("repo_id")).
 		OrderBy("updated_unix ASC")
 	if limit > 0 {
 		sess = sess.Limit(limit)

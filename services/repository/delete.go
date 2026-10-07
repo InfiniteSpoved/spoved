@@ -437,9 +437,12 @@ func removeRepositoryFromTeam(ctx context.Context, t *organization.Team, repo *r
 		return err
 	}
 
-	t.NumRepos--
-	if _, err = e.ID(t.ID).Cols("num_repos").Update(t); err != nil {
-		return err
+	// a trashed repository was already taken off the team's count when it was trashed
+	if !repo.IsTrashed() {
+		t.NumRepos--
+		if _, err = e.ID(t.ID).Cols("num_repos").Update(t); err != nil {
+			return err
+		}
 	}
 
 	// Don't need to recalculate when delete a repository from organization.

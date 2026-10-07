@@ -10,6 +10,7 @@ import (
 	"forgejo.org/models"
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
+	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	code_indexer "forgejo.org/modules/indexer/code"
@@ -49,6 +50,9 @@ func TrashRepository(ctx context.Context, doer *user_model.User, repo *repo_mode
 			return repo_model.ErrRepoNotExist{ID: repo.ID}
 		}
 		if _, err := db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos-1 WHERE id=?", repo.OwnerID); err != nil {
+			return err
+		}
+		if err := organization.AddTeamRepoCounts(ctx, repo.ID, -1); err != nil {
 			return err
 		}
 		if err := models.DeleteRepositoryTransfer(ctx, repo.ID); err != nil {

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"forgejo.org/models"
 	activities_model "forgejo.org/models/activities"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
@@ -543,9 +544,15 @@ func Delete(ctx *context.APIContext) {
 	//     "$ref": "#/responses/empty"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
 
 	if err := org_service.DeleteOrganization(ctx, ctx.Org().Organization, false); err != nil {
-		ctx.Error(http.StatusInternalServerError, "DeleteOrganization", err)
+		if models.IsErrUserOwnRepos(err) || models.IsErrUserOwnPackages(err) {
+			ctx.Error(http.StatusUnprocessableEntity, "", err)
+		} else {
+			ctx.Error(http.StatusInternalServerError, "DeleteOrganization", err)
+		}
 		return
 	}
 	ctx.Status(http.StatusNoContent)

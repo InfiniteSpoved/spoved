@@ -10,6 +10,7 @@ import (
 
 	"forgejo.org/models/db"
 	"forgejo.org/models/packages"
+	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	container_module "forgejo.org/modules/packages/container"
 	"forgejo.org/modules/util"
@@ -29,9 +30,9 @@ type BlobSearchOptions struct {
 }
 
 func (opts *BlobSearchOptions) toConds() builder.Cond {
-	var cond builder.Cond = builder.Eq{
+	cond := repo_model.NotTrashedCond("package.repo_id").And(builder.Eq{
 		"package.type": packages.TypeContainer,
-	}
+	})
 
 	if opts.OwnerID != 0 {
 		cond = cond.And(builder.Eq{"package.owner_id": opts.OwnerID})
@@ -124,12 +125,12 @@ func GetImageTags(ctx context.Context, ownerID int64, image string, n int, last 
 		return []string{}, nil
 	}
 
-	var cond builder.Cond = builder.Eq{
+	cond := repo_model.NotTrashedCond("package.repo_id").And(builder.Eq{
 		"package.type":                packages.TypeContainer,
 		"package.owner_id":            ownerID,
 		"package.lower_name":          strings.ToLower(image),
 		"package_version.is_internal": false,
-	}
+	})
 
 	var propsCond builder.Cond = builder.Eq{
 		"package_property.ref_type": packages.PropertyTypeVersion,
@@ -170,11 +171,11 @@ type ImageTagsSearchOptions struct {
 }
 
 func (opts *ImageTagsSearchOptions) toConds() builder.Cond {
-	var cond builder.Cond = builder.Eq{
+	cond := repo_model.NotTrashedCond("package.repo_id").And(builder.Eq{
 		"package.type":                packages.TypeContainer,
 		"package.id":                  opts.PackageID,
 		"package_version.is_internal": false,
-	}
+	})
 
 	if opts.Query != "" {
 		cond = cond.And(builder.Like{"package_version.lower_version", strings.ToLower(opts.Query)})
@@ -248,11 +249,11 @@ func SearchExpiredUploadedBlobs(ctx context.Context, olderThan time.Duration) ([
 
 // GetRepositories gets a sorted list of all repositories
 func GetRepositories(ctx context.Context, actor *user_model.User, n int, last string) ([]string, error) {
-	var cond builder.Cond = builder.Eq{
+	cond := repo_model.NotTrashedCond("package.repo_id").And(builder.Eq{
 		"package.type":              packages.TypeContainer,
 		"package_property.ref_type": packages.PropertyTypePackage,
 		"package_property.name":     container_module.PropertyRepository,
-	}
+	})
 
 	cond = cond.And(builder.Exists(
 		builder.

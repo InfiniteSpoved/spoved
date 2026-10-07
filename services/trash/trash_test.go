@@ -37,7 +37,7 @@ func TestPurgeExpired(t *testing.T) {
 	setTrashed(t, 2, now-29*day)             // not yet
 	setTrashed(t, 3, -(now - int64(7*3600))) // purge claimed seven hours ago, never finished
 	setTrashed(t, 4, -(now - int64(60)))     // purge claimed a minute ago, still running
-	require.NoError(t, PurgeExpired(t.Context()))
+	require.NoError(t, PurgeExpired(t.Context(), unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})))
 
 	unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: 1})
 	unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 2})

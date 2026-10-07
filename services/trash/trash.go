@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"forgejo.org/models/db"
+	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	code_indexer "forgejo.org/modules/indexer/code"
@@ -104,8 +105,10 @@ func Restore(ctx context.Context, doer *user_model.User, id int64) error {
 		if repo, err = repo_model.GetRepositoryByID(ctx, id); err != nil {
 			return err
 		}
-		_, err = db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos+1 WHERE id=?", repo.OwnerID)
-		return err
+		if _, err = db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos+1 WHERE id=?", repo.OwnerID); err != nil {
+			return err
+		}
+		return organization.AddTeamRepoCounts(ctx, repo.ID, 1)
 	}); err != nil {
 		return err
 	}
@@ -122,7 +125,17 @@ func Purge(ctx context.Context, doer *user_model.User, id int64) error {
 	if err := claimForPurge(ctx, id, builder.Gt{"trashed_unix": 0}); err != nil {
 		return err
 	}
-	return repo_service.DeleteRepositoryDirectly(ctx, id, repo_service.DeleteRepositoryOpts{})
+	return deleteClaimed(ctx, doer, id)
+}
+
+// deleteClaimed deletes the repository claimed by claimForPurge, closing the pull requests from its branches
+// into other repositories like any permanent deletion.
+func deleteClaimed(ctx context.Context, doer *user_model.User, id int64) error {
+	repo, err := repo_model.GetRepositoryByIDIncludingTrashed(ctx, id)
+	if err != nil {
+		return err
+	}
+	return repo_service.DeleteRepositoryPermanently(ctx, doer, repo, false) // its webhooks fired when it was trashed
 }
 
 // claimForPurge marks the repository as being purged, minus the time of the claim, so that a second
@@ -140,7 +153,7 @@ func claimForPurge(ctx context.Context, id int64, cond builder.Cond) error {
 
 // PurgeExpired deletes the repositories whose retention is over, and retries purges that were claimed but
 // never finished.
-func PurgeExpired(ctx context.Context) error {
+func PurgeExpired(ctx context.Context, doer *user_model.User) error {
 	now := timeutil.TimeStampNow()
 	expired := now.Add(-int64(setting.Trash.RetentionDays) * 86400)
 	stale := now.Add(-int64(purgeRetryAfter / time.Second))
@@ -160,7 +173,7 @@ func PurgeExpired(ctx context.Context) error {
 			}
 			return err
 		}
-		if err := repo_service.DeleteRepositoryDirectly(ctx, repo.ID, repo_service.DeleteRepositoryOpts{}); err != nil {
+		if err := deleteClaimed(ctx, doer, repo.ID); err != nil {
 			log.Error("purge trashed repository %d: %v", repo.ID, err)
 		}
 	}

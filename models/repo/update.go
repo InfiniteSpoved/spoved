@@ -110,9 +110,6 @@ func CheckRepoCreationLimit(ctx context.Context, doer, u *user_model.User) error
 	if doer.IsAdmin {
 		return nil
 	}
-	if !u.CanCreateRepo() {
-		return ErrReachLimitOfRepo{u.MaxRepoCreation}
-	}
 	trashed, err := db.GetEngine(ctx).Where("owner_id = ? AND trashed_unix <> 0", u.ID).Count(new(Repository))
 	if err != nil {
 		return err

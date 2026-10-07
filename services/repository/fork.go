@@ -17,6 +17,7 @@ import (
 	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/log"
 	repo_module "forgejo.org/modules/repository"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 	notify_service "forgejo.org/services/notify"
@@ -54,9 +55,9 @@ type ForkRepoOptions struct {
 // ForkRepositoryIfNotExists creates a fork of a repository if it does not already exists and fails otherwise
 func ForkRepositoryIfNotExists(ctx context.Context, doer, owner *user_model.User, opts ForkRepoOptions) (*repo_model.Repository, error) {
 	// Fork is prohibited, if user has reached maximum limit of repositories
-	if !doer.IsAdmin && !owner.CanForkRepo() {
-		return nil, repo_model.ErrReachLimitOfRepo{
-			Limit: owner.MaxRepoCreation,
+	if !setting.Repository.AllowForkWithoutMaximumLimit {
+		if err := repo_model.CheckRepoCreationLimit(ctx, doer, owner); err != nil {
+			return nil, err
 		}
 	}
 

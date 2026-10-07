@@ -4,20 +4,27 @@
 package integration
 
 import (
+	"fmt"
 	"net/http"
 	"sync"
 	"testing"
 	"time"
 
+	"forgejo.org/models"
 	auth_model "forgejo.org/models/auth"
+	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
+	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	webhook_model "forgejo.org/models/webhook"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
+	org_service "forgejo.org/services/org"
+	repo_service "forgejo.org/services/repository"
 	trash_service "forgejo.org/services/trash"
 	user_service "forgejo.org/services/user"
 	"forgejo.org/tests"
@@ -107,11 +114,11 @@ func TestTrashRetentionChanged(t *testing.T) {
 	timeutil.MockSet(time.Now().Add(100 * 24 * time.Hour))
 	defer timeutil.MockUnset()
 
-	require.NoError(t, trash_service.PurgeExpired(t.Context()))
+	require.NoError(t, trash_service.PurgeExpired(t.Context(), unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})))
 	assert.True(t, trashRepo(t).IsTrashed())
 
 	setting.Trash.RetentionDays = 30
-	require.NoError(t, trash_service.PurgeExpired(t.Context()))
+	require.NoError(t, trash_service.PurgeExpired(t.Context(), unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})))
 	unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: trashRepoID})
 }
 
@@ -222,6 +229,10 @@ func TestTrashRestore(t *testing.T) {
 	defer prepareTrash(t)()
 	before := trashRepo(t)
 	issues := unittest.GetCount(t, &issues_model.Issue{RepoID: trashRepoID})
+	pulls := unittest.GetCount(t, &issues_model.PullRequest{BaseRepoID: trashRepoID})
+	releases := unittest.GetCount(t, &repo_model.Release{RepoID: trashRepoID})
+	hooks := unittest.GetCount(t, &webhook_model.Webhook{RepoID: trashRepoID})
+	collaborators := unittest.GetCount(t, &repo_model.Collaboration{RepoID: trashRepoID})
 	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 	numRepos := owner.NumRepos
 
@@ -234,6 +245,10 @@ func TestTrashRestore(t *testing.T) {
 	assert.Equal(t, before.OwnerID, after.OwnerID)
 	assert.Equal(t, before.LowerName, after.LowerName)
 	assert.Equal(t, issues, unittest.GetCount(t, &issues_model.Issue{RepoID: trashRepoID}))
+	assert.Equal(t, pulls, unittest.GetCount(t, &issues_model.PullRequest{BaseRepoID: trashRepoID}))
+	assert.Equal(t, releases, unittest.GetCount(t, &repo_model.Release{RepoID: trashRepoID}))
+	assert.Equal(t, hooks, unittest.GetCount(t, &webhook_model.Webhook{RepoID: trashRepoID}))
+	assert.Equal(t, collaborators, unittest.GetCount(t, &repo_model.Collaboration{RepoID: trashRepoID}))
 	owner = unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 	assert.Equal(t, numRepos, owner.NumRepos)
 	loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/user2/repo1"), http.StatusOK)
@@ -317,18 +332,19 @@ func TestTrashDeleteDialog(t *testing.T) {
 	loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/admin/trash"), http.StatusForbidden)
 }
 
-// AC13: the cron job purges items past retention and leaves younger ones; maintenance mode pauses it.
+// AC13: the purge purges items past retention and leaves younger ones. The cron task is paused in maintenance mode
+// by Task.RunWithUser, which services/cron/maintenance_test.go covers for every task.
 func TestTrashPurgeExpired(t *testing.T) {
 	defer prepareTrash(t)()
 	moveToTrash(t)
 
 	timeutil.MockSet(time.Now().Add(364 * 24 * time.Hour))
 	defer timeutil.MockUnset()
-	require.NoError(t, trash_service.PurgeExpired(t.Context()))
+	require.NoError(t, trash_service.PurgeExpired(t.Context(), unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})))
 	assert.True(t, trashRepo(t).IsTrashed())
 
 	timeutil.MockSet(time.Now().Add(366 * 24 * time.Hour))
-	require.NoError(t, trash_service.PurgeExpired(t.Context()))
+	require.NoError(t, trash_service.PurgeExpired(t.Context(), unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})))
 	unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: trashRepoID})
 }
 
@@ -384,7 +400,7 @@ func TestTrashOwnerLifecycle(t *testing.T) {
 	ctx := t.Context()
 
 	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
-	require.Error(t, deleteUserForTrashTest(t, user, false), "non-purge delete is refused while repos are in the trash")
+	require.Error(t, user_service.DeleteUser(t.Context(), user, false), "non-purge delete is refused while repos are in the trash")
 	unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 
 	t.Run("renamed owner purges the right dir", func(t *testing.T) {
@@ -398,7 +414,7 @@ func TestTrashOwnerLifecycle(t *testing.T) {
 func TestTrashPurgeUserDeletion(t *testing.T) {
 	defer prepareTrash(t)()
 	moveToTrash(t)
-	require.NoError(t, deleteUserForTrashTest(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), true))
+	require.NoError(t, user_service.DeleteUser(t.Context(), unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), true))
 	unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: trashRepoID})
 }
 
@@ -419,7 +435,102 @@ func TestTrashCreationLimit(t *testing.T) {
 	assert.True(t, repo_model.IsErrReachLimitOfRepo(repo_model.CheckRepoCreationLimit(t.Context(), doer, owner)), "the trashed repository still counts")
 }
 
-func deleteUserForTrashTest(t *testing.T, u *user_model.User, purge bool) error {
-	t.Helper()
-	return user_service.DeleteUser(t.Context(), u, purge)
+// F4: a fork counts against the creation limit like any new repository, trashed ones included.
+func TestTrashForkLimit(t *testing.T) {
+	defer prepareTrash(t)()
+	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	total, err := repo_model.CountRepositories(t.Context(), repo_model.CountRepositoryOptions{OwnerID: owner.ID})
+	require.NoError(t, err)
+	defer test.MockVariableValue(&setting.Repository.MaxCreationLimit, int(total))()
+	defer test.MockVariableValue(&setting.Repository.AllowForkWithoutMaximumLimit, false)()
+	owner.MaxRepoCreation = -1
+	require.NoError(t, user_model.UpdateUserCols(t.Context(), owner, "max_repo_creation"))
+
+	moveToTrash(t)
+	owner = unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	base := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 10})
+	_, err = repo_service.ForkRepositoryIfNotExists(t.Context(), &user_model.User{ID: 99}, owner, repo_service.ForkRepoOptions{BaseRepo: base, Name: "fork-over-limit"})
+	assert.True(t, repo_model.IsErrReachLimitOfRepo(err), "the trashed repository still counts for forks: %v", err)
+}
+
+// Purging a repository closes the pull requests from its branches into other repositories, like any permanent deletion.
+func TestTrashPurgeClosesPulls(t *testing.T) {
+	defer prepareTrash(t)()
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	head := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 11}) // head of the open pull request of issue 8
+	require.False(t, unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: 8}).IsClosed)
+
+	require.NoError(t, repo_service.TrashRepository(t.Context(), admin, head))
+	assert.False(t, unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: 8}).IsClosed, "trashing leaves it open")
+	require.NoError(t, trash_service.Purge(t.Context(), admin, head.ID))
+	assert.True(t, unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: 8}).IsClosed)
+}
+
+// Team repository counts leave trashed repositories out, and the purge doesn't take them off a second time.
+func TestTrashTeamCounts(t *testing.T) {
+	defer prepareTrash(t)()
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3}) // org3's, in several teams
+	var links []*organization.TeamRepo
+	require.NoError(t, db.GetEngine(t.Context()).Where("repo_id = ?", repo.ID).Find(&links))
+	require.NotEmpty(t, links)
+	counts := func() map[int64]int {
+		res := map[int64]int{}
+		for _, l := range links {
+			res[l.TeamID] = unittest.AssertExistsAndLoadBean(t, &organization.Team{ID: l.TeamID}).NumRepos
+		}
+		return res
+	}
+	before := counts()
+	minusOne := map[int64]int{}
+	for id, n := range before {
+		minusOne[id] = n - 1
+	}
+
+	require.NoError(t, repo_service.TrashRepository(t.Context(), admin, repo))
+	assert.Equal(t, minusOne, counts())
+	require.NoError(t, trash_service.Restore(t.Context(), admin, repo.ID))
+	assert.Equal(t, before, counts())
+	require.NoError(t, repo_service.TrashRepository(t.Context(), admin, repo))
+	require.NoError(t, trash_service.Purge(t.Context(), admin, repo.ID))
+	assert.Equal(t, minusOne, counts())
+}
+
+// F1: a user or an organization whose only repository is in the trash is not deleted, and says why: not a 500.
+func TestTrashOwnerRefusals(t *testing.T) {
+	defer prepareTrash(t)()
+	admin := adminTrashToken(t)
+	admin1 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+
+	t.Run("user", func(t *testing.T) {
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/admin/users", &api.CreateUserOption{
+			Username: "trashonly", Email: "trashonly@example.com", Password: "password1234!", MustChangePassword: new(false),
+		}).AddTokenAuth(admin), http.StatusCreated)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/admin/users/trashonly/repos", &api.CreateRepoOption{Name: "only"}).AddTokenAuth(admin), http.StatusCreated)
+		user := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "trashonly"})
+		repo, err := repo_model.GetRepositoryByName(t.Context(), user.ID, "only")
+		require.NoError(t, err)
+		require.NoError(t, repo_service.TrashRepository(t.Context(), admin1, repo))
+
+		resp := MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/admin/users/trashonly").AddTokenAuth(admin), http.StatusUnprocessableEntity)
+		assert.Contains(t, resp.Body.String(), "ownership of repositories")
+		loginUser(t, "user1").MakeRequest(t, NewRequest(t, "POST", fmt.Sprintf("/admin/users/%d/delete", user.ID)), http.StatusSeeOther)
+		require.ErrorAs(t, user_service.DeleteUser(t.Context(), user, false), &models.ErrUserOwnRepos{})
+		unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: user.ID})
+	})
+
+	t.Run("organization", func(t *testing.T) {
+		token := getUserToken(t, "user2", auth_model.AccessTokenScopeAll)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/orgs", &api.CreateOrgOption{UserName: "trashorg"}).AddTokenAuth(token), http.StatusCreated)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/orgs/trashorg/repos", &api.CreateRepoOption{Name: "only"}).AddTokenAuth(token), http.StatusCreated)
+		org := unittest.AssertExistsAndLoadBean(t, &organization.Organization{Name: "trashorg"})
+		repo, err := repo_model.GetRepositoryByName(t.Context(), org.ID, "only")
+		require.NoError(t, err)
+		require.NoError(t, repo_service.TrashRepository(t.Context(), admin1, repo))
+
+		resp := MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/orgs/trashorg").AddTokenAuth(token), http.StatusUnprocessableEntity)
+		assert.Contains(t, resp.Body.String(), "ownership of repositories")
+		require.ErrorAs(t, org_service.DeleteOrganization(t.Context(), org, false), &models.ErrUserOwnRepos{})
+		unittest.AssertExistsAndLoadBean(t, &organization.Organization{ID: org.ID})
+	})
 }
