@@ -156,6 +156,7 @@ func MainTest(m *testing.M, testOpts ...*TestOptions) {
 	setting.SSH.Domain = "try.gitea.io"
 	setting.Database.Type = "sqlite3"
 	setting.Repository.DefaultBranch = "master" // many test code still assume that default branch is called "master"
+	setting.Trash.RetentionDays = 0             // tests expect deleted repositories to be gone; the trash tests turn it on
 	repoRootPath, err := os.MkdirTemp(os.TempDir(), "repos")
 	if err != nil {
 		fatalTestError("TempDir: %v\n", err)

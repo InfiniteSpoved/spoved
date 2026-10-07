@@ -5,6 +5,7 @@ package admin
 
 import (
 	"errors"
+	"html/template"
 	"net/http"
 
 	"forgejo.org/models/db"
@@ -59,7 +60,7 @@ func trashedRepo(ctx *context.Context) *repo_model.Repository {
 	return repo
 }
 
-func trashDone(ctx *context.Context, repo *repo_model.Repository, err error, successKey string) {
+func trashDone(ctx *context.Context, err error, success template.HTML) {
 	switch {
 	case errors.Is(err, trash_service.ErrTrashConflict):
 		ctx.Flash.Error(ctx.Tr("admin.trash.conflict"))
@@ -67,7 +68,7 @@ func trashDone(ctx *context.Context, repo *repo_model.Repository, err error, suc
 		ctx.ServerError("trash", err)
 		return
 	default:
-		ctx.Flash.Success(ctx.Tr(successKey, repo.TrashedOwnerName+"/"+repo.TrashedName))
+		ctx.Flash.Success(success)
 	}
 	ctx.Redirect(setting.AppSubURL + "/admin/trash")
 }
@@ -78,7 +79,7 @@ func RestoreTrash(ctx *context.Context) {
 	if repo == nil {
 		return
 	}
-	trashDone(ctx, repo, trash_service.Restore(ctx, ctx.Doer, repo.ID), "admin.trash.restored")
+	trashDone(ctx, trash_service.Restore(ctx, ctx.Doer, repo.ID), ctx.Tr("admin.trash.restored", repo.TrashedOwnerName+"/"+repo.TrashedName))
 }
 
 // PurgeTrash deletes a repository in the trash for good, after its name was typed.
@@ -92,5 +93,5 @@ func PurgeTrash(ctx *context.Context) {
 		ctx.Redirect(setting.AppSubURL + "/admin/trash")
 		return
 	}
-	trashDone(ctx, repo, trash_service.Purge(ctx, ctx.Doer, repo.ID), "admin.trash.purged")
+	trashDone(ctx, trash_service.Purge(ctx, ctx.Doer, repo.ID), ctx.Tr("admin.trash.purged", repo.TrashedOwnerName+"/"+repo.TrashedName))
 }

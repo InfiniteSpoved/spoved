@@ -357,15 +357,13 @@ func TestTrashRaceConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	results := make([]error, 4)
 	for i := range results {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if i%2 == 0 {
 				results[i] = trash_service.Restore(t.Context(), admin, trashRepoID)
 			} else {
 				results[i] = trash_service.Purge(t.Context(), admin, trashRepoID)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	wins := 0
