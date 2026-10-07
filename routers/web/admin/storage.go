@@ -7,7 +7,6 @@ import (
 	"encoding/csv"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
@@ -18,6 +17,7 @@ import (
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/util"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 	"forgejo.org/services/cron"
@@ -78,7 +78,7 @@ func Storage(ctx *context.Context) {
 				typ = "org"
 			}
 			_ = w.Write([]string{
-				csvSafe(o.Owner.Name), typ, strconv.FormatInt(o.NumRepos, 10),
+				util.CSVSafe(o.Owner.Name), typ, strconv.FormatInt(o.NumRepos, 10),
 				strconv.FormatInt(o.GitSize, 10), strconv.FormatInt(o.LFSSize, 10), strconv.FormatInt(o.Size(), 10),
 				strconv.FormatFloat(o.Percent(totals), 'f', 2, 64),
 			})
@@ -121,14 +121,6 @@ func Storage(ctx *context.Context) {
 	ctx.Data["Page"] = pager
 
 	ctx.HTML(http.StatusOK, tplStorage)
-}
-
-// csvSafe keeps a spreadsheet from reading a name as a formula
-func csvSafe(s string) string {
-	if s != "" && strings.ContainsRune("=+-@\t\r", rune(s[0])) {
-		return "'" + s
-	}
-	return s
 }
 
 // repoStorage is one row of the per-repository storage export
@@ -180,7 +172,7 @@ func exportRepoStorage(ctx *context.Context, format string) {
 		_ = w.Write([]string{"repo_id", "owner", "repo", "private", "git_size", "lfs_size", "total_size", "percent"})
 		write = func(r *repoStorage) error {
 			return w.Write([]string{
-				strconv.FormatInt(r.RepoID, 10), csvSafe(r.OwnerName), csvSafe(r.RepoName), strconv.FormatBool(r.Private),
+				strconv.FormatInt(r.RepoID, 10), util.CSVSafe(r.OwnerName), util.CSVSafe(r.RepoName), strconv.FormatBool(r.Private),
 				strconv.FormatInt(r.GitSize, 10), strconv.FormatInt(r.LFSSize, 10), strconv.FormatInt(r.TotalSize, 10),
 				strconv.FormatFloat(r.Percent, 'f', 2, 64),
 			})

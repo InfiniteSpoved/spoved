@@ -21,7 +21,7 @@ func Access(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("access_report.title")
 	ctx.Data["PageIsSettingsAccess"] = true
 
-	rows, activity, err := accessreport.ForRepo(ctx, ctx.Repo.Repository, ctx.Doer, accessreport.ParseFilter(ctx.FormString))
+	rows, activity, err := accessreport.ForRepo(ctx, ctx.Repo.Repository, ctx.Doer.IsAdmin, ctx.Doer, accessreport.ParseFilter(ctx.FormString))
 	if err != nil {
 		ctx.ServerError("ForRepo", err)
 		return
