@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"forgejo.org/models/db"
@@ -167,31 +169,40 @@ func testIndexer(name string, t *testing.T, indexer internal.Indexer) {
 		})
 
 		t.Run("Punctuation", func(t *testing.T) { testPunctuation(t, indexer, repoID) })
+		t.Run("Branches", func(t *testing.T) { testBranches(t, indexer, repoID) })
 
 		require.NoError(t, indexer.Delete(t.Context(), repoID))
 	})
 }
 
-// pushFiles commits the files to the default branch of the repo, the way a push would.
-func pushFiles(t *testing.T, repoID int64, files map[string]string) {
+// pushFiles commits the files to the default branch of the repo, or to a new branch made from it, the way a push would.
+// It returns the pushed commit.
+func pushFiles(t *testing.T, repoID int64, branch string, files map[string]string) string {
 	t.Helper()
 	repo, err := repo_model.GetRepositoryByID(t.Context(), repoID)
 	require.NoError(t, err)
 	dir := t.TempDir()
-	run := func(args ...string) {
+	run := func(args ...string) string {
 		cmd := exec.CommandContext(t.Context(), "git", args...)
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
 		out, err := cmd.CombinedOutput()
 		require.NoError(t, err, string(out))
+		return strings.TrimSpace(string(out))
 	}
 	run("clone", "-q", "-b", repo.DefaultBranch, repo.RepoPath(), ".")
+	if branch == "" {
+		branch = repo.DefaultBranch
+	} else {
+		run("checkout", "-q", "-b", branch)
+	}
 	for name, content := range files {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644))
 	}
 	run("add", ".")
 	run("commit", "-q", "-m", "files")
-	run("push", "-q", "origin", "HEAD:"+repo.DefaultBranch)
+	run("push", "-q", "origin", "HEAD:"+branch)
+	return run("rev-parse", "HEAD")
 }
 
 // testPunctuation: exact mode keeps punctuation, files with the same words in
@@ -211,7 +222,7 @@ func testPunctuation(t *testing.T, indexer internal.Indexer, repoID int64) {
 		files[fmt.Sprintf("hit%d.txt", i)] = c.hit
 		files[fmt.Sprintf("miss%d.txt", i)] = c.miss
 	}
-	pushFiles(t, repoID, files)
+	pushFiles(t, repoID, "", files)
 	require.NoError(t, index(git.DefaultContext, indexer, repoID))
 
 	for i, c := range cases {
@@ -270,4 +281,43 @@ func TestESIndexAndSearch(t *testing.T) {
 	defer indexer.Close()
 
 	testIndexer("elastic_search", t, indexer)
+}
+
+// testBranches: the same file on the default branch and on another branch is found per branch,
+// and removing the branch leaves the default one.
+func testBranches(t *testing.T, indexer internal.Indexer, repoID int64) {
+	pushFiles(t, repoID, "", map[string]string{"same.txt": "defaultcontent marker"})
+	require.NoError(t, index(git.DefaultContext, indexer, repoID))
+
+	sha := pushFiles(t, repoID, "idxbranch", map[string]string{"same.txt": "branchcontent marker"})
+	repo, err := repo_model.GetRepositoryByID(t.Context(), repoID)
+	require.NoError(t, err)
+	changes, err := getRepoChanges(t.Context(), repo, "idxbranch", "", sha)
+	require.NoError(t, err)
+	require.NoError(t, indexer.Index(t.Context(), repo, "idxbranch", sha, false, changes))
+
+	contents := func(branch string, all bool) []string {
+		_, res, _, err := indexer.Search(t.Context(), &internal.SearchOptions{
+			RepoIDs:     []int64{repoID},
+			Keyword:     "marker",
+			Mode:        SearchModeUnion,
+			Branch:      branch,
+			AllBranches: all,
+			Paginator:   &db.ListOptions{Page: 1, PageSize: 20},
+		})
+		require.NoError(t, err)
+		found := make([]string, 0, len(res))
+		for _, r := range res {
+			found = append(found, r.Content)
+		}
+		slices.Sort(found)
+		return found
+	}
+	assert.Equal(t, []string{"defaultcontent marker"}, contents("", false))
+	assert.Equal(t, []string{"branchcontent marker"}, contents("idxbranch", false))
+	assert.Equal(t, []string{"branchcontent marker", "defaultcontent marker"}, contents("", true))
+
+	require.NoError(t, indexer.DeleteBranch(t.Context(), repoID, "idxbranch"))
+	assert.Empty(t, contents("idxbranch", false))
+	assert.Equal(t, []string{"defaultcontent marker"}, contents("", true))
 }
