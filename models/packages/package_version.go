@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
@@ -233,11 +234,12 @@ type PackageSearchOptions struct {
 }
 
 func (opts *PackageSearchOptions) ToConds() builder.Cond {
-	cond := builder.NewCond()
+	// packages linked to a trashed repository are hidden together with it
+	cond := repo_model.NotTrashedCond("package.repo_id")
 	if has, value := opts.IsInternal.Get(); has {
-		cond = builder.Eq{
+		cond = cond.And(builder.Eq{
 			"package_version.is_internal": value,
-		}
+		})
 	}
 
 	if opts.OwnerID != 0 {

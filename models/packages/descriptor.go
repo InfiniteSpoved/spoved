@@ -113,7 +113,9 @@ func GetPackageDescriptor(ctx context.Context, pv *PackageVersion) (*PackageDesc
 	var repository *repo_model.Repository
 	if p.RepoID > 0 {
 		repository, err = repo_model.GetRepositoryByID(ctx, p.RepoID)
-		if err != nil && !repo_model.IsErrRepoNotExist(err) {
+		if repo_model.IsErrRepoNotExist(err) { // a deleted repository is unlinked, so this one is in the trash
+			return nil, ErrPackageNotExist
+		} else if err != nil {
 			return nil, err
 		}
 	}

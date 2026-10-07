@@ -18,6 +18,7 @@ import (
 	moderation_service "forgejo.org/services/moderation"
 	repo_service "forgejo.org/services/repository"
 	archiver_service "forgejo.org/services/repository/archiver"
+	trash_service "forgejo.org/services/trash"
 	user_service "forgejo.org/services/user"
 )
 
@@ -42,6 +43,16 @@ func registerDeleteRepositoryArchives() {
 		Schedule:   "@annually",
 	}, func(ctx context.Context, _ *user_model.User, _ Config) error {
 		return archiver_service.DeleteRepositoryArchives(ctx)
+	})
+}
+
+func registerPurgeTrash() {
+	RegisterTaskFatal("purge_trash", &BaseConfig{
+		Enabled:    true,
+		RunAtStart: false,
+		Schedule:   "@daily",
+	}, func(ctx context.Context, doer *user_model.User, _ Config) error {
+		return trash_service.PurgeExpired(ctx, doer)
 	})
 }
 
@@ -239,6 +250,7 @@ func registerRemoveResolvedReports() {
 func initExtendedTasks() {
 	registerDeleteInactiveUsers()
 	registerDeleteRepositoryArchives()
+	registerPurgeTrash()
 	registerGarbageCollectRepositories()
 	registerRewriteAllPublicKeys()
 	registerRewriteAllPrincipalKeys()

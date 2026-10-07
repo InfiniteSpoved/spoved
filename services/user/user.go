@@ -297,6 +297,7 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 	//  however consistency requires that we ensure that this is the case
 
 	// Check ownership of repository.
+	// repositories in the trash count on purpose: the owner can only be deleted once they are purged
 	count, err := repo_model.CountRepositories(ctx, repo_model.CountRepositoryOptions{OwnerID: u.ID})
 	if err != nil {
 		return fmt.Errorf("GetRepositoryCount: %w", err)

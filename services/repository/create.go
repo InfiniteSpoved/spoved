@@ -198,10 +198,8 @@ func initRepository(ctx context.Context, repoPath string, u *user_model.User, re
 
 // CreateRepositoryDirectly creates a repository for the user/organization.
 func CreateRepositoryDirectly(ctx context.Context, doer, u *user_model.User, opts CreateRepoOptions) (*repo_model.Repository, error) {
-	if !doer.IsAdmin && !u.CanCreateRepo() {
-		return nil, repo_model.ErrReachLimitOfRepo{
-			Limit: u.MaxRepoCreation,
-		}
+	if err := repo_model.CheckRepoCreationLimit(ctx, doer, u); err != nil {
+		return nil, err
 	}
 
 	if len(opts.DefaultBranch) == 0 {

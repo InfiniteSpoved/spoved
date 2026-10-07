@@ -104,10 +104,26 @@ func (err ErrRepoFilesAlreadyExist) Unwrap() error {
 	return util.ErrAlreadyExist
 }
 
+// CheckRepoCreationLimit returns ErrReachLimitOfRepo if u may not own another repository; repositories in
+// the trash still count, so deleting and creating in a loop doesn't get around the limit.
+func CheckRepoCreationLimit(ctx context.Context, doer, u *user_model.User) error {
+	if doer.IsAdmin {
+		return nil
+	}
+	trashed, err := db.GetEngine(ctx).Where("owner_id = ? AND trashed_unix <> 0", u.ID).Count(new(Repository))
+	if err != nil {
+		return err
+	}
+	if !u.CanCreateRepoWithTrashed(int(trashed)) {
+		return ErrReachLimitOfRepo{u.MaxRepoCreation}
+	}
+	return nil
+}
+
 // CheckCreateRepository check if a repository can be created
 func CheckCreateRepository(ctx context.Context, doer, u *user_model.User, name string) error {
-	if !doer.IsAdmin && !u.CanCreateRepo() {
-		return ErrReachLimitOfRepo{u.MaxRepoCreation}
+	if err := CheckRepoCreationLimit(ctx, doer, u); err != nil {
+		return err
 	}
 
 	if err := IsUsableRepoName(name); err != nil {

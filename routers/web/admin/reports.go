@@ -127,7 +127,7 @@ func setReportedContentDetails(ctx *context.Context, report *moderation.AbuseRep
 		contentReference = reportedUser.Name
 		contentURL = reportedUser.HomeLink()
 	case moderation.ReportedContentTypeRepository:
-		repo, err := repo_model.GetRepositoryByID(ctx, contentID)
+		repo, err := repo_model.GetRepositoryByIDIncludingTrashed(ctx, contentID)
 		if err != nil {
 			return err
 		}
@@ -347,13 +347,13 @@ func deleteAccount(ctx *context.Context, contentType moderation.ReportedContentT
 }
 
 func deleteRepository(ctx *context.Context, contentType moderation.ReportedContentType, contentID int64, reportAction moderation_service.ReportAction) {
-	repo, err := repo_model.GetRepositoryByID(ctx, contentID)
+	repo, err := repo_model.GetRepositoryByIDIncludingTrashed(ctx, contentID)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, fmt.Sprintf("Failed to retrieve the repository: %s", err.Error()))
 		return
 	}
 
-	if err = repo_service.DeleteRepository(ctx, ctx.Doer, repo, true); err != nil {
+	if err = repo_service.DeleteRepositoryPermanently(ctx, ctx.Doer, repo, true); err != nil {
 		ctx.Error(http.StatusInternalServerError, fmt.Sprintf("Failed to delete the repository: %s", err.Error()))
 		return
 	}

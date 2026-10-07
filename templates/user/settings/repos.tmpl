@@ -25,7 +25,7 @@
 										{{end}}
 										<a class="muted name" href="{{$repo.Link}}">{{$repo.OwnerName}}/{{$repo.Name}}</a>
 										<span class="text light-3" {{if not (eq $repo.Size 0)}} data-tooltip-content="{{$repo.SizeDetailsString ctx.Locale}}"{{end}}>{{ctx.Locale.TrSize $repo.Size}}</span>
-										{{if $repo.IsFork}}
+										{{if and $repo.IsFork $repo.BaseRepo}}
 											{{ctx.Locale.Tr "repo.forked_from"}}
 											<span><a href="{{$repo.BaseRepo.Link}}">{{$repo.BaseRepo.OwnerName}}/{{$repo.BaseRepo.Name}}</a></span>
 										{{end}}

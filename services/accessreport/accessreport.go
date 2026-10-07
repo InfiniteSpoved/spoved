@@ -126,7 +126,7 @@ func Compute(ctx context.Context, opts Options) ([]*Row, error) {
 	var rows []*Row
 	for _, repo := range repos {
 		owner := d.owners[repo.OwnerID]
-		if owner == nil {
+		if owner == nil || repo.IsTrashed() { // a trashed repository has no access, as in GetUserRepoPermission
 			continue
 		}
 		repo.Owner = owner

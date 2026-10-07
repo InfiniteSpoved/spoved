@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/util"
 
 	"code.forgejo.org/xorm/xorm"
@@ -284,6 +285,7 @@ func GetPackageByName(ctx context.Context, ownerID int64, packageType Type, name
 		"package.lower_name":  ResolvePackageName(name, packageType),
 		"package.is_internal": false,
 	}
+	cond = cond.And(repo_model.NotTrashedCond("package.repo_id"))
 
 	p := &Package{}
 
@@ -306,6 +308,7 @@ func GetPackagesByType(ctx context.Context, ownerID int64, packageType Type) ([]
 		"package.type":        packageType,
 		"package.is_internal": false,
 	}
+	cond = cond.And(repo_model.NotTrashedCond("package.repo_id"))
 
 	ps := make([]*Package, 0, 10)
 	return ps, db.GetEngine(ctx).

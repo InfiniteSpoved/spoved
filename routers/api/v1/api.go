@@ -1438,6 +1438,11 @@ func Routes() *web.Route {
 				m.Post("/{task}", admin.PostCronTask)
 			})
 			m.Get("/orgs", admin.GetAllOrgs)
+			m.Group("/trash", func() {
+				m.Get("", admin.ListTrash)
+				m.Post("/{type}/{id}/restore", admin.RestoreTrash)
+				m.Delete("/{type}/{id}", admin.PurgeTrash)
+			})
 			m.Group("/users", func() {
 				m.Get("", admin.SearchUsers)
 				m.Post("", bind(api.CreateUserOption{}), admin.CreateUser)

@@ -35,6 +35,7 @@ func DeleteOrganization(ctx context.Context, org *org_model.Organization, purge 
 	defer committer.Close()
 
 	// Check ownership of repository.
+	// repositories in the trash count on purpose: the owner can only be deleted once they are purged
 	count, err := repo_model.CountRepositories(ctx, repo_model.CountRepositoryOptions{OwnerID: org.ID})
 	if err != nil {
 		return fmt.Errorf("GetRepositoryCount: %w", err)

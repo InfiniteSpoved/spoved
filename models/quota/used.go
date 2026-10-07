@@ -160,7 +160,9 @@ func createQueryFor(ctx context.Context, userID int64, q string) db.Engine {
 func GetQuotaAttachmentsForUser(ctx context.Context, userID int64, opts db.ListOptions) (int64, *[]*repo_model.Attachment, error) {
 	var attachments []*repo_model.Attachment
 
+	// the lists leave out what belongs to a repository in the trash, which they can't describe; the totals count it
 	sess := createQueryFor(ctx, userID, "attachments").
+		Where(repo_model.NotTrashedCond("`attachment`.repo_id")).
 		OrderBy("`attachment`.size DESC")
 	if opts.PageSize > 0 {
 		sess = sess.Limit(opts.PageSize, (opts.Page-1)*opts.PageSize)
@@ -177,6 +179,7 @@ func GetQuotaPackagesForUser(ctx context.Context, userID int64, opts db.ListOpti
 	var pkgs []*packages_model.PackageVersion
 
 	sess := createQueryFor(ctx, userID, "packages").
+		Where(repo_model.NotTrashedCond("`package`.repo_id")).
 		OrderBy("`package_blob`.size DESC")
 	if opts.PageSize > 0 {
 		sess = sess.Limit(opts.PageSize, (opts.Page-1)*opts.PageSize)
@@ -193,6 +196,7 @@ func GetQuotaArtifactsForUser(ctx context.Context, userID int64, opts db.ListOpt
 	var artifacts []*actions_model.ActionArtifact
 
 	sess := createQueryFor(ctx, userID, "artifacts").
+		Where(repo_model.NotTrashedCond("`action_artifact`.repo_id")).
 		OrderBy("`action_artifact`.file_compressed_size DESC")
 	if opts.PageSize > 0 {
 		sess = sess.Limit(opts.PageSize, (opts.Page-1)*opts.PageSize)

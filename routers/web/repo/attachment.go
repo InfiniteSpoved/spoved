@@ -127,7 +127,11 @@ func ServeAttachment(ctx *context.Context, uuid string) {
 
 	repository, unitType, err := repo_service.LinkedRepository(ctx, attach)
 	if err != nil {
-		ctx.ServerError("LinkedRepository", err)
+		if repo_model.IsErrRepoNotExist(err) { // e.g. the repository is in the trash
+			ctx.Error(http.StatusNotFound)
+		} else {
+			ctx.ServerError("LinkedRepository", err)
+		}
 		return
 	}
 

@@ -191,6 +191,20 @@ type Repository struct {
 	CreatedUnix  timeutil.TimeStamp `xorm:"INDEX created"`
 	UpdatedUnix  timeutil.TimeStamp `xorm:"INDEX updated"`
 	ArchivedUnix timeutil.TimeStamp `xorm:"DEFAULT 0"`
+
+	// TrashedUnix is 0 for a live repository, the time it was moved to the trash, or minus the time a
+	// purge claimed it. Trashed repositories are hidden by the lookups below; the name columns are a
+	// display record of who deleted it and what it was called, never used to build paths.
+	TrashedUnix      timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0 INDEX"`
+	TrashedByID      int64              `xorm:"NOT NULL DEFAULT 0"`
+	TrashedByName    string             `xorm:"NOT NULL DEFAULT ''"`
+	TrashedOwnerName string             `xorm:"NOT NULL DEFAULT ''"`
+	TrashedName      string             `xorm:"NOT NULL DEFAULT ''"`
+}
+
+// IsTrashed returns true if the repository is in the trash (or being purged from it).
+func (repo *Repository) IsTrashed() bool {
+	return repo.TrashedUnix != 0
 }
 
 // BeforeInsert will be invoked by XORM before updating a record
@@ -588,6 +602,9 @@ func (repo *Repository) GetBaseRepo(ctx context.Context) (err error) {
 		return nil
 	}
 	repo.BaseRepo, err = GetRepositoryByID(ctx, repo.ForkID)
+	if IsErrRepoNotExist(err) { // the base repository is in the trash: the fork keeps working without it
+		return nil
+	}
 	return err
 }
 
@@ -783,6 +800,7 @@ func GetRepositoryByOwnerAndName(ctx context.Context, ownerName, repoName string
 		Join("INNER", "`user`", "`user`.id = repository.owner_id").
 		Where("repository.lower_name = ?", strings.ToLower(repoName)).
 		And("`user`.lower_name = ?", strings.ToLower(ownerName)).
+		And("repository.trashed_unix = 0").
 		Get(&repo)
 	if err != nil {
 		return nil, err
@@ -798,6 +816,7 @@ func GetRepositoryByName(ctx context.Context, ownerID int64, name string) (*Repo
 	has, err := db.GetEngine(ctx).
 		Where("`owner_id`=?", ownerID).
 		And("`lower_name`=?", strings.ToLower(name)).
+		And("`trashed_unix`=0").
 		NoAutoCondition().
 		Get(&repo)
 	if err != nil {
@@ -853,6 +872,19 @@ func GetRepositoryByURL(ctx context.Context, repoURL string) (*Repository, error
 
 // GetRepositoryByID returns the repository by given id if exists.
 func GetRepositoryByID(ctx context.Context, id int64) (*Repository, error) {
+	repo, err := GetRepositoryByIDIncludingTrashed(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if repo.IsTrashed() {
+		return nil, ErrRepoNotExist{id, 0, "", ""}
+	}
+	return repo, nil
+}
+
+// GetRepositoryByIDIncludingTrashed is the only lookup that returns trashed repositories; it is for the
+// trash service and the purge path.
+func GetRepositoryByIDIncludingTrashed(ctx context.Context, id int64) (*Repository, error) {
 	repo := new(Repository)
 	has, err := db.GetEngine(ctx).ID(id).Get(repo)
 	if err != nil {
@@ -866,7 +898,7 @@ func GetRepositoryByID(ctx context.Context, id int64) (*Repository, error) {
 // GetRepositoriesMapByIDs returns the repositories by given id slice.
 func GetRepositoriesMapByIDs(ctx context.Context, ids []int64) (map[int64]*Repository, error) {
 	repos := make(map[int64]*Repository, len(ids))
-	return repos, db.GetEngine(ctx).In("id", ids).Find(&repos)
+	return repos, db.GetEngine(ctx).In("id", ids).And("trashed_unix = 0").Find(&repos)
 }
 
 // IsRepositoryModelOrDirExist returns true if the repository with given name under user has already existed.

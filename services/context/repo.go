@@ -282,6 +282,10 @@ func RetrieveBaseRepo(ctx *Context, repo *repo_model.Repository) {
 		}
 		ctx.ServerError("GetBaseRepo", err)
 		return
+	} else if repo.BaseRepo == nil { // the base repository is in the trash
+		repo.IsFork = false
+		repo.ForkID = 0
+		return
 	} else if err = repo.BaseRepo.LoadOwner(ctx); err != nil {
 		ctx.ServerError("BaseRepo.LoadOwner", err)
 		return
@@ -353,7 +357,10 @@ func RedirectToRepo(ctx *Base, redirectRepoID int64) {
 	previousRepoName := ctx.Params(":reponame")
 
 	repo, err := repo_model.GetRepositoryByID(ctx, redirectRepoID)
-	if err != nil {
+	if repo_model.IsErrRepoNotExist(err) { // e.g. in the trash
+		ctx.Error(http.StatusNotFound)
+		return
+	} else if err != nil {
 		log.Error("GetRepositoryByID: %v", err)
 		ctx.Error(http.StatusInternalServerError, "GetRepositoryByID")
 		return

@@ -58,7 +58,7 @@ func startTasks(ctx context.Context) error {
 
 		// Loop through each spec and create a schedule task for it
 		for _, row := range specs {
-			if row.Repo.IsArchived {
+			if row.Repo == nil || row.Repo.IsArchived { // trashed repositories load as nil
 				// Skip if the repo is archived
 				continue
 			}

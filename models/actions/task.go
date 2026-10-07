@@ -12,6 +12,7 @@ import (
 
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
@@ -345,6 +346,7 @@ func GetAvailableJobsForRunner(e db.Engine, runner *ActionRunner) ([]*ActionRunJ
 		Join("INNER", "repo_unit", "action_run_job.repo_id = repo_unit.repo_id").
 		Where("task_id=? AND action_run_job.status=? AND `repo_unit`.type=?", 0, StatusWaiting, unit.TypeActions).
 		And(jobCond).
+		And(repo_model.NotTrashedCond("action_run_job.repo_id")).
 		Desc("action_run.priority").
 		Asc("action_run_job.updated", "action_run_job.id").
 		Find(&jobs); err != nil {

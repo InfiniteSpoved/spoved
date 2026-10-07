@@ -759,7 +759,7 @@ func (env *accessibleReposEnv) cond() builder.Cond {
 	if env.keyword != "" {
 		cond = cond.And(builder.Like{"`repository`.lower_name", strings.ToLower(env.keyword)})
 	}
-	return cond
+	return cond.And(builder.Eq{"`repository`.trashed_unix": 0})
 }
 
 func (env *accessibleReposEnv) CountRepos() (int64, error) {

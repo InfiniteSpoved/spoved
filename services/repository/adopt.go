@@ -30,10 +30,8 @@ import (
 
 // AdoptRepository adopts pre-existing repository files for the user/organization.
 func AdoptRepository(ctx context.Context, doer, u *user_model.User, opts CreateRepoOptions) (*repo_model.Repository, error) {
-	if !doer.IsAdmin && !u.CanCreateRepo() {
-		return nil, repo_model.ErrReachLimitOfRepo{
-			Limit: u.MaxRepoCreation,
-		}
+	if err := repo_model.CheckRepoCreationLimit(ctx, doer, u); err != nil {
+		return nil, err
 	}
 
 	repo := &repo_model.Repository{
@@ -255,8 +253,9 @@ func checkUnadoptedRepositories(ctx context.Context, userName string, repoNamesT
 		return err
 	}
 	repos, _, err := repo_model.GetUserRepositories(ctx, &repo_model.SearchRepoOptions{
-		Actor:   ctxUser,
-		Private: true,
+		Actor:          ctxUser,
+		Private:        true,
+		IncludeTrashed: true,
 		ListOptions: db.ListOptions{
 			Page:     1,
 			PageSize: len(repoNamesToCheck),

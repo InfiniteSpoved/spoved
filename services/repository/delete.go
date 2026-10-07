@@ -50,7 +50,7 @@ type DeleteRepositoryOpts struct {
 // DeleteRepository deletes a repository for a user or organization.
 // make sure if you call this func to close open sessions (sqlite will otherwise get a deadlock)
 func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepositoryOpts) error {
-	repo, err := repo_model.GetRepositoryByID(ctx, repoID)
+	repo, err := repo_model.GetRepositoryByIDIncludingTrashed(ctx, repoID)
 	if err != nil {
 		return err
 	}
@@ -266,8 +266,11 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepo
 			}
 		}
 
-		if _, err := db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos-1 WHERE id=?", repo.OwnerID); err != nil {
-			return err
+		// a trashed repository was already taken off the owner's count when it was trashed
+		if !repo.IsTrashed() {
+			if _, err := db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos-1 WHERE id=?", repo.OwnerID); err != nil {
+				return err
+			}
 		}
 
 		if len(repo.Topics) > 0 {
@@ -434,9 +437,12 @@ func removeRepositoryFromTeam(ctx context.Context, t *organization.Team, repo *r
 		return err
 	}
 
-	t.NumRepos--
-	if _, err = e.ID(t.ID).Cols("num_repos").Update(t); err != nil {
-		return err
+	// a trashed repository was already taken off the team's count when it was trashed
+	if !repo.IsTrashed() {
+		t.NumRepos--
+		if _, err = e.ID(t.ID).Cols("num_repos").Update(t); err != nil {
+			return err
+		}
 	}
 
 	// Don't need to recalculate when delete a repository from organization.
@@ -513,9 +519,10 @@ func DeleteOwnerRepositoriesDirectly(ctx context.Context, owner *user_model.User
 				PageSize: repo_model.RepositoryListDefaultPageSize,
 				Page:     1,
 			},
-			Private: true,
-			OwnerID: owner.ID,
-			Actor:   owner,
+			Private:        true,
+			IncludeTrashed: true,
+			OwnerID:        owner.ID,
+			Actor:          owner,
 		})
 		if err != nil {
 			return fmt.Errorf("GetUserRepositories: %w", err)

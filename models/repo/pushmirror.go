@@ -166,6 +166,7 @@ func PushMirrorsIterate(ctx context.Context, limit int, f func(idx int, bean any
 		Where("`push_mirror`.last_update + (`push_mirror`.`interval` / ?) <= ?", time.Second, time.Now().Unix()).
 		And("`push_mirror`.`interval` != 0").
 		And("`repository`.is_archived = ?", false).
+		And("`repository`.trashed_unix = 0").
 		OrderBy("last_update ASC")
 	if limit > 0 {
 		sess = sess.Limit(limit)
