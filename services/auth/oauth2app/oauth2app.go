@@ -87,8 +87,11 @@ func Set(ctx context.Context, doer *user_model.User, mode string, orgNames []str
 		}
 		for _, name := range orgNames {
 			org, err := organization.GetOrgByName(ctx, name)
-			if err != nil {
+			if organization.IsErrOrgNotExist(err) {
 				return util.NewInvalidArgumentErrorf("%s: not an organization", name)
+			}
+			if err != nil {
+				return err
 			}
 			s.OrgIDs = append(s.OrgIDs, org.ID)
 		}

@@ -4,8 +4,10 @@
 package integration
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	auth_model "forgejo.org/models/auth"
@@ -63,10 +65,14 @@ func checkWebOAuth2Writes(t *testing.T, session *TestSession, base string, app *
 		assert.Equal(t, before.ClientSecret, after.ClientSecret) // 403 happens before any write
 		unittest.AssertNotExistsBean(t, &auth_model.OAuth2Application{UID: app.UID, Name: "new-" + t.Name()})
 	}
-	// the page of a not-allowed owner has no create form but keeps the list; view and delete stay open
-	doc := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", base), http.StatusOK).Body)
-	doc.AssertElement(t, "form[action$='/oauth2']", allowed)
-	session.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("%s/oauth2/%d", base, app.ID)), http.StatusOK)
+	// the page of a not-allowed owner has a note instead of the create form and keeps the list; view and delete stay open
+	const note = "A site admin manages OAuth2 applications"
+	list := session.MakeRequest(t, NewRequest(t, "GET", base), http.StatusOK).Body.String()
+	assert.Equal(t, !allowed, strings.Contains(list, note))
+	NewHTMLParser(t, bytes.NewBufferString(list)).AssertElement(t, "form[action$='/oauth2']", allowed)
+	editPage := session.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("%s/oauth2/%d", base, app.ID)), http.StatusOK).Body.String()
+	assert.Equal(t, !allowed, strings.Contains(editPage, note))
+	NewHTMLParser(t, bytes.NewBufferString(editPage)).AssertElement(t, fmt.Sprintf("form[action$='/oauth2/%d']", app.ID), allowed)
 }
 
 func newOrgApp(t *testing.T, orgID int64, name string) *auth_model.OAuth2Application {
@@ -170,6 +176,7 @@ func TestOAuth2AppPolicyAdminSetting(t *testing.T) {
 		s.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/applications/policy", map[string]string{"mode": "everyone"}), http.StatusForbidden)
 	}
 	admin := loginUser(t, "user1")
+	assert.Contains(t, admin.MakeRequest(t, NewRequest(t, "GET", "/admin/applications"), http.StatusOK).Body.String(), "restricted to site admins by default")
 	post := func(mode, orgs string, status int) {
 		admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/applications/policy", map[string]string{"mode": mode, "org_names": orgs}), status)
 	}

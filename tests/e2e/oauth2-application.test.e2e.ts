@@ -9,7 +9,8 @@
 import {expect} from '@playwright/test';
 import {dynamic_id, test} from './utils_e2e.ts';
 
-test.use({user: 'user2'});
+// creating OAuth2 applications is restricted to site admins by default
+test.use({user: 'user1'});
 
 test.describe('OAuth2 application', () => {
   const applicationName = dynamic_id();
