@@ -163,7 +163,11 @@ func detectLanguage(filename string, content []byte) string {
 }
 
 // Index will save the index data
-func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, sha string, changes *internal.RepoChanges) error {
+func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, branch, sha string, isDefault bool, changes *internal.RepoChanges) error {
+	// ponytail: zoekt only indexes the default branch (HEAD); multi-branch needs a full rebuild with per-branch documents
+	if !isDefault {
+		return nil
+	}
 	builder, err := newZoektIndexBuilder(b.indexDir, repo, sha)
 	if errors.Is(err, errSkipIndexing) {
 		return nil
@@ -198,6 +202,11 @@ func (b *Indexer) Index(ctx context.Context, repo *repo_model.Repository, sha st
 	}
 
 	return builder.Finish()
+}
+
+// DeleteBranch does nothing: only the default branch is indexed.
+func (b *Indexer) DeleteBranch(_ context.Context, _ int64, _ string) error {
+	return nil
 }
 
 func (b *Indexer) Delete(ctx context.Context, repoID int64) error {

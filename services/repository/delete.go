@@ -195,6 +195,7 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepo
 			&repo_model.PushMirror{RepoID: repoID},
 			&repo_model.Release{RepoID: repoID},
 			&repo_model.RepoIndexerStatus{RepoID: repoID},
+			&repo_model.RepoIndexerBranch{RepoID: repoID},
 			&repo_model.Redirect{RedirectRepoID: repoID},
 			&repo_model.Star{RepoID: repoID},
 			&repo_model.Watch{RepoID: repoID},

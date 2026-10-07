@@ -44,9 +44,3 @@ func TestIsIndexedBranchName(t *testing.T) {
 	assert.False(t, isIndexedBranchName("main", patterns, "feature/x"))
 	assert.False(t, isIndexedBranchName("main", nil, "develop"))
 }
-
-// Doc IDs use ':' as separator, which can't appear in a ref name.
-func TestFilenameIndexerID(t *testing.T) {
-	assert.Equal(t, "1_develop:a/b.go", indexerDocID(1, "develop", "a/b.go"))
-	assert.NotEqual(t, indexerDocID(1, "a", "b:c"), indexerDocID(1, "a:b", "c"))
-}

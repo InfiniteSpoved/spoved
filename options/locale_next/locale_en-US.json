@@ -1716,5 +1716,9 @@
 	"access_report.two_factor": "2FA",
 	"access_report.account_source": "Account source",
 	"access_report.suspended": "Suspended",
-	"meta.last_line": "Thank you for translating Forgejo! This line isn't seen by the users but it serves other purposes in the translation management. You can place a fun fact in the translation instead of translating it."
+	"meta.last_line": "Thank you for translating Forgejo! This line isn't seen by the users but it serves other purposes in the translation management. You can place a fun fact in the translation instead of translating it.",
+	"repo.settings.code_search.title": "Code search",
+	"repo.settings.code_search.indexed_branches": "Indexed branches",
+	"repo.settings.code_search.indexed_branches_help": "The default branch is always indexed. Add more branch names or patterns, one per line, e.g. develop or release/*. A pattern selects its most recently updated branches; at most %d branches are indexed in total, the default branch included.",
+	"repo.settings.code_search.invalid_branches": "Invalid indexed branches: %s"
 }

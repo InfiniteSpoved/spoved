@@ -15,8 +15,9 @@ import (
 // Indexer defines an interface to index and search code contents
 type Indexer interface {
 	internal.Indexer
-	Index(ctx context.Context, repo *repo_model.Repository, sha string, changes *RepoChanges) error
+	Index(ctx context.Context, repo *repo_model.Repository, branch, sha string, isDefault bool, changes *RepoChanges) error
 	Delete(ctx context.Context, repoID int64) error
+	DeleteBranch(ctx context.Context, repoID int64, branch string) error
 	Search(ctx context.Context, opts *SearchOptions) (int64, []*SearchResult, []*SearchResultLanguages, error)
 	Formatter() ResultFormatter
 }
@@ -48,6 +49,11 @@ type SearchOptions struct {
 
 	Mode CodeSearchMode
 
+	// Branch limits the search to one indexed branch; empty is the default branch of each repo.
+	Branch string
+	// AllBranches searches every indexed branch, and ignores Branch.
+	AllBranches bool
+
 	db.Paginator
 }
 
@@ -62,11 +68,15 @@ type dummyIndexer struct {
 	internal.Indexer
 }
 
-func (d *dummyIndexer) Index(ctx context.Context, repo *repo_model.Repository, sha string, changes *RepoChanges) error {
+func (d *dummyIndexer) Index(ctx context.Context, repo *repo_model.Repository, branch, sha string, isDefault bool, changes *RepoChanges) error {
 	return errors.New("indexer is not ready")
 }
 
 func (d *dummyIndexer) Delete(ctx context.Context, repoID int64) error {
+	return errors.New("indexer is not ready")
+}
+
+func (d *dummyIndexer) DeleteBranch(ctx context.Context, repoID int64, branch string) error {
 	return errors.New("indexer is not ready")
 }
 

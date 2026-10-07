@@ -423,6 +423,11 @@ func (repo *Repository) MustGetUnit(ctx context.Context, tp unit.Type) *RepoUnit
 	}
 
 	switch tp {
+	case unit.TypeCode:
+		return &RepoUnit{
+			Type:   tp,
+			Config: new(CodeConfig),
+		}
 	case unit.TypeExternalWiki:
 		return &RepoUnit{
 			Type:   tp,
