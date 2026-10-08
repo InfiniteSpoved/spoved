@@ -10,7 +10,7 @@
 import {expect, type Request} from '@playwright/test';
 import {test} from './utils_e2e.ts';
 
-test('draw.io diagram renders in a sandboxed iframe', async ({page}) => {
+test('draw.io diagram renders in a sandboxed iframe', async ({page}, workerInfo) => {
   const foreign: Request[] = [];
   page.on('request', (req) => {
     if (new URL(req.url()).hostname !== 'localhost') foreign.push(req);
@@ -28,9 +28,13 @@ test('draw.io diagram renders in a sandboxed iframe', async ({page}) => {
   const frame = page.frames().find((f) => f.url().includes('/render/'));
   expect(await frame?.evaluate(() => document.title)).not.toBe('pwned');
   // the CSP blocks fetches from outside Forgejo, e.g. the external image in the diagram.
-  // Chromium reports them as failed with "csp", Firefox never starts them.
+  // Chromium reports them as failed with "csp"; Firefox reports another error, but they must not succeed either.
   for (const req of foreign) {
-    await expect.poll(() => req.failure()?.errorText).toBe('csp');
+    if (workerInfo.project.name === 'firefox') {
+      await expect.poll(async () => (await req.response()) === null || req.failure() !== null).toBe(true);
+    } else {
+      await expect.poll(() => req.failure()?.errorText).toBe('csp');
+    }
   }
 });
 

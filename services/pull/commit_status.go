@@ -98,29 +98,6 @@ func isPullCommitStatusPass(ctx context.Context, pr *issues_model.PullRequest, p
 	return MergeRequiredContextsCommitStatus(commitStatuses, pb.StatusCheckContexts).IsSuccess(), nil
 }
 
-// GetPullRequestCommitStatusState returns pull request merged commit status state, the worst state of the matching rules
-func GetPullRequestCommitStatusState(ctx context.Context, pr *issues_model.PullRequest) (structs.CommitStatusState, error) {
-	commitStatuses, err := getPullRequestCommitStatuses(ctx, pr)
-	if err != nil {
-		return "", err
-	}
-
-	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
-	if err != nil {
-		return "", fmt.Errorf("GetMatchedProtectedBranchRules: %w", err)
-	}
-	if len(rules) == 0 {
-		return MergeRequiredContextsCommitStatus(commitStatuses, nil), nil
-	}
-	var state structs.CommitStatusState
-	for _, pb := range rules {
-		if s := MergeRequiredContextsCommitStatus(commitStatuses, pb.StatusCheckContexts); state == "" || s.NoBetterThan(state) {
-			state = s
-		}
-	}
-	return state, nil
-}
-
 // getPullRequestCommitStatuses returns the latest commit statuses of the head of the pull request
 func getPullRequestCommitStatuses(ctx context.Context, pr *issues_model.PullRequest) ([]*git_model.CommitStatus, error) {
 	// Ensure HeadRepo is loaded

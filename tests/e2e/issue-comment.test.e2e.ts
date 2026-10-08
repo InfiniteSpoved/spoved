@@ -442,18 +442,6 @@ test.describe('Markdown rendered on preview', () => {
   const previewButtonSelector = '#comment-form [data-tab-for=markdown-previewer]';
   const linkSelector = '#comment-form [data-tab-panel=markdown-previewer] a';
 
-  async function getColorByPropertyName(page, propertyName) {
-    return await page.locator('html').evaluate((element, pname) => {
-      return window.getComputedStyle(element).getPropertyValue(pname).trim();
-    }, propertyName);
-  }
-
-  function hexToRGBA(hex) {
-    const hexArr = hex.slice(1).match(/.{2}/g);
-    const [r, g, b, a] = hexArr.map((h) => parseInt(h, 16));
-    return `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
-  }
-
   test.beforeEach(async ({page}) => {
     await page.goto('/user2/repo1/issues/1');
   });
@@ -466,10 +454,17 @@ test.describe('Markdown rendered on preview', () => {
     await page.locator(previewButtonSelector).click();
 
     // check content
-    const colorHex = await getColorByPropertyName(page, '--color-primary-alpha-30');
-    const colorRGBA = hexToRGBA(colorHex);
+    // let the browser resolve the color (a hex value or color-mix()), so the expected value is serialized like the actual one
+    const expected = await page.locator('html').evaluate((el) => {
+      const probe = document.createElement('div');
+      el.append(probe);
+      probe.style.backgroundColor = 'var(--color-primary-alpha-30)';
+      const color = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return color;
+    });
     const link = page.locator(linkSelector);
-    await expect(link).toHaveCSS('background-color', colorRGBA);
+    await expect(link).toHaveCSS('background-color', expected);
   });
 
   test('Mention a private user', async ({page}) => {
