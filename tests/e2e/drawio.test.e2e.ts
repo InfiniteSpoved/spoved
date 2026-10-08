@@ -13,7 +13,8 @@ import {test} from './utils_e2e.ts';
 test('draw.io diagram renders in a sandboxed iframe', async ({page}, workerInfo) => {
   const foreign: Request[] = [];
   page.on('request', (req) => {
-    if (new URL(req.url()).hostname !== 'localhost') foreign.push(req);
+    const {protocol, hostname} = new URL(req.url());
+    if (protocol.startsWith('http') && hostname !== 'localhost') foreign.push(req);
   });
 
   const response = await page.goto('/user2/drawio-test/src/branch/main/docs/arch.drawio');
@@ -31,7 +32,7 @@ test('draw.io diagram renders in a sandboxed iframe', async ({page}, workerInfo)
   // Chromium reports them as failed with "csp"; Firefox reports another error, but they must not succeed either.
   for (const req of foreign) {
     if (workerInfo.project.name === 'firefox') {
-      await expect.poll(async () => (await req.response()) === null || req.failure() !== null).toBe(true);
+      await expect.poll(async () => (await req.response()) === null || req.failure() !== null, {message: req.url()}).toBe(true);
     } else {
       await expect.poll(() => req.failure()?.errorText).toBe('csp');
     }
