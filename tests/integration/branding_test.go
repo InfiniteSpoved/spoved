@@ -26,6 +26,8 @@ var brandAllowed = []string{
 	"Forgejo documentation",
 	// CodeHat does not build its own runner: the setup pages name the upstream Forgejo Runner and its command
 	"Forgejo Runner", "forgejo-runner",
+	// the CI feature keeps its upstream name (settings.actions_desc, runs.no_workflows.help_*)
+	"Forgejo Actions",
 	// the "Help us translate" line on the appearance page names the upstream translation project
 	"Help us translate Forgejo",
 }
@@ -39,6 +41,11 @@ func assertNoBrandMentions(t *testing.T, session *TestSession, url string) {
 	} else {
 		body = session.MakeRequest(t, req, http.StatusOK).Body.String()
 	}
+	assertBodyNoBrandMentions(t, body, url)
+}
+
+func assertBodyNoBrandMentions(t *testing.T, body, url string) {
+	t.Helper()
 	for _, phrase := range brandAllowed {
 		body = strings.ReplaceAll(body, phrase, "")
 	}
@@ -103,10 +110,7 @@ func TestBranding(t *testing.T) {
 			assert.Contains(t, body, "https://code.forgejo.org/forgejo/runner/releases", c.url)
 			assert.Contains(t, body, "forgejo-runner daemon", c.url)
 			assert.NotContains(t, body, "forgejo:", c.url) // BrandMentions is case-sensitive
-			for _, phrase := range brandAllowed {
-				body = strings.ReplaceAll(body, phrase, "")
-			}
-			assert.Empty(t, test.BrandMentions(body), c.url)
+			assertBodyNoBrandMentions(t, body, c.url)
 		}
 	})
 

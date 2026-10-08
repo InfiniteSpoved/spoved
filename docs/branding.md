@@ -15,7 +15,7 @@ Visible text keeps "Forgejo" where it names the upstream project or ecosystem, n
 - documentation links (`AppDocsURL`, "Forgejo documentation"), the translation-project line and the translators' strings `meta.last_line` and `test`;
 - the API (`/api/forgejo/v1`, swagger titles), CLI output, log messages, git hook messages (`remote: Forgejo: …`), the git `user.name`, the `X-Mailer` header and the migration/LFS User-Agents.
 
-`TestBranding` (`tests/integration/branding_test.go`) fails on any other visible "Forgejo" or "GitHat"; its `brandAllowed` list holds the exact phrases above that appear on the pages it checks (group-map placeholders, "Forgejo documentation").
+`TestBranding` (`tests/integration/branding_test.go`) fails on any other visible "Forgejo" or "GitHat"; its `brandAllowed` list holds the exact phrases above that appear on the pages it checks (group-map placeholders, "Forgejo documentation", "Forgejo Runner", `forgejo-runner`, "Forgejo Actions", "Help us translate Forgejo"). The case-sensitive guard does not see lowercase names, so the package snippet names need no entry and the runner pages assert that `forgejo:` is absent.
 
 ## Strings: shadow keys
 

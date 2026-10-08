@@ -18,9 +18,9 @@ func TestBrandMentions(t *testing.T) {
 	assert.Equal(t, []string{"Forgejo"}, BrandMentions(`<input placeholder="Forgejo">`))
 	assert.Equal(t, []string{"Forgejo forge"}, BrandMentions(`<meta property="og:description" content="Forgejo forge">`))
 	assert.Equal(t, []string{"Forgejo"}, BrandMentions(`<a class="other" href="#">Forgejo</a>`))
-	// the old runner setup page text is flagged (old instruction texts; the lowercase YAML key is covered in TestBranding)
+	// the previous instruction_advanced_configurations text, rendered, is flagged (the lowercase YAML key `forgejo:` is covered by an explicit assertion in TestBranding)
 	assert.Equal(t, []string{"For configuring Forgejo Runner running in containers or advance"},
-		BrandMentions(`<body><p>For configuring Forgejo Runner running in containers or advanced configurations, see the <a href="#">documentation</a>.</p></body>`))
+		BrandMentions(`<body><p>For configuring Forgejo Runner running in containers or advanced configurations, see the <a href="https://forgejo.org/docs/next/admin/actions/">documentation</a>.</p></body>`))
 	// text inside <pre><code> is visible too
 	assert.Equal(t, []string{"$ Forgejo Runner daemon"}, BrandMentions(`<body><pre><code>$ Forgejo Runner daemon</code></pre></body>`))
 }
