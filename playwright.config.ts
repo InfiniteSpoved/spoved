@@ -29,8 +29,6 @@ export default {
   forbidOnly: Boolean(process.env.CI),
 
   /* Retry on CI only */
-  retries: process.env.CI ? 1 : 0,
-  /* fail fast */
   maxFailures: process.env.CI ? 1 : 0,
 
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
