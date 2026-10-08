@@ -16,7 +16,7 @@ argument-hint: "[supervisor|ops-lead|coder|security]"
 
 # Agent team (lean)
 
-The repository is InfiniteSpoved/spoved (it was GitHatOrg/GitHat; old URLs redirect).
+The repository is InfiniteSpoved/spoved (it was InfiniteSpoved/spoved; old URLs redirect).
 CI runs in the public InfiniteSpoved/spovedBuild repository (CLAUDE.md "CI").
 
 Org chart: the coder and the security reviewer report to the operational lead (OL).
@@ -43,7 +43,7 @@ Placeholders: `<SUP>`, `<OL>`, `<N>` (issue), `<BRANCH>`, `<SHA>` (40 characters
 
 ## Token budget
 
-The 08 Oct cost review (Confluence "CodeHat agent team: structure vs. cost and
+The 08 Oct cost review (Confluence "spoved agent team: structure vs. cost and
 speed") found:
 - sessions past 300k context took 67% of the spend;
 - leads took 55%;
@@ -135,7 +135,7 @@ The supervisor also:
 - files the user's problem reports and ideas as issues (it doesn't fix them) and
   passes them to the OL;
 - does post-merge steps the classifier blocks for others (merge, archive, messages);
-- after each merge, adds the PR as the first row of the Confluence page "CodeHat:
+- after each merge, adds the PR as the first row of the Confluence page "spoved:
   features added since the fork" and updates its "Last synced" line, using a subagent;
 - tells the user only merges and what needs them.
 
@@ -189,7 +189,7 @@ re-arm for 4 h; skip it when nothing is in flight.
 ## OL brief
 
 ```
-You are the OPERATIONAL LEAD for InfiniteSpoved/spoved (CodeHat). Supervisor:
+You are the OPERATIONAL LEAD for InfiniteSpoved/spoved (spoved). Supervisor:
 <SUP>. You run one ticket at a time: intake and priority, acceptance criteria,
 design approval, the test plan, verification and the merge. You don't write
 product code.

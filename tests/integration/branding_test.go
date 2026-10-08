@@ -6,7 +6,6 @@ package integration
 import (
 	"fmt"
 	"net/http"
-	"strings"
 	"testing"
 
 	"forgejo.org/models/auth"
@@ -18,14 +17,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// brandAllowed are visible phrases that legitimately name Forgejo, the upstream project.
-var brandAllowed = []string{
-	// group-map placeholders of the upstream LDAP/OAuth2 auth source templates
-	"MyForgejoOrganization", "MyForgejoTeam1", "MyForgejoTeam2",
-	// the push mirror branch filter help links to Forgejo's documentation
-	"Forgejo documentation",
-}
-
 func assertNoBrandMentions(t *testing.T, session *TestSession, url string) {
 	t.Helper()
 	req := NewRequest(t, "GET", url)
@@ -34,9 +25,6 @@ func assertNoBrandMentions(t *testing.T, session *TestSession, url string) {
 		body = MakeRequest(t, req, http.StatusOK).Body.String()
 	} else {
 		body = session.MakeRequest(t, req, http.StatusOK).Body.String()
-	}
-	for _, phrase := range brandAllowed {
-		body = strings.ReplaceAll(body, phrase, "")
 	}
 	assert.Empty(t, test.BrandMentions(body), url)
 }
@@ -50,11 +38,11 @@ func TestBranding(t *testing.T) {
 		}
 
 		page := NewHTMLParser(t, MakeRequest(t, NewRequest(t, "GET", "/"), http.StatusOK).Body)
-		assert.Contains(t, page.Find("title").Text(), "CodeHat")
-		assert.Contains(t, page.Find("footer").Text(), "Powered by CodeHat")
+		assert.Contains(t, page.Find("title").Text(), "spoved")
+		assert.Contains(t, page.Find("footer").Text(), "Powered by spoved")
 		page.AssertElement(t, `footer a.codehat-credit[href="https://forgejo.org"]`, true)
 		og, _ := page.Find(`meta[property="og:description"]`).Attr("content")
-		assert.Contains(t, og, "CodeHat")
+		assert.Contains(t, og, "spoved")
 	})
 
 	t.Run("Site admin", func(t *testing.T) {
@@ -82,6 +70,20 @@ func TestBranding(t *testing.T) {
 			"/user2/repo1/settings/hooks/packagist/new",
 		} {
 			assertNoBrandMentions(t, session, url)
+		}
+	})
+
+	t.Run("Runner setup pages", func(t *testing.T) {
+		session := loginUser(t, "user1")
+		for _, base := range []string{"/user2/repo1/settings/actions/runners", "/org/org3/settings/actions/runners", "/admin/actions/runners"} {
+			req := NewRequestWithValues(t, "POST", base+"/new", map[string]string{"runner_name": "branding"})
+			resp := session.MakeRequest(t, req, http.StatusOK)
+			assert.Empty(t, test.BrandMentions(resp.Body.String()), base)
+			page := NewHTMLParser(t, resp.Body)
+			setup := page.Find(".runner-container").Text()
+			assert.Contains(t, setup, "spoved runner", base)
+			assert.Contains(t, setup, "spoved:", base)
+			assert.Contains(t, setup, "forgejo-runner daemon", base)
 		}
 	})
 

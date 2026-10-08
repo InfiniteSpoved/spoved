@@ -149,11 +149,11 @@ func generateDisplayName() string {
 
 func loadServerFrom(rootCfg ConfigProvider) {
 	sec := rootCfg.Section("server")
-	AppName = rootCfg.Section("").Key("APP_NAME").MustString("CodeHat")
+	AppName = rootCfg.Section("").Key("APP_NAME").MustString("spoved")
 	AppSlogan = rootCfg.Section("").Key("APP_SLOGAN").MustString("")
 	AppDisplayNameFormat = rootCfg.Section("").Key("APP_DISPLAY_NAME_FORMAT").MustString("{APP_NAME}: {APP_SLOGAN}")
 	AppDisplayName = generateDisplayName()
-	IssueTrackerURL = sec.Key("ISSUE_TRACKER_URL").MustString("https://github.com/GitHatOrg/GitHat/issues")
+	IssueTrackerURL = sec.Key("ISSUE_TRACKER_URL").MustString("https://github.com/InfiniteSpoved/spoved/issues")
 	Domain = sec.Key("DOMAIN").MustString("localhost")
 	HTTPAddr = sec.Key("HTTP_ADDR").MustString("0.0.0.0")
 	HTTPPort = sec.Key("HTTP_PORT").MustString("3000")

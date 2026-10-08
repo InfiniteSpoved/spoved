@@ -144,9 +144,9 @@ var UI = struct {
 		Description string
 		Keywords    string
 	}{
-		Author:      "CodeHat",
-		Description: "CodeHat is a self-hosted Git forge.",
-		Keywords:    "git,forge,codehat",
+		Author:      "spoved",
+		Description: "spoved is a self-hosted Git forge.",
+		Keywords:    "git,forge,spoved",
 	},
 }
 

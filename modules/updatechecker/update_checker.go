@@ -33,7 +33,7 @@ func (r *CheckerState) Name() string {
 	return "update-checker"
 }
 
-// GiteaUpdateChecker stores the latest CodeHat release (or the error) for the admin dashboard.
+// GiteaUpdateChecker stores the latest spoved release (or the error) for the admin dashboard.
 func GiteaUpdateChecker(httpEndpoint string) error {
 	v, err := getVersionHTTP(httpEndpoint)
 	var versions []string
@@ -61,7 +61,7 @@ func getVersionHTTP(httpEndpoint string) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "CodeHat-update-checker")
+	req.Header.Set("User-Agent", "spoved-update-checker")
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", err
