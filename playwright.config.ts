@@ -29,7 +29,7 @@ export default {
   forbidOnly: Boolean(process.env.CI),
 
   /* Retry on CI only */
-  maxFailures: process.env.CI ? 1 : 0,
+  retries: process.env.CI ? 1 : 0,
 
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: process.env.CI ? 'list' : [['list'], ['html', {outputFolder: 'tests/e2e/reports/', open: 'never'}]],
