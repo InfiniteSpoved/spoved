@@ -5,8 +5,23 @@
       "Bash(tools/codemap.sh:*)",
       "Bash(./tools/codemap.sh)",
       "Bash(./tools/codemap.sh:*)",
+      "Bash(gh api:*)",
+      "Bash(gh run download:*)",
+      "Bash(gpg:*)",
+      "mcp__claude-code-remote__add_repo",
       "mcp__claude-code-remote__archive_session",
-      "mcp__claude-code-remote__send_message"
+      "mcp__claude-code-remote__create_session",
+      "mcp__claude-code-remote__get_session",
+      "mcp__claude-code-remote__interrupt_session",
+      "mcp__claude-code-remote__list_events",
+      "mcp__claude-code-remote__list_sessions",
+      "mcp__claude-code-remote__send_later",
+      "mcp__claude-code-remote__send_message",
+      "mcp__claude-code-remote__set_session_title",
+      "mcp__claude-code-remote__subscribe_pr_activity",
+      "mcp__github__add_issue_comment",
+      "mcp__github__issue_write",
+      "mcp__github__merge_pull_request"
     ]
   }
 }
