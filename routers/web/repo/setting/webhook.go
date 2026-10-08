@@ -45,7 +45,8 @@ func WebhookList(ctx *context.Context) {
 	ctx.Data["PageIsSettingsHooks"] = true
 	ctx.Data["BaseLink"] = ctx.Repo.RepoLink + "/settings/hooks"
 	ctx.Data["BaseLinkNew"] = ctx.Repo.RepoLink + "/settings/hooks"
-	ctx.Data["WebhookList"] = webhook_service.List()
+	ctx.Data["WebhookList"] = webhook_service.EnabledList(ctx)
+	ctx.Data["DisabledWebhookTypes"] = webhook_service.DisabledTypes(ctx)
 	ctx.Data["Description"] = ctx.Tr("repo.settings.hooks_desc", setting.AppDocsURL("user/repository/webhooks/"))
 
 	ws, err := db.Find[webhook.Webhook](ctx, webhook.ListWebhookOptions{RepoID: ctx.Repo.Repository.ID})
@@ -134,7 +135,7 @@ func WebhookNew(ctx *context.Context) {
 
 	hookType := ctx.Params(":type")
 	handler := webhook_service.GetWebhookHandler(hookType)
-	if handler == nil {
+	if handler == nil || !setting.IsWebhookTypeEnabled(ctx, hookType) {
 		ctx.NotFound("GetWebhookHandler", nil)
 		return
 	}
@@ -142,7 +143,8 @@ func WebhookNew(ctx *context.Context) {
 	ctx.Data["WebhookHandler"] = handler
 	ctx.Data["BaseLink"] = orCtx.LinkNew
 	ctx.Data["BaseLinkNew"] = orCtx.LinkNew
-	ctx.Data["WebhookList"] = webhook_service.List()
+	ctx.Data["WebhookList"] = webhook_service.EnabledList(ctx)
+	ctx.Data["DisabledWebhookTypes"] = webhook_service.DisabledTypes(ctx)
 
 	ctx.HTML(http.StatusOK, orCtx.NewTemplate)
 }
@@ -223,7 +225,14 @@ func WebhookCreate(ctx *context.Context) {
 	}
 	ctx.Data["BaseLink"] = orCtx.LinkNew
 	ctx.Data["BaseLinkNew"] = orCtx.LinkNew
-	ctx.Data["WebhookList"] = webhook_service.List()
+	ctx.Data["WebhookList"] = webhook_service.EnabledList(ctx)
+	ctx.Data["DisabledWebhookTypes"] = webhook_service.DisabledTypes(ctx)
+
+	if webhook_service.CheckTypeEnabled(ctx, hookType) != nil {
+		ctx.Flash.Error(ctx.Tr("repo.settings.webhook_type_disabled_error", ctx.Tr("repo.settings.web_hook_name_"+hookType)), true)
+		ctx.HTML(http.StatusUnprocessableEntity, orCtx.NewTemplate)
+		return
+	}
 
 	if ctx.HasError() {
 		// pre-fill the form with the submitted data
@@ -349,7 +358,8 @@ func checkWebhook(ctx *context.Context) (*ownerRepoCtx, *webhook.Webhook) {
 	}
 	ctx.Data["BaseLink"] = orCtx.Link
 	ctx.Data["BaseLinkNew"] = orCtx.LinkNew
-	ctx.Data["WebhookList"] = webhook_service.List()
+	ctx.Data["WebhookList"] = webhook_service.EnabledList(ctx)
+	ctx.Data["DisabledWebhookTypes"] = webhook_service.DisabledTypes(ctx)
 
 	var w *webhook.Webhook
 	if orCtx.RepoID > 0 {

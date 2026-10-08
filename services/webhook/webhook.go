@@ -9,18 +9,22 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"slices"
 	"strings"
 
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
+	system_model "forgejo.org/models/system"
 	user_model "forgejo.org/models/user"
 	webhook_model "forgejo.org/models/webhook"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/graceful"
+	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/queue"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/setting/config"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 	webhook_module "forgejo.org/modules/webhook"
@@ -70,6 +74,52 @@ func GetWebhookHandler(name webhook_module.HookType) Handler {
 // List provides a list of the supported webhooks
 func List() []Handler {
 	return webhookHandlers
+}
+
+// EnabledList provides a list of the webhook types the site admins have not disabled
+func EnabledList(ctx context.Context) []Handler {
+	return slices.DeleteFunc(slices.Clone(webhookHandlers), func(h Handler) bool { return !setting.IsWebhookTypeEnabled(ctx, h.Type()) })
+}
+
+// DisabledTypes returns the disabled types, to mark the existing hooks of these types
+func DisabledTypes(ctx context.Context) map[string]bool {
+	m := map[string]bool{}
+	for _, t := range setting.Config().WebhookTypes.Value(ctx).Disabled {
+		m[t] = true
+	}
+	return m
+}
+
+// CheckTypeEnabled returns a [util.ErrInvalidArgument] if site admins disabled the webhook type.
+func CheckTypeEnabled(ctx context.Context, hookType string) error {
+	if !setting.IsWebhookTypeEnabled(ctx, hookType) {
+		return util.NewInvalidArgumentErrorf("webhook type %q is disabled by the site administrator", hookType)
+	}
+	return nil
+}
+
+// SetDisabledTypes stores the disabled webhook types. Unknown names are refused; duplicates are dropped.
+func SetDisabledTypes(ctx context.Context, doer *user_model.User, disabled []string) error {
+	s := setting.WebhookTypesState{}
+	for _, t := range disabled {
+		if !IsValidHookTaskType(t) {
+			return util.NewInvalidArgumentErrorf("unknown webhook type %q", t)
+		}
+		if !slices.Contains(s.Disabled, t) {
+			s.Disabled = append(s.Disabled, t)
+		}
+	}
+	v, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	if err := system_model.SetSettings(ctx, map[string]string{setting.Config().WebhookTypes.DynKey(): string(v)}); err != nil {
+		return err
+	}
+	if g := config.GetDynGetter(); g != nil {
+		g.InvalidateCache()
+	}
+	return nil
 }
 
 // IsValidHookTaskType returns true if a webhook registered

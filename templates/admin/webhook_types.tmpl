@@ -1,0 +1,24 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin webhook-types")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.webhook_types"}}
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.webhook_types.desc"}}</p>
+			<p>{{ctx.Locale.Tr "admin.webhook_types.existing"}}</p>
+			<form class="ui form" action="{{AppSubUrl}}/admin/webhook-types" method="post">
+				<div class="grouped fields">
+					{{range .WebhookList}}
+						<div class="field">
+							<div class="ui checkbox">
+								<input id="enabled-{{.Type}}" name="enabled_{{.Type}}" type="checkbox" {{if not (index $.Disabled .Type)}}checked{{end}}>
+								<label for="enabled-{{.Type}}">{{.Icon 16}} {{ctx.Locale.Tr (print "repo.settings.web_hook_name_" .Type)}}</label>
+							</div>
+						</div>
+					{{end}}
+				</div>
+				<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+			</form>
+		</div>
+	</div>
+{{template "admin/layout_footer" .}}
