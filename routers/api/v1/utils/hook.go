@@ -84,6 +84,10 @@ func checkCreateHookOption(ctx *context.APIContext, form *api.CreateHookOption) 
 		ctx.Error(http.StatusUnprocessableEntity, "", fmt.Sprintf("Invalid hook type: %s", form.Type))
 		return false
 	}
+	if err := webhook_service.CheckTypeEnabled(ctx, form.Type); err != nil {
+		ctx.Error(http.StatusUnprocessableEntity, "", err.Error())
+		return false
+	}
 	for _, name := range []string{"url", "content_type"} {
 		if _, ok := form.Config[name]; !ok {
 			ctx.Error(http.StatusUnprocessableEntity, "", "Missing config option: "+name)

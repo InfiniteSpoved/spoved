@@ -4,10 +4,26 @@
 package setting
 
 import (
+	"context"
 	"net/url"
+	"slices"
 
 	"forgejo.org/modules/log"
 )
+
+// WebhookTypesState is stored as JSON in the "webhook.types" system setting. It lists the disabled types, so an
+// instance without a stored value (fresh or upgraded) has every type enabled.
+type WebhookTypesState struct {
+	Disabled []string `json:"disabled"`
+}
+
+func (s WebhookTypesState) Enabled(hookType string) bool {
+	return !slices.Contains(s.Disabled, hookType)
+}
+
+func IsWebhookTypeEnabled(ctx context.Context, hookType string) bool {
+	return Config().WebhookTypes.Value(ctx).Enabled(hookType)
+}
 
 // Webhook settings
 var Webhook = struct {

@@ -6,7 +6,6 @@ package integration
 import (
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -27,9 +26,6 @@ var brandAllowed = []string{
 	"Forgejo documentation",
 }
 
-// webhookTypeForgejo is the "Forgejo" webhook type name in the webhook type menu and form header; it applies only to webhook pages.
-var webhookTypeForgejo = regexp.MustCompile(`>\s*Forgejo\s*</(a|div)>`)
-
 func assertNoBrandMentions(t *testing.T, session *TestSession, url string) {
 	t.Helper()
 	req := NewRequest(t, "GET", url)
@@ -38,9 +34,6 @@ func assertNoBrandMentions(t *testing.T, session *TestSession, url string) {
 		body = MakeRequest(t, req, http.StatusOK).Body.String()
 	} else {
 		body = session.MakeRequest(t, req, http.StatusOK).Body.String()
-	}
-	if strings.Contains(url, "/settings/hooks") {
-		body = webhookTypeForgejo.ReplaceAllString(body, "><")
 	}
 	for _, phrase := range brandAllowed {
 		body = strings.ReplaceAll(body, phrase, "")
@@ -72,7 +65,7 @@ func TestBranding(t *testing.T) {
 			"oauth2_provider": "gitlab",
 		})
 		session := loginUser(t, "user1")
-		for _, url := range []string{"/admin", "/admin/auths/new", fmt.Sprintf("/admin/auths/%d", source.ID), "/user/settings/keys"} {
+		for _, url := range []string{"/admin", "/admin/webhook-types", "/admin/auths/new", fmt.Sprintf("/admin/auths/%d", source.ID), "/user/settings/keys"} {
 			assertNoBrandMentions(t, session, url)
 		}
 	})

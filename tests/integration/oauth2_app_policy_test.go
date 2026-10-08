@@ -17,7 +17,6 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/setting"
-	"forgejo.org/modules/setting/config"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/tests"
 
@@ -25,19 +24,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// lastPolicyRevision: fixtures reset the settings revision, so two tests could store different values under the
-// same revision and the cached one would win; keep the revision above every one seen so far.
-var lastPolicyRevision int
-
 func setOAuth2AppPolicy(t *testing.T, st setting.OAuth2AppPolicyState) {
 	v, err := json.Marshal(st)
 	require.NoError(t, err)
 	require.NoError(t, system_model.SetSettings(db.DefaultContext, map[string]string{"oauth2.app_policy": string(v)}))
-	for system_model.GetRevision(db.DefaultContext) <= lastPolicyRevision {
-		require.NoError(t, system_model.SetSettings(db.DefaultContext, nil))
-	}
-	lastPolicyRevision = system_model.GetRevision(db.DefaultContext)
-	config.GetDynGetter().InvalidateCache()
+	bumpSettingsRevision(t)
 }
 
 func appForm(name string) map[string]string {

@@ -17,6 +17,7 @@
 				<span class="text {{if eq .LastStatus 1}}green{{else if eq .LastStatus 2}}red{{else}}grey{{end}} tw-mr-2">{{svg "octicon-dot-fill" 22}}</span>
 				<div class="text truncate tw-flex-1 tw-mr-2">
 					<a title="{{.URL}}" href="{{$.BaseLink}}/{{.ID}}">{{.URL}}</a>
+					{{if index $.DisabledWebhookTypes .Type}}<span class="ui basic orange label webhook-type-disabled">{{ctx.Locale.Tr "repo.settings.webhook_type_disabled"}}</span>{{end}}
 				</div>
 				<a class="muted tw-p-2" href="{{$.BaseLink}}/{{.ID}}">{{svg "octicon-pencil"}}</a>
 				<a class="delete-button tw-p-2" data-url="{{$.Link}}/delete" data-id="{{.ID}}" data-modal-id="delete-webhook">{{svg "octicon-trash"}}</a>

@@ -902,6 +902,7 @@ func registerRoutes(m *web.Route) {
 		m.Get("/system_status", admin.SystemStatus)
 		m.Post("", web.Bind(forms.AdminDashboardForm{}), admin.DashboardPost)
 		m.Combo("/maintenance").Get(admin.Maintenance).Post(admin.MaintenancePost)
+		m.Combo("/webhook-types").Get(admin.WebhookTypes).Post(admin.WebhookTypesPost)
 		m.Combo("/ip-allowlist").Get(admin.IPAllowlist).Post(admin.IPAllowlistPost)
 
 		if setting.Database.Type.IsMySQL() {
