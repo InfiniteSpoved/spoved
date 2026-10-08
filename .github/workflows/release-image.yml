@@ -22,6 +22,7 @@ name: Release image
 #   2. A federated credential on it: issuer https://token.actions.githubusercontent.com,
 #      subject repo:InfiniteSpoved/spoved:environment:release, audience api://AzureADTokenExchange.
 #      Renaming or moving the repository changes the subject; update it then.
+#      The subject now names InfiniteSpoved/spoved: change the credential in Azure to match (outside this repository).
 #   3. Repository variable ACR_NAME (registry name, not the login server). Unset
 #      means push-to-acr does nothing.
 #   4. Variables AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID in the

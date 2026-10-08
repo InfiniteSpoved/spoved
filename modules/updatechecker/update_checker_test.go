@@ -79,7 +79,7 @@ func TestGiteaUpdateCheckerStoresHTTPError(t *testing.T) {
 	require.NoError(t, GiteaUpdateChecker(srv.URL))
 }
 
-func TestGetReleaseStatespovedVersions(t *testing.T) {
+func TestGetReleaseStateSpovedVersions(t *testing.T) {
 	defer test.MockVariableValue(&setting.AppVer, "16.0.0-spoved.1")()
 	state := system.NewMockStateStore(t)
 	state.On("Get", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {

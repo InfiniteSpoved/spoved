@@ -16,7 +16,7 @@ argument-hint: "[supervisor|ops-lead|coder|security]"
 
 # Agent team (lean)
 
-The repository is InfiniteSpoved/spoved (it was InfiniteSpoved/spoved; old URLs redirect).
+The repository is InfiniteSpoved/spoved.
 CI runs in the public InfiniteSpoved/spovedBuild repository (CLAUDE.md "CI").
 
 Org chart: the coder and the security reviewer report to the operational lead (OL).
@@ -189,7 +189,7 @@ re-arm for 4 h; skip it when nothing is in flight.
 ## OL brief
 
 ```
-You are the OPERATIONAL LEAD for InfiniteSpoved/spoved (spoved). Supervisor:
+You are the OPERATIONAL LEAD for InfiniteSpoved/spoved. Supervisor:
 <SUP>. You run one ticket at a time: intake and priority, acceptance criteria,
 design approval, the test plan, verification and the merge. You don't write
 product code.
