@@ -223,24 +223,24 @@ test.describe(`Visual properties`, () => {
 
     // Dropdown with just 3 items and nothing special
     await page.locator(`.opener[commandfor="dropdown-1"]`).click();
-    expect(await page.locator(`#dd1_g1_i1`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('4px 4px 0px 0px');
+    expect(await page.locator(`#dd1_g1_i1`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('6px 6px 0px 0px');
     expect(await page.locator(`#dd1_g1_i2`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('0px');
-    expect(await page.locator(`#dd1_g1_i3`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('0px 0px 4px 4px');
+    expect(await page.locator(`#dd1_g1_i3`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('0px 0px 6px 6px');
     await page.keyboard.press('Enter'); // Exit dropdown - page is in noJS mode
 
     // Dropdown with two groups of items separated with an <hr>
     await page.locator(`.opener[commandfor="dropdown-2"]`).click();
-    expect(await page.locator(`#dd2_g1_i1`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('4px 4px 0px 0px');
+    expect(await page.locator(`#dd2_g1_i1`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('6px 6px 0px 0px');
     expect(await page.locator(`#dd2_g1_i2`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('0px');
     expect(await page.locator(`#dd2_g1_i3`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('0px');
     expect(await page.locator(`#dd2_g2_i1`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('0px');
     expect(await page.locator(`#dd2_g2_i2`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('0px');
-    expect(await page.locator(`#dd2_g2_i3`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('0px 0px 4px 4px');
+    expect(await page.locator(`#dd2_g2_i3`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('0px 0px 6px 6px');
     await page.keyboard.press('Enter'); // Exit dropdown - page is in noJS mode
 
     // Dropdown with only one item, which should be completely round
     await page.locator(`.opener[commandfor="dropdown-3"]`).click();
-    expect(await page.locator(`#dd3_g1_i1`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('4px');
+    expect(await page.locator(`#dd3_g1_i1`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('6px');
     await page.keyboard.press('Enter'); // Exit dropdown - page is in noJS mode
 
     // Dropdown with additional content and a HR - which the very first item should take into consideration
@@ -248,7 +248,7 @@ test.describe(`Visual properties`, () => {
     expect(await page.locator(`#dd5_g1_i1`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('0px');
     expect(await page.locator(`#dd5_g1_i2`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('0px');
     expect(await page.locator(`#dd5_g2_i1`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('0px');
-    expect(await page.locator(`#dd5_g2_i2`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('0px 0px 4px 4px');
+    expect(await page.locator(`#dd5_g2_i2`).evaluate((el) => getComputedStyle(el).borderRadius)).toBe('0px 0px 6px 6px');
 
     // Explicit label with JS off
     const dropdown = page.locator('.opener[commandfor="dropdown-5"]');

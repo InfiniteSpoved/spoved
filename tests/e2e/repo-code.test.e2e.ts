@@ -110,7 +110,6 @@ test.describe('As authenticated user', () => {
 
 test('Unicode escape highlight', async ({page}) => {
   const unselectedBg = 'rgba(0, 0, 0, 0)';
-  const selectedBg = 'rgb(255, 237, 213)';
 
   const response = await page.goto('/user2/unicode-escaping/src/branch/main/a-file');
   expect(response?.status()).toBe(200);
@@ -119,6 +118,16 @@ test('Unicode escape highlight', async ({page}) => {
   expect(await page.locator('.lines-num').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(unselectedBg);
   expect(await page.locator('.lines-escape').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(unselectedBg);
   expect(await page.locator('.lines-code').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(unselectedBg);
+
+  // let the browser resolve the color (color-mix()), so the expected value is serialized like the actual one
+  const selectedBg = await page.locator('html').evaluate((el) => {
+    const probe = document.createElement('div');
+    probe.style.backgroundColor = 'var(--color-highlight-bg)';
+    el.append(probe);
+    const color = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return color;
+  });
 
   await page.locator('#L1').click();
   expect(await page.locator('.lines-num').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(selectedBg);

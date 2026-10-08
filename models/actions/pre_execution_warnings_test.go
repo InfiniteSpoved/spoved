@@ -5,6 +5,7 @@ package actions
 
 import (
 	"html/template"
+	"strings"
 	"testing"
 
 	"forgejo.org/modules/setting"
@@ -13,6 +14,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 )
+
+// productName is the product name in the locale override; the expected strings below use {product}.
+const productName = "CodeHat"
 
 func TestTranslatePreExecutionWarning(t *testing.T) {
 	defer test.MockVariableValue(&setting.AppDocsVer, func() string { return "v0.0" })() // tests below use "foo" instead, to demonstrate that the given values are NOT derived from setting.AppDocsVer
@@ -47,7 +51,7 @@ func TestTranslatePreExecutionWarning(t *testing.T) {
 					{"job1", "https://forgejo.org/docs/foo/user/api/authorized-integrations/"},
 				},
 			},
-			expected: []template.HTML{"Job <code>job1</code> or its workflow has a <code>permissions</code> field, which is not supported in Forgejo and will be ignored. Use <a href=\"https://forgejo.org/docs/foo/user/api/authorized-integrations/\">Authorized Integrations</a> to grant capabilities to this job instead."},
+			expected: []template.HTML{"Job <code>job1</code> or its workflow has a <code>permissions</code> field, which is not supported in {product} and will be ignored. Use <a href=\"https://forgejo.org/docs/foo/user/api/authorized-integrations/\">Authorized Integrations</a> to grant capabilities to this job instead."},
 		},
 		{
 			name: "WarningCodePermissionsEncoding",
@@ -58,7 +62,7 @@ func TestTranslatePreExecutionWarning(t *testing.T) {
 					{"<img src=x onerror=alert(document.domain)>", "https://forgejo.org/docs/foo/user/api/authorized-integrations/"},
 				},
 			},
-			expected: []template.HTML{"Job <code>&lt;img src=x onerror=alert(document.domain)&gt;</code> or its workflow has a <code>permissions</code> field, which is not supported in Forgejo and will be ignored. Use <a href=\"https://forgejo.org/docs/foo/user/api/authorized-integrations/\">Authorized Integrations</a> to grant capabilities to this job instead."},
+			expected: []template.HTML{"Job <code>&lt;img src=x onerror=alert(document.domain)&gt;</code> or its workflow has a <code>permissions</code> field, which is not supported in {product} and will be ignored. Use <a href=\"https://forgejo.org/docs/foo/user/api/authorized-integrations/\">Authorized Integrations</a> to grant capabilities to this job instead."},
 		},
 		{
 			name: "MultipleWarnings",
@@ -70,14 +74,17 @@ func TestTranslatePreExecutionWarning(t *testing.T) {
 				},
 			},
 			expected: []template.HTML{
-				"Job <code>job1</code> or its workflow has a <code>permissions</code> field, which is not supported in Forgejo and will be ignored. Use <a href=\"https://forgejo.org/docs/foo/user/api/authorized-integrations/\">Authorized Integrations</a> to grant capabilities to this job instead.",
-				"Job <code>job4</code> or its workflow has a <code>permissions</code> field, which is not supported in Forgejo and will be ignored. Use <a href=\"https://forgejo.org/docs/foo/user/api/authorized-integrations/\">Authorized Integrations</a> to grant capabilities to this job instead.",
+				"Job <code>job1</code> or its workflow has a <code>permissions</code> field, which is not supported in {product} and will be ignored. Use <a href=\"https://forgejo.org/docs/foo/user/api/authorized-integrations/\">Authorized Integrations</a> to grant capabilities to this job instead.",
+				"Job <code>job4</code> or its workflow has a <code>permissions</code> field, which is not supported in {product} and will be ignored. Use <a href=\"https://forgejo.org/docs/foo/user/api/authorized-integrations/\">Authorized Integrations</a> to grant capabilities to this job instead.",
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := TranslatePreExecutionWarning(lang, tt.run)
+			for i := range tt.expected {
+				tt.expected[i] = template.HTML(strings.ReplaceAll(string(tt.expected[i]), "{product}", productName))
+			}
 			assert.Equal(t, tt.expected, err)
 		})
 	}

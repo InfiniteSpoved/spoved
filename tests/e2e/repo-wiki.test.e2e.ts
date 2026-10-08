@@ -49,14 +49,24 @@ test('Wiki unicode-escape', async ({page}) => {
 
   const unescapedElements = page.locator('.ambiguous-code-point');
   for (let i = 0; i < await unescapedElements.count(); i++) {
-    expect(await unescapedElements.nth(i).evaluate((el) => getComputedStyle(el).border)).toEqual('0px solid rgb(24, 24, 27)');
+    // the border color is the text color (currentColor), whatever the theme makes it
+    expect(await unescapedElements.nth(i).evaluate((el) => `0px solid ${getComputedStyle(el).color}` === getComputedStyle(el).border)).toBe(true);
   }
 
   await page.locator('a.escape-button').click();
 
+  // the browser-resolved --color-yellow, so the expected value follows the theme
+  const yellow = await page.locator('html').evaluate((el) => {
+    const probe = document.createElement('div');
+    probe.style.color = 'var(--color-yellow)';
+    el.append(probe);
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
   const escapedElements = page.locator('.ambiguous-code-point');
   for (let i = 0; i < await escapedElements.count(); i++) {
-    expect(await escapedElements.nth(i).evaluate((el) => getComputedStyle(el).border)).toEqual('1px solid rgb(202, 138, 4)');
+    expect(await escapedElements.nth(i).evaluate((el) => getComputedStyle(el).border)).toEqual(`1px solid ${yellow}`);
   }
 });
 
