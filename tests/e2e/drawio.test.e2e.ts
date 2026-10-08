@@ -14,7 +14,8 @@ test('draw.io diagram renders in a sandboxed iframe', async ({page}, workerInfo)
   const foreign: Request[] = [];
   page.on('request', (req) => {
     const {protocol, hostname} = new URL(req.url());
-    if (protocol.startsWith('http') && hostname !== 'localhost') foreign.push(req);
+    // only requests of the diagram's iframe, not e.g. the avatars of the page itself
+    if (protocol.startsWith('http') && hostname !== 'localhost' && req.frame() !== page.mainFrame()) foreign.push(req);
   });
 
   const response = await page.goto('/user2/drawio-test/src/branch/main/docs/arch.drawio');
