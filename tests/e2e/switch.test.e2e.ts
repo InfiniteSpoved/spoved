@@ -18,8 +18,8 @@ test.describe('Switch CSS properties', () => {
   const normalMargin = '0px';
   const normalPadding = '15.75px';
 
-  const specialLeftMargin = '-4px';
-  const specialPadding = '19.75px';
+  const specialLeftMargin = '-6px';
+  const specialPadding = '21.75px';
 
   async function evaluateSwitchItem(page: Page, selector: string, hover, isActive: boolean, marginLeft, marginRight, paddingLeft, paddingRight: string, itemHeight: number) {
     const item = page.locator(selector);
