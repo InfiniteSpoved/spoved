@@ -17,6 +17,7 @@ import (
 // overrides with CodeHat wording (see docs/branding.md).
 var codehatShadowKeys = []string{
 	"return_to_forgejo",
+	"repo.settings.web_hook_name_forgejo",
 	"startpage.platform_desc",
 	"startpage.lightweight_desc",
 	"startpage.license_desc",

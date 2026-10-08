@@ -8,12 +8,12 @@ Visible text keeps "Forgejo" where it names the upstream project or ecosystem, n
 
 - the footer credit link "based on Forgejo" (`a.codehat-credit`, locale key `based_on_forgejo`);
 - Forgejo Actions and Forgejo Runner, the `FORGEJO_` variable and secret prefixes;
-- the "Forgejo" migration source and webhook type (`repo.settings.web_hook_name_forgejo`), and the `forgejo-*` theme names;
+- the "Forgejo" migration source and the `forgejo-*` theme names;
 - the `MyForgejoOrganization` / `MyForgejoTeam*` group-map placeholders in the LDAP and OAuth2 auth-source forms (upstream templates kept);
 - documentation links (`AppDocsURL`, "Forgejo documentation"), the translation-project line and the translators' strings `meta.last_line` and `test`;
 - the API (`/api/forgejo/v1`, swagger titles), CLI output, log messages, git hook messages (`remote: Forgejo: …`), the git `user.name`, the `X-Mailer` header and the migration/LFS User-Agents.
 
-`TestBranding` (`tests/integration/branding_test.go`) fails on any other visible "Forgejo" or "GitHat"; its `brandAllowed` list and `webhookTypeForgejo` hold the exact phrases above that appear on the pages it checks (group-map placeholders, "Forgejo documentation", the webhook type name).
+`TestBranding` (`tests/integration/branding_test.go`) fails on any other visible "Forgejo" or "GitHat"; its `brandAllowed` list holds the exact phrases above that appear on the pages it checks (group-map placeholders, "Forgejo documentation").
 
 ## Strings: shadow keys
 
@@ -22,6 +22,7 @@ Visible text keeps "Forgejo" where it names the upstream project or ecosystem, n
 Shadowed ini keys (also listed in `codehatShadowKeys`, `modules/translation/codehat_test.go`):
 
 - `return_to_forgejo`
+- `repo.settings.web_hook_name_forgejo`
 - `startpage.platform_desc`
 - `startpage.lightweight_desc`
 - `startpage.license_desc`

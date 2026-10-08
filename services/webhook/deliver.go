@@ -37,6 +37,16 @@ func Deliver(ctx context.Context, t *webhook_model.HookTask) error {
 		return err
 	}
 
+	// the type alone decides, before any payload or header of the hook is read
+	if !setting.IsWebhookTypeEnabled(ctx, w.Type) {
+		t.IsDelivered = true
+		// an empty request is needed: AfterLoad skips the response of a task without request content
+		t.RequestInfo = &webhook_model.HookRequest{}
+		t.ResponseInfo = &webhook_model.HookResponse{Body: "webhook type disabled"}
+		t.Delivered = timeutil.TimeStampNanoNow()
+		return webhook_model.UpdateHookTask(ctx, t)
+	}
+
 	defer func() {
 		err := recover()
 		if err == nil {

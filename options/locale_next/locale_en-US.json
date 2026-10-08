@@ -1774,5 +1774,11 @@
 	"admin.oauth2_app_review.owner": "Owner:",
 	"admin.oauth2_app_review.owner_deleted": "owner deleted",
 	"admin.oauth2_app_review.not_allowed": "owner no longer allowed",
-	"admin.oauth2_app_review.none": "No applications."
+	"admin.oauth2_app_review.none": "No applications.",
+	"admin.webhook_types": "Webhook types",
+	"admin.webhook_types.desc": "Choose which webhook types can be added on this instance. A type only sets the payload format, not where a hook may send: use [webhook] ALLOWED_HOST_LIST to control that.",
+	"admin.webhook_types.existing": "Existing hooks of a disabled type are kept and stay listed with a \"type disabled\" badge. Their deliveries are skipped and recorded, and delivery resumes when the type is enabled again.",
+	"admin.webhook_types.saved": "The webhook types were saved.",
+	"repo.settings.webhook_type_disabled": "type disabled",
+	"repo.settings.web_hook_name_forgejo": "CodeHat"
 }
