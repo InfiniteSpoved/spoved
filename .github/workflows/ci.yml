@@ -1,12 +1,13 @@
 name: CI
 
 # The CI of this repository runs in the public InfiniteSpoved/spovedBuild
-# repository (workflow "Spoved CI"), whose Actions minutes are free. This job
+# repository (workflow "CI"), whose Actions minutes are free. This job
 # only asks it to test the pull request; spovedBuild reports the result back
 # as the commit status "CI success" on the pull request's head commit.
 #
 # Manual runs with the migration, integration and end-to-end tests:
-# spovedBuild → Actions → Spoved CI → Run workflow, with the branch to test.
+# spovedBuild → Actions → CI → Run workflow, with this repository and the
+# branch to test.
 #
 # Needs the secret SPOVED_BUILD_TOKEN: a fine-grained token limited to
 # InfiniteSpoved/spovedBuild with Contents: read and write.
@@ -25,8 +26,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - run: |
-          gh api repos/InfiniteSpoved/spovedBuild/dispatches -f event_type=spoved-ci \
-            -f "client_payload[pr]=$PR" -f "client_payload[sha]=$SHA" \
+          gh api repos/InfiniteSpoved/spovedBuild/dispatches -f event_type=ci \
+            -f "client_payload[repo]=$GITHUB_REPOSITORY" -f "client_payload[pr]=$PR" -f "client_payload[sha]=$SHA" \
             -f "client_payload[head_sha]=$HEAD_SHA" -f "client_payload[base_sha]=$BASE_SHA"
         env:
           GH_TOKEN: ${{ secrets.SPOVED_BUILD_TOKEN }}
