@@ -14,11 +14,9 @@ import (
 
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
-	system_model "forgejo.org/models/system"
 	"forgejo.org/models/unittest"
 	webhook_model "forgejo.org/models/webhook"
 	"forgejo.org/modules/setting"
-	"forgejo.org/modules/setting/config"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	webhook_module "forgejo.org/modules/webhook"
@@ -28,19 +26,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// lastWebhookTypesRevision: fixtures reset the settings revision, so two tests could store different values under the
-// same revision and the cached one would win; keep the revision above every one seen so far.
-var lastWebhookTypesRevision int
-
-func bumpSettingsRevision(t *testing.T) {
-	t.Helper()
-	for system_model.GetRevision(db.DefaultContext) <= lastWebhookTypesRevision {
-		require.NoError(t, system_model.SetSettings(db.DefaultContext, nil))
-	}
-	lastWebhookTypesRevision = system_model.GetRevision(db.DefaultContext)
-	config.GetDynGetter().InvalidateCache()
-}
 
 func setDisabledWebhookTypes(t *testing.T, types ...string) {
 	t.Helper()
@@ -114,9 +99,13 @@ func TestWebhookTypesCreateRefused(t *testing.T) {
 
 	admin := loginUser(t, "user1")
 	for _, p := range webhookNewPrefixes {
-		admin.MakeRequest(t, NewRequestWithValues(t, "POST", p+"/slack/new", map[string]string{
+		resp := admin.MakeRequest(t, NewRequestWithValues(t, "POST", p+"/slack/new", map[string]string{
 			"payload_url": "http://example.com/", "events": "send_everything", "active": "1",
 		}), http.StatusUnprocessableEntity)
+		// the form page is shown again, with the localized error
+		doc := NewHTMLParser(t, resp.Body)
+		assert.Contains(t, doc.Find(".flash-error").Text(), "The site administrator has disabled the webhook type Slack.", p)
+		assert.Equal(t, 1, doc.Find(`input[name="payload_url"]`).Length(), p)
 	}
 	unittest.AssertCount(t, &webhook_model.Webhook{}, before)
 
@@ -154,6 +143,9 @@ func TestWebhookTypesExistingHooks(t *testing.T) {
 	enable := disableWebhookTypes(t, "gitea")
 	defer enable()
 	task := deliver()
+	skipped, err := webhook_model.GetWebhookByID(db.DefaultContext, w.ID)
+	require.NoError(t, err)
+	assert.Equal(t, w.LastStatus, skipped.LastStatus)
 	assert.Zero(t, requests.Load())
 	assert.True(t, task.IsDelivered)
 	assert.False(t, task.IsSucceed)
@@ -165,6 +157,31 @@ func TestWebhookTypesExistingHooks(t *testing.T) {
 	list := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/settings/hooks"), http.StatusOK).Body)
 	assert.Equal(t, 1, list.Find(`.item:contains("`+receiver.URL+`") .webhook-type-disabled`).Length())
 	session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/settings/hooks/"+strconv.FormatInt(w.ID, 10)), http.StatusOK)
+
+	// the badge shows on the org, user and admin lists too
+	admin := loginUser(t, "user1")
+	for _, c := range []struct {
+		name, list string
+		hook       webhook_model.Webhook
+	}{
+		{"org", "/org/org3/settings/hooks", webhook_model.Webhook{OwnerID: 3}},
+		{"user", "/user/settings/hooks", webhook_model.Webhook{OwnerID: 2}},
+		{"system", "/admin/hooks", webhook_model.Webhook{IsSystemWebhook: true}},
+		{"default", "/admin/hooks", webhook_model.Webhook{}},
+	} {
+		hook := c.hook
+		list := c.list
+		hook.URL, hook.Type, hook.ContentType = receiver.URL+"/"+c.name, webhook_module.GITEA, webhook_model.ContentTypeJSON
+		hook.HookEvent = &webhook_module.HookEvent{SendEverything: true}
+		require.NoError(t, hook.UpdateEvent())
+		require.NoError(t, webhook_model.CreateWebhook(db.DefaultContext, &hook, ""))
+		who := session
+		if strings.HasPrefix(list, "/admin") || strings.HasPrefix(list, "/org") {
+			who = admin
+		}
+		page := NewHTMLParser(t, who.MakeRequest(t, NewRequest(t, "GET", list), http.StatusOK).Body)
+		assert.Equal(t, 1, page.Find(`.item:contains("`+hook.URL+`") .webhook-type-disabled`).Length(), list)
+	}
 
 	// the API still edits it
 	token := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteRepository)
@@ -192,6 +209,8 @@ func TestWebhookTypesMaintenance(t *testing.T) {
 	bumpSettingsRevision(t)
 	assert.False(t, setting.Config().WebhookTypes.Value(db.DefaultContext).Enabled("slack"))
 	// a non-admin gets nothing done, whatever the response
-	loginUser(t, "user2").MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/webhook-types", map[string]string{}), http.StatusSeeOther)
+	user2 := loginUser(t, "user2")
+	user2.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/webhook-types", map[string]string{}), http.StatusSeeOther)
+	assertMaintenanceFlash(t, user2)
 	assert.True(t, setting.Config().WebhookTypes.Value(db.DefaultContext).Enabled("gitea"))
 }

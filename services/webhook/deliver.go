@@ -44,6 +44,10 @@ func Deliver(ctx context.Context, t *webhook_model.HookTask) error {
 		t.RequestInfo = &webhook_model.HookRequest{}
 		t.ResponseInfo = &webhook_model.HookResponse{Body: "webhook type disabled"}
 		t.Delivered = timeutil.TimeStampNanoNow()
+		// like the normal path: a task handled twice must not overwrite another processor's record
+		if updated, err := webhook_model.MarkTaskDelivered(ctx, t); err != nil || !updated {
+			return err
+		}
 		return webhook_model.UpdateHookTask(ctx, t)
 	}
 

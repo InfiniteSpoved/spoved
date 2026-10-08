@@ -228,8 +228,8 @@ func WebhookCreate(ctx *context.Context) {
 	ctx.Data["WebhookList"] = webhook_service.EnabledList(ctx)
 	ctx.Data["DisabledWebhookTypes"] = webhook_service.DisabledTypes(ctx)
 
-	if err := webhook_service.CheckTypeEnabled(ctx, hookType); err != nil {
-		ctx.Flash.Error(err.Error(), true)
+	if webhook_service.CheckTypeEnabled(ctx, hookType) != nil {
+		ctx.Flash.Error(ctx.Tr("repo.settings.webhook_type_disabled_error", ctx.Tr("repo.settings.web_hook_name_"+hookType)), true)
 		ctx.HTML(http.StatusUnprocessableEntity, orCtx.NewTemplate)
 		return
 	}
