@@ -1,320 +1,37 @@
 name: CI
 
-# Lint, unit, integration and end-to-end tests for the develop branch and the
-# pull requests targeting it. This mirrors the jobs of Forgejo's own
-# .forgejo/workflows/testing.yml (which GitHub does not run) using the same
-# make targets, on GitHub-hosted runners with SQLite.
+# The CI of this repository runs in the public InfiniteSpoved/spovedBuild
+# repository (workflow "Spoved CI"), whose Actions minutes are free. This job
+# only asks it to test the pull request; spovedBuild reports the result back
+# as the commit status "CI success" on the pull request's head commit.
 #
-# To keep the wall-clock time low, the test jobs do not wait for the checks,
-# and the unit and end-to-end tests are split into shards that run in
-# parallel. Each shard takes a round-robin share of the packages or test files
-# (see .github/ci/shard.sh); changing a matrix's shard list changes the split.
-# The integration tests depend on running in their own order and are not split.
+# Manual runs with the migration, integration and end-to-end tests:
+# spovedBuild → Actions → Spoved CI → Run workflow, with the branch to test.
 #
-# To save Actions minutes, pull requests run only the checks and the unit tests.
-# The migration, integration and end-to-end tests run only on a manual run
-# (Actions → CI → Run workflow), and pushes to develop run nothing. The team's
-# local test run (CLAUDE.md) stays the gate for those suites.
-#
-# Pull requests that only change files the Go tests cannot depend on (frontend
-# code and tooling, end-to-end tests, Markdown documentation) also skip the unit
-# tests; see the "changes" job.
-#
-# main is a mirror of upstream Forgejo and is not tested here.
+# Needs the secret SPOVED_BUILD_TOKEN: a fine-grained token limited to
+# InfiniteSpoved/spovedBuild with Contents: read and write.
 
 on:
   pull_request:
     branches:
       - develop
-  workflow_dispatch:
-    inputs:
-      run-all-e2e:
-        description: Run every end-to-end test. When unchecked, only the tests covering the files changed compared with develop run.
-        type: boolean
-        default: true
 
-concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  contents: read
-
-env:
-  # Forgejo tests use SQLite unless told otherwise
-  TAGS: sqlite sqlite_unlock_notify
-  TEST_TAGS: sqlite sqlite_unlock_notify
+permissions: {}
 
 jobs:
-  changes:
-    name: Detect changes
+  dispatch:
+    name: Start CI in spovedBuild
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      backend: ${{ steps.filter.outputs.backend }}
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - id: filter
-        run: |
-          if [ "$EVENT" != "pull_request" ]; then
-            echo "Not a pull request: running every test suite"
-            echo "backend=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          files=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
-          echo "Changed files:"
-          echo "$files"
-          # Files that cannot affect the Go unit, migration and integration
-          # tests. Anything else, or an empty diff, runs them.
-          safe='^(web_src/|tests/e2e/|\.github/ISSUE_TEMPLATE/|(.*/)?[^/]+\.md$|package(-lock)?\.json$|\.npmrc$|tsconfig\.json$|eslint\.config\.mjs$|stylelint\.config\.js$|vitest\.config\.ts$|webpack\.config\.js$|tailwind\.config\.js$|playwright\.config\.ts$)'
-          if [ -n "$files" ] && ! grep -qvE "$safe" <<< "$files"; then
-            echo "Only frontend, end-to-end or documentation files changed: skipping the Go test suites"
-            echo "backend=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "backend=true" >> "$GITHUB_OUTPUT"
-          fi
+      - run: |
+          gh api repos/InfiniteSpoved/spovedBuild/dispatches -f event_type=spoved-ci \
+            -f "client_payload[pr]=$PR" -f "client_payload[sha]=$SHA" \
+            -f "client_payload[head_sha]=$HEAD_SHA" -f "client_payload[base_sha]=$BASE_SHA"
         env:
-          EVENT: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ secrets.SPOVED_BUILD_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          # the merge commit of the pull request into develop, as tested before
+          SHA: ${{ github.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-
-  backend-checks:
-    name: Backend checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .node-version
-          cache: npm
-      - name: Cache golangci-lint results
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/golangci-lint
-          key: golangci-lint-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml') }}-${{ github.sha }}
-          restore-keys: |
-            golangci-lint-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml') }}-
-            golangci-lint-${{ runner.os }}-
-      # lint-renovate needs node_modules
-      - run: make deps-frontend
-      # golangci-lint, go vet, locale, editorconfig, swagger and format checks,
-      # then a build; cimake.sh runs the independent targets in parallel
-      - run: ./tools/cimake.sh pr-go
-
-  frontend-checks:
-    name: Frontend checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .node-version
-          cache: npm
-      - run: make deps-frontend
-      - run: make lint-frontend
-      - run: make checks-frontend
-      - run: make test-frontend
-      - run: make frontend
-      - name: Keep the frontend build for the end-to-end tests
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-assets
-          path: public/assets
-          retention-days: 1
-
-  test-unit:
-    name: Unit tests (${{ matrix.shard }}/${{ strategy.job-total }})
-    needs: [changes]
-    if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-      - name: Start Azurite
-        # Azure Blob Storage emulator for the azureblob storage tests (TEST_AZURITE_URL)
-        run: |
-          npx -y -p azurite@3.37.0 azurite-blob --inMemoryPersistence --skipApiVersionCheck --blobHost 127.0.0.1 > "$RUNNER_TEMP/azurite.log" 2>&1 &
-          timeout 120 bash -c 'until grep -q "successfully listens" "$RUNNER_TEMP/azurite.log"; do sleep 1; done' || { cat "$RUNNER_TEMP/azurite.log"; exit 1; }
-      - name: Unit tests
-        run: |
-          # the packages `make test-backend` tests, as computed by the Makefile
-          packages=$(make -s --eval='ci-list-test-packages: compute-go-test-packages ; @echo $(GO_TEST_PACKAGES)' ci-list-test-packages \
-            | tr ' ' '\n' | .github/ci/shard.sh "$SHARD" "$SHARDS" | paste -sd' ')
-          echo "Testing $(wc -w <<< "$packages") packages"
-          make test-backend GO_TEST_PACKAGES="$packages"
-        env:
-          RACE_ENABLED: 'true'
-          TEST_AZURITE_URL: 127.0.0.1:10000
-          SHARD: ${{ matrix.shard }}
-          SHARDS: ${{ strategy.job-total }}
-      - name: Check the tests left the source tree untouched
-        run: make test-check
-
-  test-migrations:
-    name: Migration tests (SQLite)
-    needs: [changes]
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-      - run: make test-sqlite-migration
-        env:
-          USE_REPO_TEST_DIR: 1
-
-  test-sqlite:
-    # One job, in the suite's own order: the integration tests share global
-    # settings (e.g. LFS, federation queues) that earlier tests set up, so
-    # running them in a different order or split across jobs breaks them.
-    name: Integration tests (SQLite)
-    needs: [changes]
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-      - run: make test-sqlite
-        env:
-          USE_REPO_TEST_DIR: 1
-
-  test-e2e:
-    name: End-to-end tests (${{ matrix.browser }}, ${{ matrix.shard }}/3)
-    # only the frontend build is needed
-    needs: [frontend-checks]
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        # Firefox only, like Forgejo's own CI: its timing-sensitive tests are
-        # tuned for it. To also test Chromium, add `chromium` to this list.
-        browser: [firefox]
-        # keep the job name above in line with the number of shards
-        shard: [1, 2, 3]
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          # the full history is needed to list the files a pull request changes
-          fetch-depth: 0
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .node-version
-          cache: npm
-      - name: Restore the frontend build
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-assets
-          path: public/assets
-      - run: make deps-frontend
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ matrix.browser }}-${{ hashFiles('package-lock.json') }}
-      - name: Install Playwright browser and system dependencies
-        run: npx playwright install --with-deps ${{ matrix.browser }}
-
-      - name: Select the tests to run
-        id: select
-        run: |
-          # Pull requests, and manual runs with run-all-e2e unchecked, only run
-          # the tests whose `@watch` patterns match the changed files (see
-          # tests/e2e/changes.go). Pushes to develop and the other manual runs
-          # execute all of them.
-          if [ "$EVENT" = "pull_request" ]; then
-            range="$BASE_SHA...$HEAD_SHA"
-          elif [ "$EVENT" = "workflow_dispatch" ] && [ "$RUN_ALL_INPUT" != "true" ]; then
-            range="origin/develop...HEAD"
-          else
-            echo "Running all end-to-end tests"
-            echo "mode=all" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "Files changed in $range:"
-          git diff --name-only "$range"
-          # tests/e2e/changes.go splits the list on a literal "\n"
-          changed=$(git diff --name-only "$range" | awk 'NR > 1 {printf "\\n"} {printf "%s", $0}')
-          echo "mode=changed" >> "$GITHUB_OUTPUT"
-          echo "changed-files=$changed" >> "$GITHUB_OUTPUT"
-        env:
-          EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          RUN_ALL_INPUT: ${{ inputs.run-all-e2e }}
-
-      - name: Build the end-to-end test server
-        run: make e2e.sqlite.test generate-ini-sqlite
-      - name: End-to-end tests
-        run: |
-          # an empty CHANGED_FILES is meaningful: nothing relevant changed, so no test runs
-          if [ "$E2E_MODE" = "changed" ]; then
-            export CHANGED_FILES="$CHANGED_E2E_FILES"
-          else
-            export RUN_ALL=1
-          fi
-          # this shard's test files, e.g. ^TestE2e$/^(login\.test\.e2e|...)$
-          files=$(ls tests/e2e/*.test.e2e.ts | xargs -n1 basename | sed 's/\.ts$//' \
-            | .github/ci/shard.sh "$SHARD" "$SHARDS" | sed 's/\./\\./g' | paste -sd'|')
-          PROJECT_ROOT="$PWD" PROJECT_CONF=tests/sqlite.ini ./e2e.sqlite.test -test.run "^TestE2e\$/^(${files})\$"
-        env:
-          DISPLAY: ''
-          USE_REPO_TEST_DIR: 1
-          PLAYWRIGHT_PROJECT: ${{ matrix.browser }}
-          SHARD: ${{ matrix.shard }}
-          SHARDS: 3
-          E2E_MODE: ${{ steps.select.outputs.mode }}
-          CHANGED_E2E_FILES: ${{ steps.select.outputs.changed-files }}
-      - name: Upload screenshots and traces of failed tests
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-test-artifacts-${{ matrix.browser }}-${{ matrix.shard }}
-          path: tests/e2e/test-artifacts/
-          retention-days: 7
-
-  # A single check to require in branch protection rules
-  ci-success:
-    name: CI success
-    if: always()
-    needs: [changes, backend-checks, frontend-checks, test-unit, test-migrations, test-sqlite, test-e2e]
-    runs-on: ubuntu-latest
-    steps:
-      # A job is only skipped when the changes job decided its tests are not
-      # needed, or when a job it depends on failed, which is caught here too.
-      - name: All jobs passed
-        if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
-        run: echo "All CI jobs passed or were not needed"
-      - name: Some jobs failed
-        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
-        run: |
-          echo '${{ toJSON(needs) }}'
-          exit 1
