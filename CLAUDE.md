@@ -14,7 +14,7 @@
 - Run `make generate-ini-sqlite` once, then use `PROJECT_CONF=tests/sqlite.ini` for migration tests.
 - The Node version is older than `.node-version`, so `lockfile-check` fails here. Ignore it unless you changed package files.
 
-## Testing (local equivalent of `.github/workflows/ci.yml`)
+## Testing (local equivalent of CI, `.github/ci/job.sh`)
 
 1. Backend: golangci-lint on the changed packages, `make lint-go-vet lint-locale lint-locale-usage lint-swagger lint-editorconfig`, and `make fmt` leaves no diff.
 2. Frontend, if templates/JS/CSS changed: `make lint-frontend checks-frontend test-frontend frontend`.
@@ -28,7 +28,16 @@ These fail in containers for environment reasons only. They also fail on develop
 - E2E: `webauthn.test.e2e.ts`.
 Before calling any other failure environmental, rerun it on `origin/develop`.
 
-GitHub Actions minutes are limited. PR CI runs only the lints, frontend checks and unit tests. Migration, integration and E2E tests run on GitHub only when someone starts the "CI" workflow in InfiniteSpoved/spovedBuild by hand (CI runs there, not in this repository; `.github/workflows/ci.yml` only dispatches PRs to it), so the local run stays the gate for them. Never start that manual run without the user's OK, and push as few times per PR as you can: every push uses about an hour of CI.
+## CI (runs in InfiniteSpoved/spovedBuild)
+
+This repository has no CI workflow. CI runs in the public InfiniteSpoved/spovedBuild repository (its `ci.yml` runs `.github/ci/job.sh` from here) and sets the commit status "CI success" on the tested commit. Its public logs show only pass/fail; each job's output is uploaded encrypted. Nothing that describes this repository may appear there.
+
+- After pushing a PR branch, start one run for the pushed commit. Pass the SHA, never a branch name: the `ref` input is printed in the public log.
+  `gh api -X POST repos/InfiniteSpoved/spovedBuild/actions/workflows/ci.yml/dispatches -f ref="$(gh api repos/InfiniteSpoved/spovedBuild --jq .default_branch)" -f 'inputs[repo]=InfiniteSpoved/spoved' -f "inputs[ref]=$(git rev-parse HEAD)" -f "inputs[log-key]=$(cat <scratchpad>/ci-key.b64)"`
+- That runs the lints, frontend checks and unit tests (about 10 min). Add `-f 'inputs[full]=true'` for the migration, integration and E2E tests too (about an hour), but only with the user's OK; the local run stays the gate for them.
+- Log key, once per session: `export GNUPGHOME=<scratchpad>/gnupg; mkdir -m 700 -p $GNUPGHOME; gpg --batch --passphrase '' --quick-gen-key ci-log default default 30d; gpg --export ci-log | base64 -w0 > <scratchpad>/ci-key.b64`.
+- Find your run with `gh api 'repos/InfiniteSpoved/spovedBuild/actions/runs?event=workflow_dispatch&per_page=5'` (check `head_sha` is spovedBuild's and the creation time is yours), wait with a background loop on its `status`, then read a failed job's log: `gh run download <run id> -R InfiniteSpoved/spovedBuild -n log-<N>` for "Job N" (`log-plan` lists the jobs in order), and `gpg -d log-<N>/log.gpg`.
+- Never post logs, test names or code in spovedBuild (issues, comments, run names).
 
 ## Conventions
 

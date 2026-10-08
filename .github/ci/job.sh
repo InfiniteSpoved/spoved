@@ -8,10 +8,10 @@
 #   lint | frontend | migrations | integration
 #   unit SHARD SHARDS | e2e SHARD SHARDS
 #
-# Pull requests (EVENT=repository_dispatch) run the checks and the unit tests;
-# manual runs also run the migration, integration and end-to-end tests. Pull
-# requests that only change files the Go tests cannot depend on skip the unit
-# tests. The unit and end-to-end tests are split into shards that take a
+# Runs do the checks and the unit tests; with FULL=true they also run the
+# migration, integration and end-to-end tests. Pull requests dispatched with
+# their commits (EVENT=repository_dispatch) that only change files the Go
+# tests cannot depend on skip the unit tests. The unit and end-to-end tests are split into shards that take a
 # round-robin share of the packages or test files (see shard.sh). The
 # integration tests depend on running in their own order and are not split.
 set -euo pipefail
@@ -42,7 +42,7 @@ plan)
   if [ "$backend" = true ]; then
     for i in 1 2 3 4; do tasks+=",{\"task\":\"unit\",\"args\":\"$i 4\",\"depth\":\"1\"}"; done
   fi
-  if [ "$EVENT" = workflow_dispatch ]; then
+  if [ "$FULL" = true ]; then
     # only the selection of changed end-to-end tests needs the history
     depth=1
     [ "$RUN_ALL_E2E" = true ] || depth=0
