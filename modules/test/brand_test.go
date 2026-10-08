@@ -18,4 +18,6 @@ func TestBrandMentions(t *testing.T) {
 	assert.Equal(t, []string{"Forgejo"}, BrandMentions(`<input placeholder="Forgejo">`))
 	assert.Equal(t, []string{"Forgejo forge"}, BrandMentions(`<meta property="og:description" content="Forgejo forge">`))
 	assert.Equal(t, []string{"Forgejo"}, BrandMentions(`<a class="other" href="#">Forgejo</a>`))
+	// text inside <pre><code> is visible too
+	assert.Equal(t, []string{"$ Forgejo Runner daemon"}, BrandMentions(`<body><pre><code>$ Forgejo Runner daemon</code></pre></body>`))
 }

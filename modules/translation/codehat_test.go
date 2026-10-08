@@ -56,6 +56,23 @@ var codehatShadowKeys = []string{
 	"admin.self_check.database_collation_case_insensitive",
 }
 
+// The runner setup strings live in locale_next and name the upstream Forgejo Runner on purpose.
+func TestRunnerSetupStrings(t *testing.T) {
+	next, err := os.ReadFile("../../options/locale_next/locale_en-US.json")
+	require.NoError(t, err)
+	store := i18n.NewLocaleStore()
+	require.NoError(t, store.AddLocaleByIni("en-US", "English", PluralRules[0], UsedPluralForms[0], []byte(""), nil))
+	require.NoError(t, store.AddToLocaleFromJSON("en-US", next))
+	en, _ := store.Locale("en-US")
+
+	assert.Contains(t, en.TrString("actions.runners.runner_setup.instruction_replace_connection_name"), "<code>codehat</code>")
+	assert.NotContains(t, en.TrString("actions.runners.runner_setup.instruction_replace_connection_name"), "forgejo")
+	assert.Contains(t, en.TrString("actions.runners.runner_setup.instruction_advanced_configurations"), "CodeHat")
+	download := en.TrString("actions.runners.runner_setup.runner_download")
+	assert.Contains(t, download, "CodeHat uses the Forgejo Runner")
+	assert.Contains(t, download, "%s")
+}
+
 func TestCodeHatShadowKeys(t *testing.T) {
 	ini, err := os.ReadFile("../../options/locale/locale_en-US.ini")
 	require.NoError(t, err)

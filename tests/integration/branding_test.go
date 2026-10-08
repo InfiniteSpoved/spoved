@@ -25,6 +25,10 @@ var brandAllowed = []string{
 	"MyForgejoOrganization", "MyForgejoTeam1", "MyForgejoTeam2",
 	// the push mirror branch filter help links to Forgejo's documentation
 	"Forgejo documentation",
+	// CodeHat does not build its own runner: the setup pages name the upstream Forgejo Runner and its command
+	"Forgejo Runner", "forgejo-runner",
+	// the "Help us translate" line on the appearance page names the upstream translation project
+	"Help us translate Forgejo",
 }
 
 // webhookTypeForgejo is the "Forgejo" webhook type name in the webhook type menu and form header; it applies only to webhook pages.
@@ -89,6 +93,27 @@ func TestBranding(t *testing.T) {
 			"/user2/repo1/settings/hooks/packagist/new",
 		} {
 			assertNoBrandMentions(t, session, url)
+		}
+	})
+
+	t.Run("Runner setup", func(t *testing.T) {
+		// the setup page is the response to creating a runner, in every scope
+		for _, c := range []struct{ user, url string }{
+			{"user2", "/user2/repo1/settings/actions/runners/new"},
+			{"user2", "/user/settings/actions/runners/new"},
+			{"user2", "/org/org3/settings/actions/runners/new"},
+			{"user1", "/admin/actions/runners/new"},
+		} {
+			req := NewRequestWithValues(t, "POST", c.url, map[string]string{"runner_name": "branding"})
+			body := loginUser(t, c.user).MakeRequest(t, req, http.StatusOK).Body.String()
+			assert.Contains(t, body, "codehat:", c.url)
+			assert.Contains(t, body, "https://code.forgejo.org/forgejo/runner/releases", c.url)
+			assert.Contains(t, body, "forgejo-runner daemon", c.url)
+			assert.NotContains(t, body, "forgejo:", c.url) // BrandMentions is case-sensitive
+			for _, phrase := range brandAllowed {
+				body = strings.ReplaceAll(body, phrase, "")
+			}
+			assert.Empty(t, test.BrandMentions(body), c.url)
 		}
 	})
 
