@@ -275,7 +275,8 @@ func Webhooks(ctx *context.Context) {
 	ctx.Data["PageIsSettingsHooks"] = true
 	ctx.Data["BaseLink"] = ctx.Org.OrgLink + "/settings/hooks"
 	ctx.Data["BaseLinkNew"] = ctx.Org.OrgLink + "/settings/hooks"
-	ctx.Data["WebhookList"] = webhook_service.List()
+	ctx.Data["WebhookList"] = webhook_service.EnabledList(ctx)
+	ctx.Data["DisabledWebhookTypes"] = webhook_service.DisabledTypes(ctx)
 	ctx.Data["Description"] = ctx.Tr("org.settings.hooks_desc")
 
 	ws, err := db.Find[webhook.Webhook](ctx, webhook.ListWebhookOptions{OwnerID: ctx.Org.Organization.ID})
