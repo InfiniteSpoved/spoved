@@ -49,7 +49,13 @@ plan)
     tasks+=',{"task":"migrations","args":"","depth":"1"},{"task":"integration","args":"","depth":"1"}'
     for i in 1 2 3; do tasks+=",{\"task\":\"e2e\",\"args\":\"$i 3\",\"depth\":\"$depth\"}"; done
   fi
-  echo "tasks=[$tasks]" | tee -a "$GITHUB_OUTPUT"
+  tasks="[$tasks]"
+  # ONLY (comma-separated task names) keeps just those stages, for iterating
+  # on a fix; such runs report "CI partial", never "CI success"
+  if [ -n "${ONLY:-}" ]; then
+    tasks=$(jq -c --arg only "$ONLY" '[.[] | select(.task as $t | $only | split(",") | index($t))]' <<< "$tasks")
+  fi
+  echo "tasks=$tasks" | tee -a "$GITHUB_OUTPUT"
   ;;
 
 lint)
