@@ -7,7 +7,9 @@ CodeHat is a modified version of Forgejo. The interface, emails, logo and defaul
 Visible text keeps "Forgejo" where it names the upstream project or ecosystem, not the running product:
 
 - the footer credit link "based on Forgejo" (`a.codehat-credit`, locale key `based_on_forgejo`);
-- Forgejo Actions and Forgejo Runner, the `FORGEJO_` variable and secret prefixes;
+- Forgejo Actions and Forgejo Runner, the `FORGEJO_` variable and secret prefixes. CodeHat does not build its own runner, so the runner setup pages (repo, user, org, admin) keep the command `forgejo-runner` and the name "Forgejo Runner" (exact phrases in `brandAllowed`) and link to https://code.forgejo.org/forgejo/runner/releases (key `actions.runners.runner_setup.runner_download`). The example connection name in the YAML is `codehat`;
+- the "Help us translate Forgejo" line on the appearance page (`settings.language.localization_project`): it links to Forgejo's localization documentation (`brandAllowed`);
+- the `forgejo` registry, remote and keyring names in the package snippets (`templates/package/content/{cargo,conan,cran,debian}.tmpl`): users copy them into configs, so they are identifiers;
 - the "Forgejo" migration source and the `forgejo-*` theme names;
 - the `MyForgejoOrganization` / `MyForgejoTeam*` group-map placeholders in the LDAP and OAuth2 auth-source forms (upstream templates kept);
 - documentation links (`AppDocsURL`, "Forgejo documentation"), the translation-project line and the translators' strings `meta.last_line` and `test`;
@@ -79,8 +81,12 @@ New key: `based_on_forgejo` (footer credit).
 - `packages.owner.settings.chef.keypair.description`
 - `actions.runners.runner_details.labels_note`
 - `actions.workflow.permissions_warning`
+- `actions.runners.runner_setup.instruction_replace_connection_name`
+- `actions.runners.runner_setup.instruction_advanced_configurations`
 - `actions.variables.mutation.name_description`
 - `actions.secrets.mutation.name_description`
+
+New key: `actions.runners.runner_setup.runner_download` (runner setup pages).
 
 `error.report_message_githat` (500 page) keeps its pre-rename key name; it shows no product name.
 
@@ -96,6 +102,7 @@ New key: `based_on_forgejo` (footer credit).
 
 - `modules/setting/server.go`: `APP_NAME` defaults to `CodeHat`; `ISSUE_TRACKER_URL` to the CodeHat issues.
 - `modules/setting/ui.go`: `[ui.meta]` `AUTHOR`, `DESCRIPTION`, `KEYWORDS`; `DEFAULT_THEME = company-auto`, and the company themes come first in `THEMES`.
+- `templates/install.tmpl`: the domain and URL placeholders are `git.example.com`.
 - `routers/install/install.go`: the installer's default site title is `CodeHat` and its default slogan `A self-hosted Git forge` (upstream: Forgejo's slogan).
 - `services/mailer/mail.go`: the admin test email's subject and body.
 - `modules/updatechecker`: the `CodeHat-update-checker` User-Agent; `services/cron` checks the CodeHat GitHub releases.
