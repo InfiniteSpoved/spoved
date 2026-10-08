@@ -43,7 +43,7 @@ Placeholders: `<SUP>`, `<OL>`, `<N>` (issue), `<BRANCH>`, `<SHA>` (40 characters
 
 ## Token budget
 
-The 08 Oct cost review (Confluence "CodeHat agent team: structure vs. cost and
+The 08 Oct cost review (Confluence "Spoved agent team: structure vs. cost and
 speed") found:
 - sessions past 300k context took 67% of the spend;
 - leads took 55%;
@@ -135,7 +135,7 @@ The supervisor also:
 - files the user's problem reports and ideas as issues (it doesn't fix them) and
   passes them to the OL;
 - does post-merge steps the classifier blocks for others (merge, archive, messages);
-- after each merge, adds the PR as the first row of the Confluence page "CodeHat:
+- after each merge, adds the PR as the first row of the Confluence page "Spoved:
   features added since the fork" and updates its "Last synced" line, using a subagent;
 - tells the user only merges and what needs them.
 
