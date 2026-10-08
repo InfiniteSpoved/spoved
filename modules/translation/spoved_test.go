@@ -4,10 +4,10 @@
 package translation
 
 import (
-	"encoding/json"
 	"os"
 	"testing"
 
+	"forgejo.org/modules/json"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/translation/i18n"
 
