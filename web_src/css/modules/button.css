@@ -70,13 +70,8 @@
 .button.secondary {
   --button-background: var(--color-button);
   --button-border-color: var(--color-light-border);
-  --button-color: var(--color-text-light);
+  --button-color: var(--color-text);
   --button-outline-color: oklch(from var(--button-border-color) l c h / 0.1);
-
-  &:hover,
-  &:focus {
-    --button-color: var(--color-text);
-  }
 }
 
 .button.danger {

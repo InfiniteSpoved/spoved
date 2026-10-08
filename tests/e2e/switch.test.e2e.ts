@@ -18,8 +18,8 @@ test.describe('Switch CSS properties', () => {
   const normalMargin = '0px';
   const normalPadding = '15.75px';
 
-  const specialLeftMargin = '-4px';
-  const specialPadding = '19.75px';
+  const specialLeftMargin = '-6px';
+  const specialPadding = '21.75px';
 
   async function evaluateSwitchItem(page: Page, selector: string, hover, isActive: boolean, marginLeft, marginRight, paddingLeft, paddingRight: string, itemHeight: number) {
     const item = page.locator(selector);
@@ -136,12 +136,20 @@ test.describe('Switch CSS properties', () => {
 
     test('Notifications page', async ({page}) => {
       // Test counter contrast boost in active and :hover items
-      const labelBgNormal = 'rgba(202, 202, 202, 0.482)';
-      const labelBgContrast = 'rgb(202, 202, 202)';
       const counter = page.locator('a.item[href="/notifications?q=unread"] > .ui.label');
 
       // On Unread tab (item with counter is active)
       await page.goto('/notifications?q=unread');
+
+      // the browser-resolved theme colors, so the expected values follow the theme
+      const [labelBgNormal, labelBgContrast] = await Promise.all(['--color-label-bg', '--color-label-bg-alt'].map((name) => page.locator('html').evaluate((el, variable) => {
+        const probe = document.createElement('div');
+        probe.style.backgroundColor = `var(${variable}, var(--color-label-bg))`;
+        el.append(probe);
+        const color = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return color;
+      }, name)));
 
       // * not hovering => boosted because .active
       expect(await counter.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(labelBgContrast);

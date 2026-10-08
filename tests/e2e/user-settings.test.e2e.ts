@@ -533,7 +533,7 @@ test('User: Add authorized integration (actions local)', async ({browser}, worke
   await expect(page.locator('.flash-error')).toContainText('Forgejo Actions source repository must be selected.');
 
   // Verify that initial search results for the "Select repository:" section are visible
-  const actionsLocalSectionGetter = async () => await page.locator('.ui.attached.segment').filter({has: page.locator('p', {hasText: 'Forgejo Actions will be able to access Forgejo'})});
+  const actionsLocalSectionGetter = async () => await page.locator('.ui.attached.segment').filter({has: page.locator('p', {hasText: 'Actions will be able to access'})});
   let actionsLocalSection = await actionsLocalSectionGetter();
   await expect(actionsLocalSection.getByText('user2/diff-test')).toBeVisible();
   await expect(actionsLocalSection.getByText('user2/huge-diff-test')).toBeVisible(); // another repo, will be used to verify search worked

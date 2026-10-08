@@ -58,7 +58,8 @@ function togglePreviewDisplay(previewable: boolean) {
 }
 
 export async function createCodeEditor(textarea: HTMLTextAreaElement, filenameInput: HTMLInputElement): Promise<EditorView> {
-  const filename = basename(filenameInput.value);
+  const initialFilename = filenameInput.value;
+  const filename = basename(initialFilename);
   const previewableExts = new Set((textarea.getAttribute('data-previewable-extensions') || '').split(','));
   const lineWrapExts = (textarea.getAttribute('data-line-wrap-extensions') || '').split(',');
   const previewable = previewableExts.has(extname(filename));
@@ -71,12 +72,15 @@ export async function createCodeEditor(textarea: HTMLTextAreaElement, filenameIn
     ...getEditorConfigOptions(editorConfig),
   });
 
-  filenameInput.addEventListener('input', onInputDebounce(async () => {
+  const onFilenameChange = async () => {
     const filename = filenameInput.value;
     const previewable = previewableExts.has(extname(filename));
     togglePreviewDisplay(previewable);
     await updateEditor(editor, filename, lineWrapExts);
-  }));
+  };
+  filenameInput.addEventListener('input', onInputDebounce(onFilenameChange));
+  // the filename may have been typed while the editor was loading, before the listener existed
+  if (filenameInput.value !== initialFilename) await onFilenameChange();
 
   const searchButton = document.querySelector('#editor-find');
   searchButton.addEventListener('click', () => {
