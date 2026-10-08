@@ -35,7 +35,7 @@ func cmdDoctor() *cli.Command {
 	return &cli.Command{
 		Name:        "doctor",
 		Usage:       "Diagnose and optionally fix problems, convert or re-create database tables",
-		Description: "A command to diagnose problems with the current Forgejo instance according to the given configuration. Some problems can optionally be fixed by modifying the database or data storage.",
+		Description: "A command to diagnose problems with the current CodeHat instance according to the given configuration. Some problems can optionally be fixed by modifying the database or data storage.",
 
 		Commands: []*cli.Command{
 			cmdDoctorCheck(),
@@ -52,7 +52,7 @@ func cmdDoctorCheck() *cli.Command {
 	return &cli.Command{
 		Name:        "check",
 		Usage:       "Diagnose and optionally fix problems",
-		Description: "A command to diagnose problems with the current Forgejo instance according to the given configuration. Some problems can optionally be fixed by modifying the database or data storage.",
+		Description: "A command to diagnose problems with the current CodeHat instance according to the given configuration. Some problems can optionally be fixed by modifying the database or data storage.",
 		Before:      noDanglingArgs,
 		Action:      runDoctorCheck,
 		Flags: []cli.Flag{
@@ -100,7 +100,7 @@ func cmdRecreateTable() *cli.Command {
 				Usage: "Print SQL commands sent",
 			},
 		},
-		Description: `The database definitions Forgejo uses change across versions, sometimes changing default values and leaving old unused columns.
+		Description: `The database definitions CodeHat uses change across versions, sometimes changing default values and leaving old unused columns.
 
 This command will cause Xorm to recreate tables, copying over the data and deleting the old table.
 
@@ -114,7 +114,7 @@ func cmdAvatarStripExif() *cli.Command {
 		Name:  "avatar-strip-exif",
 		Usage: "Strip EXIF metadata from all images in the avatar storage [unsupported]",
 		Description: `Stripping EXIF metadata is not currently supported. The capability was
-available in previous Forgejo releases, but has been removed. This command
+available in previous CodeHat releases, but has been removed. This command
 may be re-enabled in the future if the capability can be supported again.`,
 		Before: noDanglingArgs,
 		Action: runAvatarStripExif,
@@ -125,7 +125,7 @@ func cmdResizeAvatars() *cli.Command {
 	return &cli.Command{
 		Name:  "avatar-resize",
 		Usage: "Generate resized versions of user or repository avatars",
-		Description: `Forgejo serves small versions of avatars for inclusion in the web UI.
+		Description: `CodeHat serves small versions of avatars for inclusion in the web UI.
 
 Those rescaled versions are computed on-demand and cached in the avatar storage.
 
@@ -149,16 +149,16 @@ func cmdCleanupCommitStatuses() *cli.Command {
 	return &cli.Command{
 		Name:  "cleanup-commit-status",
 		Usage: "Cleanup extra records in commit_status table",
-		Description: `Forgejo suffered from a bug which caused the creation of more entries in the
+		Description: `CodeHat suffered from a bug which caused the creation of more entries in the
 "commit_status" table than necessary. This operation removes the redundant
 data caused by the bug. Removing this data is almost always safe.
 These redundant records can be accessed by users through the API, making it
 possible, but unlikely, that removing it could have an impact to
 integrating services (API: /repos/{owner}/{repo}/commits/{ref}/statuses).
 
-It is safe to run while Forgejo is online.
+It is safe to run while CodeHat is online.
 
-On very large Forgejo instances, the performance of operation will improve
+On very large CodeHat instances, the performance of operation will improve
 if the buffer-size option is used with large values. Approximately 130 MB of
 memory is required for every 100,000 records in the buffer.
 

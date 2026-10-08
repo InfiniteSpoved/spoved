@@ -38,8 +38,8 @@ var PIDFile = "/run/gitea.pid"
 func cmdWeb() *cli.Command {
 	return &cli.Command{
 		Name:  "web",
-		Usage: "Start the Forgejo web server",
-		Description: `The Forgejo web server is the only thing you need to run,
+		Usage: "Start the CodeHat web server",
+		Description: `The CodeHat web server is the only thing you need to run,
 and it takes care of all the other things for you`,
 		Before: multipleBefore(noDanglingArgs, PrepareConsoleLoggerLevel(log.INFO)),
 		Action: runWeb,

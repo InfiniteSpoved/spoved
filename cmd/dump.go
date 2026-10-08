@@ -163,9 +163,9 @@ func getArchiverByType(outType string) (archives.ArchiverAsync, error) {
 func cmdDump() *cli.Command {
 	return &cli.Command{
 		Name:  "dump",
-		Usage: "Dump Forgejo files and database",
+		Usage: "Dump CodeHat files and database",
 		Description: `Dump compresses all related files and database into zip file.
-It can be used for backup and capture Forgejo server image to send to maintainer`,
+It can be used for backup and capture CodeHat server image to send to maintainer`,
 		Before: noDanglingArgs,
 		Action: runDump,
 		Flags: []cli.Flag{

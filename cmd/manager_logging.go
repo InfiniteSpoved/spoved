@@ -71,7 +71,7 @@ func subcmdLogging() *cli.Command {
 		Commands: []*cli.Command{
 			{
 				Name:  "pause",
-				Usage: "Pause logging (Forgejo will buffer logs up to a certain point and will drop them after that point)",
+				Usage: "Pause logging (CodeHat will buffer logs up to a certain point and will drop them after that point)",
 				Flags: []cli.Flag{
 					&cli.BoolFlag{
 						Name: "debug",
@@ -91,7 +91,7 @@ func subcmdLogging() *cli.Command {
 				Action: runResumeLogging,
 			}, {
 				Name:  "release-and-reopen",
-				Usage: "Cause Forgejo to release and re-open files used for logging",
+				Usage: "Cause CodeHat to release and re-open files used for logging",
 				Flags: []cli.Flag{
 					&cli.BoolFlag{
 						Name: "debug",

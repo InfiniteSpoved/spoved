@@ -13,7 +13,7 @@ Visible text keeps "Forgejo" where it names the upstream project or ecosystem, n
 - the "Forgejo" migration source and the `forgejo-*` theme names;
 - the `MyForgejoOrganization` / `MyForgejoTeam*` group-map placeholders in the LDAP and OAuth2 auth-source forms (upstream templates kept);
 - documentation links (`AppDocsURL`, "Forgejo documentation"), the translation-project line and the translators' strings `meta.last_line` and `test`;
-- the API (`/api/forgejo/v1`, swagger titles), CLI output, log messages, git hook messages (`remote: Forgejo: …`), the git `user.name`, the `X-Mailer` header and the migration/LFS User-Agents.
+- the API (`/api/forgejo/v1`, swagger titles), CLI output other than help text, log messages, git hook messages (`remote: Forgejo: …`), the git `user.name`, the `X-Mailer` header and the migration/LFS User-Agents.
 
 `TestBranding` (`tests/integration/branding_test.go`) fails on any other visible "Forgejo" or "GitHat"; its `brandAllowed` list holds the exact phrases above that appear on the pages it checks (group-map placeholders, "Forgejo documentation", "Forgejo Runner", `forgejo-runner`, "Forgejo Actions", "Help us translate Forgejo"). The case-sensitive guard does not see lowercase names, so the package snippet names need no entry and the runner pages assert that `forgejo:` is absent.
 
@@ -104,6 +104,7 @@ New key: `actions.runners.runner_setup.runner_download` (runner setup pages).
 - `modules/setting/ui.go`: `[ui.meta]` `AUTHOR`, `DESCRIPTION`, `KEYWORDS`; `DEFAULT_THEME = company-auto`, and the company themes come first in `THEMES`.
 - `templates/install.tmpl`: the domain and URL placeholders are `git.example.com`.
 - `routers/install/install.go`: the installer's default site title is `CodeHat` and its default slogan `A self-hosted Git forge` (upstream: Forgejo's slogan).
+- `cmd/*.go`: the Usage/Description strings of the CLI help say CodeHat ("Forgejo Actions" stays), checked by `TestHelpBranding` (`cmd/branding_test.go`). The `forgejo` and `forgejo-cli` subcommand trees in `cmd/forgejo` keep upstream's help.
 - `services/mailer/mail.go`: the admin test email's subject and body.
 - `modules/updatechecker`: the `CodeHat-update-checker` User-Agent; `services/cron` checks the CodeHat GitHub releases.
 - `assets/logo.svg`, `assets/favicon.svg`: the CodeHat mark. `make generate-images` writes `public/assets/img/{logo,favicon}.{svg,png}`, `apple-touch-icon.png` and `avatar_default.png`; the PWA manifest uses `logo.png`/`logo.svg`.

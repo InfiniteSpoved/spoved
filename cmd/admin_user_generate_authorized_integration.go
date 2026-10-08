@@ -23,9 +23,9 @@ import (
 func microcmdUserCreateAuthorizedIntegration() *cli.Command {
 	return &cli.Command{
 		Name: "create-authorized-integration",
-		Description: `Creates an authorized integration. Authorized integrations allow Forgejo to
+		Description: `Creates an authorized integration. Authorized integrations allow CodeHat to
 receive JWTs from external sources, validate their claims against
-user-defined rules, and grant access to Forgejo's API on behalf of a user.
+user-defined rules, and grant access to CodeHat's API on behalf of a user.
 
 The issuer may be set to "urn:forgejo:authorized-integrations:actions"
 to support JWTs from the local instance's Forgejo Actions, utilizing the
