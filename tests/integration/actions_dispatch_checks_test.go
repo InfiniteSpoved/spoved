@@ -36,6 +36,8 @@ func TestActionsWorkflowDispatchChecks(t *testing.T) {
 			"release.yml":  "\n  release:\n    types: [published]",
 			"call.yml":     "[workflow_call]",
 			"dispatch.yml": "[workflow_dispatch]",
+			"scalar.yml":   "workflow_dispatch",
+			"null.yml":     "\n  workflow_dispatch:",
 		} {
 			files[".forgejo/workflows/"+name] = forgery.MapFile(fmt.Sprintf("name: %s\non: %s\njobs:\n  t:\n    runs-on: docker\n    steps:\n      - run: echo t\n", name, on))
 		}
@@ -73,7 +75,9 @@ func TestActionsWorkflowDispatchChecks(t *testing.T) {
 			return bwFlash(session)
 		}
 		setDisabled := func(workflow string, disabled bool) {
-			ru, err := repo.GetUnit(t.Context(), unit_model.TypeActions)
+			fresh, err := repo_model.GetRepositoryByID(t.Context(), repo.ID)
+			require.NoError(t, err)
+			ru, err := fresh.GetUnit(t.Context(), unit_model.TypeActions)
 			require.NoError(t, err)
 			cfg := ru.ActionsConfig()
 			if disabled {
@@ -93,6 +97,14 @@ func TestActionsWorkflowDispatchChecks(t *testing.T) {
 					assert.Contains(t, webDispatch(workflow, ref), "no workflow_dispatch trigger", "%s@%s", workflow, ref)
 					assert.Equal(t, before, countRuns(), "%s@%s", workflow, ref)
 				}
+			}
+		})
+
+		t.Run("accepted forms", func(t *testing.T) {
+			for _, workflow := range []string{"scalar.yml", "null.yml"} {
+				before := countRuns()
+				apiDispatch(workflow, repo.DefaultBranch, token, http.StatusNoContent)
+				assert.Equal(t, before+1, countRuns(), workflow)
 			}
 		})
 
