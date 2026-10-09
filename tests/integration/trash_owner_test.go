@@ -123,7 +123,7 @@ func TestTrashOrgDeleteAndRestore(t *testing.T) {
 	})
 
 	t.Run("a repository of the group is not restored alone", func(t *testing.T) {
-		require.ErrorIs(t, trash_service.Restore(t.Context(), admin, 3), trash_service.ErrTrashedWithOrg)
+		require.ErrorIs(t, trash_service.RestoreRepo(t.Context(), admin, 3, trash_service.RestoreOptions{}), trash_service.ErrTrashedWithOrg)
 		MakeRequest(t, NewRequest(t, "POST", "/api/v1/admin/trash/repo/3/restore").AddTokenAuth(adminTrashToken(t)), http.StatusUnprocessableEntity)
 		loginUser(t, "user1").MakeRequest(t, NewRequest(t, "POST", "/admin/trash/3/restore"), http.StatusSeeOther)
 		assert.True(t, trashRepoByID(t, 3).IsTrashed())
@@ -150,7 +150,7 @@ func TestTrashOrgDeleteAndRestore(t *testing.T) {
 	}
 
 	// the repository trashed earlier restores normally once its owner is back
-	require.NoError(t, trash_service.Restore(t.Context(), admin, 5))
+	require.NoError(t, trash_service.RestoreRepo(t.Context(), admin, 5, trash_service.RestoreOptions{}))
 	assert.False(t, trashRepoByID(t, 5).IsTrashed())
 }
 
@@ -416,7 +416,7 @@ func TestTrashRestoreNewOwnerAndName(t *testing.T) {
 	require.Positive(t, teamLinks)
 
 	t.Run("needs a new owner while the owner is in the trash", func(t *testing.T) {
-		require.ErrorIs(t, trash_service.Restore(ctx, admin, 5), trash_service.ErrNeedNewOwner)
+		require.ErrorIs(t, trash_service.RestoreRepo(ctx, admin, 5, trash_service.RestoreOptions{}), trash_service.ErrNeedNewOwner)
 		MakeRequest(t, NewRequest(t, "POST", "/api/v1/admin/trash/repo/5/restore").AddTokenAuth(adminTrashToken(t)), http.StatusUnprocessableEntity)
 		assert.True(t, trashRepoByID(t, 5).IsTrashed())
 	})
@@ -670,7 +670,7 @@ func TestTrashUserTombstoneCleanup(t *testing.T) {
 	require.NoError(t, trash_service.Purge(ctx, admin, 45))
 	assert.True(t, trashedAccount(t, trashUserID).IsTrashed(), "still owns two repositories in the trash")
 
-	require.ErrorIs(t, trash_service.Restore(ctx, admin, 44), trash_service.ErrNeedNewOwner)
+	require.ErrorIs(t, trash_service.RestoreRepo(ctx, admin, 44, trash_service.RestoreOptions{}), trash_service.ErrNeedNewOwner)
 	require.NoError(t, trash_service.RestoreRepo(ctx, admin, 44, trash_service.RestoreOptions{NewOwner: "user4"}))
 	assert.True(t, trashedAccount(t, trashUserID).IsTrashed())
 	assert.Equal(t, int64(4), trashRepoByID(t, 44).OwnerID)

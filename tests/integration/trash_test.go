@@ -267,7 +267,7 @@ func TestTrashRestore(t *testing.T) {
 
 		require.NoError(t, repo_service.TrashRepository(t.Context(), admin, repo3))
 		assert.Equal(t, links, unittest.GetCount(t, &organization.TeamRepo{RepoID: repo3.ID}), "trashing keeps the team links")
-		require.NoError(t, trash_service.Restore(t.Context(), admin, repo3.ID))
+		require.NoError(t, trash_service.RestoreRepo(t.Context(), admin, repo3.ID, trash_service.RestoreOptions{}))
 		assert.Equal(t, links, unittest.GetCount(t, &organization.TeamRepo{RepoID: repo3.ID}))
 	})
 }
@@ -367,13 +367,13 @@ func TestTrashRace(t *testing.T) {
 
 	t.Run("sequential", func(t *testing.T) {
 		moveToTrash(t)
-		require.NoError(t, trash_service.Restore(t.Context(), admin, trashRepoID))
-		require.ErrorIs(t, trash_service.Restore(t.Context(), admin, trashRepoID), trash_service.ErrTrashConflict)
+		require.NoError(t, trash_service.RestoreRepo(t.Context(), admin, trashRepoID, trash_service.RestoreOptions{}))
+		require.ErrorIs(t, trash_service.RestoreRepo(t.Context(), admin, trashRepoID, trash_service.RestoreOptions{}), trash_service.ErrTrashConflict)
 		require.ErrorIs(t, trash_service.Purge(t.Context(), admin, trashRepoID), trash_service.ErrTrashConflict)
 
 		moveToTrash(t)
 		require.NoError(t, trash_service.Purge(t.Context(), admin, trashRepoID))
-		require.Error(t, trash_service.Restore(t.Context(), admin, trashRepoID))
+		require.Error(t, trash_service.RestoreRepo(t.Context(), admin, trashRepoID, trash_service.RestoreOptions{}))
 		require.Error(t, trash_service.Purge(t.Context(), admin, trashRepoID))
 	})
 }
@@ -388,7 +388,7 @@ func TestTrashRaceConcurrent(t *testing.T) {
 	for i := range results {
 		wg.Go(func() {
 			if i%2 == 0 {
-				results[i] = trash_service.Restore(t.Context(), admin, trashRepoID)
+				results[i] = trash_service.RestoreRepo(t.Context(), admin, trashRepoID, trash_service.RestoreOptions{})
 			} else {
 				results[i] = trash_service.Purge(t.Context(), admin, trashRepoID)
 			}
@@ -502,7 +502,7 @@ func TestTrashTeamCounts(t *testing.T) {
 
 	require.NoError(t, repo_service.TrashRepository(t.Context(), admin, repo))
 	assert.Equal(t, minusOne, counts())
-	require.NoError(t, trash_service.Restore(t.Context(), admin, repo.ID))
+	require.NoError(t, trash_service.RestoreRepo(t.Context(), admin, repo.ID, trash_service.RestoreOptions{}))
 	assert.Equal(t, before, counts())
 	require.NoError(t, repo_service.TrashRepository(t.Context(), admin, repo))
 	require.NoError(t, trash_service.Purge(t.Context(), admin, repo.ID))

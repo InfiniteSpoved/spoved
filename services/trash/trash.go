@@ -164,11 +164,6 @@ func daysRemaining(trashed timeutil.TimeStamp) int {
 	return int((left + 24*time.Hour - 1) / (24 * time.Hour))
 }
 
-// Restore takes the repository out of the trash: same ID, owner, name and data.
-func Restore(ctx context.Context, doer *user_model.User, id int64) error {
-	return RestoreRepo(ctx, doer, id, RestoreOptions{})
-}
-
 // RestoreRepo takes the repository out of the trash, optionally under a new owner and/or name. A repository
 // whose owner is in the trash needs a new owner. The repository stays hidden until it is in place.
 func RestoreRepo(ctx context.Context, doer *user_model.User, id int64, opts RestoreOptions) error {
