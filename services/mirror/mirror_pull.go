@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"forgejo.org/modules/proxy"
 	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/sync"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 	migrations_allowlist "forgejo.org/services/migrations/allowlist"
@@ -310,10 +312,12 @@ func recheckPullPermitted(ctx context.Context, m *repo_model.Mirror, remoteURL *
 	return migrations_allowlist.IsMigrateURLAllowed(remoteURL.String(), m.Repo.Owner)
 }
 
-// runSync returns true if sync finished without error.
 // addFetchArgs adds the fetch arguments. Without filters it is the plain `fetch [--prune] --tags origin`; with filters
 // only the given refspecs are fetched (never an empty list, which would make git fall back to the configured mirror
-// refspec), and tags come only from the tag filter.
+// refspec), and tags come only from the tag filter. Unlike the old `--tags`, the filtered refspecs are forced (`+`),
+// so a moved upstream tag is updated, as a branch is.
+var pullSyncLocks sync.MutexMap
+
 func addFetchArgs(cmd *git.Command, m *repo_model.Mirror, refspecs []string) {
 	cmd.AddArguments("fetch")
 	if m.EnablePrune {
@@ -326,6 +330,7 @@ func addFetchArgs(cmd *git.Command, m *repo_model.Mirror, refspecs []string) {
 	cmd.AddArguments("--no-tags").AddDynamicArguments(m.GetRemoteName()).AddDashesAndList(refspecs...)
 }
 
+// runSync returns true if sync finished without error.
 func runSync(ctx context.Context, m *repo_model.Mirror) ([]*mirrorSyncResult, bool) {
 	repoPath := m.Repo.RepoPath()
 	wikiPath := m.Repo.WikiPath()
@@ -567,12 +572,15 @@ func runSync(ctx context.Context, m *repo_model.Mirror) ([]*mirrorSyncResult, bo
 		cache.Remove(m.Repo.GetCommitsCountCacheKey(branch.Name, true))
 	}
 
+	// also clears the error after the filters were removed
+	filterErr := ""
 	if m.HasFilter() {
-		if fe := filterErrorFor(m, upstream.head); fe != m.FilterError {
-			m.FilterError = fe
-			if err := repo_model.UpdateMirrorCols(ctx, m, "filter_error"); err != nil {
-				log.Error("SyncMirrors [repo: %-v]: failed to store the filter error: %v", m.Repo, err)
-			}
+		filterErr = filterErrorFor(m, upstream.head)
+	}
+	if filterErr != m.FilterError {
+		m.FilterError = filterErr
+		if err := repo_model.UpdateMirrorCols(ctx, m, "filter_error"); err != nil {
+			log.Error("SyncMirrors [repo: %-v]: failed to store the filter error: %v", m.Repo, err)
 		}
 	}
 
@@ -583,6 +591,16 @@ func runSync(ctx context.Context, m *repo_model.Mirror) ([]*mirrorSyncResult, bo
 // SyncPullMirror starts the sync of the pull mirror and schedules the next run.
 func SyncPullMirror(ctx context.Context, repoID int64) bool {
 	log.Trace("SyncMirrors [repo_id: %v]", repoID)
+
+	// One sync per repository at a time: applyRefFilter repacks and prunes, which must not overlap a fetch. The mirror
+	// queue only deduplicates waiting requests, so this guards a request queued while a sync runs.
+	locked, unlock := pullSyncLocks.TryLock(strconv.FormatInt(repoID, 10))
+	defer unlock()
+	if !locked {
+		log.Trace("SyncMirrors [repo_id: %v]: already syncing, skipping", repoID)
+		return false
+	}
+
 	defer func() {
 		err := recover()
 		if err == nil {

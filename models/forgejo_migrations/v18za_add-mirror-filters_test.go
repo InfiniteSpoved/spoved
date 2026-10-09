@@ -20,6 +20,15 @@ type v18zaMirrorBefore struct {
 
 func (v18zaMirrorBefore) TableName() string { return "mirror" }
 
+func Test_migrationFilenameRegexMultiLetter(t *testing.T) {
+	for file, group := range map[string]string{"/m/v18z_add-trash.go": "v18z", "/m/v18za_x.go": "v18za", "/m/v18zb_y.go": "v18zb"} {
+		match := migrationFilenameRegex.FindStringSubmatch(file)
+		require.NotEmpty(t, match, file)
+		assert.Equal(t, group, match[1])
+	}
+	assert.Empty(t, migrationFilenameRegex.FindStringSubmatch("/m/v18_x.go"))
+}
+
 // An existing pull mirror gets empty filters, i.e. it keeps mirroring everything.
 func Test_addMirrorFilters(t *testing.T) {
 	x, deferable := migration_tests.PrepareTestEnv(t, 0, new(v18zaMirrorBefore))

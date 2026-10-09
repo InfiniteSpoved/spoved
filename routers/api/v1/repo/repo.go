@@ -1265,8 +1265,14 @@ func updateMirror(ctx *context.APIContext, opts api.EditRepoOption) error {
 		mirror.BranchFilter, mirror.TagFilter = branchFilter, tagFilter
 	}
 
+	cols := []string{"interval", "next_update_unix", "enable_prune", "branch_filter", "tag_filter"}
+	if !mirror.HasFilter() && mirror.FilterError != "" { // nothing is filtered any more
+		mirror.FilterError = ""
+		cols = append(cols, "filter_error")
+	}
+
 	// finally update the mirror in the DB
-	if err := repo_model.UpdateMirrorCols(ctx, mirror, "interval", "next_update_unix", "enable_prune", "branch_filter", "tag_filter"); err != nil {
+	if err := repo_model.UpdateMirrorCols(ctx, mirror, cols...); err != nil {
 		log.Error("Failed to Set Mirror Interval: %s", err)
 		ctx.Error(http.StatusUnprocessableEntity, "MirrorInterval", err)
 		return err

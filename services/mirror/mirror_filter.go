@@ -35,6 +35,13 @@ type upstreamRefs struct {
 	present map[string]bool
 }
 
+// addLsRemoteArgs adds `ls-remote --symref -- <remote name> HEAD <exact refs>`. There is no --heads/--tags (they would
+// hide the HEAD line) and the remote is the configured one by name, never a URL.
+func addLsRemoteArgs(cmd *git.Command, m *repo_model.Mirror) *git.Command {
+	return cmd.AddArguments("ls-remote", "--symref").
+		AddDashesAndList(append([]string{m.GetRemoteName(), "HEAD"}, m.ExactRefs()...)...)
+}
+
 // lsRemoteUpstream asks the remote (by name, so the stored URL settings apply) for HEAD and the exact refs of the
 // filters. Patterns of `ls-remote` match the tail of a ref, so the result is only used by exact comparison.
 func lsRemoteUpstream(ctx context.Context, m *repo_model.Mirror, remoteAddr string, env []string, timeout time.Duration) (*upstreamRefs, error) {
@@ -47,8 +54,7 @@ func lsRemoteUpstream(ctx context.Context, m *repo_model.Mirror, remoteAddr stri
 
 	stdout := &cappedWriter{}
 	stderr := &cappedWriter{}
-	if err := cmd.AddArguments("ls-remote", "--symref").
-		AddDashesAndList(append([]string{m.GetRemoteName(), "HEAD"}, m.ExactRefs()...)...).
+	if err := addLsRemoteArgs(cmd, m).
 		SetDescription(fmt.Sprintf("Mirror.lsRemote: %s", m.Repo.FullName())).
 		Run(&git.RunOpts{Timeout: timeout, Dir: m.Repo.RepoPath(), Env: env, Stdout: stdout, Stderr: stderr}); err != nil {
 		return nil, fmt.Errorf("ls-remote: %w: %s", err, stderr.String())
@@ -84,7 +90,9 @@ func filterErrorFor(m *repo_model.Mirror, head string) string {
 }
 
 // applyRefFilter deletes the local refs the mirror's filters exclude: branches and tags that don't match, and every
-// other ref (refs/pull, refs/changes, notes, ...). HEAD's target and the default branch are always kept. If something
+// other ref (refs/pull, refs/changes, notes, ...). HEAD's target and the default branch are always kept. A mirror has
+// no pull requests of its own (CanEnablePulls), so no AGit pull request ref can be among them; the notification loop
+// in SyncPullMirror skips refs/pull anyway. If something
 // was deleted, the objects that are no longer reachable are removed too, so an excluded commit can't be read by its
 // SHA. It returns the deletions for the usual ref-deleted notifications; the caller rewrites the commit graph.
 func applyRefFilter(ctx context.Context, m *repo_model.Mirror, repoPath string) ([]*mirrorSyncResult, error) {

@@ -489,7 +489,12 @@ func SettingsPost(ctx *context.Context) {
 		pullMirror.EnablePrune = form.EnablePrune
 		pullMirror.Interval = interval
 		pullMirror.ScheduleNextUpdate()
-		if err := repo_model.UpdateMirrorCols(ctx, pullMirror, "enable_prune", "interval", "next_update_unix", "branch_filter", "tag_filter"); err != nil {
+		cols := []string{"enable_prune", "interval", "next_update_unix", "branch_filter", "tag_filter"}
+		if !pullMirror.HasFilter() && pullMirror.FilterError != "" { // nothing is filtered any more
+			pullMirror.FilterError = ""
+			cols = append(cols, "filter_error")
+		}
+		if err := repo_model.UpdateMirrorCols(ctx, pullMirror, cols...); err != nil {
 			ctx.ServerError("UpdateMirror", err)
 			return
 		}

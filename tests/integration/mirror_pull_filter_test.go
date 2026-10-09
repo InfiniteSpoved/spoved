@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"forgejo.org/models/auth"
 	"forgejo.org/models/db"
@@ -249,6 +250,22 @@ func TestMirrorPullFilter(t *testing.T) {
 		setFilter(t, repo, true, "main,dev", "")
 		m = syncFilterMirror(t, repo)
 		assert.Empty(t, m.FilterError)
+
+		// removing the filters clears a stale error too
+		setFilter(t, repo, true, "main,release/*", "")
+		assert.Equal(t, "dev", syncFilterMirror(t, repo).FilterError)
+		setFilter(t, repo, true, "", "")
+		assert.Empty(t, syncFilterMirror(t, repo).FilterError)
+	})
+
+	t.Run("a trashed repository isn't synced or touched", func(t *testing.T) {
+		u := newFilterUpstream(t)
+		repo := newFilterMirror(t, "filter-trashed", u, "", "")
+		setFilter(t, repo, true, "main", "")
+		repo.TrashedUnix = 1
+		require.NoError(t, repo_model.UpdateRepositoryCols(t.Context(), repo, "trashed_unix"))
+		assert.False(t, mirror_service.SyncPullMirror(t.Context(), repo.ID))
+		assert.Contains(t, filterMirrorRefs(t, repo), "release/1", "nothing was deleted")
 	})
 
 	t.Run("clone takes the first matching branch when HEAD is excluded", func(t *testing.T) {
@@ -354,19 +371,27 @@ func TestMirrorPullFilterEntryPoints(t *testing.T) {
 		assert.Equal(t, "main,hotfix/*", stored().BranchFilter)
 	})
 
-	t.Run("API: an archived repository's filters can't be changed", func(t *testing.T) {
+	t.Run("API: an archived repository's filters can't be changed, and no sync runs", func(t *testing.T) {
+		u.branch(t, "hotfix/9")
 		repo.IsArchived = true
 		require.NoError(t, repo_model.UpdateRepositoryCols(t.Context(), repo, "is_archived"))
-		session.MakeRequest(t, NewRequestWithJSON(t, "PATCH", apiURL, map[string]any{"mirror_branch_filter": "main"}).AddTokenAuth(token), http.StatusUnprocessableEntity)
+		patch := map[string]any{"mirror_branch_filter": "main,hotfix/*,more"}
+		session.MakeRequest(t, NewRequestWithJSON(t, "PATCH", apiURL, patch).AddTokenAuth(token), http.StatusUnprocessableEntity)
+		assert.Equal(t, "main,hotfix/*", stored().BranchFilter)
+		assert.NotContains(t, filterMirrorRefs(t, repo), "hotfix/9")
+
+		// the same change on a live repository does queue a sync, which fetches the new match
 		repo.IsArchived = false
 		require.NoError(t, repo_model.UpdateRepositoryCols(t.Context(), repo, "is_archived"))
+		session.MakeRequest(t, NewRequestWithJSON(t, "PATCH", apiURL, patch).AddTokenAuth(token), http.StatusOK)
+		assert.Eventually(t, func() bool { return slices.Contains(filterMirrorRefs(t, repo), "hotfix/9") }, 10*time.Second, 100*time.Millisecond)
 	})
 
 	t.Run("API: only admins see the filters, and webhooks never carry them", func(t *testing.T) {
 		resp := session.MakeRequest(t, NewRequest(t, "GET", apiURL).AddTokenAuth(token), http.StatusOK)
 		var got api.Repository
 		DecodeJSON(t, resp, &got)
-		assert.Equal(t, "main,hotfix/*", got.MirrorBranchFilter)
+		assert.Equal(t, "main,hotfix/*,more", got.MirrorBranchFilter)
 
 		// user4 can read the (public) repository but isn't an admin of it
 		token4 := getTokenForLoggedInUser(t, loginUser(t, "user4"), auth.AccessTokenScopeReadRepository)
@@ -381,6 +406,24 @@ func TestMirrorPullFilterEntryPoints(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotContains(t, string(payload), "mirror_branch_filter")
 		assert.NotContains(t, string(payload), "mirror_filter_error")
+	})
+
+	t.Run("removing the filters clears the filter error (web and API)", func(t *testing.T) {
+		for _, clear := range []func(){
+			func() {
+				session.MakeRequest(t, NewRequestWithValues(t, "POST", settingsURL, form("", "")), http.StatusSeeOther)
+			},
+			func() {
+				session.MakeRequest(t, NewRequestWithJSON(t, "PATCH", apiURL, map[string]any{"mirror_branch_filter": "", "mirror_tag_filter": ""}).AddTokenAuth(token), http.StatusOK)
+			},
+		} {
+			m := stored()
+			m.BranchFilter, m.FilterError = "main", "dev"
+			require.NoError(t, repo_model.UpdateMirrorCols(t.Context(), m, "branch_filter", "filter_error"))
+			clear()
+			assert.Empty(t, stored().BranchFilter)
+			assert.Empty(t, stored().FilterError)
+		}
 	})
 
 	t.Run("a finishing sync doesn't revert a filter saved meanwhile", func(t *testing.T) {
@@ -413,10 +456,14 @@ func TestMirrorPullFilterMigrateWeb(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	session := loginUser(t, "user2")
 	migrate := func(values map[string]string) string {
-		values["service"], values["uid"], values["repo_name"], values["clone_addr"] = "1", "2", "migrate-filter-web", "https://example.com/repo.git"
+		if values["service"] == "" {
+			values["service"] = "1"
+		}
+		values["uid"], values["repo_name"], values["clone_addr"] = "2", "migrate-filter-web", "https://example.com/repo.git"
 		return session.MakeRequest(t, NewRequestWithValues(t, "POST", "/repo/migrate", values), http.StatusOK).Body.String()
 	}
 	assert.Contains(t, migrate(map[string]string{"mirror": "on", "mirror_branch_filter": "a:b"}), "a:b")
 	assert.Contains(t, migrate(map[string]string{"mirror": "on", "mirror_tag_filter": "a,,b"}), "empty pattern")
 	assert.Contains(t, migrate(map[string]string{"mirror_tag_filter": "v*"}), "only for pull mirrors")
+	assert.Contains(t, migrate(map[string]string{"mirror": "on", "service": "2", "mirror_tag_filter": "v*"}), "only for pull mirrors")
 }

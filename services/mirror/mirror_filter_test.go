@@ -33,6 +33,23 @@ func TestAddFetchArgs(t *testing.T) {
 	assert.True(t, strings.HasSuffix(cmd.String(), "fetch --prune --no-tags origin -- +refs/heads/main:refs/heads/main +refs/tags/*:refs/tags/*"), cmd.String())
 }
 
+func TestAddLsRemoteArgs(t *testing.T) {
+	cmd := git.NewCommand(context.Background())
+	addLsRemoteArgs(cmd, &repo_model.Mirror{BranchFilter: "main,release/*,dev", TagFilter: "v1"})
+	assert.True(t, strings.HasSuffix(cmd.String(), "ls-remote --symref -- origin HEAD refs/heads/main refs/heads/dev refs/tags/v1"), cmd.String())
+	cmd = git.NewCommand(context.Background())
+	addLsRemoteArgs(cmd, &repo_model.Mirror{BranchFilter: "release/*"})
+	assert.True(t, strings.HasSuffix(cmd.String(), "ls-remote --symref -- origin HEAD"), cmd.String())
+}
+
+// A request queued while a sync of the same repository runs must not run beside it (repack/prune).
+func TestSyncPullMirrorOneAtATime(t *testing.T) {
+	locked, unlock := pullSyncLocks.TryLock("424242")
+	defer unlock()
+	require.True(t, locked)
+	assert.False(t, SyncPullMirror(context.Background(), 424242))
+}
+
 func TestFilterErrorFor(t *testing.T) {
 	m := &repo_model.Mirror{BranchFilter: "main,release/*"}
 	assert.Empty(t, filterErrorFor(m, ""))
