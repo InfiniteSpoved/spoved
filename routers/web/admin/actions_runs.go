@@ -82,9 +82,9 @@ func ActionsRunsExport(ctx *context.Context) {
 	for _, run := range runs {
 		_ = w.Write([]string{
 			strconv.FormatInt(run.ID, 10), util.CSVSafe(run.Repo.FullName()), util.CSVSafe(run.WorkflowID), strconv.FormatInt(run.Index, 10),
-			util.CSVSafe(run.Title), util.CSVSafe(run.PrettyRef()), util.CSVSafe(run.Event.Event()), run.Status.String(), util.CSVSafe(run.TriggerUser.Name),
+			util.CSVSafe(run.Title), util.CSVSafe(run.PrettyRef()), util.CSVSafe(run.Event.Event()), util.CSVSafe(run.Status.String()), util.CSVSafe(run.TriggerUser.Name),
 			run.Created.AsTime().UTC().Format(time.RFC3339), csvTime(run.Started), csvTime(run.Stopped),
-			strconv.FormatInt(int64(run.Duration()/time.Second), 10), run.HTMLURL(),
+			strconv.FormatInt(int64(run.Duration()/time.Second), 10), util.CSVSafe(run.HTMLURL()),
 		})
 	}
 	w.Flush()

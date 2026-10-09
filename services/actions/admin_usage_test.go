@@ -155,6 +155,16 @@ func TestGetUsage(t *testing.T) {
 		assert.EqualValues(t, 300, m[r.personal].Seconds)
 		assert.Equal(t, r.org, got[0].ID, "sorted by seconds, most first")
 	})
+	t.Run("a job that started inside the range is kept by the updated pre-filter", func(t *testing.T) {
+		// updated == started: the lowest value a valid job can have
+		addUsageJob(t, r.personal, 901, from+500, from+560, from+500, ok)
+		got, err := GetUsage(t.Context(), UsageGroupRepo, from, to, builder.Eq{"`repository`.id": r.personal}, 100)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.EqualValues(t, 300+60, got[0].Seconds)
+		_, err = db.GetEngine(t.Context()).Exec("DELETE FROM action_run_job WHERE started = ?", from+500)
+		require.NoError(t, err)
+	})
 	t.Run("owner, by repository owner and not the stale job owner", func(t *testing.T) {
 		got, err := GetUsage(t.Context(), UsageGroupOrg, from, to, nil, 100)
 		require.NoError(t, err)
@@ -217,7 +227,7 @@ func TestFindOrgRunsAllOwners(t *testing.T) {
 	require.NoError(t, err)
 	for i, repoID := range []int64{r.org, r.personal, r.trashed, r.noActions} {
 		require.NoError(t, db.Insert(t.Context(), &actions_model.ActionRun{
-			Title: "x", RepoID: repoID, OwnerID: 999, WorkflowID: "ci.yaml", Index: int64(7000 + i), TriggerUserID: 2,
+			Title: "x", RepoID: repoID, OwnerID: 999, WorkflowID: "ci.yaml", Index: int64(7000 + i), TriggerUserID: 2, EventPayload: `{"big":true}`,
 			Ref: "refs/heads/main", Event: webhook_module.HookEventPush, TriggerEvent: "push", Status: actions_model.StatusSuccess,
 		}))
 	}
@@ -226,6 +236,10 @@ func TestFindOrgRunsAllOwners(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, total, "trashed and no-Actions repositories are hidden; stale owner_id is ignored")
 	assert.Len(t, runs, 2)
+	for _, run := range runs {
+		assert.Empty(t, run.EventPayload, "the payload isn't loaded")
+		assert.Equal(t, "x", run.Title)
+	}
 
 	_, total, err = FindOrgRuns(t.Context(), nil, admin, true, nil, OrgRunFilter{Repo: "user2/repo1"}, db.ListOptions{Page: 1, PageSize: 50})
 	require.NoError(t, err)

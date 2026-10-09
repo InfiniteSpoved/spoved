@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	actions_model "forgejo.org/models/actions"
 	auth_model "forgejo.org/models/auth"
@@ -127,6 +128,21 @@ func TestAdminActionsRunsPage(t *testing.T) {
 			assert.Contains(t, resp.Body.String(), "suspended", path)
 		}
 	})
+	t.Run("an inactive admin is refused", func(t *testing.T) {
+		session := loginUser(t, "user1")
+		user1 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+		user1.IsActive = false
+		require.NoError(t, user_model.UpdateUserCols(db.DefaultContext, user1, "is_active"))
+		defer func() {
+			user1.IsActive = true
+			require.NoError(t, user_model.UpdateUserCols(db.DefaultContext, user1, "is_active"))
+		}()
+		for _, path := range []string{"/admin/actions/runs", "/admin/actions/runs/export", "/admin/actions/usage"} {
+			resp := session.MakeRequest(t, NewRequest(t, "GET", path), NoExpectedStatus)
+			assert.NotContains(t, resp.Body.String(), "org3/repo3", path)
+			assert.NotContains(t, resp.Body.String(), "unstackable usage", path)
+		}
+	})
 	t.Run("the menu", func(t *testing.T) {
 		body := adminSession.MakeRequest(t, NewRequest(t, "GET", "/admin/actions/runs"), http.StatusOK).Body.String()
 		assert.Contains(t, body, `href="/admin/actions/runs"`)
@@ -183,6 +199,21 @@ func TestAPIAdminActionsRuns(t *testing.T) {
 		apiAdminRuns(t, getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin), "", http.StatusForbidden)
 		apiAdminRuns(t, getUserToken(t, "user1", auth_model.AccessTokenScopeWriteAdmin), "", http.StatusForbidden)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/actions/runs"), http.StatusUnauthorized)
+	})
+	t.Run("an inactive or prohibited admin is refused", func(t *testing.T) {
+		user1 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+		for _, col := range []string{"is_active", "prohibit_login"} {
+			user1.IsActive, user1.ProhibitLogin = col != "is_active", col == "prohibit_login"
+			require.NoError(t, user_model.UpdateUserCols(db.DefaultContext, user1, "is_active", "prohibit_login"))
+			for _, path := range []string{"/api/v1/admin/actions/runs", "/api/v1/admin/actions/usage?group_by=repo"} {
+				resp := MakeRequest(t, NewRequest(t, "GET", path).AddTokenAuth(token), NoExpectedStatus)
+				assert.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, resp.Code, "%s %s", col, path)
+				assert.NotContains(t, resp.Body.String(), "org3/repo3")
+			}
+		}
+		user1.IsActive, user1.ProhibitLogin = true, false
+		require.NoError(t, user_model.UpdateUserCols(db.DefaultContext, user1, "is_active", "prohibit_login"))
+		apiAdminRuns(t, token, "", http.StatusOK)
 	})
 	t.Run("restricted tokens", func(t *testing.T) {
 		publicOnly := getUserToken(t, "user1", auth_model.AccessTokenScopePublicOnly, auth_model.AccessTokenScopeReadAdmin)
@@ -341,6 +372,12 @@ func TestAdminActionsRunsExport(t *testing.T) {
 			Ref: "refs/heads/main", Event: webhook_module.HookEventPush, TriggerEvent: "push", Status: actions_model.StatusSuccess,
 		}))
 	}
+	for i, wf := range []string{"+wf.yaml", "-wf.yaml", " @wf.yaml", "\n=wf.yaml", "\t=wf.yaml", "\r=wf.yaml", " \n +wf.yaml"} {
+		require.NoError(t, db.Insert(db.DefaultContext, &actions_model.ActionRun{
+			Title: "v", RepoID: 3, OwnerID: 3, WorkflowID: wf, Index: int64(700 + i), TriggerUserID: 2,
+			Ref: "refs/heads/main", Event: webhook_module.HookEventPush, TriggerEvent: "push", Status: actions_model.StatusSuccess,
+		}))
+	}
 	require.NoError(t, db.Insert(db.DefaultContext, &actions_model.ActionRun{
 		Title: "t", RepoID: 3, OwnerID: 3, WorkflowID: "=wf.yaml", Index: 600, TriggerUserID: 2,
 		Ref: "refs/heads/@b", Event: webhook_module.HookEventPush, TriggerEvent: "push", Status: actions_model.StatusSuccess,
@@ -361,7 +398,7 @@ func TestAdminActionsRunsExport(t *testing.T) {
 	})
 	t.Run("same rows as the page", func(t *testing.T) {
 		rows, _ := read("")
-		assert.Len(t, rows, 1+4+len(titles)+1)
+		assert.Len(t, rows, 1+4+len(titles)+1+7)
 		rows, _ = read("?repo=org3/repo5")
 		require.Len(t, rows, 2)
 		assert.Equal(t, "org3/repo5", rows[1][1])
@@ -395,6 +432,9 @@ func TestAdminActionsRunsExport(t *testing.T) {
 				}
 			}
 		}
+		rows, _ = read("?actor=user2&workflow_id=%2Bwf.yaml")
+		require.Len(t, rows, 2)
+		assert.Equal(t, "'+wf.yaml", rows[1][2])
 		rows, _ = read("?branch=@b")
 		require.Len(t, rows, 2)
 		assert.Equal(t, "'=wf.yaml", rows[1][2])
@@ -455,5 +495,39 @@ func TestAdminActionsRunsGetOnly(t *testing.T) {
 	for _, p := range []string{"/admin/actions/runs", "/admin/actions/runs/export", "/admin/actions/usage"} {
 		resp := session.MakeRequest(t, NewRequest(t, "POST", p), NoExpectedStatus)
 		assert.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, resp.Code, p)
+	}
+}
+
+func TestOrgActionsRunsMemberNeverSeesOtherOwners(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	prepareInstanceRuns(t) // user2/repo1 (public) has a run too
+	for _, name := range []string{"user2", "user4"} {
+		repos := orgRunRepos(orgRunRows(t, loginUser(t, name), ""))
+		assert.NotEmpty(t, repos)
+		for _, repo := range repos {
+			assert.True(t, strings.HasPrefix(repo, "org3/"), "%s: %s", name, repo)
+		}
+		token := getUserToken(t, name, auth_model.AccessTokenScopeReadOrganization, auth_model.AccessTokenScopeReadRepository)
+		for _, e := range apiOrgRuns(t, token, "?repo=user2/repo1", http.StatusOK).Entries {
+			t.Errorf("%s got %s", name, e.Repo.FullName)
+		}
+		for _, e := range apiOrgRuns(t, token, "", http.StatusOK).Entries {
+			assert.True(t, strings.HasPrefix(e.Repo.FullName, "org3/"), "%s: %s", name, e.Repo.FullName)
+		}
+	}
+}
+
+// The pages only read, so they work in read-only maintenance mode.
+func TestAdminActionsRunsMaintenanceReadOnly(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	prepareInstanceRuns(t)
+	session := loginUser(t, "user1")
+	token := getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin, auth_model.AccessTokenScopeReadRepository)
+	defer setMaintenance(t, setting.MaintenanceReadOnly, time.Time{})()
+	for _, path := range []string{"/admin/actions/runs", "/admin/actions/runs/export", "/admin/actions/usage?group_by=repo"} {
+		session.MakeRequest(t, NewRequest(t, "GET", path), http.StatusOK)
+	}
+	for _, path := range []string{"/api/v1/admin/actions/runs", "/api/v1/admin/actions/usage?group_by=org"} {
+		MakeRequest(t, NewRequest(t, "GET", path).AddTokenAuth(token), http.StatusOK)
 	}
 }

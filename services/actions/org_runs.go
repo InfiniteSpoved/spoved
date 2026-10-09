@@ -150,7 +150,7 @@ func FindOrgRuns(ctx context.Context, org *organization.Organization, doer *user
 	lo.Page = max(lo.Page, 1) // FindAndCount doesn't paginate page 0
 	opts := actions_model.FindRunOptions{
 		ListOptions: lo, RepoCond: repoCond, Status: f.Statuses, Events: f.Events, WorkflowID: f.Workflow,
-		CreatedFrom: f.From, CreatedTo: f.To,
+		CreatedFrom: f.From, CreatedTo: f.To, OmitEventPayload: true,
 	}
 	if f.Branch != "" {
 		opts.Ref = git.BranchPrefix + f.Branch
