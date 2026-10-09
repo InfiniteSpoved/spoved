@@ -84,3 +84,16 @@ func TestDynKeyGetterNoDeadlockInTransaction(t *testing.T) {
 	}))
 	<-outside
 }
+
+// After a fixture reset the revision goes down; the cache must still follow it.
+func TestDynKeyGetterLowerRevision(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	require.NoError(t, system.SetSettings(db.DefaultContext, map[string]string{"test.key": "a"}))
+	getter := system.NewDatabaseDynKeyGetter()
+	require.Greater(t, getter.GetRevision(db.DefaultContext), 1)
+
+	_, err := db.Exec(db.DefaultContext, "UPDATE system_setting SET version=1 WHERE setting_key='revision'")
+	require.NoError(t, err)
+	getter.InvalidateCache()
+	assert.Equal(t, 1, getter.GetRevision(db.DefaultContext))
+}
