@@ -19,7 +19,6 @@ import (
 
 	"code.forgejo.org/xorm/xorm"
 	"code.forgejo.org/xorm/xorm/convert"
-	"xorm.io/builder"
 )
 
 // ErrUnitTypeNotExist represents a "UnitTypeNotExist" kind of error.
@@ -422,13 +421,9 @@ func getUnitsByRepoID(ctx context.Context, repoID int64) (units []*RepoUnit, err
 	return units, nil
 }
 
-// availableUnitsSession selects the repo_unit rows the site policy doesn't hide. It joins repository only when the
-// policy hides something, so an empty policy costs nothing.
+// availableUnitsSession selects the repo_unit rows the site policy and the organization owner don't hide.
 func availableUnitsSession(ctx context.Context) *xorm.Session {
 	cond := AvailableUnitCond(ctx, "`repository`.owner_id", "`repo_unit`.type")
-	if !cond.IsValid() {
-		return db.GetEngine(ctx).Where(builder.NewCond())
-	}
 	return db.GetEngine(ctx).Select("`repo_unit`.*").Join("INNER", "repository", "`repository`.id = `repo_unit`.repo_id").Where(cond)
 }
 

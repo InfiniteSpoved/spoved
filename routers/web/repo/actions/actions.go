@@ -14,6 +14,7 @@ import (
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	"forgejo.org/modules/actions"
 	"forgejo.org/modules/base"
@@ -49,6 +50,12 @@ func MustEnableActions(ctx *context.Context) {
 	}
 
 	if unit.TypeActions.UnitGlobalDisabled() {
+		ctx.NotFound("MustEnableActions", nil)
+		return
+	}
+
+	// organization runners, secrets and variables: Actions hidden for the organization
+	if ctx.Org.Organization != nil && repo_model.HiddenUnits(ctx, ctx.Org.Organization.AsUser()).Contains(unit.TypeActions) {
 		ctx.NotFound("MustEnableActions", nil)
 		return
 	}

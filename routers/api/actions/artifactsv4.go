@@ -221,6 +221,10 @@ func (r artifactV4Routes) verifySignature(ctx *ArtifactContext, endp string) (*a
 		ctx.Error(http.StatusInternalServerError, "Error runner api getting task: task is not running")
 		return nil, "", false
 	}
+	if !task.ActionsAvailable(ctx) {
+		ctx.Error(http.StatusNotFound, "Actions is not available for this repository")
+		return nil, "", false
+	}
 	if err := task.LoadJob(ctx); err != nil {
 		log.Error("Error runner api getting job: %v", err)
 		ctx.Error(http.StatusInternalServerError, "Error runner api getting job")

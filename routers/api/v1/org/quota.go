@@ -4,6 +4,8 @@
 package org
 
 import (
+	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
 	"forgejo.org/routers/api/v1/shared"
 	"forgejo.org/services/context"
 )
@@ -126,6 +128,10 @@ func ListQuotaPackages(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
+	if repo_model.HiddenUnits(ctx, ctx.Org().Organization.AsUser()).Contains(unit.TypePackages) {
+		ctx.NotFound()
+		return
+	}
 	shared.ListQuotaPackages(ctx, ctx.Org().Organization.ID)
 }
 

@@ -15,6 +15,7 @@ import (
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/setting/config"
+	"forgejo.org/modules/util"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -63,6 +64,13 @@ func TestHiddenUnitCondMatchesHiddenUnits(t *testing.T) {
 
 	var owners []*user_model.User
 	require.NoError(t, db.GetEngine(db.DefaultContext).Find(&owners))
+	// org owners' choices: org3 turned Wiki off and Projects back on, org6 turned Issues off
+	unittest.AssertSuccessfulInsert(t,
+		&repo_model.OrgUnit{OrgID: 3, Type: unit.TypeWiki, Disabled: true},
+		&repo_model.OrgUnit{OrgID: 3, Type: unit.TypeProjects, Disabled: false},
+		&repo_model.OrgUnit{OrgID: 6, Type: unit.TypeIssues, Disabled: true},
+	)
+	defer db.DeleteAllRecords("org_unit")
 
 	for name, p := range map[string]setting.RepoUnitPolicyState{
 		"empty":       {},
@@ -80,9 +88,6 @@ func TestHiddenUnitCondMatchesHiddenUnits(t *testing.T) {
 				require.True(t, setting.Config().RepoUnitPolicy.Value(db.DefaultContext).Invalid)
 			} else {
 				setUnitPolicy(t, p)
-			}
-			if name == "empty" {
-				assert.False(t, repo_model.HiddenUnitCond(db.DefaultContext, "`user`.id", "t").IsValid())
 			}
 			for _, owner := range owners {
 				hidden := repo_model.HiddenUnits(db.DefaultContext, owner)
@@ -126,6 +131,40 @@ func TestHiddenUnitCondSQL(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotRegexp(t, `[`+"`"+`"'][0-9]+[`+"`"+`"']|(^|[ (])[0-9]+ *=`, sql)
 	}
+}
+
+// The organization owner's off rows hide a unit, and SetOrgUnits refuses what the owner may not change
+func TestOrgUnits(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer setUnitPolicy(t, setting.RepoUnitPolicyState{})
+	defer db.DeleteAllRecords("org_unit")
+	org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+
+	require.NoError(t, repo_model.SetOrgUnits(db.DefaultContext, org3, 2, map[unit.Type]bool{unit.TypeIssues: false, unit.TypeWiki: true}))
+	row := unittest.AssertExistsAndLoadBean(t, &repo_model.OrgUnit{OrgID: 3, Type: unit.TypeIssues})
+	assert.True(t, row.Disabled)
+	assert.EqualValues(t, 2, row.UpdatedBy)
+	assert.True(t, repo_model.HiddenUnits(db.DefaultContext, org3).Contains(unit.TypeIssues))
+	assert.False(t, repo_model.HiddenUnits(db.DefaultContext, org3).Contains(unit.TypeWiki))
+	orgRepo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})
+	assert.False(t, orgRepo.UnitEnabled(db.DefaultContext, unit.TypeIssues))
+	unittest.AssertExistsAndLoadBean(t, &repo_model.RepoUnit{RepoID: 3, Type: unit.TypeIssues})
+
+	// back on: the row stays with who and when
+	require.NoError(t, repo_model.SetOrgUnits(db.DefaultContext, org3, 1, map[unit.Type]bool{unit.TypeIssues: true}))
+	row = unittest.AssertExistsAndLoadBean(t, &repo_model.OrgUnit{OrgID: 3, Type: unit.TypeIssues})
+	assert.False(t, row.Disabled)
+	assert.EqualValues(t, 1, row.UpdatedBy)
+	orgRepo = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})
+	assert.True(t, orgRepo.UnitEnabled(db.DefaultContext, unit.TypeIssues))
+
+	// refused: Code, an unknown unit, a unit Not allowed by the site
+	for _, tp := range []unit.Type{unit.TypeCode, unit.Type(99)} {
+		require.ErrorIs(t, repo_model.SetOrgUnits(db.DefaultContext, org3, 2, map[unit.Type]bool{tp: false}), util.ErrInvalidArgument)
+	}
+	setUnitPolicy(t, setting.RepoUnitPolicyState{NotAllowed: []string{"repo.packages"}})
+	require.ErrorIs(t, repo_model.SetOrgUnits(db.DefaultContext, org3, 2, map[unit.Type]bool{unit.TypePackages: true}), util.ErrInvalidArgument)
+	unittest.AssertNotExistsBean(t, &repo_model.OrgUnit{OrgID: 3, Type: unit.TypePackages})
 }
 
 func TestLoadUnitsHidesPolicyUnits(t *testing.T) {

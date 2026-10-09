@@ -1341,7 +1341,15 @@ func Routes() *web.Route {
 			})
 			addActionsRoutes(
 				m,
-				reqOrgOwnership(),
+				func(ctx *context.APIContext) {
+					// Actions hidden for the organization (site policy or owner): its secrets, variables and runners too
+					if reqOrgOwnership()(ctx); ctx.Written() {
+						return
+					}
+					if repo_model.HiddenUnits(ctx, ctx.Org().Organization.AsUser()).Contains(unit.TypeActions) {
+						ctx.NotFound()
+					}
+				},
 				org.NewAction(),
 			)
 			m.Group("/public_members", func() {

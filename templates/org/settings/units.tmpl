@@ -1,0 +1,29 @@
+{{template "org/settings/layout_head" (dict "ctxData" . "pageClass" "organization settings units")}}
+<div class="org-setting-content">
+	<h4 class="ui top attached header">
+		{{ctx.Locale.Tr "org.settings.units"}}
+	</h4>
+	<div class="ui attached segment">
+		<p>{{ctx.Locale.Tr "org.settings.units.desc"}}</p>
+		<form class="ui form" action="{{.OrgLink}}/settings/units" method="post">
+			{{range .Units}}
+				{{$key := .Unit.NameKey}}
+				<div class="field org-unit" data-unit="{{$key}}">
+					<div class="ui checkbox{{if .Locked}} disabled{{end}}">
+						<input id="on-{{$key}}" name="on_{{$key}}" type="checkbox" {{if and .On (not .Locked)}}checked{{end}} {{if .Locked}}disabled{{end}}>
+						<label for="on-{{$key}}">{{ctx.Locale.Tr $key}}</label>
+					</div>
+					{{if eq .Locked "app_ini"}}
+						<p class="help">{{ctx.Locale.Tr "org.settings.units.locked_app_ini"}}</p>
+					{{else if eq .Locked "site"}}
+						<p class="help">{{ctx.Locale.Tr "org.settings.units.locked_site"}}</p>
+					{{else if .UpdatedRow}}
+						<p class="help">{{ctx.Locale.Tr "org.settings.units.updated" (DateUtils.AbsoluteShort .UpdatedRow.UpdatedUnix) .UpdatedBy}}</p>
+					{{end}}
+				</div>
+			{{end}}
+			<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+		</form>
+	</div>
+</div>
+{{template "org/settings/layout_footer" .}}
