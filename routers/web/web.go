@@ -1130,6 +1130,7 @@ func registerRoutes(m *web.Route) {
 			m.Get("/milestones/{team}", reqMilestonesDashboardPageEnabled, user.Milestones)
 			m.Post("/members/action/{action}", org.MembersAction)
 			m.Get("/teams", org.Teams)
+			m.Get("/actions", org.Runs)
 		}, context.OrgAssignment(true, false, true))
 
 		m.Group("/{org}", func() {
