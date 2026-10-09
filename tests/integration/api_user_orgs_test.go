@@ -45,6 +45,8 @@ func TestUserOrgs(t *testing.T) {
 			Location:    "",
 			Visibility:  "public",
 			Created:     org17.CreatedUnix.AsTime().Local(),
+
+			PrivateForkPolicy: "all",
 		},
 		{
 			ID:          3,
@@ -58,6 +60,8 @@ func TestUserOrgs(t *testing.T) {
 			Location:    "",
 			Visibility:  "public",
 			Created:     org3.CreatedUnix.AsTime().Local(),
+
+			PrivateForkPolicy: "all",
 		},
 	}, orgs)
 
@@ -124,6 +128,8 @@ func TestMyOrgs(t *testing.T) {
 			Location:    "",
 			Visibility:  "public",
 			Created:     org17.CreatedUnix.AsTime().Local(),
+
+			PrivateForkPolicy: "all",
 		},
 		{
 			ID:          3,
@@ -137,6 +143,8 @@ func TestMyOrgs(t *testing.T) {
 			Location:    "",
 			Visibility:  "public",
 			Created:     org3.CreatedUnix.AsTime().Local(),
+
+			PrivateForkPolicy: "all",
 		},
 	}, orgs)
 }

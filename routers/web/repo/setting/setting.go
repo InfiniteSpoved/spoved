@@ -28,6 +28,7 @@ import (
 	"forgejo.org/modules/indexer/stats"
 	"forgejo.org/modules/lfs"
 	"forgejo.org/modules/log"
+	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
@@ -62,6 +63,12 @@ func SettingsCtxData(ctx *context.Context) {
 	ctx.Data["ForcePrivate"] = setting.Repository.ForcePrivate
 	ctx.Data["TrashRetentionDays"] = setting.Trash.RetentionDays
 	ctx.Data["TrashRestoreHelpURL"] = setting.Trash.RestoreHelpURL
+	allowed, err := repo_module.AllowedByOrgPolicy(ctx, ctx.Doer, ctx.Repo.Repository, repo_module.OrgPolicyVisibility, nil)
+	if err != nil {
+		ctx.ServerError("AllowedByOrgPolicy", err)
+		return
+	}
+	ctx.Data["OrgPolicyBlocksVisibility"] = !allowed
 	ctx.Data["MirrorsEnabled"] = setting.Mirror.Enabled
 	ctx.Data["DisableNewPullMirrors"] = setting.Mirror.DisableNewPull
 	ctx.Data["DisableNewPushMirrors"] = setting.Mirror.DisableNewPush
@@ -399,6 +406,16 @@ func SettingsPost(ctx *context.Context) {
 		if visibilityChanged && setting.Repository.ForcePrivate && !form.Private && !ctx.Doer.IsAdmin {
 			ctx.RenderWithErr(ctx.Tr("form.repository_force_private"), tplSettingsOptions, form)
 			return
+		}
+		if visibilityChanged {
+			var policyErr repo_module.ErrOrgPolicy
+			if err := repo_module.CheckOrgPolicy(ctx, ctx.Doer, repo, repo_module.OrgPolicyVisibility, nil); errors.As(err, &policyErr) {
+				ctx.RenderWithErr(ctx.Tr("repo.settings.blocked_by_org_policy", ctx.Tr("org.settings."+policyErr.Policy)), tplSettingsOptions, form)
+				return
+			} else if err != nil {
+				ctx.ServerError("CheckOrgPolicy", err)
+				return
+			}
 		}
 
 		repo.IsPrivate = form.Private

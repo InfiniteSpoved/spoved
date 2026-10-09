@@ -829,6 +829,15 @@ func updateBasicProperties(ctx *context.APIContext, opts api.EditRepoOption) err
 			ctx.Error(http.StatusUnprocessableEntity, "Force Private enabled", err)
 			return err
 		}
+		if visibilityChanged {
+			if err := repo_module.CheckOrgPolicy(ctx, ctx.Doer(), repo, repo_module.OrgPolicyVisibility, nil); errors.As(err, &repo_module.ErrOrgPolicy{}) {
+				ctx.Error(http.StatusForbidden, "CheckOrgPolicy", err)
+				return err
+			} else if err != nil {
+				ctx.Error(http.StatusInternalServerError, "CheckOrgPolicy", err)
+				return err
+			}
+		}
 
 		repo.IsPrivate = *opts.Private
 	}

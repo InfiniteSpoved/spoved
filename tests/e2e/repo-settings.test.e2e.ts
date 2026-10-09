@@ -10,6 +10,7 @@ import {expect} from '@playwright/test';
 import {test, dynamic_id} from './utils_e2e.ts';
 import {screenshot} from './shared/screenshots.ts';
 import {validate_form} from './shared/forms.ts';
+import {adminAuth, FakeData, loginAs} from './shared/fake-data.ts';
 
 test.use({user: 'user2'});
 
@@ -262,5 +263,36 @@ test.describe('repo collaboration settings', () => {
     await modal.getByRole('button', {name: 'Yes'}).click();
 
     await expect(page.getByText('There are no collaborators yet.')).toBeVisible();
+  });
+});
+
+test.describe('as fake users', () => {
+  // a clean state, so that loginAs doesn't inherit user2's session
+  test.use({user: null, storageState: {cookies: [], origins: []}});
+
+  test('repo visibility follows the organization policy', async ({browser, request}) => {
+    const data = new FakeData(request);
+    try {
+      const member = await data.createUser();
+      const org = await data.createOrg();
+      const repo = await data.createRepo(org);
+      const team = await data.createTeam(org, 'admin', [repo]);
+      expect((await request.put(`/api/v1/teams/${team.id}/members/${member.username}`, {headers: adminAuth()})).ok()).toBeTruthy();
+      expect((await request.patch(`/api/v1/orgs/${org}`, {headers: adminAuth(), data: {restrict_repo_visibility_change: true}})).ok()).toBeTruthy();
+
+      const page = await (await loginAs(browser, member.username, member.password)).newPage();
+      await page.goto(`/${org}/${repo}/settings`);
+      await expect(page.locator('input[name="private"][type="checkbox"]')).toBeDisabled();
+      await expect(page.locator('.org-policy-note')).toContainText('Blocked by the organization policy "Only organization owners can change the visibility of repositories".');
+      await screenshot(page);
+
+      // other settings can still be saved, and the repository stays private
+      await page.locator('#description').fill('policy');
+      await page.getByRole('button', {name: 'Save settings'}).first().click();
+      await expect(page.locator('.flash-success')).toBeVisible();
+      await expect(page.locator('input[name="private"][type="checkbox"]')).toBeChecked();
+    } finally {
+      await data.cleanup();
+    }
   });
 });
