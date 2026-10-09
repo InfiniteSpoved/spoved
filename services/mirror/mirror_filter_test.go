@@ -7,6 +7,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/git"
@@ -42,12 +43,26 @@ func TestAddLsRemoteArgs(t *testing.T) {
 	assert.True(t, strings.HasSuffix(cmd.String(), "ls-remote --symref -- origin HEAD"), cmd.String())
 }
 
-// A request queued while a sync of the same repository runs must not run beside it (repack/prune).
-func TestSyncPullMirrorOneAtATime(t *testing.T) {
-	locked, unlock := pullSyncLocks.TryLock("424242")
-	defer unlock()
-	require.True(t, locked)
-	assert.False(t, SyncPullMirror(context.Background(), 424242))
+// A request queued while a sync of the same repository runs waits for it (repack/prune must not overlap a fetch) and
+// then loads the mirror, so it sees what was saved meanwhile.
+func TestSyncPullMirrorWaitsForRunningSync(t *testing.T) {
+	unlock := pullSyncLocks.Lock("424242")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		SyncPullMirror(context.Background(), 424242)
+	}()
+	select {
+	case <-done:
+		t.Fatal("the second sync ran while the first one held the lock")
+	case <-time.After(200 * time.Millisecond):
+	}
+	unlock()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the second sync never ran")
+	}
 }
 
 func TestFilterErrorFor(t *testing.T) {

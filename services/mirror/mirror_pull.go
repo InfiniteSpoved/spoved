@@ -312,12 +312,13 @@ func recheckPullPermitted(ctx context.Context, m *repo_model.Mirror, remoteURL *
 	return migrations_allowlist.IsMigrateURLAllowed(remoteURL.String(), m.Repo.Owner)
 }
 
+// pullSyncLocks serializes the syncs of one repository.
+var pullSyncLocks sync.MutexMap
+
 // addFetchArgs adds the fetch arguments. Without filters it is the plain `fetch [--prune] --tags origin`; with filters
 // only the given refspecs are fetched (never an empty list, which would make git fall back to the configured mirror
 // refspec), and tags come only from the tag filter. Unlike the old `--tags`, the filtered refspecs are forced (`+`),
 // so a moved upstream tag is updated, as a branch is.
-var pullSyncLocks sync.MutexMap
-
 func addFetchArgs(cmd *git.Command, m *repo_model.Mirror, refspecs []string) {
 	cmd.AddArguments("fetch")
 	if m.EnablePrune {
@@ -599,13 +600,9 @@ func SyncPullMirror(ctx context.Context, repoID int64) bool {
 	log.Trace("SyncMirrors [repo_id: %v]", repoID)
 
 	// One sync per repository at a time: applyRefFilter repacks and prunes, which must not overlap a fetch. The mirror
-	// queue only deduplicates waiting requests, so this guards a request queued while a sync runs.
-	locked, unlock := pullSyncLocks.TryLock(strconv.FormatInt(repoID, 10))
-	defer unlock()
-	if !locked {
-		log.Trace("SyncMirrors [repo_id: %v]: already syncing, skipping", repoID)
-		return false
-	}
+	// queue only deduplicates waiting requests, so this guards a request queued while a sync runs. It waits (bounded by
+	// the git timeouts) and loads the mirror only afterwards, so a filter saved meanwhile is the one this sync uses.
+	defer pullSyncLocks.Lock(strconv.FormatInt(repoID, 10))()
 
 	defer func() {
 		err := recover()
