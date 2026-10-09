@@ -227,8 +227,10 @@ func TestAPIAdminActionsRuns(t *testing.T) {
 // addJob inserts a finished job of repoID that ran for seconds, ending now, on the runner of a new task.
 func addAdminJob(t *testing.T, repoID, runnerID int64, started timeutil.TimeStamp, seconds int64, status actions_model.Status) {
 	t.Helper()
-	job := &actions_model.ActionRunJob{RunID: 1, RepoID: repoID, OwnerID: 999, Name: "j", Attempt: 1, Status: status, Started: started, Stopped: started + timeutil.TimeStamp(seconds),
-		Handle: fmt.Sprintf("admin-usage-%d-%d-%d", repoID, started, seconds)}
+	job := &actions_model.ActionRunJob{
+		RunID: 1, RepoID: repoID, OwnerID: 999, Name: "j", Attempt: 1, Status: status, Started: started, Stopped: started + timeutil.TimeStamp(seconds),
+		Handle: fmt.Sprintf("admin-usage-%d-%d-%d", repoID, started, seconds),
+	}
 	require.NoError(t, db.Insert(db.DefaultContext, job))
 	_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE action_run_job SET updated = ? WHERE id = ?", job.Stopped, job.ID)
 	require.NoError(t, err)
