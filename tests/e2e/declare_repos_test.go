@@ -359,6 +359,45 @@ jobs:
 			Status:        actions_model.StatusWaiting,
 		}, workflows))
 	})
+	newRepo(t, 2, "permalink-test", nil, []FileChanges{
+		{Filename: "a.txt", Versions: []string{"one\ntwo\nthree\n"}},
+		// tall enough to push the comments below it when it finishes loading
+		{Filename: "tall.svg", Versions: []string{`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="500"><rect width="400" height="500" fill="#ccc"/></svg>`}},
+	}, func(user *user_model.User, repo *repo_model.Repository) {
+		sha := addCommitToBranch(t, user, repo, "main", "feat", "a.txt", "", "one\nTWO\nthree\n")
+		postPullRequest(repo, "feat", user, 100, "Many comments", "PR for permalink e2e")
+		issue, err := issues_model.GetIssueByIndex(db.DefaultContext, repo.ID, 1)
+		require.NoError(t, err)
+		require.NoError(t, issue.LoadPullRequest(db.DefaultContext))
+
+		// A code comment on line 2, made outdated by a later commit on the head branch.
+		reviewer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+		gitRepo, err := gitrepo.OpenRepository(db.DefaultContext, repo)
+		require.NoError(t, err)
+		defer gitRepo.Close()
+		codeComment, err := pull_service.CreateCodeComment(db.DefaultContext, reviewer, gitRepo, issue, 2, 0, "OUTDATED-TARGET", "a.txt", false, 0, "", sha, nil)
+		require.NoError(t, err)
+		_, err = db.GetEngine(db.DefaultContext).ID(codeComment.ID).Cols("invalidated").Update(&issues_model.Comment{Invalidated: true})
+		require.NoError(t, err)
+
+		// Images, math and mermaid come before the target, so their late rendering shifts the layout.
+		const total, target = 520, 450
+		for i := range total {
+			content := fmt.Sprintf("comment %d", i)
+			switch {
+			case i == target:
+				content = "PERMALINK-TARGET"
+			case i < target && i%5 == 1:
+				content += fmt.Sprintf("\n\n![img](/user2/permalink-test/raw/branch/main/tall.svg?n=%d)", i)
+			case i < target && i%5 == 2:
+				content += "\n\n$x^2 + \\sum_i i$"
+			case i < target && i%5 == 3:
+				content += "\n\n```mermaid\ngraph TD; A-->B;\n```"
+			}
+			_, err := issue_service.CreateIssueComment(db.DefaultContext, user, repo, issue, content, nil)
+			require.NoError(t, err)
+		}
+	})
 	// add your repo declarations here
 }
 
