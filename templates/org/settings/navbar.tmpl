@@ -47,6 +47,9 @@
 		<a class="{{if .PageIsOrgSettingsBranches}}active {{end}}item" href="{{.OrgLink}}/settings/branches">
 			{{ctx.Locale.Tr "org.settings.branches"}}
 		</a>
+		<a class="{{if .PageIsSettingsUnits}}active {{end}}item" href="{{.OrgLink}}/settings/units">
+			{{ctx.Locale.Tr "org.settings.units"}}
+		</a>
 		<a class="{{if .PageIsSettingsBlockedUsers}}active {{end}}item" href="{{.OrgLink}}/settings/blocked_users">
 			{{ctx.Locale.Tr "settings.blocked_users"}}
 		</a>

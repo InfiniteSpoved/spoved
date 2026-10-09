@@ -105,6 +105,7 @@ type dbConfigCachedGetter struct {
 	cacheTime time.Time
 	revision  int
 	settings  map[string]string
+	epoch     uint64 // bumped by InvalidateCache to discard the refreshes in flight
 }
 
 var _ config.DynKeyGetter = (*dbConfigCachedGetter)(nil)
@@ -116,26 +117,38 @@ func (d *dbConfigCachedGetter) GetValue(ctx context.Context, key string) (v stri
 	return v, has
 }
 
+// GetRevision never queries the database while holding d.mu: callers inside a transaction hold a pooled connection
+// (and on SQLite the write lock) while they wait for d.mu, so a query under d.mu that waits for a connection
+// deadlocks until the busy timeout. Two concurrent refreshes may store in either order; the next refresh, at most a
+// second later, corrects an older result, the same window as the cache itself. The revision is compared with != as
+// fixtures reset it.
 func (d *dbConfigCachedGetter) GetRevision(ctx context.Context) int {
 	d.mu.RLock()
 	cachedDuration := time.Since(d.cacheTime)
-	cachedRevision := d.revision
+	cachedRevision, epoch := d.revision, d.epoch
 	d.mu.RUnlock()
 
 	if cachedDuration < time.Second {
 		return cachedRevision
 	}
 
+	rev := GetRevision(ctx)
+	var settings map[string]string
+	var err error
+	if rev != cachedRevision {
+		rev, settings, err = GetAllSettings(ctx)
+	}
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if GetRevision(ctx) != d.revision {
-		rev, set, err := GetAllSettings(ctx)
-		if err != nil {
-			log.Error("Unable to get all settings: %v", err)
-		} else {
-			d.revision = rev
-			d.settings = set
-		}
+	if epoch != d.epoch {
+		return d.revision
+	}
+	if err != nil {
+		log.Error("Unable to get all settings: %v", err)
+	} else if settings != nil {
+		d.revision = rev
+		d.settings = settings
 	}
 	d.cacheTime = time.Now()
 	return d.revision
@@ -144,6 +157,7 @@ func (d *dbConfigCachedGetter) GetRevision(ctx context.Context) int {
 func (d *dbConfigCachedGetter) InvalidateCache() {
 	d.mu.Lock()
 	d.cacheTime = time.Time{}
+	d.epoch++
 	d.mu.Unlock()
 }
 

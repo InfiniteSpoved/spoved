@@ -87,6 +87,10 @@ func IDTokenContexter() func(next http.Handler) http.Handler {
 				ctx.Error(http.StatusInternalServerError, "Error runner api getting task: task is not running")
 				return
 			}
+			if !task.ActionsAvailable(req.Context()) {
+				ctx.Error(http.StatusNotFound, "Actions is not available for this repository")
+				return
+			}
 			err = task.LoadAttributes(req.Context())
 			if err != nil {
 				log.Error("Error runner api getting task attributes: %v", err)

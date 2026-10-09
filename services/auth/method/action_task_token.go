@@ -42,6 +42,10 @@ func (a *ActionTaskToken) Verify(req *http.Request, w http.ResponseWriter, _ aut
 		return &auth.AuthenticationError{Error: errors.New("failed to retrieve non-nil task")}
 	}
 
+	if !task.ActionsAvailable(req.Context()) {
+		return &auth.AuthenticationAttemptedIncorrectCredential{Error: errors.New("Actions is not available for the repository of the task")}
+	}
+
 	log.Trace("Basic Authorization: Valid AccessToken for task[%d]", task.ID)
 	return &auth.AuthenticationSuccess{Result: &actionsTaskTokenAuthenticationResult{user: user_model.NewActionsUser(), taskID: task.ID}}
 }

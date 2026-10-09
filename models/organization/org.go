@@ -291,6 +291,10 @@ func (org *Organization) CustomAvatarRelativePath() string {
 
 // UnitPermission returns unit permission
 func (org *Organization) UnitPermission(ctx context.Context, doer *user_model.User, unitType unit.Type) perm.AccessMode {
+	// a unit the site policy or the organization owner hides is off for the organization's own pages too
+	if repo_model.HiddenUnits(ctx, org.AsUser()).Contains(unitType) {
+		return perm.AccessModeNone
+	}
 	if doer != nil {
 		teams, err := GetUserOrgTeams(ctx, org.ID, doer.ID)
 		if err != nil {
@@ -453,6 +457,7 @@ func DeleteOrganization(ctx context.Context, org *Organization) error {
 		&TeamInvite{OrgID: org.ID},
 		&UserGroupTeam{OrgID: org.ID},
 		&OrgAdminExclusion{OrgID: org.ID},
+		&repo_model.OrgUnit{OrgID: org.ID},
 		&secret_model.Secret{OwnerID: org.ID},
 		&actions_model.ActionRunner{OwnerID: org.ID},
 		&actions_model.ActionRunnerToken{OwnerID: optional.Some(org.ID)},

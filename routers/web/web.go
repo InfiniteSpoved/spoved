@@ -1230,6 +1230,7 @@ func registerRoutes(m *web.Route) {
 					m.Post("/block", org_setting.BlockedUsersBlock)
 					m.Post("/unblock", org_setting.BlockedUsersUnblock)
 				})
+				m.Combo("/units").Get(org_setting.Units).Post(org_setting.UnitsPost)
 				m.Get("/storage_overview", org_setting.StorageOverview)
 				m.Get("/access-report", org_setting.AccessReport)
 
@@ -1250,7 +1251,7 @@ func registerRoutes(m *web.Route) {
 						m.Post("/initialize", org.InitializeCargoIndex)
 						m.Post("/rebuild", org.RebuildCargoIndex)
 					})
-				}, packagesEnabled)
+				}, packagesEnabled, org.MustEnablePackages)
 			}, ctxDataSet("EnableOAuth2", setting.OAuth2.Enabled, "EnablePackages", setting.Packages.Enabled, "EnableQuota", setting.Quota.Enabled, "PageIsOrgSettings", true))
 		}, context.OrgAssignment(true, true))
 	}, reqSignIn)

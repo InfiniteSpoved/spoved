@@ -168,6 +168,10 @@ func ArtifactContexter() func(next http.Handler) http.Handler {
 				}
 			}
 
+			if !task.ActionsAvailable(req.Context()) {
+				ctx.Error(http.StatusNotFound, "Actions is not available for this repository")
+				return
+			}
 			if err := task.LoadJob(req.Context()); err != nil {
 				log.Error("Error runner api getting job: %v", err)
 				ctx.Error(http.StatusInternalServerError, "Error runner api getting job")

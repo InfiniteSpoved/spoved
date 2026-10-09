@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 
+	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/setting"
 	shared "forgejo.org/routers/web/shared/packages"
@@ -19,6 +21,13 @@ const (
 	tplSettingsPackagesRuleEdit    base.TplName = "org/settings/packages_cleanup_rules_edit"
 	tplSettingsPackagesRulePreview base.TplName = "org/settings/packages_cleanup_rules_preview"
 )
+
+// MustEnablePackages refuses the package settings of an organization whose Packages the site policy or the owner hides
+func MustEnablePackages(ctx *context.Context) {
+	if repo_model.HiddenUnits(ctx, ctx.ContextUser).Contains(unit.TypePackages) {
+		ctx.NotFound("MustEnablePackages", nil)
+	}
+}
 
 func Packages(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("packages.title")
