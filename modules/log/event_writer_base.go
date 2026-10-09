@@ -30,7 +30,10 @@ type EventWriterBaseImpl struct {
 	Mode  *WriterMode
 	Queue chan *EventFormatted
 
-	FormatMessage     EventFormatter // format the Event to a message and write it to output
+	FormatMessage EventFormatter // format the Event to a message and write it to output
+	// FormatEvent, if set, formats the event in the writer's own goroutine instead of FormatMessage in the
+	// caller's, so expensive work (the JSON redaction) stays off the request path
+	FormatEvent       func(mode *WriterMode, event *Event) []byte
 	OutputWriteCloser io.WriteCloser // it will be closed when the event writer is stopped
 	GetPauseChan      func() chan struct{}
 
@@ -114,7 +117,11 @@ func (b *EventWriterBaseImpl) Run(ctx context.Context) {
 			}
 
 			var err error
-			switch msg := event.Msg.(type) {
+			outMsg := event.Msg
+			if b.FormatEvent != nil {
+				outMsg = b.FormatEvent(b.Mode, event.Origin)
+			}
+			switch msg := outMsg.(type) {
 			case string:
 				_, err = b.OutputWriteCloser.Write([]byte(msg))
 			case []byte:
@@ -152,7 +159,7 @@ func NewEventWriterBase(name, writerType string, mode WriterMode) *EventWriterBa
 		FormatMessage: EventFormatTextMessage,
 	}
 	if mode.Format == "json" {
-		b.FormatMessage = EventFormatJSONMessage
+		b.FormatEvent = EventFormatJSONMessage
 	}
 	return b
 }

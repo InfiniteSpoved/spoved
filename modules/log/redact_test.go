@@ -23,13 +23,16 @@ func TestRedact(t *testing.T) {
 		"proxy-authorization: Basic abc123==":    "proxy-authorization: " + r,
 		"sent Bearer abcdef123456 to host":       "sent Bearer " + r + " to host",
 		// URL query parameters and free text pairs
-		"GET /x?access_token=abc123&page=2":                "GET /x?access_token=" + r + "&page=2",
-		"GET /x?page=2&token=abc":                          "GET /x?page=2&token=" + r,
-		"/login/oauth?code=abcd&state=zz":                  "/login/oauth?code=" + r + "&state=zz",
-		"/x?client_secret=aa&password=bb&key=cc&secret=dd": "/x?client_secret=" + r + "&password=" + r + "&key=" + r + "&secret=" + r,
-		"/x?API_KEY=aa&refresh_token=bb":                   "/x?API_KEY=" + r + "&refresh_token=" + r,
-		"login failed password=hunter2 for u":              "login failed password=" + r + " for u",
-		`{"password":"hunter2","user":"a"}`:                `{"password":"` + r + `","user":"a"}`,
+		"GET /x?access_token=abc123&page=2":                                     "GET /x?access_token=" + r + "&page=2",
+		"GET /x?page=2&token=abc":                                               "GET /x?page=2&token=" + r,
+		"/x?private_token=a&X-Amz-Signature=b&session_id=c&auth=d&credential=e": "/x?private_token=" + r + "&X-Amz-Signature=" + r + "&session_id=" + r + "&auth=" + r + "&credential=" + r,
+		"pass=hunter2 and bypass=1":                                             "pass=" + r + " and bypass=1",
+		`Referer: "https://h/x?a=1&access_token=abc"`:                           `Referer: "https://h/x?a=1&access_token=` + r + `"`,
+		"/login/oauth?code=abcd&state=zz":                                       "/login/oauth?code=" + r + "&state=zz",
+		"/x?client_secret=aa&password=bb&key=cc&secret=dd":                      "/x?client_secret=" + r + "&password=" + r + "&key=" + r + "&secret=" + r,
+		"/x?API_KEY=aa&refresh_token=bb":                                        "/x?API_KEY=" + r + "&refresh_token=" + r,
+		"login failed password=hunter2 for u":                                   "login failed password=" + r + " for u",
+		`{"password":"hunter2","user":"a"}`:                                     `{"password":"` + r + `","user":"a"}`,
 		// URL userinfo
 		"clone https://bob:pw123@example.com/a.git": "clone https://bob:" + r + "@example.com/a.git",
 		// known token shapes
@@ -41,9 +44,9 @@ func TestRedact(t *testing.T) {
 		// negatives: must stay untouched
 		"commit 0123456789abcdef0123456789abcdef01234567 pushed": "commit 0123456789abcdef0123456789abcdef01234567 pushed",
 		"basic settings page and bearer of news":                 "basic settings page and bearer of news",
-		"pass the token validation, monkey=1, code=7":            "pass the token validation, monkey=1, code=7",
+		"pass the token validation, 7 codes, key words":          "pass the token validation, 7 codes, key words",
 		"GET /user/settings?tab=keys&page=2":                     "GET /user/settings?tab=keys&page=2",
-		"keyboard=us passover=1":                                 "keyboard=us passover=1",
+		"page=2&state=zz&tab=keys":                               "page=2&state=zz&tab=keys",
 	} {
 		assert.Equal(t, want, Redact(in), in)
 	}

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,11 +25,12 @@ import (
 var NewRelicTransport http.RoundTripper
 
 const (
-	newRelicBatchBytes   = 1 << 20
-	newRelicMaxBytes     = 16 << 20
-	newRelicMaxEvents    = 10000
-	newRelicMaxAttempts  = 5
-	newRelicFinalTimeout = 1500 * time.Millisecond
+	newRelicBatchBytes    = 1 << 20
+	newRelicMaxBytes      = 16 << 20
+	newRelicMaxEvents     = 10000
+	newRelicMaxAttempts   = 5
+	newRelicFinalTimeout  = 1500 * time.Millisecond
+	newRelicMaxRetryAfter = 5 * time.Minute
 )
 
 // NewRelicOption holds the settings of a "newrelic" writer. The key never leaves it: not in JSON (the admin
@@ -60,8 +62,8 @@ func (o NewRelicOption) Validate() error {
 func NewEventWriterNewRelic(name string, mode WriterMode) EventWriter {
 	w := NewEventWriterBase(name, "newrelic", mode)
 	// the shipper needs the logger name for its counters: it is the first line of every message
-	w.FormatMessage = func(m *WriterMode, e *Event, f string, a ...any) []byte {
-		return append([]byte(e.Logger+"\n"), EventFormatJSONMessage(m, e, f, a...)...)
+	w.FormatEvent = func(m *WriterMode, e *Event) []byte {
+		return append([]byte(e.Logger+"\n"), EventFormatJSONMessage(m, e)...)
 	}
 	opt, _ := mode.WriterOption.(NewRelicOption)
 	if err := opt.Validate(); err != nil {
@@ -92,6 +94,9 @@ type newRelicShipper struct {
 	sleep    func(context.Context, time.Duration) bool // false when ctx is done
 
 	maxEvents, maxBytes int
+
+	failures   int           // consecutive failed attempts, kept across batches (flusher goroutine only)
+	retryAfter time.Duration // from the last Retry-After header
 
 	disabled atomic.Bool // set after 401/403
 	logged   atomic.Bool // set after the first "other 4xx" message
@@ -284,7 +289,7 @@ func (s *newRelicShipper) post(ctx context.Context, body []byte) (int, error) {
 	if err != nil {
 		return 0, errors.New("invalid request")
 	}
-	req.Header.Set("Api-Key", s.opt.Key)
+	req.Header.Set("Api-Key", s.opt.Key) // only here, so no error or log line can carry the request
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	resp, err := s.client.Do(req)
@@ -292,25 +297,39 @@ func (s *newRelicShipper) post(ctx context.Context, body []byte) (int, error) {
 		return 0, err
 	}
 	defer resp.Body.Close()
+	if secs, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && secs > 0 {
+		s.retryAfter = min(time.Duration(secs)*time.Second, newRelicMaxRetryAfter)
+	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 	return resp.StatusCode, nil
 }
 
 func backoff(attempt int) time.Duration {
-	d := min(time.Second<<attempt, 30*time.Second)
+	d := min(time.Second<<min(attempt, 6), 30*time.Second)
 	return d + time.Duration((rand.Float64()*0.4-0.2)*float64(d))
 }
 
 // send reports false when the batch was put back because ctx ended.
 func (s *newRelicShipper) send(ctx context.Context, items []nrItem, attempts int) bool {
 	body := s.encode(items)
-	for attempt := range attempts {
+	for range attempts {
+		// back off before every attempt after a failure, also for the first attempt of the next batch, so a
+		// dead endpoint is not hit again on every tick (the final flush on close makes one attempt without waiting)
+		if s.failures > 0 && attempts > 1 {
+			wait := max(backoff(s.failures-1), s.retryAfter)
+			s.retryAfter = 0
+			if !s.sleep(ctx, wait) {
+				s.requeue(items)
+				return false
+			}
+		}
 		code, err := s.post(ctx, body)
 		switch {
 		case err != nil && ctx.Err() != nil:
 			s.requeue(items)
 			return false
 		case err == nil && code/100 == 2:
+			s.failures = 0
 			s.count(items, true, false, false)
 			return true
 		case err == nil && (code == http.StatusUnauthorized || code == http.StatusForbidden):
@@ -326,11 +345,8 @@ func (s *newRelicShipper) send(ctx context.Context, items []nrItem, attempts int
 			s.count(items, false, true, true)
 			return true
 		}
+		s.failures++
 		s.count(items, false, false, true)
-		if attempt < attempts-1 && !s.sleep(ctx, backoff(attempt)) {
-			s.requeue(items)
-			return false
-		}
 	}
 	s.count(items, false, true, false)
 	return true

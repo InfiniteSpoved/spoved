@@ -16,6 +16,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestLogShippingCollectorEmptyWithoutWriter(t *testing.T) { // must run first: the counters are global
+	reg := prometheus.NewRegistry()
+	require.NoError(t, reg.Register(NewLogShippingCollector()))
+	rec := httptest.NewRecorder()
+	promhttp.HandlerFor(reg, promhttp.HandlerOpts{}).ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	assert.NotContains(t, rec.Body.String(), "log_shipping_sent_total{")
+}
+
 func TestLogShippingCollector(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	require.NoError(t, reg.Register(NewLogShippingCollector()))

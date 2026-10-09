@@ -53,9 +53,9 @@ func (l *LoggerImpl) SendLogEvent(event *Event) {
 		if event.Level < w.GetLevel() {
 			continue
 		}
-		formatted := &EventFormatted{
-			Origin: event,
-			Msg:    w.Base().FormatMessage(w.Base().Mode, event, msgFormat, msgArgs...),
+		formatted := &EventFormatted{Origin: event}
+		if w.Base().FormatEvent == nil {
+			formatted.Msg = w.Base().FormatMessage(w.Base().Mode, event, msgFormat, msgArgs...)
 		}
 		select {
 		case w.Base().Queue <- formatted:

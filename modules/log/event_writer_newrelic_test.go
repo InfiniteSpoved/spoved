@@ -26,10 +26,11 @@ const testNRKey = "NRAK-TESTKEY0123456789"
 
 type nrServer struct {
 	*httptest.Server
-	mu       sync.Mutex
-	statuses []int // consumed one per request; the last one repeats
-	bodies   [][]map[string]any
-	headers  []http.Header
+	mu         sync.Mutex
+	statuses   []int // consumed one per request; the last one repeats
+	retryAfter string
+	bodies     [][]map[string]any
+	headers    []http.Header
 }
 
 func newNRServer(t *testing.T, statuses ...int) *nrServer {
@@ -49,6 +50,9 @@ func newNRServer(t *testing.T, statuses ...int) *nrServer {
 			if json.Unmarshal(b, &events) == nil {
 				s.bodies = append(s.bodies, events)
 			}
+		}
+		if s.retryAfter != "" {
+			w.Header().Set("Retry-After", s.retryAfter)
 		}
 		w.WriteHeader(code)
 	}))
@@ -145,10 +149,10 @@ func TestNewRelicShipperRetry(t *testing.T) {
 		srv := newNRServer(t, code, code, 202)
 		var sleeps []time.Duration
 		sh := testShipper(t, srv, &sleeps)
-		errsBefore := statOf("nr-test", "default").Errors
+		errsBefore, sentBefore := statOf("nr-test", "default").Errors, statOf("nr-test", "default").Sent
 		sh.interval = 5 * time.Millisecond
 		_, _ = sh.Write(ev("default", "retry"))
-		assert.Eventually(t, func() bool { return srv.requests() == 3 }, 5*time.Second, 5*time.Millisecond)
+		assert.Eventually(t, func() bool { return statOf("nr-test", "default").Sent == sentBefore+1 }, 5*time.Second, 5*time.Millisecond)
 		require.NoError(t, sh.Close())
 		assert.Equal(t, 3, srv.requests(), code)
 		require.Len(t, sleeps, 2)
@@ -186,13 +190,15 @@ func TestNewRelicShipperAuthFailureStops(t *testing.T) {
 }
 
 func TestNewRelicShipperOtherClientErrorAndRedirect(t *testing.T) {
-	srv := newNRServer(t, 400)
-	sh := testShipper(t, srv, nil)
-	sh.interval = 5 * time.Millisecond
-	_, _ = sh.Write(ev("default", "bad"))
-	assert.Eventually(t, func() bool { return srv.requests() == 1 }, 5*time.Second, 5*time.Millisecond)
-	require.NoError(t, sh.Close())
-	assert.Equal(t, 1, srv.requests())
+	for _, code := range []int{400, 413, 422} {
+		srv := newNRServer(t, code)
+		sh := testShipper(t, srv, nil)
+		sh.interval = 5 * time.Millisecond
+		_, _ = sh.Write(ev("default", "bad"))
+		assert.Eventually(t, func() bool { return srv.requests() == 1 }, 5*time.Second, 5*time.Millisecond)
+		require.NoError(t, sh.Close())
+		assert.Equal(t, 1, srv.requests(), "no retry for HTTP %d", code)
+	}
 
 	// redirects are never followed, so the key can't be forwarded
 	other := newNRServer(t, 202)
@@ -201,7 +207,7 @@ func TestNewRelicShipperOtherClientErrorAndRedirect(t *testing.T) {
 	}))
 	defer redir.Close()
 	defer mockVar(&NewRelicTransport, redir.Client().Transport)()
-	sh = newNewRelicShipper("nr-redir", NewRelicOption{Endpoint: redir.URL, Key: testNRKey})
+	sh := newNewRelicShipper("nr-redir", NewRelicOption{Endpoint: redir.URL, Key: testNRKey})
 	_, _ = sh.Write(ev("default", "x"))
 	require.NoError(t, sh.Close())
 	assert.Equal(t, 0, other.requests())
@@ -330,4 +336,88 @@ func mockVar[T any](p *T, v T) func() {
 	old := *p
 	*p = v
 	return func() { *p = old }
+}
+
+func TestNewRelicShipperRetryAfterAndBackoffAcrossBatches(t *testing.T) {
+	srv := newNRServer(t, 429)
+	srv.retryAfter = "70"
+	var sleeps []time.Duration
+	sh := testShipper(t, srv, &sleeps)
+	sh.interval = 5 * time.Millisecond
+	drops := statOf("nr-test", "default").Dropped
+	_, _ = sh.Write(ev("default", "first"))
+	assert.Eventually(t, func() bool { return statOf("nr-test", "default").Dropped == drops+1 }, 5*time.Second, 5*time.Millisecond)
+	_, _ = sh.Write(ev("default", "second"))
+	assert.Eventually(t, func() bool { return statOf("nr-test", "default").Dropped == drops+2 }, 5*time.Second, 5*time.Millisecond)
+	require.NoError(t, sh.Close())
+
+	// 4 waits inside the first batch, then the second batch waits before its first attempt as well
+	require.Len(t, sleeps, 4+5)
+	assert.GreaterOrEqual(t, sleeps[0], 70*time.Second, "Retry-After is honoured")
+	assert.GreaterOrEqual(t, sleeps[4], 24*time.Second, "backoff state is kept across batches")
+}
+
+func TestNewRelicShipperNetworkErrorLeaksNothing(t *testing.T) {
+	defer mockVar[http.RoundTripper](&NewRelicTransport, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("dial failed for %s with %v", r.URL, r.Header)
+	}))()
+	sh := newNewRelicShipper("nr-neterr", NewRelicOption{Endpoint: "https://nr.invalid/log", Key: testNRKey})
+	sh.interval = 5 * time.Millisecond
+	sh.sleep = func(context.Context, time.Duration) bool { return true }
+	stderr := captureStderr(t, func() {
+		_, _ = sh.Write(ev("default", "x"))
+		assert.Eventually(t, func() bool { return statOf("nr-neterr", "default").Dropped == 1 }, 5*time.Second, 5*time.Millisecond)
+		require.NoError(t, sh.Close())
+	})
+	assert.NotContains(t, stderr, testNRKey)
+	assert.Equal(t, uint64(5), statOf("nr-neterr", "default").Errors)
+}
+
+func TestNewRelicQueueCountsFormattedBytes(t *testing.T) {
+	srv := newNRServer(t, 202)
+	sh := testShipper(t, srv, nil)
+	sh.maxBytes = 100 * 1024
+	before := statOf("nr-test", "default").Dropped
+	big := strings.Repeat("x", 40*1024)
+	for range 5 {
+		_, _ = sh.Write(ev("default", big))
+	}
+	assert.Equal(t, before+3, statOf("nr-test", "default").Dropped, "5 x 40 KB don't fit in 100 KB: the 3 oldest go")
+}
+
+func TestEventFormatJSONFieldCapsAndRedactionOrder(t *testing.T) {
+	// the secret sits across the 32 KB cut: redact first, cut afterwards
+	msg := strings.Repeat("a", maxJSONMessage-8) + " access_token=SECRETVALUE0123"
+	m := formatJSON(t, &Event{
+		Level: INFO, Logger: "access", MsgSimpleText: msg,
+		Fields: map[string]any{"user_agent": strings.Repeat("u", 100000), "path": "/x?token=" + strings.Repeat("t", 5000), "ip": "1.2.3.4"},
+	})
+	assert.NotContains(t, m["message"], "SECRET")
+	assert.NotContains(t, m["message"], "access_token=S")
+	assert.LessOrEqual(t, len(m["user_agent"].(string)), maxJSONField+len("…[truncated]"))
+	assert.Equal(t, "/x?token=[REDACTED]", m["path"])
+
+	// the rendered access line carries the same credentials as the path field
+	line := `203.0.113.7 - - [09/Oct/2026:10:00:00 +0000] "GET /x?password=hunter2&page=2 HTTP/1.1" 200 5 "https://h/r?access_token=REFTOKEN123" "agent"`
+	m = formatJSON(t, &Event{Level: INFO, Logger: "access", MsgSimpleText: line})
+	assert.NotContains(t, m["message"], "hunter2")
+	assert.NotContains(t, m["message"], "REFTOKEN123")
+	assert.Contains(t, m["message"], "page=2")
+}
+
+func TestJSONFormattingRunsInWriterGoroutine(t *testing.T) {
+	release := make(chan struct{})
+	w := NewEventWriterBuffer("lazy", WriterMode{Level: INFO})
+	w.Base().FormatEvent = func(*WriterMode, *Event) []byte { <-release; return []byte("late\n") }
+	l := NewLoggerWithWriters(t.Context(), "default", w)
+	returned := make(chan struct{})
+	go func() { l.Info("never formatted by the caller"); close(returned) }()
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("log.Info waited for the formatter")
+	}
+	close(release)
+	l.Close()
+	assert.Equal(t, "late\n", w.(EventWriterBuffer).GetString())
 }

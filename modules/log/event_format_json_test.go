@@ -16,7 +16,7 @@ import (
 
 func formatJSON(t *testing.T, e *Event) map[string]any {
 	t.Helper()
-	b := EventFormatJSONMessage(&WriterMode{StacktraceLevel: ERROR}, e, "")
+	b := EventFormatJSONMessage(&WriterMode{StacktraceLevel: ERROR}, e)
 	require.True(t, strings.HasSuffix(string(b), "\n"))
 	assert.Equal(t, 1, strings.Count(string(b), "\n"))
 	m := map[string]any{}
