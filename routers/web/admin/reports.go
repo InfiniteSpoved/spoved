@@ -332,7 +332,7 @@ func deleteAccount(ctx *context.Context, contentType moderation.ReportedContentT
 		}
 		log.Trace("Organization deleted by admin (%s): %s", ctx.Doer.Name, reportedOrg.Name)
 	} else {
-		if err = user_service.DeleteUser(ctx, reportedUser, true); err != nil {
+		if err = user_service.DeleteUserPermanently(ctx, reportedUser, true); err != nil {
 			ctx.Error(http.StatusInternalServerError, fmt.Sprintf("Failed to delete the user: %s", err.Error()))
 			return
 		}

@@ -181,12 +181,35 @@ func renameUser(ctx context.Context, u *user_model.User, newUserName string, doe
 // but issues/comments/pulls will be kept and shown as someone has been deleted,
 // unless the user is younger than USER_DELETE_WITH_COMMENTS_MAX_DAYS.
 func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
+	return deleteUserAccount(ctx, u, purge, true)
+}
+
+// DeleteUserPermanently is DeleteUser for moderation: the repositories (and organizations the user solely owns) are
+// deleted for good instead of going to the trash.
+func DeleteUserPermanently(ctx context.Context, u *user_model.User, purge bool) error {
+	return deleteUserAccount(ctx, u, purge, false)
+}
+
+func deleteUserAccount(ctx context.Context, u *user_model.User, purge, trash bool) error {
 	if u.IsOrganization() {
 		return fmt.Errorf("%s is an organization not a user", u.Name)
 	}
 
 	if user_model.IsLastAdminUser(ctx, u) {
 		return models.ErrDeleteLastAdminUser{UID: u.ID}
+	}
+
+	// A purged user's repositories go to the trash as separate items and the user stays as a hidden tombstone that
+	// owns them (so the name can't be taken and a purge never meets another user's repository). The tombstone is
+	// deleted for real by services/trash with the last of them.
+	trash = trash && setting.Trash.RetentionDays > 0
+	keepRow := false
+	if purge && trash && !u.IsTrashed() && setting.Trash.TrashUserRepos {
+		count, err := repo_model.CountRepositories(ctx, repo_model.CountRepositoryOptions{OwnerID: u.ID})
+		if err != nil {
+			return fmt.Errorf("GetRepositoryCount: %w", err)
+		}
+		keepRow = count > 0
 	}
 
 	hasSSHKey, err := db.GetEngine(ctx).Where("owner_id = ? AND type != ?", u.ID, asymkey_model.KeyTypePrincipal).Table("public_key").Exist()
@@ -229,7 +252,15 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 		//
 		// An alternative option here would be write a DeleteAllRepositoriesForUserID function which would delete all of the repos
 		// but such a function would likely get out of date
-		err := repo_service.DeleteOwnerRepositoriesDirectly(ctx, u)
+		var err error
+		switch {
+		case u.IsTrashed():
+			// the tombstone of a deleted user: the check below refuses if a repository turned up, it isn't deleted
+		case keepRow:
+			err = repo_service.TrashUserRepositories(ctx, u)
+		default:
+			err = repo_service.DeleteOwnerRepositoriesDirectly(ctx, u)
+		}
 		if err != nil {
 			return err
 		}
@@ -259,7 +290,12 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 			for _, org := range orgs {
 				if err := models.RemoveOrgUser(ctx, org.ID, u.ID); err != nil {
 					if organization.IsErrLastOrgOwner(err) {
-						err = org_service.DeleteOrganization(ctx, org, true)
+						// the organization with its repositories goes to the trash as one item, as if its owner had deleted it
+						if trash {
+							err = org_service.TrashOrganization(ctx, u, org)
+						} else {
+							err = org_service.DeleteOrganization(ctx, org, true)
+						}
 						if err != nil {
 							return fmt.Errorf("unable to delete organization %d: %w", org.ID, err)
 						}
@@ -301,8 +337,24 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 	count, err := repo_model.CountRepositories(ctx, repo_model.CountRepositoryOptions{OwnerID: u.ID})
 	if err != nil {
 		return fmt.Errorf("GetRepositoryCount: %w", err)
+	} else if keepRow {
+		// the trashed ones stay with the tombstone; one created meanwhile is not in the trash
+		if live, err := db.GetEngine(ctx).Table("repository").Where("owner_id = ? AND trashed_unix = 0", u.ID).Exist(); err != nil {
+			return err
+		} else if live {
+			return models.ErrUserOwnRepos{UID: u.ID}
+		}
 	} else if count > 0 {
 		return models.ErrUserOwnRepos{UID: u.ID}
+	}
+
+	// What is left of the memberships of a purged user are those of organizations in the trash, which the loop above
+	// doesn't list. They go too (only this user's rows), so the user can be deleted; an organization whose last owner
+	// this was has no owner when it is restored.
+	if purge {
+		if err := removeTrashedOrgMemberships(ctx, u); err != nil {
+			return err
+		}
 	}
 
 	// Check membership of organization.
@@ -320,7 +372,7 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 		return models.ErrUserOwnPackages{UID: u.ID}
 	}
 
-	if err := deleteUser(ctx, u, purge); err != nil {
+	if err := deleteUser(ctx, u, purge, keepRow); err != nil {
 		return fmt.Errorf("DeleteUser: %w", err)
 	}
 
@@ -343,11 +395,13 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 
 	// Note: There are something just cannot be roll back,
 	//	so just keep error logs of those operations.
-	path := user_model.UserPath(u.Name)
-	if err := util.RemoveAll(path); err != nil {
-		err = fmt.Errorf("Failed to RemoveAll %s: %w", path, err)
-		_ = system_model.CreateNotice(ctx, system_model.NoticeTask, fmt.Sprintf("delete user '%s': %v", u.Name, err))
-		return err
+	if !keepRow { // the directory holds the trashed repositories of a tombstone
+		path := user_model.UserPath(u.Name)
+		if err := util.RemoveAll(path); err != nil {
+			err = fmt.Errorf("Failed to RemoveAll %s: %w", path, err)
+			_ = system_model.CreateNotice(ctx, system_model.NoticeTask, fmt.Sprintf("delete user '%s': %v", u.Name, err))
+			return err
+		}
 	}
 
 	if u.Avatar != "" {
@@ -388,4 +442,15 @@ func DeleteInactiveUsers(ctx context.Context, olderThan time.Duration) error {
 	}
 
 	return nil
+}
+
+// removeTrashedOrgMemberships takes the user out of the organizations in the trash, with the counters.
+func removeTrashedOrgMemberships(ctx context.Context, u *user_model.User) error {
+	if _, err := db.Exec(ctx, "UPDATE `team` SET num_members = num_members - 1 WHERE id IN (SELECT team_id FROM team_user WHERE uid = ?)", u.ID); err != nil {
+		return err
+	}
+	if _, err := db.Exec(ctx, "UPDATE `user` SET num_members = num_members - 1 WHERE id IN (SELECT org_id FROM org_user WHERE uid = ?)", u.ID); err != nil {
+		return err
+	}
+	return db.DeleteBeans(ctx, &organization.OrgUser{UID: u.ID}, &organization.TeamUser{UID: u.ID})
 }

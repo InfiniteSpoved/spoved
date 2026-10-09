@@ -11,6 +11,7 @@ import (
 
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/util"
 
 	"code.forgejo.org/xorm/xorm"
@@ -371,4 +372,10 @@ func CountRepositoryPackages(ctx context.Context, repositoryID int64) (int64, er
 	return getRepositoryPackages(ctx, repositoryID).
 		Distinct("package.id").
 		Count(&Package{})
+}
+
+// NotTrashedCond hides packages linked to a repository in the trash and packages owned by an organization in
+// the trash (or a deleted user's tombstone).
+func NotTrashedCond() builder.Cond {
+	return builder.And(repo_model.NotTrashedCond("package.repo_id"), user_model.NotTrashedCond("package.owner_id"))
 }

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"forgejo.org/models/db"
-	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
@@ -220,6 +219,7 @@ const (
 // All fields optional and are not used if they have their default value (nil, "", 0)
 type PackageSearchOptions struct {
 	OwnerID         int64
+	IncludeTrashed  bool // also packages of a repository or an owner in the trash, for deleting them
 	RepoID          int64
 	Type            Type
 	PackageID       int64
@@ -235,7 +235,10 @@ type PackageSearchOptions struct {
 
 func (opts *PackageSearchOptions) ToConds() builder.Cond {
 	// packages linked to a trashed repository are hidden together with it
-	cond := repo_model.NotTrashedCond("package.repo_id")
+	cond := NotTrashedCond()
+	if opts.IncludeTrashed {
+		cond = builder.NewCond()
+	}
 	if has, value := opts.IsInternal.Get(); has {
 		cond = cond.And(builder.Eq{
 			"package_version.is_internal": value,

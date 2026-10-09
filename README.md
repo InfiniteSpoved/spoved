@@ -96,7 +96,7 @@ Forgejo's [documentation](https://forgejo.org/docs/latest/) applies to everythin
 
 ## Contributing
 
-Changes go through pull requests into `develop` on this repository. See [`CLAUDE.md`](CLAUDE.md) for the workflow, local test steps and conventions.
+Changes go through pull requests into `develop` on this repository. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow, local test steps and conventions.
 
 ## License
 

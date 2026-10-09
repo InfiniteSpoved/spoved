@@ -53,7 +53,9 @@ if (isProduction) {
       const licenseText = (licenseFile && !licenseFile.toLowerCase().includes('readme')) ? readFileSync(licenseFile) : '[no license file]';
       return {name: packageName, licenseName: licenses, body: formatLicenseText(licenseText)};
     });
-    const modules = [...goModules, ...jsModules];
+    // The vendored draw.io viewer is not an npm package, so add its licence by hand.
+    const vendorModules = [{name: 'draw.io viewer (public/assets/vendor/drawio)', licenseName: 'Apache-2.0', body: formatLicenseText(readFileSync('public/assets/vendor/drawio/LICENSE', 'utf8'))}];
+    const modules = [...goModules, ...jsModules, ...vendorModules];
     const licenseTxt = modules.map(({name, licenseName, body}) => {
       const title = licenseName ? `${name} - ${licenseName}` : name;
       return `${line}\n${title}\n${line}\n${body}`;

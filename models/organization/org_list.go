@@ -37,11 +37,11 @@ func queryUserOrgIDs(userID int64, includePrivate bool) *builder.Builder {
 	if !includePrivate {
 		cond["is_public"] = true
 	}
-	return builder.Select("org_id").From("org_user").Where(cond)
+	return builder.Select("org_id").From("org_user").Where(builder.And(cond, user_model.NotTrashedCond("org_id")))
 }
 
 func (opts FindOrgOptions) ToConds() builder.Cond {
-	var cond builder.Cond = builder.Eq{"`user`.`type`": user_model.UserTypeOrganization}
+	var cond builder.Cond = builder.Eq{"`user`.`type`": user_model.UserTypeOrganization, "`user`.trashed_unix": 0}
 	if opts.UserID > 0 {
 		cond = cond.And(builder.In("`user`.`id`", queryUserOrgIDs(opts.UserID, opts.IncludePrivate)))
 	}
@@ -70,7 +70,7 @@ func GetOrgsCanCreateRepoByUserID(ctx context.Context, userID int64) ([]*Organiz
 	return orgs, db.GetEngine(ctx).Select("DISTINCT `user`.id, `user`.*").Table("`user`").
 		Join("INNER", "`team_user`", "`team_user`.org_id = `user`.id").
 		Join("INNER", "`team`", "`team`.id = `team_user`.team_id").
-		Where(builder.Eq{"`team_user`.uid": userID}).
+		Where(builder.Eq{"`team_user`.uid": userID, "`user`.trashed_unix": 0}).
 		And(builder.Eq{"`team`.authorize": perm.AccessModeOwner}.Or(builder.Eq{"`team`.can_create_org_repo": true})).
 		Asc("`user`.name").
 		Find(&orgs)
