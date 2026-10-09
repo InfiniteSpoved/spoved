@@ -36,6 +36,7 @@ import (
 	"forgejo.org/modules/testlogger"
 	"forgejo.org/modules/util"
 	"forgejo.org/routers"
+	migrations_allowlist "forgejo.org/services/migrations/allowlist"
 	"forgejo.org/tests/internaltest"
 
 	"github.com/stretchr/testify/require"
@@ -371,6 +372,8 @@ func PrepareTestEnv(t testing.TB, skip ...int) func() {
 	deferFn := PrepareTestEnvWithPackageData(t, skip...)
 	PrepareCleanPackageData(t)
 	internaltest.NewInternalTestServer(t, nil)
+	// tests that allow local networks re-init the allowlist and only restore the setting
+	require.NoError(t, migrations_allowlist.Init())
 
 	projectRoot := base.SetupProjectRoot()
 	setting.AppWorkPath = projectRoot
