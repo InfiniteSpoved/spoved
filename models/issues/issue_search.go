@@ -201,9 +201,7 @@ func applyProjectColumnCondition(sess *xorm.Session, opts *IssuesOptions) {
 	}
 }
 
-// unitCond is repo_model.AvailableUnitCond, computed before the session is built: reading the policy inside a
-// transaction would run a query on the same session.
-func applyRepoConditions(sess *xorm.Session, opts *IssuesOptions, unitCond builder.Cond) {
+func applyRepoConditions(sess *xorm.Session, opts *IssuesOptions) {
 	if len(opts.RepoIDs) == 1 {
 		opts.RepoCond = builder.Eq{"issue.repo_id": opts.RepoIDs[0]}
 	} else if len(opts.RepoIDs) > 1 {
@@ -225,7 +223,7 @@ func applyRepoConditions(sess *xorm.Session, opts *IssuesOptions, unitCond build
 				units = []unit.Type{unit.TypeIssues}
 			}
 		}
-		subQuery = repo_model.JoinRepoType(subQuery, units...).And(unitCond)
+		subQuery = repo_model.JoinRepoType(subQuery, units...)
 		opts.RepoCond = opts.RepoCond.Or(builder.In("issue.repo_id", subQuery))
 	}
 	if opts.RepoCond != nil {
@@ -233,14 +231,16 @@ func applyRepoConditions(sess *xorm.Session, opts *IssuesOptions, unitCond build
 	}
 }
 
+// unitCond is issueUnitCond, computed before the session is built: reading the policy inside a transaction would run
+// a query on the same session.
 func applyConditions(sess *xorm.Session, opts *IssuesOptions, unitCond builder.Cond) {
-	sess.And("`repository`.trashed_unix = 0")
+	sess.And("`repository`.trashed_unix = 0").And(unitCond)
 
 	if len(opts.IssueIDs) > 0 {
 		sess.In("issue.id", opts.IssueIDs)
 	}
 
-	applyRepoConditions(sess, opts, unitCond)
+	applyRepoConditions(sess, opts)
 
 	if has, value := opts.IsClosed.Get(); has {
 		sess.And("issue.is_closed=?", value)
@@ -488,8 +488,18 @@ func applySubscribedCondition(sess *xorm.Session, subscriberID int64) {
 	)
 }
 
+// issueUnitCond drops the issues (pull requests) whose repository the site policy hides Issues (Pull requests) in.
 func issueUnitCond(ctx context.Context) builder.Cond {
-	return repo_model.AvailableUnitCond(ctx, "`repository`.owner_id", "`repo_unit`.type")
+	hidden := builder.NewCond()
+	for isPull, t := range map[bool]unit.Type{false: unit.TypeIssues, true: unit.TypePullRequests} {
+		if c := repo_model.HiddenUnitCond(ctx, "`repository`.owner_id", strconv.Itoa(int(t))); c.IsValid() {
+			hidden = hidden.Or(builder.Eq{"`issue`.is_pull": isPull}.And(c))
+		}
+	}
+	if !hidden.IsValid() {
+		return hidden
+	}
+	return builder.Not{hidden}
 }
 
 // Issues returns a list of issues by given conditions.

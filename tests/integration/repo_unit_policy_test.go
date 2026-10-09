@@ -17,6 +17,8 @@ import (
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
+	"forgejo.org/models/organization"
+	project_model "forgejo.org/models/project"
 	repo_model "forgejo.org/models/repo"
 	system_model "forgejo.org/models/system"
 	unit_model "forgejo.org/models/unit"
@@ -29,6 +31,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	actions_service "forgejo.org/services/actions"
+	issue_service "forgejo.org/services/issue"
 	"forgejo.org/services/mailer/incoming"
 	incoming_payload "forgejo.org/services/mailer/incoming/payload"
 	migrations_allowlist "forgejo.org/services/migrations/allowlist"
@@ -80,8 +83,8 @@ func repoUnitPolicyForm(allowed map[string]bool, orgs map[string]string) map[str
 	return form
 }
 
-// AC1, AC2, AC10, AC11: the admin page lists the 9 units, only site admins change them, the org names are checked,
-// app.ini locks win, and the last change is shown
+// AC1, AC2, AC10, AC11: the admin page lists the 9 units, only site admins change them (not an org owner or a repo
+// admin), the org names are checked, app.ini locks win (user repositories too), and the last change is shown
 func TestRepoUnitPolicyAdminPage(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	defer resetRepoUnitPolicy(t)
@@ -93,7 +96,13 @@ func TestRepoUnitPolicyAdminPage(t *testing.T) {
 	assert.Equal(t, 0, doc.Find(`fieldset.repo-unit[disabled]`).Length())
 
 	// org owners, repo admins and other users can't read or change it
-	for _, name := range []string{"user2", "user5"} {
+	isOwner, err := organization.IsOrganizationOwner(db.DefaultContext, 3, 2)
+	require.NoError(t, err)
+	require.True(t, isOwner, "user2 owns org3")
+	user2Token := getUserToken(t, "user2", auth_model.AccessTokenScopeWriteRepository)
+	MakeRequest(t, NewRequestWithJSON(t, "PUT", "/api/v1/repos/user2/repo1/collaborators/user5", &api.AddCollaboratorOption{Permission: new("admin")}).AddTokenAuth(user2Token), http.StatusNoContent)
+	loginUser(t, "user5").MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/settings"), http.StatusOK) // a repo admin
+	for _, name := range []string{"user2", "user5", "user4"} {
 		s := loginUser(t, name)
 		s.MakeRequest(t, NewRequest(t, "GET", "/admin/repo-units"), http.StatusForbidden)
 		s.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/repo-units", repoUnitPolicyForm(map[string]bool{"repo.issues": false}, nil)), http.StatusForbidden)
@@ -126,6 +135,8 @@ func TestRepoUnitPolicyAdminPage(t *testing.T) {
 
 		doc := NewHTMLParser(t, admin.MakeRequest(t, NewRequest(t, "GET", "/admin/repo-units"), http.StatusOK).Body)
 		assert.Equal(t, 1, doc.Find(`fieldset.repo-unit[disabled][data-unit="repo.wiki"]`).Length())
+		// the hard off applies to user repositories too
+		loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/wiki"), http.StatusNotFound)
 		assert.Equal(t, 0, doc.Find(`input[name^="default_"]:not([disabled])`).Length())
 
 		form := repoUnitPolicyForm(nil, nil)
@@ -173,7 +184,7 @@ func createUnitPolicyOrgRepo(t *testing.T, token, org, name string) *repo_model.
 	return unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{OwnerName: org, LowerName: name})
 }
 
-// AC1, AC3, AC7, AC8: a Not allowed unit disappears from organization repositories everywhere, its data is kept and
+// AC3, AC7, AC8: a Not allowed unit disappears from organization repositories everywhere, its data is kept and
 // comes back; user repositories are not restricted
 func TestRepoUnitPolicyHidesUnit(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
@@ -253,6 +264,22 @@ func TestRepoUnitPolicyHidesUnit(t *testing.T) {
 	require.NoError(t, (&incoming.ReplyHandler{}).Handle(db.DefaultContext, &incoming.MailContent{Content: "reply to a hidden issue"}, user2, payload))
 	unittest.AssertNotExistsBean(t, &issues_model.Comment{IssueID: issue.ID, Content: "reply to a hidden issue"})
 
+	// nor do services: a comment made by code reaches no watcher by notification or mail
+	recipients, restore := captureMail(t)
+	user5 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5})
+	require.NoError(t, repo_model.WatchRepoExplicitly(db.DefaultContext, user5.ID, repo.ID, repo_model.WatchAllSelection))
+	_, err = issue_service.CreateIssueComment(db.DefaultContext, user2, repo, issue, "made by code", nil)
+	require.NoError(t, err)
+	restore()
+	assert.Empty(t, recipients())
+	unittest.AssertNotExistsBean(t, &activities_model.Notification{UserID: 5, IssueID: issue.ID, Status: activities_model.NotificationStatusUnread, CommentID: unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{IssueID: issue.ID, Content: "made by code"}).ID})
+
+	// and a commit that closes it changes nothing
+	closing := fmt.Sprintf("fixes #%d", issue.Index)
+	createWorkflowFile(t, token, "unit-policy-a", "hidden", "closing.txt", getWorkflowCreateFileOptions(user2, "main", closing, "x"))
+	assert.False(t, unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: issue.ID}).IsClosed)
+	unittest.AssertNotExistsBean(t, &issues_model.Comment{IssueID: issue.ID, Type: issues_model.CommentTypeCommitRef})
+
 	// a user repository can still switch it off and on
 	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/repos/user2/repo1", &api.EditRepoOption{HasIssues: new(false)}).AddTokenAuth(token), http.StatusOK)
 	MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/issues"), http.StatusNotFound)
@@ -263,9 +290,13 @@ func TestRepoUnitPolicyHidesUnit(t *testing.T) {
 	resetRepoUnitPolicy(t)
 	visible(t, true)
 	assert.Equal(t, issuesUnit.Config, unittest.AssertExistsAndLoadBean(t, &repo_model.RepoUnit{RepoID: repo.ID, Type: unit_model.TypeIssues}).Config)
+
+	// control: the same closing commit works now
+	createWorkflowFile(t, token, "unit-policy-a", "hidden", "closing2.txt", getWorkflowCreateFileOptions(user2, "main", closing, "x"))
+	assert.True(t, unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: issue.ID}).IsClosed)
 }
 
-// AC3: the same unit is Not allowed for one organization and allowed for another, both ways round
+// AC2, AC3, AC7: the same unit is Not allowed for one organization and allowed for another, both ways round
 func TestRepoUnitPolicySelectedOrgs(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	defer resetRepoUnitPolicy(t)
@@ -288,7 +319,25 @@ func TestRepoUnitPolicySelectedOrgs(t *testing.T) {
 	MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/pulls"), http.StatusOK)
 }
 
-// AC3: hidden is decided by the current owner
+// AC8: project boards (repository and organization) don't show cards of hidden issues
+func TestRepoUnitPolicyProjectBoards(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer resetRepoUnitPolicy(t)
+	unittest.AssertSuccessfulInsert(t, &project_model.ProjectIssue{IssueID: 6, ProjectID: 2, ProjectColumnID: 5})
+
+	session := loginUser(t, "user2")
+	boards := func(t *testing.T, want bool) {
+		t.Helper()
+		for page, title := range map[string]string{"/org3/repo3/projects/2": "issue6", "/org3/-/projects/7": "a issue with a assignment"} {
+			assert.Equal(t, want, strings.Contains(session.MakeRequest(t, NewRequest(t, "GET", page), http.StatusOK).Body.String(), title), page)
+		}
+	}
+	boards(t, true)
+	defer denyRepoUnits(t, nil, unit_model.TypeIssues)()
+	boards(t, false)
+}
+
+// AC3, AC7: hidden is decided by the current owner
 func TestRepoUnitPolicyTransfer(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	defer resetRepoUnitPolicy(t)
@@ -390,7 +439,7 @@ func TestRepoUnitPolicyNewRepos(t *testing.T) {
 	})
 }
 
-// AC8: git, hooks and Actions refuse a hidden unit; Code is never hidden
+// AC8: git, hooks and Actions (triggers, runners, org runs pages) refuse a hidden unit; Code is never hidden
 func TestRepoUnitPolicyEntryPaths(t *testing.T) {
 	onApplicationRun(t, func(t *testing.T, u *url.URL) {
 		defer resetRepoUnitPolicy(t)
@@ -411,6 +460,18 @@ func TestRepoUnitPolicyEntryPaths(t *testing.T) {
 		runs := func() int { return unittest.GetCount(t, &actions_model.ActionRun{RepoID: repo.ID}) }
 		pushWorkflow("allowed")
 		require.Equal(t, 1, runs())
+		adminToken := getUserToken(t, "user1", auth_model.AccessTokenScopeAll)
+		orgRuns := func(t *testing.T, want bool) {
+			t.Helper()
+			status := map[bool]int{true: http.StatusOK, false: http.StatusNotFound}[want]
+			body := session.MakeRequest(t, NewRequest(t, "GET", "/org/org3/actions"), status).Body.String()
+			assert.Equal(t, want, strings.Contains(body, "unit-actions"))
+			session.MakeRequest(t, NewRequest(t, "GET", "/org/org3/actions/overview"), status)
+			MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3/actions/runs").AddTokenAuth(token), status)
+			// site admins see the instance list without the hidden runs too
+			assert.Equal(t, want, strings.Contains(MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/actions/runs").AddTokenAuth(adminToken), http.StatusOK).Body.String(), "unit-actions"))
+		}
+		orgRuns(t, true)
 
 		runner := newMockRunner()
 		var registration struct {
@@ -430,8 +491,17 @@ func TestRepoUnitPolicyEntryPaths(t *testing.T) {
 		assert.Equal(t, 1, runs())
 		assert.Nil(t, runner.maybeFetchTask(t))
 
-		// wiki.git over HTTP and SSH
+		orgRuns(t, false)
+
+		// wiki.git over HTTP (fetch and push) and SSH
 		MakeRequest(t, NewRequest(t, "GET", "/org3/repo3.wiki.git/info/refs?service=git-upload-pack").AddBasicAuth("user2"), http.StatusNotFound)
+		wikiDir := t.TempDir()
+		wikiURL := *u
+		wikiURL.Path = "/org3/repo3.wiki.git"
+		wikiURL.User = url.UserPassword("user2", userPassword)
+		t.Run("InitWiki", doGitInitTestRepository(wikiDir, git.Sha1ObjectFormat))
+		t.Run("AddWikiRemote", doGitAddRemote(wikiDir, "origin", &wikiURL))
+		doGitPushTestRepositoryFail(t, wikiDir, "origin", "master")
 		_, extra := private.ServCommand(t.Context(), 1, "org3", "repo3.wiki", 1, "", "git-upload-pack")
 		require.Error(t, extra.Error)
 
@@ -455,10 +525,11 @@ func TestRepoUnitPolicyEntryPaths(t *testing.T) {
 		pushWorkflow("again")
 		assert.Equal(t, 4, runs()) // the push runs all three workflows
 		runner.fetchTask(t)
+		orgRuns(t, true)
 	})
 }
 
-// Packages Not allowed for an organization close its registries, web and API pages, to site admins too
+// AC3, AC8: Packages Not allowed for an organization close its registries, web and API pages, to site admins too
 func TestRepoUnitPolicyPackages(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	defer resetRepoUnitPolicy(t)
@@ -491,7 +562,7 @@ func TestRepoUnitPolicyPackages(t *testing.T) {
 	MakeRequest(t, NewRequest(t, "GET", file).AddTokenAuth(token), http.StatusOK)
 }
 
-// A stored policy that can't be parsed fails closed for organizations, and the admin page can replace it
+// AC2: a stored policy that can't be parsed fails closed for organizations, and the admin page can replace it
 func TestRepoUnitPolicyCorrupt(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	defer resetRepoUnitPolicy(t)

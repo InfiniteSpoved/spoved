@@ -17,6 +17,7 @@ import (
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/git"
@@ -134,6 +135,10 @@ func UpdateIssuesCommit(ctx context.Context, doer *user_model.User, repo *repo_m
 				return err
 			}
 			if refIssue == nil {
+				continue
+			}
+			// an off or hidden unit takes no references, even from repository admins
+			if (refIssue.IsPull && !refRepo.UnitEnabled(ctx, unit.TypePullRequests)) || (!refIssue.IsPull && !refRepo.UnitEnabled(ctx, unit.TypeIssues)) {
 				continue
 			}
 

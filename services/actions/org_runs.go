@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -103,9 +104,11 @@ func ParseOrgRunFilter(form FormGetter) (f OrgRunFilter, err error) {
 // orgRunRepoCond matches, in the repository table, the repositories of org whose Actions runs doer may see. It is
 // the one visibility rule of the runs list, the overview and the instance pages. A nil org (site admins only) means
 // every owner.
-func orgRunRepoCond(org *organization.Organization, doer *user_model.User, admin bool, tokenRepos builder.Cond) builder.Cond {
+func orgRunRepoCond(ctx context.Context, org *organization.Organization, doer *user_model.User, admin bool, tokenRepos builder.Cond) builder.Cond {
 	cond := builder.Eq{"`repository`.trashed_unix": 0}.And(
 		builder.In("`repository`.id", builder.Select("repo_id").From("repo_unit").Where(builder.Eq{"type": unit.TypeActions})),
+		// Actions Not allowed for the owner by the site policy, for site admins too
+		repo_model.AvailableUnitCond(ctx, "`repository`.owner_id", strconv.Itoa(int(unit.TypeActions))),
 	)
 	if org != nil {
 		cond = cond.And(builder.Eq{"`repository`.owner_id": org.ID})
@@ -140,7 +143,7 @@ func FindOrgRuns(ctx context.Context, org *organization.Organization, doer *user
 	if org == nil && !admin {
 		return nil, 0, errors.New("runs of all owners are for site admins only")
 	}
-	repoCond := orgRunRepoCond(org, doer, admin, tokenRepos)
+	repoCond := orgRunRepoCond(ctx, org, doer, admin, tokenRepos)
 	if owner, name, ok := strings.Cut(strings.ToLower(f.Repo), "/"); ok {
 		repoCond = repoCond.And(builder.Eq{"`repository`.lower_name": name}, builder.Expr("LOWER(`repository`.owner_name) = ?", owner))
 	} else if f.Repo != "" {

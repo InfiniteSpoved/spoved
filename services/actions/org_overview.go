@@ -25,10 +25,10 @@ const (
 
 // visibleRepoCond limits col (a repo_id column) to the repositories orgRunRepoCond lets doer see, so every query of
 // the overview applies the rule of the runs list. Ownership is the repository's, never the owner_id of a run or job.
-func visibleRepoCond(col string, org *organization.Organization, doer *user_model.User, admin bool, tokenRepos builder.Cond) builder.Cond {
+func visibleRepoCond(ctx context.Context, col string, org *organization.Organization, doer *user_model.User, admin bool, tokenRepos builder.Cond) builder.Cond {
 	return builder.And(
 		repo_model.NotTrashedCond(col),
-		builder.In(col, builder.Select("id").From("repository").Where(orgRunRepoCond(org, doer, admin, tokenRepos))),
+		builder.In(col, builder.Select("id").From("repository").Where(orgRunRepoCond(ctx, org, doer, admin, tokenRepos))),
 	)
 }
 
@@ -56,8 +56,8 @@ func (o *OrgOverview) FailurePercent() int64 {
 // GetOrgOverview counts the runs and jobs of the repositories of org that doer may see, at time now.
 func GetOrgOverview(ctx context.Context, org *organization.Organization, doer *user_model.User, admin bool, tokenRepos builder.Cond, now timeutil.TimeStamp) (*OrgOverview, error) {
 	e := db.GetEngine(ctx)
-	runCond := visibleRepoCond("repo_id", org, doer, admin, tokenRepos)
-	jobCond := visibleRepoCond("repo_id", org, doer, admin, tokenRepos)
+	runCond := visibleRepoCond(ctx, "repo_id", org, doer, admin, tokenRepos)
+	jobCond := visibleRepoCond(ctx, "repo_id", org, doer, admin, tokenRepos)
 	o := new(OrgOverview)
 
 	// the timestamps are numbers of our own, so they go into the SQL as such
@@ -94,7 +94,7 @@ func GetOrgOverview(ctx context.Context, org *organization.Organization, doer *u
 // runs neither hide nor create an entry. Repositories without a default branch have none.
 func FindOrgFailingNow(ctx context.Context, org *organization.Organization, doer *user_model.User, admin bool, tokenRepos builder.Cond, limit int) (actions_model.RunList, int64, error) {
 	cond := builder.And(
-		visibleRepoCond("`action_run`.repo_id", org, doer, admin, tokenRepos),
+		visibleRepoCond(ctx, "`action_run`.repo_id", org, doer, admin, tokenRepos),
 		builder.Eq{"`action_run`.status": actions_model.StatusFailure},
 		builder.Expr("`repository`.default_branch <> '' AND SUBSTR(`action_run`.ref, 1, 11) = 'refs/heads/' AND SUBSTR(`action_run`.ref, 12) = `repository`.default_branch"),
 		builder.Expr("`action_run`.id = (SELECT MAX(r2.id) FROM action_run r2 WHERE r2.repo_id = `action_run`.repo_id AND r2.workflow_id = `action_run`.workflow_id AND r2.ref = `action_run`.ref AND r2.status IN (?, ?))",
@@ -129,7 +129,7 @@ type QueuedJob struct {
 // organization (the owner of the repository), or to the repository of the job.
 func FindOrgQueue(ctx context.Context, org *organization.Organization, doer *user_model.User, admin bool, tokenRepos builder.Cond, limit int, now timeutil.TimeStamp) ([]*QueuedJob, int64, error) {
 	e := db.GetEngine(ctx)
-	cond := builder.And(visibleRepoCond("repo_id", org, doer, admin, tokenRepos), builder.Eq{"status": actions_model.StatusWaiting, "task_id": 0})
+	cond := builder.And(visibleRepoCond(ctx, "repo_id", org, doer, admin, tokenRepos), builder.Eq{"status": actions_model.StatusWaiting, "task_id": 0})
 	total, err := e.Where(cond).Count(new(actions_model.ActionRunJob))
 	if err != nil || total == 0 {
 		return nil, 0, err
