@@ -112,7 +112,7 @@ func FindOrgRuns(ctx context.Context, org *organization.Organization, doer *user
 		adminTeamRepos := builder.Select("`team_repo`.repo_id").From("team_repo").
 			Join("INNER", "team_user", "`team_user`.team_id = `team_repo`.team_id").
 			Join("INNER", "team", "`team`.id = `team_repo`.team_id").
-			Where(builder.Eq{"`team_user`.uid": doer.ID}.And(builder.Gte{"`team`.authorize": perm.AccessModeAdmin}))
+			Where(builder.Eq{"`team_user`.uid": doer.ID, "`team`.org_id": org.ID}.And(builder.Gte{"`team`.authorize": perm.AccessModeAdmin}))
 		repoCond = repoCond.And(builder.Or(
 			repo_model.AccessibleRepositoryCondition(doer, unit.TypeActions),
 			builder.In("`repository`.id", adminTeamRepos),
@@ -144,6 +144,14 @@ func FindOrgRuns(ctx context.Context, org *organization.Organization, doer *user
 		opts.TriggerUserID = actor.ID
 	}
 	return db.FindAndCount[actions_model.ActionRun](ctx, opts)
+}
+
+// LoadOrgRunRepos loads the repositories of the runs and drops the runs whose repository went away since the query.
+func LoadOrgRunRepos(ctx context.Context, runs actions_model.RunList) (actions_model.RunList, error) {
+	if err := runs.LoadRepos(ctx); err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(runs, func(run *actions_model.ActionRun) bool { return run.Repo == nil }), nil
 }
 
 // OrgRunPermissions returns the permission of doer in each repository of the loaded runs, with one lookup per

@@ -46,7 +46,7 @@
 					<td>{{template "repo/actions/status" (dict "status" .Status.String)}} {{.Status.LocaleString ctx.Locale}}</td>
 					<td><a href="{{.Repo.Link}}">{{.Repo.FullName}}</a></td>
 					<td><a class="run-link" href="{{.Link}}" title="{{.Title}}">{{.WorkflowID}} #{{.Index}}</a></td>
-					<td>{{if .IsRefDeleted}}{{.PrettyRef}}{{else}}<a href="{{.RefLink}}">{{.PrettyRef}}</a>{{end}}</td>
+					<td><a href="{{.RefLink}}">{{.PrettyRef}}</a></td>
 					<td>{{.Event.Event}}</td>
 					<td><a href="{{.TriggerUser.HomeLink}}">{{.TriggerUser.Name}}</a></td>
 					<td>{{if .Started}}{{DateUtils.TimeSince .Started}}{{end}}</td>

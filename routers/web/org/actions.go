@@ -35,7 +35,7 @@ func Runs(ctx *context.Context) {
 	lo := db.ListOptions{Page: max(ctx.FormInt("page"), 1), PageSize: convert.ToCorrectPageSize(ctx.FormInt("limit"))}
 	runs, total, err := actions_service.FindOrgRuns(ctx, ctx.Org.Organization, ctx.Doer, ctx.IsUserSiteAdmin(), nil, filter, lo)
 	if err == nil {
-		err = runs.LoadRepos(ctx)
+		runs, err = actions_service.LoadOrgRunRepos(ctx, runs)
 	}
 	if err == nil {
 		err = runs.LoadTriggerUser(ctx)

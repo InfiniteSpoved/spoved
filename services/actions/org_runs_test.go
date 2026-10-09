@@ -291,3 +291,12 @@ func TestOrgRunPermissions(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, perms[24].CanWrite(unit.TypeActions))
 }
+
+func TestLoadOrgRunReposDropsGoneRepos(t *testing.T) {
+	runIDs := orgRunsSetup(t)
+	runs := actions_model.RunList{{ID: runIDs[24], RepoID: 24}, {ID: 999, RepoID: 999999}}
+	runs, err := LoadOrgRunRepos(t.Context(), runs)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{runIDs[24]}, orgRunIDs(runs))
+	assert.NotNil(t, runs[0].Repo)
+}

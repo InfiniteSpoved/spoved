@@ -98,7 +98,7 @@ func ListActionRuns(ctx *context.APIContext) {
 	lo := utils.GetListOptions(ctx)
 	runs, total, err := actions_service.FindOrgRuns(ctx, ctx.Org().Organization, ctx.Doer(), ctx.IsUserSiteAdmin(), ctx.Reducer().RepoReadAccessFilter(), filter, lo)
 	if err == nil {
-		err = runs.LoadRepos(ctx)
+		runs, err = actions_service.LoadOrgRunRepos(ctx, runs)
 	}
 	if err == nil {
 		err = runs.LoadTriggerUser(ctx)
