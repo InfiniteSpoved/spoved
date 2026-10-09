@@ -24,7 +24,7 @@ func overviewDoc(t *testing.T, session *TestSession) *HTMLDoc {
 	return NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", "/org/org3/actions/overview"), http.StatusOK).Body)
 }
 
-func overviewRows(doc *HTMLDoc, section string, attr string) []string {
+func overviewRows(doc *HTMLDoc, section, attr string) []string {
 	var rows []string
 	doc.Find(section + " tbody tr").Each(func(_ int, s *goquery.Selection) {
 		rows = append(rows, s.AttrOr("data-repo", "")+" "+s.AttrOr(attr, ""))

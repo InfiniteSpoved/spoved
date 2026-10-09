@@ -146,7 +146,7 @@ func TestOrgOverviewParity(t *testing.T) {
 	require.NoError(t, err)
 	after, err := GetOrgOverview(t.Context(), org, nil, true, nil, now+1)
 	require.NoError(t, err)
-	assert.EqualValues(t, before.Runs7d-2, after.Runs7d)
+	assert.Equal(t, before.Runs7d-2, after.Runs7d)
 	_, n, err := FindOrgFailingNow(t.Context(), org, nil, true, nil, 50)
 	require.NoError(t, err)
 	assert.Zero(t, n)
