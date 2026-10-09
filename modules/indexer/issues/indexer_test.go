@@ -426,7 +426,16 @@ func TestBleveDeleteIssue(t *testing.T) {
 	tmp := t.TempDir()
 	defer test.MockVariableValue(&setting.Indexer.IssuePath, filepath.Join(tmp, "indexers/issues.bleve"))()
 	defer test.MockVariableValue(&setting.Indexer.IssueType, "bleve")()
+	// Handle queue items synchronously: a leveldb queue is process-wide and outlives the test (it can't be drained
+	// reliably), and a late update of issue 1, which still exists in the DB, would re-index it after the delete.
+	cfg, err := setting.NewConfigProviderFromData("[queue.issue_indexer]\nTYPE = immediate\n")
+	require.NoError(t, err)
+	defer test.MockVariableValue(&setting.CfgProvider, cfg)()
 	<-InitIssueIndexer(true)
+	t.Cleanup(func() {
+		(*globalIndexer.Load()).Close() // releases the files in the temp dir
+		globalIndexer.Store(dummyIndexer)
+	})
 
 	ctx := t.Context()
 	issue := unittest.AssertExistsAndLoadBean(t, &issues.Issue{ID: 1})

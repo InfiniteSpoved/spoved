@@ -5,15 +5,15 @@
 #
 # Usage: job.sh TASK [ARGS]
 #   plan                 writes `tasks`, the jobs to run, to $GITHUB_OUTPUT
-#   lint | frontend | migrations | integration
-#   unit SHARD SHARDS | e2e SHARD SHARDS
+#   lint | frontend | migrations
+#   unit SHARD SHARDS | integration SHARD SHARDS | e2e SHARD SHARDS
 #
 # Runs do the checks and the unit tests; with FULL=true they also run the
 # migration, integration and end-to-end tests. Pull requests dispatched with
 # their commits (EVENT=repository_dispatch) that only change files the Go
-# tests cannot depend on skip the unit tests. The unit and end-to-end tests are split into shards that take a
-# round-robin share of the packages or test files (see shard.sh). The
-# integration tests depend on running in their own order and are not split.
+# tests cannot depend on skip the unit tests. The unit, integration and end-to-end tests are split into shards that
+# take a round-robin share of the packages, tests or test files (see shard.sh).
+# Each shard is its own machine, so integration shards share no state.
 set -euo pipefail
 
 # Forgejo tests use SQLite unless told otherwise
@@ -46,7 +46,8 @@ plan)
     # only the selection of changed end-to-end tests needs the history
     depth=1
     [ "$RUN_ALL_E2E" = true ] || depth=0
-    tasks+=',{"task":"migrations","args":"","depth":"1"},{"task":"integration","args":"","depth":"1"}'
+    tasks+=',{"task":"migrations","args":"","depth":"1"}'
+    for i in 1 2 3 4; do tasks+=",{\"task\":\"integration\",\"args\":\"$i 4\",\"depth\":\"1\"}"; done
     for i in 1 2 3; do tasks+=",{\"task\":\"e2e\",\"args\":\"$i 3\",\"depth\":\"$depth\"}"; done
   fi
   tasks="[$tasks]"
@@ -92,7 +93,14 @@ migrations)
   ;;
 
 integration)
-  USE_REPO_TEST_DIR=1 make test-sqlite
+  # test repositories outside the checkout, like USE_REPO_TEST_DIR
+  make integrations.sqlite.test generate-ini-sqlite REPO_TEST_DIR="$(mktemp -d)/"
+  # this shard's tests, e.g. ^(TestA|TestB)$; -test.list also prints log lines
+  tests=$(PROJECT_ROOT="$PWD" PROJECT_CONF=tests/sqlite.ini ./integrations.sqlite.test -test.list '^Test' 2>/dev/null \
+    | grep -E '^Test[A-Za-z0-9_]*$' | .github/ci/shard.sh "$1" "$2" | paste -sd'|')
+  [ -n "$tests" ] || { echo "no integration tests in shard $1 of $2" >&2; exit 1; }
+  echo "Testing $(tr -cd '|' <<< "$tests" | wc -c | awk '{print $1 + 1}') tests in shard $1 of $2"
+  PROJECT_ROOT="$PWD" PROJECT_CONF=tests/sqlite.ini ./integrations.sqlite.test -test.run "^(${tests})\$"
   ;;
 
 e2e)
