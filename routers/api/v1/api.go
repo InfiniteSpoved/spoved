@@ -1319,6 +1319,8 @@ func Routes() *web.Route {
 			m.Post("/archive", reqToken(), reqOrgOwnership(), bind(api.ArchiveOrgOption{}), org.Archive)
 			m.Post("/unarchive", reqToken(), reqOrgOwnership(), org.Unarchive)
 			m.Get("/access-report", reqToken(), reqOrgOwnership(), org.GetAccessReport)
+			// the runs of private repositories are repository data, so the repository scope is needed as well
+			m.Get("/actions/runs", reqToken(), reqOrgMembership(), tokenRequiresScopes(auth_model.AccessTokenScopeCategoryRepository), org.ListActionRuns)
 			m.Combo("/branch-workflow").Get(reqToken(), reqOrgOwnership(), org.GetBranchWorkflow).
 				Put(reqToken(), reqOrgOwnership(), bind(api.OrgBranchWorkflow{}), org.EditBranchWorkflow)
 			m.Group("/branch_protections", func() {

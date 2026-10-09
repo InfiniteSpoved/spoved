@@ -1,0 +1,71 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content organization actions">
+	{{template "org/header" .}}
+	<div class="ui container">
+		{{template "base/alert" .}}
+		<form class="ui form tw-flex tw-flex-wrap tw-gap-2 tw-items-end tw-mb-4" method="get" action="{{.OrgLink}}/actions">
+			<label>{{ctx.Locale.Tr "org.actions.runs.status"}}
+				<select name="status">
+					<option value="">{{ctx.Locale.Tr "org.actions.runs.all_statuses"}}</option>
+					{{range .StatusOptions}}<option value="{{.Value}}" {{if eq .Value $.Cur_status}}selected{{end}}>{{.Label}}</option>{{end}}
+				</select>
+			</label>
+			<label>{{ctx.Locale.Tr "org.actions.runs.repository"}} <input type="text" name="repo" value="{{.Cur_repo}}"></label>
+			<label>{{ctx.Locale.Tr "org.actions.runs.workflow"}} <input type="text" name="workflow_id" value="{{.Cur_workflow_id}}"></label>
+			<label>{{ctx.Locale.Tr "org.actions.runs.branch"}} <input type="text" name="branch" value="{{.Cur_branch}}"></label>
+			<label>{{ctx.Locale.Tr "org.actions.runs.event"}} <input type="text" name="event" value="{{.Cur_event}}"></label>
+			<label>{{ctx.Locale.Tr "org.actions.runs.actor"}} <input type="text" name="actor" value="{{.Cur_actor}}"></label>
+			<label>{{ctx.Locale.Tr "org.actions.runs.from"}} <input type="date" name="from" value="{{.Cur_from}}"></label>
+			<label>{{ctx.Locale.Tr "org.actions.runs.to"}} <input type="date" name="to" value="{{.Cur_to}}"></label>
+			<button class="ui primary button" type="submit">{{ctx.Locale.Tr "org.actions.runs.filter"}}</button>
+			{{if .IsFiltered}}<a class="ui button" href="{{.OrgLink}}/actions">{{ctx.Locale.Tr "org.actions.runs.reset"}}</a>{{end}}
+		</form>
+		{{if not .Runs}}
+			<div class="empty-placeholder">
+				{{svg "octicon-no-entry" 48}}
+				<h2>{{if .IsFiltered}}{{ctx.Locale.Tr "actions.runs.no_results"}}{{else}}{{ctx.Locale.Tr "org.actions.runs.none"}}{{end}}</h2>
+			</div>
+		{{else}}
+		<table class="ui very basic table org-runs">
+			<thead>
+				<tr>
+					<th>{{ctx.Locale.Tr "org.actions.runs.status"}}</th>
+					<th>{{ctx.Locale.Tr "org.actions.runs.repository"}}</th>
+					<th>{{ctx.Locale.Tr "org.actions.runs.workflow"}}</th>
+					<th>{{ctx.Locale.Tr "org.actions.runs.ref"}}</th>
+					<th>{{ctx.Locale.Tr "org.actions.runs.event"}}</th>
+					<th>{{ctx.Locale.Tr "org.actions.runs.actor"}}</th>
+					<th>{{ctx.Locale.Tr "org.actions.runs.started"}}</th>
+					<th>{{ctx.Locale.Tr "org.actions.runs.duration"}}</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody>
+			{{range .Runs}}
+				<tr data-repo="{{.Repo.FullName}}" data-run="{{.ID}}">
+					<td>{{template "repo/actions/status" (dict "status" .Status.String)}} {{.Status.LocaleString ctx.Locale}}</td>
+					<td><a href="{{.Repo.Link}}">{{.Repo.FullName}}</a></td>
+					<td><a class="run-link" href="{{.Link}}" title="{{.Title}}">{{.WorkflowID}} #{{.Index}}</a></td>
+					<td><a href="{{.RefLink}}">{{.PrettyRef}}</a></td>
+					<td>{{.Event.Event}}</td>
+					<td><a href="{{.TriggerUser.HomeLink}}">{{.TriggerUser.Name}}</a></td>
+					<td>{{if .Started}}{{DateUtils.TimeSince .Started}}{{end}}</td>
+					<td>{{.Duration}}</td>
+					<td class="tw-text-right">
+						{{if index $.RunCanWrite .ID}}
+							{{if .CanBeRerun}}
+								<button class="ui basic small compact button link-action" data-url="{{.Link}}/rerun">{{ctx.Locale.Tr "rerun"}}</button>
+							{{else if not .Status.IsDone}}
+								<button class="ui basic small compact red button link-action" data-url="{{.Link}}/cancel">{{ctx.Locale.Tr "cancel"}}</button>
+							{{end}}
+						{{end}}
+					</td>
+				</tr>
+			{{end}}
+			</tbody>
+		</table>
+		{{template "base/paginate" .}}
+		{{end}}
+	</div>
+</div>
+{{template "base/footer" .}}

@@ -130,6 +130,53 @@ type ListActionRunResponse struct {
 	TotalCount int64        `json:"total_count"`
 }
 
+// ActionRunSummary is a workflow run as listed across the repositories of an organization
+// swagger:model
+type ActionRunSummary struct {
+	// the action run id
+	ID int64 `json:"id"`
+	// the action run's title
+	Title string `json:"title"`
+	// the repo this run belongs to
+	Repo *RepositoryMeta `json:"repository"`
+	// the name of workflow file
+	WorkflowID string `json:"workflow_id"`
+	// a unique number for each run of a repository
+	Index int64 `json:"index_in_repo"`
+	// the user that triggered this action run
+	TriggerUser *User `json:"trigger_user"`
+	// the branch, tag or pull request (#number) the run ran on
+	PrettyRef string `json:"prettyref"`
+	// the commit sha the action run ran on
+	CommitSHA string `json:"commit_sha"`
+	// the webhook event that causes the workflow to run
+	Event string `json:"event"`
+	// the current status of this run
+	Status string `json:"status"`
+	// when the action run was started
+	// swagger:type string
+	// swagger:strfmt date-time
+	Started optional.Option[time.Time] `json:"started"`
+	// when the action run was stopped
+	// swagger:type string
+	// swagger:strfmt date-time
+	Stopped optional.Option[time.Time] `json:"stopped"`
+	// when the action run was created
+	Created time.Time `json:"created"`
+	// when the action run was last updated
+	Updated time.Time `json:"updated"`
+	// duration of the run, in nanoseconds
+	Duration time.Duration `json:"duration,omitempty"`
+	// the URL of the run's page
+	HTMLURL string `json:"html_url"`
+}
+
+// ListActionRunSummaryResponse return a list of ActionRunSummary
+type ListActionRunSummaryResponse struct {
+	Entries    []*ActionRunSummary `json:"workflow_runs"`
+	TotalCount int64               `json:"total_count"`
+}
+
 // ActionArtifact represents an artifact of a workflow run
 // swagger:model
 type ActionArtifact struct {
