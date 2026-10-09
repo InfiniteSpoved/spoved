@@ -5,10 +5,12 @@ package project
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	project_model "forgejo.org/models/project"
 	project_module "forgejo.org/modules/project"
+	"forgejo.org/modules/util"
 	"forgejo.org/modules/validation"
 )
 
@@ -18,6 +20,12 @@ func getColumnByID(ctx context.Context, columnID int64) (*project_model.Column, 
 		return nil, fmt.Errorf("failed to get column %d: %w", columnID, err)
 	}
 	return column, nil
+}
+
+// IsErrColumnNotFound reports the errors of GetValidProjectColumnByID that mean there is no such column in the
+// project: a missing column, column ID 0, or a column of another project.
+func IsErrColumnNotFound(err error) bool {
+	return project_model.IsErrProjectColumnNotExist(err) || validation.IsErrNotValid(err) || errors.Is(err, util.ErrInvalidArgument)
 }
 
 // GetValidProjectColumnByID Get a Column by its ID, validate ID != 0 and check if projectIDs match
