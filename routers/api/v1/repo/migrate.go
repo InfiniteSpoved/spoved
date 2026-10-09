@@ -147,6 +147,12 @@ func Migrate(ctx *context.APIContext) {
 		}
 	}
 
+	branchFilter, tagFilter, err := forms.NormalizeMirrorFilters(gitServiceType, form.Mirror, form.MirrorBranchFilter, form.MirrorTagFilter)
+	if err != nil {
+		ctx.Error(http.StatusUnprocessableEntity, "MirrorFilter", err)
+		return
+	}
+
 	opts := migrations.MigrateOptions{
 		CloneAddr:      remoteAddr,
 		RepoName:       form.RepoName,
@@ -167,6 +173,9 @@ func Migrate(ctx *context.APIContext) {
 		Releases:       form.Releases,
 		GitServiceType: gitServiceType,
 		MirrorInterval: form.MirrorInterval,
+
+		MirrorBranchFilter: branchFilter,
+		MirrorTagFilter:    tagFilter,
 	}
 	if opts.Mirror {
 		opts.Issues = false
