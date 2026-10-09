@@ -11,6 +11,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/container"
+	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/translation"
 	webhook_module "forgejo.org/modules/webhook"
 
@@ -78,6 +79,10 @@ type FindRunOptions struct {
 	Events        []string // []webhook_module.HookEventType
 	RunNumber     int64
 	CommitSHA     string
+	// RepoCond limits the runs to the repositories matching it, written against the `repository` table
+	RepoCond builder.Cond
+	// CreatedFrom and CreatedTo, if set, bound the creation time (both inclusive)
+	CreatedFrom, CreatedTo timeutil.TimeStamp
 }
 
 func (opts FindRunOptions) ToConds() builder.Cond {
@@ -115,6 +120,15 @@ func (opts FindRunOptions) ToConds() builder.Cond {
 	}
 	if opts.CommitSHA != "" {
 		cond = cond.And(builder.Eq{"commit_sha": opts.CommitSHA})
+	}
+	if opts.RepoCond != nil {
+		cond = cond.And(builder.In("repo_id", builder.Select("id").From("repository").Where(opts.RepoCond)))
+	}
+	if opts.CreatedFrom > 0 {
+		cond = cond.And(builder.Gte{"created": opts.CreatedFrom})
+	}
+	if opts.CreatedTo > 0 {
+		cond = cond.And(builder.Lte{"created": opts.CreatedTo})
 	}
 	return cond
 }

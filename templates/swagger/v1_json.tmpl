@@ -4144,6 +4144,110 @@
         }
       }
     },
+    "/orgs/{org}/actions/runs": {
+      "get": {
+        "description": "Lists the runs of the repositories of the organization whose Actions the authenticated user can read, newest first. The token needs the organization and the repository scope. Unlike a repository's run list, `is_ref_deleted` is not reported and the run is described by a short form.\n",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "List the workflow runs of an organization's repositories",
+        "operationId": "orgListActionRuns",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi",
+            "description": "Only return runs with one of these statuses (success, failure, cancelled, running, waiting, skipped, blocked). Repeated values are deduplicated and only the first 20 are used.",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi",
+            "description": "Only return runs triggered by one of these events, for example `push` or `pull_request`. Repeated values are deduplicated and only the first 20 are used; an unknown event matches no run.",
+            "name": "event",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Only return runs of the repository with this name.",
+            "name": "repo",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Only return runs of the workflow with this file name.",
+            "name": "workflow_id",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Only return runs of this branch.",
+            "name": "branch",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Only return runs triggered by the user with this name.",
+            "name": "actor",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Only return runs created at or after this time (RFC 3339 or YYYY-MM-DD).",
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Only return runs created at or before this time (RFC 3339, or YYYY-MM-DD for the end of that day).",
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/ActionRunSummaryList"
+          },
+          "400": {
+            "$ref": "#/responses/error"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
     "/orgs/{org}/actions/secrets": {
       "get": {
         "produces": [
@@ -26482,6 +26586,93 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "ActionRunSummary": {
+      "description": "ActionRunSummary is a workflow run as listed across the repositories of an organization",
+      "type": "object",
+      "properties": {
+        "commit_sha": {
+          "description": "the commit sha the action run ran on",
+          "type": "string",
+          "x-go-name": "CommitSHA"
+        },
+        "created": {
+          "description": "when the action run was created",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Created"
+        },
+        "duration": {
+          "$ref": "#/definitions/Duration"
+        },
+        "event": {
+          "description": "the webhook event that causes the workflow to run",
+          "type": "string",
+          "x-go-name": "Event"
+        },
+        "html_url": {
+          "description": "the URL of the run's page",
+          "type": "string",
+          "x-go-name": "HTMLURL"
+        },
+        "id": {
+          "description": "the action run id",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "index_in_repo": {
+          "description": "a unique number for each run of a repository",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Index"
+        },
+        "prettyref": {
+          "description": "the branch, tag or pull request (#number) the run ran on",
+          "type": "string",
+          "x-go-name": "PrettyRef"
+        },
+        "repository": {
+          "$ref": "#/definitions/RepositoryMeta"
+        },
+        "started": {
+          "description": "when the action run was started",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Started"
+        },
+        "status": {
+          "description": "the current status of this run",
+          "type": "string",
+          "x-go-name": "Status"
+        },
+        "stopped": {
+          "description": "when the action run was stopped",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Stopped"
+        },
+        "title": {
+          "description": "the action run's title",
+          "type": "string",
+          "x-go-name": "Title"
+        },
+        "trigger_user": {
+          "$ref": "#/definitions/User"
+        },
+        "updated": {
+          "description": "when the action run was last updated",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Updated"
+        },
+        "workflow_id": {
+          "description": "the name of workflow file",
+          "type": "string",
+          "x-go-name": "WorkflowID"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "ActionRunner": {
       "description": "ActionRunner represents a runner",
       "type": "object",
@@ -32364,6 +32555,25 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "ListActionRunSummaryResponse": {
+      "description": "ListActionRunSummaryResponse return a list of ActionRunSummary",
+      "type": "object",
+      "properties": {
+        "total_count": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "TotalCount"
+        },
+        "workflow_runs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ActionRunSummary"
+          },
+          "x-go-name": "Entries"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "Maintenance": {
       "description": "Maintenance is the instance's read-only or maintenance mode",
       "type": "object",
@@ -36652,6 +36862,12 @@
       "description": "ActionRunList",
       "schema": {
         "$ref": "#/definitions/ListActionRunResponse"
+      }
+    },
+    "ActionRunSummaryList": {
+      "description": "ActionRunSummaryList",
+      "schema": {
+        "$ref": "#/definitions/ListActionRunSummaryResponse"
       }
     },
     "ActionRunner": {

@@ -5,8 +5,8 @@ description: >
   supervisor (the user's session), one operational lead (intake, acceptance
   criteria, design approval, test plan, verification and merge), and one coder
   per ticket (design, tests, code, CI in InfiniteSpoved/spovedBuild), plus a
-  security reviewer only for security-sensitive tickets. One ticket and one PR
-  at a time. Holds the briefs, the setup steps, the check-in routine and the
+  security reviewer only for security-sensitive tickets. Up to three
+  non-conflicting tickets at a time, merged one at a time. Holds the briefs, the setup steps, the check-in routine and the
   rules. Use when asked to "create a supervisor", "set up the team", "start the
   OL", "spawn a coder/security reviewer", or to replace or resume any of these
   roles. Needs the claude-code-remote MCP tools (create_session, send_message,
@@ -33,8 +33,12 @@ There is no technical lead and no tester. The coder has the code context, so it
 designs, tests and implements. spovedBuild runs the full test suite, so nobody
 runs the 45-minute integration suite in a container any more.
 
-**One ticket and one PR at a time** (user decision 08 Oct). The next ticket starts
-only after the current PR merges, so develop never churns under an open PR.
+**Up to three non-conflicting tickets in parallel ("lanes"), merged one at a time**
+(user decision 08 Oct). At design time each coder lists the files it will touch, and
+the OL rejects overlap with tickets in flight (the en-US locale_next file and CLAUDE.md
+Learnings are append-only: keep both sides; swagger: regenerate). Each ticket reserves
+its migration letter at design time. After any merge, the other lanes merge develop in
+and get a fresh full run before their own merge.
 
 Every `create_session` uses `source_url: https://github.com/InfiniteSpoved/spoved`,
 `source_revision: develop`, and `permission_mode: auto` (never `plan`).
@@ -84,12 +88,11 @@ So:
    - Run the fast local stages: lint, unit, and the new tests by name.
    - Push the branch and open a PR to develop: "Fixes #<N>", or "Part of #<N>" for a
      partial PR.
-   - Start the CI run in spovedBuild for the pushed head **SHA**, never a branch
-     name (the ref shows in the public log). Use `inputs[full]=true` when the PR
-     changes code, and the quick run for docs/CSS-only changes (user decision 08
-     Oct: full runs are pre-approved for code PRs).
-   - Read failed jobs' encrypted logs and fix them.
-   - Repeat after every push: one run per pushed SHA.
+   - CI: the supervisor runs it (the classifier denies coders add_repo for
+     spovedBuild). Its watcher starts a full run on every new PR head and every
+     develop merge, and it sends failing tests straight to the coder. CI is free
+     (user decision 08 Oct): push early and often, and run locally only the tests
+     you are changing. Edits to .github/ci/* go to the supervisor as a diff.
    - Send the OL (and the security reviewer, if any) the PR number, the head SHA
      and the CI result.
 5. **Review.** In parallel:
@@ -98,16 +101,17 @@ So:
    - the security reviewer (if any) reviews the real diff.
    One combined must-fix list goes back to the coder. Repeat until both are clean.
    Then the OL posts "OL AC check @<SHA> … VERDICT: FULLY DONE" on the PR.
-6. **Merge**, by the OL, when all of these hold:
+6. **Merge**, by the coder, after the OL's go (user decision 08 Oct; the OL never
+   merges). The OL sends "Review passed: merge PR #<P> at head <SHA>" when all of these hold:
    - the "OL AC check @<SHA> … FULLY DONE" comment is on the PR;
    - the head is that SHA plus develop merges only (`git log --no-merges <SHA>..<head>` is empty);
    - "CI success" = success on the **head** SHA (a full run for code PRs). After a
      develop merge, run CI again on the new head;
    - the security items are resolved.
-   Use `merge_pull_request`, merge_method "merge", expectedHeadSha = the head.
-   If the auto-mode classifier blocks the merge, send the supervisor the PR, the
-   SHA and links to the OL check and the CI run; the supervisor verifies and merges.
-   Then:
+   The coder re-checks the gates and uses `merge_pull_request`, merge_method "merge",
+   expectedHeadSha = the head. If the auto-mode classifier blocks the merge, it sends
+   the OL the step and evidence, and the OL sends the supervisor the PR, the SHA and
+   links to the OL check and the CI run. Then the OL:
    - archive the coder and the security reviewer;
    - tell the supervisor "PR #<P> (#<N>) merged at <merge SHA>";
    - go to step 1.
@@ -163,13 +167,12 @@ re-arm for 4 h; skip it when nothing is in flight.
 ## Rules for everyone (paste into every brief)
 
 ```
-- One ticket and one PR at a time. No code before the OL approves the design.
+- Up to three non-conflicting tickets at a time; merges one at a time. No code before the OL approves the design.
 - Read CLAUDE.md first. Coders invoke the ponytail skill (Skill tool, "full")
   before writing code.
-- CI runs in InfiniteSpoved/spovedBuild (CLAUDE.md "CI"). At session start, call
-  add_repo (owner InfiniteSpoved, repo spovedBuild, access push) and make the log
-  key. Start one run per pushed head SHA (full=true for code changes). Never put
-  branch names, logs, test names or code anywhere in spovedBuild.
+- CI runs in InfiniteSpoved/spovedBuild (CLAUDE.md "CI"), started by the
+  supervisor on every pushed head. Never put branch names, logs, test names or
+  code anywhere in spovedBuild.
 - Stage files by name, never `git add -A`: `make lint-*` and `make frontend`
   rewrite package-lock.json with the container's old npm.
 - Merge develop in with a merge commit. Never rebase or force-push a pushed branch.
@@ -190,8 +193,8 @@ re-arm for 4 h; skip it when nothing is in flight.
 
 ```
 You are the OPERATIONAL LEAD for InfiniteSpoved/spoved. Supervisor:
-<SUP>. You run one ticket at a time: intake and priority, acceptance criteria,
-design approval, the test plan, verification and the merge. You don't write
+<SUP>. You run up to three tickets at a time: intake and priority, acceptance criteria,
+design approval, the test plan, verification and the go to merge. You don't write
 product code.
 
 Read CLAUDE.md and .claude/skills/agent-team/SKILL.md ("Ticket flow") first.
@@ -237,9 +240,9 @@ Design: high effort. Implementation: normal effort; don't re-explore code the
 design already covers. Read CLAUDE.md first.
 
 You are the CODER for #<N> in InfiniteSpoved/spoved. Your lead is the OL <OL>.
-Report only to it, with send_message. At start: get_session for your id, then
-add_repo (owner InfiniteSpoved, repo spovedBuild, access push), and create the
-CI log key (CLAUDE.md "CI").
+Report only to it, with send_message. At start: get_session for your id. The
+supervisor <SUP> runs CI for you: after every push, send it the PR number and the
+40-char head SHA.
 
 Phase 1, DESIGN ONLY (no code). Read the issue, its comments and the OL's
 acceptance criteria, then the code it touches. Send the OL:
@@ -258,14 +261,17 @@ Phase 2, after the OL approves with a test plan:
 3. Run the fast local checks: lint on the changed packages, unit tests, and the
    new integration/e2e tests by name.
 4. Push and open a PR to develop: "Fixes #<N>" (or "Part of #<N>").
-5. Start the spovedBuild CI run for the pushed head SHA, with inputs[full]=true
-   for code changes. Wait for it, read failed jobs' encrypted logs, fix and push.
-   One run per pushed SHA.
+5. Push early and often. The supervisor starts a full CI run on every pushed head
+   and sends you failures as soon as a job fails; keep working meanwhile.
 6. Send the OL (and the security reviewer, if any) the PR number, the 40-char
    head SHA and the CI result, in one go.
 7. Fix every must-fix item the OL sends. Add a CLAUDE.md "Learnings" line for
-   anything new, in the same PR. Merge origin/develop in when asked, and rerun CI
-   on the new head.
+   anything new, in the same PR. Merge origin/develop in when asked.
+8. Merge only when the OL sends "Review passed: merge PR #<P> at head <SHA>".
+   Re-check the gates yourself (FULLY DONE on <SHA>, `git log --no-merges
+   <SHA>..<head>` empty, "CI success" on the head), then merge_pull_request
+   (merge_method "merge", expectedHeadSha = head). Report "PR #<P> (#<N>) merged
+   at <merge SHA>" to the OL.
 
 <RULES FOR EVERYONE>
 ```

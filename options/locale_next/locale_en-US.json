@@ -1788,5 +1788,20 @@
 	"repo.migrate.mirror_filter_invalid": "Invalid branch or tag filter: %s",
 	"repo.settings.mirror_filter_invalid": "Invalid branch or tag filter: %s",
 	"repo.settings.mirror_filter_default_branch": "The default branch %s doesn't match the branch filter.",
-	"repo.settings.mirror_filter_error": "The default branch upstream is now %s, which doesn't match the branch filter. The default branch here is unchanged."
+	"repo.settings.mirror_filter_error": "The default branch upstream is now %s, which doesn't match the branch filter. The default branch here is unchanged.",
+	"org.actions.runs.none": "There are no workflow runs in the repositories you can access.",
+	"org.actions.runs.status": "Status",
+	"org.actions.runs.all_statuses": "Any status",
+	"org.actions.runs.repository": "Repository",
+	"org.actions.runs.workflow": "Workflow",
+	"org.actions.runs.branch": "Branch",
+	"org.actions.runs.ref": "Branch or pull request",
+	"org.actions.runs.event": "Event",
+	"org.actions.runs.actor": "Triggered by",
+	"org.actions.runs.started": "Started",
+	"org.actions.runs.duration": "Duration",
+	"org.actions.runs.from": "Created from",
+	"org.actions.runs.to": "Created until",
+	"org.actions.runs.filter": "Filter",
+	"org.actions.runs.reset": "Reset filters"
 }
