@@ -2140,7 +2140,7 @@ func TestProjectWebCRUD(t *testing.T) {
 	})
 }
 
-// #338: a project of the other kind whose ID collides is not found on the owner and repository routes.
+// #338: a project of the other kind whose ID collides is not found on any owner or repository project route.
 func TestProjectRouteTypeCollision(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	user := forgery.CreateUser(t, nil)
@@ -2150,10 +2150,39 @@ func TestProjectRouteTypeCollision(t *testing.T) {
 	userProject := &project_model.Project{Title: "collide-user", Type: project_module.TypeIndividual, OwnerID: repo.ID, CreatorID: user.ID}
 	require.NoError(t, db.Insert(t.Context(), repoProject))
 	require.NoError(t, db.Insert(t.Context(), userProject))
+	repoColumn := &project_model.Column{Title: "c", ProjectID: repoProject.ID}
+	userColumn := &project_model.Column{Title: "c", ProjectID: userProject.ID}
+	require.NoError(t, project_model.CreateColumn(t.Context(), repoColumn))
+	require.NoError(t, project_model.CreateColumn(t.Context(), userColumn))
 
 	session := loginUser(t, user.Name)
-	session.MakeRequest(t, NewRequestf(t, "GET", "/%s/-/projects/%d", user.Name, repoProject.ID), http.StatusNotFound)
-	sessionPOST(t, session, fmt.Sprintf("/%s/-/projects/%d/0/default", user.Name, repoProject.ID), http.StatusNotFound)
-	session.MakeRequest(t, NewRequestf(t, "GET", "/%s/%s/projects/%d", user.Name, repo.Name, userProject.ID), http.StatusNotFound)
-	sessionPOST(t, session, fmt.Sprintf("/%s/%s/projects/%d/0/default", user.Name, repo.Name, userProject.ID), http.StatusNotFound)
+	for _, side := range []struct {
+		base             string
+		projectID, colID int64
+	}{
+		{fmt.Sprintf("/%s/-/projects/%d", user.Name, repoProject.ID), repoProject.ID, repoColumn.ID},
+		{fmt.Sprintf("/%s/%s/projects/%d", user.Name, repo.Name, userProject.ID), userProject.ID, userColumn.ID},
+	} {
+		col := fmt.Sprintf("%s/%d", side.base, side.colID)
+		for _, r := range []struct{ method, url string }{
+			{"GET", side.base},
+			{"GET", side.base + "/edit"},
+			{"POST", side.base},
+			{"POST", side.base + "/move"},
+			{"POST", side.base + "/edit"},
+			{"POST", side.base + "/close"},
+			{"PUT", col},
+			{"DELETE", col},
+			{"POST", col + "/default"},
+			{"POST", col + "/move"},
+			{"POST", side.base + "/0/default"},
+			{"POST", side.base + "/delete"},
+		} {
+			t.Run(r.method+" "+r.url, func(t *testing.T) {
+				session.MakeRequest(t, NewRequest(t, r.method, r.url), http.StatusNotFound)
+			})
+		}
+		unittest.AssertExistsAndLoadBean(t, &project_model.Project{ID: side.projectID, IsClosed: false})
+		unittest.AssertExistsAndLoadBean(t, &project_model.Column{ID: side.colID})
+	}
 }
