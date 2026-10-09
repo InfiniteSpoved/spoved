@@ -194,8 +194,9 @@ func TestNewRelicShipperOtherClientErrorAndRedirect(t *testing.T) {
 		srv := newNRServer(t, code)
 		sh := testShipper(t, srv, nil)
 		sh.interval = 5 * time.Millisecond
+		dropped := statOf("nr-test", "default").Dropped
 		_, _ = sh.Write(ev("default", "bad"))
-		assert.Eventually(t, func() bool { return srv.requests() == 1 }, 5*time.Second, 5*time.Millisecond)
+		assert.Eventually(t, func() bool { return statOf("nr-test", "default").Dropped == dropped+1 }, 5*time.Second, 5*time.Millisecond)
 		require.NoError(t, sh.Close())
 		assert.Equal(t, 1, srv.requests(), "no retry for HTTP %d", code)
 	}
@@ -340,7 +341,7 @@ func mockVar[T any](p *T, v T) func() {
 
 func TestNewRelicShipperRetryAfterAndBackoffAcrossBatches(t *testing.T) {
 	srv := newNRServer(t, 429)
-	srv.retryAfter = "70"
+	srv.retryAfter = "70" // above the 60 s cap
 	var sleeps []time.Duration
 	sh := testShipper(t, srv, &sleeps)
 	sh.interval = 5 * time.Millisecond
@@ -353,7 +354,7 @@ func TestNewRelicShipperRetryAfterAndBackoffAcrossBatches(t *testing.T) {
 
 	// 4 waits inside the first batch, then the second batch waits before its first attempt as well
 	require.Len(t, sleeps, 4+5)
-	assert.GreaterOrEqual(t, sleeps[0], 70*time.Second, "Retry-After is honoured")
+	assert.Equal(t, time.Minute, sleeps[0], "Retry-After is honoured up to a minute")
 	assert.GreaterOrEqual(t, sleeps[4], 24*time.Second, "backoff state is kept across batches")
 }
 
@@ -420,4 +421,90 @@ func TestJSONFormattingRunsInWriterGoroutine(t *testing.T) {
 	close(release)
 	l.Close()
 	assert.Equal(t, "late\n", w.(EventWriterBuffer).GetString())
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	assert.Equal(t, 7*time.Second, parseRetryAfter("7"))
+	assert.Equal(t, time.Minute, parseRetryAfter("100000"))
+	assert.Equal(t, time.Duration(0), parseRetryAfter("-5"))
+	assert.Equal(t, time.Duration(0), parseRetryAfter("junk"))
+	assert.Equal(t, time.Duration(0), parseRetryAfter(""))
+	d := parseRetryAfter(time.Now().Add(30 * time.Second).UTC().Format(http.TimeFormat))
+	assert.InDelta(t, 30*time.Second, d, float64(2*time.Second))
+	assert.Equal(t, time.Duration(0), parseRetryAfter(time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat)))
+}
+
+func TestNewRelicShipperFlushOnClose(t *testing.T) {
+	srv := newNRServer(t, 202)
+	sh := testShipper(t, srv, nil) // 1 h ticker: only Close can send
+	for i := range 3 {
+		_, _ = sh.Write(ev("default", fmt.Sprint("m", i)))
+	}
+	assert.Equal(t, 0, srv.requests())
+	start := time.Now()
+	require.NoError(t, sh.Close())
+	assert.Less(t, time.Since(start), newRelicFinalTimeout+time.Second)
+	assert.Equal(t, 3, srv.events())
+	require.NoError(t, sh.Close(), "Close is idempotent")
+}
+
+func TestNewRelicShipperWriteAfterCloseStartsNothing(t *testing.T) {
+	srv := newNRServer(t, 202)
+	sh := testShipper(t, srv, nil)
+	require.NoError(t, sh.Close())
+	before := statOf("nr-test", "default").Dropped
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() { _, _ = sh.Write(ev("default", "late")) })
+	}
+	wg.Wait()
+	assert.Nil(t, sh.done, "no flusher goroutine after close")
+	assert.Equal(t, before+10, statOf("nr-test", "default").Dropped)
+	assert.Equal(t, 0, srv.requests())
+}
+
+func TestNewRelicShipperDropsOversizedItem(t *testing.T) {
+	srv := newNRServer(t, 202)
+	sh := testShipper(t, srv, nil)
+	before := statOf("nr-test", "default").Dropped
+	_, _ = sh.Write(ev("default", strings.Repeat("x", newRelicBatchBytes+1)))
+	_, _ = sh.Write(ev("default", "ok"))
+	assert.Equal(t, before+1, statOf("nr-test", "default").Dropped)
+	require.NoError(t, sh.Close())
+	assert.Equal(t, 1, srv.events())
+}
+
+func TestNewRelicDumpWritersLacksKey(t *testing.T) {
+	w := NewEventWriterNewRelic("dump", WriterMode{Level: INFO, WriterOption: NewRelicOption{Endpoint: "https://nr.invalid/log", Key: "NRAK-DUMPKEY0123456789"}})
+	l := NewLoggerWithWriters(t.Context(), "default", w)
+	defer l.Close()
+	b, err := json.Marshal(l.DumpWriters())
+	require.NoError(t, err)
+	assert.Contains(t, string(b), "nr.invalid")
+	assert.NotContains(t, string(b), "NRAK-DUMPKEY")
+}
+
+func TestHugeClientInputIsBounded(t *testing.T) {
+	huge := strings.Repeat("a=b&token=c&", 75000) // 900 KB
+	start := time.Now()
+	b := EventFormatJSONMessage(&WriterMode{}, &Event{
+		Level: INFO, Logger: "access", MsgSimpleText: "GET /?" + huge + " " + huge,
+		Fields: map[string]any{"path": "/?" + huge, "user_agent": huge, "user": huge, "ip": huge},
+	})
+	assert.Less(t, time.Since(start), 2*time.Second)
+	assert.Less(t, len(b), 128*1024, "JSON escaping can grow & and < up to 6x")
+	assert.Less(t, len(b), newRelicBatchBytes)
+
+	m := formatJSON(t, &Event{Level: INFO, Logger: "access", MsgSimpleText: "x", Fields: map[string]any{"path": strings.Repeat("a", 900*1024) + "?password=zz"}})
+	assert.LessOrEqual(t, len(m["path"].(string)), maxJSONField+len("…[truncated]"))
+}
+
+func TestSSHLoggerLogtype(t *testing.T) {
+	m := NewManager()
+	defer m.Close()
+	w := NewEventWriterBuffer("j", WriterMode{Level: INFO, Format: "json"}).(EventWriterBuffer)
+	m.GetLogger("ssh").AddWriters(w)
+	m.GetLogger("ssh").Info("accepted")
+	m.GetLogger("ssh").Close()
+	assert.Contains(t, w.GetString(), `"logtype":"ssh"`)
 }

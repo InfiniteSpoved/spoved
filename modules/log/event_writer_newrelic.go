@@ -30,7 +30,7 @@ const (
 	newRelicMaxEvents     = 10000
 	newRelicMaxAttempts   = 5
 	newRelicFinalTimeout  = 1500 * time.Millisecond
-	newRelicMaxRetryAfter = 5 * time.Minute
+	newRelicMaxRetryAfter = time.Minute
 )
 
 // NewRelicOption holds the settings of a "newrelic" writer. The key never leaves it: not in JSON (the admin
@@ -106,11 +106,11 @@ type newRelicShipper struct {
 	size   int
 	closed bool
 
-	startOnce, closeOnce sync.Once
-	ctx                  context.Context
-	cancel               context.CancelFunc
-	wake                 chan struct{}
-	done                 chan struct{}
+	closeOnce sync.Once
+	ctx       context.Context // these four are set under mu when the flusher starts
+	cancel    context.CancelFunc
+	wake      chan struct{}
+	done      chan struct{}
 }
 
 func newNewRelicShipper(name string, opt NewRelicOption) *newRelicShipper {
@@ -149,15 +149,6 @@ func newNewRelicShipper(name string, opt NewRelicOption) *newRelicShipper {
 	}
 }
 
-func (s *newRelicShipper) start() {
-	s.startOnce.Do(func() {
-		s.ctx, s.cancel = context.WithCancel(context.Background())
-		s.wake = make(chan struct{}, 1)
-		s.done = make(chan struct{})
-		go s.loop()
-	})
-}
-
 func (s *newRelicShipper) count(items []nrItem, sent, dropped, errs bool) {
 	per := map[string]uint64{}
 	for _, it := range items {
@@ -186,13 +177,17 @@ func (s *newRelicShipper) Write(p []byte) (int, error) {
 		s.count([]nrItem{it}, false, true, false)
 		return len(p), nil
 	}
-	s.start()
-
 	s.mu.Lock()
-	if s.closed {
+	if s.closed || len(it.data) > newRelicBatchBytes { // the formatter caps events far below a batch
 		s.mu.Unlock()
 		s.count([]nrItem{it}, false, true, false)
 		return len(p), nil
+	}
+	if s.cancel == nil { // first event: the flusher exists only from now on
+		s.ctx, s.cancel = context.WithCancel(context.Background())
+		s.wake = make(chan struct{}, 1)
+		s.done = make(chan struct{})
+		go s.loop()
 	}
 	s.buf = append(s.buf, it)
 	s.size += len(it.data)
@@ -297,11 +292,20 @@ func (s *newRelicShipper) post(ctx context.Context, body []byte) (int, error) {
 		return 0, err
 	}
 	defer resp.Body.Close()
-	if secs, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && secs > 0 {
-		s.retryAfter = min(time.Duration(secs)*time.Second, newRelicMaxRetryAfter)
-	}
+	s.retryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 	return resp.StatusCode, nil
+}
+
+// parseRetryAfter reads seconds or an HTTP date; the result is between 0 and newRelicMaxRetryAfter.
+func parseRetryAfter(h string) time.Duration {
+	var d time.Duration
+	if secs, err := strconv.Atoi(h); err == nil {
+		d = time.Duration(secs) * time.Second
+	} else if t, err := http.ParseTime(h); err == nil {
+		d = time.Until(t)
+	}
+	return max(0, min(d, newRelicMaxRetryAfter))
 }
 
 func backoff(attempt int) time.Duration {
@@ -357,12 +361,13 @@ func (s *newRelicShipper) Close() error {
 	s.closeOnce.Do(func() {
 		s.mu.Lock()
 		s.closed = true
+		cancel, done := s.cancel, s.done
 		s.mu.Unlock()
-		if s.cancel == nil {
+		if cancel == nil {
 			return
 		}
-		s.cancel()
-		<-s.done
+		cancel()
+		<-done
 		ctx, cancel := context.WithTimeout(context.Background(), newRelicFinalTimeout)
 		defer cancel()
 		s.flush(ctx, 1)

@@ -41,6 +41,13 @@ func TestRedact(t *testing.T) {
 		"tok eyJhbGciOiJI.eyJzdWIiOiIx.c2lnbmF0dXJl":                          "tok " + r,
 		"k NRAK-0123456789ABCDEF end":                                         "k " + r + " end",
 		"-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----": r,
+		// already JSON-escaped by log.Error("%q", body), token-only userinfo, token <value>, xox shapes
+		`"{\"password\":\"hunter2\",\"user\":\"a\"}"`:              `"{\"password\":\"` + r + `\",\"user\":\"a\"}"`,
+		"clone https://abc123def456@example.com/a.git":             "clone https://" + r + "@example.com/a.git",
+		"curl -H token 0123456789abcdef":                           "curl -H token " + r,
+		"slack xoxr-0123456789abcdef":                              "slack " + r,
+		"code=abc&client_code=zz&user-code=1&barcode=123&design=4": "code=" + r + "&client_code=" + r + "&user-code=" + r + "&barcode=123&design=4",
+		`{"code":"abc","sig":"d"}`:                                 `{"code":"` + r + `","sig":"` + r + `"}`,
 		// negatives: must stay untouched
 		"commit 0123456789abcdef0123456789abcdef01234567 pushed": "commit 0123456789abcdef0123456789abcdef01234567 pushed",
 		"basic settings page and bearer of news":                 "basic settings page and bearer of news",
