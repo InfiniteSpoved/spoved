@@ -385,6 +385,8 @@ func PrepareTestEnvWithPackageData(t testing.TB, skip ...int) func() {
 	if !inTestEnv.CompareAndSwap(false, true) {
 		t.Fatal("Cannot prepare a test environment if you are already in a test environment. This is a bug in your testing code.")
 	}
+	// a failed prepare returns no deferFn: don't leave the flag set for the rest of the process
+	t.Cleanup(func() { inTestEnv.Store(false) })
 
 	deferPrintCurrentTest := PrintCurrentTest(t, util.OptionalArg(skip)+1)
 	deferFn := func() {
