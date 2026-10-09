@@ -56,6 +56,6 @@ func checkTaskIsRunning(ctx context.Context, taskID int64) bool {
 		return false
 	}
 
-	// Verify that it's running
-	return task.Status == actions_model.StatusRunning
+	// Verify that it's running, in a repository that still has Actions
+	return task.Status == actions_model.StatusRunning && task.ActionsAvailable(ctx)
 }

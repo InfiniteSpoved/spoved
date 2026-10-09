@@ -230,6 +230,8 @@ func TestOrgUnitPolicyRunningTask(t *testing.T) {
 		t.Helper()
 		upload(status)
 		idTokenStatus(status)
+		// the same task's GITEA_TOKEN on the API
+		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repositories/4").AddTokenAuth("8061e833a55f6fc0157c98b883e91fcfeeb1a71a"), map[int]int{http.StatusOK: http.StatusOK, http.StatusNotFound: http.StatusUnauthorized}[status])
 	}
 
 	// the tasks run in user5/repo4; move it into org3
