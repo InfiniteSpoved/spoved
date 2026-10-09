@@ -1043,6 +1043,9 @@ func registerRoutes(m *web.Route) {
 
 		m.Group("/actions", func() {
 			m.Get("", admin.RedirectToDefaultSetting)
+			m.Get("/runs", admin.ActionsRuns)
+			m.Get("/runs/export", admin.ActionsRunsExport)
+			m.Get("/usage", admin.ActionsUsage)
 			addSettingsRunnersRoutes()
 			addSettingsVariablesRoutes()
 		})

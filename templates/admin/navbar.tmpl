@@ -80,9 +80,15 @@
 			{{end}}
 		{{end}}
 		{{if .EnableActions}}
-		<details class="item toggleable-item" {{if or .PageIsSharedSettingsRunners .PageIsSharedSettingsVariables}}open{{end}}>
+		<details class="item toggleable-item" {{if or .PageIsAdminActionsRuns .PageIsAdminActionsUsage .PageIsSharedSettingsRunners .PageIsSharedSettingsVariables}}open{{end}}>
 			<summary>{{ctx.Locale.Tr "actions.actions"}}</summary>
 			<div class="menu">
+				<a class="{{if .PageIsAdminActionsRuns}}active {{end}}item" href="{{AppSubUrl}}/admin/actions/runs">
+					{{ctx.Locale.Tr "org.actions.tab.runs"}}
+				</a>
+				<a class="{{if .PageIsAdminActionsUsage}}active {{end}}item" href="{{AppSubUrl}}/admin/actions/usage">
+					{{ctx.Locale.Tr "admin.actions.usage.title"}}
+				</a>
 				<a class="{{if .PageIsSharedSettingsRunners}}active {{end}}item" href="{{AppSubUrl}}/admin/actions/runners">
 					{{ctx.Locale.Tr "actions.runners"}}
 				</a>
