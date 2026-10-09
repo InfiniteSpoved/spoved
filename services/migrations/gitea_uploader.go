@@ -145,14 +145,16 @@ func (g *GiteaLocalUploader) CreateRepo(repo *base.Repository, opts base.Migrate
 	r.Website = repo.Website
 
 	r, err = repo_service.MigrateRepositoryGitData(g.ctx, owner, r, base.MigrateOptions{
-		CloneAddr:      repo.CloneURL, // SECURITY: we will assume that this has already been checked
-		LFS:            opts.LFS,
-		LFSEndpoint:    opts.LFSEndpoint,
-		Mirror:         repo.IsMirror,
-		MirrorInterval: opts.MirrorInterval,
-		Releases:       opts.Releases, // if didn't get releases, then sync them from tags
-		RepoName:       g.repoName,
-		Wiki:           opts.Wiki,
+		CloneAddr:          repo.CloneURL, // SECURITY: we will assume that this has already been checked
+		LFS:                opts.LFS,
+		LFSEndpoint:        opts.LFSEndpoint,
+		Mirror:             repo.IsMirror,
+		MirrorInterval:     opts.MirrorInterval,
+		MirrorBranchFilter: opts.MirrorBranchFilter,
+		MirrorTagFilter:    opts.MirrorTagFilter,
+		Releases:           opts.Releases, // if didn't get releases, then sync them from tags
+		RepoName:           g.repoName,
+		Wiki:               opts.Wiki,
 	}, allowlist.NewMigrationHTTPTransport())
 
 	g.sameApp = strings.HasPrefix(repo.OriginalURL, setting.AppURL)

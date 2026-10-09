@@ -178,6 +178,16 @@
 											<label for="interval">{{ctx.Locale.Tr "repo.mirror_interval" .MinimumMirrorInterval}}</label>
 											<input id="interval" name="interval" value="{{.PullMirror.Interval}}">
 										</div>
+										<div class="inline field {{if .Err_MirrorBranchFilter}}error{{end}}">
+											<label for="mirror_branch_filter">{{ctx.Locale.Tr "repo.mirror_branch_filter"}}</label>
+											<input id="mirror_branch_filter" name="mirror_branch_filter" value="{{.PullMirror.BranchFilter}}" maxlength="2048">
+										</div>
+										<div class="inline field {{if .Err_MirrorBranchFilter}}error{{end}}">
+											<label for="mirror_tag_filter">{{ctx.Locale.Tr "repo.mirror_tag_filter"}}</label>
+											<input id="mirror_tag_filter" name="mirror_tag_filter" value="{{.PullMirror.TagFilter}}" maxlength="2048">
+											<p class="help">{{ctx.Locale.Tr "repo.mirror_filter_help"}}</p>
+											{{if .PullMirror.FilterError}}<p class="ui warning visible message">{{ctx.Locale.Tr "repo.settings.mirror_filter_error" .PullMirror.FilterError}}</p>{{end}}
+										</div>
 										<div class="field {{if .Err_MirrorAddress}}error{{end}}">
 											<label for="mirror_address">{{ctx.Locale.Tr "repo.mirror_address"}}</label>
 											<input id="mirror_address" name="mirror_address" value="{{$address.Address}}" required>
