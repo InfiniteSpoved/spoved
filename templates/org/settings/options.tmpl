@@ -72,6 +72,32 @@
 							</div>
 						</div>
 
+						<div class="field" id="require_two_factor_box">
+							<div class="ui checkbox">
+								<input type="checkbox" name="require_two_factor" {{if .RequireTwoFactor}}checked{{end}}>
+								<label>{{ctx.Locale.Tr "org.settings.require_two_factor"}}</label>
+							</div>
+							<p class="help">{{ctx.Locale.Tr "org.settings.require_two_factor_desc"}}</p>
+							{{if .RequireTwoFactorConfirm}}
+								<div class="ui warning message require-two-factor-confirm">
+									{{if .RequireTwoFactorMembers}}
+										<p>{{ctx.Locale.Tr "org.settings.require_two_factor_members_without"}}</p>
+										<ul class="require-two-factor-members">
+											{{range .RequireTwoFactorMembers}}
+												<li><a href="{{.HomeLink}}">{{.Name}}</a>{{if index $.RequireTwoFactorOwners .ID}} <span class="ui basic label">{{ctx.Locale.Tr "org.members.owner"}}</span>{{end}}</li>
+											{{end}}
+										</ul>
+									{{else}}
+										<p>{{ctx.Locale.Tr "org.settings.require_two_factor_all_members_have"}}</p>
+									{{end}}
+									<div class="ui checkbox">
+										<input type="checkbox" name="require_two_factor_confirm" required>
+										<label>{{ctx.Locale.Tr "org.settings.require_two_factor_confirm"}}</label>
+									</div>
+								</div>
+							{{end}}
+						</div>
+
 						{{if .SignedUser.IsAdmin}}
 						<div class="divider"></div>
 

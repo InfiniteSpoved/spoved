@@ -100,9 +100,9 @@ func Migrate(ctx *context.APIContext) {
 
 		if repoOwner.IsOrganization() {
 			// Check ownership of organization.
-			isOwner, err := organization.OrgFromUser(repoOwner).IsOwnedBy(ctx, ctx.Doer().ID)
+			isOwner, err := organization.OrgFromUser(repoOwner).IsActingOwner(ctx, ctx.Doer())
 			if err != nil {
-				ctx.Error(http.StatusInternalServerError, "IsOwnedBy", err)
+				ctx.Error(http.StatusInternalServerError, "IsActingOwner", err)
 				return
 			} else if !isOwner {
 				ctx.Error(http.StatusForbidden, "", "Given user is not owner of organization.")

@@ -1,4 +1,5 @@
 // @watch start
+// templates/org/settings/options.tmpl
 // templates/org/team/new.tmpl
 // templates/org/settings/repos.tmpl
 // web_src/css/form.css
@@ -91,4 +92,21 @@ test('org settings repositories list sorting', async ({page}) => {
   await page.locator('th[data-sortt-asc="lfssize"]').click();
   await page.waitForURL(/sort=reverselfssize/);
   await expect(names).toHaveCount(3);
+});
+
+test('org requires two-factor authentication only from an owner who has it', async ({page}) => {
+  const response = await page.goto('/org/org3/settings');
+  expect(response?.status()).toBe(200);
+
+  const checkbox = page.locator('input[name="require_two_factor"]');
+  await expect(checkbox).not.toBeChecked();
+  await checkbox.check();
+  await page.getByRole('button', {name: 'Update settings'}).click();
+
+  // user2 has no two-factor authentication: nothing is saved, the form keeps the choice
+  await expect(page.locator('.flash-error')).toContainText('you must enable two-factor authentication');
+  await expect(page.locator('input[name="require_two_factor"]')).toBeChecked();
+  await screenshot(page);
+  await page.goto('/org/org3/settings');
+  await expect(page.locator('input[name="require_two_factor"]')).not.toBeChecked();
 });

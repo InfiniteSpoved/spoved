@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"forgejo.org/models"
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	org_model "forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
@@ -52,6 +53,7 @@ func Settings(ctx *context.Context) {
 	ctx.Data["PageIsSettingsOptions"] = true
 	ctx.Data["CurrentVisibility"] = ctx.Org.Organization.Visibility
 	ctx.Data["RepoAdminChangeTeamAccess"] = ctx.Org.Organization.RepoAdminChangeTeamAccess
+	ctx.Data["RequireTwoFactor"] = ctx.Org.Organization.RequireTwoFactor
 	ctx.Data["ContextUser"] = ctx.ContextUser
 	ctx.Data["CooldownPeriod"] = setting.Service.UsernameCooldownPeriod
 	ctx.Data["MaxAvatarFileSize"] = setting.Avatar.MaxFileSize
@@ -85,6 +87,11 @@ func SettingsPost(ctx *context.Context) {
 	}
 
 	org := ctx.Org.Organization
+
+	// turning on the two-factor requirement needs the doer's own 2FA and a confirmation, before anything is saved
+	if form.RequireTwoFactor && !org.RequireTwoFactor && !confirmRequireTwoFactor(ctx, org, form) {
+		return
+	}
 
 	if org.Name != form.Name {
 		if err := user_service.RenameUser(ctx, org.AsUser(), form.Name); err != nil {
@@ -130,6 +137,7 @@ func SettingsPost(ctx *context.Context) {
 		Location:                  optional.Some(form.Location),
 		Visibility:                optional.Some(form.Visibility),
 		RepoAdminChangeTeamAccess: optional.Some(form.RepoAdminChangeTeamAccess),
+		RequireTwoFactor:          optional.Some(form.RequireTwoFactor),
 	}
 	if ctx.Doer.IsAdmin {
 		opts.MaxRepoCreation = optional.Some(form.MaxRepoCreation)
@@ -163,6 +171,76 @@ func SettingsPost(ctx *context.Context) {
 	log.Trace("Organization setting updated: %s", org.Name)
 	ctx.Flash.Success(ctx.Tr("org.settings.update_setting_success"))
 	ctx.Redirect(ctx.Org.OrgLink + "/settings")
+}
+
+// confirmRequireTwoFactor reports whether the two-factor requirement may be turned on. Otherwise it renders the form
+// again, as submitted: with an error if the doer has no 2FA, or with the members who lack 2FA and a confirmation.
+func confirmRequireTwoFactor(ctx *context.Context, org *org_model.Organization, form *forms.UpdateOrgSettingForm) bool {
+	if !ctx.Doer.IsAdmin {
+		has, err := auth_model.HasTwoFactorByUID(ctx, ctx.Doer.ID)
+		if err != nil {
+			ctx.ServerError("HasTwoFactorByUID", err)
+			return false
+		}
+		if !has {
+			ctx.Flash.Error(ctx.Tr("org.settings.require_two_factor_doer_needs_2fa"), true)
+			renderSubmittedSettings(ctx, org, form)
+			return false
+		}
+	}
+	if form.RequireTwoFactorConfirm {
+		return true
+	}
+
+	members, _, err := org_model.FindOrgMembers(ctx, &org_model.FindOrgMembersOpts{Doer: ctx.Doer, IsDoerMember: true, OrgID: org.ID})
+	if err != nil {
+		ctx.ServerError("FindOrgMembers", err)
+		return false
+	}
+	withTwoFactor, err := auth_model.UserIDsWithTwoFactor(ctx, members.GetUserIDs())
+	if err != nil {
+		ctx.ServerError("UserIDsWithTwoFactor", err)
+		return false
+	}
+	ownerTeam, err := org.GetOwnerTeam(ctx)
+	if err != nil {
+		ctx.ServerError("GetOwnerTeam", err)
+		return false
+	}
+	if err := ownerTeam.LoadMembers(ctx); err != nil {
+		ctx.ServerError("LoadMembers", err)
+		return false
+	}
+	owners := map[int64]bool{}
+	for _, u := range ownerTeam.Members {
+		owners[u.ID] = true
+	}
+	without := make([]*user_model.User, 0, len(members))
+	for _, u := range members {
+		if !withTwoFactor.Contains(u.ID) {
+			without = append(without, u)
+		}
+	}
+	ctx.Data["RequireTwoFactorConfirm"] = true
+	ctx.Data["RequireTwoFactorMembers"] = without
+	ctx.Data["RequireTwoFactorOwners"] = owners
+	renderSubmittedSettings(ctx, org, form)
+	return false
+}
+
+// renderSubmittedSettings renders the settings form with the submitted values, saving nothing.
+func renderSubmittedSettings(ctx *context.Context, org *org_model.Organization, form *forms.UpdateOrgSettingForm) {
+	shown := *org
+	shown.Name, shown.FullName, shown.Email, shown.Description = form.Name, form.FullName, form.Email, form.Description
+	shown.Website, shown.Location = form.Website, form.Location
+	if ctx.Doer.IsAdmin {
+		shown.MaxRepoCreation = form.MaxRepoCreation
+	}
+	ctx.Data["Org"] = &shown
+	ctx.Data["CurrentVisibility"] = form.Visibility
+	ctx.Data["RepoAdminChangeTeamAccess"] = form.RepoAdminChangeTeamAccess
+	ctx.Data["RequireTwoFactor"] = form.RequireTwoFactor
+	ctx.HTML(http.StatusOK, tplSettingsOptions)
 }
 
 // SettingsAvatar response for change avatar on settings page

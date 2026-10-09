@@ -16,6 +16,7 @@ import (
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/structs"
 	"forgejo.org/services/authz"
 )
 
@@ -206,6 +207,12 @@ func GetUserRepoReadPermission(ctx context.Context, repo *repo_model.Repository,
 		return perm, err
 	}
 	if user != nil && user.IsAuditor {
+		if err := repo.LoadOwner(ctx); err != nil {
+			return perm, err
+		}
+		if blocked, err := user.TwoFactorBlocked(ctx, repo.Owner); err != nil || blocked {
+			return perm, err
+		}
 		if err := repo.LoadUnits(ctx); err != nil {
 			return perm, err
 		}
@@ -262,6 +269,19 @@ func GetUserRepoPermission(ctx context.Context, repo *repo_model.Repository, use
 	if user == nil && repo.IsPrivate {
 		perm.AccessMode = perm_model.AccessModeNone
 		return perm, nil
+	}
+
+	if user != nil {
+		if err := repo.LoadOwner(ctx); err != nil {
+			return perm, err
+		}
+		blocked, err := user.TwoFactorBlocked(ctx, repo.Owner)
+		if err != nil {
+			return perm, err
+		}
+		if blocked {
+			return strangerPermission(ctx, repo, user)
+		}
 	}
 
 	var isCollaborator bool
@@ -385,6 +405,25 @@ func GetUserRepoPermission(ctx context.Context, repo *repo_model.Repository, use
 	}
 
 	return perm, err
+}
+
+// strangerPermission is the permission of a signed-in user without membership, team, collaboration or ownership in
+// the organization: the units' default permissions on a public repository of an organization that is not private,
+// for a user who is not restricted.
+func strangerPermission(ctx context.Context, repo *repo_model.Repository, user *user_model.User) (perm Permission, err error) {
+	if repo.IsPrivate || user.IsRestricted || repo.Owner.Visibility == structs.VisibleTypePrivate {
+		return perm, nil
+	}
+	if err := repo.LoadUnits(ctx); err != nil {
+		return perm, err
+	}
+	perm.AccessMode = perm_model.AccessModeRead
+	perm.Units = repo.Units
+	perm.UnitsMode = make(map[unit.Type]perm_model.AccessMode, len(repo.Units))
+	for _, u := range repo.Units {
+		perm.UnitsMode[u.Type] = u.DefaultPermissions.ToAccessMode(perm_model.AccessModeRead)
+	}
+	return perm, nil
 }
 
 // IsUserRealRepoAdmin check if this user is real repo admin

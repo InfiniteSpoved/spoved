@@ -587,3 +587,26 @@ func TestUnitPermission(t *testing.T) {
 		})
 	})
 }
+
+func TestTwoFactorRequiredOrg(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := t.Context()
+	org3 := unittest.AssertExistsAndLoadBean(t, &organization.Organization{ID: 3})
+	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+
+	isOwner := func(org *organization.Organization, u *user_model.User) bool {
+		t.Helper()
+		is, err := org.IsActingOwner(ctx, u)
+		require.NoError(t, err)
+		return is
+	}
+	assert.True(t, isOwner(org3, user2))
+	assert.Equal(t, perm.AccessModeOwner, org3.UnitPermission(ctx, user2, unit.TypeProjects))
+
+	// user 2 owns org3 but has no 2FA: a stranger
+	org3.RequireTwoFactor = true
+	assert.False(t, isOwner(org3, user2))
+	assert.Equal(t, perm.AccessModeRead, org3.UnitPermission(ctx, user2, unit.TypeProjects))
+	org3.Visibility = structs.VisibleTypePrivate
+	assert.Equal(t, perm.AccessModeNone, org3.UnitPermission(ctx, user2, unit.TypeProjects))
+}

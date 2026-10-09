@@ -45,6 +45,8 @@ type UpdateOrgSettingForm struct {
 	Visibility                structs.VisibleType
 	MaxRepoCreation           int
 	RepoAdminChangeTeamAccess bool
+	RequireTwoFactor          bool
+	RequireTwoFactorConfirm   bool
 }
 
 // Validate validates the fields

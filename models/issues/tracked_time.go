@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
@@ -92,6 +93,8 @@ type FindTrackedTimesOptions struct {
 	MilestoneID       int64
 	CreatedAfterUnix  int64
 	CreatedBeforeUnix int64
+	// Leaves out the repositories an organization's two-factor requirement hides from this user.
+	ViewerID int64
 }
 
 // toCond will convert each condition into a xorm-Cond
@@ -114,6 +117,9 @@ func (opts *FindTrackedTimesOptions) ToConds() builder.Cond {
 	}
 	if opts.CreatedBeforeUnix != 0 {
 		cond = cond.And(builder.Lte{"tracked_time.created_unix": opts.CreatedBeforeUnix})
+	}
+	if opts.ViewerID > 0 {
+		cond = cond.And(builder.NotIn("tracked_time.issue_id", builder.Select("id").From("issue").Where(builder.In("repo_id", repo_model.TwoFactorHiddenRepoIDs(opts.ViewerID)))))
 	}
 	return cond
 }

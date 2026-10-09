@@ -8,6 +8,7 @@ import (
 	"time"
 
 	activities_model "forgejo.org/models/activities"
+	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/modules/graceful"
 	"forgejo.org/modules/json"
@@ -94,7 +95,13 @@ loop:
 					return
 				}
 
-				for uid, stopwatches := range usersStopwatches {
+				for uid := range usersStopwatches {
+					// the user's own list leaves out repositories an organization's two-factor requirement hides
+					stopwatches, err := issues_model.GetUserStopwatches(ctx, uid, db.ListOptions{})
+					if err != nil {
+						log.Error("Unable to get GetUserStopwatches: %v", err)
+						continue
+					}
 					apiSWs, err := convert.ToStopWatches(ctx, stopwatches)
 					if err != nil {
 						if !issues_model.IsErrIssueNotExist(err) {

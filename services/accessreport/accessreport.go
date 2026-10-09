@@ -8,6 +8,7 @@ import (
 	"context"
 	"maps"
 	"math"
+	"slices"
 	"sort"
 
 	asymkey_model "forgejo.org/models/asymkey"
@@ -94,11 +95,12 @@ type data struct {
 	access      map[key]perm_model.AccessMode // (uid, repo)
 	orgMember   map[key]bool                  // (org, uid)
 	teams       map[int64]*organization.Team
-	repoTeams   map[int64][]int64 // repo -> team IDs, ascending
-	teamMembers map[int64][]int64 // team -> uids
-	userTeams   map[key]bool      // (team, uid)
-	groups      map[key][]*Group  // (team, uid)
-	roleUsers   []int64           // site admins and auditors
+	repoTeams   map[int64][]int64    // repo -> team IDs, ascending
+	teamMembers map[int64][]int64    // team -> uids
+	userTeams   map[key]bool         // (team, uid)
+	groups      map[key][]*Group     // (team, uid)
+	roleUsers   []int64              // site admins and auditors
+	twoFactor   container.Set[int64] // users with 2FA, loaded only when an owner requires it
 }
 
 // Compute returns the access rows of the repositories: one per user who has a path to the repository, the
@@ -180,7 +182,7 @@ func Compute(ctx context.Context, opts Options) ([]*Row, error) {
 const memberID = math.MinInt64
 
 // pseudoRows returns the rows of the users who have no path to the public repository: any member of its private
-// owner org, or any signed-in user, and anyone if the owner is public too.
+// owner org (with 2FA if the org requires it), or any signed-in user, and anyone if the owner is public too.
 func (d *data) pseudoRows(repo *repo_model.Repository, owner *user_model.User) []*Row {
 	if owner.Visibility == structs.VisibleTypePrivate {
 		if !owner.IsOrganization() {
@@ -360,7 +362,21 @@ func load(ctx context.Context, repos repo_model.RepositoryList, opts Options) (*
 			d.roleUsers = append(d.roleUsers, u.ID)
 		}
 	}
+	for _, o := range owners {
+		if o.IsOrganization() && o.RequireTwoFactor {
+			var err error
+			if d.twoFactor, err = auth_model.UserIDsWithTwoFactor(ctx, slices.Collect(maps.Keys(d.users))); err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
 	return d, nil
+}
+
+// twoFactorBlocked is user_model.User.TwoFactorBlocked.
+func (d *data) twoFactorBlocked(owner, u *user_model.User) bool {
+	return owner.IsOrganization() && owner.RequireTwoFactor && !u.IsAdmin && u.ID > 0 && !d.twoFactor.Contains(u.ID)
 }
 
 // candidates returns the users who may have a path to the repository, in name order.
@@ -423,7 +439,7 @@ func (d *data) accessLevel(repo *repo_model.Repository, u *user_model.User) perm
 // permission repeats access_model.GetUserRepoPermission, raised like GetUserRepoReadPermission for auditors.
 func (d *data) permission(repo *repo_model.Repository, u *user_model.User) access_model.Permission {
 	p := d.userPermission(repo, u)
-	if u.IsAuditor {
+	if u.IsAuditor && !d.twoFactorBlocked(d.owners[repo.OwnerID], u) {
 		if p.UnitsMode == nil {
 			p.AccessMode = max(p.AccessMode, perm_model.AccessModeRead)
 		} else {
@@ -440,6 +456,18 @@ func (d *data) userPermission(repo *repo_model.Repository, u *user_model.User) (
 	k := key{u.ID, repo.ID}
 	_, isCollaborator := d.collab[k]
 	owner := d.owners[repo.OwnerID]
+	if d.twoFactorBlocked(owner, u) {
+		// a stranger, as in GetUserRepoPermission
+		if !repo.IsPrivate && !u.IsRestricted && owner.Visibility != structs.VisibleTypePrivate {
+			p.AccessMode = perm_model.AccessModeRead
+			p.Units = repo.Units
+			p.UnitsMode = make(map[unit.Type]perm_model.AccessMode, len(repo.Units))
+			for _, ru := range repo.Units {
+				p.UnitsMode[ru.Type] = ru.DefaultPermissions.ToAccessMode(perm_model.AccessModeRead)
+			}
+		}
+		return p
+	}
 	if !d.ownerVisible(owner, u) && !isCollaborator {
 		return p
 	}

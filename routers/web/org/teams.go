@@ -622,7 +622,9 @@ func TeamRepositories(ctx *context.Context) {
 	opts.Page = page
 	opts.PageSize = setting.UI.User.RepoPagingNum
 
-	if err := ctx.Org.Team.LoadPaginatedRepositories(ctx, opts); err != nil {
+	var err error
+	ctx.Org.Team.Repos, err = org_model.GetTeamRepositories(ctx, &org_model.SearchTeamRepoOptions{ListOptions: opts, TeamID: ctx.Org.Team.ID, UserID: ctx.Doer.ID})
+	if err != nil {
 		ctx.ServerError("GetRepositories", err)
 		return
 	}

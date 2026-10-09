@@ -13,6 +13,8 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
+
+	"xorm.io/builder"
 )
 
 // ErrIssueStopwatchNotExist represents an error that stopwatch is not exist
@@ -80,7 +82,7 @@ func GetUIDsAndStopwatch(ctx context.Context) (map[int64][]*Stopwatch, error) {
 // GetUserStopwatches return list of all stopwatches of a user
 func GetUserStopwatches(ctx context.Context, userID int64, listOptions db.ListOptions) ([]*Stopwatch, error) {
 	sws := make([]*Stopwatch, 0, 8)
-	sess := db.GetEngine(ctx).Where("stopwatch.user_id = ?", userID)
+	sess := db.GetEngine(ctx).Where("stopwatch.user_id = ?", userID).And(stopwatchVisibleCond(userID))
 	if listOptions.Page > 0 {
 		sess = db.SetSessionPagination(sess, &listOptions)
 	}
@@ -94,7 +96,13 @@ func GetUserStopwatches(ctx context.Context, userID int64, listOptions db.ListOp
 
 // CountUserStopwatches return count of all stopwatches of a user
 func CountUserStopwatches(ctx context.Context, userID int64) (int64, error) {
-	return db.GetEngine(ctx).Where("user_id = ?", userID).Count(&Stopwatch{})
+	return db.GetEngine(ctx).Where("user_id = ?", userID).And(stopwatchVisibleCond(userID)).Count(&Stopwatch{})
+}
+
+// stopwatchVisibleCond leaves out the stopwatches in repositories an organization's two-factor requirement hides from
+// the user.
+func stopwatchVisibleCond(userID int64) builder.Cond {
+	return builder.NotIn("stopwatch.issue_id", builder.Select("id").From("issue").Where(builder.In("repo_id", repo.TwoFactorHiddenRepoIDs(userID))))
 }
 
 // StopwatchExists returns true if the stopwatch exists
@@ -117,6 +125,7 @@ func HasUserStopwatch(ctx context.Context, userID int64) (exists bool, sw *Stopw
 		Where("user_id = ?", userID).
 		Join("INNER", "issue", "issue.id = stopwatch.issue_id").
 		Join("INNER", "repository", "repository.id = issue.repo_id").
+		And(repo.TwoFactorHiddenRepoCond(userID)).
 		Get(swIR)
 	if exists {
 		sw = &swIR.Stopwatch

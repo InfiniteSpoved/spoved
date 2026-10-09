@@ -28,6 +28,7 @@ import (
 	"forgejo.org/modules/auth/openid"
 	"forgejo.org/modules/auth/password/hash"
 	"forgejo.org/modules/base"
+	"forgejo.org/modules/cache"
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/log"
@@ -166,6 +167,7 @@ type User struct {
 	ArchivedByID              int64               `xorm:"NOT NULL DEFAULT 0"`
 	Visibility                structs.VisibleType `xorm:"NOT NULL DEFAULT 0"`
 	RepoAdminChangeTeamAccess bool                `xorm:"NOT NULL DEFAULT false"`
+	RequireTwoFactor          bool                `xorm:"NOT NULL DEFAULT false INDEX"` // organizations only: members need 2FA to reach its repositories
 
 	// Preferences
 	DiffViewStyle       string `xorm:"NOT NULL DEFAULT ''"`
@@ -282,6 +284,19 @@ func (u *User) IsAccessAllowed(ctx context.Context) bool {
 		return false
 	}
 	return hasTwoFactor
+}
+
+// TwoFactorBlocked reports whether owner is an organization that requires two-factor authentication and u, a
+// signed-in non-admin user, has neither TOTP nor WebAuthn. Such a user gets no more than a stranger in the
+// organization: no membership, team, collaboration or ownership counts.
+func (u *User) TwoFactorBlocked(ctx context.Context, owner *User) (bool, error) {
+	if u == nil || u.ID <= 0 || u.IsAdmin || u.IsOrganization() || owner == nil || !owner.IsOrganization() || !owner.RequireTwoFactor {
+		return false, nil
+	}
+	has, err := cache.GetWithContextCache(ctx, "user_has_two_factor", u.ID, func() (bool, error) {
+		return auth.HasTwoFactorByUID(ctx, u.ID)
+	})
+	return !has, err
 }
 
 // IsLocal returns true if user login type is LoginPlain.
