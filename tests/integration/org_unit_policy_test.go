@@ -273,6 +273,14 @@ func TestOrgUnitPolicyRunningTask(t *testing.T) {
 	require.NoError(t, err)
 	both(http.StatusOK)
 
+	// app.ini DISABLED_REPO_UNITS
+	disabled := unit_model.DisabledRepoUnitsGet()
+	defer unit_model.DisabledRepoUnitsSet(disabled)
+	unit_model.DisabledRepoUnitsSet(append(slices.Clone(disabled), unit_model.TypeActions))
+	both(http.StatusNotFound)
+	unit_model.DisabledRepoUnitsSet(disabled)
+	both(http.StatusOK)
+
 	// move it into org3
 	_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET owner_id = 3 WHERE id = 4")
 	require.NoError(t, err)
