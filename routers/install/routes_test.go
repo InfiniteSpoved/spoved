@@ -24,7 +24,7 @@ func TestRoutes(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), `class="page-content install"`)
-	// the config path shown on the page comes from the checkout directory, which may be named GitHat
+	// the config path shown on the page comes from the checkout directory, which may contain the product name
 	assert.Empty(t, test.BrandMentions(strings.ReplaceAll(w.Body.String(), setting.CustomConf, "")))
 
 	w = httptest.NewRecorder()

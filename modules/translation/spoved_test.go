@@ -7,15 +7,17 @@ import (
 	"os"
 	"testing"
 
+	"forgejo.org/modules/json"
+	"forgejo.org/modules/test"
 	"forgejo.org/modules/translation/i18n"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// codehatShadowKeys are upstream locale_en-US.ini keys that options/locale_next/locale_en-US.json
-// overrides with CodeHat wording (see docs/branding.md).
-var codehatShadowKeys = []string{
+// spovedShadowKeys are upstream locale_en-US.ini keys that options/locale_next/locale_en-US.json
+// overrides with spoved wording (see docs/branding.md).
+var spovedShadowKeys = []string{
 	"return_to_forgejo",
 	"repo.settings.web_hook_name_forgejo",
 	"startpage.platform_desc",
@@ -57,7 +59,7 @@ var codehatShadowKeys = []string{
 	"admin.self_check.database_collation_case_insensitive",
 }
 
-func TestCodeHatShadowKeys(t *testing.T) {
+func TestSpovedShadowKeys(t *testing.T) {
 	ini, err := os.ReadFile("../../options/locale/locale_en-US.ini")
 	require.NoError(t, err)
 	next, err := os.ReadFile("../../options/locale_next/locale_en-US.json")
@@ -71,11 +73,22 @@ func TestCodeHatShadowKeys(t *testing.T) {
 	upstreamEn, _ := upstream.Locale("en-US")
 	en, _ := shadowed.Locale("en-US")
 
-	for _, key := range codehatShadowKeys {
+	for _, key := range spovedShadowKeys {
 		assert.True(t, upstreamEn.HasKey(key), "%s is no longer in locale_en-US.ini: update the shadow key and docs/branding.md", key)
 		value := en.TrString(key)
-		assert.Contains(t, value, "CodeHat", key)
-		assert.NotContains(t, value, "Forgejo", key)
-		assert.NotContains(t, value, "GitHat", key)
+		assert.Contains(t, value, "spoved", key)
+		assert.Empty(t, test.BrandMentions(value), key)
+	}
+}
+
+func TestSpovedLocaleNextValues(t *testing.T) {
+	next, err := os.ReadFile("../../options/locale_next/locale_en-US.json")
+	require.NoError(t, err)
+	var values map[string]any
+	require.NoError(t, json.Unmarshal(next, &values))
+	for key, v := range values {
+		if s, ok := v.(string); ok {
+			assert.NotRegexp(t, `CodeHat|GitHat|Spoved|SPOVED`, s, key)
+		}
 	}
 }

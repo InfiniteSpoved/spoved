@@ -30,8 +30,6 @@ export default {
 
   /* Retry on CI only */
   retries: process.env.CI ? 1 : 0,
-  /* fail fast */
-  maxFailures: process.env.CI ? 1 : 0,
 
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: process.env.CI ? 'list' : [['list'], ['html', {outputFolder: 'tests/e2e/reports/', open: 'never'}]],

@@ -16,5 +16,5 @@ relativetime.
 # tests/integration/repo_archive_text_test.go
 repo.settings.
 
-# templates/status/500.tmpl uses the CodeHat key error.report_message_githat (its name predates the rename); the upstream string stays untouched to keep merges cheap
+# templates/status/500.tmpl uses the spoved key error.report_message_githat (its name predates the rename); the upstream string stays untouched to keep merges cheap
 error.report_message

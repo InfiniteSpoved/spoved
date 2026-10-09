@@ -1,7 +1,7 @@
 ---
 name: project-team
 description: >
-  Run the CodeHat agent team inside a Claude project, where the project's main
+  Run the spoved agent team inside a Claude project, where the project's main
   session can't create sessions and opens threads instead. One thread per
   ticket: its lead runs the coder, security reviewer and tester as in-session
   subagents. The main session is the supervisor and talks to the user. Use when
@@ -76,7 +76,7 @@ Not yet verified. Fill in after the probe.
 ## Ticket brief (one thread per ticket)
 
 ```
-You are the TICKET LEAD for #<N> in GitHatOrg/GitHat, running in a Claude
+You are the TICKET LEAD for #<N> in InfiniteSpoved/spoved, running in a Claude
 project thread. Report only to the supervisor, with send_message(to: "parent"),
 one line per milestone. Read CLAUDE.md, then .claude/skills/agent-team/SKILL.md
 (TL brief, coder/security/tester briefs, Rules for everyone): follow the TL
