@@ -31,6 +31,11 @@
 				{{svg "octicon-code"}} {{ctx.Locale.Tr "org.code"}}
 			</a>
 			{{end}}
+			{{if and .EnableActions .IsOrganizationMember}}
+			<a class="{{if $.PageIsOrgActions}}active {{end}}item" href="{{$.OrgLink}}/actions">
+				{{svg "octicon-play"}} {{ctx.Locale.Tr "actions.actions"}}
+			</a>
+			{{end}}
 			{{if .NumMembers}}
 			<a class="{{if $.PageIsOrgMembers}}active {{end}}item" href="{{$.OrgLink}}/members">
 				{{svg "octicon-person"}} {{ctx.Locale.Tr "org.members"}}

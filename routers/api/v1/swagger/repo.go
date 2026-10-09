@@ -555,6 +555,13 @@ type swaggerActionRunList struct {
 	Body api.ListActionRunResponse `json:"body"`
 }
 
+// ActionRunSummaryList
+// swagger:response ActionRunSummaryList
+type swaggerActionRunSummaryList struct {
+	// in:body
+	Body api.ListActionRunSummaryResponse `json:"body"`
+}
+
 // ActionRun
 // swagger:response ActionRun
 type swaggerActionRun struct {

@@ -1781,5 +1781,20 @@
 	"admin.webhook_types.saved": "The webhook types were saved.",
 	"repo.settings.webhook_type_disabled": "type disabled",
 	"repo.settings.webhook_type_disabled_error": "The site administrator has disabled the webhook type %s.",
-	"repo.settings.web_hook_name_forgejo": "spoved"
+	"repo.settings.web_hook_name_forgejo": "spoved",
+	"org.actions.runs.none": "There are no workflow runs in the repositories you can access.",
+	"org.actions.runs.status": "Status",
+	"org.actions.runs.all_statuses": "Any status",
+	"org.actions.runs.repository": "Repository",
+	"org.actions.runs.workflow": "Workflow",
+	"org.actions.runs.branch": "Branch",
+	"org.actions.runs.ref": "Branch or pull request",
+	"org.actions.runs.event": "Event",
+	"org.actions.runs.actor": "Triggered by",
+	"org.actions.runs.started": "Started",
+	"org.actions.runs.duration": "Duration",
+	"org.actions.runs.from": "Created from",
+	"org.actions.runs.to": "Created until",
+	"org.actions.runs.filter": "Filter",
+	"org.actions.runs.reset": "Reset filters"
 }

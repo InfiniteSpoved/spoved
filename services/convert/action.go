@@ -50,6 +50,31 @@ func ToActionRun(ctx context.Context, run *actions_model.ActionRun, doer *user_m
 	}
 }
 
+// ToActionRunSummary converts a run with its Repo and TriggerUser loaded to the short form of the lists across
+// repositories. It leaves out the event payload and who approved the run, and describes the repository by name.
+func ToActionRunSummary(ctx context.Context, run *actions_model.ActionRun, doer *user_model.User) *api.ActionRunSummary {
+	return &api.ActionRunSummary{
+		ID:    run.ID,
+		Title: run.Title,
+		Repo: &api.RepositoryMeta{
+			ID: run.Repo.ID, Name: run.Repo.Name, Owner: run.Repo.OwnerName, FullName: run.Repo.FullName(),
+		},
+		WorkflowID:  run.WorkflowID,
+		Index:       run.Index,
+		TriggerUser: ToUser(ctx, run.TriggerUser, doer),
+		PrettyRef:   run.PrettyRef(),
+		CommitSHA:   run.CommitSHA,
+		Event:       run.Event.Event(),
+		Status:      run.Status.String(),
+		Started:     run.Started.AsOptionalTime(),
+		Stopped:     run.Stopped.AsOptionalTime(),
+		Created:     run.Created.AsTime(),
+		Updated:     run.Updated.AsTime(),
+		Duration:    run.Duration(),
+		HTMLURL:     run.HTMLURL(),
+	}
+}
+
 // ToActionArtifact converts an AggregatedArtifact to an API ActionArtifact.
 // repoAPIURL is the API URL prefix for the repository (e.g. from Repository.APIURL()).
 func ToActionArtifact(repoAPIURL string, art *actions_model.AggregatedArtifact) *api.ActionArtifact {
