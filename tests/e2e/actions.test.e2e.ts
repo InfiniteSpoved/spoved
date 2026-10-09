@@ -102,6 +102,15 @@ test.describe('Workflow Authenticated user2', () => {
       await expect(enableButton).toBeVisible();
       await expect(disableButton).toBeHidden();
       await expect(disabledLabel).toBeVisible();
+
+      // Restore the state: a disabled workflow can't be dispatched, and later tests dispatch this one
+      await enableButton.click();
+      await flashBanner.waitFor();
+      await menuOpener.click();
+
+      await expect(disableButton).toBeVisible();
+      await expect(enableButton).toBeHidden();
+      await expect(disabledLabel).toBeHidden();
     } else {
       // Assert elemeents on page
       await expect(enableButton).toBeVisible();
