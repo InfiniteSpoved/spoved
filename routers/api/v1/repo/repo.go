@@ -907,8 +907,13 @@ func updateRepoUnits(ctx *context.APIContext, owner string, repo *repo_model.Rep
 	var units []repo_model.RepoUnit
 	var deleteUnitTypes []unit_model.Type
 
-	// units the site policy hides can't be enabled, and are not deleted so they come back when allowed again
-	hidden := repo_model.HiddenUnits(ctx, ctx.Repo().Owner)
+	// units the site policy hides can't be enabled, and are not deleted so they come back when allowed again. The
+	// owner is the repository's: the migrate route reaches here without a repository context.
+	if err := repo.LoadOwner(ctx); err != nil {
+		ctx.Error(http.StatusInternalServerError, "LoadOwner", err)
+		return err
+	}
+	hidden := repo_model.HiddenUnits(ctx, repo.Owner)
 	disabled := func(t unit_model.Type) bool { return t.UnitGlobalDisabled() || hidden.Contains(t) }
 
 	currHasIssues := repo.UnitEnabled(ctx, unit_model.TypeIssues)
@@ -1025,7 +1030,7 @@ func updateRepoUnits(ctx *context.APIContext, owner string, repo *repo_model.Rep
 			if !disabled(unit_model.TypeWiki) {
 				deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeWiki)
 			}
-		} else if *opts.GloballyEditableWiki {
+		} else if opts.GloballyEditableWiki != nil && *opts.GloballyEditableWiki && !disabled(unit_model.TypeWiki) {
 			config := &repo_model.UnitConfig{}
 			units = append(units, repo_model.RepoUnit{
 				RepoID:             repo.ID,

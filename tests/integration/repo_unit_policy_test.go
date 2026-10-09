@@ -446,6 +446,13 @@ func TestRepoUnitPolicyNewRepos(t *testing.T) {
 		assert.False(t, hasUnit("org3", "unit-fork", unit_model.TypePullRequests))
 		assert.True(t, hasUnit("org3", "unit-fork", unit_model.TypeCode))
 
+		// migrating with a wiki into an organization whose Wiki is Not allowed: no wiki, no error
+		require.NoError(t, repo_service.SetUnitPolicy(db.DefaultContext, nil, map[unit_model.Type]repo_service.UnitPolicyChange{unit_model.TypeWiki: {Allowed: false}}))
+		bumpSettingsRevision(t)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/migrate", &api.MigrateRepoOptions{CloneAddr: cloneURL.String(), RepoOwner: "org3", RepoName: "unit-migrate-wiki", Wiki: true, Releases: true}).AddTokenAuth(token), http.StatusCreated)
+		assert.False(t, hasUnit("org3", "unit-migrate-wiki", unit_model.TypeWiki))
+		assert.True(t, hasUnit("org3", "unit-migrate-wiki", unit_model.TypeReleases))
+
 		// app.ini DEFAULT_REPO_UNITS wins over the stored list
 		defer test.MockVariableValue(&setting.Repository.DefaultRepoUnits, []string{"repo.code", "repo.wiki"})()
 		defer test.MockProtect(&unit_model.DefaultRepoUnits)()
