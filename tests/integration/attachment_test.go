@@ -138,13 +138,25 @@ func TestGetAttachment(t *testing.T) {
 
 // Access under `/attachments/{uuid}` and `/{user}/{repo}/attachments/{uuid}` is permitted for API tokens.  Those API
 // tokens then need to have the read:issue or read:repository and the correct resource scopes to permit access, though.
+// saveTestAttachments creates the data of the fixture attachments these tests
+// fetch; PrepareTestEnv doesn't, so it must not depend on another test's files.
+func saveTestAttachments(t *testing.T) {
+	t.Helper()
+	for uuid, content := range map[string]string{
+		"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11": "hello world",
+		"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12": "hello world",
+		"d962b49e-e32a-4b72-922d-33b551b629e2": "hello universe", // added by the tests' fixture
+	} {
+		_, err := storage.Attachments.Save(repo_model.AttachmentRelativePath(uuid), strings.NewReader(content), -1)
+		require.NoError(t, err)
+	}
+}
+
 func TestGetAttachmentViaAPITokens(t *testing.T) {
 	defer unittest.OverrideFixtures("tests/integration/fixtures/TestGetAttachmentViaAPITokens")()
 	defer tests.PrepareTestEnv(t)()
 
-	// Create attachment data for an attachment added by this test's fixture.
-	_, err := storage.Attachments.Save(repo_model.AttachmentRelativePath("d962b49e-e32a-4b72-922d-33b551b629e2"), strings.NewReader("hello universe"), -1)
-	require.NoError(t, err)
+	saveTestAttachments(t)
 
 	// Enable Issues unit on repo 16, one of our test targets.
 	repo_service.UpdateRepositoryUnits(t.Context(),
@@ -363,9 +375,7 @@ func TestGetAttachmentViaAuthorizedIntegration(t *testing.T) {
 	defer unittest.OverrideFixtures("tests/integration/fixtures/TestGetAttachmentViaAPITokens")()
 	defer tests.PrepareTestEnv(t)()
 
-	// Create attachment data for an attachment added by this test's fixture.
-	_, err := storage.Attachments.Save(repo_model.AttachmentRelativePath("d962b49e-e32a-4b72-922d-33b551b629e2"), strings.NewReader("hello universe"), -1)
-	require.NoError(t, err)
+	saveTestAttachments(t)
 
 	// Enable Issues unit on repo 16, one of our test targets.
 	repo_service.UpdateRepositoryUnits(t.Context(),

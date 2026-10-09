@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"forgejo.org/modules/proxy"
 	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/sync"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 	migrations_allowlist "forgejo.org/services/migrations/allowlist"
@@ -310,6 +312,25 @@ func recheckPullPermitted(ctx context.Context, m *repo_model.Mirror, remoteURL *
 	return migrations_allowlist.IsMigrateURLAllowed(remoteURL.String(), m.Repo.Owner)
 }
 
+// pullSyncLocks serializes the syncs of one repository.
+var pullSyncLocks sync.MutexMap
+
+// addFetchArgs adds the fetch arguments. Without filters it is the plain `fetch [--prune] --tags origin`; with filters
+// only the given refspecs are fetched (never an empty list, which would make git fall back to the configured mirror
+// refspec), and tags come only from the tag filter. Unlike the old `--tags`, the filtered refspecs are forced (`+`),
+// so a moved upstream tag is updated, as a branch is.
+func addFetchArgs(cmd *git.Command, m *repo_model.Mirror, refspecs []string) {
+	cmd.AddArguments("fetch")
+	if m.EnablePrune {
+		cmd.AddArguments("--prune")
+	}
+	if !m.HasFilter() {
+		cmd.AddArguments("--tags").AddDynamicArguments(m.GetRemoteName())
+		return
+	}
+	cmd.AddArguments("--no-tags").AddDynamicArguments(m.GetRemoteName()).AddDashesAndList(refspecs...)
+}
+
 // runSync returns true if sync finished without error.
 func runSync(ctx context.Context, m *repo_model.Mirror) ([]*mirrorSyncResult, bool) {
 	repoPath := m.Repo.RepoPath()
@@ -337,6 +358,41 @@ func runSync(ctx context.Context, m *repo_model.Mirror) ([]*mirrorSyncResult, bo
 		return nil, false
 	}
 
+	envs := proxy.EnvWithProxy(remoteURL.URL)
+
+	// With filters, only the refs that match are fetched; the ones that no longer match are deleted first (Prune only).
+	var refspecs []string
+	var deleted []*mirrorSyncResult
+	var upstream *upstreamRefs
+	if m.HasFilter() {
+		upstream, err = lsRemoteUpstream(ctx, m, remoteURL.URL.String(), envs, timeout)
+		if err != nil {
+			log.Error("SyncMirrors [repo: %-v]: %v", m.Repo, util.SanitizeCredentialURLs(err.Error()))
+			return nil, false
+		}
+		if refspecs, err = m.RefSpecs(func(ref string) bool { return upstream.present[ref] }); err != nil {
+			log.Error("SyncMirrors [repo: %-v]: invalid filter: %v", m.Repo, err)
+			return nil, false
+		}
+		if m.EnablePrune {
+			var absent []string
+			for _, ref := range m.ExactRefs() {
+				if !upstream.present[ref] {
+					absent = append(absent, ref)
+				}
+			}
+			if deleted, err = applyRefFilter(ctx, m, repoPath, absent); err != nil {
+				log.Error("SyncMirrors [repo: %-v]: failed to delete refs excluded by the filter: %v", m.Repo, err)
+				return nil, false
+			}
+			if len(deleted) > 0 {
+				if err := git.WriteCommitGraph(ctx, repoPath); err != nil {
+					log.Error("SyncMirrors [repo: %-v]: %v", m.Repo, err)
+				}
+			}
+		}
+	}
+
 	cmd := git.NewCommand(ctx)
 
 	// Setup credential helper to authenticate the fetch; needs to occur before the `fetch` arg.
@@ -348,70 +404,67 @@ func runSync(ctx context.Context, m *repo_model.Mirror) ([]*mirrorSyncResult, bo
 	defer credCleanup()
 
 	// use fetch but not remote update because git fetch support --tags but remote update doesn't
-	cmd.AddArguments("fetch")
-	if m.EnablePrune {
-		cmd.AddArguments("--prune")
-	}
-	cmd.AddArguments("--tags").AddDynamicArguments(m.GetRemoteName())
-
-	envs := proxy.EnvWithProxy(remoteURL.URL)
+	addFetchArgs(cmd, m, refspecs)
 
 	stdoutBuilder := strings.Builder{}
 	stderrBuilder := strings.Builder{}
-	if err := cmd.
-		SetDescription(fmt.Sprintf("Mirror.runSync: %s", m.Repo.FullName())).
-		Run(&git.RunOpts{
-			Timeout: timeout,
-			Dir:     repoPath,
-			Env:     envs,
-			Stdout:  &stdoutBuilder,
-			Stderr:  &stderrBuilder,
-		}); err != nil {
-		stdout := stdoutBuilder.String()
-		stderr := stderrBuilder.String()
+	// An exact pattern that is missing upstream is dropped; if nothing is left there is nothing to fetch.
+	if !m.HasFilter() || len(refspecs) > 0 {
+		if err := cmd.
+			SetDescription(fmt.Sprintf("Mirror.runSync: %s", m.Repo.FullName())).
+			Run(&git.RunOpts{
+				Timeout: timeout,
+				Dir:     repoPath,
+				Env:     envs,
+				Stdout:  &stdoutBuilder,
+				Stderr:  &stderrBuilder,
+			}); err != nil {
+			stdout := stdoutBuilder.String()
+			stderr := stderrBuilder.String()
 
-		// sanitize the output, since it may contain the remote address, which may contain a password
-		stderrMessage := util.SanitizeCredentialURLs(stderr)
-		stdoutMessage := util.SanitizeCredentialURLs(stdout)
+			// sanitize the output, since it may contain the remote address, which may contain a password
+			stderrMessage := util.SanitizeCredentialURLs(stderr)
+			stdoutMessage := util.SanitizeCredentialURLs(stdout)
 
-		// Now check if the error is a resolve reference due to broken reference
-		if checkRecoverableSyncError(stderr) {
-			log.Warn("SyncMirrors [repo: %-v]: failed to update mirror repository due to broken references:\nStdout: %s\nStderr: %s\nErr: %v\nAttempting Prune", m.Repo, stdoutMessage, stderrMessage, err)
-			err = nil
+			// Now check if the error is a resolve reference due to broken reference
+			if checkRecoverableSyncError(stderr) {
+				log.Warn("SyncMirrors [repo: %-v]: failed to update mirror repository due to broken references:\nStdout: %s\nStderr: %s\nErr: %v\nAttempting Prune", m.Repo, stdoutMessage, stderrMessage, err)
+				err = nil
 
-			// Attempt prune
-			pruneErr := pruneBrokenReferences(ctx, m, repoPath, timeout, &stdoutBuilder, &stderrBuilder, false)
-			if pruneErr == nil {
-				// Successful prune - reattempt mirror
-				stderrBuilder.Reset()
-				stdoutBuilder.Reset()
-				if err = cmd.
-					SetDescription(fmt.Sprintf("Mirror.runSync: %s", m.Repo.FullName())).
-					Run(&git.RunOpts{
-						Timeout: timeout,
-						Dir:     repoPath,
-						Stdout:  &stdoutBuilder,
-						Stderr:  &stderrBuilder,
-					}); err != nil {
-					stdout := stdoutBuilder.String()
-					stderr := stderrBuilder.String()
+				// Attempt prune
+				pruneErr := pruneBrokenReferences(ctx, m, repoPath, timeout, &stdoutBuilder, &stderrBuilder, false)
+				if pruneErr == nil {
+					// Successful prune - reattempt mirror
+					stderrBuilder.Reset()
+					stdoutBuilder.Reset()
+					if err = cmd.
+						SetDescription(fmt.Sprintf("Mirror.runSync: %s", m.Repo.FullName())).
+						Run(&git.RunOpts{
+							Timeout: timeout,
+							Dir:     repoPath,
+							Stdout:  &stdoutBuilder,
+							Stderr:  &stderrBuilder,
+						}); err != nil {
+						stdout := stdoutBuilder.String()
+						stderr := stderrBuilder.String()
 
-					// sanitize the output, since it may contain the remote address, which may
-					// contain a password
-					stderrMessage = util.SanitizeCredentialURLs(stderr)
-					stdoutMessage = util.SanitizeCredentialURLs(stdout)
+						// sanitize the output, since it may contain the remote address, which may
+						// contain a password
+						stderrMessage = util.SanitizeCredentialURLs(stderr)
+						stdoutMessage = util.SanitizeCredentialURLs(stdout)
+					}
 				}
 			}
-		}
 
-		// If there is still an error (or there always was an error)
-		if err != nil {
-			log.Error("SyncMirrors [repo: %-v]: failed to update mirror repository:\nStdout: %s\nStderr: %s\nErr: %v", m.Repo, stdoutMessage, stderrMessage, err)
-			desc := fmt.Sprintf("Failed to update mirror repository '%s': %s", repoPath, stderrMessage)
-			if err = system_model.CreateRepositoryNotice(desc); err != nil {
-				log.Error("CreateRepositoryNotice: %v", err)
+			// If there is still an error (or there always was an error)
+			if err != nil {
+				log.Error("SyncMirrors [repo: %-v]: failed to update mirror repository:\nStdout: %s\nStderr: %s\nErr: %v", m.Repo, stdoutMessage, stderrMessage, err)
+				desc := fmt.Sprintf("Failed to update mirror repository '%s': %s", repoPath, stderrMessage)
+				if err = system_model.CreateRepositoryNotice(desc); err != nil {
+					log.Error("CreateRepositoryNotice: %v", err)
+				}
+				return nil, false
 			}
-			return nil, false
 		}
 	}
 	output := stderrBuilder.String()
@@ -526,13 +579,31 @@ func runSync(ctx context.Context, m *repo_model.Mirror) ([]*mirrorSyncResult, bo
 		cache.Remove(m.Repo.GetCommitsCountCacheKey(branch.Name, true))
 	}
 
+	// also clears the error after the filters were removed
+	filterErr := ""
+	if m.HasFilter() {
+		filterErr = filterErrorFor(m, upstream.head)
+	}
+	if filterErr != m.FilterError {
+		m.FilterError = filterErr
+		if err := repo_model.UpdateMirrorCols(ctx, m, "filter_error"); err != nil {
+			log.Error("SyncMirrors [repo: %-v]: failed to store the filter error: %v", m.Repo, err)
+		}
+	}
+
 	m.UpdatedUnix = timeutil.TimeStampNow()
-	return parseRemoteUpdateOutput(output, m.GetRemoteName()), true
+	return append(deleted, parseRemoteUpdateOutput(output, m.GetRemoteName())...), true
 }
 
 // SyncPullMirror starts the sync of the pull mirror and schedules the next run.
 func SyncPullMirror(ctx context.Context, repoID int64) bool {
 	log.Trace("SyncMirrors [repo_id: %v]", repoID)
+
+	// One sync per repository at a time: applyRefFilter repacks and prunes, which must not overlap a fetch. The mirror
+	// queue only deduplicates waiting requests, so this guards a request queued while a sync runs. It waits (bounded by
+	// the git timeouts) and loads the mirror only afterwards, so a filter saved meanwhile is the one this sync uses.
+	defer pullSyncLocks.Lock(strconv.FormatInt(repoID, 10))()
+
 	defer func() {
 		err := recover()
 		if err == nil {
@@ -549,6 +620,9 @@ func SyncPullMirror(ctx context.Context, repoID int64) bool {
 	}
 	_ = m.GetRepository(ctx) // force load repository of mirror
 
+	if m.Repo == nil { // trashed
+		return false
+	}
 	if m.Repo.IsArchived { // read-only repositories are not synced, like push mirrors
 		log.Trace("SyncMirrors [repo: %-v]: archived, skipping", m.Repo)
 		if err = repo_model.TouchMirror(ctx, m); err != nil {
@@ -571,7 +645,7 @@ func SyncPullMirror(ctx context.Context, repoID int64) bool {
 
 	log.Trace("SyncMirrors [repo: %-v]: Scheduling next update", m.Repo)
 	m.ScheduleNextUpdate()
-	if err = repo_model.UpdateMirror(ctx, m); err != nil {
+	if err = repo_model.UpdateMirrorCols(ctx, m, "updated_unix", "next_update_unix"); err != nil {
 		log.Error("SyncMirrors [repo: %-v]: failed to UpdateMirror with next update date: %v", m.Repo, err)
 		return false
 	}

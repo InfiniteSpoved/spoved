@@ -27,6 +27,15 @@
 					</div>
 
 					{{template "repo/migrate/options" .}}
+					<div class="inline field {{if .Err_MirrorBranchFilter}}error{{end}}">
+						<label for="mirror_branch_filter">{{ctx.Locale.Tr "repo.mirror_branch_filter"}}</label>
+						<input id="mirror_branch_filter" name="mirror_branch_filter" value="{{.mirror_branch_filter}}" maxlength="2048">
+					</div>
+					<div class="inline field {{if .Err_MirrorBranchFilter}}error{{end}}">
+						<label for="mirror_tag_filter">{{ctx.Locale.Tr "repo.mirror_tag_filter"}}</label>
+						<input id="mirror_tag_filter" name="mirror_tag_filter" value="{{.mirror_tag_filter}}" maxlength="2048">
+						<p class="help">{{ctx.Locale.Tr "repo.mirror_filter_help"}}</p>
+					</div>
 
 					<div class="divider"></div>
 

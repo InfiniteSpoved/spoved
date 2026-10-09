@@ -95,6 +95,7 @@ func checkAPIOAuth2Writes(t *testing.T, username string, app *auth_model.OAuth2A
 // AC2 + AC5 + AC6: default (no stored setting, apps exist) is "site admins only" on every route.
 func TestOAuth2AppPolicyDefaultAdminsOnly(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	bumpSettingsRevision(t) // the previous test's cached policy must not outlive the fixtures
 	// existing apps keep authorizing, exchanging and refreshing without any stored setting (before any edit below)
 	loginUser(t, "user4").MakeRequest(t, NewRequest(t, "GET", "/login/oauth/authorize?client_id=da7da3ba-9a13-4167-856f-3899de0b0138&redirect_uri=a&response_type=code&state=s"), http.StatusOK)
 	resp := MakeRequest(t, NewRequestWithValues(t, "POST", "/login/oauth/access_token", map[string]string{
@@ -161,6 +162,7 @@ func TestOAuth2AppPolicyEveryone(t *testing.T) {
 // AC1 + AC3: only site admins read/change the setting; saving validates; the choice sticks.
 func TestOAuth2AppPolicyAdminSetting(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	bumpSettingsRevision(t) // the previous test's cached policy must not outlive the fixtures
 	for _, name := range []string{"user2", "user4"} {
 		s := loginUser(t, name)
 		s.MakeRequest(t, NewRequest(t, "GET", "/admin/applications"), http.StatusForbidden)
@@ -176,6 +178,7 @@ func TestOAuth2AppPolicyAdminSetting(t *testing.T) {
 	post("orgs", "nosuchorg", http.StatusBadRequest)
 	assert.Empty(t, setting.Config().OAuth2AppPolicy.Value(db.DefaultContext).Mode) // rejected saves stored nothing
 	post("orgs", "org3", http.StatusSeeOther)
+	bumpSettingsRevision(t)
 	st := setting.Config().OAuth2AppPolicy.Value(db.DefaultContext)
 	assert.Equal(t, setting.OAuth2AppPolicyOrgs, st.Mode)
 	assert.Equal(t, []int64{3}, st.OrgIDs)
