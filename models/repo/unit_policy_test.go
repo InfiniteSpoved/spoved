@@ -167,6 +167,31 @@ func TestOrgUnits(t *testing.T) {
 	unittest.AssertNotExistsBean(t, &repo_model.OrgUnit{OrgID: 3, Type: unit.TypePackages})
 }
 
+// An empty policy adds no condition until an organization turns a unit off
+func TestOrgUnitCondFastPath(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer db.DeleteAllRecords("org_unit")
+	setUnitPolicy(t, setting.RepoUnitPolicyState{})
+	org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+	sql := func() string {
+		s, err := builder.ToBoundSQL(builder.And(
+			repo_model.AvailableUnitCond(db.DefaultContext, "`repository`.owner_id", "`repo_unit`.type"),
+			repo_model.AvailableUnitTypeCond(db.DefaultContext, "`repository`.owner_id", unit.TypeIssues),
+		))
+		require.NoError(t, err)
+		return s
+	}
+
+	assert.Empty(t, sql())
+	// a row that turns a unit back on changes nothing
+	require.NoError(t, repo_model.SetOrgUnits(db.DefaultContext, org3, 2, map[unit.Type]bool{unit.TypeWiki: false}))
+	require.NoError(t, repo_model.SetOrgUnits(db.DefaultContext, org3, 2, map[unit.Type]bool{unit.TypeWiki: true}))
+	assert.Empty(t, sql())
+
+	require.NoError(t, repo_model.SetOrgUnits(db.DefaultContext, org3, 2, map[unit.Type]bool{unit.TypeWiki: false}))
+	assert.Contains(t, sql(), "org_unit")
+}
+
 func TestLoadUnitsHidesPolicyUnits(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	defer setUnitPolicy(t, setting.RepoUnitPolicyState{})

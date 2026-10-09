@@ -196,6 +196,7 @@ func TestOrgUnitPolicyOrgFeatures(t *testing.T) {
 		owner.MakeRequest(t, NewRequest(t, "GET", "/org/unit-org-f/settings/packages"), status)
 		MakeRequest(t, NewRequest(t, "GET", "/api/packages/unit-org-f/generic/p/1.0/f.bin").AddTokenAuth(token), status)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/unit-org-f/quota/packages").AddTokenAuth(token), status)
+		MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/unit-org-f/quota/artifacts").AddTokenAuth(token), status)
 		owner.MakeRequest(t, NewRequest(t, "GET", "/org/unit-org-f/settings/actions/runners"), status)
 		owner.MakeRequest(t, NewRequest(t, "GET", "/org/unit-org-f/settings/actions/secrets"), status)
 		owner.MakeRequest(t, NewRequest(t, "GET", "/org/unit-org-f/settings/actions/variables"), status)
@@ -250,7 +251,9 @@ func TestOrgUnitPolicyRunningTask(t *testing.T) {
 		if status == http.StatusOK && signedUpload == "" {
 			var created actions.CreateArtifactResponse
 			require.NoError(t, protojson.Unmarshal(resp.Body.Bytes(), &created))
-			signedUpload = created.SignedUploadUrl[strings.Index(created.SignedUploadUrl, "/twirp/"):] + "&comp=block"
+			_, path, ok := strings.Cut(created.SignedUploadUrl, "/twirp/")
+			require.True(t, ok)
+			signedUpload = "/twirp/" + path + "&comp=block"
 		}
 	}
 	both := func(status int) {
@@ -308,20 +311,21 @@ func TestOrgUnitPolicyQueries(t *testing.T) {
 		if rows {
 			require.NoError(t, repo_model.SetOrgUnits(db.DefaultContext, org3, 2, map[unit_model.Type]bool{unit_model.TypeWiki: false}))
 		}
+		// whether any org turned a unit off, then (only if so) the org's rows, once per request
 		ctx := cache.WithCacheContext(db.DefaultContext)
-		assert.EqualValues(t, 1, countQueries(t, func() {
+		assert.EqualValues(t, map[bool]int{false: 1, true: 2}[rows], countQueries(t, func() {
 			for range 5 {
 				repo_model.HiddenUnits(ctx, org3)
 			}
 		}), "rows: %v", rows)
 	}
 
-	// a whole org page costs the same with or without rows
+	// a whole org page reads the org's rows once
 	session := loginUser(t, "user2")
 	session.MakeRequest(t, NewRequest(t, "GET", "/org3/-/projects"), http.StatusOK)
 	withRows := countQueries(t, func() { session.MakeRequest(t, NewRequest(t, "GET", "/org3/-/projects"), http.StatusOK) })
 	_, err := db.GetEngine(db.DefaultContext).Exec("DELETE FROM org_unit")
 	require.NoError(t, err)
 	withoutRows := countQueries(t, func() { session.MakeRequest(t, NewRequest(t, "GET", "/org3/-/projects"), http.StatusOK) })
-	assert.Equal(t, withoutRows, withRows)
+	assert.Equal(t, withoutRows+1, withRows)
 }

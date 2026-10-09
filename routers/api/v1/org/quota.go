@@ -164,5 +164,9 @@ func ListQuotaArtifacts(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
+	if repo_model.HiddenUnits(ctx, ctx.Org().Organization.AsUser()).Contains(unit.TypeActions) {
+		ctx.NotFound()
+		return
+	}
 	shared.ListQuotaArtifacts(ctx, ctx.Org().Organization.ID)
 }

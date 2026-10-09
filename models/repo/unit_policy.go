@@ -49,6 +49,19 @@ func orgDisabledUnits(ctx context.Context, orgID int64) ([]unit.Type, error) {
 	})
 }
 
+// anyOrgUnitOff reports whether some organization turned a unit off, read once per request, so the org_unit
+// condition costs nothing until an owner uses it. An error reads as true (fail closed).
+func anyOrgUnitOff(ctx context.Context) bool {
+	has, err := cache.GetWithContextCache(ctx, "org_unit_any_off", 0, func() (bool, error) {
+		return db.GetEngine(ctx).Table("org_unit").Where("disabled = ?", true).Exist()
+	})
+	if err != nil {
+		log.Error("anyOrgUnitOff: %v", err)
+		return true
+	}
+	return has
+}
+
 // SetOrgUnits stores the organization owner's choice for the units in on (true = on). A unit the site policy hides,
 // app.ini disables, or Code is refused.
 func SetOrgUnits(ctx context.Context, org *user_model.User, doerID int64, on map[unit.Type]bool) error {
@@ -79,6 +92,7 @@ func SetOrgUnits(ctx context.Context, org *user_model.User, doerID int64, on map
 			}
 		}
 		cache.RemoveContextData(ctx, "org_disabled_units", org.ID)
+		cache.RemoveContextData(ctx, "org_unit_any_off", 0)
 		return nil
 	})
 }
@@ -102,7 +116,7 @@ func HiddenUnits(ctx context.Context, owner *user_model.User) container.Set[unit
 			hidden.Add(t)
 		}
 	}
-	if owner != nil {
+	if owner != nil && anyOrgUnitOff(ctx) {
 		off, err := orgDisabledUnits(ctx, owner.ID)
 		if err != nil {
 			log.Error("orgDisabledUnits(%d): %v", owner.ID, err)
@@ -117,11 +131,15 @@ func HiddenUnits(ctx context.Context, owner *user_model.User) container.Set[unit
 // repositories owned by ownerCol.
 func HiddenUnitCond(ctx context.Context, ownerCol, typeCol string) builder.Cond {
 	return hiddenUnitCond(ctx, ownerCol, PolicyUnitTypes(), func(t unit.Type) builder.Cond { return builder.Eq{typeCol: t} }).
-		Or(orgUnitOffCond(ownerCol, builder.Expr("`org_unit`.type = "+typeCol)))
+		Or(orgUnitOffCond(ctx, ownerCol, builder.Expr("`org_unit`.type = "+typeCol)))
 }
 
-// orgUnitOffCond matches the owners (ownerCol) that turned off the unit typeCond selects in org_unit.
-func orgUnitOffCond(ownerCol string, typeCond builder.Cond) builder.Cond {
+// orgUnitOffCond matches the owners (ownerCol) that turned off the unit typeCond selects in org_unit, or is empty
+// when no organization turned a unit off.
+func orgUnitOffCond(ctx context.Context, ownerCol string, typeCond builder.Cond) builder.Cond {
+	if !anyOrgUnitOff(ctx) {
+		return builder.NewCond()
+	}
 	return builder.Exists(builder.Select("1").From("org_unit").
 		Where(builder.Expr("`org_unit`.org_id = " + ownerCol)).And(builder.Eq{"`org_unit`.disabled": true}).And(typeCond))
 }
@@ -130,7 +148,7 @@ func orgUnitOffCond(ownerCol string, typeCond builder.Cond) builder.Cond {
 // hides the unit t.
 func HiddenUnitTypeCond(ctx context.Context, ownerCol string, t unit.Type) builder.Cond {
 	return hiddenUnitCond(ctx, ownerCol, []unit.Type{t}, func(unit.Type) builder.Cond { return builder.NewCond() }).
-		Or(orgUnitOffCond(ownerCol, builder.Eq{"`org_unit`.type": t}))
+		Or(orgUnitOffCond(ctx, ownerCol, builder.Eq{"`org_unit`.type": t}))
 }
 
 func hiddenUnitCond(ctx context.Context, ownerCol string, types []unit.Type, typeCond func(unit.Type) builder.Cond) builder.Cond {
