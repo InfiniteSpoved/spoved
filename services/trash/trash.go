@@ -366,7 +366,7 @@ func purgeOrg(ctx context.Context, doer, org *user_model.User) error {
 	for _, id := range ids {
 		unlock := repo_service.LockTrash("repo", id)
 		// an earlier purge that crashed left its claim: take it over, as a purge in progress elsewhere is rare
-		err := claimForPurge(ctx, id, builder.Neq{"trashed_unix": 0})
+		err := claimForPurge(ctx, id, builder.And(builder.Neq{"trashed_unix": 0}, builder.Eq{"owner_id": org.ID})) // not one that was moved to another owner meanwhile
 		if err == nil {
 			err = deleteClaimed(ctx, doer, id)
 		}

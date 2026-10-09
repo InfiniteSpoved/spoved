@@ -724,8 +724,9 @@ func RemoveAllPackages(ctx context.Context, userID int64) (int, error) {
 				PageSize: repo_model.RepositoryListDefaultPageSize,
 				Page:     1,
 			},
-			OwnerID:    userID,
-			IsInternal: optional.None[bool](),
+			OwnerID:        userID,
+			IsInternal:     optional.None[bool](),
+			IncludeTrashed: true,
 		})
 		if err != nil {
 			return count, fmt.Errorf("GetOwnedPackages[%d]: %w", userID, err)

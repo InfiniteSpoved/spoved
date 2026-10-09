@@ -17,9 +17,11 @@ import (
 	user_model "forgejo.org/models/user"
 	code_indexer "forgejo.org/modules/indexer/code"
 	issue_indexer "forgejo.org/modules/indexer/issues"
+	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/sync"
 	"forgejo.org/modules/timeutil"
+	"forgejo.org/modules/util"
 	actions_service "forgejo.org/services/actions"
 )
 
@@ -172,13 +174,50 @@ func MoveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User,
 // ErrTrashConflict is returned when the repository is not in the trash any more, or is claimed by a purge.
 var ErrTrashConflict = errors.New("the repository is not in the trash, or is being restored or purged already")
 
-func moveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User, repo *repo_model.Repository, owner *user_model.User, newName string) error {
-	if newName != "" && newName != repo.Name {
-		if err := changeRepositoryName(ctx, repo, newName); err != nil {
+func moveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User, repo *repo_model.Repository, owner *user_model.User, newName string) (err error) {
+	oldName, finalName, target := repo.Name, repo.Name, owner
+	if newName != "" {
+		finalName = newName
+	}
+	if newOwner != nil {
+		if newOwner.IsOrganization() && newOwner.IsArchived {
+			return organization.ErrOrgArchived{Name: newOwner.Name}
+		}
+		target = newOwner
+	}
+	// The final place is checked before any file moves, so that a refusal leaves the repository where it is.
+	if (newOwner != nil || finalName != oldName) && !(newOwner == nil && strings.EqualFold(finalName, oldName)) {
+		if err := repo_model.IsUsableRepoName(strings.ToLower(finalName)); err != nil {
 			return err
 		}
-		repo.Name = newName
-		repo.LowerName = strings.ToLower(newName)
+		if has, err := repo_model.IsRepositoryModelOrDirExist(ctx, target, finalName); err != nil {
+			return err
+		} else if has {
+			return repo_model.ErrRepoAlreadyExist{Uname: target.Name, Name: finalName}
+		}
+	}
+
+	// whatever moved is moved back if a later step fails, as the database changes are rolled back
+	renamed, transferred := false, false
+	defer func() {
+		if err == nil {
+			return
+		}
+		if transferred {
+			moveRepoDirs(newOwner.Name, owner.Name, finalName, finalName)
+		}
+		if renamed {
+			moveRepoDirs(owner.Name, owner.Name, finalName, oldName)
+		}
+	}()
+
+	if finalName != oldName {
+		if err := changeRepositoryName(ctx, repo, finalName); err != nil {
+			return err
+		}
+		renamed = true
+		repo.Name = finalName
+		repo.LowerName = strings.ToLower(finalName)
 		if err := repo_model.UpdateRepositoryCols(ctx, repo, "name", "lower_name"); err != nil {
 			return err
 		}
@@ -186,26 +225,37 @@ func moveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User,
 	if newOwner == nil {
 		return nil
 	}
-	if newOwner.IsOrganization() && newOwner.IsArchived {
-		return organization.ErrOrgArchived{Name: newOwner.Name}
-	}
-	// Moving the repository takes it off the old owner and its teams once more, but a trashed repository was
-	// taken off already when it was trashed.
+	// Moving the repository takes it off the old owner and its teams once more, and puts it on the new ones, but a
+	// trashed repository was taken off already when it was trashed and the restore that follows counts it in.
 	if err := organization.AddTeamRepoCounts(ctx, repo.ID, 1); err != nil {
 		return err
 	}
 	if _, err := db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos+1 WHERE id=?", owner.ID); err != nil {
 		return err
 	}
+	if _, err := db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos-1 WHERE id=?", newOwner.ID); err != nil {
+		return err
+	}
 	if err := transferOwnership(ctx, doer, newOwner.Name, repo); err != nil {
 		return err
 	}
-	// it counts the repository for the new owner and its teams, and so does the restore that follows
-	if err := organization.AddTeamRepoCounts(ctx, repo.ID, -1); err != nil {
-		return err
+	transferred = true
+	return organization.AddTeamRepoCounts(ctx, repo.ID, -1) // the teams of the new owner
+}
+
+// moveRepoDirs moves the repository and wiki directories back after a failure; a failure here is logged only.
+func moveRepoDirs(fromOwner, toOwner, fromName, toName string) {
+	for _, paths := range [][2]string{
+		{repo_model.RepoPath(fromOwner, fromName), repo_model.RepoPath(toOwner, toName)},
+		{repo_model.WikiPath(fromOwner, fromName), repo_model.WikiPath(toOwner, toName)},
+	} {
+		if ok, _ := util.IsExist(paths[0]); !ok {
+			continue
+		}
+		if err := util.Rename(paths[0], paths[1]); err != nil {
+			log.Critical("Unable to move %s back to %s: %v", paths[0], paths[1], err)
+		}
 	}
-	_, err := db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos-1 WHERE id=?", newOwner.ID)
-	return err
 }
 
 // TrashUserRepositories moves every live repository of a user who is being deleted to the trash, each as a

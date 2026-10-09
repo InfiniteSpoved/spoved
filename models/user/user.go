@@ -1085,7 +1085,7 @@ func (u *User) IsTrashed() bool {
 
 // NotTrashedCond matches the accounts that are not in the trash, for queries that reach users by col.
 func NotTrashedCond(col string) builder.Cond {
-	return builder.In(col, builder.Select("id").From("`user`").Where(builder.Eq{"trashed_unix": 0}))
+	return builder.NotIn(col, builder.Select("id").From("`user`").Where(builder.Neq{"trashed_unix": 0}))
 }
 
 // GetUserByID returns the user object by given ID if exists.

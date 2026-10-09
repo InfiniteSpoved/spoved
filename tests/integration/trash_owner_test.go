@@ -17,6 +17,7 @@ import (
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
+	packages_model "forgejo.org/models/packages"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
@@ -327,6 +328,10 @@ func TestTrashOrgAdminOnly(t *testing.T) {
 func TestTrashOrgPurge(t *testing.T) {
 	defer prepareTrash(t)()
 	missingRepoDirs(t)
+	MakeRequest(t, NewRequestWithBody(t, "PUT", "/api/packages/org3/generic/purgepkg/1.0/file.bin", strings.NewReader("content")).AddTokenAuth(getUserToken(t, "user2", auth_model.AccessTokenScopeAll)), http.StatusCreated)
+	versions, _, err := packages_model.SearchVersions(t.Context(), &packages_model.PackageSearchOptions{OwnerID: trashOrgID})
+	require.NoError(t, err)
+	require.NotEmpty(t, versions)
 	require.NoError(t, repo_service.DeleteRepository(t.Context(), trashAdminUser(t), trashRepoByID(t, 5), false)) // trashed earlier, separate
 	deleteOrg3(t)
 	admin := loginUser(t, "user1")
@@ -341,6 +346,9 @@ func TestTrashOrgPurge(t *testing.T) {
 	}
 	assert.NoDirExists(t, user_model.UserPath("org3"))
 	unittest.AssertNotExistsBean(t, &organization.Team{OrgID: trashOrgID})
+	versions, _, err = packages_model.SearchVersions(t.Context(), &packages_model.PackageSearchOptions{OwnerID: trashOrgID, IncludeTrashed: true})
+	require.NoError(t, err)
+	assert.Empty(t, versions, "its packages went with it")
 	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/orgs", &api.CreateOrgOption{UserName: "org3"}).AddTokenAuth(adminTrashToken(t)), http.StatusCreated)
 
 	t.Run("API", func(t *testing.T) {
@@ -431,6 +439,15 @@ func TestTrashRestoreNewOwnerAndName(t *testing.T) {
 		require.Error(t, err)
 		assert.True(t, trash_service.IsBadTarget(err), err)
 		assert.True(t, trashRepoByID(t, 5).IsTrashed())
+
+		// the new name is free under the old owner but taken under the new one: refused before any file moves
+		_, err = repo_service.CreateRepositoryDirectly(ctx, user4, user4, repo_service.CreateRepoOptions{Name: "clashx"})
+		require.NoError(t, err)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/admin/trash/repo/5/restore", &api.RestoreTrashOption{NewOwner: "user4", NewName: "clashx"}).AddTokenAuth(adminTrashToken(t)), http.StatusUnprocessableEntity)
+		assert.True(t, trashRepoByID(t, 5).IsTrashed())
+		assert.Equal(t, "repo5", trashRepoByID(t, 5).Name)
+		assert.DirExists(t, repo_model.RepoPath("org3", "repo5"))
+		assert.NoDirExists(t, repo_model.RepoPath("org3", "clashx"))
 	})
 
 	t.Run("restore under a new owner and name", func(t *testing.T) {
@@ -477,6 +494,21 @@ func TestTrashRestoreNewOwnerAndName(t *testing.T) {
 		assert.Equal(t, "user4", repo.OwnerName)
 		assert.Equal(t, "from-form", repo.Name)
 	})
+}
+
+// B2: purging an organization leaves a repository that was moved to another owner meanwhile.
+func TestTrashOrgPurgeSkipsMovedRepo(t *testing.T) {
+	defer prepareTrash(t)()
+	missingRepoDirs(t)
+	admin := trashAdminUser(t)
+	require.NoError(t, repo_service.DeleteRepository(t.Context(), admin, trashRepoByID(t, 5), false))
+	deleteOrg3(t)
+	_, err := db.GetEngine(t.Context()).Exec("UPDATE `repository` SET owner_id = 4, owner_name = 'user4' WHERE id = 5") // what another pod's restore did
+	require.NoError(t, err)
+
+	require.NoError(t, trash_service.PurgeOrg(t.Context(), admin, trashOrgID))
+	unittest.AssertNotExistsBean(t, &user_model.User{ID: trashOrgID})
+	assert.True(t, trashRepoByID(t, 5).IsTrashed(), "not the organization's any more")
 }
 
 // AC15: an organization can be restored under a new name.
@@ -574,6 +606,9 @@ func TestTrashUserDelete(t *testing.T) {
 		}
 		_, err := user_model.GetUserByName(t.Context(), "user27")
 		require.True(t, user_model.IsErrUserNotExist(err))
+		found, err := user_model.GetUser(t.Context(), &user_model.User{LowerName: "user27"}) // sign-in, OAuth and auto-link look users up this way
+		require.NoError(t, err)
+		assert.False(t, found)
 		_, err = user_model.GetUserByEmail(t.Context(), "user27@example.com")
 		require.Error(t, err)
 		_, err = user_model.GetUserByEmail(t.Context(), tombstone.Email)
