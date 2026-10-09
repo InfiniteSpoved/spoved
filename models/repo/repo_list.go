@@ -6,6 +6,7 @@ package repo
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"forgejo.org/models/db"
@@ -53,8 +54,8 @@ func (repos RepositoryList) LoadUnits(ctx context.Context) error {
 
 	// Load units.
 	units := make([]*RepoUnit, 0, len(repos)*6)
-	if err := db.GetEngine(ctx).
-		In("repo_id", repos.IDs()).
+	if err := availableUnitsSession(ctx).
+		In("`repo_unit`.repo_id", repos.IDs()).
 		Find(&units); err != nil {
 		return fmt.Errorf("find units: %w", err)
 	}
@@ -606,6 +607,10 @@ func searchRepositoryByCondition(ctx context.Context, opts *SearchRepoOptions, c
 		orgName, _, _ := strings.Cut(opts.Keyword, "/")
 		opts.OrderBy = db.SearchOrderBy(fmt.Sprintf("CASE WHEN owner_name LIKE ? THEN 0 ELSE 1 END, %s", opts.OrderBy))
 		args = append(args, orgName)
+	}
+
+	if has, u := opts.EnabledUnit.Get(); has {
+		cond = cond.And(AvailableUnitCond(ctx, "`repository`.owner_id", strconv.Itoa(int(u))))
 	}
 
 	sess := db.GetEngine(ctx)

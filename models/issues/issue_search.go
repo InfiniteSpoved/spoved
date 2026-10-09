@@ -201,7 +201,9 @@ func applyProjectColumnCondition(sess *xorm.Session, opts *IssuesOptions) {
 	}
 }
 
-func applyRepoConditions(sess *xorm.Session, opts *IssuesOptions) {
+// unitCond is repo_model.AvailableUnitCond, computed before the session is built: reading the policy inside a
+// transaction would run a query on the same session.
+func applyRepoConditions(sess *xorm.Session, opts *IssuesOptions, unitCond builder.Cond) {
 	if len(opts.RepoIDs) == 1 {
 		opts.RepoCond = builder.Eq{"issue.repo_id": opts.RepoIDs[0]}
 	} else if len(opts.RepoIDs) > 1 {
@@ -223,7 +225,7 @@ func applyRepoConditions(sess *xorm.Session, opts *IssuesOptions) {
 				units = []unit.Type{unit.TypeIssues}
 			}
 		}
-		subQuery = repo_model.JoinRepoType(subQuery, units...)
+		subQuery = repo_model.JoinRepoType(subQuery, units...).And(unitCond)
 		opts.RepoCond = opts.RepoCond.Or(builder.In("issue.repo_id", subQuery))
 	}
 	if opts.RepoCond != nil {
@@ -231,14 +233,14 @@ func applyRepoConditions(sess *xorm.Session, opts *IssuesOptions) {
 	}
 }
 
-func applyConditions(sess *xorm.Session, opts *IssuesOptions) {
+func applyConditions(sess *xorm.Session, opts *IssuesOptions, unitCond builder.Cond) {
 	sess.And("`repository`.trashed_unix = 0")
 
 	if len(opts.IssueIDs) > 0 {
 		sess.In("issue.id", opts.IssueIDs)
 	}
 
-	applyRepoConditions(sess, opts)
+	applyRepoConditions(sess, opts, unitCond)
 
 	if has, value := opts.IsClosed.Get(); has {
 		sess.And("issue.is_closed=?", value)
@@ -486,12 +488,17 @@ func applySubscribedCondition(sess *xorm.Session, subscriberID int64) {
 	)
 }
 
+func issueUnitCond(ctx context.Context) builder.Cond {
+	return repo_model.AvailableUnitCond(ctx, "`repository`.owner_id", "`repo_unit`.type")
+}
+
 // Issues returns a list of issues by given conditions.
 func Issues(ctx context.Context, opts *IssuesOptions) (IssueList, error) {
+	unitCond := issueUnitCond(ctx)
 	sess := db.GetEngine(ctx).
 		Join("INNER", "repository", "`issue`.repo_id = `repository`.id")
 	applyLimit(sess, opts)
-	applyConditions(sess, opts)
+	applyConditions(sess, opts, unitCond)
 	applySorts(sess, opts.SortType, opts.PriorityRepoID, opts.PriorityIssueIndex)
 
 	issues := IssueList{}
@@ -508,9 +515,10 @@ func Issues(ctx context.Context, opts *IssuesOptions) (IssueList, error) {
 
 // IssueIDs returns a list of issue ids by given conditions.
 func IssueIDs(ctx context.Context, opts *IssuesOptions, otherConds ...builder.Cond) ([]int64, int64, error) {
+	unitCond := issueUnitCond(ctx)
 	sess := db.GetEngine(ctx).
 		Join("INNER", "repository", "`issue`.repo_id = `repository`.id")
-	applyConditions(sess, opts)
+	applyConditions(sess, opts, unitCond)
 	for _, cond := range otherConds {
 		sess.And(cond)
 	}

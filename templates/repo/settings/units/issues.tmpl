@@ -3,8 +3,8 @@
 </h4>
 <div class="ui attached segment">
 	{{$isIssuesEnabled := or (.Repository.UnitEnabled $.Context $.UnitTypeIssues) (.Repository.UnitEnabled $.Context $.UnitTypeExternalTracker)}}
-	{{$isIssuesGlobalDisabled := .UnitTypeIssues.UnitGlobalDisabled}}
-	{{$isExternalTrackerGlobalDisabled := .UnitTypeExternalTracker.UnitGlobalDisabled}}
+	{{$isIssuesGlobalDisabled := or .UnitTypeIssues.UnitGlobalDisabled ($.UnitHidden.Contains $.UnitTypeIssues)}}
+	{{$isExternalTrackerGlobalDisabled := or .UnitTypeExternalTracker.UnitGlobalDisabled ($.UnitHidden.Contains $.UnitTypeExternalTracker)}}
 	{{$isIssuesAndExternalGlobalDisabled := and $isIssuesGlobalDisabled $isExternalTrackerGlobalDisabled}}
 	<div class="inline field">
 		<label>{{ctx.Locale.Tr "repo.issues"}}</label>

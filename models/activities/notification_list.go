@@ -5,6 +5,7 @@ package activities
 
 import (
 	"context"
+	"slices"
 
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
@@ -284,6 +285,24 @@ func (nl NotificationList) LoadIssues(ctx context.Context) ([]int, error) {
 }
 
 // Without returns the notification list without the failures
+// UnitHidden reports whether n is about an issue (or pull request) whose unit the site policy hides in its
+// repository. The rows are filtered by permission when written, but a unit may have been hidden since. Call it after
+// loading the repository and the issue.
+func (n *Notification) UnitHidden(ctx context.Context) bool {
+	if n.Issue == nil || n.Repository == nil || n.Repository.LoadOwner(ctx) != nil {
+		return false
+	}
+	if n.Issue.IsPull {
+		return repo_model.HiddenUnits(ctx, n.Repository.Owner).Contains(unit.TypePullRequests)
+	}
+	return repo_model.HiddenUnits(ctx, n.Repository.Owner).Contains(unit.TypeIssues)
+}
+
+// WithoutHiddenUnits drops the notifications for which UnitHidden is true.
+func (nl NotificationList) WithoutHiddenUnits(ctx context.Context) NotificationList {
+	return slices.DeleteFunc(nl, func(n *Notification) bool { return n.UnitHidden(ctx) })
+}
+
 func (nl NotificationList) Without(failures []int) NotificationList {
 	if len(failures) == 0 {
 		return nl

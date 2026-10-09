@@ -555,6 +555,17 @@ func GetFeeds(ctx context.Context, opts GetFeedsOptions) (ActionList, int64, err
 		return nil, 0, err
 	}
 
+	// the rows were filtered by permission when written, but a unit may have been hidden since
+	for t, ops := range map[unit.Type][]ActionType{
+		unit.TypeIssues:       {ActionCreateIssue, ActionCommentIssue, ActionCloseIssue, ActionReopenIssue},
+		unit.TypePullRequests: {ActionCreatePullRequest, ActionMergePullRequest, ActionClosePullRequest, ActionReopenPullRequest, ActionApprovePullRequest, ActionRejectPullRequest, ActionCommentPull, ActionPullReviewDismissed, ActionPullRequestReadyForReview, ActionAutoMergePullRequest},
+		unit.TypeReleases:     {ActionPublishRelease},
+	} {
+		if hidden := repo_model.HiddenUnitCond(ctx, "`repository`.owner_id", strconv.Itoa(int(t))); hidden.IsValid() {
+			cond = cond.And(builder.Not{builder.In("`action`.op_type", ops).And(hidden)})
+		}
+	}
+
 	sess := db.GetEngine(ctx).Where(cond).
 		Select("`action`.*"). // this line will avoid select other joined table's columns
 		Join("INNER", "repository", "`repository`.id = `action`.repo_id")

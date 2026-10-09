@@ -460,7 +460,7 @@ func CreateTaskForRunner(ctx context.Context, runner *actions_model.ActionRunner
 
 	e := db.GetEngine(ctx)
 
-	jobs, err := actions_model.GetAvailableJobsForRunner(e, runner)
+	jobs, err := actions_model.GetAvailableJobsForRunner(ctx, runner)
 	if err != nil {
 		return nil, err
 	}

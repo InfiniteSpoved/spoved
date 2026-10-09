@@ -8,11 +8,15 @@
 			</div>
 		{{end}}
 		{{template "repo/settings/units/overview" .}}
-		{{template "repo/settings/units/issues" .}}
-		{{if not .IsMirror}}
+		{{if not (and (.UnitHidden.Contains .UnitTypeIssues) (.UnitHidden.Contains .UnitTypeExternalTracker))}}
+			{{template "repo/settings/units/issues" .}}
+		{{end}}
+		{{if not (or .IsMirror (.UnitHidden.Contains .UnitTypePullRequests))}}
 			{{template "repo/settings/units/pulls" .}}
 		{{end}}
-		{{template "repo/settings/units/wiki" .}}
+		{{if not (and (.UnitHidden.Contains .UnitTypeWiki) (.UnitHidden.Contains .UnitTypeExternalWiki))}}
+			{{template "repo/settings/units/wiki" .}}
+		{{end}}
 	</form>
 </div>
 {{template "repo/settings/layout_footer" .}}

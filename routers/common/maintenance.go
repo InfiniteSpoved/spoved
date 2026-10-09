@@ -53,6 +53,7 @@ var MaintenanceAdminRoutes = container.SetOf(
 	"POST /admin/maintenance",
 	"POST /admin/ip-allowlist",
 	"POST /admin/webhook-types",
+	"POST /admin/repo-units",
 	"POST /admin/applications/policy",
 	"POST /admin/config",
 	"POST /admin/config/test_mail",

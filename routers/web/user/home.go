@@ -176,9 +176,12 @@ func Milestones(ctx *context.Context) {
 	}
 
 	var (
-		userRepoCond = repo_model.SearchRepositoryCondition(&repoOpts) // all repo condition user could visit
-		repoCond     = userRepoCond
-		repoIDs      []int64
+		// all repo condition user could visit, with Issues or Pull requests the site policy doesn't hide
+		userRepoCond = repo_model.SearchRepositoryCondition(&repoOpts).And(builder.In("`repository`.id",
+			repo_model.JoinRepoType(builder.Select("`repository`.id").From("repository"), unit.TypeIssues, unit.TypePullRequests).
+				And(repo_model.AvailableUnitCond(ctx, "`repository`.owner_id", "`repo_unit`.type"))))
+		repoCond = userRepoCond
+		repoIDs  []int64
 
 		reposQuery   = ctx.FormString("repos")
 		isShowClosed = ctx.FormString("state") == "closed"
@@ -640,6 +643,12 @@ func buildIssueOverview(ctx *context.Context, unitType unit.Type) {
 		issues, err = issues_model.GetIssuesByIDs(ctx, issueIDs, true)
 		if err != nil {
 			ctx.ServerError("GetIssuesByIDs", err)
+			return
+		}
+		// ponytail: filtered after paging, so a page can come up short; the indexer has no unit field
+		issues, err = issues.FilterHiddenUnits(ctx)
+		if err != nil {
+			ctx.ServerError("FilterHiddenUnits", err)
 			return
 		}
 	}

@@ -54,10 +54,9 @@ func TestActionConcurrencyRunnerFiltering(t *testing.T) {
 		t.Run(tc.runnerName, func(t *testing.T) {
 			doTest := func(t *testing.T) {
 				t.Helper()
-				e := db.GetEngine(t.Context())
 
 				runner := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRunner{Name: tc.runnerName})
-				jobs, err := actions_model.GetAvailableJobsForRunner(e, runner)
+				jobs, err := actions_model.GetAvailableJobsForRunner(t.Context(), runner)
 				require.NoError(t, err)
 
 				ids := []int64{}
@@ -196,7 +195,7 @@ func TestActionConcurrencyGroupQueue(t *testing.T) {
 				require.EqualValues(t, 1, affected)
 			}
 
-			jobs, err := actions_model.GetAvailableJobsForRunner(e, runner)
+			jobs, err := actions_model.GetAvailableJobsForRunner(t.Context(), runner)
 			require.NoError(t, err)
 
 			ids := []int64{}

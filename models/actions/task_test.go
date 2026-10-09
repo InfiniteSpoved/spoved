@@ -8,8 +8,11 @@ import (
 
 	"forgejo.org/models/db"
 	"forgejo.org/models/repo"
+	"forgejo.org/models/system"
 	"forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/setting"
+	"forgejo.org/modules/setting/config"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -87,7 +90,7 @@ func TestActionTask_GetAvailableJobsForRunner(t *testing.T) {
 
 		runner := unittest.AssertExistsAndLoadBean(t, &ActionRunner{ID: 73711})
 
-		jobs, err := GetAvailableJobsForRunner(db.GetEngine(t.Context()), runner)
+		jobs, err := GetAvailableJobsForRunner(t.Context(), runner)
 		require.NoError(t, err)
 
 		assert.Len(t, jobs, 3)
@@ -123,7 +126,7 @@ func TestActionTask_GetAvailableJobsForRunner(t *testing.T) {
 				repo62 := unittest.AssertExistsAndLoadBean(t, &repo.Repository{ID: 62})
 				runner := unittest.AssertExistsAndLoadBean(t, &ActionRunner{ID: 73711})
 
-				jobs, err := GetAvailableJobsForRunner(db.GetEngine(t.Context()), runner)
+				jobs, err := GetAvailableJobsForRunner(t.Context(), runner)
 				require.NoError(t, err)
 
 				assert.Len(t, jobs, 3)
@@ -138,13 +141,43 @@ func TestActionTask_GetAvailableJobsForRunner(t *testing.T) {
 					Delete(new(repo.RepoUnit))
 				require.NoError(t, err)
 
-				jobs, err = GetAvailableJobsForRunner(db.GetEngine(t.Context()), runner)
+				jobs, err = GetAvailableJobsForRunner(t.Context(), runner)
 				require.NoError(t, err)
 
 				assert.Empty(t, jobs)
 			})
 		}
 	})
+}
+
+// A runner doesn't pick up jobs of a repository whose owner organization the site policy denies Actions
+func TestActionTask_GetAvailableJobsForRunnerUnitPolicy(t *testing.T) {
+	defer unittest.OverrideFixtures("models/actions/TestActionTask_GetAvailableJobsForRunner")()
+	require.NoError(t, unittest.PrepareTestDatabase())
+	setPolicy := func(v string) {
+		require.NoError(t, system.SetSettings(t.Context(), map[string]string{setting.Config().RepoUnitPolicy.DynKey(): v}))
+		config.GetDynGetter().InvalidateCache()
+	}
+	defer setPolicy("{}")
+	setPolicy(`{"not_allowed":["repo.actions"]}`)
+	runner := unittest.AssertExistsAndLoadBean(t, &ActionRunner{ID: 73713})
+
+	// owned by user2: not restricted
+	jobs, err := GetAvailableJobsForRunner(t.Context(), runner)
+	require.NoError(t, err)
+	assert.Len(t, jobs, 3)
+
+	// the current owner decides, not the owner recorded in the run
+	_, err = db.GetEngine(t.Context()).Exec("UPDATE repository SET owner_id = 3 WHERE id = 62")
+	require.NoError(t, err)
+	jobs, err = GetAvailableJobsForRunner(t.Context(), runner)
+	require.NoError(t, err)
+	assert.Empty(t, jobs)
+
+	setPolicy("{}")
+	jobs, err = GetAvailableJobsForRunner(t.Context(), runner)
+	require.NoError(t, err)
+	assert.Len(t, jobs, 3)
 }
 
 func TestActionTask_DeleteTask(t *testing.T) {

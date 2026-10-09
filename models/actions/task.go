@@ -308,7 +308,10 @@ func getConcurrencyCondition() builder.Cond {
 // Returns all the available jobs that could be executed on `runner`, before label filtering is applied.  Note that
 // only a single job can actually be run from this result for any given invocation, as multiple runs (in order) from any
 // single concurrency group could be returned.
-func GetAvailableJobsForRunner(e db.Engine, runner *ActionRunner) ([]*ActionRunJob, error) {
+func GetAvailableJobsForRunner(ctx context.Context, runner *ActionRunner) ([]*ActionRunJob, error) {
+	// read the policy before building the query: in a transaction it would run on the same session
+	unitCond := repo_model.AvailableUnitCond(ctx, "(SELECT owner_id FROM repository WHERE repository.id = action_run_job.repo_id)", "`repo_unit`.type")
+	e := db.GetEngine(ctx)
 	jobCond := builder.NewCond()
 	if runner.RepoID != 0 {
 		jobCond = builder.Eq{"repo_id": runner.RepoID}
@@ -347,6 +350,7 @@ func GetAvailableJobsForRunner(e db.Engine, runner *ActionRunner) ([]*ActionRunJ
 		Where("task_id=? AND action_run_job.status=? AND `repo_unit`.type=?", 0, StatusWaiting, unit.TypeActions).
 		And(jobCond).
 		And(repo_model.NotTrashedCond("action_run_job.repo_id")).
+		And(unitCond).
 		Desc("action_run.priority").
 		Asc("action_run_job.updated", "action_run_job.id").
 		Find(&jobs); err != nil {

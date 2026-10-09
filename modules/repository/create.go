@@ -77,9 +77,18 @@ func CreateRepositoryByExample(ctx context.Context, doer, u *user_model.User, re
 		defaultUnits = unit.DefaultForkRepoUnits
 	case repo.IsMirror:
 		defaultUnits = unit.DefaultMirrorRepoUnits
+	case len(setting.Repository.DefaultRepoUnits) == 0:
+		// app.ini DEFAULT_REPO_UNITS wins over the list site admins set
+		if keys := setting.Config().RepoUnitPolicy.Value(ctx).DefaultUnits; keys != nil {
+			defaultUnits, _ = unit.FindUnitTypes(keys...)
+		}
 	}
+	hidden := repo_model.HiddenUnits(ctx, u)
 	units := make([]repo_model.RepoUnit, 0, len(defaultUnits))
 	for _, tp := range defaultUnits {
+		if hidden.Contains(tp) || tp.UnitGlobalDisabled() || !tp.CanBeDefault() {
+			continue
+		}
 		switch tp {
 		case unit.TypeIssues:
 			units = append(units, repo_model.RepoUnit{

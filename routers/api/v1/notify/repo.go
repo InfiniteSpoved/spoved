@@ -124,6 +124,7 @@ func ListRepoNotifications(ctx *context.APIContext) {
 		ctx.InternalServerError(err)
 		return
 	}
+	nl = activities_model.NotificationList(nl).WithoutHiddenUnits(ctx)
 
 	ctx.SetTotalCountHeader(totalCount)
 

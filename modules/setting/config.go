@@ -59,6 +59,7 @@ type ConfigStruct struct {
 	IPAllowlist     *config.Value[IPAllowlistState]
 	OAuth2AppPolicy *config.Value[OAuth2AppPolicyState]
 	WebhookTypes    *config.Value[WebhookTypesState]
+	RepoUnitPolicy  *config.Value[RepoUnitPolicyState]
 }
 
 var (
@@ -80,6 +81,7 @@ func initDefaultConfig() {
 		IPAllowlist:     config.ValueJSON[IPAllowlistState]("ip_allowlist.state").WithDefault(IPAllowlistState{ExemptAdmins: true}),
 		OAuth2AppPolicy: config.ValueJSON[OAuth2AppPolicyState]("oauth2.app_policy"),
 		WebhookTypes:    config.ValueJSON[WebhookTypesState]("webhook.types"),
+		RepoUnitPolicy:  config.ValueJSON[RepoUnitPolicyState]("repository.unit_policy"),
 	}
 }
 

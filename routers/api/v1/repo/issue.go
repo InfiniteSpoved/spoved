@@ -332,6 +332,12 @@ func SearchIssues(ctx *context.APIContext) {
 		ctx.Error(http.StatusInternalServerError, "FindIssuesByIDs", err)
 		return
 	}
+	// ponytail: filtered after paging, so a page can come up short; the indexer has no unit field
+	issues, err = issues.FilterHiddenUnits(ctx)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "FilterHiddenUnits", err)
+		return
+	}
 
 	ctx.SetLinkHeader(int(total), limit)
 	ctx.SetTotalCountHeader(total)
