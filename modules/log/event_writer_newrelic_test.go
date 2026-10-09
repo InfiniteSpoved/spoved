@@ -4,13 +4,16 @@
 package log
 
 import (
+	"bufio"
 	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -387,16 +390,32 @@ func TestNewRelicQueueCountsFormattedBytes(t *testing.T) {
 }
 
 func TestEventFormatJSONFieldCapsAndRedactionOrder(t *testing.T) {
-	// the secret sits across the 32 KB cut: redact first, cut afterwards
-	msg := strings.Repeat("a", maxJSONMessage-8) + " access_token=SECRETVALUE0123"
+	const marker = len("…[truncated]")
+	secret := " access_token=SECRETVALUE0123"
+	// an event without Fields has the 32 KB message cap; the secret straddles the final cut, and the 2x pre-cut
+	for name, pad := range map[string]int{"final cut": maxJSONMessage - 8, "pre-cut": 2*maxJSONMessage - 8} {
+		m := formatJSON(t, &Event{Level: INFO, Logger: "default", MsgSimpleText: strings.Repeat("a", pad) + secret})
+		msg := m["message"].(string)
+		assert.NotContains(t, msg, "SECRET", name)
+		assert.NotContains(t, msg, "access_token=S", name)
+		assert.LessOrEqual(t, len(msg), maxJSONMessage+marker, name)
+	}
+
+	// structured (access) events: 4 KB message, 2 KB for every client controlled field, each checked on its own
+	huge := strings.Repeat("x", 900*1024)
 	m := formatJSON(t, &Event{
-		Level: INFO, Logger: "access", MsgSimpleText: msg,
-		Fields: map[string]any{"user_agent": strings.Repeat("u", 100000), "path": "/x?token=" + strings.Repeat("t", 5000), "ip": "1.2.3.4"},
+		Level: INFO, Logger: "access", MsgSimpleText: huge,
+		Fields: map[string]any{"user_agent": huge, "path": "/?" + huge, "user": huge, "ip": huge},
 	})
-	assert.NotContains(t, m["message"], "SECRET")
-	assert.NotContains(t, m["message"], "access_token=S")
-	assert.LessOrEqual(t, len(m["user_agent"].(string)), maxJSONField+len("…[truncated]"))
-	assert.Equal(t, "/x?token=[REDACTED]", m["path"])
+	assert.LessOrEqual(t, len(m["message"].(string)), maxJSONLine+marker)
+	assert.Greater(t, len(m["message"].(string)), maxJSONField, "the message cap is the larger one")
+	for _, f := range []string{"user_agent", "path", "user", "ip"} {
+		assert.LessOrEqual(t, len(m[f].(string)), maxJSONField+marker, f)
+		assert.Greater(t, len(m[f].(string)), maxJSONField-1, f)
+	}
+	m = formatJSON(t, &Event{Level: INFO, Logger: "access", MsgSimpleText: "x", Fields: map[string]any{"path": strings.Repeat("a", maxJSONField-8) + "?password=zz"}})
+	assert.NotContains(t, m["path"], "zz")
+	assert.Equal(t, "/x?token=[REDACTED]", formatJSON(t, &Event{Level: INFO, Fields: map[string]any{"path": "/x?token=" + strings.Repeat("t", 5000)}})["path"])
 
 	// the rendered access line carries the same credentials as the path field
 	line := `203.0.113.7 - - [09/Oct/2026:10:00:00 +0000] "GET /x?password=hunter2&page=2 HTTP/1.1" 200 5 "https://h/r?access_token=REFTOKEN123" "agent"`
@@ -404,6 +423,51 @@ func TestEventFormatJSONFieldCapsAndRedactionOrder(t *testing.T) {
 	assert.NotContains(t, m["message"], "hunter2")
 	assert.NotContains(t, m["message"], "REFTOKEN123")
 	assert.Contains(t, m["message"], "page=2")
+}
+
+func TestFormatJSONThroughFileAndConnWriters(t *testing.T) {
+	// a real file writer
+	file := filepath.Join(t.TempDir(), "json.log")
+	fw := NewEventWriterFile("f", WriterMode{Level: INFO, Format: "json", WriterOption: WriterFileOption{FileName: file}})
+	l := NewLoggerWithWriters(t.Context(), "access", fw)
+	l.LogWithFields(0, INFO, map[string]any{"status": 200, "path": "/x?token=abc"}, "GET /x?token=abc")
+	l.Close()
+	b, err := os.ReadFile(file)
+	require.NoError(t, err)
+	m := map[string]any{}
+	require.NoError(t, json.Unmarshal(b, &m))
+	assert.Equal(t, "access", m["logtype"])
+	assert.InDelta(t, 200, m["status"], 0)
+	assert.Equal(t, "/x?token=[REDACTED]", m["path"])
+
+	// a real conn writer
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+	got := make(chan string, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		line, _ := bufio.NewReader(c).ReadString('\n')
+		got <- line
+	}()
+	cw := NewEventWriterConn("c", WriterMode{Level: INFO, Format: "json", WriterOption: WriterConnOption{Addr: ln.Addr().String(), Protocol: "tcp"}})
+	l = NewLoggerWithWriters(t.Context(), "xorm", cw)
+	l.Warn("Authorization: Bearer abcdef123456")
+	select {
+	case line := <-got:
+		m = map[string]any{}
+		require.NoError(t, json.Unmarshal([]byte(line), &m))
+		assert.Equal(t, "xorm", m["logtype"])
+		assert.Equal(t, "warn", m["level"])
+		assert.Equal(t, "Authorization: [REDACTED]", m["message"])
+	case <-time.After(5 * time.Second):
+		t.Fatal("no event on the conn writer")
+	}
+	l.Close()
 }
 
 func TestJSONFormattingRunsInWriterGoroutine(t *testing.T) {

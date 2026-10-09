@@ -31,6 +31,17 @@ type routerLoggerOptions struct {
 
 const keyOfRequestIDInTemplate = ".RequestID"
 
+// maxAccessLogField caps the structured path and user agent: a client can send 1 MB headers, and the event waits in
+// the writer queue (10000 slots) until the JSON formatter runs.
+const maxAccessLogField = 4096
+
+func capAccessLogField(s string) string {
+	if len(s) <= maxAccessLogField {
+		return s
+	}
+	return strings.Clone(s[:maxAccessLogField]) // a copy, so the header's backing array is not retained
+}
+
 // According to:
 // TraceId: A valid trace identifier is a 16-byte array with at least one non-zero byte
 // MD5 output is 16 or 32 bytes: md5-bytes is 16, md5-hex is 32
@@ -109,11 +120,11 @@ func AccessLogger() func(http.Handler) http.Handler {
 				"ip":          reqHost,
 				"user":        user,
 				"method":      req.Method,
-				"path":        req.URL.RequestURI(),
+				"path":        capAccessLogField(req.URL.RequestURI()),
 				"status":      rw.Status(),
 				"bytes":       rw.Size(),
 				"duration_ms": time.Since(start).Milliseconds(),
-				"user_agent":  req.UserAgent(),
+				"user_agent":  capAccessLogField(req.UserAgent()),
 			}, "%s", buf.String())
 		})
 	}

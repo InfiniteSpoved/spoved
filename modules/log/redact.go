@@ -14,7 +14,7 @@ const redacted = "[REDACTED]"
 
 var (
 	// header: the value runs to the end of the line or the closing quote of its JSON/quoted form
-	redactHeader = regexp.MustCompile(`(?i)\b((?:proxy-)?authorization|set-cookie|cookie|x-api-key|api-key|x-license-key)(["']?\s*[:=]\s*["']?)[^\r\n"']*`)
+	redactHeader = regexp.MustCompile(`(?i)\b((?:proxy-)?authorization|set-cookie|cookie|x-api-key|api-key|x-license-key)(\\?["']?\s*[:=]\s*\\?["']?)(?:[^\r\n"'\\]|\\[^"'])*`)
 	// "Bearer x" / "Basic x" / "token x": prose such as "basic settings" has only letters and is left alone
 	redactScheme   = regexp.MustCompile(`(?i)\b(bearer|basic|token)(\s+)([A-Za-z0-9._~+/=-]{8,})`)
 	redactUserinfo = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://[^/\s:@]+):[^@/\s]+@`)

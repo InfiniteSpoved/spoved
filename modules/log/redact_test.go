@@ -48,6 +48,7 @@ func TestRedact(t *testing.T) {
 		"slack xoxr-0123456789abcdef":                              "slack " + r,
 		"code=abc&client_code=zz&user-code=1&barcode=123&design=4": "code=" + r + "&client_code=" + r + "&user-code=" + r + "&barcode=123&design=4",
 		`{"code":"abc","sig":"d"}`:                                 `{"code":"` + r + `","sig":"` + r + `"}`,
+		`"{\"Cookie\":\"sess=abc\",\"Host\":\"h\"}"`:               `"{\"Cookie\":\"` + r + `\",\"Host\":\"h\"}"`,
 		// negatives: must stay untouched
 		"commit 0123456789abcdef0123456789abcdef01234567 pushed": "commit 0123456789abcdef0123456789abcdef01234567 pushed",
 		"basic settings page and bearer of news":                 "basic settings page and bearer of news",
