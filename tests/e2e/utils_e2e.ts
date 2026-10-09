@@ -32,7 +32,20 @@ export async function test_context(browser: Browser, options?: BrowserContextOpt
   const context = await browser.newContext(options);
 
   context.on('page', (page) => {
-    page.on('pageerror', (err) => expect(err).toBeUndefined());
+    // Firefox fails a lazy chunk with a ChunkLoadError when a navigation aborts its request; that is
+    // not a page error, unlike a chunk the server fails to deliver (no aborted request).
+    const aborted = new Set<string>();
+    page.on('requestfailed', (req) => {
+      if (/ABORTED/.test(req.failure()?.errorText ?? '')) aborted.add(req.url());
+    });
+    page.on('pageerror', (err) => {
+      const url = err.name === 'ChunkLoadError' ? /\(error: (\S+)\)/.exec(err.message)?.[1] : undefined;
+      if (!url) return expect(err).toBeUndefined();
+      // requestfailed may arrive after the pageerror, so check later (an uncaught throw fails the test)
+      setTimeout(() => {
+        if (!aborted.has(url)) expect.soft(err).toBeUndefined();
+      }, 1000);
+    });
   });
 
   return context;
