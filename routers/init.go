@@ -35,6 +35,7 @@ import (
 	actions_service "forgejo.org/services/actions"
 	auth_method "forgejo.org/services/auth/method"
 	"forgejo.org/services/auth/source/oauth2"
+	"forgejo.org/services/authz"
 	"forgejo.org/services/automerge"
 	"forgejo.org/services/cron"
 	federation_service "forgejo.org/services/federation"
@@ -140,6 +141,7 @@ func InitWebInstalled(ctx context.Context) {
 
 	mustInitCtx(ctx, models.Init)
 	mustInitCtx(ctx, auth_model.Init)
+	mustInit(authz.CheckScopePolicy)
 	mustInitCtx(ctx, repo_service.Init)
 
 	// Booting long running goroutines.
