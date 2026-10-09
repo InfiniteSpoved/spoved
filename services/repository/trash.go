@@ -5,6 +5,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -91,6 +92,13 @@ func cancelPendingRuns(ctx context.Context, repo *repo_model.Repository) error {
 }
 
 func trashRepositoryRows(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, withOwner bool) error {
+	if repo.Status == repo_model.RepositoryPendingTransfer { // the transfer is gone, so the repository is ready again after a restore
+		repo.Status = repo_model.RepositoryReady
+		if err := repo_model.UpdateRepositoryCols(ctx, repo, "status"); err != nil {
+			return err
+		}
+	}
+	// (before the repository is hidden: the update reads it back)
 	n, err := db.GetEngine(ctx).Where("id = ? AND trashed_unix = 0", repo.ID).
 		Cols("trashed_unix", "trashed_by_id", "trashed_by_name", "trashed_owner_name", "trashed_name", "trashed_with_owner").
 		Update(&repo_model.Repository{
@@ -142,6 +150,29 @@ func MoveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User,
 	unlock := repoWorkingPool.Lock(fmt.Sprint(repo.ID))
 	defer unlock()
 
+	// The row is touched first, if it is still in the trash as the caller saw it: the write lock it takes is held
+	// until the end, so a purge claiming it meanwhile waits and then deletes the repository where it is now, and
+	// one that claimed it before makes this fail before a file moved.
+	seen := repo.TrashedUnix
+	repo.TrashedUnix = 0 // the update in transferOwnership writes non-zero fields only: it can't re-trash or overwrite a claim
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		res, err := db.Exec(ctx, "UPDATE `repository` SET trashed_unix=trashed_unix WHERE id=? AND trashed_unix=?", repo.ID, seen)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			return ErrTrashConflict
+		}
+		return moveTrashedRepository(ctx, doer, newOwner, repo, owner, newName)
+	})
+}
+
+// ErrTrashConflict is returned when the repository is not in the trash any more, or is claimed by a purge.
+var ErrTrashConflict = errors.New("the repository is not in the trash, or is being restored or purged already")
+
+func moveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User, repo *repo_model.Repository, owner *user_model.User, newName string) error {
 	if newName != "" && newName != repo.Name {
 		if err := changeRepositoryName(ctx, repo, newName); err != nil {
 			return err
@@ -158,17 +189,23 @@ func MoveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User,
 	if newOwner.IsOrganization() && newOwner.IsArchived {
 		return organization.ErrOrgArchived{Name: newOwner.Name}
 	}
-	return db.WithTx(ctx, func(ctx context.Context) error {
-		// Moving the repository takes it off the old owner and its teams once more, but a trashed repository was
-		// taken off already when it was trashed.
-		if err := organization.AddTeamRepoCounts(ctx, repo.ID, 1); err != nil {
-			return err
-		}
-		if _, err := db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos+1 WHERE id=?", owner.ID); err != nil {
-			return err
-		}
-		return transferOwnership(ctx, doer, newOwner.Name, repo)
-	})
+	// Moving the repository takes it off the old owner and its teams once more, but a trashed repository was
+	// taken off already when it was trashed.
+	if err := organization.AddTeamRepoCounts(ctx, repo.ID, 1); err != nil {
+		return err
+	}
+	if _, err := db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos+1 WHERE id=?", owner.ID); err != nil {
+		return err
+	}
+	if err := transferOwnership(ctx, doer, newOwner.Name, repo); err != nil {
+		return err
+	}
+	// it counts the repository for the new owner and its teams, and so does the restore that follows
+	if err := organization.AddTeamRepoCounts(ctx, repo.ID, -1); err != nil {
+		return err
+	}
+	_, err := db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos-1 WHERE id=?", newOwner.ID)
+	return err
 }
 
 // TrashUserRepositories moves every live repository of a user who is being deleted to the trash, each as a

@@ -1353,7 +1353,7 @@ func GetUserByEmailSimple(ctx context.Context, email string) (*User, error) {
 
 // GetUser checks if a user already exists
 func GetUser(ctx context.Context, user *User) (bool, error) {
-	return db.GetEngine(ctx).Get(user)
+	return db.GetEngine(ctx).Where("trashed_unix = 0").Get(user)
 }
 
 // GetUserByOpenID returns the user object by given OpenID if exists.

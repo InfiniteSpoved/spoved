@@ -181,6 +181,16 @@ func renameUser(ctx context.Context, u *user_model.User, newUserName string, doe
 // but issues/comments/pulls will be kept and shown as someone has been deleted,
 // unless the user is younger than USER_DELETE_WITH_COMMENTS_MAX_DAYS.
 func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
+	return deleteUserAccount(ctx, u, purge, true)
+}
+
+// DeleteUserPermanently is DeleteUser for moderation: the repositories (and organizations the user solely owns) are
+// deleted for good instead of going to the trash.
+func DeleteUserPermanently(ctx context.Context, u *user_model.User, purge bool) error {
+	return deleteUserAccount(ctx, u, purge, false)
+}
+
+func deleteUserAccount(ctx context.Context, u *user_model.User, purge, trash bool) error {
 	if u.IsOrganization() {
 		return fmt.Errorf("%s is an organization not a user", u.Name)
 	}
@@ -192,8 +202,9 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 	// A purged user's repositories go to the trash as separate items and the user stays as a hidden tombstone that
 	// owns them (so the name can't be taken and a purge never meets another user's repository). The tombstone is
 	// deleted for real by services/trash with the last of them.
+	trash = trash && setting.Trash.RetentionDays > 0
 	keepRow := false
-	if purge && !u.IsTrashed() && setting.Trash.TrashUserRepos && setting.Trash.RetentionDays > 0 {
+	if purge && trash && !u.IsTrashed() && setting.Trash.TrashUserRepos {
 		count, err := repo_model.CountRepositories(ctx, repo_model.CountRepositoryOptions{OwnerID: u.ID})
 		if err != nil {
 			return fmt.Errorf("GetRepositoryCount: %w", err)
@@ -242,9 +253,12 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 		// An alternative option here would be write a DeleteAllRepositoriesForUserID function which would delete all of the repos
 		// but such a function would likely get out of date
 		var err error
-		if keepRow {
+		switch {
+		case u.IsTrashed():
+			// the tombstone of a deleted user: the check below refuses if a repository turned up, it isn't deleted
+		case keepRow:
 			err = repo_service.TrashUserRepositories(ctx, u)
-		} else {
+		default:
 			err = repo_service.DeleteOwnerRepositoriesDirectly(ctx, u)
 		}
 		if err != nil {
@@ -276,7 +290,12 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 			for _, org := range orgs {
 				if err := models.RemoveOrgUser(ctx, org.ID, u.ID); err != nil {
 					if organization.IsErrLastOrgOwner(err) {
-						err = org_service.DeleteOrganization(ctx, org, true)
+						// the organization with its repositories goes to the trash as one item, as if its owner had deleted it
+						if trash {
+							err = org_service.TrashOrganization(ctx, u, org)
+						} else {
+							err = org_service.DeleteOrganization(ctx, org, true)
+						}
 						if err != nil {
 							return fmt.Errorf("unable to delete organization %d: %w", org.ID, err)
 						}
@@ -286,6 +305,12 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 					}
 				}
 			}
+		}
+
+		// What is left are memberships of organizations in the trash, which the lookups above don't list. They go
+		// too, so the user can be deleted; an organization whose last owner this was has no owner when it is restored.
+		if err := removeTrashedOrgMemberships(ctx, u); err != nil {
+			return err
 		}
 
 		// Delete Packages
@@ -414,4 +439,17 @@ func DeleteInactiveUsers(ctx context.Context, olderThan time.Duration) error {
 	}
 
 	return nil
+}
+
+// removeTrashedOrgMemberships takes the user out of the organizations in the trash, with the counters.
+func removeTrashedOrgMemberships(ctx context.Context, u *user_model.User) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if _, err := db.Exec(ctx, "UPDATE `team` SET num_members = num_members - 1 WHERE id IN (SELECT team_id FROM team_user WHERE uid = ?)", u.ID); err != nil {
+			return err
+		}
+		if _, err := db.Exec(ctx, "UPDATE `user` SET num_members = num_members - 1 WHERE id IN (SELECT org_id FROM org_user WHERE uid = ?)", u.ID); err != nil {
+			return err
+		}
+		return db.DeleteBeans(ctx, &organization.OrgUser{UID: u.ID}, &organization.TeamUser{UID: u.ID})
+	})
 }

@@ -31,7 +31,7 @@ func ListTrash(ctx *context.APIContext) {
 	//   type: string
 	// - name: type
 	//   in: query
-	//   description: "repo" (default) or "org"
+	//   description: the kind of item, repo (default) or org
 	//   type: string
 	// - name: page
 	//   in: query
@@ -137,6 +137,7 @@ func RestoreTrash(ctx *context.APIContext) {
 	// swagger:operation POST /admin/trash/{type}/{id}/restore admin adminRestoreTrash
 	// ---
 	// summary: Restore a deleted repository or organization from the trash
+	// description: A repository can be restored under a new owner and/or name. Its collaborators keep their access, the teams of the old organization do not.
 	// consumes:
 	// - application/json
 	// parameters:

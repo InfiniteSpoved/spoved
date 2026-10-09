@@ -32,7 +32,7 @@ import (
 
 // ErrTrashConflict is returned when the repository is not in the trash (any more): it was restored or
 // purged, or another purge is in progress.
-var ErrTrashConflict = errors.New("the repository is not in the trash, or is being restored or purged already")
+var ErrTrashConflict = repo_service.ErrTrashConflict
 
 var (
 	// ErrNeedNewOwner is returned when restoring a repository whose owner is in the trash (a trashed organization
@@ -238,7 +238,7 @@ func RestoreRepo(ctx context.Context, doer *user_model.User, id int64, opts Rest
 		code_indexer.UpdateRepoIndexer(repo)
 	}
 	if owner.IsTrashed() { // a tombstone has nothing left to keep once its last repository is gone
-		return removeTombstone(ctx, doer, oldOwnerID)
+		return removeTombstone(ctx, oldOwnerID)
 	}
 	return nil
 }
@@ -259,7 +259,7 @@ func RestoreOrg(ctx context.Context, doer *user_model.User, id int64, opts Resto
 	}
 	var repos []*repo_model.Repository
 	if err := db.WithTx(ctx, func(ctx context.Context) error {
-		res, err := db.Exec(ctx, "UPDATE `user` SET trashed_unix=0 WHERE id=? AND trashed_unix=?", id, org.TrashedUnix)
+		res, err := db.Exec(ctx, "UPDATE `user` SET trashed_unix=0 WHERE id=? AND type=? AND trashed_unix=?", id, user_model.UserTypeOrganization, org.TrashedUnix)
 		if err != nil {
 			return err
 		}
@@ -312,7 +312,7 @@ func deleteClaimed(ctx context.Context, doer *user_model.User, id int64) error {
 	if err := repo_service.DeleteRepositoryPermanently(ctx, doer, repo, false); err != nil { // its webhooks fired when it was trashed
 		return err
 	}
-	return removeTombstone(ctx, doer, repo.OwnerID)
+	return removeTombstone(ctx, repo.OwnerID)
 }
 
 // claimForPurge marks the repository as being purged, minus the time of the claim, so that a second
@@ -340,7 +340,7 @@ func PurgeOrg(ctx context.Context, doer *user_model.User, id int64) error {
 }
 
 // purgeOrg claims the organization at the trashed_unix it has now and deletes it.
-func purgeOrg(ctx context.Context, doer *user_model.User, org *user_model.User) error {
+func purgeOrg(ctx context.Context, doer, org *user_model.User) error {
 	n, err := db.GetEngine(ctx).Where("id = ? AND type = ? AND trashed_unix = ?", org.ID, user_model.UserTypeOrganization, org.TrashedUnix).
 		Cols("trashed_unix").Update(&user_model.User{TrashedUnix: -timeutil.TimeStampNow()})
 	if err != nil {
@@ -385,7 +385,7 @@ func purgeOrg(ctx context.Context, doer *user_model.User, org *user_model.User) 
 
 // removeTombstone deletes the tombstone of a deleted user once it owns no repository any more. The claim makes
 // it happen exactly once; a failure leaves the claim for PurgeExpired to retry.
-func removeTombstone(ctx context.Context, doer *user_model.User, ownerID int64) error {
+func removeTombstone(ctx context.Context, ownerID int64) error {
 	owner, err := user_model.GetUserByIDIncludingTrashed(ctx, ownerID)
 	if err != nil {
 		if user_model.IsErrUserNotExist(err) {
@@ -465,7 +465,7 @@ func PurgeExpired(ctx context.Context, doer *user_model.User) error {
 				return err
 			}
 		}
-		if err := removeTombstone(ctx, doer, u.ID); err != nil {
+		if err := removeTombstone(ctx, u.ID); err != nil {
 			log.Error("remove tombstone %d: %v", u.ID, err)
 		}
 	}

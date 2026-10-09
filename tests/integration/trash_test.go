@@ -422,9 +422,10 @@ func TestTrashOwnerLifecycle(t *testing.T) {
 	})
 }
 
-// F1: the purge user deletion removes the owner's trashed repositories too.
+// F1: with TRASH_USER_REPOS off, the purge user deletion removes the owner's trashed repositories too.
 func TestTrashPurgeUserDeletion(t *testing.T) {
 	defer prepareTrash(t)()
+	defer test.MockVariableValue(&setting.Trash.TrashUserRepos, false)()
 	moveToTrash(t)
 	require.NoError(t, user_service.DeleteUser(t.Context(), unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), true))
 	unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: trashRepoID})
@@ -540,9 +541,11 @@ func TestTrashOwnerRefusals(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, repo_service.TrashRepository(t.Context(), admin1, repo))
 
-		resp := MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/orgs/trashorg").AddTokenAuth(token), http.StatusUnprocessableEntity)
-		assert.Contains(t, resp.Body.String(), "ownership of repositories")
+		// the owner's deletion goes to the trash (the repository in it stays a separate item); the hard delete is refused
 		require.ErrorAs(t, org_service.DeleteOrganization(t.Context(), org, false), &models.ErrUserOwnRepos{})
 		unittest.AssertExistsAndLoadBean(t, &organization.Organization{ID: org.ID})
+		MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/orgs/trashorg").AddTokenAuth(token), http.StatusNoContent)
+		assert.True(t, trashedAccount(t, org.ID).IsTrashed())
+		assert.False(t, trashRepoByID(t, repo.ID).TrashedWithOwner)
 	})
 }

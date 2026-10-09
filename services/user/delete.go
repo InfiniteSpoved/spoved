@@ -157,7 +157,10 @@ func deleteUser(ctx context.Context, u *user_model.User, purge, keepRow bool) (e
 		const batchSize = 50
 		for {
 			comments := make([]*issues_model.Comment, 0, batchSize)
-			if err = e.Where("type=? AND poster_id=?", issues_model.CommentTypeComment, u.ID).Limit(batchSize, 0).Find(&comments); err != nil {
+			// (what the user wrote in a repository in the trash stays with it: it can't be loaded to be deleted)
+			if err = e.Where("type=? AND poster_id=?", issues_model.CommentTypeComment, u.ID).
+				And(builder.In("issue_id", builder.Select("id").From("issue").Where(repo_model.NotTrashedCond("issue.repo_id")))).
+				Limit(batchSize, 0).Find(&comments); err != nil {
 				return err
 			}
 			if len(comments) == 0 {
@@ -183,7 +186,7 @@ func deleteUser(ctx context.Context, u *user_model.User, purge, keepRow bool) (e
 
 		for {
 			issues := make([]*issues_model.Issue, 0, batchSize)
-			if err = e.Where("poster_id=?", u.ID).Limit(batchSize, 0).Find(&issues); err != nil {
+			if err = e.Where("poster_id=?", u.ID).And(repo_model.NotTrashedCond("issue.repo_id")).Limit(batchSize, 0).Find(&issues); err != nil {
 				return err
 			}
 			if len(issues) == 0 {
@@ -296,7 +299,7 @@ func tombstoneUser(ctx context.Context, u *user_model.User) error {
 	); err != nil {
 		return fmt.Errorf("tombstone: %w", err)
 	}
-	_, err := db.GetEngine(ctx).Table("user").ID(u.ID).Update(map[string]any{
+	_, err := db.GetEngine(ctx).Table("user").Where("id = ?", u.ID).Update(map[string]any{
 		"trashed_unix":                   timeutil.TimeStampNow(),
 		"trashed_by_id":                  u.ID,
 		"trashed_by_name":                u.Name,

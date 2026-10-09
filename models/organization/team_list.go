@@ -5,13 +5,13 @@ package organization
 
 import (
 	"context"
-	user_model "forgejo.org/models/user"
 	"strings"
 
 	"forgejo.org/models/db"
 	"forgejo.org/models/perm"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
+	user_model "forgejo.org/models/user"
 
 	"xorm.io/builder"
 )

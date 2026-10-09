@@ -2159,13 +2159,19 @@
         "tags": [
           "admin"
         ],
-        "summary": "List the deleted repositories in the trash",
+        "summary": "List the deleted repositories or organizations in the trash",
         "operationId": "adminListTrash",
         "parameters": [
           {
             "type": "string",
-            "description": "keyword to match in the owner or repository name",
+            "description": "keyword to match in the owner or repository name, or the organization name",
             "name": "q",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "the kind of item, repo (default) or org",
+            "name": "type",
             "in": "query"
           },
           {
@@ -2196,12 +2202,12 @@
         "tags": [
           "admin"
         ],
-        "summary": "Delete a repository in the trash permanently",
+        "summary": "Delete a repository or organization in the trash permanently; an organization takes the repositories in the trash it owns with it",
         "operationId": "adminPurgeTrash",
         "parameters": [
           {
             "type": "string",
-            "description": "the kind of item, \"repo\"",
+            "description": "the kind of item, \"repo\" or \"org\"",
             "name": "type",
             "in": "path",
             "required": true
@@ -2218,9 +2224,6 @@
         "responses": {
           "204": {
             "$ref": "#/responses/empty"
-          },
-          "400": {
-            "$ref": "#/responses/error"
           },
           "403": {
             "$ref": "#/responses/forbidden"
@@ -2236,15 +2239,19 @@
     },
     "/admin/trash/{type}/{id}/restore": {
       "post": {
+        "description": "A repository can be restored under a new owner and/or name. Its collaborators keep their access, the teams of the old organization do not.",
+        "consumes": [
+          "application/json"
+        ],
         "tags": [
           "admin"
         ],
-        "summary": "Restore a deleted repository from the trash",
+        "summary": "Restore a deleted repository or organization from the trash",
         "operationId": "adminRestoreTrash",
         "parameters": [
           {
             "type": "string",
-            "description": "the kind of item, \"repo\"",
+            "description": "the kind of item, \"repo\" or \"org\"",
             "name": "type",
             "in": "path",
             "required": true
@@ -2256,14 +2263,18 @@
             "name": "id",
             "in": "path",
             "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/RestoreTrashOption"
+            }
           }
         ],
         "responses": {
           "204": {
             "$ref": "#/responses/empty"
-          },
-          "400": {
-            "$ref": "#/responses/error"
           },
           "403": {
             "$ref": "#/responses/forbidden"
@@ -2273,6 +2284,9 @@
           },
           "409": {
             "$ref": "#/responses/error"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -35369,6 +35383,23 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "RestoreTrashOption": {
+      "description": "RestoreTrashOption says where a restored item goes",
+      "type": "object",
+      "properties": {
+        "new_name": {
+          "description": "restore it under this name",
+          "type": "string",
+          "x-go-name": "NewName"
+        },
+        "new_owner": {
+          "description": "a repository only: restore it under this user or organization; needed while its owner is in the trash",
+          "type": "string",
+          "x-go-name": "NewOwner"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "ReviewStateType": {
       "description": "ReviewStateType review state type",
       "type": "string",
@@ -36046,7 +36077,7 @@
       "x-go-package": "forgejo.org/modules/structs"
     },
     "TrashItem": {
-      "description": "TrashItem is a deleted repository in the trash, restorable by site admins until it is purged",
+      "description": "TrashItem is a deleted repository or organization in the trash, restorable by site admins until it is purged",
       "type": "object",
       "properties": {
         "days_remaining": {
@@ -36056,7 +36087,7 @@
           "x-go-name": "DaysRemaining"
         },
         "deleted": {
-          "description": "when the repository was moved to the trash",
+          "description": "when it was moved to the trash",
           "type": "string",
           "format": "date-time",
           "x-go-name": "Deleted"
@@ -36066,7 +36097,7 @@
           "x-go-name": "DeletedBy"
         },
         "full_name": {
-          "description": "the owner and name the repository had when it was deleted",
+          "description": "the owner and name the repository, or the name the organization, had when it was deleted",
           "type": "string",
           "x-go-name": "FullName"
         },
@@ -36080,14 +36111,20 @@
           "type": "boolean",
           "x-go-name": "Purging"
         },
+        "repo_count": {
+          "description": "of an organization: the number of its repositories in the trash, which are deleted with it",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "RepoCount"
+        },
         "size": {
-          "description": "size of the repository in bytes",
+          "description": "size of the repository, or of the repositories of the organization, in bytes",
           "type": "integer",
           "format": "int64",
           "x-go-name": "Size"
         },
         "type": {
-          "description": "the kind of item, \"repo\"",
+          "description": "the kind of item, \"repo\" or \"org\"",
           "type": "string",
           "x-go-name": "Type"
         }

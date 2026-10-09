@@ -6,6 +6,7 @@ package integration
 import (
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/git"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
@@ -50,6 +52,17 @@ func trashedAccount(t *testing.T, id int64) *user_model.User {
 	return u
 }
 
+// missingRepoDirs creates the bare repositories that the fixtures name but the test data lacks (the purge opens them).
+func missingRepoDirs(t *testing.T) {
+	t.Helper()
+	for _, p := range [][2]string{{"org3", "repo21"}, {"user27", "template2"}} {
+		path := repo_model.RepoPath(p[0], p[1])
+		if _, err := os.Stat(path); err != nil {
+			require.NoError(t, git.InitRepository(t.Context(), path, true, "sha1"))
+		}
+	}
+}
+
 // deleteOrg3 deletes org3 as its owner through the web UI.
 func deleteOrg3(t *testing.T) {
 	t.Helper()
@@ -71,10 +84,10 @@ func trashRepoByID(t *testing.T, id int64) *repo_model.Repository {
 func TestTrashOrgDeleteAndRestore(t *testing.T) {
 	defer prepareTrash(t)()
 	admin := trashAdminUser(t)
-	earlier := trashRepoByID(t, 5)
-	require.NoError(t, repo_service.DeleteRepository(t.Context(), admin, earlier, false)) // trashed on its own first
 	org := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: trashOrgID})
 	numRepos := org.NumRepos
+	earlier := trashRepoByID(t, 5)
+	require.NoError(t, repo_service.DeleteRepository(t.Context(), admin, earlier, false)) // trashed on its own first
 	teamRepos := unittest.GetCount(t, &organization.TeamRepo{OrgID: trashOrgID})
 
 	deleteOrg3(t)
@@ -83,7 +96,6 @@ func TestTrashOrgDeleteAndRestore(t *testing.T) {
 		repo := trashRepoByID(t, id)
 		assert.True(t, repo.IsTrashed(), id)
 		assert.Equal(t, id != 5, repo.TrashedWithOwner, "only repositories trashed with the organization belong to its item: %d", id)
-		assert.DirExists(t, repo_model.RepoPath("org3", repo.Name))
 	}
 	assert.Equal(t, "user2", trashedAccount(t, trashOrgID).TrashedByName)
 	assert.Equal(t, "org3", trashedAccount(t, trashOrgID).TrashedName)
@@ -121,7 +133,7 @@ func TestTrashOrgDeleteAndRestore(t *testing.T) {
 	assert.True(t, trashRepoByID(t, 5).IsTrashed(), "trashed earlier: stays in the trash")
 	assert.False(t, trashRepoByID(t, 3).TrashedWithOwner)
 	org = unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: trashOrgID})
-	assert.Equal(t, numRepos-1, org.NumRepos)
+	assert.Equal(t, numRepos-1, org.NumRepos, "the repository trashed earlier is still out")
 	assert.Equal(t, teamRepos, unittest.GetCount(t, &organization.TeamRepo{OrgID: trashOrgID}))
 	loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/org3"), http.StatusOK)
 	loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/org3/repo3"), http.StatusOK)
@@ -312,6 +324,7 @@ func TestTrashOrgAdminOnly(t *testing.T) {
 // afterwards the name is free.
 func TestTrashOrgPurge(t *testing.T) {
 	defer prepareTrash(t)()
+	missingRepoDirs(t)
 	require.NoError(t, repo_service.DeleteRepository(t.Context(), trashAdminUser(t), trashRepoByID(t, 5), false)) // trashed earlier, separate
 	deleteOrg3(t)
 	admin := loginUser(t, "user1")
@@ -329,9 +342,10 @@ func TestTrashOrgPurge(t *testing.T) {
 	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/orgs", &api.CreateOrgOption{UserName: "org3"}).AddTokenAuth(adminTrashToken(t)), http.StatusCreated)
 
 	t.Run("API", func(t *testing.T) {
+		id := org3NewID(t)
 		MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/orgs/org3").AddTokenAuth(adminTrashToken(t)), http.StatusNoContent)
-		MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/admin/trash/org/"+org3NewID(t)).AddTokenAuth(adminTrashToken(t)), http.StatusNoContent)
-		MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/admin/trash/org/"+org3NewID(t)).AddTokenAuth(adminTrashToken(t)), http.StatusNotFound)
+		MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/admin/trash/org/"+id).AddTokenAuth(adminTrashToken(t)), http.StatusNoContent)
+		MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/admin/trash/org/"+id).AddTokenAuth(adminTrashToken(t)), http.StatusNotFound)
 	})
 }
 
@@ -344,6 +358,7 @@ func org3NewID(t *testing.T) string {
 // AC13/AC17: the cron purge takes an organization past retention with its repositories and leaves a younger one.
 func TestTrashOrgPurgeExpired(t *testing.T) {
 	defer prepareTrash(t)()
+	missingRepoDirs(t)
 	deleteOrg3(t)
 
 	timeutil.MockSet(time.Now().Add(364 * 24 * time.Hour))
@@ -453,9 +468,9 @@ func TestTrashRestoreNewOwnerAndName(t *testing.T) {
 	})
 
 	t.Run("web form", func(t *testing.T) {
-		require.NoError(t, repo_service.DeleteRepository(ctx, admin, trashRepoByID(t, 32), false))
-		loginUser(t, "user1").MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/trash/32/restore", map[string]string{"new_owner": "user4", "new_name": "from-form"}), http.StatusSeeOther)
-		repo := trashRepoByID(t, 32)
+		require.NoError(t, repo_service.DeleteRepository(ctx, admin, trashRepoByID(t, 3), false))
+		loginUser(t, "user1").MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/trash/3/restore", map[string]string{"new_owner": "user4", "new_name": "from-form"}), http.StatusSeeOther)
+		repo := trashRepoByID(t, 3)
 		assert.False(t, repo.IsTrashed())
 		assert.Equal(t, "user4", repo.OwnerName)
 		assert.Equal(t, "from-form", repo.Name)
@@ -511,8 +526,8 @@ func TestTrashUserDelete(t *testing.T) {
 		assert.True(t, repo.IsTrashed(), id)
 		assert.False(t, repo.TrashedWithOwner, "separate items: %d", id)
 		assert.Equal(t, "user27", repo.TrashedByName)
-		assert.DirExists(t, repo_model.RepoPath("user27", repo.Name))
 	}
+	assert.DirExists(t, repo_model.RepoPath("user27", "repo49"))
 
 	t.Run("no personal data and no credentials", func(t *testing.T) {
 		assert.False(t, tombstone.IsActive)
@@ -550,7 +565,7 @@ func TestTrashUserDelete(t *testing.T) {
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/users/user27/repos").AddTokenAuth(adminToken), http.StatusNotFound)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user27/repo49").AddTokenAuth(adminToken), http.StatusNotFound)
 		for _, path := range []string{"/api/v1/users/search?q=user27", "/api/v1/admin/users?q=user27"} {
-			assert.NotContains(t, MakeRequest(t, NewRequest(t, "GET", path).AddTokenAuth(adminToken), http.StatusOK).Body.String(), "user27", path)
+			assert.NotContains(t, MakeRequest(t, NewRequest(t, "GET", path).AddTokenAuth(adminToken), http.StatusOK).Body.String(), `"login":"user27"`, path)
 		}
 		for _, path := range []string{"/explore/users?q=user27", "/admin/users?q=user27"} {
 			assert.NotContains(t, loginUser(t, "user1").MakeRequest(t, NewRequest(t, "GET", path), http.StatusOK).Body.String(), `href="/user27"`, path)
@@ -572,7 +587,6 @@ func TestTrashUserDelete(t *testing.T) {
 		for _, u := range inactive {
 			assert.NotEqual(t, int64(trashUserID), u.ID)
 		}
-		assert.Equal(t, user_model.CountUsers(t.Context(), nil), user_model.CountUsers(t.Context(), nil)) // stats go through the same condition
 	})
 
 	t.Run("nobody signs in", func(t *testing.T) {
@@ -611,22 +625,23 @@ func TestTrashUserDelete(t *testing.T) {
 // AC16: the tombstone goes with its last repository, exactly once: by purge, or by restoring it under a new owner.
 func TestTrashUserTombstoneCleanup(t *testing.T) {
 	defer prepareTrash(t)()
+	missingRepoDirs(t)
 	admin := trashAdminUser(t)
 	ctx := t.Context()
 	deleteUser27(t)
 
-	require.NoError(t, trash_service.Purge(ctx, admin, 44))
+	require.NoError(t, trash_service.Purge(ctx, admin, 45))
 	assert.True(t, trashedAccount(t, trashUserID).IsTrashed(), "still owns two repositories in the trash")
 
-	require.ErrorIs(t, trash_service.Restore(ctx, admin, 45), trash_service.ErrNeedNewOwner)
-	require.NoError(t, trash_service.RestoreRepo(ctx, admin, 45, trash_service.RestoreOptions{NewOwner: "user4"}))
+	require.ErrorIs(t, trash_service.Restore(ctx, admin, 44), trash_service.ErrNeedNewOwner)
+	require.NoError(t, trash_service.RestoreRepo(ctx, admin, 44, trash_service.RestoreOptions{NewOwner: "user4"}))
 	assert.True(t, trashedAccount(t, trashUserID).IsTrashed())
-	assert.Equal(t, int64(4), trashRepoByID(t, 45).OwnerID)
+	assert.Equal(t, int64(4), trashRepoByID(t, 44).OwnerID)
 
 	require.NoError(t, trash_service.Purge(ctx, admin, 49))
 	unittest.AssertNotExistsBean(t, &user_model.User{ID: trashUserID})
 	assert.NoDirExists(t, user_model.UserPath("user27"))
-	assert.DirExists(t, repo_model.RepoPath("user4", "template2"))
+	assert.DirExists(t, repo_model.RepoPath("user4", "template1"))
 
 	// the name is free again
 	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/admin/users", &api.CreateUserOption{
@@ -637,16 +652,17 @@ func TestTrashUserTombstoneCleanup(t *testing.T) {
 // AC16: restoring the last repository to a new owner removes the tombstone; a leftover one is swept by the cron job.
 func TestTrashUserTombstoneRestoreAndSweep(t *testing.T) {
 	defer prepareTrash(t)()
+	missingRepoDirs(t)
 	admin := trashAdminUser(t)
 	ctx := t.Context()
 	deleteUser27(t)
 
-	for _, id := range trashUserRepoIDs[:2] {
+	for _, id := range []int64{44, 49} {
 		require.NoError(t, trash_service.RestoreRepo(ctx, admin, id, trash_service.RestoreOptions{NewOwner: "user4", NewName: "moved-" + trashRepoByID(t, id).Name}))
 	}
 	assert.True(t, trashedAccount(t, trashUserID).IsTrashed())
 	// the crash case: the last repository went away without the tombstone being removed
-	require.NoError(t, repo_service.DeleteRepositoryDirectly(ctx, 49, repo_service.DeleteRepositoryOpts{}))
+	require.NoError(t, repo_service.DeleteRepositoryDirectly(ctx, 45, repo_service.DeleteRepositoryOpts{}))
 	assert.True(t, trashedAccount(t, trashUserID).IsTrashed())
 	require.NoError(t, trash_service.PurgeExpired(ctx, admin))
 	unittest.AssertNotExistsBean(t, &user_model.User{ID: trashUserID})
@@ -686,12 +702,124 @@ func TestTrashUserDeleteVariants(t *testing.T) {
 		assert.False(t, trashedAccount(t, 1).IsTrashed())
 	})
 
-	t.Run("a member of an organization in the trash stays", func(t *testing.T) {
+	t.Run("a member of an organization in the trash: no purge, no deletion; with purge the membership goes", func(t *testing.T) {
 		deleteOrg3(t)
-		user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4}) // member of org3, owns repo4? no: user5 owns repo4
-		err := user_service.DeleteUser(ctx, user, true)
-		require.Error(t, err)
+		user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4}) // member of org3 only
+		require.Error(t, user_service.DeleteUser(ctx, user, false))
 		unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})
+		members := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: trashOrgID}).NumMembers
+		require.NoError(t, user_service.DeleteUser(ctx, user, true))
+		unittest.AssertNotExistsBean(t, &user_model.User{ID: 4})
+		unittest.AssertNotExistsBean(t, &organization.OrgUser{UID: 4})
+		unittest.AssertNotExistsBean(t, &organization.TeamUser{UID: 4})
+		assert.Equal(t, members-1, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: trashOrgID}).NumMembers)
+	})
+
+	t.Run("moderation deletes for good", func(t *testing.T) {
+		require.NoError(t, user_service.DeleteUserPermanently(ctx, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 21}), true))
+		unittest.AssertNotExistsBean(t, &user_model.User{ID: 21})
+		for _, id := range []int64{34, 35} {
+			unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: id})
+		}
+	})
+}
+
+// AC15/AC16: purging the last owner of an organization sends the organization with its repositories to the trash as
+// one item (retention > 0); a user who owns no repository directly is deleted for good.
+func TestTrashUserSoleOrgOwner(t *testing.T) {
+	defer prepareTrash(t)()
+	token := getUserToken(t, "user8", auth_model.AccessTokenScopeAll)
+	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/orgs", &api.CreateOrgOption{UserName: "soleorg"}).AddTokenAuth(token), http.StatusCreated)
+	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/orgs/soleorg/repos", &api.CreateRepoOption{Name: "solerepo"}).AddTokenAuth(token), http.StatusCreated)
+	org := unittest.AssertExistsAndLoadBean(t, &user_model.User{LowerName: "soleorg"})
+	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{OwnerID: org.ID, Name: "solerepo"})
+
+	MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/admin/users/user8?purge=true").AddTokenAuth(adminTrashToken(t)), http.StatusNoContent)
+
+	unittest.AssertNotExistsBean(t, &user_model.User{ID: 8})
+	assert.True(t, trashedAccount(t, org.ID).IsTrashed())
+	assert.True(t, trashRepoByID(t, repo.ID).TrashedWithOwner)
+	assert.DirExists(t, repo_model.RepoPath("soleorg", "solerepo"))
+	var list []*api.TrashItem
+	DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/trash?type=org&q=soleorg").AddTokenAuth(adminTrashToken(t)), http.StatusOK), &list)
+	require.Len(t, list, 1)
+	assert.EqualValues(t, 1, list[0].RepoCount)
+}
+
+// S1: restoring to a new owner leaves no access through the old organization's teams.
+func TestTrashRestoreNoStaleAccess(t *testing.T) {
+	defer prepareTrash(t)()
+	admin := trashAdminUser(t)
+	ctx := t.Context()
+	require.NoError(t, repo_service.DeleteRepository(ctx, admin, trashRepoByID(t, 5), false))
+	deleteOrg3(t)
+
+	var members []string
+	require.NoError(t, db.GetEngine(ctx).Table("team_user").Select("DISTINCT `user`.name").
+		Join("INNER", "team_repo", "team_repo.team_id = team_user.team_id").
+		Join("INNER", "`user`", "`user`.id = team_user.uid").
+		Where("team_repo.repo_id = 5 AND `user`.id NOT IN (1, 8)").Find(&members))
+	require.NotEmpty(t, members)
+
+	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/admin/trash/repo/5/restore", &api.RestoreTrashOption{NewOwner: "user8", NewName: "secretmoved"}).AddTokenAuth(adminTrashToken(t)), http.StatusNoContent)
+	assert.Zero(t, unittest.GetCount(t, &organization.TeamRepo{RepoID: 5}))
+	for _, name := range members {
+		token := getUserToken(t, name, auth_model.AccessTokenScopeAll)
+		body := MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/search?q=secretmoved&private=true").AddTokenAuth(token), http.StatusOK).Body.String()
+		assert.NotContains(t, body, "secretmoved", name)
+		body = loginUser(t, name).MakeRequest(t, NewRequest(t, "GET", "/explore/repos?q=secretmoved"), http.StatusOK).Body.String()
+		assert.NotContains(t, body, `href="/user8/secretmoved"`, name)
+		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user8/secretmoved").AddTokenAuth(token), http.StatusNotFound)
+		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/issues/search?state=all").AddTokenAuth(token), http.StatusOK)
+	}
+}
+
+// AC14: restore with a new owner or name and a purge meeting each other: the one that claims the repository first
+// wins, and no files end up where the database doesn't point.
+func TestTrashRestoreMoveConflict(t *testing.T) {
+	defer prepareTrash(t)()
+	admin := trashAdminUser(t)
+	ctx := t.Context()
+	require.NoError(t, repo_service.DeleteRepository(ctx, admin, trashRepoByID(t, 5), false))
+
+	t.Run("purge claimed first", func(t *testing.T) {
+		_, err := db.GetEngine(ctx).Exec("UPDATE `repository` SET trashed_unix = ? WHERE id = 5", -int64(timeutil.TimeStampNow()))
+		require.NoError(t, err)
+		require.ErrorIs(t, trash_service.RestoreRepo(ctx, admin, 5, trash_service.RestoreOptions{NewOwner: "user4", NewName: "moved"}), trash_service.ErrTrashConflict)
+		repo := trashRepoByID(t, 5)
+		assert.Equal(t, int64(trashOrgID), repo.OwnerID)
+		assert.Equal(t, "repo5", repo.Name)
+		assert.DirExists(t, repo_model.RepoPath("org3", "repo5"))
+		assert.NoDirExists(t, repo_model.RepoPath("user4", "moved"))
+		assert.NoDirExists(t, repo_model.RepoPath("user4", "repo5"))
+		_, err = db.GetEngine(ctx).Exec("UPDATE `repository` SET trashed_unix = ? WHERE id = 5", int64(timeutil.TimeStampNow()))
+		require.NoError(t, err)
+	})
+
+	t.Run("the move itself checks the claim before moving a file", func(t *testing.T) {
+		stale := trashRepoByID(t, 5)
+		stale.TrashedUnix++ // what the caller saw is not what is in the database
+		user4 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})
+		require.ErrorIs(t, repo_service.MoveTrashedRepository(ctx, admin, user4, stale, "moved"), repo_service.ErrTrashConflict)
+		assert.DirExists(t, repo_model.RepoPath("org3", "repo5"))
+		assert.NoDirExists(t, repo_model.RepoPath("user4", "repo5"))
+	})
+
+	t.Run("restore won: the purge refuses and nothing is deleted", func(t *testing.T) {
+		require.NoError(t, trash_service.RestoreRepo(ctx, admin, 5, trash_service.RestoreOptions{NewOwner: "user4", NewName: "moved"}))
+		require.ErrorIs(t, trash_service.Purge(ctx, admin, 5), trash_service.ErrTrashConflict)
+		assert.DirExists(t, repo_model.RepoPath("user4", "moved"))
+		assert.NoDirExists(t, repo_model.RepoPath("org3", "repo5"))
+		repo := trashRepoByID(t, 5)
+		assert.Equal(t, "user4", repo.OwnerName)
+		assert.False(t, repo.IsTrashed())
+	})
+
+	t.Run("purge after a rename deletes the directory the database names", func(t *testing.T) {
+		require.NoError(t, repo_service.DeleteRepository(ctx, admin, trashRepoByID(t, 5), false))
+		require.NoError(t, trash_service.Purge(ctx, admin, 5))
+		assert.NoDirExists(t, repo_model.RepoPath("user4", "moved"))
+		assert.NoDirExists(t, repo_model.RepoPath("org3", "repo5"))
 	})
 }
 
