@@ -50,7 +50,12 @@
 		{{ctx.Locale.Tr "org.settings.delete_org_title"}}
 	</div>
 	<div class="content">
-		<p>{{ctx.Locale.Tr "org.settings.delete_org_desc"}}</p>
+		{{if .TrashRetentionDays}}
+			<p>{{ctx.Locale.Tr "org.settings.delete_trash_desc" .TrashRetentionDays}}
+			{{if .TrashRestoreHelpURL}}<a href="{{.TrashRestoreHelpURL}}" target="_blank" rel="noopener noreferrer">{{ctx.Locale.Tr "repo.settings.delete_trash_help"}}</a>{{end}}</p>
+		{{else}}
+			<p>{{ctx.Locale.Tr "org.settings.delete_org_desc"}}</p>
+		{{end}}
 	</div>
 	{{template "base/modal_actions_confirm" .}}
 </div>

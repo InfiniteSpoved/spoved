@@ -95,9 +95,10 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepo
 
 		// In case owner is a organization, we have to change repo specific teams
 		// if ignoreOrgTeams is not true
+		// (a trashed repository can have an owner in the trash)
 		var org *user_model.User
 		if !opts.IgnoreOrgTeams {
-			if org, err = user_model.GetUserByID(ctx, repo.OwnerID); err != nil {
+			if org, err = user_model.GetUserByIDIncludingTrashed(ctx, repo.OwnerID); err != nil {
 				return err
 			}
 		}

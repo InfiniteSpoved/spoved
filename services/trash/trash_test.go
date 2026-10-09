@@ -54,8 +54,8 @@ func TestRestore(t *testing.T) {
 	_, err := db.GetEngine(t.Context()).Exec("UPDATE `user` SET num_repos = num_repos - 1 WHERE id = ?", owner.ID)
 	require.NoError(t, err)
 
-	require.NoError(t, Restore(t.Context(), owner, repo.ID))
-	require.ErrorIs(t, Restore(t.Context(), owner, repo.ID), ErrTrashConflict)
+	require.NoError(t, RestoreRepo(t.Context(), owner, repo.ID, RestoreOptions{}))
+	require.ErrorIs(t, RestoreRepo(t.Context(), owner, repo.ID, RestoreOptions{}), ErrTrashConflict)
 
 	restored, err := repo_model.GetRepositoryByID(t.Context(), repo.ID)
 	require.NoError(t, err)

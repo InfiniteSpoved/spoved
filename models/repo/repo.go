@@ -200,6 +200,9 @@ type Repository struct {
 	TrashedByName    string             `xorm:"NOT NULL DEFAULT ''"`
 	TrashedOwnerName string             `xorm:"NOT NULL DEFAULT ''"`
 	TrashedName      string             `xorm:"NOT NULL DEFAULT ''"`
+	// TrashedWithOwner marks a repository that was trashed together with its organization: restoring or
+	// purging the organization takes it along, unlike a repository that was trashed on its own earlier.
+	TrashedWithOwner bool `xorm:"NOT NULL DEFAULT false"`
 }
 
 // IsTrashed returns true if the repository is in the trash (or being purged from it).

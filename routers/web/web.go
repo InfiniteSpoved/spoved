@@ -987,6 +987,8 @@ func registerRoutes(m *web.Route) {
 			m.Get("", admin.Trash)
 			m.Post("/{id}/restore", admin.RestoreTrash)
 			m.Post("/{id}/purge", admin.PurgeTrash)
+			m.Post("/org/{id}/restore", admin.RestoreTrashOrg)
+			m.Post("/org/{id}/purge", admin.PurgeTrashOrg)
 		})
 
 		m.Get("/storage", admin.Storage)

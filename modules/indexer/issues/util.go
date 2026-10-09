@@ -10,6 +10,7 @@ import (
 
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/indexer/issues/internal"
 	"forgejo.org/modules/log"
@@ -21,6 +22,14 @@ func getIssueIndexerData(ctx context.Context, issueID int64) (*internal.IndexerD
 	issue, err := issues_model.GetIssueByID(ctx, issueID)
 	if err != nil {
 		if issues_model.IsErrIssueNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+
+	// the issues of a repository in the trash are dropped from the index, and indexed again when it is restored
+	if _, err := repo_model.GetRepositoryByID(ctx, issue.RepoID); err != nil {
+		if repo_model.IsErrRepoNotExist(err) {
 			return nil, false, nil
 		}
 		return nil, false, err

@@ -53,6 +53,7 @@ func (opts *SearchUserOptions) toSearchQueryBase(ctx context.Context) *xorm.Sess
 	} else {
 		cond = builder.Eq{"type": opts.Type}
 	}
+	cond = cond.And(builder.Eq{"`user`.trashed_unix": 0})
 	if opts.IncludeReserved {
 		switch opts.Type {
 		case UserTypeIndividual:

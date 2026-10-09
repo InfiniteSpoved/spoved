@@ -10,7 +10,6 @@ import (
 
 	"forgejo.org/models/db"
 	"forgejo.org/models/packages"
-	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	container_module "forgejo.org/modules/packages/container"
 	"forgejo.org/modules/util"
@@ -30,7 +29,7 @@ type BlobSearchOptions struct {
 }
 
 func (opts *BlobSearchOptions) toConds() builder.Cond {
-	cond := repo_model.NotTrashedCond("package.repo_id").And(builder.Eq{
+	cond := packages.NotTrashedCond().And(builder.Eq{
 		"package.type": packages.TypeContainer,
 	})
 
@@ -125,7 +124,7 @@ func GetImageTags(ctx context.Context, ownerID int64, image string, n int, last 
 		return []string{}, nil
 	}
 
-	cond := repo_model.NotTrashedCond("package.repo_id").And(builder.Eq{
+	cond := packages.NotTrashedCond().And(builder.Eq{
 		"package.type":                packages.TypeContainer,
 		"package.owner_id":            ownerID,
 		"package.lower_name":          strings.ToLower(image),
@@ -171,7 +170,7 @@ type ImageTagsSearchOptions struct {
 }
 
 func (opts *ImageTagsSearchOptions) toConds() builder.Cond {
-	cond := repo_model.NotTrashedCond("package.repo_id").And(builder.Eq{
+	cond := packages.NotTrashedCond().And(builder.Eq{
 		"package.type":                packages.TypeContainer,
 		"package.id":                  opts.PackageID,
 		"package_version.is_internal": false,
@@ -249,7 +248,7 @@ func SearchExpiredUploadedBlobs(ctx context.Context, olderThan time.Duration) ([
 
 // GetRepositories gets a sorted list of all repositories
 func GetRepositories(ctx context.Context, actor *user_model.User, n int, last string) ([]string, error) {
-	cond := repo_model.NotTrashedCond("package.repo_id").And(builder.Eq{
+	cond := packages.NotTrashedCond().And(builder.Eq{
 		"package.type":              packages.TypeContainer,
 		"package_property.ref_type": packages.PropertyTypePackage,
 		"package_property.name":     container_module.PropertyRepository,

@@ -3,12 +3,14 @@
 
 package setting
 
-// Trash settings: deleted repositories stay recoverable by site admins for RetentionDays.
+// Trash settings: deleted repositories and organizations stay recoverable by site admins for RetentionDays.
 var Trash = struct {
 	RetentionDays  int    `ini:"RETENTION_DAYS"`
 	RestoreHelpURL string `ini:"RESTORE_HELP_URL"`
+	TrashUserRepos bool   `ini:"TRASH_USER_REPOS"`
 }{
-	RetentionDays: 365,
+	RetentionDays:  365,
+	TrashUserRepos: true,
 }
 
 func loadTrashFrom(rootCfg ConfigProvider) {

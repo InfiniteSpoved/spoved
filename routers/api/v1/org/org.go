@@ -547,7 +547,7 @@ func Delete(ctx *context.APIContext) {
 	//   "422":
 	//     "$ref": "#/responses/validationError"
 
-	if err := org_service.DeleteOrganization(ctx, ctx.Org().Organization, false); err != nil {
+	if err := org_service.DeleteOrTrashOrganization(ctx, ctx.Doer(), ctx.Org().Organization); err != nil {
 		if models.IsErrUserOwnRepos(err) || models.IsErrUserOwnPackages(err) {
 			ctx.Error(http.StatusUnprocessableEntity, "", err)
 		} else {
