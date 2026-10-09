@@ -2,7 +2,7 @@
 
 `InfiniteSpoved/spoved` is the repository of spoved, a private fork of Codeberg `forgejo/forgejo`.
 
-- `main` mirrors upstream. `.github/workflows/sync-upstream.yml` fast-forwards it nightly, so never push to it.
+- There is no `main` branch and no automatic upstream sync. Don't recreate `main`; merge anything from Forgejo by hand.
 - `develop` is the default branch. All PRs target `develop`. Merge `origin/develop` into feature branches with a merge commit; don't rebase pushed branches.
 - Use the `ponytail` skill (`.claude/skills/ponytail`) at full level: smallest correct diff, reuse existing helpers and patterns, no unrequested abstractions. It never removes tests, validation or security checks the task asks for.
 
