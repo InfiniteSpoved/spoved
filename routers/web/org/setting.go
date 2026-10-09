@@ -135,7 +135,6 @@ func SettingsPost(ctx *context.Context) {
 		opts.MaxRepoCreation = optional.Some(form.MaxRepoCreation)
 	}
 	opts.RestrictRepoVisibilityChange = optional.Some(form.RestrictRepoVisibilityChange)
-	opts.RestrictRepoDeleteTransfer = optional.Some(form.RestrictRepoDeleteTransfer)
 	opts.PrivateForkPolicy = optional.Some(form.PrivateForkPolicy)
 
 	visibilityChanged := org.Visibility != form.Visibility

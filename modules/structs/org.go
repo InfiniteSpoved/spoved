@@ -25,8 +25,6 @@ type Organization struct {
 
 	// only organization owners may change the visibility of its repositories
 	RestrictRepoVisibilityChange bool `json:"restrict_repo_visibility_change"`
-	// only organization owners may delete or transfer its repositories
-	RestrictRepoDeleteTransfer bool `json:"restrict_repo_delete_transfer"`
 	// who may fork its private repositories: `all`, `org` (only into the organization) or `none` (site admins only)
 	// enum: ["all", "org", "none"]
 	PrivateForkPolicy string `json:"private_fork_policy"`
@@ -70,8 +68,6 @@ type EditOrgOption struct {
 
 	// only organization owners may change the visibility of its repositories
 	RestrictRepoVisibilityChange *bool `json:"restrict_repo_visibility_change"`
-	// only organization owners may delete or transfer its repositories
-	RestrictRepoDeleteTransfer *bool `json:"restrict_repo_delete_transfer"`
 	// who may fork its private repositories: `all`, `org` (only into the organization) or `none` (site admins only)
 	// enum: ["all", "org", "none"]
 	PrivateForkPolicy *string `json:"private_fork_policy" binding:"In(all,org,none)"`

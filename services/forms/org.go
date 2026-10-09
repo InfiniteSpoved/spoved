@@ -48,7 +48,6 @@ type UpdateOrgSettingForm struct {
 
 	// repository policies
 	RestrictRepoVisibilityChange bool
-	RestrictRepoDeleteTransfer   bool
 	PrivateForkPolicy            int `binding:"Range(0,2)"`
 }
 

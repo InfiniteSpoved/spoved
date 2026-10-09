@@ -5,6 +5,7 @@ package integration
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"testing"
 
@@ -12,8 +13,9 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/git"
+	"forgejo.org/modules/private"
 	api "forgejo.org/modules/structs"
-	trash_service "forgejo.org/services/trash"
 	"forgejo.org/tests"
 
 	"github.com/stretchr/testify/assert"
@@ -25,8 +27,8 @@ import (
 func setOrgRepoPolicies(t *testing.T, restrict bool, forkPolicy int) {
 	t.Helper()
 	org := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "org3"})
-	org.RestrictRepoVisibilityChange, org.RestrictRepoDeleteTransfer, org.PrivateForkPolicy = restrict, restrict, forkPolicy
-	require.NoError(t, user_model.UpdateUserCols(t.Context(), org, "restrict_repo_visibility_change", "restrict_repo_delete_transfer", "private_fork_policy"))
+	org.RestrictRepoVisibilityChange, org.PrivateForkPolicy = restrict, forkPolicy
+	require.NoError(t, user_model.UpdateUserCols(t.Context(), org, "restrict_repo_visibility_change", "private_fork_policy"))
 }
 
 // orgPolicyRepo creates org3/<name> as user2 and makes user4 an admin collaborator of it.
@@ -61,7 +63,6 @@ func assertPolicyRefusedWeb(t *testing.T, user, url string, values map[string]st
 }
 
 const (
-	orgPolicyDeleteLabel     = "Only organization owners can delete or transfer repositories"
 	orgPolicyVisibilityLabel = "Only organization owners can change the visibility of repositories"
 )
 
@@ -73,12 +74,10 @@ func TestOrgRepoPolicySettings(t *testing.T) {
 		"name":                            "org3",
 		"visibility":                      "0",
 		"restrict_repo_visibility_change": "on",
-		"restrict_repo_delete_transfer":   "on",
 		"private_fork_policy":             "2",
 	}), http.StatusSeeOther)
 	org := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "org3"})
 	assert.True(t, org.RestrictRepoVisibilityChange)
-	assert.True(t, org.RestrictRepoDeleteTransfer)
 	assert.Equal(t, user_model.PrivateForkNone, org.PrivateForkPolicy)
 
 	// an out-of-range fork policy is refused
@@ -92,7 +91,6 @@ func TestOrgRepoPolicySettings(t *testing.T) {
 	var apiOrg api.Organization
 	DecodeJSON(t, MakeRequest(t, req, http.StatusOK), &apiOrg)
 	assert.False(t, apiOrg.RestrictRepoVisibilityChange)
-	assert.True(t, apiOrg.RestrictRepoDeleteTransfer)
 	assert.Equal(t, "org", apiOrg.PrivateForkPolicy)
 	org = unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "org3"})
 	assert.False(t, org.RestrictRepoVisibilityChange)
@@ -102,59 +100,70 @@ func TestOrgRepoPolicySettings(t *testing.T) {
 	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/orgs/org3", &api.EditOrgOption{PrivateForkPolicy: &bad}).AddTokenAuth(orgPolicyToken(t, "user2")), http.StatusUnprocessableEntity)
 
 	// user4 is a member, not an owner
-	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/orgs/org3", &api.EditOrgOption{RestrictRepoDeleteTransfer: &f}).AddTokenAuth(orgPolicyToken(t, "user4")), http.StatusForbidden)
+	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/orgs/org3", &api.EditOrgOption{RestrictRepoVisibilityChange: &f}).AddTokenAuth(orgPolicyToken(t, "user4")), http.StatusForbidden)
 	loginUser(t, "user4").MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/settings", map[string]string{
 		"name": "org3", "visibility": "0",
 	}), http.StatusNotFound)
-	assert.True(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "org3"}).RestrictRepoDeleteTransfer)
+	assert.Equal(t, user_model.PrivateForkOrg, unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "org3"}).PrivateForkPolicy)
 }
 
-// AC3: delete.
-func TestOrgRepoPolicyDelete(t *testing.T) {
+// AC3, AC4 (scope change): delete and transfer of an organization repository stay owner-only, as before.
+func TestOrgRepoDeleteTransferOwnerOnly(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
-	setOrgRepoPolicies(t, true, user_model.PrivateForkAll)
-	repo := orgPolicyRepo(t, "policy-delete", true)
+	repo := orgPolicyRepo(t, "owner-only", false)
+	// user28 is in team12, an admin team of org3
+	MakeRequest(t, NewRequest(t, "PUT", "/api/v1/teams/12/repos/org3/owner-only").AddTokenAuth(orgPolicyToken(t, "user2")), http.StatusNoContent)
 
-	assertPolicyRefusedWeb(t, "user4", "/org3/policy-delete/settings", map[string]string{"action": "delete", "repo_name": "org3/policy-delete"}, orgPolicyDeleteLabel)
-	assertPolicyRefusedAPI(t, NewRequest(t, "DELETE", "/api/v1/repos/org3/policy-delete").AddTokenAuth(orgPolicyToken(t, "user4")), "restrict_repo_delete_transfer")
-	unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repo.ID})
-
-	// the owner and a site admin can
-	MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/repos/org3/policy-delete").AddTokenAuth(orgPolicyToken(t, "user2")), http.StatusNoContent)
-	orgPolicyRepo(t, "policy-delete2", false)
-	loginUser(t, "user1").MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/policy-delete2/settings", map[string]string{"action": "delete", "repo_name": "org3/policy-delete2"}), http.StatusSeeOther)
-
-	// the purge_trash cron (a doer with ID -1) still purges a trashed repository of a restricting organization
-	require.NoError(t, trash_service.Purge(t.Context(), &user_model.User{ID: -1, Name: "(Cron)"}, repo.ID))
-	unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: repo.ID})
-
-	// policy off: the repo admin can
-	setOrgRepoPolicies(t, false, user_model.PrivateForkAll)
-	orgPolicyRepo(t, "policy-delete3", false)
-	MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/repos/org3/policy-delete3").AddTokenAuth(orgPolicyToken(t, "user4")), http.StatusNoContent)
-}
-
-// AC4: transfer.
-func TestOrgRepoPolicyTransfer(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
-	setOrgRepoPolicies(t, true, user_model.PrivateForkAll)
-	repo := orgPolicyRepo(t, "policy-transfer", false)
-
-	assertPolicyRefusedWeb(t, "user4", "/org3/policy-transfer/settings", map[string]string{"action": "transfer", "repo_name": "org3/policy-transfer", "new_owner_name": "user4"}, orgPolicyDeleteLabel)
-	// a transfer to the doer itself is the immediate branch
-	assertPolicyRefusedAPI(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/policy-transfer/transfer", &api.TransferRepoOption{NewOwner: "user4"}).AddTokenAuth(orgPolicyToken(t, "user4")), "restrict_repo_delete_transfer")
+	for _, user := range []string{"user4", "user28"} {
+		session := loginUser(t, user)
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/owner-only/settings", map[string]string{"action": "delete", "repo_name": "org3/owner-only"}), http.StatusNotFound)
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/owner-only/settings", map[string]string{"action": "transfer", "repo_name": "org3/owner-only", "new_owner_name": user}), http.StatusNotFound)
+		token := orgPolicyToken(t, user)
+		MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/repos/org3/owner-only").AddTokenAuth(token), http.StatusForbidden)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/owner-only/transfer", &api.TransferRepoOption{NewOwner: user}).AddTokenAuth(token), http.StatusForbidden)
+	}
 	assert.Equal(t, "org3", unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repo.ID}).OwnerName)
 
-	// the owner starts a transfer to user4, which user4 accepts: accepting isn't checked again
-	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/policy-transfer/transfer", &api.TransferRepoOption{NewOwner: "user4"}).AddTokenAuth(orgPolicyToken(t, "user2")), http.StatusCreated)
-	MakeRequest(t, NewRequest(t, "POST", "/api/v1/repos/org3/policy-transfer/transfer/accept").AddTokenAuth(orgPolicyToken(t, "user4")), http.StatusAccepted)
-	assert.Equal(t, "user4", unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repo.ID}).OwnerName)
+	// the owner transfers, a site admin deletes
+	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/owner-only/transfer", &api.TransferRepoOption{NewOwner: "org6"}).AddTokenAuth(orgPolicyToken(t, "user2")), http.StatusCreated)
+	orgPolicyRepo(t, "owner-only2", false)
+	loginUser(t, "user1").MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/owner-only2/settings", map[string]string{"action": "delete", "repo_name": "org3/owner-only2"}), http.StatusSeeOther)
+	MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/org3/owner-only2").AddTokenAuth(orgPolicyToken(t, "user2")), http.StatusNotFound)
+}
 
-	// policy off: the repo admin moves it to its own account at once
-	setOrgRepoPolicies(t, false, user_model.PrivateForkAll)
-	repo = orgPolicyRepo(t, "policy-transfer2", false)
-	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/policy-transfer2/transfer", &api.TransferRepoOption{NewOwner: "user4"}).AddTokenAuth(orgPolicyToken(t, "user4")), http.StatusAccepted)
-	assert.Equal(t, "user4", unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repo.ID}).OwnerName)
+// AC11: the repo.private push option follows the visibility policy; deploy keys push as the organization and are refused.
+func TestOrgRepoPolicyPushOption(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		setOrgRepoPolicies(t, true, user_model.PrivateForkAll)
+		repo := orgPolicyRepo(t, "policy-push", false)
+		keys := createProtectionTestDeployKeys(t, APITestContext{Username: "org3", Reponame: "policy-push", Token: orgPolicyToken(t, "user2")})
+
+		preReceive := func(userID, deployKeyID int64, options map[string]string) private.ResponseExtra {
+			return private.HookPreReceive(t.Context(), "org3", "policy-push", private.HookOptions{UserID: userID, DeployKeyID: deployKeyID, GitPushOptions: options})
+		}
+		toPrivate := map[string]string{"repo.private": "true"}
+
+		for _, refused := range []private.ResponseExtra{preReceive(4, 0, toPrivate), preReceive(3, keys["listed"].id, toPrivate)} {
+			assert.Equal(t, http.StatusForbidden, refused.StatusCode)
+			assert.Contains(t, refused.UserMsg, "restrict_repo_visibility_change")
+		}
+		// unchanged visibility and other options pass
+		require.NoError(t, preReceive(4, 0, map[string]string{"repo.private": "false", "repo.template": "true"}).Error)
+		// the owner and a site admin can
+		require.NoError(t, preReceive(2, 0, toPrivate).Error)
+		require.NoError(t, preReceive(1, 0, toPrivate).Error)
+
+		// and through a real HTTP push, which changes nothing
+		dstPath := t.TempDir()
+		u.Path = "org3/policy-push.git"
+		u.User = url.UserPassword("user4", userPassword)
+		doGitClone(dstPath, u)(t)
+		doGitCreateBranch(dstPath, "push-option")(t)
+		_, stderr, err := git.NewCommand(git.DefaultContext, "push", "-o", "repo.private=true", "origin", "push-option").RunStdString(&git.RunOpts{Dir: dstPath})
+		require.Error(t, err)
+		assert.Contains(t, stderr, "restrict_repo_visibility_change")
+		assert.False(t, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repo.ID}).IsPrivate)
+	})
 }
 
 // AC5, AC9: visibility, both directions, and the disabled controls.
@@ -183,11 +192,7 @@ func TestOrgRepoPolicyVisibility(t *testing.T) {
 	doc := NewHTMLParser(t, loginUser(t, "user4").MakeRequest(t, NewRequest(t, "GET", "/org3/policy-private/settings"), http.StatusOK).Body)
 	_, disabled := doc.Find(`input[name="private"][type="checkbox"]`).Attr("disabled")
 	assert.True(t, disabled)
-	_, disabled = doc.Find(`button[data-modal="#delete-repo-modal"]`).Attr("disabled")
-	assert.True(t, disabled)
-	_, disabled = doc.Find(`button[data-modal="#transfer-repo-modal"]`).Attr("disabled")
-	assert.True(t, disabled)
-	assert.Equal(t, 3, doc.Find(".org-policy-note").Length())
+	assert.Equal(t, 1, doc.Find(".org-policy-note").Length())
 
 	// the owner and a site admin see no restriction and can change it
 	doc = NewHTMLParser(t, loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/org3/policy-private/settings"), http.StatusOK).Body)

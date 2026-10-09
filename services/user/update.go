@@ -42,7 +42,6 @@ type UpdateOptions struct {
 	EnableRepoUnitHints          optional.Option[bool]
 	KeepPronounsPrivate          optional.Option[bool]
 	RestrictRepoVisibilityChange optional.Option[bool]
-	RestrictRepoDeleteTransfer   optional.Option[bool]
 	PrivateForkPolicy            optional.Option[int]
 }
 
@@ -146,10 +145,6 @@ func UpdateUser(ctx context.Context, u *user_model.User, opts *UpdateOptions) er
 	if has, value := opts.RestrictRepoVisibilityChange.Get(); has {
 		u.RestrictRepoVisibilityChange = value
 		cols = append(cols, "restrict_repo_visibility_change")
-	}
-	if has, value := opts.RestrictRepoDeleteTransfer.Get(); has {
-		u.RestrictRepoDeleteTransfer = value
-		cols = append(cols, "restrict_repo_delete_transfer")
 	}
 	if has, value := opts.PrivateForkPolicy.Get(); has {
 		u.PrivateForkPolicy = value

@@ -17,7 +17,6 @@ func init() {
 func addOrgRepoPolicies(x *xorm.Engine) error {
 	type User struct {
 		RestrictRepoVisibilityChange bool `xorm:"NOT NULL DEFAULT false"`
-		RestrictRepoDeleteTransfer   bool `xorm:"NOT NULL DEFAULT false"`
 		PrivateForkPolicy            int  `xorm:"NOT NULL DEFAULT 0"`
 	}
 	_, err := x.SyncWithOptions(xorm.SyncOptions{IgnoreDropIndices: true}, new(User))

@@ -64,6 +64,7 @@
 
 						<div class="field" id="repo_policies_box">
 							<label>{{ctx.Locale.Tr "org.settings.repo_policies"}}</label>
+							<p class="help">{{ctx.Locale.Tr "org.settings.repo_policies_desc"}}</p>
 							<div class="field">
 								<div class="ui checkbox">
 									<input type="checkbox" name="restrict_repo_visibility_change" {{if .Org.RestrictRepoVisibilityChange}}checked{{end}}>
@@ -71,14 +72,8 @@
 								</div>
 							</div>
 							<div class="field">
-								<div class="ui checkbox">
-									<input type="checkbox" name="restrict_repo_delete_transfer" {{if .Org.RestrictRepoDeleteTransfer}}checked{{end}}>
-									<label>{{ctx.Locale.Tr "org.settings.restrict_repo_delete_transfer"}}</label>
-								</div>
-							</div>
-							<div class="field">
 								<label for="private_fork_policy">{{ctx.Locale.Tr "org.settings.private_fork_policy"}}</label>
-								<select id="private_fork_policy" name="private_fork_policy" class="ui dropdown">
+								<select id="private_fork_policy" name="private_fork_policy">
 									<option value="0" {{if eq .Org.PrivateForkPolicy 0}}selected{{end}}>{{ctx.Locale.Tr "org.settings.private_fork_policy.all"}}</option>
 									<option value="1" {{if eq .Org.PrivateForkPolicy 1}}selected{{end}}>{{ctx.Locale.Tr "org.settings.private_fork_policy.org"}}</option>
 									<option value="2" {{if eq .Org.PrivateForkPolicy 2}}selected{{end}}>{{ctx.Locale.Tr "org.settings.private_fork_policy.none"}}</option>

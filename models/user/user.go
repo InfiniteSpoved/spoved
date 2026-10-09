@@ -176,7 +176,6 @@ type User struct {
 
 	// Repository policies of an organization (#148), enforced by repository.CheckOrgPolicy
 	RestrictRepoVisibilityChange bool `xorm:"NOT NULL DEFAULT false"` // only owners change a repository's visibility
-	RestrictRepoDeleteTransfer   bool `xorm:"NOT NULL DEFAULT false"` // only owners delete or transfer a repository
 	PrivateForkPolicy            int  `xorm:"NOT NULL DEFAULT 0"`     // PrivateForkAll, PrivateForkOrg or PrivateForkNone
 
 	// If you add new fields that might be used to store abusive content (mainly string fields),

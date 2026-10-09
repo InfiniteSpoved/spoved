@@ -63,14 +63,12 @@ func SettingsCtxData(ctx *context.Context) {
 	ctx.Data["ForcePrivate"] = setting.Repository.ForcePrivate
 	ctx.Data["TrashRetentionDays"] = setting.Trash.RetentionDays
 	ctx.Data["TrashRestoreHelpURL"] = setting.Trash.RestoreHelpURL
-	for key, action := range map[string]repo_module.OrgPolicyAction{"OrgPolicyBlocksVisibility": repo_module.OrgPolicyVisibility, "OrgPolicyBlocksDeleteTransfer": repo_module.OrgPolicyDelete} {
-		allowed, err := repo_module.AllowedByOrgPolicy(ctx, ctx.Doer, ctx.Repo.Repository, action, nil)
-		if err != nil {
-			ctx.ServerError("AllowedByOrgPolicy", err)
-			return
-		}
-		ctx.Data[key] = !allowed
+	allowed, err := repo_module.AllowedByOrgPolicy(ctx, ctx.Doer, ctx.Repo.Repository, repo_module.OrgPolicyVisibility, nil)
+	if err != nil {
+		ctx.ServerError("AllowedByOrgPolicy", err)
+		return
 	}
+	ctx.Data["OrgPolicyBlocksVisibility"] = !allowed
 	ctx.Data["MirrorsEnabled"] = setting.Mirror.Enabled
 	ctx.Data["DisableNewPullMirrors"] = setting.Mirror.DisableNewPull
 	ctx.Data["DisableNewPushMirrors"] = setting.Mirror.DisableNewPush
@@ -410,8 +408,12 @@ func SettingsPost(ctx *context.Context) {
 			return
 		}
 		if visibilityChanged {
-			if err := repo_module.CheckOrgPolicy(ctx, ctx.Doer, repo, repo_module.OrgPolicyVisibility, nil); err != nil {
-				renderOrgPolicyErr(ctx, "CheckOrgPolicy", err, form)
+			var policyErr repo_module.ErrOrgPolicy
+			if err := repo_module.CheckOrgPolicy(ctx, ctx.Doer, repo, repo_module.OrgPolicyVisibility, nil); errors.As(err, &policyErr) {
+				ctx.RenderWithErr(ctx.Tr("repo.settings.blocked_by_org_policy", ctx.Tr("org.settings."+policyErr.Policy)), tplSettingsOptions, form)
+				return
+			} else if err != nil {
+				ctx.ServerError("CheckOrgPolicy", err)
 				return
 			}
 		}
@@ -994,7 +996,7 @@ func SettingsPost(ctx *context.Context) {
 			} else if models.IsErrRepoTransferInProgress(err) {
 				ctx.RenderWithErr(ctx.Tr("repo.settings.transfer_in_progress"), tplSettingsOptions, nil)
 			} else {
-				renderOrgPolicyErr(ctx, "TransferOwnership", err, nil)
+				ctx.ServerError("TransferOwnership", err)
 			}
 
 			return
@@ -1057,7 +1059,7 @@ func SettingsPost(ctx *context.Context) {
 		}
 
 		if err := repo_service.DeleteRepository(ctx, ctx.Doer, ctx.Repo.Repository, true); err != nil {
-			renderOrgPolicyErr(ctx, "DeleteRepository", err, nil)
+			ctx.ServerError("DeleteRepository", err)
 			return
 		}
 		log.Trace("Repository deleted: %s/%s", ctx.Repo.Owner.Name, repo.Name)
@@ -1246,14 +1248,4 @@ func CodeSearchPost(ctx *context.Context) {
 
 	ctx.Flash.Success(ctx.Tr("repo.settings.update_settings_success"))
 	ctx.Redirect(redirect)
-}
-
-// renderOrgPolicyErr renders the settings page with the error of a refused organization policy, or a server error.
-func renderOrgPolicyErr(ctx *context.Context, name string, err error, form any) {
-	var policyErr repo_module.ErrOrgPolicy
-	if errors.As(err, &policyErr) {
-		ctx.RenderWithErr(ctx.Tr("repo.settings.blocked_by_org_policy", ctx.Tr("org.settings."+policyErr.Policy)), tplSettingsOptions, form)
-		return
-	}
-	ctx.ServerError(name, err)
 }

@@ -25,7 +25,7 @@ func TestCheckOrgPolicy(t *testing.T) {
 
 	// org3 owns the private repo3 and the public repo21; user2 is its only owner, user28 is in an admin team
 	org := user(3)
-	org.RestrictRepoVisibilityChange, org.RestrictRepoDeleteTransfer = true, true
+	org.RestrictRepoVisibilityChange = true
 	repo := func(id int64) *repo_model.Repository {
 		r := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: id})
 		r.Owner = org
@@ -44,44 +44,48 @@ func TestCheckOrgPolicy(t *testing.T) {
 		require.ErrorIs(t, err, util.ErrPermissionDenied)
 	}
 
-	t.Run("visibility, delete and transfer", func(t *testing.T) {
-		for _, a := range []OrgPolicyAction{OrgPolicyVisibility, OrgPolicyDelete, OrgPolicyTransfer} {
-			policy := "restrict_repo_delete_transfer"
-			if a == OrgPolicyVisibility {
-				policy = "restrict_repo_visibility_change"
-			}
-			require.NoError(t, check(owner, private, a, nil))
-			require.NoError(t, check(siteAdmin, private, a, nil))
-			refused(t, check(member, private, a, nil), policy)
-			refused(t, check(teamAdmin, public, a, nil), policy)
-		}
+	const visibility = "restrict_repo_visibility_change"
+
+	t.Run("visibility", func(t *testing.T) {
+		require.NoError(t, check(owner, private, OrgPolicyVisibility, nil))
+		require.NoError(t, check(siteAdmin, private, OrgPolicyVisibility, nil))
+		refused(t, check(member, private, OrgPolicyVisibility, nil), visibility)
+		refused(t, check(teamAdmin, public, OrgPolicyVisibility, nil), visibility)
+		// a deploy key pushes as the organization itself, which is no owner
+		refused(t, check(org, public, OrgPolicyVisibility, nil), visibility)
 	})
 
 	t.Run("policies off", func(t *testing.T) {
-		defer func() { org.RestrictRepoVisibilityChange, org.RestrictRepoDeleteTransfer = true, true }()
-		org.RestrictRepoVisibilityChange, org.RestrictRepoDeleteTransfer = false, false
-		for _, a := range []OrgPolicyAction{OrgPolicyVisibility, OrgPolicyDelete, OrgPolicyTransfer, OrgPolicyFork} {
-			require.NoError(t, check(member, private, a, member))
-		}
+		defer func() { org.RestrictRepoVisibilityChange = true }()
+		org.RestrictRepoVisibilityChange = false
+		require.NoError(t, check(member, private, OrgPolicyVisibility, nil))
+		require.NoError(t, check(member, private, OrgPolicyFork, member))
 	})
 
 	t.Run("inactive or prohibited site admin is bound", func(t *testing.T) {
 		inactive, prohibited := *siteAdmin, *siteAdmin
 		inactive.IsActive, prohibited.ProhibitLogin = false, true
-		refused(t, check(&inactive, private, OrgPolicyDelete, nil), "restrict_repo_delete_transfer")
-		refused(t, check(&prohibited, private, OrgPolicyVisibility, nil), "restrict_repo_visibility_change")
+		refused(t, check(&inactive, private, OrgPolicyVisibility, nil), visibility)
+		refused(t, check(&prohibited, private, OrgPolicyVisibility, nil), visibility)
 	})
 
-	t.Run("system paths", func(t *testing.T) {
-		require.NoError(t, check(nil, private, OrgPolicyDelete, nil))
-		require.NoError(t, check(&user_model.User{ID: -1, Name: "(Cron)"}, private, OrgPolicyDelete, nil))
+	t.Run("only a nil doer is a system path", func(t *testing.T) {
+		require.NoError(t, check(nil, private, OrgPolicyVisibility, nil))
+		refused(t, check(&user_model.User{ID: -1, Name: "(Cron)"}, private, OrgPolicyVisibility, nil), visibility)
+		actions := user_model.NewActionsUser()
+		refused(t, check(actions, private, OrgPolicyVisibility, nil), visibility)
+		defer func() { org.PrivateForkPolicy = user_model.PrivateForkAll }()
+		org.PrivateForkPolicy = user_model.PrivateForkNone
+		refused(t, check(actions, private, OrgPolicyFork, actions), "private_fork_policy")
 	})
 
 	t.Run("user-owned repository", func(t *testing.T) {
 		r := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 2}) // private, owned by user2
-		for _, a := range []OrgPolicyAction{OrgPolicyVisibility, OrgPolicyDelete, OrgPolicyTransfer, OrgPolicyFork} {
-			require.NoError(t, check(outsider, r, a, outsider))
-		}
+		u := *user(2)
+		u.RestrictRepoVisibilityChange, u.PrivateForkPolicy = true, user_model.PrivateForkNone
+		r.Owner = &u
+		require.NoError(t, check(outsider, r, OrgPolicyVisibility, nil))
+		require.NoError(t, check(outsider, r, OrgPolicyFork, outsider))
 	})
 
 	t.Run("fork", func(t *testing.T) {
@@ -111,21 +115,21 @@ func TestCheckOrgPolicy(t *testing.T) {
 
 	t.Run("lookup error fails closed", func(t *testing.T) {
 		r := &repo_model.Repository{ID: 9999, OwnerID: 9999}
-		err := check(member, r, OrgPolicyDelete, nil)
+		err := check(member, r, OrgPolicyVisibility, nil)
 		require.Error(t, err)
 		var e ErrOrgPolicy
 		assert.NotErrorAs(t, err, &e)
 
-		allowed, err := AllowedByOrgPolicy(ctx, member, r, OrgPolicyDelete, nil)
+		allowed, err := AllowedByOrgPolicy(ctx, member, r, OrgPolicyVisibility, nil)
 		require.Error(t, err)
 		assert.False(t, allowed)
 	})
 
 	t.Run("AllowedByOrgPolicy", func(t *testing.T) {
-		allowed, err := AllowedByOrgPolicy(ctx, member, private, OrgPolicyDelete, nil)
+		allowed, err := AllowedByOrgPolicy(ctx, member, private, OrgPolicyVisibility, nil)
 		require.NoError(t, err)
 		assert.False(t, allowed)
-		allowed, err = AllowedByOrgPolicy(ctx, owner, private, OrgPolicyDelete, nil)
+		allowed, err = AllowedByOrgPolicy(ctx, owner, private, OrgPolicyVisibility, nil)
 		require.NoError(t, err)
 		assert.True(t, allowed)
 	})

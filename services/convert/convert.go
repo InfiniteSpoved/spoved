@@ -421,7 +421,6 @@ func ToOrganization(ctx context.Context, org *organization.Organization) *api.Or
 		Created:                   org.CreatedUnix.AsTime(),
 
 		RestrictRepoVisibilityChange: org.RestrictRepoVisibilityChange,
-		RestrictRepoDeleteTransfer:   org.RestrictRepoDeleteTransfer,
 		PrivateForkPolicy:            org.AsUser().PrivateForkPolicyName(),
 	}
 }

@@ -30,7 +30,7 @@ func Test_addOrgRepoPolicies(t *testing.T) {
 
 	require.NoError(t, addOrgRepoPolicies(x))
 
-	count, err := x.Table("user").Where("restrict_repo_visibility_change = ? AND restrict_repo_delete_transfer = ? AND private_fork_policy = 0", false, false).Count()
+	count, err := x.Table("user").Where("restrict_repo_visibility_change = ? AND private_fork_policy = 0", false).Count()
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, count)
 }
