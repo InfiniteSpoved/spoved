@@ -216,6 +216,20 @@ func TestOrgTwoFactorRequired(t *testing.T) {
 			owner.MakeRequest(t, NewRequest(t, "GET", link), http.StatusNotFound)
 		}
 		postOrgTwoFactor(t, owner, "org3", map[string]string{}, http.StatusNotFound)
+		for link, form := range map[string]map[string]string{
+			"/org/org3/settings/hooks/forgejo/new":     {"payload_url": "http://example.com/hook", "content_type": "1", "events": "push_only", "active": "on"},
+			"/org/org3/settings/actions/runners/new":   {"name": "blocked"},
+			"/org/org3/teams/new":                      {"team_name": "blocked", "permission": "read"},
+			"/org/org3/settings/actions/secrets":       {"name": "BLOCKED", "data": "x"},
+			"/org/org3/settings/actions/variables/new": {"name": "BLOCKED", "data": "x"},
+		} {
+			owner.MakeRequest(t, NewRequestWithValues(t, "POST", link, form), http.StatusNotFound)
+		}
+		// nor create, fork or migrate into the org on the web
+		owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/repo/create", map[string]string{"uid": "3", "repo_name": "blocked"}), http.StatusForbidden)
+		owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/fork", map[string]string{"uid": "3", "repo_name": "blocked"}), http.StatusForbidden)
+		owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/repo/migrate", map[string]string{"uid": "3", "repo_name": "blocked", "clone_addr": "https://example.com/a.git", "service": "1"}), http.StatusForbidden)
+		unittest.AssertNotExistsBean(t, &repo_model.Repository{OwnerID: 3, LowerName: "blocked"})
 		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/orgs/org3", map[string]string{"full_name": "x"}).AddTokenAuth(ownerToken), http.StatusForbidden)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3/hooks").AddTokenAuth(ownerToken), http.StatusForbidden)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3/actions/runners/registration-token").AddTokenAuth(ownerToken), http.StatusForbidden)

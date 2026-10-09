@@ -88,7 +88,8 @@ func SettingsPost(ctx *context.Context) {
 
 	org := ctx.Org.Organization
 
-	// turning on the two-factor requirement needs the doer's own 2FA and a confirmation, before anything is saved
+	// turning on the two-factor requirement needs the doer's own 2FA and a confirmation, before anything is saved;
+	// any other change needs none, as a doer without 2FA isn't an acting owner and never gets here
 	if form.RequireTwoFactorShown && form.RequireTwoFactor && !org.RequireTwoFactor && !confirmRequireTwoFactor(ctx, org, form) {
 		return
 	}

@@ -617,8 +617,21 @@ func TestTwoFactorRequiredOrg(t *testing.T) {
 		require.NoError(t, err)
 		return can
 	}
+	inCreateList := func() bool {
+		t.Helper()
+		orgs, err := organization.GetOrgsCanCreateRepoByUserID(ctx, 2)
+		require.NoError(t, err)
+		for _, o := range orgs {
+			if o.ID == 3 {
+				return true
+			}
+		}
+		return false
+	}
 	assert.True(t, canCreate())
+	assert.True(t, inCreateList())
 	_, err := db.GetEngine(ctx).ID(3).Cols("require_two_factor").Update(&user_model.User{RequireTwoFactor: true})
 	require.NoError(t, err)
 	assert.False(t, canCreate())
+	assert.False(t, inCreateList())
 }
