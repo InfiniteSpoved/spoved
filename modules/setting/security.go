@@ -5,6 +5,7 @@ package setting
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -111,7 +112,7 @@ func loadSecret(sec ConfigSection, uriKey, verbatimKey string) string {
 func loadSecretFromURI(uri string) (string, error) {
 	tempURI, err := url.Parse(uri)
 	if err != nil {
-		return "", fmt.Errorf("Failed to parse %s: %v", uri, err)
+		return "", errors.New("Failed to parse the URI") // never echo it: a secret may have been pasted here
 	}
 	switch tempURI.Scheme {
 	case "file":
@@ -135,7 +136,7 @@ func loadSecretFromURI(uri string) (string, error) {
 
 	// only file URIs are allowed
 	default:
-		return "", fmt.Errorf("Unsupported URI-Scheme %q in %q", tempURI.Scheme, uri)
+		return "", fmt.Errorf("Unsupported URI-Scheme %q", tempURI.Scheme)
 	}
 }
 

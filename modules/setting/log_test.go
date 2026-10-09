@@ -711,3 +711,76 @@ ENABLE_SSH_LOG = true
 		})
 	})
 }
+
+func TestLogConfigNewRelic(t *testing.T) {
+	keyFile := filepath.Join(t.TempDir(), "key")
+	require.NoError(t, os.WriteFile(keyFile, []byte("NRAK-FROMFILE0123456789\n"), 0o600))
+	const nrSection = "[log.newrelic]\nENDPOINT = https://log-api.eu.newrelic.com/log/v1\n"
+
+	t.Run("both writers, key from KEY", func(t *testing.T) {
+		manager, closer := initLoggersByConfig(t, nrSection+"KEY = NRAK-INLINE0123456789\n[log]\nMODE = console, newrelic\nlogger.access.MODE = file, newrelic\n")
+		defer closer()
+		for logger, names := range map[string][]string{
+			"default": {"console", "newrelic"},
+			"access":  {"file.access", "newrelic.access"},
+		} {
+			writers := manager.GetLogger(logger).DumpWriters()
+			for _, n := range names {
+				assert.Contains(t, writers, n, logger)
+			}
+			assert.Len(t, writers, 2)
+		}
+		dump := toJSON(manager.DumpLoggers())
+		assert.Contains(t, dump, "log-api.eu.newrelic.com")
+		assert.NotContains(t, dump, "NRAK-INLINE0123456789", "the key must not reach the admin configuration page")
+	})
+
+	t.Run("KEY_URI", func(t *testing.T) {
+		cfg, err := NewConfigProviderFromData(nrSection + "KEY_URI = file:" + keyFile + "\n")
+		require.NoError(t, err)
+		_, _, mode, err := loadLogModeByName(cfg, "default", "newrelic")
+		require.NoError(t, err)
+		assert.Equal(t, log.NewRelicOption{Endpoint: "https://log-api.eu.newrelic.com/log/v1", Key: "NRAK-FROMFILE0123456789"}, mode.WriterOption)
+	})
+
+	t.Run("default endpoint", func(t *testing.T) {
+		cfg, err := NewConfigProviderFromData("[log.newrelic]\nKEY = k\n")
+		require.NoError(t, err)
+		_, _, mode, err := loadLogModeByName(cfg, "default", "newrelic")
+		require.NoError(t, err)
+		assert.Equal(t, defaultNewRelicEndpoint, mode.WriterOption.(log.NewRelicOption).Endpoint)
+	})
+
+	t.Run("rejected, without echoing secrets", func(t *testing.T) {
+		const pasted = "NRAK-PASTEDKEY0123456789"
+		for name, tc := range map[string]struct{ ini, want string }{
+			"missing key":         {nrSection, "[log.newrelic] KEY or KEY_URI is required"},
+			"http endpoint":       {"[log.newrelic]\nKEY = " + pasted + "\nENDPOINT = http://log-api.newrelic.com/log/v1\n", "ENDPOINT must be an https:// URL"},
+			"both":                {nrSection + "KEY = a\nKEY_URI = file:" + keyFile + "\n", "both set"},
+			"key pasted in URI":   {nrSection + "KEY_URI = " + pasted + "\n", "KEY_URI must be a file: URI"},
+			"other scheme in URI": {nrSection + "KEY_URI = https://" + pasted + "@x/\n", "KEY_URI must be a file: URI"},
+			"missing file":        {nrSection + "KEY_URI = file:/nonexistent/key\n", "KEY_URI"},
+			"bad format":          {nrSection + "KEY = k\nFORMAT = xml\n", "FORMAT must be text or json"},
+		} {
+			cfg, err := NewConfigProviderFromData(tc.ini)
+			require.NoError(t, err, name)
+			_, _, _, err = loadLogModeByName(cfg, "default", "newrelic")
+			require.ErrorContains(t, err, tc.want, name)
+			assert.NotContains(t, err.Error(), pasted, name)
+		}
+	})
+
+	t.Run("unused: no newrelic writer exists", func(t *testing.T) {
+		manager, closer := initLoggersByConfig(t, nrSection+"KEY = k\n")
+		defer closer()
+		assert.NotContains(t, toJSON(manager.DumpLoggers()), "newrelic")
+	})
+}
+
+func TestLogConfigFormat(t *testing.T) {
+	manager, closer := initLoggersByConfig(t, "[log]\nMODE = console, file\n[log.console]\nFORMAT = json\n")
+	defer closer()
+	dump := manager.GetLogger("default").DumpWriters()
+	assert.Equal(t, "json", dump["console"].(map[string]any)["Format"])
+	assert.NotContains(t, dump["file"], "Format", "the text default leaves the dump unchanged")
+}

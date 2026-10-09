@@ -55,7 +55,7 @@ func parseRequestIDFromRequestHeader(req *http.Request) string {
 
 // AccessLogger returns a middleware to log access logger
 func AccessLogger() func(http.Handler) http.Handler {
-	logger := log.GetLogger("access")
+	logger := log.GetManager().GetLogger("access")
 	needRequestID := len(setting.Log.RequestIDHeaders) > 0 && strings.Contains(setting.Log.AccessLogTemplate, keyOfRequestIDInTemplate)
 	logTemplate, _ := template.New("log").Parse(setting.Log.AccessLogTemplate)
 	return func(next http.Handler) http.Handler {
@@ -101,7 +101,20 @@ func AccessLogger() func(http.Handler) http.Handler {
 				log.Error("Could not execute access logger template: %v", err.Error())
 			}
 
-			logger.Info("%s", buf.String())
+			user := identity
+			if user == "-" {
+				user = ""
+			}
+			logger.LogWithFields(0, log.INFO, map[string]any{
+				"ip":          reqHost,
+				"user":        user,
+				"method":      req.Method,
+				"path":        req.URL.RequestURI(),
+				"status":      rw.Status(),
+				"bytes":       rw.Size(),
+				"duration_ms": time.Since(start).Milliseconds(),
+				"user_agent":  req.UserAgent(),
+			}, "%s", buf.String())
 		})
 	}
 }

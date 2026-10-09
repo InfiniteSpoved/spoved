@@ -13,6 +13,9 @@ import (
 type Event struct {
 	Time time.Time
 
+	Logger string         // name of the logger that created the event
+	Fields map[string]any // optional structured fields, only used by the JSON formatter
+
 	Caller   string
 	Filename string
 	Line     int

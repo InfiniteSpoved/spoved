@@ -18,6 +18,7 @@ import (
 type LoggerImpl struct {
 	LevelLogger
 
+	name      string
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
@@ -178,6 +179,11 @@ func (l *LoggerImpl) IsEnabled() bool {
 
 // Log prepares the log event, if the level matches, the event will be sent to the writers
 func (l *LoggerImpl) Log(skip int, level Level, format string, logArgs ...any) {
+	l.LogWithFields(skip+1, level, nil, format, logArgs...)
+}
+
+// LogWithFields is Log with structured fields, which only the JSON formatter uses
+func (l *LoggerImpl) LogWithFields(skip int, level Level, fields map[string]any, format string, logArgs ...any) {
 	if Level(l.level.Load()) > level {
 		return
 	}
@@ -185,6 +191,8 @@ func (l *LoggerImpl) Log(skip int, level Level, format string, logArgs ...any) {
 	event := &Event{
 		Time:   time.Now(),
 		Level:  level,
+		Logger: l.name,
+		Fields: fields,
 		Caller: "?()",
 	}
 
@@ -227,7 +235,7 @@ func (l *LoggerImpl) GetLevel() Level {
 }
 
 func NewLoggerWithWriters(ctx context.Context, name string, writer ...EventWriter) *LoggerImpl {
-	l := &LoggerImpl{}
+	l := &LoggerImpl{name: name}
 	l.ctx, l.ctxCancel = newProcessTypedContext(ctx, "Logger: "+name)
 	l.LevelLogger = BaseLoggerToGeneralLogger(l)
 	l.eventWriters = map[string]EventWriter{}

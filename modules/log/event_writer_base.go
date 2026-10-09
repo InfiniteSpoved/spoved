@@ -151,6 +151,9 @@ func NewEventWriterBase(name, writerType string, mode WriterMode) *EventWriterBa
 		GetPauseChan:  GetManager().GetPauseChan, // by default, use the global pause channel
 		FormatMessage: EventFormatTextMessage,
 	}
+	if mode.Format == "json" {
+		b.FormatMessage = EventFormatJSONMessage
+	}
 	return b
 }
 
