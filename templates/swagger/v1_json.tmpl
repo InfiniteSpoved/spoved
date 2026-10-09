@@ -517,6 +517,162 @@
         }
       }
     },
+    "/admin/actions/runs": {
+      "get": {
+        "description": "Lists the runs of every repository that is not in the trash and has Actions enabled, newest first. Unlike a repository's run list, `is_ref_deleted` is not reported and the run is described by a short form.\n",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "List the workflow runs of all repositories",
+        "operationId": "adminListActionRuns",
+        "parameters": [
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi",
+            "description": "Only return runs with one of these statuses (success, failure, cancelled, running, waiting, skipped, blocked). Repeated values are deduplicated and only the first 20 are used.",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi",
+            "description": "Only return runs triggered by one of these events, for example `push` or `pull_request`. Repeated values are deduplicated and only the first 20 are used; an unknown event matches no run.",
+            "name": "event",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Only return runs of the repository with this name, or this `owner/name`.",
+            "name": "repo",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Only return runs of the workflow with this file name.",
+            "name": "workflow_id",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Only return runs of this branch.",
+            "name": "branch",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Only return runs triggered by the user with this name.",
+            "name": "actor",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Only return runs created at or after this time (RFC 3339 or YYYY-MM-DD).",
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Only return runs created at or before this time (RFC 3339, or YYYY-MM-DD for the end of that day).",
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/ActionRunSummaryList"
+          },
+          "400": {
+            "$ref": "#/responses/error"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/admin/actions/usage": {
+      "get": {
+        "description": "Sums the run time of the jobs that started in the period and have finished (jobs that are still running or stopped before they started add nothing), most minutes first, and lists the repositories with the most job minutes and the most failed runs. Repositories in the trash or without Actions are left out. Jobs that had no runner are listed under runner 0. Lists are cut at `limit` entries.\n",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get the Actions usage of the instance",
+        "operationId": "adminGetActionUsage",
+        "parameters": [
+          {
+            "enum": [
+              "org",
+              "repo",
+              "runner"
+            ],
+            "type": "string",
+            "description": "what to sum per. `org` groups by the owner of the repository, which can be a user.",
+            "name": "group_by",
+            "in": "query",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "Start of the period (RFC 3339 or YYYY-MM-DD). Defaults to 30 days before `to`.",
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "End of the period (RFC 3339, or YYYY-MM-DD for the end of that day). Defaults to now. The period is at most 366 days.",
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "the most entries per list (default 100, at most 200)",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/ActionUsage"
+          },
+          "400": {
+            "$ref": "#/responses/error"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
     "/admin/announcements": {
       "get": {
         "produces": [
@@ -26838,6 +26994,90 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "ActionUsage": {
+      "description": "ActionUsage is the Actions usage of the instance in a period",
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ActionUsageEntry"
+          },
+          "x-go-name": "Entries"
+        },
+        "from": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "From"
+        },
+        "group_by": {
+          "type": "string",
+          "x-go-name": "GroupBy"
+        },
+        "to": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "To"
+        },
+        "top_repos_by_failures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ActionUsageEntry"
+          },
+          "x-go-name": "TopReposByFailures"
+        },
+        "top_repos_by_minutes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ActionUsageEntry"
+          },
+          "x-go-name": "TopReposByMinutes"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "ActionUsageEntry": {
+      "description": "ActionUsageEntry is the Actions usage of one owner, repository or runner",
+      "type": "object",
+      "properties": {
+        "failed_jobs": {
+          "description": "how many of the jobs failed",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "FailedJobs"
+        },
+        "failed_runs": {
+          "description": "the number of failed runs (only in top_repos_by_failures)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "FailedRuns"
+        },
+        "id": {
+          "description": "the ID of the owner, repository or runner; 0 for jobs that had no runner",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "job_minutes": {
+          "description": "the run time of the finished jobs, in minutes",
+          "type": "number",
+          "format": "double",
+          "x-go-name": "JobMinutes"
+        },
+        "jobs": {
+          "description": "the number of finished jobs",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Jobs"
+        },
+        "name": {
+          "description": "the name of the owner, the full name of the repository or the name of the runner",
+          "type": "string",
+          "x-go-name": "Name"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "ActionVariable": {
       "description": "ActionVariable return value of the query API",
       "type": "object",
@@ -36931,6 +37171,12 @@
           "format": "int64",
           "description": "Total number of runners matching the search criteria (excluding page and limit)"
         }
+      }
+    },
+    "ActionUsage": {
+      "description": "ActionUsage",
+      "schema": {
+        "$ref": "#/definitions/ActionUsage"
       }
     },
     "ActionVariable": {

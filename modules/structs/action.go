@@ -177,6 +177,36 @@ type ListActionRunSummaryResponse struct {
 	TotalCount int64               `json:"total_count"`
 }
 
+// ActionUsageEntry is the Actions usage of one owner, repository or runner
+// swagger:model
+type ActionUsageEntry struct {
+	// the ID of the owner, repository or runner; 0 for jobs that had no runner
+	ID int64 `json:"id"`
+	// the name of the owner, the full name of the repository or the name of the runner
+	Name string `json:"name"`
+	// the run time of the finished jobs, in minutes
+	JobMinutes float64 `json:"job_minutes"`
+	// the number of finished jobs
+	Jobs int64 `json:"jobs"`
+	// how many of the jobs failed
+	FailedJobs int64 `json:"failed_jobs"`
+	// the number of failed runs (only in top_repos_by_failures)
+	FailedRuns int64 `json:"failed_runs,omitempty"`
+}
+
+// ActionUsage is the Actions usage of the instance in a period
+// swagger:model
+type ActionUsage struct {
+	GroupBy string `json:"group_by"`
+	// swagger:strfmt date-time
+	From time.Time `json:"from"`
+	// swagger:strfmt date-time
+	To                 time.Time           `json:"to"`
+	Entries            []*ActionUsageEntry `json:"entries"`
+	TopReposByMinutes  []*ActionUsageEntry `json:"top_repos_by_minutes"`
+	TopReposByFailures []*ActionUsageEntry `json:"top_repos_by_failures"`
+}
+
 // ActionArtifact represents an artifact of a workflow run
 // swagger:model
 type ActionArtifact struct {

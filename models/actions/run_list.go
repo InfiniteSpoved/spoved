@@ -83,6 +83,28 @@ type FindRunOptions struct {
 	RepoCond builder.Cond
 	// CreatedFrom and CreatedTo, if set, bound the creation time (both inclusive)
 	CreatedFrom, CreatedTo timeutil.TimeStamp
+	// OmitEventPayload leaves the (large) event payload out, for lists that don't use it
+	OmitEventPayload bool
+}
+
+func (opts FindRunOptions) ToJoins() []db.JoinFunc {
+	if !opts.OmitEventPayload {
+		return nil
+	}
+	return []db.JoinFunc{func(sess db.Engine) error {
+		table, err := db.TableInfo(new(ActionRun))
+		if err != nil {
+			return err
+		}
+		cols := make([]string, 0, len(table.Columns()))
+		for _, col := range table.Columns() {
+			if col.Name != "event_payload" {
+				cols = append(cols, col.Name)
+			}
+		}
+		sess.Cols(cols...)
+		return nil
+	}}
 }
 
 func (opts FindRunOptions) ToConds() builder.Cond {

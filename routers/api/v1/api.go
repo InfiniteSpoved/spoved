@@ -1523,6 +1523,9 @@ func Routes() *web.Route {
 					Patch(bind(api.EditHookOption{}), admin.EditHook).
 					Delete(admin.DeleteHook)
 			})
+			// run data is repository data, so the repository scope is needed as well
+			m.Get("/actions/runs", tokenRequiresScopes(auth_model.AccessTokenScopeCategoryRepository), admin.ListActionRuns)
+			m.Get("/actions/usage", tokenRequiresScopes(auth_model.AccessTokenScopeCategoryRepository), admin.GetActionUsage)
 			m.Group("/actions/runners", func() {
 				m.Combo("").
 					Get(admin.ListRunners).

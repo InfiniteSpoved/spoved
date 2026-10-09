@@ -5,6 +5,7 @@ package actions
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -100,11 +101,15 @@ func ParseOrgRunFilter(form FormGetter) (f OrgRunFilter, err error) {
 }
 
 // orgRunRepoCond matches, in the repository table, the repositories of org whose Actions runs doer may see. It is
-// the one visibility rule of the runs list and the overview.
+// the one visibility rule of the runs list, the overview and the instance pages. A nil org (site admins only) means
+// every owner.
 func orgRunRepoCond(org *organization.Organization, doer *user_model.User, admin bool, tokenRepos builder.Cond) builder.Cond {
-	cond := builder.Eq{"`repository`.owner_id": org.ID}.And(
+	cond := builder.Eq{"`repository`.trashed_unix": 0}.And(
 		builder.In("`repository`.id", builder.Select("repo_id").From("repo_unit").Where(builder.Eq{"type": unit.TypeActions})),
 	)
+	if org != nil {
+		cond = cond.And(builder.Eq{"`repository`.owner_id": org.ID})
+	}
 	if !admin {
 		// teams that grant admin access reach every unit, with or without a team_unit row for Actions
 		adminTeamRepos := builder.Select("`team_repo`.repo_id").From("team_repo").
@@ -122,20 +127,30 @@ func orgRunRepoCond(org *organization.Organization, doer *user_model.User, admin
 	return cond
 }
 
-// FindOrgRuns lists the runs of the repositories of org that doer can read the Actions of, newest first, and how
+// IsActiveSiteAdmin says whether u may use the instance-wide Actions pages.
+func IsActiveSiteAdmin(u *user_model.User) bool {
+	return u != nil && u.IsAdmin && u.IsActive && !u.ProhibitLogin
+}
+
+// FindOrgRuns lists the runs of the repositories of org (all owners if nil, for site admins) that doer can read the Actions of, newest first, and how
 // many there are. admin is whether doer acts as a site admin, who sees every repository that isn't trashed.
 // tokenRepos, if not nil, further limits the repositories (what an access token may read, as
 // Reducer().RepoReadAccessFilter()). Ownership comes from the repository: action_run.owner_id can be stale.
 func FindOrgRuns(ctx context.Context, org *organization.Organization, doer *user_model.User, admin bool, tokenRepos builder.Cond, f OrgRunFilter, lo db.ListOptions) (actions_model.RunList, int64, error) {
+	if org == nil && !admin {
+		return nil, 0, errors.New("runs of all owners are for site admins only")
+	}
 	repoCond := orgRunRepoCond(org, doer, admin, tokenRepos)
-	if f.Repo != "" {
-		repoCond = repoCond.And(builder.Eq{"`repository`.lower_name": strings.ToLower(f.Repo)})
+	if owner, name, ok := strings.Cut(strings.ToLower(f.Repo), "/"); ok {
+		repoCond = repoCond.And(builder.Eq{"`repository`.lower_name": name}, builder.Expr("LOWER(`repository`.owner_name) = ?", owner))
+	} else if f.Repo != "" {
+		repoCond = repoCond.And(builder.Eq{"`repository`.lower_name": owner})
 	}
 
 	lo.Page = max(lo.Page, 1) // FindAndCount doesn't paginate page 0
 	opts := actions_model.FindRunOptions{
 		ListOptions: lo, RepoCond: repoCond, Status: f.Statuses, Events: f.Events, WorkflowID: f.Workflow,
-		CreatedFrom: f.From, CreatedTo: f.To,
+		CreatedFrom: f.From, CreatedTo: f.To, OmitEventPayload: true,
 	}
 	if f.Branch != "" {
 		opts.Ref = git.BranchPrefix + f.Branch
