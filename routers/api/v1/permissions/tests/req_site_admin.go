@@ -30,7 +30,8 @@ var _ = registerFunctionTest(apiv1_permissions.ReqSiteAdmin, functionTest{
 		t.Helper()
 		if !data.shared.HasDoerName() {
 			data.shared.SetDoer()
-			data.shared.SetDoerAdmin(true)
 		}
+		// a function that comes after ReqSiteAdmin in a sequence needs the doer to pass it
+		data.shared.SetDoerAdminDefault(true)
 	},
 })
