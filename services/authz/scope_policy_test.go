@@ -4,6 +4,7 @@
 package authz
 
 import (
+	"strings"
 	"testing"
 
 	auth_model "forgejo.org/models/auth"
@@ -46,16 +47,22 @@ func TestValidateScopePolicy(t *testing.T) {
 		{"all needs all listed", allowed, user, "all", true, ErrScopeNotAllowed},
 		{"every scope normalizes to all", allowed, user, everyScope, true, ErrScopeNotAllowed},
 		{"all listed", allListed, user, "all", true, nil},
+		{"every scope against all", allListed, user, everyScope, true, nil},
+		{"every scope against every write scope", setting.AccessTokenScopePolicy{Allowed: strings.Split(everyScope, ",")}, user, everyScope, true, nil},
+		{"all against every write scope", setting.AccessTokenScopePolicy{Allowed: strings.Split(everyScope, ",")}, user, "all", true, nil},
 		{"admin is exempt", allowed, admin, "all", true, nil},
 		{"inactive admin is not exempt", allowed, inactiveAdmin, "all", true, ErrScopeNotAllowed},
 		{"prohibited admin is not exempt", allowed, prohibitedAdmin, "all", true, ErrScopeNotAllowed},
 		{"restriction: all repos refused", restrict, user, "read:repository", true, ErrScopeNeedsRepoRestriction},
 		{"restriction: write implies listed read", restrict, user, "write:repository", true, ErrScopeNeedsRepoRestriction},
+		{"restriction: read does not imply listed write", setting.AccessTokenScopePolicy{RequireRepoRestriction: []string{"write:repository"}}, user, "read:repository", true, nil},
 		{"restriction: all token refused", restrict, user, "all", true, ErrScopeNeedsRepoRestriction},
 		{"restriction: specific repos pass", restrict, user, "read:repository", false, nil},
 		{"restriction: other scope passes", restrict, user, "read:issue", true, nil},
 		{"restriction: admin is exempt", restrict, admin, "read:repository", true, nil},
 		{"invalid config fails closed", setting.AccessTokenScopePolicy{Allowed: []string{"read:nope"}}, user, "read:issue", true, ErrScopePolicyConfig},
+		{"sudo-only list fails closed", setting.AccessTokenScopePolicy{Allowed: []string{"sudo"}}, user, "read:issue", true, ErrScopePolicyConfig},
+		{"empty items fail closed", setting.AccessTokenScopePolicy{Allowed: []string{"", ""}}, user, "read:issue", true, ErrScopePolicyConfig},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			defer test.MockVariableValue(&setting.AccessTokenScopes, tc.policy)()
@@ -108,10 +115,8 @@ func TestAllowedScopes(t *testing.T) {
 	assert.Nil(t, allowed)
 
 	defer test.MockVariableValue(&setting.AccessTokenScopes, setting.AccessTokenScopePolicy{Allowed: []string{"public-only"}})()
-	allowed, err = AllowedScopes(user)
-	require.NoError(t, err)
-	assert.NotNil(t, allowed)
-	assert.Empty(t, allowed)
+	_, err = AllowedScopes(user)
+	require.ErrorIs(t, err, ErrScopePolicyConfig)
 }
 
 func TestCheckScopePolicy(t *testing.T) {
@@ -127,6 +132,11 @@ func TestCheckScopePolicy(t *testing.T) {
 		{"restricted scope without repository support", setting.AccessTokenScopePolicy{RequireRepoRestriction: []string{"read:user"}}, "read:user"},
 		{"restricted all", setting.AccessTokenScopePolicy{RequireRepoRestriction: []string{"all"}}, "all"},
 		{"restricted public-only", setting.AccessTokenScopePolicy{RequireRepoRestriction: []string{"public-only"}}, "public-only"},
+		{"allowed sudo", setting.AccessTokenScopePolicy{Allowed: []string{"sudo"}}, "ACCESS_TOKEN_ALLOWED_SCOPES"},
+		{"allowed empty items", setting.AccessTokenScopePolicy{Allowed: []string{"", ""}}, "ACCESS_TOKEN_ALLOWED_SCOPES"},
+		{"allowed public-only only", setting.AccessTokenScopePolicy{Allowed: []string{"public-only"}}, "names no permission scope"},
+		{"restricted sudo", setting.AccessTokenScopePolicy{RequireRepoRestriction: []string{"sudo"}}, "ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION"},
+		{"restricted empty items", setting.AccessTokenScopePolicy{RequireRepoRestriction: []string{""}}, "ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			defer test.MockVariableValue(&setting.AccessTokenScopes, tc.policy)()

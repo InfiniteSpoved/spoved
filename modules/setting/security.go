@@ -59,9 +59,23 @@ type AccessTokenScopePolicy struct {
 
 func loadAccessTokenScopePolicy(sec ConfigSection) AccessTokenScopePolicy {
 	return AccessTokenScopePolicy{
-		Allowed:                sec.Key("ACCESS_TOKEN_ALLOWED_SCOPES").Strings(","),
-		RequireRepoRestriction: sec.Key("ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION").Strings(","),
+		Allowed:                loadScopeList(sec, "ACCESS_TOKEN_ALLOWED_SCOPES"),
+		RequireRepoRestriction: loadScopeList(sec, "ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION"),
 	}
+}
+
+// loadScopeList keeps empty items, so that a set key that names no scope (e.g. ",") is refused instead of read as
+// unset.
+func loadScopeList(sec ConfigSection, key string) []string {
+	value := strings.TrimSpace(sec.Key(key).String())
+	if value == "" {
+		return nil
+	}
+	list := strings.Split(value, ",")
+	for i := range list {
+		list[i] = strings.TrimSpace(list[i])
+	}
+	return list
 }
 
 // CredentialExpiryPolicy is the instance policy for the expiry date of new credentials.

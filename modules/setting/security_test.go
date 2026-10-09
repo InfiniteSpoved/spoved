@@ -391,9 +391,14 @@ ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION = read:repository
 	assert.Equal(t, []string{"write:repository", "read:issue"}, p.Allowed)
 	assert.Equal(t, []string{"read:repository"}, p.RequireRepoRestriction)
 
-	cfg, err = NewConfigProviderFromData(`[security]`)
+	cfg, err = NewConfigProviderFromData("[security]\nACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION = \"  \"")
 	require.NoError(t, err)
 	p = loadAccessTokenScopePolicy(cfg.Section("security"))
-	assert.Empty(t, p.Allowed)
-	assert.Empty(t, p.RequireRepoRestriction)
+	assert.Nil(t, p.Allowed)
+	assert.Nil(t, p.RequireRepoRestriction)
+
+	// A set key keeps its empty items, so the policy check can refuse it.
+	cfg, err = NewConfigProviderFromData("[security]\nACCESS_TOKEN_ALLOWED_SCOPES = ,")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"", ""}, loadAccessTokenScopePolicy(cfg.Section("security")).Allowed)
 }

@@ -37,10 +37,20 @@ func (e *ScopePolicyError) Unwrap() error {
 	return e.Err
 }
 
+// policyScope parses a configured list. A set list must name only permission scopes: "" and "sudo", which parsing
+// would silently drop, are refused so that a list can't turn into "empty = all".
 func policyScope(key string, scopes []string) (auth_model.AccessTokenScope, error) {
+	for _, s := range scopes {
+		if s == "" || s == "sudo" {
+			return "", fmt.Errorf("%w: [security] %s: invalid scope %q", ErrScopePolicyConfig, key, s)
+		}
+	}
 	scope, err := auth_model.AccessTokenScope(strings.Join(scopes, ",")).Normalize()
 	if err != nil {
 		return "", fmt.Errorf("%w: [security] %s: %w", ErrScopePolicyConfig, key, err)
+	}
+	if len(scopes) > 0 && !scope.HasPermissionScope() {
+		return "", fmt.Errorf("%w: [security] %s: %q names no permission scope", ErrScopePolicyConfig, key, strings.Join(scopes, ","))
 	}
 	return scope, nil
 }
