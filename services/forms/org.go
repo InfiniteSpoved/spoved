@@ -49,6 +49,10 @@ type UpdateOrgSettingForm struct {
 	// repository policies
 	RestrictRepoVisibilityChange bool
 	PrivateForkPolicy            int `binding:"Range(0,2)"`
+
+	RequireTwoFactor        bool
+	RequireTwoFactorConfirm bool
+	RequireTwoFactorShown   bool // the form has the require_two_factor checkbox: a post without it keeps the setting
 }
 
 // Validate validates the fields

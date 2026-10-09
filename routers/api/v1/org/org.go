@@ -169,6 +169,13 @@ func GetUserOrgsPermissions(ctx *context.APIContext) {
 		ctx.Error(http.StatusInternalServerError, "GetOrgUserAuthorizeLevel", err)
 		return
 	}
+	// teams give nothing to a user the organization's two-factor requirement blocks
+	if blocked, err := ctx.User().TwoFactorBlocked(ctx, o); err != nil {
+		ctx.Error(http.StatusInternalServerError, "TwoFactorBlocked", err)
+		return
+	} else if blocked {
+		authorizeLevel = perm.AccessModeNone
+	}
 
 	if authorizeLevel > perm.AccessModeNone {
 		op.CanRead = true

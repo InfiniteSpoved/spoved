@@ -116,7 +116,7 @@ func ListPackages(ctx *context.Context) {
 
 		if ctx.Doer != nil {
 			ctx.Data["IsOrganizationMember"], _ = org_model.IsOrganizationMember(ctx, org.ID, ctx.Doer.ID)
-			ctx.Data["IsOrganizationOwner"], _ = org_model.IsOrganizationOwner(ctx, org.ID, ctx.Doer.ID)
+			ctx.Data["IsOrganizationOwner"], _ = org.IsActingOwner(ctx, ctx.Doer)
 		} else {
 			ctx.Data["IsOrganizationMember"] = false
 			ctx.Data["IsOrganizationOwner"] = false

@@ -134,6 +134,7 @@ func FindUserOrgForks(ctx context.Context, repoID, userID int64) ([]*Repository,
 				From("org_user").
 				Where(builder.Eq{"uid": userID}),
 		),
+		TwoFactorHiddenRepoCond(userID),
 	)
 
 	var repos []*Repository

@@ -24,9 +24,9 @@ func ReqOrgOwnership(ctx Context) {
 		return
 	}
 
-	isOwner, err := organization.IsOrganizationOwner(ctx.Context(), orgID, ctx.Doer().ID)
+	isOwner, err := isActingOwner(ctx, orgID)
 	if err != nil {
-		ctx.Error(http.StatusInternalServerError, "IsOrganizationOwner", err)
+		ctx.Error(http.StatusInternalServerError, "IsActingOwner", err)
 		return
 	} else if !isOwner {
 		if ctx.Organization() != nil {
@@ -36,4 +36,16 @@ func ReqOrgOwnership(ctx Context) {
 		}
 		return
 	}
+}
+
+// isActingOwner is organization.Organization.IsActingOwner for the doer.
+func isActingOwner(ctx Context, orgID int64) (bool, error) {
+	org := ctx.Organization()
+	if org == nil || org.ID != orgID {
+		var err error
+		if org, err = organization.GetOrgByID(ctx.Context(), orgID); err != nil {
+			return false, err
+		}
+	}
+	return org.IsActingOwner(ctx.Context(), ctx.Doer())
 }

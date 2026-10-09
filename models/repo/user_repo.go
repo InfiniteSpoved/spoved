@@ -23,6 +23,8 @@ func GetStarredRepos(ctx context.Context, userID int64, private bool, listOption
 		Join("LEFT", "star", "`repository`.id=`star`.repo_id")
 	if !private {
 		sess = sess.And("is_private=?", false)
+	} else {
+		sess = sess.And(TwoFactorHiddenRepoCond(userID))
 	}
 	sess = sess.And(reducer.RepoReadAccessFilter())
 
@@ -46,6 +48,8 @@ func GetWatchedRepos(ctx context.Context, userID int64, private bool, listOption
 		Join("LEFT", "watch", "`repository`.id=`watch`.repo_id")
 	if !private {
 		sess = sess.And("is_private=?", false)
+	} else {
+		sess = sess.And(TwoFactorHiddenRepoCond(userID))
 	}
 	sess = sess.And(reducer.RepoReadAccessFilter())
 
