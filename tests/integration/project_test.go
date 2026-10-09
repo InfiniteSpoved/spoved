@@ -1401,32 +1401,9 @@ func TestProjectWebDeleteProjectColumn(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			defer tests.PrintCurrentTest(t)()
-			defer test.MockVariableValue(&setting.IsProd, false)()
 			session := loginUser(t, user.Name)
 			url := fmt.Sprintf("/%s/%s/projects/%d/0", tt.owner, tt.repo, tt.projectID)
-			resp := sessionDELETE(t, session, url, http.StatusInternalServerError)
-
-			// template: templates/status/500.tmpl
-			// template lines:
-			// <div role="main" class="page-content status-page-500">
-			// [...]
-			// 	<div class="ui container tw-my-8">
-			// 		{{if .ErrorMsg}}
-			// 			<p>{{ctx.Locale.Tr "error.occurred"}}:</p>
-			// 			<pre class="tw-whitespace-pre-wrap tw-break-all">{{.ErrorMsg}}</pre>
-			// 		{{end}}
-			// [...]
-			// 	</div>
-			// </div>
-			doc := NewHTMLParser(t, resp.Body)
-			assert.Contains(t,
-				doc.Find(".page-content.status-page-500 .ui.container.tw-my-8 p").Text(),
-				translation.NewLocale("en-US").Tr("error.occurred"),
-			)
-			assert.Contains(t,
-				doc.Find(".page-content.status-page-500 .ui.container.tw-my-8 pre.tw-whitespace-pre-wrap.tw-break-all").Text(),
-				"column ID must not be empty",
-			)
+			sessionDELETE(t, session, url, http.StatusNotFound)
 		})
 	}
 
@@ -1713,32 +1690,9 @@ func TestProjectWebEditProjectColumn(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			defer tests.PrintCurrentTest(t)()
-			defer test.MockVariableValue(&setting.IsProd, false)()
 			session := loginUser(t, user.Name)
 			url := fmt.Sprintf("/%s/%s/projects/%d/0", tt.owner, tt.repo, tt.projectID)
-			resp := sessionJSONPUT(t, session, url, &editOpts, http.StatusInternalServerError)
-
-			// template: templates/status/500.tmpl
-			// template lines:
-			// <div role="main" class="page-content status-page-500">
-			// [...]
-			// 	<div class="ui container tw-my-8">
-			// 		{{if .ErrorMsg}}
-			// 			<p>{{ctx.Locale.Tr "error.occurred"}}:</p>
-			// 			<pre class="tw-whitespace-pre-wrap tw-break-all">{{.ErrorMsg}}</pre>
-			// 		{{end}}
-			// [...]
-			// 	</div>
-			// </div>
-			doc := NewHTMLParser(t, resp.Body)
-			assert.Contains(t,
-				doc.Find(".page-content.status-page-500 .ui.container.tw-my-8 p").Text(),
-				translation.NewLocale("en-US").Tr("error.occurred"),
-			)
-			assert.Contains(t,
-				doc.Find(".page-content.status-page-500 .ui.container.tw-my-8 pre.tw-whitespace-pre-wrap.tw-break-all").Text(),
-				"column ID must not be empty",
-			)
+			sessionJSONPUT(t, session, url, &editOpts, http.StatusNotFound)
 		})
 	}
 
@@ -1888,32 +1842,9 @@ func TestProjectWebSetDefaultProjectColumn(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			defer tests.PrintCurrentTest(t)()
-			defer test.MockVariableValue(&setting.IsProd, false)()
 			session := loginUser(t, user.Name)
 			url := fmt.Sprintf("/%s/%s/projects/%d/0/default", tt.owner, tt.repo, tt.projectID)
-			resp := sessionPOST(t, session, url, http.StatusInternalServerError)
-
-			// template: templates/status/500.tmpl
-			// template lines:
-			// <div role="main" class="page-content status-page-500">
-			// [...]
-			// 	<div class="ui container tw-my-8">
-			// 		{{if .ErrorMsg}}
-			// 			<p>{{ctx.Locale.Tr "error.occurred"}}:</p>
-			// 			<pre class="tw-whitespace-pre-wrap tw-break-all">{{.ErrorMsg}}</pre>
-			// 		{{end}}
-			// [...]
-			// 	</div>
-			// </div>
-			doc := NewHTMLParser(t, resp.Body)
-			assert.Contains(t,
-				doc.Find(".page-content.status-page-500 .ui.container.tw-my-8 p").Text(),
-				translation.NewLocale("en-US").Tr("error.occurred"),
-			)
-			assert.Contains(t,
-				doc.Find(".page-content.status-page-500 .ui.container.tw-my-8 pre.tw-whitespace-pre-wrap.tw-break-all").Text(),
-				"column ID must not be empty",
-			)
+			sessionPOST(t, session, url, http.StatusNotFound)
 		})
 	}
 
@@ -2026,32 +1957,9 @@ func TestProjectWebMoveIssues(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			defer tests.PrintCurrentTest(t)()
-			defer test.MockVariableValue(&setting.IsProd, false)()
 			session := loginUser(t, user.Name)
 			url := fmt.Sprintf("/%s/%s/projects/%d/0/move", tt.owner, tt.repo, tt.projectID)
-			resp := sessionJSONPOST(t, session, url, &moveOpts, http.StatusInternalServerError)
-
-			// template: templates/status/500.tmpl
-			// template lines:
-			// <div role="main" class="page-content status-page-500">
-			// [...]
-			// 	<div class="ui container tw-my-8">
-			// 		{{if .ErrorMsg}}
-			// 			<p>{{ctx.Locale.Tr "error.occurred"}}:</p>
-			// 			<pre class="tw-whitespace-pre-wrap tw-break-all">{{.ErrorMsg}}</pre>
-			// 		{{end}}
-			// [...]
-			// 	</div>
-			// </div>
-			doc := NewHTMLParser(t, resp.Body)
-			assert.Contains(t,
-				doc.Find(".page-content.status-page-500 .ui.container.tw-my-8 p").Text(),
-				translation.NewLocale("en-US").Tr("error.occurred"),
-			)
-			assert.Contains(t,
-				doc.Find(".page-content.status-page-500 .ui.container.tw-my-8 pre.tw-whitespace-pre-wrap.tw-break-all").Text(),
-				"column ID must not be empty",
-			)
+			sessionJSONPOST(t, session, url, &moveOpts, http.StatusNotFound)
 		})
 	}
 
@@ -2230,4 +2138,22 @@ func TestProjectWebCRUD(t *testing.T) {
 	unittest.AssertNotExistsBean(t, &project_model.Project{
 		ID: project.ID,
 	})
+}
+
+// #338: a project of the other kind whose ID collides is not found on the owner and repository routes.
+func TestProjectRouteTypeCollision(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	user := forgery.CreateUser(t, nil)
+	repo := forgery.CreateRepository(t, user, nil)
+	// a repository project whose repository ID is the user's ID, and a user project whose owner ID is the repository's
+	repoProject := &project_model.Project{Title: "collide-repo", Type: project_module.TypeRepository, RepoID: user.ID, CreatorID: user.ID}
+	userProject := &project_model.Project{Title: "collide-user", Type: project_module.TypeIndividual, OwnerID: repo.ID, CreatorID: user.ID}
+	require.NoError(t, db.Insert(t.Context(), repoProject))
+	require.NoError(t, db.Insert(t.Context(), userProject))
+
+	session := loginUser(t, user.Name)
+	session.MakeRequest(t, NewRequestf(t, "GET", "/%s/-/projects/%d", user.Name, repoProject.ID), http.StatusNotFound)
+	sessionPOST(t, session, fmt.Sprintf("/%s/-/projects/%d/0/default", user.Name, repoProject.ID), http.StatusNotFound)
+	session.MakeRequest(t, NewRequestf(t, "GET", "/%s/%s/projects/%d", user.Name, repo.Name, userProject.ID), http.StatusNotFound)
+	sessionPOST(t, session, fmt.Sprintf("/%s/%s/projects/%d/0/default", user.Name, repo.Name, userProject.ID), http.StatusNotFound)
 }
