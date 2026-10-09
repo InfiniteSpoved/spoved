@@ -4,11 +4,14 @@
 package system_test
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"forgejo.org/models/db"
 	"forgejo.org/models/system"
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/setting"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,4 +52,35 @@ func TestSettings(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, settings, 2)
 	assert.Equal(t, 4, rev)
+}
+
+// A refresh waiting for a pooled connection must not hold the lock that a caller inside a transaction (which holds
+// the only connection) needs to read a setting.
+func TestDynKeyGetterNoDeadlockInTransaction(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	eng, err := db.GetMasterEngine(db.GetEngine(db.DefaultContext))
+	require.NoError(t, err)
+	eng.SetMaxOpenConns(1)
+	defer eng.SetMaxOpenConns(setting.Database.MaxOpenConns)
+
+	getter := system.NewDatabaseDynKeyGetter()
+	outside := make(chan struct{})
+	require.NoError(t, db.WithTx(db.DefaultContext, func(ctx context.Context) error {
+		go func() {
+			getter.GetRevision(context.Background()) // waits for the connection the transaction holds
+			close(outside)
+		}()
+		time.Sleep(200 * time.Millisecond)
+
+		inside := make(chan int)
+		go func() { inside <- getter.GetRevision(ctx) }()
+		select {
+		case rev := <-inside:
+			assert.Positive(t, rev)
+		case <-time.After(5 * time.Second):
+			t.Error("GetRevision inside the transaction is blocked by the refresh waiting for a connection")
+		}
+		return nil
+	}))
+	<-outside
 }
