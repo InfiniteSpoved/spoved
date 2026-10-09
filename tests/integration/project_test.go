@@ -2186,3 +2186,18 @@ func TestProjectRouteTypeCollision(t *testing.T) {
 		unittest.AssertExistsAndLoadBean(t, &project_model.Column{ID: side.colID})
 	}
 }
+
+// #338: the column order of an owner-level project can't be changed through one of the owner's repositories.
+func TestProjectMoveColumnsOwnerProjectOnRepoRoute(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	user := forgery.CreateUser(t, nil)
+	org := forgery.CreateOrganisation(t, user)
+	repo := forgery.CreateRepository(t, org.AsUser(), nil)
+	orgProject := forgery.CreateProject(t, org, nil)
+
+	session := loginUser(t, user.Name)
+	req := NewRequestWithJSON(t, "POST", fmt.Sprintf("/%s/%s/projects/%d/move", org.Name, repo.Name, orgProject.ID), map[string]any{"columns": []any{}})
+	session.MakeRequest(t, req, http.StatusNotFound)
+	req = NewRequestWithJSON(t, "POST", fmt.Sprintf("/%s/-/projects/%d/move", org.Name, orgProject.ID), map[string]any{"columns": []any{}})
+	session.MakeRequest(t, req, http.StatusOK)
+}
