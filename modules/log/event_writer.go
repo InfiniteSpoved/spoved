@@ -24,6 +24,7 @@ type WriterMode struct {
 	Prefix   string
 	Colorize bool
 	Flags    Flags
+	Format   string `json:",omitempty"` // "json" selects EventFormatJSONMessage, anything else the text format
 
 	Expression string
 	Exclusion  string

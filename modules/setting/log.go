@@ -4,6 +4,7 @@
 package setting
 
 import (
+	"errors"
 	"fmt"
 	golog "log"
 	"os"
@@ -259,16 +260,56 @@ func loadLogModeByName(rootCfg ConfigProvider, loggerName, modeName string) (wri
 		writerOption.Protocol = ConfigInheritedKey(sec, "PROTOCOL").In("tcp", []string{"tcp", "unix", "udp"})
 		writerOption.Addr = ConfigInheritedKey(sec, "ADDR").MustString(":7020")
 		writerMode.WriterOption = writerOption
+	case "newrelic":
+		key, err := loadNewRelicKey(sec)
+		if err == nil {
+			opt := log.NewRelicOption{Endpoint: ConfigInheritedKeyString(sec, "ENDPOINT", defaultNewRelicEndpoint), Key: key}
+			if err = opt.Validate(); err == nil {
+				writerMode.WriterOption = opt
+			}
+		}
+		if err != nil {
+			return "", "", writerMode, fmt.Errorf("[log.%s] %w", modeName, err)
+		}
 	default:
 		if !log.HasEventWriter(writerType) {
 			return "", "", writerMode, fmt.Errorf("invalid log writer type (mode): %s, maybe it needs something like 'MODE=file' in [log.%s] section", writerType, modeName)
 		}
 	}
 
+	switch format := ConfigInheritedKeyString(sec, "FORMAT", "text"); format {
+	case "text":
+	case "json":
+		writerMode.Format = format
+	default:
+		return "", "", writerMode, fmt.Errorf("[log.%s] FORMAT must be text or json", modeName)
+	}
+
 	// set flags last because the console writer code may update default flags
 	writerMode.Flags = log.FlagsFromString(ConfigInheritedKeyString(sec, "FLAGS", defaultFlags))
 
 	return writerName, writerType, writerMode, nil
+}
+
+const defaultNewRelicEndpoint = "https://log-api.newrelic.com/log/v1"
+
+// loadNewRelicKey reads KEY or KEY_URI. It does not use loadSecret, which exits the process and whose errors
+// could echo a key pasted into KEY_URI by mistake.
+func loadNewRelicKey(sec ConfigSection) (string, error) {
+	key, uri := sec.Key("KEY").String(), sec.Key("KEY_URI").String()
+	switch {
+	case key != "" && uri != "":
+		return "", errors.New("KEY and KEY_URI are both set, use only one")
+	case uri == "":
+		return key, nil
+	case !strings.HasPrefix(uri, "file:"):
+		return "", errors.New("KEY_URI must be a file: URI")
+	}
+	key, err := loadSecretFromURI(uri)
+	if err != nil {
+		return "", fmt.Errorf("KEY_URI: %w", err)
+	}
+	return key, nil
 }
 
 var filenameSuffix = ""
@@ -286,6 +327,7 @@ func InitLoggersForTest() {
 
 // initAllLoggers creates all the log services
 func initAllLoggers() {
+	log.SetAppVersion(AppVer)
 	initManagedLoggers(log.GetManager(), CfgProvider)
 
 	golog.SetFlags(0)
