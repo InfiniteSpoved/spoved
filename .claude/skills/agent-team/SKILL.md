@@ -88,12 +88,11 @@ So:
    - Run the fast local stages: lint, unit, and the new tests by name.
    - Push the branch and open a PR to develop: "Fixes #<N>", or "Part of #<N>" for a
      partial PR.
-   - Start the CI run in spovedBuild for the pushed head **SHA**, never a branch
-     name (the ref shows in the public log). Use `inputs[full]=true` when the PR
-     changes code, and the quick run for docs/CSS-only changes (user decision 08
-     Oct: full runs are pre-approved for code PRs).
-   - Read failed jobs' encrypted logs and fix them.
-   - Repeat after every push: one run per pushed SHA.
+   - CI: the supervisor runs it (the classifier denies coders add_repo for
+     spovedBuild). Its watcher starts a full run on every new PR head and every
+     develop merge, and it sends failing tests straight to the coder. CI is free
+     (user decision 08 Oct): push early and often, and run locally only the tests
+     you are changing. Edits to .github/ci/* go to the supervisor as a diff.
    - Send the OL (and the security reviewer, if any) the PR number, the head SHA
      and the CI result.
 5. **Review.** In parallel:
@@ -171,10 +170,9 @@ re-arm for 4 h; skip it when nothing is in flight.
 - Up to three non-conflicting tickets at a time; merges one at a time. No code before the OL approves the design.
 - Read CLAUDE.md first. Coders invoke the ponytail skill (Skill tool, "full")
   before writing code.
-- CI runs in InfiniteSpoved/spovedBuild (CLAUDE.md "CI"). At session start, call
-  add_repo (owner InfiniteSpoved, repo spovedBuild, access push) and make the log
-  key. Start one run per pushed head SHA (full=true for code changes). Never put
-  branch names, logs, test names or code anywhere in spovedBuild.
+- CI runs in InfiniteSpoved/spovedBuild (CLAUDE.md "CI"), started by the
+  supervisor on every pushed head. Never put branch names, logs, test names or
+  code anywhere in spovedBuild.
 - Stage files by name, never `git add -A`: `make lint-*` and `make frontend`
   rewrite package-lock.json with the container's old npm.
 - Merge develop in with a merge commit. Never rebase or force-push a pushed branch.
@@ -242,9 +240,9 @@ Design: high effort. Implementation: normal effort; don't re-explore code the
 design already covers. Read CLAUDE.md first.
 
 You are the CODER for #<N> in InfiniteSpoved/spoved. Your lead is the OL <OL>.
-Report only to it, with send_message. At start: get_session for your id, then
-add_repo (owner InfiniteSpoved, repo spovedBuild, access push), and create the
-CI log key (CLAUDE.md "CI").
+Report only to it, with send_message. At start: get_session for your id. The
+supervisor <SUP> runs CI for you: after every push, send it the PR number and the
+40-char head SHA.
 
 Phase 1, DESIGN ONLY (no code). Read the issue, its comments and the OL's
 acceptance criteria, then the code it touches. Send the OL:
@@ -263,14 +261,17 @@ Phase 2, after the OL approves with a test plan:
 3. Run the fast local checks: lint on the changed packages, unit tests, and the
    new integration/e2e tests by name.
 4. Push and open a PR to develop: "Fixes #<N>" (or "Part of #<N>").
-5. Start the spovedBuild CI run for the pushed head SHA, with inputs[full]=true
-   for code changes. Wait for it, read failed jobs' encrypted logs, fix and push.
-   One run per pushed SHA.
+5. Push early and often. The supervisor starts a full CI run on every pushed head
+   and sends you failures as soon as a job fails; keep working meanwhile.
 6. Send the OL (and the security reviewer, if any) the PR number, the 40-char
    head SHA and the CI result, in one go.
 7. Fix every must-fix item the OL sends. Add a CLAUDE.md "Learnings" line for
-   anything new, in the same PR. Merge origin/develop in when asked, and rerun CI
-   on the new head.
+   anything new, in the same PR. Merge origin/develop in when asked.
+8. Merge only when the OL sends "Review passed: merge PR #<P> at head <SHA>".
+   Re-check the gates yourself (FULLY DONE on <SHA>, `git log --no-merges
+   <SHA>..<head>` empty, "CI success" on the head), then merge_pull_request
+   (merge_method "merge", expectedHeadSha = head). Report "PR #<P> (#<N>) merged
+   at <merge SHA>" to the OL.
 
 <RULES FOR EVERYONE>
 ```
