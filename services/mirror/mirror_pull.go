@@ -374,7 +374,13 @@ func runSync(ctx context.Context, m *repo_model.Mirror) ([]*mirrorSyncResult, bo
 			return nil, false
 		}
 		if m.EnablePrune {
-			if deleted, err = applyRefFilter(ctx, m, repoPath); err != nil {
+			var absent []string
+			for _, ref := range m.ExactRefs() {
+				if !upstream.present[ref] {
+					absent = append(absent, ref)
+				}
+			}
+			if deleted, err = applyRefFilter(ctx, m, repoPath, absent); err != nil {
 				log.Error("SyncMirrors [repo: %-v]: failed to delete refs excluded by the filter: %v", m.Repo, err)
 				return nil, false
 			}

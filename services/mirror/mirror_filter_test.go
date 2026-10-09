@@ -66,4 +66,11 @@ func TestCappedWriter(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, maxLsRemoteOutput+10, n)
 	assert.Equal(t, maxLsRemoteOutput, w.Len())
+	assert.True(t, w.truncated)
+
+	w = &cappedWriter{}
+	_, _ = w.Write([]byte(strings.Repeat("a", maxLsRemoteOutput)))
+	assert.False(t, w.truncated, "exactly the limit isn't truncated")
+	_, _ = w.Write([]byte("b"))
+	assert.True(t, w.truncated)
 }

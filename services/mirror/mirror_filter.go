@@ -20,12 +20,15 @@ import (
 // maxLsRemoteOutput bounds what an upstream can make us keep from `git ls-remote`.
 const maxLsRemoteOutput = 1 << 20
 
-type cappedWriter struct{ bytes.Buffer }
+type cappedWriter struct {
+	bytes.Buffer
+	truncated bool
+}
 
 func (w *cappedWriter) Write(p []byte) (int, error) {
-	if room := maxLsRemoteOutput - w.Len(); room > 0 {
-		w.Buffer.Write(p[:min(len(p), room)])
-	}
+	room := max(maxLsRemoteOutput-w.Len(), 0)
+	w.Buffer.Write(p[:min(len(p), room)])
+	w.truncated = w.truncated || len(p) > room
 	return len(p), nil
 }
 
@@ -58,6 +61,11 @@ func lsRemoteUpstream(ctx context.Context, m *repo_model.Mirror, remoteAddr stri
 		SetDescription(fmt.Sprintf("Mirror.lsRemote: %s", m.Repo.FullName())).
 		Run(&git.RunOpts{Timeout: timeout, Dir: m.Repo.RepoPath(), Env: env, Stdout: stdout, Stderr: stderr}); err != nil {
 		return nil, fmt.Errorf("ls-remote: %w: %s", err, stderr.String())
+	}
+
+	if stdout.truncated {
+		// refs past the cut would look missing upstream and be dropped from the fetch
+		return nil, errors.New("ls-remote: output is too large")
 	}
 
 	up := &upstreamRefs{present: map[string]bool{}}
@@ -95,7 +103,10 @@ func filterErrorFor(m *repo_model.Mirror, head string) string {
 // in SyncPullMirror skips refs/pull anyway. If something
 // was deleted, the objects that are no longer reachable are removed too, so an excluded commit can't be read by its
 // SHA. It returns the deletions for the usual ref-deleted notifications; the caller rewrites the commit graph.
-func applyRefFilter(ctx context.Context, m *repo_model.Mirror, repoPath string) ([]*mirrorSyncResult, error) {
+//
+// absent holds the local refs of exact patterns that the remote no longer has: they are not fetched, so `fetch --prune`
+// can't delete them, and they are deleted here.
+func applyRefFilter(ctx context.Context, m *repo_model.Mirror, repoPath string, absent []string) ([]*mirrorSyncResult, error) {
 	opts := &git.RunOpts{Dir: repoPath}
 	out, _, err := git.NewCommand(ctx, "for-each-ref", "--format=%(refname) %(objectname)").RunStdString(opts)
 	if err != nil {
@@ -113,11 +124,13 @@ func applyRefFilter(ctx context.Context, m *repo_model.Mirror, repoPath string) 
 		if !ok || keep[ref] {
 			continue
 		}
-		if name, ok := strings.CutPrefix(ref, "refs/heads/"); ok && repo_model.MatchRefFilter(m.BranchFilter, name) {
-			continue
-		}
-		if name, ok := strings.CutPrefix(ref, "refs/tags/"); ok && repo_model.MatchRefFilter(m.TagFilter, name) {
-			continue
+		if !slices.Contains(absent, ref) {
+			if name, ok := strings.CutPrefix(ref, "refs/heads/"); ok && repo_model.MatchRefFilter(m.BranchFilter, name) {
+				continue
+			}
+			if name, ok := strings.CutPrefix(ref, "refs/tags/"); ok && repo_model.MatchRefFilter(m.TagFilter, name) {
+				continue
+			}
 		}
 		stdin.WriteString("delete " + ref + "\n")
 		results = append(results, &mirrorSyncResult{refName: git.RefName(ref), oldCommitID: sha, newCommitID: gitShortEmptySha})
@@ -129,11 +142,12 @@ func applyRefFilter(ctx context.Context, m *repo_model.Mirror, repoPath string) 
 	if _, _, err := git.NewCommand(ctx, "update-ref", "--stdin").RunStdString(&git.RunOpts{Dir: repoPath, Stdin: strings.NewReader(stdin.String())}); err != nil {
 		return nil, err
 	}
+	// the refs are gone already; if this fails, the unreachable objects stay until the next narrowing or a gc
 	if _, _, err := git.NewCommand(ctx, "repack", "-a", "-d", "-q").RunStdString(opts); err != nil {
-		return results, err
+		return results, fmt.Errorf("refs deleted, but repack failed: %w", err)
 	}
 	if _, _, err := git.NewCommand(ctx, "prune", "--expire=now").RunStdString(opts); err != nil {
-		return results, err
+		return results, fmt.Errorf("refs deleted, but prune failed: %w", err)
 	}
 	return results, nil
 }
@@ -161,6 +175,6 @@ func FilterNewMirror(ctx context.Context, repo *repo_model.Repository, m *repo_m
 			}
 		}
 	}
-	_, applyErr := applyRefFilter(ctx, m, repoPath)
+	_, applyErr := applyRefFilter(ctx, m, repoPath, nil)
 	return applyErr
 }

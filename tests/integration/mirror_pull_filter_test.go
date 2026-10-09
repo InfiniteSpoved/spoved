@@ -239,6 +239,22 @@ func TestMirrorPullFilter(t *testing.T) {
 		assert.Equal(t, gitIn(t, u.bare, "rev-parse", "main"), gitIn(t, repo.RepoPath(), "rev-parse", "main"))
 	})
 
+	t.Run("an exact ref deleted upstream is pruned locally only with prune on", func(t *testing.T) {
+		u := newFilterUpstream(t)
+		repo := newFilterMirror(t, "filter-absent", u, "main,release/1,release/2", "v1")
+		gitIn(t, u.bare, "update-ref", "-d", "refs/heads/release/1")
+		gitIn(t, u.bare, "update-ref", "-d", "refs/heads/release/2")
+		gitIn(t, u.bare, "update-ref", "-d", "refs/tags/v1")
+
+		setFilter(t, repo, false, "main,release/1,release/2", "v1")
+		syncFilterMirror(t, repo)
+		assert.Equal(t, []string{"main", "release/1", "release/2", "v1"}, filterMirrorRefs(t, repo), "prune off keeps them")
+
+		setFilter(t, repo, true, "main,release/1,release/2", "v1")
+		syncFilterMirror(t, repo)
+		assert.Equal(t, []string{"main"}, filterMirrorRefs(t, repo))
+	})
+
 	t.Run("upstream HEAD outside the filter is reported, the default stays", func(t *testing.T) {
 		u := newFilterUpstream(t)
 		repo := newFilterMirror(t, "filter-head", u, "main,release/*", "")
