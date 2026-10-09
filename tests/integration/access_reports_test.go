@@ -26,6 +26,7 @@ import (
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/json"
+	"forgejo.org/modules/setting/config"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/tests"
 
@@ -336,6 +337,14 @@ func (queryCounter) BeforeProcess(c *contexts.ContextHook) (context.Context, err
 
 func (queryCounter) AfterProcess(*contexts.ContextHook) error { return nil }
 
+// frozenRevision serves a fixed settings revision, so the cache refresh (once a second) is not counted.
+type frozenRevision struct {
+	config.DynKeyGetter
+	revision int
+}
+
+func (f frozenRevision) GetRevision(context.Context) int { return f.revision }
+
 // countQueries returns the number of database queries f makes.
 func countQueries(t *testing.T, f func()) int64 {
 	t.Helper()
@@ -344,6 +353,9 @@ func countQueries(t *testing.T, f func()) int64 {
 		require.NoError(t, err)
 		engine.AddHook(queryCounter{})
 	})
+	getter := config.GetDynGetter()
+	config.SetDynGetter(frozenRevision{getter, getter.GetRevision(db.DefaultContext)})
+	defer config.SetDynGetter(getter)
 	queryCount.Store(0)
 	queryCounting.Store(true)
 	defer queryCounting.Store(false)
