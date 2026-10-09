@@ -44,6 +44,14 @@ func resultFilenames(t testing.TB, doc *HTMLDoc) []string {
 	return result
 }
 
+// resetRepoIndexer drops the documents of repo from the code indexer and indexes it again. PrepareTestEnv resets the
+// database but not the process-wide index, so an earlier test that indexed the repo under another default branch
+// (TestChangeDefaultBranch) would otherwise leave documents that make every hit appear twice.
+func resetRepoIndexer(t *testing.T, repo *repo_model.Repository) {
+	t.Helper()
+	require.NoError(t, code_indexer.ResetRepoIndexer(t.Context(), repo))
+}
+
 func TestSearchRepoIndexer(t *testing.T) {
 	testSearchRepo(t, true)
 }
@@ -61,7 +69,7 @@ func testSearchRepo(t *testing.T, indexer bool) {
 	require.NoError(t, err)
 
 	if indexer {
-		code_indexer.UpdateRepoIndexer(repo)
+		resetRepoIndexer(t, repo)
 	}
 
 	testSearch(t, "/user2/repo1/search?q=Description&page=1", []string{"README.md"}, indexer)
@@ -80,7 +88,7 @@ func testSearchRepo(t *testing.T, indexer bool) {
 	require.NoError(t, err)
 
 	if indexer {
-		code_indexer.UpdateRepoIndexer(repo)
+		resetRepoIndexer(t, repo)
 	}
 
 	testEmptySearch(t, indexer, true)
