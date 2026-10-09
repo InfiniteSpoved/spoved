@@ -12,8 +12,10 @@ import (
 
 	actions_model "forgejo.org/models/actions"
 	auth_model "forgejo.org/models/auth"
+	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	api "forgejo.org/modules/structs"
@@ -187,6 +189,8 @@ func TestAPIRemoveIssueLabelByName(t *testing.T) {
 	assert.Equal(t, int64(0), orgLabel.RepoID)
 	assert.Equal(t, int64(0), repoLabel.OrgID)
 
+	// a task runs only where Actions is enabled
+	require.NoError(t, db.Insert(t.Context(), &repo_model.RepoUnit{RepoID: repo.ID, Type: unit.TypeActions}))
 	task := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionTask{ID: 47})
 	task.RepoID = repo.ID
 	task.OwnerID = repo.OwnerID
