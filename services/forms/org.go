@@ -45,6 +45,11 @@ type UpdateOrgSettingForm struct {
 	Visibility                structs.VisibleType
 	MaxRepoCreation           int
 	RepoAdminChangeTeamAccess bool
+
+	// repository policies
+	RestrictRepoVisibilityChange bool
+	RestrictRepoDeleteTransfer   bool
+	PrivateForkPolicy            int `binding:"Range(0,2)"`
 }
 
 // Validate validates the fields

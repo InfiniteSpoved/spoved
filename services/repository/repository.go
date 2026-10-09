@@ -55,6 +55,9 @@ func CreateRepository(ctx context.Context, doer, owner *user_model.User, opts Cr
 // DeleteRepository deletes a repository for a user or organization: it moves it to the trash, or deletes it
 // for good when [trash] RETENTION_DAYS is 0.
 func DeleteRepository(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, notify bool) error {
+	if err := repo_module.CheckOrgPolicy(ctx, doer, repo, repo_module.OrgPolicyDelete, nil); err != nil {
+		return err
+	}
 	if setting.Trash.RetentionDays == 0 {
 		return DeleteRepositoryPermanently(ctx, doer, repo, notify)
 	}

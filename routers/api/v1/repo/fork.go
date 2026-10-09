@@ -151,7 +151,7 @@ func CreateFork(ctx *context.APIContext) {
 		Description: repo.Description,
 	})
 	if err != nil {
-		if organization.IsErrOrgArchived(err) {
+		if organization.IsErrOrgArchived(err) || errors.Is(err, util.ErrPermissionDenied) {
 			ctx.Error(http.StatusForbidden, "ForkRepositoryAndUpdates", err)
 		} else if errors.Is(err, util.ErrAlreadyExist) || repo_model.IsErrReachLimitOfRepo(err) {
 			ctx.Error(http.StatusConflict, "ForkRepositoryAndUpdates", err)

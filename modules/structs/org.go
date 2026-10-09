@@ -22,6 +22,14 @@ type Organization struct {
 	Created  time.Time `json:"created"`
 	// deprecated
 	UserName string `json:"username"`
+
+	// only organization owners may change the visibility of its repositories
+	RestrictRepoVisibilityChange bool `json:"restrict_repo_visibility_change"`
+	// only organization owners may delete or transfer its repositories
+	RestrictRepoDeleteTransfer bool `json:"restrict_repo_delete_transfer"`
+	// who may fork its private repositories: `all`, `org` (only into the organization) or `none` (site admins only)
+	// enum: ["all", "org", "none"]
+	PrivateForkPolicy string `json:"private_fork_policy"`
 }
 
 // OrganizationPermissions list different users permissions on an organization
@@ -59,6 +67,14 @@ type EditOrgOption struct {
 	// enum: ["public", "limited", "private"]
 	Visibility                *string `json:"visibility" binding:"In(public,limited,private)"`
 	RepoAdminChangeTeamAccess *bool   `json:"repo_admin_change_team_access"`
+
+	// only organization owners may change the visibility of its repositories
+	RestrictRepoVisibilityChange *bool `json:"restrict_repo_visibility_change"`
+	// only organization owners may delete or transfer its repositories
+	RestrictRepoDeleteTransfer *bool `json:"restrict_repo_delete_transfer"`
+	// who may fork its private repositories: `all`, `org` (only into the organization) or `none` (site admins only)
+	// enum: ["all", "org", "none"]
+	PrivateForkPolicy *string `json:"private_fork_policy" binding:"In(all,org,none)"`
 }
 
 // RenameOrgOption options when renaming an organization

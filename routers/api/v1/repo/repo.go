@@ -29,6 +29,7 @@ import (
 	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/util"
 	"forgejo.org/modules/validation"
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/api/v1/utils"
@@ -829,6 +830,15 @@ func updateBasicProperties(ctx *context.APIContext, opts api.EditRepoOption) err
 			ctx.Error(http.StatusUnprocessableEntity, "Force Private enabled", err)
 			return err
 		}
+		if visibilityChanged {
+			if err := repo_module.CheckOrgPolicy(ctx, ctx.Doer(), repo, repo_module.OrgPolicyVisibility, nil); errors.Is(err, util.ErrPermissionDenied) {
+				ctx.Error(http.StatusForbidden, "CheckOrgPolicy", err)
+				return err
+			} else if err != nil {
+				ctx.Error(http.StatusInternalServerError, "CheckOrgPolicy", err)
+				return err
+			}
+		}
 
 		repo.IsPrivate = *opts.Private
 	}
@@ -1392,7 +1402,11 @@ func Delete(ctx *context.APIContext) {
 	}
 
 	if err := repo_service.DeleteRepository(ctx, ctx.Doer(), repo, true); err != nil {
-		ctx.Error(http.StatusInternalServerError, "DeleteRepository", err)
+		if errors.Is(err, util.ErrPermissionDenied) {
+			ctx.Error(http.StatusForbidden, "DeleteRepository", err)
+		} else {
+			ctx.Error(http.StatusInternalServerError, "DeleteRepository", err)
+		}
 		return
 	}
 

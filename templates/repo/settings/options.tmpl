@@ -29,11 +29,12 @@
 							{{if .IsAdmin}}
 								<input name="private" type="checkbox" {{if .Repository.IsPrivate}}checked{{end}}>
 							{{else}}
-								<input name="private" type="checkbox" {{if .Repository.IsPrivate}}checked{{end}}{{if and $.ForcePrivate .Repository.IsPrivate}} disabled{{end}}>
-								{{if and .Repository.IsPrivate $.ForcePrivate}}<input type="hidden" name="private" value="{{.Repository.IsPrivate}}">{{end}}
+								<input name="private" type="checkbox" {{if .Repository.IsPrivate}}checked{{end}}{{if or (and $.ForcePrivate .Repository.IsPrivate) $.OrgPolicyBlocksVisibility}} disabled{{end}}>
+								{{if or (and .Repository.IsPrivate $.ForcePrivate) $.OrgPolicyBlocksVisibility}}<input type="hidden" name="private" value="{{.Repository.IsPrivate}}">{{end}}
 							{{end}}
 							<label>{{ctx.Locale.Tr "repo.visibility_helper"}} {{if .Repository.NumForks}}<span class="text red">{{ctx.Locale.Tr "repo.visibility_fork_helper"}}</span>{{end}}</label>
 						</div>
+						{{if $.OrgPolicyBlocksVisibility}}<p class="help org-policy-note">{{ctx.Locale.Tr "repo.settings.blocked_by_org_policy" (ctx.Locale.Tr "org.settings.restrict_repo_visibility_change")}}</p>{{end}}
 					</div>
 				{{end}}
 				<div class="field {{if .Err_Description}}error{{end}}">
@@ -515,6 +516,7 @@
 							{{else}}
 								{{ctx.Locale.Tr "repo.settings.transfer_desc"}}
 							{{end}}
+							{{if $.OrgPolicyBlocksDeleteTransfer}}<p class="help org-policy-note">{{ctx.Locale.Tr "repo.settings.blocked_by_org_policy" (ctx.Locale.Tr "org.settings.restrict_repo_delete_transfer")}}</p>{{end}}
 						</div>
 					</div>
 					<div class="flex-item-trailing">
@@ -524,7 +526,7 @@
 								<button class="ui red button">{{ctx.Locale.Tr "repo.settings.transfer_abort"}}</button>
 							</form>
 						{{else}}
-							<button class="danger button show-modal" data-modal="#transfer-repo-modal">{{ctx.Locale.Tr "repo.settings.transfer.button"}}</button>
+							<button class="danger button show-modal" data-modal="#transfer-repo-modal"{{if $.OrgPolicyBlocksDeleteTransfer}} disabled{{end}}>{{ctx.Locale.Tr "repo.settings.transfer.button"}}</button>
 						{{end}}
 					</div>
 				</div>
@@ -553,10 +555,13 @@
 				<div class="flex-item">
 					<div class="flex-item-main">
 						<div class="flex-item-title">{{ctx.Locale.Tr "repo.settings.delete"}}</div>
-						<div class="flex-item-body">{{if .TrashRetentionDays}}{{template "repo/settings/trash_notice" .}}{{else}}{{ctx.Locale.Tr "repo.settings.delete_desc"}}{{end}}</div>
+						<div class="flex-item-body">
+							{{if .TrashRetentionDays}}{{template "repo/settings/trash_notice" .}}{{else}}{{ctx.Locale.Tr "repo.settings.delete_desc"}}{{end}}
+							{{if $.OrgPolicyBlocksDeleteTransfer}}<p class="help org-policy-note">{{ctx.Locale.Tr "repo.settings.blocked_by_org_policy" (ctx.Locale.Tr "org.settings.restrict_repo_delete_transfer")}}</p>{{end}}
+						</div>
 					</div>
 					<div class="flex-item-trailing">
-						<button class="danger button show-modal" data-modal="#delete-repo-modal">{{ctx.Locale.Tr "repo.settings.delete"}}</button>
+						<button class="danger button show-modal" data-modal="#delete-repo-modal"{{if $.OrgPolicyBlocksDeleteTransfer}} disabled{{end}}>{{ctx.Locale.Tr "repo.settings.delete"}}</button>
 					</div>
 				</div>
 				{{if not .Repository.IsMirror}}

@@ -419,6 +419,10 @@ func ToOrganization(ctx context.Context, org *organization.Organization) *api.Or
 		RepoAdminChangeTeamAccess: org.RepoAdminChangeTeamAccess,
 		Archived:                  org.IsArchived,
 		Created:                   org.CreatedUnix.AsTime(),
+
+		RestrictRepoVisibilityChange: org.RestrictRepoVisibilityChange,
+		RestrictRepoDeleteTransfer:   org.RestrictRepoDeleteTransfer,
+		PrivateForkPolicy:            org.AsUser().PrivateForkPolicyName(),
 	}
 }
 

@@ -381,6 +381,9 @@ func StartRepositoryTransfer(ctx context.Context, doer, newOwner *user_model.Use
 	if err := checkNotArchivedOrg(ctx, repo, newOwner); err != nil {
 		return err
 	}
+	if err := repo_module.CheckOrgPolicy(ctx, doer, repo, repo_module.OrgPolicyTransfer, nil); err != nil {
+		return err
+	}
 	if user_model.IsBlocked(ctx, newOwner.ID, doer.ID) {
 		return user_model.ErrBlockedByUser
 	}

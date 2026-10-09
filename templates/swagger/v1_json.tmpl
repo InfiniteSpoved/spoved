@@ -30896,9 +30896,29 @@
           "type": "string",
           "x-go-name": "Location"
         },
+        "private_fork_policy": {
+          "description": "who may fork its private repositories: `all`, `org` (only into the organization) or `none` (site admins only)",
+          "type": "string",
+          "enum": [
+            "all",
+            "org",
+            "none"
+          ],
+          "x-go-name": "PrivateForkPolicy"
+        },
         "repo_admin_change_team_access": {
           "type": "boolean",
           "x-go-name": "RepoAdminChangeTeamAccess"
+        },
+        "restrict_repo_delete_transfer": {
+          "description": "only organization owners may delete or transfer its repositories",
+          "type": "boolean",
+          "x-go-name": "RestrictRepoDeleteTransfer"
+        },
+        "restrict_repo_visibility_change": {
+          "description": "only organization owners may change the visibility of its repositories",
+          "type": "boolean",
+          "x-go-name": "RestrictRepoVisibilityChange"
         },
         "visibility": {
           "description": "possible values are `public`, `limited` or `private`",
@@ -33743,9 +33763,29 @@
           "type": "string",
           "x-go-name": "Name"
         },
+        "private_fork_policy": {
+          "description": "who may fork its private repositories: `all`, `org` (only into the organization) or `none` (site admins only)",
+          "type": "string",
+          "enum": [
+            "all",
+            "org",
+            "none"
+          ],
+          "x-go-name": "PrivateForkPolicy"
+        },
         "repo_admin_change_team_access": {
           "type": "boolean",
           "x-go-name": "RepoAdminChangeTeamAccess"
+        },
+        "restrict_repo_delete_transfer": {
+          "description": "only organization owners may delete or transfer its repositories",
+          "type": "boolean",
+          "x-go-name": "RestrictRepoDeleteTransfer"
+        },
+        "restrict_repo_visibility_change": {
+          "description": "only organization owners may change the visibility of its repositories",
+          "type": "boolean",
+          "x-go-name": "RestrictRepoVisibilityChange"
         },
         "username": {
           "description": "deprecated",

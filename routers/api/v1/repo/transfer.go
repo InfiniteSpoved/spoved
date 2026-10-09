@@ -17,6 +17,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
@@ -115,7 +116,7 @@ func Transfer(ctx *context.APIContext) {
 	oldFullname := ctx.Repo().Repository.FullName()
 
 	if err := repo_service.StartRepositoryTransfer(ctx, ctx.Doer(), newOwner, ctx.Repo().Repository, teams); err != nil {
-		if errors.Is(err, user_model.ErrBlockedByUser) || organization.IsErrOrgArchived(err) {
+		if errors.Is(err, user_model.ErrBlockedByUser) || organization.IsErrOrgArchived(err) || errors.Is(err, util.ErrPermissionDenied) {
 			ctx.Error(http.StatusForbidden, "StartRepositoryTransfer", err)
 			return
 		}
