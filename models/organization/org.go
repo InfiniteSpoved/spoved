@@ -422,7 +422,7 @@ func GetOrgByName(ctx context.Context, name string) (*Organization, error) {
 		LowerName: strings.ToLower(name),
 		Type:      user_model.UserTypeOrganization,
 	}
-	has, err := db.GetEngine(ctx).Get(u)
+	has, err := db.GetEngine(ctx).Where("trashed_unix = 0").Get(u)
 	if err != nil {
 		return nil, err
 	} else if !has {
@@ -604,6 +604,18 @@ func AddOrgUser(ctx context.Context, orgID, uid int64) error {
 
 // GetOrgByID returns the user object by given ID if exists.
 func GetOrgByID(ctx context.Context, id int64) (*Organization, error) {
+	u, err := GetOrgByIDIncludingTrashed(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if u.TrashedUnix != 0 {
+		return nil, user_model.ErrUserNotExist{UID: id}
+	}
+	return u, nil
+}
+
+// GetOrgByIDIncludingTrashed is GetOrgByID for the trash service, which also sees organizations in the trash.
+func GetOrgByIDIncludingTrashed(ctx context.Context, id int64) (*Organization, error) {
 	u := new(Organization)
 	has, err := db.GetEngine(ctx).ID(id).Get(u)
 	if err != nil {

@@ -139,6 +139,14 @@ type User struct {
 	// true: the user is not allowed to log in Web UI. Git/SSH access could still be allowed (please refer to Git/SSH access related code/documents)
 	ProhibitLogin bool `xorm:"NOT NULL DEFAULT false"`
 
+	// TrashedUnix is 0 for a live account, the time the organization was moved to the trash (or the deleted
+	// user became a tombstone that keeps the name and the trashed repositories), or minus the time a purge
+	// claimed it. Trashed accounts are hidden by the lookups below; the name columns are a display record.
+	TrashedUnix   timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0 INDEX"`
+	TrashedByID   int64              `xorm:"NOT NULL DEFAULT 0"`
+	TrashedByName string             `xorm:"NOT NULL DEFAULT ''"`
+	TrashedName   string             `xorm:"NOT NULL DEFAULT ''"`
+
 	// Avatar
 	Avatar          string `xorm:"VARCHAR(2048) NOT NULL"`
 	AvatarEmail     string `xorm:"NOT NULL"`
@@ -941,7 +949,7 @@ func CountUsers(ctx context.Context, opts *CountUserFilter) int64 {
 func countUsers(ctx context.Context, opts *CountUserFilter) int64 {
 	sess := db.GetEngine(ctx)
 	cond := builder.NewCond()
-	cond = cond.And(builder.In("type", UserTypeIndividual, UserTypeRemoteUser))
+	cond = cond.And(builder.In("type", UserTypeIndividual, UserTypeRemoteUser), builder.Eq{"trashed_unix": 0})
 
 	if opts != nil {
 		if opts.LastLoginSince != nil {
@@ -1048,7 +1056,7 @@ func UpdateUserCols(ctx context.Context, u *User, cols ...string) error {
 // GetInactiveUsers gets all inactive users
 func GetInactiveUsers(ctx context.Context, olderThan time.Duration) ([]*User, error) {
 	cond := builder.And(
-		builder.Eq{"is_active": false},
+		builder.Eq{"is_active": false, "trashed_unix": 0},
 		builder.Or( // only plain user
 			builder.Eq{"`type`": UserTypeIndividual},
 			builder.Eq{"`type`": UserTypeUserReserved},
@@ -1070,8 +1078,30 @@ func UserPath(userName string) string { //revive:disable-line:exported
 	return filepath.Join(setting.RepoRootPath, strings.ToLower(userName))
 }
 
+// IsTrashed returns true for an organization in the trash and for the tombstone of a deleted user.
+func (u *User) IsTrashed() bool {
+	return u.TrashedUnix != 0
+}
+
+// NotTrashedCond matches the accounts that are not in the trash, for queries that reach users by col.
+func NotTrashedCond(col string) builder.Cond {
+	return builder.In(col, builder.Select("id").From("`user`").Where(builder.Eq{"trashed_unix": 0}))
+}
+
 // GetUserByID returns the user object by given ID if exists.
 func GetUserByID(ctx context.Context, id int64) (*User, error) {
+	u, err := GetUserByIDIncludingTrashed(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if u.IsTrashed() {
+		return nil, ErrUserNotExist{UID: id}
+	}
+	return u, nil
+}
+
+// GetUserByIDIncludingTrashed is the only lookup that returns trashed accounts; it is for the trash service.
+func GetUserByIDIncludingTrashed(ctx context.Context, id int64) (*User, error) {
 	u := new(User)
 	has, err := db.GetEngine(ctx).ID(id).Get(u)
 	if err != nil {
@@ -1091,6 +1121,7 @@ func GetUserByIDs(ctx context.Context, ids []int64) ([]*User, error) {
 	users := make([]*User, 0, len(ids))
 	err := db.GetEngine(ctx).In("id", ids).
 		Table("user").
+		And("trashed_unix = 0").
 		Find(&users)
 	return users, err
 }
@@ -1149,7 +1180,7 @@ func GetUserByName(ctx context.Context, name string) (*User, error) {
 	}
 	// adding Type: UserTypeIndividual is a noop because it is zero and discarded
 	u := &User{LowerName: strings.ToLower(name)}
-	has, err := db.GetEngine(ctx).Get(u)
+	has, err := db.GetEngine(ctx).Where("trashed_unix = 0").Get(u)
 	if err != nil {
 		return nil, err
 	} else if !has {
@@ -1169,6 +1200,7 @@ func GetMaileableUsersByIDs(ctx context.Context, ids []int64, isMention bool) ([
 		return ous, db.GetEngine(ctx).
 			In("id", ids).
 			Where("`type` = ?", UserTypeIndividual).
+			And("`trashed_unix` = 0").
 			And("`prohibit_login` = ?", false).
 			And("`is_active` = ?", true).
 			In("`email_notifications_preference`", EmailNotificationsEnabled, EmailNotificationsOnMention, EmailNotificationsAndYourOwn, EmailNotificationsCustom).
@@ -1178,6 +1210,7 @@ func GetMaileableUsersByIDs(ctx context.Context, ids []int64, isMention bool) ([
 	return ous, db.GetEngine(ctx).
 		In("id", ids).
 		Where("`type` = ?", UserTypeIndividual).
+		And("`trashed_unix` = 0").
 		And("`prohibit_login` = ?", false).
 		And("`is_active` = ?", true).
 		In("`email_notifications_preference`", EmailNotificationsEnabled, EmailNotificationsAndYourOwn, EmailNotificationsCustom).
@@ -1187,7 +1220,7 @@ func GetMaileableUsersByIDs(ctx context.Context, ids []int64, isMention bool) ([
 // GetUserNameByID returns username for the id
 func GetUserNameByID(ctx context.Context, id int64) (string, error) {
 	var name string
-	has, err := db.GetEngine(ctx).Table("user").Where("id = ?", id).Cols("name").Get(&name)
+	has, err := db.GetEngine(ctx).Table("user").Where("id = ? AND trashed_unix = 0", id).Cols("name").Get(&name)
 	if err != nil {
 		return "", err
 	}
@@ -1286,7 +1319,7 @@ func GetUserByEmail(ctx context.Context, email string) (*User, error) {
 	if before, ok := strings.CutSuffix(email, fmt.Sprintf("@%s", setting.Service.NoReplyAddress)); ok {
 		username := before
 		user := &User{}
-		has, err := db.GetEngine(ctx).Where("lower_name=?", username).Get(user)
+		has, err := db.GetEngine(ctx).Where("lower_name=? AND trashed_unix = 0", username).Get(user)
 		if err != nil {
 			return nil, err
 		}

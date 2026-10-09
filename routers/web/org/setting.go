@@ -242,7 +242,7 @@ func SettingsDelete(ctx *context.Context) {
 			return
 		}
 
-		if err := org_service.DeleteOrganization(ctx, ctx.Org.Organization, false); err != nil {
+		if err := org_service.DeleteOrTrashOrganization(ctx, ctx.Doer, ctx.Org.Organization); err != nil {
 			if models.IsErrUserOwnRepos(err) {
 				ctx.Flash.Error(ctx.Tr("form.org_still_own_repo"))
 				ctx.Redirect(ctx.Org.OrgLink + "/settings/delete")
@@ -258,6 +258,9 @@ func SettingsDelete(ctx *context.Context) {
 		}
 		return
 	}
+
+	ctx.Data["TrashRetentionDays"] = setting.Trash.RetentionDays
+	ctx.Data["TrashRestoreHelpURL"] = setting.Trash.RestoreHelpURL
 
 	err := shared_user.LoadHeaderCount(ctx)
 	if err != nil {

@@ -22,17 +22,20 @@ import (
 	access_model "forgejo.org/models/perm/access"
 	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
+	secret_model "forgejo.org/models/secret"
 	system_model "forgejo.org/models/system"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/timeutil"
 	issue_service "forgejo.org/services/issue"
 
 	"xorm.io/builder"
 )
 
-// deleteUser deletes models associated to a user.
-func deleteUser(ctx context.Context, u *user_model.User, purge bool) (err error) {
+// deleteUser deletes models associated to a user. With keepRow the user row stays as the tombstone of a user
+// who owned repositories (see tombstoneUser) instead of being deleted.
+func deleteUser(ctx context.Context, u *user_model.User, purge, keepRow bool) (err error) {
 	e := db.GetEngine(ctx)
 
 	// ***** START: Watch *****
@@ -266,9 +269,68 @@ func deleteUser(ctx context.Context, u *user_model.User, purge bool) (err error)
 	}
 	// ***** END: TeamUser *****
 
+	if keepRow {
+		return tombstoneUser(ctx, u)
+	}
+
 	if _, err = db.DeleteByID[user_model.User](ctx, u.ID); err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}
 
+	return nil
+}
+
+// tombstoneUser turns the deleted user into a hidden, inert tombstone that keeps the name and owns the user's
+// repositories in the trash until the last one is purged or restored to another owner. Everything that
+// identifies the person or lets anyone log in as them is cleared; the email becomes a unique placeholder on the
+// no-reply domain.
+func tombstoneUser(ctx context.Context, u *user_model.User) error {
+	// the second factors and per-person rows that the hard delete leaves to the row going away
+	if err := db.DeleteBeans(ctx,
+		&auth_model.TwoFactor{UID: u.ID},
+		&auth_model.WebAuthnCredential{UserID: u.ID},
+		&activities_model.Notification{UserID: u.ID},
+		&issues_model.IssueWatch{UserID: u.ID},
+		&secret_model.Secret{OwnerID: u.ID},
+		&actions_model.ActionVariable{OwnerID: u.ID},
+	); err != nil {
+		return fmt.Errorf("tombstone: %w", err)
+	}
+	_, err := db.GetEngine(ctx).Table("user").ID(u.ID).Update(map[string]any{
+		"trashed_unix":                   timeutil.TimeStampNow(),
+		"trashed_by_id":                  u.ID,
+		"trashed_by_name":                u.Name,
+		"trashed_name":                   u.Name,
+		"email":                          fmt.Sprintf("deleted-%d@%s", u.ID, setting.Service.NoReplyAddress),
+		"full_name":                      "",
+		"keep_email_private":             true,
+		"email_notifications_preference": user_model.EmailNotificationsDisabled,
+		"passwd":                         "",
+		"salt":                           "",
+		"passwd_hash_algo":               "",
+		"rands":                          "",
+		"login_type":                     auth_model.Plain,
+		"login_source":                   0,
+		"login_name":                     "",
+		"location":                       "",
+		"website":                        "",
+		"pronouns":                       "",
+		"description":                    "",
+		"avatar":                         "",
+		"avatar_email":                   "",
+		"use_custom_avatar":              false,
+		"is_active":                      false,
+		"is_admin":                       false,
+		"is_restricted":                  true,
+		"is_auditor":                     false,
+		"prohibit_login":                 true,
+		"allow_git_hook":                 false,
+		"allow_import_local":             false,
+		"allow_create_organization":      false,
+		"max_repo_creation":              0,
+	})
+	if err != nil {
+		return fmt.Errorf("tombstone: %w", err)
+	}
 	return nil
 }

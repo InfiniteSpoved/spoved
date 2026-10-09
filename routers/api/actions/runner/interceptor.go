@@ -11,6 +11,7 @@ import (
 
 	actions_model "forgejo.org/models/actions"
 	auth_model "forgejo.org/models/auth"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
@@ -42,6 +43,16 @@ var withRunner = connect.WithInterceptors(connect.UnaryInterceptorFunc(func(unar
 		}
 		if subtle.ConstantTimeCompare([]byte(runner.TokenHash), []byte(auth_model.HashToken(token, runner.TokenSalt))) != 1 {
 			return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("unregistered runner"))
+		}
+
+		// the runners of an organization in the trash (or of a deleted user) are not served until it is restored
+		if runner.OwnerID != 0 {
+			if _, err := user_model.GetUserByID(ctx, runner.OwnerID); err != nil {
+				if user_model.IsErrUserNotExist(err) {
+					return nil, connect.NewError(connect.CodeNotFound, errors.New("owner of the runner not found"))
+				}
+				return nil, connect.NewError(connect.CodeInternal, err)
+			}
 		}
 
 		cols := []string{"last_online"}

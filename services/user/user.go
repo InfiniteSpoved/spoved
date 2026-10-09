@@ -189,6 +189,18 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 		return models.ErrDeleteLastAdminUser{UID: u.ID}
 	}
 
+	// A purged user's repositories go to the trash as separate items and the user stays as a hidden tombstone that
+	// owns them (so the name can't be taken and a purge never meets another user's repository). The tombstone is
+	// deleted for real by services/trash with the last of them.
+	keepRow := false
+	if purge && !u.IsTrashed() && setting.Trash.TrashUserRepos && setting.Trash.RetentionDays > 0 {
+		count, err := repo_model.CountRepositories(ctx, repo_model.CountRepositoryOptions{OwnerID: u.ID})
+		if err != nil {
+			return fmt.Errorf("GetRepositoryCount: %w", err)
+		}
+		keepRow = count > 0
+	}
+
 	hasSSHKey, err := db.GetEngine(ctx).Where("owner_id = ? AND type != ?", u.ID, asymkey_model.KeyTypePrincipal).Table("public_key").Exist()
 	if err != nil {
 		return err
@@ -229,7 +241,12 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 		//
 		// An alternative option here would be write a DeleteAllRepositoriesForUserID function which would delete all of the repos
 		// but such a function would likely get out of date
-		err := repo_service.DeleteOwnerRepositoriesDirectly(ctx, u)
+		var err error
+		if keepRow {
+			err = repo_service.TrashUserRepositories(ctx, u)
+		} else {
+			err = repo_service.DeleteOwnerRepositoriesDirectly(ctx, u)
+		}
 		if err != nil {
 			return err
 		}
@@ -301,6 +318,13 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 	count, err := repo_model.CountRepositories(ctx, repo_model.CountRepositoryOptions{OwnerID: u.ID})
 	if err != nil {
 		return fmt.Errorf("GetRepositoryCount: %w", err)
+	} else if keepRow {
+		// the trashed ones stay with the tombstone; one created meanwhile is not in the trash
+		if live, err := db.GetEngine(ctx).Table("repository").Where("owner_id = ? AND trashed_unix = 0", u.ID).Exist(); err != nil {
+			return err
+		} else if live {
+			return models.ErrUserOwnRepos{UID: u.ID}
+		}
 	} else if count > 0 {
 		return models.ErrUserOwnRepos{UID: u.ID}
 	}
@@ -320,7 +344,7 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 		return models.ErrUserOwnPackages{UID: u.ID}
 	}
 
-	if err := deleteUser(ctx, u, purge); err != nil {
+	if err := deleteUser(ctx, u, purge, keepRow); err != nil {
 		return fmt.Errorf("DeleteUser: %w", err)
 	}
 
@@ -343,11 +367,13 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 
 	// Note: There are something just cannot be roll back,
 	//	so just keep error logs of those operations.
-	path := user_model.UserPath(u.Name)
-	if err := util.RemoveAll(path); err != nil {
-		err = fmt.Errorf("Failed to RemoveAll %s: %w", path, err)
-		_ = system_model.CreateNotice(ctx, system_model.NoticeTask, fmt.Sprintf("delete user '%s': %v", u.Name, err))
-		return err
+	if !keepRow { // the directory holds the trashed repositories of a tombstone
+		path := user_model.UserPath(u.Name)
+		if err := util.RemoveAll(path); err != nil {
+			err = fmt.Errorf("Failed to RemoveAll %s: %w", path, err)
+			_ = system_model.CreateNotice(ctx, system_model.NoticeTask, fmt.Sprintf("delete user '%s': %v", u.Name, err))
+			return err
+		}
 	}
 
 	if u.Avatar != "" {

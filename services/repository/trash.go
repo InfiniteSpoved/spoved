@@ -6,6 +6,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"forgejo.org/models"
 	actions_model "forgejo.org/models/actions"
@@ -16,14 +17,67 @@ import (
 	code_indexer "forgejo.org/modules/indexer/code"
 	issue_indexer "forgejo.org/modules/indexer/issues"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/sync"
 	"forgejo.org/modules/timeutil"
 	actions_service "forgejo.org/services/actions"
 )
 
+var trashLocks sync.MutexMap
+
+// LockTrash serializes the trash, restore and purge of one item within this process; kind is "repo" or
+// "org". Across processes the conditional UPDATEs on trashed_unix decide, so that only one of them wins.
+func LockTrash(kind string, id int64) func() {
+	return trashLocks.Lock(fmt.Sprintf("%s-%d", kind, id))
+}
+
 // TrashRepository moves repo to the trash: it keeps all data but is hidden from everyone but site admins until
 // it is restored or purged (see services/trash). The row, its ID and its name stay, so the name stays reserved.
 func TrashRepository(ctx context.Context, doer *user_model.User, repo *repo_model.Repository) error {
-	// Stop what is running while the repository can still be loaded by the Actions code.
+	if err := cancelPendingRuns(ctx, repo); err != nil {
+		return err
+	}
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		return trashRepositoryRows(ctx, doer, repo, false)
+	}); err != nil {
+		return err
+	}
+	afterTrash(ctx, repo)
+	return nil
+}
+
+// TrashOwnerRepositories trashes every live repository of owner in one transaction, together with inTx, which
+// trashes the owner itself. Their restore and purge follow the owner's (TrashedWithOwner).
+func TrashOwnerRepositories(ctx context.Context, doer, owner *user_model.User, inTx func(context.Context) error) error {
+	var repos []*repo_model.Repository
+	if err := db.GetEngine(ctx).Where("owner_id = ? AND trashed_unix = 0", owner.ID).Find(&repos); err != nil {
+		return err
+	}
+	for _, repo := range repos {
+		if err := cancelPendingRuns(ctx, repo); err != nil {
+			return err
+		}
+	}
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		if err := inTx(ctx); err != nil {
+			return err
+		}
+		for _, repo := range repos {
+			if err := trashRepositoryRows(ctx, doer, repo, true); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, repo := range repos {
+		afterTrash(ctx, repo)
+	}
+	return nil
+}
+
+// cancelPendingRuns stops what is running while the repository can still be loaded by the Actions code.
+func cancelPendingRuns(ctx context.Context, repo *repo_model.Repository) error {
 	runs, err := db.Find[actions_model.ActionRun](ctx, actions_model.FindRunOptions{RepoID: repo.ID, Status: actions_model.PendingStatuses()})
 	if err != nil {
 		return fmt.Errorf("find pending runs: %w", err)
@@ -33,43 +87,101 @@ func TrashRepository(ctx context.Context, doer *user_model.User, repo *repo_mode
 			return fmt.Errorf("cancel run %d: %w", run.ID, err)
 		}
 	}
+	return nil
+}
 
-	if err := db.WithTx(ctx, func(ctx context.Context) error {
-		n, err := db.GetEngine(ctx).Where("id = ? AND trashed_unix = 0", repo.ID).
-			Cols("trashed_unix", "trashed_by_id", "trashed_by_name", "trashed_owner_name", "trashed_name").
-			Update(&repo_model.Repository{
-				TrashedUnix:      timeutil.TimeStampNow(),
-				TrashedByID:      doer.ID,
-				TrashedByName:    doer.Name,
-				TrashedOwnerName: repo.OwnerName,
-				TrashedName:      repo.Name,
-			})
-		if err != nil {
-			return err
-		} else if n == 0 {
-			return repo_model.ErrRepoNotExist{ID: repo.ID}
-		}
-		if _, err := db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos-1 WHERE id=?", repo.OwnerID); err != nil {
-			return err
-		}
-		if err := organization.AddTeamRepoCounts(ctx, repo.ID, -1); err != nil {
-			return err
-		}
-		if err := models.DeleteRepositoryTransfer(ctx, repo.ID); err != nil {
-			return err
-		}
-		// forget what was indexed, so that a restore indexes the code again
-		if _, err := db.GetEngine(ctx).Where("repo_id = ? AND indexer_type = ?", repo.ID, repo_model.RepoIndexerTypeCode).Delete(new(repo_model.RepoIndexerStatus)); err != nil {
-			return err
-		}
-		return repo_model.DeleteIndexerBranches(ctx, repo.ID)
-	}); err != nil {
+func trashRepositoryRows(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, withOwner bool) error {
+	n, err := db.GetEngine(ctx).Where("id = ? AND trashed_unix = 0", repo.ID).
+		Cols("trashed_unix", "trashed_by_id", "trashed_by_name", "trashed_owner_name", "trashed_name", "trashed_with_owner").
+		Update(&repo_model.Repository{
+			TrashedUnix:      timeutil.TimeStampNow(),
+			TrashedByID:      doer.ID,
+			TrashedByName:    doer.Name,
+			TrashedOwnerName: repo.OwnerName,
+			TrashedName:      repo.Name,
+			TrashedWithOwner: withOwner,
+		})
+	if err != nil {
+		return err
+	} else if n == 0 {
+		return repo_model.ErrRepoNotExist{ID: repo.ID}
+	}
+	if _, err := db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos-1 WHERE id=?", repo.OwnerID); err != nil {
 		return err
 	}
+	if err := organization.AddTeamRepoCounts(ctx, repo.ID, -1); err != nil {
+		return err
+	}
+	if err := models.DeleteRepositoryTransfer(ctx, repo.ID); err != nil {
+		return err
+	}
+	// forget what was indexed, so that a restore indexes the code again
+	if _, err := db.GetEngine(ctx).Where("repo_id = ? AND indexer_type = ?", repo.ID, repo_model.RepoIndexerTypeCode).Delete(new(repo_model.RepoIndexerStatus)); err != nil {
+		return err
+	}
+	return repo_model.DeleteIndexerBranches(ctx, repo.ID)
+}
 
+func afterTrash(ctx context.Context, repo *repo_model.Repository) {
 	issue_indexer.DeleteRepoIssueIndexer(ctx, repo.ID)
 	if setting.Indexer.RepoIndexerEnabled {
 		code_indexer.UpdateRepoIndexer(repo) // the indexer drops the documents of a repository it can't load
+	}
+}
+
+// MoveTrashedRepository renames the repository in the trash to newName (if not empty) and moves it to newOwner
+// (if not nil, a live owner), keeping it hidden until the caller restores it. The old owner may be a
+// trashed organization or a tombstone, so the owner is loaded including the trash.
+func MoveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User, repo *repo_model.Repository, newName string) error {
+	owner, err := user_model.GetUserByIDIncludingTrashed(ctx, repo.OwnerID)
+	if err != nil {
+		return err
+	}
+	repo.Owner = owner
+
+	unlock := repoWorkingPool.Lock(fmt.Sprint(repo.ID))
+	defer unlock()
+
+	if newName != "" && newName != repo.Name {
+		if err := changeRepositoryName(ctx, repo, newName); err != nil {
+			return err
+		}
+		repo.Name = newName
+		repo.LowerName = strings.ToLower(newName)
+		if err := repo_model.UpdateRepositoryCols(ctx, repo, "name", "lower_name"); err != nil {
+			return err
+		}
+	}
+	if newOwner == nil {
+		return nil
+	}
+	if newOwner.IsOrganization() && newOwner.IsArchived {
+		return organization.ErrOrgArchived{Name: newOwner.Name}
+	}
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		// Moving the repository takes it off the old owner and its teams once more, but a trashed repository was
+		// taken off already when it was trashed.
+		if err := organization.AddTeamRepoCounts(ctx, repo.ID, 1); err != nil {
+			return err
+		}
+		if _, err := db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos+1 WHERE id=?", owner.ID); err != nil {
+			return err
+		}
+		return transferOwnership(ctx, doer, newOwner.Name, repo)
+	})
+}
+
+// TrashUserRepositories moves every live repository of a user who is being deleted to the trash, each as a
+// separate item recorded as deleted by the user.
+func TrashUserRepositories(ctx context.Context, owner *user_model.User) error {
+	var repos []*repo_model.Repository
+	if err := db.GetEngine(ctx).Where("owner_id = ? AND trashed_unix = 0", owner.ID).Find(&repos); err != nil {
+		return err
+	}
+	for _, repo := range repos {
+		if err := TrashRepository(ctx, owner, repo); err != nil {
+			return fmt.Errorf("unable to trash repository %s for %s[%d]. Error: %w", repo.Name, owner.Name, owner.ID, err)
+		}
 	}
 	return nil
 }

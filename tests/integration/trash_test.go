@@ -321,7 +321,7 @@ func TestTrashAPI(t *testing.T) {
 
 	token := adminTrashToken(t)
 	MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/trash").AddTokenAuth(token), http.StatusOK)
-	MakeRequest(t, NewRequest(t, "POST", "/api/v1/admin/trash/org/1/restore").AddTokenAuth(token), http.StatusBadRequest) // PR B
+	MakeRequest(t, NewRequest(t, "POST", "/api/v1/admin/trash/org/1/restore").AddTokenAuth(token), http.StatusNotFound) // not a trashed organization
 	MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/admin/trash/repo/1").AddTokenAuth(token), http.StatusNoContent)
 	unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: trashRepoID})
 	MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/admin/trash/repo/1").AddTokenAuth(token), http.StatusNotFound)

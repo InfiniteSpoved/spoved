@@ -5,6 +5,7 @@ package organization
 
 import (
 	"context"
+	user_model "forgejo.org/models/user"
 	"strings"
 
 	"forgejo.org/models/db"
@@ -112,6 +113,7 @@ func GetUserTeams(ctx context.Context, userID int64) (teams TeamList, err error)
 	return teams, db.GetEngine(ctx).
 		Join("INNER", "team_user", "team_user.team_id = team.id").
 		Where("team_user.uid=?", userID).
+		And(user_model.NotTrashedCond("team.org_id")).
 		Find(&teams)
 }
 

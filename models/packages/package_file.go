@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"forgejo.org/models/db"
-	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 
@@ -175,9 +174,9 @@ func (opts *PackageFileSearchOptions) toConds() builder.Cond {
 				Select("package_version.id").
 				From("package_version").
 				InnerJoin("package", "package.id = package_version.package_id").
-				Where(repo_model.NotTrashedCond("package.repo_id"))))
+				Where(NotTrashedCond())))
 	} else if opts.OwnerID != 0 || (opts.PackageType != "" && opts.PackageType != "all") {
-		versionCond := repo_model.NotTrashedCond("package.repo_id").And(builder.Eq{
+		versionCond := NotTrashedCond().And(builder.Eq{
 			"package_version.is_internal": false,
 		})
 		if opts.OwnerID != 0 {
