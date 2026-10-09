@@ -4,6 +4,7 @@
 package issues
 
 import (
+	"context"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -427,10 +428,22 @@ func TestBleveDeleteIssue(t *testing.T) {
 	defer test.MockVariableValue(&setting.Indexer.IssuePath, filepath.Join(tmp, "indexers/issues.bleve"))()
 	defer test.MockVariableValue(&setting.Indexer.IssueType, "bleve")()
 	<-InitIssueIndexer(true)
+	// The queue still holds an update for every fixture issue; one landing after the delete would bring issue 1 back.
+	flushQueue := func(ctx context.Context) {
+		require.NoError(t, issueIndexerQueue.FlushWithContext(ctx, time.Minute))
+	}
+	t.Cleanup(func() {
+		flushQueue(context.Background())
+		issueIndexerQueue.ShutdownWait(time.Minute) // releases the leveldb files, or the next InitIssueIndexer can't open its queue
+		(*globalIndexer.Load()).Close()
+		globalIndexer.Store(dummyIndexer)
+	})
 
 	ctx := t.Context()
+	flushQueue(ctx)
 	issue := unittest.AssertExistsAndLoadBean(t, &issues.Issue{ID: 1})
 	UpdateIssueIndexer(ctx, issue.ID)
+	flushQueue(ctx)
 
 	opts := &internal.SearchOptions{
 		RepoIDs: []int64{issue.RepoID},
@@ -449,6 +462,7 @@ func TestBleveDeleteIssue(t *testing.T) {
 	}, time.Second*60, time.Millisecond*100, "failed to update issue")
 
 	DeleteIssueIndexer(ctx, issue.ID)
+	flushQueue(ctx)
 	assert.Eventually(t, func() bool {
 		ids, _, err := SearchIssues(ctx, opts)
 		assert.NoError(t, err)
