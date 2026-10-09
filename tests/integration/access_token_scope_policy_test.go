@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	auth_model "forgejo.org/models/auth"
@@ -15,6 +18,8 @@ import (
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
+	auth_service "forgejo.org/services/auth"
+	"forgejo.org/services/authz"
 	"forgejo.org/tests"
 
 	"github.com/stretchr/testify/assert"
@@ -80,6 +85,15 @@ func TestAccessTokenScopePolicyAPI(t *testing.T) {
 			require.NoError(t, user_model.UpdateUserCols(t.Context(), user4, "is_admin"))
 		}()
 		create(t, "/api/v1/admin/users/user4/tokens", "", adminToken, api.CreateAccessTokenOption{Scopes: []string{"all"}}, http.StatusCreated)
+
+		// A site admin who can't log in is not exempt.
+		user4.ProhibitLogin = true
+		require.NoError(t, user_model.UpdateUserCols(t.Context(), user4, "prohibit_login"))
+		defer func() {
+			user4.ProhibitLogin = false
+			require.NoError(t, user_model.UpdateUserCols(t.Context(), user4, "prohibit_login"))
+		}()
+		create(t, "/api/v1/admin/users/user4/tokens", "", adminToken, api.CreateAccessTokenOption{Scopes: []string{"all"}}, http.StatusUnprocessableEntity)
 	})
 }
 
@@ -120,6 +134,18 @@ func TestAccessTokenScopePolicyWeb(t *testing.T) {
 		unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{UID: 2, Name: "web-allowed"})
 	})
 
+	t.Run("regenerate is not checked", func(t *testing.T) {
+		// A token that breaks the policy, created before it was set.
+		old := &auth_model.AccessToken{UID: 2, Name: "pre-policy", Scope: auth_model.AccessTokenScopeReadIssue, ResourceAllRepos: true}
+		require.NoError(t, auth_model.NewAccessToken(t.Context(), old))
+
+		session := loginUser(t, "user2")
+		req := NewRequestWithValues(t, "POST", "/user/settings/applications/tokens/regenerate", map[string]string{"id": fmt.Sprint(old.ID)})
+		session.MakeRequest(t, req, http.StatusOK)
+		regenerated := unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: old.ID, Scope: auth_model.AccessTokenScopeReadIssue})
+		assert.NotEqual(t, old.TokenHash, regenerated.TokenHash)
+	})
+
 	t.Run("site admin is exempt", func(t *testing.T) {
 		session := loginUser(t, "user1")
 
@@ -154,4 +180,43 @@ func TestAccessTokenScopePolicyAuthorizedIntegrationWeb(t *testing.T) {
 
 	post(t, "ai-allowed", "read:user", http.StatusSeeOther)
 	unittest.AssertExistsAndLoadBean(t, &auth_model.AuthorizedIntegration{UserID: 2, Name: "ai-allowed"})
+}
+
+func TestAccessTokenScopePolicyAuthorizedIntegrationUpdate(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+
+	// An integration that breaks the policy, created before it was set.
+	ait := newAITester(t, func(ai *auth_model.AuthorizedIntegration) {
+		ai.Scope = auth_model.AccessTokenScopeReadIssue
+	})
+	defer ait.close()
+	defer test.MockVariableValue(&setting.AccessTokenScopes, testScopePolicy)()
+
+	// Editing it re-checks the policy, even when the edit doesn't touch the scope.
+	ai := ait.authorizedIntegration
+	ai.Name = "renamed"
+	require.ErrorIs(t, auth_service.UpdateAuthorizedIntegration(t.Context(), ai, nil), authz.ErrScopeNotAllowed)
+	unittest.AssertNotExistsBean(t, &auth_model.AuthorizedIntegration{ID: ai.ID, Name: "renamed"})
+
+	// It keeps working.
+	MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/issues/search").AddTokenAuth(ait.signedJWT()), http.StatusOK)
+}
+
+func TestAccessTokenScopePolicyCLIAuthorizedIntegration(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+
+	// The CLI runs in another process: give it the policy through its config file.
+	conf, err := os.ReadFile(setting.CustomConf)
+	require.NoError(t, err)
+	confPath := filepath.Join(t.TempDir(), "app.ini")
+	conf = append(conf, "\n[security]\nACCESS_TOKEN_ALLOWED_SCOPES = read:user\n"...)
+	require.NoError(t, os.WriteFile(confPath, conf, 0o600))
+	defer test.MockVariableValue(&setting.CustomConf, confPath)()
+
+	_, err = runMainApp("admin", "user", "create-authorized-integration", "--username", "user2", "--name", "cli-disallowed",
+		"--issuer", "https://issuer.example.org", "--scope", "read:issue")
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Contains(t, string(exitErr.Stderr), "access token scope not allowed: read:issue")
+	unittest.AssertNotExistsBean(t, &auth_model.AuthorizedIntegration{UserID: 2, Name: "cli-disallowed"})
 }

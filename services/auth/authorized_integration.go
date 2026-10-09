@@ -234,10 +234,11 @@ func InsertAuthorizedIntegration(ctx context.Context, ai *auth_model.AuthorizedI
 	ai.Name = strings.TrimSpace(ai.Name)
 	ai.Description = strings.TrimSpace(ai.Description)
 
-	if err := ValidateAuthorizedIntegration(ai, repoResources); err != nil {
+	// The scope policy goes first: it needs no remote issuer lookup.
+	if err := validateAuthorizedIntegrationScopePolicy(ctx, ai); err != nil {
 		return err
 	}
-	if err := validateAuthorizedIntegrationScopePolicy(ctx, ai); err != nil {
+	if err := ValidateAuthorizedIntegration(ai, repoResources); err != nil {
 		return err
 	}
 
@@ -258,10 +259,11 @@ func UpdateAuthorizedIntegration(ctx context.Context, ai *auth_model.AuthorizedI
 	ai.Name = strings.TrimSpace(ai.Name)
 	ai.Description = strings.TrimSpace(ai.Description)
 
-	if err := ValidateAuthorizedIntegration(ai, repoResources); err != nil {
+	// The scope policy goes first: it needs no remote issuer lookup.
+	if err := validateAuthorizedIntegrationScopePolicy(ctx, ai); err != nil {
 		return err
 	}
-	if err := validateAuthorizedIntegrationScopePolicy(ctx, ai); err != nil {
+	if err := ValidateAuthorizedIntegration(ai, repoResources); err != nil {
 		return err
 	}
 

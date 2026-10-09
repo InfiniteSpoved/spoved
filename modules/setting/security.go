@@ -73,7 +73,7 @@ func loadScopeList(sec ConfigSection, key string) []string {
 	}
 	list := strings.Split(value, ",")
 	for i := range list {
-		list[i] = strings.TrimSpace(list[i])
+		list[i] = strings.ToLower(strings.TrimSpace(list[i]))
 	}
 	return list
 }
