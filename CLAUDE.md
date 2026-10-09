@@ -20,7 +20,7 @@
 2. Frontend, if templates/JS/CSS changed: `make lint-frontend checks-frontend test-frontend frontend`.
 3. Unit: `go test -tags 'sqlite sqlite_unlock_notify'` on the changed packages and their neighbours.
 4. Migrations: `PROJECT_CONF=tests/sqlite.ini go test ./models/forgejo_migrations/...`. Never run this at the same time as the integration suite, because both rewrite the shared git hooks.
-5. Integration: the full suite in one run, `make test-sqlite` (about 45 min; run it in the background and grep `^(--- FAIL|FAIL|ok)`). The tests depend on shared global state and order, so never shard the suite or run it partially to judge a PR. Single tests: `make 'test-sqlite#TestName'`.
+5. Integration: locally the full suite in one run, `make test-sqlite` (about 45 min; run it in the background and grep `^(--- FAIL|FAIL|ok)`). Don't run a partial or hand-made split locally to judge a PR. CI splits it into 4 jobs (`integration i 4` in `.github/ci/job.sh`): each is its own machine, so its database, data path, repo root, git hooks and ports are its own, and it runs a sorted round-robin share of the `-test.list` names (via `.github/ci/shard.sh`) in the binary's order. A test that fails only in a shard is order-dependent: fix it or file an issue. Single tests: `make 'test-sqlite#TestName'`.
 6. E2E: `make 'test-e2e-sqlite#<spec>.test.e2e'` for the specs whose `@watch` covers your files.
 
 These fail in containers for environment reasons only. They also fail on develop and are not caused by a PR:
