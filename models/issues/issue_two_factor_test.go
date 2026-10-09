@@ -42,3 +42,24 @@ func TestIssuesTwoFactorRequired(t *testing.T) {
 		assert.NotContains(t, got, id)
 	}
 }
+
+// The event stream sends each user only the stopwatches they still see.
+func TestGetUIDsAndStopwatchTwoFactorRequired(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := t.Context()
+	// user 4 writes repo3 (issue 6) through team1
+	require.NoError(t, db.Insert(ctx, &issues_model.Stopwatch{UserID: 4, IssueID: 6}))
+	issueIDs := func() []int64 {
+		sws, err := issues_model.GetUIDsAndStopwatch(ctx)
+		require.NoError(t, err)
+		var ids []int64
+		for _, sw := range sws[4] {
+			ids = append(ids, sw.IssueID)
+		}
+		return ids
+	}
+	assert.Contains(t, issueIDs(), int64(6))
+	_, err := db.GetEngine(ctx).ID(3).Cols("require_two_factor").Update(&user_model.User{RequireTwoFactor: true})
+	require.NoError(t, err)
+	assert.NotContains(t, issueIDs(), int64(6))
+}

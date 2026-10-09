@@ -722,25 +722,44 @@ func TwoFactorHiddenRepoIDs(uid int64) *builder.Builder {
 	return builder.Select("id").From("repository").Where(twoFactorHiddenRepos(uid))
 }
 
+// TwoFactorHiddenRepoIDsOf is TwoFactorHiddenRepoIDs for the user in userCol, a user id column of the outer query.
+func TwoFactorHiddenRepoIDsOf(userCol string) *builder.Builder {
+	return builder.Select("id").From("repository").Where(twoFactorHiddenRepos(userCol))
+}
+
 // TwoFactorBlockingOrgIDs selects the ids of the organizations whose two-factor requirement blocks user uid (> 0),
 // as User.TwoFactorBlocked does.
 func TwoFactorBlockingOrgIDs(uid int64) *builder.Builder {
+	return twoFactorBlockingOrgIDs(uid)
+}
+
+// twoFactorUser returns the SQL for user, a user id (bound) or a user id column of the outer query.
+func twoFactorUser(user any) (string, []any) {
+	if col, ok := user.(string); ok {
+		return col, nil
+	}
+	return "?", []any{user}
+}
+
+func twoFactorBlockingOrgIDs(user any) *builder.Builder {
+	u, args := twoFactorUser(user)
 	return builder.Select("id").From("`user`").Where(builder.And(
 		builder.Eq{"type": user_model.UserTypeOrganization, "require_two_factor": true},
-		builder.Expr("EXISTS (SELECT 1 FROM `user` u WHERE u.id = ? AND u.is_admin = ? AND u.type <> ?"+
+		builder.Expr("EXISTS (SELECT 1 FROM `user` u WHERE u.id = "+u+" AND u.is_admin = ? AND u.type <> ?"+
 			" AND NOT EXISTS (SELECT 1 FROM `two_factor` WHERE `two_factor`.uid = u.id)"+
 			" AND NOT EXISTS (SELECT 1 FROM `webauthn_credential` WHERE `webauthn_credential`.user_id = u.id))",
-			uid, false, user_model.UserTypeOrganization),
+			append(args, false, user_model.UserTypeOrganization)...),
 	))
 }
 
-func twoFactorHiddenRepos(uid int64) builder.Cond {
+func twoFactorHiddenRepos(user any) builder.Cond {
+	u, args := twoFactorUser(user)
 	return builder.And(
-		builder.In("`repository`.owner_id", TwoFactorBlockingOrgIDs(uid)),
+		builder.In("`repository`.owner_id", twoFactorBlockingOrgIDs(user)),
 		builder.Or(
 			builder.Eq{"`repository`.is_private": true},
 			builder.In("`repository`.owner_id", builder.Select("id").From("`user`").Where(builder.Eq{"visibility": structs.VisibleTypePrivate})),
-			builder.Expr("EXISTS (SELECT 1 FROM `user` u WHERE u.id = ? AND u.is_restricted = ?)", uid, true),
+			builder.Expr("EXISTS (SELECT 1 FROM `user` u WHERE u.id = "+u+" AND u.is_restricted = ?)", append(args, true)...),
 		),
 	)
 }

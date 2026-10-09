@@ -16,6 +16,7 @@ import (
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
+	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
 	repo_model "forgejo.org/models/repo"
 	unit_model "forgejo.org/models/unit"
@@ -63,6 +64,12 @@ func TestOrgTwoFactorRequired(t *testing.T) {
 	member := loginUser(t, "user4")
 	memberToken := getTokenForLoggedInUser(t, member, auth_model.AccessTokenScopeAll)
 	readToken := getTokenForLoggedInUser(t, member, auth_model.AccessTokenScopeReadRepository, auth_model.AccessTokenScopeReadIssue)
+	// user 28 is in team12Creators, an admin team, given repo3; team1 may create repositories
+	require.NoError(t, db.Insert(ctx, &organization.TeamRepo{OrgID: 3, TeamID: 12, RepoID: 3}))
+	_, err := db.GetEngine(ctx).ID(2).Cols("can_create_org_repo").Update(&organization.Team{CanCreateOrgRepo: true})
+	require.NoError(t, err)
+	teamAdmin := loginUser(t, "user28")
+	teamAdminToken := getTokenForLoggedInUser(t, teamAdmin, auth_model.AccessTokenScopeAll)
 
 	// data of the member's that names repo3: a star, a notification, a subscription, a stopwatch, tracked time
 	require.NoError(t, repo_model.StarRepo(ctx, 4, 3, true))
@@ -117,6 +124,14 @@ func TestOrgTwoFactorRequired(t *testing.T) {
 		body := MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3/actions/runs").AddTokenAuth(ownerToken), http.StatusOK).Body.String()
 		return strings.Contains(body, "repo3-run")
 	}
+	// the admin-team member, on the runs API, the runs page and the overview
+	adminTeamSeesRun := func(t *testing.T) bool {
+		t.Helper()
+		fromAPI := strings.Contains(MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3/actions/runs").AddTokenAuth(teamAdminToken), http.StatusOK).Body.String(), "repo3-run")
+		fromWeb := strings.Contains(teamAdmin.MakeRequest(t, NewRequest(t, "GET", "/org/org3/actions"), http.StatusOK).Body.String(), "repo3-run")
+		assert.Equal(t, fromAPI, fromWeb)
+		return fromAPI
+	}
 	memberAccess := func(t *testing.T, status int) {
 		t.Helper()
 		member.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3"), status)
@@ -147,6 +162,7 @@ func TestOrgTwoFactorRequired(t *testing.T) {
 			assert.True(t, listed, name)
 		}
 		assert.True(t, orgRunListed(t))
+		assert.True(t, adminTeamSeesRun(t))
 	})
 
 	t.Run("turning it on", func(t *testing.T) {
@@ -185,6 +201,11 @@ func TestOrgTwoFactorRequired(t *testing.T) {
 		}
 		// login and the 2FA setup page are not blocked
 		member.MakeRequest(t, NewRequest(t, "GET", "/user/settings/security"), http.StatusOK)
+		// an admin-team member sees no run of the hidden repository
+		assert.False(t, adminTeamSeesRun(t))
+		assert.NotContains(t, teamAdmin.MakeRequest(t, NewRequest(t, "GET", "/org/org3/actions/overview"), http.StatusOK).Body.String(), "repo3")
+		// a team member who may create repositories can't
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/orgs/org3/repos", &api.CreateRepoOption{Name: "blocked"}).AddTokenAuth(memberToken), http.StatusForbidden)
 		// the org's public package stays readable, as for every signed-in user
 		MakeRequest(t, NewRequest(t, "GET", "/api/packages/org3/generic/p/1.0/f.bin").AddTokenAuth(memberToken), http.StatusOK)
 	})
@@ -198,7 +219,14 @@ func TestOrgTwoFactorRequired(t *testing.T) {
 		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/orgs/org3", map[string]string{"full_name": "x"}).AddTokenAuth(ownerToken), http.StatusForbidden)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3/hooks").AddTokenAuth(ownerToken), http.StatusForbidden)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3/actions/runners/registration-token").AddTokenAuth(ownerToken), http.StatusForbidden)
-		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/orgs/org3/repos", &api.CreateRepoOption{Name: "blocked"}).AddTokenAuth(ownerToken), http.StatusForbidden)
+		refused := func(method, url string, v any) {
+			t.Helper()
+			MakeRequest(t, NewRequestWithJSON(t, method, url, v).AddTokenAuth(ownerToken), http.StatusForbidden)
+		}
+		refused("POST", "/api/v1/orgs/org3/teams", &api.CreateTeamOption{Name: "blocked", Permission: "read"})
+		refused("POST", "/api/v1/orgs/org3/repos", &api.CreateRepoOption{Name: "blocked"})
+		refused("POST", "/api/v1/repos/user2/repo1/forks", &api.CreateForkOption{Organization: new("org3")})
+		refused("POST", "/api/v1/repos/migrate", &api.MigrateRepoOptions{CloneAddr: "https://example.com/a.git", RepoName: "blocked", RepoOwner: "org3"})
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/teams/1/members").AddTokenAuth(ownerToken), http.StatusOK) // own team
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/teams/7/members").AddTokenAuth(ownerToken), http.StatusForbidden)
 		owner.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3"), http.StatusNotFound)
@@ -234,6 +262,8 @@ func TestOrgTwoFactorRequired(t *testing.T) {
 		}
 		assert.True(t, orgRunListed(t))
 		owner.MakeRequest(t, NewRequest(t, "GET", "/org/org3/settings"), http.StatusOK)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/orgs/org3/repos", &api.CreateRepoOption{Name: "allowed"}).AddTokenAuth(ownerToken), http.StatusCreated)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/repo1/forks", &api.CreateForkOption{Organization: new("org3")}).AddTokenAuth(ownerToken), http.StatusAccepted)
 	})
 
 	t.Run("turning it off needs no confirmation", func(t *testing.T) {

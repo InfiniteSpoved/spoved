@@ -119,7 +119,7 @@ func (opts *FindTrackedTimesOptions) ToConds() builder.Cond {
 		cond = cond.And(builder.Lte{"tracked_time.created_unix": opts.CreatedBeforeUnix})
 	}
 	if opts.ViewerID > 0 {
-		cond = cond.And(builder.NotIn("tracked_time.issue_id", builder.Select("id").From("issue").Where(builder.In("repo_id", repo_model.TwoFactorHiddenRepoIDs(opts.ViewerID)))))
+		cond = cond.And(notInHiddenRepoCond("tracked_time.issue_id", repo_model.TwoFactorHiddenRepoIDs(opts.ViewerID)))
 	}
 	return cond
 }

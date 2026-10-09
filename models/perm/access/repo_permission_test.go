@@ -375,6 +375,12 @@ func TestGetUserRepoPermissionTwoFactorRequired(t *testing.T) {
 		p, err = access.GetUserRepoReadPermission(ctx, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 32}), auditor, nil)
 		require.NoError(t, err)
 		assert.True(t, p.CanRead(unit.TypeCode))
+		// the reducer still applies
+		reducer := authz.NewMockAuthorizationReducer(t)
+		reducer.On("ReduceRepoAccess", mock.Anything, mock.Anything, mock.Anything).Return(perm_model.AccessModeNone, nil)
+		p, err = access.GetUserRepoReadPermission(ctx, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 32}), auditor, reducer)
+		require.NoError(t, err)
+		assert.False(t, p.HasAccess())
 	})
 
 	t.Run("private and limited organizations", func(t *testing.T) {
@@ -497,10 +503,21 @@ func TestTwoFactorHiddenRepoCondMatchesPermission(t *testing.T) {
 func TestSearchRepositoryTwoFactorRequired(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	ctx := t.Context()
+	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+
+	// the condition adds no query, flagged or not
+	queries := func() int {
+		n := 0
+		defer onSQL(t, func(string) error { n++; return nil })()
+		_, _, err := repo_model.SearchRepository(ctx, &repo_model.SearchRepoOptions{Actor: user2, Private: true, ListOptions: db.ListOptions{Page: 1, PageSize: 10}})
+		require.NoError(t, err)
+		return n
+	}
+	unflagged := queries()
 	_, err := db.GetEngine(ctx).ID(3).Cols("require_two_factor").Update(&user_model.User{RequireTwoFactor: true})
 	require.NoError(t, err)
+	assert.Equal(t, unflagged, queries())
 
-	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 	ids, _, err := repo_model.SearchRepositoryIDs(ctx, &repo_model.SearchRepoOptions{Actor: user2, OwnerID: 2, Private: true})
 	require.NoError(t, err)
 	assert.NotContains(t, ids, int64(3))

@@ -210,13 +210,16 @@ func GetUserRepoReadPermission(ctx context.Context, repo *repo_model.Repository,
 		if err := repo.LoadOwner(ctx); err != nil {
 			return perm, err
 		}
-		if blocked, err := user.TwoFactorBlocked(ctx, repo.Owner); err != nil || blocked {
+		blocked, err := user.TwoFactorBlocked(ctx, repo.Owner)
+		if err != nil {
 			return perm, err
 		}
-		if err := repo.LoadUnits(ctx); err != nil {
-			return perm, err
+		if !blocked {
+			if err := repo.LoadUnits(ctx); err != nil {
+				return perm, err
+			}
+			perm.raiseToRead(repo.Units)
 		}
-		perm.raiseToRead(repo.Units)
 	}
 	if reducer == nil {
 		return perm, nil

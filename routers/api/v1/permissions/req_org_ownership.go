@@ -40,16 +40,12 @@ func ReqOrgOwnership(ctx Context) {
 
 // isActingOwner is organization.Organization.IsActingOwner for the doer.
 func isActingOwner(ctx Context, orgID int64) (bool, error) {
-	isOwner, err := organization.IsOrganizationOwner(ctx.Context(), orgID, ctx.Doer().ID)
-	if err != nil || !isOwner {
-		return false, err
-	}
 	org := ctx.Organization()
 	if org == nil || org.ID != orgID {
+		var err error
 		if org, err = organization.GetOrgByID(ctx.Context(), orgID); err != nil {
 			return false, err
 		}
 	}
-	blocked, err := ctx.Doer().TwoFactorBlocked(ctx.Context(), org.AsUser())
-	return !blocked, err
+	return org.IsActingOwner(ctx.Context(), ctx.Doer())
 }
