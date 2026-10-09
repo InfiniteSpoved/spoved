@@ -63,30 +63,33 @@ func (issues IssueList) LoadRepositories(ctx context.Context) (repo_model.Reposi
 	return repo_model.ValuesRepository(repoMaps), nil
 }
 
-// FilterHiddenUnits drops the issues (pull requests) whose repository the site policy hides Issues (Pull requests) in,
-// for lists that are not filtered by unit in the query (the issue indexer).
+// FilterHiddenUnits drops the issues (pull requests) whose repository doesn't have the Issues (Pull requests) unit:
+// the owner turned it off or the site policy hides it. It is for lists that are not filtered by unit in the query
+// (the issue indexer, which can therefore return a short page and a total that is too high).
 func (issues IssueList) FilterHiddenUnits(ctx context.Context) (IssueList, error) {
 	repos, err := issues.LoadRepositories(ctx)
 	if err != nil {
 		return nil, err
 	}
-	owners, err := user_model.GetUsersByIDs(ctx, container.FilterSlice(repos, func(r *repo_model.Repository) (int64, bool) { return r.OwnerID, true }))
-	if err != nil {
+	if err := repos.LoadUnits(ctx); err != nil {
 		return nil, err
 	}
-	hidden := make(map[int64]container.Set[unit.Type], len(owners))
-	for _, owner := range owners {
-		hidden[owner.ID] = repo_model.HiddenUnits(ctx, owner)
+	enabled := make(map[int64]container.Set[unit.Type], len(repos))
+	for _, repo := range repos {
+		enabled[repo.ID] = container.Set[unit.Type]{}
+		for _, u := range repo.Units {
+			enabled[repo.ID].Add(u.Type)
+		}
 	}
 	return slices.DeleteFunc(issues, func(issue *Issue) bool {
-		h, ok := hidden[issue.Repo.OwnerID]
+		units, ok := enabled[issue.RepoID]
 		if !ok {
-			return true // owner not found: fail closed
+			return true // repository not found: fail closed
 		}
 		if issue.IsPull {
-			return h.Contains(unit.TypePullRequests)
+			return !units.Contains(unit.TypePullRequests)
 		}
-		return h.Contains(unit.TypeIssues)
+		return !units.Contains(unit.TypeIssues)
 	}), nil
 }
 

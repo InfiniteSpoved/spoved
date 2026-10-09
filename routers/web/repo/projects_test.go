@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	issues_model "forgejo.org/models/issues"
+	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	"forgejo.org/models/user"
 	"forgejo.org/services/contexttest"
@@ -33,6 +35,8 @@ func TestCheckProjectColumnChangePermissions(t *testing.T) {
 func TestViewProjectPRLinkVisibility(t *testing.T) {
 	defer unittest.OverrideFixtures("routers/web/repo/TestViewProjectPRLinkVisibility")()
 	unittest.PrepareTestEnv(t)
+	// the fixture repository 2 has no Pull requests unit, which hides its pull requests from every list
+	unittest.AssertSuccessfulInsert(t, &repo_model.RepoUnit{RepoID: 2, Type: unit.TypePullRequests, Config: &repo_model.PullRequestsConfig{}})
 
 	// When a private PR references a public issue, and the public issue is put onto a project board, then the
 	// cross-reference from the private PR to the public issue should only be visible if the private PR is visible to
