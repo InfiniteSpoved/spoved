@@ -5,6 +5,7 @@ package system_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -96,4 +97,27 @@ func TestDynKeyGetterLowerRevision(t *testing.T) {
 	require.NoError(t, err)
 	getter.InvalidateCache()
 	assert.Equal(t, 1, getter.GetRevision(db.DefaultContext))
+}
+
+// #337: concurrent first calls all find or create the one revision row.
+func TestGetRevisionConcurrentInsert(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	for range 10 {
+		require.NoError(t, db.TruncateBeans(db.DefaultContext, &system.Setting{}))
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		revisions := make([]int, 20)
+		for i := range revisions {
+			wg.Go(func() {
+				<-start
+				revisions[i] = system.GetRevision(db.DefaultContext)
+			})
+		}
+		close(start)
+		wg.Wait()
+		for _, rev := range revisions {
+			assert.Equal(t, 1, rev)
+		}
+		unittest.AssertCount(t, &system.Setting{}, 1)
+	}
 }

@@ -11,6 +11,7 @@ import (
 
 	"forgejo.org/models/db"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/setting/config"
 	"forgejo.org/modules/timeutil"
 
@@ -42,11 +43,19 @@ func GetRevision(ctx context.Context) int {
 	if err != nil {
 		return 0
 	} else if !exist {
-		err = db.Insert(ctx, &Setting{SettingKey: keyRevision, Version: 1})
-		if err != nil {
+		// Concurrent first callers may all get here: insert only if absent (an error would also abort a PostgreSQL
+		// transaction), then read whichever row was stored.
+		insert := "INSERT INTO system_setting (setting_key, setting_value, version, created, updated) VALUES (?, '', 1, ?, ?) ON CONFLICT (setting_key) DO NOTHING"
+		if setting.Database.Type.IsMySQL() {
+			insert = "INSERT IGNORE INTO system_setting (setting_key, setting_value, version, created, updated) VALUES (?, '', 1, ?, ?)"
+		}
+		now := timeutil.TimeStampNow()
+		if _, err = db.Exec(ctx, insert, keyRevision, now, now); err != nil {
 			return 0
 		}
-		return 1
+		if revision, exist, err = db.Get[Setting](ctx, builder.Eq{"setting_key": keyRevision}); err != nil || !exist {
+			return 0
+		}
 	}
 	if revision.Version <= 0 || revision.Version >= math.MaxInt-1 {
 		_, err = db.Exec(ctx, "UPDATE system_setting SET version=1 WHERE setting_key=?", keyRevision)
