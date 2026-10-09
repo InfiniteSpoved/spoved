@@ -99,12 +99,10 @@ func ParseOrgRunFilter(form FormGetter) (f OrgRunFilter, err error) {
 	return f, err
 }
 
-// FindOrgRuns lists the runs of the repositories of org that doer can read the Actions of, newest first, and how
-// many there are. admin is whether doer acts as a site admin, who sees every repository that isn't trashed.
-// tokenRepos, if not nil, further limits the repositories (what an access token may read, as
-// Reducer().RepoReadAccessFilter()). Ownership comes from the repository: action_run.owner_id can be stale.
-func FindOrgRuns(ctx context.Context, org *organization.Organization, doer *user_model.User, admin bool, tokenRepos builder.Cond, f OrgRunFilter, lo db.ListOptions) (actions_model.RunList, int64, error) {
-	repoCond := builder.Eq{"`repository`.owner_id": org.ID}.And(
+// orgRunRepoCond matches, in the repository table, the repositories of org whose Actions runs doer may see. It is
+// the one visibility rule of the runs list and the overview.
+func orgRunRepoCond(org *organization.Organization, doer *user_model.User, admin bool, tokenRepos builder.Cond) builder.Cond {
+	cond := builder.Eq{"`repository`.owner_id": org.ID}.And(
 		builder.In("`repository`.id", builder.Select("repo_id").From("repo_unit").Where(builder.Eq{"type": unit.TypeActions})),
 	)
 	if !admin {
@@ -113,14 +111,23 @@ func FindOrgRuns(ctx context.Context, org *organization.Organization, doer *user
 			Join("INNER", "team_user", "`team_user`.team_id = `team_repo`.team_id").
 			Join("INNER", "team", "`team`.id = `team_repo`.team_id").
 			Where(builder.Eq{"`team_user`.uid": doer.ID, "`team`.org_id": org.ID}.And(builder.Gte{"`team`.authorize": perm.AccessModeAdmin}))
-		repoCond = repoCond.And(builder.Or(
+		cond = cond.And(builder.Or(
 			repo_model.AccessibleRepositoryCondition(doer, unit.TypeActions),
 			builder.In("`repository`.id", adminTeamRepos),
 		))
 	}
 	if tokenRepos != nil {
-		repoCond = repoCond.And(tokenRepos)
+		cond = cond.And(tokenRepos)
 	}
+	return cond
+}
+
+// FindOrgRuns lists the runs of the repositories of org that doer can read the Actions of, newest first, and how
+// many there are. admin is whether doer acts as a site admin, who sees every repository that isn't trashed.
+// tokenRepos, if not nil, further limits the repositories (what an access token may read, as
+// Reducer().RepoReadAccessFilter()). Ownership comes from the repository: action_run.owner_id can be stale.
+func FindOrgRuns(ctx context.Context, org *organization.Organization, doer *user_model.User, admin bool, tokenRepos builder.Cond, f OrgRunFilter, lo db.ListOptions) (actions_model.RunList, int64, error) {
+	repoCond := orgRunRepoCond(org, doer, admin, tokenRepos)
 	if f.Repo != "" {
 		repoCond = repoCond.And(builder.Eq{"`repository`.lower_name": strings.ToLower(f.Repo)})
 	}

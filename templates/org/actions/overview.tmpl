@@ -1,0 +1,70 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content organization actions">
+	{{template "org/header" .}}
+	<div class="ui container">
+		{{template "base/alert" .}}
+		<div class="ui secondary pointing menu tw-mb-4">
+			<a class="{{if .PageIsOrgActionsRuns}}active {{end}}item" href="{{.OrgLink}}/actions">{{ctx.Locale.Tr "org.actions.tab.runs"}}</a>
+			<a class="{{if .PageIsOrgActionsOverview}}active {{end}}item" href="{{.OrgLink}}/actions/overview">{{ctx.Locale.Tr "org.actions.tab.overview"}}</a>
+		</div>
+		<div class="ui small statistics tw-mb-4 org-overview-cards">
+			<div class="statistic" data-card="runs-24h"><div class="value">{{.Overview.Runs24h}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.runs_24h"}}</div></div>
+			<div class="statistic" data-card="runs-7d"><div class="value">{{.Overview.Runs7d}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.runs_7d"}}</div></div>
+			<div class="statistic" data-card="failure-rate"><div class="value">{{if .Overview.Finished7d}}{{.Overview.FailurePercent}}%{{else}}{{ctx.Locale.Tr "org.actions.overview.n_a"}}{{end}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.failure_rate"}}</div></div>
+			<div class="statistic" data-card="running"><div class="value">{{.Overview.Running}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.running"}}</div></div>
+			<div class="statistic" data-card="queued"><div class="value">{{.Overview.Queued}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.queued"}}</div></div>
+			<div class="statistic" data-card="avg-queue"><div class="value">{{if .Overview.HasQueueSample}}{{.Overview.AvgQueue.Round 1000000000}}{{else}}{{ctx.Locale.Tr "org.actions.overview.n_a"}}{{end}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.avg_queue"}}</div></div>
+		</div>
+
+		<h4 class="ui top attached header">{{ctx.Locale.Tr "org.actions.overview.failing_now"}} ({{len .Failing}}/{{.FailingTotal}})</h4>
+		<div class="ui attached segment org-failing-now">
+			{{if not .Failing}}
+				{{ctx.Locale.Tr "org.actions.overview.failing_none"}}
+			{{else}}
+			<table class="ui very basic table">
+				<tbody>
+				{{range .Failing}}
+					<tr data-repo="{{.Repo.FullName}}" data-run="{{.ID}}">
+						<td><a href="{{.Repo.Link}}">{{.Repo.FullName}}</a></td>
+						<td><a class="run-link" href="{{.Link}}" title="{{.Title}}">{{.WorkflowID}} #{{.Index}}</a></td>
+						<td><a href="{{.RefLink}}">{{.PrettyRef}}</a></td>
+						<td>{{if .Stopped}}{{DateUtils.TimeSince .Stopped}}{{end}}</td>
+					</tr>
+				{{end}}
+				</tbody>
+			</table>
+			{{end}}
+		</div>
+
+		<h4 class="ui top attached header">{{ctx.Locale.Tr "org.actions.overview.queue"}} ({{len .Queue}}/{{.QueueTotal}})</h4>
+		<div class="ui attached segment org-queue">
+			{{if not .Queue}}
+				{{ctx.Locale.Tr "org.actions.overview.queue_none"}}
+			{{else}}
+			<table class="ui very basic table">
+				<thead>
+					<tr>
+						<th>{{ctx.Locale.Tr "org.actions.runs.repository"}}</th>
+						<th>{{ctx.Locale.Tr "org.actions.overview.job"}}</th>
+						<th>{{ctx.Locale.Tr "org.actions.overview.labels"}}</th>
+						<th>{{ctx.Locale.Tr "org.actions.overview.waiting_since"}}</th>
+						<th>{{ctx.Locale.Tr "org.actions.overview.runner"}}</th>
+					</tr>
+				</thead>
+				<tbody>
+				{{range .Queue}}
+					<tr data-repo="{{.Repo.FullName}}" data-job="{{.Job.ID}}" data-runner="{{if .HasRunner}}yes{{else}}no{{end}}">
+						<td><a href="{{.Repo.Link}}">{{.Repo.FullName}}</a></td>
+						<td><a class="run-link" href="{{.Run.Link}}" title="{{.Run.Title}}">{{.Job.Name}}</a></td>
+						<td>{{range .Job.RunsOn}}<span class="ui small label">{{.}}</span> {{end}}</td>
+						<td>{{DateUtils.TimeSince .Job.Created}}</td>
+						<td>{{if .HasRunner}}{{ctx.Locale.Tr "org.actions.overview.runner_online"}}{{else}}<span class="ui small red label">{{ctx.Locale.Tr "org.actions.overview.runner_none"}}</span>{{end}}</td>
+					</tr>
+				{{end}}
+				</tbody>
+			</table>
+			{{end}}
+		</div>
+	</div>
+</div>
+{{template "base/footer" .}}

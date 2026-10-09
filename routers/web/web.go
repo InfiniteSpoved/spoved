@@ -1133,6 +1133,7 @@ func registerRoutes(m *web.Route) {
 			m.Post("/members/action/{action}", org.MembersAction)
 			m.Get("/teams", org.Teams)
 			m.Get("/actions", org.Runs)
+			m.Get("/actions/overview", org.Overview)
 		}, context.OrgAssignment(true, false, true))
 
 		m.Group("/{org}", func() {
