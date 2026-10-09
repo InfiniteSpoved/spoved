@@ -73,6 +73,7 @@
 						</div>
 
 						<div class="field" id="require_two_factor_box">
+							<input type="hidden" name="require_two_factor_shown" value="true">
 							<div class="ui checkbox">
 								<input type="checkbox" name="require_two_factor" {{if .RequireTwoFactor}}checked{{end}}>
 								<label>{{ctx.Locale.Tr "org.settings.require_two_factor"}}</label>

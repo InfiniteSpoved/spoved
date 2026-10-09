@@ -89,7 +89,7 @@ func SettingsPost(ctx *context.Context) {
 	org := ctx.Org.Organization
 
 	// turning on the two-factor requirement needs the doer's own 2FA and a confirmation, before anything is saved
-	if form.RequireTwoFactor && !org.RequireTwoFactor && !confirmRequireTwoFactor(ctx, org, form) {
+	if form.RequireTwoFactorShown && form.RequireTwoFactor && !org.RequireTwoFactor && !confirmRequireTwoFactor(ctx, org, form) {
 		return
 	}
 
@@ -137,7 +137,9 @@ func SettingsPost(ctx *context.Context) {
 		Location:                  optional.Some(form.Location),
 		Visibility:                optional.Some(form.Visibility),
 		RepoAdminChangeTeamAccess: optional.Some(form.RepoAdminChangeTeamAccess),
-		RequireTwoFactor:          optional.Some(form.RequireTwoFactor),
+	}
+	if form.RequireTwoFactorShown {
+		opts.RequireTwoFactor = optional.Some(form.RequireTwoFactor)
 	}
 	if ctx.Doer.IsAdmin {
 		opts.MaxRepoCreation = optional.Some(form.MaxRepoCreation)

@@ -24,6 +24,7 @@ import (
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/lfs"
 	"forgejo.org/modules/private"
+	api "forgejo.org/modules/structs"
 	"forgejo.org/tests"
 
 	"github.com/PuerkitoBio/goquery"
@@ -44,7 +45,7 @@ func unenrolTOTP(t *testing.T, uid int64) {
 
 func postOrgTwoFactor(t *testing.T, session *TestSession, org string, values map[string]string, status int) string {
 	t.Helper()
-	form := map[string]string{"name": org, "visibility": "0"}
+	form := map[string]string{"name": org, "visibility": "0", "require_two_factor_shown": "true"}
 	maps.Copy(form, values)
 	return session.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/"+org+"/settings", form), status).Body.String()
 }
@@ -172,6 +173,9 @@ func TestOrgTwoFactorRequired(t *testing.T) {
 		// saving again needs no confirmation
 		postOrgTwoFactor(t, owner, "org3", map[string]string{"require_two_factor": "on"}, http.StatusSeeOther)
 		assert.True(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3}).RequireTwoFactor)
+		// a post without the checkbox at all keeps the setting
+		owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/settings", map[string]string{"name": "org3", "visibility": "0"}), http.StatusSeeOther)
+		assert.True(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3}).RequireTwoFactor)
 	})
 
 	t.Run("member without 2FA", func(t *testing.T) {
@@ -194,6 +198,7 @@ func TestOrgTwoFactorRequired(t *testing.T) {
 		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/orgs/org3", map[string]string{"full_name": "x"}).AddTokenAuth(ownerToken), http.StatusForbidden)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3/hooks").AddTokenAuth(ownerToken), http.StatusForbidden)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3/actions/runners/registration-token").AddTokenAuth(ownerToken), http.StatusForbidden)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/orgs/org3/repos", &api.CreateRepoOption{Name: "blocked"}).AddTokenAuth(ownerToken), http.StatusForbidden)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/teams/1/members").AddTokenAuth(ownerToken), http.StatusOK) // own team
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/teams/7/members").AddTokenAuth(ownerToken), http.StatusForbidden)
 		owner.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3"), http.StatusNotFound)

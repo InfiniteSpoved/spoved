@@ -609,4 +609,16 @@ func TestTwoFactorRequiredOrg(t *testing.T) {
 	assert.Equal(t, perm.AccessModeRead, org3.UnitPermission(ctx, user2, unit.TypeProjects))
 	org3.Visibility = structs.VisibleTypePrivate
 	assert.Equal(t, perm.AccessModeNone, org3.UnitPermission(ctx, user2, unit.TypeProjects))
+
+	// nor can they create repositories in it
+	canCreate := func() bool {
+		t.Helper()
+		can, err := org3.CanCreateOrgRepo(ctx, 2)
+		require.NoError(t, err)
+		return can
+	}
+	assert.True(t, canCreate())
+	_, err := db.GetEngine(ctx).ID(3).Cols("require_two_factor").Update(&user_model.User{RequireTwoFactor: true})
+	require.NoError(t, err)
+	assert.False(t, canCreate())
 }

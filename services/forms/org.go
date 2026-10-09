@@ -47,6 +47,7 @@ type UpdateOrgSettingForm struct {
 	RepoAdminChangeTeamAccess bool
 	RequireTwoFactor          bool
 	RequireTwoFactorConfirm   bool
+	RequireTwoFactorShown     bool // the form has the require_two_factor checkbox: a post without it keeps the setting
 }
 
 // Validate validates the fields

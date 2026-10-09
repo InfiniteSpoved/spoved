@@ -722,15 +722,21 @@ func TwoFactorHiddenRepoIDs(uid int64) *builder.Builder {
 	return builder.Select("id").From("repository").Where(twoFactorHiddenRepos(uid))
 }
 
-func twoFactorHiddenRepos(uid int64) builder.Cond {
-	flagged := builder.Select("id").From("`user`").
-		Where(builder.Eq{"type": user_model.UserTypeOrganization, "require_two_factor": true})
-	return builder.And(
+// TwoFactorBlockingOrgIDs selects the ids of the organizations whose two-factor requirement blocks user uid (> 0),
+// as User.TwoFactorBlocked does.
+func TwoFactorBlockingOrgIDs(uid int64) *builder.Builder {
+	return builder.Select("id").From("`user`").Where(builder.And(
+		builder.Eq{"type": user_model.UserTypeOrganization, "require_two_factor": true},
 		builder.Expr("EXISTS (SELECT 1 FROM `user` u WHERE u.id = ? AND u.is_admin = ? AND u.type <> ?"+
 			" AND NOT EXISTS (SELECT 1 FROM `two_factor` WHERE `two_factor`.uid = u.id)"+
 			" AND NOT EXISTS (SELECT 1 FROM `webauthn_credential` WHERE `webauthn_credential`.user_id = u.id))",
 			uid, false, user_model.UserTypeOrganization),
-		builder.In("`repository`.owner_id", flagged),
+	))
+}
+
+func twoFactorHiddenRepos(uid int64) builder.Cond {
+	return builder.And(
+		builder.In("`repository`.owner_id", TwoFactorBlockingOrgIDs(uid)),
 		builder.Or(
 			builder.Eq{"`repository`.is_private": true},
 			builder.In("`repository`.owner_id", builder.Select("id").From("`user`").Where(builder.Eq{"visibility": structs.VisibleTypePrivate})),
