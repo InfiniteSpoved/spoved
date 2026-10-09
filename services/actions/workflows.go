@@ -13,6 +13,7 @@ import (
 	"forgejo.org/models/perm"
 	"forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
 	"forgejo.org/models/user"
 	"forgejo.org/modules/actions"
 	"forgejo.org/modules/git"
@@ -34,6 +35,11 @@ type InputRequiredErr struct {
 func (err InputRequiredErr) Error() string {
 	return fmt.Sprintf("input required for '%s'", err.Name)
 }
+
+var (
+	ErrWorkflowNoDispatchTrigger = util.NewInvalidArgumentErrorf("workflow has no workflow_dispatch trigger")
+	ErrWorkflowDisabled          = util.NewInvalidArgumentErrorf("workflow is disabled")
+)
 
 func IsInputRequiredErr(err error) bool {
 	_, ok := err.(InputRequiredErr)
@@ -90,6 +96,18 @@ func (entry *Workflow) Dispatch(ctx context.Context, inputGetter InputValueGette
 		return nil, nil, err
 	}
 
+	actionsUnit, err := repo.GetUnit(ctx, unit.TypeActions)
+	if err != nil {
+		return nil, nil, err
+	}
+	if actionsUnit.ActionsConfig().IsWorkflowDisabled(entry.WorkflowID) {
+		return nil, nil, ErrWorkflowDisabled
+	}
+	workflowDispatch := wf.WorkflowDispatchConfig()
+	if workflowDispatch == nil {
+		return nil, nil, ErrWorkflowNoDispatchTrigger
+	}
+
 	fullWorkflowID := entry.WorkflowPath()
 
 	title := wf.Name
@@ -101,22 +119,20 @@ func (entry *Workflow) Dispatch(ctx context.Context, inputGetter InputValueGette
 	// jobparser library takes a map[string]any which is more directly actionable for parsing:
 	inputs := make(map[string]string)
 	inputsAny := make(map[string]any)
-	if workflowDispatch := wf.WorkflowDispatchConfig(); workflowDispatch != nil {
-		for key, input := range workflowDispatch.Inputs {
-			value, err := resolveDispatchInput(key, inputGetter(key), input)
-			if err == ErrSkipDispatchInput {
-				continue
-			} else if err != nil {
-				return nil, nil, err
-			}
-			inputs[key] = value
-			inputsAny[key] = value
-			// To match the behaviour of the runner when parsing map[string]string into map[string]any, check for
-			// boolean type inputs and convert them to booleans for expression evaluation:
-			// https://code.forgejo.org/forgejo/runner/src/commit/d5693e379c034a3afcb920087570d9a6e179e86e/act/runner/expression.go#L435-L439
-			if input.Type == "boolean" {
-				inputsAny[key] = value == "true"
-			}
+	for key, input := range workflowDispatch.Inputs {
+		value, err := resolveDispatchInput(key, inputGetter(key), input)
+		if err == ErrSkipDispatchInput {
+			continue
+		} else if err != nil {
+			return nil, nil, err
+		}
+		inputs[key] = value
+		inputsAny[key] = value
+		// To match the behaviour of the runner when parsing map[string]string into map[string]any, check for
+		// boolean type inputs and convert them to booleans for expression evaluation:
+		// https://code.forgejo.org/forgejo/runner/src/commit/d5693e379c034a3afcb920087570d9a6e179e86e/act/runner/expression.go#L435-L439
+		if input.Type == "boolean" {
+			inputsAny[key] = value == "true"
 		}
 	}
 

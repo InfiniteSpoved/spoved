@@ -1197,6 +1197,8 @@
 	"actions.jobs.not_started": "not started",
 	"actions.workflow.job_parsing_error": "Unable to parse jobs in workflow: %v",
 	"actions.workflow.event_detection_error": "Unable to parse supported events in workflow: %v",
+	"actions.workflow.dispatch.no_trigger": "This workflow has no workflow_dispatch trigger.",
+	"actions.workflow.dispatch.disabled": "This workflow is disabled.",
 	"actions.workflow.persistent_incomplete_matrix": "Unable to evaluate `strategy.matrix` of job %[1]s due to a `needs` expression that was invalid. It may reference a job that is not in it's 'needs' list (%[2]s), or an output that doesn't exist on one of those jobs.",
 	"actions.workflow.incomplete_matrix_missing_job": "Unable to evaluate `strategy.matrix` of job %[1]s: job %[2]s is not in the `needs` list of job %[1]s (%[3]s).",
 	"actions.workflow.incomplete_matrix_missing_output": "Unable to evaluate `strategy.matrix` of job %[1]s: job %[2]s is missing output %[3]s.",
