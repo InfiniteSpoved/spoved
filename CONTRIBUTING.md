@@ -6,7 +6,7 @@ The product name is always written in lowercase: **spoved**.
 
 ## Where things go
 
-- Bugs and feature requests: the [issue tracker of this repository](https://github.com/InfiniteSpoved/spoved/issues).
+- Bugs and feature requests: open an issue in the [issue tracker of this repository](https://github.com/InfiniteSpoved/spoved/issues). Feature requests are welcome; the templates guide you.
 - Security problems: see [`SECURITY.md`](SECURITY.md). Do not open a public issue.
 - Do not report spoved changes or bugs to the Forgejo project, and do not propose spoved changes to it. Forgejo's own issue trackers, chat rooms and contribution rules do not apply here.
 
@@ -43,12 +43,12 @@ Conventions:
 - Add tests for what you change, and do not remove existing tests or checks.
 - Stage files by name; `make lint` can rewrite `package-lock.json`.
 
-## Licence of contributions and sign-off
+## License
 
-Contributions are accepted under the same licence as the project (inbound = outbound): GPL-3.0-or-later. Keep the existing copyright and SPDX headers of the original authors.
+spoved is licensed GPL-3.0-or-later because it is a fork of Forgejo, which is GPL-3.0-or-later. Contributions are accepted under the same license (inbound = outbound). Keep the existing copyright and SPDX headers of the original authors.
 
 Every commit must carry a `Signed-off-by:` line, which certifies the [Developer Certificate of Origin](https://developercertificate.org/). Add it with `git commit -s`.
 
-## Use of AI coding assistants
+## AI-assisted contributions
 
-Much of spoved is written with AI coding agents and reviewed by people. Contributions written with AI assistance are welcome under the same rules as any other: you are responsible for what you submit, you must be able to explain it, and it must carry your sign-off. Please say in the pull request if a substantial part was generated.
+AI-assisted contributions are welcome, and spoved's own changes are AI-assisted and reviewed by people. Please review and test what you submit, and say in the pull request if AI helped; it helps reviewers.

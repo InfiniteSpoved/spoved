@@ -31,7 +31,7 @@ body:
     id: setup
     attributes:
       label: Setup
-      description: Database, operating system or container image, reverse proxy, browser. Relevant `app.ini` settings and log lines (remove secrets).
+      description: Database, operating system or container image, reverse proxy, browser. Relevant `app.ini` settings and log lines. Never paste secrets, tokens or keys; redact hostnames and emails you don't want public.
   - type: textarea
     id: screenshots
     attributes:
