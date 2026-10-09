@@ -488,18 +488,21 @@ func applySubscribedCondition(sess *xorm.Session, subscriberID int64) {
 	)
 }
 
-// issueUnitCond drops the issues (pull requests) whose repository the site policy hides Issues (Pull requests) in.
+// issueUnitCond drops the issues (pull requests) whose repository doesn't have the Issues (Pull requests) unit: the
+// owner turned it off (the issue rows are kept) or the site policy hides it.
 func issueUnitCond(ctx context.Context) builder.Cond {
+	cond := builder.NewCond()
 	hidden := builder.NewCond()
 	for isPull, t := range map[bool]unit.Type{false: unit.TypeIssues, true: unit.TypePullRequests} {
+		cond = cond.Or(builder.Eq{"`issue`.is_pull": isPull}.And(builder.In("`issue`.repo_id", builder.Select("repo_id").From("repo_unit").Where(builder.Eq{"type": t}))))
 		if c := repo_model.HiddenUnitTypeCond(ctx, "`repository`.owner_id", t); c.IsValid() {
 			hidden = hidden.Or(builder.Eq{"`issue`.is_pull": isPull}.And(c))
 		}
 	}
-	if !hidden.IsValid() {
-		return hidden
+	if hidden.IsValid() {
+		cond = cond.And(builder.Not{hidden})
 	}
-	return builder.Not{hidden}
+	return cond
 }
 
 // Issues returns a list of issues by given conditions.

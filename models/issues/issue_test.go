@@ -222,7 +222,7 @@ func TestIssues(t *testing.T) {
 			issues_model.IssuesOptions{
 				SubscriberID: 11,
 			},
-			[]int64{11, 5, 9, 8, 3, 2, 1},
+			[]int64{11, 5, 8, 3, 2, 1}, // not 9: pull request of repo 48, which has no Pull requests unit
 		},
 		{
 			issues_model.IssuesOptions{
@@ -447,7 +447,7 @@ func TestCountIssues(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	count, err := issues_model.CountIssues(db.DefaultContext, &issues_model.IssuesOptions{})
 	require.NoError(t, err)
-	assert.EqualValues(t, 23, count)
+	assert.EqualValues(t, 20, count) // 23 issues, 3 of them in repositories without the unit (9, 18, 20)
 }
 
 func TestIssueLoadAttributes(t *testing.T) {
