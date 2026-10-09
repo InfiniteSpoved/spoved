@@ -379,3 +379,21 @@ func TestCheckKeyCfgErr(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadAccessTokenScopePolicy(t *testing.T) {
+	cfg, err := NewConfigProviderFromData(`
+[security]
+ACCESS_TOKEN_ALLOWED_SCOPES = write:repository, read:issue
+ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION = read:repository
+`)
+	require.NoError(t, err)
+	p := loadAccessTokenScopePolicy(cfg.Section("security"))
+	assert.Equal(t, []string{"write:repository", "read:issue"}, p.Allowed)
+	assert.Equal(t, []string{"read:repository"}, p.RequireRepoRestriction)
+
+	cfg, err = NewConfigProviderFromData(`[security]`)
+	require.NoError(t, err)
+	p = loadAccessTokenScopePolicy(cfg.Section("security"))
+	assert.Empty(t, p.Allowed)
+	assert.Empty(t, p.RequireRepoRestriction)
+}

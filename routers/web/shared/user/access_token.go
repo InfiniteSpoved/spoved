@@ -5,6 +5,7 @@ package user
 
 import (
 	"errors"
+	"strings"
 
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
@@ -17,6 +18,9 @@ import (
 // error.  None[string] may be returned to indicate the error is an unexpected server-side error, not a user validation
 // error.
 func TranslateAccessTokenValidationError(ctx *context.Base, err error) optional.Option[string] {
+	if msg := TranslateScopePolicyError(ctx, err); msg.Has() {
+		return msg
+	}
 	switch {
 	case errors.Is(err, authz.ErrSpecifiedReposNone):
 		return optional.Some[string](ctx.Locale.TrString("access_token.error.specified_repos_none"))
@@ -27,6 +31,18 @@ func TranslateAccessTokenValidationError(ctx *context.Base, err error) optional.
 	default:
 		return TranslateExpiryError(ctx, err, setting.AccessTokenExpiry)
 	}
+}
+
+// TranslateScopePolicyError translates errors from [authz.ValidateScopePolicy], or returns None.
+func TranslateScopePolicyError(ctx *context.Base, err error) optional.Option[string] {
+	var policyErr *authz.ScopePolicyError
+	if !errors.As(err, &policyErr) {
+		return optional.None[string]()
+	}
+	if policyErr.Err == authz.ErrScopeNotAllowed {
+		return optional.Some(ctx.Locale.TrString("access_token.error.scope_not_allowed", policyErr.Scope, strings.Join(policyErr.Allowed, ", ")))
+	}
+	return optional.Some(ctx.Locale.TrString("access_token.error.scope_needs_repo_restriction", policyErr.Scope))
 }
 
 // TranslateExpiryError translates errors from [authz.ValidateExpiry] and [authz.ParseExpiryDate], or returns None.

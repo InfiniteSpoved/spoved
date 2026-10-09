@@ -1,0 +1,135 @@
+// Copyright 2026 The Forgejo Authors. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package authz
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	auth_model "forgejo.org/models/auth"
+	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/setting"
+)
+
+var (
+	ErrScopeNotAllowed           = errors.New("access token scope not allowed")
+	ErrScopeNeedsRepoRestriction = errors.New("access token scope must be limited to specified repositories")
+	ErrScopePolicyConfig         = errors.New("invalid access token scope policy")
+)
+
+// ScopePolicyError is returned by ValidateScopePolicy; it wraps ErrScopeNotAllowed or ErrScopeNeedsRepoRestriction.
+type ScopePolicyError struct {
+	Err     error
+	Scope   string
+	Allowed []string // the scopes the owner may choose, with ErrScopeNotAllowed
+}
+
+func (e *ScopePolicyError) Error() string {
+	if e.Err == ErrScopeNotAllowed {
+		return fmt.Sprintf("%v: %s; allowed scopes: %s", e.Err, e.Scope, strings.Join(e.Allowed, ", "))
+	}
+	return fmt.Sprintf("%v: %s", e.Err, e.Scope)
+}
+
+func (e *ScopePolicyError) Unwrap() error {
+	return e.Err
+}
+
+func policyScope(key string, scopes []string) (auth_model.AccessTokenScope, error) {
+	scope, err := auth_model.AccessTokenScope(strings.Join(scopes, ",")).Normalize()
+	if err != nil {
+		return "", fmt.Errorf("%w: [security] %s: %w", ErrScopePolicyConfig, key, err)
+	}
+	return scope, nil
+}
+
+// CheckScopePolicy checks the configured scope policy at startup.
+func CheckScopePolicy() error {
+	if _, err := policyScope("ACCESS_TOKEN_ALLOWED_SCOPES", setting.AccessTokenScopes.Allowed); err != nil {
+		return err
+	}
+	if _, err := policyScope("ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION", setting.AccessTokenScopes.RequireRepoRestriction); err != nil {
+		return err
+	}
+	// A scope that a repository-specific token can't have would make every such token impossible to create.
+	for _, s := range setting.AccessTokenScopes.RequireRepoRestriction {
+		if err := ValidateRepositoryResource(false, auth_model.AccessTokenScope(s), 1); err != nil {
+			return fmt.Errorf("%w: [security] ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION: %s can't be limited to specified repositories", ErrScopePolicyConfig, s)
+		}
+	}
+	return nil
+}
+
+// scopePolicyExempt: site admins may create any token, but only while they can log in.
+func scopePolicyExempt(owner *user_model.User) bool {
+	return owner.IsAdmin && owner.IsActive && !owner.ProhibitLogin
+}
+
+// AllowedScopes returns the read/write scopes the owner may choose, or nil when any scope is allowed.
+func AllowedScopes(owner *user_model.User) ([]string, error) {
+	if scopePolicyExempt(owner) || len(setting.AccessTokenScopes.Allowed) == 0 {
+		return nil, nil
+	}
+	allowed, err := policyScope("ACCESS_TOKEN_ALLOWED_SCOPES", setting.AccessTokenScopes.Allowed)
+	if err != nil {
+		return nil, err
+	}
+	scopes := []string{}
+	for _, category := range auth_model.AllAccessTokenScopeCategories {
+		for _, level := range []auth_model.AccessTokenScopeLevel{auth_model.Read, auth_model.Write} {
+			for _, s := range auth_model.GetRequiredScopes(level, category) {
+				if has, err := allowed.HasScope(s); err != nil {
+					return nil, err
+				} else if has {
+					scopes = append(scopes, string(s))
+				}
+			}
+		}
+	}
+	return scopes, nil
+}
+
+// ValidateScopePolicy checks the scope of a new access token or authorized integration of owner against the policy.
+func ValidateScopePolicy(owner *user_model.User, scope auth_model.AccessTokenScope, resourceAllRepos bool) error {
+	if scopePolicyExempt(owner) {
+		return nil
+	}
+
+	if len(setting.AccessTokenScopes.Allowed) > 0 {
+		allowed, err := policyScope("ACCESS_TOKEN_ALLOWED_SCOPES", setting.AccessTokenScopes.Allowed)
+		if err != nil {
+			return err
+		}
+		for _, s := range scope.StringSlice() {
+			// public-only only narrows a token.
+			if s == "" || auth_model.AccessTokenScope(s) == auth_model.AccessTokenScopePublicOnly {
+				continue
+			}
+			if has, err := allowed.HasScope(auth_model.AccessTokenScope(s)); err != nil {
+				return err
+			} else if !has {
+				list, err := AllowedScopes(owner)
+				if err != nil {
+					return err
+				}
+				return &ScopePolicyError{Err: ErrScopeNotAllowed, Scope: s, Allowed: list}
+			}
+		}
+	}
+
+	if resourceAllRepos {
+		if _, err := policyScope("ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION", setting.AccessTokenScopes.RequireRepoRestriction); err != nil {
+			return err
+		}
+		for _, s := range setting.AccessTokenScopes.RequireRepoRestriction {
+			if has, err := scope.HasScope(auth_model.AccessTokenScope(s)); err != nil {
+				return err
+			} else if has {
+				return &ScopePolicyError{Err: ErrScopeNeedsRepoRestriction, Scope: s}
+			}
+		}
+	}
+	return nil
+}
