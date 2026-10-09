@@ -9,7 +9,7 @@
 // templates/repo/issue/view_content/conversation.tmpl
 // @watch end
 
-import {expect, type Page} from '@playwright/test';
+import {expect, type Locator, type Page} from '@playwright/test';
 import {test} from './utils_e2e.ts';
 
 test.use({user: 'user2'});
@@ -32,6 +32,19 @@ async function expectLayoutSettled(page: Page) {
   await expect(page.locator('.markup .mermaid-block:not(.is-loading)')).toHaveCount(90, {timeout: 60000});
 }
 
+// Samples the position once per animation frame and needs 10 identical samples in a row, then re-checks the viewport.
+async function expectStableInViewport(target: Locator) {
+  let last = NaN;
+  let same = 0;
+  await expect.poll(async () => {
+    const top = await target.evaluate((el) => new Promise<number>((resolve) => requestAnimationFrame(() => resolve(el.getBoundingClientRect().top))));
+    same = top === last ? same + 1 : 0;
+    last = top;
+    return same;
+  }, {timeout: 30000, intervals: [100]}).toBeGreaterThanOrEqual(10);
+  await expect(target).toBeInViewport({ratio: 0.5});
+}
+
 test('permalink to a deep comment stays in view while content loads', async ({page}) => {
   const id = await commentID(page, 'PERMALINK-TARGET');
   const response = await page.goto(`${PR}#${id}`, {waitUntil: 'domcontentloaded', timeout: 60000});
@@ -40,13 +53,7 @@ test('permalink to a deep comment stays in view while content loads', async ({pa
   const target = page.locator(`#${id}`);
   await expectLayoutSettled(page);
   // no scrollIntoView here: the page itself must have brought the comment into view
-  await expect(target).toBeInViewport({ratio: 0.5});
-
-  // the position must stay put after everything has settled
-  const top = await target.evaluate((el) => el.getBoundingClientRect().top);
-  await page.waitForTimeout(1000); // eslint-disable-line playwright/no-wait-for-timeout
-  expect(await target.evaluate((el) => el.getBoundingClientRect().top)).toBe(top);
-  await expect(target).toBeInViewport({ratio: 0.5});
+  await expectStableInViewport(target);
 });
 
 test('permalink to a comment in an outdated code comment group expands it', async ({page}) => {
@@ -56,6 +63,6 @@ test('permalink to a comment in an outdated code comment group expands it', asyn
   const target = page.locator(`#${id}`);
   await expectLayoutSettled(page);
   await expect(target).toBeVisible();
-  await expect(target).toBeInViewport({ratio: 0.5});
+  await expectStableInViewport(target);
   await expect(page.locator(`.conversation-holder:has(#${id}) .hide-outdated`).first()).toBeVisible();
 });

@@ -394,8 +394,8 @@ jobs:
 			case i < target && i%5 == 3:
 				content += "\n\n```mermaid\ngraph TD; A-->B;\n```"
 			}
-			_, err := issue_service.CreateIssueComment(db.DefaultContext, user, repo, issue, content, nil)
-			require.NoError(t, err)
+			// plain rows: the service layer (notifications, indexers) costs about 60 ms per comment
+			require.NoError(t, db.Insert(db.DefaultContext, &issues_model.Comment{Type: issues_model.CommentTypeComment, PosterID: user.ID, IssueID: issue.ID, Content: content}))
 		}
 	})
 	// add your repo declarations here
