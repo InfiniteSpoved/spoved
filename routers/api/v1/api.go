@@ -1523,6 +1523,8 @@ func Routes() *web.Route {
 					Patch(bind(api.EditHookOption{}), admin.EditHook).
 					Delete(admin.DeleteHook)
 			})
+			m.Get("/actions/runs", admin.ListActionRuns)
+			m.Get("/actions/usage", admin.GetActionUsage)
 			m.Group("/actions/runners", func() {
 				m.Combo("").
 					Get(admin.ListRunners).

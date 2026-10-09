@@ -96,3 +96,10 @@ type swaggerRegisterRunnerResponse struct {
 	// in: body
 	Body api.RegisterRunnerResponse `json:"body"`
 }
+
+// ActionUsage
+// swagger:response ActionUsage
+type swaggerResponseActionUsage struct {
+	// in:body
+	Body api.ActionUsage `json:"body"`
+}

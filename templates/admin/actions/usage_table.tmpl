@@ -1,0 +1,22 @@
+<table class="ui very basic striped table unstackable usage">
+	<thead>
+		<tr>
+			<th>{{ctx.Locale.Tr "admin.actions.usage.name"}}</th>
+			<th>{{ctx.Locale.Tr "admin.actions.usage.minutes"}}</th>
+			<th>{{ctx.Locale.Tr "admin.actions.usage.jobs"}}</th>
+			<th>{{ctx.Locale.Tr "admin.actions.usage.failed_jobs"}}</th>
+		</tr>
+	</thead>
+	<tbody>
+	{{range .Entries}}
+		<tr>
+			<td>{{if and $.Runner (eq .ID 0)}}{{ctx.Locale.Tr "admin.actions.usage.no_runner"}}{{else}}{{.Name}}{{end}}</td>
+			<td>{{printf "%.1f" .Minutes}}</td>
+			<td>{{.Jobs}}</td>
+			<td>{{.FailedJobs}}</td>
+		</tr>
+	{{else}}
+		<tr><td colspan="4">{{ctx.Locale.Tr "admin.actions.usage.none"}}</td></tr>
+	{{end}}
+	</tbody>
+</table>

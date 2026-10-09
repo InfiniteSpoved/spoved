@@ -1,0 +1,8 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin actions")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">{{ctx.Locale.Tr "admin.actions.runs.title"}}</h4>
+		<div class="ui attached segment">
+			{{template "org/actions/runs_list" .}}
+		</div>
+	</div>
+{{template "admin/layout_footer" .}}

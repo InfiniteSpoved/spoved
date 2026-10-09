@@ -1,0 +1,38 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin actions")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">{{ctx.Locale.Tr "admin.actions.usage.title"}}</h4>
+		<div class="ui attached segment">
+			<form class="ui form tw-flex tw-flex-wrap tw-gap-2 tw-items-end" method="get" action="{{AppSubUrl}}/admin/actions/usage">
+				<label>{{ctx.Locale.Tr "admin.actions.usage.group_by"}}
+					<select name="group_by">
+						<option value="repo" {{if eq .GroupBy "repo"}}selected{{end}}>{{ctx.Locale.Tr "admin.actions.usage.group.repo"}}</option>
+						<option value="org" {{if eq .GroupBy "org"}}selected{{end}}>{{ctx.Locale.Tr "admin.actions.usage.group.org"}}</option>
+						<option value="runner" {{if eq .GroupBy "runner"}}selected{{end}}>{{ctx.Locale.Tr "admin.actions.usage.group.runner"}}</option>
+					</select>
+				</label>
+				<label>{{ctx.Locale.Tr "admin.actions.usage.from"}} <input type="date" name="from" value="{{.From}}"></label>
+				<label>{{ctx.Locale.Tr "admin.actions.usage.to"}} <input type="date" name="to" value="{{.To}}"></label>
+				<button class="ui primary button" type="submit">{{ctx.Locale.Tr "admin.actions.usage.show"}}</button>
+			</form>
+			<p class="tw-mt-2">{{ctx.Locale.Tr "admin.actions.usage.note"}}</p>
+		</div>
+		<div class="ui attached table segment">
+			{{template "admin/actions/usage_table" (dict "Entries" .Report.Entries "Runner" (eq .GroupBy "runner"))}}
+		</div>
+		<h4 class="ui top attached header">{{ctx.Locale.Tr "admin.actions.usage.top_minutes"}}</h4>
+		<div class="ui attached table segment">
+			{{template "admin/actions/usage_table" (dict "Entries" .Report.TopByMinutes "Runner" false)}}
+		</div>
+		<h4 class="ui top attached header">{{ctx.Locale.Tr "admin.actions.usage.top_failures"}}</h4>
+		<div class="ui attached table segment">
+			<table class="ui very basic striped table unstackable top-failures">
+				<thead><tr><th>{{ctx.Locale.Tr "admin.actions.usage.name"}}</th><th>{{ctx.Locale.Tr "admin.actions.usage.failed_runs"}}</th></tr></thead>
+				<tbody>
+				{{range .Report.TopByFailures}}
+					<tr><td><a href="{{AppSubUrl}}/{{.Name}}">{{.Name}}</a></td><td>{{.FailedRuns}}</td></tr>
+				{{end}}
+				</tbody>
+			</table>
+		</div>
+	</div>
+{{template "admin/layout_footer" .}}
