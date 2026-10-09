@@ -1,0 +1,38 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems must not be reported here. See [SECURITY.md](https://github.com/InfiniteSpoved/spoved/blob/develop/SECURITY.md).
+        Please search existing issues first and write in English.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: spoved version or commit
+      description: Shown in the page footer and under Site administration.
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: Database, operating system or container image, reverse proxy, browser. Relevant `app.ini` settings and log lines (remove secrets).
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or logs
