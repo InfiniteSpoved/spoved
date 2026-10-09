@@ -289,8 +289,12 @@ func (nl NotificationList) LoadIssues(ctx context.Context) ([]int, error) {
 // repository. The rows are filtered by permission when written, but a unit may have been hidden since. Call it after
 // loading the repository and the issue.
 func (n *Notification) UnitHidden(ctx context.Context) bool {
-	if n.Issue == nil || n.Repository == nil || n.Repository.LoadOwner(ctx) != nil {
+	if n.Issue == nil || n.Repository == nil {
 		return false
+	}
+	if err := n.Repository.LoadOwner(ctx); err != nil {
+		log.Error("LoadOwner: %v", err)
+		return true
 	}
 	if n.Issue.IsPull {
 		return repo_model.HiddenUnits(ctx, n.Repository.Owner).Contains(unit.TypePullRequests)

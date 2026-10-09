@@ -9,6 +9,8 @@ import (
 
 	packages_model "forgejo.org/models/packages"
 	"forgejo.org/models/perm"
+	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/templates"
 	packages_service "forgejo.org/services/packages"
@@ -57,6 +59,12 @@ func PackageAssignmentAPI() func(ctx *APIContext) {
 func packageAssignment(ctx *packageAssignmentCtx, errCb func(int, string, any)) *Package {
 	pkg := &Package{
 		Owner: ctx.ContextUser,
+	}
+	// every registry, the web and the API come through here: Packages Not allowed for the organization means no
+	// access for anyone, site admins included
+	if repo_model.HiddenUnits(ctx, pkg.Owner).Contains(unit.TypePackages) {
+		errCb(http.StatusNotFound, "PackagesNotAllowed", nil)
+		return pkg
 	}
 	var err error
 	pkg.AccessMode, err = packages_service.DeterminePackageAccessMode(ctx.Base, pkg.Owner, ctx.Doer)

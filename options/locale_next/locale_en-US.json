@@ -1800,6 +1800,7 @@
 	"admin.repo_units.defaults_locked": "The units on for new repositories are set in app.ini ([repository] DEFAULT_REPO_UNITS).",
 	"admin.repo_units.updated": "Last changed on %s by %s.",
 	"admin.repo_units.saved": "The repository units were saved.",
+	"admin.repo_units.invalid": "The stored setting can't be read, so no organization may use any of these units. Save this page to replace it.",
 	"repo.settings.webhook_type_disabled": "type disabled",
 	"repo.settings.webhook_type_disabled_error": "The site administrator has disabled the webhook type %s.",
 	"repo.settings.web_hook_name_forgejo": "spoved",

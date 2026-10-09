@@ -79,10 +79,14 @@ func (issues IssueList) FilterHiddenUnits(ctx context.Context) (IssueList, error
 		hidden[owner.ID] = repo_model.HiddenUnits(ctx, owner)
 	}
 	return slices.DeleteFunc(issues, func(issue *Issue) bool {
-		if issue.IsPull {
-			return hidden[issue.Repo.OwnerID].Contains(unit.TypePullRequests)
+		h, ok := hidden[issue.Repo.OwnerID]
+		if !ok {
+			return true // owner not found: fail closed
 		}
-		return hidden[issue.Repo.OwnerID].Contains(unit.TypeIssues)
+		if issue.IsPull {
+			return h.Contains(unit.TypePullRequests)
+		}
+		return h.Contains(unit.TypeIssues)
 	}), nil
 }
 

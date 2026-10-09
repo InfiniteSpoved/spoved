@@ -81,7 +81,7 @@ func initDefaultConfig() {
 		IPAllowlist:     config.ValueJSON[IPAllowlistState]("ip_allowlist.state").WithDefault(IPAllowlistState{ExemptAdmins: true}),
 		OAuth2AppPolicy: config.ValueJSON[OAuth2AppPolicyState]("oauth2.app_policy"),
 		WebhookTypes:    config.ValueJSON[WebhookTypesState]("webhook.types"),
-		RepoUnitPolicy:  config.ValueJSON[RepoUnitPolicyState]("repository.unit_policy"),
+		RepoUnitPolicy:  config.ValueJSON[RepoUnitPolicyState]("repository.unit_policy").WithInvalid(RepoUnitPolicyState{Invalid: true}),
 	}
 }
 

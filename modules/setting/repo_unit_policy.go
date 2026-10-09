@@ -14,9 +14,10 @@ type RepoUnitPolicyState struct {
 	DefaultUnits []string           `json:"default_units"` // units on for new repositories; nil = DEFAULT_REPO_UNITS
 	UpdatedBy    int64              `json:"updated_by"`
 	UpdatedUnix  int64              `json:"updated_unix"`
+	Invalid      bool               `json:"-"` // the stored value can't be parsed: nothing is allowed for organizations
 }
 
 // OrgAllowed reports whether the organization orgID may use the unit with the name key.
 func (s RepoUnitPolicyState) OrgAllowed(key string, orgID int64) bool {
-	return slices.Contains(s.NotAllowed, key) == slices.Contains(s.OrgOverrides[key], orgID)
+	return !s.Invalid && slices.Contains(s.NotAllowed, key) == slices.Contains(s.OrgOverrides[key], orgID)
 }

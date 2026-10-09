@@ -66,6 +66,7 @@ func RepoUnits(ctx *context.Context) {
 		})
 	}
 	ctx.Data["Units"] = rows
+	ctx.Data["PolicyInvalid"] = p.Invalid
 	ctx.Data["DefaultsLocked"] = repo_service.DefaultUnitsLocked()
 	if p.UpdatedUnix > 0 {
 		ctx.Data["UpdatedUnix"] = timeutil.TimeStamp(p.UpdatedUnix)

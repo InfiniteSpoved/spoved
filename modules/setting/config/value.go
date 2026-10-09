@@ -23,6 +23,7 @@ type Value[T any] struct {
 	dynKey    string
 
 	def, value T
+	invalid    *T // used instead of def when the stored value can't be parsed
 	revision   int
 }
 
@@ -31,6 +32,9 @@ func (value *Value[T]) parse(key, valStr string) (v T) {
 	if valStr != "" {
 		if err := json.Unmarshal(util.UnsafeStringToBytes(valStr), &v); err != nil {
 			log.Error("Unable to unmarshal json config for key %q, err: %v", key, err)
+			if value.invalid != nil {
+				return *value.invalid
+			}
 		}
 	}
 	return v
@@ -81,6 +85,12 @@ func (value *Value[T]) DynKey() string {
 
 func (value *Value[T]) WithDefault(def T) *Value[T] {
 	value.def = def
+	return value
+}
+
+// WithInvalid sets the value used when the stored value can't be parsed, for settings that must fail closed.
+func (value *Value[T]) WithInvalid(v T) *Value[T] {
+	value.invalid = &v
 	return value
 }
 

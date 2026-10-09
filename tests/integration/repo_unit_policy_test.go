@@ -4,6 +4,7 @@
 package integration
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -455,6 +456,58 @@ func TestRepoUnitPolicyEntryPaths(t *testing.T) {
 		assert.Equal(t, 4, runs()) // the push runs all three workflows
 		runner.fetchTask(t)
 	})
+}
+
+// Packages Not allowed for an organization close its registries, web and API pages, to site admins too
+func TestRepoUnitPolicyPackages(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer resetRepoUnitPolicy(t)
+
+	token := getUserToken(t, "user2", auth_model.AccessTokenScopeWritePackage, auth_model.AccessTokenScopeReadOrganization)
+	adminToken := getUserToken(t, "user1", auth_model.AccessTokenScopeWritePackage)
+	file := "/api/packages/org3/generic/unit-policy/1.0/file.bin"
+	MakeRequest(t, NewRequestWithBody(t, "PUT", file, bytes.NewReader([]byte{1})).AddTokenAuth(token), http.StatusCreated)
+	var registryToken struct {
+		Token string `json:"token"`
+	}
+	DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/v2/token").AddBasicAuth("user2"), http.StatusOK), &registryToken)
+	registry := "Bearer " + registryToken.Token
+	MakeRequest(t, NewRequest(t, "POST", "/v2/org3/unit-policy/blobs/uploads").AddTokenAuth(registry), http.StatusAccepted)
+
+	defer denyRepoUnits(t, nil, unit_model.TypePackages)()
+	for _, tok := range []string{token, adminToken} {
+		MakeRequest(t, NewRequest(t, "GET", file).AddTokenAuth(tok), http.StatusNotFound)
+		MakeRequest(t, NewRequestWithBody(t, "PUT", "/api/packages/org3/generic/unit-policy/2.0/file.bin", bytes.NewReader([]byte{1})).AddTokenAuth(tok), http.StatusNotFound)
+		MakeRequest(t, NewRequest(t, "GET", "/api/v1/packages/org3").AddTokenAuth(tok), http.StatusNotFound)
+	}
+	MakeRequest(t, NewRequest(t, "POST", "/v2/org3/unit-policy/blobs/uploads").AddTokenAuth(registry), http.StatusNotFound)
+	loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/org3/-/packages"), http.StatusNotFound)
+	loginUser(t, "user1").MakeRequest(t, NewRequest(t, "GET", "/org3/-/packages/generic/unit-policy/1.0"), http.StatusNotFound)
+	loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/packages"), http.StatusNotFound)
+	// user packages are not restricted
+	MakeRequest(t, NewRequestWithBody(t, "PUT", "/api/packages/user2/generic/unit-policy/1.0/file.bin", bytes.NewReader([]byte{1})).AddTokenAuth(token), http.StatusCreated)
+
+	resetRepoUnitPolicy(t)
+	MakeRequest(t, NewRequest(t, "GET", file).AddTokenAuth(token), http.StatusOK)
+}
+
+// A stored policy that can't be parsed fails closed for organizations, and the admin page can replace it
+func TestRepoUnitPolicyCorrupt(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer resetRepoUnitPolicy(t)
+
+	require.NoError(t, system_model.SetSettings(db.DefaultContext, map[string]string{setting.Config().RepoUnitPolicy.DynKey(): "{not json"}))
+	bumpSettingsRevision(t)
+	session := loginUser(t, "user2")
+	session.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/issues"), http.StatusNotFound)
+	session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/issues"), http.StatusOK)
+
+	admin := loginUser(t, "user1")
+	doc := NewHTMLParser(t, admin.MakeRequest(t, NewRequest(t, "GET", "/admin/repo-units"), http.StatusOK).Body)
+	assert.Equal(t, 1, doc.Find(".ui.error.message").Length())
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/repo-units", repoUnitPolicyForm(nil, nil)), http.StatusSeeOther)
+	bumpSettingsRevision(t)
+	session.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/issues"), http.StatusOK)
 }
 
 // Must-fix 1: loading the units of a list stays one query, whatever the policy

@@ -5,6 +5,9 @@
 		</h4>
 		<div class="ui attached segment">
 			<p>{{ctx.Locale.Tr "admin.repo_units.desc"}}</p>
+			{{if .PolicyInvalid}}
+				<div class="ui error message">{{ctx.Locale.Tr "admin.repo_units.invalid"}}</div>
+			{{end}}
 			{{if .DefaultsLocked}}
 				<div class="ui warning message">{{ctx.Locale.Tr "admin.repo_units.defaults_locked"}}</div>
 			{{end}}

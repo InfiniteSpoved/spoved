@@ -25,7 +25,12 @@ func setUnitPolicy(t *testing.T, p setting.RepoUnitPolicyState) {
 	t.Helper()
 	v, err := json.Marshal(p)
 	require.NoError(t, err)
-	require.NoError(t, system_model.SetSettings(db.DefaultContext, map[string]string{setting.Config().RepoUnitPolicy.DynKey(): string(v)}))
+	setRawUnitPolicy(t, string(v))
+}
+
+func setRawUnitPolicy(t *testing.T, v string) {
+	t.Helper()
+	require.NoError(t, system_model.SetSettings(db.DefaultContext, map[string]string{setting.Config().RepoUnitPolicy.DynKey(): v}))
 	config.GetDynGetter().InvalidateCache()
 }
 
@@ -40,6 +45,7 @@ func TestOrgAllowed(t *testing.T) {
 	assert.True(t, p.OrgAllowed("repo.wiki", 3))
 	assert.True(t, p.OrgAllowed("repo.projects", 3))
 	assert.True(t, setting.RepoUnitPolicyState{}.OrgAllowed("repo.issues", 3))
+	assert.False(t, setting.RepoUnitPolicyState{Invalid: true}.OrgAllowed("repo.issues", 3))
 }
 
 // HiddenUnitCond must match HiddenUnits for every owner and unit
@@ -52,6 +58,7 @@ func TestHiddenUnitCondMatchesHiddenUnits(t *testing.T) {
 
 	for name, p := range map[string]setting.RepoUnitPolicyState{
 		"empty":       {},
+		"corrupt":     {Invalid: true},
 		"not allowed": {NotAllowed: []string{"repo.issues", "repo.packages"}},
 		"overrides": {
 			NotAllowed:   []string{"repo.issues"},
@@ -60,7 +67,12 @@ func TestHiddenUnitCondMatchesHiddenUnits(t *testing.T) {
 		"everything": {NotAllowed: []string{"repo.issues", "repo.ext_issues", "repo.pulls", "repo.releases", "repo.wiki", "repo.ext_wiki", "repo.projects", "repo.packages", "repo.actions"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			setUnitPolicy(t, p)
+			if p.Invalid {
+				setRawUnitPolicy(t, `{"not_allowed": 5`)
+				require.True(t, setting.Config().RepoUnitPolicy.Value(db.DefaultContext).Invalid)
+			} else {
+				setUnitPolicy(t, p)
+			}
 			if name == "empty" {
 				assert.False(t, repo_model.HiddenUnitCond(db.DefaultContext, "`user`.id", "t").IsValid())
 			}
@@ -89,7 +101,12 @@ func TestLoadUnitsHidesPolicyUnits(t *testing.T) {
 
 	orgRepo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})  // org3
 	userRepo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1}) // user2
+	// the owner is read in the query, never from repo.Owner
+	require.Nil(t, orgRepo.Owner)
 	assert.False(t, orgRepo.UnitEnabled(db.DefaultContext, unit.TypeIssues))
+	orgRepo.Units = nil
+	assert.False(t, orgRepo.UnitEnabled(db.DefaultContext, unit.TypeIssues))
+	assert.True(t, repo_model.HiddenUnits(db.DefaultContext, nil).Contains(unit.TypeIssues), "a nil owner hides everything")
 	assert.True(t, orgRepo.UnitEnabled(db.DefaultContext, unit.TypePullRequests))
 	assert.True(t, userRepo.UnitEnabled(db.DefaultContext, unit.TypeIssues))
 	// the row is kept
@@ -103,7 +120,15 @@ func TestLoadUnitsHidesPolicyUnits(t *testing.T) {
 	assert.False(t, list[0].UnitEnabled(db.DefaultContext, unit.TypeIssues))
 	assert.True(t, list[1].UnitEnabled(db.DefaultContext, unit.TypeIssues))
 
-	setUnitPolicy(t, setting.RepoUnitPolicyState{})
+	// a corrupt stored value fails closed for organizations, user repositories are not restricted
+	setRawUnitPolicy(t, "{not json")
+	orgRepo = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})
+	assert.False(t, orgRepo.UnitEnabled(db.DefaultContext, unit.TypePullRequests))
+	userRepo = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
+	assert.True(t, userRepo.UnitEnabled(db.DefaultContext, unit.TypePullRequests))
+
+	// nothing stored allows everything
+	setRawUnitPolicy(t, "")
 	orgRepo = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})
 	assert.True(t, orgRepo.UnitEnabled(db.DefaultContext, unit.TypeIssues))
 }
