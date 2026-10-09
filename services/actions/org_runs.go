@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -108,7 +107,7 @@ func orgRunRepoCond(ctx context.Context, org *organization.Organization, doer *u
 	cond := builder.Eq{"`repository`.trashed_unix": 0}.And(
 		builder.In("`repository`.id", builder.Select("repo_id").From("repo_unit").Where(builder.Eq{"type": unit.TypeActions})),
 		// Actions Not allowed for the owner by the site policy, for site admins too
-		repo_model.AvailableUnitCond(ctx, "`repository`.owner_id", strconv.Itoa(int(unit.TypeActions))),
+		repo_model.AvailableUnitTypeCond(ctx, "`repository`.owner_id", unit.TypeActions),
 	)
 	if org != nil {
 		cond = cond.And(builder.Eq{"`repository`.owner_id": org.ID})

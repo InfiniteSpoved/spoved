@@ -6,7 +6,6 @@ package repo
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"forgejo.org/models/db"
@@ -610,7 +609,7 @@ func searchRepositoryByCondition(ctx context.Context, opts *SearchRepoOptions, c
 	}
 
 	if has, u := opts.EnabledUnit.Get(); has {
-		cond = cond.And(AvailableUnitCond(ctx, "`repository`.owner_id", strconv.Itoa(int(u))))
+		cond = cond.And(AvailableUnitTypeCond(ctx, "`repository`.owner_id", u))
 	}
 
 	sess := db.GetEngine(ctx)

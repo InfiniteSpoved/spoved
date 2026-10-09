@@ -561,7 +561,7 @@ func GetFeeds(ctx context.Context, opts GetFeedsOptions) (ActionList, int64, err
 		unit.TypePullRequests: {ActionCreatePullRequest, ActionMergePullRequest, ActionClosePullRequest, ActionReopenPullRequest, ActionApprovePullRequest, ActionRejectPullRequest, ActionCommentPull, ActionPullReviewDismissed, ActionPullRequestReadyForReview, ActionAutoMergePullRequest},
 		unit.TypeReleases:     {ActionPublishRelease},
 	} {
-		if hidden := repo_model.HiddenUnitCond(ctx, "`repository`.owner_id", strconv.Itoa(int(t))); hidden.IsValid() {
+		if hidden := repo_model.HiddenUnitTypeCond(ctx, "`repository`.owner_id", t); hidden.IsValid() {
 			cond = cond.And(builder.Not{builder.In("`action`.op_type", ops).And(hidden)})
 		}
 	}

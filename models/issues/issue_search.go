@@ -492,7 +492,7 @@ func applySubscribedCondition(sess *xorm.Session, subscriberID int64) {
 func issueUnitCond(ctx context.Context) builder.Cond {
 	hidden := builder.NewCond()
 	for isPull, t := range map[bool]unit.Type{false: unit.TypeIssues, true: unit.TypePullRequests} {
-		if c := repo_model.HiddenUnitCond(ctx, "`repository`.owner_id", strconv.Itoa(int(t))); c.IsValid() {
+		if c := repo_model.HiddenUnitTypeCond(ctx, "`repository`.owner_id", t); c.IsValid() {
 			hidden = hidden.Or(builder.Eq{"`issue`.is_pull": isPull}.And(c))
 		}
 	}

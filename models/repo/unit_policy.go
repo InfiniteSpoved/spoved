@@ -37,24 +37,35 @@ func HiddenUnits(ctx context.Context, owner *user_model.User) container.Set[unit
 	return hidden
 }
 
-// HiddenUnitCond is HiddenUnits in SQL: it matches the rows whose unit (typeCol) is hidden in repositories owned by
-// ownerCol. typeCol may also be a unit type literal. It is empty when nothing is hidden.
+// HiddenUnitCond is HiddenUnits in SQL: it matches the rows whose unit (the typeCol column) is hidden in
+// repositories owned by ownerCol. It is empty when nothing is hidden.
 func HiddenUnitCond(ctx context.Context, ownerCol, typeCol string) builder.Cond {
+	return hiddenUnitCond(ctx, ownerCol, PolicyUnitTypes(), func(t unit.Type) builder.Cond { return builder.Eq{typeCol: t} })
+}
+
+// HiddenUnitTypeCond matches the owners (ownerCol) in whose repositories the site policy hides the unit t. It is
+// empty when nothing is hidden.
+func HiddenUnitTypeCond(ctx context.Context, ownerCol string, t unit.Type) builder.Cond {
+	return hiddenUnitCond(ctx, ownerCol, []unit.Type{t}, func(unit.Type) builder.Cond { return builder.NewCond() })
+}
+
+func hiddenUnitCond(ctx context.Context, ownerCol string, types []unit.Type, typeCond func(unit.Type) builder.Cond) builder.Cond {
 	p := setting.Config().RepoUnitPolicy.Value(ctx)
 	cond := builder.NewCond()
-	for _, t := range PolicyUnitTypes() {
+	for _, t := range types {
 		key := unit.Units[t].NameKey
 		flipped := p.OrgOverrides[key]
 		switch {
+		case t == unit.TypeCode:
 		case p.Invalid || slices.Contains(p.NotAllowed, key):
-			c := builder.Eq{typeCol: t}.And(builder.In(ownerCol, builder.Select("id").From("`user`").Where(builder.Eq{"type": user_model.UserTypeOrganization})))
+			c := typeCond(t).And(builder.In(ownerCol, builder.Select("id").From("`user`").Where(builder.Eq{"type": user_model.UserTypeOrganization})))
 			if len(flipped) > 0 && !p.Invalid {
 				c = c.And(builder.NotIn(ownerCol, flipped))
 			}
 			cond = cond.Or(c)
 		case len(flipped) > 0:
 			// only organization IDs are stored, and IDs are never reused
-			cond = cond.Or(builder.Eq{typeCol: t}.And(builder.In(ownerCol, flipped)))
+			cond = cond.Or(typeCond(t).And(builder.In(ownerCol, flipped)))
 		}
 	}
 	return cond
@@ -62,7 +73,16 @@ func HiddenUnitCond(ctx context.Context, ownerCol, typeCol string) builder.Cond 
 
 // AvailableUnitCond is the negation of HiddenUnitCond, or an empty condition when nothing is hidden.
 func AvailableUnitCond(ctx context.Context, ownerCol, typeCol string) builder.Cond {
-	if c := HiddenUnitCond(ctx, ownerCol, typeCol); c.IsValid() {
+	return notCond(HiddenUnitCond(ctx, ownerCol, typeCol))
+}
+
+// AvailableUnitTypeCond is the negation of HiddenUnitTypeCond, or an empty condition when nothing is hidden.
+func AvailableUnitTypeCond(ctx context.Context, ownerCol string, t unit.Type) builder.Cond {
+	return notCond(HiddenUnitTypeCond(ctx, ownerCol, t))
+}
+
+func notCond(c builder.Cond) builder.Cond {
+	if c.IsValid() {
 		return builder.Not{c}
 	}
 	return builder.NewCond()

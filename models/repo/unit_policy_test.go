@@ -4,7 +4,6 @@
 package repo_test
 
 import (
-	"strconv"
 	"testing"
 
 	"forgejo.org/models/db"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"xorm.io/builder"
 )
 
 func setUnitPolicy(t *testing.T, p setting.RepoUnitPolicyState) {
@@ -28,9 +28,17 @@ func setUnitPolicy(t *testing.T, p setting.RepoUnitPolicyState) {
 	setRawUnitPolicy(t, string(v))
 }
 
+var lastSettingsRevision int
+
+// setRawUnitPolicy stores v under a revision no earlier test used: fixtures reset the revision, and a cached value
+// of the same revision would win
 func setRawUnitPolicy(t *testing.T, v string) {
 	t.Helper()
 	require.NoError(t, system_model.SetSettings(db.DefaultContext, map[string]string{setting.Config().RepoUnitPolicy.DynKey(): v}))
+	for system_model.GetRevision(db.DefaultContext) <= lastSettingsRevision {
+		require.NoError(t, system_model.SetSettings(db.DefaultContext, nil))
+	}
+	lastSettingsRevision = system_model.GetRevision(db.DefaultContext)
 	config.GetDynGetter().InvalidateCache()
 }
 
@@ -79,18 +87,44 @@ func TestHiddenUnitCondMatchesHiddenUnits(t *testing.T) {
 			for _, owner := range owners {
 				hidden := repo_model.HiddenUnits(db.DefaultContext, owner)
 				for _, tp := range unit.AllRepoUnitTypes {
-					// the unit type as a literal in place of a column
-					cond := repo_model.HiddenUnitCond(db.DefaultContext, "`user`.id", strconv.Itoa(int(tp)))
+					cond := repo_model.HiddenUnitTypeCond(db.DefaultContext, "`user`.id", tp)
 					got := false
 					if cond.IsValid() {
 						var err error
 						got, err = db.GetEngine(db.DefaultContext).Table("user").Where("`user`.id = ?", owner.ID).And(cond).Exist()
 						require.NoError(t, err)
 					}
+					// the column form gives the same answer on repo_unit rows
+					if colCond := repo_model.HiddenUnitCond(db.DefaultContext, "`repository`.owner_id", "`repo_unit`.type"); colCond.IsValid() {
+						all, err := db.GetEngine(db.DefaultContext).Table("repo_unit").Join("INNER", "repository", "`repository`.id = `repo_unit`.repo_id").
+							Where(builder.Eq{"`repository`.owner_id": owner.ID, "`repo_unit`.type": tp}).Count()
+						require.NoError(t, err)
+						matched, err := db.GetEngine(db.DefaultContext).Table("repo_unit").Join("INNER", "repository", "`repository`.id = `repo_unit`.repo_id").
+							Where(builder.Eq{"`repository`.owner_id": owner.ID, "`repo_unit`.type": tp}).And(colCond).Count()
+						require.NoError(t, err)
+						assert.Equal(t, map[bool]int64{true: all, false: 0}[hidden.Contains(tp)], matched, "owner %s unit %s column form", owner.Name, tp)
+					}
 					assert.Equal(t, hidden.Contains(tp), got, "owner %s unit %s", owner.Name, tp)
 				}
 			}
 		})
+	}
+}
+
+// The conditions are plain SQL on every database: no unit type or ID is written as an identifier
+func TestHiddenUnitCondSQL(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer setUnitPolicy(t, setting.RepoUnitPolicyState{})
+	setUnitPolicy(t, setting.RepoUnitPolicyState{NotAllowed: []string{"repo.issues"}, OrgOverrides: map[string][]int64{"repo.issues": {3}, "repo.wiki": {6}}})
+
+	for _, cond := range []builder.Cond{
+		repo_model.HiddenUnitCond(db.DefaultContext, "`repository`.owner_id", "`repo_unit`.type"),
+		repo_model.HiddenUnitTypeCond(db.DefaultContext, "`repository`.owner_id", unit.TypeIssues),
+		repo_model.AvailableUnitTypeCond(db.DefaultContext, "`repository`.owner_id", unit.TypeWiki),
+	} {
+		sql, _, err := builder.ToSQL(cond)
+		require.NoError(t, err)
+		assert.NotRegexp(t, `[`+"`"+`"'][0-9]+[`+"`"+`"']|(^|[ (])[0-9]+ *=`, sql)
 	}
 }
 
