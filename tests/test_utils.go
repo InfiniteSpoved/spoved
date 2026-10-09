@@ -36,6 +36,7 @@ import (
 	"forgejo.org/modules/testlogger"
 	"forgejo.org/modules/util"
 	"forgejo.org/routers"
+	migrations_allowlist "forgejo.org/services/migrations/allowlist"
 	"forgejo.org/tests/internaltest"
 
 	"github.com/stretchr/testify/require"
@@ -371,6 +372,8 @@ func PrepareTestEnv(t testing.TB, skip ...int) func() {
 	deferFn := PrepareTestEnvWithPackageData(t, skip...)
 	PrepareCleanPackageData(t)
 	internaltest.NewInternalTestServer(t, nil)
+	// tests that allow local networks re-init the allowlist and only restore the setting
+	require.NoError(t, migrations_allowlist.Init())
 
 	projectRoot := base.SetupProjectRoot()
 	setting.AppWorkPath = projectRoot
@@ -385,6 +388,8 @@ func PrepareTestEnvWithPackageData(t testing.TB, skip ...int) func() {
 	if !inTestEnv.CompareAndSwap(false, true) {
 		t.Fatal("Cannot prepare a test environment if you are already in a test environment. This is a bug in your testing code.")
 	}
+	// a failed prepare returns no deferFn: don't leave the flag set for the rest of the process
+	t.Cleanup(func() { inTestEnv.Store(false) })
 
 	deferPrintCurrentTest := PrintCurrentTest(t, util.OptionalArg(skip)+1)
 	deferFn := func() {
