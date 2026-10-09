@@ -45,9 +45,10 @@ func TestIssueSearchOwnerDisabledUnit(t *testing.T) {
 		}
 		return res
 	}
-	webIDs := func(query string) []int64 {
+	webAdmin := loginUser(t, "user1")
+	webIDs := func(sess *TestSession, query string) []int64 {
 		var found []*api.Issue
-		DecodeJSON(t, web.MakeRequest(t, NewRequest(t, "GET", "/issues/search?limit=50&"+query), http.StatusOK), &found)
+		DecodeJSON(t, sess.MakeRequest(t, NewRequest(t, "GET", "/issues/search?limit=50&"+query), http.StatusOK), &found)
 		var res []int64
 		for _, i := range found {
 			res = append(res, i.ID)
@@ -61,7 +62,8 @@ func TestIssueSearchOwnerDisabledUnit(t *testing.T) {
 			"anonymous issues": ids("", "type=issues"),
 			"user issues":      ids(other, "type=issues"),
 			"admin issues":     ids(admin, "type=issues"),
-			"web issues":       webIDs("type=issues"),
+			"web issues":       webIDs(web, "type=issues"),
+			"web admin issues": webIDs(webAdmin, "type=issues"),
 			"admin both":       ids(admin, ""),
 			"owner both":       ids(owner, ""),
 		} {
@@ -71,7 +73,8 @@ func TestIssueSearchOwnerDisabledUnit(t *testing.T) {
 			"anonymous pulls": ids("", "type=pulls"),
 			"user pulls":      ids(other, "type=pulls"),
 			"admin pulls":     ids(admin, "type=pulls"),
-			"web pulls":       webIDs("type=pulls"),
+			"web pulls":       webIDs(web, "type=pulls"),
+			"web admin pulls": webIDs(webAdmin, "type=pulls"),
 			"admin both":      ids(admin, ""),
 			"owner both":      ids(owner, ""),
 		} {
@@ -83,6 +86,9 @@ func TestIssueSearchOwnerDisabledUnit(t *testing.T) {
 		assert.Equal(t, wantIssue, containsLink(issues, "/user2/repo1/issues/1"), "dashboard issue")
 		pulls := owner.MakeRequest(t, NewRequest(t, "GET", "/pulls?type=your_repositories&state=open"), http.StatusOK).Body.String()
 		assert.Equal(t, wantPulls, containsLink(pulls, "/user2/repo1/pulls/3"), "dashboard pull")
+		// the milestones list shows a repository with at least one of the two units
+		milestones := owner.MakeRequest(t, NewRequest(t, "GET", "/milestones?repos=[1]"), http.StatusOK).Body.String()
+		assert.Equal(t, wantIssue || wantPulls, strings.Contains(milestones, "milestone1"), "milestones")
 	}
 	patch := func(opt api.EditRepoOption) {
 		t.Helper()
@@ -98,6 +104,11 @@ func TestIssueSearchOwnerDisabledUnit(t *testing.T) {
 	patch(api.EditRepoOption{HasPullRequests: new(false)})
 	check(t, true, false)
 	patch(api.EditRepoOption{HasPullRequests: new(true)})
+	check(t, true, true)
+
+	patch(api.EditRepoOption{HasIssues: new(false), HasPullRequests: new(false)})
+	check(t, false, false)
+	patch(api.EditRepoOption{HasIssues: new(true), HasPullRequests: new(true)})
 	check(t, true, true)
 
 	// the rows were never touched

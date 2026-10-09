@@ -4,6 +4,8 @@
 package issues
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"forgejo.org/models/db"
@@ -118,4 +120,29 @@ func TestIssueListFilterHiddenUnitsDisabledUnit(t *testing.T) {
 	got, err = list().FilterHiddenUnits(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, []int64{4}, ids(got))
+}
+
+// Fail closed: a missing repository drops the issue, a failing unit lookup is an error
+func TestIssueListFilterHiddenUnitsFailsClosed(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+
+	list := IssueList{unittest.AssertExistsAndLoadBean(t, &Issue{ID: 1}), {ID: 1000, RepoID: 99999}}
+	got, err := list.FilterHiddenUnits(db.DefaultContext)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.EqualValues(t, 1, got[0].ID)
+
+	// the repositories are loaded already, so the units query is the one that fails
+	list = IssueList{unittest.AssertExistsAndLoadBean(t, &Issue{ID: 1})}
+	_, err = list.LoadRepositories(db.DefaultContext)
+	require.NoError(t, err)
+	errRollback := errors.New("rollback")
+	err = db.WithTx(db.DefaultContext, func(ctx context.Context) error {
+		_, err := db.GetEngine(ctx).Exec("DROP TABLE repo_unit")
+		require.NoError(t, err)
+		_, err = list.FilterHiddenUnits(ctx)
+		require.Error(t, err)
+		return errRollback
+	})
+	require.ErrorIs(t, err, errRollback)
 }
