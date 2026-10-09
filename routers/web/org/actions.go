@@ -11,7 +11,6 @@ import (
 	access_model "forgejo.org/models/perm/access"
 	"forgejo.org/models/unit"
 	"forgejo.org/modules/base"
-	"forgejo.org/modules/setting"
 	shared_user "forgejo.org/routers/web/shared/user"
 	actions_service "forgejo.org/services/actions"
 	"forgejo.org/services/context"
@@ -23,7 +22,7 @@ const tplRuns base.TplName = "org/actions/runs"
 
 // Runs lists the workflow runs of the repositories of the organization that the doer can read the Actions of.
 func Runs(ctx *context.Context) {
-	if !setting.Actions.Enabled || unit.TypeActions.UnitGlobalDisabled() {
+	if !actions_service.OrgRunsEnabled() {
 		ctx.NotFound("Runs", nil)
 		return
 	}

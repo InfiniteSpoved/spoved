@@ -15,7 +15,11 @@ import (
 	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
+	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/test"
 	webhook_module "forgejo.org/modules/webhook"
 	"forgejo.org/tests"
 
@@ -87,11 +91,12 @@ func TestOrgActionsRunsPage(t *testing.T) {
 	})
 
 	t.Run("a member sees only the repositories they can read", func(t *testing.T) {
-		// user4: team1 reads repo3's Actions, repo5 is out of reach, and so is the public repo21 only if it has no unit
+		// user4: team1 reads repo3's Actions, repo5 is out of reach, and the public repo21 is readable by every member
 		assert.ElementsMatch(t, []string{"org3/repo3", "org3/repo21"}, orgRunRepos(orgRunRows(t, loginUser(t, "user4"), "")))
 	})
 
 	t.Run("who may open it", func(t *testing.T) {
+		require.True(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3}).Visibility.IsPublic(), "a PUBLIC org: only membership keeps user5 out")
 		loginUser(t, "user5").MakeRequest(t, NewRequest(t, "GET", "/org/org3/actions"), http.StatusNotFound) // signed in, not a member
 		MakeRequest(t, NewRequest(t, "GET", "/org/org3/actions"), http.StatusSeeOther)                       // anonymous
 		// a site admin who isn't a member sees everything (and so does the count)
@@ -281,4 +286,27 @@ func TestOrgActionsRunsQueryCount(t *testing.T) {
 	web2, api2 := count()
 	assert.Equal(t, web1, web2)
 	assert.Equal(t, api1, api2)
+}
+
+func TestOrgActionsRunsPageSizeClamp(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	prepareOrgRuns(t)
+	for i := range setting.API.MaxResponseItems + 5 {
+		require.NoError(t, db.Insert(db.DefaultContext, &actions_model.ActionRun{
+			Title: "more", RepoID: 3, OwnerID: 3, WorkflowID: "more.yaml", Index: int64(1000 + i), TriggerUserID: 2,
+			Ref: "refs/heads/main", Event: webhook_module.HookEventPush, TriggerEvent: "push", Status: actions_model.StatusSuccess,
+		}))
+	}
+	session := loginUser(t, "user2")
+	assert.Len(t, orgRunRepos(orgRunRows(t, session, "?limit=100000")), setting.API.MaxResponseItems)
+	assert.Len(t, apiOrgRuns(t, getUserToken(t, "user2", auth_model.AccessTokenScopeReadOrganization, auth_model.AccessTokenScopeReadRepository), "?limit=100000", http.StatusOK).Entries, setting.API.MaxResponseItems)
+}
+
+func TestOrgActionsRunsActionsDisabled(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	prepareOrgRuns(t)
+	defer test.MockVariableValue(&setting.Actions.Enabled, false)()
+	token := getUserToken(t, "user2", auth_model.AccessTokenScopeReadOrganization, auth_model.AccessTokenScopeReadRepository)
+	loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/org/org3/actions"), http.StatusNotFound)
+	MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3/actions/runs").AddTokenAuth(token), http.StatusNotFound)
 }

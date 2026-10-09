@@ -4169,7 +4169,7 @@
               "type": "string"
             },
             "collectionFormat": "multi",
-            "description": "Only return runs with one of these statuses (success, failure, cancelled, running, waiting, skipped, blocked). At most 20 values.",
+            "description": "Only return runs with one of these statuses (success, failure, cancelled, running, waiting, skipped, blocked). Repeated values are deduplicated and only the first 20 are used.",
             "name": "status",
             "in": "query"
           },
@@ -4179,7 +4179,7 @@
               "type": "string"
             },
             "collectionFormat": "multi",
-            "description": "Only return runs triggered by one of these events, for example `push` or `pull_request`. At most 20 values.",
+            "description": "Only return runs triggered by one of these events, for example `push` or `pull_request`. Repeated values are deduplicated and only the first 20 are used; an unknown event matches no run.",
             "name": "event",
             "in": "query"
           },

@@ -32,14 +32,14 @@ func ListActionRuns(ctx *context.APIContext) {
 	//   required: true
 	// - name: status
 	//   in: query
-	//   description: Only return runs with one of these statuses (success, failure, cancelled, running, waiting, skipped, blocked). At most 20 values.
+	//   description: Only return runs with one of these statuses (success, failure, cancelled, running, waiting, skipped, blocked). Repeated values are deduplicated and only the first 20 are used.
 	//   type: array
 	//   items:
 	//     type: string
 	//   collectionFormat: multi
 	// - name: event
 	//   in: query
-	//   description: Only return runs triggered by one of these events, for example `push` or `pull_request`. At most 20 values.
+	//   description: Only return runs triggered by one of these events, for example `push` or `pull_request`. Repeated values are deduplicated and only the first 20 are used; an unknown event matches no run.
 	//   type: array
 	//   items:
 	//     type: string
@@ -86,6 +86,10 @@ func ListActionRuns(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
+	if !actions_service.OrgRunsEnabled() {
+		ctx.NotFound()
+		return
+	}
 	filter, err := actions_service.ParseOrgRunFilter(ctx.Base)
 	if err != nil {
 		ctx.Error(http.StatusBadRequest, "ParseOrgRunFilter", err)

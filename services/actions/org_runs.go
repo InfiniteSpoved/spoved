@@ -19,6 +19,7 @@ import (
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 
 	"xorm.io/builder"
@@ -36,6 +37,11 @@ type OrgRunFilter struct {
 	Branch   string
 	Actor    string // user name of the person who triggered the run
 	From, To timeutil.TimeStamp
+}
+
+// OrgRunsEnabled says whether Actions is on for the instance, which the org runs list needs as the repository pages do.
+func OrgRunsEnabled() bool {
+	return setting.Actions.Enabled && !unit.TypeActions.UnitGlobalDisabled()
 }
 
 // FormGetter is the part of the web and API contexts that reads query parameters.

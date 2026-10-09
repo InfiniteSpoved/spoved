@@ -136,6 +136,57 @@ func TestFindOrgRunsVisibility(t *testing.T) {
 	})
 }
 
+// A team with admin authorize reaches every unit of its repositories, with or without a team_unit row for Actions
+// (the fixtures' owner teams have none), as GetUserRepoPermission does; a read team without that row doesn't.
+func TestFindOrgRunsAdminTeamWithoutUnitRow(t *testing.T) {
+	runIDs := orgRunsSetup(t)
+	org := unittest.AssertExistsAndLoadBean(t, &organization.Organization{ID: 17})
+	has, err := db.GetEngine(t.Context()).Where("team_id = 5 AND type = ?", unit.TypeActions).Exist(new(organization.TeamUnit))
+	require.NoError(t, err)
+	require.False(t, has, "the owner team has no Actions team_unit row")
+	listed, _, err := FindOrgRuns(t.Context(), org, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 15}), false, nil, OrgRunFilter{}, db.ListOptions{ListAll: true})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []int64{runIDs[23], runIDs[24]}, orgRunIDs(listed))
+
+	// user 20 is in the read-only review_team of repo 24, which has no Actions row: only the public repo
+	listed, _, err = FindOrgRuns(t.Context(), org, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 20}), false, nil, OrgRunFilter{}, db.ListOptions{ListAll: true})
+	require.NoError(t, err)
+	assert.Equal(t, []int64{runIDs[23]}, orgRunIDs(listed))
+}
+
+// Owning the organization gives no reach beyond the repositories whose Actions can be read: not another
+// organization's, nor a trashed one, nor one with Actions off.
+func TestFindOrgRunsOrgOwnerNoExtraReach(t *testing.T) {
+	runIDs := orgRunsSetup(t)
+	org17 := unittest.AssertExistsAndLoadBean(t, &organization.Organization{ID: 17})
+	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 15})
+	_, err := db.GetEngine(t.Context()).Exec("UPDATE repository SET trashed_unix = 1 WHERE id = 23")
+	require.NoError(t, err)
+	_, err = db.GetEngine(t.Context()).Exec("DELETE FROM repo_unit WHERE repo_id = 24 AND type = ?", unit.TypeActions)
+	require.NoError(t, err)
+	listed, total, err := FindOrgRuns(t.Context(), org17, owner, false, nil, OrgRunFilter{}, db.ListOptions{ListAll: true})
+	require.NoError(t, err)
+	assert.Empty(t, listed)
+	assert.Zero(t, total)
+	// the other organization's runs are not reachable through this one
+	listed, _, err = FindOrgRuns(t.Context(), org17, owner, false, nil, OrgRunFilter{Repo: "repo21"}, db.ListOptions{ListAll: true})
+	require.NoError(t, err)
+	assert.NotContains(t, orgRunIDs(listed), runIDs[32])
+	assert.Empty(t, listed)
+}
+
+func TestOrgRunFilterCap(t *testing.T) {
+	values := make([]string, 50)
+	for i := range values {
+		values[i] = fmt.Sprintf("v%d", i)
+	}
+	assert.Len(t, dedupe(values), orgRunsMaxValues, "status and event values share the cap")
+	assert.Equal(t, []string{"a", "b"}, dedupe([]string{"a", " ", "b", "a"}))
+	f, err := ParseOrgRunFilter(testForm{"status": {"success", "success", "failure", "success"}})
+	require.NoError(t, err)
+	assert.Equal(t, []actions_model.Status{actions_model.StatusSuccess, actions_model.StatusFailure}, f.Statuses)
+}
+
 func TestFindOrgRunsFilters(t *testing.T) {
 	runIDs := orgRunsSetup(t)
 	org := unittest.AssertExistsAndLoadBean(t, &organization.Organization{ID: 17})
