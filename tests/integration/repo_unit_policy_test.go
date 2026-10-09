@@ -24,6 +24,7 @@ import (
 	unit_model "forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/cache"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/lfs"
@@ -637,8 +638,9 @@ func TestRepoUnitPolicyLoadUnitsQueries(t *testing.T) {
 				for _, r := range repos {
 					r.Units = nil
 				}
-				_ = repo_model.HiddenUnitCond(db.DefaultContext, "a", "b") // warm up the settings cache
-				assert.EqualValues(t, 1, countQueries(t, func() { require.NoError(t, repos.LoadUnits(db.DefaultContext)) }), "%d repos", n)
+				ctx := cache.WithCacheContext(db.DefaultContext)
+				_ = repo_model.HiddenUnitCond(ctx, "a", "b") // warm up the settings and org_unit caches of the request
+				assert.EqualValues(t, 1, countQueries(t, func() { require.NoError(t, repos.LoadUnits(ctx)) }), "%d repos", n)
 			}
 		})
 	}
