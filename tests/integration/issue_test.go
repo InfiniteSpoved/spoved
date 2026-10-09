@@ -891,7 +891,7 @@ func TestSearchIssues(t *testing.T) {
 
 	expectedIssueCount := min(
 		// from the fixtures
-		20, setting.UI.IssuePagingNum,
+		18, setting.UI.IssuePagingNum, // 20 before issues of repositories without the unit left (fixtures 9, 18, 20)
 	)
 
 	req := NewRequest(t, "GET", "/issues/search")
@@ -911,7 +911,7 @@ func TestSearchIssues(t *testing.T) {
 		req = NewRequest(t, "GET", link.String())
 		resp = session.MakeRequest(t, req, http.StatusOK)
 		DecodeJSON(t, resp, &apiIssues)
-		assert.Len(t, apiIssues, 11)
+		assert.Len(t, apiIssues, 8)
 		query.Del("since")
 		query.Del("before")
 
@@ -927,7 +927,7 @@ func TestSearchIssues(t *testing.T) {
 		req = NewRequest(t, "GET", link.String())
 		resp = session.MakeRequest(t, req, http.StatusOK)
 		DecodeJSON(t, resp, &apiIssues)
-		assert.Equal(t, "23", resp.Header().Get("X-Total-Count"))
+		assert.Equal(t, "20", resp.Header().Get("X-Total-Count"))
 		assert.Len(t, apiIssues, 20)
 
 		query.Add("limit", "5")
@@ -935,7 +935,7 @@ func TestSearchIssues(t *testing.T) {
 		req = NewRequest(t, "GET", link.String())
 		resp = session.MakeRequest(t, req, http.StatusOK)
 		DecodeJSON(t, resp, &apiIssues)
-		assert.Equal(t, "23", resp.Header().Get("X-Total-Count"))
+		assert.Equal(t, "20", resp.Header().Get("X-Total-Count"))
 		assert.Len(t, apiIssues, 5)
 
 		query = url.Values{"assigned": {"true"}, "state": {"all"}}
@@ -964,7 +964,7 @@ func TestSearchIssues(t *testing.T) {
 		req = NewRequest(t, "GET", link.String())
 		resp = session.MakeRequest(t, req, http.StatusOK)
 		DecodeJSON(t, resp, &apiIssues)
-		assert.Len(t, apiIssues, 9)
+		assert.Len(t, apiIssues, 8)
 
 		query = url.Values{"owner": {"org3"}} // organization
 		link.RawQuery = query.Encode()
@@ -984,7 +984,7 @@ func TestSearchIssues(t *testing.T) {
 	t.Run("By Keyword", func(t *testing.T) {
 		link, _ := url.Parse("/issues/search")
 		for keyword, len := range map[string]int{
-			"modified:>2000-01-01 modified:<2001-09-02": 11,
+			"modified:>2000-01-01 modified:<2001-09-02": 8,
 			"is:closed":             2,
 			"is:all":                20,
 			"is:all assignee:user2": 2,
@@ -1017,7 +1017,7 @@ func TestSearchIssuesWithLabels(t *testing.T) {
 
 	expectedIssueCount := min(
 		// from the fixtures
-		20, setting.UI.IssuePagingNum,
+		18, setting.UI.IssuePagingNum, // 20 before issues of repositories without the unit left (fixtures 9, 18, 20)
 	)
 
 	session := loginUser(t, "user1")

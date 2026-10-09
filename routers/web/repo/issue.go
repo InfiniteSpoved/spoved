@@ -2980,6 +2980,12 @@ func SearchIssues(ctx *context.Context) {
 		ctx.Error(http.StatusInternalServerError)
 		return
 	}
+	issues, err = issues.FilterHiddenUnits(ctx)
+	if err != nil {
+		log.Error("FilterHiddenUnits: %v", err)
+		ctx.Error(http.StatusInternalServerError)
+		return
+	}
 
 	ctx.SetTotalCountHeader(total)
 	ctx.JSON(http.StatusOK, convert.ToIssueList(ctx, ctx.Doer, issues))

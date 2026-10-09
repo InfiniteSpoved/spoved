@@ -30,6 +30,6 @@ func TestNodeinfo(t *testing.T) {
 	assert.True(t, nodeinfo.OpenRegistrations)
 	assert.Equal(t, "forgejo", nodeinfo.Software.Name)
 	assert.Equal(t, 31, nodeinfo.Usage.Users.Total)
-	assert.Equal(t, 23, nodeinfo.Usage.LocalPosts)
+	assert.Equal(t, 20, nodeinfo.Usage.LocalPosts) // 23 issues, 3 in repositories without the unit (fixtures 9, 18, 20)
 	assert.Equal(t, 4, nodeinfo.Usage.LocalComments)
 }
