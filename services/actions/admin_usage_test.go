@@ -237,7 +237,12 @@ func TestFindOrgRunsAllOwners(t *testing.T) {
 	assert.EqualValues(t, 2, total, "trashed and no-Actions repositories are hidden; stale owner_id is ignored")
 	assert.Len(t, runs, 2)
 	for _, run := range runs {
-		assert.Empty(t, run.EventPayload, "the payload isn't loaded")
+		assert.Empty(t, run.EventPayload, "OmitEventPayload: the payload isn't loaded")
+		var full actions_model.ActionRun
+		has, err := db.GetEngine(t.Context()).ID(run.ID).Get(&full)
+		require.NoError(t, err)
+		require.True(t, has)
+		assert.JSONEq(t, `{"big":true}`, full.EventPayload, "a normal load has it")
 		assert.Equal(t, "x", run.Title)
 	}
 
