@@ -13,9 +13,8 @@ The product name is always written in lowercase: **spoved**.
 ## Branches
 
 - `develop` is the default branch. Open all pull requests against `develop`.
-- `main` mirrors Forgejo and is fast-forwarded by an automated workflow. Never push to it.
 - Merge `develop` into your branch with a merge commit when it falls behind. Do not rebase or force-push a branch that is already pushed.
-- Changes that touch files inherited from Forgejo (for example `CONTRIBUTING.md`, `README.md`, templates) can conflict when `main` is merged into `develop`; keep such edits small.
+- Maintainers port Forgejo changes into `develop` periodically; you do not need to do this in your pull request.
 
 ## Building and testing
 
