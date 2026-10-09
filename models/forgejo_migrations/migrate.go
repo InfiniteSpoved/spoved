@@ -38,7 +38,7 @@ type Migration struct {
 
 var (
 	rawMigrations          []*Migration
-	migrationFilenameRegex = regexp.MustCompile(`/(?P<migration_group>v[0-9]+[a-z])_(?P<migration_id>[^/]+)\.go$`)
+	migrationFilenameRegex = regexp.MustCompile(`/(?P<migration_group>v[0-9]+[a-z]+)_(?P<migration_id>[^/]+)\.go$`)
 )
 
 var getMigrationFilename = func() string {

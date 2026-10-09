@@ -38,4 +38,7 @@ type MigrateOptions struct {
 	ReleaseAssets   bool
 	MigrateToRepoID int64
 	MirrorInterval  string `json:"mirror_interval"`
+	// Comma-separated ref patterns of a pull mirror (git service only); empty means everything.
+	MirrorBranchFilter string `json:"mirror_branch_filter"`
+	MirrorTagFilter    string `json:"mirror_tag_filter"`
 }

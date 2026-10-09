@@ -38,6 +38,7 @@ import (
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 	"forgejo.org/services/issue"
+	mirror_service "forgejo.org/services/mirror"
 	repo_service "forgejo.org/services/repository"
 	wiki_service "forgejo.org/services/wiki"
 )
@@ -600,7 +601,9 @@ func Get(ctx *context.APIContext) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, convert.ToRepo(ctx, ctx.Repo().Repository, ctx.Repo().Permission))
+	apiRepo := convert.ToRepo(ctx, ctx.Repo().Repository, ctx.Repo().Permission)
+	addMirrorFilters(ctx, apiRepo)
+	ctx.JSON(http.StatusOK, apiRepo)
 }
 
 // GetByID returns a single Repository
@@ -706,7 +709,7 @@ func Edit(ctx *context.APIContext) {
 		}
 	}
 
-	if opts.MirrorInterval != nil || opts.EnablePrune != nil {
+	if opts.MirrorInterval != nil || opts.EnablePrune != nil || opts.MirrorBranchFilter != nil || opts.MirrorTagFilter != nil {
 		if err := updateMirror(ctx, opts); err != nil {
 			return
 		}
@@ -718,7 +721,9 @@ func Edit(ctx *context.APIContext) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, convert.ToRepo(ctx, repo, ctx.Repo().Permission))
+	apiRepo := convert.ToRepo(ctx, repo, ctx.Repo().Permission)
+	addMirrorFilters(ctx, apiRepo)
+	ctx.JSON(http.StatusOK, apiRepo)
 }
 
 // Convert converts a mirror to a normal repo
@@ -1233,14 +1238,54 @@ func updateMirror(ctx *context.APIContext, opts api.EditRepoOption) error {
 		log.Trace("Repository %s Mirror[%d] Set EnablePrune: %t", repo.FullName(), mirror.ID, mirror.EnablePrune)
 	}
 
+	// update the branch and tag filters; a change queues a sync, which applies it
+	filtersChanged := false
+	if opts.MirrorBranchFilter != nil || opts.MirrorTagFilter != nil {
+		if repo.IsArchived {
+			err := errors.New("the filters of an archived repository can't be changed")
+			ctx.Error(http.StatusUnprocessableEntity, "MirrorFilter", err)
+			return err
+		}
+		branchFilter, tagFilter := mirror.BranchFilter, mirror.TagFilter
+		var err error
+		if opts.MirrorBranchFilter != nil {
+			branchFilter, err = repo_model.NormalizeRefFilter(*opts.MirrorBranchFilter)
+		}
+		if err == nil && opts.MirrorTagFilter != nil {
+			tagFilter, err = repo_model.NormalizeRefFilter(*opts.MirrorTagFilter)
+		}
+		if err == nil && !repo.IsEmpty {
+			err = repo_model.CheckDefaultBranchFilter(branchFilter, repo.DefaultBranch)
+		}
+		if err != nil {
+			ctx.Error(http.StatusUnprocessableEntity, "MirrorFilter", err)
+			return err
+		}
+		filtersChanged = branchFilter != mirror.BranchFilter || tagFilter != mirror.TagFilter
+		mirror.BranchFilter, mirror.TagFilter = branchFilter, tagFilter
+	}
+
 	// finally update the mirror in the DB
-	if err := repo_model.UpdateMirror(ctx, mirror); err != nil {
+	if err := repo_model.UpdateMirrorCols(ctx, mirror, "interval", "next_update_unix", "enable_prune", "branch_filter", "tag_filter"); err != nil {
 		log.Error("Failed to Set Mirror Interval: %s", err)
 		ctx.Error(http.StatusUnprocessableEntity, "MirrorInterval", err)
 		return err
 	}
 
+	if filtersChanged {
+		mirror_service.AddPullMirrorToQueue(repo.ID)
+	}
 	return nil
+}
+
+// addMirrorFilters adds the pull mirror filters to the API repository; only repository admins get to see them.
+func addMirrorFilters(ctx *context.APIContext, apiRepo *api.Repository) {
+	if !apiRepo.Mirror || !ctx.Repo().IsAdmin() {
+		return
+	}
+	if m, err := repo_model.GetMirrorByRepoID(ctx, apiRepo.ID); err == nil {
+		apiRepo.MirrorBranchFilter, apiRepo.MirrorTagFilter, apiRepo.MirrorFilterError = m.BranchFilter, m.TagFilter, m.FilterError
+	}
 }
 
 // convertMirrorToNormalRepository converts a mirror to a normal repo

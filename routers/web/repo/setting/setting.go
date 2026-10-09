@@ -467,10 +467,29 @@ func SettingsPost(ctx *context.Context) {
 			return
 		}
 
+		branchFilter, err := repo_model.NormalizeRefFilter(form.MirrorBranchFilter)
+		if err == nil {
+			form.MirrorBranchFilter = branchFilter
+			form.MirrorTagFilter, err = repo_model.NormalizeRefFilter(form.MirrorTagFilter)
+		}
+		if err != nil {
+			ctx.Data["Err_MirrorBranchFilter"] = true
+			ctx.RenderWithErr(ctx.Tr("repo.settings.mirror_filter_invalid", err.Error()), tplSettingsOptions, &form)
+			return
+		}
+		if !repo.IsEmpty && repo_model.CheckDefaultBranchFilter(form.MirrorBranchFilter, repo.DefaultBranch) != nil {
+			ctx.Data["Err_MirrorBranchFilter"] = true
+			ctx.RenderWithErr(ctx.Tr("repo.settings.mirror_filter_default_branch", repo.DefaultBranch), tplSettingsOptions, &form)
+			return
+		}
+		filtersChanged := pullMirror.BranchFilter != form.MirrorBranchFilter || pullMirror.TagFilter != form.MirrorTagFilter
+		pullMirror.BranchFilter = form.MirrorBranchFilter
+		pullMirror.TagFilter = form.MirrorTagFilter
+
 		pullMirror.EnablePrune = form.EnablePrune
 		pullMirror.Interval = interval
 		pullMirror.ScheduleNextUpdate()
-		if err := repo_model.UpdateMirror(ctx, pullMirror); err != nil {
+		if err := repo_model.UpdateMirrorCols(ctx, pullMirror, "enable_prune", "interval", "next_update_unix", "branch_filter", "tag_filter"); err != nil {
 			ctx.ServerError("UpdateMirror", err)
 			return
 		}
@@ -534,9 +553,13 @@ func SettingsPost(ctx *context.Context) {
 
 		pullMirror.LFS = form.LFS
 		pullMirror.LFSEndpoint = form.LFSEndpoint
-		if err := repo_model.UpdateMirror(ctx, pullMirror); err != nil {
+		if err := repo_model.UpdateMirrorCols(ctx, pullMirror, "lfs_enabled", "lfs_endpoint"); err != nil {
 			ctx.ServerError("UpdateMirror", err)
 			return
+		}
+
+		if filtersChanged {
+			mirror_service.AddPullMirrorToQueue(repo.ID)
 		}
 
 		ctx.Flash.Success(ctx.Tr("repo.settings.update_settings_success"))

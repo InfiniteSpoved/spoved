@@ -30770,10 +30770,20 @@
         "internal_tracker": {
           "$ref": "#/definitions/InternalTracker"
         },
+        "mirror_branch_filter": {
+          "description": "comma-separated branch names or patterns (one `*` at most) a pull mirror fetches; empty means all branches",
+          "type": "string",
+          "x-go-name": "MirrorBranchFilter"
+        },
         "mirror_interval": {
           "description": "set to a string like `8h30m0s` to set the mirror interval time",
           "type": "string",
           "x-go-name": "MirrorInterval"
+        },
+        "mirror_tag_filter": {
+          "description": "comma-separated tag names or patterns (one `*` at most) a pull mirror fetches; empty means all tags",
+          "type": "string",
+          "x-go-name": "MirrorTagFilter"
         },
         "name": {
           "description": "name of the repository",
@@ -32556,9 +32566,19 @@
           "type": "boolean",
           "x-go-name": "Mirror"
         },
+        "mirror_branch_filter": {
+          "description": "comma-separated branch names or patterns (one `*` at most) to mirror; only for pull mirrors of plain git remotes",
+          "type": "string",
+          "x-go-name": "MirrorBranchFilter"
+        },
         "mirror_interval": {
           "type": "string",
           "x-go-name": "MirrorInterval"
+        },
+        "mirror_tag_filter": {
+          "description": "comma-separated tag names or patterns (one `*` at most) to mirror; only for pull mirrors of plain git remotes",
+          "type": "string",
+          "x-go-name": "MirrorTagFilter"
         },
         "private": {
           "type": "boolean",
@@ -34985,9 +35005,24 @@
           "type": "boolean",
           "x-go-name": "Mirror"
         },
+        "mirror_branch_filter": {
+          "description": "Only shown to repository admins",
+          "type": "string",
+          "x-go-name": "MirrorBranchFilter"
+        },
+        "mirror_filter_error": {
+          "description": "Upstream HEAD branch that the branch filter excludes; only shown to repository admins",
+          "type": "string",
+          "x-go-name": "MirrorFilterError"
+        },
         "mirror_interval": {
           "type": "string",
           "x-go-name": "MirrorInterval"
+        },
+        "mirror_tag_filter": {
+          "description": "Only shown to repository admins",
+          "type": "string",
+          "x-go-name": "MirrorTagFilter"
         },
         "mirror_updated": {
           "type": "string",

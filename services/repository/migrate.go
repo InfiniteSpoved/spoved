@@ -22,6 +22,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
+	mirror_service "forgejo.org/services/mirror"
 )
 
 // MigrateRepositoryGitData starts migrating git related data after created migrating repository
@@ -43,6 +44,21 @@ func MigrateRepositoryGitData(ctx context.Context, u *user_model.User,
 
 	migrateTimeout := time.Duration(setting.Git.Timeout.Migrate) * time.Second
 
+	// Refuse bad filters before cloning anything.
+	mirrorFilters := &repo_model.Mirror{BranchFilter: opts.MirrorBranchFilter, TagFilter: opts.MirrorTagFilter}
+	if mirrorFilters.HasFilter() {
+		var err error
+		if !opts.Mirror {
+			return repo, errors.New("branch and tag filters are only for pull mirrors")
+		}
+		if mirrorFilters.BranchFilter, err = repo_model.NormalizeRefFilter(opts.MirrorBranchFilter); err != nil {
+			return repo, err
+		}
+		if mirrorFilters.TagFilter, err = repo_model.NormalizeRefFilter(opts.MirrorTagFilter); err != nil {
+			return repo, err
+		}
+	}
+
 	var err error
 	if err = util.RemoveAll(repoPath); err != nil {
 		return repo, fmt.Errorf("Failed to remove %s: %w", repoPath, err)
@@ -61,6 +77,12 @@ func MigrateRepositoryGitData(ctx context.Context, u *user_model.User,
 			return repo, fmt.Errorf("Clone timed out. Consider increasing [git.timeout] MIGRATE in app.ini. Underlying Error: %w", err)
 		}
 		return repo, fmt.Errorf("Clone: %w", err)
+	}
+
+	if mirrorFilters.HasFilter() {
+		if err := mirror_service.FilterNewMirror(ctx, repo, mirrorFilters); err != nil {
+			return repo, err
+		}
 	}
 
 	if err := git.WriteCommitGraph(ctx, repoPath); err != nil {
@@ -194,6 +216,8 @@ func MigrateRepositoryGitData(ctx context.Context, u *user_model.User,
 			EnablePrune:    true,
 			NextUpdateUnix: timeutil.TimeStampNow().AddDuration(setting.Mirror.DefaultInterval),
 			LFS:            opts.LFS,
+			BranchFilter:   mirrorFilters.BranchFilter,
+			TagFilter:      mirrorFilters.TagFilter,
 		}
 		if opts.LFS {
 			mirrorModel.LFSEndpoint = opts.LFSEndpoint

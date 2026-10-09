@@ -17,6 +17,7 @@ import (
 
 	"forgejo.org/models"
 	issues_model "forgejo.org/models/issues"
+	repo_model "forgejo.org/models/repo"
 	webhook_model "forgejo.org/models/webhook"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
@@ -85,6 +86,26 @@ type MigrateRepoForm struct {
 	PullRequests   bool   `json:"pull_requests"`
 	Releases       bool   `json:"releases"`
 	MirrorInterval string `json:"mirror_interval"`
+
+	MirrorBranchFilter string `json:"mirror_branch_filter"`
+	MirrorTagFilter    string `json:"mirror_tag_filter"`
+}
+
+// NormalizeMirrorFilters validates the branch and tag filters of a migration and returns them normalized. Filters are
+// only allowed for pull mirrors of plain git remotes (other services also bring refs/pull heads and non-git data).
+func NormalizeMirrorFilters(service structs.GitServiceType, mirror bool, branchFilter, tagFilter string) (string, string, error) {
+	if branchFilter == "" && tagFilter == "" {
+		return "", "", nil
+	}
+	if !mirror || service != structs.PlainGitService {
+		return "", "", errors.New("branch and tag filters are only for pull mirrors of plain git remotes")
+	}
+	branchFilter, err := repo_model.NormalizeRefFilter(branchFilter)
+	if err != nil {
+		return "", "", err
+	}
+	tagFilter, err = repo_model.NormalizeRefFilter(tagFilter)
+	return branchFilter, tagFilter, err
 }
 
 // Validate validates the fields
@@ -151,6 +172,8 @@ type RepoSettingForm struct {
 	Private                bool
 	Template               bool
 	EnablePrune            bool
+	MirrorBranchFilter     string `binding:"MaxSize(2048)" preprocess:"TrimSpace"`
+	MirrorTagFilter        string `binding:"MaxSize(2048)" preprocess:"TrimSpace"`
 
 	// Advanced settings
 	IsArchived bool

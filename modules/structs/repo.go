@@ -116,6 +116,12 @@ type Repository struct {
 	AvatarURL                     string        `json:"avatar_url"`
 	Internal                      bool          `json:"internal"`
 	MirrorInterval                string        `json:"mirror_interval"`
+	// Only shown to repository admins
+	MirrorBranchFilter string `json:"mirror_branch_filter,omitempty"`
+	// Only shown to repository admins
+	MirrorTagFilter string `json:"mirror_tag_filter,omitempty"`
+	// Upstream HEAD branch that the branch filter excludes; only shown to repository admins
+	MirrorFilterError string `json:"mirror_filter_error,omitempty"`
 	// ObjectFormatName of the underlying git repository
 	// enum: ["sha1", "sha256"]
 	ObjectFormatName string `json:"object_format_name"`
@@ -243,6 +249,10 @@ type EditRepoOption struct {
 	MirrorInterval *string `json:"mirror_interval,omitempty"`
 	// enable prune - remove obsolete remote-tracking references when mirroring
 	EnablePrune *bool `json:"enable_prune,omitempty"`
+	// comma-separated branch names or patterns (one `*` at most) a pull mirror fetches; empty means all branches
+	MirrorBranchFilter *string `json:"mirror_branch_filter,omitempty"`
+	// comma-separated tag names or patterns (one `*` at most) a pull mirror fetches; empty means all tags
+	MirrorTagFilter *string `json:"mirror_tag_filter,omitempty"`
 }
 
 // GenerateRepoOption options when creating repository using a template
@@ -403,6 +413,10 @@ type MigrateRepoOptions struct {
 	PullRequests   bool   `json:"pull_requests"`
 	Releases       bool   `json:"releases"`
 	MirrorInterval string `json:"mirror_interval"`
+	// comma-separated branch names or patterns (one `*` at most) to mirror; only for pull mirrors of plain git remotes
+	MirrorBranchFilter string `json:"mirror_branch_filter"`
+	// comma-separated tag names or patterns (one `*` at most) to mirror; only for pull mirrors of plain git remotes
+	MirrorTagFilter string `json:"mirror_tag_filter"`
 }
 
 // TokenAuth represents whether a service type supports token-based auth

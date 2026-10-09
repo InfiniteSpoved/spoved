@@ -213,6 +213,13 @@ func MigratePost(ctx *context.Context) {
 		}
 	}
 
+	branchFilter, tagFilter, err := forms.NormalizeMirrorFilters(form.Service, form.Mirror, form.MirrorBranchFilter, form.MirrorTagFilter)
+	if err != nil {
+		ctx.Data["Err_MirrorBranchFilter"] = true
+		ctx.RenderWithErr(ctx.Tr("repo.migrate.mirror_filter_invalid", err.Error()), tpl, form)
+		return
+	}
+
 	opts := migrations.MigrateOptions{
 		OriginalURL:    form.CloneAddr,
 		GitServiceType: form.Service,
@@ -233,6 +240,9 @@ func MigratePost(ctx *context.Context) {
 		Comments:       form.Issues || form.PullRequests,
 		PullRequests:   form.PullRequests,
 		Releases:       form.Releases,
+
+		MirrorBranchFilter: branchFilter,
+		MirrorTagFilter:    tagFilter,
 	}
 	if opts.Mirror {
 		opts.Issues = false

@@ -32,6 +32,12 @@ type Mirror struct {
 	UpdatedUnix    timeutil.TimeStamp `xorm:"INDEX"`
 	NextUpdateUnix timeutil.TimeStamp `xorm:"INDEX"`
 
+	// Comma-separated ref patterns (see NormalizeRefFilter); empty means every branch/tag.
+	BranchFilter string `xorm:"VARCHAR(2048) NOT NULL DEFAULT ''"`
+	TagFilter    string `xorm:"VARCHAR(2048) NOT NULL DEFAULT ''"`
+	// Name of the upstream HEAD branch when it doesn't match BranchFilter; never git output.
+	FilterError string `xorm:"TEXT"`
+
 	LFS         bool   `xorm:"lfs_enabled NOT NULL DEFAULT false"`
 	LFSEndpoint string `xorm:"lfs_endpoint TEXT"`
 
@@ -156,9 +162,9 @@ func GetMirrorByRepoID(ctx context.Context, repoID int64) (*Mirror, error) {
 	return m, nil
 }
 
-// UpdateMirror updates the mirror
-func UpdateMirror(ctx context.Context, m *Mirror) error {
-	_, err := db.GetEngine(ctx).ID(m.ID).AllCols().Update(m)
+// UpdateMirrorCols updates only the given columns, so a concurrent writer of other columns isn't reverted.
+func UpdateMirrorCols(ctx context.Context, m *Mirror, cols ...string) error {
+	_, err := db.GetEngine(ctx).ID(m.ID).Cols(cols...).Update(m)
 	return err
 }
 
