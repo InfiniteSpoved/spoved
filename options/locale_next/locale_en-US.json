@@ -32,7 +32,7 @@
 	"repo.settings.add_webhook_desc": "spoved will send <code>POST</code> requests with a specified Content-Type to the target URL. Read more in the <a target=\"_blank\" rel=\"noopener noreferrer\" href=\"%s\">webhooks guide</a>.",
 	"repo.release.deletion_desc": "Deleting a release only removes it from spoved. It will not affect the Git tag, the contents of your repository or its history. Continue?",
 	"admin.trash": "Trash",
-	"admin.trash.desc": "Deleted repositories and organizations are kept here for %d days, hidden from everyone but site administrators, and then deleted permanently. Only a site administrator can restore them or delete them earlier. A repository can be restored under a new owner or name: its collaborators keep their access, the teams of the old organization do not.",
+	"admin.trash.desc": "Deleted repositories and organizations are kept here for %d days, hidden from everyone but site administrators, and then deleted permanently. Only a site administrator can restore them or delete them earlier. A repository can be restored under a new owner or name: its collaborators keep their access, the teams of the old organization do not. A restored organization may have no owner, if its last owner was deleted while it was in the trash; add one in its teams.",
 	"admin.trash.total_size": "total size %s",
 	"admin.trash.empty": "The trash is empty.",
 	"admin.trash.repo": "Repository",

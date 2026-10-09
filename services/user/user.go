@@ -307,12 +307,6 @@ func deleteUserAccount(ctx context.Context, u *user_model.User, purge, trash boo
 			}
 		}
 
-		// What is left are memberships of organizations in the trash, which the lookups above don't list. They go
-		// too, so the user can be deleted; an organization whose last owner this was has no owner when it is restored.
-		if err := removeTrashedOrgMemberships(ctx, u); err != nil {
-			return err
-		}
-
 		// Delete Packages
 		if setting.Packages.Enabled {
 			if _, err := packages.RemoveAllPackages(ctx, u.ID); err != nil {
@@ -352,6 +346,15 @@ func deleteUserAccount(ctx context.Context, u *user_model.User, purge, trash boo
 		}
 	} else if count > 0 {
 		return models.ErrUserOwnRepos{UID: u.ID}
+	}
+
+	// What is left of the memberships of a purged user are those of organizations in the trash, which the loop above
+	// doesn't list. They go too (only this user's rows), so the user can be deleted; an organization whose last owner
+	// this was has no owner when it is restored.
+	if purge {
+		if err := removeTrashedOrgMemberships(ctx, u); err != nil {
+			return err
+		}
 	}
 
 	// Check membership of organization.
@@ -443,13 +446,11 @@ func DeleteInactiveUsers(ctx context.Context, olderThan time.Duration) error {
 
 // removeTrashedOrgMemberships takes the user out of the organizations in the trash, with the counters.
 func removeTrashedOrgMemberships(ctx context.Context, u *user_model.User) error {
-	return db.WithTx(ctx, func(ctx context.Context) error {
-		if _, err := db.Exec(ctx, "UPDATE `team` SET num_members = num_members - 1 WHERE id IN (SELECT team_id FROM team_user WHERE uid = ?)", u.ID); err != nil {
-			return err
-		}
-		if _, err := db.Exec(ctx, "UPDATE `user` SET num_members = num_members - 1 WHERE id IN (SELECT org_id FROM org_user WHERE uid = ?)", u.ID); err != nil {
-			return err
-		}
-		return db.DeleteBeans(ctx, &organization.OrgUser{UID: u.ID}, &organization.TeamUser{UID: u.ID})
-	})
+	if _, err := db.Exec(ctx, "UPDATE `team` SET num_members = num_members - 1 WHERE id IN (SELECT team_id FROM team_user WHERE uid = ?)", u.ID); err != nil {
+		return err
+	}
+	if _, err := db.Exec(ctx, "UPDATE `user` SET num_members = num_members - 1 WHERE id IN (SELECT org_id FROM org_user WHERE uid = ?)", u.ID); err != nil {
+		return err
+	}
+	return db.DeleteBeans(ctx, &organization.OrgUser{UID: u.ID}, &organization.TeamUser{UID: u.ID})
 }

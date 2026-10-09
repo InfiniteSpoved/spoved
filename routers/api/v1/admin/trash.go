@@ -137,7 +137,7 @@ func RestoreTrash(ctx *context.APIContext) {
 	// swagger:operation POST /admin/trash/{type}/{id}/restore admin adminRestoreTrash
 	// ---
 	// summary: Restore a deleted repository or organization from the trash
-	// description: A repository can be restored under a new owner and/or name. Its collaborators keep their access, the teams of the old organization do not.
+	// description: A repository can be restored under a new owner and/or name. Its collaborators keep their access, the teams of the old organization do not. A restored organization may have no owner, if its last owner was deleted while it was in the trash; a site admin can add one.
 	// consumes:
 	// - application/json
 	// parameters:

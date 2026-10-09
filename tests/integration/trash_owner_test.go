@@ -4,6 +4,7 @@
 package integration
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,6 +25,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
+	org_service "forgejo.org/services/org"
 	repo_service "forgejo.org/services/repository"
 	trash_service "forgejo.org/services/trash"
 	user_service "forgejo.org/services/user"
@@ -744,6 +746,37 @@ func TestTrashUserSoleOrgOwner(t *testing.T) {
 	DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/trash?type=org&q=soleorg").AddTokenAuth(adminTrashToken(t)), http.StatusOK), &list)
 	require.Len(t, list, 1)
 	assert.EqualValues(t, 1, list[0].RepoCount)
+}
+
+// N4: purging the last owner of an organization in the trash leaves it ownerless; restored, an admin can still use it and
+// add an owner, and no page breaks.
+func TestTrashOrgOwnerlessRestore(t *testing.T) {
+	defer prepareTrash(t)()
+	ctx := t.Context()
+	token := getUserToken(t, "user8", auth_model.AccessTokenScopeAll)
+	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/orgs", &api.CreateOrgOption{UserName: "ownerless"}).AddTokenAuth(token), http.StatusCreated)
+	org := unittest.AssertExistsAndLoadBean(t, &organization.Organization{LowerName: "ownerless"})
+	require.NoError(t, org_service.TrashOrganization(ctx, trashAdminUser(t), org))
+	other := unittest.GetCount(t, &organization.OrgUser{}, "uid != 8")
+
+	require.Error(t, user_service.DeleteUser(ctx, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8}), false), "without purge the membership keeps the user")
+	require.NoError(t, user_service.DeleteUser(ctx, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8}), true))
+	unittest.AssertNotExistsBean(t, &user_model.User{ID: 8})
+	assert.Equal(t, other, unittest.GetCount(t, &organization.OrgUser{}, "uid != 8"), "only the deleted user's rows went")
+	assert.Zero(t, unittest.GetCount(t, &organization.TeamUser{OrgID: org.ID}))
+
+	require.NoError(t, trash_service.RestoreOrg(ctx, trashAdminUser(t), org.ID, trash_service.RestoreOptions{}))
+	admin := loginUser(t, "user1")
+	admin.MakeRequest(t, NewRequest(t, "GET", "/ownerless"), http.StatusOK)
+	admin.MakeRequest(t, NewRequest(t, "GET", "/org/ownerless/teams"), http.StatusOK)
+	admin.MakeRequest(t, NewRequest(t, "GET", "/org/ownerless/members"), http.StatusOK)
+	admin.MakeRequest(t, NewRequest(t, "GET", "/org/ownerless/settings"), http.StatusOK)
+	ownerTeam, err := org.GetOwnerTeam(ctx)
+	require.NoError(t, err)
+	admin.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/org/ownerless/teams/%s", ownerTeam.LowerName)), http.StatusOK)
+	adminToken := adminTrashToken(t)
+	MakeRequest(t, NewRequest(t, "PUT", fmt.Sprintf("/api/v1/teams/%d/members/user2", ownerTeam.ID)).AddTokenAuth(adminToken), http.StatusNoContent)
+	loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/org/ownerless/settings"), http.StatusOK)
 }
 
 // S1: restoring to a new owner leaves no access through the old organization's teams.
