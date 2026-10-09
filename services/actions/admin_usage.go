@@ -103,6 +103,7 @@ func (r usageRow) entry() UsageEntry {
 // further); the owner is the repository's, never the job's. A job that never got a runner counts under runner 0, one whose runner is gone under -1.
 func GetUsage(ctx context.Context, group UsageGroup, from, to timeutil.TimeStamp, tokenRepos builder.Cond, limit int) ([]UsageEntry, error) {
 	id, n1, n2, groupBy := "`repository`.id", "`repository`.owner_name", "`repository`.name", "`repository`.id, `repository`.owner_name, `repository`.name"
+	repoCond := orgRunRepoCond(ctx, nil, nil, true, tokenRepos) // before building the session (reads a setting)
 	sess := db.GetEngine(ctx).Table("action_run_job").Join("INNER", "repository", "`repository`.id = `action_run_job`.repo_id")
 	switch group {
 	case UsageGroupOrg:
@@ -117,7 +118,7 @@ func GetUsage(ctx context.Context, group UsageGroup, from, to timeutil.TimeStamp
 	}
 	// updated >= from never drops a job (a job is updated when it stops) but lets the updated index narrow the scan
 	var rows []usageRow
-	err := sess.Where(orgRunRepoCond(nil, nil, true, tokenRepos)).
+	err := sess.Where(repoCond).
 		And("`action_run_job`.started >= ? AND `action_run_job`.started <= ? AND `action_run_job`.stopped >= `action_run_job`.started AND `action_run_job`.updated >= ?", from, to, from).
 		Select(fmt.Sprintf("%s AS id, %s AS n1, %s AS n2, SUM(`action_run_job`.stopped - `action_run_job`.started) AS seconds, COUNT(*) AS jobs, "+
 			"SUM(CASE WHEN `action_run_job`.status = %d THEN 1 ELSE 0 END) AS failed", id, n1, n2, actions_model.StatusFailure)).
@@ -139,8 +140,9 @@ func TopReposByFailures(ctx context.Context, from, to timeutil.TimeStamp, tokenR
 		N1, N2     string
 		FailedRuns int64
 	}
+	repoCond := orgRunRepoCond(ctx, nil, nil, true, tokenRepos)
 	err := db.GetEngine(ctx).Table("action_run").Join("INNER", "repository", "`repository`.id = `action_run`.repo_id").
-		Where(orgRunRepoCond(nil, nil, true, tokenRepos)).
+		Where(repoCond).
 		And("`action_run`.status = ? AND `action_run`.created >= ? AND `action_run`.created <= ?", actions_model.StatusFailure, from, to).
 		Select("`repository`.id AS id, `repository`.owner_name AS n1, `repository`.name AS n2, COUNT(*) AS failed_runs").
 		GroupBy("`repository`.id, `repository`.owner_name, `repository`.name").OrderBy("failed_runs DESC, id").

@@ -12,43 +12,49 @@
 		</div>
 	</div>
 
-	{{$isProjectsEnabled := .Repository.UnitEnabled $.Context $.UnitTypeProjects}}
-	{{$isProjectsGlobalDisabled := .UnitTypeProjects.UnitGlobalDisabled}}
-	<div class="inline field">
-		<label>{{ctx.Locale.Tr "repo.projects"}}</label>
-		<div class="ui checkbox{{if $isProjectsGlobalDisabled}} disabled{{end}}"{{if $isProjectsGlobalDisabled}} data-tooltip-content="{{ctx.Locale.Tr "repo.unit_disabled"}}"{{end}}>
-			<input class="enable-system" name="enable_projects" type="checkbox" {{if $isProjectsEnabled}}checked{{end}}>
-			<label>{{ctx.Locale.Tr "repo.settings.projects_desc"}}</label>
+	{{if not ($.UnitHidden.Contains $.UnitTypeProjects)}}
+		{{$isProjectsEnabled := .Repository.UnitEnabled $.Context $.UnitTypeProjects}}
+		{{$isProjectsGlobalDisabled := .UnitTypeProjects.UnitGlobalDisabled}}
+		<div class="inline field">
+			<label>{{ctx.Locale.Tr "repo.projects"}}</label>
+			<div class="ui checkbox{{if $isProjectsGlobalDisabled}} disabled{{end}}"{{if $isProjectsGlobalDisabled}} data-tooltip-content="{{ctx.Locale.Tr "repo.unit_disabled"}}"{{end}}>
+				<input class="enable-system" name="enable_projects" type="checkbox" {{if $isProjectsEnabled}}checked{{end}}>
+				<label>{{ctx.Locale.Tr "repo.settings.projects_desc"}}</label>
+			</div>
 		</div>
-	</div>
+	{{end}}
 
-	{{$isReleasesEnabled := .Repository.UnitEnabled $.Context $.UnitTypeReleases}}
-	{{$isReleasesGlobalDisabled := .UnitTypeReleases.UnitGlobalDisabled}}
-	<div class="inline field">
-		<label>{{ctx.Locale.Tr "repo.releases"}}</label>
-		<div class="ui checkbox{{if $isReleasesGlobalDisabled}} disabled{{end}}"{{if $isReleasesGlobalDisabled}} data-tooltip-content="{{ctx.Locale.Tr "repo.unit_disabled"}}"{{end}}>
-			<input class="enable-system" name="enable_releases" type="checkbox" {{if $isReleasesEnabled}}checked{{end}}>
-			<label>{{ctx.Locale.Tr "repo.settings.releases_desc"}}</label>
+	{{if not ($.UnitHidden.Contains $.UnitTypeReleases)}}
+		{{$isReleasesEnabled := .Repository.UnitEnabled $.Context $.UnitTypeReleases}}
+		{{$isReleasesGlobalDisabled := .UnitTypeReleases.UnitGlobalDisabled}}
+		<div class="inline field">
+			<label>{{ctx.Locale.Tr "repo.releases"}}</label>
+			<div class="ui checkbox{{if $isReleasesGlobalDisabled}} disabled{{end}}"{{if $isReleasesGlobalDisabled}} data-tooltip-content="{{ctx.Locale.Tr "repo.unit_disabled"}}"{{end}}>
+				<input class="enable-system" name="enable_releases" type="checkbox" {{if $isReleasesEnabled}}checked{{end}}>
+				<label>{{ctx.Locale.Tr "repo.settings.releases_desc"}}</label>
+			</div>
 		</div>
-	</div>
+	{{end}}
 
-	{{$isPackagesEnabled := .Repository.UnitEnabled $.Context $.UnitTypePackages}}
-	{{$isPackagesGlobalDisabled := .UnitTypePackages.UnitGlobalDisabled}}
-	<div class="inline field">
-		<label>{{ctx.Locale.Tr "repo.packages"}}</label>
-		<div class="ui checkbox{{if $isPackagesGlobalDisabled}} disabled{{end}}"{{if $isPackagesGlobalDisabled}} data-tooltip-content="{{ctx.Locale.Tr "repo.unit_disabled"}}"{{end}}>
-			<input class="enable-system" name="enable_packages" type="checkbox" {{if $isPackagesEnabled}}checked{{end}}>
-			<label>{{ctx.Locale.Tr "repo.settings.packages_desc"}}</label>
+	{{if not ($.UnitHidden.Contains $.UnitTypePackages)}}
+		{{$isPackagesEnabled := .Repository.UnitEnabled $.Context $.UnitTypePackages}}
+		{{$isPackagesGlobalDisabled := .UnitTypePackages.UnitGlobalDisabled}}
+		<div class="inline field">
+			<label>{{ctx.Locale.Tr "repo.packages"}}</label>
+			<div class="ui checkbox{{if $isPackagesGlobalDisabled}} disabled{{end}}"{{if $isPackagesGlobalDisabled}} data-tooltip-content="{{ctx.Locale.Tr "repo.unit_disabled"}}"{{end}}>
+				<input class="enable-system" name="enable_packages" type="checkbox" {{if $isPackagesEnabled}}checked{{end}}>
+				<label>{{ctx.Locale.Tr "repo.settings.packages_desc"}}</label>
+			</div>
+			{{if (and .Repository.IsPrivate .Repository.Owner.Visibility.IsPublic)}}
+				<span class="ui yellow label warning">
+					{{svg "octicon-alert"}}
+					{{ctx.Locale.Tr "repo.packages.visibility_warning" .Repository.OwnerName}}
+				</span>
+			{{end}}
 		</div>
-		{{if (and .Repository.IsPrivate .Repository.Owner.Visibility.IsPublic)}}
-			<span class="ui yellow label warning">
-				{{svg "octicon-alert"}}
-				{{ctx.Locale.Tr "repo.packages.visibility_warning" .Repository.OwnerName}}
-			</span>
-		{{end}}
-	</div>
+	{{end}}
 
-	{{if .EnableActions}}
+	{{if and .EnableActions (not ($.UnitHidden.Contains $.UnitTypeActions))}}
 		{{$isActionsEnabled := .Repository.UnitEnabled $.Context $.UnitTypeActions}}
 		{{$isActionsGlobalDisabled := .UnitTypeActions.UnitGlobalDisabled}}
 		<div class="inline field">

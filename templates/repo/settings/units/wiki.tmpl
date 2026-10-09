@@ -3,8 +3,8 @@
 </h4>
 <div class="ui attached segment">
 	{{$isWikiEnabled := or (.Repository.UnitEnabled $.Context $.UnitTypeWiki) (.Repository.UnitEnabled $.Context $.UnitTypeExternalWiki)}}
-	{{$isWikiGlobalDisabled := .UnitTypeWiki.UnitGlobalDisabled}}
-	{{$isExternalWikiGlobalDisabled := .UnitTypeExternalWiki.UnitGlobalDisabled}}
+	{{$isWikiGlobalDisabled := or .UnitTypeWiki.UnitGlobalDisabled ($.UnitHidden.Contains $.UnitTypeWiki)}}
+	{{$isExternalWikiGlobalDisabled := or .UnitTypeExternalWiki.UnitGlobalDisabled ($.UnitHidden.Contains $.UnitTypeExternalWiki)}}
 	{{$isBothWikiGlobalDisabled := and $isWikiGlobalDisabled $isExternalWikiGlobalDisabled}}
 	<div class="inline field">
 		<label>{{ctx.Locale.Tr "repo.wiki"}}</label>

@@ -151,7 +151,7 @@ func getNotifications(ctx *context.Context) {
 		return
 	}
 
-	notifications = notifications.Without(failures)
+	notifications = notifications.Without(failures).WithoutHiddenUnits(ctx)
 	failCount += len(failures)
 
 	failures, err = notifications.LoadComments(ctx)

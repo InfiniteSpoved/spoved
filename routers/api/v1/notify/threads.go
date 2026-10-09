@@ -46,6 +46,10 @@ func GetThread(ctx *context.APIContext) {
 		ctx.InternalServerError(err)
 		return
 	}
+	if n.UnitHidden(ctx) {
+		ctx.NotFound()
+		return
+	}
 
 	ctx.JSON(http.StatusOK, convert.ToNotificationThread(ctx, n))
 }

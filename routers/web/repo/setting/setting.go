@@ -109,6 +109,7 @@ func SettingsCtxData(ctx *context.Context) {
 func Units(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("repo.settings.units.units")
 	ctx.Data["PageIsRepoSettingsUnits"] = true
+	ctx.Data["UnitHidden"] = repo_model.HiddenUnits(ctx, ctx.Repo.Owner)
 
 	ctx.HTML(http.StatusOK, tplSettingsUnits)
 }
@@ -121,6 +122,9 @@ func UnitsPost(ctx *context.Context) {
 	}
 
 	repo := ctx.Repo.Repository
+	// units the site policy hides are neither enabled nor deleted, so they come back when allowed again
+	hidden := repo_model.HiddenUnits(ctx, ctx.Repo.Owner)
+	disabled := func(t unit_model.Type) bool { return t.UnitGlobalDisabled() || hidden.Contains(t) }
 
 	var repoChanged bool
 	var units []repo_model.RepoUnit
@@ -135,17 +139,17 @@ func UnitsPost(ctx *context.Context) {
 		repoChanged = true
 	}
 
-	if form.EnableCode && !unit_model.TypeCode.UnitGlobalDisabled() {
+	if form.EnableCode && !disabled(unit_model.TypeCode) {
 		units = append(units, repo_model.RepoUnit{
 			RepoID: repo.ID,
 			Type:   unit_model.TypeCode,
 			Config: repo.MustGetUnit(ctx, unit_model.TypeCode).Config, // keep the indexed branches
 		})
-	} else if !unit_model.TypeCode.UnitGlobalDisabled() {
+	} else if !disabled(unit_model.TypeCode) {
 		deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeCode)
 	}
 
-	if form.EnableWiki && form.EnableExternalWiki && !unit_model.TypeExternalWiki.UnitGlobalDisabled() {
+	if form.EnableWiki && form.EnableExternalWiki && !disabled(unit_model.TypeExternalWiki) {
 		if !validation.IsValidExternalURL(form.ExternalWikiURL) {
 			ctx.Flash.Error(ctx.Tr("repo.settings.external_wiki_url_error"))
 			ctx.Redirect(repo.Link() + "/settings/units")
@@ -160,7 +164,7 @@ func UnitsPost(ctx *context.Context) {
 			},
 		})
 		deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeWiki)
-	} else if form.EnableWiki && !form.EnableExternalWiki && !unit_model.TypeWiki.UnitGlobalDisabled() {
+	} else if form.EnableWiki && !form.EnableExternalWiki && !disabled(unit_model.TypeWiki) {
 		wikiPermissions := repo_model.UnitAccessModeUnset
 		if form.GloballyWriteableWiki {
 			wikiPermissions = repo_model.UnitAccessModeWrite
@@ -173,15 +177,15 @@ func UnitsPost(ctx *context.Context) {
 		})
 		deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeExternalWiki)
 	} else {
-		if !unit_model.TypeExternalWiki.UnitGlobalDisabled() {
+		if !disabled(unit_model.TypeExternalWiki) {
 			deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeExternalWiki)
 		}
-		if !unit_model.TypeWiki.UnitGlobalDisabled() {
+		if !disabled(unit_model.TypeWiki) {
 			deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeWiki)
 		}
 	}
 
-	if form.EnableIssues && form.EnableExternalTracker && !unit_model.TypeExternalTracker.UnitGlobalDisabled() {
+	if form.EnableIssues && form.EnableExternalTracker && !disabled(unit_model.TypeExternalTracker) {
 		if !validation.IsValidExternalURL(form.ExternalTrackerURL) {
 			ctx.Flash.Error(ctx.Tr("repo.settings.external_tracker_url_error"))
 			ctx.Redirect(repo.Link() + "/settings/units")
@@ -203,7 +207,7 @@ func UnitsPost(ctx *context.Context) {
 			},
 		})
 		deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeIssues)
-	} else if form.EnableIssues && !form.EnableExternalTracker && !unit_model.TypeIssues.UnitGlobalDisabled() {
+	} else if form.EnableIssues && !form.EnableExternalTracker && !disabled(unit_model.TypeIssues) {
 		units = append(units, repo_model.RepoUnit{
 			RepoID: repo.ID,
 			Type:   unit_model.TypeIssues,
@@ -215,51 +219,51 @@ func UnitsPost(ctx *context.Context) {
 		})
 		deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeExternalTracker)
 	} else {
-		if !unit_model.TypeExternalTracker.UnitGlobalDisabled() {
+		if !disabled(unit_model.TypeExternalTracker) {
 			deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeExternalTracker)
 		}
-		if !unit_model.TypeIssues.UnitGlobalDisabled() {
+		if !disabled(unit_model.TypeIssues) {
 			deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeIssues)
 		}
 	}
 
-	if form.EnableProjects && !unit_model.TypeProjects.UnitGlobalDisabled() {
+	if form.EnableProjects && !disabled(unit_model.TypeProjects) {
 		units = append(units, repo_model.RepoUnit{
 			RepoID: repo.ID,
 			Type:   unit_model.TypeProjects,
 		})
-	} else if !unit_model.TypeProjects.UnitGlobalDisabled() {
+	} else if !disabled(unit_model.TypeProjects) {
 		deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeProjects)
 	}
 
-	if form.EnableReleases && !unit_model.TypeReleases.UnitGlobalDisabled() {
+	if form.EnableReleases && !disabled(unit_model.TypeReleases) {
 		units = append(units, repo_model.RepoUnit{
 			RepoID: repo.ID,
 			Type:   unit_model.TypeReleases,
 		})
-	} else if !unit_model.TypeReleases.UnitGlobalDisabled() {
+	} else if !disabled(unit_model.TypeReleases) {
 		deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeReleases)
 	}
 
-	if form.EnablePackages && !unit_model.TypePackages.UnitGlobalDisabled() {
+	if form.EnablePackages && !disabled(unit_model.TypePackages) {
 		units = append(units, repo_model.RepoUnit{
 			RepoID: repo.ID,
 			Type:   unit_model.TypePackages,
 		})
-	} else if !unit_model.TypePackages.UnitGlobalDisabled() {
+	} else if !disabled(unit_model.TypePackages) {
 		deleteUnitTypes = append(deleteUnitTypes, unit_model.TypePackages)
 	}
 
-	if form.EnableActions && !unit_model.TypeActions.UnitGlobalDisabled() {
+	if form.EnableActions && !disabled(unit_model.TypeActions) {
 		units = append(units, repo_model.RepoUnit{
 			RepoID: repo.ID,
 			Type:   unit_model.TypeActions,
 		})
-	} else if !unit_model.TypeActions.UnitGlobalDisabled() {
+	} else if !disabled(unit_model.TypeActions) {
 		deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeActions)
 	}
 
-	if form.EnablePulls && !unit_model.TypePullRequests.UnitGlobalDisabled() {
+	if form.EnablePulls && !disabled(unit_model.TypePullRequests) {
 		// the branch workflow page owns the delete-branch setting; keep it when this form is saved
 		oldPulls := &repo_model.PullRequestsConfig{}
 		if u, err := repo.GetUnit(ctx, unit_model.TypePullRequests); err == nil {
@@ -285,7 +289,7 @@ func UnitsPost(ctx *context.Context) {
 				DefaultAllowMaintainerEdit:    form.DefaultAllowMaintainerEdit,
 			},
 		})
-	} else if !unit_model.TypePullRequests.UnitGlobalDisabled() {
+	} else if !disabled(unit_model.TypePullRequests) {
 		deleteUnitTypes = append(deleteUnitTypes, unit_model.TypePullRequests)
 	}
 

@@ -11,6 +11,7 @@ import (
 	"forgejo.org/models/db"
 	project_model "forgejo.org/models/project"
 	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/container"
 
@@ -60,6 +61,33 @@ func (issues IssueList) LoadRepositories(ctx context.Context) (repo_model.Reposi
 		}
 	}
 	return repo_model.ValuesRepository(repoMaps), nil
+}
+
+// FilterHiddenUnits drops the issues (pull requests) whose repository the site policy hides Issues (Pull requests) in,
+// for lists that are not filtered by unit in the query (the issue indexer).
+func (issues IssueList) FilterHiddenUnits(ctx context.Context) (IssueList, error) {
+	repos, err := issues.LoadRepositories(ctx)
+	if err != nil {
+		return nil, err
+	}
+	owners, err := user_model.GetUsersByIDs(ctx, container.FilterSlice(repos, func(r *repo_model.Repository) (int64, bool) { return r.OwnerID, true }))
+	if err != nil {
+		return nil, err
+	}
+	hidden := make(map[int64]container.Set[unit.Type], len(owners))
+	for _, owner := range owners {
+		hidden[owner.ID] = repo_model.HiddenUnits(ctx, owner)
+	}
+	return slices.DeleteFunc(issues, func(issue *Issue) bool {
+		h, ok := hidden[issue.Repo.OwnerID]
+		if !ok {
+			return true // owner not found: fail closed
+		}
+		if issue.IsPull {
+			return h.Contains(unit.TypePullRequests)
+		}
+		return h.Contains(unit.TypeIssues)
+	}), nil
 }
 
 func (issues IssueList) LoadPosters(ctx context.Context) error {

@@ -231,8 +231,10 @@ func applyRepoConditions(sess *xorm.Session, opts *IssuesOptions) {
 	}
 }
 
-func applyConditions(sess *xorm.Session, opts *IssuesOptions) {
-	sess.And("`repository`.trashed_unix = 0")
+// unitCond is issueUnitCond, computed before the session is built: reading the policy inside a transaction would run
+// a query on the same session.
+func applyConditions(sess *xorm.Session, opts *IssuesOptions, unitCond builder.Cond) {
+	sess.And("`repository`.trashed_unix = 0").And(unitCond)
 
 	if len(opts.IssueIDs) > 0 {
 		sess.In("issue.id", opts.IssueIDs)
@@ -486,12 +488,27 @@ func applySubscribedCondition(sess *xorm.Session, subscriberID int64) {
 	)
 }
 
+// issueUnitCond drops the issues (pull requests) whose repository the site policy hides Issues (Pull requests) in.
+func issueUnitCond(ctx context.Context) builder.Cond {
+	hidden := builder.NewCond()
+	for isPull, t := range map[bool]unit.Type{false: unit.TypeIssues, true: unit.TypePullRequests} {
+		if c := repo_model.HiddenUnitTypeCond(ctx, "`repository`.owner_id", t); c.IsValid() {
+			hidden = hidden.Or(builder.Eq{"`issue`.is_pull": isPull}.And(c))
+		}
+	}
+	if !hidden.IsValid() {
+		return hidden
+	}
+	return builder.Not{hidden}
+}
+
 // Issues returns a list of issues by given conditions.
 func Issues(ctx context.Context, opts *IssuesOptions) (IssueList, error) {
+	unitCond := issueUnitCond(ctx)
 	sess := db.GetEngine(ctx).
 		Join("INNER", "repository", "`issue`.repo_id = `repository`.id")
 	applyLimit(sess, opts)
-	applyConditions(sess, opts)
+	applyConditions(sess, opts, unitCond)
 	applySorts(sess, opts.SortType, opts.PriorityRepoID, opts.PriorityIssueIndex)
 
 	issues := IssueList{}
@@ -508,9 +525,10 @@ func Issues(ctx context.Context, opts *IssuesOptions) (IssueList, error) {
 
 // IssueIDs returns a list of issue ids by given conditions.
 func IssueIDs(ctx context.Context, opts *IssuesOptions, otherConds ...builder.Cond) ([]int64, int64, error) {
+	unitCond := issueUnitCond(ctx)
 	sess := db.GetEngine(ctx).
 		Join("INNER", "repository", "`issue`.repo_id = `repository`.id")
-	applyConditions(sess, opts)
+	applyConditions(sess, opts, unitCond)
 	for _, cond := range otherConds {
 		sess.And(cond)
 	}

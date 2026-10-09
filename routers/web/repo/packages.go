@@ -21,6 +21,10 @@ const (
 
 // Packages displays a list of all packages in the repository
 func Packages(ctx *context.Context) {
+	if !ctx.Repo.CanRead(unit.TypePackages) {
+		ctx.NotFound("Packages", nil)
+		return
+	}
 	page := max(ctx.FormInt("page"), 1)
 	query := ctx.FormTrim("q")
 	packageType := ctx.FormTrim("type")

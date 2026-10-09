@@ -128,6 +128,9 @@
 		<a class="{{if .PageIsAdminMaintenance}}active {{end}}item" href="{{AppSubUrl}}/admin/maintenance">
 			{{ctx.Locale.Tr "admin.maintenance"}}
 		</a>
+		<a class="{{if .PageIsAdminRepoUnits}}active {{end}}item" href="{{AppSubUrl}}/admin/repo-units">
+			{{ctx.Locale.Tr "admin.repo_units"}}
+		</a>
 		{{if not DisableWebhooks}}
 		<a class="{{if .PageIsAdminWebhookTypes}}active {{end}}item" href="{{AppSubUrl}}/admin/webhook-types">
 			{{ctx.Locale.Tr "admin.webhook_types"}}

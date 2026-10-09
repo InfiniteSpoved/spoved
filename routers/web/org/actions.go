@@ -6,6 +6,8 @@ package org
 import (
 	"net/http"
 
+	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/timeutil"
 	shared_actions "forgejo.org/routers/web/shared/actions"
@@ -25,7 +27,7 @@ const overviewLimit = 50
 
 // Runs lists the workflow runs of the repositories of the organization that the doer can read the Actions of.
 func Runs(ctx *context.Context) {
-	if !actions_service.OrgRunsEnabled() {
+	if !actions_service.OrgRunsEnabled() || repo_model.HiddenUnits(ctx, ctx.ContextUser).Contains(unit.TypeActions) {
 		ctx.NotFound("Runs", nil)
 		return
 	}
@@ -45,7 +47,7 @@ func Runs(ctx *context.Context) {
 
 // Overview shows the numbers, the failing default branches and the queue of the runs that the doer can see.
 func Overview(ctx *context.Context) {
-	if !actions_service.OrgRunsEnabled() {
+	if !actions_service.OrgRunsEnabled() || repo_model.HiddenUnits(ctx, ctx.ContextUser).Contains(unit.TypeActions) {
 		ctx.NotFound("Overview", nil)
 		return
 	}

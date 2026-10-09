@@ -6,6 +6,8 @@ package org
 import (
 	"net/http"
 
+	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/routers/api/v1/utils"
 	actions_service "forgejo.org/services/actions"
@@ -86,7 +88,7 @@ func ListActionRuns(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	if !actions_service.OrgRunsEnabled() {
+	if !actions_service.OrgRunsEnabled() || repo_model.HiddenUnits(ctx, ctx.Org().Organization.AsUser()).Contains(unit.TypeActions) {
 		ctx.NotFound()
 		return
 	}

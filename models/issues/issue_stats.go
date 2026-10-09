@@ -45,10 +45,11 @@ const (
 
 // CountIssuesByRepo map from repoID to number of issues matching the options
 func CountIssuesByRepo(ctx context.Context, opts *IssuesOptions) (map[int64]int64, error) {
+	unitCond := issueUnitCond(ctx)
 	sess := db.GetEngine(ctx).
 		Join("INNER", "repository", "`issue`.repo_id = `repository`.id")
 
-	applyConditions(sess, opts)
+	applyConditions(sess, opts, unitCond)
 
 	countsSlice := make([]*struct {
 		RepoID int64
@@ -70,11 +71,12 @@ func CountIssuesByRepo(ctx context.Context, opts *IssuesOptions) (map[int64]int6
 
 // CountIssues number return of issues by given conditions.
 func CountIssues(ctx context.Context, opts *IssuesOptions, otherConds ...builder.Cond) (int64, error) {
+	unitCond := issueUnitCond(ctx)
 	sess := db.GetEngine(ctx).
 		Select("COUNT(issue.id) AS count").
 		Table("issue").
 		Join("INNER", "repository", "`issue`.repo_id = `repository`.id")
-	applyConditions(sess, opts)
+	applyConditions(sess, opts, unitCond)
 
 	for _, cond := range otherConds {
 		sess.And(cond)

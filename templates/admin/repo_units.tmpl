@@ -1,0 +1,50 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin repo-units")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.repo_units"}}
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.repo_units.desc"}}</p>
+			{{if .PolicyInvalid}}
+				<div class="ui error message">{{ctx.Locale.Tr "admin.repo_units.invalid"}}</div>
+			{{end}}
+			{{if .DefaultsLocked}}
+				<div class="ui warning message">{{ctx.Locale.Tr "admin.repo_units.defaults_locked"}}</div>
+			{{end}}
+			{{if .UpdatedUnix}}
+				<p class="help">{{ctx.Locale.Tr "admin.repo_units.updated" (DateUtils.AbsoluteShort .UpdatedUnix) .UpdatedBy}}</p>
+			{{end}}
+			<form class="ui form" action="{{AppSubUrl}}/admin/repo-units" method="post">
+				{{range .Units}}
+					{{$key := .Unit.NameKey}}
+					<fieldset class="field repo-unit" data-unit="{{$key}}" {{if .Locked}}disabled{{end}}>
+						<h5>{{ctx.Locale.Tr $key}}</h5>
+						{{if .Locked}}
+							<p class="ui warning message">{{ctx.Locale.Tr "admin.repo_units.locked"}}</p>
+						{{end}}
+						<div class="field">
+							<div class="ui checkbox">
+								<input id="allowed-{{$key}}" name="allowed_{{$key}}" type="checkbox" {{if .Allowed}}checked{{end}}>
+								<label for="allowed-{{$key}}">{{ctx.Locale.Tr "admin.repo_units.allowed"}}</label>
+							</div>
+						</div>
+						<div class="field">
+							<label for="orgs-{{$key}}">{{ctx.Locale.Tr "admin.repo_units.orgs"}}</label>
+							<textarea id="orgs-{{$key}}" name="orgs_{{$key}}" rows="2">{{.OrgNames}}</textarea>
+							<p class="help">{{ctx.Locale.Tr "admin.repo_units.orgs_help"}}</p>
+						</div>
+						{{if .CanBeDefault}}
+							<div class="field">
+								<div class="ui checkbox">
+									<input id="default-{{$key}}" name="default_{{$key}}" type="checkbox" {{if .OnDefault}}checked{{end}} {{if $.DefaultsLocked}}disabled{{end}}>
+									<label for="default-{{$key}}">{{ctx.Locale.Tr "admin.repo_units.on_default"}}</label>
+								</div>
+							</div>
+						{{end}}
+					</fieldset>
+				{{end}}
+				<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+			</form>
+		</div>
+	</div>
+{{template "admin/layout_footer" .}}
