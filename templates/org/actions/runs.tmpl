@@ -3,6 +3,10 @@
 	{{template "org/header" .}}
 	<div class="ui container">
 		{{template "base/alert" .}}
+		<div class="ui secondary pointing menu tw-mb-4">
+			<a class="{{if .PageIsOrgActionsRuns}}active {{end}}item" href="{{.OrgLink}}/actions">{{ctx.Locale.Tr "org.actions.tab.runs"}}</a>
+			<a class="{{if .PageIsOrgActionsOverview}}active {{end}}item" href="{{.OrgLink}}/actions/overview">{{ctx.Locale.Tr "org.actions.tab.overview"}}</a>
+		</div>
 		<form class="ui form tw-flex tw-flex-wrap tw-gap-2 tw-items-end tw-mb-4" method="get" action="{{.OrgLink}}/actions">
 			<label>{{ctx.Locale.Tr "org.actions.runs.status"}}
 				<select name="status">
