@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	actions_model "forgejo.org/models/actions"
 	auth_model "forgejo.org/models/auth"
@@ -25,6 +26,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	"forgejo.org/routers"
+	"forgejo.org/routers/api/actions"
 	actions_service "forgejo.org/services/actions"
 	org_service "forgejo.org/services/org"
 	trash_service "forgejo.org/services/trash"
@@ -32,6 +34,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // postOrgUnits submits the organization units form with the given units on (name keys) and the others off
@@ -88,6 +91,13 @@ func TestOrgUnitPolicyPage(t *testing.T) {
 	doc = NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", "/org/unit-org-p/settings/units"), http.StatusOK).Body)
 	assert.Contains(t, doc.Find(`.org-unit[data-unit="repo.issues"]`).Text(), "by user2")
 	assert.Equal(t, 0, doc.Find(`input[name="on_repo.issues"][checked]`).Length())
+
+	// read-only maintenance refuses the change
+	undoMaintenance := setMaintenance(t, setting.MaintenanceReadOnly, time.Time{})
+	postOrgUnits(t, owner, "unit-org-p", http.StatusSeeOther, allOrgUnitsBut()...)
+	assertMaintenanceFlash(t, owner)
+	undoMaintenance()
+	assert.True(t, unittest.AssertExistsAndLoadBean(t, &repo_model.OrgUnit{OrgID: org.ID, Type: unit_model.TypeIssues}).Disabled)
 
 	// a site admin can change it too
 	postOrgUnits(t, loginUser(t, "user1"), "unit-org-p", http.StatusSeeOther, allOrgUnitsBut()...)
@@ -156,7 +166,12 @@ func TestOrgUnitPolicyMatrix(t *testing.T) {
 	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/repos/unit-org-b/r", &api.EditRepoOption{HasIssues: new(true)}).AddTokenAuth(token), http.StatusOK)
 	issues("unit-org-b", http.StatusOK)
 
-	// users' repositories are never restricted
+	// users' repositories are never restricted: with Issues still Not allowed for organizations, the user turns them
+	// off and on
+	owner.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/issues"), http.StatusOK)
+	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/repos/user2/repo1", &api.EditRepoOption{HasIssues: new(false)}).AddTokenAuth(token), http.StatusOK)
+	owner.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/issues"), http.StatusNotFound)
+	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/repos/user2/repo1", &api.EditRepoOption{HasIssues: new(true)}).AddTokenAuth(token), http.StatusOK)
 	owner.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/issues"), http.StatusOK)
 	_ = repoA
 }
@@ -226,8 +241,23 @@ func TestOrgUnitPolicyRunningTask(t *testing.T) {
 		t.Helper()
 		MakeRequest(t, NewRequest(t, "GET", "/api/actions/_apis/pipelines/workflows/792/idtoken?placeholder=true").AddTokenAuth(idToken), status)
 	}
+	var signedUpload string
+	createV4 := func(status int) {
+		t.Helper()
+		resp := MakeRequest(t, NewRequestWithBody(t, "POST", "/twirp/github.actions.results.api.v1.ArtifactService/CreateArtifact", toProtoJSON(&actions.CreateArtifactRequest{
+			Version: 4, Name: "unit-policy-v4", WorkflowRunBackendId: "792", WorkflowJobRunBackendId: "193",
+		})).AddTokenAuth(idToken), status)
+		if status == http.StatusOK && signedUpload == "" {
+			var created actions.CreateArtifactResponse
+			require.NoError(t, protojson.Unmarshal(resp.Body.Bytes(), &created))
+			signedUpload = created.SignedUploadUrl[strings.Index(created.SignedUploadUrl, "/twirp/"):] + "&comp=block"
+		}
+	}
 	both := func(status int) {
 		t.Helper()
+		createV4(status)
+		// a signed v4 upload URL handed out before
+		MakeRequest(t, NewRequestWithBody(t, "PUT", signedUpload, strings.NewReader("A")), map[int]int{http.StatusOK: http.StatusCreated, http.StatusNotFound: http.StatusNotFound}[status])
 		upload(status)
 		idTokenStatus(status)
 		// the same task's GITEA_TOKEN on the API

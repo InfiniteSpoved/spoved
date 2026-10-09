@@ -305,16 +305,17 @@ func getConcurrencyCondition() builder.Cond {
 	return concurrencyCond
 }
 
-// Returns all the available jobs that could be executed on `runner`, before label filtering is applied.  Note that
-// only a single job can actually be run from this result for any given invocation, as multiple runs (in order) from any
-// single concurrency group could be returned.
 // ActionsAvailable reports whether the task's repository still has Actions: once Actions is off or hidden there (site
-// policy, organization owner or repository), a running task's tokens (artifacts, ID token) stop working.
+// policy, organization owner or repository), a running task's tokens (GITEA_TOKEN, runtime token, artifacts, ID
+// token) stop working.
 func (task *ActionTask) ActionsAvailable(ctx context.Context) bool {
 	repo, err := repo_model.GetRepositoryByID(ctx, task.RepoID)
 	return err == nil && repo.UnitEnabled(ctx, unit.TypeActions)
 }
 
+// Returns all the available jobs that could be executed on `runner`, before label filtering is applied.  Note that
+// only a single job can actually be run from this result for any given invocation, as multiple runs (in order) from any
+// single concurrency group could be returned.
 func GetAvailableJobsForRunner(ctx context.Context, runner *ActionRunner) ([]*ActionRunJob, error) {
 	// read the policy before building the query: in a transaction it would run on the same session
 	unitCond := repo_model.AvailableUnitCond(ctx, "(SELECT owner_id FROM repository WHERE repository.id = action_run_job.repo_id)", "`repo_unit`.type")
