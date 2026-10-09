@@ -145,7 +145,7 @@ func TestAdminActionsRunsActionsDisabled(t *testing.T) {
 func TestAPIAdminActionsRuns(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	prepareInstanceRuns(t)
-	token := getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin)
+	token := getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin, auth_model.AccessTokenScopeReadRepository)
 	names := func(l *api.ListActionRunSummaryResponse) []string {
 		var out []string
 		for _, r := range l.Entries {
@@ -179,6 +179,9 @@ func TestAPIAdminActionsRuns(t *testing.T) {
 	t.Run("who may read", func(t *testing.T) {
 		apiAdminRuns(t, getUserToken(t, "user2", auth_model.AccessTokenScopeReadAdmin), "", http.StatusForbidden) // owner of org3, not a site admin
 		apiAdminRuns(t, getUserToken(t, "user1", auth_model.AccessTokenScopeReadRepository), "", http.StatusForbidden)
+		// admin scope alone isn't enough: run data is repository data
+		apiAdminRuns(t, getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin), "", http.StatusForbidden)
+		apiAdminRuns(t, getUserToken(t, "user1", auth_model.AccessTokenScopeWriteAdmin), "", http.StatusForbidden)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/actions/runs"), http.StatusUnauthorized)
 	})
 	t.Run("restricted tokens", func(t *testing.T) {
@@ -217,7 +220,7 @@ func TestAPIAdminActionsUsage(t *testing.T) {
 	addAdminJob(t, 1, 911, now-86400*4, 300, actions_model.StatusSuccess)
 	addAdminJob(t, 2, 911, now-86400*4, 900, actions_model.StatusSuccess)   // trashed
 	addAdminJob(t, 3, 911, now-86400*40, 5000, actions_model.StatusSuccess) // outside the default period
-	token := getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin)
+	token := getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin, auth_model.AccessTokenScopeReadRepository)
 	get := func(query string, status int) *api.ActionUsage {
 		resp := MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/actions/usage"+query).AddTokenAuth(token), status)
 		var u api.ActionUsage
@@ -276,11 +279,34 @@ func TestAPIAdminActionsUsage(t *testing.T) {
 		}
 	})
 	t.Run("who may read", func(t *testing.T) {
-		MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/actions/usage?group_by=repo").AddTokenAuth(getUserToken(t, "user2", auth_model.AccessTokenScopeReadAdmin)), http.StatusForbidden)
+		for _, tok := range []string{
+			getUserToken(t, "user2", auth_model.AccessTokenScopeReadAdmin, auth_model.AccessTokenScopeReadRepository), // not a site admin
+			getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin),
+			getUserToken(t, "user1", auth_model.AccessTokenScopeWriteAdmin),
+		} {
+			MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/actions/usage?group_by=repo").AddTokenAuth(tok), http.StatusForbidden)
+		}
+		resp := MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/actions/usage?group_by=runner").AddTokenAuth(token), http.StatusOK)
+		for _, secret := range []string{"uuid", "00000000-0000-0000-0000-000000000911", "token", "usage-it-r"} {
+			assert.NotContains(t, resp.Body.String(), secret, "no runner secrets")
+		}
 		publicOnly := getUserToken(t, "user1", auth_model.AccessTokenScopePublicOnly, auth_model.AccessTokenScopeReadAdmin)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/actions/usage?group_by=repo").AddTokenAuth(publicOnly), http.StatusForbidden)
 		specific := createFineGrainedRepoAccessToken(t, "user1", []auth_model.AccessTokenScope{auth_model.AccessTokenScopeReadAdmin}, []int64{3})
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/actions/usage?group_by=repo").AddTokenAuth(specific), http.StatusForbidden)
+	})
+	t.Run("a runner that was deleted is one bucket", func(t *testing.T) {
+		addAdminJob(t, 3, 4242, now-3600, 60, actions_model.StatusSuccess)
+		addAdminJob(t, 5, 4343, now-3500, 60, actions_model.StatusSuccess)
+		var gone *api.ActionUsageEntry
+		for _, e := range get("?group_by=runner", http.StatusOK).Entries {
+			if e.ID == -1 {
+				require.Nil(t, gone, "one entry")
+				gone = e
+			}
+		}
+		require.NotNil(t, gone)
+		assert.EqualValues(t, 2, gone.Jobs)
 	})
 	t.Run("the page", func(t *testing.T) {
 		session := loginUser(t, "user1")
@@ -300,7 +326,7 @@ func TestAPIAdminActionsUsage(t *testing.T) {
 		_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE action_run_job SET updated = ? WHERE started = ? AND repo_id = 5", now-86400, old)
 		require.NoError(t, err)
 		m := byName(get("?group_by=repo", http.StatusOK).Entries)
-		assert.InDelta(t, 1, m["org3/repo5"].JobMinutes, 0.001)
+		assert.InDelta(t, 2, m["org3/repo5"].JobMinutes, 0.001) // 1 min no runner + 1 min of the deleted runner above, not the 50 s job
 	})
 }
 
@@ -308,13 +334,17 @@ func TestAdminActionsRunsExport(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	prepareInstanceRuns(t)
 	session := loginUser(t, "user1")
-	titles := []string{"=1+2", "+1", "-1", "@SUM(A1)", "\tx", "\rx", "  =1+2", "plain, with \"quotes\""}
+	titles := []string{"=1+2", "+1", "-1", "@SUM(A1)", "\tx", "\rx", "  =1+2", "\n=1+2", " \n@x", "plain, with \"quotes\""}
 	for i, title := range titles {
 		require.NoError(t, db.Insert(db.DefaultContext, &actions_model.ActionRun{
 			Title: title, RepoID: 3, OwnerID: 3, WorkflowID: "csv.yaml", Index: int64(500 + i), TriggerUserID: 2,
 			Ref: "refs/heads/main", Event: webhook_module.HookEventPush, TriggerEvent: "push", Status: actions_model.StatusSuccess,
 		}))
 	}
+	require.NoError(t, db.Insert(db.DefaultContext, &actions_model.ActionRun{
+		Title: "t", RepoID: 3, OwnerID: 3, WorkflowID: "=wf.yaml", Index: 600, TriggerUserID: 2,
+		Ref: "refs/heads/@b", Event: webhook_module.HookEventPush, TriggerEvent: "push", Status: actions_model.StatusSuccess,
+	}))
 	read := func(query string) ([][]string, *http.Response) {
 		resp := session.MakeRequest(t, NewRequest(t, "GET", "/admin/actions/runs/export"+query), http.StatusOK)
 		rows, err := csv.NewReader(strings.NewReader(resp.Body.String())).ReadAll()
@@ -331,7 +361,7 @@ func TestAdminActionsRunsExport(t *testing.T) {
 	})
 	t.Run("same rows as the page", func(t *testing.T) {
 		rows, _ := read("")
-		assert.Len(t, rows, 1+4+len(titles))
+		assert.Len(t, rows, 1+4+len(titles)+1)
 		rows, _ = read("?repo=org3/repo5")
 		require.Len(t, rows, 2)
 		assert.Equal(t, "org3/repo5", rows[1][1])
@@ -349,12 +379,26 @@ func TestAdminActionsRunsExport(t *testing.T) {
 		got := map[string]bool{}
 		for _, r := range rows[1:] {
 			got[r[4]] = true
-			assert.NotContains(t, "=+-@\t\r", string(strings.TrimLeft(r[4], " ")[0]), "title %q", r[4])
+			assert.NotContains(t, "=+-@\t\r\n", string(strings.TrimLeft(r[4], " \n")[0]), "title %q", r[4])
 		}
-		for _, title := range titles[:7] {
+		for _, title := range titles[:9] {
 			assert.True(t, got["'"+title], "%q", title)
 		}
-		assert.True(t, got[titles[7]])
+		assert.True(t, got[titles[9]])
+	})
+	t.Run("no cell of any column can start a formula", func(t *testing.T) {
+		rows, _ := read("")
+		for _, r := range rows {
+			for _, cell := range r {
+				if trimmed := strings.TrimLeft(cell, " \n"); trimmed != "" {
+					assert.NotContains(t, "=+-@\t\r\n", string(trimmed[0]), "%q", cell)
+				}
+			}
+		}
+		rows, _ = read("?branch=@b")
+		require.Len(t, rows, 2)
+		assert.Equal(t, "'=wf.yaml", rows[1][2])
+		assert.Equal(t, "'@b", rows[1][5])
 	})
 	t.Run("capped", func(t *testing.T) {
 		defer test.MockVariableValue(&admin.RunsExportMax, 3)()
@@ -369,7 +413,7 @@ func TestAdminActionsRunsQueryCount(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	prepareInstanceRuns(t)
 	session := loginUser(t, "user1")
-	token := getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin)
+	token := getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin, auth_model.AccessTokenScopeReadRepository)
 	now := timeutil.TimeStampNow()
 	addAdminJob(t, 3, 0, now-100, 10, actions_model.StatusSuccess)
 

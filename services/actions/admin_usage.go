@@ -32,7 +32,7 @@ const (
 	usageDefaultPeriod = 30 * 24 * time.Hour
 )
 
-// UsageEntry is the usage of one owner, repository or runner (ID 0 is "no runner").
+// UsageEntry is the usage of one owner, repository or runner (ID 0 is "no runner", -1 a runner that was deleted).
 type UsageEntry struct {
 	ID         int64
 	Name       string
@@ -100,7 +100,7 @@ func (r usageRow) entry() UsageEntry {
 
 // GetUsage sums the run time of the jobs that started in [from, to] and have finished, per group, most seconds
 // first, in one query. Only repositories orgRunRepoCond lets a site admin see count (tokenRepos limits them
-// further); the owner is the repository's, never the job's. A job that never got a runner counts under runner 0.
+// further); the owner is the repository's, never the job's. A job that never got a runner counts under runner 0, one whose runner is gone under -1.
 func GetUsage(ctx context.Context, group UsageGroup, from, to timeutil.TimeStamp, tokenRepos builder.Cond, limit int) ([]UsageEntry, error) {
 	id, n1, n2, groupBy := "`repository`.id", "`repository`.owner_name", "`repository`.name", "`repository`.id, `repository`.owner_name, `repository`.name"
 	sess := db.GetEngine(ctx).Table("action_run_job").Join("INNER", "repository", "`repository`.id = `action_run_job`.repo_id")
@@ -109,7 +109,9 @@ func GetUsage(ctx context.Context, group UsageGroup, from, to timeutil.TimeStamp
 		id, n1, n2, groupBy = "`repository`.owner_id", "`user`.name", "''", "`repository`.owner_id, `user`.name"
 		sess = sess.Join("INNER", "`user`", "`user`.id = `repository`.owner_id")
 	case UsageGroupRunner:
-		id, n1, n2, groupBy = "COALESCE(`action_runner`.id, 0)", "COALESCE(`action_runner`.name, '')", "''", "COALESCE(`action_runner`.id, 0), COALESCE(`action_runner`.name, '')"
+		// 0: the job never got a task; -1: its runner is gone (one bucket, not one per job)
+		id = "CASE WHEN `action_task`.id IS NULL THEN 0 WHEN `action_runner`.id IS NULL THEN -1 ELSE `action_runner`.id END"
+		n1, n2, groupBy = "COALESCE(`action_runner`.name, '')", "''", id+", COALESCE(`action_runner`.name, '')"
 		sess = sess.Join("LEFT", "action_task", "`action_task`.id = `action_run_job`.task_id").
 			Join("LEFT", "action_runner", "`action_runner`.id = `action_task`.runner_id")
 	}

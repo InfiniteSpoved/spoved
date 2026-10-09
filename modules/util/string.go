@@ -156,9 +156,9 @@ func hasAny(s string, prefix bool, all ...string) bool {
 	return false
 }
 
-// CSVSafe keeps a spreadsheet from reading a CSV cell as a formula, also after leading spaces
+// CSVSafe keeps a spreadsheet from reading a CSV cell as a formula, also after leading spaces or newlines
 func CSVSafe(s string) string {
-	if t := strings.TrimLeft(s, " "); t != "" && strings.ContainsRune("=+-@\t\r", rune(t[0])) {
+	if t := strings.TrimLeft(s, " \n"); t != "" && strings.ContainsRune("=+-@\t\r\n", rune(t[0])) {
 		return "'" + s
 	}
 	return s

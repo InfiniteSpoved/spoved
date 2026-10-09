@@ -9,6 +9,7 @@ import (
 
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
+	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
@@ -138,6 +139,8 @@ func TestGetUsage(t *testing.T) {
 	addUsageJob(t, r.org, 901, to+1, to+11, to+11, ok)                          // after the range
 	addUsageJob(t, r.org, 901, from-1, from+5, from+5, ok)                      // started before from, updated inside: excluded
 	addUsageJob(t, r.org, 901, from-100, from-50, from-50, ok)                  // before the range
+	addUsageJob(t, r.org2, 777, 16_000, 16_030, 16_030, ok)                     // 30 s, a runner that no longer exists
+	addUsageJob(t, r.org2, 778, 16_100, 16_130, 16_130, ok)                     // 30 s, another one: the same bucket
 
 	t.Run("repo", func(t *testing.T) {
 		got, err := GetUsage(t.Context(), UsageGroupRepo, from, to, nil, 100)
@@ -148,7 +151,7 @@ func TestGetUsage(t *testing.T) {
 		assert.EqualValues(t, 4, m[r.org].Jobs)
 		assert.EqualValues(t, 1, m[r.org].FailedJobs)
 		assert.Equal(t, "org3/repo3", m[r.org].Name)
-		assert.EqualValues(t, 120, m[r.org2].Seconds) // the unfinished and the inverted job add nothing
+		assert.EqualValues(t, 120+60, m[r.org2].Seconds) // the unfinished and the inverted job add nothing
 		assert.EqualValues(t, 300, m[r.personal].Seconds)
 		assert.Equal(t, r.org, got[0].ID, "sorted by seconds, most first")
 	})
@@ -157,7 +160,7 @@ func TestGetUsage(t *testing.T) {
 		require.NoError(t, err)
 		m := usageByID(got)
 		require.Len(t, m, 2)
-		assert.EqualValues(t, 600+60+10+10+120, m[3].Seconds)
+		assert.EqualValues(t, 600+60+10+10+120+60, m[3].Seconds)
 		assert.Equal(t, "org3", m[3].Name)
 		assert.EqualValues(t, 300, m[2].Seconds)
 		assert.Equal(t, "user2", m[2].Name)
@@ -171,6 +174,8 @@ func TestGetUsage(t *testing.T) {
 		assert.EqualValues(t, 60, m[902].Seconds)
 		assert.Equal(t, "beta", m[902].Name)
 		assert.EqualValues(t, 120, m[0].Seconds)
+		assert.EqualValues(t, 60, m[-1].Seconds)
+		assert.EqualValues(t, 2, m[-1].Jobs)
 	})
 	t.Run("limit", func(t *testing.T) {
 		got, err := GetUsage(t.Context(), UsageGroupRepo, from, to, nil, 1)
@@ -232,6 +237,21 @@ func TestFindOrgRunsAllOwners(t *testing.T) {
 
 	_, _, err = FindOrgRuns(t.Context(), nil, admin, false, nil, OrgRunFilter{}, db.ListOptions{})
 	require.Error(t, err, "no organization is for site admins only")
+}
+
+func TestFindOrgRunsNotAdminStaysInOrg(t *testing.T) {
+	r := usageSetup(t)
+	require.NoError(t, db.Insert(t.Context(), &actions_model.ActionRun{
+		Title: "x", RepoID: r.personal, OwnerID: 3, WorkflowID: "ci.yaml", Index: 7100, TriggerUserID: 2,
+		Ref: "refs/heads/main", Event: webhook_module.HookEventPush, TriggerEvent: "push", Status: actions_model.StatusSuccess,
+	}))
+	org := unittest.AssertExistsAndLoadBean(t, &organization.Organization{ID: 3})
+	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	runs, _, err := FindOrgRuns(t.Context(), org, owner, false, nil, OrgRunFilter{}, db.ListOptions{Page: 1, PageSize: 50})
+	require.NoError(t, err)
+	for _, run := range runs {
+		assert.NotEqual(t, r.personal, run.RepoID)
+	}
 }
 
 func TestIsActiveSiteAdmin(t *testing.T) {

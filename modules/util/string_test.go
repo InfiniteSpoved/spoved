@@ -127,6 +127,8 @@ func TestCSVSafe(t *testing.T) {
 		"\rx":       "'\rx",
 		"a=b":       "a=b",
 		"  =1+2":    "'  =1+2",
+		"\n=1":      "'\n=1",
+		" \n@a":     "' \n@a",
 		" a =":      " a =",
 		"'=already": "'=already",
 	} {
