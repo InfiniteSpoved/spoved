@@ -267,8 +267,13 @@ func TestOrgUnitPolicyRunningTask(t *testing.T) {
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repositories/4").AddTokenAuth("8061e833a55f6fc0157c98b883e91fcfeeb1a71a"), map[int]int{http.StatusOK: http.StatusOK, http.StatusNotFound: http.StatusUnauthorized}[status])
 	}
 
-	// the tasks run in user5/repo4; move it into org3
+	// the tasks run in user5/repo4; a repository admin turning Actions off leaves running tasks alone, as upstream
 	both(http.StatusOK)
+	_, err = db.GetEngine(db.DefaultContext).Exec("DELETE FROM repo_unit WHERE repo_id = 4 AND type = ?", unit_model.TypeActions)
+	require.NoError(t, err)
+	both(http.StatusOK)
+
+	// move it into org3
 	_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET owner_id = 3 WHERE id = 4")
 	require.NoError(t, err)
 	both(http.StatusOK)

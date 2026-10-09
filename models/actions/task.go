@@ -305,12 +305,15 @@ func getConcurrencyCondition() builder.Cond {
 	return concurrencyCond
 }
 
-// ActionsAvailable reports whether the task's repository still has Actions: once Actions is off or hidden there (site
-// policy, organization owner or repository), a running task's tokens (GITEA_TOKEN, runtime token, artifacts, ID
-// token) stop working.
+// ActionsAvailable reports whether the site policy and the organization owner still let the task's repository have
+// Actions: once they hide it, a running task's tokens (GITEA_TOKEN, runtime token, artifacts, ID token) stop working.
+// A repository admin turning Actions off leaves them working, as before.
 func (task *ActionTask) ActionsAvailable(ctx context.Context) bool {
 	repo, err := repo_model.GetRepositoryByID(ctx, task.RepoID)
-	return err == nil && repo.UnitEnabled(ctx, unit.TypeActions)
+	if err == nil {
+		err = repo.LoadOwner(ctx)
+	}
+	return err == nil && !repo_model.HiddenUnits(ctx, repo.Owner).Contains(unit.TypeActions)
 }
 
 // Returns all the available jobs that could be executed on `runner`, before label filtering is applied.  Note that
