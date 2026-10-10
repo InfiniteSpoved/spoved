@@ -13,6 +13,7 @@ import (
 
 	activities_model "forgejo.org/models/activities"
 	"forgejo.org/models/db"
+	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
 	project_model "forgejo.org/models/project"
@@ -23,6 +24,7 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/storage"
 	"forgejo.org/modules/timeutil"
+	"forgejo.org/modules/translation"
 	notify_service "forgejo.org/services/notify"
 	"forgejo.org/services/stats"
 )
@@ -60,6 +62,40 @@ func NewIssue(ctx context.Context, repo *repo_model.Repository, issue *issues_mo
 	return nil
 }
 
+// CheckPRTitleRule checks a pull request title against the title rule of the base repository.
+// Rules in refuse mode are checked on creation and edit (atMerge false), rules in block-merge mode only at merge.
+// A stored rule that does not compile fails closed with an *ErrPRTitleRule{Invalid: true}.
+func CheckPRTitleRule(ctx context.Context, repo *repo_model.Repository, baseBranch, title string, atMerge bool) error {
+	rule, err := git_model.GetPushRule(ctx, repo.ID)
+	if err != nil {
+		return err
+	}
+	if rule == nil || rule.PRTitleBlockMerge != atMerge {
+		return nil
+	}
+	if err := rule.CompilePRTitle(); err != nil {
+		log.Error("Invalid pull request title rule of %-v: %v", repo, err)
+		return &git_model.ErrPRTitleRule{Invalid: true}
+	}
+	return rule.CheckPRTitle(baseBranch, title, !atMerge && issues_model.HasWorkInProgressPrefix(title))
+}
+
+// PRTitleRuleMessage returns the text to show for a title rule error: the rule's own message,
+// or a default one. It is user-entered text: escape it wherever it reaches HTML.
+func PRTitleRuleMessage(locale translation.Locale, err error) (string, bool) {
+	var ruleErr *git_model.ErrPRTitleRule
+	if !errors.As(err, &ruleErr) {
+		return "", false
+	}
+	switch {
+	case ruleErr.Invalid:
+		return locale.TrString("repo.pulls.title_rule_invalid"), true
+	case ruleErr.Message == "":
+		return locale.TrString("repo.pulls.title_rule_default"), true
+	}
+	return ruleErr.Message, true
+}
+
 // ChangeTitle changes the title of this issue, as the given user.
 func ChangeTitle(ctx context.Context, issue *issues_model.Issue, doer *user_model.User, title string) error {
 	oldTitle := issue.Title
@@ -70,6 +106,15 @@ func ChangeTitle(ctx context.Context, issue *issues_model.Issue, doer *user_mode
 
 	if err := issue.LoadRepo(ctx); err != nil {
 		return err
+	}
+
+	if issue.IsPull {
+		if err := issue.LoadPullRequest(ctx); err != nil {
+			return err
+		}
+		if err := CheckPRTitleRule(ctx, issue.Repo, issue.PullRequest.BaseBranch, title, false); err != nil {
+			return err
+		}
 	}
 
 	if user_model.IsBlockedMultiple(ctx, []int64{issue.PosterID, issue.Repo.OwnerID}, doer.ID) {
