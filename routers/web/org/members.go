@@ -181,7 +181,10 @@ func MembersAction(ctx *context.Context) {
 			addToTeam := ctx.FormBool(fmt.Sprintf("team_%d", team.ID))
 			if addToTeam {
 				err = org_service.InviteOrAddTeamMember(ctx, ctx.Doer, u, team)
-				if err != nil {
+				if flashVerifiedDomainError(ctx, err, u.Name) {
+					ctx.Redirect(ctx.Org.OrgLink + "/members")
+					return
+				} else if err != nil {
 					ctx.ServerError("InviteOrAddTeamMember", err)
 					return
 				}

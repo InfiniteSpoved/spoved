@@ -189,6 +189,9 @@ func TeamsAction(ctx *context.Context) {
 				ctx.Flash.Error(ctx.Tr("members.user_already_invited_to_team"))
 				ctx.Redirect(ctx.Org.OrgLink + "/teams/" + url.PathEscape(ctx.Org.Team.LowerName))
 				return
+			} else if flashVerifiedDomainError(ctx, err, u.Name) {
+				ctx.Redirect(ctx.Org.OrgLink + "/teams/" + url.PathEscape(ctx.Org.Team.LowerName))
+				return
 			} else if err != nil {
 				ctx.ServerError("InviteOrAddTeamMember", err)
 				return
@@ -220,7 +223,7 @@ func TeamsAction(ctx *context.Context) {
 	if err != nil {
 		if org_model.IsErrLastOrgOwner(err) {
 			ctx.Flash.Error(ctx.Tr("form.last_org_owner"))
-		} else {
+		} else if !flashVerifiedDomainError(ctx, err, ctx.Doer.Name) { // an admin joining a team
 			log.Error("Action(%s): %v", ctx.Params(":action"), err)
 			ctx.JSON(http.StatusOK, map[string]any{
 				"ok":  false,
@@ -832,6 +835,8 @@ func TeamInvitePost(ctx *context.Context) {
 			ctx.NotFound("ErrTeamInviteNotFound", err)
 		} else if org_model.IsErrOrgArchived(err) {
 			ctx.Error(http.StatusForbidden, ctx.Locale.TrString("org.archived.readonly"))
+		} else if flashVerifiedDomainError(ctx, err, ctx.Doer.Name) {
+			ctx.Redirect("/org/invite/" + invite.Token)
 		} else {
 			ctx.ServerError("AcceptInvite", err)
 		}
