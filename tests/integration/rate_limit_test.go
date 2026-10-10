@@ -639,6 +639,15 @@ func TestRateLimitServ(t *testing.T) {
 	code, _ = servCommand(t, 303, "::ffff:198.51.100.7", "git-upload-pack", 1)
 	assert.Equal(t, http.StatusTooManyRequests, code)
 
+	// a zoned IPv6 address is the address without the zone, not an invalid one
+	ratelimit.ResetForTest()
+	for i, ip := range []string{"2001:db8:9::1%25eth0", "2001:db8:9::2", "2001:db8:9::3"} {
+		code, _ = servCommand(t, int64(400+i), ip, "git-upload-pack", 1)
+		assert.NotEqual(t, http.StatusTooManyRequests, code)
+	}
+	code, _ = servCommand(t, 403, "2001:db8:9::4%25eth1", "git-upload-pack", 1)
+	assert.Equal(t, http.StatusTooManyRequests, code)
+
 	// exempt IPs are never limited
 	for range 6 {
 		code, _ = servCommand(t, 1, "192.0.2.5", "git-upload-pack", 1)

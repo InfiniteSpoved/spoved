@@ -132,18 +132,19 @@ func sshRateLimited(ctx *context.PrivateContext, keyID int64) bool {
 	}
 	addr := ""
 	if ip, err := netip.ParseAddr(ctx.FormString("ip")); err == nil {
-		addr = net.JoinHostPort(ip.String(), "0")
+		addr = net.JoinHostPort(ip.WithZone("").String(), "0") // a zone would make IPKey read it as invalid
 	}
+	r := ratelimit.CheckSSH(addr, keyID)
+	if r.Allowed {
+		return false
+	}
+	// the admin lookup only happens for a request that would be refused
 	if setting.RateLimit.ExemptAdmins {
 		if key, err := asymkey_model.GetPublicKeyByID(ctx, keyID); err == nil && key.Type != asymkey_model.KeyTypeDeploy {
 			if u, err := user_model.GetUserByID(ctx, key.OwnerID); err == nil && u.IsAdmin && u.IsActive && !u.ProhibitLogin {
 				return false
 			}
 		}
-	}
-	r := ratelimit.CheckSSH(addr, keyID)
-	if r.Allowed {
-		return false
 	}
 	sshLogger.Warn("SSH rate limit exceeded by key %d from %q", keyID, ctx.FormString("ip"))
 	ctx.JSON(http.StatusTooManyRequests, private.Response{UserMsg: (&ratelimit.LimitedError{Result: r}).Error()})
