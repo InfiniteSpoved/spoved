@@ -652,6 +652,24 @@ export default {
             </div>
           </div>
         </div>
+        <details v-if="currentJob.tokenPermissions" class="job-token-permissions">
+          <summary>{{ currentJob.tokenPermissions.title }}</summary>
+          <table class="ui very basic compact unstackable table">
+            <tbody>
+              <tr v-for="unit in currentJob.tokenPermissions.units" :key="unit.name" :data-mode="unit.mode">
+                <td>
+                  {{ unit.name }}
+                </td>
+                <td class="job-token-permission-access">
+                  {{ unit.access }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-for="note in currentJob.tokenPermissions.notes" :key="note" class="job-token-permissions-note">
+            {{ note }}
+          </p>
+        </details>
         <div v-if="currentJob.summaries?.length" class="job-summary markup">
           <!-- eslint-disable-next-line vue/no-v-html -->
           <div v-for="(stepSummary, index) in currentJob.summaries" :key="index" class="step-summary" v-html="stepSummary"/>
@@ -858,6 +876,34 @@ export default {
   border-radius: var(--border-radius);
   background: var(--color-box-body);
   color: var(--color-text);
+}
+
+.action-view-right .job-token-permissions {
+  margin: 12px 12px 0;
+  padding: 8px 16px;
+  border: 1px solid var(--color-console-border);
+  border-radius: var(--border-radius);
+  background: var(--color-box-body);
+  color: var(--color-text);
+}
+
+.action-view-right .job-token-permissions summary {
+  cursor: pointer;
+  font-weight: var(--font-weight-semibold);
+}
+
+.action-view-right .job-token-permissions .table {
+  margin: 8px 0;
+  max-width: 400px;
+}
+
+.action-view-right .job-token-permissions tr[data-mode="none"] .job-token-permission-access {
+  color: var(--color-text-light-2);
+}
+
+.action-view-right .job-token-permissions-note {
+  margin: 8px 0;
+  color: var(--color-text-light);
 }
 
 .action-view-right .job-summary .step-summary + .step-summary {

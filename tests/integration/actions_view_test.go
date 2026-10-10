@@ -15,6 +15,8 @@ import (
 	"time"
 
 	actions_model "forgejo.org/models/actions"
+	"forgejo.org/models/db"
+	"forgejo.org/models/perm"
 	repo_model "forgejo.org/models/repo"
 	unit_model "forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
@@ -22,6 +24,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
+	actions_web "forgejo.org/routers/web/repo/actions"
 	"forgejo.org/tests"
 	"forgejo.org/tests/forgery"
 
@@ -157,7 +160,7 @@ func TestActionViewsView(t *testing.T) {
 			jobIndex:          0,
 			attempt:           3,
 			workflowSourceURL: "/user5/repo4/src/commit/c2d72f548424103f01ee1dc02889c1e2bff816b0/.forgejo/workflows/artifact.yaml",
-			expectedJSON:      `{"state":{"run":{"preExecutionError":"","preExecutionWarnings":null,"link":"/user5/repo4/actions/runs/187","title":"update actions","titleHTML":"update actions","status":"success","canCancel":false,"canDelete":false,"canApprove":false,"canRerun":false,"canDeleteArtifact":false,"description":"Commit <a href=\"/user5/repo4/commit/c2d72f548424103f01ee1dc02889c1e2bff816b0\">c2d72f5484</a> pushed by <a href=\"/user1\">user1</a>","done":true,"estimatedOutcome":"success","jobs":[{"id":192,"name":"job_2","status":"success","canRerun":false,"duration":"_duration_","groupKey":"/job_2","needs":[]}],"commit":{"localeWorkflow":"Workflow","localeAllRuns":"all runs","shortSHA":"c2d72f5484","link":"/user5/repo4/commit/c2d72f548424103f01ee1dc02889c1e2bff816b0","pusher":{"displayName":"user1","link":"/user1"},"branch":{"name":"master","link":"/user5/repo4/src/branch/master","isDeleted":false}}},"currentJob":{"summaries":[],"title":"job_2","steps":[{"summary":"Set up job","duration":"_duration_","status":"running"},{"summary":"Complete job","duration":"_duration_","status":"waiting"}],"allAttempts":[{"number":3,"time_since_started_html":"_time_","status":"running","status_diagnostics":["Running for <relative-time datetime=\"2023-05-09T14:48:48+02:00\" format=\"duration\" prefix=\"\" data-tooltip-content data-tooltip-interactive=\"true\">32m44s</relative-time>"]},{"number":2,"time_since_started_html":"_time_","status":"success","status_diagnostics":["Succeeded <relative-time prefix=\"\" tense=\"past\" datetime=\"2023-05-09T14:50:26+02:00\" data-tooltip-content data-tooltip-interactive=\"true\">2023-05-09 14:50:26 +02:00</relative-time> in 1m38s"]},{"number":1,"time_since_started_html":"_time_","status":"success","status_diagnostics":["Succeeded <relative-time prefix=\"\" tense=\"past\" datetime=\"2023-05-09T14:50:26+02:00\" data-tooltip-content data-tooltip-interactive=\"true\">2023-05-09 14:50:26 +02:00</relative-time> in 1m38s"]}]}},"logs":{"stepsLog":[]}}`,
+			expectedJSON:      `{"state":{"run":{"preExecutionError":"","preExecutionWarnings":null,"link":"/user5/repo4/actions/runs/187","title":"update actions","titleHTML":"update actions","status":"success","canCancel":false,"canDelete":false,"canApprove":false,"canRerun":false,"canDeleteArtifact":false,"description":"Commit <a href=\"/user5/repo4/commit/c2d72f548424103f01ee1dc02889c1e2bff816b0\">c2d72f5484</a> pushed by <a href=\"/user1\">user1</a>","done":true,"estimatedOutcome":"success","jobs":[{"id":192,"name":"job_2","status":"success","canRerun":false,"duration":"_duration_","groupKey":"/job_2","needs":[]}],"commit":{"localeWorkflow":"Workflow","localeAllRuns":"all runs","shortSHA":"c2d72f5484","link":"/user5/repo4/commit/c2d72f548424103f01ee1dc02889c1e2bff816b0","pusher":{"displayName":"user1","link":"/user1"},"branch":{"name":"master","link":"/user5/repo4/src/branch/master","isDeleted":false}}},"currentJob":{"summaries":[],"title":"job_2","tokenPermissions":{"title":"Token permissions","units":[{"name":"Code","mode":"write","access":"Write"},{"name":"Issues","mode":"write","access":"Write"},{"name":"Pull requests","mode":"write","access":"Write"},{"name":"Releases","mode":"write","access":"Write"},{"name":"Wiki","mode":"write","access":"Write"},{"name":"Actions","mode":"write","access":"Write"}],"notes":["The workflow has no permissions block, so the token can write to every unit."]},"steps":[{"summary":"Set up job","duration":"_duration_","status":"running"},{"summary":"Complete job","duration":"_duration_","status":"waiting"}],"allAttempts":[{"number":3,"time_since_started_html":"_time_","status":"running","status_diagnostics":["Running for <relative-time datetime=\"2023-05-09T14:48:48+02:00\" format=\"duration\" prefix=\"\" data-tooltip-content data-tooltip-interactive=\"true\">32m44s</relative-time>"]},{"number":2,"time_since_started_html":"_time_","status":"success","status_diagnostics":["Succeeded <relative-time prefix=\"\" tense=\"past\" datetime=\"2023-05-09T14:50:26+02:00\" data-tooltip-content data-tooltip-interactive=\"true\">2023-05-09 14:50:26 +02:00</relative-time> in 1m38s"]},{"number":1,"time_since_started_html":"_time_","status":"success","status_diagnostics":["Succeeded <relative-time prefix=\"\" tense=\"past\" datetime=\"2023-05-09T14:50:26+02:00\" data-tooltip-content data-tooltip-interactive=\"true\">2023-05-09 14:50:26 +02:00</relative-time> in 1m38s"]}]}},"logs":{"stepsLog":[]}}`,
 			expectedArtifacts: "{\"artifacts\":[{\"name\":\"multi-file-download\",\"size\":2048,\"status\":\"completed\"}]}\n",
 		},
 		{
@@ -338,4 +341,54 @@ func TestActionViewRunDeletion(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestActionViewsTokenPermissions(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+
+	task := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionTask{ID: 47})
+	job := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRunJob{ID: task.JobID})
+	run := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRun{ID: job.RunID, Index: 187})
+
+	view := func(t *testing.T) *actions_web.ViewTokenPermissions {
+		t.Helper()
+		req := NewRequestWithJSON(t, "POST", "/user5/repo4/actions/runs/187/jobs/0/attempt/3", map[string]any{"logCursors": []any{}})
+		resp := MakeRequest(t, req, http.StatusOK)
+		var v actions_web.ViewResponse
+		DecodeJSON(t, resp, &v)
+		return v.State.CurrentJob.TokenPermissions
+	}
+	modes := func(v *actions_web.ViewTokenPermissions) map[string]string {
+		m := map[string]string{}
+		for _, u := range v.Units {
+			m[u.Name] = u.Mode
+		}
+		return m
+	}
+
+	t.Run("explicit", func(t *testing.T) {
+		task.TokenPermissions = actions_model.TokenPermissions{unit_model.TypeCode: perm.AccessModeRead, unit_model.TypeIssues: perm.AccessModeWrite}.Encode()
+		require.NoError(t, actions_model.UpdateTask(t.Context(), task, "token_permissions"))
+		run.PreExecutionWarningCodes = []actions_model.PreExecutionWarning{actions_model.WarningCodePermissionsIgnored}
+		run.PreExecutionWarningDetails = [][]any{{string(job.JobID), "packages, statuses"}}
+		_, err := db.GetEngine(t.Context()).ID(run.ID).Cols("pre_execution_warning_codes", "pre_execution_warning_details").Update(run)
+		require.NoError(t, err)
+
+		v := view(t)
+		require.NotNil(t, v)
+		assert.Equal(t, map[string]string{"Code": "read", "Issues": "write", "Pull requests": "none", "Releases": "none", "Wiki": "none", "Actions": "none"}, modes(v))
+		assert.Equal(t, []string{"These permissions keys grant nothing and were ignored: packages, statuses"}, v.Notes)
+	})
+
+	t.Run("fork", func(t *testing.T) {
+		task.IsForkPullRequest = true
+		task.TokenPermissions = ""
+		require.NoError(t, actions_model.UpdateTask(t.Context(), task, "token_permissions", "is_fork_pull_request"))
+
+		v := view(t)
+		require.NotNil(t, v)
+		assert.Equal(t, "read", modes(v)["Code"])
+		assert.Equal(t, "read", modes(v)["Issues"])
+		assert.Equal(t, "This run is for a pull request from a fork, so the token is read-only.", v.Notes[0])
+	})
 }
