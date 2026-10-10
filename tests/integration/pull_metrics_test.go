@@ -13,6 +13,7 @@ import (
 
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
+	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	"forgejo.org/modules/test"
@@ -177,6 +178,23 @@ func TestPullMetricsOrg(t *testing.T) {
 	t.Run("unit policy", func(t *testing.T) {
 		defer denyRepoUnits(t, nil, unit.TypePullRequests)()
 		owner.MakeRequest(t, NewRequest(t, "GET", "/org/org3/metrics"), http.StatusNotFound)
+	})
+
+	t.Run("org unit off", func(t *testing.T) {
+		require.NoError(t, db.Insert(ctx, &repo_model.OrgUnit{OrgID: 3, Type: unit.TypePullRequests, Disabled: true}))
+		defer func() {
+			_, err := db.DeleteByBean(ctx, &repo_model.OrgUnit{OrgID: 3})
+			require.NoError(t, err)
+		}()
+		owner.MakeRequest(t, NewRequest(t, "GET", "/org/org3/metrics"), http.StatusNotFound)
+	})
+
+	t.Run("team without the unit", func(t *testing.T) {
+		// test_team (user15) reads only issues; give it the private repo5
+		require.NoError(t, db.Insert(ctx, &organization.TeamRepo{OrgID: 3, TeamID: 7, RepoID: 5}))
+		require.NoError(t, db.Insert(ctx, &organization.OrgUser{OrgID: 3, UID: 15}))
+		repos, _ := metricsCSV(t, loginUser(t, "user15"), "/org/org3/metrics")
+		assert.Empty(t, repos)
 	})
 
 	t.Run("two-factor requirement", func(t *testing.T) {
