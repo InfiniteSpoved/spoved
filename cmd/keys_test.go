@@ -20,6 +20,7 @@ import (
 )
 
 func TestKeys(t *testing.T) {
+	defer test.MockVariableValue(&setting.InstallLock, true)()
 	// Setup the server that processes the request.
 	defer test.MockVariableValue(&setting.InternalListenerPath, "random")()
 	internaltest.NewInternalTestServer(t, optional.Some(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
