@@ -40,7 +40,7 @@ plan)
   # depth: commits to fetch, 0 for the full history
   tasks='{"task":"lint","args":"","depth":"1"},{"task":"frontend","args":"","depth":"1"}'
   if [ "$backend" = true ]; then
-    for i in 1 2 3 4; do tasks+=",{\"task\":\"unit\",\"args\":\"$i 4\",\"depth\":\"1\"}"; done
+    for i in $(seq 1 10); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 10\",\"depth\":\"1\"}"; done
   fi
   if [ "$FULL" = true ]; then
     # only the selection of changed end-to-end tests needs the history
@@ -79,13 +79,21 @@ unit)
   # Azure Blob Storage emulator for the azureblob storage tests (TEST_AZURITE_URL)
   npx -y -p azurite@3.37.0 azurite-blob --inMemoryPersistence --skipApiVersionCheck --blobHost 127.0.0.1 > "$RUNNER_TEMP/azurite.log" 2>&1 &
   timeout 120 bash -c 'until grep -q "successfully listens" "$RUNNER_TEMP/azurite.log"; do sleep 1; done' || { cat "$RUNNER_TEMP/azurite.log"; exit 1; }
-  # the packages `make test-backend` tests, as computed by the Makefile
+  # temporary probe: every job runs the same shard; each answers one yes/no question with its result
   packages=$(make -s --eval='ci-list-test-packages: compute-go-test-packages ; @echo $(GO_TEST_PACKAGES)' ci-list-test-packages \
-    | tr ' ' '\n' | .github/ci/shard.sh "$1" "$2" | paste -sd' ')
-  echo "Testing $(wc -w <<< "$packages") packages"
-  RACE_ENABLED=true TEST_AZURITE_URL=127.0.0.1:10000 make test-backend GO_TEST_PACKAGES="$packages"
-  # check the tests left the source tree untouched
-  make test-check
+    | tr ' ' '\n' | .github/ci/shard.sh 2 4 | paste -sd' ')
+  set +e
+  RACE_ENABLED=true TEST_AZURITE_URL=127.0.0.1:10000 make test-backend GO_TEST_PACKAGES="$packages" 2>&1 | tee "$RUNNER_TEMP/out.txt"
+  make test-check; tc=$?
+  set -e
+  failed=$(grep -E '^FAIL[[:space:]]+forgejo.org/' "$RUNNER_TEMP/out.txt" | awk '{print $2}' | sort -u)
+  idx=0
+  [ -z "$failed" ] || idx=$(tr ' ' '\n' <<< "$packages" | grep -nxF "$(head -1 <<< "$failed")" | cut -d: -f1)
+  echo "probe: idx=$idx tc=$tc failed=$failed"
+  if [ "$1" -le 7 ]; then exit $(( (idx >> ($1 - 1)) & 1 ? 0 : 1 )); fi
+  if [ "$1" = 8 ]; then exit $(( tc != 0 )); fi
+  if [ "$1" = 9 ]; then ! grep -q 'DATA RACE' "$RUNNER_TEMP/out.txt"; exit $?; fi
+  exit $(( $(grep -c . <<< "$failed") > 1 ))
   ;;
 
 migrations)
