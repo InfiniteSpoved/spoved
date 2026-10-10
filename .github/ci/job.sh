@@ -40,7 +40,7 @@ plan)
   # depth: commits to fetch, 0 for the full history
   tasks='{"task":"lint","args":"","depth":"1"},{"task":"frontend","args":"","depth":"1"}'
   if [ "$backend" = true ]; then
-    for i in $(seq 1 8); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 8\",\"depth\":\"1\"}"; done
+    for i in $(seq 1 9); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 9\",\"depth\":\"1\"}"; done
   fi
   if [ "$FULL" = true ]; then
     # only the selection of changed end-to-end tests needs the history
@@ -79,13 +79,17 @@ unit)
   # Azure Blob Storage emulator for the azureblob storage tests (TEST_AZURITE_URL)
   npx -y -p azurite@3.37.0 azurite-blob --inMemoryPersistence --skipApiVersionCheck --blobHost 127.0.0.1 > "$RUNNER_TEMP/azurite.log" 2>&1 &
   timeout 120 bash -c 'until grep -q "successfully listens" "$RUNNER_TEMP/azurite.log"; do sleep 1; done' || { cat "$RUNNER_TEMP/azurite.log"; exit 1; }
-  # the packages `make test-backend` tests, as computed by the Makefile
-  packages=$(make -s --eval='ci-list-test-packages: compute-go-test-packages ; @echo $(GO_TEST_PACKAGES)' ci-list-test-packages \
-    | tr ' ' '\n' | .github/ci/shard.sh 2 4 | .github/ci/shard.sh 10 12 | .github/ci/shard.sh "$1" "$2" | paste -sd' ')
-  echo "Testing $(wc -w <<< "$packages") packages"
-  RACE_ENABLED=true TEST_AZURITE_URL=127.0.0.1:10000 make test-backend GO_TEST_PACKAGES="$packages"
-  # check the tests left the source tree untouched
-  make test-check
+  # temporary probe
+  pkg=forgejo.org/services/usergroup
+  if [ "$1" -le 7 ]; then
+    tests=$(go test -tags 'sqlite sqlite_unlock_notify' -list '^Test' $pkg | grep -E '^Test' | .github/ci/shard.sh "$1" 7 | paste -sd'|')
+    TZ=UTC PROJECT_ROOT="$PWD" TEST_AZURITE_URL=127.0.0.1:10000 go test -race -tags 'sqlite sqlite_unlock_notify' -run "^(${tests})\$" $pkg
+    make test-check
+  elif [ "$1" = 8 ]; then
+    TZ=UTC PROJECT_ROOT="$PWD" TEST_AZURITE_URL=127.0.0.1:10000 go test -tags 'sqlite sqlite_unlock_notify' $pkg
+  else
+    TZ=UTC PROJECT_ROOT="$PWD" TEST_AZURITE_URL=127.0.0.1:10000 go test -race -tags 'sqlite sqlite_unlock_notify' $pkg
+  fi
   ;;
 
 migrations)
