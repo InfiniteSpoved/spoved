@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -786,6 +787,88 @@ func TestAPIGenerateReleaseNotes(t *testing.T) {
 			generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v3", PreviousTagName: "--exec"}, http.StatusNotFound)
 			generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v3", PreviousTagName: "missing"}, http.StatusNotFound)
 			generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v3", Target: "missing"}, http.StatusNotFound)
+		})
+
+		t.Run("new contributors, direct commits and category exclude", func(t *testing.T) {
+			mergeAs := func(user *user_model.User, base, branch string) int64 {
+				uctx := NewAPITestContext(t, user.Name, repo.Name, auth_model.AccessTokenScopeWriteRepository)
+				commitFile(base, branch, branch+".txt", branch)
+				pr, err := doAPICreatePullRequest(uctx, org.Name, repo.Name, base, branch)(t)
+				require.NoError(t, err)
+				doAPIMergePullRequestForm(t, ctx, org.Name, repo.Name, pr.Index, &forms.MergePullRequestForm{Do: string(repo_model.MergeStyleSquash)})
+				return pr.Index
+			}
+			member := func(name string) *user_model.User {
+				user := forgery.CreateUser(t, nil)
+				forgery.CreateTeam(t, org, &forgery.CreateTeamOptions{Name: name, Mode: perm.AccessModeWrite, Members: []*user_model.User{user}})
+				return user
+			}
+			newbie, veteran, labelled := member("newbies"), member("veterans"), member("labelled")
+			link := func(user *user_model.User, index int64) string {
+				return fmt.Sprintf("* @%s made their first contribution in #%d\n", user.Name, index)
+			}
+
+			// veteran merged to another branch before the range: not new
+			commitFile("main", "side", "side.txt", "side")
+			mergeAs(veteran, "side", "v0")
+			tag("v4", "")
+			prNewbie := mergeAs(newbie, "main", "n1")
+			prNewbie2 := mergeAs(newbie, "main", "n2")
+			prVeteran := mergeAs(veteran, "main", "vet1")
+			prLabelled := mergeAs(labelled, "main", "l1")
+			commitFile("main", "", "direct.txt", "direct")
+			tag("v5", "")
+			// merged after the range: does not make anyone's first PR earlier
+			mergeAs(newbie, "main", "n3")
+
+			issueToken := getUserToken(t, owner.Name, auth_model.AccessTokenScopeWriteIssue, auth_model.AccessTokenScopeWriteRepository)
+			MakeRequest(t, NewRequestWithJSON(t, "POST", fmt.Sprintf("/api/v1/repos/%s/%s/labels", org.Name, repo.Name), api.CreateLabelOption{Name: "skip", Color: "#ff0000"}).AddTokenAuth(issueToken), http.StatusCreated)
+			MakeRequest(t, NewRequestWithJSON(t, "POST", fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d/labels", org.Name, repo.Name, prLabelled), api.IssueLabelsOption{Labels: []any{"skip"}}).AddTokenAuth(issueToken), http.StatusOK)
+			commitFile("main", "", "cfg.yml", fmt.Sprintf("changelog:\n  exclude:\n    labels: [skip]\n  categories:\n    - title: Veterans\n      labels: [\"*\"]\n      exclude:\n        authors: [%s]\n", veteran.Name))
+			tag("v5b", "")
+
+			body := generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v5", PreviousTagName: "v4"}, http.StatusOK)
+			assert.Contains(t, body, "\n## New Contributors\n")
+			assert.Contains(t, body, link(newbie, prNewbie))
+			assert.NotContains(t, body, link(newbie, prNewbie2))
+			assert.NotContains(t, body, link(veteran, prVeteran))
+			assert.Contains(t, body, link(labelled, prLabelled))
+			assert.NotContains(t, body, "Direct commits")
+			assert.NotContains(t, body, "direct.txt")
+
+			// no section when there are none, and the first release has the owner's first PR
+			body = generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v2"}, http.StatusOK)
+			assert.NotContains(t, body, "New Contributors")
+			body = generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v1"}, http.StatusOK)
+			assert.Contains(t, body, link(owner, pr1))
+
+			// direct commits: only with the option, never the commits of a PR
+			body = generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v5", PreviousTagName: "v4", IncludeDirectCommits: true}, http.StatusOK)
+			assert.Contains(t, body, "### Direct commits\n")
+			assert.Regexp(t, `\* .* by .* \(\[[0-9a-f]{10}\]\(`+regexp.QuoteMeta(setting.AppURL+org.Name+"/"+repo.Name)+`/commit/[0-9a-f]{40}\)\)\n`, body)
+			assert.Equal(t, 1, strings.Count(body, "/commit/"), body)
+			assert.NotContains(t, body, "(#")
+
+			// category exclude and top-level exclude
+			body = generate(ctx.Token, api.GenerateReleaseNotesOption{TagName: "v5b", PreviousTagName: "v4", ConfigurationFilePath: "cfg.yml"}, http.StatusOK)
+			assert.Contains(t, body, "### Veterans\n")
+			assert.Contains(t, body, fmt.Sprintf("by @%s in #%d\n", newbie.Name, prNewbie))
+			assert.Contains(t, body, link(labelled, prLabelled))
+			assert.NotContains(t, body, fmt.Sprintf("by @%s in #%d\n", labelled.Name, prLabelled))
+			assert.Contains(t, body, fmt.Sprintf("### Other Changes\n* create a pr from vet1 to main by @%s in #%d\n", veteran.Name, prVeteran))
+
+			// web form
+			webLink := fmt.Sprintf("/%s/%s/releases/generate-notes", org.Name, repo.Name)
+			session := loginUser(t, owner.Name)
+			for value, want := range map[string]bool{"": false, "on": true} {
+				values := map[string]string{"tag_name": "v5", "previous_tag_name": "v4"}
+				if value != "" {
+					values["include_direct_commits"] = value
+				}
+				var notes struct{ Body string }
+				DecodeJSON(t, session.MakeRequest(t, NewRequestWithValues(t, "POST", webLink, values), http.StatusOK), &notes)
+				assert.Equal(t, want, strings.Contains(notes.Body, "### Direct commits"))
+			}
 		})
 
 		t.Run("permissions", func(t *testing.T) {

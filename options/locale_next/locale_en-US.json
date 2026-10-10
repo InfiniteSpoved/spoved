@@ -133,6 +133,8 @@
 	"repo.issues.review.remove_suggestion_from_batch": "Remove from batch",
 	"repo.issues.review.commit_batch_suggestions": "Commit suggestions",
 	"repo.release.generate_notes": "Generate release notes",
+	"repo.release.generate_notes_direct_commits": "Include direct commits",
+	"repo.release.generate_notes_direct_commits_help": "Also list the commits that are not part of a merged pull request. Commits of pull requests merged with rebase or fast-forward are listed, except the last one.",
 	"repo.release.generate_notes_confirm": "Replace the current description with the generated release notes?",
 	"repo.release.generate_notes_not_found": "The tag, target or previous tag does not exist.",
 	"repo.release.generate_notes_invalid_config": "Invalid release notes configuration.",
