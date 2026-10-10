@@ -32,7 +32,16 @@ export async function test_context(browser: Browser, options?: BrowserContextOpt
   const context = await browser.newContext(options);
 
   context.on('page', (page) => {
-    page.on('pageerror', (err) => expect(err).toBeUndefined());
+    // A navigation or an aborted request makes webpack raise a ChunkLoadError (seen in Firefox) that is
+    // not a page error. Only a chunk the server answered with an HTTP error is one (a network failure is ignored).
+    const failedUrls = new Set<string>();
+    page.on('response', (res) => {
+      if (!res.ok()) failedUrls.add(res.url());
+    });
+    page.on('pageerror', (err) => {
+      const url = err.name === 'ChunkLoadError' ? /\(error: (\S+)\)/.exec(err.message)?.[1] : undefined;
+      if (!url || failedUrls.has(url)) expect(err).toBeUndefined();
+    });
   });
 
   return context;
