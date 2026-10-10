@@ -169,6 +169,9 @@ func TestViewIssuesKeyword(t *testing.T) {
 		RepoID: repo.ID,
 		Index:  1,
 	})
+	// the issue indexer queue is asynchronous: let removals queued by earlier tests (e.g. deleting repo1)
+	// finish before indexing the issue again
+	require.NoError(t, queue.GetManager().FlushAll(t.Context(), 10*time.Second))
 	issues.UpdateIssueIndexer(t.Context(), issue.ID)
 	require.NoError(t, queue.GetManager().FlushAll(t.Context(), 10*time.Second))
 

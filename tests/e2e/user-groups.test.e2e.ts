@@ -246,3 +246,44 @@ test('Switching off a role a group grants asks first', async ({browser, request}
   await expect(admin.locator('input[name="grants_site_admin"]')).toBeChecked();
   await expect(warning).toHaveCount(0);
 });
+
+test('Switching off the auditor grant asks first', async ({browser, request}) => {
+  const erin = await data.createUser();
+  const group = fakeName('group');
+  const created = await request.post('/api/v1/admin/groups', {headers: adminAuth(), data: {name: group, grants_auditor: true}});
+  expect(created.status()).toBe(201);
+  data.trackGroup(group);
+  expect((await request.put(`/api/v1/admin/groups/${group}/members/${erin.username}`, {headers: adminAuth()})).status()).toBe(204);
+
+  const admin = await (await loginAsAdmin(browser)).newPage();
+  await admin.goto('/admin/groups');
+  await admin.getByRole('link', {name: group}).click();
+  const auditor = admin.locator('input[name="grants_auditor"]');
+  await expect(auditor).toBeChecked();
+
+  // the delete modal names what deleting the group takes away
+  await admin.locator('button.delete-button').click();
+  const modal = admin.locator('#delete-user-group');
+  await expect(modal).toContainText('1 member will lose auditor access.');
+  await modal.getByRole('button', {name: 'No'}).click();
+  await expect(modal).toBeHidden();
+
+  await admin.getByText('Members are auditors (read all)', {exact: true}).click();
+  await expect(auditor).not.toBeChecked();
+  await admin.getByRole('button', {name: 'Update user group'}).click();
+
+  const warning = admin.locator('.user-group-role-loss');
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText('1 member will lose auditor access.');
+  await admin.getByRole('link', {name: 'Cancel'}).click();
+  await expect(auditor).toBeChecked();
+  await expect(warning).toHaveCount(0);
+
+  // confirming turns the grant off
+  await admin.getByText('Members are auditors (read all)', {exact: true}).click();
+  await admin.getByRole('button', {name: 'Update user group'}).click();
+  await expect(warning).toBeVisible();
+  await admin.getByRole('button', {name: 'Update anyway'}).click();
+  await expect(admin.locator('input[name="grants_auditor"]')).not.toBeChecked();
+  await expect(warning).toHaveCount(0);
+});

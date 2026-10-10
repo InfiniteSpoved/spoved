@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	issueIndexerLatestVersion = 4
+	issueIndexerLatestVersion = 5
 
 	// TODO: make this configurable if necessary
 	maxTotalHits = 10000
@@ -71,6 +71,7 @@ func NewIndexer(url, apiKey, indexerName string) *Indexer {
 			"mention_ids",
 			"reviewed_ids",
 			"review_requested_ids",
+			"attention_ids",
 			"subscriber_ids",
 			"updated_unix",
 		},
@@ -195,6 +196,9 @@ func (b *Indexer) Search(ctx context.Context, options *internal.SearchOptions) (
 	}
 	if has, value := options.ReviewRequestedID.Get(); has {
 		query.And(inner_meilisearch.NewFilterEq("review_requested_ids", value))
+	}
+	if has, value := options.AttentionID.Get(); has {
+		query.And(inner_meilisearch.NewFilterEq("attention_ids", value))
 	}
 
 	if has, value := options.SubscriberID.Get(); has {

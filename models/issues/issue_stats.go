@@ -23,6 +23,7 @@ type IssueStats struct {
 	MentionCount                     int64
 	ReviewRequestedCount             int64
 	ReviewedCount                    int64
+	AttentionCount                   int64
 }
 
 // Filter modes.
@@ -34,6 +35,7 @@ const (
 	FilterModeReviewRequested
 	FilterModeReviewed
 	FilterModeYourRepositories
+	FilterModeAttention
 )
 
 const (
@@ -111,6 +113,7 @@ func GetIssueStats(ctx context.Context, opts *IssuesOptions) (*IssueStats, error
 		accum.MentionCount += stats.MentionCount
 		accum.ReviewRequestedCount += stats.ReviewRequestedCount
 		accum.ReviewedCount += stats.ReviewedCount
+		accum.AttentionCount += stats.AttentionCount
 		i = chunk
 	}
 	return accum, nil
@@ -180,6 +183,10 @@ func applyIssuesOptions(sess *xorm.Session, opts *IssuesOptions, issueIDs []int6
 
 	if opts.ReviewedID > 0 {
 		applyReviewedCondition(sess, opts.ReviewedID)
+	}
+
+	if opts.AttentionUserID > 0 {
+		applyAttentionCondition(sess, opts.AttentionUserID)
 	}
 
 	if has, value := opts.IsPull.Get(); has {

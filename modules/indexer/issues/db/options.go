@@ -58,6 +58,7 @@ func ToDBOptions(ctx context.Context, options *internal.SearchOptions) (*issues_
 		PosterID:           convertID(options.PosterID),
 		MentionedID:        convertID(options.MentionID),
 		ReviewRequestedID:  convertID(options.ReviewRequestedID),
+		AttentionUserID:    convertID(options.AttentionID),
 		ReviewedID:         convertID(options.ReviewedID),
 		SubscriberID:       convertID(options.SubscriberID),
 		ProjectID:          convertID(options.ProjectID),

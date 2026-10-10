@@ -91,7 +91,7 @@ func searchIssueWithKeyword(t *testing.T) {
 
 	ctx := t.Context()
 	for _, test := range tests {
-		require.NoError(t, test.opts.WithKeyword(ctx, test.keyword))
+		require.NoError(t, test.opts.WithKeyword(ctx, nil, test.keyword))
 		issueIDs, _, err := SearchIssues(ctx, test.opts)
 		require.NoError(t, err)
 
@@ -163,7 +163,7 @@ func searchIssueByID(t *testing.T) {
 		},
 		{
 			// NOTE: This tests no assignees filtering and also ToSearchOptions() to ensure it will set AssigneeID to 0 when it is passed as -1.
-			opts:        *ToSearchOptions(t.Context(), "", &issues.IssuesOptions{AssigneeID: -1}),
+			opts:        *ToSearchOptions(t.Context(), nil, "", &issues.IssuesOptions{AssigneeID: -1}),
 			expectedIDs: []int64{24, 22, 21, 16, 15, 14, 13, 12, 11, 5, 19, 10, 7, 4, 8, 3, 2},
 		},
 		{
@@ -444,7 +444,7 @@ func TestBleveDeleteIssue(t *testing.T) {
 	opts := &internal.SearchOptions{
 		RepoIDs: []int64{issue.RepoID},
 	}
-	opts.WithKeyword(ctx, "first")
+	opts.WithKeyword(ctx, nil, "first")
 
 	assert.Eventually(t, func() bool {
 		ids, _, err := SearchIssues(ctx, opts)
