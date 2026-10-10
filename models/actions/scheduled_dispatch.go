@@ -97,25 +97,16 @@ func GetScheduledDispatch(ctx context.Context, repoID, id int64) (*ActionSchedul
 	return sd, nil
 }
 
-func scheduledDispatchUpdate(ctx context.Context, repoID, id int64, sd *ActionScheduledDispatch, cols ...string) error {
+// UpdateScheduledDispatchRunAt changes the time of a pending row
+func UpdateScheduledDispatchRunAt(ctx context.Context, repoID, id int64, runAt timeutil.TimeStamp) error {
 	affected, err := db.GetEngine(ctx).Where("id = ? AND repo_id = ? AND status = ?", id, repoID, ScheduledDispatchPending).
-		Cols(cols...).Update(sd)
+		Cols("run_at").Update(&ActionScheduledDispatch{RunAt: runAt})
 	if err != nil {
 		return err
 	} else if affected != 1 {
 		return ErrScheduledDispatchNotFound
 	}
 	return nil
-}
-
-// UpdateScheduledDispatchRunAt changes the time of a pending row
-func UpdateScheduledDispatchRunAt(ctx context.Context, repoID, id int64, runAt timeutil.TimeStamp) error {
-	return scheduledDispatchUpdate(ctx, repoID, id, &ActionScheduledDispatch{RunAt: runAt}, "run_at")
-}
-
-// CancelScheduledDispatch turns a pending row into a cancelled one, kept for the list
-func CancelScheduledDispatch(ctx context.Context, repoID, id int64, reason string) error {
-	return scheduledDispatchUpdate(ctx, repoID, id, &ActionScheduledDispatch{Status: ScheduledDispatchCancelled, CancelReason: cancelReason(reason)}, "status", "cancel_reason", "inputs")
 }
 
 // TakeDueScheduledDispatch claims the oldest pending row that is due and returns it, or nil. A row is only returned
@@ -155,11 +146,6 @@ func DeleteScheduledDispatch(ctx context.Context, repoID, id int64) error {
 // DeleteScheduledDispatchByID deletes a row by its ID, whatever its status; used after a successful start
 func DeleteScheduledDispatchByID(ctx context.Context, id int64) error {
 	_, err := db.GetEngine(ctx).ID(id).Delete(new(ActionScheduledDispatch))
-	return err
-}
-
-func DeleteScheduledDispatchesByRepo(ctx context.Context, repoID int64) error {
-	_, err := db.GetEngine(ctx).Where("repo_id = ?", repoID).Delete(new(ActionScheduledDispatch))
 	return err
 }
 

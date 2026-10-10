@@ -93,6 +93,10 @@ func TestActionsScheduledDispatch(t *testing.T) {
 			MakeRequest(t, NewRequest(t, http.MethodDelete, fmt.Sprintf("%s/scheduled-runs/%d", base, id)).AddTokenAuth(token), status)
 		}
 		in := map[string]string{"who": "me"}
+		deleteRows := func() {
+			_, err := db.GetEngine(t.Context()).Where("repo_id = ?", repo.ID).Delete(new(actions_model.ActionScheduledDispatch))
+			require.NoError(t, err)
+		}
 
 		t.Run("refused", func(t *testing.T) {
 			now := time.Now()
@@ -290,7 +294,7 @@ func TestActionsScheduledDispatch(t *testing.T) {
 				reasons[row.CancelReason]++
 			}
 			assert.Equal(t, map[string]int{"workflow_missing": 1, "trigger_missing": 1, "inputs_invalid": 1, "internal_error": 1, "interrupted": 1}, reasons)
-			require.NoError(t, actions_model.DeleteScheduledDispatchesByRepo(t.Context(), repo.ID))
+			deleteRows()
 
 			// disabled after it was scheduled
 			disabled := actions_model.ActionScheduledDispatch{RepoID: repo.ID, DoerID: owner.ID, Ref: ref, CommitID: commitID, RunAt: runAt, WorkflowID: "dispatch.yml", Inputs: `{"who":"me"}`}
@@ -311,7 +315,7 @@ func TestActionsScheduledDispatch(t *testing.T) {
 			rows := list(ownerToken, http.StatusOK)
 			require.Len(t, rows, 1)
 			assert.Equal(t, "workflow_disabled", rows[0].CancelReason)
-			require.NoError(t, actions_model.DeleteScheduledDispatchesByRepo(t.Context(), repo.ID))
+			deleteRows()
 		})
 
 		t.Run("pending cap", func(t *testing.T) {
@@ -321,7 +325,7 @@ func TestActionsScheduledDispatch(t *testing.T) {
 				}))
 			}
 			schedule(ownerToken, "dispatch.yml", time.Now().Add(time.Hour), in, http.StatusBadRequest)
-			require.NoError(t, actions_model.DeleteScheduledDispatchesByRepo(t.Context(), repo.ID))
+			deleteRows()
 		})
 
 		t.Run("deleting the repository removes the rows", func(t *testing.T) {

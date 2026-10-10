@@ -163,6 +163,7 @@ func TestChangeScheduledRunAt(t *testing.T) {
 
 	// other repository, and a row that is no longer pending
 	require.ErrorIs(t, ChangeScheduledRunAt(t.Context(), 2, sd.ID, now.Add(time.Hour)), actions_model.ErrScheduledDispatchNotFound)
-	require.NoError(t, actions_model.CancelScheduledDispatch(t.Context(), 1, sd.ID, "no_permission"))
+	_, err := db.GetEngine(t.Context()).ID(sd.ID).Cols("status").Update(&actions_model.ActionScheduledDispatch{Status: actions_model.ScheduledDispatchCancelled})
+	require.NoError(t, err)
 	require.ErrorIs(t, ChangeScheduledRunAt(t.Context(), 1, sd.ID, now.Add(time.Hour)), actions_model.ErrScheduledDispatchNotFound)
 }
