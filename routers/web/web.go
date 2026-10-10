@@ -1961,7 +1961,7 @@ func registerRoutes(m *web.Route) {
 		m.Get("/new", user.NewAvailable)
 	}, reqSignIn)
 
-	m.Post("/-/announcements/{id}/dismiss", reqSignIn, user.DismissAnnouncement)
+	m.Post("/-/announcements/{id}/dismiss", user.DismissAnnouncement)
 
 	if setting.API.EnableSwagger {
 		m.Get("/swagger.v1.json", SwaggerV1Json)
