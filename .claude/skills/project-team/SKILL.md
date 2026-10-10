@@ -12,6 +12,10 @@ argument-hint: "[supervisor|ops|ticket]"
 
 # Project team
 
+Not in use since 10 Oct (user decision): the agent-team skill runs all work, and
+only its supervisor merges into develop. Kept for reference; ask the user before
+using it again.
+
 Same roles, rules and gates as `.claude/skills/agent-team/SKILL.md` (read it for
 the "Rules for everyone" block, the coder, security and tester briefs, and
 Lessons). Only the plumbing changes: a project has one main session plus
@@ -55,15 +59,6 @@ the test suite itself in the background.
 ## Project facts
 
 Not yet verified. Fill in after the probe.
-
-## Rules from 10 Oct
-
-- Follow agent-team "Shared with the project team" (coordination issue, develop
-  lock, migration letters, own CI log key, no CI probe commits).
-- One `[T] #N` thread per ticket, really: on 10 Oct one Opus thread ran three
-  tickets with subagents and reached 294k context. Threads run Sonnet unless the
-  ticket is auth/permission/token coding; hand off at ~200k, hard stop at 300k.
-- Run the probe above before the next ticket and record the answers here.
 
 ## Supervisor (main session)
 

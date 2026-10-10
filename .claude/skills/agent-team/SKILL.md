@@ -40,22 +40,17 @@ Learnings are append-only: keep both sides; swagger: regenerate). Each ticket re
 its migration letter at design time. After any merge, the other lanes merge develop in
 and get a fresh full run before their own merge.
 
-## Shared with the project team
+## One team on develop
 
-Both teams merge into develop. On 10 Oct about half of all develop merges into open
-branches were caused by the other team, three trains had to be redone, both teams
-reserved v18zj, and one PR was renamed v18zh → zk → zl. So both teams follow these:
-- **Coordination issue.** One pinned issue, "Team coordination", is the only registry.
-  Reserve a migration letter by editing its body (letter, issue, team) before the
-  design is approved; free it if the ticket drops the migration.
-- **Develop lock.** Before the final full run of a PR or train that merges next, post
-  "LOCK develop: PR #<P> @<SHA> until <HH:MM> UTC" (at most 90 minutes) on that issue.
-  The other team merges nothing into develop while a lock is open. After the merge (or
-  a red run), post "UNLOCK". A lock past its time is void.
-- **CI logs.** Every team dispatches with its own log key and reads a failed job's log
-  within 15 minutes. Never push CI probe commits or edit `.github/ci/*` in a feature
-  PR, and never encode test or package names in public job results: reproduce
-  locally, or use an `inputs[only]` partial run.
+Since 10 Oct (user decision) only this team works on the repository; the project
+team was wound down. On 10 Oct, with two teams merging, about half of all develop
+merges into open branches were caused by the other team, three trains had to be
+redone, both teams reserved v18zj, and one PR was renamed v18zh → zk → zl. So:
+- Only the supervisor merges into develop. Any other source of develop merges
+  (another team, a manual merge) needs the user's OK first.
+- **CI logs.** Read a failed job's log within 15 minutes. Never push CI probe
+  commits or edit `.github/ci/*` in a feature PR, and never encode test or package
+  names in public job results: reproduce locally, or use an `inputs[only]` partial run.
 - **Bugs in develop itself** (a race, a broken helper) get their own small PR at
   once, never a fix inside a feature branch.
 
@@ -136,8 +131,8 @@ So:
      head contains the current develop (`git merge-base --is-ancestor origin/develop <head>`);
    - the security items are resolved.
    Merge directly when one PR is ready. Build a train only when 2+ PRs are green on
-   the same develop base. Merge within an hour of the gates holding, under the
-   develop lock (see "Shared with the project team"). Then the OL archives the coder
+   the same develop base. Merge within an hour of the gates holding. Then the OL
+   archives the coder
    and the security reviewer and goes to step 1.
 7. **Flaky tests.** A failure that passes when rerun alone and also passes on
    develop isn't the PR's: file a "no-agent" issue naming the test and the
