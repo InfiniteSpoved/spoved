@@ -38,7 +38,7 @@ func TestRenderNotes(t *testing.T) {
 * Update docs by @carol in #4
 
 **Full Changelog**: https://example.com/owner/repo/compare/v1.0...v1.1
-`, renderNotes(url, prs, nil, "v1.0", "v1.1", false))
+`, renderNotes(url, prs, nil, notesExtras{}, "v1.0", "v1.1", false))
 	})
 
 	t.Run("first release and truncated", func(t *testing.T) {
@@ -47,7 +47,7 @@ func TestRenderNotes(t *testing.T) {
 _Only the latest 1000 commits were scanned._
 
 **Full Changelog**: https://example.com/owner/repo/commits/tag/v1.0
-`, renderNotes(url, nil, nil, "", "v1.0", true))
+`, renderNotes(url, nil, nil, notesExtras{}, "", "v1.0", true))
 	})
 
 	t.Run("config", func(t *testing.T) {
@@ -70,7 +70,7 @@ changelog:
 * Fix crash by @bob in #2
 
 **Full Changelog**: https://example.com/owner/repo/compare/v1.0...v1.1
-`, renderNotes(url, prs, cfg, "v1.0", "v1.1", false))
+`, renderNotes(url, prs, cfg, notesExtras{}, "v1.0", "v1.1", false))
 	})
 
 	t.Run("wildcard and other", func(t *testing.T) {
@@ -90,7 +90,7 @@ changelog:
 * Update docs by @carol in #4
 
 **Full Changelog**: https://example.com/owner/repo/compare/v1.0...v1.1
-`, renderNotes(url, prs, cfg, "v1.0", "v1.1", false))
+`, renderNotes(url, prs, cfg, notesExtras{}, "v1.0", "v1.1", false))
 
 		require.NoError(t, yaml.Unmarshal([]byte(`
 changelog:
@@ -98,7 +98,69 @@ changelog:
     - title: Everything
       labels: ["*"]
 `), cfg))
-		assert.Contains(t, renderNotes(url, prs, cfg, "v1.0", "v1.1", false), "### Everything\n* Add SSO login")
+		assert.Contains(t, renderNotes(url, prs, cfg, notesExtras{}, "v1.0", "v1.1", false), "### Everything\n* Add SSO login")
+	})
+}
+
+func TestRenderNotesExtras(t *testing.T) {
+	pr := func(index int64, title, poster string, labels ...string) *issues_model.PullRequest {
+		issue := &issues_model.Issue{Index: index, Title: title, Poster: &user_model.User{Name: poster}}
+		for _, l := range labels {
+			issue.Labels = append(issue.Labels, &issues_model.Label{Name: l})
+		}
+		return &issues_model.PullRequest{Issue: issue}
+	}
+	const url = "https://example.com/owner/repo"
+	prs := issues_model.PullRequestList{
+		pr(1, "Add SSO login", "alice", "feature"),
+		pr(2, "Bump deps", "renovate-bot", "feature"),
+		pr(3, "Fix crash", "bob", "bug"),
+	}
+
+	t.Run("new contributors and direct commits", func(t *testing.T) {
+		extras := notesExtras{
+			contributors: []newContributor{{name: "alice", index: 1}},
+			commits:      []directCommit{{title: "Tweak [x]", author: "Dave", sha: "0123456789abcdef"}},
+		}
+		assert.Equal(t, `## What's Changed
+* Add SSO login by @alice in #1
+### Direct commits
+* Tweak \[x\] by Dave ([0123456789](https://example.com/owner/repo/commit/0123456789abcdef))
+
+## New Contributors
+* @alice made their first contribution in #1
+
+**Full Changelog**: https://example.com/owner/repo/compare/v1.0...v1.1
+`, renderNotes(url, prs[:1], nil, extras, "v1.0", "v1.1", false))
+	})
+
+	t.Run("category exclude", func(t *testing.T) {
+		cfg := &notesConfig{}
+		require.NoError(t, yaml.Unmarshal([]byte(`
+changelog:
+  exclude:
+    labels: [bug]
+  categories:
+    - title: New features
+      labels: [feature]
+      exclude:
+        authors: [Renovate-Bot]
+    - title: Everything else
+      labels: ["*"]
+      exclude:
+        labels: [skip]
+`), cfg))
+		prs := append(prs, pr(4, "Skipped", "carol", "skip"))
+		assert.Equal(t, `## What's Changed
+### New features
+* Add SSO login by @alice in #1
+### Everything else
+* Bump deps by @renovate-bot in #2
+### Other Changes
+* Skipped by @carol in #4
+
+**Full Changelog**: https://example.com/owner/repo/compare/v1.0...v1.1
+`, renderNotes(url, prs, cfg, notesExtras{}, "v1.0", "v1.1", false))
 	})
 }
 

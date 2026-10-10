@@ -27,6 +27,7 @@ const (
 	APIWrite = "api_write"
 	Git      = "git"
 	Web      = "web"
+	Heavy    = "heavy"
 	Auth     = "auth"
 	// SSH limits git commands over SSH, per key (authenticated half) and per client IP (anonymous half).
 	SSH = "ssh"

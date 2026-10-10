@@ -23,6 +23,12 @@ func TestLoadRateLimit(t *testing.T) {
 	assert.Equal(t, RateLimitClass{0.0167, 10, 0, 0}, RateLimit.Classes["auth"])
 	assert.Equal(t, RateLimitClass{10, 100, 20, 200}, RateLimit.Classes["ssh"])
 	assert.Equal(t, RateLimitClass{5, 100, 0, 0}, RateLimit.Classes["ssh_connect"])
+	assert.Equal(t, RateLimitClass{1, 20, 0.2, 30}, RateLimit.Classes["heavy"])
+	web, heavy := RateLimit.Classes["web"], RateLimit.Classes["heavy"]
+	assert.Less(t, heavy.AuthenticatedRate, web.AuthenticatedRate)
+	assert.Less(t, heavy.AuthenticatedBurst, web.AuthenticatedBurst)
+	assert.Less(t, heavy.AnonymousRate, web.AnonymousRate)
+	assert.Less(t, heavy.AnonymousBurst, web.AnonymousBurst)
 
 	cfg, err = NewConfigProviderFromData(`
 [rate_limit]
@@ -42,6 +48,9 @@ ANONYMOUS_RATE = 0
 [rate_limit.ssh_connect]
 RATE = 1
 BURST = 7
+[rate_limit.heavy]
+AUTHENTICATED_RATE = 0
+ANONYMOUS_BURST = 3
 `)
 	require.NoError(t, err)
 	loadRateLimitFrom(cfg)
@@ -55,4 +64,5 @@ BURST = 7
 	assert.Equal(t, RateLimitClass{2, 4, 0, 0}, RateLimit.Classes["auth"])
 	assert.Equal(t, RateLimitClass{10, 100, 0, 200}, RateLimit.Classes["ssh"])
 	assert.Equal(t, RateLimitClass{1, 7, 0, 0}, RateLimit.Classes["ssh_connect"])
+	assert.Equal(t, RateLimitClass{0, 20, 0.2, 3}, RateLimit.Classes["heavy"])
 }

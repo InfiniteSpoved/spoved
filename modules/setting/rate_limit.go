@@ -34,6 +34,7 @@ func loadRateLimitFrom(rootCfg ConfigProvider) {
 		"api_write": {10, 100, 0, 0},
 		"git":       {10, 100, 2, 20},
 		"web":       {20, 200, 5, 50},
+		"heavy":     {1, 20, 0.2, 30},
 		"auth":      {0.0167, 10, 0, 0},
 		// ssh: per key and per client IP for each git command; ssh_connect: per client IP for each connection of the built-in server
 		"ssh":         {10, 100, 20, 200},

@@ -836,7 +836,7 @@ func Routes() *web.Route {
 			m.Post("/migrate", reqToken(), bind(api.MigrateRepoOptions{}), repo.Migrate)
 
 			m.Group("/{username}/{reponame}", func() {
-				m.Get("/compare/*", reqRepoReader(unit.TypeCode), context.ReferencesGitRepo(true), repo.CompareDiff)
+				m.Get("/compare/*", reqRepoReader(unit.TypeCode), common.RateLimitAPIHeavy, context.ReferencesGitRepo(true), repo.CompareDiff)
 
 				m.Combo("").Get(reqAnyRepoReader(), repo.Get).
 					Patch(reqToken(), reqAdmin(), bind(api.EditRepoOption{}), repo.Edit)
@@ -1036,7 +1036,7 @@ func Routes() *web.Route {
 				}, reqAdmin(), reqToken())
 
 				m.Get("/editorconfig/{filename}", context.ReferencesGitRepo(), context.RepoRefForAPI, reqRepoReader(unit.TypeCode), repo.GetEditorconfig)
-				m.Get("/search/code", reqRepoReader(unit.TypeCode), repo.SearchCode)
+				m.Get("/search/code", reqRepoReader(unit.TypeCode), common.RateLimitAPIHeavy, repo.SearchCode)
 				m.Group("/pulls", func() {
 					m.Combo("").Get(repo.ListPullRequests).
 						Post(reqToken(), mustNotBeArchived(), bind(api.CreatePullRequestOption{}), repo.CreatePullRequest)
@@ -1044,10 +1044,10 @@ func Routes() *web.Route {
 					m.Group("/{index}", func() {
 						m.Combo("").Get(repo.GetPullRequest).
 							Patch(reqToken(), bind(api.EditPullRequestOption{}), repo.EditPullRequest)
-						m.Get(".{diffType:diff|patch}", repo.DownloadPullDiffOrPatch)
+						m.Get(".{diffType:diff|patch}", common.RateLimitAPIHeavy, repo.DownloadPullDiffOrPatch)
 						m.Post("/update", reqToken(), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.UpdatePullRequest)
 						m.Get("/commits", repo.GetPullRequestCommits)
-						m.Get("/files", repo.GetPullRequestFiles)
+						m.Get("/files", common.RateLimitAPIHeavy, repo.GetPullRequestFiles)
 						m.Get("/approvals", reqRepoReader(unit.TypePullRequests), repo.GetPullRequestApprovals)
 						m.Combo("/merge").Get(repo.IsPullRequestMerged).
 							Post(reqToken(), mustNotBeArchived(), bind(forms.MergePullRequestForm{}), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.MergePullRequest).
@@ -1105,7 +1105,7 @@ func Routes() *web.Route {
 				m.Group("/git", func() {
 					m.Group("/commits", func() {
 						m.Get("/{sha}", repo.GetSingleCommit)
-						m.Get("/{sha}.{diffType:diff|patch}", repo.DownloadCommitDiffOrPatch)
+						m.Get("/{sha}.{diffType:diff|patch}", common.RateLimitAPIHeavy, repo.DownloadCommitDiffOrPatch)
 					})
 					m.Get("/refs", repo.GetGitAllRefs)
 					m.Get("/refs/*", repo.GetGitRefs)
