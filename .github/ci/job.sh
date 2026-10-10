@@ -40,7 +40,7 @@ plan)
   # depth: commits to fetch, 0 for the full history
   tasks='{"task":"lint","args":"","depth":"1"},{"task":"frontend","args":"","depth":"1"}'
   if [ "$backend" = true ]; then
-    for i in $(seq 1 8); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 8\",\"depth\":\"1\"}"; done
+    for i in $(seq 1 16); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 16\",\"depth\":\"1\"}"; done
   fi
   if [ "$FULL" = true ]; then
     # only the selection of changed end-to-end tests needs the history
@@ -82,12 +82,14 @@ unit)
   # the packages `make test-backend` tests, as computed by the Makefile
   packages=$(make -s --eval='ci-list-test-packages: compute-go-test-packages ; @echo $(GO_TEST_PACKAGES)' ci-list-test-packages \
     | tr ' ' '\n' | .github/ci/shard.sh 2 4 | paste -sd' ')
-  # temporary probe: job N leaves out package N of group 10 of 12
-  packages=$(tr ' ' '\n' <<< "$packages" | grep -vxF "$(tr ' ' '\n' <<< "$packages" | .github/ci/shard.sh 10 12 | .github/ci/shard.sh "$1" 8)" | paste -sd' ')
-  echo "Testing $(wc -w <<< "$packages") packages"
-  RACE_ENABLED=true TEST_AZURITE_URL=127.0.0.1:10000 make test-backend GO_TEST_PACKAGES="$packages"
-  # check the tests left the source tree untouched
-  make test-check
+  # temporary probe: job N reports whether pattern N appears in one package's output
+  set +e
+  RACE_ENABLED=true TEST_AZURITE_URL=127.0.0.1:10000 make test-backend GO_TEST_PACKAGES="$packages" > "$RUNNER_TEMP/out.txt" 2>&1
+  cat "$RUNNER_TEMP/out.txt"
+  set -e
+  awk '/^(ok|FAIL|\?) *\t/ { if (index($0, "forgejo.org/services/usergroup")) { printf "%s", buf; print; exit } buf=""; next } { buf = buf $0 "\n" }' "$RUNNER_TEMP/out.txt" > "$RUNNER_TEMP/block.txt"
+  pats=('^FAIL' 'atal' 'imeout|deadline' 'database is locked|busy' 'no such (table|column)' 'panic' 'signal|exit status' '\[F\]' 'Error Trace' 'race' 'too many open files' 'address already in use|bind' '^--- FAIL' 'Error:' 'TestMain|setup failed' '.')
+  ! grep -qE "${pats[$1 - 1]}" "$RUNNER_TEMP/block.txt"
   ;;
 
 migrations)
