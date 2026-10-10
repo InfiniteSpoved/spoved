@@ -23,6 +23,8 @@ import (
 	repo_module "forgejo.org/modules/repository"
 	app_context "forgejo.org/services/context"
 	issue_service "forgejo.org/services/issue"
+	pull_service "forgejo.org/services/pull"
+	repo_service "forgejo.org/services/repository"
 	files_service "forgejo.org/services/repository/files"
 	user_service "forgejo.org/services/user"
 	"forgejo.org/tests/forgery"
@@ -178,6 +180,39 @@ func TestPullAttentionTransitions(t *testing.T) {
 			assertAttention(t, mIssue.ID)
 		})
 
+		t.Run("a dismissed reviewer isn't added back by an author reply or push", func(t *testing.T) {
+			d := prepareConversationCheckPR(t, map[*user_model.User]perm.AccessMode{reviewer: perm.AccessModeRead})
+			dIssue := d.issue(t)
+			d.review(t, loginUser(t, reviewer.Name), "reject")
+			assertAttention(t, dIssue.ID, d.repo.Owner)
+			review, err := issues_model.GetReviewByIssueIDAndUserID(ctx, dIssue.ID, reviewer.ID)
+			require.NoError(t, err)
+			_, err = pull_service.DismissReview(ctx, review.ID, d.repo.ID, "outdated", d.repo.Owner, true, true)
+			require.NoError(t, err)
+
+			d.topLevelComment(t, loginUser(t, d.repo.OwnerName), "reply")
+			assertAttention(t, dIssue.ID)
+
+			require.NoError(t, issues_model.AddPullAttention(ctx, dIssue.ID, []int64{d.repo.OwnerID}, d.repo.OwnerID, issues_model.AttentionManual, ""))
+			_, err = files_service.ChangeRepoFiles(git.DefaultContext, d.repo, d.repo.Owner, &files_service.ChangeRepoFilesOptions{
+				Files:     []*files_service.ChangeRepoFile{{Operation: "create", TreePath: "author.txt", ContentReader: strings.NewReader("a")}},
+				Message:   "by author",
+				OldBranch: "feature",
+				NewBranch: "feature",
+			})
+			require.NoError(t, err)
+			// the push takes the author out of the set and adds nobody
+			assert.Eventually(t, func() bool { return len(attentionOf(t, dIssue.ID)) == 0 }, 10*time.Second, 100*time.Millisecond)
+			assert.Never(t, func() bool { return len(attentionOf(t, dIssue.ID)) != 0 }, time.Second, 100*time.Millisecond)
+		})
+
+		t.Run("deleting a repository removes its rows", func(t *testing.T) {
+			d := prepareConversationCheckPR(t, nil)
+			require.NoError(t, issues_model.AddPullAttention(ctx, d.pr.IssueID, []int64{reviewer.ID}, d.repo.OwnerID, issues_model.AttentionManual, ""))
+			require.NoError(t, repo_service.DeleteRepositoryDirectly(ctx, d.repo.ID, repo_service.DeleteRepositoryOpts{}))
+			unittest.AssertNotExistsBean(t, &issues_model.PullAttention{IssueID: d.pr.IssueID})
+		})
+
 		t.Run("deleting a user removes their rows", func(t *testing.T) {
 			d := prepareConversationCheckPR(t, nil)
 			gone := forgery.CreateUser(t, nil)
@@ -260,12 +295,42 @@ func TestPullAttentionManual(t *testing.T) {
 			assert.Contains(t, p.changeAttention(t, loginUser(t, privateRepo.OwnerName), "add", private.Name, ""), "error")
 			unittest.AssertNotExistsBean(t, &issues_model.PullAttention{IssueID: p.pr.IssueID})
 
+			inactive := forgery.CreateUser(t, nil)
+			inactive.IsActive = false
+			require.NoError(t, user_model.UpdateUserCols(ctx, inactive, "is_active"))
+			prohibited := forgery.CreateUser(t, nil)
+			prohibited.ProhibitLogin = true
+			require.NoError(t, user_model.UpdateUserCols(ctx, prohibited, "prohibit_login"))
+			// both can read the public repository
+			for _, target := range []*user_model.User{inactive, prohibited} {
+				assert.Contains(t, c.changeAttention(t, authorSession, "add", target.Name, ""), "error")
+			}
+
 			org := forgery.CreateOrganisation(t, author)
 			assert.Contains(t, c.changeAttention(t, authorSession, "add", org.Name, ""), "error")
 
 			require.NoError(t, user_service.BlockUser(ctx, blocker.ID, author.ID))
 			assert.Contains(t, c.changeAttention(t, authorSession, "add", blocker.Name, ""), "error")
 			assert.Contains(t, c.changeAttention(t, authorSession, "add", "no-such-user", ""), "error")
+			assertAttention(t, issue.ID, author)
+		})
+
+		t.Run("a locked pull request refuses a reader but not a pulls writer", func(t *testing.T) {
+			// involved, a reader in the set, may add the reviewer while unlocked
+			c.changeAttention(t, authorSession, "add", involved.Name, "")
+			_, err := db.GetEngine(ctx).ID(issue.ID).Cols("is_locked").Update(&issues_model.Issue{IsLocked: true})
+			require.NoError(t, err)
+			assert.Contains(t, c.changeAttention(t, loginUser(t, involved.Name), "add", reviewer.Name, ""), "error")
+			assertAttention(t, issue.ID, author, involved)
+			assert.NotContains(t, c.changeAttention(t, authorSession, "add", other.Name, ""), "error")
+			assertAttention(t, issue.ID, author, involved, other)
+			_, err = db.GetEngine(ctx).ID(issue.ID).Cols("is_locked").Update(&issues_model.Issue{IsLocked: false})
+			require.NoError(t, err)
+			assert.NotContains(t, c.changeAttention(t, loginUser(t, involved.Name), "add", reviewer.Name, ""), "error")
+			assertAttention(t, issue.ID, author, involved, other, reviewer)
+			for _, u := range []*user_model.User{involved, other, reviewer} {
+				c.changeAttention(t, authorSession, "remove", u.Name, "")
+			}
 			assertAttention(t, issue.ID, author)
 		})
 
