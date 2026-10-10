@@ -20,6 +20,7 @@ import (
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
+	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/log"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
@@ -189,6 +190,12 @@ func TestPRTitleRuleRefuse(t *testing.T) {
 		assert.Equal(t, prTitleRuleMessage, e["errorMessage"])
 		assert.Equal(t, "master", unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID}).BaseBranch)
 
+		// a refused retarget changes nothing else: the title stays as it was
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", fmt.Sprintf("/api/v1/repos/user2/repo1/pulls/%d", pr.Index), map[string]string{"title": "changed", "base": "release/1.0"}).AddTokenAuth(token), http.StatusUnprocessableEntity)
+		stored := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID})
+		require.NoError(t, stored.LoadIssue(t.Context()))
+		assert.Equal(t, "no key", stored.Issue.Title)
+
 		// a matching title can
 		MakeRequest(t, NewRequestWithJSON(t, "PATCH", fmt.Sprintf("/api/v1/repos/user2/repo1/pulls/%d", pr.Index), map[string]string{"title": "x"}).AddTokenAuth(token), http.StatusCreated)
 		MakeRequest(t, NewRequestWithJSON(t, "PATCH", fmt.Sprintf("/api/v1/repos/user2/repo1/pulls/%d", pr.Index), map[string]string{"title": "ABC-1 x", "base": "release/1.0"}).AddTokenAuth(token), http.StatusCreated)
@@ -338,16 +345,23 @@ func TestPRTitleRuleRevert(t *testing.T) {
 		setPRTitleRule(t, repo.ID, git_model.PushRule{PRTitleRegex: `^ABC-\d+ `, PRTitleMessage: prTitleRuleMessage})
 		before := countPulls(t)
 
-		// API: 422 with the plain message, no pull request row (the revert branch stays, as for any failed creation)
+		// API: 422 with the plain message, no pull request row and no revert branch left behind
 		resp := ctx.Session.MakeRequest(t, NewRequest(t, "POST", revertTestURL("revert-title-rule", 1)).AddTokenAuth(ctx.Token), http.StatusUnprocessableEntity)
 		var apiErr api.APIError
 		DecodeJSON(t, resp, &apiErr)
 		assert.Equal(t, prTitleRuleMessage, apiErr.Message)
 		assert.Equal(t, before, countPulls(t))
+		gitRepo, err := gitrepo.OpenRepository(t.Context(), repo)
+		require.NoError(t, err)
+		defer gitRepo.Close()
+		assert.False(t, gitRepo.IsBranchExist("revert-1-feature"))
+		// so a retry after fixing the rule works
+		setPRTitleRule(t, repo.ID, git_model.PushRule{})
+		ctx.Session.MakeRequest(t, NewRequest(t, "POST", revertTestURL("revert-title-rule", 1)).AddTokenAuth(ctx.Token), http.StatusCreated)
 
-		// web (another repository: the API call left its revert branch behind): a flash on the original pull request, shown escaped
-		webRepo, _ := revertTestRepo(t, ctx, "revert-title-rule-web", repo_model.MergeStyleSquash)
-		setPRTitleRule(t, webRepo.ID, git_model.PushRule{PRTitleRegex: `^ABC-\d+ `, PRTitleMessage: prTitleRuleMessage})
+		// web (another repository): a flash on the original pull request, shown escaped, _ := revertTestRepo(t, ctx, "revert-title-rule-web", repo_model.MergeStyleSquash)
+		const linkMessage = `<a href="https://evil.example/login">sign in again</a>`
+		setPRTitleRule(t, webRepo.ID, git_model.PushRule{PRTitleRegex: `^ABC-\d+ `, PRTitleMessage: linkMessage})
 		before = countPulls(t)
 		resp = ctx.Session.MakeRequest(t, NewRequest(t, "POST", "/user2/revert-title-rule-web/pulls/1/revert"), http.StatusSeeOther)
 		assert.Equal(t, "/user2/revert-title-rule-web/pulls/1", test.RedirectURL(resp))

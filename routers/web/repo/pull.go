@@ -843,7 +843,7 @@ func PrepareViewPullInfo(ctx *context.Context, issue *issues_model.Issue) *git.C
 		ctx.Data["WorkInProgressPrefix"] = pull.GetWorkInProgressPrefix(ctx)
 	}
 
-	if !pull.HasMerged && !pull.Issue.IsClosed && !pull.IsWorkInProgress(ctx) {
+	if ctx.IsSigned && !pull.HasMerged && !pull.Issue.IsClosed && !pull.IsWorkInProgress(ctx) {
 		if err := issue_service.CheckPRTitleRule(ctx, pull.BaseRepo, pull.BaseBranch, pull.Issue.Title, true); err != nil {
 			message, ok := issue_service.PRTitleRuleMessage(ctx.Locale, err)
 			if !ok {

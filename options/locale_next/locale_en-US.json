@@ -1571,7 +1571,7 @@
 	"repo.settings.push_rules.pr_title": "Pull request titles",
 	"repo.settings.push_rules.pr_title_desc": "Rules for pull request titles, checked when a pull request is created and when its title is edited. Open pull requests are not checked retroactively. A squash merge uses the pull request title as the commit subject, so keep these rules consistent with the commit message rule above.",
 	"repo.settings.push_rules.pr_title_regex": "Title must match",
-	"repo.settings.push_rules.pr_title_regex_desc": "A regular expression, e.g. <code>^[A-Z][A-Z0-9]+-\\d+ </code> or <code>^(feat|fix|docs|chore|refactor|test|ci)(\\(.+\\))?!?: .+</code>. Draft titles (with a work in progress prefix) skip this rule, so a pull request can always be converted to a draft.",
+	"repo.settings.push_rules.pr_title_regex_desc": "A regular expression, e.g. <code>^[A-Z][A-Z0-9]+-\\d+ </code> or <code>^(feat|fix|docs|chore|refactor|test|ci)(\\(.+\\))?!?: .+</code>. Draft titles (with a work in progress prefix) skip this rule, so a pull request can always be converted to a draft. Titles made by spoved, such as <code>Revert \"...\"</code> for reverts, must match too.",
 	"repo.settings.push_rules.pr_title_banned_regex": "Title must not match",
 	"repo.settings.push_rules.pr_title_banned_regex_desc": "A regular expression, e.g. <code>^WIP</code>. This also applies to drafts: banning the draft prefix stops marking a pull request as a draft through its title.",
 	"repo.settings.push_rules.pr_title_message": "Message shown when the title is refused",

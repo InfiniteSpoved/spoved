@@ -73,7 +73,7 @@ func CheckPRTitleRule(ctx context.Context, repo *repo_model.Repository, baseBran
 	if rule == nil || rule.PRTitleBlockMerge != atMerge {
 		return nil
 	}
-	if err := rule.Compile(); err != nil {
+	if err := rule.CompilePRTitle(); err != nil {
 		log.Error("Invalid pull request title rule of %-v: %v", repo, err)
 		return &git_model.ErrPRTitleRule{Invalid: true}
 	}

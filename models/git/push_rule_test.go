@@ -104,3 +104,11 @@ func TestPushRulePRTitleWorstCasePattern(t *testing.T) {
 		assert.Less(t, time.Since(start), time.Second, pattern)
 	}
 }
+
+func TestPushRuleCompilePRTitleOnly(t *testing.T) {
+	// the merge box compiles only the title fields, a broken commit message regex is not its business
+	rule := git_model.PushRule{CommitMessageRegex: "(", PRTitleRegex: "^a"}
+	require.NoError(t, rule.CompilePRTitle())
+	require.Error(t, rule.Compile())
+	assert.Nil(t, rule.CommitMessageRe)
+}

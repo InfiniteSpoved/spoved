@@ -122,6 +122,11 @@ func (r *PushRule) Compile() (err error) {
 		}
 		r.BannedFileGlobs = append(r.BannedFileGlobs, g)
 	}
+	return r.CompilePRTitle()
+}
+
+// CompilePRTitle validates and compiles only the pull request title fields.
+func (r *PushRule) CompilePRTitle() (err error) {
 	if err = compilePushRuleRegex(&r.PRTitleRe, r.PRTitleRegex); err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@
 package repo
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"math"
@@ -676,6 +677,18 @@ func EditPullRequest(ctx *context.APIContext) {
 	if !issue.IsPoster(ctx.Doer().ID) && !ctx.Repo().CanWrite(unit.TypePullRequests) {
 		ctx.Status(http.StatusForbidden)
 		return
+	}
+
+	// check the new title against the new base branch before anything is written, so a refusal changes nothing
+	if !pr.HasMerged && len(form.Base) != 0 && form.Base != pr.BaseBranch {
+		err = issue_service.CheckPRTitleRule(ctx, ctx.Repo().Repository, form.Base, cmp.Or(form.Title, issue.Title), false)
+		if message, ok := issue_service.PRTitleRuleMessage(ctx.Locale, err); ok {
+			ctx.Error(http.StatusUnprocessableEntity, "PRTitleRule", message)
+			return
+		} else if err != nil {
+			ctx.Error(http.StatusInternalServerError, "CheckPRTitleRule", err)
+			return
+		}
 	}
 
 	if len(form.Title) > 0 {
