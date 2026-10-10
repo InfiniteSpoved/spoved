@@ -359,15 +359,16 @@ func TestPRTitleRuleRevert(t *testing.T) {
 		setPRTitleRule(t, repo.ID, git_model.PushRule{})
 		ctx.Session.MakeRequest(t, NewRequest(t, "POST", revertTestURL("revert-title-rule", 1)).AddTokenAuth(ctx.Token), http.StatusCreated)
 
-		// web (another repository): a flash on the original pull request, shown escaped, _ := revertTestRepo(t, ctx, "revert-title-rule-web", repo_model.MergeStyleSquash)
+		// web (another repository): a flash on the original pull request, shown escaped
+		webRepo, _ := revertTestRepo(t, ctx, "revert-title-rule-web", repo_model.MergeStyleSquash)
 		const linkMessage = `<a href="https://evil.example/login">sign in again</a>`
 		setPRTitleRule(t, webRepo.ID, git_model.PushRule{PRTitleRegex: `^ABC-\d+ `, PRTitleMessage: linkMessage})
 		before = countPulls(t)
 		resp = ctx.Session.MakeRequest(t, NewRequest(t, "POST", "/user2/revert-title-rule-web/pulls/1/revert"), http.StatusSeeOther)
 		assert.Equal(t, "/user2/revert-title-rule-web/pulls/1", test.RedirectURL(resp))
 		flash := NewHTMLParser(t, ctx.Session.MakeRequest(t, NewRequest(t, "GET", "/user2/revert-title-rule-web/pulls/1"), http.StatusOK).Body).Find(".flash-error")
-		assert.Contains(t, flash.Text(), prTitleRuleMessage) // shown as text...
-		assert.Zero(t, flash.Find("b").Length())             // ...not as markup
+		assert.Contains(t, flash.Text(), linkMessage) // shown as text...
+		assert.Zero(t, flash.Find("a").Length())      // ...not as a link or other markup
 		assert.Equal(t, before, countPulls(t))
 	})
 }

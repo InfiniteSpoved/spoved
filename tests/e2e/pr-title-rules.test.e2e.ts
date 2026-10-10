@@ -64,3 +64,45 @@ test('PR title rules: settings and failed merge check', async ({page, request}) 
     await save();
   }
 });
+
+test('PR title rules: a refused title edit shows the message and keeps the title', async ({page, request}) => {
+  const branch = `title-edit-${Date.now()}`;
+  const api = '/api/v1/repos/user2/repo1';
+  expect((await request.post(`${api}/contents/${branch}.txt`, {headers: adminAuth(), data: {content: btoa(branch), new_branch: branch}})).ok()).toBeTruthy();
+  const created = await request.post(`${api}/pulls`, {headers: adminAuth(), data: {head: branch, base: 'master', title: 'ZZZ-1 first title'}});
+  expect(created.ok()).toBeTruthy();
+  const {number} = await created.json();
+
+  const settings = '/user2/repo1/settings/push_rules';
+  const saveSettings = async () => {
+    await page.getByRole('button', {name: 'Save settings'}).click();
+    await expect(page.locator('.flash-success')).toBeVisible();
+  };
+
+  try {
+    await page.goto(settings);
+    await page.getByLabel('Title must match').fill('^ZZZ-\\d+ ');
+    await page.getByLabel('Message shown when the title is refused').fill('Start the title with ZZZ-1');
+    await saveSettings();
+
+    await page.goto(`/user2/repo1/pulls/${number}`);
+    await page.locator('#issue-title-edit-show').click();
+    await page.locator('#issue-title-editor input').fill('no ticket key');
+    await page.locator('#issue-title-editor .primary.button').click();
+    // the refusal is shown as a toast, not as a bare status text
+    await expect(page.locator('.toastify')).toContainText('Start the title with ZZZ-1');
+    await expect(page.locator('#issue-title-editor')).toBeVisible();
+
+    // a matching title is saved
+    await page.locator('#issue-title-editor input').fill('ZZZ-2 second title');
+    await page.locator('#issue-title-editor .primary.button').click();
+    await expect(page.locator('#issue-title-display')).toContainText('ZZZ-2 second title');
+  } finally {
+    await request.patch(`${api}/pulls/${number}`, {headers: adminAuth(), data: {state: 'closed'}});
+    await request.delete(`${api}/branches/${branch}`, {headers: adminAuth()});
+    await page.goto(settings);
+    await page.getByLabel('Title must match').fill('');
+    await page.getByLabel('Message shown when the title is refused').fill('');
+    await saveSettings();
+  }
+});
