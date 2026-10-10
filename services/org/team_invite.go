@@ -37,6 +37,14 @@ func CreateTeamInviteByUser(ctx context.Context, inviter, invited *user_model.Us
 // InviteOrAddTeamMember invites the user to the team if all team changes should go through invites, or adds them directly otherwise.
 func InviteOrAddTeamMember(ctx context.Context, inviter, invited *user_model.User, team *org_model.Team) error {
 	if setting.Service.AddMembersByInvitations && inviter.ID != invited.ID {
+		// refuse before the invitation mail goes out; accepting it checks again
+		if isMember, err := org_model.IsOrganizationMember(ctx, team.OrgID, invited.ID); err != nil {
+			return err
+		} else if !isMember {
+			if err := org_model.CheckVerifiedDomainGate(ctx, team.OrgID, invited.ID); err != nil {
+				return err
+			}
+		}
 		return CreateTeamInviteByUser(ctx, inviter, invited, team)
 	}
 	return models.AddTeamMemberByCooptation(ctx, team, invited.ID, inviter.ID)

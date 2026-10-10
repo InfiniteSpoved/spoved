@@ -475,6 +475,8 @@ func DeleteOrganization(ctx context.Context, org *Organization) error {
 		&UserGroupTeam{OrgID: org.ID},
 		&OrgAdminExclusion{OrgID: org.ID},
 		&repo_model.OrgUnit{OrgID: org.ID},
+		&OrgVerifiedDomain{OrgID: org.ID},
+		&user_model.Setting{UserID: org.ID, SettingKey: SettingKeyRequireVerifiedDomain},
 		&secret_model.Secret{OwnerID: org.ID},
 		&actions_model.ActionRunner{OwnerID: org.ID},
 		&actions_model.ActionRunnerToken{OwnerID: optional.Some(org.ID)},
@@ -606,6 +608,16 @@ func AddOrgUser(ctx context.Context, orgID, uid int64) error {
 	// check in transaction
 	isAlreadyMember, err = IsOrganizationMember(ctx, orgID, uid)
 	if err != nil || isAlreadyMember {
+		return err
+	}
+
+	if err := CheckVerifiedDomainGate(ctx, orgID, uid); err != nil {
+		if IsErrUserNoVerifiedDomainEmail(err) {
+			// nothing was written: commit, so that a shared outer transaction (user group sync skips this user) survives
+			if cerr := committer.Commit(); cerr != nil {
+				return cerr
+			}
+		}
 		return err
 	}
 

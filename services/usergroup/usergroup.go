@@ -405,6 +405,10 @@ func syncTeamMembership(ctx context.Context, team *org_model.Team, userID int64,
 			return err
 		}
 		_, err := models.InsertTeamMember(ctx, team, userID, org_model.MembershipReasonAddedByUserGroup, optional.None[int64](), optional.None[int64]())
+		if org_model.IsErrUserNoVerifiedDomainEmail(err) {
+			log.Warn("user group sync: skipping user %d for organization %d: %v", userID, team.OrgID, err)
+			return nil
+		}
 		return err
 	}
 

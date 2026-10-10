@@ -332,7 +332,9 @@ func syncGroupsToTeamsCached(ctx context.Context, user *user_model.User, loginSo
 
 			// Adds wait while the organization is archived; removals always apply so offboarding still cuts access.
 			if action == syncAdd && !isMember && !org.IsArchived {
-				if err := models.AddTeamMemberByLoginSource(ctx, team, user.ID, loginSourceID); err != nil {
+				if err := models.AddTeamMemberByLoginSource(ctx, team, user.ID, loginSourceID); organization.IsErrUserNoVerifiedDomainEmail(err) {
+					log.Warn("group sync: skipping %s for organization %s: %v", user.Name, org.Name, err)
+				} else if err != nil {
 					log.Error("group sync: Could not add user to team: %v", err)
 					return err
 				}
