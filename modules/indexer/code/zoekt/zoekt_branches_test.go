@@ -9,6 +9,7 @@ import (
 	"context"
 	"os"
 	"regexp/syntax"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"forgejo.org/models/db"
 	"forgejo.org/modules/indexer/code/internal"
 	inner_zoekt "forgejo.org/modules/indexer/internal/zoekt"
+	"forgejo.org/modules/test"
 
 	"github.com/sourcegraph/zoekt"
 	"github.com/sourcegraph/zoekt/index"
@@ -118,10 +120,9 @@ func (s *stubSearcher) Search(_ context.Context, _ query.Q, opts *zoekt.SearchOp
 }
 
 func matchFile(name string) zoekt.FileMatch {
-	return zoekt.FileMatch{
-		RepositoryID: 1, FileName: name, Content: []byte("x\n"), Branches: []string{"HEAD"},
-		LineMatches: []zoekt.LineMatch{{LineNumber: 1, LineFragments: []zoekt.LineFragmentMatch{{Offset: 0, MatchLength: 1}}}},
-	}
+	f := chunkFile("x\n", [2]int{0, 1})
+	f.RepositoryID, f.FileName, f.Branches = 1, name, []string{"HEAD"}
+	return f
 }
 
 // F4: the caps are constants, the displayed documents follow the page but never exceed the window,
@@ -139,7 +140,11 @@ func TestSearchCaps(t *testing.T) {
 	assert.Equal(t, 20, stub.opts.MaxDocDisplayCount)
 	assert.Positive(t, stub.opts.ShardMaxMatchCount)
 	assert.Positive(t, stub.opts.TotalMaxMatchCount)
-	assert.True(t, stub.opts.Whole)
+	assert.False(t, stub.opts.Whole)
+	assert.True(t, stub.opts.ChunkMatches)
+	assert.Equal(t, 1, stub.opts.NumContextLines)
+	assert.Positive(t, stub.opts.MaxMatchDisplayCount)
+	assert.Positive(t, stub.opts.MaxWallTime)
 	assert.EqualValues(t, 12345, total) // from the stats, not from len(files)
 	assert.Len(t, res, 10)
 	assert.Equal(t, files[10].FileName, res[0].Filename)
@@ -148,6 +153,64 @@ func TestSearchCaps(t *testing.T) {
 	_, _, _, err = b.Search(t.Context(), &internal.SearchOptions{Keyword: "x", Paginator: &db.ListOptions{Page: 1000, PageSize: 50}})
 	require.NoError(t, err)
 	assert.LessOrEqual(t, stub.opts.MaxDocDisplayCount, internal.MaxSearchWindow)
+}
+
+// Only the requested page is converted: files outside it carry a chunk that would be visible if touched.
+func TestSearchConvertsOnlyPage(t *testing.T) {
+	files := make([]zoekt.FileMatch, 30)
+	for i := range files {
+		files[i] = matchFile("f" + strconv.Itoa(i))
+		files[i].ChunkMatches[0].Content = []byte("poison\n")
+	}
+	for i := 10; i < 20; i++ {
+		files[i].ChunkMatches[0].Content = []byte("x\n")
+	}
+	b := &Indexer{inner: &inner_zoekt.Indexer{Searcher: &stubSearcher{files: files}}}
+	_, res, _, err := b.Search(t.Context(), &internal.SearchOptions{Keyword: "x", Paginator: &db.ListOptions{Page: 2, PageSize: 10}})
+	require.NoError(t, err)
+	require.Len(t, res, 10)
+	for _, r := range res {
+		assert.Equal(t, "x\n", r.Content)
+	}
+}
+
+// Searches beyond the concurrency limit wait, then are refused as too expensive.
+func TestSearchConcurrencyLimit(t *testing.T) {
+	defer test.MockVariableValue(&searchQueueWait, 10*time.Millisecond)()
+	b := &Indexer{inner: &inner_zoekt.Indexer{Searcher: &stubSearcher{files: []zoekt.FileMatch{matchFile("a")}}}}
+	opts := &internal.SearchOptions{Keyword: "x", Paginator: &db.ListOptions{Page: 1, PageSize: 10}}
+
+	for range maxConcurrentSearches {
+		searchSlots <- struct{}{}
+	}
+	_, _, _, err := b.Search(t.Context(), opts)
+	require.ErrorIs(t, err, internal.ErrQueryTooExpensive)
+
+	<-searchSlots // a slot frees up: the search runs and gives its slot back
+	_, res, _, err := b.Search(t.Context(), opts)
+	require.NoError(t, err)
+	assert.Len(t, res, 1)
+	for range maxConcurrentSearches - 1 {
+		<-searchSlots
+	}
+	assert.Empty(t, searchSlots)
+}
+
+// A search whose context ends while it waits for a slot is too expensive, not an internal error.
+func TestSearchConcurrencyLimitDeadline(t *testing.T) {
+	b := &Indexer{inner: &inner_zoekt.Indexer{Searcher: &stubSearcher{}}}
+	for range maxConcurrentSearches {
+		searchSlots <- struct{}{}
+	}
+	defer func() {
+		for range maxConcurrentSearches {
+			<-searchSlots
+		}
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer cancel()
+	_, _, _, err := b.Search(ctx, &internal.SearchOptions{Keyword: "x", Paginator: &db.ListOptions{Page: 1, PageSize: 10}})
+	require.ErrorIs(t, err, internal.ErrQueryTooExpensive)
 }
 
 // Z4: a regex that runs into the timeout is an error of its own.
@@ -267,4 +330,42 @@ func TestBuildBranchIndexReplacesShards(t *testing.T) {
 	assert.Empty(t, searchBranch(t, dir, "dev"))
 	assert.Equal(t, []string{"main.txt"}, searchBranch(t, dir, "HEAD"))
 	assert.Equal(t, first, shardCount(t, dir), "stale shards left behind")
+}
+
+// A real index returns chunk matches: the page keeps the right line numbers and highlights, whatever the file size.
+func TestSearchRealIndexChunks(t *testing.T) {
+	dir := t.TempDir()
+	var sb strings.Builder
+	for i := 1; i <= 2000; i++ {
+		if i == 7 || i == 1500 {
+			sb.WriteString("let needle = 1;\n")
+		} else {
+			sb.WriteString("filler " + strconv.Itoa(i) + "\n")
+		}
+	}
+	require.NoError(t, buildBranchIndex(dir, 7, []zoekt.RepositoryBranch{{Name: "HEAD", Version: "aaa"}},
+		[]index.Document{{Name: "main.js", Content: []byte(sb.String()), Branches: []string{"HEAD"}}}, 1<<20))
+	s, err := search.NewDirectorySearcherFast(dir)
+	require.NoError(t, err)
+	defer s.Close()
+	b := &Indexer{inner: &inner_zoekt.Indexer{Searcher: s}}
+
+	var res []*internal.SearchResult
+	require.Eventually(t, func() bool {
+		_, res, _, err = b.Search(t.Context(), &internal.SearchOptions{Keyword: "needle", Mode: internal.CodeSearchModeExact, Paginator: &db.ListOptions{Page: 1, PageSize: 10}})
+		return err == nil && len(res) > 0
+	}, 5*time.Second, 50*time.Millisecond)
+	require.Len(t, res, 1)
+	assert.Less(t, len(res[0].Content), 200) // two short chunks, not the 30 KB file
+
+	out, err := (&zoektFormatter{}).Format(res[0])
+	require.NoError(t, err)
+	var nums []int
+	for _, l := range out.Lines {
+		nums = append(nums, l.Num)
+		if l.Num == 7 || l.Num == 1500 {
+			assert.Contains(t, string(l.FormattedContent), `<span class="search-highlight">needle</span>`)
+		}
+	}
+	assert.Equal(t, []int{6, 7, 8, 1499, 1500, 1501}, nums)
 }

@@ -6,6 +6,7 @@ package integration
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -24,6 +25,7 @@ import (
 	"forgejo.org/tests/forgery"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAdminViewUsers(t *testing.T) {
@@ -354,4 +356,54 @@ func TestAdminViewUsersSorted(t *testing.T) {
 			assert.Equalf(t, testCase.expectedUsers[i], user.UserName, "Sort type: %s, index %d", testCase.sortType, i)
 		}
 	}
+}
+
+func TestAdminEditUserLastUsableAdmin(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+
+	const lastAdmin = "You cannot remove the last admin."
+	session := loginUser(t, "user1")
+	edit := func(id int64, name, email string) *httptest.ResponseRecorder {
+		req := NewRequestWithValues(t, "POST", fmt.Sprintf("/admin/users/%d/edit", id), map[string]string{
+			"user_name":  name,
+			"login_name": name,
+			"login_type": "0-0",
+			"email":      email,
+			"admin":      "on",
+			// "active" unchecked
+		})
+		return session.MakeRequest(t, req, NoExpectedStatus)
+	}
+
+	// user 1 is the only usable admin: deactivating it is refused
+	resp := edit(1, "user1", "user1@example.com")
+	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Contains(t, resp.Body.String(), lastAdmin)
+	unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1}, "is_active = true AND is_admin = true")
+
+	// with a second usable admin it can be deactivated
+	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	user2.IsAdmin = true
+	require.NoError(t, user_model.UpdateUserCols(db.DefaultContext, user2, "is_admin"))
+	resp = edit(2, "user2", "user2@example.com")
+	assert.Equal(t, http.StatusSeeOther, resp.Code)
+	unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}, "is_active = false AND is_admin = true")
+}
+
+func TestAdminDeactivatePrimaryEmailLastUsableAdmin(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+
+	session := loginUser(t, "user1")
+	req := NewRequestWithValues(t, "POST", "/admin/emails/activate", map[string]string{
+		"uid":      "1",
+		"email":    "user1@example.com",
+		"primary":  "1",
+		"activate": "0",
+	})
+	session.MakeRequest(t, req, http.StatusSeeOther)
+
+	unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1}, "is_active = true")
+	unittest.AssertExistsAndLoadBean(t, &user_model.EmailAddress{ID: 9}, "is_activated = true")
+	resp := session.MakeRequest(t, NewRequest(t, "GET", "/admin/emails"), http.StatusOK)
+	assert.Contains(t, resp.Body.String(), "You cannot remove the last admin.")
 }
