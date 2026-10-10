@@ -5,8 +5,33 @@
 		{{else}}
 			{{template "shared/search/combo" dict "Value" .Keyword "Placeholder" (ctx.Locale.Tr "search.org_kind")}}
 		{{end}}
+		{{if .CategoryFilter}}<input type="hidden" name="category" value="{{.CategoryFilter}}">{{end}}
 	</form>
 	<div class="button-row">
+		{{if .OrgCategories}}
+		<!-- Category -->
+		<div class="dialog-dropdown">
+			<button class="opener options" command="toggle-popover" commandfor="search-category-dropdown">
+				{{ctx.Locale.Tr "explore.org_category"}}
+				{{svg "octicon-triangle-down" 14}}
+			</button>
+			<dialog popover id="search-category-dropdown" class="inline-flip">
+				<ul>
+					<li>
+						<a class="{{if not .CategoryFilter}}active{{end}}" href="?sort={{.SortType}}&q={{.Keyword}}{{if .ShowArchived}}&archived=true{{end}}">{{ctx.Locale.Tr "explore.org_category.all"}}</a>
+					</li>
+					{{range .OrgCategories}}
+					<li>
+						<a class="{{if eq $.CategoryFilter (print .ID)}}active{{end}}" href="?category={{.ID}}&sort={{$.SortType}}&q={{$.Keyword}}{{if $.ShowArchived}}&archived=true{{end}}"><i class="color-icon tw-mr-2" style="background-color: {{.Color}}"></i>{{.Name}}</a>
+					</li>
+					{{end}}
+					<li>
+						<a class="{{if eq .CategoryFilter "other"}}active{{end}}" href="?category=other&sort={{.SortType}}&q={{.Keyword}}{{if .ShowArchived}}&archived=true{{end}}">{{ctx.Locale.Tr "explore.org_category.other"}}</a>
+					</li>
+				</ul>
+			</dialog>
+		</div>
+		{{end}}
 		<!-- Sort -->
 		<div class="dialog-dropdown">
 			<button class="opener options" command="toggle-popover" commandfor="search-sort-dropdown">
@@ -16,16 +41,16 @@
 			<dialog popover id="search-sort-dropdown" class="inline-flip">
 				<ul>
 					<li>
-						<a class="{{if eq .SortType "newest"}}active{{end}}" href="?sort=newest&q={{$.Keyword}}">{{ctx.Locale.Tr "issues.search.sort.latest"}}</a>
+						<a class="{{if eq .SortType "newest"}}active{{end}}" href="?sort=newest&q={{$.Keyword}}{{if $.CategoryFilter}}&category={{$.CategoryFilter}}{{end}}">{{ctx.Locale.Tr "issues.search.sort.latest"}}</a>
 					</li>
 					<li>
-						<a class="{{if eq .SortType "oldest"}}active{{end}}" href="?sort=oldest&q={{$.Keyword}}">{{ctx.Locale.Tr "issues.search.sort.oldest"}}</a>
+						<a class="{{if eq .SortType "oldest"}}active{{end}}" href="?sort=oldest&q={{$.Keyword}}{{if $.CategoryFilter}}&category={{$.CategoryFilter}}{{end}}">{{ctx.Locale.Tr "issues.search.sort.oldest"}}</a>
 					</li>
 					<li>
-						<a class="{{if eq .SortType "alphabetically"}}active{{end}}" href="?sort=alphabetically&q={{$.Keyword}}">{{ctx.Locale.Tr "repo.issues.label.filter_sort.alphabetically"}}</a>
+						<a class="{{if eq .SortType "alphabetically"}}active{{end}}" href="?sort=alphabetically&q={{$.Keyword}}{{if $.CategoryFilter}}&category={{$.CategoryFilter}}{{end}}">{{ctx.Locale.Tr "repo.issues.label.filter_sort.alphabetically"}}</a>
 					</li>
 					<li>
-						<a class="{{if eq .SortType "reversealphabetically"}}active{{end}}" href="?sort=reversealphabetically&q={{$.Keyword}}">{{ctx.Locale.Tr "repo.issues.label.filter_sort.reverse_alphabetically"}}</a>
+						<a class="{{if eq .SortType "reversealphabetically"}}active{{end}}" href="?sort=reversealphabetically&q={{$.Keyword}}{{if $.CategoryFilter}}&category={{$.CategoryFilter}}{{end}}">{{ctx.Locale.Tr "repo.issues.label.filter_sort.reverse_alphabetically"}}</a>
 					</li>
 				</ul>
 			</dialog>

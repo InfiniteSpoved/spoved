@@ -1,0 +1,49 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin edit org-category")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{if .OrgCategory}}{{ctx.Locale.Tr "admin.org_categories.edit"}}{{else}}{{ctx.Locale.Tr "admin.org_categories.new"}}{{end}}
+		</h4>
+		<div class="ui attached segment">
+			<form class="ui form" action="{{.Link}}" method="post">
+				<div class="required field {{if .Err_Name}}error{{end}}">
+					<label for="name">{{ctx.Locale.Tr "admin.org_categories.name"}}</label>
+					<input id="name" name="name" value="{{.name}}" maxlength="100" required autofocus>
+				</div>
+				<div class="field {{if .Err_Description}}error{{end}}">
+					<label for="description">{{ctx.Locale.Tr "admin.org_categories.description"}}</label>
+					<input id="description" name="description" value="{{.description}}" maxlength="255">
+				</div>
+				<div class="two fields">
+					<div class="required field {{if .Err_Color}}error{{end}}">
+						<label for="color">{{ctx.Locale.Tr "admin.org_categories.color"}}</label>
+						<input id="color" name="color" type="color" value="{{.color}}" required>
+					</div>
+					<div class="field {{if .Err_Position}}error{{end}}">
+						<label for="position">{{ctx.Locale.Tr "admin.org_categories.position"}}</label>
+						<input id="position" name="position" type="number" min="0" max="1000000" value="{{.position}}">
+						<span class="help">{{ctx.Locale.Tr "admin.org_categories.position_helper"}}</span>
+					</div>
+				</div>
+				<div class="tw-flex tw-gap-2">
+					<button class="ui primary button">{{if .OrgCategory}}{{ctx.Locale.Tr "admin.org_categories.update"}}{{else}}{{ctx.Locale.Tr "admin.org_categories.new"}}{{end}}</button>
+					{{if .OrgCategory}}
+						<button type="button" class="ui red button delete-button" data-url="{{.OrgCategoryLink}}/delete" data-id="{{.OrgCategory.ID}}" data-modal-id="delete-org-category">{{ctx.Locale.Tr "admin.org_categories.delete"}}</button>
+					{{end}}
+				</div>
+			</form>
+		</div>
+	</div>
+
+{{if .OrgCategory}}
+<div class="ui g-modal-confirm delete modal" id="delete-org-category">
+	<div class="header">
+		{{svg "octicon-trash"}}
+		{{ctx.Locale.Tr "admin.org_categories.delete"}}
+	</div>
+	<div class="content">
+		<p>{{ctx.Locale.Tr "admin.org_categories.delete_desc"}}</p>
+	</div>
+	{{template "base/modal_actions_confirm" .}}
+</div>
+{{end}}
+{{template "admin/layout_footer" .}}

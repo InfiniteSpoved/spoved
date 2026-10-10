@@ -45,6 +45,7 @@ type UpdateOptions struct {
 	KeepPronounsPrivate          optional.Option[bool]
 	RestrictRepoVisibilityChange optional.Option[bool]
 	PrivateForkPolicy            optional.Option[int]
+	CategoryID                   optional.Option[int64]
 }
 
 func UpdateUser(ctx context.Context, u *user_model.User, opts *UpdateOptions) error {
@@ -158,6 +159,10 @@ func UpdateUser(ctx context.Context, u *user_model.User, opts *UpdateOptions) er
 	if has, value := opts.PrivateForkPolicy.Get(); has {
 		u.PrivateForkPolicy = value
 		cols = append(cols, "private_fork_policy")
+	}
+	if has, value := opts.CategoryID.Get(); has {
+		u.CategoryID = value
+		cols = append(cols, "category_id")
 	}
 	if opts.SetLastLogin {
 		u.SetLastLogin()

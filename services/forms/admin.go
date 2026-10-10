@@ -74,6 +74,20 @@ func (f *AdminDashboardForm) Validate(req *http.Request, errs binding.Errors) bi
 	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
+// OrgCategoryForm form for creating or editing an organization category
+type OrgCategoryForm struct {
+	Name        string `binding:"Required;MaxSize(100)" locale:"admin.org_categories.name"`
+	Description string `binding:"MaxSize(255)" locale:"admin.org_categories.description"`
+	Color       string `binding:"Required;MaxSize(7)" locale:"admin.org_categories.color"`
+	Position    int    `binding:"Range(0,1000000)" locale:"admin.org_categories.position"`
+}
+
+// Validate validates the fields
+func (f *OrgCategoryForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
+	ctx := context.GetValidateContext(req)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
+}
+
 // AnnouncementForm form for creating or editing an announcement
 type AnnouncementForm struct {
 	Message     string `binding:"Required;MaxSize(65535)" locale:"admin.announcements.message"`
