@@ -359,3 +359,40 @@ func TestZoektBranches(t *testing.T) {
 	assert.Contains(t, found("", true, "Description"), "README.md")
 	assert.Contains(t, found("branch2", false, "Description"), "README.md")
 }
+
+// A real zoekt search of a real repo returns chunk matches: the formatted hit keeps the file's
+// line numbers and the highlight, as it did with whole files.
+func TestZoektChunkHighlights(t *testing.T) {
+	unittest.PrepareTestEnv(t)
+
+	idx := zoekt.NewIndexer(t.TempDir())
+	if _, err := idx.Init(t.Context()); err != nil {
+		t.Skipf("zoekt is not available: %v", err)
+	}
+	defer idx.Close()
+	const repoID = 1
+	require.NoError(t, index(git.DefaultContext, idx, repoID))
+
+	var res []*internal.SearchResult
+	require.Eventually(t, func() bool { // the shards are picked up asynchronously
+		var err error
+		_, res, _, err = idx.Search(t.Context(), &internal.SearchOptions{
+			RepoIDs: []int64{repoID}, Keyword: "Description", Mode: SearchModeExact,
+			Paginator: &db.ListOptions{Page: 1, PageSize: 20},
+		})
+		require.NoError(t, err)
+		return len(res) > 0
+	}, 5*time.Second, 50*time.Millisecond)
+
+	hit, err := idx.Formatter().Format(res[0])
+	require.NoError(t, err)
+	assert.Equal(t, "README.md", hit.Filename)
+	require.NotEmpty(t, hit.Lines)
+	var highlighted []int
+	for _, l := range hit.Lines {
+		if strings.Contains(string(l.FormattedContent), `<span class="search-highlight">Description</span>`) {
+			highlighted = append(highlighted, l.Num)
+		}
+	}
+	assert.Equal(t, []int{3}, highlighted) // README.md: "# repo1", "", "Description for repo1"
+}

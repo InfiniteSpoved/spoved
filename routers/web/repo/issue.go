@@ -2416,6 +2416,10 @@ func UpdateIssueTitle(ctx *context.Context) {
 	}
 
 	if err := issue_service.ChangeTitle(ctx, issue, ctx.Doer, title); err != nil {
+		if message, ok := issue_service.PRTitleRuleMessage(ctx.Locale, err); ok {
+			ctx.JSONError(message)
+			return
+		}
 		ctx.ServerError("ChangeTitle", err)
 		return
 	}

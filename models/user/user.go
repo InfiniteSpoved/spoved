@@ -955,22 +955,36 @@ func createUser(ctx context.Context, u *User, createdByAdmin bool, overwriteDefa
 	return committer.Commit()
 }
 
+// usableAdminCond matches the admins who can sign in. It is the one definition of a usable admin.
+var usableAdminCond = builder.Eq{
+	"is_admin":       true,
+	"is_active":      true,
+	"prohibit_login": false,
+	"type":           UserTypeIndividual,
+}
+
 // IsLastAdminUser check whether user is an admin and no other admin who can sign in exists
 func IsLastAdminUser(ctx context.Context, user *User) bool {
 	if !user.IsAdmin {
 		return false
 	}
-	others, err := db.GetEngine(ctx).Where(builder.Eq{
-		"is_admin":       true,
-		"is_active":      true,
-		"prohibit_login": false,
-		"type":           UserTypeIndividual,
-	}.And(builder.Neq{"id": user.ID})).Count(new(User))
+	others, err := db.GetEngine(ctx).Where(usableAdminCond.And(builder.Neq{"id": user.ID})).Count(new(User))
 	if err != nil {
 		log.Error("user.IsLastAdminUser: %v", err)
 		return true
 	}
 	return others == 0
+}
+
+// IsLastUsableAdmin reports whether user, as stored, is the only admin who can sign in.
+// It reads the stored row, so in-memory changes to user don't affect it.
+func IsLastUsableAdmin(ctx context.Context, user *User) bool {
+	var ids []int64
+	if err := db.GetEngine(ctx).Table("user").Where(usableAdminCond).Cols("id").Limit(2).Find(&ids); err != nil {
+		log.Error("user.IsLastUsableAdmin: %v", err)
+		return true
+	}
+	return len(ids) == 1 && ids[0] == user.ID
 }
 
 // CountUserFilter represent optional filters for CountUsers

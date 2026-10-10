@@ -4,6 +4,7 @@
 package user
 
 import (
+	"errors"
 	"fmt"
 
 	"forgejo.org/modules/util"
@@ -118,3 +119,6 @@ func IsErrFederatedUserNotExists(err error) bool {
 	_, ok := err.(ErrFederatedUserNotExists)
 	return ok
 }
+
+// ErrLastUsableAdmin is returned when a change would leave no admin who can sign in.
+var ErrLastUsableAdmin = errors.New("cannot deactivate the last usable admin")

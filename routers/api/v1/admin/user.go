@@ -216,6 +216,8 @@ func EditUser(ctx *context.APIContext) {
 			ctx.Error(http.StatusBadRequest, "PasswordComplexity", err)
 		case errors.Is(err, password.ErrIsPwned), password.IsErrIsPwnedRequest(err):
 			ctx.Error(http.StatusBadRequest, "PasswordIsPwned", err)
+		case models.IsErrDeleteLastAdminUser(err):
+			ctx.Error(http.StatusBadRequest, "LastAdmin", err)
 		default:
 			ctx.Error(http.StatusInternalServerError, "UpdateAuth", err)
 		}
