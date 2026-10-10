@@ -466,3 +466,46 @@ func TestSearchRepositoryIDsByCondition(t *testing.T) {
 		assert.Equal(t, testCase.repoIDs, repoIDs)
 	}
 }
+
+func TestSearchRepositoryOwnerCategory(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE `user` SET category_id = 5 WHERE id = 3")
+	require.NoError(t, err)
+
+	search := func(opts repo_model.SearchRepoOptions) repo_model.RepositoryList {
+		t.Helper()
+		opts.ListOptions = db.ListOptions{Page: 1, PageSize: 100}
+		repos, _, err := repo_model.SearchRepository(db.DefaultContext, &opts)
+		require.NoError(t, err)
+		return repos
+	}
+
+	// a category: only that org's repos, and only those the actor can see
+	repos := search(repo_model.SearchRepoOptions{AllPublic: true, OwnerCategoryID: optional.Some[int64](5)})
+	require.NotEmpty(t, repos)
+	for _, repo := range repos {
+		assert.EqualValues(t, 3, repo.OwnerID)
+		assert.False(t, repo.IsPrivate)
+	}
+	owner := unittest.AssertExistsAndLoadBean(t, &user.User{ID: 2})
+	withPrivate := search(repo_model.SearchRepoOptions{Actor: owner, Private: true, AllPublic: true, OwnerCategoryID: optional.Some[int64](5)})
+	assert.Greater(t, len(withPrivate), len(repos))
+	for _, repo := range withPrivate {
+		assert.EqualValues(t, 3, repo.OwnerID)
+	}
+
+	// "other": users and organizations without a category
+	other := search(repo_model.SearchRepoOptions{AllPublic: true, OwnerCategoryID: optional.Some[int64](0)})
+	assert.Len(t, other, len(search(repo_model.SearchRepoOptions{AllPublic: true}))-len(repos))
+	for _, repo := range other {
+		assert.NotEqualValues(t, 3, repo.OwnerID)
+	}
+
+	// combines with the topic filter
+	topic := repo_model.SearchRepoOptions{AllPublic: true, Keyword: "graphql", TopicOnly: true}
+	assert.Len(t, search(topic), 1)
+	topic.OwnerCategoryID = optional.Some[int64](0)
+	assert.Len(t, search(topic), 1)
+	topic.OwnerCategoryID = optional.Some[int64](5)
+	assert.Empty(t, search(topic))
+}

@@ -4,7 +4,7 @@
 		{{if and $.GroupByCategory (ne $category .CategoryID)}}
 			{{$category = .CategoryID}}
 			<h3 class="org-category-header flex-text-block tw-mt-4 tw-mb-2">
-				{{with index $.OrgCategoryByID .CategoryID}}<i class="color-icon" style="background-color: {{.Color}}"></i>{{.Name}}{{else}}{{ctx.Locale.Tr "explore.org_category.other"}}{{end}}
+				{{template "shared/org_category_name" (index $.OrgCategoryByID .CategoryID)}}
 			</h3>
 		{{end}}
 		<div class="flex-item tw-items-center">

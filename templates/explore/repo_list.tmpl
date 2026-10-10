@@ -68,7 +68,7 @@
 				{{if .Topics}}
 					<div class="repo-topics">
 					{{range .Topics}}
-						{{if ne . ""}}<a class="ui label" href="{{AppSubUrl}}/explore/repos?q={{.}}&topic=1">{{.}}</a>{{end}}
+						{{if ne . ""}}<a class="ui label" href="{{AppSubUrl}}/explore/repos?q={{.}}&topic=1{{if $.CategoryFilter}}&category={{$.CategoryFilter}}{{end}}">{{.}}</a>{{end}}
 					{{end}}
 					</div>
 				{{end}}
