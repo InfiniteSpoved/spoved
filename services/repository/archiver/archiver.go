@@ -125,14 +125,14 @@ func (aReq *ArchiveRequest) GetArchiveName() string {
 	return strings.ReplaceAll(aReq.refName, "/", "-") + "." + aReq.Type.String()
 }
 
-// NeedsBuild reports whether serving the request would start a new archive build: the archive is not ready and
-// no build of it is queued.
+// NeedsBuild reports whether serving the request would start a new archive build: there is no archive row (ready
+// or generating) and no build of it is queued.
 func (aReq *ArchiveRequest) NeedsBuild(ctx context.Context) (bool, error) {
 	archiver, err := repo_model.GetRepoArchiver(ctx, aReq.RepoID, aReq.Type, aReq.CommitID)
 	if err != nil {
 		return false, fmt.Errorf("models.GetRepoArchiver: %w", err)
 	}
-	if archiver != nil && archiver.Status == repo_model.ArchiverReady {
+	if archiver != nil {
 		return false, nil
 	}
 	has, err := archiverQueue.Has(aReq)

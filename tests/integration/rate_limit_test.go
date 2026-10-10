@@ -716,12 +716,19 @@ func TestRateLimitHeavyArchive(t *testing.T) {
 		assert.Equal(t, 1, remaining("198.51.100.11"))
 	})
 
+	t.Run("a generating archive is not charged", func(t *testing.T) {
+		forget()
+		const ip = "198.51.100.14"
+		require.NoError(t, db.Insert(db.DefaultContext, &repo_model.RepoArchiver{RepoID: 1, Type: git.ZIP, Status: repo_model.ArchiverGenerating, CommitID: "65f1bf27bc3bf70f64657658635e66094edbcb4d"}))
+		for range 5 {
+			MakeRequest(t, fromIP(NewRequest(t, "POST", "/user2/repo1/archive/master.zip"), ip), http.StatusOK)
+		}
+		assert.Equal(t, 1, remaining(ip))
+	})
+
 	t.Run("builds are limited", func(t *testing.T) {
-		for _, path := range []string{"/user2/repo1/archive/master.zip", "/api/v1/repos/user2/repo1/archive/master.zip"} {
-			ip := "198.51.100.12"
-			if strings.HasPrefix(path, "/api") {
-				ip = "198.51.100.13"
-			}
+		for i, path := range []string{"/user2/repo1/archive/master.zip", "/api/v1/repos/user2/repo1/archive/master.zip", "/api/v1/repos/user2/repo1/zipball/master"} {
+			ip := fmt.Sprintf("198.51.100.%d", 20+i)
 			for range 2 {
 				forget()
 				MakeRequest(t, fromIP(NewRequest(t, "GET", path), ip), http.StatusOK)
