@@ -27,6 +27,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/indexer/issues"
 	"forgejo.org/modules/optional"
+	"forgejo.org/modules/queue"
 	"forgejo.org/modules/references"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
@@ -169,6 +170,7 @@ func TestViewIssuesKeyword(t *testing.T) {
 		Index:  1,
 	})
 	issues.UpdateIssueIndexer(t.Context(), issue.ID)
+	require.NoError(t, queue.GetManager().FlushAll(t.Context(), 10*time.Second))
 
 	const keyword = "first"
 	req := NewRequestf(t, "GET", "%s/issues?q=%s", repo.Link(), keyword)
