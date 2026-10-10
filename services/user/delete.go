@@ -115,6 +115,7 @@ func deleteUser(ctx context.Context, u *user_model.User, purge, keepRow bool) (e
 		&user_model.Follow{FollowID: u.ID},
 		&activities_model.Action{UserID: u.ID},
 		&issues_model.IssueUser{UID: u.ID},
+		&issues_model.PullAttention{UserID: u.ID},
 		&user_model.EmailAddress{UID: u.ID},
 		&user_model.UserOpenID{UID: u.ID},
 		&issues_model.Reaction{UserID: u.ID},

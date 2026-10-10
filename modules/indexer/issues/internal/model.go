@@ -34,6 +34,7 @@ type IndexerData struct {
 	MentionIDs         []int64            `json:"mention_ids"`
 	ReviewedIDs        []int64            `json:"reviewed_ids"`
 	ReviewRequestedIDs []int64            `json:"review_requested_ids"`
+	AttentionIDs       []int64            `json:"attention_ids"`
 	SubscriberIDs      []int64            `json:"subscriber_ids"`
 	UpdatedUnix        timeutil.TimeStamp `json:"updated_unix"`
 
@@ -100,6 +101,7 @@ type SearchOptions struct {
 
 	ReviewedID        optional.Option[int64] // reviewer of the issues
 	ReviewRequestedID optional.Option[int64] // requested reviewer of the issues
+	AttentionID       optional.Option[int64] // user in the attention set of the pull requests
 
 	SubscriberID optional.Option[int64] // subscriber of the issues
 

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	issueIndexerLatestVersion = 3
+	issueIndexerLatestVersion = 4
 	// multi-match-types, currently only 2 types are used
 	// Reference: https://www.elastic.co/guide/en/elasticsearch/reference/7.0/query-dsl-multi-match-query.html#multi-match-types
 	esMultiMatchTypeBestFields   = "best_fields"
@@ -73,6 +73,7 @@ const (
 			"mention_ids": { "type": "long", "index": true },
 			"reviewed_ids": { "type": "long", "index": true },
 			"review_requested_ids": { "type": "long", "index": true },
+			"attention_ids": { "type": "long", "index": true },
 			"subscriber_ids": { "type": "long", "index": true },
 			"updated_unix": { "type": "long", "index": true },
 
@@ -245,6 +246,9 @@ func (b *Indexer) Search(ctx context.Context, options *internal.SearchOptions) (
 	}
 	if has, value := options.ReviewRequestedID.Get(); has {
 		query.Must(elastic.NewTermQuery("review_requested_ids", value))
+	}
+	if has, value := options.AttentionID.Get(); has {
+		query.Must(elastic.NewTermQuery("attention_ids", value))
 	}
 
 	if has, value := options.SubscriberID.Get(); has {

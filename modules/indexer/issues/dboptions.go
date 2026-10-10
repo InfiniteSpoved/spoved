@@ -8,10 +8,11 @@ import (
 
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
 )
 
-func ToSearchOptions(ctx context.Context, keyword string, opts *issues_model.IssuesOptions) *SearchOptions {
+func ToSearchOptions(ctx context.Context, doer *user_model.User, keyword string, opts *issues_model.IssuesOptions) *SearchOptions {
 	searchOpt := &SearchOptions{
 		RepoIDs:   opts.RepoIDs,
 		AllPublic: opts.AllPublic,
@@ -67,6 +68,7 @@ func ToSearchOptions(ctx context.Context, keyword string, opts *issues_model.Iss
 	searchOpt.MentionID = convertID(opts.MentionedID)
 	searchOpt.ReviewedID = convertID(opts.ReviewedID)
 	searchOpt.ReviewRequestedID = convertID(opts.ReviewRequestedID)
+	searchOpt.AttentionID = convertID(opts.AttentionUserID)
 	searchOpt.SubscriberID = convertID(opts.SubscriberID)
 
 	if opts.UpdatedAfterUnix > 0 {
@@ -104,7 +106,7 @@ func ToSearchOptions(ctx context.Context, keyword string, opts *issues_model.Iss
 		searchOpt.SortBy = SortByUpdatedDesc
 	}
 
-	_ = searchOpt.WithKeyword(ctx, keyword)
+	_ = searchOpt.WithKeyword(ctx, doer, keyword)
 
 	return searchOpt
 }
