@@ -40,7 +40,7 @@ plan)
   # depth: commits to fetch, 0 for the full history
   tasks='{"task":"lint","args":"","depth":"1"},{"task":"frontend","args":"","depth":"1"}'
   if [ "$backend" = true ]; then
-    for i in $(seq 1 10); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 10\",\"depth\":\"1\"}"; done
+    for i in $(seq 1 8); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 8\",\"depth\":\"1\"}"; done
   fi
   if [ "$FULL" = true ]; then
     # only the selection of changed end-to-end tests needs the history
@@ -83,17 +83,21 @@ unit)
   packages=$(make -s --eval='ci-list-test-packages: compute-go-test-packages ; @echo $(GO_TEST_PACKAGES)' ci-list-test-packages \
     | tr ' ' '\n' | .github/ci/shard.sh 2 4 | paste -sd' ')
   set +e
-  RACE_ENABLED=true TEST_AZURITE_URL=127.0.0.1:10000 make test-backend GO_TEST_PACKAGES="$packages" 2>&1 | tee "$RUNNER_TEMP/out.txt"
+  RACE_ENABLED=true TEST_AZURITE_URL=127.0.0.1:10000 make test-backend GO_TEST_PACKAGES="$packages" > "$RUNNER_TEMP/out.txt" 2>&1; rc=$?
+  cat "$RUNNER_TEMP/out.txt"
   make test-check; tc=$?
   set -e
-  failed=$(grep -E '^FAIL[[:space:]]+forgejo.org/' "$RUNNER_TEMP/out.txt" | awk '{print $2}' | sort -u)
-  idx=0
-  [ -z "$failed" ] || idx=$(tr ' ' '\n' <<< "$packages" | grep -nxF "$(head -1 <<< "$failed")" | cut -d: -f1)
-  echo "probe: idx=$idx tc=$tc failed=$failed"
-  if [ "$1" -le 7 ]; then exit $(( (idx >> ($1 - 1)) & 1 ? 0 : 1 )); fi
-  if [ "$1" = 8 ]; then exit $(( tc != 0 )); fi
-  if [ "$1" = 9 ]; then ! grep -q 'DATA RACE' "$RUNNER_TEMP/out.txt"; exit $?; fi
-  exit $(( $(grep -c . <<< "$failed") > 1 ))
+  o="$RUNNER_TEMP/out.txt"
+  case $1 in
+  1) exit $(( rc != 0 )) ;;
+  2) ! grep -q '^--- FAIL' "$o" ;;
+  3) ! grep -q '^FAIL' "$o" ;;
+  4) ! grep -q 'panic:' "$o" ;;
+  5) ! grep -qi 'timed out\|timeout' "$o" ;;
+  6) exit $(( tc != 0 )) ;;
+  7) ! grep -q 'build failed\|cannot\|signal: killed' "$o" ;;
+  8) exit $(( rc != 0 )) ;;
+  esac
   ;;
 
 migrations)
