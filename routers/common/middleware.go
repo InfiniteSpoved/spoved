@@ -4,7 +4,6 @@
 package common
 
 import (
-	gocontext "context"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -13,6 +12,7 @@ import (
 	"strings"
 
 	"forgejo.org/modules/cache"
+	"forgejo.org/modules/httplib"
 	"forgejo.org/modules/process"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/web/middleware"
@@ -120,7 +120,7 @@ func joinForwardedFor(trusted []string) func(http.Handler) http.Handler {
 					req.Header.Set("X-Forwarded-For", joined)
 					req.Header.Del("X-Real-IP")
 				} else {
-					req = req.WithContext(gocontext.WithValue(req.Context(), ambiguousClientIPKey{}, true))
+					req = httplib.WithAmbiguousClientIP(req)
 				}
 			}
 			next.ServeHTTP(resp, req)
@@ -128,12 +128,10 @@ func joinForwardedFor(trusted []string) func(http.Handler) http.Handler {
 	}
 }
 
-type ambiguousClientIPKey struct{}
-
 // ClientIP returns the client address of the request, invalid if it can't be parsed or a trusted proxy sent
 // disagreeing X-Real-IP and X-Forwarded-For headers.
 func ClientIP(req *http.Request) netip.Addr {
-	if ambiguous, _ := req.Context().Value(ambiguousClientIPKey{}).(bool); ambiguous {
+	if httplib.IsClientIPAmbiguous(req) {
 		return netip.Addr{}
 	}
 	return setting.IPFromRemoteAddr(req.RemoteAddr)
