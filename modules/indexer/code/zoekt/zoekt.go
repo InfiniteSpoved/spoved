@@ -511,7 +511,7 @@ func convertZoektResult(files []zoekt.FileMatch) []*internal.SearchResult {
 				}
 				start := int(r.Start.ByteOffset - cm.ContentStart.ByteOffset)
 				end := int(r.End.ByteOffset - cm.ContentStart.ByteOffset)
-				if start >= len(chunk) || end > len(cm.Content) || (len(chunk) < len(cm.Content) && end > len(chunk)) {
+				if start >= len(chunk) || end > len(chunk) {
 					continue // past the cut
 				}
 				if nl := bytes.IndexByte(chunk[start:], '\n'); nl >= 0 {
