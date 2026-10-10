@@ -189,6 +189,18 @@ func TestOrgCategoryB1Queries(t *testing.T) {
 	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 	session := loginUser(t, "user2")
 	c := createOrgCategory(t, "Counted", 0)
+	// countQueries counts the queries of every goroutine: read each page until two readings in a row agree
+	stable := func(f func()) int64 {
+		var readings []int64
+		for len(readings) < 6 {
+			readings = append(readings, countQueries(t, f))
+			if n := len(readings); n > 1 && readings[n-1] == readings[n-2] {
+				return readings[n-1]
+			}
+		}
+		require.FailNow(t, "query count doesn't settle", "%v", readings)
+		return 0
+	}
 
 	count := func(n int) []int64 {
 		for i := range n {
@@ -203,7 +215,7 @@ func TestOrgCategoryB1Queries(t *testing.T) {
 		var counts []int64
 		for _, l := range []string{"/", fmt.Sprintf("/explore/repos?category=%d", c.ID), "/explore/repos?category=other"} {
 			session.MakeRequest(t, NewRequest(t, "GET", l), http.StatusOK) // generated avatars are saved once
-			counts = append(counts, countQueries(t, func() { session.MakeRequest(t, NewRequest(t, "GET", l), http.StatusOK) }))
+			counts = append(counts, stable(func() { session.MakeRequest(t, NewRequest(t, "GET", l), http.StatusOK) }))
 		}
 		return counts
 	}
