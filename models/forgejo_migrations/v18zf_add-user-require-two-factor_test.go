@@ -12,15 +12,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type v18zdUserBefore struct {
+type v18zfUserBefore struct {
 	ID   int64 `xorm:"pk autoincr"`
 	Name string
 }
 
-func (v18zdUserBefore) TableName() string { return "user" }
+func (v18zfUserBefore) TableName() string { return "user" }
 
 func Test_addUserRequireTwoFactor(t *testing.T) {
-	x, deferable := migration_tests.PrepareTestEnv(t, 0, new(v18zdUserBefore))
+	x, deferable := migration_tests.PrepareTestEnv(t, 0, new(v18zfUserBefore))
 	defer deferable()
 	require.NotNil(t, x)
 
