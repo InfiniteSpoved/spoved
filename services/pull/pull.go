@@ -196,6 +196,14 @@ func ChangeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer 
 		}
 	}
 
+	// a rule limited to some base branches must not be dodged by retargeting
+	if err := pr.LoadBaseRepo(ctx); err != nil {
+		return err
+	}
+	if err := issue_service.CheckPRTitleRule(ctx, pr.BaseRepo, targetBranch, pr.Issue.Title, false); err != nil {
+		return err
+	}
+
 	// Check if branches are equal
 	branchesEqual, err := IsHeadEqualWithBranch(ctx, pr, targetBranch)
 	if err != nil {

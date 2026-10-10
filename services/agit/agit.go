@@ -4,12 +4,16 @@
 package agit
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"unicode"
 
+	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
@@ -206,6 +210,20 @@ func ProcReceive(ctx context.Context, repo *repo_model.Repository, gitRepo *git.
 			}
 
 			if err := pull_service.NewPullRequest(ctx, repo, prIssue, []int64{}, []string{}, pr, []int64{}); err != nil {
+				var ruleErr *git_model.ErrPRTitleRule
+				if errors.As(err, &ruleErr) {
+					// the git client prints this: the message is user text, drop control characters (ESC)
+					message := cmp.Or(ruleErr.Message, "the title does not follow the title rules of this repository")
+					if ruleErr.Invalid {
+						message = "the title rule of this repository is invalid, a repository administrator must fix it"
+					}
+					return nil, fmt.Errorf("pull request title refused: %s", strings.Map(func(r rune) rune {
+						if unicode.IsControl(r) {
+							return ' '
+						}
+						return r
+					}, message))
+				}
 				return nil, fmt.Errorf("unable to create new pull request: %w", err)
 			}
 

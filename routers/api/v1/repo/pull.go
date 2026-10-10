@@ -804,6 +804,9 @@ func EditPullRequest(ctx *context.APIContext) {
 			} else if models.IsErrPullRequestHasMerged(err) {
 				ctx.Error(http.StatusConflict, "IsErrPullRequestHasMerged", err)
 				return
+			} else if message, ok := issue_service.PRTitleRuleMessage(ctx.Locale, err); ok {
+				ctx.Error(http.StatusUnprocessableEntity, "PRTitleRule", message)
+				return
 			}
 			ctx.InternalServerError(err)
 			return
@@ -1341,6 +1344,9 @@ func RevertPullRequest(ctx *context.APIContext) {
 		case models.IsErrMergeConflicts(err):
 			base, _ := pull_service.GetRevertBase(ctx.Repo().GitRepo, pr)
 			ctx.Error(http.StatusConflict, "RevertPullRequest", "This pull request can't be reverted automatically because later changes conflict. Revert it locally:\n"+pull_service.RevertInstructions(ctx.Repo().GitRepo, pr, base))
+		case git_model.IsErrPRTitleRule(err):
+			message, _ := issue_service.PRTitleRuleMessage(ctx.Locale, err)
+			ctx.Error(http.StatusUnprocessableEntity, "PRTitleRule", message)
 		case git_model.IsErrBranchAlreadyExists(err):
 			ctx.Error(http.StatusConflict, "RevertPullRequest", err)
 		case errors.Is(err, util.ErrInvalidArgument):

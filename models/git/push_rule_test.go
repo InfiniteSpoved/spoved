@@ -6,6 +6,7 @@ package git_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	git_model "forgejo.org/models/git"
 	"forgejo.org/models/unittest"
@@ -88,4 +89,18 @@ func TestPushRulePRTitle(t *testing.T) {
 	require.Error(t, rule.CheckPRTitle("release/1.0", "bad", false))
 	require.NoError(t, rule.CheckPRTitle("develop", "bad", false))
 	require.NoError(t, rule.CheckPRTitle("Main", "bad", false))
+}
+
+func TestPushRulePRTitleWorstCasePattern(t *testing.T) {
+	// Go's regexp is linear time and refuses programs that are too large, so the 1024 cap is enough:
+	// a pattern is either rejected at save time or cheap to match.
+	for _, pattern := range []string{`\pL{1000}`, `(\pL{1000}){1000}`, `((a{1000}){1000}){1000}`} {
+		rule := git_model.PushRule{PRTitleRegex: pattern}
+		if err := rule.Compile(); err != nil {
+			continue
+		}
+		start := time.Now()
+		require.Error(t, rule.CheckPRTitle("main", strings.Repeat("a", 255), false))
+		assert.Less(t, time.Since(start), time.Second, pattern)
+	}
 }

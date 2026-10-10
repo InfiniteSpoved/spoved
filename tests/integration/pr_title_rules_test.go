@@ -100,7 +100,7 @@ func TestPRTitleRuleRefuse(t *testing.T) {
 	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: repo.OwnerID})
 	session := loginUser(t, owner.Name)
 	token := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteRepository, auth_model.AccessTokenScopeWriteIssue)
-	for _, b := range []string{"t-api-bad", "t-api-ok", "t-web-bad", "t-web-ok", "t-agit", "t-filter"} {
+	for _, b := range []string{"t-api-bad", "t-api-ok", "t-web-bad", "t-web-ok", "t-agit", "t-filter", "t-retarget"} {
 		prTitleRuleBranch(t, repo, owner, b)
 	}
 	setPRTitleRule(t, repo.ID, git_model.PushRule{PRTitleRegex: `^ABC-\d+ `, PRTitleBannedRegex: `^BAN`, PRTitleMessage: prTitleRuleMessage})
@@ -164,6 +164,34 @@ func TestPRTitleRuleRefuse(t *testing.T) {
 		webTitle("ABC-7 web", http.StatusOK)
 		setPRTitleRule(t, repo.ID, git_model.PushRule{PRTitleRegex: `^ABC-\d+ `, PRTitleBannedRegex: `^WIP`})
 		webTitle("WIP: ABC-8 x", http.StatusBadRequest)
+		// un-drafting is checked against the new title
+		setPRTitleRule(t, repo.ID, git_model.PushRule{PRTitleRegex: `^ABC-\d+ `})
+		webTitle("WIP: ABC-9 x", http.StatusOK)
+		webTitle("ABC-9 x", http.StatusOK)
+		webTitle("WIP: ABC-9 x", http.StatusOK)
+		webTitle("not matching", http.StatusBadRequest) // the draft prefix removed: refused
+		webTitle("  ABC-9 padded  ", http.StatusOK)     // trimmed before matching
+	})
+
+	t.Run("Retarget", func(t *testing.T) {
+		setPRTitleRule(t, repo.ID, git_model.PushRule{})
+		testAPICreateBranch(t, session, "user2", "repo1", "master", "release/1.0", http.StatusCreated)
+		pr := createAPI("t-retarget", "no key", http.StatusCreated)
+		setPRTitleRule(t, repo.ID, git_model.PushRule{PRTitleRegex: `^ABC-\d+ `, PRTitleBranches: "release/*", PRTitleMessage: prTitleRuleMessage})
+
+		// a bad title on an unfiltered base branch cannot move onto a covered one
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", fmt.Sprintf("/api/v1/repos/user2/repo1/pulls/%d", pr.Index), map[string]string{"base": "release/1.0"}).AddTokenAuth(token), http.StatusUnprocessableEntity)
+		retarget := fmt.Sprintf("/user2/repo1/pull/%d/target_branch", pr.Index)
+		resp := session.MakeRequest(t, NewRequestWithValues(t, "POST", retarget, map[string]string{"target_branch": "release/1.0"}), http.StatusBadRequest)
+		var e map[string]string
+		DecodeJSON(t, resp, &e)
+		assert.Equal(t, prTitleRuleMessage, e["errorMessage"])
+		assert.Equal(t, "master", unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID}).BaseBranch)
+
+		// a matching title can
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", fmt.Sprintf("/api/v1/repos/user2/repo1/pulls/%d", pr.Index), map[string]string{"title": "x"}).AddTokenAuth(token), http.StatusCreated)
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", fmt.Sprintf("/api/v1/repos/user2/repo1/pulls/%d", pr.Index), map[string]string{"title": "ABC-1 x", "base": "release/1.0"}).AddTokenAuth(token), http.StatusCreated)
+		assert.Equal(t, "release/1.0", unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID}).BaseBranch)
 	})
 
 	t.Run("BranchFilterAndAGit", func(t *testing.T) {
@@ -228,6 +256,15 @@ func TestPRTitleRuleBlockMerge(t *testing.T) {
 	var e map[string]string
 	DecodeJSON(t, resp, &e)
 	assert.Equal(t, prTitleRuleMessage, e["errorMessage"])
+
+	// a user without merge rights gets "not allowed", not the rule message
+	reader := loginUser(t, "user5")
+	readerToken := getTokenForLoggedInUser(t, reader, auth_model.AccessTokenScopeWriteRepository)
+	resp = MakeRequest(t, NewRequestWithJSON(t, "POST", mergeURL, mergeBody).AddTokenAuth(readerToken), http.StatusMethodNotAllowed)
+	assert.NotContains(t, resp.Body.String(), "Start with ABC-1")
+
+	// marking as merged manually skips the title rule by design: nothing is merged by spoved
+	require.NoError(t, pull_service.CheckPullMergeable(t.Context(), owner, &perm, pr, pull_service.MergeCheckTypeManually, true, repo_model.MergeStyleMerge))
 
 	// a WIP pull request keeps its own error first
 	require.NoError(t, issue_service.ChangeTitle(t.Context(), pr.Issue, owner, "WIP: no key"))
