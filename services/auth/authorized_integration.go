@@ -17,6 +17,7 @@ import (
 
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/cache"
 	"forgejo.org/modules/hostmatcher"
 	"forgejo.org/modules/json"
@@ -219,11 +220,24 @@ func ValidateAuthorizedIntegration(ai *auth_model.AuthorizedIntegration, repoRes
 	return authz.ValidateRepositoryResource(ai.ResourceAllRepos, ai.Scope, len(repoResources))
 }
 
+// The tokens an authorized integration mints follow the same scope policy as access tokens of its owner.
+func validateAuthorizedIntegrationScopePolicy(ctx context.Context, ai *auth_model.AuthorizedIntegration) error {
+	owner, err := user_model.GetUserByID(ctx, ai.UserID)
+	if err != nil {
+		return err
+	}
+	return authz.ValidateScopePolicy(owner, ai.Scope, ai.ResourceAllRepos)
+}
+
 // Validate and insert a new authorized integration.
 func InsertAuthorizedIntegration(ctx context.Context, ai *auth_model.AuthorizedIntegration, repoResources []*auth_model.AuthorizedIntegResourceRepo) error {
 	ai.Name = strings.TrimSpace(ai.Name)
 	ai.Description = strings.TrimSpace(ai.Description)
 
+	// The scope policy goes first: it needs no remote issuer lookup.
+	if err := validateAuthorizedIntegrationScopePolicy(ctx, ai); err != nil {
+		return err
+	}
 	if err := ValidateAuthorizedIntegration(ai, repoResources); err != nil {
 		return err
 	}
@@ -245,6 +259,10 @@ func UpdateAuthorizedIntegration(ctx context.Context, ai *auth_model.AuthorizedI
 	ai.Name = strings.TrimSpace(ai.Name)
 	ai.Description = strings.TrimSpace(ai.Description)
 
+	// The scope policy goes first: it needs no remote issuer lookup.
+	if err := validateAuthorizedIntegrationScopePolicy(ctx, ai); err != nil {
+		return err
+	}
 	if err := ValidateAuthorizedIntegration(ai, repoResources); err != nil {
 		return err
 	}

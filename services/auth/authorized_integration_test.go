@@ -15,6 +15,7 @@ import (
 	"forgejo.org/models/unittest"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/jwtx"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/services/authz"
 
@@ -234,6 +235,57 @@ func TestUpdateAuthorizedIntegration(t *testing.T) {
 		ai, _ := prep(t)
 		err := InsertAuthorizedIntegration(t.Context(), ai, nil)
 		require.ErrorIs(t, err, authz.ErrSpecifiedReposNone)
+	})
+}
+
+func TestAuthorizedIntegrationScopePolicy(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+
+	ii := NewMockInternalIssuer(t)
+	ii.On("IssuerPlaceholder").Return("urn:forgejo:authorized-issuer:internal:test5")
+	RegisterInternalIssuerForTesting(t, "/fake-jwt-issuer", ii)
+
+	defer test.MockVariableValue(&setting.AccessTokenScopes, setting.AccessTokenScopePolicy{
+		Allowed:                []string{"write:repository"},
+		RequireRepoRestriction: []string{"write:repository"},
+	})()
+
+	newAI := func(userID int64, scope auth.AccessTokenScope) *auth.AuthorizedIntegration {
+		return &auth.AuthorizedIntegration{
+			UserID:           userID,
+			UI:               auth.AuthorizedIntegrationUIGeneric,
+			ResourceAllRepos: true,
+			ClaimRules:       &auth.ClaimRules{},
+			Name:             "policy",
+			Scope:            scope,
+			Issuer:           "urn:forgejo:authorized-issuer:internal:test5",
+		}
+	}
+	rr := []*auth.AuthorizedIntegResourceRepo{{RepoID: 2}}
+
+	t.Run("insert refuses a disallowed scope", func(t *testing.T) {
+		err := InsertAuthorizedIntegration(t.Context(), newAI(2, auth.AccessTokenScopeReadUser), nil)
+		require.ErrorIs(t, err, authz.ErrScopeNotAllowed)
+	})
+
+	t.Run("insert refuses an unrestricted token with a listed scope", func(t *testing.T) {
+		err := InsertAuthorizedIntegration(t.Context(), newAI(2, auth.AccessTokenScopeWriteRepository), nil)
+		require.ErrorIs(t, err, authz.ErrScopeNeedsRepoRestriction)
+	})
+
+	t.Run("insert allows a restricted, allowed scope", func(t *testing.T) {
+		ai := newAI(2, auth.AccessTokenScopeWriteRepository)
+		ai.ResourceAllRepos = false
+		require.NoError(t, InsertAuthorizedIntegration(t.Context(), ai, rr))
+
+		ai.ResourceAllRepos = true
+		require.ErrorIs(t, UpdateAuthorizedIntegration(t.Context(), ai, nil), authz.ErrScopeNeedsRepoRestriction)
+		ai.Scope = auth.AccessTokenScopeWriteUser
+		require.ErrorIs(t, UpdateAuthorizedIntegration(t.Context(), ai, nil), authz.ErrScopeNotAllowed)
+	})
+
+	t.Run("site admin is exempt", func(t *testing.T) {
+		require.NoError(t, InsertAuthorizedIntegration(t.Context(), newAI(1, auth.AccessTokenScopeAll), nil))
 	})
 }
 

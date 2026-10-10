@@ -207,8 +207,8 @@ func CreateAccessToken(ctx *context.APIContext) {
 		t.ResourceAllRepos = true
 	}
 
-	if err := authz.ValidateAccessToken(t, resourceRepos); err != nil {
-		if IsExpiryError(err) {
+	if err := authz.ValidateAccessToken(ctx.User(), t, resourceRepos); err != nil {
+		if IsExpiryError(err) || errors.Is(err, authz.ErrScopeNotAllowed) || errors.Is(err, authz.ErrScopeNeedsRepoRestriction) {
 			ctx.Error(http.StatusUnprocessableEntity, "ValidateAccessToken", err)
 			return
 		}
