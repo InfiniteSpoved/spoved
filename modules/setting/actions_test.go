@@ -279,3 +279,21 @@ func Test_getRunRetentionDaysForActions(t *testing.T) {
 		assert.Equal(t, want, Actions.RunRetentionDays, iniStr)
 	}
 }
+
+func Test_getDefaultTokenPermissionsForActions(t *testing.T) {
+	defer test.MockVariableValue(&Actions, Actions)()
+
+	cfg, err := NewConfigProviderFromData("[actions]\n")
+	require.NoError(t, err)
+	require.NoError(t, loadActionsFrom(cfg))
+	assert.Equal(t, "write", Actions.DefaultTokenPermissions)
+
+	cfg, err = NewConfigProviderFromData("[actions]\nDEFAULT_TOKEN_PERMISSIONS = read\n")
+	require.NoError(t, err)
+	require.NoError(t, loadActionsFrom(cfg))
+	assert.Equal(t, "read", Actions.DefaultTokenPermissions)
+
+	cfg, err = NewConfigProviderFromData("[actions]\nDEFAULT_TOKEN_PERMISSIONS = none\n")
+	require.NoError(t, err)
+	require.ErrorContains(t, loadActionsFrom(cfg), "DEFAULT_TOKEN_PERMISSIONS")
+}

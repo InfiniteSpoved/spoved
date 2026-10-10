@@ -18,7 +18,10 @@ type PreExecutionWarning int64
 // PreExecutionWarningDetails, and so they can't be changed or reordered without creating a migration or a new error
 // code to represent the new argument details.
 const (
+	// WarningCodePermissions is no longer created: `permissions:` was ignored before spoved supported it.
 	WarningCodePermissions PreExecutionWarning = iota + 1
+	// WarningCodePermissionsIgnored: details are the job ID and the ignored `permissions:` keys, comma-separated.
+	WarningCodePermissionsIgnored
 )
 
 func TranslatePreExecutionWarning(lang translation.Locale, run *ActionRun) []template.HTML {
@@ -27,6 +30,8 @@ func TranslatePreExecutionWarning(lang translation.Locale, run *ActionRun) []tem
 		switch code {
 		case WarningCodePermissions:
 			warnings[i] = lang.Tr("actions.workflow.permissions_warning", run.PreExecutionWarningDetails[i]...)
+		case WarningCodePermissionsIgnored:
+			warnings[i] = lang.Tr("actions.workflow.permissions_ignored_warning", run.PreExecutionWarningDetails[i]...)
 		default:
 			warnings[i] = template.HTML(html.EscapeString(fmt.Sprintf("unsupported warning: code=%v details=%#v", code, run.PreExecutionWarningDetails[i])))
 		}

@@ -5,6 +5,7 @@ package actions
 
 import (
 	"context"
+	"strings"
 
 	actions_model "forgejo.org/models/actions"
 	issues_model "forgejo.org/models/issues"
@@ -832,12 +833,12 @@ func calculateWarnings(run *actions_model.ActionRun, swfs []*jobparser.SingleWor
 	warningDetails := [][]any{}
 	for _, swf := range swfs {
 		id, j := swf.Job()
-		// j != nil is a workaround for a jobparser bug -- swf.HasPermissions() doesn't nil-check the job from Job(),
-		// which occurs in an invalid workflow with no job. We need to do `.Job()` here for the job name anyway, so no
-		// harm in handling it here. (https://code.forgejo.org/forgejo/runner/issues/1579)
-		if j != nil && swf.HasPermissions() {
-			warnings = append(warnings, actions_model.WarningCodePermissions)
-			warningDetails = append(warningDetails, []any{id, setting.AppDocsURL("user/api/authorized-integrations/")})
+		if j == nil {
+			continue
+		}
+		if _, ignored := workflowTokenPermissions(swf); len(ignored) > 0 {
+			warnings = append(warnings, actions_model.WarningCodePermissionsIgnored)
+			warningDetails = append(warningDetails, []any{id, strings.Join(ignored, ", ")})
 		}
 	}
 	run.PreExecutionWarningCodes = warnings

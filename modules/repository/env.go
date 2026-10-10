@@ -28,7 +28,7 @@ const (
 	EnvPushTrigger  = "GITEA_PUSH_TRIGGER"
 	EnvIsInternal   = "GITEA_INTERNAL_PUSH"
 	EnvAppURL       = "GITEA_ROOT_URL"
-	EnvActionPerm   = "GITEA_ACTION_PERM"
+	EnvActionTaskID = "GITEA_ACTION_TASK_ID"
 )
 
 type PushTrigger string

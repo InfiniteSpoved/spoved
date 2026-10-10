@@ -141,31 +141,42 @@ func (p *Permission) LogString() string {
 	return fmt.Sprintf(format.String(), args...)
 }
 
+// GetActionRepoPermission returns what the automatic token of an Actions task may do in the repository: in another
+// repository what the Actions user may do, in its own repository its token permissions (every unit at write without
+// them), never above read for a fork pull request.
 func GetActionRepoPermission(ctx context.Context, repo *repo_model.Repository, task *actions_model.ActionTask) (Permission, error) {
-	// straight forward case: an actions task is attempting to access its own repo
-	if task.RepoID == repo.ID {
-		var mode perm_model.AccessMode
-
-		// determine default access mode for repo:
-		if task.IsForkPullRequest {
-			mode = perm_model.AccessModeRead
-		} else {
-			mode = perm_model.AccessModeWrite
-		}
-
-		if err := repo.LoadUnits(ctx); err != nil {
-			return Permission{}, err
-		}
-
-		perm := Permission{
-			AccessMode: mode,
-			Units:      repo.Units,
-		}
-
-		return perm, nil
+	if task.RepoID != repo.ID {
+		return GetUserRepoPermission(ctx, repo, user_model.NewActionsUser())
 	}
 
-	return GetUserRepoPermission(ctx, repo, user_model.NewActionsUser())
+	maxMode := perm_model.AccessModeWrite
+	if task.IsForkPullRequest {
+		maxMode = perm_model.AccessModeRead
+	}
+	if err := repo.LoadUnits(ctx); err != nil {
+		return Permission{}, err
+	}
+	tokenPermissions, err := task.GetTokenPermissions()
+	if err != nil {
+		// tokenPermissions grants nothing
+		log.Error("invalid token permissions of task %d: %v", task.ID, err)
+	}
+
+	perm := Permission{UnitsMode: make(map[unit.Type]perm_model.AccessMode)}
+	if tokenPermissions == nil {
+		perm.AccessMode = maxMode
+	}
+	for _, u := range repo.Units {
+		mode := maxMode
+		if tokenPermissions != nil {
+			mode = min(tokenPermissions[u.Type], maxMode)
+		}
+		if mode > perm_model.AccessModeNone {
+			perm.Units = append(perm.Units, u)
+			perm.UnitsMode[u.Type] = mode
+		}
+	}
+	return perm, nil
 }
 
 // GetUserRepoPermission returns the user permissions to the repository, where the user's permissions may be

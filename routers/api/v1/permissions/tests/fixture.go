@@ -226,6 +226,7 @@ func fixtureSetDoerActionsUser(t *testing.T, permissions *apiv1_permissions.Perm
 		RepoID: repositoryID,
 	}
 	task.IsForkPullRequest = data.DoerActionsIsForkPullRequest()
+	task.TokenPermissions = data.DoerActionsTokenPermissions()
 	task.GenerateToken()
 	{
 		_, err := db.GetEngine(t.Context()).Insert(task)
