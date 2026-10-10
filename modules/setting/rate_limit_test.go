@@ -21,6 +21,12 @@ func TestLoadRateLimit(t *testing.T) {
 	assert.Equal(t, RateLimitClass{60, 600, 5, 50}, RateLimit.Classes["api"])
 	assert.Equal(t, RateLimitClass{10, 100, 0, 0}, RateLimit.Classes["api_write"])
 	assert.Equal(t, RateLimitClass{0.0167, 10, 0, 0}, RateLimit.Classes["auth"])
+	assert.Equal(t, RateLimitClass{1, 20, 0.2, 10}, RateLimit.Classes["heavy"])
+	web, heavy := RateLimit.Classes["web"], RateLimit.Classes["heavy"]
+	assert.Less(t, heavy.AuthenticatedRate, web.AuthenticatedRate)
+	assert.Less(t, heavy.AuthenticatedBurst, web.AuthenticatedBurst)
+	assert.Less(t, heavy.AnonymousRate, web.AnonymousRate)
+	assert.Less(t, heavy.AnonymousBurst, web.AnonymousBurst)
 
 	cfg, err = NewConfigProviderFromData(`
 [rate_limit]
@@ -35,6 +41,9 @@ ANONYMOUS_RATE = 99
 [rate_limit.auth]
 RATE = 2
 BURST = 4
+[rate_limit.heavy]
+AUTHENTICATED_RATE = 0
+ANONYMOUS_BURST = 3
 `)
 	require.NoError(t, err)
 	loadRateLimitFrom(cfg)
@@ -46,4 +55,5 @@ BURST = 4
 	assert.Equal(t, RateLimitClass{0.5, 100, 2, 3}, RateLimit.Classes["git"])
 	assert.Equal(t, RateLimitClass{10, 100, 0, 0}, RateLimit.Classes["api_write"])
 	assert.Equal(t, RateLimitClass{2, 4, 0, 0}, RateLimit.Classes["auth"])
+	assert.Equal(t, RateLimitClass{0, 20, 0.2, 3}, RateLimit.Classes["heavy"])
 }

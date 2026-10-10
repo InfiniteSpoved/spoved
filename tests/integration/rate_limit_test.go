@@ -564,3 +564,108 @@ func TestRateLimitAuthIPEndpointsIPv6Aggregate(t *testing.T) {
 		})
 	}
 }
+
+// heavyRoutes are the web and API routes of the heavy class; each takes a request from a signed-out client.
+var heavyRoutes = []struct{ path, contentType string }{
+	{"/user2/repo1/archive/master.zip", "text/plain"},
+	{"/user2/repo1/search?q=Description", "text/html"},
+	{"/user2/repo1/blame/branch/master/README.md", "text/html"},
+	{"/user2/repo1/commit/65f1bf27bc3bf70f64657658635e66094edbcb4d", "text/html"},
+	{"/user2/repo1/commit/65f1bf27bc3bf70f64657658635e66094edbcb4d.diff", "text/plain"},
+	{"/user2/repo1/compare/master...master", "text/html"},
+	{"/user2/repo1/pulls/2.patch", "text/plain"},
+	{"/user2/commitsonpr/pulls/1/files", "text/html"},
+	{"/api/v1/repos/user2/repo1/archive/master.zip", "application/json"},
+	{"/api/v1/repos/user2/repo1/search/code?q=Description", "application/json"},
+	{"/api/v1/repos/user2/repo1/compare/master...master", "application/json"},
+	{"/api/v1/repos/user2/repo1/git/commits/65f1bf27bc3bf70f64657658635e66094edbcb4d.diff", "application/json"},
+	{"/api/v1/repos/user2/repo1/pulls/2.diff", "application/json"},
+}
+
+func TestRateLimitHeavy(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	mockRateLimit(t, map[string]setting.RateLimitClass{
+		ratelimit.Heavy: {AuthenticatedRate: slow, AuthenticatedBurst: 3, AnonymousRate: slow, AnonymousBurst: 2},
+		ratelimit.Web:   {AuthenticatedRate: slow, AuthenticatedBurst: 100, AnonymousRate: slow, AnonymousBurst: 100},
+		ratelimit.API:   {AuthenticatedRate: slow, AuthenticatedBurst: 100, AnonymousRate: slow, AnonymousBurst: 100},
+	}, "192.0.2.0/24")
+
+	t.Run("heavy routes are limited, in the shape of their group", func(t *testing.T) {
+		for i, route := range heavyRoutes {
+			ip := fmt.Sprintf("198.51.100.%d", i+1)
+			for range 2 {
+				resp := MakeRequest(t, fromIP(NewRequest(t, "GET", route.path), ip), NoExpectedStatus)
+				assert.NotEqual(t, http.StatusTooManyRequests, resp.Code, route.path)
+				assert.Equal(t, "2", resp.Header().Get("X-RateLimit-Limit"), route.path)
+			}
+			resp := MakeRequest(t, fromIP(NewRequest(t, "GET", route.path), ip), http.StatusTooManyRequests)
+			assert.NotEmpty(t, resp.Header().Get("Retry-After"), route.path)
+			assert.Equal(t, "0", resp.Header().Get("X-RateLimit-Remaining"), route.path)
+			assert.Contains(t, resp.Header().Get("Content-Type"), route.contentType, route.path)
+		}
+	})
+
+	t.Run("archive POST is heavy", func(t *testing.T) {
+		for range 2 {
+			resp := MakeRequest(t, fromIP(NewRequest(t, "POST", "/user2/repo1/archive/master.zip"), "198.51.100.200"), NoExpectedStatus)
+			assert.NotEqual(t, http.StatusTooManyRequests, resp.Code)
+		}
+		MakeRequest(t, fromIP(NewRequest(t, "POST", "/user2/repo1/archive/master.zip"), "198.51.100.200"), http.StatusTooManyRequests)
+	})
+
+	t.Run("normal browsing never draws on the heavy budget", func(t *testing.T) {
+		// 198.51.100.1 exhausted its anonymous heavy bucket above
+		for _, path := range []string{"/user2/repo1", "/user2/repo1/src/branch/master/README.md", "/user2/repo1/issues", "/user2/repo1/pulls", "/user2/repo1/pulls/2", "/api/v1/repos/user2/repo1", "/api/v1/version"} {
+			for range 4 {
+				resp := MakeRequest(t, fromIP(NewRequest(t, "GET", path), "198.51.100.1"), NoExpectedStatus)
+				assert.NotEqual(t, http.StatusTooManyRequests, resp.Code, path)
+				assert.Equal(t, "100", resp.Header().Get("X-RateLimit-Limit"), path)
+			}
+		}
+	})
+
+	t.Run("signed in users have their own budget", func(t *testing.T) {
+		session := loginUser(t, "user2")
+		for range 3 {
+			resp := session.MakeRequest(t, fromIP(NewRequest(t, "GET", "/user2/repo1/archive/master.zip"), "198.51.100.1"), NoExpectedStatus)
+			assert.NotEqual(t, http.StatusTooManyRequests, resp.Code)
+		}
+		session.MakeRequest(t, fromIP(NewRequest(t, "GET", "/user2/repo1/archive/master.zip"), "198.51.100.1"), http.StatusTooManyRequests)
+
+		token := getUserToken(t, "user2", auth_model.AccessTokenScopeAll)
+		// the token is the same user: it shares the exhausted budget
+		MakeRequest(t, fromIP(NewRequest(t, "GET", "/api/v1/repos/user2/repo1/archive/master.zip"), "198.51.100.2").AddTokenAuth(token), http.StatusTooManyRequests)
+	})
+
+	t.Run("exempt addresses are not limited", func(t *testing.T) {
+		for range 5 {
+			resp := MakeRequest(t, fromIP(NewRequest(t, "GET", "/user2/repo1/archive/master.zip"), "192.0.2.9"), NoExpectedStatus)
+			assert.NotEqual(t, http.StatusTooManyRequests, resp.Code)
+			assert.Empty(t, resp.Header().Get("X-RateLimit-Limit"))
+		}
+	})
+
+	t.Run("a heavy request also takes a token of the group class", func(t *testing.T) {
+		resp := MakeRequest(t, fromIP(NewRequest(t, "GET", "/user2/repo1/commit/65f1bf27bc3bf70f64657658635e66094edbcb4d"), "198.51.100.150"), http.StatusOK)
+		// the last class to set headers is heavy; web's remaining shows in the stored bucket
+		assert.Equal(t, "2", resp.Header().Get("X-RateLimit-Limit"))
+		assert.Equal(t, 98, ratelimit.Check(ratelimit.Web, "198.51.100.150:1", ratelimit.IPKey("198.51.100.150:1"), false).Remaining)
+	})
+}
+
+func TestRateLimitHeavyOff(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	mockRateLimit(t, map[string]setting.RateLimitClass{
+		ratelimit.Heavy: {AuthenticatedRate: 0, AuthenticatedBurst: 1, AnonymousRate: 0, AnonymousBurst: 1},
+		ratelimit.Web:   {AuthenticatedRate: slow, AuthenticatedBurst: 100, AnonymousRate: slow, AnonymousBurst: 100},
+		ratelimit.API:   {AuthenticatedRate: slow, AuthenticatedBurst: 100, AnonymousRate: slow, AnonymousBurst: 100},
+	}, "")
+
+	for _, route := range heavyRoutes {
+		for range 5 {
+			resp := MakeRequest(t, fromIP(NewRequest(t, "GET", route.path), "198.51.100.1"), NoExpectedStatus)
+			assert.NotEqual(t, http.StatusTooManyRequests, resp.Code, route.path)
+			assert.Equal(t, "100", resp.Header().Get("X-RateLimit-Limit"), route.path)
+		}
+	}
+}

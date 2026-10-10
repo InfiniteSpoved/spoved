@@ -94,6 +94,33 @@ func RateLimit(class string) func(*context.Context) {
 	}
 }
 
+// RateLimitHeavy limits expensive web pages (blame, code search, diffs) in the heavy class; it is a route
+// middleware, run in addition to the web class of the route group.
+func RateLimitHeavy(ctx *context.Context) {
+	if r := checkRateLimit(ctx.Base, ratelimit.Heavy, ctx.Doer, ctx.Authentication); !r.Allowed {
+		renderRateLimited(ctx, r)
+	}
+}
+
+// RateLimitHeavyPlain is RateLimitHeavy for downloads (archives, .diff and .patch), answering in plain text.
+func RateLimitHeavyPlain(ctx *context.Context) {
+	if r := checkRateLimit(ctx.Base, ratelimit.Heavy, ctx.Doer, ctx.Authentication); !r.Allowed {
+		ctx.PlainText(http.StatusTooManyRequests, rateLimitMessage(r))
+	}
+}
+
+// RateLimitAPIHeavy limits expensive API requests (archives, code search, diffs) in the heavy class, in addition
+// to the api class of the API.
+func RateLimitAPIHeavy(ctx *context.APIContext) {
+	r := checkRateLimit(ctx.Base, ratelimit.Heavy, ctx.Doer(), ctx.Authentication())
+	if r.Limit != 0 {
+		ctx.AppendAccessControlExposeHeaders(rateLimitHeaders...)
+	}
+	if !r.Allowed {
+		ctx.JSON(http.StatusTooManyRequests, map[string]string{"message": rateLimitMessage(r)})
+	}
+}
+
 // RateLimitAPI limits API requests in the api or api_write class.
 func RateLimitAPI(ctx *context.APIContext) {
 	r := checkRateLimit(ctx.Base, ratelimit.API, ctx.Doer(), ctx.Authentication())
