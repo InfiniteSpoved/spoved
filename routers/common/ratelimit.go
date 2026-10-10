@@ -24,13 +24,14 @@ var rateLimitHeaders = []string{"X-RateLimit-Limit", "X-RateLimit-Remaining", "X
 // checkRateLimit takes a token for the request from its traffic class and sets the X-RateLimit-* headers.
 // Authenticated requests count per user (or per Actions task), anonymous ones per client IP.
 func checkRateLimit(b *context.Base, class string, doer *user_model.User, ar auth.AuthenticationResult) ratelimit.Result {
-	if ratelimit.IsExempt(b.RemoteAddr()) {
+	addr := ratelimit.ClientAddr(b.Req)
+	if ratelimit.IsExempt(addr) {
 		return ratelimit.Result{Allowed: true}
 	}
 	if setting.RateLimit.ExemptAdmins && doer != nil && doer.IsAdmin && doer.IsActive && !doer.ProhibitLogin {
 		return ratelimit.Result{Allowed: true}
 	}
-	key, authenticated := ratelimit.IPKey(b.RemoteAddr()), false
+	key, authenticated := ratelimit.IPKey(addr), false
 	if ar != nil {
 		if ok, id := ar.ActionsTaskID().Get(); ok {
 			key, authenticated = "task:"+strconv.FormatInt(id, 10), true
@@ -46,7 +47,7 @@ func checkRateLimit(b *context.Base, class string, doer *user_model.User, ar aut
 			class = ratelimit.APIWrite
 		}
 	}
-	r := ratelimit.Check(class, b.RemoteAddr(), key, authenticated)
+	r := ratelimit.Check(class, addr, key, authenticated)
 	setRateLimitHeaders(b, r)
 	if !r.Allowed {
 		log.Debug("Rate limit %s exceeded by %s", class, key)
@@ -104,21 +105,17 @@ func RateLimitAPI(ctx *context.APIContext) {
 	}
 }
 
-// RateLimitAuthIP counts every request per client IP in the auth class, for endpoints that send mail or create
-// accounts. Credential checks use StartAuthAttempt instead, which only counts failures.
+// RateLimitAuthIP counts every request per client IP in the auth class (and, for IPv6, in the shared /48 bucket), for
+// endpoints that send mail or create accounts. The attempt is never marked Succeeded, so nothing is refunded.
+// Credential checks use StartAuthAttempt instead, which only counts failures.
 func RateLimitAuthIP(ctx *context.Context) {
-	if ratelimit.IsExempt(ctx.RemoteAddr()) {
-		return
-	}
-	if r := ratelimit.Check(ratelimit.Auth, ctx.RemoteAddr(), ratelimit.IPKey(ctx.RemoteAddr()), true); !r.Allowed {
-		renderRateLimited(ctx, r)
-	}
+	StartAuthAttempt(ctx)
 }
 
 // StartAuthAttempt starts a credential check counted per client IP and per key in the auth class. When the client
 // is limited, it renders the 429 page and returns nil. Call Succeeded on the attempt after a successful check.
 func StartAuthAttempt(ctx *context.Context, keys ...string) *ratelimit.AuthAttempt {
-	a := ratelimit.StartAuth(ctx.RemoteAddr(), keys...)
+	a := ratelimit.StartAuth(ratelimit.ClientAddr(ctx.Req), keys...)
 	if !a.Allowed {
 		renderRateLimited(ctx, a.Result)
 		return nil

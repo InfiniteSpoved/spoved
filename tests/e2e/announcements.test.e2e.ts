@@ -102,3 +102,32 @@ test('An administrator announces something and a user dismisses it', async ({bro
 
   await page.context().close();
 });
+
+test('An anonymous visitor dismisses an announcement and it stays closed', async ({browser}) => {
+  test.setTimeout(120000);
+
+  const admin = await (await loginAsAdmin(browser)).newPage();
+  const word = fakeName('anonymous');
+
+  await admin.goto('/admin/announcements/new');
+  await admin.getByRole('textbox', {name: 'Message'}).fill(`Hello ${word}`);
+  await admin.getByLabel('Type').selectOption('info');
+  await admin.getByLabel('Dismissible').check();
+  await admin.getByRole('button', {name: 'Create announcement'}).click();
+  await expect(admin.locator('.flash-success')).toContainText('The announcement has been created.');
+  const id = Number(await admin.locator('.site-announcement', {hasText: word}).getAttribute('data-announcement-id'));
+  data.trackAnnouncement(id);
+
+  const context = await browser.newContext({storageState: {cookies: [], origins: []}});
+  const page = await context.newPage();
+  const banner = page.locator('.site-announcement', {hasText: word});
+  await page.goto('/explore/repos');
+  await expect(banner).toBeVisible();
+  await banner.getByRole('button', {name: 'Dismiss'}).click();
+  await expect(page).toHaveURL(/\/explore\/repos$/);
+  await expect(banner).toHaveCount(0);
+  await page.reload();
+  await expect(banner).toHaveCount(0);
+  await context.close();
+  await admin.context().close();
+});

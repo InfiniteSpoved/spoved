@@ -6,6 +6,9 @@ package announcement
 import (
 	"context"
 	"html/template"
+	"slices"
+	"strconv"
+	"strings"
 
 	"forgejo.org/models/db"
 	system_model "forgejo.org/models/system"
@@ -17,7 +20,55 @@ import (
 	"forgejo.org/modules/timeutil"
 )
 
-const cacheKey = "announcements"
+const (
+	cacheKey = "announcements"
+
+	// DismissCookie holds the announcements an anonymous visitor closed, as "id:hash" pairs
+	DismissCookie = "announcements_dismissed"
+
+	maxDismissedCookies = 20
+	maxDismissCookieLen = 512
+)
+
+// CookieHash is the short form of the content hash that is stored in the dismissal cookie
+func CookieHash(a *system_model.Announcement) string {
+	return a.ContentHash()[:8]
+}
+
+// ParseDismissCookie reads the value of the dismissal cookie, skipping malformed items
+func ParseDismissCookie(value string) map[int64]string {
+	result := map[int64]string{}
+	if len(value) > maxDismissCookieLen {
+		return result
+	}
+	for item := range strings.SplitSeq(value, ",") {
+		idStr, hash, ok := strings.Cut(item, ":")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if ok && err == nil && hash != "" {
+			result[id] = hash
+		}
+	}
+	return result
+}
+
+// AddToDismissCookie adds a dismissal to the cookie value, replacing an earlier one for the
+// same announcement and keeping only the newest maxDismissedCookies
+func AddToDismissCookie(value string, id int64, hash string) string {
+	prefix := strconv.FormatInt(id, 10) + ":"
+	var items []string
+	if len(value) <= maxDismissCookieLen {
+		for item := range strings.SplitSeq(value, ",") {
+			if item != "" && !strings.HasPrefix(item, prefix) {
+				items = append(items, item)
+			}
+		}
+	}
+	items = append(items, prefix+hash)
+	if len(items) > maxDismissedCookies {
+		items = items[len(items)-maxDismissedCookies:]
+	}
+	return strings.Join(items, ",")
+}
 
 // Banner is an announcement with its rendered message, ready to be shown
 type Banner struct {
@@ -59,8 +110,9 @@ func loadAll(ctx context.Context) ([]*Banner, error) {
 }
 
 // ActiveForUser returns the announcements to show to the given user (nil for
-// anonymous visitors) right now, most severe first, leaving out the ones they dismissed
-func ActiveForUser(ctx context.Context, doer *user_model.User) ([]*Banner, error) {
+// anonymous visitors) right now, most severe first, leaving out the ones they dismissed.
+// Anonymous visitors' dismissals come from the cookie (see ParseDismissCookie).
+func ActiveForUser(ctx context.Context, doer *user_model.User, anonDismissed map[int64]string) ([]*Banner, error) {
 	all, err := loadAll(ctx)
 	if err != nil {
 		return nil, err
@@ -85,6 +137,10 @@ func ActiveForUser(ctx context.Context, doer *user_model.User) ([]*Banner, error
 		if active, err = system_model.FilterDismissedAnnouncements(ctx, active, doer.ID); err != nil {
 			return nil, err
 		}
+	} else {
+		active = slices.DeleteFunc(active, func(a *system_model.Announcement) bool {
+			return a.CanBeDismissed() && anonDismissed[a.ID] == CookieHash(a)
+		})
 	}
 	system_model.SortAnnouncements(active)
 

@@ -13,7 +13,6 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/log"
-	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
@@ -129,7 +128,7 @@ func LinkAccountPostSignIn(ctx *context.Context) {
 		return
 	}
 
-	attempt := common.StartAuthAttempt(ctx, ratelimit.UserKey(signInForm.UserName))
+	attempt := common.StartAuthAttempt(ctx, auth_method.UserLimitKey(ctx, signInForm.UserName))
 	if attempt == nil {
 		return
 	}
