@@ -388,12 +388,11 @@ func TestZoektChunkHighlights(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "README.md", hit.Filename)
 	require.NotEmpty(t, hit.Lines)
-	highlighted := false
+	var highlighted []int
 	for _, l := range hit.Lines {
 		if strings.Contains(string(l.FormattedContent), `<span class="search-highlight">Description</span>`) {
-			highlighted = true
-			assert.Contains(t, res[0].LineNumbers, l.Num)
+			highlighted = append(highlighted, l.Num)
 		}
 	}
-	assert.True(t, highlighted)
+	assert.Equal(t, []int{3}, highlighted) // README.md: "# repo1", "", "Description for repo1"
 }
