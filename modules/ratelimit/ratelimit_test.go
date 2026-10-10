@@ -135,6 +135,22 @@ func TestStartAuthIPv6AggregateRefund(t *testing.T) {
 	assert.InDelta(t, 1.0, getStore(Auth, true).buckets[IPKey("[2001:db8:1:1::1]:1")].tokens, 0.001)
 }
 
+func TestStartAuthIPv6PerAddressAndExempt(t *testing.T) {
+	setup(t, map[string]setting.RateLimitClass{Auth: {AuthenticatedRate: slow, AuthenticatedBurst: 2}})
+	t.Cleanup(test.MockVariableValue(&setting.RateLimit.ExemptCIDRs, hostmatcher.ParseHostMatchList("", "2001:db8:e::/48")))
+	// the /64 limit still trips on its own while the /48 has plenty of room
+	for i := range 2 {
+		require.True(t, StartAuth("[2001:db8:1:1::1]:1", UserKey(fmt.Sprint("u", i))).Allowed)
+	}
+	assert.False(t, StartAuth("[2001:db8:1:1::2]:1", UserKey("u9")).Allowed, "same /64")
+	assert.InDelta(t, 18.0, getStore(auth48, true).buckets["overflow:2001:db8:1::/48"].tokens, 0.001)
+	// an exempt IPv6 client is never limited and not counted in its /48
+	for range 30 {
+		assert.True(t, StartAuth("[2001:db8:e::1]:1", UserKey("x")).Allowed)
+	}
+	assert.NotContains(t, getStore(auth48, true).buckets, "overflow:2001:db8:e::/48")
+}
+
 func TestUserIDKey(t *testing.T) {
 	assert.Equal(t, "uid:7", UserIDKey(7))
 }
