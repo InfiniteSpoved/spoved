@@ -9,6 +9,7 @@
 	<div class="timeline-avatar text {{if .Issue.PullRequest.HasMerged}}purple
 	{{- else if .Issue.IsClosed}}grey
 	{{- else if .IsPullWorkInProgress}}grey
+	{{- else if .PRTitleRuleError}}red
 	{{- else if .IsFilesConflicted}}grey
 	{{- else if .IsPullRequestBroken}}red
 	{{- else if .IsBlockedByApprovals}}red
@@ -120,6 +121,14 @@
 				</div>
 				{{template "repo/pulls/trust" .}}
 				{{template "repo/issue/view_content/update_branch_by_merge" $}}
+			{{else if .PRTitleRuleError}}
+				<div class="item pr-title-rule-error">
+					<div class="flex-text-inline tw-flex-1">
+						{{svg "octicon-x"}}
+						{{ctx.Locale.Tr "repo.pulls.cannot_merge_title_rule" .PRTitleRuleError}}
+					</div>
+				</div>
+				{{template "repo/pulls/trust" .}}
 			{{else if .Issue.PullRequest.IsChecking}}
 				<div class="item">
 					{{svg "octicon-sync"}}

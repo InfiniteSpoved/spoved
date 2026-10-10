@@ -188,8 +188,11 @@ func TestOrgTwoFactorRequired(t *testing.T) {
 		assert.False(t, saved.RequireTwoFactor)
 		assert.Equal(t, org3.FullName, saved.FullName)
 
-		postOrgTwoFactor(t, owner, "org3", map[string]string{"require_two_factor": "on", "require_two_factor_confirm": "on"}, http.StatusSeeOther)
-		assert.True(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3}).RequireTwoFactor)
+		postOrgTwoFactor(t, owner, "org3", map[string]string{"require_two_factor": "on", "require_two_factor_confirm": "on", "restrict_repo_visibility_change": "on", "private_fork_policy": "2"}, http.StatusSeeOther)
+		saved = unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+		assert.True(t, saved.RequireTwoFactor)
+		assert.True(t, saved.RestrictRepoVisibilityChange)
+		assert.Equal(t, 2, saved.PrivateForkPolicy)
 		// saving again needs no confirmation
 		postOrgTwoFactor(t, owner, "org3", map[string]string{"require_two_factor": "on"}, http.StatusSeeOther)
 		assert.True(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3}).RequireTwoFactor)

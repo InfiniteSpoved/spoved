@@ -194,3 +194,17 @@ func TestActivateUserEmail(t *testing.T) {
 		unittest.AssertExistsAndLoadBean(t, &user_model.EmailAddress{UID: 1001}, "is_activated = false")
 	})
 }
+
+func TestActivateUserEmailLastUsableAdmin(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+
+	// user 1 is the only admin; deactivating its primary email would deactivate it
+	err := user_model.ActivateUserEmail(t.Context(), 1, "user1@example.com", false)
+	require.ErrorIs(t, err, user_model.ErrLastUsableAdmin)
+	unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1}, "is_active = true")
+	unittest.AssertExistsAndLoadBean(t, &user_model.EmailAddress{ID: 9}, "is_activated = true")
+
+	// a secondary email is unaffected
+	require.NoError(t, user_model.ActivateUserEmail(t.Context(), 1, "user1-2@example.com", false))
+	unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1}, "is_active = true")
+}
