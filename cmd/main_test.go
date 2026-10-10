@@ -51,6 +51,32 @@ func runTestApp(app *cli.Command, args ...string) (runResult, error) {
 	app.Writer = outBuf
 	app.ErrWriter = errBuf
 	exitCode := -1
+	// the app loads the config into these, restore them so later tests keep the baseline of unittest.MainTest
+	for _, reset := range []func(){
+		test.MockProtect(&setting.Actions),
+		test.MockProtect(&setting.AppDataPath),
+		test.MockProtect(&setting.AppURL),
+		test.MockProtect(&setting.Attachment),
+		test.MockProtect(&setting.Avatar),
+		test.MockProtect(&setting.Badges),
+		test.MockProtect(&setting.FundingProviders),
+		test.MockProtect(&setting.Git),
+		test.MockProtect(&setting.InstallLock),
+		test.MockProtect(&setting.LFS),
+		test.MockProtect(&setting.Log),
+		test.MockProtect(&setting.OAuth2),
+		test.MockProtect(&setting.Packages),
+		test.MockProtect(&setting.PasswordHashAlgo),
+		test.MockProtect(&setting.PprofDataPath),
+		test.MockProtect(&setting.RateLimit),
+		test.MockProtect(&setting.RepoArchive),
+		test.MockProtect(&setting.RepoAvatar),
+		test.MockProtect(&setting.RepoRootPath),
+		test.MockProtect(&setting.RunUser),
+		test.MockProtect(&setting.SSH),
+	} {
+		defer reset()
+	}
 	defer test.MockVariableValue(&cli.ErrWriter, app.ErrWriter)()
 	defer test.MockVariableValue(&cli.OsExiter, func(code int) {
 		if exitCode == -1 {
