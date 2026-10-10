@@ -217,3 +217,42 @@ func TestCountUserGroupRoleLosses(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, counts)
 }
+
+func TestCountUserGroupRoleLossesAuditor(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+	auditor := organization.UserGroupRoleAuditor
+
+	group := &organization.UserGroup{Name: "auditors", GrantsAuditor: true}
+	require.NoError(t, organization.InsertUserGroup(ctx, group))
+	other := &organization.UserGroup{Name: "other-auditors", GrantsAuditor: true}
+	require.NoError(t, organization.InsertUserGroup(ctx, other))
+
+	setAuditor := func(uid int64, flag, grant bool) {
+		_, err := db.GetEngine(ctx).ID(uid).Cols("is_auditor").Update(&user_model.User{IsAuditor: flag})
+		require.NoError(t, err)
+		if grant {
+			require.NoError(t, db.Insert(ctx, &organization.UserGroupRoleGrant{UID: uid, Role: auditor}))
+		}
+		require.NoError(t, organization.InsertUserGroupMember(ctx, group.ID, uid, 0))
+	}
+	// user2 and user3 have auditor only through this group: counted.
+	setAuditor(2, true, true)
+	setAuditor(3, true, true)
+	// user4 also gets it from another group: not counted.
+	setAuditor(4, true, true)
+	require.NoError(t, organization.InsertUserGroupMember(ctx, other.ID, 4, 0))
+	// user1 has the flag set by hand, without a grant row: not counted.
+	setAuditor(1, true, false)
+	// user5 has a grant row but the flag is already off: not counted.
+	setAuditor(5, false, true)
+
+	counts, err := organization.CountUserGroupRoleLosses(ctx, group.ID, auditor, organization.UserGroupRoleSiteAdmin)
+	require.NoError(t, err)
+	assert.Equal(t, map[organization.UserGroupRole]int{auditor: 2}, counts)
+
+	// a role list without auditor leaves it out
+	counts, err = organization.CountUserGroupRoleLosses(ctx, group.ID, organization.UserGroupRoleSiteAdmin)
+	require.NoError(t, err)
+	assert.Empty(t, counts)
+}
