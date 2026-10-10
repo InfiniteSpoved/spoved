@@ -13,8 +13,10 @@ import (
 	"testing"
 	"time"
 
+	asymkey_model "forgejo.org/models/asymkey"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	"forgejo.org/models/perm"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
@@ -564,6 +566,167 @@ func TestRateLimitAuthIPEndpointsIPv6Aggregate(t *testing.T) {
 			post(path, "2001:db8:3::2")
 			assert.Equal(t, http.StatusTooManyRequests, post(path, "2001:db8:3::3").Code)
 		})
+	}
+}
+
+func servCommand(t *testing.T, keyID int64, ip, verb string, mode int) (int, string) {
+	t.Helper()
+	path := fmt.Sprintf("/api/internal/serv/command/%d/user2/repo1?mode=%d&verb=%s&ip=%s", keyID, mode, verb, url.QueryEscape(ip))
+	recorder := httptest.NewRecorder()
+	routers.InternalRoutes().ServeHTTP(recorder, NewRequest(t, "GET", path).Request)
+	return recorder.Code, recorder.Body.String()
+}
+
+// addUserKey adds a second key to user2, whose fixture key is the only usable one
+func addUserKey(t *testing.T) {
+	t.Helper()
+	require.NoError(t, db.Insert(db.DefaultContext, &asymkey_model.PublicKey{
+		ID: 901, OwnerID: 2, Name: "second", Fingerprint: "SHA256:second901", Content: "ssh-ed25519 AAAAsecond901",
+		Mode: perm.AccessModeWrite, Type: asymkey_model.KeyTypeUser,
+	}))
+}
+
+func sshClass(keyBurst, ipBurst int) map[string]setting.RateLimitClass {
+	return map[string]setting.RateLimitClass{
+		ratelimit.SSH: {AuthenticatedRate: slow, AuthenticatedBurst: keyBurst, AnonymousRate: slow, AnonymousBurst: ipBurst},
+	}
+}
+
+// AC2, AC3: every verb that reaches serv is limited per key, other keys and IPs are not affected
+func TestRateLimitServ(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	addUserKey(t)
+	mockRateLimit(t, sshClass(2, 3), "192.0.2.0/24")
+
+	verbs := map[string]int{"git-upload-pack": 1, "git-receive-pack": 2, "git-upload-archive": 1, "git-lfs-authenticate": 1, "git-lfs-transfer": 1}
+	for verb, mode := range verbs {
+		ratelimit.ResetForTest()
+		for i := range 2 {
+			code, _ := servCommand(t, 1, fmt.Sprintf("198.51.100.%d", i), verb, mode)
+			assert.Equal(t, http.StatusOK, code, verb)
+		}
+		code, body := servCommand(t, 1, "198.51.100.9", verb, mode)
+		assert.Equal(t, http.StatusTooManyRequests, code, verb)
+		assert.Contains(t, body, "rate limit exceeded, retry in", verb)
+	}
+
+	ratelimit.ResetForTest()
+	servCommand(t, 1, "198.51.100.1", "git-upload-pack", 1)
+	servCommand(t, 1, "198.51.100.1", "git-upload-pack", 1)
+	// another key from the same IP, and the same key limited from any IP
+	code, _ := servCommand(t, 901, "198.51.100.1", "git-upload-pack", 1)
+	assert.Equal(t, http.StatusOK, code)
+	code, _ = servCommand(t, 1, "198.51.100.1", "git-upload-pack", 1)
+	assert.Equal(t, http.StatusTooManyRequests, code)
+	// the IP budget (3) is spent now, for keys that still have tokens, and other IPs are fine
+	code, _ = servCommand(t, 901, "198.51.100.1", "git-upload-pack", 1)
+	assert.Equal(t, http.StatusTooManyRequests, code)
+	code, _ = servCommand(t, 901, "198.51.100.2", "git-upload-pack", 1)
+	assert.Equal(t, http.StatusOK, code)
+
+	// IPv6 addresses of one /64 share a bucket
+	for i, ip := range []string{"2001:db8:1:1::1", "2001:db8:1:1::2", "2001:db8:1:1::3"} {
+		code, _ = servCommand(t, int64(100+i), ip, "git-upload-pack", 1) // unknown keys are not found, but counted
+		assert.NotEqual(t, http.StatusTooManyRequests, code)
+	}
+	code, _ = servCommand(t, 200, "2001:db8:1:1::4", "git-upload-pack", 1)
+	assert.Equal(t, http.StatusTooManyRequests, code)
+
+	// an IPv4-mapped address is the IPv4 address
+	ratelimit.ResetForTest()
+	for i, ip := range []string{"198.51.100.7", "::ffff:198.51.100.7", "198.51.100.7"} {
+		code, _ = servCommand(t, int64(300+i), ip, "git-upload-pack", 1)
+		assert.NotEqual(t, http.StatusTooManyRequests, code)
+	}
+	code, _ = servCommand(t, 303, "::ffff:198.51.100.7", "git-upload-pack", 1)
+	assert.Equal(t, http.StatusTooManyRequests, code)
+
+	// a zoned IPv6 address is the address without the zone, not an invalid one
+	ratelimit.ResetForTest()
+	for i, ip := range []string{"2001:db8:9::1%25eth0", "2001:db8:9::2", "2001:db8:9::3"} {
+		code, _ = servCommand(t, int64(400+i), ip, "git-upload-pack", 1)
+		assert.NotEqual(t, http.StatusTooManyRequests, code)
+	}
+	code, _ = servCommand(t, 403, "2001:db8:9::4%25eth1", "git-upload-pack", 1)
+	assert.Equal(t, http.StatusTooManyRequests, code)
+
+	// exempt IPs are never limited
+	for range 6 {
+		code, _ = servCommand(t, 1, "192.0.2.5", "git-upload-pack", 1)
+		assert.Equal(t, http.StatusOK, code)
+	}
+}
+
+// AC2: a missing or unparsable IP skips the IP budget (the IP allowlist refuses it when SSH is enforced), the key
+// budget still applies
+func TestRateLimitServNoIP(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	addUserKey(t)
+	mockRateLimit(t, sshClass(2, 1), "")
+
+	for _, ip := range []string{"", "garbage"} {
+		ratelimit.ResetForTest()
+		for range 2 {
+			code, _ := servCommand(t, 1, ip, "git-upload-pack", 1)
+			assert.Equal(t, http.StatusOK, code)
+		}
+		code, _ := servCommand(t, 1, ip, "git-upload-pack", 1)
+		assert.Equal(t, http.StatusTooManyRequests, code)
+		// the IP bucket (burst 1) was never touched
+		code, _ = servCommand(t, 901, "198.51.100.1", "git-upload-pack", 1)
+		assert.Equal(t, http.StatusOK, code)
+	}
+}
+
+// AC4: a deploy key is limited by its own key, never as the repository owner; admins are exempt, deploy keys not
+func TestRateLimitServDeployKeyAndAdmin(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	require.NoError(t, db.Insert(db.DefaultContext, &asymkey_model.PublicKey{
+		ID: 900, Name: "dk", Fingerprint: "SHA256:deploykey900", Content: "ssh-ed25519 AAAAdeploy900",
+		Mode: perm.AccessModeRead, Type: asymkey_model.KeyTypeDeploy,
+	}))
+	require.NoError(t, db.Insert(db.DefaultContext, &asymkey_model.DeployKey{KeyID: 900, RepoID: 1, Name: "dk", Mode: perm.AccessModeRead}))
+	mockRateLimit(t, sshClass(2, 100), "")
+
+	for range 2 {
+		code, body := servCommand(t, 900, "198.51.100.1", "git-upload-pack", 1)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Contains(t, body, `"DeployKeyID"`)
+	}
+	code, _ := servCommand(t, 900, "198.51.100.1", "git-upload-pack", 1)
+	assert.Equal(t, http.StatusTooManyRequests, code)
+	// the owner's own key has its own budget
+	code, _ = servCommand(t, 1, "198.51.100.1", "git-upload-pack", 1)
+	assert.Equal(t, http.StatusOK, code)
+
+	// ExemptAdmins applies to the keys of an admin, not to deploy keys
+	ratelimit.ResetForTest()
+	t.Cleanup(test.MockVariableValue(&setting.RateLimit.ExemptAdmins, true))
+	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	user.IsAdmin = true
+	require.NoError(t, user_model.UpdateUserCols(db.DefaultContext, user, "is_admin"))
+	for range 5 {
+		code, _ = servCommand(t, 1, "198.51.100.1", "git-upload-pack", 1)
+		assert.Equal(t, http.StatusOK, code)
+	}
+	servCommand(t, 900, "198.51.100.1", "git-upload-pack", 1)
+	servCommand(t, 900, "198.51.100.1", "git-upload-pack", 1)
+	code, _ = servCommand(t, 900, "198.51.100.1", "git-upload-pack", 1)
+	assert.Equal(t, http.StatusTooManyRequests, code)
+}
+
+func TestRateLimitServDisabled(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	ratelimit.ResetForTest()
+	for range 5 {
+		code, _ := servCommand(t, 1, "198.51.100.1", "git-upload-pack", 1)
+		assert.Equal(t, http.StatusOK, code)
+	}
+	// enabled, but the class is off
+	mockRateLimit(t, sshClass(0, 0), "")
+	for range 5 {
+		code, _ := servCommand(t, 1, "198.51.100.1", "git-upload-pack", 1)
+		assert.Equal(t, http.StatusOK, code)
 	}
 }
 
