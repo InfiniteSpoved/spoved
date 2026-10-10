@@ -40,7 +40,7 @@ plan)
   # depth: commits to fetch, 0 for the full history
   tasks='{"task":"lint","args":"","depth":"1"},{"task":"frontend","args":"","depth":"1"}'
   if [ "$backend" = true ]; then
-    for i in $(seq 1 14); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 14\",\"depth\":\"1\"}"; done
+    for i in 1 2 3 4; do tasks+=",{\"task\":\"unit\",\"args\":\"$i 4\",\"depth\":\"1\"}"; done
   fi
   if [ "$FULL" = true ]; then
     # only the selection of changed end-to-end tests needs the history
@@ -81,15 +81,11 @@ unit)
   timeout 120 bash -c 'until grep -q "successfully listens" "$RUNNER_TEMP/azurite.log"; do sleep 1; done' || { cat "$RUNNER_TEMP/azurite.log"; exit 1; }
   # the packages `make test-backend` tests, as computed by the Makefile
   packages=$(make -s --eval='ci-list-test-packages: compute-go-test-packages ; @echo $(GO_TEST_PACKAGES)' ci-list-test-packages \
-    | tr ' ' '\n' | .github/ci/shard.sh 2 4 | paste -sd' ')
-  # temporary probe: bits of a hash of the package that makes the shard fail
-  p=$(tr ' ' '\n' <<< "$packages" | .github/ci/shard.sh 10 12 | .github/ci/shard.sh 8 8)
-  h=$(printf '%s' "$p" | sha256sum | cut -c1-4)
-  n=$(wc -w <<< "$packages")
-  if [ "$1" -le 13 ]; then
-    exit $(( (0x$h >> ($1 - 1)) & 1 ))
-  fi
-  exit $(( n != 95 ))
+    | tr ' ' '\n' | .github/ci/shard.sh "$1" "$2" | paste -sd' ')
+  echo "Testing $(wc -w <<< "$packages") packages"
+  RACE_ENABLED=true TEST_AZURITE_URL=127.0.0.1:10000 make test-backend GO_TEST_PACKAGES="$packages"
+  # check the tests left the source tree untouched
+  make test-check
   ;;
 
 migrations)

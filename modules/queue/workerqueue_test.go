@@ -191,11 +191,12 @@ func TestWorkerPoolQueueActiveWorkers(t *testing.T) {
 		require.NoError(t, q.Push(i))
 	}
 
-	// wait for states instead of sleeping a fixed time: the timing is too tight for a loaded CI machine
-	assert.Eventually(t, func() bool { return q.GetWorkerActiveNumber() == 1 }, 5*time.Second, 10*time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	assert.Equal(t, 1, q.GetWorkerNumber())
-	assert.Eventually(t, func() bool { return q.GetWorkerActiveNumber() == 0 }, 5*time.Second, 10*time.Millisecond)
+	assert.Equal(t, 1, q.GetWorkerActiveNumber())
+	time.Sleep(500 * time.Millisecond)
 	assert.Equal(t, 1, q.GetWorkerNumber())
+	assert.Equal(t, 0, q.GetWorkerActiveNumber())
 	time.Sleep(workerIdleDuration)
 	assert.Equal(t, 1, q.GetWorkerNumber()) // there is at least one worker after the queue begins working
 	stop()
@@ -206,11 +207,14 @@ func TestWorkerPoolQueueActiveWorkers(t *testing.T) {
 		require.NoError(t, q.Push(i))
 	}
 
-	assert.Eventually(t, func() bool { return q.GetWorkerActiveNumber() == 3 }, 5*time.Second, 10*time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	assert.Equal(t, 3, q.GetWorkerNumber())
-	assert.Eventually(t, func() bool { return q.GetWorkerActiveNumber() == 0 }, 5*time.Second, 10*time.Millisecond)
-	// idle workers exit after workerIdleDuration, down to the one that stays
-	assert.Eventually(t, func() bool { return q.GetWorkerNumber() == 1 }, 5*time.Second, 10*time.Millisecond)
+	assert.Equal(t, 3, q.GetWorkerActiveNumber())
+	time.Sleep(500 * time.Millisecond)
+	assert.Equal(t, 3, q.GetWorkerNumber())
+	assert.Equal(t, 0, q.GetWorkerActiveNumber())
+	time.Sleep(workerIdleDuration)
+	assert.Equal(t, 1, q.GetWorkerNumber()) // there is at least one worker after the queue begins working
 	stop()
 }
 

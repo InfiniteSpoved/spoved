@@ -62,21 +62,9 @@ func InitCustomSettings(confFileName string) {
 		if err != nil {
 			log.Fatalf("couldn't read config template: %s", templateFile)
 		}
-		// test packages run in parallel and each one writes this file: replace it atomically,
-		// or another package may read it half-written
-		tmp, err := os.CreateTemp(filepath.Join(root, "tests"), confFileName+".*")
-		if err == nil {
-			_, err = tmp.Write(content)
-			if closeErr := tmp.Close(); err == nil {
-				err = closeErr
-			}
-			if err == nil {
-				err = os.Rename(tmp.Name(), filepath.Join(root, "tests", confFileName))
-			}
-			_ = os.Remove(tmp.Name())
-		}
+		err = os.WriteFile(filepath.Join(root, "tests", confFileName), content, 0o644)
 		if err != nil {
-			log.Fatalf("couldn't write config: %s: %v", confFileName, err)
+			log.Fatalf("couldn't write config: %s", confFileName)
 		}
 		setting.CustomConf = filepath.Join(root, "tests", confFileName)
 	}

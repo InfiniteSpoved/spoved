@@ -152,7 +152,7 @@ func TestURLAllowedSSH(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 
 	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "user2"})
-	sshURL := "ssh://git@1.2.3.4/gitgay/forgejo" // an IP needs no DNS lookup
+	sshURL := "ssh://git@git.gay/gitgay/forgejo"
 
 	t.Run("Migrate URL", func(t *testing.T) {
 		require.Error(t, IsMigrateURLAllowed(sshURL, user))
