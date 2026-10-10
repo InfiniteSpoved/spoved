@@ -457,7 +457,7 @@ func ToTeams(ctx context.Context, teams []*organization.Team, loadOrgs bool) ([]
 		if loadOrgs {
 			apiOrg, ok := cache[t.OrgID]
 			if !ok {
-				org, err := organization.GetOrgByID(ctx, t.OrgID)
+				org, err := organization.GetOrgByIDIncludingTrashed(ctx, t.OrgID)
 				if err != nil {
 					return nil, err
 				}
