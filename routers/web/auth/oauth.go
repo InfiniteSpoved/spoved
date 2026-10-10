@@ -1445,7 +1445,7 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 			SetLastLogin: true,
 		}
 		opts.IsAdmin, opts.IsRestricted = getUserAdminAndRestrictedFromGroupClaims(oauth2Source, &gothUser)
-		if err := user_service.UpdateUser(ctx, u, opts); err != nil {
+		if err := user_service.UpdateUserFromSource(ctx, u, opts, source.Name); err != nil {
 			ctx.ServerError("UpdateUser", err)
 			return
 		}
@@ -1498,7 +1498,7 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 	opts := &user_service.UpdateOptions{}
 	opts.IsAdmin, opts.IsRestricted = getUserAdminAndRestrictedFromGroupClaims(oauth2Source, &gothUser)
 	if opts.IsAdmin.Has() || opts.IsRestricted.Has() {
-		if err := user_service.UpdateUser(ctx, u, opts); err != nil {
+		if err := user_service.UpdateUserFromSource(ctx, u, opts, source.Name); err != nil {
 			ctx.ServerError("UpdateUser", err)
 			return
 		}
