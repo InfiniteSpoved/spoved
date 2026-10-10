@@ -188,7 +188,7 @@ func (source *Source) Sync(ctx context.Context, updateExisting bool) error {
 					opts.IsRestricted = optional.Some(su.IsRestricted)
 				}
 
-				if err := user_service.UpdateUser(ctx, usr, opts); err != nil {
+				if err := user_service.UpdateUserFromSource(ctx, usr, opts, source.authSource.Name); err != nil {
 					log.Error("SyncExternalUsers[%s]: Error updating user %s: %v", source.authSource.Name, usr.Name, err)
 				}
 

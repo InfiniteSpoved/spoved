@@ -404,6 +404,34 @@ func TestLDAPUserGroupAdminWinsOverAdminFilter(t *testing.T) {
 	assert.False(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "fry"}).IsAdmin)
 }
 
+// An LDAP login that would remove the admin flag of the last usable admin keeps it and succeeds.
+func TestLDAPLoginKeepsLastAdmin(t *testing.T) {
+	if skipLDAPTests() {
+		t.Skip()
+		return
+	}
+	defer tests.PrepareTestEnv(t)()
+	addAuthSourceLDAP(t, "", "", "", "")
+	loginUserWithPassword(t, "fry", "fry")
+	setAdmin := func(name string, admin bool) {
+		t.Helper()
+		u := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: name})
+		u.IsAdmin = admin
+		require.NoError(t, user_model.UpdateUserCols(db.DefaultContext, u, "is_admin"))
+	}
+
+	// fry, not matched by the admin filter, is the only admin
+	setAdmin("fry", true)
+	setAdmin("user1", false)
+	loginUserWithPassword(t, "fry", "fry")
+	assert.True(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "fry"}).IsAdmin)
+
+	// with another usable admin the admin filter applies
+	setAdmin("user1", true)
+	loginUserWithPassword(t, "fry", "fry")
+	assert.False(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "fry"}).IsAdmin)
+}
+
 func TestLDAPUserSigninFailed(t *testing.T) {
 	if skipLDAPTests() {
 		t.Skip()
