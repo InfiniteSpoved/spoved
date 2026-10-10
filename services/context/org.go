@@ -303,6 +303,13 @@ func HandleOrgAssignment(ctx *Context, args ...bool) {
 	ctx.Data["CanReadPackages"] = ctx.Org.CanReadUnit(ctx, unit.TypePackages)
 	ctx.Data["CanReadCode"] = ctx.Org.CanReadUnit(ctx, unit.TypeCode)
 
+	domains, err := organization.GetVerifiedDomains(ctx, org.ID)
+	if err != nil {
+		ctx.ServerError("GetVerifiedDomains", err)
+		return
+	}
+	ctx.Data["VerifiedDomains"] = domains[:min(len(domains), 3)]
+
 	ctx.Data["IsFollowing"] = ctx.Doer != nil && user_model.IsFollowing(ctx, ctx.Doer.ID, ctx.ContextUser.ID)
 	if len(ctx.ContextUser.Description) != 0 {
 		content, err := markdown.RenderString(&markup.RenderContext{

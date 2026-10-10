@@ -1232,6 +1232,12 @@ func registerRoutes(m *web.Route) {
 					m.Post("/unblock", org_setting.BlockedUsersUnblock)
 				})
 				m.Combo("/units").Get(org_setting.Units).Post(org_setting.UnitsPost)
+				m.Group("/verified_domains", func() {
+					m.Get("", org.VerifiedDomains)
+					m.Post("/verify", org.VerifiedDomainsVerify)
+					m.Post("/remove", org.VerifiedDomainsRemove)
+					m.Post("/require", org.VerifiedDomainsRequire)
+				})
 				m.Get("/storage_overview", org_setting.StorageOverview)
 				m.Get("/access-report", org_setting.AccessReport)
 
