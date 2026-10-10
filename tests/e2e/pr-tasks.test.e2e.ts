@@ -4,7 +4,10 @@
 // @watch start
 // templates/repo/issue/view_content/context_menu.tmpl
 // templates/repo/issue/view_content/sidebar/pull_tasks.tmpl
+// templates/repo/issue/view_content/sidebar/pull_attention.tmpl
+// templates/shared/issuelist.tmpl
 // routers/web/repo/pull_task.go
+// routers/web/repo/pull_attention.go
 // web_src/js/features/repo-diff.js
 // @watch end
 
@@ -58,4 +61,29 @@ test('PR: Create a task from a review comment and complete it', async ({page}) =
   await conversation.locator('.comment-header-right.actions .dialog-dropdown .opener').click();
   await conversation.locator('.comment-header-right.actions .dialog-dropdown dialog .delete-comment').click();
   await expect(page.locator('.conversation-holder').filter({hasText: commentText})).toHaveCount(0);
+});
+
+test('PR: Add a user to the attention set and remove them', async ({page}) => {
+  const response = await page.goto('/user2/repo1/pulls/5');
+  expect(response?.status()).toBe(200);
+  const attention = page.locator('#pull-attention');
+  await attention.getByRole('combobox', {name: 'Choose a person'}).selectOption('user4');
+  await attention.getByRole('textbox', {name: 'Reason (optional)'}).fill('Please check the docs');
+  await attention.getByRole('button', {name: 'Add'}).click();
+
+  const member = page.locator('#pull-attention li').filter({hasText: 'user4'});
+  await expect(member).toBeVisible();
+  await expect(member.locator('[data-tooltip-content]').first()).toHaveAttribute('data-tooltip-content', 'Added by user2: Please check the docs');
+  await screenshot(page);
+
+  // the pull request list marks it
+  await page.goto('/user2/repo1/pulls');
+  const marker = page.locator('#issue-list .flex-item').filter({hasText: 'pull5'}).locator('.pull-attention-marker');
+  await expect(marker).toBeVisible();
+  await expect(marker).toHaveAttribute('data-tooltip-content', /^Waiting on: .*user4/);
+
+  // clean up
+  await page.goto('/user2/repo1/pulls/5');
+  await member.getByRole('button', {name: 'Remove from attention'}).click();
+  await expect(page.locator('#pull-attention li').filter({hasText: 'user4'})).toHaveCount(0);
 });
