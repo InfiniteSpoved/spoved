@@ -1890,5 +1890,16 @@
 	"admin.actions.usage.top_minutes": "Repositories with the most job minutes",
 	"admin.actions.usage.top_failures": "Repositories with the most failed runs",
 	"admin.actions.usage.none": "No jobs finished in this period.",
-	"admin.actions.usage.note": "Only jobs that started in the period and have finished count. Repositories in the trash or without Actions are left out."
+	"admin.actions.usage.note": "Only jobs that started in the period and have finished count. Repositories in the trash or without Actions are left out.",
+	"repo.settings.wiki_source_separate": "Pages in the separate wiki repository",
+	"repo.settings.wiki_source_folder": "Pages from a folder of this repository",
+	"repo.settings.wiki_folder": "Folder",
+	"repo.settings.wiki_folder_desc": "A folder of this repository, for example docs. Its Markdown files become the wiki pages and are edited like any other file.",
+	"repo.settings.wiki_branch": "Branch",
+	"repo.settings.wiki_branch_desc": "Leave empty to use the default branch.",
+	"repo.settings.wiki_folder_error": "The wiki folder must be a folder inside this repository, for example docs.",
+	"repo.settings.wiki_branch_error": "The wiki branch does not exist.",
+	"repo.wiki.folder_missing": "The folder %[1]s does not exist on the branch %[2]s.",
+	"repo.wiki.folder_edit_page": "Edit this page",
+	"repo.wiki.folder_truncated": "Only the first %d pages are listed."
 }
