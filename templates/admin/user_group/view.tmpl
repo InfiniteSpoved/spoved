@@ -78,8 +78,13 @@
 					<div class="flex-item tw-items-center">
 						<div class="flex-item-main">
 							<div class="flex-item-title">
-								<a href="{{.Org.HomeLink}}">{{.Org.Name}}</a> /
-								<a href="{{.Org.OrganisationLink}}/teams/{{.Team.LowerName | PathEscape}}">{{.Team.Name}}</a>
+								{{if .Org.TrashedUnix}}
+									{{.Org.Name}} / {{.Team.Name}}
+									<span class="text grey tw-italic">({{ctx.Locale.Tr "admin.user_groups.team_org_trashed"}})</span>
+								{{else}}
+									<a href="{{.Org.HomeLink}}">{{.Org.Name}}</a> /
+									<a href="{{.Org.OrganisationLink}}/teams/{{.Team.LowerName | PathEscape}}">{{.Team.Name}}</a>
+								{{end}}
 							</div>
 						</div>
 					</div>
