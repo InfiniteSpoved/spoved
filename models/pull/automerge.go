@@ -86,7 +86,9 @@ func GetScheduledMergeByPullID(ctx context.Context, pullID int64) (bool, *AutoMe
 	}
 
 	doer, err := user_model.GetPossibleUserByID(ctx, scheduledPRM.DoerID)
-	if err != nil {
+	if user_model.IsErrUserNotExist(err) {
+		doer = user_model.NewGhostUser()
+	} else if err != nil {
 		return false, nil, err
 	}
 
@@ -109,6 +111,12 @@ func DeleteScheduledAutoMerge(ctx context.Context, pullID int64) error {
 
 	_, err = db.GetEngine(ctx).ID(scheduledPRM.ID).Delete(&AutoMerge{})
 	return err
+}
+
+// DeleteAutoMergeByID deletes an auto merge by its own ID and reports whether this call deleted it
+func DeleteAutoMergeByID(ctx context.Context, id int64) (bool, error) {
+	affected, err := db.GetEngine(ctx).ID(id).Delete(&AutoMerge{})
+	return affected == 1, err
 }
 
 // TakeDueScheduledAutoMerges clears the time of the scheduled merges that are due and returns their pull IDs,

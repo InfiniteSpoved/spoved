@@ -16,14 +16,17 @@ import (
 
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/perm"
 	pull_model "forgejo.org/models/pull"
+	repo_model "forgejo.org/models/repo"
 	unit_model "forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
+	repo_module "forgejo.org/modules/repository"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/services/automerge"
@@ -205,17 +208,20 @@ func TestPullAutoMergeFromFork(t *testing.T) {
 		_, err = db.GetEngine(t.Context()).ID(am.ID).Update(am)
 		require.NoError(t, err)
 
-		// Trigger automerge background handler, then check PR is *not* merged because the automerge actor does not have
-		// write permission on the repo:
+		// Trigger automerge background handler, then check PR is *not* merged and the auto merge is cancelled because
+		// the automerge actor does not have write permission on the repo:
 		pullRequest = unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pullRequest.ID})
 		automerge.StartPRCheckAndAutoMerge(t.Context(), pullRequest)
 		pullRequest = unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pullRequest.ID})
 		assert.Empty(t, pullRequest.MergedCommitID)
+		unittest.AssertNotExistsBean(t, &pull_model.AutoMerge{PullID: pullRequest.ID})
+		unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{IssueID: pullRequest.IssueID, Type: issues_model.CommentTypePRUnScheduledToAutoMerge, PosterID: forkRepo.OwnerID})
 
-		// Restore the automerge actor to a user who does have write permission:
-		am.DoerID = baseRepo.OwnerID
-		_, err = db.GetEngine(t.Context()).ID(am.ID).Update(am)
-		require.NoError(t, err)
+		// Schedule it again by a user who does have write permission:
+		req = NewRequestWithJSON(t, "POST", fmt.Sprintf("/api/v1/repos/%s/%s/pulls/%d/merge", baseRepo.OwnerName, baseRepo.Name, pullIssue.Index),
+			&forms.MergePullRequestForm{Do: "squash", MergeWhenChecksSucceed: true}).
+			AddTokenAuth(token)
+		MakeRequest(t, req, http.StatusCreated)
 
 		// Trigger automerge background handler, then check PR is merged:
 		pullRequest = unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pullRequest.ID})
@@ -567,6 +573,472 @@ func TestAPIPullScheduledAfter(t *testing.T) {
 			assert.True(t, apiPR.HasMerged)
 			assert.Nil(t, apiPR.ScheduledAfter)
 			assert.Nil(t, apiPR.GiveUpAfter)
+		})
+	})
+}
+
+func TestPullAutoMergePermissionLoss(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		owner := forgery.CreateUser(t, nil)
+		org := forgery.CreateOrganisation(t, owner)
+		reviewer := forgery.CreateUser(t, nil)
+		repo := forgery.CreateRepository(t, org.AsUser(), &forgery.CreateRepositoryOptions{
+			Files:         forgery.FilesInit{},
+			Collaborators: map[*user_model.User]perm.AccessMode{reviewer: perm.AccessModeWrite},
+		})
+		forgery.EnableRepoUnits(t, repo, unit_model.TypeCode, unit_model.TypePullRequests)
+		session := loginUser(t, owner.Name)
+		reviewerSession := loginUser(t, reviewer.Name)
+		statusCtx := APITestContext{Session: session, Token: getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteRepository), Username: org.Name, Reponame: repo.Name}
+
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/%s/settings/branches/edit", repo.FullName()), map[string]string{
+			"rule_name":             "main",
+			"required_approvals":    "1",
+			"enable_status_check":   "true",
+			"status_check_contexts": "ci",
+		}), http.StatusSeeOther)
+
+		gitRepo, err := gitrepo.OpenRepository(t.Context(), repo)
+		require.NoError(t, err)
+		defer gitRepo.Close()
+
+		now := time.Now()
+		defer timeutil.MockUnset()
+		timeutil.MockSet(now)
+		passTime := func() {
+			now = now.Add(2 * time.Hour)
+			timeutil.MockSet(now)
+			require.NoError(t, automerge.StartDueScheduledAutoMerges(t.Context()))
+		}
+
+		pulls := 0
+		newPull := func(t *testing.T) (*issues_model.PullRequest, string) {
+			pulls++
+			branch := fmt.Sprintf("pull-%d", pulls)
+			testEditFileToNewBranch(t, session, org.Name, repo.Name, "main", branch, "README.md", branch)
+			testPullCreate(t, session, org.Name, repo.Name, true, "main", branch, branch)
+			pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, HeadBranch: branch})
+			sha, err := gitRepo.GetRefCommitID(pr.GetGitRefName())
+			require.NoError(t, err)
+			return pr, sha
+		}
+		approve := func(t *testing.T, pr *issues_model.PullRequest, sha string) {
+			testSubmitReview(t, reviewerSession, org.Name, repo.Name, strconv.FormatInt(pr.Index, 10), sha, "approve", http.StatusOK)
+		}
+		ciPasses := func(t *testing.T, sha string) {
+			doAPICreateCommitStatus(statusCtx, sha, api.CreateStatusOption{State: api.CommitStatusSuccess, Context: "ci"})(t)
+		}
+		newScheduler := func(t *testing.T) *user_model.User {
+			scheduler := forgery.CreateUser(t, nil)
+			require.NoError(t, repo_module.AddCollaborator(t.Context(), repo, scheduler))
+			return scheduler
+		}
+		schedule := func(t *testing.T, scheduler *user_model.User, pr *issues_model.PullRequest, at bool) {
+			apiCtx := NewAPITestContext(t, scheduler.Name, repo.Name, auth_model.AccessTokenScopeWriteRepository)
+			apiCtx.ExpectedCode = http.StatusCreated
+			form := &forms.MergePullRequestForm{Do: "merge", MergeWhenChecksSucceed: true}
+			if at {
+				form.ScheduledAfter = now.Add(time.Hour).Format(time.RFC3339)
+			}
+			doAPIMergePullRequestForm(t, apiCtx, org.Name, repo.Name, pr.Index, form)
+			unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID, DoerID: scheduler.ID})
+		}
+		isMerged := func(pr *issues_model.PullRequest) bool {
+			return unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID}).HasMerged
+		}
+		assertCancelled := func(t *testing.T, pr *issues_model.PullRequest, doerID int64) {
+			t.Helper()
+			unittest.AssertNotExistsBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+			unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{IssueID: pr.IssueID, Type: issues_model.CommentTypePRUnScheduledToAutoMerge, PosterID: doerID})
+			assert.False(t, isMerged(pr))
+		}
+
+		t.Run("Permission kept merges", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			scheduler := newScheduler(t)
+			pr, sha := newPull(t)
+			approve(t, pr, sha)
+			ciPasses(t, sha)
+			schedule(t, scheduler, pr, true)
+			passTime()
+			assert.True(t, isMerged(pr))
+		})
+
+		for _, c := range []struct {
+			name    string
+			lose    func(t *testing.T, scheduler *user_model.User)
+			restore func(t *testing.T)
+		}{
+			{name: "lost removed", lose: func(t *testing.T, scheduler *user_model.User) {
+				require.NoError(t, repo_module.DeleteCollaboration(t.Context(), repo, scheduler.ID))
+			}},
+			{name: "lost read", lose: func(t *testing.T, scheduler *user_model.User) {
+				require.NoError(t, repo_module.ChangeCollaborationAccessMode(t.Context(), repo, scheduler.ID, perm.AccessModeRead))
+			}},
+			{name: "lost deactivated", lose: func(t *testing.T, scheduler *user_model.User) {
+				require.NoError(t, user_model.UpdateUserCols(t.Context(), &user_model.User{ID: scheduler.ID, IsActive: false}, "is_active"))
+			}},
+			{name: "lost prohibited", lose: func(t *testing.T, scheduler *user_model.User) {
+				require.NoError(t, user_model.UpdateUserCols(t.Context(), &user_model.User{ID: scheduler.ID, ProhibitLogin: true}, "prohibit_login"))
+			}},
+			{name: "lost whitelist", lose: func(t *testing.T, scheduler *user_model.User) {
+				pb, err := git_model.GetFirstMatchProtectedBranchRule(t.Context(), repo.ID, "main")
+				require.NoError(t, err)
+				pb.EnableMergeWhitelist = true
+				pb.MergeWhitelistUserIDs = []int64{reviewer.ID}
+				_, err = db.GetEngine(t.Context()).ID(pb.ID).Cols("enable_merge_whitelist", "merge_whitelist_user_i_ds").Update(pb)
+				require.NoError(t, err)
+			}, restore: func(t *testing.T) {
+				_, err := db.GetEngine(t.Context()).Table("protected_branch").Where("repo_id = ?", repo.ID).Update(map[string]any{"enable_merge_whitelist": false})
+				require.NoError(t, err)
+			}},
+			{name: "lost two factor", lose: func(t *testing.T, scheduler *user_model.User) {
+				require.NoError(t, user_model.UpdateUserCols(t.Context(), &user_model.User{ID: org.ID, RequireTwoFactor: true}, "require_two_factor"))
+			}, restore: func(t *testing.T) {
+				require.NoError(t, user_model.UpdateUserCols(t.Context(), &user_model.User{ID: org.ID, RequireTwoFactor: false}, "require_two_factor"))
+			}},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				defer tests.PrintCurrentTest(t)()
+
+				t.Run("Scheduled", func(t *testing.T) {
+					scheduler := newScheduler(t)
+					pr, sha := newPull(t)
+					approve(t, pr, sha)
+					ciPasses(t, sha)
+					schedule(t, scheduler, pr, true)
+					c.lose(t, scheduler)
+					if c.restore != nil {
+						defer c.restore(t)
+					}
+					passTime()
+					assertCancelled(t, pr, scheduler.ID)
+				})
+
+				t.Run("Plain", func(t *testing.T) {
+					scheduler := newScheduler(t)
+					pr, sha := newPull(t)
+					ciPasses(t, sha)
+					schedule(t, scheduler, pr, false)
+					c.lose(t, scheduler)
+					if c.restore != nil {
+						defer c.restore(t)
+					}
+					approve(t, pr, sha)
+					assertCancelled(t, pr, scheduler.ID)
+				})
+
+				t.Run("Checks pending", func(t *testing.T) {
+					scheduler := newScheduler(t)
+					pr, sha := newPull(t)
+					approve(t, pr, sha)
+					schedule(t, scheduler, pr, true)
+					c.lose(t, scheduler)
+					if c.restore != nil {
+						defer c.restore(t)
+					}
+					passTime()
+					assertCancelled(t, pr, scheduler.ID)
+				})
+			})
+		}
+
+		for _, c := range []struct {
+			name   string
+			doerID func(t *testing.T, scheduler *user_model.User) int64
+		}{
+			{name: "Scheduler deleted", doerID: func(t *testing.T, scheduler *user_model.User) int64 {
+				return 1 << 40 // no such user
+			}},
+			{name: "Scheduler is the Actions user", doerID: func(t *testing.T, scheduler *user_model.User) int64 {
+				return user_model.ActionsUserID
+			}},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				defer tests.PrintCurrentTest(t)()
+				scheduler := newScheduler(t)
+				pr, sha := newPull(t)
+				approve(t, pr, sha)
+				ciPasses(t, sha)
+				schedule(t, scheduler, pr, true)
+				doerID := c.doerID(t, scheduler)
+				_, err := db.GetEngine(t.Context()).Table("pull_auto_merge").Where("pull_id = ?", pr.ID).Update(map[string]any{"doer_id": doerID})
+				require.NoError(t, err)
+				passTime()
+				posterID := int64(user_model.GhostUserID)
+				if doerID == user_model.ActionsUserID {
+					posterID = user_model.ActionsUserID
+				}
+				assertCancelled(t, pr, posterID)
+			})
+		}
+
+		t.Run("Scheduler gone", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			scheduler := newScheduler(t)
+			pr, sha := newPull(t)
+			approve(t, pr, sha)
+			ciPasses(t, sha)
+			schedule(t, scheduler, pr, true)
+			// a purged user stays as a hidden tombstone row, see services/user DeleteUser
+			_, err := db.GetEngine(t.Context()).ID(scheduler.ID).Cols("trashed_unix").Update(&user_model.User{TrashedUnix: 1})
+			require.NoError(t, err)
+			passTime()
+			assertCancelled(t, pr, user_model.GhostUserID)
+		})
+	})
+}
+
+func TestPullAutoMergeCancelOnPush(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		reviewer := forgery.CreateUser(t, nil)
+		repo := forgery.CreateRepository(t, nil, &forgery.CreateRepositoryOptions{
+			Files:         forgery.FilesInit{},
+			Collaborators: map[*user_model.User]perm.AccessMode{reviewer: perm.AccessModeWrite},
+		})
+		forgery.EnableRepoUnits(t, repo, unit_model.TypeCode, unit_model.TypePullRequests)
+		owner := repo.Owner
+		session := loginUser(t, owner.Name)
+		reviewerSession := loginUser(t, reviewer.Name)
+		apiCtx := NewAPITestContext(t, owner.Name, repo.Name, auth_model.AccessTokenScopeWriteRepository)
+
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/%s/settings/branches/edit", repo.FullName()), map[string]string{
+			"rule_name":          "main",
+			"required_approvals": "1",
+			"enable_push":        "all",
+		}), http.StatusSeeOther)
+
+		gitRepo, err := gitrepo.OpenRepository(t.Context(), repo)
+		require.NoError(t, err)
+		defer gitRepo.Close()
+
+		dstPath := t.TempDir()
+		cloneURL, _ := url.Parse(fmt.Sprintf("%s%s.git", u.String(), repo.FullName()))
+		cloneURL.User = url.UserPassword(owner.Name, userPassword)
+		doGitClone(dstPath, cloneURL)(t)
+
+		now := time.Now()
+		defer timeutil.MockUnset()
+		timeutil.MockSet(now)
+		passTime := func() {
+			now = now.Add(2 * time.Hour)
+			timeutil.MockSet(now)
+			require.NoError(t, automerge.StartDueScheduledAutoMerges(t.Context()))
+		}
+
+		pulls := 0
+		newPull := func(t *testing.T) (*issues_model.PullRequest, string) {
+			pulls++
+			branch := fmt.Sprintf("pull-%d", pulls)
+			testEditFileToNewBranch(t, session, owner.Name, repo.Name, "main", branch, "README.md", branch)
+			testPullCreate(t, session, owner.Name, repo.Name, true, "main", branch, branch)
+			pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, HeadBranch: branch})
+			sha, err := gitRepo.GetRefCommitID(pr.GetGitRefName())
+			require.NoError(t, err)
+			return pr, sha
+		}
+		approve := func(t *testing.T, pr *issues_model.PullRequest, sha string) {
+			testSubmitReview(t, reviewerSession, owner.Name, repo.Name, strconv.FormatInt(pr.Index, 10), sha, "approve", http.StatusOK)
+		}
+		schedule := func(t *testing.T, pr *issues_model.PullRequest, at bool) {
+			apiCtx.ExpectedCode = http.StatusCreated
+			form := &forms.MergePullRequestForm{Do: "merge", MergeWhenChecksSucceed: true}
+			if at {
+				form.ScheduledAfter = now.Add(time.Hour).Format(time.RFC3339)
+			}
+			doAPIMergePullRequestForm(t, apiCtx, owner.Name, repo.Name, pr.Index, form)
+			unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+		}
+		headMoves := func(t *testing.T, pr *issues_model.PullRequest, sha string) {
+			t.Helper()
+			assert.Eventually(t, func() bool {
+				newSHA, err := gitRepo.GetRefCommitID(pr.GetGitRefName())
+				return err == nil && newSHA != sha
+			}, 10*time.Second, 50*time.Millisecond)
+		}
+		isMerged := func(pr *issues_model.PullRequest) bool {
+			return unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID}).HasMerged
+		}
+		isCancelled := func(t *testing.T, pr *issues_model.PullRequest) bool {
+			return unittest.GetCount(t, &issues_model.Comment{IssueID: pr.IssueID, Type: issues_model.CommentTypePRUnScheduledToAutoMerge}) > 0
+		}
+		assertCancelledBy := func(t *testing.T, pr *issues_model.PullRequest, pusherID int64) {
+			t.Helper()
+			assert.Eventually(t, func() bool {
+				return unittest.GetCount(t, &pull_model.AutoMerge{PullID: pr.ID}) == 0
+			}, 10*time.Second, 50*time.Millisecond)
+			unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{IssueID: pr.IssueID, Type: issues_model.CommentTypePRUnScheduledToAutoMerge, PosterID: pusherID})
+			passTime()
+			assert.False(t, isMerged(pr))
+		}
+		pullsConfig := func(t *testing.T) *repo_model.PullRequestsConfig {
+			repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repo.ID})
+			u, err := repo.GetUnit(t.Context(), unit_model.TypePullRequests)
+			require.NoError(t, err)
+			return u.PullRequestsConfig()
+		}
+
+		t.Run("Keeps by default", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			assert.False(t, pullsConfig(t).CancelAutoMergeOnPush)
+
+			pr, sha := newPull(t)
+			approve(t, pr, sha)
+			schedule(t, pr, true)
+			testEditFile(t, session, owner.Name, repo.Name, pr.HeadBranch, "README.md", "unreviewed")
+			headMoves(t, pr, sha)
+			passTime()
+			am := unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+			assert.Equal(t, sha, am.HeadCommitID)
+			assert.False(t, isCancelled(t, pr))
+			assert.False(t, isMerged(pr))
+		})
+
+		t.Run("Plain keeps by default and merges the new head", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t)
+			schedule(t, pr, false)
+			testEditFile(t, session, owner.Name, repo.Name, pr.HeadBranch, "README.md", "new head")
+			headMoves(t, pr, sha)
+			newSHA, err := gitRepo.GetRefCommitID(pr.GetGitRefName())
+			require.NoError(t, err)
+			unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+			assert.False(t, isCancelled(t, pr))
+
+			approve(t, pr, newSHA)
+			assert.True(t, isMerged(pr))
+			mergeCommit, err := gitRepo.GetCommit(unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID}).MergedCommitID)
+			require.NoError(t, err)
+			assert.Equal(t, newSHA, mergeCommit.Parents[1].String())
+		})
+
+		t.Run("Head moved after validation", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t)
+			schedule(t, pr, false)
+			// move the head branch without the hooks, so refs/pull/N/head still has the reviewed commit
+			testEditFileToNewBranch(t, session, owner.Name, repo.Name, pr.HeadBranch, "unreviewed", "README.md", "unreviewed")
+			unreviewed, err := gitRepo.GetBranchCommitID("unreviewed")
+			require.NoError(t, err)
+			_, _, err = git.NewCommand(t.Context(), "update-ref").AddDynamicArguments(git.BranchPrefix+pr.HeadBranch, unreviewed).RunStdString(&git.RunOpts{Dir: repo.RepoPath()})
+			require.NoError(t, err)
+
+			approve(t, pr, sha)
+			assert.False(t, isMerged(pr))
+		})
+
+		t.Run("Setting", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			session.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/%s/settings/units", repo.FullName()), map[string]string{
+				"enable_code": "on", "enable_pulls": "on", "pulls_allow_merge": "on", "pulls_default_merge_style": "merge",
+				"pulls_allow_rebase_update": "on", "cancel_auto_merge_on_push": "on",
+			}), http.StatusSeeOther)
+			assert.True(t, pullsConfig(t).CancelAutoMergeOnPush)
+			resp := session.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/%s/settings/units", repo.FullName())), http.StatusOK)
+			NewHTMLParser(t, resp.Body).AssertElement(t, `input[name="cancel_auto_merge_on_push"][checked]`, true)
+		})
+
+		t.Run("Cancels scheduled", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t)
+			approve(t, pr, sha)
+			schedule(t, pr, true)
+			testEditFile(t, session, owner.Name, repo.Name, pr.HeadBranch, "README.md", "unreviewed")
+			assertCancelledBy(t, pr, owner.ID)
+		})
+
+		t.Run("Cancels plain", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t)
+			schedule(t, pr, false)
+			testEditFile(t, session, owner.Name, repo.Name, pr.HeadBranch, "README.md", "unreviewed")
+			headMoves(t, pr, sha)
+			assertCancelledBy(t, pr, owner.ID)
+			approve(t, pr, sha)
+			assert.False(t, isMerged(pr))
+		})
+
+		t.Run("Base push keeps, update branch cancels", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t)
+			approve(t, pr, sha)
+			schedule(t, pr, true)
+			_, _, err := git.NewCommand(t.Context(), "fetch", "origin").RunStdString(&git.RunOpts{Dir: dstPath})
+			require.NoError(t, err)
+			doGitCheckoutBranch(dstPath, "-B", "main", "origin/main")(t)
+			doGitAddSomeCommits(dstPath, "main")(t)
+			doGitPushTestRepository(dstPath, "origin", "main")(t)
+			unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+
+			session.MakeRequest(t, NewRequestf(t, "POST", "/%s/pulls/%d/update", repo.FullName(), pr.Index), http.StatusSeeOther)
+			assertCancelledBy(t, pr, owner.ID)
+		})
+
+		t.Run("Cancels push to a fork by another user", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			fork, err := repo_service.ForkRepositoryAndUpdates(t.Context(), reviewer, reviewer, repo_service.ForkRepoOptions{BaseRepo: repo, Name: "fork"})
+			require.NoError(t, err)
+			testEditFileToNewBranch(t, reviewerSession, reviewer.Name, fork.Name, "main", "from-fork", "README.md", "from fork")
+			pr := &issues_model.PullRequest{
+				BaseRepo: repo, BaseRepoID: repo.ID, BaseBranch: "main",
+				HeadRepo: fork, HeadRepoID: fork.ID, HeadBranch: "from-fork",
+				Type: issues_model.PullRequestGitea,
+			}
+			require.NoError(t, pull_service.NewPullRequest(t.Context(), repo, &issues_model.Issue{RepoID: repo.ID, Title: "from fork", PosterID: reviewer.ID, Poster: reviewer, IsPull: true}, nil, nil, pr, nil))
+			sha, err := gitRepo.GetRefCommitID(pr.GetGitRefName())
+			require.NoError(t, err)
+			schedule(t, pr, false)
+
+			testEditFile(t, reviewerSession, reviewer.Name, fork.Name, "from-fork", "README.md", "unreviewed")
+			headMoves(t, pr, sha)
+			assertCancelledBy(t, pr, reviewer.ID)
+		})
+
+		t.Run("Update branch by rebase cancels", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t)
+			approve(t, pr, sha)
+			schedule(t, pr, true)
+			_, _, err := git.NewCommand(t.Context(), "fetch", "origin").RunStdString(&git.RunOpts{Dir: dstPath})
+			require.NoError(t, err)
+			doGitCheckoutBranch(dstPath, "-B", "main", "origin/main")(t)
+			doGitAddSomeCommits(dstPath, "main")(t)
+			doGitPushTestRepository(dstPath, "origin", "main")(t)
+
+			diverging, divErr := pull_service.GetDiverging(t.Context(), pr)
+			require.NoError(t, divErr)
+			require.Positive(t, diverging.Behind)
+
+			MakeRequest(t, NewRequestf(t, "POST", "/api/v1/repos/%s/pulls/%d/update?style=rebase", repo.FullName(), pr.Index).AddTokenAuth(apiCtx.Token), http.StatusOK)
+			headMoves(t, pr, sha)
+			assertCancelledBy(t, pr, owner.ID)
+		})
+
+		t.Run("Cancels force push", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t)
+			approve(t, pr, sha)
+			schedule(t, pr, true)
+			_, _, err := git.NewCommand(t.Context(), "fetch", "origin").RunStdString(&git.RunOpts{Dir: dstPath})
+			require.NoError(t, err)
+			doGitCheckoutBranch(dstPath, "-b", pr.HeadBranch, "origin/"+pr.HeadBranch)(t)
+			_, _, err = git.NewCommand(t.Context(), "reset", "--hard", "HEAD~1").RunStdString(&git.RunOpts{Dir: dstPath})
+			require.NoError(t, err)
+			doGitAddSomeCommits(dstPath, pr.HeadBranch)(t)
+			doGitPushTestRepository(dstPath, "--force", "origin", pr.HeadBranch)(t)
+			assertCancelledBy(t, pr, owner.ID)
+		})
+
+		t.Run("Cancels AGit push", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			doGitCheckoutBranch(dstPath, "-b", "agit", "origin/main")(t)
+			doGitAddSomeCommits(dstPath, "agit")(t)
+			doGitPushTestRepository(dstPath, "origin", "HEAD:refs/for/main", "-o", "topic=agit")(t)
+			pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, HeadBranch: strings.ToLower(owner.Name) + "/agit"})
+			schedule(t, pr, false)
+			doGitAddSomeCommits(dstPath, "agit")(t)
+			doGitPushTestRepository(dstPath, "origin", "HEAD:refs/for/main", "-o", "topic=agit")(t)
+			assertCancelledBy(t, pr, owner.ID)
 		})
 	})
 }

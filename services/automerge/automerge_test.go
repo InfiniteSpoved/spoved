@@ -110,3 +110,18 @@ func TestTakeExpiredScheduledAutoMerges(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, expired)
 }
+
+func TestDeleteAutoMergeByID(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	am := &pull_model.AutoMerge{PullID: 1, DoerID: 2}
+	require.NoError(t, db.Insert(t.Context(), am))
+
+	deleted, err := pull_model.DeleteAutoMergeByID(t.Context(), am.ID)
+	require.NoError(t, err)
+	assert.True(t, deleted)
+	unittest.AssertNotExistsBean(t, &pull_model.AutoMerge{PullID: 1})
+
+	deleted, err = pull_model.DeleteAutoMergeByID(t.Context(), am.ID)
+	require.NoError(t, err)
+	assert.False(t, deleted)
+}

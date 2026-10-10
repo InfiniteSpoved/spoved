@@ -669,6 +669,8 @@ func GenerateReleaseNotes(ctx *context.Context) {
 		TagName:         form.TagName,
 		Target:          form.Target,
 		PreviousTagName: form.PreviousTagName,
+
+		IncludeDirectCommits: form.IncludeDirectCommits,
 	})
 	if errors.Is(err, util.ErrNotExist) {
 		ctx.JSONError(ctx.Tr("repo.release.generate_notes_not_found"))

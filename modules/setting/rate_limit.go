@@ -34,6 +34,7 @@ func loadRateLimitFrom(rootCfg ConfigProvider) {
 		"api_write": {10, 100, 0, 0},
 		"git":       {10, 100, 2, 20},
 		"web":       {20, 200, 5, 50},
+		"heavy":     {1, 20, 0.2, 30},
 		"auth":      {0.0167, 10, 0, 0},
 	}
 	RateLimit.Classes = make(map[string]RateLimitClass, len(defaults))
