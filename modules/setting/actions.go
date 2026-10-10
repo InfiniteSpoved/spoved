@@ -30,6 +30,7 @@ var (
 		ConcurrencyGroupQueueEnabled bool              `ini:"CONCURRENCY_GROUP_QUEUE_ENABLED"`
 		IDTokenExpirationTime        int64             `ini:"ID_TOKEN_EXPIRATION_TIME"`
 		RunnerRegistration           string            `ini:"RUNNER_REGISTRATION"`
+		DefaultTokenPermissions      string            `ini:"DEFAULT_TOKEN_PERMISSIONS"`
 
 		IDTokenKeyCfg *jwtx.KeyCfg
 	}{
@@ -40,6 +41,7 @@ var (
 		ConcurrencyGroupQueueEnabled: true,
 		IDTokenExpirationTime:        3600,
 		RunnerRegistration:           RunnerRegistrationEveryone,
+		DefaultTokenPermissions:      "write",
 	}
 )
 
@@ -141,6 +143,10 @@ func loadActionsFrom(rootCfg ConfigProvider) error {
 	case RunnerRegistrationEveryone, RunnerRegistrationAdminAndOrgOwners, RunnerRegistrationAdmin:
 	default:
 		return fmt.Errorf("invalid [actions] RUNNER_REGISTRATION: %q", Actions.RunnerRegistration)
+	}
+
+	if Actions.DefaultTokenPermissions != "write" && Actions.DefaultTokenPermissions != "read" {
+		return fmt.Errorf("invalid [actions] DEFAULT_TOKEN_PERMISSIONS: %q", Actions.DefaultTokenPermissions)
 	}
 
 	Actions.IDTokenKeyCfg, err = loadKeyCfg(rootCfg, secName, "ID_TOKEN_", "RS256", "actions_id_token/private.pem", onlyAsymmetric())

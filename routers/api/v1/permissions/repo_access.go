@@ -9,7 +9,6 @@ import (
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
-	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/services/auth"
 )
@@ -27,21 +26,20 @@ func RepoAccess(ctx Context) {
 			return
 		}
 
-		if task.IsForkPullRequest {
-			ctx.Permission().AccessMode = perm.AccessModeRead
-		} else {
-			ctx.Permission().AccessMode = perm.AccessModeWrite
-		}
-
-		if err := ctx.Repository().LoadUnits(ctx.Context()); err != nil {
-			ctx.Error(http.StatusInternalServerError, "LoadUnits", err)
+		permission, err := access_model.GetActionRepoPermission(ctx.Context(), ctx.Repository(), task)
+		if err != nil {
+			ctx.Error(http.StatusInternalServerError, "GetActionRepoPermission", err)
 			return
 		}
-		ctx.Permission().Units = ctx.Repository().Units
-		ctx.Permission().UnitsMode = make(map[unit.Type]perm.AccessMode)
-		for _, u := range ctx.Repository().Units {
-			ctx.Permission().UnitsMode[u.Type] = ctx.Permission().AccessMode
+		// Creating an issue or a comment only needs read: a token with permissions writes only where they grant write.
+		if task.TokenPermissions != "" && !ctx.IsReadOnlyMethod() {
+			for t, mode := range permission.UnitsMode {
+				if mode < perm.AccessModeWrite {
+					delete(permission.UnitsMode, t)
+				}
+			}
 		}
+		ctx.SetPermission(&permission)
 	} else {
 		getPermission := access_model.GetUserRepoPermissionWithReducer
 		if ctx.IsReadOnlyMethod() && auth.IsHeldByUser(ctx.Authentication()) {

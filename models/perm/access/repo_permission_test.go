@@ -45,6 +45,63 @@ func TestActionTaskCanAccessOwnRepo(t *testing.T) {
 	assertAccess(t, perm_model.AccessModeWrite, &perm)
 }
 
+func TestActionTaskTokenPermissions(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+
+	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 4})
+	require.NoError(t, repo.LoadUnits(t.Context()))
+	require.True(t, repo.UnitEnabled(t.Context(), unit.TypeCode))
+	require.True(t, repo.UnitEnabled(t.Context(), unit.TypeIssues))
+	require.True(t, repo.UnitEnabled(t.Context(), unit.TypePullRequests))
+	require.False(t, repo.UnitEnabled(t.Context(), unit.TypeExternalWiki))
+
+	get := func(t *testing.T, tokenPermissions string, isFork bool) access.Permission {
+		t.Helper()
+		task := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionTask{ID: 47})
+		task.TokenPermissions = tokenPermissions
+		task.IsForkPullRequest = isFork
+		perm, err := access.GetActionRepoPermission(t.Context(), repo, task)
+		require.NoError(t, err)
+		return perm
+	}
+
+	t.Run("legacy", func(t *testing.T) {
+		perm := get(t, "", false)
+		assert.Equal(t, repo.Units, perm.Units)
+		assert.Len(t, perm.UnitsMode, len(repo.Units))
+		assertAccess(t, perm_model.AccessModeWrite, &perm)
+	})
+	t.Run("legacy fork", func(t *testing.T) {
+		perm := get(t, "", true)
+		assert.Len(t, perm.UnitsMode, len(repo.Units))
+		assertAccess(t, perm_model.AccessModeRead, &perm)
+	})
+	t.Run("explicit", func(t *testing.T) {
+		perm := get(t, actions_model.TokenPermissions{unit.TypeCode: perm_model.AccessModeWrite, unit.TypeIssues: perm_model.AccessModeRead}.Encode(), false)
+		assert.Equal(t, perm_model.AccessModeNone, perm.AccessMode)
+		assert.Len(t, perm.Units, 2)
+		assert.True(t, perm.CanWrite(unit.TypeCode))
+		assert.True(t, perm.CanRead(unit.TypeIssues))
+		assert.False(t, perm.CanWrite(unit.TypeIssues))
+		assert.False(t, perm.CanRead(unit.TypePullRequests))
+	})
+	t.Run("explicit fork", func(t *testing.T) {
+		perm := get(t, actions_model.TokenPermissions{unit.TypeCode: perm_model.AccessModeWrite}.Encode(), true)
+		assert.True(t, perm.CanRead(unit.TypeCode))
+		assert.False(t, perm.CanWrite(unit.TypeCode))
+	})
+	t.Run("disabled unit", func(t *testing.T) {
+		perm := get(t, actions_model.TokenPermissions{unit.TypeExternalWiki: perm_model.AccessModeWrite}.Encode(), false)
+		assert.False(t, perm.HasAccess())
+	})
+	for _, value := range []string{"{}", "null", "garbage", `{"1":"write"}`} {
+		t.Run("no access "+value, func(t *testing.T) {
+			perm := get(t, value, false)
+			assert.False(t, perm.HasAccess())
+		})
+	}
+}
+
 func TestActionTaskCanAccessPublicRepo(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 

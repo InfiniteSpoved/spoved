@@ -561,11 +561,12 @@ func authenticate(ctx *context.Context, repository *repo_model.Repository, requi
 		if task.RepoID != repository.ID {
 			return false
 		}
-
-		if task.IsForkPullRequest {
-			return accessMode <= perm.AccessModeRead
+		repoPerm, err := access_model.GetActionRepoPermission(ctx, repository, task)
+		if err != nil {
+			log.Error("Unable to GetActionRepoPermission for task[%d] Error: %v", taskID, err)
+			return false
 		}
-		return accessMode <= perm.AccessModeWrite
+		return repoPerm.CanAccess(accessMode, unit.TypeCode)
 	}
 
 	// ctx.IsSigned is unnecessary here, this will be checked in perm.CanAccess. Usage of ctx.Authentication.Reducer()
