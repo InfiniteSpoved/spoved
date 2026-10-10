@@ -118,6 +118,17 @@ func (org *Organization) IsOwnedBy(ctx context.Context, uid int64) (bool, error)
 	return IsOrganizationOwner(ctx, org.ID, uid)
 }
 
+// IsActingOwner is IsOwnedBy for the doer of a request: an owner the organization's two-factor requirement blocks
+// (user_model.User.TwoFactorBlocked) does not act as one.
+func (org *Organization) IsActingOwner(ctx context.Context, doer *user_model.User) (bool, error) {
+	isOwner, err := org.IsOwnedBy(ctx, doer.ID)
+	if err != nil || !isOwner {
+		return false, err
+	}
+	blocked, err := doer.TwoFactorBlocked(ctx, org.AsUser())
+	return !blocked, err
+}
+
 // IsOrgAdmin returns true if given user is in the owner team or an admin team.
 func (org *Organization) IsOrgAdmin(ctx context.Context, uid int64) (bool, error) {
 	return IsOrganizationAdmin(ctx, org.ID, uid)
@@ -295,7 +306,13 @@ func (org *Organization) UnitPermission(ctx context.Context, doer *user_model.Us
 	if repo_model.HiddenUnits(ctx, org.AsUser()).Contains(unitType) {
 		return perm.AccessModeNone
 	}
-	if doer != nil {
+	blocked, err := doer.TwoFactorBlocked(ctx, org.AsUser())
+	if err != nil {
+		log.Error("TwoFactorBlocked: %v", err)
+		return perm.AccessModeNone
+	}
+	// a member the organization's two-factor requirement blocks is a stranger
+	if doer != nil && !blocked {
 		teams, err := GetUserOrgTeams(ctx, org.ID, doer.ID)
 		if err != nil {
 			log.Error("GetUserOrgTeams: %v", err)

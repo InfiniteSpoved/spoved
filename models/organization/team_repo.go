@@ -36,6 +36,8 @@ type SearchTeamRepoOptions struct {
 	TeamID int64
 	// Filters repositories based upon optional authorization restrictions.
 	AuthorizationReducer repo_model.RepositoryAuthorizationReducer
+	// Leaves out what the organization's two-factor requirement hides from this user.
+	UserID int64
 }
 
 // AddTeamRepoCounts adds delta to num_repos of every team that has the repository: -1 when it is trashed and +1
@@ -58,6 +60,7 @@ func GetTeamRepositories(ctx context.Context, opts *SearchTeamRepoOptions) (repo
 	if opts.AuthorizationReducer != nil {
 		sess = sess.Where(opts.AuthorizationReducer.RepoReadAccessFilter())
 	}
+	sess = sess.And(repo_model.TwoFactorHiddenRepoCond(opts.UserID))
 	if opts.PageSize > 0 {
 		sess.Limit(opts.PageSize, (opts.Page-1)*opts.PageSize)
 	}

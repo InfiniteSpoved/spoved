@@ -39,6 +39,7 @@ type UpdateOptions struct {
 	EmailNotificationsPreference optional.Option[string]
 	SetLastLogin                 bool
 	RepoAdminChangeTeamAccess    optional.Option[bool]
+	RequireTwoFactor             optional.Option[bool]
 	EnableRepoUnitHints          optional.Option[bool]
 	KeepPronounsPrivate          optional.Option[bool]
 	RestrictRepoVisibilityChange optional.Option[bool]
@@ -137,6 +138,10 @@ func UpdateUser(ctx context.Context, u *user_model.User, opts *UpdateOptions) er
 	if has, value := opts.RepoAdminChangeTeamAccess.Get(); has {
 		u.RepoAdminChangeTeamAccess = value
 		cols = append(cols, "repo_admin_change_team_access")
+	}
+	if has, value := opts.RequireTwoFactor.Get(); has {
+		u.RequireTwoFactor = value
+		cols = append(cols, "require_two_factor")
 	}
 	if has, value := opts.EmailNotificationsPreference.Get(); has {
 		u.EmailNotificationsPreference = value

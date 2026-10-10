@@ -9,6 +9,7 @@ import (
 
 	"forgejo.org/models/db"
 	"forgejo.org/models/perm"
+	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
 
@@ -104,6 +105,7 @@ func CanCreateOrgRepo(ctx context.Context, orgID, uid int64) (bool, error) {
 		Join("INNER", "team_user", "team_user.team_id = team.id").
 		And("team_user.uid = ?", uid).
 		And("team_user.org_id = ?", orgID).
+		And(builder.NotIn("team_user.org_id", repo_model.TwoFactorBlockingOrgIDs(uid))).
 		Exist(new(Team))
 }
 
