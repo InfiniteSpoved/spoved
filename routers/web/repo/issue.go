@@ -312,6 +312,10 @@ func issues(ctx *context.Context, milestoneID, projectID int64, isPullOption opt
 		ctx.ServerError("ApprovalCounts", err)
 		return
 	}
+	if ctx.Data["PullAttentionSets"], err = issues.LoadPullAttention(ctx); err != nil {
+		ctx.ServerError("LoadPullAttention", err)
+		return
+	}
 
 	if ctx.IsSigned {
 		if err := issues.LoadIsRead(ctx, ctx.Doer.ID); err != nil {
@@ -485,7 +489,7 @@ func issueIDsFromSearch(
 	keyword string,
 	opts *issues_model.IssuesOptions,
 ) ([]int64, *issue_indexer.SearchOptions, error) {
-	searchOpts := issue_indexer.ToSearchOptions(ctx, keyword, opts)
+	searchOpts := issue_indexer.ToSearchOptions(ctx, ctx.Doer, keyword, opts)
 	ids, _, err := issue_indexer.SearchIssues(ctx, searchOpts)
 	if err != nil {
 		return nil, searchOpts, fmt.Errorf("SearchIssues: %w", err)
@@ -1923,6 +1927,9 @@ func ViewIssue(ctx *context.Context) {
 		ctx.Data["PullTasks"] = tasks
 		ctx.Data["PullTasksDone"] = tasksDone
 		ctx.Data["CanCreatePullTask"] = ctx.IsSigned && !ctx.Repo.Repository.IsArchived && issues_model.CanCreatePullTask(ctx, ctx.Doer, issue, ctx.Repo.Permission)
+		if preparePullAttention(ctx, issue); ctx.Written() {
+			return
+		}
 
 		prUnit, err := repo.GetUnit(ctx, unit.TypePullRequests)
 		if err != nil {
@@ -2931,7 +2938,7 @@ func SearchIssues(ctx *context.Context) {
 		ProjectID:           projectID,
 		SortBy:              issue_indexer.ParseSortBy(ctx.FormString("sort"), issue_indexer.SortByCreatedDesc),
 	}
-	if err := searchOpt.WithKeyword(ctx, keyword); err != nil {
+	if err := searchOpt.WithKeyword(ctx, ctx.Doer, keyword); err != nil {
 		log.Error("WithKeyword: %v", err)
 		ctx.Error(http.StatusInternalServerError)
 		return
@@ -3112,7 +3119,7 @@ func ListIssues(ctx *context.Context) {
 		ProjectID: projectID,
 		SortBy:    issue_indexer.ParseSortBy(ctx.FormString("sort"), issue_indexer.SortByCreatedDesc),
 	}
-	if err := searchOpt.WithKeyword(ctx, keyword); err != nil {
+	if err := searchOpt.WithKeyword(ctx, ctx.Doer, keyword); err != nil {
 		log.Error("WithKeyword: %v", err)
 		ctx.Error(http.StatusInternalServerError)
 		return

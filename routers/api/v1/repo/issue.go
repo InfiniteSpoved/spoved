@@ -286,7 +286,7 @@ func SearchIssues(ctx *context.APIContext) {
 		SortBy:              issue_indexer.ParseSortBy(ctx.FormString("sort"), issue_indexer.SortByCreatedDesc),
 	}
 
-	if err := searchOpt.WithKeyword(ctx, keyword); err != nil {
+	if err := searchOpt.WithKeyword(ctx, ctx.Doer(), keyword); err != nil {
 		ctx.Error(http.StatusInternalServerError, "WithKeyword", err)
 		return
 	}
@@ -547,7 +547,7 @@ func ListIssues(ctx *context.APIContext) {
 		IsClosed:  isClosed,
 		SortBy:    issue_indexer.ParseSortBy(ctx.FormString("sort"), issue_indexer.SortByCreatedDesc),
 	}
-	if err := searchOpt.WithKeyword(ctx, keyword); err != nil {
+	if err := searchOpt.WithKeyword(ctx, ctx.Doer(), keyword); err != nil {
 		ctx.Error(http.StatusInternalServerError, "WithKeyword", err)
 		return
 	}

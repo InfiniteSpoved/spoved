@@ -282,7 +282,7 @@ func TestIssueQueryString(t *testing.T) {
 	for _, res := range testOpts {
 		t.Run(res.Keyword, func(t *testing.T) {
 			opt := &SearchOptions{}
-			require.NoError(t, opt.WithKeyword(ctx, res.Keyword))
+			require.NoError(t, opt.WithKeyword(ctx, nil, res.Keyword))
 			assert.Equal(t, res.Results, opt.Tokens, "failed for keyword `%s`", res.Keyword)
 		})
 	}
@@ -371,6 +371,26 @@ func TestIssueQueryStringWithFilters(t *testing.T) {
 			},
 		},
 		{
+			Keyword: "attention:test",
+			Opts: &SearchOptions{
+				AttentionID: optional.Some(int64(2)),
+			},
+		},
+		{
+			// an unknown user doesn't shift the filters after it
+			Keyword: "author:no-such-user review:test",
+			Opts: &SearchOptions{
+				ReviewedID: optional.Some(int64(2)),
+			},
+		},
+		{
+			// @me without a signed-in user matches nothing
+			Keyword: "attention:@me",
+			Opts: &SearchOptions{
+				RepoIDs: []int64{0},
+			},
+		},
+		{
 			Keyword: "sort:updated:asc",
 			Opts: &SearchOptions{
 				SortBy: SortByUpdatedAsc,
@@ -448,10 +468,16 @@ func TestIssueQueryStringWithFilters(t *testing.T) {
 	} {
 		t.Run(c.Keyword, func(t *testing.T) {
 			opts := &SearchOptions{}
-			require.NoError(t, opts.WithKeyword(context.Background(), c.Keyword))
+			require.NoError(t, opts.WithKeyword(context.Background(), nil, c.Keyword))
 			assert.Equal(t, c.Opts, opts)
 		})
 	}
+}
+
+func TestIssueQueryStringMe(t *testing.T) {
+	opts := &SearchOptions{RepoIDs: []int64{1}, AllPublic: true}
+	require.NoError(t, opts.WithKeyword(t.Context(), &user.User{ID: 7}, "attention:@me author:@me"))
+	assert.Equal(t, &SearchOptions{RepoIDs: []int64{1}, AllPublic: true, AttentionID: optional.Some(int64(7)), PosterID: optional.Some(int64(7))}, opts)
 }
 
 func TestToken_ParseIssueReference(t *testing.T) {

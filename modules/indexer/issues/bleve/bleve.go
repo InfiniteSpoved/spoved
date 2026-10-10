@@ -23,7 +23,7 @@ import (
 const (
 	issueIndexerAnalyzer      = "issueIndexer"
 	issueIndexerDocType       = "issueIndexerDocType"
-	issueIndexerLatestVersion = 7
+	issueIndexerLatestVersion = 8
 )
 
 const unicodeNormalizeName = "unicodeNormalize"
@@ -86,6 +86,7 @@ func generateIssueIndexMapping() (mapping.IndexMapping, error) {
 	docMapping.AddFieldMappingsAt("mention_ids", numberFieldMapping)
 	docMapping.AddFieldMappingsAt("reviewed_ids", numberFieldMapping)
 	docMapping.AddFieldMappingsAt("review_requested_ids", numberFieldMapping)
+	docMapping.AddFieldMappingsAt("attention_ids", numberFieldMapping)
 	docMapping.AddFieldMappingsAt("subscriber_ids", numberFieldMapping)
 	docMapping.AddFieldMappingsAt("updated_unix", numberFieldMapping)
 
@@ -263,6 +264,7 @@ func (b *Indexer) Search(ctx context.Context, options *internal.SearchOptions) (
 		"mention_ids":          options.MentionID,
 		"reviewed_ids":         options.ReviewedID,
 		"review_requested_ids": options.ReviewRequestedID,
+		"attention_ids":        options.AttentionID,
 		"subscriber_ids":       options.SubscriberID,
 	} {
 		if has, value := val.Get(); has {

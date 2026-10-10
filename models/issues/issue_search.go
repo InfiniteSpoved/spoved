@@ -32,6 +32,7 @@ type IssuesOptions struct { //nolint
 	MentionedID        int64
 	ReviewRequestedID  int64
 	ReviewedID         int64
+	AttentionUserID    int64 // in the attention set of the pull requests
 	SubscriberID       int64
 	MilestoneIDs       []int64
 	ProjectID          int64
@@ -268,6 +269,10 @@ func applyConditions(sess *xorm.Session, opts *IssuesOptions, unitCond builder.C
 		applyReviewedCondition(sess, opts.ReviewedID)
 	}
 
+	if opts.AttentionUserID > 0 {
+		applyAttentionCondition(sess, opts.AttentionUserID)
+	}
+
 	if opts.SubscriberID > 0 {
 		applySubscribedCondition(sess, opts.SubscriberID)
 	}
@@ -400,6 +405,10 @@ func applyMentionedCondition(sess *xorm.Session, mentionedID int64) {
 	sess.Join("INNER", "issue_user", "issue.id = issue_user.issue_id").
 		And("issue_user.is_mentioned = ?", true).
 		And("issue_user.uid = ?", mentionedID)
+}
+
+func applyAttentionCondition(sess *xorm.Session, userID int64) {
+	sess.In("issue.id", builder.Select("issue_id").From("pull_attention").Where(builder.Eq{"user_id": userID}))
 }
 
 func applyReviewRequestedCondition(sess *xorm.Session, reviewRequestedID int64) {

@@ -1,0 +1,31 @@
+<div id="pull-attention" class="pull-attention">
+	<span class="text"><strong>{{ctx.Locale.Tr "repo.pulls.attention.title"}}</strong></span>
+	{{if .PullAttention}}
+		<ul class="tw-list-none tw-p-0">
+			{{range .PullAttention}}
+				<li class="flex-text-block tw-my-2">
+					<span class="flex-text-inline" data-tooltip-content="{{ctx.Locale.Tr .KindLocaleKey .Doer.GetDisplayName}}{{if .Reason}}: {{.Reason}}{{end}}">{{svg "octicon-hourglass"}}</span>
+					<a class="muted flex-text-inline tw-flex-1 tw-break-anywhere" href="{{.User.HomeLink}}">{{ctx.AvatarUtils.Avatar .User 20}}{{.User.GetDisplayName}}</a>
+					{{if and $.IsSigned (or $.CanChangeAttention (eq $.SignedUserID .UserID))}}
+						<form method="post" action="{{$.Issue.Link}}/attention/remove">
+							<input type="hidden" name="username" value="{{.User.Name}}">
+							<button class="btn interact-fg" aria-label="{{ctx.Locale.Tr "repo.pulls.attention.remove"}}" data-tooltip-content="{{ctx.Locale.Tr "repo.pulls.attention.remove"}}">{{svg "octicon-x"}}</button>
+						</form>
+					{{end}}
+				</li>
+			{{end}}
+		</ul>
+	{{else}}
+		<p class="text grey">{{ctx.Locale.Tr "repo.pulls.attention.empty"}}</p>
+	{{end}}
+	{{if .CanChangeAttention}}
+		<form method="post" action="{{$.Issue.Link}}/attention/add" class="ui form">
+			<input name="username" required placeholder="{{ctx.Locale.Tr "repo.pulls.attention.username"}}" aria-label="{{ctx.Locale.Tr "repo.pulls.attention.username"}}">
+			<div class="flex-text-block tw-mt-2">
+				<input name="reason" maxlength="255" placeholder="{{ctx.Locale.Tr "repo.pulls.attention.reason"}}" aria-label="{{ctx.Locale.Tr "repo.pulls.attention.reason"}}">
+				<button class="ui tiny button">{{ctx.Locale.Tr "repo.pulls.attention.add"}}</button>
+			</div>
+		</form>
+	{{end}}
+</div>
+<div class="divider"></div>

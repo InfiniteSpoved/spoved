@@ -121,10 +121,11 @@ const (
 	userFilterAssign
 	userFilterMention
 	userFilterReview
+	userFilterAttention
 )
 
-// Parses the keyword and sets the
-func (o *SearchOptions) WithKeyword(ctx context.Context, keyword string) (err error) {
+// WithKeyword parses the keyword and sets the filters it names; @me in a user filter is doer.
+func (o *SearchOptions) WithKeyword(ctx context.Context, doer *user.User, keyword string) (err error) {
 	if keyword == "" {
 		return nil
 	}
@@ -200,6 +201,9 @@ func (o *SearchOptions) WithKeyword(ctx context.Context, keyword string) (err er
 		case token.IsOf("mentions:"):
 			userNames = append(userNames, token.Term[9:])
 			userFilter = append(userFilter, userFilterMention)
+		case token.IsOf("attention:"):
+			userNames = append(userNames, token.Term[10:])
+			userFilter = append(userFilter, userFilterAttention)
 
 		default:
 			tokens = append(tokens, token)
@@ -223,13 +227,21 @@ func (o *SearchOptions) WithKeyword(ctx context.Context, keyword string) (err er
 		}
 	}
 
-	ids, err := user.GetUserIDsByNames(ctx, userNames, true)
-	if err != nil {
-		return err
-	}
-
-	for i, id := range ids {
-		// Skip all invalid IDs.
+	for i, name := range userNames {
+		var id int64
+		if name == "@me" {
+			if doer == nil {
+				// match nothing rather than dropping the filter
+				o.RepoIDs, o.AllPublic = []int64{0}, false
+				continue
+			}
+			id = doer.ID
+		} else if u, err := user.GetUserByName(ctx, name); err == nil {
+			id = u.ID
+		} else if !user.IsErrUserNotExist(err) {
+			return err
+		}
+		// Skip unknown users.
 		// Hopefully this won't be too astonishing for the user.
 		if id <= 0 {
 			continue
@@ -244,6 +256,8 @@ func (o *SearchOptions) WithKeyword(ctx context.Context, keyword string) (err er
 			o.ReviewedID = val
 		case userFilterMention:
 			o.MentionID = val
+		case userFilterAttention:
+			o.AttentionID = val
 		}
 	}
 
