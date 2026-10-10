@@ -7,6 +7,7 @@ package zoekt
 
 import (
 	"bufio"
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -20,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/analyze"
@@ -449,46 +451,93 @@ func getSearchResultLanguages(searchResult *zoekt.SearchResult) []*internal.Sear
 	return searchResultLanguages
 }
 
+// Limits of what one hit keeps of a file, whatever the file holds.
+const (
+	maxMatchesPerFile     = 100
+	maxChunkBytes         = 4 << 10
+	maxResultContentBytes = 32 << 10
+)
+
+// convertZoektResult builds the hits from chunk matches: Content is the kept chunks joined,
+// LineNumbers the file line number of each of its lines, and Matches point into Content.
 func convertZoektResult(files []zoekt.FileMatch) []*internal.SearchResult {
 	results := make([]*internal.SearchResult, 0, len(files))
 
 	for _, f := range files {
-		content := string(f.Content)
-		lines := strings.Split(content, "\n")
-
 		var (
-			contentLines []string
+			content      []byte
 			lineNumbers  []int
 			lineOffsets  []int
 			matches      []internal.Match
+			lastLine     = 0
+			chunks       = slices.Clone(f.ChunkMatches)
+			contentStart = func(c zoekt.ChunkMatch) uint32 { return c.ContentStart.ByteOffset }
 		)
+		slices.SortStableFunc(chunks, func(a, b zoekt.ChunkMatch) int { return cmp.Compare(contentStart(a), contentStart(b)) })
 
-		offset := 0
-
-		for lineIdx, line := range lines {
-			lineNum := lineIdx + 1
-
-			contentLines = append(contentLines, line)
-			lineNumbers = append(lineNumbers, lineNum)
-			lineOffsets = append(lineOffsets, offset)
-
-			for _, lm := range f.LineMatches {
-				if lm.LineNumber != lineNum {
-					continue
-				}
-				for _, frag := range lm.LineFragments {
-					start := int(frag.Offset)
-					end := start + frag.MatchLength
-
-					matches = append(matches, internal.Match{
-						Start:      start,
-						End:        end,
-						LineNumber: lineNum,
-					})
-				}
+		for _, cm := range chunks {
+			room := min(maxChunkBytes, maxResultContentBytes-len(content))
+			startLine := int(cm.ContentStart.LineNumber)
+			if len(matches) >= maxMatchesPerFile || room <= 0 {
+				break
+			}
+			if cm.FileName || len(cm.Ranges) == 0 || startLine <= lastLine {
+				continue // a chunk starting inside the previous one cannot be placed
 			}
 
-			offset += len(line) + 1
+			chunk := cm.Content
+			if len(chunk) > room { // cut at a line end, else (one huge line) at a rune start
+				cut := room
+				if nl := bytes.LastIndexByte(chunk[:cut], '\n'); nl >= 0 {
+					cut = nl + 1
+				} else {
+					for cut > 0 && !utf8.RuneStart(chunk[cut]) {
+						cut--
+					}
+				}
+				chunk = chunk[:cut]
+			}
+
+			ranges := slices.Clone(cm.Ranges) // zoekt orders them by score
+			slices.SortFunc(ranges, func(a, b zoekt.Range) int { return cmp.Compare(a.Start.ByteOffset, b.Start.ByteOffset) })
+
+			base, first := len(content), len(matches)
+			for _, r := range ranges {
+				if len(matches) >= maxMatchesPerFile {
+					break
+				}
+				if r.Start.ByteOffset < cm.ContentStart.ByteOffset || r.End.ByteOffset < r.Start.ByteOffset {
+					continue
+				}
+				start := int(r.Start.ByteOffset - cm.ContentStart.ByteOffset)
+				end := int(r.End.ByteOffset - cm.ContentStart.ByteOffset)
+				if start >= len(chunk) || end > len(cm.Content) || (len(chunk) < len(cm.Content) && end > len(chunk)) {
+					continue // past the cut
+				}
+				if nl := bytes.IndexByte(chunk[start:], '\n'); nl >= 0 {
+					end = min(end, start+nl) // a range over several lines keeps its first line
+				}
+				matches = append(matches, internal.Match{
+					Start:      base + start,
+					End:        base + end,
+					LineNumber: startLine + bytes.Count(chunk[:start], []byte{'\n'}),
+				})
+			}
+			if len(matches) == first {
+				continue
+			}
+
+			content = append(content, chunk...)
+			offset := base
+			for i, line := range bytes.SplitAfter(chunk, []byte{'\n'}) {
+				if len(line) == 0 {
+					break
+				}
+				lineNumbers = append(lineNumbers, startLine+i)
+				lineOffsets = append(lineOffsets, offset)
+				offset += len(line)
+				lastLine = startLine + i
+			}
 		}
 
 		if len(matches) == 0 {
@@ -502,7 +551,7 @@ func convertZoektResult(files []zoekt.FileMatch) []*internal.SearchResult {
 			Branch:      firstBranch(f.Branches),
 			Filename:    f.FileName,
 			CommitID:    f.Version,
-			Content:     strings.Join(contentLines, "\n"),
+			Content:     string(content),
 			Language:    lang,
 			Color:       enry.GetColor(lang),
 			Matches:     matches,
@@ -529,9 +578,17 @@ func normalizeLanguage(lang string) string {
 }
 
 const (
-	shardMaxMatchCount = 100000
-	totalMaxMatchCount = 10000
-	regexTimeout       = 5 * time.Second
+	shardMaxMatchCount   = 100000
+	totalMaxMatchCount   = 10000
+	maxMatchDisplayCount = 10000
+	regexTimeout         = 5 * time.Second
+	// zoekt builds every match of a file before the display caps apply, so the searches that run at once are bounded.
+	maxConcurrentSearches = 8
+)
+
+var (
+	searchSlots     = make(chan struct{}, maxConcurrentSearches)
+	searchQueueWait = 5 * time.Second
 )
 
 func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int64, []*internal.SearchResult, []*internal.SearchResultLanguages, error) {
@@ -546,12 +603,26 @@ func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int
 		defer cancel()
 	}
 
+	wait := time.NewTimer(searchQueueWait)
+	defer wait.Stop()
+	select {
+	case searchSlots <- struct{}{}:
+		defer func() { <-searchSlots }()
+	case <-wait.C:
+		return 0, nil, nil, internal.ErrQueryTooExpensive
+	case <-ctx.Done():
+		return 0, nil, nil, ctx.Err()
+	}
+
 	skip, take := opts.GetSkipTake()
 	result, err := b.inner.Searcher.Search(ctx, q, &zoekt.SearchOptions{
-		Whole:              true, // only the displayed documents are loaded, see MaxDocDisplayCount
-		ShardMaxMatchCount: shardMaxMatchCount,
-		TotalMaxMatchCount: totalMaxMatchCount,
-		MaxDocDisplayCount: min(skip+take, internal.MaxSearchWindow),
+		ChunkMatches:         true, // matching lines with one context line, not the whole file
+		NumContextLines:      1,
+		ShardMaxMatchCount:   shardMaxMatchCount,
+		TotalMaxMatchCount:   totalMaxMatchCount,
+		MaxDocDisplayCount:   min(skip+take, internal.MaxSearchWindow),
+		MaxMatchDisplayCount: maxMatchDisplayCount,
+		MaxWallTime:          regexTimeout,
 	})
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -587,14 +658,20 @@ func (f *zoektFormatter) Format(r *internal.SearchResult) (*internal.Result, err
 	}
 	lineOffsets = append(lineOffsets, len(r.Content)) // end offset for the last line
 
-	// Line numbers are 1-based, last line is totalLines
-	totalLines := len(lineOffsets) - 1
+	// Content holds only the kept chunks: its i-th line is line r.LineNumbers[i] of the file
+	totalLines := min(len(lineOffsets)-1, len(r.LineNumbers))
 
-	// Collect all lines to display (+/- 1 line around each match), clamped to the file bounds
+	// Collect the lines to display (+/- 1 line around each match) as indexes into Content
 	sortedLines := make([]int, 0, len(r.Matches)*3)
 	for _, m := range r.Matches {
-		for i := max(m.LineNumber-1, 1); i <= min(m.LineNumber+1, totalLines); i++ {
-			sortedLines = append(sortedLines, i)
+		idx, ok := slices.BinarySearch(r.LineNumbers[:totalLines], m.LineNumber)
+		if !ok {
+			continue
+		}
+		for i := max(idx-1, 0); i <= min(idx+1, totalLines-1); i++ {
+			if r.LineNumbers[i] >= m.LineNumber-1 && r.LineNumbers[i] <= m.LineNumber+1 { // not a far line of another chunk
+				sortedLines = append(sortedLines, i)
+			}
 		}
 	}
 
@@ -602,13 +679,16 @@ func (f *zoektFormatter) Format(r *internal.SearchResult) (*internal.Result, err
 	slices.Sort(sortedLines)
 	sortedLines = slices.Compact(sortedLines)
 
-	// Group lines into blocks (break block if distance > 2 lines)
+	// Group lines into blocks (break block if the lines are not adjacent in the file)
 	var blocks [][]int
 	var currentBlock []int
 	for _, line := range sortedLines {
-		if len(currentBlock) > 0 && line > currentBlock[len(currentBlock)-1]+2 {
-			blocks = append(blocks, currentBlock)
-			currentBlock = nil
+		if len(currentBlock) > 0 {
+			prev := currentBlock[len(currentBlock)-1]
+			if line != prev+1 || r.LineNumbers[line] != r.LineNumbers[prev]+1 {
+				blocks = append(blocks, currentBlock)
+				currentBlock = nil
+			}
 		}
 		currentBlock = append(currentBlock, line)
 	}
@@ -620,27 +700,24 @@ func (f *zoektFormatter) Format(r *internal.SearchResult) (*internal.Result, err
 
 	// Iterate over blocks to generate ResultLines
 	for _, block := range blocks {
-		startLine := block[0]
-		endLine := block[len(block)-1]
+		startIdx := block[0]
+		endIdx := block[len(block)-1]
 
 		// Slice block content directly from r.Content using precomputed offsets
-		startOffset := lineOffsets[startLine-1]
-		endOffset := lineOffsets[endLine]
-		blockContent := r.Content[startOffset:endOffset]
+		blockContent := r.Content[lineOffsets[startIdx]:lineOffsets[endIdx+1]]
+		blockLines := make([]int, len(block))
+		for i, idx := range block {
+			blockLines[i] = r.LineNumbers[idx]
+		}
 
 		// Map for highlights per line within the block
 		highlightByLine := make(map[int][][2]int)
 		for _, match := range r.Matches {
-			if match.LineNumber < startLine || match.LineNumber > endLine {
+			idx, ok := slices.BinarySearch(r.LineNumbers[:totalLines], match.LineNumber)
+			if !ok || idx < startIdx || idx > endIdx {
 				continue
 			}
-			lineInBlock := match.LineNumber - startLine
-			globalLineIdx := match.LineNumber - 1
-
-			highlightStart := match.Start - lineOffsets[globalLineIdx]
-			highlightEnd := match.End - lineOffsets[globalLineIdx]
-
-			highlightByLine[lineInBlock] = append(highlightByLine[lineInBlock], [2]int{highlightStart, highlightEnd})
+			highlightByLine[idx-startIdx] = append(highlightByLine[idx-startIdx], [2]int{match.Start - lineOffsets[idx], match.End - lineOffsets[idx]})
 		}
 
 		// Merge overlapping highlight ranges
@@ -672,7 +749,7 @@ func (f *zoektFormatter) Format(r *internal.SearchResult) (*internal.Result, err
 		// Generate the formatted lines with highlighting
 		resultLines = append(resultLines, internal.HighlightSearchResultCode(
 			r.Filename,
-			block,
+			blockLines,
 			highlightRanges,
 			blockContent,
 		)...)
