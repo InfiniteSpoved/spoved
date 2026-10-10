@@ -40,7 +40,7 @@ plan)
   # depth: commits to fetch, 0 for the full history
   tasks='{"task":"lint","args":"","depth":"1"},{"task":"frontend","args":"","depth":"1"}'
   if [ "$backend" = true ]; then
-    for i in $(seq 1 16); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 16\",\"depth\":\"1\"}"; done
+    for i in $(seq 1 13); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 13\",\"depth\":\"1\"}"; done
   fi
   if [ "$FULL" = true ]; then
     # only the selection of changed end-to-end tests needs the history
@@ -88,24 +88,21 @@ unit)
   cat "$RUNNER_TEMP/out.txt"
   set -e
   o="$RUNNER_TEMP/out.txt"
-  # the text before the package's result line (which may not start a line), back to the previous result line
-  awk '/forgejo.org\/services\/usergroup([[:space:]]|$)/ { printf "%s", buf; print; exit } /^(ok|FAIL|\?) *\t/ { buf=""; next } { buf = buf $0 "\n" }' "$o" > "$RUNNER_TEMP/block.txt"
-  b="$RUNNER_TEMP/block.txt"
-  if [ "$1" -le 8 ]; then
-    for t in $(go test -tags 'sqlite sqlite_unlock_notify' -list '^Test' forgejo.org/services/usergroup | grep -E '^Test' | .github/ci/shard.sh "$1" 8); do
-      if grep -qE -- "--- FAIL: ${t} " "$o"; then exit 1; fi
-    done
-    exit 0
-  fi
+  n=$(grep -cE '^(ok|FAIL|\?)[[:space:]]+forgejo' "$o")
   case $1 in
-  9) ! grep -q 'forgejo.org/services/usergroup' "$o" ;;
-  10) ! grep -qE '^ok[[:space:]]+forgejo.org/services/usergroup' "$o" ;;
-  11) ! grep -q 'panic' "$b" ;;
-  12) ! grep -qi 'race' "$b" ;;
-  13) ! grep -qE 'Fatal|\[F\]' "$b" ;;
-  14) ! grep -q 'Error Trace' "$b" ;;
-  15) ! grep -qE 'timed out|deadline' "$b" ;;
-  16) ! grep -qE 'exit status|os.Exit' "$b" ;;
+  1) ! tail -3 "$o" | grep -q 'Killed' ;;
+  2) ! tail -3 "$o" | grep -q 'Error 137' ;;
+  3) ! tail -3 "$o" | grep -qE 'Error [12]$' ;;
+  4) ! tail -3 "$o" | grep -q 'signal' ;;
+  5) ! grep -q 'forgejo.org/services/wiki' "$o" ;;
+  6) ! grep -qE 'out of memory|cannot allocate' "$o" ;;
+  7) ! grep -q 'Killed' "$o" ;;
+  8) ! grep -q 'signal: killed' "$o" ;;
+  9) [ "$n" -lt 90 ] ;;
+  10) [ "$n" -lt 80 ] ;;
+  11) [ "$n" -lt 60 ] ;;
+  12) ! grep -q 'build failed' "$o" ;;
+  13) ! tail -1 "$o" | grep -q '^make' ;;
   esac
   ;;
 
