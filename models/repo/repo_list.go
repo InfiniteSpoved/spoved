@@ -691,6 +691,33 @@ func AccessibleRepositoryCondition(user *user_model.User, unitType unit.Type) bu
 	return builder.And(cond, builder.Eq{"`repository`.trashed_unix": 0}, TwoFactorHiddenRepoCond(userID(user)))
 }
 
+// OrgUnitRepoCond matches, in the repository table, the repositories of owner ownerID (every owner if 0, for site
+// admins) that aren't trashed and whose unit unitType doer may read: a repo_unit row of the type, allowed by the
+// site policy and the organization (for site admins too), and, unless admin, readable by doer through
+// AccessibleRepositoryCondition or a team of ownerID with admin access, as GetUserRepoPermission does. It reads
+// dynamic settings, so call it before building a session.
+func OrgUnitRepoCond(ctx context.Context, ownerID int64, doer *user_model.User, admin bool, unitType unit.Type) builder.Cond {
+	cond := builder.Eq{"`repository`.trashed_unix": 0}.And(
+		builder.In("`repository`.id", builder.Select("repo_id").From("repo_unit").Where(builder.Eq{"type": unitType})),
+		AvailableUnitTypeCond(ctx, "`repository`.owner_id", unitType),
+	)
+	if ownerID != 0 {
+		cond = cond.And(builder.Eq{"`repository`.owner_id": ownerID})
+	}
+	if !admin {
+		// teams that grant admin access reach every unit, with or without a team_unit row for it
+		adminTeamRepos := builder.Select("`team_repo`.repo_id").From("team_repo").
+			Join("INNER", "team_user", "`team_user`.team_id = `team_repo`.team_id").
+			Join("INNER", "team", "`team`.id = `team_repo`.team_id").
+			Where(builder.Eq{"`team_user`.uid": doer.ID, "`team`.org_id": ownerID}.And(builder.Gte{"`team`.authorize": perm.AccessModeAdmin}))
+		cond = cond.And(builder.Or(
+			AccessibleRepositoryCondition(doer, unitType),
+			builder.In("`repository`.id", adminTeamRepos),
+		), TwoFactorHiddenRepoCond(doer.ID))
+	}
+	return cond
+}
+
 func userID(u *user_model.User) int64 {
 	if u == nil {
 		return 0

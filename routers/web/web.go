@@ -1959,6 +1959,10 @@ func registerRoutes(m *web.Route) {
 	}
 	// ***** END: Repository *****
 
+	// pull request metrics (#83); ?format=csv for the CSV
+	m.Get("/org/{org}/metrics", reqSignIn, context.OrgAssignment(true, false, true), org.Metrics)
+	m.Get("/{username}/{reponame}/activity/metrics", ignSignIn, context.RepoAssignment, context.UnitTypes(), context.RepoRef(), reqRepoPullsReader, repo.Metrics)
+
 	m.Group("/notifications", func() {
 		m.Get("", user.Notifications)
 		m.Get("/subscriptions", user.NotificationSubscriptions)
