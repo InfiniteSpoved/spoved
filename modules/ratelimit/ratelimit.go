@@ -27,6 +27,7 @@ const (
 	APIWrite = "api_write"
 	Git      = "git"
 	Web      = "web"
+	Heavy    = "heavy"
 	Auth     = "auth"
 )
 
