@@ -140,7 +140,9 @@ func StartDueScheduledAutoMerges(ctx context.Context) error {
 			continue
 		}
 		doer, err := user_model.GetPossibleUserByID(ctx, am.DoerID)
-		if err != nil {
+		if user_model.IsErrUserNotExist(err) {
+			doer = user_model.NewGhostUser()
+		} else if err != nil {
 			log.Error("GetPossibleUserByID[%d]: %v", am.DoerID, err)
 			continue
 		}

@@ -931,7 +931,7 @@ func TestPullAutoMergeCancelOnPush(t *testing.T) {
 			defer tests.PrintCurrentTest(t)()
 			session.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/%s/settings/units", repo.FullName()), map[string]string{
 				"enable_code": "on", "enable_pulls": "on", "pulls_allow_merge": "on", "pulls_default_merge_style": "merge",
-				"cancel_auto_merge_on_push": "on",
+				"pulls_allow_rebase_update": "on", "cancel_auto_merge_on_push": "on",
 			}), http.StatusSeeOther)
 			assert.True(t, pullsConfig(t).CancelAutoMergeOnPush)
 			resp := session.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/%s/settings/units", repo.FullName())), http.StatusOK)
@@ -992,6 +992,21 @@ func TestPullAutoMergeCancelOnPush(t *testing.T) {
 			testEditFile(t, reviewerSession, reviewer.Name, fork.Name, "from-fork", "README.md", "unreviewed")
 			headMoves(t, pr, sha)
 			assertCancelledBy(t, pr, reviewer.ID)
+		})
+
+		t.Run("Update branch by rebase cancels", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t)
+			approve(t, pr, sha)
+			schedule(t, pr, true)
+			_, _, err := git.NewCommand(t.Context(), "fetch", "origin").RunStdString(&git.RunOpts{Dir: dstPath})
+			require.NoError(t, err)
+			doGitCheckoutBranch(dstPath, "-B", "main", "origin/main")(t)
+			doGitAddSomeCommits(dstPath, "main")(t)
+			doGitPushTestRepository(dstPath, "origin", "main")(t)
+
+			MakeRequest(t, NewRequestf(t, "POST", "/api/v1/repos/%s/pulls/%d/update?style=rebase", repo.FullName(), pr.Index).AddTokenAuth(apiCtx.Token), http.StatusOK)
+			assertCancelledBy(t, pr, owner.ID)
 		})
 
 		t.Run("Cancels force push", func(t *testing.T) {
