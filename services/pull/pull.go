@@ -43,6 +43,10 @@ func NewPullRequest(ctx context.Context, repo *repo_model.Repository, issue *iss
 		return user_model.ErrBlockedByUser
 	}
 
+	if err := issue_service.CheckPRTitleRule(ctx, repo, pr.BaseBranch, issue.Title, false); err != nil {
+		return err
+	}
+
 	testPatchCtx, err := testPatch(ctx, pr)
 	defer testPatchCtx.close()
 	if err != nil {

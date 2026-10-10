@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 
 	"forgejo.org/models/db"
@@ -19,6 +20,26 @@ import (
 // PushRuleMaxPatternLength caps each regex and the banned file pattern list.
 // Go's regexp is linear time, so a length cap is enough against ReDoS.
 const PushRuleMaxPatternLength = 1024
+
+// PushRuleMaxPRTitleMessageLength caps the custom message of the pull request title rule.
+const PushRuleMaxPRTitleMessageLength = 255
+
+// ErrPRTitleRule is returned when a pull request title violates the title rule.
+// An empty Message means the default text; Invalid means the stored rule does not compile.
+type ErrPRTitleRule struct {
+	Message string
+	Invalid bool
+}
+
+func (err *ErrPRTitleRule) Error() string {
+	return "pull request title rule: " + err.Message
+}
+
+// IsErrPRTitleRule checks if an error is an ErrPRTitleRule.
+func IsErrPRTitleRule(err error) bool {
+	_, ok := err.(*ErrPRTitleRule)
+	return ok
+}
 
 // PushRule holds the push rules of a repository. The pre-receive hook checks them on new commits.
 type PushRule struct {
@@ -32,10 +53,20 @@ type PushRule struct {
 	// semicolon separated globs, matched against the lower-case path and its basename
 	BannedFilePatterns string `xorm:"TEXT"`
 
+	PRTitleRegex       string `xorm:"TEXT"`
+	PRTitleBannedRegex string `xorm:"TEXT"`
+	PRTitleMessage     string `xorm:"VARCHAR(255)"`
+	// semicolon separated globs of base branches (case sensitive), empty = all
+	PRTitleBranches   string `xorm:"TEXT"`
+	PRTitleBlockMerge bool   `xorm:"NOT NULL DEFAULT false"`
+
 	CommitMessageRe       *regexp.Regexp `xorm:"-"`
 	CommitMessageBannedRe *regexp.Regexp `xorm:"-"`
 	BranchNameRe          *regexp.Regexp `xorm:"-"`
 	BannedFileGlobs       []glob.Glob    `xorm:"-"`
+	PRTitleRe             *regexp.Regexp `xorm:"-"`
+	PRTitleBannedRe       *regexp.Regexp `xorm:"-"`
+	PRTitleBranchGlobs    []glob.Glob    `xorm:"-"`
 
 	CreatedUnix timeutil.TimeStamp `xorm:"created"`
 	UpdatedUnix timeutil.TimeStamp `xorm:"updated"`
@@ -84,6 +115,43 @@ func (r *PushRule) Compile() (err error) {
 			return fmt.Errorf("invalid glob %q: %w", expr, err)
 		}
 		r.BannedFileGlobs = append(r.BannedFileGlobs, g)
+	}
+	if err = compilePushRuleRegex(&r.PRTitleRe, r.PRTitleRegex); err != nil {
+		return err
+	}
+	if err = compilePushRuleRegex(&r.PRTitleBannedRe, r.PRTitleBannedRegex); err != nil {
+		return err
+	}
+	if len(r.PRTitleMessage) > PushRuleMaxPRTitleMessageLength {
+		return fmt.Errorf("pull request title message is longer than %d characters", PushRuleMaxPRTitleMessageLength)
+	}
+	if len(r.PRTitleBranches) > PushRuleMaxPatternLength {
+		return fmt.Errorf("pull request title branches are longer than %d characters", PushRuleMaxPatternLength)
+	}
+	r.PRTitleBranchGlobs = nil
+	for expr := range strings.SplitSeq(r.PRTitleBranches, ";") {
+		if expr = strings.TrimSpace(expr); expr == "" {
+			continue
+		}
+		g, err := glob.Compile(expr, '/')
+		if err != nil {
+			return fmt.Errorf("invalid glob %q: %w", expr, err)
+		}
+		r.PRTitleBranchGlobs = append(r.PRTitleBranchGlobs, g)
+	}
+	return nil
+}
+
+// CheckPRTitle returns an *ErrPRTitleRule if the title violates the rule for a pull request into baseBranch.
+// A draft title skips the must-match regex, never the must-not-match one. Call Compile first.
+func (r *PushRule) CheckPRTitle(baseBranch, title string, isDraft bool) error {
+	if len(r.PRTitleBranchGlobs) > 0 && !slices.ContainsFunc(r.PRTitleBranchGlobs, func(g glob.Glob) bool { return g.Match(baseBranch) }) {
+		return nil
+	}
+	title = strings.TrimSpace(title)
+	if (r.PRTitleRe != nil && !isDraft && !r.PRTitleRe.MatchString(title)) ||
+		(r.PRTitleBannedRe != nil && r.PRTitleBannedRe.MatchString(title)) {
+		return &ErrPRTitleRule{Message: r.PRTitleMessage}
 	}
 	return nil
 }

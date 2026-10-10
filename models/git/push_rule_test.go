@@ -54,3 +54,38 @@ func TestPushRuleUpsert(t *testing.T) {
 	assert.Zero(t, rule.MaxFileSizeMB)
 	unittest.AssertCount(t, &git_model.PushRule{}, 1)
 }
+
+func TestPushRulePRTitle(t *testing.T) {
+	for _, rule := range []git_model.PushRule{
+		{PRTitleRegex: "("},
+		{PRTitleBannedRegex: strings.Repeat("a", git_model.PushRuleMaxPatternLength+1)},
+		{PRTitleBranches: "main;[a"},
+		{PRTitleBranches: strings.Repeat("a", git_model.PushRuleMaxPatternLength+1)},
+		{PRTitleMessage: strings.Repeat("a", git_model.PushRuleMaxPRTitleMessageLength+1)},
+	} {
+		require.Error(t, rule.Compile(), "%+v", rule)
+	}
+
+	var empty git_model.PushRule
+	require.NoError(t, empty.Compile())
+	require.NoError(t, empty.CheckPRTitle("main", "anything", false))
+
+	rule := git_model.PushRule{PRTitleRegex: "^[A-Z]+-\\d+ ", PRTitleBannedRegex: "^WIP", PRTitleMessage: "use KEY-1 prefix"}
+	require.NoError(t, rule.Compile())
+	require.NoError(t, rule.CheckPRTitle("main", "ABC-1 fix", false))
+	err := rule.CheckPRTitle("main", "fix", false)
+	require.ErrorAs(t, err, new(*git_model.ErrPRTitleRule))
+	assert.True(t, git_model.IsErrPRTitleRule(err))
+	assert.Equal(t, "use KEY-1 prefix", err.(*git_model.ErrPRTitleRule).Message)
+	// a draft skips must-match, never must-not-match
+	require.NoError(t, rule.CheckPRTitle("main", "fix", true))
+	require.Error(t, rule.CheckPRTitle("main", "WIP: ABC-1 fix", true))
+
+	// the filter is case sensitive and limits the checked base branches
+	rule = git_model.PushRule{PRTitleRegex: "^ok", PRTitleBranches: "main; release/*"}
+	require.NoError(t, rule.Compile())
+	require.Error(t, rule.CheckPRTitle("main", "bad", false))
+	require.Error(t, rule.CheckPRTitle("release/1.0", "bad", false))
+	require.NoError(t, rule.CheckPRTitle("develop", "bad", false))
+	require.NoError(t, rule.CheckPRTitle("Main", "bad", false))
+}

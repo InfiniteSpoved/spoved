@@ -593,6 +593,9 @@ func CreatePullRequest(ctx *context.APIContext) {
 		} else if repo_model.IsErrUserDoesNotHaveAccessToRepo(err) {
 			ctx.Error(http.StatusBadRequest, "UserDoesNotHaveAccessToRepo", err)
 			return
+		} else if message, ok := issue_service.PRTitleRuleMessage(ctx.Locale, err); ok {
+			ctx.Error(http.StatusUnprocessableEntity, "PRTitleRule", message)
+			return
 		}
 		ctx.Error(http.StatusInternalServerError, "NewPullRequest", err)
 		return
@@ -677,7 +680,10 @@ func EditPullRequest(ctx *context.APIContext) {
 
 	if len(form.Title) > 0 {
 		err = issue_service.ChangeTitle(ctx, issue, ctx.Doer(), form.Title)
-		if err != nil {
+		if message, ok := issue_service.PRTitleRuleMessage(ctx.Locale, err); ok {
+			ctx.Error(http.StatusUnprocessableEntity, "PRTitleRule", message)
+			return
+		} else if err != nil {
 			ctx.Error(http.StatusInternalServerError, "ChangeTitle", err)
 			return
 		}
@@ -980,6 +986,8 @@ func MergePullRequest(ctx *context.APIContext) {
 			ctx.Error(http.StatusMethodNotAllowed, "PR already merged", "")
 		} else if errors.Is(err, pull_service.ErrIsWorkInProgress) {
 			ctx.Error(http.StatusMethodNotAllowed, "PR is a work in progress", "Work in progress PRs cannot be merged")
+		} else if message, ok := issue_service.PRTitleRuleMessage(ctx.Locale, err); ok {
+			ctx.Error(http.StatusMethodNotAllowed, "PRTitleRule", message)
 		} else if errors.Is(err, pull_service.ErrNotMergeableState) {
 			ctx.Error(http.StatusMethodNotAllowed, "PR not in mergeable state", "Please try again later")
 		} else if models.IsErrDisallowedToMerge(err) {
