@@ -21,11 +21,13 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	asymkey_model "forgejo.org/models/asymkey"
 	"forgejo.org/modules/graceful"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/process"
+	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
 
@@ -187,7 +189,58 @@ func sessionHandler(session ssh.Session) {
 	}
 }
 
+// connRateLimit refuses a connection when its client IP is out of [rate_limit.ssh_connect] tokens. SSH has no way to
+// send an error before the key exchange, so the client gets a text line, which RFC 4253 section 4.2 lets servers send
+// before the version string (clients skip it, ssh -v shows it), and the connection is closed.
+func connRateLimit(_ ssh.Context, conn net.Conn) net.Conn {
+	r := ratelimit.CheckSSHConnect(conn.RemoteAddr().String())
+	if r.Allowed {
+		return conn
+	}
+	logger.Warn("SSH connect rate limit exceeded by %s", conn.RemoteAddr())
+	_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
+	_, _ = io.WriteString(conn, (&ratelimit.LimitedError{Result: r}).Error()+"\r\n")
+	return nil
+}
+
+// connAuth is the auth class attempt of one connection.
+type connAuth struct {
+	attempt  *ratelimit.AuthAttempt
+	refunded bool
+}
+
+type connAuthKey struct{}
+
+// countAuthFailures counts failed public key authentication in the auth class: one token per connection however
+// many keys the client offers (OpenSSH offers every key of the agent), given back when one of them is accepted.
+// The token is taken with the first key, so a limited IP is refused even with a valid key. The handler is called
+// twice for a valid key, so the token is given back once.
+func countAuthFailures(ctx ssh.Context, authenticate func() bool) bool {
+	ca, _ := ctx.Value(connAuthKey{}).(*connAuth)
+	if ca == nil {
+		attempt := ratelimit.StartAuth(ctx.RemoteAddr().String())
+		if !attempt.Allowed {
+			logger.Warn("SSH authentication rate limit exceeded by %s", ctx.RemoteAddr())
+			return false
+		}
+		ca = &connAuth{attempt: attempt}
+		ctx.SetValue(connAuthKey{}, ca)
+	}
+	if !authenticate() {
+		return false
+	}
+	if !ca.refunded {
+		ca.refunded = true
+		ca.attempt.Succeeded()
+	}
+	return true
+}
+
 func publicKeyHandler(ctx ssh.Context, key ssh.PublicKey) bool {
+	return countAuthFailures(ctx, func() bool { return authenticateKey(ctx, key) })
+}
+
+func authenticateKey(ctx ssh.Context, key ssh.PublicKey) bool {
 	if logger.LevelEnabled(log.DEBUG) { // <- FingerprintSHA256 is kinda expensive so only calculate it if necessary
 		logger.Debug("Handle Public Key: Fingerprint: %s from %s", gossh.FingerprintSHA256(key), ctx.RemoteAddr())
 	}
@@ -323,6 +376,7 @@ func Listen(host string, port int, ciphers, keyExchanges, macs []string) {
 			config.Ciphers = ciphers
 			return config
 		},
+		ConnCallback:             connRateLimit,
 		ConnectionFailedCallback: sshConnectionFailed,
 		// We need to explicitly disable the PtyCallback so text displays
 		// properly.

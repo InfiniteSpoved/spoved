@@ -21,6 +21,8 @@ func TestLoadRateLimit(t *testing.T) {
 	assert.Equal(t, RateLimitClass{60, 600, 5, 50}, RateLimit.Classes["api"])
 	assert.Equal(t, RateLimitClass{10, 100, 0, 0}, RateLimit.Classes["api_write"])
 	assert.Equal(t, RateLimitClass{0.0167, 10, 0, 0}, RateLimit.Classes["auth"])
+	assert.Equal(t, RateLimitClass{10, 100, 20, 200}, RateLimit.Classes["ssh"])
+	assert.Equal(t, RateLimitClass{5, 100, 0, 0}, RateLimit.Classes["ssh_connect"])
 
 	cfg, err = NewConfigProviderFromData(`
 [rate_limit]
@@ -35,6 +37,11 @@ ANONYMOUS_RATE = 99
 [rate_limit.auth]
 RATE = 2
 BURST = 4
+[rate_limit.ssh]
+ANONYMOUS_RATE = 0
+[rate_limit.ssh_connect]
+RATE = 1
+BURST = 7
 `)
 	require.NoError(t, err)
 	loadRateLimitFrom(cfg)
@@ -46,4 +53,6 @@ BURST = 4
 	assert.Equal(t, RateLimitClass{0.5, 100, 2, 3}, RateLimit.Classes["git"])
 	assert.Equal(t, RateLimitClass{10, 100, 0, 0}, RateLimit.Classes["api_write"])
 	assert.Equal(t, RateLimitClass{2, 4, 0, 0}, RateLimit.Classes["auth"])
+	assert.Equal(t, RateLimitClass{10, 100, 0, 200}, RateLimit.Classes["ssh"])
+	assert.Equal(t, RateLimitClass{1, 7, 0, 0}, RateLimit.Classes["ssh_connect"])
 }

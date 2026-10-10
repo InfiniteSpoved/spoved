@@ -237,3 +237,52 @@ func TestOverflowKeepsUserKeys(t *testing.T) {
 	require.False(t, StartAuth("198.51.100.3:1", UserKey("carol")).Allowed)
 	assert.NotContains(t, a.buckets, UserKey("carol"))
 }
+
+func TestCheckSSH(t *testing.T) {
+	setup(t, map[string]setting.RateLimitClass{SSH: {AuthenticatedRate: slow, AuthenticatedBurst: 2, AnonymousRate: slow, AnonymousBurst: 3}})
+
+	// per key: 2, and other keys are not affected
+	assert.True(t, CheckSSH("198.51.100.1:0", 1).Allowed)
+	assert.True(t, CheckSSH("198.51.100.2:0", 1).Allowed)
+	assert.False(t, CheckSSH("198.51.100.3:0", 1).Allowed)
+	assert.True(t, CheckSSH("198.51.100.3:0", 2).Allowed)
+
+	// per IP: 3 over all keys (key 2 and 3 used 1 and 0 of 2 so far), other IPs are not affected
+	assert.True(t, CheckSSH("198.51.100.3:0", 3).Allowed)
+	assert.False(t, CheckSSH("198.51.100.3:0", 4).Allowed)
+	assert.True(t, CheckSSH("198.51.100.4:0", 4).Allowed)
+
+	// IPv6 shares a /64
+	assert.True(t, CheckSSH("[2001:db8:1:1::1]:0", 10).Allowed)
+	assert.True(t, CheckSSH("[2001:db8:1:1::2]:0", 11).Allowed)
+	assert.True(t, CheckSSH("[2001:db8:1:1::3]:0", 12).Allowed)
+	assert.False(t, CheckSSH("[2001:db8:1:1::4]:0", 13).Allowed)
+	assert.True(t, CheckSSH("[2001:db8:1:2::4]:0", 13).Allowed)
+
+	// an empty address skips the IP half, the key half still applies
+	for range 2 {
+		assert.True(t, CheckSSH("", 20).Allowed)
+	}
+	assert.False(t, CheckSSH("", 20).Allowed)
+
+	// exempt IPs are never limited, keys included
+	for range 5 {
+		assert.True(t, CheckSSH("192.0.2.9:0", 1).Allowed)
+	}
+}
+
+func TestCheckSSHConnect(t *testing.T) {
+	setup(t, map[string]setting.RateLimitClass{SSHConnect: {AuthenticatedRate: slow, AuthenticatedBurst: 2}})
+	for range 2 {
+		assert.True(t, CheckSSHConnect("198.51.100.1:5").Allowed)
+	}
+	assert.False(t, CheckSSHConnect("198.51.100.1:6").Allowed)
+	assert.True(t, CheckSSHConnect("198.51.100.2:5").Allowed)
+	for range 5 {
+		assert.True(t, CheckSSHConnect("192.0.2.9:5").Allowed)
+	}
+	// unparsable addresses share one bucket and are never exempt
+	assert.True(t, CheckSSHConnect("garbage").Allowed)
+	assert.True(t, CheckSSHConnect("junk").Allowed)
+	assert.False(t, CheckSSHConnect("trash").Allowed)
+}

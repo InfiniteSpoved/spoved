@@ -35,12 +35,15 @@ func loadRateLimitFrom(rootCfg ConfigProvider) {
 		"git":       {10, 100, 2, 20},
 		"web":       {20, 200, 5, 50},
 		"auth":      {0.0167, 10, 0, 0},
+		// ssh: per key and per client IP for each git command; ssh_connect: per client IP for each connection of the built-in server
+		"ssh":         {10, 100, 20, 200},
+		"ssh_connect": {5, 100, 0, 0},
 	}
 	RateLimit.Classes = make(map[string]RateLimitClass, len(defaults))
 	for name, d := range defaults {
 		sec := rootCfg.Section("rate_limit." + name)
-		if name == "auth" {
-			// the auth class is per IP and per username, there is no authenticated/anonymous split
+		if name == "auth" || name == "ssh_connect" {
+			// these classes are per IP (and per username), there is no authenticated/anonymous split
 			RateLimit.Classes[name] = RateLimitClass{
 				AuthenticatedRate:  sec.Key("RATE").MustFloat64(d.AuthenticatedRate),
 				AuthenticatedBurst: sec.Key("BURST").MustInt(d.AuthenticatedBurst),

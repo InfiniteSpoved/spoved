@@ -28,6 +28,10 @@ const (
 	Git      = "git"
 	Web      = "web"
 	Auth     = "auth"
+	// SSH limits git commands over SSH, per key (authenticated half) and per client IP (anonymous half).
+	SSH = "ssh"
+	// SSHConnect limits the connections of the built-in SSH server per client IP.
+	SSHConnect = "ssh_connect"
 )
 
 const maxKeys = 100_000
@@ -173,6 +177,29 @@ func Check(class, remoteAddr, key string, authenticated bool) Result {
 	}
 	b.tokens--
 	return s.result(b, true)
+}
+
+// CheckSSH takes one token for an SSH git command from the bucket of the client IP and of the key, none when one
+// is empty. The key is the public key ID, which serv only sees after the SSH server authenticated that key. An
+// empty remoteAddr (no usable client address) skips the IP bucket. Exempt addresses are never limited.
+func CheckSSH(remoteAddr string, keyID int64) Result {
+	if remoteAddr != "" {
+		if IsExempt(remoteAddr) {
+			return Result{Allowed: true}
+		}
+		if r := Check(SSH, remoteAddr, IPKey(remoteAddr), false); !r.Allowed {
+			return r
+		}
+	}
+	return Check(SSH, remoteAddr, "key:"+strconv.FormatInt(keyID, 10), true)
+}
+
+// CheckSSHConnect takes one token for a connection to the built-in SSH server from the bucket of the client IP.
+func CheckSSHConnect(remoteAddr string) Result {
+	if IsExempt(remoteAddr) {
+		return Result{Allowed: true}
+	}
+	return Check(SSHConnect, remoteAddr, IPKey(remoteAddr), true)
 }
 
 // AuthAttempt is a credential check counted against the auth class.

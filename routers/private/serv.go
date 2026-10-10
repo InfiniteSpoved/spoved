@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strings"
 
@@ -19,6 +20,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/private"
+	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/routers/common"
 	"forgejo.org/services/context"
@@ -119,9 +121,41 @@ func ServNoCommand(ctx *context.PrivateContext) {
 	ctx.JSON(http.StatusOK, &results)
 }
 
+// sshRateLimited answers 429 and returns true when the key or the client IP is out of [rate_limit.ssh] tokens. serv is
+// reached only through an SSH connection that authenticated this key, and the internal API needs the internal
+// token, so nobody can spend the budget of a key they don't hold. A missing or unparsable client IP skips the IP
+// bucket (the IP allowlist refuses it when SSH is enforced). Admins' keys are exempt with EXEMPT_ADMINS, deploy keys
+// never.
+func sshRateLimited(ctx *context.PrivateContext, keyID int64) bool {
+	if !setting.RateLimit.Enabled {
+		return false
+	}
+	addr := ""
+	if ip, err := netip.ParseAddr(ctx.FormString("ip")); err == nil {
+		addr = net.JoinHostPort(ip.String(), "0")
+	}
+	if setting.RateLimit.ExemptAdmins {
+		if key, err := asymkey_model.GetPublicKeyByID(ctx, keyID); err == nil && key.Type != asymkey_model.KeyTypeDeploy {
+			if u, err := user_model.GetUserByID(ctx, key.OwnerID); err == nil && u.IsAdmin && u.IsActive && !u.ProhibitLogin {
+				return false
+			}
+		}
+	}
+	r := ratelimit.CheckSSH(addr, keyID)
+	if r.Allowed {
+		return false
+	}
+	sshLogger.Warn("SSH rate limit exceeded by key %d from %q", keyID, ctx.FormString("ip"))
+	ctx.JSON(http.StatusTooManyRequests, private.Response{UserMsg: (&ratelimit.LimitedError{Result: r}).Error()})
+	return true
+}
+
 // ServCommand returns information about the provided keyid
 func ServCommand(ctx *context.PrivateContext) {
 	keyID := ctx.ParamsInt64(":keyid")
+	if sshRateLimited(ctx, keyID) {
+		return
+	}
 	ownerName := ctx.Params(":owner")
 	repoName := ctx.Params(":repo")
 	mode := perm.AccessMode(ctx.FormInt("mode"))
