@@ -26,6 +26,7 @@ import (
 	"forgejo.org/modules/process"
 	"forgejo.org/modules/queue"
 	asymkey_service "forgejo.org/services/asymkey"
+	issue_service "forgejo.org/services/issue"
 	shared_automerge "forgejo.org/services/shared/automerge"
 
 	"xorm.io/builder"
@@ -95,6 +96,13 @@ func CheckPullMergeable(stdCtx context.Context, doer *user_model.User, perm *acc
 
 		if pr.IsWorkInProgress(ctx) {
 			return ErrIsWorkInProgress
+		}
+
+		if err := pr.LoadBaseRepo(ctx); err != nil {
+			return err
+		}
+		if err := issue_service.CheckPRTitleRule(ctx, pr.BaseRepo, pr.BaseBranch, pr.Issue.Title, true); err != nil {
+			return err
 		}
 
 		if !pr.CanAutoMerge() && !pr.IsEmpty() {

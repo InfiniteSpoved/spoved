@@ -57,6 +57,7 @@ import (
 	"forgejo.org/services/context/upload"
 	"forgejo.org/services/forms"
 	"forgejo.org/services/gitdiff"
+	issue_service "forgejo.org/services/issue"
 	notify_service "forgejo.org/services/notify"
 	pull_service "forgejo.org/services/pull"
 	repo_service "forgejo.org/services/repository"
@@ -842,6 +843,17 @@ func PrepareViewPullInfo(ctx *context.Context, issue *issues_model.Issue) *git.C
 		ctx.Data["WorkInProgressPrefix"] = pull.GetWorkInProgressPrefix(ctx)
 	}
 
+	if ctx.IsSigned && !pull.HasMerged && !pull.Issue.IsClosed && !pull.IsWorkInProgress(ctx) {
+		if err := issue_service.CheckPRTitleRule(ctx, pull.BaseRepo, pull.BaseBranch, pull.Issue.Title, true); err != nil {
+			message, ok := issue_service.PRTitleRuleMessage(ctx.Locale, err)
+			if !ok {
+				ctx.ServerError("CheckPRTitleRule", err)
+				return nil
+			}
+			ctx.Data["PRTitleRuleError"] = message
+		}
+	}
+
 	if pull.IsFilesConflicted() {
 		ctx.Data["IsPullFilesConflicted"] = true
 		ctx.Data["ConflictedFiles"] = pull.ConflictedFiles
@@ -1460,6 +1472,9 @@ func MergePullRequest(ctx *context.Context) {
 			ctx.JSONError(ctx.Tr("repo.pulls.has_merged"))
 		case errors.Is(err, pull_service.ErrIsWorkInProgress):
 			ctx.JSONError(ctx.Tr("repo.pulls.no_merge_wip"))
+		case git_model.IsErrPRTitleRule(err):
+			message, _ := issue_service.PRTitleRuleMessage(ctx.Locale, err)
+			ctx.JSONError(message)
 		case errors.Is(err, pull_service.ErrNotMergeableState):
 			ctx.JSONError(ctx.Tr("repo.pulls.no_merge_not_ready"))
 		case models.IsErrDisallowedToMerge(err):
@@ -1791,6 +1806,9 @@ func CompareAndPullRequestPost(ctx *context.Context) {
 			ctx.JSONError(ctx.Tr("repo.pulls.blocked_by_user"))
 		case repo_model.IsErrUserDoesNotHaveAccessToRepo(err):
 			ctx.Error(http.StatusBadRequest, "UserDoesNotHaveAccessToRepo", err.Error())
+		case git_model.IsErrPRTitleRule(err):
+			message, _ := issue_service.PRTitleRuleMessage(ctx.Locale, err)
+			ctx.JSONError(message)
 		case git.IsErrPushRejected(err):
 			pushrejErr := err.(*git.ErrPushRejected)
 			message := pushrejErr.Message
@@ -1855,6 +1873,9 @@ func RevertPullRequest(ctx *context.Context) {
 				return
 			}
 			ctx.Flash.Error(flashError)
+		case git_model.IsErrPRTitleRule(err):
+			message, _ := issue_service.PRTitleRuleMessage(ctx.Locale, err)
+			ctx.Flash.Error(html.EscapeString(message)) // a flash string is rendered as (sanitized) HTML, the message is user text
 		case git_model.IsErrBranchAlreadyExists(err):
 			ctx.Flash.Error(ctx.Tr("repo.editor.branch_already_exists", pull_service.RevertBranchName(pr)))
 		case errors.Is(err, util.ErrInvalidArgument):
@@ -2076,6 +2097,8 @@ func UpdatePullRequestTarget(ctx *context.Context) {
 				"error":      err.Error(),
 				"user_error": errorMessage,
 			})
+		} else if message, ok := issue_service.PRTitleRuleMessage(ctx.Locale, err); ok {
+			ctx.JSONError(message)
 		} else if issues_model.IsErrIssueIsClosed(err) {
 			errorMessage := ctx.Tr("repo.pulls.is_closed")
 
