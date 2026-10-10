@@ -6,6 +6,7 @@ package user
 import (
 	"testing"
 
+	"forgejo.org/models"
 	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
@@ -118,4 +119,63 @@ func TestUpdateAuth(t *testing.T) {
 	require.ErrorIs(t, UpdateAuth(db.DefaultContext, user, &UpdateAuthOptions{
 		Password: optional.Some("aaaa"),
 	}), password_module.ErrMinLength)
+}
+
+func TestUpdateLastUsableAdmin(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	deactivate := func(u *user_model.User) error {
+		return UpdateUser(ctx, u, &UpdateOptions{IsActive: optional.Some(false)})
+	}
+	prohibit := func(u *user_model.User) error {
+		return UpdateAuth(ctx, u, &UpdateAuthOptions{ProhibitLogin: optional.Some(true)})
+	}
+	load := func(id int64) *user_model.User {
+		return unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: id})
+	}
+
+	// user 1 is the only usable admin
+	for name, disable := range map[string]func(*user_model.User) error{"deactivate": deactivate, "prohibit": prohibit} {
+		t.Run(name+" only admin", func(t *testing.T) {
+			err := disable(load(1))
+			assert.True(t, models.IsErrDeleteLastAdminUser(err), "%v", err)
+			admin := load(1)
+			assert.True(t, admin.IsActive)
+			assert.False(t, admin.ProhibitLogin)
+		})
+	}
+	t.Run("keep active", func(t *testing.T) {
+		require.NoError(t, UpdateUser(ctx, load(1), &UpdateOptions{IsActive: optional.Some(true)}))
+		require.NoError(t, UpdateAuth(ctx, load(1), &UpdateAuthOptions{ProhibitLogin: optional.Some(false)}))
+	})
+	t.Run("non-admin", func(t *testing.T) {
+		require.NoError(t, prohibit(load(2)))
+		require.NoError(t, deactivate(load(2)))
+	})
+
+	// user 2 is now a disabled admin: disabling it again is unaffected, user 1 is still the last usable one
+	u2 := load(2)
+	u2.IsAdmin = true
+	require.NoError(t, user_model.UpdateUserCols(ctx, u2, "is_admin"))
+	t.Run("disabled admin", func(t *testing.T) {
+		require.NoError(t, deactivate(load(2)))
+		require.NoError(t, prohibit(load(2)))
+		require.Error(t, deactivate(load(1)))
+	})
+
+	// with two usable admins either can be disabled, then the other is the last one
+	u2 = load(2)
+	u2.IsActive, u2.ProhibitLogin = true, false
+	require.NoError(t, user_model.UpdateUserCols(ctx, u2, "is_active", "prohibit_login"))
+	require.NoError(t, prohibit(load(1)))
+	assert.True(t, load(1).ProhibitLogin)
+	require.Error(t, deactivate(load(2)))
+	require.Error(t, prohibit(load(2)))
+
+	u1 := load(1)
+	u1.ProhibitLogin = false
+	require.NoError(t, user_model.UpdateUserCols(ctx, u1, "prohibit_login"))
+	require.NoError(t, deactivate(load(2)))
+	assert.False(t, load(2).IsActive)
 }

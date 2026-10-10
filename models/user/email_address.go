@@ -399,6 +399,9 @@ func ActivateUserEmail(ctx context.Context, userID int64, email string, activate
 		}
 
 		// The user's activation state should be synchronized with the primary email
+		if !activate && user.IsActive && IsLastUsableAdmin(ctx, user) {
+			return ErrLastUsableAdmin
+		}
 		if user.IsActive != activate {
 			user.IsActive = activate
 			user.Rands = GetUserSalt()

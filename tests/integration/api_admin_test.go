@@ -698,3 +698,29 @@ func TestAPIAdminListHooksPagination(t *testing.T) {
 	assert.Len(t, hooksList, 10, "page length should equal `limit` param")
 	assert.Equal(t, "20", resp.Header().Get("X-Total-Count"))
 }
+
+func TestAPIEditUserLastUsableAdmin(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+
+	token := getUserToken(t, "user1", auth_model.AccessTokenScopeWriteAdmin)
+	bFalse, bTrue := false, true
+	patch := func(name string, opts api.EditUserOption, status int) {
+		t.Helper()
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/admin/users/"+name, opts).AddTokenAuth(token), status)
+	}
+
+	// user 1 is the only usable admin
+	patch("user1", api.EditUserOption{Active: &bFalse}, http.StatusBadRequest)
+	patch("user1", api.EditUserOption{ProhibitLogin: &bTrue}, http.StatusBadRequest)
+	unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1}, "is_active = true AND prohibit_login = false")
+
+	// a non-admin is unaffected
+	patch("user2", api.EditUserOption{ProhibitLogin: &bTrue}, http.StatusOK)
+	patch("user2", api.EditUserOption{ProhibitLogin: &bFalse}, http.StatusOK)
+
+	// with a second usable admin either can be disabled
+	patch("user2", api.EditUserOption{Admin: &bTrue}, http.StatusOK)
+	patch("user2", api.EditUserOption{ProhibitLogin: &bTrue}, http.StatusOK)
+	patch("user2", api.EditUserOption{ProhibitLogin: &bFalse, Active: &bFalse}, http.StatusOK)
+	unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}, "is_active = false AND prohibit_login = false AND is_admin = true")
+}

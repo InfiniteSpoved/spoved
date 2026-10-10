@@ -431,6 +431,8 @@ func EditUserPost(ctx *context.Context) {
 		case password.IsErrIsPwnedRequest(err):
 			ctx.Data["Err_Password"] = true
 			ctx.RenderWithErr(ctx.Tr("auth.password_pwned_err"), tplUserEdit, &form)
+		case models.IsErrDeleteLastAdminUser(err):
+			ctx.RenderWithErr(ctx.Tr("auth.last_admin"), tplUserEdit, &form)
 		default:
 			ctx.ServerError("UpdateUser", err)
 		}
