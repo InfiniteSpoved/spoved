@@ -29,6 +29,26 @@ test.afterEach(async ({page}) => {
 });
 
 test.describe('Releases', () => {
+  test('Generate release notes with direct commits', async ({page, isMobile}) => {
+    test.skip(isMobile);
+
+    const bodies: string[] = [];
+    await page.route('**/releases/generate-notes', (route) => {
+      bodies.push(route.request().postData() ?? '');
+      return route.fulfill({json: {body: 'generated'}});
+    });
+    await page.goto('/user2/repo1/releases/new');
+    await page.locator('input[name=tag_name]').pressSequentially('2.0');
+    await page.locator('#generate-release-notes').click();
+    await expect(page.locator('textarea[name=content]')).toHaveValue('generated');
+    await page.getByLabel('Include direct commits').check();
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.locator('#generate-release-notes').click();
+    await expect.poll(() => bodies.length).toBe(2);
+    expect(bodies[0]).not.toContain('include_direct_commits');
+    expect(bodies[1]).toContain('name="include_direct_commits"');
+  });
+
   test('External release attachments', async ({page, isMobile}) => {
     test.skip(isMobile);
 

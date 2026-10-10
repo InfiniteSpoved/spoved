@@ -54,6 +54,8 @@ type GenerateReleaseNotesOption struct {
 	PreviousTagName string `json:"previous_tag_name" binding:"GitRefName;MaxSize(255)"`
 	// configuration file, defaults to .forgejo/release.yml or .github/release.yml
 	ConfigurationFilePath string `json:"configuration_file_path" binding:"MaxSize(255)"`
+	// list the commits of the range that are not the merge of a pull request; of a rebased or fast-forwarded pull request only the last commit is excluded
+	IncludeDirectCommits bool `json:"include_direct_commits"`
 }
 
 // GeneratedReleaseNotes generated release notes

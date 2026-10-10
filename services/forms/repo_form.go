@@ -691,6 +691,8 @@ type GenerateReleaseNotesForm struct {
 	TagName         string `binding:"Required;GitRefName;MaxSize(255)" locale:"repo.release.tag_name"`
 	Target          string `form:"tag_target" binding:"MaxSize(255)"`
 	PreviousTagName string `binding:"GitRefName;MaxSize(255)"`
+
+	IncludeDirectCommits bool
 }
 
 // Validate validates the fields
