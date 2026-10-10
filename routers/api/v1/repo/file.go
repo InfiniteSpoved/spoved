@@ -312,6 +312,16 @@ func archiveDownload(ctx *context.APIContext) {
 		return
 	}
 
+	need, err := aReq.NeedsBuild(ctx)
+	if err != nil {
+		ctx.ServerError("aReq.NeedsBuild", err)
+		return
+	}
+	// serving a ready archive or waiting for a queued build is free; only starting a build takes a heavy token
+	if need && !common.ChargeHeavyAPI(ctx) {
+		return
+	}
+
 	archiver, err := aReq.Await(ctx)
 	if err != nil {
 		ctx.ServerError("archiver.Await", err)

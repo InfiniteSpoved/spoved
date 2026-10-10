@@ -51,6 +51,10 @@
 					<button type="button" class="ui mini button tw-float-right" id="generate-release-notes" data-url="{{$.RepoLink}}/releases/generate-notes" data-confirm="{{ctx.Locale.Tr "repo.release.generate_notes_confirm"}}"{{if .PageIsEditRelease}} data-tag-name="{{.tag_name}}" data-tag-target="{{.tag_target}}"{{end}}>
 						{{ctx.Locale.Tr "repo.release.generate_notes"}}
 					</button>
+					<div class="ui checkbox tw-float-right tw-mr-2" data-tooltip-content="{{ctx.Locale.Tr "repo.release.generate_notes_direct_commits_help"}}">
+						<input type="checkbox" id="generate-notes-direct-commits">
+						<label for="generate-notes-direct-commits">{{ctx.Locale.Tr "repo.release.generate_notes_direct_commits"}}</label>
+					</div>
 				{{end}}
 				<div class="field">
 					{{template "shared/combomarkdowneditor" (dict
