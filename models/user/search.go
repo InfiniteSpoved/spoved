@@ -34,7 +34,9 @@ type SearchUserOptions struct {
 	SupportedSortOrders container.Set[string] // if not nil, only allow to use the sort orders in this set
 
 	IsActive           optional.Option[bool]
-	IsArchived         optional.Option[bool] // organizations
+	IsArchived         optional.Option[bool]  // organizations
+	CategoryID         optional.Option[int64] // organizations: org_category.id, Some(0) = no category
+	GroupByCategory    bool                   // organizations: sort by category position first ("Other" last)
 	IsAdmin            optional.Option[bool]
 	IsRestricted       optional.Option[bool]
 	IsTwoFactorEnabled optional.Option[bool]
@@ -118,6 +120,10 @@ func (opts *SearchUserOptions) toSearchQueryBase(ctx context.Context) *xorm.Sess
 		cond = cond.And(builder.Eq{"is_archived": value})
 	}
 
+	if has, value := opts.CategoryID.Get(); has {
+		cond = cond.And(builder.Eq{"`user`.category_id": value})
+	}
+
 	if has, value := opts.IsAdmin.Get(); has {
 		cond = cond.And(builder.Eq{"is_admin": value})
 	}
@@ -166,7 +172,11 @@ func SearchUsers(ctx context.Context, opts *SearchUserOptions) (users []*User, _
 		opts.OrderBy = db.SearchOrderByAlphabetically
 	}
 
-	sessQuery := opts.toSearchQueryBase(ctx).OrderBy(opts.OrderBy.String())
+	orderBy := opts.OrderBy.String()
+	if opts.GroupByCategory {
+		orderBy = "COALESCE((SELECT `position` FROM `org_category` WHERE `org_category`.id = `user`.category_id), 2147483647), `user`.category_id, " + orderBy
+	}
+	sessQuery := opts.toSearchQueryBase(ctx).OrderBy(orderBy)
 	defer sessQuery.Close()
 	if opts.PageSize > 0 {
 		sessQuery = db.SetSessionPagination(sessQuery, opts)

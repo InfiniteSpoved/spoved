@@ -18,6 +18,8 @@ import (
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
+	perm_model "forgejo.org/models/perm"
+	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	"forgejo.org/modules/actions"
@@ -189,10 +191,24 @@ type ViewRunInfo struct {
 }
 
 type ViewCurrentJob struct {
-	Title       string          `json:"title"`
-	Steps       []*ViewJobStep  `json:"steps"`
-	AllAttempts []*TaskAttempt  `json:"allAttempts"`
-	Summaries   []template.HTML `json:"summaries"`
+	Title            string                `json:"title"`
+	Steps            []*ViewJobStep        `json:"steps"`
+	AllAttempts      []*TaskAttempt        `json:"allAttempts"`
+	Summaries        []template.HTML       `json:"summaries"`
+	TokenPermissions *ViewTokenPermissions `json:"tokenPermissions,omitempty"`
+}
+
+// ViewTokenPermissions is what the automatic token of the viewed attempt may do in the repository, per unit.
+type ViewTokenPermissions struct {
+	Title string                 `json:"title"`
+	Units []*ViewTokenPermission `json:"units"`
+	Notes []string               `json:"notes"`
+}
+
+type ViewTokenPermission struct {
+	Name   string `json:"name"`
+	Mode   string `json:"mode"` // none, read or write
+	Access string `json:"access"`
 }
 
 type ViewLogs struct {
@@ -414,6 +430,15 @@ func getViewResponse(ctx *app_context.Context, req *ViewRequest, runIndex, jobIn
 		return nil
 	}
 
+	// a placeholder task (the outer job of a workflow call) has no runner and its token is never used
+	if task.RunnerID != 0 {
+		resp.State.CurrentJob.TokenPermissions, err = viewTokenPermissions(ctx, run, current, task)
+		if err != nil {
+			ctx.Error(http.StatusInternalServerError, err.Error())
+			return nil
+		}
+	}
+
 	resp.State.CurrentJob.Summaries, err = renderStepSummaries(ctx, task, metas)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, err.Error())
@@ -496,6 +521,46 @@ func getViewResponse(ctx *app_context.Context, req *ViewRequest, runIndex, jobIn
 	}
 
 	return resp
+}
+
+// viewTokenPermissions describes what the token of the task may do, as GetActionRepoPermission decides it.
+func viewTokenPermissions(ctx *app_context.Context, run *actions_model.ActionRun, job *actions_model.ActionRunJob, task *actions_model.ActionTask) (*ViewTokenPermissions, error) {
+	repo := ctx.Repo.Repository
+	permission, err := access_model.GetActionRepoPermission(ctx, repo, task)
+	if err != nil {
+		return nil, err
+	}
+	v := &ViewTokenPermissions{
+		Title: ctx.Locale.TrString("actions.runs.token_permissions"),
+		Units: make([]*ViewTokenPermission, 0, len(repo.Units)),
+		Notes: make([]string, 0),
+	}
+	for _, u := range repo.Units {
+		mode := permission.UnitAccessMode(u.Type)
+		access := ctx.Locale.TrString("actions.runs.token_permissions.none")
+		switch mode {
+		case perm_model.AccessModeRead:
+			access = ctx.Locale.TrString("actions.runs.token_permissions.read")
+		case perm_model.AccessModeWrite:
+			access = ctx.Locale.TrString("actions.runs.token_permissions.write")
+		}
+		v.Units = append(v.Units, &ViewTokenPermission{
+			Name:   ctx.Locale.TrString(u.Unit().NameKey),
+			Mode:   mode.String(),
+			Access: access,
+		})
+	}
+	if task.IsForkPullRequest {
+		v.Notes = append(v.Notes, ctx.Locale.TrString("actions.runs.token_permissions.fork"))
+	} else if task.TokenPermissions == "" {
+		v.Notes = append(v.Notes, ctx.Locale.TrString("actions.runs.token_permissions.legacy"))
+	}
+	for i, code := range run.PreExecutionWarningCodes {
+		if details := run.PreExecutionWarningDetails[i]; code == actions_model.WarningCodePermissionsIgnored && len(details) == 2 && fmt.Sprint(details[0]) == string(job.JobID) {
+			v.Notes = append(v.Notes, ctx.Locale.TrString("actions.runs.token_permissions.ignored", fmt.Sprint(details[1])))
+		}
+	}
+	return v, nil
 }
 
 // renderStepSummaries loads the ActionTaskStepSummary content of the task's steps and renders them into sanitized HTML.

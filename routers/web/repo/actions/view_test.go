@@ -399,6 +399,11 @@ func TestActionsViewViewPost(t *testing.T) {
 			}
 			zeroDurations(&actual)
 			zeroDurations(tt.expected)
+			// the token permissions are checked in detail by TestActionViewsTokenPermissions
+			if actual.State.CurrentJob.TokenPermissions != nil {
+				assert.Equal(t, []string{"actions.runs.token_permissions.legacy"}, actual.State.CurrentJob.TokenPermissions.Notes)
+				actual.State.CurrentJob.TokenPermissions = nil
+			}
 			tt.expectedTweaks(tt.expected)
 
 			assert.Equal(t, *tt.expected, actual)
