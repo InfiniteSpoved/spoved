@@ -1430,6 +1430,7 @@ func registerRoutes(m *web.Route) {
 			})
 			m.Group("/actions", func() {
 				m.Get("", shared_actions.RedirectToDefaultSetting)
+				m.Combo("/general").Get(repo_setting.ActionsGeneral).Post(repo_setting.ActionsGeneralPost)
 				addSettingsRunnersRoutes()
 				addSettingsSecretsRoutes()
 				addSettingsVariablesRoutes()
