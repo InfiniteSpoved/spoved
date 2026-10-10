@@ -1493,6 +1493,10 @@
 		"one": "%d member will lose the right to create organizations.",
 		"other": "%d members will lose the right to create organizations."
 	},
+	"admin.user_groups.lose_auditor": {
+		"one": "%d member will lose auditor access.",
+		"other": "%d members will lose auditor access."
+	},
 	"admin.user_groups.grants_auditor": "Members are auditors (read all)",
 	"admin.user_groups.grants_auditor.description": "Every member of this group can read every repository and see every organization, but cannot change anything through this role. It ends on leaving the group.",
 	"admin.users.via_group": "via group %s",
