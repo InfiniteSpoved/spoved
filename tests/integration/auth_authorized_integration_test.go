@@ -5,7 +5,9 @@ package integration
 
 import (
 	"fmt"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	auth_model "forgejo.org/models/auth"
@@ -54,6 +56,34 @@ func TestAPIAuthWithAuthorizedIntegration(t *testing.T) {
 
 		req = NewRequest(t, "GET", "/api/v1/repos/user2/repo1").AddTokenAuth(token)
 		MakeRequest(t, req, http.StatusForbidden)
+	})
+
+	// An earlier tester's issuer URL (127.0.0.1 and a port the OS hands out again) must not serve its cached JWKS to a
+	// later tester with a different signing key.
+	t.Run("new key on a reused issuer address", func(t *testing.T) {
+		defer tests.PrintCurrentTest(t)()
+
+		ait1 := newAITester(t)
+		req := NewRequest(t, "GET", "/api/v1/user").AddTokenAuth(ait1.signedJWT())
+		MakeRequest(t, req, http.StatusOK)
+		addr := ait1.testServer.Listener.Addr().String()
+		ait1.close()
+
+		ait2 := newAITester(t)
+		defer ait2.close()
+		ait2.testServer.Close()
+		srv := httptest.NewUnstartedServer(ait2.testServer.Config.Handler)
+		l, err := net.Listen("tcp", addr)
+		require.NoError(t, err)
+		srv.Listener = l
+		srv.StartTLS()
+		ait2.testServer = srv
+		ait2.authorizedIntegration.Issuer = ait1.authorizedIntegration.Issuer
+		_, err = db.GetEngine(t.Context()).ID(ait2.authorizedIntegration.ID).Cols("issuer").Update(ait2.authorizedIntegration)
+		require.NoError(t, err)
+
+		req = NewRequest(t, "GET", "/api/v1/user").AddTokenAuth(ait2.signedJWT())
+		MakeRequest(t, req, http.StatusOK)
 	})
 
 	// Clone of TestAPICompareCommitsAccessTokenResources, but using an authorized integration rather than an access
