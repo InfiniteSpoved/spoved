@@ -12,17 +12,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type v18zjRepositoryBefore struct {
+type v18zkRepositoryBefore struct {
 	ID      int64 `xorm:"pk autoincr"`
 	Name    string
 	GitSize int64 `xorm:"NOT NULL DEFAULT 0"`
 }
 
-func (v18zjRepositoryBefore) TableName() string { return "repository" }
+func (v18zkRepositoryBefore) TableName() string { return "repository" }
 
 // AC1: wiki_size is added with 0 for existing repositories.
 func Test_addRepoWikiSize(t *testing.T) {
-	x, deferable := migration_tests.PrepareTestEnv(t, 0, new(v18zjRepositoryBefore))
+	x, deferable := migration_tests.PrepareTestEnv(t, 0, new(v18zkRepositoryBefore))
 	defer deferable()
 	require.NotNil(t, x)
 
