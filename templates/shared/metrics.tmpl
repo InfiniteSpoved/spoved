@@ -25,31 +25,31 @@
 	{{if not $r.Rows}}
 		<div class="ui segment">{{ctx.Locale.Tr "metrics.none"}}</div>
 	{{else}}
-	<div class="ui small statistics tw-mb-4">
-		<div class="statistic" data-card="first-review">
-			<div class="value">{{if $r.FirstReview.N}}{{or (Sec2Time $r.FirstReview.Median) "0"}}{{else}}{{ctx.Locale.Tr "metrics.n_a"}}{{end}}</div>
+	<div class="tw-flex tw-flex-wrap tw-gap-2 tw-mb-4">
+		<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="first-review">
+			<div class="value tw-text-xl tw-font-semibold">{{if $r.FirstReview.N}}{{or (Sec2Time $r.FirstReview.Median) "0"}}{{else}}{{ctx.Locale.Tr "metrics.n_a"}}{{end}}</div>
 			<div class="label">{{ctx.Locale.Tr "metrics.time_to_first_review"}}</div>
-			{{if $r.FirstReview.N}}<div class="text small">{{ctx.Locale.Tr "metrics.p85_n" (or (Sec2Time $r.FirstReview.P85) "0") $r.FirstReview.N}}</div>{{end}}
+			{{if $r.FirstReview.N}}<div class="text small grey">{{ctx.Locale.Tr "metrics.p85_n" (or (Sec2Time $r.FirstReview.P85) "0") $r.FirstReview.N}}</div>{{end}}
 		</div>
-		<div class="statistic" data-card="merge">
-			<div class="value">{{if $r.Merge.N}}{{or (Sec2Time $r.Merge.Median) "0"}}{{else}}{{ctx.Locale.Tr "metrics.n_a"}}{{end}}</div>
+		<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="merge">
+			<div class="value tw-text-xl tw-font-semibold">{{if $r.Merge.N}}{{or (Sec2Time $r.Merge.Median) "0"}}{{else}}{{ctx.Locale.Tr "metrics.n_a"}}{{end}}</div>
 			<div class="label">{{ctx.Locale.Tr "metrics.time_to_merge"}}</div>
-			{{if $r.Merge.N}}<div class="text small">{{ctx.Locale.Tr "metrics.p85_n" (or (Sec2Time $r.Merge.P85) "0") $r.Merge.N}}</div>{{end}}
+			{{if $r.Merge.N}}<div class="text small grey">{{ctx.Locale.Tr "metrics.p85_n" (or (Sec2Time $r.Merge.P85) "0") $r.Merge.N}}</div>{{end}}
 		</div>
-		<div class="statistic" data-card="commits">
-			<div class="value">{{if $r.Commits.N}}{{$r.Commits.Median}}{{else}}{{ctx.Locale.Tr "metrics.n_a"}}{{end}}</div>
+		<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="commits">
+			<div class="value tw-text-xl tw-font-semibold">{{if $r.Commits.N}}{{$r.Commits.Median}}{{else}}{{ctx.Locale.Tr "metrics.n_a"}}{{end}}</div>
 			<div class="label">{{ctx.Locale.Tr "metrics.commits"}}</div>
-			{{if $r.Commits.N}}<div class="text small">{{ctx.Locale.Tr "metrics.p85_n" $r.Commits.P85 $r.Commits.N}}</div>{{end}}
+			{{if $r.Commits.N}}<div class="text small grey">{{ctx.Locale.Tr "metrics.p85_n" (printf "%d" $r.Commits.P85) $r.Commits.N}}</div>{{end}}
 		</div>
-		<div class="statistic" data-card="merged">
-			<div class="value">{{$r.Merged}}</div>
+		<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="merged">
+			<div class="value tw-text-xl tw-font-semibold">{{$r.Merged}}</div>
 			<div class="label">{{ctx.Locale.Tr "metrics.merged"}}</div>
-			<div class="text small">{{ctx.Locale.Tr "metrics.per_week" (printf "%.1f" $r.PerWeek)}}</div>
+			<div class="text small grey">{{ctx.Locale.Tr "metrics.per_week" (printf "%.1f" $r.PerWeek)}}</div>
 		</div>
-		<div class="statistic" data-card="reviews">
-			<div class="value">{{$r.Reviews}}</div>
+		<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="reviews">
+			<div class="value tw-text-xl tw-font-semibold">{{$r.Reviews}}</div>
 			<div class="label">{{ctx.Locale.Tr "metrics.reviews"}}</div>
-			<div class="text small">{{ctx.Locale.Tr "metrics.reviewers" $r.ReviewerCount}}</div>
+			<div class="text small grey">{{ctx.Locale.Tr "metrics.reviewers" $r.ReviewerCount}}</div>
 		</div>
 	</div>
 

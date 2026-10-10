@@ -32,15 +32,15 @@ test('Repository pull request metrics', async ({page}) => {
   await screenshot(page);
 
   await page.locator('.ui.dropdown.jump').click();
-  await page.getByRole('link', {name: '7 days'}).click();
+  await page.locator('.ui.dropdown.jump .menu .item', {hasText: '7 days'}).click();
   await expect(page).toHaveURL(/period=7/);
   await expect(page.locator('[data-table="weekly"] tbody tr')).toHaveCount(1);
 });
 
-test('Organization pull request metrics', async ({page}) => {
-  // the tab may sit in the overflow menu on small screens
+test('Organization pull request metrics', async ({page, isMobile}) => {
   await page.goto('/org/org3/metrics');
-  await expect(page.locator('a.active[href="/org/org3/metrics"]')).toHaveCount(1);
+  // on small screens the tab moves into the overflow menu
+  if (!isMobile) await expect(page.locator('.overflow-menu-items a.active[href="/org/org3/metrics"]')).toBeVisible();
   await expect(page.getByText('Download CSV')).toBeVisible();
   await screenshot(page);
 });

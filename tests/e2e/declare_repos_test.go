@@ -398,7 +398,7 @@ jobs:
 			require.NoError(t, db.Insert(db.DefaultContext, &issues_model.Comment{Type: issues_model.CommentTypeComment, PosterID: user.ID, IssueID: issue.ID, Content: content}))
 		}
 	})
-	newRepo(t, 2, "pull-metrics", nil, []FileChanges{{Filename: "README.md", Versions: []string{"metrics"}}}, func(user *user_model.User, repo *repo_model.Repository) {
+	newRepo(t, 2, "pull-metrics", nil, []FileChanges{{Filename: "metrics.md", Versions: []string{"metrics"}}}, func(user *user_model.User, repo *repo_model.Repository) {
 		forgery.EnableRepoUnits(t, repo, unit_model.TypePullRequests)
 		// plain rows with known times: pull request i opened as a draft, made ready, reviewed and merged (but the last)
 		ctx := db.DefaultContext
