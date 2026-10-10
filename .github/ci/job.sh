@@ -78,7 +78,12 @@ frontend)
 
 unit)
   # Azure Blob Storage emulator for the azureblob storage tests (TEST_AZURITE_URL)
-  npx -y -p azurite@3.37.0 azurite-blob --inMemoryPersistence --skipApiVersionCheck --blobHost 127.0.0.1 > "$RUNNER_TEMP/azurite.log" 2>&1 &
+  # installed before starting, with retries: registry reads time out now and then on the self-hosted runners
+  for attempt in 1 2 3; do
+    npm install --no-save --prefix "$RUNNER_TEMP/azurite" azurite@3.37.0 && break
+    [ "$attempt" = 3 ] && exit 1
+  done
+  "$RUNNER_TEMP/azurite/node_modules/.bin/azurite-blob" --inMemoryPersistence --skipApiVersionCheck --blobHost 127.0.0.1 > "$RUNNER_TEMP/azurite.log" 2>&1 &
   timeout 120 bash -c 'until grep -q "successfully listens" "$RUNNER_TEMP/azurite.log"; do sleep 1; done' || { cat "$RUNNER_TEMP/azurite.log"; exit 1; }
   # the packages `make test-backend` tests, as computed by the Makefile
   packages=$(make -s --eval='ci-list-test-packages: compute-go-test-packages ; @echo $(GO_TEST_PACKAGES)' ci-list-test-packages \
