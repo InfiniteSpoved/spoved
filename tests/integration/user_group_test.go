@@ -9,9 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	auth_model "forgejo.org/models/auth"
+	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
 	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/setting"
+	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	"forgejo.org/tests"
 
@@ -220,4 +224,40 @@ func TestUserGroupAdminPages(t *testing.T) {
 
 	resp = admin.MakeRequest(t, NewRequest(t, "GET", "/admin/groups/9999"), http.StatusNotFound)
 	require.NotNil(t, resp)
+}
+
+// A team of an organization in the trash stays linked: the group pages, the API and the member sync keep working.
+func TestUserGroupLinkedTeamOfTrashedOrg(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+
+	admin := loginUser(t, "user1")
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/groups/new", map[string]string{"name": "trashed-org-group"}), http.StatusSeeOther)
+	group := unittest.AssertExistsAndLoadBean(t, &organization.UserGroup{LowerName: "trashed-org-group"})
+	groupURL := fmt.Sprintf("/admin/groups/%d", group.ID)
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/teams/team1/action/group/link", map[string]string{"group_name": "trashed-org-group"}), http.StatusSeeOther)
+
+	_, err := db.GetEngine(t.Context()).ID(3).Cols("trashed_unix").Update(&user_model.User{TrashedUnix: 1})
+	require.NoError(t, err)
+	// like the trash, which takes the repositories of the organization along
+	_, err = db.GetEngine(t.Context()).Exec("UPDATE repository SET trashed_unix = 1 WHERE owner_id = 3")
+	require.NoError(t, err)
+
+	resp := admin.MakeRequest(t, NewRequest(t, "GET", groupURL), http.StatusOK)
+	assert.Contains(t, resp.Body.String(), "organization in the trash")
+
+	token := getUserToken(t, "user1", auth_model.AccessTokenScopeWriteAdmin)
+	resp = MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/groups/trashed-org-group/teams").AddTokenAuth(token), http.StatusOK)
+	var teams []api.Team
+	DecodeJSON(t, resp, &teams)
+	require.Len(t, teams, 1)
+	assert.Equal(t, "org3", teams[0].Organization.UserName)
+
+	// the member sync still reaches the team of the trashed organization
+	admin.MakeRequest(t, NewRequestWithValues(t, "POST", groupURL+"/members/add", map[string]string{"uname": "user5"}), http.StatusSeeOther)
+	isMember, err := organization.IsTeamMember(t.Context(), 3, 2, 5)
+	require.NoError(t, err)
+	assert.True(t, isMember)
+
+	MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/admin/groups/trashed-org-group").AddTokenAuth(token), http.StatusNoContent)
+	unittest.AssertNotExistsBean(t, &organization.UserGroup{ID: group.ID})
 }

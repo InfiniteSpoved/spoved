@@ -1485,6 +1485,7 @@
 	"admin.user_groups.teams_desc": "Members of this group are members of the following organization teams.",
 	"admin.user_groups.no_members": "This group has no members.",
 	"admin.user_groups.no_teams": "This group is not linked to any team.",
+	"admin.user_groups.team_org_trashed": "organization in the trash",
 	"admin.user_groups.update": "Update user group",
 	"admin.user_groups.delete": "Delete user group",
 	"admin.user_groups.delete_desc": "Deleting this user group unlinks it from all teams. Its members lose the team memberships they only had through this group. Continue?",
