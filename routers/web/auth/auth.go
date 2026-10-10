@@ -21,7 +21,6 @@ import (
 	"forgejo.org/modules/httplib"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
-	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/session"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
@@ -251,7 +250,7 @@ func SignInPost(ctx *context.Context) {
 		}
 	}
 
-	attempt := common.StartAuthAttempt(ctx, ratelimit.UserKey(form.UserName))
+	attempt := common.StartAuthAttempt(ctx, auth_method.UserLimitKey(ctx, form.UserName))
 	if attempt == nil {
 		return
 	}

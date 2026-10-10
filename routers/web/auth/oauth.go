@@ -706,7 +706,7 @@ func OIDCKeys(ctx *context.Context) {
 // AccessTokenOAuth manages all access token requests by the client
 func AccessTokenOAuth(ctx *context.Context) {
 	// only failed token requests count against the auth rate limit
-	attempt := ratelimit.StartAuth(ctx.RemoteAddr())
+	attempt := ratelimit.StartAuth(ratelimit.ClientAddr(ctx.Req))
 	if common.WriteIfRateLimited(ctx.Base, attempt.Err(), true) {
 		return
 	}

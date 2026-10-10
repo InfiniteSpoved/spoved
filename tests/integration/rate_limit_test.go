@@ -429,3 +429,104 @@ func TestRateLimitOAuthToken(t *testing.T) {
 	parsed = tokenRequest(map[string]string{"grant_type": "authorization_code", "redirect_uri": "a", "code": "wrong"}, http.StatusTooManyRequests)
 	assert.Contains(t, parsed["message"], "rate limit exceeded")
 }
+
+func TestRateLimitSignInAliasing(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	const burst = 3
+	mockRateLimit(t, map[string]setting.RateLimitClass{
+		ratelimit.Auth: {AuthenticatedRate: slow, AuthenticatedBurst: burst},
+	}, "")
+	// every attempt comes from its own IP, so that only the per-name budget limits
+	n := 0
+	signIn := func(name string) *httptest.ResponseRecorder {
+		n++
+		req := NewRequestWithValues(t, "POST", "/user/login", map[string]string{"user_name": name, "password": "wrong"})
+		return MakeRequest(t, fromIP(req, fmt.Sprintf("198.51.100.%d", n)), NoExpectedStatus)
+	}
+	// failures until the first 429, at most 2*burst+2
+	limitedAfter := func(names ...string) (int, *httptest.ResponseRecorder) {
+		for i := range 2*burst + 2 {
+			if r := signIn(names[i%len(names)]); r.Code == http.StatusTooManyRequests {
+				return i, r
+			}
+		}
+		return -1, nil
+	}
+
+	t.Run("email and username share one budget", func(t *testing.T) {
+		single, _ := limitedAfter("user2")
+		assert.Equal(t, burst, single)
+		ratelimit.ResetForTest()
+		alternating, _ := limitedAfter("user2", "user2@example.com")
+		assert.Equal(t, single, alternating)
+	})
+
+	t.Run("unknown and known names get the same budget and 429 page", func(t *testing.T) {
+		ratelimit.ResetForTest()
+		known, knownResp := limitedAfter("user4")
+		ratelimit.ResetForTest()
+		unknown, unknownResp := limitedAfter("nobody")
+		assert.Equal(t, burst, known)
+		assert.Equal(t, burst, unknown)
+		assert.Equal(t, knownResp.Code, unknownResp.Code)
+		assert.Contains(t, knownResp.Body.String(), "You have sent too many requests")
+		assert.Contains(t, unknownResp.Body.String(), "You have sent too many requests")
+		// unknown names don't alias: an unknown email and username are limited separately
+		ratelimit.ResetForTest()
+		alternating, _ := limitedAfter("nobody", "nobody@example.com")
+		assert.Equal(t, 2*burst, alternating)
+	})
+
+	t.Run("an unactivated email address doesn't share the budget of its owner", func(t *testing.T) {
+		ratelimit.ResetForTest()
+		alternating, _ := limitedAfter("user11", "user11@example.com")
+		assert.Equal(t, 2*burst, alternating)
+	})
+
+	t.Run("a disabled account doesn't alias", func(t *testing.T) {
+		_, err := db.GetEngine(t.Context()).ID(2).Cols("prohibit_login").Update(&user_model.User{ProhibitLogin: true})
+		require.NoError(t, err)
+		ratelimit.ResetForTest()
+		alternating, _ := limitedAfter("user2", "user2@example.com")
+		assert.Equal(t, 2*burst, alternating)
+	})
+}
+
+func TestRateLimitSignInIPv6Aggregate(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	mockRateLimit(t, map[string]setting.RateLimitClass{
+		ratelimit.Auth: {AuthenticatedRate: slow, AuthenticatedBurst: 2},
+	}, "")
+	signIn := func(ip, name string, status int) {
+		t.Helper()
+		req := NewRequestWithValues(t, "POST", "/user/login", map[string]string{"user_name": name, "password": "wrong"})
+		req.Request.RemoteAddr = "[" + ip + "]:1234"
+		MakeRequest(t, req, status)
+	}
+	for i := range 20 { // 10x the burst, from different /64s and names
+		signIn(fmt.Sprintf("2001:db8:1:%x::1", i), fmt.Sprint("name", i), http.StatusOK)
+	}
+	signIn("2001:db8:1:ff::1", "other", http.StatusTooManyRequests)
+	signIn("2001:db8:2::1", "other", http.StatusOK)
+}
+
+// A trusted proxy that sends disagreeing X-Real-IP and X-Forwarded-For makes the client IP ambiguous: such requests
+// share one bucket, whatever X-Real-IP the client chose, and are never exempt.
+func TestRateLimitAmbiguousClientIP(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	mockRateLimit(t, map[string]setting.RateLimitClass{
+		ratelimit.Auth: {AuthenticatedRate: slow, AuthenticatedBurst: 2},
+	}, "203.0.113.0/24")
+	ambiguous := func(req *RequestWrapper, i int) *RequestWrapper {
+		return fromIP(req, "127.0.0.1").
+			SetHeader("X-Forwarded-For", fmt.Sprintf("198.51.100.%d", i)).
+			SetHeader("X-Real-IP", fmt.Sprintf("203.0.113.%d", i))
+	}
+	for i := range 2 {
+		req := NewRequestWithValues(t, "POST", "/user/login", map[string]string{"user_name": fmt.Sprint("name", i), "password": "wrong"})
+		MakeRequest(t, ambiguous(req, i), http.StatusOK)
+	}
+	req := NewRequestWithValues(t, "POST", "/user/login", map[string]string{"user_name": "other", "password": "wrong"})
+	MakeRequest(t, ambiguous(req, 9), http.StatusTooManyRequests)
+	MakeRequest(t, ambiguous(NewRequest(t, "GET", "/api/v1/user").AddBasicAuth("user2"), 10), http.StatusTooManyRequests)
+}

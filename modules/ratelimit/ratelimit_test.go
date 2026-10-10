@@ -17,6 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const slow = 0.0001
+
 func setup(t *testing.T, classes map[string]setting.RateLimitClass) *time.Time {
 	t.Helper()
 	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -105,6 +107,36 @@ func TestStartAuth(t *testing.T) {
 	for range 10 {
 		assert.True(t, StartAuth("192.0.2.7:1234", alice).Allowed)
 	}
+}
+
+func TestStartAuthIPv6Aggregate(t *testing.T) {
+	setup(t, map[string]setting.RateLimitClass{Auth: {AuthenticatedRate: slow, AuthenticatedBurst: 2}})
+	// every /64 of 2001:db8:1::/48 has its own budget of 2, but the /48 shares 10x that
+	for i := range 20 {
+		a := StartAuth(fmt.Sprintf("[2001:db8:1:%x::1]:1", i), UserKey(fmt.Sprint("u", i)))
+		require.True(t, a.Allowed, i)
+	}
+	assert.False(t, StartAuth("[2001:db8:1:ff::1]:1", UserKey("x")).Allowed, "the /48 is spent")
+	assert.True(t, StartAuth("[2001:db8:2::1]:1", UserKey("y")).Allowed, "another /48 is not affected")
+	// IPv4 has no aggregate: ten addresses of one /24 each get their own budget
+	for i := range 10 {
+		assert.True(t, StartAuth(fmt.Sprintf("198.51.100.%d:1", i), UserKey(fmt.Sprint("v", i))).Allowed)
+	}
+}
+
+func TestStartAuthIPv6AggregateRefund(t *testing.T) {
+	clock := setup(t, map[string]setting.RateLimitClass{Auth: {AuthenticatedRate: 1, AuthenticatedBurst: 1}})
+	a := StartAuth("[2001:db8:1:1::1]:1", UserKey("u"))
+	require.True(t, a.Allowed)
+	*clock = clock.Add(time.Hour) // everything has refilled when the refund arrives
+	a.Succeeded()
+	// each refund is capped at the burst of its own store: 1 for the /64 and user, 10 for the /48
+	assert.InDelta(t, 10.0, getStore(auth48, true).buckets["overflow:2001:db8:1::/48"].tokens, 0.001)
+	assert.InDelta(t, 1.0, getStore(Auth, true).buckets[IPKey("[2001:db8:1:1::1]:1")].tokens, 0.001)
+}
+
+func TestUserIDKey(t *testing.T) {
+	assert.Equal(t, "uid:7", UserIDKey(7))
 }
 
 func TestIPKey(t *testing.T) {
