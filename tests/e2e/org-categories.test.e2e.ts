@@ -76,10 +76,19 @@ test('organization categories', async ({page, request}) => {
     const header = page.locator('h3.org-category-header').filter({hasText: name});
     await expect(header).toBeVisible();
     await expect(page.locator('h3.org-category-header').last()).toHaveText('Other');
+    // Category sits left of Sort on the same row
+    const categoryBox = await page.locator('[commandfor="search-category-dropdown"]').boundingBox();
+    const sortBox = await page.locator('[commandfor="search-sort-dropdown"]').boundingBox();
+    expect(Math.abs(categoryBox.y - sortBox.y)).toBeLessThan(2);
+    expect(categoryBox.x).toBeLessThan(sortBox.x);
     await screenshot(page);
     await page.getByRole('button', {name: 'Category'}).click();
     await page.locator('#search-category-dropdown').getByRole('link', {name}).click();
     await expect(page).toHaveURL(/category=\d+/);
+    await expect(page.locator('[commandfor="search-category-dropdown"]')).toHaveText(`Category: ${name}`);
+    await page.getByRole('button', {name: `Category: ${name}`}).click();
+    await expect(page.locator('#search-category-dropdown a.active')).toHaveText(name);
+    await page.keyboard.press('Escape');
     await expect(page.locator('h3.org-category-header')).toHaveCount(0);
     await expect(page.locator('.flex-item-title a')).toHaveText([org]);
     await screenshot(page);

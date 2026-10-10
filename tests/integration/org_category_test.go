@@ -249,6 +249,18 @@ func TestOrgCategoryExplore(t *testing.T) {
 	archivedHref, _ := doc.Find(`a[href^="?archived="]`).Attr("href")
 	assert.Equal(t, fmt.Sprintf("?archived=true&category=%d", a.ID), archivedHref)
 
+	// the opener names the current filter, and the current item is active and focused on open
+	for _, c := range []struct{ query, label, active string }{
+		{"", "Category", "All"},
+		{fmt.Sprintf("?category=%d", a.ID), "Category: Alpha", "Alpha"},
+		{"?category=other", "Category: Other", "Other"},
+	} {
+		doc := NewHTMLParser(t, MakeRequest(t, NewRequest(t, "GET", "/explore/organizations"+c.query), http.StatusOK).Body)
+		assert.Equal(t, c.label, strings.TrimSpace(doc.Find(`[commandfor="search-category-dropdown"]`).Text()), c.query)
+		assert.Equal(t, c.active, strings.TrimSpace(doc.Find(`#search-category-dropdown a.active[autofocus]`).Text()), c.query)
+		assert.Equal(t, 1, doc.Find(`#search-category-dropdown a[autofocus]`).Length(), c.query)
+	}
+
 	// paging: a group continued on the next page repeats its header, and the pages join up to the full list
 	full, _ := exploreOrgs(t, admin, "", http.StatusOK)
 	defer test.MockVariableValue(&setting.UI.ExplorePagingNum, 2)()

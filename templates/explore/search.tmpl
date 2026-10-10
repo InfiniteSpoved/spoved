@@ -7,26 +7,29 @@
 		{{end}}
 		{{if .CategoryFilter}}<input type="hidden" name="category" value="{{.CategoryFilter}}">{{end}}
 	</form>
-	<div class="button-row">
+	<div class="button-row tw-flex">
 		{{if .OrgCategories}}
 		<!-- Category -->
+		{{$categoryLabel := ctx.Locale.Tr "explore.org_category"}}
+		{{if eq .CategoryFilter "other"}}{{$categoryLabel = ctx.Locale.Tr "explore.org_category.selected" (ctx.Locale.Tr "explore.org_category.other")}}{{end}}
+		{{range .OrgCategories}}{{if eq $.CategoryFilter (print .ID)}}{{$categoryLabel = ctx.Locale.Tr "explore.org_category.selected" .Name}}{{end}}{{end}}
 		<div class="dialog-dropdown">
 			<button class="opener options" command="toggle-popover" commandfor="search-category-dropdown">
-				{{ctx.Locale.Tr "explore.org_category"}}
+				{{$categoryLabel}}
 				{{svg "octicon-triangle-down" 14}}
 			</button>
 			<dialog popover id="search-category-dropdown" class="inline-flip">
 				<ul>
 					<li>
-						<a class="{{if not .CategoryFilter}}active{{end}}" href="?sort={{.SortType}}&q={{.Keyword}}{{if .ShowArchived}}&archived=true{{end}}">{{ctx.Locale.Tr "explore.org_category.all"}}</a>
+						<a class="{{if not .CategoryFilter}}active{{end}}" {{if not .CategoryFilter}}autofocus{{end}} href="?sort={{.SortType}}&q={{.Keyword}}{{if .ShowArchived}}&archived=true{{end}}">{{ctx.Locale.Tr "explore.org_category.all"}}</a>
 					</li>
 					{{range .OrgCategories}}
 					<li>
-						<a class="{{if eq $.CategoryFilter (print .ID)}}active{{end}}" href="?category={{.ID}}&sort={{$.SortType}}&q={{$.Keyword}}{{if $.ShowArchived}}&archived=true{{end}}"><i class="color-icon tw-mr-2" style="background-color: {{.Color}}"></i>{{.Name}}</a>
+						<a class="{{if eq $.CategoryFilter (print .ID)}}active{{end}}" {{if eq $.CategoryFilter (print .ID)}}autofocus{{end}} href="?category={{.ID}}&sort={{$.SortType}}&q={{$.Keyword}}{{if $.ShowArchived}}&archived=true{{end}}"><i class="color-icon tw-mr-2" style="background-color: {{.Color}}"></i>{{.Name}}</a>
 					</li>
 					{{end}}
 					<li>
-						<a class="{{if eq .CategoryFilter "other"}}active{{end}}" href="?category=other&sort={{.SortType}}&q={{.Keyword}}{{if .ShowArchived}}&archived=true{{end}}">{{ctx.Locale.Tr "explore.org_category.other"}}</a>
+						<a class="{{if eq .CategoryFilter "other"}}active{{end}}" {{if eq .CategoryFilter "other"}}autofocus{{end}} href="?category=other&sort={{.SortType}}&q={{.Keyword}}{{if .ShowArchived}}&archived=true{{end}}">{{ctx.Locale.Tr "explore.org_category.other"}}</a>
 					</li>
 				</ul>
 			</dialog>

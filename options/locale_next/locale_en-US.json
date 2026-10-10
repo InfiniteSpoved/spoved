@@ -1992,6 +1992,7 @@
 	"explore.org_category": "Category",
 	"explore.org_category.all": "All",
 	"explore.org_category.other": "Other",
+	"explore.org_category.selected": "Category: %s",
 	"org.settings.category": "Category",
 	"org.settings.category.none": "None (Other)",
 	"org.settings.category_help": "Groups the organization on Explore → Organizations."
