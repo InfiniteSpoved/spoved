@@ -168,6 +168,7 @@ type User struct {
 	Visibility                structs.VisibleType `xorm:"NOT NULL DEFAULT 0"`
 	RepoAdminChangeTeamAccess bool                `xorm:"NOT NULL DEFAULT false"`
 	RequireTwoFactor          bool                `xorm:"NOT NULL DEFAULT false INDEX"` // organizations only: members need 2FA to reach its repositories
+	CategoryID                int64               `xorm:"NOT NULL DEFAULT 0 INDEX"`     // organizations only: org_category.id, 0 = none ("Other")
 
 	// Preferences
 	DiffViewStyle       string `xorm:"NOT NULL DEFAULT ''"`
