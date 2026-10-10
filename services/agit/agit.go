@@ -278,6 +278,9 @@ func procReceivePullRequest(ctx context.Context,
 		}
 	}
 
+	// before the pull request's head moves, so the queued auto merge cannot merge the new head
+	pull_service.CancelAutoMergeOnPush(ctx, pr, pusher)
+
 	// Set the new commit as reference of the pull request.
 	pr.HeadCommitID = newCommitID
 	if err = pull_service.UpdateRef(ctx, pr); err != nil {

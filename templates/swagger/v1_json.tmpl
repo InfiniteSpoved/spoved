@@ -31147,6 +31147,11 @@
           "type": "boolean",
           "x-go-name": "AutodetectManualMerge"
         },
+        "cancel_auto_merge_on_push": {
+          "description": "set to `true` to cancel the auto merge of a pull request when new commits are pushed to it",
+          "type": "boolean",
+          "x-go-name": "CancelAutoMergeOnPush"
+        },
         "default_allow_maintainer_edit": {
           "description": "set to `true` to allow edits from maintainers by default",
           "type": "boolean",
@@ -35364,6 +35369,10 @@
         "avatar_url": {
           "type": "string",
           "x-go-name": "AvatarURL"
+        },
+        "cancel_auto_merge_on_push": {
+          "type": "boolean",
+          "x-go-name": "CancelAutoMergeOnPush"
         },
         "clone_url": {
           "type": "string",

@@ -112,6 +112,7 @@ type Repository struct {
 	DefaultDeleteBranchAfterMerge bool          `json:"default_delete_branch_after_merge"`
 	DefaultMergeStyle             string        `json:"default_merge_style"`
 	DefaultAllowMaintainerEdit    bool          `json:"default_allow_maintainer_edit"`
+	CancelAutoMergeOnPush         bool          `json:"cancel_auto_merge_on_push"`
 	DefaultUpdateStyle            string        `json:"default_update_style"`
 	AvatarURL                     string        `json:"avatar_url"`
 	Internal                      bool          `json:"internal"`
@@ -243,6 +244,8 @@ type EditRepoOption struct {
 	DefaultUpdateStyle *string `json:"default_update_style,omitempty" binding:"In(merge,rebase)"`
 	// set to `true` to allow edits from maintainers by default
 	DefaultAllowMaintainerEdit *bool `json:"default_allow_maintainer_edit,omitempty"`
+	// set to `true` to cancel the auto merge of a pull request when new commits are pushed to it
+	CancelAutoMergeOnPush *bool `json:"cancel_auto_merge_on_push,omitempty"`
 	// set to `true` to archive this repository.
 	Archived *bool `json:"archived,omitempty"`
 	// set to a string like `8h30m0s` to set the mirror interval time

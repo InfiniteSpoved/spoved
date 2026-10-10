@@ -231,6 +231,7 @@ type RepoUnitSettingForm struct {
 	EnableAutodetectManualMerge           bool
 	PullsAllowRebaseUpdate                bool
 	DefaultAllowMaintainerEdit            bool
+	CancelAutoMergeOnPush                 bool
 	EnableTimetracker                     bool
 	AllowOnlyContributorsToTrackTime      bool
 	EnableIssueDependencies               bool

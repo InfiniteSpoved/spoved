@@ -14,6 +14,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/git"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/services/actions"
@@ -36,6 +37,11 @@ func TestActionsAutomerge(t *testing.T) {
 
 		assert.False(t, pr.HasMerged, "PR should not be merged")
 		assert.Equal(t, issues_model.PullRequestStatusMergeable, pr.Status, "PR should be mergeable")
+		// in the fixture, the head branch differs from refs/pull/3/head (the commit the job ran on);
+		// an auto merge only merges the head it checked, so point the branch back at it
+		require.NoError(t, pr.LoadBaseRepo(ctx))
+		_, _, gitErr := git.NewCommand(ctx, "update-ref").AddDynamicArguments(git.BranchPrefix+pr.HeadBranch, pr.GetGitRefName()).RunStdString(&git.RunOpts{Dir: pr.BaseRepo.RepoPath()})
+		require.NoError(t, gitErr)
 
 		scheduled, err := automerge.ScheduleAutoMerge(ctx, user, pr, repo_model.MergeStyleMerge, "Dummy", false, 0, 0, "")
 
