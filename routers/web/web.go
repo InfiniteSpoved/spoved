@@ -953,6 +953,14 @@ func registerRoutes(m *web.Route) {
 			m.Get("", admin.Organizations)
 		})
 
+		m.Group("/org-categories", func() {
+			m.Get("", admin.OrgCategories)
+			m.Post("/settings", admin.OrgCategoriesSettingsPost)
+			m.Combo("/new").Get(admin.NewOrgCategory).Post(web.Bind(forms.OrgCategoryForm{}), admin.NewOrgCategoryPost)
+			m.Combo("/{id}").Get(admin.EditOrgCategory).Post(web.Bind(forms.OrgCategoryForm{}), admin.EditOrgCategoryPost)
+			m.Post("/{id}/delete", admin.DeleteOrgCategory)
+		})
+
 		m.Group("/announcements", func() {
 			m.Get("", admin.Announcements)
 			m.Combo("/new").Get(admin.NewAnnouncement).Post(web.Bind(forms.AnnouncementForm{}), admin.NewAnnouncementPost)

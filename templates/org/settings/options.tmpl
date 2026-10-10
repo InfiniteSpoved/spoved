@@ -82,6 +82,20 @@
 							</div>
 						</div>
 
+						{{if .CanSetOrgCategory}}
+						<div class="field" id="category_box">
+							<input type="hidden" name="category_shown" value="true">
+							<label for="category_id">{{ctx.Locale.Tr "org.settings.category"}}</label>
+							<select id="category_id" name="category_id">
+								<option value="0">{{ctx.Locale.Tr "org.settings.category.none"}}</option>
+								{{range .OrgCategories}}
+									<option value="{{.ID}}" {{if eq .ID $.Org.CategoryID}}selected{{end}}>{{.Name}}</option>
+								{{end}}
+							</select>
+							<p class="help">{{ctx.Locale.Tr "org.settings.category_help"}}</p>
+						</div>
+
+						{{end}}
 						<div class="field" id="permission_box">
 							<label>{{ctx.Locale.Tr "org.settings.permission"}}</label>
 							<div class="field">

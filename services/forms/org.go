@@ -52,6 +52,9 @@ type UpdateOrgSettingForm struct {
 	// repository policies
 	RestrictRepoVisibilityChange bool
 	PrivateForkPolicy            int `binding:"Range(0,2)"`
+
+	CategoryID    int64
+	CategoryShown bool // the form has the category picker: a post without it keeps the category
 }
 
 // Validate validates the fields
