@@ -40,6 +40,20 @@ Learnings are append-only: keep both sides; swagger: regenerate). Each ticket re
 its migration letter at design time. After any merge, the other lanes merge develop in
 and get a fresh full run before their own merge.
 
+## One team on develop
+
+Since 10 Oct (user decision) only this team works on the repository; the project
+team was wound down. On 10 Oct, with two teams merging, about half of all develop
+merges into open branches were caused by the other team, three trains had to be
+redone, both teams reserved v18zj, and one PR was renamed v18zh → zk → zl. So:
+- Only the supervisor merges into develop. Any other source of develop merges
+  (another team, a manual merge) needs the user's OK first.
+- **CI logs.** Read a failed job's log within 15 minutes. Never push CI probe
+  commits or edit `.github/ci/*` in a feature PR, and never encode test or package
+  names in public job results: reproduce locally, or use an `inputs[only]` partial run.
+- **Bugs in develop itself** (a race, a broken helper) get their own small PR at
+  once, never a fix inside a feature branch.
+
 Every `create_session` uses `source_url: https://github.com/InfiniteSpoved/spoved`,
 `source_revision: develop`, and `permission_mode: auto` (never `plan`).
 
@@ -61,6 +75,11 @@ So:
   supervisor every 4 h, and only while a ticket is in flight.
 - Delegate big reads (diffs, logs, issue threads) to subagents and keep only the
   conclusions. Short messages: results, not narration.
+- The 10 Oct review (team-comparison, 9–10 Oct) found this team cheaper per merged
+  ticket than the project team ($17–23 against about $56), but the supervisors took
+  31% of the spend, sessions past 300k took 59%, and Opus coders cost $47–61 each.
+  So every session has a hard cap of 300k context: hand off before it. The
+  supervisor rotates at ~200k or after 12 hours, like the OL.
 - The weekly usage limit stopped the whole team for 20 h on 07 Oct. Watch
   `rate_limit_info` in get_session. Status "allowed_warning" means finish the
   current step, then stop and wait for `resetsAt`.
@@ -89,10 +108,11 @@ So:
    - Push the branch and open a PR to develop: "Fixes #<N>", or "Part of #<N>" for a
      partial PR.
    - CI: the supervisor runs it (the classifier denies coders add_repo for
-     spovedBuild). Its watcher starts a full run on every new PR head and every
-     develop merge, and it sends failing tests straight to the coder. CI is free
-     (user decision 08 Oct): push early and often, and run locally only the tests
-     you are changing. Edits to .github/ci/* go to the supervisor as a diff.
+     spovedBuild): a quick run on every pushed head, a full run only on a head with
+     the OL's FULLY DONE (and the security sign-off, if there is a reviewer), a
+     train head or a develop head. It cancels runs on superseded heads (the runners
+     are shared) and sends failing tests straight to the coder. Push once per review
+     round. Edits to .github/ci/* go to the supervisor as a diff.
    - Send the OL (and the security reviewer, if any) the PR number, the head SHA
      and the CI result.
 5. **Review.** In parallel:
@@ -101,20 +121,18 @@ So:
    - the security reviewer (if any) reviews the real diff.
    One combined must-fix list goes back to the coder. Repeat until both are clean.
    Then the OL posts "OL AC check @<SHA> … VERDICT: FULLY DONE" on the PR.
-6. **Merge**, by the coder, after the OL's go (user decision 08 Oct; the OL never
-   merges). The OL sends "Review passed: merge PR #<P> at head <SHA>" when all of these hold:
+6. **Merge**, by the supervisor (user decision 10 Oct; coders and the OL never
+   merge), when all of these hold:
    - the "OL AC check @<SHA> … FULLY DONE" comment is on the PR;
-   - the head is that SHA plus develop merges only (`git log --no-merges <SHA>..<head>` is empty);
-   - "CI success" = success on the **head** SHA (a full run for code PRs). After a
-     develop merge, run CI again on the new head;
+   - the head is that SHA plus develop merges only
+     (`git log --no-merges <SHA>..<head> ^origin/develop` is empty). The supervisor
+     checks this with git; the OL posts no new comment for a develop merge;
+   - "CI success" = success on the **head** SHA (a full run for code PRs), and the
+     head contains the current develop (`git merge-base --is-ancestor origin/develop <head>`);
    - the security items are resolved.
-   The coder re-checks the gates and uses `merge_pull_request`, merge_method "merge",
-   expectedHeadSha = the head. If the auto-mode classifier blocks the merge, it sends
-   the OL the step and evidence, and the OL sends the supervisor the PR, the SHA and
-   links to the OL check and the CI run. Then the OL:
-   - archive the coder and the security reviewer;
-   - tell the supervisor "PR #<P> (#<N>) merged at <merge SHA>";
-   - go to step 1.
+   Merge directly when one PR is ready. Build a train only when 2+ PRs are green on
+   the same develop base. Merge within an hour of the gates holding. Then the OL
+   archives the coder and the security reviewer and goes to step 1.
 7. **Flaky tests.** A failure that passes when rerun alone and also passes on
    develop isn't the PR's: file a "no-agent" issue naming the test and the
    evidence, then go on. Rerun a CI job only once.
@@ -125,7 +143,8 @@ So:
 2. Check you can reach spovedBuild: `gh api repos/InfiniteSpoved/spovedBuild --jq .permissions`.
    If that fails, call `add_repo` (owner InfiniteSpoved, repo spovedBuild,
    access push). If add_repo is refused, ask the user to start this session
-   with spovedBuild selected.
+   with spovedBuild selected, or to ask you to add it (on 10 Oct the classifier
+   allowed it once the user asked). Then create your own CI log key.
 3. Verify the hand-off against GitHub before briefing anyone:
    - open PRs;
    - `git ls-remote --heads origin`;
@@ -223,8 +242,9 @@ Run the ticket flow in SKILL.md exactly:
    file:line and the covering test. A criterion without a test is PARTIAL.
    Post "OL AC check @<40-char SHA>: AC1 ✅ … VERDICT: FULLY DONE|GAPS" on the PR.
    Any later non-merge commit needs a fresh check.
-5. Merge when the gates in SKILL.md step 6 hold. Then archive the coder and the
-   security reviewer, report to the supervisor, and pick the next ticket.
+5. When the gates in SKILL.md step 6 hold, send the supervisor "Review passed: PR
+   #<P> at head <SHA>"; it merges. Then archive the coder and the security
+   reviewer and pick the next ticket.
 
 Next migration letter: <LETTER> (CLAUDE.md naming; check develop and open PRs).
 
@@ -267,11 +287,8 @@ Phase 2, after the OL approves with a test plan:
    head SHA and the CI result, in one go.
 7. Fix every must-fix item the OL sends. Add a CLAUDE.md "Learnings" line for
    anything new, in the same PR. Merge origin/develop in when asked.
-8. Merge only when the OL sends "Review passed: merge PR #<P> at head <SHA>".
-   Re-check the gates yourself (FULLY DONE on <SHA>, `git log --no-merges
-   <SHA>..<head>` empty, "CI success" on the head), then merge_pull_request
-   (merge_method "merge", expectedHeadSha = head). Report "PR #<P> (#<N>) merged
-   at <merge SHA>" to the OL.
+8. Never merge: the supervisor does. Once the OL has passed the review, push nothing
+   unless the supervisor or the OL asks.
 
 <RULES FOR EVERYONE>
 ```
