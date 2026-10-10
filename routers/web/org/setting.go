@@ -59,6 +59,10 @@ func Settings(ctx *context.Context) {
 	ctx.Data["MaxAvatarFileSize"] = setting.Avatar.MaxFileSize
 	ctx.Data["MaxAvatarWidth"] = setting.Avatar.MaxWidth
 	ctx.Data["MaxAvatarHeight"] = setting.Avatar.MaxHeight
+	orgCategoryPicker(ctx)
+	if ctx.Written() {
+		return
+	}
 
 	err := shared_user.LoadHeaderCount(ctx)
 	if err != nil {
@@ -80,6 +84,20 @@ func SettingsPost(ctx *context.Context) {
 	ctx.Data["MaxAvatarFileSize"] = setting.Avatar.MaxFileSize
 	ctx.Data["MaxAvatarWidth"] = setting.Avatar.MaxWidth
 	ctx.Data["MaxAvatarHeight"] = setting.Avatar.MaxHeight
+	canSetCategory := orgCategoryPicker(ctx)
+	if ctx.Written() {
+		return
+	}
+	setCategory := form.CategoryShown && canSetCategory
+	if setCategory && form.CategoryID != 0 {
+		if _, err := org_model.GetOrgCategoryByID(ctx, form.CategoryID); db.IsErrNotExist(err) {
+			ctx.Error(http.StatusBadRequest, "unknown category")
+			return
+		} else if err != nil {
+			ctx.ServerError("GetOrgCategoryByID", err)
+			return
+		}
+	}
 
 	if ctx.HasError() {
 		ctx.HTML(http.StatusOK, tplSettingsOptions)
@@ -145,6 +163,9 @@ func SettingsPost(ctx *context.Context) {
 	if ctx.Doer.IsAdmin {
 		opts.MaxRepoCreation = optional.Some(form.MaxRepoCreation)
 	}
+	if setCategory {
+		opts.CategoryID = optional.Some(form.CategoryID)
+	}
 	opts.RestrictRepoVisibilityChange = optional.Some(form.RestrictRepoVisibilityChange)
 	opts.PrivateForkPolicy = optional.Some(form.PrivateForkPolicy)
 
@@ -176,6 +197,20 @@ func SettingsPost(ctx *context.Context) {
 	log.Trace("Organization setting updated: %s", org.Name)
 	ctx.Flash.Success(ctx.Tr("org.settings.update_setting_success"))
 	ctx.Redirect(ctx.Org.OrgLink + "/settings")
+}
+
+// orgCategoryPicker loads the organization categories for the settings form and returns whether the doer can set
+// the category: a site admin always, an owner only when the site allows it, and nobody when there are no categories.
+func orgCategoryPicker(ctx *context.Context) bool {
+	cats, err := org_model.FindOrgCategories(ctx)
+	if err != nil {
+		ctx.ServerError("FindOrgCategories", err)
+		return false
+	}
+	can := len(cats) > 0 && (ctx.Doer.IsAdmin || setting.Config().OrgCategoryOwnersCanAssign.Value(ctx))
+	ctx.Data["OrgCategories"] = cats
+	ctx.Data["CanSetOrgCategory"] = can
+	return can
 }
 
 // confirmRequireTwoFactor reports whether the two-factor requirement may be turned on. Otherwise it renders the form
@@ -241,6 +276,9 @@ func renderSubmittedSettings(ctx *context.Context, org *org_model.Organization, 
 	shown.RestrictRepoVisibilityChange, shown.PrivateForkPolicy = form.RestrictRepoVisibilityChange, form.PrivateForkPolicy
 	if ctx.Doer.IsAdmin {
 		shown.MaxRepoCreation = form.MaxRepoCreation
+	}
+	if form.CategoryShown && ctx.Data["CanSetOrgCategory"] == true {
+		shown.CategoryID = form.CategoryID
 	}
 	ctx.Data["Org"] = &shown
 	ctx.Data["CurrentVisibility"] = form.Visibility

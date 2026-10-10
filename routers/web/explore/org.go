@@ -4,7 +4,11 @@
 package explore
 
 import (
+	"slices"
+	"strconv"
+
 	"forgejo.org/models/db"
+	org_model "forgejo.org/models/organization"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/optional"
@@ -60,6 +64,44 @@ func Organizations(ctx *context.Context) {
 	}
 	if !showArchived {
 		opts.IsArchived = optional.Some(false)
+	}
+	opts.ExtraParamStrings = map[string]string{}
+	if showArchived {
+		opts.ExtraParamStrings["archived"] = "true"
+	}
+
+	// with no categories the page stays as it was and the category parameter is ignored
+	cats, err := org_model.FindOrgCategories(ctx)
+	if err != nil {
+		ctx.ServerError("FindOrgCategories", err)
+		return
+	}
+	if len(cats) > 0 {
+		ctx.Data["OrgCategories"] = cats
+		filter := ctx.FormString("category")
+		switch filter {
+		case "":
+			opts.GroupByCategory = true
+			byID := make(map[int64]*org_model.OrgCategory, len(cats))
+			for _, c := range cats {
+				byID[c.ID] = c
+			}
+			ctx.Data["GroupByCategory"] = true
+			ctx.Data["OrgCategoryByID"] = byID
+		case "other":
+			opts.CategoryID = optional.Some[int64](0)
+		default:
+			id, _ := strconv.ParseInt(filter, 10, 64)
+			if !slices.ContainsFunc(cats, func(c *org_model.OrgCategory) bool { return c.ID == id }) {
+				ctx.NotFound("unknown category", nil)
+				return
+			}
+			opts.CategoryID = optional.Some(id)
+		}
+		ctx.Data["CategoryFilter"] = filter
+		if filter != "" {
+			opts.ExtraParamStrings["category"] = filter
+		}
 	}
 	RenderUserSearch(ctx, opts, tplExploreUsers)
 }
