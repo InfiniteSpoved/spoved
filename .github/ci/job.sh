@@ -87,9 +87,26 @@ unit)
   RACE_ENABLED=true TEST_AZURITE_URL=127.0.0.1:10000 make test-backend GO_TEST_PACKAGES="$packages" > "$RUNNER_TEMP/out.txt" 2>&1
   cat "$RUNNER_TEMP/out.txt"
   set -e
-  awk '/^(ok|FAIL|\?) *\t/ { if (index($0, "forgejo.org/services/usergroup")) { printf "%s", buf; print; exit } buf=""; next } { buf = buf $0 "\n" }' "$RUNNER_TEMP/out.txt" > "$RUNNER_TEMP/block.txt"
-  pats=('^FAIL' 'atal' 'imeout|deadline' 'database is locked|busy' 'no such (table|column)' 'panic' 'signal|exit status' '\[F\]' 'Error Trace' 'race' 'too many open files' 'address already in use|bind' '^--- FAIL' 'Error:' 'TestMain|setup failed' '.')
-  ! grep -qE "${pats[$1 - 1]}" "$RUNNER_TEMP/block.txt"
+  o="$RUNNER_TEMP/out.txt"
+  # the text before the package's result line (which may not start a line), back to the previous result line
+  awk '/forgejo.org\/services\/usergroup([[:space:]]|$)/ { printf "%s", buf; print; exit } /^(ok|FAIL|\?) *\t/ { buf=""; next } { buf = buf $0 "\n" }' "$o" > "$RUNNER_TEMP/block.txt"
+  b="$RUNNER_TEMP/block.txt"
+  if [ "$1" -le 8 ]; then
+    for t in $(go test -tags 'sqlite sqlite_unlock_notify' -list '^Test' forgejo.org/services/usergroup | grep -E '^Test' | .github/ci/shard.sh "$1" 8); do
+      if grep -qE -- "--- FAIL: ${t} " "$o"; then exit 1; fi
+    done
+    exit 0
+  fi
+  case $1 in
+  9) ! grep -q 'forgejo.org/services/usergroup' "$o" ;;
+  10) ! grep -qE '^ok[[:space:]]+forgejo.org/services/usergroup' "$o" ;;
+  11) ! grep -q 'panic' "$b" ;;
+  12) ! grep -qi 'race' "$b" ;;
+  13) ! grep -qE 'Fatal|\[F\]' "$b" ;;
+  14) ! grep -q 'Error Trace' "$b" ;;
+  15) ! grep -qE 'timed out|deadline' "$b" ;;
+  16) ! grep -qE 'exit status|os.Exit' "$b" ;;
+  esac
   ;;
 
 migrations)
