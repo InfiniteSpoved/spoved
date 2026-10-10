@@ -101,6 +101,13 @@
 		</div>
 		<div class="field">
 			<div class="ui checkbox">
+				<input name="cancel_auto_merge_on_push" type="checkbox" {{if and $pullRequestEnabled ($prUnit.PullRequestsConfig.CancelAutoMergeOnPush)}}checked{{end}}>
+				<label>{{ctx.Locale.Tr "repo.settings.pulls.cancel_auto_merge_on_push"}}</label>
+				<span class="help">{{ctx.Locale.Tr "repo.settings.pulls.cancel_auto_merge_on_push_desc"}}</span>
+			</div>
+		</div>
+		<div class="field">
+			<div class="ui checkbox">
 				<input name="pulls_allow_rebase_update" type="checkbox" {{if or (not $pullRequestEnabled) ($prUnit.PullRequestsConfig.AllowRebaseUpdate)}}checked{{end}}>
 				<label>{{ctx.Locale.Tr "repo.settings.pulls.allow_rebase_update"}}</label>
 			</div>

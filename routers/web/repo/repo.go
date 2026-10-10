@@ -32,6 +32,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
+	"forgejo.org/routers/common"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 	"forgejo.org/services/forms"
@@ -521,6 +522,10 @@ func Download(ctx *context.Context) {
 		return
 	}
 
+	if !chargeArchiveBuild(ctx, aReq) {
+		return
+	}
+
 	archiver, err := aReq.Await(ctx)
 	if err != nil {
 		ctx.ServerError("archiver.Await", err)
@@ -528,6 +533,17 @@ func Download(ctx *context.Context) {
 	}
 
 	download(ctx, aReq.GetArchiveName(), archiver)
+}
+
+// chargeArchiveBuild takes a heavy rate-limit token when serving the request starts a new archive build. Polling
+// a queued build and serving a ready archive are free, so one download costs one token.
+func chargeArchiveBuild(ctx *context.Context, aReq *archiver_service.ArchiveRequest) bool {
+	need, err := aReq.NeedsBuild(ctx)
+	if err != nil {
+		ctx.ServerError("aReq.NeedsBuild", err)
+		return false
+	}
+	return !need || common.ChargeHeavyPlain(ctx)
 }
 
 func download(ctx *context.Context, archiveName string, archiver *repo_model.RepoArchiver) {
@@ -605,6 +621,9 @@ func InitiateDownload(ctx *context.Context) {
 		return
 	}
 	if archiver == nil || archiver.Status != repo_model.ArchiverReady {
+		if !chargeArchiveBuild(ctx, aReq) {
+			return
+		}
 		if err := archiver_service.StartArchive(aReq); err != nil {
 			ctx.ServerError("archiver_service.StartArchive", err)
 			return

@@ -105,6 +105,7 @@ func innerToRepo(ctx stdCtx.Context, repo *repo_model.Repository, permissionInRe
 	defaultMergeStyle := repo_model.MergeStyleMerge
 	defaultUpdateStyle := repo_model.UpdateStyleMerge
 	defaultAllowMaintainerEdit := false
+	cancelAutoMergeOnPush := false
 	if unit, err := repo.GetUnit(ctx, unit_model.TypePullRequests); err == nil {
 		config := unit.PullRequestsConfig()
 		hasPullRequests = true
@@ -121,6 +122,7 @@ func innerToRepo(ctx stdCtx.Context, repo *repo_model.Repository, permissionInRe
 		defaultMergeStyle = config.GetDefaultMergeStyle()
 		defaultUpdateStyle = config.GetDefaultUpdateStyle()
 		defaultAllowMaintainerEdit = config.DefaultAllowMaintainerEdit
+		cancelAutoMergeOnPush = config.CancelAutoMergeOnPush
 	}
 	hasProjects := false
 	if _, err := repo.GetUnit(ctx, unit_model.TypeProjects); err == nil {
@@ -258,6 +260,7 @@ func innerToRepo(ctx stdCtx.Context, repo *repo_model.Repository, permissionInRe
 		DefaultMergeStyle:             string(defaultMergeStyle),
 		DefaultUpdateStyle:            string(defaultUpdateStyle),
 		DefaultAllowMaintainerEdit:    defaultAllowMaintainerEdit,
+		CancelAutoMergeOnPush:         cancelAutoMergeOnPush,
 		AvatarURL:                     repo.AvatarLink(ctx),
 		Internal:                      !repo.IsPrivate && repo.Owner.Visibility == api.VisibleTypePrivate,
 		MirrorInterval:                mirrorInterval,

@@ -443,3 +443,26 @@ func TestAPIRepoEditEnablePRUnitsEnablesAllowMaintainerEdits(t *testing.T) {
 	config := prUnit.PullRequestsConfig()
 	assert.True(t, config.DefaultAllowMaintainerEdit)
 }
+
+func TestAPIRepoEditCancelAutoMergeOnPush(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+
+	session := loginUser(t, "user2")
+	token := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteRepository)
+	get := func(t *testing.T) bool {
+		var repo api.Repository
+		DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1").AddTokenAuth(token), http.StatusOK), &repo)
+		return repo.CancelAutoMergeOnPush
+	}
+	assert.False(t, get(t))
+
+	for _, value := range []bool{true, false} {
+		req := NewRequestWithJSON(t, "PATCH", "/api/v1/repos/user2/repo1", &api.EditRepoOption{CancelAutoMergeOnPush: &value}).AddTokenAuth(token)
+		var repo api.Repository
+		DecodeJSON(t, MakeRequest(t, req, http.StatusOK), &repo)
+		assert.Equal(t, value, repo.CancelAutoMergeOnPush)
+		assert.Equal(t, value, get(t))
+		prUnit := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1}).MustGetUnit(t.Context(), unit_model.TypePullRequests)
+		assert.Equal(t, value, prUnit.PullRequestsConfig().CancelAutoMergeOnPush)
+	}
+}

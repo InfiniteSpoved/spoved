@@ -115,6 +115,7 @@ function initGenerateNotesButton() {
     const data = new FormData();
     data.append('tag_name', button.getAttribute('data-tag-name') ?? document.getElementById('tag-name').value);
     data.append('tag_target', button.getAttribute('data-tag-target') ?? document.querySelector('input[name="tag_target"]').value);
+    if (document.getElementById('generate-notes-direct-commits').checked) data.append('include_direct_commits', 'on');
     const resp = await POST(button.getAttribute('data-url'), {data});
     const json = await resp.json().catch(() => ({}));
     if (!resp.ok) {

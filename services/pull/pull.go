@@ -16,7 +16,9 @@ import (
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
+	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/container"
@@ -334,6 +336,10 @@ func TestPullRequest(ctx context.Context, doer *user_model.User, repoID, olderTh
 
 	for _, pr := range prs {
 		log.Trace("Updating PR[id=%d,index=%d]: composing new test task", pr.ID, pr.Index)
+		if isSync {
+			// before PushToBaseRepo moves the pull request's head, so the queued auto merge cannot merge the new head
+			CancelAutoMergeOnPush(ctx, pr, doer)
+		}
 		if pr.Flow == issues_model.PullRequestFlowGithub {
 			if err := PushToBaseRepo(ctx, pr); err != nil {
 				log.Error("PushToBaseRepo: %v", err)
@@ -390,6 +396,49 @@ func TestPullRequest(ctx context.Context, doer *user_model.User, repoID, olderTh
 		}
 		AddToTaskQueue(ctx, pr)
 	}
+}
+
+// CancelAutoMerge cancels the auto merge am of pr, unless it is already gone, with doer as the one who cancelled it
+func CancelAutoMerge(ctx context.Context, pr *issues_model.PullRequest, am *pull_model.AutoMerge, doer *user_model.User) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if deleted, err := pull_model.DeleteAutoMergeByID(ctx, am.ID); err != nil || !deleted {
+			return err
+		}
+		_, err := issues_model.CreateAutoMergeComment(ctx, issues_model.CommentTypePRUnScheduledToAutoMerge, pr, doer)
+		return err
+	})
+}
+
+// CancelAutoMergeOnPush cancels the auto merge of pr if its repository is set to cancel auto merges on new pushes.
+// Call it before the head of the pull request moves.
+func CancelAutoMergeOnPush(ctx context.Context, pr *issues_model.PullRequest, pusher *user_model.User) {
+	if err := pr.LoadBaseRepo(ctx); err != nil {
+		log.Error("%-v LoadBaseRepo: %v", pr, err)
+		return
+	}
+	prUnit, err := pr.BaseRepo.GetUnit(ctx, unit.TypePullRequests)
+	if repo_model.IsErrUnitTypeNotExist(err) {
+		return
+	} else if err != nil {
+		log.Error("%-v GetUnit: %v", pr.BaseRepo, err)
+		return
+	}
+	if !prUnit.PullRequestsConfig().CancelAutoMergeOnPush {
+		return
+	}
+	exist, am, err := pull_model.GetScheduledMergeByPullID(ctx, pr.ID)
+	if err != nil {
+		log.Error("%-v GetScheduledMergeByPullID: %v", pr, err)
+		return
+	}
+	if !exist {
+		return
+	}
+	if err := CancelAutoMerge(ctx, pr, am, pusher); err != nil {
+		log.Error("%-v CancelAutoMerge: %v", pr, err)
+		return
+	}
+	log.Info("Auto merge of %-v cancelled by a push", pr)
 }
 
 // Mark old reviews as stale if diff to mergebase has changed.
