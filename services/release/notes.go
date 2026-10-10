@@ -110,7 +110,9 @@ func GenerateReleaseNotes(ctx context.Context, repo *repo_model.Repository, gitR
 	if err := issues.LoadLabels(ctx); err != nil {
 		return "", err
 	}
-	slices.SortFunc(prs, func(a, b *issues_model.PullRequest) int { return cmp.Compare(a.MergedUnix, b.MergedUnix) })
+	slices.SortFunc(prs, func(a, b *issues_model.PullRequest) int {
+		return cmp.Or(cmp.Compare(a.MergedUnix, b.MergedUnix), cmp.Compare(a.ID, b.ID))
+	})
 
 	cfg, err := loadNotesConfig(end, opts.ConfigFilePath)
 	if err != nil {
@@ -151,40 +153,38 @@ func isExcludedAuthor(authors []string, name string) bool {
 	return slices.ContainsFunc(authors, func(a string) bool { return strings.EqualFold(a, name) })
 }
 
-// findNewContributors returns the authors whose earliest merged pull request in the repository is in prs (sorted by merge time).
+// findNewContributors returns the authors whose earliest merged pull request in the repository is in prs (sorted by merge time and ID).
+// merged_unix has second resolution, so a pull request merged in the same second counts as earlier only with a lower ID.
 // It runs one query for all authors, and prs holds at most maxNotesCommits entries.
 func findNewContributors(ctx context.Context, repoID int64, prs issues_model.PullRequestList, cfg *notesConfig) ([]newContributor, error) {
 	first := make(map[int64]*issues_model.PullRequest, len(prs))
 	var order []int64
-	prIDs := make([]int64, 0, len(prs))
+	var earlier []builder.Cond
 	for _, pr := range prs {
-		prIDs = append(prIDs, pr.ID)
 		if pr.Issue.PosterID <= 0 || isExcludedAuthor(cfg.Changelog.Exclude.Authors, pr.Issue.Poster.Name) || first[pr.Issue.PosterID] != nil {
 			continue
 		}
 		first[pr.Issue.PosterID] = pr
 		order = append(order, pr.Issue.PosterID)
+		earlier = append(earlier, builder.Eq{"issue.poster_id": pr.Issue.PosterID}.And(builder.Or(
+			builder.Lt{"pull_request.merged_unix": pr.MergedUnix},
+			builder.Eq{"pull_request.merged_unix": pr.MergedUnix}.And(builder.Lt{"pull_request.id": pr.ID}),
+		)))
 	}
 	if len(order) == 0 {
 		return nil, nil
 	}
-	var earlier []struct {
-		PosterID int64 `xorm:"poster_id"`
-		First    int64 `xorm:"first"`
-	}
+	var veterans []int64
 	if err := db.GetEngine(ctx).Table("pull_request").Join("INNER", "issue", "issue.id = pull_request.issue_id").
-		Select("issue.poster_id AS poster_id, MIN(pull_request.merged_unix) AS first").
-		Where(builder.Eq{"pull_request.base_repo_id": repoID, "pull_request.has_merged": true}).
-		In("issue.poster_id", order).NotIn("pull_request.id", prIDs).
-		GroupBy("issue.poster_id").Find(&earlier); err != nil {
+		Select("DISTINCT issue.poster_id").
+		Where(builder.Eq{"pull_request.base_repo_id": repoID, "pull_request.has_merged": true}.And(builder.Or(earlier...))).
+		Find(&veterans); err != nil {
 		return nil, err
 	}
-	var contributors []newContributor
-	for _, e := range earlier {
-		if pr := first[e.PosterID]; e.First < int64(pr.MergedUnix) {
-			delete(first, e.PosterID)
-		}
+	for _, id := range veterans {
+		delete(first, id)
 	}
+	var contributors []newContributor
 	for _, id := range order {
 		if pr, ok := first[id]; ok {
 			contributors = append(contributors, newContributor{pr.Issue.Poster.Name, pr.Issue.Index})
@@ -193,7 +193,6 @@ func findNewContributors(ctx context.Context, repoID int64, prs issues_model.Pul
 	return contributors, nil
 }
 
-// firstParentCommits returns the first-parent commits of prev..end that are not in merged (the merge commits of pull requests).
 func firstParentCommits(gitRepo *git.Repository, end, prev *git.Commit, merged map[string]bool) ([]directCommit, error) {
 	rng := end.ID.String()
 	if prev != nil {
