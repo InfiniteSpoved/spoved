@@ -2,6 +2,8 @@
 // templates/org/settings/options.tmpl
 // templates/org/team/new.tmpl
 // templates/org/settings/repos.tmpl
+// templates/org/settings/verified_domains.tmpl
+// templates/org/header.tmpl
 // web_src/css/form.css
 // web_src/js/features/org-team.js
 // web_src/js/features/tablesort.js
@@ -11,7 +13,7 @@ import {expect} from '@playwright/test';
 import {test} from './utils_e2e.ts';
 import {screenshot} from './shared/screenshots.ts';
 import {validate_form} from './shared/forms.ts';
-import {FakeData, loginAs} from './shared/fake-data.ts';
+import {FakeData, loginAs, loginAsAdmin} from './shared/fake-data.ts';
 
 test.use({user: 'user2'});
 
@@ -138,6 +140,46 @@ test.describe('as fake users', () => {
       await expect(visibility).toBeChecked();
       await expect(forks).toHaveValue('2');
       await screenshot(page);
+    } finally {
+      await data.cleanup();
+    }
+  });
+
+  test('org verified domain', async ({browser, request}) => {
+    const data = new FakeData(request);
+    try {
+      const owner = await data.createUser();
+      const org = await data.createOrg(owner);
+      const domain = `${org.toLowerCase()}.example`;
+      const page = await (await loginAs(browser, owner.username, owner.password)).newPage();
+      await page.goto(`/org/${org}/settings/verified_domains`);
+      await expect(page.getByText('No verified domains yet.')).toBeVisible();
+      await expect(page.locator('#require-verified-domain')).toBeDisabled();
+      await screenshot(page);
+
+      // adding a domain shows the DNS record to publish
+      await page.getByRole('textbox', {name: 'Domain'}).fill(domain.toUpperCase());
+      await page.getByRole('button', {name: 'Add domain'}).click();
+      const pending = page.locator('#verified-domain-pending');
+      await expect(pending).toContainText(`_spoved-verify.${domain}`);
+      await expect(pending).toContainText('spoved-verification=');
+      await expect(pending.getByRole('button', {name: 'Verify without DNS'})).toHaveCount(0);
+      await screenshot(page);
+
+      // a site administrator verifies it without DNS
+      const admin = await (await loginAsAdmin(browser)).newPage();
+      await admin.goto(`/org/${org}/settings/verified_domains?domain=${domain}`);
+      await admin.getByRole('button', {name: 'Verify without DNS'}).click();
+      await expect(admin.locator('.flash-success')).toContainText(`The domain ${domain} is verified.`);
+      await expect(admin.locator('.flex-list')).toContainText('by a site administrator');
+
+      await page.goto(`/org/${org}/settings/verified_domains`);
+      await expect(page.locator('.flex-list')).toContainText(domain);
+      await screenshot(page);
+
+      await page.goto(`/${org}`);
+      await expect(page.locator('.org-verified-domain')).toHaveText(`Verified: ${domain}`);
+      await screenshot(page, page.locator('#org-info'));
     } finally {
       await data.cleanup();
     }

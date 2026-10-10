@@ -12,6 +12,8 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
+	"forgejo.org/modules/ratelimit"
+	"forgejo.org/modules/setting"
 	auth_service "forgejo.org/services/auth"
 	"forgejo.org/services/auth/source/oauth2"
 	"forgejo.org/services/auth/source/smtp"
@@ -20,6 +22,33 @@ import (
 	_ "forgejo.org/services/auth/source/ldap" // register the ldap source
 	_ "forgejo.org/services/auth/source/pam"  // register the pam source
 )
+
+// UserLimitKey returns the auth rate limit bucket key of a sign-in name. A user name and an activated email address
+// of one account that may sign in share the key of the account, so that alternating between them gains nothing.
+// Every other name, including unknown ones and those of disabled accounts, keeps its own key and so gets the same
+// fresh budget.
+func UserLimitKey(ctx context.Context, name string) string {
+	key := ratelimit.UserKey(name)
+	if !setting.RateLimit.Enabled {
+		return key
+	}
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return key
+	}
+	u := &user_model.User{LowerName: name}
+	if strings.Contains(name, "@") {
+		email := user_model.EmailAddress{LowerEmail: name}
+		if has, err := db.GetEngine(ctx).Get(&email); err != nil || !has || !email.IsActivated {
+			return key
+		}
+		u = &user_model.User{ID: email.UID}
+	}
+	if has, err := user_model.GetUser(ctx, u); err != nil || !has || u.ID <= 0 || !u.IsActive || u.ProhibitLogin {
+		return key
+	}
+	return ratelimit.UserIDKey(u.ID)
+}
 
 // UserSignIn validates user name and password.
 func UserSignIn(ctx context.Context, username, password string) (*user_model.User, *auth.Source, error) {

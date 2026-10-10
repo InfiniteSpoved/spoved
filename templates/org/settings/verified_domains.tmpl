@@ -1,0 +1,108 @@
+{{template "org/settings/layout_head" (dict "ctxData" . "pageClass" "organization settings verified-domains")}}
+<div class="org-setting-content">
+	<h4 class="ui top attached header">
+		{{ctx.Locale.Tr "org.settings.verified_domains"}}
+	</h4>
+	<div class="ui attached segment">
+		<p>{{ctx.Locale.Tr "org.settings.verified_domains.desc"}}</p>
+		{{if .CanAdd}}
+			<form class="ui form ignore-dirty tw-flex tw-flex-wrap tw-gap-2" action="{{.Link}}" method="get">
+				<div class="ui input">
+					<input name="domain" aria-label="{{ctx.Locale.Tr "org.settings.verified_domains.domain"}}" placeholder="example.com" value="{{.PendingDomain}}" maxlength="253" required>
+				</div>
+				<button class="ui primary button">{{ctx.Locale.Tr "org.settings.verified_domains.add"}}</button>
+			</form>
+		{{else}}
+			<p class="text grey">{{ctx.Locale.Tr "org.settings.verified_domains.max" .MaxDomains}}</p>
+		{{end}}
+	</div>
+	{{if .PendingDomain}}
+		<div class="ui attached segment" id="verified-domain-pending">
+			<p>{{ctx.Locale.Tr "org.settings.verified_domains.pending" .PendingDomain}}</p>
+			<dl>
+				<div class="item">
+					<dt>{{ctx.Locale.Tr "org.settings.verified_domains.record_type"}}</dt>
+					<dd><code>TXT</code></dd>
+				</div>
+				<div class="item">
+					<dt>{{ctx.Locale.Tr "org.settings.verified_domains.record_name"}}</dt>
+					<dd>
+						<code class="tw-break-all">{{.RecordName}}</code>
+						<button class="ui basic label button" aria-label="{{ctx.Locale.Tr "copy"}}" data-clipboard-text="{{.RecordName}}">{{svg "octicon-copy" 14}}</button>
+					</dd>
+				</div>
+				<div class="item">
+					<dt>{{ctx.Locale.Tr "org.settings.verified_domains.record_value"}}</dt>
+					<dd>
+						<code class="tw-break-all">{{.RecordValue}}</code>
+						<button class="ui basic label button" aria-label="{{ctx.Locale.Tr "copy"}}" data-clipboard-text="{{.RecordValue}}">{{svg "octicon-copy" 14}}</button>
+					</dd>
+				</div>
+			</dl>
+			<form class="tw-flex tw-flex-wrap tw-gap-2" action="{{.Link}}/verify" method="post">
+				<input type="hidden" name="domain" value="{{.PendingDomain}}">
+				<button class="ui primary button">{{ctx.Locale.Tr "org.settings.verified_domains.verify"}}</button>
+				{{if .SignedUser.IsAdmin}}
+					<button class="ui button" name="without_dns" value="true">{{ctx.Locale.Tr "org.settings.verified_domains.verify_without_dns"}}</button>
+				{{end}}
+			</form>
+		</div>
+	{{end}}
+	<div class="ui attached segment">
+		<div class="flex-list">
+			{{range .Domains}}
+				<div class="flex-item flex-item-center">
+					<div class="flex-item-leading">{{svg "octicon-verified" 24}}</div>
+					<div class="flex-item-main">
+						<div class="flex-item-title">{{.Domain}}</div>
+						<div class="flex-item-body">
+							{{if .VerifiedByAdminID}}
+								{{ctx.Locale.Tr "org.settings.verified_domains.verified_by_admin" (DateUtils.AbsoluteShort .VerifiedUnix)}}
+							{{else}}
+								{{ctx.Locale.Tr "org.settings.verified_domains.verified_dns" (DateUtils.AbsoluteShort .VerifiedUnix)}}
+							{{end}}
+						</div>
+					</div>
+					<div class="flex-item-trailing">
+						<form action="{{$.Link}}/remove" method="post">
+							<input type="hidden" name="domain" value="{{.Domain}}">
+							<button class="ui red button">{{ctx.Locale.Tr "org.settings.verified_domains.remove"}}</button>
+						</form>
+					</div>
+				</div>
+			{{else}}
+				<div class="flex-item">
+					<span class="text grey italic">{{ctx.Locale.Tr "org.settings.verified_domains.none"}}</span>
+				</div>
+			{{end}}
+		</div>
+	</div>
+	<h4 class="ui attached header">
+		{{ctx.Locale.Tr "org.settings.verified_domains.restriction"}}
+	</h4>
+	<div class="ui attached segment">
+		<form class="ui form" action="{{.Link}}/require" method="post">
+			{{$locked := and (not .Required) (or (not .Domains) (not .EmailConfirmationRequired))}}
+			<div class="field">
+				<div class="ui checkbox{{if $locked}} disabled{{end}}">
+					<input id="require-verified-domain" name="require" type="checkbox" {{if .Required}}checked{{end}} {{if $locked}}disabled{{end}}>
+					<label for="require-verified-domain">{{ctx.Locale.Tr "org.settings.verified_domains.require"}}</label>
+				</div>
+				<p class="help">{{ctx.Locale.Tr "org.settings.verified_domains.require_help"}}</p>
+				{{if not .Domains}}
+					<p class="help">{{ctx.Locale.Tr "org.settings.verified_domains.require_no_domains"}}</p>
+				{{else if not .EmailConfirmationRequired}}
+					<p class="help">{{ctx.Locale.Tr "org.settings.verified_domains.require_confirmation_off"}}</p>
+				{{end}}
+			</div>
+			<button class="ui primary button" {{if $locked}}disabled{{end}}>{{ctx.Locale.Tr "save"}}</button>
+		</form>
+		{{if .NonQualifying}}
+			<div class="ui warning message" id="verified-domain-non-qualifying">
+				<p>{{ctx.Locale.Tr "org.settings.verified_domains.non_qualifying" (len .NonQualifying)}}</p>
+				<p>{{range $i, $u := .NonQualifying}}{{if $i}}, {{end}}<a href="{{$u.HomeLink}}">{{$u.Name}}</a>{{end}}</p>
+			</div>
+		{{end}}
+	</div>
+</div>
+{{template "org/settings/layout_footer" .}}

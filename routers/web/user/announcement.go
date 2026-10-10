@@ -12,6 +12,7 @@ import (
 	system_model "forgejo.org/models/system"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/web/middleware"
 	announcement_service "forgejo.org/services/announcement"
 	"forgejo.org/services/context"
 )
@@ -22,9 +23,13 @@ func GetAnnouncements(ctx *context.Context) {
 		return
 	}
 
+	var anonDismissed map[int64]string
+	if ctx.Doer == nil {
+		anonDismissed = announcement_service.ParseDismissCookie(middleware.GetSiteCookie(ctx.Req, announcement_service.DismissCookie))
+	}
 	ctx.Data["Maintenance"] = setting.GetMaintenance(ctx)
 	ctx.Data["SiteAnnouncements"] = func() []*announcement_service.Banner {
-		banners, err := announcement_service.ActiveForUser(ctx, ctx.Doer)
+		banners, err := announcement_service.ActiveForUser(ctx, ctx.Doer, anonDismissed)
 		if err != nil {
 			if !errors.Is(err, goctx.Canceled) {
 				log.Error("Unable to load announcements: %v", err)
@@ -35,7 +40,7 @@ func GetAnnouncements(ctx *context.Context) {
 	}
 }
 
-// DismissAnnouncement hides an announcement for the signed-in user until its message changes
+// DismissAnnouncement hides an announcement for the signed-in user (or, with a cookie, the anonymous visitor) until its message changes
 func DismissAnnouncement(ctx *context.Context) {
 	a, err := system_model.GetAnnouncementByID(ctx, ctx.ParamsInt64(":id"))
 	if err != nil {
@@ -46,7 +51,10 @@ func DismissAnnouncement(ctx *context.Context) {
 		ctx.Error(http.StatusUnprocessableEntity, "announcement cannot be dismissed")
 		return
 	}
-	if err := system_model.DismissAnnouncement(ctx, a, ctx.Doer.ID); err != nil {
+	if ctx.Doer == nil {
+		value := announcement_service.AddToDismissCookie(middleware.GetSiteCookie(ctx.Req, announcement_service.DismissCookie), a.ID, announcement_service.CookieHash(a))
+		middleware.SetSiteCookie(ctx.Resp, announcement_service.DismissCookie, value, 365*24*60*60)
+	} else if err := system_model.DismissAnnouncement(ctx, a, ctx.Doer.ID); err != nil {
 		ctx.ServerError("DismissAnnouncement", err)
 		return
 	}

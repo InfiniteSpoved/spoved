@@ -210,3 +210,25 @@ jobs:
 		})
 	}
 }
+
+func TestRejectWorkflowMetadata(t *testing.T) {
+	for content, refused := range map[string]bool{
+		"jobs: {j: {runs-on: x}}": false,
+		"jobs: {j: {runs-on: x, __metadata: {workflow_call_parent: a}}}":                 false,
+		"__metadata: {workflow_call_parent: a}\njobs: {j: {runs-on: x}}":                 true,
+		"__metadata:\njobs: {j: {runs-on: x}}":                                           true,
+		"\"__metadata\": {workflow_call_id: a}\njobs: {j: {runs-on: x}}":                 true,
+		"x: &m {__metadata: {workflow_call_parent: a}}\n<<: *m\njobs: {j: {runs-on: x}}": true,
+	} {
+		err := RejectWorkflowMetadata([]byte(content))
+		if refused {
+			require.Error(t, err, content)
+		} else {
+			require.NoError(t, err, content)
+		}
+		_, err = JobParser([]byte(content))
+		if refused {
+			require.ErrorContains(t, err, "__metadata", content)
+		}
+	}
+}

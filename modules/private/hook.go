@@ -37,7 +37,7 @@ type HookOptions struct {
 	PushTrigger                     repository.PushTrigger
 	DeployKeyID                     int64 // if the pusher is a DeployKey, then UserID is the repo's org user.
 	IsWiki                          bool
-	ActionPerm                      int
+	ActionTaskID                    int64 // the Actions task whose token pushes (UserID is the Actions user)
 }
 
 func (o *HookOptions) GetGitPushOptions() pushoptions.Interface {

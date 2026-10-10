@@ -95,8 +95,8 @@ func TestAnnouncements(t *testing.T) {
 		resp := MakeRequest(t, NewRequest(t, "GET", "/explore/repos"), http.StatusOK)
 		banner := NewHTMLParser(t, resp.Body).Find(".site-announcement")
 		assert.Equal(t, "Monday", banner.Find("strong").Text())
-		// anonymous visitors cannot dismiss
-		assert.Equal(t, 0, banner.Find("form").Length())
+		// anonymous visitors can dismiss dismissible announcements
+		assert.Equal(t, 1, banner.Find("form").Length())
 
 		resp = admin.MakeRequest(t, NewRequest(t, "GET", "/explore/repos"), http.StatusOK)
 		doc := NewHTMLParser(t, resp.Body)
@@ -125,7 +125,7 @@ func TestAnnouncements(t *testing.T) {
 		user.MakeRequest(t, NewRequest(t, "POST", fmt.Sprintf("/-/announcements/%d/dismiss", fixed.ID)), http.StatusUnprocessableEntity)
 		admin.MakeRequest(t, NewRequest(t, "POST", fmt.Sprintf("/admin/announcements/%d/delete", fixed.ID)), http.StatusOK)
 
-		// anonymous visitors are sent to sign in
+		// anonymous visitors dismiss with a cookie, not in the database
 		MakeRequest(t, NewRequest(t, "POST", fmt.Sprintf("/-/announcements/%d/dismiss", everyone.ID)), http.StatusSeeOther)
 		unittest.AssertNotExistsBean(t, &system_model.AnnouncementDismissal{AnnouncementID: everyone.ID})
 
@@ -146,6 +146,86 @@ func TestAnnouncements(t *testing.T) {
 			"dismissible": "on",
 		}), http.StatusSeeOther)
 		assert.Equal(t, []string{id(signedIn), id(everyone)}, shownAnnouncements(t, user))
+	})
+
+	t.Run("AnonymousDismiss", func(t *testing.T) {
+		anon := func(path string, cookies []*http.Cookie, values map[string]string, status int) *httptest.ResponseRecorder {
+			var req *RequestWrapper
+			if values == nil {
+				req = NewRequest(t, "GET", path)
+			} else {
+				req = NewRequestWithValues(t, "POST", path, values)
+			}
+			for _, c := range cookies {
+				req.AddCookie(c)
+			}
+			return MakeRequest(t, req, status)
+		}
+		shown := func(cookies []*http.Cookie) []string {
+			ids := []string{}
+			NewHTMLParser(t, anon("/explore/repos", cookies, nil, http.StatusOK).Body).Find(".site-announcement").Each(func(_ int, s *goquery.Selection) {
+				ids = append(ids, s.AttrOr("data-announcement-id", ""))
+			})
+			return ids
+		}
+		dismissCookie := func(resp *httptest.ResponseRecorder) *http.Cookie {
+			for _, c := range resp.Result().Cookies() {
+				if c.Name == "announcements_dismissed" {
+					return c
+				}
+			}
+			return nil
+		}
+
+		notice := createAnnouncement(t, admin, map[string]string{"message": "Anon notice", "type": "info", "audience": "everyone", "dismissible": "on"})
+		critical := createAnnouncement(t, admin, map[string]string{"message": "Anon critical", "type": "critical", "audience": "everyone", "dismissible": "on"})
+		defer func() {
+			admin.MakeRequest(t, NewRequest(t, "POST", fmt.Sprintf("/admin/announcements/%d/delete", notice.ID)), http.StatusOK)
+			admin.MakeRequest(t, NewRequest(t, "POST", fmt.Sprintf("/admin/announcements/%d/delete", critical.ID)), http.StatusOK)
+		}()
+		dismissURL := fmt.Sprintf("/-/announcements/%d/dismiss", notice.ID)
+
+		// AnonymousButton and AnonymousCritical
+		doc := NewHTMLParser(t, anon("/explore/repos", nil, nil, http.StatusOK).Body)
+		doc.AssertElement(t, fmt.Sprintf(`form[action="/-/announcements/%d/dismiss"]`, notice.ID), true)
+		doc.AssertElement(t, fmt.Sprintf(`form[action="/-/announcements/%d/dismiss"]`, critical.ID), false)
+		resp := anon(fmt.Sprintf("/-/announcements/%d/dismiss", critical.ID), nil, map[string]string{}, http.StatusUnprocessableEntity)
+		assert.Nil(t, dismissCookie(resp))
+
+		// unknown announcements set no cookie
+		resp = anon("/-/announcements/9999/dismiss", nil, map[string]string{}, http.StatusNotFound)
+		assert.Nil(t, dismissCookie(resp))
+
+		// AnonymousDismiss
+		resp = anon(dismissURL, nil, map[string]string{"redirect_to": "/explore/repos"}, http.StatusSeeOther)
+		assert.Equal(t, "/explore/repos", test.RedirectURL(resp))
+		cookie := dismissCookie(resp)
+		require.NotNil(t, cookie)
+		assert.True(t, cookie.HttpOnly)
+		assert.Equal(t, http.SameSiteLaxMode, cookie.SameSite)
+		assert.Equal(t, setting.SessionConfig.CookiePath, cookie.Path)
+		assert.Equal(t, setting.SessionConfig.Secure, cookie.Secure)
+		assert.Positive(t, cookie.MaxAge)
+		unittest.AssertNotExistsBean(t, &system_model.AnnouncementDismissal{AnnouncementID: notice.ID})
+
+		cookies := []*http.Cookie{cookie}
+		assert.NotContains(t, shown(cookies), id(notice))
+		assert.Contains(t, shown(cookies), id(critical))
+		assert.Contains(t, shown(nil), id(notice))
+
+		// AnonymousRedirect: only local redirects
+		resp = anon(dismissURL, nil, map[string]string{"redirect_to": "https://example.com/"}, http.StatusSeeOther)
+		assert.Equal(t, setting.AppSubURL+"/", test.RedirectURL(resp))
+
+		// AnonymousTextChange
+		admin.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/admin/announcements/%d", notice.ID), map[string]string{
+			"message": "Anon notice, changed", "type": "info", "audience": "everyone", "dismissible": "on",
+		}), http.StatusSeeOther)
+		assert.Contains(t, shown(cookies), id(notice))
+
+		// a signed-in dismissal sets no cookie
+		resp = user.MakeRequest(t, NewRequestWithValues(t, "POST", dismissURL, map[string]string{}), http.StatusSeeOther)
+		assert.Nil(t, dismissCookie(resp))
 	})
 
 	t.Run("TimeWindow", func(t *testing.T) {

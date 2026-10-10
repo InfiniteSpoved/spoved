@@ -38,6 +38,9 @@ type ActionTask struct {
 	OwnerID           int64  `xorm:"index"`
 	CommitSHA         string `xorm:"index"`
 	IsForkPullRequest bool
+	// TokenPermissions is the JSON of the TokenPermissions of the task's token; empty means as before `permissions:`
+	// was supported (see GetTokenPermissions).
+	TokenPermissions string `xorm:"TEXT"`
 
 	Token          string `xorm:"-"`
 	TokenHash      string `xorm:"UNIQUE"` // sha256 of token

@@ -45,6 +45,7 @@ type doer struct {
 	actions                  *bool
 	actionsRepoID            *int64
 	actionsIsForkPullRequest *bool
+	actionsTokenPermissions  *string
 }
 
 func (o doer) Clone() doer {
@@ -59,6 +60,7 @@ func (o doer) Clone() doer {
 		actions:                  pointerToCopyOrNil(o.actions),
 		actionsRepoID:            pointerToCopyOrNil(o.actionsRepoID),
 		actionsIsForkPullRequest: pointerToCopyOrNil(o.actionsIsForkPullRequest),
+		actionsTokenPermissions:  pointerToCopyOrNil(o.actionsTokenPermissions),
 	}
 }
 
@@ -87,6 +89,9 @@ func (o doer) String() string {
 	}
 	if o.actionsIsForkPullRequest != nil {
 		str = append(str, fmt.Sprintf("actions.IsForkPullRequest:%v", *o.actionsIsForkPullRequest))
+	}
+	if o.actionsTokenPermissions != nil {
+		str = append(str, "actions.TokenPermissions:"+*o.actionsTokenPermissions)
 	}
 	return strings.Join(str, " ")
 }
@@ -340,6 +345,15 @@ func (o *sharedData) SetDoerActionsIsForkPullRequestDefault(actionsIsForkPullReq
 
 func (o *sharedData) SetDoerActionsIsForkPullRequest(actionsIsForkPullRequest bool) *sharedData {
 	o.doer.actionsIsForkPullRequest = &actionsIsForkPullRequest
+	return o
+}
+
+func (o sharedData) DoerActionsTokenPermissions() string {
+	return getReferenceOrZero(o.doer.actionsTokenPermissions)
+}
+
+func (o *sharedData) SetDoerActionsTokenPermissions(actionsTokenPermissions string) *sharedData {
+	o.doer.actionsTokenPermissions = &actionsTokenPermissions
 	return o
 }
 

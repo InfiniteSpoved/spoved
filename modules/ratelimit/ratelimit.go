@@ -10,12 +10,14 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"net/http"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"forgejo.org/modules/httplib"
 	"forgejo.org/modules/setting"
 )
 
@@ -29,6 +31,14 @@ const (
 )
 
 const maxKeys = 100_000
+
+// auth48 names the store of the per-/48 aggregate of IPv6 clients in the auth class, with aggregateFactor times
+// its rate and burst. Its keys are /48s, never "ip:" keys, so it never takes the overflow path of store.get and
+// may exceed maxKeys between sweeps.
+const (
+	auth48          = "auth/ipv6-48"
+	aggregateFactor = 10
+)
 
 // Result describes the state of the bucket that decided a request. Limit is 0 when no limit applies.
 type Result struct {
@@ -80,7 +90,11 @@ func getStore(class string, authenticated bool) *store {
 	}
 	c := setting.RateLimit.Classes[class]
 	rate, burst, name := c.AuthenticatedRate, c.AuthenticatedBurst, class
-	if !authenticated && class != Auth {
+	if class == auth48 {
+		c = setting.RateLimit.Classes[Auth]
+		rate, burst = c.AuthenticatedRate*aggregateFactor, c.AuthenticatedBurst*aggregateFactor
+	}
+	if !authenticated && class != Auth && class != auth48 {
 		rate, burst, name = c.AnonymousRate, c.AnonymousBurst, class+"/anonymous"
 	}
 	if rate <= 0 || burst <= 0 {
@@ -164,47 +178,69 @@ func Check(class, remoteAddr, key string, authenticated bool) Result {
 // AuthAttempt is a credential check counted against the auth class.
 type AuthAttempt struct {
 	Result
-	buckets []*bucket
+	taken []takenToken
+}
+
+type takenToken struct {
+	s *store
+	b *bucket
 }
 
 // StartAuth takes one token from the auth buckets of the client IP and of each key before a credential check, so
-// that parallel attempts can't overshoot the limit. It takes nothing when a bucket is empty. Call Succeeded after a
-// successful check to give the tokens back: only failed attempts count.
+// that parallel attempts can't overshoot the limit. IPv6 clients also draw on the shared bucket of their /48. It
+// takes nothing when a bucket is empty. Call Succeeded after a successful check to give the tokens back: only
+// failed attempts count.
 func StartAuth(remoteAddr string, keys ...string) *AuthAttempt {
 	s := getStore(Auth, true)
 	if s == nil || IsExempt(remoteAddr) {
 		return &AuthAttempt{Result: Result{Allowed: true}}
 	}
+	// both stores are fetched before any s.mu is taken, and locked in a fixed order
+	var s48 *store
+	if ip := parseIP(remoteAddr); ip != nil && ip.To4() == nil {
+		s48 = getStore(auth48, true)
+	}
 	keys = append([]string{IPKey(remoteAddr)}, keys...)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s48 != nil {
+		s48.mu.Lock()
+		defer s48.mu.Unlock()
+	}
 	t := now()
-	buckets := make([]*bucket, 0, len(keys))
-	for _, k := range keys {
-		b := s.get(k, remoteAddr, t)
+	taken := make([]takenToken, 0, len(keys)+1)
+	add := func(s *store, key string) *AuthAttempt {
+		b := s.get(key, remoteAddr, t)
 		if b.tokens < 1 {
 			return &AuthAttempt{Result: s.result(b, false)}
 		}
-		if !slices.Contains(buckets, b) { // keys may share an overflow bucket
-			buckets = append(buckets, b)
+		if !slices.Contains(taken, takenToken{s, b}) { // keys may share an overflow bucket
+			taken = append(taken, takenToken{s, b})
+		}
+		return nil
+	}
+	for _, k := range keys {
+		if r := add(s, k); r != nil {
+			return r
 		}
 	}
-	for _, b := range buckets {
-		b.tokens--
+	if s48 != nil {
+		if r := add(s48, overflowKey(remoteAddr)); r != nil {
+			return r
+		}
 	}
-	return &AuthAttempt{Result: Result{Allowed: true}, buckets: buckets}
+	for _, tt := range taken {
+		tt.b.tokens--
+	}
+	return &AuthAttempt{Result: Result{Allowed: true}, taken: taken}
 }
 
-// Succeeded gives back the tokens taken by StartAuth.
+// Succeeded gives back the tokens taken by StartAuth, each capped at the burst of its own store.
 func (a *AuthAttempt) Succeeded() {
-	s := getStore(Auth, true)
-	if s == nil || len(a.buckets) == 0 {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, b := range a.buckets {
-		b.tokens = min(float64(s.burst), b.tokens+1)
+	for _, tt := range a.taken {
+		tt.s.mu.Lock()
+		tt.b.tokens = min(float64(tt.s.burst), tt.b.tokens+1)
+		tt.s.mu.Unlock()
 	}
 }
 
@@ -254,9 +290,25 @@ func UserKey(name string) string {
 	return "user:" + hex.EncodeToString(sum[:])
 }
 
+// UserIDKey returns the auth bucket key of an account that a sign-in name resolved to.
+func UserIDKey(uid int64) string {
+	return "uid:" + strconv.FormatInt(uid, 10)
+}
+
 // TwoFactorKey returns the auth bucket key of the second factor of a user.
 func TwoFactorKey(uid int64) string {
 	return "2fa:" + strconv.FormatInt(uid, 10)
+}
+
+// ClientAddr returns the client address that the limiter counts for a request. When a trusted proxy sent an
+// ambiguous client IP (see httplib.WithAmbiguousClientIP), RemoteAddr may be an address the client chose, so all
+// such requests get one fixed address that doesn't parse: they share the "ip:invalid" bucket, have no /48 bucket
+// and are never exempt.
+func ClientAddr(req *http.Request) string {
+	if httplib.IsClientIPAmbiguous(req) {
+		return "ambiguous"
+	}
+	return req.RemoteAddr
 }
 
 // IsExempt reports whether the client address is in [rate_limit] EXEMPT_CIDRS.

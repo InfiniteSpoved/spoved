@@ -50,6 +50,9 @@
 		<a class="{{if .PageIsSettingsUnits}}active {{end}}item" href="{{.OrgLink}}/settings/units">
 			{{ctx.Locale.Tr "org.settings.units"}}
 		</a>
+		<a class="{{if .PageIsSettingsVerifiedDomains}}active {{end}}item" href="{{.OrgLink}}/settings/verified_domains">
+			{{ctx.Locale.Tr "org.settings.verified_domains"}}
+		</a>
 		<a class="{{if .PageIsSettingsBlockedUsers}}active {{end}}item" href="{{.OrgLink}}/settings/blocked_users">
 			{{ctx.Locale.Tr "settings.blocked_users"}}
 		</a>
