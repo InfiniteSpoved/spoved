@@ -102,16 +102,29 @@ func RateLimitHeavy(ctx *context.Context) {
 	}
 }
 
-// RateLimitHeavyPlain is RateLimitHeavy for downloads (archives, .diff and .patch), answering in plain text.
+// RateLimitHeavyPlain is RateLimitHeavy for downloads (.diff and .patch), answering in plain text.
 func RateLimitHeavyPlain(ctx *context.Context) {
-	if r := checkRateLimit(ctx.Base, ratelimit.Heavy, ctx.Doer, ctx.Authentication); !r.Allowed {
-		ctx.PlainText(http.StatusTooManyRequests, rateLimitMessage(r))
-	}
+	ChargeHeavyPlain(ctx)
 }
 
-// RateLimitAPIHeavy limits expensive API requests (archives, code search, diffs) in the heavy class, in addition
-// to the api class of the API.
+// ChargeHeavyPlain takes a heavy token inside a handler, for work that is only sometimes expensive (archive
+// builds). When the client is limited it answers 429 in plain text and returns false.
+func ChargeHeavyPlain(ctx *context.Context) bool {
+	r := checkRateLimit(ctx.Base, ratelimit.Heavy, ctx.Doer, ctx.Authentication)
+	if !r.Allowed {
+		ctx.PlainText(http.StatusTooManyRequests, rateLimitMessage(r))
+	}
+	return r.Allowed
+}
+
+// RateLimitAPIHeavy limits expensive API requests (code search, diffs) in the heavy class, in addition to the api
+// class of the API.
 func RateLimitAPIHeavy(ctx *context.APIContext) {
+	ChargeHeavyAPI(ctx)
+}
+
+// ChargeHeavyAPI is ChargeHeavyPlain for the API: it answers 429 as JSON and returns false when limited.
+func ChargeHeavyAPI(ctx *context.APIContext) bool {
 	r := checkRateLimit(ctx.Base, ratelimit.Heavy, ctx.Doer(), ctx.Authentication())
 	if r.Limit != 0 {
 		ctx.AppendAccessControlExposeHeaders(rateLimitHeaders...)
@@ -119,6 +132,7 @@ func RateLimitAPIHeavy(ctx *context.APIContext) {
 	if !r.Allowed {
 		ctx.JSON(http.StatusTooManyRequests, map[string]string{"message": rateLimitMessage(r)})
 	}
+	return r.Allowed
 }
 
 // RateLimitAPI limits API requests in the api or api_write class.

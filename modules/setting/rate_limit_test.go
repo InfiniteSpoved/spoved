@@ -21,7 +21,7 @@ func TestLoadRateLimit(t *testing.T) {
 	assert.Equal(t, RateLimitClass{60, 600, 5, 50}, RateLimit.Classes["api"])
 	assert.Equal(t, RateLimitClass{10, 100, 0, 0}, RateLimit.Classes["api_write"])
 	assert.Equal(t, RateLimitClass{0.0167, 10, 0, 0}, RateLimit.Classes["auth"])
-	assert.Equal(t, RateLimitClass{1, 20, 0.2, 10}, RateLimit.Classes["heavy"])
+	assert.Equal(t, RateLimitClass{1, 20, 0.2, 30}, RateLimit.Classes["heavy"])
 	web, heavy := RateLimit.Classes["web"], RateLimit.Classes["heavy"]
 	assert.Less(t, heavy.AuthenticatedRate, web.AuthenticatedRate)
 	assert.Less(t, heavy.AuthenticatedBurst, web.AuthenticatedBurst)

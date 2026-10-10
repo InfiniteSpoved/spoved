@@ -905,7 +905,7 @@ func Routes() *web.Route {
 				}, reqToken())
 				m.Get("/raw/*", context.ReferencesGitRepo(), context.RepoRefForAPI, reqRepoReader(unit.TypeCode), repo.GetRawFile)
 				m.Get("/media/*", context.ReferencesGitRepo(), context.RepoRefForAPI, reqRepoReader(unit.TypeCode), repo.GetRawFileOrLFS)
-				m.Get("/archive/*", reqRepoReader(unit.TypeCode), common.RateLimitAPIHeavy, repo.GetArchive)
+				m.Get("/archive/*", reqRepoReader(unit.TypeCode), repo.GetArchive)
 				if !setting.Repository.DisableForks {
 					m.Combo("/forks").Get(repo.ListForks).
 						Post(reqToken(), reqRepoReader(unit.TypeCode), bind(api.CreateForkOption{}), checkForkDestination(), repo.CreateFork)

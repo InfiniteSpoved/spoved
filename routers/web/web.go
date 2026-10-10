@@ -1802,7 +1802,7 @@ func registerRoutes(m *web.Route) {
 		}, repo.MustBeNotEmpty, context.RepoRef(), reqRepoCodeReader)
 
 		m.Group("/blob_excerpt", func() {
-			m.Get("/{sha}", repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.ExcerptBlob)
+			m.Get("/{sha}", common.RateLimitHeavyPlain, repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.ExcerptBlob)
 		}, func(ctx *context.Context) gocontext.CancelFunc {
 			if ctx.FormBool("wiki") {
 				ctx.Data["PageIsWiki"] = true
@@ -1898,7 +1898,7 @@ func registerRoutes(m *web.Route) {
 		m.Group("", func() {
 			m.Get("/graph", repo.Graph)
 			m.Get("/commit/{sha:([a-f0-9]{4,64})$}", common.RateLimitHeavy, repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.Diff)
-			m.Get("/commit/{sha:([a-f0-9]{4,64})$}/load-branches-and-tags", repo.LoadBranchesAndTags)
+			m.Get("/commit/{sha:([a-f0-9]{4,64})$}/load-branches-and-tags", common.RateLimitHeavyPlain, repo.LoadBranchesAndTags)
 			m.Group("/commit/{sha:([a-f0-9]{4,64})$}/notes", func() {
 				m.Post("", context.RepoMustNotBeArchived(), web.Bind(forms.CommitNotesForm{}), repo.SetCommitNotes)
 				m.Post("/remove", context.RepoMustNotBeArchived(), repo.RemoveCommitNotes)
@@ -2037,7 +2037,7 @@ func registerMixedRoutes(m *web.Route) {
 		m.Group("/archive", func() {
 			m.Get("/*", repo.Download)
 			m.Post("/*", repo.InitiateDownload)
-		}, repo.MustBeNotEmpty, dlSourceEnabled, reqRepoCodeReader, common.RateLimitHeavyPlain)
+		}, repo.MustBeNotEmpty, dlSourceEnabled, reqRepoCodeReader)
 	}, ignSignIn, context.RepoAssignment, context.UnitTypes())
 
 	m.Group("/{username}/{reponame}", func() {
