@@ -109,7 +109,12 @@ e2e)
   browser=firefox
   make deps-frontend
   make frontend
-  npx playwright install --with-deps "$browser"
+  # the self-hosted runner images ship the browser's system libraries and give jobs no sudo
+  if [ "$(id -u)" = 0 ] || sudo -n true 2> /dev/null; then
+    npx playwright install --with-deps "$browser"
+  else
+    npx playwright install "$browser"
+  fi
   make e2e.sqlite.test generate-ini-sqlite
   # With RUN_ALL_E2E unchecked, only run the tests whose `@watch` patterns
   # match the files changed compared with develop (see tests/e2e/changes.go).
