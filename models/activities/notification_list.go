@@ -36,7 +36,7 @@ func (opts FindNotificationOptions) ToConds() builder.Cond {
 	// notifications of a trashed repository are hidden, as the repository's Repository would load as nil
 	cond := repo_model.NotTrashedCond("notification.repo_id")
 	if opts.UserID != 0 {
-		cond = cond.And(builder.Eq{"notification.user_id": opts.UserID})
+		cond = cond.And(builder.Eq{"notification.user_id": opts.UserID}, repo_model.TwoFactorHiddenRepoIDCond("notification.repo_id", opts.UserID))
 	}
 	if opts.RepoID != 0 {
 		cond = cond.And(builder.Eq{"notification.repo_id": opts.RepoID})

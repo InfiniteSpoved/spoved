@@ -275,6 +275,7 @@ func applyConditions(sess *xorm.Session, opts *IssuesOptions, unitCond builder.C
 
 	if opts.SubscriberID > 0 {
 		applySubscribedCondition(sess, opts.SubscriberID)
+		sess.And(repo_model.TwoFactorHiddenRepoIDCond("issue.repo_id", opts.SubscriberID))
 	}
 
 	applyMilestoneCondition(sess, opts)
@@ -308,7 +309,7 @@ func applyConditions(sess *xorm.Session, opts *IssuesOptions, unitCond builder.C
 		if opts.AllPublic {
 			cond = cond.Or(builder.In("issue.repo_id", builder.Select("id").From("repository").Where(builder.Eq{"is_private": false})))
 		}
-		sess.And(cond)
+		sess.And(cond).And(repo_model.TwoFactorHiddenRepoIDCond("issue.repo_id", opts.User.ID))
 	}
 }
 

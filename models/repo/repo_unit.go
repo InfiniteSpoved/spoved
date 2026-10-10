@@ -6,6 +6,7 @@ package repo
 import (
 	"context"
 	"fmt"
+	"path"
 	"slices"
 	"strings"
 
@@ -129,6 +130,43 @@ func (cfg *ExternalWikiConfig) FromDB(bs []byte) error {
 // ToDB exports a ExternalWikiConfig to a serialized format.
 func (cfg *ExternalWikiConfig) ToDB() ([]byte, error) {
 	return json.Marshal(cfg)
+}
+
+// WikiSourceFolder publishes a folder of the code repository as the wiki
+const WikiSourceFolder = "folder"
+
+// WikiConfig describes wiki config; the zero value is the separate wiki repository
+type WikiConfig struct {
+	Source string // "" or WikiSourceFolder
+	Folder string // folder of the code repository, see CleanWikiFolder
+	Branch string // "" means the default branch
+}
+
+// FromFolder reports whether the wiki is a folder of the code repository
+func (cfg *WikiConfig) FromFolder() bool {
+	return cfg.Source == WikiSourceFolder
+}
+
+// FromDB fills up a WikiConfig from serialized format.
+func (cfg *WikiConfig) FromDB(bs []byte) error {
+	return json.UnmarshalHandleDoubleEncode(bs, &cfg)
+}
+
+// ToDB exports a WikiConfig to a serialized format.
+func (cfg *WikiConfig) ToDB() ([]byte, error) {
+	return json.Marshal(cfg)
+}
+
+// CleanWikiFolder returns the cleaned folder, or "" when it is not a folder inside the repository below its root.
+func CleanWikiFolder(folder string) string {
+	if len(folder) > 255 || strings.HasPrefix(folder, "/") || strings.ContainsAny(folder, "\\\x00") ||
+		slices.Contains(strings.Split(folder, "/"), "..") {
+		return ""
+	}
+	if folder = path.Clean(folder); folder == "." {
+		return ""
+	}
+	return folder
 }
 
 // ExternalTrackerConfig describes external tracker config
@@ -359,7 +397,9 @@ func (r *RepoUnit) BeforeSet(colName string, val xorm.Cell) {
 			r.Config = new(ActionsConfig)
 		case unit.TypeCode:
 			r.Config = new(CodeConfig)
-		case unit.TypeReleases, unit.TypeWiki, unit.TypeProjects, unit.TypePackages:
+		case unit.TypeWiki:
+			r.Config = new(WikiConfig)
+		case unit.TypeReleases, unit.TypeProjects, unit.TypePackages:
 			fallthrough
 		default:
 			r.Config = new(UnitConfig)
@@ -390,6 +430,14 @@ func (r *RepoUnit) ReleasesConfig() *UnitConfig {
 // ExternalWikiConfig returns config for unit.TypeExternalWiki
 func (r *RepoUnit) ExternalWikiConfig() *ExternalWikiConfig {
 	return r.Config.(*ExternalWikiConfig)
+}
+
+// WikiConfig returns config for unit.TypeWiki, the zero value when the unit has none
+func (r *RepoUnit) WikiConfig() *WikiConfig {
+	if cfg, ok := r.Config.(*WikiConfig); ok && cfg != nil {
+		return cfg
+	}
+	return new(WikiConfig)
 }
 
 // IssuesConfig returns config for unit.TypeIssues

@@ -59,7 +59,7 @@ func MayManage(ctx context.Context, doer *user_model.User, ownerID int64) (bool,
 	if !owner.IsOrganization() || (p.Mode == setting.OAuth2AppPolicyOrgs && !slices.Contains(p.OrgIDs, ownerID)) {
 		return false, nil
 	}
-	return organization.IsOrganizationOwner(ctx, ownerID, doer.ID)
+	return organization.OrgFromUser(owner).IsActingOwner(ctx, doer)
 }
 
 // OwnerAllowed reports whether the owner of an existing application could create one today, for the admin review

@@ -204,6 +204,9 @@ type RepoUnitSettingForm struct {
 	GloballyWriteableWiki                 bool
 	EnableExternalWiki                    bool
 	ExternalWikiURL                       string
+	WikiSource                            string
+	WikiFolder                            string
+	WikiBranch                            string
 	EnableIssues                          bool
 	EnableExternalTracker                 bool
 	ExternalTrackerURL                    string

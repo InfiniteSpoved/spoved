@@ -1,0 +1,84 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content repository wiki {{if .WikiFolderPageList}}pages{{else}}view{{end}}">
+	{{template "repo/header" .}}
+	<div class="ui container file-content">
+		{{if .WikiFolderMissing}}
+			<div class="ui info message wiki-folder-missing">
+				<p>{{ctx.Locale.Tr "repo.wiki.folder_missing" .WikiFolder .WikiBranch}}</p>
+			</div>
+		{{else if .WikiFolderPageList}}
+			<h2 class="ui header">{{ctx.Locale.Tr "repo.wiki.pages"}}</h2>
+			<table class="ui table wiki-pages-list wiki-folder-pages">
+				<tbody>
+					{{range .WikiFolderPages}}
+						<tr>
+							<td>
+								{{svg "octicon-file"}}
+								<a href="{{$.RepoLink}}/wiki/{{PathEscapeSegments .Path}}">{{.Title}}</a>
+							</td>
+							<td class="text right grey">{{.Path}}</td>
+						</tr>
+					{{end}}
+				</tbody>
+			</table>
+			{{if .WikiFolderTruncated}}<p class="help">{{ctx.Locale.Tr "repo.wiki.folder_truncated" .WikiFolderTruncated}}</p>{{end}}
+		{{else}}
+			<div class="ui dividing header">
+				<div class="ui stackable grid">
+					<div class="eight wide column">
+						<a class="file-revisions-btn ui basic button wiki-folder-history" title="{{ctx.Locale.Tr "repo.file_history"}}" href="{{.WikiFolderHistoryLink}}">{{svg "octicon-history"}}</a>
+						{{.Title}}
+						<div class="ui sub header">{{.WikiFolderPage}}</div>
+					</div>
+					<div class="eight wide right aligned column">
+						<div class="ui right">
+							{{if .EscapeStatus.Escaped}}
+								<a class="ui small button unescape-button tw-hidden">{{ctx.Locale.Tr "repo.unescape_control_characters"}}</a>
+								<a class="ui small button escape-button">{{ctx.Locale.Tr "repo.escape_control_characters"}}</a>
+							{{end}}
+							{{if .WikiFolderEditLink}}
+								<a class="ui small button wiki-folder-edit" href="{{.WikiFolderEditLink}}">{{svg "octicon-pencil"}} {{ctx.Locale.Tr "repo.wiki.folder_edit_page"}}</a>
+							{{end}}
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div class="wiki-content-parts">
+				<div class="file-view markup wiki-content-main with-sidebar">
+					{{if or .IsFileTooLarge .IsLFSFile}}
+						<p>
+							{{if .IsLFSFile}}{{ctx.Locale.Tr "repo.stored_lfs"}}{{else}}{{ctx.Locale.Tr "repo.file_too_large"}}{{end}}
+							<a href="{{.RepoLink}}/wiki/raw/{{PathEscapeSegments .WikiFolderPage}}">{{ctx.Locale.Tr "repo.file_view_raw"}}</a>
+						</p>
+					{{else}}
+						{{template "repo/unicode_escape_prompt" dict "EscapeStatus" .EscapeStatus "root" $}}
+						{{.content}}
+					{{end}}
+				</div>
+
+				<div class="wiki-content-sidebar">
+					{{if .sidebarContent}}
+						<div class="file-view markup">
+							{{template "repo/unicode_escape_prompt" dict "EscapeStatus" .sidebarEscapeStatus "root" $}}
+							{{.sidebarContent}}
+						</div>
+					{{end}}
+					<div class="markup wiki-content-toc">
+						<a class="muted" href="{{.RepoLink}}/wiki/?action=_pages">{{ctx.Locale.Tr "repo.wiki.pages"}}</a>
+						<ul class="wiki-folder-pages">
+							{{range .WikiFolderPages}}
+								{{range .Dirs}}<li class="text grey" style="padding-inline-start: {{.Depth}}em">{{svg "octicon-file-directory"}} {{.Name}}</li>{{end}}
+								<li style="padding-inline-start: {{.Depth}}em"><a href="{{$.RepoLink}}/wiki/{{PathEscapeSegments .Path}}"{{if eq .Path $.WikiFolderPage}} class="tw-font-semibold"{{end}}>{{.Title}}</a></li>
+							{{end}}
+						</ul>
+						{{if .WikiFolderTruncated}}<p class="help">{{ctx.Locale.Tr "repo.wiki.folder_truncated" .WikiFolderTruncated}}</p>{{end}}
+					</div>
+				</div>
+
+				<div class="tw-clear-both"></div>
+			</div>
+		{{end}}
+	</div>
+</div>
+{{template "base/footer" .}}

@@ -109,3 +109,24 @@ func TestGetUserForkLaxWithTwoChoices(t *testing.T) {
 	assert.Equal(t, int64(65), repo65.ID)
 	assert.Equal(t, int64(11), repo65.ForkID)
 }
+
+func TestFindUserOrgForksTwoFactorRequired(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := t.Context()
+	// a private fork of repo 1 in org3, of which user 2 (no 2FA) is a member
+	fork := &repo_model.Repository{OwnerID: 3, OwnerName: "org3", Name: "repo1-fork", LowerName: "repo1-fork", IsPrivate: true, IsFork: true, ForkID: 1}
+	require.NoError(t, db.Insert(ctx, fork))
+	ids := func() []int64 {
+		forks, err := repo_model.FindUserOrgForks(ctx, 1, 2)
+		require.NoError(t, err)
+		var ids []int64
+		for _, f := range forks {
+			ids = append(ids, f.ID)
+		}
+		return ids
+	}
+	assert.Contains(t, ids(), fork.ID)
+	_, err := db.GetEngine(ctx).Exec("UPDATE `user` SET require_two_factor = ? WHERE id = 3", true)
+	require.NoError(t, err)
+	assert.NotContains(t, ids(), fork.ID)
+}

@@ -74,7 +74,7 @@ func CheckOrgPolicy(ctx context.Context, doer *user_model.User, repo *repo_model
 		return errors.New("unknown organization policy action")
 	}
 
-	isOwner, err := organization.OrgFromUser(owner).IsOwnedBy(ctx, doer.ID)
+	isOwner, err := organization.OrgFromUser(owner).IsActingOwner(ctx, doer)
 	if err != nil {
 		return err
 	} else if !isOwner {
