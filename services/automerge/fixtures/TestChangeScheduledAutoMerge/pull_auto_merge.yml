@@ -1,0 +1,11 @@
+-
+  id: 1001
+  pull_id: 1
+  doer_id: 2
+  merge_style: "squash"
+  message: "Scheduled message"
+  delete_branch_after_merge: true
+  scheduled_after_unix: 1771803600
+  head_commit_id: "0123456789abcdef0123456789abcdef01234567"
+  give_up_after_unix: 1771900000
+  created_unix: 1771800000

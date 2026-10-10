@@ -398,13 +398,14 @@ func TestPullRequest(ctx context.Context, doer *user_model.User, repoID, olderTh
 	}
 }
 
-// CancelAutoMerge cancels the auto merge am of pr, unless it is already gone, with doer as the one who cancelled it
-func CancelAutoMerge(ctx context.Context, pr *issues_model.PullRequest, am *pull_model.AutoMerge, doer *user_model.User) error {
+// CancelAutoMerge cancels the auto merge am of pr, unless it is already gone, with doer as the one who cancelled it.
+// reason is recorded in the timeline entry ("permission", "push", ...).
+func CancelAutoMerge(ctx context.Context, pr *issues_model.PullRequest, am *pull_model.AutoMerge, doer *user_model.User, reason string) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
 		if deleted, err := pull_model.DeleteAutoMergeByID(ctx, am.ID); err != nil || !deleted {
 			return err
 		}
-		_, err := issues_model.CreateAutoMergeComment(ctx, issues_model.CommentTypePRUnScheduledToAutoMerge, pr, doer)
+		_, err := issues_model.CreateAutoMergeComment(ctx, issues_model.CommentTypePRUnScheduledToAutoMerge, pr, doer, issues_model.AutoMergeInfo{Reason: reason})
 		return err
 	})
 }
@@ -434,7 +435,7 @@ func CancelAutoMergeOnPush(ctx context.Context, pr *issues_model.PullRequest, pu
 	if !exist {
 		return
 	}
-	if err := CancelAutoMerge(ctx, pr, am, pusher); err != nil {
+	if err := CancelAutoMerge(ctx, pr, am, pusher, "push"); err != nil {
 		log.Error("%-v CancelAutoMerge: %v", pr, err)
 		return
 	}

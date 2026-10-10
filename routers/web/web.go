@@ -756,6 +756,7 @@ func registerRoutes(m *web.Route) {
 		m.Group("/appearance", func() {
 			m.Get("", user_setting.Appearance)
 			m.Post("/language", web.Bind(forms.UpdateLanguageForm{}), user_setting.UpdateUserLang)
+			m.Post("/time_zone", web.Bind(forms.UpdateTimeZoneForm{}), user_setting.UpdateUserTimeZone)
 			m.Post("/hints", web.Bind(forms.UpdateHintsForm{}), user_setting.UpdateUserHints)
 			m.Post("/hidden_comments", user_setting.UpdateUserHiddenComments)
 			m.Post("/theme", web.Bind(forms.UpdateThemeForm{}), user_setting.UpdateUIThemePost)
@@ -1850,6 +1851,7 @@ func registerRoutes(m *web.Route) {
 			})
 			m.Post("/merge", context.RepoMustNotBeArchived(), web.Bind(forms.MergePullRequestForm{}), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.MergePullRequest)
 			m.Post("/cancel_auto_merge", context.RepoMustNotBeArchived(), repo.CancelAutoMergePullRequest)
+			m.Post("/change_auto_merge_time", context.RepoMustNotBeArchived(), web.Bind(forms.ChangeAutoMergeTimeForm{}), repo.ChangeAutoMergeTimePullRequest)
 			m.Post("/revert", context.RepoMustNotBeArchived(), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.RevertPullRequest)
 			m.Post("/update", repo.UpdatePullRequest)
 			m.Post("/set_allow_maintainer_edit", web.Bind(forms.UpdateAllowEditsForm{}), repo.SetAllowEdits)
