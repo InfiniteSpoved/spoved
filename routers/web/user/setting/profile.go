@@ -342,6 +342,11 @@ func Appearance(ctx *context.Context) {
 		return forms.IsUserHiddenCommentTypeGroupChecked(commentTypeGroup, hiddenCommentTypes)
 	}
 
+	if ctx.Data["TimeZone"], err = user_model.GetUserTimeZone(ctx, ctx.Doer.ID); err != nil {
+		ctx.ServerError("GetUserTimeZone", err)
+		return
+	}
+
 	ctx.HTML(http.StatusOK, tplSettingsAppearance)
 }
 
@@ -401,6 +406,22 @@ func UpdateUserLang(ctx *context.Context) {
 
 	log.Trace("User settings updated: %s", ctx.Doer.Name)
 	ctx.Flash.Success(translation.NewLocale(ctx.Doer.Language).TrString("settings.update_language_success"))
+	ctx.Redirect(setting.AppSubURL + "/user/settings/appearance")
+}
+
+// UpdateUserTimeZone updates the time zone the user's schedule pickers default to
+func UpdateUserTimeZone(ctx *context.Context) {
+	form := web.GetForm(ctx).(*forms.UpdateTimeZoneForm)
+	if form.TimeZone != "" && !user_model.IsValidTimeZone(form.TimeZone) {
+		ctx.Flash.Error(ctx.Tr("settings.time_zone_invalid", form.TimeZone))
+		ctx.Redirect(setting.AppSubURL + "/user/settings/appearance")
+		return
+	}
+	if err := user_model.SetUserSetting(ctx, ctx.Doer.ID, user_model.SettingsKeyTimeZone, form.TimeZone); err != nil {
+		ctx.ServerError("SetUserSetting", err)
+		return
+	}
+	ctx.Flash.Success(ctx.Tr("settings.time_zone_updated"))
 	ctx.Redirect(setting.AppSubURL + "/user/settings/appearance")
 }
 

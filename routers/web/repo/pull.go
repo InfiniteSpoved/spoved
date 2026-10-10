@@ -1715,6 +1715,43 @@ func CancelAutoMergePullRequest(ctx *context.Context) {
 	ctx.Redirect(issue.HTMLURL())
 }
 
+// ChangeAutoMergeTimePullRequest changes the time of a scheduled merge
+func ChangeAutoMergeTimePullRequest(ctx *context.Context) {
+	issue, ok := getPullInfo(ctx)
+	if !ok {
+		return
+	}
+	form := web.GetForm(ctx).(*forms.ChangeAutoMergeTimeForm)
+
+	scheduledAfter, giveUpAfter, err := form.ScheduleTimeStamps()
+	if err != nil {
+		if errors.Is(err, forms.ErrInvalidGiveUpAfter) {
+			ctx.Flash.Error(ctx.Tr("repo.pulls.auto_merge.invalid_give_up"))
+		} else {
+			ctx.Flash.Error(ctx.Tr("repo.pulls.auto_merge.invalid_time"))
+		}
+		ctx.Redirect(issue.HTMLURL())
+		return
+	}
+
+	if err := automerge.ChangeScheduledAutoMerge(ctx, ctx.Doer, issue.PullRequest, ctx.Repo.Permission, scheduledAfter, giveUpAfter); err != nil {
+		switch {
+		case errors.Is(err, util.ErrPermissionDenied):
+			ctx.Flash.Error(ctx.Tr("repo.pulls.auto_merge.no_permission_change"))
+		case db.IsErrNotExist(err):
+			ctx.Flash.Error(ctx.Tr("repo.pulls.auto_merge_not_scheduled"))
+		default:
+			ctx.ServerError("ChangeScheduledAutoMerge", err)
+			return
+		}
+		ctx.Redirect(issue.HTMLURL())
+		return
+	}
+
+	ctx.Flash.Success(ctx.Tr("repo.pulls.auto_merge.time_changed"))
+	ctx.Redirect(issue.HTMLURL())
+}
+
 func stopTimerIfAvailable(ctx stdCtx.Context, user *user_model.User, issue *issues_model.Issue) error {
 	if issues_model.StopwatchExists(ctx, user.ID, issue.ID) {
 		if err := issues_model.CreateOrStopIssueStopwatch(ctx, user, issue); err != nil {

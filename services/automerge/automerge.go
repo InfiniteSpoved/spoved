@@ -88,10 +88,67 @@ func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pull *issues_
 		}
 		scheduled = true
 
-		_, err = issues_model.CreateAutoMergeComment(ctx, issues_model.CommentTypePRScheduledToAutoMerge, pull, doer)
+		_, err = issues_model.CreateAutoMergeComment(ctx, issues_model.CommentTypePRScheduledToAutoMerge, pull, doer, issues_model.AutoMergeInfo{After: int64(scheduledAfter), GiveUp: int64(giveUpAfter)})
 		return err
 	})
 	return scheduled, err
+}
+
+// ChangeScheduledAutoMerge changes the time of the scheduled merge of pull. Who may do it is the same as for cancelling;
+// the user who scheduled it, the merge style, message, branch deletion and pinned head stay.
+func ChangeScheduledAutoMerge(ctx context.Context, doer *user_model.User, pull *issues_model.PullRequest, repoPerms access_model.Permission, scheduledAfter, giveUpAfter timeutil.TimeStamp) error {
+	exist, autoMerge, err := pull_model.GetScheduledMergeByPullID(ctx, pull.ID)
+	if err != nil {
+		return err
+	}
+	if !exist {
+		return db.ErrNotExist{Resource: "auto_merge", ID: pull.ID}
+	}
+	if err := checkMayChangeAutoMerge(ctx, doer, pull, repoPerms, autoMerge); err != nil {
+		return err
+	}
+
+	var headCommitID string
+	if autoMerge.HeadCommitID == "" {
+		if err := pull.LoadBaseRepo(ctx); err != nil {
+			return err
+		}
+		gitRepo, err := gitrepo.OpenRepository(ctx, pull.BaseRepo)
+		if err != nil {
+			return err
+		}
+		defer gitRepo.Close()
+		if headCommitID, err = gitRepo.GetRefCommitID(pull.GetGitRefName()); err != nil {
+			return err
+		}
+	}
+
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if changed, err := pull_model.ChangeAutoMergeTime(ctx, autoMerge, scheduledAfter, giveUpAfter, headCommitID); err != nil {
+			return err
+		} else if !changed {
+			return db.ErrNotExist{Resource: "auto_merge", ID: pull.ID}
+		}
+		_, err := issues_model.CreateAutoMergeComment(ctx, issues_model.CommentTypePRAutoMergeTimeChanged, pull, doer, issues_model.AutoMergeInfo{
+			Old: int64(autoMerge.ScheduledAfterUnix), New: int64(scheduledAfter), GiveUp: int64(giveUpAfter),
+		})
+		return err
+	})
+}
+
+// checkMayChangeAutoMerge allows the user who scheduled the merge and everyone who may merge the pull request
+func checkMayChangeAutoMerge(ctx context.Context, doer *user_model.User, pull *issues_model.PullRequest, repoPerms access_model.Permission, autoMerge *pull_model.AutoMerge) error {
+	if doer.ID == autoMerge.DoerID {
+		return nil
+	}
+	allowed, err := pull_service.IsUserAllowedToMerge(ctx, pull, repoPerms, doer)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return util.ErrPermissionDenied
+	}
+	return nil
 }
 
 // RemoveScheduledAutoMerge cancels a previously scheduled pull request
@@ -104,14 +161,8 @@ func RemoveScheduledAutoMerge(ctx context.Context, doer *user_model.User, pull *
 		return db.ErrNotExist{Resource: "auto_merge", ID: pull.ID}
 	}
 
-	if doer.ID != autoMerge.DoerID {
-		allowed, err := pull_service.IsUserAllowedToMerge(ctx, pull, repoPerms, doer)
-		if err != nil {
-			return err
-		}
-		if !allowed {
-			return util.ErrPermissionDenied
-		}
+	if err := checkMayChangeAutoMerge(ctx, doer, pull, repoPerms, autoMerge); err != nil {
+		return err
 	}
 
 	return db.WithTx(ctx, func(ctx context.Context) error {
@@ -119,7 +170,7 @@ func RemoveScheduledAutoMerge(ctx context.Context, doer *user_model.User, pull *
 			return err
 		}
 
-		_, err := issues_model.CreateAutoMergeComment(ctx, issues_model.CommentTypePRUnScheduledToAutoMerge, pull, doer)
+		_, err := issues_model.CreateAutoMergeComment(ctx, issues_model.CommentTypePRUnScheduledToAutoMerge, pull, doer, issues_model.AutoMergeInfo{})
 		return err
 	})
 }
@@ -146,7 +197,7 @@ func StartDueScheduledAutoMerges(ctx context.Context) error {
 			log.Error("GetPossibleUserByID[%d]: %v", am.DoerID, err)
 			continue
 		}
-		if _, err := issues_model.CreateAutoMergeComment(ctx, issues_model.CommentTypePRUnScheduledToAutoMerge, pr, doer); err != nil {
+		if _, err := issues_model.CreateAutoMergeComment(ctx, issues_model.CommentTypePRUnScheduledToAutoMerge, pr, doer, issues_model.AutoMergeInfo{Reason: "give_up"}); err != nil {
 			log.Error("CreateAutoMergeComment[%d]: %v", pr.ID, err)
 		}
 	}
@@ -166,6 +217,24 @@ func StartDueScheduledAutoMerges(ctx context.Context) error {
 	return nil
 }
 
+// skipAutoMerge records in the timeline why the scheduled merge of pr cannot go ahead, once per reason and head
+func skipAutoMerge(ctx context.Context, pr *issues_model.PullRequest, am *pull_model.AutoMerge, reason, sha string) {
+	info := issues_model.AutoMergeInfo{Reason: reason, SHA: sha}
+	if err := pr.LoadIssue(ctx); err != nil {
+		log.Error("%-v LoadIssue: %v", pr, err)
+		return
+	}
+	if recorded, err := issues_model.IsAutoMergeSkipRecorded(ctx, pr.IssueID, info); err != nil || recorded {
+		if err != nil {
+			log.Error("%-v IsAutoMergeSkipRecorded: %v", pr, err)
+		}
+		return
+	}
+	if _, err := issues_model.CreateAutoMergeComment(ctx, issues_model.CommentTypePRAutoMergeSkipped, pr, am.Doer, info); err != nil {
+		log.Error("%-v CreateAutoMergeComment: %v", pr, err)
+	}
+}
+
 // canStillMerge reports whether doer, who scheduled the auto merge of pr, may still merge it
 func canStillMerge(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User) (access_model.Permission, bool, error) {
 	if doer == nil || doer.ID <= 0 || !doer.IsActive || doer.ProhibitLogin {
@@ -182,7 +251,7 @@ func canStillMerge(ctx context.Context, pr *issues_model.PullRequest, doer *user
 // cancelAutoMerge cancels an auto merge whose scheduler may no longer merge
 func cancelAutoMerge(ctx context.Context, pr *issues_model.PullRequest, am *pull_model.AutoMerge) {
 	log.Info("Cancelling the auto merge of %-v: %s may no longer merge it", pr, am.Doer.Name)
-	if err := pull_service.CancelAutoMerge(ctx, pr, am, am.Doer); err != nil {
+	if err := pull_service.CancelAutoMerge(ctx, pr, am, am.Doer, "permission"); err != nil {
 		log.Error("%-v CancelAutoMerge: %v", pr, err)
 	}
 }
@@ -264,6 +333,7 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 	}
 	if scheduledPRM.HeadCommitID != "" && headCommitID != scheduledPRM.HeadCommitID {
 		log.Info("Scheduled auto merge %-v is pinned to %s but the head is now %s, not merging", pr, scheduledPRM.HeadCommitID, headCommitID)
+		skipAutoMerge(ctx, pr, scheduledPRM, "head_moved", headCommitID)
 		return
 	}
 	if headCommitID != sha {
@@ -296,12 +366,14 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 		headBranchExist := headGitRepo.IsBranchExist(pr.HeadBranch)
 		if pr.HeadRepo == nil || !headBranchExist {
 			log.Warn("Head branch of auto merge %-v does not exist [HeadRepoID: %d, Branch: %s]", pr, pr.HeadRepoID, pr.HeadBranch)
+			skipAutoMerge(ctx, pr, scheduledPRM, "branch_missing", headCommitID)
 			return
 		}
 	case issues_model.PullRequestFlowAGit:
 		headBranchExist := baseGitRepo.IsReferenceExist(pr.GetGitRefName())
 		if !headBranchExist {
 			log.Warn("Head branch of auto merge %-v does not exist [HeadRepoID: %d, Branch(Agit): %s]", pr, pr.HeadRepoID, pr.HeadBranch)
+			skipAutoMerge(ctx, pr, scheduledPRM, "branch_missing", headCommitID)
 			return
 		}
 	default:
@@ -317,6 +389,11 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 	}
 	if !pass {
 		log.Info("Scheduled auto merge %-v has unsuccessful status checks", pr)
+		if failed, err := pull_service.IsPullCommitStatusFailed(ctx, pr); err != nil {
+			log.Error("%-v IsPullCommitStatusFailed: %v", pr, err)
+		} else if failed {
+			skipAutoMerge(ctx, pr, scheduledPRM, "checks_failed", headCommitID)
+		} // pending checks: nothing to report yet
 		return
 	}
 
@@ -333,7 +410,16 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 			cancelAutoMerge(ctx, pr, scheduledPRM)
 			return
 		}
-		log.Error("%-v CheckPullMergeable: %v", pr, err)
+		switch {
+		case errors.Is(err, pull_service.ErrNotMergeableState):
+			skipAutoMerge(ctx, pr, scheduledPRM, "conflict", headCommitID)
+		case errors.Is(err, pull_service.ErrIsWorkInProgress):
+			skipAutoMerge(ctx, pr, scheduledPRM, "wip", headCommitID)
+		case models.IsErrDisallowedToMerge(err):
+			skipAutoMerge(ctx, pr, scheduledPRM, "blocked", headCommitID)
+		default:
+			log.Error("%-v CheckPullMergeable: %v", pr, err)
+		}
 		return
 	}
 
@@ -348,10 +434,18 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 	// only merge the head validated above: the merge fetches the head branch, which may have moved since
 	if err := pull_service.Merge(ctx, pr, doer, baseGitRepo, scheduledPRM.MergeStyle, sha, scheduledPRM.Message, true); err != nil {
 		log.Warn("Auto merge of %-v was removed but the merge failed: %v", pr, err)
+		skipAutoMerge(ctx, pr, scheduledPRM, "merge_failed", sha)
 		// FIXME: if merge failed, we should display some error message to the pull request page.
 		// The resolution is add a new column on automerge table named `error_message` to store the error message and displayed
 		// on the pull request page. But this should not be finished in a bug fix PR which will be backport to release branch.
 		return
+	}
+
+	// a scheduled merge is pinned to its head; its time was reset to 0 when it became due
+	if scheduledPRM.HeadCommitID != "" {
+		if _, err := issues_model.CreateAutoMergeComment(ctx, issues_model.CommentTypePRMergedBySchedule, pr, doer, issues_model.AutoMergeInfo{}); err != nil {
+			log.Error("%-v CreateAutoMergeComment: %v", pr, err)
+		}
 	}
 
 	alwaysDelete, err := branchworkflow.IsAlways(ctx, pr.BaseRepo)

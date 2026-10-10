@@ -2162,6 +2162,12 @@ func ViewIssue(ctx *context.Context) {
 			ctx.ServerError("GetScheduledMergeByPullID", err)
 			return
 		}
+		if ctx.IsSigned {
+			if ctx.Data["UserTimeZone"], err = user_model.GetUserTimeZone(ctx, ctx.Doer.ID); err != nil {
+				ctx.ServerError("GetUserTimeZone", err)
+				return
+			}
+		}
 	}
 
 	// Get Dependencies
