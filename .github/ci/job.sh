@@ -40,7 +40,7 @@ plan)
   # depth: commits to fetch, 0 for the full history
   tasks='{"task":"lint","args":"","depth":"1"},{"task":"frontend","args":"","depth":"1"}'
   if [ "$backend" = true ]; then
-    for i in $(seq 1 14); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 14\",\"depth\":\"1\"}"; done
+    for i in $(seq 1 16); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 16\",\"depth\":\"1\"}"; done
   fi
   if [ "$FULL" = true ]; then
     # only the selection of changed end-to-end tests needs the history
@@ -87,16 +87,11 @@ unit)
   cat "$RUNNER_TEMP/out.txt"
   set -e
   o="$RUNNER_TEMP/out.txt"
-  if [ "$1" -le 12 ]; then
-    for p in $(tr ' ' '\n' <<< "$packages" | .github/ci/shard.sh "$1" 12); do
-      if grep -qE "^FAIL[[:space:]]+${p}([[:space:]]|\$)" "$o"; then exit 1; fi
-    done
-    exit 0
-  elif [ "$1" = 13 ]; then
-    exit $(( rc != 0 ))
-  else
-    if grep -q '^--- FAIL' "$o" && ! grep -qE '^FAIL[[:space:]]+forgejo' "$o"; then exit 1; fi
-  fi
+  # job N reports whether a failing top-level test is in group ((N-1) % 8) + 1 of the package's tests
+  g=$(( ($1 - 1) % 8 + 1 ))
+  for t in $(go test -tags 'sqlite sqlite_unlock_notify' -list '^Test' forgejo.org/services/usergroup | grep -E '^Test' | .github/ci/shard.sh "$g" 8); do
+    if grep -qE "^--- FAIL: ${t} " "$o"; then exit 1; fi
+  done
   ;;
 
 migrations)
