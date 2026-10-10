@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# The CI jobs, run by the public InfiniteSpoved/spovedBuild workflow, which
-# keeps their output out of its public logs (it only uploads it encrypted).
-# Keep anything that describes this repository in here, not in that workflow.
+# The CI jobs, run by .github/workflows/ci.yml on the Proxmox runners and by the
+# public InfiniteSpoved/spovedBuild workflow, which keeps their output out of its
+# public logs (it only uploads it encrypted). Keep anything that describes this
+# repository in here, not in that workflow.
 #
 # Usage: job.sh TASK [ARGS]
 #   plan                 writes `tasks`, the jobs to run, to $GITHUB_OUTPUT
@@ -9,8 +10,8 @@
 #   unit SHARD SHARDS | integration SHARD SHARDS | e2e SHARD SHARDS
 #
 # Runs do the checks and the unit tests; with FULL=true they also run the
-# migration, integration and end-to-end tests. Pull requests dispatched with
-# their commits (EVENT=repository_dispatch) that only change files the Go
+# migration, integration and end-to-end tests. Pull requests (EVENT=pull_request,
+# or dispatched with their commits as repository_dispatch) that only change files the Go
 # tests cannot depend on skip the unit tests. The unit, integration and end-to-end tests are split into shards that
 # take a round-robin share of the packages, tests or test files (see shard.sh).
 # Each shard is its own machine, so integration shards share no state.
@@ -25,7 +26,7 @@ shift
 case $task in
 plan)
   backend=true
-  if [ "$EVENT" = repository_dispatch ]; then
+  if [ "$EVENT" = repository_dispatch ] || [ "$EVENT" = pull_request ]; then
     files=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
     echo "Changed files:"
     echo "$files"

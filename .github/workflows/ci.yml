@@ -1,0 +1,118 @@
+name: CI
+
+# The CI of this repository on the self-hosted Proxmox runners (runs-on: proxmox,
+# ephemeral Ubuntu 24.04 containers, at most 4 at a time; the other jobs queue).
+# It runs the same jobs as the InfiniteSpoved/spovedBuild workflow; what each
+# job does lives in .github/ci/job.sh. This repository is private, so unlike
+# spovedBuild the logs are shown as they are.
+#
+# Pull requests run everything (the full run). Manual runs take a branch, tag
+# or commit and run the checks and unit tests, everything when full is checked;
+# `only` limits a manual run to some stages. Require the "CI success" check in
+# the branch protection rules.
+
+on:
+  pull_request:
+    branches: [develop]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to test.
+        default: develop
+      full:
+        description: Also run the migration, integration and end-to-end tests (about an hour). Otherwise only the checks and unit tests run.
+        type: boolean
+        default: false
+      run-all-e2e:
+        description: Run every end-to-end test, not only those covering the files changed compared with develop.
+        type: boolean
+        default: true
+      only:
+        description: Optional comma-separated stages to run (lint, frontend, unit, migrations, integration, e2e), for iterating on a fix.
+        default: ''
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: proxmox
+    timeout-minutes: 10
+    outputs:
+      tasks: ${{ steps.plan.outputs.tasks }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+          # the plan compares the pull request with its base, so it needs the history
+          fetch-depth: 0
+      - name: Plan
+        id: plan
+        run: .github/ci/job.sh plan
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          FULL: ${{ github.event_name == 'pull_request' || inputs.full }}
+          RUN_ALL_E2E: ${{ inputs.run-all-e2e }}
+          ONLY: ${{ inputs.only }}
+
+  run:
+    name: ${{ matrix.task }} ${{ matrix.args }}
+    needs: [plan]
+    runs-on: proxmox
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.tasks) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+          # commits to fetch, 0 for the full history (with origin/develop)
+          fetch-depth: ${{ matrix.depth }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Cache tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/golangci-lint
+            ~/.cache/ms-playwright
+          key: tools-${{ runner.os }}-${{ matrix.task }}-${{ hashFiles('go.sum', '.golangci.yml', 'package-lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            tools-${{ runner.os }}-${{ matrix.task }}-${{ hashFiles('go.sum', '.golangci.yml', 'package-lock.json') }}-
+            tools-${{ runner.os }}-${{ matrix.task }}-
+      - name: Run
+        run: |
+          # ARGS is split into words on purpose
+          # shellcheck disable=SC2086
+          .github/ci/job.sh "$TASK" $ARGS
+        env:
+          TASK: ${{ matrix.task }}
+          ARGS: ${{ matrix.args }}
+          RUN_ALL_E2E: ${{ inputs.run-all-e2e }}
+
+  # The single check to require in the branch protection rules
+  ci-success:
+    name: CI success
+    if: always()
+    needs: [plan, run]
+    runs-on: proxmox
+    steps:
+      - name: Report the result
+        run: '[ "$FAILED" = false ]'
+        env:
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
