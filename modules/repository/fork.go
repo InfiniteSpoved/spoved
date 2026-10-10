@@ -17,7 +17,9 @@ func CanUserForkRepo(ctx context.Context, user *user_model.User, repo *repo_mode
 		return false, nil
 	}
 	if repo.OwnerID != user.ID && !repo_model.HasForkedRepo(ctx, user.ID, repo.ID) {
-		return true, nil
+		if allowed, err := AllowedByOrgPolicy(ctx, user, repo, OrgPolicyFork, user); err != nil || allowed {
+			return allowed, err
+		}
 	}
 	ownedOrgs, err := organization.GetOrgsCanCreateRepoByUserID(ctx, user.ID)
 	if err != nil {
@@ -25,7 +27,9 @@ func CanUserForkRepo(ctx context.Context, user *user_model.User, repo *repo_mode
 	}
 	for _, org := range ownedOrgs {
 		if repo.OwnerID != org.ID && !repo_model.HasForkedRepo(ctx, org.ID, repo.ID) {
-			return true, nil
+			if allowed, err := AllowedByOrgPolicy(ctx, user, repo, OrgPolicyFork, org.AsUser()); err != nil || allowed {
+				return allowed, err
+			}
 		}
 	}
 	return false, nil

@@ -174,12 +174,35 @@ type User struct {
 	KeepPronounsPrivate bool   `xorm:"NOT NULL DEFAULT false"`
 	EnableRepoUnitHints bool   `xorm:"NOT NULL DEFAULT true"`
 
+	// Repository policies of an organization (#148), enforced by repository.CheckOrgPolicy
+	RestrictRepoVisibilityChange bool `xorm:"NOT NULL DEFAULT false"` // only owners change a repository's visibility
+	PrivateForkPolicy            int  `xorm:"NOT NULL DEFAULT 0"`     // PrivateForkAll, PrivateForkOrg or PrivateForkNone
+
 	// If you add new fields that might be used to store abusive content (mainly string fields),
 	// please also add them in the UserData struct and the corresponding constructor.
 }
 
 func init() {
 	db.RegisterModel(new(User))
+}
+
+// Private fork policies of an organization, by PrivateForkPolicyNames index.
+const (
+	PrivateForkAll  = iota // anyone who can fork may fork the organization's private repositories
+	PrivateForkOrg         // only into the organization itself
+	PrivateForkNone        // nobody but site admins
+)
+
+// PrivateForkPolicyNames are the API names of the private fork policies.
+var PrivateForkPolicyNames = []string{"all", "org", "none"}
+
+// PrivateForkPolicyName returns the API name of the organization's private fork policy; an unknown value is
+// refused like "none".
+func (u *User) PrivateForkPolicyName() string {
+	if u.PrivateForkPolicy < 0 || u.PrivateForkPolicy >= len(PrivateForkPolicyNames) {
+		return "none"
+	}
+	return PrivateForkPolicyNames[u.PrivateForkPolicy]
 }
 
 // SearchOrganizationsOptions options to filter organizations

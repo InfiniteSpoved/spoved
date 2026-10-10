@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"forgejo.org/models"
 	activities_model "forgejo.org/models/activities"
@@ -437,6 +438,10 @@ func Edit(ctx *context.APIContext) {
 		Location:                  optional.FromPtr(form.Location),
 		Visibility:                changeVisibility,
 		RepoAdminChangeTeamAccess: optional.FromPtr(form.RepoAdminChangeTeamAccess),
+	}
+	opts.RestrictRepoVisibilityChange = optional.FromPtr(form.RestrictRepoVisibilityChange)
+	if form.PrivateForkPolicy != nil {
+		opts.PrivateForkPolicy = optional.Some(slices.Index(user_model.PrivateForkPolicyNames, *form.PrivateForkPolicy))
 	}
 	if err := user_service.UpdateUser(ctx, ctx.Org().Organization.AsUser(), opts); err != nil {
 		ctx.Error(http.StatusInternalServerError, "UpdateUser", err)
