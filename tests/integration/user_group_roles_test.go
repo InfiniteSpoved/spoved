@@ -227,4 +227,78 @@ func TestUserGroupRoleLossWarning(t *testing.T) {
 	resp = admin.MakeRequest(t, NewRequest(t, "GET", groupURL), http.StatusOK)
 	assert.NotContains(t, resp.Body.String(), "will lose")
 	admin.MakeRequest(t, NewRequestWithValues(t, "POST", groupURL+"/edit", map[string]string{"name": "plain2"}), http.StatusSeeOther)
+
+	t.Run("auditor", func(t *testing.T) {
+		const lossAuditor = "1 member will lose auditor access"
+		isAuditor := func(uid int64) bool {
+			return unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: uid}).IsAuditor
+		}
+		newAuditorGroup := func(name string, members ...string) string {
+			admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/groups/new", map[string]string{
+				"name": name, "grants_site_admin": "on", "grants_auditor": "on",
+			}), http.StatusSeeOther)
+			group := unittest.AssertExistsAndLoadBean(t, &organization.UserGroup{LowerName: name})
+			for _, m := range members {
+				admin.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/admin/groups/%d/members/add", group.ID), map[string]string{"uname": m}), http.StatusSeeOther)
+			}
+			return fmt.Sprintf("/admin/groups/%d", group.ID)
+		}
+		// user5 is an auditor (and administrator) only through "auditors"; user4 also through "other-auditors".
+		newAuditorGroup("other-auditors", "user4")
+		groupURL := newAuditorGroup("auditors", "user4", "user5")
+		require.True(t, isAuditor(5))
+		require.True(t, isAuditor(4))
+
+		resp := admin.MakeRequest(t, NewRequest(t, "GET", groupURL), http.StatusOK)
+		assert.Contains(t, NewHTMLParser(t, resp.Body).Find("#delete-user-group").Text(), lossAuditor)
+
+		edit := func(confirmRoles string, grantsSiteAdmin, grantsAuditor bool) *httptest.ResponseRecorder {
+			values := map[string]string{"name": "auditors", "confirm_roles": confirmRoles}
+			if grantsSiteAdmin {
+				values["grants_site_admin"] = "on"
+			}
+			if grantsAuditor {
+				values["grants_auditor"] = "on"
+			}
+			return admin.MakeRequest(t, NewRequestWithValues(t, "POST", groupURL+"/edit", values), NoExpectedStatus)
+		}
+
+		// switching auditor off asks first and changes nothing
+		resp = edit("", true, false)
+		require.Equal(t, http.StatusOK, resp.Code)
+		htmlDoc := NewHTMLParser(t, resp.Body)
+		warning := htmlDoc.Find(".user-group-role-loss").Text()
+		assert.Contains(t, warning, lossAuditor)
+		assert.NotContains(t, warning, lossAdmin)
+		htmlDoc.AssertElement(t, `input[name="confirm_roles"][value="auditor"]`, true)
+		assert.True(t, unittest.AssertExistsAndLoadBean(t, &organization.UserGroup{LowerName: "auditors"}).GrantsAuditor)
+		assert.True(t, isAuditor(5))
+
+		// confirming a different role does not confirm auditor
+		resp = edit("site_admin", true, false)
+		require.Equal(t, http.StatusOK, resp.Code)
+		assert.Contains(t, NewHTMLParser(t, resp.Body).Find(".user-group-role-loss").Text(), lossAuditor)
+		assert.True(t, isAuditor(5))
+
+		// a role switched off after the first warning is warned about too, and the two combine
+		resp = edit("auditor", false, false)
+		require.Equal(t, http.StatusOK, resp.Code)
+		htmlDoc = NewHTMLParser(t, resp.Body)
+		warning = htmlDoc.Find(".user-group-role-loss").Text()
+		assert.Contains(t, warning, lossAuditor)
+		assert.Contains(t, warning, lossAdmin)
+		htmlDoc.AssertElement(t, `input[name="confirm_roles"][value="auditor,site_admin"]`, true)
+		assert.True(t, isAuditor(5))
+
+		// confirming applies the change; the member covered by the other group keeps the role
+		assert.Equal(t, http.StatusSeeOther, edit("auditor,site_admin", false, false).Code)
+		assert.False(t, isAuditor(5))
+		assert.True(t, isAuditor(4))
+
+		// the group grants nothing now: no warning, and switching on asks nothing
+		resp = admin.MakeRequest(t, NewRequest(t, "GET", groupURL), http.StatusOK)
+		assert.NotContains(t, resp.Body.String(), "will lose")
+		assert.Equal(t, http.StatusSeeOther, edit("", false, true).Code)
+		assert.True(t, isAuditor(5))
+	})
 }
