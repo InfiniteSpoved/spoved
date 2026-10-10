@@ -1024,11 +1024,10 @@ func updateRepoUnits(ctx *context.APIContext, owner string, repo *repo_model.Rep
 			})
 			deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeWiki)
 		} else if newHasWiki && opts.ExternalWiki == nil && !disabled(unit_model.TypeWiki) {
-			config := &repo_model.UnitConfig{}
 			units = append(units, repo_model.RepoUnit{
 				RepoID:             repo.ID,
 				Type:               unit_model.TypeWiki,
-				Config:             config,
+				Config:             repo.MustGetUnit(ctx, unit_model.TypeWiki).WikiConfig(), // keep the wiki source
 				DefaultPermissions: wikiPermissions,
 			})
 			deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeExternalWiki)
@@ -1040,11 +1039,10 @@ func updateRepoUnits(ctx *context.APIContext, owner string, repo *repo_model.Rep
 				deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeWiki)
 			}
 		} else if opts.GloballyEditableWiki != nil && *opts.GloballyEditableWiki && !disabled(unit_model.TypeWiki) {
-			config := &repo_model.UnitConfig{}
 			units = append(units, repo_model.RepoUnit{
 				RepoID:             repo.ID,
 				Type:               unit_model.TypeWiki,
-				Config:             config,
+				Config:             repo.MustGetUnit(ctx, unit_model.TypeWiki).WikiConfig(), // keep the wiki source
 				DefaultPermissions: wikiPermissions,
 			})
 		}

@@ -176,10 +176,29 @@ func UnitsPost(ctx *context.Context) {
 		if form.GloballyWriteableWiki {
 			wikiPermissions = repo_model.UnitAccessModeWrite
 		}
+		// a form without the wiki source keeps the saved one
+		wikiConfig := repo.MustGetUnit(ctx, unit_model.TypeWiki).WikiConfig()
+		switch form.WikiSource {
+		case "separate":
+			wikiConfig = &repo_model.WikiConfig{}
+		case repo_model.WikiSourceFolder:
+			folder := repo_model.CleanWikiFolder(form.WikiFolder)
+			if folder == "" {
+				ctx.Flash.Error(ctx.Tr("repo.settings.wiki_folder_error"))
+				ctx.Redirect(repo.Link() + "/settings/units")
+				return
+			}
+			if form.WikiBranch != "" && (ctx.Repo.GitRepo == nil || !ctx.Repo.GitRepo.IsBranchExist(form.WikiBranch)) {
+				ctx.Flash.Error(ctx.Tr("repo.settings.wiki_branch_error"))
+				ctx.Redirect(repo.Link() + "/settings/units")
+				return
+			}
+			wikiConfig = &repo_model.WikiConfig{Source: repo_model.WikiSourceFolder, Folder: folder, Branch: form.WikiBranch}
+		}
 		units = append(units, repo_model.RepoUnit{
 			RepoID:             repo.ID,
 			Type:               unit_model.TypeWiki,
-			Config:             new(repo_model.UnitConfig),
+			Config:             wikiConfig,
 			DefaultPermissions: wikiPermissions,
 		})
 		deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeExternalWiki)

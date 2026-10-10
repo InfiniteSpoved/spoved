@@ -1,0 +1,13 @@
+name: hello-runner
+
+on: workflow_dispatch
+
+jobs:
+  hello:
+    runs-on: proxmox
+    steps:
+      - run: echo "hello from $(hostname)"
+      - run: |
+          echo "user: $(whoami)"
+          echo "os:   $(uname -srm)"
+          echo "dir:  $PWD"
