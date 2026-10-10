@@ -73,6 +73,7 @@ export default {
       intervalID: null,
       lineNumberOffset: [],
       currentJobStepsStates: [],
+      tokenPermissionsExpanded: false,
       artifacts: [],
       menuVisible: undefined,
       isFullScreen: false,
@@ -666,7 +667,39 @@ export default {
           :time-visible-timestamp="timeVisible['log-time-stamp']"
           :time-visible-seconds="timeVisible['log-time-seconds']"
           @toggle-step-logs="toggleStepLogs"
-        />
+        >
+          <div v-if="currentJob.tokenPermissions" class="job-token-permissions">
+            <div
+              class="job-step-summary"
+              tabindex="0"
+              :class="{selected: tokenPermissionsExpanded}"
+              @click.stop="tokenPermissionsExpanded = !tokenPermissionsExpanded"
+              @keyup.enter.stop="tokenPermissionsExpanded = !tokenPermissionsExpanded"
+              @keyup.space.stop="tokenPermissionsExpanded = !tokenPermissionsExpanded"
+            >
+              <SvgIcon :name="tokenPermissionsExpanded ? 'octicon-chevron-down' : 'octicon-chevron-right'" class="tw-mr-2"/>
+              <SvgIcon name="octicon-lock" class="tw-mr-2"/>
+              <span class="step-summary-msg gt-ellipsis">
+                {{ currentJob.tokenPermissions.title }}
+              </span>
+            </div>
+            <div class="job-step-logs" v-show="tokenPermissionsExpanded">
+              <div v-for="unit in currentJob.tokenPermissions.units" :key="unit.name" class="job-log-line job-token-permission" :data-mode="unit.mode">
+                <span class="log-msg job-token-permission-name">
+                  {{ unit.name }}
+                </span>
+                <span class="log-msg job-token-permission-access">
+                  {{ unit.access }}
+                </span>
+              </div>
+              <div v-for="note in currentJob.tokenPermissions.notes" :key="note" class="job-log-line job-token-permissions-note">
+                <span class="log-msg">
+                  {{ note }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </ActionJobStepList>
       </div>
     </div>
   </div>
@@ -858,6 +891,52 @@ export default {
   border-radius: var(--border-radius);
   background: var(--color-box-body);
   color: var(--color-text);
+}
+
+/* the token permissions row looks like a step row, see ActionJobStep.vue */
+.job-token-permissions {
+  margin: 10px;
+}
+
+.job-token-permissions .job-step-summary {
+  padding: 5px 10px;
+  display: flex;
+  align-items: center;
+  border-radius: var(--border-radius);
+  cursor: pointer;
+}
+
+.job-token-permissions .job-step-summary:hover {
+  color: var(--color-console-fg);
+  background: var(--color-console-hover-bg);
+}
+
+.job-token-permissions .job-step-summary.selected {
+  color: var(--color-console-fg);
+  background-color: var(--color-console-active-bg);
+}
+
+.job-token-permissions .step-summary-msg {
+  flex: 1;
+}
+
+.job-token-permissions .job-step-logs {
+  font-family: var(--fonts-monospace);
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+.job-token-permissions .job-log-line {
+  padding-inline-start: 24px;
+}
+
+.job-token-permissions .job-token-permission-name {
+  flex: 0 0 16em;
+}
+
+.job-token-permissions .job-token-permission[data-mode="none"] .job-token-permission-access,
+.job-token-permissions .job-token-permissions-note .log-msg {
+  color: var(--color-console-fg-subtle);
 }
 
 .action-view-right .job-summary .step-summary + .step-summary {

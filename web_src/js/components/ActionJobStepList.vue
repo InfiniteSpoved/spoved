@@ -73,6 +73,7 @@ export default {
 </script>
 <template>
   <div class="job-step-container" ref="steps" v-if="steps.length">
+    <slot/>
     <div class="job-step-section" v-for="(jobStep, i) in steps" :key="i">
       <ActionJobStep
         ref="jobSteps"
