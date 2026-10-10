@@ -22,9 +22,9 @@ import (
 func TestOrgStorageOverview(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	// org3 owns repo3 and repo5 (both private) and repo21
-	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 3, 3<<20, 1<<20))
-	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 5, 1<<20, 4<<20))
-	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 32, 2<<20, 0))
+	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 3, 3<<20, 1<<20, 0))
+	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 5, 1<<20, 4<<20, 0))
+	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 32, 2<<20, 0, 0))
 	defer test.MockVariableValue(&setting.UI.User.RepoPagingNum, 50)()
 	const url = "/org/org3/settings/storage_overview"
 

@@ -176,6 +176,7 @@ type Repository struct {
 	Size                            int64              `xorm:"NOT NULL DEFAULT 0"`
 	GitSize                         int64              `xorm:"NOT NULL DEFAULT 0"`
 	LFSSize                         int64              `xorm:"NOT NULL DEFAULT 0"`
+	WikiSize                        int64              `xorm:"NOT NULL DEFAULT 0"` // not part of Size
 	CodeIndexerStatus               *RepoIndexerStatus `xorm:"-"`
 	StatsIndexerStatus              *RepoIndexerStatus `xorm:"-"`
 	IsFsckEnabled                   bool               `xorm:"NOT NULL DEFAULT true"`

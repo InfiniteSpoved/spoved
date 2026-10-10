@@ -210,6 +210,7 @@ func innerToRepo(ctx stdCtx.Context, repo *repo_model.Repository, permissionInRe
 		Size:                          int(repo.Size / 1024),
 		GitSize:                       repo.GitSize,
 		LFSSize:                       repo.LFSSize,
+		WikiSize:                      repo.WikiSize,
 		Fork:                          repo.IsFork,
 		Parent:                        parent,
 		Mirror:                        repo.IsMirror,
@@ -279,6 +280,18 @@ func ToRepoTransfer(ctx stdCtx.Context, t *models.RepoTransfer) *api.RepoTransfe
 	}
 }
 
+// ToStorageSizes converts the sizes besides git and LFS
+func ToStorageSizes(s repo_model.StorageStats) api.StorageSizes {
+	return api.StorageSizes{
+		WikiSize:        s.WikiSize,
+		AttachmentsSize: s.AttachmentsSize,
+		PackagesSize:    s.PackagesSize,
+		ArtifactsSize:   s.ArtifactsSize,
+		LogsSize:        s.LogsSize,
+		TrashSize:       s.TrashSize,
+	}
+}
+
 // ToOwnerStorage converts an OwnerStorage to api.OwnerStorage, with its share of totals
 func ToOwnerStorage(o *repo_model.OwnerStorage, totals repo_model.StorageStats) *api.OwnerStorage {
 	ownerType := "user"
@@ -286,13 +299,14 @@ func ToOwnerStorage(o *repo_model.OwnerStorage, totals repo_model.StorageStats) 
 		ownerType = "org"
 	}
 	return &api.OwnerStorage{
-		OwnerID:   o.OwnerID,
-		OwnerName: o.Owner.Name,
-		OwnerType: ownerType,
-		RepoCount: o.NumRepos,
-		GitSize:   o.GitSize,
-		LFSSize:   o.LFSSize,
-		TotalSize: o.Size(),
-		Percent:   o.Percent(totals),
+		OwnerID:      o.OwnerID,
+		OwnerName:    o.Owner.Name,
+		OwnerType:    ownerType,
+		RepoCount:    o.NumRepos,
+		GitSize:      o.GitSize,
+		LFSSize:      o.LFSSize,
+		StorageSizes: ToStorageSizes(o.StorageStats),
+		TotalSize:    o.Size(),
+		Percent:      o.Percent(totals),
 	}
 }

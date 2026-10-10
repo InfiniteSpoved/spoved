@@ -140,12 +140,13 @@ func CheckCreateRepository(ctx context.Context, doer, u *user_model.User, name s
 	return nil
 }
 
-// UpdateRepoSize updates the repository size, calculating it using getDirectorySize
-func UpdateRepoSize(ctx context.Context, repoID, gitSize, lfsSize int64) error {
-	_, err := db.GetEngine(ctx).ID(repoID).Cols("size", "git_size", "lfs_size").NoAutoTime().Update(&Repository{
-		Size:    gitSize + lfsSize,
-		GitSize: gitSize,
-		LFSSize: lfsSize,
+// UpdateRepoSize stores the sizes of a repository; Size stays git + LFS
+func UpdateRepoSize(ctx context.Context, repoID, gitSize, lfsSize, wikiSize int64) error {
+	_, err := db.GetEngine(ctx).ID(repoID).Cols("size", "git_size", "lfs_size", "wiki_size").NoAutoTime().Update(&Repository{
+		Size:     gitSize + lfsSize,
+		GitSize:  gitSize,
+		LFSSize:  lfsSize,
+		WikiSize: wikiSize,
 	})
 	return err
 }

@@ -274,7 +274,15 @@ func updateWikiPage(ctx context.Context, doer *user_model.User, repo *repo_model
 		return fmt.Errorf("failed to push: %w", err)
 	}
 
+	updateSize(ctx, repo)
 	return nil
+}
+
+// updateSize measures the wiki again; the change is already saved, so a failure is only logged
+func updateSize(ctx context.Context, repo *repo_model.Repository) {
+	if err := repo_module.UpdateRepoSize(ctx, repo); err != nil {
+		log.Error("UpdateRepoSize %-v: %v", repo, err)
+	}
 }
 
 // AddWikiPage adds a new wiki page with a given wikiPath.
@@ -391,6 +399,7 @@ func DeleteWikiPage(ctx context.Context, doer *user_model.User, repo *repo_model
 		return fmt.Errorf("Push: %w", err)
 	}
 
+	updateSize(ctx, repo)
 	return nil
 }
 
@@ -401,6 +410,7 @@ func DeleteWiki(ctx context.Context, repo *repo_model.Repository) error {
 	}
 
 	system_model.RemoveAllWithNotice(ctx, "Delete repository wiki", repo.WikiPath())
+	updateSize(ctx, repo)
 	return nil
 }
 

@@ -103,7 +103,7 @@ func TestReposSortOrdersResults(t *testing.T) {
 		"repo-c": {200, 20},
 	} {
 		repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{OwnerID: org.ID, LowerName: name})
-		require.NoError(t, repo_model.UpdateRepoSize(t.Context(), repo.ID, sizes[0], sizes[1]))
+		require.NoError(t, repo_model.UpdateRepoSize(t.Context(), repo.ID, sizes[0], sizes[1], 0))
 	}
 
 	assert.Equal(t, []string{"repo-b", "repo-c", "repo-a"}, sorted("?sort=gitsize"))

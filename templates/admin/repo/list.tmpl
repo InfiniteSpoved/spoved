@@ -24,7 +24,7 @@
 				<button class="ui small button">{{ctx.Locale.Tr "filter"}}</button>
 			</form>
 		</div>
-		<div class="ui attached table segment">
+		<div class="ui attached table segment tw-overflow-x-auto">
 			<table class="ui very basic striped table unstackable">
 				<thead>
 					<tr>
@@ -56,6 +56,7 @@
 							{{ctx.Locale.Tr "admin.repos.total_size"}}
 							{{SortArrow "size" "reversesize" $.SortType false}}
 						</th>
+						<th>{{ctx.Locale.Tr "admin.repos.wiki_size"}}</th>
 						<th>{{ctx.Locale.Tr "admin.auths.updated"}}</th>
 						<th>{{ctx.Locale.Tr "admin.users.created"}}</th>
 						<th>{{ctx.Locale.Tr "admin.notices.op"}}</th>
@@ -102,12 +103,13 @@
 							<td>{{ctx.Locale.TrSize .GitSize}}</td>
 							<td>{{ctx.Locale.TrSize .LFSSize}}</td>
 							<td>{{ctx.Locale.TrSize .Size}}</td>
+							<td>{{ctx.Locale.TrSize .WikiSize}}</td>
 							<td>{{DateUtils.AbsoluteShort .UpdatedUnix}}</td>
 							<td>{{DateUtils.AbsoluteShort .CreatedUnix}}</td>
 							<td><a class="delete-button" href="" data-url="{{$.Link}}/delete?page={{$.Page.Paginater.Current}}&sort={{$.SortType}}" data-id="{{.ID}}" data-name="{{.Name}}" data-modal-id="delete-repo">{{svg "octicon-trash"}}</a></td>
 						</tr>
 					{{else}}
-						<tr><td class="tw-text-center" colspan="13">{{ctx.Locale.Tr "repo.pulls.no_results"}}</td></tr>
+						<tr><td class="tw-text-center" colspan="14">{{ctx.Locale.Tr "repo.pulls.no_results"}}</td></tr>
 					{{end}}
 				</tbody>
 			</table>

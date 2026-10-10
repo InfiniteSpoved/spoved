@@ -112,6 +112,23 @@ func GitGcRepo(ctx context.Context, repo *repo_model.Repository, timeout time.Du
 	return nil
 }
 
+// RecalculateRepoSizes measures the git, LFS and wiki sizes of the repositories of one owner, or of all
+// repositories when ownerID is 0; trashed repositories included.
+func RecalculateRepoSizes(ctx context.Context, ownerID int64) error {
+	cond := builder.Cond(builder.Gt{"id": 0})
+	if ownerID != 0 {
+		cond = builder.Eq{"owner_id": ownerID}
+	}
+	return db.Iterate(ctx, cond, func(ctx context.Context, repo *repo_model.Repository) error {
+		select {
+		case <-ctx.Done():
+			return db.ErrCancelledf("before recalculating the size of %s", repo.FullName())
+		default:
+		}
+		return repo_module.UpdateRepoSize(ctx, repo)
+	})
+}
+
 func gatherMissingRepoRecords(ctx context.Context) (repo_model.RepositoryList, error) {
 	repos := make([]*repo_model.Repository, 0, 10)
 	if err := db.Iterate(

@@ -77,6 +77,24 @@ func registerGarbageCollectRepositories() {
 	})
 }
 
+// RecalculateRepoSizesConfig is the config of recalculate_repo_sizes; OwnerID 0 means all repositories.
+type RecalculateRepoSizesConfig struct {
+	BaseConfig
+	OwnerID int64 `ini:"-"`
+}
+
+func registerRecalculateRepoSizes() {
+	RegisterTaskFatal("recalculate_repo_sizes", &RecalculateRepoSizesConfig{
+		BaseConfig: BaseConfig{
+			Enabled:    false,
+			RunAtStart: false,
+			Schedule:   "@every 168h",
+		},
+	}, func(ctx context.Context, _ *user_model.User, config Config) error {
+		return repo_service.RecalculateRepoSizes(ctx, config.(*RecalculateRepoSizesConfig).OwnerID)
+	})
+}
+
 func registerRewriteAllPublicKeys() {
 	RegisterTaskFatal("resync_all_sshkeys", &BaseConfig{
 		Enabled:    false,
@@ -252,6 +270,7 @@ func initExtendedTasks() {
 	registerDeleteRepositoryArchives()
 	registerPurgeTrash()
 	registerGarbageCollectRepositories()
+	registerRecalculateRepoSizes()
 	registerRewriteAllPublicKeys()
 	registerRewriteAllPrincipalKeys()
 	registerReinitMissingRepositories()

@@ -31,11 +31,12 @@ func GetStorageSummary(ctx *context.APIContext) {
 		return
 	}
 	ctx.JSON(http.StatusOK, &api.StorageSummary{
-		RepoCount:   totals.NumRepos,
-		GitSize:     totals.GitSize,
-		LFSSize:     totals.LFSSize,
-		TotalSize:   totals.Size(),
-		AverageSize: totals.Size() / max(totals.NumRepos, 1),
+		RepoCount:    totals.NumRepos,
+		GitSize:      totals.GitSize,
+		LFSSize:      totals.LFSSize,
+		StorageSizes: convert.ToStorageSizes(totals),
+		TotalSize:    totals.Size(),
+		AverageSize:  (totals.GitSize + totals.LFSSize + totals.WikiSize) / max(totals.NumRepos, 1),
 	})
 }
 
@@ -49,9 +50,9 @@ func ListStorageOwners(ctx *context.APIContext) {
 	// parameters:
 	// - name: sort
 	//   in: query
-	//   description: sort owners by git, LFS or total size (default)
+	//   description: sort owners by the size of one type of storage, or by the total size (default)
 	//   type: string
-	//   enum: [git, lfs, total]
+	//   enum: [git, lfs, wiki, attachments, packages, artifacts, logs, trash, total]
 	// - name: order
 	//   in: query
 	//   description: sort order, "asc" or "desc" (default)
@@ -77,7 +78,10 @@ func ListStorageOwners(ctx *context.APIContext) {
 	}
 
 	// unknown keys are not in repo_model.OwnerStorageOrderBy, so they sort by total size, descending
-	orderBy := map[string]string{"git": "gitsize", "lfs": "lfssize", "total": "size"}[ctx.FormString("sort")]
+	orderBy := map[string]string{
+		"git": "gitsize", "lfs": "lfssize", "wiki": "wikisize", "attachments": "attachmentssize", "packages": "packagessize",
+		"artifacts": "artifactssize", "logs": "logssize", "trash": "trashsize", "total": "size",
+	}[ctx.FormString("sort")]
 	if ctx.FormString("order") != "asc" {
 		orderBy = "reverse" + orderBy
 	}

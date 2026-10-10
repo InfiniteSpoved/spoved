@@ -54,7 +54,7 @@ func StorageOverview(ctx *context.Context) {
 	}
 	rows := make([]repoStorage, len(repos))
 	for i, repo := range repos {
-		rows[i] = repoStorage{Repo: repo, StorageStats: repo_model.StorageStats{GitSize: repo.GitSize, LFSSize: repo.LFSSize}}
+		rows[i] = repoStorage{Repo: repo, StorageStats: repo_model.StorageStats{GitSize: repo.GitSize, LFSSize: repo.LFSSize, WikiSize: repo.WikiSize}}
 	}
 
 	ctx.Data["OrgStorage"] = totals
