@@ -60,6 +60,8 @@ type ConfigStruct struct {
 	OAuth2AppPolicy *config.Value[OAuth2AppPolicyState]
 	WebhookTypes    *config.Value[WebhookTypesState]
 	RepoUnitPolicy  *config.Value[RepoUnitPolicyState]
+	// OrgCategoryOwnersCanAssign lets organization owners set their organization's category (site admins always can).
+	OrgCategoryOwnersCanAssign *config.Value[bool]
 }
 
 var (
@@ -77,11 +79,12 @@ func initDefaultConfig() {
 		Repository: &RepositoryStruct{
 			OpenWithEditorApps: config.ValueJSON[OpenWithEditorAppsType]("repository.open-with.editor-apps"),
 		},
-		Maintenance:     config.ValueJSON[MaintenanceState]("maintenance.state"),
-		IPAllowlist:     config.ValueJSON[IPAllowlistState]("ip_allowlist.state").WithDefault(IPAllowlistState{ExemptAdmins: true}),
-		OAuth2AppPolicy: config.ValueJSON[OAuth2AppPolicyState]("oauth2.app_policy"),
-		WebhookTypes:    config.ValueJSON[WebhookTypesState]("webhook.types"),
-		RepoUnitPolicy:  config.ValueJSON[RepoUnitPolicyState]("repository.unit_policy").WithInvalid(RepoUnitPolicyState{Invalid: true}),
+		Maintenance:                config.ValueJSON[MaintenanceState]("maintenance.state"),
+		IPAllowlist:                config.ValueJSON[IPAllowlistState]("ip_allowlist.state").WithDefault(IPAllowlistState{ExemptAdmins: true}),
+		OAuth2AppPolicy:            config.ValueJSON[OAuth2AppPolicyState]("oauth2.app_policy"),
+		WebhookTypes:               config.ValueJSON[WebhookTypesState]("webhook.types"),
+		RepoUnitPolicy:             config.ValueJSON[RepoUnitPolicyState]("repository.unit_policy").WithInvalid(RepoUnitPolicyState{Invalid: true}),
+		OrgCategoryOwnersCanAssign: config.ValueJSON[bool]("org_category.owners_can_assign"),
 	}
 }
 

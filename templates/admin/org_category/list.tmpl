@@ -1,0 +1,48 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin org-categories")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.org_categories"}}
+			<div class="ui right">
+				<a class="ui primary tiny button" href="{{AppSubUrl}}/admin/org-categories/new">{{ctx.Locale.Tr "admin.org_categories.new"}}</a>
+			</div>
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.org_categories.desc"}}</p>
+			<form class="ui form" action="{{AppSubUrl}}/admin/org-categories/settings" method="post">
+				<div class="inline field">
+					<div class="ui checkbox">
+						<input id="owners_can_assign" name="owners_can_assign" type="checkbox" {{if .OwnersCanAssign}}checked{{end}}>
+						<label for="owners_can_assign">{{ctx.Locale.Tr "admin.org_categories.owners_can_assign"}}</label>
+					</div>
+				</div>
+				<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+			</form>
+		</div>
+		<div class="ui attached table segment">
+			<table class="ui very basic striped table unstackable">
+				<thead>
+					<tr>
+						<th>{{ctx.Locale.Tr "admin.org_categories.position"}}</th>
+						<th>{{ctx.Locale.Tr "admin.org_categories.name"}}</th>
+						<th>{{ctx.Locale.Tr "admin.org_categories.description"}}</th>
+						<th>{{ctx.Locale.Tr "admin.notices.op"}}</th>
+					</tr>
+				</thead>
+				<tbody>
+					{{range .OrgCategories}}
+						<tr>
+							<td>{{.Position}}</td>
+							<td class="tw-break-anywhere"><i class="color-icon tw-mr-2" style="background-color: {{.Color}}"></i>{{.Name}}</td>
+							<td class="tw-break-anywhere">{{.Description}}</td>
+							<td>
+								<a href="{{AppSubUrl}}/admin/org-categories/{{.ID}}" data-tooltip-content="{{ctx.Locale.Tr "admin.org_categories.edit"}}" aria-label="{{ctx.Locale.Tr "admin.org_categories.edit"}}">{{svg "octicon-pencil"}}</a>
+							</td>
+						</tr>
+					{{else}}
+						<tr><td class="tw-text-center" colspan="4">{{ctx.Locale.Tr "admin.org_categories.none"}}</td></tr>
+					{{end}}
+				</tbody>
+			</table>
+		</div>
+	</div>
+{{template "admin/layout_footer" .}}
