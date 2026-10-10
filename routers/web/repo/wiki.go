@@ -437,6 +437,10 @@ func renderEditPage(ctx *context.Context) {
 
 // WikiPost renders post of wiki page
 func WikiPost(ctx *context.Context) {
+	if wikiFolderConfig(ctx) != nil {
+		ctx.NotFound("WikiPost", nil)
+		return
+	}
 	switch ctx.FormString("action") {
 	case "_new":
 		if !ctx.Repo.CanWrite(unit.TypeWiki) {
@@ -463,6 +467,18 @@ func WikiPost(ctx *context.Context) {
 
 // Wiki renders single wiki page
 func Wiki(ctx *context.Context) {
+	if cfg := wikiFolderConfig(ctx); cfg != nil {
+		switch ctx.FormString("action") {
+		case "":
+			wikiFolderView(ctx, cfg)
+		case "_pages":
+			wikiFolderPages(ctx, cfg)
+		default:
+			ctx.NotFound("Wiki", nil)
+		}
+		return
+	}
+
 	ctx.Data["CanWriteWiki"] = ctx.Repo.CanWrite(unit.TypeWiki) && !ctx.Repo.Repository.IsArchived
 
 	switch ctx.FormString("action") {
@@ -637,6 +653,10 @@ func WikiPages(ctx *context.Context) {
 
 // WikiRaw outputs raw blob requested by user (image for example)
 func WikiRaw(ctx *context.Context) {
+	if cfg := wikiFolderConfig(ctx); cfg != nil {
+		wikiFolderRaw(ctx, cfg)
+		return
+	}
 	wikiRepo, commit, err := findWikiRepoCommit(ctx)
 	defer func() {
 		if wikiRepo != nil {
