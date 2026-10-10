@@ -1,5 +1,6 @@
 // @watch start
 // web_src/js/components/RepoActionView.vue
+// web_src/js/components/ActionJobStepList.vue
 // routers/web/repo/actions/view.go
 // @watch end
 
@@ -14,10 +15,10 @@ test('job view shows the token permissions', async ({page}) => {
   const permissions = page.locator('.job-token-permissions');
   await expect(permissions).toBeVisible();
   // collapsed by default, so that the logs stay where they were
-  await expect(permissions.locator('table')).toBeHidden();
+  await expect(permissions.locator('.job-step-logs')).toBeHidden();
   await permissions.getByText('Token permissions').click();
 
-  const rows = permissions.locator('tr');
+  const rows = permissions.locator('.job-token-permission');
   await expect(rows).toHaveCount(6);
   await expect(rows.first()).toHaveText(/Code\s*Write/);
   await expect(permissions).toContainText('The workflow has no permissions block, so the token can write to every unit.');
