@@ -12,6 +12,10 @@ argument-hint: "[supervisor|ops|ticket]"
 
 # Project team
 
+Not in use since 10 Oct (user decision): the agent-team skill runs all work, and
+only its supervisor merges into develop. Kept for reference; ask the user before
+using it again.
+
 Same roles, rules and gates as `.claude/skills/agent-team/SKILL.md` (read it for
 the "Rules for everyone" block, the coder, security and tester briefs, and
 Lessons). Only the plumbing changes: a project has one main session plus
