@@ -13,7 +13,6 @@
 					{{if .Org.IsArchived}}<span class="ui large horizontal label">{{ctx.Locale.Tr "org.archived.badge"}}</span>{{end}}
 					{{if .Org.Visibility.IsLimited}}<span class="ui large horizontal label">{{ctx.Locale.Tr "org.settings.visibility.limited_shortname"}}</span>{{end}}
 					{{if .Org.Visibility.IsPrivate}}<span class="ui large horizontal label">{{ctx.Locale.Tr "org.settings.visibility.private_shortname"}}</span>{{end}}
-					{{range .VerifiedDomains}}<span class="ui large horizontal label org-verified-domain tw-whitespace-normal tw-break-all" data-tooltip-content="{{ctx.Locale.Tr "org.verified_domain.tooltip" .Domain}}">{{svg "octicon-verified"}} {{ctx.Locale.Tr "org.verified_domain" .Domain}}</span>{{end}}
 				</span>
 			</div>
 			<span class="button-sequence tw-items-center tw-ml-auto tw-whitespace-nowrap">
@@ -61,6 +60,11 @@
 				{{if .Org.Email}}<div class="flex-text-block">{{svg "octicon-mail"}} <a class="muted" href="mailto:{{.Org.Email}}">{{.Org.Email}}</a></div>{{end}}
 			{{end}}
 		</div>
+		{{if .VerifiedDomains}}
+			<div class="tw-flex tw-flex-wrap tw-gap-1 tw-mt-1">
+				{{range .VerifiedDomains}}<span class="ui large horizontal label org-verified-domain tw-m-0 tw-whitespace-normal tw-break-all" data-tooltip-content="{{ctx.Locale.Tr "org.verified_domain.tooltip" .Domain}}">{{svg "octicon-verified"}} {{ctx.Locale.Tr "org.verified_domain" .Domain}}</span>{{end}}
+			</div>
+		{{end}}
 	</div>
 </div>
 
