@@ -169,6 +169,9 @@ func prepareUserGroupView(ctx *context.Context, group *org_model.UserGroup) map[
 	if group.GrantsCreateOrganization {
 		roles = append(roles, org_model.UserGroupRoleCreateOrganization)
 	}
+	if group.GrantsAuditor {
+		roles = append(roles, org_model.UserGroupRoleAuditor)
+	}
 	losses, err := org_model.CountUserGroupRoleLosses(ctx, group.ID, roles...)
 	if err != nil {
 		ctx.ServerError("CountUserGroupRoleLosses", err)
@@ -176,6 +179,7 @@ func prepareUserGroupView(ctx *context.Context, group *org_model.UserGroup) map[
 	}
 	ctx.Data["LoseSiteAdmin"] = losses[org_model.UserGroupRoleSiteAdmin]
 	ctx.Data["LoseCreateOrganization"] = losses[org_model.UserGroupRoleCreateOrganization]
+	ctx.Data["LoseAuditor"] = losses[org_model.UserGroupRoleAuditor]
 	return losses
 }
 
@@ -222,6 +226,7 @@ func EditUserGroupPost(ctx *context.Context) {
 	for role, off := range map[org_model.UserGroupRole]bool{
 		org_model.UserGroupRoleSiteAdmin:          group.GrantsSiteAdmin && !form.GrantsSiteAdmin,
 		org_model.UserGroupRoleCreateOrganization: group.GrantsCreateOrganization && !form.GrantsCreateOrganization,
+		org_model.UserGroupRoleAuditor:            group.GrantsAuditor && !form.GrantsAuditor,
 	} {
 		if off && losses[role] > 0 {
 			warned = append(warned, string(role))
@@ -233,6 +238,7 @@ func EditUserGroupPost(ctx *context.Context) {
 		ctx.Data["ConfirmRoles"] = strings.Join(warned, ",")
 		ctx.Data["WarnSiteAdmin"] = slices.Contains(warned, string(org_model.UserGroupRoleSiteAdmin))
 		ctx.Data["WarnCreateOrganization"] = slices.Contains(warned, string(org_model.UserGroupRoleCreateOrganization))
+		ctx.Data["WarnAuditor"] = slices.Contains(warned, string(org_model.UserGroupRoleAuditor))
 		ctx.HTML(http.StatusOK, tplUserGroupView)
 		return
 	}
