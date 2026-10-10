@@ -5,6 +5,7 @@ package admin
 
 import (
 	"bytes"
+	"errors"
 	"net/http"
 	"net/url"
 
@@ -126,6 +127,8 @@ func ActivateEmail(ctx *context.Context) {
 		log.Error("ActivateUserEmail(%v,%v,%v): %v", uid, email, activate, err)
 		if user_model.IsErrEmailAlreadyUsed(err) {
 			ctx.Flash.Error(ctx.Tr("admin.emails.duplicate_active"))
+		} else if errors.Is(err, user_model.ErrLastUsableAdmin) {
+			ctx.Flash.Error(ctx.Tr("auth.last_admin"))
 		} else {
 			ctx.Flash.Error(ctx.Tr("admin.emails.not_updated", err))
 		}

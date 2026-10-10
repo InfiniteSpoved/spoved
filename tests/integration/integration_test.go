@@ -47,6 +47,7 @@ import (
 	user_service "forgejo.org/services/user"
 	"forgejo.org/tests"
 
+	mc "code.forgejo.org/go-chi/cache"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/golang-jwt/jwt/v5"
 	gouuid "github.com/google/uuid"
@@ -866,6 +867,8 @@ func newAITester(t *testing.T, setupAI ...func(*auth.AuthorizedIntegration)) *Au
 	require.NoError(t, err)
 
 	ait.resetAllowLocalNetworks = test.MockVariableValue(&setting.AuthorizedIntegration.AllowLocalNetworks, true)
+	// No cached JWKS: the issuer URL is 127.0.0.1 with an OS-picked port, which a later tester (with a new key) can get.
+	t.Cleanup(test.MockVariableValue(&auth_service.GetAuthorizedIntegrationCache, func() mc.Cache { return nil }))
 
 	return ait
 }

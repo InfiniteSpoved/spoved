@@ -106,6 +106,9 @@ func UpdateUser(ctx context.Context, u *user_model.User, opts *UpdateOptions) er
 		cols = append(cols, "max_repo_creation")
 	}
 	if has, value := opts.IsActive.Get(); has {
+		if !value && user_model.IsLastUsableAdmin(ctx, u) {
+			return models.ErrDeleteLastAdminUser{UID: u.ID}
+		}
 		u.IsActive = value
 		cols = append(cols, "is_active")
 	}
@@ -172,6 +175,9 @@ type UpdateAuthOptions struct {
 }
 
 func UpdateAuth(ctx context.Context, u *user_model.User, opts *UpdateAuthOptions) error {
+	if opts.ProhibitLogin.ValueOrDefault(false) && user_model.IsLastUsableAdmin(ctx, u) {
+		return models.ErrDeleteLastAdminUser{UID: u.ID}
+	}
 	if has, value := opts.LoginSource.Get(); has {
 		source, err := auth_model.GetSourceByID(ctx, value)
 		if err != nil {
