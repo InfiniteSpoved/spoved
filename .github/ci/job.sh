@@ -40,7 +40,7 @@ plan)
   # depth: commits to fetch, 0 for the full history
   tasks='{"task":"lint","args":"","depth":"1"},{"task":"frontend","args":"","depth":"1"}'
   if [ "$backend" = true ]; then
-    for i in $(seq 1 6); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 6\",\"depth\":\"1\"}"; done
+    for i in 1 2 3 4; do tasks+=",{\"task\":\"unit\",\"args\":\"$i 4\",\"depth\":\"1\"}"; done
   fi
   if [ "$FULL" = true ]; then
     # only the selection of changed end-to-end tests needs the history
@@ -79,13 +79,13 @@ unit)
   # Azure Blob Storage emulator for the azureblob storage tests (TEST_AZURITE_URL)
   npx -y -p azurite@3.37.0 azurite-blob --inMemoryPersistence --skipApiVersionCheck --blobHost 127.0.0.1 > "$RUNNER_TEMP/azurite.log" 2>&1 &
   timeout 120 bash -c 'until grep -q "successfully listens" "$RUNNER_TEMP/azurite.log"; do sleep 1; done' || { cat "$RUNNER_TEMP/azurite.log"; exit 1; }
-  # temporary probe
-  pkg=forgejo.org/services/usergroup
-  case $(( ($1 - 1) % 3 )) in
-  0) RACE_ENABLED=true TEST_AZURITE_URL=127.0.0.1:10000 make test-backend GO_TEST_PACKAGES="$pkg" ;;
-  1) RACE_ENABLED=true TEST_AZURITE_URL=127.0.0.1:10000 make test-backend GO_TEST_PACKAGES="$pkg"; make test-check ;;
-  2) TZ=UTC PROJECT_ROOT="$PWD" TEST_AZURITE_URL=127.0.0.1:10000 go test -race -tags 'sqlite sqlite_unlock_notify' $pkg; make test-check ;;
-  esac
+  # the packages `make test-backend` tests, as computed by the Makefile
+  packages=$(make -s --eval='ci-list-test-packages: compute-go-test-packages ; @echo $(GO_TEST_PACKAGES)' ci-list-test-packages \
+    | tr ' ' '\n' | .github/ci/shard.sh "$1" "$2" | paste -sd' ')
+  echo "Testing $(wc -w <<< "$packages") packages"
+  RACE_ENABLED=true TEST_AZURITE_URL=127.0.0.1:10000 make test-backend GO_TEST_PACKAGES="$packages"
+  # check the tests left the source tree untouched
+  make test-check
   ;;
 
 migrations)
