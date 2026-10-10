@@ -11,6 +11,7 @@ import (
 	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	password_module "forgejo.org/modules/auth/password"
+	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
@@ -225,4 +226,18 @@ func UpdateAuth(ctx context.Context, u *user_model.User, opts *UpdateAuthOptions
 	}
 
 	return nil
+}
+
+// UpdateUserFromSource is UpdateUser for changes synced from a login source. If they would remove
+// the admin flag of the last usable admin, the flag is kept, a warning is logged and the other
+// changes are applied. Like UpdateUser, only the other admins are counted, so an inactive or
+// prohibited sole admin keeps the flag too. The check and the write are not atomic, as in UpdateUser.
+func UpdateUserFromSource(ctx context.Context, u *user_model.User, opts *UpdateOptions, sourceName string) error {
+	if has, isAdmin := opts.IsAdmin.Get(); has && !isAdmin && user_model.IsLastAdminUser(ctx, u) {
+		log.Warn("login source %q would remove the admin flag of %s (id %d), the last usable admin: flag kept", sourceName, u.Name, u.ID)
+		keep := *opts
+		keep.IsAdmin = optional.None[bool]()
+		opts = &keep
+	}
+	return UpdateUser(ctx, u, opts)
 }

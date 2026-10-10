@@ -416,6 +416,18 @@ func (f *CreateCommentForm) Validate(req *http.Request, errs binding.Errors) bin
 	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
+// PullAttentionForm form for adding a user to the attention set of a pull request or removing one
+type PullAttentionForm struct {
+	UserName string `form:"username" binding:"Required"`
+	Reason   string `binding:"MaxSize(255)"`
+}
+
+// Validate validates the fields
+func (f *PullAttentionForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
+	ctx := context.GetValidateContext(req)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
+}
+
 // PullTaskForm form for adding a task to a pull request
 type PullTaskForm struct {
 	Content   string `binding:"Required;MaxSize(255)"`

@@ -63,7 +63,7 @@ func TestIndexer(t *testing.T, indexer internal.Indexer) {
 				}()
 			}
 
-			require.NoError(t, c.SearchOptions.WithKeyword(t.Context(), c.Keyword))
+			require.NoError(t, c.SearchOptions.WithKeyword(t.Context(), nil, c.Keyword))
 			result, err := indexer.Search(t.Context(), c.SearchOptions)
 			require.NoError(t, err)
 
@@ -558,6 +558,24 @@ var cases = []*testIndexerCase{
 		},
 	},
 	{
+		Name: "AttentionID",
+		SearchOptions: &internal.SearchOptions{
+			Paginator: &db.ListOptions{
+				PageSize: 5,
+			},
+			AttentionID: optional.Some(int64(1)),
+		},
+		Expected: func(t *testing.T, data map[int64]*internal.IndexerData, result *internal.SearchResult) {
+			assert.Len(t, result.Hits, 5)
+			for _, v := range result.Hits {
+				assert.Contains(t, data[v.ID].AttentionIDs, int64(1))
+			}
+			assert.Equal(t, countIndexerData(data, func(v *internal.IndexerData) bool {
+				return slices.Contains(v.AttentionIDs, 1)
+			}), result.Total)
+		},
+	},
+	{
 		Name: "SubscriberID",
 		SearchOptions: &internal.SearchOptions{
 			Paginator: &db.ListOptions{
@@ -852,6 +870,10 @@ func generateDefaultIndexerData() []*internal.IndexerData {
 			for i := range reviewRequestedIDs {
 				reviewRequestedIDs[i] = int64(i) + 1 // ReviewRequestedID should not be 0
 			}
+			attentionIDs := make([]int64, id%5)
+			for i := range attentionIDs {
+				attentionIDs[i] = int64(i) + 1 // AttentionID should not be 0
+			}
 			subscriberIDs := make([]int64, id%9)
 			for i := range subscriberIDs {
 				subscriberIDs[i] = int64(i) + 1 // SubscriberID should not be 0
@@ -885,6 +907,7 @@ func generateDefaultIndexerData() []*internal.IndexerData {
 				MentionIDs:         mentionIDs,
 				ReviewedIDs:        reviewedIDs,
 				ReviewRequestedIDs: reviewRequestedIDs,
+				AttentionIDs:       attentionIDs,
 				SubscriberIDs:      subscriberIDs,
 				UpdatedUnix:        timeutil.TimeStamp(id + issueIndex),
 				CreatedUnix:        timeutil.TimeStamp(id),

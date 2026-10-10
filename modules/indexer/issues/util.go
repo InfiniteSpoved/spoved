@@ -100,6 +100,11 @@ func getIssueIndexerData(ctx context.Context, issueID int64) (*internal.IndexerD
 		reviewRequestedIDs = reviewRequestedIDsSet.Values()
 	}
 
+	attentionIDs, err := issues_model.GetPullAttentionUserIDs(ctx, issue.ID)
+	if err != nil {
+		return nil, false, err
+	}
+
 	subscriberIDs, err := issues_model.GetIssueWatchersIDs(ctx, issue.ID, true)
 	if err != nil {
 		return nil, false, err
@@ -130,6 +135,7 @@ func getIssueIndexerData(ctx context.Context, issueID int64) (*internal.IndexerD
 		MentionIDs:         mentionIDs,
 		ReviewedIDs:        reviewedIDs,
 		ReviewRequestedIDs: reviewRequestedIDs,
+		AttentionIDs:       attentionIDs,
 		SubscriberIDs:      subscriberIDs,
 		UpdatedUnix:        issue.UpdatedUnix,
 		CreatedUnix:        issue.CreatedUnix,

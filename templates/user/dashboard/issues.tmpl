@@ -80,6 +80,10 @@
 							{{ctx.Locale.Tr "repo.issues.filter_type.assigned_to_you"}}
 						</a>
 						{{if .PageIsPulls}}
+							<a class="{{if eq .ViewType "attention"}}active{{end}} item" href="?type=attention&sort={{$.SortType}}&project={{$.ProjectID}}&state={{.State}}&q={{$.Keyword}}">
+								<div class="ui circular mini label tw-ml-0">{{CountFmt .IssueStats.AttentionCount}}</div>
+								{{ctx.Locale.Tr "repo.issues.filter_type.attention"}}
+							</a>
 							<a class="{{if eq .ViewType "review_requested"}}active{{end}} item" href="?type=review_requested&sort={{$.SortType}}&project={{$.ProjectID}}&state={{.State}}&q={{$.Keyword}}">
 								<div class="ui circular mini label tw-ml-0">{{CountFmt .IssueStats.ReviewRequestedCount}}</div>
 								{{ctx.Locale.Tr "repo.issues.filter_type.review_requested"}}
