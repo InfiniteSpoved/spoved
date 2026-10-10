@@ -813,6 +813,15 @@ export function findWipPrefix(string, wipPrefixes) {
   return wipPrefixes.find((prefix) => string.toUpperCase().startsWith(prefix.toUpperCase()));
 }
 
+// the web handlers answer a refused change with {errorMessage} (plain text), show it instead of the status text
+async function responseError(resp, fallback) {
+  try {
+    return (await resp.json()).errorMessage || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function initRepoIssueWipToggle() {
   // Toggle WIP
   $('.toggle-wip a, .toggle-wip button').on('click', async (e) => {
@@ -829,11 +838,12 @@ export function initRepoIssueWipToggle() {
 
       const response = await POST(updateUrl, {data: params});
       if (!response.ok) {
-        throw new Error('Failed to toggle WIP status');
+        throw new Error(await responseError(response, 'Failed to toggle WIP status'));
       }
       window.location.reload();
     } catch (error) {
       console.error(error);
+      showErrorToast(error.message);
     }
   });
 }
@@ -875,7 +885,7 @@ export function initRepoIssueTitleEdit() {
       if (newTitle && newTitle !== oldTitle) {
         const resp = await POST(editSaveButton.getAttribute('data-update-url'), {data: new URLSearchParams({title: newTitle})});
         if (!resp.ok) {
-          throw new Error(`Failed to update issue title: ${resp.statusText}`);
+          throw new Error(await responseError(resp, `Failed to update issue title: ${resp.statusText}`));
         }
       }
       if (prTargetUpdateUrl) {
@@ -884,7 +894,7 @@ export function initRepoIssueTitleEdit() {
         if (newTargetBranch !== oldTargetBranch) {
           const resp = await POST(prTargetUpdateUrl, {data: new URLSearchParams({target_branch: newTargetBranch})});
           if (!resp.ok) {
-            throw new Error(`Failed to update PR target branch: ${resp.statusText}`);
+            throw new Error(await responseError(resp, `Failed to update PR target branch: ${resp.statusText}`));
           }
         }
       }
