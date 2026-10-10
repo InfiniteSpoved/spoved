@@ -132,8 +132,7 @@ So:
    - the security items are resolved.
    Merge directly when one PR is ready. Build a train only when 2+ PRs are green on
    the same develop base. Merge within an hour of the gates holding. Then the OL
-   archives the coder
-   and the security reviewer and goes to step 1.
+   archives the coder and the security reviewer and goes to step 1.
 7. **Flaky tests.** A failure that passes when rerun alone and also passes on
    develop isn't the PR's: file a "no-agent" issue naming the test and the
    evidence, then go on. Rerun a CI job only once.
