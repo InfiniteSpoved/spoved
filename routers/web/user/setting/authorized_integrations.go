@@ -21,6 +21,7 @@ import (
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	"forgejo.org/modules/web/middleware"
+	"forgejo.org/routers/web/shared/user"
 	auth_service "forgejo.org/services/auth"
 	"forgejo.org/services/authz"
 	"forgejo.org/services/context"
@@ -307,6 +308,12 @@ func editAuthorizedIntegrationErrorHandler(ctx *context.Context, err error) {
 		ctx.Data["Err_SelectedRepo"] = true
 		ctx.Data["Err_Scope"] = true
 		ctx.Flash.Error(ctx.Tr("settings.authorized_integration.specified_repos_and_invalid_scope"), true)
+		EditAuthorizedIntegrationRenderCommon(ctx)
+		return
+	}
+	if has, msg := user.TranslateScopePolicyError(ctx.Base, err).Get(); has {
+		ctx.Data["Err_Scope"] = true
+		ctx.Flash.Error(msg, true)
 		EditAuthorizedIntegrationRenderCommon(ctx)
 		return
 	}

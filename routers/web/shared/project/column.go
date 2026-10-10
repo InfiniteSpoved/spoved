@@ -4,20 +4,29 @@
 package project
 
 import (
+	"errors"
+
 	project_model "forgejo.org/models/project"
 	"forgejo.org/modules/json"
+	"forgejo.org/modules/util"
 	"forgejo.org/services/context"
+	project_service "forgejo.org/services/project"
 )
 
 // MoveColumns moves or keeps columns in a project and sorts them inside that project
 func MoveColumns(ctx *context.Context) {
-	project, err := project_model.GetProjectByID(ctx, ctx.ParamsInt64(":id"))
-	if err != nil {
-		ctx.NotFoundOrServerError("GetProjectByID", project_model.IsErrProjectNotExist, err)
-		return
+	// the repository routes take only that repository's projects, the owner routes only the owner's
+	var project *project_model.Project
+	var err error
+	if ctx.Repo.Repository != nil {
+		project, err = project_service.GetProjectByIDForRepo(ctx, ctx.ParamsInt64(":id"), ctx.Repo.Repository.ID)
+	} else {
+		project, err = project_service.GetProjectByIDForOwner(ctx, ctx.ParamsInt64(":id"), ctx.ContextUser.ID)
 	}
-	if !project.CanBeAccessedByOwnerRepo(ctx.ContextUser.ID, ctx.Repo.Repository) {
-		ctx.NotFound("CanBeAccessedByOwnerRepo", nil)
+	if err != nil {
+		ctx.NotFoundOrServerError("GetProjectByID", func(err error) bool {
+			return errors.Is(err, util.ErrInvalidArgument) || project_model.IsErrProjectNotExist(err)
+		}, err)
 		return
 	}
 

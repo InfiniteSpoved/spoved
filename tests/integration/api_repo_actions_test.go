@@ -157,7 +157,7 @@ func TestActionsAPIWorkflowDispatchReturnInfo(t *testing.T) {
 					Name: "api-repo-workflow-dispatch",
 					Files: forgery.MapFS{
 						fmt.Sprintf("%s/%s", testCase.workflowDirectory, testCase.workflowID): forgery.MapFile(`name: WD
-on: [workflow-dispatch]
+on: [workflow_dispatch]
 jobs:
   t1:
     runs-on: docker

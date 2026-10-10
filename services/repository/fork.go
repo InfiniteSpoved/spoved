@@ -54,6 +54,9 @@ type ForkRepoOptions struct {
 
 // ForkRepositoryIfNotExists creates a fork of a repository if it does not already exists and fails otherwise
 func ForkRepositoryIfNotExists(ctx context.Context, doer, owner *user_model.User, opts ForkRepoOptions) (*repo_model.Repository, error) {
+	if err := repo_module.CheckOrgPolicy(ctx, doer, opts.BaseRepo, repo_module.OrgPolicyFork, owner); err != nil {
+		return nil, err
+	}
 	// Fork is prohibited, if user has reached maximum limit of repositories
 	if !setting.Repository.AllowForkWithoutMaximumLimit {
 		if err := repo_model.CheckRepoCreationLimit(ctx, doer, owner); err != nil {

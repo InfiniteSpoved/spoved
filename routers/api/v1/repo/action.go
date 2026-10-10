@@ -855,7 +855,7 @@ func DispatchWorkflow(ctx *context.APIContext) {
 
 	run, jobs, err := workflow.Dispatch(ctx, inputGetter, ctx.Repo().Repository, ctx.Doer())
 	if err != nil {
-		if actions_service.IsInputRequiredErr(err) {
+		if actions_service.IsInputRequiredErr(err) || errors.Is(err, util.ErrInvalidArgument) {
 			ctx.Error(http.StatusBadRequest, "workflow.Dispatch", err)
 		} else {
 			ctx.Error(http.StatusInternalServerError, "workflow.Dispatch", err)

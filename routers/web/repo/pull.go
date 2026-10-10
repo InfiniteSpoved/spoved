@@ -43,6 +43,7 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/markup"
 	"forgejo.org/modules/optional"
+	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
@@ -185,6 +186,25 @@ func updateForkRepositoryInContext(ctx *context.Context, forkRepo *repo_model.Re
 		}
 		traverseParentRepo = parentRepo
 	}
+
+	// the private fork policy of the repository's organization can rule out targets
+	if canForkToUser {
+		if canForkToUser, err = repo_module.AllowedByOrgPolicy(ctx, ctx.Doer, forkRepo, repo_module.OrgPolicyFork, ctx.Doer); err != nil {
+			ctx.ServerError("AllowedByOrgPolicy", err)
+			return false
+		}
+	}
+	allowedOrgs := orgs[:0]
+	for _, org := range orgs {
+		allowed, err := repo_module.AllowedByOrgPolicy(ctx, ctx.Doer, forkRepo, repo_module.OrgPolicyFork, org.AsUser())
+		if err != nil {
+			ctx.ServerError("AllowedByOrgPolicy", err)
+			return false
+		} else if allowed {
+			allowedOrgs = append(allowedOrgs, org)
+		}
+	}
+	orgs = allowedOrgs
 
 	ctx.Data["CanForkToUser"] = canForkToUser
 	ctx.Data["Orgs"] = orgs
@@ -337,6 +357,8 @@ func ForkPost(ctx *context.Context) {
 			ctx.RenderWithErr(ctx.Tr("repo.form.name_reserved", err.(db.ErrNameReserved).Name), tplFork, &form)
 		case db.IsErrNamePatternNotAllowed(err):
 			ctx.RenderWithErr(ctx.Tr("repo.form.name_pattern_not_allowed", err.(db.ErrNamePatternNotAllowed).Pattern), tplFork, &form)
+		case errors.As(err, &repo_module.ErrOrgPolicy{}):
+			ctx.RenderWithErr(ctx.Tr("repo.settings.blocked_by_org_policy", ctx.Tr("org.settings.private_fork_policy")), tplFork, &form)
 		default:
 			ctx.ServerError("ForkPost", err)
 		}

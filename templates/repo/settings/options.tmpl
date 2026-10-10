@@ -29,11 +29,12 @@
 							{{if .IsAdmin}}
 								<input name="private" type="checkbox" {{if .Repository.IsPrivate}}checked{{end}}>
 							{{else}}
-								<input name="private" type="checkbox" {{if .Repository.IsPrivate}}checked{{end}}{{if and $.ForcePrivate .Repository.IsPrivate}} disabled{{end}}>
-								{{if and .Repository.IsPrivate $.ForcePrivate}}<input type="hidden" name="private" value="{{.Repository.IsPrivate}}">{{end}}
+								<input name="private" type="checkbox" {{if .Repository.IsPrivate}}checked{{end}}{{if or (and $.ForcePrivate .Repository.IsPrivate) $.OrgPolicyBlocksVisibility}} disabled{{end}}>
+								{{if or (and .Repository.IsPrivate $.ForcePrivate) $.OrgPolicyBlocksVisibility}}<input type="hidden" name="private" value="{{.Repository.IsPrivate}}">{{end}}
 							{{end}}
 							<label>{{ctx.Locale.Tr "repo.visibility_helper"}} {{if .Repository.NumForks}}<span class="text red">{{ctx.Locale.Tr "repo.visibility_fork_helper"}}</span>{{end}}</label>
 						</div>
+						{{if $.OrgPolicyBlocksVisibility}}<p class="help org-policy-note">{{ctx.Locale.Tr "repo.settings.blocked_by_org_policy" (ctx.Locale.Tr "org.settings.restrict_repo_visibility_change")}}</p>{{end}}
 					</div>
 				{{end}}
 				<div class="field {{if .Err_Description}}error{{end}}">

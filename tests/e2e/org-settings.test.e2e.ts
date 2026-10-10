@@ -11,6 +11,7 @@ import {expect} from '@playwright/test';
 import {test} from './utils_e2e.ts';
 import {screenshot} from './shared/screenshots.ts';
 import {validate_form} from './shared/forms.ts';
+import {FakeData, loginAs} from './shared/fake-data.ts';
 
 test.use({user: 'user2'});
 
@@ -109,4 +110,36 @@ test('org requires two-factor authentication only from an owner who has it', asy
   await screenshot(page);
   await page.goto('/org/org3/settings');
   await expect(page.locator('input[name="require_two_factor"]')).not.toBeChecked();
+});
+
+test.describe('as fake users', () => {
+  // a clean state, so that loginAs doesn't inherit user2's session
+  test.use({user: null, storageState: {cookies: [], origins: []}});
+
+  test('org repository policies persist', async ({browser, request}) => {
+    const data = new FakeData(request);
+    try {
+      const owner = await data.createUser();
+      const org = await data.createOrg(owner);
+      const page = await (await loginAs(browser, owner.username, owner.password)).newPage();
+      await page.goto(`/org/${org}/settings`);
+
+      const visibility = page.locator('input[name="restrict_repo_visibility_change"]');
+      const forks = page.locator('select[name="private_fork_policy"]');
+      await expect(visibility).not.toBeChecked();
+      await expect(forks).toHaveValue('0');
+      await expect(page.locator('#repo_policies_box')).toContainText('Only organization owners can delete or transfer repositories.');
+      await visibility.check();
+      await forks.selectOption('2');
+      await page.getByRole('button', {name: 'Update settings'}).click();
+      await expect(page.locator('.flash-success')).toBeVisible();
+
+      await page.goto(`/org/${org}/settings`);
+      await expect(visibility).toBeChecked();
+      await expect(forks).toHaveValue('2');
+      await screenshot(page);
+    } finally {
+      await data.cleanup();
+    }
+  });
 });

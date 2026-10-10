@@ -42,6 +42,8 @@ type UpdateOptions struct {
 	RequireTwoFactor             optional.Option[bool]
 	EnableRepoUnitHints          optional.Option[bool]
 	KeepPronounsPrivate          optional.Option[bool]
+	RestrictRepoVisibilityChange optional.Option[bool]
+	PrivateForkPolicy            optional.Option[int]
 }
 
 func UpdateUser(ctx context.Context, u *user_model.User, opts *UpdateOptions) error {
@@ -144,6 +146,14 @@ func UpdateUser(ctx context.Context, u *user_model.User, opts *UpdateOptions) er
 	if has, value := opts.EmailNotificationsPreference.Get(); has {
 		u.EmailNotificationsPreference = value
 		cols = append(cols, "email_notifications_preference")
+	}
+	if has, value := opts.RestrictRepoVisibilityChange.Get(); has {
+		u.RestrictRepoVisibilityChange = value
+		cols = append(cols, "restrict_repo_visibility_change")
+	}
+	if has, value := opts.PrivateForkPolicy.Get(); has {
+		u.PrivateForkPolicy = value
+		cols = append(cols, "private_fork_policy")
 	}
 	if opts.SetLastLogin {
 		u.SetLastLogin()

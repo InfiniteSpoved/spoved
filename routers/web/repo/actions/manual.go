@@ -4,6 +4,7 @@
 package actions
 
 import (
+	"errors"
 	"net/url"
 
 	actions_service "forgejo.org/services/actions"
@@ -48,6 +49,16 @@ func ManualRunWorkflow(ctx *app_context.Context) {
 
 	_, _, err = workflow.Dispatch(ctx, formKeyGetter, ctx.Repo.Repository, ctx.Doer)
 	if err != nil {
+		if errors.Is(err, actions_service.ErrWorkflowNoDispatchTrigger) {
+			ctx.Flash.Error(ctx.Locale.Tr("actions.workflow.dispatch.no_trigger"))
+			ctx.Redirect(location)
+			return
+		}
+		if errors.Is(err, actions_service.ErrWorkflowDisabled) {
+			ctx.Flash.Error(ctx.Locale.Tr("actions.workflow.dispatch.disabled"))
+			ctx.Redirect(location)
+			return
+		}
 		if actions_service.IsInputRequiredErr(err) {
 			ctx.Flash.Error(ctx.Locale.Tr("actions.workflow.dispatch.input_required", err.(actions_service.InputRequiredErr).Name))
 			ctx.Redirect(location)

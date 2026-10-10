@@ -695,3 +695,32 @@ func TestCRUDProject(t *testing.T) {
 	err = DeleteProjectByID(t.Context(), wantProject.ID, optional.None[int64]())
 	require.NoError(t, err)
 }
+
+// #338: the project type is checked before the ID, because a repository ID can equal a user or organization ID.
+func TestEnsureProjectOwnedBy(t *testing.T) {
+	const id = int64(7)
+	for _, tc := range []struct {
+		name   string
+		p      project_model.Project
+		isRepo bool
+		ok     bool
+	}{
+		{"user project on the owner route", project_model.Project{Type: project_module.TypeIndividual, OwnerID: id}, false, true},
+		{"org project on the owner route", project_model.Project{Type: project_module.TypeOrganization, OwnerID: id}, false, true},
+		{"repo project on the repo route", project_model.Project{Type: project_module.TypeRepository, RepoID: id}, true, true},
+		{"repo project with a colliding ID on the owner route", project_model.Project{Type: project_module.TypeRepository, RepoID: id}, false, false},
+		{"user project with a colliding ID on the repo route", project_model.Project{Type: project_module.TypeIndividual, OwnerID: id}, true, false},
+		{"org project with a colliding ID on the repo route", project_model.Project{Type: project_module.TypeOrganization, OwnerID: id}, true, false},
+		{"another owner", project_model.Project{Type: project_module.TypeIndividual, OwnerID: id + 1}, false, false},
+		{"another repo", project_model.Project{Type: project_module.TypeRepository, RepoID: id + 1}, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ensureProjectOwnedBy(&tc.p, id, tc.isRepo)
+			if tc.ok {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, util.ErrInvalidArgument)
+			}
+		})
+	}
+}

@@ -386,8 +386,7 @@ func TestOrgBranchProtectionMerge(t *testing.T) {
 		})
 
 		// must-fix 3: a stale approval that isn't dismissed doesn't count when the rule dismisses stale approvals.
-		// It is left stale by pushing before the rule dismisses: a dismissal in the test environment waits
-		// out the database lock, because its notification runs synchronously inside the transaction.
+		// It is left stale by pushing before the rule dismisses.
 		t.Run("StaleApproval", func(t *testing.T) {
 			review(user4, pr.Index, api.ReviewStateApproved)
 			changeFile("obp-head", "", "b.txt")

@@ -95,6 +95,23 @@ func loadAccessTokenCreateData(ctx *context.Context) {
 	slices.Sort(categories)
 	ctx.Data["Categories"] = categories
 
+	allowed, err := authz.AllowedScopes(ctx.Doer)
+	if err != nil {
+		ctx.ServerError("AllowedScopes", err)
+		return
+	}
+	var disallowed []string
+	if allowed != nil {
+		for _, category := range categories {
+			for _, scope := range []string{"read:" + category, "write:" + category} {
+				if !slices.Contains(allowed, scope) {
+					disallowed = append(disallowed, scope)
+				}
+			}
+		}
+	}
+	ctx.Data["DisallowedScopes"] = disallowed
+
 	// Awkward -- GET and POST use different form bindings for the reasons explained on NewAccessTokenGetForm -- and
 	// this method can be called in both situations, on all GETs, and on some POSTs when validation errors occur.  So
 	// both forms need to be handled here.
@@ -297,7 +314,7 @@ func AccessTokenCreatePost(ctx *context.Context) {
 		return
 	}
 
-	if err := authz.ValidateAccessToken(t, resourceRepos); err != nil {
+	if err := authz.ValidateAccessToken(ctx.Doer, t, resourceRepos); err != nil {
 		s := user.TranslateAccessTokenValidationError(ctx.Base, err)
 		if has, str := s.Get(); has {
 			renderWithError(template.HTML(template.HTMLEscapeString(str)))

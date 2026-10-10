@@ -491,7 +491,10 @@ func DismissApprovalReviews(ctx context.Context, doer *user_model.User, pull *is
 		return err
 	}
 
-	return db.WithTx(ctx, func(ctx context.Context) error {
+	// Notify only after the commit: a notifier may write on another connection, which would wait for this
+	// transaction's lock (immediate queues run the handler right away).
+	comments := make([]*issues_model.Comment, 0, len(reviews))
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
 		for _, review := range reviews {
 			if err := issues_model.DismissReview(ctx, review, true); err != nil {
 				return err
@@ -512,11 +515,16 @@ func DismissApprovalReviews(ctx context.Context, doer *user_model.User, pull *is
 			comment.Review = review
 			comment.Poster = doer
 			comment.Issue = review.Issue
-
-			notify_service.PullReviewDismiss(ctx, doer, review, comment)
+			comments = append(comments, comment)
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	for _, comment := range comments {
+		notify_service.PullReviewDismiss(ctx, doer, comment.Review, comment)
+	}
+	return nil
 }
 
 // DismissReview dismissing stale review by repo admin

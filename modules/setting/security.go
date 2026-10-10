@@ -46,7 +46,37 @@ var (
 	SSHKeyExpiry      CredentialExpiryPolicy
 	DeployKeyExpiry   CredentialExpiryPolicy
 	AccessTokenExpiry CredentialExpiryPolicy
+
+	AccessTokenScopes AccessTokenScopePolicy
 )
+
+// AccessTokenScopePolicy is the instance policy for the scopes of new access tokens that non-admins create. The scope
+// names are checked by authz.CheckScopePolicy at startup.
+type AccessTokenScopePolicy struct {
+	Allowed                []string // empty = all
+	RequireRepoRestriction []string
+}
+
+func loadAccessTokenScopePolicy(sec ConfigSection) AccessTokenScopePolicy {
+	return AccessTokenScopePolicy{
+		Allowed:                loadScopeList(sec, "ACCESS_TOKEN_ALLOWED_SCOPES"),
+		RequireRepoRestriction: loadScopeList(sec, "ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION"),
+	}
+}
+
+// loadScopeList keeps empty items, so that a set key that names no scope (e.g. ",") is refused instead of read as
+// unset.
+func loadScopeList(sec ConfigSection, key string) []string {
+	value := strings.TrimSpace(sec.Key(key).String())
+	if value == "" {
+		return nil
+	}
+	list := strings.Split(value, ",")
+	for i := range list {
+		list[i] = strings.ToLower(strings.TrimSpace(list[i]))
+	}
+	return list
+}
 
 // CredentialExpiryPolicy is the instance policy for the expiry date of new credentials.
 type CredentialExpiryPolicy struct {
@@ -538,6 +568,7 @@ func loadSecurityFrom(rootCfg ConfigProvider) {
 	SSHKeyExpiry = loadCredentialExpiryPolicy(sec, "SSH_KEY")
 	DeployKeyExpiry = loadCredentialExpiryPolicy(sec, "DEPLOY_KEY")
 	AccessTokenExpiry = loadCredentialExpiryPolicy(sec, "ACCESS_TOKEN")
+	AccessTokenScopes = loadAccessTokenScopePolicy(sec)
 
 	cfgdata := sec.Key("PASSWORD_COMPLEXITY").Strings(",")
 	if len(cfgdata) == 0 {

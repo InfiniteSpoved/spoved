@@ -160,10 +160,10 @@
 								<option value="">
 									{{ctx.Locale.Tr "settings.permission_no_access"}}
 								</option>
-								<option value="read:{{.}}" {{if (SliceUtils.Contains $.scope (printf "read:%s" .))}} selected {{end}}>
+								<option value="read:{{.}}" {{if (SliceUtils.Contains $.scope (printf "read:%s" .))}} selected {{end}} {{if (SliceUtils.Contains $.DisallowedScopes (printf "read:%s" .))}} disabled {{end}}>
 									{{ctx.Locale.Tr "settings.permission_read"}}
 								</option>
-								<option value="write:{{.}}" {{if (SliceUtils.Contains $.scope (printf "write:%s" .))}} selected {{end}}>
+								<option value="write:{{.}}" {{if (SliceUtils.Contains $.scope (printf "write:%s" .))}} selected {{end}} {{if (SliceUtils.Contains $.DisallowedScopes (printf "write:%s" .))}} disabled {{end}}>
 									{{ctx.Locale.Tr "settings.permission_write"}}
 								</option>
 							</select>
