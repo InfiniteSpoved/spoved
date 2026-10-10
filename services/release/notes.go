@@ -193,6 +193,7 @@ func findNewContributors(ctx context.Context, repoID int64, prs issues_model.Pul
 	return contributors, nil
 }
 
+// firstParentCommits returns the first-parent commits of prev..end that are not in merged (the merge commits of pull requests).
 func firstParentCommits(gitRepo *git.Repository, end, prev *git.Commit, merged map[string]bool) ([]directCommit, error) {
 	rng := end.ID.String()
 	if prev != nil {
