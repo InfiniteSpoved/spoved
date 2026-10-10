@@ -40,7 +40,7 @@ plan)
   # depth: commits to fetch, 0 for the full history
   tasks='{"task":"lint","args":"","depth":"1"},{"task":"frontend","args":"","depth":"1"}'
   if [ "$backend" = true ]; then
-    for i in $(seq 1 10); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 10\",\"depth\":\"1\"}"; done
+    for i in $(seq 1 14); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 14\",\"depth\":\"1\"}"; done
   fi
   if [ "$FULL" = true ]; then
     # only the selection of changed end-to-end tests needs the history
@@ -79,13 +79,23 @@ unit)
   # Azure Blob Storage emulator for the azureblob storage tests (TEST_AZURITE_URL)
   npx -y -p azurite@3.37.0 azurite-blob --inMemoryPersistence --skipApiVersionCheck --blobHost 127.0.0.1 > "$RUNNER_TEMP/azurite.log" 2>&1 &
   timeout 120 bash -c 'until grep -q "successfully listens" "$RUNNER_TEMP/azurite.log"; do sleep 1; done' || { cat "$RUNNER_TEMP/azurite.log"; exit 1; }
-  # temporary probe: groups of one package's tests, repeated
-  pkg=forgejo.org/services/usergroup
-  if [ "$1" -le 9 ]; then
-    tests=$(go test -tags 'sqlite sqlite_unlock_notify' -list '^Test' $pkg | grep -E '^Test' | .github/ci/shard.sh "$1" 9 | paste -sd'|')
-    TZ=UTC PROJECT_ROOT="$PWD" go test -race -count=6 -tags 'sqlite sqlite_unlock_notify' -run "^(${tests})\$" $pkg
+  # temporary probe: every job runs the whole shard and reports on one group of its packages
+  packages=$(make -s --eval='ci-list-test-packages: compute-go-test-packages ; @echo $(GO_TEST_PACKAGES)' ci-list-test-packages \
+    | tr ' ' '\n' | .github/ci/shard.sh 2 4 | paste -sd' ')
+  set +e
+  RACE_ENABLED=true TEST_AZURITE_URL=127.0.0.1:10000 make test-backend GO_TEST_PACKAGES="$packages" > "$RUNNER_TEMP/out.txt" 2>&1; rc=$?
+  cat "$RUNNER_TEMP/out.txt"
+  set -e
+  o="$RUNNER_TEMP/out.txt"
+  if [ "$1" -le 12 ]; then
+    for p in $(tr ' ' '\n' <<< "$packages" | .github/ci/shard.sh "$1" 12); do
+      if grep -qE "^FAIL[[:space:]]+${p}([[:space:]]|\$)" "$o"; then exit 1; fi
+    done
+    exit 0
+  elif [ "$1" = 13 ]; then
+    exit $(( rc != 0 ))
   else
-    TZ=UTC PROJECT_ROOT="$PWD" go test -race -count=6 -tags 'sqlite sqlite_unlock_notify' $pkg
+    if grep -q '^--- FAIL' "$o" && ! grep -qE '^FAIL[[:space:]]+forgejo' "$o"; then exit 1; fi
   fi
   ;;
 
