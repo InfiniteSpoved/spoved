@@ -67,6 +67,9 @@ jobs:
     needs: [plan]
     runs-on: proxmox
     timeout-minutes: 90
+    env:
+      # npm reads from the registry time out now and then on the runners' network
+      npm_config_fetch_retries: 5
     strategy:
       fail-fast: false
       matrix:
