@@ -113,3 +113,51 @@ func TestStartDueScheduledDispatchesCancels(t *testing.T) {
 		})
 	}
 }
+
+// A row that is overdue by more than an hour (the server was down) is cancelled, not started late
+func TestStartDueScheduledDispatchesMissed(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	timeutil.MockSet(now)
+	defer timeutil.MockUnset()
+	runs := unittest.GetCount(t, &actions_model.ActionRun{})
+
+	late := &actions_model.ActionScheduledDispatch{RepoID: 1, WorkflowID: "a.yml", Ref: "refs/heads/master", Inputs: `{"a":"b"}`, DoerID: 2, RunAt: timeutil.TimeStamp(now.Add(-61 * time.Minute).Unix())}
+	require.NoError(t, actions_model.InsertScheduledDispatch(t.Context(), late))
+	require.NoError(t, StartDueScheduledDispatches(t.Context()))
+
+	got := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionScheduledDispatch{ID: late.ID, Status: actions_model.ScheduledDispatchCancelled, CancelReason: "missed"})
+	assert.Empty(t, got.Inputs, "the inputs are dropped with the cancellation")
+	assert.Equal(t, runs, unittest.GetCount(t, &actions_model.ActionRun{}))
+}
+
+func TestChangeScheduledRunAt(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	timeutil.MockSet(now)
+	defer timeutil.MockUnset()
+	defer test.MockVariableValue(&setting.Actions.MaxDelayedRunDays, 30)()
+
+	sd := &actions_model.ActionScheduledDispatch{RepoID: 1, WorkflowID: "a.yml", Ref: "refs/heads/master", Inputs: "{}", DoerID: 2, RunAt: timeutil.TimeStamp(now.Add(time.Hour).Unix())}
+	require.NoError(t, actions_model.InsertScheduledDispatch(t.Context(), sd))
+	runAt := func() timeutil.TimeStamp {
+		return unittest.AssertExistsAndLoadBean(t, &actions_model.ActionScheduledDispatch{ID: sd.ID}).RunAt
+	}
+
+	require.NoError(t, ChangeScheduledRunAt(t.Context(), 1, sd.ID, now.Add(2*time.Hour)))
+	assert.EqualValues(t, now.Add(2*time.Hour).Unix(), runAt())
+
+	// the window is checked again, and a refused change leaves the row alone
+	require.ErrorIs(t, ChangeScheduledRunAt(t.Context(), 1, sd.ID, now), ErrScheduleInPast)
+	require.ErrorIs(t, ChangeScheduledRunAt(t.Context(), 1, sd.ID, now.AddDate(0, 0, 31)), ErrScheduleTooFar)
+	require.ErrorIs(t, ChangeScheduledRunAt(t.Context(), 1, sd.ID, time.Unix(1<<62, 0)), ErrScheduleTooFar)
+	assert.EqualValues(t, now.Add(2*time.Hour).Unix(), runAt())
+	setting.Actions.MaxDelayedRunDays = 0
+	require.ErrorIs(t, ChangeScheduledRunAt(t.Context(), 1, sd.ID, now.Add(time.Hour)), ErrScheduleDisabled)
+	setting.Actions.MaxDelayedRunDays = 30
+
+	// other repository, and a row that is no longer pending
+	require.ErrorIs(t, ChangeScheduledRunAt(t.Context(), 2, sd.ID, now.Add(time.Hour)), actions_model.ErrScheduledDispatchNotFound)
+	require.NoError(t, actions_model.CancelScheduledDispatch(t.Context(), 1, sd.ID, "no_permission"))
+	require.ErrorIs(t, ChangeScheduledRunAt(t.Context(), 1, sd.ID, now.Add(time.Hour)), actions_model.ErrScheduledDispatchNotFound)
+}

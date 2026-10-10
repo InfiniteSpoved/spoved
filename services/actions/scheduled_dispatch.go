@@ -24,6 +24,8 @@ import (
 const (
 	maxScheduledDispatchInputsBytes = 64 << 10
 	maxPendingScheduledDispatches   = 100
+	maxScheduledDispatchesPerTick   = 50
+	scheduledDispatchMissedAfter    = time.Hour // a row that is overdue by more than this is cancelled, not started
 )
 
 var (
@@ -53,7 +55,7 @@ func CheckScheduleTime(runAt time.Time) error {
 // resolved; the permission of doer, the workflow and its trigger are checked again when the run starts.
 func ScheduleDispatch(ctx context.Context, repo *repo_model.Repository, doer *user_model.User, workflow *Workflow, getter InputValueGetter, runAt time.Time) (*actions_model.ActionScheduledDispatch, error) {
 	// a job token acts as the Actions user, who has no account to run as later
-	if doer.ID <= 0 {
+	if doer.ID <= 0 || doer.IsActions() {
 		return nil, util.NewPermissionDeniedErrorf("only a user can schedule a run")
 	}
 	if err := CheckScheduleTime(runAt); err != nil {
@@ -80,11 +82,21 @@ func ScheduleDispatch(ctx context.Context, repo *repo_model.Repository, doer *us
 		RepoID:     repo.ID,
 		WorkflowID: workflow.WorkflowID,
 		Ref:        workflow.Ref,
+		CommitID:   workflow.Commit.ID.String(),
 		Inputs:     string(inputsJSON),
 		DoerID:     doer.ID,
 		RunAt:      timeutil.TimeStamp(runAt.Unix()),
 	}
 	return sd, actions_model.InsertScheduledDispatch(ctx, sd)
+}
+
+// ChangeScheduledRunAt moves a pending row to runAt, which must be inside the same window as when scheduling.
+// The caller decides who may do it.
+func ChangeScheduledRunAt(ctx context.Context, repoID, id int64, runAt time.Time) error {
+	if err := CheckScheduleTime(runAt); err != nil {
+		return err
+	}
+	return actions_model.UpdateScheduledDispatchRunAt(ctx, repoID, id, timeutil.TimeStamp(runAt.Unix()))
 }
 
 // StartDueScheduledDispatches starts the scheduled runs that are due; each one is claimed first, so it starts once
@@ -93,12 +105,15 @@ func StartDueScheduledDispatches(ctx context.Context) error {
 	if err := actions_model.CleanupOldScheduledDispatches(ctx, now); err != nil {
 		return err
 	}
-	due, err := actions_model.TakeDueScheduledDispatches(ctx, now)
-	if err != nil {
-		return err
-	}
-	for _, sd := range due {
-		reason, err := startScheduledDispatch(ctx, sd)
+	// one row at a time, each finished before the next is claimed, so a crash leaves at most one claimed row
+	for range maxScheduledDispatchesPerTick {
+		sd, err := actions_model.TakeDueScheduledDispatch(ctx, now)
+		if err != nil {
+			return err
+		} else if sd == nil {
+			return nil
+		}
+		reason, err := startScheduledDispatch(ctx, sd, now)
 		if err != nil {
 			log.Error("Scheduled dispatch %d of repository %d: %v", sd.ID, sd.RepoID, err)
 			reason = "internal_error"
@@ -118,7 +133,10 @@ func StartDueScheduledDispatches(ctx context.Context) error {
 
 // startScheduledDispatch starts the run and returns "" or the code why it was refused; an error is not retried.
 // Nothing the row stored is trusted: the repository, the doer and their permission are loaded again.
-func startScheduledDispatch(ctx context.Context, sd *actions_model.ActionScheduledDispatch) (string, error) {
+func startScheduledDispatch(ctx context.Context, sd *actions_model.ActionScheduledDispatch, now timeutil.TimeStamp) (string, error) {
+	if now-sd.RunAt > timeutil.TimeStamp(scheduledDispatchMissedAfter.Seconds()) {
+		return "missed", nil // e.g. the server was down at the time
+	}
 	repo, err := repo_model.GetRepositoryByID(ctx, sd.RepoID) // hides a trashed repository
 	if repo_model.IsErrRepoNotExist(err) {
 		return "repo_missing", nil
@@ -159,6 +177,11 @@ func startScheduledDispatch(ctx context.Context, sd *actions_model.ActionSchedul
 		return "workflow_missing", nil
 	} else if err != nil {
 		return "", err
+	}
+
+	// the run executes as the scheduler: code pushed to the ref since then, maybe by someone else, must not run in their name
+	if workflow.Commit.ID.String() != sd.CommitID {
+		return "ref_changed", nil
 	}
 
 	var inputs map[string]string

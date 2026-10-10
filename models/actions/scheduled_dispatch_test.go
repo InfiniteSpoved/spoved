@@ -76,27 +76,64 @@ func TestScheduledDispatchCRUD(t *testing.T) {
 	assert.EqualValues(t, 1, total)
 }
 
-func TestTakeDueScheduledDispatches(t *testing.T) {
+func TestTakeDueScheduledDispatch(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	ctx := t.Context()
-	due := newScheduledDispatch(t, 1, 100)
+	first := newScheduledDispatch(t, 1, 100)
+	second := newScheduledDispatch(t, 1, 150)
 	newScheduledDispatch(t, 1, 300)
 
-	taken, err := TakeDueScheduledDispatches(ctx, 99)
+	sd, err := TakeDueScheduledDispatch(ctx, 99)
 	require.NoError(t, err)
-	assert.Empty(t, taken)
+	assert.Nil(t, sd)
 
-	taken, err = TakeDueScheduledDispatches(ctx, 200)
+	// one row per call, oldest first
+	sd, err = TakeDueScheduledDispatch(ctx, 200)
 	require.NoError(t, err)
-	require.Len(t, taken, 1)
-	assert.Equal(t, due.ID, taken[0].ID)
+	require.NotNil(t, sd)
+	assert.Equal(t, first.ID, sd.ID)
+	unittest.AssertExistsAndLoadBean(t, &ActionScheduledDispatch{ID: second.ID, Status: ScheduledDispatchPending})
 
-	taken, err = TakeDueScheduledDispatches(ctx, 200)
+	sd, err = TakeDueScheduledDispatch(ctx, 200)
 	require.NoError(t, err)
-	assert.Empty(t, taken, "a row is returned once")
+	require.NotNil(t, sd)
+	assert.Equal(t, second.ID, sd.ID)
 
-	// claimed rows can't be cancelled or moved
-	require.ErrorIs(t, CancelScheduledDispatch(ctx, 1, due.ID, "x"), ErrScheduledDispatchNotFound)
+	sd, err = TakeDueScheduledDispatch(ctx, 200)
+	require.NoError(t, err)
+	assert.Nil(t, sd, "a row is returned once")
+
+	// claimed rows can't be cancelled or moved by a user
+	require.ErrorIs(t, CancelScheduledDispatch(ctx, 1, first.ID, "no_permission"), ErrScheduledDispatchNotFound)
+	require.ErrorIs(t, UpdateScheduledDispatchRunAt(ctx, 1, first.ID, 5), ErrScheduledDispatchNotFound)
+}
+
+func TestScheduledDispatchCancelClearsInputs(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := t.Context()
+
+	pending := newScheduledDispatch(t, 1, 100)
+	require.NoError(t, CancelScheduledDispatch(ctx, 1, pending.ID, "no_permission"))
+	got, err := GetScheduledDispatch(ctx, 1, pending.ID)
+	require.NoError(t, err)
+	assert.Empty(t, got.Inputs)
+
+	claimed := newScheduledDispatch(t, 1, 100)
+	taken, err := TakeDueScheduledDispatch(ctx, 200)
+	require.NoError(t, err)
+	require.Equal(t, claimed.ID, taken.ID)
+	require.NoError(t, CancelClaimedScheduledDispatch(ctx, claimed.ID, "ref_changed"))
+	got, err = GetScheduledDispatch(ctx, 1, claimed.ID)
+	require.NoError(t, err)
+	assert.Empty(t, got.Inputs)
+	assert.Equal(t, "ref_changed", got.CancelReason)
+
+	// only the fixed codes are stored, whatever the caller passes
+	other := newScheduledDispatch(t, 1, 100)
+	require.NoError(t, CancelScheduledDispatch(ctx, 1, other.ID, "../../etc"+string(make([]byte, 300))))
+	got, err = GetScheduledDispatch(ctx, 1, other.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "internal_error", got.CancelReason)
 }
 
 func TestTakeDueScheduledDispatchesConcurrent(t *testing.T) {
@@ -110,12 +147,17 @@ func TestTakeDueScheduledDispatchesConcurrent(t *testing.T) {
 	var errs []error
 	for range 4 {
 		wg.Go(func() {
-			taken, err := TakeDueScheduledDispatches(t.Context(), 200)
-			mu.Lock()
-			defer mu.Unlock()
-			errs = append(errs, err)
-			for _, sd := range taken {
-				seen[sd.ID]++
+			for {
+				sd, err := TakeDueScheduledDispatch(t.Context(), 200)
+				mu.Lock()
+				errs = append(errs, err)
+				if sd != nil {
+					seen[sd.ID]++
+				}
+				mu.Unlock()
+				if sd == nil || err != nil {
+					return
+				}
 			}
 		})
 	}
@@ -146,19 +188,22 @@ func TestCleanupOldScheduledDispatches(t *testing.T) {
 	age(recentCancelled, time.Hour)
 	staleClaimed := newScheduledDispatch(t, 1, 100)
 	freshClaimed := newScheduledDispatch(t, 1, 100)
-	_, err := TakeDueScheduledDispatches(ctx, 200)
-	require.NoError(t, err)
+	for range 2 {
+		_, err := TakeDueScheduledDispatch(ctx, 200)
+		require.NoError(t, err)
+	}
 	age(staleClaimed, time.Hour)
 	age(freshClaimed, 2*time.Minute)
 
 	require.NoError(t, CleanupOldScheduledDispatches(ctx, now))
 
-	_, err = GetScheduledDispatch(ctx, 1, oldCancelled.ID)
+	_, err := GetScheduledDispatch(ctx, 1, oldCancelled.ID)
 	require.ErrorIs(t, err, ErrScheduledDispatchNotFound)
 	got, err := GetScheduledDispatch(ctx, 1, staleClaimed.ID)
 	require.NoError(t, err)
 	assert.Equal(t, ScheduledDispatchCancelled, got.Status)
 	assert.Equal(t, "interrupted", got.CancelReason)
+	assert.Empty(t, got.Inputs)
 	unittest.AssertExistsAndLoadBean(t, &ActionScheduledDispatch{ID: freshClaimed.ID, Status: ScheduledDispatchClaimed})
 	_, err = GetScheduledDispatch(ctx, 1, recentCancelled.ID)
 	require.NoError(t, err)

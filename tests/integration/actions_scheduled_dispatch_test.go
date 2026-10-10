@@ -199,6 +199,29 @@ func TestActionsScheduledDispatch(t *testing.T) {
 			del(ownerToken, rows[0].ID, http.StatusNoContent)
 		})
 
+		t.Run("a push to the ref cancels the run", func(t *testing.T) {
+			now := time.Now()
+			before := countRuns()
+			schedule(ownerToken, "dispatch.yml", now.Add(time.Hour), in, http.StatusCreated)
+
+			// someone else pushes to the branch: the run would execute that code as the scheduler
+			opts := getCreateFileOptions()
+			opts.BranchName, opts.NewBranchName = repo.DefaultBranch, repo.DefaultBranch
+			MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, fmt.Sprintf("/api/v1/repos/%s/%s/contents/later.txt", repo.OwnerName, repo.Name), &opts).
+				AddTokenAuth(adminToken), http.StatusCreated)
+
+			timeutil.MockSet(now.Add(2 * time.Hour))
+			defer timeutil.MockUnset()
+			require.NoError(t, actions_service.StartDueScheduledDispatches(t.Context()))
+			assert.Equal(t, before, countRuns())
+			rows := list(ownerToken, http.StatusOK)
+			require.Len(t, rows, 1)
+			assert.Equal(t, "cancelled", rows[0].Status)
+			assert.Equal(t, "ref_changed", rows[0].CancelReason)
+			assert.Empty(t, unittest.AssertExistsAndLoadBean(t, &actions_model.ActionScheduledDispatch{ID: rows[0].ID}).Inputs)
+			del(ownerToken, rows[0].ID, http.StatusNoContent)
+		})
+
 		t.Run("pending cap", func(t *testing.T) {
 			for range 100 {
 				require.NoError(t, actions_model.InsertScheduledDispatch(t.Context(), &actions_model.ActionScheduledDispatch{

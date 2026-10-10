@@ -20,6 +20,7 @@ func addScheduledDispatch(x *xorm.Engine) error {
 		RepoID       int64  `xorm:"INDEX NOT NULL"`
 		WorkflowID   string `xorm:"VARCHAR(255) NOT NULL"`
 		Ref          string `xorm:"VARCHAR(255) NOT NULL"`
+		CommitID     string `xorm:"VARCHAR(64) NOT NULL DEFAULT ''"`
 		Inputs       string `xorm:"TEXT NOT NULL"`
 		DoerID       int64  `xorm:"NOT NULL"`
 		RunAt        int64  `xorm:"INDEX NOT NULL"`

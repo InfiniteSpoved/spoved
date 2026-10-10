@@ -6,6 +6,7 @@ package actions
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"forgejo.org/models/db"
@@ -26,14 +27,30 @@ const (
 
 var ErrScheduledDispatchNotFound = errors.New("scheduled dispatch does not exist")
 
+// ScheduledDispatchCancelReasons are the only values of CancelReason; the web list maps each one to a locale key
+var ScheduledDispatchCancelReasons = []string{
+	"repo_missing", "doer_missing", "doer_disabled", "repo_archived", "actions_disabled", "no_permission",
+	"workflow_missing", "trigger_missing", "workflow_disabled", "inputs_invalid", "ref_changed", "missed",
+	"internal_error", "interrupted",
+}
+
+// cancelReason returns reason if it is a known code, else "internal_error"
+func cancelReason(reason string) string {
+	if slices.Contains(ScheduledDispatchCancelReasons, reason) {
+		return reason
+	}
+	return "internal_error"
+}
+
 // ActionScheduledDispatch is a manual workflow run ("workflow_dispatch") that starts at RunAt
 type ActionScheduledDispatch struct {
 	ID         int64
 	RepoID     int64  `xorm:"INDEX NOT NULL"`
 	WorkflowID string `xorm:"VARCHAR(255) NOT NULL"`
-	// Ref is resolved again when the run starts
-	Ref string `xorm:"VARCHAR(255) NOT NULL"`
-	// Inputs is the JSON of the resolved inputs
+	// Ref is resolved again when the run starts; CommitID is what it pointed to when the run was scheduled
+	Ref      string `xorm:"VARCHAR(255) NOT NULL"`
+	CommitID string `xorm:"VARCHAR(64) NOT NULL DEFAULT ''"`
+	// Inputs is the JSON of the resolved inputs, emptied once the row is cancelled
 	Inputs       string             `xorm:"TEXT NOT NULL"`
 	DoerID       int64              `xorm:"NOT NULL"`
 	RunAt        timeutil.TimeStamp `xorm:"INDEX NOT NULL"`
@@ -98,28 +115,29 @@ func UpdateScheduledDispatchRunAt(ctx context.Context, repoID, id int64, runAt t
 
 // CancelScheduledDispatch turns a pending row into a cancelled one, kept for the list
 func CancelScheduledDispatch(ctx context.Context, repoID, id int64, reason string) error {
-	return scheduledDispatchUpdate(ctx, repoID, id, &ActionScheduledDispatch{Status: ScheduledDispatchCancelled, CancelReason: reason}, "status", "cancel_reason")
+	return scheduledDispatchUpdate(ctx, repoID, id, &ActionScheduledDispatch{Status: ScheduledDispatchCancelled, CancelReason: cancelReason(reason)}, "status", "cancel_reason", "inputs")
 }
 
-// TakeDueScheduledDispatches claims the pending rows that are due and returns them. A row is only returned by the
-// caller that claimed it, so it starts once; a crash leaves it claimed, and CleanupOldScheduledDispatches cancels it.
-func TakeDueScheduledDispatches(ctx context.Context, now timeutil.TimeStamp) ([]*ActionScheduledDispatch, error) {
-	var due []*ActionScheduledDispatch
-	if err := db.GetEngine(ctx).Where("status = ? AND run_at <= ?", ScheduledDispatchPending, now).Asc("run_at", "id").Find(&due); err != nil {
-		return nil, err
-	}
-	taken := make([]*ActionScheduledDispatch, 0, len(due))
-	for _, sd := range due {
+// TakeDueScheduledDispatch claims the oldest pending row that is due and returns it, or nil. A row is only returned
+// to the caller that claimed it, so it starts once; a crash leaves it claimed, and CleanupOldScheduledDispatches
+// cancels it. Callers take one row at a time and finish it before taking the next.
+func TakeDueScheduledDispatch(ctx context.Context, now timeutil.TimeStamp) (*ActionScheduledDispatch, error) {
+	for {
+		sd := &ActionScheduledDispatch{}
+		has, err := db.GetEngine(ctx).Where("status = ? AND run_at <= ?", ScheduledDispatchPending, now).Asc("run_at", "id").Get(sd)
+		if err != nil || !has {
+			return nil, err
+		}
+		// the claim also refreshes `updated`, which CleanupOldScheduledDispatches measures from
 		affected, err := db.GetEngine(ctx).Where("id = ? AND status = ?", sd.ID, ScheduledDispatchPending).
 			Cols("status").Update(&ActionScheduledDispatch{Status: ScheduledDispatchClaimed})
 		if err != nil {
 			return nil, err
 		}
 		if affected == 1 {
-			taken = append(taken, sd)
+			return sd, nil
 		}
 	}
-	return taken, nil
 }
 
 // DeleteScheduledDispatch deletes a pending or cancelled row
@@ -153,13 +171,13 @@ func CleanupOldScheduledDispatches(ctx context.Context, now timeutil.TimeStamp) 
 		return err
 	}
 	_, err := db.GetEngine(ctx).Where("status = ? AND updated < ?", ScheduledDispatchClaimed, int64(now)-int64(scheduledDispatchClaimedStale.Seconds())).
-		Cols("status", "cancel_reason").Update(&ActionScheduledDispatch{Status: ScheduledDispatchCancelled, CancelReason: "interrupted"})
+		Cols("status", "cancel_reason", "inputs").Update(&ActionScheduledDispatch{Status: ScheduledDispatchCancelled, CancelReason: "interrupted"})
 	return err
 }
 
 // CancelClaimedScheduledDispatch turns a row that the due job claimed into a cancelled one, kept for the list
 func CancelClaimedScheduledDispatch(ctx context.Context, id int64, reason string) error {
 	_, err := db.GetEngine(ctx).Where("id = ? AND status = ?", id, ScheduledDispatchClaimed).
-		Cols("status", "cancel_reason").Update(&ActionScheduledDispatch{Status: ScheduledDispatchCancelled, CancelReason: reason})
+		Cols("status", "cancel_reason", "inputs").Update(&ActionScheduledDispatch{Status: ScheduledDispatchCancelled, CancelReason: cancelReason(reason)})
 	return err
 }
