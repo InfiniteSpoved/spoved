@@ -97,6 +97,11 @@ func RateLimit(class string) func(*context.Context) {
 // RateLimitHeavy limits expensive web pages (blame, code search, diffs) in the heavy class; it is a route
 // middleware, run in addition to the web class of the route group.
 func RateLimitHeavy(ctx *context.Context) {
+	if ctx.FormBool("file-only") {
+		// the diff pages load more files into the page with an XHR that ignores an HTML answer
+		ChargeHeavyPlain(ctx)
+		return
+	}
 	if r := checkRateLimit(ctx.Base, ratelimit.Heavy, ctx.Doer, ctx.Authentication); !r.Allowed {
 		renderRateLimited(ctx, r)
 	}

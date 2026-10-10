@@ -646,6 +646,15 @@ func TestRateLimitHeavy(t *testing.T) {
 		assert.Equal(t, 98, ratelimit.Check(ratelimit.Web, "198.51.100.150:1", ratelimit.IPKey("198.51.100.150:1"), false).Remaining)
 	})
 
+	t.Run("diff XHR gets the plain 429", func(t *testing.T) {
+		const path = "/user2/commitsonpr/pulls/1/files?file-only=true&files=test1.txt"
+		for range 2 {
+			MakeRequest(t, fromIP(NewRequest(t, "GET", path), "198.51.100.152"), http.StatusOK)
+		}
+		resp := MakeRequest(t, fromIP(NewRequest(t, "GET", path), "198.51.100.152"), http.StatusTooManyRequests)
+		assert.Contains(t, resp.Header().Get("Content-Type"), "text/plain")
+	})
+
 	t.Run("a commit page view costs two heavy tokens", func(t *testing.T) {
 		const ip = "198.51.100.151"
 		MakeRequest(t, fromIP(NewRequest(t, "GET", "/user2/repo1/commit/65f1bf27bc3bf70f64657658635e66094edbcb4d"), ip), http.StatusOK)
