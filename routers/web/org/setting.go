@@ -238,6 +238,7 @@ func renderSubmittedSettings(ctx *context.Context, org *org_model.Organization, 
 	shown := *org
 	shown.Name, shown.FullName, shown.Email, shown.Description = form.Name, form.FullName, form.Email, form.Description
 	shown.Website, shown.Location = form.Website, form.Location
+	shown.RestrictRepoVisibilityChange, shown.PrivateForkPolicy = form.RestrictRepoVisibilityChange, form.PrivateForkPolicy
 	if ctx.Doer.IsAdmin {
 		shown.MaxRepoCreation = form.MaxRepoCreation
 	}

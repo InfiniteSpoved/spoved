@@ -173,8 +173,12 @@ func TestOrgTwoFactorRequired(t *testing.T) {
 
 		enrolTOTP(t, 2)
 		// without confirmation: lists the members without 2FA, saves nothing
-		body = postOrgTwoFactor(t, owner, "org3", map[string]string{"require_two_factor": "on", "full_name": "changed"}, http.StatusOK)
+		body = postOrgTwoFactor(t, owner, "org3", map[string]string{"require_two_factor": "on", "full_name": "changed", "restrict_repo_visibility_change": "on", "private_fork_policy": "2"}, http.StatusOK)
 		page := NewHTMLParser(t, bytes.NewBufferString(body))
+		// the form is shown again as submitted
+		assert.Equal(t, "changed", page.Find(`input[name="full_name"]`).AttrOr("value", ""))
+		assert.Equal(t, 1, page.Find(`input[name="restrict_repo_visibility_change"][checked]`).Length())
+		assert.Equal(t, 1, page.Find(`select[name="private_fork_policy"] option[value="2"][selected]`).Length())
 		var members []string
 		page.Find(".require-two-factor-members li a").Each(func(_ int, s *goquery.Selection) { members = append(members, s.Text()) })
 		assert.Contains(t, members, "user4")
