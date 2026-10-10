@@ -5,17 +5,22 @@ package user
 
 import (
 	"testing"
+	"time"
 
 	"forgejo.org/models"
 	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	password_module "forgejo.org/modules/auth/password"
+	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
+	"forgejo.org/modules/test"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"xorm.io/builder"
 )
 
 func TestUpdateUser(t *testing.T) {
@@ -178,4 +183,88 @@ func TestUpdateLastUsableAdmin(t *testing.T) {
 	require.NoError(t, user_model.UpdateUserCols(ctx, u1, "prohibit_login"))
 	require.NoError(t, deactivate(load(2)))
 	assert.False(t, load(2).IsActive)
+}
+
+func TestUpdateUserFromSource(t *testing.T) {
+	ctx := db.DefaultContext
+	// user 1 is the only admin in the fixtures
+	setFlags := func(t *testing.T, id int64, admin, active, prohibitLogin bool) *user_model.User {
+		t.Helper()
+		u := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: id})
+		u.IsAdmin, u.IsActive, u.ProhibitLogin = admin, active, prohibitLogin
+		require.NoError(t, user_model.UpdateUserCols(ctx, u, "is_admin", "is_active", "prohibit_login"))
+		return u
+	}
+	demote := func(t *testing.T, id int64) error {
+		t.Helper()
+		u := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: id})
+		return UpdateUserFromSource(ctx, u, &UpdateOptions{IsAdmin: optional.Some(false), IsRestricted: optional.Some(true)}, "test-source")
+	}
+
+	t.Run("sole admin keeps the flag", func(t *testing.T) {
+		require.NoError(t, unittest.PrepareTestDatabase())
+		logChecker, cleanup := test.NewLogChecker(log.DEFAULT, log.WARN)
+		defer cleanup()
+		logChecker.Filter(`login source "test-source" would remove the admin flag of user1`).StopMark("flag kept")
+
+		require.NoError(t, demote(t, 1))
+		unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1, IsAdmin: true, IsRestricted: true})
+		filtered, stopped := logChecker.Check(5 * time.Second)
+		assert.True(t, stopped)
+		assert.Equal(t, []bool{true}, filtered)
+
+		// the admin UI and API paths still refuse
+		admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+		assert.True(t, models.IsErrDeleteLastAdminUser(UpdateUser(ctx, admin, &UpdateOptions{IsAdmin: optional.Some(false)})))
+	})
+
+	t.Run("another usable admin", func(t *testing.T) {
+		require.NoError(t, unittest.PrepareTestDatabase())
+		setFlags(t, 8, true, true, false)
+		require.NoError(t, demote(t, 1))
+		unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1, IsAdmin: false, IsRestricted: true})
+	})
+
+	t.Run("two usable admins demoted in turn", func(t *testing.T) {
+		require.NoError(t, unittest.PrepareTestDatabase())
+		setFlags(t, 8, true, true, false)
+		require.NoError(t, demote(t, 1))
+		require.NoError(t, demote(t, 8))
+		assert.Equal(t, 1, unittest.GetCount(t, &user_model.User{}, builder.Eq{"is_admin": true}))
+		unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8, IsAdmin: true})
+	})
+
+	for _, other := range []struct {
+		name                  string
+		id                    int64
+		active, prohibitLogin bool
+	}{{"other admin inactive", 8, false, false}, {"other admin prohibited", 8, true, true}, {"other admin is an organization", 3, true, false}} {
+		t.Run(other.name, func(t *testing.T) {
+			require.NoError(t, unittest.PrepareTestDatabase())
+			setFlags(t, other.id, true, other.active, other.prohibitLogin)
+			require.NoError(t, demote(t, 1))
+			unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1, IsAdmin: true})
+		})
+	}
+
+	t.Run("sole admin already inactive", func(t *testing.T) {
+		// like UpdateUser, only the other admins are counted: the flag is kept
+		require.NoError(t, unittest.PrepareTestDatabase())
+		u := setFlags(t, 1, true, false, false)
+		require.NoError(t, UpdateUserFromSource(ctx, u, &UpdateOptions{IsActive: optional.Some(true), IsAdmin: optional.Some(false)}, "test-source"))
+		unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1, IsAdmin: true, IsActive: true})
+	})
+
+	t.Run("other errors are returned", func(t *testing.T) {
+		require.NoError(t, unittest.PrepareTestDatabase())
+		defer test.MockVariableValue(&setting.Service.AllowedUserVisibilityModesSlice, []bool{true, false, false})()
+		u := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+		err := UpdateUserFromSource(ctx, u, &UpdateOptions{IsAdmin: optional.Some(false), Visibility: optional.Some(structs.VisibleTypePrivate)}, "test-source")
+		require.ErrorContains(t, err, "visibility mode not allowed")
+
+		u = unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+		err = UpdateUserFromSource(ctx, u, &UpdateOptions{IsActive: optional.Some(false), IsAdmin: optional.Some(false)}, "test-source")
+		assert.True(t, models.IsErrDeleteLastAdminUser(err), "%v", err)
+		unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1, IsAdmin: true, IsActive: true})
+	})
 }
