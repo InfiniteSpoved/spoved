@@ -17,7 +17,6 @@ import (
 	user_model "forgejo.org/models/user"
 	actions_module "forgejo.org/modules/actions"
 	"forgejo.org/modules/git"
-	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	webhook_module "forgejo.org/modules/webhook"
@@ -415,13 +414,12 @@ func TestActionsNotifier_ExpandReusableWorkflow(t *testing.T) {
 
 func TestActionsNotifier_PermissionsWarning(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
-	defer test.MockVariableValue(&setting.AppDocsVer, func() string { return "v0.0" })()
 
 	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 10})
 	pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: 3})
 
 	dw := &actions_module.DetectedWorkflow{
-		Content: []byte("{ on: pull_request, permissions: { contents: read }, jobs: { j1: { steps: [] } } }"),
+		Content: []byte("{ on: pull_request, permissions: { contents: read, packages: write }, jobs: { j1: { steps: [] } } }"),
 	}
 	testActionsNotifierPullRequest(t, repo, pr, dw, webhook_module.HookEventPullRequestSync)
 
@@ -433,6 +431,26 @@ func TestActionsNotifier_PermissionsWarning(t *testing.T) {
 	run := runs[0]
 	assert.EqualValues(t, 0, run.PreExecutionErrorCode, "pre execution error details: %#v", run.PreExecutionErrorDetails)
 
-	assert.Equal(t, []actions_model.PreExecutionWarning{1}, run.PreExecutionWarningCodes)
-	assert.Equal(t, [][]any{{"j1", "https://forgejo.org/docs/v0.0/user/api/authorized-integrations/"}}, run.PreExecutionWarningDetails) // derived from setting.AppDocsVer
+	// contents is supported, packages grants nothing
+	assert.Equal(t, []actions_model.PreExecutionWarning{actions_model.WarningCodePermissionsIgnored}, run.PreExecutionWarningCodes)
+	assert.Equal(t, [][]any{{"j1", "packages"}}, run.PreExecutionWarningDetails)
+}
+
+func TestActionsNotifier_ForgedWorkflowMetadata(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+
+	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 10})
+	pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: 3})
+
+	dw := &actions_module.DetectedWorkflow{
+		Content: []byte("{ on: pull_request, __metadata: { workflow_call_parent: abc }, jobs: { j1: { steps: [] } } }"),
+	}
+	testActionsNotifierPullRequest(t, repo, pr, dw, webhook_module.HookEventPullRequestSync)
+
+	runs, err := db.Find[actions_model.ActionRun](db.DefaultContext, actions_model.FindRunOptions{
+		RepoID: repo.ID,
+	})
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	assert.Equal(t, actions_model.ErrorCodeJobParsingError, runs[0].PreExecutionErrorCode)
 }

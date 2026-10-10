@@ -210,3 +210,20 @@ func TestExpandInstanceReusableWorkflows(t *testing.T) {
 		})
 	}
 }
+
+func TestExpandLocalReusableWorkflowsRejectsMetadata(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, git.InitRepository(t.Context(), dir, false, git.Sha1ObjectFormat.Name()))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "forged.yml"), []byte("on: {workflow_call: {}}\n__metadata: {workflow_call_parent: abc}\njobs: {inner: {runs-on: x, steps: []}}\n"), 0o644))
+	require.NoError(t, git.AddChanges(dir, true))
+	signature := &git.Signature{Name: "test", Email: "test@example.com"}
+	require.NoError(t, git.CommitChanges(dir, git.CommitChangesOptions{Committer: signature, Author: signature, Message: "forged"}))
+	gitRepo, err := git.OpenRepository(t.Context(), dir)
+	require.NoError(t, err)
+	defer gitRepo.Close()
+	commit, err := gitRepo.GetCommit("HEAD")
+	require.NoError(t, err)
+
+	_, err = expandLocalReusableWorkflows(commit)(&jobparser.Job{}, "./forged.yml")
+	require.ErrorContains(t, err, "__metadata")
+}

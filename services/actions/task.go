@@ -501,6 +501,11 @@ func CreateTaskForRunner(ctx context.Context, runner *actions_model.ActionRunner
 	if requestKey != nil {
 		task.RunnerRequestKey = *requestKey
 	}
+	tokenPermissions, err := jobTokenPermissions(ctx, job)
+	if err != nil {
+		return nil, err
+	}
+	task.TokenPermissions = tokenPermissions.Encode()
 	task.GenerateToken()
 
 	var workflowJob *jobparser.Job

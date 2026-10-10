@@ -65,6 +65,17 @@ func TestTranslatePreExecutionWarning(t *testing.T) {
 			expected: []template.HTML{"Job <code>&lt;img src=x onerror=alert(document.domain)&gt;</code> or its workflow has a <code>permissions</code> field, which is not supported in {product} and will be ignored. Use <a href=\"https://forgejo.org/docs/foo/user/api/authorized-integrations/\">Authorized Integrations</a> to grant capabilities to this job instead."},
 		},
 		{
+			name: "WarningCodePermissionsIgnored",
+			run: &ActionRun{
+				PreExecutionWarningCodes: []PreExecutionWarning{WarningCodePermissionsIgnored},
+				PreExecutionWarningDetails: [][]any{
+					// keys come from the workflow
+					{"job1", "packages, <img src=x>"},
+				},
+			},
+			expected: []template.HTML{"Job <code>job1</code> or its workflow has <code>permissions</code> keys that grant nothing in {product}: <code>packages, &lt;img src=x&gt;</code>. Its token does not get these permissions."},
+		},
+		{
 			name: "MultipleWarnings",
 			run: &ActionRun{
 				PreExecutionWarningCodes: []PreExecutionWarning{WarningCodePermissions, WarningCodePermissions},

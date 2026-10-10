@@ -89,6 +89,48 @@ var _ = registerFunctionTest(apiv1_permissions.RepoAccess, functionTest{
 				SetRepository(),
 			),
 		},
+		{
+			// The Forgejo Actions user token with permissions can write where they grant write
+			data: newTestData(map[string]string{}, newSharedData().
+				SetDoer().SetDoerName(user_model.ActionsUserName).
+				SetDoerActions(true).
+				SetDoerActionsTokenPermissions(`{"1":2}`).
+				SetRepository(),
+			),
+		},
+		{
+			// The Forgejo Actions user token with read-only permissions can't
+			// make a request that writes, although some only need read
+			data: newTestData(map[string]string{}, newSharedData().
+				SetDoer().SetDoerName(user_model.ActionsUserName).
+				SetDoerActions(true).
+				SetDoerActionsTokenPermissions(`{"1":1,"2":1}`).
+				SetRepository(),
+			),
+			error: "Not Found",
+		},
+		{
+			// The Forgejo Actions user token with permissions that grant nothing
+			data: newTestData(map[string]string{}, newSharedData().
+				SetDoer().SetDoerName(user_model.ActionsUserName).
+				SetDoerActions(true).
+				SetDoerActionsTokenPermissions(`{}`).
+				SetRepository(),
+			),
+			error: "Not Found",
+		},
+		{
+			// The Forgejo Actions user token of a forked pull request can't write
+			// even where its permissions grant write
+			data: newTestData(map[string]string{}, newSharedData().
+				SetDoer().SetDoerName(user_model.ActionsUserName).
+				SetDoerActions(true).
+				SetDoerActionsIsForkPullRequest(true).
+				SetDoerActionsTokenPermissions(`{"1":2}`).
+				SetRepository(),
+			),
+			error: "Not Found",
+		},
 	},
 	fulfillNeeds: func(t *testing.T, data *testData) {
 		t.Helper()
