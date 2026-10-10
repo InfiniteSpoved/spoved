@@ -55,7 +55,7 @@ func addAttention(ctx context.Context, issueID int64, userIDs []int64, doerID in
 }
 
 func removeAttention(ctx context.Context, issueID int64, userIDs ...int64) error {
-	if err := issues_model.RemovePullAttention(ctx, issueID, userIDs...); err != nil {
+	if n, err := issues_model.RemovePullAttention(ctx, issueID, userIDs...); err != nil || n == 0 {
 		return err
 	}
 	reindexAttention(ctx, issueID)
@@ -158,6 +158,12 @@ func canChangeAttention(ctx context.Context, doer *user_model.User, issue *issue
 	return slices.Contains(reviewers, doer.ID), err
 }
 
+// CanRemoveAttention returns whether doer may remove other users from the attention set: the author and
+// pulls writers may.
+func CanRemoveAttention(ctx context.Context, doer *user_model.User, issue *issues_model.Issue, perm access_model.Permission) bool {
+	return CanChangeAttention(ctx, doer, issue, perm) && mayAddAnyone(doer, issue, perm)
+}
+
 func mayAddAnyone(doer *user_model.User, issue *issues_model.Issue, perm access_model.Permission) bool {
 	return doer.ID == authorID(issue) || perm.CanWrite(unit.TypePullRequests)
 }
@@ -171,6 +177,16 @@ func AddAttention(ctx context.Context, doer *user_model.User, issue *issues_mode
 	} else if !ok {
 		return ErrAttentionNotAllowed
 	}
+	// involvement first, so that a refusal can't tell whether the user can read the repository or blocked the doer
+	if !mayAddAnyone(doer, issue, perm) && target.ID != authorID(issue) {
+		involved, err := reviewerIDs(ctx, issue.ID, true)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains(involved, target.ID) {
+			return ErrAttentionNotAllowed
+		}
+	}
 	if target.ID <= 0 || !target.IsIndividual() || !target.IsActive || target.ProhibitLogin || user_model.IsBlocked(ctx, target.ID, doer.ID) {
 		return ErrAttentionInvalidTarget
 	}
@@ -181,25 +197,16 @@ func AddAttention(ctx context.Context, doer *user_model.User, issue *issues_mode
 	if !targetPerm.CanRead(unit.TypePullRequests) {
 		return ErrAttentionInvalidTarget
 	}
-	if !mayAddAnyone(doer, issue, perm) && target.ID != authorID(issue) {
-		involved, err := reviewerIDs(ctx, issue.ID, true)
-		if err != nil {
-			return err
-		}
-		if !slices.Contains(involved, target.ID) {
-			return ErrAttentionNotAllowed
-		}
-	}
 	return addAttention(ctx, issue.ID, []int64{target.ID}, doer.ID, issues_model.AttentionManual, reason)
 }
 
 // RemoveAttention removes target from the attention set of the pull request by hand. Anyone may remove
-// themselves.
+// themselves; only the author and pulls writers may remove others.
 func RemoveAttention(ctx context.Context, doer *user_model.User, issue *issues_model.Issue, perm access_model.Permission, target *user_model.User) error {
 	if doer.ID != target.ID {
 		if ok, err := canChangeAttention(ctx, doer, issue, perm); err != nil {
 			return err
-		} else if !ok {
+		} else if !ok || !mayAddAnyone(doer, issue, perm) {
 			return ErrAttentionNotAllowed
 		}
 	}
@@ -272,7 +279,7 @@ func (*attentionNotifier) PullRequestPushCommits(ctx context.Context, doer *user
 }
 
 func clearAttention(ctx context.Context, issueID int64) {
-	if err := issues_model.ClearPullAttention(ctx, issueID); err != nil {
+	if n, err := issues_model.ClearPullAttention(ctx, issueID); err != nil || n == 0 {
 		logAttention(err)
 		return
 	}

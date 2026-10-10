@@ -6,7 +6,7 @@
 				<li class="flex-text-block tw-my-2">
 					<span class="flex-text-inline" data-tooltip-content="{{ctx.Locale.Tr .KindLocaleKey .Doer.GetDisplayName}}{{if .Reason}}: {{.Reason}}{{end}}">{{svg "octicon-hourglass"}}</span>
 					<a class="muted flex-text-inline tw-flex-1 tw-break-anywhere" href="{{.User.HomeLink}}">{{ctx.AvatarUtils.Avatar .User 20}}{{.User.GetDisplayName}}</a>
-					{{if and $.IsSigned (or $.CanChangeAttention (eq $.SignedUserID .UserID))}}
+					{{if and $.IsSigned (or $.CanRemoveAttention (eq $.SignedUserID .UserID))}}
 						<form method="post" action="{{$.Issue.Link}}/attention/remove">
 							<input type="hidden" name="username" value="{{.User.Name}}">
 							<button class="btn interact-fg" aria-label="{{ctx.Locale.Tr "repo.pulls.attention.remove"}}" data-tooltip-content="{{ctx.Locale.Tr "repo.pulls.attention.remove"}}">{{svg "octicon-x"}}</button>

@@ -76,19 +76,19 @@ func AddPullAttention(ctx context.Context, issueID int64, userIDs []int64, doerI
 	})
 }
 
-// RemovePullAttention removes the users from the attention set of the pull request issueID.
-func RemovePullAttention(ctx context.Context, issueID int64, userIDs ...int64) error {
+// RemovePullAttention removes the users from the attention set of the pull request issueID and returns
+// how many were in it.
+func RemovePullAttention(ctx context.Context, issueID int64, userIDs ...int64) (int64, error) {
 	if len(userIDs) == 0 {
-		return nil
+		return 0, nil
 	}
-	_, err := db.GetEngine(ctx).Where("issue_id = ?", issueID).In("user_id", userIDs).Delete(new(PullAttention))
-	return err
+	return db.GetEngine(ctx).Where("issue_id = ?", issueID).In("user_id", userIDs).Delete(new(PullAttention))
 }
 
-// ClearPullAttention empties the attention set of the pull request issueID.
-func ClearPullAttention(ctx context.Context, issueID int64) error {
-	_, err := db.GetEngine(ctx).Where("issue_id = ?", issueID).Delete(new(PullAttention))
-	return err
+// ClearPullAttention empties the attention set of the pull request issueID and returns how many users
+// were in it.
+func ClearPullAttention(ctx context.Context, issueID int64) (int64, error) {
+	return db.GetEngine(ctx).Where("issue_id = ?", issueID).Delete(new(PullAttention))
 }
 
 // GetPullAttentionUserIDs returns the IDs of the users in the attention set of the pull request issueID.

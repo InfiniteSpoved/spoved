@@ -230,7 +230,7 @@ func (o *SearchOptions) WithKeyword(ctx context.Context, doer *user.User, keywor
 	for i, name := range userNames {
 		var id int64
 		if name == "@me" {
-			if doer == nil {
+			if doer == nil || doer.ID <= 0 {
 				// match nothing rather than dropping the filter
 				o.RepoIDs, o.AllPublic = []int64{0}, false
 				continue

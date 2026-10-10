@@ -231,7 +231,8 @@ func TestPullAttentionManual(t *testing.T) {
 			assert.Contains(t, c.changeAttention(t, reviewerSession, "add", author.Name, ""), "error")
 			c.review(t, reviewerSession, "comment")
 			assertAttention(t, issue.ID, involved, author)
-			require.NoError(t, issues_model.ClearPullAttention(ctx, issue.ID))
+			_, err = issues_model.ClearPullAttention(ctx, issue.ID)
+			require.NoError(t, err)
 
 			assert.Contains(t, c.changeAttention(t, reviewerSession, "add", other.Name, ""), "error")
 			assertAttention(t, issue.ID)
@@ -243,6 +244,8 @@ func TestPullAttentionManual(t *testing.T) {
 		t.Run("anyone removes themselves, others can't remove them", func(t *testing.T) {
 			strangerSession := loginUser(t, stranger.Name)
 			assert.Contains(t, c.changeAttention(t, strangerSession, "remove", involved.Name, ""), "error")
+			// a reviewer may add but not remove others
+			assert.Contains(t, c.changeAttention(t, loginUser(t, reviewer.Name), "remove", involved.Name, ""), "error")
 			assertAttention(t, issue.ID, involved, author)
 			c.changeAttention(t, loginUser(t, involved.Name), "remove", involved.Name, "")
 			assertAttention(t, issue.ID, author)
@@ -321,9 +324,14 @@ func TestPullAttentionViews(t *testing.T) {
 			assert.Contains(t, section.Text(), member.Name)
 			tooltip, _ := section.Find("[data-tooltip-content]").First().Attr("data-tooltip-content")
 			assert.Equal(t, "Added by "+repo.OwnerName+": your area", tooltip)
-			// a member of the set may change it
+			// a member of the set may add and remove themselves
 			assert.Equal(t, 1, section.Find(`form[action$="/attention/remove"]`).Length())
 			assert.Equal(t, 1, section.Find(`form[action$="/attention/add"]`).Length())
+			c.changeAttention(t, ownerSession, "add", repo.OwnerName, "")
+			doc = NewHTMLParser(t, memberSession.MakeRequest(t, NewRequest(t, "GET", prLink), http.StatusOK).Body)
+			assert.Equal(t, 1, doc.Find(`#pull-attention form[action$="/attention/remove"]`).Length())
+			assert.Equal(t, 2, NewHTMLParser(t, ownerSession.MakeRequest(t, NewRequest(t, "GET", prLink), http.StatusOK).Body).Find(`#pull-attention form[action$="/attention/remove"]`).Length())
+			c.changeAttention(t, ownerSession, "remove", repo.OwnerName, "")
 			// an empty set
 			empty := NewHTMLParser(t, ownerSession.MakeRequest(t, NewRequest(t, "GET", otherLink), http.StatusOK).Body)
 			assert.Contains(t, empty.Find("#pull-attention").Text(), "Not waiting on anyone")

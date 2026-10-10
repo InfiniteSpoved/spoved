@@ -47,9 +47,13 @@ func TestPullAttention(t *testing.T) {
 	assert.True(t, sets[3][0].Doer.IsGhost())
 	assert.NotContains(t, sets, int64(1)) // an issue, not a pull request
 
-	require.NoError(t, issues_model.RemovePullAttention(ctx, 2, 4))
+	n, err := issues_model.RemovePullAttention(ctx, 2, 4)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n)
 	unittest.AssertNotExistsBean(t, &issues_model.PullAttention{IssueID: 2, UserID: 4})
-	require.NoError(t, issues_model.ClearPullAttention(ctx, 2))
+	n, err = issues_model.ClearPullAttention(ctx, 2)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, n)
 	unittest.AssertCount(t, &issues_model.PullAttention{IssueID: 2}, 0)
 	unittest.AssertCount(t, &issues_model.PullAttention{IssueID: 3}, 1)
 }

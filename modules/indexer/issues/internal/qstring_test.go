@@ -478,6 +478,11 @@ func TestIssueQueryStringMe(t *testing.T) {
 	opts := &SearchOptions{RepoIDs: []int64{1}, AllPublic: true}
 	require.NoError(t, opts.WithKeyword(t.Context(), &user.User{ID: 7}, "attention:@me author:@me"))
 	assert.Equal(t, &SearchOptions{RepoIDs: []int64{1}, AllPublic: true, AttentionID: optional.Some(int64(7)), PosterID: optional.Some(int64(7))}, opts)
+
+	// the Actions user is no one's @me
+	opts = &SearchOptions{RepoIDs: []int64{1}, AllPublic: true}
+	require.NoError(t, opts.WithKeyword(t.Context(), user.NewActionsUser(), "attention:@me"))
+	assert.Equal(t, &SearchOptions{RepoIDs: []int64{0}}, opts)
 }
 
 func TestToken_ParseIssueReference(t *testing.T) {

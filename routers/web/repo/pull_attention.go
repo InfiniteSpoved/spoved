@@ -57,4 +57,5 @@ func preparePullAttention(ctx *context.Context, issue *issues_model.Issue) {
 	}
 	ctx.Data["PullAttention"] = sets[issue.ID]
 	ctx.Data["CanChangeAttention"] = ctx.IsSigned && pull_service.CanChangeAttention(ctx, ctx.Doer, issue, ctx.Repo.Permission)
+	ctx.Data["CanRemoveAttention"] = ctx.IsSigned && pull_service.CanRemoveAttention(ctx, ctx.Doer, issue, ctx.Repo.Permission)
 }
