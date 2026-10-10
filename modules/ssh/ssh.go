@@ -80,6 +80,7 @@ func servEnv(command, gitProtocol string, remote, local net.Addr) []string {
 }
 
 func sessionHandler(session ssh.Session) {
+	refundAuth(session.Context())
 	keyID := session.ConnPermissions().Extensions["forgejo-key-id"]
 
 	command := session.RawCommand()
@@ -203,37 +204,32 @@ func connRateLimit(_ ssh.Context, conn net.Conn) net.Conn {
 	return nil
 }
 
-// connAuth is the auth class attempt of one connection.
-type connAuth struct {
-	attempt  *ratelimit.AuthAttempt
-	refunded bool
-}
-
 type connAuthKey struct{}
 
-// countAuthFailures counts failed public key authentication in the auth class: one token per connection however
-// many keys the client offers (OpenSSH offers every key of the agent), given back when one of them is accepted.
-// The token is taken with the first key, so a limited IP is refused even with a valid key. The handler is called
-// twice for a valid key, so the token is given back once.
+// countAuthFailures counts public key authentication in the auth class: one token per connection however many
+// keys the client offers (OpenSSH offers every key of the agent). The token is taken with the first key, so a
+// limited IP is refused even with a valid key, and given back by refundAuth once the connection really is
+// authenticated. This handler only sees public keys: it runs before the signature is checked, so an accepted key
+// is no proof and never refunds.
 func countAuthFailures(ctx ssh.Context, authenticate func() bool) bool {
-	ca, _ := ctx.Value(connAuthKey{}).(*connAuth)
-	if ca == nil {
+	if _, ok := ctx.Value(connAuthKey{}).(*ratelimit.AuthAttempt); !ok {
 		attempt := ratelimit.StartAuth(ctx.RemoteAddr().String())
 		if !attempt.Allowed {
 			logger.Warn("SSH authentication rate limit exceeded by %s", ctx.RemoteAddr())
 			return false
 		}
-		ca = &connAuth{attempt: attempt}
-		ctx.SetValue(connAuthKey{}, ca)
+		ctx.SetValue(connAuthKey{}, attempt)
 	}
-	if !authenticate() {
-		return false
+	return authenticate()
+}
+
+// refundAuth gives back the token of countAuthFailures, once. The session handler only runs for connections whose
+// signature was verified.
+func refundAuth(ctx ssh.Context) {
+	if attempt, ok := ctx.Value(connAuthKey{}).(*ratelimit.AuthAttempt); ok && attempt != nil {
+		ctx.SetValue(connAuthKey{}, (*ratelimit.AuthAttempt)(nil))
+		attempt.Succeeded()
 	}
-	if !ca.refunded {
-		ca.refunded = true
-		ca.attempt.Succeeded()
-	}
-	return true
 }
 
 func publicKeyHandler(ctx ssh.Context, key ssh.PublicKey) bool {

@@ -119,8 +119,8 @@ func newStubContext(ip string) *stubContext {
 	return &stubContext{values: map[any]any{}, addr: &net.TCPAddr{IP: net.ParseIP(ip), Port: 4000}}
 }
 
-// AC3: a connection costs one auth token however many wrong keys it offers, and a key that is accepted later
-// gives it back
+// AC3: a connection costs one auth token however many wrong keys it offers; an accepted public key (which is no
+// proof, the signature is checked later) refunds nothing, only refundAuth after the session started does, once
 func TestCountAuthFailures(t *testing.T) {
 	sshLimits(t, map[string]setting.RateLimitClass{ratelimit.Auth: {AuthenticatedRate: 0.0001, AuthenticatedBurst: 2}})
 	reject := func() bool { return false }
@@ -131,28 +131,32 @@ func TestCountAuthFailures(t *testing.T) {
 	for range 10 {
 		assert.False(t, countAuthFailures(c1, reject))
 	}
-	// a second connection fails with the second token, the third connection is refused even with a valid key
-	c2 := newStubContext("198.51.100.1")
-	assert.False(t, countAuthFailures(c2, reject))
-	c3 := newStubContext("198.51.100.1")
-	assert.False(t, countAuthFailures(c3, accept))
+	// a second connection takes the second token, the third is refused even with a valid key
+	assert.False(t, countAuthFailures(newStubContext("198.51.100.1"), reject))
+	assert.False(t, countAuthFailures(newStubContext("198.51.100.1"), accept))
 
-	// another IP is not affected: ten wrong keys, then the valid one refunds the token, also when asked twice
-	// (the query and the signed request)
-	c4 := newStubContext("198.51.100.2")
-	for range 10 {
-		assert.False(t, countAuthFailures(c4, reject))
-	}
-	assert.True(t, countAuthFailures(c4, accept))
-	assert.True(t, countAuthFailures(c4, accept))
+	// unknown key, then a victim's public key whose signature then fails: no refund
+	c2 := newStubContext("198.51.100.2")
+	assert.False(t, countAuthFailures(c2, reject))
+	assert.True(t, countAuthFailures(c2, accept))
+	assert.True(t, countAuthFailures(c2, accept)) // the signed request
+	refundAuth(newStubContext("198.51.100.2"))    // other connections' contexts hold nothing
+	assert.False(t, countAuthFailures(newStubContext("198.51.100.2"), reject))
+	assert.False(t, countAuthFailures(newStubContext("198.51.100.2"), accept), "both tokens are spent")
+
+	// an authenticated connection (its session started) gets its token back exactly once
+	c3 := newStubContext("198.51.100.3")
+	assert.True(t, countAuthFailures(c3, accept))
+	assert.True(t, countAuthFailures(c3, accept))
+	refundAuth(c3)
+	refundAuth(c3)
 	for range 2 {
-		assert.False(t, countAuthFailures(newStubContext("198.51.100.2"), reject)) // both tokens were still there
+		assert.True(t, countAuthFailures(newStubContext("198.51.100.3"), accept))
 	}
-	assert.False(t, countAuthFailures(newStubContext("198.51.100.2"), accept)) // and now it is spent
+	assert.False(t, countAuthFailures(newStubContext("198.51.100.3"), accept), "burst 2, refunded once")
 
 	// exempt IPs are never limited
 	for range 5 {
 		assert.True(t, countAuthFailures(newStubContext("192.0.2.1"), accept))
-		assert.False(t, countAuthFailures(newStubContext("192.0.2.1"), reject))
 	}
 }

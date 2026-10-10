@@ -259,6 +259,12 @@ func TestCheckSSH(t *testing.T) {
 	assert.False(t, CheckSSH("[2001:db8:1:1::4]:0", 13).Allowed)
 	assert.True(t, CheckSSH("[2001:db8:1:2::4]:0", 13).Allowed)
 
+	// an IPv4-mapped IPv6 address is the IPv4 address
+	assert.True(t, CheckSSH("198.51.100.20:0", 30).Allowed)
+	assert.True(t, CheckSSH("[::ffff:198.51.100.20]:0", 31).Allowed)
+	assert.True(t, CheckSSH("198.51.100.20:0", 32).Allowed)
+	assert.False(t, CheckSSH("[::ffff:198.51.100.20]:0", 33).Allowed)
+
 	// an empty address skips the IP half, the key half still applies
 	for range 2 {
 		assert.True(t, CheckSSH("", 20).Allowed)

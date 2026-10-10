@@ -630,6 +630,15 @@ func TestRateLimitServ(t *testing.T) {
 	code, _ = servCommand(t, 200, "2001:db8:1:1::4", "git-upload-pack", 1)
 	assert.Equal(t, http.StatusTooManyRequests, code)
 
+	// an IPv4-mapped address is the IPv4 address
+	ratelimit.ResetForTest()
+	for i, ip := range []string{"198.51.100.7", "::ffff:198.51.100.7", "198.51.100.7"} {
+		code, _ = servCommand(t, int64(300+i), ip, "git-upload-pack", 1)
+		assert.NotEqual(t, http.StatusTooManyRequests, code)
+	}
+	code, _ = servCommand(t, 303, "::ffff:198.51.100.7", "git-upload-pack", 1)
+	assert.Equal(t, http.StatusTooManyRequests, code)
+
 	// exempt IPs are never limited
 	for range 6 {
 		code, _ = servCommand(t, 1, "192.0.2.5", "git-upload-pack", 1)
