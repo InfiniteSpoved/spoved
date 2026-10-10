@@ -385,9 +385,10 @@ func TestRateLimitAuthIPEndpoints(t *testing.T) {
 		ratelimit.Auth: {AuthenticatedRate: slow, AuthenticatedBurst: 2},
 	}, "")
 
-	// every request counts, successful or not
+	// every request counts, successful or not; an unknown address, so that no MailResendLimit_<user> cache entry
+	// is left behind for later tests
 	for range 2 {
-		req := NewRequestWithValues(t, "POST", "/user/forgot_password", map[string]string{"email": "user2@example.com"})
+		req := NewRequestWithValues(t, "POST", "/user/forgot_password", map[string]string{"email": "nobody@example.com"})
 		MakeRequest(t, fromIP(req, "192.0.2.1"), http.StatusOK)
 	}
 	for _, path := range []string{"/user/forgot_password", "/user/sign_up", "/user/activate", "/user/recover_account"} {
