@@ -5,10 +5,10 @@ package hcaptcha
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
-	"time"
 )
 
 const (
@@ -19,6 +19,21 @@ const (
 
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
+}
+
+// fakeHCaptcha answers verify requests like hCaptcha does for its test keys, so the test needs no network
+type fakeHCaptcha struct{}
+
+func (fakeHCaptcha) RoundTrip(req *http.Request) (*http.Response, error) {
+	rec := httptest.NewRecorder()
+	if req.URL.String() != verifyURL || req.ParseForm() != nil {
+		rec.WriteHeader(http.StatusBadRequest)
+	} else if req.PostForm.Get("secret") == dummySecret && req.PostForm.Get("response") == dummyToken && req.PostForm.Get("sitekey") == dummySiteKey {
+		rec.WriteString(`{"success":true}`)
+	} else {
+		rec.WriteString(`{"success":false,"error-codes":["invalid-input-response"]}`)
+	}
+	return rec.Result(), nil
 }
 
 func TestCaptcha(t *testing.T) {
@@ -53,9 +68,7 @@ func TestCaptcha(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			client, err := New(tc.Secret, WithHTTP(&http.Client{
-				Timeout: time.Second * 5,
-			}))
+			client, err := New(tc.Secret, WithHTTP(&http.Client{Transport: fakeHCaptcha{}}))
 			if err != nil {
 				// The only error that can be returned from creating a client
 				if tc.Error == ErrMissingInputSecret && err == ErrMissingInputSecret {
