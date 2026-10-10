@@ -145,7 +145,7 @@ func TestPRTitleRuleRefuse(t *testing.T) {
 
 	t.Run("Edit", func(t *testing.T) {
 		pr := createAPI("t-api-ok", "ABC-3 start", http.StatusCreated)
-		patch := func(status int, path string, title string) {
+		patch := func(status int, path, title string) {
 			MakeRequest(t, NewRequestWithJSON(t, "PATCH", fmt.Sprintf("/api/v1/repos/user2/repo1/%s/%d", path, pr.Index), map[string]string{"title": title}).AddTokenAuth(token), status)
 		}
 		patch(http.StatusUnprocessableEntity, "pulls", "nokey")

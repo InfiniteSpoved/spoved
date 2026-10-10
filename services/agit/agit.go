@@ -210,8 +210,7 @@ func ProcReceive(ctx context.Context, repo *repo_model.Repository, gitRepo *git.
 			}
 
 			if err := pull_service.NewPullRequest(ctx, repo, prIssue, []int64{}, []string{}, pr, []int64{}); err != nil {
-				var ruleErr *git_model.ErrPRTitleRule
-				if errors.As(err, &ruleErr) {
+				if ruleErr, ok := errors.AsType[*git_model.ErrPRTitleRule](err); ok {
 					// the git client prints this: the message is user text, drop control characters (ESC)
 					message := cmp.Or(ruleErr.Message, "the title does not follow the title rules of this repository")
 					if ruleErr.Invalid {
