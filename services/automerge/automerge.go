@@ -164,6 +164,27 @@ func StartDueScheduledAutoMerges(ctx context.Context) error {
 	return nil
 }
 
+// canStillMerge reports whether doer, who scheduled the auto merge of pr, may still merge it
+func canStillMerge(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User) (access_model.Permission, bool, error) {
+	if doer == nil || doer.ID <= 0 || !doer.IsActive || doer.ProhibitLogin {
+		return access_model.Permission{}, false, nil
+	}
+	perm, err := access_model.GetUserRepoPermission(ctx, pr.BaseRepo, doer)
+	if err != nil {
+		return perm, false, err
+	}
+	allowed, err := pull_service.IsUserAllowedToMerge(ctx, pr, perm, doer)
+	return perm, allowed, err
+}
+
+// cancelAutoMerge cancels an auto merge whose scheduler may no longer merge
+func cancelAutoMerge(ctx context.Context, pr *issues_model.PullRequest, am *pull_model.AutoMerge) {
+	log.Info("Cancelling the auto merge of %-v: %s may no longer merge it", pr, am.Doer.Name)
+	if err := pull_service.CancelAutoMerge(ctx, pr, am, am.Doer); err != nil {
+		log.Error("%-v CancelAutoMerge: %v", pr, err)
+	}
+}
+
 // StartPRCheckAndAutoMergeBySHA start an automerge check and auto merge task for all pull requests of repository and SHA
 func StartPRCheckAndAutoMergeBySHA(ctx context.Context, sha string, repo *repo_model.Repository) error {
 	return shared_automerge.StartPRCheckAndAutoMergeBySHA(ctx, sha, repo)
@@ -211,6 +232,18 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 	}
 	if pr.BaseRepo.IsArchived {
 		log.Trace("Scheduled auto merge %-v waits: the repository is archived", pr)
+		return
+	}
+
+	// cancel as soon as the user who scheduled it may no longer merge, even while checks are pending
+	doer := scheduledPRM.Doer
+	perm, allowed, err := canStillMerge(ctx, pr, doer)
+	if err != nil {
+		log.Error("%-v canStillMerge: %v", pr, err)
+		return
+	}
+	if !allowed {
+		cancelAutoMerge(ctx, pr, scheduledPRM)
 		return
 	}
 
@@ -285,34 +318,34 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 		return
 	}
 
-	// Merge if all checks succeeded
-	doer, err := user_model.GetUserByID(ctx, scheduledPRM.DoerID)
-	if err != nil {
-		log.Error("Unable to get scheduled User[%d]: %v", scheduledPRM.DoerID, err)
+	// Merge if all checks succeeded, checking the permission again right before the merge
+	if perm, allowed, err = canStillMerge(ctx, pr, doer); err != nil {
+		log.Error("%-v canStillMerge: %v", pr, err)
+		return
+	} else if !allowed {
+		cancelAutoMerge(ctx, pr, scheduledPRM)
 		return
 	}
-
-	perm, err := access_model.GetUserRepoPermission(ctx, pr.BaseRepo, doer)
-	if err != nil {
-		log.Error("GetUserRepoPermission %-v: %v", pr.BaseRepo, err)
-		return
-	}
-
 	if err := pull_service.CheckPullMergeable(ctx, doer, &perm, pr, pull_service.MergeCheckTypeGeneral, false, scheduledPRM.MergeStyle); err != nil {
 		if errors.Is(err, pull_service.ErrUserNotAllowedToMerge) {
-			log.Info("%-v was scheduled to automerge by an unauthorized user", pr)
+			cancelAutoMerge(ctx, pr, scheduledPRM)
 			return
 		}
 		log.Error("%-v CheckPullMergeable: %v", pr, err)
 		return
 	}
 
-	if err := pull_model.DeleteScheduledAutoMerge(ctx, pr.ID); err != nil && !db.IsErrNotExist(err) {
-		log.Error("DeleteScheduledAutoMerge[%d]: %v", pr.ID, err)
+	if deleted, err := pull_model.DeleteAutoMergeByID(ctx, scheduledPRM.ID); err != nil {
+		log.Error("DeleteAutoMergeByID[%d]: %v", pr.ID, err)
+		return
+	} else if !deleted {
+		log.Trace("Auto merge %-v was removed meanwhile", pr)
+		return
 	}
 
-	if err := pull_service.Merge(ctx, pr, doer, baseGitRepo, scheduledPRM.MergeStyle, scheduledPRM.HeadCommitID, scheduledPRM.Message, true); err != nil {
-		log.Error("pull_service.Merge: %v", err)
+	// only merge the head validated above: the merge fetches the head branch, which may have moved since
+	if err := pull_service.Merge(ctx, pr, doer, baseGitRepo, scheduledPRM.MergeStyle, sha, scheduledPRM.Message, true); err != nil {
+		log.Warn("Auto merge of %-v was removed but the merge failed: %v", pr, err)
 		// FIXME: if merge failed, we should display some error message to the pull request page.
 		// The resolution is add a new column on automerge table named `error_message` to store the error message and displayed
 		// on the pull request page. But this should not be finished in a bug fix PR which will be backport to release branch.
