@@ -56,6 +56,15 @@ the test suite itself in the background.
 
 Not yet verified. Fill in after the probe.
 
+## Rules from 10 Oct
+
+- Follow agent-team "Shared with the project team" (coordination issue, develop
+  lock, migration letters, own CI log key, no CI probe commits).
+- One `[T] #N` thread per ticket, really: on 10 Oct one Opus thread ran three
+  tickets with subagents and reached 294k context. Threads run Sonnet unless the
+  ticket is auth/permission/token coding; hand off at ~200k, hard stop at 300k.
+- Run the probe above before the next ticket and record the answers here.
+
 ## Supervisor (main session)
 
 1. Verify state as in agent-team "Supervisor setup" step 2 (open PRs, branches,
