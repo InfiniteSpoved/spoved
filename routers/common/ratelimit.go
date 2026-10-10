@@ -105,16 +105,11 @@ func RateLimitAPI(ctx *context.APIContext) {
 	}
 }
 
-// RateLimitAuthIP counts every request per client IP in the auth class, for endpoints that send mail or create
-// accounts. Credential checks use StartAuthAttempt instead, which only counts failures.
+// RateLimitAuthIP counts every request per client IP in the auth class (and, for IPv6, in the shared /48 bucket), for
+// endpoints that send mail or create accounts. The attempt is never marked Succeeded, so nothing is refunded.
+// Credential checks use StartAuthAttempt instead, which only counts failures.
 func RateLimitAuthIP(ctx *context.Context) {
-	addr := ratelimit.ClientAddr(ctx.Req)
-	if ratelimit.IsExempt(addr) {
-		return
-	}
-	if r := ratelimit.Check(ratelimit.Auth, addr, ratelimit.IPKey(addr), true); !r.Allowed {
-		renderRateLimited(ctx, r)
-	}
+	StartAuthAttempt(ctx)
 }
 
 // StartAuthAttempt starts a credential check counted per client IP and per key in the auth class. When the client
