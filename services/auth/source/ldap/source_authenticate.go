@@ -66,7 +66,7 @@ func (source *Source) Authenticate(ctx context.Context, user *user_model.User, u
 				opts.IsRestricted = optional.Some(sr.IsRestricted)
 			}
 			if opts.IsAdmin.Has() || opts.IsRestricted.Has() {
-				if err := user_service.UpdateUser(ctx, user, opts); err != nil {
+				if err := user_service.UpdateUserFromSource(ctx, user, opts, source.authSource.Name); err != nil {
 					return nil, err
 				}
 			}
