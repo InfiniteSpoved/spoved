@@ -437,6 +437,8 @@ func buildIssueOverview(ctx *context.Context, unitType unit.Type) {
 		filterMode = issues_model.FilterModeReviewRequested
 	case "reviewed_by":
 		filterMode = issues_model.FilterModeReviewed
+	case "attention":
+		filterMode = issues_model.FilterModeAttention
 	case "your_repositories":
 		filterMode = issues_model.FilterModeYourRepositories
 	case "created_by":
@@ -531,6 +533,8 @@ func buildIssueOverview(ctx *context.Context, unitType unit.Type) {
 		opts.ReviewRequestedID = ctx.Doer.ID
 	case issues_model.FilterModeReviewed:
 		opts.ReviewedID = ctx.Doer.ID
+	case issues_model.FilterModeAttention:
+		opts.AttentionUserID = ctx.Doer.ID
 	}
 
 	// keyword holds the search term entered into the search field.
@@ -635,7 +639,7 @@ func buildIssueOverview(ctx *context.Context, unitType unit.Type) {
 	// USING FINAL STATE OF opts FOR A QUERY.
 	var issues issues_model.IssueList
 	{
-		issueIDs, _, err := issue_indexer.SearchIssues(ctx, issue_indexer.ToSearchOptions(ctx, keyword, opts))
+		issueIDs, _, err := issue_indexer.SearchIssues(ctx, issue_indexer.ToSearchOptions(ctx, ctx.Doer, keyword, opts))
 		if err != nil {
 			ctx.ServerError("issueIDsFromSearch", err)
 			return
@@ -662,7 +666,7 @@ func buildIssueOverview(ctx *context.Context, unitType unit.Type) {
 	// -------------------------------
 	// Fill stats to post to ctx.Data.
 	// -------------------------------
-	searchOpts := issue_indexer.ToSearchOptions(ctx, keyword, opts)
+	searchOpts := issue_indexer.ToSearchOptions(ctx, ctx.Doer, keyword, opts)
 	issueStats, err := getUserIssueStats(ctx, ctxUser, filterMode, searchOpts)
 	if err != nil {
 		ctx.ServerError("getUserIssueStats", err)
@@ -692,6 +696,10 @@ func buildIssueOverview(ctx *context.Context, unitType unit.Type) {
 	approvalCounts, err := issues.GetApprovalCounts(ctx)
 	if err != nil {
 		ctx.ServerError("ApprovalCounts", err)
+		return
+	}
+	if ctx.Data["PullAttentionSets"], err = issues.LoadPullAttention(ctx); err != nil {
+		ctx.ServerError("LoadPullAttention", err)
 		return
 	}
 	ctx.Data["ApprovalCounts"] = func(issueID int64, typ string) int64 {
@@ -888,6 +896,7 @@ func getUserIssueStats(ctx *context.Context, ctxUser *user_model.User, filterMod
 		o.MentionID = nil
 		o.ReviewRequestedID = nil
 		o.ReviewedID = nil
+		o.AttentionID = nil
 	})
 
 	var (
@@ -912,6 +921,8 @@ func getUserIssueStats(ctx *context.Context, ctxUser *user_model.User, filterMod
 			openClosedOpts.ReviewRequestedID = optional.Some(doerID)
 		case issues_model.FilterModeReviewed:
 			openClosedOpts.ReviewedID = optional.Some(doerID)
+		case issues_model.FilterModeAttention:
+			openClosedOpts.AttentionID = optional.Some(doerID)
 		}
 		openClosedOpts.IsClosed = optional.Some(false)
 		ret.OpenCount, err = issue_indexer.CountIssues(ctx, openClosedOpts)
@@ -946,6 +957,10 @@ func getUserIssueStats(ctx *context.Context, ctxUser *user_model.User, filterMod
 		return nil, err
 	}
 	ret.ReviewedCount, err = issue_indexer.CountIssues(ctx, opts.Copy(func(o *issue_indexer.SearchOptions) { o.ReviewedID = optional.Some(doerID) }))
+	if err != nil {
+		return nil, err
+	}
+	ret.AttentionCount, err = issue_indexer.CountIssues(ctx, opts.Copy(func(o *issue_indexer.SearchOptions) { o.AttentionID = optional.Some(doerID) }))
 	if err != nil {
 		return nil, err
 	}
