@@ -15,7 +15,6 @@ import (
 	"forgejo.org/modules/auth/password"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/log"
-	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/common"
@@ -269,7 +268,7 @@ func ConnectOpenIDPost(ctx *context.Context) {
 	ctx.Data["EnableOpenIDSignUp"] = setting.Service.EnableOpenIDSignUp
 	ctx.Data["OpenID"] = oid
 
-	attempt := common.StartAuthAttempt(ctx, ratelimit.UserKey(form.UserName))
+	attempt := common.StartAuthAttempt(ctx, auth_method.UserLimitKey(ctx, form.UserName))
 	if attempt == nil {
 		return
 	}

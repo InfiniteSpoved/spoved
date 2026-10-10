@@ -24,7 +24,7 @@ func ListActiveAnnouncements(ctx *context.APIContext) {
 	//   "200":
 	//     "$ref": "#/responses/AnnouncementList"
 
-	banners, err := announcement_service.ActiveForUser(ctx, ctx.Doer())
+	banners, err := announcement_service.ActiveForUser(ctx, ctx.Doer(), nil)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "ActiveForUser", err)
 		return

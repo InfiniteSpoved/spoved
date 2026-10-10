@@ -50,7 +50,7 @@ func (b *Basic) Verify(req *http.Request, w http.ResponseWriter, _ auth.SessionS
 		return &auth.AuthenticationAttemptedIncorrectCredential{Error: errors.New("basic authentication by username & password is disabled")}
 	}
 
-	attempt := ratelimit.StartAuth(req.RemoteAddr, ratelimit.UserKey(uname))
+	attempt := ratelimit.StartAuth(ratelimit.ClientAddr(req), UserLimitKey(req.Context(), uname))
 	if !attempt.Allowed {
 		return &auth.AuthenticationAttemptedIncorrectCredential{Error: attempt.Err()}
 	}
