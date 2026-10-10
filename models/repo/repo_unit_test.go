@@ -4,13 +4,16 @@
 package repo
 
 import (
+	"strings"
 	"testing"
 
 	"forgejo.org/models/perm"
+	"forgejo.org/models/unit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestActionsConfig(t *testing.T) {
@@ -85,4 +88,52 @@ func TestRepoPRGetDefaultUpdateStyle(t *testing.T) {
 		DefaultUpdateStyle: "merge",
 	}
 	assert.Equal(t, UpdateStyleMerge, cfg.GetDefaultUpdateStyle())
+}
+
+func TestWikiConfig(t *testing.T) {
+	wikiType := any(int64(unit.TypeWiki))
+	for _, bs := range []string{"{}", "null"} {
+		r := &RepoUnit{}
+		r.BeforeSet("type", &wikiType)
+		require.NoError(t, r.Config.FromDB([]byte(bs)))
+		assert.Equal(t, &WikiConfig{}, r.WikiConfig(), bs)
+		assert.False(t, r.WikiConfig().FromFolder())
+	}
+
+	cfg := &WikiConfig{Source: WikiSourceFolder, Folder: "docs", Branch: "release#1"}
+	bs, err := cfg.ToDB()
+	require.NoError(t, err)
+	r := &RepoUnit{}
+	r.BeforeSet("type", &wikiType)
+	require.NoError(t, r.Config.FromDB(bs))
+	assert.Equal(t, cfg, r.WikiConfig())
+	assert.True(t, r.WikiConfig().FromFolder())
+
+	// a unit built with another config type reads as the separate wiki
+	assert.Equal(t, &WikiConfig{}, (&RepoUnit{Type: unit.TypeWiki, Config: new(UnitConfig)}).WikiConfig())
+	assert.Equal(t, &WikiConfig{}, (&RepoUnit{Type: unit.TypeWiki}).WikiConfig())
+}
+
+func TestCleanWikiFolder(t *testing.T) {
+	for in, want := range map[string]string{
+		"docs":                   "docs",
+		"docs/":                  "docs",
+		"docs//guide":            "docs/guide",
+		"./docs":                 "docs",
+		"":                       "",
+		".":                      "",
+		"./":                     "",
+		"/":                      "",
+		"/docs":                  "",
+		"..":                     "",
+		"../docs":                "",
+		"docs/../x":              "",
+		"docs/..":                "",
+		"docs\\guide":            "",
+		"docs\x00":               "",
+		strings.Repeat("a", 255): strings.Repeat("a", 255),
+		strings.Repeat("a", 256): "",
+	} {
+		assert.Equal(t, want, CleanWikiFolder(in), "%q", in)
+	}
 }
