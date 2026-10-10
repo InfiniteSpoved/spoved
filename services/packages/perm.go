@@ -29,6 +29,18 @@ func DeterminePackageAccessMode(ctx context.Context, owner, doer *user_model.Use
 	if owner.IsOrganization() {
 		org := organization.OrgFromUser(owner)
 
+		blocked, err := doer.TwoFactorBlocked(ctx, owner)
+		if err != nil {
+			return accessMode, err
+		}
+		if blocked {
+			// a stranger: no team counts
+			if owner.Visibility != api.VisibleTypePrivate && !doer.IsRestricted {
+				accessMode = perm.AccessModeRead
+			}
+			return accessMode, nil
+		}
+
 		if doer != nil && !doer.IsGhost() {
 			// 1. If user is logged in, check all team packages permissions
 			var err error

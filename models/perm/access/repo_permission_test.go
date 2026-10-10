@@ -1,9 +1,16 @@
 package access_test
 
 import (
+	"context"
+	"errors"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	actions_model "forgejo.org/models/actions"
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	perm_model "forgejo.org/models/perm"
 	"forgejo.org/models/perm/access"
@@ -13,6 +20,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/services/authz"
 
+	"code.forgejo.org/xorm/xorm/contexts"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -287,4 +295,239 @@ func TestGetUserRepoPermissionWithReducerToNone(t *testing.T) {
 	perm, err := access.GetUserRepoPermissionWithReducer(t.Context(), repo, user, reducer)
 	require.NoError(t, err)
 	assert.False(t, perm.HasAccess())
+}
+
+func TestGetUserRepoPermissionTwoFactorRequired(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := t.Context()
+
+	requireTwoFactor := func(t *testing.T, orgIDs ...int64) {
+		t.Helper()
+		_, err := db.GetEngine(ctx).In("id", orgIDs).Cols("require_two_factor").Update(&user_model.User{RequireTwoFactor: true})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, err := db.GetEngine(ctx).In("id", orgIDs).Cols("require_two_factor").Update(&user_model.User{RequireTwoFactor: false})
+			require.NoError(t, err)
+		})
+	}
+	loadUser := func(id int64) *user_model.User {
+		return unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: id})
+	}
+	perm := func(t *testing.T, repoID int64, user *user_model.User) *access.Permission {
+		t.Helper()
+		p, err := access.GetUserRepoPermission(ctx, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repoID}), user)
+		require.NoError(t, err)
+		return &p
+	}
+
+	// org3 (public): private repos 3 and 5, public repo 32; user 2 owns it, user 4 writes repo 3 through team1,
+	// user 2 is also a collaborator on repo 3
+	t.Run("flag off", func(t *testing.T) {
+		assert.True(t, perm(t, 3, loadUser(2)).IsOwner())
+		assert.True(t, perm(t, 3, loadUser(4)).CanWrite(unit.TypeCode))
+	})
+
+	t.Run("member without 2FA is a stranger", func(t *testing.T) {
+		requireTwoFactor(t, 3)
+		for _, uid := range []int64{2, 4} {
+			assert.False(t, perm(t, 3, loadUser(uid)).HasAccess(), "user %d", uid)
+			p := perm(t, 32, loadUser(uid))
+			assert.True(t, p.CanRead(unit.TypeCode), "user %d", uid)
+			assert.False(t, p.CanWriteIssuesOrPulls(false), "user %d", uid)
+			assert.False(t, p.IsAdmin(), "user %d", uid)
+		}
+		// anonymous is unchanged
+		assert.False(t, perm(t, 3, nil).HasAccess())
+		assert.True(t, perm(t, 32, nil).CanRead(unit.TypeCode))
+	})
+
+	t.Run("TOTP or WebAuthn restores access", func(t *testing.T) {
+		requireTwoFactor(t, 3)
+		require.NoError(t, db.Insert(ctx, &auth_model.TwoFactor{UID: 2}))
+		assert.True(t, perm(t, 3, loadUser(2)).IsOwner())
+		_, err := db.DeleteByBean(ctx, &auth_model.TwoFactor{UID: 2})
+		require.NoError(t, err)
+		require.NoError(t, db.Insert(ctx, &auth_model.WebAuthnCredential{UserID: 4, Name: "key", CredentialID: []byte("cred-4")}))
+		defer func() {
+			_, err := db.DeleteByBean(ctx, &auth_model.WebAuthnCredential{UserID: 4})
+			require.NoError(t, err)
+		}()
+		assert.True(t, perm(t, 3, loadUser(4)).CanWrite(unit.TypeCode))
+		assert.False(t, perm(t, 3, loadUser(2)).HasAccess())
+	})
+
+	t.Run("site admin, the organization itself and pseudo users are exempt", func(t *testing.T) {
+		requireTwoFactor(t, 3)
+		assert.True(t, perm(t, 3, loadUser(1)).IsOwner())
+		// deploy-key pushes run as the repository owner
+		assert.True(t, perm(t, 3, loadUser(3)).IsOwner())
+		assert.True(t, perm(t, 32, user_model.NewActionsUser()).CanRead(unit.TypeCode))
+		assert.False(t, perm(t, 3, user_model.NewGhostUser()).HasAccess())
+	})
+
+	t.Run("auditor without 2FA is not raised", func(t *testing.T) {
+		requireTwoFactor(t, 3)
+		auditor := loadUser(8)
+		auditor.IsAuditor = true
+		p, err := access.GetUserRepoReadPermission(ctx, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3}), auditor, nil)
+		require.NoError(t, err)
+		assert.False(t, p.HasAccess())
+		p, err = access.GetUserRepoReadPermission(ctx, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 32}), auditor, nil)
+		require.NoError(t, err)
+		assert.True(t, p.CanRead(unit.TypeCode))
+		// the reducer still applies
+		reducer := authz.NewMockAuthorizationReducer(t)
+		reducer.On("ReduceRepoAccess", mock.Anything, mock.Anything, mock.Anything).Return(perm_model.AccessModeNone, nil)
+		p, err = access.GetUserRepoReadPermission(ctx, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 32}), auditor, reducer)
+		require.NoError(t, err)
+		assert.False(t, p.HasAccess())
+	})
+
+	t.Run("private and limited organizations", func(t *testing.T) {
+		requireTwoFactor(t, 22, 23)
+		// user 5 is a member of the private org 23, user 4 a collaborator on its public repo 40
+		assert.False(t, perm(t, 40, loadUser(5)).HasAccess())
+		assert.False(t, perm(t, 40, loadUser(4)).HasAccess())
+		assert.False(t, perm(t, 41, loadUser(5)).HasAccess())
+		// a public repo of a limited org stays readable, as for every signed-in user
+		assert.True(t, perm(t, 38, loadUser(2)).CanRead(unit.TypeCode))
+		assert.False(t, perm(t, 39, loadUser(2)).HasAccess())
+	})
+
+	t.Run("restricted user is never raised", func(t *testing.T) {
+		requireTwoFactor(t, 17)
+		// user 29 is restricted and a member of org17
+		assert.False(t, perm(t, 23, loadUser(29)).HasAccess())
+		assert.False(t, perm(t, 24, loadUser(29)).HasAccess())
+	})
+
+	t.Run("an unflagged organization adds no query", func(t *testing.T) {
+		var queries []string
+		defer onSQL(t, func(sql string) error {
+			if strings.Contains(sql, "FROM `two_factor`") || strings.Contains(sql, "FROM `webauthn_credential`") {
+				queries = append(queries, sql)
+			}
+			return nil
+		})()
+		perm(t, 3, loadUser(2))
+		assert.Empty(t, queries)
+		requireTwoFactor(t, 3)
+		perm(t, 3, loadUser(2))
+		assert.NotEmpty(t, queries)
+	})
+
+	t.Run("a lookup error is returned, never the normal permission", func(t *testing.T) {
+		requireTwoFactor(t, 3)
+		defer onSQL(t, func(sql string) error {
+			if strings.Contains(sql, "FROM `two_factor`") {
+				return errors.New("lookup failed")
+			}
+			return nil
+		})()
+		_, err := access.GetUserRepoPermission(ctx, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3}), loadUser(2))
+		require.Error(t, err)
+	})
+}
+
+var (
+	sqlHookOnce sync.Once
+	sqlHookFunc atomic.Pointer[func(string) error]
+)
+
+type sqlHook struct{}
+
+func (sqlHook) BeforeProcess(c *contexts.ContextHook) (context.Context, error) {
+	if f := sqlHookFunc.Load(); f != nil {
+		if err := (*f)(c.SQL); err != nil {
+			return nil, err
+		}
+	}
+	// xorm keeps the context of the last hook, and db.TracingHook needs its own
+	return db.TracingHook{}.BeforeProcess(c)
+}
+
+func (sqlHook) AfterProcess(*contexts.ContextHook) error { return nil }
+
+// onSQL calls f with every SQL statement until the returned func is called; an error from f fails the statement.
+func onSQL(t *testing.T, f func(string) error) func() {
+	t.Helper()
+	sqlHookOnce.Do(func() {
+		engine, err := db.GetMasterEngine(db.GetEngine(db.DefaultContext))
+		require.NoError(t, err)
+		engine.AddHook(sqlHook{})
+	})
+	sqlHookFunc.Store(&f)
+	return func() { sqlHookFunc.Store(nil) }
+}
+
+// TwoFactorHiddenRepoCond hides exactly the repositories GetUserRepoPermission refuses because of the
+// organization's two-factor requirement, and no list built on AccessibleRepositoryCondition shows a refused one.
+func TestTwoFactorHiddenRepoCondMatchesPermission(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := t.Context()
+	flagged := []int64{3, 17, 22, 23}
+	_, err := db.GetEngine(ctx).In("id", flagged).Cols("require_two_factor").Update(&user_model.User{RequireTwoFactor: true})
+	require.NoError(t, err)
+
+	var users []*user_model.User
+	require.NoError(t, db.GetEngine(ctx).Where("type <> ?", user_model.UserTypeOrganization).Find(&users))
+	var repos []*repo_model.Repository
+	require.NoError(t, db.GetEngine(ctx).In("owner_id", flagged).Find(&repos))
+	auditor := false
+	for _, u := range users {
+		if u.ID == 8 {
+			u.IsAuditor = true
+			auditor = true
+		}
+		var visible, notHidden []int64
+		require.NoError(t, db.GetEngine(ctx).Table("repository").In("owner_id", flagged).
+			And(repo_model.AccessibleRepositoryCondition(u, unit.TypeInvalid)).Cols("id").Find(&visible))
+		require.NoError(t, db.GetEngine(ctx).Table("repository").In("owner_id", flagged).
+			And(repo_model.TwoFactorHiddenRepoCond(u.ID)).Cols("id").Find(&notHidden))
+		for _, repo := range repos {
+			p, err := access.GetUserRepoReadPermission(ctx, repo, u, nil)
+			require.NoError(t, err)
+			require.NoError(t, repo.LoadOwner(ctx))
+			blocked, err := u.TwoFactorBlocked(ctx, repo.Owner)
+			require.NoError(t, err)
+			if !p.HasAccess() {
+				assert.NotContains(t, visible, repo.ID, "user %d repo %d", u.ID, repo.ID)
+			}
+			assert.Equal(t, blocked && !p.HasAccess(), !slices.Contains(notHidden, repo.ID), "user %d repo %d", u.ID, repo.ID)
+		}
+	}
+	assert.True(t, auditor)
+}
+
+// SearchRepositoryCondition skips AccessibleRepositoryCondition for the actor's own list and for auditors.
+func TestSearchRepositoryTwoFactorRequired(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := t.Context()
+	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+
+	// the condition adds no query, flagged or not
+	queries := func() int {
+		n := 0
+		defer onSQL(t, func(string) error { n++; return nil })()
+		_, _, err := repo_model.SearchRepository(ctx, &repo_model.SearchRepoOptions{Actor: user2, Private: true, ListOptions: db.ListOptions{Page: 1, PageSize: 10}})
+		require.NoError(t, err)
+		return n
+	}
+	unflagged := queries()
+	_, err := db.GetEngine(ctx).ID(3).Cols("require_two_factor").Update(&user_model.User{RequireTwoFactor: true})
+	require.NoError(t, err)
+	assert.Equal(t, unflagged, queries())
+
+	ids, _, err := repo_model.SearchRepositoryIDs(ctx, &repo_model.SearchRepoOptions{Actor: user2, OwnerID: 2, Private: true})
+	require.NoError(t, err)
+	assert.NotContains(t, ids, int64(3))
+	assert.Contains(t, ids, int64(1)) // own repositories stay
+
+	auditor := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8})
+	auditor.IsAuditor = true
+	ids, _, err = repo_model.SearchRepositoryIDs(ctx, &repo_model.SearchRepoOptions{Actor: auditor, AuditorView: true, Private: true, ListOptions: db.ListOptionsAll})
+	require.NoError(t, err)
+	assert.NotContains(t, ids, int64(3))
+	assert.Contains(t, ids, int64(32))
+	assert.Contains(t, ids, int64(41)) // other organizations stay
 }

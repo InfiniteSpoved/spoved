@@ -169,9 +169,9 @@ func HandleOrgAssignment(ctx *Context, args ...bool) {
 		ctx.Org.IsTeamAdmin = true
 		ctx.Org.CanCreateOrgRepo = true
 	} else if ctx.IsSigned {
-		ctx.Org.IsOwner, err = org.IsOwnedBy(ctx, ctx.Doer.ID)
+		ctx.Org.IsOwner, err = org.IsActingOwner(ctx, ctx.Doer)
 		if err != nil {
-			ctx.ServerError("IsOwnedBy", err)
+			ctx.ServerError("IsActingOwner", err)
 			return
 		}
 
@@ -282,6 +282,15 @@ func HandleOrgAssignment(ctx *Context, args ...bool) {
 		}
 
 		ctx.Org.IsTeamAdmin = ctx.Org.Team.IsOwnerTeam() || ctx.Org.Team.AccessMode >= perm.AccessModeAdmin
+		if ctx.Org.IsTeamAdmin && ctx.IsSigned {
+			// a member the organization's two-factor requirement blocks can't manage teams
+			blocked, err := ctx.Doer.TwoFactorBlocked(ctx, org.AsUser())
+			if err != nil {
+				ctx.ServerError("TwoFactorBlocked", err)
+				return
+			}
+			ctx.Org.IsTeamAdmin = !blocked
+		}
 		ctx.Data["IsTeamAdmin"] = ctx.Org.IsTeamAdmin
 		if requireTeamAdmin && !ctx.Org.IsTeamAdmin {
 			ctx.NotFound("OrgAssignment", err)

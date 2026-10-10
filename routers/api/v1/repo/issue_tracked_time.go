@@ -599,6 +599,7 @@ func ListMyTrackedTimes(ctx *context.APIContext) {
 	opts := &issues_model.FindTrackedTimesOptions{
 		ListOptions: utils.GetListOptions(ctx),
 		UserID:      ctx.Doer().ID,
+		ViewerID:    ctx.Doer().ID,
 	}
 
 	var err error

@@ -764,6 +764,7 @@ func GetTeamRepos(ctx *context.APIContext) {
 		ListOptions:          utils.GetListOptions(ctx),
 		TeamID:               team.ID,
 		AuthorizationReducer: ctx.Reducer(),
+		UserID:               ctx.Doer().ID,
 	})
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "GetTeamRepos", err)

@@ -59,7 +59,7 @@ func ForRepos(ctx context.Context, repoIDs []int64, admin bool, doer *user_model
 			return nil, false, err
 		}
 		if owner := repos[0].Owner; owner.IsOrganization() {
-			if isOwner, err = organization.IsOrganizationOwner(ctx, owner.ID, doer.ID); err != nil {
+			if isOwner, err = organization.OrgFromUser(owner).IsActingOwner(ctx, doer); err != nil {
 				return nil, false, err
 			}
 			isMember, err := organization.IsOrganizationMember(ctx, owner.ID, doer.ID)

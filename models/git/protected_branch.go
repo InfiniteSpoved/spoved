@@ -244,7 +244,11 @@ func (protectBranch *ProtectedBranch) IsAdminExempt(ctx context.Context, user *u
 	if protectBranch.OrgID == 0 {
 		return isRepoAdmin, nil
 	}
-	return organization.IsOrganizationOwner(ctx, protectBranch.OrgID, user.ID)
+	org, err := organization.GetOrgByID(ctx, protectBranch.OrgID)
+	if err != nil {
+		return false, err
+	}
+	return org.IsActingOwner(ctx, user)
 }
 
 // IsUserMergeWhitelisted checks if some user is whitelisted to merge to this branch
