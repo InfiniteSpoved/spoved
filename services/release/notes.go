@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"forgejo.org/models/db"
@@ -34,6 +35,8 @@ type GenerateNotesOptions struct {
 	Target          string
 	PreviousTagName string
 	ConfigFilePath  string
+	// IncludeDirectCommits lists the commits of the range that are not the merge of a pull request.
+	IncludeDirectCommits bool
 }
 
 type notesConfig struct {
@@ -43,8 +46,12 @@ type notesConfig struct {
 			Authors []string `yaml:"authors"`
 		} `yaml:"exclude"`
 		Categories []struct {
-			Title  string   `yaml:"title"`
-			Labels []string `yaml:"labels"`
+			Title   string   `yaml:"title"`
+			Labels  []string `yaml:"labels"`
+			Exclude struct {
+				Labels  []string `yaml:"labels"`
+				Authors []string `yaml:"authors"`
+			} `yaml:"exclude"`
 		} `yaml:"categories"`
 	} `yaml:"changelog"`
 }
@@ -109,7 +116,104 @@ func GenerateReleaseNotes(ctx context.Context, repo *repo_model.Repository, gitR
 	if err != nil {
 		return "", err
 	}
-	return renderNotes(repo.HTMLURL(), prs, cfg, prevTag, opts.TagName, len(commits) == maxNotesCommits), nil
+
+	var extras notesExtras
+	if extras.contributors, err = findNewContributors(ctx, repo.ID, prs, cfg); err != nil {
+		return "", err
+	}
+	if opts.IncludeDirectCommits {
+		merged := make(map[string]bool, len(prs))
+		for _, pr := range prs {
+			merged[pr.MergedCommitID] = true
+		}
+		if extras.commits, err = firstParentCommits(gitRepo, end, prev, merged); err != nil {
+			return "", err
+		}
+	}
+	return renderNotes(repo.HTMLURL(), prs, cfg, extras, prevTag, opts.TagName, len(commits) == maxNotesCommits), nil
+}
+
+type newContributor struct {
+	name  string
+	index int64
+}
+
+type directCommit struct {
+	title, author, sha string
+}
+
+type notesExtras struct {
+	contributors []newContributor
+	commits      []directCommit
+}
+
+func isExcludedAuthor(authors []string, name string) bool {
+	return slices.ContainsFunc(authors, func(a string) bool { return strings.EqualFold(a, name) })
+}
+
+// findNewContributors returns the authors whose earliest merged pull request in the repository is in prs (sorted by merge time).
+// It runs one query for all authors, and prs holds at most maxNotesCommits entries.
+func findNewContributors(ctx context.Context, repoID int64, prs issues_model.PullRequestList, cfg *notesConfig) ([]newContributor, error) {
+	first := make(map[int64]*issues_model.PullRequest, len(prs))
+	var order []int64
+	prIDs := make([]int64, 0, len(prs))
+	for _, pr := range prs {
+		prIDs = append(prIDs, pr.ID)
+		if pr.Issue.PosterID <= 0 || isExcludedAuthor(cfg.Changelog.Exclude.Authors, pr.Issue.Poster.Name) || first[pr.Issue.PosterID] != nil {
+			continue
+		}
+		first[pr.Issue.PosterID] = pr
+		order = append(order, pr.Issue.PosterID)
+	}
+	if len(order) == 0 {
+		return nil, nil
+	}
+	var earlier []struct {
+		PosterID int64 `xorm:"poster_id"`
+		First    int64 `xorm:"first"`
+	}
+	if err := db.GetEngine(ctx).Table("pull_request").Join("INNER", "issue", "issue.id = pull_request.issue_id").
+		Select("issue.poster_id AS poster_id, MIN(pull_request.merged_unix) AS first").
+		Where(builder.Eq{"pull_request.base_repo_id": repoID, "pull_request.has_merged": true}).
+		In("issue.poster_id", order).NotIn("pull_request.id", prIDs).
+		GroupBy("issue.poster_id").Find(&earlier); err != nil {
+		return nil, err
+	}
+	var contributors []newContributor
+	for _, e := range earlier {
+		if pr := first[e.PosterID]; e.First < int64(pr.MergedUnix) {
+			delete(first, e.PosterID)
+		}
+	}
+	for _, id := range order {
+		if pr, ok := first[id]; ok {
+			contributors = append(contributors, newContributor{pr.Issue.Poster.Name, pr.Issue.Index})
+		}
+	}
+	return contributors, nil
+}
+
+// firstParentCommits returns the first-parent commits of prev..end that are not in merged (the merge commits of pull requests).
+func firstParentCommits(gitRepo *git.Repository, end, prev *git.Commit, merged map[string]bool) ([]directCommit, error) {
+	rng := end.ID.String()
+	if prev != nil {
+		rng = prev.ID.String() + ".." + rng
+	}
+	stdout, _, err := git.NewCommand(gitRepo.Ctx, "log", "--first-parent", "--reverse", "--format=%H%x00%an%x00%s%x00").
+		AddOptionValues("--max-count", strconv.Itoa(maxNotesCommits)).
+		AddDynamicArguments(rng).
+		RunStdString(&git.RunOpts{Dir: gitRepo.Path})
+	if err != nil {
+		return nil, err
+	}
+	var commits []directCommit
+	fields := strings.Split(stdout, "\x00")
+	for ; len(fields) > 3; fields = fields[3:] {
+		if sha := strings.TrimSpace(fields[0]); !merged[sha] {
+			commits = append(commits, directCommit{title: fields[2], author: fields[1], sha: sha})
+		}
+	}
+	return commits, nil
 }
 
 // findPreviousTag returns the nearest tag reachable from endSHA other than tagName, or "" if there is none.
@@ -159,16 +263,19 @@ func escapeMarkdown(s string) string {
 	return markdownPunct.ReplaceAllString(strings.NewReplacer("\r", " ", "\n", " ").Replace(s), `\$0`)
 }
 
-func renderNotes(repoURL string, prs issues_model.PullRequestList, cfg *notesConfig, prevTag, tagName string, truncated bool) string {
+func renderNotes(repoURL string, prs issues_model.PullRequestList, cfg *notesConfig, extras notesExtras, prevTag, tagName string, truncated bool) string {
 	type category struct {
-		title  string
-		labels []string
-		lines  []string
+		title   string
+		labels  []string
+		exclude struct{ Labels, Authors []string }
+		lines   []string
 	}
 	var categories []*category
 	if cfg != nil {
 		for _, c := range cfg.Changelog.Categories {
-			categories = append(categories, &category{title: c.Title, labels: c.Labels})
+			cat := &category{title: c.Title, labels: c.Labels}
+			cat.exclude.Labels, cat.exclude.Authors = c.Exclude.Labels, c.Exclude.Authors
+			categories = append(categories, cat)
 		}
 	}
 	other := &category{title: "Other Changes", labels: []string{"*"}}
@@ -180,13 +287,18 @@ func renderNotes(repoURL string, prs issues_model.PullRequestList, cfg *notesCon
 		for _, l := range issue.Labels {
 			labels = append(labels, l.Name)
 		}
-		if cfg != nil && (slices.ContainsFunc(cfg.Changelog.Exclude.Authors, func(a string) bool { return strings.EqualFold(a, issue.Poster.Name) }) ||
-			slices.ContainsFunc(labels, func(l string) bool { return slices.Contains(cfg.Changelog.Exclude.Labels, l) })) {
+		hasLabel := func(wanted []string) bool {
+			return slices.ContainsFunc(labels, func(l string) bool { return slices.Contains(wanted, l) })
+		}
+		if cfg != nil && (isExcludedAuthor(cfg.Changelog.Exclude.Authors, issue.Poster.Name) || hasLabel(cfg.Changelog.Exclude.Labels)) {
 			continue
 		}
 		line := fmt.Sprintf("* %s by @%s in #%d", escapeMarkdown(issue.Title), issue.Poster.Name, issue.Index)
 		for _, c := range categories {
-			if slices.Contains(c.labels, "*") || slices.ContainsFunc(labels, func(l string) bool { return slices.Contains(c.labels, l) }) {
+			if isExcludedAuthor(c.exclude.Authors, issue.Poster.Name) || hasLabel(c.exclude.Labels) {
+				continue
+			}
+			if slices.Contains(c.labels, "*") || hasLabel(c.labels) {
 				c.lines = append(c.lines, line)
 				break
 			}
@@ -203,6 +315,18 @@ func renderNotes(repoURL string, prs issues_model.PullRequestList, cfg *notesCon
 			fmt.Fprintf(&sb, "### %s\n", escapeMarkdown(c.title))
 		}
 		sb.WriteString(strings.Join(c.lines, "\n") + "\n")
+	}
+	if len(extras.commits) > 0 {
+		sb.WriteString("### Direct commits\n")
+		for _, c := range extras.commits {
+			fmt.Fprintf(&sb, "* %s by %s ([%s](%s/commit/%s))\n", escapeMarkdown(c.title), escapeMarkdown(c.author), c.sha[:min(10, len(c.sha))], repoURL, c.sha)
+		}
+	}
+	if len(extras.contributors) > 0 {
+		sb.WriteString("\n## New Contributors\n")
+		for _, c := range extras.contributors {
+			fmt.Fprintf(&sb, "* @%s made their first contribution in #%d\n", c.name, c.index)
+		}
 	}
 	if truncated {
 		fmt.Fprintf(&sb, "\n_Only the latest %d commits were scanned._\n", maxNotesCommits)

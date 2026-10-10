@@ -336,6 +336,8 @@ func GenerateReleaseNotes(ctx *context.APIContext) {
 		Target:          form.Target,
 		PreviousTagName: form.PreviousTagName,
 		ConfigFilePath:  form.ConfigurationFilePath,
+
+		IncludeDirectCommits: form.IncludeDirectCommits,
 	})
 	if errors.Is(err, util.ErrNotExist) {
 		ctx.Error(http.StatusNotFound, "GenerateReleaseNotes", err)

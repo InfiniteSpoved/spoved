@@ -9,6 +9,7 @@ import (
 
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
+	"forgejo.org/routers/common"
 	"forgejo.org/services/context"
 	archiver_service "forgejo.org/services/repository/archiver"
 )
@@ -40,6 +41,15 @@ func DownloadArchive(ctx *context.APIContext) {
 	r, err := archiver_service.NewRequest(ctx, ctx.Repo().Repository.ID, ctx.Repo().GitRepo, ctx.Params("*"), tp)
 	if err != nil {
 		ctx.ServerError("NewRequest", err)
+		return
+	}
+
+	need, err := r.NeedsBuild(ctx)
+	if err != nil {
+		ctx.ServerError("NeedsBuild", err)
+		return
+	}
+	if need && !common.ChargeHeavyAPI(ctx) {
 		return
 	}
 
