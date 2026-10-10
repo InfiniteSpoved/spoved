@@ -67,8 +67,8 @@ test('PR: Add a user to the attention set and remove them', async ({page}) => {
   const response = await page.goto('/user2/repo1/pulls/5');
   expect(response?.status()).toBe(200);
   const attention = page.locator('#pull-attention');
-  await attention.locator('input[name="username"]').fill('user4');
-  await attention.locator('input[name="reason"]').fill('Please check the docs');
+  await attention.getByRole('textbox', {name: 'Username'}).fill('user4');
+  await attention.getByRole('textbox', {name: 'Reason (optional)'}).fill('Please check the docs');
   await attention.getByRole('button', {name: 'Add'}).click();
 
   const member = page.locator('#pull-attention li').filter({hasText: 'user4'});
