@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/models/perm"
+	repo_model "forgejo.org/models/repo"
 	unit_model "forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
@@ -220,6 +222,96 @@ func TestActionsScheduledDispatch(t *testing.T) {
 			assert.Equal(t, "ref_changed", rows[0].CancelReason)
 			assert.Empty(t, unittest.AssertExistsAndLoadBean(t, &actions_model.ActionScheduledDispatch{ID: rows[0].ID}).Inputs)
 			del(ownerToken, rows[0].ID, http.StatusNoContent)
+		})
+
+		t.Run("a job token cannot schedule", func(t *testing.T) {
+			// the Actions user has no account to run as later
+			task := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionTask{ID: 47})
+			task.RepoID = repo.ID
+			task.OwnerID = repo.OwnerID
+			task.TokenPermissions = ""
+			task.GenerateToken()
+			require.NoError(t, actions_model.UpdateTask(t.Context(), task, "repo_id", "owner_id", "token_permissions", "token", "token_salt", "token_hash", "token_last_eight"))
+			schedule(task.Token, "dispatch.yml", time.Now().Add(time.Hour), in, http.StatusForbidden)
+			assert.Zero(t, unittest.GetCount(t, &actions_model.ActionScheduledDispatch{RepoID: repo.ID}))
+		})
+
+		t.Run("limits and refusals at scheduling", func(t *testing.T) {
+			big := map[string]string{"who": strings.Repeat("x", 65<<10)}
+			schedule(ownerToken, "dispatch.yml", time.Now().Add(time.Hour), big, http.StatusBadRequest)
+
+			fresh, err := repo_model.GetRepositoryByID(t.Context(), repo.ID)
+			require.NoError(t, err)
+			ru, err := fresh.GetUnit(t.Context(), unit_model.TypeActions)
+			require.NoError(t, err)
+			ru.ActionsConfig().DisableWorkflow("dispatch.yml")
+			require.NoError(t, repo_model.UpdateRepoUnit(t.Context(), ru))
+			schedule(ownerToken, "dispatch.yml", time.Now().Add(time.Hour), in, http.StatusBadRequest)
+			ru.ActionsConfig().EnableWorkflow("dispatch.yml")
+			require.NoError(t, repo_model.UpdateRepoUnit(t.Context(), ru))
+			assert.Zero(t, unittest.GetCount(t, &actions_model.ActionScheduledDispatch{RepoID: repo.ID}))
+		})
+
+		t.Run("cancel codes when the run starts", func(t *testing.T) {
+			now := time.Now()
+			good := schedule(ownerToken, "dispatch.yml", now.Add(time.Hour), in, http.StatusCreated)
+			commitID := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionScheduledDispatch{ID: good.ID}).CommitID
+			require.NoError(t, actions_model.DeleteScheduledDispatch(t.Context(), repo.ID, good.ID))
+			before := countRuns()
+			runAt := timeutil.TimeStamp(now.Add(time.Hour).Unix())
+			ref := "refs/heads/" + repo.DefaultBranch
+
+			cases := []struct {
+				reason string
+				row    actions_model.ActionScheduledDispatch
+			}{
+				{"workflow_missing", actions_model.ActionScheduledDispatch{WorkflowID: "nope.yml", Inputs: "{}"}},
+				{"trigger_missing", actions_model.ActionScheduledDispatch{WorkflowID: "push.yml", Inputs: "{}"}},
+				{"inputs_invalid", actions_model.ActionScheduledDispatch{WorkflowID: "dispatch.yml", Inputs: "{}"}}, // required input missing
+				{"internal_error", actions_model.ActionScheduledDispatch{WorkflowID: "dispatch.yml", Inputs: "not json"}},
+			}
+			for _, c := range cases {
+				c.row.RepoID, c.row.DoerID, c.row.Ref, c.row.CommitID, c.row.RunAt = repo.ID, owner.ID, ref, commitID, runAt
+				require.NoError(t, actions_model.InsertScheduledDispatch(t.Context(), &c.row))
+			}
+			// a row claimed an hour ago by a crashed process is interrupted, never run
+			stale := actions_model.ActionScheduledDispatch{RepoID: repo.ID, DoerID: owner.ID, Ref: ref, CommitID: commitID, RunAt: runAt, WorkflowID: "dispatch.yml", Inputs: `{"who":"me"}`, Status: actions_model.ScheduledDispatchClaimed}
+			require.NoError(t, actions_model.InsertScheduledDispatch(t.Context(), &stale))
+			_, err := db.GetEngine(t.Context()).Exec("UPDATE action_scheduled_dispatch SET updated = ? WHERE id = ?", now.Add(-time.Hour).Unix(), stale.ID)
+			require.NoError(t, err)
+
+			timeutil.MockSet(now.Add(time.Hour + time.Minute))
+			defer timeutil.MockUnset()
+			require.NoError(t, actions_service.StartDueScheduledDispatches(t.Context()))
+			assert.Equal(t, before, countRuns())
+			reasons := map[string]int{}
+			for _, row := range list(ownerToken, http.StatusOK) {
+				assert.Equal(t, "cancelled", row.Status)
+				reasons[row.CancelReason]++
+			}
+			assert.Equal(t, map[string]int{"workflow_missing": 1, "trigger_missing": 1, "inputs_invalid": 1, "internal_error": 1, "interrupted": 1}, reasons)
+			require.NoError(t, actions_model.DeleteScheduledDispatchesByRepo(t.Context(), repo.ID))
+
+			// disabled after it was scheduled
+			disabled := actions_model.ActionScheduledDispatch{RepoID: repo.ID, DoerID: owner.ID, Ref: ref, CommitID: commitID, RunAt: runAt, WorkflowID: "dispatch.yml", Inputs: `{"who":"me"}`}
+			require.NoError(t, actions_model.InsertScheduledDispatch(t.Context(), &disabled))
+			fresh, err := repo_model.GetRepositoryByID(t.Context(), repo.ID)
+			require.NoError(t, err)
+			ru, err := fresh.GetUnit(t.Context(), unit_model.TypeActions)
+			require.NoError(t, err)
+			ru.ActionsConfig().DisableWorkflow("dispatch.yml")
+			require.NoError(t, repo_model.UpdateRepoUnit(t.Context(), ru))
+			defer func() {
+				ru.ActionsConfig().EnableWorkflow("dispatch.yml")
+				require.NoError(t, repo_model.UpdateRepoUnit(t.Context(), ru))
+			}()
+
+			require.NoError(t, actions_service.StartDueScheduledDispatches(t.Context()))
+			assert.Equal(t, before, countRuns())
+			rows := list(ownerToken, http.StatusOK)
+			require.Len(t, rows, 1)
+			assert.Equal(t, "workflow_disabled", rows[0].CancelReason)
+			require.NoError(t, actions_model.DeleteScheduledDispatchesByRepo(t.Context(), repo.ID))
 		})
 
 		t.Run("pending cap", func(t *testing.T) {

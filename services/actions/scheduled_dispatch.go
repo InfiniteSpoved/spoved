@@ -45,7 +45,8 @@ func CheckScheduleTime(runAt time.Time) error {
 	if !runAt.After(now) {
 		return ErrScheduleInPast
 	}
-	if runAt.After(now.AddDate(0, 0, setting.Actions.MaxDelayedRunDays)) {
+	// the clamp keeps AddDate from overflowing on an absurd setting
+	if runAt.After(now.AddDate(0, 0, min(setting.Actions.MaxDelayedRunDays, 36500))) {
 		return ErrScheduleTooFar
 	}
 	return nil

@@ -4,6 +4,7 @@
 package actions
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -34,6 +35,10 @@ func TestCheckScheduleTime(t *testing.T) {
 	require.ErrorIs(t, CheckScheduleTime(now.Add(-time.Hour)), ErrScheduleInPast)
 	require.ErrorIs(t, CheckScheduleTime(now.AddDate(0, 0, 30).Add(time.Second)), ErrScheduleTooFar)
 	require.ErrorIs(t, ErrScheduleTooFar, util.ErrInvalidArgument)
+
+	setting.Actions.MaxDelayedRunDays = math.MaxInt
+	require.NoError(t, CheckScheduleTime(now.Add(time.Minute)))
+	require.ErrorIs(t, CheckScheduleTime(time.Unix(1<<62, 0)), ErrScheduleTooFar)
 
 	setting.Actions.MaxDelayedRunDays = 0
 	require.ErrorIs(t, CheckScheduleTime(now.Add(time.Minute)), ErrScheduleDisabled)
