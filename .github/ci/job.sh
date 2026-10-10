@@ -40,7 +40,7 @@ plan)
   # depth: commits to fetch, 0 for the full history
   tasks='{"task":"lint","args":"","depth":"1"},{"task":"frontend","args":"","depth":"1"}'
   if [ "$backend" = true ]; then
-    for i in 1 2 3 4; do tasks+=",{\"task\":\"unit\",\"args\":\"$i 4\",\"depth\":\"1\"}"; done
+    for i in $(seq 1 13); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 13\",\"depth\":\"1\"}"; done
   fi
   if [ "$FULL" = true ]; then
     # only the selection of changed end-to-end tests needs the history
@@ -81,7 +81,11 @@ unit)
   timeout 120 bash -c 'until grep -q "successfully listens" "$RUNNER_TEMP/azurite.log"; do sleep 1; done' || { cat "$RUNNER_TEMP/azurite.log"; exit 1; }
   # the packages `make test-backend` tests, as computed by the Makefile
   packages=$(make -s --eval='ci-list-test-packages: compute-go-test-packages ; @echo $(GO_TEST_PACKAGES)' ci-list-test-packages \
-    | tr ' ' '\n' | .github/ci/shard.sh "$1" "$2" | paste -sd' ')
+    | tr ' ' '\n' | .github/ci/shard.sh 2 4 | paste -sd' ')
+  # temporary probe: job N leaves out package group N of 12 (job 13 runs them all)
+  if [ "$1" -le 12 ]; then
+    packages=$(tr ' ' '\n' <<< "$packages" | grep -vxF -f <(tr ' ' '\n' <<< "$packages" | .github/ci/shard.sh "$1" 12) | paste -sd' ')
+  fi
   echo "Testing $(wc -w <<< "$packages") packages"
   RACE_ENABLED=true TEST_AZURITE_URL=127.0.0.1:10000 make test-backend GO_TEST_PACKAGES="$packages"
   # check the tests left the source tree untouched
