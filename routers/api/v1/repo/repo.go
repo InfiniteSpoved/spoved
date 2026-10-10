@@ -1131,6 +1131,9 @@ func updateRepoUnits(ctx *context.APIContext, owner string, repo *repo_model.Rep
 			if opts.DefaultAllowMaintainerEdit != nil {
 				config.DefaultAllowMaintainerEdit = *opts.DefaultAllowMaintainerEdit
 			}
+			if opts.CancelAutoMergeOnPush != nil {
+				config.CancelAutoMergeOnPush = *opts.CancelAutoMergeOnPush
+			}
 
 			units = append(units, repo_model.RepoUnit{
 				RepoID: repo.ID,

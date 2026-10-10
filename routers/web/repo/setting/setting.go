@@ -313,6 +313,7 @@ func UnitsPost(ctx *context.Context) {
 				DefaultMergeStyle:             repo_model.MergeStyle(form.PullsDefaultMergeStyle),
 				DefaultUpdateStyle:            repo_model.UpdateStyle(form.PullsDefaultUpdateStyle),
 				DefaultAllowMaintainerEdit:    form.DefaultAllowMaintainerEdit,
+				CancelAutoMergeOnPush:         form.CancelAutoMergeOnPush,
 			},
 		})
 	} else if !disabled(unit_model.TypePullRequests) {

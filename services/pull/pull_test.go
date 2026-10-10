@@ -6,12 +6,15 @@ package pull
 
 import (
 	"testing"
+	"time"
 
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
+	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/setting"
@@ -134,4 +137,23 @@ func TestPullRequest_GetDefaultMergeMessage_GlobalTemplate(t *testing.T) {
 
 	assert.Equal(t, "Default merge message template", mergeMessage)
 	assert.Equal(t, "\nThis line was read from .forgejo/default_merge_message/MERGE_TEMPLATE.md", body)
+}
+
+func TestPullRequestCancelsAutoMergeOnPush(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	doer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
+	prUnit := repo.MustGetUnit(t.Context(), unit.TypePullRequests)
+	prUnit.PullRequestsConfig().CancelAutoMergeOnPush = true
+	require.NoError(t, repo_model.UpdateRepoUnit(t.Context(), prUnit))
+
+	// PushToBaseRepo fails for a head branch that does not exist; the auto merge is cancelled anyway
+	pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: 2})
+	_, err := db.GetEngine(t.Context()).ID(pr.ID).Cols("head_branch").Update(&issues_model.PullRequest{HeadBranch: "no-such-branch"})
+	require.NoError(t, err)
+	require.NoError(t, db.Insert(t.Context(), &pull_model.AutoMerge{PullID: pr.ID, DoerID: 1}))
+
+	TestPullRequest(t.Context(), doer, repo.ID, time.Now().UnixNano(), "no-such-branch", true, "", "")
+	unittest.AssertNotExistsBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+	unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{IssueID: pr.IssueID, Type: issues_model.CommentTypePRUnScheduledToAutoMerge, PosterID: doer.ID})
 }

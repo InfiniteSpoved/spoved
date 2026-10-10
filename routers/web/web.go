@@ -1466,9 +1466,9 @@ func registerRoutes(m *web.Route) {
 			m.Get("/tag/*", context.RepoRefByType(context.RepoRefTag), repo.TreeList)
 			m.Get("/commit/*", context.RepoRefByType(context.RepoRefCommit), repo.TreeList)
 		})
-		m.Get("/compare", repo.MustBeNotEmpty, reqRepoCodeReader, repo.SetEditorconfigIfExists, ignSignIn, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.CompareDiff)
+		m.Get("/compare", repo.MustBeNotEmpty, reqRepoCodeReader, common.RateLimitHeavy, repo.SetEditorconfigIfExists, ignSignIn, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.CompareDiff)
 		m.Combo("/compare/*", repo.MustBeNotEmpty, reqRepoCodeReader, repo.SetEditorconfigIfExists).
-			Get(repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.CompareDiff).
+			Get(common.RateLimitHeavy, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.CompareDiff).
 			Post(reqSignIn, context.RepoMustNotBeArchived(), reqRepoPullsReader, repo.MustAllowPulls, web.Bind(forms.CreateIssueForm{}), repo.SetWhitespaceBehavior, repo.CompareAndPullRequestPost)
 		m.Group("/{type:^(issues|pulls)$}", func() {
 			m.Group("/{index}", func() {
@@ -1811,7 +1811,7 @@ func registerRoutes(m *web.Route) {
 		}, repo.MustBeNotEmpty, context.RepoRef(), reqRepoCodeReader)
 
 		m.Group("/blob_excerpt", func() {
-			m.Get("/{sha}", repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.ExcerptBlob)
+			m.Get("/{sha}", common.RateLimitHeavyPlain, repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.ExcerptBlob)
 		}, func(ctx *context.Context) gocontext.CancelFunc {
 			if ctx.FormBool("wiki") {
 				ctx.Data["PageIsWiki"] = true
@@ -1835,13 +1835,13 @@ func registerRoutes(m *web.Route) {
 		m.Get("/pulls/posters", repo.PullPosters)
 		m.Group("/pulls/{index}", func() {
 			m.Get("", repo.SetWhitespaceBehavior, repo.GetPullDiffStats, context.EnsureOrg(), repo.ViewIssue)
-			m.Get(".diff", repo.DownloadPullDiff)
-			m.Get(".patch", repo.DownloadPullPatch)
+			m.Get(".diff", common.RateLimitHeavyPlain, repo.DownloadPullDiff)
+			m.Get(".patch", common.RateLimitHeavyPlain, repo.DownloadPullPatch)
 			m.Group("/commits", func() {
 				m.Get("", context.RepoRef(), repo.SetWhitespaceBehavior, repo.GetPullDiffStats, repo.ViewPullCommits)
 				m.Get("/list", context.RepoRef(), repo.GetPullCommits)
 				m.Group("/{sha:[a-f0-9]{4,64}}", func() {
-					m.Get("", context.RepoRef(), repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.SetShowOutdatedComments, repo.ViewPullFilesForSingleCommit)
+					m.Get("", common.RateLimitHeavy, context.RepoRef(), repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.SetShowOutdatedComments, repo.ViewPullFilesForSingleCommit)
 					m.Post("/reviews/submit", context.RepoMustNotBeArchived(), reqSignIn, repo.MustAllowUserComment, web.Bind(forms.SubmitReviewForm{}), repo.SubmitReview)
 				})
 				m.Group("/{sha:([a-f0-9]{4,64})$}/notes", func() {
@@ -1862,9 +1862,9 @@ func registerRoutes(m *web.Route) {
 			}, reqSignIn, context.RepoMustNotBeArchived())
 			m.Post("/attention/{action:add|remove}", reqSignIn, context.RepoMustNotBeArchived(), web.Bind(forms.PullAttentionForm{}), repo.UpdatePullAttention)
 			m.Group("/files", func() {
-				m.Get("", context.RepoRef(), repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.SetShowOutdatedComments, repo.ViewPullFilesForAllCommitsOfPr)
-				m.Get("/{sha:[a-f0-9]{4,64}}", context.RepoRef(), repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.SetShowOutdatedComments, repo.ViewPullFilesStartingFromCommit)
-				m.Get("/{shaFrom:[a-f0-9]{4,64}}..{shaTo:[a-f0-9]{4,64}}", context.RepoRef(), repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.SetShowOutdatedComments, repo.ViewPullFilesForRange)
+				m.Get("", common.RateLimitHeavy, context.RepoRef(), repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.SetShowOutdatedComments, repo.ViewPullFilesForAllCommitsOfPr)
+				m.Get("/{sha:[a-f0-9]{4,64}}", common.RateLimitHeavy, context.RepoRef(), repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.SetShowOutdatedComments, repo.ViewPullFilesStartingFromCommit)
+				m.Get("/{shaFrom:[a-f0-9]{4,64}}..{shaTo:[a-f0-9]{4,64}}", common.RateLimitHeavy, context.RepoRef(), repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.SetShowOutdatedComments, repo.ViewPullFilesForRange)
 				m.Group("/reviews", func() {
 					m.Get("/new_comment", repo.RenderNewCodeCommentForm)
 					m.Post("/comments", reqSignIn, repo.MustAllowUserComment, web.Bind(forms.CodeCommentForm{}), repo.SetShowOutdatedComments, repo.CreateCodeComment)
@@ -1902,12 +1902,12 @@ func registerRoutes(m *web.Route) {
 			m.Get("/branch/*", context.RepoRefByType(context.RepoRefBranch), repo.RefBlame)
 			m.Get("/tag/*", context.RepoRefByType(context.RepoRefTag), repo.RefBlame)
 			m.Get("/commit/*", context.RepoRefByType(context.RepoRefCommit), repo.RefBlame)
-		}, repo.MustBeNotEmpty, reqRepoCodeReader)
+		}, repo.MustBeNotEmpty, reqRepoCodeReader, common.RateLimitHeavy)
 
 		m.Group("", func() {
 			m.Get("/graph", repo.Graph)
-			m.Get("/commit/{sha:([a-f0-9]{4,64})$}", repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.Diff)
-			m.Get("/commit/{sha:([a-f0-9]{4,64})$}/load-branches-and-tags", repo.LoadBranchesAndTags)
+			m.Get("/commit/{sha:([a-f0-9]{4,64})$}", common.RateLimitHeavy, repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.Diff)
+			m.Get("/commit/{sha:([a-f0-9]{4,64})$}/load-branches-and-tags", common.RateLimitHeavyPlain, repo.LoadBranchesAndTags)
 			m.Group("/commit/{sha:([a-f0-9]{4,64})$}/notes", func() {
 				m.Post("", context.RepoMustNotBeArchived(), web.Bind(forms.CommitNotesForm{}), repo.SetCommitNotes)
 				m.Post("/remove", context.RepoMustNotBeArchived(), repo.RemoveCommitNotes)
@@ -1933,7 +1933,7 @@ func registerRoutes(m *web.Route) {
 				m.Get("/forks", repo.Forks)
 			}, context.RepoRef(), reqRepoCodeReader)
 		}
-		m.Get("/commit/{sha:([a-f0-9]{4,64})}.{ext:patch|diff}", repo.MustBeNotEmpty, reqRepoCodeReader, repo.RawDiff)
+		m.Get("/commit/{sha:([a-f0-9]{4,64})}.{ext:patch|diff}", repo.MustBeNotEmpty, reqRepoCodeReader, common.RateLimitHeavyPlain, repo.RawDiff)
 
 		m.Post("/sync_fork", context.RepoMustNotBeArchived(), repo.MustBeNotEmpty, reqRepoCodeWriter, repo.SyncFork)
 	}, ignSignIn, context.RepoAssignment, context.UnitTypes())
@@ -1951,7 +1951,7 @@ func registerRoutes(m *web.Route) {
 				m.Get("/branch/*", context.RepoRefByType(context.RepoRefBranch), repo.Search)
 				m.Get("/tag/*", context.RepoRefByType(context.RepoRefTag), repo.Search)
 			}
-		}, reqRepoCodeReader)
+		}, reqRepoCodeReader, common.RateLimitHeavy)
 	}, ignSignIn, context.RepoAssignment, context.UnitTypes())
 
 	m.Group("/{username}", func() {

@@ -249,6 +249,7 @@ type PullRequestsConfig struct {
 	DefaultMergeStyle             MergeStyle
 	DefaultUpdateStyle            UpdateStyle
 	DefaultAllowMaintainerEdit    bool
+	CancelAutoMergeOnPush         bool // a push to the head cancels the pull request's auto merge
 }
 
 // FromDB fills up a PullRequestsConfig from serialized format.
