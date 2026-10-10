@@ -965,6 +965,11 @@ func Routes() *web.Route {
 						m.Get("/{run_id}/artifacts", repo.ListActionRunArtifacts)
 					})
 
+					m.Group("/scheduled-runs", func() {
+						m.Get("", reqToken(), reqRepoWriter(unit.TypeActions), repo.ListScheduledRuns)
+						m.Delete("/{id}", reqToken(), reqRepoWriter(unit.TypeActions), mustNotBeArchived(), repo.DeleteScheduledRun)
+					})
+
 					m.Group("/workflows", func() {
 						m.Group("/{workflowfilename}", func() {
 							m.Post("/dispatches", reqToken(), reqRepoWriter(unit.TypeActions), mustNotBeArchived(), bind(api.DispatchWorkflowOption{}), repo.DispatchWorkflow)

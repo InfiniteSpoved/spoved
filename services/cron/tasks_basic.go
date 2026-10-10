@@ -13,6 +13,7 @@ import (
 	"forgejo.org/models/webhook"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/setting"
+	actions_service "forgejo.org/services/actions"
 	"forgejo.org/services/auth"
 	automerge_service "forgejo.org/services/automerge"
 	"forgejo.org/services/migrations"
@@ -167,6 +168,16 @@ func registerStartScheduledAutoMerges() {
 	})
 }
 
+func registerStartScheduledDispatches() {
+	RegisterTaskFatal("start_scheduled_dispatches", &BaseConfig{
+		Enabled:    true,
+		RunAtStart: true,
+		Schedule:   "@every 1m",
+	}, func(ctx context.Context, _ *user_model.User, _ Config) error {
+		return actions_service.StartDueScheduledDispatches(ctx)
+	})
+}
+
 func initBasicTasks() {
 	if setting.Mirror.Enabled {
 		registerUpdateMirrorTask()
@@ -181,6 +192,7 @@ func initBasicTasks() {
 	}
 	registerCleanupHookTaskTable()
 	registerStartScheduledAutoMerges()
+	registerStartScheduledDispatches()
 	if setting.Packages.Enabled {
 		registerCleanupPackages()
 	}
