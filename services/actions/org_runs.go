@@ -121,7 +121,7 @@ func orgRunRepoCond(ctx context.Context, org *organization.Organization, doer *u
 		cond = cond.And(builder.Or(
 			repo_model.AccessibleRepositoryCondition(doer, unit.TypeActions),
 			builder.In("`repository`.id", adminTeamRepos),
-		))
+		), repo_model.TwoFactorHiddenRepoCond(doer.ID))
 	}
 	if tokenRepos != nil {
 		cond = cond.And(tokenRepos)

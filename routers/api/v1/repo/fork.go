@@ -14,6 +14,7 @@ import (
 	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	repo_module "forgejo.org/modules/repository"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
@@ -151,7 +152,7 @@ func CreateFork(ctx *context.APIContext) {
 		Description: repo.Description,
 	})
 	if err != nil {
-		if organization.IsErrOrgArchived(err) {
+		if organization.IsErrOrgArchived(err) || errors.As(err, &repo_module.ErrOrgPolicy{}) {
 			ctx.Error(http.StatusForbidden, "ForkRepositoryAndUpdates", err)
 		} else if errors.Is(err, util.ErrAlreadyExist) || repo_model.IsErrReachLimitOfRepo(err) {
 			ctx.Error(http.StatusConflict, "ForkRepositoryAndUpdates", err)

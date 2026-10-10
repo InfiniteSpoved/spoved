@@ -21,8 +21,10 @@ import (
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
+	"forgejo.org/modules/git/pushoptions"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/private"
+	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/web"
 	app_context "forgejo.org/services/context"
@@ -160,7 +162,14 @@ func (ctx *preReceiveContext) validatePushOptions() error {
 	opts := web.GetForm(ctx).(*private.HookOptions)
 
 	if opts.GetGitPushOptions().ChangeRepoSettings() {
-		return ctx.canChangeSettings()
+		if err := ctx.canChangeSettings(); err != nil {
+			return err
+		}
+		// the visibility policy of the repository's organization; a deploy key pushes as the organization and is refused
+		repo := ctx.Repo.Repository
+		if opts.GetGitPushOptions().GetBool(pushoptions.RepoPrivate, repo.IsPrivate) != repo.IsPrivate {
+			return repo_module.CheckOrgPolicy(ctx, ctx.user, repo, repo_module.OrgPolicyVisibility, nil)
+		}
 	}
 
 	return nil

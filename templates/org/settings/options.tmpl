@@ -62,6 +62,26 @@
 							</div>
 						</div>
 
+						<div class="field" id="repo_policies_box">
+							<label>{{ctx.Locale.Tr "org.settings.repo_policies"}}</label>
+							<p class="help">{{ctx.Locale.Tr "org.settings.repo_policies_desc"}}</p>
+							<div class="field">
+								<div class="ui checkbox">
+									<input type="checkbox" name="restrict_repo_visibility_change" {{if .Org.RestrictRepoVisibilityChange}}checked{{end}}>
+									<label>{{ctx.Locale.Tr "org.settings.restrict_repo_visibility_change"}}</label>
+								</div>
+							</div>
+							<div class="field">
+								<label for="private_fork_policy">{{ctx.Locale.Tr "org.settings.private_fork_policy"}}</label>
+								<select id="private_fork_policy" name="private_fork_policy">
+									<option value="0" {{if eq .Org.PrivateForkPolicy 0}}selected{{end}}>{{ctx.Locale.Tr "org.settings.private_fork_policy.all"}}</option>
+									<option value="1" {{if eq .Org.PrivateForkPolicy 1}}selected{{end}}>{{ctx.Locale.Tr "org.settings.private_fork_policy.org"}}</option>
+									<option value="2" {{if eq .Org.PrivateForkPolicy 2}}selected{{end}}>{{ctx.Locale.Tr "org.settings.private_fork_policy.none"}}</option>
+								</select>
+								<p class="help">{{ctx.Locale.Tr "org.settings.private_fork_policy_help"}}</p>
+							</div>
+						</div>
+
 						<div class="field" id="permission_box">
 							<label>{{ctx.Locale.Tr "org.settings.permission"}}</label>
 							<div class="field">
@@ -70,6 +90,33 @@
 									<label>{{ctx.Locale.Tr "org.settings.repoadminchangeteam"}}</label>
 								</div>
 							</div>
+						</div>
+
+						<div class="field" id="require_two_factor_box">
+							<input type="hidden" name="require_two_factor_shown" value="true">
+							<div class="ui checkbox">
+								<input type="checkbox" name="require_two_factor" {{if .RequireTwoFactor}}checked{{end}}>
+								<label>{{ctx.Locale.Tr "org.settings.require_two_factor"}}</label>
+							</div>
+							<p class="help">{{ctx.Locale.Tr "org.settings.require_two_factor_desc"}}</p>
+							{{if .RequireTwoFactorConfirm}}
+								<div class="ui warning message require-two-factor-confirm">
+									{{if .RequireTwoFactorMembers}}
+										<p>{{ctx.Locale.Tr "org.settings.require_two_factor_members_without"}}</p>
+										<ul class="require-two-factor-members">
+											{{range .RequireTwoFactorMembers}}
+												<li><a href="{{.HomeLink}}">{{.Name}}</a>{{if index $.RequireTwoFactorOwners .ID}} <span class="ui basic label">{{ctx.Locale.Tr "org.members.owner"}}</span>{{end}}</li>
+											{{end}}
+										</ul>
+									{{else}}
+										<p>{{ctx.Locale.Tr "org.settings.require_two_factor_all_members_have"}}</p>
+									{{end}}
+									<div class="ui checkbox">
+										<input type="checkbox" name="require_two_factor_confirm" required>
+										<label>{{ctx.Locale.Tr "org.settings.require_two_factor_confirm"}}</label>
+									</div>
+								</div>
+							{{end}}
 						</div>
 
 						{{if .SignedUser.IsAdmin}}

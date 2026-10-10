@@ -9,6 +9,7 @@ import (
 
 	"forgejo.org/models/auth"
 	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -52,7 +53,7 @@ func TestValidateAccessToken(t *testing.T) {
 			ResourceAllRepos: true,
 			Scope:            auth.AccessTokenScopeReadRepository,
 		}
-		err := ValidateAccessToken(token, nil)
+		err := ValidateAccessToken(&user_model.User{}, token, nil)
 		require.NoError(t, err)
 	})
 
@@ -62,7 +63,7 @@ func TestValidateAccessToken(t *testing.T) {
 			Scope:            auth.AccessTokenScopeReadRepository,
 		}
 		resources := []*auth.AccessTokenResourceRepo{{RepoID: 12}}
-		err := ValidateAccessToken(token, resources)
+		err := ValidateAccessToken(&user_model.User{}, token, resources)
 		require.NoError(t, err)
 	})
 
@@ -72,7 +73,7 @@ func TestValidateAccessToken(t *testing.T) {
 			Scope:            auth.AccessTokenScopeReadRepository,
 		}
 		resources := []*auth.AccessTokenResourceRepo{}
-		err := ValidateAccessToken(token, resources)
+		err := ValidateAccessToken(&user_model.User{}, token, resources)
 		require.ErrorIs(t, err, ErrSpecifiedReposNone)
 	})
 
@@ -82,7 +83,7 @@ func TestValidateAccessToken(t *testing.T) {
 			Scope:            auth.AccessTokenScope(strings.Join([]string{string(auth.AccessTokenScopePublicOnly), string(auth.AccessTokenScopeReadRepository)}, ",")),
 		}
 		resources := []*auth.AccessTokenResourceRepo{{RepoID: 12}}
-		err := ValidateAccessToken(token, resources)
+		err := ValidateAccessToken(&user_model.User{}, token, resources)
 		require.ErrorIs(t, err, ErrSpecifiedReposNoPublicOnly)
 	})
 
@@ -92,7 +93,7 @@ func TestValidateAccessToken(t *testing.T) {
 			Scope:            auth.AccessTokenScopeReadAdmin,
 		}
 		resources := []*auth.AccessTokenResourceRepo{{RepoID: 12}}
-		err := ValidateAccessToken(token, resources)
+		err := ValidateAccessToken(&user_model.User{}, token, resources)
 		require.ErrorIs(t, err, ErrSpecifiedReposInvalidScope)
 		require.ErrorContains(t, err, string(auth.AccessTokenScopeReadAdmin))
 	})

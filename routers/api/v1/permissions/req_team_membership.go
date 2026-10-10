@@ -19,9 +19,9 @@ func ReqTeamMembership(ctx Context) {
 	}
 
 	orgID := ctx.Team().OrgID
-	isOwner, err := organization.IsOrganizationOwner(ctx.Context(), orgID, ctx.Doer().ID)
+	isOwner, err := isActingOwner(ctx, orgID)
 	if err != nil {
-		ctx.Error(http.StatusInternalServerError, "IsOrganizationOwner", err)
+		ctx.Error(http.StatusInternalServerError, "IsActingOwner", err)
 		return
 	} else if isOwner {
 		return

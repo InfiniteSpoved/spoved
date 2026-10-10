@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"forgejo.org/models"
 	activities_model "forgejo.org/models/activities"
@@ -167,6 +168,13 @@ func GetUserOrgsPermissions(ctx *context.APIContext) {
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "GetOrgUserAuthorizeLevel", err)
 		return
+	}
+	// teams give nothing to a user the organization's two-factor requirement blocks
+	if blocked, err := ctx.User().TwoFactorBlocked(ctx, o); err != nil {
+		ctx.Error(http.StatusInternalServerError, "TwoFactorBlocked", err)
+		return
+	} else if blocked {
+		authorizeLevel = perm.AccessModeNone
 	}
 
 	if authorizeLevel > perm.AccessModeNone {
@@ -437,6 +445,10 @@ func Edit(ctx *context.APIContext) {
 		Location:                  optional.FromPtr(form.Location),
 		Visibility:                changeVisibility,
 		RepoAdminChangeTeamAccess: optional.FromPtr(form.RepoAdminChangeTeamAccess),
+	}
+	opts.RestrictRepoVisibilityChange = optional.FromPtr(form.RestrictRepoVisibilityChange)
+	if form.PrivateForkPolicy != nil {
+		opts.PrivateForkPolicy = optional.Some(slices.Index(user_model.PrivateForkPolicyNames, *form.PrivateForkPolicy))
 	}
 	if err := user_service.UpdateUser(ctx, ctx.Org().Organization.AsUser(), opts); err != nil {
 		ctx.Error(http.StatusInternalServerError, "UpdateUser", err)

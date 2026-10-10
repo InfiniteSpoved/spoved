@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	activities_model "forgejo.org/models/activities"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
@@ -3619,4 +3620,20 @@ func TestPullReviewApplySuggestionQuotaOnFork(t *testing.T) {
 			map[string]any{"comment_ids": []int64{comment.ID}})
 		forkSession.MakeRequest(t, req, http.StatusRequestEntityTooLarge)
 	})
+}
+
+// #334: dismissed approvals are notified after the commit, so the notification queue's handler (run right away with
+// immediate queues, on another connection) doesn't wait for the transaction's lock until the busy timeout.
+func TestDismissApprovalReviewsNotifiesAfterCommit(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{IssueID: 2})
+	doer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+
+	start := time.Now()
+	require.NoError(t, pull_service.DismissApprovalReviews(db.DefaultContext, doer, pr))
+	assert.Less(t, time.Since(start), 10*time.Second)
+
+	unittest.AssertExistsAndLoadBean(t, &issues_model.Review{ID: 1, Dismissed: true})
+	comment := unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{IssueID: 2, ReviewID: 1, Type: issues_model.CommentTypeDismissReview})
+	unittest.AssertExistsAndLoadBean(t, &activities_model.Notification{IssueID: 2, CommentID: comment.ID})
 }

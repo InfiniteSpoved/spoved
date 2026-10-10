@@ -10,8 +10,11 @@ import (
 	activities_model "forgejo.org/models/activities"
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
+
+	"xorm.io/builder"
 )
 
 // GetThread get notification by ID
@@ -118,6 +121,14 @@ func getThread(ctx *context.APIContext) *activities_model.Notification {
 	}
 	if n.UserID != ctx.Doer().ID && !ctx.IsUserSiteAdmin() {
 		ctx.Error(http.StatusForbidden, "GetNotificationByID", fmt.Errorf("only user itself and admin are allowed to read/change this thread %d", n.ID))
+		return nil
+	}
+	// the list leaves out what an organization's two-factor requirement hides from the user
+	if visible, err := db.Exist[activities_model.Notification](ctx, builder.Eq{"id": n.ID}.And(repo_model.TwoFactorHiddenRepoIDCond("notification.repo_id", ctx.Doer().ID))); err != nil {
+		ctx.InternalServerError(err)
+		return nil
+	} else if !visible {
+		ctx.NotFound()
 		return nil
 	}
 	return n

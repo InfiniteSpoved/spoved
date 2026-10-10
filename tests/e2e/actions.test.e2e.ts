@@ -105,7 +105,8 @@ test.describe('Workflow Authenticated user2', () => {
 
       // Restore the state: a disabled workflow can't be dispatched, and later tests dispatch this one
       await enableButton.click();
-      await flashBanner.waitFor();
+      // Not the banner: the disable reload left one in the DOM, so it would match before this reload
+      await expect(disabledLabel).toBeHidden();
       await menuOpener.click();
 
       await expect(disableButton).toBeVisible();

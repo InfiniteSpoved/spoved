@@ -133,34 +133,37 @@ func GetSearchOpts(id int64, isShowClosed bool, sortType, keyword string, projec
 	return opts
 }
 
-// GetProjectByIDForOwner Fetches a Project by its ID from the DB
+// GetProjectByIDForOwner Fetches a user or organization project by its ID from the DB
 // and checks if it belongs to the given owner
 func GetProjectByIDForOwner(ctx context.Context, projectID, ownerID int64) (*project_model.Project, error) {
+	return getProjectByIDFor(ctx, projectID, ownerID, false)
+}
+
+// GetProjectByIDForRepo Fetches a repository project by its ID from the DB
+// and checks if it belongs to the given repository
+func GetProjectByIDForRepo(ctx context.Context, projectID, repoID int64) (*project_model.Project, error) {
+	return getProjectByIDFor(ctx, projectID, repoID, true)
+}
+
+func getProjectByIDFor(ctx context.Context, projectID, ownerID int64, isRepo bool) (*project_model.Project, error) {
 	project, err := project_model.GetProjectByID(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("could not get project %d for owner %d: %w", projectID, ownerID, err)
 	}
-	if err := ensureProjectOwnedBy(project, ownerID); err != nil {
+	if err := ensureProjectOwnedBy(project, ownerID, isRepo); err != nil {
 		return nil, err
 	}
 	return project, nil
 }
 
-func ensureProjectOwnedBy(project *project_model.Project, ownerID int64) error {
+// ensureProjectOwnedBy checks the project type before the ID: a repository ID can equal a user ID.
+func ensureProjectOwnedBy(project *project_model.Project, ownerID int64, isRepo bool) error {
 	errMismatchedOwner := project_module.ErrMismatchedOwner{Message: "Project did not belong to given owner"}
-	switch project.Type {
-	case project_module.TypeIndividual:
-		if project.OwnerID != ownerID {
-			return errMismatchedOwner
-		}
-	case project_module.TypeOrganization:
-		if project.OwnerID != ownerID {
-			return errMismatchedOwner
-		}
-	case project_module.TypeRepository:
-		if project.RepoID != ownerID {
-			return errMismatchedOwner
-		}
+	if (project.Type == project_module.TypeRepository) != isRepo {
+		return errMismatchedOwner
+	}
+	if isRepo && project.RepoID != ownerID || !isRepo && project.OwnerID != ownerID {
+		return errMismatchedOwner
 	}
 	return nil
 }
