@@ -1005,7 +1005,12 @@ func TestPullAutoMergeCancelOnPush(t *testing.T) {
 			doGitAddSomeCommits(dstPath, "main")(t)
 			doGitPushTestRepository(dstPath, "origin", "main")(t)
 
+			diverging, divErr := pull_service.GetDiverging(t.Context(), pr)
+			require.NoError(t, divErr)
+			require.Positive(t, diverging.Behind)
+
 			MakeRequest(t, NewRequestf(t, "POST", "/api/v1/repos/%s/pulls/%d/update?style=rebase", repo.FullName(), pr.Index).AddTokenAuth(apiCtx.Token), http.StatusOK)
+			headMoves(t, pr, sha)
 			assertCancelledBy(t, pr, owner.ID)
 		})
 
