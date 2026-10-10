@@ -531,3 +531,36 @@ func TestRateLimitAmbiguousClientIP(t *testing.T) {
 	MakeRequest(t, ambiguous(req, 9), http.StatusTooManyRequests)
 	MakeRequest(t, ambiguous(NewRequest(t, "GET", "/api/v1/user").AddBasicAuth("user2"), 10), http.StatusTooManyRequests)
 }
+
+// Every request to a mail or account endpoint counts, from many /64s of one /48 as well: they share 10x the budget.
+func TestRateLimitAuthIPEndpointsIPv6Aggregate(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	mockRateLimit(t, map[string]setting.RateLimitClass{
+		ratelimit.Auth: {AuthenticatedRate: slow, AuthenticatedBurst: 2},
+	}, "2001:db8:1:ff::/64")
+	post := func(path, ip string) *httptest.ResponseRecorder {
+		t.Helper()
+		// an unknown address, so that no MailResendLimit_<user> cache entry is left behind for later tests
+		req := NewRequestWithValues(t, "POST", path, map[string]string{"email": "nobody@example.com"})
+		req.Request.RemoteAddr = "[" + ip + "]:1234"
+		return MakeRequest(t, req, NoExpectedStatus)
+	}
+	for _, path := range []string{"/user/sign_up", "/user/forgot_password", "/user/activate"} {
+		t.Run(path, func(t *testing.T) {
+			ratelimit.ResetForTest()
+			for i := range 20 { // 10x the burst, each from its own /64
+				assert.NotEqual(t, http.StatusTooManyRequests, post(path, fmt.Sprintf("2001:db8:1:%x::1", i)).Code)
+			}
+			resp := post(path, "2001:db8:1:ff::2") // exempt
+			assert.NotEqual(t, http.StatusTooManyRequests, resp.Code)
+			resp = post(path, "2001:db8:1:fe::1")
+			assert.Equal(t, http.StatusTooManyRequests, resp.Code)
+			assert.NotEmpty(t, resp.Header().Get("Retry-After"))
+			assert.NotEqual(t, http.StatusTooManyRequests, post(path, "2001:db8:2::1").Code) // another /48
+			// a single /64 still limits at the burst
+			post(path, "2001:db8:3::1")
+			post(path, "2001:db8:3::2")
+			assert.Equal(t, http.StatusTooManyRequests, post(path, "2001:db8:3::3").Code)
+		})
+	}
+}
