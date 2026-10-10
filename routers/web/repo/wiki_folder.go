@@ -26,8 +26,9 @@ import (
 const (
 	tplWikiFolder base.TplName = "repo/wiki/folder_view"
 
-	wikiFolderMaxPages = 500
-	wikiFolderSidebar  = "_Sidebar.md"
+	wikiFolderMaxPages   = 500
+	wikiFolderMaxEntries = 5000 // tree entries the page list visits, so a big folder with few pages stays cheap
+	wikiFolderSidebar    = "_Sidebar.md"
 )
 
 // wikiFolderHomes are the home page names, matched case-insensitively in this order
@@ -138,15 +139,16 @@ func isWikiFolderPage(p string) bool {
 }
 
 // listWikiFolderPages appends the Markdown files below tree, at most limit+1 so the caller can tell the list was cut.
-// Git sorts tree entries as if directory names ended in "/", so this depth-first walk yields the paths in byte order
-// and reads only the directories it needs.
-func listWikiFolderPages(tree *git.Tree, dir string, limit int, pages []wikiFolderPage) ([]wikiFolderPage, error) {
+// Each visited tree entry takes one from *budget; it stops once that goes below zero. Git sorts tree entries as if
+// directory names ended in "/", so this depth-first walk yields the paths in byte order and reads only the
+// directories it needs.
+func listWikiFolderPages(tree *git.Tree, dir string, limit int, budget *int, pages []wikiFolderPage) ([]wikiFolderPage, error) {
 	entries, err := tree.ListEntries()
 	if err != nil {
 		return nil, err
 	}
 	for _, e := range entries {
-		if len(pages) > limit {
+		if *budget--; len(pages) > limit || *budget < 0 {
 			break
 		}
 		p := dir + e.Name()
@@ -156,7 +158,7 @@ func listWikiFolderPages(tree *git.Tree, dir string, limit int, pages []wikiFold
 			if err != nil {
 				return nil, err
 			}
-			if pages, err = listWikiFolderPages(sub, p+"/", limit, pages); err != nil {
+			if pages, err = listWikiFolderPages(sub, p+"/", limit, budget, pages); err != nil {
 				return nil, err
 			}
 		case e.IsRegular() && p != wikiFolderSidebar && isWikiFolderPage(p):
@@ -205,14 +207,15 @@ func readBlobPrefix(blob *git.Blob, limit int64) ([]byte, error) {
 
 // loadWikiFolderPages sets the page list and returns false after writing an error.
 func loadWikiFolderPages(ctx *context.Context, wf *wikiFolder) ([]wikiFolderPage, bool) {
-	pages, err := listWikiFolderPages(wf.tree, "", wikiFolderMaxPages, nil)
+	budget := wikiFolderMaxEntries
+	pages, err := listWikiFolderPages(wf.tree, "", wikiFolderMaxPages, &budget, nil)
 	if err != nil {
 		ctx.ServerError("listWikiFolderPages", err)
 		return nil, false
 	}
-	if len(pages) > wikiFolderMaxPages {
-		pages = pages[:wikiFolderMaxPages]
-		ctx.Data["WikiFolderTruncated"] = wikiFolderMaxPages
+	if len(pages) > wikiFolderMaxPages || budget < 0 {
+		pages = pages[:min(len(pages), wikiFolderMaxPages)]
+		ctx.Data["WikiFolderTruncated"] = len(pages)
 	}
 	// the paths are sorted, so each directory's pages are contiguous: label it once, at its first page
 	var prev []string

@@ -35,9 +35,11 @@ func TestWikiFolderPages(t *testing.T) {
 	commit, err := repo.GetCommit("HEAD")
 	require.NoError(t, err)
 
-	paths := func(limit int) []string {
-		pages, err := listWikiFolderPages(&commit.Tree, "", limit, nil)
+	all := []string{"A.md", "README.MD", "a-b.md", "a.md", "a/b.md", "a/c/d.markdown", "sub/_Sidebar.md", "z.md"}
+	paths := func(limit, budget int) []string {
+		pages, err := listWikiFolderPages(&commit.Tree, "", limit, &budget, nil)
 		require.NoError(t, err)
+		assert.Equal(t, budget < 0, len(pages) < len(all) && len(pages) <= limit, "budget %d, %d pages", budget, len(pages))
 		var out []string
 		for _, p := range pages {
 			out = append(out, p.Path)
@@ -45,10 +47,12 @@ func TestWikiFolderPages(t *testing.T) {
 		return out
 	}
 	// path (byte) order, Markdown files only, no symlinks, no root sidebar
-	all := []string{"A.md", "README.MD", "a-b.md", "a.md", "a/b.md", "a/c/d.markdown", "sub/_Sidebar.md", "z.md"}
-	assert.Equal(t, all, paths(100))
+	assert.Equal(t, all, paths(100, 100))
 	// cut after limit+1 entries
-	assert.Equal(t, all[:4], paths(3))
+	assert.Equal(t, all[:4], paths(3, 100))
+	// cut once the visited tree entries run out: root A.md README.MD _Sidebar.md a-b.md a.md a/ (a/b.md)
+	assert.Equal(t, all[:4], paths(100, 6))
+	assert.Equal(t, all[:5], paths(100, 8))
 
 	home, err := wikiFolderHome(&commit.Tree)
 	require.NoError(t, err)
