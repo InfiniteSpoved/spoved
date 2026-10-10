@@ -1,4 +1,4 @@
-import {firstStartDateAfterDate, startDaysBetween, fillEmptyStartDaysWithZeroes} from './time.js';
+import {firstStartDateAfterDate, startDaysBetween, fillEmptyStartDaysWithZeroes, zonedLocalToISO, zoneLabel} from './time.js';
 
 test('startDaysBetween', () => {
   expect(startDaysBetween(new Date('2024-02-15'), new Date('2024-04-18'))).toEqual([
@@ -37,4 +37,32 @@ test('fillEmptyStartDaysWithZeroes with data', () => {
 
 test('fillEmptyStartDaysWithZeroes with empty array', () => {
   expect(fillEmptyStartDaysWithZeroes([], {})).toEqual([]);
+});
+
+test('zonedLocalToISO reads the wall-clock time in the given zone', () => {
+  expect(zonedLocalToISO('2026-07-01T12:00', 'Europe/Paris')).toBe('2026-07-01T10:00:00.000Z');
+  expect(zonedLocalToISO('2026-01-01T12:00', 'Europe/Paris')).toBe('2026-01-01T11:00:00.000Z');
+  expect(zonedLocalToISO('2026-07-01T12:00', 'America/Los_Angeles')).toBe('2026-07-01T19:00:00.000Z');
+  expect(zonedLocalToISO('2026-07-01T12:00', 'UTC')).toBe('2026-07-01T12:00:00.000Z');
+  expect(zonedLocalToISO('2026-07-01T12:00', 'Asia/Kolkata')).toBe('2026-07-01T06:30:00.000Z');
+});
+
+test('zonedLocalToISO handles clock changes', () => {
+  // 2026-10-25 02:30 happens twice in Paris: the earlier one is still CEST (UTC+2)
+  expect(zonedLocalToISO('2026-10-25T02:30', 'Europe/Paris')).toBe('2026-10-25T00:30:00.000Z');
+  // 2026-03-29 02:30 does not exist in Paris: read with the offset from before the change (UTC+1)
+  expect(zonedLocalToISO('2026-03-29T02:30', 'Europe/Paris')).toBe('2026-03-29T01:30:00.000Z');
+});
+
+test('zonedLocalToISO falls back to the browser zone', () => {
+  const local = '2026-07-01T12:00';
+  const expected = new Date(local).toISOString();
+  expect(zonedLocalToISO(local, '')).toBe(expected);
+  expect(zonedLocalToISO(local, 'Not/AZone')).toBe(expected);
+  expect(zonedLocalToISO('', 'UTC')).toBe('');
+});
+
+test('zoneLabel', () => {
+  expect(zoneLabel('Europe/Paris', Date.UTC(2026, 6, 1))).toBe('Europe/Paris (UTC+02:00)');
+  expect(zoneLabel('Asia/Kolkata', Date.UTC(2026, 6, 1))).toBe('Asia/Kolkata (UTC+05:30)');
 });

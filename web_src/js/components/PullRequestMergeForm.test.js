@@ -179,3 +179,28 @@ test('shows auto merge button when a single merge style is allowed', async () =>
   expect(mergeform.find(mergeBtn).text()).toBe('Create merge commit');
   expect(mergeform.find(tooltip).text()).toBe('Auto merge when all checks succeed');
 });
+
+test('schedule picker reads the time in the time zone setting and shows the zone', async () => {
+  const mergeform = await renderMergeForm('feature', {timeZone: 'Asia/Kolkata'});
+  await mergeform.get('#scheduled-after').setValue('2026-07-01T12:00');
+  expect(mergeform.get('input[name="scheduled_after"]').element.value).toBe('2026-07-01T06:30:00.000Z');
+  expect(mergeform.get('.time-zone-label').text()).toContain('Asia/Kolkata (UTC+05:30)');
+});
+
+test('schedule picker uses the browser time zone without the setting', async () => {
+  const mergeform = await renderMergeForm('feature', {timeZone: ''});
+  await mergeform.get('#scheduled-after').setValue('2026-07-01T12:00');
+  expect(mergeform.get('input[name="scheduled_after"]').element.value).toBe(new Date('2026-07-01T12:00').toISOString());
+});
+
+test('change time control posts the new time of a pending schedule', async () => {
+  const mergeform = await renderMergeForm('feature', {
+    timeZone: 'UTC', baseLink: '/o/r/pulls/1', hasPendingPullRequestMerge: true, textChangeTime: 'Change time', textChangeTimeSave: 'Save',
+  });
+  await mergeform.get('.merge-cancel').trigger('click');
+  await mergeform.get('.change-time-button').trigger('click');
+  const form = mergeform.get('form.change-time-form');
+  expect(form.attributes('action')).toBe('/o/r/pulls/1/change_auto_merge_time');
+  await mergeform.get('#change-scheduled-after').setValue('2026-07-01T12:00');
+  expect(form.get('input[name="scheduled_after"]').element.value).toBe('2026-07-01T12:00:00.000Z');
+});

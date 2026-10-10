@@ -584,6 +584,20 @@ func (f *MergePullRequestForm) ScheduleTimeStamps() (scheduledAfter, giveUpAfter
 	return timeutil.TimeStamp(t.Unix()), timeutil.TimeStamp(g.Unix()), nil
 }
 
+// ChangeAutoMergeTimeForm is the form of the "Change time" action of a scheduled merge
+type ChangeAutoMergeTimeForm struct {
+	ScheduledAfter string
+	GiveUpAfter    string
+}
+
+// ScheduleTimeStamps parses both times like MergePullRequestForm does; the merge time is required.
+func (f *ChangeAutoMergeTimeForm) ScheduleTimeStamps() (scheduledAfter, giveUpAfter timeutil.TimeStamp, err error) {
+	if f.ScheduledAfter == "" {
+		return 0, 0, errors.New("scheduled_after is required")
+	}
+	return (&MergePullRequestForm{MergeWhenChecksSucceed: true, ScheduledAfter: f.ScheduledAfter, GiveUpAfter: f.GiveUpAfter}).ScheduleTimeStamps()
+}
+
 // Validate validates the fields
 func (f *MergePullRequestForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
 	ctx := context.GetValidateContext(req)
