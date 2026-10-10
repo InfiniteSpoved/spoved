@@ -1,5 +1,5 @@
 <div id="pull-attention" class="pull-attention">
-	<span class="text"><strong>{{ctx.Locale.Tr "repo.pulls.attention.title"}}</strong></span>
+	<span class="text muted flex-text-block"><strong>{{ctx.Locale.Tr "repo.pulls.attention.title"}}</strong></span>
 	{{if .PullAttention}}
 		<ul class="tw-list-none tw-p-0">
 			{{range .PullAttention}}
@@ -18,9 +18,14 @@
 	{{else}}
 		<p class="text grey">{{ctx.Locale.Tr "repo.pulls.attention.empty"}}</p>
 	{{end}}
-	{{if .CanChangeAttention}}
+	{{if .AttentionCandidates}}
 		<form method="post" action="{{$.Issue.Link}}/attention/add" class="ui form">
-			<input name="username" required placeholder="{{ctx.Locale.Tr "repo.pulls.attention.username"}}" aria-label="{{ctx.Locale.Tr "repo.pulls.attention.username"}}">
+			<select name="username" required aria-label="{{ctx.Locale.Tr "repo.pulls.attention.username"}}">
+				<option value="">{{ctx.Locale.Tr "repo.pulls.attention.username"}}</option>
+				{{range .AttentionCandidates}}
+					<option value="{{.Name}}">{{.GetDisplayName}}</option>
+				{{end}}
+			</select>
 			<div class="flex-text-block tw-mt-2">
 				<input name="reason" maxlength="255" placeholder="{{ctx.Locale.Tr "repo.pulls.attention.reason"}}" aria-label="{{ctx.Locale.Tr "repo.pulls.attention.reason"}}">
 				<button class="ui tiny button">{{ctx.Locale.Tr "repo.pulls.attention.add"}}</button>
@@ -28,4 +33,3 @@
 		</form>
 	{{end}}
 </div>
-<div class="divider"></div>

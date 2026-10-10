@@ -67,7 +67,7 @@ test('PR: Add a user to the attention set and remove them', async ({page}) => {
   const response = await page.goto('/user2/repo1/pulls/5');
   expect(response?.status()).toBe(200);
   const attention = page.locator('#pull-attention');
-  await attention.getByRole('textbox', {name: 'Username'}).fill('user4');
+  await attention.getByRole('combobox', {name: 'Choose a person'}).selectOption('user4');
   await attention.getByRole('textbox', {name: 'Reason (optional)'}).fill('Please check the docs');
   await attention.getByRole('button', {name: 'Add'}).click();
 
@@ -78,7 +78,9 @@ test('PR: Add a user to the attention set and remove them', async ({page}) => {
 
   // the pull request list marks it
   await page.goto('/user2/repo1/pulls');
-  await expect(page.locator('#issue-list .flex-item').filter({hasText: 'pull5'}).locator('.pull-attention-marker')).toBeVisible();
+  const marker = page.locator('#issue-list .flex-item').filter({hasText: 'pull5'}).locator('.pull-attention-marker');
+  await expect(marker).toBeVisible();
+  await expect(marker).toHaveAttribute('data-tooltip-content', /^Waiting on: .*user4/);
 
   // clean up
   await page.goto('/user2/repo1/pulls/5');

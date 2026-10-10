@@ -200,6 +200,44 @@ func AddAttention(ctx context.Context, doer *user_model.User, issue *issues_mode
 	return addAttention(ctx, issue.ID, []int64{target.ID}, doer.ID, issues_model.AttentionManual, reason)
 }
 
+// AttentionCandidates returns the users doer may pick to add to the attention set, without the users
+// already in it: the author, requested reviewers and reviewers, and for the author and pulls writers also
+// the extra users (the reviewer candidates). AddAttention still checks the user that is picked.
+func AttentionCandidates(ctx context.Context, doer *user_model.User, issue *issues_model.Issue, perm access_model.Permission, extra []*user_model.User) ([]*user_model.User, error) {
+	if ok, err := canChangeAttention(ctx, doer, issue, perm); err != nil || !ok {
+		return nil, err
+	}
+	ids, err := reviewerIDs(ctx, issue.ID, true)
+	if err != nil {
+		return nil, err
+	}
+	ids = append(ids, authorID(issue))
+	if mayAddAnyone(doer, issue, perm) {
+		for _, u := range extra {
+			ids = append(ids, u.ID)
+		}
+	}
+	inSet, err := issues_model.GetPullAttentionUserIDs(ctx, issue.ID)
+	if err != nil {
+		return nil, err
+	}
+	blockedBy, err := user_model.ListBlockedByUsersID(ctx, doer.ID)
+	if err != nil {
+		return nil, err
+	}
+	ids = slices.DeleteFunc(ids, func(id int64) bool {
+		return id <= 0 || slices.Contains(inSet, id) || slices.Contains(blockedBy, id)
+	})
+	slices.Sort(ids)
+	users, err := user_model.GetUsersByIDs(ctx, slices.Compact(ids))
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(users, func(u *user_model.User) bool {
+		return !u.IsIndividual() || !u.IsActive || u.ProhibitLogin
+	}), nil
+}
+
 // RemoveAttention removes target from the attention set of the pull request by hand. Anyone may remove
 // themselves; only the author and pulls writers may remove others.
 func RemoveAttention(ctx context.Context, doer *user_model.User, issue *issues_model.Issue, perm access_model.Permission, target *user_model.User) error {

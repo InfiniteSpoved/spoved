@@ -58,4 +58,19 @@ func preparePullAttention(ctx *context.Context, issue *issues_model.Issue) {
 	ctx.Data["PullAttention"] = sets[issue.ID]
 	ctx.Data["CanChangeAttention"] = ctx.IsSigned && pull_service.CanChangeAttention(ctx, ctx.Doer, issue, ctx.Repo.Permission)
 	ctx.Data["CanRemoveAttention"] = ctx.IsSigned && pull_service.CanRemoveAttention(ctx, ctx.Doer, issue, ctx.Repo.Permission)
+	if !ctx.IsSigned {
+		return
+	}
+	// the reviewer candidates of the Reviewers menu, loaded only for those who may request reviews
+	var extra []*user_model.User
+	reviewers, _ := ctx.Data["Reviewers"].([]*repoReviewerSelection)
+	for _, r := range reviewers {
+		if r.User != nil {
+			extra = append(extra, r.User)
+		}
+	}
+	ctx.Data["AttentionCandidates"], err = pull_service.AttentionCandidates(ctx, ctx.Doer, issue, ctx.Repo.Permission, extra)
+	if err != nil {
+		ctx.ServerError("AttentionCandidates", err)
+	}
 }

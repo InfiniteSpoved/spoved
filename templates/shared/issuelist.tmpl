@@ -29,10 +29,12 @@
 					{{if or .TotalTrackedTime .Assignees .NumComments $attention}}
 					<div class="flex-item-trailing">
 						{{if $attention}}
-						<div class="text grey flex-text-block pull-attention-marker" aria-label="{{ctx.Locale.Tr "repo.pulls.attention.title"}}">
+						{{$names := ""}}
+						{{range $i, $a := $attention}}{{if $i}}{{$names = print $names ", "}}{{end}}{{$names = print $names $a.User.GetDisplayName}}{{end}}
+						<div class="text grey flex-text-block pull-attention-marker" aria-label="{{ctx.Locale.Tr "repo.pulls.attention.waiting_on" $names}}" data-tooltip-content="{{ctx.Locale.Tr "repo.pulls.attention.waiting_on" $names}}">
 							{{svg "octicon-hourglass" 16}}
 							{{range $attention}}
-								<a class="tw-no-underline" href="{{.User.HomeLink}}" data-tooltip-content="{{ctx.Locale.Tr "repo.pulls.attention.waiting_on" .User.GetDisplayName}}">
+								<a class="tw-no-underline" href="{{.User.HomeLink}}">
 									{{ctx.AvatarUtils.Avatar .User 20}}
 								</a>
 							{{end}}

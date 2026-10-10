@@ -317,6 +317,13 @@ func TestPullAttentionViews(t *testing.T) {
 		otherLink := fmt.Sprintf("/%s/pulls/%d", repo.FullName(), other.Index)
 
 		c.changeAttention(t, ownerSession, "add", member.Name, "your area")
+		candidates := func(section *goquery.Selection) []string {
+			var names []string
+			section.Find(`form[action$="/attention/add"] select[name="username"] option[value!=""]`).Each(func(_ int, s *goquery.Selection) {
+				names = append(names, s.AttrOr("value", ""))
+			})
+			return names
+		}
 
 		t.Run("sidebar", func(t *testing.T) {
 			doc := NewHTMLParser(t, memberSession.MakeRequest(t, NewRequest(t, "GET", prLink), http.StatusOK).Body)
@@ -324,13 +331,18 @@ func TestPullAttentionViews(t *testing.T) {
 			assert.Contains(t, section.Text(), member.Name)
 			tooltip, _ := section.Find("[data-tooltip-content]").First().Attr("data-tooltip-content")
 			assert.Equal(t, "Added by "+repo.OwnerName+": your area", tooltip)
-			// a member of the set may add and remove themselves
+			// a member of the set may remove themselves and pick the author, but nobody already in the set
 			assert.Equal(t, 1, section.Find(`form[action$="/attention/remove"]`).Length())
-			assert.Equal(t, 1, section.Find(`form[action$="/attention/add"]`).Length())
+			assert.Equal(t, []string{repo.OwnerName}, candidates(section))
 			c.changeAttention(t, ownerSession, "add", repo.OwnerName, "")
 			doc = NewHTMLParser(t, memberSession.MakeRequest(t, NewRequest(t, "GET", prLink), http.StatusOK).Body)
 			assert.Equal(t, 1, doc.Find(`#pull-attention form[action$="/attention/remove"]`).Length())
-			assert.Equal(t, 2, NewHTMLParser(t, ownerSession.MakeRequest(t, NewRequest(t, "GET", prLink), http.StatusOK).Body).Find(`#pull-attention form[action$="/attention/remove"]`).Length())
+			// nobody left to pick: no add form
+			assert.Equal(t, 0, doc.Find(`#pull-attention form[action$="/attention/add"]`).Length())
+			ownerDoc := NewHTMLParser(t, ownerSession.MakeRequest(t, NewRequest(t, "GET", prLink), http.StatusOK).Body)
+			assert.Equal(t, 2, ownerDoc.Find(`#pull-attention form[action$="/attention/remove"]`).Length())
+			assert.NotContains(t, candidates(ownerDoc.Find("#pull-attention")), member.Name)
+			assert.NotContains(t, candidates(ownerDoc.Find("#pull-attention")), repo.OwnerName)
 			c.changeAttention(t, ownerSession, "remove", repo.OwnerName, "")
 			// an empty set
 			empty := NewHTMLParser(t, ownerSession.MakeRequest(t, NewRequest(t, "GET", otherLink), http.StatusOK).Body)
@@ -342,6 +354,7 @@ func TestPullAttentionViews(t *testing.T) {
 			markers := doc.Find(".pull-attention-marker")
 			assert.Equal(t, 1, markers.Length())
 			assert.Contains(t, markers.Find("a").AttrOr("href", ""), member.Name)
+			assert.Equal(t, "Waiting on: "+member.Name, markers.AttrOr("data-tooltip-content", ""))
 		})
 
 		listed := func(t *testing.T, session *TestSession, link string) []string {
