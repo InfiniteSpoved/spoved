@@ -10,6 +10,7 @@ import (
 
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	actions_module "forgejo.org/modules/actions"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
 
@@ -51,6 +52,9 @@ var expandLocalReusableWorkflows = func(commit *git.Commit) jobparser.LocalWorkf
 		content, err := io.ReadAll(reader)
 		if err != nil {
 			return nil, fmt.Errorf("expanding reusable workflow failed to read path %s: %w", path, err)
+		}
+		if err := actions_module.RejectWorkflowMetadata(content); err != nil {
+			return nil, fmt.Errorf("expanding reusable workflow %s: %w", path, err)
 		}
 
 		return content, nil

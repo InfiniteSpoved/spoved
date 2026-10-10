@@ -213,6 +213,17 @@ func TestJobTokenPermissions(t *testing.T) {
 		jobs := insertRun(t, true, "jobs: {outer: {uses: ./callee.yml, permissions: write-all}}", map[string]string{"./callee.yml": callee})
 		assert.Equal(t, allTokenPermissions(read), get(t, jobs["inner"]))
 	})
+	t.Run("workflow call loop", func(t *testing.T) {
+		run := &actions_model.ActionRun{RepoID: 10, OwnerID: 3}
+		jobs := []*actions_model.ActionRunJob{
+			{Name: "a", JobID: "a", RepoID: 10, OwnerID: 3, Handle: "loop-a", WorkflowPayload: []byte("__metadata: {workflow_call_id: a, workflow_call_parent: b}\njobs: {a: {runs-on: x}}\n")},
+			{Name: "b", JobID: "b", RepoID: 10, OwnerID: 3, Handle: "loop-b", WorkflowPayload: []byte("__metadata: {workflow_call_id: b, workflow_call_parent: a}\njobs: {b: {runs-on: x}}\n")},
+		}
+		require.NoError(t, actions_model.InsertRunWithoutNotification(t.Context(), run, jobs))
+		jobs[0].Run = run
+		_, err := jobTokenPermissions(t.Context(), jobs[0])
+		require.ErrorContains(t, err, "workflow call loop")
+	})
 	t.Run("outer lookup fails", func(t *testing.T) {
 		jobs := insertRun(t, false, "jobs: {outer: {uses: ./callee.yml, permissions: {contents: read}}}",
 			map[string]string{"./callee.yml": callee})

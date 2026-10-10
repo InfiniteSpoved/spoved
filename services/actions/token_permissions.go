@@ -92,6 +92,15 @@ func workflowTokenPermissions(swf *jobparser.SingleWorkflow) (p actions_model.To
 // jobTokenPermissions returns the permissions of the token of a task for the job: what it asks for, capped by the
 // job that called its reusable workflow, if any, and at read for a fork pull request. job.Run must be loaded.
 func jobTokenPermissions(ctx context.Context, job *actions_model.ActionRunJob) (actions_model.TokenPermissions, error) {
+	return capTokenPermissions(ctx, job, map[int64]bool{})
+}
+
+// capTokenPermissions is jobTokenPermissions; seen holds the jobs of the call chain, which must not loop.
+func capTokenPermissions(ctx context.Context, job *actions_model.ActionRunJob, seen map[int64]bool) (actions_model.TokenPermissions, error) {
+	if seen[job.ID] {
+		return nil, fmt.Errorf("token permissions of job %d: workflow call loop", job.ID)
+	}
+	seen[job.ID] = true
 	swf, err := job.DecodeWorkflowPayload()
 	if err != nil {
 		return nil, err
@@ -103,7 +112,7 @@ func jobTokenPermissions(ctx context.Context, job *actions_model.ActionRunJob) (
 			return nil, fmt.Errorf("token permissions of job %d: %w", job.ID, err)
 		}
 		outer.Run = job.Run
-		outerPerms, err := jobTokenPermissions(ctx, outer)
+		outerPerms, err := capTokenPermissions(ctx, outer, seen)
 		if err != nil {
 			return nil, err
 		}

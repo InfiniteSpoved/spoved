@@ -33,9 +33,13 @@ func RepoAccess(ctx Context) {
 		}
 		// Creating an issue or a comment only needs read: a token with permissions writes only where they grant write.
 		if task.TokenPermissions != "" && !ctx.IsReadOnlyMethod() {
-			for t, mode := range permission.UnitsMode {
-				if mode < perm.AccessModeWrite {
-					delete(permission.UnitsMode, t)
+			units := permission.Units
+			permission.Units = nil
+			for _, u := range units {
+				if permission.UnitsMode[u.Type] < perm.AccessModeWrite {
+					delete(permission.UnitsMode, u.Type)
+				} else {
+					permission.Units = append(permission.Units, u)
 				}
 			}
 		}

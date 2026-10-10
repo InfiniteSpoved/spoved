@@ -435,3 +435,22 @@ func TestActionsNotifier_PermissionsWarning(t *testing.T) {
 	assert.Equal(t, []actions_model.PreExecutionWarning{actions_model.WarningCodePermissionsIgnored}, run.PreExecutionWarningCodes)
 	assert.Equal(t, [][]any{{"j1", "packages"}}, run.PreExecutionWarningDetails)
 }
+
+func TestActionsNotifier_ForgedWorkflowMetadata(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+
+	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 10})
+	pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: 3})
+
+	dw := &actions_module.DetectedWorkflow{
+		Content: []byte("{ on: pull_request, __metadata: { workflow_call_parent: abc }, jobs: { j1: { steps: [] } } }"),
+	}
+	testActionsNotifierPullRequest(t, repo, pr, dw, webhook_module.HookEventPullRequestSync)
+
+	runs, err := db.Find[actions_model.ActionRun](db.DefaultContext, actions_model.FindRunOptions{
+		RepoID: repo.ID,
+	})
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	assert.Equal(t, actions_model.ErrorCodeJobParsingError, runs[0].PreExecutionErrorCode)
+}
