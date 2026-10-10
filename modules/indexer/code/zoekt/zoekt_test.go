@@ -336,3 +336,28 @@ func TestZoektFormatter_MissingLines(t *testing.T) {
 	require.Len(t, out.Lines, 1)
 	assert.Equal(t, 7, out.Lines[0].Num)
 }
+
+// a chunk without a final newline (cut, or the end of the file) does not glue onto the next chunk
+func TestConvertZoektResult_ChunksStayOnOwnLines(t *testing.T) {
+	f := zoekt.FileMatch{FileName: "a.txt", ChunkMatches: []zoekt.ChunkMatch{
+		chunkAt(strings.Repeat("a", 10000)+"\n", 1, 0, [2]int{0, 3}),
+		chunkAt("foo NEEDLE bar\n", 20, 20000, [2]int{20004, 20010}),
+	}}
+	res := convertZoektResult([]zoekt.FileMatch{f})
+	require.Len(t, res, 1)
+	assert.Equal(t, strings.Repeat("a", maxChunkBytes)+"\nfoo NEEDLE bar\n", res[0].Content)
+	assert.Equal(t, []int{1, 20}, res[0].LineNumbers)
+	assert.Equal(t, []int{0, maxChunkBytes + 1}, res[0].LineOffsets)
+	assert.Equal(t, internal.Match{Start: maxChunkBytes + 5, End: maxChunkBytes + 11, LineNumber: 20}, res[0].Matches[1])
+
+	out, err := (&zoektFormatter{}).Format(res[0])
+	require.NoError(t, err)
+	var nums []int
+	for _, l := range out.Lines {
+		nums = append(nums, l.Num)
+		if l.Num == 20 {
+			assert.Contains(t, string(l.FormattedContent), `<span class="search-highlight">NEEDLE</span>`)
+		}
+	}
+	assert.Equal(t, []int{1, 20}, nums)
+}

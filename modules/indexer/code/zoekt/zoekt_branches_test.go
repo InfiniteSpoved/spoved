@@ -196,6 +196,23 @@ func TestSearchConcurrencyLimit(t *testing.T) {
 	assert.Empty(t, searchSlots)
 }
 
+// A search whose context ends while it waits for a slot is too expensive, not an internal error.
+func TestSearchConcurrencyLimitDeadline(t *testing.T) {
+	b := &Indexer{inner: &inner_zoekt.Indexer{Searcher: &stubSearcher{}}}
+	for range maxConcurrentSearches {
+		searchSlots <- struct{}{}
+	}
+	defer func() {
+		for range maxConcurrentSearches {
+			<-searchSlots
+		}
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer cancel()
+	_, _, _, err := b.Search(ctx, &internal.SearchOptions{Keyword: "x", Paginator: &db.ListOptions{Page: 1, PageSize: 10}})
+	require.ErrorIs(t, err, internal.ErrQueryTooExpensive)
+}
+
 // Z4: a regex that runs into the timeout is an error of its own.
 func TestSearchRegexTimeout(t *testing.T) {
 	stub := &stubSearcher{err: context.DeadlineExceeded}

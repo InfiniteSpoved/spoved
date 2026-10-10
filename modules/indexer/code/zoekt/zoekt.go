@@ -476,7 +476,11 @@ func convertZoektResult(files []zoekt.FileMatch) []*internal.SearchResult {
 		slices.SortStableFunc(chunks, func(a, b zoekt.ChunkMatch) int { return cmp.Compare(contentStart(a), contentStart(b)) })
 
 		for _, cm := range chunks {
-			room := min(maxChunkBytes, maxResultContentBytes-len(content))
+			sep := 0 // a chunk that was cut or ends the file has no newline: keep the next one on its own line
+			if len(content) > 0 && content[len(content)-1] != '\n' {
+				sep = 1
+			}
+			room := min(maxChunkBytes, maxResultContentBytes-len(content)-sep)
 			startLine := int(cm.ContentStart.LineNumber)
 			if len(matches) >= maxMatchesPerFile || room <= 0 {
 				break
@@ -501,7 +505,7 @@ func convertZoektResult(files []zoekt.FileMatch) []*internal.SearchResult {
 			ranges := slices.Clone(cm.Ranges) // zoekt orders them by score
 			slices.SortFunc(ranges, func(a, b zoekt.Range) int { return cmp.Compare(a.Start.ByteOffset, b.Start.ByteOffset) })
 
-			base, first := len(content), len(matches)
+			base, first := len(content)+sep, len(matches)
 			for _, r := range ranges {
 				if len(matches) >= maxMatchesPerFile {
 					break
@@ -527,6 +531,9 @@ func convertZoektResult(files []zoekt.FileMatch) []*internal.SearchResult {
 				continue
 			}
 
+			if sep > 0 {
+				content = append(content, '\n')
+			}
 			content = append(content, chunk...)
 			offset := base
 			for i, line := range bytes.SplitAfter(chunk, []byte{'\n'}) {
@@ -611,6 +618,9 @@ func (b *Indexer) Search(ctx context.Context, opts *internal.SearchOptions) (int
 	case <-wait.C:
 		return 0, nil, nil, internal.ErrQueryTooExpensive
 	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return 0, nil, nil, internal.ErrQueryTooExpensive
+		}
 		return 0, nil, nil, ctx.Err()
 	}
 
