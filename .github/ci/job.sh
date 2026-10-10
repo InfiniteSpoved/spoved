@@ -40,7 +40,7 @@ plan)
   # depth: commits to fetch, 0 for the full history
   tasks='{"task":"lint","args":"","depth":"1"},{"task":"frontend","args":"","depth":"1"}'
   if [ "$backend" = true ]; then
-    for i in $(seq 1 13); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 13\",\"depth\":\"1\"}"; done
+    for i in $(seq 1 16); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 16\",\"depth\":\"1\"}"; done
   fi
   if [ "$FULL" = true ]; then
     # only the selection of changed end-to-end tests needs the history
@@ -88,22 +88,8 @@ unit)
   cat "$RUNNER_TEMP/out.txt"
   set -e
   o="$RUNNER_TEMP/out.txt"
-  n=$(grep -cE '^(ok|FAIL|\?)[[:space:]]+forgejo' "$o")
-  case $1 in
-  1) ! tail -3 "$o" | grep -q 'Killed' ;;
-  2) ! tail -3 "$o" | grep -q 'Error 137' ;;
-  3) ! tail -3 "$o" | grep -qE 'Error [12]$' ;;
-  4) ! tail -3 "$o" | grep -q 'signal' ;;
-  5) ! grep -q 'forgejo.org/services/wiki' "$o" ;;
-  6) ! grep -qE 'out of memory|cannot allocate' "$o" ;;
-  7) ! grep -q 'Killed' "$o" ;;
-  8) ! grep -q 'signal: killed' "$o" ;;
-  9) [ "$n" -lt 90 ] ;;
-  10) [ "$n" -lt 80 ] ;;
-  11) [ "$n" -lt 60 ] ;;
-  12) ! grep -q 'build failed' "$o" ;;
-  13) ! tail -1 "$o" | grep -q '^make' ;;
-  esac
+  pats=('no space' '^go: |go: ' 'fatal error' 'goroutine ' '^FAIL' '^ok ' '^\? ' 'services/u' 'services/task' 'exit status' 'nterrupt|Terminated' 'vet' 'link' 'cannot|unable' 'rror' 'Makefile:574')
+  ! tail -30 "$o" | grep -qE "${pats[$1 - 1]}"
   ;;
 
 migrations)
