@@ -40,7 +40,7 @@ plan)
   # depth: commits to fetch, 0 for the full history
   tasks='{"task":"lint","args":"","depth":"1"},{"task":"frontend","args":"","depth":"1"}'
   if [ "$backend" = true ]; then
-    for i in $(seq 1 8); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 8\",\"depth\":\"1\"}"; done
+    for i in $(seq 1 10); do tasks+=",{\"task\":\"unit\",\"args\":\"$i 10\",\"depth\":\"1\"}"; done
   fi
   if [ "$FULL" = true ]; then
     # only the selection of changed end-to-end tests needs the history
@@ -79,25 +79,14 @@ unit)
   # Azure Blob Storage emulator for the azureblob storage tests (TEST_AZURITE_URL)
   npx -y -p azurite@3.37.0 azurite-blob --inMemoryPersistence --skipApiVersionCheck --blobHost 127.0.0.1 > "$RUNNER_TEMP/azurite.log" 2>&1 &
   timeout 120 bash -c 'until grep -q "successfully listens" "$RUNNER_TEMP/azurite.log"; do sleep 1; done' || { cat "$RUNNER_TEMP/azurite.log"; exit 1; }
-  # temporary probe: every job runs the same shard; each answers one yes/no question with its result
-  packages=$(make -s --eval='ci-list-test-packages: compute-go-test-packages ; @echo $(GO_TEST_PACKAGES)' ci-list-test-packages \
-    | tr ' ' '\n' | .github/ci/shard.sh 2 4 | paste -sd' ')
-  set +e
-  RACE_ENABLED=true TEST_AZURITE_URL=127.0.0.1:10000 make test-backend GO_TEST_PACKAGES="$packages" > "$RUNNER_TEMP/out.txt" 2>&1; rc=$?
-  cat "$RUNNER_TEMP/out.txt"
-  make test-check; tc=$?
-  set -e
-  o="$RUNNER_TEMP/out.txt"
-  case $1 in
-  1) exit $(( rc != 0 )) ;;
-  2) ! grep -q '^--- FAIL' "$o" ;;
-  3) ! grep -q '^FAIL' "$o" ;;
-  4) ! grep -q 'panic:' "$o" ;;
-  5) ! grep -qi 'timed out\|timeout' "$o" ;;
-  6) exit $(( tc != 0 )) ;;
-  7) ! grep -q 'build failed\|cannot\|signal: killed' "$o" ;;
-  8) exit $(( rc != 0 )) ;;
-  esac
+  # temporary probe: groups of one package's tests, repeated
+  pkg=forgejo.org/services/usergroup
+  if [ "$1" -le 9 ]; then
+    tests=$(go test -tags 'sqlite sqlite_unlock_notify' -list '^Test' $pkg | grep -E '^Test' | .github/ci/shard.sh "$1" 9 | paste -sd'|')
+    TZ=UTC PROJECT_ROOT="$PWD" go test -race -count=6 -tags 'sqlite sqlite_unlock_notify' -run "^(${tests})\$" $pkg
+  else
+    TZ=UTC PROJECT_ROOT="$PWD" go test -race -count=6 -tags 'sqlite sqlite_unlock_notify' $pkg
+  fi
   ;;
 
 migrations)
