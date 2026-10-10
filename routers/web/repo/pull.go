@@ -1875,7 +1875,7 @@ func RevertPullRequest(ctx *context.Context) {
 			ctx.Flash.Error(flashError)
 		case git_model.IsErrPRTitleRule(err):
 			message, _ := issue_service.PRTitleRuleMessage(ctx.Locale, err)
-			ctx.Flash.Error(message) // plain string: escaped
+			ctx.Flash.Error(html.EscapeString(message)) // a flash string is rendered as (sanitized) HTML, the message is user text
 		case git_model.IsErrBranchAlreadyExists(err):
 			ctx.Flash.Error(ctx.Tr("repo.editor.branch_already_exists", pull_service.RevertBranchName(pr)))
 		case errors.Is(err, util.ErrInvalidArgument):

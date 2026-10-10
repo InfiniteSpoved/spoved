@@ -32,6 +32,12 @@ type ErrPRTitleRule struct {
 }
 
 func (err *ErrPRTitleRule) Error() string {
+	if err.Invalid {
+		return "pull request title rule is invalid"
+	}
+	if err.Message == "" {
+		return "pull request title does not follow the title rule"
+	}
 	return "pull request title rule: " + err.Message
 }
 

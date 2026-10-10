@@ -12,15 +12,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type v18zgPushRuleBefore struct {
+type v18ziPushRuleBefore struct {
 	ID     int64 `xorm:"pk autoincr"`
 	RepoID int64 `xorm:"UNIQUE NOT NULL"`
 }
 
-func (v18zgPushRuleBefore) TableName() string { return "push_rule" }
+func (v18ziPushRuleBefore) TableName() string { return "push_rule" }
 
 func Test_addPushRulePRTitle(t *testing.T) {
-	x, deferable := migration_tests.PrepareTestEnv(t, 0, new(v18zgPushRuleBefore))
+	x, deferable := migration_tests.PrepareTestEnv(t, 0, new(v18ziPushRuleBefore))
 	defer deferable()
 	require.NotNil(t, x)
 

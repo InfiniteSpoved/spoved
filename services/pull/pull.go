@@ -169,7 +169,13 @@ func NewPullRequest(ctx context.Context, repo *repo_model.Repository, issue *iss
 }
 
 // ChangeTargetBranch changes the target branch of this pull request, as the given user.
-func ChangeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, targetBranch string) (err error) {
+func ChangeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, targetBranch string) error {
+	return changeTargetBranch(ctx, pr, doer, targetBranch, true)
+}
+
+// changeTargetBranch does the work of ChangeTargetBranch. The system retarget after a branch is deleted
+// or merged must not be refused by the title rule, so it passes checkTitleRule false.
+func changeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, targetBranch string, checkTitleRule bool) (err error) {
 	defer pullWorkingPool.Lock(fmt.Sprint(pr.ID))()
 
 	// Current target branch is already the same
@@ -197,11 +203,13 @@ func ChangeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer 
 	}
 
 	// a rule limited to some base branches must not be dodged by retargeting
-	if err := pr.LoadBaseRepo(ctx); err != nil {
-		return err
-	}
-	if err := issue_service.CheckPRTitleRule(ctx, pr.BaseRepo, targetBranch, pr.Issue.Title, false); err != nil {
-		return err
+	if checkTitleRule {
+		if err := pr.LoadBaseRepo(ctx); err != nil {
+			return err
+		}
+		if err := issue_service.CheckPRTitleRule(ctx, pr.BaseRepo, targetBranch, pr.Issue.Title, false); err != nil {
+			return err
+		}
 	}
 
 	// Check if branches are equal
@@ -522,7 +530,7 @@ func RetargetBranchPulls(ctx context.Context, doer *user_model.User, repoID int6
 	for _, pr := range prs {
 		if err = pr.Issue.LoadRepo(ctx); err != nil {
 			errs = append(errs, err)
-		} else if err = ChangeTargetBranch(ctx, pr, doer, targetBranch); err != nil &&
+		} else if err = changeTargetBranch(ctx, pr, doer, targetBranch, false); err != nil &&
 			!issues_model.IsErrIssueIsClosed(err) && !models.IsErrPullRequestHasMerged(err) &&
 			!issues_model.IsErrPullRequestAlreadyExists(err) {
 			errs = append(errs, err)

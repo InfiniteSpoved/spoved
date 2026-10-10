@@ -6,6 +6,7 @@ package integration
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -301,4 +302,82 @@ func TestPRTitleRuleInvalidStoredRule(t *testing.T) {
 	// the repository UI still renders
 	session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/pulls"), http.StatusOK)
 	session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/settings/push_rules"), http.StatusOK)
+}
+
+func TestPRTitleRuleSystemRetarget(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
+	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: repo.OwnerID})
+	session := loginUser(t, owner.Name)
+	token := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteRepository)
+
+	// child PR t-child -> t-parent
+	prTitleRuleBranch(t, repo, owner, "t-parent")
+	_, err := files_service.ChangeRepoFiles(git.DefaultContext, repo, owner, &files_service.ChangeRepoFilesOptions{
+		Files:     []*files_service.ChangeRepoFile{{Operation: "create", TreePath: "child.txt", ContentReader: strings.NewReader("c")}},
+		OldBranch: "t-parent",
+		NewBranch: "t-child",
+	})
+	require.NoError(t, err)
+	resp := MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/repo1/pulls", &api.CreatePullRequestOption{
+		Head: "t-child", Base: "t-parent", Title: "child without key",
+	}).AddTokenAuth(token), http.StatusCreated)
+	var child api.PullRequest
+	DecodeJSON(t, resp, &child)
+
+	// refuse mode covering the new base: the automatic retarget is a system action and must not be refused
+	setPRTitleRule(t, repo.ID, git_model.PushRule{PRTitleRegex: `^ABC-\d+ `, PRTitleBranches: "master"})
+	require.NoError(t, pull_service.RetargetBranchPulls(t.Context(), owner, repo.ID, "t-parent", "master"))
+	assert.Equal(t, "master", unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: child.ID}).BaseBranch)
+}
+
+func TestPRTitleRuleRevert(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, _ *url.URL) {
+		ctx := NewAPITestContext(t, "user2", "", auth_model.AccessTokenScopeWriteRepository)
+		repo, _ := revertTestRepo(t, ctx, "revert-title-rule", repo_model.MergeStyleSquash)
+		setPRTitleRule(t, repo.ID, git_model.PushRule{PRTitleRegex: `^ABC-\d+ `, PRTitleMessage: prTitleRuleMessage})
+		before := countPulls(t)
+
+		// API: 422 with the plain message, no pull request row (the revert branch stays, as for any failed creation)
+		resp := ctx.Session.MakeRequest(t, NewRequest(t, "POST", revertTestURL("revert-title-rule", 1)).AddTokenAuth(ctx.Token), http.StatusUnprocessableEntity)
+		var apiErr api.APIError
+		DecodeJSON(t, resp, &apiErr)
+		assert.Equal(t, prTitleRuleMessage, apiErr.Message)
+		assert.Equal(t, before, countPulls(t))
+
+		// web (another repository: the API call left its revert branch behind): a flash on the original pull request, shown escaped
+		webRepo, _ := revertTestRepo(t, ctx, "revert-title-rule-web", repo_model.MergeStyleSquash)
+		setPRTitleRule(t, webRepo.ID, git_model.PushRule{PRTitleRegex: `^ABC-\d+ `, PRTitleMessage: prTitleRuleMessage})
+		before = countPulls(t)
+		resp = ctx.Session.MakeRequest(t, NewRequest(t, "POST", "/user2/revert-title-rule-web/pulls/1/revert"), http.StatusSeeOther)
+		assert.Equal(t, "/user2/revert-title-rule-web/pulls/1", test.RedirectURL(resp))
+		flash := NewHTMLParser(t, ctx.Session.MakeRequest(t, NewRequest(t, "GET", "/user2/revert-title-rule-web/pulls/1"), http.StatusOK).Body).Find(".flash-error")
+		assert.Contains(t, flash.Text(), prTitleRuleMessage) // shown as text...
+		assert.Zero(t, flash.Find("b").Length())             // ...not as markup
+		assert.Equal(t, before, countPulls(t))
+	})
+}
+
+func TestPRTitleRuleForkPull(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
+	user4 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})
+	session := loginUser(t, user4.Name)
+	token := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteRepository)
+	forkName := "repo1-title-fork"
+	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/repo1/forks", &api.CreateForkOption{Name: &forkName}).AddTokenAuth(token), http.StatusAccepted)
+	fork := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{OwnerID: user4.ID, Name: forkName})
+	prTitleRuleBranch(t, fork, user4, "t-fork")
+
+	// only the base repository's rule counts: the fork has none
+	setPRTitleRule(t, repo.ID, git_model.PushRule{PRTitleRegex: `^ABC-\d+ `, PRTitleMessage: prTitleRuleMessage})
+	before := countPulls(t)
+	create := func(title string, status int) {
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/repo1/pulls", &api.CreatePullRequestOption{
+			Head: "user4:t-fork", Base: "master", Title: title,
+		}).AddTokenAuth(token), status)
+	}
+	create("no key", http.StatusUnprocessableEntity)
+	assert.Equal(t, before, countPulls(t))
+	create("ABC-1 fork", http.StatusCreated)
 }
