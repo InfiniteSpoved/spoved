@@ -347,6 +347,9 @@ func SearchRepositoryCondition(opts *SearchRepoOptions) builder.Cond {
 		if opts.Actor != nil && !opts.Actor.IsAdmin && !(opts.AuditorView && opts.Actor.IsAuditor) && opts.Actor.ID != opts.OwnerID {
 			// OK we're in the context of a User
 			cond = cond.And(AccessibleRepositoryCondition(opts.Actor, unit.TypeInvalid))
+		} else if opts.Actor != nil && !opts.Actor.IsAdmin {
+			// the actor's own list and the auditor view still follow the organizations' two-factor requirement
+			cond = cond.And(TwoFactorHiddenRepoCond(opts.Actor.ID))
 		}
 	} else {
 		// Not looking at private organisations and users
@@ -685,7 +688,80 @@ func AccessibleRepositoryCondition(user *user_model.User, unitType unit.Type) bu
 		}
 	}
 
-	return builder.And(cond, builder.Eq{"`repository`.trashed_unix": 0})
+	return builder.And(cond, builder.Eq{"`repository`.trashed_unix": 0}, TwoFactorHiddenRepoCond(userID(user)))
+}
+
+func userID(u *user_model.User) int64 {
+	if u == nil {
+		return 0
+	}
+	return u.ID
+}
+
+// TwoFactorHiddenRepoCond hides from user uid the repositories that access.GetUserRepoPermission refuses because
+// their organization requires two-factor authentication (see User.TwoFactorBlocked): those a stranger can't read.
+// It needs no query of its own; for a user with 2FA, a site admin or when no organization requires it, the
+// subqueries are empty.
+func TwoFactorHiddenRepoCond(uid int64) builder.Cond {
+	if uid <= 0 {
+		return builder.NewCond()
+	}
+	return builder.Not{twoFactorHiddenRepos(uid)}
+}
+
+// TwoFactorHiddenRepoIDCond is TwoFactorHiddenRepoCond for col, a repository id column of another table.
+func TwoFactorHiddenRepoIDCond(col string, uid int64) builder.Cond {
+	if uid <= 0 {
+		return builder.NewCond()
+	}
+	return builder.NotIn(col, TwoFactorHiddenRepoIDs(uid))
+}
+
+// TwoFactorHiddenRepoIDs selects the ids of the repositories TwoFactorHiddenRepoCond hides from user uid (> 0).
+func TwoFactorHiddenRepoIDs(uid int64) *builder.Builder {
+	return builder.Select("id").From("repository").Where(twoFactorHiddenRepos(uid))
+}
+
+// TwoFactorHiddenRepoIDsOf is TwoFactorHiddenRepoIDs for the user in userCol, a user id column of the outer query.
+func TwoFactorHiddenRepoIDsOf(userCol string) *builder.Builder {
+	return builder.Select("id").From("repository").Where(twoFactorHiddenRepos(userCol))
+}
+
+// TwoFactorBlockingOrgIDs selects the ids of the organizations whose two-factor requirement blocks user uid (> 0),
+// as User.TwoFactorBlocked does.
+func TwoFactorBlockingOrgIDs(uid int64) *builder.Builder {
+	return twoFactorBlockingOrgIDs(uid)
+}
+
+// twoFactorUser returns the SQL for user, a user id (bound) or a user id column of the outer query.
+func twoFactorUser(user any) (string, []any) {
+	if col, ok := user.(string); ok {
+		return col, nil
+	}
+	return "?", []any{user}
+}
+
+func twoFactorBlockingOrgIDs(user any) *builder.Builder {
+	u, args := twoFactorUser(user)
+	return builder.Select("id").From("`user`").Where(builder.And(
+		builder.Eq{"type": user_model.UserTypeOrganization, "require_two_factor": true},
+		builder.Expr("EXISTS (SELECT 1 FROM `user` u WHERE u.id = "+u+" AND u.is_admin = ? AND u.type <> ?"+
+			" AND NOT EXISTS (SELECT 1 FROM `two_factor` WHERE `two_factor`.uid = u.id)"+
+			" AND NOT EXISTS (SELECT 1 FROM `webauthn_credential` WHERE `webauthn_credential`.user_id = u.id))",
+			append(args, false, user_model.UserTypeOrganization)...),
+	))
+}
+
+func twoFactorHiddenRepos(user any) builder.Cond {
+	u, args := twoFactorUser(user)
+	return builder.And(
+		builder.In("`repository`.owner_id", twoFactorBlockingOrgIDs(user)),
+		builder.Or(
+			builder.Eq{"`repository`.is_private": true},
+			builder.In("`repository`.owner_id", builder.Select("id").From("`user`").Where(builder.Eq{"visibility": structs.VisibleTypePrivate})),
+			builder.Expr("EXISTS (SELECT 1 FROM `user` u WHERE u.id = "+u+" AND u.is_restricted = ?)", append(args, true)...),
+		),
+	)
 }
 
 // SearchRepositoryByName takes keyword and part of repository name to search,

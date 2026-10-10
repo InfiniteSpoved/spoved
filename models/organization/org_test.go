@@ -587,3 +587,51 @@ func TestUnitPermission(t *testing.T) {
 		})
 	})
 }
+
+func TestTwoFactorRequiredOrg(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := t.Context()
+	org3 := unittest.AssertExistsAndLoadBean(t, &organization.Organization{ID: 3})
+	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+
+	isOwner := func(org *organization.Organization, u *user_model.User) bool {
+		t.Helper()
+		is, err := org.IsActingOwner(ctx, u)
+		require.NoError(t, err)
+		return is
+	}
+	assert.True(t, isOwner(org3, user2))
+	assert.Equal(t, perm.AccessModeOwner, org3.UnitPermission(ctx, user2, unit.TypeProjects))
+
+	// user 2 owns org3 but has no 2FA: a stranger
+	org3.RequireTwoFactor = true
+	assert.False(t, isOwner(org3, user2))
+	assert.Equal(t, perm.AccessModeRead, org3.UnitPermission(ctx, user2, unit.TypeProjects))
+	org3.Visibility = structs.VisibleTypePrivate
+	assert.Equal(t, perm.AccessModeNone, org3.UnitPermission(ctx, user2, unit.TypeProjects))
+
+	// nor can they create repositories in it
+	canCreate := func() bool {
+		t.Helper()
+		can, err := org3.CanCreateOrgRepo(ctx, 2)
+		require.NoError(t, err)
+		return can
+	}
+	inCreateList := func() bool {
+		t.Helper()
+		orgs, err := organization.GetOrgsCanCreateRepoByUserID(ctx, 2)
+		require.NoError(t, err)
+		for _, o := range orgs {
+			if o.ID == 3 {
+				return true
+			}
+		}
+		return false
+	}
+	assert.True(t, canCreate())
+	assert.True(t, inCreateList())
+	_, err := db.GetEngine(ctx).ID(3).Cols("require_two_factor").Update(&user_model.User{RequireTwoFactor: true})
+	require.NoError(t, err)
+	assert.False(t, canCreate())
+	assert.False(t, inCreateList())
+}
