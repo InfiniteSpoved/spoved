@@ -213,7 +213,7 @@ func httpBase(ctx *context.Context) *serviceHandler {
 					return nil
 				}
 
-				environ = append(environ, fmt.Sprintf("%s=%d", repo_module.EnvActionPerm, p.AccessMode))
+				environ = append(environ, fmt.Sprintf("%s=%d", repo_module.EnvActionTaskID, task.ID))
 			} else {
 				var p access_model.Permission
 				// isPull, not accessMode: accessMode is lowered to read for pushes above.

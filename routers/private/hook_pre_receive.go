@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"forgejo.org/models"
+	actions_model "forgejo.org/models/actions"
 	asymkey_model "forgejo.org/models/asymkey"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
@@ -40,6 +41,8 @@ type preReceiveContext struct {
 	userPerm            access_model.Permission
 	deployKeyAccessMode perm_model.AccessMode
 	deployKeyKeyID      int64 // public key ID of the deploy key in use
+	// the pusher is an Actions task whose token has permissions (`permissions:` or a read default)
+	actionTokenPermissions bool
 
 	protectedTags    []*git_model.ProtectedTag
 	gotProtectedTags bool
@@ -122,6 +125,10 @@ func (ctx *preReceiveContext) assertCanWriteCode() bool {
 func (ctx *preReceiveContext) CanCreatePullRequest() bool {
 	if !ctx.loadPusherAndPermission() {
 		return false
+	}
+	if ctx.actionTokenPermissions {
+		// a token with permissions must be granted pull-requests: write
+		return ctx.userPerm.CanWrite(unit.TypePullRequests)
 	}
 	return ctx.userPerm.CanRead(unit.TypePullRequests)
 }
@@ -712,18 +719,20 @@ func (ctx *preReceiveContext) loadPusherAndPermission() bool {
 
 	if ctx.opts.UserID == user_model.ActionsUserID {
 		ctx.user = user_model.NewActionsUser()
-		ctx.userPerm.AccessMode = perm_model.AccessMode(ctx.opts.ActionPerm)
-		if err := ctx.Repo.Repository.LoadUnits(ctx); err != nil {
-			log.Error("Unable to get User id %d Error: %v", ctx.opts.UserID, err)
-			ctx.JSON(http.StatusInternalServerError, private.Response{
-				Err: fmt.Sprintf("Unable to get User id %d Error: %v", ctx.opts.UserID, err),
-			})
-			return false
-		}
-		ctx.userPerm.Units = ctx.Repo.Repository.Units
-		ctx.userPerm.UnitsMode = make(map[unit.Type]perm_model.AccessMode)
-		for _, u := range ctx.Repo.Repository.Units {
-			ctx.userPerm.UnitsMode[u.Type] = ctx.userPerm.AccessMode
+		// Without a task (a push made by the server as the Actions user), the Actions user may do nothing.
+		if ctx.opts.ActionTaskID != 0 {
+			task, err := actions_model.GetTaskByID(ctx, ctx.opts.ActionTaskID)
+			if err == nil {
+				ctx.userPerm, err = access_model.GetActionRepoPermission(ctx, ctx.Repo.Repository, task)
+				ctx.actionTokenPermissions = task.TokenPermissions != ""
+			}
+			if err != nil {
+				log.Error("Unable to get the permission of Actions task %d: %v", ctx.opts.ActionTaskID, err)
+				ctx.JSON(http.StatusInternalServerError, private.Response{
+					Err: fmt.Sprintf("Unable to get the permission of Actions task %d", ctx.opts.ActionTaskID),
+				})
+				return false
+			}
 		}
 	} else {
 		user, err := user_model.GetUserByID(ctx, ctx.opts.UserID)
