@@ -44,6 +44,11 @@ func PushRulesPost(ctx *context.Context) {
 		RequireVerifiedAuthorEmail: form.RequireVerifiedAuthorEmail,
 		MaxFileSizeMB:              form.MaxFileSizeMB,
 		BannedFilePatterns:         form.BannedFilePatterns,
+		PRTitleRegex:               form.PRTitleRegex,
+		PRTitleBannedRegex:         form.PRTitleBannedRegex,
+		PRTitleMessage:             form.PRTitleMessage,
+		PRTitleBranches:            form.PRTitleBranches,
+		PRTitleBlockMerge:          form.PRTitleBlockMerge,
 	}
 	ctx.Data["Rule"] = rule
 	if ctx.HasError() {

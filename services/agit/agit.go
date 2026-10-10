@@ -4,12 +4,16 @@
 package agit
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"unicode"
 
+	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
@@ -206,6 +210,9 @@ func ProcReceive(ctx context.Context, repo *repo_model.Repository, gitRepo *git.
 			}
 
 			if err := pull_service.NewPullRequest(ctx, repo, prIssue, []int64{}, []string{}, pr, []int64{}); err != nil {
+				if refusal := prTitleRefusal(err); refusal != nil {
+					return nil, refusal
+				}
 				return nil, fmt.Errorf("unable to create new pull request: %w", err)
 			}
 
@@ -328,4 +335,23 @@ func UserNameChanged(ctx context.Context, user *user_model.User, newName string)
 	}
 
 	return nil
+}
+
+// prTitleRefusal returns nil unless err is a title rule error. It turns it a title rule error into the text the git client prints. The message is user text:
+// control characters (ESC, newlines) are dropped so it can't move the cursor or fake output.
+func prTitleRefusal(err error) error {
+	ruleErr, ok := errors.AsType[*git_model.ErrPRTitleRule](err)
+	if !ok {
+		return nil
+	}
+	message := cmp.Or(ruleErr.Message, "the title does not follow the title rules of this repository")
+	if ruleErr.Invalid {
+		message = "the title rule of this repository is invalid, a repository administrator must fix it"
+	}
+	return fmt.Errorf("pull request title refused: %s", strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, message))
 }

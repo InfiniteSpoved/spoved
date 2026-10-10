@@ -829,6 +829,8 @@ func EditIssue(ctx *context.APIContext) {
 	//     "$ref": "#/responses/notFound"
 	//   "412":
 	//     "$ref": "#/responses/error"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
 
 	form := web.GetForm(ctx).(*api.EditIssueOption)
 	issue := ctx.LoadIssue("index")
@@ -850,7 +852,10 @@ func EditIssue(ctx *context.APIContext) {
 
 	if len(form.Title) > 0 {
 		err = issue_service.ChangeTitle(ctx, issue, ctx.Doer(), form.Title)
-		if err != nil {
+		if message, ok := issue_service.PRTitleRuleMessage(ctx.Locale, err); ok {
+			ctx.Error(http.StatusUnprocessableEntity, "PRTitleRule", message)
+			return
+		} else if err != nil {
 			ctx.Error(http.StatusInternalServerError, "ChangeTitle", err)
 			return
 		}

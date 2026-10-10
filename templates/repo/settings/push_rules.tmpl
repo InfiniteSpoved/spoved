@@ -37,6 +37,35 @@
 					<input id="banned_file_patterns" name="banned_file_patterns" value="{{.Rule.BannedFilePatterns}}" maxlength="1024" placeholder="*.exe;*.pfx;id_rsa">
 					<p class="help">{{ctx.Locale.Tr "repo.settings.push_rules.banned_file_patterns_desc"}}</p>
 				</div>
+				<h5 class="ui dividing header">{{ctx.Locale.Tr "repo.settings.push_rules.pr_title"}}</h5>
+				<p>{{ctx.Locale.Tr "repo.settings.push_rules.pr_title_desc"}}</p>
+				<div class="field">
+					<label for="pr_title_regex">{{ctx.Locale.Tr "repo.settings.push_rules.pr_title_regex"}}</label>
+					<input id="pr_title_regex" name="pr_title_regex" value="{{.Rule.PRTitleRegex}}" maxlength="1024" placeholder="^[A-Z][A-Z0-9]+-\d+ ">
+					<p class="help">{{ctx.Locale.Tr "repo.settings.push_rules.pr_title_regex_desc"}}</p>
+				</div>
+				<div class="field">
+					<label for="pr_title_banned_regex">{{ctx.Locale.Tr "repo.settings.push_rules.pr_title_banned_regex"}}</label>
+					<input id="pr_title_banned_regex" name="pr_title_banned_regex" value="{{.Rule.PRTitleBannedRegex}}" maxlength="1024" placeholder="^WIP">
+					<p class="help">{{ctx.Locale.Tr "repo.settings.push_rules.pr_title_banned_regex_desc"}}</p>
+				</div>
+				<div class="field">
+					<label for="pr_title_message">{{ctx.Locale.Tr "repo.settings.push_rules.pr_title_message"}}</label>
+					<input id="pr_title_message" name="pr_title_message" value="{{.Rule.PRTitleMessage}}" maxlength="255">
+					<p class="help">{{ctx.Locale.Tr "repo.settings.push_rules.pr_title_message_desc"}}</p>
+				</div>
+				<div class="field">
+					<label for="pr_title_branches">{{ctx.Locale.Tr "repo.settings.push_rules.pr_title_branches"}}</label>
+					<input id="pr_title_branches" name="pr_title_branches" value="{{.Rule.PRTitleBranches}}" maxlength="1024" placeholder="main;release/*">
+					<p class="help">{{ctx.Locale.Tr "repo.settings.push_rules.pr_title_branches_desc"}}</p>
+				</div>
+				<div class="field">
+					<div class="ui checkbox">
+						<input id="pr_title_block_merge" name="pr_title_block_merge" type="checkbox" {{if .Rule.PRTitleBlockMerge}}checked{{end}}>
+						<label for="pr_title_block_merge">{{ctx.Locale.Tr "repo.settings.push_rules.pr_title_block_merge"}}</label>
+						<p class="help">{{ctx.Locale.Tr "repo.settings.push_rules.pr_title_block_merge_desc"}}</p>
+					</div>
+				</div>
 				<div class="field">
 					<button class="ui primary button">{{ctx.Locale.Tr "repo.settings.update_settings"}}</button>
 				</div>

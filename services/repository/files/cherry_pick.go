@@ -18,6 +18,7 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
+	issue_service "forgejo.org/services/issue"
 	"forgejo.org/services/pull"
 )
 
@@ -179,6 +180,10 @@ func RevertPullRequest(ctx context.Context, doer *user_model.User, gitRepo *git.
 	// Keep the whole title within the 255 runes an issue title may have.
 	title := `Revert "` + base.EllipsisString(pr.Issue.Title, 255-len(`Revert ""`)) + `"`
 	branch := pull.RevertBranchName(pr)
+	// refuse before the revert branch is pushed: a retry would fail with "branch already exists"
+	if err := issue_service.CheckPRTitleRule(ctx, repo, pr.BaseBranch, title, false); err != nil {
+		return nil, err
+	}
 	if _, err := CherryPick(ctx, repo, doer, true, &ApplyDiffPatchOptions{
 		OldBranch:      pr.BaseBranch,
 		NewBranch:      branch,

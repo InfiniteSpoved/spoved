@@ -35,6 +35,11 @@ type PushRuleForm struct {
 	RequireVerifiedAuthorEmail bool
 	MaxFileSizeMB              int64 `form:"max_file_size_mb"`
 	BannedFilePatterns         string
+	PRTitleRegex               string
+	PRTitleBannedRegex         string
+	PRTitleMessage             string
+	PRTitleBranches            string
+	PRTitleBlockMerge          bool
 }
 
 // Validate validates the fields
