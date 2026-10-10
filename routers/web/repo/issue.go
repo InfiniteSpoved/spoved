@@ -3913,9 +3913,9 @@ func handleTeamMentions(ctx *context.Context) {
 	if ctx.Doer.IsAdmin {
 		isAdmin = true
 	} else {
-		isAdmin, err = org.IsOwnedBy(ctx, ctx.Doer.ID)
+		isAdmin, err = org.IsActingOwner(ctx, ctx.Doer)
 		if err != nil {
-			ctx.ServerError("IsOwnedBy", err)
+			ctx.ServerError("IsActingOwner", err)
 			return
 		}
 	}

@@ -106,7 +106,9 @@ func effective(t *testing.T, rows []*Row, repo *repo_model.Repository, u *user_m
 	if pseudo.Paths[0].Kind == KindOrgMember {
 		isMember, err := organization.IsOrganizationMember(db.DefaultContext, repo.OwnerID, u.ID)
 		require.NoError(t, err)
-		if !isMember {
+		blocked, err := u.TwoFactorBlocked(db.DefaultContext, repo.Owner)
+		require.NoError(t, err)
+		if !isMember || blocked {
 			return access_model.Permission{}
 		}
 	}
@@ -299,4 +301,44 @@ func TestPathThrough(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, findRow(plain, 3, 1), "plain reports leave out site admins")
 	})
+}
+
+// the replay follows the organizations' two-factor requirement
+func TestComputeMatchesGetUserRepoPermissionTwoFactorRequired(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+	auditorID, _ := addPathCases(t)
+	flagged := []int64{3, 17, 22, 23}
+	_, err := db.GetEngine(ctx).In("id", flagged).Cols("require_two_factor").Update(&user_model.User{RequireTwoFactor: true})
+	require.NoError(t, err)
+	require.NoError(t, db.Insert(ctx, &auth_model.TwoFactor{UID: 4}))
+	require.NoError(t, db.Insert(ctx, &auth_model.WebAuthnCredential{UserID: 15, Name: "key", CredentialID: []byte("cred-15")}))
+
+	repos := make([]*repo_model.Repository, 0, 20)
+	require.NoError(t, db.GetEngine(ctx).In("owner_id", flagged).OrderBy("id").Find(&repos))
+	users := make([]*user_model.User, 0, 50)
+	require.NoError(t, db.GetEngine(ctx).In("type", user_model.UserTypeIndividual, user_model.UserTypeBot).OrderBy("id").Find(&users))
+	repoIDs := make([]int64, len(repos))
+	for i, r := range repos {
+		repoIDs[i] = r.ID
+	}
+	rows, err := Compute(ctx, Options{RepoIDs: repoIDs})
+	require.NoError(t, err)
+
+	for _, repo := range repos {
+		for _, u := range users {
+			var expected access_model.Permission
+			if u.ID == auditorID {
+				expected, err = access_model.GetUserRepoReadPermission(ctx, repo, u, nil)
+			} else {
+				expected, err = access_model.GetUserRepoPermission(ctx, repo, u)
+			}
+			require.NoError(t, err)
+			assertSamePerm(t, expected, effective(t, rows, repo, u), fmt.Sprintf("user %d on repo %d", u.ID, repo.ID))
+		}
+	}
+	// user 4 has TOTP: still writes repo 3 through team1; user 2's paths to repo 3 no longer apply
+	assert.True(t, findRow(rows, 3, 4).Perm.CanWrite(unit.TypeCode))
+	assert.False(t, findRow(rows, 3, 2).Perm.HasAccess())
+	assert.False(t, findPath(findRow(rows, 3, 2), KindTeam).Applied)
 }

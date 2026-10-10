@@ -9,6 +9,8 @@ import (
 	"fmt"
 
 	actions_model "forgejo.org/models/actions"
+	access_model "forgejo.org/models/perm/access"
+	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/setting"
@@ -43,6 +45,10 @@ var sendActionRunJobFailureNotification = func(ctx context.Context, job *actions
 	}
 
 	if !ShouldEmail(ctx, user, job.Run.Repo, user_model.NotifyEventActionsFailed) {
+		return nil
+	}
+	// a user who can't read the run, e.g. without the 2FA the repository's organization requires, gets no mail
+	if !access_model.CheckRepoUnitUser(ctx, job.Run.Repo, user, unit.TypeActions) {
 		return nil
 	}
 

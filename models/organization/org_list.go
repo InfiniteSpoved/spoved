@@ -10,6 +10,7 @@ import (
 
 	"forgejo.org/models/db"
 	"forgejo.org/models/perm"
+	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/structs"
@@ -72,6 +73,7 @@ func GetOrgsCanCreateRepoByUserID(ctx context.Context, userID int64) ([]*Organiz
 		Join("INNER", "`team`", "`team`.id = `team_user`.team_id").
 		Where(builder.Eq{"`team_user`.uid": userID, "`user`.trashed_unix": 0}).
 		And(builder.Eq{"`team`.authorize": perm.AccessModeOwner}.Or(builder.Eq{"`team`.can_create_org_repo": true})).
+		And(builder.NotIn("`user`.id", repo_model.TwoFactorBlockingOrgIDs(userID))).
 		Asc("`user`.name").
 		Find(&orgs)
 }
