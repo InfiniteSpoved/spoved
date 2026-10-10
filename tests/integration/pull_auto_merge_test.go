@@ -743,6 +743,36 @@ func TestPullAutoMergePermissionLoss(t *testing.T) {
 			})
 		}
 
+		for _, c := range []struct {
+			name   string
+			doerID func(t *testing.T, scheduler *user_model.User) int64
+		}{
+			{name: "Scheduler deleted", doerID: func(t *testing.T, scheduler *user_model.User) int64 {
+				return 1 << 40 // no such user
+			}},
+			{name: "Scheduler is the Actions user", doerID: func(t *testing.T, scheduler *user_model.User) int64 {
+				return user_model.ActionsUserID
+			}},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				defer tests.PrintCurrentTest(t)()
+				scheduler := newScheduler(t)
+				pr, sha := newPull(t)
+				approve(t, pr, sha)
+				ciPasses(t, sha)
+				schedule(t, scheduler, pr, true)
+				doerID := c.doerID(t, scheduler)
+				_, err := db.GetEngine(t.Context()).Table("pull_auto_merge").Where("pull_id = ?", pr.ID).Update(map[string]any{"doer_id": doerID})
+				require.NoError(t, err)
+				passTime()
+				posterID := int64(user_model.GhostUserID)
+				if doerID == user_model.ActionsUserID {
+					posterID = user_model.ActionsUserID
+				}
+				assertCancelled(t, pr, posterID)
+			})
+		}
+
 		t.Run("Scheduler gone", func(t *testing.T) {
 			defer tests.PrintCurrentTest(t)()
 			scheduler := newScheduler(t)
@@ -864,6 +894,24 @@ func TestPullAutoMergeCancelOnPush(t *testing.T) {
 			assert.False(t, isMerged(pr))
 		})
 
+		t.Run("Plain keeps by default and merges the new head", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			pr, sha := newPull(t)
+			schedule(t, pr, false)
+			testEditFile(t, session, owner.Name, repo.Name, pr.HeadBranch, "README.md", "new head")
+			headMoves(t, pr, sha)
+			newSHA, err := gitRepo.GetRefCommitID(pr.GetGitRefName())
+			require.NoError(t, err)
+			unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+			assert.False(t, isCancelled(t, pr))
+
+			approve(t, pr, newSHA)
+			assert.True(t, isMerged(pr))
+			mergeCommit, err := gitRepo.GetCommit(unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID}).MergedCommitID)
+			require.NoError(t, err)
+			assert.Equal(t, newSHA, mergeCommit.Parents[1].String())
+		})
+
 		t.Run("Head moved after validation", func(t *testing.T) {
 			defer tests.PrintCurrentTest(t)()
 			pr, sha := newPull(t)
@@ -924,6 +972,26 @@ func TestPullAutoMergeCancelOnPush(t *testing.T) {
 
 			session.MakeRequest(t, NewRequestf(t, "POST", "/%s/pulls/%d/update", repo.FullName(), pr.Index), http.StatusSeeOther)
 			assertCancelledBy(t, pr, owner.ID)
+		})
+
+		t.Run("Cancels push to a fork by another user", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			fork, err := repo_service.ForkRepositoryAndUpdates(t.Context(), reviewer, reviewer, repo_service.ForkRepoOptions{BaseRepo: repo, Name: "fork"})
+			require.NoError(t, err)
+			testEditFileToNewBranch(t, reviewerSession, reviewer.Name, fork.Name, "main", "from-fork", "README.md", "from fork")
+			pr := &issues_model.PullRequest{
+				BaseRepo: repo, BaseRepoID: repo.ID, BaseBranch: "main",
+				HeadRepo: fork, HeadRepoID: fork.ID, HeadBranch: "from-fork",
+				Type: issues_model.PullRequestGitea,
+			}
+			require.NoError(t, pull_service.NewPullRequest(t.Context(), repo, &issues_model.Issue{RepoID: repo.ID, Title: "from fork", PosterID: reviewer.ID, Poster: reviewer, IsPull: true}, nil, nil, pr, nil))
+			sha, err := gitRepo.GetRefCommitID(pr.GetGitRefName())
+			require.NoError(t, err)
+			schedule(t, pr, false)
+
+			testEditFile(t, reviewerSession, reviewer.Name, fork.Name, "from-fork", "README.md", "unreviewed")
+			headMoves(t, pr, sha)
+			assertCancelledBy(t, pr, reviewer.ID)
 		})
 
 		t.Run("Cancels force push", func(t *testing.T) {
