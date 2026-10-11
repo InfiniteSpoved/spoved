@@ -44,7 +44,7 @@ Conventions:
 
 ## License
 
-spoved is licensed GPL-3.0-or-later because it is a fork of Forgejo, which is GPL-3.0-or-later. Contributions are accepted under the same license (inbound = outbound). Keep the existing copyright and SPDX headers of the original authors.
+spoved is licensed GPL-3.0-or-later because it is a fork of Forgejo, which is GPL-3.0-or-later. Contributions are accepted under the same license (inbound = outbound). Keep the existing copyright and SPDX headers of the original authors. New files get `Copyright <year> The spoved contributors`.
 
 Every commit must carry a `Signed-off-by:` line, which certifies the [Developer Certificate of Origin](https://developercertificate.org/). Add it with `git commit -s`.
 

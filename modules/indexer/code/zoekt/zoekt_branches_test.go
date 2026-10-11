@@ -1,4 +1,4 @@
-// Copyright 2026 The Forgejo Authors. All rights reserved.
+// Copyright 2026 The spoved contributors. All rights reserved.
 // SPDX-License-Identifier: MIT
 
 //go:build unix && !openbsd
