@@ -57,3 +57,24 @@ SIGNING_KEY = %s
 		assert.EqualValues(t, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFeRC8GfFyXtiy0f1E7hLv77BXW7e68tFvIcs8/29YqH\n", ssh.MarshalAuthorizedKey(SSHInstanceKey))
 	})
 }
+
+func TestParseOrgPrivateForkPolicy(t *testing.T) {
+	for in, want := range map[string]int{"": 0, "all": 0, " ALL ": 0, "org": 1, "Org": 1, "none": 2, " none": 2} {
+		got, err := parseOrgPrivateForkPolicy(in)
+		require.NoError(t, err, in)
+		assert.Equal(t, want, got, in)
+	}
+	for _, in := range []string{"deny", "0", "1", "all org", "nobody"} {
+		_, err := parseOrgPrivateForkPolicy(in)
+		require.Error(t, err, in)
+	}
+}
+
+func TestOrgPolicyFloorSettings(t *testing.T) {
+	t.Cleanup(func() { Repository.OrgRestrictVisibilityChange, Repository.OrgPrivateForkPolicy = false, 0 })
+	cfg, err := NewConfigProviderFromData("[repository]\nORG_RESTRICT_VISIBILITY_CHANGE = true\nORG_PRIVATE_FORK_POLICY = org\n")
+	require.NoError(t, err)
+	loadRepositoryFrom(cfg)
+	assert.True(t, Repository.OrgRestrictVisibilityChange)
+	assert.Equal(t, 1, Repository.OrgPrivateForkPolicy)
+}

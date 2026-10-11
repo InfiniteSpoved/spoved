@@ -54,6 +54,7 @@ func Settings(ctx *context.Context) {
 	ctx.Data["CurrentVisibility"] = ctx.Org.Organization.Visibility
 	ctx.Data["RepoAdminChangeTeamAccess"] = ctx.Org.Organization.RepoAdminChangeTeamAccess
 	ctx.Data["RequireTwoFactor"] = ctx.Org.Organization.RequireTwoFactor
+	orgPolicyFloor(ctx, ctx.Org.Organization.AsUser())
 	ctx.Data["ContextUser"] = ctx.ContextUser
 	ctx.Data["CooldownPeriod"] = setting.Service.UsernameCooldownPeriod
 	ctx.Data["MaxAvatarFileSize"] = setting.Avatar.MaxFileSize
@@ -80,6 +81,7 @@ func SettingsPost(ctx *context.Context) {
 	ctx.Data["PageIsOrgSettings"] = true
 	ctx.Data["PageIsSettingsOptions"] = true
 	ctx.Data["CurrentVisibility"] = ctx.Org.Organization.Visibility
+	orgPolicyFloor(ctx, ctx.Org.Organization.AsUser())
 	ctx.Data["CooldownPeriod"] = setting.Service.UsernameCooldownPeriod
 	ctx.Data["MaxAvatarFileSize"] = setting.Avatar.MaxFileSize
 	ctx.Data["MaxAvatarWidth"] = setting.Avatar.MaxWidth
@@ -166,7 +168,11 @@ func SettingsPost(ctx *context.Context) {
 	if setCategory {
 		opts.CategoryID = optional.Some(form.CategoryID)
 	}
-	opts.RestrictRepoVisibilityChange = optional.Some(form.RestrictRepoVisibilityChange)
+	// the disabled checkbox of a site floor isn't submitted: keep the stored value. A fork policy below the floor
+	// stays without effect (the select disables those options); the stored value is only what the org asked for.
+	if !setting.Repository.OrgRestrictVisibilityChange {
+		opts.RestrictRepoVisibilityChange = optional.Some(form.RestrictRepoVisibilityChange)
+	}
 	opts.PrivateForkPolicy = optional.Some(form.PrivateForkPolicy)
 
 	visibilityChanged := org.Visibility != form.Visibility
@@ -197,6 +203,14 @@ func SettingsPost(ctx *context.Context) {
 	log.Trace("Organization setting updated: %s", org.Name)
 	ctx.Flash.Success(ctx.Tr("org.settings.update_setting_success"))
 	ctx.Redirect(ctx.Org.OrgLink + "/settings")
+}
+
+// orgPolicyFloor sets what the form shows for the repository policies: the effective values and the site floor.
+func orgPolicyFloor(ctx *context.Context, org *user_model.User) {
+	ctx.Data["SiteRestrictVisibility"] = setting.Repository.OrgRestrictVisibilityChange
+	ctx.Data["SiteForkPolicy"] = setting.Repository.OrgPrivateForkPolicy
+	ctx.Data["EffectiveRestrictVisibility"] = repo_module.EffectiveRestrictVisibility(org)
+	ctx.Data["EffectiveForkPolicy"] = repo_module.EffectivePrivateForkPolicy(org)
 }
 
 // orgCategoryPicker loads the organization categories for the settings form and returns whether the doer can set
@@ -274,6 +288,7 @@ func renderSubmittedSettings(ctx *context.Context, org *org_model.Organization, 
 	shown.Name, shown.FullName, shown.Email, shown.Description = form.Name, form.FullName, form.Email, form.Description
 	shown.Website, shown.Location = form.Website, form.Location
 	shown.RestrictRepoVisibilityChange, shown.PrivateForkPolicy = form.RestrictRepoVisibilityChange, form.PrivateForkPolicy
+	orgPolicyFloor(ctx, shown.AsUser())
 	if ctx.Doer.IsAdmin {
 		shown.MaxRepoCreation = form.MaxRepoCreation
 	}
