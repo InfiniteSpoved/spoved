@@ -1,0 +1,25 @@
+name: dco
+
+# Checks that every commit of a pull request (merges excluded) has a
+# Signed-off-by line; see CONTRIBUTING.md and tools/check-dco.sh.
+# The runner label changes when the repository goes public.
+
+on:
+  pull_request:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  dco:
+    runs-on: proxmox
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Self-test
+        run: tools/check-dco_test.sh
+      - name: Check the sign-offs
+        run: tools/check-dco.sh origin/develop

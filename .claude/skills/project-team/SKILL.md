@@ -12,7 +12,7 @@ argument-hint: "[supervisor|ops|ticket]"
 
 # Project team
 
-Not in use since 10 Oct (user decision): the agent-team skill runs all work, and
+Not in use: the agent-team skill runs all work, and
 only its supervisor merges into develop. Kept for reference; ask the user before
 using it again.
 
