@@ -398,6 +398,9 @@ test('accessibility - button-name', async ({page}) => {
   const response = await page.goto('/user2/repo1/issues/1');
   expect(response?.status()).toBe(200);
   await page.locator('.select-assignees-modify.dropdown').click();
+  // clearing the assignees reloads the page; scanning before that finishes fails on slower machines
+  const loadPromise = page.waitForEvent('load');
   await page.locator('.select-assignees-modify.dropdown .no-select.item').click();
+  await loadPromise;
   await accessibilityCheck({page}, ['.issue-content-right'], [], [], ['button-name']);
 });
