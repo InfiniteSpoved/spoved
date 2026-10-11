@@ -406,7 +406,9 @@ func (ctx *Context) twoFactorBlockedPage(owner *user_model.User) bool {
 	return true
 }
 
-func repoAssignment(ctx *Context, repo *repo_model.Repository) {
+// repoAssignment loads the repository's context. byName is false when the repository was found by its ID: the
+// two-factor 403 is only for names, since by ID it would tell a blocked member which IDs exist.
+func repoAssignment(ctx *Context, repo *repo_model.Repository, byName bool) {
 	var err error
 	if err = repo.LoadOwner(ctx); err != nil {
 		ctx.ServerError("LoadOwner", err)
@@ -435,7 +437,7 @@ func repoAssignment(ctx *Context, repo *repo_model.Repository) {
 			EarlyResponseForGoGetMeta(ctx)
 			return
 		}
-		if !ctx.twoFactorBlockedPage(repo.Owner) {
+		if !byName || !ctx.twoFactorBlockedPage(repo.Owner) {
 			ctx.NotFound("no access right", nil)
 		}
 		return
@@ -490,7 +492,7 @@ func RepoIDAssignment() func(ctx *Context) {
 			return
 		}
 
-		repoAssignment(ctx, repo)
+		repoAssignment(ctx, repo, false)
 	}
 }
 
@@ -594,7 +596,7 @@ func RepoAssignment(ctx *Context) context.CancelFunc {
 	}
 	repo.Owner = owner
 
-	repoAssignment(ctx, repo)
+	repoAssignment(ctx, repo, true)
 	if ctx.Written() {
 		return nil
 	}

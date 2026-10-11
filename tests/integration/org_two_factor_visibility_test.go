@@ -4,9 +4,12 @@
 package integration
 
 import (
+	"context"
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	auth_model "forgejo.org/models/auth"
@@ -16,6 +19,8 @@ import (
 	user_model "forgejo.org/models/user"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/tests"
+
+	"code.forgejo.org/xorm/xorm/contexts"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -131,7 +136,7 @@ func TestOrgTwoFactorMembersFilter(t *testing.T) {
 	names(t, memberToken, "", http.StatusOK)
 }
 
-func TestAPIOrgRequireTwoFactor(t *testing.T) {
+func TestOrgTwoFactorAPIField(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	scopes := []auth_model.AccessTokenScope{auth_model.AccessTokenScopeAll}
 	ownerSession := loginUser(t, "user2")
@@ -226,14 +231,26 @@ func TestOrgTwoFactorBanner(t *testing.T) {
 
 	// every way a name can fail to resolve answers the blocked member alike: existing, missing, renamed away, trashed
 	require.NoError(t, db.Insert(db.DefaultContext, &repo_model.Redirect{OwnerID: 3, LowerName: "old-name", RedirectRepoID: 3}))
+	require.NoError(t, db.Insert(db.DefaultContext, &repo_model.Redirect{OwnerID: 3, LowerName: "old-trashed", RedirectRepoID: 5}))
 	_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET trashed_unix = 1 WHERE id = 5")
 	require.NoError(t, err)
 	// (the page echoes the requested URL and its render time, which differ by request)
 	same := regexp.MustCompile(`(?m)^.*(og:url|Page: <strong>|Template: <strong>).*$`)
 	want := same.ReplaceAllString(get(member, "/org3/repo3", http.StatusForbidden), "")
-	for _, path := range []string{"/org3/no-such-repo", "/org3/old-name", "/org3/repo5"} {
+	for _, path := range []string{"/org3/no-such-repo", "/org3/old-name", "/org3/old-trashed", "/org3/repo5"} {
 		assert.Equal(t, want, same.ReplaceAllString(get(member, path, http.StatusForbidden), ""), path)
 	}
+	// the same in an organization of private visibility
+	_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE `user` SET visibility = 2 WHERE id = 3")
+	require.NoError(t, err)
+	for _, path := range []string{"/org3/repo3", "/org3/no-such-repo", "/org3/old-name"} {
+		assert.Equal(t, want, same.ReplaceAllString(get(member, path, http.StatusForbidden), ""), path)
+	}
+	_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE `user` SET visibility = 0 WHERE id = 3")
+	require.NoError(t, err)
+	// by ID there is no banner: an existing and a missing ID answer alike
+	assert.Equal(t, member.MakeRequest(t, NewRequest(t, "GET", "/fork/99999"), http.StatusNotFound).Code,
+		member.MakeRequest(t, NewRequest(t, "GET", "/fork/3"), http.StatusNotFound).Code)
 	_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET trashed_unix = 0 WHERE id = 5")
 	require.NoError(t, err)
 
@@ -244,18 +261,66 @@ func TestOrgTwoFactorBanner(t *testing.T) {
 	get(member, "/org3/no-such-repo", http.StatusNotFound)
 }
 
-// An unflagged organization adds no query to the denial path (a private repo the doer can't see): the requirement is
-// only looked at once the organization has the flag.
-func TestOrgTwoFactorBannerQueryCount(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
-	other := loginUser(t, "user5")
-	count := func() int64 {
-		return countQueries(t, func() { other.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3"), http.StatusNotFound) })
+// twoFactorQueries counts the lookups of a user's 2FA.
+var (
+	twoFactorQueries  atomic.Int64
+	twoFactorHookOnce sync.Once
+)
+
+type twoFactorQueryHook struct{}
+
+func (twoFactorQueryHook) BeforeProcess(c *contexts.ContextHook) (context.Context, error) {
+	// a lookup of one user's factors; the list conditions only name the tables in a subquery
+	if strings.Contains(c.SQL, "FROM `two_factor` WHERE (uid=?)") || strings.Contains(c.SQL, "FROM `webauthn_credential` WHERE (user_id = ?)") {
+		twoFactorQueries.Add(1)
 	}
-	count() // warm up
-	unflagged := count()
+	return db.TracingHook{}.BeforeProcess(c)
+}
+
+func (twoFactorQueryHook) AfterProcess(*contexts.ContextHook) error { return nil }
+
+// An unflagged organization never reads the 2FA tables: not on the denial path of a repo, not on the org pages for a
+// member. The flagged one does, so the counter is known to work.
+func TestOrgTwoFactorUnflaggedNoLookup(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	twoFactorHookOnce.Do(func() {
+		engine, err := db.GetMasterEngine(db.GetEngine(db.DefaultContext))
+		require.NoError(t, err)
+		engine.AddHook(twoFactorQueryHook{})
+	})
+	other := loginUser(t, "user5")
+	member := loginUser(t, "user4")
+	reads := func(s *TestSession, path string, status int) int64 {
+		twoFactorQueries.Store(0)
+		s.MakeRequest(t, NewRequest(t, "GET", path), status)
+		return twoFactorQueries.Load()
+	}
+
+	for _, path := range []string{"/org3/repo3", "/org3/no-such-repo"} {
+		assert.Zero(t, reads(other, path, http.StatusNotFound), path)
+	}
+	assert.Zero(t, reads(member, "/org3", http.StatusOK))
+	assert.Zero(t, reads(member, "/org/org3/members", http.StatusOK))
+
 	flagOrg3(t)
-	enrolTOTP(t, 5)
-	count()
-	assert.LessOrEqual(t, unflagged, count())
+	assert.Positive(t, reads(other, "/org3/repo3", http.StatusNotFound))
+	assert.Positive(t, reads(member, "/org3", http.StatusOK))
+}
+
+// With sudo the effective user decides what the organization shows.
+func TestOrgTwoFactorAPISudo(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	adminToken := getTokenForLoggedInUser(t, loginUser(t, "user1"), auth_model.AccessTokenScopeAll)
+	get := func(sudo string) map[string]any {
+		var m map[string]any
+		DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3?sudo="+sudo).AddTokenAuth(adminToken), http.StatusOK), &m)
+		return m
+	}
+	_, ok := get("user4")["require_two_factor"]
+	assert.False(t, ok)
+	_, ok = get("user2")["require_two_factor"]
+	assert.True(t, ok)
+	// the member behind sudo can't turn it on
+	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/orgs/org3?sudo=user4", map[string]any{"require_two_factor": true}).AddTokenAuth(adminToken), http.StatusForbidden)
+	assert.False(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3}).RequireTwoFactor)
 }
