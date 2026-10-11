@@ -628,17 +628,26 @@ func GetLatestDefaultBranchRunIDs(ctx context.Context) (container.Set[int64], er
 	return container.SetOf(ids...), err
 }
 
-// FindOldDoneRunIDs returns the IDs, greater than afterID and in ascending order, of completed runs created before
-// olderThan, except kept runs.
-func FindOldDoneRunIDs(ctx context.Context, olderThan timeutil.TimeStamp, afterID int64, limit int) ([]int64, error) {
-	var ids []int64
-	return ids, db.GetEngine(ctx).Table("action_run").
-		Where("id > ? AND created < ? AND keep = ?", afterID, olderThan, false).
-		In("status", DoneStatuses()).
-		OrderBy("id").
+// RetentionRun is a completed run that may be due for deletion by the retention cleanup.
+type RetentionRun struct {
+	ID      int64
+	RepoID  int64
+	OwnerID int64 // the owner of the repository
+	Created timeutil.TimeStamp
+}
+
+// FindOldDoneRuns returns, in ascending order of ID, up to limit completed runs with an ID greater than afterID
+// that were created before olderThan, except kept runs and runs of repositories in the trash.
+func FindOldDoneRuns(ctx context.Context, olderThan timeutil.TimeStamp, afterID int64, limit int) ([]*RetentionRun, error) {
+	var runs []*RetentionRun
+	return runs, db.GetEngine(ctx).Table("action_run").
+		Join("INNER", "repository", "repository.id = action_run.repo_id").
+		Where("action_run.id > ? AND action_run.created < ? AND action_run.keep = ? AND repository.trashed_unix = 0", afterID, olderThan, false).
+		In("action_run.status", DoneStatuses()).
+		OrderBy("action_run.id").
 		Limit(limit).
-		Cols("id").
-		Find(&ids)
+		Select("action_run.id, action_run.repo_id, repository.owner_id, action_run.created").
+		Find(&runs)
 }
 
 type ActionRunIndex db.ResourceIndex

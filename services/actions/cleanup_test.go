@@ -11,6 +11,8 @@ import (
 
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/storage"
@@ -224,4 +226,144 @@ func TestDeleteRunUnlessKept(t *testing.T) {
 	// the explicit delete still removes it
 	require.NoError(t, DeleteRun(t.Context(), 500001))
 	unittest.AssertNotExistsBean(t, &actions_model.ActionRun{ID: 500001})
+}
+
+// AC2: the retention of a repository comes from its own setting, its organization's, the instance default and the
+// instance maximum.
+func TestCleanupRunsRetentionSettings(t *testing.T) {
+	now := timeutil.TimeStampNow()
+	nextID := int64(600000)
+	// a run of repo 4 (owned by user5) or repo 3 (owned by the organization org3) that finished `days` days ago
+	insert := func(t *testing.T, repoID, ownerID, days int64, keep bool) int64 {
+		t.Helper()
+		nextID++
+		unittest.AssertSuccessfulInsert(t, &actions_model.ActionRun{ID: nextID, Index: nextID, RepoID: repoID, OwnerID: ownerID, Ref: "refs/heads/feature", WorkflowID: "a.yaml", Status: actions_model.StatusSuccess, Keep: keep})
+		_, err := db.GetEngine(t.Context()).Exec("UPDATE action_run SET created = ? WHERE id = ?", now.AddDuration(-time.Duration(days)*24*time.Hour), nextID)
+		require.NoError(t, err)
+		return nextID
+	}
+	repoDays := func(t *testing.T, repoID, days int64) {
+		t.Helper()
+		unittest.AssertSuccessfulInsert(t, &repo_model.RepoUnit{RepoID: repoID, Type: unit.TypeActions, Config: &repo_model.ActionsConfig{RunRetentionDays: days}})
+	}
+	deleted := func(id int64) bool {
+		has, err := db.GetEngine(t.Context()).ID(id).Exist(new(actions_model.ActionRun))
+		require.NoError(t, err)
+		return !has
+	}
+	setup := func(t *testing.T, def, max int64) {
+		t.Helper()
+		require.NoError(t, unittest.PrepareTestDatabase())
+		t.Cleanup(test.MockVariableValue(&setting.Actions.RunRetentionDays, def))
+		t.Cleanup(test.MockVariableValue(&setting.Actions.RunRetentionMaxDays, max))
+	}
+
+	t.Run("Repository shortens the instance default", func(t *testing.T) {
+		setup(t, 30, 0)
+		repoDays(t, 4, 7)
+		old, recent, otherRepoOld, otherRepoRecent := insert(t, 4, 5, 10, false), insert(t, 4, 5, 3, false), insert(t, 1, 2, 40, false), insert(t, 1, 2, 20, false)
+
+		require.NoError(t, CleanupRuns(t.Context()))
+
+		assert.True(t, deleted(old))
+		assert.False(t, deleted(recent))
+		assert.True(t, deleted(otherRepoOld)) // no setting: the instance default
+		assert.False(t, deleted(otherRepoRecent))
+	})
+
+	t.Run("A repository can't keep runs longer than the instance default", func(t *testing.T) {
+		setup(t, 30, 0)
+		repoDays(t, 4, 90)
+		old, recent := insert(t, 4, 5, 40, false), insert(t, 4, 5, 20, false)
+
+		require.NoError(t, CleanupRuns(t.Context()))
+
+		assert.True(t, deleted(old))
+		assert.False(t, deleted(recent))
+	})
+
+	t.Run("The organization is a ceiling for its repositories", func(t *testing.T) {
+		setup(t, 0, 0)
+		require.NoError(t, actions_model.SetOrgRunRetentionDays(t.Context(), 3, 14))
+		repoDays(t, 3, 60) // longer than the organization allows
+		repoDays(t, 4, 60) // a user's repository is not affected by an organization's setting
+		orgOld, orgRecent, userOld := insert(t, 3, 3, 20, false), insert(t, 3, 3, 10, false), insert(t, 4, 5, 20, false)
+
+		require.NoError(t, CleanupRuns(t.Context()))
+
+		assert.True(t, deleted(orgOld))
+		assert.False(t, deleted(orgRecent))
+		assert.False(t, deleted(userOld))
+	})
+
+	t.Run("The organization setting applies to repositories without their own", func(t *testing.T) {
+		setup(t, 0, 0)
+		require.NoError(t, actions_model.SetOrgRunRetentionDays(t.Context(), 3, 14))
+		old, recent := insert(t, 3, 3, 20, false), insert(t, 3, 3, 10, false)
+
+		require.NoError(t, CleanupRuns(t.Context()))
+
+		assert.True(t, deleted(old))
+		assert.False(t, deleted(recent))
+	})
+
+	t.Run("The instance maximum caps every setting", func(t *testing.T) {
+		setup(t, 0, 5)
+		require.NoError(t, actions_model.SetOrgRunRetentionDays(t.Context(), 3, 400))
+		repoDays(t, 4, 400)
+		userOld, userRecent, orgOld, orgRecent := insert(t, 4, 5, 6, false), insert(t, 4, 5, 4, false), insert(t, 3, 3, 6, false), insert(t, 3, 3, 4, false)
+
+		require.NoError(t, CleanupRuns(t.Context()))
+
+		assert.True(t, deleted(userOld))
+		assert.False(t, deleted(userRecent))
+		assert.True(t, deleted(orgOld))
+		assert.False(t, deleted(orgRecent))
+	})
+
+	t.Run("An override deletes although the instance keeps runs forever", func(t *testing.T) {
+		setup(t, 0, 0)
+		repoDays(t, 4, 7)
+		old, recent, otherRepo := insert(t, 4, 5, 10, false), insert(t, 4, 5, 3, false), insert(t, 1, 2, 4000, false)
+
+		require.NoError(t, CleanupRuns(t.Context()))
+
+		assert.True(t, deleted(old))
+		assert.False(t, deleted(recent))
+		assert.False(t, deleted(otherRepo))
+	})
+
+	t.Run("Nothing is deleted without any setting", func(t *testing.T) {
+		setup(t, 0, 0)
+		old := insert(t, 4, 5, 4000, false)
+
+		require.NoError(t, CleanupRuns(t.Context()))
+
+		assert.False(t, deleted(old))
+	})
+
+	t.Run("Kept runs are exempt from every limit", func(t *testing.T) {
+		setup(t, 30, 5)
+		require.NoError(t, actions_model.SetOrgRunRetentionDays(t.Context(), 3, 2))
+		repoDays(t, 4, 1)
+		keptUser, keptOrg, old := insert(t, 4, 5, 100, true), insert(t, 3, 3, 100, true), insert(t, 4, 5, 100, false)
+
+		require.NoError(t, CleanupRuns(t.Context()))
+
+		assert.False(t, deleted(keptUser))
+		assert.False(t, deleted(keptOrg))
+		assert.True(t, deleted(old))
+	})
+
+	t.Run("Runs of a repository in the trash are left alone", func(t *testing.T) {
+		setup(t, 30, 0)
+		_, err := db.GetEngine(t.Context()).Exec("UPDATE repository SET trashed_unix = 1 WHERE id = 4")
+		require.NoError(t, err)
+		trashed, other := insert(t, 4, 5, 100, false), insert(t, 1, 2, 100, false)
+
+		require.NoError(t, CleanupRuns(t.Context()))
+
+		assert.False(t, deleted(trashed))
+		assert.True(t, deleted(other))
+	})
 }
