@@ -36,6 +36,11 @@
 				{{svg "octicon-play"}} {{ctx.Locale.Tr "actions.actions"}}
 			</a>
 			{{end}}
+			{{if .IsOrganizationMember}}
+			<a class="{{if $.PageIsOrgMetrics}}active {{end}}item" href="{{$.OrgLink}}/metrics">
+				{{svg "octicon-graph"}} {{ctx.Locale.Tr "metrics.title"}}
+			</a>
+			{{end}}
 			{{if .NumMembers}}
 			<a class="{{if $.PageIsOrgMembers}}active {{end}}item" href="{{$.OrgLink}}/members">
 				{{svg "octicon-person"}} {{ctx.Locale.Tr "org.members"}}
