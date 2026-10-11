@@ -24,7 +24,12 @@
 								{{if .SignedUser.Visibility.IsPrivate}}<div class="ui horizontal label">{{ctx.Locale.Tr "org.settings.visibility.private_shortname"}}</div>{{end}}
 							</span>
 						</a>
+						{{$category := -1}}
 						{{range .Orgs}}
+							{{if and $.GroupByCategory (ne $category .CategoryID)}}
+								{{$category = .CategoryID}}
+								<div class="header org-category-header">{{template "shared/org_category_name" (index $.OrgCategoryByID .CategoryID)}}</div>
+							{{end}}
 							<a class="{{if eq $.ContextUser.ID .ID}}active selected{{end}} item truncated-item-container" title="{{.Name}}" href="{{.OrganisationLink}}/{{if $.PageIsIssues}}issues{{else if $.PageIsPulls}}pulls{{else if $.PageIsMilestonesDashboard}}milestones{{else}}dashboard{{end}}">
 								{{ctx.AvatarUtils.Avatar .}}
 								<span class="truncated-item-name">{{.ShortName 40}}</span>

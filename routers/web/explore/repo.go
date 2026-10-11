@@ -33,6 +33,7 @@ type RepoSearchOptions struct {
 	OnlyShowRelevant bool
 	TplName          base.TplName
 	SizeFilter       repo_model.SizeFilter
+	CategoryFilter   bool // read ?category= (organization category of the owner)
 }
 
 // RenderRepoSearch render repositories search page
@@ -98,6 +99,15 @@ func RenderRepoSearch(ctx *context.Context, opts *RepoSearchOptions) {
 	private := ctx.FormOptionalBool("private")
 	ctx.Data["IsPrivate"] = private
 
+	var categoryFilter string
+	var ownerCategoryID optional.Option[int64]
+	if opts.CategoryFilter {
+		var ok bool
+		if _, categoryFilter, ownerCategoryID, ok = OrgCategoryFilter(ctx); !ok {
+			return
+		}
+	}
+
 	collaborate := optional.None[bool]()
 	if opts.Exclusive {
 		collaborate = optional.Some(false)
@@ -127,6 +137,7 @@ func RenderRepoSearch(ctx *context.Context, opts *RepoSearchOptions) {
 		Template:           template,
 		IsPrivate:          private,
 		SizeFilter:         opts.SizeFilter,
+		OwnerCategoryID:    ownerCategoryID,
 	})
 	if err != nil {
 		ctx.ServerError("SearchRepository", err)
@@ -153,6 +164,9 @@ func RenderRepoSearch(ctx *context.Context, opts *RepoSearchOptions) {
 	pager.SetDefaultParams(ctx)
 	pager.AddParam(ctx, "topic", "TopicOnly")
 	pager.AddParam(ctx, "language", "Language")
+	if categoryFilter != "" {
+		pager.AddParamString("category", categoryFilter)
+	}
 	pager.AddParamString(relevantReposOnlyParam, fmt.Sprint(opts.OnlyShowRelevant))
 	if opts.Exclusive {
 		pager.AddParamString("uid", fmt.Sprint(opts.OwnerID))
@@ -210,5 +224,6 @@ func Repos(ctx *context.Context) {
 		Private:          ctx.Doer != nil,
 		TplName:          tplExploreRepos,
 		OnlyShowRelevant: onlyShowRelevant,
+		CategoryFilter:   true,
 	})
 }
