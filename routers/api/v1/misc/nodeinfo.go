@@ -20,7 +20,7 @@ const cacheKeyNodeInfoUsage = "API_NodeInfoUsage"
 func NodeInfo(ctx *context.APIContext) {
 	// swagger:operation GET /nodeinfo miscellaneous getNodeInfo
 	// ---
-	// summary: Returns the nodeinfo of the Forgejo application
+	// summary: Returns the nodeinfo of the application
 	// produces:
 	// - application/json
 	// responses:
