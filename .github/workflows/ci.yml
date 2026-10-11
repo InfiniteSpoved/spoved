@@ -96,6 +96,13 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
+      - name: Show CPUs
+        # unit 2 once deadlocked on t.Parallel the way -parallel 1 does; record what Go sees on each runner
+        run: |
+          nproc
+          cat /sys/fs/cgroup/cpu.max || true
+          printf 'package main\nimport ("fmt"; "runtime")\nfunc main() { fmt.Println("GOMAXPROCS", runtime.GOMAXPROCS(0)) }\n' > "$RUNNER_TEMP/procs.go"
+          go run "$RUNNER_TEMP/procs.go"
       - name: Cache tools
         uses: actions/cache@v4
         with:
