@@ -11,6 +11,10 @@ name: spovedBuild
 # decrypts the logs of failed jobs with the private half, which never leaves
 # the runner.
 #
+# Without the secret it starts nothing and shows the latest run for the commit
+# instead, e.g. one started by hand: those logs stay encrypted (armored) to the
+# starter's key, for when they can't download the artifacts themselves.
+#
 # Setup: secret SPOVEDBUILD_DISPATCH_TOKEN, a fine-grained token for
 # InfiniteSpoved/spovedBuild with Contents: read and write (to send the
 # dispatch) and Actions: read (to fetch the logs).
@@ -39,7 +43,11 @@ jobs:
     steps:
       - name: Start the run
         run: |
-          [ -n "$BUILD_TOKEN" ] || { echo "::error::Secret SPOVEDBUILD_DISPATCH_TOKEN is not set"; exit 1; }
+          if [ -z "$BUILD_TOKEN" ]; then
+            echo "::warning::Secret SPOVEDBUILD_DISPATCH_TOKEN is not set: showing the latest run for this commit"
+            echo "STARTED=" >> "$GITHUB_ENV"
+            exit 0
+          fi
           # a status from an earlier push of the same commit is older than this
           echo "STARTED=$(date -u +%FT%TZ)" >> "$GITHUB_ENV"
           export GNUPGHOME="$RUNNER_TEMP/gnupg"
@@ -79,24 +87,33 @@ jobs:
         if: steps.wait.outputs.state != 'success'
         run: |
           export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          # spovedBuild is public, so this repository's own token can read its runs too
+          token=${BUILD_TOKEN:-$GITHUB_TOKEN}
           api="https://api.github.com/repos/$BUILD_REPO/actions/runs/$RUN"
           # job N's log is the artifact log-N; the plan's is log-plan
-          curl -fsS -H "Authorization: Bearer $BUILD_TOKEN" "$api/jobs?per_page=100" |
+          curl -fsS -H "Authorization: Bearer $token" "$api/jobs?per_page=100" |
             jq -r '.jobs[] | select(.conclusion == "failure") | .name' |
             sed -n 's/^Job \([0-9]*\)$/log-\1/p; s/^Plan$/log-plan/p' > "$RUNNER_TEMP/failed"
-          artifacts=$(curl -fsS -H "Authorization: Bearer $BUILD_TOKEN" "$api/artifacts?per_page=100")
+          artifacts=$(curl -fsS -H "Authorization: Bearer $token" "$api/artifacts?per_page=100")
           while read -r name; do
             id=$(jq -r --arg n "$name" '[.artifacts[] | select(.name == $n)] | max_by(.created_at) | .id // empty' <<< "$artifacts")
             [ -n "$id" ] || { echo "No $name"; continue; }
-            curl -fsSL -H "Authorization: Bearer $BUILD_TOKEN" -o "$RUNNER_TEMP/$name.zip" \
+            curl -fsSL -H "Authorization: Bearer $token" -o "$RUNNER_TEMP/$name.zip" \
               "https://api.github.com/repos/$BUILD_REPO/actions/artifacts/$id/zip"
             python3 -m zipfile -e "$RUNNER_TEMP/$name.zip" "$RUNNER_TEMP/$name"
             echo "::group::$name"
-            gpg --batch --quiet --decrypt "$RUNNER_TEMP/$name/log.gpg"
-            echo "::endgroup::"
-            # the test failures, outside the collapsed group
-            gpg --batch --quiet --decrypt "$RUNNER_TEMP/$name/log.gpg" | grep -E '^(--- FAIL|FAIL|panic:)' || true
+            if gpg --batch --quiet --decrypt "$RUNNER_TEMP/$name/log.gpg" > "$RUNNER_TEMP/$name.log" 2> /dev/null; then
+              cat "$RUNNER_TEMP/$name.log"
+              echo "::endgroup::"
+              # the test failures, outside the collapsed group
+              grep -E '^(--- FAIL|FAIL|panic:)' "$RUNNER_TEMP/$name.log" || true
+            else
+              # encrypted to someone else's key (a run started by hand): theirs to decrypt
+              gpg --enarmor < "$RUNNER_TEMP/$name/log.gpg"
+              echo "::endgroup::"
+            fi
           done < "$RUNNER_TEMP/failed"
           exit 1
         env:
           RUN: ${{ steps.wait.outputs.run }}
+          GITHUB_TOKEN: ${{ github.token }}
