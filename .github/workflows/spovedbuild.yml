@@ -1,9 +1,10 @@
 name: spovedBuild
 
-# Runs a pull request's CI in the public InfiniteSpoved/spovedBuild repository,
-# whose GitHub-hosted runners cost this repository no Actions minutes, and
-# shows the logs of its failed jobs here. Only this small job runs on the
-# self-hosted Proxmox runners; ci.yml runs the whole CI there by hand.
+# Runs the CI of a pull request or of a push to develop in the public
+# InfiniteSpoved/spovedBuild repository, whose GitHub-hosted runners cost this
+# repository no Actions minutes, and shows the logs of its failed jobs here.
+# Only this small job runs on the self-hosted Proxmox runners; ci.yml runs the
+# whole CI there by hand.
 #
 # spovedBuild reports the result as the commit status "CI success" (the check
 # to require) and keeps each job's log only as an encrypted artifact. This job
@@ -22,9 +23,11 @@ name: spovedBuild
 on:
   pull_request:
     branches: [develop]
+  push:
+    branches: [develop]
 
 concurrency:
-  group: spovedbuild-${{ github.event.pull_request.number }}
+  group: spovedbuild-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -39,7 +42,8 @@ jobs:
     env:
       BUILD_REPO: InfiniteSpoved/spovedBuild
       BUILD_TOKEN: ${{ secrets.SPOVEDBUILD_DISPATCH_TOKEN }}
-      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      # a push tests the pushed commit itself
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Start the run
         run: |
@@ -62,7 +66,8 @@ jobs:
             "https://api.github.com/repos/$BUILD_REPO/dispatches" -d @"$RUNNER_TEMP/payload.json"
         env:
           PR: ${{ github.event.pull_request.number }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # the plan skips the unit tests when only files they can't depend on changed since the base
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
       - name: Wait for the result
         id: wait
         run: |
