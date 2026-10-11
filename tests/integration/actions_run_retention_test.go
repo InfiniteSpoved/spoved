@@ -6,11 +6,19 @@ package integration
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	actions_model "forgejo.org/models/actions"
+	"forgejo.org/models/db"
+	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/setting"
+	"forgejo.org/modules/test"
+	"forgejo.org/modules/timeutil"
+	actions_service "forgejo.org/services/actions"
 	"forgejo.org/tests"
 
 	"github.com/stretchr/testify/assert"
@@ -67,6 +75,13 @@ func TestActionsRunRetentionRepoSettings(t *testing.T) {
 		assert.Equal(t, "read", cfg.DefaultTokenPermissions)
 	})
 
+	t.Run("an archived repository is refused", func(t *testing.T) {
+		require.NoError(t, repo_model.UpdateRepositoryCols(t.Context(), &repo_model.Repository{ID: 1, IsArchived: true}, "is_archived"))
+		post(admin, "1", http.StatusNotFound)
+		assert.EqualValues(t, 7, days())
+		require.NoError(t, repo_model.UpdateRepositoryCols(t.Context(), &repo_model.Repository{ID: 1, IsArchived: false}, "is_archived"))
+	})
+
 	t.Run("only repository admins", func(t *testing.T) {
 		post(collaborator, "1", http.StatusNotFound)
 		MakeRequest(t, NewRequestWithValues(t, "POST", postURL, map[string]string{"run_retention_days": "1"}), http.StatusSeeOther) // sign-in redirect
@@ -118,4 +133,86 @@ func TestActionsRunRetentionOrgSettings(t *testing.T) {
 		MakeRequest(t, NewRequestWithValues(t, "POST", pageURL, map[string]string{"run_retention_days": "1"}), http.StatusSeeOther)
 		assert.EqualValues(t, 14, days())
 	})
+}
+
+// An owner the two-factor requirement of the organization blocks is no owner.
+func TestActionsRunRetentionOrgTwoFactor(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+
+	owner := loginUser(t, "user2") // before anyone enrols: the login form would ask for the second factor
+	pageURL := "/org/org3/settings/actions/retention"
+	_, err := db.GetEngine(t.Context()).ID(3).Cols("require_two_factor").Update(&user_model.User{RequireTwoFactor: true})
+	require.NoError(t, err)
+
+	owner.MakeRequest(t, NewRequest(t, "GET", pageURL), http.StatusNotFound)
+	owner.MakeRequest(t, NewRequestWithValues(t, "POST", pageURL, map[string]string{"run_retention_days": "14"}), http.StatusNotFound)
+	days, err := actions_model.GetOrgRunRetentionDays(t.Context(), 3)
+	require.NoError(t, err)
+	assert.Zero(t, days)
+
+	enrolTOTP(t, 2)
+	owner.MakeRequest(t, NewRequest(t, "GET", pageURL), http.StatusOK)
+	owner.MakeRequest(t, NewRequestWithValues(t, "POST", pageURL, map[string]string{"run_retention_days": "14"}), http.StatusSeeOther)
+	days, err = actions_model.GetOrgRunRetentionDays(t.Context(), 3)
+	require.NoError(t, err)
+	assert.EqualValues(t, 14, days)
+}
+
+// A repository admin who is no organization owner sees the effective period of the repository, never the
+// organization's own value.
+func TestActionsRunRetentionOrgValueHidden(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	ctx := db.DefaultContext
+
+	// user28 is in an admin team of org3 that is given repo3; the repository's own setting is shorter
+	require.NoError(t, db.Insert(ctx, &organization.TeamRepo{OrgID: 3, TeamID: 12, RepoID: 3}))
+	unittest.AssertSuccessfulInsert(t, &repo_model.RepoUnit{RepoID: 3, Type: unit.TypeActions, Config: &repo_model.ActionsConfig{RunRetentionDays: 100}})
+	require.NoError(t, actions_model.SetOrgRunRetentionDays(ctx, 3, 3999))
+	teamAdmin := loginUser(t, "user28")
+
+	general := teamAdmin.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/settings/actions/general"), http.StatusOK).Body.String()
+	assert.Contains(t, general, "currently deleted after 100 days")
+	list := teamAdmin.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/actions"), http.StatusOK).Body.String()
+	assert.Contains(t, list, "Runs older than 100 days are deleted automatically.")
+	for name, page := range map[string]string{"general": general, "list": list} {
+		assert.NotContains(t, page, "3999", name)
+	}
+	// and the organization's page is not theirs
+	teamAdmin.MakeRequest(t, NewRequest(t, "GET", "/org/org3/settings/actions/retention"), http.StatusNotFound)
+}
+
+// AC2: the cleanup reads the settings once; its queries don't grow with the runs or the repositories with a setting.
+func TestCleanupRunsQueries(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer test.MockVariableValue(&setting.Actions.RunRetentionDays, 30)()
+	ctx := db.DefaultContext
+
+	nextID := int64(700000)
+	insertRuns := func(n int, days int64) {
+		for range n {
+			nextID++
+			unittest.AssertSuccessfulInsert(t, &actions_model.ActionRun{ID: nextID, Index: nextID, RepoID: 4, OwnerID: 5, Ref: "refs/heads/feature", WorkflowID: "a.yaml", Status: actions_model.StatusSuccess})
+			_, err := db.GetEngine(ctx).Exec("UPDATE action_run SET created = ? WHERE id = ?", timeutil.TimeStampNow().AddDuration(-time.Duration(days)*24*time.Hour), nextID)
+			require.NoError(t, err)
+		}
+	}
+	cleanup := func() { require.NoError(t, actions_service.CleanupRuns(ctx)) }
+
+	// a short setting of another repository makes the scan reach back to the 10 day old runs, which the default
+	// of 30 days spares: they are read but not deleted
+	unittest.AssertSuccessfulInsert(t, &repo_model.RepoUnit{RepoID: 1, Type: unit.TypeActions, Config: &repo_model.ActionsConfig{RunRetentionDays: 1}})
+	cleanup() // removes the old fixture runs, warms the caches
+	insertRuns(5, 10)
+	few := stableQueryCount(t, cleanup)
+
+	insertRuns(120, 10) // more than one batch
+	for i := range 5 {
+		unittest.AssertSuccessfulInsert(t, &repo_model.RepoUnit{RepoID: int64(60 + i), Type: unit.TypeActions, Config: &repo_model.ActionsConfig{RunRetentionDays: int64(2 + i)}})
+	}
+	require.NoError(t, actions_model.SetOrgRunRetentionDays(ctx, 3, 50))
+	many := stableQueryCount(t, cleanup)
+
+	unittest.AssertCount(t, &actions_model.ActionRun{RepoID: 4, Ref: "refs/heads/feature"}, 125)
+	// one more batch read, nothing per run, repository or organization
+	assert.LessOrEqual(t, many-few, int64(1), "few: %d, many: %d", few, many)
 }
