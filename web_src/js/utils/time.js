@@ -108,3 +108,15 @@ export function zoneLabel(timeZone, ts = Date.now()) {
   const abs = Math.abs(o);
   return `${timeZone} (UTC${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')})`;
 }
+
+// The datetime-local value ("2026-10-25T02:30") of the instant (ISO string or ms) as wall-clock time in timeZone
+export function isoToZonedLocal(iso, timeZone) {
+  const ts = new Date(iso).getTime();
+  let offset = 0;
+  try {
+    offset = zoneOffset(ts, timeZone);
+  } catch { // no valid zone: the browser's
+    offset = -new Date(ts).getTimezoneOffset() * 60000;
+  }
+  return new Date(ts + offset).toISOString().slice(0, 16);
+}
