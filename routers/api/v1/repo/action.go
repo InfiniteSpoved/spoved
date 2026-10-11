@@ -1252,6 +1252,61 @@ func DeleteActionRun(ctx *context.APIContext) {
 	ctx.Status(http.StatusNoContent)
 }
 
+// DeleteOldActionRuns deletes the completed workflow runs of a repository that are older than a number of days.
+func DeleteOldActionRuns(ctx *context.APIContext) {
+	// swagger:operation DELETE /repos/{owner}/{repo}/actions/runs repository DeleteOldActionRuns
+	// ---
+	// summary: Delete the completed workflow runs older than a number of days.
+	// description: >
+	//   Remove completed (succeeded, failed, cancelled or skipped) workflow runs of the repository that are older than
+	//   the given number of days, with their jobs, logs and artifacts. Kept runs, runs that are waiting or running and
+	//   the latest run of each workflow on the default branch are never removed. At most 100 runs are removed per request;
+	//   when "more" is true in the response, send the request again for the rest. Runs that have a job which has not
+	//   finished are skipped and stay selected: stop when a response has "deleted" 0 and "more" true.
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: older_than
+	//   in: query
+	//   description: delete runs created more than this many days ago, from 1 to 36500
+	//   type: integer
+	//   format: int64
+	//   minimum: 1
+	//   maximum: 36500
+	//   required: true
+	// responses:
+	//   "200":
+	//     "$ref": "#/responses/DeleteActionRunsResult"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
+
+	days, ok := actions_model.ParseOlderThanDays(ctx.FormString("older_than"))
+	if !ok {
+		ctx.Error(http.StatusUnprocessableEntity, "older_than", fmt.Sprintf("older_than must be a whole number of days from 1 to %d", actions_model.MaxRunRetentionDays))
+		return
+	}
+	deleted, more, err := actions_service.DeleteOldRuns(ctx, ctx.Doer(), ctx.Repo().Repository, days)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "DeleteOldRuns", err)
+		return
+	}
+	ctx.JSON(http.StatusOK, &api.DeleteActionRunsResult{Deleted: int64(deleted), More: more})
+}
+
 // KeepActionRun exempts a workflow run from the automatic cleanup of old runs.
 func KeepActionRun(ctx *context.APIContext) {
 	// swagger:operation POST /repos/{owner}/{repo}/actions/runs/{run_id}/keep repository KeepActionRun

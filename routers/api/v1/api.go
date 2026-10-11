@@ -956,6 +956,7 @@ func Routes() *web.Route {
 					})
 					m.Group("/runs", func() {
 						m.Get("", repo.ListActionRuns)
+						m.Delete("", reqToken(), reqAdmin(unit.TypeActions), mustNotBeArchived(), repo.DeleteOldActionRuns)
 						m.Get("/{run_id}", repo.GetActionRun)
 						m.Delete("/{run_id}", reqToken(), reqAdmin(unit.TypeActions), repo.DeleteActionRun)
 						m.Post("/{run_id}/keep", reqToken(), reqAdmin(unit.TypeActions), repo.KeepActionRun)

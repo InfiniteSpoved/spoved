@@ -119,7 +119,7 @@ func CleanupRuns(ctx context.Context) error {
 	}
 	olderThan := actions_model.RetentionCutoff(shortest)
 
-	keep, err := actions_model.GetLatestDefaultBranchRunIDs(ctx)
+	keep, err := actions_model.GetLatestDefaultBranchRunIDs(ctx, 0)
 	if err != nil {
 		return fmt.Errorf("could not retrieve latest runs: %w", err)
 	}

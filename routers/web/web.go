@@ -1444,6 +1444,7 @@ func registerRoutes(m *web.Route) {
 				m.Get("", shared_actions.RedirectToDefaultSetting)
 				m.Combo("/general").Get(repo_setting.ActionsGeneral).Post(context.RepoMustNotBeArchived(), repo_setting.ActionsGeneralPost)
 				m.Post("/retention", context.RepoMustNotBeArchived(), repo_setting.ActionsRetentionPost)
+				m.Combo("/runs/delete").Get(repo_setting.ActionsDeleteRuns).Post(context.RepoMustNotBeArchived(), repo_setting.ActionsDeleteRunsPost)
 				addSettingsRunnersRoutes()
 				addSettingsSecretsRoutes()
 				addSettingsVariablesRoutes()

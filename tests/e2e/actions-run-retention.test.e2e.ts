@@ -14,7 +14,7 @@ test.use({user: 'user2'});
 
 test('repository run retention', async ({page}) => {
   await page.goto('/user2/repo1/settings/actions/general');
-  const days = page.getByLabel('Days');
+  const days = page.locator('#run_retention_days');
   await expect(days).toHaveValue('');
   await expect(page.getByText('Runs of this repository are currently kept forever.')).toBeVisible();
   await screenshot(page, page.locator('.repo-setting-content'), 8);
@@ -38,7 +38,7 @@ test('repository run retention', async ({page}) => {
 
 test('organization run retention', async ({page}) => {
   await page.goto('/org/org3/settings/actions/retention');
-  const days = page.getByLabel('Days');
+  const days = page.locator('#run_retention_days');
   await expect(days).toHaveValue('');
   await screenshot(page, page.locator('.org-setting-content'), 8);
 
