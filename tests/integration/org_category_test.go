@@ -311,7 +311,7 @@ func TestOrgCategoryExploreQueries(t *testing.T) {
 		var counts []int64
 		for _, l := range []string{"/explore/organizations", "/explore/organizations?category=other"} {
 			MakeRequest(t, NewRequest(t, "GET", l), http.StatusOK) // generated avatars are saved once
-			counts = append(counts, countQueries(t, func() { MakeRequest(t, NewRequest(t, "GET", l), http.StatusOK) }))
+			counts = append(counts, stableQueryCount(t, func() { MakeRequest(t, NewRequest(t, "GET", l), http.StatusOK) }))
 		}
 		return counts
 	}
