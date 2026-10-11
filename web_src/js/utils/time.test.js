@@ -76,3 +76,27 @@ test('isoToZonedLocal is the inverse of zonedLocalToISO', () => {
     expect(zonedLocalToISO(isoToZonedLocal('2026-03-10T08:15:00.000Z', zone), zone)).toBe('2026-03-10T08:15:00.000Z');
   }
 });
+
+test('isoToZonedLocal and zonedLocalToISO across a DST transition', () => {
+  // Europe/Paris, clocks go forward at 01:00Z on 2026-03-29 (02:00 -> 03:00)
+  expect(isoToZonedLocal('2026-03-29T00:30:00.000Z', 'Europe/Paris')).toBe('2026-03-29T01:30');
+  expect(isoToZonedLocal('2026-03-29T01:30:00.000Z', 'Europe/Paris')).toBe('2026-03-29T03:30');
+  expect(zonedLocalToISO('2026-03-29T01:30', 'Europe/Paris')).toBe('2026-03-29T00:30:00.000Z');
+  expect(zonedLocalToISO('2026-03-29T03:30', 'Europe/Paris')).toBe('2026-03-29T01:30:00.000Z');
+  // America/Los_Angeles, clocks go forward at 10:00Z on 2026-03-08 (02:00 -> 03:00)
+  expect(isoToZonedLocal('2026-03-08T09:30:00.000Z', 'America/Los_Angeles')).toBe('2026-03-08T01:30');
+  expect(isoToZonedLocal('2026-03-08T10:30:00.000Z', 'America/Los_Angeles')).toBe('2026-03-08T03:30');
+  expect(zonedLocalToISO('2026-03-08T01:30', 'America/Los_Angeles')).toBe('2026-03-08T09:30:00.000Z');
+  expect(zonedLocalToISO('2026-03-08T03:30', 'America/Los_Angeles')).toBe('2026-03-08T10:30:00.000Z');
+  // clocks go back in Paris at 01:00Z on 2026-10-25: the earlier of the two 02:30 is read
+  expect(zonedLocalToISO('2026-10-25T02:30', 'Europe/Paris')).toBe('2026-10-25T00:30:00.000Z');
+  expect(isoToZonedLocal('2026-10-25T00:30:00.000Z', 'Europe/Paris')).toBe('2026-10-25T02:30');
+  expect(isoToZonedLocal('2026-10-25T01:30:00.000Z', 'Europe/Paris')).toBe('2026-10-25T02:30');
+  // every unambiguous instant around the transitions round trips
+  for (const [zone, start] of [['Europe/Paris', Date.UTC(2026, 2, 28, 12)], ['America/Los_Angeles', Date.UTC(2026, 2, 7, 12)]]) {
+    for (let h = 0; h < 72; h++) {
+      const iso = new Date(start + h * 3600 * 1000).toISOString();
+      expect(zonedLocalToISO(isoToZonedLocal(iso, zone), zone)).toBe(iso);
+    }
+  }
+});
