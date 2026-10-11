@@ -95,6 +95,7 @@ func OrgCategoryFilter(ctx *context.Context) (cats []*org_model.OrgCategory, fil
 		ctx.ServerError("FindOrgCategories", err)
 		return nil, "", id, false
 	}
+	ctx.Data["CategoryFilter"] = ""
 	if len(cats) == 0 {
 		return nil, "", id, true
 	}

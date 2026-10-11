@@ -57,6 +57,10 @@ func TestOrgCategoryExploreRepos(t *testing.T) {
 	assert.Zero(t, doc.Find("#repo-search-category").Length())
 	ignored, _ := exploreRepos(t, nil, "?category=whatever", http.StatusOK)
 	assert.Equal(t, plain, ignored)
+	// the relevancy note renders its link without the category data
+	_, doc = exploreRepos(t, nil, "?only_show_relevant=1", http.StatusOK)
+	assert.Equal(t, 1, doc.Find(".explore-relevancy-note a").Length())
+	assert.Equal(t, 1, doc.Find("footer").Length(), "the page is rendered to its end")
 
 	a := createOrgCategory(t, "Alpha", 2)
 	b := createOrgCategory(t, "Beta", 1)
