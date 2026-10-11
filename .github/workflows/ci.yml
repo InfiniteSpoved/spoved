@@ -72,6 +72,8 @@ jobs:
       npm_config_fetch_retries: 5
       # the e2e tests' fixed waits are tuned for GitHub's hosted runners; these are about half as fast
       E2E_TIMEOUT_SCALE: 2
+      # GitHub's cache downloads sometimes stall for the default 10 minutes; treat that as a cache miss sooner
+      SEGMENT_DOWNLOAD_TIMEOUT_MINS: 2
     strategy:
       fail-fast: false
       matrix:
