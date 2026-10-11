@@ -10,7 +10,8 @@ type StorageSummary struct {
 	LFSSize   int64 `json:"lfs_size"`
 	StorageSizes
 	// every type of storage except the trash
-	TotalSize   int64 `json:"total_size"`
+	TotalSize int64 `json:"total_size"`
+	// mean git and LFS size per repository (not total_size divided by repo_count)
 	AverageSize int64 `json:"average_size"`
 }
 

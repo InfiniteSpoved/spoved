@@ -36,7 +36,7 @@ func GetStorageSummary(ctx *context.APIContext) {
 		LFSSize:      totals.LFSSize,
 		StorageSizes: convert.ToStorageSizes(totals),
 		TotalSize:    totals.Size(),
-		AverageSize:  (totals.GitSize + totals.LFSSize + totals.WikiSize) / max(totals.NumRepos, 1),
+		AverageSize:  totals.AverageRepoSize(),
 	})
 }
 

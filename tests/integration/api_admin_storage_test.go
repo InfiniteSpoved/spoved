@@ -45,7 +45,7 @@ func TestAPIAdminStorage(t *testing.T) {
 			LFSSize:      totals.LFSSize,
 			StorageSizes: convert.ToStorageSizes(totals),
 			TotalSize:    totals.Size(),
-			AverageSize:  (totals.GitSize + totals.LFSSize + totals.WikiSize) / totals.NumRepos,
+			AverageSize:  (totals.GitSize + totals.LFSSize) / totals.NumRepos,
 		}, summary)
 	})
 

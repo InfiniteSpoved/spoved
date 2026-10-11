@@ -68,6 +68,13 @@ func (s StorageStats) Size() int64 {
 	return s.GitSize + s.LFSSize + s.WikiSize + s.AttachmentsSize + s.PackagesSize + s.ArtifactsSize + s.LogsSize
 }
 
+// AverageRepoSize returns the mean git and LFS size per repository, the same measure as GetMedianRepoSize. It is not
+// Size()/NumRepos: wiki, attachments, packages, artifacts and logs are not a property of the repository (packages
+// belong to the owner), so the average and the median describe the repository itself.
+func (s StorageStats) AverageRepoSize() int64 {
+	return (s.GitSize + s.LFSSize) / max(s.NumRepos, 1)
+}
+
 // Percent returns the share of total, in percent, that s uses.
 func (s StorageStats) Percent(total StorageStats) float64 {
 	if total.Size() == 0 {

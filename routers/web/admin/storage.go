@@ -104,7 +104,7 @@ func Storage(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("admin.storage")
 	ctx.Data["PageIsAdminStorage"] = true
 	ctx.Data["Totals"] = totals
-	ctx.Data["AverageSize"] = (totals.GitSize + totals.LFSSize + totals.WikiSize) / max(totals.NumRepos, 1)
+	ctx.Data["AverageSize"] = totals.AverageRepoSize()
 	if ctx.Data["MedianSize"], err = repo_model.GetMedianRepoSize(ctx, totals.NumRepos); err != nil {
 		ctx.ServerError("GetMedianRepoSize", err)
 		return
