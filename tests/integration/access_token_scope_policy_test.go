@@ -270,6 +270,34 @@ func TestAccessTokenScopePolicyEnforced(t *testing.T) {
 		apiGet(t, "/api/v1/admin/users", adminToken, http.StatusOK)
 	})
 
+	t.Run("every way to send the token", func(t *testing.T) {
+		// None falls through to anonymous access: /api/v1/user answers 401 without a user anyway, so use a public page.
+		url := "/api/v1/repos/user2/repo1"
+		MakeRequest(t, NewRequest(t, "GET", url).SetHeader("Authorization", "token "+broad), http.StatusUnauthorized)
+		MakeRequest(t, NewRequest(t, "GET", url).SetHeader("Authorization", "Bearer "+broad), http.StatusUnauthorized)
+		defer test.MockVariableValue(&setting.DisableQueryAuthToken, false)()
+		MakeRequest(t, NewRequest(t, "GET", url+"?token="+broad), http.StatusUnauthorized)
+		MakeRequest(t, NewRequest(t, "GET", url+"?access_token="+broad), http.StatusUnauthorized)
+		req := NewRequest(t, "GET", url)
+		req.SetBasicAuth("user2", broad)
+		MakeRequest(t, req, http.StatusUnauthorized)
+		req = NewRequest(t, "GET", url)
+		req.SetBasicAuth(broad, "x-oauth-basic")
+		MakeRequest(t, req, http.StatusUnauthorized)
+		MakeRequest(t, NewRequest(t, "GET", url), http.StatusOK)
+	})
+
+	t.Run("demoted admin", func(t *testing.T) {
+		admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+		admin.IsAdmin = false
+		require.NoError(t, user_model.UpdateUserCols(t.Context(), admin, "is_admin"))
+		defer func() {
+			admin.IsAdmin = true
+			require.NoError(t, user_model.UpdateUserCols(t.Context(), admin, "is_admin"))
+		}()
+		apiGet(t, "/api/v1/admin/users", adminToken, http.StatusUnauthorized)
+	})
+
 	t.Run("last used is not updated", func(t *testing.T) {
 		apiGet(t, "/api/v1/user", broad, http.StatusUnauthorized)
 		token, err := auth_model.GetAccessTokenBySHA(t.Context(), broad)
@@ -284,13 +312,18 @@ func TestAccessTokenScopePolicyEnforced(t *testing.T) {
 	})
 
 	t.Run("nuget", func(t *testing.T) {
-		req := NewRequest(t, "GET", "/api/packages/user2/nuget/index.json").SetHeader("X-NuGet-ApiKey", broad)
-		MakeRequest(t, req, http.StatusUnauthorized)
+		for _, token := range []string{broad, unrestricted} {
+			req := NewRequest(t, "GET", "/api/packages/user2/nuget/index.json").SetHeader("X-NuGet-ApiKey", token)
+			MakeRequest(t, req, http.StatusUnauthorized)
+		}
 	})
 
 	t.Run("authorized integration", func(t *testing.T) {
 		resp := MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/issues/search").AddTokenAuth(ait.signedJWT()), http.StatusUnauthorized)
 		assert.Contains(t, resp.Body.String(), "edit the integration's scopes")
+		// Last used is not updated: the use before the date set it to a minute before.
+		ai := unittest.AssertExistsAndLoadBean(t, &auth_model.AuthorizedIntegration{ID: ait.authorizedIntegration.ID})
+		assert.Less(t, ai.UpdatedUnix.AsTime(), date)
 	})
 
 	t.Run("Actions job token is not checked", func(t *testing.T) {
