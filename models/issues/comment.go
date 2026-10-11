@@ -131,6 +131,10 @@ const (
 	CommentTypePullTaskDone     // 42 a pull request task was marked done
 	CommentTypePullTaskReopened // 43 a pull request task was reopened
 	CommentTypePullTaskDeleted  // 44 a pull request task was deleted
+
+	CommentTypePRAutoMergeTimeChanged // 45 the time of a scheduled auto merge was changed (Content is AutoMergeInfo)
+	CommentTypePRMergedBySchedule     // 46 the pull request was merged by its schedule
+	CommentTypePRAutoMergeSkipped     // 47 a scheduled auto merge was skipped (Content is AutoMergeInfo with a Reason)
 )
 
 var commentStrings = []string{
@@ -179,6 +183,9 @@ var commentStrings = []string{
 	"pull_task_done",
 	"pull_task_reopened",
 	"pull_task_deleted",
+	"pull_auto_merge_time_changed",
+	"pull_merged_by_schedule",
+	"pull_auto_merge_skipped",
 }
 
 func (t CommentType) String() string {
@@ -1465,9 +1472,28 @@ func UpdateCommentsMigrationsByType(ctx context.Context, tp structs.GitServiceTy
 	return err
 }
 
-// CreateAutoMergeComment is a internal function, only use it for CommentTypePRScheduledToAutoMerge and CommentTypePRUnScheduledToAutoMerge CommentTypes
-func CreateAutoMergeComment(ctx context.Context, typ CommentType, pr *PullRequest, doer *user_model.User) (comment *Comment, err error) {
-	if typ != CommentTypePRScheduledToAutoMerge && typ != CommentTypePRUnScheduledToAutoMerge {
+// AutoMergeInfo is the data of the auto merge timeline comments, stored as JSON in Content.
+// Times are unix seconds; Reason is a key such as "permission", "push" or "checks_failed".
+type AutoMergeInfo struct {
+	After  int64  `json:"after,omitempty"`
+	GiveUp int64  `json:"give_up,omitempty"`
+	Old    int64  `json:"old,omitempty"`
+	New    int64  `json:"new,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	SHA    string `json:"sha,omitempty"`
+}
+
+// AutoMergeInfo decodes Content; comments without data (older ones) give the zero value.
+func (c *Comment) AutoMergeInfo() (info AutoMergeInfo) {
+	_ = json.Unmarshal([]byte(c.Content), &info)
+	return info
+}
+
+// CreateAutoMergeComment is a internal function, only use it for the auto merge CommentTypes
+func CreateAutoMergeComment(ctx context.Context, typ CommentType, pr *PullRequest, doer *user_model.User, info AutoMergeInfo) (comment *Comment, err error) {
+	switch typ {
+	case CommentTypePRScheduledToAutoMerge, CommentTypePRUnScheduledToAutoMerge, CommentTypePRAutoMergeTimeChanged, CommentTypePRMergedBySchedule, CommentTypePRAutoMergeSkipped:
+	default:
 		return nil, fmt.Errorf("comment type %d cannot be used to create an auto merge comment", typ)
 	}
 	if err = pr.LoadIssue(ctx); err != nil {
@@ -1478,13 +1504,33 @@ func CreateAutoMergeComment(ctx context.Context, typ CommentType, pr *PullReques
 		return nil, err
 	}
 
-	comment, err = CreateComment(ctx, &CreateCommentOptions{
-		Type:  typ,
-		Doer:  doer,
-		Repo:  pr.BaseRepo,
-		Issue: pr.Issue,
+	var content string
+	if info != (AutoMergeInfo{}) {
+		b, err := json.Marshal(info)
+		if err != nil {
+			return nil, err
+		}
+		content = string(b)
+	}
+	return CreateComment(ctx, &CreateCommentOptions{
+		Type:    typ,
+		Doer:    doer,
+		Repo:    pr.BaseRepo,
+		Issue:   pr.Issue,
+		Content: content,
 	})
-	return comment, err
+}
+
+// IsAutoMergeSkipRecorded reports whether the latest auto merge schedule event of the issue is already a skip with the same reason and SHA
+func IsAutoMergeSkipRecorded(ctx context.Context, issueID int64, info AutoMergeInfo) (bool, error) {
+	last := &Comment{}
+	has, err := db.GetEngine(ctx).Where("issue_id = ?", issueID).
+		In("`type`", CommentTypePRScheduledToAutoMerge, CommentTypePRAutoMergeTimeChanged, CommentTypePRAutoMergeSkipped).
+		Desc("id").Get(last)
+	if err != nil || !has || last.Type != CommentTypePRAutoMergeSkipped {
+		return false, err
+	}
+	return last.AutoMergeInfo() == info, nil
 }
 
 // RemapExternalUser ExternalUserRemappable interface

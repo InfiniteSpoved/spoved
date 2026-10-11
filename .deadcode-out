@@ -53,7 +53,6 @@ forgejo.org/models/user
 	IsErrExternalLoginUserAlreadyExist
 	IsErrExternalLoginUserNotExist
 	NewFederatedUser
-	IsErrUserSettingIsNotExist
 	GetUserAllSettings
 
 forgejo.org/modules/activitypub
@@ -75,7 +74,6 @@ forgejo.org/modules/base
 
 forgejo.org/modules/cache
 	WithNoCacheContext
-	RemoveContextData
 
 forgejo.org/modules/emoji
 	ReplaceCodes
@@ -217,9 +215,6 @@ forgejo.org/modules/util
 
 forgejo.org/modules/util/filebuffer
 	CreateFromReader
-
-forgejo.org/modules/validation
-	IsErrNotValid
 
 forgejo.org/modules/web
 	RouteMock

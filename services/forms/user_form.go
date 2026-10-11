@@ -235,6 +235,11 @@ type UpdateLanguageForm struct {
 	Language string
 }
 
+// UpdateTimeZoneForm form for updating the user's time zone; empty clears it
+type UpdateTimeZoneForm struct {
+	TimeZone string
+}
+
 // UpdateHintsForm form for updating user hint settings
 type UpdateHintsForm struct {
 	EnableRepoUnitHints bool

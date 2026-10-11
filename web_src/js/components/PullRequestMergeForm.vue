@@ -1,6 +1,7 @@
 <script>
 import {SvgIcon} from '../svg.js';
 import {toggleElem} from '../utils/dom.js';
+import {zonedLocalToISO, zoneLabel} from '../utils/time.js';
 
 const {pageData} = window.config;
 
@@ -15,6 +16,7 @@ export default {
     autoMergeWhenSucceed: false,
     scheduledAfter: '',
     giveUpAfter: '',
+    showChangeTime: false,
 
     mergeStyle: '',
     mergeStyleDetail: { // dummy only, these values will come from one of the mergeForm.mergeStyles
@@ -34,13 +36,20 @@ export default {
       if (this.mergeForm.allOverridableChecksOk) return 'primary';
       return this.autoMergeWhenSucceed || this.scheduledAfterISO ? 'primary' : 'red';
     },
+    // the user's time zone setting, or else the browser's
+    timeZone() {
+      return this.mergeForm.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    },
+    timeZoneLabel() {
+      return zoneLabel(this.timeZone);
+    },
     scheduledAfterISO() {
       if (!this.scheduledAfter || this.mergeStyle === 'manually-merged') return '';
-      return new Date(this.scheduledAfter).toISOString();
+      return zonedLocalToISO(this.scheduledAfter, this.mergeForm.timeZone);
     },
     giveUpAfterISO() {
       if (!this.scheduledAfterISO || !this.giveUpAfter) return '';
-      return new Date(this.giveUpAfter).toISOString();
+      return zonedLocalToISO(this.giveUpAfter, this.mergeForm.timeZone);
     },
     forceMerge() {
       return this.mergeForm.canMergeNow && !this.mergeForm.allOverridableChecksOk;
@@ -136,6 +145,7 @@ export default {
       <div class="field" v-else>
         <label for="scheduled-after">{{ mergeForm.textScheduledAfter }}</label>
         <input type="datetime-local" id="scheduled-after" v-model="scheduledAfter">
+        <span class="time-zone-label">{{ timeZoneLabel }}</span>
       </div>
       <div class="field" v-if="mergeStyle !== 'manually-merged' && scheduledAfter">
         <label for="give-up-after">{{ mergeForm.textGiveUpAfter }}</label>
@@ -163,6 +173,26 @@ export default {
           {{ mergeForm.textDeleteBranchForced }}
         </div>
       </div>
+    </form>
+
+    <form v-if="showChangeTime" class="ui form change-time-form tw-mb-2" :action="mergeForm.baseLink+'/change_auto_merge_time'" method="post">
+      <input type="hidden" name="scheduled_after" :value="scheduledAfterISO">
+      <input type="hidden" name="give_up_after" :value="giveUpAfterISO">
+      <div class="field">
+        <label for="change-scheduled-after">{{ mergeForm.textScheduledAfter }}</label>
+        <input type="datetime-local" id="change-scheduled-after" v-model="scheduledAfter" required>
+        <span class="time-zone-label">{{ timeZoneLabel }}</span>
+      </div>
+      <div class="field">
+        <label for="change-give-up-after">{{ mergeForm.textGiveUpAfter }}</label>
+        <input type="datetime-local" id="change-give-up-after" v-model="giveUpAfter" :min="scheduledAfter">
+      </div>
+      <button class="ui primary button" type="submit">
+        {{ mergeForm.textChangeTimeSave }}
+      </button>
+      <button class="ui button" type="button" @click="showChangeTime = false">
+        {{ mergeForm.textCancel }}
+      </button>
     </form>
 
     <div v-if="!showActionForm && mergeStyleAllowedCount > 0" class="tw-flex">
@@ -214,6 +244,11 @@ export default {
           </div>
         </div>
       </div>
+
+      <!-- the change time button -->
+      <button v-if="mergeForm.hasPendingPullRequestMerge && !showChangeTime" class="ui button tw-ml-4 change-time-button" @click="showChangeTime = true">
+        {{ mergeForm.textChangeTime }}
+      </button>
 
       <!-- the cancel auto merge button -->
       <form v-if="mergeForm.hasPendingPullRequestMerge" :action="mergeForm.baseLink+'/cancel_auto_merge'" method="post" class="tw-ml-4">

@@ -180,6 +180,12 @@ func List(ctx *context.Context) {
 		}
 	}
 	ctx.Data["workflows"] = workflows
+	if ctx.Repo.CanWrite(unit.TypeActions) {
+		if err := loadScheduled(ctx); err != nil {
+			ctx.ServerError("loadScheduled", err)
+			return
+		}
+	}
 	ctx.Data["RepoLink"] = ctx.Repo.Repository.Link()
 
 	page := ctx.FormInt("page")

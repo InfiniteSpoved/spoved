@@ -965,6 +965,11 @@ func Routes() *web.Route {
 						m.Get("/{run_id}/artifacts", repo.ListActionRunArtifacts)
 					})
 
+					m.Group("/scheduled-runs", func() {
+						m.Get("", reqToken(), reqRepoWriter(unit.TypeActions), repo.ListScheduledRuns)
+						m.Delete("/{id}", reqToken(), reqRepoWriter(unit.TypeActions), mustNotBeArchived(), repo.DeleteScheduledRun)
+					})
+
 					m.Group("/workflows", func() {
 						m.Group("/{workflowfilename}", func() {
 							m.Post("/dispatches", reqToken(), reqRepoWriter(unit.TypeActions), mustNotBeArchived(), bind(api.DispatchWorkflowOption{}), repo.DispatchWorkflow)
@@ -1488,6 +1493,14 @@ func Routes() *web.Route {
 				Put(bind(api.EditMaintenanceOption{}), admin.EditMaintenance)
 			m.Combo("/ip-allowlist").Get(admin.GetIPAllowlist).
 				Put(bind(api.EditIPAllowlistOption{}), admin.EditIPAllowlist)
+			m.Group("/log-shipping/destinations", func() {
+				m.Combo("").Get(admin.ListLogShippingDestinations).
+					Post(bind(api.CreateLogShippingDestinationOption{}), admin.CreateLogShippingDestination)
+				m.Combo("/{id}").Get(admin.GetLogShippingDestination).
+					Patch(bind(api.EditLogShippingDestinationOption{}), admin.EditLogShippingDestination).
+					Delete(admin.DeleteLogShippingDestination)
+				m.Post("/{id}/test", admin.TestLogShippingDestination)
+			})
 			m.Group("/announcements", func() {
 				m.Combo("").Get(admin.ListAnnouncements).
 					Post(bind(api.CreateAnnouncementOption{}), admin.CreateAnnouncement)

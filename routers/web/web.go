@@ -756,6 +756,7 @@ func registerRoutes(m *web.Route) {
 		m.Group("/appearance", func() {
 			m.Get("", user_setting.Appearance)
 			m.Post("/language", web.Bind(forms.UpdateLanguageForm{}), user_setting.UpdateUserLang)
+			m.Post("/time_zone", web.Bind(forms.UpdateTimeZoneForm{}), user_setting.UpdateUserTimeZone)
 			m.Post("/hints", web.Bind(forms.UpdateHintsForm{}), user_setting.UpdateUserHints)
 			m.Post("/hidden_comments", user_setting.UpdateUserHiddenComments)
 			m.Post("/theme", web.Bind(forms.UpdateThemeForm{}), user_setting.UpdateUIThemePost)
@@ -905,6 +906,15 @@ func registerRoutes(m *web.Route) {
 		m.Combo("/webhook-types").Get(admin.WebhookTypes).Post(admin.WebhookTypesPost)
 		m.Combo("/repo-units").Get(admin.RepoUnits).Post(admin.RepoUnitsPost)
 		m.Combo("/ip-allowlist").Get(admin.IPAllowlist).Post(admin.IPAllowlistPost)
+		m.Group("/log-shipping", func() {
+			m.Get("", admin.LogShipping)
+			m.Post("/destinations", admin.LogShippingPost)
+			m.Group("/destinations/{id}", func() {
+				m.Combo("").Get(admin.EditLogShipping).Post(admin.LogShippingPost)
+				m.Post("/delete", admin.LogShippingDelete)
+				m.Post("/test", admin.LogShippingTest)
+			})
+		})
 
 		if setting.Database.Type.IsMySQL() {
 			m.Get("/self_check", admin.SelfCheck)
@@ -1726,7 +1736,11 @@ func registerRoutes(m *web.Route) {
 			m.Get("", actions.List)
 			m.Post("/disable", reqRepoAdmin, actions.DisableWorkflowFile)
 			m.Post("/enable", reqRepoAdmin, actions.EnableWorkflowFile)
-			m.Post("/manual", reqRepoActionsWriter, actions.ManualRunWorkflow)
+			m.Post("/manual", reqRepoActionsWriter, context.RepoMustNotBeArchived(), actions.ManualRunWorkflow)
+			m.Group("/scheduled/{id}", func() {
+				m.Post("/cancel", actions.CancelScheduled)
+				m.Post("/time", actions.ChangeScheduledTime)
+			}, reqRepoActionsWriter, context.RepoMustNotBeArchived())
 
 			m.Group("/runs", func() {
 				m.Get("/latest", actions.ViewLatest)
@@ -1850,6 +1864,7 @@ func registerRoutes(m *web.Route) {
 			})
 			m.Post("/merge", context.RepoMustNotBeArchived(), web.Bind(forms.MergePullRequestForm{}), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.MergePullRequest)
 			m.Post("/cancel_auto_merge", context.RepoMustNotBeArchived(), repo.CancelAutoMergePullRequest)
+			m.Post("/change_auto_merge_time", context.RepoMustNotBeArchived(), web.Bind(forms.ChangeAutoMergeTimeForm{}), repo.ChangeAutoMergeTimePullRequest)
 			m.Post("/revert", context.RepoMustNotBeArchived(), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.RevertPullRequest)
 			m.Post("/update", repo.UpdatePullRequest)
 			m.Post("/set_allow_maintainer_edit", web.Bind(forms.UpdateAllowEditsForm{}), repo.SetAllowEdits)

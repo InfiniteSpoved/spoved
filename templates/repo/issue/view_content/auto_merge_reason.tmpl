@@ -1,0 +1,12 @@
+{{/* the reason of a cancelled or skipped scheduled merge; an unknown key shows nothing */}}
+{{if eq . "permission"}}{{ctx.Locale.Tr "repo.pulls.auto_merge.reason.permission"}}
+{{else if eq . "push"}}{{ctx.Locale.Tr "repo.pulls.auto_merge.reason.push"}}
+{{else if eq . "give_up"}}{{ctx.Locale.Tr "repo.pulls.auto_merge.reason.give_up"}}
+{{else if eq . "checks_failed"}}{{ctx.Locale.Tr "repo.pulls.auto_merge.reason.checks_failed"}}
+{{else if eq . "head_moved"}}{{ctx.Locale.Tr "repo.pulls.auto_merge.reason.head_moved"}}
+{{else if eq . "branch_missing"}}{{ctx.Locale.Tr "repo.pulls.auto_merge.reason.branch_missing"}}
+{{else if eq . "merge_failed"}}{{ctx.Locale.Tr "repo.pulls.auto_merge.reason.merge_failed"}}
+{{else if eq . "conflict"}}{{ctx.Locale.Tr "repo.pulls.auto_merge.reason.conflict"}}
+{{else if eq . "wip"}}{{ctx.Locale.Tr "repo.pulls.auto_merge.reason.wip"}}
+{{else if eq . "blocked"}}{{ctx.Locale.Tr "repo.pulls.auto_merge.reason.blocked"}}
+{{end}}

@@ -134,8 +134,12 @@ func TestOrgTwoFactorRequired(t *testing.T) {
 	}
 	memberAccess := func(t *testing.T, status int) {
 		t.Helper()
-		member.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3"), status)
-		member.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/issues"), status)
+		web := status // a blocked member gets the 403 page with the reason on the web
+		if status == http.StatusNotFound {
+			web = http.StatusForbidden
+		}
+		member.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3"), web)
+		member.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/issues"), web)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/org3/repo3").AddTokenAuth(memberToken), status)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/org3/repo3/contents").AddTokenAuth(memberToken), status)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/org3/repo3/issues").AddTokenAuth(readToken), status)
@@ -250,7 +254,7 @@ func TestOrgTwoFactorRequired(t *testing.T) {
 		refused("POST", "/api/v1/repos/migrate", &api.MigrateRepoOptions{CloneAddr: "https://example.com/a.git", RepoName: "blocked", RepoOwner: "org3"})
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/teams/1/members").AddTokenAuth(ownerToken), http.StatusOK) // own team
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/teams/7/members").AddTokenAuth(ownerToken), http.StatusForbidden)
-		owner.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3"), http.StatusNotFound)
+		owner.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3"), http.StatusForbidden)
 		owner.MakeRequest(t, NewRequest(t, "GET", "/user/settings/security"), http.StatusOK)
 		assert.False(t, orgRunListed(t))
 		// the owner may no longer write packages, reading the public org's stays

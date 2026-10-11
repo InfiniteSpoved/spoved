@@ -26,7 +26,20 @@
 					}}
 				</div>
 
-				<form method="post" action="{{.Repo.RepoLink}}/actions/manual" id="branch-dropdown-form">
+				<form method="post" action="{{.Repo.RepoLink}}/actions/manual" id="branch-dropdown-form" data-time-zone="{{.UserTimeZone}}" data-max-days="{{.MaxDelayedRunDays}}">
+					{{if .ScheduleEnabled}}
+						<div class="field">
+							<label class="tw-mr-4"><input type="radio" name="run_mode" value="now" checked> {{ctx.Locale.Tr "actions.workflow.dispatch.run_now"}}</label>
+							<label><input type="radio" name="run_mode" value="later"> {{ctx.Locale.Tr "actions.workflow.dispatch.run_later"}}</label>
+						</div>
+						<div class="field tw-hidden" data-run-later>
+							<label>{{ctx.Locale.Tr "actions.workflow.dispatch.run_at"}}</label>
+							<input type="datetime-local" data-run-at>
+							<span class="help time-zone-label"></span>
+						</div>
+						<input type="hidden" name="run_at" autocomplete="off">
+					{{end}}
+
 					{{range $i, $key := .CurWorkflowDispatchInputKeys}}
 						{{$val := index $.CurWorkflowDispatch.Inputs $key}}
 						<div class="{{if $val.Required}}required {{end}}field">

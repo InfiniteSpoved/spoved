@@ -15,7 +15,9 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/private"
+	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/test"
 	"forgejo.org/tests"
 
 	"github.com/stretchr/testify/assert"
@@ -270,4 +272,132 @@ func TestOrgRepoPolicyQueryCount(t *testing.T) {
 	page2, settings2 := count()
 	assert.Equal(t, page, page2, "repository page")
 	assert.Equal(t, settings, settings2, "settings page")
+}
+
+// #148 PR 2: the site floor in [repository] is the stricter of site and org, and an org owner can't loosen it.
+func TestOrgRepoPolicySiteFloor(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	orgPolicyRepo(t, "floor-private", true)
+	orgPolicyRepo(t, "floor-public", false)
+	member, owner := orgPolicyToken(t, "user4"), orgPolicyToken(t, "user2")
+	yes, no, all, none, org3 := true, false, "all", "none", "org3"
+	storedOrg := func() *user_model.User { return unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "org3"}) }
+	postSettings := func(values map[string]string) {
+		values["name"], values["visibility"] = "org3", "0"
+		loginUser(t, "user2").MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/settings", values), http.StatusSeeOther)
+	}
+
+	t.Run("visibility", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.Repository.OrgRestrictVisibilityChange, true)()
+		setOrgRepoPolicies(t, false, user_model.PrivateForkAll)
+
+		// the org setting is off, the floor binds the repo admin on every path; the owner and a site admin pass
+		assertPolicyRefusedAPI(t, NewRequestWithJSON(t, "PATCH", "/api/v1/repos/org3/floor-private", &api.EditRepoOption{Private: &no}).AddTokenAuth(member), "restrict_repo_visibility_change")
+		assertPolicyRefusedWeb(t, "user4", "/org3/floor-public/settings", map[string]string{"action": "update", "repo_name": "floor-public", "private": "on"}, orgPolicyVisibilityLabel)
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/repos/org3/floor-private", &api.EditRepoOption{Private: &no}).AddTokenAuth(owner), http.StatusOK)
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/repos/org3/floor-private", &api.EditRepoOption{Private: &yes}).AddTokenAuth(orgPolicyToken(t, "user1")), http.StatusOK)
+
+		// the API shows the effective value, and loosening it is a 422 that applies nothing
+		var apiOrg api.Organization
+		DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3").AddTokenAuth(owner), http.StatusOK), &apiOrg)
+		assert.True(t, apiOrg.RestrictRepoVisibilityChange)
+		desc := "floor description"
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/orgs/org3", &api.EditOrgOption{RestrictRepoVisibilityChange: &no, Description: &desc}).AddTokenAuth(owner), http.StatusUnprocessableEntity)
+		assert.NotEqual(t, desc, storedOrg().Description)
+		// a site admin passes the gate itself, but the API refuses to loosen the floor for them too
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/orgs/org3", &api.EditOrgOption{RestrictRepoVisibilityChange: &no}).AddTokenAuth(orgPolicyToken(t, "user1")), http.StatusUnprocessableEntity)
+		// the same value as the floor is fine
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/orgs/org3", &api.EditOrgOption{RestrictRepoVisibilityChange: &yes, Description: &desc}).AddTokenAuth(owner), http.StatusOK)
+		assert.Equal(t, desc, storedOrg().Description)
+
+		// the settings page shows the checkbox on and disabled, with a note; the post keeps the stored value
+		setOrgRepoPolicies(t, false, user_model.PrivateForkAll)
+		doc := NewHTMLParser(t, loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/org/org3/settings"), http.StatusOK).Body)
+		box := doc.Find(`input[name="restrict_repo_visibility_change"]`)
+		_, disabled := box.Attr("disabled")
+		_, checked := box.Attr("checked")
+		assert.True(t, disabled)
+		assert.True(t, checked)
+		assert.Equal(t, 1, doc.Find(".site-policy-floor").Length())
+		setOrgRepoPolicies(t, true, user_model.PrivateForkAll)
+		postSettings(map[string]string{})
+		assert.True(t, storedOrg().RestrictRepoVisibilityChange)
+	})
+
+	t.Run("floor off: an owner can untick", func(t *testing.T) {
+		setOrgRepoPolicies(t, true, user_model.PrivateForkAll)
+		postSettings(map[string]string{})
+		assert.False(t, storedOrg().RestrictRepoVisibilityChange)
+		doc := NewHTMLParser(t, loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/org/org3/settings"), http.StatusOK).Body)
+		_, disabled := doc.Find(`input[name="restrict_repo_visibility_change"]`).Attr("disabled")
+		assert.False(t, disabled)
+		assert.Equal(t, 0, doc.Find(".site-policy-floor").Length())
+	})
+
+	t.Run("private forks", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.Repository.OrgPrivateForkPolicy, user_model.PrivateForkNone)()
+		setOrgRepoPolicies(t, false, user_model.PrivateForkAll)
+		fork := func(s string) *api.CreateForkOption { return &api.CreateForkOption{Name: &s} }
+
+		for _, tok := range []string{member, owner} {
+			assertPolicyRefusedAPI(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/floor-private/forks", fork("floor-fork")).AddTokenAuth(tok), "private_fork_policy")
+		}
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/floor-public/forks", fork("floor-public-fork")).AddTokenAuth(member), http.StatusAccepted)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/floor-private/forks", fork("floor-admin-fork")).AddTokenAuth(orgPolicyToken(t, "user1")), http.StatusAccepted)
+
+		// the API shows the effective policy; loosening it, even alongside a value that is allowed, is a 422 that applies nothing
+		var apiOrg api.Organization
+		DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3").AddTokenAuth(owner), http.StatusOK), &apiOrg)
+		assert.Equal(t, "none", apiOrg.PrivateForkPolicy)
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/orgs/org3", &api.EditOrgOption{RestrictRepoVisibilityChange: &yes, PrivateForkPolicy: &all}).AddTokenAuth(owner), http.StatusUnprocessableEntity)
+		assert.False(t, storedOrg().RestrictRepoVisibilityChange)
+		assert.Equal(t, user_model.PrivateForkAll, storedOrg().PrivateForkPolicy)
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/orgs/org3", &api.EditOrgOption{PrivateForkPolicy: &none}).AddTokenAuth(owner), http.StatusOK)
+
+		// the select keeps the options below the floor disabled, with the effective one selected
+		doc := NewHTMLParser(t, loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/org/org3/settings"), http.StatusOK).Body)
+		assert.Equal(t, "2", doc.Find(`select[name="private_fork_policy"] option[selected]`).AttrOr("value", ""))
+		_, lowDisabled := doc.Find(`select[name="private_fork_policy"] option[value="0"]`).Attr("disabled")
+		_, floorDisabled := doc.Find(`select[name="private_fork_policy"] option[value="2"]`).Attr("disabled")
+		assert.True(t, lowDisabled)
+		assert.False(t, floorDisabled)
+	})
+
+	t.Run("fork floor org", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.Repository.OrgPrivateForkPolicy, user_model.PrivateForkOrg)()
+		setOrgRepoPolicies(t, false, user_model.PrivateForkAll)
+		fork := func(s string) *api.CreateForkOption { return &api.CreateForkOption{Name: &s} }
+		inOrg := func(s string) *api.CreateForkOption { return &api.CreateForkOption{Organization: &org3, Name: &s} }
+
+		// into a user is refused, into the organization is allowed
+		assertPolicyRefusedAPI(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/floor-private/forks", fork("floor-org-user")).AddTokenAuth(member), "private_fork_policy")
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/floor-private/forks", inOrg("floor-org-fork")).AddTokenAuth(owner), http.StatusAccepted)
+		unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{OwnerName: "org3", LowerName: "floor-org-fork"})
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/floor-public/forks", fork("floor-org-public")).AddTokenAuth(owner), http.StatusAccepted)
+
+		// the web form stores a value below the floor as the floor
+		postSettings(map[string]string{"private_fork_policy": "0"})
+		assert.Equal(t, user_model.PrivateForkOrg, storedOrg().PrivateForkPolicy)
+		postSettings(map[string]string{"private_fork_policy": "2"})
+		assert.Equal(t, user_model.PrivateForkNone, storedOrg().PrivateForkPolicy)
+	})
+}
+
+// #148 PR 2: the repo.private push option follows the visibility floor (hook level; SSH can't run here).
+func TestOrgRepoPolicySiteFloorPushOption(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer test.MockVariableValue(&setting.Repository.OrgRestrictVisibilityChange, true)()
+	setOrgRepoPolicies(t, false, user_model.PrivateForkAll)
+	orgPolicyRepo(t, "floor-push", false)
+	preReceive := func(userID int64, options map[string]string) private.ResponseExtra {
+		return private.HookPreReceive(t.Context(), "org3", "floor-push", private.HookOptions{UserID: userID, GitPushOptions: options})
+	}
+	toPrivate := map[string]string{"repo.private": "true"}
+
+	refused := preReceive(4, toPrivate)
+	assert.Equal(t, http.StatusForbidden, refused.StatusCode)
+	assert.Contains(t, refused.UserMsg, "restrict_repo_visibility_change")
+	require.NoError(t, preReceive(4, map[string]string{"repo.private": "false"}).Error) // unchanged
+	require.NoError(t, preReceive(2, toPrivate).Error)                                  // owner
+	require.NoError(t, preReceive(1, toPrivate).Error)                                  // site admin
 }

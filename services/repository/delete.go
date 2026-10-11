@@ -209,6 +209,7 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepo
 			&actions_model.ActionRunJob{RepoID: repoID},
 			&actions_model.ActionRun{RepoID: repoID},
 			&actions_model.ActionRunner{RepoID: repoID},
+			&actions_model.ActionScheduledDispatch{RepoID: repoID},
 			&actions_model.ActionScheduleSpec{RepoID: repoID},
 			&actions_model.ActionSchedule{RepoID: repoID},
 			&actions_model.ActionArtifact{RepoID: repoID},

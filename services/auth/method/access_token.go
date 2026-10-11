@@ -4,6 +4,7 @@
 package method
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -43,6 +44,12 @@ func (a *AccessToken) Verify(req *http.Request, w http.ResponseWriter, _ auth.Se
 	u, err := user_model.GetUserByID(req.Context(), token.UID)
 	if err != nil {
 		return &auth.AuthenticationError{Error: fmt.Errorf("access token GetUserByID: %w", err)}
+	}
+
+	if err := authz.CheckScopePolicyInUse(u, token.Scope, token.ResourceAllRepos); errors.Is(err, authz.ErrScopePolicyEnforced) {
+		return &auth.AuthenticationAttemptedIncorrectCredential{Error: fmt.Errorf("%w; replace it with a token that follows the policy", err)}
+	} else if err != nil {
+		return &auth.AuthenticationError{Error: fmt.Errorf("access token CheckScopePolicyInUse: %w", err)}
 	}
 
 	if err = token.UpdateLastUsed(req.Context()); err != nil {

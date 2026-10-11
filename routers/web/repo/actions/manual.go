@@ -5,8 +5,11 @@ package actions
 
 import (
 	"errors"
+	"html/template"
 	"net/url"
+	"time"
 
+	"forgejo.org/modules/setting"
 	actions_service "forgejo.org/services/actions"
 	app_context "forgejo.org/services/context"
 )
@@ -38,29 +41,27 @@ func ManualRunWorkflow(ctx *app_context.Context) {
 		return
 	}
 
-	location := ctx.Repo.RepoLink + "/actions?workflow=" + url.QueryEscape(workflowID) +
-		"&actor=" + url.QueryEscape(ctx.FormString("actor")) +
-		"&status=" + url.QueryEscape(ctx.FormString("status"))
+	location := actionsLocation(ctx, workflowID)
 
 	formKeyGetter := func(key string) string {
 		formKey := "inputs[" + key + "]"
 		return ctx.Req.PostFormValue(formKey)
 	}
 
-	_, _, err = workflow.Dispatch(ctx, formKeyGetter, ctx.Repo.Repository, ctx.Doer)
+	success := ctx.Locale.Tr("actions.workflow.dispatch.success")
+	if ctx.FormString("run_mode") == "later" {
+		runAt, ok := parseRunAt(ctx, location)
+		if !ok {
+			return
+		}
+		_, err = actions_service.ScheduleDispatch(ctx, ctx.Repo.Repository, ctx.Doer, workflow, formKeyGetter, runAt)
+		success = ctx.Locale.Tr("actions.workflow.dispatch.scheduled")
+	} else {
+		_, _, err = workflow.Dispatch(ctx, formKeyGetter, ctx.Repo.Repository, ctx.Doer)
+	}
 	if err != nil {
-		if errors.Is(err, actions_service.ErrWorkflowNoDispatchTrigger) {
-			ctx.Flash.Error(ctx.Locale.Tr("actions.workflow.dispatch.no_trigger"))
-			ctx.Redirect(location)
-			return
-		}
-		if errors.Is(err, actions_service.ErrWorkflowDisabled) {
-			ctx.Flash.Error(ctx.Locale.Tr("actions.workflow.dispatch.disabled"))
-			ctx.Redirect(location)
-			return
-		}
-		if actions_service.IsInputRequiredErr(err) {
-			ctx.Flash.Error(ctx.Locale.Tr("actions.workflow.dispatch.input_required", err.(actions_service.InputRequiredErr).Name))
+		if msg, ok := dispatchErrorFlash(ctx, err); ok {
+			ctx.Flash.Error(msg)
 			ctx.Redirect(location)
 			return
 		}
@@ -69,6 +70,51 @@ func ManualRunWorkflow(ctx *app_context.Context) {
 	}
 
 	// forward to the page of the run which was just created
-	ctx.Flash.Info(ctx.Locale.Tr("actions.workflow.dispatch.success"))
+	ctx.Flash.Info(success)
 	ctx.Redirect(location)
+}
+
+func actionsLocation(ctx *app_context.Context, workflowID string) string {
+	return ctx.Repo.RepoLink + "/actions?workflow=" + url.QueryEscape(workflowID) +
+		"&actor=" + url.QueryEscape(ctx.FormString("actor")) +
+		"&status=" + url.QueryEscape(ctx.FormString("status"))
+}
+
+// parseRunAt reads the form value run_at, an RFC 3339 instant; otherwise it flashes and redirects to location
+func parseRunAt(ctx *app_context.Context, location string) (time.Time, bool) {
+	value := ctx.FormString("run_at")
+	runAt, err := time.Parse(time.RFC3339, value)
+	switch {
+	case value == "":
+		ctx.Flash.Error(ctx.Locale.Tr("actions.workflow.dispatch.run_at_missing"))
+	case err != nil:
+		ctx.Flash.Error(ctx.Locale.Tr("actions.workflow.dispatch.run_at_invalid"))
+	default:
+		return runAt, true
+	}
+	ctx.Redirect(location)
+	return runAt, false
+}
+
+// dispatchErrorFlash is the text for the errors of a dispatch or a scheduled one that the user can fix
+func dispatchErrorFlash(ctx *app_context.Context, err error) (template.HTML, bool) {
+	switch {
+	case errors.Is(err, actions_service.ErrWorkflowNoDispatchTrigger):
+		return ctx.Locale.Tr("actions.workflow.dispatch.no_trigger"), true
+	case errors.Is(err, actions_service.ErrWorkflowDisabled):
+		return ctx.Locale.Tr("actions.workflow.dispatch.disabled"), true
+	case actions_service.IsInputRequiredErr(err):
+		return ctx.Locale.Tr("actions.workflow.dispatch.input_required", err.(actions_service.InputRequiredErr).Name), true
+	case errors.Is(err, actions_service.ErrScheduleDisabled):
+		return ctx.Locale.Tr("actions.workflow.dispatch.schedule_disabled"), true
+	case errors.Is(err, actions_service.ErrScheduleInPast):
+		return ctx.Locale.Tr("actions.workflow.dispatch.schedule_in_past"), true
+	case errors.Is(err, actions_service.ErrScheduleTooFar):
+		return ctx.Locale.Tr("actions.workflow.dispatch.schedule_too_far", setting.Actions.MaxDelayedRunDays), true
+	case errors.Is(err, actions_service.ErrScheduleInputsTooLarge):
+		return ctx.Locale.Tr("actions.workflow.dispatch.schedule_inputs_too_large"), true
+	case errors.Is(err, actions_service.ErrScheduleLimit):
+		return ctx.Locale.Tr("actions.workflow.dispatch.schedule_limit"), true
+	}
+	return "", false
 }
