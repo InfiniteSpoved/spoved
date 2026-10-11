@@ -206,7 +206,7 @@ func TestPullMetricsOrg(t *testing.T) {
 		}()
 		repos, _ := metricsCSV(t, member, "/org/org3/metrics")
 		assert.Empty(t, repos, "a member without 2FA sees what a stranger sees")
-		member.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/activity/metrics"), http.StatusNotFound)
+		member.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/activity/metrics"), http.StatusForbidden)
 	})
 }
 
