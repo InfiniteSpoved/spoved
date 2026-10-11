@@ -62,6 +62,7 @@ type ConfigStruct struct {
 	RepoUnitPolicy  *config.Value[RepoUnitPolicyState]
 	// OrgCategoryOwnersCanAssign lets organization owners set their organization's category (site admins always can).
 	OrgCategoryOwnersCanAssign *config.Value[bool]
+	LogShipping                *config.Value[LogShippingState]
 }
 
 var (
@@ -85,6 +86,7 @@ func initDefaultConfig() {
 		WebhookTypes:               config.ValueJSON[WebhookTypesState]("webhook.types"),
 		RepoUnitPolicy:             config.ValueJSON[RepoUnitPolicyState]("repository.unit_policy").WithInvalid(RepoUnitPolicyState{Invalid: true}),
 		OrgCategoryOwnersCanAssign: config.ValueJSON[bool]("org_category.owners_can_assign"),
+		LogShipping:                config.ValueJSON[LogShippingState]("log_shipping.destinations"),
 	}
 }
 

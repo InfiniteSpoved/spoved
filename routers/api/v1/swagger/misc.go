@@ -91,6 +91,27 @@ type swaggerResponseIPAllowlist struct {
 	Body api.IPAllowlist `json:"body"`
 }
 
+// LogShippingDestination
+// swagger:response LogShippingDestination
+type swaggerResponseLogShippingDestination struct {
+	// in:body
+	Body api.LogShippingDestination `json:"body"`
+}
+
+// LogShippingDestinationList
+// swagger:response LogShippingDestinationList
+type swaggerResponseLogShippingDestinationList struct {
+	// in:body
+	Body []api.LogShippingDestination `json:"body"`
+}
+
+// LogShippingTestResult
+// swagger:response LogShippingTestResult
+type swaggerResponseLogShippingTestResult struct {
+	// in:body
+	Body api.LogShippingTestResult `json:"body"`
+}
+
 // AnnouncementList
 // swagger:response AnnouncementList
 type swaggerResponseAnnouncementList struct {
