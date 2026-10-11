@@ -56,3 +56,23 @@ func TestLogCheckerDebug(t *testing.T) {
 	_, stopped := lc.Check(100 * time.Millisecond)
 	assert.True(t, stopped)
 }
+
+// Without a stop mark an unrelated log event must not end the wait: it used to
+// match the empty mark, so a background log line arriving before the one under
+// test made Check return with the filters still unseen.
+func TestLogCheckerNoStopMark(t *testing.T) {
+	lc, cleanup := NewLogChecker(log.DEFAULT, log.INFO)
+	defer cleanup()
+
+	lc.Filter("Wanted")
+	log.Info("unrelated")
+
+	filtered, stopped := lc.Check(100 * time.Millisecond)
+	assert.Equal(t, []bool{false}, filtered)
+	assert.False(t, stopped)
+
+	log.Info("Wanted")
+	filtered, stopped = lc.Check(5 * time.Second) // returns as soon as every filter matched
+	assert.Equal(t, []bool{true}, filtered)
+	assert.False(t, stopped)
+}
