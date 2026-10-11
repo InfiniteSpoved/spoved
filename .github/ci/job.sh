@@ -128,7 +128,8 @@ e2e)
   # With RUN_ALL_E2E unchecked, only run the tests whose `@watch` patterns
   # match the files changed compared with develop (see tests/e2e/changes.go).
   # An empty CHANGED_FILES is meaningful: nothing relevant changed, so no test runs.
-  if [ "$RUN_ALL_E2E" = true ]; then
+  # A commit already on develop (a push to develop) has no changes to select by, so it runs them all.
+  if [ "$RUN_ALL_E2E" = true ] || git merge-base --is-ancestor HEAD origin/develop; then
     echo "Running all end-to-end tests"
     export RUN_ALL=1
   else

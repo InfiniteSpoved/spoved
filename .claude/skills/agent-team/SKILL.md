@@ -107,12 +107,12 @@ So:
    - Run the fast local stages: lint, unit, and the new tests by name.
    - Push the branch and open a PR to develop: "Fixes #<N>", or "Part of #<N>" for a
      partial PR.
-   - CI: the supervisor runs it (the classifier denies coders add_repo for
-     spovedBuild): a quick run on every pushed head, a full run only on a head with
-     the OL's FULLY DONE (and the security sign-off, if there is a reviewer), a
-     train head or a develop head. It cancels runs on superseded heads (the runners
-     are shared) and sends failing tests straight to the coder. Push once per review
-     round. Edits to .github/ci/* go to the supervisor as a diff.
+   - CI starts by itself: every push to a PR (and to develop) starts a full
+     spovedBuild run, and a new push cancels the PR's unfinished run. Nobody
+     dispatches CI by hand. Wait for the commit status "CI success" on the head;
+     if it fails, read the failed jobs' logs in the PR's own `spovedBuild` check
+     (decrypted there). Push once per review round. Edits to .github/ci/* go to
+     the supervisor as a diff.
    - Send the OL (and the security reviewer, if any) the PR number, the head SHA
      and the CI result.
 5. **Review.** In parallel:
@@ -140,11 +140,7 @@ So:
 ## Supervisor setup
 
 1. `get_session` (no args) gives your id `<SUP>`.
-2. Check you can reach spovedBuild: `gh api repos/InfiniteSpoved/spovedBuild --jq .permissions`.
-   If that fails, call `add_repo` (owner InfiniteSpoved, repo spovedBuild,
-   access push). If add_repo is refused, ask the user to start this session
-   with spovedBuild selected, or to ask you to add it (on 10 Oct the classifier
-   allowed it once the user asked). Then create your own CI log key.
+2. CI needs no setup: spoved's `spovedbuild.yml` starts it on every push.
 3. Verify the hand-off against GitHub before briefing anyone:
    - open PRs;
    - `git ls-remote --heads origin`;
@@ -189,8 +185,8 @@ re-arm for 4 h; skip it when nothing is in flight.
 - Up to three non-conflicting tickets at a time; merges one at a time. No code before the OL approves the design.
 - Read CLAUDE.md first. Coders invoke the ponytail skill (Skill tool, "full")
   before writing code.
-- CI runs in InfiniteSpoved/spovedBuild (CLAUDE.md "CI"), started by the
-  supervisor on every pushed head. Never put branch names, logs, test names or
+- CI runs in InfiniteSpoved/spovedBuild (CLAUDE.md "CI"), started automatically
+  by every push to a PR or to develop. Never put branch names, logs, test names or
   code anywhere in spovedBuild.
 - Stage files by name, never `git add -A`: `make lint-*` and `make frontend`
   rewrite package-lock.json with the container's old npm.
