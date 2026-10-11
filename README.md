@@ -20,7 +20,7 @@ spoved's goals have diverged from Forgejo's:
 
 ## Credits
 
-spoved is a fork of **[Forgejo](https://codeberg.org/forgejo/forgejo)**, its predecessor, which is itself a fork of [Gitea](https://gitea.com) and [Gogs](https://gogs.io). Almost all of spoved's code is their work. Thank you to the Forgejo, Gitea and Gogs contributors.
+spoved is a fork of **[Forgejo](https://codeberg.org/forgejo/forgejo)**, its predecessor, which is itself a fork of [Gitea](https://gitea.com) and [Gogs](https://gogs.io). Almost all of spoved's code is their work. Thank you to the Forgejo, Gitea and Gogs contributors. See [NOTICE](NOTICE).
 
 spoved is a modified version of Forgejo, changed by the spoved contributors since 2026 (see the git history for each change). It is not affiliated with or endorsed by Forgejo or Codeberg e.V. "Forgejo" is a trademark of Codeberg e.V. and names the Forgejo project only.
 
