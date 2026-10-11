@@ -44,12 +44,11 @@ func TestNoOldBrandInUserFacingSource(t *testing.T) {
 		}
 	}
 
-	// API docs: only upstream references that are true as written stay
+	// API docs: only upstream references that are true as written stay (docs/branding.md keeps the API title)
 	allowed := strings.NewReplacer(
-		"Forgejo API", "", // the API's name, kept by docs/branding.md
-		"deprecated in Forgejo 15", "", // upstream version numbers
-		"forgejo.org/docs", "", // upstream documentation
-		".forgejo/", "", // the workflow directory
+		`"title": "Forgejo API"`, "",
+		"This documentation describes the Forgejo API.", "",
+		"deprecated in Forgejo 15", "", // an upstream version number
 	)
 	text := regexp.MustCompile(`"(description|summary|title)": "[^\n]*`)
 	for i, line := range readLines(t, "../../templates/swagger/v1_json.tmpl") {
