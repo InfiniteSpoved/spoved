@@ -15,4 +15,9 @@
 			{{ctx.Locale.Tr "repo.activity.navbar.recent_commits"}}
 		</a>
 	{{end}}
+	{{if $.Permission.CanRead $.UnitTypePullRequests}}
+		<a class="{{if .PageIsMetrics}}active {{end}}item" href="{{.RepoLink}}/activity/metrics">
+			{{ctx.Locale.Tr "metrics.title"}}
+		</a>
+	{{end}}
 </div>
