@@ -36,8 +36,10 @@ import (
 
 func attentionOf(t *testing.T, issueID int64) []int64 {
 	t.Helper()
-	ids, err := issues_model.GetPullAttentionUserIDs(t.Context(), issueID)
-	require.NoError(t, err)
+	// Also called from Eventually/Never conditions, which run in a goroutine that can outlive the
+	// subtest: no t.Context() (cancelled by then) and no require (FailNow off the test goroutine).
+	ids, err := issues_model.GetPullAttentionUserIDs(db.DefaultContext, issueID)
+	assert.NoError(t, err)
 	return ids
 }
 
