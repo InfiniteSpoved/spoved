@@ -62,6 +62,7 @@ type Repository struct {
 	Size          int         `json:"size"`
 	GitSize       int64       `json:"git_size"`
 	LFSSize       int64       `json:"lfs_size"`
+	WikiSize      int64       `json:"wiki_size"`
 	Language      string      `json:"language"`
 	LanguagesURL  string      `json:"languages_url"`
 	HTMLURL       string      `json:"html_url"`

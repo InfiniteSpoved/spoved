@@ -8,7 +8,13 @@
 				<tbody>
 					<tr><td>{{ctx.Locale.Tr "admin.storage.git_size"}}</td><td>{{ctx.Locale.TrSize .Totals.GitSize}}</td></tr>
 					<tr><td>{{ctx.Locale.Tr "admin.storage.lfs_size"}}</td><td>{{ctx.Locale.TrSize .Totals.LFSSize}}</td></tr>
+					<tr><td>{{ctx.Locale.Tr "admin.storage.wiki_size"}}</td><td>{{ctx.Locale.TrSize .Totals.WikiSize}}</td></tr>
+					<tr><td>{{ctx.Locale.Tr "admin.storage.attachments_size"}}</td><td>{{ctx.Locale.TrSize .Totals.AttachmentsSize}}</td></tr>
+					<tr><td>{{ctx.Locale.Tr "admin.storage.packages_size"}}</td><td>{{ctx.Locale.TrSize .Totals.PackagesSize}}</td></tr>
+					<tr><td>{{ctx.Locale.Tr "admin.storage.artifacts_size"}}</td><td>{{ctx.Locale.TrSize .Totals.ArtifactsSize}}</td></tr>
+					<tr><td>{{ctx.Locale.Tr "admin.storage.logs_size"}}</td><td>{{ctx.Locale.TrSize .Totals.LogsSize}}</td></tr>
 					<tr><td>{{ctx.Locale.Tr "admin.storage.total_size"}}</td><td>{{ctx.Locale.TrSize .Totals.Size}}</td></tr>
+					<tr><td>{{ctx.Locale.Tr "admin.storage.trash_size"}}</td><td>{{ctx.Locale.TrSize .Totals.TrashSize}}</td></tr>
 					<tr><td>{{ctx.Locale.Tr "admin.storage.repos"}}</td><td>{{.Totals.NumRepos}}</td></tr>
 					<tr><td>{{ctx.Locale.Tr "admin.storage.average_size"}}</td><td>{{ctx.Locale.TrSize .AverageSize}}</td></tr>
 					<tr><td>{{ctx.Locale.Tr "admin.storage.median_size"}}</td><td>{{ctx.Locale.TrSize .MedianSize}}</td></tr>
@@ -26,6 +32,11 @@
 				{{end}}
 				<a href="{{AppSubUrl}}/admin/monitor/cron">{{ctx.Locale.Tr "admin.monitor.cron"}}</a>
 			</p>
+			<form class="ui form tw-flex tw-flex-wrap tw-items-center tw-gap-2" method="post" action="{{AppSubUrl}}/admin/storage/recalculate">
+				<input class="tw-w-auto" name="owner" aria-label="{{ctx.Locale.Tr "admin.storage.recalculate.owner"}}" placeholder="{{ctx.Locale.Tr "admin.storage.recalculate.owner"}}">
+				<button class="ui small button">{{ctx.Locale.Tr "admin.storage.recalculate"}}</button>
+				<span class="help">{{ctx.Locale.Tr "admin.storage.recalculate.help"}}</span>
+			</form>
 			<p>
 				<a href="{{AppSubUrl}}/admin/repos?sort=reversegitsize">{{ctx.Locale.Tr "admin.storage.largest_git"}}</a>
 				·
@@ -57,8 +68,9 @@
 				</div>
 			</div>
 		</div>
-		<div class="ui attached table segment">
-			<table class="ui very basic striped table unstackable">
+		<div class="ui attached table segment tw-overflow-x-auto">
+			{{if .Owners}}
+			<table class="ui very basic striped table unstackable tw-whitespace-nowrap">
 				<thead>
 					<tr>
 						<th>{{ctx.Locale.Tr "admin.repos.owner"}}</th>
@@ -75,6 +87,30 @@
 							{{ctx.Locale.Tr "admin.storage.lfs_size"}}
 							{{SortArrow "lfssize" "reverselfssize" $.SortType false}}
 						</th>
+						<th data-sortt-asc="wikisize" data-sortt-desc="reversewikisize">
+							{{ctx.Locale.Tr "admin.storage.wiki_size"}}
+							{{SortArrow "wikisize" "reversewikisize" $.SortType false}}
+						</th>
+						<th data-sortt-asc="attachmentssize" data-sortt-desc="reverseattachmentssize">
+							{{ctx.Locale.Tr "admin.storage.attachments_size"}}
+							{{SortArrow "attachmentssize" "reverseattachmentssize" $.SortType false}}
+						</th>
+						<th data-sortt-asc="packagessize" data-sortt-desc="reversepackagessize">
+							{{ctx.Locale.Tr "admin.storage.packages_size"}}
+							{{SortArrow "packagessize" "reversepackagessize" $.SortType false}}
+						</th>
+						<th data-sortt-asc="artifactssize" data-sortt-desc="reverseartifactssize">
+							<span data-tooltip-content="{{ctx.Locale.Tr "admin.storage.artifacts_size"}}">{{ctx.Locale.Tr "admin.storage.artifacts_short"}}</span>
+							{{SortArrow "artifactssize" "reverseartifactssize" $.SortType false}}
+						</th>
+						<th data-sortt-asc="logssize" data-sortt-desc="reverselogssize">
+							<span data-tooltip-content="{{ctx.Locale.Tr "admin.storage.logs_size"}}">{{ctx.Locale.Tr "admin.storage.logs_short"}}</span>
+							{{SortArrow "logssize" "reverselogssize" $.SortType false}}
+						</th>
+						<th data-sortt-asc="trashsize" data-sortt-desc="reversetrashsize">
+							{{ctx.Locale.Tr "admin.storage.trash_size"}}
+							{{SortArrow "trashsize" "reversetrashsize" $.SortType false}}
+						</th>
 						<th data-sortt-asc="size" data-sortt-desc="reversesize">
 							{{ctx.Locale.Tr "admin.storage.total_size"}}
 							{{SortArrow "size" "reversesize" $.SortType false}}
@@ -90,14 +126,21 @@
 							<td>{{.NumRepos}}</td>
 							<td>{{ctx.Locale.TrSize .GitSize}}</td>
 							<td>{{ctx.Locale.TrSize .LFSSize}}</td>
+							<td>{{ctx.Locale.TrSize .WikiSize}}</td>
+							<td>{{ctx.Locale.TrSize .AttachmentsSize}}</td>
+							<td>{{ctx.Locale.TrSize .PackagesSize}}</td>
+							<td>{{ctx.Locale.TrSize .ArtifactsSize}}</td>
+							<td>{{ctx.Locale.TrSize .LogsSize}}</td>
+							<td>{{ctx.Locale.TrSize .TrashSize}}</td>
 							<td>{{ctx.Locale.TrSize .Size}}</td>
 							<td>{{printf "%.1f" (.Percent $.Totals)}}%</td>
 						</tr>
-					{{else}}
-						<tr><td class="tw-text-center" colspan="7">{{ctx.Locale.Tr "repo.pulls.no_results"}}</td></tr>
 					{{end}}
 				</tbody>
 			</table>
+			{{else}}
+			<div class="tw-p-4 tw-text-center">{{ctx.Locale.Tr "repo.pulls.no_results"}}</div>
+			{{end}}
 		</div>
 
 		{{template "base/paginate" .}}

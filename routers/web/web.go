@@ -1011,6 +1011,7 @@ func registerRoutes(m *web.Route) {
 		})
 
 		m.Get("/storage", admin.Storage)
+		m.Post("/storage/recalculate", admin.StorageRecalculate)
 		m.Get("/access-reports", admin.AccessReports)
 
 		m.Group("/packages", func() {

@@ -12,6 +12,7 @@ import (
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/services/convert"
 	"forgejo.org/tests"
 
 	"github.com/stretchr/testify/assert"
@@ -20,8 +21,8 @@ import (
 
 func TestAPIAdminStorage(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
-	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 3, 1<<30, 1<<20)) // org3/repo3
-	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 1, 10, 1<<31))    // user2/repo1
+	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 3, 1<<30, 1<<20, 0)) // org3/repo3
+	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 1, 10, 1<<31, 0))    // user2/repo1
 
 	token := getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin)
 	owners := func(t *testing.T, query string) ([]*api.OwnerStorage, *http.Response) {
@@ -39,11 +40,12 @@ func TestAPIAdminStorage(t *testing.T) {
 		var summary api.StorageSummary
 		DecodeJSON(t, resp, &summary)
 		assert.Equal(t, api.StorageSummary{
-			RepoCount:   totals.NumRepos,
-			GitSize:     totals.GitSize,
-			LFSSize:     totals.LFSSize,
-			TotalSize:   totals.Size(),
-			AverageSize: totals.Size() / totals.NumRepos,
+			RepoCount:    totals.NumRepos,
+			GitSize:      totals.GitSize,
+			LFSSize:      totals.LFSSize,
+			StorageSizes: convert.ToStorageSizes(totals),
+			TotalSize:    totals.Size(),
+			AverageSize:  (totals.GitSize + totals.LFSSize) / totals.NumRepos,
 		}, summary)
 	})
 
@@ -59,6 +61,7 @@ func TestAPIAdminStorage(t *testing.T) {
 			assert.Equal(t, o.GitSize, got[i].GitSize)
 			assert.Equal(t, o.LFSSize, got[i].LFSSize)
 			assert.Equal(t, o.Size(), got[i].TotalSize)
+			assert.Equal(t, convert.ToStorageSizes(o.StorageStats), got[i].StorageSizes)
 			assert.Equal(t, o.NumRepos, got[i].RepoCount)
 		}
 		assert.Equal(t, "user2", got[0].OwnerName)
@@ -67,6 +70,7 @@ func TestAPIAdminStorage(t *testing.T) {
 	})
 
 	t.Run("Sort", func(t *testing.T) {
+		def, _ := owners(t, "")
 		got, _ := owners(t, "?sort=git")
 		assert.Equal(t, "org3", got[0].OwnerName)
 		assert.Equal(t, "org", got[0].OwnerType)
@@ -79,7 +83,16 @@ func TestAPIAdminStorage(t *testing.T) {
 		got, _ = owners(t, "?sort=lfs")
 		assert.Equal(t, "user2", got[0].OwnerName)
 
-		def, _ := owners(t, "")
+		got, _ = owners(t, "?sort=logs") // only user5/repo4 has Actions logs in the fixtures
+		assert.Equal(t, "user5", got[0].OwnerName)
+		assert.Positive(t, got[0].LogsSize)
+		got, _ = owners(t, "?sort=artifacts")
+		assert.Equal(t, "user5", got[0].OwnerName)
+		for _, key := range []string{"wiki", "attachments", "packages", "trash", "total"} {
+			got, _ = owners(t, "?sort="+key+"&order=asc&limit=50")
+			assert.Len(t, got, len(def), key)
+		}
+
 		bogus, _ := owners(t, "?sort=id;DROP%20TABLE%20repository&order=sideways")
 		assert.Equal(t, def, bogus)
 	})

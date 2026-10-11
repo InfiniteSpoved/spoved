@@ -430,6 +430,7 @@ func TestAPIViewRepo(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 
 	var repo api.Repository
+	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 1, 100, 200, 300))
 
 	req := NewRequest(t, "GET", "/api/v1/repos/user2/repo1")
 	resp := MakeRequest(t, req, http.StatusOK)
@@ -442,6 +443,8 @@ func TestAPIViewRepo(t *testing.T) {
 	repo1 := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
 	assert.Equal(t, repo1.GitSize, repo.GitSize)
 	assert.Equal(t, repo1.LFSSize, repo.LFSSize)
+	assert.EqualValues(t, 300, repo.WikiSize)
+	assert.Zero(t, repo.Size, "size stays git + LFS, in KiB")
 
 	req = NewRequest(t, "GET", "/api/v1/repos/user12/repo10")
 	resp = MakeRequest(t, req, http.StatusOK)

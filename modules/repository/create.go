@@ -206,9 +206,13 @@ func getDirectorySize(path string) (int64, error) {
 	return size, err
 }
 
-// UpdateRepoSize updates the repository size, calculating it using getDirectorySize
+// UpdateRepoSize updates the repository and wiki sizes, calculating them using getDirectorySize
 func UpdateRepoSize(ctx context.Context, repo *repo_model.Repository) error {
 	size, err := getDirectorySize(repo.RepoPath())
+	if err != nil {
+		return fmt.Errorf("updateSize: %w", err)
+	}
+	wikiSize, err := getDirectorySize(repo.WikiPath()) // 0 without a wiki
 	if err != nil {
 		return fmt.Errorf("updateSize: %w", err)
 	}
@@ -218,7 +222,7 @@ func UpdateRepoSize(ctx context.Context, repo *repo_model.Repository) error {
 		return fmt.Errorf("updateSize: GetLFSMetaObjects: %w", err)
 	}
 
-	return repo_model.UpdateRepoSize(ctx, repo.ID, size, lfsSize)
+	return repo_model.UpdateRepoSize(ctx, repo.ID, size, lfsSize, wikiSize)
 }
 
 // CheckDaemonExportOK creates/removes git-daemon-export-ok for git-daemon...

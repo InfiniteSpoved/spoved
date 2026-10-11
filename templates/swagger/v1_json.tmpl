@@ -2438,10 +2438,16 @@
             "enum": [
               "git",
               "lfs",
+              "wiki",
+              "attachments",
+              "packages",
+              "artifacts",
+              "logs",
+              "trash",
               "total"
             ],
             "type": "string",
-            "description": "sort owners by git, LFS or total size (default)",
+            "description": "sort owners by the size of one type of storage, or by the total size (default)",
             "name": "sort",
             "in": "query"
           },
@@ -34431,6 +34437,18 @@
       "description": "OwnerStorage is the storage used by the repositories of one owner, in bytes",
       "type": "object",
       "properties": {
+        "artifacts_size": {
+          "description": "Actions artifacts that are not expired or deleted",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ArtifactsSize"
+        },
+        "attachments_size": {
+          "description": "issue and release attachments",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "AttachmentsSize"
+        },
         "git_size": {
           "type": "integer",
           "format": "int64",
@@ -34440,6 +34458,12 @@
           "type": "integer",
           "format": "int64",
           "x-go-name": "LFSSize"
+        },
+        "logs_size": {
+          "description": "Actions logs that are not expired",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "LogsSize"
         },
         "owner_id": {
           "type": "integer",
@@ -34455,6 +34479,12 @@
           "type": "string",
           "x-go-name": "OwnerType"
         },
+        "packages_size": {
+          "description": "each package blob counts once per owner, and once in the instance's total",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "PackagesSize"
+        },
         "percent": {
           "description": "share of the instance's total size, in percent",
           "type": "number",
@@ -34467,9 +34497,21 @@
           "x-go-name": "RepoCount"
         },
         "total_size": {
+          "description": "every type of storage except the trash",
           "type": "integer",
           "format": "int64",
           "x-go-name": "TotalSize"
+        },
+        "trash_size": {
+          "description": "git, LFS and wiki of repositories in the trash, which the other sizes leave out",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "TrashSize"
+        },
+        "wiki_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "WikiSize"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -36233,6 +36275,11 @@
           "type": "string",
           "x-go-name": "WikiCloneURL"
         },
+        "wiki_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "WikiSize"
+        },
         "wiki_ssh_url": {
           "type": "string",
           "x-go-name": "WikiSSHURL"
@@ -36465,7 +36512,20 @@
       "description": "StorageSummary is the storage used by all repositories of the instance, in bytes",
       "type": "object",
       "properties": {
+        "artifacts_size": {
+          "description": "Actions artifacts that are not expired or deleted",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ArtifactsSize"
+        },
+        "attachments_size": {
+          "description": "issue and release attachments",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "AttachmentsSize"
+        },
         "average_size": {
+          "description": "mean git and LFS size per repository (not total_size divided by repo_count)",
           "type": "integer",
           "format": "int64",
           "x-go-name": "AverageSize"
@@ -36480,15 +36540,39 @@
           "format": "int64",
           "x-go-name": "LFSSize"
         },
+        "logs_size": {
+          "description": "Actions logs that are not expired",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "LogsSize"
+        },
+        "packages_size": {
+          "description": "each package blob counts once per owner, and once in the instance's total",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "PackagesSize"
+        },
         "repo_count": {
           "type": "integer",
           "format": "int64",
           "x-go-name": "RepoCount"
         },
         "total_size": {
+          "description": "every type of storage except the trash",
           "type": "integer",
           "format": "int64",
           "x-go-name": "TotalSize"
+        },
+        "trash_size": {
+          "description": "git, LFS and wiki of repositories in the trash, which the other sizes leave out",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "TrashSize"
+        },
+        "wiki_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "WikiSize"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"

@@ -11,26 +11,30 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/git"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/translation"
 	"forgejo.org/services/convert"
+	wiki_service "forgejo.org/services/wiki"
 	"forgejo.org/tests"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"xorm.io/builder"
 )
 
 func TestAdminStorage(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
-	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 3, 1<<30, 1<<20)) // org3/repo3, private
+	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 3, 1<<30, 1<<20, 0)) // org3/repo3, private
 
 	admin := loginUser(t, "user1")
 	user := loginUser(t, "user2")
@@ -61,11 +65,18 @@ func TestAdminStorage(t *testing.T) {
 		owners, _, err := repo_model.FindOwnerStorage(db.DefaultContext, repo_model.FindOwnerStorageOptions{OrderBy: "reversegitsize"})
 		require.NoError(t, err)
 		require.Len(t, rows, len(owners)+1)
-		assert.Equal(t, []string{"owner", "type", "repos", "git_size", "lfs_size", "total_size", "percent"}, rows[0])
+		assert.Equal(t, []string{
+			"owner", "type", "repos", "git_size", "lfs_size", "total_size", "percent",
+			"wiki_size", "attachments_size", "packages_size", "artifacts_size", "logs_size", "trash_size",
+		}, rows[0])
 		assert.Equal(t, []string{"org3", "org", strconv.FormatInt(owners[0].NumRepos, 10), "1073741824", "1048576", "1074790400"}, rows[1][:6])
 		for i, o := range owners {
 			assert.Equal(t, o.Owner.Name, rows[i+1][0])
 			assert.Equal(t, strconv.FormatInt(o.Size(), 10), rows[i+1][5])
+			assert.Equal(t, []string{
+				strconv.FormatInt(o.WikiSize, 10), strconv.FormatInt(o.AttachmentsSize, 10), strconv.FormatInt(o.PackagesSize, 10),
+				strconv.FormatInt(o.ArtifactsSize, 10), strconv.FormatInt(o.LogsSize, 10), strconv.FormatInt(o.TrashSize, 10),
+			}, rows[i+1][7:])
 		}
 	})
 
@@ -99,18 +110,25 @@ func TestAdminStorage(t *testing.T) {
 		rows, err := csv.NewReader(resp.Body).ReadAll()
 		require.NoError(t, err)
 		require.NotEmpty(t, rows)
-		assert.Equal(t, []string{"repo_id", "owner", "repo", "private", "git_size", "lfs_size", "total_size", "percent"}, rows[0])
+		assert.Equal(t, []string{
+			"repo_id", "owner", "repo", "private", "git_size", "lfs_size", "total_size", "percent",
+			"wiki_size", "attachments_size", "artifacts_size", "logs_size",
+		}, rows[0])
 		return rows[1:]
 	}
 	type repoRow struct {
-		RepoID    int64   `json:"repo_id"`
-		OwnerName string  `json:"owner_name"`
-		RepoName  string  `json:"repo_name"`
-		Private   bool    `json:"private"`
-		GitSize   int64   `json:"git_size"`
-		LFSSize   int64   `json:"lfs_size"`
-		TotalSize int64   `json:"total_size"`
-		Percent   float64 `json:"percent"`
+		RepoID          int64   `json:"repo_id"`
+		OwnerName       string  `json:"owner_name"`
+		RepoName        string  `json:"repo_name"`
+		Private         bool    `json:"private"`
+		GitSize         int64   `json:"git_size"`
+		LFSSize         int64   `json:"lfs_size"`
+		TotalSize       int64   `json:"total_size"`
+		Percent         float64 `json:"percent"`
+		WikiSize        int64   `json:"wiki_size"`
+		AttachmentsSize int64   `json:"attachments_size"`
+		ArtifactsSize   int64   `json:"artifacts_size"`
+		LogsSize        int64   `json:"logs_size"`
 	}
 	repoJSON := func(t *testing.T, query string) []repoRow {
 		t.Helper()
@@ -141,7 +159,7 @@ func TestAdminStorage(t *testing.T) {
 		defer test.MockVariableValue(&setting.UI.Admin.RepoPagingNum, 1)() // exports must not page
 		rows := repoJSON(t, "&sort=reversesize")
 		assert.Len(t, rows, unittest.GetCount(t, &repo_model.Repository{}))
-		assert.Equal(t, repoRow{3, "org3", "repo3", true, 1 << 30, 1 << 20, 1<<30 + 1<<20, rows[0].Percent}, rows[0])
+		assert.Equal(t, repoRow{3, "org3", "repo3", true, 1 << 30, 1 << 20, 1<<30 + 1<<20, rows[0].Percent, 0, 0, 0, 0}, rows[0])
 		assert.Positive(t, rows[0].Percent)
 
 		rows = repoJSON(t, "&uid=2")
@@ -235,8 +253,8 @@ func TestAdminStorage(t *testing.T) {
 		assert.Equal(t, 1, recalc.Find("a[href='/admin/monitor/cron']").Length())
 	})
 
-	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 1, 10, 2<<20)) // user2/repo1
-	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 4, 5<<20, 0))  // user5/repo4
+	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 1, 10, 2<<20, 0)) // user2/repo1
+	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 4, 5<<20, 0, 0))  // user5/repo4
 	repoLinks := func(t *testing.T, query string) []string {
 		t.Helper()
 		resp := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/repos?"+query), http.StatusOK)
@@ -334,5 +352,137 @@ func TestAdminStorage(t *testing.T) {
 		want := links("/explore/repos")
 		assert.NotEmpty(t, want)
 		assert.Equal(t, want, links("/explore/repos?uid=5"))
+	})
+}
+
+// AC1-AC4 of #124: wiki, attachment, artifact, log and trash sizes, and the recalculation.
+func TestAdminStorageTypes(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		ctx := db.DefaultContext
+		admin := loginUser(t, "user1")
+		user2 := loginUser(t, "user2")
+		repoSizes := func(t *testing.T, id int64) [3]int64 {
+			t.Helper()
+			repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: id})
+			return [3]int64{repo.GitSize, repo.LFSSize, repo.WikiSize}
+		}
+
+		t.Run("WikiWebEdit", func(t *testing.T) {
+			require.NoError(t, repo_model.UpdateRepoSize(ctx, 1, 1, 0, 0))
+			user2.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/wiki/Home?action=_edit", map[string]string{
+				"title":   "Home",
+				"content": strings.Repeat("wiki ", 1000),
+			}), http.StatusSeeOther)
+			assert.Positive(t, repoSizes(t, 1)[2], "a web edit measures the wiki")
+			assert.Greater(t, repoSizes(t, 1)[0], int64(1), "and the repository")
+		})
+
+		recalculate := func(t *testing.T, session *TestSession, owner string, status int) {
+			t.Helper()
+			session.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/storage/recalculate", map[string]string{"owner": owner}), status)
+		}
+		// unmeasured marks the repositories of an owner (all for 0) with a git size no measurement gives
+		unmeasured := func(t *testing.T, ownerID int64) {
+			t.Helper()
+			_, err := db.GetEngine(ctx).Where("owner_id = ? OR ? = 0", ownerID, ownerID).Cols("git_size").Update(&repo_model.Repository{GitSize: -1})
+			require.NoError(t, err)
+		}
+		// waitForRecalculation waits until the background task has measured every repository of the owner
+		waitForRecalculation := func(t *testing.T, ownerID int64) {
+			t.Helper()
+			assert.Eventually(t, func() bool {
+				return unittest.GetCount(t, &repo_model.Repository{}, builder.Expr("git_size = -1 AND (owner_id = ? OR ? = 0)", ownerID, ownerID)) == 0
+			}, 30*time.Second, 50*time.Millisecond)
+		}
+
+		t.Run("RecalculateAfterWikiPush", func(t *testing.T) {
+			before := repoSizes(t, 1)[2]
+			wikiURL := *u
+			wikiURL.Path = "user2/repo1.wiki.git"
+			wikiURL.User = url.UserPassword("user2", userPassword)
+			dst := t.TempDir()
+			require.NoError(t, git.CloneWithArgs(t.Context(), nil, wikiURL.String(), dst, git.CloneRepoOptions{}))
+			doGitSetRemoteURL(dst, "origin", &wikiURL)(t)
+			generateCommitWithNewData(t, 64*1024, dst, "user2@example.com", "User Two", "big-page-")
+			doGitPushTestRepository(dst, "origin", "master")(t)
+			assert.Equal(t, before, repoSizes(t, 1)[2], "a wiki git push doesn't measure yet (PR B)")
+
+			unmeasured(t, 2)
+			unmeasured(t, 3) // org3: not recalculated
+			recalculate(t, admin, "user2", http.StatusSeeOther)
+			waitForRecalculation(t, 2)
+			assert.Greater(t, repoSizes(t, 1)[2], before+60*1024, "the pushed wiki page is counted")
+			assert.EqualValues(t, -1, repoSizes(t, 3)[0], "only the named owner is recalculated")
+		})
+
+		t.Run("RecalculateAll", func(t *testing.T) {
+			unmeasured(t, 0)
+			recalculate(t, admin, "", http.StatusSeeOther)
+			waitForRecalculation(t, 0)
+			assert.Positive(t, repoSizes(t, 3)[0])
+		})
+
+		t.Run("RecalculateRefused", func(t *testing.T) {
+			recalculate(t, user2, "", http.StatusForbidden)
+			recalculate(t, admin, "no-such-owner", http.StatusSeeOther)
+			resp := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/storage"), http.StatusOK)
+			assert.Contains(t, NewHTMLParser(t, resp.Body).Find(".flash-error").Text(), "There is no user or organization with this name.")
+
+			func() {
+				defer setMaintenance(t, setting.MaintenanceReadOnly, time.Time{})()
+				recalculate(t, admin, "", http.StatusSeeOther)
+				assertMaintenanceFlash(t, admin)
+			}()
+		})
+
+		t.Run("DeleteWiki", func(t *testing.T) {
+			require.Positive(t, repoSizes(t, 1)[2])
+			repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
+			require.NoError(t, wiki_service.DeleteWiki(ctx, repo))
+			assert.Zero(t, repoSizes(t, 1)[2])
+		})
+
+		t.Run("TrashAndAssets", func(t *testing.T) {
+			require.NoError(t, repo_model.UpdateRepoSize(ctx, 3, 1<<30, 0, 0))
+			require.NoError(t, repo_model.UpdateRepoSize(ctx, 5, 3<<20, 0, 1<<20)) // org3, trashed
+			_, err := db.GetEngine(ctx).Exec("UPDATE repository SET trashed_unix = 1 WHERE id = 5")
+			require.NoError(t, err)
+			_, err = db.GetEngine(ctx).Exec("UPDATE attachment SET size = 2048 WHERE id = 1") // user2/repo1
+			require.NoError(t, err)
+
+			owners, _, err := repo_model.FindOwnerStorage(ctx, repo_model.FindOwnerStorageOptions{})
+			require.NoError(t, err)
+			byName := map[string]*repo_model.OwnerStorage{}
+			for _, o := range owners {
+				byName[o.Owner.Name] = o
+			}
+			assert.EqualValues(t, 4<<20, byName["org3"].TrashSize)
+			assert.EqualValues(t, unittest.GetCount(t, &repo_model.Repository{OwnerID: 3})-1, byName["org3"].NumRepos)
+			assert.EqualValues(t, 2048, byName["user2"].AttachmentsSize)
+			assert.Positive(t, byName["user5"].ArtifactsSize)
+			assert.Positive(t, byName["user5"].LogsSize)
+
+			resp := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/storage?sort=reversetrashsize"), http.StatusOK)
+			htmlDoc := NewHTMLParser(t, resp.Body)
+			headers := htmlDoc.Find("table thead th").Map(func(_ int, s *goquery.Selection) string { return strings.TrimSpace(s.Text()) })
+			assert.Equal(t, []string{"Owner", "Type", "Repositories", "Git", "LFS", "Wiki", "Attachments", "Packages", "Artifacts", "Logs", "Trash", "Total", "Share"}, headers)
+			owner := htmlDoc.Find("table tbody tr td a[href^='/admin/repos?uid=']").First()
+			assert.Equal(t, "org3", owner.Text(), "sorted by trash")
+			assert.Equal(t, "4 MiB", owner.Closest("tr").Find("td").Eq(10).Text())
+
+			summary := map[string]string{}
+			htmlDoc.Find("table").First().Find("tr").Each(func(_ int, s *goquery.Selection) {
+				summary[s.Find("td").First().Text()] = s.Find("td").Eq(1).Text()
+			})
+			totals, err := repo_model.GetStorageTotals(ctx)
+			require.NoError(t, err)
+			locale := translation.NewLocale("en-US")
+			assert.Equal(t, locale.TrSize(totals.TrashSize).String(), summary["Trash"])
+			assert.Equal(t, locale.TrSize(totals.ArtifactsSize).String(), summary["Actions artifacts"])
+			assert.Equal(t, locale.TrSize(totals.Size()).String(), summary["Total"])
+
+			resp = admin.MakeRequest(t, NewRequest(t, "GET", "/admin/repos?uid=2"), http.StatusOK)
+			assert.Equal(t, 1, NewHTMLParser(t, resp.Body).Find("table thead th:contains('Wiki size')").Length())
+		})
 	})
 }
