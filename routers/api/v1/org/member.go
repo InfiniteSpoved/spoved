@@ -92,10 +92,11 @@ func ListMembers(ctx *context.APIContext) {
 
 	// who may ask is decided before the value is looked at, so the parameter is no oracle
 	twoFactorDisabled := false
-	if ctx.Req.URL.Query().Has("filter") {
-		allowed := ctx.Doer().IsAdmin
-		if !allowed {
-			allowed, err = ctx.Org().Organization.IsActingOwner(ctx, ctx.Doer())
+	if ctx.FormString("filter") != "" {
+		doer := ctx.Doer()
+		allowed := doer != nil && doer.IsAdmin
+		if !allowed && doer != nil {
+			allowed, err = ctx.Org().Organization.IsActingOwner(ctx, doer)
 			if err != nil {
 				ctx.Error(http.StatusInternalServerError, "IsActingOwner", err)
 				return

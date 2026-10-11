@@ -5,11 +5,13 @@ package integration
 
 import (
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	api "forgejo.org/modules/structs"
@@ -124,7 +126,7 @@ func TestOrgTwoFactorMembersFilter(t *testing.T) {
 	names(t, ownerToken, "?filter=nonsense", http.StatusForbidden)
 	enrolTOTP(t, 2)
 	names(t, ownerToken, "?filter=nonsense", http.StatusUnprocessableEntity)
-	names(t, ownerToken, "?filter=", http.StatusUnprocessableEntity)
+	names(t, ownerToken, "?filter=", http.StatusOK) // empty counts as unset
 	// no filter: unchanged for everyone
 	names(t, memberToken, "", http.StatusOK)
 }
@@ -175,6 +177,12 @@ func TestAPIOrgRequireTwoFactor(t *testing.T) {
 	patch(adminToken, false, http.StatusOK)
 	assert.False(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3}).RequireTwoFactor)
 
+	// all owners lack 2FA: none can manage the org, only a site admin can
+	patch(adminToken, true, http.StatusOK)
+	patch(ownerToken, false, http.StatusForbidden)
+	assert.True(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3}).RequireTwoFactor)
+	patch(adminToken, false, http.StatusOK)
+
 	// an owner with 2FA turns it on and off; other fields leave it alone
 	enrolTOTP(t, 2)
 	patch(ownerToken, true, http.StatusOK)
@@ -215,6 +223,19 @@ func TestOrgTwoFactorBanner(t *testing.T) {
 	missing := get(other, "/org3/no-such-repo", http.StatusNotFound)
 	assert.Equal(t, missing, existing)
 	assert.NotContains(t, existing, banner)
+
+	// every way a name can fail to resolve answers the blocked member alike: existing, missing, renamed away, trashed
+	require.NoError(t, db.Insert(db.DefaultContext, &repo_model.Redirect{OwnerID: 3, LowerName: "old-name", RedirectRepoID: 3}))
+	_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET trashed_unix = 1 WHERE id = 5")
+	require.NoError(t, err)
+	// (the page echoes the requested URL and its render time, which differ by request)
+	same := regexp.MustCompile(`(?m)^.*(og:url|Page: <strong>|Template: <strong>).*$`)
+	want := same.ReplaceAllString(get(member, "/org3/repo3", http.StatusForbidden), "")
+	for _, path := range []string{"/org3/no-such-repo", "/org3/old-name", "/org3/repo5"} {
+		assert.Equal(t, want, same.ReplaceAllString(get(member, path, http.StatusForbidden), ""), path)
+	}
+	_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET trashed_unix = 0 WHERE id = 5")
+	require.NoError(t, err)
 
 	// enrolling lifts it
 	enrolTOTP(t, 4)

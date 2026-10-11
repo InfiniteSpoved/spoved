@@ -571,6 +571,10 @@ func RepoAssignment(ctx *Context) context.CancelFunc {
 	repo, err := repo_model.GetRepositoryByName(ctx, owner.ID, repoName)
 	if err != nil {
 		if repo_model.IsErrRepoNotExist(err) {
+			// before the redirect lookup, so a missing, trashed or renamed-away name answers like an existing private repo
+			if ctx.twoFactorBlockedPage(owner) {
+				return nil
+			}
 			redirectRepoID, err := redirect_service.LookupRepoRedirect(ctx, ctx.Doer, owner.ID, repoName)
 			if err == nil {
 				RedirectToRepo(ctx.Base, redirectRepoID)
@@ -579,9 +583,7 @@ func RepoAssignment(ctx *Context) context.CancelFunc {
 					EarlyResponseForGoGetMeta(ctx)
 					return nil
 				}
-				if !ctx.twoFactorBlockedPage(owner) {
-					ctx.NotFound("GetRepositoryByName", nil)
-				}
+				ctx.NotFound("GetRepositoryByName", nil)
 			} else {
 				ctx.ServerError("LookupRepoRedirect", err)
 			}
