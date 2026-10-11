@@ -1,5 +1,6 @@
 import {expect, type Page} from '@playwright/test';
 import {AxeBuilder} from '@axe-core/playwright';
+import {timeoutScale} from '../utils_e2e.ts';
 
 export async function accessibilityCheck({page}: {page: Page}, includes: string[], excludes: string[], disabledRules: string[], withRules: string[] | null = null) {
   // contrast of inline links is still a global issue in Forgejo
@@ -33,14 +34,14 @@ export async function accessibilityCheck({page}: {page: Page}, includes: string[
   await expect(async () => {
     const accessibilityScanResults = await accessibilityScanner.analyze();
     expect(accessibilityScanResults.violations).toEqual([]);
-  }).toPass({timeout: 2000});
+  }).toPass({timeout: 2000 * timeoutScale});
 
   await page.emulateMedia({colorScheme: 'dark'});
 
   await expect(async () => {
     const accessibilityScanResults = await accessibilityScanner.analyze();
     expect(accessibilityScanResults.violations).toEqual([]);
-  }).toPass({timeout: 2000});
+  }).toPass({timeout: 2000 * timeoutScale});
 
   await page.emulateMedia({colorScheme: 'light'});
 }

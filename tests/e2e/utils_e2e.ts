@@ -28,6 +28,9 @@ export const test = baseTest.extend<TestOptions>({
   authScope: 'shared',
 });
 
+// slower CI runners set E2E_TIMEOUT_SCALE (e.g. 2) to stretch the fixed waits of the tests
+export const timeoutScale = Number(process.env.E2E_TIMEOUT_SCALE) || 1;
+
 export async function test_context(browser: Browser, options?: BrowserContextOptions) {
   const context = await browser.newContext(options);
 

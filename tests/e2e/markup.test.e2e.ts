@@ -6,7 +6,7 @@
 // @watch end
 
 import {expect} from '@playwright/test';
-import {test} from './utils_e2e.ts';
+import {test, timeoutScale} from './utils_e2e.ts';
 import {screenshot} from './shared/screenshots.ts';
 
 test('Markup with #xyz-mode-only', async ({page}) => {
@@ -49,7 +49,7 @@ test('Attention formatting', async ({page}) => {
       expect(titleColor).toBe(iconColor);
       expect(ugcColor).not.toBe(titleColor);
     }));
-  }).toPass({timeout: 3000});
+  }).toPass({timeout: 3000 * timeoutScale});
 
   await screenshot(page);
 });

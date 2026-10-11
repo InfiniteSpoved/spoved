@@ -70,6 +70,8 @@ jobs:
     env:
       # npm reads from the registry time out now and then on the runners' network
       npm_config_fetch_retries: 5
+      # the e2e tests' fixed waits are tuned for GitHub's hosted runners; these are about half as fast
+      E2E_TIMEOUT_SCALE: 2
     strategy:
       fail-fast: false
       matrix:

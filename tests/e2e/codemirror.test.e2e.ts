@@ -11,7 +11,7 @@
 // @watch end
 
 import {expect, type Page} from '@playwright/test';
-import {test} from './utils_e2e.ts';
+import {test, timeoutScale} from './utils_e2e.ts';
 
 test.use({user: 'user1'});
 
@@ -66,7 +66,7 @@ test('New file with autocomplete and indent', async ({page}) => {
 
   const editor = page.locator('.cm-content');
 
-  await expect(editor).toHaveAttribute('data-language', 'html', {timeout: 3000});
+  await expect(editor).toHaveAttribute('data-language', 'html', {timeout: 3000 * timeoutScale});
 
   await editor.click();
   await type(page, '<html>');
@@ -90,7 +90,7 @@ test('Preview for markdown file', async ({page}) => {
   const editor = page.locator('.cm-content');
   const preview = page.locator('button[data-tab="preview"]');
 
-  await expect(editor).toHaveAttribute('data-language', 'markdown', {timeout: 3000});
+  await expect(editor).toHaveAttribute('data-language', 'markdown', {timeout: 3000 * timeoutScale});
 
   await preview.click();
   await expect(preview).toHaveClass(/(^|\s)active(\s|$)/);
