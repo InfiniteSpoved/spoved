@@ -3741,7 +3741,7 @@
         "tags": [
           "miscellaneous"
         ],
-        "summary": "Returns the nodeinfo of the Forgejo application",
+        "summary": "Returns the nodeinfo of the application",
         "operationId": "getNodeInfo",
         "responses": {
           "200": {
@@ -8328,7 +8328,7 @@
               ],
               "type": "string"
             },
-            "description": "Returns workflow runs with the check run status or conclusion that is specified. For example, a conclusion can be success or a status can be in_progress. Only Forgejo Actions can set a status of waiting, pending, or requested.\n",
+            "description": "Returns workflow runs with the check run status or conclusion that is specified. For example, a conclusion can be success or a status can be in_progress. Only Actions can set a status of waiting, pending, or requested.\n",
             "name": "status",
             "in": "query"
           },
@@ -27220,7 +27220,7 @@
           "x-go-name": "UUID"
         },
         "version": {
-          "description": "Version is the self-reported version string of Forgejo Runner.",
+          "description": "Version is the self-reported version string of the spoved runner.",
           "type": "string",
           "x-go-name": "Version"
         }
@@ -37254,7 +37254,7 @@
       ],
       "properties": {
         "name": {
-          "description": "New name for the variable. If the field is empty, the variable name won't be updated. Forgejo will convert it to\nuppercase.",
+          "description": "New name for the variable. If the field is empty, the variable name won't be updated. spoved will convert it to\nuppercase.",
           "type": "string",
           "x-go-name": "Name"
         },
@@ -37929,7 +37929,7 @@
       }
     },
     "ActionRunnerList": {
-      "description": "ActionRunnerList is a list of Forgejo Action runners",
+      "description": "ActionRunnerList is a list of Actions runners",
       "schema": {
         "type": "array",
         "items": {
