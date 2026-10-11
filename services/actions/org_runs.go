@@ -14,7 +14,6 @@ import (
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
-	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
@@ -104,25 +103,11 @@ func ParseOrgRunFilter(form FormGetter) (f OrgRunFilter, err error) {
 // the one visibility rule of the runs list, the overview and the instance pages. A nil org (site admins only) means
 // every owner.
 func orgRunRepoCond(ctx context.Context, org *organization.Organization, doer *user_model.User, admin bool, tokenRepos builder.Cond) builder.Cond {
-	cond := builder.Eq{"`repository`.trashed_unix": 0}.And(
-		builder.In("`repository`.id", builder.Select("repo_id").From("repo_unit").Where(builder.Eq{"type": unit.TypeActions})),
-		// Actions Not allowed for the owner by the site policy, for site admins too
-		repo_model.AvailableUnitTypeCond(ctx, "`repository`.owner_id", unit.TypeActions),
-	)
+	var ownerID int64
 	if org != nil {
-		cond = cond.And(builder.Eq{"`repository`.owner_id": org.ID})
+		ownerID = org.ID
 	}
-	if !admin {
-		// teams that grant admin access reach every unit, with or without a team_unit row for Actions
-		adminTeamRepos := builder.Select("`team_repo`.repo_id").From("team_repo").
-			Join("INNER", "team_user", "`team_user`.team_id = `team_repo`.team_id").
-			Join("INNER", "team", "`team`.id = `team_repo`.team_id").
-			Where(builder.Eq{"`team_user`.uid": doer.ID, "`team`.org_id": org.ID}.And(builder.Gte{"`team`.authorize": perm.AccessModeAdmin}))
-		cond = cond.And(builder.Or(
-			repo_model.AccessibleRepositoryCondition(doer, unit.TypeActions),
-			builder.In("`repository`.id", adminTeamRepos),
-		), repo_model.TwoFactorHiddenRepoCond(doer.ID))
-	}
+	cond := repo_model.OrgUnitRepoCond(ctx, ownerID, doer, admin, unit.TypeActions)
 	if tokenRepos != nil {
 		cond = cond.And(tokenRepos)
 	}

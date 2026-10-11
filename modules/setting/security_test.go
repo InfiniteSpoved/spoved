@@ -401,4 +401,8 @@ ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION = read:repository
 	cfg, err = NewConfigProviderFromData("[security]\nACCESS_TOKEN_ALLOWED_SCOPES = ,")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"", ""}, loadAccessTokenScopePolicy(cfg.Section("security")).Allowed)
+
+	cfg, err = NewConfigProviderFromData("[security]\nACCESS_TOKEN_SCOPE_POLICY_ENFORCE_AFTER =  2030-01-02 ")
+	require.NoError(t, err)
+	assert.Equal(t, "2030-01-02", loadAccessTokenScopePolicy(cfg.Section("security")).EnforceAfter)
 }

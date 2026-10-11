@@ -13,8 +13,10 @@ import (
 	"forgejo.org/models/webhook"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/setting"
+	actions_service "forgejo.org/services/actions"
 	"forgejo.org/services/auth"
 	automerge_service "forgejo.org/services/automerge"
+	logshipping_service "forgejo.org/services/logshipping"
 	"forgejo.org/services/migrations"
 	mirror_service "forgejo.org/services/mirror"
 	packages_cleanup_service "forgejo.org/services/packages/cleanup"
@@ -167,6 +169,26 @@ func registerStartScheduledAutoMerges() {
 	})
 }
 
+func registerStartScheduledDispatches() {
+	RegisterTaskFatal("start_scheduled_dispatches", &BaseConfig{
+		Enabled:    true,
+		RunAtStart: true,
+		Schedule:   "@every 1m",
+	}, func(ctx context.Context, _ *user_model.User, _ Config) error {
+		return actions_service.StartDueScheduledDispatches(ctx)
+	})
+}
+
+func registerReloadLogShipping() {
+	RegisterTaskFatal("reload_log_shipping", &BaseConfig{
+		Enabled:    true,
+		RunAtStart: true,
+		Schedule:   "@every 30s",
+	}, func(ctx context.Context, _ *user_model.User, _ Config) error {
+		return logshipping_service.Reload(ctx)
+	})
+}
+
 func initBasicTasks() {
 	if setting.Mirror.Enabled {
 		registerUpdateMirrorTask()
@@ -181,6 +203,8 @@ func initBasicTasks() {
 	}
 	registerCleanupHookTaskTable()
 	registerStartScheduledAutoMerges()
+	registerStartScheduledDispatches()
+	registerReloadLogShipping()
 	if setting.Packages.Enabled {
 		registerCleanupPackages()
 	}

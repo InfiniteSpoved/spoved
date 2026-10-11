@@ -296,6 +296,9 @@
 								'mergeMessageFieldPlaceHolder': {{ctx.Locale.Tr "repo.editor.commit_message_desc"}},
 								'defaultMergeMessage': defaultMergeMessage,
 
+								'timeZone': {{.UserTimeZone}},
+								'textChangeTime': {{ctx.Locale.Tr "repo.pulls.auto_merge.change_time"}},
+								'textChangeTimeSave': {{ctx.Locale.Tr "repo.pulls.auto_merge.change_time_save"}},
 								'hasPendingPullRequestMerge': {{.HasPendingPullRequestMerge}},
 								'hasPendingPullRequestMergeTip': {{$hasPendingPullRequestMergeTip}},
 							};

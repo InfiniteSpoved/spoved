@@ -20,6 +20,7 @@ import (
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
+	"forgejo.org/models/organization"
 	packages_model "forgejo.org/models/packages"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
@@ -380,7 +381,34 @@ func RedirectToRepo(ctx *Base, redirectRepoID int64) {
 	ctx.Redirect(path.Join(setting.AppSubURL, redirectPath), http.StatusMovedPermanently)
 }
 
-func repoAssignment(ctx *Context, repo *repo_model.Repository) {
+// twoFactorBlockedPage answers 403 with the reason when the doer is a member of the organization owner whose
+// two-factor requirement blocks them, and reports whether it did. It stands in for every 404 on a repository path of
+// that organization (existing or not, so the answer says nothing about which repositories exist); everyone else keeps
+// the 404. An organization without the requirement costs nothing.
+func (ctx *Context) twoFactorBlockedPage(owner *user_model.User) bool {
+	if !ctx.IsSigned || owner == nil || !owner.IsOrganization() || !owner.RequireTwoFactor {
+		return false
+	}
+	blocked, err := ctx.Doer.TwoFactorBlocked(ctx, owner)
+	if err == nil && blocked {
+		blocked, err = organization.IsOrganizationMember(ctx, owner.ID, ctx.Doer.ID)
+	}
+	if err != nil {
+		ctx.ServerError("TwoFactorBlocked", err)
+		return true
+	}
+	if !blocked {
+		return false
+	}
+	ctx.Data["Title"] = ctx.Locale.TrString("org.settings.require_two_factor_blocked")
+	ctx.Data["ForbiddenPrompt"] = ctx.Locale.TrString("org.settings.require_two_factor_blocked_text")
+	ctx.HTML(http.StatusForbidden, "status/403")
+	return true
+}
+
+// repoAssignment loads the repository's context. byName is false when the repository was found by its ID: the
+// two-factor 403 is only for names, since by ID it would tell a blocked member which IDs exist.
+func repoAssignment(ctx *Context, repo *repo_model.Repository, byName bool) {
 	var err error
 	if err = repo.LoadOwner(ctx); err != nil {
 		ctx.ServerError("LoadOwner", err)
@@ -409,7 +437,9 @@ func repoAssignment(ctx *Context, repo *repo_model.Repository) {
 			EarlyResponseForGoGetMeta(ctx)
 			return
 		}
-		ctx.NotFound("no access right", nil)
+		if !byName || !ctx.twoFactorBlockedPage(repo.Owner) {
+			ctx.NotFound("no access right", nil)
+		}
 		return
 	}
 	ctx.Data["HasAccess"] = true
@@ -462,7 +492,7 @@ func RepoIDAssignment() func(ctx *Context) {
 			return
 		}
 
-		repoAssignment(ctx, repo)
+		repoAssignment(ctx, repo, false)
 	}
 }
 
@@ -543,6 +573,10 @@ func RepoAssignment(ctx *Context) context.CancelFunc {
 	repo, err := repo_model.GetRepositoryByName(ctx, owner.ID, repoName)
 	if err != nil {
 		if repo_model.IsErrRepoNotExist(err) {
+			// before the redirect lookup, so a missing, trashed or renamed-away name answers like an existing private repo
+			if ctx.twoFactorBlockedPage(owner) {
+				return nil
+			}
 			redirectRepoID, err := redirect_service.LookupRepoRedirect(ctx, ctx.Doer, owner.ID, repoName)
 			if err == nil {
 				RedirectToRepo(ctx.Base, redirectRepoID)
@@ -562,7 +596,7 @@ func RepoAssignment(ctx *Context) context.CancelFunc {
 	}
 	repo.Owner = owner
 
-	repoAssignment(ctx, repo)
+	repoAssignment(ctx, repo, true)
 	if ctx.Written() {
 		return nil
 	}

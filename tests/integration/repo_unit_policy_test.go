@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	actions_model "forgejo.org/models/actions"
 	activities_model "forgejo.org/models/activities"
@@ -120,6 +121,7 @@ func TestRepoUnitPolicyAdminPage(t *testing.T) {
 	assert.EqualValues(t, 1, p.UpdatedBy)
 	doc = NewHTMLParser(t, admin.MakeRequest(t, NewRequest(t, "GET", "/admin/repo-units"), http.StatusOK).Body)
 	assert.Contains(t, doc.Find(".admin-setting-content").Text(), "by user1")
+	assert.Contains(t, doc.Find(".admin-setting-content").Text(), time.Unix(p.UpdatedUnix, 0).Format("2006-01-02"))
 	assert.ElementsMatch(t, []string{"org3", "org17"}, strings.Split(doc.Find(`textarea[name="orgs_repo.wiki"]`).Text(), "\n"))
 
 	// unknown, user and duplicate names are refused and nothing is saved

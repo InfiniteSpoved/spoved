@@ -199,15 +199,6 @@ const (
 // PrivateForkPolicyNames are the API names of the private fork policies.
 var PrivateForkPolicyNames = []string{"all", "org", "none"}
 
-// PrivateForkPolicyName returns the API name of the organization's private fork policy; an unknown value is
-// refused like "none".
-func (u *User) PrivateForkPolicyName() string {
-	if u.PrivateForkPolicy < 0 || u.PrivateForkPolicy >= len(PrivateForkPolicyNames) {
-		return "none"
-	}
-	return PrivateForkPolicyNames[u.PrivateForkPolicy]
-}
-
 // SearchOrganizationsOptions options to filter organizations
 type SearchOrganizationsOptions struct {
 	db.ListOptions

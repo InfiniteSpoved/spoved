@@ -1,0 +1,11 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content ui">
+	<div class="ui container center">
+		<h1 style="margin-top: 100px" class="error-code">403</h1>
+		<p>{{.ForbiddenPrompt}}</p>
+		{{if .IsSigned}}<a class="ui button green" href="{{AppSubUrl}}/user/settings/security">{{ctx.Locale.Tr "org.settings.require_two_factor_blocked_link"}}</a>{{end}}
+		<div class="divider"></div>
+		<br>
+	</div>
+</div>
+{{template "base/footer" .}}

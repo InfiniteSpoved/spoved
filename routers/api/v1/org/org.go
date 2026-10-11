@@ -12,12 +12,14 @@ import (
 
 	"forgejo.org/models"
 	activities_model "forgejo.org/models/activities"
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
+	repo_module "forgejo.org/modules/repository"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/validation"
@@ -342,7 +344,31 @@ func Get(ctx *context.APIContext) {
 		org.Email = ""
 	}
 
+	if !setOwnerFields(ctx, org) {
+		return
+	}
 	ctx.JSON(http.StatusOK, org)
+}
+
+// setOwnerFields adds what only the organization's acting owners and site administrators see. It reports false when
+// it has already answered.
+func setOwnerFields(ctx *context.APIContext, org *api.Organization) bool {
+	doer := ctx.Doer()
+	if doer == nil {
+		return true
+	}
+	allowed := doer.IsAdmin
+	if !allowed {
+		var err error
+		if allowed, err = ctx.Org().Organization.IsActingOwner(ctx, doer); err != nil {
+			ctx.Error(http.StatusInternalServerError, "IsActingOwner", err)
+			return false
+		}
+	}
+	if allowed {
+		org.RequireTwoFactor = &ctx.Org().Organization.RequireTwoFactor
+	}
+	return true
 }
 
 func Rename(ctx *context.APIContext) {
@@ -406,12 +432,37 @@ func Edit(ctx *context.APIContext) {
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/Organization"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 	//   "422":
 	//     "$ref": "#/responses/error"
 
 	form := web.GetForm(ctx).(*api.EditOrgOption)
+
+	// the site floor can't be loosened; checked before anything is written
+	var forkPolicy *int
+	if form.PrivateForkPolicy != nil {
+		i := slices.Index(user_model.PrivateForkPolicyNames, *form.PrivateForkPolicy)
+		forkPolicy = &i
+	}
+	if policy := repo_module.OrgPolicyFloorViolation(form.RestrictRepoVisibilityChange, forkPolicy); policy != "" {
+		ctx.Error(http.StatusUnprocessableEntity, "OrgPolicyFloorViolation", "blocked by the site policy "+policy)
+		return
+	}
+
+	// as on the web: turning the requirement on needs two-factor authentication of one's own, or a site admin
+	if form.RequireTwoFactor != nil && *form.RequireTwoFactor && !ctx.Doer().IsAdmin {
+		has, err := auth_model.HasTwoFactorByUID(ctx, ctx.Doer().ID)
+		if err != nil {
+			ctx.Error(http.StatusInternalServerError, "HasTwoFactorByUID", err)
+			return
+		} else if !has {
+			ctx.Error(http.StatusForbidden, "", "enable two-factor authentication on your own account first")
+			return
+		}
+	}
 
 	if form.Email != nil {
 		if *form.Email == "" {
@@ -447,15 +498,17 @@ func Edit(ctx *context.APIContext) {
 		RepoAdminChangeTeamAccess: optional.FromPtr(form.RepoAdminChangeTeamAccess),
 	}
 	opts.RestrictRepoVisibilityChange = optional.FromPtr(form.RestrictRepoVisibilityChange)
-	if form.PrivateForkPolicy != nil {
-		opts.PrivateForkPolicy = optional.Some(slices.Index(user_model.PrivateForkPolicyNames, *form.PrivateForkPolicy))
-	}
+	opts.PrivateForkPolicy = optional.FromPtr(forkPolicy)
+	opts.RequireTwoFactor = optional.FromPtr(form.RequireTwoFactor)
 	if err := user_service.UpdateUser(ctx, ctx.Org().Organization.AsUser(), opts); err != nil {
 		ctx.Error(http.StatusInternalServerError, "UpdateUser", err)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, convert.ToOrganization(ctx, ctx.Org().Organization))
+	apiOrg := convert.ToOrganization(ctx, ctx.Org().Organization)
+	if setOwnerFields(ctx, apiOrg) {
+		ctx.JSON(http.StatusOK, apiOrg)
+	}
 }
 
 // Archive makes an organization and its repositories read-only

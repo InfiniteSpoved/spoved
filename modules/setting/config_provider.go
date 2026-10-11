@@ -30,6 +30,7 @@ type ConfigKey interface {
 	Strings(delim string) []string
 
 	MustString(defaultVal string) string
+	Bool() (bool, error)
 	MustBool(defaultVal ...bool) bool
 	MustInt(defaultVal ...int) int
 	MustInt64(defaultVal ...int64) int64

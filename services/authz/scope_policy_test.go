@@ -6,11 +6,13 @@ package authz
 import (
 	"strings"
 	"testing"
+	"time"
 
 	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
+	"forgejo.org/modules/timeutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -137,6 +139,9 @@ func TestCheckScopePolicy(t *testing.T) {
 		{"allowed public-only only", setting.AccessTokenScopePolicy{Allowed: []string{"public-only"}}, "names no permission scope"},
 		{"restricted sudo", setting.AccessTokenScopePolicy{RequireRepoRestriction: []string{"sudo"}}, "ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION"},
 		{"restricted empty items", setting.AccessTokenScopePolicy{RequireRepoRestriction: []string{""}}, "ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION"},
+		{"enforce after date", setting.AccessTokenScopePolicy{EnforceAfter: "2030-01-02"}, ""},
+		{"enforce after RFC 3339", setting.AccessTokenScopePolicy{EnforceAfter: "2030-01-02T03:04:05Z"}, ""},
+		{"enforce after bad value", setting.AccessTokenScopePolicy{EnforceAfter: "2030-01-02 03:04"}, "ACCESS_TOKEN_SCOPE_POLICY_ENFORCE_AFTER"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			defer test.MockVariableValue(&setting.AccessTokenScopes, tc.policy)()
@@ -148,4 +153,60 @@ func TestCheckScopePolicy(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCheckScopePolicyInUse(t *testing.T) {
+	user := &user_model.User{IsActive: true}
+	admin := &user_model.User{IsActive: true, IsAdmin: true}
+	inactiveAdmin := &user_model.User{IsAdmin: true}
+	prohibitedAdmin := &user_model.User{IsActive: true, IsAdmin: true, ProhibitLogin: true}
+	date := time.Date(2030, 1, 2, 0, 0, 0, 0, time.UTC)
+	before, after := date.Add(-time.Second), date.Add(time.Second)
+
+	for _, tc := range []struct {
+		name         string
+		enforceAfter string
+		now          time.Time
+		owner        *user_model.User
+		scope        auth_model.AccessTokenScope
+		allRepos     bool
+		err          error
+	}{
+		{"unset", "", after, user, "all", true, nil},
+		{"before the date", "2030-01-02", before, user, "all", true, nil},
+		{"after the date", "2030-01-02", after, user, "all", true, ErrScopePolicyEnforced},
+		{"RFC 3339 before", "2030-01-02T01:00:00+01:00", before, user, "all", true, nil},
+		{"RFC 3339 after", "2030-01-02T01:00:00+01:00", after, user, "all", true, ErrScopePolicyEnforced},
+		{"allowed scope after the date", "2030-01-02", after, user, "read:repository", false, nil},
+		{"repo restriction after the date", "2030-01-02", after, user, "write:repository", true, ErrScopePolicyEnforced},
+		{"admin is exempt", "2030-01-02", after, admin, "all", true, nil},
+		{"inactive admin is not exempt", "2030-01-02", after, inactiveAdmin, "all", true, ErrScopePolicyEnforced},
+		{"prohibited admin is not exempt", "2030-01-02", after, prohibitedAdmin, "all", true, ErrScopePolicyEnforced},
+		{"bad value fails closed", "tomorrow", after, user, "read:repository", false, ErrScopePolicyConfig},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer test.MockVariableValue(&setting.AccessTokenScopes, setting.AccessTokenScopePolicy{
+				Allowed:                []string{"write:repository"},
+				RequireRepoRestriction: []string{"write:repository"},
+				EnforceAfter:           tc.enforceAfter,
+			})()
+			timeutil.MockSet(tc.now)
+			defer timeutil.MockUnset()
+			err := CheckScopePolicyInUse(tc.owner, tc.scope, tc.allRepos)
+			if tc.err == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tc.err)
+			}
+		})
+	}
+
+	t.Run("error lists only the allowed scopes", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.AccessTokenScopes, setting.AccessTokenScopePolicy{Allowed: []string{"read:issue"}, EnforceAfter: "2030-01-02"})()
+		timeutil.MockSet(after)
+		defer timeutil.MockUnset()
+		err := CheckScopePolicyInUse(user, auth_model.AccessTokenScopeReadUser, false)
+		require.ErrorIs(t, err, ErrScopeNotAllowed)
+		assert.EqualError(t, err, "access token breaks the access token scope policy: access token scope not allowed: read:user; allowed scopes: read:issue")
+	})
 }
