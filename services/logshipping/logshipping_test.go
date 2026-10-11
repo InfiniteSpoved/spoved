@@ -301,6 +301,7 @@ func TestSaveRejectsDatabaseLogsLoopsAndBadHeaders(t *testing.T) {
 		"header upgrade":     base(hdr("upgrade", "value-123")),
 		"header te":          base(hdr("TE", "value-123")),
 		"header host":        base(hdr("host", "value-123")),
+		"key short":          {Name: new("k"), Type: new("newrelic"), Endpoint: new("https://127.0.0.1:9/x"), LogTypes: &[]string{"access"}, Key: new("short")},
 		"key crlf":           {Name: new("k"), Type: new("newrelic"), Endpoint: new("https://127.0.0.1:9/x"), LogTypes: &[]string{"access"}, Key: new("a\nb")},
 		"duplicate by case": base(func(in *Input) {
 			in.Headers = &[]HeaderInput{{Name: "x-a", Value: "value-001"}, {Name: "X-A", Value: "value-002"}}
