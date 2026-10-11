@@ -9,6 +9,7 @@ import (
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
 	"forgejo.org/models/perm"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	"forgejo.org/modules/setting"
@@ -85,7 +86,7 @@ func TestWorkflowTokenPermissions(t *testing.T) {
 			swf, err := job.DecodeWorkflowPayload()
 			require.NoError(t, err)
 
-			got, ignored := workflowTokenPermissions(swf)
+			got, ignored := workflowTokenPermissions(swf, "write")
 			assert.Equal(t, tc.want, got)
 			assert.Equal(t, tc.ignored, ignored)
 			if tc.want != nil {
@@ -101,17 +102,16 @@ func TestWorkflowTokenPermissions(t *testing.T) {
 	})
 
 	t.Run("default read", func(t *testing.T) {
-		defer test.MockVariableValue(&setting.Actions.DefaultTokenPermissions, "read")()
 		swfs, err := jobparser.Parse([]byte("jobs: {j: {runs-on: x}}"), false)
 		require.NoError(t, err)
-		got, ignored := workflowTokenPermissions(swfs[0])
+		got, ignored := workflowTokenPermissions(swfs[0], "read")
 		assert.Equal(t, allTokenPermissions(read), got)
 		assert.Empty(t, ignored)
 
 		// a default, not a cap
 		swfs, err = jobparser.Parse([]byte("permissions: write-all\njobs: {j: {runs-on: x}}"), false)
 		require.NoError(t, err)
-		got, _ = workflowTokenPermissions(swfs[0])
+		got, _ = workflowTokenPermissions(swfs[0], "read")
 		assert.Equal(t, allTokenPermissions(write), got)
 	})
 }
@@ -250,12 +250,18 @@ jobs:
 
 func TestCreateTaskForRunnerTokenPermissions(t *testing.T) {
 	for _, tc := range []struct {
-		name, permissions, defaultPermissions, want string
+		name, permissions, defaultPermissions, repoDefault, want string
+		isFork                                                   bool
 	}{
 		{name: "legacy", defaultPermissions: "write", want: ""},
 		{name: "default read", defaultPermissions: "read", want: allTokenPermissions(perm.AccessModeRead).Encode()},
 		{name: "empty", permissions: "permissions: {}\n", defaultPermissions: "write", want: "{}"},
 		{name: "issues", permissions: "permissions: {issues: write}\n", defaultPermissions: "read", want: `{"2":2}`},
+		{name: "repo read", defaultPermissions: "write", repoDefault: "read", want: allTokenPermissions(perm.AccessModeRead).Encode()},
+		{name: "repo write", defaultPermissions: "read", repoDefault: "write", want: ""},
+		{name: "repo read is no cap", permissions: "permissions: {issues: write}\n", defaultPermissions: "write", repoDefault: "read", want: `{"2":2}`},
+		{name: "repo read fork", defaultPermissions: "write", repoDefault: "read", isFork: true, want: allTokenPermissions(perm.AccessModeRead).Encode()},
+		{name: "repo write fork", defaultPermissions: "read", repoDefault: "write", isFork: true, want: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			defer unittest.OverrideFixtures("services/actions/TestCreateTaskForRunner")()
@@ -265,13 +271,18 @@ func TestCreateTaskForRunnerTokenPermissions(t *testing.T) {
 			runner := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRunner{ID: 41601})
 			job := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRunJob{ID: 47301})
 			job.WorkflowPayload = []byte(tc.permissions + "jobs:\n  build:\n    runs-on: debian\n    steps:\n      - run: echo\n")
-			_, err := db.GetEngine(t.Context()).ID(job.ID).Cols("workflow_payload").Update(job)
+			job.IsForkPullRequest = tc.isFork
+			_, err := db.GetEngine(t.Context()).ID(job.ID).Cols("workflow_payload", "is_fork_pull_request").Update(job)
 			require.NoError(t, err)
+			actionsUnit := unittest.AssertExistsAndLoadBean(t, &repo_model.RepoUnit{RepoID: job.RepoID, Type: unit.TypeActions})
+			actionsUnit.ActionsConfig().DefaultTokenPermissions = tc.repoDefault
+			require.NoError(t, repo_model.UpdateRepoUnit(t.Context(), actionsUnit))
 
 			task, err := CreateTaskForRunner(t.Context(), runner, nil, nil)
 			require.NoError(t, err)
 			stored := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionTask{ID: task.ID})
 			assert.Equal(t, tc.want, stored.TokenPermissions)
+			assert.Equal(t, tc.isFork, stored.IsForkPullRequest)
 		})
 	}
 }

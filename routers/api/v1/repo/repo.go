@@ -1180,10 +1180,12 @@ func updateRepoUnits(ctx *context.APIContext, owner string, repo *repo_model.Rep
 
 	if opts.HasActions != nil && !disabled(unit_model.TypeActions) {
 		if *opts.HasActions {
-			units = append(units, repo_model.RepoUnit{
-				RepoID: repo.ID,
-				Type:   unit_model.TypeActions,
-			})
+			// keep the config set on the Actions settings page
+			actionsUnit := repo_model.RepoUnit{RepoID: repo.ID, Type: unit_model.TypeActions}
+			if u, err := repo.GetUnit(ctx, unit_model.TypeActions); err == nil {
+				actionsUnit.Config = u.ActionsConfig()
+			}
+			units = append(units, actionsUnit)
 		} else {
 			deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeActions)
 		}

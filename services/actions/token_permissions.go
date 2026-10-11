@@ -9,6 +9,7 @@ import (
 
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/perm"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	"forgejo.org/modules/setting"
 
@@ -74,8 +75,8 @@ func parseTokenPermissions(node *yaml.Node) (p actions_model.TokenPermissions, i
 }
 
 // workflowTokenPermissions returns the token permissions that a job asks for: its own `permissions:` block,
-// else its workflow's, else the default. nil means the legacy permissions (default write).
-func workflowTokenPermissions(swf *jobparser.SingleWorkflow) (p actions_model.TokenPermissions, ignored []string) {
+// else its workflow's, else defaultPermissions ("read" or "write"). nil means the legacy permissions (default write).
+func workflowTokenPermissions(swf *jobparser.SingleWorkflow, defaultPermissions string) (p actions_model.TokenPermissions, ignored []string) {
 	node := &swf.Permissions
 	if _, job := swf.Job(); job != nil && job.Permissions.Kind != 0 {
 		node = &job.Permissions
@@ -83,7 +84,7 @@ func workflowTokenPermissions(swf *jobparser.SingleWorkflow) (p actions_model.To
 	if node.Kind != 0 {
 		return parseTokenPermissions(node)
 	}
-	if setting.Actions.DefaultTokenPermissions == "read" {
+	if defaultPermissions == "read" {
 		return allTokenPermissions(perm.AccessModeRead), nil
 	}
 	return nil, nil
@@ -92,11 +93,21 @@ func workflowTokenPermissions(swf *jobparser.SingleWorkflow) (p actions_model.To
 // jobTokenPermissions returns the permissions of the token of a task for the job: what it asks for, capped by the
 // job that called its reusable workflow, if any, and at read for a fork pull request. job.Run must be loaded.
 func jobTokenPermissions(ctx context.Context, job *actions_model.ActionRunJob) (actions_model.TokenPermissions, error) {
-	return capTokenPermissions(ctx, job, map[int64]bool{})
+	if err := job.Run.LoadRepo(ctx); err != nil {
+		return nil, err
+	}
+	defaultPermissions := setting.Actions.DefaultTokenPermissions
+	actionsUnit, err := job.Run.Repo.GetUnit(ctx, unit.TypeActions)
+	if err == nil {
+		defaultPermissions = actionsUnit.ActionsConfig().EffectiveDefaultTokenPermissions()
+	} else if !repo_model.IsErrUnitTypeNotExist(err) {
+		return nil, err
+	}
+	return capTokenPermissions(ctx, job, defaultPermissions, map[int64]bool{})
 }
 
 // capTokenPermissions is jobTokenPermissions; seen holds the jobs of the call chain, which must not loop.
-func capTokenPermissions(ctx context.Context, job *actions_model.ActionRunJob, seen map[int64]bool) (actions_model.TokenPermissions, error) {
+func capTokenPermissions(ctx context.Context, job *actions_model.ActionRunJob, defaultPermissions string, seen map[int64]bool) (actions_model.TokenPermissions, error) {
 	if seen[job.ID] {
 		return nil, fmt.Errorf("token permissions of job %d: workflow call loop", job.ID)
 	}
@@ -105,14 +116,14 @@ func capTokenPermissions(ctx context.Context, job *actions_model.ActionRunJob, s
 	if err != nil {
 		return nil, err
 	}
-	p, _ := workflowTokenPermissions(swf)
+	p, _ := workflowTokenPermissions(swf, defaultPermissions)
 	if swf.Metadata.WorkflowCallParent != "" {
 		outer, err := job.Run.FindOuterWorkflowCall(ctx, job)
 		if err != nil {
 			return nil, fmt.Errorf("token permissions of job %d: %w", job.ID, err)
 		}
 		outer.Run = job.Run
-		outerPerms, err := capTokenPermissions(ctx, outer, seen)
+		outerPerms, err := capTokenPermissions(ctx, outer, defaultPermissions, seen)
 		if err != nil {
 			return nil, err
 		}

@@ -281,10 +281,12 @@ func UnitsPost(ctx *context.Context) {
 	}
 
 	if form.EnableActions && !disabled(unit_model.TypeActions) {
-		units = append(units, repo_model.RepoUnit{
-			RepoID: repo.ID,
-			Type:   unit_model.TypeActions,
-		})
+		// the Actions settings page owns this config; keep it when this form is saved
+		actionsUnit := repo_model.RepoUnit{RepoID: repo.ID, Type: unit_model.TypeActions}
+		if u, err := repo.GetUnit(ctx, unit_model.TypeActions); err == nil {
+			actionsUnit.Config = u.ActionsConfig()
+		}
+		units = append(units, actionsUnit)
 	} else if !disabled(unit_model.TypeActions) {
 		deleteUnitTypes = append(deleteUnitTypes, unit_model.TypeActions)
 	}

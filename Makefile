@@ -372,7 +372,7 @@ fmt:
 
 .PHONY: fmt-check
 fmt-check: fmt
-	@git diff --exit-code --color=always $(GO_SOURCES) templates $(WEB_DIRS) \
+	@git diff --exit-code --color=always -- '*.go' templates $(WEB_DIRS) \
 	|| (code=$$?; echo "Please run 'make fmt' and commit the result"; exit $${code})
 
 .PHONY: $(TAGS_EVIDENCE)
