@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var oldBrandRe = regexp.MustCompile(`Forgejo|Gitea|GitHat|CodeHat`)
@@ -37,7 +38,7 @@ func TestNoOldBrandInUserFacingSource(t *testing.T) {
 
 	// the registry names in the copy-paste snippets
 	files, err := filepath.Glob("../../templates/package/content/*.tmpl")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	for _, f := range files {
 		for i, line := range readLines(t, f) {
 			assert.Empty(t, regexp.MustCompile(`(?i)\b(forgejo|gitea)\b`).FindString(line), "%s:%d", f, i+1)
@@ -61,6 +62,6 @@ func TestNoOldBrandInUserFacingSource(t *testing.T) {
 func readLines(t *testing.T, path string) []string {
 	t.Helper()
 	b, err := os.ReadFile(path)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	return strings.Split(string(b), "\n")
 }
