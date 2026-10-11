@@ -311,6 +311,16 @@ func deleteRun(ctx context.Context, runID int64, unlessKept bool) error {
 			return fmt.Errorf("cannot delete run %d because it has not completed yet", run.ID)
 		}
 
+		if unlessKept {
+			// decide before the irreversible steps (logs in storage): the lock holds a concurrent keep until the commit
+			if ok, err := actions_model.LockRunUnlessKept(ctx, run.ID); err != nil || !ok {
+				if err == nil {
+					err = ErrRunKept
+				}
+				return err
+			}
+		}
+
 		err = actions_model.SetArtifactsOfRunDeleted(ctx, runID)
 		if err != nil {
 			return fmt.Errorf("unable to delete artifacts of run %d: %w", run.ID, err)

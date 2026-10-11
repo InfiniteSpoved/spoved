@@ -5,6 +5,7 @@ package actions
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/storage"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
 
@@ -207,10 +209,17 @@ func TestDeleteRunUnlessKept(t *testing.T) {
 	unittest.AssertSuccessfulInsert(t, &actions_model.ActionRun{ID: 500001, Index: 500001, RepoID: 4, OwnerID: 5, Status: actions_model.StatusSuccess, Keep: true})
 	unittest.AssertSuccessfulInsert(t, &actions_model.ActionRunJob{ID: 500001, Handle: "500001", RunID: 500001, RepoID: 4, OwnerID: 5, Status: actions_model.StatusSuccess})
 
-	// a run kept after the scan was selected is spared, with its jobs
+	unittest.AssertSuccessfulInsert(t, &actions_model.ActionTask{ID: 500001, JobID: 500001, Status: actions_model.StatusSuccess, TokenHash: "keep-test", LogInStorage: true, LogFilename: "keep-test/500001.log", LogIndexes: []int64{0}})
+	_, err := storage.Actions.Save("keep-test/500001.log", strings.NewReader("log"), -1)
+	require.NoError(t, err)
+
+	// a run kept after the scan was selected is spared, with its jobs and its logs
 	require.ErrorIs(t, DeleteRunUnlessKept(t.Context(), 500001), ErrRunKept)
 	unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRun{ID: 500001})
 	unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRunJob{ID: 500001})
+	unittest.AssertExistsAndLoadBean(t, &actions_model.ActionTask{ID: 500001})
+	_, err = storage.Actions.Stat("keep-test/500001.log")
+	require.NoError(t, err)
 
 	// the explicit delete still removes it
 	require.NoError(t, DeleteRun(t.Context(), 500001))

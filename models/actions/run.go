@@ -20,6 +20,7 @@ import (
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
+	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
@@ -600,6 +601,18 @@ func SetRunKeep(ctx context.Context, runID int64, keep bool) error {
 func DeleteUnkeptRun(ctx context.Context, runID int64) (bool, error) {
 	n, err := db.GetEngine(ctx).Where("id = ? AND keep = ?", runID, false).Delete(new(ActionRun))
 	return n > 0, err
+}
+
+// LockRunUnlessKept locks the run until the end of the transaction, so that a concurrent SetRunKeep waits for the
+// commit, and reports whether the run is not kept.
+func LockRunUnlessKept(ctx context.Context, runID int64) (bool, error) {
+	var run ActionRun
+	e := db.GetEngine(ctx).ID(runID)
+	if !setting.Database.Type.IsSQLite3() { // SQLite has no FOR UPDATE; its write lock covers the transaction
+		e = e.ForUpdate()
+	}
+	has, err := e.Get(&run)
+	return has && !run.Keep, err
 }
 
 // GetLatestDefaultBranchRunIDs returns the ID of the latest run of each workflow on the default branch of its
