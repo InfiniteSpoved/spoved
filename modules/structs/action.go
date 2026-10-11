@@ -106,6 +106,8 @@ type ActionRun struct {
 	TriggerEvent string `json:"trigger_event"`
 	// the current status of this run
 	Status string `json:"status"`
+	// whether the run is exempt from the automatic cleanup of old runs
+	Keep bool `json:"keep"`
 	// when the action run was started
 	// swagger:type string
 	// swagger:strfmt date-time
@@ -153,6 +155,8 @@ type ActionRunSummary struct {
 	Event string `json:"event"`
 	// the current status of this run
 	Status string `json:"status"`
+	// whether the run is exempt from the automatic cleanup of old runs
+	Keep bool `json:"keep"`
 	// when the action run was started
 	// swagger:type string
 	// swagger:strfmt date-time

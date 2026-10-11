@@ -16,6 +16,7 @@
 						{{if .Title}}{{RenderCommitMessage ctx .Title ($.Repository.ComposeMetas ctx)}}{{else}}{{ctx.Locale.Tr "actions.runs.empty_commit_message"}}{{end}}
 					</a>
 					{{if .Prioritize}}<span class="ui label">{{ctx.Locale.Tr "actions.runs.prioritized_run"}}</span>{{end}}
+					{{if .Keep}}<span class="ui label" data-tooltip-content="{{ctx.Locale.Tr "actions.runs.kept_tooltip"}}">{{svg "octicon-pin" 12}} {{ctx.Locale.Tr "actions.runs.kept"}}</span>{{end}}
 				</div>
 				<div class="flex-item-body">
 					<b>{{if not $.CurWorkflow}}{{.WorkflowID}} {{end}}#{{.Index}}</b> -

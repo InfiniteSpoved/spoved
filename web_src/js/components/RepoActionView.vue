@@ -94,6 +94,8 @@ export default {
         canApprove: false,
         canRerun: false,
         canDelete: false,
+        keep: false,
+        canKeep: false,
         done: false,
         preExecutionError: '',
         preExecutioWarnings: [], // array of strings
@@ -517,11 +519,15 @@ export default {
           />
           <!-- eslint-disable-next-line vue/no-v-html -->
           <h2 class="action-info-summary-title-text" v-html="run.titleHTML"/>
+          <span class="ui label" v-if="run.keep" :data-tooltip-content="locale.keptTooltip"><SvgIcon name="octicon-pin" :size="12"/> {{ locale.kept }}</span>
         </div>
         <button class="ui basic small compact button primary" @click="approveRun()" v-if="canApprove">
           {{ locale.approve }}
         </button>
         <div class="action-info-summary-actions" v-else>
+          <button class="ui basic small compact button tw-whitespace-nowrap link-action" :data-url="`${run.link}/${run.keep ? 'unkeep' : 'keep'}`" v-if="run.canKeep">
+            <SvgIcon name="octicon-pin"/> {{ run.keep ? locale.unkeep : locale.keep }}
+          </button>
           <button id="delete-run" class="ui basic small compact button red" @click="deleteRun()" v-if="run.canDelete">
             {{ locale.delete }}
           </button>
