@@ -21,7 +21,6 @@ import (
 	"forgejo.org/tests"
 
 	"code.forgejo.org/xorm/xorm/contexts"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
