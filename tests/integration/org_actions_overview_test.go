@@ -63,6 +63,9 @@ func TestOrgActionsOverviewPage(t *testing.T) {
 		assert.Equal(t, "50%", card("failure-rate")) // repo5 and bad.yaml failed, repo3 and repo21 succeeded
 		assert.Equal(t, "2", card("queued"))
 		assert.Equal(t, "n/a", card("avg-queue"))
+		// the cards are ui segments: Fomantic's statistic module isn't built
+		assert.Zero(t, doc.Find(".ui.statistics, .statistic").Length())
+		assert.Equal(t, 6, doc.Find(".org-overview-cards > .ui.segment[data-card]").Length())
 		assert.Equal(t, []string{"org3/repo3 " + fmt.Sprint(bad.ID)}, overviewRows(doc, ".org-failing-now", "data-run"))
 		queue := doc.Find(".org-queue tbody tr")
 		assert.Equal(t, 2, queue.Length())
