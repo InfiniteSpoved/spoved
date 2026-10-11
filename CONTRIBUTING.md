@@ -46,7 +46,7 @@ Conventions:
 
 spoved is licensed GPL-3.0-or-later because it is a fork of Forgejo, which is GPL-3.0-or-later. Contributions are accepted under the same license (inbound = outbound). Keep the existing copyright and SPDX headers of the original authors. New files get `Copyright <year> The spoved contributors`.
 
-Every commit must carry a `Signed-off-by:` line, which certifies the [Developer Certificate of Origin](https://developercertificate.org/). Add it with `git commit -s`.
+Every commit must carry a `Signed-off-by:` line, which certifies the [Developer Certificate of Origin](https://developercertificate.org/). Add it with `git commit -s`. This applies to commits made from the day the repository is made public; earlier history is not rewritten. A check (`tools/check-dco.sh`, run by `.github/workflows/dco.yml`) fails a pull request whose own commits, merge commits excluded, lack the line.
 
 ## AI-assisted contributions
 
