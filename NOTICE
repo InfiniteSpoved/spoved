@@ -1,0 +1,11 @@
+spoved is a modified version of Forgejo (https://codeberg.org/forgejo/forgejo),
+which is a fork of Gitea (https://gitea.com), itself a fork of Gogs (https://gogs.io).
+Almost all of its code is their work; the original copyright and licence
+notices in each file are kept. See the git history for the changes made in spoved.
+
+spoved is licensed under the GNU General Public License, version 3 or later
+(see LICENSE). Third-party licences are listed in assets/go-licenses.json and
+in the licence output of the frontend build.
+
+"Forgejo" is a trademark of Codeberg e.V. spoved is not affiliated with or
+endorsed by Forgejo or Codeberg e.V.
