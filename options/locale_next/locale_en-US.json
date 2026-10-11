@@ -1594,6 +1594,7 @@
 	"admin.announcements.updated": "The announcement has been updated.",
 	"admin.announcements.deleted": "The announcement has been deleted.",
 	"admin.dashboard.start_scheduled_auto_merges": "Start or cancel scheduled pull request merges that are due",
+	"admin.dashboard.start_scheduled_dispatches": "Start the scheduled manual workflow runs that are due",
 	"announcements.dismiss": "Dismiss",
 	"repo.settings.push_rules": "Push rules",
 	"repo.settings.push_rules.desc": "Push rules are checked on every push to a branch, including web edits and pull request merges, for everyone. They only check commits that are new to the repository's branches, so existing history is never rechecked. Merge commits are checked too.",

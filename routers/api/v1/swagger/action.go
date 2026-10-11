@@ -63,6 +63,20 @@ type swaggerDispatchWorkflowRun struct {
 	Body *api.DispatchWorkflowRun `json:"body"`
 }
 
+// ScheduledWorkflowRun is a manual workflow run that starts at a chosen time
+// swagger:response ScheduledWorkflowRun
+type swaggerScheduledWorkflowRun struct {
+	// in:body
+	Body *api.ScheduledWorkflowRun `json:"body"`
+}
+
+// ScheduledWorkflowRunList is a list of scheduled manual workflow runs
+// swagger:response ScheduledWorkflowRunList
+type swaggerScheduledWorkflowRunList struct {
+	// in:body
+	Body []*api.ScheduledWorkflowRun `json:"body"`
+}
+
 // RegistrationToken is a string used to register a runner with a server
 // swagger:response RegistrationToken
 type swaggerRegistrationToken struct {
