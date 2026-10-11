@@ -86,6 +86,7 @@
 	"org.settings.private_fork_policy.all": "Allowed",
 	"org.settings.private_fork_policy.org": "Only into this organization",
 	"org.settings.private_fork_policy.none": "Not allowed (site administrators only)",
+	"org.settings.site_policy_floor": "Required by the site administrator. An organization can't loosen it.",
 	"org.settings.private_fork_policy_help": "A repository can't be forked into its own owner on the web, so \"Only into this organization\" allows forks of private repositories only through the API, under a new name. Organization owners are bound by this setting too.",
 	"repo.settings.blocked_by_org_policy": "Blocked by the organization policy \"%s\".",
 	"repo.settings.protect_scope": "Repositories",

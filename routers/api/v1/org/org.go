@@ -18,6 +18,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
+	repo_module "forgejo.org/modules/repository"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/validation"
@@ -413,6 +414,17 @@ func Edit(ctx *context.APIContext) {
 
 	form := web.GetForm(ctx).(*api.EditOrgOption)
 
+	// the site floor can't be loosened; checked before anything is written
+	var forkPolicy *int
+	if form.PrivateForkPolicy != nil {
+		i := slices.Index(user_model.PrivateForkPolicyNames, *form.PrivateForkPolicy)
+		forkPolicy = &i
+	}
+	if policy := repo_module.OrgPolicyFloorViolation(form.RestrictRepoVisibilityChange, forkPolicy); policy != "" {
+		ctx.Error(http.StatusUnprocessableEntity, "OrgPolicyFloorViolation", "blocked by the site policy "+policy)
+		return
+	}
+
 	if form.Email != nil {
 		if *form.Email == "" {
 			err := user_model.DeletePrimaryEmailAddressOfUser(ctx, ctx.Org().Organization.ID)
@@ -447,9 +459,7 @@ func Edit(ctx *context.APIContext) {
 		RepoAdminChangeTeamAccess: optional.FromPtr(form.RepoAdminChangeTeamAccess),
 	}
 	opts.RestrictRepoVisibilityChange = optional.FromPtr(form.RestrictRepoVisibilityChange)
-	if form.PrivateForkPolicy != nil {
-		opts.PrivateForkPolicy = optional.Some(slices.Index(user_model.PrivateForkPolicyNames, *form.PrivateForkPolicy))
-	}
+	opts.PrivateForkPolicy = optional.FromPtr(forkPolicy)
 	if err := user_service.UpdateUser(ctx, ctx.Org().Organization.AsUser(), opts); err != nil {
 		ctx.Error(http.StatusInternalServerError, "UpdateUser", err)
 		return

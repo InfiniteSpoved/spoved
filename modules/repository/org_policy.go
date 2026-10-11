@@ -10,6 +10,7 @@ import (
 	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 )
@@ -34,6 +35,34 @@ func (e ErrOrgPolicy) Error() string {
 
 func (ErrOrgPolicy) Unwrap() error {
 	return util.ErrPermissionDenied
+}
+
+// EffectiveRestrictVisibility reports whether only the organization's owners may change repository visibility: the
+// site floor ([repository] ORG_RESTRICT_VISIBILITY_CHANGE) or the organization's own setting. This and
+// EffectivePrivateForkPolicy are the only places the two are combined; callers never read the org fields directly.
+func EffectiveRestrictVisibility(owner *user_model.User) bool {
+	return setting.Repository.OrgRestrictVisibilityChange || owner.RestrictRepoVisibilityChange
+}
+
+// EffectivePrivateForkPolicy is the stricter of the site floor and the organization's private fork policy; a stored
+// value that is none of PrivateForkAll/Org/None counts as PrivateForkNone.
+func EffectivePrivateForkPolicy(owner *user_model.User) int {
+	if owner.PrivateForkPolicy < user_model.PrivateForkAll || owner.PrivateForkPolicy > user_model.PrivateForkNone {
+		return user_model.PrivateForkNone
+	}
+	return max(setting.Repository.OrgPrivateForkPolicy, owner.PrivateForkPolicy)
+}
+
+// OrgPolicyFloorViolation returns the name of the first requested policy value that is weaker than the site floor,
+// or "". A nil value is not requested.
+func OrgPolicyFloorViolation(restrictVisibility *bool, forkPolicy *int) string {
+	if restrictVisibility != nil && !*restrictVisibility && setting.Repository.OrgRestrictVisibilityChange {
+		return "restrict_repo_visibility_change"
+	}
+	if forkPolicy != nil && *forkPolicy < setting.Repository.OrgPrivateForkPolicy {
+		return "private_fork_policy"
+	}
+	return ""
 }
 
 // CheckOrgPolicy returns an ErrOrgPolicy if a policy of the organization that owns repo refuses the action to
@@ -61,12 +90,12 @@ func CheckOrgPolicy(ctx context.Context, doer *user_model.User, repo *repo_model
 
 	switch action {
 	case OrgPolicyVisibility:
-		if !owner.RestrictRepoVisibilityChange {
+		if !EffectiveRestrictVisibility(owner) {
 			return nil
 		}
 	case OrgPolicyFork:
-		if !repo.IsPrivate && owner.Visibility != structs.VisibleTypePrivate || owner.PrivateForkPolicy == user_model.PrivateForkAll ||
-			owner.PrivateForkPolicy == user_model.PrivateForkOrg && forkInto != nil && forkInto.ID == owner.ID {
+		if policy := EffectivePrivateForkPolicy(owner); !repo.IsPrivate && owner.Visibility != structs.VisibleTypePrivate || policy == user_model.PrivateForkAll ||
+			policy == user_model.PrivateForkOrg && forkInto != nil && forkInto.ID == owner.ID {
 			return nil
 		}
 		return ErrOrgPolicy{Policy: "private_fork_policy"}
