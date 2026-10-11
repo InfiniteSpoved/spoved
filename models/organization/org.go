@@ -247,6 +247,20 @@ type FindOrgMembersOpts struct {
 	Doer         *user_model.User
 	IsDoerMember bool
 	OrgID        int64
+	// only members with neither TOTP nor WebAuthn
+	TwoFactorDisabled bool
+}
+
+func (opts FindOrgMembersOpts) cond() builder.Cond {
+	var cond builder.Cond = builder.Eq{"org_id": opts.OrgID}
+	if opts.PublicOnly() {
+		cond = cond.And(builder.Eq{"is_public": true})
+	}
+	if opts.TwoFactorDisabled {
+		cond = cond.And(builder.NotIn("uid", builder.Select("uid").From("two_factor"))).
+			And(builder.NotIn("uid", builder.Select("user_id").From("webauthn_credential")))
+	}
+	return cond
 }
 
 func (opts FindOrgMembersOpts) PublicOnly() bool {
@@ -255,12 +269,7 @@ func (opts FindOrgMembersOpts) PublicOnly() bool {
 
 // CountOrgMembers counts the organization's members
 func CountOrgMembers(ctx context.Context, opts *FindOrgMembersOpts) (int64, error) {
-	sess := db.GetEngine(ctx).Where("org_id=?", opts.OrgID)
-	if opts.PublicOnly() {
-		sess.And("is_public = ?", true)
-	}
-
-	return sess.Count(new(OrgUser))
+	return db.GetEngine(ctx).Where(opts.cond()).Count(new(OrgUser))
 }
 
 // FindOrgMembers loads organization members according conditions
@@ -551,11 +560,7 @@ func HasOrgsVisible(ctx context.Context, orgs []*Organization, user *user_model.
 
 // GetOrgUsersByOrgID returns all organization-user relations by organization ID.
 func GetOrgUsersByOrgID(ctx context.Context, opts *FindOrgMembersOpts) ([]*OrgUser, error) {
-	sess := db.GetEngine(ctx).Where("org_id=?", opts.OrgID)
-	if opts.PublicOnly() {
-		sess.And("is_public = ?", true)
-	}
-
+	sess := db.GetEngine(ctx).Where(opts.cond())
 	if opts.PageSize > 0 {
 		sess = db.SetSessionPagination(sess, opts)
 

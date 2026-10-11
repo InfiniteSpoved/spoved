@@ -44,11 +44,11 @@
 								{{ctx.Locale.Tr "org.members.member_role"}}
 								<strong>{{if index $.MembersIsUserOrgOwner .ID}}{{svg "octicon-shield-lock"}} {{ctx.Locale.Tr "org.members.owner"}}{{else}}{{ctx.Locale.Tr "org.members.member"}}{{end}}</strong>
 							</div>
-							{{if $.IsOrganizationOwner}}
+							{{if $.ShowMembersTwoFactor}}
 							<div>
 								{{ctx.Locale.Tr "admin.users.2fa"}}
 								<strong>
-									{{if index $.MembersTwoFaStatus .ID}}
+									{{if $.MembersWithTwoFactor.Contains .ID}}
 										<span class="text green">{{svg "octicon-check"}}</span>
 									{{else}}
 										{{svg "octicon-x"}}
