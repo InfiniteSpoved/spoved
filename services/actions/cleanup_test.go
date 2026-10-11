@@ -254,6 +254,9 @@ func TestCleanupRunsRetentionSettings(t *testing.T) {
 	setup := func(t *testing.T, def, max int64) {
 		t.Helper()
 		require.NoError(t, unittest.PrepareTestDatabase())
+		// user_setting has no fixture: drop the organization settings of the previous case
+		_, err := db.GetEngine(t.Context()).Exec("DELETE FROM user_setting")
+		require.NoError(t, err)
 		t.Cleanup(test.MockVariableValue(&setting.Actions.RunRetentionDays, def))
 		t.Cleanup(test.MockVariableValue(&setting.Actions.RunRetentionMaxDays, max))
 	}

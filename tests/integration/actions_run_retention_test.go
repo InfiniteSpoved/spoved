@@ -25,6 +25,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// resetOrgRetention removes the retention of org3 after the test: user_setting has no fixture, so PrepareTestEnv
+// leaves the row to the next test (a cleanup that deletes runs would find it).
+func resetOrgRetention(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() { require.NoError(t, actions_model.SetOrgRunRetentionDays(db.DefaultContext, 3, 0)) })
+}
+
 func reloadedActionsConfig(t *testing.T) *repo_model.ActionsConfig {
 	t.Helper()
 	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
@@ -91,6 +98,7 @@ func TestActionsRunRetentionRepoSettings(t *testing.T) {
 
 func TestActionsRunRetentionOrgSettings(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	resetOrgRetention(t)
 
 	owner := loginUser(t, "user2")  // owner of org3
 	member := loginUser(t, "user4") // member of org3, not an owner
@@ -138,6 +146,7 @@ func TestActionsRunRetentionOrgSettings(t *testing.T) {
 // An owner the two-factor requirement of the organization blocks is no owner.
 func TestActionsRunRetentionOrgTwoFactor(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	resetOrgRetention(t)
 
 	owner := loginUser(t, "user2") // before anyone enrols: the login form would ask for the second factor
 	pageURL := "/org/org3/settings/actions/retention"
@@ -151,6 +160,9 @@ func TestActionsRunRetentionOrgTwoFactor(t *testing.T) {
 	assert.Zero(t, days)
 
 	enrolTOTP(t, 2)
+	// the table is only reset by the next test that prepares its environment: a test that logs in first (e.g.
+	// TestActionRunPrioritization) would meet a user who asks for the second factor
+	t.Cleanup(func() { unenrolTOTP(t, 2) })
 	owner.MakeRequest(t, NewRequest(t, "GET", pageURL), http.StatusOK)
 	owner.MakeRequest(t, NewRequestWithValues(t, "POST", pageURL, map[string]string{"run_retention_days": "14"}), http.StatusSeeOther)
 	days, err = actions_model.GetOrgRunRetentionDays(t.Context(), 3)
@@ -162,6 +174,7 @@ func TestActionsRunRetentionOrgTwoFactor(t *testing.T) {
 // organization's own value.
 func TestActionsRunRetentionOrgValueHidden(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	resetOrgRetention(t)
 	ctx := db.DefaultContext
 
 	// user28 is in an admin team of org3 that is given repo3; the repository's own setting is shorter
@@ -184,6 +197,7 @@ func TestActionsRunRetentionOrgValueHidden(t *testing.T) {
 // AC2: the cleanup reads the settings once; its queries don't grow with the runs or the repositories with a setting.
 func TestCleanupRunsQueries(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	resetOrgRetention(t)
 	defer test.MockVariableValue(&setting.Actions.RunRetentionDays, 30)()
 	ctx := db.DefaultContext
 

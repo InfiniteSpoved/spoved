@@ -6,6 +6,7 @@ package actions
 import (
 	"testing"
 
+	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
@@ -16,6 +17,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// user_setting has no fixture: drop the settings of the previous test, and of this one when it ends.
+func resetUserSettings(t *testing.T) {
+	t.Helper()
+	reset := func() {
+		_, err := db.GetEngine(db.DefaultContext).Exec("DELETE FROM user_setting")
+		require.NoError(t, err)
+	}
+	reset()
+	t.Cleanup(reset)
+}
 
 // AC2: the effective retention is the shortest positive of repository, organization, instance default and maximum.
 func TestEffectiveRunRetentionDays(t *testing.T) {
@@ -48,6 +60,7 @@ func TestEffectiveRunRetentionDays(t *testing.T) {
 // AC2: the settings come from one query for repositories and one for organizations.
 func TestFindRunRetentionSettings(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
+	resetUserSettings(t)
 	unittest.AssertSuccessfulInsert(t, &repo_model.RepoUnit{RepoID: 4, Type: unit.TypeActions, Config: &repo_model.ActionsConfig{RunRetentionDays: 7}})
 	unittest.AssertSuccessfulInsert(t, &repo_model.RepoUnit{RepoID: 3, Type: unit.TypeActions, Config: &repo_model.ActionsConfig{DisabledWorkflows: []string{"a.yml"}}})
 	unittest.AssertSuccessfulInsert(t, &repo_model.RepoUnit{RepoID: 1, Type: unit.TypeActions, Config: &repo_model.ActionsConfig{RunRetentionDays: MaxRunRetentionDays + 1}})
@@ -72,6 +85,7 @@ func TestFindRunRetentionSettings(t *testing.T) {
 
 func TestRepoRunRetentionDays(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
+	resetUserSettings(t)
 	defer test.MockVariableValue(&setting.Actions.RunRetentionDays, 30)()
 	unittest.AssertSuccessfulInsert(t, &repo_model.RepoUnit{RepoID: 3, Type: unit.TypeActions, Config: &repo_model.ActionsConfig{RunRetentionDays: 20}})
 	unittest.AssertSuccessfulInsert(t, &repo_model.RepoUnit{RepoID: 4, Type: unit.TypeActions, Config: &repo_model.ActionsConfig{}})
