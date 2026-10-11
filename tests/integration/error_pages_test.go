@@ -54,6 +54,15 @@ func TestDemoErrorPages(t *testing.T) {
 		assert.NotContains(t, body, "codeberg.org")
 	})
 
+	t.Run("Server error reports to the spoved issues by default", func(t *testing.T) {
+		defer tests.PrepareTestEnv(t)()
+
+		req := NewRequest(t, "GET", "/-/demo/error/500")
+		resp := loginUser(t, "user1").MakeRequest(t, req, http.StatusInternalServerError)
+		href, _ := NewHTMLParser(t, resp.Body).Find(".status-page-500 p a[target=_blank]").Attr("href")
+		assert.Equal(t, "https://github.com/InfiniteSpoved/spoved/issues", href)
+	})
+
 	t.Run("Page not found",
 		func(t *testing.T) {
 			req := NewRequest(t, "GET", "/-/demo/error/404").

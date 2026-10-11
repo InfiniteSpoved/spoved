@@ -484,8 +484,9 @@ func TestUserHints(t *testing.T) {
 			_, hintChecked := htmlDoc.Find(`input[name="enable_repo_unit_hints"]`).Attr("checked")
 			assert.Equal(t, enabled, hintChecked)
 
-			link, _ := htmlDoc.Find("form[action='/user/settings/appearance/language'] a").Attr("href")
-			assert.Equal(t, "https://forgejo.org/docs/next/contributor/localization/", link) // NOT derived from setting.AppDocsVer (contrib docs aren't tied to the present version!)
+			// spoved has no translation project to point to
+			assert.Zero(t, htmlDoc.Find("form[action='/user/settings/appearance/language'] a").Length())
+			assert.NotContains(t, htmlDoc.Find("form[action='/user/settings/appearance/language']").Text(), "translate")
 		}
 
 		t.Run("view", func(t *testing.T) {
