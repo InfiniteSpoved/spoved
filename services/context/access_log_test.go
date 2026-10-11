@@ -61,3 +61,22 @@ func TestCapAccessLogField(t *testing.T) {
 	assert.Equal(t, "short", capAccessLogField("short"))
 	assert.Len(t, capAccessLogField(strings.Repeat("a", 5000)), maxAccessLogField)
 }
+
+func TestAccessLoggerFollowsTheWriters(t *testing.T) {
+	logger := log.GetManager().GetLogger("access")
+	logger.ReplaceAllWriters()
+	handler := AccessLogger()(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { _, _ = rw.Write([]byte("ok")) }))
+
+	// no writer: the request passes through untouched; the logger would panic on this plain recorder (it is no ResponseWriter)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/a", nil))
+	assert.Equal(t, "ok", rec.Body.String())
+
+	// a writer added later (a log destination) turns it on without rebuilding the middleware
+	w := log.NewEventWriterBuffer("access-late", log.WriterMode{Level: log.INFO, Format: "json"}).(log.EventWriterBuffer)
+	logger.AddWriters(w)
+	handler.ServeHTTP(WrapResponseWriter(httptest.NewRecorder()), httptest.NewRequest("GET", "/b", nil))
+	logger.ReplaceAllWriters()
+	assert.Contains(t, w.GetString(), `"path":"/b"`)
+	assert.NotContains(t, w.GetString(), `"path":"/a"`)
+}

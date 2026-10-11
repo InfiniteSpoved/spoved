@@ -150,7 +150,7 @@
 		<a class="{{if .PageIsAdminNotices}}active {{end}}item" href="{{AppSubUrl}}/admin/notices">
 			{{ctx.Locale.Tr "admin.notices"}}
 		</a>
-		<details class="item toggleable-item" {{if or .PageIsAdminMonitorStats .PageIsAdminMonitorCron .PageIsAdminMonitorQueue .PageIsAdminMonitorStacktrace}}open{{end}}>
+		<details class="item toggleable-item" {{if or .PageIsAdminMonitorStats .PageIsAdminMonitorCron .PageIsAdminMonitorQueue .PageIsAdminMonitorStacktrace .PageIsAdminLogShipping}}open{{end}}>
 			<summary>{{ctx.Locale.Tr "admin.monitor"}}</summary>
 			<div class="menu">
 				<a class="{{if .PageIsAdminMonitorStats}}active {{end}}item" href="{{AppSubUrl}}/admin/monitor/stats">
@@ -164,6 +164,9 @@
 				</a>
 				<a class="{{if .PageIsAdminMonitorStacktrace}}active {{end}}item" href="{{AppSubUrl}}/admin/monitor/stacktrace">
 					{{ctx.Locale.Tr "admin.monitor.stacktrace"}}
+				</a>
+				<a class="{{if .PageIsAdminLogShipping}}active {{end}}item" href="{{AppSubUrl}}/admin/log-shipping">
+					{{ctx.Locale.Tr "admin.log_shipping"}}
 				</a>
 			</div>
 		</details>

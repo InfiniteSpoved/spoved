@@ -1529,6 +1529,197 @@
         }
       }
     },
+    "/admin/log-shipping/destinations": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "List the log destinations",
+        "operationId": "adminListLogShippingDestinations",
+        "responses": {
+          "200": {
+            "$ref": "#/responses/LogShippingDestinationList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          }
+        }
+      },
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create a log destination",
+        "operationId": "adminCreateLogShippingDestination",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/CreateLogShippingDestinationOption"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "$ref": "#/responses/LogShippingDestination"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/admin/log-shipping/destinations/{id}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get a log destination",
+        "operationId": "adminGetLogShippingDestination",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "id of the destination",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/LogShippingDestination"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete a log destination",
+        "operationId": "adminDeleteLogShippingDestination",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "id of the destination",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "patch": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Change a log destination",
+        "operationId": "adminEditLogShippingDestination",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "id of the destination",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/EditLogShippingDestinationOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/LogShippingDestination"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/admin/log-shipping/destinations/{id}/test": {
+      "post": {
+        "description": "Sends one event with logtype \"test\" to the saved destination. At most one per destination every 5 seconds.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Send a test event to a log destination",
+        "operationId": "adminTestLogShippingDestination",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "id of the destination",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/LogShippingTestResult"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "429": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
     "/admin/maintenance": {
       "get": {
         "produces": [
@@ -29064,6 +29255,77 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "CreateLogShippingDestinationOption": {
+      "description": "CreateLogShippingDestinationOption creates a log destination",
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "endpoint",
+        "log_types"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "x-go-name": "Enabled"
+        },
+        "endpoint": {
+          "description": "an https:// URL without credentials or query",
+          "type": "string",
+          "x-go-name": "Endpoint"
+        },
+        "exclusion": {
+          "type": "string",
+          "x-go-name": "Exclusion"
+        },
+        "expression": {
+          "type": "string",
+          "x-go-name": "Expression"
+        },
+        "headers": {
+          "description": "custom headers (http); the values are stored encrypted",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LogShippingHeaderOption"
+          },
+          "x-go-name": "Headers"
+        },
+        "key": {
+          "description": "the ingest key (newrelic)",
+          "type": "string",
+          "x-go-name": "Key"
+        },
+        "level": {
+          "description": "trace, debug, info, warn or error; info if empty",
+          "type": "string",
+          "x-go-name": "Level"
+        },
+        "log_types": {
+          "description": "all, application, access, router, database, git",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "LogTypes"
+        },
+        "name": {
+          "description": "lower-case letters, digits and dashes, unique",
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "ndjson": {
+          "description": "one event per line instead of a JSON array (http)",
+          "type": "boolean",
+          "x-go-name": "NDJSON"
+        },
+        "type": {
+          "description": "newrelic or http",
+          "type": "string",
+          "x-go-name": "Type"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "CreateMilestoneOption": {
       "description": "CreateMilestoneOption options for creating a milestone",
       "type": "object",
@@ -30715,6 +30977,61 @@
         "name": {
           "type": "string",
           "x-go-name": "Name"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "EditLogShippingDestinationOption": {
+      "description": "A new endpoint needs the key and every header value again.",
+      "type": "object",
+      "title": "EditLogShippingDestinationOption changes a log destination; fields left out stay as they are.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "x-go-name": "Enabled"
+        },
+        "endpoint": {
+          "type": "string",
+          "x-go-name": "Endpoint"
+        },
+        "exclusion": {
+          "type": "string",
+          "x-go-name": "Exclusion"
+        },
+        "expression": {
+          "type": "string",
+          "x-go-name": "Expression"
+        },
+        "headers": {
+          "description": "the complete list of headers: one left out is removed, one without a value keeps its stored value",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LogShippingHeaderOption"
+          },
+          "x-go-name": "Headers"
+        },
+        "key": {
+          "type": "string",
+          "x-go-name": "Key"
+        },
+        "level": {
+          "type": "string",
+          "x-go-name": "Level"
+        },
+        "log_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "LogTypes"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "ndjson": {
+          "type": "boolean",
+          "x-go-name": "NDJSON"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -32956,6 +33273,151 @@
             "$ref": "#/definitions/ActionRunSummary"
           },
           "x-go-name": "Entries"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "LogShippingDestination": {
+      "description": "LogShippingDestination is a place the logs are shipped to",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "x-go-name": "Enabled"
+        },
+        "endpoint": {
+          "type": "string",
+          "x-go-name": "Endpoint"
+        },
+        "exclusion": {
+          "type": "string",
+          "x-go-name": "Exclusion"
+        },
+        "expression": {
+          "type": "string",
+          "x-go-name": "Expression"
+        },
+        "has_key": {
+          "description": "whether a key is stored; the key is never returned",
+          "type": "boolean",
+          "x-go-name": "HasKey"
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LogShippingHeader"
+          },
+          "x-go-name": "Headers"
+        },
+        "id": {
+          "type": "string",
+          "x-go-name": "ID"
+        },
+        "level": {
+          "type": "string",
+          "x-go-name": "Level"
+        },
+        "log_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "LogTypes"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "ndjson": {
+          "type": "boolean",
+          "x-go-name": "NDJSON"
+        },
+        "status": {
+          "$ref": "#/definitions/LogShippingStatus"
+        },
+        "type": {
+          "type": "string",
+          "x-go-name": "Type"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "LogShippingHeader": {
+      "description": "LogShippingHeader is a custom header of a log destination; the value is never returned",
+      "type": "object",
+      "properties": {
+        "has_value": {
+          "type": "boolean",
+          "x-go-name": "HasValue"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "LogShippingHeaderOption": {
+      "description": "LogShippingHeaderOption is a custom header to send; an empty value keeps the stored value of the header",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "value": {
+          "type": "string",
+          "x-go-name": "Value"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "LogShippingStatus": {
+      "description": "LogShippingStatus is what this instance sent to a log destination since it started",
+      "type": "object",
+      "properties": {
+        "dropped": {
+          "type": "integer",
+          "format": "uint64",
+          "x-go-name": "Dropped"
+        },
+        "errors": {
+          "type": "integer",
+          "format": "uint64",
+          "x-go-name": "Errors"
+        },
+        "last_error": {
+          "description": "the class of the last failure (\"status 5xx\", \"connection failed\", \"timeout\")",
+          "type": "string",
+          "x-go-name": "LastError"
+        },
+        "last_success": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "LastSuccess"
+        },
+        "sent": {
+          "type": "integer",
+          "format": "uint64",
+          "x-go-name": "Sent"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "LogShippingTestResult": {
+      "description": "LogShippingTestResult is the outcome of a test event",
+      "type": "object",
+      "properties": {
+        "error": {
+          "description": "\"status 4xx\", \"status 5xx\", \"connection failed\" or \"timeout\"; empty on success",
+          "type": "string",
+          "x-go-name": "Error"
+        },
+        "status": {
+          "description": "the HTTP status of the destination, 0 if it wasn't reached",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Status"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -37970,6 +38432,27 @@
         "items": {
           "$ref": "#/definitions/LicensesTemplateListEntry"
         }
+      }
+    },
+    "LogShippingDestination": {
+      "description": "LogShippingDestination",
+      "schema": {
+        "$ref": "#/definitions/LogShippingDestination"
+      }
+    },
+    "LogShippingDestinationList": {
+      "description": "LogShippingDestinationList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/LogShippingDestination"
+        }
+      }
+    },
+    "LogShippingTestResult": {
+      "description": "LogShippingTestResult",
+      "schema": {
+        "$ref": "#/definitions/LogShippingTestResult"
       }
     },
     "Maintenance": {

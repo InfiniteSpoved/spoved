@@ -906,6 +906,15 @@ func registerRoutes(m *web.Route) {
 		m.Combo("/webhook-types").Get(admin.WebhookTypes).Post(admin.WebhookTypesPost)
 		m.Combo("/repo-units").Get(admin.RepoUnits).Post(admin.RepoUnitsPost)
 		m.Combo("/ip-allowlist").Get(admin.IPAllowlist).Post(admin.IPAllowlistPost)
+		m.Group("/log-shipping", func() {
+			m.Get("", admin.LogShipping)
+			m.Post("/destinations", admin.LogShippingPost)
+			m.Group("/destinations/{id}", func() {
+				m.Combo("").Get(admin.EditLogShipping).Post(admin.LogShippingPost)
+				m.Post("/delete", admin.LogShippingDelete)
+				m.Post("/test", admin.LogShippingTest)
+			})
+		})
 
 		if setting.Database.Type.IsMySQL() {
 			m.Get("/self_check", admin.SelfCheck)

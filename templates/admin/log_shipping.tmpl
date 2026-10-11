@@ -1,0 +1,127 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin log-shipping")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">{{ctx.Locale.Tr "admin.log_shipping"}}</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.log_shipping.desc"}}</p>
+			<p class="help">{{ctx.Locale.Tr "admin.log_shipping.instance_note"}}</p>
+			<table class="ui very basic table" id="log-shipping-list">
+				<thead>
+					<tr>
+						<th>{{ctx.Locale.Tr "admin.log_shipping.name"}}</th>
+						<th>{{ctx.Locale.Tr "admin.log_shipping.type"}}</th>
+						<th>{{ctx.Locale.Tr "admin.log_shipping.log_types"}}</th>
+						<th>{{ctx.Locale.Tr "admin.log_shipping.status"}}</th>
+						<th>{{ctx.Locale.Tr "admin.log_shipping.sent"}}</th>
+						<th>{{ctx.Locale.Tr "admin.log_shipping.dropped"}}</th>
+						<th>{{ctx.Locale.Tr "admin.log_shipping.errors"}}</th>
+						<th>{{ctx.Locale.Tr "admin.log_shipping.last_success"}}</th>
+						<th>{{ctx.Locale.Tr "admin.log_shipping.last_error"}}</th>
+					</tr>
+				</thead>
+				<tbody>
+					{{range .Destinations}}
+						<tr>
+							<td><a href="{{AppSubUrl}}/admin/log-shipping/destinations/{{.ID}}">{{.Name}}</a></td>
+							<td>{{ctx.Locale.Tr (printf "admin.log_shipping.type.%s" .Type)}}</td>
+							<td>{{range $i, $t := .LogTypes}}{{if $i}}, {{end}}{{ctx.Locale.Tr (printf "admin.log_shipping.log_type.%s" $t)}}{{end}}</td>
+							<td>{{if .Enabled}}{{ctx.Locale.Tr "admin.log_shipping.enabled"}}{{else}}{{ctx.Locale.Tr "admin.log_shipping.disabled"}}{{end}}</td>
+							<td>{{.Status.Sent}}</td>
+							<td>{{.Status.Dropped}}</td>
+							<td>{{.Status.Errors}}</td>
+							<td>{{if .Status.LastSuccess}}{{DateUtils.AbsoluteLong .Status.LastSuccess}}{{else}}-{{end}}</td>
+							<td>{{if .Status.LastError}}{{.Status.LastError}}{{else}}-{{end}}</td>
+						</tr>
+					{{else}}
+						<tr><td colspan="9">{{ctx.Locale.Tr "admin.log_shipping.none"}}</td></tr>
+					{{end}}
+				</tbody>
+			</table>
+		</div>
+
+		<h4 class="ui top attached header">
+			{{if .Edit}}{{ctx.Locale.Tr "admin.log_shipping.edit" .Edit.Name}}{{else}}{{ctx.Locale.Tr "admin.log_shipping.new"}}{{end}}
+		</h4>
+		<div class="ui attached segment">
+			<form class="ui form" id="log-shipping-form" method="post" action="{{AppSubUrl}}/admin/log-shipping/destinations{{if .Edit}}/{{.Edit.ID}}{{end}}">
+				<div class="field">
+					<label for="name">{{ctx.Locale.Tr "admin.log_shipping.name"}}</label>
+					<input id="name" name="name" value="{{if .Edit}}{{.Edit.Name}}{{end}}" required maxlength="32" pattern="[a-z0-9][a-z0-9\-]*">
+					<span class="help">{{ctx.Locale.Tr "admin.log_shipping.name_helper"}}</span>
+				</div>
+				<div class="field">
+					<label for="type">{{ctx.Locale.Tr "admin.log_shipping.type"}}</label>
+					<select id="type" name="type" {{if .Edit}}disabled{{end}}>
+						{{range $t := (StringUtils.Make "newrelic" "http")}}
+							<option value="{{$t}}" {{if and $.Edit (eq $.Edit.Type $t)}}selected{{end}}>{{ctx.Locale.Tr (printf "admin.log_shipping.type.%s" $t)}}</option>
+						{{end}}
+					</select>
+				</div>
+				<div class="field">
+					<label for="endpoint">{{ctx.Locale.Tr "admin.log_shipping.endpoint"}}</label>
+					<input id="endpoint" name="endpoint" type="url" value="{{if .Edit}}{{.Edit.Endpoint}}{{end}}" required placeholder="https://">
+					<span class="help">{{ctx.Locale.Tr "admin.log_shipping.endpoint_helper"}}</span>
+				</div>
+				<div class="field" data-log-shipping-for="newrelic">
+					<label for="key">{{ctx.Locale.Tr "admin.log_shipping.key"}}</label>
+					<input id="key" name="key" type="password" autocomplete="off" placeholder="{{if and .Edit .Edit.HasKey}}{{ctx.Locale.Tr "admin.log_shipping.key_set"}}{{end}}">
+					<span class="help">{{ctx.Locale.Tr "admin.log_shipping.key_helper"}}</span>
+				</div>
+				<div class="field" data-log-shipping-for="http">
+					<label for="headers">{{ctx.Locale.Tr "admin.log_shipping.headers"}}</label>
+					<textarea id="headers" name="headers" rows="4" autocomplete="off" placeholder="Authorization: Bearer ...">{{.HeaderLines}}</textarea>
+					<span class="help">{{ctx.Locale.Tr "admin.log_shipping.headers_helper"}}</span>
+				</div>
+				<div class="field" data-log-shipping-for="http">
+					<div class="ui checkbox">
+						<input id="ndjson" name="ndjson" type="checkbox" {{if and .Edit .Edit.NDJSON}}checked{{end}}>
+						<label for="ndjson">{{ctx.Locale.Tr "admin.log_shipping.ndjson"}}</label>
+					</div>
+				</div>
+				<div class="grouped fields">
+					<label>{{ctx.Locale.Tr "admin.log_shipping.log_types"}}</label>
+					{{range $t := .LogTypes}}
+						<div class="field">
+							<div class="ui checkbox">
+								<input id="log-type-{{$t}}" name="log_types" value="{{$t}}" type="checkbox" {{if index $.SelectedTypes $t}}checked{{end}}>
+								<label for="log-type-{{$t}}">{{ctx.Locale.Tr (printf "admin.log_shipping.log_type.%s" $t)}}</label>
+							</div>
+						</div>
+					{{end}}
+					<span class="help">{{ctx.Locale.Tr "admin.log_shipping.database_warning"}}</span>
+				</div>
+				<div class="field">
+					<label for="level">{{ctx.Locale.Tr "admin.log_shipping.level"}}</label>
+					<select id="level" name="level">
+						{{range $l := .Levels}}
+							<option value="{{$l}}" {{if $.Edit}}{{if eq $.Edit.Level $l}}selected{{end}}{{else if eq $l "info"}}selected{{end}}>{{$l}}</option>
+						{{end}}
+					</select>
+				</div>
+				<div class="field">
+					<label for="expression">{{ctx.Locale.Tr "admin.log_shipping.expression"}}</label>
+					<input id="expression" name="expression" value="{{if .Edit}}{{.Edit.Expression}}{{end}}">
+				</div>
+				<div class="field">
+					<label for="exclusion">{{ctx.Locale.Tr "admin.log_shipping.exclusion"}}</label>
+					<input id="exclusion" name="exclusion" value="{{if .Edit}}{{.Edit.Exclusion}}{{end}}">
+				</div>
+				<div class="field">
+					<div class="ui checkbox">
+						<input id="enabled" name="enabled" type="checkbox" {{if or (not .Edit) .Edit.Enabled}}checked{{end}}>
+						<label for="enabled">{{ctx.Locale.Tr "admin.log_shipping.enabled"}}</label>
+					</div>
+				</div>
+				<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+			</form>
+			{{if .Edit}}
+				<div class="divider"></div>
+				<form class="ui form tw-inline-block" method="post" action="{{AppSubUrl}}/admin/log-shipping/destinations/{{.Edit.ID}}/test">
+					<button class="ui button" id="log-shipping-test">{{ctx.Locale.Tr "admin.log_shipping.test"}}</button>
+				</form>
+				<form class="ui form tw-inline-block" method="post" action="{{AppSubUrl}}/admin/log-shipping/destinations/{{.Edit.ID}}/delete">
+					<button class="ui red button" id="log-shipping-delete">{{ctx.Locale.Tr "admin.log_shipping.delete"}}</button>
+				</form>
+			{{end}}
+		</div>
+	</div>
+{{template "admin/layout_footer" .}}

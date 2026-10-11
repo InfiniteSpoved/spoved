@@ -123,6 +123,17 @@ func (m *LoggerManager) NewSharedWriter(writerName, writerType string, mode Writ
 	return writer, nil
 }
 
+// RemoveSharedWriter stops a shared writer (flushing what it can) and forgets its name. Detach it from the loggers first.
+func (m *LoggerManager) RemoveSharedWriter(writerName string) {
+	m.mu.Lock()
+	w, ok := m.writers[writerName]
+	delete(m.writers, writerName)
+	m.mu.Unlock()
+	if ok {
+		eventWriterStopWait(w)
+	}
+}
+
 func (m *LoggerManager) GetSharedWriter(writerName string) EventWriter {
 	m.mu.Lock()
 	defer m.mu.Unlock()

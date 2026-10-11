@@ -52,6 +52,7 @@ var MaintenanceReadRoutes = container.SetOf(
 var MaintenanceAdminRoutes = container.SetOf(
 	"POST /admin/maintenance",
 	"POST /admin/ip-allowlist",
+	"POST /admin/log-shipping/destinations/{id}/test",
 	"POST /admin/webhook-types",
 	"POST /admin/repo-units",
 	"POST /admin/applications/policy",
@@ -65,6 +66,7 @@ var MaintenanceAdminRoutes = container.SetOf(
 	"POST /admin/monitor/stacktrace/cancel/{pid}",
 	"PUT /api/v1/admin/maintenance",
 	"PUT /api/v1/admin/ip-allowlist",
+	"POST /api/v1/admin/log-shipping/destinations/{id}/test",
 	"POST /api/v1/admin/announcements",
 	"PATCH /api/v1/admin/announcements/{id}",
 	"DELETE /api/v1/admin/announcements/{id}",

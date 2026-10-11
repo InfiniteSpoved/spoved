@@ -24,6 +24,18 @@ export function initAdminCommon() {
   const announcementEditor = document.querySelector('.admin.announcement .combo-markdown-editor');
   if (announcementEditor) initComboMarkdownEditor(announcementEditor);
 
+  // Log shipping: show the fields of the selected destination type only
+  const shippingType = document.querySelector('.admin.log-shipping #type');
+  if (shippingType) {
+    const sync = () => {
+      for (const el of document.querySelectorAll('[data-log-shipping-for]')) {
+        toggleElem(el, el.getAttribute('data-log-shipping-for') === shippingType.value);
+      }
+    };
+    shippingType.addEventListener('change', sync);
+    sync();
+  }
+
   // New user
   if ($('.admin.new.user').length > 0 || $('.admin.edit.user').length > 0) {
     document.getElementById('login_type')?.addEventListener('change', function () {

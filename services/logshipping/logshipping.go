@@ -1,0 +1,496 @@
+// Copyright 2026 The Forgejo Authors. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// Package logshipping turns the instance's log destinations (a dynamic setting) into running log writers.
+package logshipping
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"forgejo.org/models/db"
+	system_model "forgejo.org/models/system"
+	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/hostmatcher"
+	"forgejo.org/modules/json"
+	"forgejo.org/modules/log"
+	"forgejo.org/modules/secret"
+	"forgejo.org/modules/setting"
+	"forgejo.org/modules/setting/config"
+	"forgejo.org/modules/util"
+)
+
+// MaxDestinations is the most destinations the instance holds.
+const MaxDestinations = 20
+
+// ErrRateLimited is returned when a test event was sent to the destination a moment ago.
+var ErrRateLimited = errors.New("a test event was sent a moment ago, try again in a few seconds")
+
+var (
+	setLogSQL    = db.SetLogSQL
+	testInterval = 5 * time.Second // per destination, per instance
+
+	mu         sync.Mutex // guards the fields below; never held across a database query
+	active     = map[string]running{}
+	appliedRev = -1
+	lastSQL    = setting.Database.LogSQL
+
+	testMu   sync.Mutex
+	testLast = map[string]time.Time{}
+)
+
+type running struct {
+	hash    string
+	loggers []string
+}
+
+func writerName(id string) string { return "ship-" + id }
+
+// hostList is the webhook host policy: the same rule decides where an admin may send logs.
+func hostList() *hostmatcher.HostMatchList {
+	v := setting.Webhook.AllowedHostList
+	if v == "" {
+		v = hostmatcher.MatchBuiltinExternal
+	}
+	return hostmatcher.ParseHostMatchList("webhook.ALLOWED_HOST_LIST", v)
+}
+
+// DialContext makes the connections of the shippers; it checks the resolved address, so a name that points to an
+// internal address (DNS rebinding) is refused at the time of the connection.
+func DialContext() func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return hostmatcher.NewDialContext("log_shipping", hostList(), nil, nil)
+}
+
+// CheckEndpoint refuses an address literal the host policy doesn't allow. Names are checked when dialled.
+func CheckEndpoint(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" {
+		return util.NewInvalidArgumentErrorf("invalid endpoint")
+	}
+	if ip := net.ParseIP(u.Hostname()); ip != nil && !hostList().MatchIPAddr(ip) {
+		return util.NewInvalidArgumentErrorf("the endpoint address is not allowed (see ALLOWED_HOST_LIST in the [webhook] section)")
+	}
+	return nil
+}
+
+func encrypt(v string) (string, error) { return secret.EncryptSecret(setting.SecretKey, v) }
+func decrypt(v string) (string, error) { return secret.DecryptSecret(setting.SecretKey, v) }
+
+// option decrypts the secrets of the destination into the options of its writer.
+func option(d setting.LogShippingDestination) (log.HTTPShipOption, error) {
+	opt := log.HTTPShipOption{Format: d.Type, Endpoint: d.Endpoint, NDJSON: d.NDJSON, DialContext: DialContext()}
+	var err error
+	if d.KeyEnc != "" {
+		if opt.Key, err = decrypt(d.KeyEnc); err != nil {
+			return opt, errors.New("the key can't be decrypted")
+		}
+	}
+	if len(d.Headers) > 0 {
+		opt.Headers = make(map[string]string, len(d.Headers))
+	}
+	for _, h := range d.Headers {
+		if opt.Headers[h.Name], err = decrypt(h.ValueEnc); err != nil {
+			return opt, errors.New("a header value can't be decrypted")
+		}
+	}
+	return opt, nil
+}
+
+func hashOf(d setting.LogShippingDestination) string {
+	b, _ := json.Marshal(d)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// Apply makes the running writers match the state: a new or changed destination gets a new writer on its loggers,
+// a changed, disabled or removed one loses its writer (flushed with the usual final timeout), an unchanged one keeps
+// its writer and buffer.
+func Apply(ctx context.Context, state setting.LogShippingState) error {
+	type desired struct {
+		d    setting.LogShippingDestination
+		mode log.WriterMode
+		hash string
+	}
+	want := map[string]desired{}
+	sql := false
+	for _, d := range state.Destinations {
+		if !d.Enabled {
+			continue
+		}
+		opt, err := option(d)
+		if err == nil {
+			err = opt.Validate()
+		}
+		if err != nil {
+			log.Error("log shipping: destination %q is not started: %v", d.Name, err)
+			continue
+		}
+		want[d.ID] = desired{d, log.WriterMode{
+			BufferLen: max(setting.Log.BufferLen, 1000), Level: log.LevelFromString(d.Level), Format: "json",
+			Expression: d.Expression, Exclusion: d.Exclusion, StacktraceLevel: log.NONE, WriterOption: opt,
+		}, hashOf(d)}
+		sql = sql || d.HasLogType("database")
+	}
+
+	mu.Lock()
+	for id, r := range active {
+		if w, ok := want[id]; !ok || w.hash != r.hash {
+			stop(id, r)
+			delete(active, id)
+		}
+	}
+	for id, w := range want {
+		if _, ok := active[id]; ok {
+			continue
+		}
+		wr, err := log.GetManager().NewSharedWriter(writerName(id), "http", w.mode)
+		if err != nil {
+			log.Error("log shipping: destination %q is not started: %v", w.d.Name, err)
+			continue
+		}
+		r := running{hash: w.hash, loggers: w.d.Loggers()}
+		for _, l := range r.loggers {
+			log.GetManager().GetLogger(l).AddWriters(wr)
+		}
+		active[id] = r
+	}
+	// the SQL log is switched for every destination that selected it, and back to the app.ini value when none does
+	if on := setting.Database.LogSQL || sql; on != lastSQL {
+		lastSQL = on
+		defer setLogSQL(ctx, on)
+	}
+	mu.Unlock()
+	return nil
+}
+
+func stop(id string, r running) {
+	for _, l := range r.loggers {
+		_ = log.GetManager().GetLogger(l).RemoveWriter(writerName(id))
+	}
+	log.GetManager().RemoveSharedWriter(writerName(id))
+	log.ForgetShipping(writerName(id))
+}
+
+// Reload applies the stored destinations when the settings revision differs from the one applied last. It runs
+// from cron on every pod; the revision is read before the lock is taken.
+func Reload(ctx context.Context) error {
+	rev := system_model.GetRevision(ctx)
+	mu.Lock()
+	same := rev == appliedRev
+	mu.Unlock()
+	if same {
+		return nil
+	}
+	if err := Apply(ctx, load(ctx)); err != nil {
+		return err
+	}
+	mu.Lock()
+	appliedRev = rev
+	mu.Unlock()
+	return nil
+}
+
+// load reads the stored state past the cache.
+func load(ctx context.Context) setting.LogShippingState {
+	if g := config.GetDynGetter(); g != nil {
+		g.InvalidateCache()
+	}
+	return setting.Config().LogShipping.Value(ctx)
+}
+
+// HeaderInput is a custom header; an empty Value on an existing header keeps the stored value.
+type HeaderInput struct{ Name, Value string }
+
+// Input holds the fields to set; nil fields are kept on an edit and defaulted on a create.
+type Input struct {
+	Name, Type, Endpoint, Key, Level, Expression, Exclusion *string
+	Headers                                                 *[]HeaderInput // the complete list: a header left out is removed
+	LogTypes                                                *[]string
+	NDJSON, Enabled                                         *bool
+}
+
+// Save creates (id == "") or edits a destination and applies it. Two admins saving at once is last-write-wins: each
+// save re-reads the stored list, changes one destination and writes the list back, and the revision moves.
+func Save(ctx context.Context, doer *user_model.User, id string, in Input) (setting.LogShippingDestination, error) {
+	var err error
+	dests := slices.Clone(load(ctx).Destinations)
+	var d setting.LogShippingDestination
+	idx := slices.IndexFunc(dests, func(x setting.LogShippingDestination) bool { return x.ID == id })
+	var changed []string
+	if id == "" {
+		if len(dests) >= MaxDestinations {
+			return d, util.NewInvalidArgumentErrorf("at most %d destinations", MaxDestinations)
+		}
+		var b [4]byte
+		_, _ = rand.Read(b[:])
+		d = setting.LogShippingDestination{ID: hex.EncodeToString(b[:]), Enabled: true, Level: "info"}
+		dests = append(dests, d)
+		idx = len(dests) - 1
+	} else if idx < 0 {
+		return d, util.ErrNotExist
+	}
+	d = dests[idx]
+	d.Headers = slices.Clone(d.Headers)
+	old := d
+
+	set := func(field string, dst, v *string) {
+		if v != nil && *v != *dst {
+			*dst = *v
+			changed = append(changed, field)
+		}
+	}
+	if id == "" {
+		set("type", &d.Type, in.Type)
+	}
+	set("name", &d.Name, in.Name)
+	set("endpoint", &d.Endpoint, in.Endpoint)
+	set("level", &d.Level, in.Level)
+	set("expression", &d.Expression, in.Expression)
+	set("exclusion", &d.Exclusion, in.Exclusion)
+	if in.NDJSON != nil && *in.NDJSON != d.NDJSON {
+		d.NDJSON = *in.NDJSON
+		changed = append(changed, "ndjson")
+	}
+	if in.Enabled != nil && *in.Enabled != d.Enabled {
+		d.Enabled = *in.Enabled
+		changed = append(changed, "enabled")
+	}
+	if in.LogTypes != nil {
+		d.LogTypes = slices.Clone(*in.LogTypes)
+		changed = append(changed, "log_types")
+	}
+
+	// a key or header value must not be sent to an address the admin didn't give it to: a new endpoint needs them all again
+	endpointChanged := id != "" && d.Endpoint != old.Endpoint
+	if in.Key != nil && *in.Key != "" {
+		if len(*in.Key) > setting.LogShippingMaxHeaderValue {
+			return d, util.NewInvalidArgumentErrorf("the key is too long")
+		}
+		if d.KeyEnc, err = encrypt(*in.Key); err != nil {
+			return d, err
+		}
+		changed = append(changed, "key")
+	} else if endpointChanged && d.Type == setting.LogShippingNewRelic {
+		return d, util.NewInvalidArgumentErrorf("a new endpoint needs the key again")
+	}
+	if in.Headers != nil {
+		headers := make([]setting.LogShippingHeader, 0, len(*in.Headers))
+		for _, h := range *in.Headers {
+			if len(h.Value) > setting.LogShippingMaxHeaderValue {
+				return d, util.NewInvalidArgumentErrorf("a header value is too long")
+			}
+			var enc string
+			if h.Value != "" {
+				if enc, err = encrypt(h.Value); err != nil {
+					return d, err
+				}
+			} else if j := slices.IndexFunc(old.Headers, func(o setting.LogShippingHeader) bool { return strings.EqualFold(o.Name, h.Name) }); j >= 0 && !endpointChanged {
+				enc = old.Headers[j].ValueEnc
+			} else {
+				return d, util.NewInvalidArgumentErrorf("the header %q needs a value", h.Name)
+			}
+			headers = append(headers, setting.LogShippingHeader{Name: h.Name, ValueEnc: enc})
+		}
+		d.Headers = headers
+		changed = append(changed, "headers")
+	} else if endpointChanged && len(d.Headers) > 0 {
+		return d, util.NewInvalidArgumentErrorf("a new endpoint needs the header values again")
+	}
+
+	if err := d.Validate(); err != nil {
+		return d, util.NewInvalidArgumentErrorf("%v", err)
+	}
+	if err := CheckEndpoint(d.Endpoint); err != nil {
+		return d, err
+	}
+	for i, o := range dests {
+		if i != idx && o.Name == d.Name {
+			return d, util.NewInvalidArgumentErrorf("the name is taken")
+		}
+	}
+	dests[idx] = d
+	if err := store(ctx, setting.LogShippingState{Destinations: dests}); err != nil {
+		return d, err
+	}
+	action := "edited"
+	if id == "" {
+		action = "created"
+	}
+	warnChange(doer, action, d, changed)
+	return d, nil
+}
+
+// Remove deletes a destination and stops its writer.
+func Remove(ctx context.Context, doer *user_model.User, id string) error {
+	state := load(ctx)
+	idx := slices.IndexFunc(state.Destinations, func(x setting.LogShippingDestination) bool { return x.ID == id })
+	if idx < 0 {
+		return util.ErrNotExist
+	}
+	d := state.Destinations[idx]
+	state.Destinations = slices.Delete(slices.Clone(state.Destinations), idx, idx+1)
+	if err := store(ctx, state); err != nil {
+		return err
+	}
+	testMu.Lock()
+	delete(testLast, id)
+	testMu.Unlock()
+	warnChange(doer, "deleted", d, nil)
+	return nil
+}
+
+func store(ctx context.Context, state setting.LogShippingState) error {
+	v, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	if err := system_model.SetSettings(ctx, map[string]string{setting.Config().LogShipping.DynKey(): string(v)}); err != nil {
+		return err
+	}
+	if g := config.GetDynGetter(); g != nil {
+		g.InvalidateCache()
+	}
+	return Apply(ctx, state)
+}
+
+// warnChange records who changed what; never a key, a header value or the endpoint's query.
+func warnChange(doer *user_model.User, action string, d setting.LogShippingDestination, fields []string) {
+	who := "-"
+	if doer != nil {
+		who = doer.Name
+	}
+	log.Warn("log shipping: %s %s destination %q (%s, id %s), changed: %s", who, action, d.Name, d.Type, d.ID, strings.Join(fields, ","))
+}
+
+func get(ctx context.Context, id string) (setting.LogShippingDestination, error) {
+	for _, d := range load(ctx).Destinations {
+		if d.ID == id {
+			return d, nil
+		}
+	}
+	return setting.LogShippingDestination{}, util.ErrNotExist
+}
+
+// Header is a custom header as shown: its name, and that a value is stored.
+type Header struct {
+	Name     string `json:"name"`
+	HasValue bool   `json:"has_value"`
+}
+
+// Status is what this instance's writer of the destination did so far.
+type Status struct {
+	Sent        uint64     `json:"sent"`
+	Dropped     uint64     `json:"dropped"`
+	Errors      uint64     `json:"errors"`
+	LastSuccess *time.Time `json:"last_success"`
+	LastError   string     `json:"last_error"`
+}
+
+// Destination is a destination as shown: no key and no header value.
+type Destination struct {
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Type       string   `json:"type"`
+	Endpoint   string   `json:"endpoint"`
+	HasKey     bool     `json:"has_key"`
+	Headers    []Header `json:"headers"`
+	NDJSON     bool     `json:"ndjson"`
+	Enabled    bool     `json:"enabled"`
+	LogTypes   []string `json:"log_types"`
+	Level      string   `json:"level"`
+	Expression string   `json:"expression"`
+	Exclusion  string   `json:"exclusion"`
+	Status     Status   `json:"status"`
+}
+
+// View turns a stored destination into its public form with the status of this instance.
+func View(d setting.LogShippingDestination) Destination {
+	v := Destination{
+		ID: d.ID, Name: d.Name, Type: d.Type, Endpoint: d.Endpoint, HasKey: d.KeyEnc != "", Headers: []Header{},
+		NDJSON: d.NDJSON, Enabled: d.Enabled, LogTypes: slices.Clone(d.LogTypes), Level: d.Level,
+		Expression: d.Expression, Exclusion: d.Exclusion,
+	}
+	for _, h := range d.Headers {
+		v.Headers = append(v.Headers, Header{Name: h.Name, HasValue: h.ValueEnc != ""})
+	}
+	for _, st := range log.ShippingStatsSnapshot() {
+		if st.Writer == writerName(d.ID) {
+			v.Status.Sent, v.Status.Dropped, v.Status.Errors = v.Status.Sent+st.Sent, v.Status.Dropped+st.Dropped, v.Status.Errors+st.Errors
+		}
+	}
+	t, e := log.ShippingStatus(writerName(d.ID))
+	if !t.IsZero() {
+		v.Status.LastSuccess = &t
+	}
+	v.Status.LastError = e
+	return v
+}
+
+// List returns the destinations as shown.
+func List(ctx context.Context) ([]Destination, error) {
+	state := load(ctx)
+	out := make([]Destination, 0, len(state.Destinations))
+	for _, d := range state.Destinations {
+		out = append(out, View(d))
+	}
+	return out, nil
+}
+
+// Get returns one destination as shown.
+func Get(ctx context.Context, id string) (Destination, error) {
+	d, err := get(ctx, id)
+	if err != nil {
+		return Destination{}, err
+	}
+	return View(d), nil
+}
+
+// TestResult is the outcome of a test event: the status code and a class of failure, never the remote's answer.
+type TestResult struct {
+	Status int    `json:"status"`
+	Error  string `json:"error"`
+}
+
+// Test sends one "test" event to a saved destination, with the same options and dial check as its writer.
+func Test(ctx context.Context, id string) (TestResult, error) {
+	d, err := get(ctx, id)
+	if err != nil {
+		return TestResult{}, err
+	}
+	testMu.Lock()
+	if time.Since(testLast[id]) < testInterval {
+		testMu.Unlock()
+		return TestResult{}, ErrRateLimited
+	}
+	testLast[id] = time.Now()
+	testMu.Unlock()
+
+	opt, err := option(d)
+	if err != nil {
+		return TestResult{Error: "invalid configuration"}, nil
+	}
+	event, _ := json.Marshal(map[string]any{
+		"timestamp": time.Now().UnixMilli(), "message": "spoved log shipping test event", "level": "INFO",
+		"logtype": "test", "logger": "test", "service": log.ServiceName,
+	})
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	code, err := log.ProbeHTTP(ctx, writerName(id), opt, event)
+	switch {
+	case err != nil:
+		return TestResult{Error: err.Error()}, nil
+	case code/100 != 2:
+		return TestResult{Status: code, Error: fmt.Sprintf("status %dxx", code/100)}, nil
+	}
+	return TestResult{Status: code}, nil
+}
