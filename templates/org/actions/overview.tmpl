@@ -7,13 +7,13 @@
 			<a class="{{if .PageIsOrgActionsRuns}}active {{end}}item" href="{{.OrgLink}}/actions">{{ctx.Locale.Tr "org.actions.tab.runs"}}</a>
 			<a class="{{if .PageIsOrgActionsOverview}}active {{end}}item" href="{{.OrgLink}}/actions/overview">{{ctx.Locale.Tr "org.actions.tab.overview"}}</a>
 		</div>
-		<div class="ui small statistics tw-mb-4 org-overview-cards">
-			<div class="statistic" data-card="runs-24h"><div class="value">{{.Overview.Runs24h}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.runs_24h"}}</div></div>
-			<div class="statistic" data-card="runs-7d"><div class="value">{{.Overview.Runs7d}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.runs_7d"}}</div></div>
-			<div class="statistic" data-card="failure-rate"><div class="value">{{if .Overview.Finished7d}}{{.Overview.FailurePercent}}%{{else}}{{ctx.Locale.Tr "org.actions.overview.n_a"}}{{end}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.failure_rate"}}</div></div>
-			<div class="statistic" data-card="running"><div class="value">{{.Overview.Running}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.running"}}</div></div>
-			<div class="statistic" data-card="queued"><div class="value">{{.Overview.Queued}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.queued"}}</div></div>
-			<div class="statistic" data-card="avg-queue"><div class="value">{{if .Overview.HasQueueSample}}{{.Overview.AvgQueue.Round 1000000000}}{{else}}{{ctx.Locale.Tr "org.actions.overview.n_a"}}{{end}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.avg_queue"}}</div></div>
+		<div class="tw-flex tw-flex-wrap tw-gap-2 tw-mb-4 org-overview-cards">
+			<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="runs-24h"><div class="value tw-text-xl tw-font-semibold">{{.Overview.Runs24h}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.runs_24h"}}</div></div>
+			<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="runs-7d"><div class="value tw-text-xl tw-font-semibold">{{.Overview.Runs7d}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.runs_7d"}}</div></div>
+			<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="failure-rate"><div class="value tw-text-xl tw-font-semibold">{{if .Overview.Finished7d}}{{.Overview.FailurePercent}}%{{else}}{{ctx.Locale.Tr "org.actions.overview.n_a"}}{{end}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.failure_rate"}}</div></div>
+			<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="running"><div class="value tw-text-xl tw-font-semibold">{{.Overview.Running}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.running"}}</div></div>
+			<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="queued"><div class="value tw-text-xl tw-font-semibold">{{.Overview.Queued}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.queued"}}</div></div>
+			<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="avg-queue"><div class="value tw-text-xl tw-font-semibold">{{if .Overview.HasQueueSample}}{{.Overview.AvgQueue.Round 1000000000}}{{else}}{{ctx.Locale.Tr "org.actions.overview.n_a"}}{{end}}</div><div class="label">{{ctx.Locale.Tr "org.actions.overview.avg_queue"}}</div></div>
 		</div>
 
 		<h4 class="ui top attached header">{{ctx.Locale.Tr "org.actions.overview.failing_now"}} ({{len .Failing}}/{{.FailingTotal}})</h4>
