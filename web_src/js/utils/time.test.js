@@ -1,4 +1,4 @@
-import {firstStartDateAfterDate, startDaysBetween, fillEmptyStartDaysWithZeroes, zonedLocalToISO, zoneLabel} from './time.js';
+import {firstStartDateAfterDate, startDaysBetween, fillEmptyStartDaysWithZeroes, zonedLocalToISO, isoToZonedLocal, zoneLabel} from './time.js';
 
 test('startDaysBetween', () => {
   expect(startDaysBetween(new Date('2024-02-15'), new Date('2024-04-18'))).toEqual([
@@ -65,4 +65,14 @@ test('zonedLocalToISO falls back to the browser zone', () => {
 test('zoneLabel', () => {
   expect(zoneLabel('Europe/Paris', Date.UTC(2026, 6, 1))).toBe('Europe/Paris (UTC+02:00)');
   expect(zoneLabel('Asia/Kolkata', Date.UTC(2026, 6, 1))).toBe('Asia/Kolkata (UTC+05:30)');
+});
+
+test('isoToZonedLocal is the inverse of zonedLocalToISO', () => {
+  expect(isoToZonedLocal('2026-07-01T10:00:00.000Z', 'Europe/Paris')).toBe('2026-07-01T12:00');
+  expect(isoToZonedLocal('2026-01-01T11:00:00.000Z', 'Europe/Paris')).toBe('2026-01-01T12:00');
+  expect(isoToZonedLocal('2026-07-01T06:30:00.000Z', 'Asia/Kolkata')).toBe('2026-07-01T12:00');
+  expect(isoToZonedLocal('2026-07-01T00:00:00.000Z', 'UTC')).toBe('2026-07-01T00:00');
+  for (const zone of ['Europe/Paris', 'America/Los_Angeles', 'UTC']) {
+    expect(zonedLocalToISO(isoToZonedLocal('2026-03-10T08:15:00.000Z', zone), zone)).toBe('2026-03-10T08:15:00.000Z');
+  }
 });

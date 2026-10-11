@@ -35,6 +35,9 @@ function noActiveDropdowns() {
 	if (document.querySelector('[aria-expanded=true]') !== null || document.querySelector('.dialog-dropdown dialog:popover-open') !== null) {
 		return false;
 	}
+	if (document.querySelector('details.change-time[open]') !== null) {
+		return false;
+	}
 	const dropdownForm = document.querySelector('#branch-dropdown-form');
 	if (dropdownForm !== null && dropdownForm.checkVisibility())
 		return false;
