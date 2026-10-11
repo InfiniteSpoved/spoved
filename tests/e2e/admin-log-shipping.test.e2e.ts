@@ -30,7 +30,6 @@ test('Log shipping destination form', async ({page}) => {
   await page.locator('#endpoint').fill('https://log-api.newrelic.com/log/v1');
   await page.locator('#key').fill('NRAK-E2EKEY0123456789');
   await page.locator('#log-type-access').check();
-  await page.locator('#log-type-database').check();
   await page.getByRole('button', {name: 'Save'}).click();
 
   // the key is masked and never comes back
@@ -39,7 +38,6 @@ test('Log shipping destination form', async ({page}) => {
   await expect(page.locator('#key')).toHaveAttribute('placeholder', /set/);
   await expect(page.locator('body')).not.toContainText('NRAK-E2EKEY0123456789');
   await expect(page.locator('#log-type-access')).toBeChecked();
-  await expect(page.locator('#log-type-database')).toBeChecked();
   await expect(page.locator('#type')).toBeDisabled();
   await expect(page.locator('#log-shipping-list')).toContainText('e2e-nr');
   await expect(page.locator('#log-shipping-test')).toBeVisible();

@@ -12,11 +12,21 @@ import (
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
+	"forgejo.org/routers/common"
 	"forgejo.org/services/context"
 	logshipping_service "forgejo.org/services/logshipping"
 )
 
 const tplLogShipping base.TplName = "admin/log_shipping"
+
+// logShippingAdmin is checked by every handler on top of the admin route group: this decides where logs are sent.
+func logShippingAdmin(ctx *context.Context) bool {
+	if !common.IsMaintenanceAdmin(ctx.Doer) {
+		ctx.Error(http.StatusForbidden, "site administrators only")
+		return false
+	}
+	return true
+}
 
 func renderLogShipping(ctx *context.Context, edit *logshipping_service.Destination) {
 	list, err := logshipping_service.List(ctx)
@@ -47,11 +57,17 @@ func renderLogShipping(ctx *context.Context, edit *logshipping_service.Destinati
 
 // LogShipping lists the log destinations and shows the form for a new one
 func LogShipping(ctx *context.Context) {
+	if !logShippingAdmin(ctx) {
+		return
+	}
 	renderLogShipping(ctx, nil)
 }
 
 // EditLogShipping shows a destination
 func EditLogShipping(ctx *context.Context) {
+	if !logShippingAdmin(ctx) {
+		return
+	}
 	d, err := logshipping_service.Get(ctx, ctx.Params("id"))
 	if err != nil {
 		logShippingError(ctx, err)
@@ -96,6 +112,9 @@ func logShippingError(ctx *context.Context, err error) {
 
 // LogShippingPost creates a destination, or saves the one in the path
 func LogShippingPost(ctx *context.Context) {
+	if !logShippingAdmin(ctx) {
+		return
+	}
 	id := ctx.Params("id")
 	d, err := logshipping_service.Save(ctx, ctx.Doer, id, logShippingInput(ctx))
 	if err != nil {
@@ -108,6 +127,9 @@ func LogShippingPost(ctx *context.Context) {
 
 // LogShippingDelete deletes a destination
 func LogShippingDelete(ctx *context.Context) {
+	if !logShippingAdmin(ctx) {
+		return
+	}
 	if err := logshipping_service.Remove(ctx, ctx.Doer, ctx.Params("id")); err != nil {
 		logShippingError(ctx, err)
 		return
@@ -118,16 +140,20 @@ func LogShippingDelete(ctx *context.Context) {
 
 // LogShippingTest sends a test event to a saved destination
 func LogShippingTest(ctx *context.Context) {
+	if !logShippingAdmin(ctx) {
+		return
+	}
 	id := ctx.Params("id")
+	ctx.Req.Body = http.MaxBytesReader(ctx.Resp, ctx.Req.Body, 1024) // the test takes no input
 	res, err := logshipping_service.Test(ctx, id)
 	if err != nil {
 		logShippingError(ctx, err)
 		return
 	}
-	if res.Error != "" {
-		ctx.Flash.Error(ctx.Tr("admin.log_shipping.test_failed", res.Error))
+	if res.OK {
+		ctx.Flash.Success(ctx.Tr("admin.log_shipping.test_ok"))
 	} else {
-		ctx.Flash.Success(ctx.Tr("admin.log_shipping.test_ok", res.Status))
+		ctx.Flash.Error(ctx.Tr("admin.log_shipping.test_failed"))
 	}
 	ctx.Redirect(setting.AppSubURL + "/admin/log-shipping/destinations/" + id)
 }

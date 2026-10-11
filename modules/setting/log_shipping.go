@@ -19,14 +19,14 @@ const (
 )
 
 // logShippingLoggers maps a log type to the logger it listens on.
-var logShippingLoggers = map[string]string{"application": "default", "access": "access", "router": "router", "database": "xorm", "git": "ssh"}
+var logShippingLoggers = map[string]string{"application": "default", "access": "access", "router": "router", "git": "ssh"}
 
 var (
 	logShippingNameRe   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
 	logShippingIDRe     = regexp.MustCompile(`^[a-z0-9]{8}$`)
 	logShippingHeaderRe = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
 	// headers the shipper sets itself or that change how the request is framed
-	logShippingForbiddenHeaders = []string{"host", "content-length", "content-encoding", "content-type", "transfer-encoding", "connection"}
+	logShippingForbiddenHeaders = []string{"host", "content-length", "content-encoding", "content-type", "transfer-encoding", "connection", "upgrade", "te", "trailer", "expect"}
 )
 
 // LogShippingMaxHeaders and LogShippingMaxHeaderValue cap the custom headers of a destination.
@@ -132,7 +132,7 @@ func (d LogShippingDestination) Validate() error {
 	seen := map[string]bool{}
 	for _, h := range d.Headers {
 		lower := strings.ToLower(h.Name)
-		if !logShippingHeaderRe.MatchString(h.Name) || slices.Contains(logShippingForbiddenHeaders, lower) {
+		if !logShippingHeaderRe.MatchString(h.Name) || slices.Contains(logShippingForbiddenHeaders, lower) || strings.HasPrefix(lower, "proxy-") {
 			return errors.New("invalid header name")
 		}
 		if seen[lower] {
@@ -145,3 +145,10 @@ func (d LogShippingDestination) Validate() error {
 	}
 	return nil
 }
+
+// String and GoString leave out the encrypted key and header values, so a log line or a dump can't carry them.
+func (d LogShippingDestination) String() string {
+	return "LogShippingDestination{ID:" + d.ID + " Name:" + d.Name + " Type:" + d.Type + " Endpoint:" + d.Endpoint + "}"
+}
+
+func (d LogShippingDestination) GoString() string { return d.String() }

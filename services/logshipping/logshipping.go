@@ -10,15 +10,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"forgejo.org/models/db"
 	system_model "forgejo.org/models/system"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/hostmatcher"
@@ -37,13 +36,11 @@ const MaxDestinations = 20
 var ErrRateLimited = errors.New("a test event was sent a moment ago, try again in a few seconds")
 
 var (
-	setLogSQL    = db.SetLogSQL
 	testInterval = 5 * time.Second // per destination, per instance
 
 	mu         sync.Mutex // guards the fields below; never held across a database query
 	active     = map[string]running{}
 	appliedRev = -1
-	lastSQL    = setting.Database.LogSQL
 
 	testMu   sync.Mutex
 	testLast = map[string]time.Time{}
@@ -83,6 +80,25 @@ func CheckEndpoint(endpoint string) error {
 	return nil
 }
 
+// checkLoop refuses the instance itself as a destination: shipping its own access log to itself would make every
+// delivery log another request, forever. A proxy or alias in front of the instance is not detected.
+func checkLoop(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return util.NewInvalidArgumentErrorf("invalid endpoint")
+	}
+	self := []string{setting.Domain, setting.SSH.Domain}
+	if a, err := url.Parse(setting.AppURL); err == nil {
+		self = append(self, a.Hostname())
+	}
+	for _, h := range self {
+		if h != "" && strings.EqualFold(h, u.Hostname()) {
+			return util.NewInvalidArgumentErrorf("the endpoint is this instance, which would ship its logs to itself")
+		}
+	}
+	return nil
+}
+
 func encrypt(v string) (string, error) { return secret.EncryptSecret(setting.SecretKey, v) }
 func decrypt(v string) (string, error) { return secret.DecryptSecret(setting.SecretKey, v) }
 
@@ -106,6 +122,11 @@ func option(d setting.LogShippingDestination) (log.HTTPShipOption, error) {
 	return opt, nil
 }
 
+// validSecret accepts a key or header value of at most 1 KiB without CR, LF or NUL.
+func validSecret(v string) bool {
+	return len(v) <= setting.LogShippingMaxHeaderValue && !strings.ContainsAny(v, "\r\n\x00")
+}
+
 func hashOf(d setting.LogShippingDestination) string {
 	b, _ := json.Marshal(d)
 	sum := sha256.Sum256(b)
@@ -122,7 +143,6 @@ func Apply(ctx context.Context, state setting.LogShippingState) error {
 		hash string
 	}
 	want := map[string]desired{}
-	sql := false
 	for _, d := range state.Destinations {
 		if !d.Enabled {
 			continue
@@ -139,7 +159,6 @@ func Apply(ctx context.Context, state setting.LogShippingState) error {
 			BufferLen: max(setting.Log.BufferLen, 1000), Level: log.LevelFromString(d.Level), Format: "json",
 			Expression: d.Expression, Exclusion: d.Exclusion, StacktraceLevel: log.NONE, WriterOption: opt,
 		}, hashOf(d)}
-		sql = sql || d.HasLogType("database")
 	}
 
 	mu.Lock()
@@ -163,11 +182,6 @@ func Apply(ctx context.Context, state setting.LogShippingState) error {
 			log.GetManager().GetLogger(l).AddWriters(wr)
 		}
 		active[id] = r
-	}
-	// the SQL log is switched for every destination that selected it, and back to the app.ini value when none does
-	if on := setting.Database.LogSQL || sql; on != lastSQL {
-		lastSQL = on
-		defer setLogSQL(ctx, on)
 	}
 	mu.Unlock()
 	return nil
@@ -273,8 +287,8 @@ func Save(ctx context.Context, doer *user_model.User, id string, in Input) (sett
 	// a key or header value must not be sent to an address the admin didn't give it to: a new endpoint needs them all again
 	endpointChanged := id != "" && d.Endpoint != old.Endpoint
 	if in.Key != nil && *in.Key != "" {
-		if len(*in.Key) > setting.LogShippingMaxHeaderValue {
-			return d, util.NewInvalidArgumentErrorf("the key is too long")
+		if !validSecret(*in.Key) {
+			return d, util.NewInvalidArgumentErrorf("the key is too long or contains a control character")
 		}
 		if d.KeyEnc, err = encrypt(*in.Key); err != nil {
 			return d, err
@@ -286,9 +300,10 @@ func Save(ctx context.Context, doer *user_model.User, id string, in Input) (sett
 	if in.Headers != nil {
 		headers := make([]setting.LogShippingHeader, 0, len(*in.Headers))
 		for _, h := range *in.Headers {
-			if len(h.Value) > setting.LogShippingMaxHeaderValue {
-				return d, util.NewInvalidArgumentErrorf("a header value is too long")
+			if !validSecret(h.Value) {
+				return d, util.NewInvalidArgumentErrorf("a header value is too long or contains a control character")
 			}
+			h.Name = http.CanonicalHeaderKey(h.Name)
 			var enc string
 			if h.Value != "" {
 				if enc, err = encrypt(h.Value); err != nil {
@@ -311,6 +326,9 @@ func Save(ctx context.Context, doer *user_model.User, id string, in Input) (sett
 		return d, util.NewInvalidArgumentErrorf("%v", err)
 	}
 	if err := CheckEndpoint(d.Endpoint); err != nil {
+		return d, err
+	}
+	if err := checkLoop(d.Endpoint); err != nil {
 		return d, err
 	}
 	for i, o := range dests {
@@ -455,10 +473,9 @@ func Get(ctx context.Context, id string) (Destination, error) {
 	return View(d), nil
 }
 
-// TestResult is the outcome of a test event: the status code and a class of failure, never the remote's answer.
+// TestResult is the outcome of a test event: ok or not, nothing of what the network or the remote said.
 type TestResult struct {
-	Status int    `json:"status"`
-	Error  string `json:"error"`
+	OK bool `json:"ok"`
 }
 
 // Test sends one "test" event to a saved destination, with the same options and dial check as its writer.
@@ -477,7 +494,7 @@ func Test(ctx context.Context, id string) (TestResult, error) {
 
 	opt, err := option(d)
 	if err != nil {
-		return TestResult{Error: "invalid configuration"}, nil
+		return TestResult{}, nil
 	}
 	event, _ := json.Marshal(map[string]any{
 		"timestamp": time.Now().UnixMilli(), "message": "spoved log shipping test event", "level": "INFO",
@@ -486,11 +503,5 @@ func Test(ctx context.Context, id string) (TestResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	code, err := log.ProbeHTTP(ctx, writerName(id), opt, event)
-	switch {
-	case err != nil:
-		return TestResult{Error: err.Error()}, nil
-	case code/100 != 2:
-		return TestResult{Status: code, Error: fmt.Sprintf("status %dxx", code/100)}, nil
-	}
-	return TestResult{Status: code}, nil
+	return TestResult{OK: err == nil && code/100 == 2}, nil
 }

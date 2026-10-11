@@ -4,7 +4,6 @@
 package logshipping
 
 import (
-	"context"
 	"io"
 	"net"
 	"net/http"
@@ -191,7 +190,7 @@ func TestPatchEndpointChangeNeedsEverySecret(t *testing.T) {
 	require.NoError(t, err)
 	gen, err := Save(t.Context(), u, "", Input{
 		Name: new("gen"), Type: new("http"), Endpoint: new("https://127.0.0.1:9/gen"), LogTypes: &[]string{"access"},
-		Headers: &[]HeaderInput{{Name: "Authorization", Value: testHeader}, {Name: "X-Team", Value: "ops"}},
+		Headers: &[]HeaderInput{{Name: "Authorization", Value: testHeader}, {Name: "X-Team", Value: "team-ops-secret-value"}},
 	})
 	require.NoError(t, err)
 
@@ -208,7 +207,7 @@ func TestPatchEndpointChangeNeedsEverySecret(t *testing.T) {
 	// with all secrets given it works
 	_, err = Save(t.Context(), u, nr.ID, Input{Endpoint: new("https://127.0.0.1:9/elsewhere"), Key: new("NRAK-NEW")})
 	require.NoError(t, err)
-	_, err = Save(t.Context(), u, gen.ID, Input{Endpoint: new("https://127.0.0.1:9/elsewhere"), Headers: &[]HeaderInput{{Name: "Authorization", Value: "Bearer new"}, {Name: "X-Team", Value: "sre"}}})
+	_, err = Save(t.Context(), u, gen.ID, Input{Endpoint: new("https://127.0.0.1:9/elsewhere"), Headers: &[]HeaderInput{{Name: "Authorization", Value: "Bearer new"}, {Name: "X-Team", Value: "team-sre-secret-value"}}})
 	require.NoError(t, err)
 
 	// with the endpoint unchanged the key and the header values stay, also when a header is sent without a value
@@ -237,7 +236,6 @@ func TestApplyAttachesAndKeepsWriters(t *testing.T) {
 	reset(t)
 	defer reset(t)
 	allowLoopback(t)
-	t.Cleanup(test.MockVariableValue(&setLogSQL, func(context.Context, bool) {}))
 	u := admin(t)
 
 	d, err := Save(t.Context(), u, "", newRelic("https://127.0.0.1:9/nr", "access", "application"))
@@ -275,27 +273,81 @@ func TestApplyAttachesAndKeepsWriters(t *testing.T) {
 	require.ErrorIs(t, Remove(t.Context(), u, d.ID), util.ErrNotExist)
 }
 
-func TestApplyTogglesSQLLogging(t *testing.T) {
+func TestSaveRejectsDatabaseLogsLoopsAndBadHeaders(t *testing.T) {
 	reset(t)
 	defer reset(t)
 	allowLoopback(t)
-	var mu sync.Mutex
-	var calls []bool
-	t.Cleanup(test.MockVariableValue(&setLogSQL, func(_ context.Context, on bool) { mu.Lock(); calls = append(calls, on); mu.Unlock() }))
-	t.Cleanup(test.MockVariableValue(&setting.Database.LogSQL, false))
+	t.Cleanup(test.MockVariableValue(&setting.AppURL, "https://git.example.org/"))
+	t.Cleanup(test.MockVariableValue(&setting.Domain, "ssh.example.org"))
+	u := admin(t)
+	base := func(f func(in *Input)) Input {
+		in := Input{Name: new("x"), Type: new("http"), Endpoint: new("https://127.0.0.1:9/x"), LogTypes: &[]string{"access"}}
+		f(&in)
+		return in
+	}
+	hdr := func(name, value string) func(in *Input) {
+		return func(in *Input) { in.Headers = &[]HeaderInput{{Name: name, Value: value}} }
+	}
+	for name, in := range map[string]Input{
+		"database log":      base(func(in *Input) { in.LogTypes = &[]string{"database"} }),
+		"app url host":      base(func(in *Input) { in.Endpoint = new("https://git.example.org/api") }),
+		"app url host case": base(func(in *Input) { in.Endpoint = new("https://GIT.example.org:8443/api") }),
+		"domain":            base(func(in *Input) { in.Endpoint = new("https://ssh.example.org/api") }),
+		"header crlf name":  base(hdr("X-A\r\nX-B", "v")),
+		"header crlf value": base(hdr("X-A", "v\r\nX-B: w")),
+		"header nul value":  base(hdr("X-A", "v\x00")),
+		"header proxy":      base(hdr("Proxy-Authorization", "v")),
+		"header upgrade":    base(hdr("upgrade", "v")),
+		"header te":         base(hdr("TE", "v")),
+		"header host":       base(hdr("host", "v")),
+		"key crlf":          {Name: new("k"), Type: new("newrelic"), Endpoint: new("https://127.0.0.1:9/x"), LogTypes: &[]string{"access"}, Key: new("a\nb")},
+		"duplicate by case": base(func(in *Input) { in.Headers = &[]HeaderInput{{Name: "x-a", Value: "1"}, {Name: "X-A", Value: "2"}} }),
+		"too many": base(func(in *Input) {
+			h := make([]HeaderInput, 11)
+			for i := range h {
+				h[i] = HeaderInput{Name: "X-" + strings.Repeat("a", i+1), Value: "v"}
+			}
+			in.Headers = &h
+		}),
+	} {
+		_, err := Save(t.Context(), u, "", in)
+		require.ErrorIs(t, err, util.ErrInvalidArgument, name)
+		assert.NotContains(t, err.Error(), "X-B: w", name)
+	}
 
-	d, err := Save(t.Context(), admin(t), "", Input{Name: new("db"), Type: new("http"), Endpoint: new("https://127.0.0.1:9/x"), LogTypes: &[]string{"database"}})
+	// names are stored in canonical form
+	d, err := Save(t.Context(), u, "", base(hdr("x-team", "ops")))
 	require.NoError(t, err)
-	assert.True(t, calls[len(calls)-1])
-	require.NoError(t, Remove(t.Context(), admin(t), d.ID))
-	assert.False(t, calls[len(calls)-1])
+	assert.Equal(t, "X-Team", d.Headers[0].Name)
+}
+
+func TestEndpointChangeIsComparedAsText(t *testing.T) {
+	reset(t)
+	defer reset(t)
+	allowLoopback(t)
+	u := admin(t)
+	nr, err := Save(t.Context(), u, "", newRelic("https://127.0.0.1:9/nr", "access"))
+	require.NoError(t, err)
+	// any other text is a new endpoint: trailing slash, case of the host, an explicit default port, a dot
+	for _, e := range []string{"https://127.0.0.1:9/nr/", "https://127.0.0.1:9/NR", "https://127.0.0.1:09/nr", "https://127.0.0.1.:9/nr", "https://127.0.0.1:9/nr?"} {
+		_, err := Save(t.Context(), u, nr.ID, Input{Endpoint: &e})
+		require.ErrorIs(t, err, util.ErrInvalidArgument, e)
+	}
+	// the same text is not
+	_, err = Save(t.Context(), u, nr.ID, Input{Endpoint: new("https://127.0.0.1:9/nr"), Level: new("warn")})
+	require.NoError(t, err)
+
+	// a renamed secret header that keeps the old value is a new secret
+	gen, err := Save(t.Context(), u, "", Input{Name: new("gen"), Type: new("http"), Endpoint: new("https://127.0.0.1:9/g"), LogTypes: &[]string{"access"}, Headers: &[]HeaderInput{{Name: "Authorization", Value: testHeader}}})
+	require.NoError(t, err)
+	_, err = Save(t.Context(), u, gen.ID, Input{Headers: &[]HeaderInput{{Name: "X-Token"}}})
+	require.ErrorIs(t, err, util.ErrInvalidArgument)
 }
 
 func TestReloadOnlyWhenTheRevisionChanges(t *testing.T) {
 	reset(t)
 	defer reset(t)
 	allowLoopback(t)
-	t.Cleanup(test.MockVariableValue(&setLogSQL, func(context.Context, bool) {}))
 	u := admin(t)
 
 	d, err := Save(t.Context(), u, "", newRelic("https://127.0.0.1:9/nr", "access"))
@@ -327,7 +379,6 @@ func TestTestEventUsesSavedDestinationAndGenericErrors(t *testing.T) {
 	reset(t)
 	defer reset(t)
 	allowLoopback(t)
-	t.Cleanup(test.MockVariableValue(&setLogSQL, func(context.Context, bool) {}))
 
 	var mu sync.Mutex
 	status := 200
@@ -352,37 +403,37 @@ func TestTestEventUsesSavedDestinationAndGenericErrors(t *testing.T) {
 
 	res, err := Test(t.Context(), d.ID)
 	require.NoError(t, err)
-	assert.Equal(t, 200, res.Status)
-	assert.Empty(t, res.Error)
+	assert.True(t, res.OK)
 	require.Len(t, got, 1)
 	assert.Contains(t, got[0], testHeader)
 	assert.Contains(t, got[0], `"logtype":"test"`)
 
-	mu.Lock()
-	status = 503
-	mu.Unlock()
-	res, err = Test(t.Context(), d.ID)
-	require.NoError(t, err)
-	assert.Equal(t, 503, res.Status)
-	assert.Equal(t, "status 5xx", res.Error)
-	assert.NotContains(t, res.Error, testKey)
-
+	// a 4xx, a 5xx and a closed port all give the same answer: not ok, with nothing else
+	for _, code := range []int{400, 503} {
+		mu.Lock()
+		status = code
+		mu.Unlock()
+		testLast = map[string]time.Time{}
+		res, err = Test(t.Context(), d.ID)
+		require.NoError(t, err)
+		assert.Equal(t, TestResult{}, res)
+	}
 	_, err = Test(t.Context(), "zzzzzzzz")
 	require.ErrorIs(t, err, util.ErrNotExist)
 
-	// the endpoint is gone: a class of failure only
 	srv.Close()
+	testLast = map[string]time.Time{}
 	res, err = Test(t.Context(), d.ID)
 	require.NoError(t, err)
-	assert.Zero(t, res.Status)
-	assert.Contains(t, []string{"connection failed", "timeout"}, res.Error)
+	assert.Equal(t, TestResult{}, res)
+	b, _ := json.Marshal(res)
+	assert.JSONEq(t, `{"ok":false}`, string(b))
 }
 
 func TestTestEventIsRateLimited(t *testing.T) {
 	reset(t)
 	defer reset(t)
 	allowLoopback(t)
-	t.Cleanup(test.MockVariableValue(&setLogSQL, func(context.Context, bool) {}))
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 	t.Cleanup(test.MockVariableValue(&log.ShipTransport, srv.Client().Transport))
@@ -399,14 +450,17 @@ func TestSecretsAreRegisteredForRedaction(t *testing.T) {
 	reset(t)
 	defer reset(t)
 	allowLoopback(t)
-	t.Cleanup(test.MockVariableValue(&setLogSQL, func(context.Context, bool) {}))
 	_, err := Save(t.Context(), admin(t), "", Input{
 		Name: new("gen"), Type: new("http"), Endpoint: new("https://127.0.0.1:9/x"), LogTypes: &[]string{"access"},
 		Headers: &[]HeaderInput{{Name: "Authorization", Value: testHeader}},
 	})
 	require.NoError(t, err)
 	assert.NotContains(t, log.Redact("sending "+testHeader), testHeader)
+	_, err = Save(t.Context(), admin(t), "", newRelic("https://127.0.0.1:9/nr2", "router"))
+	require.NoError(t, err)
+	assert.NotContains(t, log.Redact("sending "+testKey), testKey)
 	b, err := json.Marshal(log.GetManager().DumpLoggers())
 	require.NoError(t, err)
 	assert.NotContains(t, string(b), testHeader)
+	assert.NotContains(t, string(b), testKey)
 }

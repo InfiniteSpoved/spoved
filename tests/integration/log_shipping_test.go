@@ -178,7 +178,7 @@ func TestLogShippingSecrets(t *testing.T) {
 	}, http.StatusCreated), &nr)
 	DecodeJSON(t, apiShip(t, "POST", "", token, &api.CreateLogShippingDestinationOption{
 		Name: "gen", Type: "http", Endpoint: "https://127.0.0.1:9/in", LogTypes: []string{"router"},
-		Headers: []*api.LogShippingHeaderOption{{Name: "Authorization", Value: shipHeader}, {Name: "X-Team", Value: "ops"}},
+		Headers: []*api.LogShippingHeaderOption{{Name: "Authorization", Value: shipHeader}, {Name: "X-Team", Value: "team-ops-secret-value"}},
 	}, http.StatusCreated), &gen)
 	assert.True(t, nr.HasKey)
 	assert.False(t, gen.HasKey)
@@ -189,7 +189,7 @@ func TestLogShippingSecrets(t *testing.T) {
 		t.Helper()
 		assert.NotContains(t, body, shipKey, where)
 		assert.NotContains(t, body, shipHeader, where)
-		assert.NotContains(t, body, "ops\"", where)
+		assert.NotContains(t, body, "team-ops-secret-value", where)
 	}
 	noSecrets("list", apiShip(t, "GET", "", token, nil, http.StatusOK).Body.String())
 	noSecrets("get", apiShip(t, "GET", "/"+nr.ID, token, nil, http.StatusOK).Body.String())
@@ -231,6 +231,9 @@ func TestLogShippingSecrets(t *testing.T) {
 		"header":   {Name: "a", Type: "http", Endpoint: "https://127.0.0.1:9/x", LogTypes: []string{"git"}, Headers: []*api.LogShippingHeaderOption{{Name: "Host", Value: "x"}}},
 		"no key":   {Name: "a", Type: "newrelic", Endpoint: "https://127.0.0.1:9/x", LogTypes: []string{"git"}},
 		"log type": {Name: "a", Type: "http", Endpoint: "https://127.0.0.1:9/x", LogTypes: []string{"audit"}},
+		"database": {Name: "a", Type: "http", Endpoint: "https://127.0.0.1:9/x", LogTypes: []string{"database"}},
+		"self":     {Name: "a", Type: "http", Endpoint: setting.AppURL + "api/v1/version", LogTypes: []string{"access"}},
+		"crlf":     {Name: "a", Type: "http", Endpoint: "https://127.0.0.1:9/x", LogTypes: []string{"git"}, Headers: []*api.LogShippingHeaderOption{{Name: "X-A", Value: "v\r\nX-B: w"}}},
 	} {
 		resp := apiShip(t, "POST", "", token, &o, http.StatusUnprocessableEntity)
 		assert.NotContains(t, resp.Body.String(), "u:p", name)
@@ -278,7 +281,7 @@ func TestLogShippingTestEvent(t *testing.T) {
 	good := create("good", ok.URL)
 	var res api.LogShippingTestResult
 	DecodeJSON(t, apiShip(t, "POST", "/"+good.ID+"/test", token, nil, http.StatusOK), &res)
-	assert.Equal(t, api.LogShippingTestResult{Status: 200}, res)
+	assert.Equal(t, api.LogShippingTestResult{OK: true}, res)
 	e := ok.find(func(e map[string]any) bool { return e["logtype"] == "test" })
 	require.NotNil(t, e)
 	assert.Equal(t, shipHeader, ok.auth[0])
@@ -290,17 +293,15 @@ func TestLogShippingTestEvent(t *testing.T) {
 	ok.mu.Unlock()
 	failing := create("failing", ok.URL)
 	DecodeJSON(t, apiShip(t, "POST", "/"+failing.ID+"/test", token, nil, http.StatusOK), &res)
-	assert.Equal(t, api.LogShippingTestResult{Status: 503, Error: "status 5xx"}, res)
+	assert.Equal(t, api.LogShippingTestResult{}, res)
 
-	// a closed port: a class of failure, no address, no remote text
+	// a closed port: the same fixed answer, no address, no error text
 	dead := httptest.NewTLSServer(http.NotFoundHandler())
 	endpoint := dead.URL
 	dead.Close()
 	gone := create("gone", endpoint)
 	resp := apiShip(t, "POST", "/"+gone.ID+"/test", token, nil, http.StatusOK)
-	DecodeJSON(t, resp, &res)
-	assert.Contains(t, []string{"connection failed", "timeout"}, res.Error)
-	assert.NotContains(t, resp.Body.String(), "127.0.0.1")
+	assert.JSONEq(t, `{"ok":false}`, resp.Body.String())
 
 	// the web button flashes the result
 	web := create("web", ok.URL)

@@ -4,6 +4,7 @@
 package log
 
 import (
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -201,4 +202,42 @@ func TestHTTPWriterDumpHasNoSecrets(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(b), "logs.example.org")
 	assert.NotContains(t, string(b), testHTTPSecret)
+}
+
+func TestHTTPWritersRedactEveryFormat(t *testing.T) {
+	for _, tc := range []struct {
+		format string
+		opt    HTTPShipOption
+	}{
+		{"http", HTTPShipOption{Format: "http", Headers: map[string]string{"X-A": "header-value-for-redaction-test"}}},
+		{"ndjson", HTTPShipOption{Format: "http", NDJSON: true}},
+		{"newrelic", HTTPShipOption{Format: "newrelic", Key: testNRKey}},
+	} {
+		t.Run(tc.format, func(t *testing.T) {
+			s := newHTTPServer(t, 200)
+			tc.opt.Endpoint = s.URL
+			m := NewManager()
+			defer m.Close()
+			name := "redact-" + tc.format
+			w, err := m.NewSharedWriter(name, "http", WriterMode{Level: INFO, Format: "json", WriterOption: tc.opt})
+			require.NoError(t, err)
+			l := m.GetLogger("access")
+			l.AddWriters(w)
+			l.LogWithFields(0, INFO, map[string]any{"path": "/x?access_token=SUPERSECRETTOKEN0123&page=2"}, "GET /x?access_token=SUPERSECRETTOKEN0123")
+			_ = l.RemoveWriter(name)
+			m.RemoveSharedWriter(name) // flushes
+			ForgetShipping(name)
+
+			require.Equal(t, 1, s.count())
+			body := s.bodies[0]
+			if tc.format == "newrelic" {
+				zr, err := gzip.NewReader(strings.NewReader(body))
+				require.NoError(t, err)
+				b, _ := io.ReadAll(zr)
+				body = string(b)
+			}
+			assert.NotContains(t, body, "SUPERSECRETTOKEN0123")
+			assert.Contains(t, body, "access_token=[REDACTED]")
+		})
+	}
 }

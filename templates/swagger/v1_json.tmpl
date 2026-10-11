@@ -1686,7 +1686,7 @@
     },
     "/admin/log-shipping/destinations/{id}/test": {
       "post": {
-        "description": "Sends one event with logtype \"test\" to the saved destination. At most one per destination every 5 seconds.",
+        "description": "Sends one event with logtype \"test\" to the saved destination and reports only whether it was accepted. At most one per destination every 5 seconds.",
         "produces": [
           "application/json"
         ],
@@ -33405,19 +33405,12 @@
       "x-go-package": "forgejo.org/modules/structs"
     },
     "LogShippingTestResult": {
-      "description": "LogShippingTestResult is the outcome of a test event",
+      "description": "LogShippingTestResult is the outcome of a test event: only whether the destination accepted it",
       "type": "object",
       "properties": {
-        "error": {
-          "description": "\"status 4xx\", \"status 5xx\", \"connection failed\" or \"timeout\"; empty on success",
-          "type": "string",
-          "x-go-name": "Error"
-        },
-        "status": {
-          "description": "the HTTP status of the destination, 0 if it wasn't reached",
-          "type": "integer",
-          "format": "int64",
-          "x-go-name": "Status"
+        "ok": {
+          "type": "boolean",
+          "x-go-name": "OK"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"

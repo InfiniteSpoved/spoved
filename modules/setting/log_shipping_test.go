@@ -4,6 +4,7 @@
 package setting
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -52,6 +53,7 @@ func TestLogShippingDestinationValidate(t *testing.T) {
 		"query":            mutate(func(d *LogShippingDestination) { d.Endpoint = "https://example.org/x?k=v" }),
 		"fragment":         mutate(func(d *LogShippingDestination) { d.Endpoint = "https://example.org/x#f" }),
 		"unknown log type": mutate(func(d *LogShippingDestination) { d.LogTypes = []string{"nope"} }),
+		"database log":     mutate(func(d *LogShippingDestination) { d.LogTypes = []string{"database"} }),
 		"no log type":      mutate(func(d *LogShippingDestination) { d.LogTypes = nil }),
 		"bad level":        mutate(func(d *LogShippingDestination) { d.Level = "loud" }),
 		"bad expression":   mutate(func(d *LogShippingDestination) { d.Expression = "(" }),
@@ -68,7 +70,7 @@ func TestLogShippingDestinationValidate(t *testing.T) {
 		}),
 		"header without val": generic(func(d *LogShippingDestination) { d.Headers = []LogShippingHeader{{Name: "X-A"}} }),
 	}
-	for _, name := range []string{"Host", "content-length", "Content-Encoding", "CONTENT-TYPE", "Transfer-Encoding", "Connection"} {
+	for _, name := range []string{"Host", "content-length", "Content-Encoding", "CONTENT-TYPE", "Transfer-Encoding", "Connection", "Upgrade", "TE", "trailer", "Expect", "Proxy-Authorization", "proxy-x"} {
 		bad["forbidden header "+name] = generic(func(d *LogShippingDestination) { d.Headers = []LogShippingHeader{{Name: name, ValueEnc: "v"}} })
 	}
 	for name, d := range bad {
@@ -88,9 +90,19 @@ func TestLogShippingLoggers(t *testing.T) {
 	d := validDestination()
 	assert.Equal(t, []string{"access", "default"}, d.Loggers())
 	d.LogTypes = []string{"all"}
-	assert.Equal(t, []string{"access", "default", "router", "ssh", "xorm"}, d.Loggers())
-	d.LogTypes = []string{"database", "git", "database"}
-	assert.Equal(t, []string{"ssh", "xorm"}, d.Loggers())
+	assert.Equal(t, []string{"access", "default", "router", "ssh"}, d.Loggers())
+	d.LogTypes = []string{"git", "router", "git"}
+	assert.Equal(t, []string{"router", "ssh"}, d.Loggers())
 	assert.True(t, d.HasLogType("git"))
 	assert.False(t, d.HasLogType("access"))
+}
+
+func TestLogShippingDestinationStringHidesSecrets(t *testing.T) {
+	d := validDestination()
+	d.KeyEnc = "KEYCIPHER"
+	d.Headers = []LogShippingHeader{{Name: "X-A", ValueEnc: "VALUECIPHER"}}
+	for _, out := range []string{d.String(), d.GoString(), fmt.Sprintf("%v %+v %#v", d, d, d)} {
+		assert.NotContains(t, out, "KEYCIPHER")
+		assert.NotContains(t, out, "VALUECIPHER")
+	}
 }

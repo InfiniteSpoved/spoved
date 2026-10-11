@@ -88,10 +88,7 @@ type EditLogShippingDestinationOption struct {
 	Exclusion  *string                     `json:"exclusion"`
 }
 
-// LogShippingTestResult is the outcome of a test event
+// LogShippingTestResult is the outcome of a test event: only whether the destination accepted it
 type LogShippingTestResult struct {
-	// the HTTP status of the destination, 0 if it wasn't reached
-	Status int `json:"status"`
-	// "status 4xx", "status 5xx", "connection failed" or "timeout"; empty on success
-	Error string `json:"error"`
+	OK bool `json:"ok"`
 }
