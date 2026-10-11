@@ -6,14 +6,11 @@ name: CI
 # job does lives in .github/ci/job.sh. This repository is private, so unlike
 # spovedBuild the logs are shown as they are.
 #
-# Pull requests run everything (the full run). Manual runs take a branch, tag
-# or commit and run the checks and unit tests, everything when full is checked;
-# `only` limits a manual run to some stages. Require the "CI success" check in
-# the branch protection rules.
+# It only runs by hand (pull requests run in spovedBuild, see spovedbuild.yml).
+# Manual runs take a branch, tag or commit and run the checks and unit tests,
+# everything when full is checked; `only` limits a manual run to some stages.
 
 on:
-  pull_request:
-    branches: [develop]
   workflow_dispatch:
     inputs:
       ref:
