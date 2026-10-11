@@ -84,14 +84,15 @@ jobs:
           ref: ${{ inputs.ref }}
           # commits to fetch, 0 for the full history (with origin/develop)
           fetch-depth: ${{ matrix.depth }}
+      # no GitHub cache for Go and npm: the runners share host-wide caches (GOCACHE, GOMODCACHE, npm), and
+      # extracting a cache archive into them while other jobs read them crashed a build with SIGBUS
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache-dependency-path: go.sum
+          cache: false
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-          cache: npm
       - name: Cache tools
         uses: actions/cache@v4
         with:
