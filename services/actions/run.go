@@ -289,6 +289,18 @@ func checkJobRunsOnStaticMatrixError(ctx context.Context, job *actions_model.Act
 // DeleteRun removes a particular run including all associated artifacts, jobs, tasks, and logs. The run has to be
 // completed for the operation to succeed.
 func DeleteRun(ctx context.Context, runID int64) error {
+	return deleteRun(ctx, runID, false)
+}
+
+// ErrRunKept is returned by DeleteRunUnlessKept for a kept run.
+var ErrRunKept = errors.New("run is kept")
+
+// DeleteRunUnlessKept is DeleteRun for the automatic cleanup: a run kept after it was selected is spared.
+func DeleteRunUnlessKept(ctx context.Context, runID int64) error {
+	return deleteRun(ctx, runID, true)
+}
+
+func deleteRun(ctx context.Context, runID int64, unlessKept bool) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
 		run, err := actions_model.GetRunByID(ctx, runID)
 		if err != nil {
@@ -309,6 +321,14 @@ func DeleteRun(ctx context.Context, runID int64) error {
 			return fmt.Errorf("unable to delete jobs of run %d: %w", run.ID, err)
 		}
 
+		if unlessKept {
+			// the conditional delete decides, so a concurrent keep rolls the whole deletion back
+			deleted, err := actions_model.DeleteUnkeptRun(ctx, run.ID)
+			if err == nil && !deleted {
+				return ErrRunKept
+			}
+			return err
+		}
 		return actions_model.DeleteRun(ctx, run.ID)
 	})
 }

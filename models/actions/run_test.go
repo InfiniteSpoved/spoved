@@ -691,3 +691,40 @@ func TestFindOldDoneRunIDs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, ids)
 }
+
+func TestSetRunKeep(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	before := unittest.AssertExistsAndLoadBean(t, &ActionRun{ID: 791})
+	assert.False(t, before.Keep)
+
+	require.NoError(t, SetRunKeep(t.Context(), 791, true))
+
+	after := unittest.AssertExistsAndLoadBean(t, &ActionRun{ID: 791})
+	assert.True(t, after.Keep)
+	// only the column changes
+	before.Keep = true
+	assert.Equal(t, before, after)
+
+	// a kept run is never selected for retention
+	ids, err := FindOldDoneRunIDs(t.Context(), timeutil.TimeStampNow(), 0, 100)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{792, 891, 892, 893, 896}, ids)
+
+	require.NoError(t, SetRunKeep(t.Context(), 791, false))
+	assert.False(t, unittest.AssertExistsAndLoadBean(t, &ActionRun{ID: 791}).Keep)
+}
+
+func TestDeleteUnkeptRun(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	require.NoError(t, SetRunKeep(t.Context(), 791, true))
+
+	deleted, err := DeleteUnkeptRun(t.Context(), 791)
+	require.NoError(t, err)
+	assert.False(t, deleted)
+	unittest.AssertExistsAndLoadBean(t, &ActionRun{ID: 791})
+
+	deleted, err = DeleteUnkeptRun(t.Context(), 792)
+	require.NoError(t, err)
+	assert.True(t, deleted)
+	unittest.AssertNotExistsBean(t, &ActionRun{ID: 792})
+}

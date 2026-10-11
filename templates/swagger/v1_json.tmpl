@@ -8636,6 +8636,98 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/actions/runs/{run_id}/keep": {
+      "post": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Keep a workflow run, exempting it from the automatic cleanup of old runs.",
+        "operationId": "KeepActionRun",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "ID of the workflow run",
+            "name": "run_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Workflow run is kept"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "delete": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Stop keeping a workflow run so the automatic cleanup may remove it.",
+        "operationId": "UnkeepActionRun",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "ID of the workflow run",
+            "name": "run_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Workflow run is no longer kept"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/actions/runs/{run_id}/logs": {
       "get": {
         "produces": [
@@ -26893,6 +26985,11 @@
           "type": "boolean",
           "x-go-name": "IsRefDeleted"
         },
+        "keep": {
+          "description": "whether the run is exempt from the automatic cleanup of old runs",
+          "type": "boolean",
+          "x-go-name": "Keep"
+        },
         "need_approval": {
           "description": "may need approval if it's a fork pull request",
           "type": "boolean",
@@ -27111,6 +27208,11 @@
           "type": "integer",
           "format": "int64",
           "x-go-name": "Index"
+        },
+        "keep": {
+          "description": "whether the run is exempt from the automatic cleanup of old runs",
+          "type": "boolean",
+          "x-go-name": "Keep"
         },
         "prettyref": {
           "description": "the branch, tag or pull request (#number) the run ran on",

@@ -183,6 +183,8 @@ type ViewRunInfo struct {
 	CanRerun             bool            `json:"canRerun"`
 	CanDeleteArtifact    bool            `json:"canDeleteArtifact"`
 	CanDelete            bool            `json:"canDelete"`
+	Keep                 bool            `json:"keep,omitempty"`    // exempt from the automatic cleanup
+	CanKeep              bool            `json:"canKeep,omitempty"` // the doer may change Keep
 	Done                 bool            `json:"done"`
 	Jobs                 []*ViewJob      `json:"jobs"`
 	Commit               ViewCommit      `json:"commit"`
@@ -323,6 +325,8 @@ func getViewResponse(ctx *app_context.Context, req *ViewRequest, runIndex, jobIn
 	resp.State.Run.CanRerun = run.CanBeRerun() && ctx.Repo.CanWrite(unit.TypeActions)
 	resp.State.Run.CanDeleteArtifact = run.Status.IsDone() && ctx.Repo.CanWrite(unit.TypeActions)
 	resp.State.Run.CanDelete = run.Status.IsDone() && ctx.IsUserRepoAdmin()
+	resp.State.Run.Keep = run.Keep
+	resp.State.Run.CanKeep = ctx.IsUserRepoAdmin()
 	resp.State.Run.Jobs = make([]*ViewJob, 0, len(jobs)) // marshal to '[]' instead of 'null' in json
 	resp.State.Run.Status = run.Status.String()
 	resp.State.Run.EstimatedOutcome = actions_model.EstimateRunOutcome(jobs).String()
@@ -744,6 +748,28 @@ func DeleteRun(ctx *app_context.Context) {
 		return
 	}
 
+	ctx.JSONOK()
+}
+
+// KeepRun and UnkeepRun set whether the run is exempt from the automatic cleanup of old runs (repository admins).
+func KeepRun(ctx *app_context.Context)   { setRunKeep(ctx, true) }
+func UnkeepRun(ctx *app_context.Context) { setRunKeep(ctx, false) }
+
+func setRunKeep(ctx *app_context.Context, keep bool) {
+	run, err := actions_model.GetRunByIndex(ctx, ctx.Repo.Repository.ID, ctx.ParamsInt64("run"))
+	if err != nil {
+		if errors.Is(err, util.ErrNotExist) {
+			ctx.Error(http.StatusNotFound, err.Error())
+			return
+		}
+		ctx.Error(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := actions_model.SetRunKeep(ctx, run.ID, keep); err != nil {
+		ctx.Error(http.StatusInternalServerError, err.Error())
+		return
+	}
+	log.Info("User %d set keep=%t on run %d of repository %d", ctx.Doer.ID, keep, run.ID, run.RepoID)
 	ctx.JSONOK()
 }
 

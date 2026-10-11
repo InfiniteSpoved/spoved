@@ -1764,6 +1764,8 @@ func registerRoutes(m *web.Route) {
 					})
 					m.Post("/cancel", reqRepoActionsWriter, actions.Cancel)
 					m.Post("/delete", reqRepoAdmin, actions.DeleteRun)
+					m.Post("/keep", reqRepoAdmin, actions.KeepRun)
+					m.Post("/unkeep", reqRepoAdmin, actions.UnkeepRun)
 					m.Get("/artifacts", actions.ArtifactsView)
 					m.Get("/artifacts/{artifact_name_or_id}", actions.ArtifactsDownloadView)
 					m.Delete("/artifacts/{artifact_name}", reqRepoActionsWriter, actions.ArtifactsDeleteView)

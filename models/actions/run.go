@@ -95,6 +95,8 @@ type ActionRun struct {
 	// Prioritize signals whether a user has requested that this run should be prioritized (`true`). It is a separate
 	// value so that it does not get lost when prioritization algorithms change the ActionRun's Priority.
 	Prioritize bool `xorm:"NOT NULL DEFAULT false"`
+	// Keep exempts the run from the automatic cleanup of old runs.
+	Keep bool `xorm:"NOT NULL DEFAULT false"`
 }
 
 func init() {
@@ -587,6 +589,19 @@ func DeleteRun(ctx context.Context, runID int64) error {
 	return err
 }
 
+// SetRunKeep sets whether the run is exempt from the automatic cleanup of old runs.
+func SetRunKeep(ctx context.Context, runID int64, keep bool) error {
+	// plain SQL: an xorm update would bump the optimistic-lock version and the update time
+	_, err := db.GetEngine(ctx).Exec("UPDATE action_run SET keep = ? WHERE id = ?", keep, runID)
+	return err
+}
+
+// DeleteUnkeptRun deletes the run unless it is kept, and reports whether it did.
+func DeleteUnkeptRun(ctx context.Context, runID int64) (bool, error) {
+	n, err := db.GetEngine(ctx).Where("id = ? AND keep = ?", runID, false).Delete(new(ActionRun))
+	return n > 0, err
+}
+
 // GetLatestDefaultBranchRunIDs returns the ID of the latest run of each workflow on the default branch of its
 // repository, for all repositories.
 func GetLatestDefaultBranchRunIDs(ctx context.Context) (container.Set[int64], error) {
@@ -601,11 +616,11 @@ func GetLatestDefaultBranchRunIDs(ctx context.Context) (container.Set[int64], er
 }
 
 // FindOldDoneRunIDs returns the IDs, greater than afterID and in ascending order, of completed runs created before
-// olderThan.
+// olderThan, except kept runs.
 func FindOldDoneRunIDs(ctx context.Context, olderThan timeutil.TimeStamp, afterID int64, limit int) ([]int64, error) {
 	var ids []int64
 	return ids, db.GetEngine(ctx).Table("action_run").
-		Where("id > ? AND created < ?", afterID, olderThan).
+		Where("id > ? AND created < ? AND keep = ?", afterID, olderThan, false).
 		In("status", DoneStatuses()).
 		OrderBy("id").
 		Limit(limit).

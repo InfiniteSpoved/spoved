@@ -958,6 +958,8 @@ func Routes() *web.Route {
 						m.Get("", repo.ListActionRuns)
 						m.Get("/{run_id}", repo.GetActionRun)
 						m.Delete("/{run_id}", reqToken(), reqAdmin(unit.TypeActions), repo.DeleteActionRun)
+						m.Post("/{run_id}/keep", reqToken(), reqAdmin(unit.TypeActions), repo.KeepActionRun)
+						m.Delete("/{run_id}/keep", reqToken(), reqAdmin(unit.TypeActions), repo.UnkeepActionRun)
 						m.Post("/{run_id}/cancel", reqToken(), reqRepoWriter(unit.TypeActions), repo.CancelActionRun)
 						m.Post("/{run_id}/rerun", reqToken(), reqRepoWriter(unit.TypeActions), repo.RerunActionRun)
 						m.Get("/{run_id}/jobs", repo.ListActionRunJobs)

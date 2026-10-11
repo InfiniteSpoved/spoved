@@ -1252,6 +1252,102 @@ func DeleteActionRun(ctx *context.APIContext) {
 	ctx.Status(http.StatusNoContent)
 }
 
+// KeepActionRun exempts a workflow run from the automatic cleanup of old runs.
+func KeepActionRun(ctx *context.APIContext) {
+	// swagger:operation POST /repos/{owner}/{repo}/actions/runs/{run_id}/keep repository KeepActionRun
+	// ---
+	// summary: Keep a workflow run, exempting it from the automatic cleanup of old runs.
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: run_id
+	//   in: path
+	//   description: ID of the workflow run
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// responses:
+	//   "204":
+	//     description: Workflow run is kept
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+
+	setActionRunKeep(ctx, true)
+}
+
+// UnkeepActionRun makes a workflow run subject to the automatic cleanup again.
+func UnkeepActionRun(ctx *context.APIContext) {
+	// swagger:operation DELETE /repos/{owner}/{repo}/actions/runs/{run_id}/keep repository UnkeepActionRun
+	// ---
+	// summary: Stop keeping a workflow run so the automatic cleanup may remove it.
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: run_id
+	//   in: path
+	//   description: ID of the workflow run
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// responses:
+	//   "204":
+	//     description: Workflow run is no longer kept
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+
+	setActionRunKeep(ctx, false)
+}
+
+func setActionRunKeep(ctx *context.APIContext, keep bool) {
+	run, err := actions_model.GetRunByID(ctx, ctx.ParamsInt64(":run_id"))
+	if err != nil {
+		if errors.Is(err, util.ErrNotExist) {
+			ctx.Error(http.StatusNotFound, "GetRunById", err)
+			return
+		}
+
+		ctx.Error(http.StatusInternalServerError, "GetRunByID", err)
+		return
+	}
+
+	if ctx.Repo().Repository.ID != run.RepoID {
+		ctx.Error(http.StatusNotFound, "GetRunById", util.ErrNotExist)
+		return
+	}
+
+	if err := actions_model.SetRunKeep(ctx, run.ID, keep); err != nil {
+		ctx.Error(http.StatusInternalServerError, "SetRunKeep", err)
+		return
+	}
+	log.Info("User %d set keep=%t on run %d of repository %d", ctx.Doer().ID, keep, run.ID, run.RepoID)
+
+	ctx.Status(http.StatusNoContent)
+}
+
 // CancelActionRun cancels a pending or running workflow run.
 func CancelActionRun(ctx *context.APIContext) {
 	// swagger:operation POST /repos/{owner}/{repo}/actions/runs/{run_id}/cancel repository CancelActionRun

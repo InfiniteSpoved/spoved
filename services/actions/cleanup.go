@@ -133,7 +133,10 @@ func CleanupRuns(ctx context.Context) error {
 			if keep.Contains(id) {
 				continue
 			}
-			if err := DeleteRun(ctx, id); err != nil {
+			if err := DeleteRunUnlessKept(ctx, id); err != nil {
+				if errors.Is(err, ErrRunKept) {
+					continue
+				}
 				log.Error("Failed to delete run %d: %v", id, err)
 				// do not return error here, continue to next run
 				continue

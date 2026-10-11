@@ -10,6 +10,10 @@ const testLocale = {
   cancel: 'Locale Cancel',
   rerun: 'Locale Re-run',
   delete: 'Locale Delete',
+  keep: 'Locale Keep',
+  unkeep: 'Locale Unkeep',
+  kept: 'Locale Kept',
+  keptTooltip: '',
   confirmDelete: '',
   artifactsTitle: 'artifactTitleHere',
   areYouSure: '',
@@ -726,4 +730,26 @@ test('a run with a single job shows no graph', async () => {
   });
   await flushPromises();
   expect(wrapper.find('.action-run-graph').exists()).toBe(false);
+});
+
+const withRun = (run) => ({
+  ...defaultTestProps,
+  initialJobData: {...minimalInitialJobData, state: {...minimalInitialJobData.state, run: {...minimalInitialJobData.state.run, link: '/o/r/actions/runs/10', ...run}}},
+});
+
+test('keep button and kept marker', async () => {
+  Object.defineProperty(document.documentElement, 'lang', {value: 'en'});
+  let wrapper = mount(RepoActionView, {props: withRun({})});
+  await flushPromises();
+  expect(wrapper.text()).not.toContain('Locale Keep');
+  expect(wrapper.text()).not.toContain('Locale Kept');
+
+  wrapper = mount(RepoActionView, {props: withRun({canKeep: true})});
+  await flushPromises();
+  expect(wrapper.find('button[data-url="/o/r/actions/runs/10/keep"]').text()).toContain('Locale Keep');
+
+  wrapper = mount(RepoActionView, {props: withRun({canKeep: true, keep: true})});
+  await flushPromises();
+  expect(wrapper.find('button[data-url="/o/r/actions/runs/10/unkeep"]').text()).toContain('Locale Unkeep');
+  expect(wrapper.text()).toContain('Locale Kept');
 });
