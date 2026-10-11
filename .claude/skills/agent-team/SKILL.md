@@ -4,7 +4,7 @@ description: >
   Stand up and run the lean multi-session agent team for this repo: one
   supervisor (the user's session), one operational lead (intake, acceptance
   criteria, design approval, test plan, verification and merge), and one coder
-  per ticket (design, tests, code, CI in InfiniteSpoved/spovedBuild), plus a
+  per ticket (design, tests, code, CI), plus a
   security reviewer only for security-sensitive tickets. Up to three
   non-conflicting tickets at a time, merged one at a time. Holds the briefs, the setup steps, the check-in routine and the
   rules. Use when asked to "create a supervisor", "set up the team", "start the
@@ -17,7 +17,7 @@ argument-hint: "[supervisor|ops-lead|coder|security]"
 # Agent team (lean)
 
 The repository is InfiniteSpoved/spoved.
-CI runs in the public InfiniteSpoved/spovedBuild repository (CLAUDE.md "CI").
+CI: see CLAUDE.md "CI".
 
 Org chart: the coder and the security reviewer report to the operational lead (OL).
 The OL reports to the supervisor. Only the supervisor talks to the user.
@@ -30,11 +30,11 @@ The OL reports to the supervisor. Only the supervisor talks to the user.
 | Security reviewer | claude-sonnet-5-5 | 1, only for security-sensitive tickets | `role:security`, `supervisor:<OL>` |
 
 There is no technical lead and no tester. The coder has the code context, so it
-designs, tests and implements. spovedBuild runs the full test suite, so nobody
+designs, tests and implements. CI runs the full test suite, so nobody
 runs the 45-minute integration suite in a container any more.
 
 **Up to three non-conflicting tickets in parallel ("lanes"), merged one at a time**
-(user decision 08 Oct). At design time each coder lists the files it will touch, and
+At design time each coder lists the files it will touch, and
 the OL rejects overlap with tickets in flight (the en-US locale_next file and CLAUDE.md
 Learnings are append-only: keep both sides; swagger: regenerate). Each ticket reserves
 its migration letter at design time. After any merge, the other lanes merge develop in
@@ -42,15 +42,13 @@ and get a fresh full run before their own merge.
 
 ## One team on develop
 
-Since 10 Oct (user decision) only this team works on the repository; the project
-team was wound down. On 10 Oct, with two teams merging, about half of all develop
-merges into open branches were caused by the other team, three trains had to be
-redone, both teams reserved v18zj, and one PR was renamed v18zh → zk → zl. So:
+Only this team works on the repository. Two teams merging at once caused many
+needless develop merges, redone trains and clashing migration letters. So:
 - Only the supervisor merges into develop. Any other source of develop merges
   (another team, a manual merge) needs the user's OK first.
 - **CI logs.** Read a failed job's log within 15 minutes. Never push CI probe
   commits or edit `.github/ci/*` in a feature PR, and never encode test or package
-  names in public job results: reproduce locally, or use an `inputs[only]` partial run.
+  names in public job results: reproduce locally.
 - **Bugs in develop itself** (a race, a broken helper) get their own small PR at
   once, never a fix inside a feature branch.
 
@@ -61,13 +59,7 @@ Placeholders: `<SUP>`, `<OL>`, `<N>` (issue), `<BRANCH>`, `<SHA>` (40 characters
 
 ## Token budget
 
-The 08 Oct cost review (Confluence "Spoved agent team: structure vs. cost and
-speed") found:
-- sessions past 300k context took 67% of the spend;
-- leads took 55%;
-- Opus took 73%;
-- the cheapest phases were the ones with the fewest roles and short-lived sessions.
-So:
+Long sessions and leads cost the most, and Opus costs more than Sonnet. So:
 - Fewest sessions on the cheapest model: Sonnet everywhere except auth-heavy coding.
 - Retire the OL at ~200k context (get_session `context_usage.used_tokens`). Coders
   and security reviewers live for one ticket and are archived at merge.
@@ -75,12 +67,9 @@ So:
   supervisor every 4 h, and only while a ticket is in flight.
 - Delegate big reads (diffs, logs, issue threads) to subagents and keep only the
   conclusions. Short messages: results, not narration.
-- The 10 Oct review (team-comparison, 9–10 Oct) found this team cheaper per merged
-  ticket than the project team ($17–23 against about $56), but the supervisors took
-  31% of the spend, sessions past 300k took 59%, and Opus coders cost $47–61 each.
-  So every session has a hard cap of 300k context: hand off before it. The
+- Every session has a hard cap of 300k context: hand off before it. The
   supervisor rotates at ~200k or after 12 hours, like the OL.
-- The weekly usage limit stopped the whole team for 20 h on 07 Oct. Watch
+- The weekly usage limit can stop the whole team for hours. Watch
   `rate_limit_info` in get_session. Status "allowed_warning" means finish the
   current step, then stop and wait for `resetsAt`.
 
@@ -108,11 +97,10 @@ So:
    - Push the branch and open a PR to develop: "Fixes #<N>", or "Part of #<N>" for a
      partial PR.
    - CI starts by itself: every push to a PR (and to develop) starts a full
-     spovedBuild run, and a new push cancels the PR's unfinished run. Nobody
-     dispatches CI by hand. Wait for the commit status "CI success" on the head;
-     if it fails, read the failed jobs' logs in the PR's own `spovedBuild` check
-     (decrypted there). Push once per review round. Edits to .github/ci/* go to
-     the supervisor as a diff.
+     run, and a new push cancels the PR's unfinished run. Wait for the commit
+     status "CI success" on the head; if it fails, read the failed jobs' logs in
+     the PR's own CI check. Push once per review round. Edits to .github/ci/* go
+     to the supervisor as a diff.
    - Send the OL (and the security reviewer, if any) the PR number, the head SHA
      and the CI result.
 5. **Review.** In parallel:
@@ -121,7 +109,7 @@ So:
    - the security reviewer (if any) reviews the real diff.
    One combined must-fix list goes back to the coder. Repeat until both are clean.
    Then the OL posts "OL AC check @<SHA> … VERDICT: FULLY DONE" on the PR.
-6. **Merge**, by the supervisor (user decision 10 Oct; coders and the OL never
+6. **Merge**, by the supervisor (coders and the OL never
    merge), when all of these hold:
    - the "OL AC check @<SHA> … FULLY DONE" comment is on the PR;
    - the head is that SHA plus develop merges only
@@ -140,7 +128,7 @@ So:
 ## Supervisor setup
 
 1. `get_session` (no args) gives your id `<SUP>`.
-2. CI needs no setup: spoved's `spovedbuild.yml` starts it on every push.
+2. CI needs no setup: it starts on every push.
 3. Verify the hand-off against GitHub before briefing anyone:
    - open PRs;
    - `git ls-remote --heads origin`;
@@ -154,8 +142,6 @@ The supervisor also:
 - files the user's problem reports and ideas as issues (it doesn't fix them) and
   passes them to the OL;
 - does post-merge steps the classifier blocks for others (merge, archive, messages);
-- after each merge, adds the PR as the first row of the Confluence page "Spoved:
-  features added since the fork" and updates its "Last synced" line, using a subagent;
 - tells the user only merges and what needs them.
 
 ### Check-in prompt
@@ -185,15 +171,14 @@ re-arm for 4 h; skip it when nothing is in flight.
 - Up to three non-conflicting tickets at a time; merges one at a time. No code before the OL approves the design.
 - Read CLAUDE.md first. Coders invoke the ponytail skill (Skill tool, "full")
   before writing code.
-- CI runs in InfiniteSpoved/spovedBuild (CLAUDE.md "CI"), started automatically
-  by every push to a PR or to develop. Never put branch names, logs, test names or
-  code anywhere in spovedBuild.
+- CI (CLAUDE.md "CI") starts automatically on every push to a PR or to develop.
+  Never put branch names, logs, test names or code in the build repository.
 - Stage files by name, never `git add -A`: `make lint-*` and `make frontend`
   rewrite package-lock.json with the container's old npm.
-- Merge develop in with a merge commit. Never rebase or force-push a pushed branch.
+- Commit with `git commit -s`. Merge develop in with a merge commit. Never rebase or force-push a pushed branch.
 - Never push to main. PRs target develop. Don't change repo settings.
-- A vulnerability that also exists upstream is under embargo: no post outside
-  InfiniteSpoved/spoved. The user decides on reporting it to security@forgejo.org.
+- Report vulnerabilities privately as SECURITY.md describes; never describe an
+  unfixed one in a public issue, PR, comment or commit message.
 - Read narrowly: GitHub calls with `fields`/minimal_output; grep the files you
   need; delegate big reads to subagents; keep messages short.
 - Act on messages, don't poll. At most one safety-net check-in (send_later)
@@ -218,7 +203,7 @@ Then get_session (no args) for your id, send it to the supervisor, and arm a
 
 Intake (at start, after each merge, and on check-ins): list issues updated since
 your last check (mcp__github__list_issues with `since` and `fields`; write big
-lists to a file and read only new ones). Comments by lilayam are requirements.
+lists to a file and read only new ones). Comments by the repository owner are requirements.
 Effort labels: P0 (least) to P4 (most). Bugs, security problems and regressions
 go first. Park an issue with a comment "Parked until <when>: <why>". Agent
 follow-ups get the label "no-agent" and are not queued.
