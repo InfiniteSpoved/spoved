@@ -1727,7 +1727,11 @@ func registerRoutes(m *web.Route) {
 			m.Get("", actions.List)
 			m.Post("/disable", reqRepoAdmin, actions.DisableWorkflowFile)
 			m.Post("/enable", reqRepoAdmin, actions.EnableWorkflowFile)
-			m.Post("/manual", reqRepoActionsWriter, actions.ManualRunWorkflow)
+			m.Post("/manual", reqRepoActionsWriter, context.RepoMustNotBeArchived(), actions.ManualRunWorkflow)
+			m.Group("/scheduled/{id}", func() {
+				m.Post("/cancel", actions.CancelScheduled)
+				m.Post("/time", actions.ChangeScheduledTime)
+			}, reqRepoActionsWriter, context.RepoMustNotBeArchived())
 
 			m.Group("/runs", func() {
 				m.Get("/latest", actions.ViewLatest)
