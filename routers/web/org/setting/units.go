@@ -6,6 +6,7 @@ package setting
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
@@ -73,6 +74,16 @@ func UnitsPost(ctx *context.Context) {
 	org := ctx.Org.Organization
 	p := setting.Config().RepoUnitPolicy.Value(ctx)
 	on := map[unit.Type]bool{}
+	known := map[string]bool{}
+	for _, t := range repo_model.PolicyUnitTypes() {
+		known["on_"+unit.Units[t].NameKey] = true
+	}
+	for key := range ctx.Req.Form {
+		if strings.HasPrefix(key, "on_") && !known[key] {
+			ctx.Error(http.StatusBadRequest, key+" is not a unit")
+			return
+		}
+	}
 	for _, t := range repo_model.PolicyUnitTypes() {
 		key := "on_" + unit.Units[t].NameKey
 		if t.UnitGlobalDisabled() || !p.OrgAllowed(unit.Units[t].NameKey, org.ID) {

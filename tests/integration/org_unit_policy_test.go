@@ -90,6 +90,13 @@ func TestOrgUnitPolicyPage(t *testing.T) {
 	assert.EqualValues(t, 2, row.UpdatedBy)
 	doc = NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", "/org/unit-org-p/settings/units"), http.StatusOK).Body)
 	assert.Contains(t, doc.Find(`.org-unit[data-unit="repo.issues"]`).Text(), "by user2")
+	assert.Contains(t, doc.Find(`.org-unit[data-unit="repo.issues"]`).Text(), row.UpdatedUnix.AsTime().Format("2006-01-02"))
+
+	// a forged field for Code or an unknown unit is refused and nothing changes
+	for _, key := range []string{"repo.code", "repo.nope"} {
+		owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/unit-org-p/settings/units", map[string]string{"on_" + key: "on"}), http.StatusBadRequest)
+	}
+	assert.True(t, unittest.AssertExistsAndLoadBean(t, &repo_model.OrgUnit{OrgID: org.ID, Type: unit_model.TypeIssues}).Disabled)
 	assert.Equal(t, 0, doc.Find(`input[name="on_repo.issues"][checked]`).Length())
 
 	// read-only maintenance refuses the change
