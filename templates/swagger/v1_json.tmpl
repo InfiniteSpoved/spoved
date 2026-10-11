@@ -4171,6 +4171,9 @@
           "200": {
             "$ref": "#/responses/Organization"
           },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
           "404": {
             "$ref": "#/responses/notFound"
           },
@@ -5903,14 +5906,29 @@
             "description": "page size of results",
             "name": "limit",
             "in": "query"
+          },
+          {
+            "enum": [
+              "2fa_disabled"
+            ],
+            "type": "string",
+            "description": "`2fa_disabled` lists only the members without two-factor authentication (organization owners and site administrators only)",
+            "name": "filter",
+            "in": "query"
           }
         ],
         "responses": {
           "200": {
             "$ref": "#/responses/UserList"
           },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
           "404": {
             "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -31334,6 +31352,11 @@
           "type": "boolean",
           "x-go-name": "RepoAdminChangeTeamAccess"
         },
+        "require_two_factor": {
+          "description": "require two-factor authentication for members: those without it lose access to the organization's private repositories at once (list them with `filter=2fa_disabled` on the members endpoint); the doer needs it too unless they are a site administrator",
+          "type": "boolean",
+          "x-go-name": "RequireTwoFactor"
+        },
         "restrict_repo_visibility_change": {
           "description": "only organization owners may change the visibility of its repositories; can't be false while the site requires it",
           "type": "boolean",
@@ -34350,6 +34373,11 @@
         "repo_admin_change_team_access": {
           "type": "boolean",
           "x-go-name": "RepoAdminChangeTeamAccess"
+        },
+        "require_two_factor": {
+          "description": "whether members must use two-factor authentication; only shown to the organization's owners and site administrators",
+          "type": "boolean",
+          "x-go-name": "RequireTwoFactor"
         },
         "restrict_repo_visibility_change": {
           "description": "only organization owners may change the visibility of its repositories; includes the site floor",

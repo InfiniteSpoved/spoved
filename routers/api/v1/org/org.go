@@ -12,6 +12,7 @@ import (
 
 	"forgejo.org/models"
 	activities_model "forgejo.org/models/activities"
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
@@ -343,7 +344,31 @@ func Get(ctx *context.APIContext) {
 		org.Email = ""
 	}
 
+	if !setOwnerFields(ctx, org) {
+		return
+	}
 	ctx.JSON(http.StatusOK, org)
+}
+
+// setOwnerFields adds what only the organization's acting owners and site administrators see. It reports false when
+// it has already answered.
+func setOwnerFields(ctx *context.APIContext, org *api.Organization) bool {
+	doer := ctx.Doer()
+	if doer == nil {
+		return true
+	}
+	allowed := doer.IsAdmin
+	if !allowed {
+		var err error
+		if allowed, err = ctx.Org().Organization.IsActingOwner(ctx, doer); err != nil {
+			ctx.Error(http.StatusInternalServerError, "IsActingOwner", err)
+			return false
+		}
+	}
+	if allowed {
+		org.RequireTwoFactor = &ctx.Org().Organization.RequireTwoFactor
+	}
+	return true
 }
 
 func Rename(ctx *context.APIContext) {
@@ -407,6 +432,8 @@ func Edit(ctx *context.APIContext) {
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/Organization"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 	//   "422":
@@ -423,6 +450,18 @@ func Edit(ctx *context.APIContext) {
 	if policy := repo_module.OrgPolicyFloorViolation(form.RestrictRepoVisibilityChange, forkPolicy); policy != "" {
 		ctx.Error(http.StatusUnprocessableEntity, "OrgPolicyFloorViolation", "blocked by the site policy "+policy)
 		return
+	}
+
+	// as on the web: turning the requirement on needs two-factor authentication of one's own, or a site admin
+	if form.RequireTwoFactor != nil && *form.RequireTwoFactor && !ctx.Doer().IsAdmin {
+		has, err := auth_model.HasTwoFactorByUID(ctx, ctx.Doer().ID)
+		if err != nil {
+			ctx.Error(http.StatusInternalServerError, "HasTwoFactorByUID", err)
+			return
+		} else if !has {
+			ctx.Error(http.StatusForbidden, "", "enable two-factor authentication on your own account first")
+			return
+		}
 	}
 
 	if form.Email != nil {
@@ -460,12 +499,16 @@ func Edit(ctx *context.APIContext) {
 	}
 	opts.RestrictRepoVisibilityChange = optional.FromPtr(form.RestrictRepoVisibilityChange)
 	opts.PrivateForkPolicy = optional.FromPtr(forkPolicy)
+	opts.RequireTwoFactor = optional.FromPtr(form.RequireTwoFactor)
 	if err := user_service.UpdateUser(ctx, ctx.Org().Organization.AsUser(), opts); err != nil {
 		ctx.Error(http.StatusInternalServerError, "UpdateUser", err)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, convert.ToOrganization(ctx, ctx.Org().Organization))
+	apiOrg := convert.ToOrganization(ctx, ctx.Org().Organization)
+	if setOwnerFields(ctx, apiOrg) {
+		ctx.JSON(http.StatusOK, apiOrg)
+	}
 }
 
 // Archive makes an organization and its repositories read-only
