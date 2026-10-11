@@ -5,6 +5,7 @@ package organization
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -94,4 +95,29 @@ func DeleteOrgCategory(ctx context.Context, id int64) error {
 		_, err := db.GetEngine(ctx).ID(id).Delete(new(OrgCategory))
 		return err
 	})
+}
+
+// SortOrgsByCategory orders orgs by the position of their category in cats (as returned by FindOrgCategories),
+// organizations without a known category last, keeping the existing order within each group.
+func SortOrgsByCategory(orgs []*Organization, cats []*OrgCategory) {
+	rank := make(map[int64]int, len(cats))
+	for i, c := range cats {
+		rank[c.ID] = i
+	}
+	rankOf := func(o *Organization) int {
+		if r, ok := rank[o.CategoryID]; ok {
+			return r
+		}
+		return len(cats)
+	}
+	slices.SortStableFunc(orgs, func(a, b *Organization) int { return rankOf(a) - rankOf(b) })
+}
+
+// CategoriesByID maps the categories by ID, for the category headers.
+func CategoriesByID(cats []*OrgCategory) map[int64]*OrgCategory {
+	byID := make(map[int64]*OrgCategory, len(cats))
+	for _, c := range cats {
+		byID[c.ID] = c
+	}
+	return byID
 }

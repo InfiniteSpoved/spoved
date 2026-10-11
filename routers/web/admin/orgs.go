@@ -27,13 +27,22 @@ func Organizations(ctx *context.Context) {
 		ctx.SetFormString("sort", UserSearchDefaultAdminSort)
 	}
 
-	explore.RenderUserSearch(ctx, &user_model.SearchUserOptions{
+	_, filter, categoryID, ok := explore.OrgCategoryFilter(ctx)
+	if !ok {
+		return
+	}
+	opts := &user_model.SearchUserOptions{
 		Actor:           ctx.Doer,
 		Type:            user_model.UserTypeOrganization,
 		IncludeReserved: true, // administrator needs to list all accounts include reserved
 		ListOptions: db.ListOptions{
 			PageSize: setting.UI.Admin.OrgPagingNum,
 		},
-		Visible: []structs.VisibleType{structs.VisibleTypePublic, structs.VisibleTypeLimited, structs.VisibleTypePrivate},
-	}, tplOrgs)
+		Visible:    []structs.VisibleType{structs.VisibleTypePublic, structs.VisibleTypeLimited, structs.VisibleTypePrivate},
+		CategoryID: categoryID,
+	}
+	if filter != "" {
+		opts.ExtraParamStrings = map[string]string{"category": filter}
+	}
+	explore.RenderUserSearch(ctx, opts, tplOrgs)
 }

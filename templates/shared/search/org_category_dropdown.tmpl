@@ -1,0 +1,25 @@
+{{/* Categories, Filter ("" = all, "other" or a category ID), SortType, Keyword, Archived */}}
+{{$label := ctx.Locale.Tr "explore.org_category"}}
+{{if eq .Filter "other"}}{{$label = ctx.Locale.Tr "explore.org_category.selected" (ctx.Locale.Tr "explore.org_category.other")}}{{end}}
+{{range .Categories}}{{if eq $.Filter (print .ID)}}{{$label = ctx.Locale.Tr "explore.org_category.selected" .Name}}{{end}}{{end}}
+<div class="dialog-dropdown">
+	<button class="opener options" command="toggle-popover" commandfor="search-category-dropdown">
+		{{$label}}
+		{{svg "octicon-triangle-down" 14}}
+	</button>
+	<dialog popover id="search-category-dropdown" class="inline-flip">
+		<ul>
+			<li>
+				<a class="{{if not .Filter}}active{{end}}" {{if not .Filter}}autofocus{{end}} href="?sort={{.SortType}}&q={{.Keyword}}{{if .Archived}}&archived=true{{end}}">{{ctx.Locale.Tr "explore.org_category.all"}}</a>
+			</li>
+			{{range .Categories}}
+			<li>
+				<a class="{{if eq $.Filter (print .ID)}}active{{end}}" {{if eq $.Filter (print .ID)}}autofocus{{end}} href="?category={{.ID}}&sort={{$.SortType}}&q={{$.Keyword}}{{if $.Archived}}&archived=true{{end}}"><i class="color-icon tw-mr-2" style="background-color: {{.Color}}"></i>{{.Name}}</a>
+			</li>
+			{{end}}
+			<li>
+				<a class="{{if eq .Filter "other"}}active{{end}}" {{if eq .Filter "other"}}autofocus{{end}} href="?category=other&sort={{.SortType}}&q={{.Keyword}}{{if .Archived}}&archived=true{{end}}">{{ctx.Locale.Tr "explore.org_category.other"}}</a>
+			</li>
+		</ul>
+	</dialog>
+</div>

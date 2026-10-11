@@ -70,38 +70,49 @@ func Organizations(ctx *context.Context) {
 		opts.ExtraParamStrings["archived"] = "true"
 	}
 
-	// with no categories the page stays as it was and the category parameter is ignored
+	cats, filter, categoryID, ok := OrgCategoryFilter(ctx)
+	if !ok {
+		return
+	}
+	opts.CategoryID = categoryID
+	if len(cats) > 0 && filter == "" {
+		opts.GroupByCategory = true
+		ctx.Data["GroupByCategory"] = true
+		ctx.Data["OrgCategoryByID"] = org_model.CategoriesByID(cats)
+	}
+	if filter != "" {
+		opts.ExtraParamStrings["category"] = filter
+	}
+	RenderUserSearch(ctx, opts, tplExploreUsers)
+}
+
+// OrgCategoryFilter reads ?category= ("" = all, "other" = no category, or a category ID) and sets OrgCategories and
+// CategoryFilter for the templates. With no categories the parameter is ignored, so pages stay as they were. An
+// unknown category is a 404, and ok is false.
+func OrgCategoryFilter(ctx *context.Context) (cats []*org_model.OrgCategory, filter string, id optional.Option[int64], ok bool) {
 	cats, err := org_model.FindOrgCategories(ctx)
 	if err != nil {
 		ctx.ServerError("FindOrgCategories", err)
-		return
+		return nil, "", id, false
 	}
-	if len(cats) > 0 {
-		ctx.Data["OrgCategories"] = cats
-		filter := ctx.FormString("category")
-		switch filter {
-		case "":
-			opts.GroupByCategory = true
-			byID := make(map[int64]*org_model.OrgCategory, len(cats))
-			for _, c := range cats {
-				byID[c.ID] = c
-			}
-			ctx.Data["GroupByCategory"] = true
-			ctx.Data["OrgCategoryByID"] = byID
-		case "other":
-			opts.CategoryID = optional.Some[int64](0)
-		default:
-			id, _ := strconv.ParseInt(filter, 10, 64)
-			if !slices.ContainsFunc(cats, func(c *org_model.OrgCategory) bool { return c.ID == id }) {
-				ctx.NotFound("unknown category", nil)
-				return
-			}
-			opts.CategoryID = optional.Some(id)
-		}
-		ctx.Data["CategoryFilter"] = filter
-		if filter != "" {
-			opts.ExtraParamStrings["category"] = filter
-		}
+	ctx.Data["CategoryFilter"] = ""
+	if len(cats) == 0 {
+		return nil, "", id, true
 	}
-	RenderUserSearch(ctx, opts, tplExploreUsers)
+	ctx.Data["OrgCategories"] = cats
+	filter = ctx.FormString("category")
+	switch filter {
+	case "":
+	case "other":
+		id = optional.Some[int64](0)
+	default:
+		n, _ := strconv.ParseInt(filter, 10, 64)
+		if !slices.ContainsFunc(cats, func(c *org_model.OrgCategory) bool { return c.ID == n }) {
+			ctx.NotFound("unknown category", nil)
+			return nil, "", id, false
+		}
+		id = optional.Some(n)
+	}
+	ctx.Data["CategoryFilter"] = filter
+	return cats, filter, id, true
 }

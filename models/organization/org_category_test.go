@@ -110,3 +110,17 @@ func TestOrgCategorySearchAndDelete(t *testing.T) {
 	assert.Len(t, search(user_model.SearchUserOptions{CategoryID: optional.Some[int64](0)}), len(all)-1)
 	unittest.AssertNotExistsBean(t, &organization.OrgCategory{ID: a.ID})
 }
+
+func TestSortOrgsByCategory(t *testing.T) {
+	cats := []*organization.OrgCategory{{ID: 7}, {ID: 2}}
+	orgs := []*organization.Organization{
+		{Name: "a"}, {Name: "b", CategoryID: 2}, {Name: "c", CategoryID: 7}, {Name: "d", CategoryID: 99}, {Name: "e", CategoryID: 2}, {Name: "f", CategoryID: 7},
+	}
+	organization.SortOrgsByCategory(orgs, cats)
+	names := make([]string, 0, len(orgs))
+	for _, o := range orgs {
+		names = append(names, o.Name)
+	}
+	// category order, unknown and none last, existing order kept within a group
+	assert.Equal(t, []string{"c", "f", "b", "e", "a", "d"}, names)
+}
