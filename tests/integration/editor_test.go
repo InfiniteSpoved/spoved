@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	auth_model "forgejo.org/models/auth"
+	git_model "forgejo.org/models/git"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
@@ -67,10 +68,9 @@ func TestCreateFileOnProtectedBranch(t *testing.T) {
 		// Check body for error message
 		assert.Contains(t, resp.Body.String(), "Cannot commit to protected branch &#34;master&#34;.")
 
-		// remove the protected branch
-
-		// Change master branch to protected
-		req = NewRequestWithValues(t, "POST", "/user2/repo1/settings/branches/1/delete", map[string]string{})
+		// remove the protected branch; its ID depends on which tests ran before (a fresh database hands out 1)
+		rule := unittest.AssertExistsAndLoadBean(t, &git_model.ProtectedBranch{RepoID: 1, RuleName: "master"})
+		req = NewRequestWithValues(t, "POST", fmt.Sprintf("/user2/repo1/settings/branches/%d/delete", rule.ID), map[string]string{})
 
 		resp = session.MakeRequest(t, req, http.StatusOK)
 
@@ -78,10 +78,9 @@ func TestCreateFileOnProtectedBranch(t *testing.T) {
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&res))
 		assert.Equal(t, "/user2/repo1/settings/branches", res["redirect"])
 
-		// Check if master branch has been locked successfully
 		flashCookie = session.GetCookie(app_context.CookieNameFlash)
 		assert.NotNil(t, flashCookie)
-		assert.Equal(t, "error%3DRemoving%2Bbranch%2Bprotection%2Brule%2B%25221%2522%2Bfailed.", flashCookie.Value)
+		assert.Equal(t, "success%3DBranch%2Bprotection%2Bfor%2Brule%2B%2522master%2522%2Bhas%2Bbeen%2Bremoved.", flashCookie.Value)
 	})
 }
 
