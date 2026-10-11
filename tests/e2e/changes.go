@@ -35,7 +35,6 @@ func initChangedFiles() {
 		// meta and config
 		"Makefile",
 		"playwright.config.ts",
-		".forgejo/workflows/testing.yml",
 		".github/workflows/ci.yml",
 		".github/ci/*",
 		"tests/e2e/*.go",

@@ -104,19 +104,6 @@ To debug a test, you can also use "Playwright Test" for
 or [VSCode](https://marketplace.visualstudio.com/items?itemName=ms-playwright.playwright).
 
 
-### Run all tests via local act_runner
-
-If you have a [forgejo runner](https://code.forgejo.org/forgejo/runner/),
-you can use it to run the test jobs:
-
-```
-forgejo-runner exec -W .forgejo/workflows/testing.yml -j test-e2e
-```
-
-Note that the CI workflow has some logic to run tests based on changed files only.
-This might conflict with your local setup and not run all the desired tests
-because it might only look at file changes in your latest commit.
-
 ### Run e2e tests with another database
 
 This approach is not currently used,
