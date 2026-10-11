@@ -10,6 +10,8 @@ const (
 	SettingsKeyDiffWhitespaceBehavior = "diff.whitespace_behaviour"
 	// SettingsKeyShowOutdatedComments is the setting key whether or not to show outdated comments in PRs
 	SettingsKeyShowOutdatedComments = "comment_code.show_outdated"
+	// SettingsKeyTimeZone is the setting key for the user's IANA time zone (empty = not set)
+	SettingsKeyTimeZone = "time_zone"
 	// UserActivityPubPrivPem is user's private key
 	UserActivityPubPrivPem = "activitypub.priv_pem"
 	// UserActivityPubPubPem is user's public key

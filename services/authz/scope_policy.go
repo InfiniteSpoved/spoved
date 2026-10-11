@@ -7,16 +7,19 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/timeutil"
 )
 
 var (
 	ErrScopeNotAllowed           = errors.New("access token scope not allowed")
 	ErrScopeNeedsRepoRestriction = errors.New("access token scope must be limited to specified repositories")
 	ErrScopePolicyConfig         = errors.New("invalid access token scope policy")
+	ErrScopePolicyEnforced       = errors.New("access token breaks the access token scope policy")
 )
 
 // ScopePolicyError is returned by ValidateScopePolicy; it wraps ErrScopeNotAllowed or ErrScopeNeedsRepoRestriction.
@@ -61,6 +64,9 @@ func CheckScopePolicy() error {
 		return err
 	}
 	if _, err := policyScope("ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION", setting.AccessTokenScopes.RequireRepoRestriction); err != nil {
+		return err
+	}
+	if _, err := scopePolicyEnforceAfter(); err != nil {
 		return err
 	}
 	// A scope that a repository-specific token can't have would make every such token impossible to create.
@@ -140,6 +146,40 @@ func ValidateScopePolicy(owner *user_model.User, scope auth_model.AccessTokenSco
 				return &ScopePolicyError{Err: ErrScopeNeedsRepoRestriction, Scope: s}
 			}
 		}
+	}
+	return nil
+}
+
+// scopePolicyEnforceAfter returns the time after which existing tokens must follow the policy, or zero for never.
+func scopePolicyEnforceAfter() (time.Time, error) {
+	value := setting.AccessTokenScopes.EnforceAfter
+	if value == "" {
+		return time.Time{}, nil
+	}
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse(time.DateOnly, value); err == nil {
+		return t, nil
+	}
+	return time.Time{}, fmt.Errorf("%w: [security] ACCESS_TOKEN_SCOPE_POLICY_ENFORCE_AFTER: %q is neither RFC 3339 nor YYYY-MM-DD", ErrScopePolicyConfig, value)
+}
+
+// CheckScopePolicyInUse checks a token or authorized integration of owner that is being used, once the policy is
+// enforced for existing ones. The caller adds how to fix it.
+func CheckScopePolicyInUse(owner *user_model.User, scope auth_model.AccessTokenScope, resourceAllRepos bool) error {
+	after, err := scopePolicyEnforceAfter()
+	if err != nil {
+		return err
+	}
+	if after.IsZero() || timeutil.TimeStampNow().AsTime().Before(after) {
+		return nil
+	}
+	if err := ValidateScopePolicy(owner, scope, resourceAllRepos); err != nil {
+		if _, ok := errors.AsType[*ScopePolicyError](err); ok {
+			return fmt.Errorf("%w: %w", ErrScopePolicyEnforced, err)
+		}
+		return err
 	}
 	return nil
 }

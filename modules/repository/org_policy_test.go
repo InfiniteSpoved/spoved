@@ -10,7 +10,9 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
+	"forgejo.org/modules/test"
 	"forgejo.org/modules/util"
 
 	"github.com/stretchr/testify/assert"
@@ -111,6 +113,52 @@ func TestCheckOrgPolicy(t *testing.T) {
 		org.PrivateForkPolicy = 7 // unknown: refused
 		org.Visibility = structs.VisibleTypePublic
 		refused(t, check(member, private, OrgPolicyFork, org), "private_fork_policy")
+	})
+
+	t.Run("site floor", func(t *testing.T) {
+		defer func() { org.PrivateForkPolicy, org.RestrictRepoVisibilityChange = user_model.PrivateForkAll, true }()
+
+		// visibility: the site setting alone binds, as does the org's; the owner and the site admin still pass
+		org.RestrictRepoVisibilityChange = false
+		defer test.MockVariableValue(&setting.Repository.OrgRestrictVisibilityChange, true)()
+		defer test.MockVariableValue(&setting.Repository.OrgPrivateForkPolicy, 0)()
+		refused(t, check(member, private, OrgPolicyVisibility, nil), visibility)
+		require.NoError(t, check(owner, private, OrgPolicyVisibility, nil))
+		require.NoError(t, check(siteAdmin, private, OrgPolicyVisibility, nil))
+		setting.Repository.OrgRestrictVisibilityChange = false
+		require.NoError(t, check(member, private, OrgPolicyVisibility, nil))
+
+		// fork: the stricter of the two wins, in both directions
+		for _, c := range []struct{ site, org, want int }{
+			{user_model.PrivateForkAll, user_model.PrivateForkAll, user_model.PrivateForkAll},
+			{user_model.PrivateForkOrg, user_model.PrivateForkAll, user_model.PrivateForkOrg},
+			{user_model.PrivateForkAll, user_model.PrivateForkOrg, user_model.PrivateForkOrg},
+			{user_model.PrivateForkNone, user_model.PrivateForkOrg, user_model.PrivateForkNone},
+			{user_model.PrivateForkOrg, user_model.PrivateForkNone, user_model.PrivateForkNone},
+			{user_model.PrivateForkAll, -1, user_model.PrivateForkNone}, // unknown stored value: fails closed
+			{user_model.PrivateForkAll, 7, user_model.PrivateForkNone},
+		} {
+			setting.Repository.OrgPrivateForkPolicy, org.PrivateForkPolicy = c.site, c.org
+			assert.Equal(t, c.want, EffectivePrivateForkPolicy(org), "%+v", c)
+		}
+
+		setting.Repository.OrgPrivateForkPolicy, org.PrivateForkPolicy = user_model.PrivateForkNone, user_model.PrivateForkAll
+		refused(t, check(member, private, OrgPolicyFork, org), "private_fork_policy")
+		refused(t, check(owner, private, OrgPolicyFork, org), "private_fork_policy")
+		require.NoError(t, check(siteAdmin, private, OrgPolicyFork, siteAdmin))
+		require.NoError(t, check(member, public, OrgPolicyFork, member))
+		setting.Repository.OrgPrivateForkPolicy = user_model.PrivateForkOrg
+		require.NoError(t, check(member, private, OrgPolicyFork, org))
+		refused(t, check(member, private, OrgPolicyFork, member), "private_fork_policy")
+
+		// a request that would loosen the floor
+		setting.Repository.OrgRestrictVisibilityChange, setting.Repository.OrgPrivateForkPolicy = true, user_model.PrivateForkOrg
+		yes, no, all, none := true, false, user_model.PrivateForkAll, user_model.PrivateForkNone
+		assert.Equal(t, visibility, OrgPolicyFloorViolation(&no, nil))
+		assert.Equal(t, "private_fork_policy", OrgPolicyFloorViolation(nil, &all))
+		assert.Equal(t, "private_fork_policy", OrgPolicyFloorViolation(&yes, &all))
+		assert.Empty(t, OrgPolicyFloorViolation(&yes, &none))
+		assert.Empty(t, OrgPolicyFloorViolation(nil, nil))
 	})
 
 	t.Run("lookup error fails closed", func(t *testing.T) {

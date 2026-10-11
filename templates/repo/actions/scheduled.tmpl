@@ -1,0 +1,51 @@
+{{if .ScheduledRuns}}
+<div class="scheduled-runs tw-mb-4">
+	<h4 class="ui top attached header">{{ctx.Locale.Tr "actions.scheduled.title"}}</h4>
+	<div class="ui attached segment">
+		<table class="ui very basic table">
+			<thead>
+				<tr>
+					<th>{{ctx.Locale.Tr "actions.scheduled.workflow"}}</th>
+					<th>{{ctx.Locale.Tr "actions.scheduled.ref"}}</th>
+					<th>{{ctx.Locale.Tr "actions.scheduled.time"}}</th>
+					<th>{{ctx.Locale.Tr "actions.scheduled.by"}}</th>
+					<th>{{ctx.Locale.Tr "actions.scheduled.status"}}</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody>
+				{{range .ScheduledRuns}}
+					<tr>
+						<td>{{.Workflow}}</td>
+						<td>{{.Ref}}</td>
+						<td>{{DateUtils.FullTime .RunAt}}</td>
+						<td>{{.DoerName}}</td>
+						<td>{{if .Cancelled}}{{ctx.Locale.Tr "actions.scheduled.cancelled"}}: {{.Reason}}{{else}}{{ctx.Locale.Tr "actions.scheduled.pending"}}{{end}}</td>
+						<td>
+							{{if .CanManage}}
+								{{if not .Cancelled}}
+									<details class="change-time">
+										<summary>{{ctx.Locale.Tr "actions.scheduled.change_time"}}</summary>
+										<form method="post" action="{{$.Repo.RepoLink}}/actions/scheduled/{{.ID}}/time" data-time-zone="{{$.UserTimeZone}}" data-max-days="{{$.MaxDelayedRunDays}}" data-run-at-iso="{{.RunAtISO}}">
+											<input type="datetime-local" data-run-at required>
+											<span class="help time-zone-label"></span>
+											<input type="hidden" name="run_at" autocomplete="off">
+											<input type="hidden" name="workflow" value="{{$.CurWorkflow}}">
+											<button type="submit" class="ui primary small compact button">{{ctx.Locale.Tr "actions.scheduled.save"}}</button>
+										</form>
+									</details>
+								{{end}}
+								<form method="post" action="{{$.Repo.RepoLink}}/actions/scheduled/{{.ID}}/cancel">
+									<input type="hidden" name="workflow" value="{{$.CurWorkflow}}">
+									<button type="submit" class="ui red small compact button">{{if .Cancelled}}{{ctx.Locale.Tr "actions.scheduled.remove"}}{{else}}{{ctx.Locale.Tr "actions.scheduled.cancel"}}{{end}}</button>
+								</form>
+							{{end}}
+						</td>
+					</tr>
+				{{end}}
+			</tbody>
+		</table>
+		{{if .ScheduledMore}}<div class="text grey">{{ctx.Locale.Tr "actions.scheduled.more" .ScheduledMore}}</div>{{end}}
+	</div>
+</div>
+{{end}}

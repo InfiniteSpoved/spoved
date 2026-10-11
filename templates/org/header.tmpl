@@ -1,3 +1,8 @@
+{{if .TwoFactorBlockedMember}}
+<div class="ui container">
+	<div class="ui warning message">{{svg "octicon-shield-lock"}} {{ctx.Locale.Tr "org.settings.require_two_factor_blocked_text"}} <a href="{{AppSubUrl}}/user/settings/security">{{ctx.Locale.Tr "org.settings.require_two_factor_blocked_link"}}</a></div>
+</div>
+{{end}}
 {{if .Org.IsArchived}}
 <div class="ui container">
 	<div class="ui warning message org-archived-banner">{{svg "octicon-archive"}} {{ctx.Locale.Tr "org.archived.banner"}}</div>

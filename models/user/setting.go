@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"forgejo.org/models/db"
 	"forgejo.org/modules/cache"
@@ -210,4 +211,22 @@ func upsertUserSettingValue(ctx context.Context, userID int64, key, value string
 		_, err = e.Insert(&Setting{UserID: userID, SettingKey: key, SettingValue: value})
 		return err
 	})
+}
+
+// IsValidTimeZone reports whether name is an IANA time zone name that can be stored: not "Local", short, and known
+func IsValidTimeZone(name string) bool {
+	if name == "" || name == "Local" || len(name) > 64 {
+		return false
+	}
+	_, err := time.LoadLocation(name)
+	return err == nil
+}
+
+// GetUserTimeZone returns the time zone set by the user, or "" if there is none or it is no longer valid
+func GetUserTimeZone(ctx context.Context, userID int64) (string, error) {
+	name, err := GetUserSetting(ctx, userID, SettingsKeyTimeZone)
+	if err != nil || !IsValidTimeZone(name) {
+		return "", err
+	}
+	return name, nil
 }

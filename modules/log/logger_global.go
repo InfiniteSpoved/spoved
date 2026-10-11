@@ -68,10 +68,6 @@ func GetLogger(name string) Logger {
 	return GetManager().GetLogger(name)
 }
 
-func IsLoggerEnabled(name string) bool {
-	return GetManager().GetLogger(name).IsEnabled()
-}
-
 func SetConsoleLogger(loggerName, writerName string, level Level) {
 	writer := NewEventWriterConsole(writerName, WriterMode{
 		Level:        level,

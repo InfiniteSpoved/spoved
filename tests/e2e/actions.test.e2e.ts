@@ -7,6 +7,7 @@
 // modules/structs/workflow.go
 // routers/api/v1/repo/action.go
 // routers/web/repo/actions/**
+// web_src/js/features/repo-actions-dispatch.js
 // @watch end
 
 import {expect, type Page} from '@playwright/test';
@@ -69,6 +70,35 @@ test.describe('Workflow Authenticated user2', () => {
   // eslint-disable-next-line playwright/expect-expect
   test('dispatch success', async ({page}) => {
     await dispatchSuccess(page);
+  });
+
+  test('dispatch later: picker, listed, cancelled', async ({page}) => {
+    await page.goto('/user2/test_workflows/actions?workflow=test-dispatch.yml&actor=0&status=0');
+    await page.locator('#workflow_dispatch_dropdown>button').click();
+
+    // the picker is shown for "Run later" only
+    const picker = page.locator('input[data-run-at]');
+    await expect(picker).toBeHidden();
+    await page.getByLabel('Run later').check();
+    await expect(picker).toBeVisible();
+    // dispatched, not clicked: on a small screen Playwright finds the tall menu partly outside of the viewport
+    await page.getByLabel('Run now').dispatchEvent('click');
+    await expect(picker).toBeHidden();
+
+    await page.getByLabel('Run later').check();
+    await page.fill('input[name="inputs[string2]"]', 'abc');
+    await picker.fill(new Date(Date.now() + 2 * 24 * 3600 * 1000).toISOString().slice(0, 16));
+    await page.locator('#workflow-dispatch-submit').click();
+    await expect(page.getByText('Workflow run was scheduled.')).toBeVisible();
+
+    const scheduled = page.locator('.scheduled-runs');
+    await expect(scheduled.getByRole('cell', {name: 'test-dispatch.yml'})).toBeVisible();
+    await expect(scheduled.getByText('Waiting')).toBeVisible();
+    await screenshot(page, scheduled);
+
+    await scheduled.getByRole('button', {name: 'Cancel'}).click();
+    await expect(page.getByText('The scheduled run was removed.')).toBeVisible();
+    await expect(scheduled).toBeHidden();
   });
 
   test('Disable/enable workflow', async ({page}) => {

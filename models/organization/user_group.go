@@ -313,7 +313,8 @@ type LinkedTeam struct {
 	Managed int
 }
 
-// GetUserGroupTeams returns the teams a user group is linked to.
+// GetUserGroupTeams returns the teams a user group is linked to. The link outlives
+// its organization going to the trash, so Org may be in the trash (TrashedUnix != 0).
 func GetUserGroupTeams(ctx context.Context, groupID int64) ([]*LinkedTeam, error) {
 	teams := make([]*Team, 0, 10)
 	if err := db.GetEngine(ctx).
@@ -336,7 +337,7 @@ func GetUserGroupTeams(ctx context.Context, groupID int64) ([]*LinkedTeam, error
 		org, ok := orgs[t.OrgID]
 		if !ok {
 			var err error
-			if org, err = GetOrgByID(ctx, t.OrgID); err != nil {
+			if org, err = GetOrgByIDIncludingTrashed(ctx, t.OrgID); err != nil {
 				return nil, err
 			}
 			orgs[t.OrgID] = org

@@ -26,6 +26,7 @@ import (
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/log"
+	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
@@ -420,8 +421,8 @@ func ToOrganization(ctx context.Context, org *organization.Organization) *api.Or
 		Archived:                  org.IsArchived,
 		Created:                   org.CreatedUnix.AsTime(),
 
-		RestrictRepoVisibilityChange: org.RestrictRepoVisibilityChange,
-		PrivateForkPolicy:            org.AsUser().PrivateForkPolicyName(),
+		RestrictRepoVisibilityChange: repo_module.EffectiveRestrictVisibility(org.AsUser()),
+		PrivateForkPolicy:            user_model.PrivateForkPolicyNames[repo_module.EffectivePrivateForkPolicy(org.AsUser())],
 	}
 }
 
@@ -457,7 +458,7 @@ func ToTeams(ctx context.Context, teams []*organization.Team, loadOrgs bool) ([]
 		if loadOrgs {
 			apiOrg, ok := cache[t.OrgID]
 			if !ok {
-				org, err := organization.GetOrgByID(ctx, t.OrgID)
+				org, err := organization.GetOrgByIDIncludingTrashed(ctx, t.OrgID)
 				if err != nil {
 					return nil, err
 				}

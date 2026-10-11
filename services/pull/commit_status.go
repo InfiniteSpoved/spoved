@@ -87,6 +87,27 @@ func IsPullCommitStatusPass(ctx context.Context, pr *issues_model.PullRequest) (
 	return true, nil
 }
 
+// IsPullCommitStatusFailed reports whether a required status check of pr has failed (not merely pending)
+func IsPullCommitStatusFailed(ctx context.Context, pr *issues_model.PullRequest) (bool, error) {
+	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
+	if err != nil {
+		return false, fmt.Errorf("GetMatchedProtectedBranchRules: %w", err)
+	}
+	for _, pb := range rules {
+		if !pb.EnableStatusCheck {
+			continue
+		}
+		commitStatuses, err := getPullRequestCommitStatuses(ctx, pr)
+		if err != nil {
+			return false, err
+		}
+		if state := MergeRequiredContextsCommitStatus(commitStatuses, pb.StatusCheckContexts); state.IsFailure() || state.IsError() {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func isPullCommitStatusPass(ctx context.Context, pr *issues_model.PullRequest, pb *git_model.ProtectedBranch) (bool, error) {
 	if !pb.EnableStatusCheck {
 		return true, nil

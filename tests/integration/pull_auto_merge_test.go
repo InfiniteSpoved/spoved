@@ -434,6 +434,8 @@ func TestPullScheduledAutoMerge(t *testing.T) {
 			require.NoError(t, automerge.StartDueScheduledAutoMerges(t.Context()))
 			unittest.AssertNotExistsBean(t, &pull_model.AutoMerge{PullID: pr.ID})
 			assert.True(t, isCancelled(t, pr))
+			c := unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{IssueID: pr.IssueID, Type: issues_model.CommentTypePRUnScheduledToAutoMerge})
+			assert.Equal(t, "give_up", c.AutoMergeInfo().Reason)
 			assert.False(t, isMerged(pr))
 		})
 
@@ -649,7 +651,8 @@ func TestPullAutoMergePermissionLoss(t *testing.T) {
 		assertCancelled := func(t *testing.T, pr *issues_model.PullRequest, doerID int64) {
 			t.Helper()
 			unittest.AssertNotExistsBean(t, &pull_model.AutoMerge{PullID: pr.ID})
-			unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{IssueID: pr.IssueID, Type: issues_model.CommentTypePRUnScheduledToAutoMerge, PosterID: doerID})
+			c := unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{IssueID: pr.IssueID, Type: issues_model.CommentTypePRUnScheduledToAutoMerge, PosterID: doerID})
+			assert.Equal(t, "permission", c.AutoMergeInfo().Reason)
 			assert.False(t, isMerged(pr))
 		}
 
@@ -867,7 +870,8 @@ func TestPullAutoMergeCancelOnPush(t *testing.T) {
 			assert.Eventually(t, func() bool {
 				return unittest.GetCount(t, &pull_model.AutoMerge{PullID: pr.ID}) == 0
 			}, 10*time.Second, 50*time.Millisecond)
-			unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{IssueID: pr.IssueID, Type: issues_model.CommentTypePRUnScheduledToAutoMerge, PosterID: pusherID})
+			c := unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{IssueID: pr.IssueID, Type: issues_model.CommentTypePRUnScheduledToAutoMerge, PosterID: pusherID})
+			assert.Equal(t, "push", c.AutoMergeInfo().Reason)
 			passTime()
 			assert.False(t, isMerged(pr))
 		}

@@ -4,9 +4,11 @@
 package organization_test
 
 import (
+	"slices"
 	"sort"
 	"testing"
 
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/avatars"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
@@ -634,4 +636,30 @@ func TestTwoFactorRequiredOrg(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, canCreate())
 	assert.False(t, inCreateList())
+}
+
+func TestFindOrgMembersTwoFactorDisabled(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	opts := &organization.FindOrgMembersOpts{Doer: &user_model.User{IsAdmin: true}, OrgID: 3, TwoFactorDisabled: true}
+	uids := func() []int64 {
+		ous, err := organization.GetOrgUsersByOrgID(ctx, opts)
+		require.NoError(t, err)
+		count, err := organization.CountOrgMembers(ctx, opts)
+		require.NoError(t, err)
+		assert.Equal(t, int64(len(ous)), count)
+		var out []int64
+		for _, ou := range ous {
+			out = append(out, ou.UID)
+		}
+		slices.Sort(out)
+		return out
+	}
+	assert.Equal(t, []int64{2, 4, 28}, uids())
+
+	// TOTP and WebAuthn both count as two-factor authentication
+	require.NoError(t, db.Insert(ctx, &auth_model.TwoFactor{UID: 2}))
+	require.NoError(t, db.Insert(ctx, &auth_model.WebAuthnCredential{UserID: 28, Name: "k", LowerName: "k", CredentialID: []byte{1}}))
+	assert.Equal(t, []int64{4}, uids())
 }
