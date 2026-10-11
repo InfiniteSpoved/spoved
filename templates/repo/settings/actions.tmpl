@@ -6,6 +6,40 @@
 			{{template "shared/actions/secrets_list" .}}
 		{{else if eq .PageType "variables"}}
 			{{template "shared/actions/variables_list" .}}
+		{{else if eq .PageType "general"}}
+			<h4 class="ui top attached header">
+				{{ctx.Locale.Tr "actions.settings.default_token_permissions"}}
+			</h4>
+			<div class="ui attached segment">
+				<form class="ui form" method="post">
+					<p>{{ctx.Locale.Tr "actions.settings.default_token_permissions.desc"}}</p>
+					<div class="field">
+						<div class="ui radio checkbox">
+							<input type="radio" id="default_token_permissions_instance" name="default_token_permissions" value="" {{if eq .DefaultTokenPermissions ""}}checked{{end}}>
+							<label for="default_token_permissions_instance">{{ctx.Locale.Tr "actions.settings.default_token_permissions.instance"}}</label>
+							<p class="help">{{if eq .InstanceDefaultTokenPermissions "read"}}{{ctx.Locale.Tr "actions.settings.default_token_permissions.instance_read"}}{{else}}{{ctx.Locale.Tr "actions.settings.default_token_permissions.instance_write"}}{{end}}</p>
+						</div>
+					</div>
+					<div class="field">
+						<div class="ui radio checkbox">
+							<input type="radio" id="default_token_permissions_read" name="default_token_permissions" value="read" {{if eq .DefaultTokenPermissions "read"}}checked{{end}}>
+							<label for="default_token_permissions_read">{{ctx.Locale.Tr "actions.settings.default_token_permissions.read"}}</label>
+							<p class="help">{{ctx.Locale.Tr "actions.settings.default_token_permissions.read.desc"}}</p>
+						</div>
+					</div>
+					<div class="field">
+						<div class="ui radio checkbox">
+							<input type="radio" id="default_token_permissions_write" name="default_token_permissions" value="write" {{if eq .DefaultTokenPermissions "write"}}checked{{end}}>
+							<label for="default_token_permissions_write">{{ctx.Locale.Tr "actions.settings.default_token_permissions.write"}}</label>
+							<p class="help">{{ctx.Locale.Tr "actions.settings.default_token_permissions.write.desc"}}</p>
+						</div>
+					</div>
+					<div class="divider"></div>
+					<div class="field">
+						<button class="ui primary button">{{ctx.Locale.Tr "repo.settings.update_settings"}}</button>
+					</div>
+				</form>
+			</div>
 		{{end}}
 	</div>
 {{template "repo/settings/layout_footer" .}}

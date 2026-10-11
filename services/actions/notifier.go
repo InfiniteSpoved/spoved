@@ -836,7 +836,7 @@ func calculateWarnings(run *actions_model.ActionRun, swfs []*jobparser.SingleWor
 		if j == nil {
 			continue
 		}
-		if _, ignored := workflowTokenPermissions(swf); len(ignored) > 0 {
+		if _, ignored := workflowTokenPermissions(swf, setting.Actions.DefaultTokenPermissions); len(ignored) > 0 {
 			warnings = append(warnings, actions_model.WarningCodePermissionsIgnored)
 			warningDetails = append(warningDetails, []any{id, strings.Join(ignored, ", ")})
 		}

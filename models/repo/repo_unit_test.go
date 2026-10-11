@@ -36,6 +36,31 @@ func TestActionsConfig(t *testing.T) {
 	assert.Equal(t, "test1.yaml,test2.yaml,test3.yaml", cfg.ToString())
 }
 
+func TestActionsConfigDefaultTokenPermissions(t *testing.T) {
+	cfg := &ActionsConfig{}
+	require.NoError(t, cfg.FromDB([]byte(`{"DisabledWorkflows":["a.yaml"]}`)))
+	assert.Empty(t, cfg.DefaultTokenPermissions)
+
+	cfg.DefaultTokenPermissions = "read"
+	bs, err := cfg.ToDB()
+	require.NoError(t, err)
+	stored := &ActionsConfig{}
+	require.NoError(t, stored.FromDB(bs))
+	assert.Equal(t, "read", stored.DefaultTokenPermissions)
+
+	for _, tc := range []struct{ repo, instance, want string }{
+		{repo: "", instance: "write", want: "write"},
+		{repo: "", instance: "read", want: "read"},
+		{repo: "read", instance: "write", want: "read"},
+		{repo: "write", instance: "read", want: "write"},
+		{repo: "banana", instance: "read", want: "read"},
+	} {
+		defer test.MockVariableValue(&setting.Actions.DefaultTokenPermissions, tc.instance)()
+		cfg := &ActionsConfig{DefaultTokenPermissions: tc.repo}
+		assert.Equal(t, tc.want, cfg.EffectiveDefaultTokenPermissions(), "repo %q, instance %q", tc.repo, tc.instance)
+	}
+}
+
 func TestRepoUnitAccessMode(t *testing.T) {
 	// assert.Equal(t, perm.AccessModeNone, UnitAccessModeNone.ToAccessMode(perm.AccessModeAdmin))
 	// assert.Equal(t, perm.AccessModeRead, UnitAccessModeRead.ToAccessMode(perm.AccessModeAdmin))

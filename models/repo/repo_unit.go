@@ -350,6 +350,18 @@ type ActionsConfig struct {
 
 	// Format of the OIDC 'sub' claim that will be used when `enable-openid-connect` is true in an Action.
 	OIDCSubjectFormat OIDCSubjectFormat `json:",omitempty"`
+
+	// DefaultTokenPermissions is "read" or "write" for the job token of a workflow without `permissions:`, or empty
+	// for the instance default ([actions] DEFAULT_TOKEN_PERMISSIONS).
+	DefaultTokenPermissions string `json:",omitempty"`
+}
+
+// EffectiveDefaultTokenPermissions returns the repository default token permissions, else the instance default.
+func (cfg *ActionsConfig) EffectiveDefaultTokenPermissions() string {
+	if cfg.DefaultTokenPermissions == "read" || cfg.DefaultTokenPermissions == "write" {
+		return cfg.DefaultTokenPermissions
+	}
+	return setting.Actions.DefaultTokenPermissions
 }
 
 func (cfg *ActionsConfig) EnableWorkflow(file string) {
