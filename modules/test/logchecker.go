@@ -48,7 +48,8 @@ func (lc *LogChecker) checkLogEvent(event *log.EventFormatted) {
 			lc.filtered[i] = true
 		}
 	}
-	if strings.Contains(event.Origin.MsgSimpleText, lc.stopMark) {
+	// an empty mark would match every event, so any unrelated log line would end the wait
+	if lc.stopMark != "" && strings.Contains(event.Origin.MsgSimpleText, lc.stopMark) {
 		lc.stopped = true
 	}
 }
@@ -86,6 +87,21 @@ func (lc *LogChecker) StopMark(msg string) *LogChecker {
 	return lc
 }
 
+// allFiltered reports, for a checker without a stop mark, that every filter has been seen.
+func (lc *LogChecker) allFiltered() bool {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	if lc.stopMark != "" || len(lc.filtered) == 0 {
+		return false
+	}
+	for _, f := range lc.filtered {
+		if !f {
+			return false
+		}
+	}
+	return true
+}
+
 // Check returns the filtered slice and whether the stop mark is reached.
 func (lc *LogChecker) Check(d time.Duration) (filtered []bool, stopped bool) {
 	stop := time.Now().Add(d)
@@ -95,7 +111,7 @@ func (lc *LogChecker) Check(d time.Duration) (filtered []bool, stopped bool) {
 		stopped = lc.stopped
 		lc.mu.Unlock()
 
-		if time.Now().After(stop) || stopped {
+		if time.Now().After(stop) || stopped || lc.allFiltered() {
 			lc.mu.Lock()
 			f := make([]bool, len(lc.filtered))
 			copy(f, lc.filtered)
