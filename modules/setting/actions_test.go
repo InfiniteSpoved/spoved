@@ -280,6 +280,24 @@ func Test_getRunRetentionDaysForActions(t *testing.T) {
 	}
 }
 
+func Test_getRunRetentionMaxDaysForActions(t *testing.T) {
+	defer test.MockVariableValue(&Actions, Actions)()
+
+	for iniStr, want := range map[string]int64{
+		"[actions]\n":                              0,
+		"[actions]\nRUN_RETENTION_MAX_DAYS =\n":    0,
+		"[actions]\nRUN_RETENTION_MAX_DAYS = 0\n":  0,
+		"[actions]\nRUN_RETENTION_MAX_DAYS = 90\n": 90,
+		"[actions]\nRUN_RETENTION_MAX_DAYS = -5\n": 0,
+	} {
+		Actions.RunRetentionMaxDays = 0
+		cfg, err := NewConfigProviderFromData(iniStr)
+		require.NoError(t, err)
+		require.NoError(t, loadActionsFrom(cfg))
+		assert.Equal(t, want, Actions.RunRetentionMaxDays, iniStr)
+	}
+}
+
 func Test_getDefaultTokenPermissionsForActions(t *testing.T) {
 	defer test.MockVariableValue(&Actions, Actions)()
 

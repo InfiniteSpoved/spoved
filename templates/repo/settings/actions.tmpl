@@ -40,6 +40,27 @@
 					</div>
 				</form>
 			</div>
+			<h4 class="ui top attached header">
+				{{ctx.Locale.Tr "actions.settings.run_retention"}}
+			</h4>
+			<div class="ui attached segment">
+				<form class="ui form" method="post" action="{{.RepoLink}}/settings/actions/retention">
+					<p>{{ctx.Locale.Tr "actions.settings.run_retention.desc"}}</p>
+					<p>
+						{{if .EffectiveRunRetentionDays}}{{ctx.Locale.Tr "actions.settings.run_retention.effective" .EffectiveRunRetentionDays}}{{else}}{{ctx.Locale.Tr "actions.settings.run_retention.effective_forever"}}{{end}}
+						{{if .InstanceRunRetentionDays}}{{ctx.Locale.Tr "actions.settings.run_retention.instance_default" .InstanceRunRetentionDays}}{{end}}
+						{{if .InstanceRunRetentionMaxDays}}{{ctx.Locale.Tr "actions.settings.run_retention.instance_max" .InstanceRunRetentionMaxDays}}{{end}}
+					</p>
+					<div class="field">
+						<label for="run_retention_days">{{ctx.Locale.Tr "actions.settings.run_retention.days"}}</label>
+						<input id="run_retention_days" name="run_retention_days" type="number" min="0" max="{{.MaxRunRetentionDays}}" value="{{if .RunRetentionDays}}{{.RunRetentionDays}}{{end}}">
+					</div>
+					<div class="divider"></div>
+					<div class="field">
+						<button class="ui primary button">{{ctx.Locale.Tr "repo.settings.update_settings"}}</button>
+					</div>
+				</form>
+			</div>
 		{{end}}
 	</div>
 {{template "repo/settings/layout_footer" .}}

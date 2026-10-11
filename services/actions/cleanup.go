@@ -105,13 +105,19 @@ func cleanNeedDeleteArtifacts(taskCtx context.Context) error {
 
 const deleteRunBatchSize = 100
 
-// CleanupRuns removes completed runs which are older than the configured retention time, except the latest run of
-// each workflow on the default branch.
+// CleanupRuns removes completed runs which are older than the effective retention time of their repository
+// (actions_model.EffectiveRunRetentionDays), except kept runs and the latest run of each workflow on the default branch.
 func CleanupRuns(ctx context.Context) error {
-	if setting.Actions.RunRetentionDays <= 0 {
+	repoDays, orgDays, err := actions_model.FindRunRetentionSettings(ctx)
+	if err != nil {
+		return fmt.Errorf("could not retrieve retention settings: %w", err)
+	}
+	// one scan for every repository: it reaches back as far as the shortest retention of any of them
+	shortest := actions_model.EffectiveRunRetentionDays(minValue(repoDays), minValue(orgDays))
+	if shortest == 0 {
 		return nil
 	}
-	olderThan := timeutil.TimeStampNow().AddDuration(-time.Duration(setting.Actions.RunRetentionDays) * 24 * time.Hour)
+	olderThan := actions_model.RetentionCutoff(shortest)
 
 	keep, err := actions_model.GetLatestDefaultBranchRunIDs(ctx)
 	if err != nil {
@@ -124,32 +130,44 @@ func CleanupRuns(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		ids, err := actions_model.FindOldDoneRunIDs(ctx, olderThan, afterID, deleteRunBatchSize)
+		runs, err := actions_model.FindOldDoneRuns(ctx, olderThan, afterID, deleteRunBatchSize)
 		if err != nil {
 			return fmt.Errorf("could not retrieve runs to delete: %w", err)
 		}
-		for _, id := range ids {
-			afterID = id
-			if keep.Contains(id) {
+		for _, run := range runs {
+			afterID = run.ID
+			days := actions_model.EffectiveRunRetentionDays(repoDays[run.RepoID], orgDays[run.OwnerID])
+			if days == 0 || run.Created >= actions_model.RetentionCutoff(days) || keep.Contains(run.ID) {
 				continue
 			}
-			if err := DeleteRunUnlessKept(ctx, id); err != nil {
+			if err := DeleteRunUnlessKept(ctx, run.ID); err != nil {
 				if errors.Is(err, ErrRunKept) {
 					continue
 				}
-				log.Error("Failed to delete run %d: %v", id, err)
+				log.Error("Failed to delete run %d: %v", run.ID, err)
 				// do not return error here, continue to next run
 				continue
 			}
 			count++
 		}
-		if len(ids) < deleteRunBatchSize {
+		if len(runs) < deleteRunBatchSize {
 			break
 		}
 	}
 
 	log.Info("Removed %d runs", count)
 	return nil
+}
+
+// minValue returns the smallest value of m, or 0 if it is empty.
+func minValue(m map[int64]int64) int64 {
+	var smallest int64
+	for _, v := range m {
+		if smallest == 0 || v < smallest {
+			smallest = v
+		}
+	}
+	return smallest
 }
 
 const deleteLogBatchSize = 100

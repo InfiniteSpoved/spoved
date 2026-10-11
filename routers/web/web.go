@@ -1237,6 +1237,7 @@ func registerRoutes(m *web.Route) {
 
 				m.Group("/actions", func() {
 					m.Get("", org_setting.RedirectToDefaultSetting)
+					m.Combo("/retention").Get(org_setting.ActionsRetention).Post(org_setting.ActionsRetentionPost)
 					addSettingsRunnersRoutes()
 					addSettingsSecretsRoutes()
 					addSettingsVariablesRoutes()
@@ -1442,6 +1443,7 @@ func registerRoutes(m *web.Route) {
 			m.Group("/actions", func() {
 				m.Get("", shared_actions.RedirectToDefaultSetting)
 				m.Combo("/general").Get(repo_setting.ActionsGeneral).Post(context.RepoMustNotBeArchived(), repo_setting.ActionsGeneralPost)
+				m.Post("/retention", context.RepoMustNotBeArchived(), repo_setting.ActionsRetentionPost)
 				addSettingsRunnersRoutes()
 				addSettingsSecretsRoutes()
 				addSettingsVariablesRoutes()

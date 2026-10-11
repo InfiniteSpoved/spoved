@@ -15,6 +15,8 @@ test('repo default job token permissions', async ({page}) => {
   const response = await page.goto('/user2/repo1/settings/actions/general');
   expect(response?.status()).toBe(200);
 
+  // the page has a second form (run retention) with its own save button
+  const save = page.locator('form').filter({has: page.locator('#default_token_permissions_instance')}).getByRole('button', {name: 'Save settings'});
   const instance = page.locator('#default_token_permissions_instance');
   const read = page.locator('#default_token_permissions_read');
   await expect(instance).toBeChecked();
@@ -22,7 +24,7 @@ test('repo default job token permissions', async ({page}) => {
   await screenshot(page);
 
   await page.getByText('Read-only', {exact: true}).click();
-  await page.getByRole('button', {name: 'Save settings'}).click();
+  await save.click();
   await expect(page.locator('.flash-success')).toBeVisible();
   await expect(read).toBeChecked();
   await page.reload();
@@ -30,6 +32,6 @@ test('repo default job token permissions', async ({page}) => {
 
   // back to the instance default for the other tests
   await page.getByText('Use the instance default', {exact: true}).click();
-  await page.getByRole('button', {name: 'Save settings'}).click();
+  await save.click();
   await expect(instance).toBeChecked();
 });

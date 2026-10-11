@@ -676,20 +676,32 @@ func TestGetLatestDefaultBranchRunIDs(t *testing.T) {
 	assert.False(t, ids.Contains(893))
 }
 
-func TestFindOldDoneRunIDs(t *testing.T) {
+func TestFindOldDoneRuns(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
+	ids := func(afterID int64, limit int, olderThan timeutil.TimeStamp) []int64 {
+		runs, err := FindOldDoneRuns(t.Context(), olderThan, afterID, limit)
+		require.NoError(t, err)
+		var ids []int64
+		for _, r := range runs {
+			ids = append(ids, r.ID)
+		}
+		return ids
+	}
 
-	ids, err := FindOldDoneRunIDs(t.Context(), timeutil.TimeStampNow(), 0, 100)
-	require.NoError(t, err)
-	assert.Equal(t, []int64{791, 792, 891, 892, 893, 896}, ids)
+	assert.Equal(t, []int64{791, 792, 891, 892, 893, 896}, ids(0, 100, timeutil.TimeStampNow()))
+	assert.Equal(t, []int64{891, 892}, ids(792, 2, timeutil.TimeStampNow()))
+	assert.Empty(t, ids(0, 100, 1683636108))
 
-	ids, err = FindOldDoneRunIDs(t.Context(), timeutil.TimeStampNow(), 792, 2)
+	// the owner is the one of the repository
+	runs, err := FindOldDoneRuns(t.Context(), timeutil.TimeStampNow(), 0, 1)
 	require.NoError(t, err)
-	assert.Equal(t, []int64{891, 892}, ids)
+	require.Len(t, runs, 1)
+	assert.Equal(t, &RetentionRun{ID: 791, RepoID: 4, OwnerID: 5, Created: runs[0].Created}, runs[0])
 
-	ids, err = FindOldDoneRunIDs(t.Context(), 1683636108, 0, 100)
+	// runs of a repository in the trash are left alone
+	_, err = db.GetEngine(t.Context()).Exec("UPDATE repository SET trashed_unix = 1 WHERE id = 4")
 	require.NoError(t, err)
-	assert.Empty(t, ids)
+	assert.Equal(t, []int64{891, 892, 893}, ids(0, 100, timeutil.TimeStampNow()))
 }
 
 func TestSetRunKeep(t *testing.T) {
@@ -706,8 +718,12 @@ func TestSetRunKeep(t *testing.T) {
 	assert.Equal(t, before, after)
 
 	// a kept run is never selected for retention
-	ids, err := FindOldDoneRunIDs(t.Context(), timeutil.TimeStampNow(), 0, 100)
+	runs, err := FindOldDoneRuns(t.Context(), timeutil.TimeStampNow(), 0, 100)
 	require.NoError(t, err)
+	var ids []int64
+	for _, r := range runs {
+		ids = append(ids, r.ID)
+	}
 	assert.Equal(t, []int64{792, 891, 892, 893, 896}, ids)
 
 	require.NoError(t, SetRunKeep(t.Context(), 791, false))
