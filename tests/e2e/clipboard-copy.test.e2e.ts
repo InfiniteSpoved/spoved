@@ -9,7 +9,7 @@
 // @watch end
 
 import {expect, type Page} from '@playwright/test';
-import {test} from './utils_e2e.ts';
+import {test, timeoutScale} from './utils_e2e.ts';
 import {screenshot} from './shared/screenshots.ts';
 
 test('copy src file path to clipboard', async ({page}) => {
@@ -44,7 +44,7 @@ async function evaluateCommentCopyMarkdown(page: Page, url: string, commentId: s
     for (const expectation of clipboardExpectations) {
       expect(clipboardText).toContain(expectation);
     }
-  }).toPass({timeout: 3000});
+  }).toPass({timeout: 3000 * timeoutScale});
 
   // Dropdown should have been closed
   await expect(areaOfInterest.locator('dialog:popover-open')).toHaveCount(0);
@@ -56,7 +56,7 @@ test.describe('Copy comment as Markdown to clipboard', () => {
   test('Issue top comment', async ({page}) => {
     await expect(async () => {
       await evaluateCommentCopyMarkdown(page, '/user2/repo1/issues/1', 'issue-1', ['content for the first issue']);
-    }).toPass({timeout: 3000});
+    }).toPass({timeout: 3000 * timeoutScale});
   });
 
   test('Issue reply comment', async ({page}) => {
@@ -66,13 +66,13 @@ test.describe('Copy comment as Markdown to clipboard', () => {
         '**I am not appealed**',
         '`feature`',
       ]);
-    }).toPass({timeout: 3000});
+    }).toPass({timeout: 3000 * timeoutScale});
   });
 
   test('PR top comment', async ({page}) => {
     await expect(async () => {
       await evaluateCommentCopyMarkdown(page, '/user2/repo1/pulls/5', 'issue-11', ['content for the a pull request']);
-    }).toPass({timeout: 3000});
+    }).toPass({timeout: 3000 * timeoutScale});
   });
 });
 

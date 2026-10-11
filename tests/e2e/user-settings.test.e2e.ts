@@ -4,7 +4,7 @@
 // @watch end
 
 import {expect, type Page} from '@playwright/test';
-import {test, login_user, login} from './utils_e2e.ts';
+import {test, login_user, login, timeoutScale} from './utils_e2e.ts';
 import {screenshot} from './shared/screenshots.ts';
 import {validate_form} from './shared/forms.ts';
 
@@ -254,7 +254,7 @@ async function validateClaimRules(page: Page, expected: string) {
   await expect(async () => {
     const internal = await page.evaluate(() => Array.from(window.codeEditors)[0].state.doc.toString());
     expect(internal).toStrictEqual(expected);
-  }).toPass({timeout: 3000});
+  }).toPass({timeout: 3000 * timeoutScale});
   await expect(page.locator('#claim_rules')).toHaveValue(expected);
 }
 
@@ -280,7 +280,7 @@ test('User: View authorized integration', async ({browser}, workerInfo) => {
 
   // Claim rules JSON codemirror editor:
   const editor = page.locator('.cm-content');
-  await expect(editor).toHaveAttribute('data-language', 'json', {timeout: 3000});
+  await expect(editor).toHaveAttribute('data-language', 'json', {timeout: 3000 * timeoutScale});
   await validateClaimRules(page, '{\n  "rules": null\n}');
 
   await expect(page.getByRole('radio', {name: 'All (public, private, and limited)'})).toBeChecked();

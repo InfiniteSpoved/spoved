@@ -12,7 +12,7 @@
 
 import {expect, type Page} from '@playwright/test';
 import {accessibilityCheck} from './shared/accessibility.ts';
-import {test} from './utils_e2e.ts';
+import {test, timeoutScale} from './utils_e2e.ts';
 import {screenshot} from './shared/screenshots.ts';
 
 test.use({user: 'user2'});
@@ -446,7 +446,7 @@ test.describe('Markdown insert table', () => {
     await expect(async () => {
       await evaluateTableInsertion(page, '#comment-form', false);
       await evaluateTableInsertion(page, '#issuecomment-2', true);
-    }).toPass({timeout: 3000});
+    }).toPass({timeout: 3000 * timeoutScale});
   });
 });
 
@@ -539,19 +539,19 @@ test.describe('Markdown insert link', () => {
 
     await expect(async () => {
       await evaluateLinkInsertion(page, '#comment-form', false);
-    }).toPass({timeout: 3000});
+    }).toPass({timeout: 3000 * timeoutScale});
 
     await expect(async () => {
       await evaluateLinkInsertion(page, '#issuecomment-2', true);
-    }).toPass({timeout: 3000});
+    }).toPass({timeout: 3000 * timeoutScale});
 
     await expect(async () => {
       await evaluateLinkInsertionShortcut(page, '#comment-form');
-    }).toPass({timeout: 3000});
+    }).toPass({timeout: 3000 * timeoutScale});
 
     await expect(async () => {
       await evaluateLinkInsertionShortcut(page, '#issuecomment-2');
-    }).toPass({timeout: 3000});
+    }).toPass({timeout: 3000 * timeoutScale});
   });
 });
 

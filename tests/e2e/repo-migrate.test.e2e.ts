@@ -3,7 +3,7 @@
 // @watch end
 
 import {expect} from '@playwright/test';
-import {test, test_context, dynamic_id} from './utils_e2e.ts';
+import {test, test_context, dynamic_id, timeoutScale} from './utils_e2e.ts';
 import {screenshot} from './shared/screenshots.ts';
 
 test.use({user: 'user2'});
@@ -62,7 +62,7 @@ test('Migration Progress Page', async ({page, browser}) => {
   await form.getByRole('textbox', {name: 'Repository Name'}).fill(repoName);
   await form.getByRole('textbox', {name: 'Migrate / Clone from URL'}).fill(`https://codeberg.org/forgejo/${repoName}`);
   await screenshot(page);
-  await form.locator('button.primary').click({timeout: 5000});
+  await form.locator('button.primary').click({timeout: 5000 * timeoutScale});
   await expect(page).toHaveURL(`user2/${repoName}`);
   await screenshot(page);
 

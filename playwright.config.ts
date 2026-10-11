@@ -1,6 +1,8 @@
 import {devices, type PlaywrightTestConfig} from '@playwright/test';
 
 const BASE_URL = process.env.GITEA_URL?.replace?.(/\/$/g, '') || 'http://localhost:3003';
+// see timeoutScale in tests/e2e/utils_e2e.ts
+const timeoutScale = Number(process.env.E2E_TIMEOUT_SCALE) || 1;
 
 /**
  * @see https://playwright.dev/docs/test-configuration
@@ -15,14 +17,14 @@ export default {
   workers: 1,
 
   /* Maximum time one test can run for. */
-  timeout: 30 * 1000,
+  timeout: 30 * 1000 * timeoutScale,
 
   expect: {
     /**
      * Maximum time expect() should wait for the condition to be met.
      * For example in `await expect(locator).toHaveText();`
      */
-    timeout: 3000,
+    timeout: 3000 * timeoutScale,
   },
 
   /* Fail the build on CI if you accidentally left test.only in the source code. */
@@ -41,10 +43,10 @@ export default {
     locale: 'en-US',
 
     /* Maximum time each action such as `click()` can take. Defaults to 0 (no limit). */
-    actionTimeout: 3000,
+    actionTimeout: 3000 * timeoutScale,
 
     /* Maximum time allowed for navigation, such as `page.goto()`. */
-    navigationTimeout: 10 * 1000,
+    navigationTimeout: 10 * 1000 * timeoutScale,
 
     /* Base URL to use in actions like `await page.goto('/')`. */
     baseURL: BASE_URL,

@@ -1,0 +1,135 @@
+name: CI
+
+# The CI of this repository on the self-hosted Proxmox runners (runs-on: proxmox,
+# ephemeral Ubuntu 24.04 containers, at most 4 at a time; the other jobs queue).
+# It runs the same jobs as the InfiniteSpoved/spovedBuild workflow; what each
+# job does lives in .github/ci/job.sh. This repository is private, so unlike
+# spovedBuild the logs are shown as they are.
+#
+# It only runs by hand (pull requests run in spovedBuild, see spovedbuild.yml).
+# Manual runs take a branch, tag or commit and run the checks and unit tests,
+# everything when full is checked; `only` limits a manual run to some stages.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to test.
+        default: develop
+      full:
+        description: Also run the migration, integration and end-to-end tests (about an hour). Otherwise only the checks and unit tests run.
+        type: boolean
+        default: false
+      run-all-e2e:
+        description: Run every end-to-end test, not only those covering the files changed compared with develop.
+        type: boolean
+        default: true
+      only:
+        description: Optional comma-separated stages to run (lint, frontend, unit, migrations, integration, e2e), for iterating on a fix.
+        default: ''
+      integration-shards:
+        description: Number of integration jobs. spovedBuild runs 8; set that to reproduce one of its shards with readable logs.
+        default: '4'
+
+concurrency:
+  group: ci-${{ github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: proxmox
+    timeout-minutes: 10
+    outputs:
+      tasks: ${{ steps.plan.outputs.tasks }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Plan
+        id: plan
+        run: .github/ci/job.sh plan
+        env:
+          EVENT: ${{ github.event_name }}
+          FULL: ${{ inputs.full }}
+          RUN_ALL_E2E: ${{ inputs.run-all-e2e }}
+          ONLY: ${{ inputs.only }}
+          # fewer, longer jobs than on GitHub's hosted runners: the host runs only about 10 runners at once
+          INTEGRATION_SHARDS: ${{ inputs.integration-shards || 4 }}
+          E2E_SHARDS: 3
+
+  run:
+    name: ${{ matrix.task }} ${{ matrix.args }}
+    needs: [plan]
+    runs-on: proxmox
+    timeout-minutes: 90
+    env:
+      # npm reads from the registry time out now and then on the runners' network
+      npm_config_fetch_retries: 5
+      # the e2e tests' fixed waits are tuned for GitHub's hosted runners; these are about half as fast
+      E2E_TIMEOUT_SCALE: 2
+      # GitHub's cache downloads sometimes stall for the default 10 minutes; treat that as a cache miss sooner
+      SEGMENT_DOWNLOAD_TIMEOUT_MINS: 2
+      # runners have 6 GB; golangci-lint next to the lint job's parallel targets was OOM-killed, so each Go process
+      # gets a soft limit there and collects garbage harder (empty means no limit)
+      GOMEMLIMIT: ${{ matrix.task == 'lint' && '2500MiB' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.tasks) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+          # commits to fetch, 0 for the full history (with origin/develop)
+          fetch-depth: ${{ matrix.depth }}
+      # no GitHub cache for Go and npm: the runners share host-wide caches (GOCACHE, GOMODCACHE, npm), and
+      # extracting a cache archive into them while other jobs read them crashed a build with SIGBUS
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - name: Show CPUs
+        # unit 2 once deadlocked on t.Parallel the way -parallel 1 does; record what Go sees on each runner
+        run: |
+          nproc
+          cat /sys/fs/cgroup/cpu.max || true
+          printf 'package main\nimport ("fmt"; "runtime")\nfunc main() { fmt.Println("GOMAXPROCS", runtime.GOMAXPROCS(0)) }\n' > "$RUNNER_TEMP/procs.go"
+          go run "$RUNNER_TEMP/procs.go"
+      - name: Cache tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/golangci-lint
+            ~/.cache/ms-playwright
+          key: tools-${{ runner.os }}-${{ matrix.task }}-${{ hashFiles('go.sum', '.golangci.yml', 'package-lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            tools-${{ runner.os }}-${{ matrix.task }}-${{ hashFiles('go.sum', '.golangci.yml', 'package-lock.json') }}-
+            tools-${{ runner.os }}-${{ matrix.task }}-
+      - name: Run
+        run: |
+          # ARGS is split into words on purpose
+          # shellcheck disable=SC2086
+          .github/ci/job.sh "$TASK" $ARGS
+        env:
+          TASK: ${{ matrix.task }}
+          ARGS: ${{ matrix.args }}
+          RUN_ALL_E2E: ${{ inputs.run-all-e2e }}
+
+  # The single check to require in the branch protection rules
+  ci-success:
+    name: CI success
+    if: always()
+    needs: [plan, run]
+    runs-on: proxmox
+    steps:
+      - name: Report the result
+        run: '[ "$FAILED" = false ]'
+        env:
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}

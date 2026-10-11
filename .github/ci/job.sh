@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# The CI jobs, run by the public InfiniteSpoved/spovedBuild workflow, which
-# keeps their output out of its public logs (it only uploads it encrypted).
-# Keep anything that describes this repository in here, not in that workflow.
+# The CI jobs, run by .github/workflows/ci.yml on the Proxmox runners and by the
+# public InfiniteSpoved/spovedBuild workflow, which keeps their output out of its
+# public logs (it only uploads it encrypted). Keep anything that describes this
+# repository in here, not in that workflow.
 #
 # Usage: job.sh TASK [ARGS]
 #   plan                 writes `tasks`, the jobs to run, to $GITHUB_OUTPUT
@@ -47,8 +48,12 @@ plan)
     depth=1
     [ "$RUN_ALL_E2E" = true ] || depth=0
     tasks+=',{"task":"migrations","args":"","depth":"1"}'
-    for i in 1 2 3 4; do tasks+=",{\"task\":\"integration\",\"args\":\"$i 4\",\"depth\":\"1\"}"; done
-    for i in 1 2 3; do tasks+=",{\"task\":\"e2e\",\"args\":\"$i 3\",\"depth\":\"$depth\"}"; done
+    # the longest jobs, so split finer on GitHub's hosted runners, where public-repository jobs are free;
+    # the self-hosted runners ask for fewer shards (INTEGRATION_SHARDS, E2E_SHARDS)
+    n=${INTEGRATION_SHARDS:-8}
+    for ((i = 1; i <= n; i++)); do tasks+=",{\"task\":\"integration\",\"args\":\"$i $n\",\"depth\":\"1\"}"; done
+    n=${E2E_SHARDS:-5}
+    for ((i = 1; i <= n; i++)); do tasks+=",{\"task\":\"e2e\",\"args\":\"$i $n\",\"depth\":\"$depth\"}"; done
   fi
   tasks="[$tasks]"
   # ONLY (comma-separated task names) keeps just those stages, for iterating
@@ -77,7 +82,12 @@ frontend)
 
 unit)
   # Azure Blob Storage emulator for the azureblob storage tests (TEST_AZURITE_URL)
-  npx -y -p azurite@3.37.0 azurite-blob --inMemoryPersistence --skipApiVersionCheck --blobHost 127.0.0.1 > "$RUNNER_TEMP/azurite.log" 2>&1 &
+  # installed before starting, with retries: registry reads time out now and then on the self-hosted runners
+  for attempt in 1 2 3; do
+    npm install --no-save --prefix "$RUNNER_TEMP/azurite" azurite@3.37.0 && break
+    [ "$attempt" = 3 ] && exit 1
+  done
+  "$RUNNER_TEMP/azurite/node_modules/.bin/azurite-blob" --inMemoryPersistence --skipApiVersionCheck --blobHost 127.0.0.1 > "$RUNNER_TEMP/azurite.log" 2>&1 &
   timeout 120 bash -c 'until grep -q "successfully listens" "$RUNNER_TEMP/azurite.log"; do sleep 1; done' || { cat "$RUNNER_TEMP/azurite.log"; exit 1; }
   # the packages `make test-backend` tests, as computed by the Makefile
   packages=$(make -s --eval='ci-list-test-packages: compute-go-test-packages ; @echo $(GO_TEST_PACKAGES)' ci-list-test-packages \
@@ -108,7 +118,12 @@ e2e)
   browser=firefox
   make deps-frontend
   make frontend
-  npx playwright install --with-deps "$browser"
+  # the self-hosted runner images ship the browser's system libraries and give jobs no sudo
+  if [ "$(id -u)" = 0 ] || sudo -n true 2> /dev/null; then
+    npx playwright install --with-deps "$browser"
+  else
+    npx playwright install "$browser"
+  fi
   make e2e.sqlite.test generate-ini-sqlite
   # With RUN_ALL_E2E unchecked, only run the tests whose `@watch` patterns
   # match the files changed compared with develop (see tests/e2e/changes.go).
