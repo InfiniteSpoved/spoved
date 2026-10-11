@@ -55,12 +55,14 @@ var (
 type AccessTokenScopePolicy struct {
 	Allowed                []string // empty = all
 	RequireRepoRestriction []string
+	EnforceAfter           string // RFC 3339 or YYYY-MM-DD, empty = never; parsed by authz
 }
 
 func loadAccessTokenScopePolicy(sec ConfigSection) AccessTokenScopePolicy {
 	return AccessTokenScopePolicy{
 		Allowed:                loadScopeList(sec, "ACCESS_TOKEN_ALLOWED_SCOPES"),
 		RequireRepoRestriction: loadScopeList(sec, "ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION"),
+		EnforceAfter:           strings.TrimSpace(sec.Key("ACCESS_TOKEN_SCOPE_POLICY_ENFORCE_AFTER").String()),
 	}
 }
 

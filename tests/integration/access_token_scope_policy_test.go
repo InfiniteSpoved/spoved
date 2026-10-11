@@ -6,18 +6,22 @@ package integration
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
+	actions_model "forgejo.org/models/actions"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
+	"forgejo.org/modules/timeutil"
 	auth_service "forgejo.org/services/auth"
 	"forgejo.org/services/authz"
 	"forgejo.org/tests"
@@ -219,4 +223,77 @@ func TestAccessTokenScopePolicyCLIAuthorizedIntegration(t *testing.T) {
 	require.ErrorAs(t, err, &exitErr)
 	assert.Contains(t, string(exitErr.Stderr), "access token scope not allowed: read:issue")
 	unittest.AssertNotExistsBean(t, &auth_model.AuthorizedIntegration{UserID: 2, Name: "cli-disallowed"})
+}
+
+func TestAccessTokenScopePolicyEnforced(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+
+	// Tokens created before the policy existed.
+	broad := getUserToken(t, "user2", auth_model.AccessTokenScopeReadIssue, auth_model.AccessTokenScopeReadUser)
+	unrestricted := getUserToken(t, "user2", auth_model.AccessTokenScopeWriteRepository)
+	allowed := getUserToken(t, "user2", auth_model.AccessTokenScopeReadUser)
+	adminToken := getUserToken(t, "user1", auth_model.AccessTokenScopeWriteAdmin)
+	ait := newAITester(t, func(ai *auth_model.AuthorizedIntegration) {
+		ai.Scope = auth_model.AccessTokenScopeReadIssue
+	})
+	defer ait.close()
+	task := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionTask{ID: 47})
+	task.GenerateToken()
+	require.NoError(t, actions_model.UpdateTask(t.Context(), task))
+
+	policy := testScopePolicy
+	policy.EnforceAfter = "2030-01-02"
+	defer test.MockVariableValue(&setting.AccessTokenScopes, policy)()
+	date := time.Date(2030, 1, 2, 0, 0, 0, 0, time.UTC)
+	defer timeutil.MockUnset()
+
+	apiGet := func(t *testing.T, url, token string, status int) *httptest.ResponseRecorder {
+		t.Helper()
+		return MakeRequest(t, NewRequest(t, "GET", url).AddTokenAuth(token), status)
+	}
+
+	t.Run("before the date", func(t *testing.T) {
+		timeutil.MockSet(date.Add(-time.Minute))
+		apiGet(t, "/api/v1/user", broad, http.StatusOK)
+		apiGet(t, "/api/v1/repos/user2/repo1", unrestricted, http.StatusOK)
+		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/issues/search").AddTokenAuth(ait.signedJWT()), http.StatusOK)
+	})
+
+	timeutil.MockSet(date.Add(time.Minute))
+
+	t.Run("API", func(t *testing.T) {
+		resp := apiGet(t, "/api/v1/user", broad, http.StatusUnauthorized)
+		assert.Contains(t, resp.Body.String(), "access token breaks the access token scope policy: access token scope not allowed: read:issue; allowed scopes: read:repository, write:repository, read:user; replace it with a token that follows the policy")
+		resp = apiGet(t, "/api/v1/repos/user2/repo1", unrestricted, http.StatusUnauthorized)
+		assert.Contains(t, resp.Body.String(), "access token scope must be limited to specified repositories: write:repository")
+		apiGet(t, "/api/v1/user", allowed, http.StatusOK)
+		apiGet(t, "/api/v1/admin/users", adminToken, http.StatusOK)
+	})
+
+	t.Run("last used is not updated", func(t *testing.T) {
+		apiGet(t, "/api/v1/user", broad, http.StatusUnauthorized)
+		token, err := auth_model.GetAccessTokenBySHA(t.Context(), broad)
+		require.NoError(t, err)
+		assert.Less(t, token.UpdatedUnix.AsTime(), date)
+	})
+
+	t.Run("git HTTP", func(t *testing.T) {
+		req := NewRequest(t, "GET", "/user2/repo1.git/info/refs?service=git-upload-pack")
+		req.SetBasicAuth("user2", broad)
+		MakeRequest(t, req, http.StatusUnauthorized)
+	})
+
+	t.Run("nuget", func(t *testing.T) {
+		req := NewRequest(t, "GET", "/api/packages/user2/nuget/index.json").SetHeader("X-NuGet-ApiKey", broad)
+		MakeRequest(t, req, http.StatusUnauthorized)
+	})
+
+	t.Run("authorized integration", func(t *testing.T) {
+		resp := MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/issues/search").AddTokenAuth(ait.signedJWT()), http.StatusUnauthorized)
+		assert.Contains(t, resp.Body.String(), "edit the integration's scopes")
+	})
+
+	t.Run("Actions job token is not checked", func(t *testing.T) {
+		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user5/repo4").AddTokenAuth(task.Token), http.StatusOK)
+	})
 }
