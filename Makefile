@@ -47,7 +47,6 @@ GO_LICENSES_PACKAGE ?= github.com/google/go-licenses/v2@v2.0.1 # renovate: datas
 GOVULNCHECK_PACKAGE ?= golang.org/x/vuln/cmd/govulncheck@v1 # renovate: datasource=go
 DEADCODE_PACKAGE ?= golang.org/x/tools/cmd/deadcode@v0.50.0 # renovate: datasource=go
 ERRORTYPE_PACKAGE ?= fillmore-labs.com/errortype@v0.0.11 # renovate: datasource=go
-RENOVATE_NPM_PACKAGE ?= renovate@44.117.2 # renovate: datasource=docker packageName=data.forgejo.org/renovate/renovate
 MOCKERY_PACKAGE ?= github.com/vektra/mockery/v3@v3.8.0 # renovate: datasource=go
 
 # https://github.com/disposable-email-domains/disposable-email-domains/commits/main/
@@ -226,7 +225,6 @@ help:
 	@echo " - lint-css-fix                     lint css files and fix issues"
 	@echo " - lint-md                          lint markdown files"
 	@echo " - lint-swagger                     lint swagger files"
-	@echo " - lint-renovate                    lint renovate files"
 	@echo " - checks                           run various consistency checks"
 	@echo " - checks-frontend                  check frontend files"
 	@echo " - checks-backend                   check backend files"
@@ -444,7 +442,7 @@ lint-frontend: lint-js tsc lint-css
 lint-frontend-fix: lint-js-fix lint-css-fix
 
 .PHONY: lint-backend
-lint-backend: lint-go lint-go-vet lint-editorconfig lint-renovate lint-locale lint-locale-usage lint-disposable-emails lint-single-response
+lint-backend: lint-go lint-go-vet lint-editorconfig lint-locale lint-locale-usage lint-disposable-emails lint-single-response
 
 .PHONY: lint-backend-fix
 lint-backend-fix: lint-go-fix lint-go-vet lint-editorconfig lint-disposable-emails-fix
@@ -468,12 +466,6 @@ lint-css-fix: node_modules
 .PHONY: lint-swagger
 lint-swagger: node_modules
 	npx spectral lint -q -F hint $(SWAGGER_SPEC)
-
-.PHONY: lint-renovate
-lint-renovate: node_modules
-	npx --yes --package $(RENOVATE_NPM_PACKAGE) -- renovate-config-validator --no-global .forgejo/renovate.json > .lint-renovate 2>&1 || true
-	@if grep --quiet --extended-regexp -e '^( ERROR:)' .lint-renovate ; then cat .lint-renovate ; rm .lint-renovate ; exit 1 ; fi
-	@rm .lint-renovate
 
 .PHONY: lint-locale
 lint-locale:
@@ -521,7 +513,7 @@ lint-go-vet:
 
 .PHONY: lint-editorconfig
 lint-editorconfig:
-	$(GO) run $(EDITORCONFIG_CHECKER_PACKAGE) templates .forgejo/workflows
+	$(GO) run $(EDITORCONFIG_CHECKER_PACKAGE) templates
 
 .PHONY: lint-disposable-emails
 lint-disposable-emails:

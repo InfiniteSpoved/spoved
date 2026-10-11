@@ -65,7 +65,7 @@ plan)
   ;;
 
 lint)
-  # lint-renovate needs node_modules
+  # lint targets need node_modules
   make deps-frontend
   # golangci-lint, go vet, locale, editorconfig, swagger and format checks,
   # then a build; cimake.sh runs the independent targets in parallel
