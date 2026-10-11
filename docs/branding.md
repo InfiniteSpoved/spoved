@@ -17,6 +17,10 @@ Visible text keeps "Forgejo" where it names the upstream project or ecosystem, n
 
 `TestBranding` (`tests/integration/branding_test.go`) and the install, 500 and mail tests use `test.BrandMentions` (`modules/test/brand.go`). It fails on any visible old product name (Forgejo and the two earlier names, in any case) and on the capitalised "Spoved" and "SPOVED": the name is always lowercase, even at the start of a sentence. It reads body text (including `<pre>` and `<code>`), the title and the `content`, `alt`, `title`, `placeholder` and `aria-label` attributes. Its `test.BrandAllowed` list holds the exact phrases above that appear on the pages it checks ("based on Forgejo", "Forgejo documentation", `forgejo-runner`, `forgejo.org/docs`, `next.forgejo.org`), each with a comment.
 
+## Beyond the HTML pages
+
+Text that never reaches the rendered pages `TestBranding` reads is guarded by `TestNoOldBrandInUserFacingSource` (`modules/test/brand_source_test.go`): plain-text error pages, `WWW-Authenticate` realms, the Teams card, the JS error banner, swagger descriptions and package install snippets. A new such string goes into its file list; an upstream reference that stays true as written goes into the swagger allow list. The LFS realm `gitea-lfs` stays (protocol string). Leftovers outside these places are tracked in the issue tracker.
+
 ## Strings: shadow keys
 
 `modules/translation/i18n/localestore.go` looks a key up in `options/locale_next/` before `options/locale/`. So instead of editing upstream's `locale_en-US.ini`, spoved adds the **same key** with spoved wording at the top of `options/locale_next/locale_en-US.json`. The ini line, templates and Go call sites stay untouched. Other languages are untouched too.
