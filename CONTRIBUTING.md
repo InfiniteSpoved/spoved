@@ -23,6 +23,7 @@ You need Go (the version in `go.mod`), Node.js (the version in `.node-version`),
 ```sh
 make deps
 make build                 # frontend and backend
+./gitea web                # then open http://localhost:3000 for the installer
 ```
 
 Before opening a pull request, run what applies to your change:
@@ -31,7 +32,7 @@ Before opening a pull request, run what applies to your change:
 - Frontend (templates, JS, CSS): `make lint-frontend checks-frontend test-frontend frontend`.
 - Unit tests: `go test -tags 'sqlite sqlite_unlock_notify' ./path/to/package/...` for the packages you changed and their neighbours.
 - Integration tests: `make test-sqlite`. Run the whole suite; the tests share state and depend on order, so do not shard it. A single test: `make 'test-sqlite#TestName'`.
-- End-to-end tests: `make 'test-e2e-sqlite#<spec>.test.e2e'` for the specs that cover your files. Run `make frontend` first.
+- End-to-end tests: `make 'test-e2e-sqlite#<spec>.test.e2e'` for the specs that cover your files. Run `make frontend` first. The first run downloads the browsers Playwright needs; see [`tests/e2e/README.md`](tests/e2e/README.md).
 - Migrations: `make generate-ini-sqlite` once, then `PROJECT_CONF=tests/sqlite.ini go test ./models/forgejo_migrations/...`. Do not run it at the same time as the integration suite.
 
 Conventions:
@@ -42,9 +43,13 @@ Conventions:
 - Add tests for what you change, and do not remove existing tests or checks.
 - Stage files by name; `make lint` can rewrite `package-lock.json`.
 
+## Continuous integration
+
+Every pull request runs the lints, frontend checks, unit, migration, integration and end-to-end tests. The commit status **CI success** on the head of your pull request must be green before it can be merged. A maintainer runs CI for you; you don't need to do anything. The result shows as the "CI success" status on your pull request.
+
 ## License
 
-spoved is licensed GPL-3.0-or-later because it is a fork of Forgejo, which is GPL-3.0-or-later. Contributions are accepted under the same license (inbound = outbound). Keep the existing copyright and SPDX headers of the original authors. New files get `Copyright <year> The spoved contributors`.
+spoved is licensed GPL-3.0-or-later because it is a fork of Forgejo, which is GPL-3.0-or-later. Contributions are accepted under the same license (inbound = outbound). Keep the existing copyright and SPDX headers of the original authors. New files get `Copyright <year> The spoved contributors. All rights reserved.` and `SPDX-License-Identifier: GPL-3.0-or-later` as the first two comment lines, as in any new Go file.
 
 Every commit must carry a `Signed-off-by:` line, which certifies the [Developer Certificate of Origin](https://developercertificate.org/). Add it with `git commit -s`. This applies to commits made from the day the repository is made public; earlier history is not rewritten. A check (`tools/check-dco.sh`, run by `.github/workflows/dco.yml`) fails a pull request whose own commits, merge commits excluded, lack the line.
 

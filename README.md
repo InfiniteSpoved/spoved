@@ -76,9 +76,8 @@ Each feature links to the pull request that added it.
 
 ### Development and quality
 
-- CI on every pull request runs the lints, frontend checks and unit tests. The migration, integration and end-to-end suites run on a manual run of the CI workflow ([#11](https://github.com/InfiniteSpoved/spoved/pull/11), [#36](https://github.com/InfiniteSpoved/spoved/pull/36), [#27](https://github.com/InfiniteSpoved/spoved/pull/27), [#146](https://github.com/InfiniteSpoved/spoved/pull/146)).
+- CI on every pull request runs the lints, frontend checks, unit, migration, integration and end-to-end tests ([#11](https://github.com/InfiniteSpoved/spoved/pull/11), [#36](https://github.com/InfiniteSpoved/spoved/pull/36), [#27](https://github.com/InfiniteSpoved/spoved/pull/27), [#146](https://github.com/InfiniteSpoved/spoved/pull/146)).
 - Fix for a cancellation race in git attribute checks ([#42](https://github.com/InfiniteSpoved/spoved/pull/42)).
-- Contributor and agent guidance in [`CLAUDE.md`](CLAUDE.md) and [`.claude/skills`](.claude/skills) ([#47](https://github.com/InfiniteSpoved/spoved/pull/47), [#70](https://github.com/InfiniteSpoved/spoved/pull/70), [#105](https://github.com/InfiniteSpoved/spoved/pull/105), [#117](https://github.com/InfiniteSpoved/spoved/pull/117), [#123](https://github.com/InfiniteSpoved/spoved/pull/123), [#144](https://github.com/InfiniteSpoved/spoved/pull/144)).
 
 Most new features are **off or unchanged by default** and are switched on in `app.ini`, so upgrading doesn't change behavior until you configure them.
 
