@@ -66,6 +66,16 @@ func getDashboardContextUser(ctx *context.Context) *user_model.User {
 	// archived organizations are hidden from the dashboard switcher, unless one is the current context
 	n := len(orgs)
 	orgs = slices.DeleteFunc(orgs, func(o *organization.Organization) bool { return o.IsArchived && o.ID != ctxUser.ID })
+	cats, err := organization.FindOrgCategories(ctx)
+	if err != nil {
+		ctx.ServerError("FindOrgCategories", err)
+		return nil
+	}
+	if len(cats) > 0 {
+		organization.SortOrgsByCategory(orgs, cats)
+		ctx.Data["GroupByCategory"] = true
+		ctx.Data["OrgCategoryByID"] = organization.CategoriesByID(cats)
+	}
 	ctx.Data["Orgs"] = orgs
 	ctx.Data["HasHiddenArchivedOrgs"] = len(orgs) < n
 

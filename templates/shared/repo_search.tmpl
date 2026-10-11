@@ -1,9 +1,9 @@
 <div class="ui small secondary filter menu">
-	<form id="repo-search-form" class="ui form ignore-dirty tw-flex-1 tw-flex tw-flex-row tw-gap-x-2 tw-items-center">
+	<form id="repo-search-form" class="ui form ignore-dirty tw-flex-1 tw-flex tw-flex-row tw-flex-wrap tw-gap-x-2 tw-gap-y-2 tw-items-center">
 		{{if .Language}}<input hidden name="language" value="{{.Language}}">{{end}}
 		{{if .TopicOnly}}<input hidden name="topic" value="{{.TopicOnly}}">{{end}}
 		{{if .RepoOwnerID}}<input hidden name="uid" value="{{.RepoOwnerID}}">{{end}}
-		<div class="ui small fluid action input tw-flex-1">
+		<div class="ui small fluid action input tw-flex-1 tw-min-w-[12rem]">
 			{{template "shared/search/input" dict "Value" .Keyword "Placeholder" (ctx.Locale.Tr "search.repo_kind")}}
 			{{if .PageIsExploreRepositories}}
 				<input type="hidden" name="only_show_relevant" value="{{.OnlyShowRelevant}}">
@@ -37,6 +37,25 @@
 				<label class="item"><input type="radio" name="private" {{if (not (.IsPrivate.ValueOrDefault true))}}checked{{end}} value="0"> {{ctx.Locale.Tr "filter.public"}}</label>
 			</div>
 		</div>
+		{{if .OrgCategories}}
+		<!-- Category -->
+		{{$categoryLabel := ctx.Locale.Tr "explore.org_category"}}
+		{{if eq .CategoryFilter "other"}}{{$categoryLabel = ctx.Locale.Tr "explore.org_category.selected" (ctx.Locale.Tr "explore.org_category.other")}}{{end}}
+		{{range .OrgCategories}}{{if eq $.CategoryFilter (print .ID)}}{{$categoryLabel = ctx.Locale.Tr "explore.org_category.selected" .Name}}{{end}}{{end}}
+		<div id="repo-search-category" class="ui small dropdown type jump item tw-mr-0">
+			<span class="text">
+				{{$categoryLabel}}
+			</span>
+			{{svg "octicon-triangle-down" 14 "dropdown icon"}}
+			<div class="menu">
+				<label class="{{if not .CategoryFilter}}active {{end}}item"><input hidden type="radio" name="category" {{if not .CategoryFilter}}checked{{end}} value=""> {{ctx.Locale.Tr "explore.org_category.all"}}</label>
+				{{range .OrgCategories}}
+					<label class="{{if eq $.CategoryFilter (print .ID)}}active {{end}}item"><input hidden type="radio" name="category" {{if eq $.CategoryFilter (print .ID)}}checked{{end}} value="{{.ID}}"> {{template "shared/org_category_name" .}}</label>
+				{{end}}
+				<label class="{{if eq .CategoryFilter "other"}}active {{end}}item"><input hidden type="radio" name="category" {{if eq .CategoryFilter "other"}}checked{{end}} value="other"> {{ctx.Locale.Tr "explore.org_category.other"}}</label>
+			</div>
+		</div>
+		{{end}}
 		<!-- Sort -->
 		<div class="ui small dropdown type jump item tw-mr-0">
 			<span class="text">
@@ -64,7 +83,7 @@
 </div>
 {{if and .PageIsExploreRepositories .OnlyShowRelevant}}
 	<div class="ui message explore-relevancy-note">
-		<span data-tooltip-content="{{ctx.Locale.Tr "explore.relevant_repositories_tooltip"}}">{{ctx.Locale.Tr "explore.relevant_repositories" (printf "?only_show_relevant=0&sort=%s&q=%s&language=%s" $.SortType (QueryEscape $.Keyword) (QueryEscape $.Language))}}</span>
+		<span data-tooltip-content="{{ctx.Locale.Tr "explore.relevant_repositories_tooltip"}}">{{ctx.Locale.Tr "explore.relevant_repositories" (printf "?only_show_relevant=0&sort=%s&q=%s&language=%s&category=%s" $.SortType (QueryEscape $.Keyword) (QueryEscape $.Language) (QueryEscape $.CategoryFilter))}}</span>
 	</div>
 {{end}}
 <div class="divider"></div>

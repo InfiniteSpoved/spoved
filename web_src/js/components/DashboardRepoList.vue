@@ -443,31 +443,37 @@ export default {
     <div v-if="!isOrganization" v-show="tab === 'organizations'" class="ui tab active list dashboard-orgs">
       <div v-if="organizations.length" class="ui attached table segment tw-rounded">
         <ul class="repo-owner-name-list">
-          <li class="tw-flex tw-items-center tw-py-2" v-for="org in organizations" :key="org.name">
-            <a class="repo-list-link muted" :href="subUrl + '/' + encodeURIComponent(org.name)">
-              <img
-                v-if="org.avatar_url"
-                class="ui avatar repo-list-icon"
-                :src="org.avatar_url"
-                alt=""
-                width="16"
-                height="16"
-                loading="lazy"
-                @error="org.avatar_url = ''"
-              >
-              <svg-icon v-else name="octicon-organization" :size="16" class="repo-list-icon"/>
-              <div class="text truncate">{{ org.name }}</div>
-              <div><!-- div to prevent underline of label on hover -->
-                <span class="ui label" v-if="org.org_visibility !== 'public'">
-                  {{ org.org_visibility === 'limited' ? textOrgVisibilityLimited: textOrgVisibilityPrivate }}
-                </span>
+          <template v-for="(org, i) in organizations" :key="org.name">
+            <li v-if="org.category && org.category.name !== organizations[i - 1]?.category?.name" class="org-category-header tw-flex tw-items-center tw-gap-2 tw-pt-2 tw-font-semibold">
+              <span v-if="org.category.color" class="color-icon" :style="{backgroundColor: org.category.color}"/>
+              {{ org.category.name }}
+            </li>
+            <li class="tw-flex tw-items-center tw-py-2">
+              <a class="repo-list-link muted" :href="subUrl + '/' + encodeURIComponent(org.name)">
+                <img
+                  v-if="org.avatar_url"
+                  class="ui avatar repo-list-icon"
+                  :src="org.avatar_url"
+                  alt=""
+                  width="16"
+                  height="16"
+                  loading="lazy"
+                  @error="org.avatar_url = ''"
+                >
+                <svg-icon v-else name="octicon-organization" :size="16" class="repo-list-icon"/>
+                <div class="text truncate">{{ org.name }}</div>
+                <div><!-- div to prevent underline of label on hover -->
+                  <span class="ui label" v-if="org.org_visibility !== 'public'">
+                    {{ org.org_visibility === 'limited' ? textOrgVisibilityLimited: textOrgVisibilityPrivate }}
+                  </span>
+                </div>
+              </a>
+              <div class="text light grey tw-flex tw-items-center tw-ml-2">
+                {{ org.num_repos }}
+                <svg-icon name="octicon-repo" :size="16" class="tw-ml-1 tw-mt-0.5"/>
               </div>
-            </a>
-            <div class="text light grey tw-flex tw-items-center tw-ml-2">
-              {{ org.num_repos }}
-              <svg-icon name="octicon-repo" :size="16" class="tw-ml-1 tw-mt-0.5"/>
-            </div>
-          </li>
+            </li>
+          </template>
         </ul>
       </div>
     </div>

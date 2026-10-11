@@ -41,7 +41,7 @@ data.teamId = {{.Team.ID}};
 {{end}}
 
 {{if not .ContextUser.IsOrganization}}
-data.organizations = [{{range .Orgs}}{'name': {{.Name}}, 'num_repos': {{.NumRepos}}, 'org_visibility': {{.Visibility}}, 'avatar_url': {{.UploadedAvatarLink 16}}},{{end}}];
+data.organizations = [{{range .Orgs}}{'name': {{.Name}}, 'num_repos': {{.NumRepos}}, 'org_visibility': {{.Visibility}}, 'avatar_url': {{.UploadedAvatarLink 16}}{{if $.GroupByCategory}}, 'category': {{with index $.OrgCategoryByID .CategoryID}}{'name': {{.Name}}, 'color': {{.Color}}}{{else}}{'name': {{ctx.Locale.Tr "explore.org_category.other"}}, 'color': ''}{{end}}{{end}}},{{end}}];
 data.isOrganization = false;
 data.organizationsTotalCount = {{.UserOrgsCount}};
 data.canCreateOrganization = {{.SignedUser.CanCreateOrganization}};

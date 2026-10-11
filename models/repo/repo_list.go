@@ -199,6 +199,8 @@ type SearchRepoOptions struct {
 	AuditorView bool
 	// Filter to repositories in a size range.
 	SizeFilter SizeFilter
+	// Filter to repositories whose owner is in this organization category; Some(0) = no category (incl. users).
+	OwnerCategoryID optional.Option[int64]
 }
 
 // UserOwnedRepoCond returns user ownered repositories
@@ -545,6 +547,11 @@ func SearchRepositoryCondition(opts *SearchRepoOptions) builder.Cond {
 
 	if opts.SizeFilter.Field != "" {
 		cond = cond.And(opts.SizeFilter.Cond())
+	}
+
+	if has, id := opts.OwnerCategoryID.Get(); has {
+		// user.category_id is 0 for every user and for organizations without a category
+		cond = cond.And(builder.In("`repository`.owner_id", builder.Select("id").From("`user`").Where(builder.Eq{"category_id": id})))
 	}
 
 	return cond
