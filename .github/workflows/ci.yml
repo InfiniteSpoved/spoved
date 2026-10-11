@@ -30,6 +30,9 @@ on:
       only:
         description: Optional comma-separated stages to run (lint, frontend, unit, migrations, integration, e2e), for iterating on a fix.
         default: ''
+      integration-shards:
+        description: Number of integration jobs. spovedBuild runs 8; set that to reproduce one of its shards with readable logs.
+        default: '4'
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.run_id }}
@@ -62,7 +65,7 @@ jobs:
           RUN_ALL_E2E: ${{ inputs.run-all-e2e }}
           ONLY: ${{ inputs.only }}
           # fewer, longer jobs than on GitHub's hosted runners: the host runs only about 10 runners at once
-          INTEGRATION_SHARDS: 4
+          INTEGRATION_SHARDS: ${{ inputs.integration-shards || 4 }}
           E2E_SHARDS: 3
 
   run:
