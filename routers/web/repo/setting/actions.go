@@ -125,9 +125,13 @@ func ActionsDeleteRunsPost(ctx *context.Context) {
 		ctx.ServerError("DeleteOldRuns", err)
 		return
 	}
-	if more {
+	switch {
+	case more && deleted == 0:
+		// every selected run has an unfinished job: deleting again would select the same runs
+		ctx.Flash.Warning(ctx.Tr("actions.settings.delete_runs.skipped"))
+	case more:
 		ctx.Flash.Success(ctx.Tr("actions.settings.delete_runs.done_more", deleted))
-	} else {
+	default:
 		ctx.Flash.Success(ctx.Tr("actions.settings.delete_runs.done", deleted))
 	}
 	ctx.Redirect(redirect)

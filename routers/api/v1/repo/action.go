@@ -1261,7 +1261,8 @@ func DeleteOldActionRuns(ctx *context.APIContext) {
 	//   Remove completed (succeeded, failed, cancelled or skipped) workflow runs of the repository that are older than
 	//   the given number of days, with their jobs, logs and artifacts. Kept runs, runs that are waiting or running and
 	//   the latest run of each workflow on the default branch are never removed. At most 100 runs are removed per request;
-	//   when "more" is true in the response, send the request again for the rest.
+	//   when "more" is true in the response, send the request again for the rest. Runs that have a job which has not
+	//   finished are skipped and stay selected: stop when a response has "deleted" 0 and "more" true.
 	// produces:
 	// - application/json
 	// parameters:

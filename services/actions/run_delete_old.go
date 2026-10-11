@@ -29,7 +29,8 @@ func CountOldRuns(ctx context.Context, repo *repo_model.Repository, days int64) 
 
 // DeleteOldRuns deletes the completed runs of the repository older than the given number of days, at most
 // MaxDeleteOldRuns, and reports whether more are left. Kept runs, running and waiting runs and the latest run of each
-// workflow on the default branch are never deleted; a run kept after it was selected is spared.
+// workflow on the default branch are never deleted; a run kept after it was selected is spared. A run with an
+// unfinished job is skipped and stays selected by the next call, so callers stop when nothing was deleted.
 func DeleteOldRuns(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, days int64) (deleted int, more bool, err error) {
 	exclude, err := actions_model.GetLatestDefaultBranchRunIDs(ctx, repo.ID)
 	if err != nil {

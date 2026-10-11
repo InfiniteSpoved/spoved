@@ -5,6 +5,7 @@ package integration
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/tests"
@@ -146,6 +148,32 @@ func TestActionsDeleteOldRunsWeb(t *testing.T) {
 		f.assertDeleted(t)
 	})
 
+	t.Run("runs with unfinished jobs are skipped, and the page doesn't offer endless repeats", func(t *testing.T) {
+		f := newOldRunsFixture(t)
+		for i := range 101 {
+			id := int64(920000 + i)
+			unittest.AssertSuccessfulInsert(t, &actions_model.ActionRun{ID: id, Index: id, RepoID: 1, OwnerID: 2, Ref: "refs/heads/feature", WorkflowID: "c.yaml", Status: actions_model.StatusSuccess})
+			unittest.AssertSuccessfulInsert(t, &actions_model.ActionRunJob{ID: id, Handle: fmt.Sprintf("stuck-%d", id), RunID: id, RepoID: 1, OwnerID: 2, Status: actions_model.StatusRunning})
+			_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE action_run SET created = ? WHERE id = ?", timeutil.TimeStampNow().AddDuration(-40*24*time.Hour), id)
+			require.NoError(t, err)
+		}
+		post(admin, "30", http.StatusSeeOther)
+		assert.False(t, f.exists(t, f.deleted[0]))
+		// what is left selected are the stuck runs only: nothing more can be deleted
+		post(admin, "30", http.StatusSeeOther)
+		body := admin.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/settings/actions/general"), http.StatusOK).Body.String()
+		assert.Contains(t, body, "No run was deleted: the matching runs have jobs that have not finished")
+		assert.NotContains(t, body, "delete again to continue")
+		assert.True(t, f.exists(t, 920000))
+	})
+
+	t.Run("an access token doesn't sign in to the web page", func(t *testing.T) {
+		f := newOldRunsFixture(t)
+		token := getUserToken(t, "user2", auth_model.AccessTokenScopeWriteRepository)
+		MakeRequest(t, NewRequestWithValues(t, "POST", base, map[string]string{"older_than": "30"}).AddTokenAuth(token), http.StatusSeeOther) // sign-in redirect
+		f.assertUntouched(t)
+	})
+
 	t.Run("only repository admins", func(t *testing.T) {
 		f := newOldRunsFixture(t)
 		page(collaborator, "?older_than=30", http.StatusNotFound)
@@ -245,10 +273,50 @@ func TestActionsDeleteOldRunsAPI(t *testing.T) {
 			f.assertUntouched(t)
 		})
 
-		t.Run("another repository's runs are not reachable", func(t *testing.T) {
+		t.Run("another repository's runs survive, and are not reachable", func(t *testing.T) {
 			f := newOldRunsFixture(t)
+			// old done runs of a second, existing repository (user5/repo4) of another owner
+			var others []int64
+			for i := range 3 {
+				id := int64(930000 + i)
+				others = append(others, id)
+				unittest.AssertSuccessfulInsert(t, &actions_model.ActionRun{ID: id, Index: id, RepoID: 4, OwnerID: 5, Ref: "refs/heads/feature", WorkflowID: "d.yaml", Status: actions_model.StatusSuccess})
+				_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE action_run SET created = ? WHERE id = ?", timeutil.TimeStampNow().AddDuration(-40*24*time.Hour), id)
+				require.NoError(t, err)
+			}
+			assert.Equal(t, &api.DeleteActionRunsResult{Deleted: 2, More: false}, del("?older_than=30", writeToken, http.StatusOK))
+			f.assertDeleted(t)
+			for _, id := range others {
+				assert.True(t, f.exists(t, id), id)
+			}
+			// user2 is no admin there (or sees no such repository) and deletes nothing
+			status := MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/repos/user5/repo4/actions/runs?older_than=30").AddTokenAuth(writeToken), NoExpectedStatus).Code
+			assert.Contains(t, []int{http.StatusForbidden, http.StatusNotFound}, status)
 			MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/repos/user2/no-such-repo/actions/runs?older_than=30").AddTokenAuth(writeToken), http.StatusNotFound)
-			f.assertUntouched(t)
+			for _, id := range others {
+				assert.True(t, f.exists(t, id), id)
+			}
 		})
 	})
+}
+
+// A maintenance read-only mode refuses both ways to delete runs, and still shows the preview.
+func TestActionsDeleteOldRunsMaintenance(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	session := loginUser(t, "user2")
+	token := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteRepository)
+	f := newOldRunsFixture(t)
+	defer setMaintenance(t, setting.MaintenanceReadOnly, time.Now().Add(time.Hour))()
+
+	session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/settings/actions/runs/delete?older_than=30"), http.StatusOK)
+
+	req := NewRequestWithValues(t, "POST", "/user2/repo1/settings/actions/runs/delete", map[string]string{"older_than": "30"})
+	req.Header.Set("Referer", setting.AppURL+"user2/repo1")
+	resp := session.MakeRequest(t, req, http.StatusSeeOther)
+	assert.Equal(t, setting.AppURL+"user2/repo1", resp.Header().Get("Location"))
+	assertMaintenanceFlash(t, session)
+
+	resp = MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/repos/user2/repo1/actions/runs?older_than=30").AddTokenAuth(token), http.StatusServiceUnavailable)
+	assert.JSONEq(t, `{"message":"read-only mode","detail":"`+maintenanceMessage+`"}`, resp.Body.String())
+	f.assertUntouched(t)
 }
