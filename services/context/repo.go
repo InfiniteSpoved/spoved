@@ -20,6 +20,7 @@ import (
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
+	"forgejo.org/models/organization"
 	packages_model "forgejo.org/models/packages"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
@@ -380,6 +381,31 @@ func RedirectToRepo(ctx *Base, redirectRepoID int64) {
 	ctx.Redirect(path.Join(setting.AppSubURL, redirectPath), http.StatusMovedPermanently)
 }
 
+// twoFactorBlockedPage answers 403 with the reason when the doer is a member of the organization owner whose
+// two-factor requirement blocks them, and reports whether it did. It stands in for every 404 on a repository path of
+// that organization (existing or not, so the answer says nothing about which repositories exist); everyone else keeps
+// the 404. An organization without the requirement costs nothing.
+func (ctx *Context) twoFactorBlockedPage(owner *user_model.User) bool {
+	if !ctx.IsSigned || owner == nil || !owner.IsOrganization() || !owner.RequireTwoFactor {
+		return false
+	}
+	blocked, err := ctx.Doer.TwoFactorBlocked(ctx, owner)
+	if err == nil && blocked {
+		blocked, err = organization.IsOrganizationMember(ctx, owner.ID, ctx.Doer.ID)
+	}
+	if err != nil {
+		ctx.ServerError("TwoFactorBlocked", err)
+		return true
+	}
+	if !blocked {
+		return false
+	}
+	ctx.Data["Title"] = ctx.Locale.TrString("org.settings.require_two_factor_blocked")
+	ctx.Data["ForbiddenPrompt"] = ctx.Locale.TrString("org.settings.require_two_factor_blocked_text")
+	ctx.HTML(http.StatusForbidden, "status/403")
+	return true
+}
+
 func repoAssignment(ctx *Context, repo *repo_model.Repository) {
 	var err error
 	if err = repo.LoadOwner(ctx); err != nil {
@@ -409,7 +435,9 @@ func repoAssignment(ctx *Context, repo *repo_model.Repository) {
 			EarlyResponseForGoGetMeta(ctx)
 			return
 		}
-		ctx.NotFound("no access right", nil)
+		if !ctx.twoFactorBlockedPage(repo.Owner) {
+			ctx.NotFound("no access right", nil)
+		}
 		return
 	}
 	ctx.Data["HasAccess"] = true
@@ -551,7 +579,9 @@ func RepoAssignment(ctx *Context) context.CancelFunc {
 					EarlyResponseForGoGetMeta(ctx)
 					return nil
 				}
-				ctx.NotFound("GetRepositoryByName", nil)
+				if !ctx.twoFactorBlockedPage(owner) {
+					ctx.NotFound("GetRepositoryByName", nil)
+				}
 			} else {
 				ctx.ServerError("LookupRepoRedirect", err)
 			}

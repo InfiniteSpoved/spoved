@@ -19,12 +19,13 @@ import (
 )
 
 // listMembers list an organization's members
-func listMembers(ctx *context.APIContext, isMember bool) {
+func listMembers(ctx *context.APIContext, isMember, twoFactorDisabled bool) {
 	opts := &organization.FindOrgMembersOpts{
-		Doer:         ctx.Doer(),
-		IsDoerMember: isMember,
-		OrgID:        ctx.Org().Organization.ID,
-		ListOptions:  utils.GetListOptions(ctx),
+		TwoFactorDisabled: twoFactorDisabled,
+		Doer:              ctx.Doer(),
+		IsDoerMember:      isMember,
+		OrgID:             ctx.Org().Organization.ID,
+		ListOptions:       utils.GetListOptions(ctx),
 	}
 
 	count, err := organization.CountOrgMembers(ctx, opts)
@@ -69,16 +70,47 @@ func ListMembers(ctx *context.APIContext) {
 	//   in: query
 	//   description: page size of results
 	//   type: integer
+	// - name: filter
+	//   in: query
+	//   description: '`2fa_disabled` lists only the members without two-factor authentication (organization owners and site administrators only)'
+	//   type: string
+	//   enum: [2fa_disabled]
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/UserList"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
 
 	var (
 		isMember bool
 		err      error
 	)
+
+	// who may ask is decided before the value is looked at, so the parameter is no oracle
+	twoFactorDisabled := false
+	if ctx.Req.URL.Query().Has("filter") {
+		allowed := ctx.Doer().IsAdmin
+		if !allowed {
+			allowed, err = ctx.Org().Organization.IsActingOwner(ctx, ctx.Doer())
+			if err != nil {
+				ctx.Error(http.StatusInternalServerError, "IsActingOwner", err)
+				return
+			}
+		}
+		if !allowed {
+			ctx.Error(http.StatusForbidden, "", "Must be an organization owner")
+			return
+		}
+		if ctx.FormString("filter") != "2fa_disabled" {
+			ctx.Error(http.StatusUnprocessableEntity, "", "unknown filter")
+			return
+		}
+		twoFactorDisabled = true
+	}
 
 	if ctx.Doer() != nil {
 		isMember, err = ctx.Org().Organization.IsOrgMember(ctx, ctx.Doer().ID)
@@ -88,7 +120,7 @@ func ListMembers(ctx *context.APIContext) {
 		}
 	}
 	// the auditor role lists concealed members too
-	listMembers(ctx, isMember || (ctx.Doer() != nil && ctx.Doer().IsAuditor && auth.IsHeldByUser(ctx.Authentication())))
+	listMembers(ctx, isMember || (ctx.Doer() != nil && ctx.Doer().IsAuditor && auth.IsHeldByUser(ctx.Authentication())), twoFactorDisabled)
 }
 
 // ListPublicMembers list an organization's public members
@@ -118,7 +150,7 @@ func ListPublicMembers(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	listMembers(ctx, false)
+	listMembers(ctx, false, false)
 }
 
 // IsMember check if a user is a member of an organization

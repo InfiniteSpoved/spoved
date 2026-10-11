@@ -28,6 +28,9 @@ type Organization struct {
 	// who may fork its private repositories: `all`, `org` (only into the organization) or `none` (site admins only); includes the site floor
 	// enum: ["all", "org", "none"]
 	PrivateForkPolicy string `json:"private_fork_policy"`
+
+	// whether members must use two-factor authentication; only shown to the organization's owners and site administrators
+	RequireTwoFactor *bool `json:"require_two_factor,omitempty"`
 }
 
 // OrganizationPermissions list different users permissions on an organization
@@ -71,6 +74,8 @@ type EditOrgOption struct {
 	// who may fork its private repositories: `all`, `org` (only into the organization) or `none` (site admins only); can't be weaker than the site requires
 	// enum: ["all", "org", "none"]
 	PrivateForkPolicy *string `json:"private_fork_policy" binding:"In(all,org,none)"`
+	// require two-factor authentication for members: those without it lose access to the organization's private repositories at once (list them with `filter=2fa_disabled` on the members endpoint); the doer needs it too unless they are a site administrator
+	RequireTwoFactor *bool `json:"require_two_factor"`
 }
 
 // RenameOrgOption options when renaming an organization

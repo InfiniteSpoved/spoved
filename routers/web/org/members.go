@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"forgejo.org/models"
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/organization"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
@@ -77,7 +78,15 @@ func Members(ctx *context.Context) {
 	ctx.Data["Teams"] = teams
 	ctx.Data["MembersIsPublicMember"] = membersIsPublic
 	ctx.Data["MembersIsUserOrgOwner"] = organization.IsUserOrgOwner(ctx, members, org.ID)
-	ctx.Data["MembersTwoFaStatus"] = members.GetTwoFaStatus(ctx)
+	if ctx.Org.IsOwner { // the acting owner: one blocked by the 2FA requirement gets nothing
+		withTwoFactor, err := auth_model.UserIDsWithTwoFactor(ctx, members.GetUserIDs())
+		if err != nil {
+			ctx.ServerError("UserIDsWithTwoFactor", err)
+			return
+		}
+		ctx.Data["ShowMembersTwoFactor"] = true
+		ctx.Data["MembersWithTwoFactor"] = withTwoFactor
+	}
 	ctx.Data["AddMembersByInvitations"] = setting.Service.AddMembersByInvitations
 
 	ctx.HTML(http.StatusOK, tplMembers)
