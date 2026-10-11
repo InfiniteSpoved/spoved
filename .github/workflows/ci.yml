@@ -61,6 +61,9 @@ jobs:
           FULL: ${{ github.event_name == 'pull_request' || inputs.full }}
           RUN_ALL_E2E: ${{ inputs.run-all-e2e }}
           ONLY: ${{ inputs.only }}
+          # fewer, longer jobs than on GitHub's hosted runners: the host runs only about 10 runners at once
+          INTEGRATION_SHARDS: 4
+          E2E_SHARDS: 3
 
   run:
     name: ${{ matrix.task }} ${{ matrix.args }}

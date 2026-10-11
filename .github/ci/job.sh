@@ -48,8 +48,12 @@ plan)
     depth=1
     [ "$RUN_ALL_E2E" = true ] || depth=0
     tasks+=',{"task":"migrations","args":"","depth":"1"}'
-    for i in 1 2 3 4; do tasks+=",{\"task\":\"integration\",\"args\":\"$i 4\",\"depth\":\"1\"}"; done
-    for i in 1 2 3; do tasks+=",{\"task\":\"e2e\",\"args\":\"$i 3\",\"depth\":\"$depth\"}"; done
+    # the longest jobs, so split finer on GitHub's hosted runners, where public-repository jobs are free;
+    # the self-hosted runners ask for fewer shards (INTEGRATION_SHARDS, E2E_SHARDS)
+    n=${INTEGRATION_SHARDS:-8}
+    for ((i = 1; i <= n; i++)); do tasks+=",{\"task\":\"integration\",\"args\":\"$i $n\",\"depth\":\"1\"}"; done
+    n=${E2E_SHARDS:-5}
+    for ((i = 1; i <= n; i++)); do tasks+=",{\"task\":\"e2e\",\"args\":\"$i $n\",\"depth\":\"$depth\"}"; done
   fi
   tasks="[$tasks]"
   # ONLY (comma-separated task names) keeps just those stages, for iterating
