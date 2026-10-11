@@ -147,6 +147,14 @@ test('organization categories on Explore repositories, the dashboard and the adm
     await expect(page).toHaveURL(new RegExp(`q=${repo}`));
     expect(new URL(page.url()).searchParams.get('category')).toMatch(/^\d+$/);
     await expect(page.locator('.flex-list > .flex-item')).toHaveCount(1);
+
+    // changing Sort keeps the category
+    await page.locator('#repo-search-form .ui.dropdown').last().click();
+    await page.locator('#repo-search-form input[name="sort"][value="alphabetically"]').locator('..').click();
+    await expect(page).toHaveURL(/sort=alphabetically/);
+    expect(new URL(page.url()).searchParams.get('category')).toMatch(/^\d+$/);
+    await expect(page.locator('#repo-search-category > .text')).toHaveText(`Category: ${name}`);
+    await expect(page.locator('.flex-list > .flex-item')).toHaveCount(1);
     await screenshot(page);
 
     // the dashboard switcher and the "My organizations" tab group by category

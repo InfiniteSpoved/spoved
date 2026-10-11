@@ -4,6 +4,7 @@
 package integration
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"slices"
@@ -100,6 +101,11 @@ func TestOrgCategoryExploreRepos(t *testing.T) {
 	assert.True(t, checked.Parent().HasClass("active"))
 	assert.Equal(t, "Category: Alpha", strings.TrimSpace(doc.Find("#repo-search-category > .text").Text()))
 	assert.Equal(t, fmt.Sprintf("/explore/repos?q=shared-topic&topic=1&category=%d", a.ID), doc.Find(".repo-topics a").AttrOr("href", ""))
+	// the "show all repositories" link of the relevancy note keeps it too; Sort and Filter are radios of the same form
+	_, doc = exploreRepos(t, nil, fmt.Sprintf("?only_show_relevant=1&category=%d", a.ID), http.StatusOK)
+	assert.Contains(t, doc.Find(".explore-relevancy-note a").AttrOr("href", ""), fmt.Sprintf("&category=%d", a.ID))
+	assert.Equal(t, 1, doc.Find(`#repo-search-form input[name="category"][checked]`).Length())
+	assert.Positive(t, doc.Find(`#repo-search-form input[name="sort"]`).Length())
 	_, doc = exploreRepos(t, nil, "?category=other", http.StatusOK)
 	assert.Equal(t, "Category: Other", strings.TrimSpace(doc.Find("#repo-search-category > .text").Text()))
 	_, doc = exploreRepos(t, nil, "", http.StatusOK)
@@ -121,21 +127,34 @@ func TestOrgCategoryExploreRepos(t *testing.T) {
 	assert.Zero(t, NewHTMLParser(t, resp.Body).Find("#repo-search-category").Length())
 }
 
-// dashboardSwitcher returns the dashboard context switcher's organizations, with "#<header>" entries.
-func dashboardSwitcher(t *testing.T, s *TestSession) ([]string, string) {
+// dashboardSwitcher returns the dashboard context switcher's organizations, with "#<header>" entries,
+// the page, the first entry (the personal account, "*" appended when marked active) and the names of the active organizations.
+func dashboardSwitcher(t *testing.T, s *TestSession) (items []string, body, personal string, active []string) {
 	t.Helper()
-	resp := s.MakeRequest(t, NewRequest(t, "GET", "/"), http.StatusOK)
-	body := resp.Body.String()
-	var items []string
-	NewHTMLParser(t, resp.Body).Find(".context.user.overflow.menu .scrolling.menu.items").First().Children().Each(func(i int, sel *goquery.Selection) {
+	return dashboardSwitcherAt(t, s, "/")
+}
+
+func dashboardSwitcherAt(t *testing.T, s *TestSession, path string) (items []string, body, personal string, active []string) {
+	t.Helper()
+	resp := s.MakeRequest(t, NewRequest(t, "GET", path), http.StatusOK)
+	body = resp.Body.String()
+	NewHTMLParser(t, bytes.NewBufferString(body)).Find(".context.user.overflow.menu .scrolling.menu.items").First().Children().Each(func(i int, sel *goquery.Selection) {
 		switch {
+		case i == 0:
+			personal = strings.TrimSpace(sel.Find(".truncated-item-name").Text())
+			if sel.HasClass("active") {
+				personal += "*"
+			}
 		case sel.Is(".header"):
 			items = append(items, "#"+strings.TrimSpace(sel.Text()))
-		case i > 0 && sel.Is("a.item[title]"):
+		case sel.Is("a.item[title]"):
 			items = append(items, sel.AttrOr("title", ""))
+			if sel.HasClass("active") {
+				active = append(active, sel.AttrOr("title", ""))
+			}
 		}
 	})
-	return items, body
+	return items, body, personal, active
 }
 
 // AC7-AC9: the dashboard switcher and "My organizations" tab are grouped by category.
@@ -145,9 +164,10 @@ func TestOrgCategoryDashboard(t *testing.T) {
 	session := loginUser(t, "user5")
 
 	// AC9: without categories, no headers and the name order
-	plain, body := dashboardSwitcher(t, session)
+	plain, body, personal, _ := dashboardSwitcher(t, session)
 	require.Greater(t, len(plain), 3)
 	assert.True(t, slices.IsSorted(plain))
+	assert.Equal(t, "user5*", personal)
 	assert.NotContains(t, body, "'category':")
 
 	orgs, err := organization.GetUserOrgsList(db.DefaultContext, user5)
@@ -159,9 +179,10 @@ func TestOrgCategoryDashboard(t *testing.T) {
 	setOrgCategory(t, orgs[2].ID, a.ID)
 
 	// AC7: categories by position, "Other" last, names in order within each group
-	items, body := dashboardSwitcher(t, session)
+	items, body, personal, _ := dashboardSwitcher(t, session)
 	want := []string{"#Beta", orgs[1].Name, "#Alpha", orgs[0].Name, orgs[2].Name, "#Other"}
 	assert.Equal(t, want, items[:6])
+	assert.Equal(t, "user5*", personal, "the personal entry stays first, active on the own dashboard")
 	assert.Equal(t, plain[3:], items[6:])
 
 	// AC8: the "My organizations" tab gets the same order and the category of each organization
@@ -178,8 +199,29 @@ func TestOrgCategoryDashboard(t *testing.T) {
 	// archived organizations stay hidden from the switcher
 	_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE `user` SET is_archived = ? WHERE id = ?", true, orgs[1].ID)
 	require.NoError(t, err)
-	items, _ = dashboardSwitcher(t, session)
+	items, _, _, _ = dashboardSwitcher(t, session)
 	assert.Equal(t, []string{"#Alpha", orgs[0].Name, orgs[2].Name, "#Other"}, items[:4])
+
+	// the active mark stays on an organization's own dashboard, the personal entry is first and unmarked
+	items, _, personal, active := dashboardSwitcherAt(t, session, "/org/"+orgs[0].Name+"/dashboard")
+	assert.Equal(t, "user5", personal)
+	assert.Equal(t, []string{orgs[0].Name}, active)
+	assert.Contains(t, items, "#Alpha")
+}
+
+// stableQueryCount reads the queries of f until two readings in a row agree:
+// countQueries counts the queries of every goroutine.
+func stableQueryCount(t *testing.T, f func()) int64 {
+	t.Helper()
+	var readings []int64
+	for len(readings) < 6 {
+		readings = append(readings, countQueries(t, f))
+		if n := len(readings); n > 1 && readings[n-1] == readings[n-2] {
+			return readings[n-1]
+		}
+	}
+	require.FailNow(t, "query count doesn't settle", "%v", readings)
+	return 0
 }
 
 // AC11: the dashboard and Explore repositories query counts don't grow with organizations, repositories or categories.
@@ -189,18 +231,7 @@ func TestOrgCategoryB1Queries(t *testing.T) {
 	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 	session := loginUser(t, "user2")
 	c := createOrgCategory(t, "Counted", 0)
-	// countQueries counts the queries of every goroutine: read each page until two readings in a row agree
-	stable := func(f func()) int64 {
-		var readings []int64
-		for len(readings) < 6 {
-			readings = append(readings, countQueries(t, f))
-			if n := len(readings); n > 1 && readings[n-1] == readings[n-2] {
-				return readings[n-1]
-			}
-		}
-		require.FailNow(t, "query count doesn't settle", "%v", readings)
-		return 0
-	}
+	stable := func(f func()) int64 { return stableQueryCount(t, f) }
 
 	count := func(n int) []int64 {
 		for i := range n {
@@ -270,4 +301,99 @@ func TestOrgCategoryAdminOrgs(t *testing.T) {
 	})
 
 	loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/admin/orgs?category=%d", a.ID)), http.StatusForbidden)
+}
+
+// AC4: a category only narrows what the viewer may see already; nothing leaks through it.
+func TestOrgCategoryExploreNoLeak(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer test.MockVariableValue(&setting.UI.ExplorePagingNum, 1000)()
+	cat := createOrgCategory(t, "Leaky", 1)
+	for _, id := range []int64{3, 22, 23} {
+		setOrgCategory(t, id, cat.ID)
+	}
+	query := fmt.Sprintf("?category=%d", cat.ID)
+	owners := []string{"org3/", "limited_org/", "privated_org/"}
+	inCategory := func(repos []string) []string {
+		return slices.DeleteFunc(slices.Clone(repos), func(r string) bool {
+			return !slices.ContainsFunc(owners, func(o string) bool { return strings.HasPrefix(r, o) })
+		})
+	}
+	// the category list is exactly the viewer's own list, narrowed to the category
+	same := func(s *TestSession) []string {
+		t.Helper()
+		all, _ := exploreRepos(t, s, "", http.StatusOK)
+		got, _ := exploreRepos(t, s, query, http.StatusOK)
+		assert.ElementsMatch(t, inCategory(all), got)
+		return got
+	}
+
+	// anonymous: no private or limited organization, no private repository
+	anon := same(nil)
+	assert.Equal(t, []string{"org3/repo21"}, anon)
+
+	// a signed-in outsider sees the limited organization's public repository, not the private organization's
+	user10 := loginUser(t, "user10")
+	got := same(user10)
+	assert.Contains(t, got, "limited_org/public_repo_on_limited_org")
+	assert.NotContains(t, got, "limited_org/private_repo_on_limited_org")
+	assert.NotContains(t, got, "privated_org/public_repo_on_private_org")
+	assert.NotContains(t, got, "privated_org/private_repo_on_private_org")
+
+	// a restricted user sees none of them without access
+	assert.Empty(t, same(loginUser(t, "user29")))
+
+	// a member of an organization that requires two-factor, without it, sees what an outsider sees
+	member := loginUser(t, "user4") // a team member
+	before, _ := exploreRepos(t, member, query, http.StatusOK)
+	require.Contains(t, before, "org3/repo3")
+	_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE `user` SET require_two_factor = ? WHERE id = 3", true)
+	require.NoError(t, err)
+	_, err = db.GetEngine(db.DefaultContext).Exec("DELETE FROM two_factor WHERE uid = 4")
+	require.NoError(t, err)
+	_, err = db.GetEngine(db.DefaultContext).Exec("DELETE FROM webauthn_credential WHERE user_id = 4")
+	require.NoError(t, err)
+	blocked := same(member)
+	assert.NotContains(t, blocked, "org3/repo3")
+	assert.NotContains(t, blocked, "org3/repo5")
+
+	// a trashed repository is gone
+	_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET trashed_unix = 1 WHERE id = 32")
+	require.NoError(t, err)
+	for _, s := range []*TestSession{nil, user10, loginUser(t, "user1")} {
+		got, _ := exploreRepos(t, s, query, http.StatusOK)
+		assert.NotContains(t, got, "org3/repo21")
+	}
+}
+
+// AC11: the admin organizations list costs at most one query more than without categories, however many organizations have one.
+func TestOrgCategoryAdminOrgsQueries(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer test.MockVariableValue(&setting.UI.Admin.OrgPagingNum, 1000)()
+	ctx := db.DefaultContext
+	admin := loginUser(t, "user1")
+	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+
+	count := func(url string) int64 {
+		admin.MakeRequest(t, NewRequest(t, "GET", url), http.StatusOK) // generated avatars are saved once
+		return stableQueryCount(t, func() { admin.MakeRequest(t, NewRequest(t, "GET", url), http.StatusOK) })
+	}
+	baseline := count("/admin/orgs")
+
+	categorised := func(n int) (int64, int64) {
+		t.Helper()
+		for i := range n {
+			org := &organization.Organization{Name: fmt.Sprintf("ac11-org-%d-%d", n, i)}
+			require.NoError(t, organization.CreateOrganization(ctx, org, owner))
+			setOrgCategory(t, org.ID, createOrgCategory(t, fmt.Sprintf("ac11-cat-%d-%d", n, i), i).ID)
+		}
+		c := createOrgCategory(t, fmt.Sprintf("ac11-filter-%d", n), 0)
+		setOrgCategory(t, 3, c.ID)
+		return count("/admin/orgs"), count(fmt.Sprintf("/admin/orgs?category=%d", c.ID))
+	}
+	list2, filtered2 := categorised(2)
+	list4, filtered4 := categorised(4)
+	assert.Equal(t, list2, list4)
+	assert.Equal(t, filtered2, filtered4)
+	assert.LessOrEqual(t, filtered4, baseline+1)
+	assert.LessOrEqual(t, list4, baseline+1)
 }

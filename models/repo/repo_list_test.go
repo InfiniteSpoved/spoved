@@ -509,3 +509,70 @@ func TestSearchRepositoryOwnerCategory(t *testing.T) {
 	topic.OwnerCategoryID = optional.Some[int64](5)
 	assert.Empty(t, search(topic))
 }
+
+// The owner category is one more AND term: it never widens another filter and never loses its own.
+func TestSearchRepositoryOwnerCategoryWithFilters(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+	_, err := db.GetEngine(ctx).Exec("UPDATE `user` SET category_id = 5 WHERE id = 3")
+	require.NoError(t, err)
+	// org3: repo3 (private) fork; repo5 (private) template + archived; repo32 (public) mirror + Go.
+	// repo1 (user2, outside the category) has every flag.
+	for _, set := range []string{
+		"is_fork = ? WHERE id IN (1, 3)",
+		"is_template = ? WHERE id IN (1, 5)",
+		"is_archived = ? WHERE id IN (1, 5)",
+		"is_mirror = ? WHERE id IN (1, 32)",
+	} {
+		_, err := db.GetEngine(ctx).Exec("UPDATE `repository` SET "+set, true)
+		require.NoError(t, err)
+	}
+	_, err = db.GetEngine(ctx).Exec("DELETE FROM language_stat WHERE language = 'Go'")
+	require.NoError(t, err)
+	for _, id := range []int64{1, 32} {
+		require.NoError(t, db.Insert(ctx, &repo_model.LanguageStat{RepoID: id, Language: "Go", IsPrimary: true, Size: 10}))
+	}
+	admin := unittest.AssertExistsAndLoadBean(t, &user.User{ID: 1})
+
+	search := func(opts repo_model.SearchRepoOptions) []int64 {
+		t.Helper()
+		opts.Actor, opts.Private, opts.AllPublic = admin, true, true
+		opts.ListOptions = db.ListOptions{Page: 1, PageSize: 1000}
+		repos, _, err := repo_model.SearchRepository(ctx, &opts)
+		require.NoError(t, err)
+		ids := make([]int64, 0, len(repos))
+		for _, repo := range repos {
+			ids = append(ids, repo.ID)
+		}
+		return ids
+	}
+
+	for name, filter := range map[string]repo_model.SearchRepoOptions{
+		"language":     {Language: "Go"},
+		"fork":         {Fork: optional.Some(true)},
+		"not fork":     {Fork: optional.Some(false)},
+		"mirror":       {Mirror: optional.Some(true)},
+		"not mirror":   {Mirror: optional.Some(false)},
+		"template":     {Template: optional.Some(true)},
+		"not template": {Template: optional.Some(false)},
+		"private":      {IsPrivate: optional.Some(true)},
+		"public":       {IsPrivate: optional.Some(false)},
+		"archived":     {Archived: optional.Some(true)},
+		"not archived": {Archived: optional.Some(false)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			baseline := search(filter)
+			var want []int64
+			for _, id := range baseline {
+				if repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: id}); repo.OwnerID == 3 {
+					want = append(want, id)
+				}
+			}
+			require.NotEmpty(t, want, "the filter must match something in the category")
+			require.Greater(t, len(baseline), len(want), "and something outside it")
+
+			filter.OwnerCategoryID = optional.Some[int64](5)
+			assert.ElementsMatch(t, want, search(filter))
+		})
+	}
+}
