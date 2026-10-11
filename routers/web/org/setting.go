@@ -168,12 +168,12 @@ func SettingsPost(ctx *context.Context) {
 	if setCategory {
 		opts.CategoryID = optional.Some(form.CategoryID)
 	}
-	// the disabled checkbox of a site floor isn't submitted: keep the stored value. A fork policy below the floor
-	// stays without effect (the select disables those options); the stored value is only what the org asked for.
+	// the disabled checkbox of a site floor isn't submitted: keep the stored value
 	if !setting.Repository.OrgRestrictVisibilityChange {
 		opts.RestrictRepoVisibilityChange = optional.Some(form.RestrictRepoVisibilityChange)
 	}
-	opts.PrivateForkPolicy = optional.Some(form.PrivateForkPolicy)
+	// a fork policy below the floor is stored as the floor (the select disables those options)
+	opts.PrivateForkPolicy = optional.Some(repo_module.EffectivePrivateForkPolicy(&user_model.User{PrivateForkPolicy: form.PrivateForkPolicy}))
 
 	visibilityChanged := org.Visibility != form.Visibility
 

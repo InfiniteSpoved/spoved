@@ -280,7 +280,7 @@ func TestOrgRepoPolicySiteFloor(t *testing.T) {
 	orgPolicyRepo(t, "floor-private", true)
 	orgPolicyRepo(t, "floor-public", false)
 	member, owner := orgPolicyToken(t, "user4"), orgPolicyToken(t, "user2")
-	yes, no, all, none := true, false, "all", "none"
+	yes, no, all, none, org3 := true, false, "all", "none", "org3"
 	storedOrg := func() *user_model.User { return unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "org3"}) }
 	postSettings := func(values map[string]string) {
 		values["name"], values["visibility"] = "org3", "0"
@@ -304,6 +304,8 @@ func TestOrgRepoPolicySiteFloor(t *testing.T) {
 		desc := "floor description"
 		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/orgs/org3", &api.EditOrgOption{RestrictRepoVisibilityChange: &no, Description: &desc}).AddTokenAuth(owner), http.StatusUnprocessableEntity)
 		assert.NotEqual(t, desc, storedOrg().Description)
+		// a site admin passes the gate itself, but the API refuses to loosen the floor for them too
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/orgs/org3", &api.EditOrgOption{RestrictRepoVisibilityChange: &no}).AddTokenAuth(orgPolicyToken(t, "user1")), http.StatusUnprocessableEntity)
 		// the same value as the floor is fine
 		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/orgs/org3", &api.EditOrgOption{RestrictRepoVisibilityChange: &yes, Description: &desc}).AddTokenAuth(owner), http.StatusOK)
 		assert.Equal(t, desc, storedOrg().Description)
@@ -360,4 +362,42 @@ func TestOrgRepoPolicySiteFloor(t *testing.T) {
 		assert.True(t, lowDisabled)
 		assert.False(t, floorDisabled)
 	})
+
+	t.Run("fork floor org", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.Repository.OrgPrivateForkPolicy, user_model.PrivateForkOrg)()
+		setOrgRepoPolicies(t, false, user_model.PrivateForkAll)
+		fork := func(s string) *api.CreateForkOption { return &api.CreateForkOption{Name: &s} }
+		inOrg := func(s string) *api.CreateForkOption { return &api.CreateForkOption{Organization: &org3, Name: &s} }
+
+		// into a user is refused, into the organization is allowed
+		assertPolicyRefusedAPI(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/floor-private/forks", fork("floor-org-user")).AddTokenAuth(member), "private_fork_policy")
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/floor-private/forks", inOrg("floor-org-fork")).AddTokenAuth(owner), http.StatusAccepted)
+		unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{OwnerName: "org3", LowerName: "floor-org-fork"})
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/floor-public/forks", fork("floor-org-public")).AddTokenAuth(owner), http.StatusAccepted)
+
+		// the web form stores a value below the floor as the floor
+		postSettings(map[string]string{"private_fork_policy": "0"})
+		assert.Equal(t, user_model.PrivateForkOrg, storedOrg().PrivateForkPolicy)
+		postSettings(map[string]string{"private_fork_policy": "2"})
+		assert.Equal(t, user_model.PrivateForkNone, storedOrg().PrivateForkPolicy)
+	})
+}
+
+// #148 PR 2: the repo.private push option follows the visibility floor (hook level; SSH can't run here).
+func TestOrgRepoPolicySiteFloorPushOption(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer test.MockVariableValue(&setting.Repository.OrgRestrictVisibilityChange, true)()
+	setOrgRepoPolicies(t, false, user_model.PrivateForkAll)
+	orgPolicyRepo(t, "floor-push", false)
+	preReceive := func(userID int64, options map[string]string) private.ResponseExtra {
+		return private.HookPreReceive(t.Context(), "org3", "floor-push", private.HookOptions{UserID: userID, GitPushOptions: options})
+	}
+	toPrivate := map[string]string{"repo.private": "true"}
+
+	refused := preReceive(4, toPrivate)
+	assert.Equal(t, http.StatusForbidden, refused.StatusCode)
+	assert.Contains(t, refused.UserMsg, "restrict_repo_visibility_change")
+	require.NoError(t, preReceive(4, map[string]string{"repo.private": "false"}).Error) // unchanged
+	require.NoError(t, preReceive(2, toPrivate).Error)                                  // owner
+	require.NoError(t, preReceive(1, toPrivate).Error)                                  // site admin
 }

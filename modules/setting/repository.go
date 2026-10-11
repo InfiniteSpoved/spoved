@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"forgejo.org/modules/log"
@@ -321,9 +320,9 @@ func loadRepositoryFrom(rootCfg ConfigProvider) {
 	Repository.UseCompatSSHURI = sec.Key("USE_COMPAT_SSH_URI").MustBool(true)
 	Repository.GoGetCloneURLProtocol = sec.Key("GO_GET_CLONE_URL_PROTOCOL").MustString("https")
 	Repository.MaxCreationLimit = sec.Key("MAX_CREATION_LIMIT").MustInt(-1)
-	// MapTo reads a garbage bool as false; a typo in the floor must stop the start instead
+	// MapTo reads a garbage bool as false (and accepts yes/on like Bool); a typo in the floor must stop the start instead
 	if v := sec.Key("ORG_RESTRICT_VISIBILITY_CHANGE").String(); v != "" {
-		if _, err = strconv.ParseBool(v); err != nil {
+		if _, err = sec.Key("ORG_RESTRICT_VISIBILITY_CHANGE").Bool(); err != nil {
 			log.Fatal("Invalid ORG_RESTRICT_VISIBILITY_CHANGE %q: %v", v, err)
 		}
 	}

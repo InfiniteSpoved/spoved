@@ -77,4 +77,12 @@ func TestOrgPolicyFloorSettings(t *testing.T) {
 	loadRepositoryFrom(cfg)
 	assert.True(t, Repository.OrgRestrictVisibilityChange)
 	assert.Equal(t, 1, Repository.OrgPrivateForkPolicy)
+
+	// the bool accepts what MapTo accepts, and rejects a typo
+	for v, ok := range map[string]bool{"yes": true, "On": true, "1": true, "ture": false} {
+		cfg, err = NewConfigProviderFromData("[repository]\nORG_RESTRICT_VISIBILITY_CHANGE = " + v + "\n")
+		require.NoError(t, err)
+		_, err = cfg.Section("repository").Key("ORG_RESTRICT_VISIBILITY_CHANGE").Bool()
+		assert.Equal(t, ok, err == nil, v)
+	}
 }
