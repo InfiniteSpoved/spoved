@@ -208,6 +208,12 @@ func (a *AuthorizedIntegration) Verify(req *http.Request, w http.ResponseWriter,
 		return &auth_service.AuthenticationError{Error: fmt.Errorf("authorized integration: GetUserByID: %w", err)}
 	}
 
+	if err := authz.CheckScopePolicyInUse(u, authorizedIntegration.Scope, authorizedIntegration.ResourceAllRepos); errors.Is(err, authz.ErrScopePolicyEnforced) {
+		return &auth_service.AuthenticationAttemptedIncorrectCredential{Error: fmt.Errorf("authorized integration: %w; edit the integration's scopes", err)}
+	} else if err != nil {
+		return &auth_service.AuthenticationError{Error: fmt.Errorf("authorized integration CheckScopePolicyInUse: %w", err)}
+	}
+
 	if err = authorizedIntegration.UpdateLastUsed(req.Context()); err != nil {
 		log.Error("UpdateLastUsed:  %v", err)
 	}
