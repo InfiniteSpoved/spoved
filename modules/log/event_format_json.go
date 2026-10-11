@@ -1,4 +1,4 @@
-// Copyright 2026 The Forgejo Authors.
+// Copyright 2026 The spoved contributors.
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 package log
