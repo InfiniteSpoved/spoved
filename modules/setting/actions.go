@@ -21,6 +21,7 @@ var (
 		ArtifactStorage              *Storage          // how the created artifacts should be stored
 		ArtifactRetentionDays        int64             `ini:"ARTIFACT_RETENTION_DAYS"`
 		RunRetentionDays             int64             `ini:"RUN_RETENTION_DAYS"`
+		RunRetentionMaxDays          int64             `ini:"RUN_RETENTION_MAX_DAYS"`
 		DefaultActionsURL            defaultActionsURL `ini:"DEFAULT_ACTIONS_URL"`
 		ZombieTaskTimeout            time.Duration     `ini:"ZOMBIE_TASK_TIMEOUT"`
 		EndlessTaskTimeout           time.Duration     `ini:"ENDLESS_TASK_TIMEOUT"`
@@ -120,6 +121,10 @@ func loadActionsFrom(rootCfg ConfigProvider) error {
 	// default to keeping runs forever
 	if Actions.RunRetentionDays < 0 {
 		Actions.RunRetentionDays = 0
+	}
+	// no cap by default
+	if Actions.RunRetentionMaxDays < 0 {
+		Actions.RunRetentionMaxDays = 0
 	}
 
 	Actions.ZombieTaskTimeout, err = sec.Key("ZOMBIE_TASK_TIMEOUT").MustDuration(10 * time.Minute)

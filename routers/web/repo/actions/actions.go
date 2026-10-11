@@ -71,7 +71,12 @@ func MustEnableActions(ctx *context.Context) {
 func List(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("actions.actions")
 	ctx.Data["PageIsActions"] = true
-	ctx.Data["RunRetentionDays"] = setting.Actions.RunRetentionDays
+	retentionDays, err := actions_model.RepoRunRetentionDays(ctx, ctx.Repo.Repository)
+	if err != nil {
+		ctx.ServerError("RepoRunRetentionDays", err)
+		return
+	}
+	ctx.Data["RunRetentionDays"] = retentionDays
 
 	curWorkflow := ctx.FormString("workflow")
 	ctx.Data["CurWorkflow"] = curWorkflow

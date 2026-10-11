@@ -6,6 +6,27 @@
 		{{template "shared/actions/secrets_list" .}}
 	{{else if eq .PageType "variables"}}
 		{{template "shared/actions/variables_list" .}}
+	{{else if eq .PageType "retention"}}
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "actions.settings.run_retention"}}
+		</h4>
+		<div class="ui attached segment">
+			<form class="ui form" method="post">
+				<p>{{ctx.Locale.Tr "actions.settings.run_retention.org_desc"}}</p>
+				<p>
+					{{if .InstanceRunRetentionDays}}{{ctx.Locale.Tr "actions.settings.run_retention.instance_default" .InstanceRunRetentionDays}}{{end}}
+					{{if .InstanceRunRetentionMaxDays}}{{ctx.Locale.Tr "actions.settings.run_retention.instance_max" .InstanceRunRetentionMaxDays}}{{end}}
+				</p>
+				<div class="field">
+					<label for="run_retention_days">{{ctx.Locale.Tr "actions.settings.run_retention.days"}}</label>
+					<input id="run_retention_days" name="run_retention_days" type="number" min="0" max="{{.MaxRunRetentionDays}}" value="{{if .RunRetentionDays}}{{.RunRetentionDays}}{{end}}">
+				</div>
+				<div class="divider"></div>
+				<div class="field">
+					<button class="ui primary button">{{ctx.Locale.Tr "org.settings.update_settings"}}</button>
+				</div>
+			</form>
+		</div>
 	{{end}}
 	</div>
 {{template "org/settings/layout_footer" .}}

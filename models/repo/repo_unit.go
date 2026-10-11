@@ -354,6 +354,10 @@ type ActionsConfig struct {
 	// DefaultTokenPermissions is "read" or "write" for the job token of a workflow without `permissions:`, or empty
 	// for the instance default ([actions] DEFAULT_TOKEN_PERMISSIONS).
 	DefaultTokenPermissions string `json:",omitempty"`
+
+	// RunRetentionDays shortens the time runs of this repository are kept (0 = no repository setting), see
+	// actions_model.EffectiveRunRetentionDays.
+	RunRetentionDays int64 `json:",omitempty"`
 }
 
 // EffectiveDefaultTokenPermissions returns the repository default token permissions, else the instance default.
