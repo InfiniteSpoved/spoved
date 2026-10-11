@@ -14,6 +14,7 @@ import (
 	actions_model "forgejo.org/models/actions"
 	webhook_model "forgejo.org/models/webhook"
 	"forgejo.org/modules/git"
+	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 	webhook_module "forgejo.org/modules/webhook"
@@ -1154,7 +1155,7 @@ func createMSTeamsPayload(r *api.Repository, s *api.User, actionTitle string, bo
 	// Create action button for navigation
 	actionButton := MSTeamsAction{
 		Type:  "Action.OpenUrl",
-		Title: "View in Forgejo",
+		Title: "View in " + setting.AppName,
 		URL:   actionTarget,
 	}
 

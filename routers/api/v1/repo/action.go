@@ -1057,7 +1057,7 @@ func ListActionRuns(ctx *context.APIContext) {
 	// - name: status
 	//   in: query
 	//   description: |
-	//     Returns workflow runs with the check run status or conclusion that is specified. For example, a conclusion can be success or a status can be in_progress. Only Forgejo Actions can set a status of waiting, pending, or requested.
+	//     Returns workflow runs with the check run status or conclusion that is specified. For example, a conclusion can be success or a status can be in_progress. Only Actions can set a status of waiting, pending, or requested.
 	//   type: array
 	//   items:
 	//     type: string
