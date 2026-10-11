@@ -74,6 +74,9 @@ jobs:
       E2E_TIMEOUT_SCALE: 2
       # GitHub's cache downloads sometimes stall for the default 10 minutes; treat that as a cache miss sooner
       SEGMENT_DOWNLOAD_TIMEOUT_MINS: 2
+      # runners have 6 GB; golangci-lint next to the lint job's parallel targets was OOM-killed, so each Go process
+      # gets a soft limit there and collects garbage harder (empty means no limit)
+      GOMEMLIMIT: ${{ matrix.task == 'lint' && '2500MiB' || '' }}
     strategy:
       fail-fast: false
       matrix:
