@@ -121,9 +121,14 @@ Long sessions and leads cost the most, and Opus costs more than Sonnet. So:
    Merge directly when one PR is ready. Build a train only when 2+ PRs are green on
    the same develop base. Merge within an hour of the gates holding. Then the OL
    archives the coder and the security reviewer and goes to step 1.
+   After every merge the supervisor reports develop's "CI success" on the merge
+   commit to the OL (the OL's tools can't read the status of a develop commit).
+   While develop is red, merging stops (stop the line): only the PR that fixes it
+   may merge.
 7. **Flaky tests.** A failure that passes when rerun alone and also passes on
-   develop isn't the PR's: file a "no-agent" issue naming the test and the
-   evidence, then go on. Rerun a CI job only once.
+   develop isn't the PR's, but a flaky test on develop is fixed at once in its own
+   small PR, not left in the queue. Keep a "no-agent" issue only for what needs a
+   user decision. Rerun a CI job only once.
 
 ## Supervisor setup
 
@@ -308,6 +313,9 @@ names, and check the existing code the design reuses.
 - The auto-mode classifier blocked send_message, add_repo, archive_session,
   merges and post-merge steps at times. `.claude/settings.json` allows the
   routine ones. Anything still blocked goes to the supervisor, never around it.
+- Never call `require` or `t.Context()` inside `assert.Eventually`/`Never`
+  conditions: they run in a goroutine that can outlive the subtest (CLAUDE.md
+  Learnings, #421).
 - Order-dependent integration tests (TestReportQueriesDontGrowWithUsersAndRepos)
   and leftover sqlite_sequence values (ID above 2^53) fail at random. Use the
   flaky-test rule; don't stall a PR on them.
