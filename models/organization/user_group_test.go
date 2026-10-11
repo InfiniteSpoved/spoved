@@ -256,3 +256,21 @@ func TestCountUserGroupRoleLossesAuditor(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, counts)
 }
+
+func TestGetUserGroupTeamsTrashedOrg(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+
+	g := &organization.UserGroup{Name: "devs"}
+	require.NoError(t, organization.InsertUserGroup(ctx, g))
+	team := unittest.AssertExistsAndLoadBean(t, &organization.Team{ID: 2})
+	require.NoError(t, organization.InsertUserGroupTeam(ctx, g.ID, team, organization.LinkManual))
+	_, err := db.GetEngine(ctx).ID(team.OrgID).Cols("trashed_unix").Update(&user_model.User{TrashedUnix: 1})
+	require.NoError(t, err)
+
+	linked, err := organization.GetUserGroupTeams(ctx, g.ID)
+	require.NoError(t, err)
+	require.Len(t, linked, 1)
+	assert.Equal(t, team.OrgID, linked[0].Org.ID)
+	assert.NotZero(t, linked[0].Org.TrashedUnix)
+}

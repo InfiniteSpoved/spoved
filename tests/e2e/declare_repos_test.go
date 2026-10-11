@@ -398,6 +398,35 @@ jobs:
 			require.NoError(t, db.Insert(db.DefaultContext, &issues_model.Comment{Type: issues_model.CommentTypeComment, PosterID: user.ID, IssueID: issue.ID, Content: content}))
 		}
 	})
+	newRepo(t, 2, "pull-metrics", nil, []FileChanges{{Filename: "metrics.md", Versions: []string{"metrics"}}}, func(user *user_model.User, repo *repo_model.Repository) {
+		forgery.EnableRepoUnits(t, repo, unit_model.TypePullRequests)
+		// plain rows with known times: pull request i opened as a draft, made ready, reviewed and merged (but the last)
+		ctx := db.DefaultContext
+		const hour = 3600
+		for i := range int64(6) {
+			created := now.Add(-(i*4 + 3) * 24 * hour)
+			ready, reviewed, merged := created.Add(i*2*hour), created.Add(i*2*hour+(i+1)*5*hour), created.Add(i*2*hour+36*hour)
+			issue := &issues_model.Issue{RepoID: repo.ID, Index: i + 1, PosterID: user.ID, Title: fmt.Sprintf("Metrics %d", i+1), IsPull: true}
+			require.NoError(t, db.Insert(ctx, issue))
+			require.NoError(t, db.Insert(ctx, &issues_model.PullRequest{IssueID: issue.ID, Index: issue.Index, BaseRepoID: repo.ID, HeadRepoID: repo.ID, HasMerged: i < 5, CommitsAhead: int(i + 1)}))
+			change := &issues_model.Comment{Type: issues_model.CommentTypeChangeTitle, PosterID: user.ID, IssueID: issue.ID, OldTitle: "WIP: " + issue.Title, NewTitle: issue.Title}
+			review := &issues_model.Comment{Type: issues_model.CommentTypeReview, PosterID: 1 + i%2*3, IssueID: issue.ID}
+			require.NoError(t, db.Insert(ctx, change, review))
+			for _, q := range []struct {
+				sql string
+				at  timeutil.TimeStamp
+				id  int64
+			}{
+				{"UPDATE issue SET created_unix = ? WHERE id = ?", created, issue.ID},
+				{"UPDATE comment SET created_unix = ? WHERE id = ?", ready, change.ID},
+				{"UPDATE comment SET created_unix = ? WHERE id = ?", reviewed, review.ID},
+				{"UPDATE pull_request SET merged_unix = ? WHERE issue_id = ?", merged, issue.ID},
+			} {
+				_, err := db.GetEngine(ctx).Exec(q.sql, q.at, q.id)
+				require.NoError(t, err)
+			}
+		}
+	})
 	// add your repo declarations here
 }
 

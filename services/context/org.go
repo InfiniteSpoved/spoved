@@ -206,6 +206,14 @@ func HandleOrgAssignment(ctx *Context, args ...bool) {
 		return
 	}
 	ctx.Data["IsOrganizationOwner"] = ctx.Org.IsOwner
+	if ctx.IsSigned && ctx.Org.IsMember && !ctx.Doer.IsAdmin {
+		blocked, err := ctx.Doer.TwoFactorBlocked(ctx, org.AsUser())
+		if err != nil {
+			ctx.ServerError("TwoFactorBlocked", err)
+			return
+		}
+		ctx.Data["TwoFactorBlockedMember"] = blocked
+	}
 	ctx.Data["IsOrganizationMember"] = ctx.Org.IsMember
 	ctx.Data["IsPackageEnabled"] = setting.Packages.Enabled
 	ctx.Data["IsRepoIndexerEnabled"] = setting.Indexer.RepoIndexerEnabled

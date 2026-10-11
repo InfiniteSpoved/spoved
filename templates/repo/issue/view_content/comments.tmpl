@@ -12,7 +12,7 @@
 		26 = DELETE_TIME_MANUAL, 27 = REVIEW_REQUEST, 28 = MERGE_PULL_REQUEST,
 		29 = PULL_PUSH_EVENT, 30 = PROJECT_CHANGED, 31 = PROJECT_BOARD_CHANGED
 		32 = DISMISSED_REVIEW, 33 = COMMENT_TYPE_CHANGE_ISSUE_REF, 34 = PR_SCHEDULE_TO_AUTO_MERGE,
-		35 = CANCEL_SCHEDULED_AUTO_MERGE_PR, 36 = PIN_ISSUE, 37 = UNPIN_ISSUE, 38 = ACTION_AGGREGATOR -->
+		35 = CANCEL_SCHEDULED_AUTO_MERGE_PR, 36 = PIN_ISSUE, 37 = UNPIN_ISSUE, 38 = ACTION_AGGREGATOR, 45 = AUTO_MERGE_TIME_CHANGED, 46 = MERGED_BY_SCHEDULE, 47 = AUTO_MERGE_SKIPPED -->
 		{{if eq .Type 0}}
 			<div class="timeline-item comment" id="{{.HashTag}}">
 			{{if .OriginalAuthor}}
@@ -692,14 +692,23 @@
 					{{end}}
 				</span>
 			</div>
-		{{else if or (eq .Type 34) (eq .Type 35)}}
+		{{else if eq .Type 34 35 45 46 47}}
+			{{$info := .AutoMergeInfo}}
 			<div class="timeline-item event" id="{{.HashTag}}">
-				<span class="badge">{{svg "octicon-git-merge" 16}}</span>
+				<span class="badge">{{if eq .Type 47}}{{svg "octicon-alert" 16}}{{else}}{{svg "octicon-git-merge" 16}}{{end}}</span>
 				<span class="text grey muted-links">
 					{{template "repo/issue/view_content/comments_authorlink" dict "ctxData" $ "comment" .}}
-					{{if eq .Type 34}}{{ctx.Locale.Tr "repo.pulls.auto_merge_newly_scheduled_comment" $createdStr}}
-					{{else}}{{ctx.Locale.Tr "repo.pulls.auto_merge_canceled_schedule_comment" $createdStr}}{{end}}
+					{{if eq .Type 34}}{{if $info.After}}{{ctx.Locale.Tr "repo.pulls.auto_merge.scheduled_after_comment" (DateUtils.FullTime $info.After) $createdStr}}{{else}}{{ctx.Locale.Tr "repo.pulls.auto_merge_newly_scheduled_comment" $createdStr}}{{end}}
+					{{else if eq .Type 35}}{{ctx.Locale.Tr "repo.pulls.auto_merge_canceled_schedule_comment" $createdStr}}
+					{{else if eq .Type 45}}{{ctx.Locale.Tr "repo.pulls.auto_merge.time_changed_comment" (DateUtils.FullTime $info.Old) (DateUtils.FullTime $info.New) $createdStr}}
+					{{else if eq .Type 46}}{{ctx.Locale.Tr "repo.pulls.auto_merge.merged_by_schedule_comment" $createdStr}}
+					{{else}}{{ctx.Locale.Tr "repo.pulls.auto_merge.skipped_comment" $createdStr}}{{end}}
 				</span>
+				{{if or (eq .Type 35) (eq .Type 47)}}
+					<div class="detail flex-text-block">
+						<span class="text grey muted-links">{{template "repo/issue/view_content/auto_merge_reason" $info.Reason}}</span>
+					</div>
+				{{end}}
 			</div>
 		{{else if or (eq .Type 36) (eq .Type 37)}}
 			<div class="timeline-item event" id="{{.HashTag}}">

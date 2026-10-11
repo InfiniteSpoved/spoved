@@ -4,6 +4,7 @@
 package user_test
 
 import (
+	"strings"
 	"testing"
 
 	"forgejo.org/models/db"
@@ -58,4 +59,29 @@ func TestSettings(t *testing.T) {
 	settings, err = user_model.GetUserAllSettings(db.DefaultContext, 99)
 	require.NoError(t, err)
 	assert.Empty(t, settings)
+}
+
+func TestTimeZoneSetting(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	for name, valid := range map[string]bool{
+		"Europe/Paris": true, "UTC": true, "Asia/Kolkata": true,
+		"": false, "Local": false, "Not/AZone": false, "../etc/passwd": false, strings.Repeat("a", 65): false,
+	} {
+		assert.Equal(t, valid, user_model.IsValidTimeZone(name), name)
+	}
+
+	zone, err := user_model.GetUserTimeZone(t.Context(), 2)
+	require.NoError(t, err)
+	assert.Empty(t, zone)
+
+	require.NoError(t, user_model.SetUserSetting(t.Context(), 2, user_model.SettingsKeyTimeZone, "Europe/Paris"))
+	zone, err = user_model.GetUserTimeZone(t.Context(), 2)
+	require.NoError(t, err)
+	assert.Equal(t, "Europe/Paris", zone)
+
+	// a stored value that is no longer valid reads as not set
+	require.NoError(t, user_model.SetUserSetting(t.Context(), 2, user_model.SettingsKeyTimeZone, "Gone/Zone"))
+	zone, err = user_model.GetUserTimeZone(t.Context(), 2)
+	require.NoError(t, err)
+	assert.Empty(t, zone)
 }

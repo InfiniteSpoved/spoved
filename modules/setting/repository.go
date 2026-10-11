@@ -5,6 +5,7 @@
 package setting
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path"
@@ -39,6 +40,8 @@ var (
 		DetectedCharsetScore                    map[string]int `ini:"-"`
 		AnsiCharset                             string
 		ForcePrivate                            bool
+		OrgRestrictVisibilityChange             bool
+		OrgPrivateForkPolicy                    int `ini:"-"` // 0 all, 1 org, 2 none: the index in user_model.PrivateForkPolicyNames
 		DefaultPrivate                          string
 		DefaultPushCreatePrivate                bool
 		MaxCreationLimit                        int
@@ -295,6 +298,20 @@ var (
 	ScriptType   = "bash"
 )
 
+// parseOrgPrivateForkPolicy returns the index in user_model.PrivateForkPolicyNames (models can't be imported here;
+// a test keeps the two in step). Only an empty value means all.
+func parseOrgPrivateForkPolicy(v string) (int, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "all":
+		return 0, nil
+	case "org":
+		return 1, nil
+	case "none":
+		return 2, nil
+	}
+	return 0, fmt.Errorf("%q is not one of all, org, none", v)
+}
+
 func loadRepositoryFrom(rootCfg ConfigProvider) {
 	var err error
 	// Determine and create root git repository path.
@@ -303,6 +320,15 @@ func loadRepositoryFrom(rootCfg ConfigProvider) {
 	Repository.UseCompatSSHURI = sec.Key("USE_COMPAT_SSH_URI").MustBool(true)
 	Repository.GoGetCloneURLProtocol = sec.Key("GO_GET_CLONE_URL_PROTOCOL").MustString("https")
 	Repository.MaxCreationLimit = sec.Key("MAX_CREATION_LIMIT").MustInt(-1)
+	// MapTo reads a garbage bool as false (and accepts yes/on like Bool); a typo in the floor must stop the start instead
+	if v := sec.Key("ORG_RESTRICT_VISIBILITY_CHANGE").String(); v != "" {
+		if _, err = sec.Key("ORG_RESTRICT_VISIBILITY_CHANGE").Bool(); err != nil {
+			log.Fatal("Invalid ORG_RESTRICT_VISIBILITY_CHANGE %q: %v", v, err)
+		}
+	}
+	if Repository.OrgPrivateForkPolicy, err = parseOrgPrivateForkPolicy(sec.Key("ORG_PRIVATE_FORK_POLICY").String()); err != nil {
+		log.Fatal("Invalid ORG_PRIVATE_FORK_POLICY: %v", err)
+	}
 	Repository.DefaultBranch = sec.Key("DEFAULT_BRANCH").MustString(Repository.DefaultBranch)
 	RepoRootPath = sec.Key("ROOT").MustString(path.Join(AppDataPath, "forgejo-repositories"))
 	if !filepath.IsAbs(RepoRootPath) {

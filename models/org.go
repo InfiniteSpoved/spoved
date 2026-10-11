@@ -28,7 +28,7 @@ func RemoveOrgUser(ctx context.Context, orgID, userID int64) error {
 		return nil
 	}
 
-	org, err := organization.GetOrgByID(ctx, orgID)
+	org, err := organization.GetOrgByIDIncludingTrashed(ctx, orgID)
 	if err != nil {
 		return fmt.Errorf("GetUserByID [%d]: %w", orgID, err)
 	}

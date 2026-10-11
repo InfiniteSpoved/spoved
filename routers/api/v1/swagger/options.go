@@ -276,6 +276,12 @@ type swaggerParameterBodies struct {
 	EditIPAllowlistOption api.EditIPAllowlistOption
 
 	// in:body
+	CreateLogShippingDestinationOption api.CreateLogShippingDestinationOption
+
+	// in:body
+	EditLogShippingDestinationOption api.EditLogShippingDestinationOption
+
+	// in:body
 	CreateQuotaRuleOptions api.CreateQuotaRuleOptions
 
 	// in:body

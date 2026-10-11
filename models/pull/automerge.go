@@ -176,3 +176,16 @@ func GetScheduleByBaseRepoID(ctx context.Context, repoID int64) (map[int64]*Auto
 	}
 	return schedule, nil
 }
+
+// ChangeAutoMergeTime sets the times of the auto merge am by its ID, touching nothing else (merge style, message and the
+// pinned head stay), and reports whether the row still existed. headCommitID pins an auto merge that had no pin yet.
+func ChangeAutoMergeTime(ctx context.Context, am *AutoMerge, scheduledAfter, giveUpAfter timeutil.TimeStamp, headCommitID string) (bool, error) {
+	cols := []string{"scheduled_after_unix", "give_up_after_unix"}
+	upd := &AutoMerge{ScheduledAfterUnix: scheduledAfter, GiveUpAfterUnix: giveUpAfter}
+	if am.HeadCommitID == "" {
+		cols = append(cols, "head_commit_id")
+		upd.HeadCommitID = headCommitID
+	}
+	affected, err := db.GetEngine(ctx).ID(am.ID).Cols(cols...).Update(upd)
+	return affected == 1, err
+}

@@ -22,9 +22,18 @@ func NewLoggerHandler() func(next http.Handler) http.Handler {
 	}
 	manager.startSlowQueryDetector(3 * time.Second)
 
-	logger := log.GetLogger("router")
+	logger := log.GetManager().GetLogger("router")
 	manager.print = logPrinter(logger)
-	return manager.handler
+	return func(next http.Handler) http.Handler {
+		logged := manager.handler(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if !logger.IsEnabled() { // a writer can be added at runtime
+				next.ServeHTTP(w, req)
+				return
+			}
+			logged.ServeHTTP(w, req)
+		})
+	}
 }
 
 var (

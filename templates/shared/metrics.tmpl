@@ -1,0 +1,97 @@
+{{/* pull request metrics of .Report; .MetricsLink is the page */}}
+{{$r := .Report}}
+<div class="pull-metrics">
+	<h2 class="ui header tw-flex tw-justify-between tw-gap-2 tw-flex-wrap">
+		<span>{{DateUtils.AbsoluteLong $r.From.AsTime}} - {{DateUtils.AbsoluteLong $r.To.AsTime}}</span>
+		<div class="tw-flex tw-gap-2 tw-flex-wrap">
+			<div class="ui floating dropdown jump filter">
+				<div class="ui basic compact button">
+					{{ctx.Locale.Tr "repo.activity.period.filter_label"}}
+					<strong>{{if eq $r.Days 7}}{{ctx.Locale.Tr "metrics.period.7"}}{{else if eq $r.Days 90}}{{ctx.Locale.Tr "metrics.period.90"}}{{else}}{{ctx.Locale.Tr "metrics.period.30"}}{{end}}</strong>
+					{{svg "octicon-triangle-down" 14 "dropdown icon"}}
+				</div>
+				<div class="menu">
+					<a class="{{if eq $r.Days 7}}active {{end}}item" href="{{.MetricsLink}}?period=7">{{ctx.Locale.Tr "metrics.period.7"}}</a>
+					<a class="{{if eq $r.Days 30}}active {{end}}item" href="{{.MetricsLink}}?period=30">{{ctx.Locale.Tr "metrics.period.30"}}</a>
+					<a class="{{if eq $r.Days 90}}active {{end}}item" href="{{.MetricsLink}}?period=90">{{ctx.Locale.Tr "metrics.period.90"}}</a>
+				</div>
+			</div>
+			<a class="ui basic compact button" href="{{.MetricsLink}}?period={{$r.Days}}&format=csv" download>{{svg "octicon-download" 14}} {{ctx.Locale.Tr "metrics.export_csv"}}</a>
+		</div>
+	</h2>
+	{{if $r.Truncated}}
+		<div class="ui warning message">{{ctx.Locale.Tr "metrics.truncated" .MaxPRs}}</div>
+	{{end}}
+	{{if not $r.Rows}}
+		<div class="ui segment">{{ctx.Locale.Tr "metrics.none"}}</div>
+	{{else}}
+	<div class="tw-flex tw-flex-wrap tw-gap-2 tw-mb-4">
+		<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="first-review">
+			<div class="value tw-text-xl tw-font-semibold">{{if $r.FirstReview.N}}{{or (Sec2Time $r.FirstReview.Median) "0"}}{{else}}{{ctx.Locale.Tr "metrics.n_a"}}{{end}}</div>
+			<div class="label">{{ctx.Locale.Tr "metrics.time_to_first_review"}}</div>
+			{{if $r.FirstReview.N}}<div class="text small grey">{{ctx.Locale.Tr "metrics.p85_n" (or (Sec2Time $r.FirstReview.P85) "0") $r.FirstReview.N}}</div>{{end}}
+		</div>
+		<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="merge">
+			<div class="value tw-text-xl tw-font-semibold">{{if $r.Merge.N}}{{or (Sec2Time $r.Merge.Median) "0"}}{{else}}{{ctx.Locale.Tr "metrics.n_a"}}{{end}}</div>
+			<div class="label">{{ctx.Locale.Tr "metrics.time_to_merge"}}</div>
+			{{if $r.Merge.N}}<div class="text small grey">{{ctx.Locale.Tr "metrics.p85_n" (or (Sec2Time $r.Merge.P85) "0") $r.Merge.N}}</div>{{end}}
+		</div>
+		<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="commits">
+			<div class="value tw-text-xl tw-font-semibold">{{if $r.Commits.N}}{{$r.Commits.Median}}{{else}}{{ctx.Locale.Tr "metrics.n_a"}}{{end}}</div>
+			<div class="label">{{ctx.Locale.Tr "metrics.commits"}}</div>
+			{{if $r.Commits.N}}<div class="text small grey">{{ctx.Locale.Tr "metrics.p85_n" (printf "%d" $r.Commits.P85) $r.Commits.N}}</div>{{end}}
+		</div>
+		<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="merged">
+			<div class="value tw-text-xl tw-font-semibold">{{$r.Merged}}</div>
+			<div class="label">{{ctx.Locale.Tr "metrics.merged"}}</div>
+			<div class="text small grey">{{ctx.Locale.Tr "metrics.per_week" (printf "%.1f" $r.PerWeek)}}</div>
+		</div>
+		<div class="ui segment tw-m-0 tw-flex-1 tw-min-w-40 tw-text-center" data-card="reviews">
+			<div class="value tw-text-xl tw-font-semibold">{{$r.Reviews}}</div>
+			<div class="label">{{ctx.Locale.Tr "metrics.reviews"}}</div>
+			<div class="text small grey">{{ctx.Locale.Tr "metrics.reviewers" $r.ReviewerCount}}</div>
+		</div>
+	</div>
+
+	<h4 class="ui top attached header">{{ctx.Locale.Tr "metrics.weekly"}}</h4>
+	<div class="ui attached segment tw-overflow-x-auto">
+		<table class="ui very basic unstackable table" data-table="weekly">
+			<thead>
+				<tr>
+					<th>{{ctx.Locale.Tr "metrics.week"}}</th>
+					<th>{{ctx.Locale.Tr "metrics.merged"}}</th>
+					<th>{{ctx.Locale.Tr "metrics.time_to_merge"}}</th>
+					<th>{{ctx.Locale.Tr "metrics.time_to_first_review"}}</th>
+				</tr>
+			</thead>
+			<tbody>
+			{{range $r.Weeks}}
+				<tr>
+					<td>{{DateUtils.AbsoluteShort .From.AsTime}} - {{DateUtils.AbsoluteShort .To.AsTime}}</td>
+					<td>{{.Merged}}</td>
+					<td>{{if .Merge.N}}{{or (Sec2Time .Merge.Median) "0"}}{{else}}{{ctx.Locale.Tr "metrics.n_a"}}{{end}}</td>
+					<td>{{if .FirstReview.N}}{{or (Sec2Time .FirstReview.Median) "0"}}{{else}}{{ctx.Locale.Tr "metrics.n_a"}}{{end}}</td>
+				</tr>
+			{{end}}
+			</tbody>
+		</table>
+	</div>
+
+	{{if $r.Reviewers}}
+	<h4 class="ui top attached header">{{ctx.Locale.Tr "metrics.review_load"}}</h4>
+	<div class="ui attached segment">
+		<table class="ui very basic unstackable table" data-table="review-load">
+			<thead>
+				<tr><th>{{ctx.Locale.Tr "metrics.reviewer"}}</th><th>{{ctx.Locale.Tr "metrics.reviews"}}</th></tr>
+			</thead>
+			<tbody>
+			{{range $r.Reviewers}}
+				<tr><td>{{.User.GetDisplayName}}</td><td>{{.Reviews}}</td></tr>
+			{{end}}
+			</tbody>
+		</table>
+	</div>
+	{{end}}
+	{{end}}
+	<p class="help tw-mt-4">{{ctx.Locale.Tr "metrics.help"}}</p>
+</div>

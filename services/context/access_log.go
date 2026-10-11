@@ -71,6 +71,10 @@ func AccessLogger() func(http.Handler) http.Handler {
 	logTemplate, _ := template.New("log").Parse(setting.Log.AccessLogTemplate)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if !logger.IsEnabled() { // a writer can be added at runtime
+				next.ServeHTTP(w, req)
+				return
+			}
 			start := time.Now()
 
 			var requestID string

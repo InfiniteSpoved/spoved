@@ -70,6 +70,36 @@
 			</form>
 		</div>
 
+		<!-- Time zone -->
+		<h4 id="time-zone" class="ui top attached header">
+			{{ctx.Locale.Tr "settings.time_zone"}}
+		</h4>
+		<div class="ui attached segment">
+			<form class="ui form" action="{{.Link}}/time_zone" method="post">
+				<div class="field">
+					{{ctx.Locale.Tr "settings.time_zone_description"}}
+				</div>
+				<div class="field">
+					<input name="time_zone" list="time-zone-list" value="{{.TimeZone}}" maxlength="64" placeholder="Europe/Paris">
+					<datalist id="time-zone-list">
+						<option value="UTC">
+						<option value="Europe/London">
+						<option value="Europe/Paris">
+						<option value="Europe/Berlin">
+						<option value="America/New_York">
+						<option value="America/Chicago">
+						<option value="America/Los_Angeles">
+						<option value="Asia/Kolkata">
+						<option value="Asia/Tokyo">
+						<option value="Australia/Sydney">
+					</datalist>
+				</div>
+				<div class="field">
+					<button class="ui primary button">{{ctx.Locale.Tr "settings.update_time_zone"}}</button>
+				</div>
+			</form>
+		</div>
+
 		<!-- Hints -->
 		<h4 id="hints" class="ui top attached header">
 			{{ctx.Locale.Tr "settings.hints"}}

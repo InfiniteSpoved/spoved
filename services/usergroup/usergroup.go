@@ -191,7 +191,7 @@ func LinkTeam(ctx context.Context, group *org_model.UserGroup, team *org_model.T
 // group that were only members of the team because of the group.
 func UnlinkTeam(ctx context.Context, group *org_model.UserGroup, team *org_model.Team) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
-		if org, err := org_model.GetOrgByID(ctx, team.OrgID); err != nil {
+		if org, err := org_model.GetOrgByIDIncludingTrashed(ctx, team.OrgID); err != nil {
 			return err
 		} else if org.IsArchived {
 			return org_model.ErrOrgArchived{Name: org.Name}
@@ -401,7 +401,7 @@ func syncTeamMembership(ctx context.Context, team *org_model.Team, userID int64,
 	}
 	if viaGroup {
 		// Adds wait while the organization is archived (see SyncOrgTeams); removals below always apply.
-		if org, err := org_model.GetOrgByID(ctx, team.OrgID); err != nil || org.IsArchived {
+		if org, err := org_model.GetOrgByIDIncludingTrashed(ctx, team.OrgID); err != nil || org.IsArchived {
 			return err
 		}
 		_, err := models.InsertTeamMember(ctx, team, userID, org_model.MembershipReasonAddedByUserGroup, optional.None[int64](), optional.None[int64]())

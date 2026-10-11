@@ -392,11 +392,3 @@ func initLoggerByName(manager *log.LoggerManager, rootCfg ConfigProvider, logger
 func InitSQLLoggersForCli(level log.Level) {
 	log.SetConsoleLogger("xorm", "console", level)
 }
-
-func IsAccessLogEnabled() bool {
-	return log.IsLoggerEnabled("access")
-}
-
-func IsRouteLogEnabled() bool {
-	return log.IsLoggerEnabled("router")
-}

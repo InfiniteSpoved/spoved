@@ -90,6 +90,70 @@ func TestAsCommentType(t *testing.T) {
 	assert.Equal(t, issues_model.CommentTypePRUnScheduledToAutoMerge, issues_model.AsCommentType("pull_cancel_scheduled_merge"))
 }
 
+func TestAutoMergeCommentTypes(t *testing.T) {
+	// persisted values: never renumber
+	assert.Equal(t, 44, int(issues_model.CommentTypePullTaskDeleted))
+	assert.Equal(t, 45, int(issues_model.CommentTypePRAutoMergeTimeChanged))
+	assert.Equal(t, 46, int(issues_model.CommentTypePRMergedBySchedule))
+	assert.Equal(t, 47, int(issues_model.CommentTypePRAutoMergeSkipped))
+	assert.Equal(t, issues_model.CommentTypePRAutoMergeSkipped, issues_model.AsCommentType("pull_auto_merge_skipped"))
+	assert.Equal(t, "pull_merged_by_schedule", issues_model.CommentTypePRMergedBySchedule.String())
+	assert.Equal(t, "pull_auto_merge_time_changed", issues_model.CommentTypePRAutoMergeTimeChanged.String())
+}
+
+func TestAutoMergeInfo(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: 1})
+	doer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+
+	t.Run("round trip", func(t *testing.T) {
+		in := issues_model.AutoMergeInfo{Old: 100, New: 200, GiveUp: 300, Reason: "push", SHA: "abc"}
+		c, err := issues_model.CreateAutoMergeComment(t.Context(), issues_model.CommentTypePRAutoMergeTimeChanged, pr, doer, in)
+		require.NoError(t, err)
+		assert.Equal(t, in, unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ID: c.ID}).AutoMergeInfo())
+	})
+
+	t.Run("no data and garbage decode to the zero value", func(t *testing.T) {
+		c, err := issues_model.CreateAutoMergeComment(t.Context(), issues_model.CommentTypePRUnScheduledToAutoMerge, pr, doer, issues_model.AutoMergeInfo{})
+		require.NoError(t, err)
+		assert.Empty(t, c.Content)
+		assert.Equal(t, issues_model.AutoMergeInfo{}, c.AutoMergeInfo())
+		assert.Equal(t, issues_model.AutoMergeInfo{}, (&issues_model.Comment{Content: "<script>"}).AutoMergeInfo())
+	})
+
+	t.Run("other types are refused", func(t *testing.T) {
+		_, err := issues_model.CreateAutoMergeComment(t.Context(), issues_model.CommentTypeComment, pr, doer, issues_model.AutoMergeInfo{})
+		require.Error(t, err)
+	})
+
+	t.Run("skip recorded", func(t *testing.T) {
+		info := issues_model.AutoMergeInfo{Reason: "conflict", SHA: "abc"}
+		recorded, err := issues_model.IsAutoMergeSkipRecorded(t.Context(), pr.IssueID, info)
+		require.NoError(t, err)
+		assert.False(t, recorded)
+
+		_, err = issues_model.CreateAutoMergeComment(t.Context(), issues_model.CommentTypePRAutoMergeSkipped, pr, doer, info)
+		require.NoError(t, err)
+		recorded, err = issues_model.IsAutoMergeSkipRecorded(t.Context(), pr.IssueID, info)
+		require.NoError(t, err)
+		assert.True(t, recorded)
+
+		// another reason or head is not the same skip
+		for _, other := range []issues_model.AutoMergeInfo{{Reason: "wip", SHA: "abc"}, {Reason: "conflict", SHA: "def"}} {
+			recorded, err = issues_model.IsAutoMergeSkipRecorded(t.Context(), pr.IssueID, other)
+			require.NoError(t, err)
+			assert.False(t, recorded)
+		}
+
+		// a new schedule or time change starts over
+		_, err = issues_model.CreateAutoMergeComment(t.Context(), issues_model.CommentTypePRAutoMergeTimeChanged, pr, doer, issues_model.AutoMergeInfo{New: 5})
+		require.NoError(t, err)
+		recorded, err = issues_model.IsAutoMergeSkipRecorded(t.Context(), pr.IssueID, info)
+		require.NoError(t, err)
+		assert.False(t, recorded)
+	})
+}
+
 func TestMigrate_InsertIssueComments(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	issue := unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: 1})

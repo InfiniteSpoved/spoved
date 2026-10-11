@@ -74,13 +74,8 @@ func ProtocolMiddlewares() (handlers []any) {
 		handlers = append(handlers, joinForwardedFor(setting.ReverseProxyTrustedProxies), proxy.ForwardedHeaders(opt))
 	}
 
-	if setting.IsRouteLogEnabled() {
-		handlers = append(handlers, routing.NewLoggerHandler())
-	}
-
-	if setting.IsAccessLogEnabled() {
-		handlers = append(handlers, context.AccessLogger())
-	}
+	// both check per request whether their logger has a writer, so that a log destination added at runtime works
+	handlers = append(handlers, routing.NewLoggerHandler(), context.AccessLogger())
 
 	return handlers
 }

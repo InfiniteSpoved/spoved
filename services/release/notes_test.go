@@ -6,7 +6,9 @@ package release
 import (
 	"testing"
 
+	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
+	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 
 	"github.com/stretchr/testify/assert"
@@ -162,6 +164,29 @@ changelog:
 **Full Changelog**: https://example.com/owner/repo/compare/v1.0...v1.1
 `, renderNotes(url, prs, cfg, notesExtras{}, "v1.0", "v1.1", false))
 	})
+}
+
+// merged_unix has second resolution: pull requests merged in the same second are told apart by ID.
+func TestFindNewContributorsSameSecond(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	const repoID, second = 1, 1700000000
+	add := func(id, poster int64, merged bool) *issues_model.PullRequest {
+		issue := &issues_model.Issue{ID: id, RepoID: repoID, Index: id, PosterID: poster, Poster: &user_model.User{Name: "poster"}, IsPull: true}
+		_, err := db.GetEngine(t.Context()).NoAutoTime().Insert(issue)
+		require.NoError(t, err)
+		pr := &issues_model.PullRequest{ID: id, IssueID: id, Issue: issue, BaseRepoID: repoID, HasMerged: merged, MergedUnix: second}
+		_, err = db.GetEngine(t.Context()).NoAutoTime().Insert(pr)
+		require.NoError(t, err)
+		return pr
+	}
+	// poster 8001: #9001 in an earlier release, #9002 and #9003 in range, all in one second
+	// poster 8002: #9004 in range, #9005 (higher ID) merged after the range in the same second
+	list := issues_model.PullRequestList{add(9001, 8001, true), add(9002, 8001, true), add(9003, 8001, true), add(9004, 8002, true), add(9005, 8002, true)}
+	inRange := issues_model.PullRequestList{list[1], list[2], list[3]}
+
+	got, err := findNewContributors(t.Context(), repoID, inRange, &notesConfig{})
+	require.NoError(t, err)
+	assert.Equal(t, []newContributor{{name: "poster", index: 9004}}, got)
 }
 
 func TestEscapeMarkdown(t *testing.T) {
