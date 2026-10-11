@@ -562,6 +562,13 @@ type swaggerActionRunSummaryList struct {
 	Body api.ListActionRunSummaryResponse `json:"body"`
 }
 
+// DeleteActionRunsResult
+// swagger:response DeleteActionRunsResult
+type swaggerDeleteActionRunsResult struct {
+	// in:body
+	Body api.DeleteActionRunsResult `json:"body"`
+}
+
 // ActionRun
 // swagger:response ActionRun
 type swaggerActionRun struct {

@@ -85,6 +85,12 @@ func ParseRunRetentionDays(v string) (int64, bool) {
 	return days, err == nil && days >= 0 && days <= MaxRunRetentionDays
 }
 
+// ParseOlderThanDays parses the number of days of "delete runs older than": a whole number from 1 to MaxRunRetentionDays.
+func ParseOlderThanDays(v string) (int64, bool) {
+	days, err := strconv.ParseInt(v, 10, 64)
+	return days, err == nil && days >= 1 && days <= MaxRunRetentionDays
+}
+
 // parseRetentionDays reads a stored value, which is ignored if it is not valid.
 func parseRetentionDays(v string) int64 {
 	days, ok := ParseRunRetentionDays(v)

@@ -69,6 +69,15 @@ type ActionRunJobStep struct {
 	Stopped optional.Option[time.Time] `json:"stopped"`
 }
 
+// DeleteActionRunsResult is the result of deleting the workflow runs older than a number of days
+// swagger:model
+type DeleteActionRunsResult struct {
+	// the number of runs deleted
+	Deleted int64 `json:"deleted"`
+	// whether more runs match: send the request again to delete them
+	More bool `json:"more"`
+}
+
 // ActionRun represents an action run
 // swagger:model
 type ActionRun struct {

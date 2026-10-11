@@ -616,16 +616,46 @@ func LockRunUnlessKept(ctx context.Context, runID int64) (bool, error) {
 }
 
 // GetLatestDefaultBranchRunIDs returns the ID of the latest run of each workflow on the default branch of its
-// repository, for all repositories.
-func GetLatestDefaultBranchRunIDs(ctx context.Context) (container.Set[int64], error) {
+// repository, for one repository or, with repoID 0, for all repositories.
+func GetLatestDefaultBranchRunIDs(ctx context.Context, repoID int64) (container.Set[int64], error) {
 	var ids []int64
-	err := db.GetEngine(ctx).Table("action_run").
+	sess := db.GetEngine(ctx).Table("action_run").
 		Join("INNER", "repository", "repository.id = action_run.repo_id").
-		Where("action_run.ref = concat('refs/heads/', repository.default_branch)").
-		GroupBy("action_run.repo_id, action_run.workflow_id").
+		Where("action_run.ref = concat('refs/heads/', repository.default_branch)")
+	if repoID != 0 {
+		sess = sess.And("action_run.repo_id = ?", repoID)
+	}
+	err := sess.GroupBy("action_run.repo_id, action_run.workflow_id").
 		Select("MAX(action_run.id)").
 		Find(&ids)
 	return container.SetOf(ids...), err
+}
+
+func oldDoneRunsOfRepoCond(repoID int64, olderThan timeutil.TimeStamp, exclude container.Set[int64]) builder.Cond {
+	cond := builder.Eq{"repo_id": repoID, "keep": false}.
+		And(builder.Lt{"created": olderThan}).
+		And(builder.In("status", DoneStatuses()))
+	if len(exclude) > 0 {
+		cond = cond.And(builder.NotIn("id", exclude.Values()))
+	}
+	return cond
+}
+
+// FindOldDoneRunIDsOfRepo returns the IDs, in ascending order and at most limit, of the completed runs of a repository
+// created before olderThan, except kept runs and the excluded ones.
+func FindOldDoneRunIDsOfRepo(ctx context.Context, repoID int64, olderThan timeutil.TimeStamp, exclude container.Set[int64], limit int) ([]int64, error) {
+	var ids []int64
+	return ids, db.GetEngine(ctx).Table("action_run").
+		Where(oldDoneRunsOfRepoCond(repoID, olderThan, exclude)).
+		OrderBy("id").
+		Limit(limit).
+		Cols("id").
+		Find(&ids)
+}
+
+// CountOldDoneRunsOfRepo counts the runs FindOldDoneRunIDsOfRepo is about.
+func CountOldDoneRunsOfRepo(ctx context.Context, repoID int64, olderThan timeutil.TimeStamp, exclude container.Set[int64]) (int64, error) {
+	return db.GetEngine(ctx).Where(oldDoneRunsOfRepoCond(repoID, olderThan, exclude)).Count(new(ActionRun))
 }
 
 // RetentionRun is a completed run that may be due for deletion by the retention cleanup.

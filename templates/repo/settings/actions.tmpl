@@ -61,6 +61,43 @@
 					</div>
 				</form>
 			</div>
+			<h4 class="ui top attached header">
+				{{ctx.Locale.Tr "actions.settings.delete_runs"}}
+			</h4>
+			<div class="ui attached segment">
+				<form class="ui form" method="get" action="{{.RepoLink}}/settings/actions/runs/delete">
+					<p>{{ctx.Locale.Tr "actions.settings.delete_runs.desc" .MaxDeleteOldRuns}}</p>
+					<div class="field">
+						<label for="older_than">{{ctx.Locale.Tr "actions.settings.delete_runs.days"}}</label>
+						<input id="older_than" name="older_than" type="number" min="1" max="{{.MaxRunRetentionDays}}" required>
+					</div>
+					<div class="divider"></div>
+					<div class="field">
+						<button class="ui primary button">{{ctx.Locale.Tr "actions.settings.delete_runs.preview"}}</button>
+					</div>
+				</form>
+			</div>
+		{{else if eq .PageType "delete_runs"}}
+			<h4 class="ui top attached header">
+				{{ctx.Locale.Tr "actions.settings.delete_runs.title" .OlderThanDays}}
+			</h4>
+			<div class="ui attached segment">
+				<form class="ui form" method="post" action="{{.RepoLink}}/settings/actions/runs/delete">
+					<input type="hidden" name="older_than" value="{{.OlderThanDays}}">
+					{{if .OldRunsCount}}
+						<p>{{ctx.Locale.Tr "actions.settings.delete_runs.count" .OldRunsCount .MaxDeleteOldRuns}}</p>
+						<div class="divider"></div>
+						<div class="field">
+							<button class="ui red button">{{ctx.Locale.Tr "actions.settings.delete_runs.confirm"}}</button>
+							<a class="ui button" href="{{.RepoLink}}/settings/actions/general">{{ctx.Locale.Tr "cancel"}}</a>
+						</div>
+					{{else}}
+						<p>{{ctx.Locale.Tr "actions.settings.delete_runs.none"}}</p>
+						<div class="divider"></div>
+						<a class="ui button" href="{{.RepoLink}}/settings/actions/general">{{ctx.Locale.Tr "actions.settings.delete_runs.back"}}</a>
+					{{end}}
+				</form>
+			</div>
 		{{end}}
 	</div>
 {{template "repo/settings/layout_footer" .}}

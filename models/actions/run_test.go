@@ -13,6 +13,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	"forgejo.org/modules/cache"
+	"forgejo.org/modules/container"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
@@ -660,7 +661,7 @@ func TestUpdateRun(t *testing.T) {
 func TestGetLatestDefaultBranchRunIDs(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 
-	ids, err := GetLatestDefaultBranchRunIDs(t.Context())
+	ids, err := GetLatestDefaultBranchRunIDs(t.Context(), 0)
 	require.NoError(t, err)
 
 	// latest run of each workflow on the default branch
@@ -674,6 +675,42 @@ func TestGetLatestDefaultBranchRunIDs(t *testing.T) {
 	assert.False(t, ids.Contains(794))
 	assert.False(t, ids.Contains(891))
 	assert.False(t, ids.Contains(893))
+}
+
+func TestGetLatestDefaultBranchRunIDsOfRepo(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+
+	ids, err := GetLatestDefaultBranchRunIDs(t.Context(), 4)
+	require.NoError(t, err)
+	assert.True(t, ids.Contains(792))
+	assert.True(t, ids.Contains(896))
+	// the latest runs of other repositories are not in it
+	assert.False(t, ids.Contains(892))
+}
+
+// AC3: the runs a repository admin may delete: done, not kept, older than the cutoff, not excluded, of that repository.
+func TestFindOldDoneRunsOfRepo(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	now := timeutil.TimeStampNow()
+	find := func(repoID int64, olderThan timeutil.TimeStamp, exclude container.Set[int64], limit int) []int64 {
+		ids, err := FindOldDoneRunIDsOfRepo(t.Context(), repoID, olderThan, exclude, limit)
+		require.NoError(t, err)
+		count, err := CountOldDoneRunsOfRepo(t.Context(), repoID, olderThan, exclude)
+		require.NoError(t, err)
+		if limit >= 100 {
+			assert.EqualValues(t, len(ids), count)
+		}
+		return ids
+	}
+
+	assert.Equal(t, []int64{791, 792, 896}, find(4, now, nil, 100)) // not the done runs of other repositories
+	assert.Equal(t, []int64{791, 896}, find(4, now, container.SetOf[int64](792), 100))
+	assert.Equal(t, []int64{791, 792}, find(4, now, nil, 2))
+	assert.Empty(t, find(4, 1683636108, nil, 100)) // not older than the cutoff
+	assert.Empty(t, find(99999, now, nil, 100))
+
+	require.NoError(t, SetRunKeep(t.Context(), 791, true))
+	assert.Equal(t, []int64{792, 896}, find(4, now, nil, 100))
 }
 
 func TestFindOldDoneRuns(t *testing.T) {
