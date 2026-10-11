@@ -69,6 +69,7 @@
 			</div>
 		</div>
 		<div class="ui attached table segment tw-overflow-x-auto">
+			{{if .Owners}}
 			<table class="ui very basic striped table unstackable tw-whitespace-nowrap">
 				<thead>
 					<tr>
@@ -134,11 +135,12 @@
 							<td>{{ctx.Locale.TrSize .Size}}</td>
 							<td>{{printf "%.1f" (.Percent $.Totals)}}%</td>
 						</tr>
-					{{else}}
-						<tr><td class="tw-text-center" colspan="13">{{ctx.Locale.Tr "repo.pulls.no_results"}}</td></tr>
 					{{end}}
 				</tbody>
 			</table>
+			{{else}}
+			<div class="tw-p-4 tw-text-center">{{ctx.Locale.Tr "repo.pulls.no_results"}}</div>
+			{{end}}
 		</div>
 
 		{{template "base/paginate" .}}
