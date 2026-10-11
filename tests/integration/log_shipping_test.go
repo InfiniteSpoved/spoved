@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	actions_model "forgejo.org/models/actions"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	system_model "forgejo.org/models/system"
@@ -281,7 +282,7 @@ func TestLogShippingTestEvent(t *testing.T) {
 	good := create("good", ok.URL)
 	var res api.LogShippingTestResult
 	DecodeJSON(t, apiShip(t, "POST", "/"+good.ID+"/test", token, nil, http.StatusOK), &res)
-	assert.Equal(t, api.LogShippingTestResult{OK: true}, res)
+	assert.Equal(t, api.LogShippingTestResult{Status: 200}, res)
 	e := ok.find(func(e map[string]any) bool { return e["logtype"] == "test" })
 	require.NotNil(t, e)
 	assert.Equal(t, shipHeader, ok.auth[0])
@@ -293,7 +294,7 @@ func TestLogShippingTestEvent(t *testing.T) {
 	ok.mu.Unlock()
 	failing := create("failing", ok.URL)
 	DecodeJSON(t, apiShip(t, "POST", "/"+failing.ID+"/test", token, nil, http.StatusOK), &res)
-	assert.Equal(t, api.LogShippingTestResult{}, res)
+	assert.Equal(t, api.LogShippingTestResult{Status: 503, Error: "status 5xx"}, res)
 
 	// a closed port: the same fixed answer, no address, no error text
 	dead := httptest.NewTLSServer(http.NotFoundHandler())
@@ -301,7 +302,11 @@ func TestLogShippingTestEvent(t *testing.T) {
 	dead.Close()
 	gone := create("gone", endpoint)
 	resp := apiShip(t, "POST", "/"+gone.ID+"/test", token, nil, http.StatusOK)
-	assert.JSONEq(t, `{"ok":false}`, resp.Body.String())
+	text := resp.Body.String()
+	DecodeJSON(t, resp, &res)
+	assert.Zero(t, res.Status)
+	assert.Contains(t, []string{"connection failed", "timeout"}, res.Error)
+	assert.NotContains(t, text, "127.0.0.1")
 
 	// the web button flashes the result
 	web := create("web", ok.URL)
@@ -335,6 +340,13 @@ func TestLogShippingAccess(t *testing.T) {
 			assert.NotContains(t, resp.Body.String(), d.ID, name)
 		}
 	}
+	// the user of a running job (Actions token) is no admin
+	task := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionTask{ID: 47})
+	task.GenerateToken()
+	require.NoError(t, actions_model.UpdateTask(t.Context(), task, "token", "token_salt", "token_hash", "token_last_eight"))
+	apiShip(t, "GET", "", task.Token, nil, http.StatusForbidden)
+	apiShip(t, "POST", "/"+d.ID+"/test", task.Token, nil, http.StatusForbidden)
+
 	// a read-only token can read but not write
 	apiShip(t, "GET", "", readOnly, nil, http.StatusOK)
 	apiShip(t, "POST", "", readOnly, body, http.StatusForbidden)

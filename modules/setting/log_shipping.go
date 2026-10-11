@@ -65,7 +65,7 @@ type LogShippingState struct {
 
 // LogShippingLogTypes returns the log types a destination can select.
 func LogShippingLogTypes() []string {
-	return []string{"application", "access", "router", "database", "git"}
+	return []string{"application", "access", "router", "git"}
 }
 
 // HasLogType reports whether the destination selects the log type ("all" selects every one).

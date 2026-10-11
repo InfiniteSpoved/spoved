@@ -253,7 +253,7 @@ func TestLogShippingDestination(ctx *context.APIContext) {
 	// swagger:operation POST /admin/log-shipping/destinations/{id}/test admin adminTestLogShippingDestination
 	// ---
 	// summary: Send a test event to a log destination
-	// description: Sends one event with logtype "test" to the saved destination and reports only whether it was accepted. At most one per destination every 5 seconds.
+	// description: Sends one event with logtype "test" to the saved destination and reports the status and a class of failure. At most one per destination every 5 seconds.
 	// produces:
 	// - application/json
 	// parameters:
@@ -281,5 +281,5 @@ func TestLogShippingDestination(ctx *context.APIContext) {
 		logShippingError(ctx, err)
 		return
 	}
-	ctx.JSON(http.StatusOK, &api.LogShippingTestResult{OK: res.OK})
+	ctx.JSON(http.StatusOK, &api.LogShippingTestResult{Status: res.Status, Error: res.Error})
 }

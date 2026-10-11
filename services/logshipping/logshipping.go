@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -122,9 +123,10 @@ func option(d setting.LogShippingDestination) (log.HTTPShipOption, error) {
 	return opt, nil
 }
 
-// validSecret accepts a key or header value of at most 1 KiB without CR, LF or NUL.
+// validSecret accepts a key or header value of 8 bytes to 1 KiB without CR, LF or NUL. Every one is registered for
+// redaction, and a short one would mask itself all over the logs.
 func validSecret(v string) bool {
-	return len(v) <= setting.LogShippingMaxHeaderValue && !strings.ContainsAny(v, "\r\n\x00")
+	return len(v) >= 8 && len(v) <= setting.LogShippingMaxHeaderValue && !strings.ContainsAny(v, "\r\n\x00")
 }
 
 func hashOf(d setting.LogShippingDestination) string {
@@ -288,7 +290,7 @@ func Save(ctx context.Context, doer *user_model.User, id string, in Input) (sett
 	endpointChanged := id != "" && d.Endpoint != old.Endpoint
 	if in.Key != nil && *in.Key != "" {
 		if !validSecret(*in.Key) {
-			return d, util.NewInvalidArgumentErrorf("the key is too long or contains a control character")
+			return d, util.NewInvalidArgumentErrorf("the key must be 8 to 1024 characters without control characters")
 		}
 		if d.KeyEnc, err = encrypt(*in.Key); err != nil {
 			return d, err
@@ -300,8 +302,8 @@ func Save(ctx context.Context, doer *user_model.User, id string, in Input) (sett
 	if in.Headers != nil {
 		headers := make([]setting.LogShippingHeader, 0, len(*in.Headers))
 		for _, h := range *in.Headers {
-			if !validSecret(h.Value) {
-				return d, util.NewInvalidArgumentErrorf("a header value is too long or contains a control character")
+			if h.Value != "" && !validSecret(h.Value) {
+				return d, util.NewInvalidArgumentErrorf("a header value must be 8 to 1024 characters without control characters")
 			}
 			h.Name = http.CanonicalHeaderKey(h.Name)
 			var enc string
@@ -473,9 +475,11 @@ func Get(ctx context.Context, id string) (Destination, error) {
 	return View(d), nil
 }
 
-// TestResult is the outcome of a test event: ok or not, nothing of what the network or the remote said.
+// TestResult is the outcome of a test event: the status code (0 if the destination wasn't reached) and a class of
+// failure ("status 4xx", "status 5xx", "connection failed", "timeout"), never what the network or the remote said.
 type TestResult struct {
-	OK bool `json:"ok"`
+	Status int    `json:"status"`
+	Error  string `json:"error"`
 }
 
 // Test sends one "test" event to a saved destination, with the same options and dial check as its writer.
@@ -494,7 +498,7 @@ func Test(ctx context.Context, id string) (TestResult, error) {
 
 	opt, err := option(d)
 	if err != nil {
-		return TestResult{}, nil
+		return TestResult{Error: "invalid configuration"}, nil
 	}
 	event, _ := json.Marshal(map[string]any{
 		"timestamp": time.Now().UnixMilli(), "message": "spoved log shipping test event", "level": "INFO",
@@ -503,5 +507,11 @@ func Test(ctx context.Context, id string) (TestResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	code, err := log.ProbeHTTP(ctx, writerName(id), opt, event)
-	return TestResult{OK: err == nil && code/100 == 2}, nil
+	switch {
+	case err != nil:
+		return TestResult{Error: err.Error()}, nil // a class only: ProbeHTTP drops the text of the network error
+	case code/100 != 2:
+		return TestResult{Status: code, Error: fmt.Sprintf("status %dxx", code/100)}, nil
+	}
+	return TestResult{Status: code}, nil
 }

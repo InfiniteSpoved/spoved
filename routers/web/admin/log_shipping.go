@@ -150,10 +150,10 @@ func LogShippingTest(ctx *context.Context) {
 		logShippingError(ctx, err)
 		return
 	}
-	if res.OK {
-		ctx.Flash.Success(ctx.Tr("admin.log_shipping.test_ok"))
+	if res.Error != "" {
+		ctx.Flash.Error(ctx.Tr("admin.log_shipping.test_failed", res.Error))
 	} else {
-		ctx.Flash.Error(ctx.Tr("admin.log_shipping.test_failed"))
+		ctx.Flash.Success(ctx.Tr("admin.log_shipping.test_ok", res.Status))
 	}
 	ctx.Redirect(setting.AppSubURL + "/admin/log-shipping/destinations/" + id)
 }

@@ -205,9 +205,9 @@ func TestPatchEndpointChangeNeedsEverySecret(t *testing.T) {
 	assert.Equal(t, "https://127.0.0.1:9/nr", cur.Endpoint)
 
 	// with all secrets given it works
-	_, err = Save(t.Context(), u, nr.ID, Input{Endpoint: new("https://127.0.0.1:9/elsewhere"), Key: new("NRAK-NEW")})
+	_, err = Save(t.Context(), u, nr.ID, Input{Endpoint: new("https://127.0.0.1:9/elsewhere"), Key: new("NRAK-NEW-KEY")})
 	require.NoError(t, err)
-	_, err = Save(t.Context(), u, gen.ID, Input{Endpoint: new("https://127.0.0.1:9/elsewhere"), Headers: &[]HeaderInput{{Name: "Authorization", Value: "Bearer new"}, {Name: "X-Team", Value: "team-sre-secret-value"}}})
+	_, err = Save(t.Context(), u, gen.ID, Input{Endpoint: new("https://127.0.0.1:9/elsewhere"), Headers: &[]HeaderInput{{Name: "Authorization", Value: "Bearer new-value"}, {Name: "X-Team", Value: "team-sre-secret-value"}}})
 	require.NoError(t, err)
 
 	// with the endpoint unchanged the key and the header values stay, also when a header is sent without a value
@@ -221,13 +221,13 @@ func TestPatchEndpointChangeNeedsEverySecret(t *testing.T) {
 		case nr.ID:
 			k, err := decrypt(d.KeyEnc)
 			require.NoError(t, err)
-			assert.Equal(t, "NRAK-NEW", k)
+			assert.Equal(t, "NRAK-NEW-KEY", k)
 			assert.False(t, d.Enabled)
 		case gen.ID:
 			require.Len(t, d.Headers, 1)
 			v, err := decrypt(d.Headers[0].ValueEnc)
 			require.NoError(t, err)
-			assert.Equal(t, "Bearer new", v)
+			assert.Equal(t, "Bearer new-value", v)
 		}
 	}
 }
@@ -289,23 +289,26 @@ func TestSaveRejectsDatabaseLogsLoopsAndBadHeaders(t *testing.T) {
 		return func(in *Input) { in.Headers = &[]HeaderInput{{Name: name, Value: value}} }
 	}
 	for name, in := range map[string]Input{
-		"database log":      base(func(in *Input) { in.LogTypes = &[]string{"database"} }),
-		"app url host":      base(func(in *Input) { in.Endpoint = new("https://git.example.org/api") }),
-		"app url host case": base(func(in *Input) { in.Endpoint = new("https://GIT.example.org:8443/api") }),
-		"domain":            base(func(in *Input) { in.Endpoint = new("https://ssh.example.org/api") }),
-		"header crlf name":  base(hdr("X-A\r\nX-B", "v")),
-		"header crlf value": base(hdr("X-A", "v\r\nX-B: w")),
-		"header nul value":  base(hdr("X-A", "v\x00")),
-		"header proxy":      base(hdr("Proxy-Authorization", "v")),
-		"header upgrade":    base(hdr("upgrade", "v")),
-		"header te":         base(hdr("TE", "v")),
-		"header host":       base(hdr("host", "v")),
-		"key crlf":          {Name: new("k"), Type: new("newrelic"), Endpoint: new("https://127.0.0.1:9/x"), LogTypes: &[]string{"access"}, Key: new("a\nb")},
-		"duplicate by case": base(func(in *Input) { in.Headers = &[]HeaderInput{{Name: "x-a", Value: "1"}, {Name: "X-A", Value: "2"}} }),
+		"database log":       base(func(in *Input) { in.LogTypes = &[]string{"database"} }),
+		"app url host":       base(func(in *Input) { in.Endpoint = new("https://git.example.org/api") }),
+		"app url host case":  base(func(in *Input) { in.Endpoint = new("https://GIT.example.org:8443/api") }),
+		"domain":             base(func(in *Input) { in.Endpoint = new("https://ssh.example.org/api") }),
+		"header crlf name":   base(hdr("X-A\r\nX-B", "value-123")),
+		"header crlf value":  base(hdr("X-A", "value-123\r\nX-B: w")),
+		"header short value": base(hdr("X-A", "short")),
+		"header nul value":   base(hdr("X-A", "value-123\x00")),
+		"header proxy":       base(hdr("Proxy-Authorization", "value-123")),
+		"header upgrade":     base(hdr("upgrade", "value-123")),
+		"header te":          base(hdr("TE", "value-123")),
+		"header host":        base(hdr("host", "value-123")),
+		"key crlf":           {Name: new("k"), Type: new("newrelic"), Endpoint: new("https://127.0.0.1:9/x"), LogTypes: &[]string{"access"}, Key: new("a\nb")},
+		"duplicate by case": base(func(in *Input) {
+			in.Headers = &[]HeaderInput{{Name: "x-a", Value: "value-001"}, {Name: "X-A", Value: "value-002"}}
+		}),
 		"too many": base(func(in *Input) {
 			h := make([]HeaderInput, 11)
 			for i := range h {
-				h[i] = HeaderInput{Name: "X-" + strings.Repeat("a", i+1), Value: "v"}
+				h[i] = HeaderInput{Name: "X-" + strings.Repeat("a", i+1), Value: "value-123"}
 			}
 			in.Headers = &h
 		}),
@@ -316,7 +319,7 @@ func TestSaveRejectsDatabaseLogsLoopsAndBadHeaders(t *testing.T) {
 	}
 
 	// names are stored in canonical form
-	d, err := Save(t.Context(), u, "", base(hdr("x-team", "ops")))
+	d, err := Save(t.Context(), u, "", base(hdr("x-team", "team-ops-secret-value")))
 	require.NoError(t, err)
 	assert.Equal(t, "X-Team", d.Headers[0].Name)
 }
@@ -403,20 +406,20 @@ func TestTestEventUsesSavedDestinationAndGenericErrors(t *testing.T) {
 
 	res, err := Test(t.Context(), d.ID)
 	require.NoError(t, err)
-	assert.True(t, res.OK)
+	assert.Equal(t, TestResult{Status: 200}, res)
 	require.Len(t, got, 1)
 	assert.Contains(t, got[0], testHeader)
 	assert.Contains(t, got[0], `"logtype":"test"`)
 
-	// a 4xx, a 5xx and a closed port all give the same answer: not ok, with nothing else
-	for _, code := range []int{400, 503} {
+	// a 4xx and a 5xx give their class; a closed port gives a class too, never the address or the error text
+	for code, class := range map[int]string{400: "status 4xx", 503: "status 5xx"} {
 		mu.Lock()
 		status = code
 		mu.Unlock()
 		testLast = map[string]time.Time{}
 		res, err = Test(t.Context(), d.ID)
 		require.NoError(t, err)
-		assert.Equal(t, TestResult{}, res)
+		assert.Equal(t, TestResult{Status: code, Error: class}, res)
 	}
 	_, err = Test(t.Context(), "zzzzzzzz")
 	require.ErrorIs(t, err, util.ErrNotExist)
@@ -425,9 +428,8 @@ func TestTestEventUsesSavedDestinationAndGenericErrors(t *testing.T) {
 	testLast = map[string]time.Time{}
 	res, err = Test(t.Context(), d.ID)
 	require.NoError(t, err)
-	assert.Equal(t, TestResult{}, res)
-	b, _ := json.Marshal(res)
-	assert.JSONEq(t, `{"ok":false}`, string(b))
+	assert.Zero(t, res.Status)
+	assert.Contains(t, []string{"connection failed", "timeout"}, res.Error)
 }
 
 func TestTestEventIsRateLimited(t *testing.T) {
@@ -463,4 +465,31 @@ func TestSecretsAreRegisteredForRedaction(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(b), testHeader)
 	assert.NotContains(t, string(b), testKey)
+}
+
+func TestFailedDecryptDisablesOnlyThatDestination(t *testing.T) {
+	reset(t)
+	defer reset(t)
+	allowLoopback(t)
+	u := admin(t)
+	good, err := Save(t.Context(), u, "", newRelic("https://127.0.0.1:9/good", "access"))
+	require.NoError(t, err)
+
+	// the second one is encrypted with another secret key, as after SECRET_KEY changed
+	restore := test.MockVariableValue(&setting.SecretKey, "another-secret-key-for-this-test")
+	bad, err := Save(t.Context(), u, "", Input{Name: new("bad"), Type: new("newrelic"), Endpoint: new("https://127.0.0.1:9/bad"), Key: new("NRAK-OTHER-KEY"), LogTypes: &[]string{"router"}})
+	restore()
+	require.NoError(t, err)
+
+	checker, cleanup := test.NewLogChecker(log.DEFAULT, log.ERROR)
+	defer cleanup()
+	checker.Filter(`destination "bad" is not started`, "NRAK", "can't be decrypted").StopMark("decrypted")
+	require.NoError(t, Apply(t.Context(), load(t.Context())))
+	filtered, _ := checker.Check(5 * time.Second)
+	assert.True(t, filtered[0], "the name is logged")
+	assert.False(t, filtered[1], "never a key or ciphertext")
+
+	assert.Contains(t, writersOf("access"), "ship-"+good.ID)
+	assert.NotContains(t, writersOf("router"), "ship-"+bad.ID)
+	assert.Nil(t, log.GetManager().GetSharedWriter("ship-"+bad.ID))
 }

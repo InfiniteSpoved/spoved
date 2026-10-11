@@ -2112,8 +2112,8 @@
 	"admin.log_shipping.new": "New destination",
 	"admin.log_shipping.edit": "Destination %s",
 	"admin.log_shipping.test": "Send test event",
-	"admin.log_shipping.test_ok": "The test event was accepted.",
-	"admin.log_shipping.test_failed": "The test event failed.",
+	"admin.log_shipping.test_ok": "The test event was accepted (HTTP %d).",
+	"admin.log_shipping.test_failed": "The test event failed: %s.",
 	"admin.log_shipping.delete": "Delete",
 	"admin.log_shipping.saved": "The destination was saved.",
 	"admin.log_shipping.deleted": "The destination was deleted."

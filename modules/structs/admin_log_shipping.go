@@ -63,7 +63,7 @@ type CreateLogShippingDestinationOption struct {
 	// one event per line instead of a JSON array (http)
 	NDJSON  bool  `json:"ndjson"`
 	Enabled *bool `json:"enabled"`
-	// all, application, access, router, database, git
+	// all, application, access, router, git
 	// required: true
 	LogTypes []string `json:"log_types" binding:"Required"`
 	// trace, debug, info, warn or error; info if empty
@@ -88,7 +88,10 @@ type EditLogShippingDestinationOption struct {
 	Exclusion  *string                     `json:"exclusion"`
 }
 
-// LogShippingTestResult is the outcome of a test event: only whether the destination accepted it
+// LogShippingTestResult is the outcome of a test event
 type LogShippingTestResult struct {
-	OK bool `json:"ok"`
+	// the HTTP status of the destination, 0 if it wasn't reached
+	Status int `json:"status"`
+	// "status 4xx", "status 5xx", "connection failed" or "timeout"; empty on success
+	Error string `json:"error"`
 }
