@@ -287,16 +287,18 @@ func TestAccessTokenScopePolicyEnforced(t *testing.T) {
 		MakeRequest(t, NewRequest(t, "GET", url), http.StatusOK)
 	})
 
-	t.Run("demoted admin", func(t *testing.T) {
-		admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
-		admin.IsAdmin = false
-		require.NoError(t, user_model.UpdateUserCols(t.Context(), admin, "is_admin"))
-		defer func() {
-			admin.IsAdmin = true
-			require.NoError(t, user_model.UpdateUserCols(t.Context(), admin, "is_admin"))
-		}()
-		apiGet(t, "/api/v1/admin/users", adminToken, http.StatusUnauthorized)
-	})
+	// The admin token works above; once its owner is no longer a usable admin it is enforced.
+	for _, col := range []string{"is_admin", "prohibit_login", "is_active"} {
+		t.Run("admin token after changing "+col, func(t *testing.T) {
+			admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+			restore := *admin
+			admin.IsAdmin, admin.ProhibitLogin, admin.IsActive = col != "is_admin", col == "prohibit_login", col != "is_active"
+			require.NoError(t, user_model.UpdateUserCols(t.Context(), admin, col))
+			defer func() { require.NoError(t, user_model.UpdateUserCols(t.Context(), &restore, col)) }()
+			apiGet(t, "/api/v1/admin/users", adminToken, http.StatusUnauthorized)
+		})
+	}
+	apiGet(t, "/api/v1/admin/users", adminToken, http.StatusOK)
 
 	t.Run("last used is not updated", func(t *testing.T) {
 		apiGet(t, "/api/v1/user", broad, http.StatusUnauthorized)
@@ -316,6 +318,8 @@ func TestAccessTokenScopePolicyEnforced(t *testing.T) {
 			req := NewRequest(t, "GET", "/api/packages/user2/nuget/index.json").SetHeader("X-NuGet-ApiKey", token)
 			MakeRequest(t, req, http.StatusUnauthorized)
 		}
+		req := NewRequest(t, "GET", "/api/packages/user2/nuget/index.json").SetHeader("X-NuGet-ApiKey", allowed)
+		MakeRequest(t, req, http.StatusOK)
 	})
 
 	t.Run("authorized integration", func(t *testing.T) {
