@@ -388,19 +388,21 @@ func TestMirrorPullFilterEntryPoints(t *testing.T) {
 	})
 
 	t.Run("API: an archived repository's filters can't be changed, and no sync runs", func(t *testing.T) {
-		u.branch(t, "hotfix/9")
+		// "more" matches only the refused filter: a sync still queued by the last subtest's change (it runs in a
+		// goroutine, late on a slow machine) must not fetch it either
+		u.branch(t, "more")
 		repo.IsArchived = true
 		require.NoError(t, repo_model.UpdateRepositoryCols(t.Context(), repo, "is_archived"))
 		patch := map[string]any{"mirror_branch_filter": "main,hotfix/*,more"}
 		session.MakeRequest(t, NewRequestWithJSON(t, "PATCH", apiURL, patch).AddTokenAuth(token), http.StatusUnprocessableEntity)
 		assert.Equal(t, "main,hotfix/*", stored().BranchFilter)
-		assert.NotContains(t, filterMirrorRefs(t, repo), "hotfix/9")
+		assert.NotContains(t, filterMirrorRefs(t, repo), "more")
 
 		// the same change on a live repository does queue a sync, which fetches the new match
 		repo.IsArchived = false
 		require.NoError(t, repo_model.UpdateRepositoryCols(t.Context(), repo, "is_archived"))
 		session.MakeRequest(t, NewRequestWithJSON(t, "PATCH", apiURL, patch).AddTokenAuth(token), http.StatusOK)
-		assert.Eventually(t, func() bool { return slices.Contains(filterMirrorRefs(t, repo), "hotfix/9") }, 10*time.Second, 100*time.Millisecond)
+		assert.Eventually(t, func() bool { return slices.Contains(filterMirrorRefs(t, repo), "more") }, 10*time.Second, 100*time.Millisecond)
 	})
 
 	t.Run("API: only admins see the filters, and webhooks never carry them", func(t *testing.T) {
