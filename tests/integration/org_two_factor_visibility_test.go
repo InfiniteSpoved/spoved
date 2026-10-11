@@ -46,8 +46,7 @@ func TestOrgTwoFactorMembersPage(t *testing.T) {
 		page := NewHTMLParser(t, body)
 		list := page.Find(".list")
 		hasColumn = strings.Contains(list.Text(), "2FA")
-		enrolled = list.Find(".text.green").Length()
-		return
+		return hasColumn, list.Find(".text.green").Length()
 	}
 
 	// the column is shown with the flag off too

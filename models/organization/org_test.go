@@ -4,6 +4,7 @@
 package organization_test
 
 import (
+	"slices"
 	"sort"
 	"testing"
 
@@ -652,7 +653,7 @@ func TestFindOrgMembersTwoFactorDisabled(t *testing.T) {
 		for _, ou := range ous {
 			out = append(out, ou.UID)
 		}
-		sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+		slices.Sort(out)
 		return out
 	}
 	assert.Equal(t, []int64{2, 4, 28}, uids())
