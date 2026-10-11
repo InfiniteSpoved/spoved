@@ -48,4 +48,22 @@ check DCO_START=1970-01-01; expect "merge of develop is not counted" 0
 git checkout -q -b fake
 commit "fake" -m "Signed-off-by: not a real trailer"
 check DCO_START=1970-01-01; expect "malformed sign-off fails" 1
+# a NUL byte in the message must not hide the sign-off (git log %B stops at it);
+# git commit refuses such a message, so write the commit object by hand
+git checkout -q -b nul develop
+nul_commit() { # printf format of the message
+  {
+    printf 'tree %s\nparent %s\n' "$(git write-tree)" "$(git rev-parse HEAD)"
+    printf 'author Tester <tester@example.com> 1700000000 +0000\n'
+    printf 'committer Tester <tester@example.com> 1700000000 +0000\n\n'
+    printf "$1"
+  } | git hash-object -t commit -w --stdin --literally
+}
+git reset -q --soft "$(nul_commit 'nul before\n\n\0\n\nSigned-off-by: Tester <tester@example.com>\n')"
+check DCO_START=1970-01-01; expect "sign-off after a NUL byte is found" 0
+git reset -q --soft "$(nul_commit 'nul without sign-off\n\n\0\n\nmore text\n')"
+check DCO_START=1970-01-01; expect "NUL byte without sign-off fails" 1
+
+check DCO_START=not-a-date; expect "bad DCO_START is refused" 2
+grep -q "DCO_START must be a date" <<< "$out" || { echo "FAIL: no clear message"; echo "$out"; exit 1; }
 echo "all ok"

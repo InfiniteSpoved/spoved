@@ -18,7 +18,12 @@ set -euo pipefail
 base=${1:-origin/develop}
 
 since=0
-[ -n "$DCO_START" ] && since=$(date -d "$DCO_START" +%s)
+if [ -n "$DCO_START" ]; then
+  since=$(date -d "$DCO_START" +%s 2>/dev/null) || {
+    echo "DCO_START must be a date such as 2026-11-01, got: $DCO_START" >&2
+    exit 2
+  }
+fi
 
 missing=0
 while read -r sha; do

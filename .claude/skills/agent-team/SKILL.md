@@ -242,8 +242,8 @@ design already covers. Read CLAUDE.md first.
 
 You are the CODER for #<N> in InfiniteSpoved/spoved. Your lead is the OL <OL>.
 Report only to it, with send_message. At start: get_session for your id. The
-supervisor <SUP> runs CI for you: after every push, send it the PR number and the
-40-char head SHA.
+CI starts by itself on every push: after every push, send the OL the PR number and
+the 40-char head SHA.
 
 Phase 1, DESIGN ONLY (no code). Read the issue, its comments and the OL's
 acceptance criteria, then the code it touches. Send the OL:
@@ -262,8 +262,8 @@ Phase 2, after the OL approves with a test plan:
 3. Run the fast local checks: lint on the changed packages, unit tests, and the
    new integration/e2e tests by name.
 4. Push and open a PR to develop: "Fixes #<N>" (or "Part of #<N>").
-5. Push early and often. The supervisor starts a full CI run on every pushed head
-   and sends you failures as soon as a job fails; keep working meanwhile.
+5. Push early and often. CI starts by itself on every pushed head; read a failed
+   job's log in the PR's CI check soon after it fails, and keep working meanwhile.
 6. Send the OL (and the security reviewer, if any) the PR number, the 40-char
    head SHA and the CI result, in one go.
 7. Fix every must-fix item the OL sends. Add a CLAUDE.md "Learnings" line for
