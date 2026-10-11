@@ -12,6 +12,7 @@ import (
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
 	secret_model "forgejo.org/models/secret"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/actions"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
@@ -822,6 +823,8 @@ func DispatchWorkflow(ctx *context.APIContext) {
 	//     "$ref": "#/responses/empty"
 	//   "400":
 	//     "$ref": "#/responses/error"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
@@ -853,6 +856,21 @@ func DispatchWorkflow(ctx *context.APIContext) {
 		return opt.Inputs[key]
 	}
 
+	if opt.RunAt != nil {
+		sd, err := actions_service.ScheduleDispatch(ctx, ctx.Repo().Repository, ctx.Doer(), workflow, inputGetter, *opt.RunAt)
+		switch {
+		case err == nil:
+			ctx.JSON(http.StatusCreated, toScheduledWorkflowRun(sd, ctx.Doer().Name))
+		case errors.Is(err, util.ErrPermissionDenied):
+			ctx.Error(http.StatusForbidden, "ScheduleDispatch", err)
+		case actions_service.IsInputRequiredErr(err) || errors.Is(err, util.ErrInvalidArgument):
+			ctx.Error(http.StatusBadRequest, "ScheduleDispatch", err)
+		default:
+			ctx.Error(http.StatusInternalServerError, "ScheduleDispatch", err)
+		}
+		return
+	}
+
 	run, jobs, err := workflow.Dispatch(ctx, inputGetter, ctx.Repo().Repository, ctx.Doer())
 	if err != nil {
 		if actions_service.IsInputRequiredErr(err) || errors.Is(err, util.ErrInvalidArgument) {
@@ -874,6 +892,134 @@ func DispatchWorkflow(ctx *context.APIContext) {
 	} else {
 		ctx.Status(http.StatusNoContent)
 	}
+}
+
+func toScheduledWorkflowRun(sd *actions_model.ActionScheduledDispatch, doerName string) *api.ScheduledWorkflowRun {
+	status := "pending"
+	if sd.Status == actions_model.ScheduledDispatchCancelled {
+		status = "cancelled"
+	}
+	return &api.ScheduledWorkflowRun{
+		ID:           sd.ID,
+		Workflow:     sd.WorkflowID,
+		Ref:          sd.Ref,
+		RunAt:        sd.RunAt.AsTime(),
+		Doer:         doerName,
+		Status:       status,
+		CancelReason: sd.CancelReason,
+		Created:      sd.Created.AsTime(),
+	}
+}
+
+// ListScheduledRuns lists the manual workflow runs scheduled for later
+func ListScheduledRuns(ctx *context.APIContext) {
+	// swagger:operation GET /repos/{owner}/{repo}/actions/scheduled-runs repository ListScheduledRuns
+	// ---
+	// summary: Lists the manual workflow runs that are scheduled for later, and the ones that were cancelled
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: page
+	//   in: query
+	//   description: page number of results to return (1-based)
+	//   type: integer
+	// - name: limit
+	//   in: query
+	//   description: page size of results
+	//   type: integer
+	// responses:
+	//   "200":
+	//     "$ref": "#/responses/ScheduledWorkflowRunList"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+
+	list, total, err := actions_model.ListScheduledDispatches(ctx, ctx.Repo().Repository.ID, utils.GetListOptions(ctx))
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "ListScheduledDispatches", err)
+		return
+	}
+	doerIDs := make([]int64, len(list))
+	for i, sd := range list {
+		doerIDs[i] = sd.DoerID
+	}
+	doers, err := user_model.GetPossibleUserByIDs(ctx, doerIDs)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "GetPossibleUserByIDs", err)
+		return
+	}
+	names := make(map[int64]string, len(doers))
+	for _, u := range doers {
+		names[u.ID] = u.Name
+	}
+	res := make([]*api.ScheduledWorkflowRun, len(list))
+	for i, sd := range list {
+		res[i] = toScheduledWorkflowRun(sd, names[sd.DoerID])
+	}
+	ctx.SetTotalCountHeader(total)
+	ctx.JSON(http.StatusOK, res)
+}
+
+// DeleteScheduledRun removes a scheduled manual workflow run
+func DeleteScheduledRun(ctx *context.APIContext) {
+	// swagger:operation DELETE /repos/{owner}/{repo}/actions/scheduled-runs/{id} repository DeleteScheduledRun
+	// ---
+	// summary: Cancels a scheduled manual workflow run, or removes a cancelled one from the list
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: id
+	//   in: path
+	//   description: id of the scheduled run
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// responses:
+	//   "204":
+	//     "$ref": "#/responses/empty"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+
+	repoID := ctx.Repo().Repository.ID
+	sd, err := actions_model.GetScheduledDispatch(ctx, repoID, ctx.ParamsInt64("id"))
+	if errors.Is(err, actions_model.ErrScheduledDispatchNotFound) {
+		ctx.NotFound()
+		return
+	} else if err != nil {
+		ctx.Error(http.StatusInternalServerError, "GetScheduledDispatch", err)
+		return
+	}
+	if sd.DoerID != ctx.Doer().ID && !ctx.IsUserRepoAdmin() && !ctx.IsUserSiteAdmin() {
+		ctx.Error(http.StatusForbidden, "DeleteScheduledRun", "only the user who scheduled the run, a repository admin or a site admin can remove it")
+		return
+	}
+	if err := actions_model.DeleteScheduledDispatch(ctx, repoID, sd.ID); errors.Is(err, actions_model.ErrScheduledDispatchNotFound) {
+		ctx.NotFound()
+		return
+	} else if err != nil {
+		ctx.Error(http.StatusInternalServerError, "DeleteScheduledDispatch", err)
+		return
+	}
+	ctx.Status(http.StatusNoContent)
 }
 
 // ListActionRuns return a filtered list of ActionRun

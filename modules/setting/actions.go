@@ -27,6 +27,7 @@ var (
 		AbandonedJobTimeout          time.Duration     `ini:"ABANDONED_JOB_TIMEOUT"`
 		SkipWorkflowStrings          []string          `ini:"SKIP_WORKFLOW_STRINGS"`
 		LimitDispatchInputs          int64             `ini:"LIMIT_DISPATCH_INPUTS"`
+		MaxDelayedRunDays            int               `ini:"MAX_DELAYED_RUN_DAYS"`
 		ConcurrencyGroupQueueEnabled bool              `ini:"CONCURRENCY_GROUP_QUEUE_ENABLED"`
 		IDTokenExpirationTime        int64             `ini:"ID_TOKEN_EXPIRATION_TIME"`
 		RunnerRegistration           string            `ini:"RUNNER_REGISTRATION"`
@@ -38,6 +39,7 @@ var (
 		DefaultActionsURL:            defaultActionsURLForgejo,
 		SkipWorkflowStrings:          []string{"[skip ci]", "[ci skip]", "[no ci]", "[skip actions]", "[actions skip]"},
 		LimitDispatchInputs:          100,
+		MaxDelayedRunDays:            30,
 		ConcurrencyGroupQueueEnabled: true,
 		IDTokenExpirationTime:        3600,
 		RunnerRegistration:           RunnerRegistrationEveryone,

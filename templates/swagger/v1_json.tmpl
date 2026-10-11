@@ -8526,6 +8526,98 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/actions/scheduled-runs": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Lists the manual workflow runs that are scheduled for later, and the ones that were cancelled",
+        "operationId": "ListScheduledRuns",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/ScheduledWorkflowRunList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/actions/scheduled-runs/{id}": {
+      "delete": {
+        "tags": [
+          "repository"
+        ],
+        "summary": "Cancels a scheduled manual workflow run, or removes a cancelled one from the list",
+        "operationId": "DeleteScheduledRun",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the scheduled run",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/actions/secrets": {
       "get": {
         "produces": [
@@ -9057,6 +9149,9 @@
           },
           "400": {
             "$ref": "#/responses/error"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
           },
           "404": {
             "$ref": "#/responses/notFound"
@@ -30118,6 +30213,12 @@
           "type": "boolean",
           "default": false,
           "x-go-name": "ReturnRunInfo"
+        },
+        "run_at": {
+          "description": "Time to start the run (RFC 3339) instead of now; the run is then scheduled and return_run_info is ignored",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "RunAt"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -35695,6 +35796,56 @@
       "type": "string",
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "ScheduledWorkflowRun": {
+      "description": "ScheduledWorkflowRun represents a manual workflow run that starts at a chosen time",
+      "type": "object",
+      "properties": {
+        "cancel_reason": {
+          "description": "why the run was cancelled, a short code such as \"no_permission\"",
+          "type": "string",
+          "x-go-name": "CancelReason"
+        },
+        "created": {
+          "description": "when the run was scheduled",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Created"
+        },
+        "doer": {
+          "description": "the login name of the user who scheduled it, the run's actor",
+          "type": "string",
+          "x-go-name": "Doer"
+        },
+        "id": {
+          "description": "the id of the scheduled run",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "ref": {
+          "description": "the git reference the run starts from",
+          "type": "string",
+          "x-go-name": "Ref"
+        },
+        "run_at": {
+          "description": "the time the run starts",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "RunAt"
+        },
+        "status": {
+          "description": "\"pending\", or \"cancelled\" when the run can no longer start",
+          "type": "string",
+          "x-go-name": "Status"
+        },
+        "workflow": {
+          "description": "the workflow file name",
+          "type": "string",
+          "x-go-name": "Workflow"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "SearchResults": {
       "description": "SearchResults results of a successful search",
       "type": "object",
@@ -38387,6 +38538,21 @@
         "type": "array",
         "items": {
           "$ref": "#/definitions/ActionRunJob"
+        }
+      }
+    },
+    "ScheduledWorkflowRun": {
+      "description": "ScheduledWorkflowRun is a manual workflow run that starts at a chosen time",
+      "schema": {
+        "$ref": "#/definitions/ScheduledWorkflowRun"
+      }
+    },
+    "ScheduledWorkflowRunList": {
+      "description": "ScheduledWorkflowRunList is a list of scheduled manual workflow runs",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/ScheduledWorkflowRun"
         }
       }
     },

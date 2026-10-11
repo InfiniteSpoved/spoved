@@ -85,36 +85,34 @@ func (entry *Workflow) WorkflowPath() string {
 	return entry.WorkflowDirectory + "/" + entry.WorkflowID
 }
 
-func (entry *Workflow) Dispatch(ctx context.Context, inputGetter InputValueGetter, repo *repo_model.Repository, doer *user.User) (r *actions_model.ActionRun, j []string, err error) {
+// readDispatchable reads the workflow file and refuses a workflow that is disabled or has no workflow_dispatch trigger
+func (entry *Workflow) readDispatchable(ctx context.Context, repo *repo_model.Repository) ([]byte, *act_model.Workflow, *act_model.WorkflowDispatch, error) {
 	content, err := actions.GetContentFromEntry(entry.GitEntry)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	wf, err := act_model.ReadWorkflow(bytes.NewReader(content), false)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	actionsUnit, err := repo.GetUnit(ctx, unit.TypeActions)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if actionsUnit.ActionsConfig().IsWorkflowDisabled(entry.WorkflowID) {
-		return nil, nil, ErrWorkflowDisabled
+		return nil, nil, nil, ErrWorkflowDisabled
 	}
 	workflowDispatch := wf.WorkflowDispatchConfig()
 	if workflowDispatch == nil {
-		return nil, nil, ErrWorkflowNoDispatchTrigger
+		return nil, nil, nil, ErrWorkflowNoDispatchTrigger
 	}
+	return content, wf, workflowDispatch, nil
+}
 
-	fullWorkflowID := entry.WorkflowPath()
-
-	title := wf.Name
-	if len(title) < 1 {
-		title = fullWorkflowID
-	}
-
+// resolveInputs returns the inputs as the runner expects them (strings), and as the expressions evaluate them
+func resolveInputs(workflowDispatch *act_model.WorkflowDispatch, inputGetter InputValueGetter) (map[string]string, map[string]any, error) {
 	// Runner expects a `map[string]string` for inputs in in the payload dispatch, but newer code in the Runner's
 	// jobparser library takes a map[string]any which is more directly actionable for parsing:
 	inputs := make(map[string]string)
@@ -138,6 +136,41 @@ func (entry *Workflow) Dispatch(ctx context.Context, inputGetter InputValueGette
 
 	if int64(len(inputs)) > setting.Actions.LimitDispatchInputs {
 		return nil, nil, errors.New("too many inputs")
+	}
+	return inputs, inputsAny, nil
+}
+
+// ResolveInputs validates the inputs of a manual run and returns them with their defaults filled in
+func (entry *Workflow) ResolveInputs(ctx context.Context, inputGetter InputValueGetter, repo *repo_model.Repository) (map[string]string, error) {
+	_, _, workflowDispatch, err := entry.readDispatchable(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	inputs, _, err := resolveInputs(workflowDispatch, inputGetter)
+	return inputs, err
+}
+
+// DispatchWithInputs is Dispatch with inputs that were resolved earlier
+func (entry *Workflow) DispatchWithInputs(ctx context.Context, inputs map[string]string, repo *repo_model.Repository, doer *user.User) (*actions_model.ActionRun, []string, error) {
+	return entry.Dispatch(ctx, func(key string) string { return inputs[key] }, repo, doer)
+}
+
+func (entry *Workflow) Dispatch(ctx context.Context, inputGetter InputValueGetter, repo *repo_model.Repository, doer *user.User) (r *actions_model.ActionRun, j []string, err error) {
+	content, wf, workflowDispatch, err := entry.readDispatchable(ctx, repo)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	fullWorkflowID := entry.WorkflowPath()
+
+	title := wf.Name
+	if len(title) < 1 {
+		title = fullWorkflowID
+	}
+
+	inputs, inputsAny, err := resolveInputs(workflowDispatch, inputGetter)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	jobNames := util.KeysOfMap(wf.Jobs)
