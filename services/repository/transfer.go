@@ -337,7 +337,7 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 
 // changeRepositoryName changes all corresponding setting from old repository name to new one.
 func changeRepositoryName(ctx context.Context, repo *repo_model.Repository, newRepoName string) (err error) {
-	oldRepoName := repo.Name
+	oldRepoName, newName := repo.Name, newRepoName // the name keeps its case, paths and lower_name don't
 	newRepoName = strings.ToLower(newRepoName)
 	if err = repo_model.IsUsableRepoName(newRepoName); err != nil {
 		return err
@@ -404,7 +404,7 @@ func changeRepositoryName(ctx context.Context, repo *repo_model.Repository, newR
 	if err = repo_model.ReleaseRepoName(ctx, repo); err != nil {
 		return err
 	}
-	repo.Name, repo.LowerName = newRepoName, newRepoName
+	repo.Name, repo.LowerName = newName, newRepoName
 	if err = repo_model.ClaimRepoName(ctx, repo); err != nil {
 		return err
 	}

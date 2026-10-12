@@ -136,6 +136,19 @@ func TestRepoGroupRenameRepo(t *testing.T) {
 	assertDir(t, true, filepath.Join(setting.RepoRootPath, "org3", "repo5.git"))
 	unittest.AssertNotExistsBean(t, &repo_model.Redirect{OwnerID: org3.ID, LowerName: "api"})
 
+	// a mixed-case name keeps its case; the directories and lower_name are lowercase
+	for _, repo := range []*repo_model.Repository{root, nested} {
+		require.NoError(t, ChangeRepositoryName(ctx, doer, repo, "Mixed-Case"))
+		stored := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repo.ID})
+		assert.Equal(t, "Mixed-Case", stored.Name)
+		assert.Equal(t, "mixed-case", stored.LowerName)
+		assert.Equal(t, "mixed-case.git", filepath.Base(stored.RepoPath()))
+		gitRepo, err := git.OpenRepository(ctx, stored.RepoPath())
+		require.NoError(t, err)
+		gitRepo.Close()
+	}
+	unittest.AssertExistsAndLoadBean(t, &repo_model.RepoGroupNameClaim{OwnerID: org3.ID, LowerName: "mixed-case"})
+
 	unittest.CheckConsistencyFor(t, &user_model.User{}, &repo_model.Repository{})
 }
 
