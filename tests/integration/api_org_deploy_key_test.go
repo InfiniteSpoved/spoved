@@ -117,6 +117,8 @@ func TestAPIOrgDeployKey(t *testing.T) {
 		trashed := createOrgDeployKeyRepo(t, "api-dk-trashed")
 		require.NoError(t, repo_service.TrashRepository(ctx, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), trashed))
 		create(t, owner, api.CreateOrgDeployKeyOption{Title: "trashed", Repositories: []string{"api-dk-trashed"}}, http.StatusUnprocessableEntity)
+		// at most 1000 distinct names
+		create(t, owner, api.CreateOrgDeployKeyOption{Title: "many", Repositories: orgDeployKeyRepoNames(1001)}, http.StatusUnprocessableEntity)
 		assert.Equal(t, before, count())
 	})
 
@@ -170,7 +172,17 @@ func TestAPIOrgDeployKey(t *testing.T) {
 		MakeRequest(t, NewRequest(t, "GET", keysURL).AddTokenAuth(getUserToken(t, "user2", auth_model.AccessTokenScopeWriteOrganization, auth_model.AccessTokenScopePublicOnly)), http.StatusForbidden)
 
 		// a site admin can, through the API like on the web
-		MakeRequest(t, NewRequest(t, "GET", keysURL).AddTokenAuth(getUserToken(t, "user1", writeScope...)), http.StatusOK)
+		admin := getUserToken(t, "user1", writeScope...)
+		MakeRequest(t, NewRequest(t, "GET", keysURL).AddTokenAuth(admin), http.StatusOK)
+		byAdmin := create(t, admin, api.CreateOrgDeployKeyOption{Title: "admin", Repositories: []string{"repo3"}}, http.StatusCreated)
+		adminURL := fmt.Sprintf("%s/%d", keysURL, byAdmin.ID)
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", adminURL, api.EditOrgDeployKeyOption{Repositories: &[]string{"repo5"}}).AddTokenAuth(admin), http.StatusOK)
+		assert.Equal(t, []int64{5}, selection(t, byAdmin.ID))
+		MakeRequest(t, NewRequest(t, "DELETE", adminURL).AddTokenAuth(admin), http.StatusNoContent)
+
+		// a token limited to specific repositories, even one of the organization's
+		repoOnly := createFineGrainedRepoAccessToken(t, "user2", writeScope, []int64{3})
+		check(t, "repo-only token", repoOnly, http.StatusForbidden)
 
 		// an outsider of a private organization doesn't learn it exists
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/privated_org/keys").AddTokenAuth(getUserToken(t, "user8", writeScope...)), http.StatusNotFound)
@@ -209,6 +221,12 @@ func TestAPIOrgDeployKey(t *testing.T) {
 		assert.ElementsMatch(t, []int64{3, 32}, selection(t, selected.ID))
 
 		patch(t, api.EditOrgDeployKeyOption{Repositories: &[]string{"repo5"}}, http.StatusOK)
+		assert.Equal(t, []int64{5}, selection(t, selected.ID))
+		// names are deduplicated, case-insensitively, before the cap
+		patch(t, api.EditOrgDeployKeyOption{Repositories: &[]string{"repo5", "Repo5", "REPO5"}}, http.StatusOK)
+		assert.Equal(t, []int64{5}, selection(t, selected.ID))
+		many := append(orgDeployKeyRepoNames(1000), "repo5")
+		patch(t, api.EditOrgDeployKeyOption{Repositories: &many}, http.StatusUnprocessableEntity)
 		assert.Equal(t, []int64{5}, selection(t, selected.ID))
 		_, extra := private.ServCommand(ctx, selected.KeyID, "org3", "repo3", perm.AccessModeRead, "127.0.0.1", "git-upload-pack", "")
 		assert.Equal(t, http.StatusNotFound, extra.StatusCode, "repo3 is no longer covered")
@@ -323,10 +341,24 @@ func TestAPIOrgDeployKey(t *testing.T) {
 			_, err := db.Exec(ctx, "UPDATE `user` SET require_two_factor = ? WHERE id = 3", false)
 			require.NoError(t, err)
 		}()
+		before := count()
 		MakeRequest(t, NewRequest(t, "GET", keysURL).AddTokenAuth(owner), http.StatusForbidden)
+		create(t, owner, api.CreateOrgDeployKeyOption{Title: "blocked", AllRepositories: true}, http.StatusForbidden)
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", fmt.Sprintf("%s/%d", keysURL, selected.ID), api.EditOrgDeployKeyOption{AllRepositories: orgDeployKeyTrue()}).AddTokenAuth(owner), http.StatusForbidden)
 		MakeRequest(t, NewRequest(t, "DELETE", fmt.Sprintf("%s/%d", keysURL, all.ID)).AddTokenAuth(owner), http.StatusForbidden)
 		unittest.AssertExistsAndLoadBean(t, &asymkey_model.OrgDeployKey{ID: all.ID})
+		assert.False(t, unittest.AssertExistsAndLoadBean(t, &asymkey_model.OrgDeployKey{ID: selected.ID}).IncludesAllRepos)
+		assert.Equal(t, before, count())
 	})
+}
+
+// orgDeployKeyRepoNames returns n distinct repository names.
+func orgDeployKeyRepoNames(n int) []string {
+	names := make([]string, n)
+	for i := range names {
+		names[i] = fmt.Sprintf("repo-%d", i)
+	}
+	return names
 }
 
 func orgDeployKeyTrue() *bool {

@@ -5,8 +5,10 @@ package org
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	asymkey_model "forgejo.org/models/asymkey"
@@ -72,8 +74,21 @@ func getOrgDeployKey(ctx *context.APIContext) *asymkey_model.OrgDeployKey {
 	return key
 }
 
+// maxOrgDeployKeyRepos caps the repository names of one request.
+const maxOrgDeployKeyRepos = 1000
+
 // orgRepoIDs resolves repository names of the organization; a name outside it is refused.
 func orgRepoIDs(ctx *context.APIContext, names []string) ([]int64, bool) {
+	// names are case-insensitive: dedupe them as stored
+	lower := make([]string, 0, len(names))
+	for _, name := range names {
+		lower = append(lower, strings.ToLower(name))
+	}
+	names = slices.Compact(slices.Sorted(slices.Values(lower)))
+	if len(names) > maxOrgDeployKeyRepos {
+		ctx.Error(http.StatusUnprocessableEntity, "", fmt.Sprintf("at most %d repositories", maxOrgDeployKeyRepos))
+		return nil, false
+	}
 	ids := make([]int64, 0, len(names))
 	for _, name := range names {
 		r, err := repo_model.GetRepositoryByName(ctx, ctx.Org().Organization.ID, name)

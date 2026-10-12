@@ -40,7 +40,8 @@ type CreateOrgDeployKeyOption struct {
 	ReadOnly bool `json:"read_only"`
 	// Cover all repositories of the organization, including later ones
 	AllRepositories bool `json:"all_repositories"`
-	// Names of the repositories of the organization to cover, at least one unless all_repositories is set
+	// Names of the repositories of the organization to cover, at least one unless all_repositories is set; at
+	// most 1000
 	Repositories []string `json:"repositories"`
 	// When the key expires; omit for a key that never expires
 	// swagger:strfmt date-time
@@ -51,8 +52,10 @@ type CreateOrgDeployKeyOption struct {
 // the key, its access mode and its expiry can't be changed. At least one field is required.
 type EditOrgDeployKeyOption struct {
 	// true: all repositories of the organization; false: the selection, which must not be empty (repositories, or
-	// the existing selection when repositories is omitted). Can't be true together with repositories.
+	// the existing selection when repositories is omitted). Can't be true together with repositories. Setting it
+	// to true keeps the stored selection, so setting it back to false alone covers those repositories again (the
+	// web form deletes the selection instead).
 	AllRepositories *bool `json:"all_repositories"`
-	// Names of the repositories of the organization to cover; replaces the selection
+	// Names of the repositories of the organization to cover, at most 1000; replaces the selection
 	Repositories *[]string `json:"repositories"`
 }

@@ -382,6 +382,10 @@ func FindOrgDeployKeyRepos(ctx context.Context, keyID int64, opts db.ListOptions
 // DeleteOrgDeployKey deletes the deploy key, its selection and its public key if no other deploy key uses it.
 // It reports whether the public key was deleted, so the caller rewrites the authorized_keys file.
 func DeleteOrgDeployKey(ctx context.Context, key *OrgDeployKey) (deletedPublicKey bool, err error) {
+	// lock the key first, in the same order as every other change of it
+	if _, err := lockOrgDeployKey(ctx, key.OrgID, key.ID); err != nil {
+		return false, err
+	}
 	if _, err := db.GetEngine(ctx).Where("org_deploy_key_id = ?", key.ID).Delete(new(OrgDeployKeyRepo)); err != nil {
 		return false, err
 	}

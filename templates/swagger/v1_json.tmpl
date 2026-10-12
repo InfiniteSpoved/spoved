@@ -30179,7 +30179,7 @@
           "x-go-name": "ReadOnly"
         },
         "repositories": {
-          "description": "Names of the repositories of the organization to cover, at least one unless all_repositories is set",
+          "description": "Names of the repositories of the organization to cover, at least one unless all_repositories is set; at\nmost 1000",
           "type": "array",
           "items": {
             "type": "string"
@@ -31908,12 +31908,12 @@
       "title": "EditOrgDeployKeyOption options for changing which repositories a deploy key of an organization covers. The title,",
       "properties": {
         "all_repositories": {
-          "description": "true: all repositories of the organization; false: the selection, which must not be empty (repositories, or\nthe existing selection when repositories is omitted). Can't be true together with repositories.",
+          "description": "true: all repositories of the organization; false: the selection, which must not be empty (repositories, or\nthe existing selection when repositories is omitted). Can't be true together with repositories. Setting it\nto true keeps the stored selection, so setting it back to false alone covers those repositories again (the\nweb form deletes the selection instead).",
           "type": "boolean",
           "x-go-name": "AllRepositories"
         },
         "repositories": {
-          "description": "Names of the repositories of the organization to cover; replaces the selection",
+          "description": "Names of the repositories of the organization to cover, at most 1000; replaces the selection",
           "type": "array",
           "items": {
             "type": "string"
