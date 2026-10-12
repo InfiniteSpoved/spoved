@@ -5636,6 +5636,368 @@
         }
       }
     },
+    "/orgs/{org}/keys": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "List the deploy keys of an organization",
+        "operationId": "orgListDeployKeys",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/OrgDeployKeyList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Add a deploy key to an organization, for all its repositories or the selected ones",
+        "operationId": "orgCreateDeployKey",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/CreateOrgDeployKeyOption"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "$ref": "#/responses/OrgDeployKey"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/keys/{id}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Get a deploy key of an organization",
+        "operationId": "orgGetDeployKey",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the key",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/OrgDeployKey"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Delete a deploy key of an organization",
+        "operationId": "orgDeleteDeployKey",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the key",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "patch": {
+        "description": "The title, the key, its access mode and its expiry can't be changed. An empty body is refused.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Change which repositories a deploy key of an organization covers",
+        "operationId": "orgEditDeployKey",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the key",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/EditOrgDeployKeyOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/OrgDeployKey"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/keys/{id}/repos": {
+      "get": {
+        "description": "A key that covers all repositories has no selected repositories.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "List the selected repositories of a deploy key of an organization",
+        "operationId": "orgListDeployKeyRepos",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the key",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/RepositoryList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/keys/{id}/repos/{repo}": {
+      "put": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Add a repository to the selection of a deploy key of an organization",
+        "operationId": "orgAddDeployKeyRepo",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the key",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of a repository of the organization",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      },
+      "delete": {
+        "description": "The last selected repository can't be removed.",
+        "tags": [
+          "organization"
+        ],
+        "summary": "Remove a repository from the selection of a deploy key of an organization",
+        "operationId": "orgRemoveDeployKeyRepo",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the key",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of a repository of the organization",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/orgs/{org}/labels": {
       "get": {
         "produces": [
@@ -29787,6 +30149,51 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "CreateOrgDeployKeyOption": {
+      "description": "CreateOrgDeployKeyOption options for adding a deploy key to an organization",
+      "type": "object",
+      "required": [
+        "title",
+        "key"
+      ],
+      "properties": {
+        "all_repositories": {
+          "description": "Cover all repositories of the organization, including later ones",
+          "type": "boolean",
+          "x-go-name": "AllRepositories"
+        },
+        "expires_at": {
+          "description": "When the key expires; omit for a key that never expires",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ExpiresAt"
+        },
+        "key": {
+          "description": "An armored SSH key to add",
+          "type": "string",
+          "x-go-name": "Key"
+        },
+        "read_only": {
+          "description": "Describe if the key has only read access or read/write",
+          "type": "boolean",
+          "x-go-name": "ReadOnly"
+        },
+        "repositories": {
+          "description": "Names of the repositories of the organization to cover, at least one unless all_repositories is set; at\nmost 1000",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Repositories"
+        },
+        "title": {
+          "description": "Title of the key, unique in the organization",
+          "type": "string",
+          "x-go-name": "Title"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "CreateOrgOption": {
       "description": "CreateOrgOption options for creating an organization",
       "type": "object",
@@ -31491,6 +31898,27 @@
         "unprotected_file_patterns": {
           "type": "string",
           "x-go-name": "UnprotectedFilePatterns"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "EditOrgDeployKeyOption": {
+      "description": "the key, its access mode and its expiry can't be changed. At least one field is required.",
+      "type": "object",
+      "title": "EditOrgDeployKeyOption options for changing which repositories a deploy key of an organization covers. The title,",
+      "properties": {
+        "all_repositories": {
+          "description": "true: all repositories of the organization; false: the selection, which must not be empty (repositories, or\nthe existing selection when repositories is omitted). Can't be true together with repositories. Setting it\nto true keeps the stored selection, so setting it back to false alone covers those repositories again (the\nweb form deletes the selection instead).",
+          "type": "boolean",
+          "x-go-name": "AllRepositories"
+        },
+        "repositories": {
+          "description": "Names of the repositories of the organization to cover, at most 1000; replaces the selection",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Repositories"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -34490,6 +34918,65 @@
           "description": "EnforceDeleteBranchAfterMerge locks the value for all repositories of the organization",
           "type": "boolean",
           "x-go-name": "EnforceDeleteBranchAfterMerge"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "OrgDeployKey": {
+      "description": "OrgDeployKey is a deploy key of an organization, for all its repositories or the selected ones",
+      "type": "object",
+      "properties": {
+        "all_repositories": {
+          "description": "whether the key covers all repositories of the organization, including later ones, or only the selected ones",
+          "type": "boolean",
+          "x-go-name": "AllRepositories"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Created"
+        },
+        "expires_at": {
+          "description": "When the key expires, omitted if never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Expires"
+        },
+        "fingerprint": {
+          "type": "string",
+          "x-go-name": "Fingerprint"
+        },
+        "id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "key": {
+          "type": "string",
+          "x-go-name": "Key"
+        },
+        "key_id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "KeyID"
+        },
+        "last_used_at": {
+          "description": "When the key was last used, omitted if never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "LastUsed"
+        },
+        "read_only": {
+          "type": "boolean",
+          "x-go-name": "ReadOnly"
+        },
+        "title": {
+          "type": "string",
+          "x-go-name": "Title"
+        },
+        "url": {
+          "type": "string",
+          "x-go-name": "URL"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -38898,6 +39385,21 @@
       "description": "OrgBranchWorkflow",
       "schema": {
         "$ref": "#/definitions/OrgBranchWorkflow"
+      }
+    },
+    "OrgDeployKey": {
+      "description": "OrgDeployKey",
+      "schema": {
+        "$ref": "#/definitions/OrgDeployKey"
+      }
+    },
+    "OrgDeployKeyList": {
+      "description": "OrgDeployKeyList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/OrgDeployKey"
+        }
       }
     },
     "Organization": {
