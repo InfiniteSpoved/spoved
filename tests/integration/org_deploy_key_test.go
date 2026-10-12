@@ -163,9 +163,13 @@ func TestOrgDeployKey(t *testing.T) {
 	})
 
 	t.Run("hook refuses the legacy deploy key environment", func(t *testing.T) {
-		extra := hook(private.HookOptions{DeployKeyID: writeKey.ID}, emptyID, initCommit, git.RefNameFromBranch("free"))
-		assert.Equal(t, http.StatusForbidden, extra.StatusCode)
-		assert.Contains(t, extra.UserMsg, "outdated")
+		for _, legacyID := range []int64{writeKey.ID, -1} {
+			extra := hook(private.HookOptions{DeployKeyID: legacyID}, emptyID, initCommit, git.RefNameFromBranch("free"))
+			assert.Equal(t, http.StatusForbidden, extra.StatusCode)
+			assert.Contains(t, extra.UserMsg, "outdated")
+		}
+		// serv sets the legacy variable to -1 next to the new one: the new hook ignores it
+		require.NoError(t, hook(private.HookOptions{DeployKeyID: -1, DeployKeyKeyID: writeKey.KeyID}, emptyID, initCommit, git.RefNameFromBranch("free")).Error)
 	})
 
 	t.Run("hook allows a write org key on an unprotected branch", func(t *testing.T) {

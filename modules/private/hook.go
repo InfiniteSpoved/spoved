@@ -35,7 +35,7 @@ type HookOptions struct {
 	GitPushOptions                  map[string]string
 	PullRequestID                   int64
 	PushTrigger                     repository.PushTrigger
-	DeployKeyID                     int64 // legacy GITEA_DEPLOY_KEY_ID: refused without DeployKeyKeyID
+	DeployKeyID                     int64 // legacy GITEA_DEPLOY_KEY_ID (-1 from serv for a deploy key): refused without DeployKeyKeyID
 	DeployKeyKeyID                  int64 // public key ID if the pusher is a deploy key; UserID is then the repo's owner.
 	IsWiki                          bool
 	ActionTaskID                    int64 // the Actions task whose token pushes (UserID is the Actions user)
