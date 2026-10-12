@@ -94,6 +94,12 @@ func TestOrgDeployKeyWeb(t *testing.T) {
 			assert.Contains(t, []int{http.StatusOK, http.StatusSeeOther}, resp.Code, name)
 			assert.Equal(t, before, count(), name)
 		}
+		// the refused form is shown again, open, with what was entered
+		page := NewHTMLParser(t, owner.MakeRequest(t, NewRequestWithValues(t, "POST", keysURL, keyForm("kept input", "selected", "")), http.StatusOK).Body)
+		assert.False(t, page.Find("#add-deploy-key-panel").HasClass("tw-hidden"))
+		assert.Equal(t, "kept input", page.Find(`#add-deploy-key-panel input[name="title"]`).AttrOr("value", ""))
+		assert.Equal(t, 1, page.Find(`#add-deploy-key-panel input[name="scope"][value="selected"][checked]`).Length())
+
 		// a trashed repository can't be selected either
 		trashed := createOrgDeployKeyRepo(t, "dk-trashed")
 		require.NoError(t, repo_service.TrashRepository(ctx, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), trashed))

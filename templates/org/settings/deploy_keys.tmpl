@@ -26,12 +26,12 @@
 				</div>
 				<div class="field">
 					<div class="ui checkbox">
-						<input id="ssh-key-is-writable" name="is_writable" type="checkbox" value="1">
+						<input id="ssh-key-is-writable" name="is_writable" type="checkbox" value="1" {{if .is_writable}}checked{{end}}>
 						<label for="ssh-key-is-writable">{{ctx.Locale.Tr "repo.settings.is_writable"}}</label>
-						<small class="tw-pl-[26px]">{{ctx.Locale.Tr "repo.settings.is_writable_info"}}</small>
+						<small class="tw-pl-[26px]">{{ctx.Locale.Tr "org.settings.deploy_key_is_writable_info"}}</small>
 					</div>
 				</div>
-				{{template "org/settings/deploy_key_scope" (dict "ctxData" $ "ID" "new" "All" true "RepoIDs" "")}}
+				{{template "org/settings/deploy_key_scope" (dict "ctxData" $ "ID" "new" "All" .ScopeAll "RepoIDs" .ScopeRepoIDs)}}
 				{{template "shared/expiry_input" .}}
 				<button class="ui primary button">{{ctx.Locale.Tr "repo.settings.add_deploy_key"}}</button>
 				<button class="ui hide-panel button" data-panel="#add-deploy-key-panel">{{ctx.Locale.Tr "cancel"}}</button>
@@ -41,7 +41,7 @@
 			<div class="flex-list">
 				{{range .DeployKeys}}
 					{{$key := .Key}}
-					<div class="flex-item">
+					<div class="flex-item tw-flex-wrap">
 						<div class="flex-item-leading">
 							<span class="text {{if $key.HasRecentActivity}}green{{end}}" {{if $key.HasRecentActivity}}data-tooltip-content="{{ctx.Locale.Tr "settings.key_state_desc"}}"{{end}}>{{svg "octicon-key" 32}}</span>
 						</div>
@@ -55,19 +55,19 @@
 								{{ctx.Locale.Tr "org.settings.deploy_key_scope"}}:
 								{{if $key.IncludesAllRepos}}{{ctx.Locale.Tr "org.settings.deploy_key_covers_all"}}{{else}}{{range $i, $r := .Repos}}{{if $i}}, {{end}}{{$r.Name}}{{end}}{{end}}
 							</div>
-							<details>
-								<summary>{{ctx.Locale.Tr "org.settings.deploy_key_save_repos"}}</summary>
-								<form class="ui form" action="{{$.Link}}/{{$key.ID}}/repos" method="post">
-									{{template "org/settings/deploy_key_scope" (dict "ctxData" $ "ID" $key.ID "All" $key.IncludesAllRepos "RepoIDs" .RepoIDs)}}
-									<button class="ui primary tiny button">{{ctx.Locale.Tr "org.settings.deploy_key_save_repos"}}</button>
-								</form>
-							</details>
 						</div>
 						<div class="flex-item-trailing">
 							<button class="ui red tiny button delete-button" data-url="{{$.Link}}/delete" data-id="{{$key.ID}}" data-modal-id="delete-deploy-key">
 								{{ctx.Locale.Tr "settings.delete_key"}}
 							</button>
 						</div>
+						<details class="tw-w-full">
+							<summary>{{ctx.Locale.Tr "org.settings.deploy_key_change_repos"}}</summary>
+							<form class="ui form" action="{{$.Link}}/{{$key.ID}}/repos" method="post">
+								{{template "org/settings/deploy_key_scope" (dict "ctxData" $ "ID" $key.ID "All" $key.IncludesAllRepos "RepoIDs" .RepoIDs)}}
+								<button class="ui primary tiny button">{{ctx.Locale.Tr "org.settings.deploy_key_save_repos"}}</button>
+							</form>
+						</details>
 					</div>
 				{{end}}
 			</div>

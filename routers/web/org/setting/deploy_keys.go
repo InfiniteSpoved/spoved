@@ -38,6 +38,7 @@ func loadDeployKeys(ctx *context.Context) bool {
 	ctx.Data["Title"] = ctx.Tr("org.settings.deploy_keys")
 	ctx.Data["PageIsSettingsDeployKeys"] = true
 	ctx.Data["DisableSSH"] = setting.SSH.Disabled
+	ctx.Data["ScopeAll"] = true
 	user.SetExpiryFormData(ctx.Base, setting.DeployKeyExpiry)
 
 	orgID := ctx.Org.Organization.ID
@@ -109,6 +110,9 @@ func DeployKeysPost(ctx *context.Context) {
 		return
 	}
 	link := ctx.Org.OrgLink + "/settings/keys"
+	// a refused form is shown again open, with what was entered
+	includesAllRepos, repoIDs := deployKeyScope(ctx)
+	ctx.Data["ScopeAll"], ctx.Data["ScopeRepoIDs"] = includesAllRepos, ctx.FormString("repo_ids")
 	if ctx.HasError() {
 		ctx.HTML(http.StatusOK, tplSettingsDeployKeys)
 		return
@@ -130,13 +134,13 @@ func DeployKeysPost(ctx *context.Context) {
 		return
 	}
 
+	ctx.Data["HasError"] = true // RenderWithErr below keeps the form open
 	expires, expiryErr := user.ParseExpiryForm(ctx.Base, setting.DeployKeyExpiry, form.ExpiresAt)
 	if has, msg := expiryErr.Get(); has {
 		ctx.Data["Err_ExpiresAt"] = true
 		ctx.RenderWithErr(template.HTML(template.HTMLEscapeString(msg)), tplSettingsDeployKeys, &form)
 		return
 	}
-	includesAllRepos, repoIDs := deployKeyScope(ctx)
 	if !includesAllRepos && len(repoIDs) == 0 {
 		ctx.RenderWithErr(ctx.Tr("org.settings.deploy_key_no_repos"), tplSettingsDeployKeys, &form)
 		return

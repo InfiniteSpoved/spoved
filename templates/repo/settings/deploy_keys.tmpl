@@ -70,7 +70,8 @@
 				{{ctx.Locale.Tr "repo.settings.no_deploy_keys"}}
 			{{end}}
 		{{if .OrgDeployKeys}}
-			<h5 class="ui header tw-mt-4">{{ctx.Locale.Tr "repo.settings.org_deploy_keys"}}</h5>
+			<div class="divider"></div>
+			<h5 class="ui header">{{ctx.Locale.Tr "repo.settings.org_deploy_keys"}}</h5>
 			<p>{{ctx.Locale.Tr "repo.settings.org_deploy_keys_desc"}}{{if .CanManageOrgDeployKeys}} <a href="{{AppSubUrl}}/org/{{PathEscape .Repository.OwnerName}}/settings/keys">{{ctx.Locale.Tr "repo.settings.org_deploy_keys_manage"}}</a>{{end}}</p>
 			<div class="flex-list" id="org-deploy-keys">
 				{{range .OrgDeployKeys}}

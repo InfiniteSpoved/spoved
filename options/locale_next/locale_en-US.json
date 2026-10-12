@@ -2010,6 +2010,8 @@
 	"org.settings.deploy_key_no_repos": "Select at least one repository.",
 	"org.settings.deploy_key_invalid_repos": "A selected repository is not a repository of this organization.",
 	"org.settings.deploy_key_save_repos": "Save repositories",
+	"org.settings.deploy_key_change_repos": "Change repositories",
+	"org.settings.deploy_key_is_writable_info": "Allow this deploy key to <strong>push</strong> to the repositories it covers.",
 	"org.settings.deploy_key_repos_saved": "The repositories of the deploy key \"%s\" have been saved.",
 	"org.settings.deploy_key_covers_all": "All repositories",
 	"org.settings.deploy_key_deletion_desc": "Removing a deploy key will revoke its access to every repository of this organization. Continue?",
