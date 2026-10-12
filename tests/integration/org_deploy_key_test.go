@@ -226,12 +226,15 @@ func TestOrgDeployKey(t *testing.T) {
 		org17 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 17})
 		repo, err := repo_service.CreateRepositoryDirectly(ctx, admin, org3, repo_service.CreateRepoOptions{Name: "moving"})
 		require.NoError(t, err)
+		// created after readKey (all repositories): covered at once
+		_, extra := upload(readKey.KeyID, "org3", "moving")
+		require.NoError(t, extra.Error)
 		movingKey := addOrgDeployKey(t, 3, "moving", newOrgDeployKeyContent(t), false, repo.ID)
 		require.NoError(t, git_model.UpdateProtectBranch(ctx, repo, &git_model.ProtectedBranch{RepoID: repo.ID, RuleName: "main"},
 			git_model.WhitelistOptions{DeployKeyIDs: []int64{movingKey.KeyID, readKey.KeyID}}))
 		rule := unittest.AssertExistsAndLoadBean(t, &git_model.ProtectedBranch{RepoID: repo.ID, RuleName: "main"})
 		require.Equal(t, []int64{movingKey.KeyID}, rule.WhitelistDeployKeyIDs)
-		_, extra := receive(movingKey.KeyID, "org3", "moving")
+		_, extra = receive(movingKey.KeyID, "org3", "moving")
 		require.NoError(t, extra.Error)
 
 		require.NoError(t, repo_service.TransferOwnership(ctx, admin, org17, repo, nil))
