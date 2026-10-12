@@ -298,6 +298,18 @@ func TestRepoGroupWeb(t *testing.T) {
 		}
 	})
 
+	t.Run("hidden answers like missing in read-only maintenance", func(t *testing.T) {
+		defer setMaintenance(t, setting.MaintenanceReadOnly, time.Time{})()
+		for _, session := range []*TestSession{nonMember, nil} {
+			for _, rest := range []string{"/-/issues/new", "/issues/new", "/-/settings"} {
+				missing := comparableResponse(t, session, "POST", "/org3/nothing/hid"+rest)
+				assertSameResponse(t, missing, comparableResponse(t, session, "POST", "/org3/secret/hid"+rest), rest)
+				missing = comparableResponse(t, session, "POST", "/org3/proj/nothing"+rest)
+				assertSameResponse(t, missing, comparableResponse(t, session, "POST", "/org3/proj/priv"+rest), rest)
+			}
+		}
+	})
+
 	t.Run("login redirect keeps the external path", func(t *testing.T) {
 		resp := MakeRequest(t, NewRequest(t, "GET", "/org3/proj/pub/-/issues/new"), http.StatusSeeOther)
 		assert.Equal(t, "/user/login", resp.Header().Get("Location"))
@@ -421,6 +433,22 @@ func TestRepoGroupWebRouteChecks(t *testing.T) {
 		assert.Equal(t, "1", resp.Header().Get("X-RateLimit-Remaining"))
 		MakeRequest(t, fromIP(NewRequest(t, "GET", "/org3/proj/pub"), "198.51.100.30"), http.StatusOK)
 		MakeRequest(t, fromIP(NewRequest(t, "GET", "/org3/proj/pub"), "198.51.100.30"), http.StatusTooManyRequests)
+		// a failed basic sign-in takes one token of the auth class: the first pass answers 401 itself
+		mockRateLimit(t, map[string]setting.RateLimitClass{
+			ratelimit.Auth: {AuthenticatedRate: slow, AuthenticatedBurst: 2},
+		}, "")
+		failedBasic := func(status int) {
+			t.Helper()
+			req := fromIP(NewRequest(t, "GET", "/org3/proj/pub/-/raw/branch/main/README.md"), "198.51.100.32")
+			req.SetBasicAuth("user4", "wrong")
+			MakeRequest(t, req, status)
+		}
+		failedBasic(http.StatusUnauthorized)
+		failedBasic(http.StatusUnauthorized)
+		failedBasic(http.StatusTooManyRequests)
+		mockRateLimit(t, map[string]setting.RateLimitClass{
+			ratelimit.Heavy: {AuthenticatedRate: slow, AuthenticatedBurst: 1, AnonymousRate: slow, AnonymousBurst: 1},
+		}, "")
 		// and a heavy page one of the heavy class
 		MakeRequest(t, fromIP(NewRequest(t, "GET", "/org3/proj/pub/-/blame/branch/main/README.md"), "198.51.100.31"), http.StatusOK)
 		MakeRequest(t, fromIP(NewRequest(t, "GET", "/org3/proj/pub/-/blame/branch/main/README.md"), "198.51.100.31"), http.StatusTooManyRequests)
