@@ -237,11 +237,6 @@ func HookPreReceive(ctx *app_context.PrivateContext) {
 		opts:           opts,
 	}
 
-	// GITEA_DEPLOY_KEY_ID without GITEA_DEPLOY_PUBLIC_KEY_ID comes from an older serv: refuse rather than guess
-	if opts.DeployKeyID != 0 && opts.DeployKeyKeyID == 0 {
-		ctx.JSON(http.StatusForbidden, private.Response{UserMsg: "The deploy key environment is outdated, please retry the push."})
-		return
-	}
 	// a deploy key that no longer applies is refused before anything else looks at the push
 	if opts.DeployKeyKeyID != 0 && !ourCtx.loadPusherAndPermission() {
 		return
