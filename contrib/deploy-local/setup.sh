@@ -1,5 +1,5 @@
 #!/bin/bash
-# One-time setup, run as root on the Proxmox VE host: creates a long-lived LXC that runs spoved as a
+# One-time setup, run as root on the Proxmox VE host (this file is self-contained, copy it alone): creates a long-lived LXC that runs spoved as a
 # systemd service and accepts deploys from the "Deploy local" workflow (.github/workflows/deploy-local.yml).
 #
 #   setup.sh <vmid> [bridge] [storage]      e.g. setup.sh 300 vmbr4 local-zfs
@@ -12,7 +12,6 @@ set -euo pipefail
 VMID=${1:?usage: setup.sh <vmid> [bridge] [storage]}
 BRIDGE=${2:-vmbr4}
 STORAGE=${3:-local-zfs}
-HERE=$(cd "$(dirname "$0")" && pwd)
 
 pct status "$VMID" >/dev/null 2>&1 && { echo "VMID $VMID already exists" >&2; exit 1; }
 
@@ -92,7 +91,75 @@ UNIT
 # enabled, not started: the first deploy brings the binary
 pct exec "$VMID" -- systemctl enable spoved
 
-pct push "$VMID" "$HERE/spoved-deploy" /usr/local/sbin/spoved-deploy --perms 755
+pct exec "$VMID" -- bash -euc 'cat > /usr/local/sbin/spoved-deploy && chmod 755 /usr/local/sbin/spoved-deploy' <<'DEPLOY'
+#!/bin/sh
+# Installs the spoved binary read from stdin and restarts the service. It is the forced command of the
+# deploy key (see setup.sh), so the key can do nothing else. Before the swap it copies the binary,
+# app.ini and the SQLite database aside; if the new binary doesn't answer /api/healthz, all three are
+# restored, because a newer build may already have migrated the database.
+set -eu
+
+BIN=/usr/local/bin/spoved
+DATA=/var/lib/spoved
+CONF=/etc/spoved/app.ini
+BACKUPS=/var/backups/spoved
+KEEP=5
+MAX_BYTES=1000000000
+
+# what the workflow sent as the ssh command (ref and commit), for the log only
+info=$(printf '%s' "${SSH_ORIGINAL_COMMAND:-}" | tr -cd 'A-Za-z0-9._/@ -' | cut -c1-200)
+log() { echo "spoved-deploy: $*"; logger -t spoved-deploy -- "$*" 2>/dev/null || true; }
+
+new=$(mktemp /usr/local/bin/.spoved.XXXXXX)
+trap 'rm -f "$new"' EXIT
+head -c "$MAX_BYTES" > "$new"
+chmod 755 "$new"
+"$new" --version >/dev/null || { log "refused: the upload is not a working spoved binary"; exit 1; }
+
+healthy() {
+    i=0
+    while [ $i -lt 60 ]; do
+        curl -fs --noproxy "*" -o /dev/null http://127.0.0.1:3000/api/healthz && return 0
+        sleep 2
+        i=$((i + 1))
+    done
+    return 1
+}
+
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+backup="$BACKUPS/$stamp"
+mkdir -p "$backup"
+systemctl stop spoved
+[ -f "$BIN" ] && cp -p "$BIN" "$backup/spoved"
+cp -p "$CONF" "$backup/app.ini"
+# the -wal file can hold the latest writes, so it is saved and restored with the database
+for f in spoved.db spoved.db-wal spoved.db-shm; do
+    [ -f "$DATA/data/$f" ] && cp -p "$DATA/data/$f" "$backup/$f"
+done
+# keep the newest $KEEP backups
+ls -1d "$BACKUPS"/*/ | sort -r | tail -n +$((KEEP + 1)) | xargs -r rm -rf
+
+mv -f "$new" "$BIN"
+systemctl start spoved
+if healthy; then
+    log "deployed $info ($("$BIN" --version))"
+    exit 0
+fi
+
+log "deploy of $info failed its health check; restoring backup $stamp"
+journalctl -u spoved -n 40 --no-pager || true
+systemctl stop spoved
+if [ -f "$backup/spoved" ]; then
+    cp -p "$backup/spoved" "$BIN"
+    cp -p "$backup/app.ini" "$CONF"
+    for f in spoved.db spoved.db-wal spoved.db-shm; do
+        if [ -f "$backup/$f" ]; then cp -p "$backup/$f" "$DATA/data/$f"; else rm -f "$DATA/data/$f"; fi
+    done
+    systemctl start spoved
+    healthy && log "previous version restored" || log "previous version did not come back either"
+fi
+exit 1
+DEPLOY
 
 KEYDIR=$(mktemp -d)
 trap 'rm -rf "$KEYDIR"' EXIT
