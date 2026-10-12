@@ -59,6 +59,48 @@ var spovedShadowKeys = []string{
 	"admin.self_check.database_collation_case_insensitive",
 }
 
+// boardsShadowKeys are upstream locale_en-US.ini keys for the kanban feature that
+// options/locale_next/locale_en-US.json words as "boards" (see docs/branding.md), so that
+// "Projects" can mean groups of repositories.
+var boardsShadowKeys = []string{
+	"search.project_kind",
+	"user.projects",
+	"settings.comment_type_group_project",
+	"repo.project",
+	"repo.projects",
+	"repo.projects.create",
+	"repo.projects.new",
+	"repo.projects.new_subheader",
+	"repo.projects.create_success",
+	"repo.projects.deletion",
+	"repo.projects.deletion_desc",
+	"repo.projects.deletion_success",
+	"repo.projects.edit",
+	"repo.projects.edit_subheader",
+	"repo.projects.modify",
+	"repo.projects.edit_success",
+	"repo.projects.template.desc_helper",
+	"repo.projects.column.deletion_desc",
+	"repo.issues.new.projects",
+	"repo.issues.new.clear_projects",
+	"repo.issues.new.no_projects",
+	"repo.issues.new.open_projects",
+	"repo.issues.new.closed_projects",
+	"repo.issues.add_project_at",
+	"repo.issues.change_project_at",
+	"repo.issues.remove_project_at",
+	"repo.issues.filter_project",
+	"repo.issues.filter_project_all",
+	"repo.issues.filter_project_none",
+	"repo.settings.projects_desc",
+	"projects.deleted.display_name",
+	"projects.type-1.display_name",
+	"projects.type-2.display_name",
+	"projects.type-3.display_name",
+	"repo.permissions.projects.read",
+	"repo.permissions.projects.write",
+}
+
 func TestSpovedShadowKeys(t *testing.T) {
 	ini, err := os.ReadFile("../../options/locale/locale_en-US.ini")
 	require.NoError(t, err)
@@ -78,6 +120,28 @@ func TestSpovedShadowKeys(t *testing.T) {
 		value := en.TrString(key)
 		assert.Contains(t, value, "spoved", key)
 		assert.Empty(t, test.BrandMentions(value), key)
+	}
+}
+
+func TestBoardsShadowKeys(t *testing.T) {
+	ini, err := os.ReadFile("../../options/locale/locale_en-US.ini")
+	require.NoError(t, err)
+	next, err := os.ReadFile("../../options/locale_next/locale_en-US.json")
+	require.NoError(t, err)
+
+	upstream := i18n.NewLocaleStore()
+	require.NoError(t, upstream.AddLocaleByIni("en-US", "English", PluralRules[0], UsedPluralForms[0], ini, nil))
+	shadowed := i18n.NewLocaleStore()
+	require.NoError(t, shadowed.AddLocaleByIni("en-US", "English", PluralRules[0], UsedPluralForms[0], ini, nil))
+	require.NoError(t, shadowed.AddToLocaleFromJSON("en-US", next))
+	upstreamEn, _ := upstream.Locale("en-US")
+	en, _ := shadowed.Locale("en-US")
+
+	for _, key := range boardsShadowKeys {
+		assert.True(t, upstreamEn.HasKey(key), "%s is no longer in locale_en-US.ini: update the shadow key and docs/branding.md", key)
+		value := en.TrString(key)
+		assert.Regexp(t, `(?i)boards?`, value, key)
+		assert.NotRegexp(t, `(?i)project`, value, key)
 	}
 }
 
