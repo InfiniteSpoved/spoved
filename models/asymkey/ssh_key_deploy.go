@@ -180,17 +180,6 @@ func GetDeployKeyByID(ctx context.Context, id int64) (*DeployKey, error) {
 	return key, nil
 }
 
-// GetDeployKeyByRepo returns deploy key by given public key ID and repository ID.
-func GetDeployKeyByRepo(ctx context.Context, keyID, repoID int64) (*DeployKey, error) {
-	key, exist, err := db.Get[DeployKey](ctx, builder.Eq{"key_id": keyID, "repo_id": repoID})
-	if err != nil {
-		return nil, err
-	} else if !exist {
-		return nil, ErrDeployKeyNotExist{0, keyID, repoID}
-	}
-	return key, nil
-}
-
 // IsDeployKeyExistByKeyID return true if there is at least one repository or organization deploy key with the key id
 func IsDeployKeyExistByKeyID(ctx context.Context, keyID int64) (bool, error) {
 	has, err := db.GetEngine(ctx).Where("key_id = ?", keyID).Exist(new(DeployKey))
