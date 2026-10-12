@@ -3,6 +3,9 @@
 		<a class="{{if .PageIsExploreRepositories}}active {{end}}item" href="{{AppSubUrl}}/explore/repos">
 			{{svg "octicon-repo"}} {{ctx.Locale.Tr "explore.repos"}}
 		</a>
+		<a class="{{if .PageIsExploreRepoGroups}}active {{end}}item" href="{{AppSubUrl}}/explore/groups">
+			{{svg "octicon-file-directory"}} {{ctx.Locale.Tr "repo_group.projects"}}
+		</a>
 		{{if not .UsersPageIsDisabled}}
 			<a class="{{if .PageIsExploreUsers}}active {{end}}item" href="{{AppSubUrl}}/explore/users">
 				{{svg "octicon-person"}} {{ctx.Locale.Tr "explore.users"}}

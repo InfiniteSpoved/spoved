@@ -1,0 +1,15 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content organization new repo-group">
+	{{template "org/header" .}}
+	<div class="ui container">
+		<form class="ui form" action="{{.Link}}" method="post">
+			<h3 class="ui top attached header">{{ctx.Locale.Tr "repo_group.new"}}</h3>
+			<div class="ui attached segment">
+				{{template "base/alert" .}}
+				{{template "org/repo_group/fields" .}}
+				<button class="ui primary button">{{ctx.Locale.Tr "repo_group.create"}}</button>
+			</div>
+		</form>
+	</div>
+</div>
+{{template "base/footer" .}}

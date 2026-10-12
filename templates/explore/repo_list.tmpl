@@ -10,6 +10,7 @@
 						{{if and (or $.PageIsExplore $.PageIsProfileStarList) .Owner}}
 						<a class="text primary name" href="{{.Owner.HomeLink}}">{{.Owner.Name}}</a>/
 						{{end}}
+						{{if and .GroupID (not $.RepoGroup)}}<a class="text primary name" href="{{.GroupLink}}">{{.GroupName}}</a>/{{end}}
 						<a class="text primary name" href="{{.Link}}">{{.Name}}</a>
 						<span>
 							{{if .IsArchived}}

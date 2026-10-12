@@ -34,6 +34,18 @@ func (f *CreateOrgForm) Validate(req *http.Request, errs binding.Errors) binding
 	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
 
+// RepoGroupForm is the form to create a project or change its name and description
+type RepoGroupForm struct {
+	Name        string `binding:"Required;AlphaDashDot;MaxSize(100)" locale:"repo_group.name" preprocess:"TrimSpace"`
+	Description string `binding:"MaxSize(2048)"`
+}
+
+// Validate validates the fields
+func (f *RepoGroupForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
+	ctx := context.GetValidateContext(req)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
+}
+
 // UpdateOrgSettingForm form for updating organization settings
 type UpdateOrgSettingForm struct {
 	Name                      string `binding:"Required;Username;MaxSize(40)" locale:"org.org_name_holder"`

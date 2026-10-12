@@ -23,11 +23,11 @@
 										{{else}}
 											<span class="icon">{{svg "octicon-repo"}}</span>
 										{{end}}
-										<a class="muted name" href="{{$repo.Link}}">{{$repo.OwnerName}}/{{$repo.Name}}</a>
+										<a class="muted name" href="{{$repo.Link}}">{{$repo.FullName}}</a>
 										<span class="text light-3" {{if not (eq $repo.Size 0)}} data-tooltip-content="{{$repo.SizeDetailsString ctx.Locale}}"{{end}}>{{ctx.Locale.TrSize $repo.Size}}</span>
 										{{if and $repo.IsFork $repo.BaseRepo}}
 											{{ctx.Locale.Tr "repo.forked_from"}}
-											<span><a href="{{$repo.BaseRepo.Link}}">{{$repo.BaseRepo.OwnerName}}/{{$repo.BaseRepo.Name}}</a></span>
+											<span><a href="{{$repo.BaseRepo.Link}}">{{$repo.BaseRepo.FullName}}</a></span>
 										{{end}}
 									{{else}}
 										<span class="icon tw-inline-block tw-pt-2">{{svg "octicon-file-directory-fill"}}</span>
@@ -94,11 +94,11 @@
 									{{else}}
 										{{svg "octicon-repo" 16 "tw-mr-1 iconFloat"}}
 									{{end}}
-									<a class="name" href="{{.Link}}">{{.OwnerName}}/{{.Name}}</a>
+									<a class="name" href="{{.Link}}">{{.FullName}}</a>
 									<span>{{ctx.Locale.TrSize .Size}}</span>
 									{{if .IsFork}}
 										{{ctx.Locale.Tr "repo.forked_from"}}
-										<span><a href="{{.BaseRepo.Link}}">{{.BaseRepo.OwnerName}}/{{.BaseRepo.Name}}</a></span>
+										<span><a href="{{.BaseRepo.Link}}">{{.BaseRepo.FullName}}</a></span>
 									{{end}}
 								</div>
 							</div>

@@ -1,0 +1,29 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content organization repo-groups">
+	{{template "org/header" .}}
+	<div class="ui container">
+		{{template "base/alert" .}}
+		<div class="tw-flex tw-flex-wrap tw-gap-2 tw-items-center tw-mb-4">
+			<form class="ui form ignore-dirty tw-flex-1 tw-min-w-[12rem]">
+				<div class="ui small fluid action input">
+					{{template "shared/search/input" dict "Value" .Keyword "Placeholder" (ctx.Locale.Tr "repo_group.search")}}
+					{{template "shared/search/button"}}
+				</div>
+			</form>
+			{{if and .IsOrganizationOwner (not .Org.IsArchived)}}
+				<a class="ui small primary button" href="{{.OrgLink}}/groups/new">{{ctx.Locale.Tr "repo_group.new"}}</a>
+			{{end}}
+		</div>
+		{{if .RepoGroups}}
+			{{template "org/repo_group/list_items" .}}
+			{{template "base/paginate" .}}
+		{{else}}
+			<div class="empty-placeholder">
+				{{svg "octicon-file-directory" 48}}
+				<h2>{{if .Keyword}}{{ctx.Locale.Tr "repo_group.no_results"}}{{else}}{{ctx.Locale.Tr "repo_group.none_yet"}}{{end}}</h2>
+				{{if not .Keyword}}<p>{{ctx.Locale.Tr "repo_group.none_yet_desc"}}</p>{{end}}
+			</div>
+		{{end}}
+	</div>
+</div>
+{{template "base/footer" .}}

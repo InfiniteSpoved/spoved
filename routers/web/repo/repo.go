@@ -138,6 +138,25 @@ func checkContextUser(ctx *context.Context, uid int64) *user_model.User {
 	return org
 }
 
+// prepareRepoGroups lists the projects of the organizations the doer may create a repository in (checkContextUser).
+func prepareRepoGroups(ctx *context.Context, ctxUser *user_model.User, groupID int64) {
+	orgs, _ := ctx.Data["Orgs"].([]*organization.Organization)
+	ownerIDs := make([]int64, 0, len(orgs)+1)
+	for _, org := range orgs {
+		ownerIDs = append(ownerIDs, org.ID)
+	}
+	if ctxUser.IsOrganization() {
+		ownerIDs = append(ownerIDs, ctxUser.ID)
+	}
+	groups, err := repo_model.GetRepoGroupsByOwnerIDs(ctx, ownerIDs)
+	if err != nil {
+		ctx.ServerError("GetRepoGroupsByOwnerIDs", err)
+		return
+	}
+	ctx.Data["RepoGroups"] = groups
+	ctx.Data["group_id"] = groupID
+}
+
 func getRepoPrivate(ctx *context.Context) bool {
 	switch strings.ToLower(setting.Repository.DefaultPrivate) {
 	case setting.RepoCreatingLastUserVisibility:
@@ -170,6 +189,10 @@ func Create(ctx *context.Context) {
 		return
 	}
 	ctx.Data["ContextUser"] = ctxUser
+	prepareRepoGroups(ctx, ctxUser, ctx.FormInt64("group"))
+	if ctx.Written() {
+		return
+	}
 
 	ctx.Data["repo_template_name"] = ctx.Tr("repo.template_select")
 	templateID := ctx.FormInt64("template_id")
@@ -197,6 +220,9 @@ func handleCreateError(ctx *context.Context, owner *user_model.User, err error, 
 		maxCreationLimit := owner.MaxCreationLimit()
 		msg := ctx.TrN(maxCreationLimit, "repo.form.reach_limit_of_creation_1", "repo.form.reach_limit_of_creation_n", maxCreationLimit)
 		ctx.RenderWithErr(msg, tpl, form)
+	case errors.Is(err, repo_model.ErrRepoGroupNotExist):
+		ctx.Data["Err_RepoGroup"] = true
+		ctx.RenderWithErr(ctx.Tr("repo_group.not_found"), tpl, form)
 	case repo_model.IsErrRepoAlreadyExist(err):
 		ctx.Data["Err_RepoName"] = true
 		ctx.RenderWithErr(ctx.Tr("form.repo_name_been_taken"), tpl, form)
@@ -243,6 +269,10 @@ func CreatePost(ctx *context.Context) {
 		return
 	}
 	ctx.Data["ContextUser"] = ctxUser
+	prepareRepoGroups(ctx, ctxUser, form.GroupID)
+	if ctx.Written() {
+		return
+	}
 
 	if !ctx.CheckQuota(quota_model.LimitSubjectSizeReposAll, ctxUser.ID, ctxUser.Name) {
 		return
@@ -258,6 +288,7 @@ func CreatePost(ctx *context.Context) {
 	if form.RepoTemplate > 0 {
 		opts := repo_service.GenerateRepoOptions{
 			Name:            form.RepoName,
+			GroupID:         form.GroupID,
 			Description:     form.Description,
 			Private:         form.Private || setting.Repository.ForcePrivate,
 			GitContent:      form.GitContent,
@@ -293,6 +324,7 @@ func CreatePost(ctx *context.Context) {
 	} else {
 		repo, err = repo_service.CreateRepository(ctx, ctx.Doer, ctxUser, repo_service.CreateRepoOptions{
 			Name:             form.RepoName,
+			GroupID:          form.GroupID,
 			Description:      form.Description,
 			Gitignores:       form.Gitignores,
 			IssueLabels:      form.IssueLabels,

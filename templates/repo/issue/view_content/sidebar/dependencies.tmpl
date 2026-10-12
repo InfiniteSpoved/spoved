@@ -22,8 +22,8 @@
 						<a class="title muted" href="{{.Issue.Link}}" data-tooltip-content="#{{.Issue.Index}} {{RenderRefIssueTitle $.Context .Issue.Title}}">
 							#{{.Issue.Index}} {{RenderRefIssueTitle $.Context .Issue.Title}}
 						</a>
-						<div class="text small gt-ellipsis" data-tooltip-content="{{.Repository.OwnerName}}/{{.Repository.Name}}">
-							{{.Repository.OwnerName}}/{{.Repository.Name}}
+						<div class="text small gt-ellipsis" data-tooltip-content="{{.Repository.FullName}}">
+							{{.Repository.FullName}}
 						</div>
 					</div>
 					<div class="item-right tw-flex tw-items-center tw-m-1">
@@ -55,8 +55,8 @@
 						<a class="title muted" href="{{.Issue.Link}}" data-tooltip-content="#{{.Issue.Index}} {{RenderRefIssueTitle $.Context .Issue.Title}}">
 							#{{.Issue.Index}} {{RenderRefIssueTitle $.Context .Issue.Title}}
 						</a>
-						<div class="text small gt-ellipsis" data-tooltip-content="{{.Repository.OwnerName}}/{{.Repository.Name}}">
-							{{.Repository.OwnerName}}/{{.Repository.Name}}
+						<div class="text small gt-ellipsis" data-tooltip-content="{{.Repository.FullName}}">
+							{{.Repository.FullName}}
 						</div>
 					</div>
 					<div class="item-right tw-flex tw-items-center tw-m-1">
@@ -78,8 +78,8 @@
 									#{{.Issue.Index}} {{RenderRefIssueTitle $.Context .DependentIssue.Title}}
 								</span>
 							</div>
-							<div class="text small gt-ellipsis" data-tooltip-content="{{.Repository.OwnerName}}/{{.Repository.Name}}">
-								{{.Repository.OwnerName}}/{{.Repository.Name}}
+							<div class="text small gt-ellipsis" data-tooltip-content="{{.Repository.FullName}}">
+								{{.Repository.FullName}}
 							</div>
 						</div>
 						<div class="item-right tw-flex tw-items-center tw-m-1">

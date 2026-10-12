@@ -1,6 +1,6 @@
 import $ from 'jquery';
 import {htmlEscape} from 'escape-goat';
-import {hideElem, showElem} from '../utils/dom.js';
+import {hideElem, showElem, toggleElem} from '../utils/dom.js';
 
 const {appSubUrl} = window.config;
 
@@ -48,4 +48,20 @@ export function initRepoTemplateSearch() {
   };
   $('#uid').on('change', changeOwner);
   changeOwner();
+
+  // the project select offers only the projects of the selected owner
+  const repoGroup = document.querySelector('#repo_group');
+  if (!repoGroup) return;
+  const changeOwnerGroups = function () {
+    let any = false;
+    for (const option of repoGroup.querySelectorAll('option[data-owner]')) {
+      const mine = option.getAttribute('data-owner') === $('#uid').val();
+      option.hidden = option.disabled = !mine;
+      if (!mine && option.selected) repoGroup.value = '0';
+      any ||= mine;
+    }
+    toggleElem(document.querySelector('#repo_group_label'), any);
+  };
+  $('#uid').on('change', changeOwnerGroups);
+  changeOwnerGroups();
 }

@@ -1087,7 +1087,7 @@ func renderHomeCode(ctx *context.Context) {
 		return
 	}
 
-	title := ctx.Repo.Repository.Owner.Name + "/" + ctx.Repo.Repository.Name
+	title := ctx.Repo.Repository.FullName()
 	if len(ctx.Repo.Repository.Description) > 0 {
 		title += ": " + ctx.Repo.Repository.Description
 	}

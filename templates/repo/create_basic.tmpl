@@ -33,6 +33,18 @@
 	</div>
 	<span class="help">{{ctx.Locale.Tr "repo.owner_helper"}}</span>
 </label>
+{{if .RepoGroups}}
+<label id="repo_group_label" {{if .Err_RepoGroup}}class="field error"{{end}}>
+	{{ctx.Locale.Tr "repo_group.project"}}
+	<select id="repo_group" name="group_id">
+		<option value="0">{{ctx.Locale.Tr "repo_group.none"}}</option>
+		{{range .RepoGroups}}
+			<option value="{{.ID}}" data-owner="{{.OwnerID}}" {{if eq .ID $.group_id}}selected{{end}}>{{.Name}}</option>
+		{{end}}
+	</select>
+	<span class="help">{{ctx.Locale.Tr "repo_group.project_helper"}}</span>
+</label>
+{{end}}
 <label {{if .Err_RepoName}}class="field error"{{end}}>
 	{{ctx.Locale.Tr "repo.repo_name"}}
 	<input name="repo_name" value="{{.repo_name}}" required maxlength="100" autocorrect="off" autocapitalize="none" spellcheck="false">

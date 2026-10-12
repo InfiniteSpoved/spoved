@@ -8,6 +8,14 @@
 				{{end}}
 				<span hidden test-name="repository-count">{{.RepoCount}}</span>
 			</a>
+			{{if or .RepoGroupCount .IsOrganizationOwner}}
+			<a class="{{if .PageIsViewRepoGroups}}active {{end}}item" href="{{$.OrgLink}}/groups">
+				{{svg "octicon-file-directory"}} {{ctx.Locale.Tr "repo_group.projects"}}
+				{{if .RepoGroupCount}}
+					<div class="ui small label">{{.RepoGroupCount}}</div>
+				{{end}}
+			</a>
+			{{end}}
 			{{if .CanReadProjects}}
 			<a class="{{if .PageIsViewProjects}}active {{end}}item" href="{{$.Org.HomeLink}}/-/projects">
 				{{svg "octicon-project-symlink"}} {{ctx.Locale.Tr "user.projects"}}

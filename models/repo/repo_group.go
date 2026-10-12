@@ -6,13 +6,19 @@ package repo
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 
 	"forgejo.org/models/db"
+	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/setting"
+	"forgejo.org/modules/structs"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
+
+	"xorm.io/builder"
 )
 
 // RepoGroup is a project: one level of grouping for the repositories of an organization, `org/group/repo`. The
@@ -197,4 +203,102 @@ func DeleteRepoGroup(ctx context.Context, group *RepoGroup) error {
 		}
 		return releaseName(ctx, group.OwnerID, group.Name)
 	})
+}
+
+// Link returns the relative url of the project's home; ownerName is the name of its organization.
+func (group *RepoGroup) Link(ownerName string) string {
+	return setting.AppSubURL + "/" + url.PathEscape(ownerName) + "/" + url.PathEscape(group.Name)
+}
+
+// UpdateRepoGroupDescription stores the description of a group.
+func UpdateRepoGroupDescription(ctx context.Context, group *RepoGroup) error {
+	_, err := db.GetEngine(ctx).Where("owner_id = ? AND id = ?", group.OwnerID, group.ID).Cols("description").Update(group)
+	return err
+}
+
+// VisibleRepoGroupCond is the SQL form of the project home's checks on `repo_group` (OrgAssignment and
+// CanSeeRepoGroup in services/context), for the projects of organizations that aren't in the trash: every one for a
+// site admin; otherwise, in the organizations the doer can see, those of the organizations the doer is an acting
+// member of and those holding a repository the doer can see.
+func VisibleRepoGroupCond(doer *user_model.User) builder.Cond {
+	cond := builder.In("`repo_group`.owner_id", builder.Select("id").From("`user`").Where(builder.Eq{"trashed_unix": 0}))
+	if doer != nil && doer.IsAdmin {
+		return cond
+	}
+	// the organization itself must be visible, as in OrgAssignment
+	orgVisible := builder.In("`repo_group`.owner_id", builder.Select("id").From("`user`").Where(builder.Eq{"visibility": structs.VisibleTypePublic}))
+	if doer != nil {
+		isMember := builder.In("`repo_group`.owner_id", builder.Select("org_id").From("org_user").Where(builder.Eq{"uid": doer.ID}))
+		orgVisible = isMember
+		if !doer.IsRestricted {
+			orgVisible = orgVisible.Or(builder.In("`repo_group`.owner_id", builder.Select("id").From("`user`").Where(builder.Neq{"visibility": structs.VisibleTypePrivate})))
+		}
+	}
+	cond = cond.And(orgVisible)
+
+	visible := builder.In("`repo_group`.id", builder.Select("group_id").From("`repository`").Where(builder.And(
+		AccessibleRepositoryCondition(doer, unit.TypeInvalid),
+		builder.Eq{"`repository`.trashed_unix": 0},
+		builder.Neq{"`repository`.group_id": 0},
+	)))
+	if doer != nil {
+		visible = visible.Or(builder.And(
+			builder.In("`repo_group`.owner_id", builder.Select("org_id").From("org_user").Where(builder.Eq{"uid": doer.ID})),
+			builder.NotIn("`repo_group`.owner_id", TwoFactorBlockingOrgIDs(doer.ID)),
+		))
+	}
+	return cond.And(visible)
+}
+
+// FindVisibleRepoGroups returns the projects the doer can see, of one organization (ownerID) or of all, ordered by
+// name; keyword narrows them by name.
+func FindVisibleRepoGroups(ctx context.Context, doer *user_model.User, ownerID int64, keyword string, listOptions db.ListOptions) ([]*RepoGroup, int64, error) {
+	cond := VisibleRepoGroupCond(doer)
+	if ownerID != 0 {
+		cond = cond.And(builder.Eq{"`repo_group`.owner_id": ownerID})
+	}
+	if keyword != "" {
+		cond = cond.And(builder.Like{"`repo_group`.lower_name", strings.ToLower(keyword)})
+	}
+	sess := db.GetEngine(ctx).Where(cond).OrderBy("`repo_group`.lower_name, `repo_group`.id")
+	if listOptions.PageSize > 0 {
+		sess = db.SetSessionPagination(sess, &listOptions)
+	}
+	groups := make([]*RepoGroup, 0, listOptions.PageSize)
+	count, err := sess.FindAndCount(&groups)
+	return groups, count, err
+}
+
+// CountReposByGroup returns, for each of the groups, the number of its repositories that a search with opts finds.
+func CountReposByGroup(ctx context.Context, opts *SearchRepoOptions, groupIDs []int64) (map[int64]int64, error) {
+	counts := make(map[int64]int64, len(groupIDs))
+	if len(groupIDs) == 0 {
+		return counts, nil
+	}
+	rows := make([]struct {
+		ID    int64 `xorm:"id"`
+		Count int64 `xorm:"cnt"`
+	}, 0, len(groupIDs))
+	if err := db.GetEngine(ctx).Table("repository").Select("group_id AS id, COUNT(*) AS cnt").
+		Where(SearchRepositoryCondition(opts)).In("group_id", groupIDs).GroupBy("group_id").Find(&rows); err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		counts[r.ID] = r.Count
+	}
+	return counts, nil
+}
+
+// GetRepoGroupsByOwnerIDs returns the groups of the given owners, ordered by name.
+func GetRepoGroupsByOwnerIDs(ctx context.Context, ownerIDs []int64) ([]*RepoGroup, error) {
+	groups := make([]*RepoGroup, 0, len(ownerIDs))
+	if len(ownerIDs) == 0 {
+		return groups, nil
+	}
+	return groups, db.GetEngine(ctx).In("owner_id", ownerIDs).OrderBy("lower_name, id").Find(&groups)
+}
+
+// CountVisibleRepoGroups counts the projects of the organization that the doer can see.
+func CountVisibleRepoGroups(ctx context.Context, doer *user_model.User, ownerID int64) (int64, error) {
+	return db.GetEngine(ctx).Where(VisibleRepoGroupCond(doer)).And(builder.Eq{"`repo_group`.owner_id": ownerID}).Count(new(RepoGroup))
 }
