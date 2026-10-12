@@ -1,0 +1,9 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content organization repo-group">
+	{{template "org/header" .}}
+	<div class="ui container">
+		<h2>{{.RepoGroup.Name}}</h2>
+		{{if .RepoGroup.Description}}<p>{{.RepoGroup.Description}}</p>{{end}}
+	</div>
+</div>
+{{template "base/footer" .}}

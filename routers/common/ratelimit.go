@@ -82,6 +82,9 @@ func renderRateLimited(ctx *context.Context, r ratelimit.Result) {
 // shows as "remote: ...".
 func RateLimit(class string) func(*context.Context) {
 	return func(ctx *context.Context) {
+		if context.GetRepoGroupMark(ctx) != nil {
+			return // the second pass of a request in a project; its first pass was charged
+		}
 		r := checkRateLimit(ctx.Base, class, ctx.Doer, ctx.Authentication)
 		if r.Allowed {
 			return
