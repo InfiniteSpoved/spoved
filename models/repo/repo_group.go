@@ -112,18 +112,6 @@ func GetRepoGroupByID(ctx context.Context, ownerID, id int64) (*RepoGroup, error
 	return group, nil
 }
 
-// GetRepoGroupByName returns the group of the owner with the given name.
-func GetRepoGroupByName(ctx context.Context, ownerID int64, name string) (*RepoGroup, error) {
-	group := new(RepoGroup)
-	has, err := db.GetEngine(ctx).Where("owner_id = ? AND lower_name = ?", ownerID, strings.ToLower(name)).Get(group)
-	if err != nil {
-		return nil, err
-	} else if !has {
-		return nil, ErrRepoGroupNotExist
-	}
-	return group, nil
-}
-
 // CreateRepoGroup creates a group in an organization. The name follows every repository name rule and must not
 // be the name of a root repository or another group of the organization.
 func CreateRepoGroup(ctx context.Context, owner *user_model.User, name, description string) (*RepoGroup, error) {
