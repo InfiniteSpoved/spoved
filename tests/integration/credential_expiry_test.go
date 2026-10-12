@@ -108,7 +108,7 @@ func TestCredentialExpiryServ(t *testing.T) {
 
 			results, extra := private.ServCommand(ctx, valid.KeyID, "user2", "repo2", perm.AccessModeRead, "", "git-upload-pack", "")
 			require.NoError(t, extra.Error)
-			assert.Equal(t, valid.ID, results.DeployKeyID)
+			assert.Equal(t, valid.KeyID, results.DeployKeyKeyID)
 			assert.Equal(t, future, results.ExpiresUnix)
 		})
 	})

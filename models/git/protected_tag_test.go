@@ -219,11 +219,43 @@ func TestDeployKeyAllowlists(t *testing.T) {
 	}
 
 	t.Run("FilterWriteDeployKeyIDs", func(t *testing.T) {
-		ids, err := git_model.FilterWriteDeployKeyIDs(db.DefaultContext, 1, []int64{100, 101, 102, 103, 100})
+		repo1 := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
+		ids, err := git_model.FilterWriteDeployKeyIDs(db.DefaultContext, repo1, []int64{100, 101, 102, 103, 100})
 		require.NoError(t, err)
 		assert.Equal(t, []int64{100}, ids)
 
-		ids, err = git_model.FilterWriteDeployKeyIDs(db.DefaultContext, 1, nil)
+		ids, err = git_model.FilterWriteDeployKeyIDs(db.DefaultContext, repo1, nil)
+		require.NoError(t, err)
+		assert.Empty(t, ids)
+	})
+
+	t.Run("FilterWriteDeployKeyIDs org keys", func(t *testing.T) {
+		orgKeys := []*asymkey_model.OrgDeployKey{
+			{KeyID: 110, OrgID: 3, Name: "all write", Mode: perm.AccessModeWrite, IncludesAllRepos: true},
+			{KeyID: 111, OrgID: 3, Name: "all read", Mode: perm.AccessModeRead, IncludesAllRepos: true},
+			{KeyID: 112, OrgID: 3, Name: "repo5 write", Mode: perm.AccessModeWrite},
+			{KeyID: 113, OrgID: 17, Name: "other org", Mode: perm.AccessModeWrite, IncludesAllRepos: true},
+		}
+		for _, key := range orgKeys {
+			require.NoError(t, db.Insert(db.DefaultContext, key))
+		}
+		require.NoError(t, db.Insert(db.DefaultContext, &asymkey_model.OrgDeployKeyRepo{OrgDeployKeyID: orgKeys[2].ID, RepoID: 5}))
+		// a selection row pointing at another owner's repository never applies
+		require.NoError(t, db.Insert(db.DefaultContext, &asymkey_model.OrgDeployKeyRepo{OrgDeployKeyID: orgKeys[2].ID, RepoID: 1}))
+
+		all := []int64{110, 111, 112, 113}
+		repo3 := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})
+		ids, err := git_model.FilterWriteDeployKeyIDs(db.DefaultContext, repo3, all)
+		require.NoError(t, err)
+		assert.Equal(t, []int64{110}, ids)
+
+		repo5 := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 5})
+		ids, err = git_model.FilterWriteDeployKeyIDs(db.DefaultContext, repo5, all)
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []int64{110, 112}, ids)
+
+		repo1 := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
+		ids, err = git_model.FilterWriteDeployKeyIDs(db.DefaultContext, repo1, all)
 		require.NoError(t, err)
 		assert.Empty(t, ids)
 	})

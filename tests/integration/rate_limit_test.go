@@ -691,7 +691,7 @@ func TestRateLimitServDeployKeyAndAdmin(t *testing.T) {
 	for range 2 {
 		code, body := servCommand(t, 900, "198.51.100.1", "git-upload-pack", 1)
 		assert.Equal(t, http.StatusOK, code)
-		assert.Contains(t, body, `"DeployKeyID"`)
+		assert.Contains(t, body, `"DeployKeyKeyID"`)
 	}
 	code, _ := servCommand(t, 900, "198.51.100.1", "git-upload-pack", 1)
 	assert.Equal(t, http.StatusTooManyRequests, code)

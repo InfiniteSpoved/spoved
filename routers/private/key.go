@@ -8,6 +8,7 @@ import (
 
 	asymkey_model "forgejo.org/models/asymkey"
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/private"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/services/context"
@@ -24,7 +25,18 @@ func UpdatePublicKeyInRepo(ctx *context.PrivateContext) {
 		return
 	}
 
-	deployKey, err := asymkey_model.GetDeployKeyByRepo(ctx, keyID, repoID)
+	repo, err := repo_model.GetRepositoryByID(ctx, repoID)
+	if err != nil {
+		if repo_model.IsErrRepoNotExist(err) {
+			ctx.PlainText(http.StatusOK, "success")
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, private.Response{
+			Err: err.Error(),
+		})
+		return
+	}
+	deployKey, err := asymkey_model.GetEffectiveDeployKey(ctx, keyID, repo)
 	if err != nil {
 		if asymkey_model.IsErrDeployKeyNotExist(err) {
 			ctx.PlainText(http.StatusOK, "success")
@@ -35,8 +47,14 @@ func UpdatePublicKeyInRepo(ctx *context.PrivateContext) {
 		})
 		return
 	}
-	deployKey.UpdatedUnix = timeutil.TimeStampNow()
-	if err = asymkey_model.UpdateDeployKeyCols(ctx, deployKey, "updated_unix"); err != nil {
+	// the key that was used is the effective one
+	if deployKey.RepoKey != nil {
+		deployKey.RepoKey.UpdatedUnix = timeutil.TimeStampNow()
+		err = asymkey_model.UpdateDeployKeyCols(ctx, deployKey.RepoKey, "updated_unix")
+	} else {
+		_, err = db.GetEngine(ctx).ID(deployKey.OrgKey.ID).Cols("updated_unix").Update(&asymkey_model.OrgDeployKey{UpdatedUnix: timeutil.TimeStampNow()})
+	}
+	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, private.Response{
 			Err: err.Error(),
 		})

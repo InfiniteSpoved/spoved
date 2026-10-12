@@ -486,7 +486,7 @@ func CreateTagProtection(ctx *context.APIContext) {
 		}
 	}
 
-	allowlistDeployKeys, err := git_model.FilterWriteDeployKeyIDs(ctx, repo.ID, form.AllowlistDeployKeyIDs)
+	allowlistDeployKeys, err := git_model.FilterWriteDeployKeyIDs(ctx, repo, form.AllowlistDeployKeyIDs)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "FilterWriteDeployKeyIDs", err)
 		return
@@ -607,7 +607,7 @@ func EditTagProtection(ctx *context.APIContext) {
 	}
 
 	if form.AllowlistDeployKeyIDs != nil {
-		pt.AllowlistDeployKeyIDs, err = git_model.FilterWriteDeployKeyIDs(ctx, repo.ID, form.AllowlistDeployKeyIDs)
+		pt.AllowlistDeployKeyIDs, err = git_model.FilterWriteDeployKeyIDs(ctx, repo, form.AllowlistDeployKeyIDs)
 		if err != nil {
 			ctx.Error(http.StatusInternalServerError, "FilterWriteDeployKeyIDs", err)
 			return

@@ -319,18 +319,18 @@ func TestPushRules(t *testing.T) {
 			_, err = push(t, "refs/tags/key-bad")
 			require.NoError(t, err)
 
-			preReceive := func(deployKeyID int64, newCommitID string) private.ResponseExtra {
+			preReceive := func(deployKeyKeyID int64, newCommitID string) private.ResponseExtra {
 				return private.HookPreReceive(t.Context(), "user2", "push-rules", private.HookOptions{
-					OldCommitIDs: []string{master},
-					NewCommitIDs: []string{newCommitID},
-					RefFullNames: []git.RefName{git.RefNameFromBranch("master")},
-					UserID:       2,
-					UserName:     "user2",
-					DeployKeyID:  deployKeyID,
+					OldCommitIDs:   []string{master},
+					NewCommitIDs:   []string{newCommitID},
+					RefFullNames:   []git.RefName{git.RefNameFromBranch("master")},
+					UserID:         2,
+					UserName:       "user2",
+					DeployKeyKeyID: deployKeyKeyID,
 				})
 			}
-			require.NoError(t, preReceive(keys["listed"].id, foreign).Error)
-			extra := preReceive(keys["listed"].id, badMessage)
+			require.NoError(t, preReceive(keys["listed"].keyID, foreign).Error)
+			extra := preReceive(keys["listed"].keyID, badMessage)
 			assert.Equal(t, http.StatusForbidden, extra.StatusCode)
 			assert.Contains(t, extra.UserMsg, "message does not match")
 			// without the deploy key, the author is checked against user2

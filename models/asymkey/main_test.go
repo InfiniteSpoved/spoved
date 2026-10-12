@@ -17,6 +17,9 @@ func TestMain(m *testing.M) {
 			"TestParseCommitWithSSHSignature/public_key.yml",
 			"user.yml",
 			"email_address.yml",
+			"repository.yml",
+			"org_deploy_key.yml",
+			"org_deploy_key_repo.yml",
 		},
 	})
 }

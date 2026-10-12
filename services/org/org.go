@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"forgejo.org/models"
+	asymkey_model "forgejo.org/models/asymkey"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	org_model "forgejo.org/models/organization"
@@ -54,12 +55,23 @@ func DeleteOrganization(ctx context.Context, org *org_model.Organization, purge 
 		return fmt.Errorf("DeleteOrgProtectedBranches: %w", err)
 	}
 
+	deletedPublicKey, err := asymkey_model.DeleteOrgDeployKeys(ctx, org.ID)
+	if err != nil {
+		return fmt.Errorf("DeleteOrgDeployKeys: %w", err)
+	}
+
 	if err := org_model.DeleteOrganization(ctx, org); err != nil {
 		return fmt.Errorf("DeleteOrganization: %w", err)
 	}
 
 	if err := committer.Commit(); err != nil {
 		return err
+	}
+
+	if deletedPublicKey {
+		if err := asymkey_model.RewriteAllPublicKeys(ctx); err != nil {
+			return fmt.Errorf("RewriteAllPublicKeys: %w", err)
+		}
 	}
 
 	// FIXME: system notice

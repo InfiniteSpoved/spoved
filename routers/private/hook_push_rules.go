@@ -110,7 +110,7 @@ func (ctx *preReceiveContext) checkPushRule(rule *git_model.PushRule, isCreate b
 		return pushRuleError(fmt.Sprintf("branch name %q does not match %q", branchName, rule.BranchNameRegex))
 	}
 	// the author rule only applies to the pusher's own commits, not to deploy keys, Actions or PR merges
-	checkAuthor := rule.RequireVerifiedAuthorEmail && ctx.opts.DeployKeyID == 0 && ctx.opts.UserID != user_model.ActionsUserID && ctx.opts.PullRequestID == 0
+	checkAuthor := rule.RequireVerifiedAuthorEmail && ctx.opts.DeployKeyKeyID == 0 && ctx.opts.UserID != user_model.ActionsUserID && ctx.opts.PullRequestID == 0
 	checkFiles := rule.MaxFileSizeMB > 0 || len(rule.BannedFileGlobs) > 0
 	if rule.CommitMessageRe == nil && rule.CommitMessageBannedRe == nil && !checkAuthor && !checkFiles {
 		return nil
