@@ -1,0 +1,5 @@
+# one row per root repository in repository.yml (and per repo_group), see RepoGroupNameClaim
+-
+  id: 900
+  owner_id: 900
+  lower_name: review_request_test_repo

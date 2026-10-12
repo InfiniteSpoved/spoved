@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"forgejo.org/models"
@@ -126,6 +127,11 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 
 	sess := db.GetEngine(ctx)
 
+	// moving into or out of a project isn't supported yet
+	if repo.GroupID != 0 {
+		return repo_model.ErrRepoInGroup
+	}
+
 	newOwner, err := user_model.GetUserByName(ctx, newOwnerName)
 	if err != nil {
 		return fmt.Errorf("get new owner '%s': %w", newOwnerName, err)
@@ -151,11 +157,19 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 		return fmt.Errorf("FindOrgDeployKeysCoveringRepo: %w", err)
 	}
 
+	if err := repo_model.ReleaseRepoName(ctx, repo); err != nil {
+		return err
+	}
+
 	// Note: we have to set value here to make sure recalculate accesses is based on
 	// new owner.
 	repo.OwnerID = newOwner.ID
 	repo.Owner = newOwner
 	repo.OwnerName = newOwner.Name
+
+	if err := repo_model.ClaimRepoName(ctx, repo); err != nil {
+		return err
+	}
 
 	// Update repository.
 	if _, err := sess.ID(repo.ID).Update(repo); err != nil {
@@ -323,7 +337,7 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 
 // changeRepositoryName changes all corresponding setting from old repository name to new one.
 func changeRepositoryName(ctx context.Context, repo *repo_model.Repository, newRepoName string) (err error) {
-	oldRepoName := repo.Name
+	oldRepoName, newName := repo.Name, newRepoName // the name keeps its case, paths and lower_name don't
 	newRepoName = strings.ToLower(newRepoName)
 	if err = repo_model.IsUsableRepoName(newRepoName); err != nil {
 		return err
@@ -333,7 +347,13 @@ func changeRepositoryName(ctx context.Context, repo *repo_model.Repository, newR
 		return err
 	}
 
-	has, err := repo_model.IsRepositoryModelOrDirExist(ctx, repo.Owner, newRepoName)
+	// the new paths are next to the old ones, in the repository's project if it is in one
+	newRepoPath := filepath.Join(filepath.Dir(repo.RepoPath()), newRepoName+".git")
+	newWikiPath := filepath.Join(filepath.Dir(repo.WikiPath()), newRepoName+".wiki.git")
+	has, err := repo_model.IsRepositoryModelExistInGroup(ctx, repo.OwnerID, repo.GroupID, newRepoName)
+	if err == nil && !has {
+		has, err = util.IsDir(newRepoPath)
+	}
 	if err != nil {
 		return fmt.Errorf("IsRepositoryExist: %w", err)
 	} else if has {
@@ -343,21 +363,35 @@ func changeRepositoryName(ctx context.Context, repo *repo_model.Repository, newR
 		}
 	}
 
-	newRepoPath := repo_model.RepoPath(repo.Owner.Name, newRepoName)
-	if err = util.Rename(repo.RepoPath(), newRepoPath); err != nil {
+	oldRepoPath, oldLowerName := repo.RepoPath(), repo.LowerName
+	if err = util.Rename(oldRepoPath, newRepoPath); err != nil {
 		return fmt.Errorf("rename repository directory: %w", err)
 	}
 
+	// the directories go back if the database refuses the name (a project holding it, say)
 	wikiPath := repo.WikiPath()
+	wikiRenamed := false
+	defer func() {
+		if err == nil {
+			return
+		}
+		repo.Name, repo.LowerName = oldRepoName, oldLowerName
+		moveDirsBack(newRepoPath, oldRepoPath)
+		if wikiRenamed {
+			moveDirsBack(newWikiPath, wikiPath)
+		}
+	}()
+
 	isExist, err := util.IsExist(wikiPath)
 	if err != nil {
 		log.Error("Unable to check if %s exists. Error: %v", wikiPath, err)
 		return err
 	}
 	if isExist {
-		if err = util.Rename(wikiPath, repo_model.WikiPath(repo.Owner.Name, newRepoName)); err != nil {
+		if err = util.Rename(wikiPath, newWikiPath); err != nil {
 			return fmt.Errorf("rename repository wiki: %w", err)
 		}
+		wikiRenamed = true
 	}
 
 	ctx, committer, err := db.TxContext(ctx)
@@ -366,8 +400,21 @@ func changeRepositoryName(ctx context.Context, repo *repo_model.Repository, newR
 	}
 	defer committer.Close()
 
-	if err := repo_model.NewRedirect(ctx, repo.Owner.ID, repo.ID, oldRepoName, newRepoName); err != nil {
+	// the name claim and the name change together
+	if err = repo_model.ReleaseRepoName(ctx, repo); err != nil {
 		return err
+	}
+	repo.Name, repo.LowerName = newName, newRepoName
+	if err = repo_model.ClaimRepoName(ctx, repo); err != nil {
+		return err
+	}
+	if err = repo_model.UpdateRepositoryCols(ctx, repo, "name", "lower_name"); err != nil {
+		return err
+	}
+	if repo.GroupID == 0 { // redirects are root-only
+		if err = repo_model.NewRedirect(ctx, repo.Owner.ID, repo.ID, oldRepoName, newRepoName); err != nil {
+			return err
+		}
 	}
 
 	return committer.Commit()

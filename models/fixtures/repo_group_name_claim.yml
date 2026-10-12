@@ -1,0 +1,325 @@
+# one row per root repository in repository.yml (and per repo_group), see RepoGroupNameClaim
+-
+  id: 1
+  owner_id: 2
+  lower_name: repo1
+
+-
+  id: 2
+  owner_id: 2
+  lower_name: repo2
+
+-
+  id: 3
+  owner_id: 3
+  lower_name: repo3
+
+-
+  id: 4
+  owner_id: 5
+  lower_name: repo4
+
+-
+  id: 5
+  owner_id: 3
+  lower_name: repo5
+
+-
+  id: 6
+  owner_id: 10
+  lower_name: repo6
+
+-
+  id: 7
+  owner_id: 10
+  lower_name: repo7
+
+-
+  id: 8
+  owner_id: 10
+  lower_name: repo8
+
+-
+  id: 9
+  owner_id: 11
+  lower_name: repo9
+
+-
+  id: 10
+  owner_id: 12
+  lower_name: repo10
+
+-
+  id: 11
+  owner_id: 13
+  lower_name: repo11
+
+-
+  id: 12
+  owner_id: 14
+  lower_name: test_repo_12
+
+-
+  id: 13
+  owner_id: 14
+  lower_name: test_repo_13
+
+-
+  id: 14
+  owner_id: 14
+  lower_name: test_repo_14
+
+-
+  id: 15
+  owner_id: 2
+  lower_name: repo15
+
+-
+  id: 16
+  owner_id: 2
+  lower_name: repo16
+
+-
+  id: 17
+  owner_id: 15
+  lower_name: big_test_public_1
+
+-
+  id: 18
+  owner_id: 15
+  lower_name: big_test_public_2
+
+-
+  id: 19
+  owner_id: 15
+  lower_name: big_test_private_1
+
+-
+  id: 20
+  owner_id: 15
+  lower_name: big_test_private_2
+
+-
+  id: 21
+  owner_id: 16
+  lower_name: big_test_public_3
+
+-
+  id: 22
+  owner_id: 16
+  lower_name: big_test_private_3
+
+-
+  id: 23
+  owner_id: 17
+  lower_name: big_test_public_4
+
+-
+  id: 24
+  owner_id: 17
+  lower_name: big_test_private_4
+
+-
+  id: 25
+  owner_id: 20
+  lower_name: big_test_public_mirror_5
+
+-
+  id: 26
+  owner_id: 20
+  lower_name: big_test_private_mirror_5
+
+-
+  id: 27
+  owner_id: 19
+  lower_name: big_test_public_mirror_6
+
+-
+  id: 28
+  owner_id: 19
+  lower_name: big_test_private_mirror_6
+
+-
+  id: 29
+  owner_id: 20
+  lower_name: big_test_public_fork_7
+
+-
+  id: 30
+  owner_id: 20
+  lower_name: big_test_private_fork_7
+
+-
+  id: 31
+  owner_id: 2
+  lower_name: repo20
+
+-
+  id: 32
+  owner_id: 3
+  lower_name: repo21
+
+-
+  id: 33
+  owner_id: 2
+  lower_name: utf8
+
+-
+  id: 34
+  owner_id: 21
+  lower_name: golang
+
+-
+  id: 35
+  owner_id: 21
+  lower_name: graphql
+
+-
+  id: 36
+  owner_id: 2
+  lower_name: commits_search_test
+
+-
+  id: 37
+  owner_id: 2
+  lower_name: git_hooks_test
+
+-
+  id: 38
+  owner_id: 22
+  lower_name: public_repo_on_limited_org
+
+-
+  id: 39
+  owner_id: 22
+  lower_name: private_repo_on_limited_org
+
+-
+  id: 40
+  owner_id: 23
+  lower_name: public_repo_on_private_org
+
+-
+  id: 41
+  owner_id: 23
+  lower_name: private_repo_on_private_org
+
+-
+  id: 42
+  owner_id: 2
+  lower_name: glob
+
+-
+  id: 43
+  owner_id: 26
+  lower_name: repo26
+
+-
+  id: 44
+  owner_id: 27
+  lower_name: template1
+
+-
+  id: 45
+  owner_id: 27
+  lower_name: template2
+
+-
+  id: 46
+  owner_id: 26
+  lower_name: repo_external_tracker
+
+-
+  id: 47
+  owner_id: 26
+  lower_name: repo_external_tracker_numeric
+
+-
+  id: 48
+  owner_id: 26
+  lower_name: repo_external_tracker_alpha
+
+-
+  id: 49
+  owner_id: 27
+  lower_name: repo49
+
+-
+  id: 50
+  owner_id: 30
+  lower_name: repo50
+
+-
+  id: 51
+  owner_id: 30
+  lower_name: repo51
+
+-
+  id: 52
+  owner_id: 30
+  lower_name: empty
+
+-
+  id: 53
+  owner_id: 30
+  lower_name: renderer
+
+-
+  id: 54
+  owner_id: 2
+  lower_name: lfs
+
+-
+  id: 55
+  owner_id: 2
+  lower_name: scoped_label
+
+-
+  id: 56
+  owner_id: 2
+  lower_name: readme-test
+
+-
+  id: 57
+  owner_id: 2
+  lower_name: repo-release
+
+-
+  id: 58
+  owner_id: 2
+  lower_name: commitsonpr
+
+-
+  id: 1059
+  owner_id: 2
+  lower_name: repo59
+
+-
+  id: 59
+  owner_id: 2
+  lower_name: test_commit_revert
+
+-
+  id: 60
+  owner_id: 40
+  lower_name: repo60
+
+-
+  id: 61
+  owner_id: 41
+  lower_name: repo61
+
+-
+  id: 62
+  owner_id: 2
+  lower_name: test_workflows
+
+-
+  id: 63
+  owner_id: 2
+  lower_name: test_action_run_search
+
+-
+  id: 66
+  owner_id: 2
+  lower_name: repo256

@@ -6,24 +6,23 @@ package gitrepo
 import (
 	"context"
 	"io"
-	"path/filepath"
-	"strings"
 
 	"forgejo.org/modules/git"
-	"forgejo.org/modules/setting"
 )
 
+// Repository is a repository that knows where it is on disk: a repository in a project is not at
+// <owner>/<name>.git, so the path is never built from the owner and repository names here.
 type Repository interface {
-	GetName() string
-	GetOwnerName() string
+	RepoPath() string
+	WikiPath() string
 }
 
 func repoPath(repo Repository) string {
-	return filepath.Join(setting.RepoRootPath, strings.ToLower(repo.GetOwnerName()), strings.ToLower(repo.GetName())+".git")
+	return repo.RepoPath()
 }
 
 func wikiPath(repo Repository) string {
-	return filepath.Join(setting.RepoRootPath, strings.ToLower(repo.GetOwnerName()), strings.ToLower(repo.GetName())+".wiki.git")
+	return repo.WikiPath()
 }
 
 // OpenRepository opens the repository at the given relative path with the provided context.

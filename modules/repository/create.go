@@ -39,7 +39,17 @@ func CreateRepositoryByExample(ctx context.Context, doer, u *user_model.User, re
 		return err
 	}
 
-	has, err := repo_model.IsRepositoryModelExist(ctx, u, repo.Name)
+	// the group name is taken from the owner's group, never from the caller
+	repo.GroupName = ""
+	if repo.GroupID != 0 {
+		group, err := repo_model.GetRepoGroupByID(ctx, u.ID, repo.GroupID)
+		if err != nil {
+			return err
+		}
+		repo.GroupName = group.Name
+	}
+
+	has, err := repo_model.IsRepositoryModelExistInGroup(ctx, u.ID, repo.GroupID, repo.Name)
 	if err != nil {
 		return fmt.Errorf("IsRepositoryExist: %w", err)
 	} else if has {
@@ -49,7 +59,7 @@ func CreateRepositoryByExample(ctx context.Context, doer, u *user_model.User, re
 		}
 	}
 
-	repoPath := repo_model.RepoPath(u.Name, repo.Name)
+	repoPath := repo_model.GroupRepoPath(u.Name, repo.GroupName, repo.Name)
 	isExist, err := util.IsExist(repoPath)
 	if err != nil {
 		log.Error("Unable to check if %s exists. Error: %v", repoPath, err)
@@ -63,11 +73,16 @@ func CreateRepositoryByExample(ctx context.Context, doer, u *user_model.User, re
 		}
 	}
 
+	if err = repo_model.ClaimRepoName(ctx, repo); err != nil {
+		return err
+	}
 	if err = db.Insert(ctx, repo); err != nil {
 		return err
 	}
-	if err = repo_model.DeleteRedirect(ctx, u.ID, repo.Name); err != nil {
-		return err
+	if repo.GroupID == 0 { // redirects are root-only
+		if err = repo_model.DeleteRedirect(ctx, u.ID, repo.Name); err != nil {
+			return err
+		}
 	}
 
 	// insert units for repo

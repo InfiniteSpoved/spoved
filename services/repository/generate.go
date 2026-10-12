@@ -237,7 +237,7 @@ func generateRepository(ctx context.Context, doer, owner *user_model.User, templ
 		}
 	}
 
-	if err = repo_module.CheckInitRepository(ctx, owner.Name, generateRepo.Name, generateRepo.ObjectFormatName); err != nil {
+	if err = repo_module.CheckInitRepository(ctx, generateRepo, generateRepo.ObjectFormatName); err != nil {
 		return generateRepo, err
 	}
 

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"forgejo.org/models"
@@ -190,7 +191,11 @@ func moveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User,
 		if err := repo_model.IsUsableRepoName(strings.ToLower(finalName)); err != nil {
 			return err
 		}
-		if has, err := repo_model.IsRepositoryModelOrDirExist(ctx, target, finalName); err != nil {
+		if repo.GroupID != 0 && newOwner != nil {
+			return repo_model.ErrRepoInGroup
+		}
+		// a name taken by a project is refused when the claim is written
+		if has, err := repo_model.IsRepositoryModelExistInGroup(ctx, target.ID, repo.GroupID, finalName); err != nil {
 			return err
 		} else if has {
 			return repo_model.ErrRepoAlreadyExist{Uname: target.Name, Name: finalName}
@@ -199,15 +204,18 @@ func moveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User,
 
 	// whatever moved is moved back if a later step fails, as the database changes are rolled back
 	renamed, transferred := false, false
+	oldRepoPath, oldWikiPath := repo.RepoPath(), repo.WikiPath() // in the repository's project, if any
 	defer func() {
 		if err == nil {
 			return
 		}
-		if transferred {
-			moveRepoDirs(newOwner.Name, owner.Name, finalName, finalName)
+		if transferred { // only root repositories are transferred
+			moveDirsBack(repo_model.RepoPath(newOwner.Name, finalName), repo_model.RepoPath(owner.Name, finalName))
+			moveDirsBack(repo_model.WikiPath(newOwner.Name, finalName), repo_model.WikiPath(owner.Name, finalName))
 		}
 		if renamed {
-			moveRepoDirs(owner.Name, owner.Name, finalName, oldName)
+			moveDirsBack(filepath.Join(filepath.Dir(oldRepoPath), strings.ToLower(finalName)+".git"), oldRepoPath)
+			moveDirsBack(filepath.Join(filepath.Dir(oldWikiPath), strings.ToLower(finalName)+".wiki.git"), oldWikiPath)
 		}
 	}()
 
@@ -243,18 +251,13 @@ func moveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User,
 	return organization.AddTeamRepoCounts(ctx, repo.ID, -1) // the teams of the new owner
 }
 
-// moveRepoDirs moves the repository and wiki directories back after a failure; a failure here is logged only.
-func moveRepoDirs(fromOwner, toOwner, fromName, toName string) {
-	for _, paths := range [][2]string{
-		{repo_model.RepoPath(fromOwner, fromName), repo_model.RepoPath(toOwner, toName)},
-		{repo_model.WikiPath(fromOwner, fromName), repo_model.WikiPath(toOwner, toName)},
-	} {
-		if ok, _ := util.IsExist(paths[0]); !ok {
-			continue
-		}
-		if err := util.Rename(paths[0], paths[1]); err != nil {
-			log.Critical("Unable to move %s back to %s: %v", paths[0], paths[1], err)
-		}
+// moveDirsBack moves a repository or wiki directory back after a failure, if it exists; a failure here is logged only.
+func moveDirsBack(from, to string) {
+	if ok, _ := util.IsExist(from); !ok {
+		return
+	}
+	if err := util.Rename(from, to); err != nil {
+		log.Critical("Unable to move %s back to %s: %v", from, to, err)
 	}
 }
 

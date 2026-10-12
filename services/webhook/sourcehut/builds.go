@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	webhook_model "forgejo.org/models/webhook"
@@ -251,10 +252,22 @@ func (pc sourcehutConvertor) newPayload(repo *api.Repository, commitID, ref, not
 	}, nil
 }
 
+// payloadRepo locates the repository of a payload by its full name (owner[/project]/name), which the server
+// derived from the repository row, so that a repository in a project isn't looked for at the owner's root.
+type payloadRepo struct{ *api.Repository }
+
+func (r payloadRepo) RepoPath() string {
+	return filepath.Join(setting.RepoRootPath, strings.ToLower(r.FullName)+".git")
+}
+
+func (r payloadRepo) WikiPath() string {
+	return filepath.Join(setting.RepoRootPath, strings.ToLower(r.FullName)+".wiki.git")
+}
+
 // constructManifest opens and adjusts the manifest to submit to the builds service
 // in case of an error the []byte might contain an error that can be displayed to the user
 func (pc sourcehutConvertor) constructManifest(repo *api.Repository, commitID, gitRef string) ([]byte, error) {
-	gitRepo, err := gitrepo.OpenRepository(pc.ctx, repo)
+	gitRepo, err := gitrepo.OpenRepository(pc.ctx, payloadRepo{repo})
 	if err != nil {
 		msg := "could not open repository"
 		return []byte(msg), fmt.Errorf(msg+": %w", err)

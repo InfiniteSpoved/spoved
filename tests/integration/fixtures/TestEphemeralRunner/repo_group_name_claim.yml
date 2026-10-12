@@ -1,0 +1,5 @@
+# one row per root repository in repository.yml (and per repo_group), see RepoGroupNameClaim
+-
+  id: 64
+  owner_id: 10
+  lower_name: test_ephemeral_runner

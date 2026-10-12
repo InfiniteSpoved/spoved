@@ -53,7 +53,7 @@ func TestCheckCreateRepository(t *testing.T) {
 
 	t.Run("RepoAlreadyExists", func(t *testing.T) {
 		unittest.AssertExistsIf(t, true, &repo_model.Repository{Name: "repo1"})
-		user := &user_model.User{MaxRepoCreation: 2}
+		user := &user_model.User{ID: 2, MaxRepoCreation: 2} // the owner of repo1
 
 		err := repo_model.CheckCreateRepository(db.DefaultContext, user, user, "repo1")
 

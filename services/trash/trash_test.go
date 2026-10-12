@@ -8,12 +8,15 @@ import (
 	"time"
 
 	"forgejo.org/models/db"
+	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
+	org_service "forgejo.org/services/org"
+	repo_service "forgejo.org/services/repository"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,4 +64,39 @@ func TestRestore(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, restored.IsTrashed())
 	assert.Equal(t, owner.NumRepos, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: owner.ID}).NumRepos)
+}
+
+// Restore puts a repository back at its place by the name it has, never taking a project's name, and purging an
+// organization removes its projects and every name claim.
+func TestRepoGroupRestoreAndOrgPurge(t *testing.T) {
+	unittest.PrepareTestEnv(t)
+	ctx := t.Context()
+	doer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+	pay, err := repo_model.CreateRepoGroup(ctx, org3, "pay", "")
+	require.NoError(t, err)
+	nested, err := repo_service.CreateRepositoryDirectly(ctx, doer, org3, repo_service.CreateRepoOptions{Name: "api", GroupID: pay.ID})
+	require.NoError(t, err)
+
+	root, err := repo_service.CreateRepositoryDirectly(ctx, doer, org3, repo_service.CreateRepoOptions{Name: "web"})
+	require.NoError(t, err)
+	require.NoError(t, repo_service.TrashRepository(ctx, doer, root))
+	err = RestoreRepo(ctx, doer, root.ID, RestoreOptions{NewName: "pay"})
+	require.True(t, repo_model.IsErrRepoAlreadyExist(err), "%v", err)
+	require.NoError(t, RestoreRepo(ctx, doer, root.ID, RestoreOptions{}))
+	assert.Equal(t, "web", unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: root.ID}).Name)
+
+	require.NoError(t, repo_service.TrashRepository(ctx, doer, nested))
+	require.NoError(t, RestoreRepo(ctx, doer, nested.ID, RestoreOptions{}))
+	restored, err := repo_model.GetRepositoryByPath(ctx, org3.ID, "pay", "api")
+	require.NoError(t, err)
+	assert.Equal(t, nested.ID, restored.ID)
+	unittest.CheckConsistencyFor(t, &user_model.User{}, &repo_model.Repository{})
+
+	require.NoError(t, org_service.TrashOrganization(ctx, doer, organization.OrgFromUser(org3)))
+	unittest.AssertExistsAndLoadBean(t, &repo_model.RepoGroup{ID: pay.ID}) // the trash takes the projects along
+	require.NoError(t, PurgeOrg(ctx, doer, org3.ID))
+	unittest.AssertNotExistsBean(t, &repo_model.RepoGroup{OwnerID: org3.ID})
+	unittest.AssertNotExistsBean(t, &repo_model.RepoGroupNameClaim{OwnerID: org3.ID})
+	unittest.CheckRepoGroupNameClaims(t)
 }

@@ -1,0 +1,10 @@
+# one row per root repository in repository.yml (and per repo_group), see RepoGroupNameClaim
+-
+  id: 1001
+  owner_id: 1001
+  lower_name: first
+
+-
+  id: 1002
+  owner_id: 1003
+  lower_name: spammer-tools

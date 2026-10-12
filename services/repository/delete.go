@@ -246,6 +246,9 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepo
 					Name:      "",
 				}
 			}
+			if err := repo_model.ReleaseRepoName(ctx, repo); err != nil {
+				return err
+			}
 		}
 
 		// Delete Labels and related objects

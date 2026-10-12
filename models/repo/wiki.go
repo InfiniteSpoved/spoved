@@ -81,9 +81,17 @@ func WikiPath(userName, repoName string) string {
 	return filepath.Join(user_model.UserPath(userName), strings.ToLower(repoName)+".wiki.git")
 }
 
+// GroupWikiPath returns the wiki path of a repository in a project, or at the root of the owner for an empty group.
+func GroupWikiPath(userName, groupName, repoName string) string {
+	if groupName == "" {
+		return WikiPath(userName, repoName)
+	}
+	return filepath.Join(GroupPath(userName, groupName), strings.ToLower(repoName)+".wiki.git")
+}
+
 // WikiPath returns wiki data path for given repository.
 func (repo *Repository) WikiPath() string {
-	return WikiPath(repo.OwnerName, repo.Name)
+	return GroupWikiPath(repo.OwnerName, repo.groupSegment(), repo.Name)
 }
 
 // HasWiki returns true if repository has wiki.
