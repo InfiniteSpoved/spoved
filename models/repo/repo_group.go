@@ -57,6 +57,15 @@ func GroupPath(ownerName, groupName string) string {
 	return filepath.Join(user_model.UserPath(ownerName), strings.ToLower(groupName))
 }
 
+// IsUsableGroupName checks a project name: every repository name rule, and at most 100 characters like the
+// repository name in the forms.
+func IsUsableGroupName(name string) error {
+	if len(name) > 100 {
+		return fmt.Errorf("%w: name is longer than 100 characters", util.ErrInvalidArgument)
+	}
+	return IsUsableRepoName(name)
+}
+
 // claimName reserves name at the root of the owner; an existing claim is the generic ErrRepoAlreadyExist, whether
 // a repository (of any visibility, or trashed) or a group holds it. A concurrent claim fails on the unique key.
 func claimName(ctx context.Context, ownerID int64, ownerName, name string) error {
@@ -121,7 +130,7 @@ func CreateRepoGroup(ctx context.Context, owner *user_model.User, name, descript
 	if !owner.IsOrganization() {
 		return nil, fmt.Errorf("%w: only organizations have projects", util.ErrInvalidArgument)
 	}
-	if err := IsUsableRepoName(name); err != nil {
+	if err := IsUsableGroupName(name); err != nil {
 		return nil, err
 	}
 	if isExist, err := util.IsExist(GroupPath(owner.Name, name)); err != nil {
@@ -148,7 +157,7 @@ func RenameRepoGroup(ctx context.Context, owner *user_model.User, group *RepoGro
 	if group.OwnerID != owner.ID {
 		return ErrRepoGroupNotExist
 	}
-	if err := IsUsableRepoName(newName); err != nil {
+	if err := IsUsableGroupName(newName); err != nil {
 		return err
 	}
 	return db.WithTx(ctx, func(ctx context.Context) error {

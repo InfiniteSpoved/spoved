@@ -24,7 +24,7 @@ func RenameRepoGroup(ctx context.Context, owner *user_model.User, group *repo_mo
 	if group.OwnerID != owner.ID {
 		return repo_model.ErrRepoGroupNotExist
 	}
-	if err := repo_model.IsUsableRepoName(newName); err != nil { // before the name reaches a path
+	if err := repo_model.IsUsableGroupName(newName); err != nil { // before the name reaches a path
 		return err
 	}
 	var repoIDs []int64

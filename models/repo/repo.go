@@ -74,9 +74,6 @@ func IsUsableRepoName(name string) error {
 		// Note: usually this error is normally caught up earlier in the UI
 		return db.ErrNameCharsNotAllowed{Name: name}
 	}
-	if len(name) > 100 {
-		return fmt.Errorf("%w: name is longer than 100 characters", util.ErrInvalidArgument)
-	}
 	return db.IsUsableName(reservedRepoNames, reservedRepoPatterns, name)
 }
 
