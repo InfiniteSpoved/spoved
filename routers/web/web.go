@@ -1257,6 +1257,11 @@ func registerRoutes(m *web.Route) {
 					m.Post("/remove", org.VerifiedDomainsRemove)
 					m.Post("/require", org.VerifiedDomainsRequire)
 				})
+				m.Group("/keys", func() {
+					m.Combo("").Get(org_setting.DeployKeys).Post(web.Bind(forms.AddKeyForm{}), org_setting.DeployKeysPost)
+					m.Post("/{id}/repos", org_setting.DeployKeyReposPost)
+					m.Post("/delete", org_setting.DeleteDeployKey)
+				})
 				m.Get("/storage_overview", org_setting.StorageOverview)
 				m.Get("/access-report", org_setting.AccessReport)
 

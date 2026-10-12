@@ -167,14 +167,12 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 	if err := db.DeleteBeans(ctx, &asymkey_model.OrgDeployKeyRepo{RepoID: repo.ID}); err != nil {
 		return fmt.Errorf("delete org deploy key selections: %w", err)
 	}
+	oldKeyIDs := make([]int64, 0, len(oldOrgKeys))
 	for _, key := range oldOrgKeys {
-		if still, err := git_model.FilterWriteDeployKeyIDs(ctx, repo, []int64{key.KeyID}); err != nil {
-			return err
-		} else if len(still) == 0 {
-			if err := git_model.RemoveDeployKeyIDFromProtectionRules(ctx, repo.ID, key.KeyID); err != nil {
-				return fmt.Errorf("RemoveDeployKeyIDFromProtectionRules: %w", err)
-			}
-		}
+		oldKeyIDs = append(oldKeyIDs, key.KeyID)
+	}
+	if err := git_model.DropDeployKeyIDsNotWriting(ctx, repo, oldKeyIDs); err != nil {
+		return fmt.Errorf("DropDeployKeyIDsNotWriting: %w", err)
 	}
 
 	// Remove redundant collaborators.

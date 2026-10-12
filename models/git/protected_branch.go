@@ -715,6 +715,41 @@ func removeFromLists(id int64, lists ...*[]int64) bool {
 	return changed
 }
 
+// DropDeployKeyIDsNotWriting removes from the protection rules of the repository the public key IDs that no longer
+// belong to a deploy key with write access to it (its own, or one of its owner covering it).
+func DropDeployKeyIDsNotWriting(ctx context.Context, repo *repo_model.Repository, keyIDs []int64) error {
+	still, err := FilterWriteDeployKeyIDs(ctx, repo, keyIDs)
+	if err != nil {
+		return err
+	}
+	for _, keyID := range keyIDs {
+		if !slices.Contains(still, keyID) {
+			if err := RemoveDeployKeyIDFromProtectionRules(ctx, repo.ID, keyID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// DropDeployKeyIDFromOwnerRepos runs DropDeployKeyIDsNotWriting on every repository of the owner with protection
+// rules, those in the trash included: they come back with their rules when restored.
+func DropDeployKeyIDFromOwnerRepos(ctx context.Context, ownerID, keyID int64) error {
+	repos := make([]*repo_model.Repository, 0, 10)
+	if err := db.GetEngine(ctx).Where("owner_id = ?", ownerID).And(builder.Or(
+		builder.In("id", builder.Select("repo_id").From("protected_branch")),
+		builder.In("id", builder.Select("repo_id").From("protected_tag")),
+	)).Find(&repos); err != nil {
+		return err
+	}
+	for _, repo := range repos {
+		if err := DropDeployKeyIDsNotWriting(ctx, repo, []int64{keyID}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RemoveDeployKeyIDFromProtectionRules removes the public key ID of a deleted deploy key
 // from the branch and tag protection rules of the repository.
 func RemoveDeployKeyIDFromProtectionRules(ctx context.Context, repoID, keyID int64) error {

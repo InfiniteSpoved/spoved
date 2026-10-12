@@ -44,6 +44,8 @@ func ToAccessRows(ctx context.Context, rows []*accessreport.Row, doer *user_mode
 			ar.User = ToUser(ctx, r.User, doer)
 		case r.DeployKey != nil:
 			ar.DeployKey = &api.AccessDeployKey{ID: r.DeployKey.ID, Name: r.DeployKey.Name, Fingerprint: r.DeployKey.Fingerprint, Expires: OptionalTime(r.DeployKey.ExpiresUnix)}
+		case r.OrgDeployKey != nil:
+			ar.DeployKey = &api.AccessDeployKey{ID: r.OrgDeployKey.ID, Name: r.OrgDeployKey.Name, Fingerprint: r.OrgDeployKey.Fingerprint, Expires: OptionalTime(r.OrgDeployKey.ExpiresUnix)}
 		case r.Team != nil:
 			ar.Type = "team"
 			ar.Team = &api.AccessTeam{ID: r.Team.ID, Name: r.Team.Name, NumMembers: r.Team.NumMembers}

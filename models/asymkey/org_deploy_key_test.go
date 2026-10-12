@@ -90,9 +90,11 @@ func TestAddOrgDeployKey(t *testing.T) {
 		assert.Equal(t, 1, unittest.GetCount(t, &OrgDeployKeyRepo{OrgDeployKeyID: orgKey.ID}))
 
 		_, err = AddOrgDeployKey(ctx, 3, "shared", newTestDeployKeyContent(t), true, true, nil, 0)
-		require.ErrorIs(t, err, util.ErrAlreadyExist, "names are unique per organization")
+		assert.True(t, IsErrDeployKeyNameAlreadyUsed(err), "names are unique per organization: %v", err)
 		_, err = AddOrgDeployKey(ctx, 3, "again", content, true, true, nil, 0)
-		require.ErrorIs(t, err, util.ErrAlreadyExist, "a key is added once per organization")
+		assert.True(t, IsErrDeployKeyAlreadyExist(err), "a key is added once per organization: %v", err)
+		_, err = AddOrgDeployKey(ctx, 3, "no repos", newTestDeployKeyContent(t), true, false, nil, 0)
+		require.ErrorIs(t, err, util.ErrInvalidArgument, "selected repositories need at least one")
 	})
 }
 
@@ -236,4 +238,45 @@ func TestDeleteOrgDeployKeys(t *testing.T) {
 	unittest.AssertNotExistsBean(t, &PublicKey{ID: onlyOrg.KeyID})
 	unittest.AssertExistsAndLoadBean(t, &PublicKey{ID: shared.KeyID}) // a repository deploy key still uses it
 	unittest.AssertExistsAndLoadBean(t, &OrgDeployKey{ID: other.ID})
+}
+
+func TestSetOrgDeployKeyRepos(t *testing.T) {
+	prepareOrgDeployKeyTest(t)
+	ctx := db.DefaultContext
+
+	key, err := AddOrgDeployKey(ctx, 3, "ci", newTestDeployKeyContent(t), true, false, []int64{3}, 0)
+	require.NoError(t, err)
+	other, err := AddOrgDeployKey(ctx, 17, "other", newTestDeployKeyContent(t), true, true, nil, 0)
+	require.NoError(t, err)
+
+	t.Run("a key of another organization is not found", func(t *testing.T) {
+		_, err := GetOrgDeployKey(ctx, 3, other.ID)
+		assert.True(t, IsErrDeployKeyNotExist(err), "%v", err)
+		_, err = SetOrgDeployKeyRepos(ctx, 3, other.ID, false, []int64{3})
+		assert.True(t, IsErrDeployKeyNotExist(err), "%v", err)
+		unittest.AssertNotExistsBean(t, &OrgDeployKeyRepo{OrgDeployKeyID: other.ID})
+	})
+
+	t.Run("refused selections change nothing", func(t *testing.T) {
+		for _, repoIDs := range [][]int64{nil, {5, 1}, {23}} { // none, user2's repository, org17's repository
+			_, err := SetOrgDeployKeyRepos(ctx, 3, key.ID, false, repoIDs)
+			require.ErrorIs(t, err, util.ErrInvalidArgument, "%v", repoIDs)
+		}
+		ids, err := GetOrgDeployKeyRepoIDs(ctx, []int64{key.ID})
+		require.NoError(t, err)
+		assert.Equal(t, []int64{3}, ids[key.ID])
+	})
+
+	t.Run("selected and all repositories", func(t *testing.T) {
+		_, err := SetOrgDeployKeyRepos(ctx, 3, key.ID, false, []int64{5, 32, 5})
+		require.NoError(t, err)
+		ids, err := GetOrgDeployKeyRepoIDs(ctx, []int64{key.ID})
+		require.NoError(t, err)
+		assert.Equal(t, []int64{5, 32}, ids[key.ID])
+
+		_, err = SetOrgDeployKeyRepos(ctx, 3, key.ID, true, nil)
+		require.NoError(t, err)
+		assert.True(t, unittest.AssertExistsAndLoadBean(t, &OrgDeployKey{ID: key.ID}).IncludesAllRepos)
+		unittest.AssertNotExistsBean(t, &OrgDeployKeyRepo{OrgDeployKeyID: key.ID})
+	})
 }

@@ -13,10 +13,6 @@ forgejo.org/models
 	IsErrSHANotFound
 	IsErrMergeDivergingFastForwardOnly
 
-forgejo.org/models/asymkey
-	AddOrgDeployKey
-	checkOrgDeployKeyRepos
-
 forgejo.org/models/auth
 	WebAuthnCredentials
 
