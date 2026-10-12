@@ -74,6 +74,9 @@ func IsUsableRepoName(name string) error {
 		// Note: usually this error is normally caught up earlier in the UI
 		return db.ErrNameCharsNotAllowed{Name: name}
 	}
+	if len(name) > 100 {
+		return fmt.Errorf("%w: name is longer than 100 characters", util.ErrInvalidArgument)
+	}
 	return db.IsUsableName(reservedRepoNames, reservedRepoPatterns, name)
 }
 
@@ -204,6 +207,11 @@ type Repository struct {
 	// TrashedWithOwner marks a repository that was trashed together with its organization: restoring or
 	// purging the organization takes it along, unlike a repository that was trashed on its own earlier.
 	TrashedWithOwner bool `xorm:"NOT NULL DEFAULT false"`
+
+	// GroupID is the project (repo_group) the repository is in, 0 at the root of its owner. GroupName is a copy of
+	// the project's name kept like OwnerName: written only from the repo_group row, used to build paths and links.
+	GroupID   int64  `xorm:"UNIQUE(s) INDEX NOT NULL DEFAULT 0"`
+	GroupName string `xorm:"NOT NULL DEFAULT ''"`
 }
 
 // IsTrashed returns true if the repository is in the trash (or being purged from it).
@@ -355,14 +363,37 @@ func (repo *Repository) LoadAttributes(ctx context.Context) error {
 	return nil
 }
 
+// groupSegment is the path segment of the repository's project, "" at the root of its owner. A repository in a
+// project whose name is missing gets "@<id>", which no name can be, so its paths never reach a root repository.
+func (repo *Repository) groupSegment() string {
+	switch {
+	case repo.GroupID == 0:
+		return ""
+	case repo.GroupName == "":
+		return "@" + strconv.FormatInt(repo.GroupID, 10)
+	}
+	return repo.GroupName
+}
+
+// escapedPath returns the escaped owner[/project]/name path of the repository.
+func (repo *Repository) escapedPath() string {
+	if group := repo.groupSegment(); group != "" {
+		return url.PathEscape(repo.OwnerName) + "/" + url.PathEscape(group) + "/" + url.PathEscape(repo.Name)
+	}
+	return url.PathEscape(repo.OwnerName) + "/" + url.PathEscape(repo.Name)
+}
+
 // FullName returns the repository full name
 func (repo *Repository) FullName() string {
+	if group := repo.groupSegment(); group != "" {
+		return repo.OwnerName + "/" + group + "/" + repo.Name
+	}
 	return repo.OwnerName + "/" + repo.Name
 }
 
 // HTMLURL returns the repository HTML URL
 func (repo *Repository) HTMLURL() string {
-	return setting.AppURL + url.PathEscape(repo.OwnerName) + "/" + url.PathEscape(repo.Name)
+	return setting.AppURL + repo.escapedPath()
 }
 
 // SummaryCardURL returns the absolute URL to an image providing a summary of the repo
@@ -383,7 +414,7 @@ func (repo *Repository) CommitLink(commitID string) (result string) {
 
 // APIURL returns the repository API URL
 func (repo *Repository) APIURL() string {
-	return setting.AppURL + "api/v1/repos/" + url.PathEscape(repo.OwnerName) + "/" + url.PathEscape(repo.Name)
+	return setting.AppURL + "api/v1/repos/" + repo.escapedPath()
 }
 
 // APActorID returns the activitypub repository API URL
@@ -622,14 +653,22 @@ func RepoPath(userName, repoName string) string { //revive:disable-line:exported
 	return filepath.Join(user_model.UserPath(userName), strings.ToLower(repoName)+".git")
 }
 
+// GroupRepoPath returns the path of a repository in a project, or at the root of the owner for an empty group.
+func GroupRepoPath(userName, groupName, repoName string) string {
+	if groupName == "" {
+		return RepoPath(userName, repoName)
+	}
+	return filepath.Join(GroupPath(userName, groupName), strings.ToLower(repoName)+".git")
+}
+
 // RepoPath returns the repository path
 func (repo *Repository) RepoPath() string {
-	return RepoPath(repo.OwnerName, repo.Name)
+	return GroupRepoPath(repo.OwnerName, repo.groupSegment(), repo.Name)
 }
 
 // Link returns the repository relative url
 func (repo *Repository) Link() string {
-	return setting.AppSubURL + "/" + url.PathEscape(repo.OwnerName) + "/" + url.PathEscape(repo.Name)
+	return setting.AppSubURL + "/" + repo.escapedPath()
 }
 
 // ComposeCompareURL returns the repository comparison URL
@@ -695,17 +734,25 @@ type CloneLink struct {
 
 // ComposeHTTPSCloneURL returns HTTPS clone URL based on given owner and repository name.
 func ComposeHTTPSCloneURL(owner, repo string) string {
-	return fmt.Sprintf("%s%s/%s.git", setting.AppURL, url.PathEscape(owner), url.PathEscape(repo))
+	return composeHTTPSCloneURL(url.PathEscape(owner) + "/" + url.PathEscape(repo))
+}
+
+func composeHTTPSCloneURL(escapedPath string) string {
+	return fmt.Sprintf("%s%s.git", setting.AppURL, escapedPath)
 }
 
 func ComposeSSHCloneURL(ownerName, repoName string) string {
+	return composeSSHCloneURL(url.PathEscape(ownerName) + "/" + url.PathEscape(repoName))
+}
+
+func composeSSHCloneURL(escapedPath string) string {
 	sshUser := setting.SSH.User
 	sshDomain := setting.SSH.Domain
 
 	// non-standard port, it must use full URI
 	if setting.SSH.Port != 22 {
 		sshHost := net.JoinHostPort(sshDomain, strconv.Itoa(setting.SSH.Port))
-		return fmt.Sprintf("ssh://%s@%s/%s/%s.git", sshUser, sshHost, url.PathEscape(ownerName), url.PathEscape(repoName))
+		return fmt.Sprintf("ssh://%s@%s/%s.git", sshUser, sshHost, escapedPath)
 	}
 
 	// for standard port, it can use a shorter URI (without the port)
@@ -714,20 +761,20 @@ func ComposeSSHCloneURL(ownerName, repoName string) string {
 		sshHost = "[" + sshHost + "]" // for IPv6 address, wrap it with brackets
 	}
 	if setting.Repository.UseCompatSSHURI {
-		return fmt.Sprintf("ssh://%s@%s/%s/%s.git", sshUser, sshHost, url.PathEscape(ownerName), url.PathEscape(repoName))
+		return fmt.Sprintf("ssh://%s@%s/%s.git", sshUser, sshHost, escapedPath)
 	}
-	return fmt.Sprintf("%s@%s:%s/%s.git", sshUser, sshHost, url.PathEscape(ownerName), url.PathEscape(repoName))
+	return fmt.Sprintf("%s@%s:%s.git", sshUser, sshHost, escapedPath)
 }
 
 func (repo *Repository) cloneLink(isWiki bool) *CloneLink {
-	repoName := repo.Name
+	path := repo.escapedPath()
 	if isWiki {
-		repoName += ".wiki"
+		path += ".wiki"
 	}
 
 	cl := new(CloneLink)
-	cl.SSH = ComposeSSHCloneURL(repo.OwnerName, repoName)
-	cl.HTTPS = ComposeHTTPSCloneURL(repo.OwnerName, repoName)
+	cl.SSH = composeSSHCloneURL(path)
+	cl.HTTPS = composeHTTPSCloneURL(path)
 	return cl
 }
 
@@ -804,6 +851,7 @@ func GetRepositoryByOwnerAndName(ctx context.Context, ownerName, repoName string
 		Join("INNER", "`user`", "`user`.id = repository.owner_id").
 		Where("repository.lower_name = ?", strings.ToLower(repoName)).
 		And("`user`.lower_name = ?", strings.ToLower(ownerName)).
+		And("repository.group_id = 0").
 		And("repository.trashed_unix = 0").
 		Get(&repo)
 	if err != nil {
@@ -814,11 +862,32 @@ func GetRepositoryByOwnerAndName(ctx context.Context, ownerName, repoName string
 	return &repo, nil
 }
 
+// GetRepositoryByPath returns the live repository repoName in the project groupName of the owner. It never
+// returns a repository at the root of the owner.
+func GetRepositoryByPath(ctx context.Context, ownerID int64, groupName, repoName string) (*Repository, error) {
+	var repo Repository
+	has, err := db.GetEngine(ctx).Table("repository").Select("repository.*").
+		Join("INNER", "repo_group", "repo_group.id = repository.group_id AND repo_group.owner_id = repository.owner_id").
+		Where("repository.owner_id = ?", ownerID).
+		And("repo_group.lower_name = ?", strings.ToLower(groupName)).
+		And("repository.lower_name = ?", strings.ToLower(repoName)).
+		And("repository.group_id <> 0").
+		And("repository.trashed_unix = 0").
+		Get(&repo)
+	if err != nil {
+		return nil, err
+	} else if !has {
+		return nil, ErrRepoNotExist{0, ownerID, "", repoName}
+	}
+	return &repo, nil
+}
+
 // GetRepositoryByName returns the repository by given name under user if exists.
 func GetRepositoryByName(ctx context.Context, ownerID int64, name string) (*Repository, error) {
 	var repo Repository
 	has, err := db.GetEngine(ctx).
 		Where("`owner_id`=?", ownerID).
+		And("`group_id`=0").
 		And("`lower_name`=?", strings.ToLower(name)).
 		And("`trashed_unix`=0").
 		NoAutoCondition().
@@ -915,11 +984,16 @@ func IsRepositoryModelOrDirExist(ctx context.Context, u *user_model.User, repoNa
 	return has || isDir, err
 }
 
+// IsRepositoryModelExist returns true if a repository (trashed ones included) with the name is at the root of u.
 func IsRepositoryModelExist(ctx context.Context, u *user_model.User, repoName string) (bool, error) {
-	return db.GetEngine(ctx).Get(&Repository{
-		OwnerID:   u.ID,
-		LowerName: strings.ToLower(repoName),
-	})
+	return IsRepositoryModelExistInGroup(ctx, u.ID, 0, repoName)
+}
+
+// IsRepositoryModelExistInGroup returns true if a repository (trashed ones included) with the name is in the group
+// of the owner, 0 for its root.
+func IsRepositoryModelExistInGroup(ctx context.Context, ownerID, groupID int64, repoName string) (bool, error) {
+	return db.GetEngine(ctx).Where("owner_id = ? AND group_id = ? AND lower_name = ?", ownerID, groupID, strings.ToLower(repoName)).
+		Exist(new(Repository))
 }
 
 // GetTemplateRepo populates repo.TemplateRepo for a generated repository and

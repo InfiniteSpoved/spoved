@@ -46,6 +46,7 @@ type CreateRepoOptions struct {
 	MirrorInterval   string
 	ObjectFormatName string
 	Website          string
+	GroupID          int64 // the owner's project to create the repository in, 0 for its root
 }
 
 func prepareRepoCommit(ctx context.Context, repo *repo_model.Repository, tmpDir, repoPath string, opts CreateRepoOptions) error {
@@ -137,7 +138,7 @@ func prepareRepoCommit(ctx context.Context, repo *repo_model.Repository, tmpDir,
 
 // InitRepository initializes README and .gitignore if needed.
 func initRepository(ctx context.Context, repoPath string, u *user_model.User, repo *repo_model.Repository, opts CreateRepoOptions) (err error) {
-	if err = repo_module.CheckInitRepository(ctx, repo.OwnerName, repo.Name, opts.ObjectFormatName); err != nil {
+	if err = repo_module.CheckInitRepository(ctx, repo, opts.ObjectFormatName); err != nil {
 		return err
 	}
 
@@ -238,6 +239,7 @@ func CreateRepositoryDirectly(ctx context.Context, doer, u *user_model.User, opt
 		WikiBranch:                      setting.Repository.DefaultBranch,
 		ObjectFormatName:                opts.ObjectFormatName,
 		Website:                         opts.Website,
+		GroupID:                         opts.GroupID,
 	}
 
 	var rollbackRepo *repo_model.Repository
@@ -252,7 +254,7 @@ func CreateRepositoryDirectly(ctx context.Context, doer, u *user_model.User, opt
 			return nil
 		}
 
-		repoPath := repo_model.RepoPath(u.Name, repo.Name)
+		repoPath := repo.RepoPath()
 		isExist, err := util.IsExist(repoPath)
 		if err != nil {
 			log.Error("Unable to check if %s exists. Error: %v", repoPath, err)

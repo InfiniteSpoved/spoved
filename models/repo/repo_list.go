@@ -866,7 +866,7 @@ func GetUserRepositories(ctx context.Context, opts *SearchRepoOptions) (Reposito
 	}
 
 	if len(opts.LowerNames) > 0 {
-		cond = cond.And(builder.In("lower_name", opts.LowerNames))
+		cond = cond.And(builder.In("lower_name", opts.LowerNames), builder.Eq{"group_id": 0}) // names of root directories
 	}
 
 	sess := db.GetEngine(ctx)

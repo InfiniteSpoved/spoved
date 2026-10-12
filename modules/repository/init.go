@@ -120,9 +120,9 @@ func LoadRepoConfig() error {
 	return nil
 }
 
-func CheckInitRepository(ctx context.Context, owner, name, objectFormatName string) (err error) {
+func CheckInitRepository(ctx context.Context, repo *repo_model.Repository, objectFormatName string) (err error) {
 	// Somehow the directory could exist.
-	repoPath := repo_model.RepoPath(owner, name)
+	repoPath := repo.RepoPath()
 	isExist, err := util.IsExist(repoPath)
 	if err != nil {
 		log.Error("Unable to check if %s exists. Error: %v", repoPath, err)
@@ -130,8 +130,8 @@ func CheckInitRepository(ctx context.Context, owner, name, objectFormatName stri
 	}
 	if isExist {
 		return repo_model.ErrRepoFilesAlreadyExist{
-			Uname: owner,
-			Name:  name,
+			Uname: repo.OwnerName,
+			Name:  repo.Name,
 		}
 	}
 

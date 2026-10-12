@@ -27,7 +27,11 @@ var consistencyCheckMap = make(map[string]func(t *testing.T, bean any))
 // CheckConsistencyFor test that all matching database entries are consistent
 func CheckConsistencyFor(t *testing.T, beansToCheck ...any) {
 	FlushAsyncCalcs(t)
+	checkClaims := false
 	for _, bean := range beansToCheck {
+		if tb, err := db.TableInfo(bean); err == nil && (tb.Name == "user" || tb.Name == "repository") {
+			checkClaims = true
+		}
 		sliceType := reflect.SliceOf(reflect.TypeOf(bean))
 		sliceValue := reflect.MakeSlice(sliceType, 0, 10)
 
@@ -42,6 +46,35 @@ func CheckConsistencyFor(t *testing.T, beansToCheck ...any) {
 			checkForConsistency(t, entity)
 		}
 	}
+	if checkClaims {
+		CheckRepoGroupNameClaims(t)
+	}
+}
+
+// CheckRepoGroupNameClaims checks that the name claims of every owner are exactly its root repository names
+// (trashed ones included) and its group names, that no claim outlives its owner, and that every repository in a
+// group is in a group of its owner and carries that group's name.
+func CheckRepoGroupNameClaims(t *testing.T) {
+	type claim struct {
+		OwnerID   int64
+		LowerName string
+	}
+	e := db.GetEngine(db.DefaultContext)
+	var claims, names []claim
+	require.NoError(t, e.SQL("SELECT owner_id, lower_name FROM repo_group_name_claim").Find(&claims))
+	require.NoError(t, e.SQL("SELECT owner_id, lower_name FROM repository WHERE group_id = 0 UNION ALL SELECT owner_id, lower_name FROM repo_group").Find(&names))
+	assert.ElementsMatch(t, names, claims, "name claims must be the root repository names and group names of each owner")
+
+	var orphans int64
+	_, err := e.SQL("SELECT COUNT(*) FROM repo_group_name_claim WHERE owner_id NOT IN (SELECT id FROM `user`)").Get(&orphans)
+	require.NoError(t, err)
+	assert.Zero(t, orphans, "name claims of an owner that doesn't exist")
+
+	var strays int64
+	_, err = e.SQL("SELECT COUNT(*) FROM repository LEFT JOIN repo_group ON repo_group.id = repository.group_id AND repo_group.owner_id = repository.owner_id " +
+		"WHERE repository.group_id <> 0 AND (repo_group.id IS NULL OR repo_group.name <> repository.group_name)").Get(&strays)
+	require.NoError(t, err)
+	assert.Zero(t, strays, "repositories whose group is missing, of another owner, or named differently")
 }
 
 func checkForConsistency(t *testing.T, bean any) {
