@@ -17,6 +17,9 @@
 # Each shard is its own machine, so integration shards share no state.
 set -euo pipefail
 
+# Every run, pull requests included, runs all end-to-end tests, so develop sees no spec a PR skipped.
+RUN_ALL_E2E=true
+
 # Forgejo tests use SQLite unless told otherwise
 export TAGS='sqlite sqlite_unlock_notify' TEST_TAGS='sqlite sqlite_unlock_notify'
 

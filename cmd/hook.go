@@ -196,7 +196,6 @@ Forgejo or set your environment appropriately.`, "")
 	reponame := os.Getenv(repo_module.EnvRepoName)
 	userID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvPusherID), 10, 64)
 	prID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvPRID), 10, 64)
-	deployKeyID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvDeployKeyID), 10, 64)
 	deployKeyKeyID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvDeployPublicKeyID), 10, 64)
 	actionTaskID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvActionTaskID), 10, 64)
 
@@ -207,7 +206,6 @@ Forgejo or set your environment appropriately.`, "")
 		GitQuarantinePath:               os.Getenv(private.GitQuarantinePath),
 		GitPushOptions:                  pushoptions.New().ReadEnv().Map(),
 		PullRequestID:                   prID,
-		DeployKeyID:                     deployKeyID,
 		DeployKeyKeyID:                  deployKeyKeyID,
 		ActionTaskID:                    actionTaskID,
 	}

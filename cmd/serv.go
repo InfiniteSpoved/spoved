@@ -32,7 +32,6 @@ import (
 	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
-	"forgejo.org/modules/util"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/kballard/go-shellquote"
@@ -382,8 +381,6 @@ func runServ(ctx context.Context, c *cli.Command) error {
 		repo_module.EnvRepoID+"="+strconv.FormatInt(results.RepoID, 10),
 		repo_module.EnvPRID+"="+fmt.Sprintf("%d", 0),
 		repo_module.EnvDeployPublicKeyID+"="+fmt.Sprintf("%d", results.DeployKeyKeyID),
-		// -1 for a deploy key: an older hook looks it up by ID, finds nothing and refuses the push
-		repo_module.EnvDeployKeyID+"="+util.Iif(results.DeployKeyKeyID != 0, "-1", "0"),
 		repo_module.EnvKeyID+"="+fmt.Sprintf("%d", results.KeyID),
 		repo_module.EnvAppURL+"="+setting.AppURL,
 	)

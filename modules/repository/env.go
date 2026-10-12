@@ -23,7 +23,6 @@ const (
 	EnvPusherEmail       = "GITEA_PUSHER_EMAIL"
 	EnvPusherID          = "GITEA_PUSHER_ID"
 	EnvKeyID             = "GITEA_KEY_ID"               // public key ID
-	EnvDeployKeyID       = "GITEA_DEPLOY_KEY_ID"        // legacy, -1 for a deploy key so an older hook refuses; the hook refuses it alone
 	EnvDeployPublicKeyID = "GITEA_DEPLOY_PUBLIC_KEY_ID" // public key ID of the deploy key in use
 	EnvPRID              = "GITEA_PR_ID"
 	EnvPushTrigger       = "GITEA_PUSH_TRIGGER"
