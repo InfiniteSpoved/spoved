@@ -121,6 +121,8 @@ var ignoredErrorMessage = []string{
 
 	// TestDangerZoneConfirmation/Convert_fork/Fail
 	`/gitea-repositories/user20/big_test_public_fork_7.git Error: no such file or directory`,
+	// TestRepoGroupLFS
+	`by user <User 2:user2> with force true: Error: lfs lock does not exist [id: `,
 	// TestGitSmartHTTP
 	`:sendFile() [E] request file path contains invalid path: objects/info/..\..\..\..\custom\conf\app.ini`,
 	// TestGit/HTTP/BranchProtectMerge

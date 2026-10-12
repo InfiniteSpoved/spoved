@@ -6,6 +6,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -21,6 +22,7 @@ import (
 	asymkey_model "forgejo.org/models/asymkey"
 	git_model "forgejo.org/models/git"
 	"forgejo.org/models/perm"
+	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/json"
@@ -183,6 +185,47 @@ func sshClientIP(sshConnection string) string {
 	return ""
 }
 
+// splitServRepoPath splits the path of an SSH command, `owner/repo` or `owner/project/repo` with an optional
+// `.git`, into the owner and the repository path within the owner (`repo` or `project/repo`).
+func splitServRepoPath(repoPath string) (owner, repo string, err error) {
+	segments := strings.Split(repoPath, "/")
+	if len(segments) != 2 && len(segments) != 3 {
+		return "", "", errors.New("Invalid repository path")
+	}
+	segments[len(segments)-1] = strings.TrimSuffix(segments[len(segments)-1], ".git")
+	for _, s := range segments[1:] {
+		if s == "" || alphaDashDotPattern.MatchString(s) {
+			return "", "", errors.New("Invalid repo name")
+		}
+	}
+	return segments[0], strings.Join(segments[1:], "/"), nil
+}
+
+// servRepoPath returns the directory of the repository the server found, never the path the client sent.
+func servRepoPath(results *private.ServCommandResults) (string, error) {
+	for _, s := range []string{results.OwnerName, results.GroupName, results.RepoName} {
+		if alphaDashDotPattern.MatchString(s) {
+			return "", fmt.Errorf("invalid name in the repository path: %q", s)
+		}
+	}
+	if results.OwnerName == "" || results.RepoName == "" {
+		return "", errors.New("missing name in the repository path")
+	}
+	if results.IsWiki {
+		return repo_model.GroupWikiPath(results.OwnerName, results.GroupName, results.RepoName), nil
+	}
+	return repo_model.GroupRepoPath(results.OwnerName, results.GroupName, results.RepoName), nil
+}
+
+// servLFSHref returns the LFS endpoint of the repository the server found.
+func servLFSHref(results *private.ServCommandResults) string {
+	group := ""
+	if results.GroupName != "" {
+		group = url.PathEscape(results.GroupName) + "/"
+	}
+	return setting.AppURL + url.PathEscape(results.OwnerName) + "/" + group + url.PathEscape(results.RepoName) + ".git/info/lfs"
+}
+
 func runServ(ctx context.Context, c *cli.Command) error {
 	ctx, cancel := installSignals(ctx)
 	defer cancel()
@@ -257,21 +300,9 @@ func runServ(ctx context.Context, c *cli.Command) error {
 		}
 	}
 
-	rr := strings.SplitN(repoPath, "/", 2)
-	if len(rr) != 2 {
-		return fail(ctx, "Invalid repository path", "Invalid repository path: %v", repoPath)
-	}
-
-	username := rr[0]
-	reponame := strings.TrimSuffix(rr[1], ".git")
-
-	// LowerCase and trim the repoPath as that's how they are stored.
-	// This should be done after splitting the repoPath into username and reponame
-	// so that username and reponame are not affected.
-	repoPath = strings.ToLower(strings.TrimSpace(repoPath))
-
-	if alphaDashDotPattern.MatchString(reponame) {
-		return fail(ctx, "Invalid repo name", "Invalid repo name: %s", reponame)
+	username, reponame, err := splitServRepoPath(repoPath)
+	if err != nil {
+		return fail(ctx, err.Error(), "%v: %s", err, repoPath)
 	}
 
 	if c.Bool("enable-pprof") {
@@ -315,7 +346,7 @@ func runServ(ctx context.Context, c *cli.Command) error {
 
 	// LFS token authentication
 	if verb == lfsAuthenticateVerb {
-		url := fmt.Sprintf("%s%s/%s.git/info/lfs", setting.AppURL, url.PathEscape(results.OwnerName), url.PathEscape(results.RepoName))
+		url := servLFSHref(results)
 
 		now := time.Now()
 		claims := lfs.Claims{
@@ -346,6 +377,11 @@ func runServ(ctx context.Context, c *cli.Command) error {
 			return fail(ctx, "Failed to encode LFS json response", "Failed to encode LFS json response: %v", err)
 		}
 		return nil
+	}
+
+	repoPath, err = servRepoPath(results)
+	if err != nil {
+		return fail(ctx, "Invalid repository path", "%v", err)
 	}
 
 	var gitcmd *exec.Cmd

@@ -155,6 +155,7 @@ func RestoreBranchPost(ctx *context.Context) {
 			NewCommitID:  deletedBranch.CommitID,
 			PusherID:     ctx.Doer.ID,
 			PusherName:   ctx.Doer.Name,
+			RepoID:       ctx.Repo.Repository.ID,
 			RepoUserName: ctx.Repo.Owner.Name,
 			RepoName:     ctx.Repo.Repository.Name,
 		},

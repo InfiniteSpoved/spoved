@@ -42,18 +42,27 @@ type ServCommandResults struct {
 	UserEmail      string
 	UserID         int64
 	OwnerName      string
+	GroupName      string // the project of a repository in one, from the database
 	RepoName       string
 	RepoID         int64
 	ExpiresUnix    timeutil.TimeStamp // expiry of the key (deploy key or public key) used, 0 = never
 }
 
 // ServCommand preps for a serv call
+// repoName is `repo` or, for a repository in a project, `project/repo`.
 // clientIP is the SSH client address, for the IP allowlist.
 func ServCommand(ctx context.Context, keyID int64, ownerName, repoName string, mode perm.AccessMode, clientIP string, verbs ...string) (*ServCommandResults, ResponseExtra) {
 	var reqURL strings.Builder
-	fmt.Fprintf(&reqURL, "/api/internal/serv/command/%d/%s/%s?mode=%d&ip=%s",
+	group, repoName, _ := strings.Cut(repoName, "/")
+	if repoName == "" {
+		group, repoName = "", group
+	} else {
+		group = url.PathEscape(group) + "/"
+	}
+	fmt.Fprintf(&reqURL, "/api/internal/serv/command/%d/%s/%s%s?mode=%d&ip=%s",
 		keyID,
 		url.PathEscape(ownerName),
+		group,
 		url.PathEscape(repoName),
 		mode,
 		url.QueryEscape(clientIP))

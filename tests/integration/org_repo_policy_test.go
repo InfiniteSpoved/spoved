@@ -141,7 +141,7 @@ func TestOrgRepoPolicyPushOption(t *testing.T) {
 		keys := createProtectionTestDeployKeys(t, APITestContext{Username: "org3", Reponame: "policy-push", Token: orgPolicyToken(t, "user2")})
 
 		preReceive := func(userID, deployKeyKeyID int64, options map[string]string) private.ResponseExtra {
-			return private.HookPreReceive(t.Context(), "org3", "policy-push", private.HookOptions{UserID: userID, DeployKeyKeyID: deployKeyKeyID, GitPushOptions: options})
+			return private.HookPreReceive(t.Context(), repoIDByName(t, "org3", "policy-push"), private.HookOptions{UserID: userID, DeployKeyKeyID: deployKeyKeyID, GitPushOptions: options})
 		}
 		toPrivate := map[string]string{"repo.private": "true"}
 
@@ -393,7 +393,7 @@ func TestOrgRepoPolicySiteFloorPushOption(t *testing.T) {
 	setOrgRepoPolicies(t, false, user_model.PrivateForkAll)
 	orgPolicyRepo(t, "floor-push", false)
 	preReceive := func(userID int64, options map[string]string) private.ResponseExtra {
-		return private.HookPreReceive(t.Context(), "org3", "floor-push", private.HookOptions{UserID: userID, GitPushOptions: options})
+		return private.HookPreReceive(t.Context(), repoIDByName(t, "org3", "floor-push"), private.HookOptions{UserID: userID, GitPushOptions: options})
 	}
 	toPrivate := map[string]string{"repo.private": "true"}
 

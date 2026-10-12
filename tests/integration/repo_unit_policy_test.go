@@ -533,7 +533,7 @@ func TestRepoUnitPolicyEntryPaths(t *testing.T) {
 		require.Error(t, extra.Error)
 
 		// AGit pushes need Pull requests
-		extra = private.HookPreReceive(t.Context(), "org3", "repo3", private.HookOptions{
+		extra = private.HookPreReceive(t.Context(), repoIDByName(t, "org3", "repo3"), private.HookOptions{
 			UserID: 2, UserName: "user2", RefFullNames: []git.RefName{"refs/for/master/topic"},
 			OldCommitIDs: []string{git.Sha1ObjectFormat.EmptyObjectID().String()}, NewCommitIDs: []string{"65f1bf27bc3bf70f64657658635e66094edbcb4d"},
 		})

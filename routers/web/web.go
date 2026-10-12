@@ -2036,7 +2036,7 @@ func registerGitLFSRoutes(m *web.Route) {
 			return
 		}
 	}
-	m.Group("/{username}/{reponame}/info/lfs", func() {
+	lfsRoutes := func() {
 		m.Post("/objects/batch", lfs.CheckAcceptMediaType, lfs.BatchHandler)
 		m.Put("/objects/{oid}/{size}", lfs.UploadHandler)
 		m.Get("/objects/{oid}/{filename}", lfs.DownloadHandler)
@@ -2051,11 +2051,17 @@ func registerGitLFSRoutes(m *web.Route) {
 		m.Any("/*", func(ctx *context.Context) {
 			ctx.NotFound("", nil)
 		})
-	}, ignoreCSRF, lfsServerEnabled)
+	}
+	m.Group("/{username}/{reponame}/info/lfs", lfsRoutes, ignoreCSRF, lfsServerEnabled)
+	m.Group("/{username}/{groupname}/{reponame}/info/lfs", lfsRoutes, ignoreCSRF, lfsServerEnabled) // a repository in a project
 }
 
 func registerGitRoutes(m *web.Route) {
 	m.Group("/{username}/{reponame}", func() {
+		gitHTTPRouters(m)
+	})
+	// a repository in a project
+	m.Group("/{username}/{groupname}/{reponame}", func() {
 		gitHTTPRouters(m)
 	})
 }
@@ -2068,7 +2074,18 @@ func registerMixedRoutes(m *web.Route) {
 		}
 	}
 
-	m.Group("/{username}/{reponame}", func() {
+	// root repositories, and repositories in a project in both link forms
+	for _, repoPath := range []string{"/{username}/{reponame}", "/{username}/{groupname}/{reponame}", "/{username}/{groupname}/{reponame}/-"} {
+		registerMixedRepoRoutes(m, repoPath, dlSourceEnabled)
+	}
+
+	m.Group("", func() {
+		m.Methods("GET, OPTIONS", "/attachments/{uuid}", optionsCorsHandler(), repo.GetAttachment)
+	}, ignSignIn)
+}
+
+func registerMixedRepoRoutes(m *web.Route, repoPath string, dlSourceEnabled func(ctx *context.Context)) {
+	m.Group(repoPath, func() {
 		m.Group("/raw", func() {
 			m.Get("/branch/*", context.RepoRefByType(context.RepoRefBranch), repo.SingleDownload)
 			m.Get("/tag/*", context.RepoRefByType(context.RepoRefTag), repo.SingleDownload)
@@ -2084,18 +2101,14 @@ func registerMixedRoutes(m *web.Route) {
 		}, repo.MustBeNotEmpty, dlSourceEnabled, reqRepoCodeReader)
 	}, ignSignIn, context.RepoAssignment, context.UnitTypes())
 
-	m.Group("/{username}/{reponame}", func() {
+	m.Group(repoPath, func() {
 		m.Get("/releases/download/{vTag}/{fileName}", repo.MustBeNotEmpty, repo.RedirectDownload)
 	}, ignSignIn, context.RepoAssignment, context.UnitTypes(), reqRepoReleaseReader)
 
 	// to maintain compatibility with old attachments
-	m.Group("/{username}/{reponame}", func() {
+	m.Group(repoPath, func() {
 		m.Get("/attachments/{uuid}", repo.GetAttachment)
 	}, ignSignIn, context.RepoAssignment, context.UnitTypes())
-
-	m.Group("", func() {
-		m.Methods("GET, OPTIONS", "/attachments/{uuid}", optionsCorsHandler(), repo.GetAttachment)
-	}, ignSignIn)
 }
 
 func BindUpload() http.HandlerFunc {

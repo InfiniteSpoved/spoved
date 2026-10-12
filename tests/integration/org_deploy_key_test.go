@@ -131,7 +131,7 @@ func TestOrgDeployKey(t *testing.T) {
 		opts.NewCommitIDs = []string{newCommitID}
 		opts.RefFullNames = []git.RefName{ref}
 		opts.UserID = 3 // the owner, as serv sets it: never what decides
-		return private.HookPreReceive(ctx, "org3", "repo3", opts)
+		return private.HookPreReceive(ctx, repoIDByName(t, "org3", "repo3"), opts)
 	}
 	keyHook := func(keyID int64, oldCommitID, newCommitID string, ref git.RefName) private.ResponseExtra {
 		return hook(private.HookOptions{DeployKeyKeyID: keyID}, oldCommitID, newCommitID, ref)

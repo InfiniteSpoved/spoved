@@ -553,8 +553,11 @@ func RepoAssignment(ctx *Context) context.CancelFunc {
 	ctx.Data["ContextUser"] = ctx.ContextUser
 	ctx.Data["Username"] = ctx.Repo.Owner.Name
 
+	// a repository in a project, reached on its own route (git, LFS, downloads); never resolved or redirected
+	groupName := ctx.Params(":groupname")
+
 	// redirect link to wiki
-	if strings.HasSuffix(repoName, ".wiki") {
+	if strings.HasSuffix(repoName, ".wiki") && groupName == "" {
 		// ctx.Req.URL.Path does not have the preceding appSubURL - any redirect must have this added
 		// Now we happen to know that all of our paths are: /:username/:reponame/whatever_else
 		originalRepoName := ctx.Params(":reponame")
@@ -575,13 +578,21 @@ func RepoAssignment(ctx *Context) context.CancelFunc {
 
 	// Get repository.
 	var repo *repo_model.Repository
-	if strings.HasPrefix(repoName, "@") {
+	if groupName != "" {
+		repo, err = repo_model.GetRepositoryByPath(ctx, owner.ID, groupName, repoName)
+	} else if strings.HasPrefix(repoName, "@") {
 		repo, err = markedRepository(ctx, owner, repoName)
 	} else {
 		repo, err = repo_model.GetRepositoryByName(ctx, owner.ID, repoName)
 	}
 	if err != nil {
 		if repo_model.IsErrRepoNotExist(err) {
+			if groupName != "" {
+				if !ctx.twoFactorBlockedPage(owner) {
+					ctx.NotFound("GetRepositoryByPath", nil)
+				}
+				return nil
+			}
 			if ctx.ResolveRepoGroupPath() {
 				return nil
 			}
