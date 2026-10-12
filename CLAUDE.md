@@ -2,6 +2,8 @@
 
 `InfiniteSpoved/spoved` is the repository of spoved, a fork of Forgejo (Codeberg `forgejo/forgejo`).
 
+spoved is meant to replace GitLab, GitHub, Azure DevOps and Bitbucket, combining the best of them, free and open source, easy for companies to adopt, and helping them reach SOC 2 and ISO 27001 compliance faster. When choosing between options, prefer what users of those products already know and what makes compliance evidence easy (audit trails, enforced policies, expiry, access reviews).
+
 - There is no `main` branch and no automatic upstream sync. Don't recreate `main`; merge anything from Forgejo by hand.
 - `develop` is the default branch. All PRs target `develop`. Merge `origin/develop` into feature branches with a merge commit; don't rebase pushed branches.
 - Commit with `git commit -s` (DCO sign-off, see CONTRIBUTING.md); `tools/check-dco.sh` checks a PR's own commits.
