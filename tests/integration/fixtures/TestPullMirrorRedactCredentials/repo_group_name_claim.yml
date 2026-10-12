@@ -1,0 +1,5 @@
+# one row per root repository in repository.yml (and per repo_group), see RepoGroupNameClaim
+-
+  id: 1001
+  owner_id: 2
+  lower_name: repo1001
