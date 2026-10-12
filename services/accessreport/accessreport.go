@@ -171,7 +171,7 @@ func Compute(ctx context.Context, opts Options) ([]*Row, error) {
 	}
 	// a trashed repository has no access, as in GetUserRepoPermission
 	for _, k := range keys {
-		if repo := byID[k.RepoID]; !repo.IsTrashed() {
+		if repo := byID[k.RepoID]; repo != nil && !repo.IsTrashed() {
 			rows = append(rows, deployKeyRow(&Row{DeployKey: k, Repo: repo}, KindDeployKey, k.Mode, k.IsExpired()))
 		}
 	}
@@ -180,7 +180,7 @@ func Compute(ctx context.Context, opts Options) ([]*Row, error) {
 		return nil, err
 	}
 	for _, k := range orgKeys {
-		if repo := byID[k.RepoID]; !repo.IsTrashed() {
+		if repo := byID[k.RepoID]; repo != nil && !repo.IsTrashed() {
 			rows = append(rows, deployKeyRow(&Row{OrgDeployKey: &k.OrgDeployKey, Repo: repo}, KindOrgDeployKey, k.Mode, k.IsExpired()))
 		}
 	}

@@ -1,3 +1,6 @@
+// Copyright 2026 The spoved contributors. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // @watch start
 // templates/org/settings/deploy_keys.tmpl
 // templates/org/settings/deploy_key_scope.tmpl
@@ -27,7 +30,7 @@ test('org deploy key with selected repositories', async ({page}) => {
   const response = await page.goto('/org/org3/settings/keys');
   expect(response?.status()).toBe(200);
 
-  await page.getByRole('button', {name: 'Add deploy key'}).first().click();
+  await page.locator('.org-setting-content > h4').getByRole('button', {name: 'Add deploy key'}).click();
   const form = page.locator('#add-deploy-key-panel form');
   await form.locator('input[name="title"]').fill(name);
   await form.locator('textarea[name="content"]').fill(newPublicKey());
