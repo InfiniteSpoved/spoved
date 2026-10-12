@@ -140,15 +140,18 @@ func TestOrgRepoPolicyPushOption(t *testing.T) {
 		repo := orgPolicyRepo(t, "policy-push", false)
 		keys := createProtectionTestDeployKeys(t, APITestContext{Username: "org3", Reponame: "policy-push", Token: orgPolicyToken(t, "user2")})
 
-		preReceive := func(userID, deployKeyID int64, options map[string]string) private.ResponseExtra {
-			return private.HookPreReceive(t.Context(), "org3", "policy-push", private.HookOptions{UserID: userID, DeployKeyID: deployKeyID, GitPushOptions: options})
+		preReceive := func(userID, deployKeyKeyID int64, options map[string]string) private.ResponseExtra {
+			return private.HookPreReceive(t.Context(), "org3", "policy-push", private.HookOptions{UserID: userID, DeployKeyKeyID: deployKeyKeyID, GitPushOptions: options})
 		}
 		toPrivate := map[string]string{"repo.private": "true"}
 
-		for _, refused := range []private.ResponseExtra{preReceive(4, 0, toPrivate), preReceive(3, keys["listed"].id, toPrivate)} {
-			assert.Equal(t, http.StatusForbidden, refused.StatusCode)
-			assert.Contains(t, refused.UserMsg, "restrict_repo_visibility_change")
-		}
+		refused := preReceive(4, 0, toPrivate)
+		assert.Equal(t, http.StatusForbidden, refused.StatusCode)
+		assert.Contains(t, refused.UserMsg, "restrict_repo_visibility_change")
+		// a deploy key has no permission of the organization it pushes as, so it can't change settings at all
+		refused = preReceive(3, keys["listed"].keyID, toPrivate)
+		assert.Equal(t, http.StatusForbidden, refused.StatusCode)
+		assert.Contains(t, refused.UserMsg, "permission denied for changing repo settings")
 		// unchanged visibility and other options pass
 		require.NoError(t, preReceive(4, 0, map[string]string{"repo.private": "false", "repo.template": "true"}).Error)
 		// the owner and a site admin can

@@ -172,7 +172,7 @@ func (ctx *preReceiveContext) validatePushOptions() error {
 		if err := ctx.canChangeSettings(); err != nil {
 			return err
 		}
-		// the visibility policy of the repository's organization; a deploy key pushes as the organization and is refused
+		// the visibility policy of the repository's organization (a deploy key has no permission, canChangeSettings refused it)
 		repo := ctx.Repo.Repository
 		if opts.GetGitPushOptions().GetBool(pushoptions.RepoPrivate, repo.IsPrivate) != repo.IsPrivate {
 			return repo_module.CheckOrgPolicy(ctx, ctx.user, repo, repo_module.OrgPolicyVisibility, nil)
@@ -235,6 +235,16 @@ func HookPreReceive(ctx *app_context.PrivateContext) {
 		PrivateContext: ctx,
 		env:            generateGitEnv(opts), // Generate git environment for checking commits
 		opts:           opts,
+	}
+
+	// GITEA_DEPLOY_KEY_ID without GITEA_DEPLOY_PUBLIC_KEY_ID comes from an older serv: refuse rather than guess
+	if opts.DeployKeyID != 0 && opts.DeployKeyKeyID == 0 {
+		ctx.JSON(http.StatusForbidden, private.Response{UserMsg: "The deploy key environment is outdated, please retry the push."})
+		return
+	}
+	// a deploy key that no longer applies is refused before anything else looks at the push
+	if opts.DeployKeyKeyID != 0 && !ourCtx.loadPusherAndPermission() {
+		return
 	}
 
 	if !ourCtx.assertPushOptions() {
@@ -339,8 +349,8 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 	//
 	// 1. Detect and prevent deletion of the branch, unless the pusher is in the delete allow-list
 	if newCommitID == objectFormat.EmptyObjectID().String() {
-		if ctx.opts.DeployKeyID != 0 && protectBranch.CanDeployKeyDelete(ctx.deployKeyKeyID) ||
-			ctx.opts.DeployKeyID == 0 && protectBranch.CanUserDelete(ctx, ctx.user) {
+		if ctx.opts.DeployKeyKeyID != 0 && protectBranch.CanDeployKeyDelete(ctx.deployKeyKeyID) ||
+			ctx.opts.DeployKeyKeyID == 0 && protectBranch.CanUserDelete(ctx, ctx.user) {
 			return true
 		}
 		log.Warn("Forbidden: Branch: %s in %-v is protected from deletion", branchName, repo)
@@ -360,8 +370,8 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 				Err: fmt.Sprintf("Fail to detect force push: %v", err),
 			})
 			return false
-		} else if len(output) > 0 && !(ctx.opts.DeployKeyID != 0 && protectBranch.CanDeployKeyForcePush(ctx.deployKeyKeyID) ||
-			ctx.opts.DeployKeyID == 0 && protectBranch.CanUserForcePush(ctx, ctx.user)) {
+		} else if len(output) > 0 && !(ctx.opts.DeployKeyKeyID != 0 && protectBranch.CanDeployKeyForcePush(ctx.deployKeyKeyID) ||
+			ctx.opts.DeployKeyKeyID == 0 && protectBranch.CanUserForcePush(ctx, ctx.user)) {
 			log.Warn("Forbidden: Branch: %s in %-v is protected from force push", branchName, repo)
 			ctx.JSON(http.StatusForbidden, private.Response{
 				UserMsg: fmt.Sprintf("branch %s is protected from force push", branchName),
@@ -415,7 +425,7 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 
 	// 5. Check if the doer is allowed to push
 	var canPush bool
-	if ctx.opts.DeployKeyID != 0 {
+	if ctx.opts.DeployKeyKeyID != 0 {
 		canPush = !changedProtectedfiles && protectBranch.CanDeployKeyPush(ctx.deployKeyKeyID)
 	} else {
 		user, err := user_model.GetUserByID(ctx, ctx.opts.UserID)
@@ -571,7 +581,7 @@ func preReceiveTag(ctx *preReceiveContext, oldCommitID, newCommitID string, refF
 
 	var isAllowed bool
 	var err error
-	if ctx.opts.DeployKeyID != 0 {
+	if ctx.opts.DeployKeyKeyID != 0 {
 		// ctx.opts.UserID is the repository owner for deploy keys, so only the key itself decides.
 		isAllowed, err = git_model.IsDeployKeyAllowedToControlTag(ctx.protectedTags, tagName, ctx.deployKeyKeyID)
 	} else {
@@ -717,7 +727,35 @@ func (ctx *preReceiveContext) loadPusherAndPermission() bool {
 		return true
 	}
 
-	if ctx.opts.UserID == user_model.ActionsUserID {
+	if ctx.opts.DeployKeyKeyID != 0 {
+		// A deploy key acts as itself: decided from the key and the repository as they are now, never from the
+		// pusher ID, and without the owner's permission. The owner is only the name the push is recorded under.
+		repo := ctx.Repo.Repository
+		deployKey, err := asymkey_model.GetEffectiveDeployKey(ctx, ctx.opts.DeployKeyKeyID, repo)
+		if err != nil && !asymkey_model.IsErrDeployKeyNotExist(err) {
+			log.Error("Unable to get the deploy key of public key %d in %-v: %v", ctx.opts.DeployKeyKeyID, repo, err)
+			ctx.JSON(http.StatusInternalServerError, private.Response{
+				Err: fmt.Sprintf("Unable to get the deploy key of public key %d", ctx.opts.DeployKeyKeyID),
+			})
+			return false
+		}
+		if err != nil || deployKey.IsExpired() {
+			ctx.JSON(http.StatusForbidden, private.Response{
+				UserMsg: fmt.Sprintf("The deploy key is not authorized to push to %s/%s.", repo.OwnerName, repo.Name),
+			})
+			return false
+		}
+		if err := repo.LoadOwner(ctx); err != nil {
+			log.Error("Unable to load the owner of %-v: %v", repo, err)
+			ctx.JSON(http.StatusInternalServerError, private.Response{
+				Err: fmt.Sprintf("Unable to load the owner of %s/%s", repo.OwnerName, repo.Name),
+			})
+			return false
+		}
+		ctx.user = repo.Owner
+		ctx.deployKeyAccessMode = deployKey.Mode
+		ctx.deployKeyKeyID = deployKey.KeyID
+	} else if ctx.opts.UserID == user_model.ActionsUserID {
 		ctx.user = user_model.NewActionsUser()
 		// Without a task (a push made by the server as the Actions user), the Actions user may do nothing.
 		if ctx.opts.ActionTaskID != 0 {
@@ -753,19 +791,6 @@ func (ctx *preReceiveContext) loadPusherAndPermission() bool {
 			return false
 		}
 		ctx.userPerm = userPerm
-	}
-
-	if ctx.opts.DeployKeyID != 0 {
-		deployKey, err := asymkey_model.GetDeployKeyByID(ctx, ctx.opts.DeployKeyID)
-		if err != nil {
-			log.Error("Unable to get DeployKey id %d Error: %v", ctx.opts.DeployKeyID, err)
-			ctx.JSON(http.StatusInternalServerError, private.Response{
-				Err: fmt.Sprintf("Unable to get DeployKey id %d Error: %v", ctx.opts.DeployKeyID, err),
-			})
-			return false
-		}
-		ctx.deployKeyAccessMode = deployKey.Mode
-		ctx.deployKeyKeyID = deployKey.KeyID
 	}
 
 	ctx.loadedPusher = true

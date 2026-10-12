@@ -185,7 +185,7 @@ func setTagsContext(ctx *context.Context) error {
 func setAllowlistDeployKeyIDs(ctx *context.Context, pt *git_model.ProtectedTag, keyIDs string) bool {
 	ids, _ := base.StringsToInt64s(strings.Split(keyIDs, ","))
 	var err error
-	pt.AllowlistDeployKeyIDs, err = git_model.FilterWriteDeployKeyIDs(ctx, ctx.Repo.Repository.ID, ids)
+	pt.AllowlistDeployKeyIDs, err = git_model.FilterWriteDeployKeyIDs(ctx, ctx.Repo.Repository, ids)
 	if err != nil {
 		ctx.ServerError("FilterWriteDeployKeyIDs", err)
 		return false

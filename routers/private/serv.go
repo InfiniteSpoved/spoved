@@ -304,11 +304,11 @@ func ServCommand(ctx *context.PrivateContext) {
 	// Deploy Keys have ownerID set to 0 therefore we can't use the owner
 	// So now we need to check if the key is a deploy key
 	// We'll keep hold of the deploy key here for permissions checking
-	var deployKey *asymkey_model.DeployKey
+	var deployKey *asymkey_model.EffectiveDeployKey
 	var user *user_model.User
 	if key.Type == asymkey_model.KeyTypeDeploy {
 		var err error
-		deployKey, err = asymkey_model.GetDeployKeyByRepo(ctx, key.ID, repo.ID)
+		deployKey, err = asymkey_model.GetEffectiveDeployKey(ctx, key.ID, repo)
 		if err != nil {
 			if asymkey_model.IsErrDeployKeyNotExist(err) {
 				ctx.JSON(http.StatusNotFound, private.Response{
@@ -328,7 +328,8 @@ func ServCommand(ctx *context.PrivateContext) {
 			})
 			return
 		}
-		results.DeployKeyID = deployKey.ID
+		// the hook decides again from the public key and the repository, never from the pusher ID
+		results.DeployKeyKeyID = key.ID
 		results.KeyName = deployKey.Name
 		results.ExpiresUnix = deployKey.ExpiresUnix
 
@@ -510,9 +511,16 @@ func ServCommand(ctx *context.PrivateContext) {
 			return
 		}
 	}
-	sshLogger.Info("Serv Results:\n\tIsWiki: %t\n\tDeployKeyID: %d\n\tKeyID: %d\tKeyName: %s\n\tUserName: %s\n\tUserID: %d\n\tOwnerName: %s\n\tRepoName: %s\n\tRepoID: %d",
+	deployKeySource := ""
+	if deployKey != nil && deployKey.RepoKey != nil {
+		deployKeySource = fmt.Sprintf("repo %d", deployKey.RepoKey.ID)
+	} else if deployKey != nil {
+		deployKeySource = fmt.Sprintf("org %d", deployKey.OrgKey.ID)
+	}
+	sshLogger.Info("Serv Results:\n\tIsWiki: %t\n\tDeployKeyKeyID: %d\tDeployKey: %s\n\tKeyID: %d\tKeyName: %s\n\tUserName: %s\n\tUserID: %d\n\tOwnerName: %s\n\tRepoName: %s\n\tRepoID: %d",
 		results.IsWiki,
-		results.DeployKeyID,
+		results.DeployKeyKeyID,
+		deployKeySource,
 		results.KeyID,
 		results.KeyName,
 		results.UserName,

@@ -610,12 +610,12 @@ func updateDeployKeyWhitelist(ctx context.Context, repo *repo_model.Repository, 
 		return currentWhitelist, nil
 	}
 
-	return FilterWriteDeployKeyIDs(ctx, repo.ID, newWhitelist)
+	return FilterWriteDeployKeyIDs(ctx, repo, newWhitelist)
 }
 
 // FilterWriteDeployKeyIDs returns the public key IDs from keyIDs which belong to a deploy key
-// of the repository with write access.
-func FilterWriteDeployKeyIDs(ctx context.Context, repoID int64, keyIDs []int64) ([]int64, error) {
+// of the repository, or an organization deploy key covering it, with write access.
+func FilterWriteDeployKeyIDs(ctx context.Context, repo *repo_model.Repository, keyIDs []int64) ([]int64, error) {
 	filtered := make([]int64, 0, len(keyIDs))
 	if len(keyIDs) == 0 {
 		return filtered, nil
@@ -623,16 +623,26 @@ func FilterWriteDeployKeyIDs(ctx context.Context, repoID int64, keyIDs []int64) 
 
 	keys, err := db.Find[asymkey_model.DeployKey](ctx, asymkey_model.ListDeployKeysOptions{
 		ListOptions: db.ListOptionsAll,
-		RepoID:      repoID,
+		RepoID:      repo.ID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("ListDeployKeys [repo_id: %d]: %w", repoID, err)
+		return nil, fmt.Errorf("ListDeployKeys [repo_id: %d]: %w", repo.ID, err)
+	}
+	orgKeys, err := asymkey_model.FindOrgDeployKeysCoveringRepo(ctx, repo)
+	if err != nil {
+		return nil, err
 	}
 
-	for _, key := range keys {
-		if key.Mode >= perm.AccessModeWrite && slices.Contains(keyIDs, key.KeyID) && !slices.Contains(filtered, key.KeyID) {
-			filtered = append(filtered, key.KeyID)
+	add := func(mode perm.AccessMode, keyID int64) {
+		if mode >= perm.AccessModeWrite && slices.Contains(keyIDs, keyID) && !slices.Contains(filtered, keyID) {
+			filtered = append(filtered, keyID)
 		}
+	}
+	for _, key := range keys {
+		add(key.Mode, key.KeyID)
+	}
+	for _, key := range orgKeys {
+		add(key.Mode, key.KeyID)
 	}
 
 	return filtered, nil

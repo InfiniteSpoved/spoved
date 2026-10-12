@@ -269,11 +269,11 @@ func TestOrgTwoFactorRequired(t *testing.T) {
 		require.NoError(t, extra.Error)
 		assert.Equal(t, int64(3), results.UserID)
 		hook := private.HookPreReceive(ctx, "org3", "repo3", private.HookOptions{
-			OldCommitIDs: []string{git.Sha1ObjectFormat.EmptyObjectID().String()},
-			NewCommitIDs: []string{"2a47ca4b614a9f5a43abbd5ad851a54a616ffee6"},
-			RefFullNames: []git.RefName{git.RefNameFromBranch("deploy-key")},
-			UserID:       results.UserID,
-			DeployKeyID:  results.DeployKeyID,
+			OldCommitIDs:   []string{git.Sha1ObjectFormat.EmptyObjectID().String()},
+			NewCommitIDs:   []string{"2a47ca4b614a9f5a43abbd5ad851a54a616ffee6"},
+			RefFullNames:   []git.RefName{git.RefNameFromBranch("deploy-key")},
+			UserID:         results.UserID,
+			DeployKeyKeyID: results.DeployKeyKeyID,
 		})
 		require.NoError(t, hook.Error)
 	})

@@ -15,20 +15,21 @@ import (
 
 // env keys for git hooks need
 const (
-	EnvRepoName     = "GITEA_REPO_NAME"
-	EnvRepoUsername = "GITEA_REPO_USER_NAME"
-	EnvRepoID       = "GITEA_REPO_ID"
-	EnvRepoIsWiki   = "GITEA_REPO_IS_WIKI"
-	EnvPusherName   = "GITEA_PUSHER_NAME"
-	EnvPusherEmail  = "GITEA_PUSHER_EMAIL"
-	EnvPusherID     = "GITEA_PUSHER_ID"
-	EnvKeyID        = "GITEA_KEY_ID" // public key ID
-	EnvDeployKeyID  = "GITEA_DEPLOY_KEY_ID"
-	EnvPRID         = "GITEA_PR_ID"
-	EnvPushTrigger  = "GITEA_PUSH_TRIGGER"
-	EnvIsInternal   = "GITEA_INTERNAL_PUSH"
-	EnvAppURL       = "GITEA_ROOT_URL"
-	EnvActionTaskID = "GITEA_ACTION_TASK_ID"
+	EnvRepoName          = "GITEA_REPO_NAME"
+	EnvRepoUsername      = "GITEA_REPO_USER_NAME"
+	EnvRepoID            = "GITEA_REPO_ID"
+	EnvRepoIsWiki        = "GITEA_REPO_IS_WIKI"
+	EnvPusherName        = "GITEA_PUSHER_NAME"
+	EnvPusherEmail       = "GITEA_PUSHER_EMAIL"
+	EnvPusherID          = "GITEA_PUSHER_ID"
+	EnvKeyID             = "GITEA_KEY_ID"               // public key ID
+	EnvDeployKeyID       = "GITEA_DEPLOY_KEY_ID"        // legacy, no longer set: the pre-receive hook refuses it alone
+	EnvDeployPublicKeyID = "GITEA_DEPLOY_PUBLIC_KEY_ID" // public key ID of the deploy key in use
+	EnvPRID              = "GITEA_PR_ID"
+	EnvPushTrigger       = "GITEA_PUSH_TRIGGER"
+	EnvIsInternal        = "GITEA_INTERNAL_PUSH"
+	EnvAppURL            = "GITEA_ROOT_URL"
+	EnvActionTaskID      = "GITEA_ACTION_TASK_ID"
 )
 
 type PushTrigger string

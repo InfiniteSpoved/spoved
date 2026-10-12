@@ -10,7 +10,9 @@ import (
 	"strings"
 
 	"forgejo.org/models"
+	asymkey_model "forgejo.org/models/asymkey"
 	"forgejo.org/models/db"
+	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
@@ -143,6 +145,12 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 	oldOwner := repo.Owner
 	oldOwnerName = oldOwner.Name
 
+	// the old owner's deploy keys stop applying (the lookup follows the owner); collect them for the protection rules
+	oldOrgKeys, err := asymkey_model.FindOrgDeployKeysCoveringRepo(ctx, repo)
+	if err != nil {
+		return fmt.Errorf("FindOrgDeployKeysCoveringRepo: %w", err)
+	}
+
 	// Note: we have to set value here to make sure recalculate accesses is based on
 	// new owner.
 	repo.OwnerID = newOwner.ID
@@ -152,6 +160,21 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 	// Update repository.
 	if _, err := sess.ID(repo.ID).Update(repo); err != nil {
 		return fmt.Errorf("update owner: %w", err)
+	}
+
+	// Drop the selections, so moving back doesn't restore them, and the old owner's keys from the protection
+	// rules unless the key still writes to the repository (its own deploy key, or a key of the new owner).
+	if err := db.DeleteBeans(ctx, &asymkey_model.OrgDeployKeyRepo{RepoID: repo.ID}); err != nil {
+		return fmt.Errorf("delete org deploy key selections: %w", err)
+	}
+	for _, key := range oldOrgKeys {
+		if still, err := git_model.FilterWriteDeployKeyIDs(ctx, repo, []int64{key.KeyID}); err != nil {
+			return err
+		} else if len(still) == 0 {
+			if err := git_model.RemoveDeployKeyIDFromProtectionRules(ctx, repo.ID, key.KeyID); err != nil {
+				return fmt.Errorf("RemoveDeployKeyIDFromProtectionRules: %w", err)
+			}
+		}
 	}
 
 	// Remove redundant collaborators.

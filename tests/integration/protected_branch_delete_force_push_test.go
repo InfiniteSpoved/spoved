@@ -248,12 +248,12 @@ func TestProtectedBranchDeleteForcePush(t *testing.T) {
 
 			preReceive := func(key *protectionTestDeployKey, oldCommitID, newCommitID string) private.ResponseExtra {
 				return private.HookPreReceive(t.Context(), owner.Username, owner.Reponame, private.HookOptions{
-					OldCommitIDs: []string{oldCommitID},
-					NewCommitIDs: []string{newCommitID},
-					RefFullNames: []git.RefName{git.RefNameFromBranch("release-key")},
-					UserID:       2,
-					UserName:     "user2",
-					DeployKeyID:  key.id,
+					OldCommitIDs:   []string{oldCommitID},
+					NewCommitIDs:   []string{newCommitID},
+					RefFullNames:   []git.RefName{git.RefNameFromBranch("release-key")},
+					UserID:         2,
+					UserName:       "user2",
+					DeployKeyKeyID: key.keyID,
 				})
 			}
 			emptyID := git.Sha1ObjectFormat.EmptyObjectID().String()
