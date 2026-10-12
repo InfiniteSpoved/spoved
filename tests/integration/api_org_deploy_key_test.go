@@ -22,6 +22,7 @@ import (
 	"forgejo.org/modules/private"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/test"
 	org_service "forgejo.org/services/org"
 	repo_service "forgejo.org/services/repository"
 	"forgejo.org/tests"
@@ -295,6 +296,35 @@ func TestAPIOrgDeployKey(t *testing.T) {
 		unittest.AssertNotExistsBean(t, &asymkey_model.OrgDeployKey{ID: writeKey.ID})
 		unittest.AssertNotExistsBean(t, &asymkey_model.OrgDeployKeyRepo{OrgDeployKeyID: writeKey.ID})
 		unittest.AssertNotExistsBean(t, &asymkey_model.PublicKey{ID: writeKey.KeyID})
+	})
+
+	t.Run("expiry policy", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.DeployKeyExpiry, setting.CredentialExpiryPolicy{Required: true, MaxLifetimeDays: 365})()
+		admin := getUserToken(t, "user1", writeScope...)
+		before := count()
+		past := time.Now().AddDate(0, 0, -1)
+		tooLate := time.Now().AddDate(0, 0, 366)
+		// site admins aren't exempt: a "keys as code" job calls the API with a site admin token
+		for who, token := range map[string]string{"owner": owner, "site admin": admin} {
+			for name, expires := range map[string]*time.Time{"missing": nil, "past": &past, "beyond the maximum lifetime": &tooLate} {
+				create(t, token, api.CreateOrgDeployKeyOption{Title: "expiry", AllRepositories: true, ExpiresAt: expires}, http.StatusUnprocessableEntity)
+				assert.Equal(t, before, count(), "%s: %s", who, name)
+			}
+		}
+		inPolicy := time.Now().AddDate(0, 0, 364)
+		key := create(t, admin, api.CreateOrgDeployKeyOption{Title: "expiry", Repositories: []string{"repo3"}, ExpiresAt: &inPolicy}, http.StatusCreated)
+		stored := unittest.AssertExistsAndLoadBean(t, &asymkey_model.OrgDeployKey{ID: key.ID}).ExpiresUnix
+		assert.Equal(t, inPolicy.Unix(), int64(stored))
+
+		// PATCH can't extend or remove the expiry: the field isn't editable
+		keyURL := fmt.Sprintf("%s/%d", keysURL, key.ID)
+		for _, token := range []string{owner, admin} {
+			MakeRequest(t, NewRequestWithJSON(t, "PATCH", keyURL, map[string]any{"expires_at": tooLate}).AddTokenAuth(token), http.StatusUnprocessableEntity)
+			MakeRequest(t, NewRequestWithJSON(t, "PATCH", keyURL, map[string]any{"expires_at": nil}).AddTokenAuth(token), http.StatusUnprocessableEntity)
+			MakeRequest(t, NewRequestWithJSON(t, "PATCH", keyURL, map[string]any{"expires_at": tooLate, "repositories": []string{"repo5"}}).AddTokenAuth(token), http.StatusOK)
+			assert.Equal(t, stored, unittest.AssertExistsAndLoadBean(t, &asymkey_model.OrgDeployKey{ID: key.ID}).ExpiresUnix)
+		}
+		MakeRequest(t, NewRequest(t, "DELETE", keyURL).AddTokenAuth(owner), http.StatusNoContent)
 	})
 
 	t.Run("read-only maintenance", func(t *testing.T) {
