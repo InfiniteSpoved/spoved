@@ -261,7 +261,7 @@ func SetOrgDeployKeyRepos(ctx context.Context, orgID, id int64, includesAllRepos
 	var key *OrgDeployKey
 	err := db.WithTx(ctx, func(ctx context.Context) error {
 		var err error
-		if key, err = GetOrgDeployKey(ctx, orgID, id); err != nil {
+		if key, err = lockOrgDeployKey(ctx, orgID, id); err != nil {
 			return err
 		}
 		repoIDs = container.SetOf(repoIDs...).Values()
@@ -284,6 +284,99 @@ func SetOrgDeployKeyRepos(ctx context.Context, orgID, id int64, includesAllRepos
 		return err
 	})
 	return key, err
+}
+
+// lockOrgDeployKey loads the key of the organization for a change of what it covers, taking its row lock first, so
+// concurrent changes of one key run one after the other.
+func lockOrgDeployKey(ctx context.Context, orgID, id int64) (*OrgDeployKey, error) {
+	if _, err := db.Exec(ctx, "UPDATE org_deploy_key SET includes_all_repos = includes_all_repos WHERE id = ? AND org_id = ?", id, orgID); err != nil {
+		return nil, err
+	}
+	return GetOrgDeployKey(ctx, orgID, id)
+}
+
+// AddOrgDeployKeyRepo adds a live repository of the organization to the selection of the key.
+func AddOrgDeployKeyRepo(ctx context.Context, orgID, id, repoID int64) (*OrgDeployKey, error) {
+	var key *OrgDeployKey
+	err := db.WithTx(ctx, func(ctx context.Context) error {
+		var err error
+		if key, err = lockOrgDeployKey(ctx, orgID, id); err != nil {
+			return err
+		}
+		if key.IncludesAllRepos {
+			return util.NewInvalidArgumentErrorf("the key covers all repositories")
+		}
+		if err := checkOrgDeployKeyRepos(ctx, orgID, []int64{repoID}); err != nil {
+			return err
+		}
+		if has, err := db.GetEngine(ctx).Exist(&OrgDeployKeyRepo{OrgDeployKeyID: key.ID, RepoID: repoID}); err != nil || has {
+			return err
+		}
+		return db.Insert(ctx, &OrgDeployKeyRepo{OrgDeployKeyID: key.ID, RepoID: repoID})
+	})
+	return key, err
+}
+
+// RemoveOrgDeployKeyRepo removes a repository from the selection of the key; the last one can't be removed.
+func RemoveOrgDeployKeyRepo(ctx context.Context, orgID, id, repoID int64) (*OrgDeployKey, error) {
+	var key *OrgDeployKey
+	err := db.WithTx(ctx, func(ctx context.Context) error {
+		var err error
+		if key, err = lockOrgDeployKey(ctx, orgID, id); err != nil {
+			return err
+		}
+		if key.IncludesAllRepos {
+			return util.NewInvalidArgumentErrorf("the key covers all repositories")
+		}
+		n, err := db.GetEngine(ctx).Where("org_deploy_key_id = ?", key.ID).Count(new(OrgDeployKeyRepo))
+		if err != nil {
+			return err
+		}
+		if has, err := db.GetEngine(ctx).Exist(&OrgDeployKeyRepo{OrgDeployKeyID: key.ID, RepoID: repoID}); err != nil {
+			return err
+		} else if !has {
+			return util.NewNotExistErrorf("the repository is not selected")
+		} else if n <= 1 {
+			return util.NewInvalidArgumentErrorf("select at least one repository")
+		}
+		_, err = db.GetEngine(ctx).Delete(&OrgDeployKeyRepo{OrgDeployKeyID: key.ID, RepoID: repoID})
+		return err
+	})
+	return key, err
+}
+
+// SetOrgDeployKeyAllRepos switches the key to all repositories, or back to its selection, which must not be empty.
+func SetOrgDeployKeyAllRepos(ctx context.Context, orgID, id int64, includesAllRepos bool) (*OrgDeployKey, error) {
+	var key *OrgDeployKey
+	err := db.WithTx(ctx, func(ctx context.Context) error {
+		var err error
+		if key, err = lockOrgDeployKey(ctx, orgID, id); err != nil {
+			return err
+		}
+		if !includesAllRepos {
+			if has, err := db.GetEngine(ctx).Exist(&OrgDeployKeyRepo{OrgDeployKeyID: key.ID}); err != nil {
+				return err
+			} else if !has {
+				return util.NewInvalidArgumentErrorf("select at least one repository")
+			}
+		}
+		key.IncludesAllRepos = includesAllRepos
+		_, err = db.GetEngine(ctx).ID(key.ID).Cols("includes_all_repos").NoAutoTime().Update(key)
+		return err
+	})
+	return key, err
+}
+
+// FindOrgDeployKeyRepos returns a page of the live repositories selected for the key.
+func FindOrgDeployKeyRepos(ctx context.Context, keyID int64, opts db.ListOptions) ([]*repo_model.Repository, int64, error) {
+	repos := make([]*repo_model.Repository, 0, opts.PageSize)
+	sess := db.GetEngine(ctx).Where(builder.In("id", builder.Select("repo_id").From("org_deploy_key_repo").Where(builder.Eq{"org_deploy_key_id": keyID}))).
+		And("trashed_unix = 0").OrderBy("lower_name")
+	if opts.Page > 0 {
+		sess = db.SetSessionPagination(sess, &opts)
+	}
+	n, err := sess.FindAndCount(&repos)
+	return repos, n, err
 }
 
 // DeleteOrgDeployKey deletes the deploy key, its selection and its public key if no other deploy key uses it.

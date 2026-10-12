@@ -9,6 +9,7 @@ import (
 	asymkey_model "forgejo.org/models/asymkey"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
+	repo_model "forgejo.org/models/repo"
 )
 
 // SetOrgDeployKeyRepos changes what the deploy key of the organization covers. A repository it no longer writes
@@ -43,4 +44,34 @@ func DeleteOrgDeployKey(ctx context.Context, orgID, id int64) error {
 		return nil
 	}
 	return asymkey_model.RewriteAllPublicKeys(ctx)
+}
+
+// AddOrgDeployKeyRepo adds the repository to the selection of the deploy key.
+func AddOrgDeployKeyRepo(ctx context.Context, orgID, id int64, repo *repo_model.Repository) error {
+	_, err := asymkey_model.AddOrgDeployKeyRepo(ctx, orgID, id, repo.ID)
+	return err
+}
+
+// RemoveOrgDeployKeyRepo removes the repository from the selection of the deploy key, and the key from its
+// protection rules unless it still writes to it.
+func RemoveOrgDeployKeyRepo(ctx context.Context, orgID, id int64, repo *repo_model.Repository) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		key, err := asymkey_model.RemoveOrgDeployKeyRepo(ctx, orgID, id, repo.ID)
+		if err != nil {
+			return err
+		}
+		return git_model.DropDeployKeyIDsNotWriting(ctx, repo, []int64{key.KeyID})
+	})
+}
+
+// SetOrgDeployKeyAllRepos switches the deploy key to all repositories or back to its selection; the repositories it
+// no longer writes to lose it in their protection rules.
+func SetOrgDeployKeyAllRepos(ctx context.Context, orgID, id int64, includesAllRepos bool) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		key, err := asymkey_model.SetOrgDeployKeyAllRepos(ctx, orgID, id, includesAllRepos)
+		if err != nil || includesAllRepos {
+			return err
+		}
+		return git_model.DropDeployKeyIDFromOwnerRepos(ctx, orgID, key.KeyID)
+	})
 }
