@@ -41,6 +41,7 @@ const (
 	KindInternal     Kind = "internal"
 	KindOrgMember    Kind = "org_member"
 	KindDeployKey    Kind = "deploy_key"
+	KindOrgDeployKey Kind = "org_deploy_key"
 	// KindInstanceRoles stands for the site admins and auditors, whom only site admins see by name.
 	KindInstanceRoles Kind = "instance_roles"
 )
@@ -63,14 +64,15 @@ type Path struct {
 
 // Row is the access of one identity to one repository.
 type Row struct {
-	User      *user_model.User // nil for the pseudo-rows and deploy keys
-	Anonymous bool             // pseudo-row for anyone, signed in or not; otherwise a pseudo-row is for any signed-in user, or any member of the private owner org (KindOrgMember)
-	DeployKey *asymkey_model.DeployKey
-	Team      *organization.Team // a team shown as one row, for viewers outside the org
-	OrgMember bool               // the user is a member of the repository's owner org
-	Repo      *repo_model.Repository
-	Perm      access_model.Permission
-	Paths     []*Path
+	User         *user_model.User // nil for the pseudo-rows and deploy keys
+	Anonymous    bool             // pseudo-row for anyone, signed in or not; otherwise a pseudo-row is for any signed-in user, or any member of the private owner org (KindOrgMember)
+	DeployKey    *asymkey_model.DeployKey
+	OrgDeployKey *asymkey_model.OrgDeployKey
+	Team         *organization.Team // a team shown as one row, for viewers outside the org
+	OrgMember    bool               // the user is a member of the repository's owner org
+	Repo         *repo_model.Repository
+	Perm         access_model.Permission
+	Paths        []*Path
 }
 
 // Options selects what Compute reports.
@@ -167,15 +169,36 @@ func Compute(ctx context.Context, opts Options) ([]*Row, error) {
 	for _, r := range repos {
 		byID[r.ID] = r
 	}
+	// a trashed repository has no access, as in GetUserRepoPermission
 	for _, k := range keys {
-		// deploy keys only reach the code
-		rows = append(rows, &Row{
-			DeployKey: k, Repo: byID[k.RepoID],
-			Perm:  access_model.Permission{AccessMode: k.Mode, UnitsMode: map[unit.Type]perm_model.AccessMode{unit.TypeCode: k.Mode}},
-			Paths: []*Path{{Kind: KindDeployKey, Mode: k.Mode, Units: map[unit.Type]perm_model.AccessMode{unit.TypeCode: k.Mode}, Applied: true}},
-		})
+		if repo := byID[k.RepoID]; !repo.IsTrashed() {
+			rows = append(rows, deployKeyRow(&Row{DeployKey: k, Repo: repo}, KindDeployKey, k.Mode, k.IsExpired()))
+		}
+	}
+	orgKeys, err := asymkey_model.FindOrgDeployKeysCoveringRepos(ctx, opts.RepoIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, k := range orgKeys {
+		if repo := byID[k.RepoID]; !repo.IsTrashed() {
+			rows = append(rows, deployKeyRow(&Row{OrgDeployKey: &k.OrgDeployKey, Repo: repo}, KindOrgDeployKey, k.Mode, k.IsExpired()))
+		}
 	}
 	return rows, nil
+}
+
+// deployKeyRow fills the access of a deploy key row: the code only, read at most on an archived repository, and none
+// once the key has expired (the path stays, not applied).
+func deployKeyRow(r *Row, kind Kind, mode perm_model.AccessMode, expired bool) *Row {
+	if r.Repo.IsArchived {
+		mode = min(mode, perm_model.AccessModeRead)
+	}
+	units := map[unit.Type]perm_model.AccessMode{unit.TypeCode: mode}
+	r.Paths = []*Path{{Kind: kind, Mode: mode, Units: units, Applied: !expired}}
+	if !expired {
+		r.Perm = access_model.Permission{AccessMode: mode, UnitsMode: units}
+	}
+	return r
 }
 
 // memberID stands for any non-restricted member of a private org, in the replay.

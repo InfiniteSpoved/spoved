@@ -69,6 +69,26 @@
 			{{else}}
 				{{ctx.Locale.Tr "repo.settings.no_deploy_keys"}}
 			{{end}}
+		{{if .OrgDeployKeys}}
+			<h5 class="ui header tw-mt-4">{{ctx.Locale.Tr "repo.settings.org_deploy_keys"}}</h5>
+			<p>{{ctx.Locale.Tr "repo.settings.org_deploy_keys_desc"}}{{if .CanManageOrgDeployKeys}} <a href="{{AppSubUrl}}/org/{{PathEscape .Repository.OwnerName}}/settings/keys">{{ctx.Locale.Tr "repo.settings.org_deploy_keys_manage"}}</a>{{end}}</p>
+			<div class="flex-list" id="org-deploy-keys">
+				{{range .OrgDeployKeys}}
+					<div class="flex-item">
+						<div class="flex-item-leading">
+							<span class="text {{if .HasRecentActivity}}green{{end}}" {{if .HasRecentActivity}}data-tooltip-content="{{ctx.Locale.Tr "settings.key_state_desc"}}"{{end}}>{{svg "octicon-key" 32}}</span>
+						</div>
+						<div class="flex-item-main">
+							<div class="flex-item-title">{{.Name}}</div>
+							<div class="flex-item-body">{{.Fingerprint}}</div>
+							<div class="flex-item-body">
+								<p>{{ctx.Locale.Tr "settings.added_on" (DateUtils.AbsoluteShort .CreatedUnix)}} — {{svg "octicon-info"}} {{if .HasUsed}}{{ctx.Locale.Tr "settings.last_used"}} <span {{if .HasRecentActivity}}class="text green"{{end}}>{{DateUtils.AbsoluteShort .UpdatedUnix}}</span>{{else}}{{ctx.Locale.Tr "settings.no_activity"}}{{end}}{{template "shared/expiry_label" .}} - <span>{{ctx.Locale.Tr "settings.can_read_info"}}{{if not .IsReadOnly}} / {{ctx.Locale.Tr "settings.can_write_info"}}{{end}}</span></p>
+							</div>
+						</div>
+					</div>
+				{{end}}
+			</div>
+		{{end}}
 		</div>
 	</div>
 

@@ -421,8 +421,9 @@ func RenameBranchPost(ctx *context.Context) {
 	ctx.Redirect(fmt.Sprintf("%s/branches", ctx.Repo.RepoLink))
 }
 
-// getWriteDeployKeys returns the deploy keys of the repository which have write access,
-// the ones which can be selected in branch and tag protection rules.
+// getWriteDeployKeys returns the deploy keys of the repository which have write access, and those of its owner
+// organization covering it, the ones which can be selected in branch and tag protection rules. The templates only
+// read KeyID and Name, so an organization key is given as a DeployKey with those.
 func getWriteDeployKeys(ctx *context.Context) ([]*asymkey_model.DeployKey, error) {
 	keys, err := db.Find[asymkey_model.DeployKey](ctx, asymkey_model.ListDeployKeysOptions{
 		ListOptions: db.ListOptionsAll,
@@ -431,7 +432,17 @@ func getWriteDeployKeys(ctx *context.Context) ([]*asymkey_model.DeployKey, error
 	if err != nil {
 		return nil, err
 	}
-	return slices.DeleteFunc(keys, func(key *asymkey_model.DeployKey) bool { return key.IsReadOnly() }), nil
+	keys = slices.DeleteFunc(keys, func(key *asymkey_model.DeployKey) bool { return key.IsReadOnly() })
+	orgKeys, err := asymkey_model.FindOrgDeployKeysCoveringRepo(ctx, ctx.Repo.Repository)
+	if err != nil {
+		return nil, err
+	}
+	for _, k := range orgKeys {
+		if !k.IsReadOnly() && !slices.ContainsFunc(keys, func(key *asymkey_model.DeployKey) bool { return key.KeyID == k.KeyID }) {
+			keys = append(keys, &asymkey_model.DeployKey{KeyID: k.KeyID, Name: k.Name, Mode: k.Mode})
+		}
+	}
+	return keys, nil
 }
 
 // parseIDList parses the comma-separated IDs of a dropdown. An invalid list gives no IDs.

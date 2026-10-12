@@ -9,6 +9,7 @@ import (
 
 	asymkey_model "forgejo.org/models/asymkey"
 	"forgejo.org/models/db"
+	"forgejo.org/models/organization"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/web"
@@ -31,6 +32,9 @@ func DeployKeys(ctx *context.Context) {
 		return
 	}
 	ctx.Data["Deploykeys"] = keys
+	if !loadOrgDeployKeys(ctx) {
+		return
+	}
 
 	ctx.HTML(http.StatusOK, tplDeployKeys)
 }
@@ -49,6 +53,9 @@ func DeployKeysPost(ctx *context.Context) {
 		return
 	}
 	ctx.Data["Deploykeys"] = keys
+	if !loadOrgDeployKeys(ctx) {
+		return
+	}
 
 	if ctx.HasError() {
 		ctx.HTML(http.StatusOK, tplDeployKeys)
@@ -118,4 +125,25 @@ func DeleteDeployKey(ctx *context.Context) {
 	}
 
 	ctx.JSONRedirect(ctx.Repo.RepoLink + "/settings/keys")
+}
+
+// loadOrgDeployKeys sets the deploy keys of the owner organization that cover the repository, read-only.
+func loadOrgDeployKeys(ctx *context.Context) bool {
+	repo := ctx.Repo.Repository
+	if !repo.Owner.IsOrganization() {
+		return true
+	}
+	keys, err := asymkey_model.FindOrgDeployKeysCoveringRepo(ctx, repo)
+	if err != nil {
+		ctx.ServerError("FindOrgDeployKeysCoveringRepo", err)
+		return false
+	}
+	isOwner, err := organization.OrgFromUser(repo.Owner).IsActingOwner(ctx, ctx.Doer)
+	if err != nil {
+		ctx.ServerError("IsActingOwner", err)
+		return false
+	}
+	ctx.Data["OrgDeployKeys"] = keys
+	ctx.Data["CanManageOrgDeployKeys"] = isOwner
+	return true
 }

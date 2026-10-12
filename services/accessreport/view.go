@@ -118,7 +118,7 @@ func hideGroups(r *Row, all bool) {
 // Type is the type of identity of the row: person, bot or key, or "" for the other rows.
 func (r *Row) Type() string {
 	switch {
-	case r.DeployKey != nil:
+	case r.DeployKey != nil, r.OrgDeployKey != nil:
 		return "key"
 	case r.User == nil:
 		return ""

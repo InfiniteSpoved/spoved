@@ -1,0 +1,27 @@
+{{/* ctxData, ID: form ID suffix, All: covers all repositories, RepoIDs: the selected repositories, comma-separated */}}
+<div class="grouped fields">
+	<label>{{ctx.Locale.Tr "org.settings.deploy_key_scope"}}</label>
+	<div class="field">
+		<label>
+			<input name="scope" type="radio" value="all" {{if .All}}checked{{end}}>
+			{{ctx.Locale.Tr "org.settings.deploy_key_all_repos"}}
+		</label>
+	</div>
+	<div class="field">
+		<label>
+			<input name="scope" type="radio" value="selected" {{if not .All}}checked{{end}}>
+			{{ctx.Locale.Tr "org.settings.deploy_key_selected_repos"}}
+		</label>
+	</div>
+	<div id="deploy-key-repos-{{.ID}}" class="checkbox-sub-item field">
+		<div class="ui multiple search selection dropdown">
+			<input type="hidden" name="repo_ids" value="{{.RepoIDs}}">
+			<div class="default text">{{ctx.Locale.Tr "org.settings.deploy_key_select_repos"}}</div>
+			<div class="menu">
+				{{range .ctxData.Repos}}
+					<div class="item" data-value="{{.ID}}">{{.Name}}</div>
+				{{end}}
+			</div>
+		</div>
+	</div>
+</div>
