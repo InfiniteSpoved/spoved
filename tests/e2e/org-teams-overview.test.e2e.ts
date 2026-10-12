@@ -15,7 +15,7 @@ const UNIT_VALUES = [
   'Wiki',
   'External Wiki',
   'External issues',
-  'Projects',
+  'Boards',
   'Packages',
   'Actions',
 ] as const;

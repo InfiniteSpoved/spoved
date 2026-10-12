@@ -146,49 +146,49 @@ func TestIssueCommentChangeProject(t *testing.T) {
 	// Add project
 	testIssueCommentChangeEvent(t, htmlDoc, "2010",
 		"octicon-project", "User One", "/user1",
-		[]string{"user1 added this to the First project project"},
+		[]string{"user1 added this to the First project board"},
 		[]string{"/user1", "/user2/repo1/projects/1"})
 
 	// Modify project
 	testIssueCommentChangeEvent(t, htmlDoc, "2011",
 		"octicon-project", "User One", "/user1",
-		[]string{"user1 modified the project from First project to second project"},
+		[]string{"user1 modified the board from First project to second project"},
 		[]string{"/user1", "/user2/repo1/projects/1", "/org3/repo3/projects/2"})
 
 	// Remove project
 	testIssueCommentChangeEvent(t, htmlDoc, "2012",
 		"octicon-project", "User One", "/user1",
-		[]string{"user1 removed this from the second project project"},
+		[]string{"user1 removed this from the second project board"},
 		[]string{"/user1", "/org3/repo3/projects/2"})
 
 	// Deleted project
 	testIssueCommentChangeEvent(t, htmlDoc, "2013",
 		"octicon-project", "User One", "/user1",
-		[]string{"user1 added this to the (deleted) project"},
+		[]string{"user1 added this to the (deleted) board"},
 		[]string{"/user1"})
 
 	// Add to user project.
 	testIssueCommentChangeEvent(t, htmlDoc, "10001",
 		"octicon-project", "User One", "/user1",
-		[]string{"user1 added this to the project on user2 project"},
+		[]string{"user1 added this to the project on user2 board"},
 		[]string{"/user1", "/user2/-/projects/4"})
 
 	// Change from user project to repo project.
 	testIssueCommentChangeEvent(t, htmlDoc, "10002",
 		"octicon-project", "User One", "/user1",
-		[]string{"user1 modified the project from project on user2 to second project"},
+		[]string{"user1 modified the board from project on user2 to second project"},
 		[]string{"/user1", "/user2/-/projects/4", "/org3/repo3/projects/2"})
 
 	// Change from repo project to user project.
 	testIssueCommentChangeEvent(t, htmlDoc, "10003",
 		"octicon-project", "User One", "/user1",
-		[]string{"user1 modified the project from second project to project on user2"},
+		[]string{"user1 modified the board from second project to project on user2"},
 		[]string{"/user1", "/org3/repo3/projects/2", "/user2/-/projects/4"})
 
 	// Remove repo project.
 	testIssueCommentChangeEvent(t, htmlDoc, "10004",
 		"octicon-project", "User One", "/user1",
-		[]string{"user1 removed this from the project on user2 project"},
+		[]string{"user1 removed this from the project on user2 board"},
 		[]string{"/user1", "/user2/-/projects/4"})
 }
 

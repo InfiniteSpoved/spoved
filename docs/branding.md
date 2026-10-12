@@ -98,6 +98,10 @@ New key: `based_on_forgejo` (footer credit).
 - `templates/admin/dashboard.tmpl`: the update-checker hints link to the spoved releases.
 - `templates/status/500.tmpl`: uses `error.report_message_githat` with `ISSUE_TRACKER_URL`.
 
+## Boards
+
+Forgejo's kanban "Projects" are called **Boards** in the interface, so that "Projects" can mean a group of repositories. The rename is text only: locale keys (`repo.projects.*`, `user.projects`, ...), routes (`/{owner}/-/projects`, `/{owner}/{repo}/projects`), the API, templates and code keep the upstream "project" names. The English wording is shadowed like the product name above (same key in `options/locale_next/locale_en-US.json`), and the keys are listed in `boardsShadowKeys` (`modules/translation/spoved_test.go`); `TestBoardsShadowKeys` fails when upstream renames or removes one. Generic uses of "project" (a software project, a Pagure or Bitbucket project, package metadata) stay. A new upstream string that names the kanban feature shows up as "project": shadow it and add it to the list.
+
 ## Defaults and assets
 
 - `modules/setting/server.go`: `APP_NAME` defaults to `spoved`; `ISSUE_TRACKER_URL` to the spoved issues.
