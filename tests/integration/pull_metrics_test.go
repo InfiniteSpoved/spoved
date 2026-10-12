@@ -219,7 +219,7 @@ func TestPullMetricsQueryCount(t *testing.T) {
 	count := func() []int64 {
 		var counts []int64
 		for _, url := range urls {
-			counts = append(counts, countQueries(t, func() { owner.MakeRequest(t, NewRequest(t, "GET", url), http.StatusOK) }))
+			counts = append(counts, stableQueryCount(t, func() { owner.MakeRequest(t, NewRequest(t, "GET", url), http.StatusOK) }))
 		}
 		return counts
 	}
