@@ -120,16 +120,30 @@ func renderRepoGroupError(ctx *context.Context, err error, tpl base.TplName, for
 	}
 }
 
+// prepareRepoGroupForm sets the organization header of the project forms.
+func prepareRepoGroupForm(ctx *context.Context, title string) bool {
+	if err := shared_user.LoadHeaderCount(ctx); err != nil {
+		ctx.ServerError("LoadHeaderCount", err)
+		return false
+	}
+	ctx.Data["Title"] = ctx.Tr(title)
+	ctx.Data["PageIsViewRepoGroups"] = true
+	return true
+}
+
 // NewRepoGroup renders the form to create a project.
 func NewRepoGroup(ctx *context.Context) {
-	ctx.Data["Title"] = ctx.Tr("repo_group.new")
-	ctx.HTML(http.StatusOK, tplRepoGroupNew)
+	if prepareRepoGroupForm(ctx, "repo_group.new") {
+		ctx.HTML(http.StatusOK, tplRepoGroupNew)
+	}
 }
 
 // NewRepoGroupPost creates a project.
 func NewRepoGroupPost(ctx *context.Context) {
 	form := web.GetForm(ctx).(*forms.RepoGroupForm)
-	ctx.Data["Title"] = ctx.Tr("repo_group.new")
+	if !prepareRepoGroupForm(ctx, "repo_group.new") {
+		return
+	}
 	if ctx.HasError() {
 		ctx.HTML(http.StatusOK, tplRepoGroupNew)
 		return
@@ -146,7 +160,9 @@ func NewRepoGroupPost(ctx *context.Context) {
 // RepoGroupSettings renders the settings of a project, `/{org}/{project}/-/settings`.
 func RepoGroupSettings(ctx *context.Context) {
 	group := ctx.Data["RepoGroup"].(*repo_model.RepoGroup)
-	ctx.Data["Title"] = ctx.Tr("repo_group.settings")
+	if !prepareRepoGroupForm(ctx, "repo_group.settings") {
+		return
+	}
 	ctx.Data["name"] = group.Name
 	ctx.Data["description"] = group.Description
 	ctx.Data["RepoGroupLink"] = group.Link(ctx.Org.Organization.Name)
@@ -158,7 +174,9 @@ func RepoGroupSettingsPost(ctx *context.Context) {
 	form := web.GetForm(ctx).(*forms.RepoGroupForm)
 	org := ctx.Org.Organization.AsUser()
 	group := ctx.Data["RepoGroup"].(*repo_model.RepoGroup)
-	ctx.Data["Title"] = ctx.Tr("repo_group.settings")
+	if !prepareRepoGroupForm(ctx, "repo_group.settings") {
+		return
+	}
 	ctx.Data["RepoGroupLink"] = group.Link(org.Name)
 	if ctx.HasError() {
 		ctx.HTML(http.StatusOK, tplRepoGroupSettings)

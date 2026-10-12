@@ -20,7 +20,7 @@
 		{{else}}
 			<div class="empty-placeholder">
 				{{svg "octicon-file-directory" 48}}
-				<h2>{{if .Keyword}}{{ctx.Locale.Tr "repo_group.no_results"}}{{else}}{{ctx.Locale.Tr "repo_group.none_yet"}}{{end}}</h2>
+				<h2 class="tw-text-center">{{if .Keyword}}{{ctx.Locale.Tr "repo_group.no_results"}}{{else}}{{ctx.Locale.Tr "repo_group.none_yet"}}{{end}}</h2>
 				{{if not .Keyword}}<p>{{ctx.Locale.Tr "repo_group.none_yet_desc"}}</p>{{end}}
 			</div>
 		{{end}}

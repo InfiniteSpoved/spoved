@@ -2251,12 +2251,12 @@
 	"repo_group.projects": "Projects",
 	"repo_group.project": "Project",
 	"repo_group.none": "None (organization root)",
-	"repo_group.project_helper": "A repository in a project is at organization/project/repository.",
+	"repo_group.project_helper": "Repositories in a project live at organization/project/repository. Choose none to create it directly under the organization.",
 	"repo_group.not_found": "The selected project does not exist.",
 	"repo_group.new": "New project",
 	"repo_group.create": "Create project",
 	"repo_group.name": "Project name",
-	"repo_group.name_helper": "Part of the path of its repositories: organization/project/repository. A project can't share its name with a repository or another project of the organization.",
+	"repo_group.name_helper": "Used in repository paths: organization/project/repository. Must differ from the names of the organization's other projects and repositories.",
 	"repo_group.description": "Description",
 	"repo_group.name_taken": "The name is already used by a repository or project in this organization.",
 	"repo_group.name_reserved": "The project name \"%s\" is reserved.",
@@ -2276,5 +2276,6 @@
 	"repo_group.delete.not_empty": "The project still holds repositories (in the trash too). Remove them first.",
 	"repo_group.delete.success": "The project %s has been deleted.",
 	"repo_group.empty": "This project has no repositories yet",
-	"repo_group.empty_desc": "Create the first one with \"New repository\"."
+	"repo_group.empty_desc": "Create the first one with \"New repository\".",
+	"repo.new_repo_helper": "A repository contains all files, including revision history. Already hosting one elsewhere? <a href=\"%s\">Migrate repository</a>."
 }
