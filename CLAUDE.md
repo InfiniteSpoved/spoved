@@ -35,7 +35,7 @@ CI runs outside this repository and sets the commit status "CI success" on the t
 
 - A failed job's log is printed in the PR's own CI check (the build repository keeps its logs encrypted). Read it soon after the failure.
 - Never put branch names, logs, test names or code in the build repository's issues, comments or run names, and don't edit `.github/ci/*` in a feature PR.
-- PR runs select the E2E specs whose `@watch` patterns match the files changed compared with develop; a commit already on develop runs them all.
+- Every run, PRs included, runs all E2E specs (`RUN_ALL_E2E=true` in `job.sh`); `@watch` only picks specs for local runs.
 
 ## Conventions
 
