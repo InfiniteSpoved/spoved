@@ -49,7 +49,6 @@ forgejo.org/models/perm/access
 	GetRepoWriters
 
 forgejo.org/models/repo
-	GetRepositoryByPath
 	IsUsableGroupName
 	CreateRepoGroup
 	RenameRepoGroup

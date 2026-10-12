@@ -406,6 +406,20 @@ func (ctx *Context) twoFactorBlockedPage(owner *user_model.User) bool {
 	return true
 }
 
+// repoPermission returns the viewer's permission on the repository.
+func (ctx *Context) repoPermission(repo *repo_model.Repository) (access_model.Permission, error) {
+	// Typically checks for authorization reducers won't be relevant for non-API requests where this middleware is used;
+	// but, some paths like `/user/repo/raw/...` can be accessed with API authentication mechanisms.  In those edge
+	// cases, initialize `ctx.Repo.Permission` based upon the reduced permission set available.
+	authorizationReducer := ctx.Authentication.Reducer()
+	if ctx.IsReadOnlyMethod() && auth.IsHeldByUser(ctx.Authentication) {
+		return access_model.GetUserRepoReadPermission(ctx, repo, ctx.Doer, authorizationReducer)
+	} else if authorizationReducer == nil {
+		return access_model.GetUserRepoPermission(ctx, repo, ctx.Doer)
+	}
+	return access_model.GetUserRepoPermissionWithReducer(ctx, repo, ctx.Doer, authorizationReducer)
+}
+
 // repoAssignment loads the repository's context. byName is false when the repository was found by its ID: the
 // two-factor 403 is only for names, since by ID it would tell a blocked member which IDs exist.
 func repoAssignment(ctx *Context, repo *repo_model.Repository, byName bool) {
@@ -415,17 +429,7 @@ func repoAssignment(ctx *Context, repo *repo_model.Repository, byName bool) {
 		return
 	}
 
-	// Typically checks for authorization reducers won't be relevant for non-API requests where this middleware is used;
-	// but, some paths like `/user/repo/raw/...` can be accessed with API authentication mechanisms.  In those edge
-	// cases, initialize `ctx.Repo.Permission` based upon the reduced permission set available.
-	authorizationReducer := ctx.Authentication.Reducer()
-	if ctx.IsReadOnlyMethod() && auth.IsHeldByUser(ctx.Authentication) {
-		ctx.Repo.Permission, err = access_model.GetUserRepoReadPermission(ctx, repo, ctx.Doer, authorizationReducer)
-	} else if authorizationReducer == nil {
-		ctx.Repo.Permission, err = access_model.GetUserRepoPermission(ctx, repo, ctx.Doer)
-	} else {
-		ctx.Repo.Permission, err = access_model.GetUserRepoPermissionWithReducer(ctx, repo, ctx.Doer, authorizationReducer)
-	}
+	ctx.Repo.Permission, err = ctx.repoPermission(repo)
 	if err != nil {
 		ctx.ServerError("GetUserRepoPermission", err)
 		return
@@ -570,9 +574,17 @@ func RepoAssignment(ctx *Context) context.CancelFunc {
 	}
 
 	// Get repository.
-	repo, err := repo_model.GetRepositoryByName(ctx, owner.ID, repoName)
+	var repo *repo_model.Repository
+	if strings.HasPrefix(repoName, "@") {
+		repo, err = markedRepository(ctx, owner, repoName)
+	} else {
+		repo, err = repo_model.GetRepositoryByName(ctx, owner.ID, repoName)
+	}
 	if err != nil {
 		if repo_model.IsErrRepoNotExist(err) {
+			if ctx.ResolveRepoGroupPath() {
+				return nil
+			}
 			// before the redirect lookup, so a missing, trashed or renamed-away name answers like an existing private repo
 			if ctx.twoFactorBlockedPage(owner) {
 				return nil
@@ -608,7 +620,7 @@ func RepoAssignment(ctx *Context) context.CancelFunc {
 
 	ctx.Repo.RepoLink = repo.Link()
 	ctx.Data["RepoLink"] = ctx.Repo.RepoLink
-	ctx.Data["RepoRelPath"] = ctx.Repo.Owner.Name + "/" + ctx.Repo.Repository.Name
+	ctx.Data["RepoRelPath"] = ctx.Repo.Repository.FullName()
 
 	if setting.Other.EnableFeed {
 		ctx.Data["EnableFeed"] = true

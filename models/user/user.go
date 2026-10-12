@@ -736,6 +736,11 @@ var (
 	reservedUserPatterns = []string{"*.keys", "*.gpg", "*.rss", "*.atom", "*.png"}
 )
 
+// IsReservedUsername reports whether name is a reserved top-level name, which no user or organization can have.
+func IsReservedUsername(name string) bool {
+	return slices.Contains(reservedUsernames, strings.ToLower(name))
+}
+
 // IsUsableUsername returns an error when a username is reserved
 func IsUsableUsername(name string) error {
 	// Validate username make sure it satisfies requirement.

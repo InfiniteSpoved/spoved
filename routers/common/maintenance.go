@@ -114,6 +114,10 @@ func MaintenanceWeb(ctx *context.Context) {
 	if isMaintenanceWriteAllowed(ctx.Req, ctx.Doer) {
 		return
 	}
+	// a path in a project is decided on its second pass, which has the route of the repository
+	if ctx.ResolveRepoGroupPath() {
+		return
+	}
 	msg := ctx.Locale.TrString("maintenance.read_only")
 	if s.Message != "" {
 		msg += ": " + s.Message

@@ -363,6 +363,7 @@ func Routes() *web.Route {
 	routes := web.NewRoute()
 
 	routes.Use(chi_middleware.GetHead)
+	routes.Use(context.RepoGroupResolver)
 
 	routes.Head("/", misc.DummyOK) // for health check - doesn't need to be passed through gzip handler
 	routes.Methods("GET, HEAD, OPTIONS", "/assets/*", optionsCorsHandler(), public.FileHandlerFunc())
@@ -451,6 +452,9 @@ func Routes() *web.Route {
 			ctx := context.GetWebContext(req)
 			if ctx == nil {
 				panic("missing middleware context.Contexter()")
+			}
+			if ctx.ResolveRepoGroupPath() {
+				return
 			}
 			ctx.NotFound("", nil)
 		},
@@ -1130,6 +1134,7 @@ func registerRoutes(m *web.Route) {
 		m.Group("/{org}", func() {
 			m.Get("/members", org.Members)
 		}, context.OrgAssignment())
+		m.Get("/{org}/groups/{id}", context.OrgAssignment(), context.RepoGroupAssignment, org.RepoGroupHome)
 	}, ignSignIn)
 
 	m.Group("/org", func() {
@@ -1503,7 +1508,7 @@ func registerRoutes(m *web.Route) {
 			m.Get(".rss", feedEnabled, repo.IssueFeedRSS)
 			m.Get(".atom", feedEnabled, repo.IssueFeedAtom)
 		}, ctxDataSet("EnableFeed", setting.Other.EnableFeed))
-		m.Get("/-/summary-card", repo.DrawRepoSummaryCard)
+		m.Get("/summary-card", repo.DrawRepoSummaryCard) // served at /-/summary-card too, see context.RepoGroupResolver
 	}, ignSignIn, context.RepoAssignment, context.UnitTypes()) // for "/{username}/{reponame}" which doesn't require authentication
 
 	// Grouping for those endpoints that do require authentication
