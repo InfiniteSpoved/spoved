@@ -51,3 +51,17 @@ type swaggerResponseDeployKeyList struct {
 	// The total number of deploy keys
 	TotalCount int64 `json:"X-Total-Count"`
 }
+
+// OrgDeployKey
+// swagger:response OrgDeployKey
+type swaggerResponseOrgDeployKey struct {
+	// in:body
+	Body api.OrgDeployKey `json:"body"`
+}
+
+// OrgDeployKeyList
+// swagger:response OrgDeployKeyList
+type swaggerResponseOrgDeployKeyList struct {
+	// in:body
+	Body []api.OrgDeployKey `json:"body"`
+}

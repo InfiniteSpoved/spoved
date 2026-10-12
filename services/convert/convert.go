@@ -404,6 +404,26 @@ func ToDeployKey(apiLink string, key *asymkey_model.DeployKey) *api.DeployKey {
 	}
 }
 
+// ToOrgDeployKey converts an organization deploy key; apiLink is the URL of the organization's key list
+func ToOrgDeployKey(apiLink, content string, key *asymkey_model.OrgDeployKey) *api.OrgDeployKey {
+	k := &api.OrgDeployKey{
+		ID:              key.ID,
+		KeyID:           key.KeyID,
+		Key:             content,
+		Fingerprint:     key.Fingerprint,
+		URL:             fmt.Sprintf("%s/%d", apiLink, key.ID),
+		Title:           key.Name,
+		Created:         key.CreatedUnix.AsTime(),
+		ReadOnly:        key.Mode == perm.AccessModeRead,
+		AllRepositories: key.IncludesAllRepos,
+		Expires:         OptionalTime(key.ExpiresUnix),
+	}
+	if key.HasUsed {
+		k.LastUsed = OptionalTime(key.UpdatedUnix)
+	}
+	return k
+}
+
 // ToOrganization convert user_model.User to api.Organization
 func ToOrganization(ctx context.Context, org *organization.Organization) *api.Organization {
 	return &api.Organization{
