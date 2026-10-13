@@ -367,12 +367,15 @@ func RedirectToRepo(ctx *Base, redirectRepoID int64) {
 		return
 	}
 
-	redirectPath := strings.Replace(
-		ctx.Req.URL.EscapedPath(),
-		url.PathEscape(ownerName)+"/"+url.PathEscape(previousRepoName),
-		url.PathEscape(repo.OwnerName)+"/"+url.PathEscape(repo.Name),
-		1,
-	)
+	previousPath := url.PathEscape(ownerName) + "/" + url.PathEscape(previousRepoName)
+	if groupName := ctx.Params(":groupname"); groupName != "" {
+		previousPath = url.PathEscape(ownerName) + "/" + url.PathEscape(groupName) + "/" + url.PathEscape(previousRepoName)
+	}
+	newPath := strings.TrimPrefix(repo.Link(), setting.AppSubURL+"/")
+	if repo.GroupID != 0 && strings.HasPrefix(ctx.Req.URL.Path, "/api/") {
+		newPath += "/-" // the API form of a repository in a project
+	}
+	redirectPath := strings.Replace(ctx.Req.URL.EscapedPath(), previousPath, newPath, 1)
 	if ctx.Req.URL.RawQuery != "" {
 		redirectPath += "?" + ctx.Req.URL.RawQuery
 	}

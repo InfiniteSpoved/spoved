@@ -27,6 +27,8 @@ func RenameRepoGroup(ctx context.Context, owner *user_model.User, group *repo_mo
 	if err := repo_model.IsUsableGroupName(newName); err != nil { // before the name reaches a path
 		return err
 	}
+	// the project's lock first, then its repositories' by ascending ID, the order of lockRepo
+	defer repoWorkingPool.Lock(groupLockKey(group.ID))()
 	var repoIDs []int64
 	if err := db.GetEngine(ctx).Table("repository").Where("owner_id = ? AND group_id = ?", owner.ID, group.ID).
 		OrderBy("id").Cols("id").Find(&repoIDs); err != nil {

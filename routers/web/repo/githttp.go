@@ -132,6 +132,9 @@ func httpBase(ctx *context.Context) *serviceHandler {
 				context.RedirectToRepo(ctx.Base, redirectRepoID)
 				return nil
 			}
+		} else if redirectRepo, err := redirect_service.LookupGroupRepoRedirect(ctx, ctx.Doer, owner, groupName, reponame); err == nil {
+			context.RedirectToRepo(ctx.Base, redirectRepo.ID)
+			return nil
 		}
 		repoExist = false
 	}

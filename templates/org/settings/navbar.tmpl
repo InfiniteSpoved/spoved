@@ -56,6 +56,9 @@
 		<a class="{{if .PageIsSettingsDeployKeys}}active {{end}}item" href="{{.OrgLink}}/settings/keys">
 			{{ctx.Locale.Tr "org.settings.deploy_keys"}}
 		</a>
+		<a class="{{if .PageIsSettingsRedirects}}active {{end}}item" href="{{.OrgLink}}/settings/redirects">
+			{{ctx.Locale.Tr "org.settings.redirects"}}
+		</a>
 		<a class="{{if .PageIsSettingsVerifiedDomains}}active {{end}}item" href="{{.OrgLink}}/settings/verified_domains">
 			{{ctx.Locale.Tr "org.settings.verified_domains"}}
 		</a>

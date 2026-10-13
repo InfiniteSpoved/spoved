@@ -1,0 +1,35 @@
+{{template "org/settings/layout_head" (dict "ctxData" . "pageClass" "organization settings redirects")}}
+<div class="org-setting-content">
+	<h4 class="ui top attached header">
+		{{ctx.Locale.Tr "org.settings.redirects"}}
+	</h4>
+	<div class="ui attached segment">
+		<p>{{ctx.Locale.Tr "org.settings.redirects.desc"}}</p>
+		<div class="flex-list">
+			{{range .Redirects}}
+				<div class="flex-item flex-item-center">
+					<div class="flex-item-main">
+						<div class="flex-item-title tw-break-anywhere">{{.OldPath}}</div>
+						<div class="flex-item-body tw-break-anywhere">
+							{{if .TargetLink}}
+								{{ctx.Locale.Tr "org.settings.redirects.to"}} <a href="{{.TargetLink}}">{{.Target}}</a>
+							{{else}}
+								{{ctx.Locale.Tr "org.settings.redirects.target_hidden"}}
+							{{end}}
+						</div>
+					</div>
+					<div class="flex-item-trailing">
+						<form action="{{$.Link}}/delete" method="post">
+							<input type="hidden" name="id" value="{{.ID}}">
+							<input type="hidden" name="kind" value="{{if .Project}}project{{else}}repo{{end}}">
+							<button class="ui red button">{{ctx.Locale.Tr "org.settings.redirects.remove"}}</button>
+						</form>
+					</div>
+				</div>
+			{{else}}
+				<div class="flex-item">{{ctx.Locale.Tr "org.settings.redirects.none"}}</div>
+			{{end}}
+		</div>
+	</div>
+</div>
+{{template "org/settings/layout_footer" .}}

@@ -124,17 +124,24 @@ func TestRepoGroupRenameRepo(t *testing.T) {
 	require.NoError(t, ChangeRepositoryName(ctx, doer, root, "site"))
 	unittest.AssertExistsAndLoadBean(t, &repo_model.RepoGroupNameClaim{OwnerID: org3.ID, LowerName: "site"})
 	unittest.AssertNotExistsBean(t, &repo_model.RepoGroupNameClaim{OwnerID: org3.ID, LowerName: "web"})
+	// the old name redirects, so a project gets it only once an owner removed the redirect
+	_, err = repo_model.CreateRepoGroup(ctx, org3, "web", "")
+	require.True(t, repo_model.IsErrRepoAlreadyExist(err))
+	redirect := unittest.AssertExistsAndLoadBean(t, &repo_model.Redirect{OwnerID: org3.ID, LowerName: "web", RedirectRepoID: root.ID})
+	require.NoError(t, repo_model.DeleteOwnerRedirect(ctx, org3.ID, redirect.ID, false))
 	_, err = repo_model.CreateRepoGroup(ctx, org3, "web", "")
 	require.NoError(t, err, "the old name is free for a project")
 
-	// a repository in a project is renamed within it, with no claim and no root redirect
+	// a repository in a project is renamed within it, with no claim and a redirect in the project only
 	nested, err := CreateRepositoryDirectly(ctx, doer, org3, CreateRepoOptions{Name: "api", GroupID: pay.ID})
 	require.NoError(t, err)
 	require.NoError(t, ChangeRepositoryName(ctx, doer, nested, "repo5")) // a root repository's name
 	assertDir(t, true, filepath.Join(setting.RepoRootPath, "org3", "pay", "repo5.git"))
 	assertDir(t, false, filepath.Join(setting.RepoRootPath, "org3", "pay", "api.git"))
 	assertDir(t, true, filepath.Join(setting.RepoRootPath, "org3", "repo5.git"))
-	unittest.AssertNotExistsBean(t, &repo_model.Redirect{OwnerID: org3.ID, LowerName: "api"})
+	unittest.AssertExistsAndLoadBean(t, &repo_model.Redirect{OwnerID: org3.ID, GroupID: pay.ID, LowerName: "api", RedirectRepoID: nested.ID})
+	_, err = repo_model.GetRedirect(ctx, org3.ID, 0, "api")
+	require.True(t, repo_model.IsErrRedirectNotExist(err))
 
 	// a mixed-case name keeps its case; the directories and lower_name are lowercase
 	for _, repo := range []*repo_model.Repository{root, nested} {
@@ -174,12 +181,19 @@ func TestRepoGroupTransfer(t *testing.T) {
 	require.NoError(t, ChangeRepositoryName(ctx, doer, repo2, "pay"))
 	require.True(t, repo_model.IsErrRepoAlreadyExist(TransferOwnership(ctx, doer, org3, repo2, nil)))
 
-	// repositories in a project can't be transferred yet, directly or by a pending transfer
+	// a repository in a project lands at the root of the new owner, and its old path redirects
 	nested, err := CreateRepositoryDirectly(ctx, doer, org3, CreateRepoOptions{Name: "api", GroupID: pay.ID})
 	require.NoError(t, err)
 	require.NoError(t, nested.LoadOwner(ctx))
-	require.ErrorIs(t, TransferOwnership(ctx, doer, user2, nested, nil), repo_model.ErrRepoInGroup)
-	require.ErrorIs(t, models.CreatePendingRepositoryTransfer(ctx, doer, user2, nested.ID, nil), repo_model.ErrRepoInGroup)
+	require.NoError(t, models.CreatePendingRepositoryTransfer(ctx, doer, user2, nested.ID, nil))
+	require.NoError(t, CancelRepositoryTransfer(ctx, nested))
+	require.NoError(t, TransferOwnership(ctx, doer, user2, nested, nil))
+	nested = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: nested.ID})
+	assert.Equal(t, "user2/api", nested.FullName())
+	assertDir(t, true, filepath.Join(setting.RepoRootPath, "user2", "api.git"))
+	assertDir(t, false, filepath.Join(setting.RepoRootPath, "org3", "pay", "api.git"))
+	unittest.AssertExistsAndLoadBean(t, &repo_model.RepoGroupNameClaim{OwnerID: user2.ID, LowerName: "api"})
+	unittest.AssertExistsAndLoadBean(t, &repo_model.Redirect{OwnerID: org3.ID, GroupID: pay.ID, LowerName: "api", RedirectRepoID: nested.ID})
 
 	unittest.CheckConsistencyFor(t, &user_model.User{}, &repo_model.Repository{})
 }
@@ -210,13 +224,20 @@ func TestRepoGroupTrashAndDelete(t *testing.T) {
 	unittest.AssertExistsAndLoadBean(t, &repo_model.RepoGroupNameClaim{OwnerID: org3.ID, LowerName: "site"})
 	unittest.CheckRepoGroupNameClaims(t)
 
-	// a trashed repository in a project can't move to another owner yet
+	// a trashed repository in a project moves to the root of another owner
 	nested, err := CreateRepositoryDirectly(ctx, doer, org3, CreateRepoOptions{Name: "repo3", GroupID: pay.ID}) // a root repository's name
 	require.NoError(t, err)
 	require.NoError(t, TrashRepository(ctx, doer, nested))
 	nested, err = repo_model.GetRepositoryByIDIncludingTrashed(ctx, nested.ID)
 	require.NoError(t, err)
-	require.ErrorIs(t, MoveTrashedRepository(ctx, doer, user2, nested, ""), repo_model.ErrRepoInGroup)
+	require.NoError(t, MoveTrashedRepository(ctx, doer, user2, nested, "moved-out"))
+	nested, err = repo_model.GetRepositoryByIDIncludingTrashed(ctx, nested.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "user2/moved-out", nested.FullName())
+	assertDir(t, true, filepath.Join(setting.RepoRootPath, "user2", "moved-out.git"))
+	assertDir(t, false, filepath.Join(setting.RepoRootPath, "org3", "pay", "repo3.git"))
+	assertDir(t, false, filepath.Join(setting.RepoRootPath, "org3", "pay", "moved-out.git"))
+	unittest.CheckRepoGroupNameClaims(t)
 
 	// deleting it leaves the claim of the root repository with the same name
 	require.NoError(t, DeleteRepositoryDirectly(ctx, nested.ID, DeleteRepositoryOpts{}))

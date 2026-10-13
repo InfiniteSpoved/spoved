@@ -76,13 +76,11 @@ func CreateRepositoryByExample(ctx context.Context, doer, u *user_model.User, re
 	if err = repo_model.ClaimRepoName(ctx, repo); err != nil {
 		return err
 	}
-	if err = db.Insert(ctx, repo); err != nil {
+	if err = repo_model.TakeRedirectPath(ctx, u, repo.GroupID, repo.Name, 0); err != nil {
 		return err
 	}
-	if repo.GroupID == 0 { // redirects are root-only
-		if err = repo_model.DeleteRedirect(ctx, u.ID, repo.Name); err != nil {
-			return err
-		}
+	if err = db.Insert(ctx, repo); err != nil {
+		return err
 	}
 
 	// insert units for repo

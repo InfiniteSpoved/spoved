@@ -19,6 +19,7 @@ import (
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
+	redirect_service "forgejo.org/services/redirect"
 
 	"github.com/go-chi/chi/v5"
 	"xorm.io/builder"
@@ -192,6 +193,9 @@ func (ctx *Context) ResolveRepoGroupPath() bool {
 	if !resolved {
 		return false
 	}
+	if ctx.Written() { // a redirect
+		return true
+	}
 	// the second pass removes the uploaded files when it ends, not this one
 	multipartForm := ctx.Req.MultipartForm
 	ctx.Req.MultipartForm = nil
@@ -218,7 +222,7 @@ func (ctx *Context) resolveRepoGroupPath(st *repoGroupState) (bool, error) {
 	}
 	group, err := repo_model.GetRepoGroupByName(ctx, owner.ID, s[1])
 	if err == repo_model.ErrRepoGroupNotExist {
-		return false, nil
+		return ctx.redirectRepoGroupPath(owner, s)
 	} else if err != nil {
 		return false, err
 	}
@@ -246,7 +250,7 @@ func (ctx *Context) resolveRepoGroupPath(st *repoGroupState) (bool, error) {
 	}
 	repo, err := ctx.VisibleGroupRepository(owner, group.Name, s[2])
 	if repo_model.IsErrRepoNotExist(err) {
-		return false, nil
+		return ctx.redirectRepoGroupPath(owner, s)
 	} else if err != nil {
 		return false, err
 	}
@@ -257,6 +261,51 @@ func (ctx *Context) resolveRepoGroupPath(st *repoGroupState) (bool, error) {
 	st.target = "/" + url.PathEscape(owner.Name) + "/@" + strconv.FormatInt(repo.ID, 10) + restPath
 	st.canonical = "/" + url.PathEscape(owner.Name) + "/" + url.PathEscape(group.Name) + "/" + url.PathEscape(repo.Name) + restPath
 	st.mark = &RepoGroupMark{OwnerID: owner.ID, GroupID: group.ID, RepoID: repo.ID}
+	return true, nil
+}
+
+// redirectRepoGroupPath answers a GET or HEAD of a path of a renamed project, or of a repository renamed or moved
+// out of a project, with a 301 to where it is now, if the viewer can see that; otherwise it changes nothing.
+func (ctx *Context) redirectRepoGroupPath(owner *user_model.User, s []string) (bool, error) {
+	if ctx.Req.Method != http.MethodGet && ctx.Req.Method != http.MethodHead {
+		return false, nil
+	}
+	var link string
+	var rest []string
+	if len(s) == 2 || s[2] == "-" {
+		groupID, err := repo_model.GetRepoGroupRedirect(ctx, owner.ID, s[1])
+		if err == repo_model.ErrRepoGroupNotExist {
+			return false, nil
+		} else if err != nil {
+			return false, err
+		}
+		group, err := repo_model.GetRepoGroupByID(ctx, owner.ID, groupID)
+		if err != nil {
+			return false, err
+		}
+		if visible, err := ctx.CanSeeRepoGroup(owner, group); err != nil || !visible {
+			return false, err
+		}
+		link, rest = group.Link(owner.Name), s[2:]
+	} else {
+		if strings.HasSuffix(s[2], ".git") || len(s) > 3 && slices.Contains(gitSuffixes, s[3]) {
+			return false, nil
+		}
+		repo, err := redirect_service.LookupGroupRepoRedirect(ctx, ctx.Doer, owner, s[1], s[2])
+		if repo_model.IsErrRedirectNotExist(err) {
+			return false, nil
+		} else if err != nil {
+			return false, err
+		}
+		link, rest = repo.Link(), s[3:]
+	}
+	if len(rest) > 0 {
+		link += "/" + strings.Join(rest, "/")
+	}
+	if ctx.Req.URL.RawQuery != "" {
+		link += "?" + ctx.Req.URL.RawQuery
+	}
+	ctx.Redirect(link, http.StatusMovedPermanently)
 	return true, nil
 }
 
