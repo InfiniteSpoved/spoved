@@ -249,7 +249,12 @@ func UploadPackage(ctx *context.Context) {
 	}
 
 	if repo != nil {
-		if err := packages_model.SetRepositoryLink(ctx, pv.PackageID, repo.ID); err != nil {
+		// link only a package without a link, with the checks of the link API (same owner, packages write)
+		p, err := packages_model.GetPackageByID(ctx, pv.PackageID)
+		if err == nil && p.RepoID == 0 {
+			err = packages_service.LinkToRepository(ctx, p, repo, ctx.Doer)
+		}
+		if err != nil && !errors.Is(err, util.ErrPermissionDenied) && !errors.Is(err, util.ErrInvalidArgument) {
 			apiError(ctx, http.StatusInternalServerError, err)
 			return
 		}

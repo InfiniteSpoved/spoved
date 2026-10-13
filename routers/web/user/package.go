@@ -4,9 +4,12 @@
 package user
 
 import (
+	gocontext "context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 
 	"forgejo.org/models/db"
 	org_model "forgejo.org/models/organization"
@@ -15,6 +18,8 @@ import (
 	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/log"
@@ -24,12 +29,16 @@ import (
 	debian_module "forgejo.org/modules/packages/debian"
 	rpm_module "forgejo.org/modules/packages/rpm"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	packages_helper "forgejo.org/routers/api/packages/helper"
 	shared_user "forgejo.org/routers/web/shared/user"
+	"forgejo.org/services/accessreport"
 	"forgejo.org/services/context"
 	"forgejo.org/services/forms"
 	packages_service "forgejo.org/services/packages"
+
+	"xorm.io/builder"
 )
 
 const (
@@ -408,21 +417,79 @@ func PackageSettings(ctx *context.Context) {
 	ctx.Data["IsPackagesPage"] = true
 	ctx.Data["PackageDescriptor"] = pd
 
-	repos, _, _ := repo_model.GetUserRepositories(ctx, &repo_model.SearchRepoOptions{
-		Actor:   pd.Owner,
-		Private: true,
-		OrderBy: db.SearchOrderByAlphabetically,
-	})
+	if ctx.Doer == nil {
+		ctx.NotFound("PackageSettings", nil)
+		return
+	}
+	// the repositories the doer may link the package to: where they can write packages
+	ids, err := repo_model.SearchRepositoryIDsByCondition(ctx, builder.Eq{"owner_id": pd.Owner.ID})
+	if err != nil {
+		ctx.ServerError("SearchRepositoryIDsByCondition", err)
+		return
+	}
+	rows, err := accessreport.Compute(ctx, accessreport.Options{RepoIDs: ids, User: ctx.Doer})
+	if err != nil {
+		ctx.ServerError("Compute", err)
+		return
+	}
+	repos := make([]*repo_model.Repository, 0, len(rows))
+	for _, r := range rows {
+		if r.User != nil && r.Perm.CanWrite(unit.TypePackages) {
+			repos = append(repos, r.Repo)
+			if r.Repo.ID == pd.Package.RepoID {
+				ctx.Data["LinkedRepoID"] = r.Repo.ID // the current link is shown only to who may link to it
+			}
+		}
+	}
+	slices.SortFunc(repos, func(a, b *repo_model.Repository) int { return strings.Compare(a.FullName(), b.FullName()) })
 	ctx.Data["Repos"] = repos
 	ctx.Data["CanWritePackages"] = ctx.Package.AccessMode >= perm.AccessModeWrite || ctx.IsUserSiteAdmin()
 
-	err := shared_user.LoadHeaderCount(ctx)
-	if err != nil {
+	if err := shared_user.LoadHeaderCount(ctx); err != nil {
 		ctx.ServerError("LoadHeaderCount", err)
 		return
 	}
 
 	ctx.HTML(http.StatusOK, tplPackagesSettings)
+}
+
+// linkPackage links the package to the repository, or removes the link for repoID 0, with the checks of the API.
+func linkPackage(ctx gocontext.Context, doer *user_model.User, pkg *packages_model.Package, repoID int64) error {
+	if repoID == pkg.RepoID {
+		if repoID == 0 {
+			return nil
+		}
+		// a no-op only for a repository the doer may link to, so it tells nothing about another one
+		repo, err := repo_model.GetRepositoryByID(ctx, repoID)
+		if err != nil {
+			return err
+		}
+		perms, err := access_model.GetUserRepoPermission(ctx, repo, doer)
+		if err != nil {
+			return err
+		}
+		if !perms.CanWrite(unit.TypePackages) {
+			return util.ErrPermissionDenied
+		}
+		return nil
+	}
+	return db.WithTx(ctx, func(ctx gocontext.Context) error {
+		if pkg.RepoID != 0 {
+			if err := packages_service.UnlinkFromRepository(ctx, pkg, doer); err != nil {
+				return err
+			}
+		}
+		if repoID == 0 {
+			return nil
+		}
+		repo, err := repo_model.GetRepositoryByID(ctx, repoID)
+		if err != nil {
+			return err
+		}
+		unlinked := *pkg
+		unlinked.RepoID = 0
+		return packages_service.LinkToRepository(ctx, &unlinked, repo, doer)
+	})
 }
 
 // PackageSettingsPost updates the package settings
@@ -432,33 +499,13 @@ func PackageSettingsPost(ctx *context.Context) {
 	form := web.GetForm(ctx).(*forms.PackageSettingForm)
 	switch form.Action {
 	case "link":
-		success := func() bool {
-			repoID := int64(0)
-			if form.RepoID != 0 {
-				repo, err := repo_model.GetRepositoryByID(ctx, form.RepoID)
-				if err != nil {
-					log.Error("Error getting repository: %v", err)
-					return false
-				}
-
-				if repo.OwnerID != pd.Owner.ID {
-					return false
-				}
-
-				repoID = repo.ID
-			}
-
-			if err := packages_model.SetRepositoryLink(ctx, pd.Package.ID, repoID); err != nil {
-				log.Error("Error updating package: %v", err)
-				return false
-			}
-
-			return true
-		}()
-
-		if success {
+		err := linkPackage(ctx, ctx.Doer, pd.Package, form.RepoID)
+		if err == nil {
 			ctx.Flash.Success(ctx.Tr("packages.settings.link.success"))
 		} else {
+			if !errors.Is(err, util.ErrPermissionDenied) && !errors.Is(err, util.ErrInvalidArgument) && !errors.Is(err, util.ErrNotExist) {
+				log.Error("Error updating package link: %v", err)
+			}
 			ctx.Flash.Error(ctx.Tr("packages.settings.link.error"))
 		}
 

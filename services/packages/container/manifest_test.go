@@ -136,6 +136,16 @@ func Test_tryAutolinkByLabel_Project(t *testing.T) {
 	assert.True(t, linked)
 	assert.Equal(t, nested.ID, p.RepoID)
 
+	// a package linked meanwhile keeps its link, and the push goes on
+	stale := *p
+	stale.RepoID = 0
+	linked, err = tryAutolinkByLabel(ctx, &stale, map[string]string{"org.opencontainers.image.source": "https://example.com/org3/repo3"}, user2)
+	require.NoError(t, err)
+	assert.False(t, linked)
+	p, err = packages_model.GetPackageByID(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, nested.ID, p.RepoID)
+
 	p, linked = link("https://example.com/org3/repo3")
 	assert.True(t, linked)
 	assert.EqualValues(t, 3, p.RepoID, "the root repository")
