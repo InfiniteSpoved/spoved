@@ -249,9 +249,16 @@ func rebaseTrackingOnToBase(ctx *mergeContext, mergeStyle repo_model.MergeStyle)
 	ctx.outbuf.Reset()
 	ctx.errbuf.Reset()
 
-	// If the pull request is zero commits behind, then no rebasing needs to be done.
-	if ctx.pr.CommitsBehind == 0 {
+	// If the base is already part of the tracking branch, then no rebasing needs to be done.
+	// Don't use pr.CommitsBehind for this: it is refreshed asynchronously after a push to the base branch.
+	err := git.NewCommand(ctx, "merge-base", "--is-ancestor").AddDynamicArguments(baseBranch, trackingBranch).Run(ctx.RunOpts())
+	ctx.outbuf.Reset()
+	ctx.errbuf.Reset()
+	if err == nil {
 		return nil
+	}
+	if !git.IsErrorExitCode(err, 1) {
+		return fmt.Errorf("unable to git merge-base --is-ancestor in temp repo for %v: %w", ctx.pr, err)
 	}
 
 	// Check git version for availability and suitability of git-replay.
