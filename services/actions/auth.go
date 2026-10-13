@@ -36,6 +36,7 @@ type IDTokenCustomClaims struct {
 	BaseRef           string `json:"base_ref"`
 	EventName         string `json:"event_name"`
 	HeadRef           string `json:"head_ref"`
+	NamespacePath     string `json:"namespace_path"`
 	Ref               string `json:"ref"`
 	RefProtected      string `json:"ref_protected"`
 	RefType           string `json:"ref_type"`
@@ -138,6 +139,7 @@ func generateOIDCExtra(gitCtx map[string]any) (string, error) {
 		BaseRef:           ctxVal("base_ref"),
 		EventName:         ctxVal("event_name"),
 		HeadRef:           ctxVal("head_ref"),
+		NamespacePath:     ctxVal("namespace_path"),
 		Ref:               ctxVal("ref"),
 		RefProtected:      ctxVal("ref_protected"),
 		RefType:           ctxVal("ref_type"),

@@ -14,7 +14,7 @@ import (
 	"forgejo.org/modules/util"
 )
 
-func CreateVariable(ctx context.Context, ownerID, repoID int64, name, data string) (*actions_model.ActionVariable, error) {
+func CreateVariable(ctx context.Context, ownerID, groupID, repoID int64, name, data string) (*actions_model.ActionVariable, error) {
 	if err := secret.ValidateName(name); err != nil {
 		return nil, err
 	}
@@ -23,7 +23,7 @@ func CreateVariable(ctx context.Context, ownerID, repoID int64, name, data strin
 		return nil, err
 	}
 
-	v, err := actions_model.InsertVariable(ctx, ownerID, repoID, name, util.ReserveLineBreakForTextarea(data))
+	v, err := actions_model.InsertVariable(ctx, ownerID, groupID, repoID, name, util.ReserveLineBreakForTextarea(data))
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +31,7 @@ func CreateVariable(ctx context.Context, ownerID, repoID int64, name, data strin
 	return v, nil
 }
 
-func UpdateVariable(ctx context.Context, variableID, ownerID, repoID int64, name, data string) (bool, error) {
+func UpdateVariable(ctx context.Context, variableID, ownerID, groupID, repoID int64, name, data string) (bool, error) {
 	if err := secret.ValidateName(name); err != nil {
 		return false, err
 	}
@@ -45,13 +45,15 @@ func UpdateVariable(ctx context.Context, variableID, ownerID, repoID int64, name
 		Name:    strings.ToUpper(name),
 		Data:    util.ReserveLineBreakForTextarea(data),
 		OwnerID: ownerID,
+		GroupID: groupID,
 		RepoID:  repoID,
 	})
 }
 
-func DeleteVariableByName(ctx context.Context, ownerID, repoID int64, name string) error {
+func DeleteVariableByName(ctx context.Context, ownerID, groupID, repoID int64, name string) error {
 	v, err := GetVariable(ctx, actions_model.FindVariablesOpts{
 		OwnerID: ownerID,
+		GroupID: groupID,
 		RepoID:  repoID,
 		Name:    name,
 	})
@@ -59,7 +61,7 @@ func DeleteVariableByName(ctx context.Context, ownerID, repoID int64, name strin
 		return err
 	}
 
-	_, err = actions_model.DeleteVariable(ctx, v.ID, ownerID, repoID)
+	_, err = actions_model.DeleteVariable(ctx, v.ID, ownerID, groupID, repoID)
 	return err
 }
 

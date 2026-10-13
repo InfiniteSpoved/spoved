@@ -10,13 +10,14 @@ import (
 	secret_model "forgejo.org/models/secret"
 )
 
-func CreateOrUpdateSecret(ctx context.Context, ownerID, repoID int64, name, data string) (*secret_model.Secret, bool, error) {
+func CreateOrUpdateSecret(ctx context.Context, ownerID, groupID, repoID int64, name, data string) (*secret_model.Secret, bool, error) {
 	if err := secret_model.ValidateName(name); err != nil {
 		return nil, false, err
 	}
 
 	s, exists, err := db.Get[secret_model.Secret](ctx, secret_model.FindSecretsOptions{
 		OwnerID: ownerID,
+		GroupID: groupID,
 		RepoID:  repoID,
 		Name:    name,
 	}.ToConds())
@@ -25,7 +26,7 @@ func CreateOrUpdateSecret(ctx context.Context, ownerID, repoID int64, name, data
 	}
 
 	if !exists {
-		s, err := secret_model.InsertEncryptedSecret(ctx, ownerID, repoID, name, data)
+		s, err := secret_model.InsertEncryptedSecret(ctx, ownerID, groupID, repoID, name, data)
 		if err != nil {
 			return nil, false, err
 		}
@@ -39,9 +40,10 @@ func CreateOrUpdateSecret(ctx context.Context, ownerID, repoID int64, name, data
 	return s, false, nil
 }
 
-func DeleteSecretByID(ctx context.Context, ownerID, repoID, secretID int64) error {
+func DeleteSecretByID(ctx context.Context, ownerID, groupID, repoID, secretID int64) error {
 	s, err := db.Find[secret_model.Secret](ctx, secret_model.FindSecretsOptions{
 		OwnerID:  ownerID,
+		GroupID:  groupID,
 		RepoID:   repoID,
 		SecretID: secretID,
 	})
@@ -55,9 +57,10 @@ func DeleteSecretByID(ctx context.Context, ownerID, repoID, secretID int64) erro
 	return deleteSecret(ctx, s[0])
 }
 
-func DeleteSecretByName(ctx context.Context, ownerID, repoID int64, name string) error {
+func DeleteSecretByName(ctx context.Context, ownerID, groupID, repoID int64, name string) error {
 	s, err := db.Find[secret_model.Secret](ctx, secret_model.FindSecretsOptions{
 		OwnerID: ownerID,
+		GroupID: groupID,
 		RepoID:  repoID,
 		Name:    name,
 	})

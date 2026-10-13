@@ -198,7 +198,7 @@ func TestAPIOrgVariablesDeleteOrganizationVariable(t *testing.T) {
 	owner := forgery.CreateUser(t, nil)
 	org := forgery.CreateOrganisation(t, owner)
 
-	variable, err := actions_model.InsertVariable(t.Context(), org.ID, 0, "FORGEJO_FORBIDDEN", "illegal")
+	variable, err := actions_model.InsertVariable(t.Context(), org.ID, 0, 0, "FORGEJO_FORBIDDEN", "illegal")
 	require.NoError(t, err)
 	session := loginUser(t, owner.Name)
 	token := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteOrganization)

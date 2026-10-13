@@ -19,7 +19,7 @@ func TestInsertEncryptedSecret(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 
 	t.Run("Global secret", func(t *testing.T) {
-		secret, err := InsertEncryptedSecret(t.Context(), 0, 0, "GLOBAL_SECRET", "some common secret")
+		secret, err := InsertEncryptedSecret(t.Context(), 0, 0, 0, "GLOBAL_SECRET", "some common secret")
 		require.ErrorIs(t, err, util.ErrInvalidArgument)
 		assert.Nil(t, secret)
 	})
@@ -27,7 +27,7 @@ func TestInsertEncryptedSecret(t *testing.T) {
 	key := keying.ActionSecret
 
 	t.Run("Insert repository secret", func(t *testing.T) {
-		secret, err := InsertEncryptedSecret(t.Context(), 0, 1, "REPO_SECRET", "some repository secret")
+		secret, err := InsertEncryptedSecret(t.Context(), 0, 0, 1, "REPO_SECRET", "some repository secret")
 		require.NoError(t, err)
 		assert.NotNil(t, secret)
 		assert.Equal(t, "REPO_SECRET", secret.Name)
@@ -56,7 +56,7 @@ func TestInsertEncryptedSecret(t *testing.T) {
 	})
 
 	t.Run("Insert owner secret", func(t *testing.T) {
-		secret, err := InsertEncryptedSecret(t.Context(), 2, 0, "OWNER_SECRET", "some owner secret")
+		secret, err := InsertEncryptedSecret(t.Context(), 2, 0, 0, "OWNER_SECRET", "some owner secret")
 		require.NoError(t, err)
 		assert.NotNil(t, secret)
 		assert.Equal(t, "OWNER_SECRET", secret.Name)
@@ -85,12 +85,12 @@ func TestInsertEncryptedSecret(t *testing.T) {
 	})
 
 	t.Run("Rejects invalid name", func(t *testing.T) {
-		_, err := InsertEncryptedSecret(t.Context(), 2, 0, "invalid name", "some secret")
+		_, err := InsertEncryptedSecret(t.Context(), 2, 0, 0, "invalid name", "some secret")
 		require.ErrorContains(t, err, "invalid secret name")
 	})
 
 	t.Run("FetchActionSecrets", func(t *testing.T) {
-		secrets, err := FetchActionSecrets(t.Context(), 2, 1)
+		secrets, err := FetchActionSecrets(t.Context(), 2, 0, 1)
 		require.NoError(t, err)
 		assert.Equal(t, "some owner secret", secrets["OWNER_SECRET"])
 		assert.Equal(t, "some repository secret", secrets["REPO_SECRET"])
@@ -192,7 +192,7 @@ func TestSecretGetSecretByID(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			secret, err := GetSecretByID(t.Context(), testCase.ownerID, testCase.repoID, testCase.id)
+			secret, err := GetSecretByID(t.Context(), testCase.ownerID, 0, testCase.repoID, testCase.id)
 
 			if testCase.expectedError != "" {
 				assert.ErrorContains(t, err, testCase.expectedError)
@@ -214,7 +214,7 @@ func TestSecretGetSecretByID(t *testing.T) {
 func TestSecretUpdateSecret(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 
-	secret, err := InsertEncryptedSecret(t.Context(), 2, 0, "a_secret", "very secret")
+	secret, err := InsertEncryptedSecret(t.Context(), 2, 0, 0, "a_secret", "very secret")
 	require.NoError(t, err)
 
 	secret.Name = "new_name"
@@ -234,7 +234,7 @@ func TestSecretUpdateSecret(t *testing.T) {
 func TestSecretUpdateSecret_RejectsInvalidName(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 
-	secret, err := InsertEncryptedSecret(t.Context(), 2, 0, "a_secret", "very secret")
+	secret, err := InsertEncryptedSecret(t.Context(), 2, 0, 0, "a_secret", "very secret")
 	require.NoError(t, err)
 
 	secret.Name = "GITHUB_IS_REJECTED" // Because it starts with `GITHUB_`.

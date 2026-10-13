@@ -50,7 +50,7 @@ func getSecretsOfJob(ctx context.Context, job *actions_model.ActionRunJob) (map[
 		return nil, err
 	}
 
-	jobSecrets, err := secret_model.FetchActionSecrets(ctx, job.Run.Repo.OwnerID, job.Run.RepoID)
+	jobSecrets, err := secret_model.FetchActionSecrets(ctx, job.Run.Repo.OwnerID, job.Run.Repo.GroupID, job.Run.RepoID)
 	if err != nil {
 		// Don't return error details, just in case they contain confidential details and error reaches a user;
 		// FetchActionSecrets logs all errors to the server log.

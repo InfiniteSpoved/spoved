@@ -24,7 +24,7 @@ func TestDatabaseDefaultMaxInSize(t *testing.T) {
 	// Ensure there are more than db.DefaultMaxInSize objects in a table:
 	targetCount := db.DefaultMaxInSize * 2
 	for i := range targetCount {
-		_, err := actions_model.InsertVariable(t.Context(), 2, 2, fmt.Sprintf("VAR_%d", i), fmt.Sprintf("Value %d", i))
+		_, err := actions_model.InsertVariable(t.Context(), 2, 0, 2, fmt.Sprintf("VAR_%d", i), fmt.Sprintf("Value %d", i))
 		require.NoError(t, err)
 	}
 

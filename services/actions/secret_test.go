@@ -94,9 +94,9 @@ func TestGetSecretsOfJob(t *testing.T) {
 			require.NoError(t, unittest.PrepareTestDatabase())
 
 			// Due to encryption, more maintainable to do this rather than create secrets in fixture data
-			_, err := secret_model.InsertEncryptedSecret(t.Context(), 2, 0, "secret_1", "the sky is blue")
+			_, err := secret_model.InsertEncryptedSecret(t.Context(), 2, 0, 0, "secret_1", "the sky is blue")
 			require.NoError(t, err)
-			_, err = secret_model.InsertEncryptedSecret(t.Context(), 0, 63, "secret_2", "the ocean is also blue")
+			_, err = secret_model.InsertEncryptedSecret(t.Context(), 0, 0, 63, "secret_2", "the ocean is also blue")
 			require.NoError(t, err)
 
 			runJob := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRunJob{ID: tt.runJobID})

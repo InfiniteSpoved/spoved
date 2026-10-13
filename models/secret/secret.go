@@ -7,9 +7,11 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/keying"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/timeutil"
@@ -28,8 +30,9 @@ var (
 // Secret represents a secret
 //
 // It can be:
-//  1. org/user level secret, OwnerID is org/user ID and RepoID is 0
+//  1. org/user level secret, OwnerID is org/user ID, GroupID and RepoID are 0
 //  2. repo level secret, OwnerID is 0 and RepoID is repo ID
+//  3. project level secret, OwnerID is the org ID, GroupID the project (repo_group) ID and RepoID is 0
 //
 // Please note that it's not acceptable to have both OwnerID and RepoID to be non-zero,
 // or it will be complicated to find secrets belonging to a specific owner.
@@ -42,6 +45,7 @@ var (
 type Secret struct {
 	ID          int64
 	OwnerID     int64              `xorm:"INDEX UNIQUE(owner_repo_name) NOT NULL"`
+	GroupID     int64              `xorm:"UNIQUE(owner_repo_name) NOT NULL DEFAULT 0"`
 	RepoID      int64              `xorm:"INDEX UNIQUE(owner_repo_name) NOT NULL DEFAULT 0"`
 	Name        string             `xorm:"UNIQUE(owner_repo_name) NOT NULL"`
 	Data        []byte             `xorm:"BLOB"` // encrypted data
@@ -62,11 +66,14 @@ func (err ErrSecretNotFound) Unwrap() error {
 }
 
 // InsertEncryptedSecret Creates, encrypts, and validates a new secret with yet unencrypted data and insert into database
-func InsertEncryptedSecret(ctx context.Context, ownerID, repoID int64, name, data string) (*Secret, error) {
+func InsertEncryptedSecret(ctx context.Context, ownerID, groupID, repoID int64, name, data string) (*Secret, error) {
 	if ownerID != 0 && repoID != 0 {
 		// It's trying to create a secret that belongs to a repository, but OwnerID has been set accidentally.
 		// Remove OwnerID to avoid confusion; it's not worth returning an error here.
 		ownerID = 0
+	}
+	if repoID != 0 || ownerID == 0 {
+		groupID = 0
 	}
 	if ownerID == 0 && repoID == 0 {
 		return nil, fmt.Errorf("%w: ownerID and repoID cannot be both zero, global secrets are not supported", util.ErrInvalidArgument)
@@ -77,11 +84,15 @@ func InsertEncryptedSecret(ctx context.Context, ownerID, repoID int64, name, dat
 
 	secret := &Secret{
 		OwnerID: ownerID,
+		GroupID: groupID,
 		RepoID:  repoID,
 		Name:    strings.ToUpper(name),
 	}
 
 	return secret, db.WithTx(ctx, func(ctx context.Context) error {
+		if err := lockGroup(ctx, ownerID, groupID); err != nil {
+			return err
+		}
 		if err := db.Insert(ctx, secret); err != nil {
 			return err
 		}
@@ -92,6 +103,16 @@ func InsertEncryptedSecret(ctx context.Context, ownerID, repoID int64, name, dat
 	})
 }
 
+// lockGroup locks the project row, so that deleting the project (which deletes its secrets) and adding one run one
+// after the other and a secret never outlives its project.
+func lockGroup(ctx context.Context, ownerID, groupID int64) error {
+	if groupID == 0 {
+		return nil
+	}
+	_, err := repo_model.LockRepoGroup(ctx, ownerID, groupID)
+	return err
+}
+
 func init() {
 	db.RegisterModel(new(Secret))
 }
@@ -100,6 +121,7 @@ type FindSecretsOptions struct {
 	db.ListOptions
 	RepoID   int64
 	OwnerID  int64 // it will be ignored if RepoID is set
+	GroupID  int64 // the project of OwnerID; 0 is the organization/user level itself. Ignored if RepoID is set
 	SecretID int64
 	Name     string
 }
@@ -110,9 +132,9 @@ func (opts FindSecretsOptions) ToConds() builder.Cond {
 	cond = cond.And(builder.Eq{"repo_id": opts.RepoID})
 	if opts.RepoID != 0 { // if RepoID is set
 		// ignore OwnerID and treat it as 0
-		cond = cond.And(builder.Eq{"owner_id": 0})
+		cond = cond.And(builder.Eq{"owner_id": 0, "group_id": 0})
 	} else {
-		cond = cond.And(builder.Eq{"owner_id": opts.OwnerID})
+		cond = cond.And(builder.Eq{"owner_id": opts.OwnerID, "group_id": opts.GroupID})
 	}
 
 	if opts.SecretID != 0 {
@@ -148,13 +170,13 @@ func (s *Secret) GetDecryptedData() (string, error) {
 	return string(v), nil
 }
 
-func GetSecretByID(ctx context.Context, ownerID, repoID, id int64) (*Secret, error) {
+func GetSecretByID(ctx context.Context, ownerID, groupID, repoID, id int64) (*Secret, error) {
 	query := db.GetEngine(ctx).Where("id=?", id)
 
 	if repoID > 0 {
-		query = query.And(builder.Eq{"repo_id": repoID})
+		query = query.And(builder.Eq{"repo_id": repoID, "owner_id": 0, "group_id": 0})
 	} else if ownerID > 0 {
-		query = query.And(builder.Eq{"owner_id": ownerID})
+		query = query.And(builder.Eq{"repo_id": 0, "owner_id": ownerID, "group_id": groupID})
 	} else {
 		return nil, fmt.Errorf("ownerID and repoID cannot be simultaneously 0")
 	}
@@ -188,7 +210,9 @@ func UpdateSecret(ctx context.Context, secret *Secret, columns ...string) error 
 	return err
 }
 
-func FetchActionSecrets(ctx context.Context, ownerID, repoID int64) (map[string]string, error) {
+// FetchActionSecrets returns the secrets of a repository; groupID is the project it is in (0 at the root of its owner).
+// The closest level wins: repository, then project, then organization/user.
+func FetchActionSecrets(ctx context.Context, ownerID, groupID, repoID int64) (map[string]string, error) {
 	secrets := map[string]string{}
 
 	ownerSecrets, err := db.Find[Secret](ctx, FindSecretsOptions{OwnerID: ownerID})
@@ -196,13 +220,21 @@ func FetchActionSecrets(ctx context.Context, ownerID, repoID int64) (map[string]
 		log.Error("find secrets of owner %v: %v", ownerID, err)
 		return nil, err
 	}
+	var groupSecrets []*Secret
+	if groupID != 0 {
+		groupSecrets, err = db.Find[Secret](ctx, FindSecretsOptions{OwnerID: ownerID, GroupID: groupID})
+		if err != nil {
+			log.Error("find secrets of project %v: %v", groupID, err)
+			return nil, err
+		}
+	}
 	repoSecrets, err := db.Find[Secret](ctx, FindSecretsOptions{RepoID: repoID})
 	if err != nil {
 		log.Error("find secrets of repo %v: %v", repoID, err)
 		return nil, err
 	}
 
-	for _, secret := range append(ownerSecrets, repoSecrets...) {
+	for _, secret := range slices.Concat(ownerSecrets, groupSecrets, repoSecrets) {
 		decryptedData, err := secret.GetDecryptedData()
 		if err != nil {
 			log.Error("%v", err)

@@ -23,6 +23,7 @@ const (
 
 type variablesCtx struct {
 	OwnerID           int64
+	GroupID           int64
 	RepoID            int64
 	IsRepo            bool
 	IsOrg             bool
@@ -92,7 +93,7 @@ func Variables(ctx *context.Context) {
 		return
 	}
 
-	shared.SetVariablesContext(ctx, vCtx.OwnerID, vCtx.RepoID)
+	shared.SetVariablesContext(ctx, vCtx.OwnerID, vCtx.GroupID, vCtx.RepoID)
 	if ctx.Written() {
 		return
 	}
@@ -112,7 +113,7 @@ func VariableCreate(ctx *context.Context) {
 		return
 	}
 
-	shared.CreateVariable(ctx, vCtx.OwnerID, vCtx.RepoID, vCtx.RedirectLink)
+	shared.CreateVariable(ctx, vCtx.OwnerID, vCtx.GroupID, vCtx.RepoID, vCtx.RedirectLink)
 }
 
 func VariableUpdate(ctx *context.Context) {
@@ -127,7 +128,7 @@ func VariableUpdate(ctx *context.Context) {
 		return
 	}
 
-	shared.UpdateVariable(ctx, vCtx.OwnerID, vCtx.RepoID, vCtx.RedirectLink)
+	shared.UpdateVariable(ctx, vCtx.OwnerID, vCtx.GroupID, vCtx.RepoID, vCtx.RedirectLink)
 }
 
 func VariableDelete(ctx *context.Context) {
@@ -136,5 +137,5 @@ func VariableDelete(ctx *context.Context) {
 		ctx.ServerError("getVariablesCtx", err)
 		return
 	}
-	shared.DeleteVariable(ctx, vCtx.OwnerID, vCtx.RepoID, vCtx.RedirectLink)
+	shared.DeleteVariable(ctx, vCtx.OwnerID, vCtx.GroupID, vCtx.RepoID, vCtx.RedirectLink)
 }

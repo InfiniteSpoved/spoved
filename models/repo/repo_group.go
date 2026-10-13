@@ -240,6 +240,12 @@ func DeleteRepoGroup(ctx context.Context, group *RepoGroup) error {
 				return err
 			}
 		}
+		// its Actions secrets and variables (the packages can't be imported here, so by SQL)
+		for _, table := range []string{"secret", "action_variable"} {
+			if _, err := db.Exec(ctx, "DELETE FROM `"+table+"` WHERE owner_id = ? AND group_id = ?", group.OwnerID, group.ID); err != nil {
+				return err
+			}
+		}
 		return releaseName(ctx, group.OwnerID, locked.Name)
 	})
 }
