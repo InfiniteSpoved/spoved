@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
@@ -37,6 +39,11 @@ func TestRepoGroupWebhooks(t *testing.T) {
 		org17 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 17})
 		foreign, err := repo_model.CreateRepoGroup(ctx, org17, "foreign", "")
 		require.NoError(t, err)
+		// team 12 (admin, user28) and team1 (write, user4) reach the repositories of the project through the link
+		admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+		for _, teamID := range []int64{12, 2} {
+			require.NoError(t, repo_service.LinkTeamToRepoGroup(ctx, admin, organization.OrgFromUser(f.org), teamID, proj.ID))
+		}
 		link := "/org3/proj/-/settings/hooks"
 		const (
 			hookURL  = "http://127.0.0.1:1/token-in-url-9f3a"
@@ -67,6 +74,12 @@ func TestRepoGroupWebhooks(t *testing.T) {
 			assert.Equal(t, "http://127.0.0.1:1/project", w.URL)
 			assert.Contains(t, owner.MakeRequest(t, NewRequest(t, "GET", link), http.StatusOK).Body.String(), "http://127.0.0.1:1/project")
 			assert.NotContains(t, owner.MakeRequest(t, NewRequest(t, "GET", "/org/org3/settings/hooks"), http.StatusOK).Body.String(), "127.0.0.1:1/project", "not in the organization's list")
+			held := mk(f.org.ID, proj.ID)
+			list := owner.MakeRequest(t, NewRequest(t, "GET", link), http.StatusOK).Body.String()
+			assert.Contains(t, list, hookURL)
+			assert.NotContains(t, list, hookKey, "the list shows neither the secret nor the Authorization header")
+			assert.NotContains(t, list, hookAuth)
+			unittest.AssertExistsAndLoadBean(t, &webhook_model.Webhook{ID: held.ID})
 
 			owner.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("%s/%d", link, w.ID)), http.StatusOK)
 			owner.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("%s/%d", link, w.ID), map[string]string{
@@ -84,6 +97,12 @@ func TestRepoGroupWebhooks(t *testing.T) {
 			require.NoError(t, err)
 			owner.MakeRequest(t, NewRequest(t, "POST", fmt.Sprintf("%s/%d/replay/%s", link, w.ID, other.UUID)), http.StatusNotFound)
 			owner.MakeRequest(t, NewRequest(t, "POST", fmt.Sprintf("%s/%d/replay/%s", link, w.ID, own.UUID)), http.StatusSeeOther)
+			// a hook of another project, of another organization or of the organization: not found, even with its own delivery
+			for _, h := range []*webhook_model.Webhook{secretHook, foreignHook, orgHook} {
+				task, err := webhook_model.CreateHookTask(ctx, &webhook_model.HookTask{HookID: h.ID, PayloadContent: "{}", EventType: "push", PayloadVersion: 2})
+				require.NoError(t, err)
+				owner.MakeRequest(t, NewRequest(t, "POST", fmt.Sprintf("%s/%d/replay/%s", link, h.ID, task.UUID)), http.StatusNotFound)
+			}
 
 			owner.MakeRequest(t, NewRequestWithValues(t, "POST", link+"/delete", map[string]string{"id": fmt.Sprint(w.ID)}), http.StatusOK)
 			unittest.AssertNotExistsBean(t, &webhook_model.Webhook{ID: w.ID})
@@ -152,6 +171,40 @@ func TestRepoGroupWebhooks(t *testing.T) {
 			unittest.AssertExistsAndLoadBean(t, &webhook_model.Webhook{ID: project.ID, IsActive: true})
 		})
 
+		t.Run("a git push over HTTP fires the project hook only", func(t *testing.T) {
+			pushHook := mk(f.org.ID, proj.ID)
+			count := func(w *webhook_model.Webhook) int64 {
+				n, err := db.GetEngine(ctx).Where("hook_id = ? AND event_type = ?", w.ID, "push").Count(new(webhook_model.HookTask))
+				require.NoError(t, err)
+				return n
+			}
+			secretBefore := count(secretHook)
+			token := getTokenForLoggedInUser(t, owner, auth_model.AccessTokenScopeWriteRepository)
+			c := *u
+			c.Path = "/org3/proj/priv.git"
+			c.User = url.UserPassword("user2", token)
+			dir := t.TempDir()
+			doGitClone(dir, &c)(t)
+			doGitAddSomeCommits(dir, "main")(t)
+			doGitPushTestRepository(dir, "origin", "main")(t)
+			assert.Eventually(t, func() bool { return count(pushHook) == 1 }, 10*time.Second, 100*time.Millisecond)
+			assert.Equal(t, secretBefore, count(secretHook), "another project's hook doesn't fire")
+		})
+
+		t.Run("deleting the project deletes its hooks", func(t *testing.T) {
+			gone, err := repo_model.CreateRepoGroup(ctx, f.org, "gone", "")
+			require.NoError(t, err)
+			w := mk(f.org.ID, gone.ID)
+			_, err = webhook_model.CreateHookTask(ctx, &webhook_model.HookTask{HookID: w.ID, PayloadContent: "{}", EventType: "push", PayloadVersion: 2})
+			require.NoError(t, err)
+			owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/gone/-/settings/delete", map[string]string{"confirm_name": "org3/gone"}), http.StatusSeeOther)
+			unittest.AssertNotExistsBean(t, &repo_model.RepoGroup{ID: gone.ID})
+			unittest.AssertNotExistsBean(t, &webhook_model.Webhook{ID: w.ID})
+			unittest.AssertNotExistsBean(t, &webhook_model.HookTask{HookID: w.ID})
+			owner.MakeRequest(t, NewRequest(t, "GET", "/org3/gone/-/settings/hooks"), http.StatusNotFound)
+			owner.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/org/org3/groups/%d/settings/hooks", gone.ID)), http.StatusNotFound)
+		})
+
 		t.Run("archived organization", func(t *testing.T) {
 			_, err := db.GetEngine(ctx).ID(f.org.ID).Cols("is_archived").Update(&user_model.User{IsArchived: true})
 			require.NoError(t, err)
@@ -173,13 +226,13 @@ func TestRepoGroupWebhooks(t *testing.T) {
 			createIssue := func(repoID int64) {
 				MakeRequest(t, NewRequestWithJSON(t, "POST", fmt.Sprintf("/api/v1/repositories/%d/issues", repoID), &api.CreateIssueOption{Title: "hook"}).AddTokenAuth(token), http.StatusCreated)
 			}
-			orgBefore, secretBefore := count(orgHook), count(secretHook)
+			orgBefore, secretBefore, foreignBefore := count(orgHook), count(secretHook), count(foreignHook)
 
 			createIssue(f.priv.ID)
 			assert.EqualValues(t, 1, count(proj1), "an event of a repository in the project")
 			assert.Equal(t, orgBefore+1, count(orgHook), "organization hooks still fire")
 			assert.Equal(t, secretBefore, count(secretHook), "another project's doesn't")
-			assert.Zero(t, count(foreignHook))
+			assert.Equal(t, foreignBefore, count(foreignHook))
 
 			createIssue(f.hid.ID) // a repository of the other project
 			assert.EqualValues(t, 1, count(proj1))

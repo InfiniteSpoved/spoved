@@ -7,12 +7,16 @@ import (
 	"testing"
 
 	"forgejo.org/models/db"
+	"forgejo.org/models/perm"
+	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	webhook_model "forgejo.org/models/webhook"
+	"forgejo.org/modules/json"
 	api "forgejo.org/modules/structs"
 	webhook_module "forgejo.org/modules/webhook"
+	"forgejo.org/services/convert"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -71,4 +75,37 @@ func TestPrepareWebhooksProject(t *testing.T) {
 	require.NoError(t, err)
 	trashed.TrashedUnix = 1
 	assert.Empty(t, fired(EventSource{Repository: trashed}), "a trashed repository fires nothing")
+}
+
+// The payload of an event of a repository in a project is what the converters always produce: the full path of the
+// repository, and the same fields as for a repository at the root.
+func TestProjectRepoPayload(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+	fields := func() (map[string]any, string) {
+		repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})
+		payload, err := (&api.PushPayload{Repo: convert.ToRepo(ctx, repo, access_model.Permission{AccessMode: perm.AccessModeNone})}).JSONPayload()
+		require.NoError(t, err)
+		var p struct {
+			Repo map[string]any `json:"repository"`
+		}
+		require.NoError(t, json.Unmarshal(payload, &p))
+		return p.Repo, repo.FullName()
+	}
+	root, rootName := fields()
+	require.Equal(t, "org3/repo3", rootName)
+
+	_, err := db.Exec(ctx, "UPDATE `repository` SET group_id = 10, group_name = 'proj' WHERE id = 3")
+	require.NoError(t, err)
+	inProject, name := fields()
+	assert.Equal(t, "org3/proj/repo3", name)
+	assert.Equal(t, "org3/proj/repo3", inProject["full_name"])
+	for key := range inProject {
+		if key != "project" { // added with the projects API, only for a repository in a project
+			assert.Contains(t, root, key, "no new field")
+		}
+	}
+	for key := range root {
+		assert.Contains(t, inProject, key, "no field is gone")
+	}
 }
