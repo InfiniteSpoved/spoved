@@ -40,7 +40,7 @@ type CreateKeyOption struct {
 	//
 	// required: false
 	ReadOnly bool `json:"read_only"`
-	// When the key expires, omit for never
+	// When it expires. Required by default, at most 365 days from today ([security] *_EXPIRY_REQUIRED and *_MAX_LIFETIME_DAYS); omit for never only when the instance allows it
 	// swagger:strfmt date-time
 	ExpiresAt *time.Time `json:"expires_at"`
 }

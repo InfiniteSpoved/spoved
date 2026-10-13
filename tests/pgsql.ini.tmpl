@@ -101,6 +101,13 @@ DISABLE_GIT_HOOKS = false
 INSTALL_LOCK   = true
 SECRET_KEY     = 9pCviYTWSb
 DISABLE_QUERY_AUTH_TOKEN = true
+; Expiry policies are on by default; tests that need them set them (see credential_expiry_default_test.go).
+SSH_KEY_EXPIRY_REQUIRED = false
+SSH_KEY_MAX_LIFETIME_DAYS = 0
+DEPLOY_KEY_EXPIRY_REQUIRED = false
+DEPLOY_KEY_MAX_LIFETIME_DAYS = 0
+ACCESS_TOKEN_EXPIRY_REQUIRED = false
+ACCESS_TOKEN_MAX_LIFETIME_DAYS = 0
 
 [lfs]
 MINIO_BASE_PATH = lfs/

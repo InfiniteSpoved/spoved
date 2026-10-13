@@ -406,3 +406,25 @@ ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION = read:repository
 	require.NoError(t, err)
 	assert.Equal(t, "2030-01-02", loadAccessTokenScopePolicy(cfg.Section("security")).EnforceAfter)
 }
+
+func TestLoadCredentialExpiryPolicyDefault(t *testing.T) {
+	assert.Equal(t, CredentialExpiryPolicy{Required: true, MaxLifetimeDays: 365}, DefaultCredentialExpiry)
+
+	for _, data := range []string{"", "[security]\nINSTALL_LOCK = true"} {
+		cfg, err := NewConfigProviderFromData(data)
+		require.NoError(t, err)
+		loadSecurityFrom(cfg)
+		assert.Equal(t, DefaultCredentialExpiry, SSHKeyExpiry)
+		assert.Equal(t, DefaultCredentialExpiry, DeployKeyExpiry)
+		assert.Equal(t, DefaultCredentialExpiry, AccessTokenExpiry)
+	}
+
+	cfg, err := NewConfigProviderFromData("[security]\nSSH_KEY_EXPIRY_REQUIRED = false\nSSH_KEY_MAX_LIFETIME_DAYS = 0\nDEPLOY_KEY_MAX_LIFETIME_DAYS = 90")
+	require.NoError(t, err)
+	assert.Equal(t, CredentialExpiryPolicy{}, loadCredentialExpiryPolicy(cfg.Section("security"), "SSH_KEY"))
+	assert.Equal(t, CredentialExpiryPolicy{Required: true, MaxLifetimeDays: 90}, loadCredentialExpiryPolicy(cfg.Section("security"), "DEPLOY_KEY"))
+
+	cfg, err = NewConfigProviderFromData("[security]\nACCESS_TOKEN_MAX_LIFETIME_DAYS = 4611686018427387904")
+	require.NoError(t, err)
+	assert.Equal(t, CredentialExpiryPolicy{Required: true, MaxLifetimeDays: 36500}, loadCredentialExpiryPolicy(cfg.Section("security"), "ACCESS_TOKEN"))
+}

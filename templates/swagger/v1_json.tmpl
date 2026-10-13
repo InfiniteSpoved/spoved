@@ -29632,7 +29632,7 @@
       ],
       "properties": {
         "expires_at": {
-          "description": "When the token expires, omit for never",
+          "description": "When it expires. Required by default, at most 365 days from today ([security] *_EXPIRY_REQUIRED and *_MAX_LIFETIME_DAYS); omit for never only when the instance allows it",
           "type": "string",
           "format": "date-time",
           "x-go-name": "ExpiresAt"
@@ -30203,7 +30203,7 @@
       ],
       "properties": {
         "expires_at": {
-          "description": "When the key expires, omit for never",
+          "description": "When it expires. Required by default, at most 365 days from today ([security] *_EXPIRY_REQUIRED and *_MAX_LIFETIME_DAYS); omit for never only when the instance allows it",
           "type": "string",
           "format": "date-time",
           "x-go-name": "ExpiresAt"
@@ -30631,7 +30631,7 @@
           "x-go-name": "AllRepositories"
         },
         "expires_at": {
-          "description": "When the key expires; omit for a key that never expires",
+          "description": "When it expires. Required by default, at most 365 days from today ([security] *_EXPIRY_REQUIRED and *_MAX_LIFETIME_DAYS); omit for never only when the instance allows it",
           "type": "string",
           "format": "date-time",
           "x-go-name": "ExpiresAt"
