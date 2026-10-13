@@ -87,7 +87,7 @@ func TestPackageLinkRepositoryAccess(t *testing.T) {
 	writerSession := loginUser(t, writer.Name)
 
 	t.Run("Picker", func(t *testing.T) {
-		assert.Equal(t, map[int64]string{teamRepo.ID: teamRepo.FullName(), inProject.ID: inProject.FullName()}, picker(writerSession))
+		assert.Equal(t, map[int64]string{teamRepo.ID: teamRepo.Name, inProject.ID: "pl-project/pl-nested"}, picker(writerSession))
 
 		all := picker(loginUser(t, admin.Name))
 		for _, r := range []*repo_model.Repository{teamRepo, hidden, public, inProject} {
