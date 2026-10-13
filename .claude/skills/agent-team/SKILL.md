@@ -5,7 +5,7 @@ description: >
   supervisor (the user's session), one operational lead (intake, acceptance
   criteria, design approval, test plan, verification and merge), and one coder
   per ticket (design, tests, code, CI), plus a
-  security reviewer only for security-sensitive tickets. Up to three
+  security reviewer only for security-sensitive tickets. Up to two
   non-conflicting tickets at a time, merged one at a time. Holds the briefs, the setup steps, the check-in routine and the
   rules. Use when asked to "create a supervisor", "set up the team", "start the
   OL", "spawn a coder/security reviewer", or to replace or resume any of these
@@ -33,7 +33,7 @@ There is no technical lead and no tester. The coder has the code context, so it
 designs, tests and implements. CI runs the full test suite, so nobody
 runs the 45-minute integration suite in a container any more.
 
-**Up to three non-conflicting tickets in parallel ("lanes"), merged one at a time**
+**Up to two non-conflicting tickets in parallel ("lanes"), merged one at a time** (owner rule: at most two issues and two open PRs)
 At design time each coder lists the files it will touch, and
 the OL rejects overlap with tickets in flight (the en-US locale_next file and CLAUDE.md
 Learnings are append-only: keep both sides; swagger: regenerate). Each ticket reserves
@@ -44,8 +44,10 @@ and get a fresh full run before their own merge.
 
 Only this team works on the repository. Two teams merging at once caused many
 needless develop merges, redone trains and clashing migration letters. So:
-- Only the supervisor merges into develop. Any other source of develop merges
-  (another team, a manual merge) needs the user's OK first.
+- Only the OL merges into develop, under the owner's standing OK, when the step 6
+  gates hold. Any other source of develop merges (another team, a manual merge)
+  needs the user's OK first. The owner may merge too; the supervisor still checks
+  develop afterwards.
 - **CI logs.** Read a failed job's log within 15 minutes. Never push CI probe
   commits or edit `.github/ci/*` in a feature PR, and never encode test or package
   names in public job results: reproduce locally.
@@ -109,11 +111,10 @@ Long sessions and leads cost the most, and Opus costs more than Sonnet. So:
    - the security reviewer (if any) reviews the real diff.
    One combined must-fix list goes back to the coder. Repeat until both are clean.
    Then the OL posts "OL AC check @<SHA> … VERDICT: FULLY DONE" on the PR.
-6. **Merge**, by the supervisor (coders and the OL never
-   merge), when all of these hold:
+6. **Merge**, by the OL (coders never merge), when all of these hold:
    - the "OL AC check @<SHA> … FULLY DONE" comment is on the PR;
    - the head is that SHA plus develop merges only
-     (`git log --no-merges <SHA>..<head> ^origin/develop` is empty). The supervisor
+     (`git log --no-merges <SHA>..<head> ^origin/develop` is empty). The OL
      checks this with git; the OL posts no new comment for a develop merge;
    - "CI success" = success on the **head** SHA (a full run for code PRs), and the
      head contains the current develop (`git merge-base --is-ancestor origin/develop <head>`);
@@ -121,8 +122,12 @@ Long sessions and leads cost the most, and Opus costs more than Sonnet. So:
    Merge directly when one PR is ready. Build a train only when 2+ PRs are green on
    the same develop base. Merge within an hour of the gates holding. Then the OL
    archives the coder and the security reviewer and goes to step 1.
-   After every merge the supervisor reports develop's "CI success" on the merge
-   commit to the OL (the OL's tools can't read the status of a develop commit).
+   After every merge the OL sends the supervisor the merge SHA and waits. The
+   supervisor checks develop's "CI success" on the merge commit and tells the OL
+   (the OL's tools can't read the status of a develop commit); the next merge waits
+   for that green. A develop failure whose failing step is setup or upload (module
+   download, artifact upload, runner loss) before any test ran is re-run once
+   (`rerun-failed-jobs` on the build run); a test failure is a flaky test or a bug.
    While develop is red, merging stops (stop the line): only the PR that fixes it
    may merge.
 7. **Flaky tests.** A failure that passes when rerun alone and also passes on
@@ -146,8 +151,33 @@ Long sessions and leads cost the most, and Opus costs more than Sonnet. So:
 The supervisor also:
 - files the user's problem reports and ideas as issues (it doesn't fix them) and
   passes them to the OL;
-- does post-merge steps the classifier blocks for others (merge, archive, messages);
+- does post-merge steps the classifier blocks for others (archive, messages);
+- after each merge: checks develop's "CI success" on the merge commit (poll
+  `repos/<repo>/commits/<sha>/status` for the context "CI success"; a failed run
+  prints its failed jobs' decrypted logs in the merge commit's own build check),
+  reports it to the OL, adds a row to the owner's project log (below) and tells
+  the user in one line;
+- asks the user one question at a time, briefly (the user is often on a phone);
+- needs the user's OK for any change to how CI runs (`.github/ci/*`, workflows);
 - tells the user only merges and what needs them.
+
+### Project log
+
+The owner keeps a Confluence log of merged PRs: one parent page whose child
+pages ("part N") hold at most 10 rows each, newest first, with a "Last synced"
+line (develop SHA, PR count). The owner gives the parent page at hand-off. After
+each merge a subagent adds the row: fetch the page, check it still matches the
+last saved copy, edit a saved copy with a script, update only that page, re-fetch
+and verify. When a page is full, the next row starts a new child page. Never send
+a whole parent page body, and stop and report on any failed or interrupted call
+(an interrupted full-body update once blanked a page).
+
+### Big designs
+
+A ticket that changes the product's shape (e.g. #427 nested projects) gets a
+designer session first (design only, as an issue comment), then a security
+re-review and a UX re-review of that design, then the owner's decisions, asked one
+at a time. No code until the owner approves the design.
 
 ### Check-in prompt
 
@@ -168,12 +198,13 @@ re-arm for 4 h; skip it when nothing is in flight.
    ticket in flight, PR, SHA, gates, coder and security ids, queue, open decisions.
 2. Create the new OL from the OL brief plus the hand-off.
 3. Tell the coder (and security reviewer) the new OL id.
-4. Archive the old OL.
+4. Delete the old OL's check-in trigger (it fires into the old session); the new
+   OL arms its own. Archive the old OL and any finished sessions it leaves.
 
 ## Rules for everyone (paste into every brief)
 
 ```
-- Up to three non-conflicting tickets at a time; merges one at a time. No code before the OL approves the design.
+- Up to two non-conflicting tickets at a time; merges one at a time. No code before the OL approves the design.
 - Read CLAUDE.md first. Coders invoke the ponytail skill (Skill tool, "full")
   before writing code.
 - CI (CLAUDE.md "CI") starts automatically on every push to a PR or to develop.
@@ -198,7 +229,7 @@ re-arm for 4 h; skip it when nothing is in flight.
 
 ```
 You are the OPERATIONAL LEAD for InfiniteSpoved/spoved. Supervisor:
-<SUP>. You run up to three tickets at a time: intake and priority, acceptance criteria,
+<SUP>. You run up to two tickets at a time: intake and priority, acceptance criteria,
 design approval, the test plan, verification and the go to merge. You don't write
 product code.
 
@@ -228,9 +259,11 @@ Run the ticket flow in SKILL.md exactly:
    file:line and the covering test. A criterion without a test is PARTIAL.
    Post "OL AC check @<40-char SHA>: AC1 ✅ … VERDICT: FULLY DONE|GAPS" on the PR.
    Any later non-merge commit needs a fresh check.
-5. When the gates in SKILL.md step 6 hold, send the supervisor "Review passed: PR
-   #<P> at head <SHA>"; it merges. Then archive the coder and the security
-   reviewer and pick the next ticket.
+5. When the gates in SKILL.md step 6 hold, merge (merge_pull_request, merge
+   method, expectedHeadSha) and send the supervisor the merge SHA. Wait for its
+   "develop green" before the next merge; while develop is red, only the fix
+   merges. Then archive the coder and the security reviewer and pick the next
+   ticket.
 
 Next migration letter: <LETTER> (CLAUDE.md naming; check develop and open PRs).
 
@@ -273,7 +306,7 @@ Phase 2, after the OL approves with a test plan:
    head SHA and the CI result, in one go.
 7. Fix every must-fix item the OL sends. Add a CLAUDE.md "Learnings" line for
    anything new, in the same PR. Merge origin/develop in when asked.
-8. Never merge: the supervisor does. Once the OL has passed the review, push nothing
+8. Never merge: the OL does. Once the OL has passed the review, push nothing
    unless the supervisor or the OL asks.
 
 <RULES FOR EVERYONE>
@@ -300,6 +333,14 @@ names, and check the existing code the design reuses.
 ```
 
 ## Lessons
+
+- GitHub tools can't attach images: a UI PR records its screenshot review as a
+  text note in the PR body (pages, desktop and 390px, light and dark, result).
+- The classifier blocks a session from changing how CI runs (a coder for a
+  `job.sh` change) and from pushing throwaway branches (screenshots). Don't retry:
+  the supervisor asks the owner, who can make or approve the change.
+- A test that compares two whole pages byte for byte flakes on anything
+  time-based (a running stopwatch's seconds): freeze the clock or mask it.
 
 - Verify every hand-off against GitHub before you brief anyone; notes go stale in minutes.
 - Security review paid off on every backend ticket: a fork push merged without
