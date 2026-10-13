@@ -359,24 +359,42 @@ func TestOrgSettingsMenuHiddenUnits(t *testing.T) {
 	token := getTokenForLoggedInUser(t, owner, auth_model.AccessTokenScopeWriteRepository, auth_model.AccessTokenScopeWriteOrganization)
 	createUnitPolicyOrgRepo(t, token, "unit-org-m", "r")
 
-	menu := func(t *testing.T, want bool) {
+	menu := func(t *testing.T, wantPackages, wantActions bool) {
 		t.Helper()
 		page := owner.MakeRequest(t, NewRequest(t, "GET", "/org/unit-org-m/settings"), http.StatusOK).Body.String()
-		assert.Equal(t, want, strings.Contains(page, `href="/org/unit-org-m/settings/packages"`), "packages item")
-		assert.Equal(t, want, strings.Contains(page, `href="/org/unit-org-m/settings/actions/runners"`), "actions item")
+		assert.Equal(t, wantPackages, strings.Contains(page, `href="/org/unit-org-m/settings/packages"`), "packages item")
+		assert.Equal(t, wantActions, strings.Contains(page, `href="/org/unit-org-m/settings/actions/runners"`), "actions item")
 	}
-	menu(t, true)
+	menu(t, true, true)
 
-	t.Run("site policy", func(t *testing.T) {
+	// each unit alone, by site policy and by the org's Units setting
+	for _, hidden := range []unit_model.Type{unit_model.TypePackages, unit_model.TypeActions} {
+		wantPackages, wantActions := hidden != unit_model.TypePackages, hidden != unit_model.TypeActions
+		t.Run("site policy "+unit_model.Units[hidden].NameKey, func(t *testing.T) {
+			defer denyRepoUnits(t, nil, hidden)()
+			menu(t, wantPackages, wantActions)
+		})
+		t.Run("org units "+unit_model.Units[hidden].NameKey, func(t *testing.T) {
+			postOrgUnits(t, owner, "unit-org-m", http.StatusSeeOther, allOrgUnitsBut(hidden)...)
+			menu(t, wantPackages, wantActions)
+			postOrgUnits(t, owner, "unit-org-m", http.StatusSeeOther, allOrgUnitsBut()...)
+		})
+		menu(t, true, true)
+	}
+
+	t.Run("both", func(t *testing.T) {
 		defer denyRepoUnits(t, nil, unit_model.TypePackages, unit_model.TypeActions)()
-		menu(t, false)
+		menu(t, false, false)
 	})
-	menu(t, true)
 
-	t.Run("org units", func(t *testing.T) {
-		postOrgUnits(t, owner, "unit-org-m", http.StatusSeeOther, allOrgUnitsBut(unit_model.TypePackages, unit_model.TypeActions)...)
-		menu(t, false)
-		postOrgUnits(t, owner, "unit-org-m", http.StatusSeeOther, allOrgUnitsBut()...)
-		menu(t, true)
+	t.Run("app.ini", func(t *testing.T) {
+		t.Run("packages", func(t *testing.T) {
+			defer test.MockVariableValue(&setting.Packages.Enabled, false)()
+			menu(t, false, true)
+		})
+		t.Run("actions", func(t *testing.T) {
+			defer test.MockVariableValue(&setting.Actions.Enabled, false)()
+			menu(t, true, false)
+		})
 	})
 }
