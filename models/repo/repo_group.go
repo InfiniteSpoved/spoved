@@ -13,6 +13,7 @@ import (
 	"forgejo.org/models/db"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
+	webhook_model "forgejo.org/models/webhook"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 	"forgejo.org/modules/timeutil"
@@ -223,6 +224,19 @@ func DeleteRepoGroup(ctx context.Context, group *RepoGroup) error {
 			"DELETE FROM `protected_branch` WHERE repo_id = 0 AND org_id = ? AND group_id = ?",
 		} {
 			if _, err := db.Exec(ctx, query, group.OwnerID, group.ID); err != nil {
+				return err
+			}
+		}
+		// its webhooks with their deliveries (by ID: MariaDB doesn't use the hook_task key with a subquery)
+		hooks := []int64{}
+		if err := db.GetEngine(ctx).Table("webhook").Where("owner_id = ? AND group_id = ?", group.OwnerID, group.ID).Cols("id").Find(&hooks); err != nil {
+			return err
+		}
+		if len(hooks) > 0 {
+			if _, err := db.GetEngine(ctx).In("hook_id", hooks).Delete(new(webhook_model.HookTask)); err != nil {
+				return err
+			}
+			if _, err := db.GetEngine(ctx).In("id", hooks).Delete(new(webhook_model.Webhook)); err != nil {
 				return err
 			}
 		}

@@ -15,6 +15,7 @@ import (
 	issues_model "forgejo.org/models/issues"
 	org_model "forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
+	webhook_model "forgejo.org/models/webhook"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 )
@@ -214,6 +215,14 @@ func checkDBConsistency(ctx context.Context, logger log.Logger, autofix bool) er
 			Counter: git_model.CountOrphanedProtectedBranches,
 			Fixer: func(ctx context.Context) (int64, error) {
 				return -1, git_model.DeleteOrphanedProtectedBranches(ctx)
+			},
+		},
+		// find project webhooks without existing project
+		consistencyCheck{
+			Name:    "Project webhooks without existing project",
+			Counter: webhook_model.CountOrphanedGroupWebhooks,
+			Fixer: func(ctx context.Context) (int64, error) {
+				return -1, webhook_model.DeleteOrphanedGroupWebhooks(ctx)
 			},
 		},
 		// find branches without existing repository

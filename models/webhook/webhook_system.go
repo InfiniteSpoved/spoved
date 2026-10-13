@@ -19,7 +19,7 @@ func GetDefaultWebhooks(ctx context.Context) ([]*Webhook, int64, error) {
 func GetSystemOrDefaultWebhook(ctx context.Context, id int64) (*Webhook, error) {
 	webhook := &Webhook{ID: id}
 	has, err := db.GetEngine(ctx).
-		Where("repo_id=? AND owner_id=?", 0, 0).
+		Where("repo_id=? AND owner_id=? AND group_id=0", 0, 0).
 		Get(webhook)
 	if err != nil {
 		return nil, err
@@ -39,6 +39,7 @@ func getAdminWebhooks(ctx context.Context, systemWebhooks bool, listOptions db.L
 	sess := db.GetEngine(ctx).
 		Where("repo_id=?", 0).
 		And("owner_id=?", 0).
+		And("group_id=0").
 		And("is_system_webhook=?", systemWebhooks)
 	if len(onlyActive) > 0 && onlyActive[0] {
 		sess = sess.And("is_active=?", true)
@@ -54,7 +55,7 @@ func getAdminWebhooks(ctx context.Context, systemWebhooks bool, listOptions db.L
 func DeleteDefaultSystemWebhook(ctx context.Context, id int64) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
 		count, err := db.GetEngine(ctx).
-			Where("repo_id=? AND owner_id=?", 0, 0).
+			Where("repo_id=? AND owner_id=? AND group_id=0", 0, 0).
 			Delete(&Webhook{ID: id})
 		if err != nil {
 			return err

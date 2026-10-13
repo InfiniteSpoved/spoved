@@ -305,6 +305,19 @@ func PrepareWebhooks(ctx context.Context, source EventSource, event webhook_modu
 		ws = append(ws, repoHooks...)
 
 		owner = source.Repository.MustOwner(ctx)
+
+		// the hooks of its project, read from the repository as it is now: a move switches them
+		if source.Repository.GroupID != 0 {
+			groupHooks, err := db.Find[webhook_model.Webhook](ctx, webhook_model.ListWebhookOptions{
+				OwnerID:  source.Repository.OwnerID,
+				GroupID:  source.Repository.GroupID,
+				IsActive: optional.Some(true),
+			})
+			if err != nil {
+				return fmt.Errorf("ListWebhooksByOpts: %w", err)
+			}
+			ws = append(ws, groupHooks...)
+		}
 	}
 
 	// append additional webhooks of a user or organization
