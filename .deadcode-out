@@ -48,12 +48,6 @@ forgejo.org/models/perm/access
 	AccessLevel
 	GetRepoWriters
 
-forgejo.org/models/repo
-	IsUsableGroupName
-	CreateRepoGroup
-	RenameRepoGroup
-	DeleteRepoGroup
-
 forgejo.org/models/user
 	IsErrUserWrongType
 	IsErrExternalLoginUserAlreadyExist
@@ -294,8 +288,6 @@ forgejo.org/services/notify
 
 forgejo.org/services/repository
 	IsErrForkAlreadyExist
-	RenameRepoGroup
-	DeleteRepoGroup
 
 forgejo.org/services/repository/files
 	ContentType.String
