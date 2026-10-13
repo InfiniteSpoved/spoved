@@ -27,7 +27,7 @@ test('add a project webhook, see it in the list, and delete it', async ({page}) 
   await page.getByRole('link', {name: 'Webhooks'}).click();
   await expect(page).toHaveURL(`/org3/${project}/-/settings/hooks`);
   await page.locator('.ui.jump.dropdown').click();
-  await page.locator('.ui.jump.dropdown').getByRole('link', {name: 'Forgejo'}).first().click();
+  await page.locator(`.ui.jump.dropdown a.item[href$="/-/settings/hooks/forgejo/new"]`).click();
   await page.locator('#payload_url').fill('https://example.com/project-hook');
   await screenshot(page);
   await page.locator('form').getByRole('button', {name: 'Add webhook'}).click();
