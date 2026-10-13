@@ -19,11 +19,13 @@ import (
 )
 
 // OrgDeployKey is a deploy key of an organization: it covers all its repositories or the selected ones
-// (OrgDeployKeyRepo). It shares the PublicKey (KeyTypeDeploy) with repository deploy keys of the same key.
+// (OrgDeployKeyRepo), or, with GroupID set, the repositories of that project of the organization (a project key has
+// neither). It shares the PublicKey (KeyTypeDeploy) with repository deploy keys of the same key.
 type OrgDeployKey struct {
 	ID               int64 `xorm:"pk autoincr"`
 	KeyID            int64 `xorm:"UNIQUE(s) INDEX"`
 	OrgID            int64 `xorm:"UNIQUE(s) INDEX"`
+	GroupID          int64 `xorm:"UNIQUE(s) NOT NULL DEFAULT 0"` // 0 = the organization's own key
 	Name             string
 	Fingerprint      string
 	Mode             perm.AccessMode    `xorm:"NOT NULL DEFAULT 1"`
@@ -64,8 +66,9 @@ func (key *OrgDeployKey) IsReadOnly() bool {
 	return key.Mode == perm.AccessModeRead
 }
 
-// AddOrgDeployKey adds a deploy key to the organization, for all its repositories or the selected ones.
-func AddOrgDeployKey(ctx context.Context, orgID int64, name, content string, readOnly, includesAllRepos bool, repoIDs []int64, expires timeutil.TimeStamp) (*OrgDeployKey, error) {
+// AddOrgDeployKey adds a deploy key to the organization, for all its repositories or the selected ones, or, with
+// groupID set, for the repositories of that project of the organization.
+func AddOrgDeployKey(ctx context.Context, orgID, groupID int64, name, content string, readOnly, includesAllRepos bool, repoIDs []int64, expires timeutil.TimeStamp) (*OrgDeployKey, error) {
 	fingerprint, err := CalcFingerprint(content)
 	if err != nil {
 		return nil, err
@@ -77,6 +80,15 @@ func AddOrgDeployKey(ctx context.Context, orgID int64, name, content string, rea
 
 	var key *OrgDeployKey
 	err = db.WithTx(ctx, func(ctx context.Context) error {
+		if groupID != 0 {
+			// the project row first, so that a concurrent DeleteRepoGroup runs before or after this
+			if _, err := repo_model.LockRepoGroup(ctx, orgID, groupID); err != nil {
+				return err
+			}
+			if includesAllRepos || len(repoIDs) > 0 {
+				return util.NewInvalidArgumentErrorf("a project key covers the repositories of its project")
+			}
+		}
 		if isOrg, err := db.GetEngine(ctx).Table("user").
 			Where("id = ? AND type = ? AND trashed_unix = 0", orgID, user_model.UserTypeOrganization).Exist(); err != nil {
 			return err
@@ -84,13 +96,13 @@ func AddOrgDeployKey(ctx context.Context, orgID int64, name, content string, rea
 			return util.NewInvalidArgumentErrorf("%d is not an organization", orgID)
 		}
 		repoIDs = container.SetOf(repoIDs...).Values()
-		if !includesAllRepos && len(repoIDs) == 0 {
+		if groupID == 0 && !includesAllRepos && len(repoIDs) == 0 {
 			return util.NewInvalidArgumentErrorf("select at least one repository")
 		}
 		if err := checkOrgDeployKeyRepos(ctx, orgID, repoIDs); err != nil {
 			return err
 		}
-		if has, err := db.GetEngine(ctx).Where("org_id = ? AND name = ?", orgID, name).Exist(new(OrgDeployKey)); err != nil {
+		if has, err := db.GetEngine(ctx).Where(builder.Eq{"org_id": orgID, "group_id": groupID, "name": name}).Exist(new(OrgDeployKey)); err != nil {
 			return err
 		} else if has {
 			return ErrDeployKeyNameAlreadyUsed{Name: name}
@@ -100,7 +112,7 @@ func AddOrgDeployKey(ctx context.Context, orgID int64, name, content string, rea
 		if err != nil {
 			return err
 		}
-		if has, err := db.GetEngine(ctx).Where("org_id = ? AND key_id = ?", orgID, pkey.ID).Exist(new(OrgDeployKey)); err != nil {
+		if has, err := db.GetEngine(ctx).Where(builder.Eq{"org_id": orgID, "group_id": groupID, "key_id": pkey.ID}).Exist(new(OrgDeployKey)); err != nil {
 			return err
 		} else if has {
 			return ErrDeployKeyAlreadyExist{KeyID: pkey.ID}
@@ -109,6 +121,7 @@ func AddOrgDeployKey(ctx context.Context, orgID int64, name, content string, rea
 		key = &OrgDeployKey{
 			KeyID:            pkey.ID,
 			OrgID:            orgID,
+			GroupID:          groupID,
 			Name:             name,
 			Fingerprint:      fingerprint,
 			Mode:             mode,
@@ -160,8 +173,9 @@ func (key *EffectiveDeployKey) IsExpired() bool {
 }
 
 // GetEffectiveDeployKey returns the deploy key the public key has on the repository: its deploy key of the
-// repository or a deploy key of the repository owner that covers it. Unexpired keys come first, then the higher
-// mode, then the repository key. An expired key is only returned when no other applies.
+// repository or a deploy key of the repository owner (its project's or its own) that covers it. Unexpired keys come
+// first, then the higher mode, then the more specific key (repository, project, organization). An expired key is
+// only returned when no other applies.
 func GetEffectiveDeployKey(ctx context.Context, keyID int64, repo *repo_model.Repository) (*EffectiveDeployKey, error) {
 	var candidates []*EffectiveDeployKey
 	if key, has, err := db.Get[DeployKey](ctx, builder.Eq{"key_id": keyID, "repo_id": repo.ID}); err != nil {
@@ -169,9 +183,11 @@ func GetEffectiveDeployKey(ctx context.Context, keyID int64, repo *repo_model.Re
 	} else if has {
 		candidates = append(candidates, &EffectiveDeployKey{KeyID: keyID, Name: key.Name, Mode: key.Mode, ExpiresUnix: key.ExpiresUnix, RepoKey: key})
 	}
-	if key, has, err := db.Get[OrgDeployKey](ctx, builder.Eq{"key_id": keyID}.And(orgDeployKeyCoversCond(repo))); err != nil {
+	orgKeys := make([]*OrgDeployKey, 0, 2)
+	if err := db.GetEngine(ctx).Where(builder.Eq{"key_id": keyID}.And(orgDeployKeyCoversCond(repo))).OrderBy("group_id DESC").Find(&orgKeys); err != nil {
 		return nil, err
-	} else if has {
+	}
+	for _, key := range orgKeys { // the project's key before the organization's
 		candidates = append(candidates, &EffectiveDeployKey{KeyID: keyID, Name: key.Name, Mode: key.Mode, ExpiresUnix: key.ExpiresUnix, OrgKey: key})
 	}
 
@@ -213,21 +229,28 @@ func FindOrgDeployKeysCoveringRepos(ctx context.Context, repoIDs []int64) ([]*Or
 
 // orgDeployKeyCoversCond matches the deploy keys of the repository owner that cover the repository: the given one,
 // or, if repo is nil, the joined repository row. The owner condition is part of it, so no caller can leave it out:
-// a key never covers a repository of another owner, whatever is selected.
+// a key never covers a repository of another owner, whatever is selected. A project key covers the repositories
+// that are in its project now, and the organization's keys are only those with group_id 0.
 func orgDeployKeyCoversCond(repo *repo_model.Repository) builder.Cond {
 	owner, selected := builder.Expr("org_deploy_key.org_id = repository.owner_id"), builder.Expr("org_deploy_key_repo.repo_id = repository.id")
+	project := builder.Expr("org_deploy_key.group_id = repository.group_id")
 	if repo != nil {
 		owner, selected = builder.Eq{"org_deploy_key.org_id": repo.OwnerID}, builder.Eq{"org_deploy_key_repo.repo_id": repo.ID}
+		project = builder.Eq{"org_deploy_key.group_id": repo.GroupID}
 	}
 	return owner.And(builder.Or(
-		builder.Eq{"org_deploy_key.includes_all_repos": true},
-		builder.In("org_deploy_key.id", builder.Select("org_deploy_key_repo.org_deploy_key_id").From("org_deploy_key_repo").Where(selected)),
+		builder.Eq{"org_deploy_key.group_id": 0}.And(builder.Or(
+			builder.Eq{"org_deploy_key.includes_all_repos": true},
+			builder.In("org_deploy_key.id", builder.Select("org_deploy_key_repo.org_deploy_key_id").From("org_deploy_key_repo").Where(selected)),
+		)),
+		builder.Neq{"org_deploy_key.group_id": 0}.And(project),
 	))
 }
 
-// GetOrgDeployKey returns the deploy key of the organization with the ID; a key of another organization is not found.
-func GetOrgDeployKey(ctx context.Context, orgID, id int64) (*OrgDeployKey, error) {
-	key, has, err := db.Get[OrgDeployKey](ctx, builder.Eq{"id": id, "org_id": orgID})
+// GetOrgDeployKey returns the deploy key with the ID of the organization (groupID 0) or of its project groupID; a
+// key of another organization or level is not found.
+func GetOrgDeployKey(ctx context.Context, orgID, groupID, id int64) (*OrgDeployKey, error) {
+	key, has, err := db.Get[OrgDeployKey](ctx, builder.Eq{"id": id, "org_id": orgID, "group_id": groupID})
 	if err != nil {
 		return nil, err
 	} else if !has {
@@ -236,10 +259,10 @@ func GetOrgDeployKey(ctx context.Context, orgID, id int64) (*OrgDeployKey, error
 	return key, nil
 }
 
-// FindOrgDeployKeys returns the deploy keys of the organization.
-func FindOrgDeployKeys(ctx context.Context, orgID int64) ([]*OrgDeployKey, error) {
+// FindOrgDeployKeys returns the deploy keys of the organization (groupID 0) or of its project groupID.
+func FindOrgDeployKeys(ctx context.Context, orgID, groupID int64) ([]*OrgDeployKey, error) {
 	keys := make([]*OrgDeployKey, 0, 2)
-	return keys, db.GetEngine(ctx).Where("org_id = ?", orgID).OrderBy("name").Find(&keys)
+	return keys, db.GetEngine(ctx).Where(builder.Eq{"org_id": orgID, "group_id": groupID}).OrderBy("name").Find(&keys)
 }
 
 // GetOrgDeployKeyRepoIDs returns the selected repositories of each key.
@@ -261,7 +284,7 @@ func SetOrgDeployKeyRepos(ctx context.Context, orgID, id int64, includesAllRepos
 	var key *OrgDeployKey
 	err := db.WithTx(ctx, func(ctx context.Context) error {
 		var err error
-		if key, err = lockOrgDeployKey(ctx, orgID, id); err != nil {
+		if key, err = lockOrgDeployKey(ctx, orgID, 0, id); err != nil {
 			return err
 		}
 		repoIDs = container.SetOf(repoIDs...).Values()
@@ -286,13 +309,13 @@ func SetOrgDeployKeyRepos(ctx context.Context, orgID, id int64, includesAllRepos
 	return key, err
 }
 
-// lockOrgDeployKey loads the key of the organization for a change of what it covers, taking its row lock first, so
-// concurrent changes of one key run one after the other.
-func lockOrgDeployKey(ctx context.Context, orgID, id int64) (*OrgDeployKey, error) {
-	if _, err := db.Exec(ctx, "UPDATE org_deploy_key SET includes_all_repos = includes_all_repos WHERE id = ? AND org_id = ?", id, orgID); err != nil {
+// lockOrgDeployKey loads the key of the organization (groupID 0) or its project for a change, taking its row lock
+// first, so concurrent changes of one key run one after the other.
+func lockOrgDeployKey(ctx context.Context, orgID, groupID, id int64) (*OrgDeployKey, error) {
+	if _, err := db.Exec(ctx, "UPDATE org_deploy_key SET includes_all_repos = includes_all_repos WHERE id = ? AND org_id = ? AND group_id = ?", id, orgID, groupID); err != nil {
 		return nil, err
 	}
-	return GetOrgDeployKey(ctx, orgID, id)
+	return GetOrgDeployKey(ctx, orgID, groupID, id)
 }
 
 // AddOrgDeployKeyRepo adds a live repository of the organization to the selection of the key.
@@ -300,7 +323,7 @@ func AddOrgDeployKeyRepo(ctx context.Context, orgID, id, repoID int64) (*OrgDepl
 	var key *OrgDeployKey
 	err := db.WithTx(ctx, func(ctx context.Context) error {
 		var err error
-		if key, err = lockOrgDeployKey(ctx, orgID, id); err != nil {
+		if key, err = lockOrgDeployKey(ctx, orgID, 0, id); err != nil {
 			return err
 		}
 		if key.IncludesAllRepos {
@@ -322,7 +345,7 @@ func RemoveOrgDeployKeyRepo(ctx context.Context, orgID, id, repoID int64) (*OrgD
 	var key *OrgDeployKey
 	err := db.WithTx(ctx, func(ctx context.Context) error {
 		var err error
-		if key, err = lockOrgDeployKey(ctx, orgID, id); err != nil {
+		if key, err = lockOrgDeployKey(ctx, orgID, 0, id); err != nil {
 			return err
 		}
 		if key.IncludesAllRepos {
@@ -350,7 +373,7 @@ func SetOrgDeployKeyAllRepos(ctx context.Context, orgID, id int64, includesAllRe
 	var key *OrgDeployKey
 	err := db.WithTx(ctx, func(ctx context.Context) error {
 		var err error
-		if key, err = lockOrgDeployKey(ctx, orgID, id); err != nil {
+		if key, err = lockOrgDeployKey(ctx, orgID, 0, id); err != nil {
 			return err
 		}
 		if !includesAllRepos {
@@ -382,8 +405,8 @@ func FindOrgDeployKeyRepos(ctx context.Context, keyID int64, opts db.ListOptions
 // DeleteOrgDeployKey deletes the deploy key, its selection and its public key if no other deploy key uses it.
 // It reports whether the public key was deleted, so the caller rewrites the authorized_keys file.
 func DeleteOrgDeployKey(ctx context.Context, key *OrgDeployKey) (deletedPublicKey bool, err error) {
-	// lock the key first, in the same order as every other change of it
-	if _, err := lockOrgDeployKey(ctx, key.OrgID, key.ID); err != nil {
+	// lock the key first, in the same order as every other change of it (a project key's caller locks the project)
+	if _, err := lockOrgDeployKey(ctx, key.OrgID, key.GroupID, key.ID); err != nil {
 		return false, err
 	}
 	if _, err := db.GetEngine(ctx).Where("org_deploy_key_id = ?", key.ID).Delete(new(OrgDeployKeyRepo)); err != nil {
@@ -399,13 +422,30 @@ func DeleteOrgDeployKey(ctx context.Context, key *OrgDeployKey) (deletedPublicKe
 	return err == nil, err
 }
 
-// DeleteOrgDeployKeys deletes the deploy keys of the organization and the public keys no other deploy key uses.
-// It reports whether a public key was deleted, so the caller rewrites the authorized_keys file.
+// DeleteOrgDeployKeys deletes the deploy keys of the organization, its projects' included, and the public keys no
+// other deploy key uses. It reports whether a public key was deleted, so the caller rewrites the authorized_keys file.
 func DeleteOrgDeployKeys(ctx context.Context, orgID int64) (deletedPublicKey bool, err error) {
-	keys, err := FindOrgDeployKeys(ctx, orgID)
+	keys := make([]*OrgDeployKey, 0, 2)
+	if err := db.GetEngine(ctx).Where("org_id = ?", orgID).Find(&keys); err != nil {
+		return false, err
+	}
+	return deleteOrgDeployKeys(ctx, keys)
+}
+
+// DeleteProjectDeployKeys deletes the deploy keys of the project of the organization, like DeleteOrgDeployKeys. The
+// caller locks the project first (repo_model.LockRepoGroup).
+func DeleteProjectDeployKeys(ctx context.Context, orgID, groupID int64) (deletedPublicKey bool, err error) {
+	if groupID == 0 {
+		return false, util.NewInvalidArgumentErrorf("no project")
+	}
+	keys, err := FindOrgDeployKeys(ctx, orgID, groupID)
 	if err != nil {
 		return false, err
 	}
+	return deleteOrgDeployKeys(ctx, keys)
+}
+
+func deleteOrgDeployKeys(ctx context.Context, keys []*OrgDeployKey) (deletedPublicKey bool, err error) {
 	for _, key := range keys {
 		deleted, err := DeleteOrgDeployKey(ctx, key)
 		if err != nil {

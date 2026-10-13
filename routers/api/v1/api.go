@@ -1475,6 +1475,10 @@ func Routes() *web.Route {
 					m.Post("", bind(api.CreateProjectOption{}), org.CreateProject)
 					m.Combo("/{id}").Patch(bind(api.EditProjectOption{}), org.EditProject).
 						Delete(org.DeleteProject)
+					m.Combo("/{id}/keys").Get(org.ListProjectDeployKeys).
+						Post(bind(api.CreateKeyOption{}), org.CreateProjectDeployKey)
+					m.Combo("/{id}/keys/{key_id}").Get(org.GetProjectDeployKey).
+						Delete(org.DeleteProjectDeployKey)
 				}, reqToken(), reqOrgOwnership())
 			}, org.HideInvisibleOrg)
 			m.Group("/avatar", func() {

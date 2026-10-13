@@ -41,7 +41,7 @@ func TestAddOrgDeployKey(t *testing.T) {
 
 	t.Run("refuses a non-organization", func(t *testing.T) {
 		for _, ownerID := range []int64{2, 9999} { // a user, nobody
-			_, err := AddOrgDeployKey(ctx, ownerID, "ci", newTestDeployKeyContent(t), true, true, nil, 0)
+			_, err := AddOrgDeployKey(ctx, ownerID, 0, "ci", newTestDeployKeyContent(t), true, true, nil, 0)
 			require.ErrorIs(t, err, util.ErrInvalidArgument)
 		}
 	})
@@ -53,18 +53,18 @@ func TestAddOrgDeployKey(t *testing.T) {
 			_, err := db.Exec(ctx, "UPDATE `user` SET trashed_unix = 0 WHERE id = 17")
 			require.NoError(t, err)
 		}()
-		_, err = AddOrgDeployKey(ctx, 17, "ci", newTestDeployKeyContent(t), true, true, nil, 0)
+		_, err = AddOrgDeployKey(ctx, 17, 0, "ci", newTestDeployKeyContent(t), true, true, nil, 0)
 		require.ErrorIs(t, err, util.ErrInvalidArgument)
 	})
 
 	t.Run("refuses repositories of another owner or in the trash", func(t *testing.T) {
 		content := newTestDeployKeyContent(t)
-		_, err := AddOrgDeployKey(ctx, 3, "ci", content, true, false, []int64{3, 1}, 0) // repo 1 is user2's
+		_, err := AddOrgDeployKey(ctx, 3, 0, "ci", content, true, false, []int64{3, 1}, 0) // repo 1 is user2's
 		require.ErrorIs(t, err, util.ErrInvalidArgument)
 
 		_, err = db.Exec(ctx, "UPDATE repository SET trashed_unix = 1 WHERE id = 5")
 		require.NoError(t, err)
-		_, err = AddOrgDeployKey(ctx, 3, "ci", content, true, false, []int64{5}, 0)
+		_, err = AddOrgDeployKey(ctx, 3, 0, "ci", content, true, false, []int64{5}, 0)
 		require.ErrorIs(t, err, util.ErrInvalidArgument)
 		_, err = db.Exec(ctx, "UPDATE repository SET trashed_unix = 0 WHERE id = 5")
 		require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestAddOrgDeployKey(t *testing.T) {
 
 	t.Run("refuses a user's key", func(t *testing.T) {
 		userKey := unittest.AssertExistsAndLoadBean(t, &PublicKey{ID: 1})
-		_, err := AddOrgDeployKey(ctx, 3, "ci", userKey.Content, true, true, nil, 0)
+		_, err := AddOrgDeployKey(ctx, 3, 0, "ci", userKey.Content, true, true, nil, 0)
 		assert.True(t, IsErrKeyAlreadyExist(err), "%v", err)
 	})
 
@@ -83,17 +83,17 @@ func TestAddOrgDeployKey(t *testing.T) {
 		content := newTestDeployKeyContent(t)
 		repoKey, err := AddDeployKey(ctx, 3, "shared", content, true, 0)
 		require.NoError(t, err)
-		orgKey, err := AddOrgDeployKey(ctx, 3, "shared", content, false, false, []int64{5, 5}, 0)
+		orgKey, err := AddOrgDeployKey(ctx, 3, 0, "shared", content, false, false, []int64{5, 5}, 0)
 		require.NoError(t, err)
 		assert.Equal(t, repoKey.KeyID, orgKey.KeyID)
 		assert.Equal(t, perm.AccessModeWrite, orgKey.Mode)
 		assert.Equal(t, 1, unittest.GetCount(t, &OrgDeployKeyRepo{OrgDeployKeyID: orgKey.ID}))
 
-		_, err = AddOrgDeployKey(ctx, 3, "shared", newTestDeployKeyContent(t), true, true, nil, 0)
+		_, err = AddOrgDeployKey(ctx, 3, 0, "shared", newTestDeployKeyContent(t), true, true, nil, 0)
 		assert.True(t, IsErrDeployKeyNameAlreadyUsed(err), "names are unique per organization: %v", err)
-		_, err = AddOrgDeployKey(ctx, 3, "again", content, true, true, nil, 0)
+		_, err = AddOrgDeployKey(ctx, 3, 0, "again", content, true, true, nil, 0)
 		assert.True(t, IsErrDeployKeyAlreadyExist(err), "a key is added once per organization: %v", err)
-		_, err = AddOrgDeployKey(ctx, 3, "no repos", newTestDeployKeyContent(t), true, false, nil, 0)
+		_, err = AddOrgDeployKey(ctx, 3, 0, "no repos", newTestDeployKeyContent(t), true, false, nil, 0)
 		require.ErrorIs(t, err, util.ErrInvalidArgument, "selected repositories need at least one")
 	})
 }
@@ -117,9 +117,9 @@ func TestGetEffectiveDeployKey(t *testing.T) {
 	}
 
 	// org3 owns repos 3, 5 and 32; org17 owns repo 23; user2 owns repo 1
-	allRead, err := AddOrgDeployKey(ctx, 3, "all read", newTestDeployKeyContent(t), true, true, nil, 0)
+	allRead, err := AddOrgDeployKey(ctx, 3, 0, "all read", newTestDeployKeyContent(t), true, true, nil, 0)
 	require.NoError(t, err)
-	selectedWrite, err := AddOrgDeployKey(ctx, 3, "repo5 write", newTestDeployKeyContent(t), false, false, []int64{5}, 0)
+	selectedWrite, err := AddOrgDeployKey(ctx, 3, 0, "repo5 write", newTestDeployKeyContent(t), false, false, []int64{5}, 0)
 	require.NoError(t, err)
 
 	t.Run("all repositories", func(t *testing.T) {
@@ -184,7 +184,7 @@ func TestGetEffectiveDeployKey(t *testing.T) {
 	t.Run("expired keys", func(t *testing.T) {
 		past := timeutil.TimeStampNow() - 10
 		content := newTestDeployKeyContent(t)
-		orgKey, err := AddOrgDeployKey(ctx, 3, "expired write", content, false, true, nil, past)
+		orgKey, err := AddOrgDeployKey(ctx, 3, 0, "expired write", content, false, true, nil, past)
 		require.NoError(t, err)
 
 		// only an expired key: returned, so the caller can say it expired
@@ -215,14 +215,14 @@ func TestDeleteOrgDeployKeys(t *testing.T) {
 	prepareOrgDeployKeyTest(t)
 	ctx := db.DefaultContext
 
-	onlyOrg, err := AddOrgDeployKey(ctx, 3, "only org", newTestDeployKeyContent(t), true, false, []int64{3}, 0)
+	onlyOrg, err := AddOrgDeployKey(ctx, 3, 0, "only org", newTestDeployKeyContent(t), true, false, []int64{3}, 0)
 	require.NoError(t, err)
 	sharedContent := newTestDeployKeyContent(t)
-	shared, err := AddOrgDeployKey(ctx, 3, "shared", sharedContent, true, true, nil, 0)
+	shared, err := AddOrgDeployKey(ctx, 3, 0, "shared", sharedContent, true, true, nil, 0)
 	require.NoError(t, err)
 	_, err = AddDeployKey(ctx, 3, "shared", sharedContent, true, 0)
 	require.NoError(t, err)
-	other, err := AddOrgDeployKey(ctx, 17, "other org", newTestDeployKeyContent(t), true, true, nil, 0)
+	other, err := AddOrgDeployKey(ctx, 17, 0, "other org", newTestDeployKeyContent(t), true, true, nil, 0)
 	require.NoError(t, err)
 
 	has, err := IsDeployKeyExistByKeyID(ctx, onlyOrg.KeyID)
@@ -244,13 +244,13 @@ func TestSetOrgDeployKeyRepos(t *testing.T) {
 	prepareOrgDeployKeyTest(t)
 	ctx := db.DefaultContext
 
-	key, err := AddOrgDeployKey(ctx, 3, "ci", newTestDeployKeyContent(t), true, false, []int64{3}, 0)
+	key, err := AddOrgDeployKey(ctx, 3, 0, "ci", newTestDeployKeyContent(t), true, false, []int64{3}, 0)
 	require.NoError(t, err)
-	other, err := AddOrgDeployKey(ctx, 17, "other", newTestDeployKeyContent(t), true, true, nil, 0)
+	other, err := AddOrgDeployKey(ctx, 17, 0, "other", newTestDeployKeyContent(t), true, true, nil, 0)
 	require.NoError(t, err)
 
 	t.Run("a key of another organization is not found", func(t *testing.T) {
-		_, err := GetOrgDeployKey(ctx, 3, other.ID)
+		_, err := GetOrgDeployKey(ctx, 3, 0, other.ID)
 		assert.True(t, IsErrDeployKeyNotExist(err), "%v", err)
 		_, err = SetOrgDeployKeyRepos(ctx, 3, other.ID, false, []int64{3})
 		assert.True(t, IsErrDeployKeyNotExist(err), "%v", err)

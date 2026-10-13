@@ -8,6 +8,7 @@ import (
 
 	actions_model "forgejo.org/models/actions"
 	activities_model "forgejo.org/models/activities"
+	asymkey_model "forgejo.org/models/asymkey"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
@@ -234,7 +235,7 @@ func checkDBConsistency(ctx context.Context, logger log.Logger, autofix bool) er
 			Counter: func(ctx context.Context) (int64, error) {
 				var n int64
 				for _, table := range []string{"secret", "action_variable"} {
-					c, err := db.GetEngine(ctx).Table(table).Where(orphanedGroupRowsCond(table)).Count()
+					c, err := db.GetEngine(ctx).Table(table).Where(orphanedGroupRowsCond(table, "owner_id")).Count()
 					if err != nil {
 						return 0, err
 					}
@@ -244,12 +245,20 @@ func checkDBConsistency(ctx context.Context, logger log.Logger, autofix bool) er
 			},
 			Fixer: func(ctx context.Context) (int64, error) {
 				for _, table := range []string{"secret", "action_variable"} {
-					if _, err := db.GetEngine(ctx).Table(table).Where(orphanedGroupRowsCond(table)).Delete(); err != nil {
+					if _, err := db.GetEngine(ctx).Table(table).Where(orphanedGroupRowsCond(table, "owner_id")).Delete(); err != nil {
 						return 0, err
 					}
 				}
 				return -1, nil
 			},
+		},
+		// find project deploy keys without existing project
+		consistencyCheck{
+			Name: "Project deploy keys without existing project",
+			Counter: func(ctx context.Context) (int64, error) {
+				return db.GetEngine(ctx).Table("org_deploy_key").Where(orphanedGroupRowsCond("org_deploy_key", "org_id")).Count()
+			},
+			Fixer: fixOrphanedProjectDeployKeys,
 		},
 		// find branches without existing repository
 		genericOrphanCheck("Branches without existing repository",
@@ -320,11 +329,37 @@ func init() {
 	})
 }
 
-// orphanedGroupRowsCond matches the project rows of table (secret, action_variable) whose project is gone, belongs to
-// another organization, or whose owner is not an organization.
-func orphanedGroupRowsCond(table string) builder.Cond {
+// orphanedGroupRowsCond matches the project rows of table (secret, action_variable, org_deploy_key) whose project is
+// gone, belongs to another organization, or whose owner (ownerCol) is not an organization.
+func orphanedGroupRowsCond(table, ownerCol string) builder.Cond {
 	return builder.And(builder.Neq{"group_id": 0}, builder.Or(
-		builder.NotIn("owner_id", builder.Select("id").From("`user`").Where(builder.Eq{"type": user_model.UserTypeOrganization})),
-		builder.NotIn("group_id", builder.Select("id").From("repo_group").Where(builder.Expr("repo_group.owner_id = "+table+".owner_id"))),
+		builder.NotIn(ownerCol, builder.Select("id").From("`user`").Where(builder.Eq{"type": user_model.UserTypeOrganization})),
+		builder.NotIn("group_id", builder.Select("id").From("repo_group").Where(builder.Expr("repo_group.owner_id = "+table+"."+ownerCol))),
 	))
+}
+
+// fixOrphanedProjectDeployKeys deletes the orphaned project deploy keys with their public keys if no other deploy key
+// uses them, and rewrites the authorized_keys file then.
+func fixOrphanedProjectDeployKeys(ctx context.Context) (int64, error) {
+	keys := make([]*asymkey_model.OrgDeployKey, 0, 2)
+	if err := db.GetEngine(ctx).Where(orphanedGroupRowsCond("org_deploy_key", "org_id")).Find(&keys); err != nil {
+		return 0, err
+	}
+	var deletedPublicKey bool
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		for _, key := range keys {
+			deleted, err := asymkey_model.DeleteOrgDeployKey(ctx, key)
+			if err != nil {
+				return err
+			}
+			deletedPublicKey = deletedPublicKey || deleted
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	if deletedPublicKey {
+		return int64(len(keys)), asymkey_model.RewriteAllPublicKeys(ctx)
+	}
+	return int64(len(keys)), nil
 }

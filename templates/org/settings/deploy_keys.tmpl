@@ -1,7 +1,18 @@
+{{if .RepoGroup}}
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content organization settings repo-group deploy-keys">
+	{{template "org/header" .}}
+	<div class="ui container">
+		{{template "base/alert" .}}
+		<h2 class="tw-break-anywhere">
+			<a class="muted" href="{{.Org.HomeLink}}">{{.Org.Name}}</a> / <a class="muted" href="{{.RepoGroupLink}}">{{.RepoGroup.Name}}</a>
+		</h2>
+{{else}}
 {{template "org/settings/layout_head" (dict "ctxData" . "pageClass" "organization settings deploy-keys")}}
+{{end}}
 <div class="org-setting-content">
 	<h4 class="ui top attached header">
-		{{ctx.Locale.Tr "org.settings.deploy_keys"}}
+		{{if .RepoGroup}}{{ctx.Locale.Tr "repo_group.deploy_keys"}}{{else}}{{ctx.Locale.Tr "org.settings.deploy_keys"}}{{end}}
 		<div class="ui right">
 		{{if not .DisableSSH}}
 			<button class="ui primary tiny show-panel toggle button" data-panel="#add-deploy-key-panel">{{ctx.Locale.Tr "repo.settings.add_deploy_key"}}</button>
@@ -14,7 +25,7 @@
 		<div class="{{if not .HasError}}tw-hidden{{end}} tw-mb-4" id="add-deploy-key-panel">
 			<form class="ui form" action="{{.Link}}" method="post">
 				<div class="field">
-					{{ctx.Locale.Tr "org.settings.deploy_keys_desc"}}
+					{{if .RepoGroup}}{{ctx.Locale.Tr "repo_group.deploy_keys_desc"}}{{else}}{{ctx.Locale.Tr "org.settings.deploy_keys_desc"}}{{end}}
 				</div>
 				<div class="field {{if .Err_Title}}error{{end}}">
 					<label for="ssh-key-title">{{ctx.Locale.Tr "repo.settings.title"}}</label>
@@ -31,7 +42,7 @@
 						<small class="tw-pl-[26px]">{{ctx.Locale.Tr "org.settings.deploy_key_is_writable_info"}}</small>
 					</div>
 				</div>
-				{{template "org/settings/deploy_key_scope" (dict "ctxData" $ "ID" "new" "All" .ScopeAll "RepoIDs" .ScopeRepoIDs)}}
+				{{if not .RepoGroup}}{{template "org/settings/deploy_key_scope" (dict "ctxData" $ "ID" "new" "All" .ScopeAll "RepoIDs" .ScopeRepoIDs)}}{{end}}
 				{{template "shared/expiry_input" .}}
 				<button class="ui primary button">{{ctx.Locale.Tr "repo.settings.add_deploy_key"}}</button>
 				<button class="ui hide-panel button" data-panel="#add-deploy-key-panel">{{ctx.Locale.Tr "cancel"}}</button>
@@ -51,16 +62,19 @@
 							<div class="flex-item-body">
 								<p>{{ctx.Locale.Tr "settings.added_on" (DateUtils.AbsoluteShort $key.CreatedUnix)}} — {{svg "octicon-info"}} {{if $key.HasUsed}}{{ctx.Locale.Tr "settings.last_used"}} <span {{if $key.HasRecentActivity}}class="text green"{{end}}>{{DateUtils.AbsoluteShort $key.UpdatedUnix}}</span>{{else}}{{ctx.Locale.Tr "settings.no_activity"}}{{end}}{{template "shared/expiry_label" $key}} - <span>{{ctx.Locale.Tr "settings.can_read_info"}}{{if not $key.IsReadOnly}} / {{ctx.Locale.Tr "settings.can_write_info"}}{{end}}</span></p>
 							</div>
+							{{if not $.RepoGroup}}
 							<div class="flex-item-body">
 								{{ctx.Locale.Tr "org.settings.deploy_key_scope"}}:
 								{{if $key.IncludesAllRepos}}{{ctx.Locale.Tr "org.settings.deploy_key_covers_all"}}{{else}}{{range $i, $r := .Repos}}{{if $i}}, {{end}}{{$r.Name}}{{end}}{{end}}
 							</div>
+							{{end}}
 						</div>
 						<div class="flex-item-trailing">
 							<button class="ui red tiny button delete-button" data-url="{{$.Link}}/delete" data-id="{{$key.ID}}" data-modal-id="delete-deploy-key">
 								{{ctx.Locale.Tr "settings.delete_key"}}
 							</button>
 						</div>
+						{{if not $.RepoGroup}}
 						<details class="tw-w-full">
 							<summary>{{ctx.Locale.Tr "org.settings.deploy_key_change_repos"}}</summary>
 							<form class="ui form" action="{{$.Link}}/{{$key.ID}}/repos" method="post">
@@ -68,6 +82,7 @@
 								<button class="ui primary tiny button">{{ctx.Locale.Tr "org.settings.deploy_key_save_repos"}}</button>
 							</form>
 						</details>
+						{{end}}
 					</div>
 				{{end}}
 			</div>
@@ -87,4 +102,10 @@
 	</div>
 	{{template "base/modal_actions_confirm" .}}
 </div>
+{{if .RepoGroup}}
+	</div>
+</div>
+{{template "base/footer" .}}
+{{else}}
 {{template "org/settings/layout_footer" .}}
+{{end}}

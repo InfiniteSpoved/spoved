@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 
+	asymkey_model "forgejo.org/models/asymkey"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
@@ -61,13 +62,29 @@ func RenameRepoGroup(ctx context.Context, owner *user_model.User, group *repo_mo
 	return err
 }
 
-// DeleteRepoGroup deletes an empty project and its directory.
+// DeleteRepoGroup deletes an empty project, its deploy keys and its directory.
 func DeleteRepoGroup(ctx context.Context, owner *user_model.User, group *repo_model.RepoGroup) error {
 	if group.OwnerID != owner.ID {
 		return repo_model.ErrRepoGroupNotExist
 	}
-	if err := repo_model.DeleteRepoGroup(ctx, group); err != nil {
+	var deletedPublicKey bool
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		// the project row before its keys' rows, as every change of a project key (models/repo can't import asymkey)
+		if _, err := repo_model.LockRepoGroup(ctx, group.OwnerID, group.ID); err != nil {
+			return err
+		}
+		var err error
+		if deletedPublicKey, err = asymkey_model.DeleteProjectDeployKeys(ctx, group.OwnerID, group.ID); err != nil {
+			return err
+		}
+		return repo_model.DeleteRepoGroup(ctx, group)
+	}); err != nil {
 		return err
+	}
+	if deletedPublicKey {
+		if err := asymkey_model.RewriteAllPublicKeys(ctx); err != nil {
+			log.Error("RewriteAllPublicKeys: %v", err)
+		}
 	}
 	if err := os.Remove(repo_model.GroupPath(owner.Name, group.Name)); err != nil && !os.IsNotExist(err) {
 		log.Error("Unable to remove the directory of project %s/%s: %v", owner.Name, group.Name, err)

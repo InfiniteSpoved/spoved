@@ -6598,6 +6598,201 @@
         }
       }
     },
+    "/orgs/{org}/projects/{id}/keys": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "List the deploy keys of a project",
+        "operationId": "orgListProjectDeployKeys",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the project",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/OrgDeployKeyList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Add a deploy key to a project, for every repository in it",
+        "operationId": "orgCreateProjectDeployKey",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the project",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/CreateKeyOption"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "$ref": "#/responses/OrgDeployKey"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/projects/{id}/keys/{key_id}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Get a deploy key of a project",
+        "operationId": "orgGetProjectDeployKey",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the project",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the key",
+            "name": "key_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/OrgDeployKey"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Delete a deploy key of a project",
+        "operationId": "orgDeleteProjectDeployKey",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the project",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the key",
+            "name": "key_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
     "/orgs/{org}/projects/{id}/repos": {
       "get": {
         "produces": [
@@ -27309,7 +27504,7 @@
           "x-go-name": "Applied"
         },
         "kind": {
-          "description": "owner, site_admin, auditor, org_owner, admin_team, team, collaborator, public, internal, org_member,\ndeploy_key, org_deploy_key or instance_roles",
+          "description": "owner, site_admin, auditor, org_owner, admin_team, team, collaborator, public, internal, org_member,\ndeploy_key, org_deploy_key, project_deploy_key or instance_roles",
           "type": "string",
           "x-go-name": "Kind"
         },
@@ -35271,6 +35466,12 @@
           "type": "string",
           "format": "date-time",
           "x-go-name": "LastUsed"
+        },
+        "project_id": {
+          "description": "ID of the project whose repositories the key covers, omitted for a key of the organization",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ProjectID"
         },
         "read_only": {
           "type": "boolean",

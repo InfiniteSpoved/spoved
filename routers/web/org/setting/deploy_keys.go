@@ -33,7 +33,17 @@ type orgDeployKeyRow struct {
 	RepoIDs string                   // the selected live repositories, for the dropdown
 }
 
-// loadDeployKeys sets the page data: the keys of the organization and its live repositories.
+// deployKeyLevel returns the project of the page (RepoGroupAssignment), 0 on the organization's own page, and the
+// page's link.
+func deployKeyLevel(ctx *context.Context) (groupID int64, link string) {
+	if group, ok := ctx.Data["RepoGroup"].(*repo_model.RepoGroup); ok {
+		return group.ID, group.Link(ctx.Org.Organization.Name) + "/-/settings/keys"
+	}
+	return 0, ctx.Org.OrgLink + "/settings/keys"
+}
+
+// loadDeployKeys sets the page data: the keys of the organization and its live repositories, or the keys of the
+// project.
 func loadDeployKeys(ctx *context.Context) bool {
 	ctx.Data["Title"] = ctx.Tr("org.settings.deploy_keys")
 	ctx.Data["PageIsSettingsDeployKeys"] = true
@@ -42,10 +52,27 @@ func loadDeployKeys(ctx *context.Context) bool {
 	user.SetExpiryFormData(ctx.Base, setting.DeployKeyExpiry)
 
 	orgID := ctx.Org.Organization.ID
-	keys, err := asymkey_model.FindOrgDeployKeys(ctx, orgID)
+	groupID, link := deployKeyLevel(ctx)
+	keys, err := asymkey_model.FindOrgDeployKeys(ctx, orgID, groupID)
 	if err != nil {
 		ctx.ServerError("FindOrgDeployKeys", err)
 		return false
+	}
+	if groupID != 0 {
+		if err := user.LoadHeaderCount(ctx); err != nil {
+			ctx.ServerError("LoadHeaderCount", err)
+			return false
+		}
+		ctx.Data["Title"] = ctx.Tr("repo_group.deploy_keys")
+		ctx.Data["PageIsViewRepoGroups"] = true
+		ctx.Data["RepoGroupLink"] = ctx.Data["RepoGroup"].(*repo_model.RepoGroup).Link(ctx.Org.Organization.Name)
+		ctx.Data["Link"] = link
+		rows := make([]*orgDeployKeyRow, 0, len(keys))
+		for _, k := range keys {
+			rows = append(rows, &orgDeployKeyRow{Key: k})
+		}
+		ctx.Data["DeployKeys"] = rows
+		return true
 	}
 	repos, err := organization.GetOrgRepositories(ctx, orgID)
 	if err != nil {
@@ -96,22 +123,25 @@ func deployKeyScope(ctx *context.Context) (includesAllRepos bool, repoIDs []int6
 	return false, repoIDs
 }
 
-// DeployKeys shows the deploy keys of the organization
+// DeployKeys shows the deploy keys of the organization or of its project
 func DeployKeys(ctx *context.Context) {
 	if loadDeployKeys(ctx) {
 		ctx.HTML(http.StatusOK, tplSettingsDeployKeys)
 	}
 }
 
-// DeployKeysPost adds a deploy key to the organization
+// DeployKeysPost adds a deploy key to the organization or to its project
 func DeployKeysPost(ctx *context.Context) {
 	form := web.GetForm(ctx).(*forms.AddKeyForm)
 	if !loadDeployKeys(ctx) {
 		return
 	}
-	link := ctx.Org.OrgLink + "/settings/keys"
+	groupID, link := deployKeyLevel(ctx)
 	// a refused form is shown again open, with what was entered
 	includesAllRepos, repoIDs := deployKeyScope(ctx)
+	if groupID != 0 { // a project key covers its project
+		includesAllRepos, repoIDs = false, nil
+	}
 	ctx.Data["ScopeAll"], ctx.Data["ScopeRepoIDs"] = includesAllRepos, ctx.FormString("repo_ids")
 	if ctx.HasError() {
 		ctx.HTML(http.StatusOK, tplSettingsDeployKeys)
@@ -141,12 +171,12 @@ func DeployKeysPost(ctx *context.Context) {
 		ctx.RenderWithErr(template.HTML(template.HTMLEscapeString(msg)), tplSettingsDeployKeys, &form)
 		return
 	}
-	if !includesAllRepos && len(repoIDs) == 0 {
+	if groupID == 0 && !includesAllRepos && len(repoIDs) == 0 {
 		ctx.RenderWithErr(ctx.Tr("org.settings.deploy_key_no_repos"), tplSettingsDeployKeys, &form)
 		return
 	}
 
-	key, err := asymkey_model.AddOrgDeployKey(ctx, ctx.Org.Organization.ID, strings.TrimSpace(form.Title), content, !form.IsWritable, includesAllRepos, repoIDs, expires)
+	key, err := asymkey_model.AddOrgDeployKey(ctx, ctx.Org.Organization.ID, groupID, strings.TrimSpace(form.Title), content, !form.IsWritable, includesAllRepos, repoIDs, expires)
 	if err != nil {
 		switch {
 		case asymkey_model.IsErrDeployKeyAlreadyExist(err):
@@ -173,7 +203,7 @@ func DeployKeysPost(ctx *context.Context) {
 // DeployKeyReposPost changes the repositories a deploy key of the organization covers
 func DeployKeyReposPost(ctx *context.Context) {
 	orgID := ctx.Org.Organization.ID
-	key, err := asymkey_model.GetOrgDeployKey(ctx, orgID, ctx.ParamsInt64(":id"))
+	key, err := asymkey_model.GetOrgDeployKey(ctx, orgID, 0, ctx.ParamsInt64(":id"))
 	if err != nil {
 		ctx.NotFoundOrServerError("GetOrgDeployKey", asymkey_model.IsErrDeployKeyNotExist, err)
 		return
@@ -193,12 +223,15 @@ func DeployKeyReposPost(ctx *context.Context) {
 	ctx.Redirect(ctx.Org.OrgLink + "/settings/keys")
 }
 
-// DeleteDeployKey deletes a deploy key of the organization
+// DeleteDeployKey deletes a deploy key of the organization or of its project
 func DeleteDeployKey(ctx *context.Context) {
-	if err := asymkey_service.DeleteOrgDeployKey(ctx, ctx.Org.Organization.ID, ctx.FormInt64("id")); err != nil {
-		ctx.NotFoundOrServerError("DeleteOrgDeployKey", asymkey_model.IsErrDeployKeyNotExist, err)
+	groupID, link := deployKeyLevel(ctx)
+	if err := asymkey_service.DeleteOrgDeployKey(ctx, ctx.Org.Organization.ID, groupID, ctx.FormInt64("id")); err != nil {
+		ctx.NotFoundOrServerError("DeleteOrgDeployKey", func(err error) bool {
+			return asymkey_model.IsErrDeployKeyNotExist(err) || errors.Is(err, util.ErrNotExist)
+		}, err)
 		return
 	}
 	ctx.Flash.Success(ctx.Tr("repo.settings.deploy_key_deletion_success"))
-	ctx.JSONRedirect(ctx.Org.OrgLink + "/settings/keys")
+	ctx.JSONRedirect(link)
 }
