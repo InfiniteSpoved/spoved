@@ -8,14 +8,32 @@ import (
 	"fmt"
 
 	"forgejo.org/models/db"
-	secret_model "forgejo.org/models/secret"
+	"forgejo.org/modules/keying"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/secret"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/timeutil"
+	"forgejo.org/modules/util"
 
 	"code.forgejo.org/xorm/xorm"
 	"code.forgejo.org/xorm/xorm/schemas"
 )
+
+// v39Secret is the secret table as it was then, without the columns later migrations add.
+type v39Secret struct {
+	ID          int64
+	OwnerID     int64
+	RepoID      int64
+	Name        string
+	Data        []byte             `xorm:"BLOB"`
+	CreatedUnix timeutil.TimeStamp `xorm:"created NOT NULL"`
+}
+
+func (v39Secret) TableName() string { return "secret" }
+
+func (s *v39Secret) setData(data string) {
+	s.Data = keying.ActionSecret.Encrypt([]byte(util.ReserveLineBreakForTextarea(data)), keying.ColumnAndID("data", s.ID))
+}
 
 func MigrateActionSecretsToKeying(x *xorm.Engine) error {
 	return db.WithTx(db.DefaultContext, func(ctx context.Context) error {
@@ -50,7 +68,7 @@ func MigrateActionSecretsToKeying(x *xorm.Engine) error {
 		messages := make([]string, 0, 100)
 		ids := make([]int64, 0, 100)
 
-		err := db.Iterate(ctx, nil, func(ctx context.Context, bean *secret_model.Secret) error {
+		err := db.Iterate(ctx, nil, func(ctx context.Context, bean *v39Secret) error {
 			secretBytes, err := secret.DecryptSecret(oldEncryptionKey, string(bean.Data))
 			if err != nil {
 				messages = append(messages, fmt.Sprintf("secret.id=%d, secret.name=%q, secret.repo_id=%d, secret.owner_id=%d: secret.DecryptSecret(): %v", bean.ID, bean.Name, bean.RepoID, bean.OwnerID, err))
@@ -58,7 +76,7 @@ func MigrateActionSecretsToKeying(x *xorm.Engine) error {
 				return nil
 			}
 
-			bean.SetData(secretBytes)
+			bean.setData(secretBytes)
 			_, err = sess.Cols("data").ID(bean.ID).Update(bean)
 			return err
 		})
@@ -70,7 +88,7 @@ func MigrateActionSecretsToKeying(x *xorm.Engine) error {
 					log.Error("Forgejo migration[37]: %s", message)
 				}
 
-				_, err = sess.In("id", ids).NoAutoCondition().NoAutoTime().Delete(&secret_model.Secret{})
+				_, err = sess.In("id", ids).NoAutoCondition().NoAutoTime().Delete(&v39Secret{})
 			}
 		}
 		return err
