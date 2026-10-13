@@ -30,11 +30,17 @@ import (
 // orgWideToken refuses a token limited to public resources or to specific repositories: an organization deploy
 // key reaches every repository of the organization, private ones included.
 func orgWideToken(ctx *context.APIContext) bool {
-	if _, all := ctx.Reducer().(*authz.AllAccessAuthorizationReducer); ctx.PublicOnly() || !all {
+	if !isOrgWideToken(ctx) {
 		ctx.Error(http.StatusForbidden, "orgWideToken", "the token must not be limited to public or specific repositories")
 		return false
 	}
 	return true
+}
+
+// isOrgWideToken reports whether the request is limited neither to public resources nor to specific repositories.
+func isOrgWideToken(ctx *context.APIContext) bool {
+	_, all := ctx.Reducer().(*authz.AllAccessAuthorizationReducer)
+	return all && !ctx.PublicOnly()
 }
 
 // HideInvisibleOrg answers 404 to a doer who can't see the organization, before the owner check would tell it exists.

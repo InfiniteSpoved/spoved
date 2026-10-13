@@ -273,6 +273,7 @@ forgejo.org/routers/api/v1/permissions/testhelpers
 	GetSignatureStringToSignature
 	GetUniquePermissionsSequences
 	GetShortestPermissionSequenceForEachSignature
+	GetMethodsAndPatternToSignatures
 
 forgejo.org/routers/web/org
 	MustEnableProjects

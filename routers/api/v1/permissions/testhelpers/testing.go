@@ -325,3 +325,10 @@ func RequiredScopesToString(scopeCategories ...auth_model.AccessTokenScopeCatego
 	slices.Sort(categories)
 	return strings.Join(categories, "")
 }
+
+// GetMethodsAndPatternToSignatures returns the permission sequence recorded for each "METHODS pattern".
+func GetMethodsAndPatternToSignatures() map[string][][]any {
+	mutex.Lock()
+	defer mutex.Unlock()
+	return maps.Clone(methodsAndPatternToSignatures)
+}

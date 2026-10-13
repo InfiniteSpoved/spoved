@@ -596,18 +596,6 @@ func Get(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	if err := ctx.Repo().Repository.LoadAttributes(ctx); err != nil {
-		ctx.Error(http.StatusInternalServerError, "Repository.LoadAttributes", err)
-		return
-	}
-
-	apiRepo := convert.ToRepo(ctx, ctx.Repo().Repository, ctx.Repo().Permission)
-	addMirrorFilters(ctx, apiRepo)
-	ctx.JSON(http.StatusOK, apiRepo)
-}
-
-// GetByID returns a single Repository
-func GetByID(ctx *context.APIContext) {
 	// swagger:operation GET /repositories/{id} repository repoGetByID
 	// ---
 	// summary: Get a repository by id
@@ -626,25 +614,14 @@ func GetByID(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	repo, err := repo_model.GetRepositoryByID(ctx, ctx.ParamsInt64(":id"))
-	if err != nil {
-		if repo_model.IsErrRepoNotExist(err) {
-			ctx.NotFound()
-		} else {
-			ctx.Error(http.StatusInternalServerError, "GetRepositoryByID", err)
-		}
+	if err := ctx.Repo().Repository.LoadAttributes(ctx); err != nil {
+		ctx.Error(http.StatusInternalServerError, "Repository.LoadAttributes", err)
 		return
 	}
 
-	permission, err := access_model.GetUserRepoPermissionWithReducer(ctx, repo, ctx.Doer(), ctx.Reducer())
-	if err != nil {
-		ctx.Error(http.StatusInternalServerError, "GetUserRepoPermissionWithReducer", err)
-		return
-	} else if !permission.HasAccess() {
-		ctx.NotFound()
-		return
-	}
-	ctx.JSON(http.StatusOK, convert.ToRepo(ctx, repo, permission))
+	apiRepo := convert.ToRepo(ctx, ctx.Repo().Repository, ctx.Repo().Permission)
+	addMirrorFilters(ctx, apiRepo)
+	ctx.JSON(http.StatusOK, apiRepo)
 }
 
 // Edit edit repository properties

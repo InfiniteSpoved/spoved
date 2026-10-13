@@ -273,7 +273,12 @@ func VisibleRepoGroupCond(doer *user_model.User) builder.Cond {
 // FindVisibleRepoGroups returns the projects the doer can see, of one organization (ownerID) or of all, ordered by
 // name; keyword narrows them by name.
 func FindVisibleRepoGroups(ctx context.Context, doer *user_model.User, ownerID int64, keyword string, listOptions db.ListOptions) ([]*RepoGroup, int64, error) {
-	cond := VisibleRepoGroupCond(doer)
+	return FindRepoGroups(ctx, VisibleRepoGroupCond(doer), ownerID, keyword, listOptions)
+}
+
+// FindRepoGroups returns the projects matching cond, of one organization (ownerID) or of all, ordered by name;
+// keyword narrows them by name.
+func FindRepoGroups(ctx context.Context, cond builder.Cond, ownerID int64, keyword string, listOptions db.ListOptions) ([]*RepoGroup, int64, error) {
 	if ownerID != 0 {
 		cond = cond.And(builder.Eq{"`repo_group`.owner_id": ownerID})
 	}
