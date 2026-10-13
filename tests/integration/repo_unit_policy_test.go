@@ -637,12 +637,14 @@ func TestRepoUnitPolicyLoadUnitsQueries(t *testing.T) {
 			setPolicy()
 			for _, n := range []int{1, len(all)} {
 				repos := slices.Clone(all[:n])
-				for _, r := range repos {
-					r.Units = nil
-				}
 				ctx := cache.WithCacheContext(db.DefaultContext)
 				_ = repo_model.HiddenUnitCond(ctx, "a", "b") // warm up the settings and org_unit caches of the request
-				assert.EqualValues(t, 1, stableQueryCount(t, func() { require.NoError(t, repos.LoadUnits(ctx)) }), "%d repos", n)
+				assert.EqualValues(t, 1, stableQueryCount(t, func() {
+					for _, r := range repos {
+						r.Units = nil // every reading starts cold
+					}
+					require.NoError(t, repos.LoadUnits(ctx))
+				}), "%d repos", n)
 			}
 		})
 	}

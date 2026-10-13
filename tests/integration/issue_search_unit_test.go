@@ -128,11 +128,11 @@ func TestIssueListFilterHiddenUnitsQueries(t *testing.T) {
 	require.NoError(t, db.GetEngine(db.DefaultContext).Limit(20).Find(&all))
 	require.Greater(t, len(all), 10)
 	filter := func(n int) int64 {
-		list := slices.Clone(all[:n])
-		for _, i := range list {
-			i.Repo = nil
-		}
 		return stableQueryCount(t, func() {
+			list := slices.Clone(all[:n]) // FilterHiddenUnits may filter in place
+			for _, i := range list {
+				i.Repo = nil // every reading starts cold
+			}
 			_, err := list.FilterHiddenUnits(db.DefaultContext)
 			require.NoError(t, err)
 		})
