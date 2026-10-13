@@ -10,6 +10,9 @@ import (
 
 	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/setting"
+	"forgejo.org/modules/timeutil"
+	"forgejo.org/services/authz"
 
 	"github.com/urfave/cli/v3"
 )
@@ -38,6 +41,10 @@ func microcmdUserGenerateAccessToken() *cli.Command {
 				Name:  "scopes",
 				Value: "all",
 				Usage: `Comma separated list of scopes to apply to access token, examples: "all", "public-only,read:issue", "write:repository,write:user"`,
+			},
+			&cli.StringFlag{
+				Name:  "expires-at",
+				Usage: "Expiry date of the token (YYYY-MM-DD); default: the latest date the [security] ACCESS_TOKEN_* policy allows",
 			},
 		},
 		Before: noDanglingArgs,
@@ -85,6 +92,9 @@ func runGenerateAccessToken(ctx context.Context, c *cli.Command) error {
 		return errors.New("access token does not have any permission")
 	}
 	t.Scope = accessTokenScope
+	if t.ExpiresUnix, err = cliTokenExpiry(c.String("expires-at")); err != nil {
+		return err
+	}
 
 	// maintain legacy behaviour until new CLI options are added -- token has access to all resources, is not
 	// fine-grained
@@ -102,4 +112,17 @@ func runGenerateAccessToken(ctx context.Context, c *cli.Command) error {
 	}
 
 	return nil
+}
+
+// cliTokenExpiry parses an expiry date given on the command line and checks it against the access token policy.
+// Without one, the token gets the latest date the policy allows (none when it has no maximum).
+func cliTokenExpiry(value string) (timeutil.TimeStamp, error) {
+	expires, err := authz.ParseExpiryDate(value)
+	if err != nil {
+		return 0, err
+	}
+	if expires == 0 {
+		expires = authz.MaxExpiry(setting.AccessTokenExpiry)
+	}
+	return expires, authz.ValidateExpiry(setting.AccessTokenExpiry, expires)
 }

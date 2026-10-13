@@ -43,9 +43,9 @@ var (
 	SuccessfulTokensCacheSize          int
 	DisableQueryAuthToken              bool
 
-	SSHKeyExpiry      CredentialExpiryPolicy
-	DeployKeyExpiry   CredentialExpiryPolicy
-	AccessTokenExpiry CredentialExpiryPolicy
+	SSHKeyExpiry      = DefaultCredentialExpiry
+	DeployKeyExpiry   = DefaultCredentialExpiry
+	AccessTokenExpiry = DefaultCredentialExpiry
 
 	AccessTokenScopes AccessTokenScopePolicy
 )
@@ -80,17 +80,28 @@ func loadScopeList(sec ConfigSection, key string) []string {
 	return list
 }
 
+// DefaultCredentialExpiry is the policy of a credential type whose keys are not set.
+var DefaultCredentialExpiry = CredentialExpiryPolicy{Required: true, MaxLifetimeDays: 365}
+
 // CredentialExpiryPolicy is the instance policy for the expiry date of new credentials.
 type CredentialExpiryPolicy struct {
 	Required        bool
 	MaxLifetimeDays int // 0 = no maximum
 }
 
+// maxCredentialLifetimeDays caps *_MAX_LIFETIME_DAYS, so that adding it to a date can't overflow.
+const maxCredentialLifetimeDays = 36500
+
 func loadCredentialExpiryPolicy(sec ConfigSection, prefix string) CredentialExpiryPolicy {
-	return CredentialExpiryPolicy{
-		Required:        sec.Key(prefix + "_EXPIRY_REQUIRED").MustBool(false),
-		MaxLifetimeDays: sec.Key(prefix + "_MAX_LIFETIME_DAYS").MustInt(0),
+	p := CredentialExpiryPolicy{
+		Required:        sec.Key(prefix + "_EXPIRY_REQUIRED").MustBool(DefaultCredentialExpiry.Required),
+		MaxLifetimeDays: sec.Key(prefix + "_MAX_LIFETIME_DAYS").MustInt(DefaultCredentialExpiry.MaxLifetimeDays),
 	}
+	if p.MaxLifetimeDays > maxCredentialLifetimeDays {
+		log.Warn("[security] %s_MAX_LIFETIME_DAYS = %d is above %d, using %d", prefix, p.MaxLifetimeDays, maxCredentialLifetimeDays, maxCredentialLifetimeDays)
+		p.MaxLifetimeDays = maxCredentialLifetimeDays
+	}
+	return p
 }
 
 /*

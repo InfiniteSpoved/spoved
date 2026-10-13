@@ -45,7 +45,7 @@ type CreateOrgDeployKeyOption struct {
 	// Names of the repositories of the organization to cover, at least one unless all_repositories is set; at
 	// most 1000
 	Repositories []string `json:"repositories"`
-	// When the key expires; omit for a key that never expires
+	// When it expires. Required by default, at most 365 days from today ([security] *_EXPIRY_REQUIRED and *_MAX_LIFETIME_DAYS); omit for never only when the instance allows it
 	// swagger:strfmt date-time
 	ExpiresAt *time.Time `json:"expires_at"`
 }

@@ -54,6 +54,14 @@ func TestValidateExpiry(t *testing.T) {
 	}
 
 	require.ErrorContains(t, ValidateExpiry(max30, lastAllowed.Add(1)), "the maximum lifetime is 30 days")
+	require.ErrorContains(t, ValidateExpiry(max30, 0), "the maximum lifetime is 30 days")
+	require.NoError(t, ValidateExpiry(max30, MaxExpiry(max30)))
+	assert.Zero(t, MaxExpiry(required))
+	assert.Equal(t, "2026-11-03", DefaultExpiryDate(max30))
+	assert.Equal(t, "2026-11-03", DefaultExpiryDate(setting.CredentialExpiryPolicy{Required: true, MaxLifetimeDays: 365}))
+	assert.Equal(t, "2026-10-14", DefaultExpiryDate(setting.CredentialExpiryPolicy{MaxLifetimeDays: 10}))
+	assert.Equal(t, "2026-11-03", DefaultExpiryDate(required))
+	assert.Empty(t, DefaultExpiryDate(none))
 	assert.Equal(t, "2026-11-03", MaxExpiryDate(max30))
 	assert.Empty(t, MaxExpiryDate(required))
 }

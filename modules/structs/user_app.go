@@ -37,7 +37,7 @@ type CreateAccessTokenOption struct {
 	Scopes []string `json:"scopes"`
 	// If provided and not-empty, creates an access token with access only to specified repositories.
 	Repositories []*RepoTargetOption `json:"repositories"`
-	// When the token expires, omit for never
+	// When it expires. Required by default, at most 365 days from today ([security] *_EXPIRY_REQUIRED and *_MAX_LIFETIME_DAYS); omit for never only when the instance allows it
 	// swagger:strfmt date-time
 	ExpiresAt *time.Time `json:"expires_at"`
 }
