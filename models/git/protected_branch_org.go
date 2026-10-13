@@ -9,6 +9,7 @@ import (
 
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
+	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/util"
@@ -16,25 +17,26 @@ import (
 	"xorm.io/builder"
 )
 
-// Every query on an organization rule includes repo_id = 0 and org_id: a bean with RepoID 0 would match
-// any repository, because xorm drops zero fields from bean conditions.
-func orgRuleCond(orgID int64) builder.Eq {
-	return builder.Eq{"repo_id": 0, "org_id": orgID}
+// Every query on an organization or project rule includes repo_id = 0, org_id and group_id (0 for an organization
+// rule): a bean with zero fields would match the other levels, because xorm drops zero fields from bean conditions.
+func ruleScopeCond(orgID, groupID int64) builder.Eq {
+	return builder.Eq{"repo_id": 0, "org_id": orgID, "group_id": groupID}
 }
 
-// FindOrgProtectedBranchRules loads the branch protection rules of an organization.
-func FindOrgProtectedBranchRules(ctx context.Context, orgID int64) (ProtectedBranchRules, error) {
+// FindOrgProtectedBranchRules loads the branch protection rules of an organization (groupID 0) or of one of its
+// projects.
+func FindOrgProtectedBranchRules(ctx context.Context, orgID, groupID int64) (ProtectedBranchRules, error) {
 	var rules ProtectedBranchRules
-	if err := db.GetEngine(ctx).Where(orgRuleCond(orgID)).Asc("created_unix").Find(&rules); err != nil {
+	if err := db.GetEngine(ctx).Where(ruleScopeCond(orgID, groupID)).Asc("created_unix").Find(&rules); err != nil {
 		return nil, err
 	}
 	rules.sort()
 	return rules, nil
 }
 
-// GetOrgProtectedBranchRuleByName returns the organization rule with this name, or nil.
-func GetOrgProtectedBranchRuleByName(ctx context.Context, orgID int64, ruleName string) (*ProtectedBranch, error) {
-	cond := orgRuleCond(orgID)
+// GetOrgProtectedBranchRuleByName returns the organization or project rule with this name, or nil.
+func GetOrgProtectedBranchRuleByName(ctx context.Context, orgID, groupID int64, ruleName string) (*ProtectedBranch, error) {
+	cond := ruleScopeCond(orgID, groupID)
 	cond["branch_name"] = ruleName
 	rule, exist, err := db.Get[ProtectedBranch](ctx, cond)
 	if err != nil || !exist {
@@ -43,9 +45,9 @@ func GetOrgProtectedBranchRuleByName(ctx context.Context, orgID int64, ruleName 
 	return rule, nil
 }
 
-// GetOrgProtectedBranchRuleByID returns the organization rule with this ID, or nil if the organization has none.
-func GetOrgProtectedBranchRuleByID(ctx context.Context, orgID, id int64) (*ProtectedBranch, error) {
-	cond := orgRuleCond(orgID)
+// GetOrgProtectedBranchRuleByID returns the organization or project rule with this ID, or nil if that level has none.
+func GetOrgProtectedBranchRuleByID(ctx context.Context, orgID, groupID, id int64) (*ProtectedBranch, error) {
+	cond := ruleScopeCond(orgID, groupID)
 	cond["id"] = id
 	rule, exist, err := db.Get[ProtectedBranch](ctx, cond)
 	if err != nil || !exist {
@@ -60,12 +62,16 @@ func GetOrgProtectedBranchRuleRepoIDs(ctx context.Context, ruleID int64) ([]int6
 	return ids, db.GetEngine(ctx).Table("protected_branch_repo").Where("protected_branch_id = ?", ruleID).Asc("repo_id").Cols("repo_id").Find(&ids)
 }
 
-// UpdateOrgProtectBranch saves an organization rule, inserting it if its ID is 0, with the allow-lists and
-// approval rules of opts and the selected repositories repoIDs. Users must be members of the organization,
-// teams and repositories must belong to it, and deploy keys are not supported.
-func UpdateOrgProtectBranch(ctx context.Context, orgID int64, protectBranch *ProtectedBranch, opts WhitelistOptions, repoIDs []int64) error {
+// UpdateOrgProtectBranch saves an organization rule (groupID 0) or a rule of the organization's project groupID,
+// inserting it if its ID is 0, with the allow-lists and approval rules of opts and the selected repositories
+// repoIDs. Users must be members of the organization, teams and repositories must belong to it, and deploy keys are
+// not supported. A project rule covers its whole project, so it has no selected repositories.
+func UpdateOrgProtectBranch(ctx context.Context, orgID, groupID int64, protectBranch *ProtectedBranch, opts WhitelistOptions, repoIDs []int64) error {
 	if protectBranch.WhitelistDeployKeys || len(opts.DeployKeyIDs)+len(opts.DeleteDeployKeyIDs)+len(opts.ForcePushDeployKeyIDs) > 0 {
 		return util.NewInvalidArgumentErrorf("organization rules can't allow deploy keys")
+	}
+	if groupID != 0 && (protectBranch.ApplyToSelectedRepos || len(repoIDs) > 0) {
+		return util.NewInvalidArgumentErrorf("project rules apply to every repository of the project")
 	}
 	for _, ids := range [][]int64{opts.UserIDs, opts.MergeUserIDs, opts.ApprovalsUserIDs, opts.DeleteUserIDs, opts.ForcePushUserIDs} {
 		if err := checkOrgMembers(ctx, orgID, ids); err != nil {
@@ -81,7 +87,7 @@ func UpdateOrgProtectBranch(ctx context.Context, orgID int64, protectBranch *Pro
 		return err
 	}
 
-	protectBranch.RepoID, protectBranch.OrgID = 0, orgID
+	protectBranch.RepoID, protectBranch.OrgID, protectBranch.GroupID = 0, orgID, groupID
 	protectBranch.WhitelistUserIDs, protectBranch.WhitelistTeamIDs = opts.UserIDs, opts.TeamIDs
 	protectBranch.MergeWhitelistUserIDs, protectBranch.MergeWhitelistTeamIDs = opts.MergeUserIDs, opts.MergeTeamIDs
 	protectBranch.ApprovalsWhitelistUserIDs, protectBranch.ApprovalsWhitelistTeamIDs = opts.ApprovalsUserIDs, opts.ApprovalsTeamIDs
@@ -90,12 +96,18 @@ func UpdateOrgProtectBranch(ctx context.Context, orgID int64, protectBranch *Pro
 	protectBranch.WhitelistDeployKeyIDs, protectBranch.DeleteAllowlistDeployKeyIDs, protectBranch.ForcePushAllowlistDeployKeyIDs = nil, nil, nil
 
 	return db.WithTx(ctx, func(ctx context.Context) error {
+		// the project row stays locked until the end, so a concurrent DeleteRepoGroup deletes this rule or runs first
+		if groupID != 0 {
+			if _, err := repo_model.LockRepoGroup(ctx, orgID, groupID); err != nil {
+				return err
+			}
+		}
 		if protectBranch.ID == 0 {
 			if _, err := db.GetEngine(ctx).Insert(protectBranch); err != nil {
 				return fmt.Errorf("Insert: %w", err)
 			}
 		} else {
-			cond := orgRuleCond(orgID)
+			cond := ruleScopeCond(orgID, groupID)
 			cond["id"] = protectBranch.ID
 			if n, err := db.GetEngine(ctx).Where(cond).AllCols().Update(protectBranch); err != nil {
 				return fmt.Errorf("Update: %w", err)
@@ -152,10 +164,10 @@ func checkOrgOwns(ctx context.Context, table, ownerCol string, orgID int64, ids 
 	return nil
 }
 
-// DeleteOrgProtectedBranch deletes an organization rule with its approval rules and selected repositories.
-func DeleteOrgProtectedBranch(ctx context.Context, orgID, id int64) error {
+// DeleteOrgProtectedBranch deletes an organization or project rule with its approval rules and selected repositories.
+func DeleteOrgProtectedBranch(ctx context.Context, orgID, groupID, id int64) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
-		cond := orgRuleCond(orgID)
+		cond := ruleScopeCond(orgID, groupID)
 		cond["id"] = id
 		if n, err := db.GetEngine(ctx).Where(cond).Delete(new(ProtectedBranch)); err != nil {
 			return err
@@ -166,13 +178,13 @@ func DeleteOrgProtectedBranch(ctx context.Context, orgID, id int64) error {
 	})
 }
 
-// DeleteOrgProtectedBranches deletes every rule of a deleted organization.
+// DeleteOrgProtectedBranches deletes every rule of a deleted organization, those of its projects included.
 func DeleteOrgProtectedBranches(ctx context.Context, orgID int64) error {
-	ids := builder.Select("id").From("protected_branch").Where(orgRuleCond(orgID))
-	if err := deleteRuleChildren(ctx, builder.In("protected_branch_id", ids)); err != nil {
+	cond := builder.Eq{"repo_id": 0, "org_id": orgID}
+	if err := deleteRuleChildren(ctx, builder.In("protected_branch_id", builder.Select("id").From("protected_branch").Where(cond))); err != nil {
 		return err
 	}
-	_, err := db.GetEngine(ctx).Where(orgRuleCond(orgID)).Delete(new(ProtectedBranch))
+	_, err := db.GetEngine(ctx).Where(cond).Delete(new(ProtectedBranch))
 	return err
 }
 
@@ -184,11 +196,14 @@ func deleteRuleChildren(ctx context.Context, cond builder.Cond) error {
 	return err
 }
 
-// orphanedProtectedBranchesCond matches repository rules whose repository is gone and organization rules whose organization is gone.
+// orphanedProtectedBranchesCond matches repository rules whose repository is gone, organization rules whose
+// organization is gone and project rules whose project is gone or isn't the organization's.
 func orphanedProtectedBranchesCond() builder.Cond {
 	return builder.And(builder.Neq{"repo_id": 0}, builder.NotIn("repo_id", builder.Select("id").From("repository"))).
 		Or(builder.And(builder.Eq{"repo_id": 0}, builder.NotIn("org_id",
-			builder.Select("id").From("`user`").Where(builder.Eq{"type": user_model.UserTypeOrganization}))))
+			builder.Select("id").From("`user`").Where(builder.Eq{"type": user_model.UserTypeOrganization})))).
+		Or(builder.And(builder.Eq{"repo_id": 0}, builder.Neq{"group_id": 0}, builder.NotIn("group_id",
+			builder.Select("id").From("repo_group").Where(builder.Expr("repo_group.owner_id = protected_branch.org_id")))))
 }
 
 // CountOrphanedProtectedBranches counts the rules DeleteOrphanedProtectedBranches deletes.

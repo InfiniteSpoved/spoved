@@ -76,7 +76,7 @@
 								<div class="flex-item-main">
 									<div class="flex-item-title">
 										<div class="ui basic primary label">{{.RuleName}}</div>
-										<span class="ui basic label">{{ctx.Locale.Tr "repo.settings.org_rule_badge"}}</span>
+										<span class="ui basic label">{{if .GroupID}}{{ctx.Locale.Tr "repo.settings.project_rule_badge" $.Repository.GroupName}}{{else}}{{ctx.Locale.Tr "repo.settings.org_rule_badge"}}{{end}}</span>
 									</div>
 								</div>
 							</div>

@@ -215,6 +215,17 @@ func DeleteRepoGroup(ctx context.Context, group *RepoGroup) error {
 		if _, err := db.Exec(ctx, "DELETE FROM `team_group` WHERE group_id = ?", group.ID); err != nil {
 			return err
 		}
+		// its branch rules (models/git imports this package, so by SQL), with their approval rules and selected repositories
+		rules := "SELECT id FROM `protected_branch` WHERE repo_id = 0 AND org_id = ? AND group_id = ?"
+		for _, query := range []string{
+			"DELETE FROM `approval_rule` WHERE protected_branch_id IN (" + rules + ")",
+			"DELETE FROM `protected_branch_repo` WHERE protected_branch_id IN (" + rules + ")",
+			"DELETE FROM `protected_branch` WHERE repo_id = 0 AND org_id = ? AND group_id = ?",
+		} {
+			if _, err := db.Exec(ctx, query, group.OwnerID, group.ID); err != nil {
+				return err
+			}
+		}
 		return releaseName(ctx, group.OwnerID, locked.Name)
 	})
 }

@@ -11,6 +11,7 @@ import (
 
 	git_model "forgejo.org/models/git"
 	"forgejo.org/models/organization"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/base"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
@@ -27,12 +28,22 @@ const (
 	tplSettingsProtectedBranch base.TplName = "repo/settings/protected_branch"
 )
 
+// ruleScope returns the project of the page (0 for the organization's own rules) and the page listing its rules.
+// The project's rules are listed on its settings page.
+func ruleScope(ctx *context.Context) (int64, string) {
+	if group, ok := ctx.Data["RepoGroup"].(*repo_model.RepoGroup); ok {
+		ctx.Data["RepoGroupLink"] = group.Link(ctx.Org.Organization.Name)
+		return group.ID, group.Link(ctx.Org.Organization.Name) + "/-/settings"
+	}
+	return 0, ctx.Org.OrgLink + "/settings/branches"
+}
+
 // ProtectedBranchRules lists the branch protection rules of the organization.
 func ProtectedBranchRules(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("org.settings.branches")
 	ctx.Data["PageIsOrgSettings"] = true
 	ctx.Data["PageIsOrgSettingsBranches"] = true
-	rules, err := git_model.FindOrgProtectedBranchRules(ctx, ctx.Org.Organization.ID)
+	rules, err := git_model.FindOrgProtectedBranchRules(ctx, ctx.Org.Organization.ID, 0)
 	if err != nil {
 		ctx.ServerError("FindOrgProtectedBranchRules", err)
 		return
@@ -41,12 +52,14 @@ func ProtectedBranchRules(ctx *context.Context) {
 	ctx.HTML(http.StatusOK, tplSettingsBranches)
 }
 
-// SettingsProtectedBranch renders the form of a new or existing organization rule, using the repository form.
+// SettingsProtectedBranch renders the form of a new or existing organization or project rule, using the repository
+// form.
 func SettingsProtectedBranch(ctx *context.Context) {
 	org := ctx.Org.Organization
+	groupID, _ := ruleScope(ctx)
 	rule := &git_model.ProtectedBranch{}
 	if ruleName := ctx.FormString("rule_name"); ruleName != "" {
-		existing, err := git_model.GetOrgProtectedBranchRuleByName(ctx, org.ID, ruleName)
+		existing, err := git_model.GetOrgProtectedBranchRuleByName(ctx, org.ID, groupID, ruleName)
 		if err != nil {
 			ctx.ServerError("GetOrgProtectedBranchRuleByName", err)
 			return
@@ -109,21 +122,25 @@ func SettingsProtectedBranch(ctx *context.Context) {
 	ctx.HTML(http.StatusOK, tplSettingsProtectedBranch)
 }
 
-// SettingsProtectedBranchPost creates or updates an organization rule.
+// SettingsProtectedBranchPost creates or updates an organization or project rule.
 func SettingsProtectedBranchPost(ctx *context.Context) {
 	f := web.GetForm(ctx).(*forms.ProtectBranchForm)
 	org := ctx.Org.Organization
+	groupID, listLink := ruleScope(ctx)
 	editLink := ctx.Org.OrgLink + "/settings/branches/edit"
+	if groupID != 0 {
+		editLink = listLink + "/branches/edit"
+	}
 	if f.RuleName == "" {
 		ctx.Flash.Error(ctx.Tr("repo.settings.protected_branch_required_rule_name"))
 		ctx.Redirect(editLink)
 		return
 	}
 
-	// an organization rule is only ever loaded within the organization of the page
+	// a rule is only ever loaded within the organization and project of the page
 	rule := &git_model.ProtectedBranch{}
 	if f.RuleID > 0 {
-		existing, err := git_model.GetOrgProtectedBranchRuleByID(ctx, org.ID, f.RuleID)
+		existing, err := git_model.GetOrgProtectedBranchRuleByID(ctx, org.ID, groupID, f.RuleID)
 		if err != nil {
 			ctx.ServerError("GetOrgProtectedBranchRuleByID", err)
 			return
@@ -135,7 +152,7 @@ func SettingsProtectedBranchPost(ctx *context.Context) {
 		rule = existing
 	}
 	if rule.RuleName != f.RuleName {
-		same, err := git_model.GetOrgProtectedBranchRuleByName(ctx, org.ID, f.RuleName)
+		same, err := git_model.GetOrgProtectedBranchRuleByName(ctx, org.ID, groupID, f.RuleName)
 		if err != nil {
 			ctx.ServerError("GetOrgProtectedBranchRuleByName", err)
 			return
@@ -164,7 +181,7 @@ func SettingsProtectedBranchPost(ctx *context.Context) {
 		}
 	}
 
-	err := git_model.UpdateOrgProtectBranch(ctx, org.ID, rule, opts, repoIDs)
+	err := git_model.UpdateOrgProtectBranch(ctx, org.ID, groupID, rule, opts, repoIDs)
 	if errors.Is(err, util.ErrInvalidArgument) {
 		ctx.Flash.Error(ctx.Tr("repo.settings.approval_rules_invalid", err.Error()))
 		ctx.Redirect(editLink + "?rule_name=" + url.QueryEscape(f.RuleName))
@@ -179,13 +196,14 @@ func SettingsProtectedBranchPost(ctx *context.Context) {
 	}
 
 	ctx.Flash.Success(ctx.Tr("repo.settings.update_protect_branch_success", rule.RuleName))
-	ctx.Redirect(ctx.Org.OrgLink + "/settings/branches")
+	ctx.Redirect(listLink)
 }
 
-// DeleteProtectedBranchRulePost deletes an organization rule.
+// DeleteProtectedBranchRulePost deletes an organization or project rule.
 func DeleteProtectedBranchRulePost(ctx *context.Context) {
 	org := ctx.Org.Organization
-	rule, err := git_model.GetOrgProtectedBranchRuleByID(ctx, org.ID, ctx.ParamsInt64("id"))
+	groupID, listLink := ruleScope(ctx)
+	rule, err := git_model.GetOrgProtectedBranchRuleByID(ctx, org.ID, groupID, ctx.ParamsInt64("rule"))
 	if err != nil {
 		ctx.ServerError("GetOrgProtectedBranchRuleByID", err)
 		return
@@ -194,10 +212,10 @@ func DeleteProtectedBranchRulePost(ctx *context.Context) {
 		ctx.NotFound("GetOrgProtectedBranchRuleByID", nil)
 		return
 	}
-	if err := git_model.DeleteOrgProtectedBranch(ctx, org.ID, rule.ID); err != nil {
+	if err := git_model.DeleteOrgProtectedBranch(ctx, org.ID, groupID, rule.ID); err != nil {
 		ctx.ServerError("DeleteOrgProtectedBranch", err)
 		return
 	}
 	ctx.Flash.Success(ctx.Tr("repo.settings.remove_protected_branch_success", rule.RuleName))
-	ctx.JSONRedirect(ctx.Org.OrgLink + "/settings/branches")
+	ctx.JSONRedirect(listLink)
 }

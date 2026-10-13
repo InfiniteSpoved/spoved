@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	"forgejo.org/models/db"
+	git_model "forgejo.org/models/git"
 	org_model "forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
@@ -175,8 +176,16 @@ func RepoGroupSettings(ctx *context.Context) {
 	ctx.HTML(http.StatusOK, tplRepoGroupSettings)
 }
 
-// prepareRepoGroupTeams lists the teams linked to the project and the other teams of the organization.
+// prepareRepoGroupTeams lists the teams linked to the project, the other teams of the organization and the
+// project's branch rules.
 func prepareRepoGroupTeams(ctx *context.Context, group *repo_model.RepoGroup) bool {
+	rules, err := git_model.FindOrgProtectedBranchRules(ctx, ctx.Org.Organization.ID, group.ID)
+	if err != nil {
+		ctx.ServerError("FindOrgProtectedBranchRules", err)
+		return false
+	}
+	ctx.Data["ProtectedBranches"] = rules
+
 	linked, err := org_model.GetRepoGroupTeams(ctx, ctx.Org.Organization.ID, group.ID)
 	if err != nil {
 		ctx.ServerError("GetRepoGroupTeams", err)

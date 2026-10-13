@@ -51,7 +51,7 @@ func TestProtectedBranchRulesGetMatched(t *testing.T) {
 func createOrgRule(t *testing.T, orgID int64, name string, repoIDs ...int64) *ProtectedBranch {
 	t.Helper()
 	rule := &ProtectedBranch{RuleName: name, ApplyToSelectedRepos: len(repoIDs) > 0}
-	require.NoError(t, UpdateOrgProtectBranch(db.DefaultContext, orgID, rule, WhitelistOptions{}, repoIDs))
+	require.NoError(t, UpdateOrgProtectBranch(db.DefaultContext, orgID, 0, rule, WhitelistOptions{}, repoIDs))
 	return rule
 }
 
@@ -101,10 +101,10 @@ func TestFindProtectedBranchRulesForRepo(t *testing.T) {
 	})
 
 	t.Run("ScopeEdit", func(t *testing.T) {
-		rule, err := GetOrgProtectedBranchRuleByName(ctx, 3, "release/*")
+		rule, err := GetOrgProtectedBranchRuleByName(ctx, 3, 0, "release/*")
 		require.NoError(t, err)
 		rule.ApplyToSelectedRepos = false
-		require.NoError(t, UpdateOrgProtectBranch(ctx, 3, rule, WhitelistOptions{}, nil))
+		require.NoError(t, UpdateOrgProtectBranch(ctx, 3, 0, rule, WhitelistOptions{}, nil))
 		protected, err := IsBranchProtected(ctx, 3, "release/1")
 		require.NoError(t, err)
 		assert.True(t, protected)
@@ -135,13 +135,13 @@ func TestUpdateOrgProtectBranchValidation(t *testing.T) {
 		"approval rule users": {opts: WhitelistOptions{ApprovalRules: []*ApprovalRule{{Name: "a", RequiredCount: 1, UserIDs: []int64{5}}}}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := UpdateOrgProtectBranch(db.DefaultContext, 3, &ProtectedBranch{RuleName: "x"}, c.opts, c.repoIDs)
+			err := UpdateOrgProtectBranch(db.DefaultContext, 3, 0, &ProtectedBranch{RuleName: "x"}, c.opts, c.repoIDs)
 			require.ErrorIs(t, err, util.ErrInvalidArgument)
 		})
 	}
 
 	rule := &ProtectedBranch{RuleName: "x", EnableWhitelist: true}
-	require.NoError(t, UpdateOrgProtectBranch(db.DefaultContext, 3, rule, WhitelistOptions{UserIDs: []int64{4}, TeamIDs: []int64{2}}, []int64{3, 5}))
+	require.NoError(t, UpdateOrgProtectBranch(db.DefaultContext, 3, 0, rule, WhitelistOptions{UserIDs: []int64{4}, TeamIDs: []int64{2}}, []int64{3, 5}))
 	assert.Equal(t, []int64{4}, rule.WhitelistUserIDs)
 	ids, err := GetOrgProtectedBranchRuleRepoIDs(db.DefaultContext, rule.ID)
 	require.NoError(t, err)
@@ -154,12 +154,12 @@ func TestOrgRuleScopedToOrg(t *testing.T) {
 	ctx := db.DefaultContext
 	rule := createOrgRule(t, 3, "master", 3)
 
-	other, err := GetOrgProtectedBranchRuleByName(ctx, 7, "master")
+	other, err := GetOrgProtectedBranchRuleByName(ctx, 7, 0, "master")
 	require.NoError(t, err)
 	assert.Nil(t, other)
 
-	require.ErrorIs(t, DeleteOrgProtectedBranch(ctx, 7, rule.ID), util.ErrNotExist)
-	require.ErrorIs(t, UpdateOrgProtectBranch(ctx, 7, &ProtectedBranch{ID: rule.ID, RuleName: "taken"}, WhitelistOptions{}, nil), util.ErrNotExist)
+	require.ErrorIs(t, DeleteOrgProtectedBranch(ctx, 7, 0, rule.ID), util.ErrNotExist)
+	require.ErrorIs(t, UpdateOrgProtectBranch(ctx, 7, 0, &ProtectedBranch{ID: rule.ID, RuleName: "taken"}, WhitelistOptions{}, nil), util.ErrNotExist)
 	unittest.AssertExistsAndLoadBean(t, &ProtectedBranch{ID: rule.ID, OrgID: 3, RuleName: "master"})
 	unittest.AssertExistsAndLoadBean(t, &ProtectedBranchRepo{ProtectedBranchID: rule.ID, RepoID: 3})
 
@@ -168,7 +168,7 @@ func TestOrgRuleScopedToOrg(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, byID)
 
-	require.NoError(t, DeleteOrgProtectedBranch(ctx, 3, rule.ID))
+	require.NoError(t, DeleteOrgProtectedBranch(ctx, 3, 0, rule.ID))
 	unittest.AssertNotExistsBean(t, &ProtectedBranch{ID: rule.ID})
 	unittest.AssertNotExistsBean(t, &ProtectedBranchRepo{ProtectedBranchID: rule.ID})
 }

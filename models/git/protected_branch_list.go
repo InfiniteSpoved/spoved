@@ -26,12 +26,25 @@ func (rules ProtectedBranchRules) GetFirstMatched(branchName string) *ProtectedB
 	return nil
 }
 
-// GetMatched returns the first matching repository rule and the first matching organization rule, in that order.
+// level is 0 for a repository rule, 1 for a project rule and 2 for an organization rule.
+func (protectBranch *ProtectedBranch) level() int {
+	switch {
+	case protectBranch.OrgID == 0:
+		return 0
+	case protectBranch.GroupID != 0:
+		return 1
+	}
+	return 2
+}
+
+// GetMatched returns the first matching rule of each level: repository, project and organization, in that order.
 // The rules must be sorted. A ref has to pass every returned rule.
 func (rules ProtectedBranchRules) GetMatched(branchName string) ProtectedBranchRules {
 	var matched ProtectedBranchRules
+	var seen [3]bool
 	for _, rule := range rules {
-		if rule.Match(branchName) && (len(matched) == 0 || len(matched) == 1 && matched[0].OrgID == 0 && rule.OrgID != 0) {
+		if level := rule.level(); !seen[level] && rule.Match(branchName) {
+			seen[level] = true
 			matched = append(matched, rule)
 		}
 	}
@@ -40,8 +53,8 @@ func (rules ProtectedBranchRules) GetMatched(branchName string) ProtectedBranchR
 
 func (rules ProtectedBranchRules) sort() {
 	sort.Slice(rules, func(i, j int) bool {
-		if (rules[i].OrgID == 0) != (rules[j].OrgID == 0) {
-			return rules[i].OrgID == 0 // repository rules come before organization rules
+		if rules[i].level() != rules[j].level() {
+			return rules[i].level() < rules[j].level() // repository rules, then project rules, then organization rules
 		}
 		rules[i].loadGlob()
 		rules[j].loadGlob()
@@ -63,7 +76,8 @@ func FindRepoProtectedBranchRules(ctx context.Context, repoID int64) (ProtectedB
 	return rules, nil
 }
 
-// FindProtectedBranchRulesForRepo loads the repository's rules followed by the organization rules that apply to it.
+// FindProtectedBranchRulesForRepo loads the repository's rules followed by the project and organization rules that
+// apply to it.
 func FindProtectedBranchRulesForRepo(ctx context.Context, repo *repo_model.Repository) (ProtectedBranchRules, error) {
 	rules, err := findProtectedBranchRulesForRepo(ctx, repo.ID)
 	if err != nil {
@@ -77,13 +91,14 @@ func FindProtectedBranchRulesForRepo(ctx context.Context, repo *repo_model.Repos
 	return rules, nil
 }
 
-// findProtectedBranchRulesForRepo reads the owner of the repository at query time, so a new repository is
-// protected at once and a transferred one gets the rules of its new owner.
+// findProtectedBranchRulesForRepo reads the owner and the project of the repository at query time, so a new
+// repository is protected at once and a transferred or moved one gets the rules of its new place.
 func findProtectedBranchRulesForRepo(ctx context.Context, repoID int64) (ProtectedBranchRules, error) {
 	var rules ProtectedBranchRules
 	err := db.GetEngine(ctx).Where(builder.Eq{"repo_id": repoID}.Or(builder.And(
 		builder.Eq{"repo_id": 0},
 		builder.In("org_id", builder.Select("owner_id").From("repository").Where(builder.Eq{"id": repoID})),
+		builder.Eq{"group_id": 0}.Or(builder.In("group_id", builder.Select("group_id").From("repository").Where(builder.Eq{"id": repoID}))),
 		builder.Eq{"apply_to_selected_repos": false}.Or(
 			builder.In("id", builder.Select("protected_branch_id").From("protected_branch_repo").Where(builder.Eq{"repo_id": repoID})),
 		),
@@ -95,7 +110,7 @@ func findProtectedBranchRulesForRepo(ctx context.Context, repoID int64) (Protect
 	return rules, nil
 }
 
-// GetMatchedProtectedBranchRules returns the repository rule and the organization rule that match the branch.
+// GetMatchedProtectedBranchRules returns the repository, project and organization rules that match the branch.
 // Enforcement must check every returned rule.
 func GetMatchedProtectedBranchRules(ctx context.Context, repoID int64, branchName string) (ProtectedBranchRules, error) {
 	rules, err := findProtectedBranchRulesForRepo(ctx, repoID)
@@ -108,7 +123,11 @@ func GetMatchedProtectedBranchRules(ctx context.Context, repoID int64, branchNam
 		if err != nil {
 			return nil, err
 		}
-		rules[len(rules)-1].Repo = repo
+		for _, rule := range rules {
+			if rule.OrgID != 0 {
+				rule.Repo = repo
+			}
+		}
 	}
 	return rules, nil
 }
@@ -143,8 +162,8 @@ func FindAllMatchedBranches(ctx context.Context, repoID int64, ruleName string) 
 	return results, nil
 }
 
-// GetFirstMatchProtectedBranchRule returns the matching repository rule, or the matching organization rule if
-// no repository rule matches. Use it for display only, enforcement must use GetMatchedProtectedBranchRules.
+// GetFirstMatchProtectedBranchRule returns the matching repository rule, or else the matching project rule, or
+// else the matching organization rule. Use it for display only, enforcement must use GetMatchedProtectedBranchRules.
 func GetFirstMatchProtectedBranchRule(ctx context.Context, repoID int64, branchName string) (*ProtectedBranch, error) {
 	rules, err := GetMatchedProtectedBranchRules(ctx, repoID, branchName)
 	if err != nil || len(rules) == 0 {

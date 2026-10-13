@@ -382,6 +382,9 @@ func Init() error {
 // so their changed protected files follow the rule.
 func CheckPRsForOrgRule(ctx context.Context, rule *git_model.ProtectedBranch) error {
 	repoIDs := builder.Select("id").From("repository").Where(builder.Eq{"owner_id": rule.OrgID})
+	if rule.GroupID != 0 {
+		repoIDs = builder.Select("id").From("repository").Where(builder.Eq{"owner_id": rule.OrgID, "group_id": rule.GroupID})
+	}
 	if rule.ApplyToSelectedRepos {
 		repoIDs = builder.Select("repo_id").From("protected_branch_repo").Where(builder.Eq{"protected_branch_id": rule.ID})
 	}
