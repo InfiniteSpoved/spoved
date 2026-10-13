@@ -372,8 +372,8 @@ func (repo *Repository) groupSegment() string {
 	return repo.GroupName
 }
 
-// escapedPath returns the escaped owner[/project]/name path of the repository.
-func (repo *Repository) escapedPath() string {
+// EscapedPath returns the escaped owner[/project]/name path of the repository.
+func (repo *Repository) EscapedPath() string {
 	if group := repo.groupSegment(); group != "" {
 		return url.PathEscape(repo.OwnerName) + "/" + url.PathEscape(group) + "/" + url.PathEscape(repo.Name)
 	}
@@ -390,7 +390,7 @@ func (repo *Repository) FullName() string {
 
 // HTMLURL returns the repository HTML URL
 func (repo *Repository) HTMLURL() string {
-	return setting.AppURL + repo.escapedPath()
+	return setting.AppURL + repo.EscapedPath()
 }
 
 // SummaryCardURL returns the absolute URL to an image providing a summary of the repo
@@ -412,9 +412,9 @@ func (repo *Repository) CommitLink(commitID string) (result string) {
 // APIURL returns the repository API URL
 func (repo *Repository) APIURL() string {
 	if repo.GroupID != 0 {
-		return setting.AppURL + "api/v1/repos/" + repo.escapedPath() + "/-"
+		return setting.AppURL + "api/v1/repos/" + repo.EscapedPath() + "/-"
 	}
-	return setting.AppURL + "api/v1/repos/" + repo.escapedPath()
+	return setting.AppURL + "api/v1/repos/" + repo.EscapedPath()
 }
 
 // APActorID returns the activitypub repository API URL
@@ -582,6 +582,9 @@ func (repo *Repository) ComposeMetas(ctx context.Context) map[string]string {
 			"repoPath": repo.RepoPath(),
 			"mode":     "comment",
 		}
+		if repo.GroupID != 0 {
+			metas["group"] = repo.groupSegment()
+		}
 
 		unit, err := repo.GetUnit(ctx, unit.TypeExternalTracker)
 		if err == nil {
@@ -668,7 +671,7 @@ func (repo *Repository) RepoPath() string {
 
 // Link returns the repository relative url
 func (repo *Repository) Link() string {
-	return setting.AppSubURL + "/" + repo.escapedPath()
+	return setting.AppSubURL + "/" + repo.EscapedPath()
 }
 
 // GroupLink returns the relative url of the repository's project, "" at the root of its owner.
@@ -681,7 +684,7 @@ func (repo *Repository) GroupLink() string {
 
 // ComposeCompareURL returns the repository comparison URL
 func (repo *Repository) ComposeCompareURL(oldCommitID, newCommitID string) string {
-	return fmt.Sprintf("%s/%s/compare/%s...%s", url.PathEscape(repo.OwnerName), url.PathEscape(repo.Name), util.PathEscapeSegments(oldCommitID), util.PathEscapeSegments(newCommitID))
+	return fmt.Sprintf("%s/compare/%s...%s", repo.EscapedPath(), util.PathEscapeSegments(oldCommitID), util.PathEscapeSegments(newCommitID))
 }
 
 func (repo *Repository) ComposeBranchCompareURL(baseRepo *Repository, branchName string) string {
@@ -690,7 +693,7 @@ func (repo *Repository) ComposeBranchCompareURL(baseRepo *Repository, branchName
 	}
 	var cmpBranchEscaped string
 	if repo.ID != baseRepo.ID {
-		cmpBranchEscaped = fmt.Sprintf("%s/%s:", url.PathEscape(repo.OwnerName), url.PathEscape(repo.Name))
+		cmpBranchEscaped = repo.EscapedPath() + ":"
 	}
 	cmpBranchEscaped = fmt.Sprintf("%s%s", cmpBranchEscaped, util.PathEscapeSegments(branchName))
 	return fmt.Sprintf("%s/compare/%s...%s", baseRepo.Link(), util.PathEscapeSegments(baseRepo.DefaultBranch), cmpBranchEscaped)
@@ -775,7 +778,7 @@ func composeSSHCloneURL(escapedPath string) string {
 }
 
 func (repo *Repository) cloneLink(isWiki bool) *CloneLink {
-	path := repo.escapedPath()
+	path := repo.EscapedPath()
 	if isWiki {
 		path += ".wiki"
 	}
@@ -888,6 +891,23 @@ func GetRepositoryByPath(ctx context.Context, ownerID int64, groupName, repoName
 		return nil, ErrRepoNotExist{0, ownerID, "", repoName}
 	}
 	return &repo, nil
+}
+
+// GetRepositoryByRef resolves the owner, project and repository names of a reference. An empty groupName means the
+// root repository of the owner, otherwise only the repository in that project is returned; they never resolve to
+// each other. A missing owner, a trashed owner and a trashed repository are all ErrRepoNotExist.
+func GetRepositoryByRef(ctx context.Context, ownerName, groupName, repoName string) (*Repository, error) {
+	if groupName == "" {
+		return GetRepositoryByOwnerAndName(ctx, ownerName, repoName)
+	}
+	owner, err := user_model.GetUserByName(ctx, ownerName)
+	if err != nil {
+		if user_model.IsErrUserNotExist(err) {
+			return nil, ErrRepoNotExist{0, 0, ownerName, repoName}
+		}
+		return nil, err
+	}
+	return GetRepositoryByPath(ctx, owner.ID, groupName, repoName)
 }
 
 // GetRepositoryByName returns the repository by given name under user if exists.

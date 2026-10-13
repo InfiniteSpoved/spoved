@@ -247,3 +247,40 @@ func TestSearchRepositoryInProject(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[int64]int64{payments.ID: 2, other.ID: 1}, counts)
 }
+
+func TestGetRepositoryByRef(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+	org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+	pay, err := repo_model.CreateRepoGroup(ctx, org3, "pay", "")
+	require.NoError(t, err)
+	nested := insertGroupRepo(t, org3, pay, "repo3") // same leaf name as the root repository org3/repo3
+
+	root, err := repo_model.GetRepositoryByRef(ctx, "ORG3", "", "Repo3")
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, root.ID)
+	inGroup, err := repo_model.GetRepositoryByRef(ctx, "org3", "PAY", "repo3")
+	require.NoError(t, err)
+	assert.Equal(t, nested.ID, inGroup.ID)
+
+	for _, c := range [][3]string{
+		{"org3", "pay", "repo5"}, // a root repository's name inside a project
+		{"org3", "nope", "repo3"},
+		{"nobody", "pay", "repo3"},
+		{"org3", "repo3", "repo3"}, // a root repository isn't a project
+	} {
+		_, err := repo_model.GetRepositoryByRef(ctx, c[0], c[1], c[2])
+		require.True(t, repo_model.IsErrRepoNotExist(err), "%v", c)
+	}
+
+	_, err = db.GetEngine(ctx).Exec("UPDATE repository SET trashed_unix = 1 WHERE id = ?", nested.ID)
+	require.NoError(t, err)
+	_, err = repo_model.GetRepositoryByRef(ctx, "org3", "pay", "repo3")
+	require.True(t, repo_model.IsErrRepoNotExist(err), "a trashed repository")
+	_, err = db.GetEngine(ctx).Exec("UPDATE repository SET trashed_unix = 0 WHERE id = ?", nested.ID)
+	require.NoError(t, err)
+	_, err = db.GetEngine(ctx).Exec("UPDATE `user` SET trashed_unix = 1 WHERE id = ?", org3.ID)
+	require.NoError(t, err)
+	_, err = repo_model.GetRepositoryByRef(ctx, "org3", "pay", "repo3")
+	require.True(t, repo_model.IsErrRepoNotExist(err), "a trashed owner")
+}

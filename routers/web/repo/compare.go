@@ -279,12 +279,20 @@ func ParseCompareInfo(ctx *context.Context) *common.CompareInfo {
 				ci.HeadRepo = baseRepo
 			}
 		} else {
-			ci.HeadRepo, err = repo_model.GetRepositoryByOwnerAndName(ctx, headInfosSplit[0], headInfosSplit[1])
+			if len(headInfosSplit) > 3 {
+				ctx.NotFound("CompareAndPullRequest", nil)
+				return nil
+			}
+			group, name := "", headInfosSplit[1]
+			if len(headInfosSplit) == 3 {
+				group, name = headInfosSplit[1], headInfosSplit[2]
+			}
+			ci.HeadRepo, err = repo_model.GetRepositoryByRef(ctx, headInfosSplit[0], group, name)
 			if err != nil {
 				if repo_model.IsErrRepoNotExist(err) {
-					ctx.NotFound("GetRepositoryByOwnerAndName", nil)
+					ctx.NotFound("GetRepositoryByRef", nil)
 				} else {
-					ctx.ServerError("GetRepositoryByOwnerAndName", err)
+					ctx.ServerError("GetRepositoryByRef", err)
 				}
 				return nil
 			}

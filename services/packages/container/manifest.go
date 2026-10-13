@@ -634,11 +634,16 @@ func tryAutolinkByLabel(ctx context.Context, p *packages_model.Package, labels m
 	}
 
 	pathParts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(pathParts) != 2 {
-		log.Warn("Failed to extract label value org.opencontainers.image.source: value is not in format '{host}/{owner}/{repo}' (is: %s)", labelRepo)
+	if len(pathParts) != 2 && len(pathParts) != 3 {
+		log.Warn("Failed to extract label value org.opencontainers.image.source: value is not in format '{host}/{owner}/[{project}/]{repo}' (is: %s)", labelRepo)
+		return false, nil
 	}
 
-	repository, err := repo_model.GetRepositoryByOwnerAndName(ctx, pathParts[0], pathParts[1])
+	group := ""
+	if len(pathParts) == 3 {
+		group = pathParts[1]
+	}
+	repository, err := repo_model.GetRepositoryByRef(ctx, pathParts[0], group, pathParts[len(pathParts)-1])
 	if err != nil {
 		if !repo_model.IsErrRepoNotExist(err) {
 			return false, err // this is a legit error

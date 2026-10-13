@@ -495,18 +495,18 @@ func RemoveIssueBlocking(ctx *context.APIContext) {
 
 func getFormIssue(ctx *context.APIContext, form *api.IssueMeta) *issues_model.Issue {
 	var repo *repo_model.Repository
-	if form.Owner != ctx.Repo().Repository.OwnerName || form.Name != ctx.Repo().Repository.Name {
+	if cur := ctx.Repo().Repository; form.Owner != cur.OwnerName || form.Project != cur.GroupName || form.Name != cur.Name {
 		if !setting.Service.AllowCrossRepositoryDependencies {
 			ctx.JSON(http.StatusBadRequest, "CrossRepositoryDependencies not enabled")
 			return nil
 		}
 		var err error
-		repo, err = repo_model.GetRepositoryByOwnerAndName(ctx, form.Owner, form.Name)
+		repo, err = repo_model.GetRepositoryByRef(ctx, form.Owner, form.Project, form.Name)
 		if err != nil {
 			if repo_model.IsErrRepoNotExist(err) {
 				ctx.NotFound("IsErrRepoNotExist", err)
 			} else {
-				ctx.Error(http.StatusInternalServerError, "GetRepositoryByOwnerAndName", err)
+				ctx.Error(http.StatusInternalServerError, "GetRepositoryByRef", err)
 			}
 			return nil
 		}

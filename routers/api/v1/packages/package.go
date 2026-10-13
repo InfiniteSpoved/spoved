@@ -259,7 +259,12 @@ func LinkPackage(ctx *context.APIContext) {
 		return
 	}
 
-	repo, err := repo_model.GetRepositoryByName(ctx, ctx.User().ID, ctx.Params("repo_name"))
+	var repo *repo_model.Repository
+	if project := ctx.Params("project"); project != "" {
+		repo, err = repo_model.GetRepositoryByPath(ctx, ctx.User().ID, project, ctx.Params("repo_name"))
+	} else {
+		repo, err = repo_model.GetRepositoryByName(ctx, ctx.User().ID, ctx.Params("repo_name"))
+	}
 	if err != nil {
 		if errors.Is(err, util.ErrNotExist) {
 			ctx.Error(http.StatusNotFound, "GetRepositoryByName", err)
@@ -282,6 +287,46 @@ func LinkPackage(ctx *context.APIContext) {
 		return
 	}
 	ctx.Status(http.StatusCreated)
+}
+
+// LinkPackageProject sets a repository link for a package to a repository in a project
+func LinkPackageProject(ctx *context.APIContext) {
+	// swagger:operation POST /packages/{owner}/{type}/{name}/-/link/{project}/{repo_name} package linkPackageProject
+	// ---
+	// summary: Link a package to a repository in a project
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the package
+	//   type: string
+	//   required: true
+	// - name: type
+	//   in: path
+	//   description: type of the package
+	//   type: string
+	//   required: true
+	// - name: name
+	//   in: path
+	//   description: name of the package
+	//   type: string
+	//   required: true
+	// - name: project
+	//   in: path
+	//   description: project of the repository to link.
+	//   type: string
+	//   required: true
+	// - name: repo_name
+	//   in: path
+	//   description: name of the repository to link.
+	//   type: string
+	//   required: true
+	// responses:
+	//   "201":
+	//     "$ref": "#/responses/empty"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+
+	LinkPackage(ctx)
 }
 
 // UnlinkPackage sets a repository link for a package

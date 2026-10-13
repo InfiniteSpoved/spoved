@@ -1495,3 +1495,35 @@ func TestRenderDescriptionHTML(t *testing.T) {
 		"A weird alternative to `Arc&lt;RwLock&lt;T&gt;&gt;`",
 	)
 }
+
+func TestRender_ProjectReferences(t *testing.T) {
+	defer test.MockVariableValue(&setting.AppURL, markup.TestAppURL)()
+
+	render := func(metas map[string]string, input string) string {
+		buffer, err := markup.RenderString(&markup.RenderContext{
+			Ctx:          git.DefaultContext,
+			RelativePath: "a.md",
+			Links:        markup.Links{AbsolutePrefix: true, Base: setting.AppSubURL},
+			Metas:        metas,
+		}, input)
+		require.NoError(t, err)
+		return strings.TrimSpace(buffer)
+	}
+	projectMetas := map[string]string{"user": "org", "group": "proj", "repo": "leaf", "repoPath": "/x", "mode": "comment"}
+
+	assert.Equal(t,
+		`<p><a href="`+util.URLJoin(markup.TestAppURL, "org", "proj", "leaf", "issues", "5")+`" class="ref-issue" rel="nofollow">org/proj/leaf#5</a></p>`,
+		render(localMetas, "org/proj/leaf#5"))
+	// a same-repository reference in a project repository must not point at the root repository org/leaf
+	assert.Equal(t,
+		`<p><a href="`+util.URLJoin(markup.TestAppURL, "org", "proj", "leaf", "issues", "5")+`" class="ref-issue" rel="nofollow">#5</a></p>`,
+		render(projectMetas, "#5"))
+	assert.Equal(t,
+		`<p><a href="`+util.URLJoin(markup.TestAppURL, "org", "leaf", "issues", "5")+`" class="ref-issue" rel="nofollow">org/leaf#5</a></p>`,
+		render(projectMetas, "org/leaf#5"))
+	assert.Equal(t,
+		`<p><a href="`+util.URLJoin(markup.TestAppURL, "org", "proj", "leaf", "commit", "0123456789abcdef")+`" rel="nofollow">org/proj/leaf@0123456789</a></p>`,
+		render(localMetas, "org/proj/leaf@0123456789abcdef"))
+	assert.Equal(t, "org/proj/leaf", markup.RepoLinkPath(projectMetas))
+	assert.Equal(t, "user13/repo11", markup.RepoLinkPath(map[string]string{"user": "user13", "repo": "repo11"}))
+}

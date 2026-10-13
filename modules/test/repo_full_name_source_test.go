@@ -21,8 +21,6 @@ func TestNoRepoNameConcatenation(t *testing.T) {
 	concat := regexp.MustCompile(`(OwnerName|Owner\.Name)(\}\}/\{\{|\s*\+\s*"/"\s*\+\s*)[\w.$ ]*?Name\b`)
 	allowed := map[string]string{
 		`models/repo/repo.go: OwnerName + "/" + repo.Name`:                                        "FullName itself, for a root repository",
-		`templates/repo/diff/compare.tmpl: OwnerName}}/{{PathEscape $.OwnForkRepo.Name`:           "compare head grammar owner/repo:branch; forks into projects come later",
-		`templates/repo/diff/compare.tmpl: OwnerName}}/{{PathEscape $.RootRepo.Name`:              "compare head grammar owner/repo:branch; forks into projects come later",
 		`routers/web/repo/editor.go: Owner.Name + "/" + repo.Name`:                                "compare head grammar owner/repo:branch; forks into projects come later",
 		`templates/repo/issue/view_content/sidebar/pull_review.tmpl: OwnerName}}/{{.Team.Name`:    "a team, org/team",
 		`templates/repo/issue/view_content/sidebar/pull_reviewers.tmpl: OwnerName}}/{{.Team.Name`: "a team, org/team",

@@ -119,12 +119,12 @@ func UpdateIssuesCommit(ctx context.Context, doer *user_model.User, repo *repo_m
 		for _, ref := range references.FindAllIssueReferences(c.Message) {
 			// issue is from another repo
 			if len(ref.Owner) > 0 && len(ref.Name) > 0 {
-				refRepo, err = repo_model.GetRepositoryByOwnerAndName(ctx, ref.Owner, ref.Name)
+				refRepo, err = repo_model.GetRepositoryByRef(ctx, ref.Owner, ref.Group, ref.Name)
 				if err != nil {
 					if repo_model.IsErrRepoNotExist(err) {
 						log.Warn("Repository referenced in commit but does not exist: %v", err)
 					} else {
-						log.Error("repo_model.GetRepositoryByOwnerAndName: %v", err)
+						log.Error("repo_model.GetRepositoryByRef: %v", err)
 					}
 					continue
 				}

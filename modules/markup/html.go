@@ -875,6 +875,30 @@ func pullReviewCommitPatternProcessor(ctx *RenderContext, node *html.Node) {
 	}
 }
 
+// repoElems returns the path elements of the rendered repository: owner, project (if any) and repository.
+func repoElems(metas map[string]string) []string {
+	if metas["group"] != "" {
+		return []string{metas["user"], metas["group"], metas["repo"]}
+	}
+	return []string{metas["user"], metas["repo"]}
+}
+
+// RepoLinkPath returns the escaped "owner[/project]/repo" path of the rendered repository.
+func RepoLinkPath(metas map[string]string) string {
+	elems := repoElems(metas)
+	for i, e := range elems {
+		elems[i] = url.PathEscape(e)
+	}
+	return strings.Join(elems, "/")
+}
+
+func refRepoElems(ref *references.RenderizableReference) []string {
+	if ref.Group != "" {
+		return []string{ref.Owner, ref.Group, ref.Name}
+	}
+	return []string{ref.Owner, ref.Name}
+}
+
 func fullIssuePatternProcessor(ctx *RenderContext, node *html.Node) {
 	if ctx.Metas == nil {
 		return
@@ -901,7 +925,7 @@ func fullIssuePatternProcessor(ctx *RenderContext, node *html.Node) {
 		matchUser := m[re.SubexpIndex("user")]
 		matchRepo := m[re.SubexpIndex("repo")]
 
-		if matchUser == ctx.Metas["user"] && matchRepo == ctx.Metas["repo"] {
+		if matchUser == ctx.Metas["user"] && matchRepo == ctx.Metas["repo"] && ctx.Metas["group"] == "" {
 			replaceContent(node, linkIndex[0], linkIndex[1], createLink(link, text, "ref-issue"))
 		} else {
 			text = matchUser + "/" + matchRepo + text
@@ -983,9 +1007,9 @@ func issueIndexPatternProcessor(ctx *RenderContext, node *html.Node) {
 				path = "pulls"
 			}
 			if ref.Owner == "" {
-				link = createLink(util.URLJoin(ctx.Links.Prefix(), ctx.Metas["user"], ctx.Metas["repo"], path, ref.Issue), reftext, "ref-issue")
+				link = createLink(util.URLJoin(ctx.Links.Prefix(), append(repoElems(ctx.Metas), path, ref.Issue)...), reftext, "ref-issue")
 			} else {
-				link = createLink(util.URLJoin(ctx.Links.Prefix(), ref.Owner, ref.Name, path, ref.Issue), reftext, "ref-issue")
+				link = createLink(util.URLJoin(ctx.Links.Prefix(), append(refRepoElems(ref), path, ref.Issue)...), reftext, "ref-issue")
 			}
 		}
 
@@ -1023,8 +1047,8 @@ func commitCrossReferencePatternProcessor(ctx *RenderContext, node *html.Node) {
 			return
 		}
 
-		reftext := ref.Owner + "/" + ref.Name + "@" + base.ShortSha(ref.CommitSha)
-		link := createLink(util.URLJoin(ctx.Links.Prefix(), ref.Owner, ref.Name, "commit", ref.CommitSha), reftext, "commit")
+		reftext := strings.Join(refRepoElems(ref), "/") + "@" + base.ShortSha(ref.CommitSha)
+		link := createLink(util.URLJoin(ctx.Links.Prefix(), append(refRepoElems(ref), "commit", ref.CommitSha)...), reftext, "commit")
 
 		replaceContent(node, ref.RefLocation.Start, ref.RefLocation.End, link)
 		node = node.NextSibling.NextSibling
@@ -1427,7 +1451,7 @@ func hashCurrentPatternProcessor(ctx *RenderContext, node *html.Node) {
 			continue
 		}
 
-		link := util.URLJoin(ctx.Links.Prefix(), ctx.Metas["user"], ctx.Metas["repo"], "commit", hash)
+		link := util.URLJoin(ctx.Links.Prefix(), append(repoElems(ctx.Metas), "commit", hash)...)
 		replaceContent(node, m[2], m[3], createCodeLink(link, base.ShortSha(hash), ""))
 		start = 0
 		node = node.NextSibling.NextSibling

@@ -156,7 +156,7 @@ func (issue *Issue) getCrossReferences(stdCtx context.Context, ctx *crossReferen
 			refRepo = ctx.OrigIssue.Repo
 		} else {
 			// Issues in other repositories
-			refRepo, err = repo_model.GetRepositoryByOwnerAndName(stdCtx, ref.Owner, ref.Name)
+			refRepo, err = repo_model.GetRepositoryByRef(stdCtx, ref.Owner, ref.Group, ref.Name)
 			if err != nil {
 				if repo_model.IsErrRepoNotExist(err) {
 					continue

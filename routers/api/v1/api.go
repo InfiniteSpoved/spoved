@@ -1376,6 +1376,7 @@ func Routes() *web.Route {
 				})
 
 				m.Post("/-/link/{repo_name}", reqToken(), reqPackageAccess(perm.AccessModeWrite), packages.LinkPackage)
+				m.Post("/-/link/{project}/{repo_name}", reqToken(), reqPackageAccess(perm.AccessModeWrite), packages.LinkPackageProject)
 				m.Post("/-/unlink", reqToken(), reqPackageAccess(perm.AccessModeWrite), packages.UnlinkPackage)
 			})
 

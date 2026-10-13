@@ -115,7 +115,7 @@ func newFilePreview(ctx *RenderContext, node *html.Node, locale translation.Loca
 
 	titleBuffer := new(bytes.Buffer)
 
-	isExternRef := ownerName != ctx.Metas["user"] || repoName != ctx.Metas["repo"]
+	isExternRef := ownerName != ctx.Metas["user"] || repoName != ctx.Metas["repo"] || ctx.Metas["group"] != ""
 	if isExternRef {
 		err = html.Render(titleBuffer, createLink(node.Data[m[0]:m[3]], ownerName+"/"+repoName, ""))
 		if err != nil {
