@@ -154,7 +154,7 @@ func CheckRepoScopedToken(ctx *Context, repo *repo_model.Repository, level auth_
 			return
 		}
 
-		if publicOnly && repo.IsPrivate {
+		if publicOnly && (repo == nil || repo.IsPrivate) {
 			ctx.Error(http.StatusForbidden)
 			return
 		}
@@ -172,6 +172,12 @@ func CheckRepoScopedToken(ctx *Context, repo *repo_model.Repository, level auth_
 	}
 
 	if reducer := ctx.Authentication.Reducer(); reducer != nil {
+		// a token limited to some repositories answers a missing repository (push-to-create) like one it can't see;
+		// an unrestricted one keeps going, its reducer doesn't read the repository
+		if repo == nil && !reducer.AllowAdminOverride() {
+			ctx.Error(http.StatusForbidden)
+			return
+		}
 		var accessMode perm.AccessMode
 		switch level {
 		case auth_model.Read:

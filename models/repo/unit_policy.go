@@ -127,6 +127,13 @@ func HiddenUnits(ctx context.Context, owner *user_model.User) container.Set[unit
 	return hidden
 }
 
+// ActionsAvailable reports whether Actions is on for the site and, when owner is an organization, not hidden for it
+// (the org Actions pages, their menu entries and MustEnableActions all follow this one rule).
+func ActionsAvailable(ctx context.Context, owner *user_model.User) bool {
+	return setting.Actions.Enabled && !unit.TypeActions.UnitGlobalDisabled() &&
+		(owner == nil || !HiddenUnits(ctx, owner).Contains(unit.TypeActions))
+}
+
 // HiddenUnitCond is HiddenUnits in SQL: it matches the rows whose unit (the typeCol column) is hidden in
 // repositories owned by ownerCol.
 func HiddenUnitCond(ctx context.Context, ownerCol, typeCol string) builder.Cond {

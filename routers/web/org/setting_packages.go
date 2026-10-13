@@ -29,6 +29,11 @@ func MustEnablePackages(ctx *context.Context) {
 	}
 }
 
+// SettingsMenu shows the Packages item of the settings menu only where its route accepts the owner (the Actions flag comes from HandleOrgAssignment)
+func SettingsMenu(ctx *context.Context) {
+	ctx.Data["EnablePackages"] = setting.Packages.Enabled && !repo_model.HiddenUnits(ctx, ctx.ContextUser).Contains(unit.TypePackages)
+}
+
 func Packages(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("packages.title")
 	ctx.Data["PageIsOrgSettings"] = true

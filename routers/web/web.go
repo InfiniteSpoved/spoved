@@ -1305,7 +1305,7 @@ func registerRoutes(m *web.Route) {
 						m.Post("/rebuild", org.RebuildCargoIndex)
 					})
 				}, packagesEnabled, org.MustEnablePackages)
-			}, ctxDataSet("EnableOAuth2", setting.OAuth2.Enabled, "EnablePackages", setting.Packages.Enabled, "EnableQuota", setting.Quota.Enabled, "PageIsOrgSettings", true))
+			}, ctxDataSet("EnableOAuth2", setting.OAuth2.Enabled, "EnableQuota", setting.Quota.Enabled, "PageIsOrgSettings", true), org.SettingsMenu)
 		}, context.OrgAssignment(true, true))
 	}, reqSignIn)
 	// ***** END: Organization *****
