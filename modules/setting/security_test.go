@@ -408,6 +408,9 @@ ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION = read:repository
 }
 
 func TestLoadCredentialExpiryPolicyDefault(t *testing.T) {
+	ssh, deploy, token := SSHKeyExpiry, DeployKeyExpiry, AccessTokenExpiry
+	t.Cleanup(func() { SSHKeyExpiry, DeployKeyExpiry, AccessTokenExpiry = ssh, deploy, token })
+
 	assert.Equal(t, CredentialExpiryPolicy{Required: true, MaxLifetimeDays: 365}, DefaultCredentialExpiry)
 
 	for _, data := range []string{"", "[security]\nINSTALL_LOCK = true"} {

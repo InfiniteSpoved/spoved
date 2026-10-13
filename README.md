@@ -43,7 +43,7 @@ Each feature links to the pull request that added it.
 
 | Feature | What it does |
 |---|---|
-| **Expiry for SSH keys, deploy keys and access tokens** ([#115](https://github.com/InfiniteSpoved/spoved/pull/115)) | Expiry dates, required by default with a maximum of 365 days ([#459](https://github.com/InfiniteSpoved/spoved/issues/459)). Expired credentials are refused everywhere. Admins can lower the maximum or turn a policy off: `[security] SSH_KEY_*`, `DEPLOY_KEY_*` and `ACCESS_TOKEN_*` with `_EXPIRY_REQUIRED` and `_MAX_LIFETIME_DAYS`. |
+| **Expiry for SSH keys, deploy keys and access tokens** ([#115](https://github.com/InfiniteSpoved/spoved/pull/115)) | Expiry dates, required by default with a maximum of 365 days ([#459](https://github.com/InfiniteSpoved/spoved/issues/459)). Expired credentials are refused everywhere. Admins can lower the maximum or turn a policy off: `[security] SSH_KEY_*`, `DEPLOY_KEY_*` and `ACCESS_TOKEN_*` with `_EXPIRY_REQUIRED` and `_MAX_LIFETIME_DAYS`. Turning a policy off needs both keys, `_EXPIRY_REQUIRED = false` and `_MAX_LIFETIME_DAYS = 0`: a maximum alone still requires an expiry date. |
 | **Specific deploy keys in branch and tag protection** ([#50](https://github.com/InfiniteSpoved/spoved/pull/50)) | Allow chosen deploy keys, not all of them, to push to protected branches and tags. Deploy-key pushes to protected tags are decided by the key, never by the repository owner's identity. |
 
 ### Change control

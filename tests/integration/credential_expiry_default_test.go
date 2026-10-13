@@ -6,6 +6,7 @@ package integration
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,8 +17,10 @@ import (
 	actions_model "forgejo.org/models/actions"
 	asymkey_model "forgejo.org/models/asymkey"
 	auth_model "forgejo.org/models/auth"
+	"forgejo.org/models/perm"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/private"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/tests"
@@ -170,6 +173,12 @@ func TestCredentialExpiryDefault(t *testing.T) {
 
 	t.Run("existing credentials and automatic tokens keep working", func(t *testing.T) {
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/user").AddTokenAuth(userToken), http.StatusOK)
+
+		// a row stored without an expiry, as by an import or an older policy
+		row := &auth_model.AccessToken{UID: 2, Name: "stored without expiry", Scope: auth_model.AccessTokenScopeReadUser, ResourceAllRepos: true}
+		require.NoError(t, auth_model.NewAccessToken(t.Context(), row))
+		require.Zero(t, row.ExpiresUnix)
+		MakeRequest(t, NewRequest(t, "GET", "/api/v1/user").AddTokenAuth(row.Token), http.StatusOK)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user5/repo4").AddTokenAuth(task.Token), http.StatusOK)
 
 		req := NewRequest(t, "GET", setting.AppURL+"v2/token")
@@ -179,6 +188,29 @@ func TestCredentialExpiryDefault(t *testing.T) {
 		req = NewRequest(t, "GET", setting.AppURL+"v2/")
 		req.Header.Set("Authorization", "Bearer "+tokenResponse.Token)
 		MakeRequest(t, req, http.StatusOK)
+	})
+}
+
+// SSH keys stored without an expiry (the fixture key, and a deploy key) still pass serv, which every SSH path and the
+// LFS token go through; the LFS token then gets its usual lifetime (lfsTokenExpiry, cmd/serv_test.go).
+func TestCredentialExpiryDefaultServ(t *testing.T) {
+	onApplicationRun(t, func(*testing.T, *url.URL) {
+		defer test.MockVariableValue(&setting.SSHKeyExpiry, setting.DefaultCredentialExpiry)()
+		defer test.MockVariableValue(&setting.DeployKeyExpiry, setting.DefaultCredentialExpiry)()
+		ctx := t.Context()
+
+		fixture := unittest.AssertExistsAndLoadBean(t, &asymkey_model.PublicKey{ID: 1, OwnerID: 2})
+		require.Zero(t, fixture.ExpiresUnix)
+		results, extra := private.ServCommand(ctx, fixture.ID, "user2", "repo1", perm.AccessModeWrite, "", "git-receive-pack", "")
+		require.NoError(t, extra.Error)
+		assert.Zero(t, results.ExpiresUnix)
+
+		content, _ := newTestSSHKey(t)
+		deployKey, err := asymkey_model.AddDeployKey(ctx, 1, "stored without expiry", content, true, 0)
+		require.NoError(t, err)
+		results, extra = private.ServCommand(ctx, deployKey.KeyID, "user2", "repo1", perm.AccessModeRead, "", "git-upload-pack", "")
+		require.NoError(t, extra.Error)
+		assert.Zero(t, results.ExpiresUnix)
 	})
 }
 
@@ -239,5 +271,34 @@ func TestCredentialExpiryDefaultCLI(t *testing.T) {
 		// refused before the user is created
 		refused(t, create("cli-expiry-late", "--access-token-expires-at", day(366)))
 		unittest.AssertNotExistsBean(t, &user_model.User{LowerName: "cli-expiry-late"})
+	})
+
+	t.Run("required without a maximum", func(t *testing.T) {
+		withRequired := append(append([]byte{}, conf...), "\n[security]\nACCESS_TOKEN_EXPIRY_REQUIRED = true\nACCESS_TOKEN_MAX_LIFETIME_DAYS = 0\n"...)
+		requiredPath := filepath.Join(t.TempDir(), "app.ini")
+		require.NoError(t, os.WriteFile(requiredPath, withRequired, 0o600))
+		defer test.MockVariableValue(&setting.CustomConf, requiredPath)()
+		required := func(t *testing.T, err error) {
+			t.Helper()
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Contains(t, string(exitErr.Stderr), "expiry date: required")
+		}
+
+		// no maximum to default to: refused, never a token without expiry
+		required(t, generate("cli-required"))
+		unittest.AssertNotExistsBean(t, &auth_model.AccessToken{UID: 2, Name: "cli-required"})
+		_, err := runMainApp("admin", "user", "create", "--username", "cli-required", "--email", "cli-required@example.com", "--random-password", "--access-token")
+		required(t, err)
+		unittest.AssertNotExistsBean(t, &user_model.User{LowerName: "cli-required"})
+
+		require.NoError(t, generate("cli-required-dated", "--expires-at", day(400)))
+		token := unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{UID: 2, Name: "cli-required-dated"})
+		assert.Equal(t, day(400), token.ExpiresUnix.FormatDate())
+		_, err = runMainApp("admin", "user", "create", "--username", "cli-required-dated", "--email", "cli-required-dated@example.com", "--random-password", "--access-token", "--access-token-expires-at", day(400))
+		require.NoError(t, err)
+		u := unittest.AssertExistsAndLoadBean(t, &user_model.User{LowerName: "cli-required-dated"})
+		token = unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{UID: u.ID})
+		assert.Equal(t, day(400), token.ExpiresUnix.FormatDate())
 	})
 }
