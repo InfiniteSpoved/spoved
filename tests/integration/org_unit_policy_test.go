@@ -398,3 +398,43 @@ func TestOrgSettingsMenuHiddenUnits(t *testing.T) {
 		})
 	})
 }
+
+// The Actions tab of the org pages is shown only while the org Actions page accepts the member
+func TestOrgMenuHiddenUnits(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer resetRepoUnitPolicy(t)
+
+	owner := loginUser(t, "user2")
+	token := getTokenForLoggedInUser(t, owner, auth_model.AccessTokenScopeWriteRepository, auth_model.AccessTokenScopeWriteOrganization)
+	createUnitPolicyOrgRepo(t, token, "unit-org-n", "r")
+
+	tab := func(t *testing.T, want bool) {
+		t.Helper()
+		page := owner.MakeRequest(t, NewRequest(t, "GET", "/unit-org-n"), http.StatusOK).Body.String()
+		assert.Equal(t, want, strings.Contains(page, `href="/org/unit-org-n/actions"`), "actions tab")
+		status := map[bool]int{true: http.StatusOK, false: http.StatusNotFound}[want]
+		owner.MakeRequest(t, NewRequest(t, "GET", "/org/unit-org-n/actions"), status)
+	}
+	tab(t, true)
+
+	t.Run("site policy", func(t *testing.T) {
+		defer denyRepoUnits(t, nil, unit_model.TypeActions)()
+		tab(t, false)
+	})
+	t.Run("site policy other unit", func(t *testing.T) {
+		defer denyRepoUnits(t, nil, unit_model.TypePackages)()
+		tab(t, true)
+	})
+	t.Run("org units", func(t *testing.T) {
+		postOrgUnits(t, owner, "unit-org-n", http.StatusSeeOther, allOrgUnitsBut(unit_model.TypeActions)...)
+		tab(t, false)
+		postOrgUnits(t, owner, "unit-org-n", http.StatusSeeOther, allOrgUnitsBut(unit_model.TypePackages)...)
+		tab(t, true)
+		postOrgUnits(t, owner, "unit-org-n", http.StatusSeeOther, allOrgUnitsBut()...)
+	})
+	t.Run("app.ini", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.Actions.Enabled, false)()
+		tab(t, false)
+	})
+	tab(t, true)
+}
