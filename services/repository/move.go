@@ -118,14 +118,20 @@ func moveRepository(ctx context.Context, repo *repo_model.Repository, groupID in
 	}()
 
 	return db.WithTx(ctx, func(ctx context.Context) error {
+		// both project rows stay locked until the end, by ascending ID: a concurrent DeleteRepoGroup sees the
+		// repository or this sees no project, and a link or unlink of either project runs before or after the move
 		groupName := ""
-		if groupID != 0 {
-			// the row stays locked until the end: a concurrent DeleteRepoGroup sees the repository, or this sees no project
-			group, err := repo_model.LockRepoGroup(ctx, repo.OwnerID, groupID)
+		for _, id := range slices.Sorted(slices.Values([]int64{oldGroupID, groupID})) {
+			if id == 0 {
+				continue
+			}
+			group, err := repo_model.LockRepoGroup(ctx, repo.OwnerID, id)
 			if err != nil {
 				return err
 			}
-			groupName = group.Name
+			if id == groupID {
+				groupName = group.Name
+			}
 		}
 		// a name held by a project is refused when the claim is written; the unique key decides races
 		if has, err := repo_model.IsRepositoryModelExistInGroup(ctx, repo.OwnerID, groupID, repo.Name); err != nil {
@@ -147,6 +153,9 @@ func moveRepository(ctx context.Context, repo *repo_model.Repository, groupID in
 			return err
 		}
 		if err := repo_model.NewRedirect(ctx, repo.OwnerID, oldGroupID, repo.ID, repo.Name); err != nil {
+			return err
+		}
+		if err := syncRepoGroupTeams(ctx, repo); err != nil {
 			return err
 		}
 

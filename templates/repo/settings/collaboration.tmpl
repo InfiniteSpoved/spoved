@@ -76,7 +76,11 @@
 								</div>
 							{{end}}
 						</div>
-						{{if $allowedToChangeTeams}}
+						{{if index $.ViaGroup .ID}}
+							<div class="flex-item-trailing">
+								<a class="ui label" href="{{$.Repo.GroupLink}}" data-tooltip-content="{{$.Repo.GroupName}}" aria-label="{{ctx.Locale.Tr "repo_group.via_project" $.Repo.GroupName}}">{{ctx.Locale.Tr "repo_group.via_project_short"}}</a>
+							</div>
+						{{else if $allowedToChangeTeams}}
 							<div class="flex-item-trailing" {{if .IncludesAllRepositories}} data-tooltip-content="{{ctx.Locale.Tr "repo.settings.delete_team_tip"}}"{{end}}>
 								<button class="danger button delete-button{{if .IncludesAllRepositories}} disabled{{end}}" data-url="{{$.Link}}/team/delete" data-id="{{.ID}}" data-modal-id="delete-collaborator">
 										{{ctx.Locale.Tr "repo.settings.delete_collaborator"}}

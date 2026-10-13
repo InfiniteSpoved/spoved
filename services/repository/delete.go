@@ -510,6 +510,40 @@ func RemoveRepositoryFromTeam(ctx context.Context, t *organization.Team, repoID 
 	}
 	defer committer.Close()
 
+	// the lock order of link, unlink and move: the project row, the repository row, then the team row; a move
+	// meanwhile fails this
+	if repo.GroupID != 0 {
+		if _, err := repo_model.LockRepoGroup(ctx, repo.OwnerID, repo.GroupID); err != nil {
+			return err
+		}
+	}
+	if _, err := db.Exec(ctx, "UPDATE `repository` SET group_id = group_id WHERE id = ?", repo.ID); err != nil {
+		return err
+	}
+	if has, err := db.GetEngine(ctx).Table("repository").Where("id = ? AND group_id = ?", repo.ID, repo.GroupID).Exist(); err != nil {
+		return err
+	} else if !has {
+		return ErrRepoMoved
+	}
+	if _, err := db.Exec(ctx, "UPDATE `team` SET org_id = org_id WHERE id = ?", t.ID); err != nil {
+		return err
+	}
+	if !HasRepository(ctx, t, repoID) {
+		return nil
+	}
+
+	// a repository the team has through a linked project stays, as a ViaGroup row
+	if repo.GroupID != 0 {
+		if linked, err := db.GetEngine(ctx).Exist(&organization.TeamGroup{TeamID: t.ID, GroupID: repo.GroupID}); err != nil {
+			return err
+		} else if linked {
+			if _, err := db.GetEngine(ctx).Where("team_id = ? AND repo_id = ?", t.ID, repo.ID).Cols("via_group").Update(&organization.TeamRepo{ViaGroup: true}); err != nil {
+				return err
+			}
+			return committer.Commit()
+		}
+	}
+
 	if err = removeRepositoryFromTeam(ctx, t, repo, true); err != nil {
 		return err
 	}

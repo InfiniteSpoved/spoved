@@ -15,10 +15,11 @@ import (
 
 // TeamRepo represents an team-repository relation.
 type TeamRepo struct {
-	ID     int64 `xorm:"pk autoincr"`
-	OrgID  int64 `xorm:"INDEX"`
-	TeamID int64 `xorm:"UNIQUE(s)"`
-	RepoID int64 `xorm:"UNIQUE(s)"`
+	ID       int64 `xorm:"pk autoincr"`
+	OrgID    int64 `xorm:"INDEX"`
+	TeamID   int64 `xorm:"UNIQUE(s)"`
+	RepoID   int64 `xorm:"UNIQUE(s)"`
+	ViaGroup bool  `xorm:"NOT NULL DEFAULT false"` // only because the team is linked to the repository's project (TeamGroup)
 }
 
 // HasTeamRepo returns true if given repository belongs to team.

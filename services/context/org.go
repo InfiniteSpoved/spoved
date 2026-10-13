@@ -12,6 +12,7 @@ import (
 
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/markup"
@@ -216,6 +217,7 @@ func HandleOrgAssignment(ctx *Context, args ...bool) {
 	}
 	ctx.Data["IsOrganizationMember"] = ctx.Org.IsMember
 	ctx.Data["IsPackageEnabled"] = setting.Packages.Enabled
+	ctx.Data["EnableActions"] = repo_model.ActionsAvailable(ctx, ctx.ContextUser)
 	ctx.Data["IsRepoIndexerEnabled"] = setting.Indexer.RepoIndexerEnabled
 	ctx.Data["IsModerationEnabled"] = setting.Moderation.Enabled
 	ctx.Data["IsPublicMember"] = func(uid int64) bool {
