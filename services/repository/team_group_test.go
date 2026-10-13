@@ -270,3 +270,55 @@ func TestTeamGroupLockOrder(t *testing.T) {
 	}
 	consistent(t)
 }
+
+// Removing a repository from a team, alone or with "remove all", while the project is linked, unlinked or the
+// repository moved: the rows always match the links afterwards.
+func TestTeamGroupRemoveRace(t *testing.T) {
+	f := prepareTeamGroup(t)
+	ctx := t.Context()
+	a := f.repo(t, "a", f.pay.ID)
+	for i := range 8 {
+		team, err := organization.GetTeamByID(ctx, 2)
+		require.NoError(t, err)
+		ra := reloadRepo(t, a.ID)
+		if row := teamRow(t, team.ID, a.ID); row == nil {
+			require.NoError(t, models.AddRepository(ctx, team, ra))
+		} else if row.ViaGroup {
+			_, err := db.GetEngine(ctx).Where("team_id = ? AND repo_id = ?", team.ID, a.ID).Cols("via_group").Update(&organization.TeamRepo{})
+			require.NoError(t, err)
+		}
+		link := LinkTeamToRepoGroup
+		if unittest.BeanExists(t, &organization.TeamGroup{TeamID: team.ID, GroupID: f.pay.ID}) {
+			link = UnlinkTeamFromRepoGroup
+		}
+		target := f.web.ID
+		if ra.GroupID == f.web.ID {
+			target = f.pay.ID
+		}
+		remove := func() error { return RemoveRepositoryFromTeam(db.DefaultContext, team, a.ID) }
+		if i%2 == 1 {
+			remove = func() error { return models.RemoveAllRepositories(db.DefaultContext, team) }
+		}
+
+		var wg sync.WaitGroup
+		errs := make([]error, 3)
+		wg.Add(3)
+		go func() { defer wg.Done(); errs[0] = remove() }()
+		go func() { defer wg.Done(); errs[1] = link(db.DefaultContext, f.owner, f.org, team.ID, f.pay.ID) }()
+		go func() { defer wg.Done(); errs[2] = MoveRepository(db.DefaultContext, f.admin, ra, target) }()
+		done := make(chan struct{})
+		go func() { wg.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(time.Minute):
+			t.Fatal("removals, links and moves wait for each other")
+		}
+		if errs[0] != nil { // the repository or the team's projects changed meanwhile
+			require.ErrorIs(t, errs[0], util.ErrInvalidArgument)
+		}
+		require.NoError(t, errs[1])
+		require.NoError(t, errs[2])
+		unittest.CheckTeamGroupRows(t)
+	}
+	consistent(t)
+}

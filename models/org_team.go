@@ -126,6 +126,34 @@ func AddAllRepositories(ctx context.Context, t *organization.Team) (err error) {
 	return committer.Commit()
 }
 
+// lockTeamGroups locks, in the transaction of ctx, the projects the team is linked to by ascending ID, then the team
+// row: the order of link, unlink, move and repository creation, so the team's links and ViaGroup rows hold still
+// until the end of the transaction. A link or unlink that ran in between fails it, to be tried again.
+func lockTeamGroups(ctx context.Context, t *organization.Team) error {
+	linkedGroups := func() ([]int64, error) {
+		var ids []int64
+		return ids, db.GetEngine(ctx).Table("team_group").Where("team_id = ?", t.ID).Asc("group_id").Cols("group_id").Find(&ids)
+	}
+	ids, err := linkedGroups()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err := repo_model.LockRepoGroup(ctx, t.OrgID, id); err != nil {
+			return err
+		}
+	}
+	if _, err := db.Exec(ctx, "UPDATE `team` SET org_id = org_id WHERE id = ?", t.ID); err != nil {
+		return err
+	}
+	if again, err := linkedGroups(); err != nil {
+		return err
+	} else if !slices.Equal(ids, again) {
+		return util.NewInvalidArgumentErrorf("the projects of the team changed meanwhile")
+	}
+	return nil
+}
+
 // RemoveAllRepositories removes all repositories from team and recalculates access
 func RemoveAllRepositories(ctx context.Context, t *organization.Team) (err error) {
 	if t.IncludesAllRepositories {
@@ -149,6 +177,9 @@ func RemoveAllRepositories(ctx context.Context, t *organization.Team) (err error
 // team is linked to stay, as ViaGroup rows.
 // Note: Shall not be called if team includes all repositories
 func removeAllRepositories(ctx context.Context, t *organization.Team) (err error) {
+	if err := lockTeamGroups(ctx, t); err != nil {
+		return err
+	}
 	e := db.GetEngine(ctx)
 
 	if err := t.LoadRepositories(ctx); err != nil {
@@ -402,6 +433,9 @@ func DeleteTeam(ctx context.Context, t *organization.Team) error {
 	}
 
 	// unlinked first, so that no repository stays
+	if err := lockTeamGroups(ctx, t); err != nil {
+		return err
+	}
 	if err := db.DeleteBeans(ctx, &organization.TeamGroup{TeamID: t.ID}); err != nil {
 		return err
 	}

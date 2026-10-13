@@ -97,4 +97,31 @@ func TestRepoGroupTeams(t *testing.T) {
 		owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/proj/-/settings/teams/unlink", map[string]string{"id": "2"}), http.StatusNotFound)
 		unittest.CheckTeamGroupRows(t)
 	})
+
+	t.Run("team repository API", func(t *testing.T) {
+		token := getTokenForLoggedInUser(t, owner, auth_model.AccessTokenScopeWriteOrganization)
+		numRepos := func() int {
+			return unittest.AssertExistsAndLoadBean(t, &organization.Team{ID: 2}).NumRepos
+		}
+		before := numRepos()
+		// a root repository goes through TeamAddRepository and RemoveRepositoryFromTeam; adding it twice is a no-op
+		for range 2 {
+			MakeRequest(t, NewRequest(t, "PUT", "/api/v1/teams/2/repos/org3/repo5").AddTokenAuth(token), http.StatusNoContent)
+		}
+		unittest.AssertCount(t, &organization.TeamRepo{TeamID: 2, RepoID: 5}, 1)
+		assert.False(t, unittest.AssertExistsAndLoadBean(t, &organization.TeamRepo{TeamID: 2, RepoID: 5}).ViaGroup)
+		assert.Equal(t, before+1, numRepos())
+		member.MakeRequest(t, NewRequest(t, "GET", "/org3/repo5"), http.StatusOK)
+		MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/teams/2/repos/org3/repo5").AddTokenAuth(token), http.StatusNoContent)
+		unittest.AssertNotExistsBean(t, &organization.TeamRepo{TeamID: 2, RepoID: 5})
+		assert.Equal(t, before, numRepos())
+
+		// these routes name root repositories only: a repository in a project is not found there
+		for _, method := range []string{"PUT", "DELETE"} {
+			MakeRequest(t, NewRequest(t, method, "/api/v1/teams/2/repos/org3/priv").AddTokenAuth(token), http.StatusNotFound)
+			MakeRequest(t, NewRequest(t, method, "/api/v1/teams/2/repos/org3/proj").AddTokenAuth(token), http.StatusNotFound)
+		}
+		assert.Nil(t, viaRow())
+		unittest.CheckTeamGroupRows(t)
+	})
 }

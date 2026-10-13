@@ -202,7 +202,7 @@ func RepoGroupTeamLink(ctx *context.Context) {
 	case errors.Is(err, util.ErrAlreadyExist):
 		ctx.Flash.Error(ctx.Tr("repo_group.teams.already_linked"))
 	case err != nil:
-		ctx.NotFoundOrServerError("LinkTeamToRepoGroup", isRepoGroupTeamNotFound, err)
+		repoGroupTeamError(ctx, "LinkTeamToRepoGroup", err)
 		return
 	default:
 		ctx.Flash.Success(ctx.Tr("repo_group.teams.linked"))
@@ -214,15 +214,23 @@ func RepoGroupTeamLink(ctx *context.Context) {
 func RepoGroupTeamUnlink(ctx *context.Context) {
 	group := ctx.Data["RepoGroup"].(*repo_model.RepoGroup)
 	if err := repo_service.UnlinkTeamFromRepoGroup(ctx, ctx.Doer, ctx.Org.Organization, ctx.FormInt64("id"), group.ID); err != nil {
-		ctx.NotFoundOrServerError("UnlinkTeamFromRepoGroup", isRepoGroupTeamNotFound, err)
+		repoGroupTeamError(ctx, "UnlinkTeamFromRepoGroup", err)
 		return
 	}
 	ctx.Flash.Success(ctx.Tr("repo_group.teams.unlinked"))
 	ctx.JSONRedirect(group.Link(ctx.Org.Organization.Name) + "/-/settings")
 }
 
-func isRepoGroupTeamNotFound(err error) bool {
-	return errors.Is(err, util.ErrNotExist) || errors.Is(err, util.ErrPermissionDenied)
+// repoGroupTeamError answers 403 for an archived organization, like the archived-org check before the handler, and
+// "not found" for a team or project the doer can't see.
+func repoGroupTeamError(ctx *context.Context, name string, err error) {
+	if org_model.IsErrOrgArchived(err) {
+		ctx.Error(http.StatusForbidden)
+		return
+	}
+	ctx.NotFoundOrServerError(name, func(err error) bool {
+		return errors.Is(err, util.ErrNotExist) || errors.Is(err, util.ErrPermissionDenied)
+	}, err)
 }
 
 // RepoGroupSettingsPost renames a project and changes its description.
