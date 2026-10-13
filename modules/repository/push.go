@@ -11,6 +11,7 @@ import (
 type PushUpdateOptions struct {
 	PusherID     int64
 	PusherName   string
+	RepoID       int64 // the repository is loaded by this ID; the names are for messages only
 	RepoUserName string
 	RepoName     string
 	RefFullName  git.RefName // branch, tag or other name to push

@@ -244,15 +244,10 @@ func (ctx *Context) resolveRepoGroupPath(st *repoGroupState) (bool, error) {
 	if strings.HasSuffix(s[2], ".git") || len(rest) > 0 && slices.Contains(gitSuffixes, rest[0]) {
 		return false, nil
 	}
-	repo, err := repo_model.GetRepositoryByPath(ctx, owner.ID, group.Name, s[2])
+	repo, err := ctx.VisibleGroupRepository(owner, group.Name, s[2])
 	if repo_model.IsErrRepoNotExist(err) {
 		return false, nil
 	} else if err != nil {
-		return false, err
-	}
-	repo.Owner = owner
-	perm, err := ctx.repoPermission(repo)
-	if err != nil || !perm.HasAccess() {
 		return false, err
 	}
 	restPath := ""
@@ -263,6 +258,24 @@ func (ctx *Context) resolveRepoGroupPath(st *repoGroupState) (bool, error) {
 	st.canonical = "/" + url.PathEscape(owner.Name) + "/" + url.PathEscape(group.Name) + "/" + url.PathEscape(repo.Name) + restPath
 	st.mark = &RepoGroupMark{OwnerID: owner.ID, GroupID: group.ID, RepoID: repo.ID}
 	return true, nil
+}
+
+// VisibleGroupRepository returns the repository repoName in the project groupName of the owner if the viewer can
+// see it, judged like the repository's pages; a hidden repository is not found.
+func (ctx *Context) VisibleGroupRepository(owner *user_model.User, groupName, repoName string) (*repo_model.Repository, error) {
+	repo, err := repo_model.GetRepositoryByPath(ctx, owner.ID, groupName, repoName)
+	if err != nil {
+		return nil, err
+	}
+	repo.Owner = owner
+	perm, err := ctx.repoPermission(repo)
+	if err != nil {
+		return nil, err
+	}
+	if !perm.HasAccess() {
+		return nil, repo_model.ErrRepoNotExist{OwnerName: owner.Name, Name: repoName}
+	}
+	return repo, nil
 }
 
 // CanSeeRepoGroup reports whether the viewer may see the project: a site admin, an acting member of the

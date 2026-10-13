@@ -64,6 +64,7 @@ func TestPullRequestSynchronized(t *testing.T) {
 			opt := &repo_module.PushUpdateOptions{
 				PusherID:     owner.ID,
 				PusherName:   owner.Name,
+				RepoID:       repo.ID,
 				RepoUserName: owner.Name,
 				RepoName:     repo.Name,
 				RefFullName:  git.RefName("refs/heads/branch2"),

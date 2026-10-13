@@ -19,10 +19,7 @@ import (
 
 // RepoAssignment assigns the repository and gitrepository to the private context
 func RepoAssignment(ctx *app_context.PrivateContext) context.CancelFunc {
-	ownerName := ctx.Params(":owner")
-	repoName := ctx.Params(":repo")
-
-	repo := loadRepository(ctx, ownerName, repoName)
+	repo := loadRepository(ctx)
 	if ctx.Written() {
 		// Error handled in loadRepository
 		return nil
@@ -30,9 +27,9 @@ func RepoAssignment(ctx *app_context.PrivateContext) context.CancelFunc {
 
 	gitRepo, err := gitrepo.OpenRepository(ctx, repo)
 	if err != nil {
-		log.Error("Failed to open repository: %s/%s Error: %v", ownerName, repoName, err)
+		log.Error("Failed to open repository: %s Error: %v", repo.FullName(), err)
 		ctx.JSON(http.StatusInternalServerError, private.Response{
-			Err: fmt.Sprintf("Failed to open repository: %s/%s Error: %v", ownerName, repoName, err),
+			Err: fmt.Sprintf("Failed to open repository: %s Error: %v", repo.FullName(), err),
 		})
 		return nil
 	}
@@ -53,17 +50,23 @@ func RepoAssignment(ctx *app_context.PrivateContext) context.CancelFunc {
 	return cancel
 }
 
-func loadRepository(ctx *app_context.PrivateContext, ownerName, repoName string) *repo_model.Repository {
-	repo, err := repo_model.GetRepositoryByOwnerAndName(ctx, ownerName, repoName)
-	if err != nil {
-		log.Error("Failed to get repository: %s/%s Error: %v", ownerName, repoName, err)
+// loadRepository loads the repository of a hook by its ID, never by name: a repository in a project shares its
+// owner and name with others.
+func loadRepository(ctx *app_context.PrivateContext) *repo_model.Repository {
+	repoID := ctx.ParamsInt64(":repoid")
+	repo, err := repo_model.GetRepositoryByID(ctx, repoID)
+	if err == nil {
+		err = repo.LoadOwner(ctx)
+	}
+	if repo_model.IsErrRepoNotExist(err) {
+		ctx.JSON(http.StatusNotFound, private.Response{UserMsg: "Repository not found"})
+		return nil
+	} else if err != nil {
+		log.Error("Failed to get repository: %d Error: %v", repoID, err)
 		ctx.JSON(http.StatusInternalServerError, private.Response{
-			Err: fmt.Sprintf("Failed to get repository: %s/%s Error: %v", ownerName, repoName, err),
+			Err: fmt.Sprintf("Failed to get repository: %d Error: %v", repoID, err),
 		})
 		return nil
-	}
-	if repo.OwnerName == "" {
-		repo.OwnerName = ownerName
 	}
 	return repo
 }

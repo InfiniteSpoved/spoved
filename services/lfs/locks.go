@@ -10,7 +10,6 @@ import (
 
 	auth_model "forgejo.org/models/auth"
 	git_model "forgejo.org/models/git"
-	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/json"
 	lfs_module "forgejo.org/modules/lfs"
 	"forgejo.org/modules/log"
@@ -42,7 +41,7 @@ func handleLockListOut(ctx *context.Context, lock *git_model.LFSLock, err error)
 func GetListLockHandler(ctx *context.Context) {
 	rv := getRequestContext(ctx)
 
-	repository, err := repo_model.GetRepositoryByOwnerAndName(ctx, rv.User, rv.Repo)
+	repository, err := lookupRepository(ctx, rv)
 	if err != nil {
 		log.Debug("Could not find repository: %s/%s - %s", rv.User, rv.Repo, err)
 		ctx.Resp.Header().Set("WWW-Authenticate", "Basic realm=gitea-lfs")
@@ -133,9 +132,9 @@ func PostLockHandler(ctx *context.Context) {
 	userName := ctx.Params("username")
 	repoName := strings.TrimSuffix(ctx.Params("reponame"), ".git")
 
-	repository, err := repo_model.GetRepositoryByOwnerAndName(ctx, userName, repoName)
+	repository, err := lookupRepository(ctx, getRequestContext(ctx))
 	if err != nil {
-		log.Error("Unable to get repository: %s/%s Error: %v", userName, repoName, err)
+		log.Debug("Unable to get repository: %s/%s Error: %v", userName, repoName, err)
 		ctx.Resp.Header().Set("WWW-Authenticate", "Basic realm=gitea-lfs")
 		ctx.JSON(http.StatusUnauthorized, api.LFSLockError{
 			Message: "You must have push access to create locks",
@@ -204,9 +203,9 @@ func VerifyLockHandler(ctx *context.Context) {
 	userName := ctx.Params("username")
 	repoName := strings.TrimSuffix(ctx.Params("reponame"), ".git")
 
-	repository, err := repo_model.GetRepositoryByOwnerAndName(ctx, userName, repoName)
+	repository, err := lookupRepository(ctx, getRequestContext(ctx))
 	if err != nil {
-		log.Error("Unable to get repository: %s/%s Error: %v", userName, repoName, err)
+		log.Debug("Unable to get repository: %s/%s Error: %v", userName, repoName, err)
 		ctx.Resp.Header().Set("WWW-Authenticate", "Basic realm=gitea-lfs")
 		ctx.JSON(http.StatusUnauthorized, api.LFSLockError{
 			Message: "You must have push access to verify locks",
@@ -274,9 +273,9 @@ func UnLockHandler(ctx *context.Context) {
 	userName := ctx.Params("username")
 	repoName := strings.TrimSuffix(ctx.Params("reponame"), ".git")
 
-	repository, err := repo_model.GetRepositoryByOwnerAndName(ctx, userName, repoName)
+	repository, err := lookupRepository(ctx, getRequestContext(ctx))
 	if err != nil {
-		log.Error("Unable to get repository: %s/%s Error: %v", userName, repoName, err)
+		log.Debug("Unable to get repository: %s/%s Error: %v", userName, repoName, err)
 		ctx.Resp.Header().Set("WWW-Authenticate", "Basic realm=gitea-lfs")
 		ctx.JSON(http.StatusUnauthorized, api.LFSLockError{
 			Message: "You must have push access to delete locks",

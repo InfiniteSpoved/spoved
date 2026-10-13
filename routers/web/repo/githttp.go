@@ -25,6 +25,7 @@ import (
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/log"
 	repo_module "forgejo.org/modules/repository"
@@ -112,16 +113,25 @@ func httpBase(ctx *context.Context) *serviceHandler {
 	}
 
 	repoExist := true
-	repo, err := repo_model.GetRepositoryByName(ctx, owner.ID, reponame)
+	var repo *repo_model.Repository
+	var err error
+	groupName := ctx.Params(":groupname")
+	if groupName != "" {
+		repo, err = visibleGroupRepository(ctx, owner, groupName, reponame, isPull)
+	} else {
+		repo, err = repo_model.GetRepositoryByName(ctx, owner.ID, reponame)
+	}
 	if err != nil {
 		if !repo_model.IsErrRepoNotExist(err) {
 			ctx.ServerError("GetRepositoryByName", err)
 			return nil
 		}
 
-		if redirectRepoID, err := redirect_service.LookupRepoRedirect(ctx, ctx.Doer, owner.ID, reponame); err == nil {
-			context.RedirectToRepo(ctx.Base, redirectRepoID)
-			return nil
+		if groupName == "" {
+			if redirectRepoID, err := redirect_service.LookupRepoRedirect(ctx, ctx.Doer, owner.ID, reponame); err == nil {
+				context.RedirectToRepo(ctx.Base, redirectRepoID)
+				return nil
+			}
 		}
 		repoExist = false
 	}
@@ -195,42 +205,22 @@ func httpBase(ctx *context.Context) *serviceHandler {
 				accessMode = perm.AccessModeRead
 			}
 
-			if hasTaskID, taskID := ctx.Authentication.ActionsTaskID().Get(); hasTaskID {
-				task, err := actions_model.GetTaskByID(ctx, taskID)
-				if err != nil {
-					ctx.ServerError("GetTaskByID", err)
-					return nil
-				}
-
-				p, err := access_model.GetActionRepoPermission(ctx, repo, task)
-				if err != nil {
-					ctx.ServerError("GetActionRepoPermission", err)
-					return nil
-				}
-
+			// isPull, not accessMode: accessMode is lowered to read for pushes above.
+			p, task, err := gitRepoPermission(ctx, repo, isPull)
+			if err != nil {
+				ctx.ServerError("gitRepoPermission", err)
+				return nil
+			}
+			if task != nil {
 				if !p.CanAccess(accessMode, unitType) {
 					ctx.PlainText(http.StatusForbidden, "User permission denied")
 					return nil
 				}
 
 				environ = append(environ, fmt.Sprintf("%s=%d", repo_module.EnvActionTaskID, task.ID))
-			} else {
-				var p access_model.Permission
-				// isPull, not accessMode: accessMode is lowered to read for pushes above.
-				if isPull && auth.IsHeldByUser(ctx.Authentication) {
-					p, err = access_model.GetUserRepoReadPermission(ctx, repo, ctx.Doer, nil)
-				} else {
-					p, err = access_model.GetUserRepoPermission(ctx, repo, ctx.Doer)
-				}
-				if err != nil {
-					ctx.ServerError("GetUserRepoPermission", err)
-					return nil
-				}
-
-				if !p.CanAccess(accessMode, unitType) {
-					ctx.PlainText(http.StatusNotFound, "Repository not found")
-					return nil
-				}
+			} else if !p.CanAccess(accessMode, unitType) {
+				ctx.PlainText(http.StatusNotFound, "Repository not found")
+				return nil
 			}
 
 			if !isPull && repo.IsMirror {
@@ -256,7 +246,7 @@ func httpBase(ctx *context.Context) *serviceHandler {
 			return nil
 		}
 
-		if isWiki { // you cannot send wiki operation before create the repository
+		if isWiki || groupName != "" { // you cannot send wiki operation before create the repository, nor create one in a project
 			ctx.PlainText(http.StatusNotFound, "Repository not found")
 			return nil
 		}
@@ -302,6 +292,43 @@ func httpBase(ctx *context.Context) *serviceHandler {
 	ctx.Req.URL.Path = strings.ToLower(ctx.Req.URL.Path) // blue: In case some repo name has upper case name
 
 	return &serviceHandler{repo, isWiki, environ}
+}
+
+// gitRepoPermission is the permission of a git request on the repository: a job token's from its task (returned
+// too), else the requester's, with the read permission for pulls held by a user (which raises auditors).
+func gitRepoPermission(ctx *context.Context, repo *repo_model.Repository, isPull bool) (access_model.Permission, *actions_model.ActionTask, error) {
+	if hasTaskID, taskID := ctx.Authentication.ActionsTaskID().Get(); hasTaskID {
+		task, err := actions_model.GetTaskByID(ctx, taskID)
+		if err != nil {
+			return access_model.Permission{}, nil, err
+		}
+		p, err := access_model.GetActionRepoPermission(ctx, repo, task)
+		return p, task, err
+	}
+	if isPull && auth.IsHeldByUser(ctx.Authentication) {
+		p, err := access_model.GetUserRepoReadPermission(ctx, repo, ctx.Doer, nil)
+		return p, nil, err
+	}
+	p, err := access_model.GetUserRepoPermission(ctx, repo, ctx.Doer)
+	return p, nil, err
+}
+
+// visibleGroupRepository returns the repository in a project if the request may see it, with the permission the
+// request is later checked with. A hidden repository is not found, before any message about it.
+func visibleGroupRepository(ctx *context.Context, owner *user_model.User, groupName, repoName string, isPull bool) (*repo_model.Repository, error) {
+	repo, err := repo_model.GetRepositoryByPath(ctx, owner.ID, groupName, repoName)
+	if err != nil {
+		return nil, err
+	}
+	repo.Owner = owner
+	p, _, err := gitRepoPermission(ctx, repo, isPull)
+	if err != nil {
+		return nil, err
+	}
+	if !p.HasAccess() {
+		return nil, repo_model.ErrRepoNotExist{OwnerName: owner.Name, Name: repoName}
+	}
+	return repo, nil
 }
 
 var (

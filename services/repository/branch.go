@@ -499,6 +499,7 @@ func DeleteBranch(ctx context.Context, doer *user_model.User, repo *repo_model.R
 			NewCommitID:  objectFormat.EmptyObjectID().String(),
 			PusherID:     doer.ID,
 			PusherName:   doer.Name,
+			RepoID:       repo.ID,
 			RepoUserName: repo.OwnerName,
 			RepoName:     repo.Name,
 		},

@@ -76,7 +76,7 @@ func TestActionsTokenPermissions(t *testing.T) {
 
 		t.Run("pre-receive decides from the task", func(t *testing.T) {
 			hook := func(taskID int64) error {
-				return private.HookPreReceive(t.Context(), repo.OwnerName, repo.Name, private.HookOptions{
+				return private.HookPreReceive(t.Context(), repoIDByName(t, repo.OwnerName, repo.Name), private.HookOptions{
 					OldCommitIDs: []string{git.Sha1ObjectFormat.EmptyObjectID().String()},
 					NewCommitIDs: []string{"2a47ca4b614a9f5a43abbd5ad851a54a616ffee6"},
 					RefFullNames: []git.RefName{git.RefNameFromBranch("job-token-hook")},

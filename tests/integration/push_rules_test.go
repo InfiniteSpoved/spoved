@@ -257,7 +257,7 @@ func TestPushRules(t *testing.T) {
 			require.NoError(t, err)
 
 			// the default branch is exempt when it is created
-			extra := private.HookPreReceive(t.Context(), "user2", "push-rules", private.HookOptions{
+			extra := private.HookPreReceive(t.Context(), repoIDByName(t, "user2", "push-rules"), private.HookOptions{
 				OldCommitIDs: []string{git.Sha1ObjectFormat.EmptyObjectID().String()},
 				NewCommitIDs: []string{master},
 				RefFullNames: []git.RefName{git.RefNameFromBranch("master")},
@@ -320,7 +320,7 @@ func TestPushRules(t *testing.T) {
 			require.NoError(t, err)
 
 			preReceive := func(deployKeyKeyID int64, newCommitID string) private.ResponseExtra {
-				return private.HookPreReceive(t.Context(), "user2", "push-rules", private.HookOptions{
+				return private.HookPreReceive(t.Context(), repoIDByName(t, "user2", "push-rules"), private.HookOptions{
 					OldCommitIDs:   []string{master},
 					NewCommitIDs:   []string{newCommitID},
 					RefFullNames:   []git.RefName{git.RefNameFromBranch("master")},

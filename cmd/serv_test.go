@@ -4,17 +4,20 @@
 package cmd
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
 	asymkey_model "forgejo.org/models/asymkey"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/private"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetKeyCheckMessage(t *testing.T) {
@@ -97,4 +100,64 @@ func TestSSHClientIP(t *testing.T) {
 	assert.Equal(t, "2001:db8::1", sshClientIP("2001:db8::1 51234 2001:db8::2 22"))
 	assert.Empty(t, sshClientIP(""))
 	assert.Empty(t, sshClientIP("   "))
+}
+
+// an SSH path names `owner/repo` or `owner/project/repo`; anything else is refused before the server is asked
+func TestSplitServRepoPath(t *testing.T) {
+	for path, want := range map[string][2]string{
+		"user2/repo1":            {"user2", "repo1"},
+		"user2/repo1.git":        {"user2", "repo1"},
+		"user2/repo1.wiki.git":   {"user2", "repo1.wiki"},
+		"org3/proj/api":          {"org3", "proj/api"},
+		"org3/proj/api.git":      {"org3", "proj/api"},
+		"org3/proj/api.wiki.git": {"org3", "proj/api.wiki"},
+	} {
+		owner, repo, err := splitServRepoPath(path)
+		require.NoError(t, err, path)
+		assert.Equal(t, want, [2]string{owner, repo}, path)
+	}
+	for path, msg := range map[string]string{
+		"user2":                 "Invalid repository path",
+		"org3/a/b/c.git":        "Invalid repository path",
+		"user2/":                "Invalid repo name",
+		"user2/.git":            "Invalid repo name",
+		"org3//api.git":         "Invalid repo name",
+		"org3/@5.git":           "Invalid repo name",
+		"org3/proj/@5.git":      "Invalid repo name",
+		"org3/proj%2Fapi/x.git": "Invalid repo name",
+		"org3/pr oj/api.git":    "Invalid repo name",
+	} {
+		_, _, err := splitServRepoPath(path)
+		require.ErrorContains(t, err, msg, path)
+	}
+}
+
+// git runs on the repository the server found, never on the path the client sent
+func TestServRepoPath(t *testing.T) {
+	defer test.MockVariableValue(&setting.RepoRootPath, "/data/repos")()
+	defer test.MockVariableValue(&setting.AppURL, "https://example.com/")()
+
+	p, err := servRepoPath(&private.ServCommandResults{OwnerName: "User2", RepoName: "Repo1"})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.FromSlash("/data/repos/user2/repo1.git"), p)
+	p, err = servRepoPath(&private.ServCommandResults{OwnerName: "org3", GroupName: "Proj", RepoName: "API"})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.FromSlash("/data/repos/org3/proj/api.git"), p)
+	p, err = servRepoPath(&private.ServCommandResults{OwnerName: "org3", GroupName: "proj", RepoName: "api", IsWiki: true})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.FromSlash("/data/repos/org3/proj/api.wiki.git"), p)
+
+	for _, r := range []private.ServCommandResults{
+		{OwnerName: "org3", GroupName: "..", RepoName: "x/../../etc"},
+		{OwnerName: "org3", GroupName: "a/b", RepoName: "api"},
+		{OwnerName: "../org3", RepoName: "api"},
+		{OwnerName: "org3", RepoName: ""},
+		{OwnerName: "", RepoName: "api"},
+	} {
+		_, err := servRepoPath(&r)
+		require.Error(t, err, "%+v", r)
+	}
+
+	assert.Equal(t, "https://example.com/user2/repo1.git/info/lfs", servLFSHref(&private.ServCommandResults{OwnerName: "user2", RepoName: "repo1"}))
+	assert.Equal(t, "https://example.com/org3/proj/api.git/info/lfs", servLFSHref(&private.ServCommandResults{OwnerName: "org3", GroupName: "proj", RepoName: "api"}))
 }

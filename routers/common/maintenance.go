@@ -40,6 +40,8 @@ var MaintenanceReadRoutes = container.SetOf(
 	"POST /login/oauth/access_token",
 	"POST /{username}/{reponame}/markup",
 	"POST /{username}/{reponame}/archive/*",
+	"POST /{username}/{groupname}/{reponame}/archive/*",
+	"POST /{username}/{groupname}/{reponame}/-/archive/*",
 	"POST /api/v1/markup",
 	"POST /api/v1/markdown",
 	"POST /api/v1/markdown/raw",

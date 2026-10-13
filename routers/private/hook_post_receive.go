@@ -41,8 +41,7 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 	// b) our update function will likely change the repository in the db so we will need to refresh it
 	// c) we don't always need the repo
 
-	ownerName := ctx.Params(":owner")
-	repoName := ctx.Params(":repo")
+	repoID := ctx.ParamsInt64(":repoid")
 
 	// defer getting the repository at this point - as we should only retrieve it if we're going to call update
 	var repo *repo_model.Repository
@@ -59,7 +58,7 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 		// may be a very large number of them).
 		if refFullName.IsBranch() || refFullName.IsTag() {
 			if repo == nil {
-				repo = loadRepository(ctx, ownerName, repoName)
+				repo = loadRepository(ctx)
 				if ctx.Written() {
 					// Error handled in loadRepository
 					return
@@ -73,8 +72,9 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 				NewCommitID:  opts.NewCommitIDs[i],
 				PusherID:     opts.UserID,
 				PusherName:   opts.UserName,
-				RepoUserName: ownerName,
-				RepoName:     repoName,
+				RepoID:       repo.ID,
+				RepoUserName: repo.OwnerName,
+				RepoName:     repo.Name,
 				TimeNano:     time.Now().UnixNano(),
 			}
 			updates = append(updates, option)
@@ -97,7 +97,7 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 				continue
 			}
 			if repo == nil {
-				repo = loadRepository(ctx, ownerName, repoName)
+				repo = loadRepository(ctx)
 				if ctx.Written() {
 					return
 				}
@@ -106,9 +106,9 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 
 			if update.IsDelRef() {
 				if err := git_model.AddDeletedBranch(ctx, repo.ID, update.RefFullName.BranchName(), update.PusherID); err != nil {
-					log.Error("Failed to add deleted branch: %s/%s Error: %v", ownerName, repoName, err)
+					log.Error("Failed to add deleted branch: %d Error: %v", repoID, err)
 					ctx.JSON(http.StatusInternalServerError, private.HookPostReceiveResult{
-						Err: fmt.Sprintf("Failed to add deleted branch: %s/%s Error: %v", ownerName, repoName, err),
+						Err: fmt.Sprintf("Failed to add deleted branch: %d Error: %v", repoID, err),
 					})
 					return
 				}
@@ -119,9 +119,9 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 		if len(branchesToSync) > 0 {
 			gitRepo, err := gitrepo.OpenRepository(ctx, repo)
 			if err != nil {
-				log.Error("Failed to open repository: %s/%s Error: %v", ownerName, repoName, err)
+				log.Error("Failed to open repository: %d Error: %v", repoID, err)
 				ctx.JSON(http.StatusInternalServerError, private.HookPostReceiveResult{
-					Err: fmt.Sprintf("Failed to open repository: %s/%s Error: %v", ownerName, repoName, err),
+					Err: fmt.Sprintf("Failed to open repository: %d Error: %v", repoID, err),
 				})
 				return
 			}
@@ -139,21 +139,21 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 			gitRepo.Close()
 			if err != nil {
 				ctx.JSON(http.StatusInternalServerError, private.HookPostReceiveResult{
-					Err: fmt.Sprintf("Failed to sync branch to DB in repository: %s/%s Error: %v", ownerName, repoName, err),
+					Err: fmt.Sprintf("Failed to sync branch to DB in repository: %d Error: %v", repoID, err),
 				})
 				return
 			}
 		}
 
 		if err := repo_service.PushUpdates(updates); err != nil {
-			log.Error("Failed to Update: %s/%s Total Updates: %d", ownerName, repoName, len(updates))
+			log.Error("Failed to Update: %d Total Updates: %d", repoID, len(updates))
 			for i, update := range updates {
-				log.Error("Failed to Update: %s/%s Update: %d/%d: Branch: %s", ownerName, repoName, i, len(updates), update.RefFullName.BranchName())
+				log.Error("Failed to Update: %d Update: %d/%d: Branch: %s", repoID, i, len(updates), update.RefFullName.BranchName())
 			}
-			log.Error("Failed to Update: %s/%s Error: %v", ownerName, repoName, err)
+			log.Error("Failed to Update: %d Error: %v", repoID, err)
 
 			ctx.JSON(http.StatusInternalServerError, private.HookPostReceiveResult{
-				Err: fmt.Sprintf("Failed to Update: %s/%s Error: %v", ownerName, repoName, err),
+				Err: fmt.Sprintf("Failed to Update: %d Error: %v", repoID, err),
 			})
 			return
 		}
@@ -161,7 +161,7 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 
 	// handle pull request merging, a pull request action should push at least 1 commit
 	if opts.PushTrigger == repo_module.PushTriggerPRMergeToBase {
-		handlePullRequestMerging(ctx, opts, ownerName, repoName, updates)
+		handlePullRequestMerging(ctx, opts, repoID, updates)
 		if ctx.Written() {
 			return
 		}
@@ -171,7 +171,7 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 	if !opts.GetGitPushOptions().Empty() {
 		// load the repository
 		if repo == nil {
-			repo = loadRepository(ctx, ownerName, repoName)
+			repo = loadRepository(ctx)
 			if ctx.Written() {
 				// Error handled in loadRepository
 				return
@@ -182,9 +182,9 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 		repo.IsPrivate = opts.GetGitPushOptions().GetBool(pushoptions.RepoPrivate, repo.IsPrivate)
 		repo.IsTemplate = opts.GetGitPushOptions().GetBool(pushoptions.RepoTemplate, repo.IsTemplate)
 		if err := repo_model.UpdateRepositoryCols(ctx, repo, "is_private", "is_template"); err != nil {
-			log.Error("Failed to Update: %s/%s Error: %v", ownerName, repoName, err)
+			log.Error("Failed to Update: %d Error: %v", repoID, err)
 			ctx.JSON(http.StatusInternalServerError, private.HookPostReceiveResult{
-				Err: fmt.Sprintf("Failed to Update: %s/%s Error: %v", ownerName, repoName, err),
+				Err: fmt.Sprintf("Failed to Update: %d Error: %v", repoID, err),
 			})
 			return
 		}
@@ -205,7 +205,7 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 		// FIXME: use pr.Flow to test whether it's an Agit PR or a GH PR
 		if refFullName.IsPull() {
 			if repo == nil {
-				repo = loadRepository(ctx, ownerName, repoName)
+				repo = loadRepository(ctx)
 				if ctx.Written() {
 					return
 				}
@@ -242,7 +242,7 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 		if !git.IsEmptyCommitID(newCommitID, nil) && refFullName.IsBranch() {
 			// First ensure we have the repository loaded, we're allowed pulls requests and we can get the base repo
 			if repo == nil {
-				repo = loadRepository(ctx, ownerName, repoName)
+				repo = loadRepository(ctx)
 				if ctx.Written() {
 					return
 				}
@@ -347,7 +347,7 @@ func loadContextCacheUser(ctx context.Context, id int64) (*user_model.User, erro
 }
 
 // handlePullRequestMerging handle pull request merging, a pull request action should push at least 1 commit
-func handlePullRequestMerging(ctx *app_context.PrivateContext, opts *private.HookOptions, ownerName, repoName string, updates []*repo_module.PushUpdateOptions) {
+func handlePullRequestMerging(ctx *app_context.PrivateContext, opts *private.HookOptions, repoID int64, updates []*repo_module.PushUpdateOptions) {
 	if len(updates) == 0 {
 		ctx.JSON(http.StatusInternalServerError, private.HookPostReceiveResult{
 			Err: fmt.Sprintf("Pushing a merged PR (pr:%d) no commits pushed ", opts.PullRequestID),
@@ -364,7 +364,7 @@ func handlePullRequestMerging(ctx *app_context.PrivateContext, opts *private.Hoo
 
 	pusher, err := loadContextCacheUser(ctx, opts.UserID)
 	if err != nil {
-		log.Error("Failed to Update: %s/%s Error: %v", ownerName, repoName, err)
+		log.Error("Failed to Update: %d Error: %v", repoID, err)
 		ctx.JSON(http.StatusInternalServerError, private.HookPostReceiveResult{Err: "Load pusher user failed"})
 		return
 	}
@@ -380,7 +380,7 @@ func handlePullRequestMerging(ctx *app_context.PrivateContext, opts *private.Hoo
 			return fmt.Errorf("DeleteScheduledAutoMerge[%d]: %v", opts.PullRequestID, err)
 		}
 		if _, err := pr.SetMerged(ctx); err != nil {
-			return fmt.Errorf("SetMerged failed: %s/%s Error: %v", ownerName, repoName, err)
+			return fmt.Errorf("SetMerged failed: %d Error: %v", repoID, err)
 		}
 		return nil
 	})

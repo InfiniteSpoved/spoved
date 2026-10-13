@@ -15,21 +15,19 @@ import (
 
 // SetDefaultBranch updates the default branch
 func SetDefaultBranch(ctx *app_context.PrivateContext) {
-	ownerName := ctx.Params(":owner")
-	repoName := ctx.Params(":repo")
 	branch := ctx.Params(":branch")
 
 	ctx.Repo.Repository.DefaultBranch = branch
 	if err := gitrepo.SetDefaultBranch(ctx, ctx.Repo.Repository, ctx.Repo.Repository.DefaultBranch); err != nil {
 		ctx.JSON(http.StatusInternalServerError, private.Response{
-			Err: fmt.Sprintf("Unable to set default branch on repository: %s/%s Error: %v", ownerName, repoName, err),
+			Err: fmt.Sprintf("Unable to set default branch on repository: %s Error: %v", ctx.Repo.Repository.FullName(), err),
 		})
 		return
 	}
 
 	if err := repo_model.UpdateDefaultBranch(ctx, ctx.Repo.Repository); err != nil {
 		ctx.JSON(http.StatusInternalServerError, private.Response{
-			Err: fmt.Sprintf("Unable to set default branch on repository: %s/%s Error: %v", ownerName, repoName, err),
+			Err: fmt.Sprintf("Unable to set default branch on repository: %s Error: %v", ctx.Repo.Repository.FullName(), err),
 		})
 		return
 	}

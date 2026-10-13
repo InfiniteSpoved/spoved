@@ -37,7 +37,7 @@ func TestHandlePullRequestMerging(t *testing.T) {
 	handlePullRequestMerging(ctx, &private.HookOptions{
 		PullRequestID: pr.ID,
 		UserID:        2,
-	}, pr.BaseRepo.OwnerName, pr.BaseRepo.Name, []*repo_module.PushUpdateOptions{
+	}, pr.BaseRepo.ID, []*repo_module.PushUpdateOptions{
 		{NewCommitID: "01234567"},
 	})
 	assert.Empty(t, resp.Body.String())

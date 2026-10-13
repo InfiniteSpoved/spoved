@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -172,6 +173,16 @@ func (n *nilWriter) WriteString(s string) (int, error) {
 	return len(s), nil
 }
 
+// hookRepoID returns the ID of the repository being pushed to. serv, the git HTTP handler and internal pushes set
+// it; the hooks never look the repository up by its name, which a repository in a project shares with others.
+func hookRepoID() (int64, error) {
+	repoID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvRepoID), 10, 64)
+	if repoID <= 0 {
+		return 0, errors.New("missing repository ID")
+	}
+	return repoID, nil
+}
+
 func runHookPreReceive(ctx context.Context, c *cli.Command) error {
 	if isInternal, _ := strconv.ParseBool(os.Getenv(repo_module.EnvIsInternal)); isInternal {
 		return nil
@@ -192,8 +203,10 @@ Forgejo or set your environment appropriately.`, "")
 
 	// the environment is set by serv command
 	isWiki, _ := strconv.ParseBool(os.Getenv(repo_module.EnvRepoIsWiki))
-	username := os.Getenv(repo_module.EnvRepoUsername)
-	reponame := os.Getenv(repo_module.EnvRepoName)
+	repoID, err := hookRepoID()
+	if err != nil {
+		return fail(ctx, err.Error(), "")
+	}
 	userID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvPusherID), 10, 64)
 	prID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvPRID), 10, 64)
 	deployKeyKeyID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvDeployPublicKeyID), 10, 64)
@@ -261,7 +274,7 @@ Forgejo or set your environment appropriately.`, "")
 			hookOptions.OldCommitIDs = oldCommitIDs
 			hookOptions.NewCommitIDs = newCommitIDs
 			hookOptions.RefFullNames = refFullNames
-			extra := private.HookPreReceive(ctx, username, reponame, hookOptions)
+			extra := private.HookPreReceive(ctx, repoID, hookOptions)
 			if extra.HasError() {
 				return fail(ctx, extra.UserMsg, "HookPreReceive(batch) failed: %v", extra.Error)
 			}
@@ -281,7 +294,7 @@ Forgejo or set your environment appropriately.`, "")
 
 		fmt.Fprintf(out, " Checking %d references\n", count)
 
-		extra := private.HookPreReceive(ctx, username, reponame, hookOptions)
+		extra := private.HookPreReceive(ctx, repoID, hookOptions)
 		if extra.HasError() {
 			return fail(ctx, extra.UserMsg, "HookPreReceive(last) failed: %v", extra.Error)
 		}
@@ -336,9 +349,11 @@ Forgejo or set your environment appropriately.`, "")
 	}
 
 	// the environment is set by serv command
-	repoUser := os.Getenv(repo_module.EnvRepoUsername)
 	isWiki, _ := strconv.ParseBool(os.Getenv(repo_module.EnvRepoIsWiki))
-	repoName := os.Getenv(repo_module.EnvRepoName)
+	repoID, err := hookRepoID()
+	if err != nil {
+		return fail(ctx, err.Error(), "")
+	}
 	pusherID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvPusherID), 10, 64)
 	prID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvPRID), 10, 64)
 	pusherName := os.Getenv(repo_module.EnvPusherName)
@@ -390,7 +405,7 @@ Forgejo or set your environment appropriately.`, "")
 			hookOptions.OldCommitIDs = oldCommitIDs
 			hookOptions.NewCommitIDs = newCommitIDs
 			hookOptions.RefFullNames = refFullNames
-			resp, extra := private.HookPostReceive(ctx, repoUser, repoName, hookOptions)
+			resp, extra := private.HookPostReceive(ctx, repoID, hookOptions)
 			if extra.HasError() {
 				hookPrintResults(results)
 				return fail(ctx, extra.UserMsg, "HookPostReceive failed: %v", extra.Error)
@@ -404,7 +419,7 @@ Forgejo or set your environment appropriately.`, "")
 	if count == 0 {
 		if wasEmpty && masterPushed {
 			// We need to tell the repo to reset the default branch to master
-			extra := private.SetDefaultBranch(ctx, repoUser, repoName, "master")
+			extra := private.SetDefaultBranch(ctx, repoID, "master")
 			if extra.HasError() {
 				return fail(ctx, extra.UserMsg, "SetDefaultBranch failed: %v", extra.Error)
 			}
@@ -421,7 +436,7 @@ Forgejo or set your environment appropriately.`, "")
 
 	fmt.Fprintf(out, " Processing %d references\n", count)
 
-	resp, extra := private.HookPostReceive(ctx, repoUser, repoName, hookOptions)
+	resp, extra := private.HookPostReceive(ctx, repoID, hookOptions)
 	if resp == nil {
 		hookPrintResults(results)
 		return fail(ctx, extra.UserMsg, "HookPostReceive failed: %v", extra.Error)
@@ -433,7 +448,7 @@ Forgejo or set your environment appropriately.`, "")
 
 	if wasEmpty && masterPushed {
 		// We need to tell the repo to reset the default branch to master
-		extra := private.SetDefaultBranch(ctx, repoUser, repoName, "master")
+		extra := private.SetDefaultBranch(ctx, repoID, "master")
 		if extra.HasError() {
 			return fail(ctx, extra.UserMsg, "SetDefaultBranch failed: %v", extra.Error)
 		}
@@ -485,8 +500,10 @@ Forgejo or set your environment appropriately.`, "")
 	}
 
 	reader := bufio.NewReader(os.Stdin)
-	repoUser := os.Getenv(repo_module.EnvRepoUsername)
-	repoName := os.Getenv(repo_module.EnvRepoName)
+	repoID, err := hookRepoID()
+	if err != nil {
+		return fail(ctx, err.Error(), "")
+	}
 	pusherID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvPusherID), 10, 64)
 	pusherName := os.Getenv(repo_module.EnvPusherName)
 
@@ -604,7 +621,7 @@ Forgejo or set your environment appropriately.`, "")
 	}
 
 	// 3. run hook
-	resp, extra := private.HookProcReceive(ctx, repoUser, repoName, hookOptions)
+	resp, extra := private.HookProcReceive(ctx, repoID, hookOptions)
 	if extra.HasError() {
 		return fail(ctx, extra.UserMsg, "HookProcReceive failed: %v", extra.Error)
 	}
