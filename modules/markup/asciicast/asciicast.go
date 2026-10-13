@@ -46,10 +46,9 @@ func (Renderer) SanitizerRules() []setting.MarkupSanitizerRule {
 
 // Render implements markup.Renderer
 func (Renderer) Render(ctx *markup.RenderContext, _ io.Reader, output io.Writer) error {
-	rawURL := fmt.Sprintf("%s/%s/%s/raw/%s/%s",
+	rawURL := fmt.Sprintf("%s/%s/raw/%s/%s",
 		setting.AppSubURL,
-		url.PathEscape(ctx.Metas["user"]),
-		url.PathEscape(ctx.Metas["repo"]),
+		markup.RepoLinkPath(ctx.Metas),
 		ctx.Metas["BranchNameSubURL"],
 		url.PathEscape(ctx.RelativePath),
 	)

@@ -6,6 +6,7 @@ package markup_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -877,7 +878,10 @@ func TestRender_FilePreview(t *testing.T) {
 
 	defer test.MockVariableValue(&setting.AppURL, markup.TestAppURL)()
 	markup.Init(&markup.ProcessorHelper{
-		GetRepoFileBlob: func(ctx context.Context, ownerName, repoName, commitSha, filePath string, language *string) (*git.Blob, error) {
+		GetRepoFileBlob: func(ctx context.Context, ownerName, groupName, repoName, commitSha, filePath string, language *string) (*git.Blob, error) {
+			if ownerName == "sub" { // an app sub-URL prefix reads as owner/project/repo, which does not exist
+				return nil, errors.New("repository does not exist")
+			}
 			gitRepo, err := git.OpenRepository(git.DefaultContext, "./tests/repo/repo1_filepreview")
 			require.NoError(t, err)
 			defer gitRepo.Close()
@@ -1494,4 +1498,84 @@ func TestRenderDescriptionHTML(t *testing.T) {
 		"A weird alternative to `Arc<RwLock<T>>`",
 		"A weird alternative to `Arc&lt;RwLock&lt;T&gt;&gt;`",
 	)
+}
+
+func TestRender_ProjectReferences(t *testing.T) {
+	defer test.MockVariableValue(&setting.AppURL, markup.TestAppURL)()
+
+	render := func(metas map[string]string, input string) string {
+		buffer, err := markup.RenderString(&markup.RenderContext{
+			Ctx:          git.DefaultContext,
+			RelativePath: "a.md",
+			Links:        markup.Links{AbsolutePrefix: true, Base: setting.AppSubURL},
+			Metas:        metas,
+		}, input)
+		require.NoError(t, err)
+		return strings.TrimSpace(buffer)
+	}
+	projectMetas := map[string]string{"user": "org", "group": "proj", "repo": "leaf", "repoPath": "/x", "mode": "comment"}
+
+	assert.Equal(t,
+		`<p><a href="`+util.URLJoin(markup.TestAppURL, "org", "proj", "leaf", "issues", "5")+`" class="ref-issue" rel="nofollow">org/proj/leaf#5</a></p>`,
+		render(localMetas, "org/proj/leaf#5"))
+	// a same-repository reference in a project repository must not point at the root repository org/leaf
+	assert.Equal(t,
+		`<p><a href="`+util.URLJoin(markup.TestAppURL, "org", "proj", "leaf", "issues", "5")+`" class="ref-issue" rel="nofollow">#5</a></p>`,
+		render(projectMetas, "#5"))
+	assert.Equal(t,
+		`<p><a href="`+util.URLJoin(markup.TestAppURL, "org", "leaf", "issues", "5")+`" class="ref-issue" rel="nofollow">org/leaf#5</a></p>`,
+		render(projectMetas, "org/leaf#5"))
+	assert.Equal(t,
+		`<p><a href="`+util.URLJoin(markup.TestAppURL, "org", "proj", "leaf", "commit", "0123456789abcdef")+`" rel="nofollow">org/proj/leaf@0123456789</a></p>`,
+		render(localMetas, "org/proj/leaf@0123456789abcdef"))
+	assert.Equal(t, "org/proj/leaf", markup.RepoLinkPath(projectMetas))
+	assert.Equal(t, "user13/repo11", markup.RepoLinkPath(map[string]string{"user": "user13", "repo": "repo11"}))
+}
+
+func TestRender_FilePreviewProject(t *testing.T) {
+	defer test.MockVariableValue(&setting.StaticRootPath, "../../")()
+	defer test.MockVariableValue(&setting.Names, []string{"english"})()
+	defer test.MockVariableValue(&setting.Langs, []string{"en-US"})()
+	translation.InitLocales(t.Context())
+	defer test.MockVariableValue(&setting.AppURL, markup.TestAppURL)()
+	defer markup.Init(&markup.ProcessorHelper{})
+
+	var asked []string
+	markup.Init(&markup.ProcessorHelper{
+		GetRepoFileBlob: func(ctx context.Context, ownerName, groupName, repoName, commitSha, filePath string, language *string) (*git.Blob, error) {
+			asked = append(asked, ownerName+"|"+groupName+"|"+repoName)
+			if groupName == "secret" { // the helper refuses a viewer who can't read the code
+				return nil, errors.New("cannot access repository code")
+			}
+			gitRepo, err := git.OpenRepository(git.DefaultContext, "./tests/repo/repo1_filepreview")
+			require.NoError(t, err)
+			defer gitRepo.Close()
+			commit, err := gitRepo.GetCommit(commitSha)
+			require.NoError(t, err)
+			return commit.GetBlobByPath(filePath)
+		},
+	})
+
+	render := func(projPath string) string {
+		input := util.URLJoin(markup.TestAppURL, projPath, "src", "commit", "190d9492934af498c3f669d6a2431dc5459e5b20", "path", "to", "file.go") + "#L2-L3"
+		buffer, err := markup.RenderString(&markup.RenderContext{
+			Ctx: git.DefaultContext, RelativePath: ".md", Metas: localMetas, Links: markup.Links{Base: markup.TestRepoURL},
+		}, input)
+		require.NoError(t, err)
+		return buffer
+	}
+
+	out := render("org3/proj/leaf")
+	assert.Contains(t, out, "file-preview-box")
+	assert.Contains(t, out, ">org3/proj/leaf</a>")
+	assert.Equal(t, []string{"org3|proj|leaf"}, asked)
+
+	asked = nil
+	out = render("org3/secret/leaf") // a stranger on a private project repository: no preview, nothing leaks
+	assert.NotContains(t, out, "file-preview-box")
+	assert.Equal(t, []string{"org3|secret|leaf"}, asked)
+
+	asked = nil
+	assert.NotContains(t, render("org3/a/b/c"), "file-preview-box")
+	assert.Empty(t, asked, "four segments never reach the helper")
 }

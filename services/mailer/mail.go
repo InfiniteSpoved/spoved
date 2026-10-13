@@ -431,9 +431,14 @@ func createMessageIDForRelease(rel *repo_model.Release) string {
 func generateAdditionalHeaders(ctx *mailCommentContext, reason string, recipient *user_model.User) map[string]string {
 	repo := ctx.Issue.Repo
 
+	listName := repo.Name
+	if repo.GroupName != "" {
+		listName += "." + repo.GroupName
+	}
+
 	return map[string]string{
 		// https://datatracker.ietf.org/doc/html/rfc2919
-		"List-ID": fmt.Sprintf("%s <%s.%s.%s>", repo.FullName(), repo.Name, repo.OwnerName, setting.Domain),
+		"List-ID": fmt.Sprintf("%s <%s.%s.%s>", repo.FullName(), listName, repo.OwnerName, setting.Domain),
 
 		// https://datatracker.ietf.org/doc/html/rfc2369
 		"List-Archive": fmt.Sprintf("<%s>", repo.HTMLURL()),

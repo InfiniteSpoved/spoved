@@ -356,23 +356,35 @@ func (a *Action) ShortRepoName(ctx context.Context) string {
 
 // GetRepoPath returns the virtual path to the action repository.
 func (a *Action) GetRepoPath(ctx context.Context) string {
+	if r := a.GetRepo(ctx); r != nil {
+		return r.FullName()
+	}
 	return path.Join(a.GetRepoUserName(ctx), a.GetRepoName(ctx))
 }
 
 // ShortRepoPath returns the virtual path to the action repository
 // trimmed to max 20 + 1 + 33 chars.
 func (a *Action) ShortRepoPath(ctx context.Context) string {
+	if r := a.GetRepo(ctx); r != nil && r.GroupName != "" {
+		return path.Join(a.ShortRepoUserName(ctx), base.EllipsisString(r.GroupName, 33), a.ShortRepoName(ctx))
+	}
 	return path.Join(a.ShortRepoUserName(ctx), a.ShortRepoName(ctx))
 }
 
 // GetRepoLink returns relative link to action repository.
 func (a *Action) GetRepoLink(ctx context.Context) string {
+	if r := a.GetRepo(ctx); r != nil {
+		return r.Link()
+	}
 	// path.Join will skip empty strings
 	return path.Join(setting.AppSubURL, "/", url.PathEscape(a.GetRepoUserName(ctx)), url.PathEscape(a.GetRepoName(ctx)))
 }
 
 // GetRepoAbsoluteLink returns the absolute link to action repository.
 func (a *Action) GetRepoAbsoluteLink(ctx context.Context) string {
+	if r := a.GetRepo(ctx); r != nil {
+		return r.HTMLURL()
+	}
 	return setting.AppURL + url.PathEscape(a.GetRepoUserName(ctx)) + "/" + url.PathEscape(a.GetRepoName(ctx))
 }
 

@@ -422,3 +422,16 @@ func TestIsPrivate(t *testing.T) {
 		assert.Equal(t, test.private, private, "action ID: %d", test.activityID)
 	}
 }
+
+func TestAction_RepoInProject(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
+	inProject := *repo
+	inProject.GroupID, inProject.GroupName = 7, "proj"
+	action := &activities_model.Action{RepoID: repo.ID, Repo: &inProject}
+	ctx := db.DefaultContext
+	assert.Equal(t, repo.OwnerName+"/proj/"+repo.Name, action.GetRepoPath(ctx))
+	assert.Equal(t, repo.OwnerName+"/proj/"+repo.Name, action.ShortRepoPath(ctx))
+	assert.Equal(t, setting.AppSubURL+"/"+repo.OwnerName+"/proj/"+repo.Name, action.GetRepoLink(ctx))
+	assert.Equal(t, setting.AppURL+repo.OwnerName+"/proj/"+repo.Name, action.GetRepoAbsoluteLink(ctx))
+}

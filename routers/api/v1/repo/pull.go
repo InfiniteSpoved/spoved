@@ -306,21 +306,30 @@ func GetPullRequestByBaseHead(ctx *context.APIContext) {
 	if strings.Contains(head, ":") {
 		split := strings.SplitN(head, ":", 2)
 		headBranch = split[1]
-		var owner, name string
+		var owner, group, name string
 		if strings.Contains(split[0], "/") {
 			split = strings.Split(split[0], "/")
-			owner = split[0]
-			name = split[1]
+			if len(split) > 3 {
+				ctx.NotFound()
+				return
+			}
+			owner, name = split[0], split[len(split)-1]
+			if len(split) == 3 {
+				group = split[1]
+			}
 		} else {
 			owner = split[0]
 			name = ctx.Repo().Repository.Name
+			if strings.EqualFold(owner, ctx.Repo().Repository.OwnerName) { // forks live at the root of their owner
+				group = ctx.Repo().Repository.GroupName
+			}
 		}
-		repo, err := repo_model.GetRepositoryByOwnerAndName(ctx, owner, name)
+		repo, err := repo_model.GetRepositoryByRef(ctx, owner, group, name)
 		if err != nil {
 			if repo_model.IsErrRepoNotExist(err) {
 				ctx.NotFound()
 			} else {
-				ctx.Error(http.StatusInternalServerError, "GetRepositoryByOwnerName", err)
+				ctx.Error(http.StatusInternalServerError, "GetRepositoryByRef", err)
 			}
 			return
 		}
