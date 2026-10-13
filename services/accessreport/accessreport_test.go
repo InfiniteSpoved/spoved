@@ -136,9 +136,31 @@ func countRows(t *testing.T) map[string]int64 {
 
 func TestComputeMatchesGetUserRepoPermission(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
+	auditorID, _ := addPathCases(t)
+	assertComputeMatches(t, auditorID)
+}
+
+// A team's rows through a linked project (via_group) count like any other team_repo row.
+func TestComputeMatchesGetUserRepoPermissionViaGroup(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
 	ctx := db.DefaultContext
 	auditorID, _ := addPathCases(t)
+	group := &repo_model.RepoGroup{OwnerID: 3, Name: "pay", LowerName: "pay"}
+	require.NoError(t, db.Insert(ctx, group))
+	_, err := db.GetEngine(ctx).Exec("UPDATE repository SET group_id = ?, group_name = ? WHERE id = 3", group.ID, group.Name)
+	require.NoError(t, err)
+	for _, teamID := range []int64{7, 12} { // a write and an admin team of org3, now with org3/repo3 only through the link
+		require.NoError(t, db.Insert(ctx, &organization.TeamGroup{OrgID: 3, TeamID: teamID, GroupID: group.ID}))
+		_, err := db.GetEngine(ctx).Delete(&organization.TeamRepo{TeamID: teamID, RepoID: 3})
+		require.NoError(t, err)
+		require.NoError(t, db.Insert(ctx, &organization.TeamRepo{OrgID: 3, TeamID: teamID, RepoID: 3, ViaGroup: true}))
+	}
+	assertComputeMatches(t, auditorID)
+}
 
+func assertComputeMatches(t *testing.T, auditorID int64) {
+	t.Helper()
+	ctx := db.DefaultContext
 	repos := make([]*repo_model.Repository, 0, 70)
 	require.NoError(t, db.GetEngine(ctx).OrderBy("id").Find(&repos))
 	users := make([]*user_model.User, 0, 50)

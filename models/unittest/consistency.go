@@ -48,7 +48,30 @@ func CheckConsistencyFor(t *testing.T, beansToCheck ...any) {
 	}
 	if checkClaims {
 		CheckRepoGroupNameClaims(t)
+		CheckTeamGroupRows(t)
 	}
+}
+
+// CheckTeamGroupRows checks the team_repo rows of linked projects (team_group): every repository of a linked project
+// (trashed ones included) has a row for the team, every ViaGroup row has the link that justifies it, and no link
+// crosses organizations.
+func CheckTeamGroupRows(t *testing.T) {
+	e := db.GetEngine(db.DefaultContext)
+	count := func(query string, args ...any) int64 {
+		var n int64
+		_, err := e.SQL(query, args...).Get(&n)
+		require.NoError(t, err)
+		return n
+	}
+	assert.Zero(t, count("SELECT COUNT(*) FROM team_group INNER JOIN repository ON repository.group_id = team_group.group_id "+
+		"WHERE NOT EXISTS (SELECT 1 FROM team_repo WHERE team_repo.team_id = team_group.team_id AND team_repo.repo_id = repository.id)"),
+		"repositories of a linked project without a row for the team")
+	assert.Zero(t, count("SELECT COUNT(*) FROM team_repo INNER JOIN repository ON repository.id = team_repo.repo_id WHERE team_repo.via_group = ? "+
+		"AND NOT EXISTS (SELECT 1 FROM team_group WHERE team_group.team_id = team_repo.team_id AND team_group.group_id = repository.group_id)", true),
+		"ViaGroup rows without a link")
+	assert.Zero(t, count("SELECT COUNT(*) FROM team_group LEFT JOIN team ON team.id = team_group.team_id AND team.org_id = team_group.org_id "+
+		"LEFT JOIN repo_group ON repo_group.id = team_group.group_id AND repo_group.owner_id = team_group.org_id WHERE team.id IS NULL OR repo_group.id IS NULL"),
+		"links to a team or project of another organization, or a missing one")
 }
 
 // CheckRepoGroupNameClaims checks that the name claims of every owner are exactly its root repository names

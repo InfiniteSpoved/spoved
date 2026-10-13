@@ -211,6 +211,10 @@ func DeleteRepoGroup(ctx context.Context, group *RepoGroup) error {
 		if _, err := db.GetEngine(ctx).Where("owner_id = ? AND redirect_group_id = ?", group.OwnerID, group.ID).Delete(new(RepoGroupRedirect)); err != nil {
 			return err
 		}
+		// the teams linked to it; the project is empty, so they have no rows through it
+		if _, err := db.Exec(ctx, "DELETE FROM `team_group` WHERE group_id = ?", group.ID); err != nil {
+			return err
+		}
 		return releaseName(ctx, group.OwnerID, locked.Name)
 	})
 }

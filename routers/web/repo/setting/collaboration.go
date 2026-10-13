@@ -41,6 +41,10 @@ func Collaboration(ctx *context.Context) {
 		return
 	}
 	ctx.Data["Teams"] = teams
+	if ctx.Data["ViaGroup"], err = organization.ViaGroupTeamIDs(ctx, ctx.Repo.Repository.ID); err != nil {
+		ctx.ServerError("ViaGroupTeamIDs", err)
+		return
+	}
 	ctx.Data["Repo"] = ctx.Repo.Repository
 	ctx.Data["OrgID"] = ctx.Repo.Repository.OwnerID
 	ctx.Data["OrgName"] = ctx.Repo.Repository.OwnerName

@@ -510,6 +510,18 @@ func RemoveRepositoryFromTeam(ctx context.Context, t *organization.Team, repoID 
 	}
 	defer committer.Close()
 
+	// a repository the team has through a linked project stays, as a ViaGroup row
+	if repo.GroupID != 0 {
+		if linked, err := db.GetEngine(ctx).Exist(&organization.TeamGroup{TeamID: t.ID, GroupID: repo.GroupID}); err != nil {
+			return err
+		} else if linked {
+			if _, err := db.GetEngine(ctx).Where("team_id = ? AND repo_id = ?", t.ID, repo.ID).Cols("via_group").Update(&organization.TeamRepo{ViaGroup: true}); err != nil {
+				return err
+			}
+			return committer.Commit()
+		}
+	}
+
 	if err = removeRepositoryFromTeam(ctx, t, repo, true); err != nil {
 		return err
 	}

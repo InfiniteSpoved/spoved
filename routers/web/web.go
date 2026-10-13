@@ -1145,6 +1145,8 @@ func registerRoutes(m *web.Route) {
 		m.Group("/{id}/settings", func() {
 			m.Combo("").Get(org.RepoGroupSettings).Post(web.Bind(forms.RepoGroupForm{}), org.RepoGroupSettingsPost)
 			m.Post("/delete", org.RepoGroupDeletePost)
+			m.Post("/teams/link", org.RepoGroupTeamLink)
+			m.Post("/teams/unlink", org.RepoGroupTeamUnlink)
 		}, context.RepoGroupAssignment)
 	}, reqSignIn, context.OrgAssignment(true, true))
 

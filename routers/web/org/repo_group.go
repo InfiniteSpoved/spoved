@@ -6,13 +6,16 @@ package org
 import (
 	"errors"
 	"net/http"
+	"slices"
 
 	"forgejo.org/models/db"
+	org_model "forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	shared_user "forgejo.org/routers/web/shared/user"
 	"forgejo.org/services/context"
@@ -166,7 +169,60 @@ func RepoGroupSettings(ctx *context.Context) {
 	ctx.Data["name"] = group.Name
 	ctx.Data["description"] = group.Description
 	ctx.Data["RepoGroupLink"] = group.Link(ctx.Org.Organization.Name)
+	if !prepareRepoGroupTeams(ctx, group) {
+		return
+	}
 	ctx.HTML(http.StatusOK, tplRepoGroupSettings)
+}
+
+// prepareRepoGroupTeams lists the teams linked to the project and the other teams of the organization.
+func prepareRepoGroupTeams(ctx *context.Context, group *repo_model.RepoGroup) bool {
+	linked, err := org_model.GetRepoGroupTeams(ctx, ctx.Org.Organization.ID, group.ID)
+	if err != nil {
+		ctx.ServerError("GetRepoGroupTeams", err)
+		return false
+	}
+	teams, err := org_model.FindOrgTeams(ctx, ctx.Org.Organization.ID)
+	if err != nil {
+		ctx.ServerError("FindOrgTeams", err)
+		return false
+	}
+	others := slices.DeleteFunc(teams, func(t *org_model.Team) bool {
+		return slices.ContainsFunc(linked, func(l *org_model.Team) bool { return l.ID == t.ID })
+	})
+	ctx.Data["LinkedTeams"], ctx.Data["OtherTeams"] = linked, others
+	return true
+}
+
+// RepoGroupTeamLink links a team to the project, which gives it every repository of the project.
+func RepoGroupTeamLink(ctx *context.Context) {
+	group := ctx.Data["RepoGroup"].(*repo_model.RepoGroup)
+	err := repo_service.LinkTeamToRepoGroup(ctx, ctx.Doer, ctx.Org.Organization, ctx.FormInt64("team_id"), group.ID)
+	switch {
+	case errors.Is(err, util.ErrAlreadyExist):
+		ctx.Flash.Error(ctx.Tr("repo_group.teams.already_linked"))
+	case err != nil:
+		ctx.NotFoundOrServerError("LinkTeamToRepoGroup", isRepoGroupTeamNotFound, err)
+		return
+	default:
+		ctx.Flash.Success(ctx.Tr("repo_group.teams.linked"))
+	}
+	ctx.Redirect(group.Link(ctx.Org.Organization.Name) + "/-/settings")
+}
+
+// RepoGroupTeamUnlink takes back what the link of a team to the project granted.
+func RepoGroupTeamUnlink(ctx *context.Context) {
+	group := ctx.Data["RepoGroup"].(*repo_model.RepoGroup)
+	if err := repo_service.UnlinkTeamFromRepoGroup(ctx, ctx.Doer, ctx.Org.Organization, ctx.FormInt64("id"), group.ID); err != nil {
+		ctx.NotFoundOrServerError("UnlinkTeamFromRepoGroup", isRepoGroupTeamNotFound, err)
+		return
+	}
+	ctx.Flash.Success(ctx.Tr("repo_group.teams.unlinked"))
+	ctx.JSONRedirect(group.Link(ctx.Org.Organization.Name) + "/-/settings")
+}
+
+func isRepoGroupTeamNotFound(err error) bool {
+	return errors.Is(err, util.ErrNotExist) || errors.Is(err, util.ErrPermissionDenied)
 }
 
 // RepoGroupSettingsPost renames a project and changes its description.
@@ -178,6 +234,9 @@ func RepoGroupSettingsPost(ctx *context.Context) {
 		return
 	}
 	ctx.Data["RepoGroupLink"] = group.Link(org.Name)
+	if !prepareRepoGroupTeams(ctx, group) {
+		return
+	}
 	if ctx.HasError() {
 		ctx.HTML(http.StatusOK, tplRepoGroupSettings)
 		return
