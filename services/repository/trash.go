@@ -150,7 +150,10 @@ func MoveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User,
 	}
 	repo.Owner = owner
 
-	unlock := repoWorkingPool.Lock(fmt.Sprint(repo.ID))
+	unlock, err := lockRepo(ctx, repo)
+	if err != nil {
+		return err
+	}
 	defer unlock()
 
 	// The row is touched first, if it is still in the trash as the caller saw it: the write lock it takes is held
@@ -191,11 +194,12 @@ func moveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User,
 		if err := repo_model.IsUsableRepoName(strings.ToLower(finalName)); err != nil {
 			return err
 		}
-		if repo.GroupID != 0 && newOwner != nil {
-			return repo_model.ErrRepoInGroup
+		groupID := repo.GroupID
+		if newOwner != nil { // a transfer puts it at the root of the new owner
+			groupID = 0
 		}
 		// a name taken by a project is refused when the claim is written
-		if has, err := repo_model.IsRepositoryModelExistInGroup(ctx, target.ID, repo.GroupID, finalName); err != nil {
+		if has, err := repo_model.IsRepositoryModelExistInGroup(ctx, target.ID, groupID, finalName); err != nil {
 			return err
 		} else if has {
 			return repo_model.ErrRepoAlreadyExist{Uname: target.Name, Name: finalName}
@@ -205,17 +209,20 @@ func moveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User,
 	// whatever moved is moved back if a later step fails, as the database changes are rolled back
 	renamed, transferred := false, false
 	oldRepoPath, oldWikiPath := repo.RepoPath(), repo.WikiPath() // in the repository's project, if any
+	// after the rename, before the transfer
+	renamedRepoPath := filepath.Join(filepath.Dir(oldRepoPath), strings.ToLower(finalName)+".git")
+	renamedWikiPath := filepath.Join(filepath.Dir(oldWikiPath), strings.ToLower(finalName)+".wiki.git")
 	defer func() {
 		if err == nil {
 			return
 		}
-		if transferred { // only root repositories are transferred
-			moveDirsBack(repo_model.RepoPath(newOwner.Name, finalName), repo_model.RepoPath(owner.Name, finalName))
-			moveDirsBack(repo_model.WikiPath(newOwner.Name, finalName), repo_model.WikiPath(owner.Name, finalName))
+		if transferred { // to the root of the new owner
+			moveDirsBack(repo_model.RepoPath(newOwner.Name, finalName), renamedRepoPath)
+			moveDirsBack(repo_model.WikiPath(newOwner.Name, finalName), renamedWikiPath)
 		}
 		if renamed {
-			moveDirsBack(filepath.Join(filepath.Dir(oldRepoPath), strings.ToLower(finalName)+".git"), oldRepoPath)
-			moveDirsBack(filepath.Join(filepath.Dir(oldWikiPath), strings.ToLower(finalName)+".wiki.git"), oldWikiPath)
+			moveDirsBack(renamedRepoPath, oldRepoPath)
+			moveDirsBack(renamedWikiPath, oldWikiPath)
 		}
 	}()
 

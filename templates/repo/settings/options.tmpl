@@ -529,6 +529,17 @@
 						{{end}}
 					</div>
 				</div>
+				{{if .MoveGroups}}
+					<div class="flex-item">
+						<div class="flex-item-main">
+							<div class="flex-item-title">{{ctx.Locale.Tr "repo.settings.move.title"}}</div>
+							<div class="flex-item-body">{{ctx.Locale.Tr "repo.settings.move.desc"}}</div>
+						</div>
+						<div class="flex-item-trailing">
+							<button class="danger button show-modal" data-modal="#move-repo-modal">{{ctx.Locale.Tr "repo.settings.move.button"}}</button>
+						</div>
+					</div>
+				{{end}}
 				{{if .Permission.CanRead $.UnitTypeWiki}}
 					{{if ne $.Repository.GetWikiBranchName .DefaultWikiBranchName}}
 						<div class="flex-item">
@@ -686,6 +697,46 @@
 			</form>
 		</article>
 	</dialog>
+
+	{{if .MoveGroups}}
+		<dialog class="modal" id="move-repo-modal">
+			<article>
+				<header>{{ctx.Locale.Tr "repo.settings.move.title"}}</header>
+				<div class="content">
+					<div class="ui warning message">{{ctx.Locale.Tr "repo.settings.move.notice"}}</div>
+				</div>
+				<form class="ui form" action="{{.Link}}" method="post">
+					<div class="content">
+						<input type="hidden" name="action" value="move">
+						<div class="field">
+							<label>
+								{{ctx.Locale.Tr "repo.settings.enter_repo_name"}}
+								<span class="text red">{{.Repository.FullName}}</span>
+							</label>
+						</div>
+						<div class="required field">
+							<label for="move_repo_name">{{ctx.Locale.Tr "repo.settings.confirmation_string"}}</label>
+							<input id="move_repo_name" name="repo_name" required autocorrect="off" autocapitalize="none" spellcheck="false">
+						</div>
+						<div class="required field">
+							<label for="move_group_id">{{ctx.Locale.Tr "repo.settings.move.target"}}</label>
+							<select id="move_group_id" name="group_id" required>
+								<option value="" disabled selected></option>
+								{{if .Repository.GroupID}}<option value="0">{{ctx.Locale.Tr "repo.settings.move.root" .Repository.OwnerName}}</option>{{end}}
+								{{range .MoveGroups}}
+									{{if ne .ID $.Repository.GroupID}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+								{{end}}
+							</select>
+						</div>
+					</div>
+					<div class="actions">
+						<button type="button" class="ui cancel button">{{ctx.Locale.Tr "settings.cancel"}}</button>
+						<button type="submit" class="ui red button">{{ctx.Locale.Tr "repo.settings.move.perform"}}</button>
+					</div>
+				</form>
+			</article>
+		</dialog>
+	{{end}}
 
 	<dialog class="modal" id="delete-repo-modal">
 		<article>

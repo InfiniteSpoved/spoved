@@ -486,6 +486,7 @@ func DeleteOrganization(ctx context.Context, org *Organization) error {
 		&repo_model.OrgUnit{OrgID: org.ID},
 		&repo_model.RepoGroup{OwnerID: org.ID},
 		&repo_model.RepoGroupNameClaim{OwnerID: org.ID},
+		&repo_model.RepoGroupRedirect{OwnerID: org.ID},
 		&OrgVerifiedDomain{OrgID: org.ID},
 		&user_model.Setting{UserID: org.ID, SettingKey: SettingKeyRequireVerifiedDomain},
 		&secret_model.Secret{OwnerID: org.ID},
