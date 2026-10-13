@@ -68,7 +68,7 @@ func getOrgDeployKey(ctx *context.APIContext) *asymkey_model.OrgDeployKey {
 	if !orgWideToken(ctx) {
 		return nil
 	}
-	key, err := asymkey_model.GetOrgDeployKey(ctx, ctx.Org().Organization.ID, ctx.ParamsInt64(":id"))
+	key, err := asymkey_model.GetOrgDeployKey(ctx, ctx.Org().Organization.ID, 0, ctx.ParamsInt64(":id"))
 	if err != nil {
 		if asymkey_model.IsErrDeployKeyNotExist(err) {
 			ctx.NotFound()
@@ -175,7 +175,7 @@ func ListDeployKeys(ctx *context.APIContext) {
 	if !orgWideToken(ctx) {
 		return
 	}
-	keys, err := asymkey_model.FindOrgDeployKeys(ctx, ctx.Org().Organization.ID)
+	keys, err := asymkey_model.FindOrgDeployKeys(ctx, ctx.Org().Organization.ID, 0)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "FindOrgDeployKeys", err)
 		return
@@ -284,7 +284,7 @@ func CreateDeployKey(ctx *context.APIContext) {
 	if !ok {
 		return
 	}
-	key, err := asymkey_model.AddOrgDeployKey(ctx, ctx.Org().Organization.ID, strings.TrimSpace(form.Title), content, form.ReadOnly, form.AllRepositories, repoIDs, expires)
+	key, err := asymkey_model.AddOrgDeployKey(ctx, ctx.Org().Organization.ID, 0, strings.TrimSpace(form.Title), content, form.ReadOnly, form.AllRepositories, repoIDs, expires)
 	if err != nil {
 		orgDeployKeyError(ctx, err)
 		return
@@ -393,7 +393,7 @@ func DeleteDeployKey(ctx *context.APIContext) {
 	if !orgWideToken(ctx) {
 		return
 	}
-	if err := asymkey_service.DeleteOrgDeployKey(ctx, ctx.Org().Organization.ID, ctx.ParamsInt64(":id")); err != nil {
+	if err := asymkey_service.DeleteOrgDeployKey(ctx, ctx.Org().Organization.ID, 0, ctx.ParamsInt64(":id")); err != nil {
 		orgDeployKeyError(ctx, err)
 		return
 	}

@@ -18,6 +18,8 @@ type OrgDeployKey struct {
 	ReadOnly bool      `json:"read_only"`
 	// whether the key covers all repositories of the organization, including later ones, or only the selected ones
 	AllRepositories bool `json:"all_repositories"`
+	// ID of the project whose repositories the key covers, omitted for a key of the organization
+	ProjectID int64 `json:"project_id,omitempty"`
 	// When the key expires, omitted if never
 	// swagger:strfmt date-time
 	Expires *time.Time `json:"expires_at,omitempty"`

@@ -45,7 +45,7 @@ func newOrgDeployKeyContent(t *testing.T) string {
 
 func addOrgDeployKey(t *testing.T, orgID int64, name, content string, readOnly bool, repoIDs ...int64) *asymkey_model.OrgDeployKey {
 	t.Helper()
-	key, err := asymkey_model.AddOrgDeployKey(db.DefaultContext, orgID, name, content, readOnly, len(repoIDs) == 0, repoIDs, 0)
+	key, err := asymkey_model.AddOrgDeployKey(db.DefaultContext, orgID, 0, name, content, readOnly, len(repoIDs) == 0, repoIDs, 0)
 	require.NoError(t, err)
 	return key
 }
@@ -144,7 +144,7 @@ func TestOrgDeployKey(t *testing.T) {
 		// a read org key, a read repo key, an expired write org key: the owner's permission never counts
 		repoRead, err := asymkey_model.AddDeployKey(ctx, 3, "repo read", newOrgDeployKeyContent(t), true, 0)
 		require.NoError(t, err)
-		expired, err := asymkey_model.AddOrgDeployKey(ctx, 3, "expired", newOrgDeployKeyContent(t), false, true, nil, timeutil.TimeStampNow()-10)
+		expired, err := asymkey_model.AddOrgDeployKey(ctx, 3, 0, "expired", newOrgDeployKeyContent(t), false, true, nil, timeutil.TimeStampNow()-10)
 		require.NoError(t, err)
 		for name, keyID := range map[string]int64{"org read": hookRead.KeyID, "repo read": repoRead.KeyID, "expired": expired.KeyID, "unknown": 999999} {
 			extra := keyHook(keyID, emptyID, initCommit, git.RefNameFromBranch("free"))

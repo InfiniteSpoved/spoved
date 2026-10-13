@@ -42,6 +42,8 @@ const (
 	KindOrgMember    Kind = "org_member"
 	KindDeployKey    Kind = "deploy_key"
 	KindOrgDeployKey Kind = "org_deploy_key"
+	// KindProjectDeployKey is an organization deploy key of the repository's project.
+	KindProjectDeployKey Kind = "project_deploy_key"
 	// KindInstanceRoles stands for the site admins and auditors, whom only site admins see by name.
 	KindInstanceRoles Kind = "instance_roles"
 )
@@ -181,7 +183,11 @@ func Compute(ctx context.Context, opts Options) ([]*Row, error) {
 	}
 	for _, k := range orgKeys {
 		if repo := byID[k.RepoID]; repo != nil && !repo.IsTrashed() {
-			rows = append(rows, deployKeyRow(&Row{OrgDeployKey: &k.OrgDeployKey, Repo: repo}, KindOrgDeployKey, k.Mode, k.IsExpired()))
+			kind := KindOrgDeployKey
+			if k.GroupID != 0 {
+				kind = KindProjectDeployKey
+			}
+			rows = append(rows, deployKeyRow(&Row{OrgDeployKey: &k.OrgDeployKey, Repo: repo}, kind, k.Mode, k.IsExpired()))
 		}
 	}
 	return rows, nil

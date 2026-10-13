@@ -24,12 +24,17 @@ func SetOrgDeployKeyRepos(ctx context.Context, orgID, id int64, includesAllRepos
 	})
 }
 
-// DeleteOrgDeployKey deletes the deploy key of the organization; the repositories it no longer writes to lose it
-// in their protection rules.
-func DeleteOrgDeployKey(ctx context.Context, orgID, id int64) error {
+// DeleteOrgDeployKey deletes the deploy key of the organization (groupID 0) or of its project groupID; the
+// repositories it no longer writes to lose it in their protection rules.
+func DeleteOrgDeployKey(ctx context.Context, orgID, groupID, id int64) error {
 	var deletedPublicKey bool
 	if err := db.WithTx(ctx, func(ctx context.Context) error {
-		key, err := asymkey_model.GetOrgDeployKey(ctx, orgID, id)
+		if groupID != 0 { // the project row before the key's, as in AddOrgDeployKey and DeleteRepoGroup
+			if _, err := repo_model.LockRepoGroup(ctx, orgID, groupID); err != nil {
+				return err
+			}
+		}
+		key, err := asymkey_model.GetOrgDeployKey(ctx, orgID, groupID, id)
 		if err != nil {
 			return err
 		}

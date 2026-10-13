@@ -1175,6 +1175,10 @@ func registerRoutes(m *web.Route) {
 					m.Post("/{variable_id}/delete", org.RepoGroupVariableDelete)
 				})
 			}, actions.MustEnableActions)
+			m.Group("/keys", func() {
+				m.Combo("").Get(org_setting.DeployKeys).Post(web.Bind(forms.AddKeyForm{}), org_setting.DeployKeysPost)
+				m.Post("/delete", org_setting.DeleteDeployKey)
+			})
 			m.Group("/branches", func() {
 				m.Combo("/edit").Get(org_setting.SettingsProtectedBranch).
 					Post(web.Bind(forms.ProtectBranchForm{}), org_setting.SettingsProtectedBranchPost)

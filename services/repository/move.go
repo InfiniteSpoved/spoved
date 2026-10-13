@@ -11,7 +11,9 @@ import (
 	"slices"
 
 	"forgejo.org/models"
+	asymkey_model "forgejo.org/models/asymkey"
 	"forgejo.org/models/db"
+	git_model "forgejo.org/models/git"
 	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
@@ -148,6 +150,16 @@ func moveRepository(ctx context.Context, repo *repo_model.Repository, groupID in
 		if err := repo_model.ReleaseRepoName(ctx, repo); err != nil {
 			return err
 		}
+		oldKeys, err := asymkey_model.FindOrgDeployKeysCoveringRepo(ctx, repo)
+		if err != nil {
+			return err
+		}
+		oldKeyIDs := make([]int64, 0, len(oldKeys))
+		for _, k := range oldKeys {
+			if k.GroupID != 0 {
+				oldKeyIDs = append(oldKeyIDs, k.KeyID)
+			}
+		}
 		repo.GroupID, repo.GroupName = groupID, groupName
 		if err := repo_model.ClaimRepoName(ctx, repo); err != nil {
 			return err
@@ -156,6 +168,11 @@ func moveRepository(ctx context.Context, repo *repo_model.Repository, groupID in
 			return err
 		}
 		if err := repo_model.UpdateRepositoryCols(ctx, repo, "group_id", "group_name"); err != nil {
+			return err
+		}
+		// the old project's deploy keys stop applying: drop them from the protection rules unless another key of the
+		// same public key still writes to the repository
+		if err := git_model.DropDeployKeyIDsNotWriting(ctx, repo, oldKeyIDs); err != nil {
 			return err
 		}
 		if err := repo_model.NewRedirect(ctx, repo.OwnerID, oldGroupID, repo.ID, repo.Name); err != nil {

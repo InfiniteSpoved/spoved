@@ -108,7 +108,7 @@ func TestOrgDeployKeyWeb(t *testing.T) {
 	})
 
 	allWrite := unittest.AssertExistsAndLoadBean(t, &asymkey_model.OrgDeployKey{OrgID: 3, Name: "all write"})
-	other, err := asymkey_model.AddOrgDeployKey(ctx, 17, "org17 key", newOrgDeployKeyContent(t), true, true, nil, 0)
+	other, err := asymkey_model.AddOrgDeployKey(ctx, 17, 0, "org17 key", newOrgDeployKeyContent(t), true, true, nil, 0)
 	require.NoError(t, err)
 
 	t.Run("change the selection", func(t *testing.T) {
@@ -156,7 +156,7 @@ func TestOrgDeployKeyWeb(t *testing.T) {
 	})
 
 	t.Run("protection pickers offer write org keys", func(t *testing.T) {
-		readKey, err := asymkey_model.AddOrgDeployKey(ctx, 3, "all read", newOrgDeployKeyContent(t), true, true, nil, 0)
+		readKey, err := asymkey_model.AddOrgDeployKey(ctx, 3, 0, "all read", newOrgDeployKeyContent(t), true, true, nil, 0)
 		require.NoError(t, err)
 		for _, url := range []string{"/org3/repo3/settings/branches/edit", "/org3/repo3/settings/tags"} {
 			page := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", url), http.StatusOK).Body)
@@ -194,7 +194,7 @@ func TestOrgDeployKeyWeb(t *testing.T) {
 	})
 
 	t.Run("dropping a repository from the selection drops the key from its rules", func(t *testing.T) {
-		key, err := asymkey_model.AddOrgDeployKey(ctx, 3, "narrowed", newOrgDeployKeyContent(t), false, true, nil, 0)
+		key, err := asymkey_model.AddOrgDeployKey(ctx, 3, 0, "narrowed", newOrgDeployKeyContent(t), false, true, nil, 0)
 		require.NoError(t, err)
 		repo := createOrgDeployKeyRepo(t, "dk-narrowed")
 		require.NoError(t, git_model.UpdateProtectBranch(ctx, repo, &git_model.ProtectedBranch{RepoID: repo.ID, RuleName: "main"},
@@ -215,7 +215,7 @@ func TestOrgDeployKeyWeb(t *testing.T) {
 	t.Run("archived organization", func(t *testing.T) {
 		org := &organization.Organization{Name: "dk-archived"}
 		require.NoError(t, organization.CreateOrganization(ctx, org, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})))
-		key, err := asymkey_model.AddOrgDeployKey(ctx, org.ID, "archived", newOrgDeployKeyContent(t), true, true, nil, 0)
+		key, err := asymkey_model.AddOrgDeployKey(ctx, org.ID, 0, "archived", newOrgDeployKeyContent(t), true, true, nil, 0)
 		require.NoError(t, err)
 		require.NoError(t, org_service.ArchiveOrganization(ctx, org, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), false))
 
