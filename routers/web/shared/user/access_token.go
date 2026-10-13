@@ -50,6 +50,8 @@ func TranslateExpiryError(ctx *context.Base, err error, p setting.CredentialExpi
 	switch {
 	case errors.Is(err, authz.ErrExpiryInvalid):
 		return optional.Some(ctx.Locale.TrString("credential.error.expiry_invalid"))
+	case errors.Is(err, authz.ErrExpiryRequired) && p.MaxLifetimeDays > 0:
+		return optional.Some(ctx.Locale.TrString("credential.error.expiry_required_max", p.MaxLifetimeDays))
 	case errors.Is(err, authz.ErrExpiryRequired):
 		return optional.Some(ctx.Locale.TrString("credential.error.expiry_required"))
 	case errors.Is(err, authz.ErrExpiryInPast):
@@ -78,4 +80,9 @@ func ParseExpiryForm(ctx *context.Base, p setting.CredentialExpiryPolicy, value 
 func SetExpiryFormData(ctx *context.Base, p setting.CredentialExpiryPolicy) {
 	ctx.Data["ExpiryRequired"] = p.Required || p.MaxLifetimeDays > 0
 	ctx.Data["ExpiryMaxDate"] = authz.MaxExpiryDate(p)
+	ctx.Data["ExpiryMaxDays"] = p.MaxLifetimeDays
+	// an empty value (no form yet, or one the policy refused) gets the suggested date
+	if v, _ := ctx.Data["expires_at"].(string); v == "" {
+		ctx.Data["expires_at"] = authz.DefaultExpiryDate(p)
+	}
 }

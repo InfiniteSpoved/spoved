@@ -15,6 +15,7 @@ import (
 	pwd "forgejo.org/modules/auth/password"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/timeutil"
 
 	"github.com/urfave/cli/v3"
 )
@@ -73,6 +74,10 @@ func microcmdUserCreate() *cli.Command {
 				Name:  "access-token-scopes",
 				Usage: `Scopes of the generated access token, comma separated. Examples: "all", "public-only,read:issue", "write:repository,write:user"`,
 				Value: "all",
+			},
+			&cli.StringFlag{
+				Name:  "access-token-expires-at",
+				Usage: "Expiry date of the generated access token (YYYY-MM-DD); default: the latest date the [security] ACCESS_TOKEN_* policy allows",
 			},
 			&cli.BoolFlag{
 				Name:  "restricted",
@@ -178,6 +183,7 @@ func runCreateUser(ctx context.Context, c *cli.Command) error {
 
 	var accessTokenName string
 	var accessTokenScope auth_model.AccessTokenScope
+	var accessTokenExpires timeutil.TimeStamp
 	if c.IsSet("access-token") {
 		accessTokenName = strings.TrimSpace(c.String("access-token-name"))
 		if accessTokenName == "" {
@@ -191,8 +197,11 @@ func runCreateUser(ctx context.Context, c *cli.Command) error {
 		if !accessTokenScope.HasPermissionScope() {
 			return errors.New("access token does not have any permission")
 		}
-	} else if c.IsSet("access-token-name") || c.IsSet("access-token-scopes") {
-		return errors.New("access-token-name and access-token-scopes flags are only valid when access-token flag is set")
+		if accessTokenExpires, err = cliTokenExpiry(c.String("access-token-expires-at")); err != nil {
+			return err
+		}
+	} else if c.IsSet("access-token-name") || c.IsSet("access-token-scopes") || c.IsSet("access-token-expires-at") {
+		return errors.New("access-token-name, access-token-scopes and access-token-expires-at flags are only valid when access-token flag is set")
 	}
 
 	// arguments should be prepared before creating the user & access token, in case there is anything wrong
@@ -209,6 +218,8 @@ func runCreateUser(ctx context.Context, c *cli.Command) error {
 			Name:  accessTokenName,
 			UID:   u.ID,
 			Scope: accessTokenScope,
+
+			ExpiresUnix: accessTokenExpires,
 
 			// maintain legacy behaviour until new CLI options are added -- token has access to all resources, is not
 			// fine-grained
