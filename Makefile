@@ -93,8 +93,14 @@ else
     FORGEJO_VERSION ?= $(GITEA_VERSION)
     FORGEJO_VERSION_API ?= $(GITEA_VERSION)+${GITEA_COMPATIBILITY}
   else
-    # drop the "g" prefix prepended by git describe to the commit hash
-    FORGEJO_VERSION ?= $(shell git describe --exclude '*-test' --tags --always 2>/dev/null | sed 's/^v//' | sed 's/\-g/-/')
+    # spoved has no release tags: a build is named after its commit time (UTC, YYMMDDHHmm) and channel, prod
+    # on the develop branch and dev anywhere else (a pull request, a detached commit), e.g. 2610131155-prod.
+    # It parses as the semver 2610131155.0.0-prod, so later builds sort higher.
+    VERSION_DATE := $(shell TZ=UTC git log -1 --date=format-local:%y%m%d%H%M --format=%cd 2>/dev/null)
+    VERSION_CHANNEL ?= $(if $(filter develop,$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null)),prod,dev)
+    ifneq ($(VERSION_DATE),)
+      FORGEJO_VERSION ?= $(VERSION_DATE)-$(VERSION_CHANNEL)
+    endif
     ifneq ($(FORGEJO_VERSION),)
       ifeq ($(findstring $(GITEA_COMPATIBILITY),$(FORGEJO_VERSION)),)
         FORGEJO_VERSION := $(FORGEJO_VERSION)+$(GITEA_COMPATIBILITY)

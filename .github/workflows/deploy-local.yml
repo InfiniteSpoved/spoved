@@ -39,13 +39,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      # The repository has no release tags, so git describe gives a bare commit hash, which spoved can't parse as
-      # a version when it starts with a letter ("Malformed version" at startup). Use the build time (UTC,
-      # YYMMDDHHmm) and the commit instead, as a semver pre-release so it always parses.
       - name: Build
-        run: |
-          make TAGS='bindata timetzdata sqlite sqlite_unlock_notify' \
-            FORGEJO_VERSION="0.0.0-$(date -u +%y%m%d%H%M)-$(git rev-parse --short=10 HEAD)+gitea-1.22.0" build
+        run: make TAGS='bindata timetzdata sqlite sqlite_unlock_notify' build
       - name: Deploy
         env:
           HOST: ${{ secrets.DEPLOY_LOCAL_HOST }}
