@@ -349,9 +349,3 @@ func ConfigureActionRunConcurrency(workflow *act_model.Workflow, run *actions_mo
 	}
 	return nil
 }
-
-// Available reports whether Actions is on for the site and, when owner is an organization, not hidden for it
-func Available(ctx context.Context, owner *user.User) bool {
-	return setting.Actions.Enabled && !unit.TypeActions.UnitGlobalDisabled() &&
-		(owner == nil || !repo_model.HiddenUnits(ctx, owner).Contains(unit.TypeActions))
-}
