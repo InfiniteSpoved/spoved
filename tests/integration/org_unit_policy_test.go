@@ -349,3 +349,52 @@ func TestOrgUnitPolicyQueries(t *testing.T) {
 	withoutRows := countQueries(t, func() { session.MakeRequest(t, NewRequest(t, "GET", "/org3/-/projects"), http.StatusOK) })
 	assert.Equal(t, withoutRows+1, withRows)
 }
+
+// The org settings menu links Packages and Actions only while their routes accept the owner
+func TestOrgSettingsMenuHiddenUnits(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer resetRepoUnitPolicy(t)
+
+	owner := loginUser(t, "user2")
+	token := getTokenForLoggedInUser(t, owner, auth_model.AccessTokenScopeWriteRepository, auth_model.AccessTokenScopeWriteOrganization)
+	createUnitPolicyOrgRepo(t, token, "unit-org-m", "r")
+
+	menu := func(t *testing.T, wantPackages, wantActions bool) {
+		t.Helper()
+		page := owner.MakeRequest(t, NewRequest(t, "GET", "/org/unit-org-m/settings"), http.StatusOK).Body.String()
+		assert.Equal(t, wantPackages, strings.Contains(page, `href="/org/unit-org-m/settings/packages"`), "packages item")
+		assert.Equal(t, wantActions, strings.Contains(page, `href="/org/unit-org-m/settings/actions/runners"`), "actions item")
+	}
+	menu(t, true, true)
+
+	// each unit alone, by site policy and by the org's Units setting
+	for _, hidden := range []unit_model.Type{unit_model.TypePackages, unit_model.TypeActions} {
+		wantPackages, wantActions := hidden != unit_model.TypePackages, hidden != unit_model.TypeActions
+		t.Run("site policy "+unit_model.Units[hidden].NameKey, func(t *testing.T) {
+			defer denyRepoUnits(t, nil, hidden)()
+			menu(t, wantPackages, wantActions)
+		})
+		t.Run("org units "+unit_model.Units[hidden].NameKey, func(t *testing.T) {
+			postOrgUnits(t, owner, "unit-org-m", http.StatusSeeOther, allOrgUnitsBut(hidden)...)
+			menu(t, wantPackages, wantActions)
+			postOrgUnits(t, owner, "unit-org-m", http.StatusSeeOther, allOrgUnitsBut()...)
+		})
+		menu(t, true, true)
+	}
+
+	t.Run("both", func(t *testing.T) {
+		defer denyRepoUnits(t, nil, unit_model.TypePackages, unit_model.TypeActions)()
+		menu(t, false, false)
+	})
+
+	t.Run("app.ini", func(t *testing.T) {
+		t.Run("packages", func(t *testing.T) {
+			defer test.MockVariableValue(&setting.Packages.Enabled, false)()
+			menu(t, false, true)
+		})
+		t.Run("actions", func(t *testing.T) {
+			defer test.MockVariableValue(&setting.Actions.Enabled, false)()
+			menu(t, true, false)
+		})
+	})
+}

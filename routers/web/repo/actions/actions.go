@@ -14,8 +14,8 @@ import (
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
-	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/actions"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/container"
@@ -25,6 +25,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
 	"forgejo.org/routers/web/repo"
+	actions_service "forgejo.org/services/actions"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 
@@ -44,18 +45,12 @@ type Workflow struct {
 
 // MustEnableActions check if actions are enabled in settings
 func MustEnableActions(ctx *context.Context) {
-	if !setting.Actions.Enabled {
-		ctx.NotFound("MustEnableActions", nil)
-		return
-	}
-
-	if unit.TypeActions.UnitGlobalDisabled() {
-		ctx.NotFound("MustEnableActions", nil)
-		return
-	}
-
 	// organization runners, secrets and variables: Actions hidden for the organization
-	if ctx.Org.Organization != nil && repo_model.HiddenUnits(ctx, ctx.Org.Organization.AsUser()).Contains(unit.TypeActions) {
+	var org *user_model.User
+	if ctx.Org.Organization != nil {
+		org = ctx.Org.Organization.AsUser()
+	}
+	if !actions_service.Available(ctx, org) {
 		ctx.NotFound("MustEnableActions", nil)
 		return
 	}
