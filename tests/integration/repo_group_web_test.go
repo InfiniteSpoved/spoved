@@ -82,7 +82,7 @@ func repoGroupRequest(t *testing.T, session *TestSession, req *RequestWrapper, s
 }
 
 // comparableResponse is the status, headers and body of a response, with the request path replaced, and the
-// headers that differ per request (date, cookies) left out.
+// headers that differ per request (date, cookies) left out. The ticking parts (page time, stopwatch seconds) are masked.
 func comparableResponse(t *testing.T, session *TestSession, method, path string) string {
 	t.Helper()
 	var req *RequestWrapper
@@ -100,13 +100,14 @@ func comparableResponse(t *testing.T, session *TestSession, method, path string)
 	}
 	replace := strings.NewReplacer(pairs...)
 	timing := regexp.MustCompile(`<strong>\d+ms</strong>`)
+	stopwatch := regexp.MustCompile(`data-seconds="\d+"`)
 	header := resp.Header().Clone()
 	header.Del("Date")
 	header.Del("Set-Cookie")
 	if loc := header.Get("Location"); loc != "" {
 		header.Set("Location", replace.Replace(loc))
 	}
-	return fmt.Sprintf("%d\n%v\n%s", resp.Code, header, timing.ReplaceAllString(replace.Replace(resp.Body.String()), "TIME"))
+	return fmt.Sprintf("%d\n%v\n%s", resp.Code, header, stopwatch.ReplaceAllString(timing.ReplaceAllString(replace.Replace(resp.Body.String()), "TIME"), `data-seconds="SECONDS"`))
 }
 
 // assertSameResponse compares two comparableResponse results and reports the first line that differs.
