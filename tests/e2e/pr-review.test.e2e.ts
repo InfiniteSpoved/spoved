@@ -104,7 +104,8 @@ test('PR: Create review from commit', async ({page}) => {
 
   // We're back to where we started
   await expect(page.locator('.comment-content')).toBeVisible();
-  await expect(page.getByText('Resolve conversation')).toBeVisible();
+  // exact: the default substring match also finds "Unresolve conversation", which is there until the AJAX swap is done
+  await expect(page.getByText('Resolve conversation', {exact: true})).toBeVisible();
   await expectCommentMenuToOpen(page);
   // #endregion
 
