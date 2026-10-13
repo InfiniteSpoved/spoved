@@ -291,7 +291,8 @@ func TestRepoGroupUI(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "Bills", group.Description)
 		owner.MakeRequest(t, NewRequest(t, "GET", "/org3/billing/api"), http.StatusOK)
-		owner.MakeRequest(t, NewRequest(t, "GET", "/org3/payments"), http.StatusNotFound)
+		resp = owner.MakeRequest(t, NewRequest(t, "GET", "/org3/payments"), http.StatusMovedPermanently)
+		assert.Equal(t, "/org3/billing", resp.Header().Get("Location"), "the old name redirects")
 
 		resp = owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/billing/-/settings", map[string]string{"name": "repo3"}), http.StatusOK)
 		assert.Contains(t, resp.Body.String(), "The name is already used by a repository, a project or a redirect in this organization.")
