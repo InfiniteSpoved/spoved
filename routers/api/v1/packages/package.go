@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"forgejo.org/models/packages"
+	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/optional"
 	api "forgejo.org/modules/structs"
@@ -261,7 +262,18 @@ func LinkPackage(ctx *context.APIContext) {
 
 	var repo *repo_model.Repository
 	if project := ctx.Params("project"); project != "" {
+		// a missing and a hidden repository answer the same plain 404
 		repo, err = repo_model.GetRepositoryByPath(ctx, ctx.User().ID, project, ctx.Params("repo_name"))
+		if err == nil {
+			var perms access_model.Permission
+			if perms, err = access_model.GetUserRepoPermission(ctx, repo, ctx.Doer()); err == nil && !perms.HasAccess() {
+				err = util.ErrNotExist
+			}
+		}
+		if errors.Is(err, util.ErrNotExist) {
+			ctx.NotFound()
+			return
+		}
 	} else {
 		repo, err = repo_model.GetRepositoryByName(ctx, ctx.User().ID, ctx.Params("repo_name"))
 	}

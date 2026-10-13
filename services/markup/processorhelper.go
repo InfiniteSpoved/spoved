@@ -37,8 +37,8 @@ func ProcessorHelper() *markup.ProcessorHelper {
 			// when using gitea context (web context), use user's visibility and user's permission to check
 			return user.IsUserVisibleToViewer(giteaCtx, mentionedUser, giteaCtx.Doer)
 		},
-		GetRepoFileBlob: func(ctx context.Context, ownerName, repoName, commitSha, filePath string, language *string) (*git.Blob, error) {
-			repo, err := repo.GetRepositoryByOwnerAndName(ctx, ownerName, repoName)
+		GetRepoFileBlob: func(ctx context.Context, ownerName, groupName, repoName, commitSha, filePath string, language *string) (*git.Blob, error) {
+			repo, err := repo.GetRepositoryByRef(ctx, ownerName, groupName, repoName)
 			if err != nil {
 				return nil, err
 			}

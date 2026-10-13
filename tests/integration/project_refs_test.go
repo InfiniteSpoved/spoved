@@ -5,8 +5,10 @@ package integration
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	auth_model "forgejo.org/models/auth"
@@ -17,7 +19,9 @@ import (
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/repository"
+	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/test"
 	issue_service "forgejo.org/services/issue"
 	"forgejo.org/tests"
 
@@ -158,6 +162,27 @@ func TestAPIIssueDependencyProject(t *testing.T) {
 	// unknown project, unknown repository: the same answer
 	add(second, "org3/proj/pub/-", api.IssueMeta{Index: 1, Owner: "org3", Name: "pub", Project: "nope"}, http.StatusNotFound)
 	add(second, "org3/proj/pub/-", api.IssueMeta{Index: 1, Owner: "org3", Name: "nope"}, http.StatusNotFound)
+
+	t.Run("cross repository dependencies off", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.Service.AllowCrossRepositoryDependencies, false)()
+		third := createRefIssue(t, token, "org3/proj/pub/-", "third in project", "")
+		// the flag is checked before any lookup: existing, unknown and hidden targets all answer 400
+		for _, meta := range []api.IssueMeta{
+			{Index: 1, Owner: "org3", Name: "pub", Project: "proj"},
+			{Index: 1, Owner: "org3", Name: "pub"},
+			{Index: 1, Owner: "org3", Name: "pub", Project: "nope"},
+			{Index: 1, Owner: "org3", Name: "nope", Project: "proj"},
+			{Index: 1, Owner: "org3", Name: "hid", Project: "secret"},
+		} {
+			if meta.Project == "proj" && meta.Name == "pub" {
+				continue // that is the repository itself, see below
+			}
+			add(third, "org3/proj/pub/-", meta, http.StatusBadRequest)
+		}
+		// the repository itself, in any letter case, still works
+		add(third, "org3/proj/pub/-", api.IssueMeta{Index: inProject.Index, Owner: "ORG3", Name: "Pub", Project: "PROJ"}, http.StatusCreated)
+		assert.True(t, depends(third, inProject))
+	})
 }
 
 func TestProjectComparePullHeads(t *testing.T) {
@@ -182,6 +207,8 @@ func TestAPIPackageLinkProject(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	f, _ := prepareRepoGroupGit(t)
 	token := getTokenForLoggedInUser(t, loginUser(t, "user2"), auth_model.AccessTokenScopeWritePackage, auth_model.AccessTokenScopeWriteOrganization)
+	token4 := getTokenForLoggedInUser(t, loginUser(t, "user4"), auth_model.AccessTokenScopeWritePackage, auth_model.AccessTokenScopeWriteOrganization)
+	token5 := getTokenForLoggedInUser(t, loginUser(t, "user5"), auth_model.AccessTokenScopeWritePackage, auth_model.AccessTokenScopeWriteOrganization)
 
 	upload := func(name string) *packages_model.Package {
 		MakeRequest(t, NewRequestWithBody(t, "PUT", fmt.Sprintf("/api/packages/org3/generic/%s/1.0/file.bin", name), bytes.NewReader([]byte("content"))).AddBasicAuth("user2"), http.StatusCreated)
@@ -205,8 +232,49 @@ func TestAPIPackageLinkProject(t *testing.T) {
 	assert.Zero(t, root.GroupID)
 
 	upload("nested")
+	// a hidden private project repository answers exactly like a missing one, to a writer of the package
+	hidden := apiResponse(t, "POST", "/api/v1/packages/org3/generic/nested/-/link/secret/hid", token4)
+	missing := apiResponse(t, "POST", "/api/v1/packages/org3/generic/nested/-/link/secret/hid2", token4)
+	assert.Equal(t, hidden, missing)
+	assert.Equal(t, "404", strings.SplitN(hidden, "\n", 2)[0])
+	// refused without package write access, and without a token
+	MakeRequest(t, NewRequest(t, "POST", "/api/v1/packages/org3/generic/nested/-/link/proj/pub").AddTokenAuth(token5), http.StatusForbidden)
+	MakeRequest(t, NewRequest(t, "POST", "/api/v1/packages/org3/generic/nested/-/link/proj/pub"), http.StatusUnauthorized)
 	link("nested", "proj/pub", http.StatusCreated)
 	pkg, err = packages_model.GetPackageByName(db.DefaultContext, 3, packages_model.TypeGeneric, "nested")
 	require.NoError(t, err)
 	assert.Equal(t, f.pub.ID, pkg.RepoID)
+}
+
+// The `owner:branch` head of the pull API names the base side from the request's repository.
+func TestAPIPullHeadProject(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	prepareRepoGroupGit(t)
+	token := getTokenForLoggedInUser(t, loginUser(t, "user2"), auth_model.AccessTokenScopeWriteRepository)
+
+	for _, path := range []string{"org3/proj/pub/-", "org3/pub"} {
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/"+path+"/contents/new.txt", &api.CreateFileOptions{
+			FileOptions:   api.FileOptions{Message: "add", BranchName: "main", NewBranchName: "feature"},
+			ContentBase64: base64.StdEncoding.EncodeToString([]byte("new")),
+		}).AddTokenAuth(token), http.StatusCreated)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/"+path+"/pulls", &api.CreatePullRequestOption{Head: "feature", Base: "main", Title: "pr"}).AddTokenAuth(token), http.StatusCreated)
+	}
+	baseOf := func(path, head string, status int) string {
+		resp := MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/"+path+"/pulls/main/"+head).AddTokenAuth(token), status)
+		if status != http.StatusOK {
+			return ""
+		}
+		var pr api.PullRequest
+		DecodeJSON(t, resp, &pr)
+		return pr.Base.Repository.FullName
+	}
+
+	assert.Equal(t, "org3/proj/pub", baseOf("org3/proj/pub/-", "feature", http.StatusOK))
+	assert.Equal(t, "org3/proj/pub", baseOf("org3/proj/pub/-", "org3:feature", http.StatusOK), "the same owner is the request's repository, not the root one")
+	assert.Equal(t, "org3/proj/pub", baseOf("org3/proj/pub/-", "org3/proj/pub:feature", http.StatusOK))
+	assert.Equal(t, "org3/pub", baseOf("org3/pub", "org3:feature", http.StatusOK))
+	assert.Equal(t, "org3/pub", baseOf("org3/pub", "org3/pub:feature", http.StatusOK))
+	baseOf("org3/proj/pub/-", "org3/pub:feature", http.StatusNotFound) // no pull request from the root repository into the project one
+	baseOf("org3/proj/pub/-", "org3/nope/pub:feature", http.StatusNotFound)
+	baseOf("org3/proj/pub/-", "org3/a/b/c:feature", http.StatusNotFound)
 }

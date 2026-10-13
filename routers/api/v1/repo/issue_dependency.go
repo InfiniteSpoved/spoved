@@ -6,6 +6,7 @@ package repo
 
 import (
 	"net/http"
+	"strings"
 
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
@@ -495,7 +496,7 @@ func RemoveIssueBlocking(ctx *context.APIContext) {
 
 func getFormIssue(ctx *context.APIContext, form *api.IssueMeta) *issues_model.Issue {
 	var repo *repo_model.Repository
-	if cur := ctx.Repo().Repository; form.Owner != cur.OwnerName || form.Project != cur.GroupName || form.Name != cur.Name {
+	if cur := ctx.Repo().Repository; !strings.EqualFold(form.Owner, cur.OwnerName) || !strings.EqualFold(form.Project, cur.GroupName) || !strings.EqualFold(form.Name, cur.Name) {
 		if !setting.Service.AllowCrossRepositoryDependencies {
 			ctx.JSON(http.StatusBadRequest, "CrossRepositoryDependencies not enabled")
 			return nil

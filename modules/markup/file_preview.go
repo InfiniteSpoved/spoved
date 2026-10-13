@@ -94,17 +94,22 @@ func newFilePreview(ctx *RenderContext, node *html.Node, locale translation.Loca
 	preview.end = m[1]
 
 	projPathSegments := strings.Split(projPath, "/")
-	if len(projPathSegments) != 2 {
+	if len(projPathSegments) != 2 && len(projPathSegments) != 3 {
 		return nil
 	}
 
-	ownerName := projPathSegments[len(projPathSegments)-2]
+	ownerName := projPathSegments[0]
+	groupName := ""
+	if len(projPathSegments) == 3 {
+		groupName = projPathSegments[1]
+	}
 	repoName := projPathSegments[len(projPathSegments)-1]
 
 	var language string
 	fileBlob, err := DefaultProcessorHelper.GetRepoFileBlob(
 		ctx.Ctx,
 		ownerName,
+		groupName,
 		repoName,
 		commitSha, filePath,
 		&language,
@@ -115,9 +120,9 @@ func newFilePreview(ctx *RenderContext, node *html.Node, locale translation.Loca
 
 	titleBuffer := new(bytes.Buffer)
 
-	isExternRef := ownerName != ctx.Metas["user"] || repoName != ctx.Metas["repo"] || ctx.Metas["group"] != ""
+	isExternRef := ownerName != ctx.Metas["user"] || groupName != ctx.Metas["group"] || repoName != ctx.Metas["repo"]
 	if isExternRef {
-		err = html.Render(titleBuffer, createLink(node.Data[m[0]:m[3]], ownerName+"/"+repoName, ""))
+		err = html.Render(titleBuffer, createLink(node.Data[m[0]:m[3]], strings.Join(projPathSegments, "/"), ""))
 		if err != nil {
 			log.Error("failed to render repoLink: %v", err)
 		}
