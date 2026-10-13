@@ -6,6 +6,7 @@ package actions
 import (
 	"testing"
 
+	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
@@ -84,6 +85,16 @@ func TestProjectVariables(t *testing.T) {
 		ok, err = DeleteVariable(ctx, varA.ID, 3, a.ID, 0)
 		require.NoError(t, err)
 		assert.True(t, ok)
+	})
+
+	t.Run("a row of a project that is gone can't be changed", func(t *testing.T) {
+		_, err := db.Exec(ctx, "INSERT INTO `action_variable` (owner_id, group_id, repo_id, name, data, created_unix) VALUES (3, 99999, 0, 'ORPHAN', 'x', 0)")
+		require.NoError(t, err)
+		orphan := unittest.AssertExistsAndLoadBean(t, &ActionVariable{Name: "ORPHAN"})
+		_, err = UpdateVariable(ctx, &ActionVariable{ID: orphan.ID, OwnerID: 3, GroupID: 99999, Name: "ORPHAN", Data: "y"})
+		require.ErrorIs(t, err, repo_model.ErrRepoGroupNotExist)
+		_, err = DeleteVariable(ctx, orphan.ID, 3, 99999, 0)
+		require.ErrorIs(t, err, repo_model.ErrRepoGroupNotExist)
 	})
 
 	t.Run("missing project", func(t *testing.T) {

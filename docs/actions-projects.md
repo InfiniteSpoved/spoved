@@ -30,4 +30,4 @@ An organization owner cannot stop a project from overriding an organization secr
 
 ## OpenID Connect
 
-The ID token's `repository` claim is the full path, and it carries `namespace_path`. Names change when repositories move; write trust policies on `repository_id` and `repository_owner_id`, not on `sub` patterns such as `repo:dept/*`, which also match repositories in projects.
+The ID token's `repository` claim is the full path, and it carries `namespace_path`. The default `sub` is `repo:<owner>-<owner id>/<repository>-<repository id>:…` with the repository's own name only, so renaming a project or moving the repository does not change it (the legacy format follows the full path). Names change when repositories move; write trust policies on `repository_id` and `repository_owner_id`, not on `sub` patterns such as `repo:dept/*`, which also match repositories in projects.

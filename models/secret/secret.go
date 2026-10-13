@@ -90,7 +90,7 @@ func InsertEncryptedSecret(ctx context.Context, ownerID, groupID, repoID int64, 
 	}
 
 	return secret, db.WithTx(ctx, func(ctx context.Context) error {
-		if err := lockGroup(ctx, ownerID, groupID); err != nil {
+		if err := LockGroup(ctx, ownerID, groupID); err != nil {
 			return err
 		}
 		if err := db.Insert(ctx, secret); err != nil {
@@ -103,9 +103,9 @@ func InsertEncryptedSecret(ctx context.Context, ownerID, groupID, repoID int64, 
 	})
 }
 
-// lockGroup locks the project row, so that deleting the project (which deletes its secrets) and adding one run one
-// after the other and a secret never outlives its project.
-func lockGroup(ctx context.Context, ownerID, groupID int64) error {
+// LockGroup locks the project row (nothing for groupID 0), so that deleting the project (which deletes its secrets)
+// and adding, changing or deleting one run one after the other and a secret never outlives its project.
+func LockGroup(ctx context.Context, ownerID, groupID int64) error {
 	if groupID == 0 {
 		return nil
 	}
@@ -193,21 +193,24 @@ func GetSecretByID(ctx context.Context, ownerID, groupID, repoID, id int64) (*Se
 }
 
 func UpdateSecret(ctx context.Context, secret *Secret, columns ...string) error {
-	e := db.GetEngine(ctx)
-
 	if err := ValidateName(secret.Name); err != nil {
 		return err
 	}
 	secret.Name = strings.ToUpper(secret.Name)
 
-	var err error
-	if len(columns) == 0 {
-		_, err = e.ID(secret.ID).AllCols().Update(secret)
-	} else {
-		_, err = e.ID(secret.ID).Cols(columns...).Update(secret)
-	}
-
-	return err
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if err := LockGroup(ctx, secret.OwnerID, secret.GroupID); err != nil {
+			return err
+		}
+		e := db.GetEngine(ctx)
+		var err error
+		if len(columns) == 0 {
+			_, err = e.ID(secret.ID).AllCols().Update(secret)
+		} else {
+			_, err = e.ID(secret.ID).Cols(columns...).Update(secret)
+		}
+		return err
+	})
 }
 
 // FetchActionSecrets returns the secrets of a repository; groupID is the project it is in (0 at the root of its owner).

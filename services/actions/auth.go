@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -164,8 +165,8 @@ func generateOIDCExtra(gitCtx map[string]any) (string, error) {
 }
 
 func generateOIDCSub(gitCtx map[string]any) string {
-	nameParts := strings.SplitN(gitCtx["repository"].(string), "/", 2)
-	repoName := nameParts[1]
+	// the leaf (a name has no "/"), so renaming the project or moving the repository doesn't change the subject
+	repoName := path.Base(gitCtx["repository"].(string))
 	switch gitCtx["event_name"] {
 	case "pull_request":
 		return fmt.Sprintf("repo:%s-%s/%s-%s:pull_request", gitCtx["repository_owner"], gitCtx["repository_owner_id"], repoName, gitCtx["repository_id"])

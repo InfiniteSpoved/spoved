@@ -441,9 +441,15 @@ func TestGenerateGiteaContextProject(t *testing.T) {
 
 	// both subject formats tell the two repositories apart
 	assert.Equal(t, "repo:dept-789/api-456:ref:refs/heads/main", generateOIDCSub(r))
-	assert.Equal(t, "repo:dept-789/payments/api-457:ref:refs/heads/main", generateOIDCSub(n))
+	assert.Equal(t, "repo:dept-789/api-457:ref:refs/heads/main", generateOIDCSub(n))
 	assert.Equal(t, "repo:dept/api:ref:refs/heads/main", legacyGenerateOIDCSub(r))
 	assert.Equal(t, "repo:dept/payments/api:ref:refs/heads/main", legacyGenerateOIDCSub(n))
+
+	// the default subject is stable when the project is renamed or the repository moves; the legacy one follows the path
+	moved := gen(&repo.Repository{ID: 457, OwnerID: 789, OwnerName: "dept", Name: "api", GroupID: 4, GroupName: "billing"})
+	assert.Equal(t, generateOIDCSub(n), generateOIDCSub(moved))
+	assert.Equal(t, generateOIDCSub(n), generateOIDCSub(gen(&repo.Repository{ID: 457, OwnerID: 789, OwnerName: "dept", Name: "api"})))
+	assert.Equal(t, "repo:dept/billing/api:ref:refs/heads/main", legacyGenerateOIDCSub(moved))
 
 	// the claims carry the namespace and the IDs
 	extra, err := generateOIDCExtra(n)

@@ -44,6 +44,16 @@ func init() {
 	db.RegisterModel(new(ActionVariable))
 }
 
+// lockGroup locks the project row (nothing for groupID 0), so that deleting the project (which deletes its variables)
+// and adding, changing or deleting one run one after the other.
+func lockGroup(ctx context.Context, ownerID, groupID int64) error {
+	if groupID == 0 {
+		return nil
+	}
+	_, err := repo_model.LockRepoGroup(ctx, ownerID, groupID)
+	return err
+}
+
 func InsertVariable(ctx context.Context, ownerID, groupID, repoID int64, name, data string) (*ActionVariable, error) {
 	if ownerID != 0 && repoID != 0 {
 		// It's trying to create a variable that belongs to a repository, but OwnerID has been set accidentally.
@@ -62,11 +72,8 @@ func InsertVariable(ctx context.Context, ownerID, groupID, repoID int64, name, d
 		Data:    data,
 	}
 	return variable, db.WithTx(ctx, func(ctx context.Context) error {
-		// lock the project row, so that deleting the project and adding a variable run one after the other
-		if groupID != 0 {
-			if _, err := repo_model.LockRepoGroup(ctx, ownerID, groupID); err != nil {
-				return err
-			}
+		if err := lockGroup(ctx, ownerID, groupID); err != nil {
+			return err
 		}
 		return db.Insert(ctx, variable)
 	})
@@ -111,16 +118,30 @@ func FindVariables(ctx context.Context, opts FindVariablesOpts) ([]*ActionVariab
 }
 
 func UpdateVariable(ctx context.Context, variable *ActionVariable) (bool, error) {
-	count, err := db.GetEngine(ctx).ID(variable.ID).Where("owner_id = ? AND group_id = ? AND repo_id = ?", variable.OwnerID, variable.GroupID, variable.RepoID).Cols("name", "data").
-		Update(&ActionVariable{
-			Name: variable.Name,
-			Data: variable.Data,
-		})
+	var count int64
+	err := db.WithTx(ctx, func(ctx context.Context) (err error) {
+		if err = lockGroup(ctx, variable.OwnerID, variable.GroupID); err != nil {
+			return err
+		}
+		count, err = db.GetEngine(ctx).ID(variable.ID).Where("owner_id = ? AND group_id = ? AND repo_id = ?", variable.OwnerID, variable.GroupID, variable.RepoID).Cols("name", "data").
+			Update(&ActionVariable{
+				Name: variable.Name,
+				Data: variable.Data,
+			})
+		return err
+	})
 	return count != 0, err
 }
 
 func DeleteVariable(ctx context.Context, variableID, ownerID, groupID, repoID int64) (bool, error) {
-	count, err := db.GetEngine(ctx).Table("action_variable").Where("id = ? AND owner_id = ? AND group_id = ? AND repo_id = ?", variableID, ownerID, groupID, repoID).Delete()
+	var count int64
+	err := db.WithTx(ctx, func(ctx context.Context) (err error) {
+		if err = lockGroup(ctx, ownerID, groupID); err != nil {
+			return err
+		}
+		count, err = db.GetEngine(ctx).Table("action_variable").Where("id = ? AND owner_id = ? AND group_id = ? AND repo_id = ?", variableID, ownerID, groupID, repoID).Delete()
+		return err
+	})
 	return count != 0, err
 }
 

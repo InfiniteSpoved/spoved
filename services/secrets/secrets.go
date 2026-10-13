@@ -75,8 +75,11 @@ func DeleteSecretByName(ctx context.Context, ownerID, groupID, repoID int64, nam
 }
 
 func deleteSecret(ctx context.Context, s *secret_model.Secret) error {
-	if _, err := db.DeleteByID[secret_model.Secret](ctx, s.ID); err != nil {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if err := secret_model.LockGroup(ctx, s.OwnerID, s.GroupID); err != nil {
+			return err
+		}
+		_, err := db.DeleteByID[secret_model.Secret](ctx, s.ID)
 		return err
-	}
-	return nil
+	})
 }

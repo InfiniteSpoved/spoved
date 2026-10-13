@@ -19,7 +19,7 @@ import (
 const tplRepoGroupActions base.TplName = "org/repo_group/actions"
 
 // repoGroupActionsPage renders the secrets (kind "secrets") or variables list of a project,
-// `/{org}/{project}/-/settings/secrets`; the shared lists post to {{.Link}}.
+// `/org/{org}/groups/{id}/settings/secrets`; the shared lists post to {{.Link}}.
 func repoGroupActionsPage(ctx *context.Context, kind string) {
 	org := ctx.Org.Organization
 	group := ctx.Data["RepoGroup"].(*repo_model.RepoGroup)

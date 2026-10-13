@@ -321,19 +321,31 @@ jobs:
 			return secrets, task.Vars
 		}
 
+		runner.setRequestKey("11111111-2222-4333-8444-555555555551")
 		secrets, vars := fetch()
 		assert.Equal(t, map[string]string{"SHARED": "org"}, secrets, "root repository: the organization's")
 		assert.Equal(t, map[string]string{"SHARED": "org"}, vars)
 
 		require.NoError(t, repo_service.MoveRepository(ctx, user2, repo, a.ID))
-		secrets, vars = fetch()
-		assert.Equal(t, map[string]string{"SHARED": "a", "ONLY_A": "a"}, secrets, "moved into A")
-		assert.Equal(t, map[string]string{"SHARED": "a", "ONLY_A": "a"}, vars)
+		runner.setRequestKey("11111111-2222-4333-8444-555555555552")
+		secretsA, varsA := fetch()
+		assert.Equal(t, map[string]string{"SHARED": "a", "ONLY_A": "a"}, secretsA, "moved into A")
+		assert.Equal(t, map[string]string{"SHARED": "a", "ONLY_A": "a"}, varsA)
 
 		repo = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repo.ID})
 		require.NoError(t, repo_service.MoveRepository(ctx, user2, repo, b.ID))
+		runner.setRequestKey("11111111-2222-4333-8444-555555555553")
 		secrets, vars = fetch()
 		assert.Equal(t, map[string]string{"SHARED": "b", "ONLY_B": "b"}, secrets, "moved on to B")
+		assert.Equal(t, map[string]string{"SHARED": "b", "ONLY_B": "b"}, vars)
+		// what the task of A was given is not touched by the move: the server doesn't hand it out again to a running task
+		assert.Equal(t, map[string]string{"SHARED": "a", "ONLY_A": "a"}, secretsA)
+		assert.Equal(t, map[string]string{"SHARED": "a", "ONLY_A": "a"}, varsA)
+
+		// only a retry of the same fetch request (a lost response) is answered with the values of the project it is in now
+		runner.setRequestKey("11111111-2222-4333-8444-555555555552")
+		secrets, vars = fetch()
+		assert.Equal(t, map[string]string{"SHARED": "b", "ONLY_B": "b"}, secrets, "retry after the move")
 		assert.Equal(t, map[string]string{"SHARED": "b", "ONLY_B": "b"}, vars)
 	})
 }
