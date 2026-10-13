@@ -165,5 +165,27 @@ func TestRepoGroupBranchRules(t *testing.T) {
 			owner.MakeRequest(t, NewRequest(t, "POST", fmt.Sprintf("/org3/proj/-/settings/branches/%d/delete", rule.ID)), http.StatusOK)
 			unittest.AssertNotExistsBean(t, &git_model.ProtectedBranch{ID: rule.ID})
 		})
+
+		t.Run("moving a repository in re-checks its pull requests", func(t *testing.T) {
+			require.NoError(t, git_model.UpdateOrgProtectBranch(db.DefaultContext, f.org.ID, proj.ID,
+				&git_model.ProtectedBranch{RuleName: "main", ProtectedFilePatterns: "secret.txt"}, git_model.WhitelistOptions{}, nil))
+			repo, err := repo_service.CreateRepository(db.DefaultContext, admin, f.org, repo_service.CreateRepoOptions{
+				Name: "moved", Readme: "Default", AutoInit: true, DefaultBranch: "main",
+			})
+			require.NoError(t, err)
+			token := getTokenForLoggedInUser(t, owner, auth_model.AccessTokenScopeWriteRepository)
+			call := func(base, path string, body any, status int) *httptest.ResponseRecorder {
+				return MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/"+base+path, body).AddTokenAuth(token), status)
+			}
+			call("org3/moved", "/branches", &api.CreateBranchRepoOption{BranchName: "feat", OldBranchName: "main"}, http.StatusCreated)
+			call("org3/moved", "/contents/secret.txt", &api.CreateFileOptions{FileOptions: api.FileOptions{BranchName: "feat"}, ContentBase64: base64.StdEncoding.EncodeToString([]byte("s"))}, http.StatusCreated)
+			var pr api.PullRequest
+			DecodeJSON(t, call("org3/moved", "/pulls", &api.CreatePullRequestOption{Head: "feat", Base: "main", Title: "feat"}, http.StatusCreated), &pr)
+
+			// no push after the move: the protected file is still found
+			require.NoError(t, repo_service.MoveRepository(db.DefaultContext, admin, repo, proj.ID))
+			resp := call("org3/proj/moved/-", fmt.Sprintf("/pulls/%d/merge", pr.Index), &forms.MergePullRequestForm{Do: "merge"}, http.StatusMethodNotAllowed)
+			assert.Contains(t, resp.Body.String(), "Changed protected files")
+		})
 	})
 }

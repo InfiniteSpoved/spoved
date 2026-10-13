@@ -195,6 +195,9 @@ func SettingsProtectedBranchPost(ctx *context.Context) {
 		ctx.Flash.Error(ctx.Tr("repo.settings.approval_rules_invalid", err.Error()))
 		ctx.Redirect(editLink + "?rule_name=" + url.QueryEscape(f.RuleName))
 		return
+	} else if errors.Is(err, util.ErrNotExist) { // the project or the rule was deleted meanwhile
+		ctx.NotFound("UpdateOrgProtectBranch", err)
+		return
 	} else if err != nil {
 		ctx.ServerError("UpdateOrgProtectBranch", err)
 		return

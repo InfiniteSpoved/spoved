@@ -15,8 +15,10 @@ import (
 	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/log"
 	"forgejo.org/modules/util"
 	notify_service "forgejo.org/services/notify"
+	pull_service "forgejo.org/services/pull"
 )
 
 // ErrRepoMoved is returned when the repository changed its project while a change of it waited for its locks.
@@ -98,6 +100,10 @@ func MoveRepository(ctx context.Context, doer *user_model.User, repo *repo_model
 		return err
 	}
 	notify_service.TransferRepository(ctx, doer, repo, oldPlace)
+	// the project's branch rules apply now: their protected files are stored per pull request
+	if err := pull_service.CheckPRsForRepo(ctx, repo.ID); err != nil {
+		log.Error("CheckPRsForRepo: %v", err)
+	}
 	return nil
 }
 

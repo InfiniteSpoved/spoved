@@ -388,14 +388,23 @@ func CheckPRsForOrgRule(ctx context.Context, rule *git_model.ProtectedBranch) er
 	if rule.ApplyToSelectedRepos {
 		repoIDs = builder.Select("repo_id").From("protected_branch_repo").Where(builder.Eq{"protected_branch_id": rule.ID})
 	}
+	return checkOpenPRs(ctx, repoIDs, rule.Match)
+}
+
+// CheckPRsForRepo rechecks every open pull request of the repository, after it moved to other rules.
+func CheckPRsForRepo(ctx context.Context, repoID int64) error {
+	return checkOpenPRs(ctx, repoID, func(string) bool { return true })
+}
+
+func checkOpenPRs(ctx context.Context, baseRepoIDs any, matchBranch func(string) bool) error {
 	var prs []*issues_model.PullRequest
 	if err := db.GetEngine(ctx).Join("INNER", "issue", "issue.id = pull_request.issue_id").
 		Where(builder.Eq{"pull_request.has_merged": false, "issue.is_closed": false}).
-		And(builder.In("pull_request.base_repo_id", repoIDs)).Find(&prs); err != nil {
+		And(builder.In("pull_request.base_repo_id", baseRepoIDs)).Find(&prs); err != nil {
 		return err
 	}
 	for _, pr := range prs {
-		if rule.Match(pr.BaseBranch) {
+		if matchBranch(pr.BaseBranch) {
 			AddToTaskQueue(ctx, pr)
 		}
 	}
