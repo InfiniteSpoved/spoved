@@ -1147,6 +1147,20 @@ func registerRoutes(m *web.Route) {
 			m.Post("/delete", org.RepoGroupDeletePost)
 			m.Post("/teams/link", org.RepoGroupTeamLink)
 			m.Post("/teams/unlink", org.RepoGroupTeamUnlink)
+			m.Group("/hooks", func() {
+				m.Get("", org.RepoGroupWebhooks)
+				m.Post("/delete", org.RepoGroupDeleteWebhook)
+				m.Get("/{type}/new", repo_setting.WebhookNew)
+				m.Post("/{type}/new", repo_setting.WebhookCreate)
+				m.Group("/{hook}", func() { // ":id" is the project
+					m.Get("", repo_setting.WebhookEdit)
+					m.Post("", repo_setting.WebhookUpdate)
+					m.Post("/replay/{uuid}", repo_setting.WebhookReplay)
+				})
+			}, webhooksEnabled, func(ctx *context.Context) {
+				ctx.Data["PageIsRepoGroupSettings"] = true
+				ctx.Data["PageIsViewRepoGroups"] = true
+			})
 			m.Group("/branches", func() {
 				m.Combo("/edit").Get(org_setting.SettingsProtectedBranch).
 					Post(web.Bind(forms.ProtectBranchForm{}), org_setting.SettingsProtectedBranchPost)

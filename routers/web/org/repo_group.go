@@ -13,6 +13,7 @@ import (
 	org_model "forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	webhook_model "forgejo.org/models/webhook"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
@@ -22,6 +23,7 @@ import (
 	"forgejo.org/services/context"
 	"forgejo.org/services/forms"
 	repo_service "forgejo.org/services/repository"
+	webhook_service "forgejo.org/services/webhook"
 )
 
 const (
@@ -29,6 +31,7 @@ const (
 	tplRepoGroups        base.TplName = "org/repo_group/list"
 	tplRepoGroupNew      base.TplName = "org/repo_group/new"
 	tplRepoGroupSettings base.TplName = "org/repo_group/settings"
+	tplRepoGroupHooks    base.TplName = "org/repo_group/hooks"
 )
 
 // orgRepoSearchOptions are the options of the organization's repository lists, so a project's count is its list.
@@ -294,4 +297,40 @@ func RepoGroupDeletePost(ctx *context.Context) {
 	}
 	ctx.Flash.Success(ctx.Tr("repo_group.delete.success", group.Name))
 	ctx.Redirect(ctx.Org.OrgLink + "/groups")
+}
+
+// RepoGroupWebhooks lists the webhooks of a project, `/{org}/{project}/-/settings/hooks`.
+func RepoGroupWebhooks(ctx *context.Context) {
+	org := ctx.Org.Organization
+	group := ctx.Data["RepoGroup"].(*repo_model.RepoGroup)
+	if !prepareRepoGroupForm(ctx, "repo_group.hooks") {
+		return
+	}
+	link := group.Link(org.Name) + "/-/settings/hooks"
+	ctx.Data["RepoGroupLink"] = group.Link(org.Name)
+	ctx.Data["BaseLink"] = link
+	ctx.Data["BaseLinkNew"] = link
+	ctx.Data["WebhookList"] = webhook_service.EnabledList(ctx)
+	ctx.Data["DisabledWebhookTypes"] = webhook_service.DisabledTypes(ctx)
+	ctx.Data["Description"] = ctx.Tr("repo_group.hooks_desc")
+
+	ws, err := db.Find[webhook_model.Webhook](ctx, webhook_model.ListWebhookOptions{OwnerID: org.ID, GroupID: group.ID})
+	if err != nil {
+		ctx.ServerError("ListWebhooksByOpts", err)
+		return
+	}
+	ctx.Data["Webhooks"] = ws
+	ctx.HTML(http.StatusOK, tplRepoGroupHooks)
+}
+
+// RepoGroupDeleteWebhook deletes a webhook of the project.
+func RepoGroupDeleteWebhook(ctx *context.Context) {
+	org := ctx.Org.Organization
+	group := ctx.Data["RepoGroup"].(*repo_model.RepoGroup)
+	if err := webhook_model.DeleteWebhookByGroupID(ctx, org.ID, group.ID, ctx.FormInt64("id")); err != nil {
+		ctx.Flash.Error("DeleteWebhookByGroupID: " + err.Error())
+	} else {
+		ctx.Flash.Success(ctx.Tr("repo.settings.webhook_deletion_success"))
+	}
+	ctx.JSONRedirect(group.Link(org.Name) + "/-/settings/hooks")
 }

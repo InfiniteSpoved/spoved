@@ -123,6 +123,7 @@ type Webhook struct {
 	ID                        int64 `xorm:"pk autoincr"`
 	RepoID                    int64 `xorm:"INDEX"` // An ID of 0 indicates either a default or system webhook
 	OwnerID                   int64 `xorm:"INDEX"`
+	GroupID                   int64 `xorm:"INDEX NOT NULL DEFAULT 0"` // a project of the organization OwnerID; 0 for its own hooks
 	IsSystemWebhook           bool
 	URL                       string `xorm:"url TEXT"`
 	HTTPMethod                string `xorm:"http_method"`
@@ -525,7 +526,19 @@ func GetWebhookByRepoID(ctx context.Context, repoID, id int64) (*Webhook, error)
 // GetWebhookByOwnerID returns webhook of a user or organization by given ID.
 func GetWebhookByOwnerID(ctx context.Context, ownerID, id int64) (*Webhook, error) {
 	webhook := new(Webhook)
-	has, err := db.GetEngine(ctx).Where("id=? AND owner_id=?", id, ownerID).Get(webhook)
+	has, err := db.GetEngine(ctx).Where("id=? AND owner_id=? AND group_id=0", id, ownerID).Get(webhook)
+	if err != nil {
+		return nil, err
+	} else if !has {
+		return nil, ErrWebhookNotExist{ID: id}
+	}
+	return webhook, nil
+}
+
+// GetWebhookByGroupID returns the webhook of a project of the organization ownerID by given ID.
+func GetWebhookByGroupID(ctx context.Context, ownerID, groupID, id int64) (*Webhook, error) {
+	webhook := new(Webhook)
+	has, err := db.GetEngine(ctx).Where("id=? AND owner_id=? AND group_id=? AND repo_id=0", id, ownerID, groupID).Get(webhook)
 	if err != nil {
 		return nil, err
 	} else if !has {
@@ -539,6 +552,7 @@ type ListWebhookOptions struct {
 	db.ListOptions
 	RepoID   int64
 	OwnerID  int64
+	GroupID  int64 // a project of OwnerID; with OwnerID set, 0 lists the owner's own hooks only
 	IsActive optional.Option[bool]
 }
 
@@ -548,7 +562,9 @@ func (opts ListWebhookOptions) ToConds() builder.Cond {
 		cond = cond.And(builder.Eq{"webhook.repo_id": opts.RepoID})
 	}
 	if opts.OwnerID != 0 {
-		cond = cond.And(builder.Eq{"webhook.owner_id": opts.OwnerID})
+		cond = cond.And(builder.Eq{"webhook.owner_id": opts.OwnerID, "webhook.group_id": opts.GroupID})
+	} else if opts.GroupID != 0 {
+		cond = cond.And(builder.Eq{"webhook.id": 0}) // a project is only meaningful with its owner
 	}
 	if has, value := opts.IsActive.Get(); has {
 		cond = cond.And(builder.Eq{"webhook.is_active": value})
@@ -606,6 +622,14 @@ func DeleteWebhookByRepoID(ctx context.Context, repoID, id int64) error {
 // DeleteWebhookByOwnerID deletes webhook of a user or organization by given ID.
 func DeleteWebhookByOwnerID(ctx context.Context, ownerID, id int64) error {
 	if _, err := GetWebhookByOwnerID(ctx, ownerID, id); err != nil {
+		return err
+	}
+	return DeleteWebhookByID(ctx, id)
+}
+
+// DeleteWebhookByGroupID deletes the webhook of a project of the organization ownerID by given ID.
+func DeleteWebhookByGroupID(ctx context.Context, ownerID, groupID, id int64) error {
+	if _, err := GetWebhookByGroupID(ctx, ownerID, groupID, id); err != nil {
 		return err
 	}
 	return DeleteWebhookByID(ctx, id)

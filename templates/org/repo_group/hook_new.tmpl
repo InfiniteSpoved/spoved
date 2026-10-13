@@ -1,0 +1,14 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content organization settings repo-group new webhook">
+	{{template "org/header" .}}
+	<div class="ui container">
+		{{template "base/alert" .}}
+		<h2 class="tw-break-anywhere">
+			<a class="muted" href="{{.Org.HomeLink}}">{{.Org.Name}}</a> / <a class="muted" href="{{.RepoGroupLink}}">{{.RepoGroup.Name}}</a>
+		</h2>
+		{{$CustomHeaderTitle := ctx.Locale.Tr "repo.settings.update_webhook"}}
+		{{if .PageIsSettingsHooksNew}}{{$CustomHeaderTitle = ctx.Locale.Tr "repo.settings.add_webhook"}}{{end}}
+		{{template "webhook/new" (dict "ctxData" . "CustomHeaderTitle" $CustomHeaderTitle)}}
+	</div>
+</div>
+{{template "base/footer" .}}

@@ -14,6 +14,7 @@ import (
 	"forgejo.org/models/db"
 	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
+	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/models/webhook"
 	"forgejo.org/modules/base"
@@ -37,6 +38,8 @@ const (
 	tplOrgHookNew   base.TplName = "org/settings/hook_new"
 	tplUserHookNew  base.TplName = "user/settings/hook_new"
 	tplAdminHookNew base.TplName = "admin/hook_new"
+
+	tplRepoGroupHookNew base.TplName = "org/repo_group/hook_new"
 )
 
 // WebhookList render web hooks list page
@@ -61,6 +64,7 @@ func WebhookList(ctx *context.Context) {
 
 type ownerRepoCtx struct {
 	OwnerID         int64
+	GroupID         int64
 	RepoID          int64
 	IsAdmin         bool
 	IsSystemWebhook bool
@@ -77,6 +81,19 @@ func getOwnerRepoCtx(ctx *context.Context) (*ownerRepoCtx, error) {
 			Link:        path.Join(ctx.Repo.RepoLink, "settings/hooks"),
 			LinkNew:     path.Join(ctx.Repo.RepoLink, "settings/hooks"),
 			NewTemplate: tplHookNew,
+		}, nil
+	}
+
+	if ctx.Data["PageIsRepoGroupSettings"] == true {
+		group := ctx.Data["RepoGroup"].(*repo_model.RepoGroup)
+		ctx.Data["RepoGroupLink"] = group.Link(ctx.Org.Organization.Name)
+		link := group.Link(ctx.Org.Organization.Name) + "/-/settings/hooks"
+		return &ownerRepoCtx{
+			OwnerID:     ctx.Org.Organization.ID,
+			GroupID:     group.ID,
+			Link:        link,
+			LinkNew:     link,
+			NewTemplate: tplRepoGroupHookNew,
 		}, nil
 	}
 
@@ -272,6 +289,7 @@ func WebhookCreate(ctx *context.Context) {
 		Type:            hookType,
 		Meta:            string(meta),
 		OwnerID:         orCtx.OwnerID,
+		GroupID:         orCtx.GroupID,
 		IsSystemWebhook: orCtx.IsSystemWebhook,
 	}
 	if err := w.UpdateEvent(); err != nil {
@@ -361,13 +379,19 @@ func checkWebhook(ctx *context.Context) (*ownerRepoCtx, *webhook.Webhook) {
 	ctx.Data["WebhookList"] = webhook_service.EnabledList(ctx)
 	ctx.Data["DisabledWebhookTypes"] = webhook_service.DisabledTypes(ctx)
 
+	hookID := ctx.ParamsInt64(":id")
+	if orCtx.GroupID > 0 {
+		hookID = ctx.ParamsInt64(":hook") // ":id" is the project
+	}
 	var w *webhook.Webhook
 	if orCtx.RepoID > 0 {
-		w, err = webhook.GetWebhookByRepoID(ctx, orCtx.RepoID, ctx.ParamsInt64(":id"))
+		w, err = webhook.GetWebhookByRepoID(ctx, orCtx.RepoID, hookID)
+	} else if orCtx.GroupID > 0 {
+		w, err = webhook.GetWebhookByGroupID(ctx, orCtx.OwnerID, orCtx.GroupID, hookID)
 	} else if orCtx.OwnerID > 0 { // nosemgrep: forgejo-logic-suspicious-OwnerID-check (system users do not own webhooks)
-		w, err = webhook.GetWebhookByOwnerID(ctx, orCtx.OwnerID, ctx.ParamsInt64(":id"))
+		w, err = webhook.GetWebhookByOwnerID(ctx, orCtx.OwnerID, hookID)
 	} else if orCtx.IsAdmin {
-		w, err = webhook.GetSystemOrDefaultWebhook(ctx, ctx.ParamsInt64(":id"))
+		w, err = webhook.GetSystemOrDefaultWebhook(ctx, hookID)
 	}
 	if err != nil || w == nil {
 		if webhook.IsErrWebhookNotExist(err) {

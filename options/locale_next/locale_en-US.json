@@ -2277,6 +2277,8 @@
 	"repo_group.name_helper": "Used in repository paths: organization/project/repository. Must differ from the names of the organization's other projects and repositories.",
 	"repo_group.description": "Description",
 	"repo_group.teams": "Teams",
+	"repo_group.hooks": "Webhooks",
+	"repo_group.hooks_desc": "Webhooks of this project are triggered by events of every repository in it, in addition to the organization's and each repository's own webhooks.",
 	"repo_group.branches": "Branch rules",
 	"repo_group.branches.desc": "These rules apply to every repository of this project, together with the organization's rules and each repository's own rules. A branch must pass all of them.",
 	"repo_group.teams.desc": "A linked team gets every repository of this project, including repositories created or moved here later, with the team's own permission. Unlinking takes that access away again.",
