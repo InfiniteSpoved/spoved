@@ -131,6 +131,8 @@ type Repository struct {
 	MirrorUpdated time.Time     `json:"mirror_updated"`
 	RepoTransfer  *RepoTransfer `json:"repo_transfer"`
 	Topics        []string      `json:"topics"`
+	// the project the repository is in; absent for a repository at the root of its owner
+	Project *ProjectMeta `json:"project,omitempty"`
 }
 
 // CreateRepoOption options when creating repository

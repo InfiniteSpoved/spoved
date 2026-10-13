@@ -7,6 +7,10 @@
 //
 // This documentation describes the Gitea API.
 //
+// A repository in a project (`org/project/repo`) is addressed as `/repos/{owner}/{project}/{repo}/-/...` for every
+// `/repos/{owner}/{repo}/...` operation, and any repository also as `/repositories/{id}/...`. A repository in a
+// project named like a fixed path segment (such as `issues` or `raw`) is reachable by ID only.
+//
 //	Schemes: https, http
 //	BasePath: /api/v1
 //	Version: {{AppVer | JSEscape}}
@@ -188,6 +192,71 @@ func repoAndOwnerAssignment(ownerNameParam, repoNameParam string) func(ctx *cont
 		}
 
 		repoAssignment(ctx, owner, repoName)
+	}
+}
+
+// repoGroupAssignment loads the repository of `/repos/{org}/{project}/{repo}/-`. Every miss (owner, not an
+// organization, project, repository) is the same plain 404, like a repository RepoAccess hides.
+func repoGroupAssignment() func(ctx *context.APIContext) {
+	apiv1_permissions_testhelpers.FollowedBy(repoGroupAssignment, apiv1_permissions.RepoAccess)
+	return func(ctx *context.APIContext) {
+		owner, err := user_model.GetUserByName(ctx, ctx.Params("username"))
+		var repo *repo_model.Repository
+		if err == nil {
+			if !owner.IsOrganization() {
+				ctx.NotFound()
+				return
+			}
+			repo, err = repo_model.GetRepositoryByPath(ctx, owner.ID, ctx.Params("groupname"), ctx.Params("reponame"))
+		}
+		setAssignedRepo(ctx, owner, repo, err)
+	}
+}
+
+// repoIDAssignment loads the repository of `/repositories/{repo_id}` and its owner from the row.
+func repoIDAssignment() func(ctx *context.APIContext) {
+	apiv1_permissions_testhelpers.FollowedBy(repoIDAssignment, apiv1_permissions.RepoAccess)
+	return func(ctx *context.APIContext) {
+		repo, err := repo_model.GetRepositoryByID(ctx, ctx.ParamsInt64("repo_id"))
+		var owner *user_model.User
+		if err == nil {
+			owner, err = user_model.GetUserByID(ctx, repo.OwnerID)
+		}
+		setAssignedRepo(ctx, owner, repo, err)
+	}
+}
+
+func setAssignedRepo(ctx *context.APIContext, owner *user_model.User, repo *repo_model.Repository, err error) {
+	if user_model.IsErrUserNotExist(err) || repo_model.IsErrRepoNotExist(err) {
+		ctx.NotFound()
+		return
+	} else if err != nil {
+		ctx.Error(http.StatusInternalServerError, "repoAssignment", err)
+		return
+	}
+	repo.Owner = owner
+	ctx.SetUser(owner)
+	ctx.Repo().Repository = repo
+	ctx.Repo().Owner = owner
+}
+
+// mountRepoRoutes registers the routes of a repository at each of its addresses: a root repository by owner and
+// name, a repository in a project by `{org}/{project}/{repo}/-`, and any repository by ID. The middlewares follow
+// the assignment; permission comes from the loaded repository (RepoAccess), never from the path.
+// TestRepoRouteParity checks that every repository route exists at all three.
+func mountRepoRoutes(m *web.Route, routes func(), middlewares func() []any) {
+	for _, mount := range []struct {
+		pattern    string
+		assignment func() func(*context.APIContext)
+	}{
+		{"/repos/{username}/{reponame}", func() func(*context.APIContext) { return repoAndOwnerAssignment("username", "reponame") }},
+		{"/repos/{username}/{groupname}/{reponame}/-", repoGroupAssignment},
+		{"/repositories/{repo_id}", repoIDAssignment},
+	} {
+		// a group of its own, so the permission checks recorded while building one mount don't reach the next
+		m.Group("", func() {
+			m.Group(mount.pattern, routes, append([]any{mount.assignment()}, middlewares()...)...)
+		})
 	}
 }
 
@@ -550,6 +619,8 @@ func Routes() *web.Route {
 
 	m.Use(shared.Middlewares()...)
 
+	repoReadChecks := func() []any { return []any{repoAccess(), checkTokenPublicOnly()} }
+
 	addActionsRoutes := func(
 		m *web.Route,
 		reqChecker func(ctx *context.APIContext),
@@ -779,11 +850,13 @@ func Routes() *web.Route {
 			if !setting.Repository.DisableStars {
 				m.Group("/starred", func() {
 					m.Get("", user.GetMyStarredRepos)
-					m.Group("/{username}/{reponame}", func() {
+					starRoutes := func() {
 						m.Get("", user.IsStarring)
 						m.Put("", user.Star)
 						m.Delete("", user.Unstar)
-					}, repoAndOwnerAssignment("username", "reponame"), repoAccess(), checkTokenPublicOnly())
+					}
+					m.Group("/{username}/{reponame}", starRoutes, repoAndOwnerAssignment("username", "reponame"), repoAccess(), checkTokenPublicOnly())
+					m.Group("/{username}/{groupname}/{reponame}/-", starRoutes, repoGroupAssignment(), repoAccess(), checkTokenPublicOnly())
 				}, tokenRequiresScopes(auth_model.AccessTokenScopeCategoryRepository))
 			}
 			m.Get("/times", repo.ListMyTrackedTimes)
@@ -820,13 +893,11 @@ func Routes() *web.Route {
 			bind(api.CreateRepoOption{}),
 			repo.CreateOrgRepoDeprecated)
 
-		// requires repo scope
-		// FIXME: Don't expose repository id outside of the system
-		m.Combo("/repositories/{id}", reqToken(), tokenRequiresScopes(auth_model.AccessTokenScopeCategoryRepository)).Get(repo.GetByID)
-
 		// Needs to be extracted from the larger `/repos` group because deleting a repo isn't protected by
 		// `AccessTokenScopeCategoryRepository`; it's protected by either the User or Organization scope.
-		m.Delete("/repos/{username}/{reponame}", repoAndOwnerAssignment("username", "reponame"), repoAccess(), tokenRequiresRepoOwnerScope(), reqOwner(), repo.Delete)
+		mountRepoRoutes(m, func() {
+			m.Delete("", tokenRequiresRepoOwnerScope(), reqOwner(), repo.Delete)
+		}, func() []any { return []any{repoAccess()} })
 
 		// Repos (requires repo scope)
 		m.Group("/repos", func() {
@@ -834,8 +905,9 @@ func Routes() *web.Route {
 
 			// (repo scope)
 			m.Post("/migrate", reqToken(), bind(api.MigrateRepoOptions{}), repo.Migrate)
-
-			m.Group("/{username}/{reponame}", func() {
+		}, tokenRequiresScopes(auth_model.AccessTokenScopeCategoryRepository))
+		m.Group("", func() {
+			mountRepoRoutes(m, func() {
 				m.Get("/compare/*", reqRepoReader(unit.TypeCode), common.RateLimitAPIHeavy, context.ReferencesGitRepo(true), repo.CompareDiff)
 
 				m.Combo("").Get(reqAnyRepoReader(), repo.Get).
@@ -1167,23 +1239,22 @@ func Routes() *web.Route {
 				})
 
 				m.Get("/{ball_type:tarball|zipball|bundle}/*", reqRepoReader(unit.TypeCode), repo.DownloadArchive)
-			}, repoAndOwnerAssignment("username", "reponame"), repoAccess(), checkTokenPublicOnly())
+			}, repoReadChecks)
 		}, tokenRequiresScopes(auth_model.AccessTokenScopeCategoryRepository))
 
 		// Notifications (requires notifications scope)
-		m.Group("/repos", func() {
-			m.Group("/{username}/{reponame}", func() {
+		m.Group("", func() {
+			mountRepoRoutes(m, func() {
 				m.Combo("/notifications", reqToken()).
 					Get(notify.ListRepoNotifications).
 					Put(notify.ReadRepoNotifications)
-			}, repoAndOwnerAssignment("username", "reponame"), repoAccess(), checkTokenPublicOnly())
+			}, repoReadChecks)
 		}, tokenRequiresScopes(auth_model.AccessTokenScopeCategoryNotification))
 
 		// Issue (requires issue scope)
-		m.Group("/repos", func() {
-			m.Get("/issues/search", repo.SearchIssues)
-
-			m.Group("/{username}/{reponame}", func() {
+		m.Get("/repos/issues/search", tokenRequiresScopes(auth_model.AccessTokenScopeCategoryIssue), repo.SearchIssues)
+		m.Group("", func() {
+			mountRepoRoutes(m, func() {
 				m.Group("/issues", func() {
 					m.Combo("").Get(repo.ListIssues).
 						Post(reqToken(), mustNotBeArchived(), bind(api.CreateIssueOption{}), reqRepoReader(unit.TypeIssues), repo.CreateIssue)
@@ -1292,7 +1363,7 @@ func Routes() *web.Route {
 						Patch(reqToken(), reqRepoWriter(unit.TypeIssues, unit.TypePullRequests), bind(api.EditMilestoneOption{}), repo.EditMilestone).
 						Delete(reqToken(), reqRepoWriter(unit.TypeIssues, unit.TypePullRequests), repo.DeleteMilestone)
 				})
-			}, repoAndOwnerAssignment("username", "reponame"), repoAccess(), checkTokenPublicOnly())
+			}, repoReadChecks)
 		}, tokenRequiresScopes(auth_model.AccessTokenScopeCategoryIssue))
 
 		// NOTE: these are Gitea package management API - see packages.CommonRoutes and packages.DockerContainerRoutes for endpoints that implement package manager APIs
@@ -1396,6 +1467,16 @@ func Routes() *web.Route {
 					m.Combo("/repos/{repo}").Put(org.AddDeployKeyRepo).Delete(org.RemoveDeployKeyRepo)
 				})
 			}, reqToken(), org.HideInvisibleOrg, reqOrgOwnership())
+			m.Group("/projects", func() {
+				m.Get("", org.ListProjects)
+				m.Get("/{id}", org.GetProject)
+				m.Get("/{id}/repos", org.ListProjectRepos)
+				m.Group("", func() {
+					m.Post("", bind(api.CreateProjectOption{}), org.CreateProject)
+					m.Combo("/{id}").Patch(bind(api.EditProjectOption{}), org.EditProject).
+						Delete(org.DeleteProject)
+				}, reqToken(), reqOrgOwnership())
+			}, org.HideInvisibleOrg)
 			m.Group("/avatar", func() {
 				m.Post("", bind(api.UpdateUserAvatarOption{}), org.UpdateAvatar)
 				m.Delete("", org.DeleteAvatar)

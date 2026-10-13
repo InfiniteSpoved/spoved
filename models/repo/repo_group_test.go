@@ -156,7 +156,7 @@ func TestRepoGroupPaths(t *testing.T) {
 	assert.Equal(t, filepath.Join(setting.RepoRootPath, "org3", "pay", "api.wiki.git"), nested.WikiPath())
 	assert.Equal(t, "/Org3/Pay/Api", nested.Link())
 	assert.Equal(t, "https://host/Org3/Pay/Api", nested.HTMLURL())
-	assert.Equal(t, "https://host/api/v1/repos/Org3/Pay/Api", nested.APIURL())
+	assert.Equal(t, "https://host/api/v1/repos/Org3/Pay/Api/-", nested.APIURL())
 	assert.Equal(t, &repo_model.CloneLink{SSH: "git@host:Org3/Pay/Api.git", HTTPS: "https://host/Org3/Pay/Api.git"}, nested.CloneLink())
 	assert.Equal(t, &repo_model.CloneLink{SSH: "git@host:Org3/Pay/Api.wiki.git", HTTPS: "https://host/Org3/Pay/Api.wiki.git"}, nested.WikiCloneLink())
 
