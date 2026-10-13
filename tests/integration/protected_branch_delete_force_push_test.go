@@ -247,7 +247,7 @@ func TestProtectedBranchDeleteForcePush(t *testing.T) {
 			require.NoError(t, err)
 
 			preReceive := func(key *protectionTestDeployKey, oldCommitID, newCommitID string) private.ResponseExtra {
-				return private.HookPreReceive(t.Context(), owner.Username, owner.Reponame, private.HookOptions{
+				return private.HookPreReceive(t.Context(), repoIDByName(t, owner.Username, owner.Reponame), private.HookOptions{
 					OldCommitIDs:   []string{oldCommitID},
 					NewCommitIDs:   []string{newCommitID},
 					RefFullNames:   []git.RefName{git.RefNameFromBranch("release-key")},

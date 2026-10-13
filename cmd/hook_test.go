@@ -6,9 +6,11 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/private"
+	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/tests/internaltest"
@@ -120,6 +123,7 @@ func TestDelayWriter(t *testing.T) {
 	defer test.MockVariableValue(&setting.InstallLock, true)()
 	defer test.MockVariableValue(&setting.Git.VerbosePush, true)()
 	t.Setenv("SSH_ORIGINAL_COMMAND", "true")
+	t.Setenv(repo_module.EnvRepoID, "1")
 
 	// Setup the Stdin.
 	f, err := os.OpenFile(t.TempDir()+"/stdin", os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
@@ -170,6 +174,7 @@ func TestRunHookPrePostReceive(t *testing.T) {
 	defer test.MockVariableValue(&setting.Git.VerbosePush, true)()
 	defer test.MockVariableValue(&setting.InternalListenerPath, "random")()
 	t.Setenv("SSH_ORIGINAL_COMMAND", "true")
+	t.Setenv(repo_module.EnvRepoID, "42")
 
 	tests := []struct {
 		name        string
@@ -208,9 +213,11 @@ func TestRunHookPrePostReceive(t *testing.T) {
 			// Setup the server that processes the hooks.
 			var serverError error
 			var hookOpts *private.HookOptions
+			var hookPath string
 
 			internaltest.NewInternalTestServer(t, optional.Some(
 				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					hookPath = r.URL.Path
 					body, err := io.ReadAll(r.Body)
 					if err != nil {
 						serverError = err
@@ -254,6 +261,7 @@ func TestRunHookPrePostReceive(t *testing.T) {
 
 				require.NoError(t, serverError)
 				require.NotNil(t, hookOpts)
+				assert.Equal(t, "/api/internal/hook/pre-receive/42", hookPath, "the repository is named by its ID")
 
 				require.Len(t, hookOpts.OldCommitIDs, 1)
 				assert.Equal(t, tt.oldCommitID, hookOpts.OldCommitIDs[0])
@@ -282,6 +290,7 @@ func TestRunHookPrePostReceive(t *testing.T) {
 
 				require.NoError(t, serverError)
 				require.NotNil(t, hookOpts)
+				assert.Equal(t, "/api/internal/hook/post-receive/42", hookPath, "the repository is named by its ID")
 
 				require.Len(t, hookOpts.OldCommitIDs, 1)
 				assert.Equal(t, tt.oldCommitID, hookOpts.OldCommitIDs[0])
@@ -292,4 +301,33 @@ func TestRunHookPrePostReceive(t *testing.T) {
 			})
 		})
 	}
+}
+
+// a hook never looks the repository up by its name: without GITEA_REPO_ID the push is refused
+func TestRunHookWithoutRepoID(t *testing.T) {
+	defer test.MockVariableValue(&setting.InstallLock, true)()
+	defer test.MockVariableValue(&setting.InternalListenerPath, "random")()
+	t.Setenv("SSH_ORIGINAL_COMMAND", "true")
+	t.Setenv(repo_module.EnvRepoUsername, "user2")
+	t.Setenv(repo_module.EnvRepoName, "repo1")
+	// post-receive runs `git update-server-info` first
+	dir := t.TempDir()
+	require.NoError(t, exec.Command("git", "init", "--bare", dir).Run())
+	t.Chdir(dir)
+	called := false
+	internaltest.NewInternalTestServer(t, optional.Some(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})))
+
+	for _, repoID := range []string{"", "0", "-1", "x"} {
+		t.Setenv(repo_module.EnvRepoID, repoID)
+		for _, cmd := range []*cli.Command{subcmdHookPreReceive(), subcmdHookPostReceive(), subcmdHookProcReceive()} {
+			app := cli.Command{Commands: []*cli.Command{cmd}, ExitErrHandler: func(context.Context, *cli.Command, error) {}}
+			finish := captureOutput(t, os.Stderr)
+			err := app.Run(t.Context(), []string{"./forgejo", cmd.Name})
+			require.Error(t, err)
+			assert.Contains(t, finish(), "missing repository ID", "%s %q", cmd.Name, repoID)
+		}
+	}
+	assert.False(t, called)
 }

@@ -192,13 +192,20 @@ func ServCommand(ctx *context.PrivateContext) {
 		results.RepoName = repoName[:len(repoName)-5]
 	}
 
+	// a repository in a project: owner/project/repo
+	groupName := ctx.Params(":group")
+	fullName := results.OwnerName + "/" + results.RepoName
+	if groupName != "" {
+		fullName = results.OwnerName + "/" + groupName + "/" + results.RepoName
+	}
+
 	owner, err := user_model.GetUserByName(ctx, results.OwnerName)
 	if err != nil {
 		if user_model.IsErrUserNotExist(err) {
 			// User is fetching/cloning a non-existent repository
-			sshLogger.Warn("Failed authentication attempt (cannot find repository: %s/%s) from %s", results.OwnerName, results.RepoName, ctx.RemoteAddr())
+			sshLogger.Warn("Failed authentication attempt (cannot find repository: %s) from %s", fullName, ctx.RemoteAddr())
 			ctx.JSON(http.StatusNotFound, private.Response{
-				UserMsg: fmt.Sprintf("Cannot find repository: %s/%s", results.OwnerName, results.RepoName),
+				UserMsg: "Cannot find repository: " + fullName,
 			})
 			return
 		}
@@ -217,15 +224,21 @@ func ServCommand(ctx *context.PrivateContext) {
 
 	// Now get the Repository and set the results section
 	repoExist := true
-	repo, err := repo_model.GetRepositoryByName(ctx, owner.ID, results.RepoName)
+	var repo *repo_model.Repository
+	if groupName != "" {
+		repo, err = visibleGroupRepository(ctx, keyID, owner, groupName, results.RepoName)
+	} else {
+		repo, err = repo_model.GetRepositoryByName(ctx, owner.ID, results.RepoName)
+	}
 	if err != nil {
 		if repo_model.IsErrRepoNotExist(err) {
 			repoExist = false
-			if slices.Contains(ctx.FormStrings("verb"), "git-upload-pack") {
+			// a repository in a project is never created by a push, and a hidden one is missing
+			if groupName != "" || slices.Contains(ctx.FormStrings("verb"), "git-upload-pack") {
 				// User is fetching/cloning a non-existent repository
-				sshLogger.Warn("Failed authentication attempt (cannot find repository: %s/%s) from %s", results.OwnerName, results.RepoName, ctx.RemoteAddr())
+				sshLogger.Warn("Failed authentication attempt (cannot find repository: %s) from %s", fullName, ctx.RemoteAddr())
 				ctx.JSON(http.StatusNotFound, private.Response{
-					UserMsg: fmt.Sprintf("Cannot find repository: %s/%s", results.OwnerName, results.RepoName),
+					UserMsg: "Cannot find repository: " + fullName,
 				})
 				return
 			}
@@ -242,6 +255,11 @@ func ServCommand(ctx *context.PrivateContext) {
 		repo.Owner = owner
 		repo.OwnerName = ownerName
 		results.RepoID = repo.ID
+		if groupName != "" {
+			// cmd/serv runs git on the path of the repository found here, never on the one the client sent
+			repo.OwnerName = owner.Name
+			results.OwnerName, results.GroupName, results.RepoName = owner.Name, repo.GroupName, repo.Name
+		}
 
 		if repo.IsBeingCreated() {
 			ctx.JSON(http.StatusInternalServerError, private.Response{
@@ -531,4 +549,43 @@ func ServCommand(ctx *context.PrivateContext) {
 
 	ctx.JSON(http.StatusOK, results)
 	// We will update the keys in a different call.
+}
+
+// visibleGroupRepository returns the repository in a project if the key may see it: a deploy key that covers it,
+// or a user key whose owner can read it. A hidden repository is not found, before any message about it.
+func visibleGroupRepository(ctx *context.PrivateContext, keyID int64, owner *user_model.User, groupName, repoName string) (*repo_model.Repository, error) {
+	notExist := repo_model.ErrRepoNotExist{OwnerName: owner.Name, Name: repoName}
+	repo, err := repo_model.GetRepositoryByPath(ctx, owner.ID, groupName, repoName)
+	if err != nil {
+		return nil, err
+	}
+	repo.Owner = owner
+	key, err := asymkey_model.GetPublicKeyByID(ctx, keyID)
+	if asymkey_model.IsErrKeyNotExist(err) {
+		return nil, notExist
+	} else if err != nil {
+		return nil, err
+	}
+	if key.Type == asymkey_model.KeyTypeDeploy {
+		if _, err := asymkey_model.GetEffectiveDeployKey(ctx, key.ID, repo); asymkey_model.IsErrDeployKeyNotExist(err) {
+			return nil, notExist
+		} else if err != nil {
+			return nil, err
+		}
+		return repo, nil
+	}
+	user, err := user_model.GetUserByID(ctx, key.OwnerID)
+	if user_model.IsErrUserNotExist(err) {
+		return nil, notExist
+	} else if err != nil {
+		return nil, err
+	}
+	perm, err := access_model.GetUserRepoReadPermission(ctx, repo, user, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !perm.HasAccess() {
+		return nil, notExist
+	}
+	return repo, nil
 }

@@ -26,6 +26,7 @@ import (
 	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/json"
 	lfs_module "forgejo.org/modules/lfs"
 	"forgejo.org/modules/log"
@@ -38,23 +39,32 @@ import (
 // requestContext contain variables from the HTTP request.
 type requestContext struct {
 	User          string
+	Group         string // the project of a repository in one
 	Repo          string
 	Authorization string
 }
 
+// repoPath is the escaped `user/[project/]repo.git` of the request.
+func (rc *requestContext) repoPath() string {
+	if rc.Group != "" {
+		return path.Join(url.PathEscape(rc.User), url.PathEscape(rc.Group), url.PathEscape(rc.Repo+".git"))
+	}
+	return path.Join(url.PathEscape(rc.User), url.PathEscape(rc.Repo+".git"))
+}
+
 // DownloadLink builds a URL to download the object.
 func (rc *requestContext) DownloadLink(p lfs_module.Pointer) string {
-	return setting.AppURL + path.Join(url.PathEscape(rc.User), url.PathEscape(rc.Repo+".git"), "info/lfs/objects", url.PathEscape(p.Oid))
+	return setting.AppURL + path.Join(rc.repoPath(), "info/lfs/objects", url.PathEscape(p.Oid))
 }
 
 // UploadLink builds a URL to upload the object.
 func (rc *requestContext) UploadLink(p lfs_module.Pointer) string {
-	return setting.AppURL + path.Join(url.PathEscape(rc.User), url.PathEscape(rc.Repo+".git"), "info/lfs/objects", url.PathEscape(p.Oid), strconv.FormatInt(p.Size, 10))
+	return setting.AppURL + path.Join(rc.repoPath(), "info/lfs/objects", url.PathEscape(p.Oid), strconv.FormatInt(p.Size, 10))
 }
 
 // VerifyLink builds a URL for verifying the object.
 func (rc *requestContext) VerifyLink(p lfs_module.Pointer) string {
-	return setting.AppURL + path.Join(url.PathEscape(rc.User), url.PathEscape(rc.Repo+".git"), "info/lfs/verify")
+	return setting.AppURL + path.Join(rc.repoPath(), "info/lfs/verify")
 }
 
 // CheckAcceptMediaType checks if the client accepts the LFS media type.
@@ -424,6 +434,7 @@ func decodeJSON(req *http.Request, v any) error {
 func getRequestContext(ctx *context.Context) *requestContext {
 	return &requestContext{
 		User:          ctx.Params("username"),
+		Group:         ctx.Params("groupname"),
 		Repo:          strings.TrimSuffix(ctx.Params("reponame"), ".git"),
 		Authorization: ctx.Req.Header.Get("Authorization"),
 	}
@@ -451,11 +462,40 @@ func getAuthenticatedMeta(ctx *context.Context, rc *requestContext, p lfs_module
 	return meta
 }
 
-func getAuthenticatedRepository(ctx *context.Context, rc *requestContext, requireWrite bool) *repo_model.Repository {
-	repository, err := repo_model.GetRepositoryByOwnerAndName(ctx, rc.User, rc.Repo)
+// lookupRepository returns the repository of the request. A repository in a project that the request can't read is
+// not found, so that it answers like a missing one.
+func lookupRepository(ctx *context.Context, rc *requestContext) (*repo_model.Repository, error) {
+	if rc.Group == "" {
+		return repo_model.GetRepositoryByOwnerAndName(ctx, rc.User, rc.Repo)
+	}
+	owner, err := user_model.GetUserByName(ctx, rc.User)
+	if user_model.IsErrUserNotExist(err) {
+		return nil, repo_model.ErrRepoNotExist{OwnerName: rc.User, Name: rc.Repo}
+	} else if err != nil {
+		return nil, err
+	}
+	repo, err := repo_model.GetRepositoryByPath(ctx, owner.ID, rc.Group, rc.Repo)
 	if err != nil {
-		log.Error("Unable to get repository: %s/%s Error: %v", rc.User, rc.Repo, err)
-		writeStatus(ctx, http.StatusNotFound)
+		return nil, err
+	}
+	repo.Owner = owner
+	if !authenticate(ctx, repo, false, false) {
+		return nil, repo_model.ErrRepoNotExist{OwnerName: rc.User, Name: rc.Repo}
+	}
+	return repo, nil
+}
+
+func getAuthenticatedRepository(ctx *context.Context, rc *requestContext, requireWrite bool) *repo_model.Repository {
+	repository, err := lookupRepository(ctx, rc)
+	if err != nil {
+		if !repo_model.IsErrRepoNotExist(err) {
+			log.Error("Unable to get repository: %s/%s Error: %v", rc.User, rc.Repo, err)
+		}
+		if rc.Group != "" && repo_model.IsErrRepoNotExist(err) {
+			requireAuth(ctx) // what a hidden repository answers
+		} else {
+			writeStatus(ctx, http.StatusNotFound)
+		}
 		return nil
 	}
 

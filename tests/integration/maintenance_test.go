@@ -303,7 +303,7 @@ func TestMaintenanceGitPush(t *testing.T) {
 		assert.Equal(t, "This instance is in read-only mode: "+maintenanceMessage, extra.UserMsg)
 		_, extra = private.ServCommand(t.Context(), 1, "user2", "repo1", perm.AccessModeRead, "", "git-upload-pack")
 		require.NoError(t, extra.Error)
-		extra = private.HookPreReceive(t.Context(), "user2", "repo1", private.HookOptions{UserID: 2, RefFullNames: []git.RefName{"refs/heads/master"}, OldCommitIDs: []string{"a"}, NewCommitIDs: []string{"b"}})
+		extra = private.HookPreReceive(t.Context(), repoIDByName(t, "user2", "repo1"), private.HookOptions{UserID: 2, RefFullNames: []git.RefName{"refs/heads/master"}, OldCommitIDs: []string{"a"}, NewCommitIDs: []string{"b"}})
 		assert.Equal(t, "This instance is in read-only mode: "+maintenanceMessage, extra.UserMsg)
 
 		// full maintenance: non-admins can't use git at all

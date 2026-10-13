@@ -82,9 +82,9 @@ func pushUpdates(optsList []*repo_module.PushUpdateOptions) error {
 	ctx, _, finished := process.GetManager().AddContext(graceful.GetManager().HammerContext(), fmt.Sprintf("PushUpdates: %s/%s", optsList[0].RepoUserName, optsList[0].RepoName))
 	defer finished()
 
-	repo, err := repo_model.GetRepositoryByOwnerAndName(ctx, optsList[0].RepoUserName, optsList[0].RepoName)
+	repo, err := repo_model.GetRepositoryByID(ctx, optsList[0].RepoID)
 	if err != nil {
-		return fmt.Errorf("GetRepositoryByOwnerAndName failed: %w", err)
+		return fmt.Errorf("GetRepositoryByID failed: %w", err)
 	}
 
 	gitRepo, err := gitrepo.OpenRepository(ctx, repo)
