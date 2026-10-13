@@ -107,7 +107,7 @@ func TestOrgActionsOverviewQueryCount(t *testing.T) {
 	require.NoError(t, err)
 	session := loginUser(t, "user2")
 	count := func() int64 {
-		return countQueries(t, func() { session.MakeRequest(t, NewRequest(t, "GET", "/org/org3/actions/overview"), http.StatusOK) })
+		return stableQueryCount(t, func() { session.MakeRequest(t, NewRequest(t, "GET", "/org/org3/actions/overview"), http.StatusOK) })
 	}
 	add := func(i int) {
 		repoID := []int64{3, 5, 32}[i%3]

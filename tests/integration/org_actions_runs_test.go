@@ -266,8 +266,8 @@ func TestOrgActionsRunsQueryCount(t *testing.T) {
 	token := getUserToken(t, "user2", auth_model.AccessTokenScopeReadOrganization, auth_model.AccessTokenScopeReadRepository)
 
 	count := func() (web, apiCount int64) {
-		web = countQueries(t, func() { owner.MakeRequest(t, NewRequest(t, "GET", "/org/org3/actions?limit=50"), http.StatusOK) })
-		apiCount = countQueries(t, func() {
+		web = stableQueryCount(t, func() { owner.MakeRequest(t, NewRequest(t, "GET", "/org/org3/actions?limit=50"), http.StatusOK) })
+		apiCount = stableQueryCount(t, func() {
 			MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs/org3/actions/runs?limit=50").AddTokenAuth(token), http.StatusOK)
 		})
 		return web, apiCount
