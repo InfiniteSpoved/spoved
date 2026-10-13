@@ -184,6 +184,7 @@ func GenerateGitContent(ctx context.Context, templateRepo, generateRepo *repo_mo
 // GenerateRepoOptions contains the template units to generate
 type GenerateRepoOptions struct {
 	Name            string
+	GroupID         int64 // the owner's project to create the repository in, 0 for its root
 	DefaultBranch   string
 	Description     string
 	Private         bool
@@ -208,6 +209,7 @@ func generateRepository(ctx context.Context, doer, owner *user_model.User, templ
 		OwnerID:          owner.ID,
 		Owner:            owner,
 		OwnerName:        owner.Name,
+		GroupID:          opts.GroupID,
 		Name:             opts.Name,
 		LowerName:        strings.ToLower(opts.Name),
 		Description:      opts.Description,

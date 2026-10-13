@@ -668,6 +668,14 @@ func (repo *Repository) Link() string {
 	return setting.AppSubURL + "/" + repo.escapedPath()
 }
 
+// GroupLink returns the relative url of the repository's project, "" at the root of its owner.
+func (repo *Repository) GroupLink() string {
+	if repo.GroupID == 0 {
+		return ""
+	}
+	return setting.AppSubURL + "/" + url.PathEscape(repo.OwnerName) + "/" + url.PathEscape(repo.groupSegment())
+}
+
 // ComposeCompareURL returns the repository comparison URL
 func (repo *Repository) ComposeCompareURL(oldCommitID, newCommitID string) string {
 	return fmt.Sprintf("%s/%s/compare/%s...%s", url.PathEscape(repo.OwnerName), url.PathEscape(repo.Name), util.PathEscapeSegments(oldCommitID), util.PathEscapeSegments(newCommitID))

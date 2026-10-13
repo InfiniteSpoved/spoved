@@ -134,6 +134,7 @@ type SearchRepoOptions struct {
 	Actor           *user_model.User
 	Keyword         string
 	OwnerID         int64
+	GroupID         int64 // only the repositories of this project; 0 for no filter
 	PriorityOwnerID int64
 	TeamID          int64
 	OrderBy         db.SearchOrderBy
@@ -417,6 +418,10 @@ func SearchRepositoryCondition(opts *SearchRepoOptions) builder.Cond {
 		cond = cond.And(accessCond)
 	}
 
+	if opts.GroupID != 0 {
+		cond = cond.And(builder.Eq{"`repository`.group_id": opts.GroupID})
+	}
+
 	if opts.TeamID > 0 {
 		cond = cond.And(builder.In("`repository`.id", builder.Select("`team_repo`.repo_id").From("team_repo").Where(builder.Eq{"`team_repo`.team_id": opts.TeamID})))
 	}
@@ -442,12 +447,19 @@ func SearchRepositoryCondition(opts *SearchRepoOptions) builder.Cond {
 			for v := range strings.SplitSeq(opts.Keyword, ",") {
 				likes = likes.Or(builder.Like{"lower_name", strings.ToLower(v)})
 
-				// If the string looks like "org/repo", match against that pattern too
-				if opts.TeamID == 0 && strings.Count(opts.Keyword, "/") == 1 {
-					pieces := strings.Split(opts.Keyword, "/")
-					ownerName := pieces[0]
-					repoName := pieces[1]
-					likes = likes.Or(builder.And(builder.Like{"owner_name", strings.ToLower(ownerName)}, builder.Like{"lower_name", strings.ToLower(repoName)}))
+				// If the string looks like "org/repo" or "org/project/repo", match against that pattern too;
+				// "org/project/" matches every repository of the project
+				if opts.TeamID == 0 {
+					switch pieces := strings.Split(strings.ToLower(opts.Keyword), "/"); len(pieces) {
+					case 2:
+						likes = likes.Or(builder.And(builder.Like{"owner_name", pieces[0]}, builder.Like{"lower_name", pieces[1]}))
+					case 3:
+						pathCond := builder.And(builder.Like{"owner_name", pieces[0]}, builder.Neq{"group_id": 0}, builder.Like{"LOWER(group_name)", pieces[1]})
+						if pieces[2] != "" {
+							pathCond = pathCond.And(builder.Like{"lower_name", pieces[2]})
+						}
+						likes = likes.Or(pathCond)
+					}
 				}
 
 				if opts.IncludeDescription {

@@ -73,6 +73,17 @@ func TestBranding(t *testing.T) {
 		}
 	})
 
+	t.Run("Projects", func(t *testing.T) {
+		prepareRepoGroupWeb(t)
+		session := loginUser(t, "user2")
+		for _, url := range []string{"/org/org3/groups", "/org/org3/groups/new", "/org3/proj", "/org3/proj/-/settings", "/explore/groups"} {
+			assertNoBrandMentions(t, session, url)
+		}
+		for _, url := range []string{"/org/org3/groups", "/org3/proj", "/explore/groups"} {
+			assertNoBrandMentions(t, nil, url)
+		}
+	})
+
 	t.Run("Runner setup pages", func(t *testing.T) {
 		session := loginUser(t, "user1")
 		for _, base := range []string{"/user2/repo1/settings/actions/runners", "/org/org3/settings/actions/runners", "/admin/actions/runners"} {

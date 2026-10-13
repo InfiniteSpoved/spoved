@@ -667,6 +667,7 @@ func registerRoutes(m *web.Route) {
 		m.Get("/users", explore.Users)
 		m.Get("/users/sitemap-{idx}.xml", sitemapEnabled, explore.Users)
 		m.Get("/organizations", explore.Organizations)
+		m.Get("/groups", explore.RepoGroups)
 		m.Get("/code", func(ctx *context.Context) {
 			if unit.TypeCode.UnitGlobalDisabled() {
 				ctx.NotFound(unit.TypeCode.String(), nil)
@@ -1133,9 +1134,19 @@ func registerRoutes(m *web.Route) {
 	m.Group("/org", func() {
 		m.Group("/{org}", func() {
 			m.Get("/members", org.Members)
+			m.Get("/groups", org.RepoGroups)
 		}, context.OrgAssignment())
 		m.Get("/{org}/groups/{id}", context.OrgAssignment(), context.RepoGroupAssignment, org.RepoGroupHome)
 	}, ignSignIn)
+
+	// projects: org owners (and site admins) only
+	m.Group("/org/{org}/groups", func() {
+		m.Combo("/new").Get(org.NewRepoGroup).Post(web.Bind(forms.RepoGroupForm{}), org.NewRepoGroupPost)
+		m.Group("/{id}/settings", func() {
+			m.Combo("").Get(org.RepoGroupSettings).Post(web.Bind(forms.RepoGroupForm{}), org.RepoGroupSettingsPost)
+			m.Post("/delete", org.RepoGroupDeletePost)
+		}, context.RepoGroupAssignment)
+	}, reqSignIn, context.OrgAssignment(true, true))
 
 	m.Group("/org", func() {
 		m.Group("", func() {

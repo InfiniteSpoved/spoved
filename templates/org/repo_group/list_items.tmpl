@@ -1,0 +1,22 @@
+<div class="flex-list">
+	{{range .RepoGroups}}
+		{{$owner := index $.RepoGroupOwners .OwnerID}}
+		<div class="flex-item">
+			<div class="flex-item-leading">
+				{{svg "octicon-file-directory" 24}}
+			</div>
+			<div class="flex-item-main">
+				<div class="flex-item-header">
+					<div class="flex-item-title">
+						{{if $.PageIsExplore}}<a class="text primary name" href="{{$owner.HomeLink}}">{{$owner.Name}}</a>/{{end}}
+						<a class="text primary name" href="{{.Link $owner.Name}}">{{.Name}}</a>
+					</div>
+					<div class="flex-item-trailing">
+						<span class="flex-text-inline" data-tooltip-content="{{ctx.Locale.Tr "repo_group.repo_count"}}">{{svg "octicon-repo" 16}}{{index $.RepoGroupRepoCounts .ID}}</span>
+					</div>
+				</div>
+				{{if .Description}}<div class="flex-item-body">{{.Description}}</div>{{end}}
+			</div>
+		</div>
+	{{end}}
+</div>

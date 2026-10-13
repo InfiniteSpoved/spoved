@@ -2,8 +2,30 @@
 <div role="main" aria-label="{{.Title}}" class="page-content organization repo-group">
 	{{template "org/header" .}}
 	<div class="ui container">
-		<h2>{{.RepoGroup.Name}}</h2>
-		{{if .RepoGroup.Description}}<p>{{.RepoGroup.Description}}</p>{{end}}
+		{{template "base/alert" .}}
+		<div class="tw-flex tw-flex-wrap tw-gap-2 tw-items-center tw-mb-2">
+			<h2 class="tw-flex-1 tw-m-0 tw-break-anywhere">
+				<a class="muted" href="{{.Org.HomeLink}}">{{.Org.Name}}</a> / <span class="repo-group-name">{{.RepoGroup.Name}}</span>
+			</h2>
+			{{if and .CanCreateOrgRepo (not .Org.IsArchived)}}
+				<a class="ui small primary button" href="{{AppSubUrl}}/repo/create?org={{.Org.ID}}&group={{.RepoGroup.ID}}">{{ctx.Locale.Tr "new_repo.link"}}</a>
+			{{end}}
+			{{if .IsOrganizationOwner}}
+				<a class="ui small basic icon button" href="{{.RepoGroupLink}}/-/settings" aria-label="{{ctx.Locale.Tr "repo_group.settings"}}" data-tooltip-content="{{ctx.Locale.Tr "repo_group.settings"}}">{{svg "octicon-gear"}}</a>
+			{{end}}
+		</div>
+		{{if .RepoGroup.Description}}<p class="tw-break-anywhere">{{.RepoGroup.Description}}</p>{{end}}
+		{{if or .Repos .Keyword}}
+			{{template "shared/repo_search" .}}
+			{{template "explore/repo_list" .}}
+			{{template "base/paginate" .}}
+		{{else}}
+			<div class="empty-placeholder">
+				{{svg "octicon-repo" 48}}
+				<h2 class="tw-text-center">{{ctx.Locale.Tr "repo_group.empty"}}</h2>
+				{{if and .CanCreateOrgRepo (not .Org.IsArchived)}}<p>{{ctx.Locale.Tr "repo_group.empty_desc"}}</p>{{end}}
+			</div>
+		{{end}}
 	</div>
 </div>
 {{template "base/footer" .}}

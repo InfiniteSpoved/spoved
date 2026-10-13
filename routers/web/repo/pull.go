@@ -2126,7 +2126,7 @@ func UpdatePullRequestTarget(ctx *context.Context) {
 		if issues_model.IsErrPullRequestAlreadyExists(err) {
 			err := err.(issues_model.ErrPullRequestAlreadyExists)
 
-			RepoRelPath := ctx.Repo.Owner.Name + "/" + ctx.Repo.Repository.Name
+			RepoRelPath := ctx.Repo.Repository.FullName()
 			errorMessage := ctx.Tr("repo.pulls.has_pull_request", html.EscapeString(ctx.Repo.RepoLink+"/pulls/"+strconv.FormatInt(err.IssueID, 10)), html.EscapeString(RepoRelPath), err.IssueID) // FIXME: Creates url inside locale string
 
 			ctx.Flash.Error(errorMessage)

@@ -1,0 +1,30 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content organization settings repo-group">
+	{{template "org/header" .}}
+	<div class="ui container">
+		{{template "base/alert" .}}
+		<h2 class="tw-break-anywhere">
+			<a class="muted" href="{{.Org.HomeLink}}">{{.Org.Name}}</a> / <a class="muted" href="{{.RepoGroupLink}}">{{.RepoGroup.Name}}</a>
+		</h2>
+		<form class="ui form" action="{{.RepoGroupLink}}/-/settings" method="post">
+			<h4 class="ui top attached header">{{ctx.Locale.Tr "repo_group.settings"}}</h4>
+			<div class="ui attached segment">
+				{{template "org/repo_group/fields" .}}
+				<button class="ui primary button">{{ctx.Locale.Tr "repo_group.settings.update"}}</button>
+			</div>
+		</form>
+
+		<h4 class="ui top attached error header tw-mt-4">{{ctx.Locale.Tr "repo_group.delete"}}</h4>
+		<div class="ui attached error segment">
+			<p>{{ctx.Locale.Tr "repo_group.delete.desc"}}</p>
+			<form class="ui form ignore-dirty" action="{{.RepoGroupLink}}/-/settings/delete" method="post">
+				<div class="required field">
+					<label for="confirm_name">{{ctx.Locale.Tr "repo_group.delete.confirm" (print .Org.Name "/" .RepoGroup.Name)}}</label>
+					<input id="confirm_name" name="confirm_name" required autocomplete="off">
+				</div>
+				<button class="ui red button">{{ctx.Locale.Tr "repo_group.delete"}}</button>
+			</form>
+		</div>
+	</div>
+</div>
+{{template "base/footer" .}}

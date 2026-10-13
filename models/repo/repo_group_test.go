@@ -207,3 +207,43 @@ func TestRepoGroupRenameDelete(t *testing.T) {
 	_, err = repo_model.CreateRepoGroup(ctx, org3, "billing", "")
 	require.NoError(t, err, "the name is free again")
 }
+
+func TestSearchRepositoryInProject(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	org := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+	payments, err := repo_model.CreateRepoGroup(ctx, org, "payments", "")
+	require.NoError(t, err)
+	other, err := repo_model.CreateRepoGroup(ctx, org, "other", "")
+	require.NoError(t, err)
+	api := insertGroupRepo(t, org, payments, "api")
+	web := insertGroupRepo(t, org, payments, "web")
+	otherAPI := insertGroupRepo(t, org, other, "api")
+
+	search := func(opts *repo_model.SearchRepoOptions) []int64 {
+		t.Helper()
+		opts.Actor, opts.Private = admin, true
+		repos, _, err := repo_model.SearchRepository(ctx, opts)
+		require.NoError(t, err)
+		ids := []int64{}
+		for _, repo := range repos {
+			ids = append(ids, repo.ID)
+		}
+		return ids
+	}
+	assert.ElementsMatch(t, []int64{api.ID}, search(&repo_model.SearchRepoOptions{Keyword: "org3/payments/api"}))
+	assert.ElementsMatch(t, []int64{api.ID}, search(&repo_model.SearchRepoOptions{Keyword: "ORG3/Payments/API"}))
+	assert.ElementsMatch(t, []int64{api.ID, web.ID}, search(&repo_model.SearchRepoOptions{Keyword: "org3/payments/"}))
+	assert.ElementsMatch(t, []int64{otherAPI.ID}, search(&repo_model.SearchRepoOptions{Keyword: "org3/other/api"}))
+	// a root repository's name is no project
+	assert.Empty(t, search(&repo_model.SearchRepoOptions{Keyword: "org3/repo3/"}))
+	// org/repo is unchanged
+	assert.Contains(t, search(&repo_model.SearchRepoOptions{Keyword: "org3/repo3"}), int64(3))
+
+	assert.ElementsMatch(t, []int64{api.ID, web.ID}, search(&repo_model.SearchRepoOptions{OwnerID: org.ID, GroupID: payments.ID}))
+
+	counts, err := repo_model.CountReposByGroup(ctx, &repo_model.SearchRepoOptions{Actor: admin, Private: true}, []int64{payments.ID, other.ID})
+	require.NoError(t, err)
+	assert.Equal(t, map[int64]int64{payments.ID: 2, other.ID: 1}, counts)
+}

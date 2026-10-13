@@ -186,6 +186,30 @@ func LoadHeaderCount(ctx *context.Context) error {
 	if err != nil {
 		return err
 	}
+	if ctx.ContextUser.IsOrganization() {
+		ctx.Data["RepoGroupCount"], err = repo_model.CountVisibleRepoGroups(ctx, ctx.Doer, ctx.ContextUser.ID)
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
+}
+
+// PrepareRepoGroupList sets the data of the shared project list: the projects, their owners and the number of
+// repositories a search with opts finds in each.
+func PrepareRepoGroupList(ctx *context.Context, groups []*repo_model.RepoGroup, opts *repo_model.SearchRepoOptions, owners map[int64]*user_model.User) bool {
+	ids := make([]int64, 0, len(groups))
+	for _, group := range groups {
+		ids = append(ids, group.ID)
+	}
+	counts, err := repo_model.CountReposByGroup(ctx, opts, ids)
+	if err != nil {
+		ctx.ServerError("CountReposByGroup", err)
+		return false
+	}
+	ctx.Data["RepoGroups"] = groups
+	ctx.Data["RepoGroupOwners"] = owners
+	ctx.Data["RepoGroupRepoCounts"] = counts
+	return true
 }

@@ -31,6 +31,7 @@ import (
 // CreateRepoForm form for creating repository
 type CreateRepoForm struct {
 	UID           int64  `binding:"Required"`
+	GroupID       int64  // the project of the organization to create the repository in, 0 for its root
 	RepoName      string `binding:"Required;AlphaDashDot;MaxSize(100)" preprocess:"TrimSpace"`
 	Private       bool
 	Description   string `binding:"MaxSize(2048)"`

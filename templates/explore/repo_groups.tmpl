@@ -1,0 +1,22 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content explore repo-groups">
+	{{template "explore/navbar" .}}
+	<div class="ui container">
+		<form class="ui form ignore-dirty tw-mb-4">
+			<div class="ui small fluid action input">
+				{{template "shared/search/input" dict "Value" .Keyword "Placeholder" (ctx.Locale.Tr "repo_group.search")}}
+				{{template "shared/search/button"}}
+			</div>
+		</form>
+		{{if .RepoGroups}}
+			{{template "org/repo_group/list_items" .}}
+			{{template "base/paginate" .}}
+		{{else}}
+			<div class="empty-placeholder">
+				{{svg "octicon-file-directory" 48}}
+				<h2>{{ctx.Locale.Tr "repo_group.no_results"}}</h2>
+			</div>
+		{{end}}
+	</div>
+</div>
+{{template "base/footer" .}}

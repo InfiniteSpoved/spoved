@@ -23,7 +23,7 @@
 
 	{{if and .HasIssuesOrPullsWritePermission (not .Repository.IsArchived)}}
 		<div {{if ne .Issue.DeadlineUnix 0}} class="tw-hidden"{{end}} id="deadlineForm">
-			<form class="ui fluid action input issue-due-form" action="{{AppSubUrl}}/{{PathEscape .Repository.Owner.Name}}/{{PathEscape .Repository.Name}}/issues/{{.Issue.Index}}/deadline" method="post" id="update-issue-deadline-form">
+			<form class="ui fluid action input issue-due-form" action="{{.Repository.Link}}/issues/{{.Issue.Index}}/deadline" method="post" id="update-issue-deadline-form">
 				<input required placeholder="{{ctx.Locale.Tr "repo.issues.due_date_form"}}" {{if gt .Issue.DeadlineUnix 0}}value="{{.Issue.DeadlineUnix.FormatDate}}"{{end}} type="date" name="deadlineDate" id="deadlineDate" aria-labelledby="deadline-label">
 				<button class="ui icon button" data-tooltip-content="{{if ne .Issue.DeadlineUnix 0}}{{ctx.Locale.Tr "save"}}{{else}}{{ctx.Locale.Tr "add"}}{{end}}">
 					{{if ne .Issue.DeadlineUnix 0}}
