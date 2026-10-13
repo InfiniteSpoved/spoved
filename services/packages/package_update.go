@@ -5,6 +5,7 @@ package packages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	org_model "forgejo.org/models/organization"
@@ -33,6 +34,9 @@ func LinkToRepository(ctx context.Context, pkg *packages_model.Package, repo *re
 	}
 
 	if err := packages_model.SetRepositoryLink(ctx, pkg.ID, repo.ID); err != nil {
+		if errors.Is(err, util.ErrNotExist) {
+			return util.ErrInvalidArgument // linked meanwhile
+		}
 		return fmt.Errorf("error while linking package '%v' to repo '%v' : %w", pkg.Name, repo.FullName(), err)
 	}
 	return nil
@@ -64,14 +68,14 @@ func UnlinkFromRepository(ctx context.Context, pkg *packages_model.Package, doer
 	if !doer.IsAdmin {
 		if !user.IsOrganization() {
 			if doer.ID != pkg.OwnerID {
-				return fmt.Errorf("no permission to unlink package '%v' from its repository, or packages are disabled", pkg.Name)
+				return fmt.Errorf("no permission to unlink package '%v' from its repository: %w", pkg.Name, util.ErrPermissionDenied)
 			}
 		} else {
 			isOrgAdmin, err := org_model.OrgFromUser(user).IsOrgAdmin(ctx, doer.ID)
 			if err != nil {
 				return err
 			} else if !isOrgAdmin {
-				return fmt.Errorf("no permission to unlink package '%v' from its repository, or packages are disabled", pkg.Name)
+				return fmt.Errorf("no permission to unlink package '%v' from its repository: %w", pkg.Name, util.ErrPermissionDenied)
 			}
 		}
 	}

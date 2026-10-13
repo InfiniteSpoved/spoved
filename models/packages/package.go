@@ -244,9 +244,9 @@ func DeletePackageByID(ctx context.Context, packageID int64) error {
 	return err
 }
 
-// SetRepositoryLink sets the linked repository
+// SetRepositoryLink links a package that has no linked repository; ErrPackageNotExist if it is missing or linked
 func SetRepositoryLink(ctx context.Context, packageID, repoID int64) error {
-	n, err := db.GetEngine(ctx).ID(packageID).Cols("repo_id").Update(&Package{RepoID: repoID})
+	n, err := db.GetEngine(ctx).ID(packageID).Where("repo_id = 0").Cols("repo_id").Update(&Package{RepoID: repoID})
 	if n == 0 && err == nil {
 		return ErrPackageNotExist
 	}

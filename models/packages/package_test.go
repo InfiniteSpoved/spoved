@@ -106,6 +106,10 @@ func TestDeletePackageByID(t *testing.T) {
 func TestSetRepositoryLink(t *testing.T) {
 	p0 := prepareExamplePackage(t)
 
+	// a linked package keeps its link
+	require.ErrorIs(t, packages_model.SetRepositoryLink(db.DefaultContext, p0.ID, 5), packages_model.ErrPackageNotExist)
+	require.NoError(t, packages_model.UnlinkRepository(db.DefaultContext, p0.ID))
+
 	// Set repository link to package should yield no error and package RepoID should be updated
 	err := packages_model.SetRepositoryLink(db.DefaultContext, p0.ID, 5)
 	require.NoError(t, err)

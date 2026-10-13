@@ -417,6 +417,10 @@ func PackageSettings(ctx *context.Context) {
 	ctx.Data["IsPackagesPage"] = true
 	ctx.Data["PackageDescriptor"] = pd
 
+	if ctx.Doer == nil {
+		ctx.NotFound("PackageSettings", nil)
+		return
+	}
 	// the repositories the doer may link the package to: where they can write packages
 	ids, err := repo_model.SearchRepositoryIDsByCondition(ctx, builder.Eq{"owner_id": pd.Owner.ID})
 	if err != nil {
@@ -432,6 +436,9 @@ func PackageSettings(ctx *context.Context) {
 	for _, r := range rows {
 		if r.User != nil && r.Perm.CanWrite(unit.TypePackages) {
 			repos = append(repos, r.Repo)
+			if r.Repo.ID == pd.Package.RepoID {
+				ctx.Data["LinkedRepoID"] = r.Repo.ID // the current link is shown only to who may link to it
+			}
 		}
 	}
 	slices.SortFunc(repos, func(a, b *repo_model.Repository) int { return strings.Compare(a.FullName(), b.FullName()) })
@@ -449,6 +456,21 @@ func PackageSettings(ctx *context.Context) {
 // linkPackage links the package to the repository, or removes the link for repoID 0, with the checks of the API.
 func linkPackage(ctx gocontext.Context, doer *user_model.User, pkg *packages_model.Package, repoID int64) error {
 	if repoID == pkg.RepoID {
+		if repoID == 0 {
+			return nil
+		}
+		// a no-op only for a repository the doer may link to, so it tells nothing about another one
+		repo, err := repo_model.GetRepositoryByID(ctx, repoID)
+		if err != nil {
+			return err
+		}
+		perms, err := access_model.GetUserRepoPermission(ctx, repo, doer)
+		if err != nil {
+			return err
+		}
+		if !perms.CanWrite(unit.TypePackages) {
+			return util.ErrPermissionDenied
+		}
 		return nil
 	}
 	return db.WithTx(ctx, func(ctx gocontext.Context) error {
