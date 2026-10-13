@@ -55,16 +55,20 @@ func toReleaseLink(ctx *context.Context, act *activities_model.Action) string {
 // renderMarkdown creates a minimal markdown render context from an action.
 // If rendering fails, the original markdown text is returned
 func renderMarkdown(ctx *context.Context, act *activities_model.Action, content string) template.HTML {
+	metas := map[string]string{
+		"user": act.GetRepoUserName(ctx),
+		"repo": act.GetRepoName(ctx),
+	}
+	if r := act.GetRepo(ctx); r != nil && r.GroupName != "" {
+		metas["group"] = r.GroupName
+	}
 	markdownCtx := &markup.RenderContext{
 		Ctx: ctx,
 		Links: markup.Links{
 			Base: act.GetRepoLink(ctx),
 		},
-		Type: markdown.MarkupName,
-		Metas: map[string]string{
-			"user": act.GetRepoUserName(ctx),
-			"repo": act.GetRepoName(ctx),
-		},
+		Type:  markdown.MarkupName,
+		Metas: metas,
 	}
 	markdown, err := markdown.RenderString(markdownCtx, content)
 	if err != nil {

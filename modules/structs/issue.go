@@ -278,4 +278,6 @@ type IssueMeta struct {
 	Owner string `json:"owner"`
 	// required:true
 	Name string `json:"repo"`
+	// the project of the repository, empty for a repository at the root of the owner
+	Project string `json:"project,omitempty"`
 }

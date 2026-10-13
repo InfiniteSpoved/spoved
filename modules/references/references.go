@@ -35,10 +35,10 @@ var (
 	issueAlphanumericPattern = regexp.MustCompile(`(?:\s|^|\(|\[|\"|\')([A-Z]{1,10}-[1-9][0-9]*)(?:\s|$|\)|\]|:|\.(\s|$)|\"|\'|,)`)
 	// crossReferenceIssueNumericPattern matches string that references a numeric issue in a different repository
 	// e.g. org/repo#12345
-	crossReferenceIssueNumericPattern = regexp.MustCompile(`(?:\s|^|\(|\[)([0-9a-zA-Z-_\.]+/[0-9a-zA-Z-_\.]+[#!][0-9]+)(?:\s|$|\)|\]|[:;,.?!]\s|[:;,.?!]$)`)
+	crossReferenceIssueNumericPattern = regexp.MustCompile(`(?:\s|^|\(|\[)([0-9a-zA-Z-_\.]+/[0-9a-zA-Z-_\.]+(?:/[0-9a-zA-Z-_\.]+)?[#!][0-9]+)(?:\s|$|\)|\]|[:;,.?!]\s|[:;,.?!]$)`)
 	// crossReferenceCommitPattern matches a string that references a commit in a different repository
 	// e.g. go-gitea/gitea@d8a994ef, go-gitea/gitea@d8a994ef243349f321568f9e36d5c3f444b99cae (7-40 characters)
-	crossReferenceCommitPattern = regexp.MustCompile(`(?:\s|^|\(|\[)([0-9a-zA-Z-_\.]+)/([0-9a-zA-Z-_\.]+)@([0-9a-f]{7,64})(?:\s|$|\)|\]|[:;,.?!]\s|[:;,.?!]$)`)
+	crossReferenceCommitPattern = regexp.MustCompile(`(?:\s|^|\(|\[)([0-9a-zA-Z-_\.]+)/([0-9a-zA-Z-_\.]+(?:/[0-9a-zA-Z-_\.]+)?)@([0-9a-f]{7,64})(?:\s|$|\)|\]|[:;,.?!]\s|[:;,.?!]$)`)
 	// spaceTrimmedPattern let's find the trailing space
 	spaceTrimmedPattern = regexp.MustCompile(`(?:.*[0-9a-zA-Z-_])\s`)
 	// timeLogPattern matches string for time tracking
@@ -81,6 +81,7 @@ func (a XRefAction) String() string {
 type IssueReference struct {
 	Index   int64
 	Owner   string
+	Group   string // project of Name, "" for a repository at the root of Owner
 	Name    string
 	Action  XRefAction
 	TimeLog string
@@ -93,6 +94,7 @@ type IssueReference struct {
 type RenderizableReference struct {
 	Issue          string
 	Owner          string
+	Group          string // project of Name, "" for a repository at the root of Owner
 	Name           string
 	CommitSha      string
 	IsPull         bool
@@ -104,6 +106,7 @@ type RenderizableReference struct {
 type rawReference struct {
 	index          int64
 	owner          string
+	group          string
 	name           string
 	isPull         bool
 	action         XRefAction
@@ -119,6 +122,7 @@ func rawToIssueReferenceList(reflist []*rawReference) []IssueReference {
 		refarr[i] = IssueReference{
 			Index:   r.index,
 			Owner:   r.owner,
+			Group:   r.group,
 			Name:    r.name,
 			Action:  r.action,
 			TimeLog: r.timeLog,
@@ -349,6 +353,7 @@ func FindRenderizableReferenceNumeric(content string, prOnly, crossLinkOnly bool
 	return true, &RenderizableReference{
 		Issue:          r.issue,
 		Owner:          r.owner,
+		Group:          r.group,
 		Name:           r.name,
 		IsPull:         r.isPull,
 		RefLocation:    r.refLocation,
@@ -364,9 +369,11 @@ func FindRenderizableCommitCrossReference(content string) (bool, *RenderizableRe
 		return false, nil
 	}
 
+	group, name := splitGroupName(content[m[4]:m[5]])
 	return true, &RenderizableReference{
 		Owner:       content[m[2]:m[3]],
-		Name:        content[m[4]:m[5]],
+		Group:       group,
+		Name:        name,
 		CommitSha:   content[m[6]:m[7]],
 		RefLocation: &RefSpan{Start: m[2], End: m[7]},
 	}
@@ -549,17 +556,21 @@ func getCrossReference(content []byte, start, end int, fromLink, prOnly bool) *r
 		}
 	}
 	parts := strings.Split(strings.ToLower(repo), "/")
-	if len(parts) != 2 {
+	if len(parts) < 2 || len(parts) > 3 {
 		return nil
 	}
-	owner, name := parts[0], parts[1]
-	if !validNamePattern.MatchString(owner) || !validNamePattern.MatchString(name) {
-		return nil
+	for _, part := range parts {
+		if !validNamePattern.MatchString(part) {
+			return nil
+		}
 	}
+	owner := parts[0]
+	group, name := splitGroupName(strings.Join(parts[1:], "/"))
 	action, location := findActionKeywords(content, start)
 	return &rawReference{
 		index:          index,
 		owner:          owner,
+		group:          group,
 		name:           name,
 		action:         action,
 		issue:          issue,
@@ -567,6 +578,14 @@ func getCrossReference(content []byte, start, end int, fromLink, prOnly bool) *r
 		refLocation:    &RefSpan{Start: start, End: end},
 		actionLocation: location,
 	}
+}
+
+// splitGroupName splits "name" or "project/name" into project and name.
+func splitGroupName(s string) (group, name string) {
+	if group, name, ok := strings.Cut(s, "/"); ok {
+		return group, name
+	}
+	return "", s
 }
 
 func findActionKeywords(content []byte, start int) (XRefAction, *RefSpan) {

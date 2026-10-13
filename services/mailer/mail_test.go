@@ -389,6 +389,31 @@ func TestGenerateAdditionalHeaders(t *testing.T) {
 	}
 }
 
+func TestProjectRepoMailIdentity(t *testing.T) {
+	defer MockMailSettings(nil)()
+	doer, _, issue, _ := prepareMailerTest(t)
+	recipient := &user_model.User{Name: "test", Email: "test@gitea.com"}
+	ctx := &mailCommentContext{Context: t.Context(), Issue: issue, Doer: doer}
+
+	root := generateAdditionalHeaders(ctx, "r", recipient)
+	rootRef := createReference(issue, nil, activities_model.ActionCreateIssue)
+	rootSubject := fallbackMailSubject(issue)
+
+	// the same leaf name inside a project: every identifier differs, the root ones are untouched
+	repo := *issue.Repo
+	repo.GroupID, repo.GroupName = 7, "proj"
+	issue.Repo = &repo
+	inProject := generateAdditionalHeaders(ctx, "r", recipient)
+	assert.Equal(t, "user2/repo1 <repo1.user2.localhost>", root["List-ID"])
+	assert.Equal(t, "user2/proj/repo1 <repo1.proj.user2.localhost>", inProject["List-ID"])
+	assert.Equal(t, "user2/proj/repo1", inProject["X-Gitea-Repository-Path"])
+	assert.Equal(t, "https://try.gitea.io/user2/proj/repo1/issues/1", inProject["X-Gitea-Issue-Link"])
+	assert.NotEqual(t, rootRef, createReference(issue, nil, activities_model.ActionCreateIssue))
+	assert.Contains(t, createReference(issue, nil, activities_model.ActionCreateIssue), "<user2/proj/repo1/issues/1")
+	assert.NotEqual(t, rootSubject, fallbackMailSubject(issue))
+	assert.Contains(t, fallbackMailSubject(issue), "[user2/proj/repo1]")
+}
+
 func Test_createReference(t *testing.T) {
 	defer MockMailSettings(nil)()
 	_, _, issue, comment := prepareMailerTest(t)

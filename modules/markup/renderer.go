@@ -32,7 +32,7 @@ const (
 
 type ProcessorHelper struct {
 	IsUsernameMentionable func(ctx context.Context, username string) bool
-	GetRepoFileBlob       func(ctx context.Context, ownerName, repoName, commitSha, filePath string, language *string) (*git.Blob, error)
+	GetRepoFileBlob       func(ctx context.Context, ownerName, groupName, repoName, commitSha, filePath string, language *string) (*git.Blob, error)
 
 	ElementDir string // the direction of the elements, eg: "ltr", "rtl", "auto", default to no direction attribute
 }
@@ -283,14 +283,13 @@ func renderIFrame(ctx *RenderContext, output io.Writer) error {
 	// "allow-same-origin" should never be used, it leads to XSS attack, and it makes the JS in iframe can access parent window's config and CSRF token
 	// TODO: when using dark theme, if the rendered content doesn't have proper style, the default text color is black, which is not easy to read
 	_, err := io.WriteString(output, fmt.Sprintf(`
-<iframe src="%s/%s/%s/render/%s/%s"
+<iframe src="%s/%s/render/%s/%s"
 class="external-render"
 width="100%%" height="300" frameborder="0"
 sandbox="allow-scripts"
 ></iframe>`,
 		setting.AppSubURL,
-		url.PathEscape(ctx.Metas["user"]),
-		url.PathEscape(ctx.Metas["repo"]),
+		RepoLinkPath(ctx.Metas),
 		ctx.Metas["BranchNameSubURL"],
 		url.PathEscape(ctx.RelativePath),
 	))
