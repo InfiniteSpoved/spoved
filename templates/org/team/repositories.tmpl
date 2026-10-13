@@ -32,12 +32,14 @@
 									{{template "repo/icon" .}}
 								</div>
 								<div class="flex-item-main">
-									<a class="flex-item-title text primary" href="{{$.Org.HomeLink}}/{{.Name | PathEscape}}">
-										{{$.Org.Name}}/{{.Name}}
+									<a class="flex-item-title text primary" href="{{.Link}}">
+										{{.FullName}}
 									</a>
 								</div>
 								<div class="flex-item-trailing">
-									{{if $canAddRemove}}
+									{{if index $.ViaGroup .ID}}
+										<a class="ui label" href="{{.GroupLink}}" data-tooltip-content="{{.GroupName}}" aria-label="{{ctx.Locale.Tr "repo_group.via_project" .GroupName}}">{{ctx.Locale.Tr "repo_group.via_project_short"}}</a>
+									{{else if $canAddRemove}}
 										<form method="post" action="{{$.OrgLink}}/teams/{{$.Team.LowerName | PathEscape}}/action/repo/remove">
 											<button type="submit" class="ui red small button" name="repoid" value="{{.ID}}">{{ctx.Locale.Tr "remove"}}</button>
 										</form>

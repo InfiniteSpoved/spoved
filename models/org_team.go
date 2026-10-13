@@ -7,6 +7,7 @@ package models
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"forgejo.org/models/db"
@@ -31,20 +32,27 @@ func AddRepository(ctx context.Context, t *organization.Team, repo *repo_model.R
 }
 
 func InsertTeamRepository(ctx context.Context, t *organization.Team, repo *repo_model.Repository) (teamRepo *organization.TeamRepo, err error) {
+	return insertTeamRepository(ctx, t, repo, false)
+}
+
+func insertTeamRepository(ctx context.Context, t *organization.Team, repo *repo_model.Repository, viaGroup bool) (teamRepo *organization.TeamRepo, err error) {
 	teamRepo = &organization.TeamRepo{
-		OrgID:  t.OrgID,
-		TeamID: t.ID,
-		RepoID: repo.ID,
+		OrgID:    t.OrgID,
+		TeamID:   t.ID,
+		RepoID:   repo.ID,
+		ViaGroup: viaGroup,
 	}
 	if _, err = db.GetEngine(ctx).Insert(teamRepo); err != nil {
 		return nil, err
 	}
 
-	if err = organization.IncrTeamRepoNum(ctx, t.ID); err != nil {
-		return nil, fmt.Errorf("update team: %w", err)
+	// a trashed repository is counted back when it is restored
+	if !repo.IsTrashed() {
+		if err = organization.IncrTeamRepoNum(ctx, t.ID); err != nil {
+			return nil, fmt.Errorf("update team: %w", err)
+		}
+		t.NumRepos++
 	}
-
-	t.NumRepos++
 
 	if err = access_model.RecalculateTeamAccesses(ctx, repo, 0); err != nil {
 		return nil, fmt.Errorf("recalculateAccesses: %w", err)
@@ -63,6 +71,25 @@ func InsertTeamRepository(ctx context.Context, t *organization.Team, repo *repo_
 	}
 
 	return teamRepo, nil
+}
+
+// AddRepoGroupTeams gives every team linked to the repository's project, that doesn't have the repository yet, a
+// ViaGroup row for it. The caller holds the project's row lock (repo_model.LockRepoGroup).
+func AddRepoGroupTeams(ctx context.Context, repo *repo_model.Repository) error {
+	if repo.GroupID == 0 {
+		return nil
+	}
+	teams := make([]*organization.Team, 0, 5)
+	if err := db.GetEngine(ctx).Where("org_id = ? AND id IN (SELECT team_id FROM team_group WHERE group_id = ?) AND id NOT IN (SELECT team_id FROM team_repo WHERE repo_id = ?)",
+		repo.OwnerID, repo.GroupID, repo.ID).Find(&teams); err != nil {
+		return err
+	}
+	for _, t := range teams {
+		if _, err := insertTeamRepository(ctx, t, repo, true); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // addAllRepositories adds all repositories to the team.
@@ -99,6 +126,34 @@ func AddAllRepositories(ctx context.Context, t *organization.Team) (err error) {
 	return committer.Commit()
 }
 
+// lockTeamGroups locks, in the transaction of ctx, the projects the team is linked to by ascending ID, then the team
+// row: the order of link, unlink, move and repository creation, so the team's links and ViaGroup rows hold still
+// until the end of the transaction. A link or unlink that ran in between fails it, to be tried again.
+func lockTeamGroups(ctx context.Context, t *organization.Team) error {
+	linkedGroups := func() ([]int64, error) {
+		var ids []int64
+		return ids, db.GetEngine(ctx).Table("team_group").Where("team_id = ?", t.ID).Asc("group_id").Cols("group_id").Find(&ids)
+	}
+	ids, err := linkedGroups()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err := repo_model.LockRepoGroup(ctx, t.OrgID, id); err != nil {
+			return err
+		}
+	}
+	if _, err := db.Exec(ctx, "UPDATE `team` SET org_id = org_id WHERE id = ?", t.ID); err != nil {
+		return err
+	}
+	if again, err := linkedGroups(); err != nil {
+		return err
+	} else if !slices.Equal(ids, again) {
+		return util.NewInvalidArgumentErrorf("the projects of the team changed meanwhile")
+	}
+	return nil
+}
+
 // RemoveAllRepositories removes all repositories from team and recalculates access
 func RemoveAllRepositories(ctx context.Context, t *organization.Team) (err error) {
 	if t.IncludesAllRepositories {
@@ -118,9 +173,13 @@ func RemoveAllRepositories(ctx context.Context, t *organization.Team) (err error
 	return committer.Commit()
 }
 
-// removeAllRepositories removes all repositories from team and recalculates access
+// removeAllRepositories removes all repositories from team and recalculates access; the repositories of projects the
+// team is linked to stay, as ViaGroup rows.
 // Note: Shall not be called if team includes all repositories
 func removeAllRepositories(ctx context.Context, t *organization.Team) (err error) {
+	if err := lockTeamGroups(ctx, t); err != nil {
+		return err
+	}
 	e := db.GetEngine(ctx)
 
 	if err := t.LoadRepositories(ctx); err != nil {
@@ -129,9 +188,18 @@ func removeAllRepositories(ctx context.Context, t *organization.Team) (err error
 	if err := t.LoadMembers(ctx); err != nil {
 		return fmt.Errorf("load repositories failed: %w", err)
 	}
+	linked := builder.Select("repository.id").From("repository").
+		Join("INNER", "team_group", "team_group.group_id = repository.group_id").Where(builder.Eq{"team_group.team_id": t.ID})
+	var keep []int64
+	if err := e.Table("team_repo").Where(builder.Eq{"team_id": t.ID}.And(builder.In("repo_id", linked))).Cols("repo_id").Find(&keep); err != nil {
+		return err
+	}
 
 	// Delete all accesses.
 	for _, repo := range t.Repos {
+		if slices.Contains(keep, repo.ID) {
+			continue
+		}
 		if err := access_model.RecalculateTeamAccesses(ctx, repo, t.ID); err != nil {
 			return err
 		}
@@ -158,12 +226,20 @@ func removeAllRepositories(ctx context.Context, t *organization.Team) (err error
 
 	// Delete team-repo
 	if _, err := e.
-		Where("team_id=?", t.ID).
+		Where(builder.Eq{"team_id": t.ID}.And(builder.NotIn("repo_id", keep))).
 		Delete(new(organization.TeamRepo)); err != nil {
 		return err
 	}
+	if _, err := e.Where("team_id = ?", t.ID).Cols("via_group").Update(&organization.TeamRepo{ViaGroup: true}); err != nil {
+		return err
+	}
 
-	t.NumRepos = 0
+	n, err := e.Table("team_repo").Join("INNER", "repository", "repository.id = team_repo.repo_id").
+		Where("team_repo.team_id = ? AND repository.trashed_unix = 0", t.ID).Count()
+	if err != nil {
+		return err
+	}
+	t.NumRepos = int(n)
 	if _, err = e.ID(t.ID).Cols("num_repos").Update(t); err != nil {
 		return err
 	}
@@ -356,6 +432,13 @@ func DeleteTeam(ctx context.Context, t *organization.Team) error {
 		}
 	}
 
+	// unlinked first, so that no repository stays
+	if err := lockTeamGroups(ctx, t); err != nil {
+		return err
+	}
+	if err := db.DeleteBeans(ctx, &organization.TeamGroup{TeamID: t.ID}); err != nil {
+		return err
+	}
 	if err := removeAllRepositories(ctx, t); err != nil {
 		return err
 	}

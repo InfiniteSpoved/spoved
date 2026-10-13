@@ -631,6 +631,10 @@ func TeamRepositories(ctx *context.Context) {
 		return
 	}
 	ctx.Org.Team.Repos = repos
+	if ctx.Data["ViaGroup"], err = org_model.ViaGroupRepoIDs(ctx, ctx.Org.Team.ID); err != nil {
+		ctx.ServerError("ViaGroupRepoIDs", err)
+		return
+	}
 	if err := org_model.LoadTeamsNumUserGroups(ctx, []*org_model.Team{ctx.Org.Team}); err != nil {
 		ctx.ServerError("LoadTeamsNumUserGroups", err)
 		return

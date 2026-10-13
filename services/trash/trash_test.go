@@ -128,3 +128,35 @@ func TestRepoGroupRestoreAndOrgPurge(t *testing.T) {
 	unittest.AssertNotExistsBean(t, &repo_model.RepoGroupNameClaim{OwnerID: org3.ID})
 	unittest.CheckRepoGroupNameClaims(t)
 }
+
+// A team's rows through a linked project stay while the repository is in the trash, and its count follows.
+func TestTeamGroupTrashRestore(t *testing.T) {
+	unittest.PrepareTestEnv(t)
+	ctx := t.Context()
+	doer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+	pay, err := repo_model.CreateRepoGroup(ctx, org3, "pay", "")
+	require.NoError(t, err)
+	repo, err := repo_service.CreateRepositoryDirectly(ctx, doer, org3, repo_service.CreateRepoOptions{Name: "api", GroupID: pay.ID})
+	require.NoError(t, err)
+	numRepos := func() int {
+		return unittest.AssertExistsAndLoadBean(t, &organization.Team{ID: 2}).NumRepos
+	}
+	before := numRepos()
+
+	require.NoError(t, repo_service.LinkTeamToRepoGroup(ctx, doer, organization.OrgFromUser(org3), 2, pay.ID))
+	assert.Equal(t, before+1, numRepos())
+	require.NoError(t, repo_service.TrashRepository(ctx, doer, repo))
+	assert.Equal(t, before, numRepos())
+	require.NoError(t, RestoreRepo(ctx, doer, repo.ID, RestoreOptions{}))
+	assert.Equal(t, before+1, numRepos())
+
+	// unlinked and linked again while in the trash: counted only once it is back
+	require.NoError(t, repo_service.TrashRepository(ctx, doer, repo))
+	require.NoError(t, repo_service.UnlinkTeamFromRepoGroup(ctx, doer, organization.OrgFromUser(org3), 2, pay.ID))
+	require.NoError(t, repo_service.LinkTeamToRepoGroup(ctx, doer, organization.OrgFromUser(org3), 2, pay.ID))
+	assert.Equal(t, before, numRepos())
+	require.NoError(t, RestoreRepo(ctx, doer, repo.ID, RestoreOptions{}))
+	assert.Equal(t, before+1, numRepos())
+	unittest.CheckConsistencyFor(t, &user_model.User{}, &repo_model.Repository{}, &organization.Team{})
+}

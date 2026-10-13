@@ -42,7 +42,7 @@ func CreateRepositoryByExample(ctx context.Context, doer, u *user_model.User, re
 	// the group name is taken from the owner's group, never from the caller
 	repo.GroupName = ""
 	if repo.GroupID != 0 {
-		group, err := repo_model.GetRepoGroupByID(ctx, u.ID, repo.GroupID)
+		group, err := repo_model.LockRepoGroup(ctx, u.ID, repo.GroupID) // until the teams linked to it are added
 		if err != nil {
 			return err
 		}
@@ -160,6 +160,10 @@ func CreateRepositoryByExample(ctx context.Context, doer, u *user_model.User, re
 					return fmt.Errorf("AddRepository: %w", err)
 				}
 			}
+		}
+		// before the creator check below, so access through a linked project is revoked by unlinking it
+		if err := models.AddRepoGroupTeams(ctx, repo); err != nil {
+			return fmt.Errorf("AddRepoGroupTeams: %w", err)
 		}
 
 		if isAdmin, err := access_model.IsUserRepoAdmin(ctx, repo, doer); err != nil {
