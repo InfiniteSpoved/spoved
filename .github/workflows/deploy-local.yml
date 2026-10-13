@@ -31,8 +31,6 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref }}
-          # the tags give the binary its version (git describe)
-          fetch-depth: 0
       # no GitHub cache: the runners share host-wide Go and npm caches (see ci.yml)
       - uses: actions/setup-go@v6
         with:
