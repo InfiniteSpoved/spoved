@@ -184,18 +184,23 @@ test('multi-commit commenting', async ({page, request}) => {
     await page.getByText('New pull request').click(); // load compare view for the branch
     await page.locator('.show-form-container').getByText('New pull request').click(); // actually open the PR form
     await page.locator('.primary.button').getByText('Create pull request').click(); // submit PR creation
+    await expect(page).toHaveURL(/\/pulls\/\d+$/);
 
     // Test situation: adding a comment on a line that was created in the *second* commit, doing it from the "Files changed" view.
     await page.getByText('Files changed').click();
+    await expect(page).toHaveURL(/\/pulls\/\d+\/files$/);
     await page.getByText('More  This line was changed in commit 2')
       .locator('..')
       .locator('button.add-code-comment')
       .click();
     await page.getByPlaceholder('Leave a comment').fill('Comment on line changed in commit 2');
     await page.getByText('Add single comment').click();
+    // The comment is posted via AJAX: wait for it to render, or navigating away can race with the request.
+    await expect(page.locator('.conversation-holder .render-content.markup')).toHaveText('Comment on line changed in commit 2');
 
     // Test assertion: when viewing the comment from the 'Conversation' page, it's diff should look correct:
-    await page.getByText('Conversation').click();
+    await page.getByRole('link', {name: 'Conversation'}).click();
+    await expect(page).toHaveURL(/\/pulls\/\d+$/);
     await expect(page.locator('.pull.menu .item.active')).toContainText('Conversation'); // ensure we navigated back to Conversation page
     await expect(page.locator('.text.comment-content .render-content.markup')).toHaveText('Comment on line changed in commit 2');
     await expect(page.locator('.diff-file-box .code-diff')).toContainText('More  This line was changed in commit 2');
@@ -203,6 +208,7 @@ test('multi-commit commenting', async ({page, request}) => {
     // Test assertion: when viewing the comment from the second commit, it should be placed correctly in the UI:
     await page.getByRole('link', {name: 'Commits'}).click();
     await page.getByText('add commit to branch').nth(1).click();
+    await expect(page).toHaveURL(/\/pulls\/\d+\/commits\/[0-9a-f]+$/);
     // FIXME: The intent of this test is to make sure that the comment box appears in the "right spot", which is *below*
     // the line of code that it was commented on.  This check uses the elements bounding boxes which... is pretty ugly
     // and could be done better.  Probably would be better to find the line of code that the box is rendered on,
