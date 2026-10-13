@@ -47,3 +47,17 @@ func TestRender_postProcessOrCopy(t *testing.T) {
 		assert.ErrorContains(t, postProcessOrCopy(renderContext, renderer, input, &bytes.Buffer{}), "FAIL")
 	})
 }
+
+func TestRenderIFrame_Project(t *testing.T) {
+	for _, c := range []struct {
+		metas    map[string]string
+		expected string
+	}{
+		{map[string]string{"user": "org", "repo": "leaf", "BranchNameSubURL": "branch/main"}, `src="/org/leaf/render/branch/main/a.html"`},
+		{map[string]string{"user": "org", "group": "proj", "repo": "leaf", "BranchNameSubURL": "branch/main"}, `src="/org/proj/leaf/render/branch/main/a.html"`},
+	} {
+		var out bytes.Buffer
+		require.NoError(t, renderIFrame(&RenderContext{Metas: c.metas, RelativePath: "a.html"}, &out))
+		assert.Contains(t, out.String(), c.expected)
+	}
+}

@@ -586,3 +586,32 @@ func TestParseCloseKeywords(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectReferences(t *testing.T) {
+	refs := FindAllIssueReferences("see org/proj/leaf#7 and org/leaf#8, closes org/proj/leaf!9")
+	assert.Len(t, refs, 3)
+	assert.Equal(t, IssueReference{Index: 7, Owner: "org", Group: "proj", Name: "leaf"}, refs[0])
+	assert.Equal(t, IssueReference{Index: 8, Owner: "org", Name: "leaf"}, refs[1])
+	assert.Equal(t, IssueReference{Index: 9, Owner: "org", Group: "proj", Name: "leaf", Action: XRefActionCloses}, refs[2])
+
+	// four segments and path-like text never match
+	assert.Empty(t, FindAllIssueReferences("a/b/c/d#1"))
+	assert.Empty(t, FindAllIssueReferences("see src/foo/bar.go and a/b/c"))
+	assert.Empty(t, FindAllIssueReferences("a/b/c/d!1"))
+
+	found, ref := FindRenderizableReferenceNumeric("org/proj/leaf#7", false, false)
+	assert.True(t, found)
+	assert.Equal(t, "proj", ref.Group)
+	assert.Equal(t, "leaf", ref.Name)
+
+	found, ref = FindRenderizableCommitCrossReference("org/proj/leaf@0123456789")
+	assert.True(t, found)
+	assert.Equal(t, "org", ref.Owner)
+	assert.Equal(t, "proj", ref.Group)
+	assert.Equal(t, "leaf", ref.Name)
+	assert.Equal(t, 0, ref.RefLocation.Start)
+	found, ref = FindRenderizableCommitCrossReference("org/leaf@0123456789")
+	assert.True(t, found)
+	assert.Empty(t, ref.Group)
+	assert.Equal(t, "leaf", ref.Name)
+}
