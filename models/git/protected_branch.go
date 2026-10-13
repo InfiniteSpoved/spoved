@@ -33,7 +33,8 @@ var ErrBranchIsProtected = errors.New("branch is protected")
 type ProtectedBranch struct {
 	ID                            int64                  `xorm:"pk autoincr"`
 	RepoID                        int64                  `xorm:"UNIQUE(s)"`                          // 0 for organization rules
-	OrgID                         int64                  `xorm:"UNIQUE(s) INDEX NOT NULL DEFAULT 0"` // set for organization rules only
+	OrgID                         int64                  `xorm:"UNIQUE(s) INDEX NOT NULL DEFAULT 0"` // set for organization and project rules only
+	GroupID                       int64                  `xorm:"UNIQUE(s) NOT NULL DEFAULT 0"`       // set for project rules only
 	Repo                          *repo_model.Repository `xorm:"-"`
 	RuleName                      string                 `xorm:"'branch_name' UNIQUE(s)"` // a branch name or a glob match to branch name
 	globRule                      glob.Glob              `xorm:"-"`

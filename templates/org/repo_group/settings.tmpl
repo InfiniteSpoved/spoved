@@ -44,6 +44,33 @@
 			{{end}}
 		</div>
 
+		<h4 class="ui top attached header tw-mt-4">
+			{{ctx.Locale.Tr "repo_group.branches"}}
+			<div class="ui right">
+				<a class="ui primary tiny button" href="{{.RepoGroupLink}}/-/settings/branches/edit">{{ctx.Locale.Tr "repo.settings.branches.add_new_rule"}}</a>
+			</div>
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "repo_group.branches.desc"}}</p>
+			<div class="flex-list">
+				{{range .ProtectedBranches}}
+					<div class="flex-item flex-item-center">
+						<div class="flex-item-main">
+							<div class="flex-item-title"><div class="ui basic primary label">{{.RuleName}}</div></div>
+						</div>
+						<div class="flex-item-trailing">
+							<a class="ui tiny button" href="{{$.RepoGroupLink}}/-/settings/branches/edit?rule_name={{.RuleName}}">{{ctx.Locale.Tr "repo.settings.edit_protected_branch"}}</a>
+							<button class="ui red tiny button delete-button" data-url="{{$.RepoGroupLink}}/-/settings/branches/{{.ID}}/delete" data-id="{{.ID}}" data-modal-id="delete-protected-branch">
+								{{ctx.Locale.Tr "repo.settings.protected_branch.delete_rule"}}
+							</button>
+						</div>
+					</div>
+				{{else}}
+					<div class="flex-item">{{ctx.Locale.Tr "repo.settings.no_protected_branch"}}</div>
+				{{end}}
+			</div>
+		</div>
+
 		<h4 class="ui top attached error header tw-mt-4">{{ctx.Locale.Tr "repo_group.delete"}}</h4>
 		<div class="ui attached error segment">
 			<p>{{ctx.Locale.Tr "repo_group.delete.desc"}}</p>
@@ -56,6 +83,11 @@
 			</form>
 		</div>
 	</div>
+</div>
+<div class="ui g-modal-confirm delete modal" id="delete-protected-branch">
+	<div class="header">{{svg "octicon-trash"}} {{ctx.Locale.Tr "repo.settings.protected_branch_deletion"}}</div>
+	<div class="content"><p>{{ctx.Locale.Tr "repo.settings.protected_branch_deletion_desc"}}</p></div>
+	{{template "base/modal_actions_confirm" .}}
 </div>
 <div class="ui g-modal-confirm delete modal" id="unlink-team">
 	<div class="header">{{ctx.Locale.Tr "repo_group.teams.unlink"}}</div>

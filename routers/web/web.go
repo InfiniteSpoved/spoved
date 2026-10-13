@@ -1147,6 +1147,11 @@ func registerRoutes(m *web.Route) {
 			m.Post("/delete", org.RepoGroupDeletePost)
 			m.Post("/teams/link", org.RepoGroupTeamLink)
 			m.Post("/teams/unlink", org.RepoGroupTeamUnlink)
+			m.Group("/branches", func() {
+				m.Combo("/edit").Get(org_setting.SettingsProtectedBranch).
+					Post(web.Bind(forms.ProtectBranchForm{}), org_setting.SettingsProtectedBranchPost)
+				m.Post("/{rule}/delete", org_setting.DeleteProtectedBranchRulePost)
+			})
 		}, context.RepoGroupAssignment)
 	}, reqSignIn, context.OrgAssignment(true, true))
 
@@ -1250,7 +1255,7 @@ func registerRoutes(m *web.Route) {
 					m.Get("", org_setting.ProtectedBranchRules)
 					m.Combo("/edit").Get(org_setting.SettingsProtectedBranch).
 						Post(web.Bind(forms.ProtectBranchForm{}), org_setting.SettingsProtectedBranchPost)
-					m.Post("/{id}/delete", org_setting.DeleteProtectedBranchRulePost)
+					m.Post("/{rule}/delete", org_setting.DeleteProtectedBranchRulePost)
 				})
 
 				m.Group("/actions", func() {

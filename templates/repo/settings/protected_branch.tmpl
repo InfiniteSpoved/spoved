@@ -1,4 +1,13 @@
-{{if .IsOrgRule}}
+{{if .RepoGroup}}
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content organization settings repository branches repo-group">
+	{{template "org/header" .}}
+	<div class="ui container">
+		{{template "base/alert" .}}
+		<h2 class="tw-break-anywhere">
+			<a class="muted" href="{{.Org.HomeLink}}">{{.Org.Name}}</a> / <a class="muted" href="{{.RepoGroupLink}}/-/settings">{{.RepoGroup.Name}}</a>
+		</h2>
+{{else if .IsOrgRule}}
 {{template "org/settings/layout_head" (dict "ctxData" . "pageClass" "organization settings repository branches")}}
 	<div class="org-setting-content">
 {{else}}
@@ -14,7 +23,7 @@
 		</h4>
 		<form class="ui form attached segment" action="{{.Link}}" method="post">
 			<input name="rule_id" type="hidden" value="{{.Rule.ID}}">
-			{{if .IsOrgRule}}
+			{{if and .IsOrgRule (not .RepoGroup)}}
 			<fieldset>
 				<legend>{{ctx.Locale.Tr "repo.settings.protect_scope"}}</legend>
 				<label>
@@ -222,6 +231,7 @@
 						<label>{{ctx.Locale.Tr "repo.settings.protect_status_check_patterns"}}</label>
 						<textarea id="status_check_contexts" name="status_check_contexts" rows="3">{{.status_check_contexts}}</textarea>
 						<p class="help">{{ctx.Locale.Tr "repo.settings.protect_status_check_patterns_desc"}}</p>
+						{{if not .IsOrgRule}}
 						<table class="ui celled table">
 							<thead>
 								<tr>
@@ -241,6 +251,7 @@
 							{{end}}
 							</tbody>
 						</table>
+						{{end}}
 					</div>
 				</fieldset>
 			</fieldset>
@@ -337,7 +348,10 @@
 			<button class="ui primary button">{{ctx.Locale.Tr "repo.settings.protected_branch.save_rule"}}</button>
 		</form>
 	</div>
-{{if .IsOrgRule}}
+{{if .RepoGroup}}
+</div>
+{{template "base/footer" .}}
+{{else if .IsOrgRule}}
 {{template "org/settings/layout_footer" .}}
 {{else}}
 {{template "repo/settings/layout_footer" .}}
