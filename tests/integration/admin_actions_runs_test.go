@@ -463,18 +463,7 @@ func TestAdminActionsRunsQueryCount(t *testing.T) {
 		"/admin/actions/runs?limit=50", "/admin/actions/runs/export", "/admin/actions/usage?group_by=repo", "/admin/actions/usage?group_by=org", "/admin/actions/usage?group_by=runner",
 	}
 	apiPaths := []string{"/api/v1/admin/actions/runs?limit=50", "/api/v1/admin/actions/usage?group_by=repo", "/api/v1/admin/actions/usage?group_by=runner"}
-	// countQueries counts the queries of every goroutine, so a stray burst can land in one reading: read each path until two readings in a row agree
-	stable := func(f func()) int64 {
-		var readings []int64
-		for len(readings) < 6 {
-			readings = append(readings, countQueries(t, f))
-			if n := len(readings); n > 1 && readings[n-1] == readings[n-2] {
-				return readings[n-1]
-			}
-		}
-		require.FailNow(t, "query count doesn't settle", "%v", readings)
-		return 0
-	}
+	stable := func(f func()) int64 { return stableQueryCount(t, f) }
 	count := func() (counts []int64) {
 		for _, p := range paths {
 			counts = append(counts, stable(func() { session.MakeRequest(t, NewRequest(t, "GET", p), http.StatusOK) }))

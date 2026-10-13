@@ -642,7 +642,7 @@ func TestRepoUnitPolicyLoadUnitsQueries(t *testing.T) {
 				}
 				ctx := cache.WithCacheContext(db.DefaultContext)
 				_ = repo_model.HiddenUnitCond(ctx, "a", "b") // warm up the settings and org_unit caches of the request
-				assert.EqualValues(t, 1, countQueries(t, func() { require.NoError(t, repos.LoadUnits(ctx)) }), "%d repos", n)
+				assert.EqualValues(t, 1, stableQueryCount(t, func() { require.NoError(t, repos.LoadUnits(ctx)) }), "%d repos", n)
 			}
 		})
 	}

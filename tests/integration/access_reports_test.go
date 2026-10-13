@@ -403,7 +403,7 @@ func TestReportQueriesDontGrowWithUsersAndRepos(t *testing.T) {
 		admin.MakeRequest(t, NewRequest(t, "GET", link), http.StatusOK)
 		var counts []int64
 		for _, l := range []string{link, link + "?format=csv", link + "?format=json"} {
-			counts = append(counts, countQueries(t, func() { admin.MakeRequest(t, NewRequest(t, "GET", l), http.StatusOK) }))
+			counts = append(counts, stableQueryCount(t, func() { admin.MakeRequest(t, NewRequest(t, "GET", l), http.StatusOK) }))
 		}
 		return counts
 	}

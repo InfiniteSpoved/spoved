@@ -132,7 +132,7 @@ func TestIssueListFilterHiddenUnitsQueries(t *testing.T) {
 		for _, i := range list {
 			i.Repo = nil
 		}
-		return countQueries(t, func() {
+		return stableQueryCount(t, func() {
 			_, err := list.FilterHiddenUnits(db.DefaultContext)
 			require.NoError(t, err)
 		})
