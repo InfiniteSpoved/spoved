@@ -16,6 +16,7 @@ import (
 	git_model "forgejo.org/models/git"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/actions"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/container"
@@ -42,20 +43,20 @@ type Workflow struct {
 	ErrMsg string
 }
 
+// ActionsAvailable reports whether Actions is on for the site and, when owner is an organization, not hidden for it
+func ActionsAvailable(ctx *context.Context, owner *user_model.User) bool {
+	return setting.Actions.Enabled && !unit.TypeActions.UnitGlobalDisabled() &&
+		(owner == nil || !repo_model.HiddenUnits(ctx, owner).Contains(unit.TypeActions))
+}
+
 // MustEnableActions check if actions are enabled in settings
 func MustEnableActions(ctx *context.Context) {
-	if !setting.Actions.Enabled {
-		ctx.NotFound("MustEnableActions", nil)
-		return
-	}
-
-	if unit.TypeActions.UnitGlobalDisabled() {
-		ctx.NotFound("MustEnableActions", nil)
-		return
-	}
-
 	// organization runners, secrets and variables: Actions hidden for the organization
-	if ctx.Org.Organization != nil && repo_model.HiddenUnits(ctx, ctx.Org.Organization.AsUser()).Contains(unit.TypeActions) {
+	var org *user_model.User
+	if ctx.Org.Organization != nil {
+		org = ctx.Org.Organization.AsUser()
+	}
+	if !ActionsAvailable(ctx, org) {
 		ctx.NotFound("MustEnableActions", nil)
 		return
 	}

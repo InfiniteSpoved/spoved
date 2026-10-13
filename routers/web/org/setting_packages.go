@@ -11,6 +11,7 @@ import (
 	"forgejo.org/models/unit"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/setting"
+	"forgejo.org/routers/web/repo/actions"
 	shared "forgejo.org/routers/web/shared/packages"
 	shared_user "forgejo.org/routers/web/shared/user"
 	"forgejo.org/services/context"
@@ -27,6 +28,12 @@ func MustEnablePackages(ctx *context.Context) {
 	if repo_model.HiddenUnits(ctx, ctx.ContextUser).Contains(unit.TypePackages) {
 		ctx.NotFound("MustEnablePackages", nil)
 	}
+}
+
+// SettingsMenu shows the Packages and Actions items of the settings menu only where their routes accept the owner
+func SettingsMenu(ctx *context.Context) {
+	ctx.Data["EnablePackages"] = setting.Packages.Enabled && !repo_model.HiddenUnits(ctx, ctx.ContextUser).Contains(unit.TypePackages)
+	ctx.Data["EnableActions"] = actions.ActionsAvailable(ctx, ctx.ContextUser)
 }
 
 func Packages(ctx *context.Context) {
