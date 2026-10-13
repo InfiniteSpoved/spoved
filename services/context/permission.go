@@ -154,8 +154,7 @@ func CheckRepoScopedToken(ctx *Context, repo *repo_model.Repository, level auth_
 			return
 		}
 
-		// a missing repository (nil) answers like a private one, never with a nil dereference
-		if publicOnly && (repo == nil || repo.IsPrivate) {
+		if publicOnly && repo.IsPrivate {
 			ctx.Error(http.StatusForbidden)
 			return
 		}
@@ -183,10 +182,6 @@ func CheckRepoScopedToken(ctx *Context, repo *repo_model.Repository, level auth_
 			fallthrough
 		default:
 			accessMode = perm.AccessModeNone
-		}
-		if repo == nil { // a repository-restricted token never reaches a missing repository
-			ctx.Error(http.StatusForbidden)
-			return
 		}
 		actualAccessMode, err := reducer.ReduceRepoAccess(ctx, repo, accessMode)
 		if err != nil {
