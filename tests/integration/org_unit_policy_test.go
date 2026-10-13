@@ -343,10 +343,10 @@ func TestOrgUnitPolicyQueries(t *testing.T) {
 	// a whole org page reads the org's rows once
 	session := loginUser(t, "user2")
 	session.MakeRequest(t, NewRequest(t, "GET", "/org3/-/projects"), http.StatusOK)
-	withRows := countQueries(t, func() { session.MakeRequest(t, NewRequest(t, "GET", "/org3/-/projects"), http.StatusOK) })
+	withRows := stableQueryCount(t, func() { session.MakeRequest(t, NewRequest(t, "GET", "/org3/-/projects"), http.StatusOK) })
 	_, err := db.GetEngine(db.DefaultContext).Exec("DELETE FROM org_unit")
 	require.NoError(t, err)
-	withoutRows := countQueries(t, func() { session.MakeRequest(t, NewRequest(t, "GET", "/org3/-/projects"), http.StatusOK) })
+	withoutRows := stableQueryCount(t, func() { session.MakeRequest(t, NewRequest(t, "GET", "/org3/-/projects"), http.StatusOK) })
 	assert.Equal(t, withoutRows+1, withRows)
 }
 

@@ -264,8 +264,8 @@ func TestOrgRepoPolicyQueryCount(t *testing.T) {
 	orgPolicyRepo(t, "policy-count", false)
 	session := loginUser(t, "user4")
 	count := func() (page, settings int64) {
-		page = countQueries(t, func() { session.MakeRequest(t, NewRequest(t, "GET", "/org3/policy-count"), http.StatusOK) })
-		settings = countQueries(t, func() { session.MakeRequest(t, NewRequest(t, "GET", "/org3/policy-count/settings"), http.StatusOK) })
+		page = stableQueryCount(t, func() { session.MakeRequest(t, NewRequest(t, "GET", "/org3/policy-count"), http.StatusOK) })
+		settings = stableQueryCount(t, func() { session.MakeRequest(t, NewRequest(t, "GET", "/org3/policy-count/settings"), http.StatusOK) })
 		return page, settings
 	}
 	count() // warm up
