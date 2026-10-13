@@ -31,6 +31,8 @@ test('add a project branch rule, see it in a repository, and delete it after con
   await page.goto(`/org3/${project}/-/settings`);
   await page.getByRole('link', {name: 'Add new rule'}).click();
   await expect(page.locator('input[name="apply_to_selected_repos"]')).toHaveCount(0);
+  // the form's scripts run on the project page too
+  await expect(page.getByRole('button', {name: 'Add approval rule'})).toBeVisible();
   await page.locator('input[name="rule_name"]').fill('main');
   await page.getByRole('button', {name: 'Save rule'}).click();
   await expect(page).toHaveURL(`/org3/${project}/-/settings`);

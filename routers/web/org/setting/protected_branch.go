@@ -17,6 +17,7 @@ import (
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	repo_setting "forgejo.org/routers/web/repo/setting"
+	shared_user "forgejo.org/routers/web/shared/user"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 	"forgejo.org/services/forms"
@@ -70,8 +71,16 @@ func SettingsProtectedBranch(ctx *context.Context) {
 	}
 
 	ctx.Data["Title"] = ctx.Locale.TrString("repo.settings.protected_branch") + " - " + rule.RuleName
-	ctx.Data["PageIsOrgSettings"] = true
-	ctx.Data["PageIsOrgSettingsBranches"] = true
+	if groupID != 0 { // the project's settings page and its header
+		if err := shared_user.LoadHeaderCount(ctx); err != nil {
+			ctx.ServerError("LoadHeaderCount", err)
+			return
+		}
+		ctx.Data["PageIsViewRepoGroups"] = true
+	} else {
+		ctx.Data["PageIsOrgSettings"] = true
+		ctx.Data["PageIsOrgSettingsBranches"] = true
+	}
 	ctx.Data["IsOrgRule"] = true
 	ctx.Data["Owner"] = org.AsUser()
 

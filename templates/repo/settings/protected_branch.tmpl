@@ -1,6 +1,6 @@
 {{if .RepoGroup}}
 {{template "base/head" .}}
-<div role="main" aria-label="{{.Title}}" class="page-content organization settings repo-group">
+<div role="main" aria-label="{{.Title}}" class="page-content organization settings repository branches repo-group">
 	{{template "org/header" .}}
 	<div class="ui container">
 		{{template "base/alert" .}}
@@ -231,6 +231,7 @@
 						<label>{{ctx.Locale.Tr "repo.settings.protect_status_check_patterns"}}</label>
 						<textarea id="status_check_contexts" name="status_check_contexts" rows="3">{{.status_check_contexts}}</textarea>
 						<p class="help">{{ctx.Locale.Tr "repo.settings.protect_status_check_patterns_desc"}}</p>
+						{{if not .IsOrgRule}}
 						<table class="ui celled table">
 							<thead>
 								<tr>
@@ -250,6 +251,7 @@
 							{{end}}
 							</tbody>
 						</table>
+						{{end}}
 					</div>
 				</fieldset>
 			</fieldset>
