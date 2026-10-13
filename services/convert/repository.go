@@ -5,6 +5,8 @@ package convert
 
 import (
 	stdCtx "context"
+	"net/url"
+	"path"
 	"time"
 
 	"forgejo.org/models"
@@ -14,6 +16,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	unit_model "forgejo.org/models/unit"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/services/branchworkflow"
 	"forgejo.org/services/context"
@@ -204,6 +207,7 @@ func innerToRepo(ctx stdCtx.Context, repo *repo_model.Repository, permissionInRe
 		Owner:                         ToUserWithAccessMode(ctx, repo.Owner, ownerViewPerms),
 		Name:                          repo.Name,
 		FullName:                      repo.FullName(),
+		Project:                       toProjectMeta(repo),
 		Description:                   repo.Description,
 		Private:                       repo.IsPrivate,
 		Template:                      repo.IsTemplate,
@@ -312,4 +316,26 @@ func ToOwnerStorage(o *repo_model.OwnerStorage, totals repo_model.StorageStats) 
 		TotalSize:    o.Size(),
 		Percent:      o.Percent(totals),
 	}
+}
+
+// ToProject converts a project of the organization ownerName to its API form.
+func ToProject(group *repo_model.RepoGroup, ownerName string) *api.Project {
+	return &api.Project{
+		ID:          group.ID,
+		Name:        group.Name,
+		FullName:    path.Join(ownerName, group.Name),
+		Description: group.Description,
+		HTMLURL:     setting.AppURL + url.PathEscape(ownerName) + "/" + url.PathEscape(group.Name),
+		Created:     group.CreatedUnix.AsTime(),
+		Updated:     group.UpdatedUnix.AsTime(),
+	}
+}
+
+// toProjectMeta returns the project of a repository from its row, nil at the root of its owner.
+func toProjectMeta(repo *repo_model.Repository) *api.ProjectMeta {
+	if repo.GroupID == 0 {
+		return nil
+	}
+	project := ToProject(&repo_model.RepoGroup{ID: repo.GroupID, Name: repo.GroupName}, repo.OwnerName)
+	return &api.ProjectMeta{ID: project.ID, Name: project.Name, FullName: project.FullName, HTMLURL: project.HTMLURL}
 }

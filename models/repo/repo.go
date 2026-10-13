@@ -411,6 +411,9 @@ func (repo *Repository) CommitLink(commitID string) (result string) {
 
 // APIURL returns the repository API URL
 func (repo *Repository) APIURL() string {
+	if repo.GroupID != 0 {
+		return setting.AppURL + "api/v1/repos/" + repo.escapedPath() + "/-"
+	}
 	return setting.AppURL + "api/v1/repos/" + repo.escapedPath()
 }
 

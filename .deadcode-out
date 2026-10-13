@@ -48,12 +48,6 @@ forgejo.org/models/perm/access
 	AccessLevel
 	GetRepoWriters
 
-forgejo.org/models/repo
-	IsUsableGroupName
-	CreateRepoGroup
-	RenameRepoGroup
-	DeleteRepoGroup
-
 forgejo.org/models/user
 	IsErrUserWrongType
 	IsErrExternalLoginUserAlreadyExist
@@ -279,6 +273,7 @@ forgejo.org/routers/api/v1/permissions/testhelpers
 	GetSignatureStringToSignature
 	GetUniquePermissionsSequences
 	GetShortestPermissionSequenceForEachSignature
+	GetMethodsAndPatternToSignatures
 
 forgejo.org/routers/web/org
 	MustEnableProjects
@@ -294,8 +289,6 @@ forgejo.org/services/notify
 
 forgejo.org/services/repository
 	IsErrForkAlreadyExist
-	RenameRepoGroup
-	DeleteRepoGroup
 
 forgejo.org/services/repository/files
 	ContentType.String

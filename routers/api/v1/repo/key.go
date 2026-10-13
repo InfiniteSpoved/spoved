@@ -8,7 +8,6 @@ import (
 	stdCtx "context"
 	"fmt"
 	"net/http"
-	"net/url"
 
 	asymkey_model "forgejo.org/models/asymkey"
 	"forgejo.org/models/db"
@@ -39,8 +38,8 @@ func appendPrivateInformation(ctx stdCtx.Context, apiKey *api.DeployKey, key *as
 	return apiKey, nil
 }
 
-func composeDeployKeysAPILink(owner, name string) string {
-	return setting.AppURL + "api/v1/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(name) + "/keys/"
+func composeDeployKeysAPILink(repo *repo_model.Repository) string {
+	return repo.APIURL() + "/keys/"
 }
 
 // ListDeployKeys list all the deploy keys of a repository
@@ -96,7 +95,7 @@ func ListDeployKeys(ctx *context.APIContext) {
 		return
 	}
 
-	apiLink := composeDeployKeysAPILink(ctx.Repo().Owner.Name, ctx.Repo().Repository.Name)
+	apiLink := composeDeployKeysAPILink(ctx.Repo().Repository)
 	apiKeys := make([]*api.DeployKey, len(keys))
 	for i := range keys {
 		if err := keys[i].GetContent(ctx); err != nil {
@@ -164,7 +163,7 @@ func GetDeployKey(ctx *context.APIContext) {
 		return
 	}
 
-	apiLink := composeDeployKeysAPILink(ctx.Repo().Owner.Name, ctx.Repo().Repository.Name)
+	apiLink := composeDeployKeysAPILink(ctx.Repo().Repository)
 	apiKey := convert.ToDeployKey(apiLink, key)
 	if ctx.IsUserSiteAdmin() || ((ctx.Repo().Repository.ID == key.RepoID) && (ctx.Doer().ID == ctx.Repo().Owner.ID)) {
 		apiKey, _ = appendPrivateInformation(ctx, apiKey, key, ctx.Repo().Repository)
@@ -250,7 +249,7 @@ func CreateDeployKey(ctx *context.APIContext) {
 	}
 
 	key.Content = content
-	apiLink := composeDeployKeysAPILink(ctx.Repo().Owner.Name, ctx.Repo().Repository.Name)
+	apiLink := composeDeployKeysAPILink(ctx.Repo().Repository)
 	ctx.JSON(http.StatusCreated, convert.ToDeployKey(apiLink, key))
 }
 

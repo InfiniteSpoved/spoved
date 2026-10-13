@@ -48,6 +48,12 @@ var MaintenanceReadRoutes = container.SetOf(
 	"POST /api/v1/repos/{username}/{reponame}/markup",
 	"POST /api/v1/repos/{username}/{reponame}/markdown",
 	"POST /api/v1/repos/{username}/{reponame}/markdown/raw",
+	"POST /api/v1/repos/{username}/{groupname}/{reponame}/-/markup",
+	"POST /api/v1/repos/{username}/{groupname}/{reponame}/-/markdown",
+	"POST /api/v1/repos/{username}/{groupname}/{reponame}/-/markdown/raw",
+	"POST /api/v1/repositories/{repo_id}/markup",
+	"POST /api/v1/repositories/{repo_id}/markdown",
+	"POST /api/v1/repositories/{repo_id}/markdown/raw",
 )
 
 // MaintenanceAdminRoutes are the admin settings a site admin can still change in read-only mode.
