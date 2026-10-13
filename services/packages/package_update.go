@@ -79,5 +79,5 @@ func UnlinkFromRepository(ctx context.Context, pkg *packages_model.Package, doer
 			}
 		}
 	}
-	return packages_model.UnlinkRepository(ctx, pkg.ID)
+	return packages_model.UnlinkRepository(ctx, pkg.ID, pkg.RepoID)
 }

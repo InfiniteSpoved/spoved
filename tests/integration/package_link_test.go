@@ -184,10 +184,10 @@ func TestPackageLinkRepositoryAccess(t *testing.T) {
 		apiPost("unlink", http.StatusForbidden)
 		assert.Equal(t, inProject.ID, repoID())
 
-		require.NoError(t, packages_model.UnlinkRepository(ctx, pkg.ID))
+		require.NoError(t, packages_model.UnlinkRepository(ctx, pkg.ID, repoID()))
 		apiPost("link/"+teamRepo.Name, http.StatusCreated)
 		assert.Equal(t, teamRepo.ID, repoID())
-		require.NoError(t, packages_model.UnlinkRepository(ctx, pkg.ID))
+		require.NoError(t, packages_model.UnlinkRepository(ctx, pkg.ID, repoID()))
 	})
 
 	t.Run("Npm", func(t *testing.T) {
@@ -217,7 +217,7 @@ func TestPackageLinkRepositoryAccess(t *testing.T) {
 		// a new version doesn't move an existing link
 		p, err := packages_model.GetPackageByName(ctx, org.ID, packages_model.TypeNpm, "pl-npm")
 		require.NoError(t, err)
-		require.NoError(t, packages_model.UnlinkRepository(ctx, p.ID))
+		require.NoError(t, packages_model.UnlinkRepository(ctx, p.ID, p.RepoID))
 		require.NoError(t, packages_model.SetRepositoryLink(ctx, p.ID, hidden.ID))
 		publish("1.0.2", teamRepo)
 		assert.Equal(t, hidden.ID, npmLink())
