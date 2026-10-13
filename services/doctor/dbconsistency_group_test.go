@@ -7,6 +7,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	actions_model "forgejo.org/models/actions"
@@ -16,6 +19,8 @@ import (
 	secret_model "forgejo.org/models/secret"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/setting"
+	"forgejo.org/modules/test"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -67,8 +72,22 @@ func TestOrphanedProjectDeployKeys(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	t.Cleanup(func() { require.NoError(t, unittest.PrepareTestDatabase()) })
 	ctx := t.Context()
+	dir := t.TempDir()
+	defer test.MockVariableValue(&setting.SSH.StartBuiltinServer, false)()
+	defer test.MockVariableValue(&setting.SSH.CreateAuthorizedKeysFile, true)()
+	defer test.MockVariableValue(&setting.SSH.RootPath, dir)()
+	authorizedKeys := func() string {
+		data, err := os.ReadFile(filepath.Join(dir, "authorized_keys"))
+		require.NoError(t, err)
+		return string(data)
+	}
 	org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
 	group, err := repo_model.CreateRepoGroup(ctx, org3, "pa", "")
+	require.NoError(t, err)
+	orphanContent := newDeployKeyContent(t)
+	orphan, err := asymkey_model.AddOrgDeployKey(ctx, 3, group.ID, "orphan", orphanContent, true, false, nil, 0)
+	require.NoError(t, err)
+	_, err = db.Exec(ctx, "UPDATE org_deploy_key SET group_id = 999 WHERE id = ?", orphan.ID) // its project is gone
 	require.NoError(t, err)
 	good, err := asymkey_model.AddOrgDeployKey(ctx, 3, group.ID, "good", newDeployKeyContent(t), true, false, nil, 0)
 	require.NoError(t, err)
@@ -79,10 +98,14 @@ func TestOrphanedProjectDeployKeys(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	assert.EqualValues(t, 2, countOrphanedProjectDeployKeys(ctx, t))
+	require.NoError(t, asymkey_model.RewriteAllPublicKeys(ctx))
+	require.Contains(t, authorizedKeys(), strings.Fields(orphanContent)[1])
+	assert.EqualValues(t, 3, countOrphanedProjectDeployKeys(ctx, t))
 	_, err = fixOrphanedProjectDeployKeys(ctx)
 	require.NoError(t, err)
 	assert.EqualValues(t, 0, countOrphanedProjectDeployKeys(ctx, t))
+	unittest.AssertNotExistsBean(t, &asymkey_model.PublicKey{ID: orphan.KeyID})
+	assert.NotContains(t, authorizedKeys(), strings.Fields(orphanContent)[1], "the fix rewrites authorized_keys")
 	unittest.AssertExistsAndLoadBean(t, &asymkey_model.OrgDeployKey{ID: good.ID})
 	unittest.AssertExistsAndLoadBean(t, &asymkey_model.OrgDeployKey{ID: org.ID})
 }

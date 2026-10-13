@@ -6,6 +6,7 @@ package integration
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -257,8 +258,18 @@ func TestAPIRepoDeployKeySiteAdminExpiry(t *testing.T) {
 				assert.Equal(t, before, unittest.GetCount(t, &asymkey_model.DeployKey{RepoID: repoID}), "%s: %s", u, name)
 			}
 			req := NewRequestWithJSON(t, "POST", u, api.CreateKeyOption{Title: "ci " + u, Key: newOrgDeployKeyContent(t), ExpiresAt: &inPolicy}).AddTokenAuth(admin)
-			MakeRequest(t, req, http.StatusCreated)
+			var created api.DeployKey
+			DecodeJSON(t, MakeRequest(t, req, http.StatusCreated), &created)
 			assert.Equal(t, before+1, unittest.GetCount(t, &asymkey_model.DeployKey{RepoID: repoID}), u)
+
+			// list, get and delete through the same mount
+			var keys []*api.DeployKey
+			DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", u).AddTokenAuth(admin), http.StatusOK), &keys)
+			assert.True(t, slices.ContainsFunc(keys, func(k *api.DeployKey) bool { return k.ID == created.ID }), u)
+			keyURL := fmt.Sprintf("%s/%d", u, created.ID)
+			MakeRequest(t, NewRequest(t, "GET", keyURL).AddTokenAuth(admin), http.StatusOK)
+			MakeRequest(t, NewRequest(t, "DELETE", keyURL).AddTokenAuth(admin), http.StatusNoContent)
+			assert.Equal(t, before, unittest.GetCount(t, &asymkey_model.DeployKey{RepoID: repoID}), u)
 		}
 	}
 }
@@ -393,6 +404,74 @@ func TestProjectDeployKeyWeb(t *testing.T) {
 		}
 		page := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", "/org3/pay/repo3/-/settings/keys"), http.StatusOK).Body)
 		assert.Contains(t, page.Find("#org-deploy-keys").Text(), "pay write")
+		assert.Equal(t, 1, page.Find(`#org-deploy-keys a[href$="/org3/pay/-/settings/keys"]`).Length(), "the project key links to the project's page")
+	})
+
+	add := func(t *testing.T, url string, values map[string]string, status int) {
+		t.Helper()
+		values["content"] = newOrgDeployKeyContent(t)
+		owner.MakeRequest(t, NewRequestWithValues(t, "POST", url, values), status)
+	}
+	count := func() int { return unittest.GetCount(t, &asymkey_model.OrgDeployKey{OrgID: 3, GroupID: pay.ID}) }
+
+	t.Run("expiry policy", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.DeployKeyExpiry, setting.CredentialExpiryPolicy{Required: true, MaxLifetimeDays: 365})()
+		before := count()
+		for name, date := range map[string]string{"missing": "", "past": "2020-01-01", "beyond the maximum lifetime": time.Now().AddDate(0, 0, 367).Format("2006-01-02")} {
+			add(t, keysURL, map[string]string{"title": "expiry", "expires_at": date}, http.StatusOK)
+			assert.Equal(t, before, count(), name)
+		}
+		add(t, keysURL, map[string]string{"title": "expiry", "expires_at": time.Now().AddDate(0, 0, 300).Format("2006-01-02")}, http.StatusSeeOther)
+		k := unittest.AssertExistsAndLoadBean(t, &asymkey_model.OrgDeployKey{OrgID: 3, GroupID: pay.ID, Name: "expiry"})
+		assert.NotZero(t, k.ExpiresUnix)
+		owner.MakeRequest(t, NewRequestWithValues(t, "POST", keysURL+"/delete", map[string]string{"id": fmt.Sprint(k.ID)}), http.StatusOK)
+	})
+
+	t.Run("read-only maintenance", func(t *testing.T) {
+		before := count()
+		defer setMaintenance(t, setting.MaintenanceReadOnly, time.Now().Add(time.Hour))()
+		owner.MakeRequest(t, NewRequest(t, "GET", keysURL), http.StatusOK)
+		add(t, keysURL, map[string]string{"title": "maintenance"}, http.StatusSeeOther)
+		assertMaintenanceFlash(t, owner)
+		owner.MakeRequest(t, NewRequestWithValues(t, "POST", keysURL+"/delete", map[string]string{"id": fmt.Sprint(key.ID)}), http.StatusSeeOther)
+		assert.Equal(t, before, count())
+	})
+
+	t.Run("archived organization", func(t *testing.T) {
+		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+		org := &organization.Organization{Name: "pdk-archived"}
+		require.NoError(t, organization.CreateOrganization(t.Context(), org, user2))
+		group := createProjectForKeys(t, org.ID, "kept")
+		k := addProjectDeployKey(t, org.ID, group.ID, "archived", true, 0)
+		require.NoError(t, org_service.ArchiveOrganization(t.Context(), org, user2, false))
+
+		base := fmt.Sprintf("/org/pdk-archived/groups/%d/settings/keys", group.ID)
+		owner.MakeRequest(t, NewRequest(t, "GET", base), http.StatusOK)
+		add(t, base, map[string]string{"title": "new"}, http.StatusForbidden)
+		owner.MakeRequest(t, NewRequestWithValues(t, "POST", base+"/delete", map[string]string{"id": fmt.Sprint(k.ID)}), http.StatusForbidden)
+		assert.Equal(t, 1, unittest.GetCount(t, &asymkey_model.OrgDeployKey{OrgID: org.ID}))
+	})
+
+	t.Run("organization in the trash", func(t *testing.T) {
+		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+		org := &organization.Organization{Name: "pdk-trashed"}
+		require.NoError(t, organization.CreateOrganization(t.Context(), org, user2))
+		group := createProjectForKeys(t, org.ID, "kept")
+		k := addProjectDeployKey(t, org.ID, group.ID, "trashed", true, 0)
+		_, err := db.Exec(t.Context(), "UPDATE `user` SET trashed_unix = 1 WHERE id = ?", org.ID)
+		require.NoError(t, err)
+
+		base := fmt.Sprintf("/org/pdk-trashed/groups/%d/settings/keys", group.ID)
+		owner.MakeRequest(t, NewRequest(t, "GET", base), http.StatusNotFound)
+		add(t, base, map[string]string{"title": "new"}, http.StatusNotFound)
+		owner.MakeRequest(t, NewRequestWithValues(t, "POST", base+"/delete", map[string]string{"id": fmt.Sprint(k.ID)}), http.StatusNotFound)
+
+		token := getUserToken(t, "user2", auth_model.AccessTokenScopeWriteOrganization)
+		apiBase := fmt.Sprintf("/api/v1/orgs/pdk-trashed/projects/%d/keys", group.ID)
+		MakeRequest(t, NewRequest(t, "GET", apiBase).AddTokenAuth(token), http.StatusNotFound)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", apiBase, api.CreateKeyOption{Title: "new", Key: newOrgDeployKeyContent(t)}).AddTokenAuth(token), http.StatusNotFound)
+		MakeRequest(t, NewRequest(t, "DELETE", fmt.Sprintf("%s/%d", apiBase, k.ID)).AddTokenAuth(token), http.StatusNotFound)
+		assert.Equal(t, 1, unittest.GetCount(t, &asymkey_model.OrgDeployKey{OrgID: org.ID}))
 	})
 
 	t.Run("keys of other levels are not deleted here", func(t *testing.T) {

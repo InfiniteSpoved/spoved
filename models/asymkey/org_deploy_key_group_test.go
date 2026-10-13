@@ -219,3 +219,63 @@ func TestProjectDeployKeyScope(t *testing.T) {
 		unittest.AssertNotExistsBean(t, &PublicKey{ID: key.KeyID})
 	})
 }
+
+// The coverage matrix, in the value form (FindOrgDeployKeysCoveringRepo, GetEffectiveDeployKey) and the joined form
+// (FindOrgDeployKeysCoveringRepos): an organization key and a project key against a root repository, a repository in
+// the project, one in another project and one of another organization with the project's ID as group_id.
+func TestProjectDeployKeyCoverageMatrix(t *testing.T) {
+	prepareOrgDeployKeyTest(t)
+	ctx := db.DefaultContext
+	pa, pb := createTestProject(t, 3, "pa"), createTestProject(t, 3, "pb")
+	orgKey, err := AddOrgDeployKey(ctx, 3, 0, "org", newTestDeployKeyContent(t), true, true, nil, 0)
+	require.NoError(t, err)
+	projectKey, err := AddOrgDeployKey(ctx, 3, pa.ID, "project", newTestDeployKeyContent(t), true, false, nil, 0)
+	require.NoError(t, err)
+
+	repos := map[string]*repo_model.Repository{
+		"root":            unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3}),
+		"in project":      setRepoGroup(t, 5, pa.ID),
+		"other project":   setRepoGroup(t, 32, pb.ID),
+		"other org":       setRepoGroup(t, 23, pa.ID),
+		"user repository": setRepoGroup(t, 1, pa.ID),
+	}
+	want := map[string][]int64{
+		"root":          {orgKey.ID},
+		"in project":    {orgKey.ID, projectKey.ID},
+		"other project": {orgKey.ID},
+	}
+	repoIDs := make([]int64, 0, len(repos))
+	for _, r := range repos {
+		repoIDs = append(repoIDs, r.ID)
+	}
+	joined, err := FindOrgDeployKeysCoveringRepos(ctx, repoIDs)
+	require.NoError(t, err)
+
+	for name, r := range repos {
+		value, err := FindOrgDeployKeysCoveringRepo(ctx, r)
+		require.NoError(t, err)
+		var valueIDs, joinedIDs []int64
+		for _, k := range value {
+			valueIDs = append(valueIDs, k.ID)
+		}
+		for _, k := range joined {
+			if k.RepoID == r.ID {
+				joinedIDs = append(joinedIDs, k.ID)
+			}
+		}
+		assert.ElementsMatch(t, want[name], valueIDs, "value form: %s", name)
+		assert.ElementsMatch(t, want[name], joinedIDs, "joined form: %s", name)
+		for _, k := range []*OrgDeployKey{orgKey, projectKey} {
+			_, err := GetEffectiveDeployKey(ctx, k.KeyID, r)
+			covered := false
+			for _, id := range want[name] {
+				covered = covered || id == k.ID
+			}
+			if covered {
+				require.NoError(t, err, "%s: %s", name, k.Name)
+			} else {
+				assert.True(t, IsErrDeployKeyNotExist(err), "%s: %s: %v", name, k.Name, err)
+			}
+		}
+	}
+}

@@ -6,6 +6,9 @@ package repository
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	asymkey_model "forgejo.org/models/asymkey"
@@ -13,6 +16,8 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/setting"
+	"forgejo.org/modules/test"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,15 +33,38 @@ func newDeployKeyContent(t *testing.T) string {
 	return string(ssh.MarshalAuthorizedKey(sshPub))
 }
 
-// Deleting a project deletes its deploy keys, and the public keys no other deploy key uses.
+// authorizedKeysFile makes RewriteAllPublicKeys write an authorized_keys file in a temporary directory and returns
+// a function that reads it.
+func authorizedKeysFile(t *testing.T) func() string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Cleanup(test.MockVariableValue(&setting.SSH.StartBuiltinServer, false))
+	t.Cleanup(test.MockVariableValue(&setting.SSH.CreateAuthorizedKeysFile, true))
+	t.Cleanup(test.MockVariableValue(&setting.SSH.RootPath, dir))
+	return func() string {
+		data, err := os.ReadFile(filepath.Join(dir, "authorized_keys"))
+		require.NoError(t, err)
+		return string(data)
+	}
+}
+
+// keyBlob is the base64 part of an authorized_keys line.
+func keyBlob(content string) string {
+	return strings.Fields(content)[1]
+}
+
+// Deleting a project deletes its deploy keys, and the public keys no other deploy key uses, and rewrites the
+// authorized_keys file.
 func TestDeleteRepoGroupDeletesDeployKeys(t *testing.T) {
 	unittest.PrepareTestEnv(t)
 	ctx := t.Context()
+	authorizedKeys := authorizedKeysFile(t)
 	doer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
 	org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
 	group, err := repo_model.CreateRepoGroup(ctx, org3, "pay", "")
 	require.NoError(t, err)
-	only, err := asymkey_model.AddOrgDeployKey(ctx, 3, group.ID, "only", newDeployKeyContent(t), true, false, nil, 0)
+	onlyContent := newDeployKeyContent(t)
+	only, err := asymkey_model.AddOrgDeployKey(ctx, 3, group.ID, "only", onlyContent, true, false, nil, 0)
 	require.NoError(t, err)
 	shared := newDeployKeyContent(t)
 	sharedKey, err := asymkey_model.AddOrgDeployKey(ctx, 3, group.ID, "shared", shared, true, false, nil, 0)
@@ -52,7 +80,11 @@ func TestDeleteRepoGroupDeletesDeployKeys(t *testing.T) {
 	unittest.AssertExistsAndLoadBean(t, &asymkey_model.PublicKey{ID: only.KeyID})
 
 	require.NoError(t, DeleteRepositoryDirectly(ctx, repo.ID, DeleteRepositoryOpts{}))
+	require.NoError(t, asymkey_model.RewriteAllPublicKeys(ctx))
+	require.Contains(t, authorizedKeys(), keyBlob(onlyContent))
 	require.NoError(t, DeleteRepoGroup(ctx, org3, group))
+	assert.NotContains(t, authorizedKeys(), keyBlob(onlyContent))
+	assert.Contains(t, authorizedKeys(), keyBlob(shared), "still an organization key")
 	unittest.AssertNotExistsBean(t, &asymkey_model.OrgDeployKey{ID: only.ID})
 	unittest.AssertNotExistsBean(t, &asymkey_model.OrgDeployKey{ID: sharedKey.ID})
 	unittest.AssertNotExistsBean(t, &asymkey_model.PublicKey{ID: only.KeyID})
