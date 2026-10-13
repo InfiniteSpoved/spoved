@@ -125,7 +125,7 @@ func TestAPIOrgDeployKey(t *testing.T) {
 
 	all := unittest.AssertExistsAndLoadBean(t, &asymkey_model.OrgDeployKey{OrgID: 3, Name: "all"})
 	selected := unittest.AssertExistsAndLoadBean(t, &asymkey_model.OrgDeployKey{OrgID: 3, Name: "selected"})
-	other, err := asymkey_model.AddOrgDeployKey(ctx, 17, "org17", newOrgDeployKeyContent(t), true, false, []int64{24}, 0)
+	other, err := asymkey_model.AddOrgDeployKey(ctx, 17, 0, "org17", newOrgDeployKeyContent(t), true, false, []int64{24}, 0)
 	require.NoError(t, err)
 
 	t.Run("permissions", func(t *testing.T) {
@@ -344,7 +344,7 @@ func TestAPIOrgDeployKey(t *testing.T) {
 		require.NoError(t, err)
 		_, err = repo_service.CreateRepositoryDirectly(ctx, user2, org.AsUser(), repo_service.CreateRepoOptions{Name: "other"})
 		require.NoError(t, err)
-		key, err := asymkey_model.AddOrgDeployKey(ctx, org.ID, "archived", newOrgDeployKeyContent(t), true, false, []int64{repo.ID}, 0)
+		key, err := asymkey_model.AddOrgDeployKey(ctx, org.ID, 0, "archived", newOrgDeployKeyContent(t), true, false, []int64{repo.ID}, 0)
 		require.NoError(t, err)
 		require.NoError(t, org_service.ArchiveOrganization(ctx, org, user2, false))
 

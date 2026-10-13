@@ -4,9 +4,13 @@
 package doctor
 
 import (
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"testing"
 
 	actions_model "forgejo.org/models/actions"
+	asymkey_model "forgejo.org/models/asymkey"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	secret_model "forgejo.org/models/secret"
@@ -15,6 +19,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 )
 
 // Project secrets and variables whose project is gone, belongs to another organization, or whose owner is not an
@@ -33,7 +38,7 @@ func TestOrphanedGroupRows(t *testing.T) {
 	require.NoError(t, err)
 	for _, table := range []string{"secret", "action_variable"} {
 		count := func() int64 {
-			n, err := db.GetEngine(ctx).Table(table).Where(orphanedGroupRowsCond(table)).Count()
+			n, err := db.GetEngine(ctx).Table(table).Where(orphanedGroupRowsCond(table, "owner_id")).Count()
 			require.NoError(t, err)
 			return n
 		}
@@ -47,11 +52,53 @@ func TestOrphanedGroupRows(t *testing.T) {
 			require.NoError(t, err)
 		}
 		assert.EqualValues(t, 3, count(), table)
-		_, err := db.GetEngine(ctx).Table(table).Where(orphanedGroupRowsCond(table)).Delete()
+		_, err := db.GetEngine(ctx).Table(table).Where(orphanedGroupRowsCond(table, "owner_id")).Delete()
 		require.NoError(t, err)
 		assert.EqualValues(t, 0, count(), table)
 		n, err := db.GetEngine(ctx).Table(table).Where("name = 'GOOD'").Count()
 		require.NoError(t, err)
 		assert.EqualValues(t, 1, n, table)
 	}
+}
+
+// Project deploy keys whose project is gone or belongs to another organization are orphans: the fix deletes them
+// with their public keys; organization keys and keys of a live project stay.
+func TestOrphanedProjectDeployKeys(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	t.Cleanup(func() { require.NoError(t, unittest.PrepareTestDatabase()) })
+	ctx := t.Context()
+	org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+	group, err := repo_model.CreateRepoGroup(ctx, org3, "pa", "")
+	require.NoError(t, err)
+	good, err := asymkey_model.AddOrgDeployKey(ctx, 3, group.ID, "good", newDeployKeyContent(t), true, false, nil, 0)
+	require.NoError(t, err)
+	org, err := asymkey_model.AddOrgDeployKey(ctx, 3, 0, "org", newDeployKeyContent(t), true, true, nil, 0)
+	require.NoError(t, err)
+	for i, ids := range [][2]int64{{3, 999}, {17, group.ID}} { // missing project, another organization's
+		_, err := db.Exec(ctx, "INSERT INTO org_deploy_key (key_id, org_id, group_id, name, mode) VALUES (?, ?, ?, 'bad', 1)", 9000+i, ids[0], ids[1])
+		require.NoError(t, err)
+	}
+
+	assert.EqualValues(t, 2, countOrphanedProjectDeployKeys(ctx, t))
+	_, err = fixOrphanedProjectDeployKeys(ctx)
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, countOrphanedProjectDeployKeys(ctx, t))
+	unittest.AssertExistsAndLoadBean(t, &asymkey_model.OrgDeployKey{ID: good.ID})
+	unittest.AssertExistsAndLoadBean(t, &asymkey_model.OrgDeployKey{ID: org.ID})
+}
+
+func countOrphanedProjectDeployKeys(ctx context.Context, t *testing.T) int64 {
+	t.Helper()
+	n, err := db.GetEngine(ctx).Table("org_deploy_key").Where(orphanedGroupRowsCond("org_deploy_key", "org_id")).Count()
+	require.NoError(t, err)
+	return n
+}
+
+func newDeployKeyContent(t *testing.T) string {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	sshPub, err := ssh.NewPublicKey(pub)
+	require.NoError(t, err)
+	return string(ssh.MarshalAuthorizedKey(sshPub))
 }

@@ -22,7 +22,7 @@ type AccessRow struct {
 // AccessPath is one source of access
 type AccessPath struct {
 	// owner, site_admin, auditor, org_owner, admin_team, team, collaborator, public, internal, org_member,
-	// deploy_key, org_deploy_key or instance_roles
+	// deploy_key, org_deploy_key, project_deploy_key or instance_roles
 	Kind       string             `json:"kind"`
 	Access     string             `json:"access"`
 	Units      map[string]string  `json:"units,omitempty"`

@@ -416,6 +416,7 @@ func ToOrgDeployKey(apiLink, content string, key *asymkey_model.OrgDeployKey) *a
 		Created:         key.CreatedUnix.AsTime(),
 		ReadOnly:        key.Mode == perm.AccessModeRead,
 		AllRepositories: key.IncludesAllRepos,
+		ProjectID:       key.GroupID,
 		Expires:         OptionalTime(key.ExpiresUnix),
 	}
 	if key.HasUsed {
