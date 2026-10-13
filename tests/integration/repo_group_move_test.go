@@ -4,9 +4,12 @@
 package integration
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -198,6 +201,39 @@ func TestRepoGroupMove(t *testing.T) {
 			resp := MakeRequest(t, req, http.StatusMovedPermanently)
 			// git doesn't follow it after a 401 retry, as for a renamed private root repository upstream
 			assert.Equal(t, "/org3/hid/info/refs?service=git-upload-pack", resp.Header().Get("Location"))
+
+			// with the credentials sent up front (http.extraHeader, as actions/checkout does), push to the old URL
+			// follows the redirect
+			pushToken := getTokenForLoggedInUser(t, owner, auth_model.AccessTokenScopeWriteRepository)
+			c := *u
+			c.Path = "/org3/hid.git"
+			c.User = url.UserPassword("user2", pushToken)
+			dir := t.TempDir()
+			doGitClone(dir, &c)(t)
+			doGitAddSomeCommits(dir, "main")(t)
+			old := *u
+			old.Path = "/org3/vault/hid.git"
+			header := "http.extraHeader=Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("user2:"+pushToken))
+			out, err := exec.Command("git", "-C", dir, "-c", header, "push", old.String(), "main").CombinedOutput()
+			require.NoError(t, err, "%s", out)
+			head, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+			require.NoError(t, err)
+			assert.Equal(t, strings.TrimSpace(string(head)), branchCommit(t, f.hid.ID))
+		})
+
+		t.Run("restricted tokens get no redirect they can't follow", func(t *testing.T) {
+			publicOnly := getTokenForLoggedInUser(t, owner, auth_model.AccessTokenScopePublicOnly, auth_model.AccessTokenScopeReadRepository)
+			otherRepo := createFineGrainedRepoAccessToken(t, "user2", []auth_model.AccessTokenScope{auth_model.AccessTokenScopeReadRepository}, []int64{f.pub.ID})
+			for _, token := range []string{publicOnly, otherRepo} {
+				get := func(p string) *RequestWrapper {
+					req := NewRequest(t, "GET", p+".git/info/refs?service=git-upload-pack")
+					req.SetBasicAuth("user2", token)
+					return req
+				}
+				missing := gitResponse(t, get("/org3/vault/nothing"), "/org3/vault/nothing")
+				assert.True(t, strings.HasPrefix(missing, "403\n"), missing) // as for a private repository
+				assert.Equal(t, missing, gitResponse(t, get("/org3/vault/hid"), "/org3/vault/hid"))
+			}
 		})
 	})
 }

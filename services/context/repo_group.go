@@ -291,7 +291,7 @@ func (ctx *Context) redirectRepoGroupPath(owner *user_model.User, s []string) (b
 		if strings.HasSuffix(s[2], ".git") || len(s) > 3 && slices.Contains(gitSuffixes, s[3]) {
 			return false, nil
 		}
-		repo, err := redirect_service.LookupGroupRepoRedirect(ctx, ctx.Doer, owner, s[1], s[2])
+		repo, err := redirect_service.LookupGroupRepoRedirect(ctx, ctx.Doer, ctx.Authentication.Reducer(), owner, s[1], s[2])
 		if repo_model.IsErrRedirectNotExist(err) {
 			return false, nil
 		} else if err != nil {

@@ -9,6 +9,7 @@ import (
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/services/authz"
 )
 
 // LookupRepoRedirect returns the repository ID if there's a redirect registered for
@@ -41,8 +42,9 @@ func LookupRepoRedirect(ctx context.Context, doer *user_model.User, ownerID int6
 
 // LookupGroupRepoRedirect returns the repository that `owner/groupName/repoName` leads to now: the project may have
 // been renamed (a project redirect), the repository renamed or moved away (a redirect in the project), or both. Like
-// LookupRepoRedirect, a repository the doer can't see is ErrRedirectNotExist.
-func LookupGroupRepoRedirect(ctx context.Context, doer, owner *user_model.User, groupName, repoName string) (*repo_model.Repository, error) {
+// LookupRepoRedirect, a repository the doer can't see is ErrRedirectNotExist; reducer (nil for a session) limits a
+// token as its requests are, so a repository-restricted or public-only token gets no redirect it couldn't follow.
+func LookupGroupRepoRedirect(ctx context.Context, doer *user_model.User, reducer authz.AuthorizationReducer, owner *user_model.User, groupName, repoName string) (*repo_model.Repository, error) {
 	notExist := repo_model.ErrRedirectNotExist{OwnerID: owner.ID, RepoName: repoName}
 	group, err := repo_model.GetRepoGroupByName(ctx, owner.ID, groupName)
 	renamed := errors.Is(err, repo_model.ErrRepoGroupNotExist)
@@ -74,7 +76,12 @@ func LookupGroupRepoRedirect(ctx context.Context, doer, owner *user_model.User, 
 		return nil, err
 	}
 
-	perm, err := access_model.GetUserRepoPermission(ctx, repo, doer)
+	var perm access_model.Permission
+	if reducer == nil {
+		perm, err = access_model.GetUserRepoPermission(ctx, repo, doer)
+	} else {
+		perm, err = access_model.GetUserRepoPermissionWithReducer(ctx, repo, doer, reducer)
+	}
 	if err != nil {
 		return nil, err
 	}

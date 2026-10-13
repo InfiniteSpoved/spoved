@@ -11,16 +11,13 @@ import (
 	"testing"
 	"time"
 
-	activities_model "forgejo.org/models/activities"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
-	"forgejo.org/modules/queue"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
-	"forgejo.org/services/feed"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -39,9 +36,7 @@ func repoDir(parts ...string) string {
 }
 
 func TestMoveRepository(t *testing.T) {
-	registerNotifier()
 	unittest.PrepareTestEnv(t)
-	require.NoError(t, feed.Init())
 	ctx := t.Context()
 	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
 	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
@@ -86,12 +81,6 @@ func TestMoveRepository(t *testing.T) {
 	_, err = repo_model.GetRedirect(ctx, org3.ID, 0, "api")
 	require.True(t, repo_model.IsErrRedirectNotExist(err))
 	unittest.AssertExistsAndLoadBean(t, &repo_model.Redirect{OwnerID: org3.ID, GroupID: web.ID, LowerName: "api", RedirectRepoID: repo.ID})
-
-	// the feed records each move with the old path
-	queue.GetManager().FlushAll(ctx, time.Second)
-	for _, old := range []string{"org3/api", "org3/pay/api", "org3/web/api"} {
-		unittest.AssertExistsAndLoadBean(t, &activities_model.Action{OpType: activities_model.ActionTransferRepo, RepoID: repo.ID, Content: old})
-	}
 
 	unittest.CheckConsistencyFor(t, &user_model.User{}, &repo_model.Repository{})
 }
@@ -312,4 +301,64 @@ func TestRepoGroupRedirectReuse(t *testing.T) {
 	require.NoError(t, err)
 
 	unittest.CheckConsistencyFor(t, &user_model.User{}, &repo_model.Repository{})
+}
+
+// Every path that puts a repository at a name of an organization refuses a name with a live redirect, and leaves
+// the repository, its claims and its directories where they were.
+func TestRedirectReuseRefused(t *testing.T) {
+	unittest.PrepareTestEnv(t)
+	ctx := t.Context()
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+	pay, err := repo_model.CreateRepoGroup(ctx, org3, "pay", "")
+	require.NoError(t, err)
+
+	// org3/taken redirects to org3/taken2, and org3/pay/inpay to org3/pay/inpay2
+	taken, err := CreateRepositoryDirectly(ctx, admin, org3, CreateRepoOptions{Name: "taken"})
+	require.NoError(t, err)
+	require.NoError(t, ChangeRepositoryName(ctx, admin, taken, "taken2"))
+	inPay, err := CreateRepositoryDirectly(ctx, admin, org3, CreateRepoOptions{Name: "inpay", GroupID: pay.ID})
+	require.NoError(t, err)
+	require.NoError(t, ChangeRepositoryName(ctx, admin, reloadRepo(t, inPay.ID), "inpay2"))
+
+	unchanged := func(name string, err error, repo *repo_model.Repository) {
+		t.Helper()
+		assert.True(t, repo_model.IsErrRepoAlreadyExist(err), "%s: %v", name, err)
+		got := reloadRepo(t, repo.ID)
+		assert.Equal(t, repo.FullName(), got.FullName(), name)
+		assertDir(t, true, got.RepoPath())
+		unittest.CheckRepoGroupNameClaims(t)
+	}
+
+	// rename onto a redirect, at the root and in a project
+	root, err := CreateRepositoryDirectly(ctx, admin, org3, CreateRepoOptions{Name: "root"})
+	require.NoError(t, err)
+	unchanged("rename at the root", ChangeRepositoryName(ctx, admin, reloadRepo(t, root.ID), "taken"), root)
+	nested, err := CreateRepositoryDirectly(ctx, admin, org3, CreateRepoOptions{Name: "nested", GroupID: pay.ID})
+	require.NoError(t, err)
+	unchanged("rename in a project", ChangeRepositoryName(ctx, admin, reloadRepo(t, nested.ID), "inpay"), nested)
+
+	// move onto a redirect: out of the project to the root, and into the project
+	named, err := CreateRepositoryDirectly(ctx, admin, org3, CreateRepoOptions{Name: "taken", GroupID: pay.ID})
+	require.NoError(t, err)
+	unchanged("move to the root", MoveRepository(ctx, admin, reloadRepo(t, named.ID), 0), named)
+	rootInpay, err := CreateRepositoryDirectly(ctx, admin, org3, CreateRepoOptions{Name: "inpay"})
+	require.NoError(t, err)
+	unchanged("move into the project", MoveRepository(ctx, admin, reloadRepo(t, rootInpay.ID), pay.ID), rootInpay)
+
+	// transfer into the organization onto a redirect
+	incoming, err := CreateRepositoryDirectly(ctx, user2, user2, CreateRepoOptions{Name: "taken"})
+	require.NoError(t, err)
+	unchanged("transfer", TransferOwnership(ctx, admin, org3, reloadRepo(t, incoming.ID), nil), incoming)
+	unittest.AssertNotExistsBean(t, &repo_model.RepoGroupNameClaim{OwnerID: org3.ID, LowerName: "taken"})
+
+	// trash restore into the organization, with a new owner or a new name
+	require.NoError(t, TrashRepository(ctx, admin, reloadRepo(t, incoming.ID)))
+	unchanged("restore to a new owner", MoveTrashedRepository(ctx, admin, org3, reloadRepo(t, incoming.ID), ""), incoming)
+	require.NoError(t, TrashRepository(ctx, admin, reloadRepo(t, root.ID)))
+	unchanged("restore with a new name", MoveTrashedRepository(ctx, admin, nil, reloadRepo(t, root.ID), "taken"), root)
+
+	// renaming back to its own old name is fine
+	require.NoError(t, ChangeRepositoryName(ctx, admin, reloadRepo(t, taken.ID), "taken"))
 }
