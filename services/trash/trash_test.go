@@ -4,6 +4,7 @@
 package trash
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/git"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
@@ -86,11 +88,37 @@ func TestRepoGroupRestoreAndOrgPurge(t *testing.T) {
 	require.NoError(t, RestoreRepo(ctx, doer, root.ID, RestoreOptions{}))
 	assert.Equal(t, "web", unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: root.ID}).Name)
 
+	// restored by group_id: into the project under its new name, and the project can't be deleted meanwhile
 	require.NoError(t, repo_service.TrashRepository(ctx, doer, nested))
+	require.ErrorIs(t, repo_service.DeleteRepoGroup(ctx, org3, pay), repo_model.ErrRepoGroupNotEmpty)
+	require.NoError(t, repo_service.RenameRepoGroup(ctx, org3, pay, "billing"))
 	require.NoError(t, RestoreRepo(ctx, doer, nested.ID, RestoreOptions{}))
-	restored, err := repo_model.GetRepositoryByPath(ctx, org3.ID, "pay", "api")
+	restored, err := repo_model.GetRepositoryByPath(ctx, org3.ID, "billing", "api")
 	require.NoError(t, err)
 	assert.Equal(t, nested.ID, restored.ID)
+	assert.Equal(t, filepath.Join(setting.RepoRootPath, "org3", "billing", "api.git"), restored.RepoPath())
+	gitRepo, err := git.OpenRepository(ctx, restored.RepoPath())
+	require.NoError(t, err)
+	gitRepo.Close()
+
+	// with a new name in the project: the old name redirects in the project
+	require.NoError(t, repo_service.TrashRepository(ctx, doer, restored))
+	require.NoError(t, RestoreRepo(ctx, doer, nested.ID, RestoreOptions{NewName: "api2"}))
+	_, err = repo_model.GetRepositoryByPath(ctx, org3.ID, "billing", "api2")
+	require.NoError(t, err)
+	unittest.AssertExistsAndLoadBean(t, &repo_model.Redirect{OwnerID: org3.ID, GroupID: pay.ID, LowerName: "api", RedirectRepoID: nested.ID})
+
+	// to another owner: at its root
+	moved, err := repo_service.CreateRepositoryDirectly(ctx, doer, org3, repo_service.CreateRepoOptions{Name: "moved", GroupID: pay.ID, AutoInit: true, Readme: "Default"})
+	require.NoError(t, err)
+	require.NoError(t, repo_service.TrashRepository(ctx, doer, moved))
+	require.NoError(t, RestoreRepo(ctx, doer, moved.ID, RestoreOptions{NewOwner: "user2"}))
+	moved = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: moved.ID})
+	assert.Equal(t, "user2/moved", moved.FullName())
+	assert.Equal(t, filepath.Join(setting.RepoRootPath, "user2", "moved.git"), moved.RepoPath())
+	gitRepo, err = git.OpenRepository(ctx, moved.RepoPath())
+	require.NoError(t, err)
+	gitRepo.Close()
 	unittest.CheckConsistencyFor(t, &user_model.User{}, &repo_model.Repository{})
 
 	require.NoError(t, org_service.TrashOrganization(ctx, doer, organization.OrgFromUser(org3)))

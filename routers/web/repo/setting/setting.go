@@ -87,6 +87,16 @@ func SettingsCtxData(ctx *context.Context) {
 		ctx.Data["IndexedBranches"] = ru.CodeConfig().IndexedBranches
 	}
 
+	// the places a repository of an organization can move to: its root and its projects
+	if ctx.Repo.IsOwner() && ctx.Repo.Owner.IsOrganization() {
+		groups, err := repo_model.GetRepoGroupsByOwnerIDs(ctx, []int64{ctx.Repo.Owner.ID})
+		if err != nil {
+			ctx.ServerError("GetRepoGroupsByOwnerIDs", err)
+			return
+		}
+		ctx.Data["MoveGroups"] = groups
+	}
+
 	if ctx.Doer.IsAdmin {
 		if setting.Indexer.RepoIndexerEnabled {
 			status, err := repo_model.GetIndexerStatus(ctx, ctx.Repo.Repository, repo_model.RepoIndexerTypeCode)
@@ -1031,6 +1041,39 @@ func SettingsPost(ctx *context.Context) {
 			log.Trace("Repository transferred: %s -> %s", oldFullname, ctx.Repo.Repository.FullName())
 			ctx.Flash.Success(ctx.Tr("repo.settings.transfer_succeed"))
 		}
+		ctx.Redirect(repo.Link() + "/settings")
+
+	case "move":
+		if !ctx.Repo.IsOwner() {
+			ctx.Error(http.StatusNotFound)
+			return
+		}
+		if repo.FullName() != form.RepoName {
+			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_repo_name"), tplSettingsOptions, nil)
+			return
+		}
+		if ctx.Repo.GitRepo != nil {
+			ctx.Repo.GitRepo.Close()
+			ctx.Repo.GitRepo = nil
+		}
+		if err := repo_service.MoveRepository(ctx, ctx.Doer, repo, ctx.FormInt64("group_id")); err != nil {
+			switch {
+			case repo_model.IsErrRepoAlreadyExist(err), repo_model.IsErrRepoFilesAlreadyExist(err):
+				ctx.RenderWithErr(ctx.Tr("repo.settings.move.name_taken"), tplSettingsOptions, nil)
+			case organization.IsErrOrgArchived(err):
+				ctx.RenderWithErr(ctx.Tr("org.archived.readonly"), tplSettingsOptions, nil)
+			case models.IsErrRepoTransferInProgress(err):
+				ctx.RenderWithErr(ctx.Tr("repo.settings.transfer_in_progress"), tplSettingsOptions, nil)
+			case errors.Is(err, repo_model.ErrRepoGroupNotExist), errors.Is(err, util.ErrPermissionDenied):
+				ctx.NotFound("MoveRepository", nil)
+			case errors.Is(err, util.ErrInvalidArgument):
+				ctx.RenderWithErr(ctx.Tr("repo.settings.move.failed"), tplSettingsOptions, nil)
+			default:
+				ctx.ServerError("MoveRepository", err)
+			}
+			return
+		}
+		ctx.Flash.Success(ctx.Tr("repo.settings.move.success", repo.FullName()))
 		ctx.Redirect(repo.Link() + "/settings")
 
 	case "cancel_transfer":

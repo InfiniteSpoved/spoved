@@ -208,8 +208,8 @@ func TestRepoGroupUI(t *testing.T) {
 		assert.Contains(t, body, "&lt;b&gt;money&lt;/b&gt;")
 
 		for name, message := range map[string]string{
-			"repo3": "The name is already used by a repository or project in this organization.",
-			"PROJ":  "The name is already used by a repository or project in this organization.",
+			"repo3": "The name is already used by a repository, a project or a redirect in this organization.",
+			"PROJ":  "The name is already used by a repository, a project or a redirect in this organization.",
 			"x.git": `The pattern &#34;*.git&#34; cannot be used in a project name.`,
 			"a b":   "Project name should contain only alphanumeric",
 			"..":    `The project name &#34;..&#34; is reserved.`,
@@ -221,7 +221,7 @@ func TestRepoGroupUI(t *testing.T) {
 
 		// a root repository can't take a project's name either
 		resp = owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/repo/create", map[string]string{"uid": "3", "repo_name": "payments"}), http.StatusOK)
-		assert.Contains(t, resp.Body.String(), "The name is already used by a repository or project.")
+		assert.Contains(t, resp.Body.String(), "The name is already used by a repository, a project or a redirect.")
 
 		for _, session := range []*TestSession{member, teamAdmin, nonMember} {
 			session.MakeRequest(t, NewRequest(t, "GET", "/org/org3/groups/new"), http.StatusNotFound)
@@ -291,10 +291,11 @@ func TestRepoGroupUI(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "Bills", group.Description)
 		owner.MakeRequest(t, NewRequest(t, "GET", "/org3/billing/api"), http.StatusOK)
-		owner.MakeRequest(t, NewRequest(t, "GET", "/org3/payments"), http.StatusNotFound)
+		resp = owner.MakeRequest(t, NewRequest(t, "GET", "/org3/payments"), http.StatusMovedPermanently)
+		assert.Equal(t, "/org3/billing", resp.Header().Get("Location"), "the old name redirects")
 
 		resp = owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/billing/-/settings", map[string]string{"name": "repo3"}), http.StatusOK)
-		assert.Contains(t, resp.Body.String(), "The name is already used by a repository or project in this organization.")
+		assert.Contains(t, resp.Body.String(), "The name is already used by a repository, a project or a redirect in this organization.")
 	})
 
 	t.Run("delete", func(t *testing.T) {

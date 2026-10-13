@@ -1278,6 +1278,10 @@ func registerRoutes(m *web.Route) {
 					m.Post("/{id}/repos", org_setting.DeployKeyReposPost)
 					m.Post("/delete", org_setting.DeleteDeployKey)
 				})
+				m.Group("/redirects", func() {
+					m.Get("", org.Redirects)
+					m.Post("/delete", org.RedirectsDelete)
+				})
 				m.Get("/storage_overview", org_setting.StorageOverview)
 				m.Get("/access-report", org_setting.AccessReport)
 

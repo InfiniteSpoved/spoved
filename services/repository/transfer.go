@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -58,9 +59,12 @@ func TransferOwnership(ctx context.Context, doer, newOwner *user_model.User, rep
 		}
 	}
 
-	oldOwner := repo.Owner
+	oldPlace := path.Dir(repo.FullName()) // the owner, and the project if any
 
-	unlock := repoWorkingPool.Lock(fmt.Sprint(repo.ID))
+	unlock, err := lockRepo(ctx, repo)
+	if err != nil {
+		return err
+	}
 	if err := transferOwnership(ctx, doer, newOwner.Name, repo); err != nil {
 		unlock()
 		return err
@@ -78,7 +82,7 @@ func TransferOwnership(ctx context.Context, doer, newOwner *user_model.User, rep
 		}
 	}
 
-	notify_service.TransferRepository(ctx, doer, repo, oldOwner.Name)
+	notify_service.TransferRepository(ctx, doer, repo, oldPlace)
 
 	return nil
 }
@@ -87,7 +91,8 @@ func TransferOwnership(ctx context.Context, doer, newOwner *user_model.User, rep
 func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName string, repo *repo_model.Repository) (err error) {
 	repoRenamed := false
 	wikiRenamed := false
-	oldOwnerName := doer.Name
+	// the old place, in the repository's project if any; a transfer puts it at the root of the new owner
+	oldRepoPath, oldWikiPath, oldGroupID := repo.RepoPath(), repo.WikiPath(), repo.GroupID
 
 	defer func() {
 		if !repoRenamed && !wikiRenamed {
@@ -100,16 +105,16 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 		}
 
 		if repoRenamed {
-			if err := util.Rename(repo_model.RepoPath(newOwnerName, repo.Name), repo_model.RepoPath(oldOwnerName, repo.Name)); err != nil {
-				log.Critical("Unable to move repository %s/%s directory from %s back to correct place %s: %v", oldOwnerName, repo.Name,
-					repo_model.RepoPath(newOwnerName, repo.Name), repo_model.RepoPath(oldOwnerName, repo.Name), err)
+			if err := util.Rename(repo_model.RepoPath(newOwnerName, repo.Name), oldRepoPath); err != nil {
+				log.Critical("Unable to move repository %s directory from %s back to correct place %s: %v", repo.Name,
+					repo_model.RepoPath(newOwnerName, repo.Name), oldRepoPath, err)
 			}
 		}
 
 		if wikiRenamed {
-			if err := util.Rename(repo_model.WikiPath(newOwnerName, repo.Name), repo_model.WikiPath(oldOwnerName, repo.Name)); err != nil {
-				log.Critical("Unable to move wiki for repository %s/%s directory from %s back to correct place %s: %v", oldOwnerName, repo.Name,
-					repo_model.WikiPath(newOwnerName, repo.Name), repo_model.WikiPath(oldOwnerName, repo.Name), err)
+			if err := util.Rename(repo_model.WikiPath(newOwnerName, repo.Name), oldWikiPath); err != nil {
+				log.Critical("Unable to move wiki for repository %s directory from %s back to correct place %s: %v", repo.Name,
+					repo_model.WikiPath(newOwnerName, repo.Name), oldWikiPath, err)
 			}
 		}
 
@@ -126,11 +131,6 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 	defer committer.Close()
 
 	sess := db.GetEngine(ctx)
-
-	// moving into or out of a project isn't supported yet
-	if repo.GroupID != 0 {
-		return repo_model.ErrRepoInGroup
-	}
 
 	newOwner, err := user_model.GetUserByName(ctx, newOwnerName)
 	if err != nil {
@@ -149,7 +149,6 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 	}
 
 	oldOwner := repo.Owner
-	oldOwnerName = oldOwner.Name
 
 	// the old owner's deploy keys stop applying (the lookup follows the owner); collect them for the protection rules
 	oldOrgKeys, err := asymkey_model.FindOrgDeployKeysCoveringRepo(ctx, repo)
@@ -166,14 +165,21 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 	repo.OwnerID = newOwner.ID
 	repo.Owner = newOwner
 	repo.OwnerName = newOwner.Name
+	repo.GroupID, repo.GroupName = 0, ""
 
 	if err := repo_model.ClaimRepoName(ctx, repo); err != nil {
+		return err
+	}
+	if err := repo_model.TakeRedirectPath(ctx, newOwner, 0, repo.Name, repo.ID); err != nil {
 		return err
 	}
 
 	// Update repository.
 	if _, err := sess.ID(repo.ID).Update(repo); err != nil {
 		return fmt.Errorf("update owner: %w", err)
+	}
+	if _, err := sess.ID(repo.ID).Cols("group_id", "group_name").Update(repo); err != nil { // zero values
+		return fmt.Errorf("update project: %w", err)
 	}
 
 	// Drop the selections, so moving back doesn't restore them, and the old owner's keys from the protection
@@ -297,13 +303,13 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 		return fmt.Errorf("Failed to create dir %s: %w", dir, err)
 	}
 
-	if err := util.Rename(repo_model.RepoPath(oldOwner.Name, repo.Name), repo_model.RepoPath(newOwner.Name, repo.Name)); err != nil {
+	if err := util.Rename(oldRepoPath, repo_model.RepoPath(newOwner.Name, repo.Name)); err != nil {
 		return fmt.Errorf("rename repository directory: %w", err)
 	}
 	repoRenamed = true
 
 	// Rename remote wiki repository to new path and delete local copy.
-	wikiPath := repo_model.WikiPath(oldOwner.Name, repo.Name)
+	wikiPath := oldWikiPath
 
 	if isExist, err := util.IsExist(wikiPath); err != nil {
 		log.Error("Unable to check if %s exists. Error: %v", wikiPath, err)
@@ -323,12 +329,7 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 		return err
 	}
 
-	// If there was previously a redirect at this location, remove it.
-	if err := repo_model.DeleteRedirect(ctx, newOwner.ID, repo.Name); err != nil {
-		return fmt.Errorf("delete repo redirect: %w", err)
-	}
-
-	if err := repo_model.NewRedirect(ctx, oldOwner.ID, repo.ID, repo.Name, repo.Name); err != nil {
+	if err := repo_model.NewRedirect(ctx, oldOwner.ID, oldGroupID, repo.ID, repo.Name); err != nil {
 		return fmt.Errorf("repo_model.NewRedirect: %w", err)
 	}
 
@@ -408,13 +409,14 @@ func changeRepositoryName(ctx context.Context, repo *repo_model.Repository, newR
 	if err = repo_model.ClaimRepoName(ctx, repo); err != nil {
 		return err
 	}
+	if err = repo_model.TakeRedirectPath(ctx, repo.Owner, repo.GroupID, newName, repo.ID); err != nil {
+		return err
+	}
 	if err = repo_model.UpdateRepositoryCols(ctx, repo, "name", "lower_name"); err != nil {
 		return err
 	}
-	if repo.GroupID == 0 { // redirects are root-only
-		if err = repo_model.NewRedirect(ctx, repo.Owner.ID, repo.ID, oldRepoName, newRepoName); err != nil {
-			return err
-		}
+	if err = repo_model.NewRedirect(ctx, repo.Owner.ID, repo.GroupID, repo.ID, oldRepoName); err != nil {
+		return err
 	}
 
 	return committer.Commit()
@@ -430,7 +432,10 @@ func ChangeRepositoryName(ctx context.Context, doer *user_model.User, repo *repo
 	// repo so that we can atomically rename the repo path and updates the
 	// local copy's origin accordingly.
 
-	unlock := repoWorkingPool.Lock(fmt.Sprint(repo.ID))
+	unlock, err := lockRepo(ctx, repo)
+	if err != nil {
+		return err
+	}
 	if err := changeRepositoryName(ctx, repo, newRepoName); err != nil {
 		unlock()
 		return err

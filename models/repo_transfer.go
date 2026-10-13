@@ -141,9 +141,6 @@ func CreatePendingRepositoryTransfer(ctx context.Context, doer, newOwner *user_m
 		if err := TestRepositoryReadyForTransfer(repo.Status); err != nil {
 			return err
 		}
-		if repo.GroupID != 0 {
-			return repo_model.ErrRepoInGroup
-		}
 
 		repo.Status = repo_model.RepositoryPendingTransfer
 		if err := repo_model.UpdateRepositoryCols(ctx, repo, "status"); err != nil {

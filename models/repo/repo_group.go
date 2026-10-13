@@ -52,8 +52,6 @@ func init() {
 var (
 	// ErrRepoGroupNotEmpty is returned when deleting a group that still holds repositories, trashed ones included.
 	ErrRepoGroupNotEmpty = fmt.Errorf("%w: the project still holds repositories", util.ErrInvalidArgument)
-	// ErrRepoInGroup is returned for an operation that doesn't support repositories in a group yet.
-	ErrRepoInGroup = fmt.Errorf("%w: the repository is in a project", util.ErrInvalidArgument)
 	// ErrRepoGroupNotExist is returned when a group isn't found under the given owner.
 	ErrRepoGroupNotExist = fmt.Errorf("%w: project does not exist", util.ErrNotExist)
 )
@@ -149,8 +147,8 @@ func CreateRepoGroup(ctx context.Context, owner *user_model.User, name, descript
 		if err := claimName(ctx, owner.ID, owner.Name, name); err != nil {
 			return err
 		}
-		// a root redirect of the same name would shadow the group's path
-		if err := DeleteRedirect(ctx, owner.ID, name); err != nil {
+		// a live redirect of the name is refused, like a taken name
+		if err := takeGroupRedirectPath(ctx, owner, name, 0); err != nil {
 			return err
 		}
 		return db.Insert(ctx, group)
@@ -174,7 +172,10 @@ func RenameRepoGroup(ctx context.Context, owner *user_model.User, group *RepoGro
 			if err := claimName(ctx, owner.ID, owner.Name, newName); err != nil {
 				return err
 			}
-			if err := DeleteRedirect(ctx, owner.ID, newName); err != nil {
+			if err := takeGroupRedirectPath(ctx, owner, newName, group.ID); err != nil {
+				return err
+			}
+			if err := db.Insert(ctx, &RepoGroupRedirect{OwnerID: owner.ID, LowerName: group.LowerName, RedirectGroupID: group.ID}); err != nil {
 				return err
 			}
 		}
@@ -191,18 +192,37 @@ func RenameRepoGroup(ctx context.Context, owner *user_model.User, group *RepoGro
 // that a trashed repository's group still exists when it is restored.
 func DeleteRepoGroup(ctx context.Context, group *RepoGroup) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
+		// the row lock first, so that a repository moving in meanwhile is seen (LockRepoGroup)
+		locked, err := LockRepoGroup(ctx, group.OwnerID, group.ID)
+		if err != nil {
+			return err
+		}
 		if has, err := db.GetEngine(ctx).Where("owner_id = ? AND group_id = ?", group.OwnerID, group.ID).Exist(new(Repository)); err != nil {
 			return err
 		} else if has {
 			return ErrRepoGroupNotEmpty
 		}
-		if n, err := db.GetEngine(ctx).Where("owner_id = ? AND id = ?", group.OwnerID, group.ID).Delete(new(RepoGroup)); err != nil {
+		if _, err := db.GetEngine(ctx).Where("owner_id = ? AND id = ?", group.OwnerID, group.ID).Delete(new(RepoGroup)); err != nil {
 			return err
-		} else if n == 0 {
-			return ErrRepoGroupNotExist
 		}
-		return releaseName(ctx, group.OwnerID, group.Name)
+		if _, err := db.GetEngine(ctx).Where("owner_id = ? AND group_id = ?", group.OwnerID, group.ID).Delete(new(Redirect)); err != nil {
+			return err
+		}
+		if _, err := db.GetEngine(ctx).Where("owner_id = ? AND redirect_group_id = ?", group.OwnerID, group.ID).Delete(new(RepoGroupRedirect)); err != nil {
+			return err
+		}
+		return releaseName(ctx, group.OwnerID, locked.Name)
 	})
+}
+
+// LockRepoGroup locks the row of the group in the transaction of ctx until it ends and returns the group as it is
+// then, so that moving a repository into the group and deleting the group run one after the other; a missing group
+// is ErrRepoGroupNotExist. (No RowsAffected: MySQL counts a no-op update as 0 rows.)
+func LockRepoGroup(ctx context.Context, ownerID, id int64) (*RepoGroup, error) {
+	if _, err := db.Exec(ctx, "UPDATE `repo_group` SET owner_id = owner_id WHERE owner_id = ? AND id = ?", ownerID, id); err != nil {
+		return nil, err
+	}
+	return GetRepoGroupByID(ctx, ownerID, id)
 }
 
 // Link returns the relative url of the project's home; ownerName is the name of its organization.
