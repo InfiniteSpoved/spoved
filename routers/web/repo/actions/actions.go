@@ -43,8 +43,8 @@ type Workflow struct {
 	ErrMsg string
 }
 
-// ActionsAvailable reports whether Actions is on for the site and, when owner is an organization, not hidden for it
-func ActionsAvailable(ctx *context.Context, owner *user_model.User) bool {
+// Available reports whether Actions is on for the site and, when owner is an organization, not hidden for it
+func Available(ctx *context.Context, owner *user_model.User) bool {
 	return setting.Actions.Enabled && !unit.TypeActions.UnitGlobalDisabled() &&
 		(owner == nil || !repo_model.HiddenUnits(ctx, owner).Contains(unit.TypeActions))
 }
@@ -56,7 +56,7 @@ func MustEnableActions(ctx *context.Context) {
 	if ctx.Org.Organization != nil {
 		org = ctx.Org.Organization.AsUser()
 	}
-	if !ActionsAvailable(ctx, org) {
+	if !Available(ctx, org) {
 		ctx.NotFound("MustEnableActions", nil)
 		return
 	}

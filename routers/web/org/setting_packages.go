@@ -33,7 +33,7 @@ func MustEnablePackages(ctx *context.Context) {
 // SettingsMenu shows the Packages and Actions items of the settings menu only where their routes accept the owner
 func SettingsMenu(ctx *context.Context) {
 	ctx.Data["EnablePackages"] = setting.Packages.Enabled && !repo_model.HiddenUnits(ctx, ctx.ContextUser).Contains(unit.TypePackages)
-	ctx.Data["EnableActions"] = actions.ActionsAvailable(ctx, ctx.ContextUser)
+	ctx.Data["EnableActions"] = actions.Available(ctx, ctx.ContextUser)
 }
 
 func Packages(ctx *context.Context) {
