@@ -70,6 +70,17 @@ func TestAPIRepoGroupAddressing(t *testing.T) {
 		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/repos/org3/proj/priv/-", &api.EditRepoOption{Description: &description}).AddTokenAuth(token), http.StatusOK)
 		assert.Equal(t, description, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: f.priv.ID}).Description)
 
+		// the same writes by ID
+		byID := fmt.Sprintf("/api/v1/repositories/%d", f.priv.ID)
+		description = "changed by ID"
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", byID, &api.EditRepoOption{Description: &description}).AddTokenAuth(token), http.StatusOK)
+		assert.Equal(t, apiResponse(t, "GET", "/api/v1/repos/org3/proj/priv/-", token), apiResponse(t, "GET", byID, token))
+		assert.Equal(t, description, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: f.priv.ID}).Description)
+		var issueByID api.Issue
+		DecodeJSON(t, MakeRequest(t, NewRequestWithJSON(t, "POST", byID+"/issues", &api.CreateIssueOption{Title: "by ID"}).AddTokenAuth(token), http.StatusCreated), &issueByID)
+		assert.Equal(t, issue.Repo, issueByID.Repo)
+		assert.Equal(t, issue.Index+1, issueByID.Index)
+
 		MakeRequest(t, NewRequest(t, "PUT", "/api/v1/user/starred/org3/proj/pub/-").AddTokenAuth(token), http.StatusNoContent)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/user/starred/org3/proj/pub/-").AddTokenAuth(token), http.StatusNoContent)
 	})
@@ -177,7 +188,11 @@ func TestAPIRepoGroupTokens(t *testing.T) {
 		for _, req := range []struct{ method, rest string }{{"GET", ""}, {"GET", "/issues"}, {"POST", "/issues"}} {
 			name := apiResponse(t, req.method, byName+req.rest, token)
 			id := apiResponse(t, req.method, byID+req.rest, token)
-			assert.Equal(t, name[:3], id[:3], "%s %s%s", req.method, repo.FullName(), req.rest)
+			if req.method == "GET" || name[:3] != "201" {
+				assert.Equal(t, name, id, "%s %s%s", req.method, repo.FullName(), req.rest)
+			} else { // each POST creates its own issue
+				assert.Equal(t, name[:3], id[:3], "%s %s%s", req.method, repo.FullName(), req.rest)
+			}
 			if req.method == "GET" {
 				assert.Equal(t, fmt.Sprint(readStatus), name[:3], "%s %s%s", req.method, repo.FullName(), req.rest)
 			}
