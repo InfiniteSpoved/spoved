@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	migration_tests "forgejo.org/models/gitea_migrations/test"
-	"forgejo.org/models/secret"
 	"forgejo.org/modules/keying"
 	"forgejo.org/modules/timeutil"
 
@@ -42,7 +41,10 @@ func Test_MigrateActionSecretToKeying(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, cnt)
 
-	var secret secret.Secret
+	var secret struct {
+		ID   int64
+		Data []byte
+	}
 	_, err = x.Table("secret").ID(1).Get(&secret)
 	require.NoError(t, err)
 

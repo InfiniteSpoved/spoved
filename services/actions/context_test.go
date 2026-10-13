@@ -405,3 +405,59 @@ func TestGenerateGiteaContextForRun(t *testing.T) {
 		assert.Equal(t, "testowner/testrepo/.github/workflows/test-workflow.yml@refs/heads/main", gitContextObj.WorkflowRef)
 	})
 }
+
+// A repository in a project is named by its full path, so it never collides with a root repository of the same name.
+func TestGenerateGiteaContextProject(t *testing.T) {
+	testUser := &user.User{ID: 123, Name: "testuser"}
+	root := &repo.Repository{ID: 456, OwnerID: 789, OwnerName: "dept", Name: "api"}
+	nested := &repo.Repository{ID: 457, OwnerID: 789, OwnerName: "dept", Name: "api", GroupID: 3, GroupName: "payments"}
+	gen := func(r *repo.Repository) map[string]any {
+		run := &actions_model.ActionRun{
+			TriggerUserID: testUser.ID, TriggerUser: testUser, RepoID: r.ID, Repo: r,
+			TriggerEvent: "push", Ref: "refs/heads/main", WorkflowID: "ci.yaml", WorkflowDirectory: ".forgejo/workflows",
+		}
+		c, err := GenerateGiteaContext(run, nil)
+		require.NoError(t, err)
+		return c
+	}
+	r, n := gen(root), gen(nested)
+
+	assert.Equal(t, "dept/api", r["repository"])
+	assert.Equal(t, "dept", r["namespace_path"])
+	assert.Empty(t, r["repository_group"])
+	assert.Equal(t, "api", r["repository_leaf"])
+	assert.Equal(t, "dept/api", r["forgejo_repository_path"])
+	assert.Equal(t, "dept/api/.forgejo/workflows/ci.yaml@refs/heads/main", r["workflow_ref"])
+
+	assert.Equal(t, "dept/payments/api", n["repository"])
+	assert.Equal(t, "dept/payments", n["namespace_path"])
+	assert.Equal(t, "payments", n["repository_group"])
+	assert.Equal(t, "api", n["repository_leaf"])
+	assert.Equal(t, "dept/payments/api", n["forgejo_repository_path"])
+	assert.Equal(t, "dept/payments/api/.forgejo/workflows/ci.yaml@refs/heads/main", n["workflow_ref"])
+	assert.Equal(t, "dept", n["repository_owner"])
+	assert.Equal(t, "789", n["repository_owner_id"])
+	assert.Equal(t, "457", n["repository_id"])
+
+	// both subject formats tell the two repositories apart
+	assert.Equal(t, "repo:dept-789/api-456:ref:refs/heads/main", generateOIDCSub(r))
+	assert.Equal(t, "repo:dept-789/api-457:ref:refs/heads/main", generateOIDCSub(n))
+	assert.Equal(t, "repo:dept/api:ref:refs/heads/main", legacyGenerateOIDCSub(r))
+	assert.Equal(t, "repo:dept/payments/api:ref:refs/heads/main", legacyGenerateOIDCSub(n))
+
+	// the default subject is stable when the project is renamed or the repository moves; the legacy one follows the path
+	moved := gen(&repo.Repository{ID: 457, OwnerID: 789, OwnerName: "dept", Name: "api", GroupID: 4, GroupName: "billing"})
+	assert.Equal(t, generateOIDCSub(n), generateOIDCSub(moved))
+	assert.Equal(t, generateOIDCSub(n), generateOIDCSub(gen(&repo.Repository{ID: 457, OwnerID: 789, OwnerName: "dept", Name: "api"})))
+	assert.Equal(t, "repo:dept/billing/api:ref:refs/heads/main", legacyGenerateOIDCSub(moved))
+
+	// the claims carry the namespace and the IDs
+	extra, err := generateOIDCExtra(n)
+	require.NoError(t, err)
+	var claims IDTokenCustomClaims
+	require.NoError(t, json.Unmarshal([]byte(extra), &claims))
+	assert.Equal(t, "dept/payments", claims.NamespacePath)
+	assert.Equal(t, "dept/payments/api", claims.Repository)
+	assert.Equal(t, "457", claims.RepositoryID)
+	assert.Equal(t, "789", claims.RepositoryOwnerID)
+}

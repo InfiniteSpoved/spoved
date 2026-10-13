@@ -1161,6 +1161,20 @@ func registerRoutes(m *web.Route) {
 				ctx.Data["PageIsRepoGroupSettings"] = true
 				ctx.Data["PageIsViewRepoGroups"] = true
 			})
+			m.Group("", func() {
+				m.Group("/secrets", func() {
+					m.Get("", org.RepoGroupSecrets)
+					m.Post("", web.Bind(forms.CreateSecretForm{}), org.RepoGroupSecretCreate)
+					m.Post("/{secret_id}/edit", web.Bind(forms.EditSecretForm{}), org.RepoGroupSecretEdit)
+					m.Post("/{secret_id}/delete", org.RepoGroupSecretDelete)
+				})
+				m.Group("/variables", func() {
+					m.Get("", org.RepoGroupVariables)
+					m.Post("/new", web.Bind(forms.EditVariableForm{}), org.RepoGroupVariableCreate)
+					m.Post("/{variable_id}/edit", web.Bind(forms.EditVariableForm{}), org.RepoGroupVariableUpdate)
+					m.Post("/{variable_id}/delete", org.RepoGroupVariableDelete)
+				})
+			}, actions.MustEnableActions)
 			m.Group("/branches", func() {
 				m.Combo("/edit").Get(org_setting.SettingsProtectedBranch).
 					Post(web.Bind(forms.ProtectBranchForm{}), org_setting.SettingsProtectedBranchPost)

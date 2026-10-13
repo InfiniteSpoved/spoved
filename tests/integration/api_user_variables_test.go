@@ -198,7 +198,7 @@ func TestAPIUserVariablesDeleteUserVariable(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 
 	user1 := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "user1"})
-	variable, err := actions_model.InsertVariable(t.Context(), user1.ID, 0, "FORGEJO_FORBIDDEN", "illegal")
+	variable, err := actions_model.InsertVariable(t.Context(), user1.ID, 0, 0, "FORGEJO_FORBIDDEN", "illegal")
 	require.NoError(t, err)
 
 	session := loginUser(t, user1.Name)

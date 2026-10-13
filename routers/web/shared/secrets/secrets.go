@@ -16,8 +16,8 @@ import (
 	secrets_service "forgejo.org/services/secrets"
 )
 
-func SetSecretsContext(ctx *context.Context, ownerID, repoID int64) {
-	secrets, err := db.Find[secret_model.Secret](ctx, secret_model.FindSecretsOptions{OwnerID: ownerID, RepoID: repoID})
+func SetSecretsContext(ctx *context.Context, ownerID, groupID, repoID int64) {
+	secrets, err := db.Find[secret_model.Secret](ctx, secret_model.FindSecretsOptions{OwnerID: ownerID, GroupID: groupID, RepoID: repoID})
 	if err != nil {
 		ctx.ServerError("FindSecrets", err)
 		return
@@ -26,11 +26,11 @@ func SetSecretsContext(ctx *context.Context, ownerID, repoID int64) {
 	ctx.Data["Secrets"] = secrets
 }
 
-func CreateSecretPost(ctx *context.Context, ownerID, repoID int64, redirectURL string) {
+func CreateSecretPost(ctx *context.Context, ownerID, groupID, repoID int64, redirectURL string) {
 	form := web.GetForm(ctx).(*forms.CreateSecretForm)
 
 	normalizedData := util.ReserveLineBreakForTextarea(form.Data)
-	secret, err := secret_model.InsertEncryptedSecret(ctx, ownerID, repoID, form.Name, normalizedData)
+	secret, err := secret_model.InsertEncryptedSecret(ctx, ownerID, groupID, repoID, form.Name, normalizedData)
 	if err != nil {
 		log.Error("InsertEncryptedSecret failed: %v", err)
 		ctx.JSONError(ctx.Tr("secrets.creation.failed"))
@@ -41,10 +41,10 @@ func CreateSecretPost(ctx *context.Context, ownerID, repoID int64, redirectURL s
 	ctx.JSONRedirect(redirectURL)
 }
 
-func EditSecretPost(ctx *context.Context, ownerID, repoID, id int64, redirectURL string) {
+func EditSecretPost(ctx *context.Context, ownerID, groupID, repoID, id int64, redirectURL string) {
 	form := web.GetForm(ctx).(*forms.EditSecretForm)
 
-	secret, err := secret_model.GetSecretByID(ctx, ownerID, repoID, id)
+	secret, err := secret_model.GetSecretByID(ctx, ownerID, groupID, repoID, id)
 	if errors.Is(err, util.ErrNotExist) {
 		ctx.NotFound("GetSecretByID", err)
 		return
@@ -69,8 +69,8 @@ func EditSecretPost(ctx *context.Context, ownerID, repoID, id int64, redirectURL
 	ctx.JSONRedirect(redirectURL)
 }
 
-func DeleteSecretPost(ctx *context.Context, ownerID, repoID, id int64, redirectURL string) {
-	err := secrets_service.DeleteSecretByID(ctx, ownerID, repoID, id)
+func DeleteSecretPost(ctx *context.Context, ownerID, groupID, repoID, id int64, redirectURL string) {
+	err := secrets_service.DeleteSecretByID(ctx, ownerID, groupID, repoID, id)
 	if err != nil {
 		log.Error("DeleteSecretByID(%d) failed: %v", id, err)
 		ctx.JSONError(ctx.Tr("secrets.deletion.failed"))

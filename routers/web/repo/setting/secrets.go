@@ -23,6 +23,7 @@ const (
 
 type secretsCtx struct {
 	OwnerID         int64
+	GroupID         int64
 	RepoID          int64
 	IsRepo          bool
 	IsOrg           bool
@@ -85,7 +86,7 @@ func Secrets(ctx *context.Context) {
 		ctx.Data["DisableSSH"] = setting.SSH.Disabled
 	}
 
-	shared.SetSecretsContext(ctx, sCtx.OwnerID, sCtx.RepoID)
+	shared.SetSecretsContext(ctx, sCtx.OwnerID, sCtx.GroupID, sCtx.RepoID)
 	if ctx.Written() {
 		return
 	}
@@ -107,6 +108,7 @@ func SecretsCreatePost(ctx *context.Context) {
 	shared.CreateSecretPost(
 		ctx,
 		sCtx.OwnerID,
+		sCtx.GroupID,
 		sCtx.RepoID,
 		sCtx.RedirectLink,
 	)
@@ -124,7 +126,7 @@ func SecretsEditPost(ctx *context.Context) {
 		return
 	}
 
-	shared.EditSecretPost(ctx, sCtx.OwnerID, sCtx.RepoID, ctx.ParamsInt64(":secret_id"), sCtx.RedirectLink)
+	shared.EditSecretPost(ctx, sCtx.OwnerID, sCtx.GroupID, sCtx.RepoID, ctx.ParamsInt64(":secret_id"), sCtx.RedirectLink)
 }
 
 func SecretsDeletePost(ctx *context.Context) {
@@ -136,6 +138,7 @@ func SecretsDeletePost(ctx *context.Context) {
 	shared.DeleteSecretPost(
 		ctx,
 		sCtx.OwnerID,
+		sCtx.GroupID,
 		sCtx.RepoID,
 		ctx.ParamsInt64(":secret_id"),
 		sCtx.RedirectLink,

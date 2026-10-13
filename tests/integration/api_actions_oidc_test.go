@@ -47,7 +47,7 @@ func TestActionsOIDC(t *testing.T) {
 	assert.Equal(t, []string{"id_token"}, config.ResponseTypesSupported)
 	assert.Equal(t, []string{
 		"sub", "aud", "exp", "iat", "iss", "nbf", "actor", "actor_id", "base_ref", "event_name",
-		"head_ref", "ref", "ref_protected", "ref_type", "repository", "repository_id", "repository_owner",
+		"head_ref", "namespace_path", "ref", "ref_protected", "ref_type", "repository", "repository_id", "repository_owner",
 		"repository_owner_id", "run_attempt", "run_id", "run_number", "sha", "workflow", "workflow_ref",
 	},
 		config.ClaimsSupported)

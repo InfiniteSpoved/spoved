@@ -13,9 +13,10 @@ import (
 	"forgejo.org/services/forms"
 )
 
-func SetVariablesContext(ctx *context.Context, ownerID, repoID int64) {
+func SetVariablesContext(ctx *context.Context, ownerID, groupID, repoID int64) {
 	variables, err := db.Find[actions_model.ActionVariable](ctx, actions_model.FindVariablesOpts{
 		OwnerID: ownerID,
+		GroupID: groupID,
 		RepoID:  repoID,
 	})
 	if err != nil {
@@ -25,10 +26,10 @@ func SetVariablesContext(ctx *context.Context, ownerID, repoID int64) {
 	ctx.Data["Variables"] = variables
 }
 
-func CreateVariable(ctx *context.Context, ownerID, repoID int64, redirectURL string) {
+func CreateVariable(ctx *context.Context, ownerID, groupID, repoID int64, redirectURL string) {
 	form := web.GetForm(ctx).(*forms.EditVariableForm)
 
-	v, err := actions_service.CreateVariable(ctx, ownerID, repoID, form.Name, form.Data)
+	v, err := actions_service.CreateVariable(ctx, ownerID, groupID, repoID, form.Name, form.Data)
 	if err != nil {
 		log.Error("CreateVariable: %v", err)
 		ctx.JSONError(ctx.Tr("actions.variables.creation.failed"))
@@ -39,11 +40,11 @@ func CreateVariable(ctx *context.Context, ownerID, repoID int64, redirectURL str
 	ctx.JSONRedirect(redirectURL)
 }
 
-func UpdateVariable(ctx *context.Context, ownerID, repoID int64, redirectURL string) {
+func UpdateVariable(ctx *context.Context, ownerID, groupID, repoID int64, redirectURL string) {
 	id := ctx.ParamsInt64(":variable_id")
 	form := web.GetForm(ctx).(*forms.EditVariableForm)
 
-	if ok, err := actions_service.UpdateVariable(ctx, id, ownerID, repoID, form.Name, form.Data); err != nil || !ok {
+	if ok, err := actions_service.UpdateVariable(ctx, id, ownerID, groupID, repoID, form.Name, form.Data); err != nil || !ok {
 		if !ok {
 			ctx.JSONError(ctx.Tr("actions.variables.not_found"))
 		} else {
@@ -56,10 +57,10 @@ func UpdateVariable(ctx *context.Context, ownerID, repoID int64, redirectURL str
 	ctx.JSONRedirect(redirectURL)
 }
 
-func DeleteVariable(ctx *context.Context, ownerID, repoID int64, redirectURL string) {
+func DeleteVariable(ctx *context.Context, ownerID, groupID, repoID int64, redirectURL string) {
 	id := ctx.ParamsInt64(":variable_id")
 
-	if ok, err := actions_model.DeleteVariable(ctx, id, ownerID, repoID); err != nil || !ok {
+	if ok, err := actions_model.DeleteVariable(ctx, id, ownerID, groupID, repoID); err != nil || !ok {
 		if !ok {
 			ctx.JSONError(ctx.Tr("actions.variables.not_found"))
 		} else {

@@ -202,7 +202,7 @@ func TestAPIRepoVariablesDeleteRepositoryVariable(t *testing.T) {
 
 	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
 	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: repo.OwnerID})
-	variable, err := actions_model.InsertVariable(t.Context(), 0, repo.ID, "FORGEJO_FORBIDDEN", "illegal")
+	variable, err := actions_model.InsertVariable(t.Context(), 0, 0, repo.ID, "FORGEJO_FORBIDDEN", "illegal")
 	require.NoError(t, err)
 	session := loginUser(t, user.Name)
 	token := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteRepository)

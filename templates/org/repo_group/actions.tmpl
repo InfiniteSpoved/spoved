@@ -1,0 +1,17 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content organization settings repo-group actions-{{.PageType}}">
+	{{template "org/header" .}}
+	<div class="ui container">
+		{{template "base/alert" .}}
+		<h2 class="tw-break-anywhere">
+			<a class="muted" href="{{.Org.HomeLink}}">{{.Org.Name}}</a> / <a class="muted" href="{{.RepoGroupLink}}">{{.RepoGroup.Name}}</a>
+		</h2>
+		<p>{{.Description}}</p>
+		{{if eq .PageType "secrets"}}
+			{{template "shared/actions/secrets_list" .}}
+		{{else}}
+			{{template "shared/actions/variables_list" .}}
+		{{end}}
+	</div>
+</div>
+{{template "base/footer" .}}

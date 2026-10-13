@@ -280,3 +280,38 @@ func TestIsActiveSiteAdmin(t *testing.T) {
 	assert.False(t, IsActiveSiteAdmin(&user_model.User{IsActive: true}))
 	assert.False(t, IsActiveSiteAdmin(nil))
 }
+
+// A repository in a project is named by its full path, so it differs from a root repository with the same name.
+func TestUsageNamesProject(t *testing.T) {
+	r := usageSetup(t)
+	const from, to = timeutil.TimeStamp(10_000), timeutil.TimeStamp(20_000)
+	_, err := db.GetEngine(t.Context()).Exec("UPDATE repository SET name = 'repo3', lower_name = 'repo3', group_id = 7, group_name = 'payments' WHERE id = ?", r.org2)
+	require.NoError(t, err)
+	addUsageJob(t, r.org, 0, 11_000, 11_100, 11_100, actions_model.StatusSuccess)
+	addUsageJob(t, r.org2, 0, 11_000, 11_200, 11_200, actions_model.StatusSuccess)
+	for i, repoID := range []int64{r.org, r.org2} {
+		run := &actions_model.ActionRun{
+			Title: "f", RepoID: repoID, OwnerID: 999, WorkflowID: "ci.yaml", Index: int64(9000 + i), TriggerUserID: 2,
+			Ref: "refs/heads/main", Event: webhook_module.HookEventPush, TriggerEvent: "push", Status: actions_model.StatusFailure,
+		}
+		require.NoError(t, db.Insert(t.Context(), run))
+		_, err := db.GetEngine(t.Context()).Exec("UPDATE action_run SET created = ? WHERE id = ?", from+10, run.ID)
+		require.NoError(t, err)
+	}
+
+	usage, err := GetUsage(t.Context(), UsageGroupRepo, from, to, nil, 100)
+	require.NoError(t, err)
+	m := usageByID(usage)
+	assert.Equal(t, "org3/repo3", m[r.org].Name)
+	assert.Equal(t, "org3/payments/repo3", m[r.org2].Name)
+
+	top, err := TopReposByFailures(t.Context(), from, to, nil, 10)
+	require.NoError(t, err)
+	m = usageByID(top)
+	assert.Equal(t, "org3/repo3", m[r.org].Name)
+	assert.Equal(t, "org3/payments/repo3", m[r.org2].Name)
+
+	byOrg, err := GetUsage(t.Context(), UsageGroupOrg, from, to, nil, 100)
+	require.NoError(t, err)
+	assert.Equal(t, "org3", usageByID(byOrg)[3].Name)
+}

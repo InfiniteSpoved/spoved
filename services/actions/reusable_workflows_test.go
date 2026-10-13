@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/setting"
 
@@ -226,4 +228,18 @@ func TestExpandLocalReusableWorkflowsRejectsMetadata(t *testing.T) {
 
 	_, err = expandLocalReusableWorkflows(commit)(&jobparser.Job{}, "./forged.yml")
 	require.ErrorContains(t, err, "__metadata")
+}
+
+// `uses: org/project/repo/.forgejo/workflows/x.yml@ref` names the project as the repository, which is not a repository:
+// reusable workflows in a project are not resolved and fail closed with the message of a missing repository.
+func TestExpandInstanceReusableWorkflowsProject(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+	require.True(t, org3.Visibility.IsPublic())
+	_, err := repo_model.CreateRepoGroup(t.Context(), org3, "payments", "")
+	require.NoError(t, err)
+
+	ref := &model.NonLocalReusableWorkflowReference{Org: org3.Name, Repo: "payments", GitPlatform: "forgejo", Filename: "x.yml", Ref: "main"}
+	_, err = expandInstanceReusableWorkflows(t.Context())(&jobparser.Job{}, ref)
+	require.ErrorContains(t, err, "payments: repo does not exist")
 }

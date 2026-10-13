@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
@@ -41,36 +42,36 @@ func generateGiteaContextForRun(run *actions_model.ActionRun) *model.GithubConte
 	}
 
 	refName := git.RefName(ref)
-	workflowRef := fmt.Sprintf("%s/%s/%s/%s@%s", run.Repo.OwnerName, run.Repo.Name, run.WorkflowDirectory, run.WorkflowID, ref)
+	workflowRef := fmt.Sprintf("%s/%s/%s@%s", run.Repo.FullName(), run.WorkflowDirectory, run.WorkflowID, ref)
 
 	gitContextObj := &model.GithubContext{
 		// standard contexts, see https://docs.github.com/en/actions/learn-github-actions/contexts#github-context
-		APIURL:           setting.AppURL + "api/v1",                // string, The URL of the GitHub REST API.
-		Action:           "",                                       // string, The name of the action currently running, or the id of a step. GitHub removes special characters, and uses the name __run when the current step runs a script without an id. If you use the same action more than once in the same job, the name will include a suffix with the sequence number with underscore before it. For example, the first script you run will have the name __run, and the second script will be named __run_2. Similarly, the second invocation of actions/checkout will be actionscheckout2.
-		ActionPath:       "",                                       // string, The path where an action is located. This property is only supported in composite actions. You can use this path to access files located in the same repository as the action.
-		ActionRef:        "",                                       // string, For a step executing an action, this is the ref of the action being executed. For example, v2.
-		ActionRepository: "",                                       // string, For a step executing an action, this is the owner and repository name of the action. For example, actions/checkout.
-		BaseRef:          baseRef,                                  // string, The base_ref or target branch of the pull request in a workflow run. This property is only available when the event that triggers a workflow run is either pull_request or pull_request_target.
-		Event:            event,                                    // object, The full event webhook payload. You can access individual properties of the event using this context. This object is identical to the webhook payload of the event that triggered the workflow run, and is different for each event. The webhooks for each GitHub Actions event is linked in "Events that trigger workflows." For example, for a workflow run triggered by the push event, this object contains the contents of the push webhook payload.
-		EventName:        run.TriggerEvent,                         // string, The name of the event that triggered the workflow run.
-		EventPath:        "",                                       // string, The path to the file on the runner that contains the full event webhook payload.
-		GraphQLURL:       "",                                       // string, The URL of the GitHub GraphQL API.
-		HeadRef:          headRef,                                  // string, The head_ref or source branch of the pull request in a workflow run. This property is only available when the event that triggers a workflow run is either pull_request or pull_request_target.
-		Job:              "",                                       // string, The job_id of the current job.
-		Ref:              ref,                                      // string, The fully-formed ref of the branch or tag that triggered the workflow run. For workflows triggered by push, this is the branch or tag ref that was pushed. For workflows triggered by pull_request, this is the pull request merge branch. For workflows triggered by release, this is the release tag created. For other triggers, this is the branch or tag ref that triggered the workflow run. This is only set if a branch or tag is available for the event type. The ref given is fully-formed, meaning that for branches the format is refs/heads/<branch_name>, for pull requests it is refs/pull/<pr_number>/merge, and for tags it is refs/tags/<tag_name>. For example, refs/heads/feature-branch-1.
-		RefName:          refName.ShortName(),                      // string, The short ref name of the branch or tag that triggered the workflow run. This value matches the branch or tag name shown on GitHub. For example, feature-branch-1.
-		RefType:          refName.RefType(),                        // string, The type of ref that triggered the workflow run. Valid values are branch or tag.
-		Repository:       run.Repo.OwnerName + "/" + run.Repo.Name, // string, The owner and repository name. For example, Codertocat/Hello-World.
-		RepositoryOwner:  run.Repo.OwnerName,                       // string, The repository owner's name. For example, Codertocat.
-		RetentionDays:    "",                                       // string, The number of days that workflow run logs and artifacts are kept.
-		RunID:            "",                                       // string, A unique number for each workflow run within a repository. This number does not change if you re-run the workflow run.
-		RunNumber:        fmt.Sprint(run.Index),                    // string, A unique number for each run of a particular workflow in a repository. This number begins at 1 for the workflow's first run, and increments with each new run. This number does not change if you re-run the workflow run.
-		RunAttempt:       "",                                       // string, A unique number for each attempt of a particular workflow run in a repository. This number begins at 1 for the workflow run's first attempt, and increments with each re-run.
-		ServerURL:        setting.AppURL,                           // string, The URL of the GitHub server. For example: https://github.com.
-		Sha:              sha,                                      // string, The commit SHA that triggered the workflow. The value of this commit SHA depends on the event that triggered the workflow. For more information, see "Events that trigger workflows." For example, ffac537e6cbbf934b08745a378932722df287a53.
-		Workflow:         run.WorkflowID,                           // string, The name of the workflow. If the workflow file doesn't specify a name, the value of this property is the full path of the workflow file in the repository.
-		WorkflowRef:      workflowRef,                              // string, ref path to the workflow file, for example, example/test/.forgejo/workflows/test.yaml@refs/heads/main
-		Workspace:        "",                                       // string, The default working directory on the runner for steps, and the default location of your repository when using the checkout action.
+		APIURL:           setting.AppURL + "api/v1", // string, The URL of the GitHub REST API.
+		Action:           "",                        // string, The name of the action currently running, or the id of a step. GitHub removes special characters, and uses the name __run when the current step runs a script without an id. If you use the same action more than once in the same job, the name will include a suffix with the sequence number with underscore before it. For example, the first script you run will have the name __run, and the second script will be named __run_2. Similarly, the second invocation of actions/checkout will be actionscheckout2.
+		ActionPath:       "",                        // string, The path where an action is located. This property is only supported in composite actions. You can use this path to access files located in the same repository as the action.
+		ActionRef:        "",                        // string, For a step executing an action, this is the ref of the action being executed. For example, v2.
+		ActionRepository: "",                        // string, For a step executing an action, this is the owner and repository name of the action. For example, actions/checkout.
+		BaseRef:          baseRef,                   // string, The base_ref or target branch of the pull request in a workflow run. This property is only available when the event that triggers a workflow run is either pull_request or pull_request_target.
+		Event:            event,                     // object, The full event webhook payload. You can access individual properties of the event using this context. This object is identical to the webhook payload of the event that triggered the workflow run, and is different for each event. The webhooks for each GitHub Actions event is linked in "Events that trigger workflows." For example, for a workflow run triggered by the push event, this object contains the contents of the push webhook payload.
+		EventName:        run.TriggerEvent,          // string, The name of the event that triggered the workflow run.
+		EventPath:        "",                        // string, The path to the file on the runner that contains the full event webhook payload.
+		GraphQLURL:       "",                        // string, The URL of the GitHub GraphQL API.
+		HeadRef:          headRef,                   // string, The head_ref or source branch of the pull request in a workflow run. This property is only available when the event that triggers a workflow run is either pull_request or pull_request_target.
+		Job:              "",                        // string, The job_id of the current job.
+		Ref:              ref,                       // string, The fully-formed ref of the branch or tag that triggered the workflow run. For workflows triggered by push, this is the branch or tag ref that was pushed. For workflows triggered by pull_request, this is the pull request merge branch. For workflows triggered by release, this is the release tag created. For other triggers, this is the branch or tag ref that triggered the workflow run. This is only set if a branch or tag is available for the event type. The ref given is fully-formed, meaning that for branches the format is refs/heads/<branch_name>, for pull requests it is refs/pull/<pr_number>/merge, and for tags it is refs/tags/<tag_name>. For example, refs/heads/feature-branch-1.
+		RefName:          refName.ShortName(),       // string, The short ref name of the branch or tag that triggered the workflow run. This value matches the branch or tag name shown on GitHub. For example, feature-branch-1.
+		RefType:          refName.RefType(),         // string, The type of ref that triggered the workflow run. Valid values are branch or tag.
+		Repository:       run.Repo.FullName(),       // string, The owner and repository name. For example, Codertocat/Hello-World.
+		RepositoryOwner:  run.Repo.OwnerName,        // string, The repository owner's name. For example, Codertocat.
+		RetentionDays:    "",                        // string, The number of days that workflow run logs and artifacts are kept.
+		RunID:            "",                        // string, A unique number for each workflow run within a repository. This number does not change if you re-run the workflow run.
+		RunNumber:        fmt.Sprint(run.Index),     // string, A unique number for each run of a particular workflow in a repository. This number begins at 1 for the workflow's first run, and increments with each new run. This number does not change if you re-run the workflow run.
+		RunAttempt:       "",                        // string, A unique number for each attempt of a particular workflow run in a repository. This number begins at 1 for the workflow run's first attempt, and increments with each re-run.
+		ServerURL:        setting.AppURL,            // string, The URL of the GitHub server. For example: https://github.com.
+		Sha:              sha,                       // string, The commit SHA that triggered the workflow. The value of this commit SHA depends on the event that triggered the workflow. For more information, see "Events that trigger workflows." For example, ffac537e6cbbf934b08745a378932722df287a53.
+		Workflow:         run.WorkflowID,            // string, The name of the workflow. If the workflow file doesn't specify a name, the value of this property is the full path of the workflow file in the repository.
+		WorkflowRef:      workflowRef,               // string, ref path to the workflow file, for example, example/test/.forgejo/workflows/test.yaml@refs/heads/main
+		Workspace:        "",                        // string, The default working directory on the runner for steps, and the default location of your repository when using the checkout action.
 	}
 	if run.TriggerUser != nil {
 		gitContextObj.Actor = run.TriggerUser.Name // string, The username of the user that triggered the initial workflow run. If the workflow run is a re-run, this value may differ from github.triggering_actor. Any workflow re-runs will use the privileges of github.actor, even if the actor initiating the re-run (github.triggering_actor) has different privileges.
@@ -106,7 +107,7 @@ func GenerateGiteaContext(run *actions_model.ActionRun, job *actions_model.Actio
 	gitContext["ref_protected"] = false                                         // boolean, true if branch protections are configured for the ref that triggered the workflow run.
 	gitContext["repository_owner"] = run.Repo.OwnerName                         // string, The repository owner's name. For example, Codertocat.
 	gitContext["repository_owner_id"] = strconv.FormatInt(run.Repo.OwnerID, 10) // string, Immutable unique identifier for the repository owner (unlike repository_owner, which can change with a user rename)
-	gitContext["repository"] = run.Repo.OwnerName + "/" + run.Repo.Name         // string, The owner and repository name. For example, Codertocat/Hello-World.
+	gitContext["repository"] = run.Repo.FullName()                              // string, The owner and repository name. For example, Codertocat/Hello-World.
 	gitContext["repository_id"] = strconv.FormatInt(run.RepoID, 10)             // string, Immutable unique identifier for the repository (unlike repository, which can be renamed)
 	gitContext["repositoryUrl"] = run.Repo.HTMLURL()                            // string, The Git URL to the repository. For example, git://github.com/codertocat/hello-world.git.
 	gitContext["secret_source"] = "Actions"                                     // string, The source of a secret used in a workflow. Possible values are None, Actions, Dependabot, or Codespaces.
@@ -115,7 +116,13 @@ func GenerateGiteaContext(run *actions_model.ActionRun, job *actions_model.Actio
 	gitContext["workflow"] = run.WorkflowID                                     // string, The name of the workflow. If the workflow file doesn't specify a name, the value of this property is the full path of the workflow file in the repository.
 
 	// additional contexts
-	gitContext["gitea_default_actions_url"] = setting.Actions.DefaultActionsURL.URL() // Remove after Forgejo 19.
+	// the parts of repository for a repository in a project (organization/project/leaf); computed from the repository, never parsed from a name
+	namespacePath := strings.TrimSuffix(run.Repo.FullName(), "/"+run.Repo.Name)
+	gitContext["forgejo_repository_path"] = run.Repo.FullName()
+	gitContext["namespace_path"] = namespacePath                                                                    // string, The owner, and the project for a repository in one. For example, dept/payments.
+	gitContext["repository_group"] = strings.TrimPrefix(strings.TrimPrefix(namespacePath, run.Repo.OwnerName), "/") // string, The project of the repository, empty at the root of its owner.
+	gitContext["repository_leaf"] = run.Repo.Name                                                                   // string, The repository name without owner and project.
+	gitContext["gitea_default_actions_url"] = setting.Actions.DefaultActionsURL.URL()                               // Remove after Forgejo 19.
 	gitContext["forgejo_default_actions_url"] = setting.Actions.DefaultActionsURL.URL()
 	gitContext["forgejo_server_version"] = setting.AppVer
 

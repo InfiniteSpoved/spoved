@@ -10,6 +10,7 @@ import (
 
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/timeutil"
 
 	"xorm.io/builder"
@@ -83,36 +84,45 @@ func ParseUsageRange(fromStr, toStr string, now timeutil.TimeStamp) (from, to ti
 }
 
 type usageRow struct {
-	ID      int64
-	N1, N2  string
-	Seconds int64
-	Jobs    int64
-	Failed  int64
+	ID        int64
+	N1, N2    string
+	GroupID   int64 // the project of a repository
+	GroupName string
+	Seconds   int64
+	Jobs      int64
+	Failed    int64
+}
+
+// usageName is the owner, or the full path of a repository (owner/project/name for one in a project).
+func usageName(owner, name string, groupID int64, groupName string) string {
+	if name == "" {
+		return owner
+	}
+	return (&repo_model.Repository{OwnerName: owner, Name: name, GroupID: groupID, GroupName: groupName}).FullName()
 }
 
 func (r usageRow) entry() UsageEntry {
-	name := r.N1
-	if r.N2 != "" {
-		name += "/" + r.N2
-	}
-	return UsageEntry{ID: r.ID, Name: name, Seconds: r.Seconds, Jobs: r.Jobs, FailedJobs: r.Failed}
+	return UsageEntry{ID: r.ID, Name: usageName(r.N1, r.N2, r.GroupID, r.GroupName), Seconds: r.Seconds, Jobs: r.Jobs, FailedJobs: r.Failed}
 }
 
 // GetUsage sums the run time of the jobs that started in [from, to] and have finished, per group, most seconds
 // first, in one query. Only repositories orgRunRepoCond lets a site admin see count (tokenRepos limits them
 // further); the owner is the repository's, never the job's. A job that never got a runner counts under runner 0, one whose runner is gone under -1.
 func GetUsage(ctx context.Context, group UsageGroup, from, to timeutil.TimeStamp, tokenRepos builder.Cond, limit int) ([]UsageEntry, error) {
-	id, n1, n2, groupBy := "`repository`.id", "`repository`.owner_name", "`repository`.name", "`repository`.id, `repository`.owner_name, `repository`.name"
+	id, n1, n2, groupBy := "`repository`.id", "`repository`.owner_name", "`repository`.name", "`repository`.id, `repository`.owner_name, `repository`.name, `repository`.group_id, `repository`.group_name"
+	gid, gname := "`repository`.group_id", "`repository`.group_name"
 	repoCond := orgRunRepoCond(ctx, nil, nil, true, tokenRepos) // before building the session (reads a setting)
 	sess := db.GetEngine(ctx).Table("action_run_job").Join("INNER", "repository", "`repository`.id = `action_run_job`.repo_id")
 	switch group {
 	case UsageGroupOrg:
 		id, n1, n2, groupBy = "`repository`.owner_id", "`user`.name", "''", "`repository`.owner_id, `user`.name"
+		gid, gname = "0", "''"
 		sess = sess.Join("INNER", "`user`", "`user`.id = `repository`.owner_id")
 	case UsageGroupRunner:
 		// 0: the job never got a task; -1: its runner is gone (one bucket, not one per job)
 		id = "CASE WHEN `action_task`.id IS NULL THEN 0 WHEN `action_runner`.id IS NULL THEN -1 ELSE `action_runner`.id END"
 		n1, n2, groupBy = "COALESCE(`action_runner`.name, '')", "''", id+", COALESCE(`action_runner`.name, '')"
+		gid, gname = "0", "''"
 		sess = sess.Join("LEFT", "action_task", "`action_task`.id = `action_run_job`.task_id").
 			Join("LEFT", "action_runner", "`action_runner`.id = `action_task`.runner_id")
 	}
@@ -120,8 +130,8 @@ func GetUsage(ctx context.Context, group UsageGroup, from, to timeutil.TimeStamp
 	var rows []usageRow
 	err := sess.Where(repoCond).
 		And("`action_run_job`.started >= ? AND `action_run_job`.started <= ? AND `action_run_job`.stopped >= `action_run_job`.started AND `action_run_job`.updated >= ?", from, to, from).
-		Select(fmt.Sprintf("%s AS id, %s AS n1, %s AS n2, SUM(`action_run_job`.stopped - `action_run_job`.started) AS seconds, COUNT(*) AS jobs, "+
-			"SUM(CASE WHEN `action_run_job`.status = %d THEN 1 ELSE 0 END) AS failed", id, n1, n2, actions_model.StatusFailure)).
+		Select(fmt.Sprintf("%s AS id, %s AS n1, %s AS n2, %s AS group_id, %s AS group_name, SUM(`action_run_job`.stopped - `action_run_job`.started) AS seconds, COUNT(*) AS jobs, "+
+			"SUM(CASE WHEN `action_run_job`.status = %d THEN 1 ELSE 0 END) AS failed", id, n1, n2, gid, gname, actions_model.StatusFailure)).
 		GroupBy(groupBy).OrderBy("seconds DESC, id").Limit(min(limit, UsageMaxEntries)).Find(&rows)
 	if err != nil {
 		return nil, err
@@ -138,21 +148,23 @@ func TopReposByFailures(ctx context.Context, from, to timeutil.TimeStamp, tokenR
 	var rows []struct {
 		ID         int64
 		N1, N2     string
+		GroupID    int64
+		GroupName  string
 		FailedRuns int64
 	}
 	repoCond := orgRunRepoCond(ctx, nil, nil, true, tokenRepos)
 	err := db.GetEngine(ctx).Table("action_run").Join("INNER", "repository", "`repository`.id = `action_run`.repo_id").
 		Where(repoCond).
 		And("`action_run`.status = ? AND `action_run`.created >= ? AND `action_run`.created <= ?", actions_model.StatusFailure, from, to).
-		Select("`repository`.id AS id, `repository`.owner_name AS n1, `repository`.name AS n2, COUNT(*) AS failed_runs").
-		GroupBy("`repository`.id, `repository`.owner_name, `repository`.name").OrderBy("failed_runs DESC, id").
+		Select("`repository`.id AS id, `repository`.owner_name AS n1, `repository`.name AS n2, `repository`.group_id AS group_id, `repository`.group_name AS group_name, COUNT(*) AS failed_runs").
+		GroupBy("`repository`.id, `repository`.owner_name, `repository`.name, `repository`.group_id, `repository`.group_name").OrderBy("failed_runs DESC, id").
 		Limit(min(limit, UsageMaxEntries)).Find(&rows)
 	if err != nil {
 		return nil, err
 	}
 	entries := make([]UsageEntry, len(rows))
 	for i, r := range rows {
-		entries[i] = UsageEntry{ID: r.ID, Name: r.N1 + "/" + r.N2, FailedRuns: r.FailedRuns}
+		entries[i] = UsageEntry{ID: r.ID, Name: usageName(r.N1, r.N2, r.GroupID, r.GroupName), FailedRuns: r.FailedRuns}
 	}
 	return entries, nil
 }

@@ -15,9 +15,12 @@ import (
 	issues_model "forgejo.org/models/issues"
 	org_model "forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
+	user_model "forgejo.org/models/user"
 	webhook_model "forgejo.org/models/webhook"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
+
+	"xorm.io/builder"
 )
 
 type consistencyCheck struct {
@@ -225,6 +228,29 @@ func checkDBConsistency(ctx context.Context, logger log.Logger, autofix bool) er
 				return -1, webhook_model.DeleteOrphanedGroupWebhooks(ctx)
 			},
 		},
+		// find project secrets and variables without existing project
+		consistencyCheck{
+			Name: "Project Actions secrets and variables without existing project",
+			Counter: func(ctx context.Context) (int64, error) {
+				var n int64
+				for _, table := range []string{"secret", "action_variable"} {
+					c, err := db.GetEngine(ctx).Table(table).Where(orphanedGroupRowsCond(table)).Count()
+					if err != nil {
+						return 0, err
+					}
+					n += c
+				}
+				return n, nil
+			},
+			Fixer: func(ctx context.Context) (int64, error) {
+				for _, table := range []string{"secret", "action_variable"} {
+					if _, err := db.GetEngine(ctx).Table(table).Where(orphanedGroupRowsCond(table)).Delete(); err != nil {
+						return 0, err
+					}
+				}
+				return -1, nil
+			},
+		},
 		// find branches without existing repository
 		genericOrphanCheck("Branches without existing repository",
 			"branch", "repository", "branch.repo_id=repository.id"),
@@ -292,4 +318,13 @@ func init() {
 		Run:       checkDBConsistency,
 		Priority:  3,
 	})
+}
+
+// orphanedGroupRowsCond matches the project rows of table (secret, action_variable) whose project is gone, belongs to
+// another organization, or whose owner is not an organization.
+func orphanedGroupRowsCond(table string) builder.Cond {
+	return builder.And(builder.Neq{"group_id": 0}, builder.Or(
+		builder.NotIn("owner_id", builder.Select("id").From("`user`").Where(builder.Eq{"type": user_model.UserTypeOrganization})),
+		builder.NotIn("group_id", builder.Select("id").From("repo_group").Where(builder.Expr("repo_group.owner_id = "+table+".owner_id"))),
+	))
 }

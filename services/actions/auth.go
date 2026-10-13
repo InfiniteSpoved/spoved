@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -36,6 +37,7 @@ type IDTokenCustomClaims struct {
 	BaseRef           string `json:"base_ref"`
 	EventName         string `json:"event_name"`
 	HeadRef           string `json:"head_ref"`
+	NamespacePath     string `json:"namespace_path"`
 	Ref               string `json:"ref"`
 	RefProtected      string `json:"ref_protected"`
 	RefType           string `json:"ref_type"`
@@ -138,6 +140,7 @@ func generateOIDCExtra(gitCtx map[string]any) (string, error) {
 		BaseRef:           ctxVal("base_ref"),
 		EventName:         ctxVal("event_name"),
 		HeadRef:           ctxVal("head_ref"),
+		NamespacePath:     ctxVal("namespace_path"),
 		Ref:               ctxVal("ref"),
 		RefProtected:      ctxVal("ref_protected"),
 		RefType:           ctxVal("ref_type"),
@@ -162,8 +165,8 @@ func generateOIDCExtra(gitCtx map[string]any) (string, error) {
 }
 
 func generateOIDCSub(gitCtx map[string]any) string {
-	nameParts := strings.SplitN(gitCtx["repository"].(string), "/", 2)
-	repoName := nameParts[1]
+	// the leaf (a name has no "/"), so renaming the project or moving the repository doesn't change the subject
+	repoName := path.Base(gitCtx["repository"].(string))
 	switch gitCtx["event_name"] {
 	case "pull_request":
 		return fmt.Sprintf("repo:%s-%s/%s-%s:pull_request", gitCtx["repository_owner"], gitCtx["repository_owner_id"], repoName, gitCtx["repository_id"])

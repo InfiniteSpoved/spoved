@@ -5,9 +5,11 @@ package actions
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/timeutil"
 
@@ -18,8 +20,9 @@ import (
 //
 // It can be:
 //  1. global variable, OwnerID is 0 and RepoID is 0
-//  2. org/user level variable, OwnerID is org/user ID and RepoID is 0
+//  2. org/user level variable, OwnerID is org/user ID, GroupID and RepoID are 0
 //  3. repo level variable, OwnerID is 0 and RepoID is repo ID
+//  4. project level variable, OwnerID is the org ID, GroupID the project (repo_group) ID and RepoID is 0
 //
 // Please note that it's not acceptable to have both OwnerID and RepoID to be non-zero,
 // or it will be complicated to find variables belonging to a specific owner.
@@ -29,6 +32,7 @@ import (
 type ActionVariable struct {
 	ID          int64              `xorm:"pk autoincr"`
 	OwnerID     int64              `xorm:"UNIQUE(owner_repo_name)"`
+	GroupID     int64              `xorm:"UNIQUE(owner_repo_name) NOT NULL DEFAULT 0"`
 	RepoID      int64              `xorm:"INDEX UNIQUE(owner_repo_name)"`
 	Name        string             `xorm:"UNIQUE(owner_repo_name) NOT NULL"`
 	Data        string             `xorm:"LONGTEXT NOT NULL"`
@@ -40,26 +44,46 @@ func init() {
 	db.RegisterModel(new(ActionVariable))
 }
 
-func InsertVariable(ctx context.Context, ownerID, repoID int64, name, data string) (*ActionVariable, error) {
+// lockGroup locks the project row (nothing for groupID 0), so that deleting the project (which deletes its variables)
+// and adding, changing or deleting one run one after the other.
+func lockGroup(ctx context.Context, ownerID, groupID int64) error {
+	if groupID == 0 {
+		return nil
+	}
+	_, err := repo_model.LockRepoGroup(ctx, ownerID, groupID)
+	return err
+}
+
+func InsertVariable(ctx context.Context, ownerID, groupID, repoID int64, name, data string) (*ActionVariable, error) {
 	if ownerID != 0 && repoID != 0 {
 		// It's trying to create a variable that belongs to a repository, but OwnerID has been set accidentally.
 		// Remove OwnerID to avoid confusion; it's not worth returning an error here.
 		ownerID = 0
 	}
+	if repoID != 0 || ownerID == 0 {
+		groupID = 0
+	}
 
 	variable := &ActionVariable{
 		OwnerID: ownerID,
+		GroupID: groupID,
 		RepoID:  repoID,
 		Name:    strings.ToUpper(name),
 		Data:    data,
 	}
-	return variable, db.Insert(ctx, variable)
+	return variable, db.WithTx(ctx, func(ctx context.Context) error {
+		if err := lockGroup(ctx, ownerID, groupID); err != nil {
+			return err
+		}
+		return db.Insert(ctx, variable)
+	})
 }
 
 type FindVariablesOpts struct {
 	db.ListOptions
 	RepoID  int64
 	OwnerID int64 // it will be ignored if RepoID is set
+	GroupID int64 // the project of OwnerID; 0 is the organization/user level itself. Ignored if RepoID is set
 	Name    string
 }
 
@@ -70,9 +94,9 @@ func (opts FindVariablesOpts) ToConds() builder.Cond {
 	cond = cond.And(builder.Eq{"repo_id": opts.RepoID})
 	if opts.RepoID != 0 { // if RepoID is set
 		// ignore OwnerID and treat it as 0
-		cond = cond.And(builder.Eq{"owner_id": 0})
+		cond = cond.And(builder.Eq{"owner_id": 0, "group_id": 0})
 	} else {
-		cond = cond.And(builder.Eq{"owner_id": opts.OwnerID})
+		cond = cond.And(builder.Eq{"owner_id": opts.OwnerID, "group_id": opts.GroupID})
 	}
 
 	if opts.Name != "" {
@@ -94,16 +118,30 @@ func FindVariables(ctx context.Context, opts FindVariablesOpts) ([]*ActionVariab
 }
 
 func UpdateVariable(ctx context.Context, variable *ActionVariable) (bool, error) {
-	count, err := db.GetEngine(ctx).ID(variable.ID).Where("owner_id = ? AND repo_id = ?", variable.OwnerID, variable.RepoID).Cols("name", "data").
-		Update(&ActionVariable{
-			Name: variable.Name,
-			Data: variable.Data,
-		})
+	var count int64
+	err := db.WithTx(ctx, func(ctx context.Context) (err error) {
+		if err = lockGroup(ctx, variable.OwnerID, variable.GroupID); err != nil {
+			return err
+		}
+		count, err = db.GetEngine(ctx).ID(variable.ID).Where("owner_id = ? AND group_id = ? AND repo_id = ?", variable.OwnerID, variable.GroupID, variable.RepoID).Cols("name", "data").
+			Update(&ActionVariable{
+				Name: variable.Name,
+				Data: variable.Data,
+			})
+		return err
+	})
 	return count != 0, err
 }
 
-func DeleteVariable(ctx context.Context, variableID, ownerID, repoID int64) (bool, error) {
-	count, err := db.GetEngine(ctx).Table("action_variable").Where("id = ? AND owner_id = ? AND repo_id = ?", variableID, ownerID, repoID).Delete()
+func DeleteVariable(ctx context.Context, variableID, ownerID, groupID, repoID int64) (bool, error) {
+	var count int64
+	err := db.WithTx(ctx, func(ctx context.Context) (err error) {
+		if err = lockGroup(ctx, ownerID, groupID); err != nil {
+			return err
+		}
+		count, err = db.GetEngine(ctx).Table("action_variable").Where("id = ? AND owner_id = ? AND group_id = ? AND repo_id = ?", variableID, ownerID, groupID, repoID).Delete()
+		return err
+	})
 	return count != 0, err
 }
 
@@ -129,6 +167,16 @@ func GetVariablesOfRun(ctx context.Context, run *ActionRun) (map[string]string, 
 		return nil, err
 	}
 
+	// Project level (the repository's current project)
+	var groupVariables []*ActionVariable
+	if run.Repo.GroupID != 0 {
+		groupVariables, err = db.Find[ActionVariable](ctx, FindVariablesOpts{OwnerID: run.Repo.OwnerID, GroupID: run.Repo.GroupID})
+		if err != nil {
+			log.Error("find variables of project: %d, error: %v", run.Repo.GroupID, err)
+			return nil, err
+		}
+	}
+
 	// Repo level
 	repoVariables, err := db.Find[ActionVariable](ctx, FindVariablesOpts{RepoID: run.RepoID})
 	if err != nil {
@@ -136,8 +184,8 @@ func GetVariablesOfRun(ctx context.Context, run *ActionRun) (map[string]string, 
 		return nil, err
 	}
 
-	// Level precedence: Repo > Org / User > Global
-	for _, v := range append(globalVariables, append(ownerVariables, repoVariables...)...) {
+	// Level precedence: Repo > Project > Org / User > Global
+	for _, v := range slices.Concat(globalVariables, ownerVariables, groupVariables, repoVariables) {
 		variables[v.Name] = v.Data
 	}
 
