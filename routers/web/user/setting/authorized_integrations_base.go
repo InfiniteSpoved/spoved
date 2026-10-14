@@ -89,7 +89,7 @@ func (f *baseAuthorizedIntegrationForm) copyAuthorizedIntegrationToForm(ctx *con
 				return err
 			}
 			if permission.HasAccess() {
-				f.SelectedRepo = append(f.SelectedRepo, fmt.Sprintf("%s/%s", repo.OwnerName, repo.Name))
+				f.SelectedRepo = append(f.SelectedRepo, repo.FullName())
 			}
 		}
 	}

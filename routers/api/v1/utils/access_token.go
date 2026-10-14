@@ -171,12 +171,18 @@ func CreateAccessToken(ctx *context.APIContext) {
 	if form.Repositories != nil {
 		repos := make([]*repo_model.Repository, len(form.Repositories))
 		for i, repoTarget := range form.Repositories {
-			repo, err := repo_model.GetRepositoryByOwnerAndName(ctx, repoTarget.Owner, repoTarget.Name)
+			// built from the request only, the same for a missing and a hidden repository
+			fullName := repoTarget.Owner + "/" + repoTarget.Name
+			if repoTarget.Project != "" {
+				fullName = repoTarget.Owner + "/" + repoTarget.Project + "/" + repoTarget.Name
+			}
+			notExist := fmt.Errorf("repository %s does not exist", fullName)
+			repo, err := repo_model.GetRepositoryByRef(ctx, repoTarget.Owner, repoTarget.Project, repoTarget.Name)
 			if err != nil && repo_model.IsErrRepoNotExist(err) {
-				ctx.Error(http.StatusBadRequest, "GetRepositoryByOwnerAndName", fmt.Errorf("repository %s/%s does not exist", repoTarget.Owner, repoTarget.Name))
+				ctx.Error(http.StatusBadRequest, "GetRepositoryByRef", notExist)
 				return
 			} else if err != nil {
-				ctx.ServerError("GetRepositoryByOwnerAndName", err)
+				ctx.ServerError("GetRepositoryByRef", err)
 				return
 			}
 			permission, err := access_model.GetUserRepoPermissionWithReducer(ctx, repo, ctx.Doer(), ctx.Reducer())
@@ -185,7 +191,7 @@ func CreateAccessToken(ctx *context.APIContext) {
 				return
 			} else if !permission.HasAccess() {
 				// Prevent data existence probing -- ensure this error is the exact same as the !IsErrRepoNotExist case above
-				ctx.Error(http.StatusBadRequest, "GetRepositoryByOwnerAndName", fmt.Errorf("repository %s/%s does not exist", repoTarget.Owner, repoTarget.Name))
+				ctx.Error(http.StatusBadRequest, "GetRepositoryByRef", notExist)
 				return
 			}
 			repos[i] = repo

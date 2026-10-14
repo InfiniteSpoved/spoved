@@ -462,6 +462,8 @@ type RepoTargetOption struct {
 	// Name of user or organisation that owns the repository
 	// required: true
 	Owner string `json:"owner"`
+	// Name of the project that holds the repository; omit for a repository at the root of the owner
+	Project string `json:"project,omitempty"`
 	// Name of repository
 	// required: true
 	Name string `json:"name"`

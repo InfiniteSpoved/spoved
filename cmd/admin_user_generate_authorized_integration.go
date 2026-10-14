@@ -90,7 +90,7 @@ enable-openid-connect flag in a workflow.`,
 			&cli.StringSliceFlag{
 				Name:  "repo",
 				Value: []string{"all"},
-				Usage: `Zero-or-more specific repositories that can be accessed, or "all" to allow access to all repositories, example: "owner1/repo1"`,
+				Usage: `Zero-or-more specific repositories that can be accessed, or "all" to allow access to all repositories, example: "owner1/repo1" or, in a project, "org1/project1/repo1"`,
 			},
 		},
 		Before: noDanglingArgs,
@@ -175,13 +175,7 @@ func runCreateAuthorizedIntegration(ctx context.Context, c *cli.Command) error {
 		if repoName == "all" {
 			allRepos = true
 		} else {
-			split := strings.Split(repoName, "/")
-			if len(split) != 2 {
-				return fmt.Errorf("invalid repo name: %q", split)
-			}
-			owner := split[0]
-			name := split[1]
-			repo, err := repo.GetRepositoryByOwnerAndName(ctx, owner, name)
+			repo, err := repo.GetRepositoryByFullName(ctx, repoName)
 			if err != nil {
 				return err
 			}
