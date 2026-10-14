@@ -1362,7 +1362,7 @@ func UpdatePullRequest(ctx *context.Context) {
 		return
 	}
 	// the update writes to the head repository
-	if !ctx.CheckQuota(quota_model.LimitSubjectSizeGitAll, issue.PullRequest.HeadRepo.OwnerID, issue.PullRequest.HeadRepo.OwnerName) {
+	if !ctx.CheckPersonalRepoLimit(issue.PullRequest.HeadRepo.OwnerID, issue.PullRequest.HeadRepo.OwnerName) {
 		return
 	}
 
@@ -1795,7 +1795,7 @@ func CompareAndPullRequestPost(ctx *context.Context) {
 		return
 	}
 	// the head of a pull request from another repository is copied into the base repository
-	if ci.HeadRepo.ID != repo.ID && !ctx.CheckQuota(quota_model.LimitSubjectSizeGitAll, repo.OwnerID, repo.OwnerName) {
+	if ci.HeadRepo.ID != repo.ID && !ctx.CheckPersonalRepoLimit(repo.OwnerID, repo.OwnerName) {
 		return
 	}
 

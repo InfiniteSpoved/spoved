@@ -1233,9 +1233,9 @@ func Routes() *web.Route {
 				}, reqAdmin(), reqToken())
 				m.Group("/sync_fork", func() {
 					m.Get("", reqRepoReader(unit.TypeCode), repo.SyncForkDefaultInfo)
-					m.Post("", mustNotBeArchived(), reqRepoWriter(unit.TypeCode), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.SyncForkDefault)
+					m.Post("", mustNotBeArchived(), reqRepoWriter(unit.TypeCode), context.EnforcePersonalRepoLimitAPI(context.QuotaTargetRepo), repo.SyncForkDefault)
 					m.Get("/{branch}", reqRepoReader(unit.TypeCode), repo.SyncForkBranchInfo)
-					m.Post("/{branch}", mustNotBeArchived(), reqRepoWriter(unit.TypeCode), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.SyncForkBranch)
+					m.Post("/{branch}", mustNotBeArchived(), reqRepoWriter(unit.TypeCode), context.EnforcePersonalRepoLimitAPI(context.QuotaTargetRepo), repo.SyncForkBranch)
 				})
 
 				m.Get("/{ball_type:tarball|zipball|bundle}/*", reqRepoReader(unit.TypeCode), repo.DownloadArchive)

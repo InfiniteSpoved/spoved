@@ -116,7 +116,36 @@ func (ctx *Context) checkQuota(evaluate quotaEvaluator, subject quota_model.Limi
 
 // ctx.CheckQuota checks whether the user in question is within quota limits (API context)
 func (ctx *APIContext) CheckQuota(subject quota_model.LimitSubject, userID int64, username string) bool {
-	ok, err := checkQuota(ctx.originCtx, quota_model.EvaluateForUser, subject, userID, username, func(userID int64, username string) {
+	return ctx.checkQuota(quota_model.EvaluateForUser, subject, userID, username)
+}
+
+// CheckPersonalRepoLimit checks only the size limit of the user's personal repositories (web context), for writes
+// the quota groups don't cover.
+func (ctx *Context) CheckPersonalRepoLimit(userID int64, username string) bool {
+	return ctx.checkQuota(quota_model.EvaluatePersonalRepoLimit, quota_model.LimitSubjectSizeGitAll, userID, username)
+}
+
+// CheckPersonalRepoLimit is the API context's CheckPersonalRepoLimit.
+func (ctx *APIContext) CheckPersonalRepoLimit(userID int64, username string) bool {
+	return ctx.checkQuota(quota_model.EvaluatePersonalRepoLimit, quota_model.LimitSubjectSizeGitAll, userID, username)
+}
+
+// EnforcePersonalRepoLimitWeb returns a middleware that checks only the size limit of personal repositories.
+func EnforcePersonalRepoLimitWeb(target QuotaTargetType) func(ctx *Context) {
+	return func(ctx *Context) {
+		ctx.CheckPersonalRepoLimit(target.UserID(ctx), target.UserName(ctx))
+	}
+}
+
+// EnforcePersonalRepoLimitAPI is the API's EnforcePersonalRepoLimitWeb.
+func EnforcePersonalRepoLimitAPI(target QuotaTargetType) func(ctx *APIContext) {
+	return func(ctx *APIContext) {
+		ctx.CheckPersonalRepoLimit(target.UserID(ctx), target.UserName(ctx))
+	}
+}
+
+func (ctx *APIContext) checkQuota(evaluate quotaEvaluator, subject quota_model.LimitSubject, userID int64, username string) bool {
+	ok, err := checkQuota(ctx.originCtx, evaluate, subject, userID, username, func(userID int64, username string) {
 		msg := "quota exceeded"
 		if personal := personalRepoLimitReached(ctx, userID); personal.Reached() {
 			var doerID int64

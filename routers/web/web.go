@@ -2022,7 +2022,7 @@ func registerRoutes(m *web.Route) {
 		}
 		m.Get("/commit/{sha:([a-f0-9]{4,64})}.{ext:patch|diff}", repo.MustBeNotEmpty, reqRepoCodeReader, common.RateLimitHeavyPlain, repo.RawDiff)
 
-		m.Post("/sync_fork", context.RepoMustNotBeArchived(), repo.MustBeNotEmpty, reqRepoCodeWriter, context.EnforceQuotaWeb(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.SyncFork)
+		m.Post("/sync_fork", context.RepoMustNotBeArchived(), repo.MustBeNotEmpty, reqRepoCodeWriter, context.EnforcePersonalRepoLimitWeb(context.QuotaTargetRepo), repo.SyncFork)
 	}, ignSignIn, context.RepoAssignment, context.UnitTypes())
 
 	m.Get("/{username}/{reponame}/lastcommit/*", ignSignIn, context.RepoAssignment, context.UnitTypes(), context.RepoRefByType(context.RepoRefCommit), reqRepoCodeReader, repo.LastCommit)

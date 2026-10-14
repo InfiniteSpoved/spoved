@@ -259,7 +259,10 @@ func TestPersonalRepoSizeLockWrites(t *testing.T) {
 		refusedAPI(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/migrate", &api.MigrateRepoOptions{CloneAddr: cloneURL.String(), RepoOwner: "user2", RepoName: "lock-mig"}).AddTokenAuth(token))
 		refusedAPI(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/lock-writes/contents/new.txt", &api.CreateFileOptions{ContentBase64: content}).AddTokenAuth(token))
 		refusedAPI(t, NewRequestWithJSON(t, "DELETE", "/api/v1/repos/user2/lock-writes/contents/README.md", &api.DeleteFileOptions{SHA: readme.SHA}).AddTokenAuth(token)) // only the web UI deletes
-		refusedAPI(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user5/transfer-me/transfer", &api.TransferRepoOption{NewOwner: "user2"}).AddTokenAuth(other))
+		// a transfer by someone else: refused without user2's numbers
+		var transferErr api.APIError
+		DecodeJSON(t, MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user5/transfer-me/transfer", &api.TransferRepoOption{NewOwner: "user2"}).AddTokenAuth(other), http.StatusRequestEntityTooLarge), &transferErr)
+		assert.Contains(t, transferErr.Message, "The owner's personal repositories reached their size limit")
 		// git notes add objects too
 		refusedAPI(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/lock-writes/git/notes/"+sha, &api.NoteOptions{Message: "note"}).AddTokenAuth(token))
 		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/lock-writes/commit/"+sha+"/notes", map[string]string{"notes": "note"}), http.StatusRequestEntityTooLarge)
@@ -483,9 +486,12 @@ func TestPersonalRepoSizeLockSSH(t *testing.T) {
 		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/orgs/org3/repos", &api.CreateRepoOption{Name: "lock-ssh-org", AutoInit: true}).AddTokenAuth(token), http.StatusCreated)
 
 		// key 1 is user2's
-		serv := func(owner, repo string, verbs ...string) private.ResponseExtra {
-			_, extra := private.ServCommand(ctx, 1, owner, repo, perm.AccessModeWrite, "", verbs...)
+		servMode := func(mode perm.AccessMode, owner, repo string, verbs ...string) private.ResponseExtra {
+			_, extra := private.ServCommand(ctx, 1, owner, repo, mode, "", verbs...)
 			return extra
+		}
+		serv := func(owner, repo string, verbs ...string) private.ResponseExtra {
+			return servMode(perm.AccessModeWrite, owner, repo, verbs...)
 		}
 		writes := map[string][]string{
 			"push":        {"user2", "lock-ssh", "git-receive-pack", ""},
@@ -505,7 +511,7 @@ func TestPersonalRepoSizeLockSSH(t *testing.T) {
 			assert.Contains(t, extra.UserMsg, personalLimitMessage, name)
 		}
 		// reads stay allowed
-		require.NoError(t, serv("user2", "lock-ssh", "git-upload-pack", "").Error)
+		require.NoError(t, servMode(perm.AccessModeRead, "user2", "lock-ssh", "git-upload-pack", "").Error)
 
 		// a usable admin owner is never locked
 		require.NoError(t, user_model.UpdateUserCols(db.DefaultContext, &user_model.User{ID: 2, IsAdmin: true}, "is_admin"))
@@ -551,19 +557,29 @@ func TestPersonalRepoSizeLockAutoMerge(t *testing.T) {
 }
 
 // M3: the recipient of a transfer is checked, not the doer; a package goes to the owner in the URL; a trash restore
-// to a new owner at its limit is refused.
+// to a new owner at its limit is refused. Users are locked by their override, with a large site limit.
 func TestPersonalRepoSizeLockTargets(t *testing.T) {
 	defer prepareTrash(t)()
 	defer resetPersonalRepoMode(t)
-	owner := getTokenForLoggedInUser(t, loginUser(t, "user2"), auth_model.AccessTokenScopeAll)
-	admin := loginUser(t, "user1")
+	defer setPersonalRepoOverride(t, 2, 0)
+	defer setPersonalRepoOverride(t, 5, 0)
+	setPersonalRepoSizeLimit(t, 1<<40)
+	lock := func(uid int64) { setPersonalRepoOverride(t, uid, personalRepoUsage(t, uid)) }
+	user2 := loginUser(t, "user2")
+	owner := getTokenForLoggedInUser(t, user2, auth_model.AccessTokenScopeAll)
+	user5Token := getTokenForLoggedInUser(t, loginUser(t, "user5"), auth_model.AccessTokenScopeAll)
 
-	// user2 offers a repository to user5; the admin accepts for user5, who is locked
-	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/user/repos", &api.CreateRepoOption{Name: "to-user5"}).AddTokenAuth(owner), http.StatusCreated)
-	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/to-user5/transfer", &api.TransferRepoOption{NewOwner: "user5"}).AddTokenAuth(owner), http.StatusCreated)
-	lockPersonalRepos(t, 5, true)
-	admin.MakeRequest(t, NewRequest(t, "POST", "/user2/to-user5/action/accept_transfer"), http.StatusRequestEntityTooLarge)
-	assert.True(t, repoExists(t, "user2", "to-user5"))
+	// user5 offers a repository to org3; user2, an owner of org3, is locked and accepts for org3, which isn't
+	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/user/repos", &api.CreateRepoOption{Name: "to-org3"}).AddTokenAuth(user5Token), http.StatusCreated)
+	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user5/to-org3/transfer", &api.TransferRepoOption{NewOwner: "org3"}).AddTokenAuth(user5Token), http.StatusCreated)
+	lock(2)
+	user2.MakeRequest(t, NewRequest(t, "POST", "/user5/to-org3/action/accept_transfer"), http.StatusSeeOther)
+	assert.True(t, repoExists(t, "org3", "to-org3"))
+
+	// user2 locked: packages into its own namespace are refused, into org3's allowed
+	MakeRequest(t, NewRequestWithBody(t, "PUT", "/api/packages/user2/generic/lock-own/1.0/f.txt", strings.NewReader("p")).AddBasicAuth("user2"), http.StatusRequestEntityTooLarge)
+	MakeRequest(t, NewRequestWithBody(t, "PUT", "/api/packages/org3/generic/lock-org/1.0/f.txt", strings.NewReader("p")).AddBasicAuth("user2"), http.StatusCreated)
+	setPersonalRepoOverride(t, 2, 0)
 
 	// a trash restore to the locked user5
 	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/user/repos", &api.CreateRepoOption{Name: "trash-to-user5"}).AddTokenAuth(owner), http.StatusCreated)
@@ -571,13 +587,10 @@ func TestPersonalRepoSizeLockTargets(t *testing.T) {
 	MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/repos/user2/trash-to-user5").AddTokenAuth(owner), http.StatusNoContent)
 	repo, err := repo_model.GetRepositoryByIDIncludingTrashed(db.DefaultContext, id)
 	require.NoError(t, err)
+	require.NoError(t, repo_model.UpdateRepoSize(db.DefaultContext, 4, 1000, 0, 0)) // user5's repo4: an override of 0 would mean the site limit
+	lock(5)
 	user5 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5})
 	require.ErrorAs(t, repo_service.MoveTrashedRepository(db.DefaultContext, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1}), user5, repo, ""), &quota_model.ErrPersonalRepoLimit{})
-
-	// user2 locked: packages into its own namespace are refused, into org3's allowed
-	lockPersonalRepos(t, 2, true)
-	MakeRequest(t, NewRequestWithBody(t, "PUT", "/api/packages/user2/generic/lock-own/1.0/f.txt", strings.NewReader("p")).AddBasicAuth("user2"), http.StatusRequestEntityTooLarge)
-	MakeRequest(t, NewRequestWithBody(t, "PUT", "/api/packages/org3/generic/lock-org/1.0/f.txt", strings.NewReader("p")).AddBasicAuth("user2"), http.StatusCreated)
 }
 
 // M5: re-saving the admin edit form keeps an override set in bytes that isn't whole MiB.

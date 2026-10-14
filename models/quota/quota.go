@@ -26,6 +26,13 @@ func EvaluateForUser(ctx context.Context, userID int64, subject LimitSubject) (b
 	return EvaluateQuotaGroupsForUser(ctx, userID, subject)
 }
 
+// EvaluatePersonalRepoLimit is EvaluateForUser with the size limit of personal repositories only, for writes the
+// quota groups never covered (a pull request head copied into the base repository, syncing a fork).
+func EvaluatePersonalRepoLimit(ctx context.Context, userID int64, _ LimitSubject) (bool, error) {
+	reached, err := personalRepoLimitReached(ctx, userID)
+	return err == nil && !reached, err
+}
+
 // EvaluateQuotaGroupsForUser is EvaluateForUser without the personal repository size limit, for the pre-receive
 // hook: the limit refuses git pushes before they start, and web deletes push through the hook.
 func EvaluateQuotaGroupsForUser(ctx context.Context, userID int64, subject LimitSubject) (bool, error) {
