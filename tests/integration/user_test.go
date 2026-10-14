@@ -330,7 +330,7 @@ func findLatestTokenID(t *testing.T, session *TestSession) (string, int) {
 	htmlDoc := NewHTMLParser(t, resp.Body)
 	latestTokenName := ""
 	latestTokenID := 0
-	htmlDoc.Find(".delete-button").Each(func(i int, s *goquery.Selection) {
+	htmlDoc.Find(`.delete-button[data-modal-id="delete-token"]`).Each(func(i int, s *goquery.Selection) {
 		tokenID, exists := s.Attr("data-id")
 
 		if !exists || tokenID == "" {

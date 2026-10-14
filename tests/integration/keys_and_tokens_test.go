@@ -24,7 +24,7 @@ func TestKeysAndTokensPage(t *testing.T) {
 	sshAt := strings.Index(body, "Manage SSH keys")
 	gpgAt := strings.Index(body, "Manage GPG keys")
 	tokensAt := strings.Index(body, "Access tokens")
-	assert.Greater(t, sshAt, 0)
+	assert.Positive(t, sshAt)
 	assert.Greater(t, gpgAt, sshAt)
 	assert.Greater(t, tokensAt, gpgAt)
 	assert.Contains(t, body, `href="/user/settings/keys/tokens/new"`)
