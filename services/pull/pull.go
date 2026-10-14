@@ -17,6 +17,7 @@ import (
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	pull_model "forgejo.org/models/pull"
+	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
@@ -509,6 +510,17 @@ func PushToBaseRepo(ctx context.Context, pr *issues_model.PullRequest) (err erro
 		return err
 	}
 	baseRepoPath := pr.BaseRepo.RepoPath()
+
+	// the head of a pull request from another repository is copied into the base repository, which the size limit
+	// of its owner's personal repositories refuses
+	if pr.HeadRepoID != pr.BaseRepoID {
+		if l, err := quota_model.GetPersonalRepoLimit(ctx, pr.BaseRepo.OwnerID); err != nil {
+			return err
+		} else if l.Reached() {
+			log.Warn("Personal repository size limit reached for the owner of %-v: head of PR #%d not copied", pr.BaseRepo, pr.Index)
+			return quota_model.ErrPersonalRepoLimit{PersonalRepoLimit: l}
+		}
+	}
 
 	baseRepo, err := git.OpenRepository(ctx, baseRepoPath)
 	if err != nil {

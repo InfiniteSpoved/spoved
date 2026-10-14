@@ -192,6 +192,10 @@ func EditUser(ctx *context.APIContext) {
 	//     "$ref": "#/responses/validationError"
 
 	form := web.GetForm(ctx).(*api.EditUserOption)
+	if form.PersonalRepoSizeLimit != nil && (*form.PersonalRepoSizeLimit < -1 || ctx.User().IsOrganization()) {
+		ctx.Error(http.StatusUnprocessableEntity, "", "personal_repo_size_limit must be -1 (unlimited), 0 (the site limit) or a size in bytes, and only applies to individual users")
+		return
+	}
 
 	// If either LoginSource or LoginName is given, the other must be present too.
 	if form.SourceID != nil || form.LoginName != nil {
@@ -242,6 +246,7 @@ func EditUser(ctx *context.APIContext) {
 		}
 	}
 
+	oldSizeLimit := ctx.User().PersonalRepoSizeLimit
 	opts := &user_service.UpdateOptions{
 		FullName:                optional.FromPtr(form.FullName),
 		Website:                 optional.FromPtr(form.Website),
@@ -254,6 +259,7 @@ func EditUser(ctx *context.APIContext) {
 		AllowGitHook:            optional.FromPtr(form.AllowGitHook),
 		AllowImportLocal:        optional.FromPtr(form.AllowImportLocal),
 		MaxRepoCreation:         optional.FromPtr(form.MaxRepoCreation),
+		PersonalRepoSizeLimit:   optional.FromPtr(form.PersonalRepoSizeLimit),
 		AllowCreateOrganization: optional.FromPtr(form.AllowCreateOrganization),
 		IsRestricted:            optional.FromPtr(form.Restricted),
 		KeepEmailPrivate:        optional.FromPtr(form.HideEmail),
@@ -269,6 +275,9 @@ func EditUser(ctx *context.APIContext) {
 	}
 
 	log.Trace("Account profile updated by admin (%s): %s", ctx.Doer().Name, ctx.User().Name)
+	if oldSizeLimit != ctx.User().PersonalRepoSizeLimit {
+		log.Info("Personal repository size limit of %s changed from %d to %d by %s", ctx.User().Name, oldSizeLimit, ctx.User().PersonalRepoSizeLimit, ctx.Doer().Name)
+	}
 
 	ctx.JSON(http.StatusOK, convert.ToUser(ctx, ctx.User(), ctx.Doer()))
 }

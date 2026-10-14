@@ -38,6 +38,9 @@ func CreateRepositoryByExample(ctx context.Context, doer, u *user_model.User, re
 	if err = CheckPersonalRepoPolicy(ctx, doer, u, repo.IsPrivate); err != nil {
 		return err
 	}
+	if err = CheckPersonalRepoLimit(ctx, u); err != nil {
+		return err
+	}
 	if err = repo_model.IsUsableRepoName(repo.Name); err != nil {
 		return err
 	}

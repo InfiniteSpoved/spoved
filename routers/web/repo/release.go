@@ -34,6 +34,7 @@ import (
 	"forgejo.org/services/context/upload"
 	"forgejo.org/services/forms"
 	release_service "forgejo.org/services/release"
+	repo_service "forgejo.org/services/repository"
 )
 
 const (
@@ -887,6 +888,7 @@ func deleteReleaseOrTag(ctx *context.Context, isDelTag bool) {
 		return
 	}
 
+	locked := repo_service.PersonalRepoLocked(ctx, ctx.Repo.Repository)
 	if err := release_service.DeleteReleaseByID(ctx, ctx.Repo.Repository, rel, ctx.Doer, isDelTag); err != nil {
 		if models.IsErrProtectedTagName(err) {
 			ctx.Flash.Error(ctx.Tr("repo.release.tag_name_protected"))
@@ -894,6 +896,7 @@ func deleteReleaseOrTag(ctx *context.Context, isDelTag bool) {
 			ctx.Flash.Error("DeleteReleaseByID: " + err.Error())
 		}
 	} else {
+		repo_service.ShrinkAfterDelete(ctx, ctx.Repo.Repository, locked)
 		if isDelTag {
 			ctx.Flash.Success(ctx.Tr("repo.release.deletion_tag_success"))
 		} else {

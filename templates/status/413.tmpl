@@ -3,7 +3,7 @@
 	{{if .IsRepo}}{{template "repo/header" .}}{{end}}
 	<div class="ui container center">
 		<h1 style="margin-top: 100px" class="error-code">413</h1>
-		<p>{{ctx.Locale.Tr "error413"}}</p>
+		<p>{{if .QuotaMessage}}{{.QuotaMessage}}{{else}}{{ctx.Locale.Tr "error413"}}{{end}}</p>
 		<div class="divider"></div>
 		<br>
 	</div>

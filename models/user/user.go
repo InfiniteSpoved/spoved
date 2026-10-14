@@ -121,6 +121,9 @@ type User struct {
 	LastRepoVisibility bool
 	// Maximum repository creation limit, -1 means use global default
 	MaxRepoCreation int `xorm:"NOT NULL DEFAULT -1"`
+	// PersonalRepoSizeLimit overrides the site size limit of personal repositories: 0 = the site limit,
+	// -1 = unlimited, >0 = bytes. Zero is the default so that a row written without it gets the site limit.
+	PersonalRepoSizeLimit int64 `xorm:"NOT NULL DEFAULT 0"`
 
 	// IsActive true: primary email is activated, user can access Web UI and Git SSH.
 	// false: an inactive user can only log in Web UI for account operations (ex: activate the account by email), no other access.

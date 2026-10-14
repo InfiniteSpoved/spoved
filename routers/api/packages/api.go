@@ -102,7 +102,7 @@ func enforcePackagesQuota() func(ctx *context.Context) {
 		// Evaluate quota against the package owner (org or user the package is pushed to),
 		// not the uploader (ctx.Doer). This enables org-level quota: all members uploading
 		// to an org consume from the org's quota group, not their own personal quota.
-		ownerID := ctx.Doer.ID
+		ownerID := ctx.ContextUser.ID // the owner named in the URL, never the uploader
 		if ctx.Package != nil {
 			ownerID = ctx.Package.Owner.ID
 		}
@@ -113,7 +113,11 @@ func enforcePackagesQuota() func(ctx *context.Context) {
 			return
 		}
 		if !ok {
-			ctx.Error(http.StatusRequestEntityTooLarge, "enforcePackagesQuota", "quota exceeded")
+			msg := "quota exceeded"
+			if l, err := quota_model.GetPersonalRepoLimit(ctx, ownerID); err == nil && l.Reached() {
+				msg = l.Message()
+			}
+			ctx.Error(http.StatusRequestEntityTooLarge, msg)
 			return
 		}
 	}

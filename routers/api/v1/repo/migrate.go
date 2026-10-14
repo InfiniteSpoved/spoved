@@ -252,6 +252,8 @@ func handleMigrateError(ctx *context.APIContext, repoOwner *user_model.User, err
 		ctx.Error(http.StatusUnprocessableEntity, "", "Remote visit addressed rate limitation.")
 	case migrations.IsTwoFactorAuthError(err):
 		ctx.Error(http.StatusUnprocessableEntity, "", "Remote visit required two factors authentication.")
+	case errors.As(err, &quota_model.ErrPersonalRepoLimit{}):
+		ctx.Error(http.StatusRequestEntityTooLarge, "", err)
 	case organization.IsErrOrgArchived(err), errors.As(err, &repo_module.ErrPersonalRepoPolicy{}):
 		ctx.Error(http.StatusForbidden, "", err)
 	case repo_model.IsErrReachLimitOfRepo(err):

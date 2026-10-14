@@ -44,6 +44,7 @@ type AdminEditUserForm struct {
 	Language                string `binding:"MaxSize(5)"`
 	Pronouns                string `binding:"MaxSize(50)"`
 	MaxRepoCreation         int
+	PersonalRepoSizeLimit   int64 // MiB; 0 = the site limit, -1 = unlimited
 	Active                  bool
 	Admin                   bool
 	Restricted              bool

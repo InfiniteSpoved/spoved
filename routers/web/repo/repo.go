@@ -213,12 +213,12 @@ func Create(ctx *context.Context) {
 }
 
 func handleCreateError(ctx *context.Context, owner *user_model.User, err error, name string, tpl base.TplName, form any) {
-	var policyErr repo_module.ErrPersonalRepoPolicy
+	refusal, refused := ctx.PersonalRepoRefusal(err)
 	switch {
 	case organization.IsErrOrgArchived(err):
 		ctx.RenderWithErr(ctx.Tr("org.archived.readonly"), tpl, form)
-	case errors.As(err, &policyErr):
-		ctx.RenderWithErr(ctx.Tr(policyErr.TrKey()), tpl, form)
+	case refused:
+		ctx.RenderWithErr(refusal, tpl, form)
 	case repo_model.IsErrReachLimitOfRepo(err):
 		maxCreationLimit := owner.MaxCreationLimit()
 		msg := ctx.TrN(maxCreationLimit, "repo.form.reach_limit_of_creation_1", "repo.form.reach_limit_of_creation_n", maxCreationLimit)
@@ -432,8 +432,8 @@ func ActionTransfer(accept bool) func(ctx *context.Context) {
 		}
 
 		ok, err := acceptOrRejectRepoTransfer(ctx, accept)
-		if policyErr, ok := errors.AsType[repo_module.ErrPersonalRepoPolicy](err); ok {
-			ctx.Flash.Error(ctx.Tr(policyErr.TrKey()))
+		if refusal, refused := ctx.PersonalRepoRefusal(err); refused {
+			ctx.Flash.Error(refusal)
 			ctx.Redirect(ctx.Repo.RepoLink)
 			return
 		}
@@ -468,7 +468,8 @@ func acceptOrRejectRepoTransfer(ctx *context.Context, accept bool) (bool, error)
 	}
 
 	if accept {
-		if !ctx.CheckQuota(quota_model.LimitSubjectSizeReposAll, ctx.Doer.ID, ctx.Doer.Name) {
+		// the repository goes to the recipient, which may be an organization the doer accepts for
+		if !ctx.CheckQuota(quota_model.LimitSubjectSizeReposAll, repoTransfer.Recipient.ID, repoTransfer.Recipient.Name) {
 			return false, nil
 		}
 

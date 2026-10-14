@@ -29,6 +29,7 @@ import (
 	"forgejo.org/services/context"
 	"forgejo.org/services/context/upload"
 	"forgejo.org/services/forms"
+	repo_service "forgejo.org/services/repository"
 	files_service "forgejo.org/services/repository/files"
 
 	"github.com/editorconfig/editorconfig-core-go/v2"
@@ -532,6 +533,18 @@ func DeleteFilePost(ctx *context.Context) {
 		return
 	}
 
+	// While the size limit of personal repositories is reached this route is the one way to delete a file, so it
+	// must not add anything: no new branch, and the default commit message instead of the user's.
+	locked := repo_service.PersonalRepoLocked(ctx, ctx.Repo.Repository)
+	if locked {
+		if branchName != ctx.Repo.BranchName {
+			ctx.Data["Err_NewBranchName"] = true
+			ctx.RenderWithErr(ctx.Tr("repo.personal_repos.limit_reached_short"), tplDeleteFile, &form)
+			return
+		}
+		form.CommitSummary, form.CommitMessage = "", ""
+	}
+
 	message := strings.TrimSpace(form.CommitSummary)
 	if len(message) == 0 {
 		message = ctx.Locale.TrString("repo.editor.delete", ctx.Repo.TreePath)
@@ -621,6 +634,7 @@ func DeleteFilePost(ctx *context.Context) {
 		return
 	}
 
+	repo_service.ShrinkAfterDelete(ctx, ctx.Repo.Repository, locked)
 	ctx.Flash.Success(ctx.Tr("repo.editor.file_delete_success", ctx.Repo.TreePath))
 	treePath := path.Dir(ctx.Repo.TreePath)
 	if treePath == "." {

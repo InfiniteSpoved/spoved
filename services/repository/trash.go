@@ -191,6 +191,9 @@ func moveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User,
 		if err := repo_module.CheckPersonalRepoPolicy(ctx, doer, newOwner, repo.IsPrivate); err != nil {
 			return err
 		}
+		if err := repo_module.CheckPersonalRepoLimit(ctx, newOwner); err != nil {
+			return err
+		}
 		target = newOwner
 	}
 	// The final place is checked before any file moves, so that a refusal leaves the repository where it is.

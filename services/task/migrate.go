@@ -13,6 +13,7 @@ import (
 	admin_model "forgejo.org/models/admin"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
+	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/graceful"
@@ -30,7 +31,7 @@ import (
 
 func handleCreateError(owner *user_model.User, err error) error {
 	switch {
-	case organization.IsErrOrgArchived(err), errors.As(err, &repo_module.ErrPersonalRepoPolicy{}):
+	case organization.IsErrOrgArchived(err), errors.As(err, &repo_module.ErrPersonalRepoPolicy{}), errors.As(err, &quota_model.ErrPersonalRepoLimit{}):
 		return err
 	case repo_model.IsErrReachLimitOfRepo(err):
 		return fmt.Errorf("you have already reached your limit of %d repositories", owner.MaxCreationLimit())

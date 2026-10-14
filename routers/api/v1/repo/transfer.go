@@ -116,6 +116,10 @@ func Transfer(ctx *context.APIContext) {
 	oldFullname := ctx.Repo().Repository.FullName()
 
 	if err := repo_service.StartRepositoryTransfer(ctx, ctx.Doer(), newOwner, ctx.Repo().Repository, teams); err != nil {
+		if errors.As(err, &quota_model.ErrPersonalRepoLimit{}) {
+			ctx.Error(http.StatusRequestEntityTooLarge, "StartRepositoryTransfer", err)
+			return
+		}
 		if errors.Is(err, user_model.ErrBlockedByUser) || organization.IsErrOrgArchived(err) || errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) {
 			ctx.Error(http.StatusForbidden, "StartRepositoryTransfer", err)
 			return
@@ -175,6 +179,10 @@ func AcceptTransfer(ctx *context.APIContext) {
 
 	err := acceptOrRejectRepoTransfer(ctx, true)
 	if ctx.Written() {
+		return
+	}
+	if errors.As(err, &quota_model.ErrPersonalRepoLimit{}) {
+		ctx.Error(http.StatusRequestEntityTooLarge, "acceptOrRejectRepoTransfer", err)
 		return
 	}
 	if organization.IsErrOrgArchived(err) || errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) {

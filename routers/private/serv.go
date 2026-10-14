@@ -16,6 +16,7 @@ import (
 	"forgejo.org/models/auth"
 	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
+	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
@@ -169,6 +170,9 @@ func ServCommand(ctx *context.PrivateContext) {
 		OwnerName: ownerName,
 		KeyID:     keyID,
 	}
+
+	// a push lowers mode to read for AGit below; the size limit refuses every write
+	isWrite := mode > perm.AccessModeRead
 
 	// Now because we're not translating things properly let's just default some English strings here
 	modeString := "read"
@@ -472,6 +476,24 @@ func ServCommand(ctx *context.PrivateContext) {
 		}
 	}
 
+	// The size limit of the owner's personal repositories refuses every push (one that only deletes too) and LFS
+	// upload, after the permission checks; push-to-create only in the pusher's own namespace (PushCreateRepo
+	// refuses the others).
+	if isWrite && (repoExist || user != nil && user.ID == owner.ID) {
+		if l, err := quota_model.GetPersonalRepoLimit(ctx, owner.ID); err != nil {
+			ctx.JSON(http.StatusInternalServerError, private.Response{Err: fmt.Sprintf("GetPersonalRepoLimit: %v", err)})
+			return
+		} else if l.Reached() {
+			var doerID int64
+			if user != nil {
+				doerID = user.ID
+			}
+			sshLogger.Warn("Personal repository size limit reached for %s (%d of %d bytes): SSH write to %s refused", owner.Name, l.Used, l.Limit, fullName)
+			ctx.JSON(http.StatusForbidden, private.Response{UserMsg: l.MessageFor(doerID, owner.ID)})
+			return
+		}
+	}
+
 	// We already know we aren't using a deploy key
 	if !repoExist {
 		owner, err := user_model.GetUserByName(ctx, ownerName)
@@ -496,7 +518,7 @@ func ServCommand(ctx *context.PrivateContext) {
 		}
 
 		repo, err = repo_service.PushCreateRepo(ctx, user, owner, results.RepoName)
-		if errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) {
+		if errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) || errors.As(err, &quota_model.ErrPersonalRepoLimit{}) {
 			ctx.JSON(http.StatusForbidden, private.Response{UserMsg: err.Error()})
 			return
 		}

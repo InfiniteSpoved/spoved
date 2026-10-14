@@ -21,6 +21,7 @@ import (
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
 	pull_model "forgejo.org/models/pull"
+	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
@@ -480,6 +481,11 @@ func CreatePullRequest(ctx *context.APIContext) {
 		return
 	}
 	defer headGitRepo.Close()
+
+	// the head of a pull request from another repository is copied into the base repository
+	if baseRepo := ctx.Repo().Repository; headRepo.ID != baseRepo.ID && !ctx.CheckQuota(quota_model.LimitSubjectSizeGitAll, baseRepo.OwnerID, baseRepo.OwnerName) {
+		return
+	}
 
 	// Check if another PR exists with the same targets
 	existingPr, err := issues_model.GetUnmergedPullRequest(ctx, headRepo.ID, ctx.Repo().Repository.ID, headBranch, baseBranch, issues_model.PullRequestFlowGithub)
@@ -1457,6 +1463,10 @@ func UpdatePullRequest(ctx *context.APIContext) {
 	}
 	if err = pr.LoadHeadRepo(ctx); err != nil {
 		ctx.Error(http.StatusInternalServerError, "LoadHeadRepo", err)
+		return
+	}
+	// the update writes to the head repository
+	if !ctx.CheckQuota(quota_model.LimitSubjectSizeGitAll, pr.HeadRepo.OwnerID, pr.HeadRepo.OwnerName) {
 		return
 	}
 

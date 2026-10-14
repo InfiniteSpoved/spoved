@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"forgejo.org/models/db"
+	quota_model "forgejo.org/models/quota"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/container"
@@ -98,6 +99,14 @@ func RenderUserSearch(ctx *context.Context, opts *user_model.SearchUserOptions, 
 	ctx.Data["Users"] = users
 	if opts.Load2FAStatus {
 		ctx.Data["UsersTwoFaStatus"] = user_model.UserList(users).GetTwoFaStatus(ctx)
+	}
+	if opts.LoadRepoUsage {
+		limits, err := quota_model.GetPersonalRepoLimits(ctx, users)
+		if err != nil {
+			ctx.ServerError("GetPersonalRepoLimits", err)
+			return
+		}
+		ctx.Data["PersonalRepoLimits"] = limits
 	}
 	ctx.Data["ShowUserEmail"] = setting.UI.ShowUserEmail
 	ctx.Data["IsRepoIndexerEnabled"] = setting.Indexer.RepoIndexerEnabled

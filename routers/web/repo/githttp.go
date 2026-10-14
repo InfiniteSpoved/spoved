@@ -24,6 +24,7 @@ import (
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
+	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
@@ -233,6 +234,20 @@ func httpBase(ctx *context.Context) *serviceHandler {
 			}
 		}
 
+		// The size limit of the owner's personal repositories refuses every push, one that only deletes too, in
+		// the ref advertisement already; push-to-create only in the doer's own namespace (PushCreateRepo refuses
+		// the others).
+		if receivePack && (repoExist || ctx.Doer.ID == owner.ID) {
+			if l, err := quota_model.GetPersonalRepoLimit(ctx, owner.ID); err != nil {
+				ctx.ServerError("GetPersonalRepoLimit", err)
+				return nil
+			} else if l.Reached() {
+				log.Warn("Personal repository size limit reached for %s (%d of %d bytes): HTTP push to %s refused", owner.Name, l.Used, l.Limit, reponame)
+				refuseGitPush(ctx, l.MessageFor(ctx.Doer.ID, owner.ID))
+				return nil
+			}
+		}
+
 		if !ctx.Doer.KeepEmailPrivate {
 			environ = append(environ, repo_module.EnvPusherEmail+"="+ctx.Doer.Email)
 		}
@@ -280,7 +295,7 @@ func httpBase(ctx *context.Context) *serviceHandler {
 		}
 
 		repo, err = repo_service.PushCreateRepo(ctx, ctx.Doer, owner, reponame)
-		if errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) {
+		if errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) || errors.As(err, &quota_model.ErrPersonalRepoLimit{}) {
 			refuseGitPush(ctx, err.Error())
 			return nil
 		}

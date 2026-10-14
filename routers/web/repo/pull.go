@@ -334,12 +334,12 @@ func ForkPost(ctx *context.Context) {
 	})
 	if err != nil {
 		ctx.Data["Err_RepoName"] = true
-		var policyErr repo_module.ErrPersonalRepoPolicy
+		refusal, refused := ctx.PersonalRepoRefusal(err)
 		switch {
 		case organization.IsErrOrgArchived(err):
 			ctx.RenderWithErr(ctx.Tr("org.archived.readonly"), tplFork, &form)
-		case errors.As(err, &policyErr):
-			ctx.RenderWithErr(ctx.Tr(policyErr.TrKey()), tplFork, &form)
+		case refused:
+			ctx.RenderWithErr(refusal, tplFork, &form)
 		case repo_model.IsErrReachLimitOfRepo(err):
 			maxCreationLimit := ctxUser.MaxCreationLimit()
 			msg := ctx.TrN(maxCreationLimit, "repo.form.reach_limit_of_creation_1", "repo.form.reach_limit_of_creation_n", maxCreationLimit)
@@ -1361,6 +1361,10 @@ func UpdatePullRequest(ctx *context.Context) {
 		ctx.ServerError("LoadHeadRepo", err)
 		return
 	}
+	// the update writes to the head repository
+	if !ctx.CheckQuota(quota_model.LimitSubjectSizeGitAll, issue.PullRequest.HeadRepo.OwnerID, issue.PullRequest.HeadRepo.OwnerName) {
+		return
+	}
 
 	headRepoPerm, err := access_model.GetUserRepoPermission(ctx, issue.PullRequest.HeadRepo, ctx.Doer)
 	if err != nil {
@@ -1788,6 +1792,10 @@ func CompareAndPullRequestPost(ctx *context.Context) {
 		}
 	}()
 	if ctx.Written() {
+		return
+	}
+	// the head of a pull request from another repository is copied into the base repository
+	if ci.HeadRepo.ID != repo.ID && !ctx.CheckQuota(quota_model.LimitSubjectSizeGitAll, repo.OwnerID, repo.OwnerName) {
 		return
 	}
 

@@ -112,6 +112,13 @@
 					<input id="max_repo_creation" name="max_repo_creation" type="number" min="-1" value="{{.User.MaxRepoCreation}}">
 					<p class="help">{{ctx.Locale.Tr "admin.users.max_repo_creation_desc"}}</p>
 				</div>
+				{{if not .User.IsOrganization}}
+				<div class="inline field {{if .Err_PersonalRepoSizeLimit}}error{{end}}">
+					<label for="personal_repo_size_limit">{{ctx.Locale.Tr "admin.users.personal_repo_size_limit"}}</label>
+					<input id="personal_repo_size_limit" name="personal_repo_size_limit" type="number" min="-1" step="1" value="{{.PersonalRepoSizeLimitMiB}}">
+					<p class="help">{{ctx.Locale.Tr "admin.users.personal_repo_size_limit_desc"}}</p>
+				</div>
+				{{end}}
 
 				<div class="divider"></div>
 

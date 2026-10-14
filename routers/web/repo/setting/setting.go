@@ -1025,8 +1025,8 @@ func SettingsPost(ctx *context.Context) {
 
 		oldFullname := repo.FullName()
 		if err := repo_service.StartRepositoryTransfer(ctx, ctx.Doer, newOwner, repo, nil); err != nil {
-			if policyErr, ok := errors.AsType[repo_module.ErrPersonalRepoPolicy](err); ok {
-				ctx.RenderWithErr(ctx.Tr(policyErr.TrKey()), tplSettingsOptions, nil)
+			if refusal, refused := ctx.PersonalRepoRefusal(err); refused {
+				ctx.RenderWithErr(refusal, tplSettingsOptions, nil)
 			} else if organization.IsErrOrgArchived(err) {
 				ctx.RenderWithErr(ctx.Tr("org.archived.readonly"), tplSettingsOptions, nil)
 			} else if errors.Is(err, user_model.ErrBlockedByUser) {

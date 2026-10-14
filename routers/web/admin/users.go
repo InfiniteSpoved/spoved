@@ -6,6 +6,7 @@ package admin
 
 import (
 	"errors"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -104,6 +105,7 @@ func Users(ctx *context.Context) {
 		AccountType:        accountTypeFilter,
 		IncludeReserved:    true, // administrator needs to list all accounts include reserved, bot, remote ones
 		Load2FAStatus:      true,
+		LoadRepoUsage:      true,
 		ExtraParamStrings:  extraParamStrings,
 	}, tplUsers)
 }
@@ -250,6 +252,10 @@ func prepareUserInfo(ctx *context.Context) *user_model.User {
 
 	ctx.Data["User"] = u
 	ctx.Data["ContextUser"] = u
+	ctx.Data["PersonalRepoSizeLimitMiB"] = u.PersonalRepoSizeLimit
+	if u.PersonalRepoSizeLimit > 0 {
+		ctx.Data["PersonalRepoSizeLimitMiB"] = max(u.PersonalRepoSizeLimit>>20, 1)
+	}
 
 	roleGroups, err := org_model.GetUsersGrantedRoleGroups(ctx, u.ID)
 	if err != nil {
@@ -372,6 +378,15 @@ func EditUserPost(ctx *context.Context) {
 		ctx.HTML(http.StatusOK, tplUserEdit)
 		return
 	}
+	sizeLimit := form.PersonalRepoSizeLimit
+	if sizeLimit < -1 || sizeLimit > math.MaxInt64>>20 {
+		ctx.Data["Err_PersonalRepoSizeLimit"] = true
+		ctx.RenderWithErr(ctx.Tr("admin.users.personal_repo_size_limit_invalid"), tplUserEdit, &form)
+		return
+	}
+	if sizeLimit > 0 {
+		sizeLimit <<= 20
+	}
 
 	if form.UserName != "" {
 		if err := user_service.AdminRenameUser(ctx, u, form.UserName); err != nil {
@@ -468,6 +483,7 @@ func EditUserPost(ctx *context.Context) {
 		AllowGitHook:            optional.Some(form.AllowGitHook),
 		AllowImportLocal:        optional.Some(form.AllowImportLocal),
 		MaxRepoCreation:         optional.Some(form.MaxRepoCreation),
+		PersonalRepoSizeLimit:   optional.Some(sizeLimit),
 		AllowCreateOrganization: optional.Some(form.AllowCreateOrganization),
 		IsRestricted:            optional.Some(form.Restricted),
 		Visibility:              optional.Some(form.Visibility),
@@ -475,6 +491,7 @@ func EditUserPost(ctx *context.Context) {
 		KeepEmailPrivate:        optional.Some(form.HideEmail),
 	}
 
+	oldSizeLimit := u.PersonalRepoSizeLimit
 	if err := user_service.UpdateUser(ctx, u, opts); err != nil {
 		if models.IsErrDeleteLastAdminUser(err) {
 			ctx.RenderWithErr(ctx.Tr("auth.last_admin"), tplUserEdit, &form)
@@ -484,6 +501,9 @@ func EditUserPost(ctx *context.Context) {
 		return
 	}
 	log.Trace("Account profile updated by admin (%s): %s", ctx.Doer.Name, u.Name)
+	if oldSizeLimit != u.PersonalRepoSizeLimit {
+		log.Info("Personal repository size limit of %s changed from %d to %d by %s", u.Name, oldSizeLimit, u.PersonalRepoSizeLimit, ctx.Doer.Name)
+	}
 
 	if form.Reset2FA {
 		tf, err := auth.GetTwoFactorByUID(ctx, u.ID)
