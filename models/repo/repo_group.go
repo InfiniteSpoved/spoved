@@ -365,3 +365,21 @@ func GetRepoGroupsByOwnerIDs(ctx context.Context, ownerIDs []int64) ([]*RepoGrou
 func CountVisibleRepoGroups(ctx context.Context, doer *user_model.User, ownerID int64) (int64, error) {
 	return db.GetEngine(ctx).Where(VisibleRepoGroupCond(doer)).And(builder.Eq{"`repo_group`.owner_id": ownerID}).Count(new(RepoGroup))
 }
+
+// IsNameTaken reports, without writing, whether a new project of the owner (groupID 0) or a new repository in its
+// project groupID can't take name: a repository, project or claim holds it, or a redirect does (TakeRedirectPath
+// refuses a name a redirect holds in an organization).
+func IsNameTaken(ctx context.Context, ownerID, groupID int64, name string) (bool, error) {
+	lower := strings.ToLower(name)
+	if groupID == 0 {
+		if has, err := db.GetEngine(ctx).Where("owner_id = ? AND lower_name = ?", ownerID, lower).Exist(new(RepoGroupNameClaim)); err != nil || has {
+			return has, err
+		}
+		if has, err := db.GetEngine(ctx).Where("owner_id = ? AND lower_name = ?", ownerID, lower).Exist(new(RepoGroupRedirect)); err != nil || has {
+			return has, err
+		}
+	} else if has, err := IsRepositoryModelExistInGroup(ctx, ownerID, groupID, name); err != nil || has {
+		return has, err
+	}
+	return db.GetEngine(ctx).Where("owner_id = ? AND group_id = ? AND lower_name = ?", ownerID, groupID, lower).Exist(new(Redirect))
+}

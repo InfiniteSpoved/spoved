@@ -30,7 +30,7 @@ func MigrateRepositoryGitData(ctx context.Context, u *user_model.User,
 	repo *repo_model.Repository, opts migration.MigrateOptions,
 	httpTransport http.RoundTripper,
 ) (*repo_model.Repository, error) {
-	repoPath := repo_model.RepoPath(u.Name, opts.RepoName)
+	repoPath := repo.RepoPath()
 
 	if u.IsOrganization() {
 		t, err := organization.OrgFromUser(u).GetOwnerTeam(ctx)
@@ -90,7 +90,7 @@ func MigrateRepositoryGitData(ctx context.Context, u *user_model.User,
 	}
 
 	if opts.Wiki {
-		wikiPath := repo_model.WikiPath(u.Name, opts.RepoName)
+		wikiPath := repo.WikiPath()
 		wikiRemotePath := repo_module.WikiRemoteURL(ctx, opts.CloneAddr)
 		if len(wikiRemotePath) > 0 {
 			if err := util.RemoveAll(wikiPath); err != nil {

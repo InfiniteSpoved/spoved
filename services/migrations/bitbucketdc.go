@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
 	base "forgejo.org/modules/migration"
@@ -117,9 +118,20 @@ type bitbucketRef struct {
 
 // newBitbucketDataCenterDownloader creates a Bitbucket Data Center downloader.
 func newBitbucketDataCenterDownloader(ctx context.Context, baseURL *url.URL, project, repoSlug, token string) *BitbucketDataCenterDownloader {
+	client := allowlist.NewMigrationHTTPClient()
+	// a redirect may not leave the server's origin, nor downgrade https to http
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if req.URL.Scheme != baseURL.Scheme || req.URL.Host != baseURL.Host {
+			return errors.New("redirect off the Bitbucket server refused")
+		}
+		if len(via) >= 10 { // Go's own limit, which a CheckRedirect replaces
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
 	return &BitbucketDataCenterDownloader{
 		ctx:      ctx,
-		client:   allowlist.NewMigrationHTTPClient(),
+		client:   client,
 		baseURL:  baseURL,
 		project:  project,
 		repoSlug: repoSlug,
@@ -161,6 +173,39 @@ func (d *BitbucketDataCenterDownloader) FormatCloneURL(opts base.MigrateOptions,
 		u.User = url.UserPassword(opts.AuthUsername, opts.AuthPassword)
 	}
 	return u.String(), nil
+}
+
+// cloneURL returns the HTTP clone URL of a repository of the server, or "" for a key or slug that isn't a plain name.
+func (d *BitbucketDataCenterDownloader) cloneURL(key, slug string) string {
+	if !repo_model.IsValidBitbucketName(key) || !repo_model.IsValidBitbucketName(slug) {
+		return ""
+	}
+	return d.baseURL.JoinPath("scm", strings.ToLower(key), slug+".git").String()
+}
+
+// maxBitbucketPages caps the pages read from one paged list.
+const maxBitbucketPages = 1000
+
+// callAPIPaged reads every page of a paged list of the REST API v1 into values.
+func callAPIPaged[T any](d *BitbucketDataCenterDownloader, endpoint string) ([]T, error) {
+	var values []T
+	start := 0
+	for range maxBitbucketPages {
+		var page struct {
+			Values        []T  `json:"values"`
+			IsLastPage    bool `json:"isLastPage"`
+			NextPageStart int  `json:"nextPageStart"`
+		}
+		if err := d.callAPI(endpoint, url.Values{"start": {strconv.Itoa(start)}, "limit": {"100"}}, &page); err != nil {
+			return nil, err
+		}
+		values = append(values, page.Values...)
+		if page.IsLastPage || page.NextPageStart <= start {
+			return values, nil
+		}
+		start = page.NextPageStart
+	}
+	return nil, fmt.Errorf("%s: more than %d pages", endpoint, maxBitbucketPages)
 }
 
 // callAPI performs a GET against the Bitbucket Data Center REST API v1 and decodes the JSON result.
@@ -213,15 +258,12 @@ func (d *BitbucketDataCenterDownloader) GetRepoInfo() (*base.Repository, error) 
 		return nil, err
 	}
 
-	cloneURL := repo.Links.httpURL()
-	if cloneURL == "" {
+	// The clone and browse URLs are built from the server the migration was started with, never taken from the API.
+	if repo.Links.httpURL() == "" {
 		return nil, fmt.Errorf("no HTTP clone link for %s/%s: HTTP(S) SCM hosting is probably disabled on the Bitbucket instance", d.project, d.repoSlug)
 	}
-
-	var originalURL string
-	if len(repo.Links.Self) > 0 {
-		originalURL = repo.Links.Self[0].Href
-	}
+	cloneURL := d.cloneURL(d.project, d.repoSlug)
+	originalURL := d.baseURL.JoinPath("projects", strings.ToUpper(d.project), "repos", d.repoSlug, "browse").String()
 
 	// Default branch is absent (404) for empty repositories; warn on any other failure.
 	var defaultBranch struct {
@@ -315,8 +357,8 @@ func (d *BitbucketDataCenterDownloader) GetPullRequests(page, perPage int) ([]*b
 			OwnerName: pr.FromRef.Repository.Project.Key,
 		}
 		if head.RepoFullName() != fmt.Sprintf("%s/%s", pr.ToRef.Repository.Project.Key, pr.ToRef.Repository.Slug) {
-			// Fork pull request: the head branch must be fetched from the source repository.
-			head.CloneURL = pr.FromRef.Repository.Links.httpURL()
+			// Fork pull request: the head branch must be fetched from the source repository, on the same server.
+			head.CloneURL = d.cloneURL(pr.FromRef.Repository.Project.Key, pr.FromRef.Repository.Slug)
 		}
 
 		result := &base.PullRequest{

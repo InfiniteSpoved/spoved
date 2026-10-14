@@ -752,6 +752,9 @@ func TestGiteaUploadUpdateGitForPullRequest(t *testing.T) {
 	require.NoError(t, err)
 
 	toRepoName := "migrated"
+	// the fork heads are local paths: fetching them takes a doer who may import local paths
+	defer test.MockVariableValue(&setting.ImportLocalPaths, true)()
+	fromRepoOwner.AllowImportLocal = true
 	uploader := NewGiteaLocalUploader(t.Context(), fromRepoOwner, fromRepoOwner.Name, toRepoName)
 	uploader.gitServiceType = structs.GiteaService
 	require.NoError(t, uploader.CreateRepo(&base.Repository{
@@ -960,6 +963,23 @@ func TestGiteaUploadUpdateGitForPullRequest(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("fork on a blocked host", func(t *testing.T) {
+		defer test.MockVariableValueWithReset(&setting.Migrations.BlockedDomains, "blocked.example.com", func() { require.NoError(t, allowlist.Init()) })()
+		pr := base.PullRequest{
+			Number:      1,
+			State:       "open",
+			EnsuredSafe: true,
+			Base:        base.PullRequestBranch{CloneURL: fromRepo.RepoPath(), Ref: baseRef, SHA: baseSHA, RepoName: fromRepo.Name, OwnerName: fromRepo.OwnerName},
+			Head:        base.PullRequestBranch{CloneURL: "https://blocked.example.com/fork.git", Ref: forkHeadRef, SHA: forkHeadSHA, RepoName: forkRepo.Name, OwnerName: "blockedfork"},
+		}
+		head, err := uploader.updateGitForPullRequest(&pr)
+		require.NoError(t, err)
+		assert.Equal(t, "unknown repository", head)
+		remotes, _, err := git.NewCommand(t.Context(), "remote").RunStdString(&git.RunOpts{Dir: uploader.repo.RepoPath()})
+		require.NoError(t, err)
+		assert.NotContains(t, remotes, "blockedfork", "no remote is added for a blocked fork")
+	})
 }
 
 func TestGiteaUploaderWithAvatar(t *testing.T) {

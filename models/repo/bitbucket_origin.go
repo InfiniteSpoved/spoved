@@ -144,3 +144,24 @@ func bitbucketOriginKeywordCond(keyword string) builder.Cond {
 	}
 	return builder.In("`repository`.id", builder.Select("repo_id").From("bitbucket_origin").Where(cond))
 }
+
+// IsValidBitbucketName reports whether s is a plain Bitbucket project key or repository slug.
+func IsValidBitbucketName(s string) bool {
+	return bitbucketNamePattern.MatchString(s)
+}
+
+// GetBitbucketOriginByPath returns the origin row of a Bitbucket repository (or of a project, with an empty slug),
+// or nil.
+func GetBitbucketOriginByPath(ctx context.Context, server, key, slug string) (*BitbucketOrigin, error) {
+	o := new(BitbucketOrigin)
+	if has, err := db.GetEngine(ctx).Where("project_key = ? AND slug = ? AND server = ?", key, slug, server).Get(o); err != nil || !has {
+		return nil, err
+	}
+	return o, nil
+}
+
+// InsertBitbucketOrigin records an origin; a second row for the same Bitbucket repository or project fails on the
+// unique key.
+func InsertBitbucketOrigin(ctx context.Context, o *BitbucketOrigin) error {
+	return db.Insert(ctx, o)
+}
