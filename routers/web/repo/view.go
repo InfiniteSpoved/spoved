@@ -351,7 +351,7 @@ func renderReadmeFile(ctx *context.Context, subfolder string, readmeFile *git.Tr
 		ctx.Data["EscapeStatus"], ctx.Data["FileContent"] = charset.EscapeControlHTML(template.HTML(contentEscaped), ctx.Locale, charset.FileviewContext)
 	}
 
-	if !fInfo.isLFSFile && ctx.Repo.CanEnableEditor(ctx, ctx.Doer) {
+	if !fInfo.isLFSFile && ctx.Repo.CanEnableEditor(ctx, ctx.Doer) && !ctx.Repo.PersonalRepoLocked {
 		ctx.Data["CanEditReadmeFile"] = true
 	}
 }
@@ -901,7 +901,6 @@ func Home(ctx *context.Context) {
 		ctx.Data["BitbucketOrigin"] = origin
 	}
 
-	ctx.SetPersonalRepoLimit(ctx.Repo.Repository.OwnerID) // the banner, and no actions that would be refused
 	renderHomeCode(ctx)
 }
 
@@ -1245,7 +1244,7 @@ PostRecentBranchCheck:
 			return
 		}
 
-		if syncForkInfo.Allowed {
+		if syncForkInfo.Allowed && !ctx.Repo.PersonalRepoLocked {
 			ctx.Data["CanSyncFork"] = true
 			ctx.Data["ForkCommitsBehind"] = syncForkInfo.CommitsBehind
 			ctx.Data["BaseBranchLink"] = fmt.Sprintf("%s/src/branch/%s", ctx.Repo.Repository.BaseRepo.HTMLURL(), util.PathEscapeSegments(ctx.Repo.BranchName))

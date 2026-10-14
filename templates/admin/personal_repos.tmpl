@@ -23,7 +23,7 @@
 				<div class="field">
 					<label for="size_limit_mib">{{ctx.Locale.Tr "admin.personal_repos.size_limit"}}</label>
 					<input id="size_limit_mib" name="size_limit_mib" type="number" min="0" step="1" value="{{.SizeLimitMiB}}">
-					<p class="help">{{ctx.Locale.Tr "admin.personal_repos.size_limit_help"}}</p>
+					<p class="help">{{ctx.Locale.Tr "admin.personal_repos.size_limit_help"}}{{if .SizeLimit}} {{ctx.Locale.Tr "admin.personal_repos.size_limit_current" (ctx.Locale.TrSize .SizeLimit)}}{{end}}</p>
 				</div>
 				<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
 			</form>

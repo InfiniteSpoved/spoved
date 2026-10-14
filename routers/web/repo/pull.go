@@ -716,6 +716,13 @@ func PrepareViewPullInfo(ctx *context.Context, issue *issues_model.Issue) *git.C
 			ctx.ServerError("IsUserAllowedToUpdate", err)
 			return nil
 		}
+		// an update writes to the head repository, which the size limit of its owner's personal repositories refuses
+		if l, err := quota_model.GetPersonalRepoLimit(ctx, pull.HeadRepo.OwnerID); err != nil {
+			ctx.ServerError("GetPersonalRepoLimit", err)
+			return nil
+		} else if l.Reached() {
+			ctx.Data["UpdateAllowed"], ctx.Data["UpdateByRebaseAllowed"] = false, false
+		}
 		ctx.Data["GetCommitMessages"] = pull_service.GetSquashMergeCommitMessages(ctx, pull)
 	} else {
 		ctx.Data["GetCommitMessages"] = ""
@@ -1310,7 +1317,7 @@ func viewPullFiles(ctx *context.Context, specifiedStartCommit, specifiedEndCommi
 	ctx.Data["IsIssuePoster"] = ctx.IsSigned && issue.IsPoster(ctx.Doer.ID)
 	ctx.Data["HasIssuesOrPullsWritePermission"] = ctx.Repo.CanWriteIssuesOrPulls(issue.IsPull)
 
-	ctx.Data["IsAttachmentEnabled"] = setting.Attachment.Enabled
+	ctx.Data["IsAttachmentEnabled"] = ctx.AttachmentsEnabled()
 	// For files changed page
 	PrepareBranchList(ctx)
 	if ctx.Written() {
@@ -1777,7 +1784,7 @@ func CompareAndPullRequestPost(ctx *context.Context) {
 	ctx.Data["PageIsComparePull"] = true
 	ctx.Data["IsDiffCompare"] = true
 	ctx.Data["PullRequestWorkInProgressPrefixes"] = setting.Repository.PullRequest.WorkInProgressPrefixes
-	ctx.Data["IsAttachmentEnabled"] = setting.Attachment.Enabled
+	ctx.Data["IsAttachmentEnabled"] = ctx.AttachmentsEnabled()
 	upload.AddUploadContext(ctx, "comment")
 	ctx.Data["HasIssuesOrPullsWritePermission"] = ctx.Repo.CanWrite(unit.TypePullRequests)
 

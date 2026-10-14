@@ -51,6 +51,7 @@ func FormatSize(n int64) string {
 // ErrPersonalRepoLimit refuses a new repository in a namespace whose size limit is reached.
 type ErrPersonalRepoLimit struct {
 	PersonalRepoLimit
+	OwnerID int64 // whose repositories are locked; only they see the numbers (MessageFor)
 }
 
 func (e ErrPersonalRepoLimit) Error() string {
@@ -183,11 +184,25 @@ func GetPersonalRepoLimit(ctx context.Context, userID int64) (PersonalRepoLimit,
 	} else if err != nil {
 		return PersonalRepoLimit{}, err
 	}
+	return personalRepoLimitOf(ctx, u, siteLimit)
+}
+
+// GetPersonalRepoLimitOf is GetPersonalRepoLimit for an owner that is already loaded.
+func GetPersonalRepoLimitOf(ctx context.Context, u *user_model.User) (PersonalRepoLimit, error) {
+	siteLimit := setting.Config().PersonalRepos.Value(ctx).EffectiveSizeLimit()
+	if siteLimit <= 0 {
+		return PersonalRepoLimit{}, nil
+	}
+	return personalRepoLimitOf(ctx, u, siteLimit)
+}
+
+func personalRepoLimitOf(ctx context.Context, u *user_model.User, siteLimit int64) (PersonalRepoLimit, error) {
 	limit := PersonalRepoLimit{Limit: EffectivePersonalRepoSizeLimit(u, siteLimit)}
 	if limit.Limit == 0 {
 		return limit, nil
 	}
-	limit.Used, err = GetPersonalRepoUsage(ctx, userID)
+	var err error
+	limit.Used, err = GetPersonalRepoUsage(ctx, u.ID)
 	return limit, err
 }
 

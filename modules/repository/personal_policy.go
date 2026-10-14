@@ -67,7 +67,7 @@ func CheckPersonalRepoLimit(ctx context.Context, owner *user_model.User) error {
 		return err
 	} else if l.Reached() {
 		log.Warn("Personal repository size limit reached for %s (%d of %d bytes): repository refused", owner.Name, l.Used, l.Limit)
-		return quota_model.ErrPersonalRepoLimit{PersonalRepoLimit: l}
+		return quota_model.ErrPersonalRepoLimit{PersonalRepoLimit: l, OwnerID: owner.ID}
 	}
 	return nil
 }

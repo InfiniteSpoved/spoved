@@ -980,7 +980,7 @@ func NewIssue(ctx *context.Context) {
 	}
 	ctx.Data["IsOwnerProjectsEnabled"] = isOwnerProjectsEnabled
 
-	ctx.Data["IsAttachmentEnabled"] = setting.Attachment.Enabled
+	ctx.Data["IsAttachmentEnabled"] = ctx.AttachmentsEnabled()
 	upload.AddUploadContext(ctx, "comment")
 
 	milestoneID := ctx.FormInt64("milestone")
@@ -1222,7 +1222,7 @@ func NewIssuePost(ctx *context.Context) {
 	ctx.Data["PageIsIssueList"] = true
 	ctx.Data["NewIssueChooseTemplate"] = issue_service.HasTemplatesOrContactLinks(ctx, ctx.Repo.Repository, ctx.Repo.GitRepo)
 	ctx.Data["PullRequestWorkInProgressPrefixes"] = setting.Repository.PullRequest.WorkInProgressPrefixes
-	ctx.Data["IsAttachmentEnabled"] = setting.Attachment.Enabled
+	ctx.Data["IsAttachmentEnabled"] = ctx.AttachmentsEnabled()
 	upload.AddUploadContext(ctx, "comment")
 
 	var (
@@ -1486,7 +1486,7 @@ func ViewIssue(ctx *context.Context) {
 	ctx.Data["IsModerationEnabled"] = setting.Moderation.Enabled
 	isProjectsEnabled := ctx.Repo.CanRead(unit.TypeProjects)
 	ctx.Data["IsProjectsEnabled"] = isProjectsEnabled
-	ctx.Data["IsAttachmentEnabled"] = setting.Attachment.Enabled
+	ctx.Data["IsAttachmentEnabled"] = ctx.AttachmentsEnabled()
 	upload.AddUploadContext(ctx, "comment")
 
 	if err = issue.LoadAttributes(ctx); err != nil {

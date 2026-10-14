@@ -2,12 +2,12 @@
 <div role="main" aria-label="{{.Title}}" class="page-content repository new repo">
 	<div class="ui middle very relaxed page one column grid">
 		<div class="column">
+			{{template "shared/personal_repo_limit" .}}
 			<form class="ui form" action="{{.Link}}" method="post">
 				<h3 class="ui top attached header">
 					{{ctx.Locale.Tr "new_repo.title"}}
 				</h3>
 				<div class="ui attached segment">
-					{{template "shared/personal_repo_limit" .}}
 					{{if or .CanCreateRepo .Orgs}}
 						{{template "base/alert" .}}
 						{{template "repo/create_helper" .}}
@@ -45,7 +45,7 @@
 						<button class="ui primary button">
 							{{ctx.Locale.Tr "repo.create_repo"}}
 						</button>
-					{{else}}
+					{{else if not .PersonalRepoLocked}}{{/* the banner above says why */}}
 						<div class="ui negative message">
 							{{ctx.Locale.Tr "repo.form.cannot_create"}}
 						</div>

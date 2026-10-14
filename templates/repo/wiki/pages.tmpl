@@ -5,7 +5,7 @@
 		<h2 class="ui header tw-flex tw-items-center tw-justify-between">
 			<span>{{ctx.Locale.Tr "repo.wiki.pages"}}</span>
 			<span>
-				{{if and .CanWriteWiki (not .Repository.IsMirror)}}
+				{{if and .CanWriteWiki (not .Repository.IsMirror) (not .PersonalRepoLocked)}}
 					<a class="ui small primary button" href="{{.RepoLink}}/wiki?action=_new">{{ctx.Locale.Tr "repo.wiki.new_page_button"}}</a>
 				{{end}}
 			</span>

@@ -13,6 +13,7 @@ import (
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/log"
 	repo_module "forgejo.org/modules/repository"
+	"forgejo.org/modules/setting"
 )
 
 type QuotaTargetType int
@@ -206,14 +207,23 @@ func (ctx *Context) SetPersonalRepoLimit(ownerID int64) quota_model.PersonalRepo
 	return l
 }
 
+// setPersonalRepoLimit always overwrites, so a page about another owner (the fork page runs in the source
+// repository) never keeps the repository owner's state.
 func (ctx *Context) setPersonalRepoLimit(l quota_model.PersonalRepoLimit, ownerID int64) {
-	if !l.Reached() {
-		return
-	}
-	ctx.Data["PersonalRepoLocked"] = true
-	ctx.Data["PersonalRepoLimitOwn"] = ctx.doerID() == ownerID
+	locked := l.Reached()
+	own := ctx.doerID() == ownerID
+	ctx.Data["PersonalRepoLocked"] = locked
+	ctx.Data["PersonalRepoLimitOwn"] = own
+	// only the owner and site admins learn that the owner is locked; the numbers are the owner's alone
+	ctx.Data["PersonalRepoBanner"] = locked && (own || ctx.Doer != nil && ctx.Doer.IsAdmin)
 	ctx.Data["PersonalRepoUsed"] = l.Used
 	ctx.Data["PersonalRepoLimit"] = l.Limit
+}
+
+// AttachmentsEnabled is setting.Attachment.Enabled, but false in a repository whose owner reached the size limit of
+// personal repositories, where uploads are refused.
+func (ctx *Context) AttachmentsEnabled() bool {
+	return setting.Attachment.Enabled && (ctx.Repo == nil || !ctx.Repo.PersonalRepoLocked)
 }
 
 func (ctx *Context) doerID() int64 {
@@ -305,6 +315,9 @@ func (ctx *Context) PersonalRepoRefusal(err error) (string, bool) {
 		return ctx.Locale.TrString(e.TrKey()), true
 	}
 	if e, ok := errors.AsType[quota_model.ErrPersonalRepoLimit](err); ok {
+		if e.OwnerID != ctx.doerID() {
+			return ctx.Locale.TrString("repo.personal_repos.limit_reached_owner"), true
+		}
 		return ctx.Locale.TrString("repo.personal_repos.limit_reached", ctx.Locale.TrSize(e.Used), ctx.Locale.TrSize(e.Limit)), true
 	}
 	return "", false

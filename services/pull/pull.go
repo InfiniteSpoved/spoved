@@ -518,7 +518,7 @@ func PushToBaseRepo(ctx context.Context, pr *issues_model.PullRequest) (err erro
 			return err
 		} else if l.Reached() {
 			log.Warn("Personal repository size limit reached for the owner of %-v: head of PR #%d not copied", pr.BaseRepo, pr.Index)
-			return quota_model.ErrPersonalRepoLimit{PersonalRepoLimit: l}
+			return quota_model.ErrPersonalRepoLimit{PersonalRepoLimit: l, OwnerID: pr.BaseRepo.OwnerID}
 		}
 	}
 

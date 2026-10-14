@@ -10,6 +10,7 @@ import (
 
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
+	quota_model "forgejo.org/models/quota"
 	unit_model "forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/util"
@@ -52,7 +53,9 @@ func CanEditHeadBranch(ctx context.Context, doer *user_model.User, pr *issues_mo
 	err := CheckHeadBranchEditable(ctx, doer, pr)
 	switch {
 	case err == nil:
-		return true, nil
+		// the size limit of the head owner's personal repositories refuses every edit (Edit file, Apply suggestion)
+		l, err := quota_model.GetPersonalRepoLimit(ctx, pr.HeadRepo.OwnerID)
+		return !l.Reached(), err
 	case errors.Is(err, ErrHeadBranchNotEditable), errors.Is(err, util.ErrPermissionDenied):
 		return false, nil
 	default:

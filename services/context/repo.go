@@ -23,6 +23,7 @@ import (
 	"forgejo.org/models/organization"
 	packages_model "forgejo.org/models/packages"
 	access_model "forgejo.org/models/perm/access"
+	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	unit_model "forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
@@ -75,6 +76,10 @@ type Repository struct {
 	RepoLink     string
 	CloneLink    repo_model.CloneLink
 	CommitsCount int64
+
+	// PersonalRepoLocked: the owner's personal repositories reached their size limit, so writes are refused
+	// (deletes aren't); set for signed-in viewers only, every action they can't use is hidden while it is true
+	PersonalRepoLocked bool
 
 	PullRequest *PullRequest
 }
@@ -684,6 +689,15 @@ func RepoAssignment(ctx *Context) context.CancelFunc {
 	ctx.Data["CanWritePulls"] = ctx.Repo.CanWrite(unit_model.TypePullRequests)
 	ctx.Data["CanWriteActions"] = ctx.Repo.CanWrite(unit_model.TypeActions)
 	ctx.Data["IsModerationEnabled"] = setting.Moderation.Enabled
+	if ctx.Doer != nil && !repo.Owner.IsOrganization() {
+		l, err := quota_model.GetPersonalRepoLimitOf(ctx, repo.Owner)
+		if err != nil {
+			ctx.ServerError("GetPersonalRepoLimitOf", err)
+			return nil
+		}
+		ctx.setPersonalRepoLimit(l, repo.OwnerID)
+		ctx.Repo.PersonalRepoLocked = l.Reached()
+	}
 
 	canSignedUserFork, err := repo_module.CanUserForkRepo(ctx, ctx.Doer, ctx.Repo.Repository)
 	if err != nil {
@@ -1192,7 +1206,7 @@ func RepoRefByType(refType RepoRefType, ignoreNotExistErr ...bool) func(*Context
 		ctx.Data["IsViewBranch"] = ctx.Repo.IsViewBranch
 		ctx.Data["IsViewTag"] = ctx.Repo.IsViewTag
 		ctx.Data["IsViewCommit"] = ctx.Repo.IsViewCommit
-		ctx.Data["CanCreateBranch"] = ctx.Repo.CanCreateBranch()
+		ctx.Data["CanCreateBranch"] = ctx.Repo.CanCreateBranch() && !ctx.Repo.PersonalRepoLocked
 
 		ctx.Repo.CommitsCount, err = ctx.Repo.GetCommitsCount()
 		if err != nil {

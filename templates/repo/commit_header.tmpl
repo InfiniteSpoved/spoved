@@ -30,7 +30,7 @@
 				<a class="ui primary tiny button" href="{{.SourcePath}}">
 					{{ctx.Locale.Tr "repo.diff.browse_source"}}
 				</a>
-				{{if and ($.Permission.CanWrite $.UnitTypeCode) (not $.Repository.IsArchived) (not .IsDeleted)}}{{- /* */ -}}
+				{{if and ($.Permission.CanWrite $.UnitTypeCode) (not $.Repository.IsArchived) (not .IsDeleted) (not $.PersonalRepoLocked)}}{{- /* */ -}}
 					<div class="ui dropdown primary tiny button">
 						{{ctx.Locale.Tr "repo.commit.operations"}}
 						{{svg "octicon-triangle-down" 14 "dropdown icon"}}
@@ -284,7 +284,7 @@
 		<span class="text grey tw-flex-1" id="note-authored-time">{{DateUtils.TimeSince .NoteCommit.Author.When}}</span>
 		{{if and ($.Permission.CanWrite $.UnitTypeCode) (not $.Repository.IsArchived) (not .IsDeleted)}}
 			<div class="ui tw-flex tw-items-center">
-				<button id="commit-notes-edit-button" class="ui tiny primary button tw-py-[6px] tw-px-[10px]">{{ctx.Locale.Tr "edit"}}</button>
+				{{if not $.PersonalRepoLocked}}<button id="commit-notes-edit-button" class="ui tiny primary button tw-py-[6px] tw-px-[10px]">{{ctx.Locale.Tr "edit"}}</button>{{end}}
 				<button class="ui tiny button red show-modal tw-py-[6px] tw-px-[10px]" data-modal="#delete-note-modal">{{ctx.Locale.Tr "remove"}}</button>
 			</div>
 			<dialog class="modal" id="delete-note-modal">
@@ -307,7 +307,7 @@
 		<pre class="commit-body">{{.NoteRendered | SanitizeHTML}}</pre>
 	</div>
 {{end}}
-{{if and ($.Permission.CanWrite $.UnitTypeCode) (not $.Repository.IsArchived) (not .IsDeleted)}}
+{{if and ($.Permission.CanWrite $.UnitTypeCode) (not $.Repository.IsArchived) (not .IsDeleted) (not $.PersonalRepoLocked)}}
 	<div id="commit-notes-edit-area" class="ui bottom attached info segment git-notes tw-hidden">
 		<form id="commit-notes-edit-form" class="ui form" action="{{.Link}}/notes" method="post">
 			<div class="field">

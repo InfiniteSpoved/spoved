@@ -441,7 +441,7 @@ func NewRelease(ctx *context.Context) {
 			ctx.Data["attachments"] = rel.Attachments
 		}
 	}
-	ctx.Data["IsAttachmentEnabled"] = setting.Attachment.Enabled
+	ctx.Data["IsAttachmentEnabled"] = ctx.AttachmentsEnabled()
 	assigneeUsers, err := repo_model.GetRepoAssignees(ctx, ctx.Repo.Repository)
 	if err != nil {
 		ctx.ServerError("GetRepoAssignees", err)
@@ -691,7 +691,7 @@ func EditRelease(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("repo.release.edit_release")
 	ctx.Data["PageIsReleaseList"] = true
 	ctx.Data["PageIsEditRelease"] = true
-	ctx.Data["IsAttachmentEnabled"] = setting.Attachment.Enabled
+	ctx.Data["IsAttachmentEnabled"] = ctx.AttachmentsEnabled()
 	upload.AddUploadContext(ctx, "release")
 
 	tagName := ctx.Params("*")

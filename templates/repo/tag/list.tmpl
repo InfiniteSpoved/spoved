@@ -37,7 +37,7 @@
 											<a class="archive-link tw-mr-2 muted" href="{{$.RepoLink}}/archive/{{.TagName | PathEscapeSegments}}.tar.gz" rel="nofollow">{{svg "octicon-file-zip" 16 "tw-mr-1"}}TAR.GZ</a>
 										{{end}}
 
-										{{if (and $canReadReleases $.CanCreateRelease $release.IsTag)}}
+										{{if (and $canReadReleases $.CanCreateRelease $release.IsTag (not $.PersonalRepoLocked))}}
 											<a class="tw-mr-2 muted" href="{{$.RepoLink}}/releases/new?tag={{.TagName}}">{{svg "octicon-tag" 16 "tw-mr-1"}}{{ctx.Locale.Tr "repo.release.new_release"}}</a>
 										{{end}}
 

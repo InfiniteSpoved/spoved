@@ -3,8 +3,10 @@
 	{{if .IsRepo}}{{template "repo/header" .}}{{end}}
 	<div class="ui container center">
 		<h1 style="margin-top: 100px" class="error-code">413</h1>
-		{{if .PersonalRepoLocked}}
+		{{if .PersonalRepoBanner}}
 			{{template "shared/personal_repo_limit" .}}
+		{{else if .PersonalRepoLocked}}
+			<p>{{ctx.Locale.Tr "repo.personal_repos.limit_reached_owner"}}</p>
 		{{else}}
 			<p>{{ctx.Locale.Tr "error413"}}</p>
 		{{end}}

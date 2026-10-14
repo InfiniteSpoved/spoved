@@ -61,6 +61,12 @@ export function initAdminCommon() {
         document.getElementById('password')?.removeAttribute('required');
       }
     });
+    // personal repository size limit: the MiB field belongs to the custom mode only
+    document.getElementById('personal_repo_size_limit_mode')?.addEventListener('change', function () {
+      const custom = this.value === 'custom';
+      toggleElem('#personal_repo_size_limit_field', custom);
+      document.getElementById('personal_repo_size_limit').disabled = !custom;
+    });
   }
 
   function onUsePagedSearchChange() {

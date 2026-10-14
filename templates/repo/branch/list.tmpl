@@ -30,7 +30,7 @@
 								<p class="info tw-flex tw-items-center tw-my-1">{{svg "octicon-git-commit" 16 "tw-mr-1"}}<a href="{{.RepoLink}}/commit/{{PathEscape .DefaultBranchBranch.DBBranch.CommitID}}">{{ShortSha .DefaultBranchBranch.DBBranch.CommitID}}</a> · <span class="commit-message">{{RenderCommitMessage $.Context .DefaultBranchBranch.DBBranch.CommitMessage (.Repository.ComposeMetas ctx)}}</span> · {{ctx.Locale.Tr "org.repo_updated" (DateUtils.TimeSince .DefaultBranchBranch.DBBranch.CommitTime)}}{{if .DefaultBranchBranch.DBBranch.Pusher}} &nbsp;{{template "shared/user/avatarlink" dict "user" .DefaultBranchBranch.DBBranch.Pusher}}{{template "shared/user/namelink" .DefaultBranchBranch.DBBranch.Pusher}}{{end}}</p>
 							</td>
 							<td class="right aligned middle aligned overflow-visible">
-								{{if and $.IsWriter (not $.Repository.IsArchived) (not $.Repository.IsMirror) (not .IsDeleted)}}
+								{{if and $.IsWriter (not $.Repository.IsArchived) (not $.Repository.IsMirror) (not .IsDeleted) (not $.PersonalRepoLocked)}}
 									<button class="btn interact-bg show-create-branch-modal tw-p-2"
 										data-branch-from="{{$.DefaultBranchBranch.DBBranch.Name}}"
 										data-tooltip-content="{{ctx.Locale.Tr "repo.branch.new_branch_from" ($.DefaultBranchBranch.DBBranch.Name)}}"
@@ -152,7 +152,7 @@
 								{{end}}
 							</td>
 							<td class="three wide right aligned overflow-visible">
-								{{if and $.IsWriter (not $.Repository.IsArchived) (not $.Repository.IsMirror) (not .DBBranch.IsDeleted)}}
+								{{if and $.IsWriter (not $.Repository.IsArchived) (not $.Repository.IsMirror) (not .DBBranch.IsDeleted) (not $.PersonalRepoLocked)}}
 									<button class="btn interact-bg tw-p-2 show-create-branch-modal"
 										data-branch-from="{{.DBBranch.Name}}"
 										data-tooltip-content="{{ctx.Locale.Tr "repo.branch.new_branch_from" .DBBranch.Name}}"
@@ -182,7 +182,7 @@
 									</button>
 								{{end}}
 								{{if and $.IsWriter (not $.IsMirror) (not $.Repository.IsArchived)}}
-									{{if and .DBBranch.IsDeleted (not .IsProtected)}}
+									{{if and .DBBranch.IsDeleted (not .IsProtected) (not $.PersonalRepoLocked)}}
 										<button class="btn interact-bg tw-p-2 link-action restore-branch-button" data-url="{{$.Link}}/restore?branch_id={{.DBBranch.ID}}&name={{.DBBranch.Name}}&page={{$.Page.Paginater.Current}}" data-tooltip-content="{{ctx.Locale.Tr "repo.branch.restore" (.DBBranch.Name)}}">
 											<span class="text blue">
 												{{svg "octicon-reply"}}
@@ -215,6 +215,7 @@
 	{{template "base/modal_actions_confirm" .}}
 </div>
 
+{{if not .PersonalRepoLocked}}
 <dialog class="modal" id="create-branch-modal">
 	<article>
 		<header>{{ctx.Locale.Tr "repo.branch.new_branch"}}</header>
@@ -233,6 +234,7 @@
 		</form>
 	</article>
 </dialog>
+{{end}}
 
 <dialog class="modal" id="rename-branch-modal">
 	<article>
