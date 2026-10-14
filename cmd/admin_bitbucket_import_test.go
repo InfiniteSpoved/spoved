@@ -17,9 +17,12 @@ import (
 )
 
 func TestBitbucketImportToken(t *testing.T) {
+	var names []string
 	for _, f := range subcmdBitbucketImport().Flags {
 		assert.NotContains(t, f.Names(), "token", "the token is never a command-line argument")
+		names = append(names, f.Names()...)
 	}
+	assert.Contains(t, names, "key-expiry")
 
 	t.Setenv("BITBUCKET_TOKEN", "")
 	_, err := bitbucketToken("")
@@ -42,18 +45,20 @@ func TestBitbucketImportOutput(t *testing.T) {
 		{Kind: "project", Bitbucket: "PAY", Name: "org3/pay", Status: "planned"},
 		{Kind: "repository", Bitbucket: "PAY/api", Name: "org3/pay/api", Status: "conflict", Reason: "bad\x1b[2Jname\r\n", OldSSH: "=HYPERLINK(\"x\")", OldHTTP: "https://bb.example.com/scm/pay/api.git"},
 		{Kind: "repository", Bitbucket: "PAY/web", Name: "org3/pay/web", Status: "created", NewHTTP: "https://spoved.example.com/org3/pay/web.git"},
+		{Kind: "key", Bitbucket: "PAY key 1", Name: "ci", Target: "org3/pay", Status: "planned", Access: "read", Expires: "2030-01-02"},
 	}}
 
 	var out bytes.Buffer
 	printBitbucketReport(&out, report)
 	assert.NotContains(t, out.String(), "\x1b")
-	assert.Equal(t, 3, strings.Count(out.String(), "\n"), "one line per item")
+	assert.Equal(t, 4, strings.Count(out.String(), "\n"), "one line per item")
+	assert.Contains(t, out.String(), "on org3/pay, read, expires 2030-01-02")
 	assert.Contains(t, out.String(), "https://spoved.example.com/org3/pay/web.git", "the new URL is printed")
 
 	out.Reset()
 	require.NoError(t, writeBitbucketCSV(&out, report))
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	require.Len(t, lines, 4, "a header and a row per item")
+	require.Len(t, lines, 4, "a header and a row per project and repository")
 	assert.True(t, strings.HasPrefix(lines[0], "kind,"))
 	assert.True(t, strings.HasPrefix(lines[1], "project,PAY,"))
 	assert.Contains(t, lines[2], `'=HYPERLINK`)

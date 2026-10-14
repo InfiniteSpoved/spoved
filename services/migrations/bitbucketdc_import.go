@@ -21,7 +21,9 @@ import (
 	base "forgejo.org/modules/migration"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
+	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
+	"forgejo.org/services/authz"
 	"forgejo.org/services/migrations/allowlist"
 	repo_service "forgejo.org/services/repository"
 )
@@ -34,11 +36,12 @@ type BitbucketImportOptions struct {
 	Projects     []string // project keys; empty imports every project the token can read
 	DryRun       bool
 	PullRequests bool
+	KeyExpiry    string // YYYY-MM-DD: the latest expiry of an imported deploy key; empty for none
 }
 
 // String never prints the token.
 func (o BitbucketImportOptions) String() string {
-	return fmt.Sprintf("{server: %s, projects: %v, dry run: %t}", o.Server, o.Projects, o.DryRun)
+	return fmt.Sprintf("{server: %s, projects: %v, dry run: %t, key expiry: %s}", o.Server, o.Projects, o.DryRun, o.KeyExpiry)
 }
 
 // GoString never prints the token.
@@ -53,14 +56,18 @@ const (
 	BitbucketCreated  = "created"
 	BitbucketConflict = "conflict"
 	BitbucketFailed   = "failed"
+	BitbucketSkipped  = "skipped"
 )
 
-// BitbucketImportItem is a project or repository of an import. Text from the Bitbucket server is stripped of control
-// characters.
+// BitbucketImportItem is a project, repository, permission or key of an import. Text from the Bitbucket server is
+// stripped of control characters.
 type BitbucketImportItem struct {
-	Kind      string `json:"kind"`      // "project" or "repository"
-	Bitbucket string `json:"bitbucket"` // KEY or KEY/slug
-	Name      string `json:"name"`      // the path in spoved
+	Kind      string `json:"kind"`             // "project", "repository", "team", "member", "group", "collaborator", "key" or "permission"
+	Bitbucket string `json:"bitbucket"`        // KEY, KEY/slug, a user or group name, "KEY key 1", ...
+	Name      string `json:"name"`             // the path, team, login, user group or key name in spoved
+	Target    string `json:"target,omitempty"` // the team, repository or project a grant or key lands on
+	Access    string `json:"access,omitempty"`
+	Expires   string `json:"expires,omitempty"`
 	Status    string `json:"status"`
 	Reason    string `json:"reason,omitempty"`
 	OldHTTP   string `json:"old_http,omitempty"`
@@ -72,7 +79,10 @@ type BitbucketImportItem struct {
 
 	key, slug, groupName, description string
 	group                             *repo_model.RepoGroup
+	repo                              *repo_model.Repository
 	repos                             []*BitbucketImportItem
+	public                            bool
+	bitbucketPermission
 }
 
 func (item *BitbucketImportItem) set(status, reason string) {
@@ -125,6 +135,13 @@ func ImportBitbucket(ctx context.Context, doerName, orgName string, opts Bitbuck
 	if err := allowlist.IsMigrateURLAllowed(server.String(), doer); err != nil {
 		return nil, err
 	}
+	keyExpiry, err := authz.ParseExpiryDate(opts.KeyExpiry)
+	if err == nil && keyExpiry != 0 {
+		err = authz.ValidateExpiry(setting.DeployKeyExpiry, keyExpiry)
+	}
+	if err != nil {
+		return nil, util.NewInvalidArgumentErrorf("--key-expiry: %v", err)
+	}
 
 	if _, busy := bitbucketImports.LoadOrStore(org.ID, true); busy {
 		return nil, fmt.Errorf("%w: an import into %s is already running", util.ErrAlreadyExist, org.Name)
@@ -133,7 +150,7 @@ func ImportBitbucket(ctx context.Context, doerName, orgName string, opts Bitbuck
 	log.Info("Bitbucket import into %s by %s: %s", org.Name, doer.Name, opts) // String leaves the token out
 
 	d := newBitbucketDataCenterDownloader(ctx, server, "", "", opts.Token)
-	report, err := planBitbucketImport(ctx, d, org, opts.Projects)
+	report, err := planBitbucketImport(ctx, d, org, opts.Projects, keyExpiry)
 	if err != nil || report.Blocked || opts.DryRun {
 		return report, err
 	}
@@ -158,11 +175,13 @@ type bitbucketProject struct {
 	Key         string `json:"key"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Public      bool   `json:"public"`
 }
 
 type bitbucketRepository struct {
-	Slug  string              `json:"slug"`
-	Links bitbucketCloneLinks `json:"links"`
+	Slug   string              `json:"slug"`
+	Links  bitbucketCloneLinks `json:"links"`
+	Public bool                `json:"public"`
 }
 
 // bitbucketProjectName turns a Bitbucket project name into a project name: lower case, every run of other characters
@@ -184,9 +203,9 @@ func bitbucketProjectName(name, key string) string {
 
 // planBitbucketImport lists the projects and repositories to import and decides, without writing, what happens to
 // each: created, reused (imported before into the same place) or a conflict, which blocks the whole import.
-func planBitbucketImport(ctx context.Context, d *BitbucketDataCenterDownloader, org *organization.Organization, keys []string) (*BitbucketImportReport, error) {
+func planBitbucketImport(ctx context.Context, d *BitbucketDataCenterDownloader, org *organization.Organization, keys []string, keyExpiry timeutil.TimeStamp) (*BitbucketImportReport, error) {
 	server := d.baseURL.String()
-	projects, err := callAPIPaged[bitbucketProject](d, "projects")
+	projects, err := callAPIPaged[bitbucketProject](d, "api/1.0/projects")
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +226,7 @@ func planBitbucketImport(ctx context.Context, d *BitbucketDataCenterDownloader, 
 			continue
 		}
 		wanted[strings.ToUpper(p.Key)] = true
-		item := &BitbucketImportItem{Kind: "project", Bitbucket: util.StripControl(p.Key), key: p.Key, description: util.StripControl(p.Description), Status: BitbucketPlanned}
+		item := &BitbucketImportItem{Kind: "project", Bitbucket: util.StripControl(p.Key), key: p.Key, description: util.StripControl(p.Description), public: p.Public, Status: BitbucketPlanned}
 		report.Items = append(report.Items, item)
 		if !repo_model.IsValidBitbucketName(p.Key) {
 			conflict(item, "the project key isn't a plain name")
@@ -245,13 +264,13 @@ func planBitbucketImport(ctx context.Context, d *BitbucketDataCenterDownloader, 
 		names[item.groupName] = true
 		item.Name = org.Name + "/" + item.groupName
 
-		repos, err := callAPIPaged[bitbucketRepository](d, "projects/"+p.Key+"/repos")
+		repos, err := callAPIPaged[bitbucketRepository](d, "api/1.0/projects/"+p.Key+"/repos")
 		if err != nil {
 			return nil, err
 		}
 		slices.SortFunc(repos, func(a, b bitbucketRepository) int { return strings.Compare(a.Slug, b.Slug) })
 		for _, r := range repos {
-			ritem := &BitbucketImportItem{Kind: "repository", Bitbucket: util.StripControl(p.Key + "/" + r.Slug), key: p.Key, slug: r.Slug, Status: BitbucketPlanned}
+			ritem := &BitbucketImportItem{Kind: "repository", Bitbucket: util.StripControl(p.Key + "/" + r.Slug), key: p.Key, slug: r.Slug, public: r.Public, Status: BitbucketPlanned}
 			item.repos = append(item.repos, ritem)
 			report.Items = append(report.Items, ritem)
 			if !repo_model.IsValidBitbucketName(r.Slug) || repo_model.IsUsableRepoName(r.Slug) != nil {
@@ -283,6 +302,7 @@ func planBitbucketImport(ctx context.Context, d *BitbucketDataCenterDownloader, 
 					continue
 				}
 				ritem.set(BitbucketReused, "")
+				ritem.repo = repo
 				ritem.NewHTTP, ritem.NewSSH, ritem.NewWeb = repo.CloneLink().HTTPS, repo.CloneLink().SSH, repo.HTMLURL()
 			} else if item.group != nil {
 				if taken, err := repo_model.IsNameTaken(ctx, org.ID, item.group.ID, r.Slug); err != nil {
@@ -292,6 +312,11 @@ func planBitbucketImport(ctx context.Context, d *BitbucketDataCenterDownloader, 
 				} else if taken || onDisk {
 					conflict(ritem, "the name is taken in the project")
 				}
+			}
+		}
+		if item.Status != BitbucketConflict {
+			if err := planBitbucketPermissions(ctx, d, org, report, item, keyExpiry); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -334,7 +359,7 @@ func applyBitbucketImport(ctx context.Context, doer *user_model.User, org *organ
 			group, err := repo_model.CreateRepoGroup(ctx, org.AsUser(), item.groupName, item.description)
 			if err != nil {
 				failure(item, err)
-			} else if err := repo_model.InsertBitbucketOrigin(ctx, &repo_model.BitbucketOrigin{OwnerID: org.ID, GroupID: group.ID, ProjectKey: strings.ToUpper(item.key), Server: server}); err != nil {
+			} else if err := repo_model.InsertBitbucketOrigin(context.WithoutCancel(ctx), &repo_model.BitbucketOrigin{OwnerID: org.ID, GroupID: group.ID, ProjectKey: strings.ToUpper(item.key), Server: server}); err != nil {
 				failure(item, fmt.Errorf("the project was created, but recording its origin failed: delete it and rerun: %w", err))
 			} else {
 				item.group = group
@@ -389,8 +414,10 @@ func applyBitbucketImport(ctx context.Context, doer *user_model.User, org *organ
 				purge(ritem, repo, fmt.Errorf("recording the origin failed: %w", err))
 				continue
 			}
+			ritem.repo = migrated
 			ritem.NewHTTP, ritem.NewSSH, ritem.NewWeb = migrated.CloneLink().HTTPS, migrated.CloneLink().SSH, migrated.HTMLURL()
 			ritem.set(BitbucketCreated, "")
 		}
+		applyBitbucketPermissions(ctx, doer, org, item, failure)
 	}
 }

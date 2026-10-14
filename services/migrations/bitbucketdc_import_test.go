@@ -10,6 +10,7 @@ import (
 	"forgejo.org/models/unittest"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
+	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 	"forgejo.org/services/migrations/allowlist"
 
@@ -102,4 +103,14 @@ func TestImportBitbucketChecks(t *testing.T) {
 	require.NotErrorIs(t, err, util.ErrAlreadyExist)
 	_, held := bitbucketImports.Load(int64(3))
 	assert.False(t, held, "the lock is released")
+}
+
+func TestBitbucketKeyExpiry(t *testing.T) {
+	const bb, maxExpiry, flag = timeutil.TimeStamp(100), timeutil.TimeStamp(200), timeutil.TimeStamp(300)
+	assert.Equal(t, bb, bitbucketKeyExpiry(bb, maxExpiry, flag))
+	assert.Equal(t, maxExpiry, bitbucketKeyExpiry(0, maxExpiry, flag))
+	assert.Equal(t, maxExpiry, bitbucketKeyExpiry(400, maxExpiry, 0))
+	assert.Equal(t, flag, bitbucketKeyExpiry(400, 0, flag))
+	assert.Equal(t, bb, bitbucketKeyExpiry(bb, 0, 0))
+	assert.Zero(t, bitbucketKeyExpiry(0, 0, 0))
 }
