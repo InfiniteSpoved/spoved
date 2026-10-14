@@ -17,9 +17,11 @@ import (
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	base "forgejo.org/modules/migration"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 	"forgejo.org/services/migrations/allowlist"
+	repo_service "forgejo.org/services/repository"
 )
 
 // BitbucketImportOptions are the options of an import of Bitbucket Data Center projects into an organization.
@@ -111,6 +113,9 @@ func ImportBitbucket(ctx context.Context, doerName, orgName string, opts Bitbuck
 			return nil, util.NewPermissionDeniedErrorf("%s is not an owner of %s", doer.Name, org.Name)
 		}
 	}
+	if !opts.DryRun && setting.GetMaintenance(ctx).ReadOnly() {
+		return nil, util.NewPermissionDeniedErrorf("the instance is in maintenance mode")
+	}
 	server, err := parseBitbucketServer(opts.Server)
 	if err != nil {
 		return nil, err
@@ -199,7 +204,7 @@ func planBitbucketImport(ctx context.Context, d *BitbucketDataCenterDownloader, 
 			continue
 		}
 		wanted[strings.ToUpper(p.Key)] = true
-		item := &BitbucketImportItem{Kind: "project", Bitbucket: util.StripControl(p.Key), key: p.Key, description: p.Description, Status: BitbucketPlanned}
+		item := &BitbucketImportItem{Kind: "project", Bitbucket: util.StripControl(p.Key), key: p.Key, description: util.StripControl(p.Description), Status: BitbucketPlanned}
 		report.Items = append(report.Items, item)
 		if !repo_model.IsValidBitbucketName(p.Key) {
 			conflict(item, "the project key isn't a plain name")
@@ -224,9 +229,13 @@ func planBitbucketImport(ctx context.Context, d *BitbucketDataCenterDownloader, 
 			item.set(BitbucketReused, "")
 		} else {
 			item.groupName = bitbucketProjectName(p.Name, p.Key)
-			if taken, err := repo_model.IsNameTaken(ctx, org.ID, 0, item.groupName); err != nil {
+			if repo_model.IsUsableGroupName(item.groupName) != nil {
+				conflict(item, "the project name isn't usable")
+			} else if taken, err := repo_model.IsNameTaken(ctx, org.ID, 0, item.groupName); err != nil {
 				return nil, err
-			} else if taken || names[item.groupName] {
+			} else if onDisk, err := util.IsExist(repo_model.GroupPath(org.Name, item.groupName)); err != nil {
+				return nil, err
+			} else if taken || onDisk || names[item.groupName] {
 				conflict(item, "the name is taken in the organization")
 			}
 		}
@@ -275,7 +284,9 @@ func planBitbucketImport(ctx context.Context, d *BitbucketDataCenterDownloader, 
 			} else if item.group != nil {
 				if taken, err := repo_model.IsNameTaken(ctx, org.ID, item.group.ID, r.Slug); err != nil {
 					return nil, err
-				} else if taken {
+				} else if onDisk, err := util.IsExist(repo_model.GroupRepoPath(org.Name, item.group.Name, r.Slug)); err != nil {
+					return nil, err
+				} else if taken || onDisk {
 					conflict(ritem, "the name is taken in the project")
 				}
 			}
@@ -325,18 +336,38 @@ func applyBitbucketImport(ctx context.Context, doer *user_model.User, org *organ
 				ritem.set(BitbucketFailed, "its project was not created")
 				continue
 			}
-			repo, err := MigrateRepository(ctx, doer, org.Name, base.MigrateOptions{
-				CloneAddr:      ritem.OldHTTP,
-				AuthUsername:   opts.Username,
-				AuthToken:      opts.Token,
-				RepoName:       ritem.slug,
+			// create the repository first, as the migration task does, so a failed one can be deleted by its ID
+			repo, err := repo_service.CreateRepositoryDirectly(ctx, doer, org.AsUser(), repo_service.CreateRepoOptions{
+				Name:           ritem.slug,
 				GroupID:        item.group.ID,
-				Private:        true,
+				OriginalURL:    ritem.OldWeb,
 				GitServiceType: structs.BitbucketDataCenterService,
-				PullRequests:   opts.PullRequests,
-				Comments:       opts.PullRequests,
-			}, nil)
+				IsPrivate:      true,
+				Status:         repo_model.RepositoryBeingMigrated,
+			})
 			if err != nil {
+				failure(ritem, err)
+				continue
+			}
+			if _, err := MigrateRepository(ctx, doer, org.Name, base.MigrateOptions{
+				CloneAddr:       ritem.OldHTTP,
+				OriginalURL:     ritem.OldWeb,
+				AuthUsername:    opts.Username,
+				AuthToken:       opts.Token,
+				RepoName:        ritem.slug,
+				MigrateToRepoID: repo.ID,
+				Private:         true,
+				GitServiceType:  structs.BitbucketDataCenterService,
+				PullRequests:    opts.PullRequests,
+				Comments:        opts.PullRequests,
+			}, nil); err != nil {
+				if derr := repo_service.DeleteRepositoryPermanently(ctx, doer, repo, false); derr != nil {
+					err = fmt.Errorf("%w; deleting the half-imported repository failed too: delete %s and rerun", err, repo.FullName())
+				}
+				failure(ritem, err)
+				continue
+			}
+			if repo, err = repo_model.GetRepositoryByID(ctx, repo.ID); err != nil {
 				failure(ritem, err)
 				continue
 			}

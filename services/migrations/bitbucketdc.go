@@ -120,9 +120,12 @@ type bitbucketRef struct {
 func newBitbucketDataCenterDownloader(ctx context.Context, baseURL *url.URL, project, repoSlug, token string) *BitbucketDataCenterDownloader {
 	client := allowlist.NewMigrationHTTPClient()
 	// a redirect may not leave the server's origin, nor downgrade https to http
-	client.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if req.URL.Scheme != baseURL.Scheme || req.URL.Host != baseURL.Host {
 			return errors.New("redirect off the Bitbucket server refused")
+		}
+		if len(via) >= 10 { // Go's own limit, which a CheckRedirect replaces
+			return errors.New("stopped after 10 redirects")
 		}
 		return nil
 	}

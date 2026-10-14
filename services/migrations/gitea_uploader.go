@@ -126,7 +126,6 @@ func (g *GiteaLocalUploader) CreateRepo(repo *base.Repository, opts base.Migrate
 	if opts.MigrateToRepoID <= 0 {
 		r, err = repo_service.CreateRepositoryDirectly(g.ctx, g.doer, owner, repo_service.CreateRepoOptions{
 			Name:           g.repoName,
-			GroupID:        opts.GroupID,
 			Description:    repo.Description,
 			Website:        repo.Website,
 			OriginalURL:    repo.OriginalURL,
@@ -696,8 +695,12 @@ func (g *GiteaLocalUploader) updateGitForPullRequest(pr *base.PullRequest) (head
 				// ... let's try something less nice
 				remote = "head-pr-" + strconv.FormatInt(pr.Number, 10)
 			}
-			// ... now add the remote
-			err := g.gitRepo.AddRemote(remote, pr.Head.CloneURL, true)
+			// ... now add the remote; it is fetched below, without following redirects. The URL comes from the
+			// downloader, so it is checked like a clone address first.
+			err := allowlist.IsMigrateURLAllowed(pr.Head.CloneURL, g.doer)
+			if err == nil {
+				err = g.gitRepo.AddRemote(remote, pr.Head.CloneURL, false)
+			}
 			if err != nil {
 				log.Error("PR #%d in %s/%s AddRemote[%s] failed: %v", pr.Number, g.repoOwner, g.repoName, remote, err)
 			} else {
@@ -735,7 +738,7 @@ func (g *GiteaLocalUploader) updateGitForPullRequest(pr *base.PullRequest) (head
 				fetchArg = git.BranchPrefix + fetchArg
 			}
 
-			_, _, err = git.NewCommand(g.ctx, "fetch", "--no-tags").AddDashesAndList(remote, fetchArg).RunStdString(&git.RunOpts{Dir: g.repo.RepoPath()})
+			_, _, err = git.NewCommand(g.ctx, "-c", "http.followRedirects=false", "fetch", "--no-tags").AddDashesAndList(remote, fetchArg).RunStdString(&git.RunOpts{Dir: g.repo.RepoPath()})
 			if err != nil {
 				log.Error("Fetch branch from %s failed: %v", pr.Head.CloneURL, err)
 				return head, nil

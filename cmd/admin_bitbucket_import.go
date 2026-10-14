@@ -104,6 +104,9 @@ func bitbucketToken(file string) (string, error) {
 func printBitbucketReport(w io.Writer, report *migrations.BitbucketImportReport) {
 	for _, item := range report.Items {
 		line := fmt.Sprintf("%-10s %-10s %s -> %s", item.Kind, item.Status, item.Bitbucket, item.Name)
+		if item.NewHTTP != "" {
+			line += " (" + item.NewHTTP + ")"
+		}
 		if item.Reason != "" {
 			line += ": " + item.Reason
 		}
@@ -113,12 +116,9 @@ func printBitbucketReport(w io.Writer, report *migrations.BitbucketImportReport)
 
 func writeBitbucketCSV(w io.Writer, report *migrations.BitbucketImportReport) error {
 	out := csv.NewWriter(w)
-	_ = out.Write([]string{"bitbucket", "status", "old_http", "old_ssh", "old_web", "new_https", "new_ssh", "new_web"})
+	_ = out.Write([]string{"kind", "bitbucket", "name", "status", "old_http", "old_ssh", "old_web", "new_https", "new_ssh", "new_web"})
 	for _, item := range report.Items {
-		if item.Kind != "repository" {
-			continue
-		}
-		row := []string{item.Bitbucket, item.Status, item.OldHTTP, item.OldSSH, item.OldWeb, item.NewHTTP, item.NewSSH, item.NewWeb}
+		row := []string{item.Kind, item.Bitbucket, item.Name, item.Status, item.OldHTTP, item.OldSSH, item.OldWeb, item.NewHTTP, item.NewSSH, item.NewWeb}
 		for i := range row {
 			row[i] = util.CSVSafe(util.StripControl(row[i]))
 		}

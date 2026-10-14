@@ -6,6 +6,7 @@ package private
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/private"
@@ -30,6 +31,7 @@ func BitbucketImport(ctx *app_context.PrivateContext) {
 		DryRun:       params.DryRun,
 		PullRequests: params.PullRequests,
 	}
+	token := params.Token
 	params.Token = ""
 	report, err := migrations.ImportBitbucket(ctx, params.Doer, params.Org, opts)
 	opts.Token = ""
@@ -43,7 +45,11 @@ func BitbucketImport(ctx *app_context.PrivateContext) {
 		case errors.Is(err, util.ErrInvalidArgument), errors.Is(err, util.ErrAlreadyExist):
 			status = http.StatusBadRequest
 		}
-		msg := util.StripControl(err.Error())
+		msg := util.SanitizeCredentialURLs(err.Error())
+		if token != "" {
+			msg = strings.ReplaceAll(msg, token, "***")
+		}
+		msg = util.StripControl(msg)
 		ctx.JSON(status, private.Response{Err: msg, UserMsg: msg})
 		return
 	}

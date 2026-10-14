@@ -466,19 +466,25 @@ func TestBitbucketDataCenterRedirects(t *testing.T) {
 			http.Redirect(w, r, other.URL+r.URL.Path, http.StatusFound)
 		case "/rest/api/1.0/projects/proj/repos/downgrade":
 			http.Redirect(w, r, "http://"+r.Host+r.URL.Path, http.StatusFound)
+		case "/rest/api/1.0/projects/proj/repos/loop":
+			http.Redirect(w, r, r.URL.Path, http.StatusFound)
 		}
 	}))
 	defer tlsServer.Close()
 	tlsURL = tlsServer.URL
 
-	for slug, ok := range map[string]bool{"same": true, "elsewhere": false, "downgrade": false} {
+	for slug, ok := range map[string]bool{"same": true, "elsewhere": false, "downgrade": false, "loop": false} {
 		downloader, err := (&BitbucketDataCenterDownloaderFactory{}).New(t.Context(), base.MigrateOptions{CloneAddr: tlsServer.URL + "/scm/proj/" + slug + ".git", AuthToken: "sometoken"})
 		require.NoError(t, err)
 		_, err = downloader.GetRepoInfo()
 		if ok {
 			require.NoError(t, err, slug)
 		} else {
-			require.ErrorContains(t, err, "redirect off the Bitbucket server refused", slug)
+			require.Error(t, err, slug)
+			assert.Contains(t, err.Error(), map[string]string{"loop": "stopped after 10 redirects"}[slug]+"", slug)
+			if slug != "loop" {
+				require.ErrorContains(t, err, "redirect off the Bitbucket server refused", slug)
+			}
 		}
 	}
 }

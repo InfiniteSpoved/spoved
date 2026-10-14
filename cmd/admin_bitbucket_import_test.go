@@ -41,17 +41,21 @@ func TestBitbucketImportOutput(t *testing.T) {
 	report := &migrations.BitbucketImportReport{Items: []*migrations.BitbucketImportItem{
 		{Kind: "project", Bitbucket: "PAY", Name: "org3/pay", Status: "planned"},
 		{Kind: "repository", Bitbucket: "PAY/api", Name: "org3/pay/api", Status: "conflict", Reason: "bad\x1b[2Jname\r\n", OldSSH: "=HYPERLINK(\"x\")", OldHTTP: "https://bb.example.com/scm/pay/api.git"},
+		{Kind: "repository", Bitbucket: "PAY/web", Name: "org3/pay/web", Status: "created", NewHTTP: "https://spoved.example.com/org3/pay/web.git"},
 	}}
 
 	var out bytes.Buffer
 	printBitbucketReport(&out, report)
 	assert.NotContains(t, out.String(), "\x1b")
-	assert.Equal(t, 2, strings.Count(out.String(), "\n"), "one line per item")
+	assert.Equal(t, 3, strings.Count(out.String(), "\n"), "one line per item")
+	assert.Contains(t, out.String(), "https://spoved.example.com/org3/pay/web.git", "the new URL is printed")
 
 	out.Reset()
 	require.NoError(t, writeBitbucketCSV(&out, report))
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	require.Len(t, lines, 2, "a header and the repository")
-	assert.Contains(t, lines[1], `'=HYPERLINK`)
-	assert.Contains(t, lines[1], "https://bb.example.com/scm/pay/api.git")
+	require.Len(t, lines, 4, "a header and a row per item")
+	assert.True(t, strings.HasPrefix(lines[0], "kind,"))
+	assert.True(t, strings.HasPrefix(lines[1], "project,PAY,"))
+	assert.Contains(t, lines[2], `'=HYPERLINK`)
+	assert.Contains(t, lines[2], "https://bb.example.com/scm/pay/api.git")
 }

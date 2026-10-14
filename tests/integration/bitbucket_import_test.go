@@ -4,7 +4,6 @@
 package integration
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,15 +11,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"forgejo.org/models/db"
+	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/optional"
 	"forgejo.org/modules/private"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
@@ -35,9 +37,15 @@ import (
 
 const bitbucketTestToken = "bbtoken-0123456789abcdef"
 
-// newBitbucketMock serves a Bitbucket Data Center REST API with the projects and their repository slugs, and every
-// repository's git data (dumb HTTP) from a copy of user2/repo1. Every clone link it hands out is hostile.
-func newBitbucketMock(t *testing.T, projects map[string]string, repos map[string][]string) *httptest.Server {
+// bitbucketMock serves a Bitbucket Data Center REST API with the projects (key → name) and their repository slugs,
+// and every repository's git data (dumb HTTP) from a copy of user2/repo1. Every clone link it hands out is hostile.
+// PAY/api has one open pull request from a fork, ~JDOE/api, whose git URL redirects.
+type bitbucketMock struct {
+	*httptest.Server
+	failSlug atomic.Value // a slug whose git data answers 404
+}
+
+func newBitbucketMock(t *testing.T, projects map[string]string, repos map[string][]string) *bitbucketMock {
 	t.Helper()
 	bare := filepath.Join(t.TempDir(), "repo.git")
 	for _, args := range [][]string{
@@ -47,15 +55,30 @@ func newBitbucketMock(t *testing.T, projects map[string]string, repos map[string
 		out, err := exec.Command("git", args...).CombinedOutput()
 		require.NoError(t, err, string(out))
 	}
+	out, err := exec.Command("git", "-C", bare, "rev-parse", "master").Output()
+	require.NoError(t, err)
+	head := strings.TrimSpace(string(out))
 	files := http.FileServer(http.Dir(bare))
 
+	m := &bitbucketMock{}
+	m.failSlug.Store("")
 	page := func(w http.ResponseWriter, values any) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"isLastPage": true, "values": values})
 	}
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ref := func(key, branch string) map[string]any {
+		return map[string]any{"displayId": branch, "latestCommit": head, "repository": map[string]any{"slug": "api", "project": map[string]string{"key": key}}}
+	}
+	m.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 		if parts[0] == "scm" && len(parts) >= 3 { // git data: the same repository for every slug
-			http.StripPrefix("/"+strings.Join(parts[:3], "/"), files).ServeHTTP(w, r)
+			switch {
+			case parts[1] == "~jdoe":
+				http.Redirect(w, r, "/scm/pay/"+strings.Join(parts[2:], "/"), http.StatusFound)
+			case parts[2] == m.failSlug.Load().(string)+".git":
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				http.StripPrefix("/"+strings.Join(parts[:3], "/"), files).ServeHTTP(w, r)
+			}
 			return
 		}
 		if r.Header.Get("Authorization") != "Bearer "+bitbucketTestToken {
@@ -67,7 +90,7 @@ func newBitbucketMock(t *testing.T, projects map[string]string, repos map[string
 		case len(rest) == 1 && rest[0] == "projects":
 			values := []map[string]string{}
 			for key, name := range projects {
-				values = append(values, map[string]string{"key": key, "name": name})
+				values = append(values, map[string]string{"key": key, "name": name, "description": "desc\x1b[2J"})
 			}
 			page(w, values)
 		case len(rest) == 3 && rest[2] == "repos":
@@ -85,20 +108,38 @@ func newBitbucketMock(t *testing.T, projects map[string]string, repos map[string
 			}})
 		case len(rest) == 6 && rest[4] == "branches":
 			_, _ = w.Write([]byte(`{"displayId":"master"}`))
+		case len(rest) == 5 && rest[3] == "api" && rest[4] == "pull-requests":
+			page(w, []map[string]any{{
+				"id": 1, "title": "From a fork", "state": "OPEN", "createdDate": 1700000000000, "updatedDate": 1700000000000,
+				"author":  map[string]any{"user": map[string]any{"id": 7, "name": "jdoe", "emailAddress": "jdoe@example.com"}},
+				"fromRef": ref("~JDOE", "feature"), "toRef": ref("PAY", "master"),
+			}})
 		default:
 			page(w, []any{})
 		}
 	}))
+	return m
 }
 
-func countBitbucketImportRows(t *testing.T) map[string]int {
+// bitbucketImportTables are the tables an import writes to, directly or through the services it calls.
+var bitbucketImportTables = []string{
+	"repository", "repo_unit", "access", "team", "team_repo", "action", "notice", "webhook", "hook_task",
+	"issue", "pull_request", "comment", "review", "repo_group", "repo_group_name_claim", "repo_group_redirect",
+	"repo_redirect", "bitbucket_origin",
+}
+
+func countBitbucketImportRows(t *testing.T) map[string]int64 {
 	t.Helper()
-	counts := map[string]int{}
-	for _, bean := range []any{new(repo_model.Repository), new(repo_model.RepoGroup), new(repo_model.RepoGroupNameClaim), new(repo_model.BitbucketOrigin), new(repo_model.Redirect)} {
-		n, err := db.GetEngine(db.DefaultContext).Count(bean)
+	counts := map[string]int64{}
+	for _, table := range bitbucketImportTables {
+		n, err := db.GetEngine(db.DefaultContext).Table(table).Count()
 		require.NoError(t, err)
-		counts[fmt.Sprintf("%T", bean)] = int(n)
+		counts[table] = n
 	}
+	var numRepos int64
+	_, err := db.GetEngine(db.DefaultContext).SQL("SELECT SUM(num_repos) FROM `user`").Get(&numRepos)
+	require.NoError(t, err)
+	counts["user.num_repos"] = numRepos
 	return counts
 }
 
@@ -107,51 +148,83 @@ func TestBitbucketImport(t *testing.T) {
 		defer test.MockVariableValueWithReset(&setting.Migrations.AllowLocalNetworks, true, func() { require.NoError(t, allowlist.Init()) })()
 		defer test.MockVariableValueWithReset(&setting.Migrations.AllowUnencrypted, true, func() { require.NoError(t, allowlist.Init()) })()
 		ctx := t.Context()
-		server := newBitbucketMock(t, map[string]string{"PAY": "Payments\x1b[31m Team", "ZZZ": "repo3"}, map[string][]string{"PAY": {"api", "web"}, "ZZZ": {"tools"}})
+		server := newBitbucketMock(t, map[string]string{"PAY": "Payments\x1b[31m Team", "ZZZ": "repo3", "~JD": "---", "-": "", "A.GIT": ""},
+			map[string][]string{"PAY": {"api", "web"}, "ZZZ": {"tools"}})
 		defer server.Close()
 		opts := migrations.BitbucketImportOptions{Server: server.URL, Token: bitbucketTestToken, Projects: []string{"PAY"}, PullRequests: true}
 		dryRun := opts
 		dryRun.DryRun = true
+		const projectName = "payments-31m-team"
 
-		t.Run("a conflict in the last item writes nothing", func(t *testing.T) {
+		// blocked runs the import and checks it stopped before any write, on a conflict of the item named
+		blocked := func(t *testing.T, o migrations.BitbucketImportOptions, conflicting string) {
+			t.Helper()
 			before := countBitbucketImportRows(t)
-			all := opts
-			all.Projects = nil // PAY, then ZZZ, whose name is taken by org3's repo3
-			report, err := migrations.ImportBitbucket(ctx, "user2", "org3", all)
+			report, err := migrations.ImportBitbucket(ctx, "user2", "org3", o)
 			require.NoError(t, err)
 			assert.True(t, report.Blocked)
-			last := report.Items[len(report.Items)-2]
-			assert.Equal(t, "ZZZ", last.Bitbucket)
-			assert.Equal(t, migrations.BitbucketConflict, last.Status)
+			found := false
+			for _, item := range report.Items {
+				if item.Bitbucket == conflicting {
+					found = true
+					assert.Equal(t, migrations.BitbucketConflict, item.Status, conflicting)
+				}
+			}
+			assert.True(t, found, conflicting)
 			assert.Equal(t, before, countBitbucketImportRows(t))
-		})
+		}
 
 		t.Run("a server outside the allowlist gets no request", func(t *testing.T) {
-			hits := 0
-			blocked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits++ }))
-			defer blocked.Close()
+			var hits atomic.Int32
+			outside := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1) }))
+			defer outside.Close()
 			defer test.MockVariableValueWithReset(&setting.Migrations.AllowLocalNetworks, false, func() { require.NoError(t, allowlist.Init()) })()
-			_, err := migrations.ImportBitbucket(ctx, "user2", "org3", migrations.BitbucketImportOptions{Server: blocked.URL, Token: bitbucketTestToken, DryRun: true})
+			_, err := migrations.ImportBitbucket(ctx, "user2", "org3", migrations.BitbucketImportOptions{Server: outside.URL, Token: bitbucketTestToken, DryRun: true})
 			require.Error(t, err)
-			assert.Zero(t, hits)
+			assert.Zero(t, hits.Load())
+		})
+
+		t.Run("conflicts write nothing", func(t *testing.T) {
+			last := opts
+			last.Projects = []string{"PAY", "ZZZ"} // ZZZ, the last project, is named like org3's repo3
+			blocked(t, last, "ZZZ")
+
+			for _, key := range []string{"~JD", "-", "A.GIT"} { // their names fall back to an unusable key
+				unusable := opts
+				unusable.Projects = []string{key}
+				blocked(t, unusable, key)
+			}
+
+			org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+			group, err := repo_model.CreateRepoGroup(ctx, org3, projectName, "")
+			require.NoError(t, err)
+			blocked(t, opts, "PAY")
+			require.NoError(t, repo_model.DeleteRepoGroup(ctx, group))
+
+			require.NoError(t, db.Insert(ctx, &repo_model.RepoGroupRedirect{OwnerID: 3, LowerName: projectName, RedirectGroupID: 999}))
+			blocked(t, opts, "PAY")
+			_, err = db.GetEngine(ctx).Where("owner_id = 3 AND lower_name = ?", projectName).Delete(new(repo_model.RepoGroupRedirect))
+			require.NoError(t, err)
 		})
 
 		t.Run("dry run", func(t *testing.T) {
-			before := countBitbucketImportRows(t)
-			report, err := migrations.ImportBitbucket(ctx, "user2", "org3", dryRun)
-			require.NoError(t, err)
-			assert.False(t, report.Blocked)
-			assert.Equal(t, before, countBitbucketImportRows(t))
-			require.Len(t, report.Items, 3)
-			assert.Equal(t, "org3/payments-31m-team", report.Items[0].Name)
-			for _, item := range report.Items {
-				assert.Equal(t, migrations.BitbucketPlanned, item.Status, item.Bitbucket)
+			for _, doer := range []string{"user2", "user1"} { // the owner, and a site admin who isn't a member
+				before := countBitbucketImportRows(t)
+				report, err := migrations.ImportBitbucket(ctx, doer, "org3", dryRun)
+				require.NoError(t, err)
+				assert.False(t, report.Blocked)
+				assert.Equal(t, before, countBitbucketImportRows(t))
+				require.Len(t, report.Items, 3)
+				assert.Equal(t, "org3/"+projectName, report.Items[0].Name)
+				for _, item := range report.Items {
+					assert.Equal(t, migrations.BitbucketPlanned, item.Status, item.Bitbucket)
+				}
+				api := report.Items[1]
+				assert.Equal(t, "PAY/api", api.Bitbucket)
+				assert.Equal(t, server.URL+"/scm/pay/api.git", api.OldHTTP)
+				assert.Equal(t, server.URL+"/projects/PAY/repos/api/browse", api.OldWeb)
+				assert.NotContains(t, api.OldSSH, "\x1b", "display text is stripped of control characters")
 			}
-			api := report.Items[1]
-			assert.Equal(t, "PAY/api", api.Bitbucket)
-			assert.Equal(t, server.URL+"/scm/pay/api.git", api.OldHTTP)
-			assert.Equal(t, server.URL+"/projects/PAY/repos/api/browse", api.OldWeb)
-			assert.NotContains(t, api.OldSSH, "\x1b", "display text is stripped of control characters")
 		})
 
 		t.Run("through the internal route", func(t *testing.T) {
@@ -162,34 +235,56 @@ func TestBitbucketImport(t *testing.T) {
 
 			_, extra = private.BitbucketImport(ctx, private.BitbucketImportParams{Doer: "user5", Org: "org3", Server: server.URL, Token: bitbucketTestToken, DryRun: true})
 			assert.Equal(t, http.StatusForbidden, extra.StatusCode)
+
+			defer test.MockVariableValue(&setting.Maintenance.Mode, setting.MaintenanceReadOnly)()
+			_, extra = private.BitbucketImport(ctx, private.BitbucketImportParams{Doer: "user2", Org: "org3", Server: server.URL, Token: bitbucketTestToken, Projects: []string{"PAY"}})
+			assert.Equal(t, http.StatusForbidden, extra.StatusCode, "no real run in maintenance mode")
+			_, extra = private.BitbucketImport(ctx, private.BitbucketImportParams{Doer: "user2", Org: "org3", Server: server.URL, Token: bitbucketTestToken, Projects: []string{"PAY"}, DryRun: true})
+			require.NoError(t, extra.Error, "a dry run still works")
 		})
 
-		var report *migrations.BitbucketImportReport
-		t.Run("import", func(t *testing.T) {
+		t.Run("a failed repository is deleted and imported by the next run", func(t *testing.T) {
 			logChecker, cleanup := test.NewLogChecker(log.DEFAULT, log.TRACE)
 			logChecker.Filter(bitbucketTestToken)
 			defer cleanup()
 
-			var err error
-			report, err = migrations.ImportBitbucket(ctx, "user2", "org3", opts)
+			server.failSlug.Store("web")
+			report, err := migrations.ImportBitbucket(ctx, "user2", "org3", opts)
+			server.failSlug.Store("")
 			require.NoError(t, err)
-			for _, item := range report.Items {
-				require.Equal(t, migrations.BitbucketCreated, item.Status, "%s: %s", item.Bitbucket, item.Reason)
-			}
+			require.Len(t, report.Items, 3)
+			assert.Equal(t, migrations.BitbucketCreated, report.Items[0].Status, report.Items[0].Reason)
+			assert.Equal(t, migrations.BitbucketCreated, report.Items[1].Status, report.Items[1].Reason)
+			assert.Equal(t, migrations.BitbucketFailed, report.Items[2].Status)
+			b, err := json.Marshal(report)
+			require.NoError(t, err)
+			assert.NotContains(t, string(b), bitbucketTestToken)
 			found, _ := logChecker.Check(time.Second)
 			assert.False(t, found[0], "the token is never logged")
 
-			group := unittest.AssertExistsAndLoadBean(t, &repo_model.RepoGroup{OwnerID: 3, LowerName: "payments-31m-team"})
+			group := unittest.AssertExistsAndLoadBean(t, &repo_model.RepoGroup{OwnerID: 3, LowerName: projectName})
+			_, err = repo_model.GetRepositoryByPath(ctx, 3, group.Name, "web")
+			assert.True(t, repo_model.IsErrRepoNotExist(err), "the failed repository is gone")
+			unittest.AssertNotExistsBean(t, &repo_model.BitbucketOrigin{ProjectKey: "PAY", Slug: "web"})
+
+			again, err := migrations.ImportBitbucket(ctx, "user2", "org3", opts)
+			require.NoError(t, err)
+			assert.Equal(t, []string{migrations.BitbucketReused, migrations.BitbucketReused, migrations.BitbucketCreated},
+				[]string{again.Items[0].Status, again.Items[1].Status, again.Items[2].Status}, again.Items[2].Reason)
+		})
+
+		t.Run("imported repositories", func(t *testing.T) {
+			group := unittest.AssertExistsAndLoadBean(t, &repo_model.RepoGroup{OwnerID: 3, LowerName: projectName})
+			assert.Equal(t, "desc?[2J", group.Description)
 			unittest.AssertExistsAndLoadBean(t, &repo_model.BitbucketOrigin{OwnerID: 3, GroupID: group.ID, ProjectKey: "PAY", Server: server.URL})
 			for _, slug := range []string{"api", "web"} {
 				repo, err := repo_model.GetRepositoryByPath(ctx, 3, group.Name, slug)
 				require.NoError(t, err)
+				assert.Equal(t, repo_model.RepositoryReady, repo.Status)
 				assert.True(t, repo.IsPrivate)
-				assert.Equal(t, group.ID, repo.GroupID)
 				assert.Equal(t, server.URL+"/projects/PAY/repos/"+slug+"/browse", repo.OriginalURL)
 				origin := unittest.AssertExistsAndLoadBean(t, &repo_model.BitbucketOrigin{RepoID: repo.ID})
 				assert.Zero(t, origin.OwnerID)
-				assert.Equal(t, "PAY/"+slug, origin.Path())
 
 				// the git data is at the project path and nothing at the owner's root
 				assert.DirExists(t, repo.RepoPath())
@@ -198,9 +293,26 @@ func TestBitbucketImport(t *testing.T) {
 				require.NoError(t, err)
 				assert.NotContains(t, string(config), bitbucketTestToken)
 				assert.NotContains(t, string(config), `[remote "origin"]`)
-				assert.NotContains(t, repo.OriginalURL, bitbucketTestToken)
 				out, err := exec.Command("git", "-C", repo.RepoPath(), "rev-parse", "--verify", "refs/heads/master").CombinedOutput()
 				require.NoError(t, err, string(out))
+			}
+
+			// the fork pull request is imported, but its head behind a redirect is not fetched
+			api, err := repo_model.GetRepositoryByPath(ctx, 3, group.Name, "api")
+			require.NoError(t, err)
+			pulls, err := issues_model.Issues(ctx, &issues_model.IssuesOptions{RepoIDs: []int64{api.ID}, IsPull: optional.Some(true)})
+			require.NoError(t, err)
+			require.Len(t, pulls, 1)
+			out, err := exec.Command("git", "-C", api.RepoPath(), "for-each-ref", "--format=%(refname)", "refs/heads/").Output()
+			require.NoError(t, err)
+			assert.NotContains(t, string(out), "jdoe")
+
+			// the 14b origin search finds it, for the owner only
+			for user, want := range map[string]bool{"user2": true, "user5": false} {
+				doer := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: user})
+				repos, _, err := repo_model.SearchRepositoryByName(ctx, &repo_model.SearchRepoOptions{Keyword: "PAY/api", Actor: doer, Private: true})
+				require.NoError(t, err)
+				assert.Equal(t, want, len(repos) == 1 && repos[0].ID == api.ID, user)
 			}
 		})
 
@@ -211,32 +323,33 @@ func TestBitbucketImport(t *testing.T) {
 			for _, item := range again.Items {
 				assert.Equal(t, migrations.BitbucketReused, item.Status, item.Bitbucket)
 			}
-			assert.Equal(t, report.Items[1].NewHTTP, again.Items[1].NewHTTP)
 			assert.Equal(t, before, countBitbucketImportRows(t))
 		})
 
 		t.Run("a resume never reuses a repository that left its place", func(t *testing.T) {
-			group := unittest.AssertExistsAndLoadBean(t, &repo_model.RepoGroup{OwnerID: 3, LowerName: "payments-31m-team"})
+			admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+			group := unittest.AssertExistsAndLoadBean(t, &repo_model.RepoGroup{OwnerID: 3, LowerName: projectName})
 			api, err := repo_model.GetRepositoryByPath(ctx, 3, group.Name, "api")
 			require.NoError(t, err)
-			blocked := func(t *testing.T) {
-				t.Helper()
-				before := countBitbucketImportRows(t)
-				r, err := migrations.ImportBitbucket(ctx, "user2", "org3", opts)
-				require.NoError(t, err)
-				assert.True(t, r.Blocked)
-				assert.Equal(t, migrations.BitbucketConflict, r.Items[1].Status)
-				assert.Equal(t, before, countBitbucketImportRows(t))
-			}
 
 			_, err = db.Exec(ctx, "UPDATE repository SET trashed_unix = 1 WHERE id = ?", api.ID)
 			require.NoError(t, err)
-			blocked(t)
+			blocked(t, opts, "PAY/api")
 			_, err = db.Exec(ctx, "UPDATE repository SET trashed_unix = 0 WHERE id = ?", api.ID)
 			require.NoError(t, err)
 
-			require.NoError(t, repo_service.MoveRepository(ctx, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1}), api, 0))
-			blocked(t)
+			other, err := repo_model.CreateRepoGroup(ctx, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3}), "other", "")
+			require.NoError(t, err)
+			require.NoError(t, repo_service.MoveRepository(ctx, admin, api, other.ID))
+			blocked(t, opts, "PAY/api")
+
+			api = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: api.ID})
+			require.NoError(t, repo_service.MoveRepository(ctx, admin, api, 0))
+			blocked(t, opts, "PAY/api")
+
+			api = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: api.ID})
+			require.NoError(t, repo_service.TransferOwnership(ctx, admin, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 17}), api, nil))
+			blocked(t, opts, "PAY/api")
 		})
 
 		t.Run("the existing web migration still works", func(t *testing.T) {
@@ -246,7 +359,7 @@ func TestBitbucketImport(t *testing.T) {
 				"auth_token": bitbucketTestToken,
 				"uid":        "2",
 				"repo_name":  "from-bitbucket",
-				"service":    fmt.Sprint(int(structs.BitbucketDataCenterService)),
+				"service":    "11",
 			})
 			session.MakeRequest(t, req, http.StatusSeeOther)
 			assert.Eventually(t, func() bool {

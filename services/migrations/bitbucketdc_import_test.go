@@ -52,28 +52,42 @@ func TestImportBitbucketChecks(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	defer test.MockVariableValueWithReset(&setting.Migrations.AllowLocalNetworks, true, func() { require.NoError(t, allowlist.Init()) })()
 	opts := BitbucketImportOptions{Server: "https://127.0.0.1:1", Token: "sometoken", DryRun: true}
+	set := func(t *testing.T, query string, args ...any) {
+		t.Helper()
+		_, err := db.Exec(db.DefaultContext, append([]any{query}, args...)...)
+		require.NoError(t, err)
+	}
 
 	// org3 is owned by user2; user5 isn't a member; user1 is a site admin
 	_, err := ImportBitbucket(t.Context(), "user5", "org3", opts)
 	require.ErrorIs(t, err, util.ErrPermissionDenied)
 	_, err = ImportBitbucket(t.Context(), "user2", "user5", opts)
 	require.Error(t, err, "not an organization")
-	_, err = ImportBitbucket(t.Context(), "user2", "org3", BitbucketImportOptions{Server: "file:///srv"})
+	_, err = ImportBitbucket(t.Context(), "user2", "org3", BitbucketImportOptions{Server: "file:///srv", DryRun: true})
 	require.ErrorIs(t, err, util.ErrInvalidArgument)
 
-	_, err = db.Exec(db.DefaultContext, "UPDATE `user` SET require_two_factor = ? WHERE id = 3", true)
-	require.NoError(t, err)
-	_, err = ImportBitbucket(t.Context(), "user2", "org3", opts)
-	require.ErrorIs(t, err, util.ErrPermissionDenied, "an owner blocked by the two-factor requirement")
-	_, err = db.Exec(db.DefaultContext, "UPDATE `user` SET require_two_factor = ? WHERE id = 3", false)
-	require.NoError(t, err)
+	for name, flag := range map[string]string{
+		"an owner blocked by the two-factor requirement": "UPDATE `user` SET require_two_factor = ? WHERE id = 3",
+		"a doer who can't sign in":                       "UPDATE `user` SET prohibit_login = ? WHERE id = 2",
+		"an inactive doer":                               "UPDATE `user` SET is_active = NOT ? WHERE id = 2",
+	} {
+		t.Run(name, func(t *testing.T) {
+			set(t, flag, true)
+			t.Cleanup(func() { set(t, flag, false) })
+			_, err := ImportBitbucket(t.Context(), "user2", "org3", opts)
+			require.ErrorIs(t, err, util.ErrPermissionDenied)
+		})
+	}
 
-	_, err = db.Exec(db.DefaultContext, "UPDATE `user` SET prohibit_login = ? WHERE id = 2", true)
-	require.NoError(t, err)
-	_, err = ImportBitbucket(t.Context(), "user2", "org3", opts)
-	require.ErrorIs(t, err, util.ErrPermissionDenied, "a doer who can't sign in")
-	_, err = db.Exec(db.DefaultContext, "UPDATE `user` SET prohibit_login = ? WHERE id = 2", false)
-	require.NoError(t, err)
+	t.Run("maintenance mode refuses a real run only", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.Maintenance.Mode, setting.MaintenanceReadOnly)()
+		real := opts
+		real.DryRun = false
+		_, err := ImportBitbucket(t.Context(), "user1", "org3", real)
+		require.ErrorIs(t, err, util.ErrPermissionDenied)
+		_, err = ImportBitbucket(t.Context(), "user1", "org3", opts)
+		require.NotErrorIs(t, err, util.ErrPermissionDenied, "a dry run still reaches the server")
+	})
 
 	// one import per organization at a time
 	bitbucketImports.Store(int64(3), true)

@@ -37,7 +37,6 @@ type MigrateOptions struct {
 	PullRequests    bool
 	ReleaseAssets   bool
 	MigrateToRepoID int64
-	GroupID         int64  `json:"-"` // the owner's project to create the repository in, 0 for its root
 	MirrorInterval  string `json:"mirror_interval"`
 	// Comma-separated ref patterns of a pull mirror (git service only); empty means everything.
 	MirrorBranchFilter string `json:"mirror_branch_filter"`

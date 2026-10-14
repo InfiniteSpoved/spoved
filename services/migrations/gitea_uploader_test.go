@@ -752,6 +752,9 @@ func TestGiteaUploadUpdateGitForPullRequest(t *testing.T) {
 	require.NoError(t, err)
 
 	toRepoName := "migrated"
+	// the fork heads are local paths: fetching them takes a doer who may import local paths
+	defer test.MockVariableValue(&setting.ImportLocalPaths, true)()
+	fromRepoOwner.AllowImportLocal = true
 	uploader := NewGiteaLocalUploader(t.Context(), fromRepoOwner, fromRepoOwner.Name, toRepoName)
 	uploader.gitServiceType = structs.GiteaService
 	require.NoError(t, uploader.CreateRepo(&base.Repository{
