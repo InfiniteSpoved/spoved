@@ -83,6 +83,9 @@ func TestBitbucketImportRules(t *testing.T) {
 			"branch-permissions/2.0/projects/RUL/repos/svc/restrictions": page(
 				// user20 can't write svc; key 99 is unknown
 				restriction("read-only", "BRANCH", "refs/heads/main", []map[string]any{usr("user4"), usr("user20")}, nil, 21, 99),
+				// the same type twice on one matcher, for keys: only key 21 is in both
+				restriction("no-deletes", "BRANCH", "refs/heads/main", nil, nil, 21, 22),
+				restriction("no-deletes", "BRANCH", "refs/heads/main", nil, nil, 21),
 				// a read key never pushes: dropped, and nobody else is excepted
 				restriction("read-only", "BRANCH", "refs/heads/rk", nil, nil, 23),
 			),
@@ -258,6 +261,7 @@ func TestBitbucketImportRules(t *testing.T) {
 			assert.Equal(t, []int64{key.KeyID}, rule.WhitelistDeployKeyIDs, "the imported key, not the unknown one")
 			assert.True(t, rule.CanDeployKeyPush(key.KeyID))
 			assert.False(t, rule.CanDeployKeyPush(other.KeyID), "another write key of the repository may not push")
+			assert.Equal(t, []int64{key.KeyID}, rule.DeleteAllowlistDeployKeyIDs, "the intersection of both no-deletes key lists")
 			assert.Contains(t, item(t, report, "rule", "RUL/svc refs/heads/main").Reason, "key 99")
 
 			rk, err := git_model.GetProtectedBranchRuleByName(ctx, svc.ID, "rk")
