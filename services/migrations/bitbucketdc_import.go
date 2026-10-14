@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"forgejo.org/models/organization"
@@ -38,6 +39,11 @@ type BitbucketImportOptions struct {
 // String never prints the token.
 func (o BitbucketImportOptions) String() string {
 	return fmt.Sprintf("{server: %s, projects: %v, dry run: %t}", o.Server, o.Projects, o.DryRun)
+}
+
+// GoString never prints the token.
+func (o BitbucketImportOptions) GoString() string {
+	return o.String()
 }
 
 // The statuses of a BitbucketImportItem.
@@ -310,6 +316,16 @@ func applyBitbucketImport(ctx context.Context, doer *user_model.User, org *organ
 		}
 		item.set(BitbucketFailed, msg)
 	}
+	// purge deletes a repository whose import failed, so a rerun imports it. It runs even when ctx was cancelled (a
+	// Ctrl-C or a dropped CLI connection), which also kills the clone.
+	purge := func(item *BitbucketImportItem, repo *repo_model.Repository, err error) {
+		pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+		defer cancel()
+		if derr := repo_service.DeleteRepositoryPermanently(pctx, doer, repo, false); derr != nil {
+			err = fmt.Errorf("%w; deleting the half-imported repository failed too: delete %s and rerun", err, repo.FullName())
+		}
+		failure(item, err)
+	}
 	for _, item := range report.Items {
 		if item.Kind != "project" || item.Status == BitbucketConflict {
 			continue
@@ -327,6 +343,10 @@ func applyBitbucketImport(ctx context.Context, doer *user_model.User, org *organ
 		}
 		for _, ritem := range item.repos {
 			if ritem.Status != BitbucketPlanned {
+				continue
+			}
+			if ctx.Err() != nil {
+				ritem.set(BitbucketFailed, "the import was cancelled")
 				continue
 			}
 			if item.Status == BitbucketFailed {
@@ -358,21 +378,18 @@ func applyBitbucketImport(ctx context.Context, doer *user_model.User, org *organ
 				PullRequests:    opts.PullRequests,
 				Comments:        opts.PullRequests,
 			}, nil); err != nil {
-				if derr := repo_service.DeleteRepositoryPermanently(ctx, doer, repo, false); derr != nil {
-					err = fmt.Errorf("%w; deleting the half-imported repository failed too: delete %s and rerun", err, repo.FullName())
-				}
-				failure(ritem, err)
+				purge(ritem, repo, err)
 				continue
 			}
-			if repo, err = repo_model.GetRepositoryByID(ctx, repo.ID); err != nil {
-				failure(ritem, err)
+			migrated, err := repo_model.GetRepositoryByID(ctx, repo.ID)
+			if err == nil {
+				err = repo_model.InsertBitbucketOrigin(ctx, &repo_model.BitbucketOrigin{RepoID: repo.ID, ProjectKey: strings.ToUpper(ritem.key), Slug: strings.ToLower(ritem.slug), Server: server})
+			}
+			if err != nil {
+				purge(ritem, repo, fmt.Errorf("recording the origin failed: %w", err))
 				continue
 			}
-			ritem.NewHTTP, ritem.NewSSH, ritem.NewWeb = repo.CloneLink().HTTPS, repo.CloneLink().SSH, repo.HTMLURL()
-			if err := repo_model.InsertBitbucketOrigin(ctx, &repo_model.BitbucketOrigin{RepoID: repo.ID, ProjectKey: strings.ToUpper(ritem.key), Slug: strings.ToLower(ritem.slug), Server: server}); err != nil {
-				failure(ritem, fmt.Errorf("the repository was created, but recording its origin failed: delete it and rerun: %w", err))
-				continue
-			}
+			ritem.NewHTTP, ritem.NewSSH, ritem.NewWeb = migrated.CloneLink().HTTPS, migrated.CloneLink().SSH, migrated.HTMLURL()
 			ritem.set(BitbucketCreated, "")
 		}
 	}

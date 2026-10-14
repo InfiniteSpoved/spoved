@@ -481,8 +481,9 @@ func TestBitbucketDataCenterRedirects(t *testing.T) {
 			require.NoError(t, err, slug)
 		} else {
 			require.Error(t, err, slug)
-			assert.Contains(t, err.Error(), map[string]string{"loop": "stopped after 10 redirects"}[slug]+"", slug)
-			if slug != "loop" {
+			if slug == "loop" {
+				require.ErrorContains(t, err, "stopped after 10 redirects")
+			} else {
 				require.ErrorContains(t, err, "redirect off the Bitbucket server refused", slug)
 			}
 		}
