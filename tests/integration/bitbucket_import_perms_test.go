@@ -231,11 +231,15 @@ func TestBitbucketImportPermissions(t *testing.T) {
 		require.NoError(t, err)
 		web, err := repo_model.GetRepositoryByPath(ctx, org.ID, group.Name, "web")
 		require.NoError(t, err)
-		// InsertTeamMember watches the team's repositories in a goroutine (AUTO_WATCH_NEW_REPOS): wait for the four
-		// members of the project teams before counting rows
+		// InsertTeamMember watches the team's repositories in a goroutine (AUTO_WATCH_NEW_REPOS): wait until every
+		// member of an imported team watches every repository of the team before counting rows
 		assert.Eventually(t, func() bool {
-			n, err := db.GetEngine(db.DefaultContext).Table("watch").In("repo_id", api.ID, web.ID).In("user_id", 4, 5, 8, 15).Count()
-			return err == nil && n == 8
+			missing, err := db.GetEngine(db.DefaultContext).Table("team_user").
+				Join("INNER", "team_repo", "team_repo.team_id = team_user.team_id").
+				Join("INNER", "team", "team.id = team_user.team_id").
+				Where("team.org_id = ? AND team.lower_name <> ?", org.ID, "owners").
+				And("NOT EXISTS (SELECT 1 FROM watch WHERE watch.user_id = team_user.uid AND watch.repo_id = team_repo.repo_id)").Count()
+			return err == nil && missing == 0
 		}, 10*time.Second, 50*time.Millisecond)
 
 		t.Run("teams", func(t *testing.T) {
