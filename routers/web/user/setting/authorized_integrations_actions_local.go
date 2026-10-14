@@ -204,7 +204,7 @@ func (g *actionsLocalAuthorizedIntegrationForm) populateForm(ctx *context.Contex
 		} else if !permission.HasAccess() || repo.OwnerID != repositoryOwnerID {
 			return fmt.Errorf("repository could not be loaded")
 		}
-		g.SourceRepo = fmt.Sprintf("%s/%s", repo.OwnerName, repo.Name)
+		g.SourceRepo = repo.FullName()
 	}
 
 	return nil

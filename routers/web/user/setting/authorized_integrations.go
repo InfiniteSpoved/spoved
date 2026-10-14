@@ -268,6 +268,9 @@ func editAuthorizedIntegrationErrorHandler(ctx *context.Context, err error) {
 	// invalid claim rules.  (Excepting the Generic UI, which handles this case itself.)
 	var errMissingField *auth_service.MissingFieldError
 	switch {
+	case errors.Is(err, errSelectedRepoNotFound):
+		ctx.Error(http.StatusBadRequest, "getSelectedRepos")
+		return
 	case errors.As(err, &errMissingField):
 		switch errMissingField.Field {
 		case "Name":
