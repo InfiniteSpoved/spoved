@@ -449,6 +449,12 @@ func SettingsPost(ctx *context.Context) {
 				return
 			}
 		}
+		if visibilityChanged && !form.Private {
+			if policyErr, ok := errors.AsType[repo_module.ErrPersonalRepoPolicy](repo_module.CheckPersonalRepoPolicy(ctx, ctx.Doer, ctx.Repo.Owner, false)); ok {
+				ctx.RenderWithErr(ctx.Tr("repo.personal_repos."+policyErr.Mode), tplSettingsOptions, form)
+				return
+			}
+		}
 
 		repo.IsPrivate = form.Private
 		if err := repo_service.UpdateRepository(ctx, repo, visibilityChanged); err != nil {
@@ -1019,7 +1025,9 @@ func SettingsPost(ctx *context.Context) {
 
 		oldFullname := repo.FullName()
 		if err := repo_service.StartRepositoryTransfer(ctx, ctx.Doer, newOwner, repo, nil); err != nil {
-			if organization.IsErrOrgArchived(err) {
+			if policyErr, ok := errors.AsType[repo_module.ErrPersonalRepoPolicy](err); ok {
+				ctx.RenderWithErr(ctx.Tr(policyErr.TrKey()), tplSettingsOptions, nil)
+			} else if organization.IsErrOrgArchived(err) {
 				ctx.RenderWithErr(ctx.Tr("org.archived.readonly"), tplSettingsOptions, nil)
 			} else if errors.Is(err, user_model.ErrBlockedByUser) {
 				ctx.RenderWithErr(ctx.Tr("repo.settings.new_owner_blocked_doer"), tplSettingsOptions, nil)

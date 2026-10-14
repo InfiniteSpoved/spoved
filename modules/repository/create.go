@@ -35,6 +35,9 @@ func CreateRepositoryByExample(ctx context.Context, doer, u *user_model.User, re
 	if u.IsArchived {
 		return organization.ErrOrgArchived{Name: u.Name}
 	}
+	if err = CheckPersonalRepoPolicy(ctx, doer, u, repo.IsPrivate); err != nil {
+		return err
+	}
 	if err = repo_model.IsUsableRepoName(repo.Name); err != nil {
 		return err
 	}
@@ -326,8 +329,18 @@ func UpdateRepository(ctx context.Context, repo *repo_model.Repository, visibili
 		if err != nil {
 			return fmt.Errorf("getRepositoriesByForkID: %w", err)
 		}
+		private := repo.IsPrivate || repo.Owner.Visibility == api.VisibleTypePrivate
 		for i := range forkRepos {
-			forkRepos[i].IsPrivate = repo.IsPrivate || repo.Owner.Visibility == api.VisibleTypePrivate
+			if !private && forkRepos[i].IsPrivate {
+				if err = forkRepos[i].LoadOwner(ctx); err != nil {
+					return err
+				}
+				// a personal fork stays private where the site policy refuses public personal repositories
+				if CheckPersonalRepoPolicy(ctx, nil, forkRepos[i].Owner, false) != nil {
+					continue
+				}
+			}
+			forkRepos[i].IsPrivate = private
 			if err = UpdateRepository(ctx, forkRepos[i], true); err != nil {
 				return fmt.Errorf("updateRepository[%d]: %w", forkRepos[i].ID, err)
 			}

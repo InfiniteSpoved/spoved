@@ -174,8 +174,14 @@ func (ctx *preReceiveContext) validatePushOptions() error {
 		}
 		// the visibility policy of the repository's organization (a deploy key has no permission, canChangeSettings refused it)
 		repo := ctx.Repo.Repository
-		if opts.GetGitPushOptions().GetBool(pushoptions.RepoPrivate, repo.IsPrivate) != repo.IsPrivate {
-			return repo_module.CheckOrgPolicy(ctx, ctx.user, repo, repo_module.OrgPolicyVisibility, nil)
+		if private := opts.GetGitPushOptions().GetBool(pushoptions.RepoPrivate, repo.IsPrivate); private != repo.IsPrivate {
+			if err := repo_module.CheckOrgPolicy(ctx, ctx.user, repo, repo_module.OrgPolicyVisibility, nil); err != nil || private {
+				return err
+			}
+			if err := repo.LoadOwner(ctx); err != nil {
+				return err
+			}
+			return repo_module.CheckPersonalRepoPolicy(ctx, ctx.user, repo.Owner, false)
 		}
 	}
 

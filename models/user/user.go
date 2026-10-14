@@ -960,6 +960,11 @@ var usableAdminCond = builder.Eq{
 	"type":           UserTypeIndividual,
 }
 
+// UsableAdminCond returns usableAdminCond, for queries of other packages on the user table.
+func UsableAdminCond() builder.Cond {
+	return usableAdminCond
+}
+
 // IsLastAdminUser check whether user is an admin and no other admin who can sign in exists
 func IsLastAdminUser(ctx context.Context, user *User) bool {
 	if !user.IsAdmin {

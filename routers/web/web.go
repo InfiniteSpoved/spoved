@@ -908,6 +908,7 @@ func registerRoutes(m *web.Route) {
 		m.Combo("/maintenance").Get(admin.Maintenance).Post(admin.MaintenancePost)
 		m.Combo("/webhook-types").Get(admin.WebhookTypes).Post(admin.WebhookTypesPost)
 		m.Combo("/repo-units").Get(admin.RepoUnits).Post(admin.RepoUnitsPost)
+		m.Combo("/personal-repos").Get(admin.PersonalRepos).Post(admin.PersonalReposPost)
 		m.Combo("/ip-allowlist").Get(admin.IPAllowlist).Post(admin.IPAllowlistPost)
 		m.Group("/log-shipping", func() {
 			m.Get("", admin.LogShipping)

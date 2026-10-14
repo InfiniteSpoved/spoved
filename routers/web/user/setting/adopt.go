@@ -4,10 +4,12 @@
 package setting
 
 import (
+	"errors"
 	"path/filepath"
 
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
 	"forgejo.org/services/context"
@@ -23,6 +25,7 @@ func AdoptOrDeleteRepository(ctx *context.Context) {
 	action := ctx.FormString("action")
 
 	ctxUser := ctx.Doer
+	var policyErr repo_module.ErrPersonalRepoPolicy
 	root := user_model.UserPath(ctxUser.LowerName)
 
 	// check not a repo
@@ -43,11 +46,14 @@ func AdoptOrDeleteRepository(ctx *context.Context) {
 		if _, err := repo_service.AdoptRepository(ctx, ctxUser, ctxUser, repo_service.CreateRepoOptions{
 			Name:      dir,
 			IsPrivate: true,
-		}); err != nil {
+		}); errors.As(err, &policyErr) {
+			ctx.Flash.Error(ctx.Tr(policyErr.TrKey()))
+		} else if err != nil {
 			ctx.ServerError("repository.AdoptRepository", err)
 			return
+		} else {
+			ctx.Flash.Success(ctx.Tr("repo.adopt_preexisting_success", dir))
 		}
-		ctx.Flash.Success(ctx.Tr("repo.adopt_preexisting_success", dir))
 	} else if action == "delete" && allowDelete {
 		if err := repo_service.DeleteUnadoptedRepository(ctx, ctxUser, ctxUser, dir); err != nil {
 			ctx.ServerError("repository.AdoptRepository", err)

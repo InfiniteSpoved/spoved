@@ -4,6 +4,7 @@
 package private
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/private"
 	"forgejo.org/modules/ratelimit"
+	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	"forgejo.org/routers/common"
 	"forgejo.org/services/context"
@@ -494,6 +496,10 @@ func ServCommand(ctx *context.PrivateContext) {
 		}
 
 		repo, err = repo_service.PushCreateRepo(ctx, user, owner, results.RepoName)
+		if errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) {
+			ctx.JSON(http.StatusForbidden, private.Response{UserMsg: err.Error()})
+			return
+		}
 		if err != nil {
 			sshLogger.Error("pushCreateRepo: %v", err)
 			ctx.JSON(http.StatusNotFound, private.Response{
