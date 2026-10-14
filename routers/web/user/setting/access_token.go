@@ -190,6 +190,16 @@ func loadAccessTokenCreateData(ctx *context.Context) {
 		ctx.JSON(http.StatusInternalServerError, nil)
 		return
 	}
+	// adding repositories shrinks the list, so the page the form remembers can be past its end: show the last one
+	if len(repos) == 0 && page > 1 && count > 0 {
+		page = (int(count) + pageSize - 1) / pageSize
+		repoSearch.Page = page
+		if repos, count, err = repo_model.SearchRepositoryByCondition(ctx, repoSearch, cond, false); err != nil {
+			log.Error("SearchRepository: %v", err)
+			ctx.JSON(http.StatusInternalServerError, nil)
+			return
+		}
+	}
 	ctx.Data["Repos"] = repos
 
 	pager := context.NewPagination(int(count), pageSize, page, 3)
@@ -220,6 +230,10 @@ func AccessTokenCreate(ctx *context.Context) {
 	loadAccessTokenCreateData(ctx)
 	if ctx.Written() {
 		return
+	}
+	// least privilege by default
+	if r, _ := ctx.Data["resource"].(string); r == "" {
+		ctx.Data["resource"] = "repo-specific"
 	}
 
 	ctx.HTML(http.StatusOK, tplAccessTokenEdit)

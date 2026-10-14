@@ -210,9 +210,8 @@ test('User: Add specific repo access token', async ({browser}, workerInfo) => {
   await page.getByRole('textbox', {name: /^Token name/}).fill(tokenName);
   await page.getByRole('combobox', {name: 'repository'}).selectOption('read:repository');
 
-  // clicking specific repositories will display currently available repositories:
-  await expect(page.getByText('org17/big_test_private_4')).toBeHidden();
-  await page.getByRole('radio', {name: 'Specific repositories'}).click();
+  // "Specific repositories" is the default (least privilege), so the available repositories show at once
+  await expect(page.getByRole('radio', {name: 'Specific repositories'})).toBeChecked();
   await expect(page.getByText('org17/big_test_private_4')).toBeVisible();
   await expect(page.getByText('user2/commits_search_test')).toBeVisible(); // another repo, will be used to verify search worked
 
