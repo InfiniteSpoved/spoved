@@ -788,6 +788,13 @@ func handleRefreshToken(ctx *context.Context, form forms.AccessTokenForm, verifi
 	// "The authorization server MUST ... require client authentication for confidential clients"
 	// https://datatracker.ietf.org/doc/html/rfc6749#section-6
 	if app.ConfidentialClient && !app.ValidateClientSecret([]byte(form.ClientSecret)) {
+		if app.MatchesExpiredClientSecret([]byte(form.ClientSecret)) {
+			handleAccessTokenError(ctx, AccessTokenErrorResponse{
+				ErrorCode:        AccessTokenErrorCodeInvalidClient,
+				ErrorDescription: "client secret expired",
+			})
+			return
+		}
 		errorDescription := "invalid client secret"
 		if form.ClientSecret == "" {
 			errorDescription = "invalid empty client secret"
@@ -867,6 +874,13 @@ func handleAuthorizationCode(ctx *context.Context, form forms.AccessTokenForm, s
 		return
 	}
 	if app.ConfidentialClient && !app.ValidateClientSecret([]byte(form.ClientSecret)) {
+		if app.MatchesExpiredClientSecret([]byte(form.ClientSecret)) {
+			handleAccessTokenError(ctx, AccessTokenErrorResponse{
+				ErrorCode:        AccessTokenErrorCodeInvalidClient,
+				ErrorDescription: "client secret expired",
+			})
+			return
+		}
 		errorDescription := "invalid client secret"
 		if form.ClientSecret == "" {
 			errorDescription = "invalid empty client secret"

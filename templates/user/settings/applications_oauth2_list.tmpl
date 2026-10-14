@@ -12,7 +12,7 @@
 					<div class="flex-item-title">{{.Name}}</div>
 					<div class="flex-item-body">
 						{{ctx.Locale.Tr "settings.oauth2_client_id"}}
-						<span class="ui label">{{.ClientID}}</span>
+						<span class="ui label">{{.ClientID}}</span>{{template "shared/expiry_label" (dict "ExpiresUnix" .ClientSecretExpiresUnix "IsExpired" .ClientSecretExpired)}}
 					</div>
 				</div>
 				{{$isBuiltin := and $.BuiltinApplications (index $.BuiltinApplications .ClientID)}}
@@ -67,6 +67,7 @@
 				<input type="checkbox" name="confidential_client" checked>
 			</div>
 		</div>
+		{{template "shared/expiry_input" .}}
 		<button class="ui primary button">
 			{{ctx.Locale.Tr "settings.create_oauth2_application_button"}}
 		</button>
