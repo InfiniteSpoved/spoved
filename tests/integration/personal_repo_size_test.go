@@ -21,6 +21,8 @@ import (
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
+	"forgejo.org/models/perm"
+	pull_model "forgejo.org/models/pull"
 	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
@@ -28,9 +30,11 @@ import (
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/lfs"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/private"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
+	"forgejo.org/services/forms"
 	migrations_allowlist "forgejo.org/services/migrations/allowlist"
 	pull_service "forgejo.org/services/pull"
 	repo_service "forgejo.org/services/repository"
@@ -193,7 +197,7 @@ func TestPersonalRepoSizeLockGit(t *testing.T) {
 		// and the wiki push refreshed the wiki size
 		assert.Positive(t, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{OwnerName: "user2", LowerName: "lock-git"}).WikiSize)
 
-		// writes reopen when the usage drops (here: a higher limit)
+		// writes reopen once the usage is below the limit (here by raising it)
 		lockPersonalRepos(t, 2, false)
 		doGitPushTestRepository(dir, "origin", ":to-delete")(t)
 	})
@@ -466,4 +470,129 @@ func TestPersonalRepoSizeQueries(t *testing.T) {
 	assert.EqualValues(t, 0, stableQueryCount(t, evaluate))
 	setPersonalRepoSizeLimit(t, 1<<40)
 	assert.EqualValues(t, 2, stableQueryCount(t, evaluate))
+}
+
+// M1: the SSH path, at the internal serv command (ssh can't run in containers).
+func TestPersonalRepoSizeLockSSH(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		defer resetPersonalRepoMode(t)
+		ctx := t.Context()
+		token := getTokenForLoggedInUser(t, loginUser(t, "user2"), auth_model.AccessTokenScopeAll)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/user/repos", &api.CreateRepoOption{Name: "lock-ssh", AutoInit: true, DefaultBranch: "main"}).AddTokenAuth(token), http.StatusCreated)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/lock-ssh/wiki/new", &api.CreateWikiPageOptions{Title: "Home", ContentBase64: "aG9tZQ=="}).AddTokenAuth(token), http.StatusCreated)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/orgs/org3/repos", &api.CreateRepoOption{Name: "lock-ssh-org", AutoInit: true}).AddTokenAuth(token), http.StatusCreated)
+
+		// key 1 is user2's
+		serv := func(owner, repo string, verbs ...string) private.ResponseExtra {
+			_, extra := private.ServCommand(ctx, 1, owner, repo, perm.AccessModeWrite, "", verbs...)
+			return extra
+		}
+		writes := map[string][]string{
+			"push":        {"user2", "lock-ssh", "git-receive-pack", ""},
+			"wiki push":   {"user2", "lock-ssh.wiki", "git-receive-pack", ""},
+			"LFS upload":  {"user2", "lock-ssh", "git-lfs-authenticate", "upload"},
+			"org push":    {"org3", "lock-ssh-org", "git-receive-pack", ""},
+			"push-create": {"user2", "lock-ssh-new", "git-receive-pack", ""},
+		}
+		lockPersonalRepos(t, 2, true)
+		for name, w := range writes {
+			extra := serv(w[0], w[1], w[2:]...)
+			if w[0] == "org3" {
+				require.NoError(t, extra.Error, "organizations are never locked")
+				continue
+			}
+			assert.Equal(t, http.StatusForbidden, extra.StatusCode, name)
+			assert.Contains(t, extra.UserMsg, personalLimitMessage, name)
+		}
+		// reads stay allowed
+		require.NoError(t, serv("user2", "lock-ssh", "git-upload-pack", "").Error)
+
+		// a usable admin owner is never locked
+		require.NoError(t, user_model.UpdateUserCols(db.DefaultContext, &user_model.User{ID: 2, IsAdmin: true}, "is_admin"))
+		require.NoError(t, serv("user2", "lock-ssh", "git-receive-pack", "").Error)
+		require.NoError(t, user_model.UpdateUserCols(db.DefaultContext, &user_model.User{ID: 2, IsAdmin: false}, "is_admin"))
+
+		// below the limit
+		lockPersonalRepos(t, 2, false)
+		for _, name := range []string{"push", "wiki push", "LFS upload"} {
+			w := writes[name]
+			require.NoError(t, serv(w[0], w[1], w[2:]...).Error, name)
+		}
+	})
+}
+
+// M2: a merge scheduled before the lock waits while the base owner is locked, then merges.
+func TestPersonalRepoSizeLockAutoMerge(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		defer resetPersonalRepoMode(t)
+		token := getTokenForLoggedInUser(t, loginUser(t, "user2"), auth_model.AccessTokenScopeAll)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/user/repos", &api.CreateRepoOption{Name: "lock-am", AutoInit: true, DefaultBranch: "main"}).AddTokenAuth(token), http.StatusCreated)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/lock-am/branch_protections", &api.CreateBranchProtectionOption{RuleName: "main", EnableStatusCheck: true, StatusCheckContexts: []string{"ci"}}).AddTokenAuth(token), http.StatusCreated)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/lock-am/contents/f.txt", &api.CreateFileOptions{ContentBase64: "Zg==", FileOptions: api.FileOptions{NewBranchName: "feature"}}).AddTokenAuth(token), http.StatusCreated)
+		var pr api.PullRequest
+		DecodeJSON(t, MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/lock-am/pulls", &api.CreatePullRequestOption{Head: "feature", Base: "main", Title: "am"}).AddTokenAuth(token), http.StatusCreated), &pr)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", fmt.Sprintf("/api/v1/repos/user2/lock-am/pulls/%d/merge", pr.Index), &forms.MergePullRequestForm{Do: string(repo_model.MergeStyleMerge), MergeWhenChecksSucceed: true}).AddTokenAuth(token), http.StatusCreated)
+
+		status := func() {
+			MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/lock-am/statuses/"+pr.Head.Sha, &api.CreateStatusOption{State: api.CommitStatusSuccess, Context: "ci"}).AddTokenAuth(token), http.StatusCreated)
+		}
+		merged := func() bool {
+			return unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID}).HasMerged
+		}
+		lockPersonalRepos(t, 2, true)
+		status()
+		assert.False(t, merged(), "waits while locked")
+		unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: pr.ID})
+
+		lockPersonalRepos(t, 2, false)
+		status()
+		assert.True(t, merged())
+	})
+}
+
+// M3: the recipient of a transfer is checked, not the doer; a package goes to the owner in the URL; a trash restore
+// to a new owner at its limit is refused.
+func TestPersonalRepoSizeLockTargets(t *testing.T) {
+	defer prepareTrash(t)()
+	defer resetPersonalRepoMode(t)
+	owner := getTokenForLoggedInUser(t, loginUser(t, "user2"), auth_model.AccessTokenScopeAll)
+	admin := loginUser(t, "user1")
+
+	// user2 offers a repository to user5; the admin accepts for user5, who is locked
+	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/user/repos", &api.CreateRepoOption{Name: "to-user5"}).AddTokenAuth(owner), http.StatusCreated)
+	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/to-user5/transfer", &api.TransferRepoOption{NewOwner: "user5"}).AddTokenAuth(owner), http.StatusCreated)
+	lockPersonalRepos(t, 5, true)
+	admin.MakeRequest(t, NewRequest(t, "POST", "/user2/to-user5/action/accept_transfer"), http.StatusRequestEntityTooLarge)
+	assert.True(t, repoExists(t, "user2", "to-user5"))
+
+	// a trash restore to the locked user5
+	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/user/repos", &api.CreateRepoOption{Name: "trash-to-user5"}).AddTokenAuth(owner), http.StatusCreated)
+	id := repoIDByName(t, "user2", "trash-to-user5")
+	MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/repos/user2/trash-to-user5").AddTokenAuth(owner), http.StatusNoContent)
+	repo, err := repo_model.GetRepositoryByIDIncludingTrashed(db.DefaultContext, id)
+	require.NoError(t, err)
+	user5 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5})
+	require.ErrorAs(t, repo_service.MoveTrashedRepository(db.DefaultContext, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1}), user5, repo, ""), &quota_model.ErrPersonalRepoLimit{})
+
+	// user2 locked: packages into its own namespace are refused, into org3's allowed
+	lockPersonalRepos(t, 2, true)
+	MakeRequest(t, NewRequestWithBody(t, "PUT", "/api/packages/user2/generic/lock-own/1.0/f.txt", strings.NewReader("p")).AddBasicAuth("user2"), http.StatusRequestEntityTooLarge)
+	MakeRequest(t, NewRequestWithBody(t, "PUT", "/api/packages/org3/generic/lock-org/1.0/f.txt", strings.NewReader("p")).AddBasicAuth("user2"), http.StatusCreated)
+}
+
+// M5: re-saving the admin edit form keeps an override set in bytes that isn't whole MiB.
+func TestPersonalRepoSizeOverrideBytesKept(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer setPersonalRepoOverride(t, 5, 0)
+	setPersonalRepoOverride(t, 5, 1500000) // 1.43 MiB, shown as 1
+	user5 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5})
+	edit := func(value string) {
+		loginUser(t, "user1").MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/users/5/edit", map[string]string{
+			"login_type": "0-0", "login_name": user5.LoginName, "email": user5.Email, "max_repo_creation": "-1", "personal_repo_size_limit": value,
+		}), http.StatusSeeOther)
+	}
+	edit("1")
+	assert.EqualValues(t, 1500000, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5}).PersonalRepoSizeLimit)
+	edit("2")
+	assert.EqualValues(t, 2<<20, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5}).PersonalRepoSizeLimit)
 }

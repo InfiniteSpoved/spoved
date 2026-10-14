@@ -437,7 +437,6 @@ func renderEditPage(ctx *context.Context) {
 	ctx.Data["footerContent"] = ""
 }
 
-// WikiPost renders post of wiki page
 // EnforceWikiQuota is the quota check of WikiPost. Deleting a page skips the size limit of personal repositories:
 // deletes made in the web UI stay allowed at that limit (DeleteWikiPage writes its own fixed commit message).
 func EnforceWikiQuota(ctx *context.Context) {
@@ -448,6 +447,7 @@ func EnforceWikiQuota(ctx *context.Context) {
 	ctx.CheckQuota(quota_model.LimitSubjectSizeWiki, ctx.Repo.Repository.OwnerID, ctx.Repo.Repository.OwnerName)
 }
 
+// WikiPost renders post of wiki page
 func WikiPost(ctx *context.Context) {
 	if wikiFolderConfig(ctx) != nil {
 		ctx.NotFound("WikiPost", nil)

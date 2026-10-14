@@ -239,6 +239,14 @@ func NewUserPost(ctx *context.Context) {
 	ctx.Redirect(setting.AppSubURL + "/admin/users/" + strconv.FormatInt(u.ID, 10))
 }
 
+// personalRepoSizeLimitMiB is the size limit override of u as the edit form shows it: MiB, at least 1, or 0/-1.
+func personalRepoSizeLimitMiB(u *user_model.User) int64 {
+	if u.PersonalRepoSizeLimit > 0 {
+		return max(u.PersonalRepoSizeLimit>>20, 1)
+	}
+	return u.PersonalRepoSizeLimit
+}
+
 func prepareUserInfo(ctx *context.Context) *user_model.User {
 	u, err := user_model.GetUserByID(ctx, ctx.ParamsInt64(":userid"))
 	if err != nil {
@@ -252,10 +260,7 @@ func prepareUserInfo(ctx *context.Context) *user_model.User {
 
 	ctx.Data["User"] = u
 	ctx.Data["ContextUser"] = u
-	ctx.Data["PersonalRepoSizeLimitMiB"] = u.PersonalRepoSizeLimit
-	if u.PersonalRepoSizeLimit > 0 {
-		ctx.Data["PersonalRepoSizeLimitMiB"] = max(u.PersonalRepoSizeLimit>>20, 1)
-	}
+	ctx.Data["PersonalRepoSizeLimitMiB"] = personalRepoSizeLimitMiB(u)
 
 	roleGroups, err := org_model.GetUsersGrantedRoleGroups(ctx, u.ID)
 	if err != nil {
@@ -384,7 +389,10 @@ func EditUserPost(ctx *context.Context) {
 		ctx.RenderWithErr(ctx.Tr("admin.users.personal_repo_size_limit_invalid"), tplUserEdit, &form)
 		return
 	}
-	if sizeLimit > 0 {
+	switch {
+	case sizeLimit == personalRepoSizeLimitMiB(u):
+		sizeLimit = u.PersonalRepoSizeLimit // unchanged: keep an override in bytes (API) that isn't whole MiB
+	case sizeLimit > 0:
 		sizeLimit <<= 20
 	}
 

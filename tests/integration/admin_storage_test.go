@@ -405,7 +405,7 @@ func TestAdminStorageTypes(t *testing.T) {
 			doGitSetRemoteURL(dst, "origin", &wikiURL)(t)
 			generateCommitWithNewData(t, 64*1024, dst, "user2@example.com", "User Two", "big-page-")
 			doGitPushTestRepository(dst, "origin", "master")(t)
-			assert.Equal(t, before, repoSizes(t, 1)[2], "a wiki git push doesn't measure yet (PR B)")
+			assert.Greater(t, repoSizes(t, 1)[2], before+60*1024, "a wiki git push measures the wiki (#491)")
 
 			unmeasured(t, 2)
 			unmeasured(t, 3) // org3: not recalculated
