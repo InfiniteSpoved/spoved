@@ -55,7 +55,10 @@ func CanEditHeadBranch(ctx context.Context, doer *user_model.User, pr *issues_mo
 	case err == nil:
 		// the size limit of the head owner's personal repositories refuses every edit (Edit file, Apply suggestion)
 		l, err := quota_model.GetPersonalRepoLimit(ctx, pr.HeadRepo.OwnerID)
-		return !l.Reached(), err
+		if err != nil {
+			return false, err
+		}
+		return !l.Reached(), nil
 	case errors.Is(err, ErrHeadBranchNotEditable), errors.Is(err, util.ErrPermissionDenied):
 		return false, nil
 	default:

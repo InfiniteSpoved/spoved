@@ -3,6 +3,7 @@
 	<div class="ui middle very relaxed page grid">
 		<div class="column">
 			{{template "shared/personal_repo_limit" .}}
+			{{if not (and .PersonalRepoLocked (not .Orgs))}}{{/* else the banner alone: no owner can take a repository */}}
 			<form class="ui form" action="{{.Link}}" method="post">
 				{{template "base/disable_form_autofill"}}
 				<h3 class="ui top attached header">
@@ -119,12 +120,13 @@
 					<div class="divider"></div>
 					<div class="inline field">
 						<label></label>
-						<button class="ui primary button"{{if and .PersonalRepoLocked (not .Orgs)}} disabled{{end}}>
+						<button class="ui primary button">
 							{{ctx.Locale.Tr "repo.migrate_repo"}}
 						</button>
 					</div>
 				</div>
 			</form>
+			{{end}}
 		</div>
 	</div>
 </div>

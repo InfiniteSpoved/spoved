@@ -3,6 +3,7 @@
 	<div class="ui middle very relaxed page one column grid">
 		<div class="column">
 			{{template "shared/personal_repo_limit" .}}
+			{{if not (and .PersonalRepoLocked (not .Orgs))}}{{/* else the banner alone: no owner can take a repository */}}
 			<form class="ui form" action="{{.Link}}" method="post">
 				<h3 class="ui top attached header">
 					{{ctx.Locale.Tr "new_repo.title"}}
@@ -52,6 +53,7 @@
 					{{end}}
 				</div>
 			</form>
+			{{end}}
 		</div>
 	</div>
 </div>

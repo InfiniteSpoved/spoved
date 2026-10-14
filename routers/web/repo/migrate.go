@@ -48,6 +48,15 @@ func Migrate(ctx *context.Context) {
 	if serviceType == 0 {
 		ctx.Data["Org"] = ctx.FormString("org")
 		ctx.Data["Mirror"] = ctx.FormString("mirror")
+		// locked in the doer's own namespace: the services are offered only with an organization to migrate into
+		if ctx.Data["PersonalRepoLocked"] == true {
+			orgs, err := organization.GetOrgsCanCreateRepoByUserID(ctx, ctx.Doer.ID)
+			if err != nil {
+				ctx.ServerError("GetOrgsCanCreateRepoByUserID", err)
+				return
+			}
+			ctx.Data["Orgs"] = orgs
+		}
 
 		ctx.HTML(http.StatusOK, tplMigrate)
 		return

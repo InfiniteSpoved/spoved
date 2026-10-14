@@ -268,7 +268,7 @@ func TestPersonalRepoLockAdminEditForm(t *testing.T) {
 	assert.Equal(t, "5", doc.Find("#personal_repo_size_limit").AttrOr("value", ""))
 }
 
-// MUST-FIX: while locked the edit forms have no dropzone and send no files; saving them must keep the attachments.
+// While locked the edit forms have no dropzone and send no files; saving them must keep the attachments.
 func TestPersonalRepoLockEditKeepsAttachments(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	defer resetPersonalRepoMode(t)
@@ -302,7 +302,7 @@ func TestPersonalRepoLockEditKeepsAttachments(t *testing.T) {
 	unittest.AssertNotExistsBean(t, &repo_model.Attachment{CommentID: comment.ID})
 }
 
-// MUST-FIX: a release is deleted from its edit page, which stays open while locked; saving it is refused.
+// A release is deleted from its edit page, which stays open while locked; saving it is refused.
 func TestPersonalRepoLockReleaseEdit(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	defer resetPersonalRepoMode(t)
@@ -324,4 +324,41 @@ func TestPersonalRepoLockReleaseEdit(t *testing.T) {
 	}), http.StatusRequestEntityTooLarge)
 	session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/releases/delete", map[string]string{"id": "1"}), http.StatusOK)
 	assert.True(t, unittest.AssertExistsAndLoadBean(t, &repo_model.Release{ID: 1}).IsTag, "the release is gone, its tag stays")
+}
+
+// #500: a locked user with no other owner to choose gets the banner and no form (no empty segment); with an
+// organization to choose, the forms stay.
+func TestPersonalRepoLockOnlyOwner(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer resetPersonalRepoMode(t)
+	adminToken := getTokenForLoggedInUser(t, loginUser(t, "user1"), auth_model.AccessTokenScopeAll)
+	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/admin/users/user8/repos", &api.CreateRepoOption{Name: "user8-repo", AutoInit: true, Readme: "Default"}).AddTokenAuth(adminToken), http.StatusCreated)
+	setPersonalRepoSizeLimit(t, 1<<40)
+	setPersonalRepoOverride(t, 8, 1)
+	defer setPersonalRepoOverride(t, 8, 0)
+	setPersonalRepoOverride(t, 2, 1)
+	defer setPersonalRepoOverride(t, 2, 0)
+
+	pages := []string{"/repo/create", "/repo/migrate", "/repo/migrate?service_type=2", "/user5/repo4/fork"}
+	user8 := loginUser(t, "user8")
+	for _, path := range pages {
+		doc := NewHTMLParser(t, user8.MakeRequest(t, NewRequest(t, "GET", path), http.StatusOK).Body)
+		assert.Contains(t, doc.Find("#personal-repo-limit-banner").Text(), "You can't push or add content", path)
+		assert.Zero(t, doc.Find("form.ui.form").Length(), "%s: no form", path)
+		assert.Zero(t, doc.Find(".ui.attached.segment").Length(), "%s: no empty segment", path)
+		assert.Zero(t, doc.Find(".migrate-entry").Length(), "%s: no service tiles", path)
+		assert.Zero(t, doc.Find(".ui.negative.message").Length(), "%s: the banner explains it", path)
+	}
+
+	// user2 can choose an organization: the forms stay
+	user2 := loginUser(t, "user2")
+	for _, path := range pages {
+		doc := NewHTMLParser(t, user2.MakeRequest(t, NewRequest(t, "GET", path), http.StatusOK).Body)
+		assert.Contains(t, doc.Find("#personal-repo-limit-banner").Text(), "You can't push or add content", path)
+		if path == "/repo/migrate" {
+			assert.Positive(t, doc.Find(".migrate-entry").Length(), path)
+		} else {
+			assert.Equal(t, 1, doc.Find("form.ui.form").Length(), path)
+		}
+	}
 }

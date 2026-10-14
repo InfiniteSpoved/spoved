@@ -5,6 +5,7 @@
 // templates/shared/personal_repo_limit.tmpl
 // templates/repo/create.tmpl
 // templates/repo/migrate/**
+// templates/repo/pulls/fork.tmpl
 // templates/repo/home.tmpl
 // templates/repo/view_file.tmpl
 // templates/repo/release_tag_header.tmpl
@@ -58,11 +59,12 @@ test('Personal repository size lock: what the owner and others see', async ({bro
     });
     expect(patched.ok()).toBeTruthy();
 
-    // A: the banner shows on the create and migrate forms
-    for (const path of ['/repo/create', '/repo/migrate?service_type=1']) {
+    // A, #500: without an organization to choose, the create and migrate pages show the banner and no form
+    for (const path of ['/repo/create', '/repo/migrate', '/repo/migrate?service_type=1']) {
       await owner.goto(path);
       await expect(owner.locator('#personal-repo-limit-banner')).toBeVisible();
       await expect(owner.locator('#personal-repo-limit-banner')).toContainText("You can't push or add content");
+      await expect(owner.locator('form.ui.form, .ui.attached.segment, .migrate-entry')).toHaveCount(0);
     }
 
     // D: no add/edit actions for the owner

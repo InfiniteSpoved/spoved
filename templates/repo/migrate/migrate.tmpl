@@ -4,6 +4,7 @@
 		<h2 class="tw-mt-4">{{ctx.Locale.Tr "migrate.select.title"}}</h1>
 		{{template "repo/migrate/helper" .}}
 		{{template "shared/personal_repo_limit" .}}
+		{{if not (and .PersonalRepoLocked (not .Orgs))}}{{/* else the banner alone: no owner can take a repository */}}
 		<div class="migrate-entries">
 			{{range .Services}}
 				<a class="migrate-entry tw-items-center" href="{{AppSubUrl}}/repo/migrate?service_type={{.}}&org={{$.Org}}&mirror={{$.Mirror}}">
@@ -25,6 +26,7 @@
 				</a>
 			{{end}}
 		</div>
+		{{end}}
 	</div>
 </div>
 {{template "base/footer" .}}
