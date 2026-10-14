@@ -288,7 +288,7 @@ func CreateUserRepo(ctx *context.APIContext, owner *user_model.User, opt api.Cre
 		ObjectFormatName: opt.ObjectFormatName,
 	})
 	if err != nil {
-		if organization.IsErrOrgArchived(err) {
+		if organization.IsErrOrgArchived(err) || errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) {
 			ctx.Error(http.StatusForbidden, "", err)
 		} else if repo_model.IsErrRepoAlreadyExist(err) {
 			ctx.Error(http.StatusConflict, "", "The repository with the same name already exists.")
@@ -467,7 +467,9 @@ func Generate(ctx *context.APIContext) {
 
 	repo, err := repo_service.GenerateRepository(ctx, ctx.Doer(), targetOwner, ctx.Repo().Repository, opts)
 	if err != nil {
-		if repo_model.IsErrRepoAlreadyExist(err) {
+		if errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) {
+			ctx.Error(http.StatusForbidden, "", err)
+		} else if repo_model.IsErrRepoAlreadyExist(err) {
 			ctx.Error(http.StatusConflict, "", "The repository with the same name already exists.")
 		} else if db.IsErrNameReserved(err) ||
 			db.IsErrNamePatternNotAllowed(err) {
@@ -812,6 +814,12 @@ func updateBasicProperties(ctx *context.APIContext, opts api.EditRepoOption) err
 				return err
 			} else if err != nil {
 				ctx.Error(http.StatusInternalServerError, "CheckOrgPolicy", err)
+				return err
+			}
+		}
+		if visibilityChanged && !*opts.Private {
+			if err := repo_module.CheckPersonalRepoPolicy(ctx, ctx.Doer(), ctx.Repo().Owner, false); err != nil {
+				ctx.Error(http.StatusForbidden, "CheckPersonalRepoPolicy", err)
 				return err
 			}
 		}

@@ -21,6 +21,7 @@ import (
 	"forgejo.org/modules/lfs"
 	"forgejo.org/modules/log"
 	base "forgejo.org/modules/migration"
+	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
@@ -251,7 +252,7 @@ func handleMigrateError(ctx *context.APIContext, repoOwner *user_model.User, err
 		ctx.Error(http.StatusUnprocessableEntity, "", "Remote visit addressed rate limitation.")
 	case migrations.IsTwoFactorAuthError(err):
 		ctx.Error(http.StatusUnprocessableEntity, "", "Remote visit required two factors authentication.")
-	case organization.IsErrOrgArchived(err):
+	case organization.IsErrOrgArchived(err), errors.As(err, &repo_module.ErrPersonalRepoPolicy{}):
 		ctx.Error(http.StatusForbidden, "", err)
 	case repo_model.IsErrReachLimitOfRepo(err):
 		ctx.Error(http.StatusUnprocessableEntity, "", fmt.Sprintf("You have already reached your limit of %d repositories.", repoOwner.MaxCreationLimit()))

@@ -20,6 +20,7 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/migration"
 	"forgejo.org/modules/process"
+	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/structs"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
@@ -29,7 +30,7 @@ import (
 
 func handleCreateError(owner *user_model.User, err error) error {
 	switch {
-	case organization.IsErrOrgArchived(err):
+	case organization.IsErrOrgArchived(err), errors.As(err, &repo_module.ErrPersonalRepoPolicy{}):
 		return err
 	case repo_model.IsErrReachLimitOfRepo(err):
 		return fmt.Errorf("you have already reached your limit of %d repositories", owner.MaxCreationLimit())

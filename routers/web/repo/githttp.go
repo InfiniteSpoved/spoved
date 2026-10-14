@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	gocontext "context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -263,6 +264,12 @@ func httpBase(ctx *context.Context) *serviceHandler {
 			return nil
 		}
 
+		// refused before git sends anything, so that the push shows why
+		if err := repo_module.CheckPersonalRepoPolicy(ctx, ctx.Doer, owner, setting.Repository.DefaultPushCreatePrivate || setting.Repository.ForcePrivate); err != nil {
+			refuseGitPush(ctx, err.Error())
+			return nil
+		}
+
 		// Return dummy payload if GET receive-pack
 		if ctx.Req.Method == http.MethodGet {
 			dummyInfoRefs(ctx)
@@ -270,6 +277,10 @@ func httpBase(ctx *context.Context) *serviceHandler {
 		}
 
 		repo, err = repo_service.PushCreateRepo(ctx, ctx.Doer, owner, reponame)
+		if errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) {
+			refuseGitPush(ctx, err.Error())
+			return nil
+		}
 		if err != nil {
 			log.Error("pushCreateRepo: %v", err)
 			ctx.Status(http.StatusNotFound)
@@ -374,6 +385,19 @@ func dummyInfoRefs(ctx *context.Context) {
 	_, _ = ctx.Write(packetWrite("# service=git-receive-pack\n"))
 	_, _ = ctx.Write([]byte("0000"))
 	_, _ = ctx.Write(infoRefsCache)
+}
+
+// refuseGitPush refuses a push so that git shows msg: as an error line of the ref advertisement (GET info/refs),
+// else as a plain 403.
+func refuseGitPush(ctx *context.Context, msg string) {
+	if ctx.Req.Method != http.MethodGet {
+		ctx.PlainText(http.StatusForbidden, msg)
+		return
+	}
+	ctx.RespHeader().Set("Content-Type", "application/x-git-receive-pack-advertisement")
+	_, _ = ctx.Write(packetWrite("# service=git-receive-pack\n"))
+	_, _ = ctx.Write([]byte("0000"))
+	_, _ = ctx.Write(packetWrite("ERR " + msg + "\n"))
 }
 
 type serviceHandler struct {

@@ -19,6 +19,7 @@ import (
 	code_indexer "forgejo.org/modules/indexer/code"
 	issue_indexer "forgejo.org/modules/indexer/issues"
 	"forgejo.org/modules/log"
+	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
@@ -50,7 +51,8 @@ var (
 // (taken, reserved, malformed); the message says which.
 func IsBadTarget(err error) bool {
 	return repo_model.IsErrRepoAlreadyExist(err) || db.IsErrNameReserved(err) || db.IsErrNamePatternNotAllowed(err) ||
-		user_model.IsErrUserAlreadyExist(err) || organization.IsErrOrgArchived(err) || errors.Is(err, util.ErrInvalidArgument)
+		user_model.IsErrUserAlreadyExist(err) || organization.IsErrOrgArchived(err) || errors.Is(err, util.ErrInvalidArgument) ||
+		errors.As(err, &repo_module.ErrPersonalRepoPolicy{})
 }
 
 // RestoreOptions says where a restored item goes: a new owner (repositories only) and/or a new name.

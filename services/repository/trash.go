@@ -19,6 +19,7 @@ import (
 	code_indexer "forgejo.org/modules/indexer/code"
 	issue_indexer "forgejo.org/modules/indexer/issues"
 	"forgejo.org/modules/log"
+	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/sync"
 	"forgejo.org/modules/timeutil"
@@ -186,6 +187,9 @@ func moveTrashedRepository(ctx context.Context, doer, newOwner *user_model.User,
 	if newOwner != nil {
 		if newOwner.IsOrganization() && newOwner.IsArchived {
 			return organization.ErrOrgArchived{Name: newOwner.Name}
+		}
+		if err := repo_module.CheckPersonalRepoPolicy(ctx, doer, newOwner, repo.IsPrivate); err != nil {
+			return err
 		}
 		target = newOwner
 	}

@@ -60,6 +60,7 @@ type ConfigStruct struct {
 	OAuth2AppPolicy *config.Value[OAuth2AppPolicyState]
 	WebhookTypes    *config.Value[WebhookTypesState]
 	RepoUnitPolicy  *config.Value[RepoUnitPolicyState]
+	PersonalRepos   *config.Value[PersonalReposState]
 	// OrgCategoryOwnersCanAssign lets organization owners set their organization's category (site admins always can).
 	OrgCategoryOwnersCanAssign *config.Value[bool]
 	LogShipping                *config.Value[LogShippingState]
@@ -85,6 +86,7 @@ func initDefaultConfig() {
 		OAuth2AppPolicy:            config.ValueJSON[OAuth2AppPolicyState]("oauth2.app_policy"),
 		WebhookTypes:               config.ValueJSON[WebhookTypesState]("webhook.types"),
 		RepoUnitPolicy:             config.ValueJSON[RepoUnitPolicyState]("repository.unit_policy").WithInvalid(RepoUnitPolicyState{Invalid: true}),
+		PersonalRepos:              config.ValueJSON[PersonalReposState]("repository.personal_repos").WithInvalid(PersonalReposState{Mode: "invalid"}),
 		OrgCategoryOwnersCanAssign: config.ValueJSON[bool]("org_category.owners_can_assign"),
 		LogShipping:                config.ValueJSON[LogShippingState]("log_shipping.destinations"),
 	}

@@ -41,7 +41,8 @@ var (
 		AnsiCharset                             string
 		ForcePrivate                            bool
 		OrgRestrictVisibilityChange             bool
-		OrgPrivateForkPolicy                    int `ini:"-"` // 0 all, 1 org, 2 none: the index in user_model.PrivateForkPolicyNames
+		PersonalRepos                           string `ini:"-"` // the default of the dynamic setting repository.personal_repos
+		OrgPrivateForkPolicy                    int    `ini:"-"` // 0 all, 1 org, 2 none: the index in user_model.PrivateForkPolicyNames
 		DefaultPrivate                          string
 		DefaultPushCreatePrivate                bool
 		MaxCreationLimit                        int
@@ -174,6 +175,7 @@ var (
 		DefaultPrivate:                          RepoCreatingLastUserVisibility,
 		DefaultPushCreatePrivate:                true,
 		MaxCreationLimit:                        -1,
+		PersonalRepos:                           PersonalReposAllowed,
 		PreferredLicenses:                       []string{"Apache-2.0", "MIT"},
 		DisableHTTPGit:                          false,
 		AccessControlAllowOrigin:                "",
@@ -328,6 +330,9 @@ func loadRepositoryFrom(rootCfg ConfigProvider) {
 	}
 	if Repository.OrgPrivateForkPolicy, err = parseOrgPrivateForkPolicy(sec.Key("ORG_PRIVATE_FORK_POLICY").String()); err != nil {
 		log.Fatal("Invalid ORG_PRIVATE_FORK_POLICY: %v", err)
+	}
+	if Repository.PersonalRepos, err = parsePersonalRepos(sec.Key("PERSONAL_REPOS").String()); err != nil {
+		log.Fatal("Invalid PERSONAL_REPOS: %v", err)
 	}
 	Repository.DefaultBranch = sec.Key("DEFAULT_BRANCH").MustString(Repository.DefaultBranch)
 	RepoRootPath = sec.Key("ROOT").MustString(path.Join(AppDataPath, "forgejo-repositories"))

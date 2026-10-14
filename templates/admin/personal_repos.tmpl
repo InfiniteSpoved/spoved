@@ -1,0 +1,55 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin personal-repos")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.personal_repos"}}
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.personal_repos.desc"}}</p>
+			{{if .UpdatedUnix}}
+				<p class="help">{{ctx.Locale.Tr "admin.personal_repos.updated" (DateUtils.AbsoluteShort .UpdatedUnix) .UpdatedBy}}</p>
+			{{end}}
+			<form class="ui form" action="{{AppSubUrl}}/admin/personal-repos" method="post">
+				<fieldset class="grouped fields">
+					<legend>{{ctx.Locale.Tr "admin.personal_repos.mode"}}</legend>
+					{{range .Modes}}
+						<div class="field">
+							<div class="ui radio checkbox">
+								<input id="mode-{{.}}" name="mode" type="radio" value="{{.}}" {{if eq . $.Mode}}checked{{end}}>
+								<label for="mode-{{.}}">{{ctx.Locale.Tr (print "admin.personal_repos.mode." .)}}</label>
+							</div>
+						</div>
+					{{end}}
+				</fieldset>
+				<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+			</form>
+		</div>
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.personal_repos.violators" .ViolatorsTotal}}
+		</h4>
+		<div class="ui attached segment">
+			{{if .Violators}}
+				<table class="ui very basic table" id="personal-repo-violators">
+					<thead>
+						<tr>
+							<th>{{ctx.Locale.Tr "admin.users.name"}}</th>
+							<th>{{ctx.Locale.Tr "admin.users.repos"}}</th>
+						</tr>
+					</thead>
+					<tbody>
+						{{range .Violators}}
+							<tr>
+								<td><a href="{{AppSubUrl}}/{{PathEscape .OwnerName}}">{{.OwnerName}}</a></td>
+								<td>{{.NumRepos}}</td>
+							</tr>
+						{{end}}
+					</tbody>
+				</table>
+				{{if gt .ViolatorsTotal (len .Violators)}}
+					<p class="help">{{ctx.Locale.Tr "admin.personal_repos.violators_more" (len .Violators)}}</p>
+				{{end}}
+			{{else}}
+				<p>{{ctx.Locale.Tr "admin.personal_repos.none"}}</p>
+			{{end}}
+		</div>
+	</div>
+{{template "admin/layout_footer" .}}
