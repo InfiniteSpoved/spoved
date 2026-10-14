@@ -67,6 +67,10 @@ func Migrate(ctx *context.Context) {
 	if ctx.Written() {
 		return
 	}
+	// the doer's own namespace is locked by the size limit: preselect an organization
+	if orgs, _ := ctx.Data["Orgs"].([]*organization.Organization); ctx.Data["PersonalRepoLocked"] == true && ctxUser.ID == ctx.Doer.ID && len(orgs) > 0 {
+		ctxUser = orgs[0].AsUser()
+	}
 	ctx.Data["ContextUser"] = ctxUser
 
 	ctx.HTML(http.StatusOK, base.TplName("repo/migrate/"+serviceType.Name()))
@@ -273,6 +277,7 @@ func MigratePost(ctx *context.Context) {
 
 func setMigrationContextData(ctx *context.Context, serviceType structs.GitServiceType) {
 	ctx.Data["Title"] = ctx.Tr("new_migrate.title")
+	ctx.SetPersonalRepoLimit(ctx.Doer.ID) // the banner; the forms leave the doer out as owner while it shows
 
 	ctx.Data["LFSActive"] = setting.LFS.StartServer
 	ctx.Data["IsForcedPrivate"] = setting.Repository.ForcePrivate

@@ -7,11 +7,12 @@
 					{{ctx.Locale.Tr "new_repo.title"}}
 				</h3>
 				<div class="ui attached segment">
+					{{template "shared/personal_repo_limit" .}}
 					{{if or .CanCreateRepo .Orgs}}
 						{{template "base/alert" .}}
 						{{template "repo/create_helper" .}}
 
-						{{if and (not .CanCreateRepo) (ne .MaxCreationLimit 0)}}
+						{{if and (not .CanCreateRepo) (ne .MaxCreationLimit 0) (not .PersonalRepoLocked)}}
 							<div class="ui negative message">
 								<p>{{ctx.Locale.TrN .MaxCreationLimit "repo.form.reach_limit_of_creation_1" "repo.form.reach_limit_of_creation_n" .MaxCreationLimit}}</p>
 							</div>

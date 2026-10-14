@@ -204,12 +204,18 @@ func Create(ctx *context.Context) {
 		}
 	}
 
-	ctx.Data["CanCreateRepo"] = ctx.Doer.CanCreateRepo()
+	ctx.Data["CanCreateRepo"] = canCreatePersonalRepo(ctx)
 	ctx.Data["MaxCreationLimit"] = ctx.Doer.MaxCreationLimit()
 	ctx.Data["SupportedObjectFormats"] = git.SupportedObjectFormats
 	ctx.Data["DefaultObjectFormat"] = git.Sha1ObjectFormat
 
 	ctx.HTML(http.StatusOK, tplCreate)
+}
+
+// canCreatePersonalRepo is Doer.CanCreateRepo, and false while the size limit locks the doer's personal
+// repositories: the owner list then leaves the doer out, and the banner says why.
+func canCreatePersonalRepo(ctx *context.Context) bool {
+	return !ctx.SetPersonalRepoLimit(ctx.Doer.ID).Reached() && ctx.Doer.CanCreateRepo()
 }
 
 func handleCreateError(ctx *context.Context, owner *user_model.User, err error, name string, tpl base.TplName, form any) {
@@ -262,7 +268,7 @@ func CreatePost(ctx *context.Context) {
 	ctx.Data["Licenses"] = repo_module.Licenses
 	ctx.Data["Readmes"] = repo_module.Readmes
 
-	ctx.Data["CanCreateRepo"] = ctx.Doer.CanCreateRepo()
+	ctx.Data["CanCreateRepo"] = canCreatePersonalRepo(ctx)
 	ctx.Data["MaxCreationLimit"] = ctx.Doer.MaxCreationLimit()
 	ctx.Data["SupportedObjectFormats"] = git.SupportedObjectFormats
 	ctx.Data["DefaultObjectFormat"] = git.Sha1ObjectFormat

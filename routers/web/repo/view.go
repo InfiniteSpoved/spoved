@@ -901,6 +901,7 @@ func Home(ctx *context.Context) {
 		ctx.Data["BitbucketOrigin"] = origin
 	}
 
+	ctx.SetPersonalRepoLimit(ctx.Repo.Repository.OwnerID) // the banner, and no actions that would be refused
 	renderHomeCode(ctx)
 }
 

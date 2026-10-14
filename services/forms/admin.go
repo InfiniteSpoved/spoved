@@ -33,28 +33,29 @@ func (f *AdminCreateUserForm) Validate(req *http.Request, errs binding.Errors) b
 
 // AdminEditUserForm form for admin to create user
 type AdminEditUserForm struct {
-	LoginType               string `binding:"Required"`
-	UserName                string `binding:"Username;MaxSize(40)"`
-	LoginName               string
-	FullName                string `binding:"MaxSize(100)"`
-	Email                   string `binding:"Required;EmailForAdmin;MaxSize(254)"`
-	Password                string `binding:"MaxSize(255)"`
-	Website                 string `binding:"ValidSiteUrl;MaxSize(255)"`
-	Location                string `binding:"MaxSize(50)"`
-	Language                string `binding:"MaxSize(5)"`
-	Pronouns                string `binding:"MaxSize(50)"`
-	MaxRepoCreation         int
-	PersonalRepoSizeLimit   int64 // MiB; 0 = the site limit, -1 = unlimited
-	Active                  bool
-	Admin                   bool
-	Restricted              bool
-	AllowGitHook            bool
-	AllowImportLocal        bool
-	AllowCreateOrganization bool
-	ProhibitLogin           bool
-	Reset2FA                bool `form:"reset_2fa"`
-	Visibility              structs.VisibleType
-	HideEmail               bool `form:"hide_email"`
+	LoginType                 string `binding:"Required"`
+	UserName                  string `binding:"Username;MaxSize(40)"`
+	LoginName                 string
+	FullName                  string `binding:"MaxSize(100)"`
+	Email                     string `binding:"Required;EmailForAdmin;MaxSize(254)"`
+	Password                  string `binding:"MaxSize(255)"`
+	Website                   string `binding:"ValidSiteUrl;MaxSize(255)"`
+	Location                  string `binding:"MaxSize(50)"`
+	Language                  string `binding:"MaxSize(5)"`
+	Pronouns                  string `binding:"MaxSize(50)"`
+	MaxRepoCreation           int
+	PersonalRepoSizeLimitMode string `binding:"In(,site,custom,unlimited)"`
+	PersonalRepoSizeLimit     int64  // MiB, for the custom mode
+	Active                    bool
+	Admin                     bool
+	Restricted                bool
+	AllowGitHook              bool
+	AllowImportLocal          bool
+	AllowCreateOrganization   bool
+	ProhibitLogin             bool
+	Reset2FA                  bool `form:"reset_2fa"`
+	Visibility                structs.VisibleType
+	HideEmail                 bool `form:"hide_email"`
 }
 
 // Validate validates form fields

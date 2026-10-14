@@ -97,11 +97,7 @@ func (ctx *Context) checkQuota(evaluate quotaEvaluator, subject quota_model.Limi
 			return
 		}
 
-		if personal.Reached() && ctx.doerID() == userID {
-			ctx.Data["QuotaMessage"] = ctx.Tr("repo.personal_repos.limit_reached", base.FileSize(personal.Used), base.FileSize(personal.Limit))
-		} else if personal.Reached() {
-			ctx.Data["QuotaMessage"] = ctx.Tr("repo.personal_repos.limit_reached_owner")
-		}
+		ctx.setPersonalRepoLimit(personal, userID)
 		ctx.Data["IsRepo"] = ctx.Repo.Repository != nil
 		ctx.Data["Title"] = "Quota Exceeded"
 		ctx.HTML(http.StatusRequestEntityTooLarge, base.TplName("status/413"))
@@ -198,6 +194,28 @@ func checkQuota(ctx context.Context, evaluate quotaEvaluator, subject quota_mode
 	return true, nil
 }
 
+// SetPersonalRepoLimit loads the size limit of ownerID's personal repositories for the banner
+// (templates/shared/personal_repo_limit.tmpl) and returns it (Reached: locked); with the limit off it reads
+// nothing but the cached setting. Pages hide the actions that would be refused while it is true.
+func (ctx *Context) SetPersonalRepoLimit(ownerID int64) quota_model.PersonalRepoLimit {
+	l, err := quota_model.GetPersonalRepoLimit(ctx, ownerID)
+	if err != nil {
+		log.Error("GetPersonalRepoLimit: %v", err)
+	}
+	ctx.setPersonalRepoLimit(l, ownerID)
+	return l
+}
+
+func (ctx *Context) setPersonalRepoLimit(l quota_model.PersonalRepoLimit, ownerID int64) {
+	if !l.Reached() {
+		return
+	}
+	ctx.Data["PersonalRepoLocked"] = true
+	ctx.Data["PersonalRepoLimitOwn"] = ctx.doerID() == ownerID
+	ctx.Data["PersonalRepoUsed"] = l.Used
+	ctx.Data["PersonalRepoLimit"] = l.Limit
+}
+
 func (ctx *Context) doerID() int64 {
 	if ctx.Doer == nil {
 		return 0
@@ -287,7 +305,7 @@ func (ctx *Context) PersonalRepoRefusal(err error) (string, bool) {
 		return ctx.Locale.TrString(e.TrKey()), true
 	}
 	if e, ok := errors.AsType[quota_model.ErrPersonalRepoLimit](err); ok {
-		return ctx.Locale.TrString("repo.personal_repos.limit_reached", base.FileSize(e.Used), base.FileSize(e.Limit)), true
+		return ctx.Locale.TrString("repo.personal_repos.limit_reached", ctx.Locale.TrSize(e.Used), ctx.Locale.TrSize(e.Limit)), true
 	}
 	return "", false
 }

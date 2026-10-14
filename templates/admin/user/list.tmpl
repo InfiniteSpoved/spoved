@@ -103,7 +103,13 @@
 							<td>{{if .IsActive}}{{svg "octicon-check"}}{{else}}{{svg "octicon-x"}}{{end}}</td>
 							<td>{{if .IsRestricted}}{{svg "octicon-check"}}{{else}}{{svg "octicon-x"}}{{end}}</td>
 							<td>{{if index $.UsersTwoFaStatus .ID}}{{svg "octicon-check"}}{{else}}{{svg "octicon-x"}}{{end}}</td>
-							<td class="personal-repo-usage">{{with index $.PersonalRepoLimits .ID}}{{ctx.Locale.TrSize .Used}}{{if .Limit}} / {{ctx.Locale.TrSize .Limit}}{{end}}{{end}}</td>
+							<td class="personal-repo-usage">
+								{{if and .IsAdmin .IsActive (not .ProhibitLogin)}}
+									{{ctx.Locale.Tr "admin.users.personal_repo_exempt"}}
+								{{else}}
+									{{with index $.PersonalRepoLimits .ID}}{{ctx.Locale.TrSize .Used}} / {{if .Limit}}{{ctx.Locale.TrSize .Limit}}{{else}}{{ctx.Locale.Tr "admin.users.personal_repo_unlimited"}}{{end}}{{end}}
+								{{end}}
+							</td>
 							<td>{{DateUtils.AbsoluteShort .CreatedUnix}}</td>
 							{{if .LastLoginUnix}}
 								<td>{{DateUtils.AbsoluteShort .LastLoginUnix}}</td>

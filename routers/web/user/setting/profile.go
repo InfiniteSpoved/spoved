@@ -16,7 +16,6 @@ import (
 	"forgejo.org/models/avatars"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
-	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
@@ -217,12 +216,7 @@ func Repos(ctx *context.Context) {
 	ctx.Data["PageIsSettingsRepos"] = true
 	ctx.Data["allowAdopt"] = ctx.IsUserSiteAdmin() || setting.Repository.AllowAdoptionOfUnadoptedRepositories
 	ctx.Data["allowDelete"] = ctx.IsUserSiteAdmin() || setting.Repository.AllowDeleteOfUnadoptedRepositories
-	limit, err := quota_model.GetPersonalRepoLimit(ctx, ctx.Doer.ID)
-	if err != nil {
-		ctx.ServerError("GetPersonalRepoLimit", err)
-		return
-	}
-	ctx.Data["PersonalRepoLimit"] = limit
+	ctx.Data["PersonalRepoUsage"] = ctx.SetPersonalRepoLimit(ctx.Doer.ID)
 
 	opts := db.ListOptions{
 		PageSize: setting.UI.Admin.UserPagingNum,

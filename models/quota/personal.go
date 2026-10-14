@@ -6,6 +6,7 @@ package quota
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"forgejo.org/models/db"
 	user_model "forgejo.org/models/user"
@@ -38,7 +39,13 @@ func (l PersonalRepoLimit) MessageFor(doerID, ownerID int64) string {
 // Message is the refusal shown when the limit is reached.
 func (l PersonalRepoLimit) Message() string {
 	return fmt.Sprintf("Personal repository size limit reached (%s of %s used). Delete content in the web UI to write again.",
-		humanize.IBytes(uint64(l.Used)), humanize.IBytes(uint64(l.Limit)))
+		FormatSize(l.Used), FormatSize(l.Limit))
+}
+
+// FormatSize formats a size like the web UI does (Locale.TrSize in English): "1 MiB", "1.5 MiB", "512 B".
+func FormatSize(n int64) string {
+	number, unit, _ := strings.Cut(humanize.IBytes(uint64(max(n, 0))), " ")
+	return strings.TrimSuffix(number, ".0") + " " + unit
 }
 
 // ErrPersonalRepoLimit refuses a new repository in a namespace whose size limit is reached.

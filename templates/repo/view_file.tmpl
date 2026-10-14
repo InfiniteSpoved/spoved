@@ -84,7 +84,7 @@
 					{{end}}
 				{{end}}
 				{{if .Repository.CanEnableEditor}}
-					{{if .CanEditFile}}
+					{{if and .CanEditFile (not .PersonalRepoLocked)}}
 						<a class="btn-octicon" href="{{.RepoLink}}/_edit/{{PathEscapeSegments .BranchName}}/{{PathEscapeSegments .TreePath}}" data-tooltip-content="{{.EditFileTooltip}}">
 							{{svg "octicon-pencil"}}
 						</a>

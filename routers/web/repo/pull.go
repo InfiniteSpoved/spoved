@@ -146,7 +146,8 @@ func updateForkRepositoryInContext(ctx *context.Context, forkRepo *repo_model.Re
 	ctx.Data["repo_name"] = forkRepo.Name
 	ctx.Data["description"] = forkRepo.Description
 	ctx.Data["IsPrivate"] = forkRepo.IsPrivate || forkRepo.Owner.Visibility == structs.VisibleTypePrivate
-	canForkToUser := forkRepo.OwnerID != ctx.Doer.ID && !repo_model.HasForkedRepo(ctx, ctx.Doer.ID, forkRepo.ID)
+	canForkToUser := forkRepo.OwnerID != ctx.Doer.ID && !repo_model.HasForkedRepo(ctx, ctx.Doer.ID, forkRepo.ID) &&
+		!ctx.SetPersonalRepoLimit(ctx.Doer.ID).Reached() // the banner says why
 
 	ctx.Data["ForkRepo"] = forkRepo
 

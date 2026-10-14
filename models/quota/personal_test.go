@@ -63,8 +63,11 @@ func TestPersonalRepoLimitReached(t *testing.T) {
 	assert.False(t, PersonalRepoLimit{Used: 9, Limit: 10}.Reached(), "one byte under")
 	assert.True(t, PersonalRepoLimit{Used: 10, Limit: 10}.Reached(), "at the limit")
 	assert.True(t, PersonalRepoLimit{Used: 11, Limit: 10}.Reached(), "over")
-	assert.Equal(t, "Personal repository size limit reached (1.0 KiB of 1.0 KiB used). Delete content in the web UI to write again.", PersonalRepoLimit{Used: 1024, Limit: 1024}.MessageFor(2, 2))
+	assert.Equal(t, "Personal repository size limit reached (1 KiB of 1 KiB used). Delete content in the web UI to write again.", PersonalRepoLimit{Used: 1024, Limit: 1024}.MessageFor(2, 2))
 	assert.NotContains(t, PersonalRepoLimit{Used: 1024, Limit: 1024}.MessageFor(4, 2), "KiB", "only the owner sees the numbers")
+	assert.Equal(t, "1.5 MiB", FormatSize(3<<19))
+	assert.Equal(t, "512 B", FormatSize(512))
+	assert.Equal(t, "2 GiB", FormatSize(2<<30))
 }
 
 func TestGetPersonalRepoUsage(t *testing.T) {

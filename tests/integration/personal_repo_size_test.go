@@ -286,8 +286,12 @@ func TestPersonalRepoSizeLockWrites(t *testing.T) {
 		assert.Contains(t, resp.Body.String(), personalLimitMessage)
 
 		// the web editor refuses with the 413 page and the message
-		resp = session.MakeRequest(t, NewRequest(t, "GET", "/user2/lock-writes/_new/main/"), http.StatusRequestEntityTooLarge)
-		assert.Contains(t, resp.Body.String(), "Personal repository size limit reached")
+		// U2: not a dead end: the banner with the link to the repositories list, a way back and the repository header
+		doc := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", "/user2/lock-writes/_new/main/").SetHeader("Accept", "text/html"), http.StatusRequestEntityTooLarge).Body)
+		assert.Contains(t, doc.Find("#personal-repo-limit-banner").Text(), "You can't push or add content")
+		assert.Equal(t, 1, doc.Find(`#personal-repo-limit-banner a[href$="/user/settings/repos"]`).Length())
+		assert.Equal(t, "/user2/lock-writes", doc.Find("#quota-back").AttrOr("href", ""))
+		assert.Equal(t, 1, doc.Find(".repo-header").Length())
 
 		// below the limit again: allowed
 		lockPersonalRepos(t, 2, false)
@@ -445,7 +449,7 @@ func TestPersonalRepoSizeAdmin(t *testing.T) {
 	// the web override: MiB, -1 unlimited
 	user5 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5})
 	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/users/5/edit", map[string]string{
-		"login_type": "0-0", "login_name": user5.LoginName, "email": user5.Email, "max_repo_creation": "-1", "personal_repo_size_limit": "-1",
+		"login_type": "0-0", "login_name": user5.LoginName, "email": user5.Email, "max_repo_creation": "-1", "personal_repo_size_limit_mode": "unlimited",
 	}), http.StatusSeeOther)
 	defer setPersonalRepoOverride(t, 5, 0)
 	assert.EqualValues(t, -1, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5}).PersonalRepoSizeLimit)
@@ -456,10 +460,17 @@ func TestPersonalRepoSizeAdmin(t *testing.T) {
 	doc := NewHTMLParser(t, admin.MakeRequest(t, NewRequest(t, "GET", "/admin/personal-repos"), http.StatusOK).Body)
 	assert.Contains(t, doc.Find("#personal-repo-over-limit").Text(), "user2")
 	assert.NotContains(t, doc.Find("#personal-repo-over-limit").Text(), "user5")
-	doc = NewHTMLParser(t, admin.MakeRequest(t, NewRequest(t, "GET", "/admin/users?q=user2"), http.StatusOK).Body)
-	assert.Contains(t, doc.Find(".personal-repo-usage").First().Text(), "/ 1 B")
+	// U4: usage / limit, "unlimited", "exempt" for a site admin; never a bare size
+	usageOf := func(name string) string {
+		doc := NewHTMLParser(t, admin.MakeRequest(t, NewRequest(t, "GET", "/admin/users?q="+name), http.StatusOK).Body)
+		return strings.Join(strings.Fields(doc.Find(".personal-repo-usage").First().Text()), " ")
+	}
+	assert.True(t, strings.HasSuffix(usageOf("user2"), "/ 1 B"), usageOf("user2"))
+	assert.True(t, strings.HasSuffix(usageOf("user5"), "/ unlimited"), usageOf("user5"))
+	assert.Equal(t, "exempt (site administrator)", usageOf("user1"))
+	// U6: the settings page
 	doc = NewHTMLParser(t, loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/user/settings/repos"), http.StatusOK).Body)
-	assert.Contains(t, doc.Find("#personal-repo-limit").Text(), "only deletions are possible")
+	assert.Contains(t, doc.Find("#personal-repo-limit-banner").Text(), "You can't push or add content until you delete some")
 }
 
 // M3: with the limit off a quota check reads only the cached setting; with it on, the user and the usage.
@@ -601,11 +612,65 @@ func TestPersonalRepoSizeOverrideBytesKept(t *testing.T) {
 	user5 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5})
 	edit := func(value string) {
 		loginUser(t, "user1").MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/users/5/edit", map[string]string{
-			"login_type": "0-0", "login_name": user5.LoginName, "email": user5.Email, "max_repo_creation": "-1", "personal_repo_size_limit": value,
+			"login_type": "0-0", "login_name": user5.LoginName, "email": user5.Email, "max_repo_creation": "-1",
+			"personal_repo_size_limit_mode": "custom", "personal_repo_size_limit": value,
 		}), http.StatusSeeOther)
 	}
 	edit("1")
 	assert.EqualValues(t, 1500000, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5}).PersonalRepoSizeLimit)
 	edit("2")
 	assert.EqualValues(t, 2<<20, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5}).PersonalRepoSizeLimit)
+	// the form: three choices, the custom value in MiB
+	doc := NewHTMLParser(t, loginUser(t, "user1").MakeRequest(t, NewRequest(t, "GET", "/admin/users/5/edit"), http.StatusOK).Body)
+	assert.Equal(t, "custom", doc.Find("#personal_repo_size_limit_mode option[selected]").AttrOr("value", ""))
+	assert.Equal(t, "2", doc.Find("#personal_repo_size_limit").AttrOr("value", ""))
+	loginUser(t, "user1").MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/users/5/edit", map[string]string{
+		"login_type": "0-0", "login_name": user5.LoginName, "email": user5.Email, "max_repo_creation": "-1", "personal_repo_size_limit_mode": "site",
+	}), http.StatusSeeOther)
+	assert.EqualValues(t, 0, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5}).PersonalRepoSizeLimit)
+}
+
+// U1: the owner is warned before a write fails, and the pages offer no action that would be refused.
+func TestPersonalRepoSizeLockUI(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		defer resetPersonalRepoMode(t)
+		session := loginUser(t, "user2")
+		token := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeAll)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/user/repos", &api.CreateRepoOption{Name: "lock-ui", AutoInit: true, DefaultBranch: "main", Readme: "Default"}).AddTokenAuth(token), http.StatusCreated)
+		page := func(path string) *HTMLDoc {
+			return NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", path), http.StatusOK).Body)
+		}
+		banner := func(doc *HTMLDoc) string { return doc.Find("#personal-repo-limit-banner").Text() }
+
+		// unlocked: no banner, the actions are there
+		doc := page("/user2/lock-ui")
+		assert.Empty(t, banner(doc))
+		assert.Equal(t, 1, doc.Find(`a[href$="/_new/main/"]`).Length())
+
+		lockPersonalRepos(t, 2, true)
+		doc = page("/user2/lock-ui")
+		assert.Contains(t, banner(doc), "You can't push or add content")
+		assert.Equal(t, 0, doc.Find(`a[href$="/_new/main/"]`).Length(), "no Add file")
+		doc = page("/user2/lock-ui/src/branch/main/README.md")
+		assert.Contains(t, banner(doc), "You can't push or add content")
+		assert.Equal(t, 0, doc.Find(`a[href*="/_edit/"]`).Length(), "no edit")
+		assert.Equal(t, 1, doc.Find(`a[href*="/_delete/"]`).Length(), "deletes stay")
+
+		// new repository, fork and migrate: the banner, and the user isn't offered as the owner
+		doc = page("/repo/create")
+		assert.Contains(t, banner(doc), "You can't push or add content")
+		assert.Equal(t, 0, doc.Find(`#repo_owner_label .menu .item[data-value="2"]`).Length())
+		assert.Positive(t, doc.Find(`#repo_owner_label .menu .item`).Length(), "user2's organizations stay")
+		doc = page("/user5/repo4/fork")
+		assert.Contains(t, banner(doc), "You can't push or add content")
+		assert.Equal(t, 0, doc.Find(`.menu .item[data-value="2"]`).Length())
+		doc = page("/repo/migrate?service_type=1")
+		assert.Contains(t, banner(doc), "You can't push or add content")
+		assert.Equal(t, 0, doc.Find(`.menu .item[data-value="2"]`).Length())
+		assert.NotEqual(t, "2", doc.Find("#uid").AttrOr("value", ""), "an organization is preselected")
+
+		// someone else sees the banner without the owner's numbers
+		doc = NewHTMLParser(t, loginUser(t, "user5").MakeRequest(t, NewRequest(t, "GET", "/user2/lock-ui"), http.StatusOK).Body)
+		assert.Contains(t, banner(doc), "The owner's personal repositories reached their size limit")
+	})
 }

@@ -36,7 +36,7 @@ the page stores the setting in the database, where it takes effect at once on ev
 
 The same page sets the size limit of each user's personal repositories, in MiB; 0 turns it off. The default comes from
 `[repository] PERSONAL_REPOS_SIZE_LIMIT` (bytes or a size such as `50 MiB`). Site admins can give a user an override in
-the user's admin page (MiB) or with `PATCH /api/v1/admin/users/{username}` (`personal_repo_size_limit`, bytes): 0 uses
+the user's admin page (Site limit, Custom in MiB or Unlimited) or with `PATCH /api/v1/admin/users/{username}` (`personal_repo_size_limit`, bytes): 0 uses
 the site limit, -1 means unlimited, any other value replaces it (higher or lower). Overrides apply only while the site
 limit is on. Organizations and site admins who can sign in are never limited.
 

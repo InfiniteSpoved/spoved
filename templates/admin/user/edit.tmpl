@@ -113,10 +113,18 @@
 					<p class="help">{{ctx.Locale.Tr "admin.users.max_repo_creation_desc"}}</p>
 				</div>
 				{{if not .User.IsOrganization}}
-				<div class="inline field {{if .Err_PersonalRepoSizeLimit}}error{{end}}">
-					<label for="personal_repo_size_limit">{{ctx.Locale.Tr "admin.users.personal_repo_size_limit"}}</label>
-					<input id="personal_repo_size_limit" name="personal_repo_size_limit" type="number" min="-1" step="1" value="{{.PersonalRepoSizeLimitMiB}}">
-					<p class="help">{{ctx.Locale.Tr "admin.users.personal_repo_size_limit_desc"}}</p>
+				<div class="field {{if .Err_PersonalRepoSizeLimit}}error{{end}}">
+					<label for="personal_repo_size_limit_mode">{{ctx.Locale.Tr "admin.users.personal_repo_size_limit"}}</label>
+					<select id="personal_repo_size_limit_mode" name="personal_repo_size_limit_mode">
+						<option value="site"{{if eq .User.PersonalRepoSizeLimit 0}} selected{{end}}>{{ctx.Locale.Tr "admin.users.personal_repo_size_limit.site"}}</option>
+						<option value="custom"{{if gt .User.PersonalRepoSizeLimit 0}} selected{{end}}>{{ctx.Locale.Tr "admin.users.personal_repo_size_limit.custom"}}</option>
+						<option value="unlimited"{{if lt .User.PersonalRepoSizeLimit 0}} selected{{end}}>{{ctx.Locale.Tr "admin.users.personal_repo_size_limit.unlimited"}}</option>
+					</select>
+				</div>
+				<div class="field {{if .Err_PersonalRepoSizeLimit}}error{{end}}">
+					<label for="personal_repo_size_limit">{{ctx.Locale.Tr "admin.users.personal_repo_size_limit.mib"}}</label>
+					<input id="personal_repo_size_limit" name="personal_repo_size_limit" type="number" min="1" step="1" value="{{.PersonalRepoSizeLimitMiB}}">
+					<span class="help">{{ctx.Locale.Tr "admin.users.personal_repo_size_limit_desc"}}</span>
 				</div>
 				{{end}}
 

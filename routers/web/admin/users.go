@@ -239,12 +239,13 @@ func NewUserPost(ctx *context.Context) {
 	ctx.Redirect(setting.AppSubURL + "/admin/users/" + strconv.FormatInt(u.ID, 10))
 }
 
-// personalRepoSizeLimitMiB is the size limit override of u as the edit form shows it: MiB, at least 1, or 0/-1.
+// personalRepoSizeLimitMiB is a custom size limit override of u as the edit form shows it, in MiB (at least 1); 0
+// for the other modes.
 func personalRepoSizeLimitMiB(u *user_model.User) int64 {
 	if u.PersonalRepoSizeLimit > 0 {
 		return max(u.PersonalRepoSizeLimit>>20, 1)
 	}
-	return u.PersonalRepoSizeLimit
+	return 0
 }
 
 func prepareUserInfo(ctx *context.Context) *user_model.User {
@@ -260,7 +261,9 @@ func prepareUserInfo(ctx *context.Context) *user_model.User {
 
 	ctx.Data["User"] = u
 	ctx.Data["ContextUser"] = u
-	ctx.Data["PersonalRepoSizeLimitMiB"] = personalRepoSizeLimitMiB(u)
+	if mib := personalRepoSizeLimitMiB(u); mib > 0 {
+		ctx.Data["PersonalRepoSizeLimitMiB"] = mib
+	}
 
 	roleGroups, err := org_model.GetUsersGrantedRoleGroups(ctx, u.ID)
 	if err != nil {
@@ -383,17 +386,23 @@ func EditUserPost(ctx *context.Context) {
 		ctx.HTML(http.StatusOK, tplUserEdit)
 		return
 	}
-	sizeLimit := form.PersonalRepoSizeLimit
-	if sizeLimit < -1 || sizeLimit > math.MaxInt64>>20 {
-		ctx.Data["Err_PersonalRepoSizeLimit"] = true
-		ctx.RenderWithErr(ctx.Tr("admin.users.personal_repo_size_limit_invalid"), tplUserEdit, &form)
-		return
-	}
-	switch {
-	case sizeLimit == personalRepoSizeLimitMiB(u):
-		sizeLimit = u.PersonalRepoSizeLimit // unchanged: keep an override in bytes (API) that isn't whole MiB
-	case sizeLimit > 0:
-		sizeLimit <<= 20
+	sizeLimit := u.PersonalRepoSizeLimit // no mode sent: unchanged
+	switch form.PersonalRepoSizeLimitMode {
+	case "site":
+		sizeLimit = 0
+	case "unlimited":
+		sizeLimit = -1
+	case "custom":
+		mib := form.PersonalRepoSizeLimit
+		if mib < 1 || mib > math.MaxInt64>>20 {
+			ctx.Data["Err_PersonalRepoSizeLimit"] = true
+			ctx.RenderWithErr(ctx.Tr("admin.users.personal_repo_size_limit_invalid"), tplUserEdit, &form)
+			return
+		}
+		// an unchanged value keeps an override set in bytes (API) that isn't whole MiB
+		if u.PersonalRepoSizeLimit <= 0 || mib != personalRepoSizeLimitMiB(u) {
+			sizeLimit = mib << 20
+		}
 	}
 
 	if form.UserName != "" {
