@@ -130,7 +130,7 @@ func TestHookEventInclusion(t *testing.T) {
 			string(webhook_module.HookEventWorkflowJobWaiting),
 		},
 	}
-	hook, ok := addHook(ctx, &opts, 2, 1)
+	hook, ok := addHook(ctx, &opts, 2, 0, 1)
 	require.True(t, ok)
 	val := reflect.ValueOf(hook.HookEvents)
 	ty := val.Type()

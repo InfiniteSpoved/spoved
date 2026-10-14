@@ -1419,19 +1419,16 @@ func Routes() *web.Route {
 				m.Combo("/{username}").Get(reqToken(), org.IsMember).
 					Delete(reqToken(), reqOrgOwnership(), org.DeleteMember)
 			})
-			addActionsRoutes(
-				m,
-				func(ctx *context.APIContext) {
-					// Actions hidden for the organization (site policy or owner): its secrets, variables and runners too
-					if reqOrgOwnership()(ctx); ctx.Written() {
-						return
-					}
-					if repo_model.HiddenUnits(ctx, ctx.Org().Organization.AsUser()).Contains(unit.TypeActions) {
-						ctx.NotFound()
-					}
-				},
-				org.NewAction(),
-			)
+			// Actions hidden for the organization (site policy or owner): its secrets, variables and runners too
+			reqOrgActions := func(ctx *context.APIContext) {
+				if reqOrgOwnership()(ctx); ctx.Written() {
+					return
+				}
+				if repo_model.HiddenUnits(ctx, ctx.Org().Organization.AsUser()).Contains(unit.TypeActions) {
+					ctx.NotFound()
+				}
+			}
+			addActionsRoutes(m, reqOrgActions, org.NewAction())
 			m.Group("/public_members", func() {
 				m.Get("", org.ListPublicMembers)
 				m.Combo("/{username}").Get(org.IsPublicMember).
@@ -1480,6 +1477,31 @@ func Routes() *web.Route {
 						Post(bind(api.CreateKeyOption{}), org.CreateProjectDeployKey)
 					m.Combo("/{id}/keys/{key_id}").Get(org.GetProjectDeployKey).
 						Delete(org.DeleteProjectDeployKey)
+					m.Group("/{id}/branch_protections", func() {
+						m.Combo("").Get(org.ListProjectBranchProtections).
+							Post(bind(api.CreateOrgBranchProtectionOption{}), org.CreateProjectBranchProtection)
+						m.Combo("/{name}").Get(org.GetProjectBranchProtection).
+							Patch(bind(api.EditOrgBranchProtectionOption{}), org.EditProjectBranchProtection).
+							Delete(org.DeleteProjectBranchProtection)
+					})
+					m.Group("/{id}/hooks", func() {
+						m.Combo("").Get(org.ListProjectHooks).
+							Post(bind(api.CreateHookOption{}), org.CreateProjectHook)
+						m.Combo("/{hook_id}").Get(org.GetProjectHook).
+							Patch(bind(api.EditHookOption{}), org.EditProjectHook).
+							Delete(org.DeleteProjectHook)
+					}, reqWebhooksEnabled())
+					m.Group("/{id}/actions", func() {
+						m.Get("/secrets", org.ListProjectActionsSecrets)
+						m.Combo("/secrets/{secretname}").
+							Put(bind(api.CreateOrUpdateSecretOption{}), org.CreateOrUpdateProjectSecret).
+							Delete(org.DeleteProjectSecret)
+						m.Get("/variables", org.ListProjectVariables)
+						m.Combo("/variables/{variablename}").Get(org.GetProjectVariable).
+							Delete(org.DeleteProjectVariable).
+							Post(bind(api.CreateVariableOption{}), org.CreateProjectVariable).
+							Put(bind(api.UpdateVariableOption{}), org.UpdateProjectVariable)
+					}, reqOrgActions)
 				}, reqToken(), reqOrgOwnership())
 			}, org.HideInvisibleOrg)
 			m.Group("/avatar", func() {

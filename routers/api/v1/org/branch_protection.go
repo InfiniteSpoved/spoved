@@ -39,7 +39,12 @@ func ListBranchProtections(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	rules, err := git_model.FindOrgProtectedBranchRules(ctx, ctx.Org().Organization.ID, 0)
+	listBranchProtections(ctx, 0)
+}
+
+// listBranchProtections lists the rules of the organization (groupID 0) or of its project groupID.
+func listBranchProtections(ctx *context.APIContext, groupID int64) {
+	rules, err := git_model.FindOrgProtectedBranchRules(ctx, ctx.Org().Organization.ID, groupID)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "FindOrgProtectedBranchRules", err)
 		return
@@ -81,7 +86,11 @@ func GetBranchProtection(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	rule := getOrgRule(ctx)
+	getBranchProtection(ctx, 0)
+}
+
+func getBranchProtection(ctx *context.APIContext, groupID int64) {
+	rule := getOrgRule(ctx, groupID)
 	if rule == nil {
 		return
 	}
@@ -119,6 +128,10 @@ func CreateBranchProtection(ctx *context.APIContext) {
 	//   "422":
 	//     "$ref": "#/responses/validationError"
 
+	createBranchProtection(ctx, 0)
+}
+
+func createBranchProtection(ctx *context.APIContext, groupID int64) {
 	form := web.GetForm(ctx).(*api.CreateOrgBranchProtectionOption)
 	org := ctx.Org().Organization
 
@@ -127,7 +140,7 @@ func CreateBranchProtection(ctx *context.APIContext) {
 		ctx.Error(http.StatusUnprocessableEntity, "", "rule_name is empty")
 		return
 	}
-	if existing, err := git_model.GetOrgProtectedBranchRuleByName(ctx, org.ID, 0, ruleName); err != nil {
+	if existing, err := git_model.GetOrgProtectedBranchRuleByName(ctx, org.ID, groupID, ruleName); err != nil {
 		ctx.Error(http.StatusInternalServerError, "GetOrgProtectedBranchRuleByName", err)
 		return
 	} else if existing != nil {
@@ -144,7 +157,7 @@ func CreateBranchProtection(ctx *context.APIContext) {
 	if !ok {
 		return
 	}
-	saveOrgRule(ctx, rule, opts, repoIDs, http.StatusCreated)
+	saveOrgRule(ctx, groupID, rule, opts, repoIDs, http.StatusCreated)
 }
 
 // EditBranchProtection edits a branch protection rule of an organization
@@ -181,8 +194,12 @@ func EditBranchProtection(ctx *context.APIContext) {
 	//   "422":
 	//     "$ref": "#/responses/validationError"
 
+	editBranchProtection(ctx, 0)
+}
+
+func editBranchProtection(ctx *context.APIContext, groupID int64) {
 	form := web.GetForm(ctx).(*api.EditOrgBranchProtectionOption)
-	rule := getOrgRule(ctx)
+	rule := getOrgRule(ctx, groupID)
 	if rule == nil {
 		return
 	}
@@ -203,7 +220,7 @@ func EditBranchProtection(ctx *context.APIContext) {
 	if !ok {
 		return
 	}
-	saveOrgRule(ctx, rule, opts, repoIDs, http.StatusOK)
+	saveOrgRule(ctx, groupID, rule, opts, repoIDs, http.StatusOK)
 }
 
 // DeleteBranchProtection deletes a branch protection rule of an organization
@@ -232,20 +249,25 @@ func DeleteBranchProtection(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	rule := getOrgRule(ctx)
+	deleteBranchProtection(ctx, 0)
+}
+
+func deleteBranchProtection(ctx *context.APIContext, groupID int64) {
+	rule := getOrgRule(ctx, groupID)
 	if rule == nil {
 		return
 	}
-	if err := git_model.DeleteOrgProtectedBranch(ctx, ctx.Org().Organization.ID, 0, rule.ID); err != nil {
+	if err := git_model.DeleteOrgProtectedBranch(ctx, ctx.Org().Organization.ID, groupID, rule.ID); err != nil {
 		ctx.Error(http.StatusInternalServerError, "DeleteOrgProtectedBranch", err)
 		return
 	}
 	ctx.Status(http.StatusNoContent)
 }
 
-// getOrgRule returns the rule named in the path, or writes 404 and returns nil.
-func getOrgRule(ctx *context.APIContext) *git_model.ProtectedBranch {
-	rule, err := git_model.GetOrgProtectedBranchRuleByName(ctx, ctx.Org().Organization.ID, 0, ctx.Params(":name"))
+// getOrgRule returns the rule of the organization (groupID 0) or of its project groupID named in the path, or writes
+// 404 and returns nil.
+func getOrgRule(ctx *context.APIContext, groupID int64) *git_model.ProtectedBranch {
+	rule, err := git_model.GetOrgProtectedBranchRuleByName(ctx, ctx.Org().Organization.ID, groupID, ctx.Params(":name"))
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "GetOrgProtectedBranchRuleByName", err)
 		return nil
@@ -282,8 +304,8 @@ func getRuleRepoIDs(ctx *context.APIContext, rule *git_model.ProtectedBranch) ([
 	return ids, true
 }
 
-func saveOrgRule(ctx *context.APIContext, rule *git_model.ProtectedBranch, opts git_model.WhitelistOptions, repoIDs []int64, status int) {
-	err := git_model.UpdateOrgProtectBranch(ctx, ctx.Org().Organization.ID, 0, rule, opts, repoIDs)
+func saveOrgRule(ctx *context.APIContext, groupID int64, rule *git_model.ProtectedBranch, opts git_model.WhitelistOptions, repoIDs []int64, status int) {
+	err := git_model.UpdateOrgProtectBranch(ctx, ctx.Org().Organization.ID, groupID, rule, opts, repoIDs)
 	if errors.Is(err, util.ErrInvalidArgument) {
 		ctx.Error(http.StatusUnprocessableEntity, "", err.Error())
 		return
@@ -297,7 +319,7 @@ func saveOrgRule(ctx *context.APIContext, rule *git_model.ProtectedBranch, opts 
 	}
 
 	// reload to get the stored allow-lists
-	rule, err = git_model.GetOrgProtectedBranchRuleByName(ctx, ctx.Org().Organization.ID, 0, rule.RuleName)
+	rule, err = git_model.GetOrgProtectedBranchRuleByName(ctx, ctx.Org().Organization.ID, groupID, rule.RuleName)
 	if err != nil || rule == nil {
 		ctx.Error(http.StatusInternalServerError, "GetOrgProtectedBranchRuleByName", err)
 		return
