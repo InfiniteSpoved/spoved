@@ -30,6 +30,8 @@ func TestBitbucketBranchRule(t *testing.T) {
 		{"PATTERN", "a/**/b", true, []string{"a/b", "a/x/b", "a/x/y/b", "z/a/b"}, []string{"a/bc"}},
 		{"PATTERN", "v?", true, []string{"v1", "x/v1"}, []string{"v10", "v/"}},
 		{"PATTERN", "a{b}[c]", true, []string{"a{b}[c]", "x/a{b}[c]"}, []string{"abc"}},
+		{"PATTERN", "a,b!c", true, []string{"a,b!c", "x/a,b!c"}, []string{"a", "b!c"}},
+		{"PATTERN", "refs/heads/x,y", false, []string{"x,y"}, []string{"x", "y"}},
 	} {
 		rule, tags, ok := bitbucketBranchRule(c.matcherType, c.id)
 		if !assert.True(t, ok, c.id) {

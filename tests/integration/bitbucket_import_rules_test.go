@@ -32,7 +32,7 @@ func TestBitbucketImportRules(t *testing.T) {
 		defer test.MockVariableValueWithReset(&setting.Migrations.AllowLocalNetworks, true, func() { require.NoError(t, allowlist.Init()) })()
 		defer test.MockVariableValueWithReset(&setting.Migrations.AllowUnencrypted, true, func() { require.NoError(t, allowlist.Init()) })()
 		ctx := t.Context()
-		server := newBitbucketMock(t, nil, map[string][]string{"RUL": {"lib", "svc"}, "UNM": {"u"}})
+		server := newBitbucketMock(t, nil, map[string][]string{"RUL": {"lib", "ov2", "ovl", "svc"}, "UNM": {"u"}})
 		defer server.Close()
 
 		page := func(values ...any) map[string]any { return map[string]any{"isLastPage": true, "values": values} }
@@ -64,7 +64,7 @@ func TestBitbucketImportRules(t *testing.T) {
 			"keys/1.0/projects/RUL/repos/svc/ssh": page(map[string]any{"key": map[string]any{"id": 21, "text": keys[21], "label": "ci"}, "permission": "REPO_WRITE"}),
 			"branch-permissions/2.0/projects/RUL/restrictions": page(
 				// user8 is no member of the organization; the group and the project key can't be held by a project rule
-				restriction("read-only", "PATTERN", "release/*", []map[string]any{usr("user4"), usr("user8")}, []string{"bb-devs"}, 30),
+				restriction("read-only", "BRANCH", "refs/heads/release", []map[string]any{usr("user4"), usr("user8")}, []string{"bb-devs"}, 30),
 				restriction("read-only", "BRANCH", "refs/heads/main", []map[string]any{usr("user4"), usr("user5")}, nil),
 				restriction("pull-request-only", "BRANCH", "refs/heads/main", []map[string]any{usr("user5")}, nil),
 				restriction("no-deletes", "BRANCH", "refs/heads/develop", []map[string]any{usr("user4")}, nil),
@@ -76,6 +76,18 @@ func TestBitbucketImportRules(t *testing.T) {
 			),
 			"branch-permissions/2.0/projects/RUL/repos/svc/restrictions": page(
 				restriction("read-only", "BRANCH", "refs/heads/main", []map[string]any{usr("user4")}, nil, 21, 99),
+			),
+			"branch-permissions/2.0/projects/RUL/repos/lib/restrictions": page(
+				restriction("pull-request-only", "PATTERN", "rel,x/*", []map[string]any{usr("user4")}, nil),
+			),
+			// overlapping restrictions: spoved applies only the first matching rule, so both get the strictest
+			"branch-permissions/2.0/projects/RUL/repos/ovl/restrictions": page(
+				restriction("no-deletes", "BRANCH", "refs/heads/main", nil, nil),
+				restriction("read-only", "PATTERN", "**", nil, nil),
+			),
+			"branch-permissions/2.0/projects/RUL/repos/ov2/restrictions": page(
+				restriction("fast-forward-only", "PATTERN", "release/**", []map[string]any{usr("user4")}, nil),
+				restriction("pull-request-only", "PATTERN", "release/*", []map[string]any{usr("user5")}, nil),
 			),
 			"api/1.0/projects/RUL/webhooks": page(
 				map[string]any{
@@ -141,7 +153,7 @@ func TestBitbucketImportRules(t *testing.T) {
 			report := run(t, o)
 			assert.False(t, report.Blocked)
 			assert.Equal(t, before, countBitbucketImportRows(t))
-			assert.Equal(t, migrations.BitbucketPlanned, item(t, report, "rule", "RUL release/*").Status)
+			assert.Equal(t, migrations.BitbucketPlanned, item(t, report, "rule", "RUL refs/heads/release").Status)
 			assert.Equal(t, migrations.BitbucketPlanned, item(t, report, "hook", "RUL hook 1").Status)
 		})
 
@@ -178,7 +190,7 @@ func TestBitbucketImportRules(t *testing.T) {
 		}
 
 		t.Run("project rules", func(t *testing.T) {
-			release := projectRule(t, "{release/*,**/release/*}")
+			release := projectRule(t, "release")
 			assert.True(t, release.CanPush)
 			assert.True(t, release.EnableWhitelist)
 			assert.Equal(t, []int64{4}, release.WhitelistUserIDs, "user8 is no org member")
@@ -188,8 +200,8 @@ func TestBitbucketImportRules(t *testing.T) {
 			assert.Empty(t, release.ForcePushAllowlistUserIDs)
 			assert.Empty(t, release.WhitelistDeployKeyIDs)
 			assert.True(t, release.ApplyToAdmins)
-			reason := item(t, report, "rule", "RUL release/*").Reason
-			for _, s := range []string{"tags too", "deletion blocked", "force push blocked", "group bb-devs", "key 30", "dropped"} {
+			reason := item(t, report, "rule", "RUL refs/heads/release").Reason
+			for _, s := range []string{"deletion blocked", "force push blocked", "group bb-devs", "key 30", "dropped"} {
 				assert.Contains(t, reason, s)
 			}
 
@@ -205,8 +217,9 @@ func TestBitbucketImportRules(t *testing.T) {
 			assert.Equal(t, []int64{5}, develop.ForcePushAllowlistUserIDs)
 
 			frozen := projectRule(t, "frozen")
-			assert.False(t, frozen.CanPush, "nobody may push")
-			assert.False(t, frozen.EnableWhitelist)
+			assert.True(t, frozen.CanPush)
+			assert.True(t, frozen.EnableWhitelist, "pushes only through the allowlist")
+			assert.Empty(t, frozen.WhitelistUserIDs, "nobody may push")
 			assert.True(t, frozen.EnableMergeWhitelist)
 			assert.Empty(t, frozen.MergeWhitelistUserIDs, "nobody may merge")
 			assert.Empty(t, frozen.DeleteAllowlistUserIDs, "nobody may delete")
@@ -223,6 +236,44 @@ func TestBitbucketImportRules(t *testing.T) {
 			assert.True(t, rule.WhitelistDeployKeys)
 			assert.Equal(t, []int64{key.KeyID}, rule.WhitelistDeployKeyIDs, "the imported key, not the unknown one")
 			assert.Contains(t, item(t, report, "rule", "RUL/svc refs/heads/main").Reason, "key 99")
+
+			lib, err := repo_model.GetRepositoryByPath(ctx, org.ID, group.Name, "lib")
+			require.NoError(t, err)
+			rules, err := git_model.GetMatchedProtectedBranchRules(ctx, lib.ID, "rel,x/1")
+			require.NoError(t, err)
+			require.Len(t, rules, 1, "a comma in a pattern is a character, not an alternative")
+			assert.Contains(t, item(t, report, "rule", "RUL/lib rel,x/*").Reason, "tags too")
+		})
+
+		t.Run("overlapping restrictions take the strictest", func(t *testing.T) {
+			user4 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})
+			user5 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5})
+			refused := func(t *testing.T, repoName, branch string, can func(*git_model.ProtectedBranch) bool) bool {
+				t.Helper()
+				repo, err := repo_model.GetRepositoryByPath(ctx, org.ID, group.Name, repoName)
+				require.NoError(t, err)
+				rules, err := git_model.GetMatchedProtectedBranchRules(ctx, repo.ID, branch)
+				require.NoError(t, err)
+				require.NotEmpty(t, rules)
+				for _, rule := range rules { // enforcement checks every matched rule
+					if !can(rule) {
+						return true
+					}
+				}
+				return false
+			}
+			// main is matched by its plain rule first: without the combination, pushes would be allowed
+			assert.True(t, refused(t, "ovl", "main", func(r *git_model.ProtectedBranch) bool { return r.CanUserPush(ctx, user4) }), "a direct push to main is refused")
+			assert.True(t, refused(t, "ovl", "main", func(r *git_model.ProtectedBranch) bool { return r.CanUserDelete(ctx, user4) }))
+			assert.Contains(t, item(t, report, "rule", "RUL/ovl refs/heads/main").Reason, "overlapping restrictions")
+
+			// release/1 is matched by both globs: only user5 (pull-request-only exception) pushes directly, and nobody
+			// force-pushes, since the pull-request-only rule allows no force push either
+			assert.True(t, refused(t, "ov2", "release/1", func(r *git_model.ProtectedBranch) bool { return r.CanUserPush(ctx, user4) }), "user4 may not push")
+			assert.False(t, refused(t, "ov2", "release/1", func(r *git_model.ProtectedBranch) bool { return r.CanUserPush(ctx, user5) }), "user5 may push")
+			for _, u := range []*user_model.User{user4, user5} {
+				assert.True(t, refused(t, "ov2", "release/1", func(r *git_model.ProtectedBranch) bool { return r.CanUserForcePush(ctx, u) }), "user %d may not force-push", u.ID)
+			}
 		})
 
 		t.Run("hooks", func(t *testing.T) {

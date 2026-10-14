@@ -16,6 +16,7 @@ import (
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	"forgejo.org/models/organization"
+	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
@@ -62,7 +63,7 @@ type bitbucketWebhook struct {
 func bitbucketGlob(p string) string {
 	var b strings.Builder
 	for i := 0; i < len(p); i++ {
-		if c := p[i]; c != '*' && c != '?' && syntax.Special(c) {
+		if c := p[i]; c != '*' && c != '?' && (syntax.Special(c) || c == ',' || c == '!') { // "," and "!" mean something in braces and classes
 			b.WriteByte('\\')
 		}
 		b.WriteByte(p[i])
@@ -163,7 +164,7 @@ func (p *bitbucketPlanner) planRules(owner *BitbucketImportItem, endpoint string
 			}
 			continue
 		}
-		if _, err := glob.Compile(name, '/'); err != nil {
+		if _, err := glob.Compile(name, '/'); err != nil || strings.ContainsFunc(r.Matcher.ID, unicode.IsControl) {
 			p.add(item, BitbucketConflict, "the pattern doesn't translate")
 			continue
 		}
@@ -177,17 +178,36 @@ func (p *bitbucketPlanner) planRules(owner *BitbucketImportItem, endpoint string
 		m.tags = m.tags || tags
 		m.restrictions = append(m.restrictions, r)
 	}
+
+	items := make([]*BitbucketImportItem, 0, len(rules))
+	notes := map[*BitbucketImportItem][]string{}
 	for _, m := range rules {
-		if err := p.planRule(owner, m.item, m.restrictions, m.tags); err != nil {
+		n, err := p.buildRule(owner, m.item, m.restrictions, m.tags)
+		if err != nil {
+			return err
+		}
+		items, notes[m.item] = append(items, m.item), n
+	}
+	// Bitbucket applies every matching restriction, spoved only the first matching rule of a level: where a glob
+	// may overlap another rule, every rule of the level gets the strictest combination of them all
+	if overlapping := len(items) > 1 && slices.ContainsFunc(items, func(it *BitbucketImportItem) bool { return git_model.IsRuleNameSpecial(it.Name) }); overlapping {
+		if combineBitbucketRules(items) {
+			for _, it := range items {
+				notes[it] = append(notes[it], "stricter than Bitbucket (overlapping restrictions)")
+			}
+		}
+	}
+	for _, it := range items {
+		if err := p.finishRule(owner, it, strings.Join(notes[it], "; ")); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// planRule builds the rule of one matcher. An exception that can't be mapped is dropped, which only makes the rule
-// stricter: an empty allowlist lets nobody through.
-func (p *bitbucketPlanner) planRule(owner, item *BitbucketImportItem, restrictions []bitbucketRestriction, tags bool) error {
+// buildRule builds the rule of one matcher and returns its notes. An exception that can't be mapped is dropped, which
+// only makes the rule stricter: an empty allowlist lets nobody through.
+func (p *bitbucketPlanner) buildRule(owner, item *BitbucketImportItem, restrictions []bitbucketRestriction, tags bool) ([]string, error) {
 	var dropped, notes []string
 	type exceptions struct {
 		users []int64
@@ -202,14 +222,15 @@ func (p *bitbucketPlanner) planRule(owner, item *BitbucketImportItem, restrictio
 			} else if unmatched, ok := errors.AsType[bitbucketUnmatched](err); ok {
 				dropped = append(dropped, util.StripControl(u.Name)+" ("+string(unmatched)+")")
 			} else {
-				return err
+				return nil, err
 			}
 		}
 		for _, g := range r.Groups {
 			dropped = append(dropped, "group "+util.StripControl(g))
 		}
 		for _, k := range r.AccessKeys {
-			if key := p.keys[owner][k.Key.ID]; key != nil && owner.Kind == "repository" {
+			// only a key of this repository that can write: a read key never pushes
+			if key := p.keys[owner][k.Key.ID]; key != nil && owner.Kind == "repository" && key.mode == perm.AccessModeWrite {
 				e.keys = append(e.keys, key)
 			} else {
 				dropped = append(dropped, fmt.Sprintf("key %d", k.Key.ID))
@@ -222,41 +243,29 @@ func (p *bitbucketPlanner) planRule(owner, item *BitbucketImportItem, restrictio
 	}
 
 	rule := &git_model.ProtectedBranch{RuleName: item.Name, ApplyToAdmins: true, CanPush: true}
-	var opts git_model.WhitelistOptions
 	ro, pr := byType["read-only"], byType["pull-request-only"]
 	if ro != nil || pr != nil {
 		push := ro
 		if push == nil {
 			push = pr
 		} else if pr != nil { // both: only someone both let through may push
-			push = &exceptions{}
-			for _, u := range ro.users {
-				if slices.Contains(pr.users, u) {
-					push.users = append(push.users, u)
-				}
-			}
-			for _, k := range ro.keys {
-				if slices.Contains(pr.keys, k) {
-					push.keys = append(push.keys, k)
-				}
-			}
+			push = &exceptions{users: intersect(ro.users, pr.users), keys: intersect(ro.keys, pr.keys)}
 		}
-		rule.CanPush = len(push.users)+len(push.keys) > 0
-		rule.EnableWhitelist = rule.CanPush
-		opts.UserIDs, item.pushKeys = push.users, push.keys
-		rule.WhitelistDeployKeys = len(push.keys) > 0
+		// pushes only through the allowlist, empty = nobody
+		rule.EnableWhitelist = true
+		item.ruleOpts.UserIDs, item.pushKeys = push.users, push.keys
 	}
 	if ro != nil {
 		rule.EnableMergeWhitelist = true
-		opts.MergeUserIDs = ro.users
+		item.ruleOpts.MergeUserIDs = ro.users
 	}
 	if e := byType["no-deletes"]; e != nil {
-		opts.DeleteUserIDs, item.deleteKeys = e.users, e.keys
+		item.ruleOpts.DeleteUserIDs, item.deleteKeys = e.users, e.keys
 	} else {
 		notes = append(notes, "deletion blocked; Bitbucket allowed it")
 	}
 	if e := byType["fast-forward-only"]; e != nil {
-		opts.ForcePushUserIDs, item.forcePushKeys = e.users, e.keys
+		item.ruleOpts.ForcePushUserIDs, item.forcePushKeys = e.users, e.keys
 	} else {
 		notes = append(notes, "force push blocked; Bitbucket allowed it")
 	}
@@ -266,9 +275,74 @@ func (p *bitbucketPlanner) planRule(owner, item *BitbucketImportItem, restrictio
 	if len(dropped) > 0 {
 		notes = append(notes, "exceptions dropped: "+strings.Join(dropped, ", "))
 	}
-	item.parent, item.rule, item.ruleOpts = owner, rule, opts
-	note := strings.Join(notes, "; ")
+	item.parent, item.rule = owner, rule
+	return notes, nil
+}
 
+func intersect[T comparable](a, b []T) []T {
+	var both []T
+	for _, x := range a {
+		if slices.Contains(b, x) {
+			both = append(both, x)
+		}
+	}
+	return both
+}
+
+// combineBitbucketRules gives every rule the strictest combination of all of them: pushes and merges only for whom
+// every restricting rule lets through, deletes and force pushes only for whom every rule lets through. It reports
+// whether a rule changed.
+func combineBitbucketRules(items []*BitbucketImportItem) bool {
+	var push, merge, del, force *[]int64
+	var pushKeys, delKeys, forceKeys *[]*BitbucketImportItem
+	both := func(acc **[]int64, ids []int64) {
+		if *acc == nil {
+			*acc = &ids
+		} else {
+			v := intersect(**acc, ids)
+			*acc = &v
+		}
+	}
+	bothKeys := func(acc **[]*BitbucketImportItem, keys []*BitbucketImportItem) {
+		if *acc == nil {
+			*acc = &keys
+		} else {
+			v := intersect(**acc, keys)
+			*acc = &v
+		}
+	}
+	for _, it := range items {
+		if it.rule.EnableWhitelist {
+			both(&push, it.ruleOpts.UserIDs)
+			bothKeys(&pushKeys, it.pushKeys)
+		}
+		if it.rule.EnableMergeWhitelist {
+			both(&merge, it.ruleOpts.MergeUserIDs)
+		}
+		both(&del, it.ruleOpts.DeleteUserIDs)
+		bothKeys(&delKeys, it.deleteKeys)
+		both(&force, it.ruleOpts.ForcePushUserIDs)
+		bothKeys(&forceKeys, it.forcePushKeys)
+	}
+	changed := false
+	for _, it := range items {
+		before := fmt.Sprint(it.rule.EnableWhitelist, it.rule.EnableMergeWhitelist, it.ruleOpts, it.pushKeys, it.deleteKeys, it.forcePushKeys)
+		if push != nil {
+			it.rule.EnableWhitelist, it.ruleOpts.UserIDs, it.pushKeys = true, *push, *pushKeys
+		}
+		if merge != nil {
+			it.rule.EnableMergeWhitelist, it.ruleOpts.MergeUserIDs = true, *merge
+		}
+		it.ruleOpts.DeleteUserIDs, it.deleteKeys = *del, *delKeys
+		it.ruleOpts.ForcePushUserIDs, it.forcePushKeys = *force, *forceKeys
+		changed = changed || before != fmt.Sprint(it.rule.EnableWhitelist, it.rule.EnableMergeWhitelist, it.ruleOpts, it.pushKeys, it.deleteKeys, it.forcePushKeys)
+	}
+	return changed
+}
+
+// finishRule decides whether the built rule is new, reused (an existing rule of the same name and level with exactly
+// these fields) or a conflict (one in another shape).
+func (p *bitbucketPlanner) finishRule(owner, item *BitbucketImportItem, note string) error {
 	var existing *git_model.ProtectedBranch
 	var err error
 	if owner.Kind == "project" && owner.group != nil {
@@ -363,10 +437,7 @@ func bitbucketRuleToWrite(ctx context.Context, org *organization.Organization, o
 		return nil, 0, err
 	}
 	rule.WhitelistDeployKeyIDs, rule.DeleteAllowlistDeployKeyIDs, rule.ForcePushAllowlistDeployKeyIDs = keyIDs(item.pushKeys), keyIDs(item.deleteKeys), keyIDs(item.forcePushKeys)
-	// whoever was dropped is let through by nobody else: an allowlist that lost everyone still lets nobody through
-	if rule.EnableWhitelist && len(rule.WhitelistUserIDs)+len(rule.WhitelistDeployKeyIDs) == 0 {
-		rule.CanPush, rule.EnableWhitelist = false, false
-	}
+	// an allowlist that lost everyone lets nobody through: the flags stay set
 	rule.WhitelistDeployKeys = len(rule.WhitelistDeployKeyIDs) > 0
 	return &rule, dropped, nil
 }
