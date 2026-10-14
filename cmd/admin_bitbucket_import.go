@@ -53,17 +53,7 @@ func runBitbucketImport(ctx context.Context, c *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	text, extra := private.BitbucketImport(ctx, private.BitbucketImportParams{
-		Doer:         c.String("doer"),
-		Org:          c.String("org"),
-		Server:       c.String("server"),
-		Username:     c.String("username"),
-		Token:        token,
-		Projects:     c.StringSlice("project"),
-		DryRun:       c.Bool("dry-run"),
-		PullRequests: !c.Bool("no-pull-requests"),
-		KeyExpiry:    c.String("key-expiry"),
-	})
+	text, extra := private.BitbucketImport(ctx, bitbucketImportParams(c, token))
 	if extra.HasError() {
 		return handleCliResponseExtra(extra)
 	}
@@ -86,6 +76,20 @@ func runBitbucketImport(ctx context.Context, c *cli.Command) error {
 		return errors.New("nothing was imported: resolve the conflicts above and run again")
 	}
 	return nil
+}
+
+func bitbucketImportParams(c *cli.Command, token string) private.BitbucketImportParams {
+	return private.BitbucketImportParams{
+		Doer:         c.String("doer"),
+		Org:          c.String("org"),
+		Server:       c.String("server"),
+		Username:     c.String("username"),
+		Token:        token,
+		Projects:     c.StringSlice("project"),
+		DryRun:       c.Bool("dry-run"),
+		PullRequests: !c.Bool("no-pull-requests"),
+		KeyExpiry:    c.String("key-expiry"),
+	}
 }
 
 // bitbucketToken reads the token from the file, or else from BITBUCKET_TOKEN: never from the command line.

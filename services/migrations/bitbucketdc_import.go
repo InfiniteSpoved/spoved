@@ -221,6 +221,7 @@ func planBitbucketImport(ctx context.Context, d *BitbucketDataCenterDownloader, 
 		report.Blocked = true
 	}
 	names, filter := map[string]bool{}, len(wanted) > 0
+	teams := map[string]*BitbucketImportItem{}
 	for _, p := range projects {
 		if _, ok := wanted[strings.ToUpper(p.Key)]; filter && !ok {
 			continue
@@ -315,7 +316,7 @@ func planBitbucketImport(ctx context.Context, d *BitbucketDataCenterDownloader, 
 			}
 		}
 		if item.Status != BitbucketConflict {
-			if err := planBitbucketPermissions(ctx, d, org, report, item, keyExpiry); err != nil {
+			if err := planBitbucketPermissions(ctx, d, org, report, item, keyExpiry, teams); err != nil {
 				return nil, err
 			}
 		}

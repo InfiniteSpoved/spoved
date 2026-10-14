@@ -5,15 +5,18 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"forgejo.org/modules/private"
 	"forgejo.org/services/migrations"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 )
 
 func TestBitbucketImportToken(t *testing.T) {
@@ -23,6 +26,15 @@ func TestBitbucketImportToken(t *testing.T) {
 		names = append(names, f.Names()...)
 	}
 	assert.Contains(t, names, "key-expiry")
+
+	cmd := subcmdBitbucketImport()
+	var params private.BitbucketImportParams
+	cmd.Action = func(_ context.Context, c *cli.Command) error {
+		params = bitbucketImportParams(c, "tok")
+		return nil
+	}
+	require.NoError(t, cmd.Run(t.Context(), []string{"bitbucket-import", "--server", "https://bb.example.com", "--org", "org3", "--doer", "user2", "--key-expiry", "2030-01-02", "--project", "PAY"}))
+	assert.Equal(t, private.BitbucketImportParams{Doer: "user2", Org: "org3", Server: "https://bb.example.com", Token: "tok", Projects: []string{"PAY"}, PullRequests: true, KeyExpiry: "2030-01-02"}, params)
 
 	t.Setenv("BITBUCKET_TOKEN", "")
 	_, err := bitbucketToken("")

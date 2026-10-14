@@ -48,7 +48,7 @@ func TestBitbucketImportPermissions(t *testing.T) {
 		defer test.MockVariableValueWithReset(&setting.Migrations.AllowUnencrypted, true, func() { require.NoError(t, allowlist.Init()) })()
 		defer test.MockVariableValue(&setting.DeployKeyExpiry, setting.CredentialExpiryPolicy{MaxLifetimeDays: 30})()
 		ctx := t.Context()
-		server := newBitbucketMock(t, nil, map[string][]string{"GATE": {"g"}, "TFA": {"f"}, "NOX": {"n"}})
+		server := newBitbucketMock(t, nil, map[string][]string{"GATE": {"g"}, "TFA": {"f"}, "NOX": {"n"}, "CA": {"x"}})
 		defer server.Close()
 
 		page := func(values ...any) map[string]any { return map[string]any{"isLastPage": true, "values": values} }
@@ -80,6 +80,8 @@ func TestBitbucketImportPermissions(t *testing.T) {
 				map[string]any{"key": "GATE", "name": "Gate"},
 				map[string]any{"key": "TFA", "name": "Tfa"},
 				map[string]any{"key": "NOX", "name": "Nox"},
+				map[string]any{"key": "CA", "name": "Coll"},   // repository x: team coll-x-read
+				map[string]any{"key": "CB", "name": "Coll X"}, // project team coll-x-read
 			),
 			"api/1.0/projects/PAY/repos": page(map[string]any{"slug": "api", "public": true}, map[string]any{"slug": "web"}),
 			"api/1.0/projects/PAY/permissions/users": page(
@@ -94,6 +96,7 @@ func TestBitbucketImportPermissions(t *testing.T) {
 				usr("nobody", "nobody@example.com", true, "PROJECT_READ"),
 				usr("user12", "user12@example.com", false, "PROJECT_READ"), // inactive in Bitbucket
 				usr("user13", "user13@example.com", true, "PROJECT_CREATE"),
+				usr("user27", "user27@example.com", true, "PROJECT_READ"), // restricted: gets what the team grants
 			),
 			"api/1.0/projects/PAY/permissions/groups":           page(grp("bb-devs", "PROJECT_WRITE"), grp("bb-nogroup", "PROJECT_READ")),
 			"api/1.0/projects/PAY/permissions/PROJECT_READ/all": map[string]any{"permitted": true},
@@ -104,7 +107,9 @@ func TestBitbucketImportPermissions(t *testing.T) {
 				usr("user2", "user2@example.com", true, "REPO_WRITE"),  // an owner of the organization
 				usr("user21", "user21@example.com", true, "REPO_READ"), // blocked by the organization
 			),
-			"api/1.0/projects/PAY/repos/api/permissions/groups": page(grp("bb-devs", "REPO_ADMIN")),
+			"api/1.0/projects/PAY/repos/api/permissions/groups": page(grp("bb-devs", "REPO_ADMIN"), grp("bb-nogroup", "REPO_READ")),
+			"api/1.0/projects/CA/repos/x/permissions/groups":    page(grp("bb-devs", "REPO_READ")),
+			"api/1.0/projects/CB/permissions/users":             page(usr("user4", "user4@example.com", true, "PROJECT_READ")),
 			"keys/1.0/projects/PAY/ssh": page(
 				accessKey(1, keys[1], "ci\x1b[2J", now.Add(-24*time.Hour), 10, "PROJECT_READ"),
 				accessKey(2, keys[2], "deploy", now, 0, "PROJECT_WRITE"),
@@ -126,6 +131,9 @@ func TestBitbucketImportPermissions(t *testing.T) {
 			return org
 		}
 		org := newOrg(t, "bbperms")
+		user27 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 27})
+		user27.IsRestricted = true
+		require.NoError(t, user_model.UpdateUserCols(ctx, user27, "is_restricted"))
 		require.NoError(t, db.Insert(ctx, &user_model.BlockedUser{UserID: org.ID, BlockID: 21}))
 		devs := &organization.UserGroup{Name: "bb-devs"}
 		require.NoError(t, usergroup.CreateGroup(ctx, devs))
@@ -236,7 +244,7 @@ func TestBitbucketImportPermissions(t *testing.T) {
 				members []int64
 				project bool
 			}{
-				"payments-read":      {perm.AccessModeRead, []int64{4}, true},
+				"payments-read":      {perm.AccessModeRead, []int64{4, 27}, true},
 				"payments-write":     {perm.AccessModeWrite, []int64{5, 8, 15}, true},
 				"payments-api-write": {perm.AccessModeWrite, []int64{15}, false},
 			} {
@@ -260,6 +268,8 @@ func TestBitbucketImportPermissions(t *testing.T) {
 				assert.Equal(t, want.project, linked, name)
 			}
 			assert.Contains(t, findBitbucketItem(t, report, "member", "user8", "payments-write").Reason, "admin mapped to write")
+			_, err := organization.GetTeam(ctx, org.ID, "payments-api-read")
+			assert.True(t, organization.IsErrTeamNotExist(err), "no team for a group without a user group")
 		})
 
 		t.Run("unmatched and unmapped are reported", func(t *testing.T) {
@@ -339,6 +349,7 @@ func TestBitbucketImportPermissions(t *testing.T) {
 			require.NoError(t, err)
 			want := map[int64]map[string]perm.AccessMode{
 				4:  {"api": perm.AccessModeRead, "web": perm.AccessModeRead},
+				27: {"api": perm.AccessModeRead, "web": perm.AccessModeRead},
 				5:  {"api": perm.AccessModeWrite, "web": perm.AccessModeWrite},
 				8:  {"api": perm.AccessModeWrite, "web": perm.AccessModeWrite},
 				15: {"api": perm.AccessModeWrite, "web": perm.AccessModeWrite},
@@ -385,6 +396,9 @@ func TestBitbucketImportPermissions(t *testing.T) {
 			for _, item := range again.Items {
 				assert.NotContains(t, []string{migrations.BitbucketPlanned, migrations.BitbucketCreated, migrations.BitbucketFailed}, item.Status, "%s %s", item.Kind, item.Bitbucket)
 			}
+			for _, name := range []string{"payments-read", "payments-write", "payments-api-write"} {
+				assert.Equal(t, migrations.BitbucketReused, findBitbucketItem(t, again, "team", "", name).Status, "a team of the importer's shape is reused")
+			}
 			c := unittest.AssertExistsAndLoadBean(t, &repo_model.Collaboration{RepoID: api.ID, UserID: 16})
 			assert.Equal(t, perm.AccessModeWrite, c.Mode)
 			assert.Equal(t, migrations.BitbucketSkipped, findBitbucketItem(t, again, "collaborator", "user16", "").Status)
@@ -394,6 +408,8 @@ func TestBitbucketImportPermissions(t *testing.T) {
 			read, err := organization.GetTeam(ctx, org.ID, "payments-read")
 			require.NoError(t, err)
 			apiTeam, err := organization.GetTeam(ctx, org.ID, "payments-api-write")
+			require.NoError(t, err)
+			other, err := repo_model.CreateRepoGroup(ctx, org.AsUser(), "other", "")
 			require.NoError(t, err)
 			for name, change := range map[string]struct {
 				team *organization.Team
@@ -405,6 +421,10 @@ func TestBitbucketImportPermissions(t *testing.T) {
 				"owner mode":           {read, []any{"UPDATE team SET authorize = ? WHERE id = ?", perm.AccessModeOwner, read.ID}, []any{"UPDATE team SET authorize = ? WHERE id = ?", perm.AccessModeRead, read.ID}},
 				"a linked repo team":   {apiTeam, []any{&organization.TeamGroup{OrgID: org.ID, TeamID: apiTeam.ID, GroupID: group.ID}}, []any{&organization.TeamGroup{TeamID: apiTeam.ID, GroupID: group.ID}}},
 				"another repo in team": {apiTeam, []any{&organization.TeamRepo{OrgID: org.ID, TeamID: apiTeam.ID, RepoID: web.ID}}, []any{&organization.TeamRepo{TeamID: apiTeam.ID, RepoID: web.ID}}},
+				"write units":          {read, []any{"UPDATE team_unit SET access_mode = ? WHERE team_id = ?", perm.AccessModeWrite, read.ID}, []any{"UPDATE team_unit SET access_mode = ? WHERE team_id = ?", perm.AccessModeRead, read.ID}},
+				"another project":      {read, []any{&organization.TeamGroup{OrgID: org.ID, TeamID: read.ID, GroupID: other.ID}}, []any{&organization.TeamGroup{TeamID: read.ID, GroupID: other.ID}}},
+				"all repositories":     {read, []any{"UPDATE team SET includes_all_repositories = ? WHERE id = ?", true, read.ID}, []any{"UPDATE team SET includes_all_repositories = ? WHERE id = ?", false, read.ID}},
+				"can create repos":     {read, []any{"UPDATE team SET can_create_org_repo = ? WHERE id = ?", true, read.ID}, []any{"UPDATE team SET can_create_org_repo = ? WHERE id = ?", false, read.ID}},
 			} {
 				t.Run(name, func(t *testing.T) {
 					apply := func(change []any, insert bool) {
@@ -425,6 +445,19 @@ func TestBitbucketImportPermissions(t *testing.T) {
 				})
 			}
 			assert.False(t, run(t, org.Name, opts).Blocked, "the shapes are back")
+		})
+
+		t.Run("two teams of one name in a run block it", func(t *testing.T) {
+			o := opts
+			o.Projects = []string{"CA", "CB"}
+			report := blocked(t, org.Name, o)
+			conflicts := 0
+			for _, item := range report.Items {
+				if item.Kind == "team" && item.Name == "coll-x-read" && item.Status == migrations.BitbucketConflict {
+					conflicts++
+				}
+			}
+			assert.Equal(t, 1, conflicts, "the second team of that name")
 		})
 
 		t.Run("a verified-domain refusal skips the member", func(t *testing.T) {

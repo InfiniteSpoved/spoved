@@ -170,7 +170,7 @@ type bitbucketPlanner struct {
 	report    *BitbucketImportReport
 	project   *BitbucketImportItem
 	keyExpiry timeutil.TimeStamp
-	teams     map[string]*BitbucketImportItem
+	teams     map[string]*BitbucketImportItem // the teams of the whole run, by lower-case name
 }
 
 func (p *bitbucketPlanner) add(item *BitbucketImportItem, status, reason string) {
@@ -188,8 +188,8 @@ func (p *bitbucketPlanner) unmapped(owner *BitbucketImportItem, what string) {
 
 // planBitbucketPermissions plans, without writing, the teams, members, user group links, collaborators and deploy
 // keys of a project and its repositories.
-func planBitbucketPermissions(ctx context.Context, d *BitbucketDataCenterDownloader, org *organization.Organization, report *BitbucketImportReport, project *BitbucketImportItem, keyExpiry timeutil.TimeStamp) error {
-	p := &bitbucketPlanner{ctx: ctx, d: d, org: org, report: report, project: project, keyExpiry: keyExpiry, teams: map[string]*BitbucketImportItem{}}
+func planBitbucketPermissions(ctx context.Context, d *BitbucketDataCenterDownloader, org *organization.Organization, report *BitbucketImportReport, project *BitbucketImportItem, keyExpiry timeutil.TimeStamp, teams map[string]*BitbucketImportItem) error {
+	p := &bitbucketPlanner{ctx: ctx, d: d, org: org, report: report, project: project, keyExpiry: keyExpiry, teams: teams}
 	if err := p.plan(project, "api/1.0/projects/"+project.key); err != nil {
 		return err
 	}
@@ -244,19 +244,19 @@ func (p *bitbucketPlanner) plan(owner *BitbucketImportItem, endpoint string) err
 			p.unmapped(owner, g.Group.Name+" "+g.Permission)
 			continue
 		}
-		team, err := p.planTeam(owner, mode)
-		if err != nil {
-			return err
-		}
-		item := &BitbucketImportItem{Kind: "group", Bitbucket: util.StripControl(g.Group.Name), Target: team.Name, Access: mode.String(), bitbucketPermission: bitbucketPermission{parent: team}}
+		item := &BitbucketImportItem{Kind: "group", Bitbucket: util.StripControl(g.Group.Name), Target: p.teamName(owner, mode), Access: mode.String()}
 		group, err := organization.GetUserGroupByName(p.ctx, g.Group.Name)
 		if organization.IsErrUserGroupNotExist(err) || (err == nil && group.Name != g.Group.Name) {
-			p.add(item, BitbucketSkipped, "no user group")
+			p.add(item, BitbucketSkipped, "no user group") // and no team for it
 			continue
 		} else if err != nil {
 			return err
 		}
-		item.Name, item.userGroup = group.Name, group
+		team, err := p.planTeam(owner, mode)
+		if err != nil {
+			return err
+		}
+		item.Name, item.userGroup, item.parent = group.Name, group, team
 		status := BitbucketPlanned
 		if team.team != nil {
 			if linked, err := organization.IsUserGroupLinkedToTeam(p.ctx, group.ID, team.team.ID); err != nil {
@@ -273,18 +273,28 @@ func (p *bitbucketPlanner) plan(owner *BitbucketImportItem, endpoint string) err
 	return nil
 }
 
-// planTeam plans the team of a project (linked to it) or of a repository (holding only it) at a mode, once.
-func (p *bitbucketPlanner) planTeam(owner *BitbucketImportItem, mode perm.AccessMode) (*BitbucketImportItem, error) {
+// teamName is the name of the team of a project or repository at a mode: <project>[-<repo>]-<mode>.
+func (p *bitbucketPlanner) teamName(owner *BitbucketImportItem, mode perm.AccessMode) string {
 	name := p.project.groupName
 	if owner != p.project {
 		name += "-" + owner.slug
 	}
-	name += "-" + mode.String()
-	if team, ok := p.teams[name]; ok {
-		return team, nil
-	}
+	return name + "-" + mode.String()
+}
+
+// planTeam plans the team of a project (linked to it) or of a repository (holding only it) at a mode, once. Two
+// different teams of the run with one name are a conflict.
+func (p *bitbucketPlanner) planTeam(owner *BitbucketImportItem, mode perm.AccessMode) (*BitbucketImportItem, error) {
+	name := p.teamName(owner, mode)
 	item := &BitbucketImportItem{Kind: "team", Name: name, Target: owner.Name, Access: mode.String(), bitbucketPermission: bitbucketPermission{parent: owner, mode: mode}}
-	p.teams[name] = item
+	if team, ok := p.teams[strings.ToLower(name)]; ok {
+		if team.parent == owner && team.mode == mode {
+			return team, nil
+		}
+		p.add(item, BitbucketConflict, "another team of this import has this name")
+		return item, nil
+	}
+	p.teams[strings.ToLower(name)] = item
 	team, err := organization.GetTeam(p.ctx, p.org.ID, name)
 	if organization.IsErrTeamNotExist(err) {
 		if len(name) > 255 {
@@ -473,6 +483,21 @@ func (p *bitbucketPlanner) planKeys(owner *BitbucketImportItem, endpoint string)
 	return nil
 }
 
+// addBitbucketCollaborator adds the user as a collaborator at the mode, unless they already are one. It is one
+// transaction, because AddCollaborator grants write before the mode is set.
+func addBitbucketCollaborator(ctx context.Context, repo *repo_model.Repository, u *user_model.User, mode perm.AccessMode) (existed bool, err error) {
+	err = db.WithTx(ctx, func(ctx context.Context) error {
+		if existed, err = repo_model.IsCollaborator(ctx, repo.ID, u.ID); err != nil || existed {
+			return err
+		}
+		if err := repo_module.AddCollaborator(ctx, repo, u); err != nil {
+			return err
+		}
+		return repo_module.ChangeCollaborationAccessMode(ctx, repo, u.ID, mode)
+	})
+	return existed, err
+}
+
 // applyBitbucketPermissions applies the planned permissions and keys of a project once its repositories were
 // imported. Each item is applied on its own: one that fails is reported and the others go on.
 func applyBitbucketPermissions(ctx context.Context, doer *user_model.User, org *organization.Organization, project *BitbucketImportItem, failure func(*BitbucketImportItem, error)) {
@@ -531,18 +556,10 @@ func applyBitbucketPermissions(ctx context.Context, doer *user_model.User, org *
 				status, err = BitbucketReused, nil
 			}
 		case "collaborator":
-			// in one transaction: AddCollaborator grants write before the mode is set
-			err = db.WithTx(ctx, func(ctx context.Context) error {
-				if has, err := repo_model.IsCollaborator(ctx, owner.repo.ID, item.user.ID); err != nil || has {
-					status, item.Reason = BitbucketSkipped, "an existing collaborator, kept as is"
-					return err
-				}
-				if err := repo_module.AddCollaborator(ctx, owner.repo, item.user); err != nil {
-					return err
-				}
-				return repo_module.ChangeCollaborationAccessMode(ctx, owner.repo, item.user.ID, item.mode)
-			})
-			if errors.Is(err, user_model.ErrBlockedByUser) {
+			var existed bool
+			if existed, err = addBitbucketCollaborator(ctx, owner.repo, item.user, item.mode); existed {
+				status, item.Reason = BitbucketSkipped, "an existing collaborator, kept as is"
+			} else if errors.Is(err, user_model.ErrBlockedByUser) {
 				status, err = BitbucketSkipped, nil
 			}
 		case "key":
