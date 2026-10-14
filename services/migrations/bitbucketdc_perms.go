@@ -127,41 +127,39 @@ func matchBitbucketUser(ctx context.Context, g bitbucketUserGrant) (*user_model.
 	return u, nil
 }
 
-// bitbucketTeamShape reports whether an existing team has exactly the shape the importer gives a team: the mode on
-// Code and pull requests and nothing else, and linked to the project (groupID) or holding only the repository (repoID).
+// bitbucketTeamShape reports whether an existing team has exactly the shape the importer gives a team: not the owner
+// team, the mode, exactly two units (Code and pull requests at that mode), and either linked to the project (groupID)
+// alone with only that project's repositories, or holding only the repository (repoID) with no link.
 func bitbucketTeamShape(ctx context.Context, team *organization.Team, mode perm.AccessMode, groupID, repoID int64) (bool, error) {
-	if team.AccessMode != mode || team.IncludesAllRepositories || team.CanCreateOrgRepo {
+	if team.IsOwnerTeam() || team.AccessMode != mode || team.IncludesAllRepositories || team.CanCreateOrgRepo {
 		return false, nil
 	}
 	if err := team.LoadUnits(ctx); err != nil {
 		return false, err
 	}
-	found := 0
+	if len(team.Units) != 2 {
+		return false, nil
+	}
 	for _, u := range team.Units {
-		switch {
-		case u.Type == unit.TypeCode || u.Type == unit.TypePullRequests:
-			if u.AccessMode != mode {
-				return false, nil
-			}
-			found++
-		case u.AccessMode != perm.AccessModeNone:
+		if (u.Type != unit.TypeCode && u.Type != unit.TypePullRequests) || u.AccessMode != mode {
 			return false, nil
 		}
 	}
-	if found != 2 {
-		return false, nil
-	}
-	var groupIDs, repoIDs []int64
+	var groupIDs []int64
 	if err := db.GetEngine(ctx).Table("team_group").Where("team_id = ?", team.ID).Cols("group_id").Find(&groupIDs); err != nil {
 		return false, err
 	}
-	if err := db.GetEngine(ctx).Table("team_repo").Where("team_id = ? AND via_group = ?", team.ID, false).Cols("repo_id").Find(&repoIDs); err != nil {
+	if groupID != 0 {
+		// every repository row comes from the link: none direct, none outside the project
+		outside, err := db.GetEngine(ctx).Table("team_repo").Join("INNER", "repository", "repository.id = team_repo.repo_id").
+			Where("team_repo.team_id = ? AND (team_repo.via_group = ? OR repository.group_id <> ?)", team.ID, false, groupID).Count()
+		return err == nil && outside == 0 && slices.Equal(groupIDs, []int64{groupID}), err
+	}
+	var rows []*organization.TeamRepo
+	if err := db.GetEngine(ctx).Where("team_id = ?", team.ID).Find(&rows); err != nil {
 		return false, err
 	}
-	if groupID != 0 {
-		return slices.Equal(groupIDs, []int64{groupID}) && len(repoIDs) == 0, nil
-	}
-	return len(groupIDs) == 0 && slices.Equal(repoIDs, []int64{repoID}), nil
+	return len(groupIDs) == 0 && len(rows) == 1 && rows[0].RepoID == repoID && !rows[0].ViaGroup, nil
 }
 
 // bitbucketPlanner plans the permissions and keys of one project.
@@ -375,6 +373,8 @@ func (p *bitbucketPlanner) planUser(owner *BitbucketImportItem, g bitbucketUserG
 		p.add(item, BitbucketSkipped, "blocked")
 		return nil
 	}
+	// a collaborator isn't an organization member, so the verified-domain gate doesn't apply (as on the web and API)
+	note = strings.TrimSuffix("added as a collaborator, not a member; "+note, "; ")
 	status := BitbucketPlanned
 	if owner.repo != nil {
 		c := &repo_model.Collaboration{RepoID: owner.repo.ID, UserID: u.ID}
@@ -460,10 +460,14 @@ func (p *bitbucketPlanner) planKeys(owner *BitbucketImportItem, endpoint string)
 		if err != nil {
 			return err
 		}
+		note := ""
+		if owner == p.project {
+			note = "covers every repository of the project, also ones moved in later"
+		}
 		if exists {
-			p.add(item, BitbucketReused, "")
+			p.add(item, BitbucketReused, note)
 		} else {
-			p.add(item, BitbucketPlanned, "")
+			p.add(item, BitbucketPlanned, note)
 		}
 	}
 	return nil

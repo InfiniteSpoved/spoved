@@ -101,3 +101,9 @@ func TestBitbucketOriginLookups(t *testing.T) {
 	unittest.AssertNotExistsBean(t, &repo_model.BitbucketOrigin{GroupID: group.ID})
 	unittest.AssertExistsAndLoadBean(t, &repo_model.BitbucketOrigin{RepoID: 3}) // a repository's row stays
 }
+
+func TestIsValidBitbucketName(t *testing.T) {
+	for name, ok := range map[string]bool{"PAY": true, "~jdoe": true, "a.b": true, "my-repo_1": true, ".": false, "..": false, "": false, "a/b": false, "a b": false} {
+		assert.Equal(t, ok, repo_model.IsValidBitbucketName(name), name)
+	}
+}

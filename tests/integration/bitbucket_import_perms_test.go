@@ -223,6 +223,12 @@ func TestBitbucketImportPermissions(t *testing.T) {
 		require.NoError(t, err)
 		web, err := repo_model.GetRepositoryByPath(ctx, org.ID, group.Name, "web")
 		require.NoError(t, err)
+		// InsertTeamMember watches the team's repositories in a goroutine (AUTO_WATCH_NEW_REPOS): wait for the four
+		// members of the project teams before counting rows
+		assert.Eventually(t, func() bool {
+			n, err := db.GetEngine(db.DefaultContext).Table("watch").In("repo_id", api.ID, web.ID).In("user_id", 4, 5, 8, 15).Count()
+			return err == nil && n == 8
+		}, 10*time.Second, 50*time.Millisecond)
 
 		t.Run("teams", func(t *testing.T) {
 			for name, want := range map[string]struct {
@@ -382,6 +388,43 @@ func TestBitbucketImportPermissions(t *testing.T) {
 			c := unittest.AssertExistsAndLoadBean(t, &repo_model.Collaboration{RepoID: api.ID, UserID: 16})
 			assert.Equal(t, perm.AccessModeWrite, c.Mode)
 			assert.Equal(t, migrations.BitbucketSkipped, findBitbucketItem(t, again, "collaborator", "user16", "").Status)
+		})
+
+		t.Run("a reused team that changed shape blocks the run", func(t *testing.T) {
+			read, err := organization.GetTeam(ctx, org.ID, "payments-read")
+			require.NoError(t, err)
+			apiTeam, err := organization.GetTeam(ctx, org.ID, "payments-api-write")
+			require.NoError(t, err)
+			for name, change := range map[string]struct {
+				team *organization.Team
+				do   []any // a bean to insert, or a statement to run
+				undo []any
+			}{
+				"a direct repository":  {read, []any{&organization.TeamRepo{OrgID: org.ID, TeamID: read.ID, RepoID: 1}}, []any{&organization.TeamRepo{TeamID: read.ID, RepoID: 1}}},
+				"another unit row":     {read, []any{&organization.TeamUnit{OrgID: org.ID, TeamID: read.ID, Type: unit.TypeIssues}}, []any{&organization.TeamUnit{TeamID: read.ID, Type: unit.TypeIssues}}},
+				"owner mode":           {read, []any{"UPDATE team SET authorize = ? WHERE id = ?", perm.AccessModeOwner, read.ID}, []any{"UPDATE team SET authorize = ? WHERE id = ?", perm.AccessModeRead, read.ID}},
+				"a linked repo team":   {apiTeam, []any{&organization.TeamGroup{OrgID: org.ID, TeamID: apiTeam.ID, GroupID: group.ID}}, []any{&organization.TeamGroup{TeamID: apiTeam.ID, GroupID: group.ID}}},
+				"another repo in team": {apiTeam, []any{&organization.TeamRepo{OrgID: org.ID, TeamID: apiTeam.ID, RepoID: web.ID}}, []any{&organization.TeamRepo{TeamID: apiTeam.ID, RepoID: web.ID}}},
+			} {
+				t.Run(name, func(t *testing.T) {
+					apply := func(change []any, insert bool) {
+						if sql, ok := change[0].(string); ok {
+							_, err := db.Exec(ctx, append([]any{sql}, change[1:]...)...)
+							require.NoError(t, err)
+						} else if insert {
+							require.NoError(t, db.Insert(ctx, change[0]))
+						} else {
+							_, err := db.DeleteByBean(ctx, change[0])
+							require.NoError(t, err)
+						}
+					}
+					apply(change.do, true)
+					report := blocked(t, org.Name, opts)
+					assert.Equal(t, migrations.BitbucketConflict, findBitbucketItem(t, report, "team", "", change.team.Name).Status)
+					apply(change.undo, false)
+				})
+			}
+			assert.False(t, run(t, org.Name, opts).Blocked, "the shapes are back")
 		})
 
 		t.Run("a verified-domain refusal skips the member", func(t *testing.T) {
