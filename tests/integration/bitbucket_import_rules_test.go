@@ -32,7 +32,7 @@ func TestBitbucketImportRules(t *testing.T) {
 		defer test.MockVariableValueWithReset(&setting.Migrations.AllowLocalNetworks, true, func() { require.NoError(t, allowlist.Init()) })()
 		defer test.MockVariableValueWithReset(&setting.Migrations.AllowUnencrypted, true, func() { require.NoError(t, allowlist.Init()) })()
 		ctx := t.Context()
-		server := newBitbucketMock(t, nil, map[string][]string{"RUL": {"api", "lib", "ov2", "ovl", "svc"}, "UNM": {"u"}})
+		server := newBitbucketMock(t, nil, map[string][]string{"RUL": {"api", "lib", "ov2", "ov3", "ovl", "svc"}, "UNM": {"u"}})
 		defer server.Close()
 
 		page := func(values ...any) map[string]any { return map[string]any{"isLastPage": true, "values": values} }
@@ -96,6 +96,11 @@ func TestBitbucketImportRules(t *testing.T) {
 			"branch-permissions/2.0/projects/RUL/repos/ovl/restrictions": page(
 				restriction("no-deletes", "BRANCH", "refs/heads/main", nil, nil),
 				restriction("read-only", "PATTERN", "**", nil, nil),
+			),
+			// plain names match case-insensitively: main and Main both match "main"
+			"branch-permissions/2.0/projects/RUL/repos/ov3/restrictions": page(
+				restriction("no-deletes", "BRANCH", "refs/heads/main", nil, nil),
+				restriction("read-only", "BRANCH", "refs/heads/Main", nil, nil),
 			),
 			"branch-permissions/2.0/projects/RUL/repos/ov2/restrictions": page(
 				restriction("fast-forward-only", "PATTERN", "release/**", []map[string]any{usr("user4")}, nil),
@@ -294,6 +299,9 @@ func TestBitbucketImportRules(t *testing.T) {
 			assert.True(t, refused(t, "ovl", "main", func(r *git_model.ProtectedBranch) bool { return r.CanUserPush(ctx, user4) }), "a direct push to main is refused")
 			assert.True(t, refused(t, "ovl", "main", func(r *git_model.ProtectedBranch) bool { return r.CanUserDelete(ctx, user4) }))
 			assert.Contains(t, item(t, report, "rule", "RUL/ovl refs/heads/main").Reason, "overlapping restrictions")
+			for _, branch := range []string{"main", "Main"} {
+				assert.True(t, refused(t, "ov3", branch, func(r *git_model.ProtectedBranch) bool { return r.CanUserPush(ctx, user4) }), "a direct push to %s is refused", branch)
+			}
 
 			// release/1 is matched by both globs: only user5 (pull-request-only exception) pushes directly, and nobody
 			// force-pushes, since the pull-request-only rule allows no force push either

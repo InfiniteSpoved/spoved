@@ -188,9 +188,16 @@ func (p *bitbucketPlanner) planRules(owner *BitbucketImportItem, endpoint string
 		}
 		items, notes[m.item] = append(items, m.item), n
 	}
-	// Bitbucket applies every matching restriction, spoved only the first matching rule of a level: where a glob
-	// may overlap another rule, every rule of the level gets the strictest combination of them all
-	if overlapping := len(items) > 1 && slices.ContainsFunc(items, func(it *BitbucketImportItem) bool { return git_model.IsRuleNameSpecial(it.Name) }); overlapping {
+	// Bitbucket applies every matching restriction, spoved only the first matching rule of a level: where rules may
+	// overlap (a glob, or two plain names that differ only in case, since plain names match case-insensitively),
+	// every rule of the level gets the strictest combination of them all
+	names := map[string]bool{}
+	overlapping := false
+	for _, it := range items {
+		overlapping = overlapping || git_model.IsRuleNameSpecial(it.Name) || names[strings.ToLower(it.Name)]
+		names[strings.ToLower(it.Name)] = true
+	}
+	if overlapping && len(items) > 1 {
 		if combineBitbucketRules(items) {
 			for _, it := range items {
 				notes[it] = append(notes[it], "stricter than Bitbucket (overlapping restrictions)")
