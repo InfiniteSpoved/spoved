@@ -88,5 +88,9 @@ func PersonalReposPost(ctx *context.Context) {
 
 // sizeLimitMiB is a size limit as the site page shows it: in MiB, rounded up.
 func sizeLimitMiB(limit int64) int64 {
-	return (limit + 1<<20 - 1) >> 20
+	mib := limit >> 20
+	if limit&(1<<20-1) != 0 { // round up without overflowing near MaxInt64
+		mib++
+	}
+	return mib
 }

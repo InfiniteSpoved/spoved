@@ -4,6 +4,7 @@
 package admin
 
 import (
+	"math"
 	"testing"
 
 	activities_model "forgejo.org/models/activities"
@@ -114,4 +115,13 @@ func TestMonitorStats(t *testing.T) {
 		assert.EqualValues(t, stats.IssueByLabel, mappedStats["IssueByLabel"])
 		assert.EqualValues(t, stats.IssueByRepository, mappedStats["IssueByRepository"])
 	})
+}
+
+func TestSizeLimitMiB(t *testing.T) {
+	assert.EqualValues(t, 0, sizeLimitMiB(0))
+	assert.EqualValues(t, 1, sizeLimitMiB(1))
+	assert.EqualValues(t, 1, sizeLimitMiB(1<<20))
+	assert.EqualValues(t, 2, sizeLimitMiB(1<<20+1))
+	// near MaxInt64 the rounding must not overflow to a negative (or zero: off) limit
+	assert.Equal(t, int64(math.MaxInt64>>20)+1, sizeLimitMiB(math.MaxInt64))
 }
