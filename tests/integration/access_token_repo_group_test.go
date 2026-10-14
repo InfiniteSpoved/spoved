@@ -19,6 +19,7 @@ import (
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/lfs"
 	api "forgejo.org/modules/structs"
+	auth_service "forgejo.org/services/auth"
 	repo_service "forgejo.org/services/repository"
 
 	"github.com/PuerkitoBio/goquery"
@@ -181,17 +182,46 @@ func TestAccessTokenRepoGroup(t *testing.T) {
 			ai = unittest.AssertExistsAndLoadBean(t, &auth_model.AuthorizedIntegration{ID: ai.ID})
 			assert.Contains(t, ai.ClaimRules.Rules, sourceRule)
 
+			// missing and hidden repositories give the same 400, in both UIs, on new and edit
 			user5 := loginUser(t, "user5")
-			post := func(field, value string) string {
-				v := url.Values{"name": {"x"}, "source_repo": {"user5/repo4"}, "resource": {"repo-specific"}, "scope": {"read:repository"}, "selected_repo": {"user5/repo4"}}
-				v.Set(field, value)
-				return user5.MakeRequest(t, NewRequestWithURLValues(t, "POST", "/user/settings/authorized-integrations/forgejo-actions-local/new", v), http.StatusBadRequest).Body.String()
+			issuer := "urn:forgejo:authorized-integrations:actions"
+			paths := map[string][]string{}
+			for _, ui := range []auth_model.AuthorizedIntegrationUI{auth_model.AuthorizedIntegrationUIGeneric, auth_model.AuthorizedIntegrationUIForgejoActionsLocal} {
+				existing := &auth_model.AuthorizedIntegration{
+					UserID: 5, Name: "user5 " + string(ui), UI: ui, Issuer: issuer, Scope: "read:repository", ResourceAllRepos: true,
+					ClaimRules: &auth_model.ClaimRules{Rules: []auth_model.ClaimRule{
+						{Claim: "repository_id", Comparison: auth_model.ClaimEqual, Value: "4"},
+						{Claim: "repository_owner_id", Comparison: auth_model.ClaimEqual, Value: "5"},
+					}},
+				}
+				require.NoError(t, auth_service.InsertAuthorizedIntegration(db.DefaultContext, existing, nil))
+				base := fmt.Sprintf("/user/settings/authorized-integrations/%s/", ui)
+				paths[string(ui)] = []string{base + "new", fmt.Sprintf("%s%d", base, existing.ID)}
 			}
-			missing := post("selected_repo", "org3/proj/nosuch")
-			assert.Equal(t, "getSelectedRepos\n", missing)
-			assert.Equal(t, missing, post("selected_repo", "org3/proj/priv"))
-			assert.Equal(t, missing, post("source_repo", "org3/proj/priv"))
-			assert.Equal(t, missing, post("source_repo", "org3/proj/nosuch"))
+			post := func(t *testing.T, path, field, value string) string {
+				t.Helper()
+				v := url.Values{
+					"name": {"x"}, "resource": {"repo-specific"}, "scope": {"read:repository"}, "selected_repo": {"user5/repo4"},
+					"source_repo": {"user5/repo4"}, "issuer": {issuer}, "claim_rules": {`{"rules":[]}`},
+				}
+				v.Set(field, value)
+				return user5.MakeRequest(t, NewRequestWithURLValues(t, "POST", path, v), http.StatusBadRequest).Body.String()
+			}
+			for ui, uiPaths := range paths {
+				fields := []string{"selected_repo"}
+				if ui == string(auth_model.AuthorizedIntegrationUIForgejoActionsLocal) {
+					fields = append(fields, "source_repo")
+				}
+				for _, path := range uiPaths {
+					for _, field := range fields {
+						missing := post(t, path, field, "org3/proj/nosuch")
+						assert.Equal(t, "getSelectedRepos\n", missing, "%s %s", path, field)
+						for _, hidden := range []string{"org3/proj/priv", "org3/secret/hid", "org3/priv"} {
+							assert.Equal(t, missing, post(t, path, field, hidden), "%s %s %s", path, field, hidden)
+						}
+					}
+				}
+			}
 		})
 
 		t.Run("CLI authorized integration", func(t *testing.T) {
