@@ -11,5 +11,6 @@
 		{{if not ($.UserDisabledFeatures.Contains "manage_gpg_keys")}}
 		{{template "user/settings/keys_gpg" .}}
 		{{end}}
+		{{template "user/settings/keys_tokens" .}}
 	</div>
 {{template "user/settings/layout_footer" .}}

@@ -29,7 +29,7 @@ import (
 func TestAccessTokenCreate(t *testing.T) {
 	unittest.PrepareTestEnv(t)
 
-	ctx, resp := contexttest.MockContext(t, "user/settings/applications/tokens/new",
+	ctx, resp := contexttest.MockContext(t, "user/settings/keys/tokens/new",
 		contexttest.MockContextOption{Render: templates.HTMLRenderer()})
 	contexttest.LoadUser(t, ctx, 2)
 
@@ -54,7 +54,7 @@ func TestAccessTokenCreatePost(t *testing.T) {
 	post := func(t *testing.T, form *forms.NewAccessTokenPostForm) (*context.Context, *httptest.ResponseRecorder) {
 		t.Helper()
 
-		ctx, resp := contexttest.MockContext(t, "user/settings/applications/tokens/new",
+		ctx, resp := contexttest.MockContext(t, "user/settings/keys/tokens/new",
 			contexttest.MockContextOption{Render: templates.HTMLRenderer()})
 		contexttest.LoadUser(t, ctx, 2)
 
@@ -190,7 +190,7 @@ func TestGetSelectedRepos(t *testing.T) {
 
 	selected := func(t *testing.T, raw ...string) ([]*repo_model.Repository, error) {
 		t.Helper()
-		ctx, _ := contexttest.MockContext(t, "user/settings/applications/tokens/new")
+		ctx, _ := contexttest.MockContext(t, "user/settings/keys/tokens/new")
 		contexttest.LoadUser(t, ctx, 2)
 		return getSelectedRepos(ctx, raw)
 	}
@@ -230,7 +230,7 @@ func TestAccessTokenCreatePostProjectRepo(t *testing.T) {
 	unittest.PrepareTestEnv(t)
 	moveToProject(t, 5, "proj", "repo3")
 
-	ctx, resp := contexttest.MockContext(t, "user/settings/applications/tokens/new")
+	ctx, resp := contexttest.MockContext(t, "user/settings/keys/tokens/new")
 	contexttest.LoadUser(t, ctx, 2)
 	web.SetForm(ctx, &forms.NewAccessTokenPostForm{
 		Name:         "project token",

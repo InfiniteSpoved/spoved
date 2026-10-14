@@ -48,7 +48,7 @@ func TestAccessTokenRepoGroup(t *testing.T) {
 			t.Helper()
 			name := fmt.Sprintf("repo-group-token-%d", tokenCounter.Add(1))
 			values := url.Values{"name": {name}, "resource": {"repo-specific"}, "scope": {"write:repository"}, "selected_repo": selected}
-			resp := session.MakeRequest(t, NewRequestWithURLValues(t, "POST", "/user/settings/applications/tokens/new", values), status)
+			resp := session.MakeRequest(t, NewRequestWithURLValues(t, "POST", "/user/settings/keys/tokens/new", values), status)
 			if status != http.StatusSeeOther {
 				return resp.Body.String()
 			}

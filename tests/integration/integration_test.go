@@ -476,11 +476,11 @@ func createApplicationSettingsToken(t testing.TB, session *TestSession, name str
 	} else {
 		urlValues.Add("resource", "all")
 	}
-	req := NewRequestWithURLValues(t, "POST", "/user/settings/applications/tokens/new", urlValues)
+	req := NewRequestWithURLValues(t, "POST", "/user/settings/keys/tokens/new", urlValues)
 	resp := session.MakeRequest(t, req, http.StatusSeeOther)
 
 	// Log the flash values on failure
-	if !assert.Equal(t, []string{"/user/settings/applications"}, resp.Result().Header["Location"]) {
+	if !assert.Equal(t, []string{"/user/settings/keys"}, resp.Result().Header["Location"]) {
 		for _, cookie := range resp.Result().Cookies() {
 			if cookie.Name != app_context.CookieNameFlash {
 				continue
@@ -528,10 +528,10 @@ func createFineGrainedRepoAccessToken(t testing.TB, username string, scopes []au
 	return token.Token
 }
 
-// assertAccessToken retrieves a token from "/user/settings/applications" and returns it.
+// assertAccessToken retrieves a token from "/user/settings/keys" and returns it.
 // It will also assert that the page contains a token.
 func assertAccessToken(t testing.TB, session *TestSession) string {
-	req := NewRequest(t, "GET", "/user/settings/applications")
+	req := NewRequest(t, "GET", "/user/settings/keys")
 	resp := session.MakeRequest(t, req, http.StatusOK)
 	htmlDoc := NewHTMLParser(t, resp.Body)
 	token := htmlDoc.doc.Find(".ui.info p").Text()

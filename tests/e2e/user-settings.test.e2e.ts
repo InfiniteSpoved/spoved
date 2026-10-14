@@ -127,7 +127,7 @@ test('User: Canceling adding GPG key clears input', async ({browser}, workerInfo
 
 test('User: Add access token', async ({browser}, workerInfo) => {
   const page = await login({browser}, workerInfo);
-  await page.goto('/user/settings/applications');
+  await page.goto('/user/settings/keys');
   await page.getByRole('link', {name: 'New access token'}).click();
 
   await page.locator('#scoped-access-submit').click();
@@ -150,9 +150,40 @@ test('User: Add access token', async ({browser}, workerInfo) => {
   await page.getByText(tokenName).isVisible();
 });
 
+test('User: Keys and tokens page', async ({browser}, workerInfo) => {
+  const page = await login({browser}, workerInfo);
+  await page.goto('/user/settings/keys');
+  await expect(page.getByRole('link', {name: 'Keys and tokens'})).toHaveClass(/active/);
+
+  // sections: SSH keys, GPG keys, access tokens
+  const headings = page.locator('.user-setting-content > h4.header');
+  await expect(headings.filter({hasText: 'Manage SSH keys'})).toBeVisible();
+  await expect(headings.filter({hasText: 'Manage GPG keys'})).toBeVisible();
+  await expect(headings.last()).toContainText('Access tokens');
+
+  await page.getByRole('link', {name: 'New access token'}).click();
+  await expect(page).toHaveURL(/\/user\/settings\/keys\/tokens\/new$/);
+  const tokenName = globalThis.crypto.randomUUID();
+  await page.locator('#name').fill(tokenName);
+  await page.selectOption('#access-token-scope-activitypub', 'read:activitypub');
+  await page.getByRole('radio', {name: /^All /}).click();
+  await page.locator('#scoped-access-submit').click();
+  await expect(page).toHaveURL(/\/user\/settings\/keys$/);
+  const token = page.locator('.flex-item', {hasText: tokenName});
+  await expect(token).toBeVisible();
+
+  await token.getByRole('button', {name: 'Delete'}).click();
+  await page.locator('#delete-token').getByRole('button', {name: 'Yes'}).click();
+  await expect(page.getByText(tokenName)).toBeHidden();
+
+  // Applications holds only OAuth2
+  await page.goto('/user/settings/applications');
+  await expect(page.getByRole('link', {name: 'New access token'})).toBeHidden();
+});
+
 test('User: Add access token validation error', async ({browser}, workerInfo) => {
   const page = await login({browser}, workerInfo);
-  await page.goto('/user/settings/applications');
+  await page.goto('/user/settings/keys');
   await page.getByRole('link', {name: 'New access token'}).click();
 
   await page.getByRole('button', {name: 'Generate token'}).click();
@@ -172,7 +203,7 @@ test('User: Add access token validation error', async ({browser}, workerInfo) =>
 
 test('User: Add specific repo access token', async ({browser}, workerInfo) => {
   const page = await login({browser}, workerInfo);
-  await page.goto('/user/settings/applications');
+  await page.goto('/user/settings/keys');
   await page.getByRole('link', {name: 'New access token'}).click();
 
   const tokenName = globalThis.crypto.randomUUID();
@@ -221,7 +252,7 @@ test('User: Add specific repo access token', async ({browser}, workerInfo) => {
 // error is displayed.
 test('User: Add specific repo access token error', async ({browser}, workerInfo) => {
   const page = await login({browser}, workerInfo);
-  await page.goto('/user/settings/applications');
+  await page.goto('/user/settings/keys');
   await page.getByRole('link', {name: 'New access token'}).click();
 
   await page.getByRole('textbox', {name: /^Token name/}).fill('Token A');

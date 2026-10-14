@@ -351,4 +351,6 @@ func loadKeysData(ctx *context.Context) {
 	ctx.Data["VerifyingID"] = ctx.FormString("verify_gpg")
 	ctx.Data["VerifyingFingerprint"] = ctx.FormString("verify_ssh")
 	ctx.Data["UserDisabledFeatures"] = user_model.DisabledFeaturesWithLoginType(ctx.Doer)
+
+	loadAccessTokensData(ctx)
 }
