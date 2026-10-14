@@ -186,7 +186,7 @@ func (d *BitbucketDataCenterDownloader) cloneURL(key, slug string) string {
 // maxBitbucketPages caps the pages read from one paged list.
 const maxBitbucketPages = 1000
 
-// callAPIPaged reads every page of a paged list of the REST API v1 into values.
+// callAPIPaged reads every page of a paged list of the REST API into values.
 func callAPIPaged[T any](d *BitbucketDataCenterDownloader, endpoint string) ([]T, error) {
 	var values []T
 	start := 0
@@ -208,9 +208,10 @@ func callAPIPaged[T any](d *BitbucketDataCenterDownloader, endpoint string) ([]T
 	return nil, fmt.Errorf("%s: more than %d pages", endpoint, maxBitbucketPages)
 }
 
-// callAPI performs a GET against the Bitbucket Data Center REST API v1 and decodes the JSON result.
+// callAPI performs a GET against the Bitbucket Data Center REST API, endpoint below rest/ (e.g. api/1.0/projects),
+// and decodes the JSON result.
 func (d *BitbucketDataCenterDownloader) callAPI(endpoint string, query url.Values, result any) error {
-	u := d.baseURL.JoinPath("rest/api/1.0", endpoint)
+	u := d.baseURL.JoinPath("rest", endpoint)
 	if len(query) > 0 {
 		u.RawQuery = query.Encode()
 	}
@@ -254,7 +255,7 @@ func (d *BitbucketDataCenterDownloader) GetRepoInfo() (*base.Repository, error) 
 			} `json:"self"`
 		} `json:"links"`
 	}
-	if err := d.callAPI(fmt.Sprintf("projects/%s/repos/%s", d.project, d.repoSlug), nil, &repo); err != nil {
+	if err := d.callAPI(fmt.Sprintf("api/1.0/projects/%s/repos/%s", d.project, d.repoSlug), nil, &repo); err != nil {
 		return nil, err
 	}
 
@@ -269,7 +270,7 @@ func (d *BitbucketDataCenterDownloader) GetRepoInfo() (*base.Repository, error) 
 	var defaultBranch struct {
 		DisplayID string `json:"displayId"`
 	}
-	if err := d.callAPI(fmt.Sprintf("projects/%s/repos/%s/branches/default", d.project, d.repoSlug), nil, &defaultBranch); err != nil && !errors.Is(err, errBitbucketNotFound) {
+	if err := d.callAPI(fmt.Sprintf("api/1.0/projects/%s/repos/%s/branches/default", d.project, d.repoSlug), nil, &defaultBranch); err != nil && !errors.Is(err, errBitbucketNotFound) {
 		log.Warn("Unable to get the default branch of %s/%s: %v", d.project, d.repoSlug, err)
 	}
 
@@ -327,7 +328,7 @@ func (d *BitbucketDataCenterDownloader) GetPullRequests(page, perPage int) ([]*b
 		"start": {strconv.Itoa(start)},
 		"limit": {strconv.Itoa(perPage)},
 	}
-	if err := d.callAPI(fmt.Sprintf("projects/%s/repos/%s/pull-requests", d.project, d.repoSlug), query, &resp); err != nil {
+	if err := d.callAPI(fmt.Sprintf("api/1.0/projects/%s/repos/%s/pull-requests", d.project, d.repoSlug), query, &resp); err != nil {
 		return nil, false, err
 	}
 	d.prNextPageStart = resp.NextPageStart
@@ -524,7 +525,7 @@ func (d *BitbucketDataCenterDownloader) fetchPullRequestActivities(prID int64) (
 			"start": {strconv.Itoa(start)},
 			"limit": {"100"},
 		}
-		if err := d.callAPI(fmt.Sprintf("projects/%s/repos/%s/pull-requests/%d/activities", d.project, d.repoSlug, prID), query, &resp); err != nil {
+		if err := d.callAPI(fmt.Sprintf("api/1.0/projects/%s/repos/%s/pull-requests/%d/activities", d.project, d.repoSlug, prID), query, &resp); err != nil {
 			return nil, err
 		}
 		activities = append(activities, resp.Values...)

@@ -19,6 +19,7 @@ type BitbucketImportParams struct {
 	Projects     []string
 	DryRun       bool
 	PullRequests bool
+	KeyExpiry    string
 }
 
 // String never prints the token.

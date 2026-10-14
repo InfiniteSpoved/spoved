@@ -145,9 +145,10 @@ func bitbucketOriginKeywordCond(keyword string) builder.Cond {
 	return builder.In("`repository`.id", builder.Select("repo_id").From("bitbucket_origin").Where(cond))
 }
 
-// IsValidBitbucketName reports whether s is a plain Bitbucket project key or repository slug.
+// IsValidBitbucketName reports whether s is a plain Bitbucket project key or repository slug. "." and ".." are not:
+// url.JoinPath would resolve them and send a request to another path.
 func IsValidBitbucketName(s string) bool {
-	return bitbucketNamePattern.MatchString(s)
+	return s != "." && s != ".." && bitbucketNamePattern.MatchString(s)
 }
 
 // GetBitbucketOriginByPath returns the origin row of a Bitbucket repository (or of a project, with an empty slug),

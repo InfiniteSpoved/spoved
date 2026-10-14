@@ -37,6 +37,7 @@ func subcmdBitbucketImport() *cli.Command {
 			&cli.BoolFlag{Name: "dry-run", Usage: "List what would be imported and change nothing"},
 			&cli.BoolFlag{Name: "no-pull-requests", Usage: "Don't import pull requests, their comments and reviews"},
 			&cli.StringFlag{Name: "csv", Usage: "Write the old and new URLs of the repositories to this CSV file"},
+			&cli.StringFlag{Name: "key-expiry", Usage: "Latest expiry (YYYY-MM-DD) of the imported deploy keys; needed when neither Bitbucket nor the policy sets one"},
 			&cli.StringFlag{Name: "username", Usage: "Account of a user access token; empty for a project or repository token"},
 			&cli.StringFlag{Name: "token-file", Usage: "File holding the Bitbucket access token"},
 		},
@@ -52,16 +53,7 @@ func runBitbucketImport(ctx context.Context, c *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	text, extra := private.BitbucketImport(ctx, private.BitbucketImportParams{
-		Doer:         c.String("doer"),
-		Org:          c.String("org"),
-		Server:       c.String("server"),
-		Username:     c.String("username"),
-		Token:        token,
-		Projects:     c.StringSlice("project"),
-		DryRun:       c.Bool("dry-run"),
-		PullRequests: !c.Bool("no-pull-requests"),
-	})
+	text, extra := private.BitbucketImport(ctx, bitbucketImportParams(c, token))
 	if extra.HasError() {
 		return handleCliResponseExtra(extra)
 	}
@@ -86,6 +78,20 @@ func runBitbucketImport(ctx context.Context, c *cli.Command) error {
 	return nil
 }
 
+func bitbucketImportParams(c *cli.Command, token string) private.BitbucketImportParams {
+	return private.BitbucketImportParams{
+		Doer:         c.String("doer"),
+		Org:          c.String("org"),
+		Server:       c.String("server"),
+		Username:     c.String("username"),
+		Token:        token,
+		Projects:     c.StringSlice("project"),
+		DryRun:       c.Bool("dry-run"),
+		PullRequests: !c.Bool("no-pull-requests"),
+		KeyExpiry:    c.String("key-expiry"),
+	}
+}
+
 // bitbucketToken reads the token from the file, or else from BITBUCKET_TOKEN: never from the command line.
 func bitbucketToken(file string) (string, error) {
 	if file != "" {
@@ -103,7 +109,17 @@ func bitbucketToken(file string) (string, error) {
 
 func printBitbucketReport(w io.Writer, report *migrations.BitbucketImportReport) {
 	for _, item := range report.Items {
-		line := fmt.Sprintf("%-10s %-10s %s -> %s", item.Kind, item.Status, item.Bitbucket, item.Name)
+		line := fmt.Sprintf("%-12s %-10s %s -> %s", item.Kind, item.Status, item.Bitbucket, item.Name)
+		if item.Target != "" {
+			parts := []string{item.Target}
+			if item.Access != "" {
+				parts = append(parts, item.Access)
+			}
+			if item.Expires != "" {
+				parts = append(parts, "expires "+item.Expires)
+			}
+			line += " on " + strings.Join(parts, ", ")
+		}
 		if item.NewHTTP != "" {
 			line += " (" + item.NewHTTP + ")"
 		}
@@ -118,6 +134,9 @@ func writeBitbucketCSV(w io.Writer, report *migrations.BitbucketImportReport) er
 	out := csv.NewWriter(w)
 	_ = out.Write([]string{"kind", "bitbucket", "name", "status", "old_http", "old_ssh", "old_web", "new_https", "new_ssh", "new_web"})
 	for _, item := range report.Items {
+		if item.Kind != "project" && item.Kind != "repository" {
+			continue // the CSV holds the URLs only
+		}
 		row := []string{item.Kind, item.Bitbucket, item.Name, item.Status, item.OldHTTP, item.OldSSH, item.OldWeb, item.NewHTTP, item.NewSSH, item.NewWeb}
 		for i := range row {
 			row[i] = util.CSVSafe(util.StripControl(row[i]))

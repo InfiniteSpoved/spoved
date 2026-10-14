@@ -44,6 +44,7 @@ const bitbucketTestToken = "bbtoken-0123456789abcdef"
 type bitbucketMock struct {
 	*httptest.Server
 	bare    string                                                                         // the git data
+	pages   map[string]any                                                                 // REST answers by path below rest/, set before the first request
 	gitHook atomic.Pointer[func(w http.ResponseWriter, r *http.Request, slug string) bool] // answers a git request when it returns true
 }
 
@@ -86,6 +87,10 @@ func newBitbucketMock(t *testing.T, projects map[string]string, repos map[string
 		}
 		if r.Header.Get("Authorization") != "Bearer "+bitbucketTestToken {
 			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if v, ok := m.pages[strings.Join(parts[1:], "/")]; ok {
+			_ = json.NewEncoder(w).Encode(v)
 			return
 		}
 		rest := parts[3:] // after rest/api/1.0
@@ -153,7 +158,7 @@ func TestBitbucketImport(t *testing.T) {
 		defer test.MockVariableValueWithReset(&setting.Migrations.AllowUnencrypted, true, func() { require.NoError(t, allowlist.Init()) })()
 		ctx := t.Context()
 		server := newBitbucketMock(t, map[string]string{"PAY": "Payments\x1b[31m Team", "ZZZ": "repo3", "~JD": "---", "-": "", "A.GIT": ""},
-			map[string][]string{"PAY": {"api", "web"}, "ZZZ": {"tools"}})
+			map[string][]string{"PAY": {"api", "web", "zeta"}, "ZZZ": {"tools"}})
 		defer server.Close()
 		opts := migrations.BitbucketImportOptions{Server: server.URL, Token: bitbucketTestToken, Projects: []string{"PAY"}, PullRequests: true}
 		dryRun := opts
@@ -218,7 +223,7 @@ func TestBitbucketImport(t *testing.T) {
 				require.NoError(t, err)
 				assert.False(t, report.Blocked)
 				assert.Equal(t, before, countBitbucketImportRows(t))
-				require.Len(t, report.Items, 3)
+				require.Len(t, report.Items, 4)
 				assert.Equal(t, "org3/"+projectName, report.Items[0].Name)
 				for _, item := range report.Items {
 					assert.Equal(t, migrations.BitbucketPlanned, item.Status, item.Bitbucket)
@@ -255,26 +260,31 @@ func TestBitbucketImport(t *testing.T) {
 			// each way to fail answers the git requests of PAY/web; PAY/api is imported by the first run
 			var cancelRun context.CancelFunc
 			var conflictInserted atomic.Bool
-			for name, hook := range map[string]func(w http.ResponseWriter, r *http.Request) bool{
-				"clone fails": func(w http.ResponseWriter, r *http.Request) bool {
-					w.WriteHeader(http.StatusNotFound)
-					return true
-				},
-				"the run is cancelled during the clone": func(w http.ResponseWriter, r *http.Request) bool {
+			// the cancel first, so zeta, after web, is still to import and reported cancelled
+			for _, c := range []struct {
+				name string
+				hook func(w http.ResponseWriter, r *http.Request) bool
+			}{
+				{"the run is cancelled during the clone", func(w http.ResponseWriter, r *http.Request) bool {
 					cancelRun()
 					select { // until the clone is killed
 					case <-r.Context().Done():
 					case <-time.After(30 * time.Second):
 					}
 					return true
-				},
-				"recording the origin fails": func(w http.ResponseWriter, r *http.Request) bool {
+				}},
+				{"clone fails", func(w http.ResponseWriter, r *http.Request) bool {
+					w.WriteHeader(http.StatusNotFound)
+					return true
+				}},
+				{"recording the origin fails", func(w http.ResponseWriter, r *http.Request) bool {
 					if !conflictInserted.Swap(true) { // the origin insert then hits the unique key
 						assert.NoError(t, db.Insert(db.DefaultContext, &repo_model.BitbucketOrigin{RepoID: 99999, ProjectKey: "PAY", Slug: "web", Server: server.URL}))
 					}
 					return false
-				},
+				}},
 			} {
+				name, hook := c.name, c.hook
 				t.Run(name, func(t *testing.T) {
 					runCtx, cancel := context.WithCancel(ctx)
 					defer cancel()
@@ -286,11 +296,20 @@ func TestBitbucketImport(t *testing.T) {
 					server.gitHook.Store(nil)
 					require.NoError(t, err)
 					assert.Equal(t, name == "the run is cancelled during the clone", runCtx.Err() != nil)
-					require.Len(t, report.Items, 3)
+					require.Len(t, report.Items, 4)
 					assert.Contains(t, []string{migrations.BitbucketCreated, migrations.BitbucketReused}, report.Items[0].Status, report.Items[0].Reason)
 					assert.Contains(t, []string{migrations.BitbucketCreated, migrations.BitbucketReused}, report.Items[1].Status, report.Items[1].Reason)
 					assert.Equal(t, migrations.BitbucketFailed, report.Items[2].Status)
 					assert.NotContains(t, report.Items[2].Reason, "delete ", "the purge worked")
+					if name == "the run is cancelled during the clone" {
+						assert.Equal(t, migrations.BitbucketFailed, report.Items[3].Status)
+						assert.Equal(t, "the import was cancelled", report.Items[3].Reason)
+						group := unittest.AssertExistsAndLoadBean(t, &repo_model.RepoGroup{OwnerID: 3, LowerName: projectName})
+						_, err = repo_model.GetRepositoryByPath(db.DefaultContext, 3, group.Name, "zeta")
+						assert.True(t, repo_model.IsErrRepoNotExist(err), "zeta wasn't started")
+					} else {
+						assert.Contains(t, []string{migrations.BitbucketCreated, migrations.BitbucketReused}, report.Items[3].Status, report.Items[3].Reason)
+					}
 					b, err := json.Marshal(report)
 					require.NoError(t, err)
 					assert.NotContains(t, string(b), bitbucketTestToken)
@@ -310,8 +329,8 @@ func TestBitbucketImport(t *testing.T) {
 
 			again, err := migrations.ImportBitbucket(ctx, "user2", "org3", opts)
 			require.NoError(t, err)
-			assert.Equal(t, []string{migrations.BitbucketReused, migrations.BitbucketReused, migrations.BitbucketCreated},
-				[]string{again.Items[0].Status, again.Items[1].Status, again.Items[2].Status}, again.Items[2].Reason)
+			assert.Equal(t, []string{migrations.BitbucketReused, migrations.BitbucketReused, migrations.BitbucketCreated, migrations.BitbucketReused},
+				[]string{again.Items[0].Status, again.Items[1].Status, again.Items[2].Status, again.Items[3].Status}, again.Items[2].Reason)
 		})
 
 		t.Run("imported repositories", func(t *testing.T) {

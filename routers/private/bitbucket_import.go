@@ -30,6 +30,7 @@ func BitbucketImport(ctx *app_context.PrivateContext) {
 		Projects:     params.Projects,
 		DryRun:       params.DryRun,
 		PullRequests: params.PullRequests,
+		KeyExpiry:    params.KeyExpiry,
 	}
 	token := params.Token
 	params.Token = ""
