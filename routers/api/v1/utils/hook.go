@@ -4,12 +4,14 @@
 package utils
 
 import (
+	go_context "context"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/models/webhook"
 	"forgejo.org/modules/json"
@@ -22,11 +24,12 @@ import (
 	webhook_service "forgejo.org/services/webhook"
 )
 
-// ListOwnerHooks lists the webhooks of the provided owner
-func ListOwnerHooks(ctx *context.APIContext, owner *user_model.User) {
+// ListOwnerHooks lists the webhooks of the provided owner (groupID 0) or of its project groupID
+func ListOwnerHooks(ctx *context.APIContext, owner *user_model.User, groupID int64) {
 	opts := &webhook.ListWebhookOptions{
 		ListOptions: GetListOptions(ctx),
 		OwnerID:     owner.ID,
+		GroupID:     groupID,
 	}
 
 	hooks, count, err := db.FindAndCount[webhook.Webhook](ctx, opts)
@@ -48,9 +51,16 @@ func ListOwnerHooks(ctx *context.APIContext, owner *user_model.User) {
 	ctx.JSON(http.StatusOK, apiHooks)
 }
 
-// GetOwnerHook gets an user or organization webhook. Errors are written to ctx.
-func GetOwnerHook(ctx *context.APIContext, ownerID, hookID int64) (*webhook.Webhook, error) {
-	w, err := webhook.GetWebhookByOwnerID(ctx, ownerID, hookID)
+// GetOwnerHook gets an user or organization webhook (groupID 0) or a webhook of the organization's project groupID.
+// Errors are written to ctx.
+func GetOwnerHook(ctx *context.APIContext, ownerID, groupID, hookID int64) (*webhook.Webhook, error) {
+	var w *webhook.Webhook
+	var err error
+	if groupID != 0 {
+		w, err = webhook.GetWebhookByGroupID(ctx, ownerID, groupID, hookID)
+	} else {
+		w, err = webhook.GetWebhookByOwnerID(ctx, ownerID, hookID)
+	}
 	if err != nil {
 		if webhook.IsErrWebhookNotExist(err) {
 			ctx.NotFound()
@@ -107,7 +117,7 @@ func checkCreateHookOption(ctx *context.APIContext, form *api.CreateHookOption) 
 
 // AddSystemHook add a system hook
 func AddSystemHook(ctx *context.APIContext, form *api.CreateHookOption) {
-	hook, ok := addHook(ctx, form, 0, 0)
+	hook, ok := addHook(ctx, form, 0, 0, 0)
 	if ok {
 		h, err := webhook_service.ToHook(setting.AppSubURL+"/admin", hook)
 		if err != nil {
@@ -118,9 +128,9 @@ func AddSystemHook(ctx *context.APIContext, form *api.CreateHookOption) {
 	}
 }
 
-// AddOwnerHook adds a hook to an user or organization
-func AddOwnerHook(ctx *context.APIContext, owner *user_model.User, form *api.CreateHookOption) {
-	hook, ok := addHook(ctx, form, owner.ID, 0)
+// AddOwnerHook adds a hook to an user or organization (groupID 0) or to the organization's project groupID
+func AddOwnerHook(ctx *context.APIContext, owner *user_model.User, groupID int64, form *api.CreateHookOption) {
+	hook, ok := addHook(ctx, form, owner.ID, groupID, 0)
 	if !ok {
 		return
 	}
@@ -134,7 +144,7 @@ func AddOwnerHook(ctx *context.APIContext, owner *user_model.User, form *api.Cre
 // AddRepoHook add a hook to a repo. Writes to `ctx` accordingly
 func AddRepoHook(ctx *context.APIContext, form *api.CreateHookOption) {
 	repo := ctx.Repo()
-	hook, ok := addHook(ctx, form, 0, repo.Repository.ID)
+	hook, ok := addHook(ctx, form, 0, 0, repo.Repository.ID)
 	if !ok {
 		return
 	}
@@ -164,9 +174,9 @@ func pullHook(events []string, event string) bool {
 	return util.SliceContainsString(events, event, true) || util.SliceContainsString(events, string(webhook_module.HookEventPullRequest), true)
 }
 
-// addHook add the hook specified by `form`, `ownerID` and `repoID`. If there is
+// addHook add the hook specified by `form`, `ownerID`, `groupID` and `repoID`. If there is
 // an error, write to `ctx` accordingly. Return (webhook, ok)
-func addHook(ctx *context.APIContext, form *api.CreateHookOption, ownerID, repoID int64) (*webhook.Webhook, bool) {
+func addHook(ctx *context.APIContext, form *api.CreateHookOption, ownerID, groupID, repoID int64) (*webhook.Webhook, bool) {
 	var isSystemWebhook bool
 	if !checkCreateHookOption(ctx, form) {
 		return nil, false
@@ -185,6 +195,7 @@ func addHook(ctx *context.APIContext, form *api.CreateHookOption, ownerID, repoI
 	}
 	w := &webhook.Webhook{
 		OwnerID:         ownerID,
+		GroupID:         groupID,
 		RepoID:          repoID,
 		URL:             form.Config["url"],
 		ContentType:     webhook.ToHookContentType(form.Config["content_type"]),
@@ -268,7 +279,15 @@ func addHook(ctx *context.APIContext, form *api.CreateHookOption, ownerID, repoI
 		return nil, false
 	}
 
-	if err := webhook.CreateWebhook(ctx, w, form.AuthorizationHeader); err != nil {
+	if err := db.WithTx(ctx, func(ctx go_context.Context) error {
+		// the project row stays locked until the end, so a concurrent DeleteRepoGroup deletes this hook or runs first
+		if groupID != 0 {
+			if _, err := repo_model.LockRepoGroup(ctx, ownerID, groupID); err != nil {
+				return err
+			}
+		}
+		return webhook.CreateWebhook(ctx, w, form.AuthorizationHeader)
+	}); err != nil {
 		ctx.Error(http.StatusInternalServerError, "CreateWebhook", err)
 		return nil, false
 	}
@@ -299,16 +318,16 @@ func EditSystemHook(ctx *context.APIContext, form *api.EditHookOption, hookID in
 	ctx.JSON(http.StatusOK, h)
 }
 
-// EditOwnerHook updates a webhook of an user or organization
-func EditOwnerHook(ctx *context.APIContext, owner *user_model.User, form *api.EditHookOption, hookID int64) {
-	hook, err := GetOwnerHook(ctx, owner.ID, hookID)
+// EditOwnerHook updates a webhook of an user or organization (groupID 0) or of the organization's project groupID
+func EditOwnerHook(ctx *context.APIContext, owner *user_model.User, groupID int64, form *api.EditHookOption, hookID int64) {
+	hook, err := GetOwnerHook(ctx, owner.ID, groupID, hookID)
 	if err != nil {
 		return
 	}
 	if !editHook(ctx, form, hook) {
 		return
 	}
-	updated, err := GetOwnerHook(ctx, owner.ID, hookID)
+	updated, err := GetOwnerHook(ctx, owner.ID, groupID, hookID)
 	if err != nil {
 		return
 	}
@@ -428,9 +447,15 @@ func editHook(ctx *context.APIContext, form *api.EditHookOption, w *webhook.Webh
 	return true
 }
 
-// DeleteOwnerHook deletes the hook owned by the owner.
-func DeleteOwnerHook(ctx *context.APIContext, owner *user_model.User, hookID int64) {
-	if err := webhook.DeleteWebhookByOwnerID(ctx, owner.ID, hookID); err != nil {
+// DeleteOwnerHook deletes the hook owned by the owner (groupID 0) or by the owner's project groupID.
+func DeleteOwnerHook(ctx *context.APIContext, owner *user_model.User, groupID, hookID int64) {
+	del := webhook.DeleteWebhookByOwnerID
+	if groupID != 0 {
+		del = func(ctx go_context.Context, ownerID, id int64) error {
+			return webhook.DeleteWebhookByGroupID(ctx, ownerID, groupID, id)
+		}
+	}
+	if err := del(ctx, owner.ID, hookID); err != nil {
 		if webhook.IsErrWebhookNotExist(err) {
 			ctx.NotFound()
 		} else {

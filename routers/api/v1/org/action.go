@@ -47,8 +47,13 @@ func (Action) ListActionsSecrets(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
+	listSecrets(ctx, 0)
+}
+
+func listSecrets(ctx *context.APIContext, groupID int64) {
 	opts := &secret_model.FindSecretsOptions{
 		OwnerID:     ctx.Org().Organization.ID,
+		GroupID:     groupID,
 		ListOptions: utils.GetListOptions(ctx),
 	}
 
@@ -104,9 +109,13 @@ func (Action) CreateOrUpdateSecret(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
+	createOrUpdateSecret(ctx, 0)
+}
+
+func createOrUpdateSecret(ctx *context.APIContext, groupID int64) {
 	opt := web.GetForm(ctx).(*api.CreateOrUpdateSecretOption)
 
-	_, created, err := secrets_service.CreateOrUpdateSecret(ctx, ctx.Org().Organization.ID, 0, 0, ctx.Params("secretname"), opt.Data)
+	_, created, err := secrets_service.CreateOrUpdateSecret(ctx, ctx.Org().Organization.ID, groupID, 0, ctx.Params("secretname"), opt.Data)
 	if err != nil {
 		if errors.Is(err, util.ErrInvalidArgument) {
 			ctx.Error(http.StatusBadRequest, "CreateOrUpdateSecret", err)
@@ -153,7 +162,11 @@ func (Action) DeleteSecret(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	err := secrets_service.DeleteSecretByName(ctx, ctx.Org().Organization.ID, 0, 0, ctx.Params("secretname"))
+	deleteSecret(ctx, 0)
+}
+
+func deleteSecret(ctx *context.APIContext, groupID int64) {
+	err := secrets_service.DeleteSecretByName(ctx, ctx.Org().Organization.ID, groupID, 0, ctx.Params("secretname"))
 	if err != nil {
 		if errors.Is(err, util.ErrInvalidArgument) {
 			ctx.Error(http.StatusBadRequest, "DeleteSecret", err)
@@ -250,8 +263,13 @@ func (Action) ListVariables(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
+	listVariables(ctx, 0)
+}
+
+func listVariables(ctx *context.APIContext, groupID int64) {
 	vars, count, err := db.FindAndCount[actions_model.ActionVariable](ctx, &actions_model.FindVariablesOpts{
 		OwnerID:     ctx.Org().Organization.ID,
+		GroupID:     groupID,
 		ListOptions: utils.GetListOptions(ctx),
 	})
 	if err != nil {
@@ -424,8 +442,13 @@ func (Action) GetVariable(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
+	getVariable(ctx, 0)
+}
+
+func getVariable(ctx *context.APIContext, groupID int64) {
 	v, err := actions_service.GetVariable(ctx, actions_model.FindVariablesOpts{
 		OwnerID: ctx.Org().Organization.ID,
+		GroupID: groupID,
 		Name:    ctx.Params("variablename"),
 	})
 	if err != nil {
@@ -473,7 +496,11 @@ func (Action) DeleteVariable(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	if err := actions_service.DeleteVariableByName(ctx, ctx.Org().Organization.ID, 0, 0, ctx.Params("variablename")); err != nil {
+	deleteVariable(ctx, 0)
+}
+
+func deleteVariable(ctx *context.APIContext, groupID int64) {
+	if err := actions_service.DeleteVariableByName(ctx, ctx.Org().Organization.ID, groupID, 0, ctx.Params("variablename")); err != nil {
 		if errors.Is(err, util.ErrInvalidArgument) {
 			ctx.Error(http.StatusBadRequest, "DeleteVariableByName", err)
 		} else if errors.Is(err, util.ErrNotExist) {
@@ -521,6 +548,10 @@ func (Action) CreateVariable(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
+	createVariable(ctx, 0)
+}
+
+func createVariable(ctx *context.APIContext, groupID int64) {
 	opt := web.GetForm(ctx).(*api.CreateVariableOption)
 
 	ownerID := ctx.Org().Organization.ID
@@ -528,6 +559,7 @@ func (Action) CreateVariable(ctx *context.APIContext) {
 
 	v, err := actions_service.GetVariable(ctx, actions_model.FindVariablesOpts{
 		OwnerID: ownerID,
+		GroupID: groupID,
 		Name:    variableName,
 	})
 	if err != nil && !errors.Is(err, util.ErrNotExist) {
@@ -539,7 +571,7 @@ func (Action) CreateVariable(ctx *context.APIContext) {
 		return
 	}
 
-	if _, err := actions_service.CreateVariable(ctx, ownerID, 0, 0, variableName, opt.Value); err != nil {
+	if _, err := actions_service.CreateVariable(ctx, ownerID, groupID, 0, variableName, opt.Value); err != nil {
 		if errors.Is(err, util.ErrInvalidArgument) {
 			ctx.Error(http.StatusBadRequest, "CreateVariable", err)
 		} else {
@@ -585,10 +617,15 @@ func (Action) UpdateVariable(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
+	updateVariable(ctx, 0)
+}
+
+func updateVariable(ctx *context.APIContext, groupID int64) {
 	opt := web.GetForm(ctx).(*api.UpdateVariableOption)
 
 	v, err := actions_service.GetVariable(ctx, actions_model.FindVariablesOpts{
 		OwnerID: ctx.Org().Organization.ID,
+		GroupID: groupID,
 		Name:    ctx.Params("variablename"),
 	})
 	if err != nil {
@@ -603,7 +640,7 @@ func (Action) UpdateVariable(ctx *context.APIContext) {
 	if opt.Name == "" {
 		opt.Name = ctx.Params("variablename")
 	}
-	if _, err := actions_service.UpdateVariable(ctx, v.ID, ctx.Org().Organization.ID, 0, 0, opt.Name, opt.Value); err != nil {
+	if _, err := actions_service.UpdateVariable(ctx, v.ID, ctx.Org().Organization.ID, groupID, 0, opt.Name, opt.Value); err != nil {
 		if errors.Is(err, util.ErrInvalidArgument) {
 			ctx.Error(http.StatusBadRequest, "UpdateVariable", err)
 		} else {
