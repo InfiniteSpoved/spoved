@@ -218,7 +218,13 @@ func (p *bitbucketPlanner) buildRule(owner, item *BitbucketImportItem, restricti
 		e := &exceptions{}
 		for _, u := range r.Users {
 			if matched, err := matchBitbucketUser(p.ctx, u); err == nil {
-				e.users = append(e.users, matched.ID)
+				if why, err := p.cannotHold(owner, matched); err != nil {
+					return nil, err
+				} else if why != "" {
+					dropped = append(dropped, matched.Name+" ("+why+")")
+				} else {
+					e.users = append(e.users, matched.ID)
+				}
 			} else if unmatched, ok := errors.AsType[bitbucketUnmatched](err); ok {
 				dropped = append(dropped, util.StripControl(u.Name)+" ("+string(unmatched)+")")
 			} else {
@@ -236,8 +242,8 @@ func (p *bitbucketPlanner) buildRule(owner, item *BitbucketImportItem, restricti
 				dropped = append(dropped, fmt.Sprintf("key %d", k.Key.ID))
 			}
 		}
-		if prev := byType[r.Type]; prev != nil { // the same type twice on one matcher: either list lets through
-			e.users, e.keys = append(prev.users, e.users...), append(prev.keys, e.keys...)
+		if prev := byType[r.Type]; prev != nil { // the same type twice on one matcher: Bitbucket applies both
+			e.users, e.keys = intersect(prev.users, e.users), intersect(prev.keys, e.keys)
 		}
 		byType[r.Type] = e
 	}
@@ -277,6 +283,30 @@ func (p *bitbucketPlanner) buildRule(owner, item *BitbucketImportItem, restricti
 	}
 	item.parent, item.rule = owner, rule
 	return notes, nil
+}
+
+// cannotHold tells why a rule of the project or repository can't hold the user in an allowlist: a project rule only
+// org members, a repository rule only users who can write its code, now or by this plan.
+func (p *bitbucketPlanner) cannotHold(owner *BitbucketImportItem, u *user_model.User) (string, error) {
+	if owner.Kind == "project" {
+		member, err := organization.IsOrganizationMember(p.ctx, p.org.ID, u.ID)
+		if err != nil || member || p.members[u.ID] {
+			return "", err
+		}
+		return "not an org member", nil
+	}
+	if p.writers[owner][u.ID] || p.writers[p.project][u.ID] {
+		return "", nil
+	}
+	if owner.repo != nil {
+		perm, err := access_model.GetUserRepoPermission(p.ctx, owner.repo, u)
+		if err != nil || perm.CanWrite(unit.TypeCode) {
+			return "", err
+		}
+	} else if owner, err := organization.IsOrganizationOwner(p.ctx, p.org.ID, u.ID); err != nil || owner {
+		return "", err
+	}
+	return "no write access", nil
 }
 
 func intersect[T comparable](a, b []T) []T {
@@ -437,8 +467,9 @@ func bitbucketRuleToWrite(ctx context.Context, org *organization.Organization, o
 		return nil, 0, err
 	}
 	rule.WhitelistDeployKeyIDs, rule.DeleteAllowlistDeployKeyIDs, rule.ForcePushAllowlistDeployKeyIDs = keyIDs(item.pushKeys), keyIDs(item.deleteKeys), keyIDs(item.forcePushKeys)
-	// an allowlist that lost everyone lets nobody through: the flags stay set
-	rule.WhitelistDeployKeys = len(rule.WhitelistDeployKeyIDs) > 0
+	// an allowlist that lost everyone lets nobody through: the flags stay set. WhitelistDeployKeys would let every
+	// deploy key push: the import names keys by ID only.
+	rule.WhitelistDeployKeys = false
 	return &rule, dropped, nil
 }
 

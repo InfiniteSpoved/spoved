@@ -184,6 +184,8 @@ type bitbucketPlanner struct {
 
 	skipUnmapped bool
 	keys         map[*BitbucketImportItem]map[int64]*BitbucketImportItem // the keys of a project or repository by Bitbucket key ID
+	members      map[int64]bool                                          // users the plan makes org members
+	writers      map[*BitbucketImportItem]map[int64]bool                 // users the plan lets write a project's or repository's code
 }
 
 func (p *bitbucketPlanner) add(item *BitbucketImportItem, status, reason string) {
@@ -202,7 +204,10 @@ func (p *bitbucketPlanner) unmapped(owner *BitbucketImportItem, what string) {
 // planBitbucketPermissions plans, without writing, the teams, members, user group links, collaborators and deploy
 // keys of a project and its repositories.
 func planBitbucketPermissions(ctx context.Context, d *BitbucketDataCenterDownloader, org *organization.Organization, report *BitbucketImportReport, project *BitbucketImportItem, keyExpiry timeutil.TimeStamp, teams map[string]*BitbucketImportItem, skipUnmapped bool) error {
-	p := &bitbucketPlanner{ctx: ctx, d: d, org: org, report: report, project: project, keyExpiry: keyExpiry, teams: teams, skipUnmapped: skipUnmapped, keys: map[*BitbucketImportItem]map[int64]*BitbucketImportItem{}}
+	p := &bitbucketPlanner{
+		ctx: ctx, d: d, org: org, report: report, project: project, keyExpiry: keyExpiry, teams: teams, skipUnmapped: skipUnmapped, keys: map[*BitbucketImportItem]map[int64]*BitbucketImportItem{},
+		members: map[int64]bool{}, writers: map[*BitbucketImportItem]map[int64]bool{},
+	}
 	if err := p.plan(project, "api/1.0/projects/"+project.key); err != nil {
 		return err
 	}
@@ -397,6 +402,7 @@ func (p *bitbucketPlanner) planUser(owner *BitbucketImportItem, g bitbucketUserG
 			}
 		}
 		p.add(item, status, note)
+		p.grant(p.project, u.ID, mode)
 		return nil
 	}
 
@@ -425,7 +431,22 @@ func (p *bitbucketPlanner) planUser(owner *BitbucketImportItem, g bitbucketUserG
 		}
 	}
 	p.add(item, status, note)
+	p.grant(owner, u.ID, mode)
 	return nil
+}
+
+// grant records what the plan gives a user, so that a rule planned in the same run can tell who will be an org member
+// (a project team) and who will write a repository (a write team of its project, or a write collaboration).
+func (p *bitbucketPlanner) grant(owner *BitbucketImportItem, uid int64, mode perm.AccessMode) {
+	if owner == p.project {
+		p.members[uid] = true
+	}
+	if mode >= perm.AccessModeWrite {
+		if p.writers[owner] == nil {
+			p.writers[owner] = map[int64]bool{}
+		}
+		p.writers[owner][uid] = true
+	}
 }
 
 // planKeys plans the access keys of a project or repository as deploy keys, each with an expiry.

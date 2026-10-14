@@ -10,6 +10,7 @@ import (
 	git_model "forgejo.org/models/git"
 	webhook_module "forgejo.org/modules/webhook"
 
+	"github.com/gobwas/glob"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -64,15 +65,50 @@ func TestBitbucketBranchRule(t *testing.T) {
 }
 
 func TestBitbucketHookEvents(t *testing.T) {
-	events, unmapped := bitbucketHookEvents([]string{
-		"repo:refs_changed", "repo:modified", "repo:forked", "pr:opened", "pr:merged",
-		"pr:from_ref_updated", "pr:reviewer:approved", "pr:reviewer:updated", "pr:comment:added", "mirror:repo_synchronized", "repo:comment:added",
-	})
-	assert.Equal(t, webhook_module.HookEvents{
-		Push: true, Create: true, Delete: true, Repository: true, Fork: true, PullRequest: true, PullRequestSync: true,
-		PullRequestReview: true, PullRequestReviewRequest: true, PullRequestComment: true,
-	}, events)
-	assert.Equal(t, []string{"mirror:repo_synchronized", "repo:comment:added"}, unmapped)
+	for event, want := range map[string]webhook_module.HookEvents{
+		"repo:refs_changed":        {Push: true, Create: true, Delete: true},
+		"repo:modified":            {Repository: true},
+		"repo:forked":              {Fork: true},
+		"pr:opened":                {PullRequest: true},
+		"pr:modified":              {PullRequest: true},
+		"pr:merged":                {PullRequest: true},
+		"pr:declined":              {PullRequest: true},
+		"pr:deleted":               {PullRequest: true},
+		"pr:from_ref_updated":      {PullRequestSync: true},
+		"pr:reviewer:approved":     {PullRequestReview: true},
+		"pr:reviewer:unapproved":   {PullRequestReview: true},
+		"pr:reviewer:needs_work":   {PullRequestReview: true},
+		"pr:reviewer:updated":      {PullRequestReviewRequest: true},
+		"pr:comment:added":         {PullRequestComment: true},
+		"pr:comment:edited":        {PullRequestComment: true},
+		"pr:comment:deleted":       {PullRequestComment: true},
+		"mirror:repo_synchronized": {},
+		"repo:comment:added":       {},
+		"pr:reviewer:x\x1b[2J":     {},
+	} {
+		events, unmapped := bitbucketHookEvents([]string{event})
+		assert.Equal(t, want, events, event)
+		if want == (webhook_module.HookEvents{}) {
+			require.Len(t, unmapped, 1, event)
+			assert.NotContains(t, unmapped[0], "\x1b", "unmapped event names are stripped")
+		} else {
+			assert.Empty(t, unmapped, event)
+		}
+	}
+}
+
+// Every translated pattern must compile; quoting leaves no input that fails, which this checks over awkward patterns.
+func TestBitbucketBranchRuleCompiles(t *testing.T) {
+	for _, p := range []string{"[", "]", "{", "}", "\\", "a\\", "{a,b}", "[!a]", "a-z", "**", "***", "*?*", "/", "//", "a//b", "a/**/**/b", ",", "!"} {
+		for _, id := range []string{p, "refs/heads/" + p, "heads/" + p} {
+			rule, _, ok := bitbucketBranchRule("PATTERN", id)
+			if !ok {
+				continue
+			}
+			_, err := glob.Compile(rule, '/')
+			require.NoError(t, err, "%q → %q", id, rule)
+		}
+	}
 }
 
 func TestRedactedHookURL(t *testing.T) {

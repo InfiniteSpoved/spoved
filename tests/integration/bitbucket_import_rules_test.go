@@ -32,7 +32,7 @@ func TestBitbucketImportRules(t *testing.T) {
 		defer test.MockVariableValueWithReset(&setting.Migrations.AllowLocalNetworks, true, func() { require.NoError(t, allowlist.Init()) })()
 		defer test.MockVariableValueWithReset(&setting.Migrations.AllowUnencrypted, true, func() { require.NoError(t, allowlist.Init()) })()
 		ctx := t.Context()
-		server := newBitbucketMock(t, nil, map[string][]string{"RUL": {"lib", "ov2", "ovl", "svc"}, "UNM": {"u"}})
+		server := newBitbucketMock(t, nil, map[string][]string{"RUL": {"api", "lib", "ov2", "ovl", "svc"}, "UNM": {"u"}})
 		defer server.Close()
 
 		page := func(values ...any) map[string]any { return map[string]any{"isLastPage": true, "values": values} }
@@ -50,7 +50,7 @@ func TestBitbucketImportRules(t *testing.T) {
 			}
 		}
 		keys := map[int]string{}
-		for _, id := range []int{30, 21} {
+		for _, id := range []int{30, 21, 22, 23} {
 			keys[id], _ = newTestSSHKey(t)
 		}
 		const hookSecret, hookToken = "s3cret-hook-value-1234", "tok-in-query-5678"
@@ -60,14 +60,20 @@ func TestBitbucketImportRules(t *testing.T) {
 				map[string]any{"user": usr("user4"), "permission": "PROJECT_WRITE"},
 				map[string]any{"user": usr("user5"), "permission": "PROJECT_WRITE"},
 			),
-			"keys/1.0/projects/RUL/ssh":           page(map[string]any{"key": map[string]any{"id": 30, "text": keys[30], "label": "proj"}, "permission": "PROJECT_READ"}),
-			"keys/1.0/projects/RUL/repos/svc/ssh": page(map[string]any{"key": map[string]any{"id": 21, "text": keys[21], "label": "ci"}, "permission": "REPO_WRITE"}),
+			"keys/1.0/projects/RUL/ssh": page(map[string]any{"key": map[string]any{"id": 30, "text": keys[30], "label": "proj"}, "permission": "PROJECT_READ"}),
+			"keys/1.0/projects/RUL/repos/svc/ssh": page(
+				map[string]any{"key": map[string]any{"id": 21, "text": keys[21], "label": "ci"}, "permission": "REPO_WRITE"},
+				map[string]any{"key": map[string]any{"id": 22, "text": keys[22], "label": "other"}, "permission": "REPO_WRITE"},
+				map[string]any{"key": map[string]any{"id": 23, "text": keys[23], "label": "reader"}, "permission": "REPO_READ"},
+			),
 			"branch-permissions/2.0/projects/RUL/restrictions": page(
 				// user8 is no member of the organization; the group and the project key can't be held by a project rule
 				restriction("read-only", "BRANCH", "refs/heads/release", []map[string]any{usr("user4"), usr("user8")}, []string{"bb-devs"}, 30),
 				restriction("read-only", "BRANCH", "refs/heads/main", []map[string]any{usr("user4"), usr("user5")}, nil),
 				restriction("pull-request-only", "BRANCH", "refs/heads/main", []map[string]any{usr("user5")}, nil),
 				restriction("no-deletes", "BRANCH", "refs/heads/develop", []map[string]any{usr("user4")}, nil),
+				// the same type twice on one matcher: Bitbucket applies both, so only user4 may delete
+				restriction("no-deletes", "BRANCH", "refs/heads/develop", []map[string]any{usr("user4"), usr("user5")}, nil),
 				restriction("fast-forward-only", "BRANCH", "refs/heads/develop", []map[string]any{usr("user5")}, nil),
 				// every exception dropped: nobody may push, merge, delete or force-push
 				restriction("read-only", "BRANCH", "refs/heads/frozen", []map[string]any{usr("nobody")}, []string{"g"}),
@@ -75,7 +81,13 @@ func TestBitbucketImportRules(t *testing.T) {
 				restriction("fast-forward-only", "BRANCH", "refs/heads/frozen", []map[string]any{usr("nobody")}, nil),
 			),
 			"branch-permissions/2.0/projects/RUL/repos/svc/restrictions": page(
-				restriction("read-only", "BRANCH", "refs/heads/main", []map[string]any{usr("user4")}, nil, 21, 99),
+				// user20 can't write svc; key 99 is unknown
+				restriction("read-only", "BRANCH", "refs/heads/main", []map[string]any{usr("user4"), usr("user20")}, nil, 21, 99),
+				// a read key never pushes: dropped, and nobody else is excepted
+				restriction("read-only", "BRANCH", "refs/heads/rk", nil, nil, 23),
+			),
+			"branch-permissions/2.0/projects/RUL/repos/api/restrictions": page(
+				restriction("no-deletes", "BRANCH", "refs/heads/master", nil, nil),
 			),
 			"branch-permissions/2.0/projects/RUL/repos/lib/restrictions": page(
 				restriction("pull-request-only", "PATTERN", "rel,x/*", []map[string]any{usr("user4")}, nil),
@@ -110,7 +122,7 @@ func TestBitbucketImportRules(t *testing.T) {
 		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 		org := &organization.Organization{Name: "bbrules"}
 		require.NoError(t, organization.CreateOrganization(ctx, org, user2))
-		opts := migrations.BitbucketImportOptions{Server: server.URL, Token: bitbucketTestToken, Projects: []string{"RUL"}, KeyExpiry: time.Now().AddDate(0, 0, 20).Format("2006-01-02")}
+		opts := migrations.BitbucketImportOptions{Server: server.URL, Token: bitbucketTestToken, Projects: []string{"RUL"}, PullRequests: true, KeyExpiry: time.Now().AddDate(0, 0, 20).Format("2006-01-02")}
 		run := func(t *testing.T, o migrations.BitbucketImportOptions) *migrations.BitbucketImportReport {
 			t.Helper()
 			report, err := migrations.ImportBitbucket(ctx, "user2", org.Name, o)
@@ -154,6 +166,9 @@ func TestBitbucketImportRules(t *testing.T) {
 			assert.False(t, report.Blocked)
 			assert.Equal(t, before, countBitbucketImportRows(t))
 			assert.Equal(t, migrations.BitbucketPlanned, item(t, report, "rule", "RUL refs/heads/release").Status)
+			// the dry run already names the users a rule can't hold
+			assert.Contains(t, item(t, report, "rule", "RUL refs/heads/release").Reason, "user8 (not an org member)")
+			assert.Contains(t, item(t, report, "rule", "RUL/svc refs/heads/main").Reason, "user20 (no write access)")
 			assert.Equal(t, migrations.BitbucketPlanned, item(t, report, "hook", "RUL hook 1").Status)
 		})
 
@@ -213,7 +228,7 @@ func TestBitbucketImportRules(t *testing.T) {
 			assert.True(t, develop.CanPush)
 			assert.False(t, develop.EnableWhitelist)
 			assert.False(t, develop.EnableMergeWhitelist)
-			assert.Equal(t, []int64{4}, develop.DeleteAllowlistUserIDs)
+			assert.Equal(t, []int64{4}, develop.DeleteAllowlistUserIDs, "the intersection of both no-deletes lists")
 			assert.Equal(t, []int64{5}, develop.ForcePushAllowlistUserIDs)
 
 			frozen := projectRule(t, "frozen")
@@ -233,9 +248,22 @@ func TestBitbucketImportRules(t *testing.T) {
 			require.NotNil(t, rule)
 			assert.Equal(t, []int64{4}, rule.WhitelistUserIDs)
 			key := unittest.AssertExistsAndLoadBean(t, &asymkey_model.DeployKey{RepoID: svc.ID, Name: "ci"})
-			assert.True(t, rule.WhitelistDeployKeys)
+			other := unittest.AssertExistsAndLoadBean(t, &asymkey_model.DeployKey{RepoID: svc.ID, Name: "other"})
+			assert.False(t, rule.WhitelistDeployKeys, "never every deploy key")
 			assert.Equal(t, []int64{key.KeyID}, rule.WhitelistDeployKeyIDs, "the imported key, not the unknown one")
+			assert.True(t, rule.CanDeployKeyPush(key.KeyID))
+			assert.False(t, rule.CanDeployKeyPush(other.KeyID), "another write key of the repository may not push")
 			assert.Contains(t, item(t, report, "rule", "RUL/svc refs/heads/main").Reason, "key 99")
+
+			rk, err := git_model.GetProtectedBranchRuleByName(ctx, svc.ID, "rk")
+			require.NoError(t, err)
+			require.NotNil(t, rk)
+			reader := unittest.AssertExistsAndLoadBean(t, &asymkey_model.DeployKey{RepoID: svc.ID, Name: "reader"})
+			assert.Empty(t, rk.WhitelistDeployKeyIDs)
+			assert.False(t, rk.CanDeployKeyPush(reader.KeyID))
+			assert.False(t, rk.CanDeployKeyPush(key.KeyID))
+			assert.False(t, rk.CanUserPush(ctx, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})), "nobody pushes")
+			assert.Contains(t, item(t, report, "rule", "RUL/svc refs/heads/rk").Reason, "key 23")
 
 			lib, err := repo_model.GetRepositoryByPath(ctx, org.ID, group.Name, "lib")
 			require.NoError(t, err)
@@ -317,6 +345,23 @@ func TestBitbucketImportRules(t *testing.T) {
 					}
 				}
 			}
+		})
+
+		t.Run("writing a rule rechecks the open pull requests", func(t *testing.T) {
+			api, err := repo_model.GetRepositoryByPath(ctx, org.ID, group.Name, "api")
+			require.NoError(t, err)
+			rule, err := git_model.GetProtectedBranchRuleByName(ctx, api.ID, "master")
+			require.NoError(t, err)
+			require.NotNil(t, rule)
+			_, err = db.Exec(ctx, "DELETE FROM protected_branch WHERE id = ? AND repo_id = ?", rule.ID, api.ID)
+			require.NoError(t, err)
+			checker, cleanup := test.NewLogChecker(log.DEFAULT, log.TRACE)
+			defer cleanup()
+			checker.Filter("to the test pull requests queue")
+			again := run(t, opts)
+			assert.Equal(t, migrations.BitbucketCreated, item(t, again, "rule", "RUL/api refs/heads/master").Status)
+			found, _ := checker.Check(5 * time.Second)
+			assert.True(t, found[0], "the imported pull request of api was queued for a check")
 		})
 
 		t.Run("a rule or hook in another shape blocks the run", func(t *testing.T) {
