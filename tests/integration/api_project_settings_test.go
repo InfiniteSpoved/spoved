@@ -22,6 +22,7 @@ import (
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
+	webhook_module "forgejo.org/modules/webhook"
 	"forgejo.org/tests"
 
 	"github.com/stretchr/testify/assert"
@@ -153,6 +154,14 @@ func TestAPIProjectSettings(t *testing.T) {
 		assert.Equal(t, "blue", unittest.AssertExistsAndLoadBean(t, &actions_model.ActionVariable{OwnerID: 3, GroupID: 0, RepoID: 0, Name: "COLOR"}).Data)
 		do(t, "POST", payBase+"/actions/variables/COLOR", owner, api.CreateVariableOption{Value: "green"}, http.StatusConflict)
 
+		// writes on the organization never reach the project's row of the same name
+		paySecret := unittest.AssertExistsAndLoadBean(t, &secret_model.Secret{OwnerID: 3, GroupID: pay.ID, Name: "TOKEN"})
+		do(t, "PUT", orgBase+"/actions/secrets/TOKEN", owner, api.CreateOrUpdateSecretOption{Data: "org-value"}, http.StatusNoContent)
+		do(t, "PUT", orgBase+"/actions/variables/COLOR", owner, api.UpdateVariableOption{Value: "orange"}, http.StatusNoContent)
+		assert.Equal(t, paySecret.Data, unittest.AssertExistsAndLoadBean(t, &secret_model.Secret{ID: paySecret.ID}).Data)
+		assert.Equal(t, "red", unittest.AssertExistsAndLoadBean(t, &actions_model.ActionVariable{OwnerID: 3, GroupID: pay.ID, Name: "COLOR"}).Data)
+		assert.Equal(t, "orange", unittest.AssertExistsAndLoadBean(t, &actions_model.ActionVariable{OwnerID: 3, GroupID: 0, RepoID: 0, Name: "COLOR"}).Data)
+
 		do(t, "DELETE", payBase+"/actions/secrets/NONE", owner, nil, http.StatusNotFound)
 		do(t, "DELETE", payBase+"/actions/variables/NONE", owner, nil, http.StatusNotFound)
 		do(t, "GET", payBase+"/actions/variables/NONE", owner, nil, http.StatusNotFound)
@@ -212,6 +221,35 @@ func TestAPIProjectSettings(t *testing.T) {
 				assert.Equal(t, http.StatusOK, MakeRequest(t, NewRequest(t, "GET", u[1]).AddTokenAuth(admin), NoExpectedStatus).Code, "site admin %s", name)
 			}
 		}
+
+		// a token that can't be used on projects is refused before the project is looked up
+		for id, status := range map[int64]int{pay.ID: http.StatusForbidden, 999999: http.StatusForbidden} {
+			check(t, "public-only token", getUserToken(t, "user2", auth_model.AccessTokenScopeWriteOrganization, auth_model.AccessTokenScopePublicOnly), projectBase(id), status)
+			check(t, "repo-only token", createFineGrainedRepoAccessToken(t, "user2", writeScope, []int64{3}), projectBase(id), status)
+			check(t, "non-owner", getUserToken(t, "user4", writeScope...), projectBase(id), status)
+		}
+		rowsLeft(t)
+	})
+
+	t.Run("site admin writes", func(t *testing.T) {
+		rule := api.CreateOrgBranchProtectionOption{CreateBranchProtectionOption: api.CreateBranchProtectionOption{RuleName: "admin"}}
+		do(t, "POST", payBase+"/branch_protections", admin, rule, http.StatusCreated)
+		do(t, "PATCH", payBase+"/branch_protections/admin", admin, api.EditOrgBranchProtectionOption{EditBranchProtectionOption: api.EditBranchProtectionOption{EnablePush: new(true)}}, http.StatusOK)
+		do(t, "DELETE", payBase+"/branch_protections/admin", admin, nil, http.StatusNoContent)
+
+		var hook api.Hook
+		DecodeJSON(t, do(t, "POST", payBase+"/hooks", admin, api.CreateHookOption{Type: "forgejo", Config: api.CreateHookOptionConfig{"url": "http://admin.example.com", "content_type": "json"}}, http.StatusCreated), &hook)
+		assert.Equal(t, pay.ID, unittest.AssertExistsAndLoadBean(t, &webhook_model.Webhook{ID: hook.ID}).GroupID)
+		do(t, "PATCH", fmt.Sprintf("%s/hooks/%d", payBase, hook.ID), admin, api.EditHookOption{Events: []string{"push"}}, http.StatusOK)
+		do(t, "DELETE", fmt.Sprintf("%s/hooks/%d", payBase, hook.ID), admin, nil, http.StatusNoContent)
+
+		do(t, "PUT", payBase+"/actions/secrets/ADMIN", admin, api.CreateOrUpdateSecretOption{Data: "x"}, http.StatusCreated)
+		do(t, "DELETE", payBase+"/actions/secrets/ADMIN", admin, nil, http.StatusNoContent)
+		do(t, "POST", payBase+"/actions/variables/ADMIN", admin, api.CreateVariableOption{Value: "x"}, http.StatusNoContent)
+		do(t, "PUT", payBase+"/actions/variables/ADMIN", admin, api.UpdateVariableOption{Value: "y"}, http.StatusNoContent)
+		assert.Equal(t, "y", unittest.AssertExistsAndLoadBean(t, &actions_model.ActionVariable{OwnerID: 3, GroupID: pay.ID, Name: "ADMIN"}).Data)
+		do(t, "DELETE", payBase+"/actions/variables/ADMIN", admin, nil, http.StatusNoContent)
+		rowsLeft(t)
 	})
 
 	t.Run("an owner blocked by the two-factor requirement", func(t *testing.T) {
@@ -235,6 +273,47 @@ func TestAPIProjectSettings(t *testing.T) {
 		rowsLeft(t)
 	})
 
+	t.Run("a project whose ID is a repository's", func(t *testing.T) {
+		// give a new project the ID of an org3 repository that has its own rule, hook, secret and variable
+		var repo *repo_model.Repository
+		for _, id := range []int64{3, 5, 32} {
+			if !unittest.BeanExists(t, &repo_model.RepoGroup{ID: id}) {
+				repo = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: id, OwnerID: 3})
+				break
+			}
+		}
+		require.NotNil(t, repo)
+		collide := createProjectForKeys(t, 3, "collide")
+		_, err := db.Exec(ctx, "UPDATE repo_group SET id = ? WHERE id = ?", repo.ID, collide.ID)
+		require.NoError(t, err)
+		require.NoError(t, db.Insert(ctx, &git_model.ProtectedBranch{RepoID: repo.ID, RuleName: "repo-rule"}))
+		repoHook := &webhook_model.Webhook{RepoID: repo.ID, URL: "http://repo.example.com", ContentType: webhook_model.ContentTypeJSON, HookEvent: &webhook_module.HookEvent{PushOnly: true}, IsActive: true, Type: "forgejo"}
+		require.NoError(t, webhook_model.CreateWebhook(ctx, repoHook, ""))
+		repoSecret, err := secret_model.InsertEncryptedSecret(ctx, 0, 0, repo.ID, "REPO_TOKEN", "x")
+		require.NoError(t, err)
+		require.NoError(t, db.Insert(ctx, &actions_model.ActionVariable{RepoID: repo.ID, Name: "REPO_VAR", Data: "x"}))
+
+		base := projectBase(repo.ID)
+		for _, path := range []string{"/branch_protections", "/hooks", "/actions/secrets", "/actions/variables"} {
+			assert.JSONEq(t, "[]", do(t, "GET", base+path, owner, nil, http.StatusOK).Body.String(), path)
+		}
+		do(t, "GET", base+"/branch_protections/repo-rule", owner, nil, http.StatusNotFound)
+		do(t, "DELETE", base+"/branch_protections/repo-rule", owner, nil, http.StatusNotFound)
+		do(t, "GET", fmt.Sprintf("%s/hooks/%d", base, repoHook.ID), owner, nil, http.StatusNotFound)
+		do(t, "DELETE", fmt.Sprintf("%s/hooks/%d", base, repoHook.ID), owner, nil, http.StatusNotFound)
+		do(t, "DELETE", base+"/actions/secrets/REPO_TOKEN", owner, nil, http.StatusNotFound)
+		do(t, "GET", base+"/actions/variables/REPO_VAR", owner, nil, http.StatusNotFound)
+		do(t, "DELETE", base+"/actions/variables/REPO_VAR", owner, nil, http.StatusNotFound)
+
+		// a write lands on the project, never on the repository
+		do(t, "PUT", base+"/actions/secrets/REPO_TOKEN", owner, api.CreateOrUpdateSecretOption{Data: "y"}, http.StatusCreated)
+		unittest.AssertExistsAndLoadBean(t, &secret_model.Secret{OwnerID: 3, GroupID: repo.ID, RepoID: 0, Name: "REPO_TOKEN"})
+		assert.Equal(t, repoSecret.Data, unittest.AssertExistsAndLoadBean(t, &secret_model.Secret{ID: repoSecret.ID}).Data)
+		unittest.AssertExistsAndLoadBean(t, &git_model.ProtectedBranch{RepoID: repo.ID, RuleName: "repo-rule"})
+		unittest.AssertExistsAndLoadBean(t, &webhook_model.Webhook{ID: repoHook.ID})
+		unittest.AssertExistsAndLoadBean(t, &actions_model.ActionVariable{RepoID: repo.ID, Name: "REPO_VAR"})
+	})
+
 	t.Run("Actions hidden for the organization", func(t *testing.T) {
 		require.NoError(t, db.Insert(ctx, &repo_model.OrgUnit{OrgID: 3, Type: unit_model.TypeActions, Disabled: true}))
 		defer func() {
@@ -252,9 +331,9 @@ func TestAPIProjectSettings(t *testing.T) {
 
 	t.Run("webhooks disabled", func(t *testing.T) {
 		defer test.MockVariableValue(&setting.DisableWebhooks, true)()
-		orgCode := do(t, "GET", orgBase+"/hooks", owner, nil, NoExpectedStatus).Code
-		assert.NotEqual(t, http.StatusOK, orgCode)
-		assert.Equal(t, orgCode, do(t, "GET", payBase+"/hooks", owner, nil, NoExpectedStatus).Code)
+		do(t, "GET", orgBase+"/hooks", owner, nil, http.StatusForbidden)
+		do(t, "GET", payBase+"/hooks", owner, nil, http.StatusForbidden)
+		do(t, "POST", payBase+"/hooks", owner, api.CreateHookOption{Type: "forgejo", Config: api.CreateHookOptionConfig{"url": "http://off.example.com", "content_type": "json"}}, http.StatusForbidden)
 	})
 
 	t.Run("project delete removes the rows", func(t *testing.T) {

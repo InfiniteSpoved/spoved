@@ -16,6 +16,7 @@ import (
 // The branch protection rules, webhooks, Actions secrets and variables of a project. The routes sit behind
 // reqOrgOwnership; ownedProject refuses a token limited to public or specific repositories and finds the project
 // within the organization only, and every reader and writer below binds the project's ID.
+
 // ListProjectBranchProtections is the project form of the organization endpoint
 func ListProjectBranchProtections(ctx *context.APIContext) {
 	// swagger:operation GET /orgs/{org}/projects/{id}/branch_protections organization orgListProjectBranchProtections
