@@ -20,6 +20,7 @@ type BitbucketImportParams struct {
 	DryRun       bool
 	PullRequests bool
 	KeyExpiry    string
+	SkipUnmapped bool
 }
 
 // String never prints the token.

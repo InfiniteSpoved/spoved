@@ -13,11 +13,13 @@ import (
 	"forgejo.org/models"
 	asymkey_model "forgejo.org/models/asymkey"
 	"forgejo.org/models/db"
+	git_model "forgejo.org/models/git"
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
+	webhook_model "forgejo.org/models/webhook"
 	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
@@ -37,15 +39,23 @@ type bitbucketPermission struct {
 	team      *organization.Team
 	content   string // the public key
 	expires   timeutil.TimeStamp
+	keyID     int64 // the public key ID of a repository key once it exists
+
+	rule                                *git_model.ProtectedBranch
+	ruleOpts                            git_model.WhitelistOptions
+	pushKeys, deleteKeys, forcePushKeys []*BitbucketImportItem
+	hook                                *webhook_model.Webhook
+}
+
+type bitbucketAccount struct {
+	Name         string `json:"name"`
+	EmailAddress string `json:"emailAddress"`
+	Active       bool   `json:"active"`
 }
 
 type bitbucketUserGrant struct {
-	User struct {
-		Name         string `json:"name"`
-		EmailAddress string `json:"emailAddress"`
-		Active       bool   `json:"active"`
-	} `json:"user"`
-	Permission string `json:"permission"`
+	User       bitbucketAccount `json:"user"`
+	Permission string           `json:"permission"`
 }
 
 type bitbucketGroupGrant struct {
@@ -99,11 +109,11 @@ func (e bitbucketUnmatched) Error() string { return string(e) }
 // matchBitbucketUser finds the spoved user of a Bitbucket user: the login is the Bitbucket name, and the Bitbucket
 // email is an activated email of that same user, who is an active individual allowed to sign in. Otherwise it returns
 // a bitbucketUnmatched reason code; the email is never reported.
-func matchBitbucketUser(ctx context.Context, g bitbucketUserGrant) (*user_model.User, error) {
-	if !g.User.Active {
+func matchBitbucketUser(ctx context.Context, bu bitbucketAccount) (*user_model.User, error) {
+	if !bu.Active {
 		return nil, bitbucketUnmatched("bb_inactive")
 	}
-	u, err := user_model.GetUserByName(ctx, g.User.Name)
+	u, err := user_model.GetUserByName(ctx, bu.Name)
 	if user_model.IsErrUserNotExist(err) || (err == nil && !u.IsIndividual()) {
 		return nil, bitbucketUnmatched("no_user")
 	} else if err != nil {
@@ -112,10 +122,10 @@ func matchBitbucketUser(ctx context.Context, g bitbucketUserGrant) (*user_model.
 	if !u.IsActive || u.ProhibitLogin {
 		return nil, bitbucketUnmatched("inactive")
 	}
-	if g.User.EmailAddress == "" {
+	if bu.EmailAddress == "" {
 		return nil, bitbucketUnmatched("email_mismatch")
 	}
-	email, err := user_model.GetEmailAddressByEmail(ctx, g.User.EmailAddress)
+	email, err := user_model.GetEmailAddressByEmail(ctx, bu.EmailAddress)
 	if user_model.IsErrEmailAddressNotExist(err) || (err == nil && email.UID != u.ID) {
 		return nil, bitbucketUnmatched("email_mismatch")
 	} else if err != nil {
@@ -171,6 +181,11 @@ type bitbucketPlanner struct {
 	project   *BitbucketImportItem
 	keyExpiry timeutil.TimeStamp
 	teams     map[string]*BitbucketImportItem // the teams of the whole run, by lower-case name
+
+	skipUnmapped bool
+	keys         map[*BitbucketImportItem]map[int64]*BitbucketImportItem // the keys of a project or repository by Bitbucket key ID
+	members      map[int64]bool                                          // users the plan makes org members
+	writers      map[*BitbucketImportItem]map[int64]bool                 // users the plan lets write a project's or repository's code
 }
 
 func (p *bitbucketPlanner) add(item *BitbucketImportItem, status, reason string) {
@@ -188,8 +203,11 @@ func (p *bitbucketPlanner) unmapped(owner *BitbucketImportItem, what string) {
 
 // planBitbucketPermissions plans, without writing, the teams, members, user group links, collaborators and deploy
 // keys of a project and its repositories.
-func planBitbucketPermissions(ctx context.Context, d *BitbucketDataCenterDownloader, org *organization.Organization, report *BitbucketImportReport, project *BitbucketImportItem, keyExpiry timeutil.TimeStamp, teams map[string]*BitbucketImportItem) error {
-	p := &bitbucketPlanner{ctx: ctx, d: d, org: org, report: report, project: project, keyExpiry: keyExpiry, teams: teams}
+func planBitbucketPermissions(ctx context.Context, d *BitbucketDataCenterDownloader, org *organization.Organization, report *BitbucketImportReport, project *BitbucketImportItem, keyExpiry timeutil.TimeStamp, teams map[string]*BitbucketImportItem, skipUnmapped bool) error {
+	p := &bitbucketPlanner{
+		ctx: ctx, d: d, org: org, report: report, project: project, keyExpiry: keyExpiry, teams: teams, skipUnmapped: skipUnmapped, keys: map[*BitbucketImportItem]map[int64]*BitbucketImportItem{},
+		members: map[int64]bool{}, writers: map[*BitbucketImportItem]map[int64]bool{},
+	}
 	if err := p.plan(project, "api/1.0/projects/"+project.key); err != nil {
 		return err
 	}
@@ -212,7 +230,18 @@ func planBitbucketPermissions(ctx context.Context, d *BitbucketDataCenterDownloa
 			return err
 		}
 	}
-	return p.planKeys(project, "keys/1.0/projects/"+project.key+"/ssh")
+	if err := p.planKeys(project, "keys/1.0/projects/"+project.key+"/ssh"); err != nil {
+		return err
+	}
+	return p.planRulesAndHooks(project, "projects/"+project.key)
+}
+
+// planRulesAndHooks plans the branch rules and the webhooks of a project or repository, after its keys.
+func (p *bitbucketPlanner) planRulesAndHooks(owner *BitbucketImportItem, path string) error {
+	if err := p.planRules(owner, "branch-permissions/2.0/"+path+"/restrictions"); err != nil {
+		return err
+	}
+	return p.planHooks(owner, "api/1.0/"+path+"/webhooks")
 }
 
 // plan plans the user and group grants of a project or repository, and its repository keys.
@@ -268,7 +297,10 @@ func (p *bitbucketPlanner) plan(owner *BitbucketImportItem, endpoint string) err
 		p.add(item, status, note)
 	}
 	if owner.Kind == "repository" {
-		return p.planKeys(owner, "keys/1.0/projects/"+p.project.key+"/repos/"+owner.slug+"/ssh")
+		if err := p.planKeys(owner, "keys/1.0/projects/"+p.project.key+"/repos/"+owner.slug+"/ssh"); err != nil {
+			return err
+		}
+		return p.planRulesAndHooks(owner, "projects/"+p.project.key+"/repos/"+owner.slug)
 	}
 	return nil
 }
@@ -336,7 +368,7 @@ func (p *bitbucketPlanner) planUser(owner *BitbucketImportItem, g bitbucketUserG
 		}
 		item.Kind, item.Target, item.parent = "member", team.Name, team
 	}
-	u, err := matchBitbucketUser(p.ctx, g)
+	u, err := matchBitbucketUser(p.ctx, g.User)
 	if unmatched, ok := errors.AsType[bitbucketUnmatched](err); ok {
 		p.add(item, BitbucketSkipped, string(unmatched))
 		return nil
@@ -370,6 +402,7 @@ func (p *bitbucketPlanner) planUser(owner *BitbucketImportItem, g bitbucketUserG
 			}
 		}
 		p.add(item, status, note)
+		p.grant(p.project, u.ID, mode)
 		return nil
 	}
 
@@ -398,7 +431,22 @@ func (p *bitbucketPlanner) planUser(owner *BitbucketImportItem, g bitbucketUserG
 		}
 	}
 	p.add(item, status, note)
+	p.grant(owner, u.ID, mode)
 	return nil
+}
+
+// grant records what the plan gives a user, so that a rule planned in the same run can tell who will be an org member
+// (a project team) and who will write a repository (a write team of its project, or a write collaboration).
+func (p *bitbucketPlanner) grant(owner *BitbucketImportItem, uid int64, mode perm.AccessMode) {
+	if owner == p.project {
+		p.members[uid] = true
+	}
+	if mode >= perm.AccessModeWrite {
+		if p.writers[owner] == nil {
+			p.writers[owner] = map[int64]bool{}
+		}
+		p.writers[owner][uid] = true
+	}
 }
 
 // planKeys plans the access keys of a project or repository as deploy keys, each with an expiry.
@@ -465,11 +513,17 @@ func (p *bitbucketPlanner) planKeys(owner *BitbucketImportItem, endpoint string)
 		if owner.group != nil && owner == p.project {
 			exists, err = db.GetEngine(p.ctx).Exist(&asymkey_model.OrgDeployKey{OrgID: p.org.ID, GroupID: owner.group.ID, Fingerprint: fingerprint})
 		} else if owner.repo != nil {
-			exists, err = db.GetEngine(p.ctx).Exist(&asymkey_model.DeployKey{RepoID: owner.repo.ID, Fingerprint: fingerprint})
+			key := &asymkey_model.DeployKey{RepoID: owner.repo.ID, Fingerprint: fingerprint}
+			exists, err = db.GetEngine(p.ctx).Get(key)
+			item.keyID = key.KeyID
 		}
 		if err != nil {
 			return err
 		}
+		if p.keys[owner] == nil {
+			p.keys[owner] = map[int64]*BitbucketImportItem{}
+		}
+		p.keys[owner][k.Key.ID] = item
 		note := ""
 		if owner == p.project {
 			note = "covers every repository of the project, also ones moved in later"
@@ -498,6 +552,17 @@ func addBitbucketCollaborator(ctx context.Context, repo *repo_model.Repository, 
 	return existed, err
 }
 
+// repoDeployKeyID returns the public key ID of the repository's deploy key with that content.
+func repoDeployKeyID(ctx context.Context, repoID int64, content string) (int64, error) {
+	fingerprint, err := asymkey_model.CalcFingerprint(content)
+	if err != nil {
+		return 0, err
+	}
+	key := &asymkey_model.DeployKey{RepoID: repoID, Fingerprint: fingerprint}
+	_, err = db.GetEngine(ctx).Get(key)
+	return key.KeyID, err
+}
+
 // applyBitbucketPermissions applies the planned permissions and keys of a project once its repositories were
 // imported. Each item is applied on its own: one that fails is reported and the others go on.
 func applyBitbucketPermissions(ctx context.Context, doer *user_model.User, org *organization.Organization, project *BitbucketImportItem, failure func(*BitbucketImportItem, error)) {
@@ -512,7 +577,7 @@ func applyBitbucketPermissions(ctx context.Context, doer *user_model.User, org *
 		parent := item.parent
 		var owner *BitbucketImportItem // the project or repository the grant needs
 		switch item.Kind {
-		case "team", "collaborator", "key":
+		case "team", "collaborator", "key", "rule", "hook":
 			owner = parent
 		}
 		if owner != nil && owner.group == nil && owner.repo == nil {
@@ -567,11 +632,17 @@ func applyBitbucketPermissions(ctx context.Context, doer *user_model.User, org *
 			if owner.Kind == "project" {
 				_, err = asymkey_model.AddOrgDeployKey(ctx, org.ID, owner.group.ID, item.Name, item.content, readOnly, false, nil, item.expires)
 			} else {
-				_, err = asymkey_model.AddDeployKey(ctx, owner.repo.ID, item.Name, item.content, readOnly, item.expires)
+				var key *asymkey_model.DeployKey
+				if key, err = asymkey_model.AddDeployKey(ctx, owner.repo.ID, item.Name, item.content, readOnly, item.expires); err == nil {
+					item.keyID = key.KeyID
+				}
 			}
 			switch {
 			case asymkey_model.IsErrDeployKeyAlreadyExist(err):
 				status, err = BitbucketReused, nil
+				if owner.Kind == "repository" {
+					item.keyID, err = repoDeployKeyID(ctx, owner.repo.ID, item.content)
+				}
 			case asymkey_model.IsErrKeyAlreadyExist(err):
 				status, err = BitbucketSkipped, nil
 				item.Reason = "used as a user key"
@@ -579,6 +650,10 @@ func applyBitbucketPermissions(ctx context.Context, doer *user_model.User, org *
 				status, err = BitbucketSkipped, nil
 				item.Reason = "the name is used"
 			}
+		case "rule":
+			err = applyBitbucketRule(ctx, org, owner, item)
+		case "hook":
+			err = applyBitbucketHook(ctx, org, owner, item)
 		}
 		if err != nil {
 			failure(item, err)

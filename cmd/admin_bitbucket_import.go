@@ -37,6 +37,7 @@ func subcmdBitbucketImport() *cli.Command {
 			&cli.BoolFlag{Name: "dry-run", Usage: "List what would be imported and change nothing"},
 			&cli.BoolFlag{Name: "no-pull-requests", Usage: "Don't import pull requests, their comments and reviews"},
 			&cli.StringFlag{Name: "csv", Usage: "Write the old and new URLs of the repositories to this CSV file"},
+			&cli.BoolFlag{Name: "skip-unmapped", Usage: "Import the rest when a branch permission can't be mapped (branch model, tags, other refs) instead of stopping"},
 			&cli.StringFlag{Name: "key-expiry", Usage: "Latest expiry (YYYY-MM-DD) of the imported deploy keys; needed when neither Bitbucket nor the policy sets one"},
 			&cli.StringFlag{Name: "username", Usage: "Account of a user access token; empty for a project or repository token"},
 			&cli.StringFlag{Name: "token-file", Usage: "File holding the Bitbucket access token"},
@@ -89,6 +90,7 @@ func bitbucketImportParams(c *cli.Command, token string) private.BitbucketImport
 		DryRun:       c.Bool("dry-run"),
 		PullRequests: !c.Bool("no-pull-requests"),
 		KeyExpiry:    c.String("key-expiry"),
+		SkipUnmapped: c.Bool("skip-unmapped"),
 	}
 }
 

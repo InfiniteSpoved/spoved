@@ -33,8 +33,8 @@ func TestBitbucketImportToken(t *testing.T) {
 		params = bitbucketImportParams(c, "tok")
 		return nil
 	}
-	require.NoError(t, cmd.Run(t.Context(), []string{"bitbucket-import", "--server", "https://bb.example.com", "--org", "org3", "--doer", "user2", "--key-expiry", "2030-01-02", "--project", "PAY"}))
-	assert.Equal(t, private.BitbucketImportParams{Doer: "user2", Org: "org3", Server: "https://bb.example.com", Token: "tok", Projects: []string{"PAY"}, PullRequests: true, KeyExpiry: "2030-01-02"}, params)
+	require.NoError(t, cmd.Run(t.Context(), []string{"bitbucket-import", "--server", "https://bb.example.com", "--org", "org3", "--doer", "user2", "--key-expiry", "2030-01-02", "--project", "PAY", "--skip-unmapped"}))
+	assert.Equal(t, private.BitbucketImportParams{Doer: "user2", Org: "org3", Server: "https://bb.example.com", Token: "tok", Projects: []string{"PAY"}, PullRequests: true, KeyExpiry: "2030-01-02", SkipUnmapped: true}, params)
 
 	t.Setenv("BITBUCKET_TOKEN", "")
 	_, err := bitbucketToken("")
