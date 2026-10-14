@@ -408,8 +408,10 @@ ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION = read:repository
 }
 
 func TestLoadCredentialExpiryPolicyDefault(t *testing.T) {
-	ssh, deploy, token := SSHKeyExpiry, DeployKeyExpiry, AccessTokenExpiry
-	t.Cleanup(func() { SSHKeyExpiry, DeployKeyExpiry, AccessTokenExpiry = ssh, deploy, token })
+	ssh, deploy, token, oauth2App := SSHKeyExpiry, DeployKeyExpiry, AccessTokenExpiry, OAuth2AppSecretExpiry
+	t.Cleanup(func() {
+		SSHKeyExpiry, DeployKeyExpiry, AccessTokenExpiry, OAuth2AppSecretExpiry = ssh, deploy, token, oauth2App
+	})
 
 	assert.Equal(t, CredentialExpiryPolicy{Required: true, MaxLifetimeDays: 365}, DefaultCredentialExpiry)
 
@@ -420,6 +422,7 @@ func TestLoadCredentialExpiryPolicyDefault(t *testing.T) {
 		assert.Equal(t, DefaultCredentialExpiry, SSHKeyExpiry)
 		assert.Equal(t, DefaultCredentialExpiry, DeployKeyExpiry)
 		assert.Equal(t, DefaultCredentialExpiry, AccessTokenExpiry)
+		assert.Equal(t, DefaultCredentialExpiry, OAuth2AppSecretExpiry)
 	}
 
 	cfg, err := NewConfigProviderFromData("[security]\nSSH_KEY_EXPIRY_REQUIRED = false\nSSH_KEY_MAX_LIFETIME_DAYS = 0\nDEPLOY_KEY_MAX_LIFETIME_DAYS = 90")

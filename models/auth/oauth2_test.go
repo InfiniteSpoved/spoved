@@ -10,6 +10,7 @@ import (
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/timeutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,7 +19,7 @@ import (
 func TestOAuth2Application_GenerateClientSecret(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	app := unittest.AssertExistsAndLoadBean(t, &auth_model.OAuth2Application{ID: 1})
-	secret, err := app.GenerateClientSecret(db.DefaultContext)
+	secret, err := app.GenerateClientSecret(db.DefaultContext, 0)
 	require.NoError(t, err)
 	assert.NotEmpty(t, secret)
 	unittest.AssertExistsAndLoadBean(t, &auth_model.OAuth2Application{ID: 1, ClientSecret: app.ClientSecret})
@@ -28,7 +29,7 @@ func BenchmarkOAuth2Application_GenerateClientSecret(b *testing.B) {
 	require.NoError(b, unittest.PrepareTestDatabase())
 	app := unittest.AssertExistsAndLoadBean(b, &auth_model.OAuth2Application{ID: 1})
 	for i := 0; i < b.N; i++ {
-		_, _ = app.GenerateClientSecret(db.DefaultContext)
+		_, _ = app.GenerateClientSecret(db.DefaultContext, 0)
 	}
 }
 
@@ -85,10 +86,24 @@ func TestOAuth2Application_ContainsRedirect_Normalization(t *testing.T) {
 func TestOAuth2Application_ValidateClientSecret(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	app := unittest.AssertExistsAndLoadBean(t, &auth_model.OAuth2Application{ID: 1})
-	secret, err := app.GenerateClientSecret(db.DefaultContext)
+	secret, err := app.GenerateClientSecret(db.DefaultContext, 0)
 	require.NoError(t, err)
 	assert.True(t, app.ValidateClientSecret([]byte(secret)))
 	assert.False(t, app.ValidateClientSecret([]byte("fewijfowejgfiowjeoifew")))
+	assert.False(t, app.MatchesExpiredClientSecret([]byte(secret)), "0 = never")
+
+	secret, err = app.GenerateClientSecret(db.DefaultContext, timeutil.TimeStampNow().Add(3600))
+	require.NoError(t, err)
+	assert.True(t, app.ValidateClientSecret([]byte(secret)))
+	assert.False(t, app.MatchesExpiredClientSecret([]byte(secret)))
+
+	secret, err = app.GenerateClientSecret(db.DefaultContext, timeutil.TimeStampNow())
+	require.NoError(t, err)
+	stored := unittest.AssertExistsAndLoadBean(t, &auth_model.OAuth2Application{ID: 1})
+	assert.Equal(t, app.ClientSecretExpiresUnix, stored.ClientSecretExpiresUnix)
+	assert.False(t, stored.ValidateClientSecret([]byte(secret)), "expired")
+	assert.True(t, stored.MatchesExpiredClientSecret([]byte(secret)))
+	assert.False(t, stored.MatchesExpiredClientSecret([]byte("fewijfowejgfiowjeoifew")), "only a matching secret is reported as expired")
 }
 
 func TestGetOAuth2ApplicationByClientID(t *testing.T) {

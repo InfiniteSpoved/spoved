@@ -220,7 +220,7 @@ func TestCredentialExpiryDefaultCLI(t *testing.T) {
 	// The CLI runs in another process: give it the test config without the expiry keys, so it gets the default.
 	conf, err := os.ReadFile(setting.CustomConf)
 	require.NoError(t, err)
-	conf = regexp.MustCompile(`(?m)^(SSH_KEY|DEPLOY_KEY|ACCESS_TOKEN)_(EXPIRY_REQUIRED|MAX_LIFETIME_DAYS)\s*=.*$`).ReplaceAll(conf, nil)
+	conf = regexp.MustCompile(`(?m)^(SSH_KEY|DEPLOY_KEY|ACCESS_TOKEN|OAUTH2_APP_SECRET)_(EXPIRY_REQUIRED|MAX_LIFETIME_DAYS)\s*=.*$`).ReplaceAll(conf, nil)
 	require.NotContains(t, string(conf), "_MAX_LIFETIME_DAYS")
 	confPath := filepath.Join(t.TempDir(), "app.ini")
 	require.NoError(t, os.WriteFile(confPath, conf, 0o600))

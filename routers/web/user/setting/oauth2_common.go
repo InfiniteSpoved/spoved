@@ -5,10 +5,12 @@ package setting
 
 import (
 	"fmt"
+	"html"
 	"net/http"
 
 	"forgejo.org/models/auth"
 	"forgejo.org/modules/base"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	shared_user "forgejo.org/routers/web/shared/user"
@@ -24,7 +26,8 @@ type OAuth2CommonHandlers struct {
 	TplAppEdit         base.TplName // the template for the application edit page
 }
 
-// SetCanCreateOAuth2App tells the template whether to offer the create form; the POST handlers decide again.
+// SetCanCreateOAuth2App tells the template whether to offer the create and regenerate forms, and sets their secret
+// expiry input; the POST handlers decide again.
 func SetCanCreateOAuth2App(ctx *context.Context, ownerID int64) bool {
 	ok, err := oauth2app.MayManage(ctx, ctx.Doer, ownerID)
 	if err != nil {
@@ -32,6 +35,7 @@ func SetCanCreateOAuth2App(ctx *context.Context, ownerID int64) bool {
 		return false
 	}
 	ctx.Data["CanCreateOAuth2App"] = ok
+	shared_user.SetExpiryFormData(ctx.Base, setting.OAuth2AppSecretExpiry)
 	return true
 }
 
@@ -77,6 +81,12 @@ func (oa *OAuth2CommonHandlers) AddApp(ctx *context.Context) {
 		ctx.Redirect(oa.BasePathList)
 		return
 	}
+	expires, expiryErr := shared_user.ParseExpiryForm(ctx.Base, setting.OAuth2AppSecretExpiry, form.ExpiresAt)
+	if has, msg := expiryErr.Get(); has {
+		ctx.Flash.Error(html.EscapeString(msg))
+		ctx.Redirect(oa.BasePathList)
+		return
+	}
 
 	app, err := auth.CreateOAuth2Application(ctx, auth.CreateOAuth2ApplicationOptions{
 		Name:               form.Name,
@@ -92,7 +102,7 @@ func (oa *OAuth2CommonHandlers) AddApp(ctx *context.Context) {
 	// render the edit page with secret
 	ctx.Flash.Success(ctx.Tr("settings.create_oauth2_application_success"), true)
 	ctx.Data["App"] = app
-	ctx.Data["ClientSecret"], err = app.GenerateClientSecret(ctx)
+	ctx.Data["ClientSecret"], err = app.GenerateClientSecret(ctx, expires)
 	if err != nil {
 		ctx.ServerError("GenerateClientSecret", err)
 		return
@@ -180,8 +190,14 @@ func (oa *OAuth2CommonHandlers) RegenerateSecret(ctx *context.Context) {
 	if !mayManage(ctx, app.UID) {
 		return
 	}
+	expires, expiryErr := shared_user.ParseExpiryForm(ctx.Base, setting.OAuth2AppSecretExpiry, ctx.FormString("expires_at"))
+	if has, msg := expiryErr.Get(); has {
+		ctx.Flash.Error(html.EscapeString(msg))
+		ctx.Redirect(fmt.Sprintf("%s/%d", oa.BasePathEditPrefix, app.ID))
+		return
+	}
 	ctx.Data["App"] = app
-	ctx.Data["ClientSecret"], err = app.GenerateClientSecret(ctx)
+	ctx.Data["ClientSecret"], err = app.GenerateClientSecret(ctx, expires)
 	if err != nil {
 		ctx.ServerError("GenerateClientSecret", err)
 		return

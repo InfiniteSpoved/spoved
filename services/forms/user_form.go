@@ -395,6 +395,7 @@ type EditOAuth2ApplicationForm struct {
 	Name               string `binding:"Required;MaxSize(255)" form:"application_name"`
 	RedirectURIs       string `binding:"Required;ValidUrlList" form:"redirect_uris"`
 	ConfidentialClient bool   `form:"confidential_client"`
+	ExpiresAt          string `form:"expires_at"`
 }
 
 // Validate validates the fields

@@ -9,21 +9,19 @@
 		<label for="client-id">{{ctx.Locale.Tr "settings.oauth2_client_id"}}</label>
 		<input id="client-id" readonly value="{{.App.ClientID}}">
 	</div>
-	{{if .ClientSecret}}
-		<div class="field">
-			<label for="client-secret">{{ctx.Locale.Tr "settings.oauth2_client_secret"}}</label>
+	<div class="field">
+		<label for="client-secret">{{ctx.Locale.Tr "settings.oauth2_client_secret"}}{{template "shared/expiry_label" (dict "ExpiresUnix" .App.ClientSecretExpiresUnix "IsExpired" .App.ClientSecretExpired)}}</label>
+		{{if .ClientSecret}}
 			<input id="client-secret" type="text" readonly value="{{.ClientSecret}}">
-		</div>
-	{{else}}
-		<div class="field">
-			<label for="client-secret">{{ctx.Locale.Tr "settings.oauth2_client_secret"}}</label>
+		{{else}}
 			<input id="client-secret" type="password" readonly value="averysecuresecret">
-		</div>
-	{{end}}
+		{{end}}
+	</div>
 	{{if .CanCreateOAuth2App}}
 	<div class="item">
 		<!-- TODO add regenerate secret functionality */ -->
 		<form class="ui form ignore-dirty" action="{{.FormActionPath}}/regenerate_secret" method="post">
+			{{template "shared/expiry_input" .}}
 			{{ctx.Locale.Tr "settings.oauth2_regenerate_secret_hint"}}
 			<button class="ui mini button tw-ml-2" type="submit">{{ctx.Locale.Tr "settings.oauth2_regenerate_secret"}}</button>
 		</form>

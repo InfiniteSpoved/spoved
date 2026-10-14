@@ -43,9 +43,10 @@ var (
 	SuccessfulTokensCacheSize          int
 	DisableQueryAuthToken              bool
 
-	SSHKeyExpiry      = DefaultCredentialExpiry
-	DeployKeyExpiry   = DefaultCredentialExpiry
-	AccessTokenExpiry = DefaultCredentialExpiry
+	SSHKeyExpiry          = DefaultCredentialExpiry
+	DeployKeyExpiry       = DefaultCredentialExpiry
+	AccessTokenExpiry     = DefaultCredentialExpiry
+	OAuth2AppSecretExpiry = DefaultCredentialExpiry
 
 	AccessTokenScopes AccessTokenScopePolicy
 )
@@ -581,6 +582,7 @@ func loadSecurityFrom(rootCfg ConfigProvider) {
 	SSHKeyExpiry = loadCredentialExpiryPolicy(sec, "SSH_KEY")
 	DeployKeyExpiry = loadCredentialExpiryPolicy(sec, "DEPLOY_KEY")
 	AccessTokenExpiry = loadCredentialExpiryPolicy(sec, "ACCESS_TOKEN")
+	OAuth2AppSecretExpiry = loadCredentialExpiryPolicy(sec, "OAUTH2_APP_SECRET")
 	AccessTokenScopes = loadAccessTokenScopePolicy(sec)
 
 	cfgdata := sec.Key("PASSWORD_COMPLEXITY").Strings(",")

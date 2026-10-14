@@ -47,6 +47,8 @@ type CreateOAuth2ApplicationOptions struct {
 	Name               string   `json:"name" binding:"Required"`
 	ConfidentialClient bool     `json:"confidential_client"`
 	RedirectURIs       []string `json:"redirect_uris" binding:"Required"`
+	// Expiry of the new client secret; required unless the instance's policy allows no expiry
+	ClientSecretExpiresAt *time.Time `json:"client_secret_expires_at"`
 }
 
 // OAuth2Application represents an OAuth2 application
@@ -59,6 +61,8 @@ type OAuth2Application struct {
 	ConfidentialClient bool      `json:"confidential_client"`
 	RedirectURIs       []string  `json:"redirect_uris"`
 	Created            time.Time `json:"created"`
+	// absent when the client secret never expires
+	ClientSecretExpiresAt *time.Time `json:"client_secret_expires_at,omitempty"`
 }
 
 // OAuth2ApplicationList represents a list of OAuth2 applications.
