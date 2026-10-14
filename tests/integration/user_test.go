@@ -267,7 +267,7 @@ func TestAccessTokenRegenerate(t *testing.T) {
 
 	assert.Equal(t, "TestAccessToken", oldTokenName)
 
-	req := NewRequestWithValues(t, "POST", "/user/settings/applications/tokens/regenerate", map[string]string{
+	req := NewRequestWithValues(t, "POST", "/user/settings/keys/tokens/regenerate", map[string]string{
 		"id": strconv.Itoa(oldTokenID),
 	})
 	session.MakeRequest(t, req, http.StatusOK)
@@ -279,7 +279,7 @@ func TestAccessTokenRegenerate(t *testing.T) {
 	assert.Equal(t, oldTokenID, newTokenID)
 	assert.Equal(t, "TestAccessToken", newTokenName)
 
-	req = NewRequestWithValues(t, "POST", "/user/settings/applications/tokens/delete", map[string]string{
+	req = NewRequestWithValues(t, "POST", "/user/settings/keys/tokens/delete", map[string]string{
 		"id": strconv.Itoa(newTokenID),
 	})
 	session.MakeRequest(t, req, http.StatusOK)
@@ -302,7 +302,7 @@ func TestAccessTokenResourceRepos(t *testing.T) {
 
 	// Before creating a repo-specific access token, we shouldn't have the "Repository access:" list in the personal
 	// access token page:
-	req := NewRequest(t, "GET", "/user/settings/applications")
+	req := NewRequest(t, "GET", "/user/settings/keys")
 	resp := session.MakeRequest(t, req, http.StatusOK)
 	htmlDoc := NewHTMLParser(t, resp.Body)
 	htmlDoc.AssertSelection(t, htmlDoc.FindByText(".user-setting-content p", repoAccess), false)
@@ -316,7 +316,7 @@ func TestAccessTokenResourceRepos(t *testing.T) {
 	)
 
 	// Now we have "Repository access:"...
-	req = NewRequest(t, "GET", "/user/settings/applications")
+	req = NewRequest(t, "GET", "/user/settings/keys")
 	resp = session.MakeRequest(t, req, http.StatusOK)
 	htmlDoc = NewHTMLParser(t, resp.Body)
 	htmlDoc.AssertSelection(t, htmlDoc.FindByText(".user-setting-content p", repoAccess), true)
@@ -325,7 +325,7 @@ func TestAccessTokenResourceRepos(t *testing.T) {
 }
 
 func findLatestTokenID(t *testing.T, session *TestSession) (string, int) {
-	req := NewRequest(t, "GET", "/user/settings/applications")
+	req := NewRequest(t, "GET", "/user/settings/keys")
 	resp := session.MakeRequest(t, req, http.StatusOK)
 	htmlDoc := NewHTMLParser(t, resp.Body)
 	latestTokenName := ""

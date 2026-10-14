@@ -800,15 +800,6 @@ func registerRoutes(m *web.Route) {
 				m.Post("/{id}/revoke/{grantId}", user_setting.RevokeOAuth2Grant)
 			}, oauth2Enabled)
 
-			// access token
-			m.Group("/tokens", func() {
-				m.Combo("/new").
-					Get(web.Bind(forms.NewAccessTokenGetForm{}), user_setting.AccessTokenCreate).
-					Post(web.Bind(forms.NewAccessTokenPostForm{}), user_setting.AccessTokenCreatePost)
-				m.Post("/delete", user_setting.DeleteAccessToken)
-				m.Post("/regenerate", user_setting.RegenerateAccessToken)
-			})
-
 			m.Get("", user_setting.Applications)
 		})
 
@@ -828,6 +819,13 @@ func registerRoutes(m *web.Route) {
 		m.Combo("/keys").Get(user_setting.Keys).
 			Post(web.Bind(forms.AddKeyForm{}), user_setting.KeysPost)
 		m.Post("/keys/delete", user_setting.DeleteKey)
+		m.Group("/keys/tokens", func() {
+			m.Combo("/new").
+				Get(web.Bind(forms.NewAccessTokenGetForm{}), user_setting.AccessTokenCreate).
+				Post(web.Bind(forms.NewAccessTokenPostForm{}), user_setting.AccessTokenCreatePost)
+			m.Post("/delete", user_setting.DeleteAccessToken)
+			m.Post("/regenerate", user_setting.RegenerateAccessToken)
+		})
 		m.Group("/packages", func() {
 			m.Get("", user_setting.Packages)
 			m.Group("/rules", func() {

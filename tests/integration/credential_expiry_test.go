@@ -28,6 +28,7 @@ import (
 	"forgejo.org/tests"
 
 	"github.com/42wim/httpsig"
+	"github.com/PuerkitoBio/goquery"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -282,7 +283,7 @@ func TestCredentialExpiryWeb(t *testing.T) {
 		})
 		session.MakeRequest(t, req, http.StatusSeeOther)
 		key := unittest.AssertExistsAndLoadBean(t, &asymkey_model.PublicKey{OwnerID: 2, Name: "web-expiring", ExpiresUnix: expires})
-		assertExpiryLabel(t, session, "/user/settings/keys", &asymkey_model.PublicKey{}, key.ID)
+		assertExpiryLabel(t, session, "/user/settings/keys", &asymkey_model.PublicKey{}, key.ID, "")
 
 		defer test.MockVariableValue(&setting.SSHKeyExpiry, setting.CredentialExpiryPolicy{Required: true})()
 		content, _ = newTestSSHKey(t)
@@ -301,7 +302,7 @@ func TestCredentialExpiryWeb(t *testing.T) {
 		})
 		session.MakeRequest(t, req, http.StatusSeeOther)
 		key := unittest.AssertExistsAndLoadBean(t, &asymkey_model.DeployKey{RepoID: 1, Name: "web-deploy", ExpiresUnix: expires})
-		assertExpiryLabel(t, session, "/user2/repo1/settings/keys", &asymkey_model.DeployKey{}, key.ID)
+		assertExpiryLabel(t, session, "/user2/repo1/settings/keys", &asymkey_model.DeployKey{}, key.ID, "")
 
 		defer test.MockVariableValue(&setting.DeployKeyExpiry, setting.CredentialExpiryPolicy{MaxLifetimeDays: 5})()
 		content, _ = newTestSSHKey(t)
@@ -313,14 +314,14 @@ func TestCredentialExpiryWeb(t *testing.T) {
 	})
 
 	t.Run("access token", func(t *testing.T) {
-		req := NewRequestWithValues(t, "POST", "/user/settings/applications/tokens/new", map[string]string{
-			"name": "web-expiring", "resource": "all", "scope": "read:user", "expires_at": date,
+		req := NewRequestWithValues(t, "POST", "/user/settings/keys/tokens/new", map[string]string{
+			"name": "web-token-expiring", "resource": "all", "scope": "read:user", "expires_at": date,
 		})
 		session.MakeRequest(t, req, http.StatusSeeOther)
-		token := unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{UID: 2, Name: "web-expiring", ExpiresUnix: expires})
-		assertExpiryLabel(t, session, "/user/settings/applications", &auth_model.AccessToken{}, token.ID)
+		token := unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{UID: 2, Name: "web-token-expiring", ExpiresUnix: expires})
+		assertExpiryLabel(t, session, "/user/settings/keys", &auth_model.AccessToken{}, token.ID, "web-token-expiring")
 
-		req = NewRequestWithValues(t, "POST", "/user/settings/applications/tokens/new", map[string]string{
+		req = NewRequestWithValues(t, "POST", "/user/settings/keys/tokens/new", map[string]string{
 			"name": "web-past", "resource": "all", "scope": "read:user", "expires_at": "2020-01-01",
 		})
 		resp := session.MakeRequest(t, req, http.StatusOK)
@@ -329,15 +330,23 @@ func TestCredentialExpiryWeb(t *testing.T) {
 }
 
 // assertExpiryLabel checks that the list on page shows "Expires", then "Expired" once the credential has expired.
-func assertExpiryLabel(t *testing.T, session *TestSession, page string, bean any, id int64) {
+// A non-empty name limits the check to the list items showing it (the keys page lists several credential types).
+func assertExpiryLabel(t *testing.T, session *TestSession, page string, bean any, id int64, name string) {
 	t.Helper()
-	resp := session.MakeRequest(t, NewRequest(t, "GET", page), http.StatusOK)
-	assert.Contains(t, resp.Body.String(), "Expires ")
-	assert.NotContains(t, resp.Body.String(), "Expired ")
+	text := func() string {
+		body := session.MakeRequest(t, NewRequest(t, "GET", page), http.StatusOK).Body
+		if name == "" {
+			return body.String()
+		}
+		return NewHTMLParser(t, body).doc.Find(".flex-item").FilterFunction(func(_ int, s *goquery.Selection) bool {
+			return strings.Contains(s.Text(), name)
+		}).Text()
+	}
+	assert.Contains(t, text(), "Expires ")
+	assert.NotContains(t, text(), "Expired ")
 
 	setExpiresUnix(t, bean, id, timeutil.TimeStampNow().Add(-1))
-	resp = session.MakeRequest(t, NewRequest(t, "GET", page), http.StatusOK)
-	assert.Contains(t, resp.Body.String(), "Expired ")
+	assert.Contains(t, text(), "Expired ")
 }
 
 func TestCredentialExpiryUserKeysFile(t *testing.T) {

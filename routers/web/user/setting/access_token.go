@@ -212,10 +212,10 @@ func loadAccessTokenCreateData(ctx *context.Context) {
 	ctx.Data["Autofocus"] = autofocus
 }
 
-// Applications render manage access token page
+// AccessTokenCreate renders the new access token form
 func AccessTokenCreate(ctx *context.Context) {
-	ctx.Data["Title"] = ctx.Tr("settings.applications")
-	ctx.Data["PageIsSettingsApplications"] = true
+	ctx.Data["Title"] = ctx.Tr("settings.ssh_gpg_keys")
+	ctx.Data["PageIsSettingsKeys"] = true
 
 	loadAccessTokenCreateData(ctx)
 	if ctx.Written() {
@@ -225,11 +225,11 @@ func AccessTokenCreate(ctx *context.Context) {
 	ctx.HTML(http.StatusOK, tplAccessTokenEdit)
 }
 
-// ApplicationsPost response for add user's access token
+// AccessTokenCreatePost handles adding a user access token
 func AccessTokenCreatePost(ctx *context.Context) {
 	form := web.GetForm(ctx).(*forms.NewAccessTokenPostForm)
 	ctx.Data["Title"] = ctx.Tr("settings")
-	ctx.Data["PageIsSettingsApplications"] = true
+	ctx.Data["PageIsSettingsKeys"] = true
 
 	renderWithError := func(msg template.HTML) {
 		loadAccessTokenCreateData(ctx)
@@ -329,7 +329,7 @@ func AccessTokenCreatePost(ctx *context.Context) {
 	ctx.Flash.Success(ctx.Tr("settings.generate_token_success"))
 	ctx.Flash.Info(t.Token)
 
-	ctx.Redirect(setting.AppSubURL + "/user/settings/applications")
+	ctx.Redirect(setting.AppSubURL + "/user/settings/keys")
 }
 
 // DeleteAccessToken response for delete user access token
@@ -340,7 +340,7 @@ func DeleteAccessToken(ctx *context.Context) {
 		ctx.Flash.Success(ctx.Tr("settings.delete_token_success"))
 	}
 
-	ctx.JSONRedirect(setting.AppSubURL + "/user/settings/applications")
+	ctx.JSONRedirect(setting.AppSubURL + "/user/settings/keys")
 }
 
 // RegenerateAccessToken response for regenerating user access token
@@ -357,5 +357,45 @@ func RegenerateAccessToken(ctx *context.Context) {
 		ctx.Flash.Info(t.Token)
 	}
 
-	ctx.JSONRedirect(setting.AppSubURL + "/user/settings/applications")
+	ctx.JSONRedirect(setting.AppSubURL + "/user/settings/keys")
+}
+
+type TokenWithResources struct {
+	Token        *auth_model.AccessToken
+	Repositories []*repo_model.Repository
+}
+
+func loadAccessTokensData(ctx *context.Context) {
+	tokens, err := db.Find[auth_model.AccessToken](ctx, auth_model.ListAccessTokensOptions{UserID: ctx.Doer.ID})
+	if err != nil {
+		ctx.ServerError("ListAccessTokens", err)
+		return
+	}
+
+	// Load all the AccessTokenResourceRepo for the tokens that we're returning:
+	reposByTokenID, err := repo_model.BulkGetRepositoriesForAccessTokens(ctx, tokens,
+		func(repo *repo_model.Repository) (bool, error) {
+			// Repos associated with a repo-specific access token should already be visible to the token owner, but it's
+			// possible that access has changed, such as a removed collaborator on a repo -- don't provide info on that
+			// repo if so.
+			permission, err := access_model.GetUserRepoPermission(ctx, repo, ctx.Doer)
+			if err != nil {
+				return false, err
+			}
+			return permission.HasAccess(), nil
+		})
+	if err != nil {
+		ctx.ServerError("BulkGetRepositoriesForAccessTokens", err)
+		return
+	}
+
+	tokensWithResources := make([]*TokenWithResources, len(tokens))
+	for i := range tokens {
+		tokensWithResources[i] = &TokenWithResources{
+			Token:        tokens[i],
+			Repositories: reposByTokenID[tokens[i].ID],
+		}
+	}
+
+	ctx.Data["TokensWithResources"] = tokensWithResources
 }

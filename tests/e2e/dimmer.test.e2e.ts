@@ -11,7 +11,7 @@ import {screenshot} from './shared/screenshots.ts';
 test.use({user: 'user2'});
 
 test('Dimmed modal (regenerate access token)', async ({page}) => {
-  await page.goto('/user/settings/applications');
+  await page.goto('/user/settings/keys');
 
   const modalOpener = page.locator('button[data-modal-id="regenerate-token"]');
   await expect(modalOpener).toContainText('Regenerate');

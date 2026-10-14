@@ -60,7 +60,7 @@ func TestCredentialExpiryDefault(t *testing.T) {
 			bean             func(name string) any
 		}{
 			{
-				"access token", "/user/settings/applications/tokens/new", "/user/settings/applications/tokens/new", user2,
+				"access token", "/user/settings/keys/tokens/new", "/user/settings/keys/tokens/new", user2,
 				func(name string) map[string]string {
 					return map[string]string{"name": name, "resource": "all", "scope": "read:user"}
 				},
