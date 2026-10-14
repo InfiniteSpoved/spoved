@@ -91,14 +91,16 @@ func (ctx *Context) checkQuota(evaluate quotaEvaluator, subject quota_model.Limi
 		if !showHTML {
 			msg := "Quota exceeded."
 			if personal.Reached() {
-				msg = personal.Message()
+				msg = personal.MessageFor(ctx.doerID(), userID)
 			}
 			ctx.plainTextInternal(3, http.StatusRequestEntityTooLarge, []byte(msg+"\n"))
 			return
 		}
 
-		if personal.Reached() {
+		if personal.Reached() && ctx.doerID() == userID {
 			ctx.Data["QuotaMessage"] = ctx.Tr("repo.personal_repos.limit_reached", base.FileSize(personal.Used), base.FileSize(personal.Limit))
+		} else if personal.Reached() {
+			ctx.Data["QuotaMessage"] = ctx.Tr("repo.personal_repos.limit_reached_owner")
 		}
 		ctx.Data["IsRepo"] = ctx.Repo.Repository != nil
 		ctx.Data["Title"] = "Quota Exceeded"
@@ -117,7 +119,11 @@ func (ctx *APIContext) CheckQuota(subject quota_model.LimitSubject, userID int64
 	ok, err := checkQuota(ctx.originCtx, quota_model.EvaluateForUser, subject, userID, username, func(userID int64, username string) {
 		msg := "quota exceeded"
 		if personal := personalRepoLimitReached(ctx, userID); personal.Reached() {
-			msg = personal.Message()
+			var doerID int64
+			if ctx.Doer() != nil {
+				doerID = ctx.Doer().ID
+			}
+			msg = personal.MessageFor(doerID, userID)
 		}
 		ctx.JSON(http.StatusRequestEntityTooLarge, APIQuotaExceeded{
 			Message:  msg,
@@ -161,6 +167,13 @@ func checkQuota(ctx context.Context, evaluate quotaEvaluator, subject quota_mode
 		return false, nil
 	}
 	return true, nil
+}
+
+func (ctx *Context) doerID() int64 {
+	if ctx.Doer == nil {
+		return 0
+	}
+	return ctx.Doer.ID
 }
 
 // personalRepoLimitReached returns the personal repository size limit of userID, for the refusal message; an error

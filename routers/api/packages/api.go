@@ -115,7 +115,7 @@ func enforcePackagesQuota() func(ctx *context.Context) {
 		if !ok {
 			msg := "quota exceeded"
 			if l, err := quota_model.GetPersonalRepoLimit(ctx, ownerID); err == nil && l.Reached() {
-				msg = l.Message()
+				msg = l.MessageFor(ctx.Doer.ID, ownerID)
 			}
 			ctx.Error(http.StatusRequestEntityTooLarge, msg)
 			return

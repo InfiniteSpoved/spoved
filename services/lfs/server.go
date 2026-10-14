@@ -569,7 +569,11 @@ func writeStatus(ctx *context.Context, status int) {
 // quotaRefusal is the message of an LFS upload refused by EvaluateForUser.
 func quotaRefusal(ctx *context.Context, ownerID int64) string {
 	if l, err := quota_model.GetPersonalRepoLimit(ctx, ownerID); err == nil && l.Reached() {
-		return l.Message()
+		var doerID int64
+		if ctx.Doer != nil {
+			doerID = ctx.Doer.ID
+		}
+		return l.MessageFor(doerID, ownerID)
 	}
 	return "quota exceeded"
 }

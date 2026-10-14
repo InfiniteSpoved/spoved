@@ -44,13 +44,14 @@ limit is on. Organizations and site admins who can sign in are never limited.
   and LFS objects as stored now. It is shown on the user's *Settings > Repositories* page and in the admin user list.
 - **At or over the limit the user's repositories are locked for writes.** Every git push is refused before it starts,
   over HTTP and SSH, a push that only deletes a ref too, and so are wiki pushes, LFS uploads, push-to-create, new
-  repositories (create, template, fork, migration, transfer, adopt, trash restore), web and API file changes,
+  repositories (create, template, fork, migration, transfer, adopt, trash restore), web and API file changes, git notes,
   branches, tags and releases, release and issue attachments, package uploads, Actions artifacts, pull mirror syncs,
   syncing a fork, updating a pull request branch in the user's repository, and pull requests from another repository
   into the user's repository.
 - **Only deletions made in the web UI stay allowed:** a repository (it moves to the trash; emptying the trash frees
   its space), branches, tags, files (only on the current branch, with the default commit message), releases,
-  attachments, LFS objects (repository settings) and wiki pages. Restoring a deleted branch is refused while locked.
+  attachments, LFS objects (repository settings) and wiki pages. Restoring a deleted branch is refused while locked,
+  and a branch deleted while locked can't be restored later either: the gc after the delete removes its commits.
   After a delete in a locked namespace the repository runs `git gc` at once, so the space counts right away; space
   that other refs or history still reach is not freed (deleting a file keeps it in history).
 - Writes are allowed again as soon as the usage is below the limit.

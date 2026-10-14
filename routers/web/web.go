@@ -1931,7 +1931,7 @@ func registerRoutes(m *web.Route) {
 					m.Post("/reviews/submit", context.RepoMustNotBeArchived(), reqSignIn, repo.MustAllowUserComment, web.Bind(forms.SubmitReviewForm{}), repo.SubmitReview)
 				})
 				m.Group("/{sha:([a-f0-9]{4,64})$}/notes", func() {
-					m.Post("", context.RepoMustNotBeArchived(), web.Bind(forms.CommitNotesForm{}), repo.SetCommitNotesPullRequest)
+					m.Post("", context.RepoMustNotBeArchived(), web.Bind(forms.CommitNotesForm{}), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.SetCommitNotesPullRequest)
 					m.Post("/remove", context.RepoMustNotBeArchived(), repo.RemoveCommitNotesPullRequest)
 				}, reqSignIn, reqRepoCodeWriter)
 			})
@@ -1996,7 +1996,7 @@ func registerRoutes(m *web.Route) {
 			m.Get("/commit/{sha:([a-f0-9]{4,64})$}", common.RateLimitHeavy, repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.Diff)
 			m.Get("/commit/{sha:([a-f0-9]{4,64})$}/load-branches-and-tags", common.RateLimitHeavyPlain, repo.LoadBranchesAndTags)
 			m.Group("/commit/{sha:([a-f0-9]{4,64})$}/notes", func() {
-				m.Post("", context.RepoMustNotBeArchived(), web.Bind(forms.CommitNotesForm{}), repo.SetCommitNotes)
+				m.Post("", context.RepoMustNotBeArchived(), web.Bind(forms.CommitNotesForm{}), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.SetCommitNotes)
 				m.Post("/remove", context.RepoMustNotBeArchived(), repo.RemoveCommitNotes)
 			}, reqSignIn, reqRepoCodeWriter)
 			m.Get("/cherry-pick/{sha:([a-f0-9]{4,64})$}", repo.SetEditorconfigIfExists, repo.CherryPick)

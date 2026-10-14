@@ -1195,7 +1195,7 @@ func Routes() *web.Route {
 					m.Get("/tags/{sha}", repo.GetAnnotatedTag)
 					m.Group("/notes/{sha}", func() {
 						m.Get("", repo.GetNote)
-						m.Post("", reqToken(), reqRepoWriter(unit.TypeCode), bind(api.NoteOptions{}), repo.SetNote)
+						m.Post("", reqToken(), reqRepoWriter(unit.TypeCode), bind(api.NoteOptions{}), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.SetNote)
 						m.Delete("", reqToken(), reqRepoWriter(unit.TypeCode), repo.RemoveNote)
 					})
 				}, context.ReferencesGitRepo(true), reqRepoReader(unit.TypeCode))

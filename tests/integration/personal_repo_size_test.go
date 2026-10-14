@@ -233,6 +233,11 @@ func TestPersonalRepoSizeLockWrites(t *testing.T) {
 		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/user/repos", &api.CreateRepoOption{Name: "transfer-me", AutoInit: true, DefaultBranch: "main"}).AddTokenAuth(other), http.StatusCreated)
 		var readme api.ContentsResponse
 		DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/lock-writes/contents/README.md").AddTokenAuth(token), http.StatusOK), &readme)
+		var branch api.Branch
+		DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/lock-writes/branches/main").AddTokenAuth(token), http.StatusOK), &branch)
+		sha := branch.Commit.ID
+		MakeRequest(t, NewRequestWithJSON(t, "PUT", "/api/v1/repos/user2/lock-writes/collaborators/user4", &api.AddCollaboratorOption{}).AddTokenAuth(token), http.StatusNoContent)
+		collaborator := getTokenForLoggedInUser(t, loginUser(t, "user4"), auth_model.AccessTokenScopeAll)
 
 		lockPersonalRepos(t, 2, true)
 		refusedAPI := func(t *testing.T, req *RequestWrapper) {
@@ -251,6 +256,14 @@ func TestPersonalRepoSizeLockWrites(t *testing.T) {
 		refusedAPI(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/lock-writes/contents/new.txt", &api.CreateFileOptions{ContentBase64: content}).AddTokenAuth(token))
 		refusedAPI(t, NewRequestWithJSON(t, "DELETE", "/api/v1/repos/user2/lock-writes/contents/README.md", &api.DeleteFileOptions{SHA: readme.SHA}).AddTokenAuth(token)) // only the web UI deletes
 		refusedAPI(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user5/transfer-me/transfer", &api.TransferRepoOption{NewOwner: "user2"}).AddTokenAuth(other))
+		// git notes add objects too
+		refusedAPI(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/lock-writes/git/notes/"+sha, &api.NoteOptions{Message: "note"}).AddTokenAuth(token))
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/lock-writes/commit/"+sha+"/notes", map[string]string{"notes": "note"}), http.StatusRequestEntityTooLarge)
+		// a collaborator is refused without the owner's numbers
+		var apiErr api.APIError
+		DecodeJSON(t, MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/lock-writes/contents/collab.txt", &api.CreateFileOptions{ContentBase64: content}).AddTokenAuth(collaborator), http.StatusRequestEntityTooLarge), &apiErr)
+		assert.Contains(t, apiErr.Message, "The owner's personal repositories reached their size limit")
+		assert.NotContains(t, apiErr.Message, "KiB")
 
 		body := &bytes.Buffer{}
 		form := multipart.NewWriter(body)
@@ -271,6 +284,7 @@ func TestPersonalRepoSizeLockWrites(t *testing.T) {
 
 		// below the limit again: allowed
 		lockPersonalRepos(t, 2, false)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/lock-writes/git/notes/"+sha, &api.NoteOptions{Message: "note"}).AddTokenAuth(token), http.StatusOK)
 		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/lock-writes/contents/new.txt", &api.CreateFileOptions{ContentBase64: content}).AddTokenAuth(token), http.StatusCreated)
 	})
 }
