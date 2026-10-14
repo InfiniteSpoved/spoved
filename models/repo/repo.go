@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -908,6 +909,20 @@ func GetRepositoryByRef(ctx context.Context, ownerName, groupName, repoName stri
 		return nil, err
 	}
 	return GetRepositoryByPath(ctx, owner.ID, groupName, repoName)
+}
+
+// GetRepositoryByFullName resolves a FullName, owner/repo or owner/project/repo, with GetRepositoryByRef. Any
+// other shape, empty segments included, is ErrRepoNotExist.
+func GetRepositoryByFullName(ctx context.Context, fullName string) (*Repository, error) {
+	parts := strings.Split(fullName, "/")
+	if (len(parts) != 2 && len(parts) != 3) || slices.Contains(parts, "") {
+		return nil, ErrRepoNotExist{Name: fullName}
+	}
+	group := ""
+	if len(parts) == 3 {
+		group = parts[1]
+	}
+	return GetRepositoryByRef(ctx, parts[0], group, parts[len(parts)-1])
 }
 
 // GetRepositoryByName returns the repository by given name under user if exists.

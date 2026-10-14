@@ -190,9 +190,6 @@ type SearchRepoOptions struct {
 	OnlyShowRelevant bool
 	// Filters repositories based upon optional authorization restrictions.
 	AuthorizationReducer RepositoryAuthorizationReducer
-	// Retrieve multiple repositories by their owner name & repository name, similar to [GetRepositoryByOwnerAndName]
-	// but in bulk.
-	OwnerAndName [][2]string
 	// Filter to repositories with this unit enabled.
 	EnabledUnit optional.Option[unit.Type]
 	// List every repository to an Actor with the auditor role. Only set it for read-only listings requested with the
@@ -534,26 +531,6 @@ func SearchRepositoryCondition(opts *SearchRepoOptions) builder.Cond {
 
 	if opts.AuthorizationReducer != nil {
 		cond = cond.And(opts.AuthorizationReducer.RepoReadAccessFilter())
-	}
-
-	if opts.OwnerAndName != nil {
-		if len(opts.OwnerAndName) > 0 {
-			// repository is indexed on `(owner_id, lower_name)`, but not on the `owner_name` field.  Plus the `owner_name`
-			// field isn't ToLower'd.  So this becomes a subquery:
-			subQuery := builder.Select("inner_repo.id").From("repository", "inner_repo").
-				Join("INNER", "`user`", "`user`.id = inner_repo.owner_id")
-			for _, ownerAndName := range opts.OwnerAndName {
-				subQuery.Or(builder.Eq{
-					"`user`.lower_name":     strings.ToLower(ownerAndName[0]),
-					"inner_repo.lower_name": strings.ToLower(ownerAndName[1]),
-				})
-			}
-			cond = cond.And(builder.In("id", subQuery))
-		} else {
-			// If opts.OwnerAndName is a non-nil, empty array, then we want to return zero repositories.  The loop to
-			// build the `Eq` conditions wouldn't occur, so we would have no filtering if this wasn't special-case'd.
-			cond = cond.And(builder.Eq{"1": "2"})
-		}
 	}
 
 	if has, unit := opts.EnabledUnit.Get(); has {

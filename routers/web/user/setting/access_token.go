@@ -7,6 +7,7 @@ package setting
 
 import (
 	stdCtx "context"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/base"
+	"forgejo.org/modules/container"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
@@ -34,44 +36,33 @@ const (
 	tplAccessTokenEdit base.TplName = "user/settings/access_token_edit"
 )
 
+// errSelectedRepoNotFound is the one error for a missing, unreadable, malformed or duplicate selected repository.
+var errSelectedRepoNotFound = errors.New("one or more of the repositories couldn't be found by owner & name")
+
+// getSelectedRepos resolves the full names of the selected repositories. A missing, unreadable, malformed or
+// duplicate entry gives errSelectedRepoNotFound, so that the response can't be used to probe for existence.
 func getSelectedRepos(ctx *context.Context, selectedReposRaw []string) ([]*repo_model.Repository, error) {
-	ownerAndName := make([][2]string, len(selectedReposRaw))
-	for i, selected := range selectedReposRaw {
-		split := strings.SplitN(selected, "/", 2) // ownername/reponame
-		if len(split) != 2 {
-			return nil, fmt.Errorf("invalid selected_repo: %s", selected)
+	selectedRepos := make([]*repo_model.Repository, 0, len(selectedReposRaw))
+	seen := make(container.Set[int64], len(selectedReposRaw))
+	for _, selected := range selectedReposRaw {
+		repo, err := repo_model.GetRepositoryByFullName(ctx, selected)
+		if repo_model.IsErrRepoNotExist(err) {
+			return nil, errSelectedRepoNotFound
+		} else if err != nil {
+			return nil, err
 		}
-		ownerAndName[i] = [2]string{split[0], split[1]}
-	}
-
-	repoSearch := &repo_model.SearchRepoOptions{
-		OwnerAndName: ownerAndName,
-		OrderBy:      db.SearchOrderByAlphabetically, // match sorting in loadAccessTokenCreateData for consistency
-		Private:      true,
-	}
-
-	cond := repo_model.SearchRepositoryCondition(repoSearch)
-	repos, _, err := repo_model.SearchRepositoryByCondition(ctx, repoSearch, cond, false)
-	if err != nil {
-		return nil, err
-	} else if len(repos) != len(selectedReposRaw) {
-		// One or more of the repositories couldn't be found by search by owner & name.
-		// Keep error in sync w/ ~permission.HasAccess below to avoid data existence probing.
-		return nil, fmt.Errorf("one or more of the repositories couldn't be found by owner & name")
-	}
-
-	selectedRepos := make([]*repo_model.Repository, len(selectedReposRaw))
-	for i, repo := range repos {
 		permission, err := access_model.GetUserRepoPermission(ctx, repo, ctx.Doer)
 		if err != nil {
 			return nil, err
-		} else if !permission.HasAccess() {
-			// Prevent data existence probing -- ensure this error is the exact same as the (len(repos) !=
-			// len(selectedReposRaw)) case above
-			return nil, fmt.Errorf("one or more of the repositories couldn't be found by owner & name")
+		} else if !permission.HasAccess() || !seen.Add(repo.ID) {
+			return nil, errSelectedRepoNotFound
 		}
-		selectedRepos[i] = repo
+		selectedRepos = append(selectedRepos, repo)
 	}
+	// match sorting in loadAccessTokenCreateData for consistency
+	slices.SortFunc(selectedRepos, func(a, b *repo_model.Repository) int {
+		return strings.Compare(strings.ToLower(a.FullName()), strings.ToLower(b.FullName()))
+	})
 	return selectedRepos, nil
 }
 
