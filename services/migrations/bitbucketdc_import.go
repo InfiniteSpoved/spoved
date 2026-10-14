@@ -37,6 +37,7 @@ type BitbucketImportOptions struct {
 	DryRun       bool
 	PullRequests bool
 	KeyExpiry    string // YYYY-MM-DD: the latest expiry of an imported deploy key; empty for none
+	SkipUnmapped bool   // import the rest when a branch permission can't be mapped, instead of stopping
 }
 
 // String never prints the token.
@@ -150,7 +151,7 @@ func ImportBitbucket(ctx context.Context, doerName, orgName string, opts Bitbuck
 	log.Info("Bitbucket import into %s by %s: %s", org.Name, doer.Name, opts) // String leaves the token out
 
 	d := newBitbucketDataCenterDownloader(ctx, server, "", "", opts.Token)
-	report, err := planBitbucketImport(ctx, d, org, opts.Projects, keyExpiry)
+	report, err := planBitbucketImport(ctx, d, org, opts.Projects, keyExpiry, opts.SkipUnmapped)
 	if err != nil || report.Blocked || opts.DryRun {
 		return report, err
 	}
@@ -203,7 +204,7 @@ func bitbucketProjectName(name, key string) string {
 
 // planBitbucketImport lists the projects and repositories to import and decides, without writing, what happens to
 // each: created, reused (imported before into the same place) or a conflict, which blocks the whole import.
-func planBitbucketImport(ctx context.Context, d *BitbucketDataCenterDownloader, org *organization.Organization, keys []string, keyExpiry timeutil.TimeStamp) (*BitbucketImportReport, error) {
+func planBitbucketImport(ctx context.Context, d *BitbucketDataCenterDownloader, org *organization.Organization, keys []string, keyExpiry timeutil.TimeStamp, skipUnmapped bool) (*BitbucketImportReport, error) {
 	server := d.baseURL.String()
 	projects, err := callAPIPaged[bitbucketProject](d, "api/1.0/projects")
 	if err != nil {
@@ -316,7 +317,7 @@ func planBitbucketImport(ctx context.Context, d *BitbucketDataCenterDownloader, 
 			}
 		}
 		if item.Status != BitbucketConflict {
-			if err := planBitbucketPermissions(ctx, d, org, report, item, keyExpiry, teams); err != nil {
+			if err := planBitbucketPermissions(ctx, d, org, report, item, keyExpiry, teams, skipUnmapped); err != nil {
 				return nil, err
 			}
 		}
