@@ -98,7 +98,13 @@ func RepoGroupHome(ctx *context.Context) {
 		ctx.ServerError("LoadHeaderCount", err)
 		return
 	}
+	origin, err := repo_model.GetBitbucketProjectOrigin(ctx, org.ID, group.ID)
+	if err != nil {
+		ctx.ServerError("GetBitbucketProjectOrigin", err)
+		return
+	}
 
+	ctx.Data["BitbucketOrigin"] = origin
 	ctx.Data["Title"] = org.Name + " / " + group.Name
 	ctx.Data["PageIsViewRepoGroups"] = true
 	ctx.Data["RepoGroupLink"] = group.Link(org.Name)

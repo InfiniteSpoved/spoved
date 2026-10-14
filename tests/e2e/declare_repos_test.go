@@ -24,6 +24,7 @@ import (
 	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/indexer/stats"
 	"forgejo.org/modules/setting"
+	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/timeutil"
 	actions_service "forgejo.org/services/actions"
 	issue_service "forgejo.org/services/issue"
@@ -89,6 +90,14 @@ func DeclareGitRepos(t *testing.T) {
 		Filename: "testfile",
 		Versions: []string{"hello", "hallo", "hola", "native", "ubuntu-latest", "- runs-on: ubuntu-latest", "- runs-on: debian-latest"},
 	}}, nil)
+	newRepo(t, 2, "bitbucket-migrated", nil, []FileChanges{{
+		Filename: "main.go",
+		Versions: []string{"hello"},
+	}}, func(_ *user_model.User, repo *repo_model.Repository) {
+		require.NoError(t, db.Insert(db.DefaultContext, &repo_model.BitbucketOrigin{RepoID: repo.ID, ProjectKey: "PAY", Slug: "api", Server: "https://bb.example.com"}))
+		_, err := db.Exec(db.DefaultContext, "UPDATE repository SET original_service_type = ? WHERE id = ?", api.BitbucketDataCenterService, repo.ID)
+		require.NoError(t, err)
+	})
 	newRepo(t, 2, "language-stats-test", nil, []FileChanges{{
 		Filename: "main.rs",
 		Versions: []string{"fn main() {", "println!(\"Hello World!\");", "}"},

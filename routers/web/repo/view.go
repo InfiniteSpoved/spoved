@@ -892,6 +892,15 @@ func Home(ctx *context.Context) {
 		return
 	}
 
+	if ctx.Repo.TreePath == "" && ctx.Repo.Repository.OriginalServiceType == structs.BitbucketDataCenterService {
+		origin, err := repo_model.GetBitbucketOrigin(ctx, ctx.Repo.Repository.ID)
+		if err != nil {
+			ctx.ServerError("GetBitbucketOrigin", err)
+			return
+		}
+		ctx.Data["BitbucketOrigin"] = origin
+	}
+
 	renderHomeCode(ctx)
 }
 

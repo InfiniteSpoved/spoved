@@ -1,0 +1,5 @@
+{{$command := print "git remote set-url origin " .}}
+<div class="tw-flex tw-items-center tw-gap-2 tw-my-1">
+	<code>{{$command}}</code>
+	<button class="btn interact-fg tw-p-2" data-clipboard-text="{{$command}}" data-tooltip-content="{{ctx.Locale.Tr "copy"}}">{{svg "octicon-copy" 14}}</button>
+</div>

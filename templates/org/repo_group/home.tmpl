@@ -6,6 +6,7 @@
 		<div class="tw-flex tw-flex-wrap tw-gap-2 tw-items-center tw-mb-2">
 			<h2 class="tw-flex-1 tw-m-0 tw-break-anywhere">
 				<a class="muted" href="{{.Org.HomeLink}}">{{.Org.Name}}</a> / <span class="repo-group-name">{{.RepoGroup.Name}}</span>
+				{{if .BitbucketOrigin}}<span class="ui basic label" id="bitbucket-project-key">{{ctx.Locale.Tr "repo_group.bitbucket_key" .BitbucketOrigin.ProjectKey}}</span>{{end}}
 			</h2>
 			{{if and .CanCreateOrgRepo (not .Org.IsArchived)}}
 				<a class="ui small primary button" href="{{AppSubUrl}}/repo/create?org={{.Org.ID}}&group={{.RepoGroup.ID}}">{{ctx.Locale.Tr "new_repo.link"}}</a>

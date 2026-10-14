@@ -467,6 +467,9 @@ func SearchRepositoryCondition(opts *SearchRepoOptions) builder.Cond {
 				}
 			}
 			keywordCond = keywordCond.Or(likes)
+			if origin := bitbucketOriginKeywordCond(opts.Keyword); origin != nil {
+				keywordCond = keywordCond.Or(origin)
+			}
 		}
 		cond = cond.And(keywordCond)
 	}
