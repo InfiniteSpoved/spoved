@@ -93,10 +93,12 @@ else
     FORGEJO_VERSION ?= $(GITEA_VERSION)
     FORGEJO_VERSION_API ?= $(GITEA_VERSION)+${GITEA_COMPATIBILITY}
   else
-    # spoved has no release tags: a build is named after its commit time (UTC, YYMMDDHHmm) and channel, prod
-    # on the develop branch and dev anywhere else (a pull request, a detached commit), e.g. 2610131155-prod.
-    # It parses as the semver 2610131155.0.0-prod, so later builds sort higher.
-    VERSION_DATE := $(shell TZ=UTC git log -1 --date=format-local:%y%m%d%H%M --format=%cd 2>/dev/null)
+    # spoved has no release tags: a build is named after its commit time (US Eastern, YYMMDDHHmm) and channel,
+    # prod on the develop branch and dev anywhere else (a pull request, a detached commit), e.g. 2610131155-prod.
+    # It parses as the semver 2610131155.0.0-prod, so later builds sort higher, except across the hour repeated
+    # when DST ends. The zone is a POSIX rule (America/New_York since 2007), not a zone name: the Docker build
+    # stage has no tzdata, and an unknown zone name would silently fall back to UTC.
+    VERSION_DATE := $(shell TZ=EST5EDT,M3.2.0,M11.1.0 git log -1 --date=format-local:%y%m%d%H%M --format=%cd 2>/dev/null)
     VERSION_CHANNEL ?= $(if $(filter develop,$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null)),prod,dev)
     ifneq ($(VERSION_DATE),)
       FORGEJO_VERSION ?= $(VERSION_DATE)-$(VERSION_CHANNEL)
