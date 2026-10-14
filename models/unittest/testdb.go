@@ -6,6 +6,7 @@ package unittest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -62,9 +63,21 @@ func InitCustomSettings(confFileName string) {
 		if err != nil {
 			log.Fatalf("couldn't read config template: %s", templateFile)
 		}
-		err = os.WriteFile(filepath.Join(root, "tests", confFileName), content, 0o644)
+		// Packages run in parallel and share this file: write a temp file and rename it,
+		// or a process reading it while another truncates it sees an empty config.
+		tmp, err := os.CreateTemp(filepath.Join(root, "tests"), confFileName+".*.tmp")
+		if err == nil {
+			_, err = tmp.Write(content)
+			err = errors.Join(err, tmp.Chmod(0o644), tmp.Close())
+			if err == nil {
+				err = os.Rename(tmp.Name(), filepath.Join(root, "tests", confFileName))
+			}
+			if err != nil {
+				os.Remove(tmp.Name())
+			}
+		}
 		if err != nil {
-			log.Fatalf("couldn't write config: %s", confFileName)
+			log.Fatalf("couldn't write config: %s: %v", confFileName, err)
 		}
 		setting.CustomConf = filepath.Join(root, "tests", confFileName)
 	}
