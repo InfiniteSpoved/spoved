@@ -209,6 +209,9 @@ func DeleteRepoGroup(ctx context.Context, group *RepoGroup) error {
 		if _, err := db.GetEngine(ctx).Where("owner_id = ? AND group_id = ?", group.OwnerID, group.ID).Delete(new(Redirect)); err != nil {
 			return err
 		}
+		if _, err := db.GetEngine(ctx).Where("owner_id = ? AND group_id = ?", group.OwnerID, group.ID).Delete(new(BitbucketOrigin)); err != nil {
+			return err
+		}
 		if _, err := db.GetEngine(ctx).Where("owner_id = ? AND redirect_group_id = ?", group.OwnerID, group.ID).Delete(new(RepoGroupRedirect)); err != nil {
 			return err
 		}

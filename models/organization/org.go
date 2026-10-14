@@ -487,6 +487,7 @@ func DeleteOrganization(ctx context.Context, org *Organization) error {
 		&repo_model.RepoGroup{OwnerID: org.ID},
 		&repo_model.RepoGroupNameClaim{OwnerID: org.ID},
 		&repo_model.RepoGroupRedirect{OwnerID: org.ID},
+		&repo_model.BitbucketOrigin{OwnerID: org.ID}, // project rows only: repository rows have no owner
 		&TeamGroup{OrgID: org.ID},
 		&OrgVerifiedDomain{OrgID: org.ID},
 		&user_model.Setting{UserID: org.ID, SettingKey: SettingKeyRequireVerifiedDomain},

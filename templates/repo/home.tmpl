@@ -3,6 +3,15 @@
 	{{template "repo/header" .}}
 	<div class="ui container {{if .IsBlame}}fluid padded{{end}}">
 		{{template "base/alert" .}}
+		{{if .BitbucketOrigin}}
+		<div class="ui info message tw-hidden" id="bitbucket-origin-banner" data-repo-id="{{.Repository.ID}}">
+			<button class="ui small basic button tw-float-right" id="bitbucket-origin-banner-dismiss">{{ctx.Locale.Tr "repo.bitbucket_origin.dismiss"}}</button>
+			<div class="header">{{ctx.Locale.Tr "repo.bitbucket_origin.banner_title"}}</div>
+			<p>{{ctx.Locale.Tr "repo.bitbucket_origin.banner_desc"}}</p>
+			{{if $.CloneButtonShowHTTPS}}{{template "repo/bitbucket_origin_command" $.CloneButtonOriginLink.HTTPS}}{{end}}
+			{{if $.CloneButtonShowSSH}}{{template "repo/bitbucket_origin_command" $.CloneButtonOriginLink.SSH}}{{end}}
+		</div>
+		{{end}}
 		{{if and (not .HideRepoInfo) (not .IsBlame)}}
 		<div class="repo-description">
 			<div id="repo-desc" class="tw-break-anywhere tw-text-16">

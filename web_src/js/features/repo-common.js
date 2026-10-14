@@ -55,6 +55,27 @@ export function initRepoCloneLink() {
   });
 }
 
+const bitbucketBannerDismissMs = 90 * 24 * 60 * 60 * 1000;
+
+// initRepoBitbucketOriginBanner shows the migration banner unless it was dismissed in this browser in the last 90 days.
+export function initRepoBitbucketOriginBanner() {
+  const banner = document.querySelector('#bitbucket-origin-banner');
+  if (!banner) return;
+  const key = `bitbucket-origin-banner-${banner.getAttribute('data-repo-id')}`;
+  let dismissed = 0;
+  try {
+    dismissed = Number(localStorage.getItem(key)) || 0;
+  } catch {}
+  if (Date.now() - dismissed < bitbucketBannerDismissMs) return;
+  banner.classList.remove('tw-hidden');
+  banner.querySelector('#bitbucket-origin-banner-dismiss').addEventListener('click', () => {
+    try {
+      localStorage.setItem(key, String(Date.now()));
+    } catch {}
+    banner.classList.add('tw-hidden');
+  });
+}
+
 export function initRepoCommonBranchOrTagDropdown(selector) {
   $(selector).each(function () {
     const $dropdown = $(this);
