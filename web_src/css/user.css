@@ -137,7 +137,7 @@
   display: none;
 }
 
-/* user's access token edit page; /user/settings/applications/tokens/new; custom CSS for repo selector visibility */
+/* user's access token edit page; /user/settings/keys/tokens/new; custom CSS for repo selector visibility */
 
 /* #repo-selector-wrapper hides and shows the repository selection based upon the radio-button value, with an animation
 to hint the connection between the two to the user. */

@@ -111,13 +111,13 @@ func TestAccessTokenScopePolicyWeb(t *testing.T) {
 		if resource == "repo-specific" {
 			values.Set("selected_repo", "user2/repo1")
 		}
-		return session.MakeRequest(t, NewRequestWithURLValues(t, "POST", "/user/settings/applications/tokens/new", values), status).Body.String()
+		return session.MakeRequest(t, NewRequestWithURLValues(t, "POST", "/user/settings/keys/tokens/new", values), status).Body.String()
 	}
 
 	t.Run("non-admin", func(t *testing.T) {
 		session := loginUser(t, "user2")
 
-		resp := session.MakeRequest(t, NewRequest(t, "GET", "/user/settings/applications/tokens/new"), http.StatusOK)
+		resp := session.MakeRequest(t, NewRequest(t, "GET", "/user/settings/keys/tokens/new"), http.StatusOK)
 		doc := NewHTMLParser(t, resp.Body)
 		assert.True(t, doc.Find(`#access-token-scope-issue option[value="read:issue"]`).Is("[disabled]"))
 		assert.True(t, doc.Find(`#access-token-scope-user option[value="write:user"]`).Is("[disabled]"))
@@ -144,7 +144,7 @@ func TestAccessTokenScopePolicyWeb(t *testing.T) {
 		require.NoError(t, auth_model.NewAccessToken(t.Context(), old))
 
 		session := loginUser(t, "user2")
-		req := NewRequestWithValues(t, "POST", "/user/settings/applications/tokens/regenerate", map[string]string{"id": fmt.Sprint(old.ID)})
+		req := NewRequestWithValues(t, "POST", "/user/settings/keys/tokens/regenerate", map[string]string{"id": fmt.Sprint(old.ID)})
 		session.MakeRequest(t, req, http.StatusOK)
 		regenerated := unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: old.ID, Scope: auth_model.AccessTokenScopeReadIssue})
 		assert.NotEqual(t, old.TokenHash, regenerated.TokenHash)
@@ -153,7 +153,7 @@ func TestAccessTokenScopePolicyWeb(t *testing.T) {
 	t.Run("site admin is exempt", func(t *testing.T) {
 		session := loginUser(t, "user1")
 
-		resp := session.MakeRequest(t, NewRequest(t, "GET", "/user/settings/applications/tokens/new"), http.StatusOK)
+		resp := session.MakeRequest(t, NewRequest(t, "GET", "/user/settings/keys/tokens/new"), http.StatusOK)
 		assert.Equal(t, 0, NewHTMLParser(t, resp.Body).Find(".access-token-select option[disabled]").Length())
 
 		post(t, session, "web-admin", "all", http.StatusSeeOther, "write:admin", "write:issue")

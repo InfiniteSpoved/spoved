@@ -817,6 +817,7 @@
 	"settings.access_token.resource_specific_repo_help": "Limit access to a specific list of repositories. Read-only access is permitted to all public repositories. Only permissions that allow access to repositories and issues can be enabled.",
 	"settings.access_token.admin_disabled": "Administrative permissions are disabled.",
 	"settings.authorized_integrations": "Authorized Integrations",
+	"settings.ssh_gpg_keys": "Keys and tokens",
 	"settings.manage_authorized_integrations": "Authorized integrations",
 	"settings.authorized_integration.desc": "Authorized integrations allow spoved to receive signed JWTs, validate their claims against configured rules, and permit them to access spoved's APIs.",
 	"settings.authorized_integration.ui.generic": "Generic JWT",
