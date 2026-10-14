@@ -16,6 +16,7 @@ import (
 	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/log"
 	base "forgejo.org/modules/migration"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
@@ -37,11 +38,6 @@ type BitbucketImportOptions struct {
 // String never prints the token.
 func (o BitbucketImportOptions) String() string {
 	return fmt.Sprintf("{server: %s, projects: %v, dry run: %t}", o.Server, o.Projects, o.DryRun)
-}
-
-// GoString never prints the token.
-func (o BitbucketImportOptions) GoString() string {
-	return o.String()
 }
 
 // The statuses of a BitbucketImportItem.
@@ -128,6 +124,7 @@ func ImportBitbucket(ctx context.Context, doerName, orgName string, opts Bitbuck
 		return nil, fmt.Errorf("%w: an import into %s is already running", util.ErrAlreadyExist, org.Name)
 	}
 	defer bitbucketImports.Delete(org.ID)
+	log.Info("Bitbucket import into %s by %s: %s", org.Name, doer.Name, opts) // String leaves the token out
 
 	d := newBitbucketDataCenterDownloader(ctx, server, "", "", opts.Token)
 	report, err := planBitbucketImport(ctx, d, org, opts.Projects)
