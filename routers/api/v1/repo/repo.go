@@ -288,7 +288,9 @@ func CreateUserRepo(ctx *context.APIContext, owner *user_model.User, opt api.Cre
 		ObjectFormatName: opt.ObjectFormatName,
 	})
 	if err != nil {
-		if organization.IsErrOrgArchived(err) || errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) {
+		if errors.As(err, &quota_model.ErrPersonalRepoLimit{}) {
+			ctx.Error(http.StatusRequestEntityTooLarge, "", err)
+		} else if organization.IsErrOrgArchived(err) || errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) {
 			ctx.Error(http.StatusForbidden, "", err)
 		} else if repo_model.IsErrRepoAlreadyExist(err) {
 			ctx.Error(http.StatusConflict, "", "The repository with the same name already exists.")
@@ -467,7 +469,9 @@ func Generate(ctx *context.APIContext) {
 
 	repo, err := repo_service.GenerateRepository(ctx, ctx.Doer(), targetOwner, ctx.Repo().Repository, opts)
 	if err != nil {
-		if errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) {
+		if errors.As(err, &quota_model.ErrPersonalRepoLimit{}) {
+			ctx.Error(http.StatusRequestEntityTooLarge, "", err)
+		} else if errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) {
 			ctx.Error(http.StatusForbidden, "", err)
 		} else if repo_model.IsErrRepoAlreadyExist(err) {
 			ctx.Error(http.StatusConflict, "", "The repository with the same name already exists.")

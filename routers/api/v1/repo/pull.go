@@ -481,6 +481,11 @@ func CreatePullRequest(ctx *context.APIContext) {
 	}
 	defer headGitRepo.Close()
 
+	// the head of a pull request from another repository is copied into the base repository
+	if baseRepo := ctx.Repo().Repository; headRepo.ID != baseRepo.ID && !ctx.CheckPersonalRepoLimit(baseRepo.OwnerID, baseRepo.OwnerName) {
+		return
+	}
+
 	// Check if another PR exists with the same targets
 	existingPr, err := issues_model.GetUnmergedPullRequest(ctx, headRepo.ID, ctx.Repo().Repository.ID, headBranch, baseBranch, issues_model.PullRequestFlowGithub)
 	if err != nil {
@@ -1457,6 +1462,10 @@ func UpdatePullRequest(ctx *context.APIContext) {
 	}
 	if err = pr.LoadHeadRepo(ctx); err != nil {
 		ctx.Error(http.StatusInternalServerError, "LoadHeadRepo", err)
+		return
+	}
+	// the update writes to the head repository
+	if !ctx.CheckPersonalRepoLimit(pr.HeadRepo.OwnerID, pr.HeadRepo.OwnerName) {
 		return
 	}
 

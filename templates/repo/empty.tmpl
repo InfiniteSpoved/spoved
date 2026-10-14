@@ -5,6 +5,7 @@
 		<div class="ui grid">
 			<div class="sixteen wide column content">
 				{{template "base/alert" .}}
+				{{template "shared/personal_repo_limit" .}}
 				{{if .Repository.IsArchived}}
 					<div class="ui warning message tw-text-center">
 						{{if .Repository.ArchivedUnix.IsZero}}
@@ -27,7 +28,7 @@
 							<h3>{{ctx.Locale.Tr "repo.clone_this_repo"}} <small>{{ctx.Locale.Tr "repo.clone_helper" "http://git-scm.com/book/en/v2/Git-Basics-Getting-a-Git-Repository"}}</small></h3>
 
 							<div class="repo-button-row">
-								{{if and .CanWriteCode (not .Repository.IsArchived)}}
+								{{if and .CanWriteCode (not .Repository.IsArchived) (not .PersonalRepoLocked)}}
 									<a class="ui small button" href="{{.RepoLink}}/_new/{{.BranchName | PathEscapeSegments}}/">
 										{{ctx.Locale.Tr "file_editor.new_file"}}
 									</a>

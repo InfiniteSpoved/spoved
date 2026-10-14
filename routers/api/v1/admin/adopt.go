@@ -4,8 +4,10 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 
+	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/util"
@@ -111,7 +113,10 @@ func AdoptRepository(ctx *context.APIContext) {
 	if _, err := repo_service.AdoptRepository(ctx, ctx.Doer(), ctxUser, repo_service.CreateRepoOptions{
 		Name:      repoName,
 		IsPrivate: true,
-	}); err != nil {
+	}); errors.As(err, &quota_model.ErrPersonalRepoLimit{}) {
+		ctx.Error(http.StatusRequestEntityTooLarge, "AdoptRepository", err)
+		return
+	} else if err != nil {
 		ctx.InternalServerError(err)
 		return
 	}

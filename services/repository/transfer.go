@@ -53,6 +53,9 @@ func TransferOwnership(ctx context.Context, doer, newOwner *user_model.User, rep
 	if err := repo_module.CheckPersonalRepoPolicy(ctx, doer, newOwner, repo.IsPrivate); err != nil {
 		return err
 	}
+	if err := repo_module.CheckPersonalRepoLimit(ctx, newOwner); err != nil {
+		return err
+	}
 	if err := repo.LoadOwner(ctx); err != nil {
 		return err
 	}
@@ -458,6 +461,9 @@ func StartRepositoryTransfer(ctx context.Context, doer, newOwner *user_model.Use
 		return err
 	}
 	if err := repo_module.CheckPersonalRepoPolicy(ctx, doer, newOwner, repo.IsPrivate); err != nil {
+		return err
+	}
+	if err := repo_module.CheckPersonalRepoLimit(ctx, newOwner); err != nil {
 		return err
 	}
 	if user_model.IsBlocked(ctx, newOwner.ID, doer.ID) {

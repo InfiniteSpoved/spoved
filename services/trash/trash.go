@@ -14,6 +14,7 @@ import (
 
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
+	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	code_indexer "forgejo.org/modules/indexer/code"
@@ -52,7 +53,7 @@ var (
 func IsBadTarget(err error) bool {
 	return repo_model.IsErrRepoAlreadyExist(err) || db.IsErrNameReserved(err) || db.IsErrNamePatternNotAllowed(err) ||
 		user_model.IsErrUserAlreadyExist(err) || organization.IsErrOrgArchived(err) || errors.Is(err, util.ErrInvalidArgument) ||
-		errors.As(err, &repo_module.ErrPersonalRepoPolicy{})
+		errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) || errors.As(err, &quota_model.ErrPersonalRepoLimit{})
 }
 
 // RestoreOptions says where a restored item goes: a new owner (repositories only) and/or a new name.

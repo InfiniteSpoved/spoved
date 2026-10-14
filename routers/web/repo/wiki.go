@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	git_model "forgejo.org/models/git"
+	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	"forgejo.org/modules/base"
@@ -32,6 +33,7 @@ import (
 	"forgejo.org/services/context"
 	"forgejo.org/services/forms"
 	notify_service "forgejo.org/services/notify"
+	repo_service "forgejo.org/services/repository"
 	wiki_service "forgejo.org/services/wiki"
 )
 
@@ -435,6 +437,16 @@ func renderEditPage(ctx *context.Context) {
 	ctx.Data["footerContent"] = ""
 }
 
+// EnforceWikiQuota is the quota check of WikiPost. Deleting a page skips the size limit of personal repositories:
+// deletes made in the web UI stay allowed at that limit (DeleteWikiPage writes its own fixed commit message).
+func EnforceWikiQuota(ctx *context.Context) {
+	if ctx.FormString("action") == "_delete" {
+		context.EnforceQuotaGroupsWeb(quota_model.LimitSubjectSizeWiki, context.QuotaTargetRepo)(ctx)
+		return
+	}
+	ctx.CheckQuota(quota_model.LimitSubjectSizeWiki, ctx.Repo.Repository.OwnerID, ctx.Repo.Repository.OwnerName)
+}
+
 // WikiPost renders post of wiki page
 func WikiPost(ctx *context.Context) {
 	if wikiFolderConfig(ctx) != nil {
@@ -809,10 +821,12 @@ func DeleteWikiPagePost(ctx *context.Context) {
 		wikiName = "Home"
 	}
 
+	locked := repo_service.PersonalRepoLocked(ctx, ctx.Repo.Repository)
 	if err := wiki_service.DeleteWikiPage(ctx, ctx.Doer, ctx.Repo.Repository, wikiName); err != nil {
 		ctx.ServerError("DeleteWikiPage", err)
 		return
 	}
+	repo_service.ShrinkAfterDelete(ctx, ctx.Repo.Repository, locked)
 
 	notify_service.DeleteWikiPage(ctx, ctx.Doer, ctx.Repo.Repository, string(wikiName))
 

@@ -378,6 +378,9 @@ func LFSDelete(ctx *context.Context) {
 			return
 		}
 	}
+	if err := repo_module.UpdateRepoSize(ctx, ctx.Repo.Repository); err != nil {
+		log.Error("UpdateRepoSize: %v", err)
+	}
 	ctx.Redirect(ctx.Repo.RepoLink + "/settings/lfs")
 }
 

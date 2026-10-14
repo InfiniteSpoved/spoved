@@ -43,6 +43,19 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 
 	repoID := ctx.ParamsInt64(":repoid")
 
+	// a wiki push is only measured again, for the size limit of personal repositories (no feeds for wikis)
+	if opts.IsWiki {
+		repo := loadRepository(ctx)
+		if ctx.Written() {
+			return
+		}
+		if err := repo_module.UpdateRepoSize(ctx, repo); err != nil {
+			log.Error("UpdateRepoSize after a wiki push to %-v: %v", repo, err)
+		}
+		ctx.JSON(http.StatusOK, private.HookPostReceiveResult{})
+		return
+	}
+
 	// defer getting the repository at this point - as we should only retrieve it if we're going to call update
 	var repo *repo_model.Repository
 

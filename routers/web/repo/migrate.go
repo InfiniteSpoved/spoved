@@ -5,7 +5,6 @@
 package repo
 
 import (
-	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,7 +19,6 @@ import (
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/lfs"
 	"forgejo.org/modules/log"
-	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
@@ -69,13 +67,17 @@ func Migrate(ctx *context.Context) {
 	if ctx.Written() {
 		return
 	}
+	// the doer's own namespace is locked by the size limit: preselect an organization
+	if orgs, _ := ctx.Data["Orgs"].([]*organization.Organization); ctx.Data["PersonalRepoLocked"] == true && ctxUser.ID == ctx.Doer.ID && len(orgs) > 0 {
+		ctxUser = orgs[0].AsUser()
+	}
 	ctx.Data["ContextUser"] = ctxUser
 
 	ctx.HTML(http.StatusOK, base.TplName("repo/migrate/"+serviceType.Name()))
 }
 
 func handleMigrateError(ctx *context.Context, owner *user_model.User, err error, name string, tpl base.TplName, form *forms.MigrateRepoForm) {
-	var policyErr repo_module.ErrPersonalRepoPolicy
+	refusal, refused := ctx.PersonalRepoRefusal(err)
 	if setting.Repository.DisableMigrations {
 		ctx.Error(http.StatusForbidden, "MigrateError: the site administrator has disabled migrations")
 		return
@@ -88,8 +90,8 @@ func handleMigrateError(ctx *context.Context, owner *user_model.User, err error,
 		ctx.RenderWithErr(ctx.Tr("form.2fa_auth_required"), tpl, form)
 	case organization.IsErrOrgArchived(err):
 		ctx.RenderWithErr(ctx.Tr("org.archived.readonly"), tpl, form)
-	case errors.As(err, &policyErr):
-		ctx.RenderWithErr(ctx.Tr(policyErr.TrKey()), tpl, form)
+	case refused:
+		ctx.RenderWithErr(refusal, tpl, form)
 	case repo_model.IsErrReachLimitOfRepo(err):
 		maxCreationLimit := owner.MaxCreationLimit()
 		msg := ctx.TrN(maxCreationLimit, "repo.form.reach_limit_of_creation_1", "repo.form.reach_limit_of_creation_n", maxCreationLimit)
@@ -275,6 +277,7 @@ func MigratePost(ctx *context.Context) {
 
 func setMigrationContextData(ctx *context.Context, serviceType structs.GitServiceType) {
 	ctx.Data["Title"] = ctx.Tr("new_migrate.title")
+	ctx.SetPersonalRepoLimit(ctx.Doer.ID) // the banner; the forms leave the doer out as owner while it shows
 
 	ctx.Data["LFSActive"] = setting.LFS.StartServer
 	ctx.Data["IsForcedPrivate"] = setting.Repository.ForcePrivate

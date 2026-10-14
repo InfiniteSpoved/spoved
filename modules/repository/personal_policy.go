@@ -6,6 +6,7 @@ package repository
 import (
 	"context"
 
+	quota_model "forgejo.org/models/quota"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
@@ -56,4 +57,17 @@ func CheckPersonalRepoPolicy(ctx context.Context, doer, owner *user_model.User, 
 	}
 	log.Warn("Personal repository policy %s refused a repository of %s (doer %s, private %t)", mode, owner.Name, doerName, private)
 	return ErrPersonalRepoPolicy{Mode: mode}
+}
+
+// CheckPersonalRepoLimit returns a quota_model.ErrPersonalRepoLimit if the size limit of owner's personal
+// repositories is reached, for a repository that would be added there (created, forked, migrated, moved).
+func CheckPersonalRepoLimit(ctx context.Context, owner *user_model.User) error {
+	l, err := quota_model.GetPersonalRepoLimit(ctx, owner.ID)
+	if err != nil {
+		return err
+	} else if l.Reached() {
+		log.Warn("Personal repository size limit reached for %s (%d of %d bytes): repository refused", owner.Name, l.Used, l.Limit)
+		return quota_model.ErrPersonalRepoLimit{PersonalRepoLimit: l}
+	}
+	return nil
 }

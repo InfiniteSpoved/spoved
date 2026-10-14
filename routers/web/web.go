@@ -1666,8 +1666,6 @@ func registerRoutes(m *web.Route) {
 				m.Combo("/_new/*").Get(repo.NewFile).
 					Post(web.Bind(forms.EditRepoFileForm{}), repo.NewFilePost)
 				m.Post("/_preview/*", web.Bind(forms.EditPreviewDiffForm{}), repo.DiffPreviewPost)
-				m.Combo("/_delete/*").Get(repo.DeleteFile).
-					Post(web.Bind(forms.DeleteRepoFileForm{}), repo.DeleteFilePost)
 				m.Combo("/_upload/*", repo.MustBeAbleToUpload).
 					Get(repo.UploadFile).
 					Post(BindUpload(), repo.UploadFilePost)
@@ -1676,6 +1674,9 @@ func registerRoutes(m *web.Route) {
 				m.Combo("/_cherrypick/{sha:([a-f0-9]{4,64})}/*").Get(repo.CherryPick).
 					Post(web.Bind(forms.CherryPickForm{}), repo.CherryPickPost)
 			}, repo.MustBeEditable, repo.CommonEditorData, context.EnforceQuotaWeb(quota_model.LimitSubjectSizeReposAll, context.QuotaTargetRepo))
+			// deletes stay allowed while the size limit of personal repositories is reached (DeleteFilePost)
+			m.Combo("/_delete/*", repo.MustBeEditable, repo.CommonEditorData, context.EnforceQuotaGroupsWeb(quota_model.LimitSubjectSizeReposAll, context.QuotaTargetRepo)).Get(repo.DeleteFile).
+				Post(web.Bind(forms.DeleteRepoFileForm{}), repo.DeleteFilePost)
 			m.Group("", func() {
 				m.Post("/upload-file", context.EnforceQuotaWeb(quota_model.LimitSubjectSizeReposAll, context.QuotaTargetRepo), repo.UploadFileToServer)
 				m.Post("/upload-remove", web.Bind(forms.RemoveUploadFileForm{}), repo.RemoveUploadFileFromServer)
@@ -1852,10 +1853,10 @@ func registerRoutes(m *web.Route) {
 		m.Group("/wiki", func() {
 			m.Combo("/").
 				Get(repo.Wiki).
-				Post(context.RepoMustNotBeArchived(), reqSignIn, reqRepoWikiWriter, web.Bind(forms.NewWikiForm{}), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeWiki, context.QuotaTargetRepo), repo.WikiPost)
+				Post(context.RepoMustNotBeArchived(), reqSignIn, reqRepoWikiWriter, web.Bind(forms.NewWikiForm{}), repo.EnforceWikiQuota, repo.WikiPost)
 			m.Combo("/*").
 				Get(repo.Wiki).
-				Post(context.RepoMustNotBeArchived(), reqSignIn, reqRepoWikiWriter, web.Bind(forms.NewWikiForm{}), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeWiki, context.QuotaTargetRepo), repo.WikiPost)
+				Post(context.RepoMustNotBeArchived(), reqSignIn, reqRepoWikiWriter, web.Bind(forms.NewWikiForm{}), repo.EnforceWikiQuota, repo.WikiPost)
 			m.Get("/commit/{sha:[a-f0-9]{4,64}}", repo.WikiNotFromFolder, repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.Diff)
 			m.Get("/commit/{sha:[a-f0-9]{4,64}}.{ext:patch|diff}", repo.WikiNotFromFolder, repo.RawDiff)
 		}, repo.MustEnableWiki, func(ctx *context.Context) {
@@ -1930,7 +1931,7 @@ func registerRoutes(m *web.Route) {
 					m.Post("/reviews/submit", context.RepoMustNotBeArchived(), reqSignIn, repo.MustAllowUserComment, web.Bind(forms.SubmitReviewForm{}), repo.SubmitReview)
 				})
 				m.Group("/{sha:([a-f0-9]{4,64})$}/notes", func() {
-					m.Post("", context.RepoMustNotBeArchived(), web.Bind(forms.CommitNotesForm{}), repo.SetCommitNotesPullRequest)
+					m.Post("", context.RepoMustNotBeArchived(), web.Bind(forms.CommitNotesForm{}), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.SetCommitNotesPullRequest)
 					m.Post("/remove", context.RepoMustNotBeArchived(), repo.RemoveCommitNotesPullRequest)
 				}, reqSignIn, reqRepoCodeWriter)
 			})
@@ -1995,7 +1996,7 @@ func registerRoutes(m *web.Route) {
 			m.Get("/commit/{sha:([a-f0-9]{4,64})$}", common.RateLimitHeavy, repo.SetEditorconfigIfExists, repo.SetDiffViewStyle, repo.SetWhitespaceBehavior, repo.Diff)
 			m.Get("/commit/{sha:([a-f0-9]{4,64})$}/load-branches-and-tags", common.RateLimitHeavyPlain, repo.LoadBranchesAndTags)
 			m.Group("/commit/{sha:([a-f0-9]{4,64})$}/notes", func() {
-				m.Post("", context.RepoMustNotBeArchived(), web.Bind(forms.CommitNotesForm{}), repo.SetCommitNotes)
+				m.Post("", context.RepoMustNotBeArchived(), web.Bind(forms.CommitNotesForm{}), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.SetCommitNotes)
 				m.Post("/remove", context.RepoMustNotBeArchived(), repo.RemoveCommitNotes)
 			}, reqSignIn, reqRepoCodeWriter)
 			m.Get("/cherry-pick/{sha:([a-f0-9]{4,64})$}", repo.SetEditorconfigIfExists, repo.CherryPick)
@@ -2021,7 +2022,7 @@ func registerRoutes(m *web.Route) {
 		}
 		m.Get("/commit/{sha:([a-f0-9]{4,64})}.{ext:patch|diff}", repo.MustBeNotEmpty, reqRepoCodeReader, common.RateLimitHeavyPlain, repo.RawDiff)
 
-		m.Post("/sync_fork", context.RepoMustNotBeArchived(), repo.MustBeNotEmpty, reqRepoCodeWriter, repo.SyncFork)
+		m.Post("/sync_fork", context.RepoMustNotBeArchived(), repo.MustBeNotEmpty, reqRepoCodeWriter, context.EnforcePersonalRepoLimitWeb(context.QuotaTargetRepo), repo.SyncFork)
 	}, ignSignIn, context.RepoAssignment, context.UnitTypes())
 
 	m.Get("/{username}/{reponame}/lastcommit/*", ignSignIn, context.RepoAssignment, context.UnitTypes(), context.RepoRefByType(context.RepoRefCommit), reqRepoCodeReader, repo.LastCommit)

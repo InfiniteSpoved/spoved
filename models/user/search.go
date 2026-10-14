@@ -45,6 +45,7 @@ type SearchUserOptions struct {
 	IncludeReserved    bool
 
 	Load2FAStatus     bool
+	LoadRepoUsage     bool // the usage and limit of the users' personal repositories, for the admin list
 	ExtraParamStrings map[string]string
 }
 

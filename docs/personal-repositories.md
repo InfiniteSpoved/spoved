@@ -31,3 +31,33 @@ the page stores the setting in the database, where it takes effect at once on ev
 - An unknown value in app.ini stops the start; a stored value that can't be read counts as `disabled`.
 - Every change is logged (`Personal repository policy changed from … to … by …`), and so is every refusal
   (`Personal repository policy … refused a repository of …`).
+
+## Size limit
+
+The same page sets the size limit of each user's personal repositories, in MiB; 0 turns it off. The default comes from
+`[repository] PERSONAL_REPOS_SIZE_LIMIT` (bytes or a size such as `50 MiB`). Site admins can give a user an override in
+the user's admin page (Site limit, Custom in MiB or Unlimited) or with `PATCH /api/v1/admin/users/{username}` (`personal_repo_size_limit`, bytes): 0 uses
+the site limit, -1 means unlimited, any other value replaces it (higher or lower). Overrides apply only while the site
+limit is on. Organizations and site admins who can sign in are never limited.
+
+- **Usage** counts every repository the user owns, those in the trash included: git data and wiki as last measured,
+  and LFS objects as stored now. It is shown on the user's *Settings > Repositories* page and in the admin user list.
+- **At or over the limit the user's repositories are locked for writes.** Every git push is refused before it starts,
+  over HTTP and SSH, a push that only deletes a ref too, and so are wiki pushes, LFS uploads, push-to-create, new
+  repositories (create, template, fork, migration, transfer, adopt, trash restore), web and API file changes, git notes,
+  branches, tags and releases, release and issue attachments, package uploads, Actions artifacts, pull mirror syncs,
+  syncing a fork, updating a pull request branch in the user's repository, and pull requests from another repository
+  into the user's repository.
+- **Only deletions made in the web UI stay allowed:** a repository (it moves to the trash; emptying the trash frees
+  its space), branches, tags, files (only on the current branch, with the default commit message), releases,
+  attachments, LFS objects (repository settings) and wiki pages. Restoring a deleted branch is refused while locked,
+  and a branch deleted while locked can't be restored later either: the gc after the delete removes its commits.
+  After a delete in a locked namespace the repository runs `git gc` at once, so the space counts right away; space
+  that other refs or history still reach is not freed (deleting a file keeps it in history).
+- Writes are allowed again as soon as the usage is below the limit.
+- The size of a repository is measured again after each push, in the background. A push that starts below the limit
+  is accepted even if it crosses it, and so are pushes that run at the same time, so the usage can end up somewhat
+  above the limit; the next write is refused. The limit is not a hard cap on disk space.
+- The refusal says that the limit is reached and shows the usage and the limit; someone else than the owner sees no
+  numbers. The admin page lists the users at or over their limit.
+- Changes of the limit and of an override, and every refusal, are logged.

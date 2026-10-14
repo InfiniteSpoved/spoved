@@ -6,6 +6,7 @@ package setting
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path"
@@ -14,6 +15,7 @@ import (
 
 	"forgejo.org/modules/log"
 
+	"github.com/dustin/go-humanize"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -42,6 +44,7 @@ var (
 		ForcePrivate                            bool
 		OrgRestrictVisibilityChange             bool
 		PersonalRepos                           string `ini:"-"` // the default of the dynamic setting repository.personal_repos
+		PersonalReposSizeLimit                  int64  `ini:"-"` // bytes, 0 = off; the default of its size limit
 		OrgPrivateForkPolicy                    int    `ini:"-"` // 0 all, 1 org, 2 none: the index in user_model.PrivateForkPolicyNames
 		DefaultPrivate                          string
 		DefaultPushCreatePrivate                bool
@@ -333,6 +336,13 @@ func loadRepositoryFrom(rootCfg ConfigProvider) {
 	}
 	if Repository.PersonalRepos, err = parsePersonalRepos(sec.Key("PERSONAL_REPOS").String()); err != nil {
 		log.Fatal("Invalid PERSONAL_REPOS: %v", err)
+	}
+	if v := sec.Key("PERSONAL_REPOS_SIZE_LIMIT").String(); v != "" {
+		size, err := humanize.ParseBytes(v)
+		if err != nil || size > math.MaxInt64 {
+			log.Fatal("Invalid PERSONAL_REPOS_SIZE_LIMIT %q: %v", v, err)
+		}
+		Repository.PersonalReposSizeLimit = int64(size)
 	}
 	Repository.DefaultBranch = sec.Key("DEFAULT_BRANCH").MustString(Repository.DefaultBranch)
 	RepoRootPath = sec.Key("ROOT").MustString(path.Join(AppDataPath, "forgejo-repositories"))

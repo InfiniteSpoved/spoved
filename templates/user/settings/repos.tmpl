@@ -4,6 +4,13 @@
 			{{ctx.Locale.Tr "settings.repos"}}
 		</h4>
 		<div class="ui attached segment">
+			{{if .PersonalRepoLocked}}
+				{{template "shared/personal_repo_limit" .}}
+			{{else if .PersonalRepoUsage.Limit}}
+				<div class="ui info message" id="personal-repo-usage">
+					{{ctx.Locale.Tr "user.settings.personal_repos_usage" (ctx.Locale.TrSize .PersonalRepoUsage.Used) (ctx.Locale.TrSize .PersonalRepoUsage.Limit)}}
+				</div>
+			{{end}}
 			{{if or .allowAdopt .allowDelete}}
 				{{if .Dirs}}
 					<div class="ui list">

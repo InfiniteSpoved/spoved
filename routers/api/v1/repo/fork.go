@@ -152,7 +152,9 @@ func CreateFork(ctx *context.APIContext) {
 		Description: repo.Description,
 	})
 	if err != nil {
-		if organization.IsErrOrgArchived(err) || errors.As(err, &repo_module.ErrOrgPolicy{}) || errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) {
+		if errors.As(err, &quota_model.ErrPersonalRepoLimit{}) {
+			ctx.Error(http.StatusRequestEntityTooLarge, "ForkRepositoryAndUpdates", err)
+		} else if organization.IsErrOrgArchived(err) || errors.As(err, &repo_module.ErrOrgPolicy{}) || errors.As(err, &repo_module.ErrPersonalRepoPolicy{}) {
 			ctx.Error(http.StatusForbidden, "ForkRepositoryAndUpdates", err)
 		} else if errors.Is(err, util.ErrAlreadyExist) || repo_model.IsErrReachLimitOfRepo(err) {
 			ctx.Error(http.StatusConflict, "ForkRepositoryAndUpdates", err)

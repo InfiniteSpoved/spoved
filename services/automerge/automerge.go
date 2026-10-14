@@ -13,6 +13,7 @@ import (
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
 	pull_model "forgejo.org/models/pull"
+	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
@@ -303,6 +304,15 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 	}
 	if pr.BaseRepo.IsArchived {
 		log.Trace("Scheduled auto merge %-v waits: the repository is archived", pr)
+		return
+	}
+	// the merge commit goes to the base repository, which the size limit of its owner's personal repositories
+	// locks: wait, the merge happens on a later event once the usage is below the limit again
+	if l, err := quota_model.GetPersonalRepoLimit(ctx, pr.BaseRepo.OwnerID); err != nil {
+		log.Error("%-v GetPersonalRepoLimit: %v", pr, err)
+		return
+	} else if l.Reached() {
+		log.Info("Scheduled auto merge %-v waits: the size limit of the owner's personal repositories is reached", pr)
 		return
 	}
 

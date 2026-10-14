@@ -10,6 +10,7 @@
 				</h3>
 				<div class="ui attached segment">
 					{{template "base/alert" .}}
+					{{template "shared/personal_repo_limit" .}}
 					<div class="inline required field {{if .Err_CloneAddr}}error{{end}}">
 						<label for="clone_addr">{{ctx.Locale.Tr "migrate.pagure.project_url"}}</label>
 						<input id="clone_addr" name="clone_addr" value="{{.clone_addr}}" autofocus required autocomplete="url">
@@ -66,10 +67,12 @@
 							</span>
 							{{svg "octicon-triangle-down" 14 "dropdown icon"}}
 							<div class="menu" title="{{.SignedUser.Name}}">
-								<div class="item truncated-item-container" data-value="{{.SignedUser.ID}}">
-									{{ctx.AvatarUtils.Avatar .SignedUser 28 "mini"}}
-									<span class="truncated-item-name">{{.SignedUser.ShortName 40}}</span>
-								</div>
+								{{if not .PersonalRepoLocked}}
+									<div class="item truncated-item-container" data-value="{{.SignedUser.ID}}">
+										{{ctx.AvatarUtils.Avatar .SignedUser 28 "mini"}}
+										<span class="truncated-item-name">{{.SignedUser.ShortName 40}}</span>
+									</div>
+								{{end}}
 								{{range .Orgs}}
 									<div class="item truncated-item-container" data-value="{{.ID}}" title="{{.Name}}">
 										{{ctx.AvatarUtils.Avatar . 28 "mini"}}
@@ -116,7 +119,7 @@
 					<div class="divider"></div>
 					<div class="inline field">
 						<label></label>
-						<button class="ui primary button">
+						<button class="ui primary button"{{if and .PersonalRepoLocked (not .Orgs)}} disabled{{end}}>
 							{{ctx.Locale.Tr "repo.migrate_repo"}}
 						</button>
 					</div>

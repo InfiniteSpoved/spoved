@@ -416,6 +416,15 @@ Forgejo or set your environment appropriately.`, "")
 		}
 	}
 
+	if isWiki {
+		// the server only measures the wiki again
+		hookOptions.IsWiki = true
+		if _, extra := private.HookPostReceive(ctx, repoID, hookOptions); extra.HasError() {
+			return fail(ctx, extra.UserMsg, "HookPostReceive failed: %v", extra.Error)
+		}
+		return nil
+	}
+
 	if count == 0 {
 		if wasEmpty && masterPushed {
 			// We need to tell the repo to reset the default branch to master
