@@ -29,9 +29,10 @@ func TestCheckPersonalRepoPolicy(t *testing.T) {
 	t.Cleanup(func() { storePersonalRepos(t, "") })
 	user := func(id int64) *user_model.User { return unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: id}) }
 	individual, org, admin := user(2), user(3), user(1)
-	inactiveAdmin, prohibitedAdmin := user(1), user(1)
+	inactiveAdmin, prohibitedAdmin, botAdmin := user(1), user(1), user(1)
 	inactiveAdmin.IsActive = false
 	prohibitedAdmin.ProhibitLogin = true
+	botAdmin.Type = user_model.UserTypeBot
 
 	check := func(doer, owner *user_model.User, private bool) error {
 		return CheckPersonalRepoPolicy(db.DefaultContext, doer, owner, private)
@@ -66,7 +67,7 @@ func TestCheckPersonalRepoPolicy(t *testing.T) {
 				require.NoError(t, check(admin, individual, private))
 				require.NoError(t, check(individual, admin, private))
 
-				for _, doer := range []*user_model.User{individual, nil, inactiveAdmin, prohibitedAdmin} {
+				for _, doer := range []*user_model.User{individual, nil, inactiveAdmin, prohibitedAdmin, botAdmin} {
 					err := check(doer, individual, private)
 					switch {
 					case tc.mode == setting.PersonalReposAllowed, tc.mode == setting.PersonalReposPrivateOnly && private:

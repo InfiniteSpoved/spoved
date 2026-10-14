@@ -264,10 +264,13 @@ func httpBase(ctx *context.Context) *serviceHandler {
 			return nil
 		}
 
-		// refused before git sends anything, so that the push shows why
-		if err := repo_module.CheckPersonalRepoPolicy(ctx, ctx.Doer, owner, setting.Repository.DefaultPushCreatePrivate || setting.Repository.ForcePrivate); err != nil {
-			refuseGitPush(ctx, err.Error())
-			return nil
+		// refused before git sends anything, so that the push shows why; only in the doer's own namespace, as
+		// PushCreateRepo refuses others anyway and the answer would tell which users are admins
+		if ctx.Doer.ID == owner.ID {
+			if err := repo_module.CheckPersonalRepoPolicy(ctx, ctx.Doer, owner, setting.Repository.DefaultPushCreatePrivate || setting.Repository.ForcePrivate); err != nil {
+				refuseGitPush(ctx, err.Error())
+				return nil
+			}
 		}
 
 		// Return dummy payload if GET receive-pack

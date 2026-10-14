@@ -22,6 +22,12 @@ the page stores the setting in the database, where it takes effect at once on ev
 - Existing repositories are never changed or deleted. The page lists the users whose repositories break the current
   policy (public repositories under `private_only`, any repository under `disabled`; repositories in the trash are not
   counted), so they can be moved to an organization.
+- Bot accounts are restricted like users, but the list doesn't show them.
+- Restoring a repository from the trash to its own owner is not checked: it is existing data, so a public repository
+  comes back public under `private_only`. A restore to another owner is checked for that owner.
+- The cargo package registry keeps its index in a public repository `_cargo-index` in the owner's namespace. Under
+  `private_only` or `disabled` a non-admin user can't create it, so initialising the index in the package settings
+  fails with the generic message (uploads only update an existing index); use an organization for cargo packages.
 - An unknown value in app.ini stops the start; a stored value that can't be read counts as `disabled`.
 - Every change is logged (`Personal repository policy changed from … to … by …`), and so is every refusal
   (`Personal repository policy … refused a repository of …`).

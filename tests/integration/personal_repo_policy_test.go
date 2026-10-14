@@ -6,6 +6,7 @@ package integration
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
@@ -438,4 +439,49 @@ func TestPersonalRepoPolicyRefusalLogged(t *testing.T) {
 	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/user/repos", &api.CreateRepoOption{Name: "logged", Private: true}).AddTokenAuth(token), http.StatusForbidden)
 	filtered, _ := logChecker.Check(5 * time.Second)
 	assert.Equal(t, []bool{true}, filtered)
+}
+
+// Push-to-create into another user's namespace is never refused by the policy before the namespace check, so the
+// answer doesn't tell which users are site admins, and nothing is logged.
+func TestPersonalRepoPolicyPushCreateProbe(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer test.MockVariableValue(&setting.Repository.EnablePushCreateUser, true)()
+	defer setPersonalRepoMode(t, setting.PersonalReposDisabled)()
+	logChecker, cleanup := test.NewLogChecker(log.DEFAULT, log.WARN)
+	logChecker.Filter("Personal repository policy")
+	defer cleanup()
+
+	probe := func(owner string) *httptest.ResponseRecorder {
+		return MakeRequest(t, NewRequest(t, "GET", "/"+owner+"/probe.git/info/refs?service=git-receive-pack").AddBasicAuth("user4"), NoExpectedStatus)
+	}
+	admin, ordinary := probe("user1"), probe("user5")
+	assert.Equal(t, admin.Code, ordinary.Code)
+	assert.Equal(t, admin.Body.String(), ordinary.Body.String())
+	filtered, _ := logChecker.Check(time.Second)
+	assert.Equal(t, []bool{false}, filtered)
+
+	// in the doer's own namespace the refusal shows
+	assert.Contains(t, probe("user4").Body.String(), "ERR "+personalRepoMessage(setting.PersonalReposDisabled))
+}
+
+// The web transfer and accept pages show the policy refusal.
+func TestPersonalRepoPolicyWebTransfer(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	user2 := loginUser(t, "user2")
+	owner := getTokenForLoggedInUser(t, user2, auth_model.AccessTokenScopeAll)
+	for _, name := range []string{"web-tr-start", "web-tr-accept"} {
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/user/repos", &api.CreateRepoOption{Name: name}).AddTokenAuth(owner), http.StatusCreated)
+	}
+	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/web-tr-accept/transfer", &api.TransferRepoOption{NewOwner: "user4"}).AddTokenAuth(owner), http.StatusCreated)
+	defer setPersonalRepoMode(t, setting.PersonalReposPrivateOnly)()
+
+	resp := user2.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/web-tr-start/settings", map[string]string{"action": "transfer", "repo_name": "user2/web-tr-start", "new_owner_name": "user4"}), http.StatusOK)
+	assert.Contains(t, NewHTMLParser(t, resp.Body).Find(".flash-error").Text(), "Personal repositories must be private")
+	assert.True(t, repoExists(t, "user2", "web-tr-start"))
+
+	user4 := loginUser(t, "user4")
+	user4.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/web-tr-accept/action/accept_transfer", nil), http.StatusSeeOther)
+	doc := NewHTMLParser(t, user4.MakeRequest(t, NewRequest(t, "GET", "/user2/web-tr-accept"), http.StatusOK).Body)
+	assert.Contains(t, doc.Find(".flash-error").Text(), "Personal repositories must be private")
+	assert.True(t, repoExists(t, "user2", "web-tr-accept"))
 }

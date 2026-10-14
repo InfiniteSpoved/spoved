@@ -35,7 +35,7 @@ func (ErrPersonalRepoPolicy) Unwrap() error {
 }
 
 func usableAdmin(u *user_model.User) bool {
-	return u != nil && u.IsAdmin && u.IsActive && !u.ProhibitLogin
+	return u != nil && u.IsAdmin && u.IsActive && !u.ProhibitLogin && u.Type == user_model.UserTypeIndividual
 }
 
 // CheckPersonalRepoPolicy returns an ErrPersonalRepoPolicy if the site policy for personal repositories refuses
