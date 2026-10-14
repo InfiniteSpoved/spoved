@@ -35,7 +35,8 @@ func (ErrPersonalRepoPolicy) Unwrap() error {
 	return util.ErrPermissionDenied
 }
 
-func usableAdmin(u *user_model.User) bool {
+// UsableAdmin is a site admin who can sign in (active, login allowed, individual).
+func UsableAdmin(u *user_model.User) bool {
 	return u != nil && u.IsAdmin && u.IsActive && !u.ProhibitLogin && u.Type == user_model.UserTypeIndividual
 }
 
@@ -44,7 +45,7 @@ func usableAdmin(u *user_model.User) bool {
 // (private false). Organizations are never restricted, and a usable site admin as doer or owner is exempt; a nil
 // doer is not. Refusals are logged.
 func CheckPersonalRepoPolicy(ctx context.Context, doer, owner *user_model.User, private bool) error {
-	if owner.IsOrganization() || usableAdmin(doer) || usableAdmin(owner) {
+	if owner.IsOrganization() || UsableAdmin(doer) || UsableAdmin(owner) {
 		return nil
 	}
 	mode := setting.Config().PersonalRepos.Value(ctx).EffectiveMode()

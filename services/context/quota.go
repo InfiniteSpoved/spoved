@@ -215,7 +215,7 @@ func (ctx *Context) setPersonalRepoLimit(l quota_model.PersonalRepoLimit, ownerI
 	ctx.Data["PersonalRepoLocked"] = locked
 	ctx.Data["PersonalRepoLimitOwn"] = own
 	// only the owner and site admins learn that the owner is locked; the numbers are the owner's alone
-	ctx.Data["PersonalRepoBanner"] = locked && (own || ctx.Doer != nil && ctx.Doer.IsAdmin)
+	ctx.Data["PersonalRepoBanner"] = locked && (own || repo_module.UsableAdmin(ctx.Doer))
 	ctx.Data["PersonalRepoUsed"] = l.Used
 	ctx.Data["PersonalRepoLimit"] = l.Limit
 }

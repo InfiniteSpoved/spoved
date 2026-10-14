@@ -12,11 +12,15 @@ import (
 
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/perm"
+	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unittest"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/tests"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -87,14 +91,18 @@ func TestPersonalRepoLockPageWalk(t *testing.T) {
 			"/user2/repo1/pulls/3/files",
 			"/user2/repo1/issues/1",
 			"/user2/repo1/issues/new",
+			"/user2/repo1/pulls/5", // behind its base: Update branch
 			prLink,
 		}
 		owner := loginUser(t, "user2")
 		// the patterns find the actions while unlocked, so an empty result below means hidden, not missed
 		unlocked := refusedLinks(t, owner, pages)
-		for _, kind := range []string{"editor", "new release", "new branch", "restore branch", "wiki edit", "notes", "attachments"} {
+		for _, kind := range []string{"editor", "new release", "new branch", "restore branch", "wiki edit", "notes", "update", "attachments"} {
 			assert.Contains(t, unlocked, kind)
 		}
+		// the merge form is a Vue component: its mount point stands for the buttons
+		doc := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", prLink), http.StatusOK).Body)
+		assert.Equal(t, 1, doc.Find("#pull-request-merge-form").Length())
 
 		lockPersonalRepos(t, 2, true)
 		for _, name := range []string{"user2", "user4", "user1"} {
@@ -111,6 +119,7 @@ func TestPersonalRepoLockPageWalk(t *testing.T) {
 				doc = NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", prLink), http.StatusOK).Body)
 				assert.Contains(t, doc.Find("#personal-repo-merge-locked").Text(), "The owner's personal repositories reached their size limit")
 				assert.Equal(t, 1, doc.Find(`#personal-repo-merge-locked + div button[disabled]`).Length())
+				assert.Zero(t, doc.Find("#pull-request-merge-form").Length())
 				assert.NotContains(t, doc.Find("#personal-repo-merge-locked").Text(), "used")
 			})
 		}
@@ -255,4 +264,58 @@ func TestPersonalRepoLockAdminEditForm(t *testing.T) {
 	assert.Equal(t, "custom", doc.Find("input#personal_repo_size_limit_mode").AttrOr("value", ""))
 	assert.False(t, doc.Find("#personal_repo_size_limit_field").HasClass("tw-hidden"))
 	assert.Equal(t, "5", doc.Find("#personal_repo_size_limit").AttrOr("value", ""))
+}
+
+// MUST-FIX: while locked the edit forms have no dropzone and send no files; saving them must keep the attachments.
+func TestPersonalRepoLockEditKeepsAttachments(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer resetPersonalRepoMode(t)
+	session := loginUser(t, "user2")
+	token := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeAll)
+	var comment api.Comment
+	DecodeJSON(t, MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/repo1/issues/1/comments", &api.CreateIssueCommentOption{Body: "with a file"}).AddTokenAuth(token), http.StatusCreated), &comment)
+	require.NoError(t, db.Insert(db.DefaultContext, &repo_model.Attachment{UUID: uuid.NewString(), RepoID: 1, IssueID: 1, CommentID: comment.ID, Name: "c.txt"}))
+	editIssue := func() {
+		issue := unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: 1})
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/issues/1/content", map[string]string{
+			"content": "edited " + strconv.Itoa(issue.ContentVersion), "content_version": strconv.Itoa(issue.ContentVersion),
+		}), http.StatusOK)
+	}
+	editComment := func() {
+		c := unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ID: comment.ID})
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/comments/"+strconv.FormatInt(comment.ID, 10), map[string]string{
+			"content": "edited " + strconv.Itoa(c.ContentVersion), "content_version": strconv.Itoa(c.ContentVersion),
+		}), http.StatusOK)
+	}
+
+	lockPersonalRepos(t, 2, true)
+	editIssue()
+	editComment()
+	unittest.AssertExistsAndLoadBean(t, &repo_model.Attachment{ID: 1, IssueID: 1})
+	unittest.AssertExistsAndLoadBean(t, &repo_model.Attachment{CommentID: comment.ID})
+
+	// below the limit the form's list decides again: a save without the file removes it
+	lockPersonalRepos(t, 2, false)
+	editComment()
+	unittest.AssertNotExistsBean(t, &repo_model.Attachment{CommentID: comment.ID})
+}
+
+// MUST-FIX: a release is deleted from its edit page, which stays open while locked; saving it is refused.
+func TestPersonalRepoLockReleaseEdit(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer resetPersonalRepoMode(t)
+	session := loginUser(t, "user2")
+	lockPersonalRepos(t, 2, true)
+
+	doc := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/releases/edit/v1.1"), http.StatusOK).Body)
+	assert.Contains(t, doc.Find("#personal-repo-limit-banner").Text(), "You can't push or add content")
+	assert.Equal(t, 1, doc.Find(".delete-button[data-url$=\"/releases/delete\"]").Length())
+	assert.Zero(t, doc.Find(`form.ui.form button.primary`).Length(), "no Save or Publish")
+	assert.Zero(t, doc.Find(`.dropzone`).Length(), "no uploads")
+
+	session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/releases/edit/v1.1", map[string]string{
+		"tag_name": "v1.1", "title": "edited", "content": "",
+	}), http.StatusRequestEntityTooLarge)
+	session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/releases/delete", map[string]string{"id": "1"}), http.StatusOK)
+	unittest.AssertNotExistsBean(t, &repo_model.Release{ID: 1})
 }

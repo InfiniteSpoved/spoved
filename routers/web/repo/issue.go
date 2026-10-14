@@ -2492,7 +2492,9 @@ func UpdateIssueContent(ctx *context.Context) {
 	}
 
 	// when update the request doesn't intend to update attachments (eg: change checkbox state), ignore attachment updates
-	if !ctx.FormBool("ignore_attachments") {
+	// without a dropzone (attachments off, or the owner's personal repositories at their size limit) the form sends
+	// no files, which would delete every attachment
+	if !ctx.FormBool("ignore_attachments") && ctx.AttachmentsEnabled() {
 		if err := updateAttachments(ctx, issue, ctx.FormStrings("files[]")); err != nil {
 			ctx.ServerError("UpdateAttachments", err)
 			return
@@ -3495,7 +3497,9 @@ func UpdateCommentContent(ctx *context.Context) {
 	}
 
 	// when the update request doesn't intend to update attachments (eg: change checkbox state), ignore attachment updates
-	if !ctx.FormBool("ignore_attachments") {
+	// without a dropzone (attachments off, or the owner's personal repositories at their size limit) the form sends
+	// no files, which would delete every attachment
+	if !ctx.FormBool("ignore_attachments") && ctx.AttachmentsEnabled() {
 		if err := updateAttachments(ctx, comment, ctx.FormStrings("files[]")); err != nil {
 			ctx.ServerError("UpdateAttachments", err)
 			return

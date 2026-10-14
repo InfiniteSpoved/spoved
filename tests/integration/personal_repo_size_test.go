@@ -481,9 +481,17 @@ func TestPersonalRepoSizeQueries(t *testing.T) {
 		_, err := quota_model.EvaluateForUser(db.DefaultContext, 2, quota_model.LimitSubjectSizeReposAll)
 		require.NoError(t, err)
 	}
+	// RepoAssignment's check for every repository page of a signed-in viewer: the owner is loaded already
+	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	repoPage := func() {
+		_, err := quota_model.GetPersonalRepoLimitOf(db.DefaultContext, owner)
+		require.NoError(t, err)
+	}
 	assert.EqualValues(t, 0, stableQueryCount(t, evaluate))
+	assert.EqualValues(t, 0, stableQueryCount(t, repoPage))
 	setPersonalRepoSizeLimit(t, 1<<40)
 	assert.EqualValues(t, 2, stableQueryCount(t, evaluate))
+	assert.EqualValues(t, 1, stableQueryCount(t, repoPage))
 }
 
 // M1: the SSH path, at the internal serv command (ssh can't run in containers).
