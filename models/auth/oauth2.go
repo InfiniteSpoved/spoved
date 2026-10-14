@@ -34,6 +34,8 @@ type OAuth2Application struct {
 	Name         string
 	ClientID     string `xorm:"unique"`
 	ClientSecret string
+	// ClientSecretExpiresUnix is the expiry of the client secret; 0 = never
+	ClientSecretExpiresUnix timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"`
 	// OAuth defines both Confidential and Public client types
 	// https://datatracker.ietf.org/doc/html/rfc6749#section-2.1
 	// "Authorization servers MUST record the client type in the client registration details"
@@ -183,8 +185,9 @@ const lowerBase32Chars = "abcdefghijklmnopqrstuvwxyz234567"
 // base32 encoder that uses lowered characters without padding.
 var base32Lower = base32.NewEncoding(lowerBase32Chars).WithPadding(base32.NoPadding)
 
-// GenerateClientSecret will generate the client secret and returns the plaintext and saves the hash at the database
-func (app *OAuth2Application) GenerateClientSecret(ctx context.Context) (string, error) {
+// GenerateClientSecret will generate the client secret and returns the plaintext and saves the hash at the database,
+// with its expiry (0 = never), which the caller has checked against the policy
+func (app *OAuth2Application) GenerateClientSecret(ctx context.Context, expires timeutil.TimeStamp) (string, error) {
 	// Add a prefix to the base32, this is in order to make it easier
 	// for code scanners to grab sensitive tokens.
 	clientSecret := "gto_" + base32Lower.EncodeToString(util.CryptoRandomBytes(32))
@@ -194,15 +197,26 @@ func (app *OAuth2Application) GenerateClientSecret(ctx context.Context) (string,
 		return "", err
 	}
 	app.ClientSecret = string(hashedSecret)
-	if _, err := db.GetEngine(ctx).ID(app.ID).Cols("client_secret").Update(app); err != nil {
+	app.ClientSecretExpiresUnix = expires
+	if _, err := db.GetEngine(ctx).ID(app.ID).Cols("client_secret", "client_secret_expires_unix").Update(app); err != nil {
 		return "", err
 	}
 	return clientSecret, nil
 }
 
-// ValidateClientSecret validates the given secret by the hash saved in database
+// ClientSecretExpired reports whether the client secret has an expiry that has passed
+func (app *OAuth2Application) ClientSecretExpired() bool {
+	return app.ClientSecretExpiresUnix != 0 && timeutil.TimeStampNow() >= app.ClientSecretExpiresUnix
+}
+
+// ValidateClientSecret validates the given secret by the hash saved in database; an expired secret is invalid
 func (app *OAuth2Application) ValidateClientSecret(secret []byte) bool {
-	return bcrypt.CompareHashAndPassword([]byte(app.ClientSecret), secret) == nil
+	return !app.ClientSecretExpired() && bcrypt.CompareHashAndPassword([]byte(app.ClientSecret), secret) == nil
+}
+
+// MatchesExpiredClientSecret reports whether the given secret is the application's secret and has expired
+func (app *OAuth2Application) MatchesExpiredClientSecret(secret []byte) bool {
+	return app.ClientSecretExpired() && bcrypt.CompareHashAndPassword([]byte(app.ClientSecret), secret) == nil
 }
 
 // GetGrantByUserID returns a OAuth2Grant by its user and application ID
@@ -319,7 +333,7 @@ func UpdateOAuth2Application(ctx context.Context, opts UpdateOAuth2ApplicationOp
 }
 
 func updateOAuth2Application(ctx context.Context, app *OAuth2Application) error {
-	if _, err := db.GetEngine(ctx).ID(app.ID).UseBool("confidential_client").Update(app); err != nil {
+	if _, err := db.GetEngine(ctx).ID(app.ID).Cols("name", "redirect_uris", "confidential_client").Update(app); err != nil {
 		return err
 	}
 	return nil

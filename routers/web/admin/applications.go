@@ -15,6 +15,7 @@ import (
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
+	shared_user "forgejo.org/routers/web/shared/user"
 	user_setting "forgejo.org/routers/web/user/setting"
 	"forgejo.org/services/auth/oauth2app"
 	"forgejo.org/services/context"
@@ -49,6 +50,7 @@ func Applications(ctx *context.Context) {
 	ctx.Data["Applications"] = apps
 	ctx.Data["BuiltinApplications"] = auth.BuiltinApplications()
 	ctx.Data["CanCreateOAuth2App"] = true // site admins always may
+	shared_user.SetExpiryFormData(ctx.Base, setting.OAuth2AppSecretExpiry)
 
 	// review list: apps owned by users and organizations, whose owners may no longer be allowed to create apps
 	all, err := db.Find[auth.OAuth2Application](ctx, auth.FindOAuth2ApplicationsOptions{})

@@ -9,6 +9,7 @@ import (
 
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/api/v1/utils"
@@ -149,11 +150,17 @@ func CreateOauth2Application(ctx *context.APIContext) {
 	//     "$ref": "#/responses/unauthorized"
 	//   "403":
 	//     "$ref": "#/responses/forbidden"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
 
 	if !mayManageOAuth2Apps(ctx) {
 		return
 	}
 	data := web.GetForm(ctx).(*api.CreateOAuth2ApplicationOptions)
+	expires, ok := utils.ValidateExpiry(ctx, setting.OAuth2AppSecretExpiry, data.ClientSecretExpiresAt)
+	if !ok {
+		return
+	}
 
 	app, err := auth_model.CreateOAuth2Application(ctx, auth_model.CreateOAuth2ApplicationOptions{
 		Name:               data.Name,
@@ -165,7 +172,7 @@ func CreateOauth2Application(ctx *context.APIContext) {
 		ctx.Error(http.StatusBadRequest, "", "error creating oauth2 application")
 		return
 	}
-	secret, err := app.GenerateClientSecret(ctx)
+	secret, err := app.GenerateClientSecret(ctx, expires)
 	if err != nil {
 		ctx.Error(http.StatusBadRequest, "", "error creating application secret")
 		return
@@ -325,12 +332,18 @@ func UpdateOauth2Application(ctx *context.APIContext) {
 	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
 	if !mayManageOAuth2Apps(ctx) {
 		return
 	}
 	appID := ctx.ParamsInt64(":id")
 
 	data := web.GetForm(ctx).(*api.CreateOAuth2ApplicationOptions)
+	expires, ok := utils.ValidateExpiry(ctx, setting.OAuth2AppSecretExpiry, data.ClientSecretExpiresAt)
+	if !ok {
+		return
+	}
 
 	app, err := auth_model.UpdateOAuth2Application(ctx, auth_model.UpdateOAuth2ApplicationOptions{
 		Name:               data.Name,
@@ -347,7 +360,7 @@ func UpdateOauth2Application(ctx *context.APIContext) {
 		}
 		return
 	}
-	app.ClientSecret, err = app.GenerateClientSecret(ctx)
+	app.ClientSecret, err = app.GenerateClientSecret(ctx, expires)
 	if err != nil {
 		ctx.Error(http.StatusBadRequest, "", "error updating application secret")
 		return

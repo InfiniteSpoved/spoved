@@ -24594,6 +24594,9 @@
           },
           "403": {
             "$ref": "#/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -24706,6 +24709,9 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -30419,6 +30425,12 @@
       "description": "CreateOAuth2ApplicationOptions holds options to create an oauth2 application",
       "type": "object",
       "properties": {
+        "client_secret_expires_at": {
+          "description": "Expiry of the new client secret; required unless the instance's policy allows no expiry",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ClientSecretExpiresAt"
+        },
         "confidential_client": {
           "type": "boolean",
           "x-go-name": "ConfidentialClient"
@@ -35207,6 +35219,12 @@
           "type": "string",
           "x-go-name": "ClientSecret"
         },
+        "client_secret_expires_at": {
+          "description": "absent when the client secret never expires",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ClientSecretExpiresAt"
+        },
         "confidential_client": {
           "type": "boolean",
           "x-go-name": "ConfidentialClient"
@@ -39965,6 +39983,11 @@
         },
         "client_secret": {
           "type": "string"
+        },
+        "client_secret_expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "absent when the client secret never expires"
         },
         "confidential_client": {
           "type": "boolean"
