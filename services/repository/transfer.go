@@ -50,6 +50,9 @@ func TransferOwnership(ctx context.Context, doer, newOwner *user_model.User, rep
 	if err := checkNotArchivedOrg(ctx, repo, newOwner); err != nil {
 		return err
 	}
+	if err := repo_module.CheckPersonalRepoPolicy(ctx, doer, newOwner, repo.IsPrivate); err != nil {
+		return err
+	}
 	if err := repo.LoadOwner(ctx); err != nil {
 		return err
 	}
@@ -452,6 +455,9 @@ func ChangeRepositoryName(ctx context.Context, doer *user_model.User, repo *repo
 // it make repository into pending transfer state, if doer can not create repo for new owner.
 func StartRepositoryTransfer(ctx context.Context, doer, newOwner *user_model.User, repo *repo_model.Repository, teams []*organization.Team) error {
 	if err := checkNotArchivedOrg(ctx, repo, newOwner); err != nil {
+		return err
+	}
+	if err := repo_module.CheckPersonalRepoPolicy(ctx, doer, newOwner, repo.IsPrivate); err != nil {
 		return err
 	}
 	if user_model.IsBlocked(ctx, newOwner.ID, doer.ID) {

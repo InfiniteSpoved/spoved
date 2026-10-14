@@ -134,6 +134,9 @@
 		<a class="{{if .PageIsAdminRepoUnits}}active {{end}}item" href="{{AppSubUrl}}/admin/repo-units">
 			{{ctx.Locale.Tr "admin.repo_units"}}
 		</a>
+		<a class="{{if .PageIsAdminPersonalRepos}}active {{end}}item" href="{{AppSubUrl}}/admin/personal-repos">
+			{{ctx.Locale.Tr "admin.personal_repos"}}
+		</a>
 		{{if not DisableWebhooks}}
 		<a class="{{if .PageIsAdminWebhookTypes}}active {{end}}item" href="{{AppSubUrl}}/admin/webhook-types">
 			{{ctx.Locale.Tr "admin.webhook_types"}}
