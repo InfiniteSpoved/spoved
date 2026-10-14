@@ -104,6 +104,24 @@ func TestOAuth2Application_ValidateClientSecret(t *testing.T) {
 	assert.False(t, stored.ValidateClientSecret([]byte(secret)), "expired")
 	assert.True(t, stored.MatchesExpiredClientSecret([]byte(secret)))
 	assert.False(t, stored.MatchesExpiredClientSecret([]byte("fewijfowejgfiowjeoifew")), "only a matching secret is reported as expired")
+
+	// regenerate to "never", where the policy allows it
+	secret, err = stored.GenerateClientSecret(db.DefaultContext, 0)
+	require.NoError(t, err)
+	stored = unittest.AssertExistsAndLoadBean(t, &auth_model.OAuth2Application{ID: 1})
+	assert.Zero(t, stored.ClientSecretExpiresUnix)
+	assert.True(t, stored.ValidateClientSecret([]byte(secret)))
+
+	// an edit doesn't write the secret or its expiry back
+	before := *stored
+	_, err = stored.GenerateClientSecret(db.DefaultContext, timeutil.TimeStampNow().Add(60))
+	require.NoError(t, err)
+	_, err = auth_model.UpdateOAuth2Application(db.DefaultContext, auth_model.UpdateOAuth2ApplicationOptions{ID: 1, UserID: before.UID, Name: "renamed", RedirectURIs: before.RedirectURIs, ConfidentialClient: true})
+	require.NoError(t, err)
+	edited := unittest.AssertExistsAndLoadBean(t, &auth_model.OAuth2Application{ID: 1})
+	assert.Equal(t, stored.ClientSecret, edited.ClientSecret)
+	assert.Equal(t, stored.ClientSecretExpiresUnix, edited.ClientSecretExpiresUnix)
+	assert.Equal(t, "renamed", edited.Name)
 }
 
 func TestGetOAuth2ApplicationByClientID(t *testing.T) {

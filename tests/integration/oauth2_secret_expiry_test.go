@@ -66,9 +66,13 @@ func TestOAuth2AppSecretExpiryPolicy(t *testing.T) {
 			assert.Contains(t, editPage.Find("label[for='client-secret']").Text(), "Expires ")
 
 			admin.MakeRequest(t, NewRequestWithValues(t, "POST", regenerate, map[string]string{"expires_at": day(366)}), http.StatusSeeOther)
-			assert.Contains(t, admin.MakeRequest(t, NewRequest(t, "GET", edit), http.StatusOK).Body.String(), "at most 365 days from today.")
+			assert.Contains(t, admin.MakeRequest(t, NewRequest(t, "GET", edit), http.StatusOK).Body.String(), "The expiry date can be at most 365 days from today.")
+			// a missing field is "required", never "no expiry"
+			admin.MakeRequest(t, NewRequestWithValues(t, "POST", regenerate, nil), http.StatusSeeOther)
+			assert.Contains(t, admin.MakeRequest(t, NewRequest(t, "GET", edit), http.StatusOK).Body.String(), "An expiry date is required, at most 365 days from today.")
 			after := unittest.AssertExistsAndLoadBean(t, &auth_model.OAuth2Application{ID: app.ID})
 			assert.Equal(t, app.ClientSecret, after.ClientSecret, "a refused regenerate keeps the secret")
+			assert.Equal(t, app.ClientSecretExpiresUnix, after.ClientSecretExpiresUnix)
 
 			admin.MakeRequest(t, NewRequestWithValues(t, "POST", regenerate, map[string]string{"expires_at": day(10)}), http.StatusOK)
 			after = unittest.AssertExistsAndLoadBean(t, &auth_model.OAuth2Application{ID: app.ID})
@@ -81,7 +85,11 @@ func TestOAuth2AppSecretExpiryPolicy(t *testing.T) {
 		token := getTokenForLoggedInUser(t, admin, auth_model.AccessTokenScopeWriteUser)
 		send := func(method, url string, expires *time.Time, status int) *api.OAuth2Application {
 			t.Helper()
-			body := api.CreateOAuth2ApplicationOptions{Name: "api", RedirectURIs: []string{"https://example.com/cb"}, ConfidentialClient: true, ClientSecretExpiresAt: expires}
+			name := "api"
+			if status >= 300 {
+				name = "refused"
+			}
+			body := api.CreateOAuth2ApplicationOptions{Name: name, RedirectURIs: []string{"https://example.com/cb"}, ConfidentialClient: true, ClientSecretExpiresAt: expires}
 			resp := MakeRequest(t, NewRequestWithJSON(t, method, url, body).AddTokenAuth(token), status)
 			app := new(api.OAuth2Application)
 			if status < 300 {
@@ -94,7 +102,7 @@ func TestOAuth2AppSecretExpiryPolicy(t *testing.T) {
 
 		send("POST", "/api/v1/user/applications/oauth2", nil, http.StatusUnprocessableEntity)
 		send("POST", "/api/v1/user/applications/oauth2", &tooLate, http.StatusUnprocessableEntity)
-		unittest.AssertNotExistsBean(t, &auth_model.OAuth2Application{UID: 1, Name: "api"})
+		unittest.AssertNotExistsBean(t, &auth_model.OAuth2Application{UID: 1, Name: "refused"})
 		created := send("POST", "/api/v1/user/applications/oauth2", &inPolicy, http.StatusCreated)
 		require.NotNil(t, created.ClientSecretExpiresAt)
 		assert.True(t, inPolicy.Equal(*created.ClientSecretExpiresAt))
@@ -104,6 +112,7 @@ func TestOAuth2AppSecretExpiryPolicy(t *testing.T) {
 		send("PATCH", url, &tooLate, http.StatusUnprocessableEntity)
 		stored := unittest.AssertExistsAndLoadBean(t, &auth_model.OAuth2Application{ID: created.ID})
 		assert.True(t, stored.ValidateClientSecret([]byte(created.ClientSecret)), "a refused PATCH keeps the secret")
+		assert.Equal(t, "api", stored.Name, "a refused PATCH changes nothing")
 		soon := time.Now().AddDate(0, 0, 10).Truncate(time.Second)
 		patched := send("PATCH", url, &soon, http.StatusOK)
 		assert.True(t, soon.Equal(*patched.ClientSecretExpiresAt))

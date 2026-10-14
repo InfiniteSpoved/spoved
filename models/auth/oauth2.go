@@ -333,7 +333,7 @@ func UpdateOAuth2Application(ctx context.Context, opts UpdateOAuth2ApplicationOp
 }
 
 func updateOAuth2Application(ctx context.Context, app *OAuth2Application) error {
-	if _, err := db.GetEngine(ctx).ID(app.ID).UseBool("confidential_client").Update(app); err != nil {
+	if _, err := db.GetEngine(ctx).ID(app.ID).Cols("name", "redirect_uris", "confidential_client").Update(app); err != nil {
 		return err
 	}
 	return nil
