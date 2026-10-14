@@ -209,7 +209,7 @@ func (ctx *preReceiveContext) checkQuota() error {
 		return nil
 	}
 
-	ok, err := quota_model.EvaluateForUser(ctx, ctx.Repo.Repository.OwnerID, quota_model.LimitSubjectSizeReposAll)
+	ok, err := quota_model.EvaluateQuotaGroupsForUser(ctx, ctx.Repo.Repository.OwnerID, quota_model.LimitSubjectSizeReposAll)
 	if err != nil {
 		log.Error("quota_model.EvaluateForUser: %v", err)
 		ctx.JSON(http.StatusInternalServerError, private.Response{

@@ -34041,6 +34041,12 @@
           "type": "string",
           "x-go-name": "Password"
         },
+        "personal_repo_size_limit": {
+          "description": "size limit in bytes of all of the user's personal repositories: 0 = the site limit, -1 = unlimited",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "PersonalRepoSizeLimit"
+        },
         "prohibit_login": {
           "type": "boolean",
           "x-go-name": "ProhibitLogin"

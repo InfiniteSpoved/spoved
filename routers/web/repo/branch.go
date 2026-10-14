@@ -90,6 +90,7 @@ func DeleteBranchPost(ctx *context.Context) {
 	defer redirect(ctx)
 	branchName := ctx.FormString("name")
 
+	locked := repo_service.PersonalRepoLocked(ctx, ctx.Repo.Repository)
 	if err := repo_service.DeleteBranch(ctx, ctx.Doer, ctx.Repo.Repository, ctx.Repo.GitRepo, branchName); err != nil {
 		switch {
 		case git.IsErrBranchNotExist(err):
@@ -109,6 +110,7 @@ func DeleteBranchPost(ctx *context.Context) {
 		return
 	}
 
+	repo_service.ShrinkAfterDelete(ctx, ctx.Repo.Repository, locked)
 	ctx.Flash.Success(ctx.Tr("repo.branch.deletion_success", branchName))
 }
 
@@ -118,6 +120,12 @@ func RestoreBranchPost(ctx *context.Context) {
 
 	branchID := ctx.FormInt64("branch_id")
 	branchName := ctx.FormString("name")
+
+	// a restore adds a branch, and the size limit's gc may have pruned its objects
+	if repo_service.PersonalRepoLocked(ctx, ctx.Repo.Repository) {
+		ctx.Flash.Error(ctx.Tr("repo.personal_repos.limit_reached_short"))
+		return
+	}
 
 	deletedBranch, err := git_model.GetDeletedBranchByID(ctx, ctx.Repo.Repository.ID, branchID)
 	if err != nil {

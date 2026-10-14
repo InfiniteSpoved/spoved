@@ -216,6 +216,7 @@ func Repos(ctx *context.Context) {
 	ctx.Data["PageIsSettingsRepos"] = true
 	ctx.Data["allowAdopt"] = ctx.IsUserSiteAdmin() || setting.Repository.AllowAdoptionOfUnadoptedRepositories
 	ctx.Data["allowDelete"] = ctx.IsUserSiteAdmin() || setting.Repository.AllowDeleteOfUnadoptedRepositories
+	ctx.Data["PersonalRepoUsage"] = ctx.SetPersonalRepoLimit(ctx.Doer.ID)
 
 	opts := db.ListOptions{
 		PageSize: setting.UI.Admin.UserPagingNum,

@@ -167,10 +167,15 @@ func AdoptOrDeleteRepository(ctx *context.Context) {
 			Name:      dirSplit[1],
 			IsPrivate: true,
 		}); err != nil {
-			ctx.ServerError("repository.AdoptRepository", err)
-			return
+			refusal, refused := ctx.PersonalRepoRefusal(err)
+			if !refused {
+				ctx.ServerError("repository.AdoptRepository", err)
+				return
+			}
+			ctx.Flash.Error(refusal)
+		} else {
+			ctx.Flash.Success(ctx.Tr("repo.adopt_preexisting_success", dir))
 		}
-		ctx.Flash.Success(ctx.Tr("repo.adopt_preexisting_success", dir))
 	} else if action == "delete" {
 		if err := repo_service.DeleteUnadoptedRepository(ctx, ctx.Doer, ctxUser, dirSplit[1]); err != nil {
 			ctx.ServerError("repository.AdoptRepository", err)

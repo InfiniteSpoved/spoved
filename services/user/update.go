@@ -28,6 +28,7 @@ type UpdateOptions struct {
 	AllowGitHook                 optional.Option[bool]
 	AllowImportLocal             optional.Option[bool]
 	MaxRepoCreation              optional.Option[int]
+	PersonalRepoSizeLimit        optional.Option[int64]
 	IsRestricted                 optional.Option[bool]
 	Visibility                   optional.Option[structs.VisibleType]
 	KeepActivityPrivate          optional.Option[bool]
@@ -106,6 +107,10 @@ func UpdateUser(ctx context.Context, u *user_model.User, opts *UpdateOptions) er
 	if has, value := opts.MaxRepoCreation.Get(); has {
 		u.MaxRepoCreation = value
 		cols = append(cols, "max_repo_creation")
+	}
+	if has, value := opts.PersonalRepoSizeLimit.Get(); has {
+		u.PersonalRepoSizeLimit = value
+		cols = append(cols, "personal_repo_size_limit")
 	}
 	if has, value := opts.IsActive.Get(); has {
 		if !value && user_model.IsLastUsableAdmin(ctx, u) {

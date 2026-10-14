@@ -40,7 +40,7 @@ var personalRepoModes = []string{setting.PersonalReposAllowed, setting.PersonalR
 func setPersonalRepoMode(t *testing.T, mode string) func() {
 	t.Helper()
 	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
-	require.NoError(t, repo_service.SetPersonalRepoPolicy(db.DefaultContext, admin, mode))
+	require.NoError(t, repo_service.SetPersonalRepoPolicy(db.DefaultContext, admin, mode, 0))
 	bumpSettingsRevision(t)
 	return func() { resetPersonalRepoMode(t) }
 }

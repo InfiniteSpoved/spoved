@@ -202,7 +202,7 @@ func BatchHandler(ctx *context.Context) {
 			return
 		}
 		if !ok {
-			writeStatusMessage(ctx, http.StatusRequestEntityTooLarge, "quota exceeded")
+			writeStatusMessage(ctx, http.StatusRequestEntityTooLarge, quotaRefusal(ctx, repository.OwnerID))
 			return
 		}
 	}
@@ -341,7 +341,7 @@ func UploadHandler(ctx *context.Context) {
 			return
 		}
 		if !ok {
-			writeStatusMessage(ctx, http.StatusRequestEntityTooLarge, "quota exceeded")
+			writeStatusMessage(ctx, http.StatusRequestEntityTooLarge, quotaRefusal(ctx, repository.OwnerID))
 			return
 		}
 	}
@@ -564,6 +564,18 @@ func buildObjectResponse(rc *requestContext, pointer lfs_module.Pointer, downloa
 
 func writeStatus(ctx *context.Context, status int) {
 	writeStatusMessage(ctx, status, http.StatusText(status))
+}
+
+// quotaRefusal is the message of an LFS upload refused by EvaluateForUser.
+func quotaRefusal(ctx *context.Context, ownerID int64) string {
+	if l, err := quota_model.GetPersonalRepoLimit(ctx, ownerID); err == nil && l.Reached() {
+		var doerID int64
+		if ctx.Doer != nil {
+			doerID = ctx.Doer.ID
+		}
+		return l.MessageFor(doerID, ownerID)
+	}
+	return "quota exceeded"
 }
 
 func writeStatusMessage(ctx *context.Context, status int, message string) {

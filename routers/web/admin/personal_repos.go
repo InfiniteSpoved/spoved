@@ -5,8 +5,10 @@ package admin
 
 import (
 	"errors"
+	"math"
 	"net/http"
 
+	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
@@ -45,12 +47,27 @@ func PersonalRepos(ctx *context.Context) {
 	}
 	ctx.Data["Violators"] = violators
 	ctx.Data["ViolatorsTotal"] = total
+	sizeLimit := s.EffectiveSizeLimit()
+	ctx.Data["SizeLimit"] = sizeLimit
+	ctx.Data["SizeLimitMiB"] = sizeLimit / (1 << 20)
+	overLimit, overLimitTotal, err := quota_model.FindPersonalRepoOverLimit(ctx, maxPersonalRepoViolators)
+	if err != nil {
+		ctx.ServerError("FindPersonalRepoOverLimit", err)
+		return
+	}
+	ctx.Data["OverLimit"] = overLimit
+	ctx.Data["OverLimitTotal"] = overLimitTotal
 	ctx.HTML(http.StatusOK, tplPersonalRepos)
 }
 
 // PersonalReposPost stores the policy
 func PersonalReposPost(ctx *context.Context) {
-	err := repo_service.SetPersonalRepoPolicy(ctx, ctx.Doer, ctx.FormString("mode"))
+	mib := ctx.FormInt64("size_limit_mib")
+	if mib < 0 || mib > math.MaxInt64>>20 {
+		ctx.Error(http.StatusBadRequest, "invalid size limit")
+		return
+	}
+	err := repo_service.SetPersonalRepoPolicy(ctx, ctx.Doer, ctx.FormString("mode"), mib<<20)
 	if errors.Is(err, util.ErrInvalidArgument) {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return

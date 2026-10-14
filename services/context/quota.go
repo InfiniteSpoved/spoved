@@ -5,11 +5,14 @@ package context
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
 	quota_model "forgejo.org/models/quota"
 	"forgejo.org/modules/base"
+	"forgejo.org/modules/log"
+	repo_module "forgejo.org/modules/repository"
 )
 
 type QuotaTargetType int
@@ -64,7 +67,20 @@ func QuotaRuleAssignmentAPI() func(ctx *APIContext) {
 
 // ctx.CheckQuota checks whether the user in question is within quota limits (web context)
 func (ctx *Context) CheckQuota(subject quota_model.LimitSubject, userID int64, username string) bool {
-	ok, err := checkQuota(ctx.originCtx, subject, userID, username, func(userID int64, username string) {
+	return ctx.checkQuota(quota_model.EvaluateForUser, subject, userID, username)
+}
+
+// EnforceQuotaGroupsWeb is EnforceQuotaWeb without the size limit of personal repositories, for the web deletes
+// that stay allowed at that limit.
+func EnforceQuotaGroupsWeb(subject quota_model.LimitSubject, target QuotaTargetType) func(ctx *Context) {
+	return func(ctx *Context) {
+		ctx.checkQuota(quota_model.EvaluateQuotaGroupsForUser, subject, target.UserID(ctx), target.UserName(ctx))
+	}
+}
+
+func (ctx *Context) checkQuota(evaluate quotaEvaluator, subject quota_model.LimitSubject, userID int64, username string) bool {
+	ok, err := checkQuota(ctx.originCtx, evaluate, subject, userID, username, func(userID int64, username string) {
+		personal := personalRepoLimitReached(ctx, userID)
 		showHTML := false
 		for _, part := range ctx.Req.Header["Accept"] {
 			if strings.Contains(part, "text/html") {
@@ -73,10 +89,15 @@ func (ctx *Context) CheckQuota(subject quota_model.LimitSubject, userID int64, u
 			}
 		}
 		if !showHTML {
-			ctx.plainTextInternal(3, http.StatusRequestEntityTooLarge, []byte("Quota exceeded.\n"))
+			msg := "Quota exceeded."
+			if personal.Reached() {
+				msg = personal.MessageFor(ctx.doerID(), userID)
+			}
+			ctx.plainTextInternal(3, http.StatusRequestEntityTooLarge, []byte(msg+"\n"))
 			return
 		}
 
+		ctx.setPersonalRepoLimit(personal, userID)
 		ctx.Data["IsRepo"] = ctx.Repo.Repository != nil
 		ctx.Data["Title"] = "Quota Exceeded"
 		ctx.HTML(http.StatusRequestEntityTooLarge, base.TplName("status/413"))
@@ -91,9 +112,46 @@ func (ctx *Context) CheckQuota(subject quota_model.LimitSubject, userID int64, u
 
 // ctx.CheckQuota checks whether the user in question is within quota limits (API context)
 func (ctx *APIContext) CheckQuota(subject quota_model.LimitSubject, userID int64, username string) bool {
-	ok, err := checkQuota(ctx.originCtx, subject, userID, username, func(userID int64, username string) {
+	return ctx.checkQuota(quota_model.EvaluateForUser, subject, userID, username)
+}
+
+// CheckPersonalRepoLimit checks only the size limit of the user's personal repositories (web context), for writes
+// the quota groups don't cover.
+func (ctx *Context) CheckPersonalRepoLimit(userID int64, username string) bool {
+	return ctx.checkQuota(quota_model.EvaluatePersonalRepoLimit, quota_model.LimitSubjectSizeGitAll, userID, username)
+}
+
+// CheckPersonalRepoLimit is the API context's CheckPersonalRepoLimit.
+func (ctx *APIContext) CheckPersonalRepoLimit(userID int64, username string) bool {
+	return ctx.checkQuota(quota_model.EvaluatePersonalRepoLimit, quota_model.LimitSubjectSizeGitAll, userID, username)
+}
+
+// EnforcePersonalRepoLimitWeb returns a middleware that checks only the size limit of personal repositories.
+func EnforcePersonalRepoLimitWeb(target QuotaTargetType) func(ctx *Context) {
+	return func(ctx *Context) {
+		ctx.CheckPersonalRepoLimit(target.UserID(ctx), target.UserName(ctx))
+	}
+}
+
+// EnforcePersonalRepoLimitAPI is the API's EnforcePersonalRepoLimitWeb.
+func EnforcePersonalRepoLimitAPI(target QuotaTargetType) func(ctx *APIContext) {
+	return func(ctx *APIContext) {
+		ctx.CheckPersonalRepoLimit(target.UserID(ctx), target.UserName(ctx))
+	}
+}
+
+func (ctx *APIContext) checkQuota(evaluate quotaEvaluator, subject quota_model.LimitSubject, userID int64, username string) bool {
+	ok, err := checkQuota(ctx.originCtx, evaluate, subject, userID, username, func(userID int64, username string) {
+		msg := "quota exceeded"
+		if personal := personalRepoLimitReached(ctx, userID); personal.Reached() {
+			var doerID int64
+			if ctx.Doer() != nil {
+				doerID = ctx.Doer().ID
+			}
+			msg = personal.MessageFor(doerID, userID)
+		}
 		ctx.JSON(http.StatusRequestEntityTooLarge, APIQuotaExceeded{
-			Message:  "quota exceeded",
+			Message:  msg,
 			UserID:   userID,
 			UserName: username,
 		})
@@ -121,8 +179,10 @@ func EnforceQuotaAPI(subject quota_model.LimitSubject, target QuotaTargetType) f
 }
 
 // checkQuota wraps quota checking into a single function
-func checkQuota(ctx context.Context, subject quota_model.LimitSubject, userID int64, username string, quotaExceededHandler func(userID int64, username string), errorHandler func(err error)) (bool, error) {
-	ok, err := quota_model.EvaluateForUser(ctx, userID, subject)
+type quotaEvaluator func(ctx context.Context, userID int64, subject quota_model.LimitSubject) (bool, error)
+
+func checkQuota(ctx context.Context, evaluate quotaEvaluator, subject quota_model.LimitSubject, userID int64, username string, quotaExceededHandler func(userID int64, username string), errorHandler func(err error)) (bool, error) {
+	ok, err := evaluate(ctx, userID, subject)
 	if err != nil {
 		errorHandler(err)
 		return false, err
@@ -132,6 +192,45 @@ func checkQuota(ctx context.Context, subject quota_model.LimitSubject, userID in
 		return false, nil
 	}
 	return true, nil
+}
+
+// SetPersonalRepoLimit loads the size limit of ownerID's personal repositories for the banner
+// (templates/shared/personal_repo_limit.tmpl) and returns it (Reached: locked); with the limit off it reads
+// nothing but the cached setting. Pages hide the actions that would be refused while it is true.
+func (ctx *Context) SetPersonalRepoLimit(ownerID int64) quota_model.PersonalRepoLimit {
+	l, err := quota_model.GetPersonalRepoLimit(ctx, ownerID)
+	if err != nil {
+		log.Error("GetPersonalRepoLimit: %v", err)
+	}
+	ctx.setPersonalRepoLimit(l, ownerID)
+	return l
+}
+
+func (ctx *Context) setPersonalRepoLimit(l quota_model.PersonalRepoLimit, ownerID int64) {
+	if !l.Reached() {
+		return
+	}
+	ctx.Data["PersonalRepoLocked"] = true
+	ctx.Data["PersonalRepoLimitOwn"] = ctx.doerID() == ownerID
+	ctx.Data["PersonalRepoUsed"] = l.Used
+	ctx.Data["PersonalRepoLimit"] = l.Limit
+}
+
+func (ctx *Context) doerID() int64 {
+	if ctx.Doer == nil {
+		return 0
+	}
+	return ctx.Doer.ID
+}
+
+// personalRepoLimitReached returns the personal repository size limit of userID, for the refusal message; an error
+// reads as not reached, so the generic quota message is shown.
+func personalRepoLimitReached(ctx context.Context, userID int64) quota_model.PersonalRepoLimit {
+	l, err := quota_model.GetPersonalRepoLimit(ctx, userID)
+	if err != nil {
+		log.Error("GetPersonalRepoLimit: %v", err)
+	}
+	return l
 }
 
 type QuotaContext interface {
@@ -197,4 +296,16 @@ func (target QuotaTargetType) UserID(ctx QuotaContext) int64 {
 
 func (target QuotaTargetType) UserName(ctx QuotaContext) string {
 	return ctx.GetQuotaTargetUserName(target)
+}
+
+// PersonalRepoRefusal returns the translated message of a refusal by the personal repository policy or size limit
+// in err, and false for any other error.
+func (ctx *Context) PersonalRepoRefusal(err error) (string, bool) {
+	if e, ok := errors.AsType[repo_module.ErrPersonalRepoPolicy](err); ok {
+		return ctx.Locale.TrString(e.TrKey()), true
+	}
+	if e, ok := errors.AsType[quota_model.ErrPersonalRepoLimit](err); ok {
+		return ctx.Locale.TrString("repo.personal_repos.limit_reached", ctx.Locale.TrSize(e.Used), ctx.Locale.TrSize(e.Limit)), true
+	}
+	return "", false
 }
