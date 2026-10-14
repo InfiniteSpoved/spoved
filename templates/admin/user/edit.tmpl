@@ -115,15 +115,21 @@
 				{{if not .User.IsOrganization}}
 				<div class="field {{if .Err_PersonalRepoSizeLimit}}error{{end}}">
 					<label for="personal_repo_size_limit_mode">{{ctx.Locale.Tr "admin.users.personal_repo_size_limit"}}</label>
-					<select id="personal_repo_size_limit_mode" name="personal_repo_size_limit_mode">
-						<option value="site"{{if eq .User.PersonalRepoSizeLimit 0}} selected{{end}}>{{ctx.Locale.Tr "admin.users.personal_repo_size_limit.site"}}</option>
-						<option value="custom"{{if gt .User.PersonalRepoSizeLimit 0}} selected{{end}}>{{ctx.Locale.Tr "admin.users.personal_repo_size_limit.custom"}}</option>
-						<option value="unlimited"{{if lt .User.PersonalRepoSizeLimit 0}} selected{{end}}>{{ctx.Locale.Tr "admin.users.personal_repo_size_limit.unlimited"}}</option>
-					</select>
+					{{$mode := "site"}}{{if gt .User.PersonalRepoSizeLimit 0}}{{$mode = "custom"}}{{else if lt .User.PersonalRepoSizeLimit 0}}{{$mode = "unlimited"}}{{end}}
+					<div class="ui selection dropdown">
+						<input type="hidden" id="personal_repo_size_limit_mode" name="personal_repo_size_limit_mode" value="{{$mode}}">
+						{{svg "octicon-triangle-down" 14 "dropdown icon"}}
+						<div class="text">{{ctx.Locale.Tr (print "admin.users.personal_repo_size_limit." $mode)}}</div>
+						<div class="menu">
+							{{range $m := StringUtils.Split "site,custom,unlimited" ","}}
+								<div class="item{{if eq $m $mode}} active selected{{end}}" data-value="{{$m}}">{{ctx.Locale.Tr (print "admin.users.personal_repo_size_limit." $m)}}</div>
+							{{end}}
+						</div>
+					</div>
 				</div>
-				<div class="field {{if .Err_PersonalRepoSizeLimit}}error{{end}}">
+				<div class="field {{if .Err_PersonalRepoSizeLimit}}error{{end}} {{if ne $mode "custom"}}tw-hidden{{end}}" id="personal_repo_size_limit_field">
 					<label for="personal_repo_size_limit">{{ctx.Locale.Tr "admin.users.personal_repo_size_limit.mib"}}</label>
-					<input id="personal_repo_size_limit" name="personal_repo_size_limit" type="number" min="1" step="1" value="{{.PersonalRepoSizeLimitMiB}}">
+					<input id="personal_repo_size_limit" name="personal_repo_size_limit" type="number" min="1" step="1" value="{{.PersonalRepoSizeLimitMiB}}"{{if ne $mode "custom"}} disabled{{end}}>
 					<span class="help">{{ctx.Locale.Tr "admin.users.personal_repo_size_limit_desc"}}</span>
 				</div>
 				{{end}}

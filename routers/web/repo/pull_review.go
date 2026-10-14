@@ -68,7 +68,7 @@ func RenderNewCodeCommentForm(ctx *context.Context) {
 		beforeCommitID = issue.PullRequest.MergeBase
 	}
 	ctx.Data["BeforeCommitID"] = beforeCommitID
-	ctx.Data["IsAttachmentEnabled"] = setting.Attachment.Enabled
+	ctx.Data["IsAttachmentEnabled"] = ctx.AttachmentsEnabled()
 	upload.AddUploadContext(ctx, "comment")
 	ctx.HTML(http.StatusOK, tplNewComment)
 }
@@ -249,7 +249,7 @@ func renderConversation(ctx *context.Context, comment *issues_model.Comment, ori
 		return
 	}
 
-	ctx.Data["IsAttachmentEnabled"] = setting.Attachment.Enabled
+	ctx.Data["IsAttachmentEnabled"] = ctx.AttachmentsEnabled()
 	upload.AddUploadContext(ctx, "comment")
 
 	ctx.Data["comments"] = comments

@@ -11,6 +11,7 @@
 				<div class="sub header">{{ctx.Locale.Tr "repo.release.new_subheader"}}</div>
 			{{end}}
 		</h2>
+		{{template "shared/personal_repo_limit" .}}
 		{{template "base/alert" .}}
 		<form class="ui form" action="{{.Link}}" method="post">
 			<div class="ui seven wide target">
@@ -149,7 +150,8 @@
 								<a class="secondary button" href="{{.RepoLink}}/releases">
 									{{ctx.Locale.Tr "repo.release.cancel"}}
 								</a>
-								{{if .IsDraft}}
+								{{if $.PersonalRepoLocked}}{{/* only the delete is allowed */}}
+								{{else if .IsDraft}}
 									<button class="secondary button" type="submit" name="draft" value="{{ctx.Locale.Tr "repo.release.save_draft"}}">
 										{{ctx.Locale.Tr "repo.release.save_draft"}}
 									</button>

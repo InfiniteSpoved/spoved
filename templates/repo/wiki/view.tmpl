@@ -59,8 +59,10 @@
 							<a class="ui small button escape-button">{{ctx.Locale.Tr "repo.escape_control_characters"}}</a>
 						{{end}}
 						{{if and .CanWriteWiki (not .Repository.IsMirror)}}
+							{{if not .PersonalRepoLocked}}
 							<a class="ui small button" href="{{.RepoLink}}/wiki/{{.PageURL}}?action=_edit">{{ctx.Locale.Tr "repo.wiki.edit_page_button"}}</a>
 							<a class="ui small primary button" href="{{.RepoLink}}/wiki?action=_new">{{ctx.Locale.Tr "repo.wiki.new_page_button"}}</a>
+							{{end}}
 							<a class="ui small red button delete-button" href="" data-url="{{.RepoLink}}/wiki/{{.PageURL}}?action=_delete" data-id="{{.PageURL}}" data-modal-id="delete-wiki-page">{{ctx.Locale.Tr "repo.wiki.delete_page_button"}}</a>
 						{{end}}
 					</div>
@@ -88,7 +90,7 @@
 			{{if .sidebarPresent}}
 			<div class="file-view markup wiki-content-sidebar">
 				{{template "repo/unicode_escape_prompt" dict "EscapeStatus" .sidebarEscapeStatus "root" $}}
-				{{if and .CanWriteWiki (not .Repository.IsMirror)}}
+				{{if and .CanWriteWiki (not .Repository.IsMirror) (not .PersonalRepoLocked)}}
 					<a class="tw-float-right muted" href="{{.RepoLink}}/wiki/_Sidebar?action=_edit" aria-label="{{ctx.Locale.Tr "repo.wiki.edit_page_button"}}">{{svg "octicon-pencil"}}</a>
 				{{end}}
 				{{.sidebarContent | TrustHTML}}
@@ -100,7 +102,7 @@
 			{{if .footerPresent}}
 			<div class="file-view markup wiki-content-footer">
 				{{template "repo/unicode_escape_prompt" dict "EscapeStatus" .sidebarEscapeStatus "root" $}}
-				{{if and .CanWriteWiki (not .Repository.IsMirror)}}
+				{{if and .CanWriteWiki (not .Repository.IsMirror) (not .PersonalRepoLocked)}}
 					<a class="tw-float-right muted" href="{{.RepoLink}}/wiki/_Footer?action=_edit" aria-label="{{ctx.Locale.Tr "repo.wiki.edit_page_button"}}">{{svg "octicon-pencil"}}</a>
 				{{end}}
 				{{.footerContent | TrustHTML}}

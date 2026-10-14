@@ -1,7 +1,8 @@
-{{if .PersonalRepoLocked}}
+{{if .PersonalRepoBanner}}
 	<div class="ui warning message" id="personal-repo-limit-banner">
 		{{if .PersonalRepoLimitOwn}}
-			{{ctx.Locale.Tr "repo.personal_repos.locked" (ctx.Locale.TrSize .PersonalRepoUsed) (ctx.Locale.TrSize .PersonalRepoLimit) (print AppSubUrl "/user/settings/repos")}}
+			{{ctx.Locale.Tr "repo.personal_repos.locked" (ctx.Locale.TrSize .PersonalRepoUsed) (ctx.Locale.TrSize .PersonalRepoLimit)}}
+			{{if not .PageIsSettingsRepos}}<a href="{{AppSubUrl}}/user/settings/repos">{{ctx.Locale.Tr "repo.personal_repos.see_repos"}}</a>{{end}}
 		{{else}}
 			{{ctx.Locale.Tr "repo.personal_repos.limit_reached_owner"}}
 		{{end}}

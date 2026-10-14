@@ -6,7 +6,7 @@
 			{{svg "octicon-book" 48}}
 			<h2>{{ctx.Locale.Tr "repo.wiki.welcome"}}</h2>
 			<p>{{ctx.Locale.Tr "repo.wiki.welcome_desc"}}</p>
-			{{if and .CanWriteWiki (not .Repository.IsMirror)}}
+			{{if and .CanWriteWiki (not .Repository.IsMirror) (not .PersonalRepoLocked)}}
 				<a class="ui primary button" href="{{.RepoLink}}/wiki?action=_new">{{ctx.Locale.Tr "repo.wiki.create_first_page"}}</a>
 			{{end}}
 		</div>

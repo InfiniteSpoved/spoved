@@ -21,7 +21,7 @@
 					<label class="not-mobile">{{ctx.Locale.Tr "rss_feed"}}</label>
 				</a>
 			{{end}}
-			{{if and (not .PageIsTagList) .CanCreateRelease}}
+			{{if and (not .PageIsTagList) .CanCreateRelease (not .PersonalRepoLocked)}}
 				<a class="primary button" href="{{$.RepoLink}}/releases/new">
 					{{ctx.Locale.Tr "repo.release.new_release"}}
 				</a>

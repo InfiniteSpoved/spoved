@@ -481,9 +481,17 @@ func TestPersonalRepoSizeQueries(t *testing.T) {
 		_, err := quota_model.EvaluateForUser(db.DefaultContext, 2, quota_model.LimitSubjectSizeReposAll)
 		require.NoError(t, err)
 	}
+	// RepoAssignment's check for every repository page of a signed-in viewer: the owner is loaded already
+	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	repoPage := func() {
+		_, err := quota_model.GetPersonalRepoLimitOf(db.DefaultContext, owner)
+		require.NoError(t, err)
+	}
 	assert.EqualValues(t, 0, stableQueryCount(t, evaluate))
+	assert.EqualValues(t, 0, stableQueryCount(t, repoPage))
 	setPersonalRepoSizeLimit(t, 1<<40)
 	assert.EqualValues(t, 2, stableQueryCount(t, evaluate))
+	assert.EqualValues(t, 1, stableQueryCount(t, repoPage))
 }
 
 // M1: the SSH path, at the internal serv command (ssh can't run in containers).
@@ -622,7 +630,7 @@ func TestPersonalRepoSizeOverrideBytesKept(t *testing.T) {
 	assert.EqualValues(t, 2<<20, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5}).PersonalRepoSizeLimit)
 	// the form: three choices, the custom value in MiB
 	doc := NewHTMLParser(t, loginUser(t, "user1").MakeRequest(t, NewRequest(t, "GET", "/admin/users/5/edit"), http.StatusOK).Body)
-	assert.Equal(t, "custom", doc.Find("#personal_repo_size_limit_mode option[selected]").AttrOr("value", ""))
+	assert.Equal(t, "custom", doc.Find("input#personal_repo_size_limit_mode").AttrOr("value", ""))
 	assert.Equal(t, "2", doc.Find("#personal_repo_size_limit").AttrOr("value", ""))
 	loginUser(t, "user1").MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/users/5/edit", map[string]string{
 		"login_type": "0-0", "login_name": user5.LoginName, "email": user5.Email, "max_repo_creation": "-1", "personal_repo_size_limit_mode": "site",
@@ -669,8 +677,8 @@ func TestPersonalRepoSizeLockUI(t *testing.T) {
 		assert.Equal(t, 0, doc.Find(`.menu .item[data-value="2"]`).Length())
 		assert.NotEqual(t, "2", doc.Find("#uid").AttrOr("value", ""), "an organization is preselected")
 
-		// someone else sees the banner without the owner's numbers
+		// someone else sees no banner (TestPersonalRepoLockBannerVisibility)
 		doc = NewHTMLParser(t, loginUser(t, "user5").MakeRequest(t, NewRequest(t, "GET", "/user2/lock-ui"), http.StatusOK).Body)
-		assert.Contains(t, banner(doc), "The owner's personal repositories reached their size limit")
+		assert.Empty(t, banner(doc))
 	})
 }

@@ -60,4 +60,11 @@ limit is on. Organizations and site admins who can sign in are never limited.
   above the limit; the next write is refused. The limit is not a hard cap on disk space.
 - The refusal says that the limit is reached and shows the usage and the limit; someone else than the owner sees no
   numbers. The admin page lists the users at or over their limit.
+- While locked, the web UI offers no action that would be refused (add, edit and upload files, new branches, tags,
+  releases and wiki pages, cherry-pick and revert, git notes, attachments, applying suggestions, updating and merging
+  pull requests, syncing a fork); deletes stay. A writer sees a disabled merge button with a line saying the owner
+  reached the limit. A release is deleted from its edit page, which stays open while locked (saving it is refused).
+- Only the owner (with the numbers) and site admins (without) see the banner about the lock; other visitors and
+  collaborators see none, so the lock isn't public.
+- The site page shows the limit in MiB rounded up; saving it unchanged keeps a limit from app.ini that isn't whole MiB.
 - Changes of the limit and of an override, and every refusal, are logged.

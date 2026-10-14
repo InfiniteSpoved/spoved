@@ -2,13 +2,13 @@
 <div role="main" aria-label="{{.Title}}" class="page-content repository new fork">
 	<div class="ui middle very relaxed page grid">
 		<div class="column">
+			{{template "shared/personal_repo_limit" .}}
 			<form class="ui form" action="{{.Link}}" method="post">
 				<h3 class="ui top attached header">
 					{{ctx.Locale.Tr "new_fork"}}
 				</h3>
 				<div class="ui attached segment">
 					{{template "base/alert" .}}
-					{{template "shared/personal_repo_limit" .}}
 					<div class="inline required field {{if .Err_Owner}}error{{end}}">
 						<label>{{ctx.Locale.Tr "repo.owner"}}</label>
 						<div class="ui selection owner dropdown">

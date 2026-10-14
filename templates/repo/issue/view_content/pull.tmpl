@@ -63,7 +63,7 @@
 							{{if .IsPullBranchDeletable}}
 							<button class="delete-button ui button" data-url="{{.DeleteBranchLink}}" data-modal-id="delete-branch">{{ctx.Locale.Tr "repo.branch.delete_html"}}</button>
 							{{end}}
-							{{if .CanRevertPull}}
+							{{if and .CanRevertPull (not $.PersonalRepoLocked)}}
 							<form method="post" action="{{.Issue.Link}}/revert">
 								<button class="ui button" id="revert-pull-request">{{ctx.Locale.Tr "repo.pulls.revert"}}</button>
 							</form>
@@ -248,7 +248,21 @@
 					</div>
 				{{end}}
 
-				{{if .AllowMerge}} {{/* user is allowed to merge */}}
+				{{if and .AllowMerge $.PersonalRepoLocked}}{{/* merging is refused; no numbers for anyone here */}}
+					<div class="divider"></div>
+					<div class="item" id="personal-repo-merge-locked">
+						{{svg "octicon-alert"}}
+						{{ctx.Locale.Tr "repo.personal_repos.limit_reached_owner"}}
+					</div>
+					<div class="tw-flex tw-gap-2">
+						<button class="ui primary button" disabled>{{ctx.Locale.Tr "repo.pulls.merge_pull_request"}}</button>
+						{{if .HasPendingPullRequestMerge}}
+							<form method="post" action="{{.Link}}/cancel_auto_merge">
+								<button class="ui button">{{ctx.Locale.Tr "repo.pulls.auto_merge_cancel_schedule"}}</button>
+							</form>
+						{{end}}
+					</div>
+				{{else if .AllowMerge}} {{/* user is allowed to merge */}}
 					{{if or $prConfig.AllowMerge $prConfig.AllowRebase $prConfig.AllowRebaseMerge $prConfig.AllowSquash $prConfig.AllowFastForwardOnly $prConfig.AllowManualMerge}}
 						{{$hasPendingPullRequestMergeTip := ""}}
 						{{if .HasPendingPullRequestMerge}}
