@@ -150,7 +150,7 @@
 								<a class="secondary button" href="{{.RepoLink}}/releases">
 									{{ctx.Locale.Tr "repo.release.cancel"}}
 								</a>
-								{{if .PersonalRepoLocked}}{{/* only the delete is allowed */}}
+								{{if $.PersonalRepoLocked}}{{/* only the delete is allowed */}}
 								{{else if .IsDraft}}
 									<button class="secondary button" type="submit" name="draft" value="{{ctx.Locale.Tr "repo.release.save_draft"}}">
 										{{ctx.Locale.Tr "repo.release.save_draft"}}

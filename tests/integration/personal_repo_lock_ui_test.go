@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 
 	auth_model "forgejo.org/models/auth"
@@ -20,6 +21,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/tests"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -310,12 +312,16 @@ func TestPersonalRepoLockReleaseEdit(t *testing.T) {
 	doc := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/releases/edit/v1.1"), http.StatusOK).Body)
 	assert.Contains(t, doc.Find("#personal-repo-limit-banner").Text(), "You can't push or add content")
 	assert.Equal(t, 1, doc.Find(".delete-button[data-url$=\"/releases/delete\"]").Length())
-	assert.Zero(t, doc.Find(`form.ui.form button.primary`).Length(), "no Save or Publish")
+	for _, label := range []string{"Update release", "Publish release", "Save draft"} {
+		assert.Zero(t, doc.Find("button").FilterFunction(func(_ int, b *goquery.Selection) bool {
+			return strings.TrimSpace(b.Text()) == label
+		}).Length(), label)
+	}
 	assert.Zero(t, doc.Find(`.dropzone`).Length(), "no uploads")
 
 	session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/releases/edit/v1.1", map[string]string{
 		"tag_name": "v1.1", "title": "edited", "content": "",
 	}), http.StatusRequestEntityTooLarge)
 	session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/releases/delete", map[string]string{"id": "1"}), http.StatusOK)
-	unittest.AssertNotExistsBean(t, &repo_model.Release{ID: 1})
+	assert.True(t, unittest.AssertExistsAndLoadBean(t, &repo_model.Release{ID: 1}).IsTag, "the release is gone, its tag stays")
 }
