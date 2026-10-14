@@ -405,3 +405,80 @@ func TestBitbucketDataCenterGetRepoInfoWithoutHTTPCloneLink(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "HTTP(S) SCM hosting")
 }
+
+// TestBitbucketDataCenterURLsFromServer: the clone, browse and fork head URLs come from the server the migration was
+// started with, never from the hrefs of the API.
+func TestBitbucketDataCenterURLsFromServer(t *testing.T) {
+	t.Cleanup(test.MockVariableValueWithReset(&setting.Migrations.AllowLocalNetworks, true, func() { require.NoError(t, allowlist.Init()) }))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ctx/rest/api/1.0/projects/proj/repos/myrepo", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"slug":"myrepo","links":{
+			"clone":[{"name":"http","href":"file:///etc/passwd"},{"name":"ssh","href":"ssh://git@evil.example.com/x.git"}],
+			"self":[{"href":"https://user:pw@evil.example.com/browse"}]}}`)
+	})
+	mux.HandleFunc("/ctx/rest/api/1.0/projects/proj/repos/myrepo/pull-requests", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"isLastPage":true,"values":[{"id":1,"state":"OPEN",
+			"fromRef":{"displayId":"f","latestCommit":"1111111111111111111111111111111111111111","repository":{"slug":"myrepo","project":{"key":"~JDOE"},
+				"links":{"clone":[{"name":"http","href":"http://evil.example.com/scm/x/y.git"}]}}},
+			"toRef":{"displayId":"main","latestCommit":"2222222222222222222222222222222222222222","repository":{"slug":"myrepo","project":{"key":"PROJ"}}}},
+			{"id":2,"state":"OPEN",
+			"fromRef":{"displayId":"g","latestCommit":"1111111111111111111111111111111111111111","repository":{"slug":"my repo","project":{"key":"../x"}}},
+			"toRef":{"displayId":"main","latestCommit":"2222222222222222222222222222222222222222","repository":{"slug":"myrepo","project":{"key":"PROJ"}}}}]}`)
+	})
+	mux.HandleFunc("/ctx/rest/api/1.0/projects/proj/repos/myrepo/pull-requests/", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"isLastPage":true,"values":[]}`)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	downloader, err := (&BitbucketDataCenterDownloaderFactory{}).New(t.Context(), base.MigrateOptions{CloneAddr: server.URL + "/ctx/scm/proj/myrepo.git"})
+	require.NoError(t, err)
+	repo, err := downloader.GetRepoInfo()
+	require.NoError(t, err)
+	assert.Equal(t, server.URL+"/ctx/scm/proj/myrepo.git", repo.CloneURL)
+	assert.Equal(t, server.URL+"/ctx/projects/PROJ/repos/myrepo/browse", repo.OriginalURL)
+
+	prs, _, err := downloader.GetPullRequests(1, 10)
+	require.NoError(t, err)
+	require.Len(t, prs, 2)
+	assert.Equal(t, server.URL+"/ctx/scm/~jdoe/myrepo.git", prs[0].Head.CloneURL)
+	assert.Empty(t, prs[1].Head.CloneURL, "no clone URL from a key or slug that isn't a plain name")
+}
+
+// TestBitbucketDataCenterRedirects: the REST client follows a redirect only within the server's origin.
+func TestBitbucketDataCenterRedirects(t *testing.T) {
+	t.Cleanup(test.MockVariableValueWithReset(&setting.Migrations.AllowLocalNetworks, true, func() { require.NoError(t, allowlist.Init()) }))
+	t.Cleanup(test.MockVariableValueWithReset(&setting.Migrations.SkipTLSVerify, true, func() { require.NoError(t, allowlist.Init()) }))
+
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"slug":"myrepo","links":{"clone":[{"name":"http","href":"x"}]}}`)
+	}))
+	defer other.Close()
+	var tlsURL string
+	tlsServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/1.0/projects/proj/repos/same":
+			http.Redirect(w, r, tlsURL+"/rest/api/1.0/projects/proj/repos/target", http.StatusFound)
+		case "/rest/api/1.0/projects/proj/repos/target":
+			_, _ = io.WriteString(w, `{"slug":"target","links":{"clone":[{"name":"http","href":"x"}]}}`)
+		case "/rest/api/1.0/projects/proj/repos/elsewhere":
+			http.Redirect(w, r, other.URL+r.URL.Path, http.StatusFound)
+		case "/rest/api/1.0/projects/proj/repos/downgrade":
+			http.Redirect(w, r, "http://"+r.Host+r.URL.Path, http.StatusFound)
+		}
+	}))
+	defer tlsServer.Close()
+	tlsURL = tlsServer.URL
+
+	for slug, ok := range map[string]bool{"same": true, "elsewhere": false, "downgrade": false} {
+		downloader, err := (&BitbucketDataCenterDownloaderFactory{}).New(t.Context(), base.MigrateOptions{CloneAddr: tlsServer.URL + "/scm/proj/" + slug + ".git", AuthToken: "sometoken"})
+		require.NoError(t, err)
+		_, err = downloader.GetRepoInfo()
+		if ok {
+			require.NoError(t, err, slug)
+		} else {
+			require.ErrorContains(t, err, "redirect off the Bitbucket server refused", slug)
+		}
+	}
+}

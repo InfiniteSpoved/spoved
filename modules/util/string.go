@@ -6,6 +6,7 @@ package util
 import (
 	"slices"
 	"strings"
+	"unicode"
 	"unsafe"
 )
 
@@ -162,4 +163,15 @@ func CSVSafe(s string) string {
 		return "'" + s
 	}
 	return s
+}
+
+// StripControl replaces the control characters of s (escape sequences, CR, LF, ...) with "?", for text from an
+// external system that is printed to a terminal or a log.
+func StripControl(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return '?'
+		}
+		return r
+	}, s)
 }

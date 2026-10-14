@@ -17,6 +17,7 @@ import (
 	base "forgejo.org/modules/migration"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
+	"forgejo.org/modules/util"
 	"forgejo.org/services/migrations/allowlist"
 )
 
@@ -147,7 +148,7 @@ func migrateRepository(_ context.Context, doer *user_model.User, downloader base
 		// We don't actually need to check the OriginalURL as it isn't used anywhere
 	}
 
-	log.Trace("migrating git data from %s", repo.CloneURL)
+	log.Trace("migrating git data from %s", util.SanitizeCredentialURLs(repo.CloneURL))
 	messenger("migrate.in_progress.git")
 	if err = uploader.CreateRepo(repo, opts); err != nil {
 		return err
