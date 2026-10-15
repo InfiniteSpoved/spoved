@@ -174,7 +174,7 @@ func GetDiverging(ctx context.Context, pr *issues_model.PullRequest) (*git.Diver
 	log.Trace("GetDiverging[%-v]: compare commits", pr)
 	prCtx, cancel, err := createTemporaryRepoForPR(ctx, pr)
 	if err != nil {
-		if !git_model.IsErrBranchNotExist(err) {
+		if !git_model.IsErrBranchNotExist(err) && ctx.Err() == nil {
 			log.Error("CreateTemporaryRepoForPR %-v: %v", pr, err)
 		}
 		return nil, err

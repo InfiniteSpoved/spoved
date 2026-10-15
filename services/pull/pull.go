@@ -383,6 +383,9 @@ func TestPullRequest(ctx context.Context, doer *user_model.User, repoID, olderTh
 	}
 	for _, pr := range prs {
 		divergence, err := GetDiverging(ctx, pr)
+		if ctx.Err() != nil {
+			return // shut down or cancelled: the repositories may be gone, there is nothing left to compare
+		}
 		if err != nil {
 			if git_model.IsErrBranchNotExist(err) && !git.IsBranchExist(ctx, pr.HeadRepo.RepoPath(), pr.HeadBranch) {
 				log.Warn("Cannot test PR %s/%d: head_branch %s no longer exists", pr.BaseRepo.Name, pr.IssueID, pr.HeadBranch)
