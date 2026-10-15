@@ -92,7 +92,11 @@ subagent in this thread:
   brief, design round then code round. Its findings are must-fix.
 - Tester: the tester brief. The full suite once per PR, narrowed reruns after.
   Run the integration suite in the background and keep working.
-Subagents return results to you; they don't message anyone.
+Subagents return results to you; they don't message anyone. Reporting rule (see
+"Rules for everyone"): vulnerabilities, secrets, credentials, hosts/IPs,
+infrastructure details and embargoed upstream issues go only into issues in
+InfiniteSpoved/spovedOps, never into spoved issues, PRs, comments, commits or
+branch names.
 
 Gates (unchanged): no code before you approve the design; merge only when the PR
 has "OL AC check @<SHA> … VERDICT: FULLY DONE" and the merged head is that SHA
