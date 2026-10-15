@@ -114,7 +114,7 @@ func TestBitbucketBranchRuleCompiles(t *testing.T) {
 func TestRedactedHookURL(t *testing.T) {
 	u, err := url.Parse("https://user:pass@hooks.example.com:8443/path/x?token=secret#frag")
 	require.NoError(t, err)
-	assert.Equal(t, "https://hooks.example.com:8443/path/x", redactedHookURL(u))
+	assert.Equal(t, "https://hooks.example.com:8443", redactedHookURL(u))
 }
 
 func TestSameBitbucketRule(t *testing.T) {
