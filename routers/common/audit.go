@@ -6,6 +6,7 @@ package common
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -39,7 +40,7 @@ func SetAuditActor(ctx *context.Base, ar auth_service.AuthenticationResult) {
 		}
 	}
 	if peer, candidates, ok := httplib.AmbiguousClientIP(ctx.Req); ok {
-		a.IP, a.IPAmbiguous, a.IPCandidates = peer, true, candidates[:min(len(candidates), audit_model.MaxIPCandidates)]
+		a.IP, a.IPAmbiguous, a.IPCandidates = peer, true, slices.Clone(candidates[:min(len(candidates), audit_model.MaxIPCandidates)]) // never the parsed header's array
 	} else {
 		a.IP = auditPeer(ctx.Req.RemoteAddr, ClientIP(ctx.Req))
 	}
