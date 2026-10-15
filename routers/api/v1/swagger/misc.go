@@ -118,3 +118,10 @@ type swaggerResponseAnnouncementList struct {
 	// in:body
 	Body []api.Announcement `json:"body"`
 }
+
+// AuditEventList
+// swagger:response AuditEventList
+type swaggerResponseAuditEventList struct {
+	// in:body
+	Body []api.AuditEvent `json:"body"`
+}

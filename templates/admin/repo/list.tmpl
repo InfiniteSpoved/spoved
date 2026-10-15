@@ -106,7 +106,7 @@
 							<td>{{ctx.Locale.TrSize .WikiSize}}</td>
 							<td>{{DateUtils.AbsoluteShort .UpdatedUnix}}</td>
 							<td>{{DateUtils.AbsoluteShort .CreatedUnix}}</td>
-							<td><a class="delete-button" href="" data-url="{{$.Link}}/delete?page={{$.Page.Paginater.Current}}&sort={{$.SortType}}" data-id="{{.ID}}" data-name="{{.Name}}" data-modal-id="delete-repo">{{svg "octicon-trash"}}</a></td>
+							<td><a href="{{AppSubUrl}}/admin/audit?category=all&repo={{.FullName}}" data-tooltip-content="{{ctx.Locale.Tr "admin.audit.title"}}" aria-label="{{ctx.Locale.Tr "admin.audit.title"}}">{{svg "octicon-log"}}</a> <a class="delete-button" href="" data-url="{{$.Link}}/delete?page={{$.Page.Paginater.Current}}&sort={{$.SortType}}" data-id="{{.ID}}" data-name="{{.Name}}" data-modal-id="delete-repo">{{svg "octicon-trash"}}</a></td>
 						</tr>
 					{{else}}
 						<tr><td class="tw-text-center" colspan="14">{{ctx.Locale.Tr "repo.pulls.no_results"}}</td></tr>

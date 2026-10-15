@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	audit_model "forgejo.org/models/audit"
@@ -19,7 +20,7 @@ import (
 )
 
 // ExportCap is the most rows a web or API export holds; the CLI export has no cap.
-const ExportCap = 100_000
+var ExportCap = 100_000 // a variable for tests
 
 // Manifest describes an export.
 type Manifest struct {
@@ -29,6 +30,16 @@ type Manifest struct {
 	Through     time.Time // the time of the last row, when Truncated
 	ThroughID   int64
 	Rows        int
+}
+
+// FilterHeader returns the filter as a query string, for X-Audit-Filter.
+func (m *Manifest) FilterHeader() string {
+	filter := make([]string, 0, len(m.Filter))
+	for _, kv := range m.Filter {
+		k, v, _ := strings.Cut(kv, "=")
+		filter = append(filter, k+"="+url.QueryEscape(v))
+	}
+	return strings.Join(filter, "&")
 }
 
 // Next returns the filter parameters that continue a truncated export.

@@ -108,3 +108,44 @@ func TestParseFilter(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+func TestPage(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	var ids []int64
+	for range 5 {
+		e := &audit_model.Entry{Category: "credential", Action: "credential.x"}
+		require.NoError(t, db.Insert(t.Context(), e))
+		ids = append(ids, e.ID)
+	}
+	page := func(q string) ([]int64, bool, bool) {
+		f, err := parse(t, q)
+		require.NoError(t, err)
+		entries, newer, older, err := Page(t.Context(), f, 2)
+		require.NoError(t, err)
+		var got []int64
+		for _, e := range entries {
+			got = append(got, e.ID)
+		}
+		return got, newer, older
+	}
+	got, newer, older := page("")
+	assert.Equal(t, []int64{ids[4], ids[3]}, got)
+	assert.False(t, newer)
+	assert.True(t, older)
+	got, newer, older = page("before_id=" + itoa(ids[3]))
+	assert.Equal(t, []int64{ids[2], ids[1]}, got)
+	assert.True(t, newer)
+	assert.True(t, older)
+	got, newer, older = page("before_id=" + itoa(ids[1]))
+	assert.Equal(t, []int64{ids[0]}, got)
+	assert.True(t, newer)
+	assert.False(t, older)
+	got, newer, older = page("after_id=" + itoa(ids[0]))
+	assert.Equal(t, []int64{ids[2], ids[1]}, got)
+	assert.True(t, newer)
+	assert.True(t, older)
+	got, newer, older = page("after_id=" + itoa(ids[2]))
+	assert.Equal(t, []int64{ids[4], ids[3]}, got)
+	assert.False(t, newer)
+	assert.True(t, older)
+}

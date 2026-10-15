@@ -1,0 +1,179 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin audit-log")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.audit.title"}}
+			<div class="ui right">
+				{{if not .FilterError}}
+					<a class="ui primary tiny button" href="{{.CSVLink}}">{{ctx.Locale.Tr "access_report.export_csv"}}</a>
+					<a class="ui primary tiny button" href="{{.JSONLink}}">{{ctx.Locale.Tr "access_report.export_json"}}</a>
+				{{end}}
+			</div>
+		</h4>
+		<div class="ui attached segment">
+			<div class="ui secondary pointing menu audit-tabs">
+				{{range .Tabs}}
+					<a class="{{if eq $.Category .}}active {{end}}item" href="{{index $.TabLinks .}}">{{ctx.Locale.Tr (print "admin.audit.tab." .)}}</a>
+				{{end}}
+			</div>
+			<details class="audit-filters">
+				<summary>{{ctx.Locale.Tr "admin.audit.filters" .FilterCount}}</summary>
+				<form class="ui form" method="get">
+					<input type="hidden" name="category" value="{{.Category}}">
+					{{with .Filter.Get "credential"}}<input type="hidden" name="credential" value="{{.}}">{{end}}
+					<div class="fields">
+						<div class="field">
+							<label for="audit-org">{{ctx.Locale.Tr "admin.audit.org"}}</label>
+							<input id="audit-org" name="org" value="{{.Filter.Get "org"}}">
+						</div>
+						{{if .Projects}}
+							<div class="field">
+								<label for="audit-project">{{ctx.Locale.Tr "admin.audit.project"}}</label>
+								<select id="audit-project" name="project">
+									<option value="">{{ctx.Locale.Tr "access_report.filter.any"}}</option>
+									{{range .Projects}}
+										<option value="{{.ID}}"{{if eq ($.Filter.Get "project") (print .ID)}} selected{{end}}>{{.Name}}</option>
+									{{end}}
+								</select>
+							</div>
+						{{end}}
+						<div class="field">
+							<label for="audit-repo">{{ctx.Locale.Tr "admin.audit.repo"}}</label>
+							<input id="audit-repo" name="repo" value="{{.Filter.Get "repo"}}">
+						</div>
+						<div class="field">
+							<label for="audit-user">{{ctx.Locale.Tr "admin.audit.user"}}</label>
+							<input id="audit-user" name="user" value="{{.Filter.Get "user"}}">
+						</div>
+					</div>
+					<div class="fields">
+						<div class="field">
+							<label for="audit-credential-type">{{ctx.Locale.Tr "admin.audit.credential_type"}}</label>
+							<select id="audit-credential-type" name="credential_type">
+								<option value="">{{ctx.Locale.Tr "access_report.filter.any"}}</option>
+								{{range .CredentialTypes}}
+									<option value="{{.}}"{{if eq ($.Filter.Get "credential_type") .}} selected{{end}}>{{ctx.Locale.Tr (print "admin.audit.credential." .)}}</option>
+								{{end}}
+							</select>
+						</div>
+						<div class="field">
+							<label for="audit-action">{{ctx.Locale.Tr "admin.audit.action"}}</label>
+							<input id="audit-action" name="action" list="audit-actions" value="{{.Filter.Get "action"}}">
+							<datalist id="audit-actions">{{range .ActionKeys}}<option value="{{.}}"></option>{{end}}</datalist>
+						</div>
+						<div class="field">
+							<label for="audit-result">{{ctx.Locale.Tr "admin.audit.result"}}</label>
+							<select id="audit-result" name="result">
+								<option value="">{{ctx.Locale.Tr "access_report.filter.any"}}</option>
+								{{range .Results}}
+									<option value="{{.}}"{{if eq ($.Filter.Get "result") .}} selected{{end}}>{{ctx.Locale.Tr (print "admin.audit.result." .)}}</option>
+								{{end}}
+							</select>
+						</div>
+						<div class="field">
+							<label for="audit-ip">{{ctx.Locale.Tr "admin.audit.ip"}}</label>
+							<input id="audit-ip" name="ip" value="{{.Filter.Get "ip"}}">
+						</div>
+						<div class="field">
+							<label for="audit-since">{{ctx.Locale.Tr "admin.audit.since"}}</label>
+							<input id="audit-since" name="since" placeholder="2026-01-31T00:00:00Z" value="{{.Filter.Get "since"}}">
+						</div>
+						<div class="field">
+							<label for="audit-before">{{ctx.Locale.Tr "admin.audit.before"}}</label>
+							<input id="audit-before" name="before" placeholder="2026-02-01T00:00:00Z" value="{{.Filter.Get "before"}}">
+						</div>
+					</div>
+					<button class="ui primary button">{{ctx.Locale.Tr "admin.audit.filter"}}</button>
+					<a class="ui button" href="{{.ClearLink}}">{{ctx.Locale.Tr "admin.audit.clear"}}</a>
+				</form>
+			</details>
+			{{with .Filter.Get "credential"}}
+				<div class="ui label audit-credential-pill">
+					{{ctx.Locale.Tr "admin.audit.credential_pill" . $.CredentialName}}
+					<a class="icon" href="{{$.RemoveCredentialLink}}" aria-label="{{ctx.Locale.Tr "admin.audit.remove_credential"}}">{{svg "octicon-x" 12}}</a>
+				</div>
+			{{end}}
+			{{if .FilterError}}
+				<div class="ui error message audit-filter-error">
+					{{if .FilterError.Unknown}}
+						{{ctx.Locale.Tr (print "admin.audit.unknown." .FilterError.Param) .FilterError.Value}}
+					{{else}}
+						{{ctx.Locale.Tr "admin.audit.invalid" .FilterError.Param .FilterError.Value}}
+					{{end}}
+				</div>
+			{{end}}
+			<p class="text grey audit-status">
+				{{if .OldestEntry}}{{ctx.Locale.Tr "admin.audit.oldest" .OldestEntry}} · {{end}}{{ctx.Locale.Tr "admin.audit.time_zone" .TimeZone}}
+				· {{ctx.Locale.Tr "admin.audit.export_cap" .ExportCap}}
+			</p>
+			{{if .Rows}}
+				<table class="ui very basic table audit-entries">
+					<thead>
+						<tr>
+							<th>{{ctx.Locale.Tr "admin.audit.time"}}</th>
+							<th>{{ctx.Locale.Tr "admin.audit.actor"}}</th>
+							<th>{{ctx.Locale.Tr "admin.audit.credential"}}</th>
+							<th>{{ctx.Locale.Tr "admin.audit.event"}}</th>
+							<th>{{ctx.Locale.Tr "admin.audit.result"}}</th>
+							<th>{{ctx.Locale.Tr "admin.audit.ip"}}</th>
+						</tr>
+					</thead>
+					<tbody>
+						{{range .Rows}}
+							<tr data-id="{{.ID}}">
+								<td class="audit-time">{{.Time}}</td>
+								<td class="audit-actor">
+									{{if .SudoByName}}
+										<a href="?category=all&user={{.SudoByID}}">{{.SudoByName}}</a> {{ctx.Locale.Tr "admin.audit.acting_as"}} <a href="?category=all&user={{.ActorID}}">{{.ActorName}}</a>
+									{{else if eq .ActorType "user"}}
+										<a href="?category=all&user={{.ActorID}}">{{.ActorName}}</a>
+									{{else}}
+										{{.ActorName}} <span class="text grey">({{ctx.Locale.Tr (print "admin.audit.actor." .ActorType)}})</span>
+									{{end}}
+								</td>
+								<td class="audit-credential">
+									{{if ctx.Locale.HasKey (print "admin.audit.credential." .CredentialType)}}{{ctx.Locale.Tr (print "admin.audit.credential." .CredentialType)}}{{else}}{{.CredentialType}}{{end}}
+									{{if .CredentialName}}"{{.CredentialName}}"{{end}}
+									{{if .CredentialID}}<a class="audit-only-this" href="{{$.OnlyLinkBase}}&credential={{.CredentialType}}:{{.CredentialID}}">{{ctx.Locale.Tr "admin.audit.only_this"}}</a>{{end}}
+								</td>
+								<td class="audit-event">
+									{{if ctx.Locale.HasKey (print "admin.audit.action." .Action)}}{{if .TargetName}}{{ctx.Locale.Tr (print "admin.audit.action." .Action) .TargetName}}{{else}}{{ctx.Locale.Tr (print "admin.audit.action." .Action)}}{{end}}{{else}}{{.Action}}{{if .TargetName}} · {{.TargetName}}{{end}}{{end}}
+									<details class="audit-details">
+										<summary>{{ctx.Locale.Tr "admin.audit.details"}}</summary>
+										<dl>
+											<dt>{{ctx.Locale.Tr "admin.audit.action"}}</dt><dd><code>{{.Action}}</code></dd>
+											{{if .TargetType}}<dt>{{ctx.Locale.Tr "admin.audit.target"}}</dt><dd>{{.TargetType}} #{{.TargetID}} {{.TargetName}}</dd>{{end}}
+											{{if .RequestID}}<dt>{{ctx.Locale.Tr "admin.audit.request_id"}}</dt><dd><code>{{.RequestID}}</code> <a href="?category=all&request_id={{.RequestID}}">{{ctx.Locale.Tr "admin.audit.same_request"}}</a></dd>{{end}}
+											{{if .UserAgent}}<dt>{{ctx.Locale.Tr "admin.audit.user_agent"}}</dt><dd>{{.UserAgent}}</dd>{{end}}
+											{{range $k, $v := .Details}}<dt>{{$k}}</dt><dd>{{$v}}</dd>{{end}}
+										</dl>
+										{{if .Changes}}
+											<table class="ui very basic compact table">
+												<thead><tr><th></th><th>{{ctx.Locale.Tr "admin.audit.before_value"}}</th><th>{{ctx.Locale.Tr "admin.audit.after_value"}}</th></tr></thead>
+												<tbody>
+													{{range .Changes}}<tr><td>{{.Key}}</td><td>{{.Before}}</td><td>{{.After}}</td></tr>{{end}}
+												</tbody>
+											</table>
+										{{end}}
+									</details>
+								</td>
+								<td class="audit-result">{{if ne .Result "success"}}<span class="ui {{if eq .Result "refused"}}orange{{else}}red{{end}} label">{{ctx.Locale.Tr (print "admin.audit.result." .Result)}}</span>{{end}}</td>
+								<td class="audit-ip">{{.IP}}</td>
+							</tr>
+						{{end}}
+					</tbody>
+				</table>
+				<div class="audit-pager">
+					{{if .NewerLink}}<a class="ui small button" href="{{.NewerLink}}">‹ {{ctx.Locale.Tr "admin.audit.newer"}}</a>{{end}}
+					{{if .OlderLink}}<a class="ui small button older" href="{{.OlderLink}}">{{ctx.Locale.Tr "admin.audit.older"}} ›</a>{{end}}
+				</div>
+			{{else if .LogEmpty}}
+				<div class="ui placeholder segment audit-empty">{{ctx.Locale.Tr "admin.audit.empty"}}</div>
+			{{else if not .FilterError}}
+				<div class="ui placeholder segment audit-empty">
+					{{ctx.Locale.Tr "admin.audit.no_match"}}
+					<a class="ui button" href="{{.ClearLink}}">{{ctx.Locale.Tr "admin.audit.clear"}}</a>
+				</div>
+			{{end}}
+		</div>
+	</div>
+{{template "admin/layout_footer" .}}

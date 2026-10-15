@@ -1,0 +1,235 @@
+// Copyright 2026 The spoved contributors. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package admin
+
+import (
+	"errors"
+	"net/http"
+	"net/url"
+	"slices"
+	"strconv"
+	"time"
+
+	audit_model "forgejo.org/models/audit"
+	repo_model "forgejo.org/models/repo"
+	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/base"
+	"forgejo.org/modules/json"
+	"forgejo.org/modules/setting"
+	"forgejo.org/routers/common"
+	audit_service "forgejo.org/services/audit"
+	"forgejo.org/services/context"
+	"forgejo.org/services/convert"
+)
+
+const (
+	tplAudit      base.TplName = "admin/audit"
+	auditPageSize              = 50
+)
+
+var auditTabs = []string{"changes", "signins", "activity", "all"}
+
+// AuditReq lets a usable site admin or auditor through; it runs after the sign-in check. The auditor only reads:
+// IsAuditorView needs a GET or HEAD made with a credential the auditor holds.
+func AuditReq(ctx *context.Context) {
+	if !common.UsableAuditReader(ctx.Doer) || !ctx.Doer.IsAdmin && !ctx.IsAuditorView() {
+		ctx.Error(http.StatusForbidden)
+	}
+}
+
+// auditRow is an entry as the page shows it.
+type auditRow struct {
+	*audit_model.Entry
+	Time       string
+	SudoByName string
+	Changes    []auditChange
+	Details    map[string]string
+}
+
+type auditChange struct {
+	Key, Before, After string
+}
+
+// auditValue is the text of a data value: a string as it is, anything else as JSON, nothing as "".
+func auditValue(v any, ok bool) string {
+	if s, isString := v.(string); isString || !ok {
+		return s
+	}
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+func newAuditRow(e *audit_model.Entry, loc *time.Location, names map[int64]string) *auditRow {
+	data := convert.AuditData(e.Data)
+	r := &auditRow{Entry: e, Time: e.CreatedUnix.AsTime().In(loc).Format("2006-01-02 15:04:05"), Details: map[string]string{}}
+	if e.SudoByID != 0 {
+		r.SudoByName = names[e.SudoByID]
+		if r.SudoByName == "" {
+			r.SudoByName = "#" + strconv.FormatInt(e.SudoByID, 10)
+		}
+	}
+	before, _ := data["before"].(map[string]any)
+	after, _ := data["after"].(map[string]any)
+	for k, v := range data {
+		if k != "before" && k != "after" {
+			r.Details[k] = auditValue(v, true)
+		}
+	}
+	var keys []string
+	for k := range before {
+		keys = append(keys, k)
+	}
+	for k := range after {
+		if _, ok := before[k]; !ok {
+			keys = append(keys, k)
+		}
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		b, hasBefore := before[k]
+		a, hasAfter := after[k]
+		r.Changes = append(r.Changes, auditChange{Key: k, Before: auditValue(b, hasBefore), After: auditValue(a, hasAfter)})
+	}
+	return r
+}
+
+// Audit shows the audit log, or exports it with ?format=csv|json.
+func Audit(ctx *context.Context) {
+	f, err := audit_service.ParseFilter(ctx, ctx.FormString)
+	var filterErr *audit_service.FilterError
+	if err != nil && !errors.As(err, &filterErr) {
+		ctx.ServerError("ParseFilter", err)
+		return
+	}
+
+	if format := ctx.FormString("format"); format == "csv" || format == "json" {
+		if filterErr != nil {
+			ctx.PlainText(http.StatusUnprocessableEntity, filterErr.Error())
+			return
+		}
+		if ctx.Req.Method == http.MethodHead {
+			return // a HEAD neither costs a heavy token nor records an export
+		}
+		if common.ChargeHeavyPlain(ctx) {
+			common.ExportAudit(ctx.Base, f, format, setting.AppURL+"admin/audit")
+		}
+		return
+	}
+
+	ctx.Data["Title"] = ctx.Tr("admin.audit.title")
+	ctx.Data["PageIsAdminAudit"] = true
+	ctx.Data["Tabs"] = auditTabs
+	ctx.Data["CredentialTypes"] = audit_model.CredentialTypes
+	ctx.Data["Results"] = audit_model.Results
+	ctx.Data["ActionKeys"] = audit_service.ActionKeys
+	query := ctx.Req.URL.Query()
+	ctx.Data["Filter"] = query
+	n := 0
+	for _, k := range audit_service.Params {
+		if query.Get(k) != "" && !slices.Contains([]string{"category", "before_id", "after_id", "credential"}, k) {
+			n++
+		}
+	}
+	ctx.Data["FilterCount"] = n
+	ctx.Data["ClearLink"] = "?category=" + url.QueryEscape(query.Get("category"))
+	if filterErr != nil {
+		tabLinks := map[string]string{}
+		for _, tab := range auditTabs {
+			tabLinks[tab] = "?category=" + tab
+		}
+		ctx.Data["TabLinks"] = tabLinks
+		ctx.Data["FilterError"] = filterErr
+		ctx.Data["Category"] = query.Get("category")
+		ctx.HTML(http.StatusUnprocessableEntity, tplAudit)
+		return
+	}
+	ctx.Data["Category"] = f.Values.Get("category")
+
+	link := func(change func(q url.Values)) string {
+		q := url.Values{}
+		for k, v := range f.Values {
+			q[k] = v
+		}
+		q.Del("before_id")
+		q.Del("after_id")
+		change(q)
+		return "?" + q.Encode()
+	}
+	tabLinks := map[string]string{}
+	for _, tab := range auditTabs {
+		tabLinks[tab] = link(func(q url.Values) { q.Set("category", tab) })
+	}
+	ctx.Data["TabLinks"] = tabLinks
+	ctx.Data["CSVLink"] = link(func(q url.Values) { q.Set("format", "csv") })
+	ctx.Data["JSONLink"] = link(func(q url.Values) { q.Set("format", "json") })
+	ctx.Data["RemoveCredentialLink"] = link(func(q url.Values) { q.Del("credential") })
+	ctx.Data["OnlyLinkBase"] = ctx.Data["RemoveCredentialLink"]
+
+	if f.OrgID != 0 {
+		projects, err := repo_model.GetRepoGroupsByOwnerIDs(ctx, []int64{f.OrgID})
+		if err != nil {
+			ctx.ServerError("GetRepoGroupsByOwnerIDs", err)
+			return
+		}
+		ctx.Data["Projects"] = projects
+	}
+
+	entries, newer, older, err := audit_service.Page(ctx, f, auditPageSize)
+	if err != nil {
+		ctx.ServerError("Page", err)
+		return
+	}
+	var sudoIDs []int64
+	for _, e := range entries {
+		if e.SudoByID != 0 {
+			sudoIDs = append(sudoIDs, e.SudoByID)
+		}
+	}
+	users, err := user_model.GetUsersByIDs(ctx, sudoIDs)
+	if err != nil {
+		ctx.ServerError("GetUsersByIDs", err)
+		return
+	}
+	names := map[int64]string{}
+	for _, u := range users {
+		names[u.ID] = u.Name
+	}
+	tz, err := user_model.GetUserTimeZone(ctx, ctx.Doer.ID)
+	if err != nil {
+		ctx.ServerError("GetUserTimeZone", err)
+		return
+	}
+	loc := time.UTC
+	if tz != "" {
+		loc, _ = time.LoadLocation(tz)
+	}
+	ctx.Data["TimeZone"] = loc.String()
+	rows := make([]*auditRow, 0, len(entries))
+	for _, e := range entries {
+		rows = append(rows, newAuditRow(e, loc, names))
+	}
+	ctx.Data["Rows"] = rows
+	if f.Opts.CredentialType != "" && len(rows) > 0 {
+		ctx.Data["CredentialName"] = rows[0].CredentialName
+	}
+	if len(rows) > 0 {
+		if newer {
+			ctx.Data["NewerLink"] = link(func(q url.Values) { q.Set("after_id", strconv.FormatInt(rows[0].ID, 10)) })
+		}
+		if older {
+			ctx.Data["OlderLink"] = link(func(q url.Values) { q.Set("before_id", strconv.FormatInt(rows[len(rows)-1].ID, 10)) })
+		}
+	}
+	oldest, err := audit_model.OldestEntryTime(ctx)
+	if err != nil {
+		ctx.ServerError("OldestEntryTime", err)
+		return
+	}
+	ctx.Data["LogEmpty"] = oldest == 0
+	if oldest != 0 {
+		ctx.Data["OldestEntry"] = oldest.AsTime().In(loc).Format("2006-01-02")
+	}
+	ctx.Data["ExportCap"] = audit_service.ExportCap
+	ctx.HTML(http.StatusOK, tplAudit)
+}

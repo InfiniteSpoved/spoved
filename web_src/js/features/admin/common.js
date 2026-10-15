@@ -21,6 +21,10 @@ export function initAdminCommon() {
   // check whether appUrl(ROOT_URL) is correct, if not, show an error message
   checkAppUrl();
 
+  // Audit log: the filters fold on narrow screens only
+  const auditFilters = document.querySelector('.admin.audit-log details.audit-filters');
+  if (auditFilters && window.matchMedia('(min-width: 768px)').matches) auditFilters.open = true;
+
   const announcementEditor = document.querySelector('.admin.announcement .combo-markdown-editor');
   if (announcementEditor) initComboMarkdownEditor(announcementEditor);
 

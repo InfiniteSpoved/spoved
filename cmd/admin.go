@@ -32,6 +32,7 @@ func cmdAdmin() *cli.Command {
 			subcmdMaintenance(),
 			subcmdIPAllowlist(),
 			subcmdBitbucketImport(),
+			subcmdAudit(),
 		},
 	}
 }
