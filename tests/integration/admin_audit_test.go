@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,10 +18,12 @@ import (
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
+	"forgejo.org/modules/timeutil"
 	audit_service "forgejo.org/services/audit"
 	"forgejo.org/tests"
 
@@ -44,7 +47,7 @@ func insertAuditRows(t *testing.T) []int64 {
 			CreatedUnix: 2000, Category: "credential", Action: "credential.access_token.deleted", Result: "success",
 			ActorType: "user", ActorID: 2, ActorName: "user2", SudoByID: 1, CredentialType: "access_token", CredentialID: 6, TargetName: "t2",
 		},
-		{CreatedUnix: 3000, Category: "repo", Action: "x.unknown", Result: "refused", ActorType: "user", ActorID: 4, ActorName: "user4", OwnerID: 3, RepoID: 3, TargetName: "tgt"},
+		{CreatedUnix: 3000, Category: "repo", Action: "x.unknown", Result: "refused", ActorType: "user", ActorID: 4, ActorName: "user4<script>actor()</script>", OwnerID: 3, RepoID: 3, TargetName: "tgt"},
 		{CreatedUnix: 4000, Category: "auth", Action: "auth.signin", Result: "success", ActorType: "user", ActorID: 2, ActorName: "user2"},
 	}
 	ids := make([]int64, 0, len(rows))
@@ -82,6 +85,10 @@ func TestAdminAuditPage(t *testing.T) {
 	assert.NotContains(t, body, "<script>alert")
 	assert.NotContains(t, body, "<script>ua")
 	assert.NotContains(t, body, "<b>x</b>")
+	assert.NotContains(t, body, "<script>actor")
+	assert.Contains(t, body, ">user4&lt;script&gt;actor()&lt;/script&gt;</a>")
+	// the credential type is shown by its label
+	assert.Regexp(t, `<td class="audit-credential">\s*access token\s*"ci"`, body)
 	assert.Contains(t, body, "Created access token tok&lt;script&gt;alert(1)&lt;/script&gt;")
 	assert.Contains(t, body, "&lt;script&gt;ua()&lt;/script&gt;")
 	assert.Contains(t, body, "&lt;b&gt;x&lt;/b&gt;")
@@ -117,6 +124,12 @@ func TestAdminAuditPage(t *testing.T) {
 
 		body = admin.MakeRequest(t, NewRequest(t, "GET", "/admin/audit?action=nothing.here"), http.StatusOK).Body.String()
 		assert.Contains(t, body, "Nothing matches these filters.")
+	})
+
+	t.Run("time zone", func(t *testing.T) {
+		// a stored zone that can't be loaded shows UTC
+		require.NoError(t, db.Insert(db.DefaultContext, &user_model.Setting{UserID: 1, SettingKey: user_model.SettingsKeyTimeZone, SettingValue: "No/Such_Zone"}))
+		assert.Contains(t, admin.MakeRequest(t, NewRequest(t, "GET", "/admin/audit"), http.StatusOK).Body.String(), "Times in UTC")
 	})
 
 	t.Run("links", func(t *testing.T) {
@@ -328,4 +341,37 @@ func TestAdminAuditExport(t *testing.T) {
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/audit?format=csv").AddTokenAuth(token), http.StatusOK)
 		assert.Equal(t, before+2, countExports(t))
 	})
+}
+
+// TestAdminAuditPaging checks the API page size cap and that the page and the API select the same entries for the
+// same query string.
+func TestAdminAuditPaging(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	for i := range 105 {
+		require.NoError(t, db.Insert(db.DefaultContext, &audit_model.Entry{CreatedUnix: timeutil.TimeStamp(5000 + i), Category: "credential", Action: "credential.access_token.created", Result: "success", ActorType: "user", ActorID: 2}))
+	}
+	require.NoError(t, db.Insert(db.DefaultContext, &audit_model.Entry{CreatedUnix: 6000, Category: "credential", Action: "credential.access_token.deleted", Result: "failure", ActorType: "user", ActorID: 2}))
+	admin := loginUser(t, "user1")
+	token := getTokenForLoggedInUser(t, admin, auth_model.AccessTokenScopeReadAdmin)
+	apiIDs := func(query string) []string {
+		var events []*api.AuditEvent
+		DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/admin/audit?"+query).AddTokenAuth(token), http.StatusOK), &events)
+		ids := make([]string, 0, len(events))
+		for _, e := range events {
+			ids = append(ids, strconv.FormatInt(e.ID, 10))
+		}
+		return ids
+	}
+
+	assert.Len(t, apiIDs("category=all&before=2000-01-01T00:00:00Z&limit=200"), 100)
+
+	query := "category=credential&result=success&before=2000-01-01T00:00:00Z"
+	want := apiIDs(query)
+	require.Len(t, want, 50)
+	body := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/audit?"+query), http.StatusOK).Body.String()
+	var got []string
+	for _, m := range regexp.MustCompile(`<tr data-id="(\d+)"`).FindAllStringSubmatch(body, -1) {
+		got = append(got, m[1])
+	}
+	assert.Equal(t, want, got)
 }
