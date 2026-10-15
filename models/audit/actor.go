@@ -80,9 +80,13 @@ func ActorFromContext(ctx context.Context) *Actor {
 	return a
 }
 
-// WithSystem marks work the server does by itself, e.g. "cron:<task>", "mirror:<repo id>", "install".
+// SystemActor is the server doing work by itself, e.g. "cron:<task>", "mirror:<repo id>", "install".
+func SystemActor(name string) *Actor {
+	return &Actor{Type: ActorSystem, Name: name, Credential: Credential{Type: CredentialSystem}}
+}
+
 func WithSystem(ctx context.Context, name string) context.Context {
-	return WithActor(ctx, &Actor{Type: ActorSystem, Name: name, Credential: Credential{Type: CredentialSystem}})
+	return WithActor(ctx, SystemActor(name))
 }
 
 // WithCLI marks a command line change. The OS user name is not recorded: it would be client input.

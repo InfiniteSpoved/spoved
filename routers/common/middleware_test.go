@@ -5,6 +5,7 @@ package common
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"testing"
 
 	"forgejo.org/modules/web"
@@ -94,4 +95,11 @@ func TestStripSlashesMiddleware(t *testing.T) {
 		r.ServeHTTP(httptest.NewRecorder(), req)
 		assert.True(t, called)
 	}
+}
+
+func TestAuditPeer(t *testing.T) {
+	assert.Equal(t, "unix", auditPeer("@", netip.Addr{}))
+	assert.Equal(t, "unix", auditPeer("@", netip.MustParseAddr("127.0.0.1")))
+	assert.Equal(t, "invalid", auditPeer("x", netip.Addr{}))
+	assert.Equal(t, "192.0.2.1", auditPeer("[::ffff:192.0.2.1]:1", netip.MustParseAddr("::ffff:192.0.2.1")))
 }

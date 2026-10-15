@@ -4,7 +4,6 @@
 package method
 
 import (
-	audit_model "forgejo.org/models/audit"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/modules/cache"

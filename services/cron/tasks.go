@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	system_model "forgejo.org/models/system"
 	user_model "forgejo.org/models/user"
@@ -110,7 +111,7 @@ func (t *Task) RunWithUser(doer *user_model.User, config Config) {
 			doerName = doer.Name
 		}
 
-		ctx, _, finished := pm.AddContext(baseCtx, config.FormatMessage(translation.NewLocale("en-US"), t.Name, "process", doerName))
+		ctx, _, finished := pm.AddContext(audit_model.WithSystem(baseCtx, "cron:"+t.Name), config.FormatMessage(translation.NewLocale("en-US"), t.Name, "process", doerName))
 		defer finished()
 
 		if err := t.fun(ctx, doer, config); err != nil {

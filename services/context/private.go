@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/modules/graceful"
 	"forgejo.org/modules/process"
 	"forgejo.org/modules/web"
@@ -68,6 +69,7 @@ func PrivateContexter() func(http.Handler) http.Handler {
 			ctx := &PrivateContext{Base: base}
 			defer baseCleanUp()
 			ctx.AppendContextValue(privateContextKey, ctx)
+			ctx.AppendContextValue(audit_model.ActorContextKey, audit_model.SystemActor("private"))
 
 			next.ServeHTTP(ctx.Resp, ctx.Req)
 		})

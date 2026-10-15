@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"forgejo.org/cmd/forgejo"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 
@@ -197,7 +198,11 @@ func innerNewMainApp(version, versionExtra string, subCmdsStandaloneArgs, subCmd
 	}
 	app.Flags = append(app.Flags, cli.VersionFlag)
 	app.Flags = append(app.Flags, globalFlags()...)
-	app.Before = PrepareConsoleLoggerLevel(log.INFO)
+	prepareLogger := PrepareConsoleLoggerLevel(log.INFO)
+	app.Before = func(ctx context.Context, c *cli.Command) (context.Context, error) {
+		ctx, err := prepareLogger(ctx, c)
+		return withCLIActor(ctx, c.Args().First()), err
+	}
 	for i := range subCmdWithConfig {
 		prepareSubcommandWithConfig(subCmdWithConfig[i], globalFlags)
 	}
@@ -206,6 +211,16 @@ func innerNewMainApp(version, versionExtra string, subCmdsStandaloneArgs, subCmd
 
 	setting.InitEnvVars()
 	return app
+}
+
+// withCLIActor makes "cli" the audit actor of commands that change data in-process. The servers set their own actors:
+// web (also the default command) per request, serv and hook through the internal API.
+func withCLIActor(ctx context.Context, subcommand string) context.Context {
+	switch subcommand {
+	case "", "web", "serv", "hook":
+		return ctx
+	}
+	return audit_model.WithCLI(ctx)
 }
 
 func RunMainApp(app *cli.Command, args ...string) error {

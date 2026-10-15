@@ -99,6 +99,7 @@ func apiAuthentication(authMethod auth.Method) func(*context.APIContext) {
 		ctx.SetDoer(ar.User())
 		ctx.SetIsSigned(ctx.Doer() != nil)
 		ctx.SetAuthentication(ar)
+		common.SetAuditActor(ctx.Base, ar)
 	}
 }
 

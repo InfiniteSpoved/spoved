@@ -6,10 +6,10 @@ package audit
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	"forgejo.org/models/db"
+	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"

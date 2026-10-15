@@ -4,13 +4,13 @@
 package audit_test
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/json"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

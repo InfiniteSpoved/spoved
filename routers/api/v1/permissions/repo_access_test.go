@@ -4,10 +4,10 @@
 package permissions
 
 import (
-	audit_model "forgejo.org/models/audit"
 	"testing"
 
 	actions_model "forgejo.org/models/actions"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/perm"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
