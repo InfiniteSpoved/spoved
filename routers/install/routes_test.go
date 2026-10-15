@@ -8,9 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/unittest"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
+	"forgejo.org/modules/web"
+	"forgejo.org/routers/common"
+	"forgejo.org/services/context"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -40,4 +44,16 @@ func TestRoutes(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	unittest.MainTest(m, &unittest.TestOptions{IniFileOverride: "install.ini"})
+}
+
+func TestContexterAuditActor(t *testing.T) {
+	var got *audit_model.Actor
+	r := web.NewRoute()
+	r.Use(common.ProtocolMiddlewares()...)
+	r.Use(common.Sessioner(), Contexter())
+	r.Get("/", func(ctx *context.Context) {
+		got = audit_model.ActorFromContext(ctx)
+	})
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+	assert.Equal(t, audit_model.SystemActor("install"), got)
 }

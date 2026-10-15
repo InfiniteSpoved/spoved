@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
 	user_model "forgejo.org/models/user"
 	chef_module "forgejo.org/modules/packages/chef"
 	"forgejo.org/modules/util"
@@ -286,4 +287,8 @@ func verifyDataOld(signature, data []byte, pub *rsa.PublicKey) error {
 	}
 
 	return nil
+}
+
+func (r *chefAuthenticationResult) Credential() audit_model.Credential {
+	return audit_model.Credential{Type: audit_model.CredentialChefKey, OwnerID: r.user.ID}
 }

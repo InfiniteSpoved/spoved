@@ -5,10 +5,15 @@ package routers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"os"
 	"reflect"
 	"runtime"
 
 	"forgejo.org/models"
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/modules/cache"
 	"forgejo.org/modules/eventsource"
@@ -168,8 +173,27 @@ func InitWebInstalled(ctx context.Context) {
 
 	mustInit(actions_router.InitOIDC)
 
+	mustInitCtx(ctx, RecordInstanceStarted)
+
 	// Finally start up the cron
 	cron.NewContext(ctx)
+}
+
+// RecordInstanceStarted records the start of the web server with the version and the SHA-256 of app.ini, so that
+// changes to app.ini leave a trace in the audit log.
+func RecordInstanceStarted(ctx context.Context) error {
+	conf, err := os.ReadFile(setting.CustomConf)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	sum := sha256.Sum256(conf)
+	return audit_model.Record(audit_model.WithSystem(ctx, "instance"), audit_model.Event{
+		Action:     "audit.instance.started",
+		Category:   audit_model.CategoryAudit,
+		Result:     audit_model.ResultSuccess,
+		TargetType: "instance",
+		Data:       map[string]any{"version": setting.AppVer, "config_sha256": hex.EncodeToString(sum[:])},
+	})
 }
 
 // NormalRoutes represents non install routes

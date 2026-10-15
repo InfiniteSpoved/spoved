@@ -513,7 +513,7 @@ func createFineGrainedRepoAccessToken(t testing.TB, username string, scopes []au
 		Scope:            scope,
 		ResourceAllRepos: false,
 	}
-	err = auth.NewAccessToken(t.Context(), token)
+	err = auth.NewAccessToken(t.Context(), token, nil)
 	require.NoError(t, err)
 
 	for _, id := range repoIDs {

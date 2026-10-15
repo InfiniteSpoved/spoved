@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"strings"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/setting"
@@ -50,6 +51,15 @@ func init() {
 	db.RegisterModel(new(OAuth2Application))
 	db.RegisterModel(new(OAuth2AuthorizationCode))
 	db.RegisterModel(new(OAuth2Grant))
+	audit_model.RegisterCredentialNamer(audit_model.CredentialOAuth2Grant, func(ctx context.Context, c audit_model.Credential) (string, error) {
+		app, err := GetOAuth2ApplicationByID(ctx, c.AppID)
+		if IsErrOAuthApplicationNotFound(err) {
+			return "", nil
+		} else if err != nil {
+			return "", err
+		}
+		return app.Name, nil
+	})
 }
 
 type BuiltinOAuth2Application struct {

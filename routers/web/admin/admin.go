@@ -5,6 +5,7 @@
 package admin
 
 import (
+	stdCtx "context"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	activities_model "forgejo.org/models/activities"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/cache"
@@ -209,7 +211,7 @@ func DashboardPost(ctx *context.Context) {
 		default:
 			task := cron.GetTask(form.Op)
 			if task != nil {
-				go task.RunWithUser(ctx.Doer, nil)
+				go task.RunWithUser(audit_model.WithActor(stdCtx.Background(), audit_model.ActorFromContext(ctx)), ctx.Doer, nil)
 				ctx.Flash.Success(ctx.Tr("admin.dashboard.task.started", ctx.Tr("admin.dashboard."+form.Op)))
 			} else {
 				ctx.Flash.Error(ctx.Tr("admin.dashboard.task.unknown", form.Op))

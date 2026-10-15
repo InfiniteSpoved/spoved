@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"forgejo.org/models/asymkey"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	db_install "forgejo.org/models/db/install"
 	"forgejo.org/models/gitea_migrations"
@@ -66,6 +67,7 @@ func Contexter() func(next http.Handler) http.Handler {
 
 			ctx := context.NewWebContext(base, rnd, session.GetSession(req))
 			ctx.AppendContextValue(context.WebContextKey, ctx)
+			ctx.AppendContextValue(audit_model.ActorContextKey, audit_model.SystemActor("install"))
 			ctx.Data.MergeFrom(middleware.CommonTemplateContextData())
 			ctx.Data.MergeFrom(middleware.ContextData{
 				"Context":        ctx, // TODO: use "ctx" in template and remove this

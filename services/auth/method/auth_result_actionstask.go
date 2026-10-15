@@ -4,6 +4,7 @@
 package method
 
 import (
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
@@ -28,4 +29,8 @@ func (r *actionsTaskTokenAuthenticationResult) User() *user_model.User {
 
 func (r *actionsTaskTokenAuthenticationResult) ActionsTaskID() optional.Option[int64] {
 	return optional.Some(r.taskID)
+}
+
+func (r *actionsTaskTokenAuthenticationResult) Credential() audit_model.Credential {
+	return audit_model.Credential{Type: audit_model.CredentialActionsTask, ID: r.taskID}
 }

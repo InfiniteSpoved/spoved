@@ -149,7 +149,7 @@ func TestDeleteUserCleansUpRepoSpecificAPIAccess(t *testing.T) {
 		Scope:            auth_model.AccessTokenScopeReadRepository,
 		ResourceAllRepos: false,
 	}
-	require.NoError(t, auth_model.NewAccessToken(t.Context(), accessToken))
+	require.NoError(t, auth_model.NewAccessToken(t.Context(), accessToken, nil))
 	resRepo1 := &auth_model.AccessTokenResourceRepo{
 		RepoID: 2,
 	}

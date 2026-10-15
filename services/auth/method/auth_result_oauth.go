@@ -4,6 +4,7 @@
 package method
 
 import (
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
@@ -17,6 +18,8 @@ type oAuth2JWTAuthenticationResult struct {
 	user        *user_model.User
 	scope       optional.Option[auth_model.AccessTokenScope]
 	grantScopes string
+	grantID     int64
+	appID       int64
 }
 
 func (*oAuth2JWTAuthenticationResult) IsOAuth2JWTAuthentication() bool {
@@ -33,4 +36,9 @@ func (r *oAuth2JWTAuthenticationResult) Scope() optional.Option[auth_model.Acces
 
 func (r *oAuth2JWTAuthenticationResult) OAuth2GrantScopes() optional.Option[string] {
 	return optional.Some(r.grantScopes)
+}
+
+// Credential is the grant; Record names it after its application.
+func (r *oAuth2JWTAuthenticationResult) Credential() audit_model.Credential {
+	return audit_model.Credential{Type: audit_model.CredentialOAuth2Grant, ID: r.grantID, AppID: r.appID, OwnerID: r.user.ID}
 }
