@@ -94,7 +94,7 @@
 			{{end}}
 			{{if .Resolved}}
 				<p class="audit-resolved">
-					{{range $i, $r := .Resolved}}{{if $i}} · {{end}}{{ctx.Locale.Tr $r.Label}}: {{if $r.Name}}{{$r.Name}} (#{{$r.ID}}){{else}}{{ctx.Locale.Tr "admin.audit.resolved_missing" $r.ID}}{{end}}{{end}}
+					{{range $i, $r := .Resolved}}{{if $i}} · {{end}}{{$r.Label}}: {{if $r.Name}}{{$r.Name}} (#{{$r.ID}}){{else}}{{ctx.Locale.Tr "admin.audit.resolved_missing" $r.ID}}{{end}}{{end}}
 				</p>
 			{{end}}
 			{{if .FilterError}}

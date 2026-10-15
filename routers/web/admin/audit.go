@@ -106,7 +106,11 @@ func resolveAuditFilter(ctx *context.Context, o *audit_model.SearchOptions) ([]a
 	for _, u := range []struct {
 		label string
 		id    int64
-	}{{"admin.audit.org", o.OwnerID}, {"admin.audit.user", o.UserID}, {"admin.audit.credential_owner", o.CredentialOwnerID}} {
+	}{
+		{ctx.Locale.TrString("admin.audit.org"), o.OwnerID},
+		{ctx.Locale.TrString("admin.audit.user"), o.UserID},
+		{ctx.Locale.TrString("admin.audit.credential_owner"), o.CredentialOwnerID},
+	} {
 		if u.id == 0 {
 			continue
 		}
@@ -119,7 +123,7 @@ func resolveAuditFilter(ctx *context.Context, o *audit_model.SearchOptions) ([]a
 		out = append(out, r)
 	}
 	if o.RepoID != 0 {
-		r := auditResolved{Label: "admin.audit.repo", ID: o.RepoID}
+		r := auditResolved{Label: ctx.Locale.TrString("admin.audit.repo"), ID: o.RepoID}
 		if repo, err := repo_model.GetRepositoryByIDIncludingTrashed(ctx, o.RepoID); err == nil {
 			r.Name = repo.FullName()
 		} else if !repo_model.IsErrRepoNotExist(err) {
