@@ -330,7 +330,7 @@ func TestBitbucketImportRules(t *testing.T) {
 			assert.Equal(t, hookSecret, ci.Secret)
 			assert.True(t, ci.Push && ci.Create && ci.Delete && ci.PullRequest)
 			assert.False(t, ci.Fork)
-			assert.Equal(t, "https://hooks.example.com/ci", item(t, report, "hook", "RUL hook 1").Name)
+			assert.Equal(t, "https://hooks.example.com", item(t, report, "hook", "RUL hook 1").Name)
 			assert.Contains(t, item(t, report, "hook", "RUL hook 1").Reason, "mirror:repo_synchronized")
 			nosecret := byURL["https://hooks.example.com/nosecret"]
 			require.NotNil(t, nosecret)
