@@ -130,6 +130,14 @@ func resolveAuditFilter(ctx *context.Context, o *audit_model.SearchOptions) ([]a
 	return out, nil
 }
 
+// auditLocation is the time zone the page shows times in: the user's, or UTC when there is none or it can't be loaded.
+func auditLocation(tz string) *time.Location {
+	if loc, err := time.LoadLocation(tz); tz != "" && err == nil {
+		return loc
+	}
+	return time.UTC
+}
+
 // Audit shows the audit log, or exports it with ?format=csv|json.
 func Audit(ctx *context.Context) {
 	f, err := audit_service.ParseFilter(ctx, ctx.FormString)
@@ -240,10 +248,7 @@ func Audit(ctx *context.Context) {
 		ctx.ServerError("GetUserTimeZone", err)
 		return
 	}
-	loc := time.UTC
-	if tz != "" {
-		loc, _ = time.LoadLocation(tz)
-	}
+	loc := auditLocation(tz)
 	ctx.Data["TimeZone"] = loc.String()
 	rows := make([]*auditRow, 0, len(entries))
 	for _, e := range entries {

@@ -23,8 +23,9 @@ link to the same evidence in the API. All filters combine with AND.
 | `before_id`, `after_id` | paging: older or newer entries than this ID |
 
 Names are looked up as they are now, so a renamed or trashed object isn't found by its name. A value of only digits is
-an ID and is used as it is, so entries of deleted and trashed objects stay reachable; the links on the page use IDs.
-An unknown name is an error, never an empty list.
+always read as an ID, never as a name, and is used as it is, so entries of deleted and trashed objects stay reachable;
+for a user or organization whose name is all digits, give its ID. The page shows what each filter resolved to, and its
+links use IDs. An unknown name is an error, never an empty list.
 
 ## Export
 
