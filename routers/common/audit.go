@@ -95,8 +95,6 @@ func RecordAuthFailure(b *context.Base, v *auth_service.AuthenticationAttemptedI
 	SetAuditActor(b, &auth_service.UnauthenticatedResult{})
 	var limited *ratelimit.LimitedError
 	var expired auth_model.ErrAccessTokenExpired
-	var badPassword db.ErrUserPasswordInvalid
-	var prohibited user_model.ErrUserProhibitLogin
 	subject := v.UserID
 	switch {
 	case errors.As(v.Error, &limited):
@@ -105,9 +103,9 @@ func RecordAuthFailure(b *context.Base, v *auth_service.AuthenticationAttemptedI
 	case errors.Is(v.Error, authz.ErrScopePolicyEnforced):
 		auth_service.RecordRefusal(b, "scope_policy", 0, subject, audit_model.IPKey(audit_model.ActorFromContext(b), 48)+"|"+strconv.FormatInt(subject, 10), nil)
 	default:
-		if errors.As(v.Error, &badPassword) {
+		if badPassword, ok := errors.AsType[db.ErrUserPasswordInvalid](v.Error); ok {
 			subject = badPassword.UID
-		} else if errors.As(v.Error, &prohibited) {
+		} else if prohibited, ok := errors.AsType[user_model.ErrUserProhibitLogin](v.Error); ok {
 			subject = prohibited.UID
 		}
 		auth_service.RecordSignInFailure(b, subject, "bad_credential")

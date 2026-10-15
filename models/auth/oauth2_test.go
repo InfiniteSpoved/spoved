@@ -383,7 +383,7 @@ func TestOAuth2GrantAuditName(t *testing.T) {
 		ID:         1,
 		Credential: audit_model.Credential{Type: audit_model.CredentialOAuth2Grant, ID: 1, AppID: 1, OwnerID: 1},
 	})
-	require.NoError(t, audit_model.Record(ctx, audit_model.Event{Action: "test.oauth2"}))
-	e := unittest.AssertExistsAndLoadBean(t, &audit_model.Entry{Action: "test.oauth2"})
+	require.NoError(t, audit_model.Record(ctx, audit_model.Event{Action: "audit.exported"}))
+	e := unittest.AssertExistsAndLoadBean(t, &audit_model.Entry{Action: "audit.exported", CredentialType: audit_model.CredentialOAuth2Grant})
 	assert.Equal(t, "Test", e.CredentialName, "named after the grant's application when the entry is written")
 }
