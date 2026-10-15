@@ -536,10 +536,10 @@ func bitbucketHookEvents(events []string) (webhook_module.HookEvents, []string) 
 	return e, unmapped
 }
 
-// redactedHookURL is what the report shows of a hook URL: scheme, host and path, never the user info, query or
-// fragment, which often hold tokens.
+// redactedHookURL is what the report shows of a hook URL: scheme and host (with port), never the user info, path,
+// query or fragment, which often hold tokens.
 func redactedHookURL(u *url.URL) string {
-	return util.StripControl((&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String())
+	return util.StripControl((&url.URL{Scheme: u.Scheme, Host: u.Host}).String())
 }
 
 // maxBitbucketHookURL caps the length of an imported hook URL.
