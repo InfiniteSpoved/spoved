@@ -10,6 +10,9 @@ name: CI
 # It only runs by hand (pull requests run in spovedBuild, see spovedbuild.yml).
 # Manual runs take a branch, tag or commit and run the checks and unit tests,
 # everything when full is checked; `only` limits a manual run to some stages.
+#
+# To test an untrusted commit, such as a fork's branch, push it to a branch here and choose
+# that branch in "Use workflow from" (not develop): the caches are scoped to the branch.
 
 on:
   workflow_dispatch:
