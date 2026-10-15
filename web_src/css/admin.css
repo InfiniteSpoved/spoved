@@ -50,14 +50,23 @@
   margin-bottom: 1rem;
 }
 
+.admin.audit-log .audit-tabs {
+  flex-wrap: wrap;
+}
+
 .admin.audit-log .audit-filters > summary {
   cursor: pointer;
   margin-bottom: 0.5rem;
 }
 
 .admin.audit-log .audit-entries td {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   vertical-align: top;
+}
+
+.admin.audit-log .audit-entries td.audit-time,
+.admin.audit-log .audit-entries td.audit-ip {
+  white-space: nowrap;
 }
 
 .admin.audit-log .audit-details dl {
