@@ -193,3 +193,24 @@ func TestRecordCredentialUsed(t *testing.T) {
 	}), "web")
 	assert.Empty(t, entriesSince(t, since), "a session is not a credential use")
 }
+
+func TestAggregationFirstWritesCap(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	audit_model.ResetActivity()
+	defer audit_model.ResetActivity()
+	defer test.MockVariableValue(&audit_model.AggregateFirstWrites, 2)()
+	ctx := audit_model.WithActor(t.Context(), &audit_model.Actor{Type: audit_model.ActorAnonymous, IP: "203.0.113.1"})
+
+	since := maxID(t)
+	for i := range 4 {
+		audit_model.RecordAggregated(ctx, failedSignIn(7), fmt.Sprint("k", i))
+	}
+	assert.Len(t, entriesSince(t, since), 2, "past the cap a new key is only counted")
+
+	since = maxID(t)
+	audit_model.FlushAggregated(t.Context(), true)
+	entries := entriesSince(t, since)
+	require.Len(t, entries, 1)
+	assert.Contains(t, entries[0].Data, `"count":2`)
+	assert.Contains(t, entries[0].Data, `"overflow":true`)
+}

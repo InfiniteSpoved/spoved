@@ -15,9 +15,12 @@ import (
 
 // AggregateCap and AggregateOverflowCap bound the pending aggregates per pod. When the first is full a new key goes
 // to the overflow bucket of its action and subject; when that is full too, to the one bucket of its action.
+// AggregateFirstWrites bounds the first events written at once per window and pod; past it, a new key only counts
+// into an overflow bucket.
 var (
 	AggregateCap         = 10_000
 	AggregateOverflowCap = 1_000
+	AggregateFirstWrites = 1_000
 )
 
 const aggregateWindow = 60 // seconds
@@ -34,6 +37,8 @@ type aggBucket struct {
 var agg struct {
 	sync.Mutex
 	buckets, overflow map[string]*aggBucket
+	windowStart       timeutil.TimeStamp // of the first-writes count
+	firstWrites       int
 }
 
 // RecordAggregated writes the first event of (action, key) in a window of one minute at once, and counts the rest
@@ -42,8 +47,11 @@ func RecordAggregated(ctx context.Context, ev Event, key string) {
 	now := timeutil.TimeStampNow()
 	k := ev.Action + "|" + key
 	agg.Lock()
+	if now >= agg.windowStart+aggregateWindow {
+		agg.windowStart, agg.firstWrites = now, 0
+	}
 	b, m, overflow := agg.buckets[k], agg.buckets, false
-	if b == nil && len(agg.buckets) >= AggregateCap {
+	if b == nil && (len(agg.buckets) >= AggregateCap || agg.firstWrites >= AggregateFirstWrites) {
 		m, overflow = agg.overflow, true
 		if k = ev.Action + "|subject:" + strconv.FormatInt(ev.SubjectUserID, 10); m[k] == nil && len(m) >= AggregateOverflowCap {
 			k = ev.Action + "|"
@@ -67,8 +75,16 @@ func RecordAggregated(ctx context.Context, ev Event, key string) {
 		b.actor = Actor{Type: ActorUnknown}
 	}
 	m[k] = b
+	write := agg.firstWrites < AggregateFirstWrites
+	if write {
+		agg.firstWrites++
+	} else {
+		b.count, b.first, b.last = 1, now, now // only counted: too many first events in this window
+	}
 	agg.Unlock()
-	RecordActivity(ctx, ev)
+	if write {
+		RecordActivity(ctx, ev)
+	}
 }
 
 // FlushAggregated writes the aggregates whose window has ended, or every pending one when all is set (shutdown).

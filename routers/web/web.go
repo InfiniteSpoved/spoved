@@ -444,7 +444,7 @@ func Routes() *web.Route {
 		"GET, POST, OPTIONS",
 		"/login/oauth/userinfo",
 		gzipMid, sessioner, context.Contexter(),
-		oauth2Enabled, optionsCorsHandler(), ignoreCSRF, webAuth(&auth_method.OAuth2{}), common.IPAllowlistMixed, common.CredentialUsed("web"),
+		oauth2Enabled, optionsCorsHandler(), ignoreCSRF, webAuth(&auth_method.OAuth2{}), common.IPAllowlistMixed,
 		auth.InfoOAuth,
 	)
 

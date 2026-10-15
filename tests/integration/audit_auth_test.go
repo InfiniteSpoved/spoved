@@ -10,7 +10,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	asymkey_model "forgejo.org/models/asymkey"
 	audit_model "forgejo.org/models/audit"
@@ -18,6 +22,8 @@ import (
 	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/json"
+	"forgejo.org/modules/keying"
 	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
@@ -27,6 +33,7 @@ import (
 	"forgejo.org/tests"
 
 	"github.com/markbates/goth"
+	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -57,6 +64,28 @@ func assertSignIn(t *testing.T, e *audit_model.Entry, uid int64, ip, method stri
 		assert.Equal(t, ip, e.IP)
 	}
 	assert.Equal(t, method, auditData(t, e)["method"])
+}
+
+// sessionData returns the raw stored session of s (the tests use the file session provider).
+func sessionData(t *testing.T, s *TestSession) string {
+	t.Helper()
+	var conf struct{ ProviderConfig string }
+	require.NoError(t, json.Unmarshal([]byte(setting.SessionConfig.ProviderConfig), &conf))
+	sid := s.GetCookie(setting.SessionConfig.CookieName).Value
+	data, err := os.ReadFile(filepath.Join(conf.ProviderConfig, sid[0:1], sid[1:2], sid))
+	require.NoError(t, err)
+	return string(data)
+}
+
+func totpPasscode(t *testing.T, u *user_model.User) string {
+	t.Helper()
+	twoFactor, err := auth_model.GetTwoFactorByUID(db.DefaultContext, u.ID)
+	require.NoError(t, err)
+	secret, err := keying.TOTP.Decrypt(twoFactor.Secret, keying.ColumnAndID("secret", twoFactor.ID))
+	require.NoError(t, err)
+	passcode, err := totp.GenerateCode(string(secret), time.Now())
+	require.NoError(t, err)
+	return passcode
 }
 
 func TestAuditSignInPassword(t *testing.T) {
@@ -94,6 +123,13 @@ func TestAuditSignInPassword(t *testing.T) {
 	require.Len(t, agg, 1)
 	assert.EqualValues(t, 2, agg[0].SubjectUserID)
 	assert.EqualValues(t, 1, auditData(t, agg[0])["count"])
+
+	since = auditMaxID(t)
+	signIn("203.0.113.22", "user37", userPassword, http.StatusOK) // login prohibited
+	failed = auditActions(t, since, "auth.signin.failed")
+	require.Len(t, failed, 1)
+	assert.EqualValues(t, 37, failed[0].SubjectUserID)
+	assert.Equal(t, "prohibited", auditData(t, failed[0])["reason"])
 }
 
 func TestAuditSignInSecondFactor(t *testing.T) {
@@ -105,11 +141,18 @@ func TestAuditSignInSecondFactor(t *testing.T) {
 		session.EnrollTOTP(t)
 		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 
+		// the method is set by the server and dropped after the sign-in; a request value can't set it
 		since := auditMaxID(t)
-		loginUserWithTOTP(t, user2)
+		session = loginUser(t, "user2") // stops at the 2FA page
+		assert.Empty(t, auditActions(t, since, "auth.signin.success"), "the password step alone is no sign-in")
+		assert.Contains(t, sessionData(t, session), "twofaMethod")
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user/two_factor?twofaMethod=evil", map[string]string{
+			"passcode": totpPasscode(t, user2), "twofaMethod": "evil", "method": "evil",
+		}), http.StatusSeeOther)
 		entries := auditActions(t, since, "auth.signin.success")
-		require.Len(t, entries, 1, "the password step alone is no sign-in")
+		require.Len(t, entries, 1)
 		assertSignIn(t, entries[0], 2, "", "password+totp")
+		assert.NotContains(t, sessionData(t, session), "twofaMethod")
 
 		since = auditMaxID(t)
 		session = loginUser(t, "user2") // stops at the 2FA page
@@ -215,17 +258,18 @@ func TestAuditSignInResetAndActivation(t *testing.T) {
 	auditFresh(t)
 
 	t.Run("password reset", func(t *testing.T) {
-		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
-		cleanup, code, _ := parseMailHelper(t, user2.EmailTo(), translation.NewLocale("en-US").TrString("mail.reset_password"))
+		// user4: another user than the other reset tests, whose mail resend limit (cached for 180 s) this would hit
+		user4 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})
+		cleanup, code, _ := parseMailHelper(t, user4.EmailTo(), translation.NewLocale("en-US").TrString("mail.reset_password"))
 		defer cleanup()
 		session := emptyTestSession(t)
-		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user/forgot_password", map[string]string{"email": user2.Email}), http.StatusOK)
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user/forgot_password", map[string]string{"email": user4.Email}), http.StatusOK)
 
 		since := auditMaxID(t)
 		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user/recover_account", map[string]string{"code": *code, "password": "new_password1!"}), http.StatusSeeOther)
 		entries := auditActions(t, since, "auth.signin.success")
 		require.Len(t, entries, 1)
-		assertSignIn(t, entries[0], 2, "", "password_reset")
+		assertSignIn(t, entries[0], 4, "", "password_reset")
 		assert.Equal(t, "reset_code", auditData(t, entries[0])["reason"])
 	})
 
@@ -349,6 +393,7 @@ func TestAuditCredentialUsed(t *testing.T) {
 		since := auditMaxID(t)
 		MakeRequest(t, api("203.0.113.47"), http.StatusOK)
 		MakeRequest(t, api("203.0.113.48"), http.StatusTooManyRequests)
+		MakeRequest(t, api("203.0.113.48"), http.StatusTooManyRequests)
 		entries := used(t, since)
 		require.Len(t, entries, 1, "a refused request records no credential use")
 		assert.Equal(t, "203.0.113.47", entries[0].IP)
@@ -356,6 +401,11 @@ func TestAuditCredentialUsed(t *testing.T) {
 		require.Len(t, refused, 1)
 		assert.Equal(t, "rate_limit", auditData(t, refused[0])["reason"])
 		assert.Equal(t, ratelimit.API, auditData(t, refused[0])["class"])
+
+		audit_model.FlushAggregated(t.Context(), true)
+		agg := auditActions(t, since, "auth.refused.aggregated")
+		require.Len(t, agg, 1)
+		assert.EqualValues(t, 1, auditData(t, agg[0])["count"])
 	})
 
 	t.Run("write failure", func(t *testing.T) {
@@ -373,9 +423,17 @@ func TestAuditBadCredential(t *testing.T) {
 	auditFresh(t)
 
 	since := auditMaxID(t)
-	MakeRequest(t, from("203.0.113.50", NewRequest(t, "GET", "/api/v1/user").AddTokenAuth("0123456789abcdef0123456789abcdef01234567")), http.StatusUnauthorized)
+	hugeUA := strings.Repeat("u", 1<<20)
+	for range 2 {
+		MakeRequest(t, from("203.0.113.50", NewRequest(t, "GET", "/api/v1/user").AddTokenAuth("0123456789abcdef0123456789abcdef01234567").SetHeader("User-Agent", hugeUA)), http.StatusUnauthorized)
+	}
 	failed := auditActions(t, since, "auth.signin.failed")
 	require.Len(t, failed, 1)
+	assert.Len(t, failed[0].UserAgent, audit_model.MaxUserAgent)
+	audit_model.FlushAggregated(t.Context(), true)
+	agg := auditActions(t, since, "auth.signin.failed.aggregated")
+	require.Len(t, agg, 1)
+	assert.Len(t, agg[0].UserAgent, audit_model.MaxUserAgent, "the aggregate keeps the capped actor")
 	assert.Equal(t, audit_model.ActorAnonymous, failed[0].ActorType)
 	assert.Equal(t, "203.0.113.50", failed[0].IP)
 	assert.Zero(t, failed[0].SubjectUserID)
@@ -392,6 +450,7 @@ func TestAuditBadCredential(t *testing.T) {
 		since := auditMaxID(t)
 		basic(http.StatusUnauthorized)
 		basic(http.StatusTooManyRequests)
+		basic(http.StatusTooManyRequests)
 		failed := auditActions(t, since, "auth.signin.failed")
 		require.Len(t, failed, 1, "the refused attempt is only a rate limit refusal")
 		assert.EqualValues(t, 2, failed[0].SubjectUserID)
@@ -399,6 +458,12 @@ func TestAuditBadCredential(t *testing.T) {
 		require.Len(t, refused, 1)
 		assert.Equal(t, "rate_limit", auditData(t, refused[0])["reason"])
 		assert.Equal(t, ratelimit.Auth, auditData(t, refused[0])["class"])
+
+		audit_model.FlushAggregated(t.Context(), true)
+		agg := auditActions(t, since, "auth.refused.aggregated")
+		require.Len(t, agg, 1)
+		assert.Equal(t, "rate_limit", auditData(t, agg[0])["reason"])
+		assert.EqualValues(t, 1, auditData(t, agg[0])["count"])
 	})
 }
 
@@ -425,6 +490,12 @@ func TestAuditRefusals(t *testing.T) {
 		agg := auditActions(t, since, "auth.refused.aggregated")
 		require.Len(t, agg, 1)
 		assert.EqualValues(t, 2, auditData(t, agg[0])["count"])
+
+		since = auditMaxID(t)
+		for _, ip := range []string{"2001:db8:77::1", "2001:db8:77:1::1", "2001:db8:78::1"} {
+			MakeRequest(t, from(ip, NewRequest(t, "GET", "/api/v1/user").AddTokenAuth(token)), http.StatusForbidden)
+		}
+		assert.Len(t, auditActions(t, since, "auth.refused"), 2, "one per IPv6 /48")
 	})
 
 	t.Run("org two-factor requirement", func(t *testing.T) {
@@ -457,6 +528,17 @@ func TestAuditRefusals(t *testing.T) {
 		require.Len(t, refused, 1)
 		assert.Equal(t, "expired", auditData(t, refused[0])["reason"])
 		assert.Empty(t, auditActions(t, since, "auth.signin.failed"))
+
+		audit_model.FlushAggregated(t.Context(), true) // earlier subtests' buckets
+		since = auditMaxID(t)
+		for range 2 {
+			MakeRequest(t, NewRequest(t, "GET", "/api/v1/user").AddTokenAuth(token), http.StatusUnauthorized)
+		}
+		audit_model.FlushAggregated(t.Context(), true)
+		agg := auditActions(t, since, "auth.refused.aggregated")
+		require.Len(t, agg, 1)
+		assert.Equal(t, "expired", auditData(t, agg[0])["reason"])
+		assert.EqualValues(t, 1, auditData(t, agg[0])["count"])
 
 		audit_model.ResetActivity() // another pod: the existing entry still counts
 		since = auditMaxID(t)

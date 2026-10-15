@@ -185,7 +185,7 @@ func sshRateLimited(ctx *context.PrivateContext, keyID int64) bool {
 		}
 	}
 	sshLogger.Warn("SSH rate limit exceeded by key %d from %q", keyID, ctx.FormString("ip"))
-	auth_service.RecordRefusal(ctx, "rate_limit", 0, 0, ratelimit.SSH+"|"+addr+"|key:"+strconv.FormatInt(keyID, 10), map[string]any{"class": ratelimit.SSH})
+	auth_service.RecordRefusal(ctx, "rate_limit", 0, 0, ratelimit.SSH+"|"+auth_service.ActorIPKey(ctx, 48)+"|key:"+strconv.FormatInt(keyID, 10), map[string]any{"class": ratelimit.SSH})
 	ctx.JSON(http.StatusTooManyRequests, private.Response{UserMsg: (&ratelimit.LimitedError{Result: r}).Error()})
 	return true
 }

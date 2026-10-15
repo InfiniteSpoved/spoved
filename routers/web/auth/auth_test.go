@@ -17,6 +17,7 @@ import (
 	"forgejo.org/services/auth/source/oauth2"
 	"forgejo.org/services/contexttest"
 
+	"code.forgejo.org/go-chi/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -141,4 +142,34 @@ func TestSignInOAuth2AutoRedirect(t *testing.T) {
 	ctx, resp = contexttest.MockContext(t, "/user/login")
 	SignIn(ctx)
 	assert.Equal(t, http.StatusOK, resp.Code)
+}
+
+// mapSession is a session store that only keeps values (the embedded Store is nil).
+type mapSession struct {
+	session.Store
+	m map[any]any
+}
+
+func (s mapSession) Get(k any) any      { return s.m[k] }
+func (s mapSession) Set(k, v any) error { s.m[k] = v; return nil }
+func (s mapSession) Delete(k any) error { delete(s.m, k); return nil }
+
+// The audit method of a sign-in comes from its source and from what the server put in the session, never from the
+// request: the suite has no LDAP or OpenID server and no WebAuthn authenticator, so the mapping is checked here.
+func TestSignInMethod(t *testing.T) {
+	assert.Equal(t, "password", signInMethod(nil))
+	assert.Equal(t, "password", signInMethod(&auth_model.Source{Type: auth_model.Plain}))
+	assert.Equal(t, "ldap:3", signInMethod(&auth_model.Source{ID: 3, Type: auth_model.LDAP}))
+	assert.Equal(t, "ldap:4", signInMethod(&auth_model.Source{ID: 4, Type: auth_model.DLDAP}))
+	assert.Equal(t, "smtp:5", signInMethod(&auth_model.Source{ID: 5, Type: auth_model.SMTP}))
+	assert.Equal(t, "pam:6", signInMethod(&auth_model.Source{ID: 6, Type: auth_model.PAM}))
+	assert.Equal(t, "oauth2:7", signInMethod(&auth_model.Source{ID: 7, Type: auth_model.OAuth2}))
+
+	ctx, _ := contexttest.MockContext(t, "/user/webauthn/assertion?twofaMethod=evil")
+	ctx.Session = mapSession{m: map[any]any{}}
+	assert.Equal(t, "password", firstFactor(ctx), "never read from the request")
+	require.NoError(t, ctx.Session.Set("twofaMethod", signInMethod(&auth_model.Source{ID: 3, Type: auth_model.LDAP})))
+	assert.Equal(t, "ldap:3", firstFactor(ctx))
+	require.NoError(t, ctx.Session.Set("twofaMethod", signInMethod(nil)+"+link"))
+	assert.Equal(t, "password+link", firstFactor(ctx))
 }

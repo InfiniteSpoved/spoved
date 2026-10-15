@@ -29,8 +29,8 @@ func SetAuditActor(ctx *context.Base, ar auth_service.AuthenticationResult) {
 	a := &audit_model.Actor{
 		Type:       audit_model.ActorAnonymous,
 		Credential: ar.Credential(),
-		UserAgent:  ctx.Req.UserAgent(),
-		RequestID:  util.CryptoRandomString(util.RandomStringMedium), // never the client's X-Request-ID
+		UserAgent:  audit_model.Text(ctx.Req.UserAgent(), audit_model.MaxUserAgent), // capped here: actors are copied into aggregates
+		RequestID:  util.CryptoRandomString(util.RandomStringMedium),                // never the client's X-Request-ID
 	}
 	if u := ar.User(); u != nil {
 		a.Type, a.ID, a.Name = audit_model.ActorUser, u.ID, u.Name
@@ -39,7 +39,7 @@ func SetAuditActor(ctx *context.Base, ar auth_service.AuthenticationResult) {
 		}
 	}
 	if peer, candidates, ok := httplib.AmbiguousClientIP(ctx.Req); ok {
-		a.IP, a.IPAmbiguous, a.IPCandidates = peer, true, candidates
+		a.IP, a.IPAmbiguous, a.IPCandidates = peer, true, candidates[:min(len(candidates), audit_model.MaxIPCandidates)]
 	} else {
 		a.IP = auditPeer(ctx.Req.RemoteAddr, ClientIP(ctx.Req))
 	}

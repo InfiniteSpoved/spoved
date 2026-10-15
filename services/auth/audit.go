@@ -34,7 +34,8 @@ func RecordSignIn(ctx context.Context, u *user_model.User, method, reason string
 	})
 }
 
-func actorIPKey(ctx context.Context, bits int) string {
+// ActorIPKey is the request actor's client IP for aggregation keys (see audit_model.IPKey).
+func ActorIPKey(ctx context.Context, bits int) string {
 	if a := audit_model.ActorFromContext(ctx); a != nil {
 		return audit_model.IPKey(a, bits)
 	}
@@ -47,7 +48,7 @@ func RecordSignInFailure(ctx context.Context, subject int64, reason string) {
 	audit_model.RecordAggregated(ctx, audit_model.Event{
 		Action: "auth.signin.failed", Result: audit_model.ResultFailure, OwnerID: subject, SubjectUserID: subject,
 		TargetType: "signin", TargetID: subject, Data: map[string]any{"reason": reason},
-	}, actorIPKey(ctx, 48)+"|"+strconv.FormatInt(subject, 10)+"|"+reason)
+	}, ActorIPKey(ctx, 48)+"|"+strconv.FormatInt(subject, 10)+"|"+reason)
 }
 
 // RecordRefusal records a request refused by a policy (reason "ip_allowlist", "rate_limit", "expired", ...),

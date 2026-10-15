@@ -59,7 +59,7 @@ func IPAllowlistRefused(ctx context.Context, ip netip.Addr, surface string, doer
 	if doer != nil {
 		uid = doer.ID
 	}
-	auth.RecordRefusal(ctx, "ip_allowlist", 0, uid, shown+"|"+strconv.FormatInt(uid, 10), map[string]any{"class": surface})
+	auth.RecordRefusal(ctx, "ip_allowlist", 0, uid, auth.ActorIPKey(ctx, 48)+"|"+strconv.FormatInt(uid, 10), map[string]any{"class": surface})
 	return shown, true
 }
 

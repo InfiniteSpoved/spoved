@@ -50,6 +50,7 @@ func ResetActivity() {
 	seen.Store(c)
 	agg.Lock()
 	agg.buckets, agg.overflow = map[string]*aggBucket{}, map[string]*aggBucket{}
+	agg.windowStart, agg.firstWrites = 0, 0
 	agg.Unlock()
 }
 

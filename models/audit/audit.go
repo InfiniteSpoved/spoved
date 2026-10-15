@@ -67,6 +67,12 @@ func init() {
 	db.RegisterModel(new(ChainHead))
 }
 
+// MaxUserAgent is the most bytes of a user agent kept; MaxIPCandidates the most candidate IPs of an ambiguous one.
+const (
+	MaxUserAgent    = 256
+	MaxIPCandidates = 8
+)
+
 const (
 	CategoryAuth       = "auth"
 	CategoryCredential = "credential"
@@ -78,7 +84,7 @@ const (
 
 	maxText     = 255
 	maxData     = 32 * 1024
-	maxUA       = 256
+	maxUA       = MaxUserAgent
 	maxIP       = 64
 	maxListText = 255
 )

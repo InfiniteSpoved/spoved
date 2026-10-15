@@ -176,7 +176,7 @@ func RateLimitAuthIP(ctx *context.Context) {
 func StartAuthAttempt(ctx *context.Context, keys ...string) *ratelimit.AuthAttempt {
 	a := ratelimit.StartAuth(ratelimit.ClientAddr(ctx.Req), keys...)
 	if !a.Allowed {
-		recordRateLimited(ctx.Base, ratelimit.Auth, ratelimit.IPKey(ratelimit.ClientAddr(ctx.Req)), nil)
+		recordRateLimited(ctx.Base, ratelimit.Auth, auth.ActorIPKey(ctx, 48), nil)
 		renderRateLimited(ctx, a.Result)
 		return nil
 	}
@@ -190,7 +190,7 @@ func WriteIfRateLimited(b *context.Base, err error, asJSON bool) bool {
 	if !errors.As(err, &limited) {
 		return false
 	}
-	recordRateLimited(b, ratelimit.Auth, ratelimit.IPKey(ratelimit.ClientAddr(b.Req)), nil)
+	recordRateLimited(b, ratelimit.Auth, auth.ActorIPKey(b, 48), nil)
 	setRateLimitHeaders(b, limited.Result)
 	if asJSON {
 		b.JSON(http.StatusTooManyRequests, map[string]string{"message": limited.Error()})
