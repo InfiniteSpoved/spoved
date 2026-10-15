@@ -4,6 +4,7 @@
 package audit_test
 
 import (
+	"slices"
 	"testing"
 
 	audit_model "forgejo.org/models/audit"
@@ -61,8 +62,8 @@ func TestFindEntries(t *testing.T) {
 	}
 	want := func(labels ...string) []int64 {
 		out := make([]int64, 0, len(labels))
-		for i := len(labels) - 1; i >= 0; i-- { // newest first
-			out = append(out, ids[labels[i]])
+		for _, label := range slices.Backward(labels) { // newest first
+			out = append(out, ids[label])
 		}
 		return out
 	}

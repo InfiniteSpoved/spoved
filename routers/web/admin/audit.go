@@ -5,6 +5,7 @@ package admin
 
 import (
 	"errors"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -23,10 +24,9 @@ import (
 	"forgejo.org/services/convert"
 )
 
-const (
-	tplAudit      base.TplName = "admin/audit"
-	auditPageSize              = 50
-)
+const tplAudit base.TplName = "admin/audit"
+
+const auditPageSize = 50
 
 var auditTabs = []string{"changes", "signins", "activity", "all"}
 
@@ -97,8 +97,8 @@ func newAuditRow(e *audit_model.Entry, loc *time.Location, names map[int64]strin
 // Audit shows the audit log, or exports it with ?format=csv|json.
 func Audit(ctx *context.Context) {
 	f, err := audit_service.ParseFilter(ctx, ctx.FormString)
-	var filterErr *audit_service.FilterError
-	if err != nil && !errors.As(err, &filterErr) {
+	filterErr, _ := errors.AsType[*audit_service.FilterError](err)
+	if err != nil && filterErr == nil {
 		ctx.ServerError("ParseFilter", err)
 		return
 	}
@@ -147,10 +147,7 @@ func Audit(ctx *context.Context) {
 	ctx.Data["Category"] = f.Values.Get("category")
 
 	link := func(change func(q url.Values)) string {
-		q := url.Values{}
-		for k, v := range f.Values {
-			q[k] = v
-		}
+		q := maps.Clone(f.Values)
 		q.Del("before_id")
 		q.Del("after_id")
 		change(q)

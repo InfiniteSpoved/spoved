@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/csv"
 	"io"
+	"maps"
 	"net/url"
 	"strconv"
 	"strings"
@@ -44,10 +45,7 @@ func (m *Manifest) FilterHeader() string {
 
 // Next returns the filter parameters that continue a truncated export.
 func (m *Manifest) Next(f *Filter) url.Values {
-	next := url.Values{}
-	for k, v := range f.Values {
-		next[k] = v
-	}
+	next := maps.Clone(f.Values)
 	next.Set("since", m.Through.Format(time.RFC3339))
 	next.Set("after_id", strconv.FormatInt(m.ThroughID, 10))
 	return next

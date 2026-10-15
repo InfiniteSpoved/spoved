@@ -5,8 +5,8 @@ package admin
 
 import (
 	"errors"
+	"maps"
 	"net/http"
-	"net/url"
 	"strconv"
 
 	"forgejo.org/modules/setting"
@@ -133,8 +133,7 @@ func ListAuditEvents(ctx *context.APIContext) {
 
 	f, err := audit_service.ParseFilter(ctx, ctx.FormString)
 	if err != nil {
-		var filterErr *audit_service.FilterError
-		if errors.As(err, &filterErr) {
+		if filterErr, ok := errors.AsType[*audit_service.FilterError](err); ok {
 			ctx.Error(http.StatusUnprocessableEntity, "", filterErr.Error())
 		} else {
 			ctx.Error(http.StatusInternalServerError, "ParseFilter", err)
@@ -166,10 +165,7 @@ func ListAuditEvents(ctx *context.APIContext) {
 		events = append(events, convert.ToAuditEvent(e))
 	}
 	page := func(key string, id int64, rel string) string {
-		q := url.Values{}
-		for k, v := range f.Values {
-			q[k] = v
-		}
+		q := maps.Clone(f.Values)
 		q.Del("before_id")
 		q.Del("after_id")
 		q.Set(key, strconv.FormatInt(id, 10))

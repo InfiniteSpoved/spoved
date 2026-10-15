@@ -77,10 +77,10 @@ func TestExportCSV(t *testing.T) {
 	assert.Equal(t, "'@cmd", first["credential_name"])
 	assert.Equal(t, "'\t=evil", first["user_agent"])
 	assert.Equal(t, "'-x", first["target_name"])
-	assert.Equal(t, `{"name":"=HYPERLINK(1)"}`, first["data"])
+	assert.JSONEq(t, `{"name":"=HYPERLINK(1)"}`, first["data"])
 	assert.Equal(t, "1970-01-01T00:16:40Z", first["time"])
 	assert.Empty(t, first["seq"])
-	assert.Equal(t, `{"_raw":"not json"}`, records[2][23])
+	assert.JSONEq(t, `{"_raw":"not json"}`, records[2][23])
 
 	e := lastEntry(t)
 	assert.Equal(t, "audit.exported", e.Action)
