@@ -714,7 +714,7 @@
 								<span class="text red">{{.Repository.FullName}}</span>
 							</label>
 						</div>
-						<div class="required field">
+						<div class="required field{{if .Err_MoveRepoName}} error{{end}}">
 							<label for="move_repo_name">{{ctx.Locale.Tr "repo.settings.confirmation_string"}}</label>
 							<input id="move_repo_name" name="repo_name" required autocorrect="off" autocapitalize="none" spellcheck="false">
 						</div>

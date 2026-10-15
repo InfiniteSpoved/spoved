@@ -1056,15 +1056,27 @@ func SettingsPost(ctx *context.Context) {
 			ctx.Error(http.StatusNotFound)
 			return
 		}
-		if repo.FullName() != form.RepoName {
-			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_repo_name"), tplSettingsOptions, nil)
+		// the confirmation holds a path with "/", so the binding error of the repository name field doesn't apply
+		delete(ctx.Data, "Err_RepoName")
+		if !strings.EqualFold(strings.TrimSpace(form.RepoName), repo.FullName()) {
+			ctx.Data["Err_MoveRepoName"] = true
+			ctx.RenderWithErr(ctx.Tr("repo.settings.move.confirm_mismatch", repo.FullName()), tplSettingsOptions, nil)
+			return
+		}
+		groupID := ctx.FormInt64("group_id")
+		if groupID == repo.GroupID {
+			ctx.RenderWithErr(ctx.Tr("repo.settings.move.already_there"), tplSettingsOptions, nil)
+			return
+		}
+		if repo.Status == repo_model.RepositoryBeingMigrated {
+			ctx.RenderWithErr(ctx.Tr("repo.settings.move.migrating"), tplSettingsOptions, nil)
 			return
 		}
 		if ctx.Repo.GitRepo != nil {
 			ctx.Repo.GitRepo.Close()
 			ctx.Repo.GitRepo = nil
 		}
-		if err := repo_service.MoveRepository(ctx, ctx.Doer, repo, ctx.FormInt64("group_id")); err != nil {
+		if err := repo_service.MoveRepository(ctx, ctx.Doer, repo, groupID); err != nil {
 			switch {
 			case repo_model.IsErrRepoAlreadyExist(err), repo_model.IsErrRepoFilesAlreadyExist(err):
 				ctx.RenderWithErr(ctx.Tr("repo.settings.move.name_taken"), tplSettingsOptions, nil)
@@ -1074,7 +1086,10 @@ func SettingsPost(ctx *context.Context) {
 				ctx.RenderWithErr(ctx.Tr("repo.settings.transfer_in_progress"), tplSettingsOptions, nil)
 			case errors.Is(err, repo_model.ErrRepoGroupNotExist), errors.Is(err, util.ErrPermissionDenied):
 				ctx.NotFound("MoveRepository", nil)
+			case errors.Is(err, repo_service.ErrRepoMoved):
+				ctx.RenderWithErr(ctx.Tr("repo.settings.move.moved_meanwhile"), tplSettingsOptions, nil)
 			case errors.Is(err, util.ErrInvalidArgument):
+				log.Warn("MoveRepository %s: %v", repo.FullName(), err)
 				ctx.RenderWithErr(ctx.Tr("repo.settings.move.failed"), tplSettingsOptions, nil)
 			default:
 				ctx.ServerError("MoveRepository", err)

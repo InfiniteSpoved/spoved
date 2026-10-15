@@ -35,7 +35,17 @@ test('move a repository into a project, and remove the redirect of its old path'
   await page.getByRole('button', {name: 'Move', exact: true}).click();
   const modal = page.locator('#move-repo-modal');
   await expect(modal).toBeVisible();
-  await modal.locator('input[name="repo_name"]').fill(`org3/${repo}`);
+  // a wrong confirmation names the expected full name and moves nothing
+  await modal.locator('input[name="repo_name"]').fill('org3/other');
+  await modal.getByLabel('Move to').selectOption({label: project});
+  await modal.getByRole('button', {name: 'Move repository'}).click();
+  await expect(page.locator('.flash-error')).toContainText(`Enter the full name of the repository: org3/${repo}`);
+  await screenshot(page);
+
+  // blanks around the name and its case don't matter
+  await page.getByRole('button', {name: 'Move', exact: true}).click();
+  await expect(modal).toBeVisible();
+  await modal.locator('input[name="repo_name"]').fill(`  ORG3/${repo} `);
   await modal.getByLabel('Move to').selectOption({label: project});
   await accessibilityCheck({page}, ['#move-repo-modal'], [], []);
   await screenshot(page);
