@@ -69,3 +69,34 @@ test('move a repository into a project, and remove the redirect of its old path'
   await expect(page.locator('.flash-success')).toBeVisible();
   await expect(page.locator('.flex-item', {hasText: `org3/${repo}`})).toHaveCount(0);
 });
+
+// a mobile keyboard appends a blank, copying the label can bring a non-breaking space
+test('the move confirmation ignores a trailing blank and a trailing non-breaking space', async ({page}) => {
+  const suffix = randomBytes(4).toString('hex');
+  const project = `e2e-blank-${suffix}`;
+  const repo = `e2e-blank-repo-${suffix}`;
+
+  await page.goto('/org/org3/groups/new');
+  await page.getByLabel('Project name').fill(project);
+  await page.getByRole('button', {name: 'Create project'}).click();
+  await expect(page).toHaveURL(`/org3/${project}`);
+  await page.goto('/repo/create?org=3');
+  await page.locator('input[name="repo_name"]').fill(repo);
+  await page.getByRole('button', {name: 'Create repository'}).click();
+  await expect(page).toHaveURL(`/org3/${repo}`);
+
+  await page.goto(`/org3/${repo}/settings`);
+  await page.getByRole('button', {name: 'Move', exact: true}).click();
+  const modal = page.locator('#move-repo-modal');
+  await modal.locator('input[name="repo_name"]').fill(`org3/${repo} `);
+  await modal.getByLabel('Move to').selectOption({label: project});
+  await modal.getByRole('button', {name: 'Move repository'}).click();
+  await expect(page).toHaveURL(`/org3/${project}/${repo}/settings`);
+
+  await page.getByRole('button', {name: 'Move', exact: true}).click();
+  await expect(modal).toBeVisible();
+  await modal.locator('input[name="repo_name"]').fill(`org3/${project}/${repo}\u00a0`);
+  await modal.getByLabel('Move to').selectOption({index: 1});
+  await modal.getByRole('button', {name: 'Move repository'}).click();
+  await expect(page).toHaveURL(`/org3/${repo}/settings`);
+});
