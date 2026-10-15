@@ -44,11 +44,12 @@ func auditMaxID(t *testing.T) int64 {
 	return id
 }
 
-// auditOne returns the one entry of action written after the id since; there must be no other entry since then.
+// auditOne returns the one entry of action written after the id since; there must be no other entry since then,
+// apart from sign-in and credential activity (category auth), which every request may add.
 func auditOne(t *testing.T, since int64, action string) *audit_model.Entry {
 	t.Helper()
 	var entries []*audit_model.Entry
-	require.NoError(t, db.GetEngine(t.Context()).Where("id > ?", since).OrderBy("id").Find(&entries))
+	require.NoError(t, db.GetEngine(t.Context()).Where("id > ? AND category <> ?", since, audit_model.CategoryAuth).OrderBy("id").Find(&entries))
 	require.Len(t, entries, 1)
 	require.Equal(t, action, entries[0].Action)
 	return entries[0]
@@ -333,9 +334,9 @@ func TestAuditRowsOutliveDeletes(t *testing.T) {
 
 	since := auditMaxID(t)
 	for _, ev := range []audit_model.Event{
-		{Action: "test.user", SubjectUserID: user8.ID, OwnerID: user8.ID},
-		{Action: "test.org", OwnerID: org.ID},
-		{Action: "test.repo", OwnerID: user2.ID, RepoID: repo.ID},
+		{Action: "audit.exported", SubjectUserID: user8.ID, OwnerID: user8.ID},
+		{Action: "audit.exported", OwnerID: org.ID},
+		{Action: "audit.exported", OwnerID: user2.ID, RepoID: repo.ID},
 	} {
 		require.NoError(t, audit_model.Record(ctx, ev))
 	}
@@ -347,7 +348,7 @@ func TestAuditRowsOutliveDeletes(t *testing.T) {
 	unittest.AssertNotExistsBean(t, &user_model.User{ID: org.ID})
 	unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: repo.ID})
 
-	count, err := db.GetEngine(t.Context()).Where("id > ? AND action LIKE 'test.%'", since).Count(new(audit_model.Entry))
+	count, err := db.GetEngine(t.Context()).Where("id > ? AND action = 'audit.exported' AND actor_name = 'test'", since).Count(new(audit_model.Entry))
 	require.NoError(t, err)
 	assert.EqualValues(t, 3, count)
 }

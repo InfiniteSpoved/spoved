@@ -141,6 +141,7 @@ func verifyAuth(r *web.Route, authMethods []auth.Method) {
 			ctx.ServerError("authentication error", v.Error)
 			return
 		case *auth.AuthenticationAttemptedIncorrectCredential:
+			common.RecordAuthFailure(ctx.Base, v)
 			if common.WriteIfRateLimited(ctx.Base, v.Error, false) {
 				return
 			}
@@ -157,10 +158,12 @@ func verifyAuth(r *web.Route, authMethods []auth.Method) {
 		ctx.Doer = ar.User()
 		ctx.IsSigned = ctx.Doer != nil
 		ctx.Authentication = ar
+		common.SetAuditActor(ctx.Base, ar)
 	})
 	r.Use(common.RateLimit(ratelimit.API))
 	r.Use(common.MaintenanceGit)
 	r.Use(common.IPAllowlistPlain(setting.IPAllowlistSurfacePackages))
+	r.Use(common.CredentialUsed("packages"))
 }
 
 func verifyContainerAuth(r *web.Route, authMethods []auth.Method) {
@@ -181,6 +184,7 @@ func verifyContainerAuth(r *web.Route, authMethods []auth.Method) {
 			ctx.ServerError("authentication error", v.Error)
 			return
 		case *auth.AuthenticationAttemptedIncorrectCredential:
+			common.RecordAuthFailure(ctx.Base, v)
 			if common.WriteIfRateLimited(ctx.Base, v.Error, false) {
 				return
 			}
@@ -199,10 +203,12 @@ func verifyContainerAuth(r *web.Route, authMethods []auth.Method) {
 		ctx.Doer = ar.User()
 		ctx.IsSigned = ctx.Doer != nil
 		ctx.Authentication = ar
+		common.SetAuditActor(ctx.Base, ar)
 	})
 	r.Use(common.RateLimit(ratelimit.API))
 	r.Use(common.MaintenanceGit)
 	r.Use(common.IPAllowlistPlain(setting.IPAllowlistSurfacePackages))
+	r.Use(common.CredentialUsed("packages"))
 }
 
 // CommonRoutes provide endpoints for most package managers (except containers - see below)

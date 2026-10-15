@@ -43,6 +43,8 @@ func handleSignIn(resp http.ResponseWriter, req *http.Request, sess auth.Session
 	_ = sess.Delete("twofaOpenID")
 	_ = sess.Delete("webauthnAssertion")
 	_ = sess.Delete("linkAccount")
+	_ = sess.Delete("twofaMethod")
+	_ = sess.Delete("signinRememberSSO")
 	err = sess.Set("uid", user.ID)
 	if err != nil {
 		log.Error(fmt.Sprintf("Error setting session: %v", err))

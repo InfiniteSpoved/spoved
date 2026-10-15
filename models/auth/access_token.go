@@ -59,6 +59,7 @@ func (err ErrAccessTokenEmpty) Unwrap() error {
 
 // ErrAccessTokenExpired represents an access token whose expiry date has passed.
 type ErrAccessTokenExpired struct {
+	ID, UID int64
 	Name    string
 	Expires timeutil.TimeStamp
 }
@@ -154,7 +155,6 @@ func accessTokenFields(t *AccessToken, repoIDs []int64) map[string]any {
 func recordAccessToken(ctx context.Context, verb string, t *AccessToken, data map[string]any) error {
 	return audit_model.Record(ctx, audit_model.Event{
 		Action:        "credential.access_token." + verb,
-		Category:      audit_model.CategoryCredential,
 		Result:        audit_model.ResultSuccess,
 		OwnerID:       t.UID,
 		SubjectUserID: t.UID,
@@ -263,7 +263,7 @@ func GetAccessTokenBySHA(ctx context.Context, token string) (*AccessToken, error
 
 func checkAccessTokenExpiry(t *AccessToken) (*AccessToken, error) {
 	if t.IsExpired() {
-		return nil, ErrAccessTokenExpired{Name: t.Name, Expires: t.ExpiresUnix}
+		return nil, ErrAccessTokenExpired{ID: t.ID, UID: t.UID, Name: t.Name, Expires: t.ExpiresUnix}
 	}
 	return t, nil
 }

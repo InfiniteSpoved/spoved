@@ -20,6 +20,7 @@ import (
 	"forgejo.org/modules/web"
 	"forgejo.org/modules/web/middleware"
 	"forgejo.org/routers/common"
+	auth_service "forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	"forgejo.org/services/forms"
 	"forgejo.org/services/mailer"
@@ -190,6 +191,7 @@ func ResetPasswdPost(ctx *context.Context) {
 
 	// Handle two-factor
 	regenerateScratchToken := false
+	method := "password_reset"
 	if twofa != nil {
 		attempt := common.StartAuthAttempt(ctx, ratelimit.TwoFactorKey(u.ID))
 		if attempt == nil {
@@ -197,12 +199,14 @@ func ResetPasswdPost(ctx *context.Context) {
 		}
 		if ctx.FormBool("scratch_code") {
 			if !twofa.VerifyScratchToken(ctx.FormString("token")) {
+				auth_service.RecordSignInFailure(ctx, u.ID, "bad_scratch")
 				ctx.Data["IsResetForm"] = true
 				ctx.Data["Err_Token"] = true
 				ctx.RenderWithErr(ctx.Tr("auth.twofa_scratch_token_incorrect"), tplResetPassword, nil)
 				return
 			}
 			regenerateScratchToken = true
+			method += "+scratch"
 		} else {
 			passcode := ctx.FormString("passcode")
 			ok, err := twofa.ValidateTOTP(passcode)
@@ -211,6 +215,7 @@ func ResetPasswdPost(ctx *context.Context) {
 				return
 			}
 			if !ok || twofa.LastUsedPasscode == passcode {
+				auth_service.RecordSignInFailure(ctx, u.ID, "bad_totp")
 				ctx.Data["IsResetForm"] = true
 				ctx.Data["Err_Passcode"] = true
 				ctx.RenderWithErr(ctx.Tr("auth.twofa_passcode_incorrect"), tplResetPassword, nil)
@@ -222,6 +227,7 @@ func ResetPasswdPost(ctx *context.Context) {
 				ctx.ServerError("ResetPasswdPost: UpdateTwoFactor", err)
 				return
 			}
+			method += "+totp"
 		}
 		attempt.Succeeded()
 	}
@@ -260,7 +266,7 @@ func ResetPasswdPost(ctx *context.Context) {
 			return
 		}
 
-		handleSignInFull(ctx, u, remember, false)
+		handleSignInFull(ctx, u, remember, false, method, "reset_code")
 		if ctx.Written() {
 			return
 		}
@@ -269,7 +275,7 @@ func ResetPasswdPost(ctx *context.Context) {
 		return
 	}
 
-	handleSignIn(ctx, u, remember)
+	handleSignIn(ctx, u, remember, method, "reset_code")
 }
 
 // MustChangePassword renders the page to change a user's password

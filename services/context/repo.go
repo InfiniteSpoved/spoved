@@ -408,6 +408,7 @@ func (ctx *Context) twoFactorBlockedPage(owner *user_model.User) bool {
 	if !blocked {
 		return false
 	}
+	auth.RecordTwoFactorBlocked(ctx, ctx.Doer.ID, owner.ID)
 	ctx.Data["Title"] = ctx.Locale.TrString("org.settings.require_two_factor_blocked")
 	ctx.Data["ForbiddenPrompt"] = ctx.Locale.TrString("org.settings.require_two_factor_blocked_text")
 	ctx.HTML(http.StatusForbidden, "status/403")

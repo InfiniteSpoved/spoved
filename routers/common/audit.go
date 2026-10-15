@@ -4,17 +4,23 @@
 package common
 
 import (
+	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
 	audit_model "forgejo.org/models/audit"
+	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/httplib"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/util"
 	audit_service "forgejo.org/services/audit"
 	auth_service "forgejo.org/services/auth"
+	"forgejo.org/services/auth/source/db"
+	"forgejo.org/services/authz"
 	"forgejo.org/services/context"
 )
 
@@ -24,8 +30,8 @@ func SetAuditActor(ctx *context.Base, ar auth_service.AuthenticationResult) {
 	a := &audit_model.Actor{
 		Type:       audit_model.ActorAnonymous,
 		Credential: ar.Credential(),
-		UserAgent:  ctx.Req.UserAgent(),
-		RequestID:  util.CryptoRandomString(util.RandomStringMedium), // never the client's X-Request-ID
+		UserAgent:  audit_model.Text(ctx.Req.UserAgent(), audit_model.MaxUserAgent), // capped here: actors are copied into aggregates
+		RequestID:  util.CryptoRandomString(util.RandomStringMedium),                // never the client's X-Request-ID
 	}
 	if u := ar.User(); u != nil {
 		a.Type, a.ID, a.Name = audit_model.ActorUser, u.ID, u.Name
@@ -34,7 +40,7 @@ func SetAuditActor(ctx *context.Base, ar auth_service.AuthenticationResult) {
 		}
 	}
 	if peer, candidates, ok := httplib.AmbiguousClientIP(ctx.Req); ok {
-		a.IP, a.IPAmbiguous, a.IPCandidates = peer, true, candidates
+		a.IP, a.IPAmbiguous, a.IPCandidates = peer, true, slices.Clone(candidates[:min(len(candidates), audit_model.MaxIPCandidates)]) // never the parsed header's array
 	} else {
 		a.IP = auditPeer(ctx.Req.RemoteAddr, ClientIP(ctx.Req))
 	}
@@ -81,4 +87,41 @@ func ExportAudit(ctx *context.Base, f *audit_service.Filter, format, link string
 	}
 	log.Error("ExportAudit: %v", err)
 	panic(http.ErrAbortHandler) // abort so the client sees a failed download, not a short file
+}
+
+// RecordAuthFailure records a request whose credential was refused, with an anonymous actor: an expired access token
+// as expired, a token refused by the scope policy as a refusal, anything else as a failed sign-in. A request the auth
+// rate limit refused is recorded by WriteIfRateLimited instead.
+func RecordAuthFailure(b *context.Base, v *auth_service.AuthenticationAttemptedIncorrectCredential) {
+	SetAuditActor(b, &auth_service.UnauthenticatedResult{})
+	var limited *ratelimit.LimitedError
+	var expired auth_model.ErrAccessTokenExpired
+	subject := v.UserID
+	switch {
+	case errors.As(v.Error, &limited):
+	case errors.As(v.Error, &expired):
+		auth_service.RecordExpired(b, audit_model.CredentialAccessToken, expired.ID, expired.UID, expired.Name, expired.Expires)
+	case errors.Is(v.Error, authz.ErrScopePolicyEnforced):
+		auth_service.RecordRefusal(b, "scope_policy", 0, subject, audit_model.IPKey(audit_model.ActorFromContext(b), 48)+"|"+strconv.FormatInt(subject, 10), nil)
+	default:
+		if badPassword, ok := errors.AsType[db.ErrUserPasswordInvalid](v.Error); ok {
+			subject = badPassword.UID
+		} else if prohibited, ok := errors.AsType[user_model.ErrUserProhibitLogin](v.Error); ok {
+			subject = prohibited.UID
+		}
+		auth_service.RecordSignInFailure(b, subject, "bad_credential")
+	}
+}
+
+// CredentialUsed records the first use of the request's credential from its client IP per day; it runs after the
+// rate limit and the IP allowlist, so a refused request records nothing here.
+func CredentialUsed(method string) func(*context.Context) {
+	return func(ctx *context.Context) {
+		audit_model.RecordCredentialUsed(ctx, method)
+	}
+}
+
+// CredentialUsedAPI is CredentialUsed for the API, before sudo changes the actor.
+func CredentialUsedAPI(ctx *context.APIContext) {
+	audit_model.RecordCredentialUsed(ctx, "api")
 }

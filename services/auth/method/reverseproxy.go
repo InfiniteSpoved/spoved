@@ -122,14 +122,16 @@ func (r *ReverseProxy) Verify(req *http.Request, w http.ResponseWriter, sess aut
 		}
 	}
 
+	newSession := false
 	if r.CreateSession {
 		if sess != nil && (sess.Get("uid") == nil || sess.Get("uid").(int64) != user.ID) {
 			handleSignIn(w, req, sess, user)
+			newSession = true
 		}
 	}
 
 	log.Trace("ReverseProxy Authorization: Logged in user %-v", user)
-	return &auth.AuthenticationSuccess{Result: &reverseProxyAuthenticationResult{user: user}}
+	return &auth.AuthenticationSuccess{Result: &reverseProxyAuthenticationResult{user: user, newSession: newSession}}
 }
 
 // isAutoRegisterAllowed checks if EnableReverseProxyAutoRegister setting is true

@@ -61,7 +61,8 @@ type AuthenticationNotAttempted struct {
 // found to not match any user, AuthenticationAttemptedIncorrectCredential would be returned. This is typically an
 // indicator of a `401 Unauthorized ...` response.
 type AuthenticationAttemptedIncorrectCredential struct {
-	Error error
+	Error  error
+	UserID int64 // the user of the refused credential, for the audit log, when it is known
 }
 
 // Authentication was attempted and an unexpected internal error occurred.
