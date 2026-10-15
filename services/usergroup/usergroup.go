@@ -66,7 +66,7 @@ func addMember(ctx context.Context, group *org_model.UserGroup, user *user_model
 		if err := org_model.InsertUserGroupMember(ctx, group.ID, user.ID, loginSourceID); err != nil {
 			return err
 		}
-		if err := syncRoles(ctx, user.ID); err != nil {
+		if err := syncRoles(ctx, group.ID, user.ID); err != nil {
 			return err
 		}
 		return syncUserForGroupTeams(ctx, group.ID, user.ID, false)
@@ -80,7 +80,7 @@ func RemoveMember(ctx context.Context, group *org_model.UserGroup, userID int64)
 		if err := org_model.DeleteUserGroupMember(ctx, group.ID, userID); err != nil {
 			return err
 		}
-		if err := syncRoles(ctx, userID); err != nil {
+		if err := syncRoles(ctx, group.ID, userID); err != nil {
 			return err
 		}
 		return syncUserForGroupTeams(ctx, group.ID, userID, false)
@@ -136,7 +136,7 @@ func SyncDirectoryGroups(ctx context.Context, user *user_model.User, loginSource
 			if err != nil || !deleted {
 				return err
 			}
-			if err := syncRoles(ctx, user.ID); err != nil {
+			if err := syncRoles(ctx, group.ID, user.ID); err != nil {
 				return err
 			}
 			return syncUserForGroupTeams(ctx, group.ID, user.ID, true)
@@ -244,7 +244,7 @@ func UpdateGroup(ctx context.Context, group *org_model.UserGroup) error {
 		if err != nil {
 			return err
 		}
-		if err := syncRoles(ctx, memberIDs...); err != nil {
+		if err := syncRoles(ctx, group.ID, memberIDs...); err != nil {
 			return err
 		}
 		if old.GrantsOrgAdmin == group.GrantsOrgAdmin {
@@ -276,7 +276,7 @@ func DeleteGroup(ctx context.Context, group *org_model.UserGroup) error {
 		); err != nil {
 			return err
 		}
-		return syncRoles(ctx, memberIDs...)
+		return syncRoles(ctx, group.ID, memberIDs...)
 	})
 }
 
@@ -300,7 +300,8 @@ func DirectoryAdmin(ctx context.Context, user *user_model.User, directoryIsAdmin
 // groups grant. A flag is turned on when a group grants the role, and turned
 // off only when a group turned it on and none grants it anymore. It refuses
 // to remove the last site administrator with models.ErrDeleteLastAdminUser.
-func syncRoles(ctx context.Context, uids ...int64) error {
+// groupID is the group whose change started the sync, for the audit log.
+func syncRoles(ctx context.Context, groupID int64, uids ...int64) error {
 	for _, uid := range uids {
 		user, err := user_model.GetUserByID(ctx, uid)
 		if user_model.IsErrUserNotExist(err) {
@@ -337,6 +338,9 @@ func syncRoles(ctx context.Context, uids ...int64) error {
 				if err := user_model.UpdateUserCols(ctx, user, col); err != nil {
 					return err
 				}
+				if err := user_model.RecordUser(ctx, "account.user.role_granted", user, map[string]any{"role": string(role), "group_id": groupID}); err != nil {
+					return err
+				}
 				if !hasGrant {
 					if err := db.Insert(ctx, grant); err != nil {
 						return err
@@ -349,6 +353,9 @@ func syncRoles(ctx context.Context, uids ...int64) error {
 					}
 					*flag = false
 					if err := user_model.UpdateUserCols(ctx, user, col); err != nil {
+						return err
+					}
+					if err := user_model.RecordUser(ctx, "account.user.role_revoked", user, map[string]any{"role": string(role), "group_id": groupID}); err != nil {
 						return err
 					}
 				}

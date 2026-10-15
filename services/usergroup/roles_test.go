@@ -271,6 +271,6 @@ func TestRolesUnknownRole(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	defer test.MockVariableValue(&org_model.UserGroupRoles, append(slices.Clone(org_model.UserGroupRoles), "unknown"))()
 
-	require.Error(t, syncRoles(db.DefaultContext, 5))
+	require.Error(t, syncRoles(db.DefaultContext, 0, 5))
 	assertRoles(t, 5, false, false)
 }

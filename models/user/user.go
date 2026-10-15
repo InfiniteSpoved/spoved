@@ -952,6 +952,13 @@ func createUser(ctx context.Context, u *User, createdByAdmin bool, overwriteDefa
 		return err
 	}
 
+	if !u.IsOrganization() {
+		data := map[string]any{"after": u.AuditFields()}
+		if err := RecordUser(ctx, "account.user.created", u, data); err != nil {
+			return err
+		}
+	}
+
 	return committer.Commit()
 }
 

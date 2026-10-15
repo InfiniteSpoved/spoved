@@ -74,6 +74,7 @@ const (
 )
 
 const (
+	CategoryAccount    = "account"
 	CategoryAuth       = "auth"
 	CategoryCredential = "credential"
 	CategoryAudit      = "audit"
@@ -103,10 +104,19 @@ type Event struct {
 
 // Fields lists the data keys kept per target type. Secrets (token values, hashes, salts, last eight) are never listed.
 var Fields = map[string][]string{
-	"access_token":       {"name", "scopes", "expires", "resource_all_repos", "repo_ids"},
-	"audit_export":       {"format", "filter", "capped", "through_id"},
-	"credential_use":     {"method"},
-	"deploy_key":         {"expires"},
+	"access_token":   {"name", "scopes", "expires", "resource_all_repos", "repo_ids"},
+	"audit_export":   {"format", "filter", "capped", "through_id"},
+	"credential_use": {"method"},
+	"deploy_key":     {"expires"},
+	"email":          {"address", "primary", "activated"},
+	"external_login": {"login_source_id", "external_id"},
+	"openid":         {"uri"},
+	"two_factor":     {"type", "name"},
+	"user": {
+		"name", "email", "is_admin", "is_restricted", "is_active", "prohibit_login", "visibility", "login_source",
+		"login_type", "must_change_password", "require_two_factor", "is_auditor", "allow_create_organization",
+		"counts", "purge", "tombstone", "tombstone_removed", "role", "group_id", "user_ids", "count", "login_source_id",
+	},
 	"instance":           {"version", "config_sha256"},
 	"oauth2_app":         {"secret_expires"},
 	"org_deploy_key":     {"expires"},
@@ -120,6 +130,15 @@ var Fields = map[string][]string{
 var sharedKeys = []string{
 	"before", "after", "on_behalf", "reason", "truncated", "ip_ambiguous", "ip_candidates",
 	"count", "first", "last", "overflow", // aggregated entries
+}
+
+// RecordAccount records a change of the account uid, its subject. The actor is whoever makes it: the user, an admin,
+// the CLI or a cron task.
+func RecordAccount(ctx context.Context, action string, uid int64, targetType string, targetID int64, targetName string, data map[string]any) error {
+	return Record(ctx, Event{
+		Action: action, Result: ResultSuccess, OwnerID: uid, SubjectUserID: uid,
+		TargetType: targetType, TargetID: targetID, TargetName: targetName, Data: data,
+	})
 }
 
 // InsertEntry writes the row. It is a variable so that tests can make the insert fail.

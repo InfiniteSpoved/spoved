@@ -104,13 +104,25 @@ func renameUser(ctx context.Context, u *user_model.User, newUserName string, doe
 	onlyCapitalization := strings.EqualFold(newUserName, u.Name)
 	oldUserName := u.Name
 
+	renamed := map[string]any{"before": map[string]any{"name": oldUserName}, "after": map[string]any{"name": newUserName}}
 	if onlyCapitalization {
 		u.Name = newUserName
-		if err := user_model.UpdateUserCols(ctx, u, "name"); err != nil {
+		if err := db.WithTx(ctx, func(ctx context.Context) error {
+			if err := user_model.UpdateUserCols(ctx, u, "name"); err != nil {
+				return err
+			}
+			if err := repo_model.UpdateRepositoryOwnerNames(ctx, u.ID, newUserName); err != nil {
+				return err
+			}
+			if u.IsOrganization() {
+				return nil
+			}
+			return user_model.RecordUser(ctx, "account.user.renamed", u, renamed)
+		}); err != nil {
 			u.Name = oldUserName
 			return err
 		}
-		return repo_model.UpdateRepositoryOwnerNames(ctx, u.ID, newUserName)
+		return nil
 	}
 
 	ctx, committer, err := db.TxContext(ctx)
@@ -156,6 +168,13 @@ func renameUser(ctx context.Context, u *user_model.User, newUserName string, doe
 		u.Name = oldUserName
 		u.LowerName = strings.ToLower(oldUserName)
 		return err
+	}
+	if !u.IsOrganization() {
+		if err := user_model.RecordUser(ctx, "account.user.renamed", u, renamed); err != nil {
+			u.Name = oldUserName
+			u.LowerName = strings.ToLower(oldUserName)
+			return err
+		}
 	}
 
 	// Do not fail if directory does not exist
@@ -237,6 +256,9 @@ func deleteUserAccount(ctx context.Context, u *user_model.User, purge, trash boo
 			MaxRepoCreation: 0,
 		}, "is_active", "is_restricted", "is_admin", "prohibit_login", "max_repo_creation", "passwd", "salt", "passwd_hash_algo"); err != nil {
 			return fmt.Errorf("unable to disable user: %s[%d] prior to purge. UpdateUserCols: %w", u.Name, u.ID, err)
+		}
+		if err := user_model.RecordUser(ctx, "account.user.purge_started", u, nil); err != nil {
+			return err
 		}
 
 		// Force any logged in sessions to log out
