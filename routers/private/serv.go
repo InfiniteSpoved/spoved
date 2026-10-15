@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 
 	asymkey_model "forgejo.org/models/asymkey"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/auth"
 	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
@@ -25,7 +27,9 @@ import (
 	"forgejo.org/modules/ratelimit"
 	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/util"
 	"forgejo.org/routers/common"
+	auth_service "forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	repo_service "forgejo.org/services/repository"
 	wiki_service "forgejo.org/services/wiki"
@@ -52,6 +56,35 @@ func checkTwoFactor(ctx *context.PrivateContext, user *user_model.User) {
 		})
 		return
 	}
+}
+
+// sshActor makes the request's audit actor (the "private" one of this request) the SSH client: the key it
+// authenticated with and the client IP that cmd/serv read from SSH_CONNECTION.
+func sshActor(ctx *context.PrivateContext, keyID int64) *audit_model.Actor {
+	a := audit_model.ActorFromContext(ctx)
+	ip := ctx.FormString("ip")
+	if addr, err := netip.ParseAddr(ip); err == nil {
+		ip = addr.WithZone("").String()
+	}
+	*a = audit_model.Actor{
+		Type: audit_model.ActorAnonymous, IP: ip, RequestID: util.CryptoRandomString(util.RandomStringMedium),
+		Credential: audit_model.Credential{Type: audit_model.CredentialSSHKey, ID: keyID},
+	}
+	return a
+}
+
+// deployKeyCredential is the audit credential of an effective deploy key on repo.
+func deployKeyCredential(key *asymkey_model.EffectiveDeployKey, repo *repo_model.Repository) audit_model.Credential {
+	c := audit_model.Credential{Type: audit_model.CredentialDeployKey, Name: key.Name, OwnerID: repo.OwnerID}
+	switch {
+	case key.RepoKey != nil:
+		c.ID = key.RepoKey.ID
+	case key.OrgKey.GroupID != 0:
+		c.Type, c.ID = audit_model.CredentialProjectDeployKey, key.OrgKey.ID
+	default:
+		c.Type, c.ID = audit_model.CredentialOrgDeployKey, key.OrgKey.ID
+	}
+	return c
 }
 
 func expiredKeyMsg(key *asymkey_model.PublicKey) string {
@@ -86,6 +119,8 @@ func ServNoCommand(ctx *context.PrivateContext) {
 	results.Key = key
 
 	if key.IsExpired() {
+		sshActor(ctx, keyID)
+		auth_service.RecordExpired(ctx, audit_model.CredentialSSHKey, key.ID, key.OwnerID, key.Name, key.ExpiresUnix)
 		ctx.JSON(http.StatusUnauthorized, private.Response{
 			UserMsg: expiredKeyMsg(key),
 		})
@@ -150,6 +185,7 @@ func sshRateLimited(ctx *context.PrivateContext, keyID int64) bool {
 		}
 	}
 	sshLogger.Warn("SSH rate limit exceeded by key %d from %q", keyID, ctx.FormString("ip"))
+	auth_service.RecordRefusal(ctx, "rate_limit", 0, 0, ratelimit.SSH+"|"+addr+"|key:"+strconv.FormatInt(keyID, 10), map[string]any{"class": ratelimit.SSH})
 	ctx.JSON(http.StatusTooManyRequests, private.Response{UserMsg: (&ratelimit.LimitedError{Result: r}).Error()})
 	return true
 }
@@ -157,6 +193,7 @@ func sshRateLimited(ctx *context.PrivateContext, keyID int64) bool {
 // ServCommand returns information about the provided keyid
 func ServCommand(ctx *context.PrivateContext) {
 	keyID := ctx.ParamsInt64(":keyid")
+	actor := sshActor(ctx, keyID)
 	if sshRateLimited(ctx, keyID) {
 		return
 	}
@@ -311,6 +348,7 @@ func ServCommand(ctx *context.PrivateContext) {
 	results.ExpiresUnix = key.ExpiresUnix
 
 	if key.IsExpired() {
+		auth_service.RecordExpired(ctx, audit_model.CredentialSSHKey, key.ID, key.OwnerID, key.Name, key.ExpiresUnix)
 		ctx.JSON(http.StatusUnauthorized, private.Response{
 			UserMsg: expiredKeyMsg(key),
 		})
@@ -346,7 +384,10 @@ func ServCommand(ctx *context.PrivateContext) {
 			})
 			return
 		}
+		actor.Type, actor.Credential = audit_model.ActorDeployKey, deployKeyCredential(deployKey, repo)
 		if deployKey.IsExpired() {
+			c := actor.Credential
+			auth_service.RecordExpired(ctx, c.Type, c.ID, c.OwnerID, c.Name, deployKey.ExpiresUnix)
 			ctx.JSON(http.StatusUnauthorized, private.Response{
 				UserMsg: fmt.Sprintf("Deploy key %q expired on %s.", deployKey.Name, deployKey.ExpiresUnix.FormatDate()),
 			})
@@ -383,6 +424,8 @@ func ServCommand(ctx *context.PrivateContext) {
 			return
 		}
 
+		actor.Type, actor.ID, actor.Name = audit_model.ActorUser, user.ID, user.Name
+		actor.Credential = audit_model.Credential{Type: audit_model.CredentialSSHKey, ID: key.ID, Name: key.Name, OwnerID: user.ID}
 		if !user.IsActive || user.ProhibitLogin {
 			ctx.JSON(http.StatusForbidden, private.Response{
 				UserMsg: "Your account is disabled.",
@@ -412,6 +455,7 @@ func ServCommand(ctx *context.PrivateContext) {
 		ctx.JSON(http.StatusForbidden, private.Response{UserMsg: maintenance.Refusal()})
 		return
 	}
+	audit_model.RecordCredentialUsed(ctx, "ssh")
 
 	// Don't allow pushing if the repo is archived
 	if repoExist && mode > perm.AccessModeRead && repo.IsArchived {

@@ -16,10 +16,10 @@ import (
 // Categories, Results and CredentialTypes are the values a filter accepts.
 var (
 	Categories      = []string{"auth", "credential", "account", "admin", "org", "repo", "activity", "audit"}
-	Results         = []string{ResultSuccess, "failure", "refused"}
+	Results         = []string{ResultSuccess, ResultFailure, ResultRefused}
 	CredentialTypes = []string{
 		CredentialSession, CredentialPassword, CredentialAccessToken, CredentialOAuth2Grant, CredentialAuthorizedIntegration,
-		CredentialSSHKey, "deploy_key", "org_deploy_key", "project_deploy_key", CredentialActionsTask, CredentialReverseProxy,
+		CredentialSSHKey, CredentialDeployKey, CredentialOrgDeployKey, CredentialProjectDeployKey, CredentialActionsTask, CredentialReverseProxy,
 		"runner_token", CredentialChefKey, CredentialSystem, CredentialCLI, CredentialUnknown,
 	}
 )
@@ -172,4 +172,9 @@ func OldestEntryTime(ctx context.Context) (timeutil.TimeStamp, error) {
 		return 0, err
 	}
 	return e.CreatedUnix, nil
+}
+
+// HasEntry reports whether an entry of the action exists for the target.
+func HasEntry(ctx context.Context, action, targetType string, targetID int64) (bool, error) {
+	return db.GetEngine(ctx).Where("action = ? AND target_type = ? AND target_id = ?", action, targetType, targetID).Exist(new(Entry))
 }

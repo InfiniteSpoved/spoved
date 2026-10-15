@@ -80,6 +80,7 @@ func apiAuthentication(authMethod auth.Method) func(*context.APIContext) {
 		case *auth.AuthenticationNotAttempted:
 			ar = &auth.UnauthenticatedResult{}
 		case *auth.AuthenticationAttemptedIncorrectCredential:
+			common.RecordAuthFailure(ctx.Base, v)
 			if common.WriteIfRateLimited(ctx.Base, v.Error, true) {
 				return
 			}

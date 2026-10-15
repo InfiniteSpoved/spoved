@@ -8,6 +8,7 @@ import "context"
 const (
 	ActorUser      = "user"
 	ActorAnonymous = "anonymous"
+	ActorDeployKey = "deploy_key"
 	ActorActions   = "actions"
 	ActorSystem    = "system"
 	ActorCLI       = "cli"
@@ -22,6 +23,10 @@ const (
 	CredentialOAuth2Grant           = "oauth2_grant"
 	CredentialAuthorizedIntegration = "authorized_integration"
 	CredentialSSHKey                = "ssh_key"
+	CredentialDeployKey             = "deploy_key"
+	CredentialOrgDeployKey          = "org_deploy_key"
+	CredentialProjectDeployKey      = "project_deploy_key"
+	CredentialOAuth2App             = "oauth2_app" // only as the target of an expired client secret
 	CredentialActionsTask           = "actions_task"
 	CredentialReverseProxy          = "reverse_proxy"
 	CredentialChefKey               = "chef_key"

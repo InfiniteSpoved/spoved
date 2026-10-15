@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"slices"
+	"strconv"
 
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
@@ -50,10 +51,16 @@ func IPAllowlistRefused(ctx context.Context, ip netip.Addr, surface string, doer
 	if s.Allows(ip) || IPAllowlistExempt(s, doer, ar) {
 		return "", false
 	}
-	if !ip.IsValid() {
-		return "unknown", true
+	shown := "unknown"
+	if ip.IsValid() {
+		shown = ip.String()
 	}
-	return ip.String(), true
+	var uid int64
+	if doer != nil {
+		uid = doer.ID
+	}
+	auth.RecordRefusal(ctx, "ip_allowlist", 0, uid, shown+"|"+strconv.FormatInt(uid, 10), map[string]any{"class": surface})
+	return shown, true
 }
 
 // IPAllowlistWeb shows the "approved networks" page to refused clients of the web UI. The sign-in pages stay reachable,

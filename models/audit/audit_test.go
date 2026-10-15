@@ -41,7 +41,7 @@ func decode(t *testing.T, e *audit_model.Entry) map[string]any {
 
 func TestRecordWhitelist(t *testing.T) {
 	e := recordOne(t, audit_model.Event{
-		Action: "credential.access_token.created", Category: audit_model.CategoryCredential, Result: audit_model.ResultSuccess,
+		Action: "credential.access_token.created", Result: audit_model.ResultSuccess,
 		TargetType: "access_token", TargetID: 5, TargetName: "ci",
 		Data: map[string]any{
 			"after":  map[string]any{"name": "ci", "token": "secret", "token_hash": "h", "token_salt": "s", "token_last_eight": "l", "repo_ids": []int64{1, 2}},
@@ -66,7 +66,7 @@ func TestRecordWhitelist(t *testing.T) {
 }
 
 func TestRecordUnknownTargetKeepsNothing(t *testing.T) {
-	e := recordOne(t, audit_model.Event{Action: "x", TargetType: "nope", Data: map[string]any{"name": "a"}})
+	e := recordOne(t, audit_model.Event{Action: "audit.exported", TargetType: "nope", Data: map[string]any{"name": "a"}})
 	assert.Equal(t, "{}", e.Data)
 }
 
@@ -78,7 +78,7 @@ func TestText(t *testing.T) {
 	assert.Equal(t, "a?b", audit_model.Text("a\nb", 255))
 	assert.Equal(t, "a\uFFFDb", audit_model.Text("a\xffb", 255), "invalid UTF-8 is replaced")
 
-	e := recordOne(t, audit_model.Event{Action: "x", TargetType: "access_token", TargetName: s, Data: map[string]any{"name": s}})
+	e := recordOne(t, audit_model.Event{Action: "audit.exported", TargetType: "access_token", TargetName: s, Data: map[string]any{"name": s}})
 	assert.LessOrEqual(t, len(e.TargetName), 255)
 	assert.Equal(t, got, decode(t, e)["name"])
 }
@@ -88,7 +88,7 @@ func TestRecordTruncatesData(t *testing.T) {
 	for i := range ids {
 		ids[i] = 100000 + int64(i)
 	}
-	e := recordOne(t, audit_model.Event{Action: "x", TargetType: "access_token", Data: map[string]any{
+	e := recordOne(t, audit_model.Event{Action: "audit.exported", TargetType: "access_token", Data: map[string]any{
 		"after": map[string]any{"repo_ids": ids, "name": "ci"},
 	}})
 	assert.LessOrEqual(t, len(e.Data), 32*1024)
@@ -101,7 +101,7 @@ func TestRecordTruncatesData(t *testing.T) {
 
 func TestRecordWithoutActor(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
-	require.NoError(t, audit_model.Record(t.Context(), audit_model.Event{Action: "x"}))
+	require.NoError(t, audit_model.Record(t.Context(), audit_model.Event{Action: "audit.exported"}))
 	e := &audit_model.Entry{}
 	_, err := db.GetEngine(t.Context()).Desc("id").Get(e)
 	require.NoError(t, err)
@@ -111,7 +111,7 @@ func TestRecordWithoutActor(t *testing.T) {
 func TestRecordAmbiguousIP(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	ctx := audit_model.WithActor(t.Context(), &audit_model.Actor{Type: audit_model.ActorUser, IP: "10.0.0.1", IPAmbiguous: true, IPCandidates: []string{"1.2.3.4"}, Task: "cron"})
-	require.NoError(t, audit_model.Record(ctx, audit_model.Event{Action: "x"}))
+	require.NoError(t, audit_model.Record(ctx, audit_model.Event{Action: "audit.exported"}))
 	e := &audit_model.Entry{}
 	_, err := db.GetEngine(t.Context()).Desc("id").Get(e)
 	require.NoError(t, err)
@@ -131,7 +131,7 @@ func TestRecordTruncatesNamesBeforeIDs(t *testing.T) {
 	for i := range ids {
 		ids[i] = 1000000 + int64(i)
 	}
-	e := recordOne(t, audit_model.Event{Action: "x", TargetType: "test_lists", Data: map[string]any{"names": names, "ids": ids}})
+	e := recordOne(t, audit_model.Event{Action: "audit.exported", TargetType: "test_lists", Data: map[string]any{"names": names, "ids": ids}})
 	assert.LessOrEqual(t, len(e.Data), 32*1024)
 	data := decode(t, e)
 	assert.Equal(t, true, data["truncated"])

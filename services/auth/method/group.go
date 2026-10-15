@@ -45,6 +45,7 @@ func (b *Group) Add(method auth.Method) {
 
 func (b *Group) Verify(req *http.Request, w http.ResponseWriter, sess auth.SessionStore) auth.MethodOutput {
 	var incorrectCredentials []error
+	var incorrectUserID int64
 	var interactiveReauthenticationPossible bool
 
 	for _, m := range b.methods {
@@ -63,6 +64,9 @@ func (b *Group) Verify(req *http.Request, w http.ResponseWriter, sess auth.Sessi
 			// Move on to the next supported authentication method, but keep a record of this error.  If none of the
 			// other methods are able to authenticate the user, we'll report this as an incorrect credential (401) case.
 			incorrectCredentials = append(incorrectCredentials, v.Error)
+			if incorrectUserID == 0 {
+				incorrectUserID = v.UserID
+			}
 			continue
 
 		default:
@@ -71,7 +75,7 @@ func (b *Group) Verify(req *http.Request, w http.ResponseWriter, sess auth.Sessi
 	}
 
 	if len(incorrectCredentials) != 0 {
-		return &auth.AuthenticationAttemptedIncorrectCredential{Error: errors.Join(incorrectCredentials...)}
+		return &auth.AuthenticationAttemptedIncorrectCredential{Error: errors.Join(incorrectCredentials...), UserID: incorrectUserID}
 	}
 
 	return &auth.AuthenticationNotAttempted{InteractiveReauthenticationPossible: interactiveReauthenticationPossible}

@@ -146,7 +146,6 @@ func recordExport(ctx context.Context, format string, m *Manifest) error {
 	}
 	return audit_model.Record(ctx, audit_model.Event{
 		Action:     "audit.exported",
-		Category:   audit_model.CategoryAudit,
 		Result:     audit_model.ResultSuccess,
 		TargetType: "audit_export",
 		Data:       data,

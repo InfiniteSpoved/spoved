@@ -6,6 +6,7 @@ package audit
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"forgejo.org/models/db"
@@ -67,10 +68,13 @@ func init() {
 }
 
 const (
+	CategoryAuth       = "auth"
 	CategoryCredential = "credential"
 	CategoryAudit      = "audit"
 
 	ResultSuccess = "success"
+	ResultFailure = "failure"
+	ResultRefused = "refused"
 
 	maxText     = 255
 	maxData     = 32 * 1024
@@ -79,10 +83,10 @@ const (
 	maxListText = 255
 )
 
-// Event is what a caller records. Data holds only keys listed in Fields[TargetType] (and inside "before"/"after");
+// Event is what a caller records. Its category comes from Actions. Data holds only keys listed in Fields[TargetType] (and inside "before"/"after");
 // everything else is dropped.
 type Event struct {
-	Action, Category, Result string
+	Action, Result           string
 	OwnerID, GroupID, RepoID int64
 	SubjectUserID            int64
 	TargetType               string
@@ -93,13 +97,24 @@ type Event struct {
 
 // Fields lists the data keys kept per target type. Secrets (token values, hashes, salts, last eight) are never listed.
 var Fields = map[string][]string{
-	"access_token": {"name", "scopes", "expires", "resource_all_repos", "repo_ids"},
-	"audit_export": {"format", "filter", "capped", "through_id"},
-	"instance":     {"version", "config_sha256"},
+	"access_token":       {"name", "scopes", "expires", "resource_all_repos", "repo_ids"},
+	"audit_export":       {"format", "filter", "capped", "through_id"},
+	"credential_use":     {"method"},
+	"deploy_key":         {"expires"},
+	"instance":           {"version", "config_sha256"},
+	"oauth2_app":         {"secret_expires"},
+	"org_deploy_key":     {"expires"},
+	"project_deploy_key": {"expires"},
+	"refusal":            {"reason", "class", "method"},
+	"signin":             {"method", "reason"},
+	"ssh_key":            {"expires"},
 }
 
 // sharedKeys are the top-level data keys every target type may carry.
-var sharedKeys = []string{"before", "after", "on_behalf", "reason", "truncated", "ip_ambiguous", "ip_candidates"}
+var sharedKeys = []string{
+	"before", "after", "on_behalf", "reason", "truncated", "ip_ambiguous", "ip_candidates",
+	"count", "first", "last", "overflow", // aggregated entries
+}
 
 // InsertEntry writes the row. It is a variable so that tests can make the insert fail.
 var InsertEntry = func(ctx context.Context, e *Entry) error {
@@ -109,6 +124,10 @@ var InsertEntry = func(ctx context.Context, e *Entry) error {
 // Record writes one entry with the actor of ctx, in ctx's transaction if it has one. An error means the entry was not
 // written: callers inside a transaction return it, so the change fails with it.
 func Record(ctx context.Context, ev Event) error {
+	category, ok := Actions[ev.Action]
+	if !ok {
+		return fmt.Errorf("audit: unknown action %q", ev.Action)
+	}
 	a := ActorFromContext(ctx)
 	if a == nil {
 		log.Error("audit: no actor in context for %s", ev.Action)
@@ -139,7 +158,7 @@ func Record(ctx context.Context, ev Event) error {
 	return InsertEntry(ctx, &Entry{
 		CreatedUnix:       timeutil.TimeStampNow(),
 		Action:            ev.Action,
-		Category:          ev.Category,
+		Category:          category,
 		Result:            ev.Result,
 		ActorType:         a.Type,
 		ActorID:           a.ID,

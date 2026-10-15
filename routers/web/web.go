@@ -211,6 +211,7 @@ func webAuth(authMethod auth_service.Method) func(*context.Context) {
 		case *auth_service.AuthenticationNotAttempted:
 			ar = &auth_service.UnauthenticatedResult{}
 		case *auth_service.AuthenticationAttemptedIncorrectCredential:
+			common.RecordAuthFailure(ctx.Base, v)
 			if common.WriteIfRateLimited(ctx.Base, v.Error, false) {
 				return
 			}
@@ -234,6 +235,9 @@ func webAuth(authMethod auth_service.Method) func(*context.Context) {
 		ctx.IsSigned = ar.User() != nil
 		ctx.Authentication = ar
 		common.SetAuditActor(ctx.Base, ar)
+		if rp, ok := ar.(interface{ NewSession() bool }); ok && rp.NewSession() {
+			auth_service.RecordSignIn(ctx, ctx.Doer, "reverse_proxy", "")
+		}
 		if ctx.Doer == nil && ctx.InteractiveReauthenticationPossible {
 			// The request is not authenticated, and session authentication was attempted. Clear "uid" from the session.
 			// The purpose of this behaviour isn't clear as it is retained through multiple refactorings, originally
@@ -417,22 +421,22 @@ func Routes() *web.Route {
 		func() {
 			registerRoutes(routes)
 		},
-		gzipMid, sessioner, context.Contexter(), webAuth(buildAuthGroup()), common.RateLimit(ratelimit.Web), common.MaintenanceWeb, common.IPAllowlistWeb,
+		gzipMid, sessioner, context.Contexter(), webAuth(buildAuthGroup()), common.RateLimit(ratelimit.Web), common.MaintenanceWeb, common.IPAllowlistWeb, common.CredentialUsed("web"),
 		// TODO: GetNotificationCount & GetActiveStopwatch really seem like things that could be folded into Contexter or as helper functions
 		user.GetNotificationCount, repo.GetActiveStopwatch, user.GetAnnouncements,
 		goGet)
 	routes.Group("",
 		func() {
 			registerMixedRoutes(routes)
-		}, gzipMid, sessioner, context.Contexter(), webAuth(buildMixedAuthGroup()), common.RateLimit(ratelimit.Web), common.MaintenanceWeb, common.IPAllowlistMixed, goGet)
+		}, gzipMid, sessioner, context.Contexter(), webAuth(buildMixedAuthGroup()), common.RateLimit(ratelimit.Web), common.MaintenanceWeb, common.IPAllowlistMixed, common.CredentialUsed("web"), goGet)
 	routes.Group("",
 		func() {
 			registerGitLFSRoutes(routes)
-		}, gzipMid, sessioner, context.Contexter(), webAuth(buildGitLfsAuthGroup()), common.RateLimit(ratelimit.Git), common.MaintenanceGit, common.IPAllowlistPlain(setting.IPAllowlistSurfaceGit), goGet)
+		}, gzipMid, sessioner, context.Contexter(), webAuth(buildGitLfsAuthGroup()), common.RateLimit(ratelimit.Git), common.MaintenanceGit, common.IPAllowlistPlain(setting.IPAllowlistSurfaceGit), common.CredentialUsed("lfs"), goGet)
 	routes.Group("",
 		func() {
 			registerGitRoutes(routes)
-		}, gzipMid, sessioner, context.Contexter(), webAuth(buildGitAuthGroup()), common.RateLimit(ratelimit.Git), common.MaintenanceGit, common.IPAllowlistPlain(setting.IPAllowlistSurfaceGit), goGet)
+		}, gzipMid, sessioner, context.Contexter(), webAuth(buildGitAuthGroup()), common.RateLimit(ratelimit.Git), common.MaintenanceGit, common.IPAllowlistPlain(setting.IPAllowlistSurfaceGit), common.CredentialUsed("git"), goGet)
 
 	// The only endpoint which can only be accessed with the OAuth2 authentication method is /userinfo, extracted here
 	// so that other auth methods can't be applied to it
@@ -440,7 +444,7 @@ func Routes() *web.Route {
 		"GET, POST, OPTIONS",
 		"/login/oauth/userinfo",
 		gzipMid, sessioner, context.Contexter(),
-		oauth2Enabled, optionsCorsHandler(), ignoreCSRF, webAuth(&auth_method.OAuth2{}), common.IPAllowlistMixed,
+		oauth2Enabled, optionsCorsHandler(), ignoreCSRF, webAuth(&auth_method.OAuth2{}), common.IPAllowlistMixed, common.CredentialUsed("web"),
 		auth.InfoOAuth,
 	)
 
