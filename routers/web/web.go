@@ -233,6 +233,7 @@ func webAuth(authMethod auth_service.Method) func(*context.Context) {
 		ctx.Doer = ar.User()
 		ctx.IsSigned = ar.User() != nil
 		ctx.Authentication = ar
+		common.SetAuditActor(ctx.Base, ar)
 		if ctx.Doer == nil && ctx.InteractiveReauthenticationPossible {
 			// The request is not authenticated, and session authentication was attempted. Clear "uid" from the session.
 			// The purpose of this behaviour isn't clear as it is retained through multiple refactorings, originally

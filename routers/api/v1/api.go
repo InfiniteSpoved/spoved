@@ -63,6 +63,7 @@ import (
 	"net/http"
 	"strings"
 
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
@@ -118,6 +119,9 @@ func sudo() func(ctx *context.APIContext) {
 				}
 				log.Trace("Sudo from (%s) to: %s", ctx.Doer().Name, user.Name)
 				ctx.SetDoer(user)
+				if actor := audit_model.ActorFromContext(ctx); actor != nil {
+					actor.SetSudo(user.ID, user.Name)
+				}
 			} else {
 				ctx.JSON(http.StatusForbidden, map[string]string{
 					"message": "Only administrators allowed to sudo.",

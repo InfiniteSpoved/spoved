@@ -74,7 +74,7 @@ func (h *HTTPSign) Verify(req *http.Request, w http.ResponseWriter, _ auth.Sessi
 	}
 
 	log.Trace("HTTP Sign: Logged in user %-v", u)
-	return &auth.AuthenticationSuccess{Result: &httpSignAuthenticationResult{user: u}}
+	return &auth.AuthenticationSuccess{Result: &httpSignAuthenticationResult{user: u, key: publicKey}}
 }
 
 func VerifyPubKey(r *http.Request) (*asymkey_model.PublicKey, error) {

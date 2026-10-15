@@ -176,7 +176,7 @@ func TestCredentialExpiryDefault(t *testing.T) {
 
 		// a row stored without an expiry, as by an import or an older policy
 		row := &auth_model.AccessToken{UID: 2, Name: "stored without expiry", Scope: auth_model.AccessTokenScopeReadUser, ResourceAllRepos: true}
-		require.NoError(t, auth_model.NewAccessToken(t.Context(), row))
+		require.NoError(t, auth_model.NewAccessToken(t.Context(), row, nil))
 		require.Zero(t, row.ExpiresUnix)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/user").AddTokenAuth(row.Token), http.StatusOK)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user5/repo4").AddTokenAuth(task.Token), http.StatusOK)

@@ -225,7 +225,7 @@ func runCreateUser(ctx context.Context, c *cli.Command) error {
 			// fine-grained
 			ResourceAllRepos: true,
 		}
-		if err := auth_model.NewAccessToken(ctx, t); err != nil {
+		if err := auth_model.NewAccessToken(ctx, t, nil); err != nil {
 			return err
 		}
 		fmt.Printf("Access token was successfully created... %s\n", t.Token)

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
@@ -373,4 +374,16 @@ func TestOrphanedOAuth2Applications(t *testing.T) {
 	assert.EqualValues(t, 0, count)
 	unittest.AssertExistsIf(t, false, &auth_model.OAuth2Application{ID: 1002})
 	unittest.AssertExistsIf(t, true, &auth_model.OAuth2Application{ID: 1003})
+}
+
+func TestOAuth2GrantAuditName(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := audit_model.WithActor(t.Context(), &audit_model.Actor{
+		Type:       audit_model.ActorUser,
+		ID:         1,
+		Credential: audit_model.Credential{Type: audit_model.CredentialOAuth2Grant, ID: 1, AppID: 1, OwnerID: 1},
+	})
+	require.NoError(t, audit_model.Record(ctx, audit_model.Event{Action: "test.oauth2"}))
+	e := unittest.AssertExistsAndLoadBean(t, &audit_model.Entry{Action: "test.oauth2"})
+	assert.Equal(t, "Test", e.CredentialName, "named after the grant's application when the entry is written")
 }

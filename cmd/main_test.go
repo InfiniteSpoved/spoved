@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/unittest"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
@@ -198,4 +199,11 @@ func TestCliCmdError(t *testing.T) {
 	assert.Equal(t, -1, r.ExitCode) // the cli.OsExiter is not called
 	assert.Empty(t, r.Stdout)
 	assert.Empty(t, r.Stderr)
+}
+
+func TestWithCLIActor(t *testing.T) {
+	for _, server := range []string{"", "web", "serv", "hook"} {
+		assert.Nil(t, audit_model.ActorFromContext(withCLIActor(t.Context(), server)), server)
+	}
+	assert.Equal(t, audit_model.ActorCLI, audit_model.ActorFromContext(withCLIActor(t.Context(), "admin")).Type)
 }

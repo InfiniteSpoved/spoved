@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
@@ -122,6 +123,10 @@ type AuthenticationResult interface {
 	// The ID of the personal access token used, or 0 for any other credential, including OAuth2, Actions and
 	// authorized integration tokens.
 	AccessTokenID() int64
+
+	// The credential used, for the audit log. Every result reports one; its name may be loaded only when an entry is
+	// written (see audit_model.RegisterCredentialNamer).
+	Credential() audit_model.Credential
 }
 
 // IsHeldByUser reports whether the user authenticated with a credential of their own, rather than one another party
@@ -174,4 +179,8 @@ type UnauthenticatedResult struct {
 
 func (*UnauthenticatedResult) User() *user_model.User {
 	return nil
+}
+
+func (*UnauthenticatedResult) Credential() audit_model.Credential {
+	return audit_model.Credential{}
 }

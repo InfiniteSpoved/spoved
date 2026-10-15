@@ -101,7 +101,7 @@ func runGenerateAccessToken(ctx context.Context, c *cli.Command) error {
 	t.ResourceAllRepos = true
 
 	// create the token
-	if err := auth_model.NewAccessToken(ctx, t); err != nil {
+	if err := auth_model.NewAccessToken(ctx, t, nil); err != nil {
 		return err
 	}
 

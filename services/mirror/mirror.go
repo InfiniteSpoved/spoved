@@ -6,7 +6,9 @@ package mirror
 import (
 	"context"
 	"errors"
+	"fmt"
 
+	audit_model "forgejo.org/models/audit"
 	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/graceful"
@@ -23,9 +25,9 @@ func doMirrorSync(ctx context.Context, req *SyncRequest) {
 	}
 	switch req.Type {
 	case PushMirrorType:
-		_ = SyncPushMirror(ctx, req.ReferenceID)
+		_ = SyncPushMirror(audit_model.WithSystem(ctx, fmt.Sprintf("push_mirror:%d", req.ReferenceID)), req.ReferenceID)
 	case PullMirrorType:
-		_ = SyncPullMirror(ctx, req.ReferenceID)
+		_ = SyncPullMirror(audit_model.WithSystem(ctx, fmt.Sprintf("mirror:%d", req.ReferenceID)), req.ReferenceID)
 	default:
 		log.Error("Unknown Request type in queue: %v for MirrorID[%d]", req.Type, req.ReferenceID)
 	}

@@ -4,6 +4,7 @@
 package method
 
 import (
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/lfs"
@@ -39,4 +40,9 @@ func (r *lfsTokenAuthenticationResult) Reducer() authz.AuthorizationReducer {
 
 func (r *lfsTokenAuthenticationResult) GetTargetRepoID() int64 {
 	return r.claims.RepoID
+}
+
+// Credential is unknown until the LFS token carries the credential it was issued for (#17 PR 3).
+func (r *lfsTokenAuthenticationResult) Credential() audit_model.Credential {
+	return audit_model.Credential{Type: audit_model.CredentialUnknown, OwnerID: r.user.ID}
 }

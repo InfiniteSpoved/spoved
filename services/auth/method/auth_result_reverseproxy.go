@@ -4,6 +4,7 @@
 package method
 
 import (
+	audit_model "forgejo.org/models/audit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/services/auth"
 )
@@ -21,4 +22,8 @@ func (r *reverseProxyAuthenticationResult) User() *user_model.User {
 
 func (*reverseProxyAuthenticationResult) IsReverseProxyAuthentication() bool {
 	return true
+}
+
+func (r *reverseProxyAuthenticationResult) Credential() audit_model.Credential {
+	return audit_model.Credential{Type: audit_model.CredentialReverseProxy, OwnerID: r.user.ID}
 }

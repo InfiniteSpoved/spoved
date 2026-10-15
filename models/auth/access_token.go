@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
@@ -120,11 +121,48 @@ func init() {
 	})
 }
 
-// NewAccessToken creates new access token.
-func NewAccessToken(ctx context.Context, t *AccessToken) error {
+// NewAccessToken creates a new access token limited to the given repositories, and records it in the audit log.
+func NewAccessToken(ctx context.Context, t *AccessToken, resources []*AccessTokenResourceRepo) error {
 	generateAccessToken(t)
-	_, err := db.GetEngine(ctx).Insert(t)
-	return err
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if _, err := db.GetEngine(ctx).Insert(t); err != nil {
+			return err
+		}
+		if err := InsertAccessTokenResourceRepos(ctx, t.ID, resources); err != nil {
+			return err
+		}
+		repoIDs := make([]int64, 0, len(resources))
+		for _, resourceRepo := range resources {
+			repoIDs = append(repoIDs, resourceRepo.RepoID)
+		}
+		return recordAccessToken(ctx, "created", t, map[string]any{"after": accessTokenFields(t, repoIDs)})
+	})
+}
+
+func accessTokenFields(t *AccessToken, repoIDs []int64) map[string]any {
+	return map[string]any{
+		"name":               t.Name,
+		"scopes":             string(t.Scope),
+		"expires":            int64(t.ExpiresUnix),
+		"resource_all_repos": t.ResourceAllRepos,
+		"repo_ids":           repoIDs,
+	}
+}
+
+// recordAccessToken records a change of the token in the audit log. The token's owner is read from the row, never
+// from the doer, who may be an admin acting for the owner.
+func recordAccessToken(ctx context.Context, verb string, t *AccessToken, data map[string]any) error {
+	return audit_model.Record(ctx, audit_model.Event{
+		Action:        "credential.access_token." + verb,
+		Category:      audit_model.CategoryCredential,
+		Result:        audit_model.ResultSuccess,
+		OwnerID:       t.UID,
+		SubjectUserID: t.UID,
+		TargetType:    "access_token",
+		TargetID:      t.ID,
+		TargetName:    t.Name,
+		Data:          data,
+	})
 }
 
 func generateAccessToken(t *AccessToken) {
@@ -259,6 +297,16 @@ func (opts ListAccessTokensOptions) ToOrders() string {
 // DeleteAccessTokenByID deletes access token by given ID.
 func DeleteAccessTokenByID(ctx context.Context, id, userID int64) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
+		t := &AccessToken{}
+		if has, err := db.GetEngine(ctx).Where("id = ? AND uid = ?", id, userID).Get(t); err != nil {
+			return err
+		} else if !has {
+			return ErrAccessTokenNotExist{}
+		}
+		var repoIDs []int64
+		if err := db.GetEngine(ctx).Table("access_token_resource_repo").Where("token_id = ?", id).Cols("repo_id").Find(&repoIDs); err != nil {
+			return err
+		}
 		if err := db.DeleteBeans(ctx,
 			&AccessTokenResourceRepo{TokenID: id},
 		); err != nil {
@@ -273,7 +321,7 @@ func DeleteAccessTokenByID(ctx context.Context, id, userID int64) error {
 		} else if cnt != 1 {
 			return ErrAccessTokenNotExist{}
 		}
-		return nil
+		return recordAccessToken(ctx, "deleted", t, map[string]any{"before": accessTokenFields(t, repoIDs)})
 	})
 }
 
@@ -281,18 +329,22 @@ func DeleteAccessTokenByID(ctx context.Context, id, userID int64) error {
 // It regenerates token and salt, as well as updates the creation time.
 func RegenerateAccessTokenByID(ctx context.Context, id, userID int64) (*AccessToken, error) {
 	t := &AccessToken{}
-	found, err := db.GetEngine(ctx).Where("id = ? AND uid = ?", id, userID).Get(t)
-	if err != nil {
-		return nil, err
-	} else if !found {
-		return nil, ErrAccessTokenNotExist{}
-	}
+	return t, db.WithTx(ctx, func(ctx context.Context) error {
+		found, err := db.GetEngine(ctx).Where("id = ? AND uid = ?", id, userID).Get(t)
+		if err != nil {
+			return err
+		} else if !found {
+			return ErrAccessTokenNotExist{}
+		}
 
-	generateAccessToken(t)
+		generateAccessToken(t)
 
-	// Reset the creation time, token is unused
-	t.UpdatedUnix = timeutil.TimeStampNow()
+		// Reset the creation time, token is unused
+		t.UpdatedUnix = timeutil.TimeStampNow()
 
-	_, err = db.GetEngine(ctx).ID(t.ID).Cols("token_salt", "token", "token_hash", "token_last_eight", "updated_unix").NoAutoTime().Update(t)
-	return t, err
+		if _, err := db.GetEngine(ctx).ID(t.ID).Cols("token_salt", "token", "token_hash", "token_last_eight", "updated_unix").NoAutoTime().Update(t); err != nil {
+			return err
+		}
+		return recordAccessToken(ctx, "regenerated", t, map[string]any{"name": t.Name})
+	})
 }

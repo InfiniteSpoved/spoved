@@ -22,7 +22,7 @@ func TestNewAccessToken(t *testing.T) {
 		UID:  3,
 		Name: "Token C",
 	}
-	require.NoError(t, auth_model.NewAccessToken(db.DefaultContext, token))
+	require.NoError(t, auth_model.NewAccessToken(db.DefaultContext, token, nil))
 	unittest.AssertExistsAndLoadBean(t, token)
 
 	invalidToken := &auth_model.AccessToken{
@@ -30,7 +30,7 @@ func TestNewAccessToken(t *testing.T) {
 		UID:  2,
 		Name: "Token F",
 	}
-	require.Error(t, auth_model.NewAccessToken(db.DefaultContext, invalidToken))
+	require.Error(t, auth_model.NewAccessToken(db.DefaultContext, invalidToken, nil))
 }
 
 func TestAccessTokenByNameExists(t *testing.T) {
@@ -48,7 +48,7 @@ func TestAccessTokenByNameExists(t *testing.T) {
 	assert.False(t, exist)
 
 	// Save it to the database
-	require.NoError(t, auth_model.NewAccessToken(db.DefaultContext, token))
+	require.NoError(t, auth_model.NewAccessToken(db.DefaultContext, token, nil))
 	unittest.AssertExistsAndLoadBean(t, token)
 
 	// This token must be found by name in the DB now
@@ -105,7 +105,7 @@ func TestGetAccessTokenBySHAExpired(t *testing.T) {
 
 	t.Run("not cached", func(t *testing.T) {
 		token := &auth_model.AccessToken{UID: 2, Name: "expired", ExpiresUnix: timeutil.TimeStampNow().Add(-1)}
-		require.NoError(t, auth_model.NewAccessToken(db.DefaultContext, token))
+		require.NoError(t, auth_model.NewAccessToken(db.DefaultContext, token, nil))
 
 		_, err := auth_model.GetAccessTokenBySHA(db.DefaultContext, token.Token)
 		assert.True(t, auth_model.IsErrAccessTokenExpired(err))
@@ -113,7 +113,7 @@ func TestGetAccessTokenBySHAExpired(t *testing.T) {
 
 	t.Run("not yet expired", func(t *testing.T) {
 		token := &auth_model.AccessToken{UID: 2, Name: "valid", ExpiresUnix: timeutil.TimeStampNow().Add(3600)}
-		require.NoError(t, auth_model.NewAccessToken(db.DefaultContext, token))
+		require.NoError(t, auth_model.NewAccessToken(db.DefaultContext, token, nil))
 
 		_, err := auth_model.GetAccessTokenBySHA(db.DefaultContext, token.Token)
 		require.NoError(t, err)

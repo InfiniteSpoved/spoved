@@ -4,6 +4,7 @@
 package method
 
 import (
+	audit_model "forgejo.org/models/audit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/services/auth"
 )
@@ -21,4 +22,8 @@ func (*basicPaswordAuthenticationResult) IsPasswordAuthentication() bool {
 
 func (r *basicPaswordAuthenticationResult) User() *user_model.User {
 	return r.user
+}
+
+func (r *basicPaswordAuthenticationResult) Credential() audit_model.Credential {
+	return audit_model.Credential{Type: audit_model.CredentialPassword, OwnerID: r.user.ID}
 }

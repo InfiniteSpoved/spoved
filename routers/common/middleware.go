@@ -115,12 +115,28 @@ func joinForwardedFor(trusted []string) func(http.Handler) http.Handler {
 					req.Header.Set("X-Forwarded-For", joined)
 					req.Header.Del("X-Real-IP")
 				} else {
-					req = httplib.WithAmbiguousClientIP(req)
+					var candidates []string
+					for _, c := range []string{strings.TrimSpace(realIP), last} {
+						if a, err := netip.ParseAddr(c); err == nil {
+							candidates = append(candidates, a.String())
+						}
+					}
+					req = httplib.WithAmbiguousClientIP(req, auditPeer(req.RemoteAddr, peer), candidates)
 				}
 			}
 			next.ServeHTTP(resp, req)
 		})
 	}
+}
+
+// auditPeer is the peer address as the audit log stores it: "unix" for a unix socket, never "".
+func auditPeer(remoteAddr string, peer netip.Addr) string {
+	if remoteAddr == "@" {
+		return "unix"
+	} else if !peer.IsValid() {
+		return "invalid"
+	}
+	return peer.Unmap().String()
 }
 
 // ClientIP returns the client address of the request, invalid if it can't be parsed or a trusted proxy sent

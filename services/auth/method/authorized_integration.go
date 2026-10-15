@@ -232,6 +232,8 @@ func (a *AuthorizedIntegration) Verify(req *http.Request, w http.ResponseWriter,
 
 	return &auth_service.AuthenticationSuccess{
 		Result: &authorizedIntegrationAuthenticationResult{
+			id:        authorizedIntegration.ID,
+			name:      authorizedIntegration.Name,
 			user:      u,
 			scope:     authorizedIntegration.Scope,
 			reducer:   reducer,
