@@ -360,6 +360,19 @@ func Settings(ctx *context.Context) {
 }
 
 // SettingsPost response for changes of a repository
+// confirmsRepoName tells whether a typed or pasted confirmation names the repository. Mobile keyboards append a blank
+// and copying the label can bring zero-width characters, so those and surrounding space are ignored, as is the case.
+func confirmsRepoName(input string, repo *repo_model.Repository) bool {
+	input = strings.Map(func(r rune) rune {
+		switch r {
+		case '\u200b', '\u200c', '\u200d', '\ufeff', '\u2060':
+			return -1
+		}
+		return r
+	}, input)
+	return strings.EqualFold(strings.TrimSpace(input), repo.FullName())
+}
+
 func SettingsPost(ctx *context.Context) {
 	form := web.GetForm(ctx).(*forms.RepoSettingForm)
 
@@ -923,7 +936,7 @@ func SettingsPost(ctx *context.Context) {
 			ctx.Error(http.StatusNotFound)
 			return
 		}
-		if repo.FullName() != form.RepoName {
+		if !confirmsRepoName(form.RepoName, repo) {
 			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_repo_name"), tplSettingsOptions, nil)
 			return
 		}
@@ -950,7 +963,7 @@ func SettingsPost(ctx *context.Context) {
 			ctx.ServerError("Convert Fork", err)
 			return
 		}
-		if repo.FullName() != form.RepoName {
+		if !confirmsRepoName(form.RepoName, repo) {
 			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_repo_name"), tplSettingsOptions, nil)
 			return
 		}
@@ -983,7 +996,7 @@ func SettingsPost(ctx *context.Context) {
 			ctx.Error(http.StatusNotFound)
 			return
 		}
-		if repo.FullName() != form.RepoName {
+		if !confirmsRepoName(form.RepoName, repo) {
 			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_repo_name"), tplSettingsOptions, nil)
 			return
 		}
@@ -1058,7 +1071,7 @@ func SettingsPost(ctx *context.Context) {
 		}
 		// the confirmation holds a path with "/", so the binding error of the repository name field doesn't apply
 		delete(ctx.Data, "Err_RepoName")
-		if !strings.EqualFold(strings.TrimSpace(form.RepoName), repo.FullName()) {
+		if !confirmsRepoName(form.RepoName, repo) {
 			ctx.Data["Err_MoveRepoName"] = true
 			ctx.RenderWithErr(ctx.Tr("repo.settings.move.confirm_mismatch", repo.FullName()), tplSettingsOptions, nil)
 			return
@@ -1136,7 +1149,7 @@ func SettingsPost(ctx *context.Context) {
 			ctx.Error(http.StatusNotFound)
 			return
 		}
-		if repo.FullName() != form.RepoName {
+		if !confirmsRepoName(form.RepoName, repo) {
 			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_repo_name"), tplSettingsOptions, nil)
 			return
 		}
@@ -1160,7 +1173,7 @@ func SettingsPost(ctx *context.Context) {
 			ctx.Error(http.StatusNotFound)
 			return
 		}
-		if repo.FullName() != form.RepoName {
+		if !confirmsRepoName(form.RepoName, repo) {
 			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_repo_name"), tplSettingsOptions, nil)
 			return
 		}
@@ -1179,7 +1192,7 @@ func SettingsPost(ctx *context.Context) {
 			ctx.Error(http.StatusNotFound)
 			return
 		}
-		if repo.FullName() != form.RepoName {
+		if !confirmsRepoName(form.RepoName, repo) {
 			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_repo_name"), tplSettingsOptions, nil)
 			return
 		}

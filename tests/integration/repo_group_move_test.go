@@ -78,7 +78,7 @@ func TestRepoGroupMove(t *testing.T) {
 			resp = owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/api/settings", map[string]string{
 				"action": "move", "repo_name": "org3/other", "group_id": strconv.FormatInt(proj.ID, 10),
 			}), http.StatusOK)
-			assert.Contains(t, resp.Body.String(), "The repository name you entered is incorrect.")
+			assert.Contains(t, resp.Body.String(), "Enter the full name of the repository: org3/api")
 			assert.EqualValues(t, 0, reload(api.ID).GroupID)
 
 			// another organization's project is not found

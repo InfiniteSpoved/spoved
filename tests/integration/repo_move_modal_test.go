@@ -127,6 +127,33 @@ func TestRepoMoveModalFields(t *testing.T) {
 			})
 		}
 
+		// what a keyboard or a copied label adds, and a real mismatch
+		t.Run("confirmation forms", func(t *testing.T) {
+			repo := newRepo(t, "modal-forms", false)
+			for _, confirm := range []string{"org3/modal-forms\n", "org3/modal-forms ", "org3/modal-forms\u00a0", "\u200borg3/modal-forms", "\ufeffORG3/Modal-Forms\u2060"} {
+				move(t, repo, confirm, proj.ID, http.StatusSeeOther)
+				assert.Equal(t, proj.ID, reload(repo.ID).GroupID, "%q", confirm)
+				move(t, reload(repo.ID), reload(repo.ID).FullName(), 0, http.StatusSeeOther)
+			}
+			move(t, repo, "org3/modal-form", proj.ID, http.StatusOK)
+			assert.EqualValues(t, 0, reload(repo.ID).GroupID)
+		})
+
+		t.Run("delete with a padded confirmation", func(t *testing.T) {
+			repo := newRepo(t, "modal-delete", false)
+			post := func(confirm string, status int) {
+				owner.MakeRequest(t, NewRequestWithValues(t, "POST", repo.Link()+"/settings", map[string]string{
+					"action": "delete", "repo_name": confirm,
+				}), status)
+			}
+			post("org3/modal-delet", http.StatusOK)
+			_, err := repo_model.GetRepositoryByID(ctx, repo.ID)
+			require.NoError(t, err)
+			post(" Org3/modal-delete\n", http.StatusSeeOther)
+			_, err = repo_model.GetRepositoryByID(ctx, repo.ID)
+			assert.True(t, repo_model.IsErrRepoNotExist(err), "deleted")
+		})
+
 		t.Run("messages", func(t *testing.T) {
 			repo := newRepo(t, "modal-errors", false)
 
