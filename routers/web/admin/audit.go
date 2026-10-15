@@ -94,6 +94,42 @@ func newAuditRow(e *audit_model.Entry, loc *time.Location, names map[int64]strin
 	return r
 }
 
+// auditResolved is what a name or ID filter selected, shown next to the filters.
+type auditResolved struct {
+	Label, Name string
+	ID          int64
+}
+
+// resolveAuditFilter names the objects of the ID filters, trashed ones included; a missing one has no name.
+func resolveAuditFilter(ctx *context.Context, o *audit_model.SearchOptions) ([]auditResolved, error) {
+	var out []auditResolved
+	for _, u := range []struct {
+		label string
+		id    int64
+	}{{"admin.audit.org", o.OwnerID}, {"admin.audit.user", o.UserID}, {"admin.audit.credential_owner", o.CredentialOwnerID}} {
+		if u.id == 0 {
+			continue
+		}
+		r := auditResolved{Label: u.label, ID: u.id}
+		if user, err := user_model.GetUserByIDIncludingTrashed(ctx, u.id); err == nil {
+			r.Name = user.Name
+		} else if !user_model.IsErrUserNotExist(err) {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	if o.RepoID != 0 {
+		r := auditResolved{Label: "admin.audit.repo", ID: o.RepoID}
+		if repo, err := repo_model.GetRepositoryByIDIncludingTrashed(ctx, o.RepoID); err == nil {
+			r.Name = repo.FullName()
+		} else if !repo_model.IsErrRepoNotExist(err) {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
 // Audit shows the audit log, or exports it with ?format=csv|json.
 func Audit(ctx *context.Context) {
 	f, err := audit_service.ParseFilter(ctx, ctx.FormString)
@@ -162,6 +198,13 @@ func Audit(ctx *context.Context) {
 	ctx.Data["JSONLink"] = link(func(q url.Values) { q.Set("format", "json") })
 	ctx.Data["RemoveCredentialLink"] = link(func(q url.Values) { q.Del("credential") })
 	ctx.Data["OnlyLinkBase"] = ctx.Data["RemoveCredentialLink"]
+
+	resolved, err := resolveAuditFilter(ctx, &f.Opts)
+	if err != nil {
+		ctx.ServerError("resolveAuditFilter", err)
+		return
+	}
+	ctx.Data["Resolved"] = resolved
 
 	if f.OrgID != 0 {
 		projects, err := repo_model.GetRepoGroupsByOwnerIDs(ctx, []int64{f.OrgID})

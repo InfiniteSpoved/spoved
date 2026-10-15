@@ -1840,6 +1840,8 @@
 	"admin.audit.repo": "Repository",
 	"admin.audit.user": "User",
 	"admin.audit.credential_type": "Credential type",
+	"admin.audit.credential_owner": "Credential owner",
+	"admin.audit.resolved_missing": "#%d (no longer exists)",
 	"admin.audit.action": "Action",
 	"admin.audit.result": "Result",
 	"admin.audit.ip": "IP",

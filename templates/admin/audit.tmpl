@@ -92,6 +92,11 @@
 					<a class="icon" href="{{$.RemoveCredentialLink}}" aria-label="{{ctx.Locale.Tr "admin.audit.remove_credential"}}">{{svg "octicon-x" 12}}</a>
 				</div>
 			{{end}}
+			{{if .Resolved}}
+				<p class="audit-resolved">
+					{{range $i, $r := .Resolved}}{{if $i}} · {{end}}{{ctx.Locale.Tr $r.Label}}: {{if $r.Name}}{{$r.Name}} (#{{$r.ID}}){{else}}{{ctx.Locale.Tr "admin.audit.resolved_missing" $r.ID}}{{end}}{{end}}
+				</p>
+			{{end}}
 			{{if .FilterError}}
 				<div class="ui error message audit-filter-error">
 					{{if .FilterError.Unknown}}

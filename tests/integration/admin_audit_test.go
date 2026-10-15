@@ -111,6 +111,9 @@ func TestAdminAuditPage(t *testing.T) {
 		body = admin.MakeRequest(t, NewRequest(t, "GET", "/admin/audit?category=all&user=user4"), http.StatusOK).Body.String()
 		assert.Contains(t, body, rowID(ids[2]))
 		assert.NotContains(t, body, rowID(ids[0]))
+		assert.Contains(t, body, "User: user4 (#4)")
+		body = admin.MakeRequest(t, NewRequest(t, "GET", "/admin/audit?category=all&org=3&repo=1&user=999"), http.StatusOK).Body.String()
+		assert.Contains(t, body, "Organization: org3 (#3) · User: #999 (no longer exists) · Repository: user2/repo1 (#1)")
 
 		body = admin.MakeRequest(t, NewRequest(t, "GET", "/admin/audit?action=nothing.here"), http.StatusOK).Body.String()
 		assert.Contains(t, body, "Nothing matches these filters.")
