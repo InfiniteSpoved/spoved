@@ -77,38 +77,38 @@
 }
 
 .admin.audit-log .audit-pager .older {
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 
 /* on phones each entry is a card: time and actor, then the event, then credential, result and IP */
 @media (max-width: 767.98px) {
-  .admin.audit-log .audit-entries thead {
+  .admin.audit-log .audit-entries > thead {
     display: none;
   }
   .admin.audit-log .audit-entries,
-  .admin.audit-log .audit-entries tbody {
+  .admin.audit-log .audit-entries > tbody {
     display: block;
   }
-  .admin.audit-log .audit-entries tr {
+  .admin.audit-log .audit-entries > tbody > tr {
     display: flex;
     flex-wrap: wrap;
     gap: 0.25rem 0.5rem;
     padding: 0.5rem 0;
     border-bottom: 1px solid var(--color-secondary);
   }
-  .admin.audit-log .audit-entries tr > td {
+  .admin.audit-log .audit-entries > tbody > tr > td {
     display: block;
     padding: 0 !important;
     border: 0 !important;
     min-width: 0;
   }
-  .admin.audit-log .audit-entries td.audit-event {
+  .admin.audit-log .audit-entries > tbody > tr > td.audit-event {
     order: 1;
     flex-basis: 100%;
   }
-  .admin.audit-log .audit-entries td.audit-credential,
-  .admin.audit-log .audit-entries td.audit-result,
-  .admin.audit-log .audit-entries td.audit-ip {
+  .admin.audit-log .audit-entries > tbody > tr > td.audit-credential,
+  .admin.audit-log .audit-entries > tbody > tr > td.audit-result,
+  .admin.audit-log .audit-entries > tbody > tr > td.audit-ip {
     order: 2;
   }
 }

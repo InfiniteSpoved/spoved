@@ -111,7 +111,7 @@
 				· {{ctx.Locale.Tr "admin.audit.export_cap" .ExportCap}}
 			</p>
 			{{if .Rows}}
-				<table class="ui very basic table audit-entries">
+				<table class="ui very basic unstackable table audit-entries">
 					<thead>
 						<tr>
 							<th>{{ctx.Locale.Tr "admin.audit.time"}}</th>
@@ -152,7 +152,7 @@
 											{{range $k, $v := .Details}}<dt>{{$k}}</dt><dd>{{$v}}</dd>{{end}}
 										</dl>
 										{{if .Changes}}
-											<table class="ui very basic compact table">
+											<table class="ui very basic compact unstackable table">
 												<thead><tr><th></th><th>{{ctx.Locale.Tr "admin.audit.before_value"}}</th><th>{{ctx.Locale.Tr "admin.audit.after_value"}}</th></tr></thead>
 												<tbody>
 													{{range .Changes}}<tr><td>{{.Key}}</td><td>{{.Before}}</td><td>{{.After}}</td></tr>{{end}}
