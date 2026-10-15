@@ -65,7 +65,7 @@ func (t *Task) GetConfig() Config {
 
 // Run will run the task incrementing the cron counter with no user defined
 func (t *Task) Run() {
-	t.RunWithUser(&user_model.User{
+	t.RunWithUser(context.Background(), &user_model.User{
 		ID:        -1,
 		Name:      "(Cron)",
 		LowerName: "(cron)",
@@ -73,7 +73,15 @@ func (t *Task) Run() {
 }
 
 // RunWithUser will run the task incrementing the cron counter at the time with User
-func (t *Task) RunWithUser(doer *user_model.User, config Config) {
+// RunWithUser runs the task. A run started by a user (ctx is their request) records them as the audit actor;
+// scheduled runs record the system actor "cron:<task>".
+func (t *Task) RunWithUser(ctx context.Context, doer *user_model.User, config Config) {
+	actor := audit_model.SystemActor("cron:" + t.Name)
+	if requestActor := audit_model.ActorFromContext(ctx); requestActor != nil && doer != nil && doer.ID > 0 {
+		run := *requestActor
+		run.Task = t.Name
+		actor = &run
+	}
 	// jobs that change data wait while maintenance mode is on, and run on their next schedule after it
 	if setting.GetMaintenance(graceful.GetManager().ShutdownContext()).ReadOnly() {
 		log.Info("Skipping cron task %s: maintenance mode is on", t.Name)
@@ -111,7 +119,7 @@ func (t *Task) RunWithUser(doer *user_model.User, config Config) {
 			doerName = doer.Name
 		}
 
-		ctx, _, finished := pm.AddContext(audit_model.WithSystem(baseCtx, "cron:"+t.Name), config.FormatMessage(translation.NewLocale("en-US"), t.Name, "process", doerName))
+		ctx, _, finished := pm.AddContext(audit_model.WithActor(baseCtx, actor), config.FormatMessage(translation.NewLocale("en-US"), t.Name, "process", doerName))
 		defer finished()
 
 		if err := t.fun(ctx, doer, config); err != nil {

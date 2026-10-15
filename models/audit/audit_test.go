@@ -110,11 +110,11 @@ func TestRecordWithoutActor(t *testing.T) {
 
 func TestRecordAmbiguousIP(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
-	ctx := audit_model.WithActor(t.Context(), &audit_model.Actor{Type: audit_model.ActorUser, IP: "10.0.0.1", IPAmbiguous: true, IPCandidates: []string{"1.2.3.4"}})
+	ctx := audit_model.WithActor(t.Context(), &audit_model.Actor{Type: audit_model.ActorUser, IP: "10.0.0.1", IPAmbiguous: true, IPCandidates: []string{"1.2.3.4"}, Task: "cron"})
 	require.NoError(t, audit_model.Record(ctx, audit_model.Event{Action: "x"}))
 	e := &audit_model.Entry{}
 	_, err := db.GetEngine(t.Context()).Desc("id").Get(e)
 	require.NoError(t, err)
 	assert.Equal(t, "10.0.0.1", e.IP)
-	assert.JSONEq(t, `{"ip_ambiguous":true,"ip_candidates":["1.2.3.4"]}`, e.Data)
+	assert.JSONEq(t, `{"ip_ambiguous":true,"ip_candidates":["1.2.3.4"],"task":"cron"}`, e.Data)
 }

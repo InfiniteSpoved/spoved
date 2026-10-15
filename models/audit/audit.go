@@ -120,6 +120,9 @@ func Record(ctx context.Context, ev Event) error {
 			data["ip_candidates"] = a.IPCandidates
 		}
 	}
+	if a.Task != "" {
+		data["task"] = Text(a.Task, maxText)
+	}
 	cred := a.Credential
 	if namer := credentialNamers[cred.Type]; cred.Name == "" && namer != nil {
 		name, err := namer(ctx, cred)

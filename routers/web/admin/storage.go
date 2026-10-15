@@ -271,7 +271,7 @@ func StorageRecalculate(ctx *context.Context) {
 		}
 		config.OwnerID = owner.ID
 	}
-	go task.RunWithUser(ctx.Doer, config) // a run already in progress makes this a no-op
+	go task.RunWithUser(ctx, ctx.Doer, config) // a run already in progress makes this a no-op
 	ctx.Flash.Success(ctx.Tr("admin.storage.recalculate.started"))
 	ctx.Redirect(setting.AppSubURL + "/admin/storage")
 }
