@@ -29,12 +29,12 @@ type Entry struct {
 	CredentialType    string             `xorm:"VARCHAR(32) index(credential_id)"`
 	CredentialID      int64              `xorm:"NOT NULL DEFAULT 0 index(credential_id)"`
 	CredentialName    string             `xorm:"VARCHAR(255)"`
-	CredentialOwnerID int64              `xorm:"NOT NULL DEFAULT 0"`
-	IP                string             `xorm:"VARCHAR(64)"`
+	CredentialOwnerID int64              `xorm:"NOT NULL DEFAULT 0 index(credential_owner_id)"`
+	IP                string             `xorm:"VARCHAR(64) index(ip_id)"`
 	UserAgent         string             `xorm:"VARCHAR(256)"`
-	RequestID         string             `xorm:"VARCHAR(32)"`
+	RequestID         string             `xorm:"VARCHAR(32) INDEX"`
 	OwnerID           int64              `xorm:"NOT NULL DEFAULT 0 index(owner_id)"`
-	GroupID           int64              `xorm:"NOT NULL DEFAULT 0"`
+	GroupID           int64              `xorm:"NOT NULL DEFAULT 0 index(group_id)"`
 	RepoID            int64              `xorm:"NOT NULL DEFAULT 0 index(repo_id)"`
 	SubjectUserID     int64              `xorm:"NOT NULL DEFAULT 0 index(subject_user_id)"`
 	TargetType        string             `xorm:"VARCHAR(32) index(target)"`
@@ -45,7 +45,7 @@ type Entry struct {
 	PrevHash          *string            `xorm:"CHAR(64) NULL"`
 	Hash              *string            `xorm:"CHAR(64) NULL"`
 	// ID is last so that it is the last column of the (x, id) indexes above.
-	ID int64 `xorm:"pk autoincr index(action_id) index(category_id) index(actor_id) index(sudo_by_id) index(credential_id) index(owner_id) index(repo_id) index(subject_user_id)"`
+	ID int64 `xorm:"pk autoincr index(action_id) index(category_id) index(actor_id) index(sudo_by_id) index(credential_id) index(credential_owner_id) index(ip_id) index(owner_id) index(group_id) index(repo_id) index(subject_user_id)"`
 }
 
 func (Entry) TableName() string { return "audit_event" }
@@ -94,6 +94,7 @@ type Event struct {
 // Fields lists the data keys kept per target type. Secrets (token values, hashes, salts, last eight) are never listed.
 var Fields = map[string][]string{
 	"access_token": {"name", "scopes", "expires", "resource_all_repos", "repo_ids"},
+	"audit_export": {"format", "filter", "capped", "through_id"},
 	"instance":     {"version", "config_sha256"},
 }
 

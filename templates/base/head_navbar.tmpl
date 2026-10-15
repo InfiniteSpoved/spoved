@@ -199,7 +199,7 @@
 							</a>
 						</li>
 						{{$showDemo := not .RunModeIsProd}}
-						{{if or .IsAdmin $showDemo}}
+						{{if or .IsAdmin .SignedUser.IsAuditor $showDemo}}
 							<hr>
 						{{end}}
 						{{if .IsAdmin}}
@@ -207,6 +207,13 @@
 								<a {{if .PageIsAdmin}}class="active"{{end}} href="{{AppSubUrl}}/admin">
 									{{svg "octicon-server"}}
 									{{ctx.Locale.Tr "admin_panel"}}
+								</a>
+							</li>
+						{{else if .SignedUser.IsAuditor}}
+							<li>
+								<a href="{{AppSubUrl}}/admin/audit">
+									{{svg "octicon-log"}}
+									{{ctx.Locale.Tr "admin.audit.title"}}
 								</a>
 							</li>
 						{{end}}

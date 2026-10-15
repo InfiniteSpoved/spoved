@@ -43,7 +43,7 @@ func projectRepoSearchOptions(ctx *context.APIContext) *repo_model.SearchRepoOpt
 // membership.
 func visibleProjectCond(ctx *context.APIContext) builder.Cond {
 	cond := repo_model.VisibleRepoGroupCond(ctx.Doer()).And(builder.Eq{"`repo_group`.owner_id": ctx.Org().Organization.ID})
-	if !isOrgWideToken(ctx) {
+	if !utils.IsOrgWideToken(ctx) {
 		cond = cond.And(builder.In("`repo_group`.id", builder.Select("group_id").From("repository").
 			Where(repo_model.SearchRepositoryCondition(projectRepoSearchOptions(ctx)))))
 	}

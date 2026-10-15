@@ -49,3 +49,75 @@
   gap: 1rem;
   margin-bottom: 1rem;
 }
+
+.admin.audit-log .audit-tabs {
+  flex-wrap: wrap;
+}
+
+.admin.audit-log .audit-filters > summary {
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+}
+
+.admin.audit-log .audit-entries td {
+  overflow-wrap: break-word;
+  vertical-align: top;
+}
+
+.admin.audit-log .audit-entries td.audit-time,
+.admin.audit-log .audit-entries td.audit-ip {
+  white-space: nowrap;
+}
+
+.admin.audit-log .audit-details dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0 0.5rem;
+  margin: 0.25rem 0;
+}
+
+.admin.audit-log .audit-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin.audit-log .audit-pager {
+  display: flex;
+}
+
+.admin.audit-log .audit-pager .older {
+  margin-inline-start: auto;
+}
+
+/* on phones each entry is a card: time and actor, then the event, then credential, result and IP */
+@media (max-width: 767.98px) {
+  .admin.audit-log .audit-entries > thead {
+    display: none;
+  }
+  .admin.audit-log .audit-entries,
+  .admin.audit-log .audit-entries > tbody {
+    display: block;
+  }
+  .admin.audit-log .audit-entries > tbody > tr {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.5rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--color-secondary);
+  }
+  .admin.audit-log .audit-entries > tbody > tr > td {
+    display: block;
+    padding: 0 !important;
+    border: 0 !important;
+    min-width: 0;
+  }
+  .admin.audit-log .audit-entries > tbody > tr > td.audit-event {
+    order: 1;
+    flex-basis: 100%;
+  }
+  .admin.audit-log .audit-entries > tbody > tr > td.audit-credential,
+  .admin.audit-log .audit-entries > tbody > tr > td.audit-result,
+  .admin.audit-log .audit-entries > tbody > tr > td.audit-ip {
+    order: 2;
+  }
+}

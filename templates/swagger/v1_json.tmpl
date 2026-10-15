@@ -845,6 +845,153 @@
         }
       }
     },
+    "/admin/audit": {
+      "get": {
+        "description": "Paged by ID (before_id, after_id) with a Link header and no total count. With format=csv or format=json every matching entry is exported, oldest first, with the X-Audit-* manifest headers.",
+        "produces": [
+          "application/json",
+          "text/csv"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "List the audit log, newest first, or export it",
+        "operationId": "adminListAuditEvents",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "changes (default), signins, activity, all, or a comma-separated list of categories",
+            "name": "category",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "organization name or ID",
+            "name": "org",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "project ID",
+            "name": "project",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "repository full name (owner/[project/]name) or ID",
+            "name": "repo",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "user name or ID (the acting user, the admin behind a sudo, or the account the entry concerns)",
+            "name": "user",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "comma-separated credential types",
+            "name": "credential_type",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "one credential, as type and ID separated by a colon",
+            "name": "credential",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "user or organization name or ID owning the credential",
+            "name": "credential_owner",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "catalog key, or a prefix ending in .*",
+            "name": "action",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "success, failure or refused",
+            "name": "result",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "client IP address",
+            "name": "ip",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "request ID",
+            "name": "request_id",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "RFC 3339 time, inclusive",
+            "name": "since",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "RFC 3339 time, exclusive",
+            "name": "before",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "target type",
+            "name": "target_type",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "target ID",
+            "name": "target_id",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "return entries older than this ID",
+            "name": "before_id",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "return entries newer than this ID",
+            "name": "after_id",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size, at most 100 (default 50)",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "csv or json to export every matching entry (at most 100000) instead of a page",
+            "name": "format",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/AuditEventList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/admin/cron": {
       "get": {
         "produces": [
@@ -29768,6 +29915,136 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "AuditEvent": {
+      "description": "AuditEvent is one entry of the audit log",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "x-go-name": "Action"
+        },
+        "actor_id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ActorID"
+        },
+        "actor_name": {
+          "type": "string",
+          "x-go-name": "ActorName"
+        },
+        "actor_type": {
+          "type": "string",
+          "x-go-name": "ActorType"
+        },
+        "category": {
+          "type": "string",
+          "x-go-name": "Category"
+        },
+        "credential_id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "CredentialID"
+        },
+        "credential_name": {
+          "type": "string",
+          "x-go-name": "CredentialName"
+        },
+        "credential_owner_id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "CredentialOwnerID"
+        },
+        "credential_type": {
+          "type": "string",
+          "x-go-name": "CredentialType"
+        },
+        "data": {
+          "description": "the whitelisted details of the entry, e.g. before and after",
+          "type": "object",
+          "additionalProperties": {},
+          "x-go-name": "Data"
+        },
+        "group_id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "GroupID"
+        },
+        "hash": {
+          "type": "string",
+          "x-go-name": "Hash"
+        },
+        "id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "ip": {
+          "type": "string",
+          "x-go-name": "IP"
+        },
+        "owner_id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "OwnerID"
+        },
+        "prev_hash": {
+          "type": "string",
+          "x-go-name": "PrevHash"
+        },
+        "repo_id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "RepoID"
+        },
+        "request_id": {
+          "type": "string",
+          "x-go-name": "RequestID"
+        },
+        "result": {
+          "type": "string",
+          "x-go-name": "Result"
+        },
+        "seq": {
+          "description": "position in the hash chain, null until the entry is sealed",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Seq"
+        },
+        "subject_user_id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "SubjectUserID"
+        },
+        "sudo_by_id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "SudoByID"
+        },
+        "target_id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "TargetID"
+        },
+        "target_name": {
+          "type": "string",
+          "x-go-name": "TargetName"
+        },
+        "target_type": {
+          "type": "string",
+          "x-go-name": "TargetType"
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Time"
+        },
+        "user_agent": {
+          "type": "string",
+          "x-go-name": "UserAgent"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "BlockedUser": {
       "description": "BlockedUser represents a blocked user",
       "type": "object",
@@ -40272,6 +40549,15 @@
         "type": "array",
         "items": {
           "$ref": "#/definitions/Attachment"
+        }
+      }
+    },
+    "AuditEventList": {
+      "description": "AuditEventList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/AuditEvent"
         }
       }
     },

@@ -1573,6 +1573,8 @@ func Routes() *web.Route {
 			})
 		}, reqToken(), tokenRequiresScopes(auth_model.AccessTokenScopeCategoryUser))
 
+		// outside reqSiteAdmin for the auditor; ReqAuditReader decides
+		m.Get("/admin/audit", tokenRequiresScopes(auth_model.AccessTokenScopeCategoryAdmin), reqToken(), admin.ReqAuditReader, admin.ListAuditEvents)
 		m.Group("/admin", func() {
 			m.Group("/cron", func() {
 				m.Get("", admin.ListCronTasks)

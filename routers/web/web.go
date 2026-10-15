@@ -902,6 +902,8 @@ func registerRoutes(m *web.Route) {
 	adminReq := verifyAuthWithOptions(&common.VerifyOptions{SignInRequired: func() bool { return true }, AdminRequired: true})
 
 	// ***** START: Admin *****
+	// the audit log is outside adminReq for the auditor; only GET routes may be (TestAdminAuditRoutes)
+	m.Get("/admin/audit", reqSignIn, admin.AuditReq, admin.Audit)
 	m.Group("/admin", func() {
 		m.Get("", admin.Dashboard)
 		m.Get("/system_status", admin.SystemStatus)
