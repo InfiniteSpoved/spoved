@@ -47,17 +47,11 @@ func fixtureCreateToken(t *testing.T, user *user_model.User, scope auth_model.Ac
 		Scope:            scope,
 		ResourceAllRepos: resourceAllRepos,
 	}
-	require.NoError(t, auth_model.NewAccessToken(t.Context(), accessToken, nil))
-	if len(repoIDs) > 0 {
-		var resourceRepos []*auth_model.AccessTokenResourceRepo
-		for _, repoID := range repoIDs {
-			resourceRepos = append(resourceRepos, &auth_model.AccessTokenResourceRepo{
-				TokenID: accessToken.ID,
-				RepoID:  repoID,
-			})
-		}
-		require.NoError(t, auth_model.InsertAccessTokenResourceRepos(t.Context(), accessToken.ID, resourceRepos))
+	var resourceRepos []*auth_model.AccessTokenResourceRepo
+	for _, repoID := range repoIDs {
+		resourceRepos = append(resourceRepos, &auth_model.AccessTokenResourceRepo{RepoID: repoID})
 	}
+	require.NoError(t, auth_model.NewAccessToken(t.Context(), accessToken, resourceRepos))
 	return accessToken, nil
 }
 

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	auth_model "forgejo.org/models/auth"
-	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 
@@ -48,14 +47,12 @@ func CreateAccessToken(t testing.TB, user *user_model.User, opts *CreateAccessTo
 		Scope:            scope,
 		ResourceAllRepos: resoureceAllRepos,
 	}
-	require.NoError(t, auth_model.NewAccessToken(t.Context(), accessToken, nil))
-
+	var resourceRepos []*auth_model.AccessTokenResourceRepo
 	for _, repoID := range opts.RepositoryIDs {
-		accessTokenResourceRepo := &auth_model.AccessTokenResourceRepo{
-			TokenID: accessToken.ID,
-			RepoID:  repoID,
-		}
-		require.NoError(t, db.Insert(t.Context(), accessTokenResourceRepo))
+		resourceRepos = append(resourceRepos, &auth_model.AccessTokenResourceRepo{RepoID: repoID})
+	}
+	require.NoError(t, auth_model.NewAccessToken(t.Context(), accessToken, resourceRepos))
+	for _, accessTokenResourceRepo := range resourceRepos {
 		t.Cleanup(func() {
 			unittest.AssertSuccessfulDelete(t, &auth_model.AccessTokenResourceRepo{ID: accessTokenResourceRepo.ID})
 		})

@@ -4,10 +4,12 @@
 package admin
 
 import (
+	stdCtx "context"
 	"encoding/csv"
 	"net/http"
 	"strconv"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
@@ -271,7 +273,7 @@ func StorageRecalculate(ctx *context.Context) {
 		}
 		config.OwnerID = owner.ID
 	}
-	go task.RunWithUser(ctx, ctx.Doer, config) // a run already in progress makes this a no-op
+	go task.RunWithUser(audit_model.WithActor(stdCtx.Background(), audit_model.ActorFromContext(ctx)), ctx.Doer, config) // a run already in progress makes this a no-op
 	ctx.Flash.Success(ctx.Tr("admin.storage.recalculate.started"))
 	ctx.Redirect(setting.AppSubURL + "/admin/storage")
 }

@@ -118,3 +118,23 @@ func TestRecordAmbiguousIP(t *testing.T) {
 	assert.Equal(t, "10.0.0.1", e.IP)
 	assert.JSONEq(t, `{"ip_ambiguous":true,"ip_candidates":["1.2.3.4"],"task":"cron"}`, e.Data)
 }
+
+func TestRecordTruncatesNamesBeforeIDs(t *testing.T) {
+	audit_model.Fields["test_lists"] = []string{"names", "ids"}
+	defer delete(audit_model.Fields, "test_lists")
+
+	names := make([]string, 300) // ~30 KB
+	for i := range names {
+		names[i] = strings.Repeat("n", 100)
+	}
+	ids := make([]int64, 1000) // ~7 KB
+	for i := range ids {
+		ids[i] = 1000000 + int64(i)
+	}
+	e := recordOne(t, audit_model.Event{Action: "x", TargetType: "test_lists", Data: map[string]any{"names": names, "ids": ids}})
+	assert.LessOrEqual(t, len(e.Data), 32*1024)
+	data := decode(t, e)
+	assert.Equal(t, true, data["truncated"])
+	assert.Len(t, data["ids"], 1000, "IDs are kept")
+	assert.Less(t, len(data["names"].([]any)), 300, "names are cut first")
+}

@@ -207,10 +207,13 @@ func TestAuditFailClosed(t *testing.T) {
 	since := auditMaxID(t)
 
 	t.Run("create", func(t *testing.T) {
+		repoRows := unittest.GetCount(t, &auth_model.AccessTokenResourceRepo{})
 		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/users/user2/tokens", &api.CreateAccessTokenOption{
-			Name: "audit-refused", Scopes: []string{"read:user"},
+			Name: "audit-refused", Scopes: []string{"read:repository"},
+			Repositories: []*api.RepoTargetOption{{Owner: "user2", Name: "repo1"}},
 		}).AddBasicAuth("user2"), http.StatusInternalServerError)
 		unittest.AssertNotExistsBean(t, &auth_model.AccessToken{UID: 2, Name: "audit-refused"})
+		assert.Equal(t, repoRows, unittest.GetCount(t, &auth_model.AccessTokenResourceRepo{}), "no repository rows are left")
 	})
 
 	t.Run("regenerate", func(t *testing.T) {
@@ -307,6 +310,13 @@ func TestAuditInstanceStarted(t *testing.T) {
 		return data["config_sha256"].(string)
 	}
 	assert.NotEqual(t, started(t, "[server]\n"), started(t, "[server]\nDOMAIN = example.org\n"))
+
+	t.Run("insert failure stops the start", func(t *testing.T) {
+		defer test.MockVariableValue(&audit_model.InsertEntry, func(context.Context, *audit_model.Entry) error {
+			return errors.New("audit store down")
+		})()
+		require.ErrorContains(t, routers.RecordInstanceStarted(t.Context()), "audit store down")
+	})
 }
 
 func TestAuditRowsOutliveDeletes(t *testing.T) {
