@@ -64,6 +64,13 @@ check DCO_START=1970-01-01; expect "sign-off after a NUL byte is found" 0
 git reset -q --soft "$(nul_commit 'nul without sign-off\n\n\0\n\nmore text\n')"
 check DCO_START=1970-01-01; expect "NUL byte without sign-off fails" 1
 
+# the go-public date: an unsigned commit made before it is ignored, one made from that day is checked
+git checkout -q -b dates develop
+GIT_COMMITTER_DATE=2026-10-18T23:59:59Z commit "unsigned before the date"
+check TZ=UTC DCO_START=2026-10-19; expect "unsigned commit before the date is ignored" 0
+GIT_COMMITTER_DATE=2026-10-19T00:00:00Z commit "unsigned on the date"
+check TZ=UTC DCO_START=2026-10-19; expect "unsigned commit from the date is checked" 1
+
 check DCO_START=not-a-date; expect "bad DCO_START is refused" 2
 grep -q "DCO_START must be a date" <<< "$out" || { echo "FAIL: no clear message"; echo "$out"; exit 1; }
 echo "all ok"

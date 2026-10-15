@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The CI jobs, run by .github/workflows/ci.yml on the Proxmox runners and by the
+# The CI jobs, run by .github/workflows/ci.yml and by the
 # public InfiniteSpoved/spovedBuild workflow, which keeps their output out of its
 # public logs (it only uploads it encrypted). Keep anything that describes this
 # repository in here, not in that workflow.

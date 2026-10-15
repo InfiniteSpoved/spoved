@@ -33,10 +33,12 @@ Before calling any other failure environmental, rerun it on `origin/develop`.
 
 ## CI
 
-CI runs outside this repository and sets the commit status "CI success" on the tested commit; a green "CI success" on the PR head is a merge gate. Every push to a PR starts a full run by itself, and a new push cancels the unfinished one. `.github/ci/job.sh` holds the jobs (lint, frontend, unit, migrations, integration, e2e); the unit, integration and e2e tests run in shards.
+CI runs outside this repository and sets the commit status "CI success" on the tested commit; a green "CI success" on the PR head is a merge gate. Every push to a PR starts a full run by itself, and a new push cancels the unfinished one. All workflows run on GitHub-hosted runners (`ubuntu-latest`), never self-hosted ones, and only on `pull_request`/`push` (never `pull_request_target`); a PR-controlled value reaches a `run:` script only through `env:`. `.github/ci/job.sh` holds the jobs (lint, frontend, unit, migrations, integration, e2e); the unit, integration and e2e tests run in shards.
 
 - A failed job's log is printed in the PR's own CI check (the build repository keeps its logs encrypted). Read it soon after the failure.
 - Never put branch names, logs, test names or code in the build repository's issues, comments or run names, and don't edit `.github/ci/*` in a feature PR.
+- A PR from a fork gets no secret, so its `spovedBuild` job ends at once with a notice and sets no "CI success": a maintainer reads the change and pushes the branch to this repository, which tests the same commit. `ci.yml` (manual, `ref` input) runs the same jobs here with readable logs, but doesn't set the status.
+- `dco.yml` passes `DCO_START=2026-10-19`: commits made before that date need no sign-off.
 - Every run, PRs included, runs all E2E specs (`RUN_ALL_E2E=true` in `job.sh`); `@watch` only picks specs for local runs.
 
 ## Conventions

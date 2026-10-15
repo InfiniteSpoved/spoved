@@ -45,7 +45,9 @@ Conventions:
 
 ## Continuous integration
 
-Every pull request runs the lints, frontend checks, unit, migration, integration and end-to-end tests. The commit status **CI success** on the head of your pull request must be green before it can be merged. A maintainer runs CI for you; you don't need to do anything. The result shows as the "CI success" status on your pull request.
+Every pull request runs the lints, frontend checks, unit, migration, integration and end-to-end tests. The commit status **CI success** on the head of your pull request must be green before it can be merged. The result shows as the "CI success" status on your pull request.
+
+A pull request from a branch in this repository starts CI by itself. A pull request from a fork gets no access to the secret that starts the full CI, so its `spovedBuild` check ends at once with a notice and "CI success" is not set. A maintainer reads your change and pushes your branch to this repository (a branch name of their choice, with your commits unchanged); CI then tests the same commit and the status shows on your pull request. You don't need to do anything, and the lints and tests you can run yourself are listed in the repository's `CLAUDE.md`. The `dco` check runs for forks too.
 
 ## License
 

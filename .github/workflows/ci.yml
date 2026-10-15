@@ -1,10 +1,11 @@
 name: CI
 
-# The CI of this repository on the self-hosted Proxmox runners (runs-on: proxmox,
-# ephemeral Ubuntu 24.04 containers, at most 4 at a time; the other jobs queue).
-# It runs the same jobs as the InfiniteSpoved/spovedBuild workflow; what each
-# job does lives in .github/ci/job.sh. This repository is private, so unlike
-# spovedBuild the logs are shown as they are.
+# Runs the same jobs as the InfiniteSpoved/spovedBuild workflow, on GitHub-hosted
+# runners in this repository; what each job does lives in .github/ci/job.sh.
+# Unlike spovedBuild, the logs are shown as they are. It uses no secret and the
+# token is read-only, so a maintainer can run it on the branch of a fork pull
+# request after reading the change. It does not set the "CI success" status that
+# gates a merge; only spovedBuild does, see CONTRIBUTING.md.
 #
 # It only runs by hand (pull requests run in spovedBuild, see spovedbuild.yml).
 # Manual runs take a branch, tag or commit and run the checks and unit tests,
@@ -41,7 +42,7 @@ permissions:
 jobs:
   plan:
     name: Plan
-    runs-on: proxmox
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       tasks: ${{ steps.plan.outputs.tasks }}
@@ -57,14 +58,14 @@ jobs:
           FULL: ${{ inputs.full }}
           RUN_ALL_E2E: ${{ inputs.run-all-e2e }}
           ONLY: ${{ inputs.only }}
-          # fewer, longer jobs than on GitHub's hosted runners: the host runs only about 10 runners at once
+          # fewer, longer jobs than spovedBuild's 8 shards, for readable logs
           INTEGRATION_SHARDS: ${{ inputs.integration-shards || 4 }}
           E2E_SHARDS: 3
 
   run:
     name: ${{ matrix.task }} ${{ matrix.args }}
     needs: [plan]
-    runs-on: proxmox
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
       # npm reads from the registry time out now and then on the runners' network
@@ -122,12 +123,13 @@ jobs:
           ARGS: ${{ matrix.args }}
           RUN_ALL_E2E: ${{ inputs.run-all-e2e }}
 
-  # The single check to require in the branch protection rules
+  # Named differently from the "CI success" status of spovedBuild on purpose: a check with that
+  # name could satisfy the required status of the merge rules.
   ci-success:
-    name: CI success
+    name: Manual CI result
     if: always()
     needs: [plan, run]
-    runs-on: proxmox
+    runs-on: ubuntu-latest
     steps:
       - name: Report the result
         run: '[ "$FAILED" = false ]'
