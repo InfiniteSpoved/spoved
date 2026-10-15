@@ -47,6 +47,7 @@ CI runs outside this repository and sets the commit status "CI success" on the t
 - Merge conflicts in the locale file: keep both sides. Swagger conflicts: regenerate.
 - CSRF: web POSTs are protected by `http.NewCrossOriginProtection` in `routers/web/web.go`; forms don't need a token.
 - No installs to upgrade: spoved has no existing deployments; deployments start fresh and import from external services, so don't write data backfills, compat shims or redirects for old spoved shapes (schema migrations still run on fresh installs).
+- Report vulnerabilities, embargoed upstream issues, secrets, credentials, hosts/IPs and infrastructure details only as issues in InfiniteSpoved/spovedOps (private), never in spoved issues, PRs, comments, commits or branch names; a spoved issue or PR for such a fix gets a neutral title and text and may link the spovedOps issue by number only. Outside reporters use GitHub private vulnerability reporting (`SECURITY.md`).
 - Team memberships record why they exist (`team_user.reason`, e.g. `MembershipReasonAddedByUserGroup`); user-group memberships record the login source that synced them (`user_group_user.login_source_id`, 0 = added by an admin). Only remove what your code path added.
 
 ## Learnings

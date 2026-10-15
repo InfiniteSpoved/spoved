@@ -149,8 +149,8 @@ Long sessions and leads cost the most, and Opus costs more than Sonnet. So:
    trigger id and change it with `update_trigger`; never create a second one.
 
 The supervisor also:
-- files the user's problem reports and ideas as issues (it doesn't fix them) and
-  passes them to the OL;
+- files the user's problem reports and ideas as issues (it doesn't fix them; the
+  sensitive ones only in spovedOps, see the rules) and passes them to the OL;
 - does post-merge steps the classifier blocks for others (archive, messages);
 - after each merge: checks develop's "CI success" on the merge commit (poll
   `repos/<repo>/commits/<sha>/status` for the context "CI success"; a failed run
@@ -201,8 +201,11 @@ re-arm for 4 h; skip it when nothing is in flight.
   rewrite package-lock.json with the container's old npm.
 - Commit with `git commit -s`. Merge develop in with a merge commit. Never rebase or force-push a pushed branch.
 - Never push to main. PRs target develop. Don't change repo settings.
-- Report vulnerabilities privately as SECURITY.md describes; never describe an
-  unfixed one in a public issue, PR, comment or commit message.
+- Report vulnerabilities, embargoed upstream issues, secrets, credentials,
+  hosts/IPs, infrastructure details and anything else not meant to be public
+  only as issues in InfiniteSpoved/spovedOps (private). Never put them in spoved
+  issues, PRs, comments, commits or branch names. A spoved issue or PR for such a
+  fix gets a neutral title and text, and may link the spovedOps issue by number only.
 - Read narrowly: GitHub calls with `fields`/minimal_output; grep the files you
   need; delegate big reads to subagents; keep messages short.
 - Act on messages, don't poll. At most one safety-net check-in (send_later)
@@ -306,7 +309,8 @@ Phase 2, after the OL approves with a test plan:
 High effort. Read CLAUDE.md first.
 
 You are the SECURITY REVIEWER for #<N> in InfiniteSpoved/spoved. Your lead is the OL <OL>.
-Report only to it. Don't edit, commit, push or comment on GitHub.
+Report only to it. Don't edit, commit, push or comment on GitHub. Describe findings
+only in messages to the OL, which files them in InfiniteSpoved/spovedOps.
 
 Report real, exploitable issues only: an attacker, preconditions, steps, impact
 and the smallest fix. No hardening wishlists. If you find nothing exploitable,
