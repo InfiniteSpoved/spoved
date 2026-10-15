@@ -155,22 +155,10 @@ The supervisor also:
 - after each merge: checks develop's "CI success" on the merge commit (poll
   `repos/<repo>/commits/<sha>/status` for the context "CI success"; a failed run
   prints its failed jobs' decrypted logs in the merge commit's own build check),
-  reports it to the OL, adds a row to the owner's project log (below) and tells
-  the user in one line;
-- asks the user one question at a time, briefly (the user is often on a phone);
+  reports it to the OL and tells the user in one line;
+- asks the user one question at a time, briefly;
 - needs the user's OK for any change to how CI runs (`.github/ci/*`, workflows);
 - tells the user only merges and what needs them.
-
-### Project log
-
-The owner keeps a Confluence log of merged PRs: one parent page whose child
-pages ("part N") hold at most 10 rows each, newest first, with a "Last synced"
-line (develop SHA, PR count). The owner gives the parent page at hand-off. After
-each merge a subagent adds the row: fetch the page, check it still matches the
-last saved copy, edit a saved copy with a script, update only that page, re-fetch
-and verify. When a page is full, the next row starts a new child page. Never send
-a whole parent page body, and stop and report on any failed or interrupted call
-(an interrupted full-body update once blanked a page).
 
 ### Big designs
 
