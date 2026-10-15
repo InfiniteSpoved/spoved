@@ -4,6 +4,7 @@
 package permissions
 
 import (
+	audit_model "forgejo.org/models/audit"
 	"testing"
 
 	actions_model "forgejo.org/models/actions"
@@ -26,6 +27,10 @@ func TestMain(m *testing.M) {
 type taskAuthentication struct {
 	*auth.BaseAuthenticationResult
 	taskID int64
+}
+
+func (r *taskAuthentication) Credential() audit_model.Credential {
+	return audit_model.Credential{Type: audit_model.CredentialActionsTask, ID: r.taskID}
 }
 
 func (r *taskAuthentication) User() *user_model.User {

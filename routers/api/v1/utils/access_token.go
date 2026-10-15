@@ -5,7 +5,6 @@ package utils
 
 import (
 	"cmp"
-	stdCtx "context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -227,13 +226,7 @@ func CreateAccessToken(ctx *context.APIContext) {
 		return
 	}
 
-	err = db.WithTx(ctx, func(ctx stdCtx.Context) error {
-		if err := auth_model.NewAccessToken(ctx, t); err != nil {
-			return err
-		}
-		return auth_model.InsertAccessTokenResourceRepos(ctx, t.ID, resourceRepos)
-	})
-	if err != nil {
+	if err := auth_model.NewAccessToken(ctx, t, resourceRepos); err != nil {
 		ctx.Error(http.StatusInternalServerError, "NewAccessToken", err)
 		return
 	}

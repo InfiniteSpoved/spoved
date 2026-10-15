@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
@@ -68,4 +69,9 @@ func (a *Auth) Verify(req *http.Request, w http.ResponseWriter, sess auth.Sessio
 	}
 
 	return &auth.AuthenticationSuccess{Result: &containerAuthenticationResult{user: u, scope: authScope}}
+}
+
+// Credential is unknown until the package token carries the credential it was issued for (#17 PR 3).
+func (r *containerAuthenticationResult) Credential() audit_model.Credential {
+	return audit_model.Credential{Type: audit_model.CredentialUnknown, OwnerID: r.user.ID}
 }

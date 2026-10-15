@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
@@ -22,7 +23,8 @@ var (
 
 type nugetAuthenticationResult struct {
 	*auth.BaseAuthenticationResult
-	user *user_model.User
+	user  *user_model.User
+	token *auth_model.AccessToken
 }
 
 func (r *nugetAuthenticationResult) User() *user_model.User {
@@ -60,5 +62,9 @@ func (a *Auth) Verify(req *http.Request, w http.ResponseWriter, sess auth.Sessio
 		log.Error("UpdateLastUsed:  %v", err)
 	}
 
-	return &auth.AuthenticationSuccess{Result: &nugetAuthenticationResult{user: u}}
+	return &auth.AuthenticationSuccess{Result: &nugetAuthenticationResult{user: u, token: token}}
+}
+
+func (r *nugetAuthenticationResult) Credential() audit_model.Credential {
+	return audit_model.Credential{Type: audit_model.CredentialAccessToken, ID: r.token.ID, Name: r.token.Name, OwnerID: r.user.ID}
 }

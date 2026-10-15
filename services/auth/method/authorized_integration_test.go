@@ -4,6 +4,7 @@
 package method
 
 import (
+	audit_model "forgejo.org/models/audit"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -325,6 +326,7 @@ func TestAuthorizedIntegration(t *testing.T) {
 		success := requireOutput[*auth.AuthenticationSuccess](t, output)
 		res := success.Result
 		assert.EqualValues(t, 2, res.User().ID)
+		assert.Equal(t, audit_model.Credential{Type: audit_model.CredentialAuthorizedIntegration, ID: ait.dbAI.ID, Name: ait.dbAI.Name, OwnerID: 2}, res.Credential())
 		hasScope, scope := res.Scope().Get()
 		assert.True(t, hasScope)
 		assert.Equal(t, auth_model.AccessTokenScopeAll, scope)

@@ -48,7 +48,7 @@ func CreateAccessToken(t testing.TB, user *user_model.User, opts *CreateAccessTo
 		Scope:            scope,
 		ResourceAllRepos: resoureceAllRepos,
 	}
-	require.NoError(t, auth_model.NewAccessToken(t.Context(), accessToken))
+	require.NoError(t, auth_model.NewAccessToken(t.Context(), accessToken, nil))
 
 	for _, repoID := range opts.RepositoryIDs {
 		accessTokenResourceRepo := &auth_model.AccessTokenResourceRepo{

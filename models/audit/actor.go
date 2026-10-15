@@ -1,0 +1,91 @@
+// Copyright 2026 The spoved contributors. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package audit
+
+import "context"
+
+const (
+	ActorUser      = "user"
+	ActorAnonymous = "anonymous"
+	ActorActions   = "actions"
+	ActorSystem    = "system"
+	ActorCLI       = "cli"
+	ActorUnknown   = "unknown"
+)
+
+// Credential types.
+const (
+	CredentialSession               = "session"
+	CredentialPassword              = "password"
+	CredentialAccessToken           = "access_token"
+	CredentialOAuth2Grant           = "oauth2_grant"
+	CredentialAuthorizedIntegration = "authorized_integration"
+	CredentialSSHKey                = "ssh_key"
+	CredentialActionsTask           = "actions_task"
+	CredentialReverseProxy          = "reverse_proxy"
+	CredentialChefKey               = "chef_key"
+	CredentialSystem                = "system"
+	CredentialCLI                   = "cli"
+	CredentialUnknown               = "unknown"
+)
+
+// Credential is the credential a request authenticated with. It comes only from server-side authentication.
+type Credential struct {
+	Type    string
+	ID      int64
+	Name    string
+	OwnerID int64
+	AppID   int64 // oauth2_grant: its application, named by Record when it writes
+}
+
+var credentialNamers = map[string]func(context.Context, Credential) (string, error){}
+
+// RegisterCredentialNamer sets how Record names a credential of this type that has no name yet, so that the name is
+// loaded only when an entry is written.
+func RegisterCredentialNamer(typ string, namer func(context.Context, Credential) (string, error)) {
+	credentialNamers[typ] = namer
+}
+
+// Actor is who does what is recorded. One Actor is stored per request; API sudo changes it in place.
+type Actor struct {
+	Type         string
+	ID           int64
+	Name         string
+	SudoByID     int64
+	Credential   Credential
+	IP           string
+	IPAmbiguous  bool
+	IPCandidates []string
+	UserAgent    string
+	RequestID    string
+}
+
+// SetSudo makes the user acted as the actor and keeps the admin in SudoByID.
+func (a *Actor) SetSudo(id int64, name string) {
+	a.SudoByID, a.ID, a.Name = a.ID, id, name
+}
+
+type actorKey struct{}
+
+// ActorContextKey is the context key of the *Actor.
+var ActorContextKey = actorKey{}
+
+func WithActor(ctx context.Context, a *Actor) context.Context {
+	return context.WithValue(ctx, ActorContextKey, a)
+}
+
+func ActorFromContext(ctx context.Context) *Actor {
+	a, _ := ctx.Value(ActorContextKey).(*Actor)
+	return a
+}
+
+// WithSystem marks work the server does by itself, e.g. "cron:<task>", "mirror:<repo id>", "install".
+func WithSystem(ctx context.Context, name string) context.Context {
+	return WithActor(ctx, &Actor{Type: ActorSystem, Name: name, Credential: Credential{Type: CredentialSystem}})
+}
+
+// WithCLI marks a command line change. The OS user name is not recorded: it would be client input.
+func WithCLI(ctx context.Context) context.Context {
+	return WithActor(ctx, &Actor{Type: ActorCLI, Credential: Credential{Type: CredentialCLI}})
+}

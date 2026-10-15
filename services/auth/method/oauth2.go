@@ -124,6 +124,8 @@ func (o *OAuth2) Verify(req *http.Request, w http.ResponseWriter, _ auth.Session
 			user:        user,
 			scope:       accessTokenScope,
 			grantScopes: grantScopes,
+			grantID:     grant.ID,
+			appID:       grant.ApplicationID,
 		},
 	}
 }

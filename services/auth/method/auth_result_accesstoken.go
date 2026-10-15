@@ -4,6 +4,7 @@
 package method
 
 import (
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
@@ -17,6 +18,7 @@ var _ auth.AuthenticationResult = &accessTokenAuthenticationResult{}
 type accessTokenAuthenticationResult struct {
 	*auth.BaseAuthenticationResult
 	id      int64
+	name    string
 	user    *user_model.User
 	scope   auth_model.AccessTokenScope
 	reducer authz.AuthorizationReducer
@@ -44,4 +46,8 @@ func (r *accessTokenAuthenticationResult) ExpiresAt() optional.Option[timeutil.T
 		return optional.None[timeutil.TimeStamp]()
 	}
 	return optional.Some(r.expires)
+}
+
+func (r *accessTokenAuthenticationResult) Credential() audit_model.Credential {
+	return audit_model.Credential{Type: audit_model.CredentialAccessToken, ID: r.id, Name: r.name, OwnerID: r.user.ID}
 }

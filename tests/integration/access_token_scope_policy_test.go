@@ -141,7 +141,7 @@ func TestAccessTokenScopePolicyWeb(t *testing.T) {
 	t.Run("regenerate is not checked", func(t *testing.T) {
 		// A token that breaks the policy, created before it was set.
 		old := &auth_model.AccessToken{UID: 2, Name: "pre-policy", Scope: auth_model.AccessTokenScopeReadIssue, ResourceAllRepos: true}
-		require.NoError(t, auth_model.NewAccessToken(t.Context(), old))
+		require.NoError(t, auth_model.NewAccessToken(t.Context(), old, nil))
 
 		session := loginUser(t, "user2")
 		req := NewRequestWithValues(t, "POST", "/user/settings/keys/tokens/regenerate", map[string]string{"id": fmt.Sprint(old.ID)})

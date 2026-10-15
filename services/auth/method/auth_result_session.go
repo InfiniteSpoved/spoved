@@ -4,6 +4,7 @@
 package method
 
 import (
+	audit_model "forgejo.org/models/audit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/services/auth"
 )
@@ -23,4 +24,8 @@ func (r *sessionAuthenticationResult) User() *user_model.User {
 func IsSession(r auth.AuthenticationResult) bool {
 	_, ok := r.(*sessionAuthenticationResult)
 	return ok
+}
+
+func (r *sessionAuthenticationResult) Credential() audit_model.Credential {
+	return audit_model.Credential{Type: audit_model.CredentialSession, OwnerID: r.user.ID}
 }

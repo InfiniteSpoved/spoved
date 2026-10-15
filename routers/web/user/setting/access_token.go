@@ -6,7 +6,6 @@
 package setting
 
 import (
-	stdCtx "context"
 	"errors"
 	"fmt"
 	"html/template"
@@ -329,13 +328,7 @@ func AccessTokenCreatePost(ctx *context.Context) {
 		return
 	}
 
-	err = db.WithTx(ctx, func(ctx stdCtx.Context) error {
-		if err := auth_model.NewAccessToken(ctx, t); err != nil {
-			return err
-		}
-		return auth_model.InsertAccessTokenResourceRepos(ctx, t.ID, resourceRepos)
-	})
-	if err != nil {
+	if err := auth_model.NewAccessToken(ctx, t, resourceRepos); err != nil {
 		ctx.ServerError("NewAccessToken", err)
 		return
 	}
