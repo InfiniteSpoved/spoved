@@ -82,6 +82,7 @@ const (
 	CategoryAudit      = "audit"
 	CategoryAdmin      = "admin"
 	CategoryOrg        = "org"
+	CategoryRepo       = "repo"
 
 	ResultSuccess = "success"
 	ResultFailure = "failure"
@@ -151,6 +152,16 @@ var Fields = map[string][]string{
 		"name", "access_mode", "units", "includes_all_repositories", "can_create_org_repo", "user_id", "inviter_id", "reason",
 		"repo_id", "repo_name", "group_id", "counts", "email",
 	},
+	"repo": {
+		"name", "owner_id", "owner_name", "group_id", "group_name", "is_private", "is_template", "default_branch",
+		"is_mirror", "fork_id", "template_id", "units", "counts", "purge", "to_owner_id", "to_owner_name", "team_ids",
+		"interval", "enable_prune", "branch_filter", "tag_filter", "lfs", "lfs_endpoint", "address", "url_changed",
+		"credentials_changed",
+	},
+	"collaborator":       {"user_id", "mode"},
+	"branch":             {"name", "from", "to", "commit", "default"},
+	"tag":                {"name", "commit"},
+	"project":            {"name", "counts"},
 	"queue":              {"name"},
 	"quota_rule":         {"name", "limit", "subjects", "counts"},
 	"quota_group":        {"name", "rule_name", "user_id", "groups", "counts"},

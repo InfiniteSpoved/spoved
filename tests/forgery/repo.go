@@ -113,7 +113,7 @@ func CreateRepository(t testing.TB, owner *user_model.User, opts *CreateReposito
 	repo.Owner = owner
 
 	for user, mode := range opts.Collaborators {
-		require.NoError(t, repo_module.AddCollaborator(t.Context(), repo, user))
+		require.NoError(t, repo_module.AddCollaborator(t.Context(), repo, user, perm.AccessModeWrite))
 		require.NoError(t, repo_module.ChangeCollaborationAccessMode(t.Context(), repo, user.ID, mode))
 	}
 

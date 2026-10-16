@@ -14,6 +14,7 @@ import (
 	"forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/util"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,12 +27,28 @@ func TestRepository_AddCollaborator(t *testing.T) {
 		repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repoID})
 		require.NoError(t, repo.LoadOwner(db.DefaultContext))
 		user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: userID})
-		require.NoError(t, AddCollaborator(db.DefaultContext, repo, user))
+		require.NoError(t, AddCollaborator(db.DefaultContext, repo, user, perm_model.AccessModeWrite))
 		unittest.CheckConsistencyFor(t, &repo_model.Repository{ID: repoID}, &user_model.User{ID: userID})
 	}
 	testSuccess(1, 4)
 	testSuccess(1, 4)
 	testSuccess(3, 4)
+}
+
+func TestRepository_AddCollaboratorMode(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
+	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})
+	for _, mode := range []perm_model.AccessMode{perm_model.AccessModeNone, perm_model.AccessModeOwner} {
+		require.ErrorIs(t, AddCollaborator(t.Context(), repo, user, mode), util.ErrInvalidArgument)
+	}
+	unittest.AssertNotExistsBean(t, &repo_model.Collaboration{RepoID: 1, UserID: 4})
+
+	require.NoError(t, AddCollaborator(t.Context(), repo, user, perm_model.AccessModeRead))
+	unittest.AssertExistsAndLoadBean(t, &repo_model.Collaboration{RepoID: 1, UserID: 4, Mode: perm_model.AccessModeRead})
+	// an existing collaborator is left as it is
+	require.NoError(t, AddCollaborator(t.Context(), repo, user, perm_model.AccessModeAdmin))
+	unittest.AssertExistsAndLoadBean(t, &repo_model.Collaboration{RepoID: 1, UserID: 4, Mode: perm_model.AccessModeRead})
 }
 
 func TestRepository_AddCollaborator_IsBlocked(t *testing.T) {
@@ -44,14 +61,14 @@ func TestRepository_AddCollaborator_IsBlocked(t *testing.T) {
 
 		// Owner blocked user.
 		unittest.AssertSuccessfulInsert(t, &user_model.BlockedUser{UserID: repo.OwnerID, BlockID: userID})
-		require.ErrorIs(t, AddCollaborator(db.DefaultContext, repo, user), user_model.ErrBlockedByUser)
+		require.ErrorIs(t, AddCollaborator(db.DefaultContext, repo, user, perm_model.AccessModeWrite), user_model.ErrBlockedByUser)
 		unittest.CheckConsistencyFor(t, &repo_model.Repository{ID: repoID}, &user_model.User{ID: userID})
 		_, err := db.DeleteByBean(db.DefaultContext, &user_model.BlockedUser{UserID: repo.OwnerID, BlockID: userID})
 		require.NoError(t, err)
 
 		// User has owner blocked.
 		unittest.AssertSuccessfulInsert(t, &user_model.BlockedUser{UserID: userID, BlockID: repo.OwnerID})
-		require.ErrorIs(t, AddCollaborator(db.DefaultContext, repo, user), user_model.ErrBlockedByUser)
+		require.ErrorIs(t, AddCollaborator(db.DefaultContext, repo, user, perm_model.AccessModeWrite), user_model.ErrBlockedByUser)
 		unittest.CheckConsistencyFor(t, &repo_model.Repository{ID: repoID}, &user_model.User{ID: userID})
 	}
 	// Ensure idempotency (public repository).
@@ -78,7 +95,7 @@ func TestRepoPermissionPublicNonOrgRepo(t *testing.T) {
 	}
 
 	// change to collaborator
-	require.NoError(t, AddCollaborator(db.DefaultContext, repo, user))
+	require.NoError(t, AddCollaborator(db.DefaultContext, repo, user, perm_model.AccessModeWrite))
 	perm, err = access_model.GetUserRepoPermission(db.DefaultContext, repo, user)
 	require.NoError(t, err)
 	for _, unit := range repo.Units {
@@ -131,7 +148,7 @@ func TestRepoPermissionPrivateNonOrgRepo(t *testing.T) {
 	}
 
 	// change to collaborator to default write access
-	require.NoError(t, AddCollaborator(db.DefaultContext, repo, user))
+	require.NoError(t, AddCollaborator(db.DefaultContext, repo, user, perm_model.AccessModeWrite))
 	perm, err = access_model.GetUserRepoPermission(db.DefaultContext, repo, user)
 	require.NoError(t, err)
 	for _, unit := range repo.Units {
@@ -183,7 +200,7 @@ func TestRepoPermissionPublicOrgRepo(t *testing.T) {
 	}
 
 	// change to collaborator to default write access
-	require.NoError(t, AddCollaborator(db.DefaultContext, repo, user))
+	require.NoError(t, AddCollaborator(db.DefaultContext, repo, user, perm_model.AccessModeWrite))
 	perm, err = access_model.GetUserRepoPermission(db.DefaultContext, repo, user)
 	require.NoError(t, err)
 	for _, unit := range repo.Units {
@@ -245,7 +262,7 @@ func TestRepoPermissionPrivateOrgRepo(t *testing.T) {
 	}
 
 	// change to collaborator to default write access
-	require.NoError(t, AddCollaborator(db.DefaultContext, repo, user))
+	require.NoError(t, AddCollaborator(db.DefaultContext, repo, user, perm_model.AccessModeWrite))
 	perm, err = access_model.GetUserRepoPermission(db.DefaultContext, repo, user)
 	require.NoError(t, err)
 	for _, unit := range repo.Units {
@@ -338,7 +355,7 @@ func TestRepository_ChangeCollaborationAccessMode(t *testing.T) {
 	// On an organization-owned repo, access can be granted through a team, or a collaborator.  The highest available
 	// access mode should win and be stored in the access table.  First set-up collaborator with Admin:
 	repo = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})
-	require.NoError(t, AddCollaborator(t.Context(), repo, user))
+	require.NoError(t, AddCollaborator(t.Context(), repo, user, perm_model.AccessModeWrite))
 	require.NoError(t, ChangeCollaborationAccessMode(t.Context(), repo, user.ID, perm_model.AccessModeAdmin))
 	collaboration = unittest.AssertExistsAndLoadBean(t, &repo_model.Collaboration{RepoID: repo.ID, UserID: user.ID})
 	assert.Equal(t, perm_model.AccessModeAdmin, collaboration.Mode)

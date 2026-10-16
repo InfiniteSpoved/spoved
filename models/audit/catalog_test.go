@@ -87,6 +87,7 @@ func TestFieldsHoldNoSecrets(t *testing.T) {
 		"password", "passwd", "salt", "rands", "secret", "client_secret", "secret_hash", "token", "token_hash",
 		"token_salt", "token_last_eight", "scratch", "scratch_token", "scratch_hash", "totp_secret", "bind_password",
 		"public_key", "credential_id", "headers", "url", "typed_name", "login_name", "content", "armor", "emails",
+		"remote_address", "encrypted_remote_address", "userinfo", "message",
 	}
 	for typ, fields := range audit_model.Fields {
 		for _, f := range fields {

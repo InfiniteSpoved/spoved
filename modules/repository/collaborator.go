@@ -8,16 +8,23 @@ import (
 	"fmt"
 
 	"forgejo.org/models"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/util"
 
 	"xorm.io/builder"
 )
 
-func AddCollaborator(ctx context.Context, repo *repo_model.Repository, u *user_model.User) error {
+// AddCollaborator adds u as a collaborator of repo with mode, from read to admin; an existing collaborator is left as
+// it is.
+func AddCollaborator(ctx context.Context, repo *repo_model.Repository, u *user_model.User, mode perm.AccessMode) error {
+	if mode < perm.AccessModeRead || mode > perm.AccessModeAdmin {
+		return fmt.Errorf("%w: collaborator access mode %d", util.ErrInvalidArgument, mode)
+	}
 	if user_model.IsBlocked(ctx, repo.OwnerID, u.ID) || user_model.IsBlocked(ctx, u.ID, repo.OwnerID) {
 		return user_model.ErrBlockedByUser
 	}
@@ -36,8 +43,11 @@ func AddCollaborator(ctx context.Context, repo *repo_model.Repository, u *user_m
 		if err = db.Insert(ctx, &repo_model.Collaboration{
 			RepoID: repo.ID,
 			UserID: u.ID,
-			Mode:   perm.AccessModeWrite,
+			Mode:   mode,
 		}); err != nil {
+			return err
+		}
+		if err = recordCollaborator(ctx, "repo.collaborator.added", repo, u.ID, map[string]any{"user_id": u.ID, "mode": mode.String()}); err != nil {
 			return err
 		}
 
@@ -69,6 +79,11 @@ func ChangeCollaborationAccessMode(ctx context.Context, repo *repo_model.Reposit
 
 		if collaboration.Mode == mode {
 			return nil
+		}
+		if err := recordCollaborator(ctx, "repo.collaborator.mode_changed", repo, uid, map[string]any{
+			"user_id": uid, "before": map[string]any{"mode": collaboration.Mode.String()}, "after": map[string]any{"mode": mode.String()},
+		}); err != nil {
+			return err
 		}
 		collaboration.Mode = mode
 
@@ -103,6 +118,9 @@ func DeleteCollaboration(ctx context.Context, repo *repo_model.Repository, uid i
 	} else if has == 0 {
 		return committer.Commit()
 	}
+	if err = recordCollaborator(ctx, "repo.collaborator.removed", repo, uid, map[string]any{"user_id": uid}); err != nil {
+		return err
+	}
 	if err = access_model.RecalculateAccesses(ctx, repo); err != nil {
 		return err
 	}
@@ -121,4 +139,17 @@ func DeleteCollaboration(ctx context.Context, repo *repo_model.Repository, uid i
 	}
 
 	return committer.Commit()
+}
+
+// recordCollaborator records action about the collaborator uid of repo.
+func recordCollaborator(ctx context.Context, action string, repo *repo_model.Repository, uid int64, data map[string]any) error {
+	name := ""
+	if u, err := user_model.GetPossibleUserByID(ctx, uid); err == nil {
+		name = u.Name
+	} else if !user_model.IsErrUserNotExist(err) {
+		return err
+	}
+	return repo_model.RecordRepoTarget(ctx, repo, audit_model.Event{
+		Action: action, TargetType: "collaborator", TargetID: uid, TargetName: name, Data: data,
+	})
 }

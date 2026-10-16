@@ -13,6 +13,7 @@ import (
 
 	"forgejo.org/models"
 	asymkey_model "forgejo.org/models/asymkey"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
@@ -26,6 +27,8 @@ import (
 	"forgejo.org/modules/sync"
 	"forgejo.org/modules/util"
 	notify_service "forgejo.org/services/notify"
+
+	"xorm.io/builder"
 )
 
 // repoWorkingPool represents a working pool to order the parallel changes to the same repository
@@ -160,6 +163,11 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 	}
 
 	oldOwner := repo.Owner
+	before := map[string]any{"owner_id": oldOwner.ID, "owner_name": oldOwner.Name, "group_id": oldGroupID, "group_name": repo.GroupName}
+	counts, err := transferCounts(ctx, repo, oldOwner)
+	if err != nil {
+		return err
+	}
 
 	// the old owner's deploy keys stop applying (the lookup follows the owner); collect them for the protection rules
 	oldOrgKeys, err := asymkey_model.FindOrgDeployKeysCoveringRepo(ctx, repo)
@@ -217,9 +225,11 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 	for _, c := range collaborators {
 		if c.IsGhost() {
 			collaboration.ID = c.Collaboration.ID
-			if _, err := sess.Delete(collaboration); err != nil {
+			n, err := sess.Delete(collaboration)
+			if err != nil {
 				return fmt.Errorf("remove collaborator '%d': %w", c.ID, err)
 			}
+			counts["collaborators"] += n
 			collaboration.ID = 0
 		}
 
@@ -232,9 +242,11 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 			}
 		}
 		collaboration.UserID = c.ID
-		if _, err := sess.Delete(collaboration); err != nil {
+		n, err := sess.Delete(collaboration)
+		if err != nil {
 			return fmt.Errorf("remove collaborator '%d': %w", c.ID, err)
 		}
+		counts["collaborators"] += n
 		collaboration.UserID = 0
 	}
 
@@ -332,8 +344,23 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 		wikiRenamed = true
 	}
 
-	if err := models.DeleteRepositoryTransfer(ctx, repo.ID); err != nil {
+	accepted, err := models.DeleteRepositoryTransfer(ctx, repo.ID)
+	if err != nil {
 		return fmt.Errorf("deleteRepositoryTransfer: %w", err)
+	}
+	// scoped to the previous owner, whose repository leaves it
+	action := "repo.repository.transferred"
+	if accepted {
+		action = "repo.transfer.accepted"
+	}
+	if err := audit_model.Record(ctx, audit_model.Event{
+		Action: action, Result: audit_model.ResultSuccess, RepoID: repo.ID, OwnerID: oldOwner.ID, GroupID: oldGroupID, TargetType: "repo", TargetID: repo.ID,
+		TargetName: path.Join(oldOwner.Name, before["group_name"].(string), repo.Name), Data: map[string]any{
+			"before": before, "after": map[string]any{"owner_id": newOwner.ID, "owner_name": newOwner.Name, "group_id": int64(0), "group_name": ""},
+			"counts": counts,
+		},
+	}); err != nil {
+		return err
 	}
 	repo.Status = repo_model.RepositoryReady
 	if err := repo_model.UpdateRepositoryCols(ctx, repo, "status"); err != nil {
@@ -426,6 +453,11 @@ func changeRepositoryName(ctx context.Context, repo *repo_model.Repository, newR
 	if err = repo_model.UpdateRepositoryCols(ctx, repo, "name", "lower_name"); err != nil {
 		return err
 	}
+	if err = repo_model.RecordRepo(ctx, "repo.repository.renamed", repo, map[string]any{
+		"before": map[string]any{"name": oldRepoName}, "after": map[string]any{"name": newName},
+	}); err != nil {
+		return err
+	}
 	if err = repo_model.NewRedirect(ctx, repo.Owner.ID, repo.GroupID, repo.ID, oldRepoName); err != nil {
 		return err
 	}
@@ -501,10 +533,7 @@ func StartRepositoryTransfer(ctx context.Context, doer, newOwner *user_model.Use
 		return err
 	}
 	if !hasAccess {
-		if err := repo_module.AddCollaborator(ctx, repo, newOwner); err != nil {
-			return err
-		}
-		if err := repo_module.ChangeCollaborationAccessMode(ctx, repo, newOwner.ID, perm.AccessModeRead); err != nil {
+		if err := repo_module.AddCollaborator(ctx, repo, newOwner, perm.AccessModeRead); err != nil {
 			return err
 		}
 	}
@@ -522,8 +551,8 @@ func StartRepositoryTransfer(ctx context.Context, doer, newOwner *user_model.Use
 }
 
 // CancelRepositoryTransfer marks the repository as ready and remove pending transfer entry,
-// thus cancel the transfer process.
-func CancelRepositoryTransfer(ctx context.Context, repo *repo_model.Repository) error {
+// thus cancel the transfer process. rejected tells that the recipient refused it, rather than the owner withdrawing it.
+func CancelRepositoryTransfer(ctx context.Context, repo *repo_model.Repository, rejected bool) error {
 	ctx, committer, err := db.TxContext(ctx)
 	if err != nil {
 		return err
@@ -535,9 +564,38 @@ func CancelRepositoryTransfer(ctx context.Context, repo *repo_model.Repository) 
 		return err
 	}
 
-	if err := models.DeleteRepositoryTransfer(ctx, repo.ID); err != nil {
+	if had, err := models.DeleteRepositoryTransfer(ctx, repo.ID); err != nil {
 		return err
+	} else if had {
+		action := "repo.transfer.canceled"
+		if rejected {
+			action = "repo.transfer.rejected"
+		}
+		if err := repo_model.RecordRepo(ctx, action, repo, nil); err != nil {
+			return err
+		}
 	}
 
 	return committer.Commit()
+}
+
+// transferCounts counts the rows transferring repo away from oldOwner removes, for its audit entry: the
+// collaborators who are members of the new owner (or it), the old organization's team rows and the deploy key
+// selections.
+func transferCounts(ctx context.Context, repo *repo_model.Repository, oldOwner *user_model.User) (map[string]int64, error) {
+	counts := map[string]int64{"collaborators": 0}
+	for _, c := range []struct {
+		name, table string
+		cond        builder.Cond
+	}{
+		{"teams", "team_repo", builder.Eq{"repo_id": repo.ID, "org_id": oldOwner.ID}},
+		{"deploy_key_selections", "org_deploy_key_repo", builder.Eq{"repo_id": repo.ID}},
+	} {
+		n, err := db.GetEngine(ctx).Table(c.table).Where(c.cond).Count()
+		if err != nil {
+			return nil, err
+		}
+		counts[c.name] = n
+	}
+	return counts, nil
 }

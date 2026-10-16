@@ -17,6 +17,7 @@ import (
 	system_model "forgejo.org/models/system"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/git/pushoptions"
 	"forgejo.org/modules/graceful"
 	"forgejo.org/modules/log"
 	repo_module "forgejo.org/modules/repository"
@@ -166,4 +167,30 @@ func LinkedRepository(ctx context.Context, a *repo_model.Attachment) (*repo_mode
 		return repo, unit.TypeReleases, err
 	}
 	return nil, -1, nil
+}
+
+// UpdateRepositoryFromPushOptions applies the repo.private and repo.template push options to the repository repoID:
+// it re-reads the row, writes only those two columns, records the change and then applies a visibility change.
+func UpdateRepositoryFromPushOptions(ctx context.Context, repoID int64, opts pushoptions.Interface) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		repo := new(repo_model.Repository)
+		if has, err := db.GetEngine(ctx).ID(repoID).Get(repo); err != nil {
+			return err
+		} else if !has {
+			return repo_model.ErrRepoNotExist{ID: repoID}
+		}
+		wasPrivate := repo.IsPrivate
+		repo.IsPrivate = opts.GetBool(pushoptions.RepoPrivate, repo.IsPrivate)
+		repo.IsTemplate = opts.GetBool(pushoptions.RepoTemplate, repo.IsTemplate)
+		if err := repo_model.RecordRepoChange(ctx, repo); err != nil {
+			return err
+		}
+		if err := repo_model.UpdateRepositoryCols(ctx, repo, "is_private", "is_template"); err != nil {
+			return err
+		}
+		if repo.IsPrivate != wasPrivate {
+			return repo_module.ApplyVisibilityChange(ctx, repo)
+		}
+		return nil
+	})
 }

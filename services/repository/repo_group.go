@@ -14,6 +14,8 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/util"
+
+	"xorm.io/builder"
 )
 
 // RenameRepoGroup renames a project and moves its directory. Like a repository rename, the directory moves
@@ -73,7 +75,13 @@ func DeleteRepoGroup(ctx context.Context, owner *user_model.User, group *repo_mo
 		if _, err := repo_model.LockRepoGroup(ctx, group.OwnerID, group.ID); err != nil {
 			return err
 		}
-		var err error
+		counts, err := projectDeleteCounts(ctx, group)
+		if err != nil {
+			return err
+		}
+		if err := repo_model.RecordProject(ctx, "org.project.deleted", group, map[string]any{"counts": counts}); err != nil {
+			return err
+		}
 		if deletedPublicKey, err = asymkey_model.DeleteProjectDeployKeys(ctx, group.OwnerID, group.ID); err != nil {
 			return err
 		}
@@ -90,4 +98,28 @@ func DeleteRepoGroup(ctx context.Context, owner *user_model.User, group *repo_mo
 		log.Error("Unable to remove the directory of project %s/%s: %v", owner.Name, group.Name, err)
 	}
 	return nil
+}
+
+// projectDeleteCounts counts the rows deleting the project group removes with it, for its audit entry.
+func projectDeleteCounts(ctx context.Context, group *repo_model.RepoGroup) (map[string]int64, error) {
+	scope := builder.Eq{"owner_id": group.OwnerID, "group_id": group.ID}
+	counts := map[string]int64{}
+	for _, c := range []struct {
+		name, table string
+		cond        builder.Cond
+	}{
+		{"teams", "team_group", builder.Eq{"group_id": group.ID}},
+		{"branch_rules", "protected_branch", builder.Eq{"repo_id": 0, "org_id": group.OwnerID, "group_id": group.ID}},
+		{"webhooks", "webhook", scope},
+		{"secrets", "secret", scope},
+		{"variables", "action_variable", scope},
+		{"deploy_keys", "org_deploy_key", builder.Eq{"org_id": group.OwnerID, "group_id": group.ID}},
+	} {
+		n, err := db.GetEngine(ctx).Table(c.table).Where(c.cond).Count()
+		if err != nil {
+			return nil, err
+		}
+		counts[c.name] = n
+	}
+	return counts, nil
 }

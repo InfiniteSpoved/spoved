@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"forgejo.org/models"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	repo_model "forgejo.org/models/repo"
@@ -35,7 +36,9 @@ type AttachmentChange struct {
 	ExternalURL string
 }
 
-func createTag(ctx context.Context, gitRepo *git.Repository, rel *repo_model.Release, msg string) (bool, error) {
+// createTag creates the git tag of rel unless it exists; notify tells whether to notify about it now (false in a
+// transaction, whose caller calls notifyTagCreated after the commit).
+func createTag(ctx context.Context, gitRepo *git.Repository, rel *repo_model.Release, msg string, notify bool) (bool, error) {
 	err := rel.LoadAttributes(ctx)
 	if err != nil {
 		return false, err
@@ -96,22 +99,9 @@ func createTag(ctx context.Context, gitRepo *git.Repository, rel *repo_model.Rel
 			}
 			created = true
 			rel.LowerTagName = strings.ToLower(rel.TagName)
-
-			objectFormat := git.ObjectFormatFromName(rel.Repo.ObjectFormatName)
-			commits := repository.NewPushCommits()
-			commits.HeadCommit = repository.CommitToPushCommit(commit)
-			commits.CompareURL = rel.Repo.ComposeCompareURL(objectFormat.EmptyObjectID().String(), commit.ID.String())
-
-			refFullName := git.RefNameFromTag(rel.TagName)
-			notify_service.PushCommits(
-				ctx, rel.Publisher, rel.Repo,
-				&repository.PushUpdateOptions{
-					RefFullName: refFullName,
-					OldCommitID: objectFormat.EmptyObjectID().String(),
-					NewCommitID: commit.ID.String(),
-				}, commits,
-			)
-			notify_service.CreateRef(ctx, rel.Publisher, rel.Repo, refFullName, commit.ID.String())
+			if notify {
+				notifyTagCreated(ctx, rel, commit)
+			}
 			rel.CreatedUnix = timeutil.TimeStampNow()
 		}
 		commit, err := gitRepo.GetTagCommit(rel.TagName)
@@ -137,6 +127,25 @@ func createTag(ctx context.Context, gitRepo *git.Repository, rel *repo_model.Rel
 	return created, nil
 }
 
+// notifyTagCreated notifies about the new tag of rel on commit.
+func notifyTagCreated(ctx context.Context, rel *repo_model.Release, commit *git.Commit) {
+	objectFormat := git.ObjectFormatFromName(rel.Repo.ObjectFormatName)
+	commits := repository.NewPushCommits()
+	commits.HeadCommit = repository.CommitToPushCommit(commit)
+	commits.CompareURL = rel.Repo.ComposeCompareURL(objectFormat.EmptyObjectID().String(), commit.ID.String())
+
+	refFullName := git.RefNameFromTag(rel.TagName)
+	notify_service.PushCommits(
+		ctx, rel.Publisher, rel.Repo,
+		&repository.PushUpdateOptions{
+			RefFullName: refFullName,
+			OldCommitID: objectFormat.EmptyObjectID().String(),
+			NewCommitID: commit.ID.String(),
+		}, commits,
+	)
+	notify_service.CreateRef(ctx, rel.Publisher, rel.Repo, refFullName, commit.ID.String())
+}
+
 // CreateRelease creates a new release of repository.
 func CreateRelease(gitRepo *git.Repository, rel *repo_model.Release, msg string, attachmentChanges []*AttachmentChange) error {
 	has, err := repo_model.IsReleaseExist(gitRepo.Ctx, rel.RepoID, rel.TagName)
@@ -148,7 +157,7 @@ func CreateRelease(gitRepo *git.Repository, rel *repo_model.Release, msg string,
 		}
 	}
 
-	if _, err = createTag(gitRepo.Ctx, gitRepo, rel, msg); err != nil {
+	if _, err = createTag(gitRepo.Ctx, gitRepo, rel, msg, true); err != nil {
 		return err
 	}
 
@@ -233,11 +242,27 @@ func CreateNewTag(ctx context.Context, doer *user_model.User, repo *repo_model.R
 		IsTag:        true,
 	}
 
-	if _, err = createTag(ctx, gitRepo, rel, msg); err != nil {
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		// recorded before the tag is created: a failed tag rolls the entry back
+		if err := repo_model.RecordRepoTarget(ctx, repo, audit_model.Event{
+			Action: "repo.tag.created", TargetType: "tag", TargetName: tagName, Data: map[string]any{"name": tagName, "commit": commit},
+		}); err != nil {
+			return err
+		}
+		if _, err := createTag(ctx, gitRepo, rel, msg, false); err != nil {
+			return err
+		}
+		return db.Insert(ctx, rel)
+	}); err != nil {
 		return err
 	}
-
-	return db.Insert(ctx, rel)
+	c, err := gitRepo.GetCommit(rel.Sha1)
+	if err != nil {
+		log.Error("GetCommit: %v", err)
+		return nil
+	}
+	notifyTagCreated(ctx, rel, c)
+	return nil
 }
 
 // UpdateRelease updates information, attachments of a release and will create tag if it's not a draft and tag not exist.
@@ -249,7 +274,7 @@ func UpdateRelease(ctx context.Context, doer *user_model.User, gitRepo *git.Repo
 	if rel.ID == 0 {
 		return errors.New("UpdateRelease only accepts an exist release")
 	}
-	isCreated, err := createTag(gitRepo.Ctx, gitRepo, rel, "")
+	isCreated, err := createTag(gitRepo.Ctx, gitRepo, rel, "", true)
 	if err != nil {
 		return err
 	}
@@ -395,16 +420,29 @@ func DeleteReleaseByID(ctx context.Context, repo *repo_model.Repository, rel *re
 			}
 		}
 
-		err = repo_model.DeleteArchiveDownloadCountForRelease(ctx, rel.ID)
-		if err != nil {
+		// recorded before the tag is deleted: a failed delete rolls the entry back
+		if err := db.WithTx(ctx, func(ctx context.Context) error {
+			if err := repo_model.RecordRepoTarget(ctx, repo, audit_model.Event{
+				Action: "repo.tag.deleted", TargetType: "tag", TargetName: rel.TagName,
+				Data: map[string]any{"name": rel.TagName, "commit": rel.Sha1},
+			}); err != nil {
+				return err
+			}
+			if err := repo_model.DeleteArchiveDownloadCountForRelease(ctx, rel.ID); err != nil {
+				return err
+			}
+			if stdout, _, err := git.NewCommand(ctx, "tag", "-d").AddDashesAndList(rel.TagName).
+				SetDescription(fmt.Sprintf("DeleteReleaseByID (git tag -d): %d", rel.ID)).
+				RunStdString(&git.RunOpts{Dir: repo.RepoPath()}); err != nil && !strings.Contains(err.Error(), "not found") {
+				log.Error("DeleteReleaseByID (git tag -d): %d in %v Failed:\nStdout: %s\nError: %v", rel.ID, repo, stdout, err)
+				return fmt.Errorf("git tag -d: %w", err)
+			}
+			if _, err := db.DeleteByID[repo_model.Release](ctx, rel.ID); err != nil {
+				return fmt.Errorf("DeleteReleaseByID: %w", err)
+			}
+			return nil
+		}); err != nil {
 			return err
-		}
-
-		if stdout, _, err := git.NewCommand(ctx, "tag", "-d").AddDashesAndList(rel.TagName).
-			SetDescription(fmt.Sprintf("DeleteReleaseByID (git tag -d): %d", rel.ID)).
-			RunStdString(&git.RunOpts{Dir: repo.RepoPath()}); err != nil && !strings.Contains(err.Error(), "not found") {
-			log.Error("DeleteReleaseByID (git tag -d): %d in %v Failed:\nStdout: %s\nError: %v", rel.ID, repo, stdout, err)
-			return fmt.Errorf("git tag -d: %w", err)
 		}
 
 		refName := git.RefNameFromTag(rel.TagName)
@@ -418,10 +456,6 @@ func DeleteReleaseByID(ctx context.Context, repo *repo_model.Repository, rel *re
 			}, repository.NewPushCommits(),
 		)
 		notify_service.DeleteRef(ctx, doer, repo, refName)
-
-		if _, err := db.DeleteByID[repo_model.Release](ctx, rel.ID); err != nil {
-			return fmt.Errorf("DeleteReleaseByID: %w", err)
-		}
 	} else {
 		rel.IsTag = true
 

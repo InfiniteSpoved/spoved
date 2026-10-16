@@ -79,7 +79,7 @@ func TestOrgArchivePermissions(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 
 	// repo admin without team membership, team member, non-member
-	require.NoError(t, repo_module.AddCollaborator(t.Context(), orgArchiveRepos(t)[3], unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8})))
+	require.NoError(t, repo_module.AddCollaborator(t.Context(), orgArchiveRepos(t)[3], unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8}), perm.AccessModeWrite))
 	require.NoError(t, repo_module.ChangeCollaborationAccessMode(t.Context(), orgArchiveRepos(t)[3], 8, perm.AccessModeAdmin))
 
 	for _, name := range []string{"user4", "user8", "user10"} {

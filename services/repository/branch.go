@@ -12,6 +12,7 @@ import (
 
 	"forgejo.org/models"
 	actions_model "forgejo.org/models/actions"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
@@ -481,6 +482,12 @@ func DeleteBranch(ctx context.Context, doer *user_model.User, repo *repo_model.R
 				return err
 			}
 		}
+		if err := repo_model.RecordRepoTarget(ctx, repo, audit_model.Event{
+			Action: "repo.branch.deleted", TargetType: "branch", TargetName: branchName,
+			Data: map[string]any{"name": branchName, "commit": commit.ID.String()},
+		}); err != nil {
+			return err
+		}
 
 		return gitRepo.DeleteBranch(branchName, git.DeleteBranchOptions{
 			Force: true,
@@ -646,6 +653,9 @@ func SetRepoDefaultBranch(ctx context.Context, repo *repo_model.Repository, gitR
 	oldDefaultBranchName := repo.DefaultBranch
 	repo.DefaultBranch = newBranchName
 	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		if err := repo_model.RecordRepoChange(ctx, repo); err != nil {
+			return err
+		}
 		if err := repo_model.UpdateDefaultBranch(ctx, repo); err != nil {
 			return err
 		}

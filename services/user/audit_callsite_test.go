@@ -26,6 +26,9 @@ var auditedUserColumns = []string{
 	"private_fork_policy", "repo_admin_change_team_access",
 }
 
+// auditedRepoColumns are the repository columns whose changes the audit log must see.
+var auditedRepoColumns = []string{"is_private", "is_archived", "default_branch"}
+
 // auditedWrites are the functions allowed to write those columns, or to delete keys, key selections or access tokens,
 // with why.
 // A new write elsewhere fails TestAuditCallSites: record it in its function, or add it here with a reason.
@@ -57,8 +60,8 @@ var auditedWrites = map[string]string{
 	"models/asymkey.DeleteOrgDeployKey":            "records credential.org_deploy_key|project_deploy_key.deleted",
 	"models/asymkey.SetOrgDeployKeyRepos":          "records credential.org_deploy_key.updated",
 	"models/asymkey.RemoveOrgDeployKeyRepo":        "records credential.org_deploy_key.updated",
-	"services/repository.DeleteRepositoryDirectly": "selection rows and runners of the deleted repository: part of the repository delete (settings audit)",
-	"services/repository.transferOwnership":        "selection rows of the moved repository: part of the transfer (settings audit)",
+	"services/repository.DeleteRepositoryDirectly": "records repo.repository.deleted with the counts (selection rows, runners, tokens, collaborators)",
+	"services/repository.transferOwnership":        "records repo.repository.transferred or repo.transfer.accepted with the counts",
 
 	// OAuth2 apps and grants, authorized integrations, runners
 	"models/auth.deleteOAuth2Application":            "its caller DeleteOAuth2Application records credential.oauth2_app.deleted; Init removes builtin apps unrecorded",
@@ -69,7 +72,7 @@ var auditedWrites = map[string]string{
 	"models/actions.deleteRunner":                    "records credential.runner.deleted",
 	"models/actions.FixRunnersWithoutBelongingOwner": "doctor: runners of owners that no longer exist",
 	"models/actions.FixRunnersWithoutBelongingRepo":  "doctor: runners of repositories that no longer exist",
-	"models/organization.DeleteOrganization":         "its caller services/org.DeleteOrganization records org.organization.deleted with the counts",
+	"models/organization.DeleteOrganization":         "its caller services/org.DeleteOrganization records org.organization.deleted with the counts; its repositories are deleted first, each recording repo.repository.deleted",
 
 	// login sources, user groups, quota, dynamic settings
 	"models/auth.CreateSource":                        "records admin.login_source.created (and deleted when registering fails)",
@@ -95,12 +98,30 @@ var auditedWrites = map[string]string{
 	"models.RemoveOrgUser":                        "the org membership follows the team ones, each recorded as org.team.member_removed",
 	"models.removeAllRepositories":                "its callers record org.team.repos_removed_all or org.team.deleted with the counts",
 	"models/organization.RemoveTeamRepo":          "its callers record org.team.repo_removed or are counted by the project unlink, repository move or delete",
-	"models/organization.RemoveOrgRepo":           "team rows of a transferred repository: part of the transfer (repository audit)",
+	"models/organization.RemoveOrgRepo":           "team rows of a transferred repository: counted in repo.repository.transferred",
 	"models/organization.removeInvite":            "records org.team.invite_removed",
 	"models/organization.RemoveVerifiedDomain":    "records org.verified_domain.removed",
 	"services/repository.UnlinkTeamFromRepoGroup": "records org.team.project_unlinked",
 	"services/user.removeTrashedOrgMemberships":   "records org.team.member_removed for each team",
-	"models/repo.DeleteRepoGroup":                 "team links of the deleted project: counted in its project delete entry (org.project.deleted, repository audit)",
+	"models/repo.DeleteRepoGroup":                 "its callers record org.project.deleted with the counts",
+
+	// repositories
+	"models.DeleteRepositoryTransfer":                     "its callers record repo.transfer.accepted|canceled|rejected, or repo.repository.trashed",
+	"models/git.RenameBranch":                             "records repo.branch.renamed (the default branch follows the rename)",
+	"models/repo.DeleteMirrorByRepoID":                    "its caller ConvertMirrorToNormalRepo records repo.repository.updated (is_mirror) first",
+	"models/repo.FixNullArchivedRepository":               "doctor: is_archived NULL to false, no change of state",
+	"models/repo.SetArchiveRepoState":                     "its caller services/repository.SetArchiveRepoState records repo.repository.archived|unarchived",
+	"models/repo.UpdateDefaultBranch":                     "its caller SetRepoDefaultBranch records repo.repository.updated",
+	"modules/repository.UpdateRepository":                 "records repo.repository.updated",
+	"modules/repository.ApplyVisibilityChange":            "not the repository table: the actions' is_private follows the recorded visibility change",
+	"services/mirror.checkAndUpdateEmptyRepository":       "records repo.repository.updated (the default branch of a mirror's first sync)",
+	"services/org.ArchiveOrganization":                    "its repositories, counted in org.organization.archived",
+	"services/org.UnarchiveOrganization":                  "its repositories, counted in org.organization.unarchived",
+	"services/repository.UpdateRepositoryFromPushOptions": "records repo.repository.updated",
+	"services/repository.UpdateRepositoryUnits":           "records repo.units.changed",
+	"services/repository.pushUpdates":                     "the default branch of the first push to an empty repository: push activity (PR 3)",
+	"services/repository/files.ChangeRepoFiles":           "the default branch of the first commit to an empty repository: push activity (PR 3)",
+	"services/user.BlockUser":                             "records repo.collaborator.removed and repo.transfer.canceled (reason blocked)",
 }
 
 // TestAuditCallSites walks the code for writes of the audited user columns (UpdateUserCols, and Update/Exec chains on
@@ -178,6 +199,11 @@ func types(e ast.Expr) string {
 func isAuditedWrite(call *ast.CallExpr) bool {
 	name := callName(call.Fun)
 	switch name {
+	case "UpdateRepositoryCols":
+		return slices.ContainsFunc(literals(call), isAuditedRepoColumn) || len(call.Args) > 2 && slices.ContainsFunc(call.Args[2:], func(a ast.Expr) bool {
+			_, lit := a.(*ast.BasicLit)
+			return !lit
+		}) || call.Ellipsis.IsValid()
 	case "UpdateUserCols":
 		// a column list that isn't all literals (a variable, a spread) counts: the test can't see what it writes
 		return slices.ContainsFunc(literals(call), isAuditedColumn) || len(call.Args) > 2 && slices.ContainsFunc(call.Args[2:], func(a ast.Expr) bool {
@@ -204,6 +230,9 @@ func isAuditedWrite(call *ast.CallExpr) bool {
 					userTable = true
 				}
 			}
+		}
+		if slices.ContainsFunc(lits, isAuditedRepoColumn) || slices.ContainsFunc(call.Args, mapHasAuditedRepoKey) {
+			return true
 		}
 		if !userTable && !slices.ContainsFunc(lits, isAuditedColumn) {
 			return false
@@ -235,6 +264,7 @@ var auditedDeletes = []string{
 	"OAuth2Application", "OAuth2Grant", "AuthorizedIntegration", "ActionRunner",
 	"Source", "UserGroup", "UserGroupUser", "UserGroupTeam", "Rule", "Group", "GroupMapping", "GroupRuleMapping",
 	"Team", "TeamUser", "TeamRepo", "TeamUnit", "TeamGroup", "TeamInvite", "OrgUser", "OrgVerifiedDomain", "OrgUnit",
+	"Repository", "Collaboration", "RepoUnit", "Mirror", "RepoTransfer", "RepoGroup",
 }
 
 // auditedDeleteTables are the tables of auditedDeletes that raw deletes (builder.Delete(...).From(table)) name.
@@ -242,6 +272,7 @@ var auditedDeleteTables = []string{
 	"oauth2_application", "oauth2_grant", "authorized_integration", "action_runner", "login_source", "user_group",
 	"user_group_user", "user_group_team", "quota_rule", "quota_group", "quota_group_mapping", "quota_group_rule_mapping",
 	"team", "team_user", "team_repo", "team_unit", "team_group", "team_invite", "org_user", "org_verified_domain", "org_unit",
+	"repository", "collaboration", "repo_unit", "mirror", "repo_transfer", "repo_group",
 }
 
 // deletesAuditedTable reports whether the SQL statement sql deletes rows of a table of auditedDeleteTables.
@@ -267,6 +298,29 @@ func writesSystemSetting(call *ast.CallExpr) bool {
 
 func isAuditedColumn(s string) bool {
 	return slices.Contains(auditedUserColumns, s)
+}
+
+func isAuditedRepoColumn(s string) bool {
+	return slices.Contains(auditedRepoColumns, s)
+}
+
+func mapHasAuditedRepoKey(e ast.Expr) bool {
+	lit, ok := e.(*ast.CompositeLit)
+	if !ok {
+		return false
+	}
+	return slices.ContainsFunc(lit.Elts, func(el ast.Expr) bool {
+		kv, ok := el.(*ast.KeyValueExpr)
+		if !ok {
+			return false
+		}
+		k, ok := kv.Key.(*ast.BasicLit)
+		if !ok {
+			return false
+		}
+		s, err := strconv.Unquote(k.Value)
+		return err == nil && isAuditedRepoColumn(s)
+	})
 }
 
 func callName(fun ast.Expr) string {
