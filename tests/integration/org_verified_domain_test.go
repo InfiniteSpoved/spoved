@@ -151,7 +151,7 @@ func TestOrgVerifiedDomainMembership(t *testing.T) {
 	defer test.MockVariableValue(&setting.Service.AddMembersByInvitations, false)()
 	ctx := t.Context()
 	require.NoError(t, organization.AddVerifiedDomain(ctx, &organization.OrgVerifiedDomain{OrgID: 3, Domain: "company.com"}))
-	require.NoError(t, org_service.SetVerifiedDomainRequired(ctx, 3, true))
+	require.NoError(t, org_service.SetVerifiedDomainRequired(ctx, unittest.AssertExistsAndLoadBean(t, &organization.Organization{ID: 3}), true))
 	addEmail := func(uid int64, email string, activated bool) {
 		require.NoError(t, db.Insert(ctx, &user_model.EmailAddress{UID: uid, Email: email, LowerEmail: email, IsActivated: activated}))
 	}
@@ -255,7 +255,7 @@ func TestOrgVerifiedDomainMembership(t *testing.T) {
 		org := &organization.Organization{Name: "domain-org"}
 		require.NoError(t, organization.CreateOrganization(ctx, org, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})))
 		require.NoError(t, organization.AddVerifiedDomain(ctx, &organization.OrgVerifiedDomain{OrgID: org.ID, Domain: "deleted.example"}))
-		require.NoError(t, org_service.SetVerifiedDomainRequired(ctx, org.ID, true))
+		require.NoError(t, org_service.SetVerifiedDomainRequired(ctx, org, true))
 		require.NoError(t, org_service.DeleteOrganization(ctx, org, false))
 		unittest.AssertNotExistsBean(t, &organization.OrgVerifiedDomain{OrgID: org.ID})
 		unittest.AssertNotExistsBean(t, &user_model.Setting{UserID: org.ID, SettingKey: organization.SettingKeyRequireVerifiedDomain})

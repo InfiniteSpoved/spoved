@@ -30,7 +30,11 @@ func TrashOrganization(ctx context.Context, doer *user_model.User, org *org_mode
 		} else if n == 0 {
 			return org_model.ErrOrgNotExist{ID: org.ID}
 		}
-		return nil
+		repos, err := db.GetEngine(ctx).Table("repository").Where("owner_id = ? AND trashed_unix = 0", org.ID).Count()
+		if err != nil {
+			return err
+		}
+		return user_model.RecordOrg(ctx, "org.organization.trashed", org.AsUser(), map[string]any{"counts": map[string]int64{"repos": repos}})
 	})
 }
 

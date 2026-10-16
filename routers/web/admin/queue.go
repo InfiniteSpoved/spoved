@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strconv"
 
+	audit_model "forgejo.org/models/audit"
+	"forgejo.org/modules/log"
 	"forgejo.org/modules/queue"
 	"forgejo.org/modules/setting"
 	"forgejo.org/services/context"
@@ -82,6 +84,13 @@ func QueueRemoveAllItems(ctx *context.Context) {
 	if err := mq.RemoveAllItems(ctx); err != nil {
 		ctx.ServerError("RemoveAllItems", err)
 		return
+	}
+	// the queue has no transaction: the items are gone, so a failed entry is logged, not returned
+	if err := audit_model.Record(ctx, audit_model.Event{
+		Action: "admin.queue.items_removed", Result: audit_model.ResultSuccess, TargetType: "queue", TargetID: qid,
+		TargetName: mq.GetName(), Data: map[string]any{"name": mq.GetName()},
+	}); err != nil {
+		log.Error("audit: %v", err)
 	}
 
 	ctx.Flash.Success(ctx.Tr("admin.monitor.queue.settings.remove_all_items.success"))

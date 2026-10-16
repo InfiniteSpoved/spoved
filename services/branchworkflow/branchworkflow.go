@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 
+	audit_model "forgejo.org/models/audit"
+	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
@@ -108,16 +110,36 @@ func SetOrg(ctx context.Context, org *user_model.User, mode repo_model.DeleteBra
 	if locked && mode == repo_model.DeleteBranchInherit {
 		return ErrLockWithoutValue
 	}
-	set := func(key, value string, keep bool) error {
-		if !keep {
-			return user_model.DeleteUserSetting(ctx, org.ID, key)
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		stored, err := user_model.GetSettings(ctx, org.ID, []string{keyDeleteAfterMerge, keyDeleteAfterMergeLocked})
+		if err != nil {
+			return err
 		}
-		return user_model.SetUserSetting(ctx, org.ID, key, value)
-	}
-	if err := set(keyDeleteAfterMerge, mode.String(), mode != repo_model.DeleteBranchInherit); err != nil {
-		return err
-	}
-	return set(keyDeleteAfterMergeLocked, "true", locked)
+		before := map[string]any{"mode": repo_model.DeleteBranchInherit.String(), "locked": false}
+		if s := stored[keyDeleteAfterMerge]; s != nil {
+			m, _ := repo_model.ParseDeleteBranchMode(s.SettingValue)
+			before["mode"] = m.String()
+		}
+		if s := stored[keyDeleteAfterMergeLocked]; s != nil {
+			before["locked"] = s.SettingValue == "true"
+		}
+		set := func(key, value string, keep bool) error {
+			if !keep {
+				return user_model.DeleteUserSetting(ctx, org.ID, key)
+			}
+			return user_model.SetUserSetting(ctx, org.ID, key, value)
+		}
+		if err := set(keyDeleteAfterMerge, mode.String(), mode != repo_model.DeleteBranchInherit); err != nil {
+			return err
+		}
+		if err := set(keyDeleteAfterMergeLocked, "true", locked); err != nil {
+			return err
+		}
+		if changes := audit_model.Changes(before, map[string]any{"mode": mode.String(), "locked": locked}); changes != nil {
+			return user_model.RecordOrg(ctx, "org.branch_workflow.changed", org, changes)
+		}
+		return nil
+	})
 }
 
 // SetRepo stores the repository's own value unless the organization enforces one.

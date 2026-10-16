@@ -127,20 +127,21 @@ func TestSetVerifiedDomainRequired(t *testing.T) {
 	ctx := db.DefaultContext
 	defer test.MockVariableValue(&setting.Service.RegisterEmailConfirm, true)()
 	defer test.MockVariableValue(&setting.OAuth2Client.RegisterEmailConfirm, true)()
+	org3 := unittest.AssertExistsAndLoadBean(t, &organization.Organization{ID: 3})
 
-	require.ErrorIs(t, SetVerifiedDomainRequired(ctx, 3, true), ErrNoVerifiedDomains)
+	require.ErrorIs(t, SetVerifiedDomainRequired(ctx, org3, true), ErrNoVerifiedDomains)
 	require.NoError(t, organization.AddVerifiedDomain(ctx, &organization.OrgVerifiedDomain{OrgID: 3, Domain: "example.com"}))
 	func() {
 		defer test.MockVariableValue(&setting.OAuth2Client.RegisterEmailConfirm, false)()
-		require.ErrorIs(t, SetVerifiedDomainRequired(ctx, 3, true), ErrEmailConfirmationOff)
+		require.ErrorIs(t, SetVerifiedDomainRequired(ctx, org3, true), ErrEmailConfirmationOff)
 	}()
-	require.NoError(t, SetVerifiedDomainRequired(ctx, 3, true))
+	require.NoError(t, SetVerifiedDomainRequired(ctx, org3, true))
 	on, err := organization.IsVerifiedDomainRequired(ctx, 3)
 	require.NoError(t, err)
 	assert.True(t, on)
 
 	// removing the last domain turns the restriction off
-	require.NoError(t, organization.RemoveVerifiedDomain(ctx, 3, "example.com"))
+	require.NoError(t, organization.RemoveVerifiedDomain(ctx, org3.AsUser(), "example.com"))
 	on, err = organization.IsVerifiedDomainRequired(ctx, 3)
 	require.NoError(t, err)
 	assert.False(t, on)

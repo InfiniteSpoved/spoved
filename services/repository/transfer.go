@@ -83,7 +83,12 @@ func TransferOwnership(ctx context.Context, doer, newOwner *user_model.User, rep
 	}
 
 	for _, team := range teams {
-		if err := models.AddRepository(ctx, team, newRepo); err != nil {
+		if err := db.WithTx(ctx, func(ctx context.Context) error {
+			if err := models.AddRepository(ctx, team, newRepo); err != nil {
+				return err
+			}
+			return organization.RecordTeamRepo(ctx, "org.team.repo_added", team, newRepo)
+		}); err != nil {
 			return err
 		}
 	}

@@ -208,6 +208,7 @@ func TestAuditAccountAdmin(t *testing.T) {
 			"access_tokens": 2.0, "ssh_keys": 1.0, "gpg_keys": 1.0, "two_factor": 1.0, "webauthn": 1.0,
 			"emails": 2.0, "external_logins": 1.0, "openids": 1.0,
 			"oauth2_apps": 0.0, "oauth2_grants": 0.0, "authorized_integrations": 0.0, "runners": 0.0,
+			"team_invites_sent": 0.0, "team_invites_received": 0.0,
 		}, data["counts"])
 		assert.Equal(t, false, data["purge"])
 		assert.Empty(t, auditActions(t, since, "credential.access_token.deleted"), "the tokens go in bulk with the account")

@@ -188,11 +188,17 @@ func EditUser(ctx *context.APIContext) {
 	//     "$ref": "#/responses/error"
 	//   "403":
 	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
 	//   "422":
 	//     "$ref": "#/responses/validationError"
 
+	if ctx.User().IsOrganization() { // changed in the organization's settings
+		ctx.NotFound()
+		return
+	}
 	form := web.GetForm(ctx).(*api.EditUserOption)
-	if form.PersonalRepoSizeLimit != nil && (*form.PersonalRepoSizeLimit < -1 || ctx.User().IsOrganization()) {
+	if form.PersonalRepoSizeLimit != nil && *form.PersonalRepoSizeLimit < -1 {
 		ctx.Error(http.StatusUnprocessableEntity, "", "personal_repo_size_limit must be -1 (unlimited), 0 (the site limit) or a size in bytes, and only applies to individual users")
 		return
 	}
@@ -507,11 +513,13 @@ func RenameUser(ctx *context.APIContext) {
 	//     "$ref": "#/responses/empty"
 	//   "403":
 	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
 	//   "422":
 	//     "$ref": "#/responses/validationError"
 
-	if ctx.User().IsOrganization() {
-		ctx.Error(http.StatusUnprocessableEntity, "", fmt.Errorf("%s is an organization not a user", ctx.User().Name))
+	if ctx.User().IsOrganization() { // renamed in the organization's settings
+		ctx.NotFound()
 		return
 	}
 

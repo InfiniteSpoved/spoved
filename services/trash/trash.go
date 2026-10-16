@@ -277,8 +277,10 @@ func RestoreOrg(ctx context.Context, doer *user_model.User, id int64, opts Resto
 				return err
 			}
 		}
-		_, err = db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos+? WHERE id=?", len(repos), id)
-		return err
+		if _, err := db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos+? WHERE id=?", len(repos), id); err != nil {
+			return err
+		}
+		return user_model.RecordOrg(ctx, "org.organization.restored", org, map[string]any{"counts": map[string]int{"repos": len(repos)}})
 	}); err != nil {
 		return err
 	}

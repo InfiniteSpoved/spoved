@@ -258,6 +258,10 @@ func prepareUserInfo(ctx *context.Context) *user_model.User {
 		}
 		return nil
 	}
+	if u.IsOrganization() { // changed in the organization's settings
+		ctx.NotFound("prepareUserInfo", nil)
+		return nil
+	}
 
 	ctx.Data["User"] = u
 	ctx.Data["ContextUser"] = u

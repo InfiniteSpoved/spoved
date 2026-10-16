@@ -443,7 +443,7 @@ func TestPersonalRepoSizeAdmin(t *testing.T) {
 	one, minusTwo, minusOne := int64(1), int64(-2), int64(-1)
 	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/admin/users/user2", &api.EditUserOption{PersonalRepoSizeLimit: &one}).AddTokenAuth(adminToken), http.StatusOK)
 	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/admin/users/user2", &api.EditUserOption{PersonalRepoSizeLimit: &minusTwo}).AddTokenAuth(adminToken), http.StatusUnprocessableEntity)
-	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/admin/users/org3", &api.EditUserOption{PersonalRepoSizeLimit: &minusOne}).AddTokenAuth(adminToken), http.StatusUnprocessableEntity)
+	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/admin/users/org3", &api.EditUserOption{PersonalRepoSizeLimit: &minusOne}).AddTokenAuth(adminToken), http.StatusNotFound)
 	assert.EqualValues(t, 1, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}).PersonalRepoSizeLimit)
 
 	// the web override: MiB, -1 unlimited

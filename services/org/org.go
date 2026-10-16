@@ -18,6 +18,8 @@ import (
 	"forgejo.org/modules/storage"
 	"forgejo.org/modules/util"
 	repo_service "forgejo.org/services/repository"
+
+	"xorm.io/builder"
 )
 
 // DeleteOrganization completely and permanently deletes everything of organization.
@@ -49,6 +51,16 @@ func DeleteOrganization(ctx context.Context, org *org_model.Organization, purge 
 		return fmt.Errorf("HasOwnerPackages: %w", err)
 	} else if ownsPackages {
 		return models.ErrUserOwnPackages{UID: org.ID}
+	}
+
+	counts, err := deleteCounts(ctx, org.ID)
+	if err != nil {
+		return err
+	}
+	if err := user_model.RecordOrg(ctx, "org.organization.deleted", org.AsUser(), map[string]any{
+		"counts": counts, "purge": purge || org.TrashedUnix != 0, // deleting it from the trash purges it
+	}); err != nil {
+		return err
 	}
 
 	if err := git_model.DeleteOrgProtectedBranches(ctx, org.ID); err != nil {
@@ -91,4 +103,32 @@ func DeleteOrganization(ctx context.Context, org *org_model.Organization, purge 
 	}
 
 	return nil
+}
+
+// deleteCounts counts the rows deleting the organization orgID removes with it, for its audit entry.
+func deleteCounts(ctx context.Context, orgID int64) (map[string]int64, error) {
+	keys := builder.Select("id").From("org_deploy_key").Where(builder.Eq{"org_id": orgID})
+	counts := map[string]int64{}
+	for _, c := range []struct {
+		name, table string
+		cond        builder.Cond
+	}{
+		{"teams", "team", builder.Eq{"org_id": orgID}},
+		{"members", "org_user", builder.Eq{"org_id": orgID}},
+		{"runners", "action_runner", builder.Eq{"owner_id": orgID}.And(builder.IsNull{"deleted"}.Or(builder.Eq{"deleted": 0}))},
+		{"runner_tokens", "action_runner_token", builder.Eq{"owner_id": orgID}},
+		{"deploy_keys", "org_deploy_key", builder.Eq{"org_id": orgID}},
+		{"deploy_key_repos", "org_deploy_key_repo", builder.In("org_deploy_key_id", keys)},
+		{"secrets", "secret", builder.Eq{"owner_id": orgID}},
+		{"variables", "action_variable", builder.Eq{"owner_id": orgID}},
+		{"verified_domains", "org_verified_domain", builder.Eq{"org_id": orgID}},
+		{"branch_rules", "protected_branch", builder.Eq{"repo_id": 0, "org_id": orgID}},
+	} {
+		n, err := db.GetEngine(ctx).Table(c.table).Where(c.cond).Count()
+		if err != nil {
+			return nil, err
+		}
+		counts[c.name] = n
+	}
+	return counts, nil
 }

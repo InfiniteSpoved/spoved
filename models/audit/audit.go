@@ -81,6 +81,7 @@ const (
 	CategoryCredential = "credential"
 	CategoryAudit      = "audit"
 	CategoryAdmin      = "admin"
+	CategoryOrg        = "org"
 
 	ResultSuccess = "success"
 	ResultFailure = "failure"
@@ -141,6 +142,16 @@ var Fields = map[string][]string{
 		"id", "name", "type", "endpoint", "log_types", "enabled", "level", "ndjson", "key_changed", "headers_changed",
 		"header_names", "filter_changed",
 	},
+	"org": {
+		"name", "visibility", "require_two_factor", "restrict_repo_visibility_change", "private_fork_policy",
+		"repo_admin_change_team_access", "max_repo_creation", "category_id", "is_active", "prohibit_login", "user_id",
+		"counts", "purge", "domain", "verified_by_admin", "required", "units", "mode", "locked",
+	},
+	"team": {
+		"name", "access_mode", "units", "includes_all_repositories", "can_create_org_repo", "user_id", "inviter_id", "reason",
+		"repo_id", "repo_name", "group_id", "counts", "email",
+	},
+	"queue":              {"name"},
 	"quota_rule":         {"name", "limit", "subjects", "counts"},
 	"quota_group":        {"name", "rule_name", "user_id", "groups", "counts"},
 	"cron_task":          {"name"},

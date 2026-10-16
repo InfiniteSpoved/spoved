@@ -476,9 +476,17 @@ func syncTeamMembership(ctx context.Context, team *org_model.Team, userID int64,
 			return org_model.ErrLastOrgOwner{UID: userID, OrgID: team.OrgID}
 		}
 		log.Warn("user group sync: keeping user %d as the last owner of organization %d", userID, team.OrgID)
+		before := membership.Reason
 		membership.Reason = org_model.MembershipReasonAddedByUser
-		_, err := db.GetEngine(ctx).ID(membership.ID).Cols("reason").Update(membership)
-		return err
+		if _, err := db.GetEngine(ctx).ID(membership.ID).Cols("reason").Update(membership); err != nil {
+			return err
+		}
+		return org_model.RecordTeam(ctx, team, audit_model.Event{
+			Action: "org.team.member_reason_changed", SubjectUserID: userID, Data: map[string]any{
+				"user_id": userID, "before": map[string]any{"reason": before.AuditName()},
+				"after": map[string]any{"reason": membership.Reason.AuditName()},
+			},
+		})
 	}
 	return models.RemoveTeamMember(ctx, team, userID)
 }

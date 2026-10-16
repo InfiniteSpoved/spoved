@@ -13,6 +13,7 @@ import (
 
 	"forgejo.org/models"
 	asymkey_model "forgejo.org/models/asymkey"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
@@ -36,6 +37,14 @@ import (
 // RenameUser renames a user
 func RenameUser(ctx context.Context, u *user_model.User, newUserName string) error {
 	return renameUser(ctx, u, newUserName, false)
+}
+
+// recordRenamed records the rename of a user or an organization.
+func recordRenamed(ctx context.Context, u *user_model.User, renamed map[string]any) error {
+	if u.IsOrganization() {
+		return user_model.RecordOrg(ctx, "org.organization.renamed", u, renamed)
+	}
+	return user_model.RecordUser(ctx, "account.user.renamed", u, renamed)
 }
 
 // AdminRenameUser renames a user as an admin.
@@ -114,10 +123,7 @@ func renameUser(ctx context.Context, u *user_model.User, newUserName string, doe
 			if err := repo_model.UpdateRepositoryOwnerNames(ctx, u.ID, newUserName); err != nil {
 				return err
 			}
-			if u.IsOrganization() {
-				return nil
-			}
-			return user_model.RecordUser(ctx, "account.user.renamed", u, renamed)
+			return recordRenamed(ctx, u, renamed)
 		}); err != nil {
 			u.Name = oldUserName
 			return err
@@ -169,12 +175,10 @@ func renameUser(ctx context.Context, u *user_model.User, newUserName string, doe
 		u.LowerName = strings.ToLower(oldUserName)
 		return err
 	}
-	if !u.IsOrganization() {
-		if err := user_model.RecordUser(ctx, "account.user.renamed", u, renamed); err != nil {
-			u.Name = oldUserName
-			u.LowerName = strings.ToLower(oldUserName)
-			return err
-		}
+	if err := recordRenamed(ctx, u, renamed); err != nil {
+		u.Name = oldUserName
+		u.LowerName = strings.ToLower(oldUserName)
+		return err
 	}
 
 	// Do not fail if directory does not exist
@@ -470,6 +474,17 @@ func DeleteInactiveUsers(ctx context.Context, olderThan time.Duration) error {
 
 // removeTrashedOrgMemberships takes the user out of the organizations in the trash, with the counters.
 func removeTrashedOrgMemberships(ctx context.Context, u *user_model.User) error {
+	var teams []*organization.Team
+	if err := db.GetEngine(ctx).Where("id IN (SELECT team_id FROM team_user WHERE uid = ?)", u.ID).Find(&teams); err != nil {
+		return err
+	}
+	for _, t := range teams {
+		if err := organization.RecordTeam(ctx, t, audit_model.Event{
+			Action: "org.team.member_removed", SubjectUserID: u.ID, Data: map[string]any{"user_id": u.ID},
+		}); err != nil {
+			return err
+		}
+	}
 	if _, err := db.Exec(ctx, "UPDATE `team` SET num_members = num_members - 1 WHERE id IN (SELECT team_id FROM team_user WHERE uid = ?)", u.ID); err != nil {
 		return err
 	}

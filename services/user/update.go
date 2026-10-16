@@ -177,11 +177,30 @@ func UpdateUser(ctx context.Context, u *user_model.User, opts *UpdateOptions) er
 	}
 
 	return db.WithTx(ctx, func(ctx context.Context) error {
+		stored, err := storedOrg(ctx, u)
+		if err != nil {
+			return err
+		}
 		if err := user_model.UpdateUserCols(ctx, u, cols...); err != nil {
+			return err
+		}
+		if err := user_model.RecordOrgChange(ctx, stored, u); err != nil {
 			return err
 		}
 		return user_model.RecordUserChange(ctx, before, u)
 	})
+}
+
+// storedOrg reads the stored row of u when it is an organization, so that its audited change is taken from what the
+// database held, not from u, which the caller already changed; nil for a user.
+func storedOrg(ctx context.Context, u *user_model.User) (stored *user_model.User, err error) {
+	if u.IsOrganization() {
+		var has bool
+		if stored, has, err = db.GetByID[user_model.User](ctx, u.ID); err == nil && !has {
+			err = user_model.ErrUserNotExist{UID: u.ID}
+		}
+	}
+	return stored, err
 }
 
 type UpdateAuthOptions struct {
@@ -238,6 +257,10 @@ func UpdateAuth(ctx context.Context, u *user_model.User, opts *UpdateAuthOptions
 	}
 
 	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		stored, err := storedOrg(ctx, u)
+		if err != nil {
+			return err
+		}
 		if err := user_model.UpdateUserCols(ctx, u, "login_type", "login_source", "login_name", "passwd", "passwd_hash_algo", "salt", "must_change_password", "prohibit_login"); err != nil {
 			return err
 		}
@@ -245,6 +268,9 @@ func UpdateAuth(ctx context.Context, u *user_model.User, opts *UpdateAuthOptions
 			if err := user_model.RecordUser(ctx, "account.user.password_changed", u, nil); err != nil {
 				return err
 			}
+		}
+		if err := user_model.RecordOrgChange(ctx, stored, u); err != nil {
+			return err
 		}
 		return user_model.RecordUserChange(ctx, before, u)
 	}); err != nil {

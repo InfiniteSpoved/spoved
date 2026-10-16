@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/container"
@@ -110,7 +111,15 @@ type TeamInvite struct {
 }
 
 // CreateTeamInviteByEmail creates a TeamInvite for someone who does not have an account yet.
-func CreateTeamInviteByEmail(ctx context.Context, doer *user_model.User, team *Team, email string) (*TeamInvite, error) {
+func CreateTeamInviteByEmail(ctx context.Context, doer *user_model.User, team *Team, email string) (invite *TeamInvite, err error) {
+	err = db.WithTx(ctx, func(ctx context.Context) error {
+		invite, err = createTeamInviteByEmail(ctx, doer, team, email)
+		return err
+	})
+	return invite, err
+}
+
+func createTeamInviteByEmail(ctx context.Context, doer *user_model.User, team *Team, email string) (*TeamInvite, error) {
 	existingInvite := TeamInvite{
 		TeamID: team.ID,
 		Email:  email,
@@ -121,8 +130,7 @@ func CreateTeamInviteByEmail(ctx context.Context, doer *user_model.User, team *T
 	}
 	if has {
 		if existingInvite.IsExpired() {
-			_, err := db.GetEngine(ctx).Delete(&existingInvite)
-			if err != nil {
+			if err := removeInvite(ctx, team, &existingInvite, "expired"); err != nil {
 				return nil, err
 			}
 		} else {
@@ -164,11 +172,19 @@ func CreateTeamInviteByEmail(ctx context.Context, doer *user_model.User, team *T
 		ExpiryUnix: getInviteExpiry(),
 	}
 
-	return invite, db.Insert(ctx, invite)
+	return invite, insertInvite(ctx, team, invite)
 }
 
 // CreateTeamInviteForUser creates a TeamInvite for someone who already has an account on the instance.
-func CreateTeamInviteForUser(ctx context.Context, doer, invited *user_model.User, team *Team) (*TeamInvite, error) {
+func CreateTeamInviteForUser(ctx context.Context, doer, invited *user_model.User, team *Team) (invite *TeamInvite, err error) {
+	err = db.WithTx(ctx, func(ctx context.Context) error {
+		invite, err = createTeamInviteForUser(ctx, doer, invited, team)
+		return err
+	})
+	return invite, err
+}
+
+func createTeamInviteForUser(ctx context.Context, doer, invited *user_model.User, team *Team) (*TeamInvite, error) {
 	existingInvite := TeamInvite{
 		TeamID:    team.ID,
 		InvitedID: optional.Some(invited.ID),
@@ -179,8 +195,7 @@ func CreateTeamInviteForUser(ctx context.Context, doer, invited *user_model.User
 	}
 	if has {
 		if existingInvite.IsExpired() {
-			_, err := db.GetEngine(ctx).Delete(&existingInvite)
-			if err != nil {
+			if err := removeInvite(ctx, team, &existingInvite, "expired"); err != nil {
 				return nil, err
 			}
 		} else {
@@ -223,7 +238,7 @@ func CreateTeamInviteForUser(ctx context.Context, doer, invited *user_model.User
 		ExpiryUnix:  getInviteExpiry(),
 	}
 
-	return invite, db.Insert(ctx, invite)
+	return invite, insertInvite(ctx, team, invite)
 }
 
 // GetInviteForUserByID loads a team invite issued to a given user
@@ -253,11 +268,49 @@ func GetInviteInTeamByID(ctx context.Context, inviteID, teamID int64) (*TeamInvi
 }
 
 func RemoveInviteByID(ctx context.Context, inviteID, teamID int64) error {
-	_, err := db.DeleteByBean(ctx, &TeamInvite{
-		ID:     inviteID,
-		TeamID: teamID,
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		invite, err := GetInviteInTeamByID(ctx, inviteID, teamID)
+		if IsErrTeamInviteNotFound(err) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		team, err := GetTeamByID(ctx, teamID)
+		if err != nil {
+			return err
+		}
+		return removeInvite(ctx, team, invite, "")
 	})
-	return err
+}
+
+// inviteData is what the audit log keeps of an invite: who it is for, never its token.
+func inviteData(invite *TeamInvite) map[string]any {
+	data := map[string]any{"email": invite.Email}
+	if has, id := invite.InvitedID.Get(); has {
+		data["user_id"] = id
+	}
+	return data
+}
+
+func insertInvite(ctx context.Context, team *Team, invite *TeamInvite) error {
+	if err := db.Insert(ctx, invite); err != nil {
+		return err
+	}
+	_, subject := invite.InvitedID.Get()
+	return RecordTeam(ctx, team, audit_model.Event{Action: "org.team.invite_created", SubjectUserID: subject, Data: inviteData(invite)})
+}
+
+// removeInvite deletes the invite of team, recording it with reason ("" when someone removed it) when it was there.
+func removeInvite(ctx context.Context, team *Team, invite *TeamInvite, reason string) error {
+	if n, err := db.GetEngine(ctx).ID(invite.ID).Delete(new(TeamInvite)); err != nil || n == 0 {
+		return err
+	}
+	data := inviteData(invite)
+	if reason != "" {
+		data["reason"] = reason
+	}
+	_, subject := invite.InvitedID.Get()
+	return RecordTeam(ctx, team, audit_model.Event{Action: "org.team.invite_removed", SubjectUserID: subject, Data: data})
 }
 
 // SearchMembersOptions holds the search options

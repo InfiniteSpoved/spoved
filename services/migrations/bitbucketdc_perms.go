@@ -604,7 +604,10 @@ func applyBitbucketPermissions(ctx context.Context, doer *user_model.User, org *
 				if owner.Kind == "project" {
 					return repo_service.LinkTeamToRepoGroup(ctx, doer, org, team.ID, owner.group.ID)
 				}
-				return models.AddRepository(ctx, team, owner.repo)
+				if err := models.AddRepository(ctx, team, owner.repo); err != nil {
+					return err
+				}
+				return organization.RecordTeamRepo(ctx, "org.team.repo_added", team, owner.repo)
 			})
 			if err == nil {
 				item.team = team

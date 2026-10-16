@@ -12,7 +12,6 @@ import (
 
 	"forgejo.org/models/db"
 	"forgejo.org/modules/cache"
-	setting_module "forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
 
 	"xorm.io/builder"
@@ -150,10 +149,12 @@ func DeleteUserSetting(ctx context.Context, userID int64, key string) error {
 		return err
 	}
 
-	cache.Remove(genSettingCacheKey(userID, key))
-	_, err := db.GetEngine(ctx).Delete(&Setting{UserID: userID, SettingKey: key})
-
-	return err
+	if _, err := db.GetEngine(ctx).Delete(&Setting{UserID: userID, SettingKey: key}); err != nil {
+		return err
+	}
+	// after the commit, so a rollback can't leave the cache out of step
+	db.AfterTx(ctx, func() { cache.Remove(genSettingCacheKey(userID, key)) })
+	return nil
 }
 
 // SetUserSetting updates a users' setting for a specific key
@@ -166,11 +167,8 @@ func SetUserSetting(ctx context.Context, userID int64, key, value string) error 
 		return err
 	}
 
-	cc := cache.GetCache()
-	if cc != nil {
-		return cc.Put(genSettingCacheKey(userID, key), value, setting_module.CacheService.TTLSeconds())
-	}
-
+	// after the commit, so a rollback can't leave the new value cached
+	db.AfterTx(ctx, func() { cache.Remove(genSettingCacheKey(userID, key)) })
 	return nil
 }
 
