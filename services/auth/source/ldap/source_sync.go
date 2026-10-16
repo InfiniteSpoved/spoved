@@ -22,6 +22,9 @@ import (
 	usergroup_service "forgejo.org/services/usergroup"
 )
 
+// SearchSyncEntries reads the users of the directory for Sync; a variable so that tests can sync without a server.
+var SearchSyncEntries = (*Source).SearchEntries
+
 // Sync causes this ldap source to synchronize its users with the db
 func (source *Source) Sync(ctx context.Context, updateExisting bool) error {
 	log.Trace("Doing: SyncExternalUsers[%s]", source.authSource.Name)
@@ -52,7 +55,7 @@ func (source *Source) Sync(ctx context.Context, updateExisting bool) error {
 		mailUsers[strings.ToLower(u.Email)] = u
 	}
 
-	sr, err := source.SearchEntries()
+	sr, err := SearchSyncEntries(source)
 	if err != nil {
 		log.Error("SyncExternalUsers LDAP source failure [%s], skipped", source.authSource.Name)
 		return nil

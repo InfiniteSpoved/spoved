@@ -10,6 +10,7 @@ import (
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
 )
 
@@ -55,8 +56,11 @@ func DeleteSource(ctx context.Context, source *auth.Source) error {
 		return err
 	}
 
+	// the source is gone already: a provider that can't be unregistered is only logged
 	if registerableSource, ok := source.Cfg.(auth.RegisterableSource); ok {
-		return registerableSource.UnregisterSource()
+		if err := registerableSource.UnregisterSource(); err != nil {
+			log.Error("DeleteSource: unregister %s: %v", source.Name, err)
+		}
 	}
 	return nil
 }

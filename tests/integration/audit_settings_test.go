@@ -23,17 +23,21 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/json"
+	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	"forgejo.org/routers"
 	auth_service "forgejo.org/services/auth"
+	"forgejo.org/services/auth/source/ldap"
 	"forgejo.org/services/auth/source/pam"
 	"forgejo.org/services/cron"
 	logshipping_service "forgejo.org/services/logshipping"
+	user_service "forgejo.org/services/user"
 	usergroup_service "forgejo.org/services/usergroup"
 	"forgejo.org/tests"
 
+	"github.com/markbates/goth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -186,6 +190,8 @@ func TestAuditUserGroup(t *testing.T) {
 	assert.EqualValues(t, team.ID, auditData(t, e)["team_id"])
 	require.NoError(t, usergroup_service.UnlinkTeam(ctx, group, team))
 	assert.Equal(t, team.OrgID, adminOne(t, since, "admin.user_group.team_unlinked").OwnerID)
+	require.NoError(t, usergroup_service.UnlinkTeam(ctx, group, team))
+	assert.Len(t, auditActions(t, since, "admin.user_group.team_unlinked"), 1, "unlinking a team that isn't linked records nothing")
 
 	// a login source sync: the source is the actor, and only its own memberships are removed
 	sync := audit_model.WithLoginSource(ctx, 77, "audit-source")
@@ -447,4 +453,145 @@ func TestAuditSettingsFailClosed(t *testing.T) {
 	assert.Equal(t, before[setting.Config().LogShipping.DynKey()], after[setting.Config().LogShipping.DynKey()])
 	raw, _ := json.Marshal(after)
 	assert.NotContains(t, string(raw), name)
+}
+
+// TestAuditLoginSourceSyncCounts runs the LDAP sync on a directory answer given by the test, so it needs no server.
+func TestAuditLoginSourceSyncCounts(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	payload := buildAuthSourceLDAPPayload("", "", "", "", "", "")
+	payload["name"] = "audit-sync"
+	payload["admin_filter"], payload["restricted_filter"] = "", ""
+	source := addAuthSource(t, payload)
+	entries := []*ldap.SearchResult{
+		{Username: "audit-sync-a", LowerName: "audit-sync-a", Mail: "audit-sync-a@example.com"},
+		{Username: "audit-sync-b", LowerName: "audit-sync-b", Mail: "audit-sync-b@example.com"},
+	}
+	defer test.MockVariableValue(&ldap.SearchSyncEntries, func(*ldap.Source) ([]*ldap.SearchResult, error) { return entries, nil })()
+	ctx := audit_model.WithSystem(t.Context(), "cron:sync_external_users")
+	counts := func(since int64) map[string]any {
+		t.Helper()
+		e := adminOne(t, since, "admin.login_source.synced")
+		assert.Equal(t, audit_model.ActorLoginSource, e.ActorType)
+		assert.Equal(t, source.ID, e.ActorID)
+		assert.Equal(t, "cron:sync_external_users", audit_model.ActorFromContext(ctx).Name, "the cron actor is left as it was")
+		return auditData(t, e)["counts"].(map[string]any)
+	}
+
+	since := auditMaxID(t)
+	require.NoError(t, auth_service.SyncExternalUsers(ctx, true))
+	assert.Equal(t, map[string]any{"added": float64(2), "updated": float64(0), "disabled": float64(0)}, counts(since))
+	created := auditActions(t, since, "account.user.created")
+	require.Len(t, created, 2)
+	for _, e := range created {
+		assert.Equal(t, audit_model.ActorLoginSource, e.ActorType)
+		assert.Equal(t, source.ID, e.ActorID)
+	}
+
+	// b leaves the directory: disabled once, and not counted again while it stays inactive
+	entries = entries[:1]
+	since = auditMaxID(t)
+	require.NoError(t, auth_service.SyncExternalUsers(ctx, true))
+	assert.Equal(t, map[string]any{"added": float64(0), "updated": float64(0), "disabled": float64(1)}, counts(since))
+	assert.Equal(t, audit_model.ActorLoginSource, accountOne(t, since, "account.user.updated").ActorType)
+	since = auditMaxID(t)
+	require.NoError(t, auth_service.SyncExternalUsers(ctx, true))
+	assert.Equal(t, map[string]any{"added": float64(0), "updated": float64(0), "disabled": float64(0)}, counts(since))
+	assert.Empty(t, auditActions(t, since, "account.user.updated"))
+}
+
+func TestAuditLoginSourceCLIAndRestore(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	since := auditMaxID(t)
+	_, err := runMainApp("admin", "auth", "add-ldap", "--name", "audit-cli-ldap", "--security-protocol", "unencrypted",
+		"--host", "ldap.example.com", "--port", "389", "--user-search-base", "ou=people,dc=example,dc=com",
+		"--user-filter", "(uid=%s)", "--email-attribute", "mail")
+	require.NoError(t, err)
+	source := unittest.AssertExistsAndLoadBean(t, &auth_model.Source{Name: "audit-cli-ldap"})
+	id := fmt.Sprint(source.ID)
+	_, err = runMainApp("admin", "auth", "update-ldap", "--id", id, "--host", "ldap2.example.com")
+	require.NoError(t, err)
+	e := adminOne(t, since, "admin.login_source.updated")
+	assert.Equal(t, audit_model.ActorCLI, e.ActorType)
+	assert.Equal(t, true, auditData(t, e)["config_changed"])
+	_, err = runMainApp("admin", "auth", "delete", "--id", id)
+	require.NoError(t, err)
+	assert.Equal(t, audit_model.ActorCLI, adminOne(t, since, "admin.login_source.deleted").ActorType)
+
+	// an OpenID Connect source whose new discovery URL fails to register is restored, and that is recorded
+	failing := false
+	var discovery *httptest.Server
+	discovery = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if failing && r.URL.Path == "/new/.well-known/openid-configuration" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer": discovery.URL, "authorization_endpoint": discovery.URL + "/auth", "token_endpoint": discovery.URL + "/token",
+			"userinfo_endpoint": discovery.URL + "/userinfo", "jwks_uri": discovery.URL + "/keys",
+		})
+	}))
+	defer discovery.Close()
+	payload := authSourcePayloadOpenIDConnect("audit-oidc-restore", discovery.URL+"/")
+	payload["oauth2_key"], payload["oauth2_secret"] = "client-id", "audit-client-secret"
+	oidc := addAuthSource(t, payload)
+	failing = true
+	payload["open_id_connect_auto_discovery_url"] = discovery.URL + "/new/.well-known/openid-configuration"
+	since = auditMaxID(t)
+	loginUser(t, "user1").MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/admin/auths/%d", oidc.ID), payload), http.StatusOK)
+	updates := auditActions(t, since, "admin.login_source.updated")
+	require.Len(t, updates, 2)
+	assert.NotContains(t, auditData(t, updates[0]), "reason")
+	assert.Equal(t, "register_failed", auditData(t, updates[1])["reason"])
+	assert.Equal(t, true, auditData(t, updates[1])["config_changed"])
+	assertNoSecretIn(t, since, "audit-client-secret")
+}
+
+func TestAuditUserFieldsTable(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	token := getUserToken(t, "user1", auth_model.AccessTokenScopeWriteAdmin)
+	yes, maxRepos, limit := true, 7, int64(1<<20)
+	for field, opt := range map[string]*api.EditUserOption{
+		"allow_import_local":       {AllowImportLocal: &yes},
+		"max_repo_creation":        {MaxRepoCreation: &maxRepos},
+		"personal_repo_size_limit": {PersonalRepoSizeLimit: &limit},
+	} {
+		since := auditMaxID(t)
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/admin/users/user2", opt).AddTokenAuth(token), http.StatusOK)
+		data := auditData(t, accountOne(t, since, "account.user.updated"))
+		assert.Contains(t, data["after"], field, field)
+	}
+	// category_id is set only on organizations (whose settings are recorded with the organization); the user fields follow it
+	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	since := auditMaxID(t)
+	require.NoError(t, user_service.UpdateUser(asActor(t, 1, "user1"), user, &user_service.UpdateOptions{CategoryID: optional.Some[int64](3)}))
+	assert.Equal(t, map[string]any{"category_id": float64(3)}, auditData(t, accountOne(t, since, "account.user.updated"))["after"])
+}
+
+func TestAuditOAuth2QuotaGroupSync(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	_, err := quota_model.CreateGroup(asActor(t, 1, "user1"), "audit-sso-quota")
+	require.NoError(t, err)
+	payload := authSourcePayloadGitLabCustom("gitlab")
+	payload["oauth2_quota_group_claim_name"] = "groups"
+	payload["oauth2_quota_group_map"] = `{"devs": ["audit-sso-quota"]}`
+	gitlab := addAuthSource(t, payload)
+	userGitLab := &user_model.User{
+		Name: "gitlabuser", Email: "gitlabuser@example.com", Passwd: "gitlabuserpassword",
+		Type: user_model.UserTypeIndividual, LoginType: auth_model.OAuth2, LoginSource: gitlab.ID, LoginName: "5678",
+	}
+	defer createUser(t.Context(), t, userGitLab)()
+	defer mockCompleteUserAuth(func(res http.ResponseWriter, req *http.Request) (goth.User, error) {
+		return goth.User{Provider: "gitlab", UserID: "5678", Email: userGitLab.Email, RawData: map[string]any{"groups": []string{"devs"}}}, nil
+	})()
+
+	since := auditMaxID(t)
+	MakeRequest(t, NewRequest(t, "GET", "/user/oauth2/gitlab/callback?code=XYZ&state=XYZ"), http.StatusSeeOther)
+	e := adminOne(t, since, "admin.quota_group.user_added")
+	assert.Equal(t, audit_model.ActorLoginSource, e.ActorType)
+	assert.Equal(t, gitlab.ID, e.ActorID)
+	assert.Equal(t, userGitLab.ID, e.SubjectUserID)
+	// the sign-in keeps its own actor: the user
+	signin := auditActions(t, since, "auth.signin.success")
+	require.Len(t, signin, 1)
+	assert.Equal(t, audit_model.ActorUser, signin[0].ActorType)
 }

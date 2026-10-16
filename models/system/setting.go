@@ -105,6 +105,12 @@ func SetSettings(ctx context.Context, settings map[string]string) error {
 		for k := range settings {
 			keys = append(keys, k)
 		}
+		// lock the rows (a no-op update, as GetSettingForUpdate) so that the values read are the ones replaced
+		for _, k := range keys {
+			if _, err := db.Exec(ctx, "UPDATE system_setting SET version=version WHERE setting_key=?", k); err != nil {
+				return err
+			}
+		}
 		var stored []*Setting
 		if err := e.In("setting_key", keys).Find(&stored); err != nil {
 			return err

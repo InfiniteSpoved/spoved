@@ -219,11 +219,17 @@ func UnlinkTeam(ctx context.Context, group *org_model.UserGroup, team *org_model
 		} else if org.IsArchived {
 			return org_model.ErrOrgArchived{Name: org.Name}
 		}
+		linked, err := org_model.IsUserGroupLinkedToTeam(ctx, group.ID, team.ID)
+		if err != nil {
+			return err
+		}
 		if err := org_model.DeleteUserGroupTeam(ctx, group.ID, team.ID); err != nil {
 			return err
 		}
-		if err := recordTeamLink(ctx, "admin.user_group.team_unlinked", group, team); err != nil {
-			return err
+		if linked {
+			if err := recordTeamLink(ctx, "admin.user_group.team_unlinked", group, team); err != nil {
+				return err
+			}
 		}
 		return syncGroupMembersForTeam(ctx, group.ID, team)
 	})

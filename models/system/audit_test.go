@@ -69,4 +69,28 @@ func TestSetSettingsAudit(t *testing.T) {
 	since = maxAuditID(t)
 	require.NoError(t, system.SetSettings(ctx, map[string]string{"log_shipping.destinations": `{}`}))
 	assert.Nil(t, lastSettingEntry(t, since))
+
+	// values that would pass the data cap together: the ones over the budget are recorded as hashes
+	var keys []string
+	for _, k := range audit_model.Fields["setting"] {
+		if k != "keys" && k != "hashed" {
+			keys = append(keys, k)
+		}
+	}
+	value := func(c string) string { return `"` + strings.Repeat(c, 1990) + `"` }
+	all := func(c string) map[string]string {
+		m := map[string]string{}
+		for _, k := range keys {
+			m[k] = value(c)
+		}
+		return m
+	}
+	require.NoError(t, system.SetSettings(ctx, all("a")))
+	since = maxAuditID(t)
+	require.NoError(t, system.SetSettings(ctx, all("b")))
+	data = lastSettingEntry(t, since)
+	assert.Equal(t, true, data["truncated"])
+	assert.NotEmpty(t, data["after"])
+	assert.NotEmpty(t, data["hashed"])
+	assert.Len(t, data["keys"], len(keys))
 }

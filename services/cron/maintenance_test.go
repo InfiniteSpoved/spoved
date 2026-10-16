@@ -59,6 +59,12 @@ func TestCronAuditActor(t *testing.T) {
 	assert.EqualValues(t, 1, recorded[0].ActorID)
 	assert.Equal(t, "actor test", recorded[0].TargetName)
 
+	// a run by hand while the task is already running doesn't run, and records nothing
+	require.True(t, taskStatusTable.StartIfNotRunning(task.Name))
+	task.RunWithUser(audit_model.WithActor(t.Context(), admin), &user_model.User{ID: 1, Name: "user1"}, nil)
+	taskStatusTable.Stop(task.Name)
+	assert.Len(t, recorded, 1)
+
 	// a run by hand that can't be recorded doesn't run
 	got = nil
 	defer test.MockVariableValue(&audit_model.InsertEntry, func(context.Context, *audit_model.Entry) error {

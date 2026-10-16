@@ -54,8 +54,8 @@ func recordSettings(ctx context.Context, before, after map[string]string) error 
 				continue
 			}
 		}
-		if len(v) > maxSettingValue || len(old) > maxSettingValue {
-			data["truncated"] = true
+		if slices.Contains(audit_model.Fields["setting"], k) {
+			data["truncated"] = true // a value that would have been recorded is cut to its hash (too long, or over the budget)
 		}
 		h := map[string]any{"after": sha256Hex(v)}
 		if had {
