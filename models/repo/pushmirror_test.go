@@ -121,7 +121,7 @@ func TestPushMirrorBranchFilter(t *testing.T) {
 		unittest.AssertSuccessfulInsert(t, m)
 
 		m.BranchFilter = "main,develop"
-		require.NoError(t, repo_model.UpdatePushMirrorBranchFilter(db.DefaultContext, m))
+		require.NoError(t, repo_model.UpdatePushMirrorSettings(db.DefaultContext, m, "branch_filter"))
 
 		updated := unittest.AssertExistsAndLoadBean(t, &repo_model.PushMirror{ID: m.ID})
 		assert.Equal(t, "main,develop", updated.BranchFilter)

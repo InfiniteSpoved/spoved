@@ -8,6 +8,7 @@ import (
 
 	"forgejo.org/modules/git"
 	"forgejo.org/services/context"
+	repo_service "forgejo.org/services/repository"
 )
 
 // GitHooks hooks of a repository
@@ -56,9 +57,8 @@ func GitHooksEditPost(ctx *context.Context) {
 		}
 		return
 	}
-	hook.Content = ctx.FormString("content")
-	if err = hook.Update(); err != nil {
-		ctx.ServerError("hook.Update", err)
+	if err = repo_service.UpdateGitHook(ctx, ctx.Repo.Repository, hook, ctx.FormString("content")); err != nil {
+		ctx.ServerError("UpdateGitHook", err)
 		return
 	}
 	ctx.Redirect(ctx.Repo.RepoLink + "/settings/hooks/git")

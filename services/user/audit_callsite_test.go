@@ -122,6 +122,20 @@ var auditedWrites = map[string]string{
 	"services/repository.pushUpdates":                     "the default branch of the first push to an empty repository: push activity (PR 3)",
 	"services/repository/files.ChangeRepoFiles":           "the default branch of the first commit to an empty repository: push activity (PR 3)",
 	"services/user.BlockUser":                             "records repo.collaborator.removed and repo.transfer.canceled (reason blocked)",
+
+	// repository integrations
+	"models/repo.deletePushMirrors":              "records repo.push_mirror.deleted for each",
+	"models/webhook.DeleteWebhookByID":           "records <level>.webhook.deleted",
+	"models/webhook.DeleteDefaultSystemWebhook":  "records admin.webhook.deleted",
+	"models/webhook.DeleteOrphanedGroupWebhooks": "doctor: hooks of projects that no longer exist",
+	"models/git.DeleteProtectedBranch":           "records repo.branch_protection.deleted",
+	"models/git.DeleteOrgProtectedBranch":        "records org.branch_protection.deleted",
+	"models/git.DeleteOrgProtectedBranches":      "part of org.organization.deleted: the rules of the deleted organization",
+	"models/git.DeleteOrphanedProtectedBranches": "doctor: rules of repositories or organizations that no longer exist",
+	"models/git.DeleteProtectedTag":              "records repo.tag_protection.deleted",
+	"models/secret.DeleteSecret":                 "records <level>.actions_secret.deleted",
+	"models/actions.DeleteRun":                   "its caller services/actions.deleteRun records repo.actions_run.deleted, or its callers DeleteOldRuns/CleanupRuns record repo.actions_runs.*",
+	"models/actions.DeleteUnkeptRun":             "its callers DeleteOldRuns and CleanupRuns record repo.actions_runs.deleted_old|cleaned",
 }
 
 // TestAuditCallSites walks the code for writes of the audited user columns (UpdateUserCols, and Update/Exec chains on
@@ -265,6 +279,7 @@ var auditedDeletes = []string{
 	"Source", "UserGroup", "UserGroupUser", "UserGroupTeam", "Rule", "Group", "GroupMapping", "GroupRuleMapping",
 	"Team", "TeamUser", "TeamRepo", "TeamUnit", "TeamGroup", "TeamInvite", "OrgUser", "OrgVerifiedDomain", "OrgUnit",
 	"Repository", "Collaboration", "RepoUnit", "Mirror", "RepoTransfer", "RepoGroup",
+	"PushMirror", "Webhook", "ProtectedBranch", "ProtectedTag", "PushRule", "Secret", "ActionVariable", "ActionRun",
 }
 
 // auditedDeleteTables are the tables of auditedDeletes that raw deletes (builder.Delete(...).From(table)) name.
@@ -273,6 +288,7 @@ var auditedDeleteTables = []string{
 	"user_group_user", "user_group_team", "quota_rule", "quota_group", "quota_group_mapping", "quota_group_rule_mapping",
 	"team", "team_user", "team_repo", "team_unit", "team_group", "team_invite", "org_user", "org_verified_domain", "org_unit",
 	"repository", "collaboration", "repo_unit", "mirror", "repo_transfer", "repo_group",
+	"push_mirror", "webhook", "protected_branch", "protected_tag", "push_rule", "secret", "action_variable", "action_run",
 }
 
 // deletesAuditedTable reports whether the SQL statement sql deletes rows of a table of auditedDeleteTables.

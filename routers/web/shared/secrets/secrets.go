@@ -58,7 +58,7 @@ func EditSecretPost(ctx *context.Context, ownerID, groupID, repoID, id int64, re
 		secret.SetData(util.ReserveLineBreakForTextarea(form.Data))
 	}
 
-	err = secret_model.UpdateSecret(ctx, secret)
+	err = secret_model.UpdateSecret(ctx, secret, form.Data != "")
 	if err != nil {
 		log.Error("UpdateSecret failed: %v", err)
 		ctx.JSONError(ctx.Tr("actions.secrets.mutation.failure_message", secret.Name))

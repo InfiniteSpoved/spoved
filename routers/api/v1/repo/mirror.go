@@ -121,6 +121,11 @@ func PushMirrorSync(ctx *context.APIContext) {
 		return
 	}
 	for _, mirror := range pushMirrors {
+		mirror.Repo = ctx.Repo().Repository
+		if err := repo_model.RecordPushMirrorSync(ctx, mirror); err != nil {
+			ctx.ServerError("RecordPushMirrorSync", err)
+			return
+		}
 		ok := mirror_service.SyncPushMirror(ctx, mirror.ID)
 		if !ok {
 			ctx.Error(http.StatusInternalServerError, "PushMirrorSync", "error occurred when syncing push mirror "+mirror.RemoteName)
@@ -416,7 +421,7 @@ func CreatePushMirror(ctx *context.APIContext, mirrorOption *api.CreatePushMirro
 		pushMirror.PublicKey = string(publicKey)
 	}
 
-	if err = db.Insert(ctx, pushMirror); err != nil {
+	if err = repo_model.InsertPushMirror(ctx, pushMirror, address != remoteAddress); err != nil {
 		ctx.ServerError("InsertPushMirror", err)
 		return
 	}

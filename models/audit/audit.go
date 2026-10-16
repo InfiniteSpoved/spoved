@@ -176,6 +176,35 @@ var Fields = map[string][]string{
 	"runner_token":       {"level"},
 	"signin":             {"method", "reason"},
 	"ssh_key":            {"expires", "name", "fingerprint", "key_type", "login_source_id"},
+	"webhook": {
+		"origin", "type", "http_method", "content_type", "is_active", "events", "branch_filter", "kind", "secret_set",
+		"authorization_set", "secret_changed", "authorization_changed", "url_changed",
+	},
+	"push_mirror": {"remote_name", "address", "interval", "sync_on_commit", "branch_filter", "use_ssh", "credentials_set"},
+	"git_hook":    {"name", "active"},
+	"branch_protection": {
+		"rule_name", "can_push", "enable_whitelist", "whitelist_user_ids", "whitelist_team_ids", "enable_merge_whitelist",
+		"whitelist_deploy_keys", "whitelist_deploy_key_ids", "merge_whitelist_user_ids", "merge_whitelist_team_ids",
+		"enable_status_check", "status_check_contexts", "enable_approvals_whitelist", "approvals_whitelist_user_ids",
+		"approvals_whitelist_team_ids", "required_approvals", "block_on_rejected_reviews", "block_on_official_review_requests",
+		"block_on_outdated_branch", "dismiss_stale_approvals", "ignore_stale_approvals", "require_signed_commits",
+		"protected_file_patterns", "unprotected_file_patterns", "apply_to_admins", "block_on_unresolved_conversations",
+		"ignore_outdated_conversations", "block_on_incomplete_tasks", "delete_allowlist_user_ids", "delete_allowlist_team_ids",
+		"delete_allowlist_deploy_key_ids", "force_push_allowlist_user_ids", "force_push_allowlist_team_ids",
+		"force_push_allowlist_deploy_key_ids", "apply_to_selected_repos", "approval_rules", "repo_ids",
+	},
+	"tag_protection": {"name_pattern", "allowlist_user_ids", "allowlist_team_ids", "allowlist_deploy_key_ids"},
+	"push_rule": {
+		"commit_message_regex", "commit_message_banned_regex", "branch_name_regex", "require_verified_author_email",
+		"max_file_size_mb", "banned_file_patterns", "pr_title_regex", "pr_title_banned_regex", "pr_title_message",
+		"pr_title_branches", "pr_title_block_merge",
+	},
+	"actions_secret":   {"name", "value_changed"},
+	"actions_variable": {"name", "value_changed"},
+	"actions_run":      {"index", "workflow", "counts"},
+	"actions_runs":     {"older_than_days", "run_ids"},
+	"actions_artifact": {"name", "run_id"},
+	"actions_cleanup":  {},
 }
 
 // sharedKeys are the top-level data keys every target type may carry.
@@ -389,3 +418,7 @@ func halveLongest[T any](data map[string]any) bool {
 	set(longest[:len(longest)/2])
 	return true
 }
+
+// LevelActions are the action keys of one change of a setting that exists at several levels (a webhook, an Actions
+// secret or variable), so that each key is a literal at its call site.
+type LevelActions struct{ Repo, Org, Account, Admin string }

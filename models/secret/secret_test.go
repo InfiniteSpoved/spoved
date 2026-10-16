@@ -220,7 +220,7 @@ func TestSecretUpdateSecret(t *testing.T) {
 	secret.Name = "new_name"
 	secret.SetData("also very secret")
 
-	err = UpdateSecret(t.Context(), secret)
+	err = UpdateSecret(t.Context(), secret, true)
 	require.NoError(t, err)
 
 	updatedSecret := unittest.AssertExistsAndLoadBean(t, &Secret{ID: secret.ID})
@@ -240,7 +240,7 @@ func TestSecretUpdateSecret_RejectsInvalidName(t *testing.T) {
 	secret.Name = "GITHUB_IS_REJECTED" // Because it starts with `GITHUB_`.
 	secret.SetData("also very secret")
 
-	err = UpdateSecret(t.Context(), secret)
+	err = UpdateSecret(t.Context(), secret, true)
 	require.ErrorContains(t, err, "invalid secret name")
 
 	updatedSecret := unittest.AssertExistsAndLoadBean(t, &Secret{ID: secret.ID})

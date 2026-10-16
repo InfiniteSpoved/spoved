@@ -319,6 +319,9 @@ func deleteRun(ctx context.Context, runID int64, unlessKept bool) error {
 				}
 				return err
 			}
+		} else if err := recordRunDeleted(ctx, run); err != nil {
+			// an explicit delete is recorded before the storage deletes below, which a rollback can't undo
+			return err
 		}
 
 		err = actions_model.SetArtifactsOfRunDeleted(ctx, runID)

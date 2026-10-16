@@ -312,7 +312,7 @@ func TestUpdateWebhook(t *testing.T) {
 	hook.IsActive = true
 	hook.ContentType = ContentTypeForm
 	unittest.AssertNotExistsBean(t, hook)
-	require.NoError(t, UpdateWebhook(db.DefaultContext, hook))
+	require.NoError(t, UpdateWebhook(db.DefaultContext, hook, false, false))
 	unittest.AssertExistsAndLoadBean(t, hook)
 }
 

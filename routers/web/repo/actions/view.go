@@ -870,7 +870,7 @@ func ArtifactsDeleteView(ctx *app_context.Context) {
 		}, err)
 		return
 	}
-	if err = actions_model.SetArtifactNeedDelete(ctx, run.ID, artifactName); err != nil {
+	if err = actions_model.DeleteArtifactOfRun(ctx, ctx.Repo.Repository, run.ID, artifactName); err != nil {
 		ctx.Error(http.StatusInternalServerError, err.Error())
 		return
 	}
