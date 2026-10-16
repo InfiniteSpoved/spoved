@@ -658,8 +658,8 @@ func NewReleasePost(ctx *context.Context) {
 	}
 	log.Trace("Release created: %s/%s:%s", ctx.Doer.LowerName, ctx.Repo.Repository.Name, form.TagName)
 
-	ctx.Redirect(ctx.Repo.RepoLink + "/releases")
 	common.RecordUpload(ctx.Base, ctx.Repo.Repository, nil, "release", "create", strconv.FormatInt(rel.ID, 10), -1)
+	ctx.Redirect(ctx.Repo.RepoLink + "/releases")
 }
 
 // GenerateReleaseNotes returns release notes generated from the pull requests merged since the previous tag
@@ -857,8 +857,8 @@ func EditReleasePost(ctx *context.Context) {
 		}
 		return
 	}
-	ctx.Redirect(ctx.Repo.RepoLink + "/releases")
 	common.RecordUpload(ctx.Base, ctx.Repo.Repository, nil, "release", "update", strconv.FormatInt(rel.ID, 10), -1)
+	ctx.Redirect(ctx.Repo.RepoLink + "/releases")
 }
 
 // DeleteRelease deletes a release

@@ -63,10 +63,10 @@ func uploadAttachment(ctx *context.Context, repoID int64, allowedTypes string) {
 	}
 
 	log.Trace("New attachment uploaded: %s", attach.UUID)
+	common.RecordUpload(ctx.Base, ctx.Repo.Repository, nil, "attachment", "create", strconv.FormatInt(attach.ID, 10), attach.Size)
 	ctx.JSON(http.StatusOK, map[string]string{
 		"uuid": attach.UUID,
 	})
-	common.RecordUpload(ctx.Base, ctx.Repo.Repository, nil, "attachment", "create", strconv.FormatInt(attach.ID, 10), attach.Size)
 }
 
 // DeleteAttachment response for deleting issue's attachment
