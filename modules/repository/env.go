@@ -4,10 +4,13 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
+	audit_model "forgejo.org/models/audit"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/setting"
@@ -29,6 +32,9 @@ const (
 	EnvIsInternal        = "GITEA_INTERNAL_PUSH"
 	EnvAppURL            = "GITEA_ROOT_URL"
 	EnvActionTaskID      = "GITEA_ACTION_TASK_ID"
+	EnvAuditCredential   = "GITEA_AUDIT_CREDENTIAL" // <type>:<id> of the credential that pushes, checked again by the hook
+	EnvAuditIP           = "GITEA_AUDIT_IP"
+	EnvAuditRequestID    = "GITEA_AUDIT_REQUEST_ID"
 )
 
 type PushTrigger string
@@ -36,25 +42,42 @@ type PushTrigger string
 const (
 	PushTriggerPRMergeToBase    PushTrigger = "pr-merge-to-base"
 	PushTriggerPRUpdateWithBase PushTrigger = "pr-update-with-base"
+	PushTriggerWeb              PushTrigger = "web" // any other push the server makes, e.g. the web editor
 )
+
+// AuditEnv is the hook environment that tells the audit log who pushes. All three keys are always set, and callers
+// append them after the inherited environment, so that a value inherited from the server's own environment never
+// wins.
+func AuditEnv(credential, ip, requestID string) []string {
+	return []string{EnvAuditCredential + "=" + credential, EnvAuditIP + "=" + ip, EnvAuditRequestID + "=" + requestID}
+}
+
+// AuditEnvironment is AuditEnv for the audit actor of ctx; empty values without one.
+func AuditEnvironment(ctx context.Context) []string {
+	a := audit_model.ActorFromContext(ctx)
+	if a == nil {
+		return AuditEnv("", "", "")
+	}
+	return AuditEnv(a.Credential.Type+":"+strconv.FormatInt(a.Credential.ID, 10), a.IP, a.RequestID)
+}
 
 // InternalPushingEnvironment returns an os environment to switch off hooks on push
 // It is recommended to avoid using this unless you are pushing within a transaction
 // or if you absolutely are sure that post-receive and pre-receive will do nothing
 // We provide the full pushing-environment for other hook providers
-func InternalPushingEnvironment(doer *user_model.User, repo *repo_model.Repository) []string {
-	return append(PushingEnvironment(doer, repo),
+func InternalPushingEnvironment(ctx context.Context, doer *user_model.User, repo *repo_model.Repository) []string {
+	return append(PushingEnvironment(ctx, doer, repo),
 		EnvIsInternal+"=true",
 	)
 }
 
 // PushingEnvironment returns an os environment to allow hooks to work on push
-func PushingEnvironment(doer *user_model.User, repo *repo_model.Repository) []string {
-	return FullPushingEnvironment(doer, doer, repo, repo.Name, 0)
+func PushingEnvironment(ctx context.Context, doer *user_model.User, repo *repo_model.Repository) []string {
+	return FullPushingEnvironment(ctx, doer, doer, repo, repo.Name, 0)
 }
 
 // FullPushingEnvironment returns an os environment to allow hooks to work on push
-func FullPushingEnvironment(author, committer *user_model.User, repo *repo_model.Repository, repoName string, prID int64) []string {
+func FullPushingEnvironment(ctx context.Context, author, committer *user_model.User, repo *repo_model.Repository, repoName string, prID int64) []string {
 	isWiki := "false"
 	if strings.HasSuffix(repoName, ".wiki") {
 		isWiki = "true"
@@ -77,7 +100,9 @@ func FullPushingEnvironment(author, committer *user_model.User, repo *repo_model
 		EnvPRID+"="+fmt.Sprintf("%d", prID),
 		EnvAppURL+"="+setting.AppURL,
 		"SSH_ORIGINAL_COMMAND=gitea-internal",
+		EnvPushTrigger+"="+string(PushTriggerWeb), // a merge appends its own
 	)
+	environ = append(environ, AuditEnvironment(ctx)...)
 
 	if !committer.KeepEmailPrivate {
 		environ = append(environ, EnvPusherEmail+"="+committer.Email)

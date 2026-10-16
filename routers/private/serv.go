@@ -465,6 +465,13 @@ func ServCommand(ctx *context.PrivateContext) {
 		return
 	}
 
+	// a refused push is recorded; LFS and reads are not pushes
+	refused := func(reason string) {
+		if repoExist && ctx.FormString("verb") == "git-receive-pack" {
+			repo_model.RecordPushRefused(ctx, repo, reason, "")
+		}
+	}
+
 	// Permissions checking:
 	if repoExist &&
 		(mode > perm.AccessModeRead ||
@@ -474,6 +481,7 @@ func ServCommand(ctx *context.PrivateContext) {
 			setting.Service.RequireSignInView) {
 		if key.Type == asymkey_model.KeyTypeDeploy {
 			if deployKey.Mode < mode {
+				refused("read_only_key")
 				ctx.JSON(http.StatusUnauthorized, private.Response{
 					UserMsg: fmt.Sprintf("Deploy Key: %d:%s is not authorized to %s %s/%s.", key.ID, key.Name, modeString, results.OwnerName, results.RepoName),
 				})
@@ -511,6 +519,7 @@ func ServCommand(ctx *context.PrivateContext) {
 			userMode := perm.UnitAccessMode(unitType)
 
 			if userMode < mode {
+				refused("permission")
 				sshLogger.Warn("Failed authentication attempt for %s with key %s (not authorized to %s %s/%s) from %s", user.Name, key.Name, modeString, ownerName, repoName, ctx.RemoteAddr())
 				ctx.JSON(http.StatusUnauthorized, private.Response{
 					UserMsg: fmt.Sprintf("User: %d:%s with Key: %d:%s is not authorized to %s %s/%s.", user.ID, user.Name, key.ID, key.Name, modeString, ownerName, repoName),
@@ -533,6 +542,7 @@ func ServCommand(ctx *context.PrivateContext) {
 				doerID = user.ID
 			}
 			sshLogger.Warn("Personal repository size limit reached for %s (%d of %d bytes): SSH write to %s refused", owner.Name, l.Used, l.Limit, fullName)
+			refused("size_lock")
 			ctx.JSON(http.StatusForbidden, private.Response{UserMsg: l.MessageFor(doerID, owner.ID)})
 			return
 		}
@@ -619,6 +629,7 @@ func ServCommand(ctx *context.PrivateContext) {
 		results.RepoName,
 		results.RepoID)
 
+	results.RequestID = actor.RequestID
 	ctx.JSON(http.StatusOK, results)
 	// We will update the keys in a different call.
 }

@@ -411,6 +411,7 @@ func doMergeAndPush(ctx context.Context, pr *issues_model.PullRequest, doer *use
 	}
 
 	mergeCtx.env = repo_module.FullPushingEnvironment(
+		ctx,
 		headUser,
 		doer,
 		pr.BaseRepo,

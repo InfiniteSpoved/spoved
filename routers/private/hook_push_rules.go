@@ -97,7 +97,7 @@ func (ctx *preReceiveContext) checkPushRules(oldCommitID, newCommitID, branchNam
 		return true
 	case errors.As(err, &ruleErr), errors.Is(err, errPushTooLarge):
 		log.Warn("Forbidden: push to branch %s in %-v rejected by push rule: %v", branchName, repo, err)
-		ctx.JSON(http.StatusForbidden, private.Response{UserMsg: fmt.Sprintf("push rule: %v", err)})
+		ctx.refuse(http.StatusForbidden, "push_rule", git.BranchPrefix+branchName, fmt.Sprintf("push rule: %v", err))
 	default:
 		log.Error("Unable to check the push rule for branch %s in %-v: %v", branchName, repo, err)
 		ctx.JSON(http.StatusInternalServerError, private.Response{Err: fmt.Sprintf("Unable to check the push rule: %v", err)})

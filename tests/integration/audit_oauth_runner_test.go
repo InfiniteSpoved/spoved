@@ -34,11 +34,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// auditSince returns every entry written after since, except sign-in and credential activity.
+// auditSince returns every entry written after since, except sign-in, credential and request activity.
 func auditSince(t *testing.T, since int64) []*audit_model.Entry {
 	t.Helper()
 	var entries []*audit_model.Entry
-	require.NoError(t, db.GetEngine(t.Context()).Where("id > ? AND category <> ?", since, audit_model.CategoryAuth).OrderBy("id").Find(&entries))
+	require.NoError(t, db.GetEngine(t.Context()).Where("id > ? AND category NOT IN (?, ?)", since, audit_model.CategoryAuth, audit_model.CategoryActivity).OrderBy("id").Find(&entries))
 	return entries
 }
 

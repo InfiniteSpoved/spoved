@@ -46,6 +46,7 @@ type ServCommandResults struct {
 	RepoName       string
 	RepoID         int64
 	ExpiresUnix    timeutil.TimeStamp // expiry of the key (deploy key or public key) used, 0 = never
+	RequestID      string             // of the audit entries of this command, passed on to the hooks
 }
 
 // ServCommand preps for a serv call

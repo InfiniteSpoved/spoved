@@ -33,7 +33,7 @@ func SyncFork(ctx context.Context, doer *user_model.User, repo *repo_model.Repos
 	err = git.Push(ctx, repo.BaseRepo.RepoPath(), git.PushOptions{
 		Remote: repo.RepoPath(),
 		Branch: fmt.Sprintf("%s:%s", branch, branch),
-		Env:    repo_module.PushingEnvironment(doer, repo),
+		Env:    repo_module.PushingEnvironment(ctx, doer, repo),
 	})
 
 	return err
