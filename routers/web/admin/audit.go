@@ -5,6 +5,7 @@ package admin
 
 import (
 	"errors"
+	"html"
 	"html/template"
 	"maps"
 	"math"
@@ -46,7 +47,7 @@ type auditRow struct {
 	*audit_model.Entry
 	Time       string
 	SudoByName string
-	// Event is the translated action; the target is passed only to a phrase that has a %s for it.
+	// Event is the translated action; the target fills a %s in the phrase, or follows it after a dot.
 	Event   template.HTML
 	Changes []auditChange
 	Details map[string]string
@@ -316,6 +317,9 @@ func Audit(ctx *context.Context) {
 				r.Event = ctx.Locale.Tr("admin.audit.action."+e.Action, e.TargetName)
 			} else {
 				r.Event = ctx.Locale.Tr("admin.audit.action." + e.Action)
+				if e.TargetName != "" {
+					r.Event += " · " + template.HTML(html.EscapeString(e.TargetName))
+				}
 			}
 		}
 		rows = append(rows, r)
