@@ -99,6 +99,16 @@ func (t *Task) RunWithUser(ctx context.Context, doer *user_model.User, config Co
 	defer func() {
 		taskStatusTable.Stop(t.Name)
 	}()
+	if actor.Type == audit_model.ActorUser {
+		// a run started by hand is recorded once it starts, and not run when it can't be recorded
+		if err := audit_model.Record(audit_model.WithActor(ctx, actor), audit_model.Event{
+			Action: "admin.cron.run", Result: audit_model.ResultSuccess, TargetType: "cron_task", TargetName: t.Name,
+			Data: map[string]any{"name": t.Name},
+		}); err != nil {
+			log.Error("Not running cron task %s: audit: %v", t.Name, err)
+			return
+		}
+	}
 	graceful.GetManager().RunWithShutdownContext(func(baseCtx context.Context) {
 		defer func() {
 			if err := recover(); err != nil {

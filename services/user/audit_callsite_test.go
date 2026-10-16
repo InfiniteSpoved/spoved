@@ -69,6 +69,24 @@ var auditedWrites = map[string]string{
 	"models/actions.FixRunnersWithoutBelongingOwner": "doctor: runners of owners that no longer exist",
 	"models/actions.FixRunnersWithoutBelongingRepo":  "doctor: runners of repositories that no longer exist",
 	"models/organization.DeleteOrganization":         "runners of the deleted organization: part of the organization delete (settings audit)",
+
+	// login sources, user groups, quota, dynamic settings
+	"models/auth.CreateSource":                        "records admin.login_source.created (and deleted when registering fails)",
+	"services/auth.DeleteSource":                      "records admin.login_source.deleted",
+	"services/usergroup.DeleteGroup":                  "records admin.user_group.deleted",
+	"models/organization.DeleteUserGroupMember":       "its caller RemoveMember records admin.user_group.member_removed",
+	"models/organization.DeleteSyncedUserGroupMember": "its caller SyncDirectoryGroups records admin.user_group.member_removed",
+	"models/organization.DeleteUserGroupTeam":         "its callers UnlinkTeam (records admin.user_group.team_unlinked) and syncOrgAdminLinks",
+	"services/usergroup.syncOrgAdminLinks":            "managed links follow the org-admin role and exclusions, recorded with the group or exclusion change",
+	"models.DeleteTeam":                               "group links of the deleted team: part of the team delete (settings audit, orgs and teams)",
+	"models/quota.DeleteRuleByName":                   "records admin.quota_rule.deleted",
+	"models/quota.DeleteGroupByName":                  "records admin.quota_group.deleted",
+	"models/quota.(*Group).RemoveUserByID":            "records admin.quota_group.user_removed",
+	"models/quota.(*Group).RemoveRuleByName":          "records admin.quota_group.rule_removed",
+	"models/quota.SetUserGroups":                      "records admin.quota_group.user_groups_set",
+	"models/system.SetSettings":                       "records admin.setting.changed",
+	"models/system.GetRevision":                       "not a setting: the revision counter of the settings cache",
+	"models/system.GetSettingForUpdate":               "not a change: a no-op update that locks the row",
 }
 
 // TestAuditCallSites walks the code for writes of the audited user columns (UpdateUserCols, and Update/Exec chains on
@@ -153,6 +171,9 @@ func isAuditedWrite(call *ast.CallExpr) bool {
 			return !lit
 		}) || call.Ellipsis.IsValid()
 	case "Update", "Exec":
+		if writesSystemSetting(call) {
+			return true
+		}
 		var lits []string
 		userTable := false
 		for c := call; c != nil; c = receiverCall(c) {
@@ -198,10 +219,27 @@ func isAuditedWrite(call *ast.CallExpr) bool {
 var auditedDeletes = []string{
 	"PublicKey", "AccessToken", "GPGKey", "DeployKey", "OrgDeployKey", "OrgDeployKeyRepo",
 	"OAuth2Application", "OAuth2Grant", "AuthorizedIntegration", "ActionRunner",
+	"Source", "UserGroup", "UserGroupUser", "UserGroupTeam", "Rule", "Group", "GroupMapping", "GroupRuleMapping",
 }
 
 // auditedDeleteTables are the tables of auditedDeletes that raw deletes (builder.Delete(...).From(table)) name.
-var auditedDeleteTables = []string{"oauth2_application", "oauth2_grant", "authorized_integration", "action_runner"}
+var auditedDeleteTables = []string{
+	"oauth2_application", "oauth2_grant", "authorized_integration", "action_runner", "login_source", "user_group",
+	"user_group_user", "user_group_team", "quota_rule", "quota_group", "quota_group_mapping", "quota_group_rule_mapping",
+}
+
+// writesSystemSetting reports whether an Update or Exec chain writes the system_setting table, whose writes only
+// SetSettings may make (it records them).
+func writesSystemSetting(call *ast.CallExpr) bool {
+	for c := call; c != nil; c = receiverCall(c) {
+		for _, l := range literals(c) {
+			if strings.Contains(strings.ToLower(l), "system_setting") {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 func isAuditedColumn(s string) bool {
 	return slices.Contains(auditedUserColumns, s)

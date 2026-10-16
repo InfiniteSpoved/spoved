@@ -23,9 +23,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"forgejo.org/models"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	org_model "forgejo.org/models/organization"
 	user_model "forgejo.org/models/user"
@@ -66,6 +69,9 @@ func addMember(ctx context.Context, group *org_model.UserGroup, user *user_model
 		if err := org_model.InsertUserGroupMember(ctx, group.ID, user.ID, loginSourceID); err != nil {
 			return err
 		}
+		if err := recordGroup(ctx, "admin.user_group.member_added", group, user.ID, user.ID, memberData(user.ID, loginSourceID)); err != nil {
+			return err
+		}
 		if err := syncRoles(ctx, group.ID, user.ID); err != nil {
 			return err
 		}
@@ -77,8 +83,17 @@ func addMember(ctx context.Context, group *org_model.UserGroup, user *user_model
 // was only a member of because of the group.
 func RemoveMember(ctx context.Context, group *org_model.UserGroup, userID int64) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
+		isMember, err := org_model.IsUserGroupMember(ctx, group.ID, userID)
+		if err != nil {
+			return err
+		}
 		if err := org_model.DeleteUserGroupMember(ctx, group.ID, userID); err != nil {
 			return err
+		}
+		if isMember {
+			if err := recordGroup(ctx, "admin.user_group.member_removed", group, userID, userID, memberData(userID, 0)); err != nil {
+				return err
+			}
 		}
 		if err := syncRoles(ctx, group.ID, userID); err != nil {
 			return err
@@ -136,6 +151,11 @@ func SyncDirectoryGroups(ctx context.Context, user *user_model.User, loginSource
 			if err != nil || !deleted {
 				return err
 			}
+			data := memberData(user.ID, loginSourceID)
+			data["reason"] = "login_source_sync"
+			if err := recordGroup(ctx, "admin.user_group.member_removed", group, user.ID, user.ID, data); err != nil {
+				return err
+			}
 			if err := syncRoles(ctx, group.ID, user.ID); err != nil {
 				return err
 			}
@@ -183,6 +203,9 @@ func LinkTeam(ctx context.Context, group *org_model.UserGroup, team *org_model.T
 		if err := org_model.InsertUserGroupTeam(ctx, group.ID, team, org_model.LinkManual); err != nil {
 			return err
 		}
+		if err := recordTeamLink(ctx, "admin.user_group.team_linked", group, team); err != nil {
+			return err
+		}
 		return syncGroupMembersForTeam(ctx, group.ID, team)
 	})
 }
@@ -196,8 +219,17 @@ func UnlinkTeam(ctx context.Context, group *org_model.UserGroup, team *org_model
 		} else if org.IsArchived {
 			return org_model.ErrOrgArchived{Name: org.Name}
 		}
+		linked, err := org_model.IsUserGroupLinkedToTeam(ctx, group.ID, team.ID)
+		if err != nil {
+			return err
+		}
 		if err := org_model.DeleteUserGroupTeam(ctx, group.ID, team.ID); err != nil {
 			return err
+		}
+		if linked {
+			if err := recordTeamLink(ctx, "admin.user_group.team_unlinked", group, team); err != nil {
+				return err
+			}
 		}
 		return syncGroupMembersForTeam(ctx, group.ID, team)
 	})
@@ -222,6 +254,9 @@ func CreateGroup(ctx context.Context, group *org_model.UserGroup) error {
 		if err := org_model.InsertUserGroup(ctx, group); err != nil {
 			return err
 		}
+		if err := recordGroup(ctx, "admin.user_group.created", group, 0, 0, groupFields(group)); err != nil {
+			return err
+		}
 		if !group.GrantsOrgAdmin {
 			return nil
 		}
@@ -239,6 +274,11 @@ func UpdateGroup(ctx context.Context, group *org_model.UserGroup) error {
 		}
 		if err := org_model.UpdateUserGroup(ctx, group); err != nil {
 			return err
+		}
+		if data := audit_model.Changes(groupFields(old), groupFields(group)); data != nil {
+			if err := recordGroup(ctx, "admin.user_group.updated", group, 0, 0, data); err != nil {
+				return err
+			}
 		}
 		memberIDs, err := org_model.GetUserGroupMemberIDs(ctx, group.ID)
 		if err != nil {
@@ -274,6 +314,11 @@ func DeleteGroup(ctx context.Context, group *org_model.UserGroup) error {
 			&org_model.UserGroupUser{GroupID: group.ID},
 			&org_model.UserGroup{ID: group.ID},
 		); err != nil {
+			return err
+		}
+		data := groupFields(group)
+		data["counts"] = map[string]int{"members": len(memberIDs), "teams": len(linked)}
+		if err := recordGroup(ctx, "admin.user_group.deleted", group, 0, 0, data); err != nil {
 			return err
 		}
 		return syncRoles(ctx, group.ID, memberIDs...)
@@ -572,6 +617,12 @@ func SetOrgAdminExclusions(ctx context.Context, orgIDs []int64) error {
 		}
 		if len(changed) == 0 {
 			return nil
+		}
+		if err := audit_model.Record(ctx, audit_model.Event{
+			Action: "admin.user_group.org_admin_exclusions_changed", Result: audit_model.ResultSuccess, TargetType: "user_group",
+			Data: map[string]any{"before": map[string]any{"org_ids": append([]int64{}, slices.Sorted(maps.Keys(old))...)}, "after": map[string]any{"org_ids": append([]int64{}, slices.Sorted(maps.Keys(next))...)}},
+		}); err != nil {
+			return err
 		}
 		return SyncOrgAdminLinks(ctx, changed...)
 	})

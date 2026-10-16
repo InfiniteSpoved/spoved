@@ -4,6 +4,7 @@
 package logshipping
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
+	"forgejo.org/models/db"
 	system_model "forgejo.org/models/system"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
@@ -34,11 +37,18 @@ const (
 )
 
 // reset removes every destination, also from the loggers, and the saved state.
+// lastRevision is the highest settings revision a test has used: the fixtures reset the revision, so without a new
+// one a cached value of an earlier test would be served.
+var lastRevision int
+
 func reset(t *testing.T) {
 	t.Helper()
 	unittest.PrepareTestEnv(t)
 	require.NoError(t, Apply(t.Context(), setting.LogShippingState{}))
 	require.NoError(t, system_model.SetSettings(t.Context(), map[string]string{setting.Config().LogShipping.DynKey(): ""}))
+	lastRevision = max(lastRevision, system_model.GetRevision(t.Context())) + 1
+	_, err := db.Exec(t.Context(), "UPDATE system_setting SET version=? WHERE setting_key='revision'", lastRevision)
+	require.NoError(t, err)
 	config.GetDynGetter().InvalidateCache()
 }
 
@@ -493,4 +503,28 @@ func TestFailedDecryptDisablesOnlyThatDestination(t *testing.T) {
 	assert.Contains(t, writersOf("access"), "ship-"+good.ID)
 	assert.NotContains(t, writersOf("router"), "ship-"+bad.ID)
 	assert.Nil(t, log.GetManager().GetSharedWriter("ship-"+bad.ID))
+}
+
+// TestSaveConcurrent saves destinations at once: each save reads and writes the stored list in one transaction, so
+// none undoes another.
+func TestSaveConcurrent(t *testing.T) {
+	reset(t)
+	defer reset(t)
+	ctx := audit_model.WithCLI(t.Context())
+	var wg sync.WaitGroup
+	errs := make(chan error, 6)
+	for i := range 6 {
+		wg.Go(func() {
+			_, err := Save(ctx, admin(t), "", Input{
+				Name: new(fmt.Sprintf("d%d", i)), Type: new("http"), Endpoint: new("https://logs.example.com/x"), LogTypes: &[]string{"access"},
+			})
+			errs <- err
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	assert.Len(t, load(ctx).Destinations, 6)
 }

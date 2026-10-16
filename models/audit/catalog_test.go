@@ -75,7 +75,7 @@ func TestActionCatalog(t *testing.T) {
 	}
 	for _, actor := range []string{
 		audit_model.ActorAnonymous, audit_model.ActorDeployKey, audit_model.ActorActions,
-		audit_model.ActorRunner, audit_model.ActorSystem, audit_model.ActorCLI, audit_model.ActorUnknown,
+		audit_model.ActorRunner, audit_model.ActorLoginSource, audit_model.ActorSystem, audit_model.ActorCLI, audit_model.ActorUnknown,
 	} {
 		assert.NotEmpty(t, locale["admin.audit.actor."+actor], "actor %s has no phrase", actor)
 	}

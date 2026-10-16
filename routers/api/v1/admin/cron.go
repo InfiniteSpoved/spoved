@@ -4,8 +4,10 @@
 package admin
 
 import (
+	stdctx "context"
 	"net/http"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
@@ -79,7 +81,8 @@ func PostCronTask(ctx *context.APIContext) {
 		ctx.NotFound()
 		return
 	}
-	task.Run()
+	// the run records the admin as its audit actor
+	task.RunWithUser(audit_model.WithActor(stdctx.Background(), audit_model.ActorFromContext(ctx)), ctx.Doer(), nil)
 	log.Trace("Cron Task %s started by admin(%s)", task.Name, ctx.Doer().Name)
 
 	ctx.Status(http.StatusNoContent)

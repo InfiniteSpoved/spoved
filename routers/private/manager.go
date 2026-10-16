@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/modules/graceful"
 	"forgejo.org/modules/graceful/releasereopen"
@@ -61,12 +62,14 @@ func FlushQueues(ctx *context.PrivateContext) {
 // PauseLogging pauses logging
 func PauseLogging(ctx *context.PrivateContext) {
 	log.GetManager().PauseAll()
+	recordLogging(ctx, map[string]any{"op": "pause"})
 	ctx.PlainText(http.StatusOK, "success")
 }
 
 // ResumeLogging resumes logging
 func ResumeLogging(ctx *context.PrivateContext) {
 	log.GetManager().ResumeAll()
+	recordLogging(ctx, map[string]any{"op": "resume"})
 	ctx.PlainText(http.StatusOK, "success")
 }
 
@@ -78,12 +81,14 @@ func ReleaseReopenLogging(ctx *context.PrivateContext) {
 		})
 		return
 	}
+	recordLogging(ctx, map[string]any{"op": "release_reopen"})
 	ctx.PlainText(http.StatusOK, "success")
 }
 
 // SetLogSQL re-sets database SQL logging
 func SetLogSQL(ctx *context.PrivateContext) {
 	db.SetLogSQL(ctx, ctx.FormBool("on"))
+	recordLogging(ctx, map[string]any{"op": "sql", "on": ctx.FormBool("on")})
 	ctx.PlainText(http.StatusOK, "success")
 }
 
@@ -98,6 +103,7 @@ func RemoveLogger(ctx *context.PrivateContext) {
 		})
 		return
 	}
+	recordLogging(ctx, map[string]any{"op": "remove", "logger": logger, "writer": writer})
 	ctx.PlainText(http.StatusOK, fmt.Sprintf("Removed %s %s", logger, writer))
 }
 
@@ -193,5 +199,18 @@ func AddLogger(ctx *context.PrivateContext) {
 		return
 	}
 	log.GetManager().GetLogger(opts.Logger).AddWriters(writer)
+	// never the writer's configuration: it can hold file paths and addresses
+	recordLogging(ctx, map[string]any{"op": "add", "logger": opts.Logger, "writer": opts.Writer, "mode": writerType})
 	ctx.PlainText(http.StatusOK, "success")
+}
+
+// recordLogging records a runtime logger change. Only `forgejo manager logging` calls these routes, with the internal
+// token, so the actor is the CLI. The change is held in memory with no transaction to fail, so an entry that can't be
+// written is logged, not returned.
+func recordLogging(ctx *context.PrivateContext, data map[string]any) {
+	if err := audit_model.Record(audit_model.WithCLI(ctx), audit_model.Event{
+		Action: "admin.logging.changed", Result: audit_model.ResultSuccess, TargetType: "logger", Data: data,
+	}); err != nil {
+		log.Error("audit: %v", err)
+	}
 }
