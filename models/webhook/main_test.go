@@ -8,8 +8,7 @@ import (
 
 	"forgejo.org/models/unittest"
 
-	// the audit log reads a hook's scope from their tables
-	_ "forgejo.org/models/repo"
+	_ "forgejo.org/models/repo" // the audit log reads a hook's scope from their tables
 	_ "forgejo.org/models/user"
 )
 
