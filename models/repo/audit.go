@@ -5,6 +5,7 @@ package repo
 
 import (
 	"context"
+	"strconv"
 
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
@@ -140,8 +141,12 @@ func RecordPushRefused(ctx context.Context, repo *Repository, reason, ref string
 	if ref != "" {
 		data["ref"] = ref
 	}
-	audit_model.RecordActivity(ctx, audit_model.Event{
+	key := strconv.FormatInt(repo.ID, 10) + "|" + reason
+	if a := audit_model.ActorFromContext(ctx); a != nil {
+		key += "|" + audit_model.IPKey(a, 48) + "|" + a.Credential.Type + ":" + strconv.FormatInt(a.Credential.ID, 10)
+	}
+	audit_model.RecordAggregated(ctx, audit_model.Event{
 		Action: "activity.git.push.refused", Result: audit_model.ResultRefused, OwnerID: repo.OwnerID, GroupID: repo.GroupID,
 		RepoID: repo.ID, TargetType: "git_push_refused", TargetID: repo.ID, TargetName: repo.FullName(), Data: data,
-	})
+	}, key)
 }

@@ -93,6 +93,19 @@ func TestAuditAPIWrite(t *testing.T) {
 		assert.EqualValues(t, http.StatusForbidden, auditData(t, auditActivity(t, since, "activity.api.write"))["status"])
 	})
 
+	t.Run("identical failures are aggregated", func(t *testing.T) {
+		audit_model.ResetActivity()
+		since := auditMaxID(t)
+		for range 5 {
+			MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/repo1/issues", &api.CreateIssueOption{Title: ""}).AddTokenAuth(token), http.StatusUnprocessableEntity)
+		}
+		assert.Len(t, auditActions(t, since, "activity.api.write"), 1) // the first of the window is written at once
+		audit_model.FlushAggregated(t.Context(), true)
+		agg := auditActivity(t, since, "activity.api.write.aggregated")
+		assert.EqualValues(t, 4, auditData(t, agg)["count"])
+		assert.EqualValues(t, http.StatusUnprocessableEntity, auditData(t, agg)["status"])
+	})
+
 	t.Run("anonymous and reads are not recorded", func(t *testing.T) {
 		since := auditMaxID(t)
 		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/repo1/issues", &api.CreateIssueOption{Title: "x"}), http.StatusUnauthorized)
@@ -110,6 +123,14 @@ func TestAuditAPIWrite(t *testing.T) {
 		assert.EqualValues(t, 1, e.SudoByID)
 		assert.EqualValues(t, 1, e.RepoID)
 		assert.Equal(t, "GET", auditData(t, e)["method"])
+
+		audit_model.ResetActivity()
+		since = auditMaxID(t)
+		for range 3 {
+			MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/no-such-repo?sudo=user2").AddTokenAuth(adminToken), http.StatusNotFound)
+		}
+		audit_model.FlushAggregated(t.Context(), true)
+		assert.EqualValues(t, 2, auditData(t, auditActivity(t, since, "activity.api.sudo.aggregated"))["count"])
 	})
 
 	t.Run("a change and its request share the request ID", func(t *testing.T) {
@@ -315,6 +336,7 @@ func TestAuditGitPushRefused(t *testing.T) {
 				opts.UserID, opts.UserName = 2, "user2"
 			}
 			opts.AuditCredential = "session:0"
+			audit_model.ResetActivity() // an identical refusal in the same minute would only be counted
 			since := auditMaxID(t)
 			extra := private.HookPreReceive(t.Context(), repo.ID, opts)
 			require.Error(t, extra.Error)
@@ -329,6 +351,20 @@ func TestAuditGitPushRefused(t *testing.T) {
 
 		t.Run("protected_branch", func(t *testing.T) {
 			refused(t, "protected_branch", push(master, zero, git.RefNameFromBranch("master")))
+		})
+		t.Run("identical refusals are aggregated", func(t *testing.T) {
+			audit_model.ResetActivity()
+			since := auditMaxID(t)
+			for range 3 {
+				extra := private.HookPreReceive(t.Context(), repo.ID, private.HookOptions{
+					OldCommitIDs: []string{master}, NewCommitIDs: []string{zero}, RefFullNames: []git.RefName{git.RefNameFromBranch("master")},
+					UserID: 2, UserName: "user2", AuditCredential: "session:0",
+				})
+				require.Error(t, extra.Error)
+			}
+			assert.Len(t, auditActions(t, since, "activity.git.push.refused"), 1)
+			audit_model.FlushAggregated(t.Context(), true)
+			assert.EqualValues(t, 2, auditData(t, auditActivity(t, since, "activity.git.push.refused.aggregated"))["count"])
 		})
 		t.Run("force_push", func(t *testing.T) {
 			require.NoError(t, git_model.UpdateProtectBranch(audit_model.WithCLI(t.Context()), repo, &git_model.ProtectedBranch{RepoID: repo.ID, RuleName: "branch2", CanPush: true}, git_model.WhitelistOptions{}))
@@ -345,6 +381,7 @@ func TestAuditGitPushRefused(t *testing.T) {
 		t.Run("push_rule AGit title", func(t *testing.T) {
 			setPRTitleRule(t, repo.ID, git_model.PushRule{PRTitleRegex: `^ABC-\d+ `})
 			defer setPRTitleRule(t, repo.ID, git_model.PushRule{})
+			audit_model.ResetActivity()
 			since := auditMaxID(t)
 			_, extra := private.HookProcReceive(t.Context(), repo.ID, private.HookOptions{
 				OldCommitIDs: []string{zero}, NewCommitIDs: []string{branch2}, RefFullNames: []git.RefName{"refs/for/master/audit-title"},

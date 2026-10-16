@@ -114,10 +114,13 @@ var Actions = map[string]string{
 	"admin.user_group.team_unlinked":                CategoryAdmin,
 	"admin.user_group.updated":                      CategoryAdmin,
 
-	"activity.api.sudo":         CategoryActivity,
-	"activity.api.write":        CategoryActivity,
-	"activity.git.push":         CategoryActivity,
-	"activity.git.push.refused": CategoryActivity,
+	"activity.api.sudo":                    CategoryActivity,
+	"activity.api.sudo.aggregated":         CategoryActivity,
+	"activity.api.write":                   CategoryActivity,
+	"activity.api.write.aggregated":        CategoryActivity,
+	"activity.git.push":                    CategoryActivity,
+	"activity.git.push.refused":            CategoryActivity,
+	"activity.git.push.refused.aggregated": CategoryActivity,
 
 	"audit.exported":         CategoryAudit,
 	"audit.instance.started": CategoryAudit,

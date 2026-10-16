@@ -209,5 +209,11 @@ func recordRequest(req *http.Request, status int, ev audit_model.Event, target s
 	}
 	ev.SubjectUserID, ev.TargetType = a.ID, "api_request"
 	ev.Data = map[string]any{"method": req.Method, "route": chi.RouteContext(req.Context()).RoutePattern(), "status": status, "target": target}
-	audit_model.RecordActivity(req.Context(), ev)
+	if status < http.StatusBadRequest {
+		audit_model.RecordActivity(req.Context(), ev)
+		return
+	}
+	// failed requests are aggregated per client, credential, route and status
+	key := strings.Join([]string{audit_model.IPKey(a, 48), a.Credential.Type, strconv.FormatInt(a.Credential.ID, 10), req.Method, chi.RouteContext(req.Context()).RoutePattern(), strconv.Itoa(status)}, "|")
+	audit_model.RecordAggregated(req.Context(), ev, key)
 }
