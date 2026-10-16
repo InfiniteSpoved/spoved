@@ -192,7 +192,9 @@ func TestConnRefusalsQueued(t *testing.T) {
 	}
 	assert.Equal(t, []refusal{{ratelimit.SSHConnect, "198.51.100.1:4000"}}, drainRefusals())
 
-	assert.False(t, countAuthFailures(newStubContext("198.51.100.2"), func() bool { return true }) && countAuthFailures(newStubContext("198.51.100.2"), func() bool { return true }))
+	accept := func() bool { return true }
+	assert.True(t, countAuthFailures(newStubContext("198.51.100.2"), accept))
+	assert.False(t, countAuthFailures(newStubContext("198.51.100.2"), accept))
 	assert.Equal(t, []refusal{{ratelimit.Auth, "198.51.100.2:4000"}}, drainRefusals())
 }
 

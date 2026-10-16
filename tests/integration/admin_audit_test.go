@@ -382,8 +382,10 @@ func TestAdminAuditUI(t *testing.T) {
 	const first, last = 1760648400, 1760648460
 	rows := []*audit_model.Entry{
 		{CreatedUnix: first, Category: "activity", Action: "activity.api.write", Result: "success", ActorType: "user", ActorID: 2, ActorName: "user2", IP: "10.0.0.7"},
-		{CreatedUnix: last + 30, Category: "activity", Action: "activity.api.write.aggregated", Result: "success", ActorType: "user", ActorID: 2, ActorName: "user2", IP: "10.0.0.7",
-			Data: `{"count":12,"first":1760648400,"last":1760648460}`},
+		{
+			CreatedUnix: last + 30, Category: "activity", Action: "activity.api.write.aggregated", Result: "success", ActorType: "user", ActorID: 2, ActorName: "user2", IP: "10.0.0.7",
+			Data: `{"count":12,"first":1760648400,"last":1760648460}`,
+		},
 		{CreatedUnix: last + 40, Category: "activity", Action: "activity.api.read", Result: "success", ActorType: "user", ActorID: 2, ActorName: "user2", IP: "10.0.0.8"},
 	}
 	for _, e := range rows {

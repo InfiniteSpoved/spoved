@@ -645,7 +645,7 @@ func TestAuditTwoFactorBlockedAPIAndGit(t *testing.T) {
 			require.Len(t, refused, 1, "once per user, organization and day")
 			assert.Equal(t, "org_two_factor", auditData(t, refused[0])["reason"])
 			assert.EqualValues(t, 3, refused[0].OwnerID)
-			assert.EqualValues(t, tc.uid, refused[0].SubjectUserID)
+			assert.Equal(t, tc.uid, refused[0].SubjectUserID)
 			assert.NotEqual(t, audit_model.ActorUnknown, refused[0].ActorType, "the request's actor is known")
 		})
 	}
