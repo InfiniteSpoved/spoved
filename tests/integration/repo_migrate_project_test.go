@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -245,9 +246,11 @@ func TestAPIRepoMigrateProject(t *testing.T) {
 	})
 
 	t.Run("a failed migration leaves nothing", func(t *testing.T) {
-		notGit := t.TempDir() // exists, but is not a repository: the clone fails after the repository was created
+		defer test.MockVariableValueWithReset(&setting.Migrations.AllowUnencrypted, true, func() { require.NoError(t, allowlist.Init()) })()
+		gone := httptest.NewServer(http.NotFoundHandler()) // passes the address checks, the clone fails after the repository was created
+		defer gone.Close()
 		resp := NewRequestWithJSON(t, "POST", "/api/v1/repos/migrate", &api.MigrateRepoOptions{
-			CloneAddr: notGit, RepoOwner: "org3", RepoName: "apifail", Project: "proj",
+			CloneAddr: gone.URL + "/org/repo.git", RepoOwner: "org3", RepoName: "apifail", Project: "proj",
 		}).AddTokenAuth(token)
 		assert.NotEqual(t, http.StatusCreated, MakeRequest(t, resp, NoExpectedStatus).Code)
 		unittest.AssertNotExistsBean(t, &repo_model.Repository{LowerName: "apifail"})
