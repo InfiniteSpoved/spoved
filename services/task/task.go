@@ -59,17 +59,22 @@ func handler(items ...*admin_model.Task) []*admin_model.Task {
 }
 
 // MigrateRepository add migration repository to task
-func MigrateRepository(ctx context.Context, doer, u *user_model.User, opts base.MigrateOptions) error {
-	task, err := CreateMigrateTask(ctx, doer, u, opts)
+func MigrateRepository(ctx context.Context, doer, u *user_model.User, groupID int64, opts base.MigrateOptions) (*repo_model.Repository, error) {
+	task, err := CreateMigrateTask(ctx, doer, u, groupID, opts)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if err := task.LoadRepo(ctx); err != nil {
+		return nil, err
 	}
 
-	return taskQueue.Push(task)
+	repo := task.Repo // the queue handler may replace it
+	return repo, taskQueue.Push(task)
 }
 
 // CreateMigrateTask creates a migrate task
-func CreateMigrateTask(ctx context.Context, doer, u *user_model.User, opts base.MigrateOptions) (*admin_model.Task, error) {
+// The project is not part of the payload: the repository row created here is where the migration lands.
+func CreateMigrateTask(ctx context.Context, doer, u *user_model.User, groupID int64, opts base.MigrateOptions) (*admin_model.Task, error) {
 	// encrypt credentials for persistence
 
 	task := &admin_model.Task{
@@ -114,6 +119,7 @@ func CreateMigrateTask(ctx context.Context, doer, u *user_model.User, opts base.
 		IsPrivate:      opts.Private || setting.Repository.ForcePrivate,
 		IsMirror:       opts.Mirror,
 		Status:         repo_model.RepositoryBeingMigrated,
+		GroupID:        groupID,
 	})
 	if err != nil {
 		task.EndTime = timeutil.TimeStampNow()

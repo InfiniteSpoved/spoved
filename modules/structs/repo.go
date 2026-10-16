@@ -388,6 +388,8 @@ type MigrateRepoOptions struct {
 	RepoOwnerID int64 `json:"uid"`
 	// Name of User or Organisation who will own Repo after migration
 	RepoOwner string `json:"repo_owner"`
+	// Name of the project of the organization to migrate into; omit for the root of the owner
+	Project string `json:"project,omitempty"`
 	// required: true
 	RepoName string `json:"repo_name" binding:"Required;AlphaDashDot;MaxSize(100)"`
 

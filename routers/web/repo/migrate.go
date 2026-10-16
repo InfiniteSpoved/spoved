@@ -5,8 +5,8 @@
 package repo
 
 import (
+	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"forgejo.org/models"
@@ -48,6 +48,7 @@ func Migrate(ctx *context.Context) {
 	if serviceType == 0 {
 		ctx.Data["Org"] = ctx.FormString("org")
 		ctx.Data["Mirror"] = ctx.FormString("mirror")
+		ctx.Data["Group"] = ctx.FormInt64("group") // a number, never the raw query
 		// locked in the doer's own namespace: the services are offered only with an organization to migrate into
 		if ctx.Data["PersonalRepoLocked"] == true {
 			orgs, err := organization.GetOrgsCanCreateRepoByUserID(ctx, ctx.Doer.ID)
@@ -81,6 +82,10 @@ func Migrate(ctx *context.Context) {
 		ctxUser = orgs[0].AsUser()
 	}
 	ctx.Data["ContextUser"] = ctxUser
+	prepareRepoGroups(ctx, ctxUser, ctx.FormInt64("group"))
+	if ctx.Written() {
+		return
+	}
 
 	ctx.HTML(http.StatusOK, base.TplName("repo/migrate/"+serviceType.Name()))
 }
@@ -93,6 +98,9 @@ func handleMigrateError(ctx *context.Context, owner *user_model.User, err error,
 	}
 
 	switch {
+	case errors.Is(err, repo_model.ErrRepoGroupNotExist):
+		ctx.Data["Err_RepoGroup"] = true
+		ctx.RenderWithErr(ctx.Tr("repo_group.not_found"), tpl, form)
 	case migrations.IsRateLimitError(err):
 		ctx.RenderWithErr(ctx.Tr("form.visit_rate_limit"), tpl, form)
 	case migrations.IsTwoFactorAuthError(err):
@@ -190,6 +198,10 @@ func MigratePost(ctx *context.Context) {
 		return
 	}
 	ctx.Data["ContextUser"] = ctxUser
+	prepareRepoGroups(ctx, ctxUser, form.GroupID) // after the owner is authorised
+	if ctx.Written() {
+		return
+	}
 
 	tpl := base.TplName("repo/migrate/" + form.Service.Name())
 
@@ -269,15 +281,15 @@ func MigratePost(ctx *context.Context) {
 		opts.Releases = false
 	}
 
-	err = repo_model.CheckCreateRepository(ctx, ctx.Doer, ctxUser, opts.RepoName)
+	err = repo_model.CheckCreateRepositoryInGroup(ctx, ctx.Doer, ctxUser, form.GroupID, opts.RepoName)
 	if err != nil {
 		handleMigrateError(ctx, ctxUser, err, "MigratePost", tpl, form)
 		return
 	}
 
-	err = task.MigrateRepository(ctx, ctx.Doer, ctxUser, opts)
+	repo, err := task.MigrateRepository(ctx, ctx.Doer, ctxUser, form.GroupID, opts)
 	if err == nil {
-		ctx.Redirect(ctxUser.HomeLink() + "/" + url.PathEscape(opts.RepoName))
+		ctx.Redirect(repo.Link())
 		return
 	}
 

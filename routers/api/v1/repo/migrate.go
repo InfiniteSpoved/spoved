@@ -4,6 +4,7 @@
 package repo
 
 import (
+	gocontext "context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -26,6 +27,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
+	"forgejo.org/routers/api/v1/utils"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 	"forgejo.org/services/forms"
@@ -54,6 +56,8 @@ func Migrate(ctx *context.APIContext) {
 	//     "$ref": "#/responses/Repository"
 	//   "403":
 	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
 	//   "409":
 	//     description: The repository with the same name already exists.
 	//   "413":
@@ -110,6 +114,25 @@ func Migrate(ctx *context.APIContext) {
 				return
 			}
 		}
+	}
+
+	// a project is reached only by a token that reaches the whole organization; unknown and foreign ones are one answer
+	var groupID int64
+	if form.Project != "" {
+		if !utils.IsOrgWideToken(ctx) {
+			ctx.Error(http.StatusForbidden, "", "This token may not migrate into a project.")
+			return
+		}
+		group, err := repo_model.GetRepoGroupByName(ctx, repoOwner.ID, form.Project)
+		if err != nil {
+			if errors.Is(err, repo_model.ErrRepoGroupNotExist) {
+				ctx.NotFound()
+			} else {
+				ctx.Error(http.StatusInternalServerError, "GetRepoGroupByName", err)
+			}
+			return
+		}
+		groupID = group.ID
 	}
 
 	remoteAddr, err := forms.ParseRemoteAddr(form.CloneAddr, form.AuthUsername, form.AuthPassword)
@@ -195,6 +218,7 @@ func Migrate(ctx *context.APIContext) {
 		IsPrivate:      opts.Private || setting.Repository.ForcePrivate,
 		IsMirror:       opts.Mirror,
 		Status:         repo_model.RepositoryBeingMigrated,
+		GroupID:        groupID,
 	})
 	if err != nil {
 		handleMigrateError(ctx, repoOwner, err)
@@ -216,16 +240,20 @@ func Migrate(ctx *context.APIContext) {
 		}
 
 		if repo != nil {
-			if errDelete := repo_service.DeleteRepositoryDirectly(ctx, repo.ID, repo_service.DeleteRepositoryOpts{}); errDelete != nil {
+			// not cancelled with the request: a dropped client must not leave the being-migrated repository behind
+			if errDelete := repo_service.DeleteRepositoryDirectly(gocontext.WithoutCancel(ctx), repo.ID, repo_service.DeleteRepositoryOpts{}); errDelete != nil {
 				log.Error("DeleteRepository: %v", errDelete)
 			}
 		}
 	}()
 
-	if repo, err = migrations.MigrateRepository(graceful.GetManager().HammerContext(), ctx.Doer(), repoOwner.Name, opts, nil); err != nil {
+	// not assigned to repo: the failed migration returns nil, and the deferred cleanup needs the created repository
+	migrated, err := migrations.MigrateRepository(graceful.GetManager().HammerContext(), ctx.Doer(), repoOwner.Name, opts, nil)
+	if err != nil {
 		handleMigrateError(ctx, repoOwner, err)
 		return
 	}
+	repo = migrated
 
 	if opts.Releases || opts.Wiki {
 		repoOpt := api.EditRepoOption{
@@ -233,8 +261,8 @@ func Migrate(ctx *context.APIContext) {
 			HasWiki:     &opts.Wiki,
 		}
 
-		if err = updateRepoUnits(ctx, repoOwner.Name, repo, repoOpt); err != nil {
-			log.Error("Failed to update units on %s/%s repo. %w", repoOwner.Name, form.RepoName, err)
+		if unitsErr := updateRepoUnits(ctx, repoOwner.Name, repo, repoOpt); unitsErr != nil { // not err: that would delete the migrated repository
+			log.Error("Failed to update units on %s/%s repo. %v", repoOwner.Name, form.RepoName, unitsErr)
 		}
 	}
 
@@ -244,6 +272,8 @@ func Migrate(ctx *context.APIContext) {
 
 func handleMigrateError(ctx *context.APIContext, repoOwner *user_model.User, err error) {
 	switch {
+	case errors.Is(err, repo_model.ErrRepoGroupNotExist):
+		ctx.NotFound()
 	case repo_model.IsErrRepoAlreadyExist(err):
 		ctx.Error(http.StatusConflict, "", "The repository with the same name already exists.")
 	case repo_model.IsErrRepoFilesAlreadyExist(err):
