@@ -89,6 +89,7 @@ import (
 	"forgejo.org/routers/api/v1/user"
 	"forgejo.org/routers/common"
 	"forgejo.org/services/actions"
+	auth_service "forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	"forgejo.org/services/forms"
 	redirect_service "forgejo.org/services/redirect"
@@ -141,6 +142,7 @@ func repoAssignment(ctx *context.APIContext, owner *user_model.User, repoName st
 			if err == nil {
 				context.RedirectToRepo(ctx.Base, redirectRepoID)
 			} else if repo_model.IsErrRedirectNotExist(err) {
+				auth_service.RecordTwoFactorBlockedMember(ctx, ctx.Doer(), owner)
 				ctx.NotFound()
 			} else {
 				ctx.Error(http.StatusInternalServerError, "LookupRepoRedirect", err)

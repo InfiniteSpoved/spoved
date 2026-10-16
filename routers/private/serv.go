@@ -190,6 +190,19 @@ func sshRateLimited(ctx *context.PrivateContext, keyID int64) bool {
 	return true
 }
 
+// recordTwoFactorBlockedKey is RecordTwoFactorBlockedMember for a refusal before the key's user is loaded. A key that
+// can't be read or belongs to no user records nothing.
+func recordTwoFactorBlockedKey(ctx *context.PrivateContext, keyID int64, owner *user_model.User) {
+	if !owner.IsOrganization() || !owner.RequireTwoFactor {
+		return
+	}
+	if key, err := asymkey_model.GetPublicKeyByID(ctx, keyID); err == nil && key.Type != asymkey_model.KeyTypeDeploy {
+		if u, err := user_model.GetUserByID(ctx, key.OwnerID); err == nil {
+			auth_service.RecordTwoFactorBlockedMember(ctx, u, owner)
+		}
+	}
+}
+
 // ServCommand returns information about the provided keyid
 func ServCommand(ctx *context.PrivateContext) {
 	keyID := ctx.ParamsInt64(":keyid")
@@ -278,6 +291,7 @@ func ServCommand(ctx *context.PrivateContext) {
 			repoExist = false
 			// a repository in a project is never created by a push, and a hidden one is missing
 			if groupName != "" || slices.Contains(ctx.FormStrings("verb"), "git-upload-pack") {
+				recordTwoFactorBlockedKey(ctx, keyID, owner)
 				// User is fetching/cloning a non-existent repository
 				sshLogger.Warn("Failed authentication attempt (cannot find repository: %s) from %s", fullName, ctx.RemoteAddr())
 				ctx.JSON(http.StatusNotFound, private.Response{
@@ -520,6 +534,7 @@ func ServCommand(ctx *context.PrivateContext) {
 
 			if userMode < mode {
 				refused("permission")
+				auth_service.RecordTwoFactorBlockedMember(ctx, user, owner)
 				sshLogger.Warn("Failed authentication attempt for %s with key %s (not authorized to %s %s/%s) from %s", user.Name, key.Name, modeString, ownerName, repoName, ctx.RemoteAddr())
 				ctx.JSON(http.StatusUnauthorized, private.Response{
 					UserMsg: fmt.Sprintf("User: %d:%s with Key: %d:%s is not authorized to %s %s/%s.", user.ID, user.Name, key.ID, key.Name, modeString, ownerName, repoName),

@@ -4,6 +4,7 @@
 package integration
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -597,4 +598,64 @@ func TestAuditRefusals(t *testing.T) {
 		require.Len(t, expired, 1)
 		assert.EqualValues(t, 1, expired[0].TargetID)
 	})
+}
+
+// A member of an organization that requires two-factor and has none is refused on the API and on git too, and
+// each refusal is recorded once per user, organization and day, with the same answers as before.
+func TestAuditTwoFactorBlockedAPIAndGit(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	auditFresh(t)
+	flagOrg3(t)
+	content, _ := newTestSSHKey(t)
+	key, err := asymkey_model.AddPublicKey(audit_model.WithSystem(t.Context(), "test"), 4, "audit-2fa", content, 0, 0)
+	require.NoError(t, err)
+	tokenOf := func(name string) string {
+		return getTokenForLoggedInUser(t, loginUser(t, name), auth_model.AccessTokenScopeReadRepository)
+	}
+	member, stranger := tokenOf("user4"), tokenOf("user5")
+
+	for name, tc := range map[string]struct {
+		token    string
+		do       func(token string) int
+		uid      int64
+		recorded bool
+		status   int
+	}{
+		"api hidden":     {member, func(tok string) int { return apiStatus(t, "/api/v1/repos/org3/repo3", tok) }, 4, true, 0},
+		"api missing":    {member, func(tok string) int { return apiStatus(t, "/api/v1/repos/org3/nope", tok) }, 4, true, 0},
+		"git hidden":     {member, func(tok string) int { return apiStatus(t, "/org3/repo3.git/info/refs?service=git-upload-pack", tok) }, 4, true, 0},
+		"git missing":    {member, func(tok string) int { return apiStatus(t, "/org3/nope.git/info/refs?service=git-upload-pack", tok) }, 4, true, 0},
+		"ssh hidden":     {"", func(string) int { s, _ := servCommandTo(t, key.ID, "org3/repo3", "203.0.113.70"); return s }, 4, true, http.StatusUnauthorized},
+		"ssh missing":    {"", func(string) int { s, _ := servCommandTo(t, key.ID, "org3/nope", "203.0.113.70"); return s }, 4, true, 0},
+		"api non-member": {stranger, func(tok string) int { return apiStatus(t, "/api/v1/repos/org3/repo3", tok) }, 5, false, 0},
+		"git non-member": {stranger, func(tok string) int { return apiStatus(t, "/org3/repo3.git/info/refs?service=git-upload-pack", tok) }, 5, false, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			audit_model.ResetActivity()
+			since := auditMaxID(t)
+			first := tc.do(tc.token)
+			want := cmp.Or(tc.status, http.StatusNotFound)
+			assert.Equal(t, want, first, "the answer is unchanged")
+			assert.Equal(t, first, tc.do(tc.token))
+			refused := auditActions(t, since, "auth.refused")
+			if !tc.recorded {
+				assert.Empty(t, refused)
+				return
+			}
+			require.Len(t, refused, 1, "once per user, organization and day")
+			assert.Equal(t, "org_two_factor", auditData(t, refused[0])["reason"])
+			assert.EqualValues(t, 3, refused[0].OwnerID)
+			assert.EqualValues(t, tc.uid, refused[0].SubjectUserID)
+			assert.NotEqual(t, audit_model.ActorUnknown, refused[0].ActorType, "the request's actor is known")
+		})
+	}
+}
+
+func apiStatus(t *testing.T, path, token string) int {
+	t.Helper()
+	req := NewRequest(t, "GET", path)
+	if token != "" {
+		req = req.AddTokenAuth(token)
+	}
+	return MakeRequest(t, req, NoExpectedStatus).Code
 }

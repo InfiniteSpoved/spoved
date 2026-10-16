@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	audit_model "forgejo.org/models/audit"
+	"forgejo.org/models/organization"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/timeutil"
@@ -76,6 +77,26 @@ func RecordTwoFactorBlocked(ctx context.Context, uid, orgID int64) {
 		TargetType: "refusal", TargetID: uid, Data: map[string]any{"reason": "org_two_factor"},
 	}) {
 		audit_model.MarkSeenToday(key)
+	}
+}
+
+// RecordTwoFactorBlockedMember is RecordTwoFactorBlocked for the denial points of the API and of git: it records only
+// when owner is an organization whose two-factor requirement blocks doer, who is one of its members. Anything else
+// records nothing, and a failed lookup is logged: the denial itself stays as it is.
+func RecordTwoFactorBlockedMember(ctx context.Context, doer, owner *user_model.User) {
+	if doer == nil || owner == nil || !owner.IsOrganization() || !owner.RequireTwoFactor {
+		return
+	}
+	blocked, err := doer.TwoFactorBlocked(ctx, owner)
+	if err == nil && blocked {
+		blocked, err = organization.IsOrganizationMember(ctx, owner.ID, doer.ID)
+	}
+	if err != nil {
+		log.Error("RecordTwoFactorBlockedMember: %v", err)
+		return
+	}
+	if blocked {
+		RecordTwoFactorBlocked(ctx, doer.ID, owner.ID)
 	}
 }
 

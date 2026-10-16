@@ -236,6 +236,7 @@ func httpBase(ctx *context.Context) *serviceHandler {
 				environ = append(environ, fmt.Sprintf("%s=%d", repo_module.EnvActionTaskID, task.ID))
 			} else if !p.CanAccess(accessMode, unitType) {
 				refused("permission")
+				auth.RecordTwoFactorBlockedMember(ctx, ctx.Doer, owner)
 				ctx.PlainText(http.StatusNotFound, "Repository not found")
 				return nil
 			}
@@ -273,6 +274,7 @@ func httpBase(ctx *context.Context) *serviceHandler {
 	}
 
 	if !repoExist {
+		auth.RecordTwoFactorBlockedMember(ctx, ctx.Doer, owner)
 		if !receivePack {
 			ctx.PlainText(http.StatusNotFound, "Repository not found")
 			return nil
