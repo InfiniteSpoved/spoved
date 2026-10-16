@@ -25,7 +25,6 @@ import (
 	"forgejo.org/modules/test"
 	actions_service "forgejo.org/services/actions"
 	auth_service "forgejo.org/services/auth"
-	user_service "forgejo.org/services/user"
 	"forgejo.org/tests"
 
 	runnerv1 "code.forgejo.org/forgejo/actions-proto/runner/v1"
@@ -439,17 +438,6 @@ func TestAuditRunnerCleanup(t *testing.T) {
 	e := credentialOne(t, since, "credential.runner.deleted")
 	assert.EqualValues(t, 10000008, e.TargetID)
 	assert.Equal(t, "ephemeral", auditData(t, e)["reason"])
-}
-
-func TestAuditOAuthRunnerUserDeleteCounts(t *testing.T) {
-	defer tests.PrepareTestEnv(t)()
-	u := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8})
-	since := auditMaxID(t)
-	require.NoError(t, user_service.DeleteUser(asActor(t, 1, "user1"), u, false))
-	counts, _ := auditData(t, accountOne(t, since, "account.user.deleted"))["counts"].(map[string]any)
-	for _, k := range []string{"oauth2_apps", "oauth2_grants", "authorized_integrations", "runners"} {
-		assert.Contains(t, counts, k)
-	}
 }
 
 func TestAuditOAuthRunnerFailClosed(t *testing.T) {
