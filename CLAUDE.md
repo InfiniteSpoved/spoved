@@ -27,7 +27,7 @@ spoved is meant to replace GitLab, GitHub, Azure DevOps and Bitbucket, combining
 6. E2E: `make 'test-e2e-sqlite#<spec>.test.e2e'` for the specs whose `@watch` covers your files.
 
 These fail in containers for environment reasons only. They also fail on develop and are not caused by a PR:
-- Integration (no `ssh`/`ssh-keygen`, and the root warning appears in CLI output): `TestActions_CmdForgejo_Actions`, `TestDeployKeyBranchProtection`, `TestDeployKeyTagProtection`, `TestGit`, `TestRepoSSHSignedTags`, `TestInstanceSigning`, `TestPushDeployKeyOnEmptyRepo`, `TestKeyOnlyOneType`, `TestRepoWikiGitOperation`, `TestProtectedBranchDeleteForcePushSSH`, and any new test that pushes over SSH. Cover SSH-only logic with a hook-level or HTTP test as well.
+- Integration (no `ssh`/`ssh-keygen`, and the root warning appears in CLI output): `TestActions_CmdForgejo_Actions`, `TestDeployKeyBranchProtection`, `TestDeployKeyTagProtection`, `TestGit`, `TestRepoSSHSignedTags`, `TestInstanceSigning`, `TestPushDeployKeyOnEmptyRepo`, `TestKeyOnlyOneType`, `TestRepoWikiGitOperation`, `TestProtectedBranchDeleteForcePushSSH`, `TestOrgDeployKeySSH`, and any new test that pushes over SSH. Cover SSH-only logic with a hook-level or HTTP test as well.
 - E2E: `webauthn.test.e2e.ts`.
 Before calling any other failure environmental, rerun it on `origin/develop`.
 

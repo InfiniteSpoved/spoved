@@ -189,8 +189,12 @@ func replaceInactivePrimaryEmail(ctx context.Context, oldEmail string, email *us
 		return err
 	}
 
-	err = MakeEmailAddressPrimary(ctx, user, email, false)
+	// email carries no ID: make the inserted row primary
+	added, err := user_model.GetEmailAddressOfUser(ctx, email.Email, user.ID)
 	if err != nil {
+		return err
+	}
+	if err := MakeEmailAddressPrimary(ctx, user, added, false); err != nil {
 		return err
 	}
 

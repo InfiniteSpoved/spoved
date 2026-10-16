@@ -10,10 +10,12 @@ import (
 	"testing"
 	"time"
 
+	asymkey_model "forgejo.org/models/asymkey"
 	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	org_model "forgejo.org/models/organization"
+	"forgejo.org/models/perm"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
@@ -22,6 +24,7 @@ import (
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/translation"
 	"forgejo.org/services/cron"
+	trash_service "forgejo.org/services/trash"
 	user_service "forgejo.org/services/user"
 	usergroup_service "forgejo.org/services/usergroup"
 	"forgejo.org/tests"
@@ -117,6 +120,23 @@ func TestAuditAccountPassword(t *testing.T) {
 		"before": map[string]any{"must_change_password": false},
 		"after":  map[string]any{"must_change_password": true},
 	}, auditData(t, e))
+
+	// the forced change by the user themself
+	user5 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5})
+	user5.MustChangePassword = true
+	require.NoError(t, user_model.UpdateUserCols(t.Context(), user5, "must_change_password"))
+	session = loginUser(t, "user5")
+	since = auditMaxID(t)
+	session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user/settings/change_password", map[string]string{
+		"password": "forced-Pass1!", "retype": "forced-Pass1!",
+	}), http.StatusSeeOther)
+	assertSubject(t, accountOne(t, since, "account.user.password_changed"), 5, 5)
+	e = accountOne(t, since, "account.user.updated")
+	assertSubject(t, e, 5, 5)
+	assert.Equal(t, map[string]any{
+		"before": map[string]any{"must_change_password": true},
+		"after":  map[string]any{"must_change_password": false},
+	}, auditData(t, e))
 }
 
 func TestAuditAccountAdmin(t *testing.T) {
@@ -170,14 +190,24 @@ func TestAuditAccountAdmin(t *testing.T) {
 		user8 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8})
 		require.NoError(t, auth_model.NewAccessToken(asActor(t, 8, "user8"), &auth_model.AccessToken{UID: 8, Name: "a", Scope: auth_model.AccessTokenScopeReadUser}, nil))
 		require.NoError(t, auth_model.NewAccessToken(asActor(t, 8, "user8"), &auth_model.AccessToken{UID: 8, Name: "b", Scope: auth_model.AccessTokenScopeReadUser}, nil))
+		ctx8 := asActor(t, 8, "user8")
+		require.NoError(t, db.Insert(t.Context(), &asymkey_model.PublicKey{OwnerID: 8, Name: "audit-ssh", Fingerprint: "SHA256:audit-user8", Content: "ssh-ed25519 AAAA", Mode: perm.AccessModeWrite, Type: asymkey_model.KeyTypeUser}))
+		require.NoError(t, db.Insert(t.Context(), &asymkey_model.GPGKey{OwnerID: 8, KeyID: "AUDIT0000000008", Content: "x"}))
+		require.NoError(t, auth_model.NewTwoFactor(ctx8, &auth_model.TwoFactor{UID: 8}, "secret"))
+		_, err := auth_model.CreateCredential(ctx8, 8, "key", &webauthn.Credential{ID: []byte("audit-user8")})
+		require.NoError(t, err)
+		require.NoError(t, user_service.AddEmailAddresses(ctx8, user8, []string{"audit-user8@example.com"}))
+		require.NoError(t, user_model.LinkExternalToUser(ctx8, user8, &user_model.ExternalLoginUser{ExternalID: "ext-8", UserID: 8, LoginSourceID: 7}))
+		require.NoError(t, user_model.AddUserOpenID(ctx8, &user_model.UserOpenID{UID: 8, URI: "https://id.example.com/user8"}))
 		since := auditMaxID(t)
 		MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/admin/users/user8").AddTokenAuth(admin), http.StatusNoContent)
 		e := accountOne(t, since, "account.user.deleted")
 		assertSubject(t, e, 1, user8.ID)
 		data := auditData(t, e)
-		counts := data["counts"].(map[string]any)
-		assert.EqualValues(t, 2, counts["access_tokens"])
-		assert.EqualValues(t, 1, counts["emails"])
+		assert.Equal(t, map[string]any{
+			"access_tokens": 2.0, "ssh_keys": 1.0, "gpg_keys": 1.0, "two_factor": 1.0, "webauthn": 1.0,
+			"emails": 2.0, "external_logins": 1.0, "openids": 1.0,
+		}, data["counts"])
 		assert.Equal(t, false, data["purge"])
 		assert.Empty(t, auditActions(t, since, "credential.access_token.deleted"), "the tokens go in bulk with the account")
 	})
@@ -191,6 +221,22 @@ func TestAuditAccountAdmin(t *testing.T) {
 		data := auditData(t, accountOne(t, since, "account.user.deleted"))
 		assert.Equal(t, true, data["purge"])
 		assert.Equal(t, true, data["tombstone"])
+
+		// purging the last trashed repository removes the tombstone
+		var repoIDs []int64
+		require.NoError(t, db.GetEngine(t.Context()).Table("repository").Where("owner_id = 5").Cols("id").Find(&repoIDs))
+		require.NotEmpty(t, repoIDs)
+		user1 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+		since = auditMaxID(t)
+		for _, id := range repoIDs {
+			require.NoError(t, trash_service.Purge(asActor(t, 1, "user1"), user1, id))
+		}
+		e := accountOne(t, since, "account.user.deleted")
+		assertSubject(t, e, 1, 5)
+		data = auditData(t, e)
+		assert.Equal(t, true, data["tombstone_removed"])
+		assert.Equal(t, false, data["tombstone"])
+		unittest.AssertNotExistsBean(t, &user_model.User{ID: 5})
 	})
 
 	t.Run("inactive accounts cron", func(t *testing.T) {
@@ -228,9 +274,30 @@ func TestAuditAccountActivationAndRoles(t *testing.T) {
 		u := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "auditact"})
 		since := auditMaxID(t)
 		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user/activate?code="+*code, map[string]string{"password": "examplePassword!1"}), http.StatusSeeOther)
-		e := accountOne(t, since, "account.user.activated")
-		assert.Equal(t, u.ID, e.SubjectUserID)
-		assert.Equal(t, u.ID, accountOne(t, since, "account.email.activated").SubjectUserID)
+		// the code holder is not signed in yet: the actor is anonymous
+		for _, action := range []string{"account.user.activated", "account.email.activated"} {
+			e := accountOne(t, since, action)
+			assert.Equal(t, audit_model.ActorAnonymous, e.ActorType)
+			assertSubject(t, e, 0, u.ID)
+		}
+	})
+
+	t.Run("new address before activation", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.Service.RegisterEmailConfirm, true)()
+		session := emptyTestSession(t)
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user/sign_up", map[string]string{
+			"user_name": "auditact2", "email": "auditact2@example.com", "password": "examplePassword!1", "retype": "examplePassword!1",
+		}), http.StatusOK)
+		u := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "auditact2"})
+		session = loginUserWithPassword(t, "auditact2", "examplePassword!1")
+		since := auditMaxID(t)
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user/activate", map[string]string{"email": "auditact2-new@example.com"}), http.StatusSeeOther)
+		added, err := user_model.GetEmailAddressOfUser(t.Context(), "auditact2-new@example.com", u.ID)
+		require.NoError(t, err)
+		assert.True(t, added.IsPrimary)
+		e := accountOne(t, since, "account.email.primary")
+		assertSubject(t, e, u.ID, u.ID)
+		assert.Equal(t, added.ID, e.TargetID)
 	})
 
 	t.Run("role from a user group", func(t *testing.T) {
@@ -246,7 +313,9 @@ func TestAuditAccountActivationAndRoles(t *testing.T) {
 
 		since = auditMaxID(t)
 		require.NoError(t, usergroup_service.RemoveMember(ctx, group, 4))
-		assertSubject(t, accountOne(t, since, "account.user.role_revoked"), 1, 4)
+		e = accountOne(t, since, "account.user.role_revoked")
+		assertSubject(t, e, 1, 4)
+		assert.Equal(t, map[string]any{"role": "site_admin", "group_id": float64(group.ID)}, auditData(t, e))
 	})
 }
 
@@ -266,12 +335,14 @@ func TestAuditAccountEmailsAndLinks(t *testing.T) {
 	require.NoError(t, err)
 	since = auditMaxID(t)
 	require.NoError(t, user_model.ActivateUserEmail(ctx, 2, extra.Email, true))
-	accountOne(t, since, "account.email.activated")
+	assertSubject(t, accountOne(t, since, "account.email.activated"), 2, 2)
 
 	since = auditMaxID(t)
 	old := user2.Email
 	require.NoError(t, user_service.MakeEmailAddressPrimary(ctx, user2, extra, false))
-	assert.Equal(t, true, auditData(t, accountOne(t, since, "account.email.primary"))["primary"])
+	e = accountOne(t, since, "account.email.primary")
+	assertSubject(t, e, 2, 2)
+	assert.Equal(t, true, auditData(t, e)["primary"])
 
 	since = auditMaxID(t)
 	require.NoError(t, user_service.DeleteEmailAddresses(ctx, user2, []string{old}))
@@ -302,6 +373,23 @@ func TestAuditAccountEmailsAndLinks(t *testing.T) {
 	since = auditMaxID(t)
 	require.NoError(t, user_model.DeleteUserOpenID(ctx, &user_model.UserOpenID{UID: 2, ID: openid.ID}))
 	accountOne(t, since, "account.openid.unlinked")
+
+	// admin changes of a user's primary address
+	user4 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})
+	since = auditMaxID(t)
+	require.NoError(t, user_service.AdminAddOrSetPrimaryEmailAddress(admin, user4, "audit-admin-set@example.com"))
+	e = accountOne(t, since, "account.email.added")
+	assertSubject(t, e, 1, 4)
+	assert.Equal(t, "audit-admin-set@example.com", auditData(t, e)["address"])
+
+	since = auditMaxID(t)
+	require.NoError(t, user_service.ReplacePrimaryEmailAddress(admin, user4, "audit-admin-replace@example.com"))
+	e = accountOne(t, since, "account.email.deleted")
+	assertSubject(t, e, 1, 4)
+	assert.Equal(t, "audit-admin-set@example.com", auditData(t, e)["address"])
+	e = accountOne(t, since, "account.email.added")
+	assertSubject(t, e, 1, 4)
+	assert.Equal(t, "audit-admin-replace@example.com", auditData(t, e)["address"])
 }
 
 func TestAuditAccountFailClosed(t *testing.T) {
@@ -337,6 +425,15 @@ func TestAuditAccountFailClosed(t *testing.T) {
 		user4 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})
 		require.Error(t, user_service.AddEmailAddresses(ctx, user4, []string{"audit-down@example.com"}))
 		unittest.AssertNotExistsBean(t, &user_model.EmailAddress{LowerEmail: "audit-down@example.com"})
+	})
+
+	t.Run("purge", func(t *testing.T) {
+		user8 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8})
+		require.ErrorContains(t, user_service.DeleteUser(ctx, user8, true), "audit down")
+		after := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8})
+		assert.True(t, after.IsActive)
+		assert.False(t, after.ProhibitLogin)
+		assert.Equal(t, user8.Passwd, after.Passwd)
 	})
 
 	t.Run("must change password (CLI)", func(t *testing.T) {
