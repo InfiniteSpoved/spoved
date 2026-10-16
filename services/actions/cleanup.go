@@ -174,7 +174,7 @@ func CleanupRuns(ctx context.Context) error {
 	// returned, the runs stay deleted
 	var recordErr error
 	for _, repoID := range slices.Sorted(maps.Keys(deleted)) {
-		repo, err := repo_model.GetRepositoryByID(ctx, repoID)
+		repo, err := repo_model.GetRepositoryByIDIncludingTrashed(ctx, repoID)
 		if err == nil {
 			err = recordRunsDeleted(ctx, "repo.actions_runs.cleaned", repo, days[repoID], deleted[repoID])
 		}

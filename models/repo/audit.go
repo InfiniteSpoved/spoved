@@ -96,7 +96,7 @@ func recordPushMirror(ctx context.Context, action string, m *PushMirror, data ma
 	repo := m.Repo
 	if repo == nil {
 		var err error
-		if repo, err = GetRepositoryByID(ctx, m.RepoID); err != nil {
+		if repo, err = GetRepositoryByIDIncludingTrashed(ctx, m.RepoID); err != nil {
 			return err
 		}
 	}
