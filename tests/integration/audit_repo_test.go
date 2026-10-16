@@ -19,6 +19,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/json"
 	"forgejo.org/modules/private"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
@@ -322,10 +323,14 @@ func TestAuditRepoMirror(t *testing.T) {
 	since = auditMaxID(t)
 	require.NoError(t, mirror_service.SaveRemoteAddress(ctx, m, "https://alice:other-pass@mirror.example.com:8443/team/x.git?token=t0ken"))
 	assert.Empty(t, auditActions(t, since, "repo.mirror.updated"))
-	var leaks int64
-	leaks, err = db.GetEngine(t.Context()).Where("data LIKE ? OR data LIKE ? OR data LIKE ? OR data LIKE ?", "%s3cr3t%", "%other-pass%", "%t0ken%", "%/team/%").Count(new(audit_model.Entry))
-	require.NoError(t, err)
-	assert.Zero(t, leaks)
+	// no column of any mirror entry holds the user, a password, the query or the path
+	for _, e := range auditActions(t, 0, "repo.mirror.updated") {
+		row, err := json.Marshal(e)
+		require.NoError(t, err)
+		for _, secret := range []string{"alice", "s3cr3t-pass", "other-pass", "t0ken", "/team/"} {
+			assert.NotContains(t, string(row), secret)
+		}
+	}
 
 	// LFS endpoint: its origin only
 	m.LFSEndpoint = "https://lfs.example.com/path/x"
@@ -400,6 +405,21 @@ func TestAuditRepoBranchesTags(t *testing.T) {
 	since = auditMaxID(t)
 	session.MakeRequest(t, NewRequest(t, "POST", fmt.Sprintf("/user2/repo1/tags/delete?id=%d", rel.ID)), http.StatusOK)
 	repoOne(t, since, "repo.tag.deleted", repo)
+}
+
+// A branch deleted after its pull request is merged is recorded once.
+func TestAuditRepoBranchDeletedAfterMerge(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		session := loginUser(t, "user2")
+		testEditFileToNewBranch(t, session, "user2", "repo1", "master", "audit-merged", "README.md", "Hello, World\n(audit)\n")
+		resp := testPullCreate(t, session, "user2", "repo1", true, "master", "audit-merged", "Audit merge")
+		elem := strings.Split(test.RedirectURL(resp), "/")
+		since := auditMaxID(t)
+		testPullMerge(t, session, elem[1], elem[2], elem[4], repo_model.MergeStyleMerge, true)
+		e := repoOne(t, since, "repo.branch.deleted", loadRepo(t, "user2", "repo1"))
+		assert.Equal(t, "audit-merged", e.TargetName)
+		assert.EqualValues(t, 2, e.ActorID)
+	})
 }
 
 func TestAuditRepoCollaborators(t *testing.T) {
