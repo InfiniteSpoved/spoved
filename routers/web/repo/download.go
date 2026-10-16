@@ -116,7 +116,9 @@ func SingleDownload(ctx *context.Context) {
 
 	if err := common.ServeBlob(ctx.Base, ctx.Repo.TreePath, blob, lastModified); err != nil {
 		ctx.ServerError("ServeBlob", err)
+		return
 	}
+	common.RecordDownload(ctx.Base, ctx.Repo.Repository, "raw", ctx.Repo.TreePath)
 }
 
 // SingleDownloadOrLFS download a file by repos path redirecting to LFS if necessary
@@ -128,7 +130,9 @@ func SingleDownloadOrLFS(ctx *context.Context) {
 
 	if err := ServeBlobOrLFS(ctx, blob, lastModified); err != nil {
 		ctx.ServerError("ServeBlobOrLFS", err)
+		return
 	}
+	common.RecordDownload(ctx.Base, ctx.Repo.Repository, "raw", ctx.Repo.TreePath)
 }
 
 // DownloadByID download a file by sha1 ID
@@ -144,7 +148,9 @@ func DownloadByID(ctx *context.Context) {
 	}
 	if err = common.ServeBlob(ctx.Base, ctx.Repo.TreePath, blob, nil); err != nil {
 		ctx.ServerError("ServeBlob", err)
+		return
 	}
+	common.RecordDownload(ctx.Base, ctx.Repo.Repository, "raw", ctx.Repo.TreePath)
 }
 
 // DownloadByIDOrLFS download a file by sha1 ID taking account of LFS
@@ -160,5 +166,7 @@ func DownloadByIDOrLFS(ctx *context.Context) {
 	}
 	if err = ServeBlobOrLFS(ctx, blob, nil); err != nil {
 		ctx.ServerError("ServeBlob", err)
+		return
 	}
+	common.RecordDownload(ctx.Base, ctx.Repo.Repository, "raw", ctx.Repo.TreePath)
 }

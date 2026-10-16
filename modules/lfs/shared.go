@@ -125,5 +125,6 @@ type Claims struct {
 	RepoID int64
 	Op     string
 	UserID int64
+	Cred   string `json:"cred,omitempty"` // "type:id" of the credential the token was issued for (audit log only)
 	jwt.RegisteredClaims
 }

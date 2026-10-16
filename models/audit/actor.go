@@ -3,7 +3,11 @@
 
 package audit
 
-import "context"
+import (
+	"context"
+	"strconv"
+	"strings"
+)
 
 const (
 	ActorUser        = "user"
@@ -71,9 +75,41 @@ type Actor struct {
 	Task         string // a cron task a user started, or the account a command line import runs as; recorded as data.task
 }
 
-// SetSudo makes the user acted as the actor and keeps the admin in SudoByID.
+// SetSudo makes the user acted as the actor and keeps the admin in SudoByID; sudo to oneself records no sudoer.
 func (a *Actor) SetSudo(id int64, name string) {
-	a.SudoByID, a.ID, a.Name = a.ID, id, name
+	if id != a.ID {
+		a.SudoByID = a.ID
+	}
+	a.ID, a.Name = id, name
+}
+
+// CredentialClaim is the "type:id" a JWT carries for the credential that minted it, "" for one that must not be
+// carried (unknown, session, system, cli, reverse proxy).
+func CredentialClaim(c Credential) string {
+	if !claimTypes[c.Type] {
+		return ""
+	}
+	return c.Type + ":" + strconv.FormatInt(c.ID, 10)
+}
+
+var claimTypes = map[string]bool{
+	CredentialAccessToken: true, CredentialOAuth2Grant: true, CredentialAuthorizedIntegration: true, CredentialSSHKey: true,
+	CredentialDeployKey: true, CredentialOrgDeployKey: true, CredentialProjectDeployKey: true, CredentialPassword: true,
+	CredentialActionsTask: true,
+}
+
+// CredentialFromClaim reads CredentialClaim back. The claim is server-signed, so it needs no lookup; anything but an
+// allowed type with a positive ID (password: ID 0) is unknown.
+func CredentialFromClaim(s string, ownerID int64) Credential {
+	typ, idText, ok := strings.Cut(s, ":")
+	id, err := strconv.ParseInt(idText, 10, 64)
+	if !ok || err != nil || !claimTypes[typ] || (id <= 0 && typ != CredentialPassword) {
+		return Credential{Type: CredentialUnknown, OwnerID: ownerID}
+	}
+	if typ == CredentialPassword {
+		id = 0
+	}
+	return Credential{Type: typ, ID: id, OwnerID: ownerID}
 }
 
 type actorKey struct{}

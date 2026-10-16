@@ -6,6 +6,7 @@ package repo
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"forgejo.org/models/auth"
 	access_model "forgejo.org/models/perm/access"
@@ -62,6 +63,7 @@ func uploadAttachment(ctx *context.Context, repoID int64, allowedTypes string) {
 	}
 
 	log.Trace("New attachment uploaded: %s", attach.UUID)
+	common.RecordUpload(ctx.Base, ctx.Repo.Repository, nil, "attachment", "create", strconv.FormatInt(attach.ID, 10), attach.Size)
 	ctx.JSON(http.StatusOK, map[string]string{
 		"uuid": attach.UUID,
 	})
@@ -176,6 +178,12 @@ func ServeAttachment(ctx *context.Context, uuid string) {
 			}
 		}
 	}
+
+	kind := "attachment"
+	if attach.ReleaseID != 0 {
+		kind = "release_asset"
+	}
+	defer common.RecordDownload(ctx.Base, repository, kind, strconv.FormatInt(attach.ID, 10))
 
 	if attach.ExternalURL != "" {
 		ctx.Redirect(attach.ExternalURL)

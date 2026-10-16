@@ -35,6 +35,7 @@ const (
 	EnvAuditCredential   = "GITEA_AUDIT_CREDENTIAL" // <type>:<id> of the credential that pushes, checked again by the hook
 	EnvAuditIP           = "GITEA_AUDIT_IP"
 	EnvAuditRequestID    = "GITEA_AUDIT_REQUEST_ID"
+	EnvAuditSudoBy       = "GITEA_AUDIT_SUDO_BY" // ID of the admin who pushes with API sudo, "" otherwise; checked again by the hook
 )
 
 type PushTrigger string
@@ -45,20 +46,24 @@ const (
 	PushTriggerWeb              PushTrigger = "web" // any other push the server makes, e.g. the web editor
 )
 
-// AuditEnv is the hook environment that tells the audit log who pushes. All three keys are always set, and callers
+// AuditEnv is the hook environment that tells the audit log who pushes. All four keys are always set, and callers
 // append them after the inherited environment, so that a value inherited from the server's own environment never
 // wins.
-func AuditEnv(credential, ip, requestID string) []string {
-	return []string{EnvAuditCredential + "=" + credential, EnvAuditIP + "=" + ip, EnvAuditRequestID + "=" + requestID}
+func AuditEnv(credential, ip, requestID, sudoBy string) []string {
+	return []string{EnvAuditCredential + "=" + credential, EnvAuditIP + "=" + ip, EnvAuditRequestID + "=" + requestID, EnvAuditSudoBy + "=" + sudoBy}
 }
 
 // AuditEnvironment is AuditEnv for the audit actor of ctx; empty values without one.
 func AuditEnvironment(ctx context.Context) []string {
 	a := audit_model.ActorFromContext(ctx)
 	if a == nil {
-		return AuditEnv("", "", "")
+		return AuditEnv("", "", "", "")
 	}
-	return AuditEnv(a.Credential.Type+":"+strconv.FormatInt(a.Credential.ID, 10), a.IP, a.RequestID)
+	sudoBy := ""
+	if a.SudoByID != 0 {
+		sudoBy = strconv.FormatInt(a.SudoByID, 10)
+	}
+	return AuditEnv(a.Credential.Type+":"+strconv.FormatInt(a.Credential.ID, 10), a.IP, a.RequestID, sudoBy)
 }
 
 // InternalPushingEnvironment returns an os environment to switch off hooks on push

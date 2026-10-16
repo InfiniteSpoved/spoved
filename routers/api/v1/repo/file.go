@@ -78,6 +78,7 @@ func GetRawFile(ctx *context.APIContext) {
 	if ctx.Written() {
 		return
 	}
+	defer common.RecordDownload(ctx.Base, ctx.Repo().Repository, "raw", ctx.Repo().TreePath)
 
 	ctx.RespHeader().Set(giteaObjectTypeHeader, string(files_service.GetObjectTypeFromTreeEntry(entry)))
 	ctx.RespHeader().Set(forgejoObjectTypeHeader, string(files_service.GetObjectTypeFromTreeEntry(entry)))
@@ -127,6 +128,7 @@ func GetRawFileOrLFS(ctx *context.APIContext) {
 	if ctx.Written() {
 		return
 	}
+	defer common.RecordDownload(ctx.Base, ctx.Repo().Repository, "raw", ctx.Repo().TreePath)
 
 	ctx.RespHeader().Set(giteaObjectTypeHeader, string(files_service.GetObjectTypeFromTreeEntry(entry)))
 	ctx.RespHeader().Set(forgejoObjectTypeHeader, string(files_service.GetObjectTypeFromTreeEntry(entry)))
@@ -333,6 +335,7 @@ func archiveDownload(ctx *context.APIContext) {
 
 func download(ctx *context.APIContext, archiveName string, archiver *repo_model.RepoArchiver) {
 	downloadName := ctx.Repo().Repository.Name + "-" + archiveName
+	defer common.RecordDownload(ctx.Base, ctx.Repo().Repository, "archive", archiveName)
 
 	// Add nix format link header so tarballs lock correctly:
 	// https://github.com/nixos/nix/blob/56763ff918eb308db23080e560ed2ea3e00c80a7/doc/manual/src/protocols/tarball-fetcher.md

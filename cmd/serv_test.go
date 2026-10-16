@@ -167,6 +167,7 @@ func TestServRepoPath(t *testing.T) {
 func TestServGitEnvAudit(t *testing.T) {
 	t.Setenv(repo_module.EnvAuditIP, "203.0.113.9")
 	t.Setenv(repo_module.EnvAuditRequestID, "forged")
+	t.Setenv(repo_module.EnvAuditSudoBy, "1")
 	lastEnv := func(env []string, key string) string {
 		v := "<unset>"
 		for _, kv := range env {
@@ -181,6 +182,7 @@ func TestServGitEnvAudit(t *testing.T) {
 	assert.Equal(t, "ssh_key:3", lastEnv(env, repo_module.EnvAuditCredential))
 	assert.Equal(t, "192.0.2.1", lastEnv(env, repo_module.EnvAuditIP))
 	assert.Equal(t, "req", lastEnv(env, repo_module.EnvAuditRequestID))
+	assert.Empty(t, lastEnv(env, repo_module.EnvAuditSudoBy))
 
 	env = servGitEnv(&private.ServCommandResults{KeyID: 3, DeployKeyKeyID: 3, UserID: 2}, "")
 	assert.Empty(t, lastEnv(env, repo_module.EnvAuditCredential)) // the hook resolves the deploy key itself

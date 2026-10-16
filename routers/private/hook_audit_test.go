@@ -12,6 +12,7 @@ import (
 	audit_model "forgejo.org/models/audit"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/private"
 
@@ -104,4 +105,67 @@ func TestHookActor(t *testing.T) {
 	assert.Len(t, a.RequestID, 32)
 	a = hookActor(t.Context(), repo, &private.HookOptions{UserID: 2, AuditIP: "::ffff:10.0.0.1"})
 	assert.Equal(t, "10.0.0.1", a.IP)
+}
+
+func TestHookActorSudo(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
+	actor := func(uid, sudoBy int64, c string) *audit_model.Actor {
+		return hookActor(t.Context(), repo, &private.HookOptions{UserID: uid, AuditCredential: c, AuditSudoByID: sudoBy})
+	}
+
+	// admin 1 pushes as user 2 with their own token
+	a := actor(2, 1, "access_token:1")
+	assert.EqualValues(t, 2, a.ID)
+	assert.EqualValues(t, 1, a.SudoByID)
+	assert.Equal(t, audit_model.Credential{Type: audit_model.CredentialAccessToken, ID: 1, Name: "Token A", OwnerID: 1}, a.Credential)
+
+	// the credential must be the sudoer's own: user 2's SSH key does not count for admin 1
+	a = actor(2, 1, "ssh_key:1")
+	assert.Equal(t, audit_model.CredentialUnknown, a.Credential.Type)
+	assert.Zero(t, a.SudoByID)
+	assert.EqualValues(t, 2, a.ID)
+
+	// self-sudo records no sudoer
+	a = actor(1, 1, "access_token:1")
+	assert.Zero(t, a.SudoByID)
+	assert.Equal(t, audit_model.CredentialAccessToken, a.Credential.Type)
+
+	// a session credential of the sudoer is recorded as such
+	a = actor(2, 1, "session:0")
+	assert.EqualValues(t, 1, a.SudoByID)
+	assert.Equal(t, audit_model.Credential{Type: audit_model.CredentialSession, OwnerID: 1}, a.Credential)
+
+	// sudo to an organization doesn't fail
+	a = actor(3, 1, "access_token:1")
+	assert.EqualValues(t, 3, a.ID)
+	assert.EqualValues(t, 1, a.SudoByID)
+
+	// garbage sudoer values
+	for _, id := range []int64{0, -1, 999999} {
+		a = actor(2, id, "access_token:1")
+		assert.Zero(t, a.SudoByID)
+		assert.Equal(t, audit_model.CredentialUnknown, a.Credential.Type)
+	}
+
+	// the sudoer must be a usable admin now: user 2 is not an admin, then an inactive one, then one who can't sign in
+	u2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	a = actor(4, 2, "ssh_key:1")
+	assert.Zero(t, a.SudoByID)
+	assert.Equal(t, audit_model.CredentialUnknown, a.Credential.Type)
+	u2.IsAdmin = true
+	require.NoError(t, user_model.UpdateUserCols(t.Context(), u2, "is_admin"))
+	a = actor(4, 2, "ssh_key:1")
+	assert.EqualValues(t, 2, a.SudoByID)
+	u2.IsActive = false
+	require.NoError(t, user_model.UpdateUserCols(t.Context(), u2, "is_active"))
+	assert.Zero(t, actor(4, 2, "ssh_key:1").SudoByID)
+	u2.IsActive, u2.ProhibitLogin = true, true
+	require.NoError(t, user_model.UpdateUserCols(t.Context(), u2, "is_active", "prohibit_login"))
+	a = actor(4, 2, "ssh_key:1")
+	assert.Zero(t, a.SudoByID)
+	assert.Equal(t, audit_model.CredentialUnknown, a.Credential.Type)
+
+	// deploy-key and Actions pushes ignore the key
+	assert.Zero(t, hookActor(t.Context(), repo, &private.HookOptions{UserID: user_model.ActionsUserID, ActionTaskID: 1, AuditSudoByID: 1}).SudoByID)
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
@@ -24,9 +25,10 @@ type packageClaims struct {
 	jwt.RegisteredClaims
 	UserID int64
 	Scope  auth_model.AccessTokenScope
+	Cred   string `json:"cred,omitempty"` // "type:id" of the credential the token was minted with (audit log only)
 }
 
-func CreateAuthorizationToken(u *user_model.User, scope auth_model.AccessTokenScope, maxExpiry optional.Option[timeutil.TimeStamp]) (string, error) {
+func CreateAuthorizationToken(u *user_model.User, scope auth_model.AccessTokenScope, maxExpiry optional.Option[timeutil.TimeStamp], cred audit_model.Credential) (string, error) {
 	now := time.Now()
 
 	// Don't allow package registry authentication to create a credential that exceeds the lifetime of whatever
@@ -43,6 +45,7 @@ func CreateAuthorizationToken(u *user_model.User, scope auth_model.AccessTokenSc
 		},
 		UserID: u.ID,
 		Scope:  scope,
+		Cred:   audit_model.CredentialClaim(cred),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
@@ -54,16 +57,16 @@ func CreateAuthorizationToken(u *user_model.User, scope auth_model.AccessTokenSc
 	return tokenString, nil
 }
 
-func ParseAuthorizationToken(req *http.Request) (int64, auth_model.AccessTokenScope, error) {
+func ParseAuthorizationToken(req *http.Request) (int64, auth_model.AccessTokenScope, string, error) {
 	h := req.Header.Get("Authorization")
 	if h == "" {
-		return 0, "", nil
+		return 0, "", "", nil
 	}
 
 	parts := strings.SplitN(h, " ", 2)
 	if len(parts) != 2 {
 		log.Error("split token failed: %s", h)
-		return 0, "", errors.New("split token failed")
+		return 0, "", "", errors.New("split token failed")
 	}
 
 	token, err := jwt.ParseWithClaims(parts[1], &packageClaims{}, func(t *jwt.Token) (any, error) {
@@ -73,13 +76,13 @@ func ParseAuthorizationToken(req *http.Request) (int64, auth_model.AccessTokenSc
 		return setting.GetGeneralTokenSigningSecret(), nil
 	})
 	if err != nil {
-		return 0, "", err
+		return 0, "", "", err
 	}
 
 	c, ok := token.Claims.(*packageClaims)
 	if !token.Valid || !ok {
-		return 0, "", errors.New("invalid token claim")
+		return 0, "", "", errors.New("invalid token claim")
 	}
 
-	return c.UserID, c.Scope, nil
+	return c.UserID, c.Scope, c.Cred, nil
 }

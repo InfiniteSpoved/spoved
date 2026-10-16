@@ -975,6 +975,12 @@ func UsableAdminCond() builder.Cond {
 	return usableAdminCond
 }
 
+// IsUsableAdmin reports whether id is an admin who can sign in.
+func IsUsableAdmin(ctx context.Context, id int64) bool {
+	has, err := db.GetEngine(ctx).Where(usableAdminCond.And(builder.Eq{"id": id})).Exist(new(User))
+	return err == nil && has
+}
+
 // IsLastAdminUser check whether user is an admin and no other admin who can sign in exists
 func IsLastAdminUser(ctx context.Context, user *User) bool {
 	if !user.IsAdmin {

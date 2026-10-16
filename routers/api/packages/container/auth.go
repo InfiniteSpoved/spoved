@@ -25,6 +25,7 @@ type containerAuthenticationResult struct {
 	*auth.BaseAuthenticationResult
 	user  *user_model.User
 	scope optional.Option[auth_model.AccessTokenScope]
+	cred  string
 }
 
 func (r *containerAuthenticationResult) Scope() optional.Option[auth_model.AccessTokenScope] {
@@ -44,7 +45,7 @@ func (a *Auth) Name() string {
 // Verify extracts the user from the Bearer token
 // If it's an anonymous session a ghost user is returned
 func (a *Auth) Verify(req *http.Request, w http.ResponseWriter, sess auth.SessionStore) auth.MethodOutput {
-	uid, scope, err := packages.ParseAuthorizationToken(req)
+	uid, scope, cred, err := packages.ParseAuthorizationToken(req)
 	if err != nil {
 		log.Trace("ParseAuthorizationToken: %v", err)
 		// Errors from ParseAuthorizationToken are almost all from malformed incoming input, which we'll consider an
@@ -68,10 +69,10 @@ func (a *Auth) Verify(req *http.Request, w http.ResponseWriter, sess auth.Sessio
 		return &auth.AuthenticationError{Error: fmt.Errorf("container auth GetPossibleUserByID: %w", err)}
 	}
 
-	return &auth.AuthenticationSuccess{Result: &containerAuthenticationResult{user: u, scope: authScope}}
+	return &auth.AuthenticationSuccess{Result: &containerAuthenticationResult{user: u, scope: authScope, cred: cred}}
 }
 
-// Credential is unknown until the package token carries the credential it was issued for (#17 PR 3).
+// Credential is the credential the token was minted with; unknown for a token without the claim.
 func (r *containerAuthenticationResult) Credential() audit_model.Credential {
-	return audit_model.Credential{Type: audit_model.CredentialUnknown, OwnerID: r.user.ID}
+	return audit_model.CredentialFromClaim(r.cred, r.user.ID)
 }

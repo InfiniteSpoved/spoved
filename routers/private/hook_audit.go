@@ -45,6 +45,14 @@ func hookActor(ctx context.Context, repo *repo_model.Repository, opts *private.H
 		a.Type = audit_model.ActorActions
 		a.Credential = audit_model.Credential{Type: audit_model.CredentialActionsTask, ID: opts.ActionTaskID}
 	default:
+		// API sudo: the credential is the sudoer's, so it must be theirs exactly, and they must be a usable admin now
+		if sudoBy := opts.AuditSudoByID; sudoBy > 0 && sudoBy != opts.UserID && user_model.IsUsableAdmin(ctx, sudoBy) {
+			a.Credential = hookCredential(ctx, sudoBy, opts.AuditCredential)
+			if a.Credential.Type != audit_model.CredentialUnknown {
+				a.SudoByID = sudoBy
+			}
+			break
+		}
 		a.Credential = hookCredential(ctx, opts.UserID, opts.AuditCredential)
 	}
 	return a

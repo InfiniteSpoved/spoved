@@ -213,6 +213,7 @@ func loadCommonSettingsFrom(cfg ConfigProvider) error {
 	loadMarkupFrom(cfg)
 	loadQuotaFrom(cfg)
 	loadRateLimitFrom(cfg)
+	loadAuditFrom(cfg)
 	loadOtherFrom(cfg)
 	loadCustomFundingProvidersFrom(cfg)
 	return nil

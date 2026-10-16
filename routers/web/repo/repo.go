@@ -595,6 +595,7 @@ func chargeArchiveBuild(ctx *context.Context, aReq *archiver_service.ArchiveRequ
 
 func download(ctx *context.Context, archiveName string, archiver *repo_model.RepoArchiver) {
 	downloadName := ctx.Repo.Repository.Name + "-" + archiveName
+	defer common.RecordDownload(ctx.Base, ctx.Repo.Repository, "archive", archiveName)
 
 	// Add nix format link header so tarballs lock correctly:
 	// https://github.com/nixos/nix/blob/56763ff918eb308db23080e560ed2ea3e00c80a7/doc/manual/src/protocols/tarball-fetcher.md

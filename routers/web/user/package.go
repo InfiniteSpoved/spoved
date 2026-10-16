@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 
 	"forgejo.org/models/db"
@@ -32,6 +33,7 @@ import (
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	packages_helper "forgejo.org/routers/api/packages/helper"
+	"forgejo.org/routers/common"
 	shared_user "forgejo.org/routers/web/shared/user"
 	"forgejo.org/services/accessreport"
 	"forgejo.org/services/context"
@@ -517,6 +519,7 @@ func PackageSettingsPost(ctx *context.Context) {
 			log.Error("Error deleting package: %v", err)
 			ctx.Flash.Error(ctx.Tr("packages.settings.delete.error"))
 		} else {
+			common.RecordUpload(ctx.Base, nil, ctx.Package.Owner, "package", "delete", strconv.FormatInt(ctx.Package.Descriptor.Version.ID, 10), -1)
 			ctx.Flash.Success(ctx.Tr("packages.settings.delete.success"))
 		}
 

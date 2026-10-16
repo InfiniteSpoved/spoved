@@ -4,6 +4,7 @@
 package common
 
 import (
+	stdctx "context"
 	"errors"
 	"net/http"
 	"slices"
@@ -13,10 +14,13 @@ import (
 
 	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
+	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/httplib"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/ratelimit"
+	"forgejo.org/modules/setting"
+	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 	audit_service "forgejo.org/services/audit"
 	auth_service "forgejo.org/services/auth"
@@ -37,6 +41,11 @@ func SetAuditActor(ctx *context.Base, ar auth_service.AuthenticationResult) {
 		if u.ID == user_model.ActionsUserID {
 			a.Type = audit_model.ActorActions
 		}
+	}
+	switch a.Credential.Type {
+	case audit_model.CredentialDeployKey, audit_model.CredentialOrgDeployKey, audit_model.CredentialProjectDeployKey:
+		// a deploy-key LFS token carries the repository owner as its user: the key is the actor, as in the hooks
+		a.Type, a.ID, a.Name = audit_model.ActorDeployKey, 0, ""
 	}
 	ctx.AppendContextValue(audit_model.ActorContextKey, a)
 }
@@ -161,7 +170,11 @@ func APIActivity(next http.Handler) http.Handler {
 			ev.OwnerID, ev.TargetID, ev.TargetName = o.Organization.ID, o.Organization.ID, o.Organization.Name
 			target = "org"
 		}
-		recordRequest(req, ctx.Resp.WrittenStatus(), ev, target)
+		private := false
+		if r := ctx.Repo(); r != nil && r.Repository != nil && r.HasAccess() {
+			private = r.Repository.IsPrivate || (r.Owner != nil && r.Owner.Visibility == api.VisibleTypePrivate)
+		}
+		recordRequest(req, ctx.Resp.WrittenStatus(), ev, target, private && ctx.Data["AuditRecorded"] == nil)
 	})
 }
 
@@ -180,11 +193,13 @@ func PackageActivity(next http.Handler) http.Handler {
 			ev.OwnerID, ev.TargetID, ev.TargetName = ctx.Package.Owner.ID, ctx.Package.Owner.ID, ctx.Package.Owner.Name
 			target = "owner"
 		}
-		recordRequest(req, ctx.Resp.WrittenStatus(), ev, target)
+		recordRequest(req, ctx.Resp.WrittenStatus(), ev, target, false)
 	})
 }
 
-func recordRequest(req *http.Request, status int, ev audit_model.Event, target string) {
+// recordRequest records the request as a write, a request with sudo or, when readPrivate is set and [audit] LOG_READS is
+// on, a read of a private repository, in that order.
+func recordRequest(req *http.Request, status int, ev audit_model.Event, target string, readPrivate bool) {
 	a := audit_model.ActorFromContext(req.Context())
 	if a == nil || a.Type == audit_model.ActorAnonymous {
 		return
@@ -194,6 +209,8 @@ func recordRequest(req *http.Request, status int, ev audit_model.Event, target s
 		ev.Action = "activity.api.write"
 	case a.SudoByID != 0:
 		ev.Action = "activity.api.sudo"
+	case readPrivate && setting.Audit.LogReads:
+		ev.Action = "activity.api.read"
 	default:
 		return
 	}
@@ -209,6 +226,9 @@ func recordRequest(req *http.Request, status int, ev audit_model.Event, target s
 	}
 	ev.SubjectUserID, ev.TargetType = a.ID, "api_request"
 	ev.Data = map[string]any{"method": req.Method, "route": chi.RouteContext(req.Context()).RoutePattern(), "status": status, "target": target}
+	if req.ContentLength >= 0 {
+		ev.Data["bytes"] = req.ContentLength
+	}
 	if status < http.StatusBadRequest {
 		audit_model.RecordActivity(req.Context(), ev)
 		return
@@ -216,4 +236,102 @@ func recordRequest(req *http.Request, status int, ev audit_model.Event, target s
 	// failed requests are aggregated per client, credential, route and status
 	key := strings.Join([]string{audit_model.IPKey(a, 48), a.Credential.Type, strconv.FormatInt(a.Credential.ID, 10), req.Method, chi.RouteContext(req.Context()).RoutePattern(), strconv.Itoa(status)}, "|")
 	audit_model.RecordAggregated(req.Context(), ev, key)
+}
+
+// WebCredential reports whether c is a browser's: a session or reverse proxy authentication. Reads with it are
+// recorded only when [audit] LOG_READS is on.
+func WebCredential(c audit_model.Credential) bool {
+	return c.Type == audit_model.CredentialSession || c.Type == audit_model.CredentialReverseProxy
+}
+
+// RecordDownload records, after it was served, a download of kind archive, raw, lfs, release_asset or attachment
+// (activity.download) with the bytes written. It records nothing for an anonymous request, a 304 or an error, nor
+// for a web session unless [audit] LOG_READS is on. A redirect (ServeDirect) is recorded without bytes and never
+// with its URL. repo may be nil (an unlinked attachment): the target is then the actor. It marks the request, so that
+// the API read of it isn't recorded again.
+func RecordDownload(ctx *context.Base, repo *repo_model.Repository, kind, object string) {
+	a := audit_model.ActorFromContext(ctx)
+	status := ctx.Resp.WrittenStatus()
+	if a == nil || a.Type == audit_model.ActorAnonymous || status == http.StatusNotModified || status >= http.StatusBadRequest ||
+		(WebCredential(a.Credential) && !setting.Audit.LogReads) {
+		return
+	}
+	ev := audit_model.Event{Action: "activity.download", Result: audit_model.ResultSuccess, TargetType: "download"}
+	data := map[string]any{"kind": kind, "object": audit_model.Text(util.StripControl(object), 255)}
+	if status < http.StatusMultipleChoices {
+		data["bytes"] = ctx.Resp.Size()
+	}
+	ev.Data = data
+	if a.Type == audit_model.ActorUser {
+		ev.SubjectUserID = a.ID
+	}
+	switch {
+	case repo != nil:
+		ev.OwnerID, ev.GroupID, ev.RepoID, ev.TargetID, ev.TargetName = repo.OwnerID, repo.GroupID, repo.ID, repo.ID, repo.FullName()
+	case a.ID != 0:
+		ev.OwnerID, ev.TargetID, ev.TargetName = a.ID, a.ID, a.Name
+	default:
+		return // no target: never user 0
+	}
+	audit_model.RecordActivity(ctx, ev)
+	ctx.Data["AuditRecorded"] = true
+}
+
+// RecordUpload records, after it succeeded, an upload that no API route record covers (activity.upload): kind is lfs,
+// attachment, release or package, op create, update or delete, bytes the size (-1: not known). Nothing for an
+// anonymous request or an error. The target is repo, else owner (a package), else the actor.
+func RecordUpload(ctx *context.Base, repo *repo_model.Repository, owner *user_model.User, kind, op, object string, bytes int64) {
+	a := audit_model.ActorFromContext(ctx)
+	if a == nil || a.Type == audit_model.ActorAnonymous || ctx.Resp.WrittenStatus() >= http.StatusBadRequest {
+		return
+	}
+	ev := audit_model.Event{Action: "activity.upload", Result: audit_model.ResultSuccess, TargetType: "upload"}
+	ev.Data = map[string]any{"kind": kind, "op": op, "object": audit_model.Text(util.StripControl(object), 255)}
+	if bytes >= 0 {
+		ev.Data["bytes"] = bytes
+	}
+	if a.Type == audit_model.ActorUser {
+		ev.SubjectUserID = a.ID
+	}
+	switch {
+	case repo != nil:
+		ev.OwnerID, ev.GroupID, ev.RepoID, ev.TargetID, ev.TargetName = repo.OwnerID, repo.GroupID, repo.ID, repo.ID, repo.FullName()
+	case owner != nil:
+		ev.OwnerID, ev.TargetID, ev.TargetName = owner.ID, owner.ID, owner.Name
+	case a.ID != 0:
+		ev.OwnerID, ev.TargetID, ev.TargetName = a.ID, a.ID, a.Name
+	default:
+		return // no target: never user 0
+	}
+	audit_model.RecordActivity(ctx, ev)
+}
+
+// RecordGitRead records a read of a repository with git (activity.git.read): service upload-pack or upload-archive,
+// protocol ssh or http, bytes for HTTP (-1: not known). It records nothing for an anonymous request, nor for a web
+// session unless [audit] LOG_READS is on. A failed read is aggregated per client, credential and repository.
+func RecordGitRead(ctx stdctx.Context, repo *repo_model.Repository, service, protocol string, bytes int64, wiki, failed bool) {
+	a := audit_model.ActorFromContext(ctx)
+	if a == nil || a.Type == audit_model.ActorAnonymous || (WebCredential(a.Credential) && !setting.Audit.LogReads) {
+		return
+	}
+	data := map[string]any{"service": service, "protocol": protocol}
+	if bytes >= 0 {
+		data["bytes"] = bytes
+	}
+	if wiki {
+		data["wiki"] = true
+	}
+	ev := audit_model.Event{
+		Action: "activity.git.read", Result: audit_model.ResultSuccess, OwnerID: repo.OwnerID, GroupID: repo.GroupID,
+		RepoID: repo.ID, TargetType: "git_read", TargetID: repo.ID, TargetName: repo.FullName(), Data: data,
+	}
+	if a.Type == audit_model.ActorUser {
+		ev.SubjectUserID = a.ID
+	}
+	if !failed {
+		audit_model.RecordActivity(ctx, ev)
+		return
+	}
+	ev.Result = audit_model.ResultFailure
+	audit_model.RecordAggregated(ctx, ev, strings.Join([]string{audit_model.IPKey(a, 48), a.Credential.Type, strconv.FormatInt(a.Credential.ID, 10), strconv.FormatInt(repo.ID, 10), service, protocol}, "|"))
 }

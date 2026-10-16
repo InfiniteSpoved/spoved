@@ -630,6 +630,11 @@ func ServCommand(ctx *context.PrivateContext) {
 		results.RepoID)
 
 	results.RequestID = actor.RequestID
+	if verb := ctx.FormString("verb"); verb == "git-upload-pack" || verb == "git-upload-archive" {
+		// recorded before git runs, so the size is not known; never git-lfs-authenticate
+		common.RecordGitRead(ctx, repo, strings.TrimPrefix(verb, "git-"), "ssh", -1, results.IsWiki, false)
+	}
+	results.AuditCredential = audit_model.CredentialClaim(actor.Credential)
 	ctx.JSON(http.StatusOK, results)
 	// We will update the keys in a different call.
 }
