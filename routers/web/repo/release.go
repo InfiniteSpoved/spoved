@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"forgejo.org/models"
@@ -29,6 +30,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
+	"forgejo.org/routers/common"
 	"forgejo.org/routers/web/feed"
 	"forgejo.org/services/context"
 	"forgejo.org/services/context/upload"
@@ -657,6 +659,7 @@ func NewReleasePost(ctx *context.Context) {
 	log.Trace("Release created: %s/%s:%s", ctx.Doer.LowerName, ctx.Repo.Repository.Name, form.TagName)
 
 	ctx.Redirect(ctx.Repo.RepoLink + "/releases")
+	common.RecordUpload(ctx.Base, ctx.Repo.Repository, "release", "create", strconv.FormatInt(rel.ID, 10), -1)
 }
 
 // GenerateReleaseNotes returns release notes generated from the pull requests merged since the previous tag
@@ -855,6 +858,7 @@ func EditReleasePost(ctx *context.Context) {
 		return
 	}
 	ctx.Redirect(ctx.Repo.RepoLink + "/releases")
+	common.RecordUpload(ctx.Base, ctx.Repo.Repository, "release", "update", strconv.FormatInt(rel.ID, 10), -1)
 }
 
 // DeleteRelease deletes a release
@@ -897,6 +901,9 @@ func deleteReleaseOrTag(ctx *context.Context, isDelTag bool) {
 		}
 	} else {
 		repo_service.ShrinkAfterDelete(ctx, ctx.Repo.Repository, locked)
+		if !isDelTag {
+			common.RecordUpload(ctx.Base, ctx.Repo.Repository, "release", "delete", strconv.FormatInt(rel.ID, 10), -1)
+		}
 		if isDelTag {
 			ctx.Flash.Success(ctx.Tr("repo.release.deletion_tag_success"))
 		} else {

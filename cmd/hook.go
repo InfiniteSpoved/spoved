@@ -486,6 +486,7 @@ func setHookAudit(opts *private.HookOptions) {
 	opts.AuditCredential = os.Getenv(repo_module.EnvAuditCredential)
 	opts.AuditIP = os.Getenv(repo_module.EnvAuditIP)
 	opts.AuditRequestID = os.Getenv(repo_module.EnvAuditRequestID)
+	opts.AuditSudoByID, _ = strconv.ParseInt(os.Getenv(repo_module.EnvAuditSudoBy), 10, 64) // invalid: 0
 }
 
 func hookPrintResults(results []private.HookPostReceiveBranchResult) {

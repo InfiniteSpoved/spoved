@@ -10,6 +10,7 @@ import (
 	gocontext "context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -34,6 +35,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
+	"forgejo.org/routers/common"
 	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	redirect_service "forgejo.org/services/redirect"
@@ -544,12 +546,17 @@ func serviceRPC(ctx *context.Context, h *serviceHandler, service string) {
 	}
 
 	var stderr bytes.Buffer
+	var stdout io.Writer = ctx.Resp
+	counter := &countingWriter{w: ctx.Resp}
+	if service == "upload-pack" {
+		stdout = counter // only the git command's output is wrapped, never the response writer in middleware
+	}
 	cmd.AddArguments("--stateless-rpc").AddDynamicArguments(h.getRepoDir())
 	cmd.SetDescription(fmt.Sprintf("%s %s %s [repo_path: %s]", git.GitExecutable, service, "--stateless-rpc", h.getRepoDir()))
 	if err := cmd.Run(&git.RunOpts{
 		Dir:               h.getRepoDir(),
 		Env:               append(os.Environ(), h.environ...),
-		Stdout:            ctx.Resp,
+		Stdout:            stdout,
 		Stdin:             reqBody,
 		Stderr:            &stderr,
 		UseContextTimeout: true,
@@ -557,8 +564,26 @@ func serviceRPC(ctx *context.Context, h *serviceHandler, service string) {
 		if !git.IsErrCanceledOrKilled(err) {
 			log.Error("Fail to serve RPC(%s) in %s: %v - %s", service, h.getRepoDir(), err, stderr.String())
 		}
+		if service == "upload-pack" {
+			common.RecordGitRead(ctx, h.repo, service, "http", counter.n, h.isWiki, true)
+		}
 		return
 	}
+	if service == "upload-pack" {
+		common.RecordGitRead(ctx, h.repo, service, "http", counter.n, h.isWiki, false)
+	}
+}
+
+// countingWriter counts the bytes written through it.
+type countingWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += int64(n)
+	return n, err
 }
 
 // ServiceUploadPack implements Git Smart HTTP protocol

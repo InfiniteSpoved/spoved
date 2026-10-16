@@ -205,7 +205,7 @@ func servGitEnv(results *private.ServCommandResults, clientIP string) []string {
 		repo_module.EnvKeyID+"="+fmt.Sprintf("%d", results.KeyID),
 		repo_module.EnvAppURL+"="+setting.AppURL,
 	)
-	return append(env, repo_module.AuditEnv(credential, clientIP, results.RequestID)...)
+	return append(env, repo_module.AuditEnv(credential, clientIP, results.RequestID, "")...)
 }
 
 // splitServRepoPath splits the path of an SSH command, `owner/repo` or `owner/project/repo` with an optional
@@ -380,6 +380,7 @@ func runServ(ctx context.Context, c *cli.Command) error {
 			RepoID: results.RepoID,
 			Op:     lfsVerb,
 			UserID: results.UserID,
+			Cred:   results.AuditCredential,
 		}
 
 		// Sign and get the complete encoded token as a string using the secret

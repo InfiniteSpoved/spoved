@@ -32,6 +32,7 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/storage"
+	"forgejo.org/routers/common"
 	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 )
@@ -150,6 +151,9 @@ func DownloadHandler(ctx *context.Context) {
 	ctx.Resp.WriteHeader(statusCode)
 	if written, err := io.CopyN(ctx.Resp, content, contentLength); err != nil {
 		log.Error("Error whilst copying LFS OID[%s] to the response after %d bytes. Error: %v", meta.Oid, written, err)
+	}
+	if repo, err := repo_model.GetRepositoryByID(ctx, meta.RepositoryID); err == nil {
+		common.RecordDownload(ctx.Base, repo, "lfs", meta.Oid)
 	}
 }
 
@@ -394,6 +398,7 @@ func UploadHandler(ctx *context.Context) {
 	}
 
 	writeStatus(ctx, http.StatusOK)
+	common.RecordUpload(ctx.Base, repository, "lfs", "create", p.Oid, p.Size)
 }
 
 // VerifyHandler verify oid and its size from the content store

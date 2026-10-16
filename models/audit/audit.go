@@ -117,7 +117,10 @@ var Fields = map[string][]string{
 	"audit_export":   {"format", "filter", "capped", "through_id"},
 	"credential_use": {"method"},
 	// activity: what a request or a push did, never its body, query or content
-	"api_request":      {"method", "route", "status", "target"},
+	"api_request":      {"method", "route", "status", "target", "bytes"},
+	"upload":           {"kind", "op", "bytes", "object"},
+	"download":         {"kind", "bytes", "object"},
+	"git_read":         {"service", "protocol", "bytes", "wiki"},
 	"git_push":         {"refs", "more", "forced_count", "forced_unknown", "deleted_count", "wiki", "trigger"},
 	"git_push_refused": {"ref"},
 	"deploy_key":       {"expires", "name", "fingerprint", "mode"},

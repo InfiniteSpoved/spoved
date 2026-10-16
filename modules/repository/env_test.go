@@ -31,11 +31,12 @@ func TestPushingEnvironmentAudit(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	t.Setenv(EnvAuditIP, "203.0.113.9")
 	t.Setenv(EnvAuditCredential, "access_token:1")
+	t.Setenv(EnvAuditSudoBy, "1") // inherited: must not survive
 	doer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
 
 	env := PushingEnvironment(t.Context(), doer, repo)
-	for _, k := range []string{EnvAuditCredential, EnvAuditIP, EnvAuditRequestID} {
+	for _, k := range []string{EnvAuditCredential, EnvAuditIP, EnvAuditRequestID, EnvAuditSudoBy} {
 		v, ok := lastEnv(env, k)
 		assert.True(t, ok, k)
 		assert.Empty(t, v, k) // no actor: set, but empty
@@ -52,4 +53,10 @@ func TestPushingEnvironmentAudit(t *testing.T) {
 	assert.Equal(t, "192.0.2.1", v)
 	v, _ = lastEnv(env, EnvAuditRequestID)
 	assert.Equal(t, "req", v)
+	v, _ = lastEnv(env, EnvAuditSudoBy)
+	assert.Empty(t, v)
+
+	ctx = audit_model.WithActor(t.Context(), &audit_model.Actor{Type: audit_model.ActorUser, ID: 2, SudoByID: 1})
+	v, _ = lastEnv(FullPushingEnvironment(ctx, doer, doer, repo, repo.Name, 0), EnvAuditSudoBy)
+	assert.Equal(t, "1", v)
 }

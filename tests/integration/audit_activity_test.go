@@ -27,12 +27,17 @@ import (
 	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
+	lfs_module "forgejo.org/modules/lfs"
+	"forgejo.org/modules/optional"
 	"forgejo.org/modules/private"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
+	"forgejo.org/modules/timeutil"
+	packages_service "forgejo.org/services/packages"
 	"forgejo.org/tests"
 
 	"github.com/stretchr/testify/assert"
@@ -536,5 +541,315 @@ func TestAuditServRefused(t *testing.T) {
 			lockPersonalRepos(t, 2, true)
 			serv(t, "size_lock", 1, "user2", "repo1", 1)
 		})
+	})
+}
+
+func TestAuditDownloads(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	auditFresh(t)
+	saveTestAttachments(t)
+	token := getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository, auth_model.AccessTokenScopeWriteRepository)
+	tok, err := auth_model.GetAccessTokenBySHA(t.Context(), token)
+	require.NoError(t, err)
+
+	download := func(t *testing.T, req *RequestWrapper, kind, object string) *audit_model.Entry {
+		t.Helper()
+		since := auditMaxID(t)
+		MakeRequest(t, req, http.StatusOK)
+		e := auditActivity(t, since, "activity.download")
+		assert.Equal(t, audit_model.CredentialAccessToken, e.CredentialType)
+		assert.Equal(t, tok.ID, e.CredentialID)
+		assert.EqualValues(t, 2, e.ActorID)
+		assert.EqualValues(t, 1, e.RepoID)
+		data := auditData(t, e)
+		assert.Equal(t, kind, data["kind"])
+		assert.Equal(t, object, data["object"])
+		assert.Positive(t, data["bytes"])
+		assertNoSecrets(t, since, token, "secret=q")
+		assert.Empty(t, auditActions(t, since, "activity.api.read"))
+		return e
+	}
+
+	t.Run("raw and media", func(t *testing.T) {
+		download(t, NewRequest(t, "GET", "/user2/repo1/raw/branch/master/README.md?secret=q").AddTokenAuth(token), "raw", "README.md")
+		download(t, NewRequest(t, "GET", "/user2/repo1/media/branch/master/README.md").AddTokenAuth(token), "raw", "README.md")
+		download(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1/raw/README.md?ref=master").AddTokenAuth(token), "raw", "README.md")
+		download(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1/media/README.md?ref=master").AddTokenAuth(token), "raw", "README.md")
+	})
+
+	t.Run("archive", func(t *testing.T) {
+		download(t, NewRequest(t, "GET", "/user2/repo1/archive/master.zip").AddTokenAuth(token), "archive", "master.zip")
+		download(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1/archive/master.zip").AddTokenAuth(token), "archive", "master.zip")
+	})
+
+	t.Run("attachment", func(t *testing.T) {
+		download(t, NewRequest(t, "GET", "/attachments/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11").AddTokenAuth(token), "attachment", "1")
+	})
+
+	t.Run("lfs", func(t *testing.T) {
+		content := []byte("audit lfs content")
+		repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
+		oid := storeObjectInRepo(t, repo.ID, &content)
+		req := NewRequest(t, "GET", "/user2/repo1.git/info/lfs/objects/"+oid+"/x")
+		req.SetBasicAuth("user2", token)
+		e := download(t, req, "lfs", oid)
+		assert.EqualValues(t, len(content), auditData(t, e)["bytes"])
+	})
+
+	t.Run("not recorded", func(t *testing.T) {
+		since := auditMaxID(t)
+		MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/raw/branch/master/README.md"), http.StatusOK) // anonymous
+		session := loginUser(t, "user2")
+		MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/raw/branch/master/README.md"), http.StatusOK)
+		session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/raw/branch/master/README.md"), http.StatusOK) // session, LOG_READS off
+		req := NewRequest(t, "GET", "/user2/repo1/raw/branch/master/README.md").AddTokenAuth(token)
+		resp := MakeRequest(t, req, http.StatusOK)
+		since2 := auditMaxID(t)
+		req = NewRequest(t, "GET", "/user2/repo1/raw/branch/master/README.md").AddTokenAuth(token)
+		req.Header.Set("If-None-Match", resp.Header().Get("ETag"))
+		MakeRequest(t, req, http.StatusNotModified)
+		assert.Empty(t, auditActions(t, since2, "activity.download"))
+		assert.Len(t, auditActions(t, since, "activity.download"), 1) // only the first token request
+	})
+
+	t.Run("session with LOG_READS", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.Audit.LogReads, true)()
+		session := loginUser(t, "user2")
+		since := auditMaxID(t)
+		session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/raw/branch/master/README.md"), http.StatusOK)
+		e := auditActivity(t, since, "activity.download")
+		assert.Equal(t, audit_model.CredentialSession, e.CredentialType)
+	})
+}
+
+func TestAuditAPIReads(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	auditFresh(t)
+	token := getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository)
+	count := func(path string) int {
+		since := auditMaxID(t)
+		MakeRequest(t, NewRequest(t, "GET", path).AddTokenAuth(token), http.StatusOK)
+		return len(auditActions(t, since, "activity.api.read"))
+	}
+
+	assert.Zero(t, count("/api/v1/repos/user2/repo2")) // LOG_READS off
+
+	defer test.MockVariableValue(&setting.Audit.LogReads, true)()
+	since := auditMaxID(t)
+	MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo2?secret=q").AddTokenAuth(token), http.StatusOK)
+	e := auditActivity(t, since, "activity.api.read")
+	assert.Equal(t, "user2/repo2", e.TargetName)
+	assert.Equal(t, "GET", auditData(t, e)["method"])
+	assertNoSecrets(t, since, token, "secret=q")
+	assert.Zero(t, count("/api/v1/repos/user2/repo1")) // public
+
+	// a public repository of a private organization counts as private
+	org := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+	require.NoError(t, user_model.UpdateUserCols(t.Context(), &user_model.User{ID: org.ID, Visibility: api.VisibleTypePrivate}, "visibility"))
+	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{OwnerID: org.ID, IsPrivate: false})
+	orgToken := getUserToken(t, "user1", auth_model.AccessTokenScopeAll)
+	since = auditMaxID(t)
+	MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/"+org.Name+"/"+repo.Name).AddTokenAuth(orgToken), http.StatusOK)
+	assert.Len(t, auditActions(t, since, "activity.api.read"), 1)
+
+	// a download is not recorded twice
+	since = auditMaxID(t)
+	MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo2/raw/README.md").AddTokenAuth(token), http.StatusOK)
+	assert.Len(t, auditActions(t, since, "activity.download"), 1)
+	assert.Empty(t, auditActions(t, since, "activity.api.read"))
+}
+
+func TestAuditUploads(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	auditFresh(t)
+	token := getUserToken(t, "user2", auth_model.AccessTokenScopeWriteRepository, auth_model.AccessTokenScopeWritePackage)
+	tok, err := auth_model.GetAccessTokenBySHA(t.Context(), token)
+	require.NoError(t, err)
+
+	t.Run("lfs", func(t *testing.T) {
+		content := []byte("audit lfs upload")
+		sum := sha256.Sum256(content)
+		oid := hex.EncodeToString(sum[:])
+		since := auditMaxID(t)
+		req := NewRequestWithBody(t, "PUT", fmt.Sprintf("/user2/repo1.git/info/lfs/objects/%s/%d", oid, len(content)), bytes.NewReader(content))
+		req.SetBasicAuth("user2", token)
+		MakeRequest(t, req, http.StatusOK)
+		e := auditActivity(t, since, "activity.upload")
+		data := auditData(t, e)
+		assert.Equal(t, "lfs", data["kind"])
+		assert.Equal(t, "create", data["op"])
+		assert.Equal(t, oid, data["object"])
+		assert.EqualValues(t, len(content), data["bytes"])
+		assert.Equal(t, tok.ID, e.CredentialID)
+		assert.EqualValues(t, 1, e.RepoID)
+	})
+
+	t.Run("generic package and release asset: only the API entry", func(t *testing.T) {
+		since := auditMaxID(t)
+		MakeRequest(t, NewRequestWithBody(t, "PUT", "/api/packages/user2/generic/audit/1.0/a.bin", strings.NewReader("12345")).AddBasicAuth("user2").SetHeader("Authorization", "token "+token), http.StatusCreated)
+		e := auditActivity(t, since, "activity.api.write")
+		assert.EqualValues(t, 5, auditData(t, e)["bytes"])
+		assert.Empty(t, auditActions(t, since, "activity.upload"))
+	})
+
+	t.Run("web release", func(t *testing.T) {
+		session := loginUser(t, "user2")
+		since := auditMaxID(t)
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/releases/new", map[string]string{
+			"tag_name": "audit-v1", "tag_target": "master", "title": "audit",
+		}), http.StatusSeeOther)
+		e := auditActivity(t, since, "activity.upload")
+		assert.Equal(t, "release", auditData(t, e)["kind"])
+		assert.Equal(t, "create", auditData(t, e)["op"])
+		assert.Equal(t, audit_model.CredentialSession, e.CredentialType)
+
+		since = auditMaxID(t)
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/releases/edit/audit-v1", map[string]string{"title": "audit 2"}), http.StatusSeeOther)
+		assert.Equal(t, "update", auditData(t, auditActivity(t, since, "activity.upload"))["op"])
+
+		rel, err := repo_model.GetRelease(t.Context(), 1, "audit-v1")
+		require.NoError(t, err)
+		since = auditMaxID(t)
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/user2/repo1/releases/delete?id=%d", rel.ID), nil), http.StatusOK)
+		assert.Equal(t, "delete", auditData(t, auditActivity(t, since, "activity.upload"))["op"])
+	})
+}
+
+func TestAuditGitReadHTTP(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		auditFresh(t)
+		token := getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository)
+		tok, err := auth_model.GetAccessTokenBySHA(t.Context(), token)
+		require.NoError(t, err)
+
+		since := auditMaxID(t)
+		doGitClone(t.TempDir(), gitURL(u, "/user2/repo1.git", "user2", token))(t)
+		entries := auditActions(t, since, "activity.git.read")
+		require.NotEmpty(t, entries) // protocol v2 sends more than one POST
+		for _, e := range entries {
+			assert.Equal(t, tok.ID, e.CredentialID)
+			assert.EqualValues(t, 1, e.RepoID)
+			assert.Equal(t, "http", auditData(t, e)["protocol"])
+			assert.Equal(t, "upload-pack", auditData(t, e)["service"])
+		}
+		assert.Positive(t, auditData(t, entries[len(entries)-1])["bytes"])
+		assertNoSecrets(t, since, token)
+
+		// anonymous clone of a public repository: nothing
+		since = auditMaxID(t)
+		doGitClone(t.TempDir(), gitURL(u, "/user2/repo1.git", "", ""))(t)
+		assert.Empty(t, auditActions(t, since, "activity.git.read"))
+	})
+}
+
+func TestAuditJWTCredential(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	auditFresh(t)
+	content := []byte("jwt lfs content")
+	oid := storeObjectInRepo(t, 1, &content)
+
+	get := func(t *testing.T, cred string) *audit_model.Entry {
+		t.Helper()
+		jwtToken, err := setting.LFS.SigningKey.JWT(lfs_module.Claims{RepoID: 1, Op: "download", UserID: 2, Cred: cred})
+		require.NoError(t, err)
+		since := auditMaxID(t)
+		MakeRequest(t, NewRequest(t, "GET", "/user2/repo1.git/info/lfs/objects/"+oid+"/x").SetHeader("Authorization", "Bearer "+jwtToken), http.StatusOK)
+		return auditActivity(t, since, "activity.download")
+	}
+
+	e := get(t, "ssh_key:1")
+	assert.Equal(t, audit_model.CredentialSSHKey, e.CredentialType)
+	assert.EqualValues(t, 1, e.CredentialID)
+	assert.EqualValues(t, 2, e.ActorID)
+
+	e = get(t, "deploy_key:7")
+	assert.Equal(t, audit_model.ActorDeployKey, e.ActorType)
+	assert.Zero(t, e.ActorID)
+	assert.EqualValues(t, 1, e.RepoID)
+
+	for _, cred := range []string{"", "session:1", "bogus:1", "ssh_key:0"} {
+		assert.Equal(t, audit_model.CredentialUnknown, get(t, cred).CredentialType, cred)
+	}
+}
+
+func TestAuditSudoPush(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	auditFresh(t)
+	token := getUserToken(t, "user1", auth_model.AccessTokenScopeAll)
+	tok, err := auth_model.GetAccessTokenBySHA(t.Context(), token)
+	require.NoError(t, err)
+
+	since := auditMaxID(t)
+	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/repo1/contents/sudo-audit.txt?sudo=user2", &api.CreateFileOptions{
+		FileOptions: api.FileOptions{Message: "sudo"}, ContentBase64: "aGVsbG8=",
+	}).AddTokenAuth(token), http.StatusCreated)
+	e := auditActivity(t, since, "activity.git.push")
+	assert.EqualValues(t, 2, e.ActorID)
+	assert.EqualValues(t, 1, e.SudoByID)
+	assert.Equal(t, audit_model.CredentialAccessToken, e.CredentialType)
+	assert.Equal(t, tok.ID, e.CredentialID)
+}
+
+func TestAuditContainerJWTCredential(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	auditFresh(t)
+	token := getUserToken(t, "user2", auth_model.AccessTokenScopeWritePackage)
+	tok, err := auth_model.GetAccessTokenBySHA(t.Context(), token)
+	require.NoError(t, err)
+
+	req := NewRequest(t, "GET", setting.AppURL+"v2/token")
+	req.SetBasicAuth("user2", token)
+	var tokenResponse struct {
+		Token string `json:"token"`
+	}
+	DecodeJSON(t, MakeRequest(t, req, http.StatusOK), &tokenResponse)
+
+	push := func(t *testing.T, jwt string) *audit_model.Entry {
+		t.Helper()
+		since := auditMaxID(t)
+		MakeRequest(t, NewRequestWithBody(t, "POST", setting.AppURL+"v2/user2/audit/blobs/uploads?digest=sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", bytes.NewReader(nil)).AddTokenAuth("Bearer "+jwt), http.StatusCreated)
+		return auditActivity(t, since, "activity.api.write")
+	}
+
+	e := push(t, tokenResponse.Token)
+	assert.Equal(t, audit_model.CredentialAccessToken, e.CredentialType)
+	assert.Equal(t, tok.ID, e.CredentialID)
+	assert.EqualValues(t, 2, e.ActorID)
+
+	// a JWT minted from a JWT keeps the original credential
+	req = NewRequest(t, "GET", setting.AppURL+"v2/token").AddTokenAuth("Bearer " + tokenResponse.Token)
+	DecodeJSON(t, MakeRequest(t, req, http.StatusOK), &tokenResponse)
+	assert.Equal(t, tok.ID, push(t, tokenResponse.Token).CredentialID)
+
+	// a JWT without the claim
+	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	old, err := packages_service.CreateAuthorizationToken(user, auth_model.AccessTokenScopeAll, optional.None[timeutil.TimeStamp](), audit_model.Credential{})
+	require.NoError(t, err)
+	assert.Equal(t, audit_model.CredentialUnknown, push(t, old).CredentialType)
+}
+
+// TestAuditServRead covers the SSH reads at the internal API of the SSH entry point, without an SSH client.
+func TestAuditServRead(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		auditFresh(t)
+		serv := func(verb string) []*audit_model.Entry {
+			since := auditMaxID(t)
+			_, extra := private.ServCommand(t.Context(), 1, "user2", "repo1", perm.AccessModeRead, "127.0.0.1", verb, "")
+			require.NoError(t, extra.Error)
+			return auditActions(t, since, "activity.git.read")
+		}
+		for _, service := range []string{"upload-pack", "upload-archive"} {
+			entries := serv("git-" + service)
+			require.Len(t, entries, 1, service)
+			e := entries[0]
+			assert.Equal(t, audit_model.CredentialSSHKey, e.CredentialType)
+			assert.EqualValues(t, 1, e.CredentialID)
+			assert.EqualValues(t, 1, e.RepoID)
+			data := auditData(t, e)
+			assert.Equal(t, service, data["service"])
+			assert.Equal(t, "ssh", data["protocol"])
+			assert.Nil(t, data["bytes"])
+		}
+		assert.Empty(t, serv("git-lfs-authenticate"))
 	})
 }

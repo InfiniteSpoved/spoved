@@ -40,6 +40,7 @@ type HookOptions struct {
 	ActionTaskID                    int64 // the Actions task whose token pushes (UserID is the Actions user)
 	// who pushes, for the audit log: set by the server (serv, git HTTP, web pushes) and checked again by the hook
 	AuditCredential, AuditIP, AuditRequestID string
+	AuditSudoByID                            int64 // the admin who pushes with API sudo (0: none)
 }
 
 func (o *HookOptions) GetGitPushOptions() pushoptions.Interface {
