@@ -109,7 +109,7 @@ func VerifyDomain(ctx context.Context, org *org_model.Organization, doer *user_m
 		return ErrDomainRecordNotFound
 	}
 	if err := db.WithTx(ctx, func(ctx context.Context) error {
-		if err := db.Insert(ctx, d); err != nil {
+		if err := org_model.AddVerifiedDomain(ctx, d); err != nil {
 			return err
 		}
 		data := map[string]any{"domain": domain}
