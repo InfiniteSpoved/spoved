@@ -6,6 +6,29 @@ package audit
 // Actions maps every action key to its category. Record refuses a key that is not listed; TestActionCatalog checks
 // that each one is recorded somewhere, tested and has a phrase.
 var Actions = map[string]string{
+	"account.email.activated":                CategoryAccount,
+	"account.email.added":                    CategoryAccount,
+	"account.email.deactivated":              CategoryAccount,
+	"account.email.deleted":                  CategoryAccount,
+	"account.email.primary":                  CategoryAccount,
+	"account.external_login.linked":          CategoryAccount,
+	"account.external_login.unlinked":        CategoryAccount,
+	"account.openid.linked":                  CategoryAccount,
+	"account.openid.unlinked":                CategoryAccount,
+	"account.two_factor.enrolled":            CategoryAccount,
+	"account.two_factor.removed":             CategoryAccount,
+	"account.two_factor.scratch_regenerated": CategoryAccount,
+	"account.user.activated":                 CategoryAccount,
+	"account.user.created":                   CategoryAccount,
+	"account.user.deleted":                   CategoryAccount,
+	"account.user.must_change_password":      CategoryAccount,
+	"account.user.password_changed":          CategoryAccount,
+	"account.user.purge_started":             CategoryAccount,
+	"account.user.renamed":                   CategoryAccount,
+	"account.user.role_granted":              CategoryAccount,
+	"account.user.role_revoked":              CategoryAccount,
+	"account.user.updated":                   CategoryAccount,
+
 	"audit.exported":         CategoryAudit,
 	"audit.instance.started": CategoryAudit,
 

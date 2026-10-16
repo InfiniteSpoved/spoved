@@ -913,20 +913,13 @@ func ActivatePost(ctx *context.Context) {
 }
 
 func handleAccountActivation(ctx *context.Context, user *user_model.User) {
-	user.IsActive = true
-	user.Rands = user_model.GetUserSalt()
-	if err := user_model.UpdateUserCols(ctx, user, "is_active", "rands"); err != nil {
+	if err := user_service.ActivateAccount(ctx, user); err != nil {
 		if user_model.IsErrUserNotExist(err) {
-			ctx.NotFound("UpdateUserCols", err)
+			ctx.NotFound("ActivateAccount", err)
 		} else {
-			ctx.ServerError("UpdateUser", err)
+			log.Error("Unable to activate user: %-v with email: %s: %v", user, user.Email, err)
+			ctx.ServerError("ActivateAccount", err)
 		}
-		return
-	}
-
-	if err := user_model.ActivateUserEmail(ctx, user.ID, user.Email, true); err != nil {
-		log.Error("Unable to activate email for user: %-v with email: %s: %v", user, user.Email, err)
-		ctx.ServerError("ActivateUserEmail", err)
 		return
 	}
 

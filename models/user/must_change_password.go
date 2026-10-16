@@ -7,6 +7,7 @@ import (
 	"context"
 	"strings"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/modules/util"
 
@@ -45,5 +46,19 @@ func SetMustChangePassword(ctx context.Context, all, mustChangePassword bool, in
 		cond = cond.And(builder.NotIn("lower_name", exclude))
 	}
 
-	return db.GetEngine(ctx).Where(cond).MustCols("must_change_password").Update(&User{MustChangePassword: mustChangePassword})
+	var count int64
+	return count, db.WithTx(ctx, func(ctx context.Context) error {
+		ids := make([]int64, 0, 10)
+		if err := db.GetEngine(ctx).Table("user").Where(cond).Cols("id").Find(&ids); err != nil {
+			return err
+		}
+		var err error
+		if count, err = db.GetEngine(ctx).Where(cond).MustCols("must_change_password").Update(&User{MustChangePassword: mustChangePassword}); err != nil || count == 0 {
+			return err
+		}
+		return audit_model.Record(ctx, audit_model.Event{
+			Action: "account.user.must_change_password", Result: audit_model.ResultSuccess, TargetType: "user",
+			Data: map[string]any{"user_ids": ids, "count": count, "must_change_password": mustChangePassword},
+		})
+	})
 }

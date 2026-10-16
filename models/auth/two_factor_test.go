@@ -53,7 +53,7 @@ func TestNewTwoFactor(t *testing.T) {
 	})
 
 	t.Run("Normal", func(t *testing.T) {
-		reset := unittest.SetFaultInjector(4)
+		reset := unittest.SetFaultInjector(5) // insert, secret, audit entry
 		require.NoError(t, NewTwoFactor(t.Context(), &TwoFactor{UID: 44}, otpKey.Secret()))
 		reset()
 

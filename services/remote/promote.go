@@ -78,7 +78,14 @@ func MaybePromoteRemoteUser(ctx context.Context, source *auth_model.Source, logi
 		LoginType:   source.Type,
 	}
 	reason = NewReason(log.DEBUG, ReasonPromoted, "promote user %v: LoginName %v => %v, LoginSource %v => %v, LoginType %v => %v, Email %v => %v", user.ID, user.LoginName, promote.LoginName, user.LoginSource, promote.LoginSource, user.LoginType, promote.LoginType, user.Email, promote.Email)
-	if err := user_model.UpdateUserCols(ctx, promote, "type", "email", "login_source", "login_type"); err != nil {
+	before := user.AuditFields()
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		if err := user_model.UpdateUserCols(ctx, promote, "type", "email", "login_source", "login_type"); err != nil {
+			return err
+		}
+		user.Type, user.Email, user.LoginSource, user.LoginType = promote.Type, promote.Email, promote.LoginSource, promote.LoginType
+		return user_model.RecordUserChange(ctx, before, user)
+	}); err != nil {
 		return false, ReasonUpdateFail, err
 	}
 	return true, reason, nil

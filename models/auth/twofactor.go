@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/modules/keying"
 	"forgejo.org/modules/timeutil"
@@ -109,8 +110,27 @@ func NewTwoFactor(ctx context.Context, t *TwoFactor, secret string) error {
 		}
 
 		t.SetSecret(secret)
-		_, err = sess.Cols("secret").ID(t.ID).Update(t)
-		return err
+		if _, err = sess.Cols("secret").ID(t.ID).Update(t); err != nil {
+			return err
+		}
+		return recordTwoFactor(ctx, "account.two_factor.enrolled", t.UID, t.ID, "totp", "")
+	})
+}
+
+// recordTwoFactor records a change of a second factor (type "totp" or "webauthn" with the key's name) of the user
+// uid. Secrets, scratch codes and key material are never recorded.
+func recordTwoFactor(ctx context.Context, action string, uid, id int64, typ, name string) error {
+	return audit_model.RecordAccount(ctx, action, uid, "two_factor", id, typ, map[string]any{"type": typ, "name": name})
+}
+
+// RegenerateScratchToken gives t a new scratch code and returns it.
+func RegenerateScratchToken(ctx context.Context, t *TwoFactor) (string, error) {
+	token := t.GenerateScratchToken()
+	return token, db.WithTx(ctx, func(ctx context.Context) error {
+		if err := UpdateTwoFactor(ctx, t); err != nil {
+			return err
+		}
+		return recordTwoFactor(ctx, "account.two_factor.scratch_regenerated", t.UID, t.ID, "totp", "")
 	})
 }
 
@@ -141,13 +161,15 @@ func HasTOTPByUID(ctx context.Context, uid int64) (bool, error) {
 
 // DeleteTwoFactorByID deletes two-factor authentication token by given ID.
 func DeleteTwoFactorByID(ctx context.Context, id, userID int64) error {
-	cnt, err := db.GetEngine(ctx).ID(id).Delete(&TwoFactor{
-		UID: userID,
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		cnt, err := db.GetEngine(ctx).ID(id).Delete(&TwoFactor{
+			UID: userID,
+		})
+		if err != nil {
+			return err
+		} else if cnt != 1 {
+			return ErrTwoFactorNotEnrolled{userID}
+		}
+		return recordTwoFactor(ctx, "account.two_factor.removed", userID, id, "totp", "")
 	})
-	if err != nil {
-		return err
-	} else if cnt != 1 {
-		return ErrTwoFactorNotEnrolled{userID}
-	}
-	return nil
 }

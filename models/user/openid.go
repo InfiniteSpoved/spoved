@@ -7,8 +7,11 @@ import (
 	"context"
 	"fmt"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/modules/util"
+
+	"xorm.io/builder"
 )
 
 // ErrOpenIDNotExist openid is not known
@@ -78,30 +81,40 @@ func AddUserOpenID(ctx context.Context, openid *UserOpenID) error {
 		return ErrOpenIDAlreadyUsed{openid.URI}
 	}
 
-	return db.Insert(ctx, openid)
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if err := db.Insert(ctx, openid); err != nil {
+			return err
+		}
+		return recordOpenID(ctx, "account.openid.linked", openid)
+	})
+}
+
+func recordOpenID(ctx context.Context, action string, o *UserOpenID) error {
+	return audit_model.RecordAccount(ctx, action, o.UID, "openid", o.ID, o.URI, map[string]any{"uri": o.URI})
 }
 
 // DeleteUserOpenID deletes an openid address of given user.
-func DeleteUserOpenID(ctx context.Context, openid *UserOpenID) (err error) {
-	var deleted int64
-	// ask to check UID
-	address := UserOpenID{
-		UID: openid.UID,
-	}
-	if openid.ID > 0 {
-		deleted, err = db.GetEngine(ctx).ID(openid.ID).Delete(&address)
-	} else {
-		deleted, err = db.GetEngine(ctx).
-			Where("openid=?", openid.URI).
-			Delete(&address)
-	}
-
-	if err != nil {
-		return err
-	} else if deleted != 1 {
-		return ErrOpenIDNotExist
-	}
-	return nil
+func DeleteUserOpenID(ctx context.Context, openid *UserOpenID) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		// ask to check UID
+		cond := builder.Eq{"uid": openid.UID}
+		if openid.ID > 0 {
+			cond["id"] = openid.ID
+		} else {
+			cond["openid"] = openid.URI
+		}
+		found := make([]*UserOpenID, 0, 1)
+		if err := db.GetEngine(ctx).Where(cond).Find(&found); err != nil {
+			return err
+		}
+		deleted, err := db.GetEngine(ctx).Where(cond).Delete(&UserOpenID{})
+		if err != nil {
+			return err
+		} else if deleted != 1 {
+			return ErrOpenIDNotExist
+		}
+		return recordOpenID(ctx, "account.openid.unlinked", found[0])
+	})
 }
 
 // ToggleUserOpenIDVisibility toggles visibility of an openid address of given user.
