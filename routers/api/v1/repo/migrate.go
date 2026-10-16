@@ -245,10 +245,13 @@ func Migrate(ctx *context.APIContext) {
 		}
 	}()
 
-	if repo, err = migrations.MigrateRepository(graceful.GetManager().HammerContext(), ctx.Doer(), repoOwner.Name, opts, nil); err != nil {
+	// not assigned to repo: the failed migration returns nil, and the deferred cleanup needs the created repository
+	migrated, err := migrations.MigrateRepository(graceful.GetManager().HammerContext(), ctx.Doer(), repoOwner.Name, opts, nil)
+	if err != nil {
 		handleMigrateError(ctx, repoOwner, err)
 		return
 	}
+	repo = migrated
 
 	if opts.Releases || opts.Wiki {
 		repoOpt := api.EditRepoOption{
