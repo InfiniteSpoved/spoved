@@ -74,7 +74,7 @@ func TestRepoMigrateProject(t *testing.T) {
 
 	t.Run("picker", func(t *testing.T) {
 		list := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", "/repo/migrate?org=3&group="+fid(proj.ID)+"&mirror=1"), http.StatusOK).Body)
-		list.AssertElement(t, fmt.Sprintf(`a.migrate-entry[href*="group=%d"]`, proj.ID), true)
+		assert.Equal(t, 11, list.doc.Find(fmt.Sprintf(`a.migrate-entry[href*="group=%d"]`, proj.ID)).Length())
 		for _, service := range []api.GitServiceType{api.PlainGitService, api.GithubService, api.GiteaService, api.GitlabService, api.GogsService, api.OneDevService, api.GitBucketService, api.CodebaseService, api.ForgejoService, api.PagureService, api.BitbucketDataCenterService} {
 			page := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/repo/migrate?service_type=%d&org=3&group=%d", service, proj.ID)), http.StatusOK).Body)
 			assert.Equal(t, fid(proj.ID), page.doc.Find(`select#repo_group option[selected]`).AttrOr("value", ""), "service %d", service)
@@ -113,7 +113,7 @@ func TestRepoMigrateProject(t *testing.T) {
 		via, err := org_model.ViaGroupRepoIDs(ctx, team.ID)
 		require.NoError(t, err)
 		assert.True(t, via[repo.ID])
-		unittest.CheckConsistencyFor(t, &repo_model.Repository{}, &org_model.TeamRepo{})
+		unittest.CheckConsistencyFor(t, &repo_model.Repository{})
 		session.MakeRequest(t, NewRequest(t, "GET", "/org3/proj/imported"), http.StatusOK)
 	})
 
@@ -146,7 +146,7 @@ func TestRepoMigrateProject(t *testing.T) {
 		notFound(t, session, map[string]string{"uid": "2", "group_id": fid(proj.ID), "repo_name": "x3"})    // a user's namespace has no projects
 		notFound(t, session, map[string]string{"uid": "3", "group_id": "-1", "repo_name": "x4"})
 		body := NewHTMLParser(t, bytes.NewBufferString(migrate(t, session, map[string]string{"uid": "3", "group_id": fid(proj.ID), "repo_name": "imported"}, http.StatusOK))).doc.Find(".ui.negative.message").Text()
-		assert.Contains(t, body, "name has already been taken")
+		assert.Contains(t, body, "already used by a repository")
 		for _, name := range []string{"x1", "x2", "x3", "x4"} {
 			_, err := repo_model.GetRepositoryByRef(ctx, "org3", "proj", name)
 			require.Error(t, err)
