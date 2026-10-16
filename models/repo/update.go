@@ -122,6 +122,20 @@ func CheckRepoCreationLimit(ctx context.Context, doer, u *user_model.User) error
 
 // CheckCreateRepository check if a repository can be created
 func CheckCreateRepository(ctx context.Context, doer, u *user_model.User, name string) error {
+	return CheckCreateRepositoryInGroup(ctx, doer, u, 0, name)
+}
+
+// CheckCreateRepositoryInGroup is CheckCreateRepository for a repository in the project groupID of u (0 = its
+// root); a project that is not u's is ErrRepoGroupNotExist.
+func CheckCreateRepositoryInGroup(ctx context.Context, doer, u *user_model.User, groupID int64, name string) error {
+	groupName := ""
+	if groupID != 0 {
+		group, err := GetRepoGroupByID(ctx, u.ID, groupID)
+		if err != nil {
+			return err
+		}
+		groupName = group.Name
+	}
 	if err := CheckRepoCreationLimit(ctx, doer, u); err != nil {
 		return err
 	}
@@ -130,10 +144,14 @@ func CheckCreateRepository(ctx context.Context, doer, u *user_model.User, name s
 		return err
 	}
 
-	has, err := IsRepositoryModelOrDirExist(ctx, u, name)
+	has, err := IsRepositoryModelExistInGroup(ctx, u.ID, groupID, name)
 	if err != nil {
 		return fmt.Errorf("IsRepositoryExist: %w", err)
-	} else if has {
+	}
+	isDir, err := util.IsDir(GroupRepoPath(u.Name, groupName, name))
+	if err != nil {
+		return fmt.Errorf("IsRepositoryExist: %w", err)
+	} else if has || isDir {
 		return ErrRepoAlreadyExist{u.Name, name}
 	}
 

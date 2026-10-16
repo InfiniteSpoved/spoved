@@ -72,3 +72,21 @@ func TestCheckCreateRepository(t *testing.T) {
 		require.ErrorIs(t, err, repo_model.ErrRepoAlreadyExist{Name: "repo1", Uname: "user2"})
 	})
 }
+
+func TestCheckCreateRepositoryInGroup(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := db.DefaultContext
+	admin := &user_model.User{IsAdmin: true}
+	org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+	group, err := repo_model.CreateRepoGroup(ctx, org3, "chk", "")
+	require.NoError(t, err)
+	require.NoError(t, db.Insert(ctx, &repo_model.Repository{OwnerID: org3.ID, OwnerName: org3.Name, GroupID: group.ID, GroupName: group.Name, Name: "taken", LowerName: "taken"}))
+
+	require.NoError(t, repo_model.CheckCreateRepositoryInGroup(ctx, admin, org3, group.ID, "free"))
+	require.NoError(t, repo_model.CheckCreateRepositoryInGroup(ctx, admin, org3, 0, "free"))
+	assert.True(t, repo_model.IsErrRepoAlreadyExist(repo_model.CheckCreateRepositoryInGroup(ctx, admin, org3, group.ID, "TAKEN")))
+	require.NoError(t, repo_model.CheckCreateRepositoryInGroup(ctx, admin, org3, 0, "taken")) // the root is another namespace
+	require.ErrorIs(t, repo_model.CheckCreateRepositoryInGroup(ctx, admin, org3, group.ID+1000, "free"), repo_model.ErrRepoGroupNotExist)
+	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	require.ErrorIs(t, repo_model.CheckCreateRepositoryInGroup(ctx, admin, user2, group.ID, "free"), repo_model.ErrRepoGroupNotExist) // another owner's project
+}

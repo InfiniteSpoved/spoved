@@ -26,6 +26,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
+	"forgejo.org/routers/api/v1/utils"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 	"forgejo.org/services/forms"
@@ -54,6 +55,8 @@ func Migrate(ctx *context.APIContext) {
 	//     "$ref": "#/responses/Repository"
 	//   "403":
 	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
 	//   "409":
 	//     description: The repository with the same name already exists.
 	//   "413":
@@ -110,6 +113,25 @@ func Migrate(ctx *context.APIContext) {
 				return
 			}
 		}
+	}
+
+	// a project is reached only by a token that reaches the whole organization; unknown and foreign ones are one answer
+	var groupID int64
+	if form.Project != "" {
+		if !utils.IsOrgWideToken(ctx) {
+			ctx.Error(http.StatusForbidden, "", "This token may not migrate into a project.")
+			return
+		}
+		group, err := repo_model.GetRepoGroupByName(ctx, repoOwner.ID, form.Project)
+		if err != nil {
+			if errors.Is(err, repo_model.ErrRepoGroupNotExist) {
+				ctx.NotFound()
+			} else {
+				ctx.Error(http.StatusInternalServerError, "GetRepoGroupByName", err)
+			}
+			return
+		}
+		groupID = group.ID
 	}
 
 	remoteAddr, err := forms.ParseRemoteAddr(form.CloneAddr, form.AuthUsername, form.AuthPassword)
@@ -195,6 +217,7 @@ func Migrate(ctx *context.APIContext) {
 		IsPrivate:      opts.Private || setting.Repository.ForcePrivate,
 		IsMirror:       opts.Mirror,
 		Status:         repo_model.RepositoryBeingMigrated,
+		GroupID:        groupID,
 	})
 	if err != nil {
 		handleMigrateError(ctx, repoOwner, err)
@@ -244,6 +267,8 @@ func Migrate(ctx *context.APIContext) {
 
 func handleMigrateError(ctx *context.APIContext, repoOwner *user_model.User, err error) {
 	switch {
+	case errors.Is(err, repo_model.ErrRepoGroupNotExist):
+		ctx.NotFound()
 	case repo_model.IsErrRepoAlreadyExist(err):
 		ctx.Error(http.StatusConflict, "", "The repository with the same name already exists.")
 	case repo_model.IsErrRepoFilesAlreadyExist(err):

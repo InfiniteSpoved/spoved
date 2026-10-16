@@ -7,7 +7,7 @@
 		{{if not (and .PersonalRepoLocked (not .Orgs))}}{{/* else the banner alone: no owner can take a repository */}}
 		<div class="migrate-entries">
 			{{range .Services}}
-				<a class="migrate-entry tw-items-center" href="{{AppSubUrl}}/repo/migrate?service_type={{.}}&org={{$.Org}}&mirror={{$.Mirror}}">
+				<a class="migrate-entry tw-items-center" href="{{AppSubUrl}}/repo/migrate?service_type={{.}}&org={{$.Org}}&group={{$.Group}}&mirror={{$.Mirror}}">
 					{{if eq .Name "github"}}
 						{{svg "octicon-mark-github" 184}}
 					{{else if eq .Name "bitbucketdc"}}
