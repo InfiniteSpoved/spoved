@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	actions_model "forgejo.org/models/actions"
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
@@ -53,6 +54,9 @@ var withRunner = connect.WithInterceptors(connect.UnaryInterceptorFunc(func(unar
 				}
 				return nil, connect.NewError(connect.CodeInternal, err)
 			}
+		}
+		if err := setRunnerActor(ctx, runner); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
 		}
 
 		cols := []string{"last_online"}
@@ -103,5 +107,24 @@ func getRequestKey(ctx context.Context) *string {
 			return &r
 		}
 	}
+	return nil
+}
+
+// setRunnerActor makes the authenticated runner the request's audit actor (common.WithRequestAuditActor stored it).
+// Its name is chosen by the runner, so it is never a user's.
+func setRunnerActor(ctx context.Context, runner *actions_model.ActionRunner) error {
+	a := audit_model.ActorFromContext(ctx)
+	if a == nil {
+		return nil
+	}
+	owner := runner.OwnerID
+	if runner.RepoID != 0 {
+		var err error
+		if owner, _, _, err = actions_model.RunnerScope(ctx, 0, runner.RepoID); err != nil {
+			return err
+		}
+	}
+	a.Type, a.ID, a.Name = audit_model.ActorRunner, runner.ID, runner.Name
+	a.Credential = audit_model.Credential{Type: audit_model.CredentialRunner, ID: runner.ID, Name: runner.Name, OwnerID: owner}
 	return nil
 }

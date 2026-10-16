@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
@@ -350,24 +351,74 @@ func UpdateRunner(ctx context.Context, r *ActionRunner, cols ...string) error {
 	return err
 }
 
+// EditRunner saves the runner's name and description, and its new secret when regenerate is set (after
+// GenerateToken); it records a change of its name or secret.
+func EditRunner(ctx context.Context, r *ActionRunner, regenerate bool) error {
+	cols := []string{"name", "description"}
+	if regenerate {
+		cols = append(cols, "token_hash", "token_salt")
+	}
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		var oldName string
+		if _, err := db.GetEngine(ctx).Table("action_runner").Where("id = ?", r.ID).Cols("name").Get(&oldName); err != nil {
+			return err
+		}
+		if err := UpdateRunner(ctx, r, cols...); err != nil {
+			return err
+		}
+		data := audit_model.Changes(map[string]any{"name": oldName}, map[string]any{"name": r.Name})
+		if regenerate {
+			if data == nil {
+				data = map[string]any{}
+			}
+			data["token_reset"] = true
+		}
+		if data == nil {
+			return nil
+		}
+		return recordRunner(ctx, "credential.runner.updated", r, data)
+	})
+}
+
 // DeleteRunner deletes a runner by given ID.
 func DeleteRunner(ctx context.Context, r *ActionRunner) error {
+	_, err := deleteRunner(ctx, r, nil, "")
+	return err
+}
+
+// deleteRunner deletes the runner if it still matches cond (nil: always) and records it with the reason; it reports
+// whether it deleted it.
+func deleteRunner(ctx context.Context, r *ActionRunner, cond builder.Cond, reason string) (bool, error) {
 	// Replace the UUID, which was either based on the secret's first 16 bytes or an UUIDv4,
 	// with a sequence of 8 0xff bytes followed by the little-endian version of the record's
 	// identifier. This will prevent the deleted record's identifier from colliding with any
 	// new record.
 	b := make([]byte, 8)
 	binary.LittleEndian.PutUint64(b, uint64(r.ID))
-	r.UUID = fmt.Sprintf("ffffffff-ffff-ffff-%.2x%.2x-%.2x%.2x%.2x%.2x%.2x%.2x",
+	uuid := fmt.Sprintf("ffffffff-ffff-ffff-%.2x%.2x-%.2x%.2x%.2x%.2x%.2x%.2x",
 		b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7])
 
-	err := UpdateRunner(ctx, r, "UUID")
-	if err != nil {
-		return err
-	}
-
-	_, err = db.DeleteByID[ActionRunner](ctx, r.ID)
-	return err
+	deleted := false
+	err := db.WithTx(ctx, func(ctx context.Context) error {
+		sess := db.GetEngine(ctx).ID(r.ID)
+		if cond != nil {
+			sess = sess.And(cond)
+		}
+		n, err := sess.Cols("uuid").Update(&ActionRunner{UUID: uuid})
+		if err != nil || n == 0 {
+			return err
+		}
+		if _, err := db.DeleteByID[ActionRunner](ctx, r.ID); err != nil {
+			return err
+		}
+		r.UUID, deleted = uuid, true
+		var extra map[string]any
+		if reason != "" {
+			extra = map[string]any{"reason": reason}
+		}
+		return recordRunner(ctx, "credential.runner.deleted", r, extra)
+	})
+	return deleted && err == nil, err
 }
 
 // CreateRunner creates new runner.
@@ -378,7 +429,12 @@ func CreateRunner(ctx context.Context, t *ActionRunner) error {
 		t.OwnerID = 0
 	}
 	t.Name, _ = util.SplitStringAtByteN(t.Name, 255)
-	return db.Insert(ctx, t)
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if err := db.Insert(ctx, t); err != nil {
+			return err
+		}
+		return recordRunner(ctx, "credential.runner.registered", t, nil)
+	})
 }
 
 func CountRunnersWithoutBelongingOwner(ctx context.Context) (int64, error) {
@@ -430,8 +486,31 @@ func FixRunnersWithoutBelongingRepo(ctx context.Context) (int64, error) {
 // DeleteEphemeralRunner removes the ephemeral runner with the given ID. If the runner with the given ID is not an
 // ephemeral runner, nothing happens.
 func DeleteEphemeralRunner(ctx context.Context, id int64) error {
-	_, err := db.GetEngine(ctx).Where(builder.Eq{"id": id, "ephemeral": true}).Delete(&ActionRunner{})
-	return err
+	return DeleteEphemeralRunners(ctx, builder.Eq{"id": id})
+}
+
+// DeleteEphemeralRunners removes the ephemeral runners that match cond, one by one, each recorded.
+func DeleteEphemeralRunners(ctx context.Context, cond builder.Cond) error {
+	var runners []*ActionRunner
+	if err := db.GetEngine(ctx).Where(builder.And(cond, builder.Eq{"ephemeral": true})).Find(&runners); err != nil {
+		return err
+	}
+	for _, r := range runners {
+		if _, err := deleteRunner(ctx, r, builder.Eq{"ephemeral": true}, "ephemeral"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// offlineRunnerCond matches a runner that has been offline since olderThan, or never online and created before it.
+func offlineRunnerCond(olderThan timeutil.TimeStamp) builder.Cond {
+	return builder.Or(
+		// never online
+		builder.And(builder.Eq{"last_online": 0}, builder.Lt{"created": olderThan}),
+		// was online but offline
+		builder.And(builder.Gt{"last_online": 0}, builder.Lt{"last_online": olderThan}),
+	)
 }
 
 func DeleteOfflineRunners(ctx context.Context, olderThan timeutil.TimeStamp, globalOnly bool) error {
@@ -441,12 +520,7 @@ func DeleteOfflineRunners(ctx context.Context, olderThan timeutil.TimeStamp, glo
 		return fmt.Errorf("invalid `cron.cleanup_offline_runners.older_than`value: must be at least %q", RunnerOfflineTime)
 	}
 
-	cond := builder.Or(
-		// never online
-		builder.And(builder.Eq{"last_online": 0}, builder.Lt{"created": olderThan}),
-		// was online but offline
-		builder.And(builder.Gt{"last_online": 0}, builder.Lt{"last_online": olderThan}),
-	)
+	cond := offlineRunnerCond(olderThan)
 
 	if globalOnly {
 		cond = builder.And(cond, builder.Eq{"owner_id": 0}, builder.Eq{"repo_id": 0})
@@ -456,8 +530,11 @@ func DeleteOfflineRunners(ctx context.Context, olderThan timeutil.TimeStamp, glo
 		ctx,
 		cond,
 		func(ctx context.Context, r *ActionRunner) error {
-			if err := DeleteRunner(ctx, r); err != nil {
+			// the runner may have come online since the scan: delete it only if it is still offline
+			if deleted, err := deleteRunner(ctx, r, offlineRunnerCond(olderThan), "offline"); err != nil {
 				return fmt.Errorf("DeleteOfflineRunners: %w", err)
+			} else if !deleted {
+				return nil
 			}
 			lastOnline := r.LastOnline.AsTime()
 			olderThanTime := olderThan.AsTime()

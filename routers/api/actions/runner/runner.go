@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	actions_model "forgejo.org/models/actions"
+	audit_model "forgejo.org/models/audit"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/actions"
@@ -78,6 +79,15 @@ func (*Service) Register(
 	}
 	if !allowed {
 		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("runner registration for this scope is restricted by the site administrator"))
+	}
+
+	// the registration token is the credential: recorded by its row and owner, never by its value
+	if a := audit_model.ActorFromContext(ctx); a != nil {
+		owner, _, _, err := actions_model.RunnerScope(ctx, runnerToken.OwnerID.ValueOrDefault(0), runnerToken.RepoID.ValueOrDefault(0))
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.New("can't read the scope of the token"))
+		}
+		a.Credential = audit_model.Credential{Type: audit_model.CredentialRunnerToken, ID: runnerToken.ID, OwnerID: owner}
 	}
 
 	labels := req.Msg.Labels
@@ -353,7 +363,7 @@ func (*Service) UpdateTask(
 		}
 
 		if runner.Ephemeral {
-			err := actions_model.DeleteRunner(ctx, runner)
+			err := actions_model.DeleteEphemeralRunner(ctx, runner.ID)
 			if err != nil {
 				log.Error("failed to delete ephemeral runner %v, %w", task.RunnerID, err)
 				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to delete ephemeral runner %v, %w", task.RunnerID, err))
