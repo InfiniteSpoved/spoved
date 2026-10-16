@@ -15,7 +15,9 @@ func (u *User) AuditFields() map[string]any {
 		"name": u.Name, "email": u.Email, "is_admin": u.IsAdmin, "is_restricted": u.IsRestricted, "is_active": u.IsActive,
 		"prohibit_login": u.ProhibitLogin, "visibility": int(u.Visibility), "login_source": u.LoginSource,
 		"login_type": int(u.LoginType), "must_change_password": u.MustChangePassword, "require_two_factor": u.RequireTwoFactor,
-		"is_auditor": u.IsAuditor, "allow_create_organization": u.AllowCreateOrganization,
+		"is_auditor": u.IsAuditor, "allow_create_organization": u.AllowCreateOrganization, "allow_git_hook": u.AllowGitHook,
+		"allow_import_local": u.AllowImportLocal, "max_repo_creation": u.MaxRepoCreation,
+		"personal_repo_size_limit": u.PersonalRepoSizeLimit, "category_id": u.CategoryID,
 	}
 }
 

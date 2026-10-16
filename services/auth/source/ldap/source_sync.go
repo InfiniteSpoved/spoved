@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	asymkey_model "forgejo.org/models/asymkey"
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
 	user_model "forgejo.org/models/user"
@@ -44,6 +45,7 @@ func (source *Source) Sync(ctx context.Context, updateExisting bool) error {
 	usernameUsers := make(map[string]*user_model.User, len(users))
 	mailUsers := make(map[string]*user_model.User, len(users))
 	keepActiveUsers := make(container.Set[int64])
+	var added, updated, disabled int
 
 	for _, u := range users {
 		usernameUsers[u.LowerName] = u
@@ -140,6 +142,8 @@ func (source *Source) Sync(ctx context.Context, updateExisting bool) error {
 			err = user_model.CreateUser(ctx, usr, overwriteDefault)
 			if err != nil {
 				log.Error("SyncExternalUsers[%s]: Error creating user %s: %v", source.authSource.Name, su.Username, err)
+			} else {
+				added++
 			}
 
 			if err == nil && isAttributeSSHPublicKeySet {
@@ -190,6 +194,8 @@ func (source *Source) Sync(ctx context.Context, updateExisting bool) error {
 
 				if err := user_service.UpdateUserFromSource(ctx, usr, opts, source.authSource.Name); err != nil {
 					log.Error("SyncExternalUsers[%s]: Error updating user %s: %v", source.authSource.Name, usr.Name, err)
+				} else {
+					updated++
 				}
 
 				if err := user_service.ReplacePrimaryEmailAddress(ctx, usr, su.Mail); err != nil {
@@ -239,7 +245,7 @@ func (source *Source) Sync(ctx context.Context, updateExisting bool) error {
 	// Deactivate users not present in LDAP
 	if updateExisting {
 		for _, usr := range users {
-			if keepActiveUsers.Contains(usr.ID) {
+			if keepActiveUsers.Contains(usr.ID) || !usr.IsActive {
 				continue
 			}
 
@@ -250,8 +256,17 @@ func (source *Source) Sync(ctx context.Context, updateExisting bool) error {
 			}
 			if err := user_service.UpdateUser(ctx, usr, opts); err != nil {
 				log.Error("SyncExternalUsers[%s]: Error deactivating user %s: %v", source.authSource.Name, usr.Name, err)
+			} else {
+				disabled++
 			}
 		}
+	}
+
+	// the summary of a run that already happened: every change above is recorded on its own
+	if err := auth_model.RecordSource(ctx, "admin.login_source.synced", source.authSource, map[string]any{
+		"counts": map[string]int{"added": added, "updated": updated, "disabled": disabled},
+	}); err != nil {
+		log.Error("SyncExternalUsers[%s]: audit: %v", source.authSource.Name, err)
 	}
 	return nil
 }

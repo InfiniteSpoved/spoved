@@ -4,11 +4,13 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"maps"
 
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
+	"forgejo.org/modules/json"
 )
 
 // appFields are the audited fields of the app: its name and where it redirects to, never its secret.
@@ -70,4 +72,51 @@ func RecordAuthorizedIntegration(ctx context.Context, action string, ai *Authori
 		Action: action, OwnerID: ai.UserID, SubjectUserID: ai.UserID,
 		TargetType: "authorized_integration", TargetID: ai.ID, TargetName: ai.Name, Data: data,
 	})
+}
+
+// sourceFields are the audited fields of a login source. Its configuration holds bind passwords and client secrets,
+// so only whether it changed is recorded.
+func sourceFields(s *Source) map[string]any {
+	return map[string]any{"name": s.Name, "type": s.Type.String(), "is_active": s.IsActive, "is_sync_enabled": s.IsSyncEnabled}
+}
+
+// configChanged compares the configurations as they are in memory, before they are stored: storing one encrypts its
+// secrets with a new nonce each time (and clears them from the struct), so the stored forms always differ.
+func configChanged(before, after *Source) (bool, error) {
+	b, err := json.Marshal(before.Cfg)
+	if err != nil {
+		return false, err
+	}
+	a, err := json.Marshal(after.Cfg)
+	if err != nil {
+		return false, err
+	}
+	return !bytes.Equal(b, a), nil
+}
+
+// RecordSource records a change of the login source s; data is merged over its audited fields.
+func RecordSource(ctx context.Context, action string, s *Source, data map[string]any) error {
+	fields := sourceFields(s)
+	maps.Copy(fields, data)
+	return audit_model.Record(ctx, audit_model.Event{
+		Action: action, Result: audit_model.ResultSuccess, TargetType: "login_source", TargetID: s.ID, TargetName: s.Name,
+		Data: fields,
+	})
+}
+
+// recordSourceChange records admin.login_source.updated when an audited field or the configuration of the source
+// differs from before.
+func recordSourceChange(ctx context.Context, before, source *Source, changed bool, reason string) error {
+	data := audit_model.Changes(sourceFields(before), sourceFields(source))
+	if data == nil && !changed {
+		return nil
+	}
+	if data == nil {
+		data = map[string]any{}
+	}
+	data["config_changed"] = changed
+	if reason != "" {
+		data["reason"] = reason
+	}
+	return RecordSource(ctx, "admin.login_source.updated", source, data)
 }

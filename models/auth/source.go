@@ -214,32 +214,42 @@ func CreateSource(ctx context.Context, source *Source) error {
 		source.IsSyncEnabled = false
 	}
 
-	_, err = db.GetEngine(ctx).Insert(source)
-	if err != nil {
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		if _, err := db.GetEngine(ctx).Insert(source); err != nil {
+			return err
+		}
+		return RecordSource(ctx, "admin.login_source.created", source, nil)
+	}); err != nil {
 		return err
 	}
 
-	if !source.IsActive {
-		return nil
-	}
-
-	if settable, ok := source.Cfg.(SourceSettable); ok {
-		settable.SetAuthSource(source)
-	}
-
-	registerableSource, ok := source.Cfg.(RegisterableSource)
-	if !ok {
-		return nil
-	}
-
-	err = registerableSource.RegisterSource()
+	// registering may fetch the provider's configuration, so it runs outside the transaction
+	err = registerSource(source)
 	if err != nil {
 		// remove the AuthSource in case of errors while registering configuration
-		if _, err := db.GetEngine(ctx).ID(source.ID).Delete(new(Source)); err != nil {
+		if err := db.WithTx(ctx, func(ctx context.Context) error {
+			if _, err := db.GetEngine(ctx).ID(source.ID).Delete(new(Source)); err != nil {
+				return err
+			}
+			return RecordSource(ctx, "admin.login_source.deleted", source, map[string]any{"reason": "register_failed"})
+		}); err != nil {
 			log.Error("CreateSource: Error while wrapOpenIDConnectInitializeError: %v", err)
 		}
 	}
 	return err
+}
+
+func registerSource(source *Source) error {
+	if !source.IsActive {
+		return nil
+	}
+	if settable, ok := source.Cfg.(SourceSettable); ok {
+		settable.SetAuthSource(source)
+	}
+	if registerableSource, ok := source.Cfg.(RegisterableSource); ok {
+		return registerableSource.RegisterSource()
+	}
+	return nil
 }
 
 type FindSourcesOptions struct {
@@ -281,13 +291,10 @@ func GetSourceByID(ctx context.Context, id int64) (*Source, error) {
 
 // UpdateSource updates a Source record in DB.
 func UpdateSource(ctx context.Context, source *Source) error {
-	var originalSource *Source
-	if source.IsOAuth2() {
-		// keep track of the original values so we can restore in case of errors while registering OAuth2 providers
-		var err error
-		if originalSource, err = GetSourceByID(ctx, source.ID); err != nil {
-			return err
-		}
+	// keep track of the original values so we can restore in case of errors while registering OAuth2 providers
+	originalSource, err := GetSourceByID(ctx, source.ID)
+	if err != nil {
+		return err
 	}
 
 	has, err := db.GetEngine(ctx).Where("name=? AND id!=?", source.Name, source.ID).Exist(new(Source))
@@ -297,32 +304,33 @@ func UpdateSource(ctx context.Context, source *Source) error {
 		return ErrSourceAlreadyExist{source.Name}
 	}
 
-	_, err = db.GetEngine(ctx).ID(source.ID).AllCols().Update(source)
+	// compared before storing: storing encrypts the secrets of the configuration
+	changed, err := configChanged(originalSource, source)
 	if err != nil {
 		return err
 	}
-
-	if !source.IsActive {
-		return nil
+	if err := updateSource(ctx, originalSource, source, changed, ""); err != nil {
+		return err
 	}
 
-	if settable, ok := source.Cfg.(SourceSettable); ok {
-		settable.SetAuthSource(source)
-	}
-
-	registerableSource, ok := source.Cfg.(RegisterableSource)
-	if !ok {
-		return nil
-	}
-
-	err = registerableSource.RegisterSource()
-	if err != nil {
+	// registering may fetch the provider's configuration, so it runs outside the transaction
+	err = registerSource(source)
+	if err != nil && source.IsOAuth2() {
 		// restore original values since we cannot update the provider it self
-		if _, err := db.GetEngine(ctx).ID(source.ID).AllCols().Update(originalSource); err != nil {
+		if err := updateSource(ctx, source, originalSource, true, "register_failed"); err != nil {
 			log.Error("UpdateSource: Error while wrapOpenIDConnectInitializeError: %v", err)
 		}
 	}
 	return err
+}
+
+func updateSource(ctx context.Context, before, source *Source, configChanged bool, reason string) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if _, err := db.GetEngine(ctx).ID(source.ID).AllCols().Update(source); err != nil {
+			return err
+		}
+		return recordSourceChange(ctx, before, source, configChanged, reason)
+	})
 }
 
 // ErrSourceNotExist represents a "SourceNotExist" kind of error.

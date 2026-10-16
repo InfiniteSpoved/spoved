@@ -6,6 +6,7 @@ package quota
 import (
 	"context"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/setting"
@@ -68,6 +69,15 @@ func (g *Group) IsUserInGroup(ctx context.Context, userID int64) (bool, error) {
 }
 
 func (g *Group) AddUserByID(ctx context.Context, userID int64) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if err := g.addUserByID(ctx, userID); err != nil {
+			return err
+		}
+		return recordGroup(ctx, "admin.quota_group.user_added", g.Name, userID, map[string]any{"user_id": userID})
+	})
+}
+
+func (g *Group) addUserByID(ctx context.Context, userID int64) error {
 	ctx, committer, err := db.TxContext(ctx)
 	if err != nil {
 		return err
@@ -114,6 +124,9 @@ func (g *Group) RemoveUserByID(ctx context.Context, userID int64) error {
 	if err != nil {
 		return err
 	}
+	if err := recordGroup(ctx, "admin.quota_group.user_removed", g.Name, userID, map[string]any{"user_id": userID}); err != nil {
+		return err
+	}
 	return committer.Commit()
 }
 
@@ -151,6 +164,9 @@ func (g *Group) AddRuleByName(ctx context.Context, ruleName string) error {
 	if err != nil {
 		return err
 	}
+	if err := recordGroup(ctx, "admin.quota_group.rule_added", g.Name, 0, map[string]any{"rule_name": ruleName}); err != nil {
+		return err
+	}
 	return committer.Commit()
 }
 
@@ -173,6 +189,9 @@ func (g *Group) RemoveRuleByName(ctx context.Context, ruleName string) error {
 		RuleName:  ruleName,
 	})
 	if err != nil {
+		return err
+	}
+	if err := recordGroup(ctx, "admin.quota_group.rule_removed", g.Name, 0, map[string]any{"rule_name": ruleName}); err != nil {
 		return err
 	}
 	return committer.Commit()
@@ -255,6 +274,9 @@ func CreateGroup(ctx context.Context, name string) (*Group, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := recordGroup(ctx, "admin.quota_group.created", name, 0, nil); err != nil {
+		return nil, err
+	}
 	return &group, committer.Commit()
 }
 
@@ -280,22 +302,27 @@ func DeleteGroupByName(ctx context.Context, name string) error {
 	}
 	defer committer.Close()
 
-	_, err = db.GetEngine(ctx).Delete(GroupMapping{
+	users, err := db.GetEngine(ctx).Delete(GroupMapping{
 		GroupName: name,
 	})
 	if err != nil {
 		return err
 	}
-	_, err = db.GetEngine(ctx).Delete(GroupRuleMapping{
+	rules, err := db.GetEngine(ctx).Delete(GroupRuleMapping{
 		GroupName: name,
 	})
 	if err != nil {
 		return err
 	}
 
-	_, err = db.GetEngine(ctx).Delete(Group{Name: name})
+	deleted, err := db.GetEngine(ctx).Delete(Group{Name: name})
 	if err != nil {
 		return err
+	}
+	if deleted > 0 {
+		if err := recordGroup(ctx, "admin.quota_group.deleted", name, 0, map[string]any{"counts": map[string]int64{"users": users, "rules": rules}}); err != nil {
+			return err
+		}
 	}
 	return committer.Commit()
 }
@@ -307,6 +334,10 @@ func SetUserGroups(ctx context.Context, userID int64, groups *[]string) error {
 	}
 	defer committer.Close()
 
+	before, err := userGroupNames(ctx, userID)
+	if err != nil {
+		return err
+	}
 	// First: remove the user from any groups
 	_, err = db.GetEngine(ctx).Where("kind = ? AND mapped_id = ?", KindUser, userID).Delete(GroupMapping{})
 	if err != nil {
@@ -326,8 +357,20 @@ func SetUserGroups(ctx context.Context, userID int64, groups *[]string) error {
 		if group == nil {
 			return ErrGroupNotFound{Name: groupName}
 		}
-		err = group.AddUserByID(ctx, userID)
+		err = group.addUserByID(ctx, userID)
 		if err != nil {
+			return err
+		}
+	}
+	after, err := userGroupNames(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if data := audit_model.Changes(map[string]any{"groups": before}, map[string]any{"groups": after}); data != nil {
+		if err := audit_model.Record(ctx, audit_model.Event{
+			Action: "admin.quota_group.user_groups_set", Result: audit_model.ResultSuccess, OwnerID: userID, SubjectUserID: userID,
+			TargetType: "quota_group", Data: data,
+		}); err != nil {
 			return err
 		}
 	}

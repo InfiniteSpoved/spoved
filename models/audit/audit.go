@@ -80,6 +80,7 @@ const (
 	CategoryAuth       = "auth"
 	CategoryCredential = "credential"
 	CategoryAudit      = "audit"
+	CategoryAdmin      = "admin"
 
 	ResultSuccess = "success"
 	ResultFailure = "failure"
@@ -122,8 +123,28 @@ var Fields = map[string][]string{
 		"name", "email", "is_admin", "is_restricted", "is_active", "prohibit_login", "visibility", "login_source",
 		"login_type", "must_change_password", "require_two_factor", "is_auditor", "allow_create_organization",
 		"counts", "purge", "tombstone", "tombstone_removed", "role", "group_id", "user_ids", "count", "login_source_id",
+		"allow_git_hook", "allow_import_local", "max_repo_creation", "personal_repo_size_limit", "category_id",
 	},
-	"instance":           {"version", "config_sha256"},
+	"instance":     {"version", "config_sha256"},
+	"login_source": {"name", "type", "is_active", "is_sync_enabled", "config_changed", "counts"},
+	"user_group": {
+		"name", "grants_site_admin", "grants_create_organization", "grants_auditor", "grants_org_admin", "user_id",
+		"team_id", "team_name", "org_id", "login_source_id", "org_ids", "counts",
+	},
+	// setting: the non-secret dynamic settings, whose values are recorded; any other key is recorded as a hash
+	"setting": {
+		"keys", "hashed", "picture.disable_gravatar", "picture.enable_federated_avatar", "repository.open-with.editor-apps",
+		"maintenance.state", "ip_allowlist.state", "oauth2.app_policy", "webhook.types", "repository.unit_policy",
+		"repository.personal_repos", "org_category.owners_can_assign",
+	},
+	"log_shipping": {
+		"id", "name", "type", "endpoint", "log_types", "enabled", "level", "ndjson", "key_changed", "headers_changed",
+		"header_names", "filter_changed",
+	},
+	"quota_rule":         {"name", "limit", "subjects", "counts"},
+	"quota_group":        {"name", "rule_name", "user_id", "groups", "counts"},
+	"cron_task":          {"name"},
+	"logger":             {"op", "logger", "writer", "mode", "on"},
 	"oauth2_app":         {"name", "redirect_uris", "confidential", "secret_expires", "counts"},
 	"oauth2_grant":       {"app_id", "app_name", "scopes"},
 	"org_deploy_key":     {"expires", "name", "fingerprint", "mode", "all_repos", "repo_ids", "repos_added", "repos_removed"},
@@ -255,6 +276,16 @@ func URL(raw string) string {
 		return u.Scheme + ":"
 	}
 	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
+}
+
+// Origin is the scheme and host (with port) of raw, so that no path, query or user info is recorded; "" when raw
+// doesn't parse or has no host.
+func Origin(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // Text strips control characters and cuts s to at most n bytes at a rune boundary.

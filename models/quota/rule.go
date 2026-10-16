@@ -7,6 +7,7 @@ import (
 	"context"
 	"slices"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 )
 
@@ -74,6 +75,7 @@ func (r Rule) Evaluate(used Used, forSubject LimitSubject) (match, allow bool) {
 
 func (r *Rule) Edit(ctx context.Context, limit *int64, subjects *LimitSubjects) (*Rule, error) {
 	cols := []string{}
+	before := ruleFields(r)
 
 	if limit != nil {
 		r.Limit = *limit
@@ -84,8 +86,15 @@ func (r *Rule) Edit(ctx context.Context, limit *int64, subjects *LimitSubjects) 
 		cols = append(cols, "subjects")
 	}
 
-	_, err := db.GetEngine(ctx).Where("name = ?", r.Name).Cols(cols...).Update(r)
-	return r, err
+	return r, db.WithTx(ctx, func(ctx context.Context) error {
+		if _, err := db.GetEngine(ctx).Where("name = ?", r.Name).Cols(cols...).Update(r); err != nil {
+			return err
+		}
+		if data := audit_model.Changes(before, ruleFields(r)); data != nil {
+			return recordRule(ctx, "admin.quota_rule.updated", r, data)
+		}
+		return nil
+	})
 }
 
 func GetRuleByName(ctx context.Context, name string) (*Rule, error) {
@@ -135,6 +144,9 @@ func CreateRule(ctx context.Context, name string, limit int64, subjects LimitSub
 	if err != nil {
 		return nil, err
 	}
+	if err := recordRule(ctx, "admin.quota_rule.created", &rule, nil); err != nil {
+		return nil, err
+	}
 
 	return &rule, committer.Commit()
 }
@@ -146,7 +158,11 @@ func DeleteRuleByName(ctx context.Context, name string) error {
 	}
 	defer committer.Close()
 
-	_, err = db.GetEngine(ctx).Delete(GroupRuleMapping{
+	rule, err := GetRuleByName(ctx, name)
+	if err != nil {
+		return err
+	}
+	groups, err := db.GetEngine(ctx).Delete(GroupRuleMapping{
 		RuleName: name,
 	})
 	if err != nil {
@@ -156,6 +172,11 @@ func DeleteRuleByName(ctx context.Context, name string) error {
 	_, err = db.GetEngine(ctx).Delete(Rule{Name: name})
 	if err != nil {
 		return err
+	}
+	if rule != nil {
+		if err := recordRule(ctx, "admin.quota_rule.deleted", rule, map[string]any{"counts": map[string]int64{"groups": groups}}); err != nil {
+			return err
+		}
 	}
 	return committer.Commit()
 }

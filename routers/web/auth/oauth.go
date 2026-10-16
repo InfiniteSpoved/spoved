@@ -1211,7 +1211,7 @@ func SignInOAuthCallback(ctx *context.Context) {
 				return
 			}
 
-			if err := syncGroupsToQuotaGroups(ctx, source, &gothUser, u); err != nil {
+			if err := syncGroupsToQuotaGroups(ctx, authSource, &gothUser, u); err != nil {
 				ctx.ServerError("SyncGroupsToQuotaGroups", err)
 				return
 			}
@@ -1244,6 +1244,7 @@ func claimValueToStringSet(claimValue any) container.Set[string] {
 
 func syncGroupsToTeams(ctx *context.Context, authSource *auth.Source, gothUser *goth.User, u *user_model.User) error {
 	source := authSource.Cfg.(*oauth2.Source)
+	syncCtx := audit_model.WithLoginSource(ctx, authSource.ID, authSource.Name)
 	if source.GroupTeamMap != "" || source.GroupTeamMapRemoval ||
 		source.DynGroupMaps != "" || source.DynGroupMapsRemoval {
 		groupTeamMapping, err := auth_module.UnmarshalGroupTeamMapping(source.GroupTeamMap)
@@ -1259,7 +1260,7 @@ func syncGroupsToTeams(ctx *context.Context, authSource *auth.Source, gothUser *
 
 		groups := getClaimedGroups(source, gothUser)
 
-		if err := source_service.SyncGroupsToTeams(ctx,
+		if err := source_service.SyncGroupsToTeams(syncCtx,
 			u, authSource.ID, groups, groupTeamMapping, source.GroupTeamMapRemoval,
 			dynGroupMaps, source.DynGroupMapsRemoval,
 		); err != nil {
@@ -1279,10 +1280,11 @@ func syncGroupsToUserGroups(ctx *context.Context, authSource *auth.Source, gothU
 	if err != nil {
 		return err
 	}
-	return usergroup_service.SyncDirectoryGroups(ctx, u, authSource.ID, getClaimedGroups(source, gothUser), mapping, source.GroupUserGroupMapRemoval)
+	return usergroup_service.SyncDirectoryGroups(audit_model.WithLoginSource(ctx, authSource.ID, authSource.Name), u, authSource.ID, getClaimedGroups(source, gothUser), mapping, source.GroupUserGroupMapRemoval)
 }
 
-func syncGroupsToQuotaGroups(ctx *context.Context, source *oauth2.Source, gothUser *goth.User, u *user_model.User) error {
+func syncGroupsToQuotaGroups(ctx *context.Context, authSource *auth.Source, gothUser *goth.User, u *user_model.User) error {
+	source := authSource.Cfg.(*oauth2.Source)
 	if source.QuotaGroupMap != "" || source.QuotaGroupMapRemoval {
 		quotaGroupMapping, err := auth_module.UnmarshalQuotaGroupMapping(source.QuotaGroupMap)
 		if err != nil {
@@ -1291,7 +1293,7 @@ func syncGroupsToQuotaGroups(ctx *context.Context, source *oauth2.Source, gothUs
 
 		groups := getClaimedQuotaGroups(source, gothUser)
 
-		if err := source_service.SyncGroupsToQuotaGroups(ctx, u, groups, quotaGroupMapping, source.QuotaGroupMapRemoval); err != nil {
+		if err := source_service.SyncGroupsToQuotaGroups(audit_model.WithLoginSource(ctx, authSource.ID, authSource.Name), u, groups, quotaGroupMapping, source.QuotaGroupMapRemoval); err != nil {
 			return err
 		}
 	}
@@ -1425,6 +1427,8 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 	}
 
 	oauth2Source := source.Cfg.(*oauth2.Source)
+	// the syncs below change the account from the provider: the audit log records the login source as their actor
+	syncCtx := audit_model.WithLoginSource(ctx, source.ID, source.Name)
 	groupTeamMapping, err := auth_module.UnmarshalGroupTeamMapping(oauth2Source.GroupTeamMap)
 	if err != nil {
 		ctx.ServerError("UnmarshalGroupTeamMapping", err)
@@ -1473,14 +1477,14 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 			SetLastLogin: true,
 		}
 		opts.IsAdmin, opts.IsRestricted = getUserAdminAndRestrictedFromGroupClaims(oauth2Source, &gothUser)
-		if err := user_service.UpdateUserFromSource(ctx, u, opts, source.Name); err != nil {
+		if err := user_service.UpdateUserFromSource(syncCtx, u, opts, source.Name); err != nil {
 			ctx.ServerError("UpdateUser", err)
 			return
 		}
 
 		if oauth2Source.GroupTeamMap != "" || oauth2Source.GroupTeamMapRemoval ||
 			oauth2Source.DynGroupMaps != "" || oauth2Source.DynGroupMapsRemoval {
-			if err := source_service.SyncGroupsToTeams(ctx,
+			if err := source_service.SyncGroupsToTeams(syncCtx,
 				u, source.ID, groups, groupTeamMapping, oauth2Source.GroupTeamMapRemoval,
 				dynGroupMaps, oauth2Source.DynGroupMapsRemoval,
 			); err != nil {
@@ -1495,7 +1499,7 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 		}
 
 		if oauth2Source.QuotaGroupMap != "" || oauth2Source.QuotaGroupMapRemoval {
-			if err := source_service.SyncGroupsToQuotaGroups(ctx, u, quotaGroups, quotaGroupMapping, oauth2Source.QuotaGroupMapRemoval); err != nil {
+			if err := source_service.SyncGroupsToQuotaGroups(syncCtx, u, quotaGroups, quotaGroupMapping, oauth2Source.QuotaGroupMapRemoval); err != nil {
 				ctx.ServerError("SyncGroupsToQuotaGroups", err)
 				return
 			}
@@ -1526,7 +1530,7 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 	opts := &user_service.UpdateOptions{}
 	opts.IsAdmin, opts.IsRestricted = getUserAdminAndRestrictedFromGroupClaims(oauth2Source, &gothUser)
 	if opts.IsAdmin.Has() || opts.IsRestricted.Has() {
-		if err := user_service.UpdateUserFromSource(ctx, u, opts, source.Name); err != nil {
+		if err := user_service.UpdateUserFromSource(syncCtx, u, opts, source.Name); err != nil {
 			ctx.ServerError("UpdateUser", err)
 			return
 		}
@@ -1534,7 +1538,7 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 
 	if oauth2Source.GroupTeamMap != "" || oauth2Source.GroupTeamMapRemoval ||
 		oauth2Source.DynGroupMaps != "" || oauth2Source.DynGroupMapsRemoval {
-		if err := source_service.SyncGroupsToTeams(ctx,
+		if err := source_service.SyncGroupsToTeams(syncCtx,
 			u, source.ID, groups, groupTeamMapping, oauth2Source.GroupTeamMapRemoval,
 			dynGroupMaps, oauth2Source.DynGroupMapsRemoval,
 		); err != nil {
@@ -1549,7 +1553,7 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 	}
 
 	if oauth2Source.QuotaGroupMap != "" || oauth2Source.QuotaGroupMapRemoval {
-		if err := source_service.SyncGroupsToQuotaGroups(ctx, u, quotaGroups, quotaGroupMapping, oauth2Source.QuotaGroupMapRemoval); err != nil {
+		if err := source_service.SyncGroupsToQuotaGroups(syncCtx, u, quotaGroups, quotaGroupMapping, oauth2Source.QuotaGroupMapRemoval); err != nil {
 			ctx.ServerError("SyncGroupsToQuotaGroups", err)
 			return
 		}

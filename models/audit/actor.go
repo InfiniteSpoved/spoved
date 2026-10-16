@@ -6,14 +6,15 @@ package audit
 import "context"
 
 const (
-	ActorUser      = "user"
-	ActorAnonymous = "anonymous"
-	ActorDeployKey = "deploy_key"
-	ActorActions   = "actions"
-	ActorRunner    = "runner" // an Actions runner, by its own secret
-	ActorSystem    = "system"
-	ActorCLI       = "cli"
-	ActorUnknown   = "unknown"
+	ActorUser        = "user"
+	ActorAnonymous   = "anonymous"
+	ActorDeployKey   = "deploy_key"
+	ActorActions     = "actions"
+	ActorRunner      = "runner" // an Actions runner, by its own secret
+	ActorSystem      = "system"
+	ActorLoginSource = "login_source" // a login source syncing users, groups or keys
+	ActorCLI         = "cli"
+	ActorUnknown     = "unknown"
 )
 
 // Credential types.
@@ -101,4 +102,20 @@ func WithSystem(ctx context.Context, name string) context.Context {
 // WithCLI marks a command line change. The OS user name is not recorded: it would be client input.
 func WithCLI(ctx context.Context) context.Context {
 	return WithActor(ctx, &Actor{Type: ActorCLI, Credential: Credential{Type: CredentialCLI}})
+}
+
+// WithLoginSource makes the login source id the actor of what ctx does, keeping the IP, user agent and request ID of
+// the actor it replaces (a sign-in or a cron run). It never changes that actor.
+func WithLoginSource(ctx context.Context, id int64, name string) context.Context {
+	outer := ActorFromContext(ctx)
+	if outer != nil && outer.Type == ActorLoginSource && outer.ID == id {
+		return ctx
+	}
+	a := &Actor{}
+	if outer != nil {
+		*a = *outer
+		a.SudoByID = 0
+	}
+	a.Type, a.ID, a.Name, a.Credential = ActorLoginSource, id, name, Credential{Type: CredentialSystem}
+	return WithActor(ctx, a)
 }

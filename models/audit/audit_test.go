@@ -177,3 +177,36 @@ func TestRecordCredentialOnBehalf(t *testing.T) {
 	require.NoError(t, audit_model.RecordCredential(audit_model.WithSystem(t.Context(), "cron:sync_external_users"), ev))
 	assert.NotContains(t, last(), "on_behalf")
 }
+
+func TestOrigin(t *testing.T) {
+	for raw, want := range map[string]string{
+		"https://user:pw@logs.example.com:8443/path/token?q=1#f": "https://logs.example.com:8443",
+		"http://example.com":         "http://example.com",
+		"mailto:someone@example.com": "",
+		"/relative/path":             "",
+		"::not a url":                "",
+		"":                           "",
+	} {
+		assert.Equal(t, want, audit_model.Origin(raw), raw)
+	}
+}
+
+func TestWithLoginSource(t *testing.T) {
+	outer := &audit_model.Actor{Type: audit_model.ActorUser, ID: 2, Name: "user2", IP: "192.0.2.1", RequestID: "r1", SudoByID: 1}
+	ctx := audit_model.WithLoginSource(audit_model.WithActor(t.Context(), outer), 7, "ldap")
+	a := audit_model.ActorFromContext(ctx)
+	assert.Equal(t, audit_model.ActorLoginSource, a.Type)
+	assert.EqualValues(t, 7, a.ID)
+	assert.Equal(t, "ldap", a.Name)
+	assert.Equal(t, "192.0.2.1", a.IP)
+	assert.Equal(t, "r1", a.RequestID)
+	assert.Zero(t, a.SudoByID)
+	assert.Equal(t, audit_model.CredentialSystem, a.Credential.Type)
+	// the request's actor is left as it was, for what the request records after the sync
+	assert.Equal(t, audit_model.ActorUser, outer.Type)
+	assert.EqualValues(t, 2, outer.ID)
+
+	assert.Equal(t, ctx, audit_model.WithLoginSource(ctx, 7, "ldap"), "already that source")
+	assert.NotEqual(t, ctx, audit_model.WithLoginSource(ctx, 8, "other"))
+	assert.Equal(t, audit_model.ActorLoginSource, audit_model.ActorFromContext(audit_model.WithLoginSource(t.Context(), 7, "ldap")).Type)
+}

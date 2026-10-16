@@ -84,10 +84,35 @@ func GetAllSettings(ctx context.Context) (revision int, res map[string]string, e
 	return revision, res, nil
 }
 
+// GetSettingForUpdate returns the stored value of key (has = false when it isn't stored) and, inside a transaction,
+// locks its row until the transaction ends, so that a read-modify-write of the value can't lose a concurrent one.
+func GetSettingForUpdate(ctx context.Context, key string) (value string, has bool, err error) {
+	if _, err := db.Exec(ctx, "UPDATE system_setting SET version=version WHERE setting_key=?", key); err != nil {
+		return "", false, err
+	}
+	s, has, err := db.Get[Setting](ctx, builder.Eq{"setting_key": key})
+	if err != nil || !has {
+		return "", false, err
+	}
+	return s.SettingValue, true, nil
+}
+
 func SetSettings(ctx context.Context, settings map[string]string) error {
 	_ = GetRevision(ctx) // prepare the "revision" key ahead
 	return db.WithTx(ctx, func(ctx context.Context) error {
 		e := db.GetEngine(ctx)
+		keys := make([]string, 0, len(settings))
+		for k := range settings {
+			keys = append(keys, k)
+		}
+		var stored []*Setting
+		if err := e.In("setting_key", keys).Find(&stored); err != nil {
+			return err
+		}
+		before := make(map[string]string, len(stored))
+		for _, s := range stored {
+			before[s.SettingKey] = s.SettingValue
+		}
 		_, err := db.Exec(ctx, "UPDATE system_setting SET version=version+1 WHERE setting_key=?", keyRevision)
 		if err != nil {
 			return err
@@ -104,7 +129,7 @@ func SetSettings(ctx context.Context, settings map[string]string) error {
 				}
 			}
 		}
-		return nil
+		return recordSettings(ctx, before, settings)
 	})
 }
 

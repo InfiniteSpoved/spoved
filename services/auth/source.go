@@ -33,23 +33,30 @@ func DeleteSource(ctx context.Context, source *auth.Source) error {
 		}
 	}
 
-	if registerableSource, ok := source.Cfg.(auth.RegisterableSource); ok {
-		if err := registerableSource.UnregisterSource(); err != nil {
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		tokens, err := db.GetEngine(ctx).Where("login_source_id = ?", source.ID).Delete(new(auth.AuthorizationToken))
+		if err != nil {
 			return err
 		}
-	}
-
-	if _, err := db.GetEngine(ctx).Where("login_source_id = ?", source.ID).Delete(new(auth.AuthorizationToken)); err != nil {
+		members, err := db.GetEngine(ctx).
+			Where("created_by_login_source_id = ?", source.ID).
+			Cols("created_by_login_source_id").
+			Update(organization.TeamUser{CreatedByLoginSourceID: optional.None[int64]()})
+		if err != nil {
+			return err
+		}
+		if _, err := db.GetEngine(ctx).ID(source.ID).Delete(new(auth.Source)); err != nil {
+			return err
+		}
+		return auth.RecordSource(ctx, "admin.login_source.deleted", source, map[string]any{
+			"counts": map[string]int64{"authorization_tokens": tokens, "team_memberships_unlinked": members},
+		})
+	}); err != nil {
 		return err
 	}
 
-	if _, err := db.GetEngine(ctx).
-		Where("created_by_login_source_id = ?", source.ID).
-		Cols("created_by_login_source_id").
-		Update(organization.TeamUser{CreatedByLoginSourceID: optional.None[int64]()}); err != nil {
-		return err
+	if registerableSource, ok := source.Cfg.(auth.RegisterableSource); ok {
+		return registerableSource.UnregisterSource()
 	}
-
-	_, err = db.GetEngine(ctx).ID(source.ID).Delete(new(auth.Source))
-	return err
+	return nil
 }

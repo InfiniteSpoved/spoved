@@ -11,6 +11,8 @@ import (
 
 // ActionKeys are the catalog keys the action filter suggests.
 var ActionKeys = []string{
+	"admin.*", "admin.login_source.*", "admin.user_group.*", "admin.setting.changed", "admin.log_shipping.*", "admin.quota_rule.*",
+	"admin.quota_group.*", "admin.cron.run", "admin.logging.changed",
 	"audit.*", "audit.exported", "audit.instance.started",
 	"credential.*", "credential.access_token.*", "credential.access_token.created", "credential.access_token.deleted",
 	"credential.access_token.regenerated",
