@@ -514,19 +514,27 @@ func UpdateProtectBranch(ctx context.Context, repo *repo_model.Repository, prote
 	}
 
 	return db.WithTx(ctx, func(ctx context.Context) error {
+		var before map[string]any
 		// Make sure protectBranch.ID is not 0 for whitelists
 		if protectBranch.ID == 0 {
 			if _, err = db.GetEngine(ctx).Insert(protectBranch); err != nil {
 				return fmt.Errorf("Insert: %v", err)
 			}
-		} else if _, err = db.GetEngine(ctx).ID(protectBranch.ID).AllCols().Update(protectBranch); err != nil {
-			return fmt.Errorf("Update: %v", err)
+		} else {
+			if before, err = storedBranchRule(ctx, protectBranch.ID); err != nil {
+				return err
+			}
+			if _, err = db.GetEngine(ctx).ID(protectBranch.ID).AllCols().Update(protectBranch); err != nil {
+				return fmt.Errorf("Update: %v", err)
+			}
 		}
 
-		if opts.ApprovalRules == nil {
-			return nil
+		if opts.ApprovalRules != nil {
+			if err := SetApprovalRules(ctx, repo, protectBranch.ID, opts.ApprovalRules); err != nil {
+				return err
+			}
 		}
-		return SetApprovalRules(ctx, repo, protectBranch.ID, opts.ApprovalRules)
+		return recordBranchRule(ctx, repo, protectBranch, before)
 	})
 }
 
@@ -656,19 +664,26 @@ func DeleteProtectedBranch(ctx context.Context, repo *repo_model.Repository, id 
 		return err
 	}
 
-	protectedBranch := &ProtectedBranch{
-		RepoID: repo.ID,
-		ID:     id,
-	}
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		protectedBranch := &ProtectedBranch{}
+		if has, err := db.GetEngine(ctx).Where("id = ? AND repo_id = ?", id, repo.ID).Get(protectedBranch); err != nil {
+			return err
+		} else if !has {
+			return fmt.Errorf("delete protected branch ID(%v) failed", id)
+		}
+		if err := recordBranchRuleEvent(ctx, "repo.branch_protection.deleted", "org.branch_protection.deleted", repo, protectedBranch, map[string]any{"rule_name": protectedBranch.RuleName}); err != nil {
+			return err
+		}
 
-	if affected, err := db.GetEngine(ctx).Delete(protectedBranch); err != nil {
+		if affected, err := db.GetEngine(ctx).Delete(&ProtectedBranch{RepoID: repo.ID, ID: id}); err != nil {
+			return err
+		} else if affected != 1 {
+			return fmt.Errorf("delete protected branch ID(%v) failed", id)
+		}
+
+		_, err := db.GetEngine(ctx).Where("protected_branch_id = ?", id).Delete(new(ApprovalRule))
 		return err
-	} else if affected != 1 {
-		return fmt.Errorf("delete protected branch ID(%v) failed", id)
-	}
-
-	_, err = db.GetEngine(ctx).Where("protected_branch_id = ?", id).Delete(new(ApprovalRule))
-	return err
+	})
 }
 
 // RemoveUserIDFromProtectedBranch remove all user ids from protected branch options

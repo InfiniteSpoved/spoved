@@ -328,6 +328,10 @@ func WebhookUpdate(ctx *context.Context) {
 		middleware.Validate(errs, ctx.Data, form, ctx.Locale) // error checked below in ctx.HasError
 	})
 
+	// what the request sets anew, for the audit log; the stored header is never decrypted for this
+	secretChanged := fields.Secret != w.Secret
+	authorizationChanged := fields.AuthorizationHeader != "" || len(w.HeaderAuthorizationEncrypted) > 0
+
 	// pre-fill the form with the submitted data
 	w.URL = fields.URL
 	w.ContentType = fields.ContentType
@@ -359,7 +363,7 @@ func WebhookUpdate(ctx *context.Context) {
 	if err := w.UpdateEvent(); err != nil {
 		ctx.ServerError("UpdateEvent", err)
 		return
-	} else if err := webhook.UpdateWebhook(ctx, w); err != nil {
+	} else if err := webhook.UpdateWebhook(ctx, w, secretChanged, authorizationChanged); err != nil {
 		ctx.ServerError("UpdateWebhook", err)
 		return
 	}

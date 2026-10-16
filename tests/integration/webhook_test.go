@@ -37,7 +37,7 @@ func TestWebhookPayloadRef(t *testing.T) {
 			SendEverything: true,
 		}
 		require.NoError(t, w.UpdateEvent())
-		require.NoError(t, webhook_model.UpdateWebhook(db.DefaultContext, w))
+		require.NoError(t, webhook_model.UpdateWebhook(db.DefaultContext, w, false, false))
 
 		hookTasks := retrieveHookTasks(t, w.ID, true)
 		hookTasksLenBefore := len(hookTasks)
@@ -91,7 +91,7 @@ func TestWebhookReleaseEvents(t *testing.T) {
 		SendEverything: true,
 	}
 	require.NoError(t, w.UpdateEvent())
-	require.NoError(t, webhook_model.UpdateWebhook(db.DefaultContext, w))
+	require.NoError(t, webhook_model.UpdateWebhook(db.DefaultContext, w, false, false))
 
 	hookTasks := retrieveHookTasks(t, w.ID, true)
 

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 )
 
@@ -54,6 +55,15 @@ func getAdminWebhooks(ctx context.Context, systemWebhooks bool, listOptions db.L
 // DeleteDefaultSystemWebhook deletes an admin-configured default or system webhook (where Org and Repo ID both 0)
 func DeleteDefaultSystemWebhook(ctx context.Context, id int64) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
+		w := new(Webhook)
+		if has, err := db.GetEngine(ctx).Where("id=? AND repo_id=? AND owner_id=? AND group_id=0", id, 0, 0).Get(w); err != nil {
+			return err
+		} else if !has {
+			return ErrWebhookNotExist{ID: id}
+		}
+		if err := recordWebhook(ctx, audit_model.LevelActions{Repo: "repo.webhook.deleted", Org: "org.webhook.deleted", Account: "account.webhook.deleted", Admin: "admin.webhook.deleted"}, w, w.AuditFields()); err != nil {
+			return err
+		}
 		count, err := db.GetEngine(ctx).
 			Where("repo_id=? AND owner_id=? AND group_id=0", 0, 0).
 			Delete(&Webhook{ID: id})
@@ -68,19 +78,20 @@ func DeleteDefaultSystemWebhook(ctx context.Context, id int64) error {
 	})
 }
 
-// CopyDefaultWebhooksToRepo creates copies of the default webhooks in a new repo
-func CopyDefaultWebhooksToRepo(ctx context.Context, repoID int64) error {
+// CopyDefaultWebhooksToRepo creates copies of the default webhooks in a new repo, unrecorded, and returns how many:
+// the caller counts them on repo.repository.created.
+func CopyDefaultWebhooksToRepo(ctx context.Context, repoID int64) (int, error) {
 	ws, _, err := GetDefaultWebhooks(ctx)
 	if err != nil {
-		return fmt.Errorf("GetDefaultWebhooks: %v", err)
+		return 0, fmt.Errorf("GetDefaultWebhooks: %v", err)
 	}
 
 	for _, w := range ws {
 		w.ID = 0
 		w.RepoID = repoID
-		if err := CreateWebhook(ctx, w, ""); err != nil {
-			return fmt.Errorf("CreateWebhook: %v", err)
+		if err := InsertWebhook(ctx, w, ""); err != nil {
+			return 0, fmt.Errorf("InsertWebhook: %v", err)
 		}
 	}
-	return nil
+	return len(ws), nil
 }

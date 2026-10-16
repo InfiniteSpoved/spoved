@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/keying"
@@ -98,7 +99,34 @@ func InsertEncryptedSecret(ctx context.Context, ownerID, groupID, repoID int64, 
 		}
 
 		secret.SetData(data)
-		_, err := db.GetEngine(ctx).ID(secret.ID).Cols("data").Update(secret)
+		if _, err := db.GetEngine(ctx).ID(secret.ID).Cols("data").Update(secret); err != nil {
+			return err
+		}
+		return recordSecret(ctx, audit_model.LevelActions{Repo: "repo.actions_secret.created", Org: "org.actions_secret.created", Account: "account.actions_secret.created"}, secret, nil)
+	})
+}
+
+// recordSecret records the action of actions for the secret's level, with its name only, never its value.
+func recordSecret(ctx context.Context, actions audit_model.LevelActions, s *Secret, data map[string]any) error {
+	if data == nil {
+		data = map[string]any{}
+	}
+	data["name"] = s.Name
+	return repo_model.RecordScoped(ctx, actions, s.OwnerID, s.GroupID, s.RepoID, audit_model.Event{
+		TargetType: "actions_secret", TargetID: s.ID, TargetName: s.Name, Data: data,
+	})
+}
+
+// DeleteSecret deletes s and records actions_secret.deleted.
+func DeleteSecret(ctx context.Context, s *Secret) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if err := LockGroup(ctx, s.OwnerID, s.GroupID); err != nil {
+			return err
+		}
+		if err := recordSecret(ctx, audit_model.LevelActions{Repo: "repo.actions_secret.deleted", Org: "org.actions_secret.deleted", Account: "account.actions_secret.deleted"}, s, nil); err != nil {
+			return err
+		}
+		_, err := db.DeleteByID[Secret](ctx, s.ID)
 		return err
 	})
 }
@@ -192,7 +220,9 @@ func GetSecretByID(ctx context.Context, ownerID, groupID, repoID, id int64) (*Se
 	return &secret, nil
 }
 
-func UpdateSecret(ctx context.Context, secret *Secret, columns ...string) error {
+// UpdateSecret writes secret and records actions_secret.updated when its name changed or valueChanged (the request
+// set a new value); the value itself is never compared or recorded.
+func UpdateSecret(ctx context.Context, secret *Secret, valueChanged bool, columns ...string) error {
 	if err := ValidateName(secret.Name); err != nil {
 		return err
 	}
@@ -203,6 +233,19 @@ func UpdateSecret(ctx context.Context, secret *Secret, columns ...string) error 
 			return err
 		}
 		e := db.GetEngine(ctx)
+		stored := new(Secret)
+		if has, err := e.ID(secret.ID).Cols("name").Get(stored); err != nil {
+			return err
+		} else if has && (stored.Name != secret.Name || valueChanged) {
+			data := audit_model.Changes(map[string]any{"name": stored.Name}, map[string]any{"name": secret.Name})
+			if data == nil {
+				data = map[string]any{}
+			}
+			data["value_changed"] = valueChanged
+			if err := recordSecret(ctx, audit_model.LevelActions{Repo: "repo.actions_secret.updated", Org: "org.actions_secret.updated", Account: "account.actions_secret.updated"}, secret, data); err != nil {
+				return err
+			}
+		}
 		var err error
 		if len(columns) == 0 {
 			_, err = e.ID(secret.ID).AllCols().Update(secret)

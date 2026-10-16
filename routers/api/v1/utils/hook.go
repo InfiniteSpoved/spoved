@@ -412,6 +412,8 @@ func editHook(ctx *context.APIContext, form *api.EditHookOption, w *webhook.Webh
 	w.Release = util.SliceContainsString(form.Events, string(webhook_module.HookEventRelease), true)
 	w.BranchFilter = form.BranchFilter
 
+	// the request sets a new header unless it sends none and there was none; the stored one is never decrypted for this
+	authorizationChanged := form.AuthorizationHeader != "" || len(w.HeaderAuthorizationEncrypted) > 0
 	w.SetHeaderAuthorization(form.AuthorizationHeader)
 
 	// Issues
@@ -440,7 +442,7 @@ func editHook(ctx *context.APIContext, form *api.EditHookOption, w *webhook.Webh
 		w.IsActive = *form.Active
 	}
 
-	if err := webhook.UpdateWebhook(ctx, w); err != nil {
+	if err := webhook.UpdateWebhook(ctx, w, false, authorizationChanged); err != nil {
 		ctx.Error(http.StatusInternalServerError, "UpdateWebhook", err)
 		return false
 	}

@@ -8,6 +8,7 @@ import (
 
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
+	user_model "forgejo.org/models/user"
 )
 
 // AuditFields are the settings the audit log keeps before/after for a repository (audit_model.Fields["repo"]).
@@ -80,4 +81,53 @@ func UpdateMirrorSettings(ctx context.Context, m *Mirror, cols ...string) error 
 		}
 		return UpdateMirrorCols(ctx, m, cols...)
 	})
+}
+
+// AuditFields are the settings the audit log keeps before/after for a push mirror; of its address only the origin,
+// never the private key.
+func (m *PushMirror) AuditFields() map[string]any {
+	return map[string]any{
+		"remote_name": m.RemoteName, "address": audit_model.Origin(m.RemoteAddress), "interval": m.Interval.String(),
+		"sync_on_commit": m.SyncOnCommit, "branch_filter": m.BranchFilter, "use_ssh": m.PublicKey != "",
+	}
+}
+
+func recordPushMirror(ctx context.Context, action string, m *PushMirror, data map[string]any) error {
+	repo := m.Repo
+	if repo == nil {
+		var err error
+		if repo, err = GetRepositoryByIDIncludingTrashed(ctx, m.RepoID); err != nil {
+			return err
+		}
+	}
+	return RecordRepoTarget(ctx, repo, audit_model.Event{
+		Action: action, TargetType: "push_mirror", TargetID: m.ID, TargetName: m.RemoteName, Data: data,
+	})
+}
+
+// RecordScoped records the action of actions for the level of a setting that belongs to the repository repoID, the
+// project groupID of the organization ownerID, the organization or user ownerID, or the instance (all zero).
+func RecordScoped(ctx context.Context, actions audit_model.LevelActions, ownerID, groupID, repoID int64, ev audit_model.Event) error {
+	ev.Result, ev.OwnerID, ev.GroupID, ev.RepoID = audit_model.ResultSuccess, ownerID, groupID, repoID
+	switch {
+	case repoID != 0:
+		repo, err := GetRepositoryByID(ctx, repoID)
+		if err != nil {
+			return err
+		}
+		ev.Action = actions.Repo
+		return RecordRepoTarget(ctx, repo, ev)
+	case ownerID != 0:
+		owner, err := user_model.GetUserByIDIncludingTrashed(ctx, ownerID)
+		if err != nil {
+			return err
+		}
+		ev.Action = actions.Org
+		if !owner.IsOrganization() {
+			ev.Action, ev.SubjectUserID = actions.Account, ownerID
+		}
+	default:
+		ev.Action = actions.Admin
+	}
+	return audit_model.Record(ctx, ev)
 }

@@ -4,13 +4,17 @@
 package actions
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"time"
 
 	actions_model "forgejo.org/models/actions"
+	repo_model "forgejo.org/models/repo"
 	actions_module "forgejo.org/modules/actions"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
@@ -59,11 +63,18 @@ func cleanExpiredArtifacts(taskCtx context.Context) error {
 		return err
 	}
 	log.Info("Found %d expired artifacts", len(artifacts))
+	expired := 0
+	defer func() {
+		if err := recordExpired(taskCtx, "admin.actions.artifacts_expired", expired); err != nil {
+			log.Error("Failed to record %d expired artifacts: %v", expired, err)
+		}
+	}()
 	for _, artifact := range artifacts {
 		if err := actions_model.SetArtifactExpired(taskCtx, artifact.ID); err != nil {
 			log.Error("Cannot set artifact %d expired: %v", artifact.ID, err)
 			continue
 		}
+		expired++
 		if err := storage.ActionsArtifacts.Delete(artifact.StoragePath); err != nil {
 			log.Error("Cannot delete artifact %d: %v", artifact.ID, err)
 			continue
@@ -124,6 +135,8 @@ func CleanupRuns(ctx context.Context) error {
 	}
 
 	count := 0
+	deleted := map[int64][]int64{} // repository ID → its deleted runs, recorded per repository at the end
+	days := map[int64]int64{}
 	var afterID int64
 	for {
 		if err := ctx.Err(); err != nil {
@@ -135,8 +148,8 @@ func CleanupRuns(ctx context.Context) error {
 		}
 		for _, run := range runs {
 			afterID = run.ID
-			days := actions_model.EffectiveRunRetentionDays(repoDays[run.RepoID], orgDays[run.OwnerID])
-			if days == 0 || run.Created >= actions_model.RetentionCutoff(days) || keep.Contains(run.ID) {
+			runDays := actions_model.EffectiveRunRetentionDays(repoDays[run.RepoID], orgDays[run.OwnerID])
+			if runDays == 0 || run.Created >= actions_model.RetentionCutoff(runDays) || keep.Contains(run.ID) {
 				continue
 			}
 			if err := DeleteRunUnlessKept(ctx, run.ID); err != nil {
@@ -148,6 +161,8 @@ func CleanupRuns(ctx context.Context) error {
 				continue
 			}
 			count++
+			deleted[run.RepoID] = append(deleted[run.RepoID], run.ID)
+			days[run.RepoID] = runDays
 		}
 		if len(runs) < deleteRunBatchSize {
 			break
@@ -155,7 +170,20 @@ func CleanupRuns(ctx context.Context) error {
 	}
 
 	log.Info("Removed %d runs", count)
-	return nil
+	// ponytail: recorded after the deletes (one entry per repository, not per run); a failed record is logged and
+	// returned, the runs stay deleted
+	var recordErr error
+	for _, repoID := range slices.Sorted(maps.Keys(deleted)) {
+		repo, err := repo_model.GetRepositoryByIDIncludingTrashed(ctx, repoID)
+		if err == nil {
+			err = recordRunsDeleted(ctx, "repo.actions_runs.cleaned", repo, days[repoID], deleted[repoID])
+		}
+		if err != nil {
+			log.Error("Failed to record the cleanup of %d runs of repository %d: %v", len(deleted[repoID]), repoID, err)
+			recordErr = cmp.Or(recordErr, err)
+		}
+	}
+	return recordErr
 }
 
 // minValue returns the smallest value of m, or 0 if it is empty.
@@ -209,7 +237,7 @@ func CleanupLogs(ctx context.Context) error {
 	}
 
 	log.Info("Removed %d logs", count)
-	return nil
+	return recordExpired(ctx, "admin.actions.logs_expired", count)
 }
 
 // CleanupEphemeralRunners removes used ephemeral runners which are no longer able to process jobs

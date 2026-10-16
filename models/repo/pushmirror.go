@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/modules/git"
 	giturl "forgejo.org/modules/git/url"
@@ -115,25 +116,63 @@ func UpdatePushMirror(ctx context.Context, m *PushMirror) error {
 	return err
 }
 
-// UpdatePushMirrorInterval updates the push-mirror
-func UpdatePushMirrorInterval(ctx context.Context, m *PushMirror) error {
-	_, err := db.GetEngine(ctx).ID(m.ID).Cols("interval").Update(m)
-	return err
+// UpdatePushMirrorSettings writes the cols (interval, branch_filter) of m that its owner sets, and records
+// repo.push_mirror.updated with the settings that differ from the stored row.
+func UpdatePushMirrorSettings(ctx context.Context, m *PushMirror, cols ...string) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		stored := new(PushMirror)
+		if has, err := db.GetEngine(ctx).ID(m.ID).Get(stored); err != nil {
+			return err
+		} else if has {
+			if changes := audit_model.Changes(stored.AuditFields(), m.AuditFields()); changes != nil {
+				if err := recordPushMirror(ctx, "repo.push_mirror.updated", m, changes); err != nil {
+					return err
+				}
+			}
+		}
+		_, err := db.GetEngine(ctx).ID(m.ID).Cols(cols...).Update(m)
+		return err
+	})
 }
 
-func UpdatePushMirrorBranchFilter(ctx context.Context, m *PushMirror) error {
-	_, err := db.GetEngine(ctx).ID(m.ID).Cols("branch_filter").Update(m)
-	return err
+// InsertPushMirror inserts m and records repo.push_mirror.created; credentials says whether its address carried user
+// info, which RemoteAddress no longer holds.
+func InsertPushMirror(ctx context.Context, m *PushMirror, credentials bool) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if err := db.Insert(ctx, m); err != nil {
+			return err
+		}
+		data := m.AuditFields()
+		data["credentials_set"] = credentials
+		return recordPushMirror(ctx, "repo.push_mirror.created", m, data)
+	})
+}
+
+// RecordPushMirrorSync records repo.push_mirror.sync_requested, a sync someone asked for.
+func RecordPushMirrorSync(ctx context.Context, m *PushMirror) error {
+	return recordPushMirror(ctx, "repo.push_mirror.sync_requested", m, nil)
 }
 
 var DeletePushMirrors = deletePushMirrors
 
+// deletePushMirrors deletes the push mirrors of opts, recording repo.push_mirror.deleted for each.
 func deletePushMirrors(ctx context.Context, opts PushMirrorOptions) error {
-	if opts.RepoID > 0 {
-		_, err := db.Delete[PushMirror](ctx, opts)
-		return err
+	if opts.RepoID <= 0 {
+		return util.NewInvalidArgumentErrorf("repoID required and must be set")
 	}
-	return util.NewInvalidArgumentErrorf("repoID required and must be set")
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		mirrors, err := db.Find[PushMirror](ctx, opts)
+		if err != nil {
+			return err
+		}
+		for _, m := range mirrors {
+			if err := recordPushMirror(ctx, "repo.push_mirror.deleted", m, m.AuditFields()); err != nil {
+				return err
+			}
+		}
+		_, err = db.Delete[PushMirror](ctx, opts)
+		return err
+	})
 }
 
 // GetPushMirrorsByRepoID returns push-mirror information of a repository.

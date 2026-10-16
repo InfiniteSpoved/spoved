@@ -142,9 +142,13 @@ func CreateRepositoryByExample(ctx context.Context, doer, u *user_model.User, re
 	if err = db.Insert(ctx, units); err != nil {
 		return err
 	}
+	hooks, err := webhook.CopyDefaultWebhooksToRepo(ctx, repo.ID)
+	if err != nil {
+		return fmt.Errorf("CopyDefaultWebhooksToRepo: %w", err)
+	}
 	if err = repo_model.RecordRepo(ctx, "repo.repository.created", repo, map[string]any{
 		"is_private": repo.IsPrivate, "is_template": repo.IsTemplate, "is_mirror": repo.IsMirror, "fork_id": repo.ForkID,
-		"template_id": repo.TemplateID,
+		"template_id": repo.TemplateID, "counts": map[string]any{"webhooks": hooks},
 	}); err != nil {
 		return err
 	}
@@ -195,10 +199,6 @@ func CreateRepositoryByExample(ctx context.Context, doer, u *user_model.User, re
 		if err = repo_model.WatchIfAutoWatchNewRepos(ctx, doer.ID, repo.ID); err != nil {
 			return fmt.Errorf("WatchRepo: %w", err)
 		}
-	}
-
-	if err = webhook.CopyDefaultWebhooksToRepo(ctx, repo.ID); err != nil {
-		return fmt.Errorf("CopyDefaultWebhooksToRepo: %w", err)
 	}
 
 	return nil

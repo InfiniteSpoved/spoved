@@ -685,6 +685,10 @@ func SettingsPost(ctx *context.Context) {
 			return
 		}
 
+		if err := repo_model.RecordPushMirrorSync(ctx, m); err != nil {
+			ctx.ServerError("RecordPushMirrorSync", err)
+			return
+		}
 		mirror_service.AddPushMirrorToQueue(m.ID)
 
 		ctx.Flash.Info(ctx.Tr("repo.settings.push_mirror_sync_in_progress", m.RemoteAddress))
@@ -713,25 +717,20 @@ func SettingsPost(ctx *context.Context) {
 		}
 
 		m.Interval = interval
-		if err := repo_model.UpdatePushMirrorInterval(ctx, m); err != nil {
-			ctx.ServerError("UpdatePushMirrorInterval", err)
-			return
-		}
-
-		if m.BranchFilter != form.PushMirrorBranchFilter {
-			// replace `remote.<remote>.push` in config and db
-			m.BranchFilter = form.PushMirrorBranchFilter
-			if err := db.WithTx(ctx, func(ctx go_context.Context) error {
-				// Update the DB
-				if err = repo_model.UpdatePushMirrorBranchFilter(ctx, m); err != nil {
-					return err
-				}
-				// Update the repo config
-				return mirror_service.UpdatePushMirrorBranchFilter(ctx, m)
-			}); err != nil {
-				ctx.ServerError("UpdatePushMirrorBranchFilter", err)
-				return
+		filterChanged := m.BranchFilter != form.PushMirrorBranchFilter
+		m.BranchFilter = form.PushMirrorBranchFilter
+		if err := db.WithTx(ctx, func(ctx go_context.Context) error {
+			if err := repo_model.UpdatePushMirrorSettings(ctx, m, "interval", "branch_filter"); err != nil {
+				return err
 			}
+			if filterChanged {
+				// replace `remote.<remote>.push` in the repo config
+				return mirror_service.UpdatePushMirrorBranchFilter(ctx, m)
+			}
+			return nil
+		}); err != nil {
+			ctx.ServerError("UpdatePushMirrorSettings", err)
+			return
 		}
 
 		// Background why we are adding it to Queue
@@ -839,7 +838,7 @@ func SettingsPost(ctx *context.Context) {
 			m.PublicKey = string(publicKey)
 		}
 
-		if err := db.Insert(ctx, m); err != nil {
+		if err := repo_model.InsertPushMirror(ctx, m, address != remoteAddress); err != nil {
 			ctx.ServerError("InsertPushMirror", err)
 			return
 		}

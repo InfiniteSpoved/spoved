@@ -9,6 +9,7 @@ import (
 
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 )
 
@@ -61,5 +62,20 @@ func recordRunnerToken(ctx context.Context, t *ActionRunnerToken) error {
 	return audit_model.RecordCredential(ctx, audit_model.Event{
 		Action: "credential.runner_token.reset", OwnerID: owner, GroupID: group, RepoID: repoID,
 		TargetType: "runner_token", TargetID: t.ID, Data: map[string]any{"level": level},
+	})
+}
+
+// DeleteArtifactOfRun marks the artifact name of the run of repo for deletion, as a user asked, and records
+// repo.actions_artifact.deleted when there was one to delete.
+func DeleteArtifactOfRun(ctx context.Context, repo *repo_model.Repository, runID int64, name string) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		n, err := db.GetEngine(ctx).Where("run_id=? AND artifact_name=? AND status = ?", runID, name, ArtifactStatusUploadConfirmed).Cols("status").Update(&ActionArtifact{Status: int64(ArtifactStatusPendingDeletion)})
+		if err != nil || n == 0 {
+			return err
+		}
+		return repo_model.RecordRepoTarget(ctx, repo, audit_model.Event{
+			Action: "repo.actions_artifact.deleted", TargetType: "actions_artifact", TargetName: name,
+			Data: map[string]any{"name": name, "run_id": runID},
+		})
 	})
 }

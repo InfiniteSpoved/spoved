@@ -34,7 +34,7 @@ func CreateOrUpdateSecret(ctx context.Context, ownerID, groupID, repoID int64, n
 	}
 
 	s.SetData(data)
-	if _, err := db.GetEngine(ctx).Cols("data").ID(s.ID).Update(s); err != nil {
+	if err := secret_model.UpdateSecret(ctx, s, true, "data"); err != nil {
 		return nil, false, err
 	}
 	return s, false, nil
@@ -75,11 +75,5 @@ func DeleteSecretByName(ctx context.Context, ownerID, groupID, repoID int64, nam
 }
 
 func deleteSecret(ctx context.Context, s *secret_model.Secret) error {
-	return db.WithTx(ctx, func(ctx context.Context) error {
-		if err := secret_model.LockGroup(ctx, s.OwnerID, s.GroupID); err != nil {
-			return err
-		}
-		_, err := db.DeleteByID[secret_model.Secret](ctx, s.ID)
-		return err
-	})
+	return secret_model.DeleteSecret(ctx, s)
 }
