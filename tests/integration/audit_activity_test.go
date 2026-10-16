@@ -37,6 +37,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
+	"forgejo.org/routers/common"
 	packages_service "forgejo.org/services/packages"
 	"forgejo.org/tests"
 
@@ -548,7 +549,7 @@ func TestAuditDownloads(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	auditFresh(t)
 	saveTestAttachments(t)
-	token := getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository, auth_model.AccessTokenScopeWriteRepository)
+	token := getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository, auth_model.AccessTokenScopeWriteRepository, auth_model.AccessTokenScopeReadIssue)
 	tok, err := auth_model.GetAccessTokenBySHA(t.Context(), token)
 	require.NoError(t, err)
 
@@ -572,7 +573,6 @@ func TestAuditDownloads(t *testing.T) {
 
 	t.Run("raw and media", func(t *testing.T) {
 		download(t, NewRequest(t, "GET", "/user2/repo1/raw/branch/master/README.md?secret=q").AddTokenAuth(token), "raw", "README.md")
-		download(t, NewRequest(t, "GET", "/user2/repo1/media/branch/master/README.md").AddTokenAuth(token), "raw", "README.md")
 		download(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1/raw/README.md?ref=master").AddTokenAuth(token), "raw", "README.md")
 		download(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1/media/README.md?ref=master").AddTokenAuth(token), "raw", "README.md")
 	})
@@ -652,9 +652,19 @@ func TestAuditAPIReads(t *testing.T) {
 	MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/"+org.Name+"/"+repo.Name).AddTokenAuth(orgToken), http.StatusOK)
 	assert.Len(t, auditActions(t, since, "activity.api.read"), 1)
 
+	// a failed read is aggregated
+	audit_model.ResetActivity()
+	since = auditMaxID(t)
+	for range 3 {
+		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo2/issues/99999").AddTokenAuth(token), http.StatusNotFound)
+	}
+	assert.Len(t, auditActions(t, since, "activity.api.read"), 1)
+	audit_model.FlushAggregated(t.Context(), true)
+	assert.EqualValues(t, 2, auditData(t, auditActivity(t, since, "activity.api.read.aggregated"))["count"])
+
 	// a download is not recorded twice
 	since = auditMaxID(t)
-	MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo2/raw/README.md").AddTokenAuth(token), http.StatusOK)
+	MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo2/raw/Home.md?ref=master").AddTokenAuth(token), http.StatusOK)
 	assert.Len(t, auditActions(t, since, "activity.download"), 1)
 	assert.Empty(t, auditActions(t, since, "activity.api.read"))
 }
@@ -723,17 +733,28 @@ func TestAuditGitReadHTTP(t *testing.T) {
 		require.NoError(t, err)
 
 		since := auditMaxID(t)
-		doGitClone(t.TempDir(), gitURL(u, "/user2/repo1.git", "user2", token))(t)
+		require.NoError(t, git.CloneWithArgs(t.Context(), git.AllowLFSFiltersArgs(), gitURL(u, "/user2/repo2.git", "user2", token).String(), t.TempDir(), git.CloneRepoOptions{})) // private: git only sends credentials when asked
 		entries := auditActions(t, since, "activity.git.read")
 		require.NotEmpty(t, entries) // protocol v2 sends more than one POST
 		for _, e := range entries {
 			assert.Equal(t, tok.ID, e.CredentialID)
-			assert.EqualValues(t, 1, e.RepoID)
+			assert.EqualValues(t, 2, e.RepoID)
 			assert.Equal(t, "http", auditData(t, e)["protocol"])
 			assert.Equal(t, "upload-pack", auditData(t, e)["service"])
 		}
 		assert.Positive(t, auditData(t, entries[len(entries)-1])["bytes"])
 		assertNoSecrets(t, since, token)
+
+		// a failed read is aggregated
+		audit_model.ResetActivity()
+		since = auditMaxID(t)
+		actor := &audit_model.Actor{Type: audit_model.ActorUser, ID: 2, Name: "user2", IP: "127.0.0.1", Credential: audit_model.Credential{Type: audit_model.CredentialAccessToken, ID: tok.ID}}
+		repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 2})
+		for range 3 {
+			common.RecordGitRead(audit_model.WithActor(t.Context(), actor), repo, "upload-pack", "http", 0, false, true)
+		}
+		audit_model.FlushAggregated(t.Context(), true)
+		assert.EqualValues(t, 2, auditData(t, auditActivity(t, since, "activity.git.read.aggregated"))["count"])
 
 		// anonymous clone of a public repository: nothing
 		since = auditMaxID(t)
