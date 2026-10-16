@@ -6,6 +6,8 @@ package integration
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -21,6 +23,8 @@ import (
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
+	"forgejo.org/models/perm"
+	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	"forgejo.org/modules/git"
@@ -33,6 +37,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 )
 
 // auditActivity returns the one entry of action written after since.
@@ -314,6 +319,26 @@ func TestAuditGitPush(t *testing.T) {
 			assert.Equal(t, key.ID, e.CredentialID)
 			assert.Equal(t, "192.0.2.7", e.IP)
 		})
+
+		t.Run("unknown forced", func(t *testing.T) {
+			gitRepo, err := gitrepo.OpenRepository(t.Context(), repo)
+			require.NoError(t, err)
+			defer gitRepo.Close()
+			main, err := gitRepo.GetBranchCommitID("main")
+			require.NoError(t, err)
+			since := auditMaxID(t)
+			extra := private.HookPushAudit(t.Context(), repo.ID, private.HookOptions{
+				OldCommitIDs: []string{strings.Repeat("a", 40)}, NewCommitIDs: []string{main}, // an old commit that doesn't exist: merge-base fails
+				RefFullNames: []git.RefName{git.RefNameFromBranch("unknown-forced")}, UserID: 2, UserName: "user2", AuditCredential: "session:0",
+			})
+			require.NoError(t, extra.Error)
+			data := auditData(t, auditActivity(t, since, "activity.git.push"))
+			assert.EqualValues(t, 1, data["forced_unknown"])
+			assert.Zero(t, data["forced_count"])
+			ref := data["refs"].([]any)[0].(map[string]any)
+			assert.Nil(t, ref["forced"])
+			assert.Contains(t, ref, "forced")
+		})
 	})
 }
 
@@ -413,6 +438,21 @@ func TestAuditGitPushRefused(t *testing.T) {
 			opts.UserID, opts.UserName = 4, "user4"
 			refused(t, "permission", opts)
 		})
+		t.Run("protected_tag", func(t *testing.T) {
+			require.NoError(t, git_model.InsertProtectedTag(t.Context(), &git_model.ProtectedTag{RepoID: repo.ID, NamePattern: "audit-v*"}))
+			refused(t, "protected_tag", push(zero, master, git.RefNameFromTag("audit-v1")))
+		})
+		t.Run("size_lock", func(t *testing.T) {
+			defer test.MockVariableValue(&setting.Quota.Enabled, true)()
+			group, err := quota_model.CreateGroup(t.Context(), "audit-block")
+			require.NoError(t, err)
+			rule, err := quota_model.CreateRule(t.Context(), "audit-block", 0, quota_model.LimitSubjects{quota_model.LimitSubjectSizeAll})
+			require.NoError(t, err)
+			require.NoError(t, group.AddRuleByName(t.Context(), rule.Name))
+			require.NoError(t, group.AddUserByID(t.Context(), 2))
+			defer func() { require.NoError(t, group.RemoveUserByID(t.Context(), 2)) }()
+			refused(t, "size_lock", push(zero, master, git.RefNameFromBranch("audit-quota")))
+		})
 
 		t.Run("HTTP", func(t *testing.T) {
 			readToken := getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository)
@@ -460,4 +500,41 @@ func protectedBranchID(t *testing.T, repoID int64, name string) int64 {
 	pb, err := git_model.GetProtectedBranchRuleByName(t.Context(), repoID, name)
 	require.NoError(t, err)
 	return pb.ID
+}
+
+// TestAuditServRefused covers the refusals of the SSH entry point at its internal API, without an SSH client.
+func TestAuditServRefused(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		auditFresh(t)
+		const verb = "git-receive-pack"
+		serv := func(t *testing.T, reason string, keyID int64, owner, repo string, repoID int64) {
+			t.Helper()
+			audit_model.ResetActivity()
+			since := auditMaxID(t)
+			_, extra := private.ServCommand(t.Context(), keyID, owner, repo, perm.AccessModeWrite, "127.0.0.1", verb, "")
+			require.Error(t, extra.Error)
+			e := auditActivity(t, since, "activity.git.push.refused")
+			assert.Equal(t, audit_model.ResultRefused, e.Result)
+			assert.Equal(t, reason, auditData(t, e)["reason"])
+			assert.Equal(t, repoID, e.RepoID)
+		}
+
+		t.Run("permission", func(t *testing.T) {
+			serv(t, "permission", 1, "user15", "big_test_private_1", unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{OwnerName: "user15", Name: "big_test_private_1"}).ID)
+		})
+		t.Run("read_only_key", func(t *testing.T) {
+			pub, _, err := ed25519.GenerateKey(rand.Reader)
+			require.NoError(t, err)
+			sshPub, err := ssh.NewPublicKey(pub)
+			require.NoError(t, err)
+			key, err := asymkey_model.AddDeployKey(audit_model.WithCLI(t.Context()), 1, "audit-read-only", string(ssh.MarshalAuthorizedKey(sshPub)), true, 0)
+			require.NoError(t, err)
+			serv(t, "read_only_key", key.KeyID, "user2", "repo1", 1)
+		})
+		t.Run("size_lock", func(t *testing.T) {
+			defer resetPersonalRepoMode(t)
+			lockPersonalRepos(t, 2, true)
+			serv(t, "size_lock", 1, "user2", "repo1", 1)
+		})
+	})
 }
