@@ -245,14 +245,14 @@ func Changes(before, after map[string]any) map[string]any {
 }
 
 // URL is raw without its user info, query and fragment, so that no value they carry is recorded; "" when raw doesn't
-// parse.
+// parse. Of an opaque URI (scheme:anything) only the scheme is kept.
 func URL(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return ""
 	}
 	if u.Opaque != "" {
-		return u.Scheme + ":" + u.Opaque
+		return u.Scheme + ":"
 	}
 	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
 }

@@ -23,7 +23,7 @@ func TestAuditOAuth2AppRedirectURIs(t *testing.T) {
 
 	app, err := auth_model.CreateOAuth2Application(ctx, auth_model.CreateOAuth2ApplicationOptions{
 		Name: "s2", UserID: 2,
-		RedirectURIs: []string{"https://u:p@example.com/cb?code=x#frag", "::bad", "http://localhost:8080/a/b?x=1"},
+		RedirectURIs: []string{"https://u:p@example.com/cb?code=x#frag", "::bad", "http://localhost:8080/a/b?x=1", "myapp:user:secret@host"},
 	})
 	require.NoError(t, err)
 	e := &audit_model.Entry{}
@@ -32,11 +32,12 @@ func TestAuditOAuth2AppRedirectURIs(t *testing.T) {
 	require.True(t, has)
 	data := map[string]any{}
 	require.NoError(t, json.Unmarshal([]byte(e.Data), &data))
-	assert.Equal(t, []any{"https://example.com/cb", "http://localhost:8080/a/b"}, data["redirect_uris"])
+	assert.Equal(t, []any{"https://example.com/cb", "http://localhost:8080/a/b", "myapp:"}, data["redirect_uris"])
 	assert.NotContains(t, e.Data, "u:p")
+	assert.NotContains(t, e.Data, "secret")
 	assert.NotContains(t, e.Data, "::bad")
 
 	assert.Equal(t, "https://issuer.example.org/x", audit_model.URL("https://user:pw@issuer.example.org/x?q=1#f"))
 	assert.Empty(t, audit_model.URL("::bad"))
-	assert.Equal(t, "urn:forgejo:authorized-integrations:actions", audit_model.URL("urn:forgejo:authorized-integrations:actions"))
+	assert.Equal(t, "myapp:", audit_model.URL("myapp:user:secret@host"))
 }

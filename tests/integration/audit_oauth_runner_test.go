@@ -16,6 +16,7 @@ import (
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
@@ -267,6 +268,13 @@ func TestAuditRunnerWeb(t *testing.T) {
 	assert.Equal(t, token.ID, e.TargetID)
 	assertNoSecretIn(t, since, token.Token)
 
+	// a view while a token is active issues none (Q2)
+	apiToken := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteRepository)
+	since = auditMaxID(t)
+	session.MakeRequest(t, NewRequest(t, "GET", base), http.StatusOK)
+	MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1/actions/runners/registration-token").AddTokenAuth(apiToken), http.StatusOK)
+	assert.Empty(t, auditSince(t, since))
+
 	since = auditMaxID(t)
 	session.MakeRequest(t, NewRequest(t, "POST", fmt.Sprintf("%s/%d/delete", base, runner.ID)), http.StatusOK)
 	assert.Equal(t, runner.ID, credentialOne(t, since, "credential.runner.deleted").TargetID)
@@ -282,15 +290,16 @@ func TestAuditRunnerAPIAndPrivate(t *testing.T) {
 	require.NoError(t, err)
 	_, err = db.GetEngine(t.Context()).Exec("UPDATE repository SET group_id = ? WHERE id = 3", group.ID)
 	require.NoError(t, err)
+	require.NoError(t, db.Insert(t.Context(), &repo_model.RepoUnit{RepoID: 3, Type: unit.TypeActions}))
 	since := auditMaxID(t)
-	inProject := &actions_model.ActionRunner{UUID: "audit-in-project", Name: "in-project", RepoID: 3}
-	require.NoError(t, actions_model.CreateRunner(asActor(t, 2, "user2"), inProject))
+	var inProject api.RegisterRunnerResponse
+	DecodeJSON(t, MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repositories/3/actions/runners", &api.RegisterRunnerOptions{Name: "in-project"}).
+		AddTokenAuth(token), http.StatusCreated), &inProject)
 	e := credentialOne(t, since, "credential.runner.registered")
 	assert.EqualValues(t, 3, e.OwnerID)
 	assert.Equal(t, group.ID, e.GroupID)
 	assert.EqualValues(t, 3, e.RepoID)
 
-	// API
 	since = auditMaxID(t)
 	var created api.RegisterRunnerResponse
 	DecodeJSON(t, MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/repo1/actions/runners", &api.RegisterRunnerOptions{Name: "api-runner"}).
@@ -349,6 +358,12 @@ func TestAuditRunnerRPC(t *testing.T) {
 			assert.EqualValues(t, 1, e.RepoID)
 			assert.Equal(t, []any{"ubuntu", "docker"}, auditData(t, e)["labels"])
 			assertNoSecretIn(t, since, regToken, runner.token)
+
+			// labels and version a runner reports are not recorded (S5)
+			since = auditMaxID(t)
+			_, err := runner.client.runnerServiceClient.Declare(t.Context(), connect.NewRequest(&runnerv1.DeclareRequest{Version: "v2", Labels: []string{"other"}}))
+			require.NoError(t, err)
+			assert.Empty(t, auditSince(t, since))
 		})
 
 		t.Run("ambiguous client IP", func(t *testing.T) {
@@ -438,6 +453,24 @@ func TestAuditRunnerCleanup(t *testing.T) {
 	e := credentialOne(t, since, "credential.runner.deleted")
 	assert.EqualValues(t, 10000008, e.TargetID)
 	assert.Equal(t, "ephemeral", auditData(t, e)["reason"])
+
+	// an organization's ephemeral runner that picked a task of a deleted repository (Q6)
+	_, err = db.GetEngine(t.Context()).Exec("UPDATE action_task SET runner_id = 10000013 WHERE id = 10055")
+	require.NoError(t, err)
+	since = auditMaxID(t)
+	require.NoError(t, actions_service.CleanupEphemeralRunnersByPickedTaskOfRepo(asActor(t, 2, "user2"), 64))
+	var org *audit_model.Entry
+	for _, e := range auditActions(t, since, "credential.runner.deleted") {
+		if e.TargetID == 10000013 {
+			org = e
+		}
+	}
+	require.NotNil(t, org)
+	assert.EqualValues(t, 3, org.OwnerID)
+	data := auditData(t, org)
+	assert.Equal(t, "ephemeral", data["reason"])
+	assert.Equal(t, "org", data["level"])
+	unittest.AssertNotExistsBean(t, &actions_model.ActionRunner{ID: 10000013})
 }
 
 func TestAuditOAuthRunnerFailClosed(t *testing.T) {
