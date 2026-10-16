@@ -4,6 +4,7 @@
 package repo
 
 import (
+	gocontext "context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -239,7 +240,8 @@ func Migrate(ctx *context.APIContext) {
 		}
 
 		if repo != nil {
-			if errDelete := repo_service.DeleteRepositoryDirectly(ctx, repo.ID, repo_service.DeleteRepositoryOpts{}); errDelete != nil {
+			// not cancelled with the request: a dropped client must not leave the being-migrated repository behind
+			if errDelete := repo_service.DeleteRepositoryDirectly(gocontext.WithoutCancel(ctx), repo.ID, repo_service.DeleteRepositoryOpts{}); errDelete != nil {
 				log.Error("DeleteRepository: %v", errDelete)
 			}
 		}
@@ -259,8 +261,8 @@ func Migrate(ctx *context.APIContext) {
 			HasWiki:     &opts.Wiki,
 		}
 
-		if err = updateRepoUnits(ctx, repoOwner.Name, repo, repoOpt); err != nil {
-			log.Error("Failed to update units on %s/%s repo. %w", repoOwner.Name, form.RepoName, err)
+		if unitsErr := updateRepoUnits(ctx, repoOwner.Name, repo, repoOpt); unitsErr != nil { // not err: that would delete the migrated repository
+			log.Error("Failed to update units on %s/%s repo. %v", repoOwner.Name, form.RepoName, unitsErr)
 		}
 	}
 

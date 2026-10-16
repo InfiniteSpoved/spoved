@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -235,6 +236,15 @@ func TestAPIRepoMigrateProject(t *testing.T) {
 			post(t, publicOnly, api.MigrateRepoOptions{RepoName: "apirestricted", Project: project}, http.StatusForbidden)
 		}
 		unittest.AssertNotExistsBean(t, &repo_model.Repository{LowerName: "apirestricted"})
+		// a token limited to specific repositories
+		session.MakeRequest(t, NewRequestWithURLValues(t, "POST", "/user/settings/keys/tokens/new", url.Values{
+			"name": {"migrate-limited"}, "resource": {"repo-specific"}, "scope": {"write:repository"}, "selected_repo": {"org3/proj/pub"},
+		}), http.StatusSeeOther)
+		limited := assertAccessToken(t, session)
+		for _, project := range []string{"proj", "nosuch"} {
+			post(t, limited, api.MigrateRepoOptions{RepoName: "apirestricted2", Project: project}, http.StatusForbidden)
+		}
+		unittest.AssertNotExistsBean(t, &repo_model.Repository{LowerName: "apirestricted2"})
 		// without a project: as before
 		post(t, publicOnly, api.MigrateRepoOptions{RepoName: "apirestricted"}, http.StatusCreated)
 	})
@@ -249,13 +259,18 @@ func TestAPIRepoMigrateProject(t *testing.T) {
 		defer test.MockVariableValueWithReset(&setting.Migrations.AllowUnencrypted, true, func() { require.NoError(t, allowlist.Init()) })()
 		gone := httptest.NewServer(http.NotFoundHandler()) // passes the address checks, the clone fails after the repository was created
 		defer gone.Close()
-		resp := NewRequestWithJSON(t, "POST", "/api/v1/repos/migrate", &api.MigrateRepoOptions{
-			CloneAddr: gone.URL + "/org/repo.git", RepoOwner: "org3", RepoName: "apifail", Project: "proj",
-		}).AddTokenAuth(token)
-		assert.NotEqual(t, http.StatusCreated, MakeRequest(t, resp, NoExpectedStatus).Code)
-		unittest.AssertNotExistsBean(t, &repo_model.Repository{LowerName: "apifail"})
-		_, err := os.Stat(filepath.Join(setting.RepoRootPath, "org3", "proj", "apifail.git"))
-		assert.True(t, os.IsNotExist(err))
+		for _, c := range []struct{ name, project, dir string }{
+			{"apifail", "proj", filepath.Join("org3", "proj", "apifail.git")},
+			{"apifailroot", "", filepath.Join("org3", "apifailroot.git")},
+		} {
+			resp := NewRequestWithJSON(t, "POST", "/api/v1/repos/migrate", &api.MigrateRepoOptions{
+				CloneAddr: gone.URL + "/org/repo.git", RepoOwner: "org3", RepoName: c.name, Project: c.project,
+			}).AddTokenAuth(token)
+			assert.NotEqual(t, http.StatusCreated, MakeRequest(t, resp, NoExpectedStatus).Code)
+			unittest.AssertNotExistsBean(t, &repo_model.Repository{LowerName: c.name})
+			_, err := os.Stat(filepath.Join(setting.RepoRootPath, c.dir))
+			assert.True(t, os.IsNotExist(err), c.dir)
+		}
 		unittest.CheckConsistencyFor(t, &repo_model.Repository{})
 	})
 }
