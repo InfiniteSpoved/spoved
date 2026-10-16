@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -23,6 +24,7 @@ import (
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
+	packages_model "forgejo.org/models/packages"
 	"forgejo.org/models/perm"
 	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
@@ -34,6 +36,7 @@ import (
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/private"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/storage"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
@@ -257,6 +260,17 @@ func TestAuditGitPush(t *testing.T) {
 			assert.EqualValues(t, 0, data["deleted_count"])
 			assert.Nil(t, data["trigger"])
 			assertNoSecrets(t, since, token)
+		})
+
+		t.Run("inherited sudo key does not survive", func(t *testing.T) {
+			t.Setenv("GITEA_AUDIT_SUDO_BY", "1") // the git process inherits the server's environment
+			commitFile(t, dir, "inherited.txt", 10)
+			since := auditMaxID(t)
+			doGitPushTestRepository(dir, "origin", "feature")(t)
+			e := auditActivity(t, since, "activity.git.push")
+			assert.Zero(t, e.SudoByID)
+			assert.Equal(t, tok.ID, e.CredentialID)
+			assert.EqualValues(t, 2, e.ActorID)
 		})
 
 		t.Run("force push", func(t *testing.T) {
@@ -586,6 +600,15 @@ func TestAuditDownloads(t *testing.T) {
 		download(t, NewRequest(t, "GET", "/attachments/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11").AddTokenAuth(token), "attachment", "1")
 	})
 
+	t.Run("release asset", func(t *testing.T) {
+		att, err := repo_model.GetAttachmentByUUID(t.Context(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a19")
+		require.NoError(t, err)
+		_, err = storage.Attachments.Save(att.RelativePath(), strings.NewReader("release asset"), -1)
+		require.NoError(t, err)
+		e := download(t, NewRequest(t, "GET", "/user2/repo1/releases/download/v1.1/"+att.Name).AddTokenAuth(token), "release_asset", strconv.FormatInt(att.ID, 10))
+		assert.EqualValues(t, 13, auditData(t, e)["bytes"])
+	})
+
 	t.Run("lfs", func(t *testing.T) {
 		content := []byte("audit lfs content")
 		repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
@@ -656,7 +679,7 @@ func TestAuditAPIReads(t *testing.T) {
 	audit_model.ResetActivity()
 	since = auditMaxID(t)
 	for range 3 {
-		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo2/issues/99999").AddTokenAuth(token), http.StatusNotFound)
+		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo2/branches/no-such-branch").AddTokenAuth(token), http.StatusNotFound)
 	}
 	assert.Len(t, auditActions(t, since, "activity.api.read"), 1)
 	audit_model.FlushAggregated(t.Context(), true)
@@ -700,6 +723,33 @@ func TestAuditUploads(t *testing.T) {
 		e := auditActivity(t, since, "activity.api.write")
 		assert.EqualValues(t, 5, auditData(t, e)["bytes"])
 		assert.Empty(t, auditActions(t, since, "activity.upload"))
+	})
+
+	t.Run("web attachment", func(t *testing.T) {
+		session := loginUser(t, "user2")
+		since := auditMaxID(t)
+		createAttachment(t, session, "user2/repo1", "image.png", generateImg(), http.StatusOK)
+		e := auditActivity(t, since, "activity.upload")
+		data := auditData(t, e)
+		assert.Equal(t, "attachment", data["kind"])
+		assert.Equal(t, "create", data["op"])
+		assert.Positive(t, data["bytes"])
+		assert.Equal(t, audit_model.CredentialSession, e.CredentialType)
+		assert.EqualValues(t, 1, e.RepoID)
+	})
+
+	t.Run("web package delete targets the owner", func(t *testing.T) {
+		session := loginUser(t, "user2")
+		pv, err := packages_model.GetVersionByNameAndVersion(t.Context(), 2, packages_model.TypeGeneric, "audit", "1.0")
+		require.NoError(t, err)
+		since := auditMaxID(t)
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/-/packages/generic/audit/1.0/settings", map[string]string{"action": "delete"}), http.StatusSeeOther)
+		e := auditActivity(t, since, "activity.upload")
+		assert.Equal(t, "package", auditData(t, e)["kind"])
+		assert.Equal(t, "delete", auditData(t, e)["op"])
+		assert.EqualValues(t, 2, e.OwnerID)
+		assert.Equal(t, "user2", e.TargetName)
+		assert.Equal(t, strconv.FormatInt(pv.ID, 10), auditData(t, e)["object"])
 	})
 
 	t.Run("web release", func(t *testing.T) {
@@ -755,6 +805,14 @@ func TestAuditGitReadHTTP(t *testing.T) {
 		}
 		audit_model.FlushAggregated(t.Context(), true)
 		assert.EqualValues(t, 2, auditData(t, auditActivity(t, since, "activity.git.read.aggregated"))["count"])
+
+		// git over HTTP takes no session, so a password clone is a credential read: recorded without LOG_READS
+		req := NewRequestWithBody(t, "POST", "/user2/repo1.git/git-upload-pack", strings.NewReader("0000"))
+		req.Header.Set("Content-Type", "application/x-git-upload-pack-request")
+		req.SetBasicAuth("user2", userPassword)
+		since = auditMaxID(t)
+		MakeRequest(t, req, http.StatusOK)
+		assert.Equal(t, audit_model.CredentialPassword, auditActivity(t, since, "activity.git.read").CredentialType)
 
 		// anonymous clone of a public repository: nothing
 		since = auditMaxID(t)

@@ -519,7 +519,7 @@ func PackageSettingsPost(ctx *context.Context) {
 			log.Error("Error deleting package: %v", err)
 			ctx.Flash.Error(ctx.Tr("packages.settings.delete.error"))
 		} else {
-			common.RecordUpload(ctx.Base, nil, "package", "delete", strconv.FormatInt(ctx.Package.Descriptor.Version.ID, 10), -1)
+			common.RecordUpload(ctx.Base, nil, ctx.Package.Owner, "package", "delete", strconv.FormatInt(ctx.Package.Descriptor.Version.ID, 10), -1)
 			ctx.Flash.Success(ctx.Tr("packages.settings.delete.success"))
 		}
 

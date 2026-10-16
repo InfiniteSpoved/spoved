@@ -398,7 +398,7 @@ func UploadHandler(ctx *context.Context) {
 	}
 
 	writeStatus(ctx, http.StatusOK)
-	common.RecordUpload(ctx.Base, repository, "lfs", "create", p.Oid, p.Size)
+	common.RecordUpload(ctx.Base, repository, nil, "lfs", "create", p.Oid, p.Size)
 }
 
 // VerifyHandler verify oid and its size from the content store

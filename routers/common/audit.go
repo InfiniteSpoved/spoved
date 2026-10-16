@@ -279,8 +279,8 @@ func RecordDownload(ctx *context.Base, repo *repo_model.Repository, kind, object
 
 // RecordUpload records, after it succeeded, an upload that no API route record covers (activity.upload): kind is lfs,
 // attachment, release or package, op create, update or delete, bytes the size (-1: not known). Nothing for an
-// anonymous request or an error. repo may be nil (package, unlinked attachment): the target is then the actor.
-func RecordUpload(ctx *context.Base, repo *repo_model.Repository, kind, op, object string, bytes int64) {
+// anonymous request or an error. The target is repo, else owner (a package), else the actor.
+func RecordUpload(ctx *context.Base, repo *repo_model.Repository, owner *user_model.User, kind, op, object string, bytes int64) {
 	a := audit_model.ActorFromContext(ctx)
 	if a == nil || a.Type == audit_model.ActorAnonymous || ctx.Resp.WrittenStatus() >= http.StatusBadRequest {
 		return
@@ -296,6 +296,8 @@ func RecordUpload(ctx *context.Base, repo *repo_model.Repository, kind, op, obje
 	switch {
 	case repo != nil:
 		ev.OwnerID, ev.GroupID, ev.RepoID, ev.TargetID, ev.TargetName = repo.OwnerID, repo.GroupID, repo.ID, repo.ID, repo.FullName()
+	case owner != nil:
+		ev.OwnerID, ev.TargetID, ev.TargetName = owner.ID, owner.ID, owner.Name
 	case a.ID != 0:
 		ev.OwnerID, ev.TargetID, ev.TargetName = a.ID, a.ID, a.Name
 	default:
