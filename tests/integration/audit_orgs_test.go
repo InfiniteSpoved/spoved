@@ -210,11 +210,12 @@ func TestAuditAdminRefusesOrgEdit(t *testing.T) {
 	assert.False(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3}).ProhibitLogin)
 
 	// a site admin sets an organization's limits on its settings page
+	limit := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3}).MaxRepoCreation
 	form := getOrgSettingsFormData(t, session, "org3")
 	form["email"], form["max_repo_creation"] = "org3@example.com", "7"
 	session.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/settings", form), http.StatusSeeOther)
 	data := auditData(t, orgOne(t, since, "org.organization.updated"))
-	assert.EqualValues(t, -1, data["before"].(map[string]any)["max_repo_creation"])
+	assert.EqualValues(t, limit, data["before"].(map[string]any)["max_repo_creation"])
 	assert.EqualValues(t, 7, data["after"].(map[string]any)["max_repo_creation"])
 }
 
