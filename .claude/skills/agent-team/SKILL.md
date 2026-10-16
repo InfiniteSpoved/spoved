@@ -344,8 +344,10 @@ names, and check the existing code the design reuses.
 - PRs that each pass CI can still break develop together (#166). With one PR at a
   time and CI on the merged head, that can't recur unnoticed.
 - The auto-mode classifier blocked send_message, add_repo, archive_session,
-  merges and post-merge steps at times. `.claude/settings.json` allows the
-  routine ones. Anything still blocked goes to the supervisor, never around it.
+  merges and post-merge steps at times. `.claude/settings.json` pre-approves only
+  codemap and read-only session tools, so remote-session and GitHub write tools
+  get permission prompts or classifier checks. Anything still blocked goes to the
+  supervisor, never around it.
 - Never call `require` or `t.Context()` inside `assert.Eventually`/`Never`
   conditions: they run in a goroutine that can outlive the subtest (CLAUDE.md
   Learnings, #421).
