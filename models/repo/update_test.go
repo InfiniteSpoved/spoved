@@ -16,13 +16,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCheckCreateRepository(t *testing.T) {
+func TestCheckCreateRepositoryInGroupRoot(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 
 	t.Run("Success", func(t *testing.T) {
 		user := &user_model.User{MaxRepoCreation: 1}
 
-		err := repo_model.CheckCreateRepository(db.DefaultContext, user, user, "testName")
+		err := repo_model.CheckCreateRepositoryInGroup(db.DefaultContext, user, user, 0, "testName")
 
 		require.NoError(t, err)
 	})
@@ -30,7 +30,7 @@ func TestCheckCreateRepository(t *testing.T) {
 	t.Run("AdminIgnoresRepoLimit", func(t *testing.T) {
 		user := &user_model.User{MaxRepoCreation: 0, IsAdmin: true}
 
-		err := repo_model.CheckCreateRepository(db.DefaultContext, user, user, "testName")
+		err := repo_model.CheckCreateRepositoryInGroup(db.DefaultContext, user, user, 0, "testName")
 
 		require.NoError(t, err)
 	})
@@ -38,7 +38,7 @@ func TestCheckCreateRepository(t *testing.T) {
 	t.Run("RepoLimitReached", func(t *testing.T) {
 		user := &user_model.User{MaxRepoCreation: 0}
 
-		err := repo_model.CheckCreateRepository(db.DefaultContext, user, user, "testName")
+		err := repo_model.CheckCreateRepositoryInGroup(db.DefaultContext, user, user, 0, "testName")
 
 		require.ErrorIs(t, err, repo_model.ErrReachLimitOfRepo{})
 	})
@@ -46,7 +46,7 @@ func TestCheckCreateRepository(t *testing.T) {
 	t.Run("UnusableRepoName", func(t *testing.T) {
 		user := &user_model.User{MaxRepoCreation: 1}
 
-		err := repo_model.CheckCreateRepository(db.DefaultContext, user, user, "testName/")
+		err := repo_model.CheckCreateRepositoryInGroup(db.DefaultContext, user, user, 0, "testName/")
 
 		require.ErrorIs(t, err, db.ErrNameCharsNotAllowed{Name: "testName/"})
 	})
@@ -55,7 +55,7 @@ func TestCheckCreateRepository(t *testing.T) {
 		unittest.AssertExistsIf(t, true, &repo_model.Repository{Name: "repo1"})
 		user := &user_model.User{ID: 2, MaxRepoCreation: 2} // the owner of repo1
 
-		err := repo_model.CheckCreateRepository(db.DefaultContext, user, user, "repo1")
+		err := repo_model.CheckCreateRepositoryInGroup(db.DefaultContext, user, user, 0, "repo1")
 
 		require.ErrorIs(t, err, repo_model.ErrRepoAlreadyExist{Name: "repo1"})
 	})
@@ -67,7 +67,7 @@ func TestCheckCreateRepository(t *testing.T) {
 		exists, _ := util.IsExist(repo_model.RepoPath("user2", "repo1"))
 		assert.True(t, exists)
 
-		err := repo_model.CheckCreateRepository(db.DefaultContext, user, user, "repo1")
+		err := repo_model.CheckCreateRepositoryInGroup(db.DefaultContext, user, user, 0, "repo1")
 
 		require.ErrorIs(t, err, repo_model.ErrRepoAlreadyExist{Name: "repo1", Uname: "user2"})
 	})

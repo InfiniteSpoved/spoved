@@ -120,13 +120,8 @@ func CheckRepoCreationLimit(ctx context.Context, doer, u *user_model.User) error
 	return nil
 }
 
-// CheckCreateRepository check if a repository can be created
-func CheckCreateRepository(ctx context.Context, doer, u *user_model.User, name string) error {
-	return CheckCreateRepositoryInGroup(ctx, doer, u, 0, name)
-}
-
-// CheckCreateRepositoryInGroup is CheckCreateRepository for a repository in the project groupID of u (0 = its
-// root); a project that is not u's is ErrRepoGroupNotExist.
+// CheckCreateRepositoryInGroup checks if a repository can be created in the project groupID of u (0 = its root);
+// a project that is not u's is ErrRepoGroupNotExist.
 func CheckCreateRepositoryInGroup(ctx context.Context, doer, u *user_model.User, groupID int64, name string) error {
 	groupName := ""
 	if groupID != 0 {
