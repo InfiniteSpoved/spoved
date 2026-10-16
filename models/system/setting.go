@@ -5,7 +5,9 @@ package system
 
 import (
 	"context"
+	"maps"
 	"math"
+	"slices"
 	"sync"
 	"time"
 
@@ -101,11 +103,9 @@ func SetSettings(ctx context.Context, settings map[string]string) error {
 	_ = GetRevision(ctx) // prepare the "revision" key ahead
 	return db.WithTx(ctx, func(ctx context.Context) error {
 		e := db.GetEngine(ctx)
-		keys := make([]string, 0, len(settings))
-		for k := range settings {
-			keys = append(keys, k)
-		}
-		// lock the rows (a no-op update, as GetSettingForUpdate) so that the values read are the ones replaced
+		// lock the rows (a no-op update, as GetSettingForUpdate) so that the values read are the ones replaced; in key
+		// order, so that two calls with overlapping keys can't deadlock
+		keys := slices.Sorted(maps.Keys(settings))
 		for _, k := range keys {
 			if _, err := db.Exec(ctx, "UPDATE system_setting SET version=version WHERE setting_key=?", k); err != nil {
 				return err
