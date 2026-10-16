@@ -89,6 +89,10 @@ func TestAuditTeam(t *testing.T) {
 	assert.Len(t, auditActions(t, since, "org.team.repo_removed"), 1)
 	MakeRequest(t, NewRequest(t, "PUT", "/api/v1/repos/org3/repo5/teams/audit-team").AddTokenAuth(token), http.StatusNoContent)
 	assert.Len(t, auditActions(t, since, "org.team.repo_added"), 2)
+	// the repository's collaboration page
+	MakeRequest(t, NewRequest(t, "PUT", teamURL+"/repos/org3/repo3").AddTokenAuth(token), http.StatusNoContent)
+	session.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/repo3/settings/collaboration/team/delete", map[string]string{"id": fmt.Sprint(created.ID)}), http.StatusOK)
+	assert.Len(t, auditActions(t, since, "org.team.repo_removed"), 2)
 
 	ctx := asActor(t, 2, "user2")
 	team := unittest.AssertExistsAndLoadBean(t, &org_model.Team{ID: created.ID})
@@ -152,6 +156,23 @@ func TestAuditTeamMemberRemovalPaths(t *testing.T) {
 	since = auditMaxID(t)
 	require.NoError(t, user_service.DeleteUser(asActor(t, 1, "user1"), unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8}), true))
 	assert.EqualValues(t, 8, orgOne(t, since, "org.team.member_removed").SubjectUserID)
+}
+
+// TestAuditTrashedOrgMemberRemoved checks that purging a user records leaving the teams of an organization in the trash.
+func TestAuditTrashedOrgMemberRemoved(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	token := getUserToken(t, "user8", auth_model.AccessTokenScopeAll)
+	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/orgs", &api.CreateOrgOption{UserName: "audit-trashed"}).AddTokenAuth(token), http.StatusCreated)
+	org := unittest.AssertExistsAndLoadBean(t, &org_model.Organization{LowerName: "audit-trashed"})
+	ctx := asActor(t, 1, "user1")
+	user1 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	require.NoError(t, org_service.TrashOrganization(ctx, user1, org))
+
+	since := auditMaxID(t)
+	require.NoError(t, user_service.DeleteUser(ctx, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 8}), true))
+	e := orgOne(t, since, "org.team.member_removed")
+	assert.EqualValues(t, 8, e.SubjectUserID)
+	assert.Equal(t, org.ID, e.OwnerID)
 }
 
 func TestAuditTeamFailClosed(t *testing.T) {
