@@ -99,6 +99,8 @@ func TestAggregationOverflow(t *testing.T) {
 	defer audit_model.ResetActivity()
 	defer test.MockVariableValue(&audit_model.AggregateCap, 2)()
 	defer test.MockVariableValue(&audit_model.AggregateOverflowCap, 1)()
+	timeutil.MockSet(time.Now()) // first/last are compared with "now" below: a real clock can cross a second
+	defer timeutil.MockUnset()
 	ctx := audit_model.WithActor(t.Context(), &audit_model.Actor{Type: audit_model.ActorAnonymous, IP: "203.0.113.1"})
 
 	since := maxID(t)
