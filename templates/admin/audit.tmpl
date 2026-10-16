@@ -18,7 +18,16 @@
 			<details class="audit-filters">
 				<summary>{{ctx.Locale.Tr "admin.audit.filters" .FilterCount}}</summary>
 				<form class="ui form" method="get">
-					<input type="hidden" name="category" value="{{.Category}}">
+					<div class="fields">
+						<div class="field">
+							<label for="audit-category">{{ctx.Locale.Tr "admin.audit.category"}}</label>
+							<select id="audit-category" name="category">
+								{{range .CategoryOptions}}
+									<option value="{{.}}"{{if eq $.Category .}} selected{{end}}>{{ctx.Locale.Tr (print "admin.audit.category." .)}}</option>
+								{{end}}
+							</select>
+						</div>
+					</div>
 					{{with .Filter.Get "credential"}}<input type="hidden" name="credential" value="{{.}}">{{end}}
 					<div class="fields">
 						<div class="field">
@@ -142,6 +151,12 @@
 								</td>
 								<td class="audit-event">
 									{{if ctx.Locale.HasKey (print "admin.audit.action." .Action)}}{{if .TargetName}}{{ctx.Locale.Tr (print "admin.audit.action." .Action) .TargetName}}{{else}}{{ctx.Locale.Tr (print "admin.audit.action." .Action)}}{{end}}{{else}}{{.Action}}{{if .TargetName}} · {{.TargetName}}{{end}}{{end}}
+									{{if .AggregatedLink}}
+										<div class="audit-aggregated text grey">
+											{{ctx.Locale.Tr "admin.audit.aggregated" .AggregatedCount .AggregatedFirst .AggregatedLast}}
+											<a href="{{.AggregatedLink}}">{{ctx.Locale.Tr "admin.audit.aggregated_show"}}</a>
+										</div>
+									{{end}}
 									<details class="audit-details">
 										<summary>{{ctx.Locale.Tr "admin.audit.details"}}</summary>
 										<dl>
@@ -161,7 +176,7 @@
 										{{end}}
 									</details>
 								</td>
-								<td class="audit-result">{{if ne .Result "success"}}<span class="ui {{if eq .Result "refused"}}orange{{else}}red{{end}} label">{{ctx.Locale.Tr (print "admin.audit.result." .Result)}}</span>{{end}}</td>
+								<td class="audit-result">{{if eq .Result "success"}}{{ctx.Locale.Tr "admin.audit.result.success"}}{{else}}<span class="ui {{if eq .Result "refused"}}orange{{else}}red{{end}} label">{{ctx.Locale.Tr (print "admin.audit.result." .Result)}}</span>{{end}}</td>
 								<td class="audit-ip">{{.IP}}</td>
 							</tr>
 						{{end}}

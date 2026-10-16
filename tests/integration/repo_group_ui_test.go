@@ -20,6 +20,7 @@ import (
 	user_model "forgejo.org/models/user"
 	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/test"
 	app_context "forgejo.org/services/context"
 	repo_service "forgejo.org/services/repository"
 	"forgejo.org/tests"
@@ -321,6 +322,37 @@ func TestRepoGroupUI(t *testing.T) {
 		resp := owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/tmp/-/settings/delete", map[string]string{"confirm_name": "org3/tmp"}), http.StatusSeeOther)
 		assert.Equal(t, "/org/org3/groups", resp.Header().Get("Location"))
 		assert.False(t, groupExists("tmp"))
+	})
+
+	t.Run("empty project hint", func(t *testing.T) {
+		_, err := repo_model.CreateRepoGroup(ctx, f.org, "hintempty", "")
+		require.NoError(t, err)
+		const hint = `/repo/migrate?org=3&group=`
+		const text = "Or bring one in with"
+		body := owner.MakeRequest(t, NewRequest(t, "GET", "/org3/hintempty"), http.StatusOK).Body.String()
+		assert.Contains(t, body, text)
+		assert.Contains(t, body, hint)
+		body = member.MakeRequest(t, NewRequest(t, "GET", "/org3/hintempty"), http.StatusOK).Body.String()
+		assert.Contains(t, body, "This project has no repositories yet")
+		assert.NotContains(t, body, text, "a member who may not create")
+		assert.NotContains(t, body, hint, "a member who may not create")
+		nonMember.MakeRequest(t, NewRequest(t, "GET", "/org3/hintempty"), http.StatusNotFound)
+
+		defer test.MockVariableValue(&setting.Repository.DisableMigrations, true)()
+		body = owner.MakeRequest(t, NewRequest(t, "GET", "/org3/hintempty"), http.StatusOK).Body.String()
+		assert.NotContains(t, body, text)
+		assert.NotContains(t, body, hint)
+	})
+
+	t.Run("archived organization empty hint", func(t *testing.T) {
+		_, err := db.GetEngine(ctx).Exec("UPDATE `user` SET is_archived = ? WHERE id = ?", true, f.org.ID)
+		require.NoError(t, err)
+		defer func() {
+			_, err := db.GetEngine(ctx).Exec("UPDATE `user` SET is_archived = ? WHERE id = ?", false, f.org.ID)
+			require.NoError(t, err)
+		}()
+		body := owner.MakeRequest(t, NewRequest(t, "GET", "/org3/hintempty"), http.StatusOK).Body.String()
+		assert.NotContains(t, body, "Or bring one in with")
 	})
 
 	t.Run("archived organization", func(t *testing.T) {

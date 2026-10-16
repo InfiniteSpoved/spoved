@@ -375,3 +375,53 @@ func TestAdminAuditPaging(t *testing.T) {
 	}
 	assert.Equal(t, want, got)
 }
+
+func TestAdminAuditUI(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	admin := loginUser(t, "user1")
+	const first, last = 1760648400, 1760648460
+	rows := []*audit_model.Entry{
+		{CreatedUnix: first, Category: "activity", Action: "activity.api.write", Result: "success", ActorType: "user", ActorID: 2, ActorName: "user2", IP: "10.0.0.7"},
+		{CreatedUnix: last + 30, Category: "activity", Action: "activity.api.write.aggregated", Result: "success", ActorType: "user", ActorID: 2, ActorName: "user2", IP: "10.0.0.7",
+			Data: `{"count":12,"first":1760648400,"last":1760648460}`},
+		{CreatedUnix: last + 40, Category: "activity", Action: "activity.api.read", Result: "success", ActorType: "user", ActorID: 2, ActorName: "user2", IP: "10.0.0.8"},
+	}
+	for _, e := range rows {
+		require.NoError(t, db.Insert(t.Context(), e))
+	}
+
+	body := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/audit?category=activity"), http.StatusOK).Body.String()
+	t.Run("categories", func(t *testing.T) {
+		for _, c := range []string{"changes", "signins", "activity", "all", "auth", "credential", "account", "admin", "org", "repo", "audit"} {
+			assert.Contains(t, body, `<option value="`+c+`"`, c)
+		}
+		assert.Contains(t, body, `<option value="activity" selected>`)
+		assert.Equal(t, 1, strings.Count(body, `<option value="activity"`))
+		for _, e := range rows {
+			assert.Contains(t, body, rowID(e.ID))
+		}
+		changes := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/audit"), http.StatusOK).Body.String()
+		assert.NotContains(t, changes, rowID(rows[0].ID), "activity is not in the default tab")
+	})
+
+	t.Run("result", func(t *testing.T) {
+		assert.Regexp(t, `<td class="audit-result">success</td>`, body)
+	})
+
+	t.Run("aggregated", func(t *testing.T) {
+		assert.Equal(t, 1, strings.Count(body, "12 more like this between "), "only the aggregated row is labelled")
+		assert.Contains(t, body, "between 2025-10-16 21:00:00 and 2025-10-16 21:01:00")
+		m := regexp.MustCompile(`<a href="(\?[^"]*action=activity\.api\.write[^"]*)">Show them</a>`).FindStringSubmatch(body)
+		require.NotNil(t, m, body)
+		link := strings.ReplaceAll(m[1], "&amp;", "&")
+		assert.Contains(t, link, "ip=10.0.0.7")
+
+		got := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/audit"+link), http.StatusOK).Body.String()
+		assert.Contains(t, got, rowID(rows[0].ID), "the link lists the base row")
+		assert.NotContains(t, got, rowID(rows[2].ID), "another action and IP is left out")
+	})
+
+	t.Run("time values", func(t *testing.T) {
+		assert.Contains(t, body, "<dt>first</dt><dd>2025-10-16 21:00:00 (1760648400)</dd>")
+	})
+}
