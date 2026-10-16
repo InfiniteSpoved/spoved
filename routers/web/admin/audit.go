@@ -5,6 +5,7 @@ package admin
 
 import (
 	"errors"
+	"html/template"
 	"maps"
 	"math"
 	"net/http"
@@ -45,8 +46,10 @@ type auditRow struct {
 	*audit_model.Entry
 	Time       string
 	SudoByName string
-	Changes    []auditChange
-	Details    map[string]string
+	// Event is the translated action; the target is passed only to a phrase that has a %s for it.
+	Event   template.HTML
+	Changes []auditChange
+	Details map[string]string
 	// AggregatedCount is the number of events folded into an ".aggregated" entry, 0 for any other entry.
 	AggregatedCount                 int64
 	AggregatedFirst, AggregatedLast string
@@ -307,7 +310,15 @@ func Audit(ctx *context.Context) {
 	ctx.Data["TimeZone"] = loc.String()
 	rows := make([]*auditRow, 0, len(entries))
 	for _, e := range entries {
-		rows = append(rows, newAuditRow(e, loc, names))
+		r := newAuditRow(e, loc, names)
+		if ctx.Locale.HasKey("admin.audit.action." + e.Action) {
+			if e.TargetName != "" && strings.Contains(ctx.Locale.TrString("admin.audit.action."+e.Action), "%s") {
+				r.Event = ctx.Locale.Tr("admin.audit.action."+e.Action, e.TargetName)
+			} else {
+				r.Event = ctx.Locale.Tr("admin.audit.action." + e.Action)
+			}
+		}
+		rows = append(rows, r)
 	}
 	ctx.Data["Rows"] = rows
 	if f.Opts.CredentialType != "" && len(rows) > 0 {

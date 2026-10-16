@@ -138,6 +138,17 @@ func TestAdminAuditPage(t *testing.T) {
 		assert.Contains(t, admin.MakeRequest(t, NewRequest(t, "GET", "/admin/repos"), http.StatusOK).Body.String(), "/admin/audit?category=all&repo=user2%2frepo1")
 	})
 
+	t.Run("phrases without a placeholder", func(t *testing.T) {
+		for _, a := range []string{"activity.api.write", "activity.api.write.aggregated", "credential.access_token.created"} {
+			require.NoError(t, db.Insert(t.Context(), &audit_model.Entry{CreatedUnix: 5000, Category: "activity", Action: a, Result: "success", ActorType: "user", ActorID: 2, ActorName: "user2", TargetName: "user2/r1"}))
+		}
+		body := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/audit?category=all"), http.StatusOK).Body.String()
+		assert.Contains(t, body, "API write request")
+		assert.Contains(t, body, "Failed API write requests (aggregated)")
+		assert.Contains(t, body, "Created access token user2/r1")
+		assert.NotContains(t, body, "%!")
+	})
+
 	t.Run("empty", func(t *testing.T) {
 		_, err := db.GetEngine(db.DefaultContext).Exec("DELETE FROM audit_event")
 		require.NoError(t, err)

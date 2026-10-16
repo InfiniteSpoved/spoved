@@ -150,7 +150,7 @@
 									{{if .CredentialID}}<a class="audit-only-this" href="{{$.OnlyLinkBase}}&credential={{.CredentialType}}:{{.CredentialID}}">{{ctx.Locale.Tr "admin.audit.only_this"}}</a>{{end}}
 								</td>
 								<td class="audit-event">
-									{{if ctx.Locale.HasKey (print "admin.audit.action." .Action)}}{{if .TargetName}}{{ctx.Locale.Tr (print "admin.audit.action." .Action) .TargetName}}{{else}}{{ctx.Locale.Tr (print "admin.audit.action." .Action)}}{{end}}{{else}}{{.Action}}{{if .TargetName}} · {{.TargetName}}{{end}}{{end}}
+									{{if .Event}}{{.Event}}{{else}}{{.Action}}{{if .TargetName}} · {{.TargetName}}{{end}}{{end}}
 									{{if .AggregatedLink}}
 										<div class="audit-aggregated text grey">
 											{{ctx.Locale.Tr "admin.audit.aggregated" .AggregatedCount .AggregatedFirst .AggregatedLast}}
