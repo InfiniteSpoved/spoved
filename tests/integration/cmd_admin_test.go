@@ -82,6 +82,15 @@ func Test_Cmd_AdminUser(t *testing.T) {
 	})
 }
 
+func Test_Cmd_AdminChangePasswordOrg(t *testing.T) {
+	onApplicationRun(t, func(*testing.T, *url.URL) {
+		before := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "org3"})
+		_, err := runMainApp("admin", "user", "change-password", "--username", "org3", "--password", "password123!")
+		require.ErrorContains(t, err, "org3 is an organization")
+		assert.Equal(t, before, unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "org3"}))
+	})
+}
+
 func Test_Cmd_AdminFirstUser(t *testing.T) {
 	onApplicationRun(t, func(*testing.T, *url.URL) {
 		for _, testCase := range []struct {

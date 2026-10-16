@@ -283,13 +283,13 @@ func RemoveInviteByID(ctx context.Context, inviteID, teamID int64) error {
 	})
 }
 
-// inviteData is what the audit log keeps of an invite: who it is for, never its token.
+// inviteData is what the audit log keeps of an invite: who it is for (the user, or the address when there is no user),
+// never its token.
 func inviteData(invite *TeamInvite) map[string]any {
-	data := map[string]any{"email": invite.Email}
 	if has, id := invite.InvitedID.Get(); has {
-		data["user_id"] = id
+		return map[string]any{"user_id": id}
 	}
-	return data
+	return map[string]any{"email": invite.Email}
 }
 
 func insertInvite(ctx context.Context, team *Team, invite *TeamInvite) error {

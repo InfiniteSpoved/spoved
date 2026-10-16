@@ -245,7 +245,7 @@ func TestAuditTeamInvite(t *testing.T) {
 	invite, err = org_model.CreateTeamInviteForUser(ctx, user2, user5, team1)
 	require.NoError(t, err)
 	e = orgOne(t, since, "org.team.invite_removed")
-	assert.Equal(t, "expired", auditData(t, e)["reason"])
+	assert.Equal(t, map[string]any{"user_id": float64(5), "reason": "expired"}, auditData(t, e), "a user's invite keeps no email")
 	assert.EqualValues(t, 5, e.SubjectUserID)
 	assert.Len(t, auditActions(t, since, "org.team.invite_created"), 2)
 
