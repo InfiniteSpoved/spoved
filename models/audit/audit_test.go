@@ -138,3 +138,41 @@ func TestRecordTruncatesNamesBeforeIDs(t *testing.T) {
 	assert.Len(t, data["ids"], 1000, "IDs are kept")
 	assert.Less(t, len(data["names"].([]any)), 300, "names are cut first")
 }
+
+func TestRecordCredentialTruncatesSelection(t *testing.T) {
+	ids := make([]int64, 10000) // a selection change too large for one entry
+	for i := range ids {
+		ids[i] = 100000 + int64(i)
+	}
+	e := recordOne(t, audit_model.Event{Action: "credential.org_deploy_key.updated", TargetType: "org_deploy_key", Data: map[string]any{
+		"repos_added": ids, "repos_removed": []int64{1}, "name": "k",
+	}})
+	data := decode(t, e)
+	assert.Equal(t, true, data["truncated"])
+	assert.NotEmpty(t, data["repos_added"])
+	assert.Equal(t, "k", data["name"])
+}
+
+func TestRecordCredentialOnBehalf(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	last := func() map[string]any {
+		e := &audit_model.Entry{}
+		_, err := db.GetEngine(t.Context()).Desc("id").Get(e)
+		require.NoError(t, err)
+		return decode(t, e)
+	}
+	ev := audit_model.Event{Action: "credential.ssh_key.created", TargetType: "ssh_key", SubjectUserID: 2, Data: map[string]any{"name": "k"}}
+
+	admin := audit_model.WithActor(t.Context(), &audit_model.Actor{Type: audit_model.ActorUser, ID: 1})
+	require.NoError(t, audit_model.RecordCredential(admin, ev))
+	assert.Equal(t, true, last()["on_behalf"])
+
+	owner := audit_model.WithActor(t.Context(), &audit_model.Actor{Type: audit_model.ActorUser, ID: 2})
+	ev.Data = map[string]any{"name": "k"}
+	require.NoError(t, audit_model.RecordCredential(owner, ev))
+	assert.NotContains(t, last(), "on_behalf")
+
+	ev.Data = map[string]any{"name": "k"}
+	require.NoError(t, audit_model.RecordCredential(audit_model.WithSystem(t.Context(), "cron:sync_external_users"), ev))
+	assert.NotContains(t, last(), "on_behalf")
+}

@@ -81,6 +81,8 @@ func (key *PublicKey) AuthorizedString() string {
 	return AuthorizedStringForKey(key)
 }
 
+// addKey saves the key. Callers append it to the authorized_keys file after their transaction commits: a line for a
+// rolled-back row could match a later key that reuses its ID.
 func addKey(ctx context.Context, key *PublicKey) (err error) {
 	if len(key.Fingerprint) == 0 {
 		key.Fingerprint, err = CalcFingerprint(key.Content)
@@ -88,13 +90,7 @@ func addKey(ctx context.Context, key *PublicKey) (err error) {
 			return err
 		}
 	}
-
-	// Save SSH key.
-	if err = db.Insert(ctx, key); err != nil {
-		return err
-	}
-
-	return appendAuthorizedKeysToFile(key)
+	return db.Insert(ctx, key)
 }
 
 // AddPublicKey adds new public key to database and authorized_keys file.
@@ -139,8 +135,13 @@ func AddPublicKey(ctx context.Context, ownerID int64, name, content string, auth
 	if err = addKey(ctx, key); err != nil {
 		return nil, fmt.Errorf("addKey: %w", err)
 	}
-
-	return key, committer.Commit()
+	if err := RecordPublicKey(ctx, "credential.ssh_key.created", key, nil); err != nil {
+		return nil, err
+	}
+	if err := committer.Commit(); err != nil {
+		return nil, err
+	}
+	return key, appendAuthorizedKeysToFile(key)
 }
 
 // GetPublicKeyByID returns public key by given ID.
@@ -314,6 +315,10 @@ func deleteKeysMarkedForDeletion(ctx context.Context, keys []string) (bool, erro
 		if _, err = db.DeleteByID[PublicKey](ctx, key.ID); err != nil {
 			log.Error("DeleteByID[PublicKey]: %v", err)
 			continue
+		}
+		// a delete that can't be recorded rolls back the whole batch
+		if err := RecordPublicKey(ctx, "credential.ssh_key.deleted", key, map[string]any{"reason": "login_source_sync"}); err != nil {
+			return false, err
 		}
 		sshKeysNeedUpdate = true
 	}

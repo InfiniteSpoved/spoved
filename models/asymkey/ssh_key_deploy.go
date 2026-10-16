@@ -130,7 +130,7 @@ func AddDeployKey(ctx context.Context, repoID int64, name, content string, readO
 	}
 	defer committer.Close()
 
-	pkey, err := getOrAddDeployPublicKey(ctx, name, content, fingerprint, accessMode)
+	pkey, added, err := getOrAddDeployPublicKey(ctx, name, content, fingerprint, accessMode)
 	if err != nil {
 		return nil, err
 	}
@@ -139,21 +139,30 @@ func AddDeployKey(ctx context.Context, repoID int64, name, content string, readO
 	if err != nil {
 		return nil, err
 	}
-
-	return key, committer.Commit()
+	if err := RecordDeployKey(ctx, "credential.deploy_key.created", key); err != nil {
+		return nil, err
+	}
+	if err := committer.Commit(); err != nil {
+		return nil, err
+	}
+	if added {
+		return key, appendAuthorizedKeysToFile(pkey)
+	}
+	return key, nil
 }
 
 // getOrAddDeployPublicKey returns the deploy public key with the fingerprint, shared by repository and organization
-// deploy keys, and adds it if it doesn't exist. A key of another type (a user's) is refused.
-func getOrAddDeployPublicKey(ctx context.Context, name, content, fingerprint string, mode perm.AccessMode) (*PublicKey, error) {
+// deploy keys, and adds it if it doesn't exist, which it reports so that the caller appends it to the authorized_keys
+// file after its commit. A key of another type (a user's) is refused.
+func getOrAddDeployPublicKey(ctx context.Context, name, content, fingerprint string, mode perm.AccessMode) (*PublicKey, bool, error) {
 	pkey, exist, err := db.Get[PublicKey](ctx, builder.Eq{"fingerprint": fingerprint})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	} else if exist {
 		if pkey.Type != KeyTypeDeploy {
-			return nil, ErrKeyAlreadyExist{0, fingerprint, ""}
+			return nil, false, ErrKeyAlreadyExist{0, fingerprint, ""}
 		}
-		return pkey, nil
+		return pkey, false, nil
 	}
 	// First time use this deploy key.
 	pkey = &PublicKey{
@@ -164,9 +173,9 @@ func getOrAddDeployPublicKey(ctx context.Context, name, content, fingerprint str
 		Name:        name,
 	}
 	if err = addKey(ctx, pkey); err != nil {
-		return nil, fmt.Errorf("addKey: %w", err)
+		return nil, false, fmt.Errorf("addKey: %w", err)
 	}
-	return pkey, nil
+	return pkey, true, nil
 }
 
 // GetDeployKeyByID returns deploy key by given ID.
