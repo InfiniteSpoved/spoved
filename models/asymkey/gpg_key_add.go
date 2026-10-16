@@ -161,6 +161,9 @@ func AddGPGKey(ctx context.Context, ownerID int64, content, token, signature str
 		if err = addGPGKey(ctx, key, content); err != nil {
 			return nil, err
 		}
+		if err := recordGPGKey(ctx, "credential.gpg_key.created", key); err != nil {
+			return nil, err
+		}
 		keys = append(keys, key)
 	}
 	return keys, committer.Commit()
