@@ -4,11 +4,13 @@
 package ssh
 
 import (
+	"context"
 	"io"
 	"net"
 	"os/exec"
 	"slices"
 	"testing"
+	"time"
 
 	"forgejo.org/modules/hostmatcher"
 	"forgejo.org/modules/ratelimit"
@@ -159,4 +161,71 @@ func TestCountAuthFailures(t *testing.T) {
 	for range 5 {
 		assert.True(t, countAuthFailures(newStubContext("192.0.2.1"), accept))
 	}
+}
+
+// drainRefusals empties the queue of refused connections and returns what it held.
+func drainRefusals() (got []refusal) {
+	for {
+		select {
+		case r := <-refusals:
+			got = append(got, r)
+		default:
+			return got
+		}
+	}
+}
+
+// C2: a refused connection is queued for the audit log, never recorded by the code that closes it
+func TestConnRefusalsQueued(t *testing.T) {
+	sshLimits(t, map[string]setting.RateLimitClass{
+		ratelimit.SSHConnect: {AuthenticatedRate: 0.0001, AuthenticatedBurst: 1},
+		ratelimit.Auth:       {AuthenticatedRate: 0.0001, AuthenticatedBurst: 1},
+	})
+	drainRefusals()
+	t.Cleanup(func() { drainRefusals() })
+
+	for range 2 {
+		server, client := connection("198.51.100.1")
+		go io.Copy(io.Discard, client)
+		connRateLimit(nil, server)
+		client.Close()
+	}
+	assert.Equal(t, []refusal{{ratelimit.SSHConnect, "198.51.100.1:4000"}}, drainRefusals())
+
+	assert.False(t, countAuthFailures(newStubContext("198.51.100.2"), func() bool { return true }) && countAuthFailures(newStubContext("198.51.100.2"), func() bool { return true }))
+	assert.Equal(t, []refusal{{ratelimit.Auth, "198.51.100.2:4000"}}, drainRefusals())
+}
+
+// C2: with nobody reading, a flood of refusals never blocks the caller
+func TestQueueRefusalNeverBlocks(t *testing.T) {
+	drainRefusals()
+	t.Cleanup(func() { drainRefusals() })
+	done := make(chan struct{})
+	go func() {
+		for range 10 * cap(refusals) {
+			queueRefusal(ratelimit.SSHConnect, "198.51.100.1:4000")
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("queueRefusal blocked")
+	}
+	assert.Len(t, drainRefusals(), cap(refusals))
+}
+
+// C2: the worker hands queued refusals to the recorder until it is stopped
+func TestRecordRefusals(t *testing.T) {
+	drainRefusals()
+	got := make(chan refusal, 1)
+	t.Cleanup(test.MockVariableValue(&recordRefusal, func(_ context.Context, class, addr string) { got <- refusal{class, addr} }))
+	ctx, cancel := context.WithCancel(t.Context())
+	stopped := make(chan struct{})
+	go func() { recordRefusals(ctx); close(stopped) }()
+
+	queueRefusal(ratelimit.Auth, "198.51.100.3:4000")
+	assert.Equal(t, refusal{ratelimit.Auth, "198.51.100.3:4000"}, <-got)
+	cancel()
+	<-stopped
 }

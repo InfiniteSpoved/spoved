@@ -5,12 +5,14 @@ package auth
 
 import (
 	"context"
+	"net/netip"
 	"strconv"
 
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/organization"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/timeutil"
 )
 
@@ -63,6 +65,17 @@ func RecordRefusal(ctx context.Context, reason string, ownerID, subject int64, k
 		Action: "auth.refused", Result: audit_model.ResultRefused, OwnerID: ownerID, SubjectUserID: subject,
 		TargetType: "refusal", TargetID: subject, Data: data,
 	}, reason+"|"+key)
+}
+
+// RecordConnectionRefused records, aggregated per rate limit class and client address (an IPv6 /64), that the rate
+// limiter closed a connection of remoteAddr ("host:port") before any request: there is no request, so the actor is an
+// anonymous one with that address. It writes to the database, so callers outside a request run it off their hot path.
+func RecordConnectionRefused(ctx context.Context, class, remoteAddr string) {
+	a := &audit_model.Actor{Type: audit_model.ActorAnonymous, IP: "invalid"}
+	if ap, err := netip.ParseAddrPort(remoteAddr); err == nil {
+		a.IP = ap.Addr().Unmap().WithZone("").String()
+	}
+	RecordRefusal(audit_model.WithActor(ctx, a), "rate_limit", 0, 0, "conn|"+class+"|"+ratelimit.IPKey(remoteAddr), map[string]any{"class": class})
 }
 
 // RecordTwoFactorBlocked records once per user, organization and UTC day that the organization's two-factor

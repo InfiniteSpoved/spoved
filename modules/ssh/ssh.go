@@ -30,6 +30,7 @@ import (
 	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
+	auth_service "forgejo.org/services/auth"
 
 	"github.com/gliderlabs/ssh"
 	gossh "golang.org/x/crypto/ssh"
@@ -190,6 +191,35 @@ func sessionHandler(session ssh.Session) {
 	}
 }
 
+// refusal is a connection that the rate limiter refused: its class and client address.
+type refusal struct{ class, addr string }
+
+// refusals carries them to recordRefusals, so that the code that refuses a connection never waits for the database.
+// When it is full the audit entry is dropped (the log line stays), as a flood is then counted by the earlier ones.
+var refusals = make(chan refusal, 64)
+
+// recordRefusal is the audit write of recordRefusals.
+var recordRefusal = auth_service.RecordConnectionRefused
+
+func queueRefusal(class, addr string) {
+	select {
+	case refusals <- refusal{class, addr}:
+	default:
+	}
+}
+
+// recordRefusals writes the queued refusals until ctx ends.
+func recordRefusals(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case r := <-refusals:
+			recordRefusal(ctx, r.class, r.addr)
+		}
+	}
+}
+
 // connRateLimit refuses a connection when its client IP is out of [rate_limit.ssh_connect] tokens. SSH has no way to
 // send an error before the key exchange, so the client gets a text line, which RFC 4253 section 4.2 lets servers send
 // before the version string (clients skip it, ssh -v shows it), and the connection is closed.
@@ -199,6 +229,7 @@ func connRateLimit(_ ssh.Context, conn net.Conn) net.Conn {
 		return conn
 	}
 	logger.Warn("SSH connect rate limit exceeded by %s", conn.RemoteAddr())
+	queueRefusal(ratelimit.SSHConnect, conn.RemoteAddr().String())
 	_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
 	_, _ = io.WriteString(conn, (&ratelimit.LimitedError{Result: r}).Error()+"\r\n")
 	return nil
@@ -216,6 +247,7 @@ func countAuthFailures(ctx ssh.Context, authenticate func() bool) bool {
 		attempt := ratelimit.StartAuth(ctx.RemoteAddr().String())
 		if !attempt.Allowed {
 			logger.Warn("SSH authentication rate limit exceeded by %s", ctx.RemoteAddr())
+			queueRefusal(ratelimit.Auth, ctx.RemoteAddr().String())
 			return false
 		}
 		ctx.SetValue(connAuthKey{}, attempt)
@@ -415,6 +447,11 @@ func Listen(host string, port int, ciphers, keyExchanges, macs []string) {
 		}
 	}
 
+	go func() {
+		ctx, _, finished := process.GetManager().AddTypedContext(graceful.GetManager().HammerContext(), "Service: SSH refusal audit", process.SystemProcessType, true)
+		defer finished()
+		recordRefusals(ctx)
+	}()
 	go func() {
 		_, _, finished := process.GetManager().AddTypedContext(graceful.GetManager().HammerContext(), "Service: Built-in SSH server", process.SystemProcessType, true)
 		defer finished()
