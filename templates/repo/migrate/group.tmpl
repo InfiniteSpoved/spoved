@@ -1,0 +1,12 @@
+{{if .RepoGroups}}
+<div class="inline field {{if .Err_RepoGroup}}error{{end}}" id="repo_group_label">
+	<label for="repo_group">{{ctx.Locale.Tr "repo_group.project"}}</label>
+	<select id="repo_group" name="group_id">
+		<option value="0">{{ctx.Locale.Tr "repo_group.none"}}</option>
+		{{range .RepoGroups}}
+			<option value="{{.ID}}" data-owner="{{.OwnerID}}" {{if eq .ID $.group_id}}selected{{end}}>{{.Name}}</option>
+		{{end}}
+	</select>
+	<span class="help">{{ctx.Locale.Tr "repo_group.project_helper"}}</span>
+</div>
+{{end}}

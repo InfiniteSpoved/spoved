@@ -65,6 +65,7 @@ func (f *CreateRepoForm) Validate(req *http.Request, errs binding.Errors) bindin
 // MigrateRepoForm form for migrating repository
 // this is used to interact with web ui
 type MigrateRepoForm struct {
+	GroupID int64 // the project of the organization to migrate into, 0 for its root
 	// required: true
 	CloneAddr    string                 `json:"clone_addr" binding:"Required"`
 	Service      structs.GitServiceType `json:"service"`
