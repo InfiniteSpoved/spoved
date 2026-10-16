@@ -91,7 +91,7 @@ func VerifiedDomainsVerify(ctx *context.Context) {
 // VerifiedDomainsRemove removes a verified domain.
 func VerifiedDomainsRemove(ctx *context.Context) {
 	domain := ctx.FormString("domain")
-	if err := org_model.RemoveVerifiedDomain(ctx, ctx.Org.Organization.ID, domain); err != nil {
+	if err := org_model.RemoveVerifiedDomain(ctx, ctx.Org.Organization.AsUser(), domain); err != nil {
 		ctx.ServerError("RemoveVerifiedDomain", err)
 		return
 	}
@@ -101,7 +101,7 @@ func VerifiedDomainsRemove(ctx *context.Context) {
 
 // VerifiedDomainsRequire turns the member restriction on or off.
 func VerifiedDomainsRequire(ctx *context.Context) {
-	err := org_service.SetVerifiedDomainRequired(ctx, ctx.Org.Organization.ID, ctx.FormBool("require"))
+	err := org_service.SetVerifiedDomainRequired(ctx, ctx.Org.Organization, ctx.FormBool("require"))
 	switch {
 	case err == nil:
 		ctx.Flash.Success(ctx.Tr("org.settings.verified_domains.saved"))

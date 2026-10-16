@@ -45,14 +45,17 @@ func ArchiveOrganization(ctx context.Context, org *org_model.Organization, doer 
 			}
 		}
 		now := timeutil.TimeStampNow()
-		if _, err := db.GetEngine(ctx).Table("repository").NoAutoTime().
+		repos, err := db.GetEngine(ctx).Table("repository").NoAutoTime().
 			Where("owner_id = ? AND is_archived = ?", org.ID, false).
-			Update(map[string]any{"is_archived": true, "archived_unix": now, "archived_by_org": true}); err != nil {
+			Update(map[string]any{"is_archived": true, "archived_unix": now, "archived_by_org": true})
+		if err != nil {
 			return err
 		}
 		org.IsArchived, org.ArchivedUnix, org.ArchivedByID = true, now, doer.ID
-		_, err = db.GetEngine(ctx).ID(org.ID).Cols("is_archived", "archived_unix", "archived_by_id").NoAutoTime().Update(org)
-		return err
+		if _, err := db.GetEngine(ctx).ID(org.ID).Cols("is_archived", "archived_unix", "archived_by_id").NoAutoTime().Update(org); err != nil {
+			return err
+		}
+		return user_model.RecordOrg(ctx, "org.organization.archived", org.AsUser(), map[string]any{"counts": map[string]int64{"repos": repos}})
 	})
 }
 
@@ -68,13 +71,16 @@ func UnarchiveOrganization(ctx context.Context, org *org_model.Organization) err
 		if !org.AsUser().IsOrganization() || !org.IsArchived {
 			return util.NewInvalidArgumentErrorf("%s is not an archived organization", org.Name)
 		}
-		if _, err := db.GetEngine(ctx).Table("repository").NoAutoTime().
+		repos, err := db.GetEngine(ctx).Table("repository").NoAutoTime().
 			Where("owner_id = ? AND archived_by_org = ?", org.ID, true).
-			Update(map[string]any{"is_archived": false, "archived_unix": 0, "archived_by_org": false}); err != nil {
+			Update(map[string]any{"is_archived": false, "archived_unix": 0, "archived_by_org": false})
+		if err != nil {
 			return err
 		}
 		org.IsArchived, org.ArchivedUnix, org.ArchivedByID = false, 0, 0
-		_, err = db.GetEngine(ctx).ID(org.ID).Cols("is_archived", "archived_unix", "archived_by_id").NoAutoTime().Update(org)
-		return err
+		if _, err := db.GetEngine(ctx).ID(org.ID).Cols("is_archived", "archived_unix", "archived_by_id").NoAutoTime().Update(org); err != nil {
+			return err
+		}
+		return user_model.RecordOrg(ctx, "org.organization.unarchived", org.AsUser(), map[string]any{"counts": map[string]int64{"repos": repos}})
 	})
 }

@@ -11,6 +11,7 @@ import (
 
 	"forgejo.org/models"
 	asymkey_model "forgejo.org/models/asymkey"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
@@ -223,8 +224,17 @@ func TestBitbucketImportPermissions(t *testing.T) {
 
 		var report *migrations.BitbucketImportReport
 		t.Run("import", func(t *testing.T) {
+			since := auditMaxID(t)
 			report = run(t, org.Name, opts)
 			require.False(t, report.Blocked)
+			// a command line run as user2: actor cli, the account in data.task
+			teams := auditActions(t, since, "org.team.created")
+			require.NotEmpty(t, teams)
+			for _, e := range append(teams, auditActions(t, since, "org.team.member_added")...) {
+				assert.Equal(t, audit_model.ActorCLI, e.ActorType)
+				assert.Equal(t, "bitbucket_import:user2(2)", auditData(t, e)["task"])
+			}
+			assert.NotEmpty(t, auditActions(t, since, "org.team.repo_added"))
 		})
 		group := unittest.AssertExistsAndLoadBean(t, &repo_model.RepoGroup{OwnerID: org.ID, LowerName: "payments"})
 		api, err := repo_model.GetRepositoryByPath(ctx, org.ID, group.Name, "api")

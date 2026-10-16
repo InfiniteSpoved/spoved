@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"forgejo.org/models"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
@@ -67,8 +68,14 @@ func LinkTeamToRepoGroup(ctx context.Context, doer *user_model.User, org *organi
 				return err
 			}
 		}
-		return nil
+		return recordProjectLink(ctx, "org.team.project_linked", team, group, len(repos))
 	})
+}
+
+func recordProjectLink(ctx context.Context, action string, team *organization.Team, group *repo_model.RepoGroup, repos int) error {
+	return organization.RecordTeam(ctx, team, audit_model.Event{Action: action, GroupID: group.ID, Data: map[string]any{
+		"group_id": group.ID, "counts": map[string]int{"repos": repos},
+	}})
 }
 
 // UnlinkTeamFromRepoGroup takes back what the link granted: the team's ViaGroup rows of the project. Repositories
@@ -94,7 +101,7 @@ func UnlinkTeamFromRepoGroup(ctx context.Context, doer *user_model.User, org *or
 				return err
 			}
 		}
-		return nil
+		return recordProjectLink(ctx, "org.team.project_unlinked", team, group, len(repos))
 	})
 }
 

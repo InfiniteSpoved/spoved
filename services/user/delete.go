@@ -54,6 +54,8 @@ func deleteUser(ctx context.Context, u *user_model.User, purge, keepRow bool) (e
 		"oauth2_grants":           &auth_model.OAuth2Grant{UserID: u.ID},
 		"runners":                 &actions_model.ActionRunner{OwnerID: u.ID},
 		"authorized_integrations": &auth_model.AuthorizedIntegration{UserID: u.ID},
+		"team_invites_sent":       &organization.TeamInvite{InviterID: u.ID},
+		"team_invites_received":   &organization.TeamInvite{InvitedID: optional.Some(u.ID)},
 	} {
 		if counts[name], err = e.Count(bean); err != nil {
 			return fmt.Errorf("count %s: %w", name, err)

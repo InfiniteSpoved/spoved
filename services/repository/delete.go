@@ -548,6 +548,9 @@ func RemoveRepositoryFromTeam(ctx context.Context, t *organization.Team, repoID 
 	if err = removeRepositoryFromTeam(ctx, t, repo, true); err != nil {
 		return err
 	}
+	if err := organization.RecordTeamRepo(ctx, "org.team.repo_removed", t, repo); err != nil {
+		return err
+	}
 
 	return committer.Commit()
 }

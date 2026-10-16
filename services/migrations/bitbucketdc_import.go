@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
@@ -126,6 +127,11 @@ func ImportBitbucket(ctx context.Context, doerName, orgName string, opts Bitbuck
 			return nil, util.NewPermissionDeniedErrorf("%s is not an owner of %s", doer.Name, org.Name)
 		}
 	}
+	// a command line run: every entry it causes names the account it runs as (data.task)
+	ctx = audit_model.WithActor(ctx, &audit_model.Actor{
+		Type: audit_model.ActorCLI, Credential: audit_model.Credential{Type: audit_model.CredentialCLI},
+		Task: fmt.Sprintf("bitbucket_import:%s(%d)", doer.Name, doer.ID),
+	})
 	if !opts.DryRun && setting.GetMaintenance(ctx).ReadOnly() {
 		return nil, util.NewPermissionDeniedErrorf("the instance is in maintenance mode")
 	}

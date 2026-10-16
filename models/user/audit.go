@@ -50,3 +50,33 @@ func RecordEmail(ctx context.Context, action string, e *EmailAddress) error {
 		"address": e.Email, "primary": e.IsPrimary, "activated": e.IsActivated,
 	})
 }
+
+// OrgAuditFields are the settings the audit log keeps for an organization (audit_model.Fields["org"]).
+func (u *User) OrgAuditFields() map[string]any {
+	return map[string]any{
+		"visibility": int(u.Visibility), "require_two_factor": u.RequireTwoFactor,
+		"restrict_repo_visibility_change": u.RestrictRepoVisibilityChange, "private_fork_policy": u.PrivateForkPolicy,
+		"repo_admin_change_team_access": u.RepoAdminChangeTeamAccess, "max_repo_creation": u.MaxRepoCreation,
+		"category_id": u.CategoryID, "is_active": u.IsActive, "prohibit_login": u.ProhibitLogin,
+	}
+}
+
+// RecordOrg records an event of the organization org.
+func RecordOrg(ctx context.Context, action string, org *User, data map[string]any) error {
+	return audit_model.Record(ctx, audit_model.Event{
+		Action: action, Result: audit_model.ResultSuccess, OwnerID: org.ID, TargetType: "org", TargetID: org.ID,
+		TargetName: org.Name, Data: data,
+	})
+}
+
+// RecordOrgChange records org.organization.updated with the settings of org that differ from before, the row as it
+// was stored, and nothing when none does or before is nil (u isn't an organization).
+func RecordOrgChange(ctx context.Context, before, org *User) error {
+	if before == nil {
+		return nil
+	}
+	if changes := audit_model.Changes(before.OrgAuditFields(), org.OrgAuditFields()); changes != nil {
+		return RecordOrg(ctx, "org.organization.updated", org, changes)
+	}
+	return nil
+}

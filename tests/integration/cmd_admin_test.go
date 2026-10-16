@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"testing"
 
 	auth_model "forgejo.org/models/auth"
@@ -79,6 +80,17 @@ func Test_Cmd_AdminUser(t *testing.T) {
 				unittest.AssertNotExistsBean(t, &user_model.User{Name: name})
 			})
 		}
+	})
+}
+
+func Test_Cmd_AdminChangePasswordOrg(t *testing.T) {
+	onApplicationRun(t, func(*testing.T, *url.URL) {
+		before := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "org3"})
+		_, err := runMainApp("admin", "user", "change-password", "--username", "org3", "--password", "password123!")
+		var exitErr *exec.ExitError
+		require.ErrorAs(t, err, &exitErr)
+		assert.Contains(t, string(exitErr.Stderr), "org3 is an organization")
+		assert.Equal(t, before, unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "org3"}))
 	})
 }
 

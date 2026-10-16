@@ -68,7 +68,7 @@ type Actor struct {
 	IPCandidates []string
 	UserAgent    string
 	RequestID    string
-	Task         string // a cron task a user started, recorded as data.task
+	Task         string // a cron task a user started, or the account a command line import runs as; recorded as data.task
 }
 
 // SetSudo makes the user acted as the actor and keeps the admin in SudoByID.

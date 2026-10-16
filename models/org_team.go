@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
@@ -119,11 +120,32 @@ func AddAllRepositories(ctx context.Context, t *organization.Team) (err error) {
 	}
 	defer committer.Close()
 
+	before, err := countTeamRepos(ctx, t)
+	if err != nil {
+		return err
+	}
 	if err = addAllRepositories(ctx, t); err != nil {
+		return err
+	}
+	if err := recordTeamRepoCount(ctx, "org.team.repos_added_all", t, before); err != nil {
 		return err
 	}
 
 	return committer.Commit()
+}
+
+func countTeamRepos(ctx context.Context, t *organization.Team) (int64, error) {
+	return db.GetEngine(ctx).Count(&organization.TeamRepo{TeamID: t.ID})
+}
+
+// recordTeamRepoCount records action with how many repositories the team t gained or lost since it had before,
+// and nothing when that is none.
+func recordTeamRepoCount(ctx context.Context, action string, t *organization.Team, before int64) error {
+	after, err := countTeamRepos(ctx, t)
+	if err != nil || after == before {
+		return err
+	}
+	return organization.RecordTeam(ctx, t, audit_model.Event{Action: action, Data: map[string]any{"counts": map[string]int64{"repos": max(after-before, before-after)}}})
 }
 
 // lockTeamGroups locks, in the transaction of ctx, the projects the team is linked to by ascending ID, then the team
@@ -166,7 +188,14 @@ func RemoveAllRepositories(ctx context.Context, t *organization.Team) (err error
 	}
 	defer committer.Close()
 
+	before, err := countTeamRepos(ctx, t)
+	if err != nil {
+		return err
+	}
 	if err = removeAllRepositories(ctx, t); err != nil {
+		return err
+	}
+	if err := recordTeamRepoCount(ctx, "org.team.repos_removed_all", t, before); err != nil {
 		return err
 	}
 
@@ -310,6 +339,11 @@ func NewTeam(ctx context.Context, t *organization.Team) (err error) {
 	if _, err = db.Exec(ctx, "UPDATE `user` SET num_teams=num_teams+1 WHERE id = ?", t.OrgID); err != nil {
 		return err
 	}
+	data := t.AuditFields()
+	data["counts"] = map[string]int{"repos": t.NumRepos}
+	if err := organization.RecordTeam(ctx, t, audit_model.Event{Action: "org.team.created", Data: data}); err != nil {
+		return err
+	}
 	return committer.Commit()
 }
 
@@ -330,11 +364,17 @@ func UpdateTeam(ctx context.Context, t *organization.Team, authChanged, includeA
 	defer committer.Close()
 
 	// The Owners team is found by its name, so it can't be renamed.
-	if old, err := organization.GetTeamByID(ctx, t.ID); err != nil {
+	old, err := organization.GetTeamByID(ctx, t.ID)
+	if err != nil {
 		return err
 	} else if old.IsOwnerTeam() && old.Name != t.Name {
 		return util.NewInvalidArgumentErrorf("the Owners team cannot be renamed")
 	}
+	// the audited "before" is the stored team: the caller has already changed t
+	if err := old.LoadUnits(ctx); err != nil {
+		return err
+	}
+	before := old.AuditFields()
 
 	t.LowerName = strings.ToLower(t.Name)
 	has, err := db.Exist[organization.Team](ctx, builder.Eq{
@@ -391,6 +431,16 @@ func UpdateTeam(ctx context.Context, t *organization.Team, authChanged, includeA
 		}
 	}
 
+	after := t.AuditFields()
+	if len(t.Units) == 0 { // the units were left alone
+		after["units"] = before["units"]
+	}
+	if changes := audit_model.Changes(before, after); changes != nil {
+		if err := organization.RecordTeam(ctx, t, audit_model.Event{Action: "org.team.updated", Data: changes}); err != nil {
+			return err
+		}
+	}
+
 	return committer.Commit()
 }
 
@@ -434,6 +484,23 @@ func DeleteTeam(ctx context.Context, t *organization.Team) error {
 
 	// unlinked first, so that no repository stays
 	if err := lockTeamGroups(ctx, t); err != nil {
+		return err
+	}
+	counts := map[string]int64{"members": int64(len(t.Members)), "repos": int64(len(t.Repos))}
+	for name, bean := range map[string]any{
+		"projects": &organization.TeamGroup{TeamID: t.ID}, "user_groups": &organization.UserGroupTeam{TeamID: t.ID},
+		"invites": &organization.TeamInvite{TeamID: t.ID},
+	} {
+		if counts[name], err = db.GetEngine(ctx).Count(bean); err != nil {
+			return err
+		}
+	}
+	if err := t.LoadUnits(ctx); err != nil {
+		return err
+	}
+	data := t.AuditFields()
+	data["counts"] = counts
+	if err := organization.RecordTeam(ctx, t, audit_model.Event{Action: "org.team.deleted", Data: data}); err != nil {
 		return err
 	}
 	if err := db.DeleteBeans(ctx, &organization.TeamGroup{TeamID: t.ID}); err != nil {
@@ -486,10 +553,6 @@ func InsertTeamMember(ctx context.Context, team *organization.Team, userID int64
 		return nil, err
 	}
 
-	if err := organization.AddOrgUser(ctx, team.OrgID, userID); err != nil {
-		return nil, err
-	}
-
 	teamUser := &organization.TeamUser{
 		UID:                    userID,
 		OrgID:                  team.OrgID,
@@ -500,10 +563,20 @@ func InsertTeamMember(ctx context.Context, team *organization.Team, userID int64
 		CreatedUnix:            optional.Some(timeutil.TimeStampNow()),
 	}
 
+	var refused error
 	err = db.WithTx(ctx, func(ctx context.Context) error {
 		// check in transaction
 		isAlreadyMember, err = organization.IsTeamMember(ctx, team.OrgID, team.ID, userID)
 		if err != nil || isAlreadyMember {
+			return err
+		}
+
+		if err := organization.AddOrgUser(ctx, team.OrgID, userID); err != nil {
+			if organization.IsErrUserNoVerifiedDomainEmail(err) {
+				// nothing was written: commit, so that a shared outer transaction (user group sync skips this user) survives
+				refused = err
+				return nil
+			}
 			return err
 		}
 
@@ -528,10 +601,16 @@ func InsertTeamMember(ctx context.Context, team *organization.Team, userID int64
 			return fmt.Errorf("error recalculating user access: %w", err)
 		}
 
-		return nil
+		data := map[string]any{"user_id": userID, "reason": reason.AuditName()}
+		if has, id := inviterID.Get(); has {
+			data["inviter_id"] = id
+		}
+		return organization.RecordTeam(ctx, team, audit_model.Event{Action: "org.team.member_added", SubjectUserID: userID, Data: data})
 	})
 	if err != nil {
 		return nil, err
+	} else if refused != nil {
+		return nil, refused
 	}
 
 	// this behaviour may spend much time so run it in a goroutine
@@ -576,6 +655,10 @@ func removeTeamMember(ctx context.Context, team *organization.Team, userID int64
 		UID:    userID,
 		OrgID:  team.OrgID,
 		TeamID: team.ID,
+	}); err != nil {
+		return err
+	} else if err := organization.RecordTeam(ctx, team, audit_model.Event{
+		Action: "org.team.member_removed", SubjectUserID: userID, Data: map[string]any{"user_id": userID},
 	}); err != nil {
 		return err
 	} else if _, err = e.

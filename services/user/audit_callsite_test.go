@@ -22,7 +22,8 @@ import (
 // salts the activation and reset tokens (updateActivation writes it with every email activation).
 var auditedUserColumns = []string{
 	"is_active", "prohibit_login", "is_admin", "is_auditor", "is_restricted", "passwd", "must_change_password", "email",
-	"login_source", "login_name", "login_type", "visibility",
+	"login_source", "login_name", "login_type", "visibility", "require_two_factor", "restrict_repo_visibility_change",
+	"private_fork_policy", "repo_admin_change_team_access",
 }
 
 // auditedWrites are the functions allowed to write those columns, or to delete keys, key selections or access tokens,
@@ -68,7 +69,7 @@ var auditedWrites = map[string]string{
 	"models/actions.deleteRunner":                    "records credential.runner.deleted",
 	"models/actions.FixRunnersWithoutBelongingOwner": "doctor: runners of owners that no longer exist",
 	"models/actions.FixRunnersWithoutBelongingRepo":  "doctor: runners of repositories that no longer exist",
-	"models/organization.DeleteOrganization":         "runners of the deleted organization: part of the organization delete (settings audit)",
+	"models/organization.DeleteOrganization":         "its caller services/org.DeleteOrganization records org.organization.deleted with the counts",
 
 	// login sources, user groups, quota, dynamic settings
 	"models/auth.CreateSource":                        "records admin.login_source.created (and deleted when registering fails)",
@@ -78,7 +79,7 @@ var auditedWrites = map[string]string{
 	"models/organization.DeleteSyncedUserGroupMember": "its caller SyncDirectoryGroups records admin.user_group.member_removed",
 	"models/organization.DeleteUserGroupTeam":         "its callers UnlinkTeam (records admin.user_group.team_unlinked) and syncOrgAdminLinks",
 	"services/usergroup.syncOrgAdminLinks":            "managed links follow the org-admin role and exclusions, recorded with the group or exclusion change",
-	"models.DeleteTeam":                               "group links of the deleted team: part of the team delete (settings audit, orgs and teams)",
+	"models.DeleteTeam":                               "records org.team.deleted with the counts",
 	"models/quota.DeleteRuleByName":                   "records admin.quota_rule.deleted",
 	"models/quota.DeleteGroupByName":                  "records admin.quota_group.deleted",
 	"models/quota.(*Group).RemoveUserByID":            "records admin.quota_group.user_removed",
@@ -87,6 +88,19 @@ var auditedWrites = map[string]string{
 	"models/system.SetSettings":                       "records admin.setting.changed",
 	"models/system.GetRevision":                       "not a setting: the revision counter of the settings cache",
 	"models/system.GetSettingForUpdate":               "not a change: a no-op update that locks the row",
+
+	// organizations and teams
+	"models.UpdateTeam":                           "records org.team.updated (its units are rewritten)",
+	"models.removeTeamMember":                     "records org.team.member_removed",
+	"models.RemoveOrgUser":                        "the org membership follows the team ones, each recorded as org.team.member_removed",
+	"models.removeAllRepositories":                "its callers record org.team.repos_removed_all or org.team.deleted with the counts",
+	"models/organization.RemoveTeamRepo":          "its callers record org.team.repo_removed or are counted by the project unlink, repository move or delete",
+	"models/organization.RemoveOrgRepo":           "team rows of a transferred repository: part of the transfer (repository audit)",
+	"models/organization.removeInvite":            "records org.team.invite_removed",
+	"models/organization.RemoveVerifiedDomain":    "records org.verified_domain.removed",
+	"services/repository.UnlinkTeamFromRepoGroup": "records org.team.project_unlinked",
+	"services/user.removeTrashedOrgMemberships":   "records org.team.member_removed for each team",
+	"models/repo.DeleteRepoGroup":                 "team links of the deleted project: counted in its project delete entry (org.project.deleted, repository audit)",
 }
 
 // TestAuditCallSites walks the code for writes of the audited user columns (UpdateUserCols, and Update/Exec chains on
@@ -171,7 +185,7 @@ func isAuditedWrite(call *ast.CallExpr) bool {
 			return !lit
 		}) || call.Ellipsis.IsValid()
 	case "Update", "Exec":
-		if writesSystemSetting(call) {
+		if writesSystemSetting(call) || name == "Exec" && slices.ContainsFunc(literals(call), deletesAuditedTable) {
 			return true
 		}
 		var lits []string
@@ -220,12 +234,22 @@ var auditedDeletes = []string{
 	"PublicKey", "AccessToken", "GPGKey", "DeployKey", "OrgDeployKey", "OrgDeployKeyRepo",
 	"OAuth2Application", "OAuth2Grant", "AuthorizedIntegration", "ActionRunner",
 	"Source", "UserGroup", "UserGroupUser", "UserGroupTeam", "Rule", "Group", "GroupMapping", "GroupRuleMapping",
+	"Team", "TeamUser", "TeamRepo", "TeamUnit", "TeamGroup", "TeamInvite", "OrgUser", "OrgVerifiedDomain", "OrgUnit",
 }
 
 // auditedDeleteTables are the tables of auditedDeletes that raw deletes (builder.Delete(...).From(table)) name.
 var auditedDeleteTables = []string{
 	"oauth2_application", "oauth2_grant", "authorized_integration", "action_runner", "login_source", "user_group",
 	"user_group_user", "user_group_team", "quota_rule", "quota_group", "quota_group_mapping", "quota_group_rule_mapping",
+	"team", "team_user", "team_repo", "team_unit", "team_group", "team_invite", "org_user", "org_verified_domain", "org_unit",
+}
+
+// deletesAuditedTable reports whether the SQL statement sql deletes rows of a table of auditedDeleteTables.
+func deletesAuditedTable(sql string) bool {
+	sql = strings.ToLower(sql)
+	return strings.Contains(sql, "delete from") && slices.ContainsFunc(auditedDeleteTables, func(t string) bool {
+		return strings.Contains(sql, "from `"+t+"`") || strings.Contains(sql, `from "`+t+`"`) || strings.Contains(sql, "from "+t+" ")
+	})
 }
 
 // writesSystemSetting reports whether an Update or Exec chain writes the system_setting table, whose writes only
