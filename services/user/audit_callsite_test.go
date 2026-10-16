@@ -25,7 +25,8 @@ var auditedUserColumns = []string{
 	"login_source", "login_name", "login_type", "visibility",
 }
 
-// auditedWrites are the functions allowed to write those columns, or to delete SSH keys or access tokens, with why.
+// auditedWrites are the functions allowed to write those columns, or to delete keys, key selections or access tokens,
+// with why.
 // A new write elsewhere fails TestAuditCallSites: record it in its function, or add it here with a reason.
 var auditedWrites = map[string]string{
 	// user columns
@@ -46,12 +47,17 @@ var auditedWrites = map[string]string{
 	"models/actions.NewRunnerToken":                  "not the user table (a runner token's is_active)",
 
 	// SSH keys and access tokens
-	"services/user.deleteUser":                   "counted in account.user.deleted (bulk, with the account)",
-	"models/auth.DeleteAccessTokenByID":          "records credential.access_token.deleted",
-	"models/asymkey.deleteKeysMarkedForDeletion": "LDAP key sync: recorded in a later PR (credential lifecycle)",
-	"services/asymkey.DeletePublicKey":           "recorded in a later PR (credential lifecycle)",
-	"models.DeleteDeployKey":                     "recorded in a later PR (credential lifecycle)",
-	"models/asymkey.DeleteOrgDeployKey":          "recorded in a later PR (credential lifecycle)",
+	"services/user.deleteUser":                     "counted in account.user.deleted (bulk, with the account)",
+	"models/auth.DeleteAccessTokenByID":            "records credential.access_token.deleted",
+	"models/asymkey.deleteKeysMarkedForDeletion":   "records credential.ssh_key.deleted (login source sync)",
+	"services/asymkey.DeletePublicKey":             "records credential.ssh_key.deleted",
+	"models/asymkey.deleteGPGKey":                  "its one caller DeleteGPGKey records credential.gpg_key.deleted",
+	"models.DeleteDeployKey":                       "records credential.deploy_key.deleted",
+	"models/asymkey.DeleteOrgDeployKey":            "records credential.org_deploy_key|project_deploy_key.deleted",
+	"models/asymkey.SetOrgDeployKeyRepos":          "records credential.org_deploy_key.updated",
+	"models/asymkey.RemoveOrgDeployKeyRepo":        "records credential.org_deploy_key.updated",
+	"services/repository.DeleteRepositoryDirectly": "selection rows of the deleted repository: part of the repository delete (settings audit)",
+	"services/repository.transferOwnership":        "selection rows of the moved repository: part of the transfer (settings audit)",
 }
 
 // TestAuditCallSites walks the code for writes of the audited user columns (UpdateUserCols, and Update/Exec chains on
@@ -163,15 +169,15 @@ func isAuditedWrite(call *ast.CallExpr) bool {
 		}
 		return slices.ContainsFunc(call.Args, mapHasAuditedKey)
 	case "Delete", "DeleteByBean", "DeleteBeans", "DeleteByID":
-		if mentionsType(call.Fun, "PublicKey") || mentionsType(call.Fun, "AccessToken") {
-			return true
-		}
-		return slices.ContainsFunc(call.Args, func(a ast.Expr) bool {
-			return mentionsType(a, "PublicKey") || mentionsType(a, "AccessToken")
+		return slices.ContainsFunc(append([]ast.Expr{call.Fun}, call.Args...), func(a ast.Expr) bool {
+			return slices.ContainsFunc(auditedDeletes, func(typ string) bool { return mentionsType(a, typ) })
 		})
 	}
 	return false
 }
+
+// auditedDeletes are the credential types whose deletes the audit log must see.
+var auditedDeletes = []string{"PublicKey", "AccessToken", "GPGKey", "DeployKey", "OrgDeployKey", "OrgDeployKeyRepo"}
 
 func isAuditedColumn(s string) bool {
 	return slices.Contains(auditedUserColumns, s)

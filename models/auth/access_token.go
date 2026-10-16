@@ -153,9 +153,8 @@ func accessTokenFields(t *AccessToken, repoIDs []int64) map[string]any {
 // recordAccessToken records a change of the token in the audit log. The token's owner is read from the row, never
 // from the doer, who may be an admin acting for the owner.
 func recordAccessToken(ctx context.Context, verb string, t *AccessToken, data map[string]any) error {
-	return audit_model.Record(ctx, audit_model.Event{
+	return audit_model.RecordCredential(ctx, audit_model.Event{
 		Action:        "credential.access_token." + verb,
-		Result:        audit_model.ResultSuccess,
 		OwnerID:       t.UID,
 		SubjectUserID: t.UID,
 		TargetType:    "access_token",

@@ -36,6 +36,9 @@ func DeletePublicKey(ctx context.Context, doer *user_model.User, id int64) (err 
 	if _, err = db.DeleteByID[asymkey_model.PublicKey](dbCtx, id); err != nil {
 		return err
 	}
+	if err = asymkey_model.RecordPublicKey(dbCtx, "credential.ssh_key.deleted", key, nil); err != nil {
+		return err
+	}
 
 	if err = committer.Commit(); err != nil {
 		return err

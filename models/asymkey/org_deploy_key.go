@@ -79,6 +79,8 @@ func AddOrgDeployKey(ctx context.Context, orgID, groupID int64, name, content st
 	}
 
 	var key *OrgDeployKey
+	var pkey *PublicKey
+	var added bool
 	err = db.WithTx(ctx, func(ctx context.Context) error {
 		if groupID != 0 {
 			// the project row first, so that a concurrent DeleteRepoGroup runs before or after this
@@ -108,8 +110,8 @@ func AddOrgDeployKey(ctx context.Context, orgID, groupID int64, name, content st
 			return ErrDeployKeyNameAlreadyUsed{Name: name}
 		}
 
-		pkey, err := getOrAddDeployPublicKey(ctx, name, content, fingerprint, mode)
-		if err != nil {
+		var err error
+		if pkey, added, err = getOrAddDeployPublicKey(ctx, name, content, fingerprint, mode); err != nil {
 			return err
 		}
 		if has, err := db.GetEngine(ctx).Where(builder.Eq{"org_id": orgID, "group_id": groupID, "key_id": pkey.ID}).Exist(new(OrgDeployKey)); err != nil {
@@ -136,9 +138,14 @@ func AddOrgDeployKey(ctx context.Context, orgID, groupID int64, name, content st
 				return err
 			}
 		}
-		return nil
+		return recordOrgDeployKey(ctx, "credential.org_deploy_key.created", "credential.project_deploy_key.created", key, map[string]any{
+			"all_repos": includesAllRepos, "repo_ids": repoIDs,
+		})
 	})
-	return key, err
+	if err != nil || !added {
+		return key, err
+	}
+	return key, appendKeyAfterCommit(pkey)
 }
 
 // checkOrgDeployKeyRepos refuses repositories that aren't live repositories of the organization.
@@ -294,6 +301,10 @@ func SetOrgDeployKeyRepos(ctx context.Context, orgID, id int64, includesAllRepos
 		if err := checkOrgDeployKeyRepos(ctx, orgID, repoIDs); err != nil {
 			return err
 		}
+		var oldIDs []int64
+		if err := db.GetEngine(ctx).Table("org_deploy_key_repo").Where("org_deploy_key_id = ?", key.ID).Cols("repo_id").Find(&oldIDs); err != nil {
+			return err
+		}
 		if _, err := db.GetEngine(ctx).Where("org_deploy_key_id = ?", key.ID).Delete(new(OrgDeployKeyRepo)); err != nil {
 			return err
 		}
@@ -302,9 +313,30 @@ func SetOrgDeployKeyRepos(ctx context.Context, orgID, id int64, includesAllRepos
 				return err
 			}
 		}
+		wasAllRepos := key.IncludesAllRepos
 		key.IncludesAllRepos = includesAllRepos
-		_, err = db.GetEngine(ctx).ID(key.ID).Cols("includes_all_repos").NoAutoTime().Update(key)
-		return err
+		if _, err = db.GetEngine(ctx).ID(key.ID).Cols("includes_all_repos").NoAutoTime().Update(key); err != nil {
+			return err
+		}
+		oldSet, newSet := container.SetOf(oldIDs...), container.SetOf(repoIDs...)
+		added, removed := []int64{}, []int64{}
+		for _, id := range repoIDs {
+			if !oldSet.Contains(id) {
+				added = append(added, id)
+			}
+		}
+		for _, id := range oldIDs {
+			if !newSet.Contains(id) {
+				removed = append(removed, id)
+			}
+		}
+		if wasAllRepos == includesAllRepos && len(added) == 0 && len(removed) == 0 {
+			return nil
+		}
+		return recordOrgDeployKey(ctx, "credential.org_deploy_key.updated", "", key, map[string]any{
+			"before": map[string]any{"all_repos": wasAllRepos}, "after": map[string]any{"all_repos": includesAllRepos},
+			"repos_added": added, "repos_removed": removed,
+		})
 	})
 	return key, err
 }
@@ -335,7 +367,10 @@ func AddOrgDeployKeyRepo(ctx context.Context, orgID, id, repoID int64) (*OrgDepl
 		if has, err := db.GetEngine(ctx).Exist(&OrgDeployKeyRepo{OrgDeployKeyID: key.ID, RepoID: repoID}); err != nil || has {
 			return err
 		}
-		return db.Insert(ctx, &OrgDeployKeyRepo{OrgDeployKeyID: key.ID, RepoID: repoID})
+		if err := db.Insert(ctx, &OrgDeployKeyRepo{OrgDeployKeyID: key.ID, RepoID: repoID}); err != nil {
+			return err
+		}
+		return recordOrgDeployKey(ctx, "credential.org_deploy_key.updated", "", key, map[string]any{"repos_added": []int64{repoID}})
 	})
 	return key, err
 }
@@ -362,8 +397,10 @@ func RemoveOrgDeployKeyRepo(ctx context.Context, orgID, id, repoID int64) (*OrgD
 		} else if n <= 1 {
 			return util.NewInvalidArgumentErrorf("select at least one repository")
 		}
-		_, err = db.GetEngine(ctx).Delete(&OrgDeployKeyRepo{OrgDeployKeyID: key.ID, RepoID: repoID})
-		return err
+		if _, err = db.GetEngine(ctx).Delete(&OrgDeployKeyRepo{OrgDeployKeyID: key.ID, RepoID: repoID}); err != nil {
+			return err
+		}
+		return recordOrgDeployKey(ctx, "credential.org_deploy_key.updated", "", key, map[string]any{"repos_removed": []int64{repoID}})
 	})
 	return key, err
 }
@@ -383,9 +420,16 @@ func SetOrgDeployKeyAllRepos(ctx context.Context, orgID, id int64, includesAllRe
 				return util.NewInvalidArgumentErrorf("select at least one repository")
 			}
 		}
+		if key.IncludesAllRepos == includesAllRepos {
+			return nil
+		}
 		key.IncludesAllRepos = includesAllRepos
-		_, err = db.GetEngine(ctx).ID(key.ID).Cols("includes_all_repos").NoAutoTime().Update(key)
-		return err
+		if _, err = db.GetEngine(ctx).ID(key.ID).Cols("includes_all_repos").NoAutoTime().Update(key); err != nil {
+			return err
+		}
+		return recordOrgDeployKey(ctx, "credential.org_deploy_key.updated", "", key, map[string]any{
+			"before": map[string]any{"all_repos": !includesAllRepos}, "after": map[string]any{"all_repos": includesAllRepos},
+		})
 	})
 	return key, err
 }
@@ -409,10 +453,19 @@ func DeleteOrgDeployKey(ctx context.Context, key *OrgDeployKey) (deletedPublicKe
 	if _, err := lockOrgDeployKey(ctx, key.OrgID, key.GroupID, key.ID); err != nil {
 		return false, err
 	}
+	var repoIDs []int64
+	if err := db.GetEngine(ctx).Table("org_deploy_key_repo").Where("org_deploy_key_id = ?", key.ID).Cols("repo_id").Find(&repoIDs); err != nil {
+		return false, err
+	}
 	if _, err := db.GetEngine(ctx).Where("org_deploy_key_id = ?", key.ID).Delete(new(OrgDeployKeyRepo)); err != nil {
 		return false, err
 	}
 	if _, err := db.DeleteByID[OrgDeployKey](ctx, key.ID); err != nil {
+		return false, err
+	}
+	if err := recordOrgDeployKey(ctx, "credential.org_deploy_key.deleted", "credential.project_deploy_key.deleted", key, map[string]any{
+		"all_repos": key.IncludesAllRepos, "repo_ids": repoIDs,
+	}); err != nil {
 		return false, err
 	}
 	if has, err := IsDeployKeyExistByKeyID(ctx, key.KeyID); err != nil || has {

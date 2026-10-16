@@ -107,8 +107,9 @@ var Fields = map[string][]string{
 	"access_token":   {"name", "scopes", "expires", "resource_all_repos", "repo_ids"},
 	"audit_export":   {"format", "filter", "capped", "through_id"},
 	"credential_use": {"method"},
-	"deploy_key":     {"expires"},
+	"deploy_key":     {"expires", "name", "fingerprint", "mode"},
 	"email":          {"address", "primary", "activated"},
+	"gpg_key":        {"key_id", "subkey_ids", "verified", "expires"},
 	"external_login": {"login_source_id", "external_id"},
 	"openid":         {"uri"},
 	"two_factor":     {"type", "name"},
@@ -119,11 +120,11 @@ var Fields = map[string][]string{
 	},
 	"instance":           {"version", "config_sha256"},
 	"oauth2_app":         {"secret_expires"},
-	"org_deploy_key":     {"expires"},
-	"project_deploy_key": {"expires"},
+	"org_deploy_key":     {"expires", "name", "fingerprint", "mode", "all_repos", "repo_ids", "repos_added", "repos_removed"},
+	"project_deploy_key": {"expires", "name", "fingerprint", "mode", "all_repos", "repo_ids", "repos_added", "repos_removed"},
 	"refusal":            {"reason", "class", "method"},
 	"signin":             {"method", "reason"},
-	"ssh_key":            {"expires"},
+	"ssh_key":            {"expires", "name", "fingerprint", "key_type", "login_source_id"},
 }
 
 // sharedKeys are the top-level data keys every target type may carry.
@@ -139,6 +140,19 @@ func RecordAccount(ctx context.Context, action string, uid int64, targetType str
 		Action: action, Result: ResultSuccess, OwnerID: uid, SubjectUserID: uid,
 		TargetType: targetType, TargetID: targetID, TargetName: targetName, Data: data,
 	})
+}
+
+// RecordCredential records a change of a credential. Its SubjectUserID is the user who owns it (0 for a key of a
+// repository or an organization); when another user makes the change, such as an admin, data.on_behalf is set.
+func RecordCredential(ctx context.Context, ev Event) error {
+	ev.Result = ResultSuccess
+	if a := ActorFromContext(ctx); a != nil && a.Type == ActorUser && ev.SubjectUserID != 0 && a.ID != ev.SubjectUserID {
+		if ev.Data == nil {
+			ev.Data = map[string]any{}
+		}
+		ev.Data["on_behalf"] = true
+	}
+	return Record(ctx, ev)
 }
 
 // InsertEntry writes the row. It is a variable so that tests can make the insert fail.

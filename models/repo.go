@@ -295,6 +295,9 @@ func DeleteDeployKey(ctx context.Context, id, repoID int64) error {
 	if _, err := db.DeleteByID[asymkey_model.DeployKey](ctx, key.ID); err != nil {
 		return fmt.Errorf("delete deploy key [%d]: %w", key.ID, err)
 	}
+	if err := asymkey_model.RecordDeployKey(ctx, "credential.deploy_key.deleted", key); err != nil {
+		return err
+	}
 
 	if err := git_model.RemoveDeployKeyIDFromProtectionRules(ctx, key.RepoID, key.KeyID); err != nil {
 		return fmt.Errorf("remove deploy key [%d] from protection rules: %w", key.ID, err)
