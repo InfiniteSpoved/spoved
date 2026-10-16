@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
+	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	system_model "forgejo.org/models/system"
 	"forgejo.org/modules/cache"
@@ -32,6 +34,48 @@ import (
 
 // gitShortEmptySha Git short empty SHA
 const gitShortEmptySha = "0000000"
+
+// SaveRemoteAddress stores addr as the remote address of m, and records repo.mirror.updated when it differs from the
+// stored one: the origins and whether the rest of the URL or its credentials changed, never the address itself.
+func SaveRemoteAddress(ctx context.Context, m *repo_model.Mirror, addr string) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		stored := new(repo_model.Mirror)
+		if _, err := db.GetEngine(ctx).ID(m.ID).Get(stored); err != nil {
+			return err
+		}
+		old := ""
+		if maybe, err := stored.DecryptRemoteAddress(); err == nil {
+			_, old = maybe.Get()
+		}
+		oldURL, oldInfo := splitUserinfo(old)
+		newURL, newInfo := splitUserinfo(addr)
+		urlChanged, credentialsChanged := oldURL != newURL, oldInfo != newInfo
+		if urlChanged || credentialsChanged {
+			repo, err := repo_model.GetRepositoryByID(ctx, m.RepoID)
+			if err != nil {
+				return err
+			}
+			if err := repo_model.RecordRepo(ctx, "repo.mirror.updated", repo, map[string]any{
+				"before": map[string]any{"address": audit_model.Origin(old)}, "after": map[string]any{"address": audit_model.Origin(addr)},
+				"url_changed": urlChanged, "credentials_changed": credentialsChanged,
+			}); err != nil {
+				return err
+			}
+		}
+		return m.UpdateRemoteAddress(ctx, addr)
+	})
+}
+
+// splitUserinfo returns raw without its user info, and the user info; an unparsable raw is returned as it is.
+func splitUserinfo(raw string) (string, string) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw, ""
+	}
+	info := u.User.String()
+	u.User = nil
+	return u.String(), info
+}
 
 // UpdateAddress writes new address to Git repository and database
 func UpdateAddress(ctx context.Context, m *repo_model.Mirror, addr string) error {
@@ -802,7 +846,12 @@ func checkAndUpdateEmptyRepository(ctx context.Context, m *repo_model.Mirror, re
 		}
 		m.Repo.IsEmpty = false
 		// Update the is empty and default_branch columns
-		if err := repo_model.UpdateRepositoryCols(ctx, m.Repo, "default_branch", "is_empty"); err != nil {
+		if err := db.WithTx(ctx, func(ctx context.Context) error {
+			if err := repo_model.RecordRepoChange(ctx, m.Repo); err != nil {
+				return err
+			}
+			return repo_model.UpdateRepositoryCols(ctx, m.Repo, "default_branch", "is_empty")
+		}); err != nil {
 			log.Error("Failed to update default branch of repository %-v. Error: %v", m.Repo, err)
 			desc := fmt.Sprintf("Failed to update default branch of repository '%s': %v", m.Repo.RepoPath(), err)
 			if err = system_model.CreateRepositoryNotice(desc); err != nil {

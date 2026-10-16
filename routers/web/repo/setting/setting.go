@@ -566,7 +566,7 @@ func SettingsPost(ctx *context.Context) {
 			pullMirror.FilterError = ""
 			cols = append(cols, "filter_error")
 		}
-		if err := repo_model.UpdateMirrorCols(ctx, pullMirror, cols...); err != nil {
+		if err := repo_model.UpdateMirrorSettings(ctx, pullMirror, cols...); err != nil {
 			ctx.ServerError("UpdateMirror", err)
 			return
 		}
@@ -591,7 +591,7 @@ func SettingsPost(ctx *context.Context) {
 			return
 		}
 
-		if err := pullMirror.UpdateRemoteAddress(ctx, address); err != nil {
+		if err := mirror_service.SaveRemoteAddress(ctx, pullMirror, address); err != nil {
 			ctx.Data["Err_MirrorAddress"] = true
 			handleSettingRemoteAddrError(ctx, err, form)
 			return
@@ -630,7 +630,7 @@ func SettingsPost(ctx *context.Context) {
 
 		pullMirror.LFS = form.LFS
 		pullMirror.LFSEndpoint = form.LFSEndpoint
-		if err := repo_model.UpdateMirrorCols(ctx, pullMirror, "lfs_enabled", "lfs_endpoint"); err != nil {
+		if err := repo_model.UpdateMirrorSettings(ctx, pullMirror, "lfs_enabled", "lfs_endpoint"); err != nil {
 			ctx.ServerError("UpdateMirror", err)
 			return
 		}
@@ -1135,7 +1135,7 @@ func SettingsPost(ctx *context.Context) {
 			return
 		}
 
-		if err := repo_service.CancelRepositoryTransfer(ctx, ctx.Repo.Repository); err != nil {
+		if err := repo_service.CancelRepositoryTransfer(ctx, ctx.Repo.Repository, false); err != nil {
 			ctx.ServerError("CancelRepositoryTransfer", err)
 			return
 		}
@@ -1220,7 +1220,7 @@ func SettingsPost(ctx *context.Context) {
 			return
 		}
 
-		if err := repo_model.SetArchiveRepoState(ctx, repo, true); err != nil {
+		if err := repo_service.SetArchiveRepoState(ctx, repo, true); err != nil {
 			log.Error("Tried to archive a repo: %s", err)
 			ctx.Flash.Error(ctx.Tr("repo.settings.archive.error"))
 			ctx.Redirect(ctx.Repo.RepoLink + "/settings")
@@ -1242,7 +1242,7 @@ func SettingsPost(ctx *context.Context) {
 			return
 		}
 
-		if err := repo_model.SetArchiveRepoState(ctx, repo, false); err != nil {
+		if err := repo_service.SetArchiveRepoState(ctx, repo, false); err != nil {
 			log.Error("Tried to unarchive a repo: %s", err)
 			ctx.Flash.Error(ctx.Tr("repo.settings.unarchive.error"))
 			ctx.Redirect(ctx.Repo.RepoLink + "/settings")

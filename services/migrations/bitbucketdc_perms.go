@@ -537,17 +537,13 @@ func (p *bitbucketPlanner) planKeys(owner *BitbucketImportItem, endpoint string)
 	return nil
 }
 
-// addBitbucketCollaborator adds the user as a collaborator at the mode, unless they already are one. It is one
-// transaction, because AddCollaborator grants write before the mode is set.
+// addBitbucketCollaborator adds the user as a collaborator at the mode, unless they already are one.
 func addBitbucketCollaborator(ctx context.Context, repo *repo_model.Repository, u *user_model.User, mode perm.AccessMode) (existed bool, err error) {
 	err = db.WithTx(ctx, func(ctx context.Context) error {
 		if existed, err = repo_model.IsCollaborator(ctx, repo.ID, u.ID); err != nil || existed {
 			return err
 		}
-		if err := repo_module.AddCollaborator(ctx, repo, u); err != nil {
-			return err
-		}
-		return repo_module.ChangeCollaborationAccessMode(ctx, repo, u.ID, mode)
+		return repo_module.AddCollaborator(ctx, repo, u, mode)
 	})
 	return existed, err
 }

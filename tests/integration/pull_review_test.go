@@ -24,6 +24,7 @@ import (
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
+	"forgejo.org/models/perm"
 	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
 	unit_model "forgejo.org/models/unit"
@@ -118,7 +119,7 @@ func TestPullView_SelfReviewNotification(t *testing.T) {
 		})
 
 		// we need to add user1 as collaborator so it can be added as reviewer
-		err := repo_module.AddCollaborator(db.DefaultContext, repo, user1)
+		err := repo_module.AddCollaborator(db.DefaultContext, repo, user1, perm.AccessModeWrite)
 		require.NoError(t, err)
 
 		// create a new branch to prepare for pull request

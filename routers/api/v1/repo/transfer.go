@@ -263,5 +263,5 @@ func acceptOrRejectRepoTransfer(ctx *context.APIContext, accept bool) error {
 		return repo_service.TransferOwnership(ctx, repoTransfer.Doer, repoTransfer.Recipient, ctx.Repo().Repository, repoTransfer.Teams)
 	}
 
-	return repo_service.CancelRepositoryTransfer(ctx, ctx.Repo().Repository)
+	return repo_service.CancelRepositoryTransfer(ctx, ctx.Repo().Repository, true)
 }

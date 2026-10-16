@@ -226,7 +226,10 @@ func RestoreRepo(ctx context.Context, doer *user_model.User, id int64, opts Rest
 		if _, err = db.Exec(ctx, "UPDATE `user` SET num_repos=num_repos+1 WHERE id=?", repo.OwnerID); err != nil {
 			return err
 		}
-		return organization.AddTeamRepoCounts(ctx, repo.ID, 1)
+		if err := organization.AddTeamRepoCounts(ctx, repo.ID, 1); err != nil {
+			return err
+		}
+		return repo_model.RecordRepo(ctx, "repo.repository.restored", repo, nil)
 	}); err != nil {
 		return err
 	}

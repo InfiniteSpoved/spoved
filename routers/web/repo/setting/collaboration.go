@@ -105,7 +105,7 @@ func CollaborationPost(ctx *context.Context) {
 		}
 	}
 
-	if err = repo_module.AddCollaborator(ctx, ctx.Repo.Repository, u); err != nil {
+	if err = repo_module.AddCollaborator(ctx, ctx.Repo.Repository, u, perm.AccessModeWrite); err != nil {
 		if !errors.Is(err, user_model.ErrBlockedByUser) {
 			ctx.ServerError("AddCollaborator", err)
 			return

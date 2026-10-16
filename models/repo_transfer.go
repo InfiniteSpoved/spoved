@@ -112,9 +112,10 @@ func GetPendingRepositoryTransfer(ctx context.Context, repo *repo_model.Reposito
 	return transfer, nil
 }
 
-func DeleteRepositoryTransfer(ctx context.Context, repoID int64) error {
-	_, err := db.GetEngine(ctx).Where("repo_id = ?", repoID).Delete(&RepoTransfer{})
-	return err
+// DeleteRepositoryTransfer deletes the pending transfer of the repository, and reports whether there was one.
+func DeleteRepositoryTransfer(ctx context.Context, repoID int64) (bool, error) {
+	n, err := db.GetEngine(ctx).Where("repo_id = ?", repoID).Delete(&RepoTransfer{})
+	return n > 0, err
 }
 
 // TestRepositoryReadyForTransfer make sure repo is ready to transfer
@@ -170,7 +171,12 @@ func CreatePendingRepositoryTransfer(ctx context.Context, doer, newOwner *user_m
 			transfer.TeamIDs = append(transfer.TeamIDs, teams[k].ID)
 		}
 
-		return db.Insert(ctx, transfer)
+		if err := db.Insert(ctx, transfer); err != nil {
+			return err
+		}
+		return repo_model.RecordRepo(ctx, "repo.transfer.started", repo, map[string]any{
+			"to_owner_id": newOwner.ID, "to_owner_name": newOwner.Name, "team_ids": transfer.TeamIDs,
+		})
 	})
 }
 

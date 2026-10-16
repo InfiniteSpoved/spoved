@@ -152,7 +152,10 @@ func CreateRepoGroup(ctx context.Context, owner *user_model.User, name, descript
 		if err := takeGroupRedirectPath(ctx, owner, name, 0); err != nil {
 			return err
 		}
-		return db.Insert(ctx, group)
+		if err := db.Insert(ctx, group); err != nil {
+			return err
+		}
+		return RecordProject(ctx, "org.project.created", group, map[string]any{"name": name})
 	})
 }
 
@@ -166,6 +169,13 @@ func RenameRepoGroup(ctx context.Context, owner *user_model.User, group *RepoGro
 		return err
 	}
 	return db.WithTx(ctx, func(ctx context.Context) error {
+		if group.Name != newName {
+			if err := RecordProject(ctx, "org.project.renamed", group, map[string]any{
+				"before": map[string]any{"name": group.Name}, "after": map[string]any{"name": newName},
+			}); err != nil {
+				return err
+			}
+		}
 		if !strings.EqualFold(group.Name, newName) {
 			if err := releaseName(ctx, owner.ID, group.Name); err != nil {
 				return err

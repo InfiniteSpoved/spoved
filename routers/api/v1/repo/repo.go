@@ -1202,7 +1202,7 @@ func updateRepoArchivedState(ctx *context.APIContext, opts api.EditRepoOption) e
 			return err
 		}
 		if *opts.Archived {
-			if err := repo_model.SetArchiveRepoState(ctx, repo, *opts.Archived); err != nil {
+			if err := repo_service.SetArchiveRepoState(ctx, repo, *opts.Archived); err != nil {
 				log.Error("Tried to archive a repo: %s", err)
 				ctx.Error(http.StatusInternalServerError, "ArchiveRepoState", err)
 				return err
@@ -1212,7 +1212,7 @@ func updateRepoArchivedState(ctx *context.APIContext, opts api.EditRepoOption) e
 			}
 			log.Trace("Repository was archived: %s/%s", ctx.Repo().Owner.Name, repo.Name)
 		} else {
-			if err := repo_model.SetArchiveRepoState(ctx, repo, *opts.Archived); err != nil {
+			if err := repo_service.SetArchiveRepoState(ctx, repo, *opts.Archived); err != nil {
 				log.Error("Tried to un-archive a repo: %s", err)
 				ctx.Error(http.StatusInternalServerError, "ArchiveRepoState", err)
 				return err
@@ -1309,7 +1309,7 @@ func updateMirror(ctx *context.APIContext, opts api.EditRepoOption) error {
 	}
 
 	// finally update the mirror in the DB
-	if err := repo_model.UpdateMirrorCols(ctx, mirror, cols...); err != nil {
+	if err := repo_model.UpdateMirrorSettings(ctx, mirror, cols...); err != nil {
 		log.Error("Failed to Set Mirror Interval: %s", err)
 		ctx.Error(http.StatusUnprocessableEntity, "MirrorInterval", err)
 		return err

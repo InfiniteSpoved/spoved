@@ -489,7 +489,7 @@ func acceptOrRejectRepoTransfer(ctx *context.Context, accept bool) (bool, error)
 		}
 		ctx.Flash.Success(ctx.Tr("repo.settings.transfer.success"))
 	} else {
-		if err := repo_service.CancelRepositoryTransfer(ctx, ctx.Repo.Repository); err != nil {
+		if err := repo_service.CancelRepositoryTransfer(ctx, ctx.Repo.Repository, true); err != nil {
 			return false, err
 		}
 		ctx.Flash.Success(ctx.Tr("repo.settings.transfer.rejected"))

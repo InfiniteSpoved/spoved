@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"forgejo.org/models/db"
+	"forgejo.org/models/perm"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
@@ -69,7 +70,7 @@ func TestVisibleRepoGroupCondMatchesCanSee(t *testing.T) {
 	_, err := db.GetEngine(ctx).Exec("UPDATE `repository` SET trashed_unix = 1 WHERE group_id = ?", trashOnly.ID)
 	require.NoError(t, err)
 	// the outside collaborator user5 sees the private repository of "secret"
-	require.NoError(t, repo_module.AddCollaborator(ctx, f.hid, user5))
+	require.NoError(t, repo_module.AddCollaborator(ctx, f.hid, user5, perm.AccessModeWrite))
 	// limited_org36 (members user1, user5)
 	limited := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 36})
 	project(limited, "lim", "lpub", false)

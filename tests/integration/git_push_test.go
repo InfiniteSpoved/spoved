@@ -13,6 +13,7 @@ import (
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
+	"forgejo.org/models/perm"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
@@ -284,7 +285,7 @@ func testOptionsGitPush(t *testing.T, u *url.URL) {
 		})
 
 		// give write access to the collaborator
-		require.NoError(t, repo_module.AddCollaborator(db.DefaultContext, repo, collaborator))
+		require.NoError(t, repo_module.AddCollaborator(db.DefaultContext, repo, collaborator, perm.AccessModeWrite))
 
 		t.Run("Collaborator with write access is allowed to push", func(t *testing.T) {
 			branchName := "branch4"

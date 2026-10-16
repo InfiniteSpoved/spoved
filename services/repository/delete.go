@@ -93,6 +93,16 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepo
 	}, func(ctx context.Context) error {
 		sess := db.GetEngine(ctx)
 
+		counts, err := deleteCounts(ctx, repo.ID)
+		if err != nil {
+			return err
+		}
+		if err := repo_model.RecordRepo(ctx, "repo.repository.deleted", repo, map[string]any{
+			"counts": counts, "purge": repo.TrashedUnix != 0, // deleting it from the trash purges it
+		}); err != nil {
+			return err
+		}
+
 		// In case owner is a organization, we have to change repo specific teams
 		// if ignoreOrgTeams is not true
 		// (a trashed repository can have an owner in the trash)
@@ -581,4 +591,32 @@ func DeleteOwnerRepositoriesDirectly(ctx context.Context, owner *user_model.User
 		}
 	}
 	return nil
+}
+
+// deleteCounts counts the rows deleting the repository repoID removes with it, for its audit entry.
+func deleteCounts(ctx context.Context, repoID int64) (map[string]int64, error) {
+	counts := map[string]int64{}
+	for _, c := range []struct {
+		name, table string
+		cond        builder.Cond
+	}{
+		{"collaborators", "collaboration", builder.Eq{"repo_id": repoID}},
+		{"teams", "team_repo", builder.Eq{"repo_id": repoID}},
+		{"deploy_keys", "deploy_key", builder.Eq{"repo_id": repoID}},
+		{"deploy_key_selections", "org_deploy_key_repo", builder.Eq{"repo_id": repoID}},
+		{"runners", "action_runner", builder.Eq{"repo_id": repoID}.And(builder.IsNull{"deleted"}.Or(builder.Eq{"deleted": 0}))},
+		{"runner_tokens", "action_runner_token", builder.Eq{"repo_id": repoID}},
+		{"token_selections", "access_token_resource_repo", builder.Eq{"repo_id": repoID}},
+		{"secrets", "secret", builder.Eq{"repo_id": repoID}},
+		{"variables", "action_variable", builder.Eq{"repo_id": repoID}},
+		{"webhooks", "webhook", builder.Eq{"repo_id": repoID}},
+		{"branch_rules", "protected_branch", builder.Eq{"repo_id": repoID}},
+	} {
+		n, err := db.GetEngine(ctx).Table(c.table).Where(c.cond).Count()
+		if err != nil {
+			return nil, err
+		}
+		counts[c.name] = n
+	}
+	return counts, nil
 }

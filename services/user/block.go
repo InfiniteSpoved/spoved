@@ -6,6 +6,7 @@ import (
 	"context"
 
 	model "forgejo.org/models"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
@@ -65,6 +66,9 @@ func BlockUser(ctx context.Context, userID, blockID int64) error {
 		return err
 	}
 
+	if err := recordBlockedCollaborations(ctx, collabsID, blockID); err != nil {
+		return err
+	}
 	_, err = db.GetEngine(ctx).In("id", collabsID).Delete(&repo_model.Collaboration{})
 	if err != nil {
 		return err
@@ -87,6 +91,19 @@ func BlockUser(ctx context.Context, userID, blockID int64) error {
 		return err
 	}
 
+	var transfers []*model.RepoTransfer
+	if err := db.GetEngine(ctx).In("id", pendingTransfersIDs).Find(&transfers); err != nil {
+		return err
+	}
+	for _, t := range transfers {
+		repo, err := repo_model.GetRepositoryByID(ctx, t.RepoID)
+		if err != nil {
+			return err
+		}
+		if err := repo_model.RecordRepo(ctx, "repo.transfer.canceled", repo, map[string]any{"reason": "blocked"}); err != nil {
+			return err
+		}
+	}
 	_, err = db.GetEngine(ctx).In("id", pendingTransfersIDs).Delete(&model.RepoTransfer{})
 	if err != nil {
 		return err
@@ -100,4 +117,30 @@ func BlockUser(ctx context.Context, userID, blockID int64) error {
 	}
 
 	return committer.Commit()
+}
+
+// recordBlockedCollaborations records repo.collaborator.removed for each collaboration of the blocked user being
+// removed.
+func recordBlockedCollaborations(ctx context.Context, ids []int64, blockID int64) error {
+	var collabs []*repo_model.Collaboration
+	if err := db.GetEngine(ctx).In("id", ids).Find(&collabs); err != nil {
+		return err
+	}
+	blocked, err := user_model.GetPossibleUserByID(ctx, blockID)
+	if err != nil {
+		return err
+	}
+	for _, c := range collabs {
+		repo, err := repo_model.GetRepositoryByIDIncludingTrashed(ctx, c.RepoID)
+		if err != nil {
+			return err
+		}
+		if err := repo_model.RecordRepoTarget(ctx, repo, audit_model.Event{
+			Action: "repo.collaborator.removed", TargetType: "collaborator", TargetID: blockID, TargetName: blocked.Name,
+			Data: map[string]any{"user_id": blockID, "reason": "blocked"},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

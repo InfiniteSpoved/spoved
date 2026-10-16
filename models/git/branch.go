@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
@@ -360,6 +361,12 @@ func RenameBranch(ctx context.Context, repo *repo_model.Repository, from, to str
 
 	// 2. update default branch if needed
 	isDefault := repo.DefaultBranch == from
+	if err := repo_model.RecordRepoTarget(ctx, repo, audit_model.Event{
+		Action: "repo.branch.renamed", TargetType: "branch", TargetName: to,
+		Data: map[string]any{"from": from, "to": to, "default": isDefault},
+	}); err != nil {
+		return err
+	}
 	if isDefault {
 		repo.DefaultBranch = to
 		_, err = sess.ID(repo.ID).Cols("default_branch").Update(repo)

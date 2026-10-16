@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
@@ -18,7 +19,6 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/cache"
 	"forgejo.org/modules/git"
-	"forgejo.org/modules/git/pushoptions"
 	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/private"
@@ -192,9 +192,7 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 			wasEmpty = repo.IsEmpty
 		}
 
-		repo.IsPrivate = opts.GetGitPushOptions().GetBool(pushoptions.RepoPrivate, repo.IsPrivate)
-		repo.IsTemplate = opts.GetGitPushOptions().GetBool(pushoptions.RepoTemplate, repo.IsTemplate)
-		if err := repo_model.UpdateRepositoryCols(ctx, repo, "is_private", "is_template"); err != nil {
+		if err := repo_service.UpdateRepositoryFromPushOptions(pusherActor(ctx, opts.UserID), repoID, opts.GetGitPushOptions()); err != nil {
 			log.Error("Failed to Update: %d Error: %v", repoID, err)
 			ctx.JSON(http.StatusInternalServerError, private.HookPostReceiveResult{
 				Err: fmt.Sprintf("Failed to Update: %d Error: %v", repoID, err),
@@ -401,4 +399,16 @@ func handlePullRequestMerging(ctx *app_context.PrivateContext, opts *private.Hoo
 		log.Error("Failed to update PR to merged: %v", err)
 		ctx.JSON(http.StatusInternalServerError, private.HookPostReceiveResult{Err: "Failed to update PR to merged"})
 	}
+}
+
+// pusherActor is ctx with the pusher userID, read from the user row, as the audit actor; the request ID stays.
+func pusherActor(ctx *app_context.PrivateContext, userID int64) context.Context {
+	a := &audit_model.Actor{Type: audit_model.ActorUser, ID: userID}
+	if outer := audit_model.ActorFromContext(ctx); outer != nil {
+		a.RequestID = outer.RequestID
+	}
+	if u, err := user_model.GetPossibleUserByID(ctx, userID); err == nil {
+		a.Name = u.Name
+	}
+	return audit_model.WithActor(ctx, a)
 }

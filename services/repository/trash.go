@@ -124,7 +124,12 @@ func trashRepositoryRows(ctx context.Context, doer *user_model.User, repo *repo_
 	if err := organization.AddTeamRepoCounts(ctx, repo.ID, -1); err != nil {
 		return err
 	}
-	if err := models.DeleteRepositoryTransfer(ctx, repo.ID); err != nil {
+	if !withOwner { // one trashed with its owner is counted on the owner's entry
+		if err := repo_model.RecordRepo(ctx, "repo.repository.trashed", repo, nil); err != nil {
+			return err
+		}
+	}
+	if _, err := models.DeleteRepositoryTransfer(ctx, repo.ID); err != nil {
 		return err
 	}
 	// forget what was indexed, so that a restore indexes the code again

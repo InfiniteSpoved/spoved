@@ -155,7 +155,7 @@ func TestActionsScheduledDispatch(t *testing.T) {
 			}
 			// a writer who is neither the scheduler nor an admin
 			peer := forgery.CreateUser(t, nil)
-			require.NoError(t, repo_module.AddCollaborator(t.Context(), repo, peer))
+			require.NoError(t, repo_module.AddCollaborator(t.Context(), repo, peer, perm.AccessModeWrite))
 			require.NoError(t, repo_module.ChangeCollaborationAccessMode(t.Context(), repo, peer.ID, perm.AccessModeWrite))
 			sd = schedule(ownerToken, "dispatch.yml", time.Now().Add(time.Hour), in, http.StatusCreated)
 			del(getUserToken(t, peer.LowerName, auth_model.AccessTokenScopeWriteRepository), sd.ID, http.StatusForbidden)

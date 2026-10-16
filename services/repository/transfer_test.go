@@ -98,7 +98,7 @@ func TestRepositoryTransfer(t *testing.T) {
 	assert.NotNil(t, transfer)
 
 	// Cancel transfer
-	require.NoError(t, CancelRepositoryTransfer(db.DefaultContext, repo))
+	require.NoError(t, CancelRepositoryTransfer(db.DefaultContext, repo, false))
 
 	transfer, err = models.GetPendingRepositoryTransfer(db.DefaultContext, repo)
 	require.Error(t, err)
@@ -126,5 +126,5 @@ func TestRepositoryTransfer(t *testing.T) {
 	require.Error(t, err)
 
 	// Cancel transfer
-	require.NoError(t, CancelRepositoryTransfer(db.DefaultContext, repo))
+	require.NoError(t, CancelRepositoryTransfer(db.DefaultContext, repo, false))
 }
