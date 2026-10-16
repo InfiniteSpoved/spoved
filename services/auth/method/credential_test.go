@@ -10,6 +10,7 @@ import (
 	asymkey_model "forgejo.org/models/asymkey"
 	audit_model "forgejo.org/models/audit"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/lfs"
 	"forgejo.org/services/auth"
 
 	"github.com/stretchr/testify/assert"
@@ -30,7 +31,7 @@ func TestCredential(t *testing.T) {
 		{&sessionAuthenticationResult{user: u}, audit_model.Credential{Type: "session", OwnerID: 7}},
 		{&basicPaswordAuthenticationResult{user: u}, audit_model.Credential{Type: "password", OwnerID: 7}},
 		{&reverseProxyAuthenticationResult{user: u}, audit_model.Credential{Type: "reverse_proxy", OwnerID: 7}},
-		{&lfsTokenAuthenticationResult{user: u}, audit_model.Credential{Type: "unknown", OwnerID: 7}},
+		{&lfsTokenAuthenticationResult{user: u, claims: &lfs.Claims{}}, audit_model.Credential{Type: "unknown"}},
 		{&auth.UnauthenticatedResult{}, audit_model.Credential{}},
 	} {
 		assert.Equal(t, c.want, c.result.Credential(), "%T", c.result)
