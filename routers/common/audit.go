@@ -27,24 +27,39 @@ import (
 // SetAuditActor stores the request's audit actor right after authentication. It is stored once per request; API sudo
 // changes it in place (Actor.SetSudo).
 func SetAuditActor(ctx *context.Base, ar auth_service.AuthenticationResult) {
-	a := &audit_model.Actor{
-		Type:       audit_model.ActorAnonymous,
-		Credential: ar.Credential(),
-		UserAgent:  audit_model.Text(ctx.Req.UserAgent(), audit_model.MaxUserAgent), // capped here: actors are copied into aggregates
-		RequestID:  util.CryptoRandomString(util.RandomStringMedium),                // never the client's X-Request-ID
-	}
+	a := RequestAuditActor(ctx.Req)
+	a.Credential = ar.Credential()
 	if u := ar.User(); u != nil {
 		a.Type, a.ID, a.Name = audit_model.ActorUser, u.ID, u.Name
 		if u.ID == user_model.ActionsUserID {
 			a.Type = audit_model.ActorActions
 		}
 	}
-	if peer, candidates, ok := httplib.AmbiguousClientIP(ctx.Req); ok {
+	ctx.AppendContextValue(audit_model.ActorContextKey, a)
+}
+
+// RequestAuditActor is the anonymous actor of req: its client IP, user agent and a new request ID. req must have
+// passed ProtocolMiddlewares, so that the client IP comes from trusted proxies only.
+func RequestAuditActor(req *http.Request) *audit_model.Actor {
+	a := &audit_model.Actor{
+		Type:      audit_model.ActorAnonymous,
+		UserAgent: audit_model.Text(req.UserAgent(), audit_model.MaxUserAgent), // capped here: actors are copied into aggregates
+		RequestID: util.CryptoRandomString(util.RandomStringMedium),            // never the client's X-Request-ID
+	}
+	if peer, candidates, ok := httplib.AmbiguousClientIP(req); ok {
 		a.IP, a.IPAmbiguous, a.IPCandidates = peer, true, slices.Clone(candidates[:min(len(candidates), audit_model.MaxIPCandidates)]) // never the parsed header's array
 	} else {
-		a.IP = auditPeer(ctx.Req.RemoteAddr, ClientIP(ctx.Req))
+		a.IP = auditPeer(req.RemoteAddr, ClientIP(req))
 	}
-	ctx.AppendContextValue(audit_model.ActorContextKey, a)
+	return a
+}
+
+// WithRequestAuditActor stores the request's anonymous actor for handlers that authenticate by themselves, such as
+// the runner RPC, which fill in who it is once they know.
+func WithRequestAuditActor(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		next.ServeHTTP(w, req.WithContext(audit_model.WithActor(req.Context(), RequestAuditActor(req))))
+	})
 }
 
 // UsableAuditReader reports whether the doer may read the audit log: a site admin or an auditor whose account can

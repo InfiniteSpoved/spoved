@@ -9,6 +9,7 @@ import (
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/api/actions/ping"
 	"forgejo.org/routers/api/actions/runner"
+	"forgejo.org/routers/common"
 )
 
 func Routes(prefix string) *web.Route {
@@ -18,7 +19,7 @@ func Routes(prefix string) *web.Route {
 	m.Post(path+"*", http.StripPrefix(prefix, handler).ServeHTTP)
 
 	path, handler = runner.NewRunnerServiceHandler()
-	m.Post(path+"*", http.StripPrefix(prefix, handler).ServeHTTP)
+	m.Post(path+"*", common.WithRequestAuditActor(http.StripPrefix(prefix, handler)).ServeHTTP)
 
 	m.Mount("/.well-known", OIDCRoutes(prefix))
 	m.Get(idTokenRouteBase, IDTokenContexter(), generateIDToken)

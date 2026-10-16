@@ -56,8 +56,19 @@ var auditedWrites = map[string]string{
 	"models/asymkey.DeleteOrgDeployKey":            "records credential.org_deploy_key|project_deploy_key.deleted",
 	"models/asymkey.SetOrgDeployKeyRepos":          "records credential.org_deploy_key.updated",
 	"models/asymkey.RemoveOrgDeployKeyRepo":        "records credential.org_deploy_key.updated",
-	"services/repository.DeleteRepositoryDirectly": "selection rows of the deleted repository: part of the repository delete (settings audit)",
+	"services/repository.DeleteRepositoryDirectly": "selection rows and runners of the deleted repository: part of the repository delete (settings audit)",
 	"services/repository.transferOwnership":        "selection rows of the moved repository: part of the transfer (settings audit)",
+
+	// OAuth2 apps and grants, authorized integrations, runners
+	"models/auth.deleteOAuth2Application":            "its caller DeleteOAuth2Application records credential.oauth2_app.deleted; Init removes builtin apps unrecorded",
+	"models/auth.RevokeOAuth2Grant":                  "records credential.oauth2_grant.revoked",
+	"models/auth.DeleteOAuth2RelictsByUserID":        "counted in account.user.deleted (bulk, with the account)",
+	"models/auth.DeleteOrphanedOAuth2Applications":   "doctor: apps of users that no longer exist",
+	"models/auth.DeleteAuthorizedIntegrationByID":    "records credential.authorized_integration.deleted",
+	"models/actions.deleteRunner":                    "records credential.runner.deleted",
+	"models/actions.FixRunnersWithoutBelongingOwner": "doctor: runners of owners that no longer exist",
+	"models/actions.FixRunnersWithoutBelongingRepo":  "doctor: runners of repositories that no longer exist",
+	"models/organization.DeleteOrganization":         "runners of the deleted organization: part of the organization delete (settings audit)",
 }
 
 // TestAuditCallSites walks the code for writes of the audited user columns (UpdateUserCols, and Update/Exec chains on
@@ -168,6 +179,13 @@ func isAuditedWrite(call *ast.CallExpr) bool {
 			}
 		}
 		return slices.ContainsFunc(call.Args, mapHasAuditedKey)
+	case "From":
+		if del := receiverCall(call); del == nil || callName(del.Fun) != "Delete" {
+			return false
+		}
+		return slices.ContainsFunc(literals(call), func(l string) bool {
+			return slices.Contains(auditedDeleteTables, strings.Trim(l, "`\""))
+		})
 	case "Delete", "DeleteByBean", "DeleteBeans", "DeleteByID":
 		return slices.ContainsFunc(append([]ast.Expr{call.Fun}, call.Args...), func(a ast.Expr) bool {
 			return slices.ContainsFunc(auditedDeletes, func(typ string) bool { return mentionsType(a, typ) })
@@ -177,7 +195,13 @@ func isAuditedWrite(call *ast.CallExpr) bool {
 }
 
 // auditedDeletes are the credential types whose deletes the audit log must see.
-var auditedDeletes = []string{"PublicKey", "AccessToken", "GPGKey", "DeployKey", "OrgDeployKey", "OrgDeployKeyRepo"}
+var auditedDeletes = []string{
+	"PublicKey", "AccessToken", "GPGKey", "DeployKey", "OrgDeployKey", "OrgDeployKeyRepo",
+	"OAuth2Application", "OAuth2Grant", "AuthorizedIntegration", "ActionRunner",
+}
+
+// auditedDeleteTables are the tables of auditedDeletes that raw deletes (builder.Delete(...).From(table)) name.
+var auditedDeleteTables = []string{"oauth2_application", "oauth2_grant", "authorized_integration", "action_runner"}
 
 func isAuditedColumn(s string) bool {
 	return slices.Contains(auditedUserColumns, s)

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	actions_model "forgejo.org/models/actions"
-	"forgejo.org/models/db"
 	actions_module "forgejo.org/modules/actions"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
@@ -215,45 +214,19 @@ func CleanupLogs(ctx context.Context) error {
 
 // CleanupEphemeralRunners removes used ephemeral runners which are no longer able to process jobs
 func CleanupEphemeralRunners(ctx context.Context) error {
-	var ids []int
-	err := db.GetEngine(ctx).
-		Table("`action_runner`").
-		Select("DISTINCT `action_runner`.id").
-		Join("INNER", "`action_task`", "`action_task`.`runner_id` = `action_runner`.`id`").
-		Where(builder.Eq{"`action_runner`.`ephemeral`": true}).
-		And(builder.In("`action_task`.`status`", actions_model.DoneStatuses())).
-		Find(&ids)
-	if err != nil {
-		return fmt.Errorf("failed to find ephemeral runners: %w", err)
-	}
-
-	res, err := db.GetEngine(ctx).
-		In("id", ids).
-		Delete(&actions_model.ActionRunner{})
-	if err != nil {
+	done := builder.Select("runner_id").From("action_task").Where(builder.In("status", actions_model.DoneStatuses()))
+	if err := actions_model.DeleteEphemeralRunners(ctx, builder.In("id", done)); err != nil {
 		return fmt.Errorf("failed to delete ephemeral runners: %w", err)
 	}
-
-	log.Info("Removed %d ephemeral runners", res)
 	return nil
 }
 
 // CleanupEphemeralRunnersByPickedTaskOfRepo removes all ephemeral runners that have active/finished tasks on the given repository
 func CleanupEphemeralRunnersByPickedTaskOfRepo(ctx context.Context, repoID int64) error {
-	subQuery := builder.Select("`action_runner`.id").
-		From(builder.Select("*").From("`action_runner`"), "`action_runner`"). // mysql needs this redundant subquery
-		Join("INNER", "`action_task`", "`action_task`.`runner_id` = `action_runner`.`id`").
-		Where(builder.And(builder.Eq{"`action_runner`.`ephemeral`": true}, builder.Eq{"`action_task`.`repo_id`": repoID}))
-	b := builder.Delete(builder.In("id", subQuery)).From("`action_runner`")
-	res, err := db.GetEngine(ctx).Exec(b)
-	if err != nil {
-		return fmt.Errorf("find runners: %w", err)
+	picked := builder.Select("runner_id").From("action_task").Where(builder.Eq{"repo_id": repoID})
+	if err := actions_model.DeleteEphemeralRunners(ctx, builder.In("id", picked)); err != nil {
+		return fmt.Errorf("delete runners: %w", err)
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	log.Info("Removed %d runners", affected)
 	return nil
 }
 

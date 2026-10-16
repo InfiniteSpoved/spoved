@@ -7,6 +7,8 @@ package audit
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"reflect"
 	"strings"
 
 	"forgejo.org/models/db"
@@ -104,7 +106,10 @@ type Event struct {
 
 // Fields lists the data keys kept per target type. Secrets (token values, hashes, salts, last eight) are never listed.
 var Fields = map[string][]string{
-	"access_token":   {"name", "scopes", "expires", "resource_all_repos", "repo_ids"},
+	"access_token": {"name", "scopes", "expires", "resource_all_repos", "repo_ids"},
+	"authorized_integration": {
+		"name", "issuer", "scopes", "resource_all_repos", "repo_ids", "ui", "claim_rules_changed",
+	},
 	"audit_export":   {"format", "filter", "capped", "through_id"},
 	"credential_use": {"method"},
 	"deploy_key":     {"expires", "name", "fingerprint", "mode"},
@@ -119,10 +124,13 @@ var Fields = map[string][]string{
 		"counts", "purge", "tombstone", "tombstone_removed", "role", "group_id", "user_ids", "count", "login_source_id",
 	},
 	"instance":           {"version", "config_sha256"},
-	"oauth2_app":         {"secret_expires"},
+	"oauth2_app":         {"name", "redirect_uris", "confidential", "secret_expires", "counts"},
+	"oauth2_grant":       {"app_id", "app_name", "scopes"},
 	"org_deploy_key":     {"expires", "name", "fingerprint", "mode", "all_repos", "repo_ids", "repos_added", "repos_removed"},
 	"project_deploy_key": {"expires", "name", "fingerprint", "mode", "all_repos", "repo_ids", "repos_added", "repos_removed"},
 	"refusal":            {"reason", "class", "method"},
+	"runner":             {"name", "labels", "level", "ephemeral", "token_reset"},
+	"runner_token":       {"level"},
 	"signin":             {"method", "reason"},
 	"ssh_key":            {"expires", "name", "fingerprint", "key_type", "login_source_id"},
 }
@@ -219,6 +227,34 @@ func Record(ctx context.Context, ev Event) error {
 		TargetName:        Text(ev.TargetName, maxText),
 		Data:              encoded,
 	})
+}
+
+// Changes returns the fields of after whose value differs from before, as data's "before" and "after"; nil when none
+// differs.
+func Changes(before, after map[string]any) map[string]any {
+	b, a := map[string]any{}, map[string]any{}
+	for k, v := range after {
+		if !reflect.DeepEqual(before[k], v) {
+			b[k], a[k] = before[k], v
+		}
+	}
+	if len(a) == 0 {
+		return nil
+	}
+	return map[string]any{"before": b, "after": a}
+}
+
+// URL is raw without its user info, query and fragment, so that no value they carry is recorded; "" when raw doesn't
+// parse. Of an opaque URI (scheme:anything) only the scheme is kept.
+func URL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	if u.Opaque != "" {
+		return u.Scheme + ":"
+	}
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
 }
 
 // Text strips control characters and cuts s to at most n bytes at a rune boundary.

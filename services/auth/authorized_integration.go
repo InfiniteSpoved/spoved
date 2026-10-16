@@ -12,9 +12,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	user_model "forgejo.org/models/user"
@@ -24,6 +26,7 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/proxy"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/util"
 	"forgejo.org/services/authz"
 
 	"github.com/gobwas/glob"
@@ -251,7 +254,7 @@ func InsertAuthorizedIntegration(ctx context.Context, ai *auth_model.AuthorizedI
 				return err
 			}
 		}
-		return nil
+		return auth_model.RecordAuthorizedIntegration(ctx, "credential.authorized_integration.created", ai, auth_model.IntegrationFields(ai, resourceRepoIDs(ai, repoResources)))
 	})
 }
 
@@ -268,11 +271,46 @@ func UpdateAuthorizedIntegration(ctx context.Context, ai *auth_model.AuthorizedI
 	}
 
 	return db.WithTx(ctx, func(ctx context.Context) error {
+		old := &auth_model.AuthorizedIntegration{}
+		if has, err := db.GetEngine(ctx).ID(ai.ID).Get(old); err != nil {
+			return err
+		} else if !has {
+			return fmt.Errorf("authorized integration %d: %w", ai.ID, util.ErrNotExist)
+		}
+		oldRepos, err := auth_model.GetRepositoriesAccessibleWithIntegration(ctx, ai.ID)
+		if err != nil {
+			return err
+		}
 		if err := auth_model.UpdateAuthorizedIntegration(ctx, ai); err != nil {
 			return err
 		}
-		return auth_model.UpdateAuthorizedIntegrationResourceRepos(ctx, ai.ID, repoResources)
+		if err := auth_model.UpdateAuthorizedIntegrationResourceRepos(ctx, ai.ID, repoResources); err != nil {
+			return err
+		}
+		changes := audit_model.Changes(auth_model.IntegrationFields(old, resourceRepoIDs(old, oldRepos)), auth_model.IntegrationFields(ai, resourceRepoIDs(ai, repoResources)))
+		if !reflect.DeepEqual(old.ClaimRules, ai.ClaimRules) {
+			if changes == nil {
+				changes = map[string]any{}
+			}
+			changes["claim_rules_changed"] = true // never the rules (#17 Q4)
+		}
+		if changes == nil {
+			return nil
+		}
+		return auth_model.RecordAuthorizedIntegration(ctx, "credential.authorized_integration.updated", ai, changes)
 	})
+}
+
+// resourceRepoIDs are the repositories the integration is limited to, nil when it reaches all of them.
+func resourceRepoIDs(ai *auth_model.AuthorizedIntegration, resources []*auth_model.AuthorizedIntegResourceRepo) []int64 {
+	if ai.ResourceAllRepos {
+		return nil
+	}
+	ids := make([]int64, 0, len(resources))
+	for _, r := range resources {
+		ids = append(ids, r.RepoID)
+	}
+	return ids
 }
 
 func validateExternalIssuer(issuer string) error {

@@ -73,6 +73,12 @@ func TestActionCatalog(t *testing.T) {
 		assert.True(t, tests[action], "%s has no test", action)
 		assert.NotEmpty(t, locale["admin.audit.action."+action], "%s has no phrase", action)
 	}
+	for _, actor := range []string{
+		audit_model.ActorAnonymous, audit_model.ActorDeployKey, audit_model.ActorActions,
+		audit_model.ActorRunner, audit_model.ActorSystem, audit_model.ActorCLI, audit_model.ActorUnknown,
+	} {
+		assert.NotEmpty(t, locale["admin.audit.actor."+actor], "actor %s has no phrase", actor)
+	}
 }
 
 // TestFieldsHoldNoSecrets fails when a whitelist lists a field that holds a secret.

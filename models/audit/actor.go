@@ -10,6 +10,7 @@ const (
 	ActorAnonymous = "anonymous"
 	ActorDeployKey = "deploy_key"
 	ActorActions   = "actions"
+	ActorRunner    = "runner" // an Actions runner, by its own secret
 	ActorSystem    = "system"
 	ActorCLI       = "cli"
 	ActorUnknown   = "unknown"
@@ -27,6 +28,8 @@ const (
 	CredentialOrgDeployKey          = "org_deploy_key"
 	CredentialProjectDeployKey      = "project_deploy_key"
 	CredentialOAuth2App             = "oauth2_app" // only as the target of an expired client secret
+	CredentialRunner                = "runner"
+	CredentialRunnerToken           = "runner_token" // a registration token, by its row: the token itself is never recorded
 	CredentialActionsTask           = "actions_task"
 	CredentialReverseProxy          = "reverse_proxy"
 	CredentialChefKey               = "chef_key"

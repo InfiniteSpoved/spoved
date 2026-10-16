@@ -42,14 +42,18 @@ func deleteUser(ctx context.Context, u *user_model.User, purge, keepRow bool) (e
 	// bulk below, without an entry of their own)
 	counts := map[string]int64{}
 	for name, bean := range map[string]any{
-		"access_tokens":   &auth_model.AccessToken{UID: u.ID},
-		"ssh_keys":        &asymkey_model.PublicKey{OwnerID: u.ID},
-		"gpg_keys":        &asymkey_model.GPGKey{OwnerID: u.ID},
-		"two_factor":      &auth_model.TwoFactor{UID: u.ID},
-		"webauthn":        &auth_model.WebAuthnCredential{UserID: u.ID},
-		"emails":          &user_model.EmailAddress{UID: u.ID},
-		"external_logins": &user_model.ExternalLoginUser{UserID: u.ID},
-		"openids":         &user_model.UserOpenID{UID: u.ID},
+		"access_tokens":           &auth_model.AccessToken{UID: u.ID},
+		"ssh_keys":                &asymkey_model.PublicKey{OwnerID: u.ID},
+		"gpg_keys":                &asymkey_model.GPGKey{OwnerID: u.ID},
+		"two_factor":              &auth_model.TwoFactor{UID: u.ID},
+		"webauthn":                &auth_model.WebAuthnCredential{UserID: u.ID},
+		"emails":                  &user_model.EmailAddress{UID: u.ID},
+		"external_logins":         &user_model.ExternalLoginUser{UserID: u.ID},
+		"openids":                 &user_model.UserOpenID{UID: u.ID},
+		"oauth2_apps":             &auth_model.OAuth2Application{UID: u.ID},
+		"oauth2_grants":           &auth_model.OAuth2Grant{UserID: u.ID},
+		"runners":                 &actions_model.ActionRunner{OwnerID: u.ID},
+		"authorized_integrations": &auth_model.AuthorizedIntegration{UserID: u.ID},
 	} {
 		if counts[name], err = e.Count(bean); err != nil {
 			return fmt.Errorf("count %s: %w", name, err)
