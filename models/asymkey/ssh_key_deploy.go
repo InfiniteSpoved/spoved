@@ -146,7 +146,7 @@ func AddDeployKey(ctx context.Context, repoID int64, name, content string, readO
 		return nil, err
 	}
 	if added {
-		return key, appendAuthorizedKeysToFile(pkey)
+		return key, appendKeyAfterCommit(pkey)
 	}
 	return key, nil
 }

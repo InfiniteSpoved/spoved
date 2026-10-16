@@ -145,7 +145,7 @@ func AddOrgDeployKey(ctx context.Context, orgID, groupID int64, name, content st
 	if err != nil || !added {
 		return key, err
 	}
-	return key, appendAuthorizedKeysToFile(pkey)
+	return key, appendKeyAfterCommit(pkey)
 }
 
 // checkOrgDeployKeyRepos refuses repositories that aren't live repositories of the organization.

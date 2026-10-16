@@ -81,7 +81,8 @@ func (key *PublicKey) AuthorizedString() string {
 	return AuthorizedStringForKey(key)
 }
 
-// addKey saves the key. Callers append it to the authorized_keys file after their transaction commits.
+// addKey saves the key. Callers append it to the authorized_keys file (appendKeyAfterCommit) after their own
+// transaction commits, so they must not run inside an outer transaction.
 func addKey(ctx context.Context, key *PublicKey) (err error) {
 	if len(key.Fingerprint) == 0 {
 		key.Fingerprint, err = CalcFingerprint(key.Content)
@@ -90,6 +91,16 @@ func addKey(ctx context.Context, key *PublicKey) (err error) {
 		}
 	}
 	return db.Insert(ctx, key)
+}
+
+// appendKeyAfterCommit appends a committed key to the authorized_keys file.
+func appendKeyAfterCommit(key *PublicKey) error {
+	if err := appendAuthorizedKeysToFile(key); err != nil {
+		// the key is saved; it works over SSH again once the file is rewritten (resync)
+		log.Error("appendAuthorizedKeysToFile: key %d: %v", key.ID, err)
+		return err
+	}
+	return nil
 }
 
 // AddPublicKey adds new public key to database and authorized_keys file.
@@ -140,7 +151,7 @@ func AddPublicKey(ctx context.Context, ownerID int64, name, content string, auth
 	if err := committer.Commit(); err != nil {
 		return nil, err
 	}
-	return key, appendAuthorizedKeysToFile(key)
+	return key, appendKeyAfterCommit(key)
 }
 
 // GetPublicKeyByID returns public key by given ID.

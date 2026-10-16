@@ -150,6 +150,7 @@ func TestRecordCredentialTruncatesSelection(t *testing.T) {
 	data := decode(t, e)
 	assert.Equal(t, true, data["truncated"])
 	assert.NotEmpty(t, data["repos_added"])
+	assert.Less(t, len(data["repos_added"].([]any)), len(ids))
 	assert.Equal(t, "k", data["name"])
 }
 

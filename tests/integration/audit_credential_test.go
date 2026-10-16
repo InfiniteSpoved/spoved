@@ -136,32 +136,45 @@ func TestAuditCredentialKeySync(t *testing.T) {
 	ctx := audit_model.WithSystem(t.Context(), "cron:sync_external_users")
 
 	content, fingerprint := newSSHKey(t)
+	content2, fingerprint2 := newSSHKey(t)
 	since := auditMaxID(t)
 	require.True(t, asymkey_model.AddPublicKeysBySource(ctx, user, source, []string{content}))
-	e := credentialOne(t, since, "credential.ssh_key.created")
+	require.True(t, asymkey_model.AddPublicKeysBySource(ctx, user, source, []string{content2}))
+	e := auditActions(t, since, "credential.ssh_key.created")[0]
 	assert.Equal(t, audit_model.ActorSystem, e.ActorType)
 	assert.Equal(t, "cron:sync_external_users", e.ActorName)
 	assert.EqualValues(t, 2, e.SubjectUserID)
 	assert.EqualValues(t, 77, auditData(t, e)["login_source_id"])
 	assert.NotContains(t, auditData(t, e), "on_behalf")
 
-	// a failed audit write keeps the key
+	// the second delete's audit write fails: the whole batch rolls back and both keys stay
 	func() {
-		defer test.MockVariableValue(&audit_model.InsertEntry, func(context.Context, *audit_model.Entry) error {
-			return errors.New("audit down")
+		calls := 0
+		defer test.MockVariableValue(&audit_model.InsertEntry, func(ctx context.Context, e *audit_model.Entry) error {
+			if calls++; calls == 2 {
+				return errors.New("audit down")
+			}
+			return db.Insert(ctx, e)
 		})()
+		since := auditMaxID(t)
 		asymkey_model.SynchronizePublicKeys(ctx, user, source, nil)
+		assert.Equal(t, 2, calls)
+		assert.Empty(t, auditActions(t, since, "credential.ssh_key.deleted"))
 	}()
 	unittest.AssertExistsAndLoadBean(t, &asymkey_model.PublicKey{Fingerprint: fingerprint})
+	unittest.AssertExistsAndLoadBean(t, &asymkey_model.PublicKey{Fingerprint: fingerprint2})
 
 	since = auditMaxID(t)
 	require.True(t, asymkey_model.SynchronizePublicKeys(ctx, user, source, nil))
-	e = credentialOne(t, since, "credential.ssh_key.deleted")
+	entries := auditActions(t, since, "credential.ssh_key.deleted")
+	require.Len(t, entries, 2)
+	e = entries[0]
 	assert.Equal(t, "cron:sync_external_users", e.ActorName)
 	data := auditData(t, e)
 	assert.Equal(t, "login_source_sync", data["reason"])
 	assert.EqualValues(t, 77, data["login_source_id"])
 	unittest.AssertNotExistsBean(t, &asymkey_model.PublicKey{Fingerprint: fingerprint})
+	unittest.AssertNotExistsBean(t, &asymkey_model.PublicKey{Fingerprint: fingerprint2})
 }
 
 func TestAuditCredentialGPGKey(t *testing.T) {
@@ -198,6 +211,8 @@ func TestAuditCredentialGPGKey(t *testing.T) {
 	e = credentialOne(t, since, "credential.gpg_key.verified")
 	assertSubject(t, e, 2, 2)
 	assert.Equal(t, true, auditData(t, e)["verified"])
+	require.NotEmpty(t, entity.Subkeys)
+	assert.Len(t, auditData(t, e)["subkey_ids"], len(entity.Subkeys))
 
 	since = auditMaxID(t)
 	require.NoError(t, asymkey_model.DeleteGPGKey(ctx, &user_model.User{ID: 2}, keys[0].ID))
@@ -232,14 +247,34 @@ func TestAuditCredentialDeployKey(t *testing.T) {
 	assert.Equal(t, repo.ID, credentialOne(t, since, "credential.deploy_key.deleted").RepoID)
 
 	// a repository delete records each of its keys
-	content, _ = newSSHKey(t)
-	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/audit-deploy/keys", api.CreateKeyOption{Title: "deploy2", Key: content}).
-		AddTokenAuth(token), http.StatusCreated)
+	for _, title := range []string{"deploy2", "deploy3"} {
+		content, _ = newSSHKey(t)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/audit-deploy/keys", api.CreateKeyOption{Title: title, Key: content}).
+			AddTokenAuth(token), http.StatusCreated)
+	}
 	since = auditMaxID(t)
 	MakeRequest(t, NewRequest(t, "DELETE", "/api/v1/repos/user2/audit-deploy").AddTokenAuth(token), http.StatusNoContent)
-	e = credentialOne(t, since, "credential.deploy_key.deleted")
-	assert.Equal(t, repo.ID, e.RepoID)
-	assert.Equal(t, "deploy2", e.TargetName)
+	entries := auditActions(t, since, "credential.deploy_key.deleted")
+	require.Len(t, entries, 2)
+	for _, e := range entries {
+		assert.Equal(t, repo.ID, e.RepoID)
+	}
+	assert.ElementsMatch(t, []string{"deploy2", "deploy3"}, []string{entries[0].TargetName, entries[1].TargetName})
+
+	// a key of a repository in a project records the project
+	org := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+	group, err := repo_model.CreateRepoGroup(t.Context(), org, "audit-deploy-project", "")
+	require.NoError(t, err)
+	_, err = db.GetEngine(t.Context()).Exec("UPDATE repository SET group_id = ? WHERE id = 3", group.ID)
+	require.NoError(t, err)
+	content, _ = newSSHKey(t)
+	since = auditMaxID(t)
+	_, err = asymkey_model.AddDeployKey(asActor(t, 2, "user2"), 3, "in-project", content, true, 0)
+	require.NoError(t, err)
+	e = credentialOne(t, since, "credential.deploy_key.created")
+	assert.EqualValues(t, 3, e.OwnerID)
+	assert.Equal(t, group.ID, e.GroupID)
+	assert.EqualValues(t, 3, e.RepoID)
 }
 
 func TestAuditCredentialOrgDeployKey(t *testing.T) {
@@ -346,8 +381,20 @@ func TestAuditCredentialFailClosed(t *testing.T) {
 	_, err = asymkey_model.AddPublicKey(ctx, 2, "fail-key", content, 0, 0)
 	require.Error(t, err)
 	unittest.AssertNotExistsBean(t, &asymkey_model.PublicKey{Fingerprint: fingerprint})
+	deployContent, deployFingerprint := newSSHKey(t)
+	_, err = asymkey_model.AddDeployKey(ctx, 1, "fail-deploy", deployContent, true, 0)
+	require.Error(t, err)
+	unittest.AssertNotExistsBean(t, &asymkey_model.DeployKey{Fingerprint: deployFingerprint})
+	unittest.AssertNotExistsBean(t, &asymkey_model.PublicKey{Fingerprint: deployFingerprint})
+	orgContent, orgFingerprint := newSSHKey(t)
+	_, err = asymkey_model.AddOrgDeployKey(ctx, 3, 0, "fail-org", orgContent, true, true, nil, 0)
+	require.Error(t, err)
+	unittest.AssertNotExistsBean(t, &asymkey_model.OrgDeployKey{Fingerprint: orgFingerprint})
+	unittest.AssertNotExistsBean(t, &asymkey_model.PublicKey{Fingerprint: orgFingerprint})
 	authorizedKeys, _ := os.ReadFile(filepath.Join(setting.SSH.RootPath, "authorized_keys"))
-	assert.NotContains(t, string(authorizedKeys), strings.Fields(content)[1])
+	for _, c := range []string{content, deployContent, orgContent} {
+		assert.NotContains(t, string(authorizedKeys), strings.Fields(c)[1])
+	}
 
 	before, err := asymkey_model.GetOrgDeployKeyRepoIDs(t.Context(), []int64{key.ID})
 	require.NoError(t, err)
