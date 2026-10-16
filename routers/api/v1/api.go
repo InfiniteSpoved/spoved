@@ -1724,7 +1724,7 @@ func Routes() *web.Route {
 		m.Group("/topics", func() {
 			m.Get("/search", repo.TopicSearch)
 		}, tokenRequiresScopes(auth_model.AccessTokenScopeCategoryRepository))
-	}, common.IPAllowlistAPI, common.CredentialUsedAPI, sudo(), common.MaintenanceAPI)
+	}, common.IPAllowlistAPI, common.CredentialUsedAPI, sudo(), common.APIActivity, common.MaintenanceAPI)
 
 	return m
 }

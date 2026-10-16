@@ -260,6 +260,7 @@ func updateWikiPage(ctx context.Context, doer *user_model.User, repo *repo_model
 		Remote: DefaultRemote,
 		Branch: fmt.Sprintf("%s:%s%s", commitHash.String(), git.BranchPrefix, repo.GetWikiBranchName()),
 		Env: repo_module.FullPushingEnvironment(
+			ctx,
 			doer,
 			doer,
 			repo,
@@ -386,6 +387,7 @@ func DeleteWikiPage(ctx context.Context, doer *user_model.User, repo *repo_model
 		Remote: DefaultRemote,
 		Branch: fmt.Sprintf("%s:%s%s", commitHash.String(), git.BranchPrefix, repo.GetWikiBranchName()),
 		Env: repo_module.FullPushingEnvironment(
+			ctx,
 			doer,
 			doer,
 			repo,

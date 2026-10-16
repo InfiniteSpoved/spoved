@@ -131,3 +131,17 @@ func RecordScoped(ctx context.Context, actions audit_model.LevelActions, ownerID
 	}
 	return audit_model.Record(ctx, ev)
 }
+
+// RecordPushRefused records a push to repo that the server refused, with its reason ("protected_branch", "force_push",
+// "push_rule", "size_lock", "org_policy", "deploy_key", "permission") and the ref, if one was refused. It is activity:
+// a failed write is logged and counted.
+func RecordPushRefused(ctx context.Context, repo *Repository, reason, ref string) {
+	data := map[string]any{"reason": reason}
+	if ref != "" {
+		data["ref"] = ref
+	}
+	audit_model.RecordActivity(ctx, audit_model.Event{
+		Action: "activity.git.push.refused", Result: audit_model.ResultRefused, OwnerID: repo.OwnerID, GroupID: repo.GroupID,
+		RepoID: repo.ID, TargetType: "git_push_refused", TargetID: repo.ID, TargetName: repo.FullName(), Data: data,
+	})
+}

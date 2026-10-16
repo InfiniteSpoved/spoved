@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	audit_model "forgejo.org/models/audit"
@@ -22,6 +23,8 @@ import (
 	"forgejo.org/services/auth/source/db"
 	"forgejo.org/services/authz"
 	"forgejo.org/services/context"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // SetAuditActor stores the request's audit actor right after authentication. It is stored once per request; API sudo
@@ -139,4 +142,72 @@ func CredentialUsed(method string) func(*context.Context) {
 // CredentialUsedAPI is CredentialUsed for the API, before sudo changes the actor.
 func CredentialUsedAPI(ctx *context.APIContext) {
 	audit_model.RecordCredentialUsed(ctx, "api")
+}
+
+// APIActivity records, after the handler, every API request of an authenticated actor that is not a read
+// (activity.api.write) and every request made with sudo (activity.api.sudo): its method, route pattern and status,
+// never the path, query or body. The target is the repository or organization the request was assigned, if it got
+// that far, else the actor.
+func APIActivity(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		next.ServeHTTP(w, req)
+		ctx := context.GetAPIContext(req)
+		ev := audit_model.Event{}
+		target := ""
+		if r := ctx.Repo(); r != nil && r.Repository != nil && r.HasAccess() {
+			ev.OwnerID, ev.GroupID, ev.RepoID, ev.TargetID, ev.TargetName = r.Repository.OwnerID, r.Repository.GroupID, r.Repository.ID, r.Repository.ID, r.Repository.FullName()
+			target = "repo"
+		} else if o := ctx.Org(); o != nil && o.Organization != nil {
+			ev.OwnerID, ev.TargetID, ev.TargetName = o.Organization.ID, o.Organization.ID, o.Organization.Name
+			target = "org"
+		}
+		recordRequest(req, ctx.Resp.WrittenStatus(), ev, target)
+	})
+}
+
+// PackageActivity is APIActivity for the package registries, whose target is the package owner. The PATCH chunks of
+// a container blob upload are left out: the upload is recorded by its final PUT.
+func PackageActivity(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		next.ServeHTTP(w, req)
+		if req.Method == http.MethodPatch && strings.HasPrefix(req.URL.Path, "/v2/") {
+			return
+		}
+		ctx := context.GetWebContext(req)
+		ev := audit_model.Event{}
+		target := ""
+		if ctx.Package != nil && ctx.Package.Owner != nil {
+			ev.OwnerID, ev.TargetID, ev.TargetName = ctx.Package.Owner.ID, ctx.Package.Owner.ID, ctx.Package.Owner.Name
+			target = "owner"
+		}
+		recordRequest(req, ctx.Resp.WrittenStatus(), ev, target)
+	})
+}
+
+func recordRequest(req *http.Request, status int, ev audit_model.Event, target string) {
+	a := audit_model.ActorFromContext(req.Context())
+	if a == nil || a.Type == audit_model.ActorAnonymous {
+		return
+	}
+	switch {
+	case req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions:
+		ev.Action = "activity.api.write"
+	case a.SudoByID != 0:
+		ev.Action = "activity.api.sudo"
+	default:
+		return
+	}
+	if target == "" {
+		ev.OwnerID, ev.TargetID, ev.TargetName, target = a.ID, a.ID, a.Name, "user"
+	}
+	if status == 0 {
+		status = http.StatusOK
+	}
+	ev.Result = audit_model.ResultSuccess
+	if status >= http.StatusBadRequest {
+		ev.Result = audit_model.ResultFailure
+	}
+	ev.SubjectUserID, ev.TargetType = a.ID, "api_request"
+	ev.Data = map[string]any{"method": req.Method, "route": chi.RouteContext(req.Context()).RoutePattern(), "status": status, "target": target}
+	audit_model.RecordActivity(req.Context(), ev)
 }

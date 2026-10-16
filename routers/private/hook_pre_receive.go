@@ -86,9 +86,7 @@ func (ctx *preReceiveContext) assertCanWriteCodeToBranch(branchName string) bool
 			sb.WriteString("\nYou can learn about creating pull requests with AGit in the documentation: ")
 			sb.WriteString(setting.AppDocsURL("user/git-cli/agit-support/"))
 		}
-		ctx.JSON(http.StatusForbidden, private.Response{
-			UserMsg: sb.String(),
-		})
+		ctx.refuse(http.StatusForbidden, "permission", git.BranchPrefix+branchName, sb.String())
 		return false
 	}
 	return true
@@ -112,10 +110,7 @@ func (ctx *preReceiveContext) assertCanWriteCode() bool {
 		if ctx.Written() {
 			return false
 		}
-		msg := fmt.Sprintf("User '%s' is not allowed to push to repository '%s/%s'.", ctx.user.Name, ctx.Repo.Repository.OwnerName, ctx.Repo.Repository.Name)
-		ctx.JSON(http.StatusForbidden, private.Response{
-			UserMsg: msg,
-		})
+		ctx.refuse(http.StatusForbidden, "permission", "", fmt.Sprintf("User '%s' is not allowed to push to repository '%s/%s'.", ctx.user.Name, ctx.Repo.Repository.OwnerName, ctx.Repo.Repository.Name))
 		return false
 	}
 	return true
@@ -139,9 +134,7 @@ func (ctx *preReceiveContext) AssertCreatePullRequest() bool {
 		if ctx.Written() {
 			return false
 		}
-		ctx.JSON(http.StatusForbidden, private.Response{
-			UserMsg: "User permission denied for creating pull-request.",
-		})
+		ctx.refuse(http.StatusForbidden, "permission", "", "User permission denied for creating pull-request.")
 		return false
 	}
 	return true
@@ -190,9 +183,11 @@ func (ctx *preReceiveContext) validatePushOptions() error {
 
 func (ctx *preReceiveContext) assertPushOptions() bool {
 	if err := ctx.validatePushOptions(); err != nil {
-		ctx.JSON(http.StatusForbidden, private.Response{
-			UserMsg: fmt.Sprintf("options validation failed: %v", err),
-		})
+		reason := "org_policy"
+		if errors.Is(err, errPermissionDenied) {
+			reason = "permission"
+		}
+		ctx.refuse(http.StatusForbidden, reason, "", fmt.Sprintf("options validation failed: %v", err))
 		return false
 	}
 	return true
@@ -223,9 +218,13 @@ func (ctx *preReceiveContext) checkQuota() error {
 }
 
 func (ctx *preReceiveContext) quotaExceeded() {
-	ctx.JSON(http.StatusRequestEntityTooLarge, private.Response{
-		UserMsg: "Quota exceeded",
-	})
+	ctx.refuse(http.StatusRequestEntityTooLarge, "size_lock", "", "Quota exceeded")
+}
+
+// refuse refuses the push with msg and records it in the audit log with its reason and the ref it refused, if any.
+func (ctx *preReceiveContext) refuse(status int, reason, ref, msg string) {
+	recordPushRefused(ctx.PrivateContext, ctx.opts, reason, ref)
+	ctx.JSON(status, private.Response{UserMsg: msg})
 }
 
 // HookPreReceive checks whether a individual commit is acceptable
@@ -299,9 +298,7 @@ func preReceiveBranch(ctx *preReceiveContext, oldCommitID, newCommitID string, r
 
 	if branchName == repo.DefaultBranch && newCommitID == objectFormat.EmptyObjectID().String() {
 		log.Warn("Forbidden: Branch: %s is the default branch in %-v and cannot be deleted", branchName, repo)
-		ctx.JSON(http.StatusForbidden, private.Response{
-			UserMsg: fmt.Sprintf("branch %s is the default branch and cannot be deleted", branchName),
-		})
+		ctx.refuse(http.StatusForbidden, "protected_branch", refFullName.String(), fmt.Sprintf("branch %s is the default branch and cannot be deleted", branchName))
 		return
 	}
 
@@ -355,9 +352,7 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 			return true
 		}
 		log.Warn("Forbidden: Branch: %s in %-v is protected from deletion", branchName, repo)
-		ctx.JSON(http.StatusForbidden, private.Response{
-			UserMsg: fmt.Sprintf("branch %s is protected from deletion", branchName),
-		})
+		ctx.refuse(http.StatusForbidden, "protected_branch", git.BranchPrefix+branchName, fmt.Sprintf("branch %s is protected from deletion", branchName))
 		return false
 	}
 
@@ -374,9 +369,7 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 		} else if len(output) > 0 && !(ctx.opts.DeployKeyKeyID != 0 && protectBranch.CanDeployKeyForcePush(ctx.deployKeyKeyID) ||
 			ctx.opts.DeployKeyKeyID == 0 && protectBranch.CanUserForcePush(ctx, ctx.user)) {
 			log.Warn("Forbidden: Branch: %s in %-v is protected from force push", branchName, repo)
-			ctx.JSON(http.StatusForbidden, private.Response{
-				UserMsg: fmt.Sprintf("branch %s is protected from force push", branchName),
-			})
+			ctx.refuse(http.StatusForbidden, "force_push", git.BranchPrefix+branchName, fmt.Sprintf("branch %s is protected from force push", branchName))
 			return false
 		}
 	}
@@ -394,9 +387,7 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 			}
 			unverifiedCommit := err.(*errUnverifiedCommit).sha
 			log.Warn("Forbidden: Branch: %s in %-v is protected from unverified commit %s", branchName, repo, unverifiedCommit)
-			ctx.JSON(http.StatusForbidden, private.Response{
-				UserMsg: fmt.Sprintf("branch %s is protected from unverified commit %s", branchName, unverifiedCommit),
-			})
+			ctx.refuse(http.StatusForbidden, "protected_branch", git.BranchPrefix+branchName, fmt.Sprintf("branch %s is protected from unverified commit %s", branchName, unverifiedCommit))
 			return false
 		}
 	}
@@ -449,9 +440,7 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 			// We are changing a protected file and we're not allowed to do that
 			if changedProtectedfiles {
 				log.Warn("Forbidden: Branch: %s in %-v is protected from changing file %s", branchName, repo, protectedFilePath)
-				ctx.JSON(http.StatusForbidden, private.Response{
-					UserMsg: fmt.Sprintf("branch %s is protected from changing file %s", branchName, protectedFilePath),
-				})
+				ctx.refuse(http.StatusForbidden, "protected_branch", git.BranchPrefix+branchName, fmt.Sprintf("branch %s is protected from changing file %s", branchName, protectedFilePath))
 				return false
 			}
 
@@ -474,9 +463,7 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 
 			// Or we're simply not able to push to this protected branch
 			log.Warn("Forbidden: User %d is not allowed to push to protected branch: %s in %-v", ctx.opts.UserID, branchName, repo)
-			ctx.JSON(http.StatusForbidden, private.Response{
-				UserMsg: fmt.Sprintf("Not allowed to push to protected branch %s", branchName),
-			})
+			ctx.refuse(http.StatusForbidden, "protected_branch", git.BranchPrefix+branchName, fmt.Sprintf("Not allowed to push to protected branch %s", branchName))
 			return false
 		}
 		// 6b. Merge (from UI or API)
@@ -510,9 +497,7 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 
 		if !allowedMerge {
 			log.Warn("Forbidden: User %d is not allowed to push to protected branch: %s in %-v and is not allowed to merge pr #%d", ctx.opts.UserID, branchName, repo, pr.Index)
-			ctx.JSON(http.StatusForbidden, private.Response{
-				UserMsg: fmt.Sprintf("Not allowed to push to protected branch %s", branchName),
-			})
+			ctx.refuse(http.StatusForbidden, "protected_branch", git.BranchPrefix+branchName, fmt.Sprintf("Not allowed to push to protected branch %s", branchName))
 			return false
 		}
 
@@ -535,9 +520,7 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 		// admin and the protected branch rule doesn't apply to admins.
 		if changedProtectedfiles && !exempt(protectBranch) {
 			log.Warn("Forbidden: Branch: %s in %-v is protected from changing file %s", branchName, repo, protectedFilePath)
-			ctx.JSON(http.StatusForbidden, private.Response{
-				UserMsg: fmt.Sprintf("branch %s is protected from changing file %s", branchName, protectedFilePath),
-			})
+			ctx.refuse(http.StatusForbidden, "protected_branch", git.BranchPrefix+branchName, fmt.Sprintf("branch %s is protected from changing file %s", branchName, protectedFilePath))
 			return false
 		}
 
@@ -545,9 +528,7 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 		if _, err := pull_service.CheckPullBranchProtections(ctx, pr, true, exempt); err != nil {
 			if models.IsErrDisallowedToMerge(err) {
 				log.Warn("Forbidden: User %d is not allowed push to protected branch %s in %-v and pr #%d is not ready to be merged: %s", ctx.opts.UserID, branchName, repo, pr.Index, err.Error())
-				ctx.JSON(http.StatusForbidden, private.Response{
-					UserMsg: fmt.Sprintf("Not allowed to push to protected branch %s and pr #%d is not ready to be merged: %s", branchName, ctx.opts.PullRequestID, err.Error()),
-				})
+				ctx.refuse(http.StatusForbidden, "protected_branch", git.BranchPrefix+branchName, fmt.Sprintf("Not allowed to push to protected branch %s and pr #%d is not ready to be merged: %s", branchName, ctx.opts.PullRequestID, err.Error()))
 				return false
 			}
 			log.Error("Unable to check if mergeable: protected branch %s in %-v and pr #%d. Error: %v", ctx.opts.UserID, branchName, repo, pr.Index, err)
@@ -596,9 +577,7 @@ func preReceiveTag(ctx *preReceiveContext, oldCommitID, newCommitID string, refF
 	}
 	if !isAllowed {
 		log.Warn("Forbidden: Tag %s in %-v is protected", tagName, ctx.Repo.Repository)
-		ctx.JSON(http.StatusForbidden, private.Response{
-			UserMsg: fmt.Sprintf("Tag %s is protected", tagName),
-		})
+		ctx.refuse(http.StatusForbidden, "protected_tag", refFullName.String(), fmt.Sprintf("Tag %s is protected", tagName))
 		return
 	}
 
@@ -697,9 +676,7 @@ func preReceivePull(ctx *preReceiveContext, oldCommitID, newCommitID string, ref
 		}
 		if ctx.user.ID != pr.Issue.PosterID {
 			msg := fmt.Sprintf("User '%s' is not allowed to push to pull request %d of repository '%s/%s'.", ctx.user.Name, pr.Index, ctx.Repo.Repository.OwnerName, ctx.Repo.Repository.Name)
-			ctx.JSON(http.StatusForbidden, private.Response{
-				UserMsg: msg,
-			})
+			ctx.refuse(http.StatusForbidden, "permission", refFullName.String(), msg)
 			return
 		}
 	}
@@ -741,9 +718,7 @@ func (ctx *preReceiveContext) loadPusherAndPermission() bool {
 			return false
 		}
 		if err != nil || deployKey.IsExpired() {
-			ctx.JSON(http.StatusForbidden, private.Response{
-				UserMsg: fmt.Sprintf("The deploy key is not authorized to push to %s/%s.", repo.OwnerName, repo.Name),
-			})
+			ctx.refuse(http.StatusForbidden, "deploy_key", "", fmt.Sprintf("The deploy key is not authorized to push to %s/%s.", repo.OwnerName, repo.Name))
 			return false
 		}
 		if err := repo.LoadOwner(ctx); err != nil {

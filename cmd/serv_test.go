@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/private"
+	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
@@ -160,4 +162,28 @@ func TestServRepoPath(t *testing.T) {
 
 	assert.Equal(t, "https://example.com/user2/repo1.git/info/lfs", servLFSHref(&private.ServCommandResults{OwnerName: "user2", RepoName: "repo1"}))
 	assert.Equal(t, "https://example.com/org3/proj/api.git/info/lfs", servLFSHref(&private.ServCommandResults{OwnerName: "org3", GroupName: "proj", RepoName: "api"}))
+}
+
+func TestServGitEnvAudit(t *testing.T) {
+	t.Setenv(repo_module.EnvAuditIP, "203.0.113.9")
+	t.Setenv(repo_module.EnvAuditRequestID, "forged")
+	lastEnv := func(env []string, key string) string {
+		v := "<unset>"
+		for _, kv := range env {
+			if s, ok := strings.CutPrefix(kv, key+"="); ok {
+				v = s
+			}
+		}
+		return v
+	}
+
+	env := servGitEnv(&private.ServCommandResults{KeyID: 3, UserID: 2, RequestID: "req"}, "192.0.2.1")
+	assert.Equal(t, "ssh_key:3", lastEnv(env, repo_module.EnvAuditCredential))
+	assert.Equal(t, "192.0.2.1", lastEnv(env, repo_module.EnvAuditIP))
+	assert.Equal(t, "req", lastEnv(env, repo_module.EnvAuditRequestID))
+
+	env = servGitEnv(&private.ServCommandResults{KeyID: 3, DeployKeyKeyID: 3, UserID: 2}, "")
+	assert.Empty(t, lastEnv(env, repo_module.EnvAuditCredential)) // the hook resolves the deploy key itself
+	assert.Empty(t, lastEnv(env, repo_module.EnvAuditIP))
+	assert.Empty(t, lastEnv(env, repo_module.EnvAuditRequestID))
 }

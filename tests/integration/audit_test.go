@@ -45,11 +45,11 @@ func auditMaxID(t *testing.T) int64 {
 }
 
 // auditOne returns the one entry of action written after the id since; there must be no other entry since then,
-// apart from sign-in and credential activity (category auth), which every request may add.
+// apart from sign-in, credential and request activity (categories auth and activity), which every request may add.
 func auditOne(t *testing.T, since int64, action string) *audit_model.Entry {
 	t.Helper()
 	var entries []*audit_model.Entry
-	require.NoError(t, db.GetEngine(t.Context()).Where("id > ? AND category <> ?", since, audit_model.CategoryAuth).OrderBy("id").Find(&entries))
+	require.NoError(t, db.GetEngine(t.Context()).Where("id > ? AND category NOT IN (?, ?)", since, audit_model.CategoryAuth, audit_model.CategoryActivity).OrderBy("id").Find(&entries))
 	require.Len(t, entries, 1)
 	require.Equal(t, action, entries[0].Action)
 	return entries[0]

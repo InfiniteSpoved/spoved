@@ -83,6 +83,7 @@ const (
 	CategoryAdmin      = "admin"
 	CategoryOrg        = "org"
 	CategoryRepo       = "repo"
+	CategoryActivity   = "activity"
 
 	ResultSuccess = "success"
 	ResultFailure = "failure"
@@ -115,12 +116,16 @@ var Fields = map[string][]string{
 	},
 	"audit_export":   {"format", "filter", "capped", "through_id"},
 	"credential_use": {"method"},
-	"deploy_key":     {"expires", "name", "fingerprint", "mode"},
-	"email":          {"address", "primary", "activated"},
-	"gpg_key":        {"key_id", "subkey_ids", "verified", "expires"},
-	"external_login": {"login_source_id", "external_id"},
-	"openid":         {"uri"},
-	"two_factor":     {"type", "name"},
+	// activity: what a request or a push did, never its body, query or content
+	"api_request":      {"method", "route", "status", "target"},
+	"git_push":         {"refs", "more", "forced_count", "forced_unknown", "deleted_count", "wiki", "trigger"},
+	"git_push_refused": {"ref"},
+	"deploy_key":       {"expires", "name", "fingerprint", "mode"},
+	"email":            {"address", "primary", "activated"},
+	"gpg_key":          {"key_id", "subkey_ids", "verified", "expires"},
+	"external_login":   {"login_source_id", "external_id"},
+	"openid":           {"uri"},
+	"two_factor":       {"type", "name"},
 	"user": {
 		"name", "email", "is_admin", "is_restricted", "is_active", "prohibit_login", "visibility", "login_source",
 		"login_type", "must_change_password", "require_two_factor", "is_auditor", "allow_create_organization",

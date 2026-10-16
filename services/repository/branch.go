@@ -343,7 +343,7 @@ func CreateNewBranchFromCommit(ctx context.Context, doer *user_model.User, repo 
 	if err := git.Push(ctx, repo.RepoPath(), git.PushOptions{
 		Remote: repo.RepoPath(),
 		Branch: fmt.Sprintf("%s:%s%s", commitID, git.BranchPrefix, branchName),
-		Env:    repo_module.PushingEnvironment(doer, repo),
+		Env:    repo_module.PushingEnvironment(ctx, doer, repo),
 	}); err != nil {
 		if git.IsErrPushOutOfDate(err) || git.IsErrPushRejected(err) {
 			return err
