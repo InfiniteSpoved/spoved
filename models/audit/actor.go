@@ -104,7 +104,7 @@ func CredentialFromClaim(s string, ownerID int64) Credential {
 	typ, idText, ok := strings.Cut(s, ":")
 	id, err := strconv.ParseInt(idText, 10, 64)
 	if !ok || err != nil || !claimTypes[typ] || (id <= 0 && typ != CredentialPassword) {
-		return Credential{Type: CredentialUnknown}
+		return Credential{Type: CredentialUnknown, OwnerID: ownerID}
 	}
 	if typ == CredentialPassword {
 		id = 0

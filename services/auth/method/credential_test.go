@@ -31,7 +31,7 @@ func TestCredential(t *testing.T) {
 		{&sessionAuthenticationResult{user: u}, audit_model.Credential{Type: "session", OwnerID: 7}},
 		{&basicPaswordAuthenticationResult{user: u}, audit_model.Credential{Type: "password", OwnerID: 7}},
 		{&reverseProxyAuthenticationResult{user: u}, audit_model.Credential{Type: "reverse_proxy", OwnerID: 7}},
-		{&lfsTokenAuthenticationResult{user: u, claims: &lfs.Claims{}}, audit_model.Credential{Type: "unknown"}},
+		{&lfsTokenAuthenticationResult{user: u, claims: &lfs.Claims{}}, audit_model.Credential{Type: "unknown", OwnerID: 7}},
 		{&auth.UnauthenticatedResult{}, audit_model.Credential{}},
 	} {
 		assert.Equal(t, c.want, c.result.Credential(), "%T", c.result)
