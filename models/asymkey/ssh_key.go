@@ -81,8 +81,7 @@ func (key *PublicKey) AuthorizedString() string {
 	return AuthorizedStringForKey(key)
 }
 
-// addKey saves the key. Callers append it to the authorized_keys file after their transaction commits: a line for a
-// rolled-back row could match a later key that reuses its ID.
+// addKey saves the key. Callers append it to the authorized_keys file after their transaction commits.
 func addKey(ctx context.Context, key *PublicKey) (err error) {
 	if len(key.Fingerprint) == 0 {
 		key.Fingerprint, err = CalcFingerprint(key.Content)
