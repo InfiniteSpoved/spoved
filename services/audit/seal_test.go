@@ -14,6 +14,7 @@ import (
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
 
@@ -226,4 +227,16 @@ func TestRunSealer(t *testing.T) {
 	}, 5*time.Second, 20*time.Millisecond)
 	cancel()
 	<-done
+}
+
+// The sealer is not a write of a user: it keeps working in maintenance read-only mode.
+func TestSealInMaintenanceMode(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&setting.Maintenance.Mode, setting.MaintenanceReadOnly)()
+	require.True(t, setting.GetMaintenance(t.Context()).ReadOnly())
+	insertUnsealed(t, 2)
+	n, err := Seal(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, 3, n)
+	mustVerify(t)
 }

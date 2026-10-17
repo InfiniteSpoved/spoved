@@ -106,3 +106,10 @@ func TestVerify(t *testing.T) {
 		verifyFails(t, VerifyOptions{From: 3}, 3, "link")
 	})
 }
+
+// A head that was set back, even to 0, leaves sealed rows beyond it.
+func TestVerifyHeadSetBack(t *testing.T) {
+	sealed(t, 5)
+	exec(t, "UPDATE audit_chain_head SET seq = 0, hash = ?", audit_model.ZeroHash)
+	verifyFails(t, VerifyOptions{}, 0, "head")
+}

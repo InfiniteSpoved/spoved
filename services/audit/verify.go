@@ -41,8 +41,7 @@ var anchorRe = regexp.MustCompile(`^([1-9][0-9]*):([0-9a-f]{64})$`)
 const verifyPage = 5000
 
 // Verify checks the chain from seq 1 (or o.From) up to the head as it was when Verify started, and only reads. Rows
-// sealed meanwhile are left for the next run. ponytail: a head row set back together with its rows is only caught
-// by --anchor; the stored anchor_seq of retention is read from 4b on.
+// sealed meanwhile are left for the next run. The stored anchor_seq of retention is read from 4b on.
 func Verify(ctx context.Context, o VerifyOptions) (*VerifyResult, error) {
 	var anchorSeq int64
 	var anchorHash string
@@ -123,6 +122,16 @@ func Verify(ctx context.Context, o VerifyOptions) (*VerifyResult, error) {
 	}
 	if next-1 != head.Seq || prev != head.Hash {
 		fail(head.Seq, "head")
+	}
+	// a row beyond the head is a head that was set back; read the max first, so rows sealed meanwhile are covered
+	maxSeq, err := audit_model.MaxSealedSeq(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if cur, err := audit_model.GetHead(ctx); err != nil {
+		return nil, err
+	} else if maxSeq > cur.Seq {
+		fail(cur.Seq, "head")
 	}
 	if o.Anchor != "" && !anchorSeen {
 		fail(anchorSeq, "anchor")

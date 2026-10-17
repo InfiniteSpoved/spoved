@@ -168,3 +168,18 @@ func TestExportSealCap(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 500, m.SealedSeq)
 }
+
+// A sealing error that is not the backlog cap fails the export before anything is written.
+func TestExportSealError(t *testing.T) {
+	insertExportRows(t)
+	_, err := db.GetEngine(t.Context()).Exec("DELETE FROM audit_chain_head")
+	require.NoError(t, err)
+	f, err := parse(t, "")
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	started := false
+	_, err = Export(exportCtx(t), &buf, f, "csv", 0, func(*Manifest) error { started = true; return nil })
+	require.Error(t, err)
+	assert.False(t, started)
+	assert.Zero(t, buf.Len())
+}

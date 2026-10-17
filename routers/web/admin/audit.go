@@ -373,14 +373,18 @@ func setSealStatus(ctx *context.Context) error {
 		line = ctx.Locale.TrString("admin.audit.sealed_through", head.Seq, last.CreatedUnix.AsTime().UTC().Format("2006-01-02 15:04:05"))
 		ctx.Data["Anchor"] = ctx.Locale.TrString("admin.audit.anchor_help", head.Seq, head.Hash)
 	}
-	count := strconv.FormatInt(n, 10)
-	if n >= audit_model.UnsealedCountCap {
-		count = strconv.Itoa(audit_model.UnsealedCountCap-1) + "+"
-	}
-	line += " · " + ctx.Locale.TrString("admin.audit.unsealed", count)
+	line += " · " + ctx.Locale.TrString("admin.audit.unsealed", unsealedCount(n))
 	if n > 0 {
 		line += " (" + ctx.Locale.TrString("admin.audit.unsealed_oldest", age.Round(time.Second).String()) + ")"
 	}
 	ctx.Data["SealLine"] = line
 	return nil
+}
+
+// unsealedCount shows a backlog past the count cap as "10000+".
+func unsealedCount(n int64) string {
+	if n >= audit_model.UnsealedCountCap {
+		return strconv.Itoa(audit_model.UnsealedCountCap-1) + "+"
+	}
+	return strconv.FormatInt(n, 10)
 }

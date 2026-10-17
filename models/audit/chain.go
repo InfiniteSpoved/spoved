@@ -7,11 +7,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json" //nolint:depguard // the canonical form is defined by encoding/json, never by the swappable json module
 	"strings"
 	"time"
 
 	"forgejo.org/models/db"
-	"forgejo.org/modules/json"
 )
 
 // ZeroHash is the hash before the first sealed entry.
@@ -89,4 +89,10 @@ func GetBySeq(ctx context.Context, seq int64) (*Entry, error) {
 		return nil, err
 	}
 	return e, nil
+}
+
+// MaxSealedSeq returns the highest seq of any entry, 0 if none is sealed.
+func MaxSealedSeq(ctx context.Context) (seq int64, err error) {
+	_, err = db.GetEngine(ctx).Table("audit_event").Select("COALESCE(MAX(seq), 0)").Get(&seq)
+	return seq, err
 }
