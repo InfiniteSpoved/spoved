@@ -21,12 +21,10 @@ func TestNoRepoNameConcatenation(t *testing.T) {
 	concat := regexp.MustCompile(`(OwnerName|Owner\.Name)(\}\}/\{\{|\s*\+\s*"/"\s*\+\s*)[\w.$ ]*?Name\b`)
 	allowed := map[string]string{
 		`models/repo/repo.go: OwnerName + "/" + repo.Name`:                                        "FullName itself, for a root repository",
+		`models/repo/repo.go: OwnerName + "/" + repo.TrashedName`:                                 "TrashedFullName itself, for a root repository",
 		`routers/web/repo/editor.go: Owner.Name + "/" + repo.Name`:                                "compare head grammar owner/repo:branch; forks into projects come later",
 		`templates/repo/issue/view_content/sidebar/pull_review.tmpl: OwnerName}}/{{.Team.Name`:    "a team, org/team",
 		`templates/repo/issue/view_content/sidebar/pull_reviewers.tmpl: OwnerName}}/{{.Team.Name`: "a team, org/team",
-		`templates/admin/trash.tmpl: OwnerName}}/{{.Repo.TrashedName`:                             "trash rows keep the name at trash time; restoring into projects comes with the move PR",
-		`routers/web/admin/trash.go: OwnerName+"/"+repo.TrashedName`:                              "trash rows keep the name at trash time; restoring into projects comes with the move PR",
-		`routers/api/v1/admin/trash.go: OwnerName + "/" + item.Repo.TrashedName`:                  "trash rows keep the name at trash time; restoring into projects comes with the move PR",
 		`services/packages/container/common.go: OwnerName+"/"+p.LowerName`:                        "a package name, not a repository",
 		`routers/private/serv.go: OwnerName + "/" + results.RepoName`:                             "the path a git client asked for, before any repository is loaded",
 		`routers/private/serv.go: OwnerName + "/" + groupName`:                                    "the path a git client asked for, before any repository is loaded",
