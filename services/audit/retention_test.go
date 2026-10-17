@@ -120,3 +120,31 @@ func TestCleanup(t *testing.T) {
 		assert.Less(t, firstSetting, firstAudit)
 	})
 }
+
+// SetRetention computes from the stored row under its lock, not from a cached or earlier read.
+func TestSetRetentionUsesStoredRow(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := audit_model.WithSystem(t.Context(), "test")
+	read := func() (s setting.AuditRetentionState) {
+		v, has, err := system_model.GetSettingForUpdate(t.Context(), setting.Config().AuditRetention.DynKey())
+		require.NoError(t, err)
+		require.True(t, has)
+		require.NoError(t, json.Unmarshal([]byte(v), &s))
+		return s
+	}
+	require.NoError(t, SetRetention(ctx, 90))
+	assert.Equal(t, 90, read().Days)
+	assert.Equal(t, 365, read().PreviousDays)
+
+	// another pod stored 730 days; this one's cache still holds the lowering to 90
+	b, err := json.Marshal(setting.AuditRetentionState{Days: 730})
+	require.NoError(t, err)
+	require.NoError(t, system_model.SetSettings(ctx, map[string]string{setting.Config().AuditRetention.DynKey(): string(b)}))
+	require.NoError(t, SetRetention(ctx, 30))
+	s := read()
+	assert.Equal(t, 30, s.Days)
+	assert.Equal(t, 730, s.PreviousDays)
+
+	require.Error(t, SetRetention(ctx, 31))
+	assert.Equal(t, s, read())
+}

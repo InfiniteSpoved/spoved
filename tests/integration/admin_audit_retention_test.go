@@ -24,6 +24,7 @@ func storedRetention(t *testing.T) setting.AuditRetentionState {
 // AC7
 func TestAdminAuditRetention(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	storeRetention(t, setting.AuditRetentionState{}) // system settings outlive PrepareTestEnv
 	admin := loginUser(t, "user1")
 
 	page := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/audit/retention"), http.StatusOK).Body.String()
@@ -64,6 +65,7 @@ func TestAdminAuditRetention(t *testing.T) {
 // Only a site admin changes the retention; an auditor reads the audit page but can't open the form.
 func TestAdminAuditRetentionPermissions(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	storeRetention(t, setting.AuditRetentionState{})
 	setUserFlag(t, 2, "is_auditor", true)
 	for _, name := range []string{"user2", "user4"} {
 		sess := loginUser(t, name)

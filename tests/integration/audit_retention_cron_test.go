@@ -51,6 +51,7 @@ func agedChain(t *testing.T, n, daysAgo int) time.Time {
 // AC7, AC8: the nightly task, as a site admin runs it by hand and under maintenance mode.
 func TestAuditRetentionCron(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	t.Cleanup(func() { storeRetention(t, setting.AuditRetentionState{}) }) // system settings outlive the test
 	task := cron.GetTask("cleanup_audit_log")
 	require.NotNil(t, task)
 	assert.True(t, task.IsEnabled())

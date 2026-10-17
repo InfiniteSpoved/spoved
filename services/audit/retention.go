@@ -8,6 +8,7 @@ import (
 	"time"
 
 	audit_model "forgejo.org/models/audit"
+	"forgejo.org/models/db"
 	system_model "forgejo.org/models/system"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/setting"
@@ -33,18 +34,28 @@ func Cleanup(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// SetRetention stores the retention an admin chose (see setting.NextAuditRetention). The change is audited by
-// SetSettings. Two admins saving at the same moment is last-writer-wins.
+// SetRetention stores the retention an admin chose (see setting.NextAuditRetention). The stored row is read and
+// replaced in one transaction under its lock, so two admins saving together can't compute from a stale previous
+// value. The change is audited by SetSettings.
 func SetRetention(ctx context.Context, days int) error {
-	next, err := setting.NextAuditRetention(setting.Config().AuditRetention.Value(ctx), days, time.Now())
-	if err != nil {
-		return util.NewInvalidArgumentErrorf("%v", err)
-	}
-	v, err := json.Marshal(next)
-	if err != nil {
-		return err
-	}
-	if err := system_model.SetSettings(ctx, map[string]string{setting.Config().AuditRetention.DynKey(): string(v)}); err != nil {
+	key := setting.Config().AuditRetention.DynKey()
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		var cur setting.AuditRetentionState
+		if v, has, err := system_model.GetSettingForUpdate(ctx, key); err != nil {
+			return err
+		} else if has && json.Unmarshal([]byte(v), &cur) != nil {
+			cur = setting.AuditRetentionState{} // a stored value that can't be read is the default
+		}
+		next, err := setting.NextAuditRetention(cur, days, time.Now())
+		if err != nil {
+			return util.NewInvalidArgumentErrorf("%v", err)
+		}
+		v, err := json.Marshal(next)
+		if err != nil {
+			return err
+		}
+		return system_model.SetSettings(ctx, map[string]string{key: string(v)})
+	}); err != nil {
 		return err
 	}
 	if g := config.GetDynGetter(); g != nil {
