@@ -344,6 +344,7 @@ func initManagedLoggers(manager *log.LoggerManager, cfg ConfigProvider) {
 	initLoggerByName(manager, cfg, "router")
 	initLoggerByName(manager, cfg, "xorm")
 	initLoggerByName(manager, cfg, "ssh")
+	initLoggerByName(manager, cfg, "audit") // no writer unless configured, or shipped to by an admin destination
 }
 
 func initLoggerByName(manager *log.LoggerManager, rootCfg ConfigProvider, loggerName string) {
@@ -356,7 +357,7 @@ func initLoggerByName(manager *log.LoggerManager, rootCfg ConfigProvider, logger
 	}
 
 	modeVal := sec.Key(key).String()
-	if modeVal == "," {
+	if modeVal == "," && loggerName != "audit" { // audit events carry IPs and user agents: never to the console by default
 		modeVal = Log.Mode
 	}
 

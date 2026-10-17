@@ -1874,6 +1874,11 @@
 	"admin.audit.unknown.credential_owner": "No user or organization named %s.",
 	"admin.audit.invalid": "Invalid value for %s: %s",
 	"admin.audit.oldest": "Oldest entry: %s",
+	"admin.audit.streaming": {
+		"one": "Streaming: %s destination",
+		"other": "Streaming: %s destinations"
+	},
+	"admin.audit.streaming_off": "Streaming: off",
 	"admin.audit.retention": "Retention: %s",
 	"admin.audit_retention": "Audit log retention",
 	"admin.audit_retention.desc": "Audit entries older than the retention are deleted every night. The deletion is itself recorded, and the hash chain can still be verified afterwards. There is no option to keep entries forever.",
@@ -2572,6 +2577,7 @@
 	"admin.log_shipping.type": "Type",
 	"admin.log_shipping.type.newrelic": "New Relic",
 	"admin.log_shipping.type.http": "HTTPS endpoint",
+	"admin.log_shipping.type.loki": "Grafana Loki",
 	"admin.log_shipping.endpoint": "Endpoint",
 	"admin.log_shipping.endpoint_helper": "An https:// URL without credentials or query. The address must be allowed by ALLOWED_HOST_LIST in the [webhook] section.",
 	"admin.log_shipping.key": "Ingest key",
@@ -2586,6 +2592,8 @@
 	"admin.log_shipping.log_type.access": "Access",
 	"admin.log_shipping.log_type.router": "Router",
 	"admin.log_shipping.log_type.git": "Git (SSH)",
+	"admin.log_shipping.log_type.audit": "Audit log",
+	"admin.log_shipping.log_type.audit_hint": "Contains IP addresses and user agents, and is not part of \"All\". Every audit entry is sent, whatever the minimum level and the filters below say.",
 	"admin.log_shipping.level": "Minimum level",
 	"admin.log_shipping.expression": "Only messages matching (regular expression)",
 	"admin.log_shipping.exclusion": "Skip messages matching (regular expression)",

@@ -33,7 +33,7 @@ export function initAdminCommon() {
   if (shippingType) {
     const sync = () => {
       for (const el of document.querySelectorAll('[data-log-shipping-for]')) {
-        toggleElem(el, el.getAttribute('data-log-shipping-for') === shippingType.value);
+        toggleElem(el, el.getAttribute('data-log-shipping-for').split(' ').includes(shippingType.value));
       }
     };
     shippingType.addEventListener('change', sync);

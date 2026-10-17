@@ -27,6 +27,7 @@ const sealBatch = 500
 // write lock on SQLite, the row lock elsewhere) before it reads anything, so concurrent sealers on any pod are
 // serialized by the database; an idle pod only reads.
 func Seal(ctx context.Context) (n int, err error) {
+	var sealed []*audit_model.Entry
 	if has, err := audit_model.HasUnsealed(ctx); err != nil || !has {
 		return 0, err
 	}
@@ -64,6 +65,7 @@ func Seal(ctx context.Context) (n int, err error) {
 			} else if updated != 1 {
 				return fmt.Errorf("audit: entry %d was sealed by another sealer", e.ID)
 			}
+			e.Seq, e.PrevHash, e.Hash = new(seq), new(prev), new(hash)
 			prev = hash
 		}
 		if updated, err := db.GetEngine(ctx).Table("audit_chain_head").Where("id = 1 AND seq = ?", head.Seq).
@@ -72,9 +74,12 @@ func Seal(ctx context.Context) (n int, err error) {
 		} else if updated != 1 {
 			return fmt.Errorf("audit: the chain head moved from seq %d", head.Seq)
 		}
-		n = len(rows)
+		n, sealed = len(rows), rows
 		return nil
 	})
+	if err == nil {
+		shipEntries(ctx, sealed) // only committed rows, once, by the sealer that sealed them
+	}
 	return n, err
 }
 

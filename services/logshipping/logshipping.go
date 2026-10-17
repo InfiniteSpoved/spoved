@@ -48,12 +48,28 @@ var (
 	testLast = map[string]time.Time{}
 )
 
+// running is a destination's writers: name -> loggers. Audit has a writer of its own (writerName(id)+"-audit"), at
+// TRACE and without filters, so a destination's level or expression can never drop an audit row.
 type running struct {
 	hash    string
-	loggers []string
+	writers map[string][]string
 }
 
 func writerName(id string) string { return "ship-" + id }
+
+func auditWriterName(id string) string { return writerName(id) + "-audit" }
+
+// StreamingCount is the number of destinations of this instance that are running with the audit type.
+func StreamingCount() (n int) {
+	mu.Lock()
+	defer mu.Unlock()
+	for id, r := range active {
+		if _, ok := r.writers[auditWriterName(id)]; ok {
+			n++
+		}
+	}
+	return n
+}
 
 // hostList is the webhook host policy: the same rule decides where an admin may send logs.
 func hostList() *hostmatcher.HostMatchList {
@@ -145,6 +161,7 @@ func Apply(ctx context.Context, state setting.LogShippingState) error {
 		mode log.WriterMode
 		hash string
 	}
+	wantAudit := map[string]log.WriterMode{}
 	want := map[string]desired{}
 	for _, d := range state.Destinations {
 		if !d.Enabled {
@@ -162,12 +179,15 @@ func Apply(ctx context.Context, state setting.LogShippingState) error {
 			BufferLen: max(setting.Log.BufferLen, 1000), Level: log.LevelFromString(d.Level), Format: "json",
 			Expression: d.Expression, Exclusion: d.Exclusion, StacktraceLevel: log.NONE, WriterOption: opt,
 		}, hashOf(d)}
+		if d.StreamsAudit() {
+			wantAudit[d.ID] = log.WriterMode{BufferLen: max(setting.Log.BufferLen, 1000), Level: log.TRACE, Format: "json", StacktraceLevel: log.NONE, WriterOption: opt}
+		}
 	}
 
 	mu.Lock()
 	for id, r := range active {
 		if w, ok := want[id]; !ok || w.hash != r.hash {
-			stop(id, r)
+			stop(r)
 			delete(active, id)
 		}
 	}
@@ -175,14 +195,35 @@ func Apply(ctx context.Context, state setting.LogShippingState) error {
 		if _, ok := active[id]; ok {
 			continue
 		}
-		wr, err := log.GetManager().NewSharedWriter(writerName(id), "http", w.mode)
-		if err != nil {
-			log.Error("log shipping: destination %q is not started: %v", w.d.Name, err)
-			continue
+		r := running{hash: w.hash, writers: map[string][]string{}}
+		type spec struct {
+			name    string
+			mode    log.WriterMode
+			loggers []string
 		}
-		r := running{hash: w.hash, loggers: w.d.Loggers()}
-		for _, l := range r.loggers {
-			log.GetManager().GetLogger(l).AddWriters(wr)
+		var others []string
+		for _, l := range w.d.Loggers() {
+			if l != "audit" {
+				others = append(others, l)
+			}
+		}
+		specs := []spec{{writerName(id), w.mode, others}}
+		if m, ok := wantAudit[id]; ok {
+			specs = append(specs, spec{auditWriterName(id), m, []string{"audit"}})
+		}
+		for _, sp := range specs {
+			if len(sp.loggers) == 0 {
+				continue
+			}
+			wr, err := log.GetManager().NewSharedWriter(sp.name, "http", sp.mode)
+			if err != nil {
+				log.Error("log shipping: destination %q is not started: %v", w.d.Name, err)
+				continue
+			}
+			for _, l := range sp.loggers {
+				log.GetManager().GetLogger(l).AddWriters(wr)
+			}
+			r.writers[sp.name] = sp.loggers
 		}
 		active[id] = r
 	}
@@ -190,12 +231,14 @@ func Apply(ctx context.Context, state setting.LogShippingState) error {
 	return nil
 }
 
-func stop(id string, r running) {
-	for _, l := range r.loggers {
-		_ = log.GetManager().GetLogger(l).RemoveWriter(writerName(id))
+func stop(r running) {
+	for name, loggers := range r.writers {
+		for _, l := range loggers {
+			_ = log.GetManager().GetLogger(l).RemoveWriter(name)
+		}
+		log.GetManager().RemoveSharedWriter(name)
+		log.ForgetShipping(name)
 	}
-	log.GetManager().RemoveSharedWriter(writerName(id))
-	log.ForgetShipping(writerName(id))
 }
 
 // Reload applies the stored destinations when the settings revision differs from the one applied last. It runs
@@ -493,7 +536,7 @@ func View(d setting.LogShippingDestination) Destination {
 		v.Headers = append(v.Headers, Header{Name: h.Name, HasValue: h.ValueEnc != ""})
 	}
 	for _, st := range log.ShippingStatsSnapshot() {
-		if st.Writer == writerName(d.ID) {
+		if st.Writer == writerName(d.ID) || st.Writer == auditWriterName(d.ID) {
 			v.Status.Sent, v.Status.Dropped, v.Status.Errors = v.Status.Sent+st.Sent, v.Status.Dropped+st.Dropped, v.Status.Errors+st.Errors
 		}
 	}

@@ -26,6 +26,7 @@ import (
 	audit_service "forgejo.org/services/audit"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
+	logshipping_service "forgejo.org/services/logshipping"
 )
 
 const tplAudit base.TplName = "admin/audit"
@@ -346,6 +347,7 @@ func Audit(ctx *context.Context) {
 		ctx.Data["OldestEntry"] = oldest.AsTime().In(loc).Format("2006-01-02")
 	}
 	ctx.Data["ExportCap"] = audit_service.ExportCap
+	ctx.Data["StreamingCount"] = logshipping_service.StreamingCount() // a count only: auditors see no destination
 	ctx.Data["RetentionLine"] = auditRetentionLine(ctx)
 	ctx.Data["CanEditRetention"] = ctx.Doer.IsAdmin
 	if err := setSealStatus(ctx); err != nil {

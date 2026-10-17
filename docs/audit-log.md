@@ -46,3 +46,27 @@ Exports use the heavy rate limit class; the page and the API list use the normal
 maintenance mode, and recording continues.
 
 Viewing the page or listing entries through the API isn't recorded yet; that comes with read logging.
+
+## Shipping to a log service
+
+Site administration → Log shipping can send the audit log to New Relic, any HTTPS collector or Grafana Loki: tick the
+**Audit log** type of a destination. "All" doesn't include it, because entries carry IP addresses and user agents.
+Every entry is sent whatever the destination's minimum level or filters are. The sealer ships each row once, right
+after it is committed, as one JSON event: the message is the action key, `seq` and `hash` tie it to the chain, and
+`data` is one JSON string (redacted like every shipped field, cut at 2 KB). With Loki, the labels are
+`service="spoved"`, `logtype="audit"` and `level` (`info` for a success, `warn` otherwise); put the tenant or
+authorisation in a custom header. The audit page shows how many destinations this instance streams to.
+
+Shipping is best effort; the database is the source of truth. The receiver can find a gap from `seq` and `hash`.
+The shipped copy can't be re-hashed: `data` is redacted and cut at 2 KB, and names may be redacted, so a hash
+verifies only against the database. A receiver checks continuity instead: `seq` rises by one, and each event's
+`prev_hash` is the `hash` of the one before.
+
+Known gaps:
+
+- A pod ships nothing before its first reload of the destinations (up to 30 s after start).
+- Rows sealed after a destination is removed or disabled don't reach it, and nothing is re-sent later.
+- The buffer (up to 5 s of events, or what a down destination hasn't taken yet) is lost on a hard kill.
+- Loki may reject samples that are too old after a long outage; the shipper drops what it can't deliver.
+- The org, project and repository names are looked up when the row is shipped; one deleted since then shows an empty
+  name, and the ids stay.

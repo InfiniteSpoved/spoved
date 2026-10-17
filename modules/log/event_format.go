@@ -14,7 +14,7 @@ type Event struct {
 	Time time.Time
 
 	Logger string         // name of the logger that created the event
-	Fields map[string]any // optional structured fields, only used by the JSON formatter
+	Fields map[string]any `json:"-"` // optional structured fields, only used by the JSON formatter; kept out of json.Marshal (the full-queue fallback marshals the event)
 
 	Caller   string
 	Filename string
