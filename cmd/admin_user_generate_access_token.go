@@ -92,7 +92,7 @@ func runGenerateAccessToken(ctx context.Context, c *cli.Command) error {
 		return errors.New("access token does not have any permission")
 	}
 	t.Scope = accessTokenScope
-	if t.ExpiresUnix, err = cliTokenExpiry(c.String("expires-at")); err != nil {
+	if t.ExpiresUnix, err = cliCredentialExpiry(setting.AccessTokenExpiry, c.String("expires-at")); err != nil {
 		return err
 	}
 
@@ -114,15 +114,15 @@ func runGenerateAccessToken(ctx context.Context, c *cli.Command) error {
 	return nil
 }
 
-// cliTokenExpiry parses an expiry date given on the command line and checks it against the access token policy.
-// Without one, the token gets the latest date the policy allows (none when it has no maximum).
-func cliTokenExpiry(value string) (timeutil.TimeStamp, error) {
+// cliCredentialExpiry parses an expiry date given on the command line and checks it against the policy. Without one,
+// the credential gets the latest date the policy allows (none when it has no maximum).
+func cliCredentialExpiry(p setting.CredentialExpiryPolicy, value string) (timeutil.TimeStamp, error) {
 	expires, err := authz.ParseExpiryDate(value)
 	if err != nil {
 		return 0, err
 	}
 	if expires == 0 {
-		expires = authz.MaxExpiry(setting.AccessTokenExpiry)
+		expires = authz.MaxExpiry(p)
 	}
-	return expires, authz.ValidateExpiry(setting.AccessTokenExpiry, expires)
+	return expires, authz.ValidateExpiry(p, expires)
 }

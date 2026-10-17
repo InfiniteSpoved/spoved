@@ -197,7 +197,7 @@ func runCreateUser(ctx context.Context, c *cli.Command) error {
 		if !accessTokenScope.HasPermissionScope() {
 			return errors.New("access token does not have any permission")
 		}
-		if accessTokenExpires, err = cliTokenExpiry(c.String("access-token-expires-at")); err != nil {
+		if accessTokenExpires, err = cliCredentialExpiry(setting.AccessTokenExpiry, c.String("access-token-expires-at")); err != nil {
 			return err
 		}
 	} else if c.IsSet("access-token-name") || c.IsSet("access-token-scopes") || c.IsSet("access-token-expires-at") {

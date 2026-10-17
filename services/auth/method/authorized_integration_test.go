@@ -15,6 +15,7 @@ import (
 	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	"forgejo.org/models/unittest"
 	"forgejo.org/modules/cache"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/jwtx"
@@ -382,6 +383,50 @@ func TestAuthorizedIntegration(t *testing.T) {
 			assert.True(t, hasExpiry)
 			assert.Equal(t, timeutil.TimeStamp(1767297600), expiry)
 		})
+	})
+
+	t.Run("integration expiry", func(t *testing.T) {
+		t.Run("expired", func(t *testing.T) {
+			ait := newAITester(t,
+				aiDBTweak(func(aiDB *auth_model.AuthorizedIntegration) {
+					aiDB.ExpiresUnix = timeutil.TimeStampNow() - 1
+				}))
+			defer ait.close()
+			_, err := db.GetEngine(t.Context()).Exec("UPDATE authorized_integration SET updated_unix = 1 WHERE id = ?", ait.dbAI.ID)
+			require.NoError(t, err)
+			output := ait.bearerRequest()
+			err = requireOutput[*auth.AuthenticationAttemptedIncorrectCredential](t, output).Error
+			require.EqualError(t, err, "authorized integration: expired")
+			assert.EqualValues(t, 1, unittest.AssertExistsAndLoadBean(t, &auth_model.AuthorizedIntegration{ID: ait.dbAI.ID}).UpdatedUnix, "not marked as used")
+		})
+
+		// the JWTs are checked at 2026-01-01 16:00 local time
+		timeutil.MockSet(time.Date(2026, time.January, 1, 16, 0, 0, 0, time.Local))
+		defer timeutil.MockUnset()
+		aiExpires := timeutil.TimeStamp(time.Date(2026, time.January, 1, 17, 0, 0, 0, time.Local).Unix())
+		for name, tc := range map[string]struct {
+			jwtExpires *jwt.NumericDate
+			want       timeutil.TimeStamp
+		}{
+			"JWT without expiry": {nil, aiExpires},
+			"JWT expires later":  {jwt.NewNumericDate(time.Date(2026, time.January, 1, 18, 0, 0, 0, time.Local)), aiExpires},
+			"JWT expires before": {jwt.NewNumericDate(time.Date(2026, time.January, 1, 16, 30, 0, 0, time.Local)), timeutil.TimeStamp(time.Date(2026, time.January, 1, 16, 30, 0, 0, time.Local).Unix())},
+		} {
+			t.Run(name, func(t *testing.T) {
+				ait := newAITester(t,
+					aiDBTweak(func(aiDB *auth_model.AuthorizedIntegration) {
+						aiDB.ExpiresUnix = aiExpires
+					}),
+					claimTweak(func(rc *flexibleClaims) {
+						rc.ExpiresAt = tc.jwtExpires
+					}))
+				defer ait.close()
+				res := requireOutput[*auth.AuthenticationSuccess](t, ait.bearerRequest()).Result
+				hasExpiry, expiry := res.ExpiresAt().Get()
+				assert.True(t, hasExpiry)
+				assert.Equal(t, tc.want, expiry)
+			})
+		}
 	})
 
 	t.Run("JWT issued at", func(t *testing.T) {
