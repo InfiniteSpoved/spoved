@@ -385,7 +385,7 @@ func repoMultiSelect(ctx *context.Context) {
 		)
 	}
 
-	selectedRepos, err := getSelectedRepos(ctx, form.SelectedRepo)
+	selectedRepos, err := getSelectedRepos(ctx, ctx.Doer, form.SelectedRepo)
 	if err != nil {
 		ctx.Error(http.StatusBadRequest, "getSelectedRepos")
 		return

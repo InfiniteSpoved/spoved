@@ -246,6 +246,10 @@
 				</div>
 			</form>
 		</div>
+
+		{{if .ShowAccessTokens}}
+			{{template "user/settings/keys_tokens" .}}
+		{{end}}
 	</div>
 
 {{template "shared/admin/user_delete" .}}

@@ -121,7 +121,7 @@ func (f *baseAuthorizedIntegrationForm) copyFormToAuthorizedIntegration(ctx *con
 		scopeRaw = fmt.Sprintf("%s,%s", scopeRaw, auth_model.AccessTokenScopePublicOnly)
 	case "repo-specific":
 		ai.ResourceAllRepos = false
-		selectedRepos, err := getSelectedRepos(ctx, f.SelectedRepo)
+		selectedRepos, err := getSelectedRepos(ctx, ctx.Doer, f.SelectedRepo)
 		if err != nil {
 			return nil, err
 		}
