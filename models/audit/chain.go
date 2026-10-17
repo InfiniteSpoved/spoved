@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"forgejo.org/models/db"
+	"forgejo.org/modules/setting"
 )
 
 // ZeroHash is the hash before the first sealed entry.
@@ -39,15 +40,28 @@ func HashEntry(prev string, e *Entry) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// GetHead returns the chain head.
+// GetHead returns the chain head; without a head row (a fresh install before the first seal) it is the empty chain.
+// It only reads: EnsureHead creates the row.
 func GetHead(ctx context.Context) (*ChainHead, error) {
 	h := &ChainHead{}
 	if has, err := db.GetEngine(ctx).ID(1).Get(h); err != nil {
 		return nil, err
 	} else if !has {
-		return nil, db.ErrNotExist{Resource: "audit_chain_head", ID: 1}
+		return &ChainHead{ID: 1, Hash: ZeroHash, AnchorPrevHash: ZeroHash}, nil
 	}
 	return h, nil
+}
+
+// EnsureHead creates the head row if it is missing. Fresh installs record the migration without running it, so the
+// row is not in the migration. Concurrent callers insert only if absent: an insert error would also abort a
+// PostgreSQL transaction.
+func EnsureHead(ctx context.Context) error {
+	insert := "INSERT INTO audit_chain_head (id, seq, hash, anchor_seq, anchor_prev_hash) VALUES (1, 0, ?, 0, ?) ON CONFLICT (id) DO NOTHING"
+	if setting.Database.Type.IsMySQL() {
+		insert = "INSERT IGNORE INTO audit_chain_head (id, seq, hash, anchor_seq, anchor_prev_hash) VALUES (1, 0, ?, 0, ?)"
+	}
+	_, err := db.Exec(ctx, insert, ZeroHash, ZeroHash)
+	return err
 }
 
 // FindUnsealed returns up to limit entries without a seq, oldest id first, leaving out skipID. It is a variable so

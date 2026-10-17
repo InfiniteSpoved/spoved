@@ -76,6 +76,8 @@ func TestAuditChainExport(t *testing.T) {
 func TestAuditChainPage(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	insertAuditRows(t)
+	_, err := db.GetEngine(t.Context()).Exec("DELETE FROM audit_chain_head") // a fresh install has no head row
+	require.NoError(t, err)
 	setUserFlag(t, 2, "is_auditor", true)
 	sessions := map[string]*TestSession{"user1": loginUser(t, "user1"), "user2": loginUser(t, "user2")}
 	for name, session := range sessions { // the sign-ins are unsealed entries too

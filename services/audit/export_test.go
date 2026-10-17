@@ -172,14 +172,15 @@ func TestExportSealCap(t *testing.T) {
 // A sealing error that is not the backlog cap fails the export before anything is written.
 func TestExportSealError(t *testing.T) {
 	insertExportRows(t)
-	_, err := db.GetEngine(t.Context()).Exec("DELETE FROM audit_chain_head")
-	require.NoError(t, err)
+	defer test.MockVariableValue(&audit_model.FindUnsealed, func(context.Context, int, int64) ([]*audit_model.Entry, error) {
+		return nil, errors.New("database unavailable")
+	})()
 	f, err := parse(t, "")
 	require.NoError(t, err)
 	var buf bytes.Buffer
 	started := false
 	_, err = Export(exportCtx(t), &buf, f, "csv", 0, func(*Manifest) error { started = true; return nil })
-	require.Error(t, err)
+	require.ErrorContains(t, err, "database unavailable")
 	assert.False(t, started)
 	assert.Zero(t, buf.Len())
 }

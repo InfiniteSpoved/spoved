@@ -23,8 +23,7 @@ func Test_addAuditLog(t *testing.T) {
 
 	var heads []v18zzaAuditChainHead
 	require.NoError(t, x.Find(&heads))
-	zero := strings.Repeat("0", 64)
-	assert.Equal(t, []v18zzaAuditChainHead{{ID: 1, Hash: zero, AnchorPrevHash: zero}}, heads)
+	assert.Empty(t, heads, "the head row is created by the sealer: fresh installs record this migration without running it")
 
 	tables, err := x.DBMetas()
 	require.NoError(t, err)

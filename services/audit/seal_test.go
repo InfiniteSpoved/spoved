@@ -240,3 +240,25 @@ func TestSealInMaintenanceMode(t *testing.T) {
 	assert.Equal(t, 3, n)
 	mustVerify(t)
 }
+
+// A fresh install has no head row: the first Seal creates it and writes the genesis.
+func TestSealCreatesHead(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	_, err := db.GetEngine(t.Context()).Exec("DELETE FROM audit_chain_head")
+	require.NoError(t, err)
+	insertUnsealed(t, 2)
+	res, err := Verify(t.Context(), VerifyOptions{}) // works without a head, and writes nothing
+	require.NoError(t, err)
+	assert.Nil(t, res.Failure)
+
+	n, err := Seal(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, 3, n)
+	head, err := audit_model.GetHead(t.Context())
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, head.Seq)
+	entries := allEntries(t)
+	assert.Equal(t, "audit.chain.started", entries[2].Action)
+	assert.EqualValues(t, 1, *entries[2].Seq)
+	mustVerify(t)
+}

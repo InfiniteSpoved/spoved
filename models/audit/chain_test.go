@@ -4,9 +4,12 @@
 package audit_test
 
 import (
+	"sync"
 	"testing"
 
 	audit_model "forgejo.org/models/audit"
+	"forgejo.org/models/db"
+	"forgejo.org/models/unittest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,4 +32,41 @@ func TestCanonicalGolden(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "3dc898788830893539867a50b9af57d00bfdb2fbe05413364158fd215958589b", hash)
 	assert.Len(t, hash, 64)
+}
+
+// A fresh install has no head row (migrations are recorded, not run): reading works and writes nothing.
+func TestGetHeadEmpty(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	_, err := db.GetEngine(t.Context()).Exec("DELETE FROM audit_chain_head")
+	require.NoError(t, err)
+
+	head, err := audit_model.GetHead(t.Context())
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, head.Seq)
+	assert.Equal(t, audit_model.ZeroHash, head.Hash)
+	assert.Equal(t, audit_model.ZeroHash, head.AnchorPrevHash)
+	n, err := db.GetEngine(t.Context()).Count(new(audit_model.ChainHead))
+	require.NoError(t, err)
+	assert.Zero(t, n)
+}
+
+func TestEnsureHeadConcurrent(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	_, err := db.GetEngine(t.Context()).Exec("DELETE FROM audit_chain_head")
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Go(func() { errs <- audit_model.EnsureHead(t.Context()) })
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	n, err := db.GetEngine(t.Context()).Count(new(audit_model.ChainHead))
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n)
+	require.NoError(t, audit_model.EnsureHead(t.Context())) // and again when it exists
 }

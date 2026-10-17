@@ -32,6 +32,9 @@ func Seal(ctx context.Context) (n int, err error) {
 	}
 	err = db.WithTx(ctx, func(ctx context.Context) error {
 		n = 0
+		if err := audit_model.EnsureHead(ctx); err != nil {
+			return err
+		}
 		if _, err := db.Exec(ctx, "UPDATE audit_chain_head SET seq = seq WHERE id = 1"); err != nil {
 			return err
 		}
