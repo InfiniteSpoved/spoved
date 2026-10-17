@@ -75,6 +75,14 @@ func (*AuthenticationNotAttempted) isMethodOutput()                 {}
 func (*AuthenticationAttemptedIncorrectCredential) isMethodOutput() {}
 func (*AuthenticationError) isMethodOutput()                        {}
 
+// CredentialOwnerError marks a refusal that is only reached after the credential was proven (token hash, password or
+// JWT signature matched), so its text may be shown to the caller; any other refusal gets a generic answer.
+type CredentialOwnerError struct{ Err error }
+
+func (e *CredentialOwnerError) Error() string { return e.Err.Error() }
+
+func (e *CredentialOwnerError) Unwrap() error { return e.Err }
+
 // PasswordAuthenticator represents a source of authentication
 type PasswordAuthenticator interface {
 	Authenticate(ctx context.Context, user *user_model.User, login, password string) (*user_model.User, error)

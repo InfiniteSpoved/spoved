@@ -34,7 +34,9 @@ func (a *AccessToken) Verify(req *http.Request, w http.ResponseWriter, _ auth.Se
 
 	// check personal access token
 	token, err := auth_model.GetAccessTokenBySHA(req.Context(), authToken)
-	if auth_model.IsErrAccessTokenNotExist(err) || auth_model.IsErrAccessTokenEmpty(err) || auth_model.IsErrAccessTokenExpired(err) {
+	if auth_model.IsErrAccessTokenExpired(err) {
+		return &auth.AuthenticationAttemptedIncorrectCredential{Error: &auth.CredentialOwnerError{Err: err}}
+	} else if auth_model.IsErrAccessTokenNotExist(err) || auth_model.IsErrAccessTokenEmpty(err) {
 		return &auth.AuthenticationAttemptedIncorrectCredential{Error: err}
 	} else if err != nil {
 		return &auth.AuthenticationError{Error: fmt.Errorf("access token GetAccessTokenBySHA: %w", err)}
@@ -47,7 +49,7 @@ func (a *AccessToken) Verify(req *http.Request, w http.ResponseWriter, _ auth.Se
 	}
 
 	if err := authz.CheckScopePolicyInUse(u, token.Scope, token.ResourceAllRepos); errors.Is(err, authz.ErrScopePolicyEnforced) {
-		return &auth.AuthenticationAttemptedIncorrectCredential{Error: fmt.Errorf("%w; replace it with a token that follows the policy", err), UserID: u.ID}
+		return &auth.AuthenticationAttemptedIncorrectCredential{Error: &auth.CredentialOwnerError{Err: fmt.Errorf("%w; replace it with a token that follows the policy", err)}, UserID: u.ID}
 	} else if err != nil {
 		return &auth.AuthenticationError{Error: fmt.Errorf("access token CheckScopePolicyInUse: %w", err)}
 	}

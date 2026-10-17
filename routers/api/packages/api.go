@@ -189,7 +189,7 @@ func verifyContainerAuth(r *web.Route, authMethods []auth.Method) {
 			if common.WriteIfRateLimited(ctx.Base, v.Error, false) {
 				return
 			}
-			log.Info("Failed to verify user: %v", v.Error)
+			log.Info("Failed to verify user: %s", common.AuthFailureReason(v.Error))
 			container.APIUnauthorizedError(ctx)
 			ctx.Error(http.StatusUnauthorized, "authGroup.Verify")
 			return
