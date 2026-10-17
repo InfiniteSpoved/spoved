@@ -39,7 +39,7 @@ func shipEntries(ctx context.Context, rows []*audit_model.Entry) {
 			"org": orgs[e.OwnerID], "project": projects[e.GroupID], "repo": repos[e.RepoID],
 			"owner_id": e.OwnerID, "group_id": e.GroupID, "repo_id": e.RepoID, "subject_user_id": e.SubjectUserID,
 			"auth_method": "", "kind": "", "bytes": 0,
-			"seq": *e.Seq, "hash": *e.Hash, "data": data,
+			"seq": *e.Seq, "prev_hash": *e.PrevHash, "hash": *e.Hash, "data": data,
 		}
 		maps.Copy(fields, promoted)
 		l.LogWithFields(0, level, fields, "%s", e.Action)

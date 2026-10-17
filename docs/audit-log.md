@@ -58,6 +58,10 @@ after it is committed, as one JSON event: the message is the action key, `seq` a
 authorisation in a custom header. The audit page shows how many destinations this instance streams to.
 
 Shipping is best effort; the database is the source of truth. The receiver can find a gap from `seq` and `hash`.
+The shipped copy can't be re-hashed: `data` is redacted and cut at 2 KB, and names may be redacted, so a hash
+verifies only against the database. A receiver checks continuity instead: `seq` rises by one, and each event's
+`prev_hash` is the `hash` of the one before.
+
 Known gaps:
 
 - A pod ships nothing before its first reload of the destinations (up to 30 s after start).

@@ -65,8 +65,8 @@ func Seal(ctx context.Context) (n int, err error) {
 			} else if updated != 1 {
 				return fmt.Errorf("audit: entry %d was sealed by another sealer", e.ID)
 			}
+			e.Seq, e.PrevHash, e.Hash = new(seq), new(prev), new(hash)
 			prev = hash
-			e.Seq, e.Hash = new(seq), new(hash)
 		}
 		if updated, err := db.GetEngine(ctx).Table("audit_chain_head").Where("id = 1 AND seq = ?", head.Seq).
 			Update(map[string]any{"seq": seq, "hash": prev}); err != nil {

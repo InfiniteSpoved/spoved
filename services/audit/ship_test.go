@@ -89,6 +89,10 @@ func TestSealShipsEachSealedRowOnce(t *testing.T) {
 		assert.Equal(t, e.Action, m["action"])
 		assert.EqualValues(t, *e.Seq, m["seq"])
 		assert.Equal(t, *e.Hash, m["hash"])
+		assert.Equal(t, *e.PrevHash, m["prev_hash"])
+		if i > 0 {
+			assert.Equal(t, events[i-1]["hash"], m["prev_hash"]) // the receiver's continuity check
+		}
 		assert.Equal(t, "audit", m["logtype"])
 		assert.IsType(t, "", m["data"])
 	}
@@ -150,7 +154,7 @@ func TestShippedEventHasEveryTopLevelField(t *testing.T) {
 		"actor_type", "actor_id", "actor_name", "sudo_by_id",
 		"credential_type", "credential_id", "credential_name", "credential_owner_id",
 		"target_type", "target_id", "target_name", "org", "project", "repo",
-		"auth_method", "kind", "bytes", "request_id", "seq", "hash", "data",
+		"auth_method", "kind", "bytes", "request_id", "seq", "prev_hash", "hash", "data",
 	} {
 		assert.Contains(t, m, k)
 	}
