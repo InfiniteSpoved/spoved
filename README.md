@@ -136,6 +136,7 @@ Projects group repositories under an organization (`org/project/repo`).
 | **Teams** ([#450](https://github.com/InfiniteSpoved/spoved/pull/450)) | Link a team to a project to give it every repository in it. |
 | **Branch rules, webhooks, secrets, variables and deploy keys** ([#452](https://github.com/InfiniteSpoved/spoved/pull/452), [#453](https://github.com/InfiniteSpoved/spoved/pull/453), [#454](https://github.com/InfiniteSpoved/spoved/pull/454), [#456](https://github.com/InfiniteSpoved/spoved/pull/456)) | Set once on the project and apply to all its repositories. Project settings. |
 | **API** ([#442](https://github.com/InfiniteSpoved/spoved/pull/442), [#469](https://github.com/InfiniteSpoved/spoved/pull/469)) | `/orgs/{org}/projects` and its branch protection, hook, secret and variable endpoints; `/repositories/{id}`. |
+| **URL forms** | Web, git, LFS and API paths of `org/project/repo`, redirects and what to update in tools that link to repositories: [`docs/projects.md`](docs/projects.md). |
 | **Projects elsewhere** ([#458](https://github.com/InfiniteSpoved/spoved/pull/458), [#494](https://github.com/InfiniteSpoved/spoved/pull/494), [#523](https://github.com/InfiniteSpoved/spoved/pull/523)) | References, mail, packages, token repository pickers and migrations understand `owner/project/repo`. |
 
 ### Bitbucket Data Center import
