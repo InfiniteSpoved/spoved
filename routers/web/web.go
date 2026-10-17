@@ -961,6 +961,13 @@ func registerRoutes(m *web.Route) {
 			m.Get("/{userid}/access", admin.UserAccess)
 			m.Combo("/{userid}/edit").Get(admin.EditUser).Post(web.Bind(forms.AdminEditUserForm{}), admin.EditUserPost)
 			m.Post("/{userid}/delete", admin.DeleteUser)
+			m.Group("/{userid}/tokens", func() {
+				m.Combo("/new").
+					Get(web.Bind(forms.NewAccessTokenGetForm{}), admin.UserTokenNew).
+					Post(web.Bind(forms.NewAccessTokenPostForm{}), admin.UserTokenNewPost)
+				m.Post("/delete", admin.UserTokenDelete)
+				m.Post("/regenerate", admin.UserTokenRegenerate)
+			})
 			m.Post("/{userid}/avatar", web.Bind(forms.AvatarForm{}), admin.AvatarPost)
 			m.Post("/{userid}/avatar/delete", admin.DeleteAvatar)
 		})

@@ -58,7 +58,7 @@ func (actionsLocalUI) populateTemplateContext(ctx *context.Context) {
 	form := ctx.Data["Form"].(*actionsLocalAuthorizedIntegrationForm)
 
 	if form.SourceRepo != "" {
-		selectedRepos, err := getSelectedRepos(ctx, []string{form.SourceRepo})
+		selectedRepos, err := getSelectedRepos(ctx, ctx.Doer, []string{form.SourceRepo})
 		if err != nil {
 			ctx.Error(http.StatusBadRequest, "getSelectedRepos")
 			return
@@ -218,7 +218,7 @@ func (g *actionsLocalAuthorizedIntegrationForm) convertForm(ctx *context.Context
 	if g.SourceRepo == "" {
 		return "", nil, &auth_service.MissingFieldError{Field: "SourceRepo"}
 	}
-	selectedRepos, err := getSelectedRepos(ctx, []string{g.SourceRepo})
+	selectedRepos, err := getSelectedRepos(ctx, ctx.Doer, []string{g.SourceRepo})
 	if err != nil {
 		return "", nil, err
 	} else if len(selectedRepos) != 1 {

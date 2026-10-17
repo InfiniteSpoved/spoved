@@ -17,6 +17,7 @@ import (
 	"forgejo.org/models/db"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/log"
@@ -38,9 +39,10 @@ const (
 // errSelectedRepoNotFound is the one error for a missing, unreadable, malformed or duplicate selected repository.
 var errSelectedRepoNotFound = errors.New("one or more of the repositories couldn't be found by owner & name")
 
-// getSelectedRepos resolves the full names of the selected repositories. A missing, unreadable, malformed or
-// duplicate entry gives errSelectedRepoNotFound, so that the response can't be used to probe for existence.
-func getSelectedRepos(ctx *context.Context, selectedReposRaw []string) ([]*repo_model.Repository, error) {
+// getSelectedRepos resolves the full names of the selected repositories. A missing, malformed or duplicate entry, or
+// one the token owner can't read, gives errSelectedRepoNotFound, so that the response can't be used to probe for
+// existence.
+func getSelectedRepos(ctx *context.Context, owner *user_model.User, selectedReposRaw []string) ([]*repo_model.Repository, error) {
 	selectedRepos := make([]*repo_model.Repository, 0, len(selectedReposRaw))
 	seen := make(container.Set[int64], len(selectedReposRaw))
 	for _, selected := range selectedReposRaw {
@@ -50,7 +52,7 @@ func getSelectedRepos(ctx *context.Context, selectedReposRaw []string) ([]*repo_
 		} else if err != nil {
 			return nil, err
 		}
-		permission, err := access_model.GetUserRepoPermission(ctx, repo, ctx.Doer)
+		permission, err := access_model.GetUserRepoPermission(ctx, repo, owner)
 		if err != nil {
 			return nil, err
 		} else if !permission.HasAccess() || !seen.Add(repo.ID) {
@@ -65,7 +67,8 @@ func getSelectedRepos(ctx *context.Context, selectedReposRaw []string) ([]*repo_
 	return selectedRepos, nil
 }
 
-func loadAccessTokenCreateData(ctx *context.Context) {
+// loadAccessTokenCreateData fills the new token form for a token of owner, the doer or a user a site admin acts for.
+func loadAccessTokenCreateData(ctx *context.Context, owner *user_model.User) {
 	user.SetExpiryFormData(ctx.Base, setting.AccessTokenExpiry)
 	ctx.Data["AccessTokenScopePublicOnly"] = string(auth_model.AccessTokenScopePublicOnly) // note: SliceUtils.Contains won't work in the template if this is a `auth_model.AccessTokenScope`, so it's cast to a string here
 
@@ -79,13 +82,14 @@ func loadAccessTokenCreateData(ctx *context.Context) {
 		"repository",
 		"user",
 	}
-	if ctx.Doer.IsAdmin {
+	if owner.IsAdmin {
 		categories = append(categories, "admin")
 	}
+	ctx.Data["TokenOwnerIsAdmin"] = owner.IsAdmin
 	slices.Sort(categories)
 	ctx.Data["Categories"] = categories
 
-	allowed, err := authz.AllowedScopes(ctx.Doer)
+	allowed, err := authz.AllowedScopes(owner)
 	if err != nil {
 		ctx.ServerError("AllowedScopes", err)
 		return
@@ -140,7 +144,7 @@ func loadAccessTokenCreateData(ctx *context.Context) {
 	} else if isPost {
 		selectedReposRaw = postForm.SelectedRepo
 	}
-	selectedRepos, err := getSelectedRepos(ctx, selectedReposRaw)
+	selectedRepos, err := getSelectedRepos(ctx, owner, selectedReposRaw)
 	if err != nil {
 		ctx.Error(http.StatusBadRequest, "getSelectedRepos")
 		return
@@ -160,7 +164,7 @@ func loadAccessTokenCreateData(ctx *context.Context) {
 	}
 	pageSize := 10
 	repoSearch := &repo_model.SearchRepoOptions{
-		Actor:    ctx.Doer,
+		Actor:    owner,
 		Keyword:  repoSearchText,
 		Private:  true,
 		Archived: optional.Some(false),
@@ -168,7 +172,7 @@ func loadAccessTokenCreateData(ctx *context.Context) {
 		// Restrict repositories to those owned by, or collaborated with, by the user.  Repo-specific access tokens
 		// could theoretically be created on any public repository as well, but there wouldn't be much point to that and
 		// it would really balloon the search results to an impractical number of repos.
-		OwnerID: ctx.Doer.ID,
+		OwnerID: owner.ID,
 
 		ListOptions: db.ListOptions{
 			Page:     page,
@@ -225,8 +229,12 @@ func loadAccessTokenCreateData(ctx *context.Context) {
 func AccessTokenCreate(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("settings.ssh_gpg_keys")
 	ctx.Data["PageIsSettingsKeys"] = true
+	AccessTokenCreateFor(ctx, ctx.Doer, tplAccessTokenEdit)
+}
 
-	loadAccessTokenCreateData(ctx)
+// AccessTokenCreateFor renders the new access token form for a token of owner.
+func AccessTokenCreateFor(ctx *context.Context, owner *user_model.User, tpl base.TplName) {
+	loadAccessTokenCreateData(ctx, owner)
 	if ctx.Written() {
 		return
 	}
@@ -235,29 +243,34 @@ func AccessTokenCreate(ctx *context.Context) {
 		ctx.Data["resource"] = "repo-specific"
 	}
 
-	ctx.HTML(http.StatusOK, tplAccessTokenEdit)
+	ctx.HTML(http.StatusOK, tpl)
 }
 
 // AccessTokenCreatePost handles adding a user access token
 func AccessTokenCreatePost(ctx *context.Context) {
-	form := web.GetForm(ctx).(*forms.NewAccessTokenPostForm)
 	ctx.Data["Title"] = ctx.Tr("settings")
 	ctx.Data["PageIsSettingsKeys"] = true
+	AccessTokenCreatePostFor(ctx, ctx.Doer, tplAccessTokenEdit, setting.AppSubURL+"/user/settings/keys")
+}
+
+// AccessTokenCreatePostFor adds an access token of owner and redirects to redirect, where the flash shows its value.
+func AccessTokenCreatePostFor(ctx *context.Context, owner *user_model.User, tpl base.TplName, redirect string) {
+	form := web.GetForm(ctx).(*forms.NewAccessTokenPostForm)
 
 	renderWithError := func(msg template.HTML) {
-		loadAccessTokenCreateData(ctx)
+		loadAccessTokenCreateData(ctx, owner)
 		if ctx.Written() {
 			return
 		}
-		ctx.RenderWithErr(msg, tplAccessTokenEdit, form)
+		ctx.RenderWithErr(msg, tpl, form)
 	}
 
 	if ctx.HasError() {
-		loadAccessTokenCreateData(ctx)
+		loadAccessTokenCreateData(ctx, owner)
 		if ctx.Written() {
 			return
 		}
-		ctx.HTML(http.StatusOK, tplAccessTokenEdit)
+		ctx.HTML(http.StatusOK, tpl)
 		return
 	}
 
@@ -278,7 +291,7 @@ func AccessTokenCreatePost(ctx *context.Context) {
 	}
 
 	t := &auth_model.AccessToken{
-		UID:         ctx.Doer.ID,
+		UID:         owner.ID,
 		Name:        form.Name,
 		Scope:       scope,
 		ExpiresUnix: expires,
@@ -299,7 +312,7 @@ func AccessTokenCreatePost(ctx *context.Context) {
 		t.Scope = newScope
 	case "repo-specific":
 		t.ResourceAllRepos = false
-		selectedRepos, err := getSelectedRepos(ctx, form.SelectedRepo)
+		selectedRepos, err := getSelectedRepos(ctx, owner, form.SelectedRepo)
 		if err != nil {
 			ctx.Error(http.StatusBadRequest, "getSelectedRepos")
 			return
@@ -318,7 +331,7 @@ func AccessTokenCreatePost(ctx *context.Context) {
 		return
 	}
 
-	if err := authz.ValidateAccessToken(ctx.Doer, t, resourceRepos); err != nil {
+	if err := authz.ValidateAccessToken(owner, t, resourceRepos); err != nil {
 		s := user.TranslateAccessTokenValidationError(ctx.Base, err)
 		if has, str := s.Get(); has {
 			renderWithError(template.HTML(template.HTMLEscapeString(str)))
@@ -333,10 +346,14 @@ func AccessTokenCreatePost(ctx *context.Context) {
 		return
 	}
 
-	ctx.Flash.Success(ctx.Tr("settings.generate_token_success"))
+	if ctx.Data["TokensForOtherUser"] == true {
+		ctx.Flash.Success(ctx.Tr("admin.users.generate_token_success"))
+	} else {
+		ctx.Flash.Success(ctx.Tr("settings.generate_token_success"))
+	}
 	ctx.Flash.Info(t.Token)
 
-	ctx.Redirect(setting.AppSubURL + "/user/settings/keys")
+	ctx.Redirect(redirect)
 }
 
 // DeleteAccessToken response for delete user access token
@@ -373,7 +390,14 @@ type TokenWithResources struct {
 }
 
 func loadAccessTokensData(ctx *context.Context) {
-	tokens, err := db.Find[auth_model.AccessToken](ctx, auth_model.ListAccessTokensOptions{UserID: ctx.Doer.ID})
+	LoadAccessTokensFor(ctx, ctx.Doer, setting.AppSubURL+"/user/settings/keys/tokens")
+}
+
+// LoadAccessTokensFor lists the access tokens of owner, with the repositories owner can still read, for the
+// keys_tokens template, whose links start with link.
+func LoadAccessTokensFor(ctx *context.Context, owner *user_model.User, link string) {
+	ctx.Data["AccessTokensLink"] = link
+	tokens, err := db.Find[auth_model.AccessToken](ctx, auth_model.ListAccessTokensOptions{UserID: owner.ID})
 	if err != nil {
 		ctx.ServerError("ListAccessTokens", err)
 		return
@@ -385,7 +409,7 @@ func loadAccessTokensData(ctx *context.Context) {
 			// Repos associated with a repo-specific access token should already be visible to the token owner, but it's
 			// possible that access has changed, such as a removed collaborator on a repo -- don't provide info on that
 			// repo if so.
-			permission, err := access_model.GetUserRepoPermission(ctx, repo, ctx.Doer)
+			permission, err := access_model.GetUserRepoPermission(ctx, repo, owner)
 			if err != nil {
 				return false, err
 			}
