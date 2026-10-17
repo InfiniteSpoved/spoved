@@ -1,0 +1,21 @@
+# gitleaks configuration: the default rules, minus paths that hold only
+# made-up test literals (fixtures, test data, test configs, doc examples).
+# Single hits elsewhere are listed by fingerprint in .gitleaksignore.
+# Keep .github/secret_scanning.yml in step.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Made-up test fixtures, test data and documentation examples"
+paths = [
+  '''(^|/)fixtures/''',
+  '''(^|/)testdata/''',
+  '''/Test[^/]+/[^/]+\.yml$''',
+  '''^tests/[^/]+\.ini(\.tmpl)?$''',
+  '''^integrations/[^/]+\.ini(\.tmpl)?$''',
+  '''^tests/integration/ssh-signing-key$''',
+  '''^integrations/private-testing\.key$''',
+  '''^routers/private/tests/''',
+  '''^docs/content/''',
+]
