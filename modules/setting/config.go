@@ -64,6 +64,7 @@ type ConfigStruct struct {
 	// OrgCategoryOwnersCanAssign lets organization owners set their organization's category (site admins always can).
 	OrgCategoryOwnersCanAssign *config.Value[bool]
 	LogShipping                *config.Value[LogShippingState]
+	AuditRetention             *config.Value[AuditRetentionState]
 }
 
 var (
@@ -89,6 +90,7 @@ func initDefaultConfig() {
 		PersonalRepos:              config.ValueJSON[PersonalReposState]("repository.personal_repos").WithInvalid(PersonalReposState{Mode: "invalid"}),
 		OrgCategoryOwnersCanAssign: config.ValueJSON[bool]("org_category.owners_can_assign"),
 		LogShipping:                config.ValueJSON[LogShippingState]("log_shipping.destinations"),
+		AuditRetention:             config.ValueJSON[AuditRetentionState]("audit.retention_days"),
 	}
 }
 

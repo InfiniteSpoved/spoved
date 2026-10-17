@@ -1,0 +1,24 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin audit-retention")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.audit_retention"}}
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.audit_retention.desc"}}</p>
+			<p id="audit-retention-line">{{.RetentionLine}}</p>
+			<form class="ui form" action="{{AppSubUrl}}/admin/audit/retention" method="post">
+				<div class="field">
+					<label for="days">{{ctx.Locale.Tr "admin.audit_retention.keep"}}</label>
+					<select id="days" name="days" class="ui dropdown">
+						{{range .Options}}
+							<option value="{{.}}" {{if eq . $.Current}}selected{{end}}>{{ctx.Locale.Tr (print "admin.audit_retention.option." .)}}</option>
+						{{end}}
+					</select>
+					<p class="help">{{ctx.Locale.Tr "admin.audit_retention.lower_help"}}</p>
+				</div>
+				<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+				<a class="ui button" href="{{AppSubUrl}}/admin/audit">{{ctx.Locale.Tr "admin.audit_retention.back"}}</a>
+			</form>
+		</div>
+	</div>
+{{template "admin/layout_footer" .}}
