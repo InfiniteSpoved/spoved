@@ -5,11 +5,14 @@ package auth
 
 import (
 	"context"
+	"net/netip"
 	"strconv"
 
 	audit_model "forgejo.org/models/audit"
+	"forgejo.org/models/organization"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/timeutil"
 )
 
@@ -64,6 +67,17 @@ func RecordRefusal(ctx context.Context, reason string, ownerID, subject int64, k
 	}, reason+"|"+key)
 }
 
+// RecordConnectionRefused records, aggregated per rate limit class and client address (an IPv6 /64), that the rate
+// limiter closed a connection of remoteAddr ("host:port") before any request: there is no request, so the actor is an
+// anonymous one with that address. It writes to the database, so callers outside a request run it off their hot path.
+func RecordConnectionRefused(ctx context.Context, class, remoteAddr string) {
+	a := &audit_model.Actor{Type: audit_model.ActorAnonymous, IP: "invalid"}
+	if ap, err := netip.ParseAddrPort(remoteAddr); err == nil {
+		a.IP = ap.Addr().Unmap().WithZone("").String()
+	}
+	RecordRefusal(audit_model.WithActor(ctx, a), "rate_limit", 0, 0, "conn|"+class+"|"+ratelimit.IPKey(remoteAddr), map[string]any{"class": class})
+}
+
 // RecordTwoFactorBlocked records once per user, organization and UTC day that the organization's two-factor
 // requirement refused the user.
 func RecordTwoFactorBlocked(ctx context.Context, uid, orgID int64) {
@@ -76,6 +90,26 @@ func RecordTwoFactorBlocked(ctx context.Context, uid, orgID int64) {
 		TargetType: "refusal", TargetID: uid, Data: map[string]any{"reason": "org_two_factor"},
 	}) {
 		audit_model.MarkSeenToday(key)
+	}
+}
+
+// RecordTwoFactorBlockedMember is RecordTwoFactorBlocked for the denial points of the API and of git: it records only
+// when owner is an organization whose two-factor requirement blocks doer, who is one of its members. Anything else
+// records nothing, and a failed lookup is logged: the denial itself stays as it is.
+func RecordTwoFactorBlockedMember(ctx context.Context, doer, owner *user_model.User) {
+	if doer == nil || owner == nil || !owner.IsOrganization() || !owner.RequireTwoFactor {
+		return
+	}
+	blocked, err := doer.TwoFactorBlocked(ctx, owner)
+	if err == nil && blocked {
+		blocked, err = organization.IsOrganizationMember(ctx, owner.ID, doer.ID)
+	}
+	if err != nil {
+		log.Error("RecordTwoFactorBlockedMember: %v", err)
+		return
+	}
+	if blocked {
+		RecordTwoFactorBlocked(ctx, doer.ID, owner.ID)
 	}
 }
 

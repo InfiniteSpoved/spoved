@@ -96,7 +96,7 @@ test('Migration into a project: picker follows the owner', async ({page}) => {
   await expect(page).toHaveURL(`/org3/${name}`);
 
   // the project page links to the migration with the project preselected, and the service links keep it
-  await page.locator('.page-content').getByRole('link', {name: 'New migration'}).click();
+  await page.locator('.page-content').getByRole('link', {name: 'New migration', exact: true}).click();
   await expect(page).toHaveURL(/\/repo\/migrate\?org=\d+&group=[1-9]\d*&mirror=1$/);
   await page.locator('a.migrate-entry').first().click();
   await expect(page.locator('#repo_group option:checked')).toHaveText(name);

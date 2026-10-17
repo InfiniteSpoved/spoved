@@ -121,3 +121,16 @@
     order: 2;
   }
 }
+
+/* the filter fields wrap instead of being cut off at 1280px */
+.admin.audit-log .audit-filters .fields {
+  flex-wrap: wrap;
+}
+
+.admin.audit-log .audit-filters .fields > .field {
+  min-width: 12rem;
+}
+
+.admin.audit-log .audit-aggregated {
+  margin-bottom: 0.25rem;
+}

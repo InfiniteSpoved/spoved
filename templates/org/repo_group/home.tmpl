@@ -27,7 +27,10 @@
 			<div class="empty-placeholder">
 				{{svg "octicon-repo" 48}}
 				<h2 class="tw-text-center">{{ctx.Locale.Tr "repo_group.empty"}}</h2>
-				{{if and .CanCreateOrgRepo (not .Org.IsArchived)}}<p>{{ctx.Locale.Tr "repo_group.empty_desc"}}</p>{{end}}
+				{{if and .CanCreateOrgRepo (not .Org.IsArchived)}}
+					<p>{{ctx.Locale.Tr "repo_group.empty_desc"}}</p>
+					{{if not .DisableMigrations}}<p><a href="{{AppSubUrl}}/repo/migrate?org={{.Org.ID}}&group={{.RepoGroup.ID}}&mirror=1">{{ctx.Locale.Tr "repo_group.empty_desc_migrate"}}</a></p>{{end}}
+				{{end}}
 			</div>
 		{{end}}
 	</div>

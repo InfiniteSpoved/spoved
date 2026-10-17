@@ -5,11 +5,15 @@ package admin
 
 import (
 	"errors"
+	"html"
+	"html/template"
 	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	audit_model "forgejo.org/models/audit"
@@ -43,8 +47,14 @@ type auditRow struct {
 	*audit_model.Entry
 	Time       string
 	SudoByName string
-	Changes    []auditChange
-	Details    map[string]string
+	// Event is the translated action; the target fills a %s in the phrase, or follows it after a dot.
+	Event   template.HTML
+	Changes []auditChange
+	Details map[string]string
+	// AggregatedCount is the number of events folded into an ".aggregated" entry, 0 for any other entry.
+	AggregatedCount                 int64
+	AggregatedFirst, AggregatedLast string
+	AggregatedLink                  string
 }
 
 type auditChange struct {
@@ -60,6 +70,49 @@ func auditValue(v any, ok bool) string {
 	return string(b)
 }
 
+// auditTimeKeys are the data keys that hold a unix time in seconds.
+var auditTimeKeys = []string{"expires", "first", "last"}
+
+// auditTimeValue is v as "date (raw)" in loc when v is a whole number of seconds in a sane range, else its plain text.
+func auditTimeValue(v any, loc *time.Location) string {
+	if f, ok := v.(float64); ok && f == math.Trunc(f) && f > 0 && f < 1e11 {
+		return time.Unix(int64(f), 0).In(loc).Format("2006-01-02 15:04:05") + " (" + strconv.FormatInt(int64(f), 10) + ")"
+	}
+	return auditValue(v, true)
+}
+
+// auditDataValue is the text of the data value k: a time for the known time keys.
+func auditDataValue(k string, v any, ok bool, loc *time.Location) string {
+	if ok && slices.Contains(auditTimeKeys, k) {
+		return auditTimeValue(v, loc)
+	}
+	return auditValue(v, ok)
+}
+
+// setAggregated fills the label and the link of an ".aggregated" entry that counted events in a known window. The
+// link lists the entries of the same action in that window, by the same IP when the entry has one.
+func (r *auditRow) setAggregated(data map[string]any, loc *time.Location) {
+	action, ok := strings.CutSuffix(r.Action, ".aggregated")
+	count, _ := data["count"].(float64)
+	first, _ := data["first"].(float64)
+	last, _ := data["last"].(float64)
+	if !ok || count < 1 || first <= 0 || last < first || last >= 1e11 {
+		return
+	}
+	r.AggregatedCount = int64(count)
+	r.AggregatedFirst = time.Unix(int64(first), 0).In(loc).Format("2006-01-02 15:04:05")
+	r.AggregatedLast = time.Unix(int64(last), 0).In(loc).Format("2006-01-02 15:04:05")
+	q := url.Values{
+		"category": {"all"}, "action": {action},
+		"since":  {time.Unix(int64(first), 0).UTC().Format(time.RFC3339)},
+		"before": {time.Unix(int64(last)+1, 0).UTC().Format(time.RFC3339)},
+	}
+	if r.IP != "" {
+		q.Set("ip", r.IP)
+	}
+	r.AggregatedLink = "?" + q.Encode()
+}
+
 func newAuditRow(e *audit_model.Entry, loc *time.Location, names map[int64]string) *auditRow {
 	data := convert.AuditData(e.Data)
 	r := &auditRow{Entry: e, Time: e.CreatedUnix.AsTime().In(loc).Format("2006-01-02 15:04:05"), Details: map[string]string{}}
@@ -73,9 +126,10 @@ func newAuditRow(e *audit_model.Entry, loc *time.Location, names map[int64]strin
 	after, _ := data["after"].(map[string]any)
 	for k, v := range data {
 		if k != "before" && k != "after" {
-			r.Details[k] = auditValue(v, true)
+			r.Details[k] = auditDataValue(k, v, true, loc)
 		}
 	}
+	r.setAggregated(data, loc)
 	var keys []string
 	for k := range before {
 		keys = append(keys, k)
@@ -89,7 +143,7 @@ func newAuditRow(e *audit_model.Entry, loc *time.Location, names map[int64]strin
 	for _, k := range keys {
 		b, hasBefore := before[k]
 		a, hasAfter := after[k]
-		r.Changes = append(r.Changes, auditChange{Key: k, Before: auditValue(b, hasBefore), After: auditValue(a, hasAfter)})
+		r.Changes = append(r.Changes, auditChange{Key: k, Before: auditDataValue(k, b, hasBefore, loc), After: auditDataValue(k, a, hasAfter, loc)})
 	}
 	return r
 }
@@ -170,6 +224,7 @@ func Audit(ctx *context.Context) {
 	ctx.Data["Tabs"] = auditTabs
 	ctx.Data["CredentialTypes"] = audit_model.CredentialTypes
 	ctx.Data["Results"] = audit_model.Results
+	ctx.Data["CategoryOptions"] = append(slices.Clone(auditTabs), slices.DeleteFunc(slices.Clone(audit_model.Categories), func(c string) bool { return slices.Contains(auditTabs, c) })...)
 	ctx.Data["ActionKeys"] = audit_service.ActionKeys
 	query := ctx.Req.URL.Query()
 	ctx.Data["Filter"] = query
@@ -256,7 +311,18 @@ func Audit(ctx *context.Context) {
 	ctx.Data["TimeZone"] = loc.String()
 	rows := make([]*auditRow, 0, len(entries))
 	for _, e := range entries {
-		rows = append(rows, newAuditRow(e, loc, names))
+		r := newAuditRow(e, loc, names)
+		if ctx.Locale.HasKey("admin.audit.action." + e.Action) {
+			if e.TargetName != "" && strings.Contains(ctx.Locale.TrString("admin.audit.action."+e.Action), "%s") {
+				r.Event = ctx.Locale.Tr("admin.audit.action."+e.Action, e.TargetName)
+			} else {
+				r.Event = ctx.Locale.Tr("admin.audit.action." + e.Action)
+				if e.TargetName != "" {
+					r.Event += " · " + template.HTML(html.EscapeString(e.TargetName))
+				}
+			}
+		}
+		rows = append(rows, r)
 	}
 	ctx.Data["Rows"] = rows
 	if f.Opts.CredentialType != "" && len(rows) > 0 {
