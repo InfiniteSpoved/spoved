@@ -31593,7 +31593,7 @@
           "x-go-name": "Level"
         },
         "log_types": {
-          "description": "all, application, access, router, git",
+          "description": "all (not audit), application, access, router, git, audit",
           "type": "array",
           "items": {
             "type": "string"
@@ -31611,7 +31611,7 @@
           "x-go-name": "NDJSON"
         },
         "type": {
-          "description": "newrelic or http",
+          "description": "newrelic, http or loki",
           "type": "string",
           "x-go-name": "Type"
         }

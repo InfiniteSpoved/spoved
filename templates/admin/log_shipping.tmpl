@@ -51,7 +51,7 @@
 				<div class="field">
 					<label for="type">{{ctx.Locale.Tr "admin.log_shipping.type"}}</label>
 					<select id="type" name="type" {{if .Edit}}disabled{{end}}>
-						{{range $t := (StringUtils.Make "newrelic" "http")}}
+						{{range $t := (StringUtils.Make "newrelic" "http" "loki")}}
 							<option value="{{$t}}" {{if and $.Edit (eq $.Edit.Type $t)}}selected{{end}}>{{ctx.Locale.Tr (printf "admin.log_shipping.type.%s" $t)}}</option>
 						{{end}}
 					</select>
@@ -66,7 +66,7 @@
 					<input id="key" name="key" type="password" autocomplete="off" placeholder="{{if and .Edit .Edit.HasKey}}{{ctx.Locale.Tr "admin.log_shipping.key_set"}}{{end}}">
 					<span class="help">{{ctx.Locale.Tr "admin.log_shipping.key_helper"}}</span>
 				</div>
-				<div class="field" data-log-shipping-for="http">
+				<div class="field" data-log-shipping-for="http loki">
 					<label for="headers">{{ctx.Locale.Tr "admin.log_shipping.headers"}}</label>
 					<textarea id="headers" name="headers" rows="4" autocomplete="off" placeholder="Authorization: Bearer ...">{{.HeaderLines}}</textarea>
 					<span class="help">{{ctx.Locale.Tr "admin.log_shipping.headers_helper"}}</span>
@@ -84,6 +84,7 @@
 							<div class="ui checkbox">
 								<input id="log-type-{{$t}}" name="log_types" value="{{$t}}" type="checkbox" {{if index $.SelectedTypes $t}}checked{{end}}>
 								<label for="log-type-{{$t}}">{{ctx.Locale.Tr (printf "admin.log_shipping.log_type.%s" $t)}}</label>
+							{{if eq $t "audit"}}<span class="help">{{ctx.Locale.Tr "admin.log_shipping.log_type.audit_hint"}}</span>{{end}}
 							</div>
 						</div>
 					{{end}}

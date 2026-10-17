@@ -231,7 +231,7 @@ func TestLogShippingSecrets(t *testing.T) {
 		"dupe":     {Name: "gen", Type: "http", Endpoint: "https://127.0.0.1:9/x", LogTypes: []string{"git"}},
 		"header":   {Name: "a", Type: "http", Endpoint: "https://127.0.0.1:9/x", LogTypes: []string{"git"}, Headers: []*api.LogShippingHeaderOption{{Name: "Host", Value: "x"}}},
 		"no key":   {Name: "a", Type: "newrelic", Endpoint: "https://127.0.0.1:9/x", LogTypes: []string{"git"}},
-		"log type": {Name: "a", Type: "http", Endpoint: "https://127.0.0.1:9/x", LogTypes: []string{"audit"}},
+		"log type": {Name: "a", Type: "http", Endpoint: "https://127.0.0.1:9/x", LogTypes: []string{"nope"}},
 		"database": {Name: "a", Type: "http", Endpoint: "https://127.0.0.1:9/x", LogTypes: []string{"database"}},
 		"self":     {Name: "a", Type: "http", Endpoint: setting.AppURL + "api/v1/version", LogTypes: []string{"access"}},
 		"crlf":     {Name: "a", Type: "http", Endpoint: "https://127.0.0.1:9/x", LogTypes: []string{"git"}, Headers: []*api.LogShippingHeaderOption{{Name: "X-A", Value: "v\r\nX-B: w"}}},

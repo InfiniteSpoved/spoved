@@ -5,6 +5,7 @@ package log
 
 import (
 	"bytes"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"crypto/tls"
@@ -22,6 +23,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"forgejo.org/modules/json"
 )
 
 // ShipTransport replaces the HTTP transport of the HTTP shipping writers. It is only set by tests.
@@ -30,10 +33,10 @@ var ShipTransport http.RoundTripper
 // HTTPShipOption holds the settings of an "http" writer. The key and the header values never leave it: not in JSON (the
 // admin configuration page dumps writer options), not in formatted output, not in errors.
 type HTTPShipOption struct {
-	Format   string // "newrelic" or "http"
+	Format   string // "newrelic", "http" or "loki"
 	Endpoint string
 	Key      string            `json:"-"` // newrelic only
-	Headers  map[string]string `json:"-"` // http only
+	Headers  map[string]string `json:"-"` // http and loki only
 	NDJSON   bool              // http only: one event per line instead of a JSON array
 	// DialContext, if set, makes every connection and disables the proxy; it checks the resolved address.
 	DialContext func(ctx context.Context, network, addr string) (net.Conn, error) `json:"-"`
@@ -46,11 +49,14 @@ func (o HTTPShipOption) GoString() string { return o.String() }
 
 // Validate returns an error that names the setting and never contains the key or a header value.
 func (o HTTPShipOption) Validate() error {
-	if o.Format != "newrelic" && o.Format != "http" {
+	if o.Format != "newrelic" && o.Format != "http" && o.Format != "loki" {
 		return errors.New("unknown format")
 	}
 	if o.Format == "newrelic" && o.Key == "" {
 		return errors.New("a key is required")
+	}
+	if o.Format == "loki" && (o.Key != "" || o.NDJSON) { // Loki auth is a custom header; a key would be silently unused
+		return errors.New("a key and NDJSON are not used by Loki")
 	}
 	u, err := url.Parse(o.Endpoint)
 	if err != nil || u.Host == "" {
@@ -152,8 +158,11 @@ func newHTTPShipper(name string, opt HTTPShipOption) *httpShipper {
 		rt = t
 	}
 	var format shipFormat = httpFormat{opt}
-	if opt.Format == "newrelic" {
+	switch opt.Format {
+	case "newrelic":
 		format = newRelicFormat{opt}
+	case "loki":
+		format = lokiFormat{opt}
 	}
 	return &httpShipper{
 		name:   name,
@@ -474,6 +483,76 @@ func (f httpFormat) Encode(items []shipItem) []byte {
 		buf.WriteByte('\n')
 	}
 	return buf.Bytes()
+}
+
+// lokiFormat posts to Loki's push API. The labels come from closed sets, never from the event's text.
+type lokiFormat struct{ opt HTTPShipOption }
+
+func (lokiFormat) Label() string { return "Loki" }
+
+func (f lokiFormat) Headers() http.Header {
+	h := http.Header{}
+	for k, v := range f.opt.Headers {
+		h.Set(k, v)
+	}
+	h.Set("Content-Type", "application/json")
+	return h
+}
+
+var (
+	lokiLogtypes = []string{"application", "access", "router", "ssh", "audit", "test"}
+	lokiLevels   = []string{"trace", "debug", "info", "warn", "error", "fatal"}
+)
+
+type lokiValue struct {
+	ts   int64 // ns
+	line string
+}
+
+func (lokiFormat) Encode(items []shipItem) []byte {
+	type key struct{ logtype, level string }
+	groups := map[key][]lokiValue{}
+	var order []key
+	now := time.Now().UnixNano()
+	for _, it := range items {
+		var e struct {
+			Timestamp int64  `json:"timestamp"` // ms
+			Logtype   string `json:"logtype"`
+			Level     string `json:"level"`
+		}
+		k, ts := key{"application", "info"}, now
+		if json.Unmarshal(it.data, &e) == nil { // an unparsable line is kept under the default labels
+			if slices.Contains(lokiLogtypes, e.Logtype) {
+				k.logtype = e.Logtype
+			}
+			if slices.Contains(lokiLevels, e.Level) {
+				k.level = e.Level
+			}
+			if e.Timestamp > 0 {
+				ts = e.Timestamp * int64(time.Millisecond)
+			}
+		}
+		if _, ok := groups[k]; !ok {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], lokiValue{ts, string(it.data)})
+	}
+	type stream struct {
+		Stream map[string]string `json:"stream"`
+		Values [][2]string       `json:"values"`
+	}
+	streams := make([]stream, 0, len(order))
+	for _, k := range order {
+		vs := groups[k]
+		slices.SortStableFunc(vs, func(a, b lokiValue) int { return cmp.Compare(a.ts, b.ts) })
+		st := stream{Stream: map[string]string{"service": ServiceName, "logtype": k.logtype, "level": k.level}}
+		for _, v := range vs {
+			st.Values = append(st.Values, [2]string{strconv.FormatInt(v.ts, 10), v.line})
+		}
+		streams = append(streams, st)
+	}
+	b, _ := json.Marshal(map[string]any{"streams": streams})
+	return b
 }
 
 func jsonArray(items []shipItem) []byte {

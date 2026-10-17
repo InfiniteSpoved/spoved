@@ -784,3 +784,14 @@ func TestLogConfigFormat(t *testing.T) {
 	assert.Equal(t, "json", dump["console"].(map[string]any)["Format"])
 	assert.NotContains(t, dump["file"], "Format", "the text default leaves the dump unchanged")
 }
+
+func TestLogConfigAuditNeverFallsBack(t *testing.T) {
+	for name, cfg := range map[string]string{"unset": ``, "default marker": "[log]\nLOGGER_AUDIT_MODE = ,\n"} {
+		manager, closer := initLoggersByConfig(t, cfg)
+		assert.Empty(t, manager.GetLogger("audit").DumpWriters(), name)
+		closer()
+	}
+	manager, closer := initLoggersByConfig(t, "[log]\nLOGGER_AUDIT_MODE = console\n")
+	defer closer()
+	assert.Contains(t, manager.GetLogger("audit").DumpWriters(), "console")
+}

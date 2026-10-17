@@ -528,3 +528,70 @@ func TestSaveConcurrent(t *testing.T) {
 	}
 	assert.Len(t, load(ctx).Destinations, 6)
 }
+
+func TestApplyAuditWriter(t *testing.T) {
+	reset(t)
+	defer reset(t)
+	allowLoopback(t)
+	u := admin(t)
+
+	// "all" alone never streams audit
+	d, err := Save(t.Context(), u, "", Input{Name: new("all"), Type: new("http"), Endpoint: new("https://127.0.0.1:9/a"), LogTypes: &[]string{"all"}})
+	require.NoError(t, err)
+	assert.Empty(t, writersOf("audit"))
+	assert.Equal(t, 0, StreamingCount())
+
+	// audit has a writer of its own, so the destination's level (and filters) can't drop audit rows (M3)
+	_, err = Save(t.Context(), u, d.ID, Input{LogTypes: &[]string{"all", "audit"}, Level: new("error"), Expression: new("nothing-matches")})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"ship-" + d.ID + "-audit"}, writersOf("audit"))
+	assert.Contains(t, writersOf("access"), "ship-"+d.ID)
+	assert.Equal(t, log.TRACE, log.GetManager().GetSharedWriter("ship-"+d.ID+"-audit").GetLevel())
+	assert.Equal(t, log.ERROR, log.GetManager().GetSharedWriter("ship-"+d.ID).GetLevel())
+	assert.Equal(t, 1, StreamingCount())
+
+	// only audit: no writer on the other loggers
+	_, err = Save(t.Context(), u, d.ID, Input{LogTypes: &[]string{"audit"}})
+	require.NoError(t, err)
+	assert.Nil(t, log.GetManager().GetSharedWriter("ship-"+d.ID))
+	assert.NotContains(t, writersOf("access"), "ship-"+d.ID)
+
+	_, err = Save(t.Context(), u, d.ID, Input{Enabled: new(false)})
+	require.NoError(t, err)
+	assert.Empty(t, writersOf("audit"))
+	assert.Equal(t, 0, StreamingCount())
+}
+
+// A destination with Level=error and only the audit type still receives an info row, as Loki lines.
+func TestAuditRowsIgnoreDestinationLevel(t *testing.T) {
+	reset(t)
+	defer reset(t)
+	allowLoopback(t)
+
+	var mu sync.Mutex
+	var got []string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		got = append(got, r.URL.Path+" "+string(b))
+		mu.Unlock()
+		w.WriteHeader(204)
+	}))
+	defer srv.Close()
+	t.Cleanup(test.MockVariableValue(&log.ShipTransport, srv.Client().Transport))
+
+	u := admin(t)
+	d, err := Save(t.Context(), u, "", Input{
+		Name: new("loki"), Type: new("loki"), Endpoint: new(srv.URL + "/loki/api/v1/push"), LogTypes: &[]string{"audit"}, Level: new("error"),
+	})
+	require.NoError(t, err)
+	log.GetManager().GetLogger("audit").LogWithFields(0, log.INFO, map[string]any{"seq": 7, "data": "{}"}, "%s", "auth.signin")
+	require.NoError(t, Remove(t.Context(), u, d.ID)) // flushes the writer
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, got, 1)
+	assert.True(t, strings.HasPrefix(got[0], "/loki/api/v1/push "), got[0])
+	assert.Contains(t, got[0], `"logtype":"audit"`)
+	assert.Contains(t, got[0], `\"message\":\"auth.signin\"`)
+}
