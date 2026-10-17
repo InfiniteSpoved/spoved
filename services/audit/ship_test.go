@@ -12,6 +12,7 @@ import (
 
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
@@ -122,4 +123,53 @@ func TestSealDoesNotWaitForTheWriter(t *testing.T) {
 		t.Fatal("Seal waited for the writer")
 	}
 	assert.EqualValues(t, 21, mustVerify(t).LastSeq)
+}
+
+// Every top-level field of the design's list is on a shipped event, with the names resolved and the data fields
+// promoted out of `data`.
+func TestShippedEventHasEveryTopLevelField(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	c := &capture{}
+	shipTo(t, c, 1000)
+	group := &repo_model.RepoGroup{OwnerID: 3, Name: "proj", LowerName: "proj"}
+	require.NoError(t, db.Insert(t.Context(), group))
+	require.NoError(t, db.Insert(t.Context(), &audit_model.Entry{
+		CreatedUnix: timeutil.TimeStamp(1700000000), Category: "activity", Action: "activity.api.read", Result: "success",
+		ActorType: "user", ActorID: 2, ActorName: "user2", SudoByID: 1,
+		CredentialType: "access_token", CredentialID: 5, CredentialName: "tok", CredentialOwnerID: 2,
+		IP: "203.0.113.5", UserAgent: "UA/1", RequestID: "req1", OwnerID: 3, GroupID: group.ID, RepoID: 1,
+		TargetType: "download", TargetID: 7, TargetName: "obj",
+		Data: `{"kind":"archive","bytes":1234,"ip_ambiguous":true,"method":"GET","keep":"me"}`,
+	}))
+	require.NoError(t, SealAll(t.Context()))
+	require.Eventually(t, func() bool { return len(c.get()) == 2 }, 5*time.Second, 10*time.Millisecond)
+	var m map[string]any
+	require.NoError(t, json.Unmarshal([]byte(c.get()[1]), &m))
+	for _, k := range []string{
+		"timestamp", "action", "category", "result", "ip", "ip_ambiguous", "user_agent",
+		"actor_type", "actor_id", "actor_name", "sudo_by_id",
+		"credential_type", "credential_id", "credential_name", "credential_owner_id",
+		"target_type", "target_id", "target_name", "org", "project", "repo",
+		"auth_method", "kind", "bytes", "request_id", "seq", "hash", "data",
+	} {
+		assert.Contains(t, m, k)
+	}
+	assert.EqualValues(t, 1700000000000, m["timestamp"]) // the entry's time, not the shipping time
+	assert.Equal(t, "org3", m["org"])
+	assert.Equal(t, "proj", m["project"])
+	assert.Equal(t, "repo1", m["repo"])
+	assert.Equal(t, "archive", m["kind"])
+	assert.EqualValues(t, 1234, m["bytes"])
+	assert.Equal(t, true, m["ip_ambiguous"])
+	assert.Empty(t, m["auth_method"]) // "method" of a download is not an auth method
+	assert.JSONEq(t, `{"keep":"me","method":"GET"}`, m["data"].(string))
+}
+
+func TestSplitDataPromotesAuthMethod(t *testing.T) {
+	data, promoted := splitData(&audit_model.Entry{TargetType: "signin", Data: `{"method":"password","reason":"x"}`})
+	assert.Equal(t, "password", promoted["auth_method"])
+	assert.JSONEq(t, `{"reason":"x"}`, data)
+	data, promoted = splitData(&audit_model.Entry{TargetType: "signin", Data: "not json"})
+	assert.Equal(t, "not json", data)
+	assert.Empty(t, promoted)
 }

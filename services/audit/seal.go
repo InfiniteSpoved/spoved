@@ -78,7 +78,7 @@ func Seal(ctx context.Context) (n int, err error) {
 		return nil
 	})
 	if err == nil {
-		shipEntries(sealed) // only committed rows, once, by the sealer that sealed them
+		shipEntries(ctx, sealed) // only committed rows, once, by the sealer that sealed them
 	}
 	return n, err
 }

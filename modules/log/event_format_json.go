@@ -62,7 +62,9 @@ func EventFormatJSONMessage(mode *WriterMode, event *Event) []byte {
 		logtype = "application"
 	}
 	ver, _ := appVersion.Load().(string)
-	m["timestamp"] = event.Time.UnixMilli()
+	if _, ok := m["timestamp"].(int64); !ok { // a caller shipping a stored event gives the time it happened
+		m["timestamp"] = event.Time.UnixMilli()
+	}
 	m["message"] = clean(strings.TrimSuffix(event.MsgSimpleText, "\n"), maxMessage)
 	m["level"] = event.Level.String()
 	m["logtype"] = logtype

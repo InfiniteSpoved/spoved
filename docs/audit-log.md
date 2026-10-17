@@ -64,4 +64,5 @@ Known gaps:
 - Rows sealed after a destination is removed or disabled don't reach it, and nothing is re-sent later.
 - The buffer (up to 5 s of events, or what a down destination hasn't taken yet) is lost on a hard kill.
 - Loki may reject samples that are too old after a long outage; the shipper drops what it can't deliver.
-- The timestamp of an event is when it was shipped; the time of the entry itself is `occurred_at` (Unix seconds).
+- The org, project and repository names are looked up when the row is shipped; one deleted since then shows an empty
+  name, and the ids stay.
