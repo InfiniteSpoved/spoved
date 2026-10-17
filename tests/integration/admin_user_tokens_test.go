@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -67,9 +69,27 @@ func TestAdminUserTokens(t *testing.T) {
 			doc := NewHTMLParser(t, admin.MakeRequest(t, NewRequest(t, "GET", editURL(4)), http.StatusOK).Body)
 			assert.Equal(t, 1, doc.Find(`a[href$="/admin/users/4/tokens/new"]`).Length())
 
-			defer setCol(t, 4, "login_type", 6)() // OAuth2
-			doc = NewHTMLParser(t, admin.MakeRequest(t, NewRequest(t, "GET", editURL(4)), http.StatusOK).Body)
-			assert.Zero(t, doc.Find(`a[href*="/tokens/"]`).Length())
+			noSection := func(t *testing.T, uid int64) {
+				t.Helper()
+				doc := NewHTMLParser(t, admin.MakeRequest(t, NewRequest(t, "GET", editURL(uid)), http.StatusOK).Body)
+				assert.Equal(t, 1, doc.Find(`form[action="./edit"]`).Length())
+				assert.Zero(t, doc.Find(`a[href*="/tokens/"], [data-url*="/tokens/"]`).Length())
+			}
+			t.Run("ldap", func(t *testing.T) {
+				defer setCol(t, 4, "login_type", 2)()
+				noSection(t, 4)
+			})
+			t.Run("oauth2", func(t *testing.T) {
+				defer setCol(t, 4, "login_type", 6)()
+				noSection(t, 4)
+			})
+			t.Run("bot", func(t *testing.T) {
+				defer setCol(t, 4, "type", int(user_model.UserTypeBot))()
+				noSection(t, 4)
+			})
+			t.Run("organization", func(t *testing.T) {
+				admin.MakeRequest(t, NewRequest(t, "GET", editURL(3)), http.StatusNotFound)
+			})
 		})
 
 		t.Run("refused targets", func(t *testing.T) {
@@ -135,6 +155,27 @@ func TestAdminUserTokens(t *testing.T) {
 			assert.Equal(t, "admin-made", e.TargetName)
 			assert.Equal(t, true, auditData(t, e)["on_behalf"])
 			assertNoSecretIn(t, since, value)
+
+			// the list shows scopes, created, expires and last used
+			created := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC).Unix()
+			used := time.Date(2026, 2, 3, 12, 0, 0, 0, time.UTC).Unix()
+			expires := time.Now().AddDate(0, 2, 0).Unix()
+			_, err := db.GetEngine(ctx).Exec("UPDATE access_token SET created_unix = ?, updated_unix = ?, expires_unix = ? WHERE id = ?", created, used, expires, tok.ID)
+			require.NoError(t, err)
+			doc := NewHTMLParser(t, admin.MakeRequest(t, NewRequest(t, "GET", editURL(2)), http.StatusOK).Body)
+			item := doc.Find(".flex-item").FilterFunction(func(_ int, s *goquery.Selection) bool {
+				return s.Find(".flex-item-title").Text() == "admin-made"
+			})
+			require.Equal(t, 1, item.Length())
+			text := strings.Join(strings.Fields(item.Text()), " ")
+			day := func(unix int64) string { return time.Unix(unix, 0).Format("2006-01-02") }
+			assert.Contains(t, text, "write:repository")
+			assert.Contains(t, text, "Added on "+day(created))
+			assert.Contains(t, text, "Last used on "+day(used))
+			assert.Contains(t, text, "Expires "+day(expires))
+			assert.Contains(t, text, f.priv.FullName())
+			assert.Equal(t, 1, item.Find(fmt.Sprintf(`[data-url="/admin/users/2/tokens/delete"][data-id="%d"]`, tok.ID)).Length())
+			assert.Equal(t, 1, item.Find(fmt.Sprintf(`[data-url="/admin/users/2/tokens/regenerate"][data-id="%d"]`, tok.ID)).Length())
 
 			// the name check is per target: the admin may use the same name for another user
 			create(t, admin, 2, http.StatusOK, url.Values{"name": {"admin-made"}, "resource": {"all"}, "scope": {"read:user"}})
@@ -226,6 +267,7 @@ func TestAdminUserTokens(t *testing.T) {
 			assert.Equal(t, mine.ID, e.TargetID)
 			assert.Equal(t, "regen", e.TargetName)
 			assert.Equal(t, true, auditData(t, e)["on_behalf"])
+			assertNoSecretIn(t, since, value, mine.Token)
 		})
 
 		t.Run("who may act", func(t *testing.T) {
@@ -266,9 +308,12 @@ func TestAdminUserTokens(t *testing.T) {
 			t.Run("maintenance read-only", func(t *testing.T) {
 				defer setMaintenance(t, setting.MaintenanceReadOnly, time.Time{})()
 				admin.MakeRequest(t, NewRequest(t, "GET", tokensURL(8, "new")), http.StatusOK)
-				create(t, admin, 8, NoExpectedStatus, url.Values{"name": {"in-maintenance"}, "resource": {"all"}, "scope": {"read:user"}})
-				post(t, admin, tokensURL(8, "delete"), tok.ID, NoExpectedStatus)
-				post(t, admin, tokensURL(8, "regenerate"), tok.ID, NoExpectedStatus)
+				create(t, admin, 8, http.StatusSeeOther, url.Values{"name": {"in-maintenance"}, "resource": {"all"}, "scope": {"read:user"}})
+				assertMaintenanceFlash(t, admin)
+				post(t, admin, tokensURL(8, "delete"), tok.ID, http.StatusSeeOther)
+				assertMaintenanceFlash(t, admin)
+				post(t, admin, tokensURL(8, "regenerate"), tok.ID, http.StatusSeeOther)
+				assertMaintenanceFlash(t, admin)
 				unittest.AssertNotExistsBean(t, &auth_model.AccessToken{UID: 8, Name: "in-maintenance"})
 			})
 			assert.Equal(t, tok.TokenHash, unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: tok.ID}).TokenHash)
