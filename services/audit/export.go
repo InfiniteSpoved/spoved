@@ -31,6 +31,8 @@ type Manifest struct {
 	Through     time.Time // the time of the last row, when Truncated
 	ThroughID   int64
 	Rows        int
+	SealedSeq   int64 // the chain head after sealing, before the snapshot
+	SealedHash  string
 }
 
 // FilterHeader returns the filter as a query string, for X-Audit-Filter.
@@ -63,6 +65,13 @@ var CSVHeader = []string{
 // it stops after cap rows. It records the export before anything is written and calls start (headers, manifest)
 // right before the first byte; an error before that means nothing was written.
 func Export(ctx context.Context, w io.Writer, f *Filter, format string, cap int, start func(*Manifest) error) (*Manifest, error) {
+	if err := SealAll(ctx); err != nil { // a backlog beyond the cap is not an error: the headers name what was reached
+		return nil, err
+	}
+	head, err := audit_model.GetHead(ctx)
+	if err != nil {
+		return nil, err
+	}
 	o := f.Opts
 	maxID, err := audit_model.MaxEntryID(ctx)
 	if err != nil {
@@ -72,7 +81,7 @@ func Export(ctx context.Context, w io.Writer, f *Filter, format string, cap int,
 	if maxID == 0 {
 		o.MaxID = -1 // an empty table gives an empty export, not one that holds its own entry
 	}
-	m := &Manifest{Filter: f.List(), GeneratedAt: time.Now().UTC()}
+	m := &Manifest{Filter: f.List(), GeneratedAt: time.Now().UTC(), SealedSeq: head.Seq, SealedHash: head.Hash}
 	if cap > 0 {
 		if extra, err := audit_model.NthEntry(ctx, &o, cap); err != nil {
 			return nil, err

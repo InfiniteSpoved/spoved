@@ -119,6 +119,7 @@
 				{{if .OldestEntry}}{{ctx.Locale.Tr "admin.audit.oldest" .OldestEntry}} · {{end}}{{ctx.Locale.Tr "admin.audit.time_zone" .TimeZone}}
 				· {{ctx.Locale.Tr "admin.audit.export_cap" .ExportCap}}
 			</p>
+			{{if .SealLine}}<p class="text grey audit-seal">{{.SealLine}}{{if .Anchor}}<br>{{.Anchor}}{{end}}</p>{{end}}
 			{{if .Rows}}
 				<table class="ui very basic unstackable table audit-entries">
 					<thead>

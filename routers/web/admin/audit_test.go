@@ -65,3 +65,9 @@ func TestAuditRowTimestamps(t *testing.T) {
 		assert.Zero(t, r.AggregatedCount, e.Data)
 	}
 }
+
+func TestUnsealedCount(t *testing.T) {
+	assert.Equal(t, "0", unsealedCount(0))
+	assert.Equal(t, "10000", unsealedCount(audit_model.UnsealedCountCap-1))
+	assert.Equal(t, "10000+", unsealedCount(audit_model.UnsealedCountCap))
+}

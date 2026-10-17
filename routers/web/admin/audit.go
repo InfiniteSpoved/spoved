@@ -346,5 +346,45 @@ func Audit(ctx *context.Context) {
 		ctx.Data["OldestEntry"] = oldest.AsTime().In(loc).Format("2006-01-02")
 	}
 	ctx.Data["ExportCap"] = audit_service.ExportCap
+	if err := setSealStatus(ctx); err != nil {
+		ctx.ServerError("setSealStatus", err)
+		return
+	}
 	ctx.HTML(http.StatusOK, tplAudit)
+}
+
+// setSealStatus sets the line "Sealed through #N (time UTC) · M unsealed" and the anchor help. A stuck sealer shows as
+// a growing age of the oldest unsealed entry.
+func setSealStatus(ctx *context.Context) error {
+	head, err := audit_model.GetHead(ctx)
+	if err != nil {
+		return err
+	}
+	n, age, err := audit_model.UnsealedStats(ctx)
+	if err != nil {
+		return err
+	}
+	line := ctx.Locale.TrString("admin.audit.sealed_none")
+	if head.Seq > 0 {
+		last, err := audit_model.GetBySeq(ctx, head.Seq)
+		if err != nil || last == nil {
+			return err
+		}
+		line = ctx.Locale.TrString("admin.audit.sealed_through", head.Seq, last.CreatedUnix.AsTime().UTC().Format("2006-01-02 15:04:05"))
+		ctx.Data["Anchor"] = ctx.Locale.TrString("admin.audit.anchor_help", head.Seq, head.Hash)
+	}
+	line += " · " + ctx.Locale.TrString("admin.audit.unsealed", unsealedCount(n))
+	if n > 0 {
+		line += " (" + ctx.Locale.TrString("admin.audit.unsealed_oldest", age.Round(time.Second).String()) + ")"
+	}
+	ctx.Data["SealLine"] = line
+	return nil
+}
+
+// unsealedCount shows a backlog past the count cap as "10000+".
+func unsealedCount(n int64) string {
+	if n >= audit_model.UnsealedCountCap {
+		return strconv.Itoa(audit_model.UnsealedCountCap-1) + "+"
+	}
+	return strconv.FormatInt(n, 10)
 }
