@@ -5,7 +5,6 @@ package integration
 
 import (
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -76,5 +75,5 @@ func TestAdminAuditRetentionPermissions(t *testing.T) {
 
 	body := loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/admin/audit"), http.StatusOK).Body.String()
 	assert.Contains(t, body, "Retention: 1 year")
-	assert.False(t, strings.Contains(body, `href="/admin/audit/retention"`), "the auditor gets no link to the form")
+	assert.NotContains(t, body, `href="/admin/audit/retention"`, "the auditor gets no link to the form")
 }
