@@ -4,6 +4,7 @@
 package integration
 
 import (
+	"maps"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -44,9 +45,7 @@ func TestAPIAuthUniformErrors(t *testing.T) {
 			"aud":          ait.authorizedIntegration.Audience,
 			"custom-claim": "custom-claim-value",
 		}
-		for k, v := range override {
-			c[k] = v
-		}
+		maps.Copy(c, override)
 		return c
 	}
 	otherKey, err := jwtx.InitAsymmetricSigningKey(filepath.Join(t.TempDir(), "other.priv"), "RS256")
