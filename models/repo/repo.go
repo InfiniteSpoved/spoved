@@ -389,6 +389,14 @@ func (repo *Repository) FullName() string {
 	return repo.OwnerName + "/" + repo.Name
 }
 
+// TrashedFullName is FullName with the owner and name the repository had when it went to the trash.
+func (repo *Repository) TrashedFullName() string {
+	if group := repo.groupSegment(); group != "" {
+		return repo.TrashedOwnerName + "/" + group + "/" + repo.TrashedName
+	}
+	return repo.TrashedOwnerName + "/" + repo.TrashedName
+}
+
 // HTMLURL returns the repository HTML URL
 func (repo *Repository) HTMLURL() string {
 	return setting.AppURL + repo.EscapedPath()

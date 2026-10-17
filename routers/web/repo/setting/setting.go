@@ -360,6 +360,19 @@ func Settings(ctx *context.Context) {
 }
 
 // SettingsPost response for changes of a repository
+// confirmsRepoName tells whether a typed or pasted confirmation names the repository. Mobile keyboards append a blank
+// and copying the label can bring zero-width characters, so those and surrounding space are ignored, as is the case.
+func confirmsRepoName(input string, repo *repo_model.Repository) bool {
+	input = strings.Map(func(r rune) rune {
+		switch r {
+		case '\u200b', '\u200c', '\u200d', '\ufeff', '\u2060':
+			return -1
+		}
+		return r
+	}, input)
+	return strings.EqualFold(strings.TrimSpace(input), repo.FullName())
+}
+
 func SettingsPost(ctx *context.Context) {
 	form := web.GetForm(ctx).(*forms.RepoSettingForm)
 
@@ -553,7 +566,7 @@ func SettingsPost(ctx *context.Context) {
 			pullMirror.FilterError = ""
 			cols = append(cols, "filter_error")
 		}
-		if err := repo_model.UpdateMirrorCols(ctx, pullMirror, cols...); err != nil {
+		if err := repo_model.UpdateMirrorSettings(ctx, pullMirror, cols...); err != nil {
 			ctx.ServerError("UpdateMirror", err)
 			return
 		}
@@ -578,7 +591,7 @@ func SettingsPost(ctx *context.Context) {
 			return
 		}
 
-		if err := pullMirror.UpdateRemoteAddress(ctx, address); err != nil {
+		if err := mirror_service.SaveRemoteAddress(ctx, pullMirror, address); err != nil {
 			ctx.Data["Err_MirrorAddress"] = true
 			handleSettingRemoteAddrError(ctx, err, form)
 			return
@@ -617,7 +630,7 @@ func SettingsPost(ctx *context.Context) {
 
 		pullMirror.LFS = form.LFS
 		pullMirror.LFSEndpoint = form.LFSEndpoint
-		if err := repo_model.UpdateMirrorCols(ctx, pullMirror, "lfs_enabled", "lfs_endpoint"); err != nil {
+		if err := repo_model.UpdateMirrorSettings(ctx, pullMirror, "lfs_enabled", "lfs_endpoint"); err != nil {
 			ctx.ServerError("UpdateMirror", err)
 			return
 		}
@@ -672,6 +685,10 @@ func SettingsPost(ctx *context.Context) {
 			return
 		}
 
+		if err := repo_model.RecordPushMirrorSync(ctx, m); err != nil {
+			ctx.ServerError("RecordPushMirrorSync", err)
+			return
+		}
 		mirror_service.AddPushMirrorToQueue(m.ID)
 
 		ctx.Flash.Info(ctx.Tr("repo.settings.push_mirror_sync_in_progress", m.RemoteAddress))
@@ -700,25 +717,20 @@ func SettingsPost(ctx *context.Context) {
 		}
 
 		m.Interval = interval
-		if err := repo_model.UpdatePushMirrorInterval(ctx, m); err != nil {
-			ctx.ServerError("UpdatePushMirrorInterval", err)
-			return
-		}
-
-		if m.BranchFilter != form.PushMirrorBranchFilter {
-			// replace `remote.<remote>.push` in config and db
-			m.BranchFilter = form.PushMirrorBranchFilter
-			if err := db.WithTx(ctx, func(ctx go_context.Context) error {
-				// Update the DB
-				if err = repo_model.UpdatePushMirrorBranchFilter(ctx, m); err != nil {
-					return err
-				}
-				// Update the repo config
-				return mirror_service.UpdatePushMirrorBranchFilter(ctx, m)
-			}); err != nil {
-				ctx.ServerError("UpdatePushMirrorBranchFilter", err)
-				return
+		filterChanged := m.BranchFilter != form.PushMirrorBranchFilter
+		m.BranchFilter = form.PushMirrorBranchFilter
+		if err := db.WithTx(ctx, func(ctx go_context.Context) error {
+			if err := repo_model.UpdatePushMirrorSettings(ctx, m, "interval", "branch_filter"); err != nil {
+				return err
 			}
+			if filterChanged {
+				// replace `remote.<remote>.push` in the repo config
+				return mirror_service.UpdatePushMirrorBranchFilter(ctx, m)
+			}
+			return nil
+		}); err != nil {
+			ctx.ServerError("UpdatePushMirrorSettings", err)
+			return
 		}
 
 		// Background why we are adding it to Queue
@@ -826,7 +838,7 @@ func SettingsPost(ctx *context.Context) {
 			m.PublicKey = string(publicKey)
 		}
 
-		if err := db.Insert(ctx, m); err != nil {
+		if err := repo_model.InsertPushMirror(ctx, m, address != remoteAddress); err != nil {
 			ctx.ServerError("InsertPushMirror", err)
 			return
 		}
@@ -923,7 +935,7 @@ func SettingsPost(ctx *context.Context) {
 			ctx.Error(http.StatusNotFound)
 			return
 		}
-		if repo.FullName() != form.RepoName {
+		if !confirmsRepoName(form.RepoName, repo) {
 			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_repo_name"), tplSettingsOptions, nil)
 			return
 		}
@@ -950,7 +962,7 @@ func SettingsPost(ctx *context.Context) {
 			ctx.ServerError("Convert Fork", err)
 			return
 		}
-		if repo.FullName() != form.RepoName {
+		if !confirmsRepoName(form.RepoName, repo) {
 			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_repo_name"), tplSettingsOptions, nil)
 			return
 		}
@@ -983,7 +995,7 @@ func SettingsPost(ctx *context.Context) {
 			ctx.Error(http.StatusNotFound)
 			return
 		}
-		if repo.FullName() != form.RepoName {
+		if !confirmsRepoName(form.RepoName, repo) {
 			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_repo_name"), tplSettingsOptions, nil)
 			return
 		}
@@ -1056,15 +1068,27 @@ func SettingsPost(ctx *context.Context) {
 			ctx.Error(http.StatusNotFound)
 			return
 		}
-		if repo.FullName() != form.RepoName {
-			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_repo_name"), tplSettingsOptions, nil)
+		// the confirmation holds a path with "/", so the binding error of the repository name field doesn't apply
+		delete(ctx.Data, "Err_RepoName")
+		if !confirmsRepoName(form.RepoName, repo) {
+			ctx.Data["Err_MoveRepoName"] = true
+			ctx.RenderWithErr(ctx.Tr("repo.settings.move.confirm_mismatch", repo.FullName()), tplSettingsOptions, nil)
+			return
+		}
+		groupID := ctx.FormInt64("group_id")
+		if groupID == repo.GroupID {
+			ctx.RenderWithErr(ctx.Tr("repo.settings.move.already_there"), tplSettingsOptions, nil)
+			return
+		}
+		if repo.Status == repo_model.RepositoryBeingMigrated {
+			ctx.RenderWithErr(ctx.Tr("repo.settings.move.migrating"), tplSettingsOptions, nil)
 			return
 		}
 		if ctx.Repo.GitRepo != nil {
 			ctx.Repo.GitRepo.Close()
 			ctx.Repo.GitRepo = nil
 		}
-		if err := repo_service.MoveRepository(ctx, ctx.Doer, repo, ctx.FormInt64("group_id")); err != nil {
+		if err := repo_service.MoveRepository(ctx, ctx.Doer, repo, groupID); err != nil {
 			switch {
 			case repo_model.IsErrRepoAlreadyExist(err), repo_model.IsErrRepoFilesAlreadyExist(err):
 				ctx.RenderWithErr(ctx.Tr("repo.settings.move.name_taken"), tplSettingsOptions, nil)
@@ -1074,7 +1098,10 @@ func SettingsPost(ctx *context.Context) {
 				ctx.RenderWithErr(ctx.Tr("repo.settings.transfer_in_progress"), tplSettingsOptions, nil)
 			case errors.Is(err, repo_model.ErrRepoGroupNotExist), errors.Is(err, util.ErrPermissionDenied):
 				ctx.NotFound("MoveRepository", nil)
+			case errors.Is(err, repo_service.ErrRepoMoved):
+				ctx.RenderWithErr(ctx.Tr("repo.settings.move.moved_meanwhile"), tplSettingsOptions, nil)
 			case errors.Is(err, util.ErrInvalidArgument):
+				log.Warn("MoveRepository %s: %v", repo.FullName(), err)
 				ctx.RenderWithErr(ctx.Tr("repo.settings.move.failed"), tplSettingsOptions, nil)
 			default:
 				ctx.ServerError("MoveRepository", err)
@@ -1107,7 +1134,7 @@ func SettingsPost(ctx *context.Context) {
 			return
 		}
 
-		if err := repo_service.CancelRepositoryTransfer(ctx, ctx.Repo.Repository); err != nil {
+		if err := repo_service.CancelRepositoryTransfer(ctx, ctx.Repo.Repository, false); err != nil {
 			ctx.ServerError("CancelRepositoryTransfer", err)
 			return
 		}
@@ -1121,7 +1148,7 @@ func SettingsPost(ctx *context.Context) {
 			ctx.Error(http.StatusNotFound)
 			return
 		}
-		if repo.FullName() != form.RepoName {
+		if !confirmsRepoName(form.RepoName, repo) {
 			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_repo_name"), tplSettingsOptions, nil)
 			return
 		}
@@ -1145,7 +1172,7 @@ func SettingsPost(ctx *context.Context) {
 			ctx.Error(http.StatusNotFound)
 			return
 		}
-		if repo.FullName() != form.RepoName {
+		if !confirmsRepoName(form.RepoName, repo) {
 			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_repo_name"), tplSettingsOptions, nil)
 			return
 		}
@@ -1164,7 +1191,7 @@ func SettingsPost(ctx *context.Context) {
 			ctx.Error(http.StatusNotFound)
 			return
 		}
-		if repo.FullName() != form.RepoName {
+		if !confirmsRepoName(form.RepoName, repo) {
 			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_repo_name"), tplSettingsOptions, nil)
 			return
 		}
@@ -1192,7 +1219,7 @@ func SettingsPost(ctx *context.Context) {
 			return
 		}
 
-		if err := repo_model.SetArchiveRepoState(ctx, repo, true); err != nil {
+		if err := repo_service.SetArchiveRepoState(ctx, repo, true); err != nil {
 			log.Error("Tried to archive a repo: %s", err)
 			ctx.Flash.Error(ctx.Tr("repo.settings.archive.error"))
 			ctx.Redirect(ctx.Repo.RepoLink + "/settings")
@@ -1214,7 +1241,7 @@ func SettingsPost(ctx *context.Context) {
 			return
 		}
 
-		if err := repo_model.SetArchiveRepoState(ctx, repo, false); err != nil {
+		if err := repo_service.SetArchiveRepoState(ctx, repo, false); err != nil {
 			log.Error("Tried to unarchive a repo: %s", err)
 			ctx.Flash.Error(ctx.Tr("repo.settings.unarchive.error"))
 			ctx.Redirect(ctx.Repo.RepoLink + "/settings")

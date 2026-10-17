@@ -89,6 +89,7 @@ import (
 	"forgejo.org/routers/api/v1/user"
 	"forgejo.org/routers/common"
 	"forgejo.org/services/actions"
+	auth_service "forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	"forgejo.org/services/forms"
 	redirect_service "forgejo.org/services/redirect"
@@ -141,6 +142,7 @@ func repoAssignment(ctx *context.APIContext, owner *user_model.User, repoName st
 			if err == nil {
 				context.RedirectToRepo(ctx.Base, redirectRepoID)
 			} else if repo_model.IsErrRedirectNotExist(err) {
+				auth_service.RecordTwoFactorBlockedMember(ctx, ctx.Doer(), owner)
 				ctx.NotFound()
 			} else {
 				ctx.Error(http.StatusInternalServerError, "LookupRepoRedirect", err)
@@ -1573,6 +1575,8 @@ func Routes() *web.Route {
 			})
 		}, reqToken(), tokenRequiresScopes(auth_model.AccessTokenScopeCategoryUser))
 
+		// outside reqSiteAdmin for the auditor; ReqAuditReader decides
+		m.Get("/admin/audit", tokenRequiresScopes(auth_model.AccessTokenScopeCategoryAdmin), reqToken(), admin.ReqAuditReader, admin.ListAuditEvents)
 		m.Group("/admin", func() {
 			m.Group("/cron", func() {
 				m.Get("", admin.ListCronTasks)
@@ -1722,7 +1726,7 @@ func Routes() *web.Route {
 		m.Group("/topics", func() {
 			m.Get("/search", repo.TopicSearch)
 		}, tokenRequiresScopes(auth_model.AccessTokenScopeCategoryRepository))
-	}, common.IPAllowlistAPI, sudo(), common.MaintenanceAPI)
+	}, common.IPAllowlistAPI, common.CredentialUsedAPI, sudo(), common.APIActivity, common.MaintenanceAPI)
 
 	return m
 }

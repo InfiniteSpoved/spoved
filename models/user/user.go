@@ -952,6 +952,13 @@ func createUser(ctx context.Context, u *User, createdByAdmin bool, overwriteDefa
 		return err
 	}
 
+	if !u.IsOrganization() {
+		data := map[string]any{"after": u.AuditFields()}
+		if err := RecordUser(ctx, "account.user.created", u, data); err != nil {
+			return err
+		}
+	}
+
 	return committer.Commit()
 }
 
@@ -966,6 +973,12 @@ var usableAdminCond = builder.Eq{
 // UsableAdminCond returns usableAdminCond, for queries of other packages on the user table.
 func UsableAdminCond() builder.Cond {
 	return usableAdminCond
+}
+
+// IsUsableAdmin reports whether id is an admin who can sign in.
+func IsUsableAdmin(ctx context.Context, id int64) bool {
+	has, err := db.GetEngine(ctx).Where(usableAdminCond.And(builder.Eq{"id": id})).Exist(new(User))
+	return err == nil && has
 }
 
 // IsLastAdminUser check whether user is an admin and no other admin who can sign in exists

@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"forgejo.org/models/db"
 	system_model "forgejo.org/models/system"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/hostmatcher"
@@ -47,12 +48,28 @@ var (
 	testLast = map[string]time.Time{}
 )
 
+// running is a destination's writers: name -> loggers. Audit has a writer of its own (writerName(id)+"-audit"), at
+// TRACE and without filters, so a destination's level or expression can never drop an audit row.
 type running struct {
 	hash    string
-	loggers []string
+	writers map[string][]string
 }
 
 func writerName(id string) string { return "ship-" + id }
+
+func auditWriterName(id string) string { return writerName(id) + "-audit" }
+
+// StreamingCount is the number of destinations of this instance that are running with the audit type.
+func StreamingCount() (n int) {
+	mu.Lock()
+	defer mu.Unlock()
+	for id, r := range active {
+		if _, ok := r.writers[auditWriterName(id)]; ok {
+			n++
+		}
+	}
+	return n
+}
 
 // hostList is the webhook host policy: the same rule decides where an admin may send logs.
 func hostList() *hostmatcher.HostMatchList {
@@ -144,6 +161,7 @@ func Apply(ctx context.Context, state setting.LogShippingState) error {
 		mode log.WriterMode
 		hash string
 	}
+	wantAudit := map[string]log.WriterMode{}
 	want := map[string]desired{}
 	for _, d := range state.Destinations {
 		if !d.Enabled {
@@ -161,12 +179,15 @@ func Apply(ctx context.Context, state setting.LogShippingState) error {
 			BufferLen: max(setting.Log.BufferLen, 1000), Level: log.LevelFromString(d.Level), Format: "json",
 			Expression: d.Expression, Exclusion: d.Exclusion, StacktraceLevel: log.NONE, WriterOption: opt,
 		}, hashOf(d)}
+		if d.StreamsAudit() {
+			wantAudit[d.ID] = log.WriterMode{BufferLen: max(setting.Log.BufferLen, 1000), Level: log.TRACE, Format: "json", StacktraceLevel: log.NONE, WriterOption: opt}
+		}
 	}
 
 	mu.Lock()
 	for id, r := range active {
 		if w, ok := want[id]; !ok || w.hash != r.hash {
-			stop(id, r)
+			stop(r)
 			delete(active, id)
 		}
 	}
@@ -174,14 +195,35 @@ func Apply(ctx context.Context, state setting.LogShippingState) error {
 		if _, ok := active[id]; ok {
 			continue
 		}
-		wr, err := log.GetManager().NewSharedWriter(writerName(id), "http", w.mode)
-		if err != nil {
-			log.Error("log shipping: destination %q is not started: %v", w.d.Name, err)
-			continue
+		r := running{hash: w.hash, writers: map[string][]string{}}
+		type spec struct {
+			name    string
+			mode    log.WriterMode
+			loggers []string
 		}
-		r := running{hash: w.hash, loggers: w.d.Loggers()}
-		for _, l := range r.loggers {
-			log.GetManager().GetLogger(l).AddWriters(wr)
+		var others []string
+		for _, l := range w.d.Loggers() {
+			if l != "audit" {
+				others = append(others, l)
+			}
+		}
+		specs := []spec{{writerName(id), w.mode, others}}
+		if m, ok := wantAudit[id]; ok {
+			specs = append(specs, spec{auditWriterName(id), m, []string{"audit"}})
+		}
+		for _, sp := range specs {
+			if len(sp.loggers) == 0 {
+				continue
+			}
+			wr, err := log.GetManager().NewSharedWriter(sp.name, "http", sp.mode)
+			if err != nil {
+				log.Error("log shipping: destination %q is not started: %v", w.d.Name, err)
+				continue
+			}
+			for _, l := range sp.loggers {
+				log.GetManager().GetLogger(l).AddWriters(wr)
+			}
+			r.writers[sp.name] = sp.loggers
 		}
 		active[id] = r
 	}
@@ -189,12 +231,14 @@ func Apply(ctx context.Context, state setting.LogShippingState) error {
 	return nil
 }
 
-func stop(id string, r running) {
-	for _, l := range r.loggers {
-		_ = log.GetManager().GetLogger(l).RemoveWriter(writerName(id))
+func stop(r running) {
+	for name, loggers := range r.writers {
+		for _, l := range loggers {
+			_ = log.GetManager().GetLogger(l).RemoveWriter(name)
+		}
+		log.GetManager().RemoveSharedWriter(name)
+		log.ForgetShipping(name)
 	}
-	log.GetManager().RemoveSharedWriter(writerName(id))
-	log.ForgetShipping(writerName(id))
 }
 
 // Reload applies the stored destinations when the settings revision differs from the one applied last. It runs
@@ -235,17 +279,39 @@ type Input struct {
 	NDJSON, Enabled                                         *bool
 }
 
-// Save creates (id == "") or edits a destination and applies it. Two admins saving at once is last-write-wins: each
-// save re-reads the stored list, changes one destination and writes the list back, and the revision moves.
-func Save(ctx context.Context, doer *user_model.User, id string, in Input) (setting.LogShippingDestination, error) {
-	var err error
-	dests := slices.Clone(load(ctx).Destinations)
+// Save creates (id == "") or edits a destination and applies it. It reads the stored list with its row locked,
+// changes one destination and writes the list back in one transaction, so two saves at once can't undo each other.
+func Save(ctx context.Context, doer *user_model.User, id string, in Input) (d setting.LogShippingDestination, err error) {
+	var state setting.LogShippingState
+	var changed []string
+	if err = db.WithTx(ctx, func(ctx context.Context) error {
+		changed, err = save(ctx, &state, &d, id, in)
+		return err
+	}); err != nil {
+		return d, err
+	}
+	if err := apply(ctx, state); err != nil {
+		return d, err
+	}
+	action := "edited"
+	if id == "" {
+		action = "created"
+	}
+	warnChange(doer, action, d, changed)
+	return d, nil
+}
+
+func save(ctx context.Context, state *setting.LogShippingState, out *setting.LogShippingDestination, id string, in Input) (changed []string, err error) {
+	stored, err := lockedState(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dests := stored.Destinations
 	var d setting.LogShippingDestination
 	idx := slices.IndexFunc(dests, func(x setting.LogShippingDestination) bool { return x.ID == id })
-	var changed []string
 	if id == "" {
 		if len(dests) >= MaxDestinations {
-			return d, util.NewInvalidArgumentErrorf("at most %d destinations", MaxDestinations)
+			return nil, util.NewInvalidArgumentErrorf("at most %d destinations", MaxDestinations)
 		}
 		var b [4]byte
 		_, _ = rand.Read(b[:])
@@ -253,7 +319,7 @@ func Save(ctx context.Context, doer *user_model.User, id string, in Input) (sett
 		dests = append(dests, d)
 		idx = len(dests) - 1
 	} else if idx < 0 {
-		return d, util.ErrNotExist
+		return nil, util.ErrNotExist
 	}
 	d = dests[idx]
 	d.Headers = slices.Clone(d.Headers)
@@ -290,76 +356,91 @@ func Save(ctx context.Context, doer *user_model.User, id string, in Input) (sett
 	endpointChanged := id != "" && d.Endpoint != old.Endpoint
 	if in.Key != nil && *in.Key != "" {
 		if !validSecret(*in.Key) {
-			return d, util.NewInvalidArgumentErrorf("the key must be 8 to 1024 characters without control characters")
+			return nil, util.NewInvalidArgumentErrorf("the key must be 8 to 1024 characters without control characters")
 		}
 		if d.KeyEnc, err = encrypt(*in.Key); err != nil {
-			return d, err
+			return nil, err
 		}
 		changed = append(changed, "key")
 	} else if endpointChanged && d.Type == setting.LogShippingNewRelic {
-		return d, util.NewInvalidArgumentErrorf("a new endpoint needs the key again")
+		return nil, util.NewInvalidArgumentErrorf("a new endpoint needs the key again")
 	}
 	if in.Headers != nil {
 		headers := make([]setting.LogShippingHeader, 0, len(*in.Headers))
 		for _, h := range *in.Headers {
 			if h.Value != "" && !validSecret(h.Value) {
-				return d, util.NewInvalidArgumentErrorf("a header value must be 8 to 1024 characters without control characters")
+				return nil, util.NewInvalidArgumentErrorf("a header value must be 8 to 1024 characters without control characters")
 			}
 			h.Name = http.CanonicalHeaderKey(h.Name)
 			var enc string
 			if h.Value != "" {
 				if enc, err = encrypt(h.Value); err != nil {
-					return d, err
+					return nil, err
 				}
 			} else if j := slices.IndexFunc(old.Headers, func(o setting.LogShippingHeader) bool { return strings.EqualFold(o.Name, h.Name) }); j >= 0 && !endpointChanged {
 				enc = old.Headers[j].ValueEnc
 			} else {
-				return d, util.NewInvalidArgumentErrorf("the header %q needs a value", h.Name)
+				return nil, util.NewInvalidArgumentErrorf("the header %q needs a value", h.Name)
 			}
 			headers = append(headers, setting.LogShippingHeader{Name: h.Name, ValueEnc: enc})
 		}
 		d.Headers = headers
 		changed = append(changed, "headers")
 	} else if endpointChanged && len(d.Headers) > 0 {
-		return d, util.NewInvalidArgumentErrorf("a new endpoint needs the header values again")
+		return nil, util.NewInvalidArgumentErrorf("a new endpoint needs the header values again")
 	}
 
 	if err := d.Validate(); err != nil {
-		return d, util.NewInvalidArgumentErrorf("%v", err)
+		return nil, util.NewInvalidArgumentErrorf("%v", err)
 	}
 	if err := CheckEndpoint(d.Endpoint); err != nil {
-		return d, err
+		return nil, err
 	}
 	if err := checkLoop(d.Endpoint); err != nil {
-		return d, err
+		return nil, err
 	}
 	for i, o := range dests {
 		if i != idx && o.Name == d.Name {
-			return d, util.NewInvalidArgumentErrorf("the name is taken")
+			return nil, util.NewInvalidArgumentErrorf("the name is taken")
 		}
 	}
 	dests[idx] = d
-	if err := store(ctx, setting.LogShippingState{Destinations: dests}); err != nil {
-		return d, err
+	*out, *state = d, setting.LogShippingState{Destinations: dests}
+	if err := write(ctx, *state); err != nil {
+		return nil, err
 	}
-	action := "edited"
 	if id == "" {
-		action = "created"
+		return changed, recordDestination(ctx, "admin.log_shipping.created", d, nil)
 	}
-	warnChange(doer, action, d, changed)
-	return d, nil
+	if data := destinationChanges(old, d); data != nil {
+		return changed, recordDestination(ctx, "admin.log_shipping.updated", d, data)
+	}
+	return changed, nil
 }
 
 // Remove deletes a destination and stops its writer.
 func Remove(ctx context.Context, doer *user_model.User, id string) error {
-	state := load(ctx)
-	idx := slices.IndexFunc(state.Destinations, func(x setting.LogShippingDestination) bool { return x.ID == id })
-	if idx < 0 {
-		return util.ErrNotExist
+	var state setting.LogShippingState
+	var d setting.LogShippingDestination
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		var err error
+		if state, err = lockedState(ctx); err != nil {
+			return err
+		}
+		idx := slices.IndexFunc(state.Destinations, func(x setting.LogShippingDestination) bool { return x.ID == id })
+		if idx < 0 {
+			return util.ErrNotExist
+		}
+		d = state.Destinations[idx]
+		state.Destinations = slices.Delete(state.Destinations, idx, idx+1)
+		if err := write(ctx, state); err != nil {
+			return err
+		}
+		return recordDestination(ctx, "admin.log_shipping.deleted", d, nil)
+	}); err != nil {
+		return err
 	}
-	d := state.Destinations[idx]
-	state.Destinations = slices.Delete(slices.Clone(state.Destinations), idx, idx+1)
-	if err := store(ctx, state); err != nil {
+	if err := apply(ctx, state); err != nil {
 		return err
 	}
 	testMu.Lock()
@@ -369,14 +450,25 @@ func Remove(ctx context.Context, doer *user_model.User, id string) error {
 	return nil
 }
 
-func store(ctx context.Context, state setting.LogShippingState) error {
+// lockedState reads the stored destinations and locks their row until the transaction ends.
+func lockedState(ctx context.Context) (state setting.LogShippingState, err error) {
+	v, has, err := system_model.GetSettingForUpdate(ctx, setting.Config().LogShipping.DynKey())
+	if err != nil || !has || v == "" {
+		return state, err
+	}
+	return state, json.Unmarshal([]byte(v), &state)
+}
+
+func write(ctx context.Context, state setting.LogShippingState) error {
 	v, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
-	if err := system_model.SetSettings(ctx, map[string]string{setting.Config().LogShipping.DynKey(): string(v)}); err != nil {
-		return err
-	}
+	return system_model.SetSettings(ctx, map[string]string{setting.Config().LogShipping.DynKey(): string(v)})
+}
+
+// apply starts using state once it is stored.
+func apply(ctx context.Context, state setting.LogShippingState) error {
 	if g := config.GetDynGetter(); g != nil {
 		g.InvalidateCache()
 	}
@@ -444,7 +536,7 @@ func View(d setting.LogShippingDestination) Destination {
 		v.Headers = append(v.Headers, Header{Name: h.Name, HasValue: h.ValueEnc != ""})
 	}
 	for _, st := range log.ShippingStatsSnapshot() {
-		if st.Writer == writerName(d.ID) {
+		if st.Writer == writerName(d.ID) || st.Writer == auditWriterName(d.ID) {
 			v.Status.Sent, v.Status.Dropped, v.Status.Errors = v.Status.Sent+st.Sent, v.Status.Dropped+st.Dropped, v.Status.Errors+st.Errors
 		}
 	}

@@ -242,7 +242,13 @@ func DeleteGPGKey(ctx context.Context, doer *user_model.User, id int64) (err err
 	}
 	defer committer.Close()
 
+	if err := key.LoadSubKeys(ctx); err != nil {
+		return err
+	}
 	if _, err = deleteGPGKey(ctx, key.KeyID); err != nil {
+		return err
+	}
+	if err := recordGPGKey(ctx, "credential.gpg_key.deleted", key); err != nil {
 		return err
 	}
 

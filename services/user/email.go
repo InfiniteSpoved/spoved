@@ -37,39 +37,44 @@ func AdminAddOrSetPrimaryEmailAddress(ctx context.Context, u *user_model.User, e
 		return user_model.ErrEmailAlreadyUsed{Email: emailStr}
 	}
 
-	// Update old primary address
-	primary, err := user_model.GetPrimaryEmailAddressOfUser(ctx, u.ID)
-	if err != nil {
-		return err
-	}
-
-	primary.IsPrimary = false
-	if err := user_model.UpdateEmailAddress(ctx, primary); err != nil {
-		return err
-	}
-
-	// Insert new or update existing address
-	if email != nil {
-		email.IsPrimary = true
-		email.IsActivated = true
-		if err := user_model.UpdateEmailAddress(ctx, email); err != nil {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		// Update old primary address
+		primary, err := user_model.GetPrimaryEmailAddressOfUser(ctx, u.ID)
+		if err != nil {
 			return err
 		}
-	} else {
-		email = &user_model.EmailAddress{
-			UID:         u.ID,
-			Email:       emailStr,
-			IsActivated: true,
-			IsPrimary:   true,
-		}
-		if _, err := user_model.InsertEmailAddress(ctx, email); err != nil {
+
+		primary.IsPrimary = false
+		if err := user_model.UpdateEmailAddress(ctx, primary); err != nil {
 			return err
 		}
-	}
 
-	u.Email = emailStr
+		// Insert new or update existing address
+		if email != nil {
+			email.IsPrimary = true
+			email.IsActivated = true
+			if err := user_model.UpdateEmailAddress(ctx, email); err != nil {
+				return err
+			}
+			if err := user_model.RecordEmail(ctx, "account.email.primary", email); err != nil {
+				return err
+			}
+		} else {
+			email = &user_model.EmailAddress{
+				UID:         u.ID,
+				Email:       emailStr,
+				IsActivated: true,
+				IsPrimary:   true,
+			}
+			if _, err := user_model.InsertEmailAddress(ctx, email); err != nil {
+				return err
+			}
+		}
 
-	return user_model.UpdateUserCols(ctx, u, "email")
+		u.Email = emailStr
+
+		return user_model.UpdateUserCols(ctx, u, "email")
+	})
 }
 
 func ReplacePrimaryEmailAddress(ctx context.Context, u *user_model.User, emailStr string) error {
@@ -81,46 +86,57 @@ func ReplacePrimaryEmailAddress(ctx context.Context, u *user_model.User, emailSt
 		return err
 	}
 
-	if !u.IsOrganization() {
-		// Check if address exists already
-		email, err := user_model.GetEmailAddressByEmail(ctx, emailStr)
-		if err != nil && !errors.Is(err, util.ErrNotExist) {
-			return err
-		}
-		if email != nil {
-			if email.IsPrimary && email.UID == u.ID {
-				return nil
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if !u.IsOrganization() {
+			// Check if address exists already
+			email, err := user_model.GetEmailAddressByEmail(ctx, emailStr)
+			if err != nil && !errors.Is(err, util.ErrNotExist) {
+				return err
 			}
-			return user_model.ErrEmailAlreadyUsed{Email: emailStr}
+			if email != nil {
+				if email.IsPrimary && email.UID == u.ID {
+					return nil
+				}
+				return user_model.ErrEmailAlreadyUsed{Email: emailStr}
+			}
+
+			// Remove old primary address
+			primary, err := user_model.GetPrimaryEmailAddressOfUser(ctx, u.ID)
+			if err != nil {
+				return err
+			}
+			if _, err := db.DeleteByID[user_model.EmailAddress](ctx, primary.ID); err != nil {
+				return err
+			}
+			if err := user_model.RecordEmail(ctx, "account.email.deleted", primary); err != nil {
+				return err
+			}
+
+			// Insert new primary address
+			email = &user_model.EmailAddress{
+				UID:         u.ID,
+				Email:       emailStr,
+				IsActivated: true,
+				IsPrimary:   true,
+			}
+			if _, err := user_model.InsertEmailAddress(ctx, email); err != nil {
+				return err
+			}
 		}
 
-		// Remove old primary address
-		primary, err := user_model.GetPrimaryEmailAddressOfUser(ctx, u.ID)
-		if err != nil {
-			return err
-		}
-		if _, err := db.DeleteByID[user_model.EmailAddress](ctx, primary.ID); err != nil {
-			return err
-		}
+		u.Email = emailStr
 
-		// Insert new primary address
-		email = &user_model.EmailAddress{
-			UID:         u.ID,
-			Email:       emailStr,
-			IsActivated: true,
-			IsPrimary:   true,
-		}
-		if _, err := user_model.InsertEmailAddress(ctx, email); err != nil {
-			return err
-		}
-	}
-
-	u.Email = emailStr
-
-	return user_model.UpdateUserCols(ctx, u, "email")
+		return user_model.UpdateUserCols(ctx, u, "email")
+	})
 }
 
 func AddEmailAddresses(ctx context.Context, u *user_model.User, emails []string) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		return addEmailAddresses(ctx, u, emails)
+	})
+}
+
+func addEmailAddresses(ctx context.Context, u *user_model.User, emails []string) error {
 	for _, emailStr := range emails {
 		if err := validation.ValidateEmail(emailStr); err != nil {
 			return err
@@ -152,6 +168,12 @@ func AddEmailAddresses(ctx context.Context, u *user_model.User, emails []string)
 
 // ReplaceInactivePrimaryEmail replaces the primary email of a given user, even if the primary is not yet activated.
 func ReplaceInactivePrimaryEmail(ctx context.Context, oldEmail string, email *user_model.EmailAddress) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		return replaceInactivePrimaryEmail(ctx, oldEmail, email)
+	})
+}
+
+func replaceInactivePrimaryEmail(ctx context.Context, oldEmail string, email *user_model.EmailAddress) error {
 	user := &user_model.User{}
 	has, err := db.GetEngine(ctx).ID(email.UID).Get(user)
 	if err != nil {
@@ -167,8 +189,12 @@ func ReplaceInactivePrimaryEmail(ctx context.Context, oldEmail string, email *us
 		return err
 	}
 
-	err = MakeEmailAddressPrimary(ctx, user, email, false)
+	// email carries no ID: make the inserted row primary
+	added, err := user_model.GetEmailAddressOfUser(ctx, email.Email, user.ID)
 	if err != nil {
+		return err
+	}
+	if err := MakeEmailAddressPrimary(ctx, user, added, false); err != nil {
 		return err
 	}
 
@@ -197,6 +223,9 @@ func DeleteEmailAddresses(ctx context.Context, u *user_model.User, emails []stri
 
 			// Remove address
 			if _, err := db.DeleteByID[user_model.EmailAddress](ctx, email.ID); err != nil {
+				return err
+			}
+			if err := user_model.RecordEmail(ctx, "account.email.deleted", email); err != nil {
 				return err
 			}
 		}
@@ -238,6 +267,9 @@ func MakeEmailAddressPrimary(ctx context.Context, u *user_model.User, newPrimary
 	if _, err = sess.ID(newPrimaryEmail.ID).Cols("is_primary").Update(newPrimaryEmail); err != nil {
 		return err
 	}
+	if err := user_model.RecordEmail(ctx, "account.email.primary", newPrimaryEmail); err != nil {
+		return err
+	}
 
 	if err := committer.Commit(); err != nil {
 		return err
@@ -247,4 +279,19 @@ func MakeEmailAddressPrimary(ctx context.Context, u *user_model.User, newPrimary
 		return mailer.SendPrimaryMailChange(u, oldPrimaryEmail)
 	}
 	return nil
+}
+
+// ActivateAccount activates u, which confirmed its primary email address, and that address.
+func ActivateAccount(ctx context.Context, u *user_model.User) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		u.IsActive = true
+		u.Rands = user_model.GetUserSalt()
+		if err := user_model.UpdateUserCols(ctx, u, "is_active", "rands"); err != nil {
+			return err
+		}
+		if err := user_model.RecordUser(ctx, "account.user.activated", u, nil); err != nil {
+			return err
+		}
+		return user_model.ActivateUserEmail(ctx, u.ID, u.Email, true)
+	})
 }

@@ -13,6 +13,7 @@ import (
 
 	"forgejo.org/models"
 	asymkey_model "forgejo.org/models/asymkey"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
@@ -36,6 +37,14 @@ import (
 // RenameUser renames a user
 func RenameUser(ctx context.Context, u *user_model.User, newUserName string) error {
 	return renameUser(ctx, u, newUserName, false)
+}
+
+// recordRenamed records the rename of a user or an organization.
+func recordRenamed(ctx context.Context, u *user_model.User, renamed map[string]any) error {
+	if u.IsOrganization() {
+		return user_model.RecordOrg(ctx, "org.organization.renamed", u, renamed)
+	}
+	return user_model.RecordUser(ctx, "account.user.renamed", u, renamed)
 }
 
 // AdminRenameUser renames a user as an admin.
@@ -104,13 +113,22 @@ func renameUser(ctx context.Context, u *user_model.User, newUserName string, doe
 	onlyCapitalization := strings.EqualFold(newUserName, u.Name)
 	oldUserName := u.Name
 
+	renamed := map[string]any{"before": map[string]any{"name": oldUserName}, "after": map[string]any{"name": newUserName}}
 	if onlyCapitalization {
 		u.Name = newUserName
-		if err := user_model.UpdateUserCols(ctx, u, "name"); err != nil {
+		if err := db.WithTx(ctx, func(ctx context.Context) error {
+			if err := user_model.UpdateUserCols(ctx, u, "name"); err != nil {
+				return err
+			}
+			if err := repo_model.UpdateRepositoryOwnerNames(ctx, u.ID, newUserName); err != nil {
+				return err
+			}
+			return recordRenamed(ctx, u, renamed)
+		}); err != nil {
 			u.Name = oldUserName
 			return err
 		}
-		return repo_model.UpdateRepositoryOwnerNames(ctx, u.ID, newUserName)
+		return nil
 	}
 
 	ctx, committer, err := db.TxContext(ctx)
@@ -153,6 +171,11 @@ func renameUser(ctx context.Context, u *user_model.User, newUserName string, doe
 	u.Name = newUserName
 	u.LowerName = strings.ToLower(newUserName)
 	if err := user_model.UpdateUserCols(ctx, u, "name", "lower_name"); err != nil {
+		u.Name = oldUserName
+		u.LowerName = strings.ToLower(oldUserName)
+		return err
+	}
+	if err := recordRenamed(ctx, u, renamed); err != nil {
 		u.Name = oldUserName
 		u.LowerName = strings.ToLower(oldUserName)
 		return err
@@ -224,19 +247,24 @@ func deleteUserAccount(ctx context.Context, u *user_model.User, purge, trash boo
 
 	if purge {
 		// Disable the user first
-		// NOTE: This is deliberately not within a transaction as it must disable the user immediately to prevent any further action by the user to be purged.
-		if err := user_model.UpdateUserCols(ctx, &user_model.User{
-			ID:              u.ID,
-			IsActive:        false,
-			IsRestricted:    true,
-			IsAdmin:         false,
-			ProhibitLogin:   true,
-			Passwd:          "",
-			Salt:            "",
-			PasswdHashAlgo:  "",
-			MaxRepoCreation: 0,
-		}, "is_active", "is_restricted", "is_admin", "prohibit_login", "max_repo_creation", "passwd", "salt", "passwd_hash_algo"); err != nil {
-			return fmt.Errorf("unable to disable user: %s[%d] prior to purge. UpdateUserCols: %w", u.Name, u.ID, err)
+		// NOTE: This transaction commits before the repositories are deleted, as it must disable the user immediately to prevent any further action by the user to be purged.
+		if err := db.WithTx(ctx, func(ctx context.Context) error {
+			if err := user_model.UpdateUserCols(ctx, &user_model.User{
+				ID:              u.ID,
+				IsActive:        false,
+				IsRestricted:    true,
+				IsAdmin:         false,
+				ProhibitLogin:   true,
+				Passwd:          "",
+				Salt:            "",
+				PasswdHashAlgo:  "",
+				MaxRepoCreation: 0,
+			}, "is_active", "is_restricted", "is_admin", "prohibit_login", "max_repo_creation", "passwd", "salt", "passwd_hash_algo"); err != nil {
+				return fmt.Errorf("unable to disable user: %s[%d] prior to purge. UpdateUserCols: %w", u.Name, u.ID, err)
+			}
+			return user_model.RecordUser(ctx, "account.user.purge_started", u, nil)
+		}); err != nil {
+			return err
 		}
 
 		// Force any logged in sessions to log out
@@ -446,6 +474,17 @@ func DeleteInactiveUsers(ctx context.Context, olderThan time.Duration) error {
 
 // removeTrashedOrgMemberships takes the user out of the organizations in the trash, with the counters.
 func removeTrashedOrgMemberships(ctx context.Context, u *user_model.User) error {
+	var teams []*organization.Team
+	if err := db.GetEngine(ctx).Where("id IN (SELECT team_id FROM team_user WHERE uid = ?)", u.ID).Find(&teams); err != nil {
+		return err
+	}
+	for _, t := range teams {
+		if err := organization.RecordTeam(ctx, t, audit_model.Event{
+			Action: "org.team.member_removed", SubjectUserID: u.ID, Data: map[string]any{"user_id": u.ID},
+		}); err != nil {
+			return err
+		}
+	}
 	if _, err := db.Exec(ctx, "UPDATE `team` SET num_members = num_members - 1 WHERE id IN (SELECT team_id FROM team_user WHERE uid = ?)", u.ID); err != nil {
 		return err
 	}

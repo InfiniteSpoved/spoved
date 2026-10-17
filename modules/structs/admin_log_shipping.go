@@ -50,7 +50,7 @@ type CreateLogShippingDestinationOption struct {
 	// lower-case letters, digits and dashes, unique
 	// required: true
 	Name string `json:"name" binding:"Required"`
-	// newrelic or http
+	// newrelic, http or loki
 	// required: true
 	Type string `json:"type" binding:"Required"`
 	// an https:// URL without credentials or query
@@ -63,7 +63,7 @@ type CreateLogShippingDestinationOption struct {
 	// one event per line instead of a JSON array (http)
 	NDJSON  bool  `json:"ndjson"`
 	Enabled *bool `json:"enabled"`
-	// all, application, access, router, git
+	// all (not audit), application, access, router, git, audit
 	// required: true
 	LogTypes []string `json:"log_types" binding:"Required"`
 	// trace, debug, info, warn or error; info if empty

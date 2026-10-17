@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/keying"
@@ -469,8 +470,20 @@ func (w *Webhook) SetHeaderAuthorization(cleartext string) {
 	w.HeaderAuthorizationEncrypted = keying.Webhook.Encrypt([]byte(cleartext), keying.ColumnAndID("header_authorization_encrypted", w.ID))
 }
 
-// CreateWebhook creates a new web hook.
+// CreateWebhook creates a new web hook and records its creation.
 func CreateWebhook(ctx context.Context, w *Webhook, authorizationHeader string) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if err := InsertWebhook(ctx, w, authorizationHeader); err != nil {
+			return err
+		}
+		data := w.AuditFields()
+		data["secret_set"], data["authorization_set"] = w.Secret != "", authorizationHeader != ""
+		return recordWebhook(ctx, audit_model.LevelActions{Repo: "repo.webhook.created", Org: "org.webhook.created", Account: "account.webhook.created", Admin: "admin.webhook.created"}, w, data)
+	})
+}
+
+// InsertWebhook creates a new web hook without recording it: for copies counted by the caller's entry.
+func InsertWebhook(ctx context.Context, w *Webhook, authorizationHeader string) error {
 	w.Type = strings.TrimSpace(w.Type)
 
 	if len(authorizationHeader) == 0 {
@@ -579,10 +592,27 @@ func (opts ListWebhookOptions) ToOrders() string {
 	return "webhook.id"
 }
 
-// UpdateWebhook updates information of webhook.
-func UpdateWebhook(ctx context.Context, w *Webhook) error {
-	_, err := db.GetEngine(ctx).ID(w.ID).AllCols().Update(w)
-	return err
+// UpdateWebhook updates information of webhook, and records the settings that differ from the stored row.
+// secretChanged and authorizationChanged say whether the request set a new secret or authorization header.
+func UpdateWebhook(ctx context.Context, w *Webhook, secretChanged, authorizationChanged bool) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		stored, err := GetWebhookByID(ctx, w.ID)
+		if err != nil {
+			return err
+		}
+		data := audit_model.Changes(stored.AuditFields(), w.AuditFields())
+		if urlChanged := stored.URL != w.URL; data != nil || urlChanged || secretChanged || authorizationChanged {
+			if data == nil {
+				data = map[string]any{}
+			}
+			data["url_changed"], data["secret_changed"], data["authorization_changed"] = urlChanged, secretChanged, authorizationChanged
+			if err := recordWebhook(ctx, audit_model.LevelActions{Repo: "repo.webhook.updated", Org: "org.webhook.updated", Account: "account.webhook.updated", Admin: "admin.webhook.updated"}, w, data); err != nil {
+				return err
+			}
+		}
+		_, err = db.GetEngine(ctx).ID(w.ID).AllCols().Update(w)
+		return err
+	})
 }
 
 // UpdateWebhookLastStatus updates last status of webhook.
@@ -600,6 +630,13 @@ func DeleteWebhookByID(ctx context.Context, id int64) (err error) {
 	}
 	defer committer.Close()
 
+	w, err := GetWebhookByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := recordWebhook(ctx, audit_model.LevelActions{Repo: "repo.webhook.deleted", Org: "org.webhook.deleted", Account: "account.webhook.deleted", Admin: "admin.webhook.deleted"}, w, w.AuditFields()); err != nil {
+		return err
+	}
 	if count, err := db.DeleteByID[Webhook](ctx, id); err != nil {
 		return err
 	} else if count == 0 {

@@ -14,6 +14,7 @@ import (
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/setting"
 	actions_service "forgejo.org/services/actions"
+	audit_service "forgejo.org/services/audit"
 	"forgejo.org/services/auth"
 	automerge_service "forgejo.org/services/automerge"
 	logshipping_service "forgejo.org/services/logshipping"
@@ -129,6 +130,16 @@ func registerUpdateMigrationPosterID() {
 	})
 }
 
+func registerCleanupAuditLog() {
+	RegisterTaskFatal("cleanup_audit_log", &BaseConfig{
+		Enabled:    true,
+		RunAtStart: false,
+		Schedule:   "@midnight",
+	}, func(ctx context.Context, _ *user_model.User, _ Config) error {
+		return audit_service.Cleanup(ctx)
+	})
+}
+
 func registerCleanupHookTaskTable() {
 	RegisterTaskFatal("cleanup_hook_task_table", &CleanupHookTaskConfig{
 		BaseConfig: BaseConfig{
@@ -202,6 +213,7 @@ func initBasicTasks() {
 		registerUpdateMigrationPosterID()
 	}
 	registerCleanupHookTaskTable()
+	registerCleanupAuditLog()
 	registerStartScheduledAutoMerges()
 	registerStartScheduledDispatches()
 	registerReloadLogShipping()

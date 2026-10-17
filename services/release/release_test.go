@@ -473,13 +473,13 @@ func TestRelease_createTag(t *testing.T) {
 		IsPrerelease: false,
 		IsTag:        false,
 	}
-	_, err = createTag(db.DefaultContext, gitRepo, release, "")
+	_, err = createTag(db.DefaultContext, gitRepo, release, "", true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, release.CreatedUnix)
 	releaseCreatedUnix := release.CreatedUnix
 	test.SleepTillNextSecond()
 	release.Note = "Changed note"
-	_, err = createTag(db.DefaultContext, gitRepo, release, "")
+	_, err = createTag(db.DefaultContext, gitRepo, release, "", true)
 	require.NoError(t, err)
 	assert.Equal(t, int64(releaseCreatedUnix), int64(release.CreatedUnix))
 
@@ -497,12 +497,12 @@ func TestRelease_createTag(t *testing.T) {
 		IsPrerelease: false,
 		IsTag:        false,
 	}
-	_, err = createTag(db.DefaultContext, gitRepo, release, "")
+	_, err = createTag(db.DefaultContext, gitRepo, release, "", true)
 	require.NoError(t, err)
 	releaseCreatedUnix = release.CreatedUnix
 	test.SleepTillNextSecond()
 	release.Title = "Changed title"
-	_, err = createTag(db.DefaultContext, gitRepo, release, "")
+	_, err = createTag(db.DefaultContext, gitRepo, release, "", true)
 	require.NoError(t, err)
 	assert.Less(t, int64(releaseCreatedUnix), int64(release.CreatedUnix))
 
@@ -520,13 +520,13 @@ func TestRelease_createTag(t *testing.T) {
 		IsPrerelease: true,
 		IsTag:        false,
 	}
-	_, err = createTag(db.DefaultContext, gitRepo, release, "")
+	_, err = createTag(db.DefaultContext, gitRepo, release, "", true)
 	require.NoError(t, err)
 	releaseCreatedUnix = release.CreatedUnix
 	test.SleepTillNextSecond()
 	release.Title = "Changed title"
 	release.Note = "Changed note"
-	_, err = createTag(db.DefaultContext, gitRepo, release, "")
+	_, err = createTag(db.DefaultContext, gitRepo, release, "", true)
 	require.NoError(t, err)
 	assert.Equal(t, int64(releaseCreatedUnix), int64(release.CreatedUnix))
 }

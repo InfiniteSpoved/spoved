@@ -21,6 +21,8 @@
 				<textarea id="description" name="description" rows="5" placeholder="{{ctx.Locale.Tr "settings.authorized_integration.field.description.placeholder"}}">{{.Form.Description}}</textarea>
 			</div>
 
+			{{template "shared/expiry_input" .}}
+
 			{{if not .IsNew}}
 				<div class="field">
 					<label for="audience">{{ctx.Locale.Tr "settings.authorized_integration.field.audience"}}</label>

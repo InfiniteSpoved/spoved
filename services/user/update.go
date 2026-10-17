@@ -9,6 +9,7 @@ import (
 
 	"forgejo.org/models"
 	auth_model "forgejo.org/models/auth"
+	"forgejo.org/models/db"
 	user_model "forgejo.org/models/user"
 	password_module "forgejo.org/modules/auth/password"
 	"forgejo.org/modules/log"
@@ -50,6 +51,7 @@ type UpdateOptions struct {
 }
 
 func UpdateUser(ctx context.Context, u *user_model.User, opts *UpdateOptions) error {
+	before := u.AuditFields()
 	cols := make([]string, 0, 20)
 
 	if has, value := opts.KeepEmailPrivate.Get(); has {
@@ -174,7 +176,31 @@ func UpdateUser(ctx context.Context, u *user_model.User, opts *UpdateOptions) er
 		cols = append(cols, "last_login_unix")
 	}
 
-	return user_model.UpdateUserCols(ctx, u, cols...)
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		stored, err := storedOrg(ctx, u)
+		if err != nil {
+			return err
+		}
+		if err := user_model.UpdateUserCols(ctx, u, cols...); err != nil {
+			return err
+		}
+		if err := user_model.RecordOrgChange(ctx, stored, u); err != nil {
+			return err
+		}
+		return user_model.RecordUserChange(ctx, before, u)
+	})
+}
+
+// storedOrg reads the stored row of u when it is an organization, so that its audited change is taken from what the
+// database held, not from u, which the caller already changed; nil for a user.
+func storedOrg(ctx context.Context, u *user_model.User) (stored *user_model.User, err error) {
+	if u.IsOrganization() {
+		var has bool
+		if stored, has, err = db.GetByID[user_model.User](ctx, u.ID); err == nil && !has {
+			err = user_model.ErrUserNotExist{UID: u.ID}
+		}
+	}
+	return stored, err
 }
 
 type UpdateAuthOptions struct {
@@ -189,6 +215,8 @@ func UpdateAuth(ctx context.Context, u *user_model.User, opts *UpdateAuthOptions
 	if opts.ProhibitLogin.ValueOrDefault(false) && user_model.IsLastUsableAdmin(ctx, u) {
 		return models.ErrDeleteLastAdminUser{UID: u.ID}
 	}
+	before := u.AuditFields()
+	passwordChanged := false
 	if has, value := opts.LoginSource.Get(); has {
 		source, err := auth_model.GetSourceByID(ctx, value)
 		if err != nil {
@@ -218,6 +246,7 @@ func UpdateAuth(ctx context.Context, u *user_model.User, opts *UpdateAuthOptions
 		if err := u.SetPassword(password); err != nil {
 			return err
 		}
+		passwordChanged = true
 	}
 
 	if has, value := opts.MustChangePassword.Get(); has {
@@ -227,7 +256,24 @@ func UpdateAuth(ctx context.Context, u *user_model.User, opts *UpdateAuthOptions
 		u.ProhibitLogin = value
 	}
 
-	if err := user_model.UpdateUserCols(ctx, u, "login_type", "login_source", "login_name", "passwd", "passwd_hash_algo", "salt", "must_change_password", "prohibit_login"); err != nil {
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		stored, err := storedOrg(ctx, u)
+		if err != nil {
+			return err
+		}
+		if err := user_model.UpdateUserCols(ctx, u, "login_type", "login_source", "login_name", "passwd", "passwd_hash_algo", "salt", "must_change_password", "prohibit_login"); err != nil {
+			return err
+		}
+		if passwordChanged {
+			if err := user_model.RecordUser(ctx, "account.user.password_changed", u, nil); err != nil {
+				return err
+			}
+		}
+		if err := user_model.RecordOrgChange(ctx, stored, u); err != nil {
+			return err
+		}
+		return user_model.RecordUserChange(ctx, before, u)
+	}); err != nil {
 		return err
 	}
 

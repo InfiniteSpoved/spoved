@@ -61,7 +61,8 @@ type AuthenticationNotAttempted struct {
 // found to not match any user, AuthenticationAttemptedIncorrectCredential would be returned. This is typically an
 // indicator of a `401 Unauthorized ...` response.
 type AuthenticationAttemptedIncorrectCredential struct {
-	Error error
+	Error  error
+	UserID int64 // the user of the refused credential, for the audit log, when it is known
 }
 
 // Authentication was attempted and an unexpected internal error occurred.
@@ -73,6 +74,14 @@ func (*AuthenticationSuccess) isMethodOutput()                      {}
 func (*AuthenticationNotAttempted) isMethodOutput()                 {}
 func (*AuthenticationAttemptedIncorrectCredential) isMethodOutput() {}
 func (*AuthenticationError) isMethodOutput()                        {}
+
+// CredentialOwnerError marks a refusal that is only reached after the credential was proven (token hash, password or
+// JWT signature matched), so its text may be shown to the caller; any other refusal gets a generic answer.
+type CredentialOwnerError struct{ Err error }
+
+func (e *CredentialOwnerError) Error() string { return e.Err.Error() }
+
+func (e *CredentialOwnerError) Unwrap() error { return e.Err }
 
 // PasswordAuthenticator represents a source of authentication
 type PasswordAuthenticator interface {

@@ -186,7 +186,7 @@ func TestRepoGroupTransfer(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, nested.LoadOwner(ctx))
 	require.NoError(t, models.CreatePendingRepositoryTransfer(ctx, doer, user2, nested.ID, nil))
-	require.NoError(t, CancelRepositoryTransfer(ctx, nested))
+	require.NoError(t, CancelRepositoryTransfer(ctx, nested, false))
 	require.NoError(t, TransferOwnership(ctx, doer, user2, nested, nil))
 	nested = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: nested.ID})
 	assert.Equal(t, "user2/api", nested.FullName())

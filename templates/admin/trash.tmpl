@@ -51,7 +51,7 @@
 						</tr>
 						{{else}}
 						<tr>
-							<td class="tw-break-anywhere">{{.Repo.TrashedOwnerName}}/{{.Repo.TrashedName}}</td>
+							<td class="tw-break-anywhere">{{.Repo.TrashedFullName}}</td>
 							<td>{{.Repo.TrashedByName}}</td>
 							<td>{{DateUtils.AbsoluteShort .Repo.TrashedUnix}}</td>
 							<td>{{if .Purging}}{{ctx.Locale.Tr "admin.trash.purging"}}{{else}}{{.DaysRemaining}}{{end}}</td>
@@ -64,7 +64,7 @@
 										<button class="ui small primary button">{{ctx.Locale.Tr "admin.trash.restore"}}</button>
 									</form>
 									<form class="tw-inline-flex tw-items-center tw-gap-1" method="post" action="{{AppSubUrl}}/admin/trash/{{.Repo.ID}}/purge">
-										<input name="confirm_name" required autocomplete="off" aria-label="{{ctx.Locale.Tr "admin.trash.purge_confirm" (print .Repo.TrashedOwnerName "/" .Repo.TrashedName)}}" placeholder="{{.Repo.TrashedOwnerName}}/{{.Repo.TrashedName}}">
+										<input name="confirm_name" required autocomplete="off" aria-label="{{ctx.Locale.Tr "admin.trash.purge_confirm" .Repo.TrashedFullName}}" placeholder="{{.Repo.TrashedFullName}}">
 										<button class="ui small red button">{{ctx.Locale.Tr "admin.trash.purge"}}</button>
 									</form>
 								{{end}}

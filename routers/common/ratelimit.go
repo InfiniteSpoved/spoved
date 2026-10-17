@@ -51,8 +51,18 @@ func checkRateLimit(b *context.Base, class string, doer *user_model.User, ar aut
 	setRateLimitHeaders(b, r)
 	if !r.Allowed {
 		log.Debug("Rate limit %s exceeded by %s", class, key)
+		recordRateLimited(b, class, key, doer)
 	}
 	return r
+}
+
+// recordRateLimited records a rate limit refusal in the audit log, aggregated per bucket and class.
+func recordRateLimited(b *context.Base, class, key string, doer *user_model.User) {
+	var uid int64
+	if doer != nil {
+		uid = doer.ID
+	}
+	auth.RecordRefusal(b, "rate_limit", 0, uid, class+"|"+key, map[string]any{"class": class})
 }
 
 func setRateLimitHeaders(b *context.Base, r ratelimit.Result) {
@@ -166,6 +176,7 @@ func RateLimitAuthIP(ctx *context.Context) {
 func StartAuthAttempt(ctx *context.Context, keys ...string) *ratelimit.AuthAttempt {
 	a := ratelimit.StartAuth(ratelimit.ClientAddr(ctx.Req), keys...)
 	if !a.Allowed {
+		recordRateLimited(ctx.Base, ratelimit.Auth, auth.ActorIPKey(ctx, 48), nil)
 		renderRateLimited(ctx, a.Result)
 		return nil
 	}
@@ -179,6 +190,7 @@ func WriteIfRateLimited(b *context.Base, err error, asJSON bool) bool {
 	if !errors.As(err, &limited) {
 		return false
 	}
+	recordRateLimited(b, ratelimit.Auth, auth.ActorIPKey(b, 48), nil)
 	setRateLimitHeaders(b, limited.Result)
 	if asJSON {
 		b.JSON(http.StatusTooManyRequests, map[string]string{"message": limited.Error()})

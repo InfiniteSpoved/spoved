@@ -211,6 +211,7 @@ func webAuth(authMethod auth_service.Method) func(*context.Context) {
 		case *auth_service.AuthenticationNotAttempted:
 			ar = &auth_service.UnauthenticatedResult{}
 		case *auth_service.AuthenticationAttemptedIncorrectCredential:
+			common.RecordAuthFailure(ctx.Base, v)
 			if common.WriteIfRateLimited(ctx.Base, v.Error, false) {
 				return
 			}
@@ -234,6 +235,9 @@ func webAuth(authMethod auth_service.Method) func(*context.Context) {
 		ctx.IsSigned = ar.User() != nil
 		ctx.Authentication = ar
 		common.SetAuditActor(ctx.Base, ar)
+		if rp, ok := ar.(interface{ NewSession() bool }); ok && rp.NewSession() {
+			auth_service.RecordSignIn(ctx, ctx.Doer, "reverse_proxy", "")
+		}
 		if ctx.Doer == nil && ctx.InteractiveReauthenticationPossible {
 			// The request is not authenticated, and session authentication was attempted. Clear "uid" from the session.
 			// The purpose of this behaviour isn't clear as it is retained through multiple refactorings, originally
@@ -417,22 +421,22 @@ func Routes() *web.Route {
 		func() {
 			registerRoutes(routes)
 		},
-		gzipMid, sessioner, context.Contexter(), webAuth(buildAuthGroup()), common.RateLimit(ratelimit.Web), common.MaintenanceWeb, common.IPAllowlistWeb,
+		gzipMid, sessioner, context.Contexter(), webAuth(buildAuthGroup()), common.RateLimit(ratelimit.Web), common.MaintenanceWeb, common.IPAllowlistWeb, common.CredentialUsed("web"),
 		// TODO: GetNotificationCount & GetActiveStopwatch really seem like things that could be folded into Contexter or as helper functions
 		user.GetNotificationCount, repo.GetActiveStopwatch, user.GetAnnouncements,
 		goGet)
 	routes.Group("",
 		func() {
 			registerMixedRoutes(routes)
-		}, gzipMid, sessioner, context.Contexter(), webAuth(buildMixedAuthGroup()), common.RateLimit(ratelimit.Web), common.MaintenanceWeb, common.IPAllowlistMixed, goGet)
+		}, gzipMid, sessioner, context.Contexter(), webAuth(buildMixedAuthGroup()), common.RateLimit(ratelimit.Web), common.MaintenanceWeb, common.IPAllowlistMixed, common.CredentialUsed("web"), goGet)
 	routes.Group("",
 		func() {
 			registerGitLFSRoutes(routes)
-		}, gzipMid, sessioner, context.Contexter(), webAuth(buildGitLfsAuthGroup()), common.RateLimit(ratelimit.Git), common.MaintenanceGit, common.IPAllowlistPlain(setting.IPAllowlistSurfaceGit), goGet)
+		}, gzipMid, sessioner, context.Contexter(), webAuth(buildGitLfsAuthGroup()), common.RateLimit(ratelimit.Git), common.MaintenanceGit, common.IPAllowlistPlain(setting.IPAllowlistSurfaceGit), common.CredentialUsed("lfs"), goGet)
 	routes.Group("",
 		func() {
 			registerGitRoutes(routes)
-		}, gzipMid, sessioner, context.Contexter(), webAuth(buildGitAuthGroup()), common.RateLimit(ratelimit.Git), common.MaintenanceGit, common.IPAllowlistPlain(setting.IPAllowlistSurfaceGit), goGet)
+		}, gzipMid, sessioner, context.Contexter(), webAuth(buildGitAuthGroup()), common.RateLimit(ratelimit.Git), common.MaintenanceGit, common.IPAllowlistPlain(setting.IPAllowlistSurfaceGit), common.CredentialUsed("git"), goGet)
 
 	// The only endpoint which can only be accessed with the OAuth2 authentication method is /userinfo, extracted here
 	// so that other auth methods can't be applied to it
@@ -902,6 +906,8 @@ func registerRoutes(m *web.Route) {
 	adminReq := verifyAuthWithOptions(&common.VerifyOptions{SignInRequired: func() bool { return true }, AdminRequired: true})
 
 	// ***** START: Admin *****
+	// the audit log is outside adminReq for the auditor; only GET routes may be (TestAdminAuditRoutes)
+	m.Get("/admin/audit", reqSignIn, admin.AuditReq, admin.Audit)
 	m.Group("/admin", func() {
 		m.Get("", admin.Dashboard)
 		m.Get("/system_status", admin.SystemStatus)
@@ -909,6 +915,7 @@ func registerRoutes(m *web.Route) {
 		m.Combo("/maintenance").Get(admin.Maintenance).Post(admin.MaintenancePost)
 		m.Combo("/webhook-types").Get(admin.WebhookTypes).Post(admin.WebhookTypesPost)
 		m.Combo("/repo-units").Get(admin.RepoUnits).Post(admin.RepoUnitsPost)
+		m.Combo("/audit/retention").Get(admin.AuditRetention).Post(admin.AuditRetentionPost)
 		m.Combo("/personal-repos").Get(admin.PersonalRepos).Post(admin.PersonalReposPost)
 		m.Combo("/ip-allowlist").Get(admin.IPAllowlist).Post(admin.IPAllowlistPost)
 		m.Group("/log-shipping", func() {
@@ -954,6 +961,13 @@ func registerRoutes(m *web.Route) {
 			m.Get("/{userid}/access", admin.UserAccess)
 			m.Combo("/{userid}/edit").Get(admin.EditUser).Post(web.Bind(forms.AdminEditUserForm{}), admin.EditUserPost)
 			m.Post("/{userid}/delete", admin.DeleteUser)
+			m.Group("/{userid}/tokens", func() {
+				m.Combo("/new").
+					Get(web.Bind(forms.NewAccessTokenGetForm{}), admin.UserTokenNew).
+					Post(web.Bind(forms.NewAccessTokenPostForm{}), admin.UserTokenNewPost)
+				m.Post("/delete", admin.UserTokenDelete)
+				m.Post("/regenerate", admin.UserTokenRegenerate)
+			})
 			m.Post("/{userid}/avatar", web.Bind(forms.AvatarForm{}), admin.AvatarPost)
 			m.Post("/{userid}/avatar/delete", admin.DeleteAvatar)
 		})

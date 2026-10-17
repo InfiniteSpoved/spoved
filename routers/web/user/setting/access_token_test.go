@@ -192,7 +192,7 @@ func TestGetSelectedRepos(t *testing.T) {
 		t.Helper()
 		ctx, _ := contexttest.MockContext(t, "user/settings/keys/tokens/new")
 		contexttest.LoadUser(t, ctx, 2)
-		return getSelectedRepos(ctx, raw)
+		return getSelectedRepos(ctx, ctx.Doer, raw)
 	}
 
 	repos, err := selected(t, "user2/repo1", "org3/repo3", "org3/proj/repo3")

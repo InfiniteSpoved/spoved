@@ -258,6 +258,10 @@ func prepareUserInfo(ctx *context.Context) *user_model.User {
 		}
 		return nil
 	}
+	if u.IsOrganization() { // changed in the organization's settings
+		ctx.NotFound("prepareUserInfo", nil)
+		return nil
+	}
 
 	ctx.Data["User"] = u
 	ctx.Data["ContextUser"] = u
@@ -365,7 +369,11 @@ func editUserCommon(ctx *context.Context) {
 // EditUser show editing user page
 func EditUser(ctx *context.Context) {
 	editUserCommon(ctx)
-	prepareUserInfo(ctx)
+	u := prepareUserInfo(ctx)
+	if ctx.Written() {
+		return
+	}
+	loadUserTokens(ctx, u)
 	if ctx.Written() {
 		return
 	}
@@ -377,6 +385,10 @@ func EditUser(ctx *context.Context) {
 func EditUserPost(ctx *context.Context) {
 	editUserCommon(ctx)
 	u := prepareUserInfo(ctx)
+	if ctx.Written() {
+		return
+	}
+	loadUserTokens(ctx, u)
 	if ctx.Written() {
 		return
 	}

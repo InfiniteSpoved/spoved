@@ -121,7 +121,7 @@ func Authenticate(ctx *context.Context) {
 	scope := ctx.Authentication.Scope().ValueOrZeroValue()
 	exp := ctx.Authentication.ExpiresAt()
 
-	token, err := packages_service.CreateAuthorizationToken(ctx.Doer, scope, exp)
+	token, err := packages_service.CreateAuthorizationToken(ctx.Doer, scope, exp, ctx.Authentication.Credential())
 	if err != nil {
 		apiError(ctx, http.StatusInternalServerError, err)
 		return

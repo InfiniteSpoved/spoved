@@ -86,15 +86,31 @@ func AddVerifiedDomain(ctx context.Context, d *OrgVerifiedDomain) error {
 
 // RemoveVerifiedDomain removes a verified domain of an organization; removing the last one also turns the member
 // restriction off.
-func RemoveVerifiedDomain(ctx context.Context, orgID int64, domain string) error {
+func RemoveVerifiedDomain(ctx context.Context, org *user_model.User, domain string) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
-		if _, err := db.GetEngine(ctx).Where("org_id = ? AND domain = ?", orgID, domain).Delete(new(OrgVerifiedDomain)); err != nil {
+		if n, err := db.GetEngine(ctx).Where("org_id = ? AND domain = ?", org.ID, domain).Delete(new(OrgVerifiedDomain)); err != nil || n == 0 {
 			return err
 		}
-		if n, err := db.GetEngine(ctx).Where("org_id = ?", orgID).Count(new(OrgVerifiedDomain)); err != nil || n > 0 {
+		if err := user_model.RecordOrg(ctx, "org.verified_domain.removed", org, map[string]any{"domain": domain}); err != nil {
 			return err
 		}
-		return user_model.DeleteUserSetting(ctx, orgID, SettingKeyRequireVerifiedDomain)
+		if n, err := db.GetEngine(ctx).Where("org_id = ?", org.ID).Count(new(OrgVerifiedDomain)); err != nil || n > 0 {
+			return err
+		}
+		return ClearVerifiedDomainRequired(ctx, org)
+	})
+}
+
+// ClearVerifiedDomainRequired turns the member restriction of org off, recording it when it was on.
+func ClearVerifiedDomainRequired(ctx context.Context, org *user_model.User) error {
+	if on, err := IsVerifiedDomainRequired(ctx, org.ID); err != nil || !on {
+		return err
+	}
+	if err := user_model.DeleteUserSetting(ctx, org.ID, SettingKeyRequireVerifiedDomain); err != nil {
+		return err
+	}
+	return user_model.RecordOrg(ctx, "org.verified_domain.required_changed", org, map[string]any{
+		"before": map[string]any{"required": true}, "after": map[string]any{"required": false},
 	})
 }
 

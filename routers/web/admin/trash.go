@@ -100,7 +100,7 @@ func RestoreTrash(ctx *context.Context) {
 	trashDone(ctx, trash_service.RestoreRepo(ctx, ctx.Doer, repo.ID, trash_service.RestoreOptions{
 		NewOwner: ctx.FormTrim("new_owner"),
 		NewName:  ctx.FormTrim("new_name"),
-	}), ctx.Tr("admin.trash.restored", repo.TrashedOwnerName+"/"+repo.TrashedName))
+	}), ctx.Tr("admin.trash.restored", repo.TrashedFullName()))
 }
 
 // PurgeTrash deletes a repository in the trash for good, after its name was typed.
@@ -109,12 +109,12 @@ func PurgeTrash(ctx *context.Context) {
 	if repo == nil {
 		return
 	}
-	if ctx.FormString("confirm_name") != repo.TrashedOwnerName+"/"+repo.TrashedName {
+	if ctx.FormString("confirm_name") != repo.TrashedFullName() {
 		ctx.Flash.Error(ctx.Tr("admin.trash.confirm_mismatch"))
 		ctx.Redirect(setting.AppSubURL + "/admin/trash")
 		return
 	}
-	trashDone(ctx, trash_service.Purge(ctx, ctx.Doer, repo.ID), ctx.Tr("admin.trash.purged", repo.TrashedOwnerName+"/"+repo.TrashedName))
+	trashDone(ctx, trash_service.Purge(ctx, ctx.Doer, repo.ID), ctx.Tr("admin.trash.purged", repo.TrashedFullName()))
 }
 
 // trashedOrg returns the organization in the trash named by the :id path parameter, or writes the response.

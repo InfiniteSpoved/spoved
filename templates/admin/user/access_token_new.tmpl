@@ -1,0 +1,5 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin edit user")}}
+<div class="admin-setting-content">
+	{{template "user/settings/access_token_form" .}}
+</div>
+{{template "admin/layout_footer" .}}

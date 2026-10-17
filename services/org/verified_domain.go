@@ -105,10 +105,26 @@ func VerifyDomain(ctx context.Context, org *org_model.Organization, doer *user_m
 	d.LastCheckedUnix = d.VerifiedUnix
 	if withoutDNS {
 		d.VerifiedByAdminID = doer.ID
-	} else if !hasDomainRecord(ctx, org.ID, domain) {
+	} else if !hasDomainRecord(ctx, org.ID, domain) { // DNS: before the transaction
 		return ErrDomainRecordNotFound
 	}
-	return org_model.AddVerifiedDomain(ctx, d)
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		if err := org_model.AddVerifiedDomain(ctx, d); err != nil {
+			return err
+		}
+		data := map[string]any{"domain": domain}
+		if withoutDNS {
+			data["verified_by_admin"] = true
+		}
+		return user_model.RecordOrg(ctx, "org.verified_domain.added", org.AsUser(), data)
+	}); err != nil {
+		// checked after the rollback: on PostgreSQL the failed insert aborts the transaction
+		if taken, _ := db.GetEngine(ctx).Exist(&org_model.OrgVerifiedDomain{Domain: domain}); taken {
+			return org_model.ErrDomainVerifiedByOtherOrg
+		}
+		return err
+	}
+	return nil
 }
 
 func hasDomainRecord(ctx context.Context, orgID int64, domain string) bool {
@@ -130,18 +146,28 @@ func hasDomainRecord(ctx context.Context, orgID int64, domain string) bool {
 
 // SetVerifiedDomainRequired turns the member restriction of an organization on or off. It can only be on while the
 // organization has a verified domain and users must confirm the email addresses they add.
-func SetVerifiedDomainRequired(ctx context.Context, orgID int64, on bool) error {
-	if !on {
-		return user_model.DeleteUserSetting(ctx, orgID, org_model.SettingKeyRequireVerifiedDomain)
-	}
-	if !org_model.EmailConfirmationRequired() {
+func SetVerifiedDomainRequired(ctx context.Context, org *org_model.Organization, on bool) error {
+	if on && !org_model.EmailConfirmationRequired() {
 		return ErrEmailConfirmationOff
 	}
-	domains, err := org_model.GetVerifiedDomains(ctx, orgID)
-	if err != nil {
-		return err
-	} else if len(domains) == 0 {
-		return ErrNoVerifiedDomains
-	}
-	return user_model.SetUserSetting(ctx, orgID, org_model.SettingKeyRequireVerifiedDomain, "true")
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		before, err := org_model.IsVerifiedDomainRequired(ctx, org.ID)
+		if err != nil || before == on {
+			return err
+		}
+		if !on {
+			return org_model.ClearVerifiedDomainRequired(ctx, org.AsUser())
+		}
+		if domains, err := org_model.GetVerifiedDomains(ctx, org.ID); err != nil {
+			return err
+		} else if len(domains) == 0 {
+			return ErrNoVerifiedDomains
+		}
+		if err := user_model.SetUserSetting(ctx, org.ID, org_model.SettingKeyRequireVerifiedDomain, "true"); err != nil {
+			return err
+		}
+		return user_model.RecordOrg(ctx, "org.verified_domain.required_changed", org.AsUser(), map[string]any{
+			"before": map[string]any{"required": false}, "after": map[string]any{"required": true},
+		})
+	})
 }

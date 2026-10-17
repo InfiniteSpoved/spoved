@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/log"
@@ -75,7 +76,21 @@ func InsertVariable(ctx context.Context, ownerID, groupID, repoID int64, name, d
 		if err := lockGroup(ctx, ownerID, groupID); err != nil {
 			return err
 		}
-		return db.Insert(ctx, variable)
+		if err := db.Insert(ctx, variable); err != nil {
+			return err
+		}
+		return recordVariable(ctx, audit_model.LevelActions{Repo: "repo.actions_variable.created", Org: "org.actions_variable.created", Account: "account.actions_variable.created", Admin: "admin.actions_variable.created"}, variable, nil)
+	})
+}
+
+// recordVariable records the action of actions for the variable's level, with its name, never its value.
+func recordVariable(ctx context.Context, actions audit_model.LevelActions, v *ActionVariable, data map[string]any) error {
+	if data == nil {
+		data = map[string]any{}
+	}
+	data["name"] = v.Name
+	return repo_model.RecordScoped(ctx, actions, v.OwnerID, v.GroupID, v.RepoID, audit_model.Event{
+		TargetType: "actions_variable", TargetID: v.ID, TargetName: v.Name, Data: data,
 	})
 }
 
@@ -123,6 +138,20 @@ func UpdateVariable(ctx context.Context, variable *ActionVariable) (bool, error)
 		if err = lockGroup(ctx, variable.OwnerID, variable.GroupID); err != nil {
 			return err
 		}
+		stored := new(ActionVariable)
+		if has, err := db.GetEngine(ctx).ID(variable.ID).Where("owner_id = ? AND group_id = ? AND repo_id = ?", variable.OwnerID, variable.GroupID, variable.RepoID).Get(stored); err != nil || !has {
+			return err
+		}
+		if valueChanged := stored.Data != variable.Data; valueChanged || stored.Name != variable.Name {
+			data := audit_model.Changes(map[string]any{"name": stored.Name}, map[string]any{"name": variable.Name})
+			if data == nil {
+				data = map[string]any{}
+			}
+			data["value_changed"] = valueChanged
+			if err := recordVariable(ctx, audit_model.LevelActions{Repo: "repo.actions_variable.updated", Org: "org.actions_variable.updated", Account: "account.actions_variable.updated", Admin: "admin.actions_variable.updated"}, variable, data); err != nil {
+				return err
+			}
+		}
 		count, err = db.GetEngine(ctx).ID(variable.ID).Where("owner_id = ? AND group_id = ? AND repo_id = ?", variable.OwnerID, variable.GroupID, variable.RepoID).Cols("name", "data").
 			Update(&ActionVariable{
 				Name: variable.Name,
@@ -137,6 +166,13 @@ func DeleteVariable(ctx context.Context, variableID, ownerID, groupID, repoID in
 	var count int64
 	err := db.WithTx(ctx, func(ctx context.Context) (err error) {
 		if err = lockGroup(ctx, ownerID, groupID); err != nil {
+			return err
+		}
+		stored := new(ActionVariable)
+		if has, err := db.GetEngine(ctx).Where("id = ? AND owner_id = ? AND group_id = ? AND repo_id = ?", variableID, ownerID, groupID, repoID).Get(stored); err != nil || !has {
+			return err
+		}
+		if err := recordVariable(ctx, audit_model.LevelActions{Repo: "repo.actions_variable.deleted", Org: "org.actions_variable.deleted", Account: "account.actions_variable.deleted", Admin: "admin.actions_variable.deleted"}, stored, nil); err != nil {
 			return err
 		}
 		count, err = db.GetEngine(ctx).Table("action_variable").Where("id = ? AND owner_id = ? AND group_id = ? AND repo_id = ?", variableID, ownerID, groupID, repoID).Delete()

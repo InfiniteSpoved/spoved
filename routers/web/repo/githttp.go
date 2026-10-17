@@ -10,6 +10,7 @@ import (
 	gocontext "context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -34,6 +35,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
+	"forgejo.org/routers/common"
 	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	redirect_service "forgejo.org/services/redirect"
@@ -174,8 +176,16 @@ func httpBase(ctx *context.Context) *serviceHandler {
 			return nil
 		}
 
+		// a refused push of a signed-in user is recorded; git's first, anonymous round trip is not
+		refused := func(reason string) {
+			if receivePack && repo != nil {
+				repo_model.RecordPushRefused(ctx, repo, reason, "")
+			}
+		}
+
 		context.CheckRepoScopedToken(ctx, repo, auth_model.GetScopeLevelFromAccessMode(accessMode))
 		if ctx.Written() {
+			refused("permission")
 			return nil
 		}
 
@@ -218,12 +228,15 @@ func httpBase(ctx *context.Context) *serviceHandler {
 			}
 			if task != nil {
 				if !p.CanAccess(accessMode, unitType) {
+					refused("permission")
 					ctx.PlainText(http.StatusForbidden, "User permission denied")
 					return nil
 				}
 
 				environ = append(environ, fmt.Sprintf("%s=%d", repo_module.EnvActionTaskID, task.ID))
 			} else if !p.CanAccess(accessMode, unitType) {
+				refused("permission")
+				auth.RecordTwoFactorBlockedMember(ctx, ctx.Doer, owner)
 				ctx.PlainText(http.StatusNotFound, "Repository not found")
 				return nil
 			}
@@ -243,6 +256,7 @@ func httpBase(ctx *context.Context) *serviceHandler {
 				return nil
 			} else if l.Reached() {
 				log.Warn("Personal repository size limit reached for %s (%d of %d bytes): HTTP push to %s refused", owner.Name, l.Used, l.Limit, reponame)
+				refused("size_lock")
 				refuseGitPush(ctx, l.MessageFor(ctx.Doer.ID, owner.ID))
 				return nil
 			}
@@ -260,6 +274,7 @@ func httpBase(ctx *context.Context) *serviceHandler {
 	}
 
 	if !repoExist {
+		auth.RecordTwoFactorBlockedMember(ctx, ctx.Doer, owner)
 		if !receivePack {
 			ctx.PlainText(http.StatusNotFound, "Repository not found")
 			return nil
@@ -320,6 +335,7 @@ func httpBase(ctx *context.Context) *serviceHandler {
 	}
 
 	environ = append(environ, repo_module.EnvRepoID+fmt.Sprintf("=%d", repo.ID))
+	environ = append(environ, repo_module.AuditEnvironment(ctx)...)
 
 	ctx.Req.URL.Path = strings.ToLower(ctx.Req.URL.Path) // blue: In case some repo name has upper case name
 
@@ -532,12 +548,17 @@ func serviceRPC(ctx *context.Context, h *serviceHandler, service string) {
 	}
 
 	var stderr bytes.Buffer
+	var stdout io.Writer = ctx.Resp
+	counter := &countingWriter{w: ctx.Resp}
+	if service == "upload-pack" {
+		stdout = counter // only the git command's output is wrapped, never the response writer in middleware
+	}
 	cmd.AddArguments("--stateless-rpc").AddDynamicArguments(h.getRepoDir())
 	cmd.SetDescription(fmt.Sprintf("%s %s %s [repo_path: %s]", git.GitExecutable, service, "--stateless-rpc", h.getRepoDir()))
 	if err := cmd.Run(&git.RunOpts{
 		Dir:               h.getRepoDir(),
 		Env:               append(os.Environ(), h.environ...),
-		Stdout:            ctx.Resp,
+		Stdout:            stdout,
 		Stdin:             reqBody,
 		Stderr:            &stderr,
 		UseContextTimeout: true,
@@ -545,8 +566,26 @@ func serviceRPC(ctx *context.Context, h *serviceHandler, service string) {
 		if !git.IsErrCanceledOrKilled(err) {
 			log.Error("Fail to serve RPC(%s) in %s: %v - %s", service, h.getRepoDir(), err, stderr.String())
 		}
+		if service == "upload-pack" {
+			common.RecordGitRead(ctx, h.repo, service, "http", counter.n, h.isWiki, true)
+		}
 		return
 	}
+	if service == "upload-pack" {
+		common.RecordGitRead(ctx, h.repo, service, "http", counter.n, h.isWiki, false)
+	}
+}
+
+// countingWriter counts the bytes written through it.
+type countingWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += int64(n)
+	return n, err
 }
 
 // ServiceUploadPack implements Git Smart HTTP protocol

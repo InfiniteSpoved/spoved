@@ -44,6 +44,9 @@ func AddPrincipalKey(ctx context.Context, ownerID int64, content string, authSou
 	if err = db.Insert(dbCtx, key); err != nil {
 		return nil, fmt.Errorf("addKey: %w", err)
 	}
+	if err := RecordPublicKey(dbCtx, "credential.ssh_key.created", key, nil); err != nil {
+		return nil, err
+	}
 
 	if err = committer.Commit(); err != nil {
 		return nil, err

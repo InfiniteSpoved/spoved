@@ -208,10 +208,12 @@ func (app *OAuth2Application) GenerateClientSecret(ctx context.Context, expires 
 	}
 	app.ClientSecret = string(hashedSecret)
 	app.ClientSecretExpiresUnix = expires
-	if _, err := db.GetEngine(ctx).ID(app.ID).Cols("client_secret", "client_secret_expires_unix").Update(app); err != nil {
-		return "", err
-	}
-	return clientSecret, nil
+	return clientSecret, db.WithTx(ctx, func(ctx context.Context) error {
+		if _, err := db.GetEngine(ctx).ID(app.ID).Cols("client_secret", "client_secret_expires_unix").Update(app); err != nil {
+			return err
+		}
+		return recordOAuth2App(ctx, "credential.oauth2_app.secret_regenerated", app, map[string]any{"secret_expires": int64(expires)})
+	})
 }
 
 // ClientSecretExpired reports whether the client secret has an expiry that has passed
@@ -247,11 +249,12 @@ func (app *OAuth2Application) CreateGrant(ctx context.Context, userID int64, sco
 		UserID:        userID,
 		Scope:         scope,
 	}
-	err := db.Insert(ctx, grant)
-	if err != nil {
-		return nil, err
-	}
-	return grant, nil
+	return grant, db.WithTx(ctx, func(ctx context.Context) error {
+		if err := db.Insert(ctx, grant); err != nil {
+			return err
+		}
+		return recordGrant(ctx, "credential.oauth2_grant.created", grant)
+	})
 }
 
 // GetOAuth2ApplicationByClientID returns the oauth2 application with the given client_id. Returns an error if not found.
@@ -295,10 +298,12 @@ func CreateOAuth2Application(ctx context.Context, opts CreateOAuth2ApplicationOp
 		RedirectURIs:       opts.RedirectURIs,
 		ConfidentialClient: opts.ConfidentialClient,
 	}
-	if err := db.Insert(ctx, app); err != nil {
-		return nil, err
-	}
-	return app, nil
+	return app, db.WithTx(ctx, func(ctx context.Context) error {
+		if err := db.Insert(ctx, app); err != nil {
+			return err
+		}
+		return recordOAuth2App(ctx, "credential.oauth2_app.created", app, nil)
+	})
 }
 
 // UpdateOAuth2ApplicationOptions holds options to update an oauth2 application
@@ -330,12 +335,18 @@ func UpdateOAuth2Application(ctx context.Context, opts UpdateOAuth2ApplicationOp
 		return nil, fmt.Errorf("failed to edit OAuth2 application: application is locked: %s", app.ClientID)
 	}
 
+	before := appFields(app)
 	app.Name = opts.Name
 	app.RedirectURIs = opts.RedirectURIs
 	app.ConfidentialClient = opts.ConfidentialClient
 
 	if err = updateOAuth2Application(ctx, app); err != nil {
 		return nil, err
+	}
+	if changes := audit_model.Changes(before, appFields(app)); changes != nil {
+		if err := recordOAuth2App(ctx, "credential.oauth2_app.updated", app, changes); err != nil {
+			return nil, err
+		}
 	}
 	app.ClientSecret = ""
 
@@ -393,7 +404,14 @@ func DeleteOAuth2Application(ctx context.Context, id, userid int64) error {
 	if _, builtin := builtinApps[app.ClientID]; builtin {
 		return fmt.Errorf("failed to delete OAuth2 application: application is locked: %s", app.ClientID)
 	}
+	grants, err := db.GetEngine(ctx).Where("application_id = ?", id).Count(new(OAuth2Grant))
+	if err != nil {
+		return err
+	}
 	if err := deleteOAuth2Application(ctx, id, userid); err != nil {
+		return err
+	}
+	if err := recordOAuth2App(ctx, "credential.oauth2_app.deleted", app, map[string]any{"counts": map[string]int64{"grants": grants}}); err != nil {
 		return err
 	}
 	return committer.Commit()
@@ -607,8 +625,16 @@ func GetOAuth2GrantsByUserID(ctx context.Context, uid int64) ([]*OAuth2Grant, er
 
 // RevokeOAuth2Grant deletes the grant with grantID and userID
 func RevokeOAuth2Grant(ctx context.Context, grantID, userID int64) error {
-	_, err := db.GetEngine(ctx).Where(builder.Eq{"id": grantID, "user_id": userID}).Delete(&OAuth2Grant{})
-	return err
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		grant := &OAuth2Grant{}
+		if has, err := db.GetEngine(ctx).Where(builder.Eq{"id": grantID, "user_id": userID}).Get(grant); err != nil || !has {
+			return err
+		}
+		if _, err := db.DeleteByID[OAuth2Grant](ctx, grant.ID); err != nil {
+			return err
+		}
+		return recordGrant(ctx, "credential.oauth2_grant.revoked", grant)
+	})
 }
 
 // ErrOAuthClientIDInvalid will be thrown if client id cannot be found

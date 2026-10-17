@@ -185,6 +185,29 @@ func sshClientIP(sshConnection string) string {
 	return ""
 }
 
+// servGitEnv is the environment of the git command and its hooks: the server's own, then the repository, pusher and
+// audit values, which come last so that none of them can be inherited.
+func servGitEnv(results *private.ServCommandResults, clientIP string) []string {
+	credential := ""
+	if results.DeployKeyKeyID == 0 { // the hook resolves a deploy key from GITEA_DEPLOY_PUBLIC_KEY_ID
+		credential = "ssh_key:" + strconv.FormatInt(results.KeyID, 10)
+	}
+	env := append(os.Environ(),
+		repo_module.EnvRepoIsWiki+"="+strconv.FormatBool(results.IsWiki),
+		repo_module.EnvRepoName+"="+results.RepoName,
+		repo_module.EnvRepoUsername+"="+results.OwnerName,
+		repo_module.EnvPusherName+"="+results.UserName,
+		repo_module.EnvPusherEmail+"="+results.UserEmail,
+		repo_module.EnvPusherID+"="+strconv.FormatInt(results.UserID, 10),
+		repo_module.EnvRepoID+"="+strconv.FormatInt(results.RepoID, 10),
+		repo_module.EnvPRID+"="+fmt.Sprintf("%d", 0),
+		repo_module.EnvDeployPublicKeyID+"="+fmt.Sprintf("%d", results.DeployKeyKeyID),
+		repo_module.EnvKeyID+"="+fmt.Sprintf("%d", results.KeyID),
+		repo_module.EnvAppURL+"="+setting.AppURL,
+	)
+	return append(env, repo_module.AuditEnv(credential, clientIP, results.RequestID, "")...)
+}
+
 // splitServRepoPath splits the path of an SSH command, `owner/repo` or `owner/project/repo` with an optional
 // `.git`, into the owner and the repository path within the owner (`repo` or `project/repo`).
 func splitServRepoPath(repoPath string) (owner, repo string, err error) {
@@ -357,6 +380,7 @@ func runServ(ctx context.Context, c *cli.Command) error {
 			RepoID: results.RepoID,
 			Op:     lfsVerb,
 			UserID: results.UserID,
+			Cred:   results.AuditCredential,
 		}
 
 		// Sign and get the complete encoded token as a string using the secret
@@ -406,20 +430,7 @@ func runServ(ctx context.Context, c *cli.Command) error {
 	gitcmd.Stdout = os.Stdout
 	gitcmd.Stdin = os.Stdin
 	gitcmd.Stderr = os.Stderr
-	gitcmd.Env = append(gitcmd.Env, os.Environ()...)
-	gitcmd.Env = append(gitcmd.Env,
-		repo_module.EnvRepoIsWiki+"="+strconv.FormatBool(results.IsWiki),
-		repo_module.EnvRepoName+"="+results.RepoName,
-		repo_module.EnvRepoUsername+"="+results.OwnerName,
-		repo_module.EnvPusherName+"="+results.UserName,
-		repo_module.EnvPusherEmail+"="+results.UserEmail,
-		repo_module.EnvPusherID+"="+strconv.FormatInt(results.UserID, 10),
-		repo_module.EnvRepoID+"="+strconv.FormatInt(results.RepoID, 10),
-		repo_module.EnvPRID+"="+fmt.Sprintf("%d", 0),
-		repo_module.EnvDeployPublicKeyID+"="+fmt.Sprintf("%d", results.DeployKeyKeyID),
-		repo_module.EnvKeyID+"="+fmt.Sprintf("%d", results.KeyID),
-		repo_module.EnvAppURL+"="+setting.AppURL,
-	)
+	gitcmd.Env = servGitEnv(results, sshClientIP(os.Getenv("SSH_CONNECTION")))
 	// to avoid breaking, here only use the minimal environment variables for the "gitea serv" command.
 	// it could be re-considered whether to use the same git.CommonGitCmdEnvs() as "git" command later.
 	gitcmd.Env = append(gitcmd.Env, git.CommonCmdServEnvs()...)

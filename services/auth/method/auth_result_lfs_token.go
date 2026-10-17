@@ -42,7 +42,7 @@ func (r *lfsTokenAuthenticationResult) GetTargetRepoID() int64 {
 	return r.claims.RepoID
 }
 
-// Credential is unknown until the LFS token carries the credential it was issued for (#17 PR 3).
+// Credential is the credential the token was issued for; unknown for a token without the claim.
 func (r *lfsTokenAuthenticationResult) Credential() audit_model.Credential {
-	return audit_model.Credential{Type: audit_model.CredentialUnknown, OwnerID: r.user.ID}
+	return audit_model.CredentialFromClaim(r.claims.Cred, r.user.ID)
 }

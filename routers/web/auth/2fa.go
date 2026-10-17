@@ -14,6 +14,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/common"
+	auth_service "forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	"forgejo.org/services/externalaccount"
 	"forgejo.org/services/forms"
@@ -102,10 +103,11 @@ func TwoFactorPost(ctx *context.Context) {
 			return
 		}
 
-		handleSignIn(ctx, u, remember)
+		handleSignIn(ctx, u, remember, firstFactor(ctx)+"+totp", "")
 		return
 	}
 
+	auth_service.RecordSignInFailure(ctx, id, "bad_totp")
 	ctx.RenderWithErr(ctx.Tr("auth.twofa_passcode_incorrect"), tplTwofa, forms.TwoFactorAuthForm{})
 }
 
@@ -174,7 +176,7 @@ func TwoFactorScratchPost(ctx *context.Context) {
 			}
 		}
 
-		handleSignInFull(ctx, u, remember, false)
+		handleSignInFull(ctx, u, remember, false, firstFactor(ctx)+"+scratch", "")
 		if ctx.Written() {
 			return
 		}
@@ -183,5 +185,6 @@ func TwoFactorScratchPost(ctx *context.Context) {
 		return
 	}
 
+	auth_service.RecordSignInFailure(ctx, id, "bad_scratch")
 	ctx.RenderWithErr(ctx.Tr("auth.twofa_scratch_token_incorrect"), tplTwofaScratch, forms.TwoFactorScratchAuthForm{})
 }

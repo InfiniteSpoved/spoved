@@ -183,7 +183,14 @@ func AddCollaborator(ctx *context.APIContext) {
 		return
 	}
 
-	if err := repo_module.AddCollaborator(ctx, ctx.Repo().Repository, collaborator); err != nil {
+	// an unknown permission gives write, as before
+	mode := perm.AccessModeWrite
+	if form.Permission != nil {
+		if m := perm.ParseAccessMode(*form.Permission); m != perm.AccessModeNone {
+			mode = m
+		}
+	}
+	if err := repo_module.AddCollaborator(ctx, ctx.Repo().Repository, collaborator, mode); err != nil {
 		if errors.Is(err, user_model.ErrBlockedByUser) {
 			ctx.Error(http.StatusForbidden, "AddCollaborator", err)
 		} else {

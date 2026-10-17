@@ -6,6 +6,7 @@ package repo
 import (
 	"context"
 	"slices"
+	"strings"
 
 	"forgejo.org/models/db"
 	"forgejo.org/models/unit"
@@ -72,6 +73,7 @@ func SetOrgUnits(ctx context.Context, org *user_model.User, doerID int64, on map
 		}
 	}
 	return db.WithTx(ctx, func(ctx context.Context) error {
+		var before, after []string
 		for t, v := range on {
 			row := &OrgUnit{OrgID: org.ID, Type: t}
 			has, err := db.GetEngine(ctx).Get(row)
@@ -90,11 +92,29 @@ func SetOrgUnits(ctx context.Context, org *user_model.User, doerID int64, on map
 			if err != nil {
 				return err
 			}
+			name := strings.TrimPrefix(unit.Units[t].NameKey, "repo.")
+			before, after = append(before, name+":"+onOff(!v)), append(after, name+":"+onOff(v))
+		}
+		if len(after) > 0 {
+			slices.Sort(before)
+			slices.Sort(after)
+			if err := user_model.RecordOrg(ctx, "org.units.changed", org, map[string]any{
+				"before": map[string]any{"units": before}, "after": map[string]any{"units": after},
+			}); err != nil {
+				return err
+			}
 		}
 		cache.RemoveContextData(ctx, "org_disabled_units", org.ID)
 		cache.RemoveContextData(ctx, "org_unit_any_off", 0)
 		return nil
 	})
+}
+
+func onOff(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
 }
 
 // PolicyUnitTypes are the units the site policy decides on: every unit but Code.

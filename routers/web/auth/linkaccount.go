@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"forgejo.org/models/auth"
@@ -84,6 +85,7 @@ func LinkAccount(ctx *context.Context) {
 }
 
 func handleSignInError(ctx *context.Context, userName string, ptrForm any, tmpl base.TplName, invoker string, err error) {
+	recordSignInError(ctx, err)
 	if errors.Is(err, util.ErrNotExist) {
 		ctx.RenderWithErr(ctx.Tr("form.username_password_incorrect"), tmpl, ptrForm)
 	} else if errors.Is(err, util.ErrInvalidArgument) {
@@ -132,17 +134,18 @@ func LinkAccountPostSignIn(ctx *context.Context) {
 	if attempt == nil {
 		return
 	}
-	u, _, err := auth_method.UserSignIn(ctx, signInForm.UserName, signInForm.Password)
+	u, source, err := auth_method.UserSignIn(ctx, signInForm.UserName, signInForm.Password)
 	if err != nil {
 		handleSignInError(ctx, signInForm.UserName, &signInForm, tplLinkAccount, "UserLinkAccount", err)
 		return
 	}
 	attempt.Succeeded()
 
-	linkAccount(ctx, u, gothUser.(goth.User), signInForm.Remember)
+	linkAccount(ctx, u, gothUser.(goth.User), signInForm.Remember, signInMethod(source)+"+link")
 }
 
-func linkAccount(ctx *context.Context, u *user_model.User, gothUser goth.User, remember bool) {
+// linkAccount links the external account to u and signs u in; method is how u was identified.
+func linkAccount(ctx *context.Context, u *user_model.User, gothUser goth.User, remember bool, method string) {
 	updateAvatarIfNeed(ctx, gothUser.AvatarURL, u)
 
 	// If this user is enrolled in 2FA, we can't sign the user in just yet.
@@ -160,7 +163,7 @@ func linkAccount(ctx *context.Context, u *user_model.User, gothUser goth.User, r
 			return
 		}
 
-		handleSignIn(ctx, u, remember)
+		handleSignIn(ctx, u, remember, method, "")
 		return
 	}
 
@@ -168,6 +171,7 @@ func linkAccount(ctx *context.Context, u *user_model.User, gothUser goth.User, r
 		// User needs to use 2FA, save data and redirect to 2FA page.
 		"twofaUid":      u.ID,
 		"twofaRemember": remember,
+		"twofaMethod":   method,
 		"linkAccount":   true,
 	}); err != nil {
 		ctx.ServerError("RegenerateSession", err)
@@ -289,5 +293,5 @@ func LinkAccountPostRegister(ctx *context.Context) {
 		return
 	}
 
-	handleSignIn(ctx, u, false)
+	handleSignIn(ctx, u, false, "oauth2:"+strconv.FormatInt(authSource.ID, 10)+"+register", "")
 }

@@ -13,6 +13,7 @@ import (
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
+	auth_service "forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	"forgejo.org/services/externalaccount"
 
@@ -112,6 +113,7 @@ func WebAuthnLoginAssertionPost(ctx *context.Context) {
 	if err != nil {
 		// Failed authentication attempt.
 		log.Info("Failed authentication attempt for %s from %s: %v", user.Name, ctx.RemoteAddr(), err)
+		auth_service.RecordSignInFailure(ctx, user.ID, "bad_webauthn")
 		ctx.Status(http.StatusForbidden)
 		return
 	}
@@ -140,6 +142,7 @@ func WebAuthnLoginAssertionPost(ctx *context.Context) {
 	if err != nil {
 		// Failed authentication attempt.
 		log.Info("Failed authentication attempt for %s from %s: %v", user.Name, ctx.RemoteAddr(), err)
+		auth_service.RecordSignInFailure(ctx, user.ID, "bad_webauthn")
 		ctx.Status(http.StatusForbidden)
 		return
 	}
@@ -148,6 +151,7 @@ func WebAuthnLoginAssertionPost(ctx *context.Context) {
 	// (This is set if the sign counter is less than the one we have stored.)
 	if cred.Authenticator.CloneWarning {
 		log.Info("Failed authentication attempt for %s from %s: cloned credential", user.Name, ctx.RemoteAddr())
+		auth_service.RecordSignInFailure(ctx, user.ID, "bad_webauthn")
 		ctx.Status(http.StatusForbidden)
 		return
 	}
@@ -175,7 +179,7 @@ func WebAuthnLoginAssertionPost(ctx *context.Context) {
 	}
 
 	remember := ctx.Session.Get("twofaRemember").(bool)
-	redirect := handleSignInFull(ctx, user, remember, false)
+	redirect := handleSignInFull(ctx, user, remember, false, firstFactor(ctx)+"+webauthn", "")
 	if redirect == "" {
 		redirect = setting.AppSubURL + "/"
 	}

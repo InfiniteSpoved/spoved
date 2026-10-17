@@ -38,6 +38,9 @@ type HookOptions struct {
 	DeployKeyKeyID                  int64 // public key ID if the pusher is a deploy key; UserID is then the repo's owner.
 	IsWiki                          bool
 	ActionTaskID                    int64 // the Actions task whose token pushes (UserID is the Actions user)
+	// who pushes, for the audit log: set by the server (serv, git HTTP, web pushes) and checked again by the hook
+	AuditCredential, AuditIP, AuditRequestID string
+	AuditSudoByID                            int64 // the admin who pushes with API sudo (0: none)
 }
 
 func (o *HookOptions) GetGitPushOptions() pushoptions.Interface {
@@ -98,6 +101,15 @@ func HookPostReceive(ctx context.Context, repoID int64, opts HookOptions) (*Hook
 	req := newInternalRequest(ctx, reqURL, "POST", opts)
 	req.SetReadWriteTimeout(time.Duration(60+len(opts.OldCommitIDs)) * time.Second)
 	return requestJSONResp(req, &HookPostReceiveResult{})
+}
+
+// HookPushAudit records the push in the audit log once, after post-receive, with all of its refs
+func HookPushAudit(ctx context.Context, repoID int64, opts HookOptions) ResponseExtra {
+	reqURL := fmt.Sprintf("/api/internal/hook/push-audit/%d", repoID)
+	req := newInternalRequest(ctx, reqURL, "POST", opts)
+	req.SetReadWriteTimeout(time.Duration(60+len(opts.OldCommitIDs)/30) * time.Second)
+	_, extra := requestJSONResp(req, &ResponseText{})
+	return extra
 }
 
 // HookProcReceive proc-receive hook

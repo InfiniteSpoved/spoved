@@ -77,6 +77,9 @@ func runChangePassword(ctx context.Context, c *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	if user.IsOrganization() {
+		return fmt.Errorf("%s is an organization", user.Name)
+	}
 
 	password := c.String("password")
 	if password == "" {

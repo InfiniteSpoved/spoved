@@ -13,7 +13,13 @@ var _ auth.AuthenticationResult = &reverseProxyAuthenticationResult{}
 
 type reverseProxyAuthenticationResult struct {
 	*auth.BaseAuthenticationResult
-	user *user_model.User
+	user       *user_model.User
+	newSession bool
+}
+
+// NewSession reports whether the request signed the user in: a session was created for them.
+func (r *reverseProxyAuthenticationResult) NewSession() bool {
+	return r.newSession
 }
 
 func (r *reverseProxyAuthenticationResult) User() *user_model.User {

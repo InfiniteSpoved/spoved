@@ -38,6 +38,30 @@ import (
 func deleteUser(ctx context.Context, u *user_model.User, purge, keepRow bool) (err error) {
 	e := db.GetEngine(ctx)
 
+	// the credentials and identities that go with the account, for the audit log (the access tokens are deleted in
+	// bulk below, without an entry of their own)
+	counts := map[string]int64{}
+	for name, bean := range map[string]any{
+		"access_tokens":           &auth_model.AccessToken{UID: u.ID},
+		"ssh_keys":                &asymkey_model.PublicKey{OwnerID: u.ID},
+		"gpg_keys":                &asymkey_model.GPGKey{OwnerID: u.ID},
+		"two_factor":              &auth_model.TwoFactor{UID: u.ID},
+		"webauthn":                &auth_model.WebAuthnCredential{UserID: u.ID},
+		"emails":                  &user_model.EmailAddress{UID: u.ID},
+		"external_logins":         &user_model.ExternalLoginUser{UserID: u.ID},
+		"openids":                 &user_model.UserOpenID{UID: u.ID},
+		"oauth2_apps":             &auth_model.OAuth2Application{UID: u.ID},
+		"oauth2_grants":           &auth_model.OAuth2Grant{UserID: u.ID},
+		"runners":                 &actions_model.ActionRunner{OwnerID: u.ID},
+		"authorized_integrations": &auth_model.AuthorizedIntegration{UserID: u.ID},
+		"team_invites_sent":       &organization.TeamInvite{InviterID: u.ID},
+		"team_invites_received":   &organization.TeamInvite{InvitedID: optional.Some(u.ID)},
+	} {
+		if counts[name], err = e.Count(bean); err != nil {
+			return fmt.Errorf("count %s: %w", name, err)
+		}
+	}
+
 	// ***** START: Watch *****
 	watchedRepoIDs, err := db.FindIDs(ctx, "watch", "watch.repo_id",
 		builder.Eq{"watch.user_id": u.ID}.
@@ -272,6 +296,12 @@ func deleteUser(ctx context.Context, u *user_model.User, purge, keepRow bool) (e
 		return err
 	}
 	// ***** END: TeamUser *****
+
+	if err := user_model.RecordUser(ctx, "account.user.deleted", u, map[string]any{
+		"counts": counts, "purge": purge, "tombstone": keepRow, "tombstone_removed": u.IsTrashed(),
+	}); err != nil {
+		return err
+	}
 
 	if keepRow {
 		return tombstoneUser(ctx, u)

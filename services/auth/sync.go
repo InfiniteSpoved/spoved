@@ -6,6 +6,7 @@ package auth
 import (
 	"context"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/modules/log"
@@ -33,7 +34,7 @@ func SyncExternalUsers(ctx context.Context, updateExisting bool) error {
 		}
 
 		if syncable, ok := s.Cfg.(SynchronizableSource); ok {
-			err := syncable.Sync(ctx, updateExisting)
+			err := syncable.Sync(audit_model.WithLoginSource(ctx, s.ID, s.Name), updateExisting)
 			if err != nil {
 				return err
 			}

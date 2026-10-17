@@ -94,8 +94,10 @@ func NewRunnerToken(ctx context.Context, ownerID, repoID optional.Option[int64])
 			return err
 		}
 
-		_, err := db.GetEngine(ctx).Insert(runnerToken)
-		return err
+		if _, err := db.GetEngine(ctx).Insert(runnerToken); err != nil {
+			return err
+		}
+		return recordRunnerToken(ctx, runnerToken)
 	})
 }
 

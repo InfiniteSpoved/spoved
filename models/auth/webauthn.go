@@ -186,16 +186,29 @@ func CreateCredential(ctx context.Context, userID int64, name string, cred *weba
 		Legacy:          false,
 	}
 
-	if err := db.Insert(ctx, c); err != nil {
-		return nil, err
-	}
-	return c, nil
+	return c, db.WithTx(ctx, func(ctx context.Context) error {
+		if err := db.Insert(ctx, c); err != nil {
+			return err
+		}
+		return recordTwoFactor(ctx, "account.two_factor.enrolled", userID, c.ID, "webauthn", name)
+	})
 }
 
 // DeleteCredential will delete WebAuthnCredential
 func DeleteCredential(ctx context.Context, id, userID int64) (bool, error) {
-	had, err := db.GetEngine(ctx).ID(id).Where("user_id = ?", userID).Delete(&WebAuthnCredential{})
-	return had > 0, err
+	var had bool
+	return had, db.WithTx(ctx, func(ctx context.Context) error {
+		c := &WebAuthnCredential{}
+		has, err := db.GetEngine(ctx).ID(id).Where("user_id = ?", userID).Get(c)
+		if err != nil || !has {
+			return err
+		}
+		if _, err := db.GetEngine(ctx).ID(id).Where("user_id = ?", userID).Delete(&WebAuthnCredential{}); err != nil {
+			return err
+		}
+		had = true
+		return recordTwoFactor(ctx, "account.two_factor.removed", userID, id, "webauthn", c.Name)
+	})
 }
 
 // WebAuthnCredentials implementns the webauthn.User interface

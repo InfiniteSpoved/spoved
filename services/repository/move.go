@@ -170,6 +170,12 @@ func moveRepository(ctx context.Context, repo *repo_model.Repository, groupID in
 		if err := repo_model.UpdateRepositoryCols(ctx, repo, "group_id", "group_name"); err != nil {
 			return err
 		}
+		if err := repo_model.RecordRepo(ctx, "repo.repository.moved", repo, map[string]any{
+			"before": map[string]any{"group_id": oldGroupID, "group_name": oldGroupName},
+			"after":  map[string]any{"group_id": groupID, "group_name": groupName},
+		}); err != nil {
+			return err
+		}
 		// the old project's deploy keys stop applying: drop them from the protection rules unless another key of the
 		// same public key still writes to the repository
 		if err := git_model.DropDeployKeyIDsNotWriting(ctx, repo, oldKeyIDs); err != nil {

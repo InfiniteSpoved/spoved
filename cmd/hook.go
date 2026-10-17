@@ -222,6 +222,7 @@ Forgejo or set your environment appropriately.`, "")
 		DeployKeyKeyID:                  deployKeyKeyID,
 		ActionTaskID:                    actionTaskID,
 	}
+	setHookAudit(&hookOptions)
 
 	scanner := bufio.NewScanner(os.Stdin)
 
@@ -368,6 +369,8 @@ Forgejo or set your environment appropriately.`, "")
 		PullRequestID:                   prID,
 		PushTrigger:                     repo_module.PushTrigger(os.Getenv(repo_module.EnvPushTrigger)),
 	}
+	setHookAudit(&hookOptions)
+	var pushed private.HookOptions // every ref, for the audit log
 	oldCommitIDs := make([]string, hookBatchSize)
 	newCommitIDs := make([]string, hookBatchSize)
 	refFullNames := make([]git.RefName, hookBatchSize)
@@ -379,13 +382,16 @@ Forgejo or set your environment appropriately.`, "")
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
-		// TODO: support news feeds for wiki
-		if isWiki {
-			continue
-		}
-
 		fields := bytes.Split(scanner.Bytes(), []byte(" "))
 		if len(fields) != 3 {
+			continue
+		}
+		pushed.OldCommitIDs = append(pushed.OldCommitIDs, string(fields[0]))
+		pushed.NewCommitIDs = append(pushed.NewCommitIDs, string(fields[1]))
+		pushed.RefFullNames = append(pushed.RefFullNames, git.RefName(fields[2]))
+
+		// TODO: support news feeds for wiki
+		if isWiki {
 			continue
 		}
 
@@ -414,6 +420,14 @@ Forgejo or set your environment appropriately.`, "")
 			results = append(results, resp.Results...)
 			count = 0
 		}
+	}
+
+	if len(pushed.RefFullNames) > 0 {
+		audit := hookOptions
+		audit.OldCommitIDs, audit.NewCommitIDs, audit.RefFullNames, audit.IsWiki = pushed.OldCommitIDs, pushed.NewCommitIDs, pushed.RefFullNames, isWiki
+		audit.DeployKeyKeyID, _ = strconv.ParseInt(os.Getenv(repo_module.EnvDeployPublicKeyID), 10, 64)
+		audit.ActionTaskID, _ = strconv.ParseInt(os.Getenv(repo_module.EnvActionTaskID), 10, 64)
+		_ = private.HookPushAudit(ctx, repoID, audit) // the server logs a failure; the push has happened either way
 	}
 
 	if isWiki {
@@ -465,6 +479,14 @@ Forgejo or set your environment appropriately.`, "")
 
 	hookPrintResults(results)
 	return nil
+}
+
+// setHookAudit sets who pushes, for the audit log, from the environment the server set for the push.
+func setHookAudit(opts *private.HookOptions) {
+	opts.AuditCredential = os.Getenv(repo_module.EnvAuditCredential)
+	opts.AuditIP = os.Getenv(repo_module.EnvAuditIP)
+	opts.AuditRequestID = os.Getenv(repo_module.EnvAuditRequestID)
+	opts.AuditSudoByID, _ = strconv.ParseInt(os.Getenv(repo_module.EnvAuditSudoBy), 10, 64) // invalid: 0
 }
 
 func hookPrintResults(results []private.HookPostReceiveBranchResult) {
@@ -589,6 +611,7 @@ Forgejo or set your environment appropriately.`, "")
 		UserName: pusherName,
 		UserID:   pusherID,
 	}
+	setHookAudit(&hookOptions)
 	hookOptions.OldCommitIDs = make([]string, 0, hookBatchSize)
 	hookOptions.NewCommitIDs = make([]string, 0, hookBatchSize)
 	hookOptions.RefFullNames = make([]git.RefName, 0, hookBatchSize)

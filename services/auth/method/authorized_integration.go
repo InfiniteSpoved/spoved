@@ -208,8 +208,13 @@ func (a *AuthorizedIntegration) Verify(req *http.Request, w http.ResponseWriter,
 		return &auth_service.AuthenticationError{Error: fmt.Errorf("authorized integration: GetUserByID: %w", err)}
 	}
 
+	// Checked only after the signature: the claims that select the integration are not trusted before it.
+	if authorizedIntegration.IsExpired() {
+		return &auth_service.AuthenticationAttemptedIncorrectCredential{Error: errors.New("authorized integration: expired")}
+	}
+
 	if err := authz.CheckScopePolicyInUse(u, authorizedIntegration.Scope, authorizedIntegration.ResourceAllRepos); errors.Is(err, authz.ErrScopePolicyEnforced) {
-		return &auth_service.AuthenticationAttemptedIncorrectCredential{Error: fmt.Errorf("authorized integration: %w; edit the integration's scopes", err)}
+		return &auth_service.AuthenticationAttemptedIncorrectCredential{Error: &auth_service.CredentialOwnerError{Err: fmt.Errorf("authorized integration: %w; edit the integration's scopes", err)}, UserID: u.ID}
 	} else if err != nil {
 		return &auth_service.AuthenticationError{Error: fmt.Errorf("authorized integration CheckScopePolicyInUse: %w", err)}
 	}
@@ -228,6 +233,10 @@ func (a *AuthorizedIntegration) Verify(req *http.Request, w http.ResponseWriter,
 		return &auth_service.AuthenticationError{Error: fmt.Errorf("authorized integration GetExpirationTime: %w", err)}
 	} else if exp != nil {
 		optionalExp = optional.Some(timeutil.TimeStamp(exp.Unix()))
+	}
+	// Tokens derived from this authentication (container, conan) must not outlive the integration.
+	if e := authorizedIntegration.ExpiresUnix; e != 0 && (!optionalExp.Has() || e < optionalExp.ValueOrZeroValue()) {
+		optionalExp = optional.Some(e)
 	}
 
 	return &auth_service.AuthenticationSuccess{

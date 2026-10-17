@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"forgejo.org/routers/common"
 	auth_service "forgejo.org/services/auth"
 	auth_method "forgejo.org/services/auth/method"
+	source_db "forgejo.org/services/auth/source/db"
 	"forgejo.org/services/auth/source/oauth2"
 	"forgejo.org/services/context"
 	"forgejo.org/services/externalaccount"
@@ -74,6 +76,7 @@ func autoSignIn(ctx *context.Context) (bool, error) {
 		if err := updateSession(ctx, nil, map[string]any{"uid": u.ID}); err != nil {
 			return false, fmt.Errorf("unable to updateSession: %w", err)
 		}
+		auth_service.RecordSignIn(ctx, u, "remember_me", "")
 
 		if err := resetLocale(ctx, u); err != nil {
 			return false, err
@@ -105,6 +108,10 @@ func autoSignIn(ctx *context.Context) (bool, error) {
 
 	if err := deleteToken(); err != nil {
 		return false, fmt.Errorf("deleteToken: %w", err)
+	}
+	// handleOAuth2SignIn records the sign-in as remember_me_sso when the provider answers
+	if err := ctx.Session.Set("signinRememberSSO", source.ID); err != nil {
+		return false, fmt.Errorf("Session.Set: %w", err)
 	}
 	isSucceed = true
 
@@ -256,6 +263,7 @@ func SignInPost(ctx *context.Context) {
 	}
 	u, source, err := auth_method.UserSignIn(ctx, form.UserName, form.Password)
 	if err != nil {
+		recordSignInError(ctx, err)
 		if errors.Is(err, util.ErrNotExist) || errors.Is(err, util.ErrInvalidArgument) {
 			log.Warn("Failed authentication attempt for %s from %s: %v", form.UserName, ctx.RemoteAddr(), err)
 			ctx.RenderWithErr(ctx.Tr("form.username_password_incorrect"), tplSignIn, &form)
@@ -277,7 +285,7 @@ func SignInPost(ctx *context.Context) {
 
 	// First of all if the source can skip local two fa we're done
 	if skipper, ok := source.Cfg.(auth_service.LocalTwoFASkipper); ok && skipper.IsSkipLocalTwoFA() {
-		handleSignIn(ctx, u, form.Remember)
+		handleSignIn(ctx, u, form.Remember, signInMethod(source), "")
 		return
 	}
 
@@ -298,7 +306,7 @@ func SignInPost(ctx *context.Context) {
 
 	if !hasTOTPtwofa && !hasWebAuthnTwofa {
 		// No two factor auth configured we can sign in the user
-		handleSignIn(ctx, u, form.Remember)
+		handleSignIn(ctx, u, form.Remember, signInMethod(source), "")
 		return
 	}
 
@@ -306,6 +314,7 @@ func SignInPost(ctx *context.Context) {
 		// User will need to use 2FA TOTP or WebAuthn, save data
 		"twofaUid":      u.ID,
 		"twofaRemember": form.Remember,
+		"twofaMethod":   signInMethod(source),
 	}
 	if hasTOTPtwofa {
 		// User will need to use WebAuthn, save data
@@ -326,16 +335,64 @@ func SignInPost(ctx *context.Context) {
 	ctx.Redirect(setting.AppSubURL + "/user/two_factor")
 }
 
-// This handles the final part of the sign-in process of the user.
-func handleSignIn(ctx *context.Context, u *user_model.User, remember bool) {
-	redirect := handleSignInFull(ctx, u, remember, true)
+// signInMethod names a password sign-in for the audit log by its login source: "password" for a local account,
+// else the source type and ID, e.g. "ldap:3".
+func signInMethod(source *auth.Source) string {
+	if source == nil || source.ID == 0 {
+		return "password"
+	}
+	typ := "password"
+	switch source.Type {
+	case auth.LDAP, auth.DLDAP:
+		typ = "ldap"
+	case auth.SMTP:
+		typ = "smtp"
+	case auth.PAM:
+		typ = "pam"
+	case auth.OAuth2:
+		typ = "oauth2"
+	}
+	return typ + ":" + strconv.FormatInt(source.ID, 10)
+}
+
+// firstFactor is the method that started a two-factor sign-in. The server sets it with twofaUid; it is never read
+// from the request.
+func firstFactor(ctx *context.Context) string {
+	if m, ok := ctx.Session.Get("twofaMethod").(string); ok && m != "" {
+		return m
+	}
+	return "password"
+}
+
+// recordSignInError records a failed password check: the user when the error names one, never a typed name.
+func recordSignInError(ctx *context.Context, err error) {
+	var badPassword source_db.ErrUserPasswordInvalid
+	var noPassword source_db.ErrUserPasswordNotSet
+	var prohibited user_model.ErrUserProhibitLogin
+	switch {
+	case errors.As(err, &badPassword):
+		auth_service.RecordSignInFailure(ctx, badPassword.UID, "bad_password")
+	case errors.As(err, &noPassword):
+		auth_service.RecordSignInFailure(ctx, noPassword.UID, "bad_password")
+	case errors.As(err, &prohibited):
+		auth_service.RecordSignInFailure(ctx, prohibited.UID, "prohibited")
+	case errors.Is(err, util.ErrNotExist):
+		auth_service.RecordSignInFailure(ctx, 0, "unknown_user")
+	default:
+		auth_service.RecordSignInFailure(ctx, 0, "bad_password")
+	}
+}
+
+// This handles the final part of the sign-in process of the user. method and reason are recorded in the audit log.
+func handleSignIn(ctx *context.Context, u *user_model.User, remember bool, method, reason string) {
+	redirect := handleSignInFull(ctx, u, remember, true, method, reason)
 	if ctx.Written() {
 		return
 	}
 	ctx.Redirect(redirect)
 }
 
-func handleSignInFull(ctx *context.Context, u *user_model.User, remember, obeyRedirect bool) string {
+func handleSignInFull(ctx *context.Context, u *user_model.User, remember, obeyRedirect bool, method, reason string) string {
 	if remember {
 		var err error
 		if ssoLTA, _ := ctx.Session.Get("twofaSSOLTA").(bool); ssoLTA {
@@ -366,6 +423,8 @@ func handleSignInFull(ctx *context.Context, u *user_model.User, remember, obeyRe
 		"twofaSSOLTA",
 		"twofaSSOLTASourceID",
 		"twofaOpenID",
+		"twofaMethod",
+		"signinRememberSSO",
 		"linkAccount",
 	}, map[string]any{
 		"uid": u.ID,
@@ -373,6 +432,7 @@ func handleSignInFull(ctx *context.Context, u *user_model.User, remember, obeyRe
 		ctx.ServerError("RegenerateSession", err)
 		return setting.AppSubURL + "/"
 	}
+	auth_service.RecordSignIn(ctx, u, method, reason)
 
 	// Language setting of the user overwrites the one previously set
 	// If the user does not have a locale set, we save the current one.
@@ -566,7 +626,7 @@ func SignUpPost(ctx *context.Context) {
 	}
 
 	ctx.Flash.Success(ctx.Tr("auth.sign_up_successful"))
-	handleSignIn(ctx, u, false)
+	handleSignIn(ctx, u, false, "signup", "")
 }
 
 // createAndHandleCreatedUser calls createUserInContext and
@@ -598,7 +658,7 @@ func createUserInContext(ctx *context.Context, tpl base.TplName, form any, u *us
 				}
 
 				// TODO: probably we should respect 'remember' user's choice...
-				linkAccount(ctx, user, *gothUser, true)
+				linkAccount(ctx, user, *gothUser, true, "oauth2:"+strconv.FormatInt(u.LoginSource, 10))
 				return false // user is already created here, all redirects are handled
 			case setting.OAuth2AccountLinkingLogin:
 				showLinkingLogin(ctx, *gothUser)
@@ -837,6 +897,7 @@ func ActivatePost(ctx *context.Context) {
 			return
 		}
 		if !user.ValidatePassword(ctx, password) {
+			auth_service.RecordSignInFailure(ctx, user.ID, "bad_activation_password")
 			ctx.Data["IsPasswordInvalid"] = true
 			ctx.HTML(http.StatusOK, TplActivate)
 			return
@@ -852,20 +913,13 @@ func ActivatePost(ctx *context.Context) {
 }
 
 func handleAccountActivation(ctx *context.Context, user *user_model.User) {
-	user.IsActive = true
-	user.Rands = user_model.GetUserSalt()
-	if err := user_model.UpdateUserCols(ctx, user, "is_active", "rands"); err != nil {
+	if err := user_service.ActivateAccount(ctx, user); err != nil {
 		if user_model.IsErrUserNotExist(err) {
-			ctx.NotFound("UpdateUserCols", err)
+			ctx.NotFound("ActivateAccount", err)
 		} else {
-			ctx.ServerError("UpdateUser", err)
+			log.Error("Unable to activate user: %-v with email: %s: %v", user, user.Email, err)
+			ctx.ServerError("ActivateAccount", err)
 		}
-		return
-	}
-
-	if err := user_model.ActivateUserEmail(ctx, user.ID, user.Email, true); err != nil {
-		log.Error("Unable to activate email for user: %-v with email: %s: %v", user, user.Email, err)
-		ctx.ServerError("ActivateUserEmail", err)
 		return
 	}
 
@@ -878,6 +932,7 @@ func handleAccountActivation(ctx *context.Context, user *user_model.User) {
 		ctx.ServerError("ActivateUserEmail", err)
 		return
 	}
+	auth_service.RecordSignIn(ctx, user, "activation", "activation_code")
 
 	if err := resetLocale(ctx, user); err != nil {
 		ctx.ServerError("resetLocale", err)

@@ -133,6 +133,7 @@ func signInOpenIDVerify(ctx *context.Context) {
 
 	id, err := openid.Verify(fullURL)
 	if err != nil {
+		auth.RecordSignInFailure(ctx, 0, "openid_failed")
 		ctx.RenderWithErr(err.Error(), tplSignInOpenID, &forms.SignInOpenIDForm{
 			Openid: id,
 		})
@@ -158,7 +159,7 @@ func signInOpenIDVerify(ctx *context.Context) {
 		log.Trace("User exists, logging in")
 		remember, _ := ctx.Session.Get("openid_signin_remember").(bool)
 		log.Trace("Session stored openid-remember: %t", remember)
-		handleSignIn(ctx, u, remember)
+		handleSignIn(ctx, u, remember, "openid", "")
 		return
 	}
 
@@ -302,7 +303,7 @@ func ConnectOpenIDPost(ctx *context.Context) {
 		}
 
 		ctx.Flash.Success(ctx.Tr("settings.add_openid_success"))
-		handleSignIn(ctx, u, remember)
+		handleSignIn(ctx, u, remember, signInMethod(source)+"+link", "")
 		return
 	}
 
@@ -317,6 +318,7 @@ func ConnectOpenIDPost(ctx *context.Context) {
 		"twofaUid":      u.ID,
 		"twofaRemember": remember,
 		"twofaOpenID":   oid,
+		"twofaMethod":   signInMethod(source) + "+link",
 	}); err != nil {
 		ctx.ServerError("Unable to update session", err)
 		return
@@ -428,5 +430,5 @@ func RegisterOpenIDPost(ctx *context.Context) {
 
 	remember, _ := ctx.Session.Get("openid_signin_remember").(bool)
 	log.Trace("Session stored openid-remember: %t", remember)
-	handleSignIn(ctx, u, remember)
+	handleSignIn(ctx, u, remember, "openid+register", "")
 }

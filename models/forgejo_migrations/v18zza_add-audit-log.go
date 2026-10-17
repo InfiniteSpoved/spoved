@@ -4,8 +4,6 @@
 package forgejo_migrations
 
 import (
-	"strings"
-
 	"code.forgejo.org/xorm/xorm"
 )
 
@@ -59,13 +57,7 @@ type v18zzaAuditChainHead struct {
 func (v18zzaAuditChainHead) TableName() string { return "audit_chain_head" }
 
 func addAuditLog(x *xorm.Engine) error {
-	if err := x.Sync(new(v18zzaAuditEvent), new(v18zzaAuditChainHead)); err != nil {
-		return err
-	}
-	if has, err := x.Exist(new(v18zzaAuditChainHead)); err != nil || has {
-		return err
-	}
-	zero := strings.Repeat("0", 64)
-	_, err := x.Insert(&v18zzaAuditChainHead{ID: 1, Hash: zero, AnchorPrevHash: zero})
-	return err
+	// the head row is not inserted here: a fresh install records this migration without running it, so
+	// audit_model.EnsureHead creates it
+	return x.Sync(new(v18zzaAuditEvent), new(v18zzaAuditChainHead))
 }

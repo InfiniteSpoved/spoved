@@ -3,15 +3,22 @@
 
 package audit
 
-import "context"
+import (
+	"context"
+	"strconv"
+	"strings"
+)
 
 const (
-	ActorUser      = "user"
-	ActorAnonymous = "anonymous"
-	ActorActions   = "actions"
-	ActorSystem    = "system"
-	ActorCLI       = "cli"
-	ActorUnknown   = "unknown"
+	ActorUser        = "user"
+	ActorAnonymous   = "anonymous"
+	ActorDeployKey   = "deploy_key"
+	ActorActions     = "actions"
+	ActorRunner      = "runner" // an Actions runner, by its own secret
+	ActorSystem      = "system"
+	ActorLoginSource = "login_source" // a login source syncing users, groups or keys
+	ActorCLI         = "cli"
+	ActorUnknown     = "unknown"
 )
 
 // Credential types.
@@ -22,6 +29,12 @@ const (
 	CredentialOAuth2Grant           = "oauth2_grant"
 	CredentialAuthorizedIntegration = "authorized_integration"
 	CredentialSSHKey                = "ssh_key"
+	CredentialDeployKey             = "deploy_key"
+	CredentialOrgDeployKey          = "org_deploy_key"
+	CredentialProjectDeployKey      = "project_deploy_key"
+	CredentialOAuth2App             = "oauth2_app" // only as the target of an expired client secret
+	CredentialRunner                = "runner"
+	CredentialRunnerToken           = "runner_token" // a registration token, by its row: the token itself is never recorded
 	CredentialActionsTask           = "actions_task"
 	CredentialReverseProxy          = "reverse_proxy"
 	CredentialChefKey               = "chef_key"
@@ -59,12 +72,44 @@ type Actor struct {
 	IPCandidates []string
 	UserAgent    string
 	RequestID    string
-	Task         string // a cron task a user started, recorded as data.task
+	Task         string // a cron task a user started, or the account a command line import runs as; recorded as data.task
 }
 
-// SetSudo makes the user acted as the actor and keeps the admin in SudoByID.
+// SetSudo makes the user acted as the actor and keeps the admin in SudoByID; sudo to oneself records no sudoer.
 func (a *Actor) SetSudo(id int64, name string) {
-	a.SudoByID, a.ID, a.Name = a.ID, id, name
+	if id != a.ID {
+		a.SudoByID = a.ID
+	}
+	a.ID, a.Name = id, name
+}
+
+// CredentialClaim is the "type:id" a JWT carries for the credential that minted it, "" for one that must not be
+// carried (unknown, session, system, cli, reverse proxy).
+func CredentialClaim(c Credential) string {
+	if !claimTypes[c.Type] {
+		return ""
+	}
+	return c.Type + ":" + strconv.FormatInt(c.ID, 10)
+}
+
+var claimTypes = map[string]bool{
+	CredentialAccessToken: true, CredentialOAuth2Grant: true, CredentialAuthorizedIntegration: true, CredentialSSHKey: true,
+	CredentialDeployKey: true, CredentialOrgDeployKey: true, CredentialProjectDeployKey: true, CredentialPassword: true,
+	CredentialActionsTask: true,
+}
+
+// CredentialFromClaim reads CredentialClaim back. The claim is server-signed, so it needs no lookup; anything but an
+// allowed type with a positive ID (password: ID 0) is unknown.
+func CredentialFromClaim(s string, ownerID int64) Credential {
+	typ, idText, ok := strings.Cut(s, ":")
+	id, err := strconv.ParseInt(idText, 10, 64)
+	if !ok || err != nil || !claimTypes[typ] || (id <= 0 && typ != CredentialPassword) {
+		return Credential{Type: CredentialUnknown, OwnerID: ownerID}
+	}
+	if typ == CredentialPassword {
+		id = 0
+	}
+	return Credential{Type: typ, ID: id, OwnerID: ownerID}
 }
 
 type actorKey struct{}
@@ -93,4 +138,20 @@ func WithSystem(ctx context.Context, name string) context.Context {
 // WithCLI marks a command line change. The OS user name is not recorded: it would be client input.
 func WithCLI(ctx context.Context) context.Context {
 	return WithActor(ctx, &Actor{Type: ActorCLI, Credential: Credential{Type: CredentialCLI}})
+}
+
+// WithLoginSource makes the login source id the actor of what ctx does, keeping the IP, user agent and request ID of
+// the actor it replaces (a sign-in or a cron run). It never changes that actor.
+func WithLoginSource(ctx context.Context, id int64, name string) context.Context {
+	outer := ActorFromContext(ctx)
+	if outer != nil && outer.Type == ActorLoginSource && outer.ID == id {
+		return ctx
+	}
+	a := &Actor{}
+	if outer != nil {
+		*a = *outer
+		a.SudoByID = 0
+	}
+	a.Type, a.ID, a.Name, a.Credential = ActorLoginSource, id, name, Credential{Type: CredentialSystem}
+	return WithActor(ctx, a)
 }

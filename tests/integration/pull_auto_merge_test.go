@@ -632,7 +632,7 @@ func TestPullAutoMergePermissionLoss(t *testing.T) {
 		}
 		newScheduler := func(t *testing.T) *user_model.User {
 			scheduler := forgery.CreateUser(t, nil)
-			require.NoError(t, repo_module.AddCollaborator(t.Context(), repo, scheduler))
+			require.NoError(t, repo_module.AddCollaborator(t.Context(), repo, scheduler, perm.AccessModeWrite))
 			return scheduler
 		}
 		schedule := func(t *testing.T, scheduler *user_model.User, pr *issues_model.PullRequest, at bool) {

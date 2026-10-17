@@ -73,6 +73,7 @@ func updateHeadByRebaseOnToBase(ctx context.Context, pr *issues_model.PullReques
 
 	if err := pushCmd.Run(&git.RunOpts{
 		Env: repo_module.FullPushingEnvironment(
+			ctx,
 			headUser,
 			doer,
 			pr.HeadRepo,

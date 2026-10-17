@@ -102,11 +102,16 @@ func UpdateOrgProtectBranch(ctx context.Context, orgID, groupID int64, protectBr
 				return err
 			}
 		}
+		var before map[string]any
 		if protectBranch.ID == 0 {
 			if _, err := db.GetEngine(ctx).Insert(protectBranch); err != nil {
 				return fmt.Errorf("Insert: %w", err)
 			}
 		} else {
+			var err error
+			if before, err = storedBranchRule(ctx, protectBranch.ID); err != nil {
+				return err
+			}
 			cond := ruleScopeCond(orgID, groupID)
 			cond["id"] = protectBranch.ID
 			if n, err := db.GetEngine(ctx).Where(cond).AllCols().Update(protectBranch); err != nil {
@@ -125,15 +130,17 @@ func UpdateOrgProtectBranch(ctx context.Context, orgID, groupID int64, protectBr
 			}
 		}
 
-		if opts.ApprovalRules == nil {
-			return nil
-		}
-		return setApprovalRules(ctx, protectBranch.ID, opts.ApprovalRules, func(r *ApprovalRule) error {
-			if err := checkOrgMembers(ctx, orgID, r.UserIDs); err != nil {
+		if opts.ApprovalRules != nil {
+			if err := setApprovalRules(ctx, protectBranch.ID, opts.ApprovalRules, func(r *ApprovalRule) error {
+				if err := checkOrgMembers(ctx, orgID, r.UserIDs); err != nil {
+					return err
+				}
+				return checkOrgOwns(ctx, "team", "org_id", orgID, r.TeamIDs)
+			}); err != nil {
 				return err
 			}
-			return checkOrgOwns(ctx, "team", "org_id", orgID, r.TeamIDs)
-		})
+		}
+		return recordBranchRule(ctx, nil, protectBranch, before)
 	})
 }
 
@@ -169,6 +176,14 @@ func DeleteOrgProtectedBranch(ctx context.Context, orgID, groupID, id int64) err
 	return db.WithTx(ctx, func(ctx context.Context) error {
 		cond := ruleScopeCond(orgID, groupID)
 		cond["id"] = id
+		rule := new(ProtectedBranch)
+		if has, err := db.GetEngine(ctx).Where(cond).Get(rule); err != nil {
+			return err
+		} else if has {
+			if err := recordBranchRuleEvent(ctx, "repo.branch_protection.deleted", "org.branch_protection.deleted", nil, rule, map[string]any{"rule_name": rule.RuleName}); err != nil {
+				return err
+			}
+		}
 		if n, err := db.GetEngine(ctx).Where(cond).Delete(new(ProtectedBranch)); err != nil {
 			return err
 		} else if n != 1 {

@@ -440,6 +440,13 @@ func CreateOrganization(ctx context.Context, org *Organization, owner *user_mode
 		return fmt.Errorf("insert team-user relation: %w", err)
 	}
 
+	// the creator's membership of the Owners team is part of this entry
+	if err := user_model.RecordOrg(ctx, "org.organization.created", org.AsUser(), map[string]any{
+		"name": org.Name, "visibility": int(org.Visibility), "user_id": owner.ID,
+	}); err != nil {
+		return err
+	}
+
 	return committer.Commit()
 }
 

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
@@ -121,7 +122,7 @@ func TestPushMirrorBranchFilter(t *testing.T) {
 		unittest.AssertSuccessfulInsert(t, m)
 
 		m.BranchFilter = "main,develop"
-		require.NoError(t, repo_model.UpdatePushMirrorBranchFilter(db.DefaultContext, m))
+		require.NoError(t, repo_model.UpdatePushMirrorSettings(db.DefaultContext, m, "branch_filter"))
 
 		updated := unittest.AssertExistsAndLoadBean(t, &repo_model.PushMirror{ID: m.ID})
 		assert.Equal(t, "main,develop", updated.BranchFilter)
@@ -210,4 +211,18 @@ func TestPushMirrorBranchFilter(t *testing.T) {
 		assert.Equal(t, "main,develop", filterMap["sync-mirror-1"])
 		assert.Equal(t, "feature-*", filterMap["sync-mirror-2"])
 	})
+}
+
+func TestDeletePushMirrorsTrashedRepo(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := audit_model.WithSystem(db.DefaultContext, "test")
+	m := &repo_model.PushMirror{RepoID: 1, RemoteName: "trashed"}
+	unittest.AssertSuccessfulInsert(t, m)
+	_, err := db.GetEngine(ctx).Exec("UPDATE repository SET trashed_unix = 1 WHERE id = 1")
+	require.NoError(t, err)
+
+	require.NoError(t, repo_model.DeletePushMirrors(ctx, repo_model.PushMirrorOptions{RepoID: 1}))
+	entries, err := audit_model.FindEntries(ctx, &audit_model.SearchOptions{RepoID: 1, Action: "repo.push_mirror.deleted"}, 10)
+	require.NoError(t, err)
+	assert.Len(t, entries, 1)
 }

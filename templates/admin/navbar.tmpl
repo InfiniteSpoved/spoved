@@ -1,6 +1,9 @@
 <div class="flex-container-nav">
 	<div class="ui fluid vertical menu">
 		<div class="header item">{{ctx.Locale.Tr "admin.settings"}}</div>
+		{{if not .IsAdmin}}{{/* an auditor sees only the audit log */}}
+		<a class="active item" href="{{AppSubUrl}}/admin/audit">{{ctx.Locale.Tr "admin.audit.title"}}</a>
+		{{else}}
 		<a class="{{if .PageIsAdminDashboard}}active {{end}}item" href="{{AppSubUrl}}/admin">
 			{{ctx.Locale.Tr "admin.dashboard"}}
 		</a>
@@ -142,9 +145,12 @@
 			{{ctx.Locale.Tr "admin.webhook_types"}}
 		</a>
 		{{end}}
-		<details class="item toggleable-item" {{if .PageIsAdminIPAllowlist}}open{{end}}>
+		<details class="item toggleable-item" {{if or .PageIsAdminIPAllowlist .PageIsAdminAudit}}open{{end}}>
 			<summary>{{ctx.Locale.Tr "admin.security"}}</summary>
 			<div class="menu">
+				<a class="{{if .PageIsAdminAudit}}active {{end}}item" href="{{AppSubUrl}}/admin/audit">
+					{{ctx.Locale.Tr "admin.audit.title"}}
+				</a>
 				<a class="{{if .PageIsAdminIPAllowlist}}active {{end}}item" href="{{AppSubUrl}}/admin/ip-allowlist">
 					{{ctx.Locale.Tr "admin.ip_allowlist"}}
 				</a>
@@ -177,6 +183,7 @@
 		<a class="{{if .PageIsAdminModerationReports}}active {{end}}item" href="{{AppSubUrl}}/admin/moderation/reports">
 			{{ctx.Locale.Tr "admin.moderation.moderation_reports"}}
 		</a>
+		{{end}}
 		{{end}}
 	</div>
 </div>

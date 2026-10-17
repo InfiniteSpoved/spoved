@@ -95,6 +95,32 @@ func TestLogShippingLoggers(t *testing.T) {
 	assert.Equal(t, []string{"router", "ssh"}, d.Loggers())
 	assert.True(t, d.HasLogType("git"))
 	assert.False(t, d.HasLogType("access"))
+
+	// "all" never selects audit (IPs and user agents): it must be named
+	d.LogTypes = []string{"all"}
+	assert.False(t, d.HasLogType("audit"))
+	assert.False(t, d.StreamsAudit())
+	d.LogTypes = []string{"all", "audit"}
+	assert.Equal(t, []string{"access", "audit", "default", "router", "ssh"}, d.Loggers())
+	assert.True(t, d.StreamsAudit())
+	d.Enabled = false
+	assert.False(t, d.StreamsAudit())
+	assert.Contains(t, LogShippingLogTypes(), "audit")
+}
+
+func TestLogShippingLoki(t *testing.T) {
+	loki := func(f func(d *LogShippingDestination)) LogShippingDestination {
+		d := validDestination()
+		d.Type, d.Endpoint, d.KeyEnc, d.LogTypes = LogShippingLoki, "https://loki.example.org/loki/api/v1/push", "", []string{"audit"}
+		f(&d)
+		return d
+	}
+	require.NoError(t, loki(func(d *LogShippingDestination) {
+		d.Headers = []LogShippingHeader{{Name: "Authorization", ValueEnc: "v"}}
+	}).Validate())
+	require.Error(t, loki(func(d *LogShippingDestination) { d.KeyEnc = "x" }).Validate(), "a key would be silently unused")
+	require.Error(t, loki(func(d *LogShippingDestination) { d.NDJSON = true }).Validate())
+	require.Error(t, loki(func(d *LogShippingDestination) { d.Endpoint = "https://u:p@loki.example.org/x" }).Validate())
 }
 
 func TestLogShippingDestinationStringHidesSecrets(t *testing.T) {

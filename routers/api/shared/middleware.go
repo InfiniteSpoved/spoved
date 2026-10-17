@@ -80,10 +80,18 @@ func apiAuthentication(authMethod auth.Method) func(*context.APIContext) {
 		case *auth.AuthenticationNotAttempted:
 			ar = &auth.UnauthenticatedResult{}
 		case *auth.AuthenticationAttemptedIncorrectCredential:
+			common.RecordAuthFailure(ctx.Base, v)
 			if common.WriteIfRateLimited(ctx.Base, v.Error, true) {
 				return
 			}
-			ctx.Error(http.StatusUnauthorized, "APIAuth", v.Error)
+			// Only a refusal after the credential was proven tells why; anything else could tell an unauthenticated
+			// caller what exists or what a check expects.
+			log.Info("API authentication failed: %s", common.AuthFailureReason(v.Error))
+			message := "invalid credentials"
+			if owner, ok := errors.AsType[*auth.CredentialOwnerError](v.Error); ok {
+				message = owner.Error()
+			}
+			ctx.Error(http.StatusUnauthorized, "APIAuth", message)
 			return
 		case *auth.AuthenticationError:
 			ctx.ServerError("authentication error", v.Error)

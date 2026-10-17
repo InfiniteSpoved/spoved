@@ -1909,8 +1909,8 @@ func DeleteActionArtifact(ctx *context.APIContext) {
 		return
 	}
 
-	if err := actions_model.SetArtifactNeedDelete(ctx, meta.RunID, meta.ArtifactName); err != nil {
-		ctx.Error(http.StatusInternalServerError, "SetArtifactNeedDelete", err)
+	if err := actions_model.DeleteArtifactOfRun(ctx, ctx.Repo().Repository, meta.RunID, meta.ArtifactName); err != nil {
+		ctx.Error(http.StatusInternalServerError, "DeleteArtifactOfRun", err)
 		return
 	}
 

@@ -142,6 +142,16 @@ func CreateRepositoryByExample(ctx context.Context, doer, u *user_model.User, re
 	if err = db.Insert(ctx, units); err != nil {
 		return err
 	}
+	hooks, err := webhook.CopyDefaultWebhooksToRepo(ctx, repo.ID)
+	if err != nil {
+		return fmt.Errorf("CopyDefaultWebhooksToRepo: %w", err)
+	}
+	if err = repo_model.RecordRepo(ctx, "repo.repository.created", repo, map[string]any{
+		"is_private": repo.IsPrivate, "is_template": repo.IsTemplate, "is_mirror": repo.IsMirror, "fork_id": repo.ForkID,
+		"template_id": repo.TemplateID, "counts": map[string]any{"webhooks": hooks},
+	}); err != nil {
+		return err
+	}
 
 	// Remember visibility preference.
 	u.LastRepoVisibility = repo.IsPrivate
@@ -176,11 +186,8 @@ func CreateRepositoryByExample(ctx context.Context, doer, u *user_model.User, re
 			return fmt.Errorf("IsUserRepoAdmin: %w", err)
 		} else if !isAdmin {
 			// Make creator repo admin if it wasn't assigned automatically
-			if err = AddCollaborator(ctx, repo, doer); err != nil {
+			if err = AddCollaborator(ctx, repo, doer, perm.AccessModeAdmin); err != nil {
 				return fmt.Errorf("AddCollaborator: %w", err)
-			}
-			if err = ChangeCollaborationAccessMode(ctx, repo, doer.ID, perm.AccessModeAdmin); err != nil {
-				return fmt.Errorf("ChangeCollaborationAccessModeCtx: %w", err)
 			}
 		}
 	} else if err = access_model.RecalculateAccesses(ctx, repo); err != nil {
@@ -192,10 +199,6 @@ func CreateRepositoryByExample(ctx context.Context, doer, u *user_model.User, re
 		if err = repo_model.WatchIfAutoWatchNewRepos(ctx, doer.ID, repo.ID); err != nil {
 			return fmt.Errorf("WatchRepo: %w", err)
 		}
-	}
-
-	if err = webhook.CopyDefaultWebhooksToRepo(ctx, repo.ID); err != nil {
-		return fmt.Errorf("CopyDefaultWebhooksToRepo: %w", err)
 	}
 
 	return nil
@@ -290,6 +293,9 @@ func UpdateRepository(ctx context.Context, repo *repo_model.Repository, visibili
 		return err
 	}
 
+	if err = repo_model.RecordRepoChange(ctx, repo); err != nil {
+		return err
+	}
 	if _, err = e.ID(repo.ID).AllCols().Omit("is_archived", "archived_unix", "archived_by_org").Update(repo); err != nil {
 		return fmt.Errorf("update: %w", err)
 	}
@@ -299,60 +305,67 @@ func UpdateRepository(ctx context.Context, repo *repo_model.Repository, visibili
 	}
 
 	if visibilityChanged {
-		if err = repo.LoadOwner(ctx); err != nil {
-			return fmt.Errorf("LoadOwner: %w", err)
-		}
-		if repo.Owner.IsOrganization() {
-			// Organization repository need to recalculate access table when visibility is changed.
-			if err = access_model.RecalculateTeamAccesses(ctx, repo, 0); err != nil {
-				return fmt.Errorf("recalculateTeamAccesses: %w", err)
-			}
-		}
+		return ApplyVisibilityChange(ctx, repo)
+	}
+	return nil
+}
 
-		// If repo has become private, we need to set its actions to private.
-		if repo.IsPrivate {
-			_, err = e.Where("repo_id = ?", repo.ID).Cols("is_private").Update(&activities_model.Action{
-				IsPrivate: true,
-			})
-			if err != nil {
-				return err
-			}
-
-			if err = repo_model.ClearRepoStars(ctx, repo.ID); err != nil {
-				return err
-			}
+// ApplyVisibilityChange updates what follows the visibility of repo, which was just changed: access, the privacy of
+// its actions, stars, the git-daemon export, its forks and the issue indexer.
+func ApplyVisibilityChange(ctx context.Context, repo *repo_model.Repository) (err error) {
+	e := db.GetEngine(ctx)
+	if err = repo.LoadOwner(ctx); err != nil {
+		return fmt.Errorf("LoadOwner: %w", err)
+	}
+	if repo.Owner.IsOrganization() {
+		// Organization repository need to recalculate access table when visibility is changed.
+		if err = access_model.RecalculateTeamAccesses(ctx, repo, 0); err != nil {
+			return fmt.Errorf("recalculateTeamAccesses: %w", err)
 		}
+	}
 
-		// Create/Remove git-daemon-export-ok for git-daemon...
-		if err := CheckDaemonExportOK(ctx, repo); err != nil {
+	// If repo has become private, we need to set its actions to private.
+	if repo.IsPrivate {
+		_, err = e.Where("repo_id = ?", repo.ID).Cols("is_private").Update(&activities_model.Action{
+			IsPrivate: true,
+		})
+		if err != nil {
 			return err
 		}
 
-		forkRepos, err := repo_model.GetRepositoriesByForkID(ctx, repo.ID)
-		if err != nil {
-			return fmt.Errorf("getRepositoriesByForkID: %w", err)
+		if err = repo_model.ClearRepoStars(ctx, repo.ID); err != nil {
+			return err
 		}
-		private := repo.IsPrivate || repo.Owner.Visibility == api.VisibleTypePrivate
-		for i := range forkRepos {
-			if !private && forkRepos[i].IsPrivate {
-				if err = forkRepos[i].LoadOwner(ctx); err != nil {
-					return err
-				}
-				// a personal fork stays private where the site policy refuses public personal repositories
-				if CheckPersonalRepoPolicy(ctx, nil, forkRepos[i].Owner, false) != nil {
-					continue
-				}
-			}
-			forkRepos[i].IsPrivate = private
-			if err = UpdateRepository(ctx, forkRepos[i], true); err != nil {
-				return fmt.Errorf("updateRepository[%d]: %w", forkRepos[i].ID, err)
-			}
-		}
-
-		// If visibility is changed, we need to update the issue indexer.
-		// Since the data in the issue indexer have field to indicate if the repo is public or not.
-		issue_indexer.UpdateRepoIndexer(ctx, repo.ID)
 	}
 
+	// Create/Remove git-daemon-export-ok for git-daemon...
+	if err := CheckDaemonExportOK(ctx, repo); err != nil {
+		return err
+	}
+
+	forkRepos, err := repo_model.GetRepositoriesByForkID(ctx, repo.ID)
+	if err != nil {
+		return fmt.Errorf("getRepositoriesByForkID: %w", err)
+	}
+	private := repo.IsPrivate || repo.Owner.Visibility == api.VisibleTypePrivate
+	for i := range forkRepos {
+		if !private && forkRepos[i].IsPrivate {
+			if err = forkRepos[i].LoadOwner(ctx); err != nil {
+				return err
+			}
+			// a personal fork stays private where the site policy refuses public personal repositories
+			if CheckPersonalRepoPolicy(ctx, nil, forkRepos[i].Owner, false) != nil {
+				continue
+			}
+		}
+		forkRepos[i].IsPrivate = private
+		if err = UpdateRepository(ctx, forkRepos[i], true); err != nil {
+			return fmt.Errorf("updateRepository[%d]: %w", forkRepos[i].ID, err)
+		}
+	}
+
+	// If visibility is changed, we need to update the issue indexer.
+	// Since the data in the issue indexer have field to indicate if the repo is public or not.
+	issue_indexer.UpdateRepoIndexer(ctx, repo.ID)
 	return nil
 }

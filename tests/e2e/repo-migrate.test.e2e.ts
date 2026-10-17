@@ -1,7 +1,11 @@
 // @watch start
 // web_src/js/features/repo-migrate.js
+// web_src/js/features/repo-template.js
+// templates/repo/migrate/**
+// templates/org/repo_group/home.tmpl
 // @watch end
 
+import {randomBytes} from 'node:crypto';
 import {expect} from '@playwright/test';
 import {test, test_context, dynamic_id, timeoutScale} from './utils_e2e.ts';
 import {screenshot} from './shared/screenshots.ts';
@@ -82,4 +86,28 @@ test('Migration Progress Page', async ({page, browser}) => {
   await expect(page).toHaveURL('/');
   // checked last to preserve the order of screenshots from first run
   await screenshot(unauthenticatedPage);
+});
+
+test('Migration into a project: picker follows the owner', async ({page}) => {
+  const name = `e2e-mig-${randomBytes(4).toString('hex')}`;
+  await page.goto('/org/org3/groups/new');
+  await page.getByLabel('Project name').fill(name);
+  await page.getByRole('button', {name: 'Create project'}).click();
+  await expect(page).toHaveURL(`/org3/${name}`);
+
+  // the project page links to the migration with the project preselected, and the service links keep it
+  await page.locator('.page-content').getByRole('link', {name: 'New migration', exact: true}).click();
+  await expect(page).toHaveURL(/\/repo\/migrate\?org=\d+&group=[1-9]\d*&mirror=1$/);
+  await page.locator('a.migrate-entry').first().click();
+  await expect(page.locator('#repo_group option:checked')).toHaveText(name);
+  await screenshot(page);
+
+  // another owner has no projects: the picker goes away and nothing is submitted for it
+  await page.locator('.owner.dropdown').click();
+  await page.locator('.owner.dropdown .menu .item[data-value="2"]').click();
+  await expect(page.locator('#repo_group_label')).toBeHidden();
+  await page.locator('.owner.dropdown').click();
+  await page.locator('.owner.dropdown .menu .item[data-value="3"]').click();
+  await expect(page.locator('#repo_group_label')).toBeVisible();
+  await expect(page.locator('#repo_group')).toHaveValue('0');
 });

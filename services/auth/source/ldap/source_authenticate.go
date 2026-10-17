@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	asymkey_model "forgejo.org/models/asymkey"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	auth_module "forgejo.org/modules/auth"
@@ -30,6 +31,8 @@ func (source *Source) Authenticate(ctx context.Context, user *user_model.User, u
 		// User not in LDAP, do nothing
 		return nil, user_model.ErrUserNotExist{Name: loginName}
 	}
+	// what follows syncs the account from the directory: the audit log records the login source as its actor
+	ctx = audit_model.WithLoginSource(ctx, source.authSource.ID, source.authSource.Name)
 	// Fallback.
 	if len(sr.Username) == 0 {
 		sr.Username = userName

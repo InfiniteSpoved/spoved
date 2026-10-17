@@ -537,17 +537,13 @@ func (p *bitbucketPlanner) planKeys(owner *BitbucketImportItem, endpoint string)
 	return nil
 }
 
-// addBitbucketCollaborator adds the user as a collaborator at the mode, unless they already are one. It is one
-// transaction, because AddCollaborator grants write before the mode is set.
+// addBitbucketCollaborator adds the user as a collaborator at the mode, unless they already are one.
 func addBitbucketCollaborator(ctx context.Context, repo *repo_model.Repository, u *user_model.User, mode perm.AccessMode) (existed bool, err error) {
 	err = db.WithTx(ctx, func(ctx context.Context) error {
 		if existed, err = repo_model.IsCollaborator(ctx, repo.ID, u.ID); err != nil || existed {
 			return err
 		}
-		if err := repo_module.AddCollaborator(ctx, repo, u); err != nil {
-			return err
-		}
-		return repo_module.ChangeCollaborationAccessMode(ctx, repo, u.ID, mode)
+		return repo_module.AddCollaborator(ctx, repo, u, mode)
 	})
 	return existed, err
 }
@@ -604,7 +600,10 @@ func applyBitbucketPermissions(ctx context.Context, doer *user_model.User, org *
 				if owner.Kind == "project" {
 					return repo_service.LinkTeamToRepoGroup(ctx, doer, org, team.ID, owner.group.ID)
 				}
-				return models.AddRepository(ctx, team, owner.repo)
+				if err := models.AddRepository(ctx, team, owner.repo); err != nil {
+					return err
+				}
+				return organization.RecordTeamRepo(ctx, "org.team.repo_added", team, owner.repo)
 			})
 			if err == nil {
 				item.team = team

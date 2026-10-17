@@ -340,6 +340,9 @@ func UserNameChanged(ctx context.Context, user *user_model.User, newName string)
 	return nil
 }
 
+// ErrPRTitleRefused is the error of a pull request whose title the title rules of the repository refuse.
+var ErrPRTitleRefused = errors.New("pull request title refused")
+
 // prTitleRefusal returns nil unless err is a title rule error. It turns it a title rule error into the text the git client prints. The message is user text:
 // control characters (ESC, newlines) are dropped so it can't move the cursor or fake output.
 func prTitleRefusal(err error) error {
@@ -351,7 +354,7 @@ func prTitleRefusal(err error) error {
 	if ruleErr.Invalid {
 		message = "the title rule of this repository is invalid, a repository administrator must fix it"
 	}
-	return fmt.Errorf("pull request title refused: %s", strings.Map(func(r rune) rune {
+	return fmt.Errorf("%w: %s", ErrPRTitleRefused, strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
 			return ' '
 		}

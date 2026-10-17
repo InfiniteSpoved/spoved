@@ -16,10 +16,11 @@ import (
 const (
 	LogShippingNewRelic = "newrelic"
 	LogShippingHTTP     = "http"
+	LogShippingLoki     = "loki"
 )
 
 // logShippingLoggers maps a log type to the logger it listens on.
-var logShippingLoggers = map[string]string{"application": "default", "access": "access", "router": "router", "git": "ssh"}
+var logShippingLoggers = map[string]string{"application": "default", "access": "access", "router": "router", "git": "ssh", "audit": "audit"}
 
 var (
 	logShippingNameRe   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
@@ -65,13 +66,17 @@ type LogShippingState struct {
 
 // LogShippingLogTypes returns the log types a destination can select.
 func LogShippingLogTypes() []string {
-	return []string{"application", "access", "router", "git"}
+	return []string{"application", "access", "router", "git", "audit"}
 }
 
-// HasLogType reports whether the destination selects the log type ("all" selects every one).
+// HasLogType reports whether the destination selects the log type ("all" selects every one but audit, whose events
+// carry IP addresses and user agents and must be named).
 func (d LogShippingDestination) HasLogType(t string) bool {
-	return slices.Contains(d.LogTypes, t) || slices.Contains(d.LogTypes, "all")
+	return slices.Contains(d.LogTypes, t) || (t != "audit" && slices.Contains(d.LogTypes, "all"))
 }
+
+// StreamsAudit reports whether the destination is enabled and selects the audit log.
+func (d LogShippingDestination) StreamsAudit() bool { return d.Enabled && d.HasLogType("audit") }
 
 // Loggers returns the sorted, distinct loggers the destination listens on.
 func (d LogShippingDestination) Loggers() []string {
@@ -103,6 +108,10 @@ func (d LogShippingDestination) Validate() error {
 			return errors.New("custom headers and NDJSON are for HTTP destinations only")
 		}
 	case LogShippingHTTP:
+	case LogShippingLoki:
+		if d.KeyEnc != "" || d.NDJSON { // auth is a custom header; a key would be silently unused
+			return errors.New("a key and NDJSON are not used by Loki")
+		}
 	default:
 		return errors.New("unknown destination type")
 	}

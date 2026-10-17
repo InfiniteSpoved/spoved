@@ -1,13 +1,13 @@
 <h4 class="ui top attached header">
 	{{ctx.Locale.Tr "settings.manage_access_token"}}
 	<div class="ui right">
-		<a class="ui primary tiny button" href="{{AppSubUrl}}/user/settings/keys/tokens/new">{{ctx.Locale.Tr "settings.new_access_token"}}</a>
+		<a class="ui primary tiny button" href="{{$.AccessTokensLink}}/new">{{ctx.Locale.Tr "settings.new_access_token"}}</a>
 	</div>
 </h4>
 <div class="ui attached segment">
 	<div class="flex-list">
 		<div class="flex-item">
-			{{ctx.Locale.Tr "settings.tokens_desc"}}
+			{{if $.TokensForOtherUser}}{{ctx.Locale.Tr "admin.users.tokens_desc"}}{{else}}{{ctx.Locale.Tr "settings.tokens_desc"}}{{end}}
 		</div>
 		{{range .TokensWithResources}}
 			<div class="flex-item">
@@ -48,11 +48,11 @@
 					</div>
 				</div>
 				<div class="flex-item-trailing">
-						<button class="ui primary tiny button delete-button" data-modal-id="regenerate-token" data-url="{{$.Link}}/tokens/regenerate" data-id="{{.Token.ID}}">
+						<button class="ui primary tiny button delete-button" data-modal-id="regenerate-token" data-url="{{$.AccessTokensLink}}/regenerate" data-id="{{.Token.ID}}">
 							{{svg "octicon-issue-reopened" 16 "tw-mr-1"}}
 							{{ctx.Locale.Tr "settings.regenerate_token"}}
 						</button>
-						<button class="ui red tiny button delete-button" data-modal-id="delete-token" data-url="{{$.Link}}/tokens/delete" data-id="{{.Token.ID}}">
+						<button class="ui red tiny button delete-button" data-modal-id="delete-token" data-url="{{$.AccessTokensLink}}/delete" data-id="{{.Token.ID}}">
 							{{svg "octicon-trash" 16 "tw-mr-1"}}
 							{{ctx.Locale.Tr "settings.delete_token"}}
 						</button>
@@ -68,7 +68,7 @@
 		{{ctx.Locale.Tr "settings.access_token_regeneration"}}
 	</div>
 	<div class="content">
-		<p>{{ctx.Locale.Tr "settings.access_token_regeneration_desc"}}</p>
+		<p>{{if $.TokensForOtherUser}}{{ctx.Locale.Tr "admin.users.access_token_regeneration_desc"}}{{else}}{{ctx.Locale.Tr "settings.access_token_regeneration_desc"}}{{end}}</p>
 	</div>
 	{{template "base/modal_actions_confirm" (dict "ModalButtonColors" "primary")}}
 </div>
@@ -79,7 +79,7 @@
 		{{ctx.Locale.Tr "settings.access_token_deletion"}}
 	</div>
 	<div class="content">
-		<p>{{ctx.Locale.Tr "settings.access_token_deletion_desc"}}</p>
+		<p>{{if $.TokensForOtherUser}}{{ctx.Locale.Tr "admin.users.access_token_deletion_desc"}}{{else}}{{ctx.Locale.Tr "settings.access_token_deletion_desc"}}{{end}}</p>
 	</div>
 	{{template "base/modal_actions_confirm"}}
 </div>

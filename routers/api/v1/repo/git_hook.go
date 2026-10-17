@@ -11,6 +11,7 @@ import (
 	"forgejo.org/modules/web"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
+	repo_service "forgejo.org/services/repository"
 )
 
 // ListGitHooks list all Git hooks of a repository
@@ -137,9 +138,8 @@ func EditGitHook(ctx *context.APIContext) {
 		return
 	}
 
-	hook.Content = form.Content
-	if err = hook.Update(); err != nil {
-		ctx.Error(http.StatusInternalServerError, "hook.Update", err)
+	if err = repo_service.UpdateGitHook(ctx, ctx.Repo().Repository, hook, form.Content); err != nil {
+		ctx.Error(http.StatusInternalServerError, "UpdateGitHook", err)
 		return
 	}
 
@@ -186,9 +186,8 @@ func DeleteGitHook(ctx *context.APIContext) {
 		return
 	}
 
-	hook.Content = ""
-	if err = hook.Update(); err != nil {
-		ctx.Error(http.StatusInternalServerError, "hook.Update", err)
+	if err = repo_service.UpdateGitHook(ctx, ctx.Repo().Repository, hook, ""); err != nil {
+		ctx.Error(http.StatusInternalServerError, "UpdateGitHook", err)
 		return
 	}
 

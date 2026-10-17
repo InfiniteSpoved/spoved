@@ -438,7 +438,7 @@ func RunnerEditPost(ctx *context.Context) {
 	}
 
 	if !form.RegenerateToken {
-		err = actions_model.UpdateRunner(ctx, runner, "name", "description")
+		err = actions_model.EditRunner(ctx, runner, false)
 		if err != nil {
 			log.Warn("RunnerEditPost.UpdateRunner failed: %v, url: %s", err, ctx.Req.URL)
 			ctx.Flash.Warning(ctx.Tr("actions.runners.update_runner.failed"))
@@ -457,7 +457,7 @@ func RunnerEditPost(ctx *context.Context) {
 		return
 	}
 	runner.GenerateToken()
-	err = actions_model.UpdateRunner(ctx, runner, "name", "description", "token_hash", "token_salt")
+	err = actions_model.EditRunner(ctx, runner, true)
 	if err != nil {
 		log.Warn("RunnerEditPost.UpdateRunner failed: %v, url: %s", err, ctx.Req.URL)
 		ctx.Flash.Warning(ctx.Tr("actions.runners.update_runner.failed"))

@@ -4,6 +4,7 @@
 package permissions
 
 import (
+	"context"
 	"net/http"
 
 	actions_model "forgejo.org/models/actions"
@@ -58,6 +59,12 @@ func RepoAccess(ctx Context) {
 	}
 
 	if !ctx.Permission().HasAccess() {
+		// the request's audit actor lives in the API context itself, not in Context()
+		auditCtx := ctx.Context()
+		if c, ok := ctx.(context.Context); ok {
+			auditCtx = c
+		}
+		auth.RecordTwoFactorBlockedMember(auditCtx, ctx.Doer(), ctx.Repository().Owner)
 		ctx.NotFound()
 		return
 	}

@@ -40,9 +40,8 @@ func RegenerateScratchTwoFactor(ctx *context.Context) {
 		return
 	}
 
-	token := t.GenerateScratchToken()
-
-	if err = auth.UpdateTwoFactor(ctx, t); err != nil {
+	token, err := auth.RegenerateScratchToken(ctx, t)
+	if err != nil {
 		ctx.ServerError("SettingsTwoFactor: Failed to UpdateTwoFactor", err)
 		return
 	}

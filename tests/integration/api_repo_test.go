@@ -60,7 +60,7 @@ func TestAPIUserReposWithWrongToken(t *testing.T) {
 		AddTokenAuth(wrongToken)
 	resp := MakeRequest(t, req, http.StatusUnauthorized)
 
-	assert.Contains(t, resp.Body.String(), "access token does not exist")
+	assert.Contains(t, resp.Body.String(), "invalid credentials")
 	assert.NotContains(t, resp.Body.String(), "wrong_token")
 }
 

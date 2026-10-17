@@ -98,10 +98,12 @@ func (email *EmailAddress) BeforeInsert() {
 }
 
 func InsertEmailAddress(ctx context.Context, email *EmailAddress) (*EmailAddress, error) {
-	if err := db.Insert(ctx, email); err != nil {
-		return nil, err
-	}
-	return email, nil
+	return email, db.WithTx(ctx, func(ctx context.Context) error {
+		if err := db.Insert(ctx, email); err != nil {
+			return err
+		}
+		return RecordEmail(ctx, "account.email.added", email)
+	})
 }
 
 func UpdateEmailAddress(ctx context.Context, email *EmailAddress) error {
@@ -157,9 +159,18 @@ func DeletePrimaryEmailAddressOfUser(ctx context.Context, uid int64) error {
 	}
 	defer committer.Close()
 
+	primary, err := GetPrimaryEmailAddressOfUser(ctx, uid)
+	if err != nil && !IsErrEmailAddressNotExist(err) {
+		return err
+	}
 	_, err = db.GetEngine(ctx).Exec("DELETE FROM email_address WHERE uid = ? AND is_primary = true", uid)
 	if err != nil {
 		return err
+	}
+	if primary != nil {
+		if err := RecordEmail(ctx, "account.email.deleted", primary); err != nil {
+			return err
+		}
 	}
 
 	user.Email = ""
@@ -269,6 +280,13 @@ func updateActivation(ctx context.Context, email *EmailAddress, activate bool) e
 	user.Rands = GetUserSalt()
 	email.IsActivated = activate
 	if _, err := db.GetEngine(ctx).ID(email.ID).Cols("is_activated").Update(email); err != nil {
+		return err
+	}
+	action := "account.email.activated"
+	if !activate {
+		action = "account.email.deactivated"
+	}
+	if err := RecordEmail(ctx, action, email); err != nil {
 		return err
 	}
 	return UpdateUserCols(ctx, user, "rands")
@@ -403,10 +421,14 @@ func ActivateUserEmail(ctx context.Context, userID int64, email string, activate
 			return ErrLastUsableAdmin
 		}
 		if user.IsActive != activate {
+			before := user.AuditFields()
 			user.IsActive = activate
 			user.Rands = GetUserSalt()
 			if err = UpdateUserCols(ctx, user, "is_active", "rands"); err != nil {
 				return fmt.Errorf("unable to updateUserCols() for user ID: %d: %w", userID, err)
+			}
+			if err := RecordUserChange(ctx, before, user); err != nil {
+				return err
 			}
 		}
 	}

@@ -54,6 +54,12 @@ type AuthorizedIntegration struct {
 
 	CreatedUnix timeutil.TimeStamp `xorm:"NOT NULL created"`
 	UpdatedUnix timeutil.TimeStamp `xorm:"NOT NULL updated"`
+	ExpiresUnix timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"` // 0 = never
+}
+
+// IsExpired reports whether the integration has an expiry date that has passed.
+func (ai *AuthorizedIntegration) IsExpired() bool {
+	return ai.ExpiresUnix != 0 && timeutil.TimeStampNow() >= ai.ExpiresUnix
 }
 
 func init() {
@@ -282,16 +288,15 @@ func DeleteAuthorizedIntegrationByID(ctx context.Context, id, userID int64) erro
 			return fmt.Errorf("DeleteBeans: %w", err)
 		}
 
-		cnt, err := db.GetEngine(ctx).
-			ID(id).
-			Delete(&AuthorizedIntegration{
-				UserID: userID,
-			})
-		if err != nil {
+		ai := &AuthorizedIntegration{}
+		if has, err := db.GetEngine(ctx).ID(id).Get(ai); err != nil {
 			return err
-		} else if cnt != 1 {
+		} else if !has || ai.UserID != userID {
 			return fmt.Errorf("authorized integration %d does not exist: %w", id, util.ErrNotExist)
 		}
-		return nil
+		if _, err := db.DeleteByID[AuthorizedIntegration](ctx, id); err != nil {
+			return err
+		}
+		return RecordAuthorizedIntegration(ctx, "credential.authorized_integration.deleted", ai, IntegrationFields(ai, nil))
 	})
 }

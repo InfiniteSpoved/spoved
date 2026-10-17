@@ -4,6 +4,7 @@
 package private
 
 import (
+	"errors"
 	"net/http"
 
 	repo_model "forgejo.org/models/repo"
@@ -20,7 +21,11 @@ func HookProcReceive(ctx *app_context.PrivateContext) {
 
 	results, err := agit.ProcReceive(ctx, ctx.Repo.Repository, ctx.Repo.GitRepo, opts)
 	if err != nil {
+		if errors.Is(err, agit.ErrPRTitleRefused) {
+			recordPushRefused(ctx, opts, "push_rule", "")
+		}
 		if repo_model.IsErrUserDoesNotHaveAccessToRepo(err) {
+			recordPushRefused(ctx, opts, "permission", "")
 			ctx.Error(http.StatusBadRequest, "UserDoesNotHaveAccessToRepo", err.Error())
 		} else {
 			log.Error(err.Error())

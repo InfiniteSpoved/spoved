@@ -18,6 +18,7 @@ import (
 	"forgejo.org/modules/cache"
 	"forgejo.org/modules/eventsource"
 	"forgejo.org/modules/git"
+	"forgejo.org/modules/graceful"
 	"forgejo.org/modules/highlight"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/markup"
@@ -38,6 +39,7 @@ import (
 	"forgejo.org/routers/private"
 	web_routers "forgejo.org/routers/web"
 	actions_service "forgejo.org/services/actions"
+	audit_service "forgejo.org/services/audit"
 	auth_method "forgejo.org/services/auth/method"
 	"forgejo.org/services/auth/source/oauth2"
 	"forgejo.org/services/authz"
@@ -174,6 +176,10 @@ func InitWebInstalled(ctx context.Context) {
 	mustInit(actions_router.InitOIDC)
 
 	mustInitCtx(ctx, RecordInstanceStarted)
+	go graceful.GetManager().RunWithShutdownContext(audit_model.RunAggregator)
+	if !setting.IsInTesting { // the tests seal by hand, or their row counts and query counts would flake
+		go graceful.GetManager().RunWithShutdownContext(audit_service.RunSealer)
+	}
 
 	// Finally start up the cron
 	cron.NewContext(ctx)
@@ -189,7 +195,6 @@ func RecordInstanceStarted(ctx context.Context) error {
 	sum := sha256.Sum256(conf)
 	return audit_model.Record(audit_model.WithSystem(ctx, "instance"), audit_model.Event{
 		Action:     "audit.instance.started",
-		Category:   audit_model.CategoryAudit,
 		Result:     audit_model.ResultSuccess,
 		TargetType: "instance",
 		Data:       map[string]any{"version": setting.AppVer, "config_sha256": hex.EncodeToString(sum[:])},

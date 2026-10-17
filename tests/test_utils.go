@@ -401,13 +401,15 @@ func PrepareTestEnvWithPackageData(t testing.TB, skip ...int) func() {
 	}
 
 	cancelProcesses(t, 30*time.Second)
-	t.Cleanup(func() { cancelProcesses(t, 0) }) // cancel remaining processes in a non-blocking way
 
 	// load database fixtures
 	require.NoError(t, unittest.LoadFixtures())
 
 	// do not add more Prepare* functions here, only call necessary ones in the related test functions
 	PrepareGitRepoDirectory(t)
+	// registered after the repository root, so it runs before t.TempDir removes it: a background process (the async
+	// TestPullRequest after a push) must be gone by then, or git writes into a directory that is being removed (#511)
+	t.Cleanup(func() { cancelProcesses(t, 30*time.Second) })
 	PrepareLFSStorage(t)
 	return deferFn
 }

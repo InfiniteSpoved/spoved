@@ -19,6 +19,8 @@ import (
 	"forgejo.org/modules/util"
 	"forgejo.org/services/auth"
 	"forgejo.org/services/auth/source/db"
+	"forgejo.org/services/auth/source/oauth2"
+	"forgejo.org/services/auth/source/smtp"
 )
 
 // Ensure the struct implements the interface.
@@ -57,8 +59,12 @@ func (b *Basic) Verify(req *http.Request, w http.ResponseWriter, _ auth.SessionS
 	log.Trace("Basic Authorization: Attempting SignIn for %s", uname)
 	u, source, err := UserSignIn(req.Context(), uname, passwd)
 	if err != nil {
-		if user_model.IsErrUserNotExist(err) || user_model.IsErrUserProhibitLogin(err) ||
-			errors.As(err, &db.ErrUserPasswordInvalid{}) || errors.As(err, &db.ErrUserPasswordNotSet{}) {
+		if user_model.IsErrUserProhibitLogin(err) {
+			return &auth.AuthenticationAttemptedIncorrectCredential{Error: &auth.CredentialOwnerError{Err: err}}
+		}
+		if user_model.IsErrUserNotExist(err) || user_model.IsErrEmailAddressNotExist(err) ||
+			errors.As(err, &db.ErrUserPasswordInvalid{}) || errors.As(err, &db.ErrUserPasswordNotSet{}) ||
+			errors.Is(err, oauth2.ErrAuthSourceNotActivated) || errors.Is(err, smtp.ErrUnsupportedLoginType) {
 			return &auth.AuthenticationAttemptedIncorrectCredential{Error: err}
 		}
 		return &auth.AuthenticationError{Error: fmt.Errorf("basic auth UserSignIn: %w", err)}
@@ -70,7 +76,7 @@ func (b *Basic) Verify(req *http.Request, w http.ResponseWriter, _ auth.SessionS
 	}
 
 	if hashWebAuthn {
-		return &auth.AuthenticationAttemptedIncorrectCredential{Error: errors.New("Basic authorization is not allowed while having security keys enrolled")}
+		return &auth.AuthenticationAttemptedIncorrectCredential{Error: &auth.CredentialOwnerError{Err: errors.New("Basic authorization is not allowed while having security keys enrolled")}}
 	}
 
 	if skipper, ok := source.Cfg.(auth.LocalTwoFASkipper); !ok || !skipper.IsSkipLocalTwoFA() {
@@ -105,7 +111,7 @@ func validateTOTP(req *http.Request, u *user_model.User) error {
 	if ok, err := twofa.ValidateTOTP(getOtpHeader(req.Header)); err != nil {
 		return err
 	} else if !ok {
-		return util.NewInvalidArgumentErrorf("invalid provided OTP")
+		return &auth.CredentialOwnerError{Err: util.NewInvalidArgumentErrorf("invalid provided OTP")}
 	}
 	return nil
 }

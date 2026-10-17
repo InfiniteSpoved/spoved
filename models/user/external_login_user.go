@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/modules/util"
 
@@ -108,20 +109,40 @@ func LinkExternalToUser(ctx context.Context, user *User, externalLoginUser *Exte
 		return ErrExternalLoginUserAlreadyExist{externalLoginUser.ExternalID, user.ID, externalLoginUser.LoginSourceID}
 	}
 
-	_, err = db.GetEngine(ctx).Insert(externalLoginUser)
-	return err
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if _, err := db.GetEngine(ctx).Insert(externalLoginUser); err != nil {
+			return err
+		}
+		return recordExternalLogin(ctx, "account.external_login.linked", user.ID, externalLoginUser.LoginSourceID, externalLoginUser.ExternalID)
+	})
+}
+
+func recordExternalLogin(ctx context.Context, action string, uid, sourceID int64, externalID string) error {
+	return audit_model.RecordAccount(ctx, action, uid, "external_login", sourceID, externalID, map[string]any{
+		"login_source_id": sourceID, "external_id": externalID,
+	})
 }
 
 // RemoveAccountLink will remove all external login sources for the given user
-func RemoveAccountLink(ctx context.Context, user *User, loginSourceID int64) (int64, error) {
-	deleted, err := db.GetEngine(ctx).Delete(&ExternalLoginUser{UserID: user.ID, LoginSourceID: loginSourceID})
-	if err != nil {
-		return deleted, err
-	}
-	if deleted < 1 {
-		return deleted, ErrExternalLoginUserNotExist{user.ID, loginSourceID}
-	}
-	return deleted, err
+func RemoveAccountLink(ctx context.Context, user *User, loginSourceID int64) (deleted int64, err error) {
+	return deleted, db.WithTx(ctx, func(ctx context.Context) error {
+		links := make([]*ExternalLoginUser, 0, 1)
+		if err := db.GetEngine(ctx).Where("user_id = ? AND login_source_id = ?", user.ID, loginSourceID).Find(&links); err != nil {
+			return err
+		}
+		if deleted, err = db.GetEngine(ctx).Delete(&ExternalLoginUser{UserID: user.ID, LoginSourceID: loginSourceID}); err != nil {
+			return err
+		}
+		if deleted < 1 {
+			return ErrExternalLoginUserNotExist{user.ID, loginSourceID}
+		}
+		for _, l := range links {
+			if err := recordExternalLogin(ctx, "account.external_login.unlinked", user.ID, loginSourceID, l.ExternalID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // RemoveAllAccountLinks will remove all external login sources for the given user

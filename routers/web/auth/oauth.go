@@ -15,9 +15,11 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	asymkey_model "forgejo.org/models/asymkey"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/auth"
 	org_model "forgejo.org/models/organization"
 	user_model "forgejo.org/models/user"
@@ -35,6 +37,7 @@ import (
 	"forgejo.org/modules/web"
 	"forgejo.org/modules/web/middleware"
 	"forgejo.org/routers/common"
+	auth_service "forgejo.org/services/auth"
 	source_service "forgejo.org/services/auth/source"
 	"forgejo.org/services/auth/source/oauth2"
 	"forgejo.org/services/context"
@@ -789,6 +792,7 @@ func handleRefreshToken(ctx *context.Context, form forms.AccessTokenForm, verifi
 	// https://datatracker.ietf.org/doc/html/rfc6749#section-6
 	if app.ConfidentialClient && !app.ValidateClientSecret([]byte(form.ClientSecret)) {
 		if app.MatchesExpiredClientSecret([]byte(form.ClientSecret)) {
+			auth_service.RecordExpired(ctx, audit_model.CredentialOAuth2App, app.ID, app.UID, app.Name, app.ClientSecretExpiresUnix)
 			handleAccessTokenError(ctx, AccessTokenErrorResponse{
 				ErrorCode:        AccessTokenErrorCodeInvalidClient,
 				ErrorDescription: "client secret expired",
@@ -875,6 +879,7 @@ func handleAuthorizationCode(ctx *context.Context, form forms.AccessTokenForm, s
 	}
 	if app.ConfidentialClient && !app.ValidateClientSecret([]byte(form.ClientSecret)) {
 		if app.MatchesExpiredClientSecret([]byte(form.ClientSecret)) {
+			auth_service.RecordExpired(ctx, audit_model.CredentialOAuth2App, app.ID, app.UID, app.Name, app.ClientSecretExpiresUnix)
 			handleAccessTokenError(ctx, AccessTokenErrorResponse{
 				ErrorCode:        AccessTokenErrorCodeInvalidClient,
 				ErrorDescription: "client secret expired",
@@ -1099,12 +1104,14 @@ func SignInOAuthCallback(ctx *context.Context) {
 	if err != nil {
 		if user_model.IsErrUserProhibitLogin(err) {
 			uplerr := err.(user_model.ErrUserProhibitLogin)
+			auth_service.RecordSignInFailure(ctx, uplerr.UID, "prohibited")
 			log.Info("Failed authentication attempt for %s from %s: %v", uplerr.Name, ctx.RemoteAddr(), err)
 			ctx.Data["Title"] = ctx.Tr("auth.prohibit_login")
 			ctx.HTML(http.StatusOK, "user/auth/prohibit_login")
 			return
 		}
 		if callbackErr, ok := err.(errCallback); ok {
+			auth_service.RecordSignInFailure(ctx, 0, "oauth2_failed")
 			log.Info("Failed OAuth callback: (%v) %v", callbackErr.Code, callbackErr.Description)
 			switch callbackErr.Code {
 			case "access_denied":
@@ -1118,6 +1125,7 @@ func SignInOAuthCallback(ctx *context.Context) {
 			return
 		}
 		if err, ok := err.(*go_oauth2.RetrieveError); ok {
+			auth_service.RecordSignInFailure(ctx, 0, "oauth2_failed")
 			ctx.Flash.Error("OAuth2 RetrieveError: " + err.Error())
 			ctx.Redirect(setting.AppSubURL + "/user/login")
 			return
@@ -1203,7 +1211,7 @@ func SignInOAuthCallback(ctx *context.Context) {
 				return
 			}
 
-			if err := syncGroupsToQuotaGroups(ctx, source, &gothUser, u); err != nil {
+			if err := syncGroupsToQuotaGroups(ctx, authSource, &gothUser, u); err != nil {
 				ctx.ServerError("SyncGroupsToQuotaGroups", err)
 				return
 			}
@@ -1236,6 +1244,7 @@ func claimValueToStringSet(claimValue any) container.Set[string] {
 
 func syncGroupsToTeams(ctx *context.Context, authSource *auth.Source, gothUser *goth.User, u *user_model.User) error {
 	source := authSource.Cfg.(*oauth2.Source)
+	syncCtx := audit_model.WithLoginSource(ctx, authSource.ID, authSource.Name)
 	if source.GroupTeamMap != "" || source.GroupTeamMapRemoval ||
 		source.DynGroupMaps != "" || source.DynGroupMapsRemoval {
 		groupTeamMapping, err := auth_module.UnmarshalGroupTeamMapping(source.GroupTeamMap)
@@ -1251,7 +1260,7 @@ func syncGroupsToTeams(ctx *context.Context, authSource *auth.Source, gothUser *
 
 		groups := getClaimedGroups(source, gothUser)
 
-		if err := source_service.SyncGroupsToTeams(ctx,
+		if err := source_service.SyncGroupsToTeams(syncCtx,
 			u, authSource.ID, groups, groupTeamMapping, source.GroupTeamMapRemoval,
 			dynGroupMaps, source.DynGroupMapsRemoval,
 		); err != nil {
@@ -1271,10 +1280,11 @@ func syncGroupsToUserGroups(ctx *context.Context, authSource *auth.Source, gothU
 	if err != nil {
 		return err
 	}
-	return usergroup_service.SyncDirectoryGroups(ctx, u, authSource.ID, getClaimedGroups(source, gothUser), mapping, source.GroupUserGroupMapRemoval)
+	return usergroup_service.SyncDirectoryGroups(audit_model.WithLoginSource(ctx, authSource.ID, authSource.Name), u, authSource.ID, getClaimedGroups(source, gothUser), mapping, source.GroupUserGroupMapRemoval)
 }
 
-func syncGroupsToQuotaGroups(ctx *context.Context, source *oauth2.Source, gothUser *goth.User, u *user_model.User) error {
+func syncGroupsToQuotaGroups(ctx *context.Context, authSource *auth.Source, gothUser *goth.User, u *user_model.User) error {
+	source := authSource.Cfg.(*oauth2.Source)
 	if source.QuotaGroupMap != "" || source.QuotaGroupMapRemoval {
 		quotaGroupMapping, err := auth_module.UnmarshalQuotaGroupMapping(source.QuotaGroupMap)
 		if err != nil {
@@ -1283,7 +1293,7 @@ func syncGroupsToQuotaGroups(ctx *context.Context, source *oauth2.Source, gothUs
 
 		groups := getClaimedQuotaGroups(source, gothUser)
 
-		if err := source_service.SyncGroupsToQuotaGroups(ctx, u, groups, quotaGroupMapping, source.QuotaGroupMapRemoval); err != nil {
+		if err := source_service.SyncGroupsToQuotaGroups(audit_model.WithLoginSource(ctx, authSource.ID, authSource.Name), u, groups, quotaGroupMapping, source.QuotaGroupMapRemoval); err != nil {
 			return err
 		}
 	}
@@ -1417,6 +1427,8 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 	}
 
 	oauth2Source := source.Cfg.(*oauth2.Source)
+	// the syncs below change the account from the provider: the audit log records the login source as their actor
+	syncCtx := audit_model.WithLoginSource(ctx, source.ID, source.Name)
 	groupTeamMapping, err := auth_module.UnmarshalGroupTeamMapping(oauth2Source.GroupTeamMap)
 	if err != nil {
 		ctx.ServerError("UnmarshalGroupTeamMapping", err)
@@ -1438,6 +1450,11 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 	groups := getClaimedGroups(oauth2Source, &gothUser)
 	quotaGroups := getClaimedQuotaGroups(oauth2Source, &gothUser)
 
+	method := signInMethod(source)
+	if id, _ := ctx.Session.Get("signinRememberSSO").(int64); id == source.ID {
+		method = "remember_me_sso:" + strconv.FormatInt(id, 10) // set by autoSignIn before it sent the user here
+	}
+
 	// If this user is enrolled in 2FA and this source doesn't override it,
 	// we can't sign the user in just yet. Instead, redirect them to the 2FA authentication page.
 	if !needs2FA {
@@ -1447,26 +1464,27 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 		}
 
 		if err := updateSession(ctx,
-			[]string{"oauth_signin_silent"},
+			[]string{"oauth_signin_silent", "signinRememberSSO"},
 			map[string]any{
 				"uid": u.ID,
 			}); err != nil {
 			ctx.ServerError("updateSession", err)
 			return
 		}
+		auth_service.RecordSignIn(ctx, u, method, "")
 
 		opts := &user_service.UpdateOptions{
 			SetLastLogin: true,
 		}
 		opts.IsAdmin, opts.IsRestricted = getUserAdminAndRestrictedFromGroupClaims(oauth2Source, &gothUser)
-		if err := user_service.UpdateUserFromSource(ctx, u, opts, source.Name); err != nil {
+		if err := user_service.UpdateUserFromSource(syncCtx, u, opts, source.Name); err != nil {
 			ctx.ServerError("UpdateUser", err)
 			return
 		}
 
 		if oauth2Source.GroupTeamMap != "" || oauth2Source.GroupTeamMapRemoval ||
 			oauth2Source.DynGroupMaps != "" || oauth2Source.DynGroupMapsRemoval {
-			if err := source_service.SyncGroupsToTeams(ctx,
+			if err := source_service.SyncGroupsToTeams(syncCtx,
 				u, source.ID, groups, groupTeamMapping, oauth2Source.GroupTeamMapRemoval,
 				dynGroupMaps, oauth2Source.DynGroupMapsRemoval,
 			); err != nil {
@@ -1481,7 +1499,7 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 		}
 
 		if oauth2Source.QuotaGroupMap != "" || oauth2Source.QuotaGroupMapRemoval {
-			if err := source_service.SyncGroupsToQuotaGroups(ctx, u, quotaGroups, quotaGroupMapping, oauth2Source.QuotaGroupMapRemoval); err != nil {
+			if err := source_service.SyncGroupsToQuotaGroups(syncCtx, u, quotaGroups, quotaGroupMapping, oauth2Source.QuotaGroupMapRemoval); err != nil {
 				ctx.ServerError("SyncGroupsToQuotaGroups", err)
 				return
 			}
@@ -1512,7 +1530,7 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 	opts := &user_service.UpdateOptions{}
 	opts.IsAdmin, opts.IsRestricted = getUserAdminAndRestrictedFromGroupClaims(oauth2Source, &gothUser)
 	if opts.IsAdmin.Has() || opts.IsRestricted.Has() {
-		if err := user_service.UpdateUserFromSource(ctx, u, opts, source.Name); err != nil {
+		if err := user_service.UpdateUserFromSource(syncCtx, u, opts, source.Name); err != nil {
 			ctx.ServerError("UpdateUser", err)
 			return
 		}
@@ -1520,7 +1538,7 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 
 	if oauth2Source.GroupTeamMap != "" || oauth2Source.GroupTeamMapRemoval ||
 		oauth2Source.DynGroupMaps != "" || oauth2Source.DynGroupMapsRemoval {
-		if err := source_service.SyncGroupsToTeams(ctx,
+		if err := source_service.SyncGroupsToTeams(syncCtx,
 			u, source.ID, groups, groupTeamMapping, oauth2Source.GroupTeamMapRemoval,
 			dynGroupMaps, oauth2Source.DynGroupMapsRemoval,
 		); err != nil {
@@ -1535,19 +1553,20 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 	}
 
 	if oauth2Source.QuotaGroupMap != "" || oauth2Source.QuotaGroupMapRemoval {
-		if err := source_service.SyncGroupsToQuotaGroups(ctx, u, quotaGroups, quotaGroupMapping, oauth2Source.QuotaGroupMapRemoval); err != nil {
+		if err := source_service.SyncGroupsToQuotaGroups(syncCtx, u, quotaGroups, quotaGroupMapping, oauth2Source.QuotaGroupMapRemoval); err != nil {
 			ctx.ServerError("SyncGroupsToQuotaGroups", err)
 			return
 		}
 	}
 
 	if err := updateSession(ctx,
-		[]string{"oauth_signin_silent"},
+		[]string{"oauth_signin_silent", "signinRememberSSO"},
 		map[string]any{
 			"twofaUid":            u.ID,
 			"twofaRemember":       true, // OAuth implies remember
 			"twofaSSOLTA":         true, // honored by handleSignInFull to issue the SSO variant
 			"twofaSSOLTASourceID": source.ID,
+			"twofaMethod":         method,
 		}); err != nil {
 		ctx.ServerError("updateSession", err)
 		return

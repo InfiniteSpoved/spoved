@@ -489,7 +489,7 @@ func acceptOrRejectRepoTransfer(ctx *context.Context, accept bool) (bool, error)
 		}
 		ctx.Flash.Success(ctx.Tr("repo.settings.transfer.success"))
 	} else {
-		if err := repo_service.CancelRepositoryTransfer(ctx, ctx.Repo.Repository); err != nil {
+		if err := repo_service.CancelRepositoryTransfer(ctx, ctx.Repo.Repository, true); err != nil {
 			return false, err
 		}
 		ctx.Flash.Success(ctx.Tr("repo.settings.transfer.rejected"))
@@ -595,6 +595,7 @@ func chargeArchiveBuild(ctx *context.Context, aReq *archiver_service.ArchiveRequ
 
 func download(ctx *context.Context, archiveName string, archiver *repo_model.RepoArchiver) {
 	downloadName := ctx.Repo.Repository.Name + "-" + archiveName
+	defer common.RecordDownload(ctx.Base, ctx.Repo.Repository, "archive", archiveName)
 
 	// Add nix format link header so tarballs lock correctly:
 	// https://github.com/nixos/nix/blob/56763ff918eb308db23080e560ed2ea3e00c80a7/doc/manual/src/protocols/tarball-fetcher.md

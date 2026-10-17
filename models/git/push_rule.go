@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/modules/timeutil"
 
@@ -187,17 +188,29 @@ func GetPushRule(ctx context.Context, repoID int64) (*PushRule, error) {
 	return rule, nil
 }
 
-// UpsertPushRule creates or replaces the push rule of rule.RepoID.
+// UpsertPushRule creates or replaces the push rule of rule.RepoID, and records repo.push_rule.created or the
+// settings that differ (repo.push_rule.updated).
 func UpsertPushRule(ctx context.Context, rule *PushRule) error {
-	existing, err := GetPushRule(ctx, rule.RepoID)
-	if err != nil {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		existing, err := GetPushRule(ctx, rule.RepoID)
+		if err != nil {
+			return err
+		}
+		ev := audit_model.Event{TargetType: "push_rule", Data: rule.AuditFields()}
+		if existing == nil {
+			if _, err = db.GetEngine(ctx).Insert(rule); err != nil {
+				return err
+			}
+			ev.TargetID = rule.ID
+			return recordRepoRule(ctx, "repo.push_rule.created", rule.RepoID, ev)
+		}
+		rule.ID, ev.TargetID = existing.ID, existing.ID
+		if ev.Data = audit_model.Changes(existing.AuditFields(), rule.AuditFields()); ev.Data != nil {
+			if err := recordRepoRule(ctx, "repo.push_rule.updated", rule.RepoID, ev); err != nil {
+				return err
+			}
+		}
+		_, err = db.GetEngine(ctx).ID(rule.ID).AllCols().Update(rule)
 		return err
-	}
-	if existing == nil {
-		_, err = db.GetEngine(ctx).Insert(rule)
-		return err
-	}
-	rule.ID = existing.ID
-	_, err = db.GetEngine(ctx).ID(rule.ID).AllCols().Update(rule)
-	return err
+	})
 }

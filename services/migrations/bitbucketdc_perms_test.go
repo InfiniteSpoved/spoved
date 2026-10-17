@@ -23,11 +23,11 @@ import (
 
 var failCollaborationUpdates atomic.Bool
 
-// failCollaborationUpdate makes the UPDATE of a collaboration's mode fail while failCollaborationUpdates is set.
+// failCollaborationUpdate makes the audit entry of a new collaboration fail while failCollaborationUpdates is set.
 type failCollaborationUpdate struct{}
 
 func (failCollaborationUpdate) BeforeProcess(c *contexts.ContextHook) (context.Context, error) {
-	if failCollaborationUpdates.Load() && strings.HasPrefix(c.SQL, "UPDATE `collaboration`") {
+	if failCollaborationUpdates.Load() && strings.HasPrefix(c.SQL, "INSERT INTO `audit_event`") {
 		return c.Ctx, errors.New("injected failure")
 	}
 	return db.TracingHook{}.BeforeProcess(c)
@@ -46,7 +46,7 @@ func TestAddBitbucketCollaboratorRollsBack(t *testing.T) {
 	u := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 10})
 	unittest.AssertNotExistsBean(t, &repo_model.Collaboration{RepoID: repo.ID, UserID: u.ID})
 
-	// the downgrade from write to read fails: no write collaboration is left behind
+	// the collaboration and its audit entry are one transaction: nothing is left behind
 	failCollaborationUpdates.Store(true)
 	_, err = addBitbucketCollaborator(db.DefaultContext, repo, u, perm.AccessModeRead)
 	failCollaborationUpdates.Store(false)

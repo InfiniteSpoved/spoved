@@ -43,6 +43,12 @@ func DeleteOldRuns(ctx context.Context, doer *user_model.User, repo *repo_model.
 	if more = len(ids) > MaxDeleteOldRuns; more {
 		ids = ids[:MaxDeleteOldRuns]
 	}
+	if len(ids) > 0 {
+		// recorded before anything is deleted, so a failed record deletes nothing
+		if err := recordRunsDeleted(ctx, "repo.actions_runs.deleted_old", repo, days, ids); err != nil {
+			return 0, false, err
+		}
+	}
 	for _, id := range ids {
 		if err := DeleteRunUnlessKept(ctx, id); err != nil {
 			if !errors.Is(err, ErrRunKept) {

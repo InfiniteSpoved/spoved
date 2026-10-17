@@ -28,7 +28,7 @@ func TestCreateMigrateTask(t *testing.T) {
 	t.Run("Transaction failure", func(t *testing.T) {
 		defer unittest.SetFaultInjector(2)()
 
-		task, err := CreateMigrateTask(t.Context(), user, user, migration.MigrateOptions{
+		task, err := CreateMigrateTask(t.Context(), user, user, 0, migration.MigrateOptions{
 			CloneAddr:    "https://admin:password2@example.com",
 			AuthPassword: "password",
 			AuthToken:    "token",
@@ -41,7 +41,7 @@ func TestCreateMigrateTask(t *testing.T) {
 	})
 
 	t.Run("Normal", func(t *testing.T) {
-		task, err := CreateMigrateTask(t.Context(), user, user, migration.MigrateOptions{
+		task, err := CreateMigrateTask(t.Context(), user, user, 0, migration.MigrateOptions{
 			CloneAddr:    "https://admin:password@example.com",
 			AuthPassword: "password",
 			AuthToken:    "token",
