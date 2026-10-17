@@ -62,12 +62,14 @@ func TestExportCSV(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, started)
-	assert.Equal(t, 3, m.Rows, "the changes tab, without the export's own entry")
+	assert.Equal(t, 4, m.Rows, "the changes tab and audit.chain.started, without the export's own entry")
+	assert.EqualValues(t, 5, m.SealedSeq, "the export sealed the four rows after audit.chain.started")
+	assert.Len(t, m.SealedHash, 64)
 	assert.False(t, m.Truncated)
 
 	records, err := csv.NewReader(&buf).ReadAll()
 	require.NoError(t, err)
-	require.Len(t, records, 4)
+	require.Len(t, records, 5)
 	assert.Equal(t, CSVHeader, records[0])
 	first := map[string]string{}
 	for i, k := range CSVHeader {
@@ -79,7 +81,7 @@ func TestExportCSV(t *testing.T) {
 	assert.Equal(t, "'-x", first["target_name"])
 	assert.JSONEq(t, `{"name":"=HYPERLINK(1)"}`, first["data"])
 	assert.Equal(t, "1970-01-01T00:16:40Z", first["time"])
-	assert.Empty(t, first["seq"])
+	assert.Equal(t, "2", first["seq"]) // seq 1 is audit.chain.started
 	assert.JSONEq(t, `{"_raw":"not json"}`, records[2][23])
 
 	e := lastEntry(t)
@@ -152,4 +154,17 @@ func TestExportRecord(t *testing.T) {
 		require.Error(t, err)
 		assert.Zero(t, buf.Len())
 	})
+}
+
+// A backlog beyond one sealing call is not an error: the export goes on and names the head it reached.
+func TestExportSealCap(t *testing.T) {
+	insertExportRows(t)
+	defer test.MockVariableValue(&SealBatchesPerCall, 1)()
+	insertUnsealed(t, 600)
+	f, err := parse(t, "category=all&action=credential.*")
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	m, err := Export(exportCtx(t), &buf, f, "json", 0, func(*Manifest) error { return nil })
+	require.NoError(t, err)
+	assert.EqualValues(t, 500, m.SealedSeq)
 }

@@ -49,7 +49,7 @@ func auditMaxID(t *testing.T) int64 {
 func auditOne(t *testing.T, since int64, action string) *audit_model.Entry {
 	t.Helper()
 	var entries []*audit_model.Entry
-	require.NoError(t, db.GetEngine(t.Context()).Where("id > ? AND category NOT IN (?, ?)", since, audit_model.CategoryAuth, audit_model.CategoryActivity).OrderBy("id").Find(&entries))
+	require.NoError(t, db.GetEngine(t.Context()).Where("id > ? AND category NOT IN (?, ?) AND action <> ?", since, audit_model.CategoryAuth, audit_model.CategoryActivity, "audit.chain.started").OrderBy("id").Find(&entries))
 	require.Len(t, entries, 1)
 	require.Equal(t, action, entries[0].Action)
 	return entries[0]

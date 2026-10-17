@@ -115,6 +115,7 @@ var Fields = map[string][]string{
 		"name", "issuer", "scopes", "resource_all_repos", "repo_ids", "ui", "claim_rules_changed",
 	},
 	"audit_export":   {"format", "filter", "capped", "through_id"},
+	"audit_chain":    {"unsealed_before", "first_unsealed_id"},
 	"credential_use": {"method"},
 	// activity: what a request or a push did, never its body, query or content
 	"api_request":      {"method", "route", "status", "target", "bytes"},

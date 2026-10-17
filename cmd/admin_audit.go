@@ -45,6 +45,16 @@ func subcmdAudit() *cli.Command {
 				Action: runAuditExport,
 				Flags:  flags,
 			},
+			{
+				Name:   "verify",
+				Usage:  "Check the tamper-evident chain of the audit log (read-only); exits 1 when it is broken",
+				Before: noDanglingArgs,
+				Action: runAuditVerify,
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "anchor", Usage: "SEQ:HASH kept outside the database, e.g. from a shipped event"},
+					&cli.Int64Flag{Name: "from", Usage: "first seq to check; earlier rows are only linked to, not checked"},
+				},
+			},
 		},
 	}
 }
@@ -86,7 +96,28 @@ func runAuditExport(ctx context.Context, c *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(os.Stderr, "X-Audit-Filter: %s\nX-Audit-Generated-At: %s\nX-Audit-Truncated: false\nRows: %d\n",
-		m.FilterHeader(), m.GeneratedAt.Format(time.RFC3339), m.Rows)
+	_, err = fmt.Fprintf(os.Stderr, "X-Audit-Filter: %s\nX-Audit-Generated-At: %s\nX-Audit-Truncated: false\nX-Audit-Sealed-Through: %d:%s\nRows: %d\n",
+		m.FilterHeader(), m.GeneratedAt.Format(time.RFC3339), m.SealedSeq, m.SealedHash, m.Rows)
 	return err
+}
+
+func runAuditVerify(ctx context.Context, c *cli.Command) error {
+	ctx, cancel := installSignals(ctx)
+	defer cancel()
+
+	if err := initDB(ctx); err != nil {
+		return err
+	}
+	res, err := audit_service.Verify(ctx, audit_service.VerifyOptions{From: c.Int64("from"), Anchor: c.String("anchor")})
+	if err != nil {
+		return err
+	}
+	fmt.Print(res)
+	if c.Int64("from") > 1 {
+		fmt.Printf("rows before seq %d were not checked\n", c.Int64("from"))
+	}
+	if res.Failure != nil {
+		return cli.Exit("", 1)
+	}
+	return nil
 }

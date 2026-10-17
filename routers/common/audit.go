@@ -6,6 +6,7 @@ package common
 import (
 	stdctx "context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
@@ -97,6 +98,7 @@ func ExportAudit(ctx *context.Base, f *audit_service.Filter, format, link string
 		h.Set("X-Audit-Filter", m.FilterHeader())
 		h.Set("X-Audit-Generated-At", m.GeneratedAt.Format(time.RFC3339))
 		h.Set("X-Audit-Truncated", strconv.FormatBool(m.Truncated))
+		h.Set("X-Audit-Sealed-Through", fmt.Sprintf("%d:%s", m.SealedSeq, m.SealedHash))
 		if m.Truncated {
 			h.Set("X-Audit-Exported-Through", m.Through.Format(time.RFC3339))
 			h.Set("Link", "<"+link+"?"+m.Next(f).Encode()+">; rel=\"next\"")
