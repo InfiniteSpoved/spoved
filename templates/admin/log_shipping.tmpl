@@ -84,8 +84,8 @@
 							<div class="ui checkbox">
 								<input id="log-type-{{$t}}" name="log_types" value="{{$t}}" type="checkbox" {{if index $.SelectedTypes $t}}checked{{end}}>
 								<label for="log-type-{{$t}}">{{ctx.Locale.Tr (printf "admin.log_shipping.log_type.%s" $t)}}</label>
-							{{if eq $t "audit"}}<span class="help">{{ctx.Locale.Tr "admin.log_shipping.log_type.audit_hint"}}</span>{{end}}
 							</div>
+							{{if eq $t "audit"}}<span class="help">{{ctx.Locale.Tr "admin.log_shipping.log_type.audit_hint"}}</span>{{end}}
 						</div>
 					{{end}}
 				</div>

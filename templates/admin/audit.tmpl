@@ -118,7 +118,7 @@
 			<p class="text grey audit-status">
 				{{if .OldestEntry}}{{ctx.Locale.Tr "admin.audit.oldest" .OldestEntry}} · {{end}}{{ctx.Locale.Tr "admin.audit.time_zone" .TimeZone}}
 				· {{ctx.Locale.Tr "admin.audit.export_cap" .ExportCap}}
-				· {{if .StreamingCount}}{{ctx.Locale.Tr "admin.audit.streaming" .StreamingCount}}{{else}}{{ctx.Locale.Tr "admin.audit.streaming_off"}}{{end}}
+				· {{if .StreamingCount}}{{ctx.Locale.TrPluralString .StreamingCount "admin.audit.streaming" (printf "%d" .StreamingCount)}}{{else}}{{ctx.Locale.Tr "admin.audit.streaming_off"}}{{end}}
 				· {{.RetentionLine}}{{if .CanEditRetention}} (<a href="{{AppSubUrl}}/admin/audit/retention">{{ctx.Locale.Tr "admin.audit_retention.change"}}</a>){{end}}
 			</p>
 			{{if .SealLine}}<p class="text grey audit-seal">{{.SealLine}}{{if .Anchor}}<br>{{.Anchor}}{{end}}</p>{{end}}

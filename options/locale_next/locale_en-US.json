@@ -1874,7 +1874,10 @@
 	"admin.audit.unknown.credential_owner": "No user or organization named %s.",
 	"admin.audit.invalid": "Invalid value for %s: %s",
 	"admin.audit.oldest": "Oldest entry: %s",
-	"admin.audit.streaming": "Streaming: %d destinations",
+	"admin.audit.streaming": {
+		"one": "Streaming: %s destination",
+		"other": "Streaming: %s destinations"
+	},
 	"admin.audit.streaming_off": "Streaming: off",
 	"admin.audit.retention": "Retention: %s",
 	"admin.audit_retention": "Audit log retention",

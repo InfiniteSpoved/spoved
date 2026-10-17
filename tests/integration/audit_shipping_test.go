@@ -103,7 +103,8 @@ func TestAuditShippingToLoki(t *testing.T) {
 		body := loginUser(t, name).MakeRequest(t, NewRequest(t, "GET", "/admin/audit"), http.StatusOK).Body.String()
 		_, status, _ := strings.Cut(body, `audit-status`)
 		status, _, _ = strings.Cut(status, "</p>") // the rows may name the destination the admin created; the header must not
-		assert.Contains(t, status, "Streaming: 1 destinations", name)
+		assert.Contains(t, status, "Streaming: 1 destination", name)
+		assert.NotContains(t, status, "destinations", name)
 		assert.NotContains(t, status, "127.0.0.1", name)
 		assert.NotContains(t, status, "loki", name)
 	}
@@ -120,6 +121,6 @@ func TestAuditShippingForm(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	body := loginUser(t, "user1").MakeRequest(t, NewRequest(t, "GET", "/admin/log-shipping"), http.StatusOK).Body.String()
 	assert.Contains(t, body, `id="log-type-audit"`)
-	assert.Contains(t, body, "Contains IP addresses and user agents")
+	assert.Contains(t, body, `<span class="help">Contains IP addresses and user agents`)
 	assert.Contains(t, body, `<option value="loki"`)
 }
