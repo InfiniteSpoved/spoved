@@ -74,7 +74,7 @@ func ListTrash(ctx *context.APIContext) {
 		res[i] = &api.TrashItem{
 			Type:          "repo",
 			ID:            item.Repo.ID,
-			FullName:      item.Repo.TrashedOwnerName + "/" + item.Repo.TrashedName,
+			FullName:      item.Repo.TrashedFullName(),
 			DeletedBy:     item.Repo.TrashedByName,
 			Deleted:       item.Repo.TrashedUnix.AsTime(),
 			DaysRemaining: item.DaysRemaining,
