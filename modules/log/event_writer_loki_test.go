@@ -89,8 +89,8 @@ func TestLokiDelivery(t *testing.T) {
 	assert.EqualValues(t, 1, statOf("loki-test", "audit").Sent)
 }
 
-// M1: a full writer queue prints the event with json.Marshal to stderr; structured fields (IP, user agent, data) must not be in it.
-func TestEventFieldsNotMarshaled(t *testing.T) {
+// The fallback output of a full queue is json.Marshal(event); structured fields stay out of it.
+func TestEventFieldsStayOutOfFallbackOutput(t *testing.T) {
 	b, err := json.Marshal(&Event{Fields: map[string]any{"ip": "203.0.113.77", "user_agent": "UA-secret-agent"}})
 	require.NoError(t, err)
 	assert.NotContains(t, string(b), "203.0.113.77")
