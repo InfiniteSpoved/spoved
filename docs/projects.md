@@ -94,4 +94,4 @@ spoved states what it produces; how another tool reads it is not verified here. 
 
 ## Not covered yet
 
-Workflow `uses: org/repo` references, package image names and token repository targets named by `owner/repo` only find repositories outside projects.
+Reusable workflow references (`uses: org/repo/...`) find only repositories outside projects.
