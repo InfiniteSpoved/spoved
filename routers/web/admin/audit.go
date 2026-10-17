@@ -346,6 +346,8 @@ func Audit(ctx *context.Context) {
 		ctx.Data["OldestEntry"] = oldest.AsTime().In(loc).Format("2006-01-02")
 	}
 	ctx.Data["ExportCap"] = audit_service.ExportCap
+	ctx.Data["RetentionLine"] = auditRetentionLine(ctx)
+	ctx.Data["CanEditRetention"] = ctx.Doer.IsAdmin
 	if err := setSealStatus(ctx); err != nil {
 		ctx.ServerError("setSealStatus", err)
 		return

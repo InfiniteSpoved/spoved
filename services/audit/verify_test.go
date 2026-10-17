@@ -4,13 +4,19 @@
 package audit
 
 import (
+	"context"
 	"fmt"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/timeutil"
 
+	"code.forgejo.org/xorm/xorm/contexts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -112,4 +118,135 @@ func TestVerifyHeadSetBack(t *testing.T) {
 	sealed(t, 5)
 	exec(t, "UPDATE audit_chain_head SET seq = 0, hash = ?", audit_model.ZeroHash)
 	verifyFails(t, VerifyOptions{}, 0, "head")
+}
+
+// sealedOld is sealed with a genesis entry that is two years old, so a purge may take it.
+func sealedOld(t *testing.T, n int) []*audit_model.Entry {
+	t.Helper()
+	timeutil.MockSet(time.Now().AddDate(-2, 0, 0))
+	defer timeutil.MockUnset()
+	return sealed(t, n)
+}
+
+func oldCutoff() time.Time { return time.Now().AddDate(-1, 0, 0) }
+
+// purged seals chain.started and 5 rows, then purges all but the head row, so the anchor is seq 5.
+func purged(t *testing.T) []*audit_model.Entry {
+	t.Helper()
+	rows := sealedOld(t, 5)
+	n, err := audit_model.PurgeBatch(audit_model.WithSystem(t.Context(), "cron"), oldCutoff(), 365, 10000)
+	require.NoError(t, err)
+	require.EqualValues(t, 5, n)
+	return rows
+}
+
+// AC9
+func TestVerifyAfterPurge(t *testing.T) {
+	t.Run("passes right after a purge, with the purge entry unsealed (M3), and once it is sealed", func(t *testing.T) {
+		purged(t)
+		res := mustVerify(t)
+		assert.EqualValues(t, 6, res.FirstSeq)
+		assert.EqualValues(t, 1, res.Rows)
+		assert.EqualValues(t, 5, res.PurgedThrough)
+		assert.Contains(t, res.String(), "deleted by retention")
+		require.NoError(t, SealAll(t.Context()))
+		mustVerify(t)
+	})
+	t.Run("--from below the anchor starts at the anchor", func(t *testing.T) {
+		purged(t)
+		res, err := Verify(t.Context(), VerifyOptions{From: 2})
+		require.NoError(t, err)
+		assert.Nil(t, res.Failure)
+		assert.EqualValues(t, 6, res.FirstSeq)
+		assert.EqualValues(t, 5, res.PurgedThrough)
+	})
+	t.Run("--anchor at and below the anchor", func(t *testing.T) {
+		rows := purged(t)
+		good := fmt.Sprintf("5:%s", *rows[4].Hash)
+		res, err := Verify(t.Context(), VerifyOptions{Anchor: good})
+		require.NoError(t, err)
+		assert.Nil(t, res.Failure)
+		verifyFails(t, VerifyOptions{Anchor: fmt.Sprintf("5:%s", audit_model.ZeroHash)}, 5, "anchor")
+		verifyFails(t, VerifyOptions{Anchor: fmt.Sprintf("3:%s", *rows[2].Hash)}, 3, "anchor") // entries are gone
+		res, err = Verify(t.Context(), VerifyOptions{Anchor: fmt.Sprintf("6:%s", *rows[5].Hash)})
+		require.NoError(t, err)
+		assert.Nil(t, res.Failure)
+	})
+	t.Run("edited anchor_prev_hash", func(t *testing.T) {
+		purged(t)
+		exec(t, "UPDATE audit_chain_head SET anchor_prev_hash = ?", audit_model.ZeroHash)
+		res, err := Verify(t.Context(), VerifyOptions{})
+		require.NoError(t, err)
+		require.NotNil(t, res.Failure)
+	})
+	t.Run("deleted purge entry", func(t *testing.T) {
+		purged(t)
+		exec(t, "DELETE FROM audit_event WHERE action = ?", "audit.purge")
+		verifyFails(t, VerifyOptions{}, 5, "anchor")
+	})
+	t.Run("sealed purge entry deleted", func(t *testing.T) {
+		purged(t)
+		require.NoError(t, SealAll(t.Context()))
+		exec(t, "DELETE FROM audit_event WHERE action = ?", "audit.purge")
+		res, err := Verify(t.Context(), VerifyOptions{})
+		require.NoError(t, err)
+		require.NotNil(t, res.Failure)
+	})
+	for name, data := range map[string]string{
+		"through_hash differs": `{"through_seq":5,"through_hash":"%s","cutoff_unix":1000000,"retention_days":365}`,
+		"through_seq differs":  `{"through_seq":4,"through_hash":"HASH","cutoff_unix":1000000,"retention_days":365}`,
+		"unallowed retention":  `{"through_seq":5,"through_hash":"HASH","cutoff_unix":1000000,"retention_days":31}`,
+		"cutoff too recent":    `{"through_seq":5,"through_hash":"HASH","cutoff_unix":4102444800,"retention_days":365}`,
+		"not json":             `nope`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rows := purged(t)
+			if strings.Contains(data, "%s") {
+				data = fmt.Sprintf(data, audit_model.ZeroHash)
+			}
+			exec(t, "UPDATE audit_event SET data = ? WHERE action = ?", strings.ReplaceAll(data, "HASH", *rows[4].Hash), "audit.purge")
+			verifyFails(t, VerifyOptions{}, 5, "anchor")
+		})
+	}
+	t.Run("entry missing after the anchor", func(t *testing.T) {
+		rows := sealedOld(t, 7)
+		_, err := audit_model.PurgeBatch(audit_model.WithSystem(t.Context(), "cron"), oldCutoff(), 365, 3)
+		require.NoError(t, err)
+		exec(t, "DELETE FROM audit_event WHERE id = ?", rows[4].ID) // seq 5, anchor is 3
+		verifyFails(t, VerifyOptions{}, 5, "gap")
+	})
+}
+
+// M4: a purge that moves the anchor while verify runs makes it start over once instead of failing.
+func TestVerifyDuringPurge(t *testing.T) {
+	sealedOld(t, 5)
+	h := &purgeOnRead{t: t}
+	x, err := db.GetMasterEngine(db.GetEngine(db.DefaultContext))
+	require.NoError(t, err)
+	x.AddHook(h)
+	res, err := Verify(t.Context(), VerifyOptions{})
+	require.NoError(t, err)
+	assert.True(t, h.done.Load())
+	assert.Nil(t, res.Failure, "%+v", res.Failure)
+	assert.EqualValues(t, 5, res.PurgedThrough)
+}
+
+// purgeOnRead purges once, right before verify reads its first page of rows.
+type purgeOnRead struct {
+	t    *testing.T
+	done atomic.Bool
+}
+
+func (h *purgeOnRead) BeforeProcess(c *contexts.ContextHook) (context.Context, error) {
+	if strings.Contains(c.SQL, "ORDER BY seq LIMIT 5000") && h.done.CompareAndSwap(false, true) {
+		n, err := audit_model.PurgeBatch(audit_model.WithSystem(db.DefaultContext, "cron"), oldCutoff(), 365, 10000)
+		if err != nil || n != 5 {
+			h.t.Errorf("purge during verify: %d %v", n, err)
+		}
+	}
+	return db.TracingHook{}.BeforeProcess(c)
+}
+
+func (h *purgeOnRead) AfterProcess(c *contexts.ContextHook) error {
+	return db.TracingHook{}.AfterProcess(c)
 }

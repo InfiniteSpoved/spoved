@@ -115,7 +115,7 @@ var Fields = map[string][]string{
 		"name", "issuer", "scopes", "resource_all_repos", "repo_ids", "ui", "claim_rules_changed",
 	},
 	"audit_export":   {"format", "filter", "capped", "through_id"},
-	"audit_chain":    {"unsealed_before", "first_unsealed_id"},
+	"audit_chain":    {"unsealed_before", "first_unsealed_id", "deleted", "through_seq", "through_hash", "cutoff_unix", "retention_days"},
 	"credential_use": {"method"},
 	// activity: what a request or a push did, never its body, query or content
 	"api_request":      {"method", "route", "status", "target", "bytes"},
@@ -146,7 +146,7 @@ var Fields = map[string][]string{
 	"setting": {
 		"keys", "hashed", "picture.disable_gravatar", "picture.enable_federated_avatar", "repository.open-with.editor-apps",
 		"maintenance.state", "ip_allowlist.state", "oauth2.app_policy", "webhook.types", "repository.unit_policy",
-		"repository.personal_repos", "org_category.owners_can_assign",
+		"repository.personal_repos", "org_category.owners_can_assign", "audit.retention_days",
 	},
 	"log_shipping": {
 		"id", "name", "type", "endpoint", "log_types", "enabled", "level", "ndjson", "key_changed", "headers_changed",
