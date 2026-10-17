@@ -131,6 +131,7 @@ var Actions = map[string]string{
 	"audit.chain.started":    CategoryAudit,
 	"audit.exported":         CategoryAudit,
 	"audit.instance.started": CategoryAudit,
+	"audit.purge":            CategoryAudit,
 
 	"auth.credential.used":          CategoryAuth,
 	"auth.refused":                  CategoryAuth,
