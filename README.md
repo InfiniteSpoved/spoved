@@ -2,15 +2,14 @@
 
 **spoved: a self-hosted Git forge, based on Forgejo.**
 
-spoved is a self-hosted Git forge for companies that need to pass security and compliance audits. It is built with **SOC 2** and **ISO/IEC 27001** controls in mind: who can access what, how credentials are managed, how changes reach protected branches, and how the platform is operated.
-
-spoved started as a fork of [Forgejo](https://forgejo.org) and keeps everything Forgejo offers: Git hosting, issues, pull requests, wikis, project boards, Actions (GitHub-compatible CI), a package registry for about 20 formats, LDAP and OAuth2/OIDC sign-in, and more. On top of that it adds the features listed below.
+spoved is a self-hosted Git forge for companies that must pass security and compliance audits, built with **SOC 2** and **ISO/IEC 27001** controls in mind: who can access what, how credentials are managed, how changes reach protected branches, and how the platform is operated.
+It keeps everything Forgejo offers and adds a tamper-evident audit log, projects, credential expiry and more.
 
 > spoved helps you meet SOC 2 and ISO 27001 controls; it does not make an organization compliant or certified by itself. Certification covers your organization, processes and evidence, not a single tool.
 
 ## Highlights
 
-- **Tamper-evident audit log**: every sign-in, credential use and settings change is recorded in a hash chain you can verify and export ([#518](https://github.com/InfiniteSpoved/spoved/pull/518), [#535](https://github.com/InfiniteSpoved/spoved/pull/535)).
+- **Tamper-evident audit log**: sign-ins, credential use and settings changes are recorded in a hash chain you can verify and export ([#518](https://github.com/InfiniteSpoved/spoved/pull/518), [#535](https://github.com/InfiniteSpoved/spoved/pull/535)).
 - **Projects**: group repositories under an organization and share teams, branch rules, webhooks, secrets and deploy keys across them ([#434](https://github.com/InfiniteSpoved/spoved/pull/434), [#450](https://github.com/InfiniteSpoved/spoved/pull/450), [#452](https://github.com/InfiniteSpoved/spoved/pull/452)).
 - **One-command Bitbucket Data Center import**: bring projects, repositories, permissions, keys and branch rules over with `admin bitbucket-import` ([#488](https://github.com/InfiniteSpoved/spoved/pull/488)).
 - **Read-only auditor role**: reviewers read every repository and nothing else, granted through a user group ([#118](https://github.com/InfiniteSpoved/spoved/pull/118)).
@@ -58,6 +57,8 @@ spoved's goals have diverged from Forgejo's:
 
 spoved is a fork of **[Forgejo](https://codeberg.org/forgejo/forgejo)**, its predecessor, which is itself a fork of [Gitea](https://gitea.com) and [Gogs](https://gogs.io). Almost all of spoved's code is their work. Thank you to the Forgejo, Gitea and Gogs contributors. See [NOTICE](NOTICE).
 
+spoved started as a fork of [Forgejo](https://forgejo.org) and keeps everything Forgejo offers: Git hosting, issues, pull requests, wikis, project boards, Actions (GitHub-compatible CI), a package registry for about 20 formats, LDAP and OAuth2/OIDC sign-in, and more. On top of that it adds the features listed below.
+
 spoved is a modified version of Forgejo, changed by the spoved contributors since 2026 (see the git history for each change). It is not affiliated with or endorsed by Forgejo or Codeberg e.V. "Forgejo" is a trademark of Codeberg e.V. and names the Forgejo project only.
 
 ## Features spoved adds
@@ -80,7 +81,7 @@ Each feature links to the pull request that added it.
 | Feature | What it does |
 |---|---|
 | **Expiry for SSH keys, deploy keys and access tokens** ([#115](https://github.com/InfiniteSpoved/spoved/pull/115)) | Expiry dates, required by default with a maximum of 365 days ([#459](https://github.com/InfiniteSpoved/spoved/issues/459)). Expired credentials are refused everywhere. Admins can lower the maximum or turn a policy off: `[security] SSH_KEY_*`, `DEPLOY_KEY_*` and `ACCESS_TOKEN_*` with `_EXPIRY_REQUIRED` and `_MAX_LIFETIME_DAYS`. Turning a policy off needs both keys, `_EXPIRY_REQUIRED = false` and `_MAX_LIFETIME_DAYS = 0`: a maximum alone still requires an expiry date. |
-| **Expiry for OAuth2 app secrets** ([#466](https://github.com/InfiniteSpoved/spoved/pull/466)) | Client secrets expire; an expired secret is refused at the token endpoint. `[security] OAUTH2_APP_SECRET_EXPIRY_REQUIRED` and `OAUTH2_APP_SECRET_MAX_LIFETIME_DAYS` (default 365 days). Who may create OAuth2 apps is set under Site administration → Applications → Policy ([#286](https://github.com/InfiniteSpoved/spoved/pull/286)). |
+| **Expiry for OAuth2 app secrets** ([#466](https://github.com/InfiniteSpoved/spoved/pull/466)) | Client secrets expire; an expired secret is refused at the token endpoint. `[security] OAUTH2_APP_SECRET_EXPIRY_REQUIRED` and `OAUTH2_APP_SECRET_MAX_LIFETIME_DAYS` (default 365 days). Who may create OAuth2 apps is set under a policy form on Site administration → Applications ([#286](https://github.com/InfiniteSpoved/spoved/pull/286)). |
 | **Specific deploy keys in branch and tag protection** ([#50](https://github.com/InfiniteSpoved/spoved/pull/50)) | Allow chosen deploy keys, not all of them, to push to protected branches and tags. Deploy-key pushes to protected tags are decided by the key, never by the repository owner's identity. |
 
 ### Change control
