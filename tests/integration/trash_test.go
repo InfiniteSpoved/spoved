@@ -287,6 +287,23 @@ func TestTrashPurge(t *testing.T) {
 
 	token := getUserToken(t, "user2", auth_model.AccessTokenScopeAll)
 	MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/user/repos", &api.CreateRepoOption{Name: "repo1"}).AddTokenAuth(token), http.StatusCreated)
+
+	t.Run("in a project", func(t *testing.T) {
+		doer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+		org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+		pay, err := repo_model.CreateRepoGroup(t.Context(), org3, "pay", "")
+		require.NoError(t, err)
+		repo, err := repo_service.CreateRepositoryDirectly(t.Context(), doer, org3, repo_service.CreateRepoOptions{Name: "api", GroupID: pay.ID})
+		require.NoError(t, err)
+		require.NoError(t, repo_service.TrashRepository(t.Context(), doer, repo))
+		purge := fmt.Sprintf("/admin/trash/%d/purge", repo.ID)
+
+		assert.Contains(t, admin.MakeRequest(t, NewRequest(t, "GET", "/admin/trash"), http.StatusOK).Body.String(), "org3/pay/api")
+		admin.MakeRequest(t, NewRequestWithValues(t, "POST", purge, map[string]string{"confirm_name": "org3/api"}), http.StatusSeeOther)
+		unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repo.ID})
+		admin.MakeRequest(t, NewRequestWithValues(t, "POST", purge, map[string]string{"confirm_name": "org3/pay/api"}), http.StatusSeeOther)
+		unittest.AssertNotExistsBean(t, &repo_model.Repository{ID: repo.ID})
+	})
 }
 
 // AC9: no non-admin reaches any trash endpoint.
