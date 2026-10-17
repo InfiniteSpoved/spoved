@@ -10,10 +10,13 @@ import (
 	"testing"
 	"time"
 
+	auth_model "forgejo.org/models/auth"
+	"forgejo.org/models/db"
 	"forgejo.org/modules/jwtx"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
+	"forgejo.org/services/auth/source/pam"
 	"forgejo.org/tests"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -90,12 +93,18 @@ func TestAPIAuthUniformErrors(t *testing.T) {
 		const pat = "0123456789abcdef0123456789abcdef01234567"
 		logChecker.Filter("unknown user or bad password", "\n2026/01/01 forged line", pat)
 
+		inactive := &auth_model.Source{Type: auth_model.PAM, Name: "inactive pam", IsActive: false, Cfg: &pam.Source{ServiceName: "x"}}
+		require.NoError(t, auth_model.CreateSource(t.Context(), inactive))
+		_, err := db.GetEngine(t.Context()).Exec("UPDATE `user` SET login_source = ?, login_type = ? WHERE id = 4", inactive.ID, auth_model.PAM)
+		require.NoError(t, err)
+
 		body := refused(t, NewRequest(t, "GET", "/api/v1/user").AddBasicAuth("no-such-user"))
 		for name, req := range map[string]*RequestWrapper{
-			"wrong password": basic("user2", "wrong"),
-			"unknown email":  basic("nobody@example.com", "password"),
-			"crlf username":  basic("x\r\n2026/01/01 forged line", "password"),
-			"token as name":  basic(pat, ""),
+			"wrong password":  basic("user2", "wrong"),
+			"unknown email":   basic("nobody@example.com", "password"),
+			"crlf username":   basic("x\r\n2026/01/01 forged line", "password"),
+			"inactive source": basic("user4", "password"),
+			"token as name":   basic(pat, ""),
 		} {
 			assert.Equal(t, body, refused(t, req), name)
 		}
