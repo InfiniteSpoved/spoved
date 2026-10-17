@@ -11,6 +11,7 @@ import (
 	"forgejo.org/models/db"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
+	"forgejo.org/services/authz"
 	"forgejo.org/services/context"
 )
 
@@ -29,6 +30,7 @@ type baseAuthorizedIntegrationForm struct {
 	SelectedRepo []string // slice of ownername/reponame for repo-specific
 	ScopeAll     bool
 	Scope        []string
+	ExpiresAt    string // YYYY-MM-DD, empty = never
 
 	// Values used for repo-specific repository multi-select UI, not stored in Authorized Integration:
 	RepoSearch         string
@@ -47,6 +49,9 @@ func (f *baseAuthorizedIntegrationForm) copyAuthorizedIntegrationToForm(ctx *con
 	f.Name = ai.Name
 	f.Description = ai.Description
 	f.Audience = ai.Audience
+	if ai.ExpiresUnix != 0 {
+		f.ExpiresAt = ai.ExpiresUnix.FormatDate()
+	}
 
 	if ai.ResourceAllRepos {
 		publicOnly, err := ai.Scope.PublicOnly()
@@ -100,6 +105,11 @@ func (f *baseAuthorizedIntegrationForm) copyAuthorizedIntegrationToForm(ctx *con
 func (f *baseAuthorizedIntegrationForm) copyFormToAuthorizedIntegration(ctx *context.Context, ai *auth_model.AuthorizedIntegration) ([]*auth_model.AuthorizedIntegResourceRepo, error) {
 	ai.Name = f.Name
 	ai.Description = f.Description
+	expires, err := authz.ParseExpiryDate(f.ExpiresAt)
+	if err != nil {
+		return nil, err
+	}
+	ai.ExpiresUnix = expires
 
 	scopeRaw := strings.Join(f.Scope, ",")
 	var resourceRepos []*auth_model.AuthorizedIntegResourceRepo

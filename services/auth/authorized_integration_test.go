@@ -12,11 +12,13 @@ import (
 	"testing"
 
 	"forgejo.org/models/auth"
+	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/jwtx"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
+	"forgejo.org/modules/timeutil"
 	"forgejo.org/services/authz"
 
 	"github.com/stretchr/testify/assert"
@@ -586,5 +588,70 @@ func TestValidateClaimRules(t *testing.T) {
 			},
 		}, "root")
 		require.NoError(t, err)
+	})
+}
+
+func TestAuthorizedIntegrationExpiryPolicy(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+
+	ii := NewMockInternalIssuer(t)
+	ii.On("IssuerPlaceholder").Return("urn:forgejo:authorized-issuer:internal:test6")
+	RegisterInternalIssuerForTesting(t, "/fake-jwt-issuer", ii)
+
+	defer test.MockVariableValue(&setting.AuthorizedIntegrationExpiry, setting.DefaultCredentialExpiry)()
+
+	newAI := func(userID int64, expires timeutil.TimeStamp) *auth.AuthorizedIntegration {
+		return &auth.AuthorizedIntegration{
+			UserID:           userID,
+			UI:               auth.AuthorizedIntegrationUIGeneric,
+			ResourceAllRepos: true,
+			ClaimRules:       &auth.ClaimRules{},
+			Name:             "expiry",
+			Scope:            auth.AccessTokenScopeReadRepository,
+			Issuer:           "urn:forgejo:authorized-issuer:internal:test6",
+			ExpiresUnix:      expires,
+		}
+	}
+	now := timeutil.TimeStampNow()
+	day := int64(24 * 60 * 60)
+
+	t.Run("insert refuses a missing, past or too late expiry", func(t *testing.T) {
+		require.ErrorIs(t, InsertAuthorizedIntegration(t.Context(), newAI(2, 0), nil), authz.ErrExpiryRequired)
+		require.ErrorIs(t, InsertAuthorizedIntegration(t.Context(), newAI(2, now-1), nil), authz.ErrExpiryInPast)
+		require.ErrorIs(t, InsertAuthorizedIntegration(t.Context(), newAI(2, now+timeutil.TimeStamp(400*day)), nil), authz.ErrExpiryTooLate)
+		// no exemption, as for the other credentials
+		require.ErrorIs(t, InsertAuthorizedIntegration(t.Context(), newAI(1, 0), nil), authz.ErrExpiryRequired)
+	})
+
+	t.Run("update re-checks and a refusal leaves the row unchanged", func(t *testing.T) {
+		ai := newAI(2, now+timeutil.TimeStamp(30*day))
+		require.NoError(t, InsertAuthorizedIntegration(t.Context(), ai, nil))
+		assert.Equal(t, now+timeutil.TimeStamp(30*day), unittest.AssertExistsAndLoadBean(t, &auth.AuthorizedIntegration{ID: ai.ID}).ExpiresUnix)
+
+		ai.Name = "renamed"
+		ai.ExpiresUnix = 0
+		require.ErrorIs(t, UpdateAuthorizedIntegration(t.Context(), ai, nil), authz.ErrExpiryRequired)
+		fromDB := unittest.AssertExistsAndLoadBean(t, &auth.AuthorizedIntegration{ID: ai.ID})
+		assert.Equal(t, "expiry", fromDB.Name)
+		assert.Equal(t, now+timeutil.TimeStamp(30*day), fromDB.ExpiresUnix)
+
+		ai.ExpiresUnix = now + timeutil.TimeStamp(60*day)
+		require.NoError(t, UpdateAuthorizedIntegration(t.Context(), ai, nil))
+		assert.Equal(t, now+timeutil.TimeStamp(60*day), unittest.AssertExistsAndLoadBean(t, &auth.AuthorizedIntegration{ID: ai.ID}).ExpiresUnix)
+	})
+
+	t.Run("an expired integration needs a new date", func(t *testing.T) {
+		ai := newAI(2, now+timeutil.TimeStamp(day))
+		require.NoError(t, InsertAuthorizedIntegration(t.Context(), ai, nil))
+		_, err := db.GetEngine(t.Context()).Exec("UPDATE authorized_integration SET expires_unix = ? WHERE id = ?", now-1, ai.ID)
+		require.NoError(t, err)
+		ai = unittest.AssertExistsAndLoadBean(t, &auth.AuthorizedIntegration{ID: ai.ID})
+		assert.True(t, ai.IsExpired())
+
+		ai.Description = "edited"
+		require.ErrorIs(t, UpdateAuthorizedIntegration(t.Context(), ai, nil), authz.ErrExpiryInPast)
+		ai.ExpiresUnix = now + timeutil.TimeStamp(day)
+		require.NoError(t, UpdateAuthorizedIntegration(t.Context(), ai, nil))
+		assert.False(t, unittest.AssertExistsAndLoadBean(t, &auth.AuthorizedIntegration{ID: ai.ID}).IsExpired())
 	})
 }

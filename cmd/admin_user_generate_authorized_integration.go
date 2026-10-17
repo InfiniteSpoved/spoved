@@ -15,6 +15,7 @@ import (
 	"forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/json"
+	"forgejo.org/modules/setting"
 	auth_service "forgejo.org/services/auth"
 
 	"github.com/urfave/cli/v3"
@@ -92,6 +93,10 @@ enable-openid-connect flag in a workflow.`,
 				Value: []string{"all"},
 				Usage: `Zero-or-more specific repositories that can be accessed, or "all" to allow access to all repositories, example: "owner1/repo1" or, in a project, "org1/project1/repo1"`,
 			},
+			&cli.StringFlag{
+				Name:  "expires-at",
+				Usage: "Expiry date of the integration (YYYY-MM-DD); default: the latest date the [security] AUTHORIZED_INTEGRATION_* policy allows",
+			},
 		},
 		Before: noDanglingArgs,
 		Action: runCreateAuthorizedIntegration,
@@ -120,6 +125,9 @@ func runCreateAuthorizedIntegration(ctx context.Context, c *cli.Command) error {
 		Name:        c.String("name"),
 		Description: c.String("description"),
 		UI:          auth_model.AuthorizedIntegrationUIGeneric,
+	}
+	if ai.ExpiresUnix, err = cliCredentialExpiry(setting.AuthorizedIntegrationExpiry, c.String("expires-at")); err != nil {
+		return err
 	}
 
 	var rules []auth_model.ClaimRule

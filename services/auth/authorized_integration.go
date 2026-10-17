@@ -223,8 +223,12 @@ func ValidateAuthorizedIntegration(ai *auth_model.AuthorizedIntegration, repoRes
 	return authz.ValidateRepositoryResource(ai.ResourceAllRepos, ai.Scope, len(repoResources))
 }
 
-// The tokens an authorized integration mints follow the same scope policy as access tokens of its owner.
+// The tokens an authorized integration mints follow the same scope policy as access tokens of its owner, and the
+// integration itself the expiry policy.
 func validateAuthorizedIntegrationScopePolicy(ctx context.Context, ai *auth_model.AuthorizedIntegration) error {
+	if err := authz.ValidateExpiry(setting.AuthorizedIntegrationExpiry, ai.ExpiresUnix); err != nil {
+		return err
+	}
 	owner, err := user_model.GetUserByID(ctx, ai.UserID)
 	if err != nil {
 		return err

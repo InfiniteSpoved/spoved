@@ -54,6 +54,12 @@ type AuthorizedIntegration struct {
 
 	CreatedUnix timeutil.TimeStamp `xorm:"NOT NULL created"`
 	UpdatedUnix timeutil.TimeStamp `xorm:"NOT NULL updated"`
+	ExpiresUnix timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"` // 0 = never
+}
+
+// IsExpired reports whether the integration has an expiry date that has passed.
+func (ai *AuthorizedIntegration) IsExpired() bool {
+	return ai.ExpiresUnix != 0 && timeutil.TimeStampNow() >= ai.ExpiresUnix
 }
 
 func init() {
