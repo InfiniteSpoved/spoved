@@ -822,6 +822,7 @@
 	"settings.authorized_integration.desc": "Authorized integrations allow spoved to receive signed JWTs, validate their claims against configured rules, and permit them to access spoved's APIs.",
 	"settings.authorized_integration.ui.generic": "Generic JWT",
 	"settings.authorized_integration.ui.forgejo_actions_local": "Forgejo Actions (Local)",
+	"settings.authorized_integration.expired_needs_new_date": "This integration has expired. Set a new expiry date to save it.",
 	"settings.authorized_integration.none": "No authorized integrations currently configured.",
 	"settings.authorized_integration.edit": "Edit",
 	"settings.authorized_integration.edit_page_title": "Authorized Integration <b>%s</b>",

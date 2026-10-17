@@ -197,6 +197,7 @@ func EditAuthorizedIntegrationPost(ctx *context.Context) {
 	ai.Issuer = issuer
 	ai.ClaimRules = claimRules
 
+	wasExpired := ai.IsExpired()
 	rr, err := form.baseForm().copyFormToAuthorizedIntegration(ctx, ai)
 	if err != nil {
 		editAuthorizedIntegrationErrorHandler(ctx, err)
@@ -204,6 +205,12 @@ func EditAuthorizedIntegrationPost(ctx *context.Context) {
 	}
 
 	if err := auth_service.UpdateAuthorizedIntegration(ctx, ai, rr); err != nil {
+		if wasExpired && errors.Is(err, authz.ErrExpiryInPast) {
+			ctx.Data["Err_ExpiresAt"] = true
+			ctx.Flash.Error(ctx.Tr("settings.authorized_integration.expired_needs_new_date"), true)
+			EditAuthorizedIntegrationRenderCommon(ctx)
+			return
+		}
 		editAuthorizedIntegrationErrorHandler(ctx, err)
 		return
 	}
@@ -320,6 +327,12 @@ func editAuthorizedIntegrationErrorHandler(ctx *context.Context, err error) {
 		EditAuthorizedIntegrationRenderCommon(ctx)
 		return
 	}
+	if has, msg := user.TranslateExpiryError(ctx.Base, err, setting.AuthorizedIntegrationExpiry).Get(); has {
+		ctx.Data["Err_ExpiresAt"] = true
+		ctx.Flash.Error(msg, true)
+		EditAuthorizedIntegrationRenderCommon(ctx)
+		return
+	}
 
 	ctx.ServerError("UpdateAuthorizedIntegration", err)
 }
@@ -343,6 +356,9 @@ func EditAuthorizedIntegrationRenderCommon(ctx *context.Context) {
 	}
 	slices.Sort(categories)
 	ctx.Data["Categories"] = categories
+
+	ctx.Data["expires_at"] = ctx.Data["Form"].(authorizedIntegrationUIForm).baseForm().ExpiresAt
+	user.SetExpiryFormData(ctx.Base, setting.AuthorizedIntegrationExpiry)
 
 	repoMultiSelect(ctx)
 	if ctx.Written() {

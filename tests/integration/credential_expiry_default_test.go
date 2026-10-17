@@ -220,7 +220,7 @@ func TestCredentialExpiryDefaultCLI(t *testing.T) {
 	// The CLI runs in another process: give it the test config without the expiry keys, so it gets the default.
 	conf, err := os.ReadFile(setting.CustomConf)
 	require.NoError(t, err)
-	conf = regexp.MustCompile(`(?m)^(SSH_KEY|DEPLOY_KEY|ACCESS_TOKEN|OAUTH2_APP_SECRET)_(EXPIRY_REQUIRED|MAX_LIFETIME_DAYS)\s*=.*$`).ReplaceAll(conf, nil)
+	conf = regexp.MustCompile(`(?m)^(SSH_KEY|DEPLOY_KEY|ACCESS_TOKEN|OAUTH2_APP_SECRET|AUTHORIZED_INTEGRATION)_(EXPIRY_REQUIRED|MAX_LIFETIME_DAYS)\s*=.*$`).ReplaceAll(conf, nil)
 	require.NotContains(t, string(conf), "_MAX_LIFETIME_DAYS")
 	confPath := filepath.Join(t.TempDir(), "app.ini")
 	require.NoError(t, os.WriteFile(confPath, conf, 0o600))
@@ -251,6 +251,32 @@ func TestCredentialExpiryDefaultCLI(t *testing.T) {
 
 		refused(t, generate("cli-too-late", "--expires-at", day(366)))
 		unittest.AssertNotExistsBean(t, &auth_model.AccessToken{UID: 2, Name: "cli-too-late"})
+	})
+
+	t.Run("create-authorized-integration", func(t *testing.T) {
+		create := func(name string, args ...string) error {
+			args = append([]string{
+				"user", "create-authorized-integration", "--username", "user2", "--name", name,
+				"--issuer", "urn:forgejo:authorized-integrations:actions", "--scope", "read:user",
+			}, args...)
+			_, err := runMainApp("admin", args...)
+			return err
+		}
+		require.NoError(t, create("cli-ai-default"))
+		ai := unittest.AssertExistsAndLoadBean(t, &auth_model.AuthorizedIntegration{UserID: 2, Name: "cli-ai-default"})
+		assert.Equal(t, day(365), ai.ExpiresUnix.FormatDate())
+
+		require.NoError(t, create("cli-ai-10-days", "--expires-at", day(10)))
+		ai = unittest.AssertExistsAndLoadBean(t, &auth_model.AuthorizedIntegration{UserID: 2, Name: "cli-ai-10-days"})
+		assert.Equal(t, day(10), ai.ExpiresUnix.FormatDate())
+
+		refused(t, create("cli-ai-too-late", "--expires-at", day(366)))
+		unittest.AssertNotExistsBean(t, &auth_model.AuthorizedIntegration{UserID: 2, Name: "cli-ai-too-late"})
+
+		var exitErr *exec.ExitError
+		require.ErrorAs(t, create("cli-ai-past", "--expires-at", day(-1)), &exitErr)
+		assert.Contains(t, string(exitErr.Stderr), "must be in the future")
+		unittest.AssertNotExistsBean(t, &auth_model.AuthorizedIntegration{UserID: 2, Name: "cli-ai-past"})
 	})
 
 	t.Run("user create --access-token", func(t *testing.T) {
