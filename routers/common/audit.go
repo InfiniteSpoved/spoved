@@ -142,6 +142,23 @@ func RecordAuthFailure(b *context.Base, v *auth_service.AuthenticationAttemptedI
 	}
 }
 
+// AuthFailureReason is the refusal reason for the server log: the name or email of a failed password sign-in is left
+// out (it can be a pasted token), and control characters are replaced so the text can't forge log lines.
+func AuthFailureReason(err error) string {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		reasons := make([]string, 0, len(joined.Unwrap()))
+		for _, e := range joined.Unwrap() {
+			reasons = append(reasons, AuthFailureReason(e))
+		}
+		return strings.Join(reasons, "; ")
+	}
+	if user_model.IsErrUserNotExist(err) || user_model.IsErrEmailAddressNotExist(err) ||
+		errors.As(err, &db.ErrUserPasswordInvalid{}) || errors.As(err, &db.ErrUserPasswordNotSet{}) {
+		return "unknown user or bad password"
+	}
+	return util.StripControl(err.Error())
+}
+
 // CredentialUsed records the first use of the request's credential from its client IP per day; it runs after the
 // rate limit and the IP allowlist, so a refused request records nothing here.
 func CredentialUsed(method string) func(*context.Context) {

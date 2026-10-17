@@ -209,7 +209,7 @@ func (a *AuthorizedIntegration) Verify(req *http.Request, w http.ResponseWriter,
 	}
 
 	if err := authz.CheckScopePolicyInUse(u, authorizedIntegration.Scope, authorizedIntegration.ResourceAllRepos); errors.Is(err, authz.ErrScopePolicyEnforced) {
-		return &auth_service.AuthenticationAttemptedIncorrectCredential{Error: fmt.Errorf("authorized integration: %w; edit the integration's scopes", err), UserID: u.ID}
+		return &auth_service.AuthenticationAttemptedIncorrectCredential{Error: &auth_service.CredentialOwnerError{Err: fmt.Errorf("authorized integration: %w; edit the integration's scopes", err)}, UserID: u.ID}
 	} else if err != nil {
 		return &auth_service.AuthenticationError{Error: fmt.Errorf("authorized integration CheckScopePolicyInUse: %w", err)}
 	}
