@@ -35,7 +35,13 @@ For anything beyond a small fix, write a short plan: what changes (files, functi
 
 ## 5. Check locally
 
-Run what `CONTRIBUTING.md` lists for your change (`make fmt`, the lints, unit tests of the changed packages and their neighbours, the migration test if you added one, the e2e specs that cover your files). Run the integration suite for backend changes. Before calling a failure unrelated, run it on `origin/develop`; the environmental failures already known are listed in `CLAUDE.md`. Re-read your own diff as a reviewer would.
+Run what `CONTRIBUTING.md` lists for your change (`make fmt`, the lints, unit tests of the changed packages and their neighbours, the migration test if you added one, the e2e specs that cover your files). Run the integration suite for backend changes. Before calling a failure unrelated, run it on `origin/develop`; the environmental failures already known are listed in `CLAUDE.md`. Re-read your own diff as a reviewer would. Then use the other skills:
+
+- `tester` on your head: the full local checks, other databases and performance, with every failure classified.
+- `security-review` on your diff when it touches sign-in, permissions, roles, tokens, keys or secrets, input that reaches HTML, SQL, git or a shell, uploads, redirects, webhooks or outbound requests. Fix what it finds before opening the pull request.
+- `screenshots` when the interface changes, and fix what it reports.
+
+If the change adds or changes a user-visible feature, update the feature list in `README.md` and any page under `docs/` it affects, in the same pull request.
 
 ## 6. Commit and open the pull request
 

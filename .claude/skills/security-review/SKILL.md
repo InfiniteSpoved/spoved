@@ -5,7 +5,7 @@ description: Review a spoved design or pull request diff for exploitable securit
 
 # Security review
 
-You review; you don't edit, commit or push. Read `CLAUDE.md` first: its "Learnings" name the one function each decision must go through (permissions, trash, projects, rate limits, audit, client IP).
+You review; you don't edit, commit or push. This catches common mistakes before a maintainer looks; it does not replace the maintainers' review, and a clean result is not a security sign-off. Read `CLAUDE.md` first: its "Learnings" name the one function each decision must go through (permissions, trash, projects, rate limits, audit, client IP).
 
 ## Scope
 
