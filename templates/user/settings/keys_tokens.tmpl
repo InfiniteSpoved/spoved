@@ -7,7 +7,7 @@
 <div class="ui attached segment">
 	<div class="flex-list">
 		<div class="flex-item">
-			{{ctx.Locale.Tr "settings.tokens_desc"}}
+			{{if $.TokensForOtherUser}}{{ctx.Locale.Tr "admin.users.tokens_desc"}}{{else}}{{ctx.Locale.Tr "settings.tokens_desc"}}{{end}}
 		</div>
 		{{range .TokensWithResources}}
 			<div class="flex-item">
@@ -68,7 +68,7 @@
 		{{ctx.Locale.Tr "settings.access_token_regeneration"}}
 	</div>
 	<div class="content">
-		<p>{{ctx.Locale.Tr "settings.access_token_regeneration_desc"}}</p>
+		<p>{{if $.TokensForOtherUser}}{{ctx.Locale.Tr "admin.users.access_token_regeneration_desc"}}{{else}}{{ctx.Locale.Tr "settings.access_token_regeneration_desc"}}{{end}}</p>
 	</div>
 	{{template "base/modal_actions_confirm" (dict "ModalButtonColors" "primary")}}
 </div>
@@ -79,7 +79,7 @@
 		{{ctx.Locale.Tr "settings.access_token_deletion"}}
 	</div>
 	<div class="content">
-		<p>{{ctx.Locale.Tr "settings.access_token_deletion_desc"}}</p>
+		<p>{{if $.TokensForOtherUser}}{{ctx.Locale.Tr "admin.users.access_token_deletion_desc"}}{{else}}{{ctx.Locale.Tr "settings.access_token_deletion_desc"}}{{end}}</p>
 	</div>
 	{{template "base/modal_actions_confirm"}}
 </div>

@@ -45,6 +45,7 @@ func loadUserTokens(ctx *context.Context, u *user_model.User) {
 		return
 	}
 	ctx.Data["ShowAccessTokens"] = true
+	ctx.Data["TokensForOtherUser"] = true
 	user_setting.LoadAccessTokensFor(ctx, u, userTokensLink(u))
 }
 
@@ -69,6 +70,7 @@ func UserTokenNewPost(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("settings.new_access_token")
 	ctx.Data["PageIsAdminUsers"] = true
 	ctx.Data["User"] = u
+	ctx.Data["TokensForOtherUser"] = true
 	user_setting.AccessTokenCreatePostFor(ctx, u, tplUserTokenNew, userEditLink(u))
 }
 
@@ -86,7 +88,7 @@ func UserTokenDelete(ctx *context.Context) {
 		}
 		return
 	}
-	ctx.Flash.Success(ctx.Tr("settings.delete_token_success"))
+	ctx.Flash.Success(ctx.Tr("admin.users.delete_token_success"))
 	ctx.JSONRedirect(userEditLink(u))
 }
 
@@ -105,7 +107,7 @@ func UserTokenRegenerate(ctx *context.Context) {
 		}
 		return
 	}
-	ctx.Flash.Success(ctx.Tr("settings.regenerate_token_success"))
+	ctx.Flash.Success(ctx.Tr("admin.users.regenerate_token_success"))
 	ctx.Flash.Info(t.Token)
 	ctx.JSONRedirect(userEditLink(u))
 }

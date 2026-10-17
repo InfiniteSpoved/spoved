@@ -20,6 +20,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
+	app_context "forgejo.org/services/context"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
@@ -142,6 +143,17 @@ func TestAdminUserTokens(t *testing.T) {
 			assert.Contains(t, body, "admin-made")
 			assert.Contains(t, body, f.priv.FullName())
 			assert.NotContains(t, body, tok.TokenHash)
+			// the admin page speaks of this user's account, never of the admin's
+			assert.Contains(t, body, "The new token has been generated.")
+			assert.Contains(t, body, "These tokens grant access to this user's account")
+			assert.Contains(t, body, "revoke access to this user's account")
+			assert.NotContains(t, body, "your account")
+			assert.NotContains(t, body, "Your new token")
+			// the user's own page keeps its wording
+			own := loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", "/user/settings/keys"), http.StatusOK).Body.String()
+			assert.Contains(t, own, "These tokens grant access to your account")
+			assert.Contains(t, own, "revoke access to your account")
+			assert.NotContains(t, own, "this user's account")
 
 			resp := admin.MakeRequest(t, NewRequest(t, "GET", editURL(2)), http.StatusOK)
 			assert.NotContains(t, resp.Body.String(), value)
@@ -242,6 +254,7 @@ func TestAdminUserTokens(t *testing.T) {
 
 			since := auditMaxID(t)
 			post(t, admin, tokensURL(4, "regenerate"), mine.ID, http.StatusOK)
+			assert.Contains(t, flashText(t, admin), "no longer have access to this user's account")
 			regenerated := unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: mine.ID})
 			assert.NotEqual(t, mine.TokenHash, regenerated.TokenHash)
 			assert.Equal(t, mine.ExpiresUnix, regenerated.ExpiresUnix)
@@ -260,6 +273,7 @@ func TestAdminUserTokens(t *testing.T) {
 
 			since = auditMaxID(t)
 			post(t, admin, tokensURL(4, "delete"), mine.ID, http.StatusOK)
+			assert.Contains(t, flashText(t, admin), "no longer have access to this user's account")
 			unittest.AssertNotExistsBean(t, &auth_model.AccessToken{ID: mine.ID})
 			e = auditOne(t, since, "credential.access_token.deleted")
 			assert.EqualValues(t, 1, e.ActorID)
@@ -338,4 +352,15 @@ func tokenRepoIDs(t *testing.T, tokenID int64) []int64 {
 		ids = append(ids, r.RepoID)
 	}
 	return ids
+}
+
+func flashText(t *testing.T, session *TestSession) string {
+	t.Helper()
+	cookie := session.GetCookie(app_context.CookieNameFlash)
+	require.NotNil(t, cookie)
+	v, err := url.QueryUnescape(cookie.Value)
+	require.NoError(t, err)
+	v, err = url.QueryUnescape(v)
+	require.NoError(t, err)
+	return v
 }

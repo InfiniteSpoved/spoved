@@ -346,7 +346,11 @@ func AccessTokenCreatePostFor(ctx *context.Context, owner *user_model.User, tpl 
 		return
 	}
 
-	ctx.Flash.Success(ctx.Tr("settings.generate_token_success"))
+	if ctx.Data["TokensForOtherUser"] == true {
+		ctx.Flash.Success(ctx.Tr("admin.users.generate_token_success"))
+	} else {
+		ctx.Flash.Success(ctx.Tr("settings.generate_token_success"))
+	}
 	ctx.Flash.Info(t.Token)
 
 	ctx.Redirect(redirect)
