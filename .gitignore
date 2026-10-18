@@ -126,9 +126,6 @@ prime/
 # Direnv configuration
 /.envrc
 
-# nix-direnv generated files
-.direnv/
-
 # Make evidence files
 /.make_evidence
 
