@@ -41,6 +41,10 @@ make build        # frontend and backend
 ./gitea web       # then open http://localhost:3000 for the installer
 ```
 
+### Install on Kubernetes
+
+The [Helm chart](helm/spoved/README.md) installs the published image `ghcr.io/infinitespoved/spoved` on any cluster (AKS, EKS, GKE, on-prem) with an external PostgreSQL database; it has example values for each cloud.
+
 The binary is still called `gitea`. Settings go in `app.ini`; [`custom/conf/app.example.ini`](custom/conf/app.example.ini) lists every key.
 
 ## Why a separate project
