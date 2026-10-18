@@ -45,7 +45,9 @@ Conventions:
 
 ## Continuous integration
 
-Every pull request runs the lints, frontend checks, unit, migration, integration and end-to-end tests. The commit status **CI success** on the head of your pull request must be green before it can be merged. A maintainer runs CI for you; you don't need to do anything. The result shows as the "CI success" status on your pull request.
+Every pull request runs the lints, frontend checks, unit, migration, integration and end-to-end tests on GitHub-hosted runners (`.github/workflows/ci.yml`). The check **CI success** on the head of your pull request must be green before it can be merged.
+
+Pull requests from forks run the same CI. Each run for an outside contributor starts once a maintainer approves it. The `dco` check runs too. Changes under `.github/` (the workflows) need the maintainer's review (`.github/CODEOWNERS`). The lints and tests you can run yourself are listed in the repository's `CLAUDE.md`.
 
 ## License
 

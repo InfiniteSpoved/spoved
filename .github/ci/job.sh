@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# The CI jobs, run by .github/workflows/ci.yml on the Proxmox runners and by the
-# public InfiniteSpoved/spovedBuild workflow, which keeps their output out of its
-# public logs (it only uploads it encrypted). Keep anything that describes this
-# repository in here, not in that workflow.
+# The CI jobs, run by .github/workflows/ci.yml.
 #
 # Usage: job.sh TASK [ARGS]
 #   plan                 writes `tasks`, the jobs to run, to $GITHUB_OUTPUT
@@ -10,9 +7,9 @@
 #   unit SHARD SHARDS | integration SHARD SHARDS | e2e SHARD SHARDS
 #
 # Runs do the checks and the unit tests; with FULL=true they also run the
-# migration, integration and end-to-end tests. Pull requests dispatched with
-# their commits (EVENT=repository_dispatch) that only change files the Go
-# tests cannot depend on skip the unit tests. The unit, integration and end-to-end tests are split into shards that
+# migration, integration and end-to-end tests. Pull requests
+# (EVENT=pull_request) that only change files the Go tests cannot depend on
+# skip the unit tests. The unit, integration and end-to-end tests are split into shards that
 # take a round-robin share of the packages, tests or test files (see shard.sh).
 # Each shard is its own machine, so integration shards share no state.
 set -euo pipefail
@@ -29,7 +26,7 @@ shift
 case $task in
 plan)
   backend=true
-  if [ "$EVENT" = repository_dispatch ]; then
+  if [ "$EVENT" = pull_request ]; then
     files=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
     echo "Changed files:"
     echo "$files"
@@ -51,8 +48,7 @@ plan)
     depth=1
     [ "$RUN_ALL_E2E" = true ] || depth=0
     tasks+=',{"task":"migrations","args":"","depth":"1"}'
-    # the longest jobs, so split finer on GitHub's hosted runners, where public-repository jobs are free;
-    # the self-hosted runners ask for fewer shards (INTEGRATION_SHARDS, E2E_SHARDS)
+    # the longest jobs, so split finer on GitHub's hosted runners, where public-repository jobs are free
     n=${INTEGRATION_SHARDS:-8}
     for ((i = 1; i <= n; i++)); do tasks+=",{\"task\":\"integration\",\"args\":\"$i $n\",\"depth\":\"1\"}"; done
     n=${E2E_SHARDS:-5}
@@ -85,7 +81,7 @@ frontend)
 
 unit)
   # Azure Blob Storage emulator for the azureblob storage tests (TEST_AZURITE_URL)
-  # installed before starting, with retries: registry reads time out now and then on the self-hosted runners
+  # installed before starting, with retries: registry reads time out now and then on the runners
   for attempt in 1 2 3; do
     npm install --no-save --prefix "$RUNNER_TEMP/azurite" azurite@3.37.0 && break
     [ "$attempt" = 3 ] && exit 1
@@ -121,7 +117,7 @@ e2e)
   browser=firefox
   make deps-frontend
   make frontend
-  # the self-hosted runner images ship the browser's system libraries and give jobs no sudo
+  # without root or sudo, the browser's system libraries must already be installed
   if [ "$(id -u)" = 0 ] || sudo -n true 2> /dev/null; then
     npx playwright install --with-deps "$browser"
   else
