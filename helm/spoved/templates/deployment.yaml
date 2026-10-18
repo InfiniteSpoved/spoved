@@ -96,11 +96,14 @@ spec:
           volumeMounts:
             - {name: data, mountPath: /var/lib/gitea}
             - {name: tmp, mountPath: /tmp}
+            - {name: run, mountPath: /run/forgejo}
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: {{ .Values.persistence.existingClaim | default (include "spoved.fullname" .) }}
         - name: tmp
+          emptyDir: {}
+        - name: run
           emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
