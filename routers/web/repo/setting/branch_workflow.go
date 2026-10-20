@@ -6,6 +6,8 @@ package setting
 import (
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/base"
@@ -40,45 +42,67 @@ func BranchWorkflowDeleteMergedPost(ctx *context.Context) {
 }
 
 // PrepareMergedBranches sets the data of the "delete merged branches" section of the settings page at back, and the
-// branches it would delete when preview is set. It deletes nothing.
+// first MaxDeleteMergedBranches branches it may delete when preview is set. It deletes nothing.
 func PrepareMergedBranches(ctx *context.Context, scope repo_service.MergedBranchScope, back string, preview bool) bool {
 	ctx.Data["MergedLink"] = back + "/delete_merged"
 	ctx.Data["MergedBackLink"] = back
 	ctx.Data["MergedShowRepos"] = scope.Repo == nil
+	ctx.Data["MergedConfirmName"] = mergedConfirmName(ctx, scope)
 	if !preview {
 		return true
 	}
-	found, err := repo_service.FindMergedBranches(ctx, scope)
+	found, total, err := repo_service.FindMergedBranches(ctx, scope, repo_service.MaxDeleteMergedBranches)
 	if err != nil {
 		ctx.ServerError("FindMergedBranches", err)
 		return false
 	}
-	count := 0
-	for _, f := range found {
-		count += len(f.Branches)
-	}
 	ctx.Data["MergedPreview"] = true
 	ctx.Data["MergedBranches"] = found
-	ctx.Data["MergedCount"] = count
+	ctx.Data["MergedCount"] = total
+	ctx.Data["MergedMore"] = total > repo_service.MaxDeleteMergedBranches
 	ctx.Data["MaxDeleteMerged"] = repo_service.MaxDeleteMergedBranches
 	return true
 }
 
-// DeleteMergedBranchesPost deletes the merged branches of the scope, at most MaxDeleteMergedBranches at once, and
-// redirects to the settings page at back.
+// mergedConfirmName is what the doer types to confirm a run over several repositories: the organization's name, or
+// "org/project". A single repository needs none.
+func mergedConfirmName(ctx *context.Context, scope repo_service.MergedBranchScope) string {
+	switch {
+	case scope.Group != nil:
+		return ctx.Org.Organization.Name + "/" + scope.Group.Name
+	case scope.Org != nil:
+		return scope.Org.Name
+	}
+	return ""
+}
+
+// DeleteMergedBranchesPost deletes the branches ticked in the preview ("<repo id>:<name>") that are still merged
+// branches of the scope. It returns to the preview while more are left, else to the settings page at back.
 func DeleteMergedBranchesPost(ctx *context.Context, scope repo_service.MergedBranchScope, back string) {
-	deleted, failed, more, err := repo_service.DeleteMergedBranches(ctx, ctx.Doer, scope)
+	if name := mergedConfirmName(ctx, scope); name != "" && !strings.EqualFold(strings.TrimSpace(ctx.FormString("confirm_name")), name) {
+		ctx.Flash.Error(ctx.Tr("repo.settings.delete_merged.confirm_mismatch"))
+		ctx.Redirect(back + "/delete_merged#delete-merged")
+		return
+	}
+	selected := map[int64][]string{}
+	for _, v := range ctx.FormStrings("branch") {
+		id, name, _ := strings.Cut(v, ":")
+		if repoID, err := strconv.ParseInt(id, 10, 64); err == nil && name != "" {
+			selected[repoID] = append(selected[repoID], name)
+		}
+	}
+	deleted, failed, err := repo_service.DeleteMergedBranches(ctx, ctx.Doer, scope, selected)
 	if err != nil {
 		ctx.ServerError("DeleteMergedBranches", err)
 		return
 	}
-	if more {
-		ctx.Flash.Success(ctx.Tr("repo.settings.delete_merged.done_more", deleted))
-	} else {
-		ctx.Flash.Success(ctx.Tr("repo.settings.delete_merged.done", deleted))
-	}
+	ctx.Flash.Success(ctx.Tr("repo.settings.delete_merged.done", deleted))
 	if failed > 0 {
 		ctx.Flash.Warning(ctx.Tr("repo.settings.delete_merged.failed", failed))
+	}
+	if ctx.FormBool("more") {
+		ctx.Redirect(back + "/delete_merged#delete-merged")
+		return
 	}
 	ctx.Redirect(back)
 }

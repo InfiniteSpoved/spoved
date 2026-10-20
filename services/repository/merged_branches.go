@@ -5,6 +5,7 @@ package repository
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"forgejo.org/models/db"
@@ -19,7 +20,7 @@ import (
 	"xorm.io/builder"
 )
 
-// MaxDeleteMergedBranches is how many branches one DeleteMergedBranches call deletes at most.
+// MaxDeleteMergedBranches is how many branches one preview shows and one DeleteMergedBranches call deletes at most.
 const MaxDeleteMergedBranches = 200
 
 // MergedBranchScope names the repositories of a "delete merged branches" run: one repository, the repositories of
@@ -98,50 +99,49 @@ func mergedBranches(ctx context.Context, repo *repo_model.Repository, gitRepo *g
 	return branches, nil
 }
 
-// FindMergedBranches lists, per repository of the scope, the branches DeleteMergedBranches would delete. It deletes
-// nothing.
-func FindMergedBranches(ctx context.Context, scope MergedBranchScope) ([]*MergedBranches, error) {
+// FindMergedBranches lists, per repository of the scope, the first limit branches DeleteMergedBranches may delete,
+// and how many there are in all. It deletes nothing.
+func FindMergedBranches(ctx context.Context, scope MergedBranchScope, limit int) (found []*MergedBranches, total int, err error) {
 	repos, err := mergedBranchRepos(ctx, scope)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	var found []*MergedBranches
 	for _, repo := range repos {
 		gitRepo, err := gitrepo.OpenRepository(ctx, repo)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		branches, err := mergedBranches(ctx, repo, gitRepo)
 		gitRepo.Close()
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		if len(branches) > 0 {
-			found = append(found, &MergedBranches{Repo: repo, Branches: branches})
+		if shown := min(len(branches), limit-min(total, limit)); shown > 0 {
+			found = append(found, &MergedBranches{Repo: repo, Branches: branches[:shown]})
 		}
+		total += len(branches)
 	}
-	return found, nil
+	return found, total, nil
 }
 
-// DeleteMergedBranches deletes, through DeleteBranch, at most MaxDeleteMergedBranches of the branches that
-// FindMergedBranches lists at this moment, and records who started it with the totals. more tells the caller that
-// branches are left; a branch that failed to delete is tried again by the next call.
-func DeleteMergedBranches(ctx context.Context, doer *user_model.User, scope MergedBranchScope) (deleted, failed int, more bool, err error) {
+// DeleteMergedBranches deletes, through DeleteBranch, the selected branches (by repository ID) that are still merged
+// branches of the scope, at most MaxDeleteMergedBranches, and records who started it with the totals. A branch that
+// failed to delete is logged and counted.
+func DeleteMergedBranches(ctx context.Context, doer *user_model.User, scope MergedBranchScope, selected map[int64][]string) (deleted, failed int, err error) {
 	repos, err := mergedBranchRepos(ctx, scope)
 	if err != nil {
-		return 0, 0, false, err
+		return 0, 0, err
 	}
-	touched := 0
+	touched, budget := 0, MaxDeleteMergedBranches
 	for _, repo := range repos {
-		if deleted+failed >= MaxDeleteMergedBranches {
-			more = true
-			break
+		if len(selected[repo.ID]) == 0 || budget == 0 {
+			continue
 		}
-		n, f, left, err := deleteMergedBranchesOf(ctx, doer, repo, MaxDeleteMergedBranches-deleted-failed)
+		n, f, err := deleteMergedBranchesOf(ctx, doer, repo, selected[repo.ID], budget)
 		if err != nil {
-			return deleted, failed, more, err
+			return deleted, failed, err
 		}
-		deleted, failed, more = deleted+n, failed+f, more || left
+		deleted, failed, budget = deleted+n, failed+f, budget-n-f
 		if n > 0 {
 			touched++
 		}
@@ -155,21 +155,23 @@ func DeleteMergedBranches(ctx context.Context, doer *user_model.User, scope Merg
 	default:
 		err = user_model.RecordOrg(ctx, "org.merged_branches.deleted", scope.Org, data)
 	}
-	return deleted, failed, more, err
+	return deleted, failed, err
 }
 
-func deleteMergedBranchesOf(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, limit int) (deleted, failed int, more bool, err error) {
+func deleteMergedBranchesOf(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, selected []string, limit int) (deleted, failed int, err error) {
 	gitRepo, err := gitrepo.OpenRepository(ctx, repo)
 	if err != nil {
-		return 0, 0, false, err
+		return 0, 0, err
 	}
 	defer gitRepo.Close()
-	branches, err := mergedBranches(ctx, repo, gitRepo)
-	if err != nil || len(branches) == 0 {
-		return 0, 0, false, err
+	merged, err := mergedBranches(ctx, repo, gitRepo)
+	if err != nil {
+		return 0, 0, err
 	}
-	if len(branches) > limit {
-		branches, more = branches[:limit], true
+	branches := slices.DeleteFunc(merged, func(b string) bool { return !slices.Contains(selected, b) })
+	branches = branches[:min(len(branches), limit)]
+	if len(branches) == 0 {
+		return 0, 0, nil
 	}
 	locked := PersonalRepoLocked(ctx, repo)
 	for _, name := range branches {
@@ -181,5 +183,5 @@ func deleteMergedBranchesOf(ctx context.Context, doer *user_model.User, repo *re
 		deleted++
 	}
 	ShrinkAfterDelete(ctx, repo, locked && deleted > 0)
-	return deleted, failed, more, nil
+	return deleted, failed, nil
 }
