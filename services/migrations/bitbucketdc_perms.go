@@ -25,6 +25,7 @@ import (
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 	"forgejo.org/services/authz"
+	"forgejo.org/services/branchworkflow"
 	repo_service "forgejo.org/services/repository"
 	"forgejo.org/services/usergroup"
 )
@@ -45,6 +46,7 @@ type bitbucketPermission struct {
 	ruleOpts                            git_model.WhitelistOptions
 	pushKeys, deleteKeys, forcePushKeys []*BitbucketImportItem
 	hook                                *webhook_model.Webhook
+	branchingModel                      *repo_model.BranchingModel
 }
 
 type bitbucketAccount struct {
@@ -298,6 +300,9 @@ func (p *bitbucketPlanner) plan(owner *BitbucketImportItem, endpoint string) err
 	}
 	if owner.Kind == "repository" {
 		if err := p.planKeys(owner, "keys/1.0/projects/"+p.project.key+"/repos/"+owner.slug+"/ssh"); err != nil {
+			return err
+		}
+		if err := p.planBranchingModel(owner); err != nil {
 			return err
 		}
 		return p.planRulesAndHooks(owner, "projects/"+p.project.key+"/repos/"+owner.slug)
@@ -573,7 +578,7 @@ func applyBitbucketPermissions(ctx context.Context, doer *user_model.User, org *
 		parent := item.parent
 		var owner *BitbucketImportItem // the project or repository the grant needs
 		switch item.Kind {
-		case "team", "collaborator", "key", "rule", "hook":
+		case "team", "collaborator", "key", "rule", "hook", "branching_model":
 			owner = parent
 		}
 		if owner != nil && owner.group == nil && owner.repo == nil {
@@ -653,6 +658,14 @@ func applyBitbucketPermissions(ctx context.Context, doer *user_model.User, org *
 			err = applyBitbucketRule(ctx, org, owner, item)
 		case "hook":
 			err = applyBitbucketHook(ctx, org, owner, item)
+		case "branching_model":
+			err = branchworkflow.SetRepoModel(ctx, owner.repo, item.branchingModel)
+			switch {
+			case errors.Is(err, branchworkflow.ErrLocked):
+				status, err, item.Reason = BitbucketSkipped, nil, "the organization enforces a branching model"
+			case errors.Is(err, branchworkflow.ErrNoPullRequests):
+				status, err, item.Reason = BitbucketSkipped, nil, "pull requests are off in the repository"
+			}
 		}
 		if err != nil {
 			failure(item, err)

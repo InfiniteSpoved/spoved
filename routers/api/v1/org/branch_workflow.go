@@ -89,3 +89,84 @@ func EditBranchWorkflow(ctx *context.APIContext) {
 	}
 	ctx.JSON(http.StatusOK, form)
 }
+
+func renderBranchingModel(ctx *context.APIContext) {
+	model, locked, err := branchworkflow.GetOrgModel(ctx, ctx.Org().Organization.AsUser())
+	if err != nil {
+		ctx.ServerError("GetOrgModel", err)
+		return
+	}
+	res := &api.OrgBranchingModel{ReleasePrefixes: []string{}, Enforce: locked}
+	if model != nil {
+		res.DevelopmentBranch = model.DevelopmentBranch
+		res.ReleasePrefixes = append(res.ReleasePrefixes, model.ReleasePrefixes...)
+	}
+	ctx.JSON(http.StatusOK, res)
+}
+
+// GetBranchingModel returns the branching model of an organization
+func GetBranchingModel(ctx *context.APIContext) {
+	// swagger:operation GET /orgs/{org}/branching-model organization orgGetBranchingModel
+	// ---
+	// summary: Get the branching model of an organization
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: org
+	//   in: path
+	//   description: name of the organization
+	//   type: string
+	//   required: true
+	// responses:
+	//   "200":
+	//     "$ref": "#/responses/OrgBranchingModel"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+
+	renderBranchingModel(ctx)
+}
+
+// EditBranchingModel changes the branching model of an organization
+func EditBranchingModel(ctx *context.APIContext) {
+	// swagger:operation PUT /orgs/{org}/branching-model organization orgEditBranchingModel
+	// ---
+	// summary: Change the branching model of an organization
+	// consumes:
+	// - application/json
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: org
+	//   in: path
+	//   description: name of the organization
+	//   type: string
+	//   required: true
+	// - name: body
+	//   in: body
+	//   required: true
+	//   schema:
+	//     "$ref": "#/definitions/OrgBranchingModel"
+	// responses:
+	//   "200":
+	//     "$ref": "#/responses/OrgBranchingModel"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
+
+	form := web.GetForm(ctx).(*api.OrgBranchingModel)
+	err := branchworkflow.SetOrgModel(ctx, ctx.Org().Organization.AsUser(), &repo_model.BranchingModel{DevelopmentBranch: form.DevelopmentBranch, ReleasePrefixes: form.ReleasePrefixes}, form.Enforce)
+	if _, ok := branchworkflow.IsInvalidBranchingModel(err); ok || errors.Is(err, branchworkflow.ErrLockWithoutValue) || errors.Is(err, branchworkflow.ErrTooManyReleasePrefixes) {
+		ctx.Error(http.StatusUnprocessableEntity, "SetOrgModel", err)
+		return
+	}
+	if err != nil {
+		ctx.ServerError("SetOrgModel", err)
+		return
+	}
+	renderBranchingModel(ctx)
+}

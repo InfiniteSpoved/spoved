@@ -4,6 +4,7 @@
 package migrations
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/validation"
 	webhook_module "forgejo.org/modules/webhook"
+	"forgejo.org/services/branchworkflow"
 	pull_service "forgejo.org/services/pull"
 	webhook_service "forgejo.org/services/webhook"
 
@@ -644,4 +646,66 @@ func applyBitbucketHook(ctx context.Context, org *organization.Organization, own
 		}
 		return webhook_model.CreateWebhook(ctx, &w, "")
 	})
+}
+
+type bitbucketBranchModel struct {
+	Development *struct {
+		DisplayID string `json:"displayId"`
+		IsDefault bool   `json:"isDefault"`
+	} `json:"development"`
+	Types []struct {
+		ID     string `json:"id"`
+		Prefix string `json:"prefix"`
+	} `json:"types"`
+}
+
+// planBranchingModel plans the branching model that applies to a Bitbucket repository, its own or its project's, as
+// the repository's own branching model: the development branch (none when it is the default branch) and the release
+// prefix. Bitbucket's automatic merging follows only release branches, so the other branch types are left out.
+func (p *bitbucketPlanner) planBranchingModel(owner *BitbucketImportItem) error {
+	var bm bitbucketBranchModel
+	if err := p.d.callAPI("branch-utils/1.0/projects/"+p.project.key+"/repos/"+owner.slug+"/branchmodel", nil, &bm); errors.Is(err, errBitbucketNotFound) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	model := &repo_model.BranchingModel{}
+	if bm.Development != nil && !bm.Development.IsDefault {
+		model.DevelopmentBranch = bm.Development.DisplayID
+	}
+	for _, t := range bm.Types {
+		if t.ID == "RELEASE" {
+			model.ReleasePrefixes = append(model.ReleasePrefixes, t.Prefix)
+		}
+	}
+	item := &BitbucketImportItem{Kind: "branching_model", Bitbucket: owner.Bitbucket + " branching model", Target: owner.Name, bitbucketPermission: bitbucketPermission{parent: owner}}
+	model, err := branchworkflow.NormalizeBranchingModel(model)
+	if err != nil {
+		p.add(item, BitbucketSkipped, "not a valid branch name or prefix")
+		return nil
+	}
+	if len(model.ReleasePrefixes) == 0 {
+		return nil
+	}
+	item.Name = util.StripControl(strings.Join(model.ReleasePrefixes, ", ") + " → " + cmp.Or(model.DevelopmentBranch, "default branch"))
+	item.branchingModel = model
+
+	status, reason := BitbucketPlanned, ""
+	if _, locked, err := branchworkflow.GetOrgModel(p.ctx, p.org.AsUser()); err != nil {
+		return err
+	} else if locked {
+		status, reason = BitbucketSkipped, "the organization enforces a branching model"
+	} else if owner.repo != nil {
+		eff, err := branchworkflow.GetEffectiveModel(p.ctx, owner.repo)
+		if err != nil {
+			return err
+		}
+		if eff.Configured != nil && reflect.DeepEqual(eff.Configured, model) {
+			status = BitbucketReused
+		} else if eff.Configured != nil {
+			status, reason = BitbucketSkipped, "the repository has its own branching model, kept as is"
+		}
+	}
+	p.add(item, status, reason)
+	return nil
 }

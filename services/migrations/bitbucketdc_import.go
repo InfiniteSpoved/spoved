@@ -64,7 +64,7 @@ const (
 // BitbucketImportItem is a project, repository, permission or key of an import. Text from the Bitbucket server is
 // stripped of control characters.
 type BitbucketImportItem struct {
-	Kind      string `json:"kind"`             // "project", "repository", "team", "member", "group", "collaborator", "key" or "permission"
+	Kind      string `json:"kind"`             // "project", "repository", "team", "member", "group", "collaborator", "key", "rule", "hook", "branching_model" or "permission"
 	Bitbucket string `json:"bitbucket"`        // KEY, KEY/slug, a user or group name, "KEY key 1", ...
 	Name      string `json:"name"`             // the path, team, login, user group or key name in spoved
 	Target    string `json:"target,omitempty"` // the team, repository or project a grant or key lands on

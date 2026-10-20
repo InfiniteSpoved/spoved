@@ -23,5 +23,69 @@
 				{{end}}
 			</form>
 		</div>
+		<h4 class="ui top attached header" id="branching-model">
+			{{ctx.Locale.Tr "repo.settings.branching_model"}}
+		</h4>
+		<div class="ui attached segment">
+			<form class="ui form" action="{{.Link}}/branching_model" method="post">
+				<p>{{ctx.Locale.Tr "repo.settings.branching_model.desc"}}</p>
+				{{if .ModelLocked}}
+				<p class="help">{{.ModelSetBy}}</p>
+				{{else if .OwnerIsOrg}}
+				<div class="field">
+					<div class="ui checkbox">
+						<input id="inherit" name="inherit" type="checkbox" {{if .ModelInherit}}checked{{end}}>
+						<label for="inherit">{{ctx.Locale.Tr "repo.settings.branching_model.inherit"}}</label>
+						<p class="help">{{if .ModelInheritDesc}}{{.ModelInheritDesc}}{{else}}{{ctx.Locale.Tr "repo.settings.branching_model.inherit_desc"}}{{end}}</p>
+					</div>
+				</div>
+				{{end}}
+				<div class="two fields">
+					<div class="field">
+						<label for="development_branch">{{ctx.Locale.Tr "repo.settings.branching_model.development_branch"}}</label>
+						<input id="development_branch" name="development_branch" value="{{.DevelopmentBranch}}" placeholder="{{.Repository.DefaultBranch}}" maxlength="255" {{if .ModelLocked}}disabled{{end}}>
+						<p class="help">{{ctx.Locale.Tr "repo.settings.branching_model.development_branch_desc"}}</p>
+					</div>
+					<div class="field">
+						<label for="release_prefixes">{{ctx.Locale.Tr "repo.settings.branching_model.release_prefixes"}}</label>
+						<input id="release_prefixes" name="release_prefixes" value="{{.ReleasePrefixes}}" placeholder="release/" maxlength="1100" {{if .ModelLocked}}disabled{{end}}>
+						<p class="help">{{ctx.Locale.Tr "repo.settings.branching_model.release_prefixes_desc"}}</p>
+					</div>
+				</div>
+				{{if not .ModelLocked}}
+				<div class="field">
+					<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+				</div>
+				{{end}}
+			</form>
+		</div>
+		<h4 class="ui top attached header" id="chain-preview">
+			{{ctx.Locale.Tr "repo.settings.branching_model.preview"}}
+		</h4>
+		<div class="ui attached segment">
+			{{if not .HasModel}}
+			<p>{{ctx.Locale.Tr "repo.settings.branching_model.preview_none"}}</p>
+			{{else}}
+			{{if .Chain.Releases}}
+			<p>{{ctx.Locale.Tr "repo.settings.branching_model.preview_desc"}}</p>
+			<div class="flex-text-block tw-flex-wrap branching-model-chain">
+				{{range .Chain.Releases}}<span class="ui basic label">{{.}}</span>{{svg "octicon-arrow-right"}}{{end}}
+				<span class="ui primary basic label">{{.Chain.Development}}</span>
+			</div>
+			{{else}}
+			<p>{{ctx.Locale.Tr "repo.settings.branching_model.preview_no_releases"}}</p>
+			{{end}}
+			{{if .Chain.DevelopmentMissing}}
+			<div class="ui warning message">{{ctx.Locale.Tr "repo.settings.branching_model.development_missing" .Chain.Development}}</div>
+			{{end}}
+			{{if .Chain.Ignored}}
+			<div class="ui warning message branching-model-ignored">
+				<p>{{ctx.Locale.Tr "repo.settings.branching_model.ignored"}}</p>
+				<ul>{{range .Chain.Ignored}}<li><code>{{.}}</code></li>{{end}}</ul>
+				{{if .IgnoredMore}}<p>{{ctx.Locale.Tr "repo.settings.branching_model.ignored_more" .IgnoredMore}}</p>{{end}}
+			</div>
+			{{end}}
+			{{end}}
+		</div>
 	</div>
 {{template "repo/settings/layout_footer" .}}
