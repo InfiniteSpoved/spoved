@@ -4,7 +4,7 @@
 			{{ctx.Locale.Tr "repo.settings.branch_workflow"}}
 		</h4>
 		<div class="ui attached segment">
-			<form class="ui form" action="{{.Link}}" method="post">
+			<form class="ui form" action="{{.RepoLink}}/settings/branch_workflow" method="post">
 				<div class="field">
 					<label for="delete_after_merge">{{ctx.Locale.Tr "repo.settings.branch_workflow.delete_after_merge"}}</label>
 					<select id="delete_after_merge" name="delete_after_merge" class="ui dropdown" {{if .Locked}}disabled{{end}}>
@@ -27,7 +27,7 @@
 			{{ctx.Locale.Tr "repo.settings.branching_model"}}
 		</h4>
 		<div class="ui attached segment">
-			<form class="ui form" action="{{.Link}}/branching_model" method="post">
+			<form class="ui form" action="{{.RepoLink}}/settings/branch_workflow/branching_model" method="post">
 				<p>{{ctx.Locale.Tr "repo.settings.branching_model.desc"}}</p>
 				{{if .ModelLocked}}
 				<p class="help">{{.ModelSetBy}}</p>
@@ -87,5 +87,6 @@
 			{{end}}
 			{{end}}
 		</div>
+		{{template "shared/delete_merged_branches" .}}
 	</div>
 {{template "repo/settings/layout_footer" .}}

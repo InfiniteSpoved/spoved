@@ -11,15 +11,31 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/web"
+	repo_setting "forgejo.org/routers/web/repo/setting"
 	"forgejo.org/services/branchworkflow"
 	"forgejo.org/services/context"
 	"forgejo.org/services/forms"
+	repo_service "forgejo.org/services/repository"
 )
 
 const tplSettingsBranchWorkflow base.TplName = "org/settings/branch_workflow"
 
 // BranchWorkflow renders the organization's branch workflow settings.
 func BranchWorkflow(ctx *context.Context) {
+	renderBranchWorkflow(ctx, false)
+}
+
+// BranchWorkflowDeleteMerged renders the branch workflow settings with the merged branches that would be deleted.
+func BranchWorkflowDeleteMerged(ctx *context.Context) {
+	renderBranchWorkflow(ctx, true)
+}
+
+// BranchWorkflowDeleteMergedPost deletes the merged branches of every repository of the organization.
+func BranchWorkflowDeleteMergedPost(ctx *context.Context) {
+	repo_setting.DeleteMergedBranchesPost(ctx, repo_service.MergedBranchScope{Org: ctx.Org.Organization.AsUser()}, ctx.Org.OrgLink+"/settings/branch_workflow")
+}
+
+func renderBranchWorkflow(ctx *context.Context, preview bool) {
 	ctx.Data["Title"] = ctx.Tr("org.settings.branch_workflow")
 	ctx.Data["PageIsOrgSettings"] = true
 	ctx.Data["PageIsOrgSettingsBranchWorkflow"] = true
@@ -40,6 +56,9 @@ func BranchWorkflow(ctx *context.Context) {
 		ctx.Data["ReleasePrefixes"] = strings.Join(model.ReleasePrefixes, ", ")
 	}
 	ctx.Data["EnforceModel"] = modelLocked
+	if !repo_setting.PrepareMergedBranches(ctx, repo_service.MergedBranchScope{Org: ctx.Org.Organization.AsUser()}, ctx.Org.OrgLink+"/settings/branch_workflow", preview) {
+		return
+	}
 	ctx.HTML(http.StatusOK, tplSettingsBranchWorkflow)
 }
 

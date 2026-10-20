@@ -176,6 +176,7 @@ var Actions = map[string]string{
 	"credential.ssh_key.expired":                CategoryCredential,
 
 	"org.branch_workflow.changed":          CategoryOrg,
+	"org.merged_branches.deleted":          CategoryOrg,
 	"org.organization.archived":            CategoryOrg,
 	"org.organization.created":             CategoryOrg,
 	"org.organization.deleted":             CategoryOrg,
@@ -186,6 +187,7 @@ var Actions = map[string]string{
 	"org.organization.updated":             CategoryOrg,
 	"org.project.created":                  CategoryOrg,
 	"org.project.deleted":                  CategoryOrg,
+	"org.project.merged_branches_deleted":  CategoryOrg,
 	"org.project.renamed":                  CategoryOrg,
 	"repo.branch.deleted":                  CategoryRepo,
 	"repo.branch_workflow.changed":         CategoryRepo,
@@ -193,6 +195,7 @@ var Actions = map[string]string{
 	"repo.collaborator.added":              CategoryRepo,
 	"repo.collaborator.mode_changed":       CategoryRepo,
 	"repo.collaborator.removed":            CategoryRepo,
+	"repo.merged_branches.deleted":         CategoryRepo,
 	"repo.mirror.updated":                  CategoryRepo,
 	"repo.repository.archived":             CategoryRepo,
 	"repo.repository.created":              CategoryRepo,

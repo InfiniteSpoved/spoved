@@ -70,6 +70,9 @@
 			<div class="tw-flex tw-items-center">
 				{{ctx.Locale.Tr "repo.branches"}}
 			</div>
+			{{if and $.Permission.IsAdmin (not $.Repository.IsArchived) (not $.Repository.IsMirror)}}
+				<a class="ui tiny button" href="{{.RepoLink}}/settings/branch_workflow/delete_merged#delete-merged">{{ctx.Locale.Tr "repo.settings.delete_merged"}}</a>
+			{{end}}
 		</h4>
 
 		<div class="ui attached segment">

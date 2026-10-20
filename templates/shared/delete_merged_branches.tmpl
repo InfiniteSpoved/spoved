@@ -1,0 +1,44 @@
+<h4 class="ui top attached header tw-mt-4" id="delete-merged">
+	{{ctx.Locale.Tr "repo.settings.delete_merged"}}
+</h4>
+<div class="ui attached segment">
+	<p>{{ctx.Locale.Tr "repo.settings.delete_merged.desc"}}</p>
+	{{if .MergedPreview}}
+		{{if .MergedBranches}}
+			<form class="ui form ignore-dirty" action="{{.MergedLink}}" method="post">
+				<p>{{if .MergedMore}}{{ctx.Locale.Tr "repo.settings.delete_merged.count_more" .MergedCount}}{{else}}{{ctx.Locale.TrPluralString .MergedCount "repo.settings.delete_merged.count" .MergedCount}}{{end}}</p>
+				{{if .MergedMore}}<input type="hidden" name="more" value="true">{{end}}
+				<div class="flex-list">
+					{{range .MergedBranches}}
+						{{$repoID := .Repo.ID}}
+						<div class="flex-item">
+							<div class="flex-item-main">
+								{{if $.MergedShowRepos}}<div class="flex-item-title tw-break-anywhere"><a href="{{.Repo.Link}}/branches">{{.Repo.FullName}}</a> ({{len .Branches}})</div>{{end}}
+								<div class="tw-flex tw-flex-wrap tw-gap-2">
+									{{range .Branches}}
+										<label class="tw-flex tw-items-center tw-gap-1 tw-break-anywhere"><input type="checkbox" name="branch" value="{{$repoID}}:{{.}}" checked>{{.}}</label>
+									{{end}}
+								</div>
+							</div>
+						</div>
+					{{end}}
+				</div>
+				{{if .MergedConfirmName}}
+					<div class="required field tw-mt-4">
+						<label for="confirm_name">{{ctx.Locale.Tr "repo.settings.delete_merged.confirm_name" .MergedConfirmName}}</label>
+						<input id="confirm_name" name="confirm_name" autocomplete="off" required>
+					</div>
+				{{end}}
+				<div class="tw-mt-4">
+					<button class="ui red button">{{ctx.Locale.Tr "repo.settings.delete_merged.confirm"}}</button>
+					<a class="ui button" href="{{.MergedBackLink}}">{{ctx.Locale.Tr "cancel"}}</a>
+				</div>
+			</form>
+		{{else}}
+			<p>{{ctx.Locale.Tr "repo.settings.delete_merged.none"}}</p>
+			<a class="ui button" href="{{.MergedBackLink}}">{{ctx.Locale.Tr "repo.settings.delete_merged.back"}}</a>
+		{{end}}
+	{{else}}
+		<a class="ui button" href="{{.MergedLink}}#delete-merged">{{ctx.Locale.Tr "repo.settings.delete_merged.preview"}}</a>
+	{{end}}
+</div>
