@@ -1,0 +1,31 @@
+# EKS: EBS gp3, AWS Load Balancer Controller (ALB for HTTP, NLB for SSH), Amazon RDS for PostgreSQL.
+rootUrl: https://git.example.com/
+sshDomain: ssh.example.com
+database:
+  host: spoved.abcdefghij.eu-west-1.rds.amazonaws.com:5432
+  existingSecret: spoved-db
+persistence:
+  storageClassName: gp3
+service:
+  http:
+    type: ClusterIP
+  ssh:
+    enabled: true
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: external
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /api/healthz
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:eu-west-1:111122223333:certificate/example
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+  hosts:
+    - host: git.example.com
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/spoved

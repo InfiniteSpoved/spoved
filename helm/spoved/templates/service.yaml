@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "spoved.fullname" . }}-http
+  labels:
+    {{- include "spoved.labels" . | nindent 4 }}
+  {{- with .Values.service.http.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.http.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.http.port }}
+      targetPort: http
+  selector:
+    {{- include "spoved.selector" . | nindent 4 }}
+{{- if .Values.service.ssh.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "spoved.fullname" . }}-ssh
+  labels:
+    {{- include "spoved.labels" . | nindent 4 }}
+  {{- with .Values.service.ssh.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.ssh.type }}
+  {{- with .Values.service.ssh.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ . }}
+  {{- end }}
+  ports:
+    - name: ssh
+      port: {{ .Values.service.ssh.port }}
+      targetPort: ssh
+  selector:
+    {{- include "spoved.selector" . | nindent 4 }}
+{{- end }}
