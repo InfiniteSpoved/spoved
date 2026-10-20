@@ -100,9 +100,9 @@ func DeleteMergedBranchesPost(ctx *context.Context, scope repo_service.MergedBra
 		ctx.ServerError("DeleteMergedBranches", err)
 		return
 	}
-	ctx.Flash.Success(ctx.Tr("repo.settings.delete_merged.done", deleted))
+	ctx.Flash.Success(ctx.Locale.TrPluralString(deleted, "repo.settings.delete_merged.done", deleted))
 	if failed > 0 {
-		ctx.Flash.Warning(ctx.Tr("repo.settings.delete_merged.failed", failed))
+		ctx.Flash.Warning(ctx.Locale.TrPluralString(failed, "repo.settings.delete_merged.failed", failed))
 	}
 	if ctx.FormBool("more") {
 		ctx.Redirect(back + "/delete_merged#delete-merged")

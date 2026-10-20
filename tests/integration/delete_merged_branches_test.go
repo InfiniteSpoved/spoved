@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"testing"
 
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
@@ -93,7 +94,7 @@ func TestDeleteMergedBranches(t *testing.T) {
 		since := auditMaxID(t)
 		// a branch that isn't merged is never deleted, even when posted
 		dmPost(t, s, link, "", id+":merged-old", id+":unmerged", id+":prot-merged")
-		assert.Contains(t, bwFlash(s), "Deleted 1 merged branches.")
+		assert.Contains(t, bwFlash(s), "Deleted 1 merged branch.")
 		assert.ElementsMatch(t, []string{"master", "merged-keep", "prot-merged", "pr-base", "at-tip", "unmerged"}, dmBranches(t, repo))
 		e := repoOne(t, since, "repo.merged_branches.deleted", repo)
 		assert.Equal(t, map[string]any{"deleted": float64(1), "failed": float64(0), "repos": float64(1)}, auditData(t, e)["counts"])
@@ -106,9 +107,9 @@ func TestDeleteMergedBranches(t *testing.T) {
 		archived := dmRepo(t, s, "dm-archived")
 		_, err := db.GetEngine(t.Context()).Exec("UPDATE repository SET is_archived = ? WHERE id = ?", true, archived.ID)
 		require.NoError(t, err)
-		group, err := repo_model.CreateRepoGroup(t.Context(), org, "dm-group", "")
+		group, err := repo_model.CreateRepoGroup(audit_model.WithCLI(t.Context()), org, "dm-group", "")
 		require.NoError(t, err)
-		require.NoError(t, repo_service.MoveRepository(t.Context(), unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), inProject, group.ID))
+		require.NoError(t, repo_service.MoveRepository(audit_model.WithCLI(t.Context()), unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), inProject, group.ID))
 		inProject = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: inProject.ID})
 
 		projectLink := group.Link("org3") + "/-/settings/delete_merged"
