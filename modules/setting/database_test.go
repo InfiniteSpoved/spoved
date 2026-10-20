@@ -272,6 +272,13 @@ func Test_loadDBSetting(t *testing.T) {
 
 		cfg, _ = NewConfigProviderFromData(`
 			[database]
+			MAX_OPEN_CONNS = 0
+		`)
+		loadDBSetting(cfg)
+		assert.Equal(t, 2, Database.MaxIdleConns)
+
+		cfg, _ = NewConfigProviderFromData(`
+			[database]
 			MAX_IDLE_CONNS = 5
 		`)
 		loadDBSetting(cfg)

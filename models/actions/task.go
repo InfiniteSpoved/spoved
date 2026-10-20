@@ -222,7 +222,8 @@ func GetRunningTaskByToken(ctx context.Context, token string) (*ActionTask, erro
 
 	lastEight := token[len(token)-8:]
 
-	if cached := getTaskFromCache(token); cached.ID > 0 {
+	cacheKey := auth_model.TokenCacheKey(token)
+	if cached := getTaskFromCache(cacheKey); cached.ID > 0 {
 		task := &ActionTask{
 			TokenLastEight: lastEight,
 			Status:         StatusRunning,
@@ -235,7 +236,7 @@ func GetRunningTaskByToken(ctx context.Context, token string) (*ActionTask, erro
 		if has && task.TokenHash == cached.Hash {
 			return task, nil
 		}
-		successfulTokenTaskCache.Remove(token)
+		successfulTokenTaskCache.Remove(cacheKey)
 	}
 
 	var tasks []*ActionTask
@@ -250,7 +251,7 @@ func GetRunningTaskByToken(ctx context.Context, token string) (*ActionTask, erro
 		tempHash := auth_model.HashToken(token, t.TokenSalt)
 		if subtle.ConstantTimeCompare([]byte(t.TokenHash), []byte(tempHash)) == 1 {
 			if successfulTokenTaskCache != nil {
-				successfulTokenTaskCache.Add(token, auth_model.CachedToken{ID: t.ID, Hash: t.TokenHash})
+				successfulTokenTaskCache.Add(cacheKey, auth_model.CachedToken{ID: t.ID, Hash: t.TokenHash})
 			}
 			return t, nil
 		}
@@ -460,11 +461,11 @@ func FindOldTasksToExpire(ctx context.Context, olderThan timeutil.TimeStamp, lim
 		Find(&tasks)
 }
 
-func getTaskFromCache(token string) auth_model.CachedToken {
+func getTaskFromCache(key string) auth_model.CachedToken {
 	if successfulTokenTaskCache == nil {
 		return auth_model.CachedToken{}
 	}
-	tInterface, ok := successfulTokenTaskCache.Get(token)
+	tInterface, ok := successfulTokenTaskCache.Get(key)
 	if !ok {
 		return auth_model.CachedToken{}
 	}

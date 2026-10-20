@@ -206,6 +206,8 @@ func TestGetAccessTokenBySHACache(t *testing.T) {
 	cached, err := auth_model.GetAccessTokenBySHA(db.DefaultContext, sha)
 	require.NoError(t, err)
 	assert.Equal(t, token.ID, cached.ID)
+	// the cache holds a hash of the token, not the token itself
+	assert.Equal(t, []string{auth_model.TokenCacheKey(sha)}, auth_model.SuccessfulAccessTokenCacheKeys())
 
 	t.Run("hash changed", func(t *testing.T) {
 		// a token regenerated in place keeps its row: the cached ID alone must not authenticate it

@@ -15,3 +15,8 @@ func MockSuccessfulAccessTokenCache(t *testing.T) {
 	successfulAccessTokenCache, _ = lru.New[string, any](10)
 	t.Cleanup(func() { successfulAccessTokenCache = old })
 }
+
+// SuccessfulAccessTokenCacheKeys returns the keys of the successful token cache.
+func SuccessfulAccessTokenCacheKeys() []string {
+	return successfulAccessTokenCache.Keys()
+}

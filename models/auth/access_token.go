@@ -6,6 +6,7 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
@@ -200,11 +201,17 @@ type CachedToken struct {
 	Hash string
 }
 
-func getAccessTokenFromCache(token string) CachedToken {
+// TokenCacheKey is the key of a token in the successful token caches, so they don't hold the tokens themselves.
+func TokenCacheKey(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+func getAccessTokenFromCache(key string) CachedToken {
 	if successfulAccessTokenCache == nil {
 		return CachedToken{}
 	}
-	tInterface, ok := successfulAccessTokenCache.Get(token)
+	tInterface, ok := successfulAccessTokenCache.Get(key)
 	if !ok {
 		return CachedToken{}
 	}
@@ -228,8 +235,9 @@ func GetAccessTokenBySHA(ctx context.Context, token string) (*AccessToken, error
 	}
 
 	lastEight := token[len(token)-8:]
+	cacheKey := TokenCacheKey(token)
 
-	if cached := getAccessTokenFromCache(token); cached.ID > 0 {
+	if cached := getAccessTokenFromCache(cacheKey); cached.ID > 0 {
 		accessToken := &AccessToken{
 			TokenLastEight: lastEight,
 		}
@@ -241,7 +249,7 @@ func GetAccessTokenBySHA(ctx context.Context, token string) (*AccessToken, error
 		if has && accessToken.TokenHash == cached.Hash {
 			return checkAccessTokenExpiry(accessToken)
 		}
-		successfulAccessTokenCache.Remove(token)
+		successfulAccessTokenCache.Remove(cacheKey)
 	}
 
 	var tokens []AccessToken
@@ -256,7 +264,7 @@ func GetAccessTokenBySHA(ctx context.Context, token string) (*AccessToken, error
 		tempHash := HashToken(token, t.TokenSalt)
 		if subtle.ConstantTimeCompare([]byte(t.TokenHash), []byte(tempHash)) == 1 {
 			if successfulAccessTokenCache != nil {
-				successfulAccessTokenCache.Add(token, CachedToken{ID: t.ID, Hash: t.TokenHash})
+				successfulAccessTokenCache.Add(cacheKey, CachedToken{ID: t.ID, Hash: t.TokenHash})
 			}
 			return checkAccessTokenExpiry(&t)
 		}

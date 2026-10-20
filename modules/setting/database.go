@@ -107,8 +107,9 @@ func loadDBSetting(rootCfg ConfigProvider) {
 	}
 
 	Database.MaxOpenConns = sec.Key("MAX_OPEN_CONNS").MustInt(30)
-	// keep the pool open: closing idle connections makes the database open (and authenticate) new ones under load
-	Database.MaxIdleConns = sec.Key("MAX_IDLE_CONNS").MustInt(Database.MaxOpenConns)
+	// keep the pool open: closing idle connections makes the database open (and authenticate) new ones under load;
+	// MAX_OPEN_CONNS = 0 means no limit, and 0 idle connections would mean none are kept
+	Database.MaxIdleConns = sec.Key("MAX_IDLE_CONNS").MustInt(max(Database.MaxOpenConns, 2))
 
 	Database.IterateBufferSize = sec.Key("ITERATE_BUFFER_SIZE").MustInt(50)
 	Database.LogSQL = sec.Key("LOG_SQL").MustBool(false)
