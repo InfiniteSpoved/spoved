@@ -175,6 +175,14 @@ func TestAuditOrgSettings(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, repo_model.DeleteBranchAlways, mode)
 	assert.True(t, locked)
+
+	since = auditMaxID(t)
+	model := &repo_model.BranchingModel{DevelopmentBranch: "develop", ReleasePrefixes: []string{"release/"}}
+	require.NoError(t, branchworkflow.SetOrgModel(ctx, org3.AsUser(), model, true))
+	require.NoError(t, branchworkflow.SetOrgModel(ctx, org3.AsUser(), model, true))
+	data = auditData(t, orgOne(t, since, "org.branch_workflow.changed"))
+	assert.Equal(t, map[string]any{"development_branch": "", "release_prefixes": []any{}, "model_locked": false}, data["before"])
+	assert.Equal(t, map[string]any{"development_branch": "develop", "release_prefixes": []any{"release/"}, "model_locked": true}, data["after"])
 }
 
 // TestAuditOrgSettingsRollback checks that a failed entry fails the change and leaves no new value cached.

@@ -155,7 +155,8 @@ var Fields = map[string][]string{
 	"org": {
 		"name", "visibility", "require_two_factor", "restrict_repo_visibility_change", "private_fork_policy",
 		"repo_admin_change_team_access", "max_repo_creation", "category_id", "is_active", "prohibit_login", "user_id",
-		"counts", "purge", "domain", "verified_by_admin", "required", "units", "mode", "locked",
+		"counts", "purge", "domain", "verified_by_admin", "required", "units", "mode", "locked", "development_branch",
+		"release_prefixes", "model_locked",
 	},
 	"team": {
 		"name", "access_mode", "units", "includes_all_repositories", "can_create_org_repo", "user_id", "inviter_id", "reason",

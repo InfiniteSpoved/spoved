@@ -1296,6 +1296,7 @@ func registerRoutes(m *web.Route) {
 
 				m.Combo("/branch_workflow").Get(org_setting.BranchWorkflow).
 					Post(web.Bind(forms.BranchWorkflowForm{}), org_setting.BranchWorkflowPost)
+				m.Post("/branch_workflow/branching_model", web.Bind(forms.BranchingModelForm{}), org_setting.BranchingModelPost)
 
 				m.Group("/branches", func() {
 					m.Get("", org_setting.ProtectedBranchRules)
@@ -1476,6 +1477,7 @@ func registerRoutes(m *web.Route) {
 
 			m.Combo("/branch_workflow").Get(repo_setting.BranchWorkflow).
 				Post(web.Bind(forms.BranchWorkflowForm{}), context.RepoMustNotBeArchived(), repo_setting.BranchWorkflowPost)
+			m.Post("/branch_workflow/branching_model", web.Bind(forms.BranchingModelForm{}), context.RepoMustNotBeArchived(), repo_setting.BranchingModelPost)
 
 			m.Combo("/push_rules").Get(repo_setting.PushRules).
 				Post(web.Bind(forms.PushRuleForm{}), context.RepoMustNotBeArchived(), repo_setting.PushRulesPost)

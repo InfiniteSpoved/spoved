@@ -20,6 +20,7 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
+	"forgejo.org/services/branchworkflow"
 	"forgejo.org/services/migrations"
 	"forgejo.org/services/migrations/allowlist"
 
@@ -121,6 +122,14 @@ func TestBitbucketImportRules(t *testing.T) {
 				map[string]any{"id": 4, "url": "ftp://hooks.example.com/x", "active": true, "events": []string{"repo:refs_changed"}},
 				map[string]any{"id": 5, "url": "https://hooks.example.com/repo", "active": true, "events": []string{"pr:comment:added"}, "configuration": map[string]string{"secret": hookSecret}},
 			),
+			"branch-utils/1.0/projects/RUL/repos/svc/branchmodel": map[string]any{
+				"development": map[string]any{"displayId": "develop", "isDefault": false},
+				"types":       []map[string]string{{"id": "RELEASE", "prefix": "release/"}, {"id": "HOTFIX", "prefix": "hotfix/"}},
+			},
+			"branch-utils/1.0/projects/RUL/repos/lib/branchmodel": map[string]any{
+				"development": map[string]any{"displayId": "master", "isDefault": true},
+				"types":       []map[string]string{{"id": "FEATURE", "prefix": "feature/"}},
+			},
 			"branch-permissions/2.0/projects/UNM/restrictions": page(
 				restriction("read-only", "MODEL_BRANCH", "production", nil, nil),
 				restriction("read-only", "PATTERN", "refs/tags/*", nil, nil),
@@ -345,12 +354,26 @@ func TestBitbucketImportRules(t *testing.T) {
 			assert.Equal(t, migrations.BitbucketSkipped, item(t, report, "hook", "RUL/svc hook 4").Status)
 		})
 
+		t.Run("branching model", func(t *testing.T) {
+			eff, err := branchworkflow.GetEffectiveModel(ctx, svc)
+			require.NoError(t, err)
+			require.NotNil(t, eff.Configured)
+			assert.Equal(t, repo_model.BranchingModel{DevelopmentBranch: "develop", ReleasePrefixes: []string{"release/"}}, *eff.Configured, "only release branches cascade in Bitbucket")
+			assert.Equal(t, migrations.BitbucketCreated, item(t, report, "branching_model", "RUL/svc branching model").Status)
+
+			lib, err := repo_model.GetRepositoryByPath(ctx, org.ID, group.Name, "lib")
+			require.NoError(t, err)
+			eff, err = branchworkflow.GetEffectiveModel(ctx, lib)
+			require.NoError(t, err)
+			assert.Nil(t, eff.Configured, "no release branch type: nothing to import")
+		})
+
 		t.Run("a rerun creates nothing new", func(t *testing.T) {
 			before := countBitbucketImportRows(t)
 			again := run(t, opts)
 			assert.False(t, again.Blocked)
 			assert.Equal(t, before, countBitbucketImportRows(t))
-			for _, kind := range []string{"rule", "hook"} {
+			for _, kind := range []string{"rule", "hook", "branching_model"} {
 				for _, it := range again.Items {
 					if it.Kind == kind {
 						assert.NotContains(t, []string{migrations.BitbucketPlanned, migrations.BitbucketCreated, migrations.BitbucketFailed}, it.Status, it.Bitbucket)
