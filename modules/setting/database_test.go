@@ -262,6 +262,21 @@ func Test_getPostgreSQLEngineGroupConnectionStrings(t *testing.T) {
 
 func Test_loadDBSetting(t *testing.T) {
 	defer test.MockProtect(&Database)()
+	t.Run("idle connections default to MAX_OPEN_CONNS", func(t *testing.T) {
+		cfg, _ := NewConfigProviderFromData(`
+			[database]
+			MAX_OPEN_CONNS = 50
+		`)
+		loadDBSetting(cfg)
+		assert.Equal(t, 50, Database.MaxIdleConns)
+
+		cfg, _ = NewConfigProviderFromData(`
+			[database]
+			MAX_IDLE_CONNS = 5
+		`)
+		loadDBSetting(cfg)
+		assert.Equal(t, 5, Database.MaxIdleConns)
+	})
 	t.Run("Does not overwrite Passwd", func(t *testing.T) {
 		expectedPassword := "already_set"
 
