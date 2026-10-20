@@ -43,6 +43,10 @@ make build        # frontend and backend
 
 The binary is still called `gitea`. Settings go in `app.ini`; [`custom/conf/app.example.ini`](custom/conf/app.example.ini) lists every key.
 
+### Install on Kubernetes
+
+The [Helm chart](helm/spoved/README.md) installs the published image `ghcr.io/infinitespoved/spoved` on any cluster (AKS, EKS, GKE, on-prem) with an external PostgreSQL database; it has example values for each cloud.
+
 ## Why a separate project
 
 spoved was inspired by teams moving off big vendors that keep raising prices while long-standing customer bugs stay open, such as Bitbucket Data Center, GitLab and GitHub. Anyone moving off them can use spoved.

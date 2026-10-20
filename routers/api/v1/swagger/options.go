@@ -107,6 +107,9 @@ type swaggerParameterBodies struct {
 	EditRepoBranchWorkflowOption api.EditRepoBranchWorkflowOption
 
 	// in:body
+	EditRepoBranchingModelOption api.EditRepoBranchingModelOption
+
+	// in:body
 	CreatePullRequestOption api.CreatePullRequestOption
 	// in:body
 	EditPullRequestOption api.EditPullRequestOption

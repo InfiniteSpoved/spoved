@@ -604,6 +604,13 @@ type swaggerResponseRepoBranchWorkflow struct {
 	Body api.RepoBranchWorkflow `json:"body"`
 }
 
+// RepoBranchingModel
+// swagger:response RepoBranchingModel
+type swaggerResponseRepoBranchingModel struct {
+	// in:body
+	Body api.RepoBranchingModel `json:"body"`
+}
+
 // AccessRowList
 // swagger:response AccessRowList
 type swaggerResponseAccessRowList struct {

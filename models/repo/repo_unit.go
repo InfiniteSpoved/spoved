@@ -249,7 +249,14 @@ type PullRequestsConfig struct {
 	DefaultMergeStyle             MergeStyle
 	DefaultUpdateStyle            UpdateStyle
 	DefaultAllowMaintainerEdit    bool
-	CancelAutoMergeOnPush         bool // a push to the head cancels the pull request's auto merge
+	CancelAutoMergeOnPush         bool            // a push to the head cancels the pull request's auto merge
+	BranchingModel                *BranchingModel // nil inherits from the organization
+}
+
+// BranchingModel names the development branch and the release branches whose names end in a version.
+type BranchingModel struct {
+	DevelopmentBranch string   `json:",omitempty"` // "" is the repository's default branch
+	ReleasePrefixes   []string `json:",omitempty"`
 }
 
 // FromDB fills up a PullRequestsConfig from serialized format.

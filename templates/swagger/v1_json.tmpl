@@ -5593,6 +5593,82 @@
         }
       }
     },
+    "/orgs/{org}/branching-model": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Get the branching model of an organization",
+        "operationId": "orgGetBranchingModel",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/OrgBranchingModel"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "put": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Change the branching model of an organization",
+        "operationId": "orgEditBranchingModel",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/OrgBranchingModel"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/OrgBranchingModel"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/orgs/{org}/hooks": {
       "get": {
         "produces": [
@@ -12258,6 +12334,93 @@
         "responses": {
           "204": {
             "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/branching-model": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Get the branching model of a repository, where it comes from, and its release branches in version order",
+        "operationId": "repoGetBranchingModel",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/RepoBranchingModel"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "put": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Change the branching model of a repository",
+        "operationId": "repoEditBranchingModel",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/EditRepoBranchingModelOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/RepoBranchingModel"
           },
           "403": {
             "$ref": "#/responses/forbidden"
@@ -30334,6 +30497,26 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "BranchingModel": {
+      "description": "BranchingModel names the development branch and the release branch prefixes",
+      "type": "object",
+      "properties": {
+        "development_branch": {
+          "description": "DevelopmentBranch is where every chain of release branches ends; empty is the repository's default branch",
+          "type": "string",
+          "x-go-name": "DevelopmentBranch"
+        },
+        "release_prefixes": {
+          "description": "ReleasePrefixes start the names of release branches; the rest of the name is read as a version",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ReleasePrefixes"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "ChangeFileOperation": {
       "description": "ChangeFileOperation for creating, updating or deleting a file",
       "type": "object",
@@ -33936,6 +34119,29 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "EditRepoBranchingModelOption": {
+      "description": "EditRepoBranchingModelOption options to change the branching model of a repository",
+      "type": "object",
+      "properties": {
+        "development_branch": {
+          "type": "string",
+          "x-go-name": "DevelopmentBranch"
+        },
+        "inherit": {
+          "description": "Inherit removes the repository's own branching model; the other fields are then ignored",
+          "type": "boolean",
+          "x-go-name": "Inherit"
+        },
+        "release_prefixes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ReleasePrefixes"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "EditRepoOption": {
       "description": "EditRepoOption options when editing a repository's properties",
       "type": "object",
@@ -36736,6 +36942,31 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "OrgBranchingModel": {
+      "description": "OrgBranchingModel represents the branching model of an organization, and the body to change it",
+      "type": "object",
+      "properties": {
+        "development_branch": {
+          "description": "DevelopmentBranch is where every chain of release branches ends; empty is each repository's default branch",
+          "type": "string",
+          "x-go-name": "DevelopmentBranch"
+        },
+        "enforce": {
+          "description": "Enforce locks the branching model for all repositories of the organization; it needs a release prefix",
+          "type": "boolean",
+          "x-go-name": "Enforce"
+        },
+        "release_prefixes": {
+          "description": "ReleasePrefixes start the names of release branches; empty removes the branching model",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ReleasePrefixes"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "OrgDeployKey": {
       "description": "OrgDeployKey is a deploy key of an organization, for all its repositories or the selected ones",
       "type": "object",
@@ -38401,6 +38632,55 @@
         },
         "source": {
           "description": "Source tells where the effective value comes from: instance, org or repo",
+          "type": "string",
+          "x-go-name": "Source"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "RepoBranchingModel": {
+      "description": "RepoBranchingModel represents the branching model of a repository and what it makes of the repository's branches",
+      "type": "object",
+      "properties": {
+        "effective": {
+          "$ref": "#/definitions/BranchingModel"
+        },
+        "ignored_branches": {
+          "description": "IgnoredBranches have a release prefix but no version after it",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "IgnoredBranches"
+        },
+        "inherit": {
+          "description": "Inherit is true when the repository has no branching model of its own",
+          "type": "boolean",
+          "x-go-name": "Inherit"
+        },
+        "locked": {
+          "description": "Locked is true when the organization enforces the branching model",
+          "type": "boolean",
+          "x-go-name": "Locked"
+        },
+        "locked_by": {
+          "description": "LockedBy is the organization that enforces the branching model",
+          "type": "string",
+          "x-go-name": "LockedBy"
+        },
+        "own": {
+          "$ref": "#/definitions/BranchingModel"
+        },
+        "release_branches": {
+          "description": "ReleaseBranches are the release branches in version order",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "ReleaseBranches"
+        },
+        "source": {
+          "description": "Source tells where the effective value comes from: none, org or repo",
           "type": "string",
           "x-go-name": "Source"
         }
@@ -41291,6 +41571,12 @@
         "$ref": "#/definitions/OrgBranchWorkflow"
       }
     },
+    "OrgBranchingModel": {
+      "description": "OrgBranchingModel",
+      "schema": {
+        "$ref": "#/definitions/OrgBranchingModel"
+      }
+    },
     "OrgDeployKey": {
       "description": "OrgDeployKey",
       "schema": {
@@ -41668,6 +41954,12 @@
       "description": "RepoBranchWorkflow",
       "schema": {
         "$ref": "#/definitions/RepoBranchWorkflow"
+      }
+    },
+    "RepoBranchingModel": {
+      "description": "RepoBranchingModel",
+      "schema": {
+        "$ref": "#/definitions/RepoBranchingModel"
       }
     },
     "RepoCollaboratorPermission": {

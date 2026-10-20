@@ -1,0 +1,31 @@
+# AKS: Azure Disk, ingress-nginx, Azure Load Balancer for SSH, Azure Database for PostgreSQL.
+rootUrl: https://git.example.com/
+sshDomain: ssh.example.com
+database:
+  host: spoved.postgres.database.azure.com:5432
+  existingSecret: spoved-db
+persistence:
+  storageClassName: managed-csi-premium
+service:
+  ssh:
+    enabled: true
+    externalTrafficPolicy: Local
+    annotations:
+      service.beta.kubernetes.io/azure-load-balancer-health-probe-protocol: tcp
+      # Internal only: service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 512m
+    cert-manager.io/cluster-issuer: letsencrypt
+  hosts:
+    - host: git.example.com
+  tls:
+    - secretName: spoved-tls
+      hosts: [git.example.com]
+serviceAccount:
+  annotations:
+    azure.workload.identity/client-id: 00000000-0000-0000-0000-000000000000
+podLabels:
+  azure.workload.identity/use: "true"
