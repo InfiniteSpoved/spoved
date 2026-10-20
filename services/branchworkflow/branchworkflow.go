@@ -22,6 +22,7 @@ const (
 	keyDeleteAfterMergeLocked = "branch_workflow.delete_after_merge_locked"
 
 	SourceInstance = "instance"
+	SourceNone     = "none" // no branching model on any level
 	SourceOrg      = "org"
 	SourceRepo     = "repo"
 )

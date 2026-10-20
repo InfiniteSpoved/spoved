@@ -23,3 +23,17 @@ func (f *BranchWorkflowForm) Validate(req *http.Request, errs binding.Errors) bi
 	ctx := context.GetValidateContext(req)
 	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
 }
+
+// BranchingModelForm is the branching model section of the organization and repository branch workflow pages.
+type BranchingModelForm struct {
+	Inherit           bool // repositories of organizations only
+	DevelopmentBranch string
+	ReleasePrefixes   string // separated by commas
+	EnforceModel      bool   // organizations only
+}
+
+// Validate validates the fields
+func (f *BranchingModelForm) Validate(req *http.Request, errs binding.Errors) binding.Errors {
+	ctx := context.GetValidateContext(req)
+	return middleware.Validate(errs, ctx.Data, f, ctx.Locale)
+}

@@ -190,6 +190,7 @@ var Actions = map[string]string{
 	"org.project.merged_branches_deleted":  CategoryOrg,
 	"org.project.renamed":                  CategoryOrg,
 	"repo.branch.deleted":                  CategoryRepo,
+	"repo.branch_workflow.changed":         CategoryRepo,
 	"repo.branch.renamed":                  CategoryRepo,
 	"repo.collaborator.added":              CategoryRepo,
 	"repo.collaborator.mode_changed":       CategoryRepo,

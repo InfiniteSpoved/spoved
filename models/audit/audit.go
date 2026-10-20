@@ -155,7 +155,8 @@ var Fields = map[string][]string{
 	"org": {
 		"name", "visibility", "require_two_factor", "restrict_repo_visibility_change", "private_fork_policy",
 		"repo_admin_change_team_access", "max_repo_creation", "category_id", "is_active", "prohibit_login", "user_id",
-		"counts", "purge", "domain", "verified_by_admin", "required", "units", "mode", "locked",
+		"counts", "purge", "domain", "verified_by_admin", "required", "units", "mode", "locked", "development_branch",
+		"release_prefixes", "model_locked",
 	},
 	"team": {
 		"name", "access_mode", "units", "includes_all_repositories", "can_create_org_repo", "user_id", "inviter_id", "reason",
@@ -165,7 +166,7 @@ var Fields = map[string][]string{
 		"name", "owner_id", "owner_name", "group_id", "group_name", "is_private", "is_template", "default_branch",
 		"is_mirror", "fork_id", "template_id", "units", "counts", "purge", "to_owner_id", "to_owner_name", "team_ids",
 		"interval", "enable_prune", "branch_filter", "tag_filter", "lfs", "lfs_endpoint", "address", "url_changed",
-		"credentials_changed",
+		"credentials_changed", "development_branch", "release_prefixes", "inherit",
 	},
 	"collaborator":       {"user_id", "mode"},
 	"branch":             {"name", "from", "to", "commit", "default"},

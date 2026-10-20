@@ -91,7 +91,6 @@ func loadDBSetting(rootCfg ConfigProvider) {
 	Database.Timeout = sec.Key("SQLITE_TIMEOUT").MustInt(60000)
 	Database.SQLiteJournalMode = sec.Key("SQLITE_JOURNAL_MODE").MustString("WAL")
 
-	Database.MaxIdleConns = sec.Key("MAX_IDLE_CONNS").MustInt(2)
 	var err error
 	if Database.Type.IsMySQL() {
 		Database.ConnMaxLifetime, err = sec.Key("CONN_MAX_LIFETIME").MustDuration(3 * time.Second)
@@ -108,6 +107,9 @@ func loadDBSetting(rootCfg ConfigProvider) {
 	}
 
 	Database.MaxOpenConns = sec.Key("MAX_OPEN_CONNS").MustInt(30)
+	// keep the pool open: closing idle connections makes the database open (and authenticate) new ones under load;
+	// MAX_OPEN_CONNS = 0 means no limit, and 0 idle connections would mean none are kept
+	Database.MaxIdleConns = sec.Key("MAX_IDLE_CONNS").MustInt(max(Database.MaxOpenConns, 2))
 
 	Database.IterateBufferSize = sec.Key("ITERATE_BUFFER_SIZE").MustInt(50)
 	Database.LogSQL = sec.Key("LOG_SQL").MustBool(false)

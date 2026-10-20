@@ -13,7 +13,9 @@ import (
 	"forgejo.org/models/unittest"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/setting/config"
+	"forgejo.org/modules/util"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -197,4 +199,34 @@ func TestActionTask_DeleteTask(t *testing.T) {
 	unittest.AssertCount(t, &ActionTaskStepSummary{TaskID: taskID}, 0)
 	unittest.AssertCount(t, &ActionTaskStep{TaskID: taskID}, 0)
 	unittest.AssertCount(t, &ActionTaskOutput{TaskID: taskID}, 0)
+}
+
+func TestActionTask_GetRunningTaskByTokenCache(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	old := successfulTokenTaskCache
+	successfulTokenTaskCache, _ = lru.New[string, any](10)
+	t.Cleanup(func() { successfulTokenTaskCache = old })
+
+	token, salt, hash, lastEight := generateSaltedToken()
+	setToken := func(t *testing.T, status Status, hash string) {
+		_, err := db.GetEngine(t.Context()).Exec("UPDATE action_task SET token_salt = ?, token_hash = ?, token_last_eight = ?, status = ? WHERE id = 47", salt, hash, lastEight, status)
+		require.NoError(t, err)
+	}
+	setToken(t, StatusRunning, hash)
+	for range 2 { // the second lookup comes from the cache
+		task, err := GetRunningTaskByToken(t.Context(), token)
+		require.NoError(t, err)
+		assert.EqualValues(t, 47, task.ID)
+	}
+
+	setToken(t, StatusSuccess, hash)
+	_, err := GetRunningTaskByToken(t.Context(), token)
+	require.ErrorIs(t, err, util.ErrNotExist, "a stopped task")
+
+	setToken(t, StatusRunning, hash)
+	_, err = GetRunningTaskByToken(t.Context(), token)
+	require.NoError(t, err)
+	setToken(t, StatusRunning, "regenerated")
+	_, err = GetRunningTaskByToken(t.Context(), token)
+	require.ErrorIs(t, err, util.ErrNotExist, "a token regenerated in place")
 }

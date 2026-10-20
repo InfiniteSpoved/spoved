@@ -6,6 +6,7 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
@@ -193,18 +194,28 @@ func (t *AccessToken) UpdateLastUsed(ctx context.Context) error {
 	return err
 }
 
-func getAccessTokenIDFromCache(token string) int64 {
+// CachedToken is what the successful token caches hold: the row and the hash that matched, so a token
+// regenerated in place (same row, new hash) is not accepted from the cache.
+type CachedToken struct {
+	ID   int64
+	Hash string
+}
+
+// TokenCacheKey is the key of a token in the successful token caches, so they don't hold the tokens themselves.
+func TokenCacheKey(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+func getAccessTokenFromCache(key string) CachedToken {
 	if successfulAccessTokenCache == nil {
-		return 0
+		return CachedToken{}
 	}
-	tInterface, ok := successfulAccessTokenCache.Get(token)
+	tInterface, ok := successfulAccessTokenCache.Get(key)
 	if !ok {
-		return 0
+		return CachedToken{}
 	}
-	t, ok := tInterface.(int64)
-	if !ok {
-		return 0
-	}
+	t, _ := tInterface.(CachedToken)
 	return t
 }
 
@@ -224,20 +235,21 @@ func GetAccessTokenBySHA(ctx context.Context, token string) (*AccessToken, error
 	}
 
 	lastEight := token[len(token)-8:]
+	cacheKey := TokenCacheKey(token)
 
-	if id := getAccessTokenIDFromCache(token); id > 0 {
+	if cached := getAccessTokenFromCache(cacheKey); cached.ID > 0 {
 		accessToken := &AccessToken{
 			TokenLastEight: lastEight,
 		}
-		// Re-get the token from the db in case it has been deleted in the intervening period
-		has, err := db.GetEngine(ctx).ID(id).Get(accessToken)
+		// Re-get the token from the db in case it has been deleted or regenerated in the intervening period
+		has, err := db.GetEngine(ctx).ID(cached.ID).Get(accessToken)
 		if err != nil {
 			return nil, err
 		}
-		if has {
+		if has && accessToken.TokenHash == cached.Hash {
 			return checkAccessTokenExpiry(accessToken)
 		}
-		successfulAccessTokenCache.Remove(token)
+		successfulAccessTokenCache.Remove(cacheKey)
 	}
 
 	var tokens []AccessToken
@@ -252,7 +264,7 @@ func GetAccessTokenBySHA(ctx context.Context, token string) (*AccessToken, error
 		tempHash := HashToken(token, t.TokenSalt)
 		if subtle.ConstantTimeCompare([]byte(t.TokenHash), []byte(tempHash)) == 1 {
 			if successfulAccessTokenCache != nil {
-				successfulAccessTokenCache.Add(token, t.ID)
+				successfulAccessTokenCache.Add(cacheKey, CachedToken{ID: t.ID, Hash: t.TokenHash})
 			}
 			return checkAccessTokenExpiry(&t)
 		}

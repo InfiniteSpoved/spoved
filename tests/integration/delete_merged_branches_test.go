@@ -49,7 +49,10 @@ func dmBranches(t *testing.T, repo *repo_model.Repository) []string {
 func dmPreview(t *testing.T, s *TestSession, link string) []string {
 	t.Helper()
 	resp := s.MakeRequest(t, NewRequest(t, "GET", link), http.StatusOK)
-	return NewHTMLParser(t, resp.Body).doc.Find(`#delete-merged + .segment input[name="branch"][checked]`).
+	doc := NewHTMLParser(t, resp.Body).doc
+	// Only the preview's own form posts to delete_merged; the page's other forms post to the settings page.
+	assert.Equal(t, 1, doc.Find(`form[action*="delete_merged"]`).Length())
+	return doc.Find(`#delete-merged + .segment input[name="branch"][checked]`).
 		Map(func(_ int, i *goquery.Selection) string { return i.AttrOr("value", "") })
 }
 

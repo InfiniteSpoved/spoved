@@ -6,6 +6,7 @@ package setting
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/base"
@@ -45,6 +46,16 @@ func renderBranchWorkflow(ctx *context.Context, preview bool) {
 	}
 	ctx.Data["DeleteAfterMerge"] = mode.String()
 	ctx.Data["Enforce"] = locked
+	model, modelLocked, err := branchworkflow.GetOrgModel(ctx, ctx.Org.Organization.AsUser())
+	if err != nil {
+		ctx.ServerError("GetOrgModel", err)
+		return
+	}
+	if model != nil {
+		ctx.Data["DevelopmentBranch"] = model.DevelopmentBranch
+		ctx.Data["ReleasePrefixes"] = strings.Join(model.ReleasePrefixes, ", ")
+	}
+	ctx.Data["EnforceModel"] = modelLocked
 	if !repo_setting.PrepareMergedBranches(ctx, repo_service.MergedBranchScope{Org: ctx.Org.Organization.AsUser()}, ctx.Org.OrgLink+"/settings/branch_workflow", preview) {
 		return
 	}
@@ -68,6 +79,29 @@ func BranchWorkflowPost(ctx *context.Context) {
 		return
 	default:
 		ctx.Flash.Success(ctx.Tr("org.settings.update_setting_success"))
+	}
+	ctx.Redirect(ctx.Org.OrgLink + "/settings/branch_workflow")
+}
+
+// BranchingModelPost saves the organization's branching model.
+func BranchingModelPost(ctx *context.Context) {
+	form := web.GetForm(ctx).(*forms.BranchingModelForm)
+	model := &repo_model.BranchingModel{DevelopmentBranch: form.DevelopmentBranch, ReleasePrefixes: strings.Split(form.ReleasePrefixes, ",")}
+	err := branchworkflow.SetOrgModel(ctx, ctx.Org.Organization.AsUser(), model, form.EnforceModel)
+	if value, ok := branchworkflow.IsInvalidBranchingModel(err); ok {
+		ctx.Flash.Error(ctx.Tr("repo.settings.branching_model.invalid", value))
+	} else {
+		switch {
+		case errors.Is(err, branchworkflow.ErrTooManyReleasePrefixes):
+			ctx.Flash.Error(ctx.Tr("repo.settings.branching_model.too_many_prefixes"))
+		case errors.Is(err, branchworkflow.ErrLockWithoutValue):
+			ctx.Flash.Error(ctx.Tr("org.settings.branching_model.enforce_needs_value"))
+		case err != nil:
+			ctx.ServerError("SetOrgModel", err)
+			return
+		default:
+			ctx.Flash.Success(ctx.Tr("org.settings.update_setting_success"))
+		}
 	}
 	ctx.Redirect(ctx.Org.OrgLink + "/settings/branch_workflow")
 }

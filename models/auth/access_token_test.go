@@ -195,3 +195,34 @@ func TestRegenerateAccessTokenByID(t *testing.T) {
 	assert.Equal(t, token.Name, newToken.Name)
 	assert.Equal(t, token.Scope, newToken.Scope)
 }
+
+func TestGetAccessTokenBySHACache(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	auth_model.MockSuccessfulAccessTokenCache(t)
+	const sha = "d2c6c1ba3890b309189a8e618c72a162e4efbf36"
+
+	token, err := auth_model.GetAccessTokenBySHA(db.DefaultContext, sha)
+	require.NoError(t, err)
+	cached, err := auth_model.GetAccessTokenBySHA(db.DefaultContext, sha)
+	require.NoError(t, err)
+	assert.Equal(t, token.ID, cached.ID)
+	// the cache holds a hash of the token, not the token itself
+	assert.Equal(t, []string{auth_model.TokenCacheKey(sha)}, auth_model.SuccessfulAccessTokenCacheKeys())
+
+	t.Run("hash changed", func(t *testing.T) {
+		// a token regenerated in place keeps its row: the cached ID alone must not authenticate it
+		_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE access_token SET token_hash = ? WHERE id = ?", "other", token.ID)
+		require.NoError(t, err)
+		_, err = auth_model.GetAccessTokenBySHA(db.DefaultContext, sha)
+		assert.True(t, auth_model.IsErrAccessTokenNotExist(err))
+	})
+
+	t.Run("deleted", func(t *testing.T) {
+		require.NoError(t, unittest.PrepareTestDatabase())
+		_, err := auth_model.GetAccessTokenBySHA(db.DefaultContext, sha)
+		require.NoError(t, err)
+		require.NoError(t, auth_model.DeleteAccessTokenByID(db.DefaultContext, token.ID, token.UID))
+		_, err = auth_model.GetAccessTokenBySHA(db.DefaultContext, sha)
+		assert.True(t, auth_model.IsErrAccessTokenNotExist(err))
+	})
+}

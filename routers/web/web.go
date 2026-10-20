@@ -1297,6 +1297,7 @@ func registerRoutes(m *web.Route) {
 
 				m.Combo("/branch_workflow").Get(org_setting.BranchWorkflow).
 					Post(web.Bind(forms.BranchWorkflowForm{}), org_setting.BranchWorkflowPost)
+				m.Post("/branch_workflow/branching_model", web.Bind(forms.BranchingModelForm{}), org_setting.BranchingModelPost)
 				m.Combo("/branch_workflow/delete_merged").Get(common.RateLimitHeavy, org_setting.BranchWorkflowDeleteMerged).
 					Post(org_setting.BranchWorkflowDeleteMergedPost)
 
@@ -1479,6 +1480,7 @@ func registerRoutes(m *web.Route) {
 
 			m.Combo("/branch_workflow").Get(repo_setting.BranchWorkflow).
 				Post(web.Bind(forms.BranchWorkflowForm{}), context.RepoMustNotBeArchived(), repo_setting.BranchWorkflowPost)
+			m.Post("/branch_workflow/branching_model", web.Bind(forms.BranchingModelForm{}), context.RepoMustNotBeArchived(), repo_setting.BranchingModelPost)
 			m.Combo("/branch_workflow/delete_merged").Get(common.RateLimitHeavy, repo_setting.BranchWorkflowDeleteMerged).
 				Post(context.RepoMustNotBeArchived(), repo_setting.BranchWorkflowDeleteMergedPost)
 

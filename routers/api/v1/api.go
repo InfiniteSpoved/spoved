@@ -922,6 +922,8 @@ func Routes() *web.Route {
 				m.Post("/convert", reqOwner(), reqAdmin(), repo.Convert)
 				m.Combo("/branch-workflow").Get(reqRepoReader(unit.TypeCode), repo.GetBranchWorkflow).
 					Put(reqToken(), reqAdmin(), mustNotBeArchived(), bind(api.EditRepoBranchWorkflowOption{}), repo.EditBranchWorkflow)
+				m.Combo("/branching-model").Get(reqRepoReader(unit.TypeCode), repo.GetBranchingModel).
+					Put(reqToken(), reqAdmin(), mustNotBeArchived(), bind(api.EditRepoBranchingModelOption{}), repo.EditBranchingModel)
 				m.Post("/generate", reqToken(), reqRepoReader(unit.TypeCode), bind(api.GenerateRepoOption{}), repo.Generate)
 				m.Group("/transfer", func() {
 					m.Post("", reqOwner(), reqAdmin(), bind(api.TransferRepoOption{}), repo.Transfer)
@@ -1409,6 +1411,8 @@ func Routes() *web.Route {
 			m.Get("/actions/runs", reqToken(), reqOrgMembership(), tokenRequiresScopes(auth_model.AccessTokenScopeCategoryRepository), org.ListActionRuns)
 			m.Combo("/branch-workflow").Get(reqToken(), reqOrgOwnership(), org.GetBranchWorkflow).
 				Put(reqToken(), reqOrgOwnership(), bind(api.OrgBranchWorkflow{}), org.EditBranchWorkflow)
+			m.Combo("/branching-model").Get(reqToken(), reqOrgOwnership(), org.GetBranchingModel).
+				Put(reqToken(), reqOrgOwnership(), bind(api.OrgBranchingModel{}), org.EditBranchingModel)
 			m.Group("/branch_protections", func() {
 				m.Get("", org.ListBranchProtections)
 				m.Post("", bind(api.CreateOrgBranchProtectionOption{}), org.CreateBranchProtection)
