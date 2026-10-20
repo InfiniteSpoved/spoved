@@ -112,6 +112,9 @@ func TestDeleteMergedBranches(t *testing.T) {
 		ticked := dmPreview(t, s, projectLink)
 		assert.Equal(t, []string{strconv.FormatInt(inProject.ID, 10) + ":merged-old"}, ticked)
 		since = auditMaxID(t)
+		// a repository outside the project can't be named, and a run that deletes nothing records nothing
+		dmPost(t, s, projectLink, "org3/dm-group", strconv.FormatInt(outside.ID, 10)+":merged-old")
+		assert.Contains(t, dmBranches(t, outside), "merged-old")
 		dmPost(t, s, projectLink, "org3", ticked...) // wrong name
 		assert.Contains(t, bwFlash(s), "doesn't match")
 		assert.Empty(t, auditActions(t, since, "org.project.merged_branches_deleted"))

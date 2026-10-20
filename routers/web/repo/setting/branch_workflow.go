@@ -51,15 +51,19 @@ func PrepareMergedBranches(ctx *context.Context, scope repo_service.MergedBranch
 	if !preview {
 		return true
 	}
-	found, total, err := repo_service.FindMergedBranches(ctx, scope, repo_service.MaxDeleteMergedBranches)
+	found, more, err := repo_service.FindMergedBranches(ctx, scope, repo_service.MaxDeleteMergedBranches)
 	if err != nil {
 		ctx.ServerError("FindMergedBranches", err)
 		return false
 	}
+	count := 0
+	for _, f := range found {
+		count += len(f.Branches)
+	}
 	ctx.Data["MergedPreview"] = true
 	ctx.Data["MergedBranches"] = found
-	ctx.Data["MergedCount"] = total
-	ctx.Data["MergedMore"] = total > repo_service.MaxDeleteMergedBranches
+	ctx.Data["MergedCount"] = count
+	ctx.Data["MergedMore"] = more
 	ctx.Data["MaxDeleteMerged"] = repo_service.MaxDeleteMergedBranches
 	return true
 }
