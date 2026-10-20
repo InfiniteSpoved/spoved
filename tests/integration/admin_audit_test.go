@@ -5,6 +5,7 @@ package integration
 
 import (
 	"encoding/csv"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -147,6 +148,19 @@ func TestAdminAuditPage(t *testing.T) {
 		assert.Contains(t, body, "Failed API write requests (aggregated) · user2/r1")
 		assert.Contains(t, body, "Created access token user2/r1")
 		assert.NotContains(t, body, "%!")
+	})
+
+	t.Run("read logging and write errors", func(t *testing.T) {
+		body := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/audit"), http.StatusOK).Body.String()
+		assert.Contains(t, body, "Read logging: off")
+		assert.NotContains(t, body, "audit-write-errors")
+
+		defer test.MockVariableValue(&setting.Audit.LogReads, true)()
+		audit_model.WriteErrors.Add(2)
+		defer audit_model.WriteErrors.Add(-2)
+		body = admin.MakeRequest(t, NewRequest(t, "GET", "/admin/audit"), http.StatusOK).Body.String()
+		assert.Contains(t, body, "Read logging: on")
+		assert.Contains(t, body, fmt.Sprintf("%d activity entries could not be written on this server", audit_model.WriteErrors.Load()))
 	})
 
 	t.Run("empty", func(t *testing.T) {

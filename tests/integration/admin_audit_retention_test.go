@@ -28,6 +28,9 @@ func TestAdminAuditRetention(t *testing.T) {
 
 	page := admin.MakeRequest(t, NewRequest(t, "GET", "/admin/audit/retention"), http.StatusOK).Body.String()
 	assert.Contains(t, page, "Retention: 1 year")
+	assert.Contains(t, page, "The log holds")
+	assert.Regexp(t, `>1 year · about [\d,]+ entries, [\d.]+ [KMG]?i?B</option>`, page, "the sign-in is in the log, so each choice has a projection")
+	assert.NotContains(t, page, "audit-retention-short")
 
 	since := auditMaxID(t)
 	admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/audit/retention", map[string]string{"days": "90"}), http.StatusSeeOther)
@@ -37,6 +40,9 @@ func TestAdminAuditRetention(t *testing.T) {
 	assert.Equal(t, 90, s.Days)
 	assert.Equal(t, 365, s.PreviousDays)
 	assert.InDelta(t, time.Now().Add(setting.AuditRetentionLowerDelay).Unix(), s.EffectiveFrom, 60)
+
+	assert.Contains(t, admin.MakeRequest(t, NewRequest(t, "GET", "/admin/audit/retention"), http.StatusOK).Body.String(),
+		"The retention is shorter than 1 year.", "the hint follows the chosen value, not the one still in force")
 
 	// both pages show the pending lowering and the retention in force
 	for _, path := range []string{"/admin/audit/retention", "/admin/audit"} {

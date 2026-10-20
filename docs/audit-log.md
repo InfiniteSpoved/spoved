@@ -70,3 +70,18 @@ Known gaps:
 - Loki may reject samples that are too old after a long outage; the shipper drops what it can't deliver.
 - The org, project and repository names are looked up when the row is shipped; one deleted since then shows an empty
   name, and the ids stay.
+
+## Retention and volume
+
+**Site administration → Security → Audit log → change** (`/admin/audit/retention`) sets how long entries are kept,
+from 30 days to 20 years (default 1 year). A longer value applies at once, a shorter one after 7 days. A value under
+1 year shows a reminder that SOC 2 and ISO 27001 audits usually need 12 months of evidence. The page shows how many
+entries the log holds and how many it gained a day over the last 30 days, and next to each choice how many entries
+(and roughly how much storage, at 1.5 KiB per entry) the log would hold at that rate.
+
+## Metrics
+
+With `[metrics] ENABLED`, `/metrics` has two counters per process: `gitea_audit_events_total{category}` (entries
+written whose change committed) and `gitea_audit_write_errors_total` (activity entries that could not be written,
+such as a sign-in or a push recorded after the fact). A write error is also shown on the audit page, with the count
+since the server started; the server log has the error. A failed write of a change entry fails the change itself.

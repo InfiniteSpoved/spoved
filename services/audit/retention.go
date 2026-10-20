@@ -34,6 +34,39 @@ func Cleanup(ctx context.Context) error {
 	return ctx.Err()
 }
 
+// EntryBytes is a rough stored size of one entry with its indexes, for the projections of the retention page.
+const EntryBytes = 1536
+
+// Volume is how many entries the log holds and how many it gains a day.
+type Volume struct {
+	Kept, PerDay int64
+}
+
+// GetVolume counts the entries without a COUNT over the whole table: a purge deletes a prefix of the chain, so the
+// sealed entries are the ones between the anchor and the head, plus the unsealed ones (counted up to
+// audit_model.UnsealedCountCap). PerDay averages the last 30 days, or the time since the oldest entry when the log is
+// younger, and at least one day.
+func GetVolume(ctx context.Context, now time.Time) (*Volume, error) {
+	head, err := audit_model.GetHead(ctx)
+	if err != nil {
+		return nil, err
+	}
+	unsealed, _, err := audit_model.UnsealedStats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	oldest, err := audit_model.OldestEntryTime(ctx)
+	if err != nil || oldest == 0 {
+		return &Volume{Kept: head.Seq - head.AnchorSeq + unsealed}, err
+	}
+	window := min(30*24*time.Hour, max(24*time.Hour, now.Sub(oldest.AsTime())))
+	n, err := audit_model.CountSince(ctx, timeutil.TimeStamp(now.Add(-window).Unix()))
+	if err != nil {
+		return nil, err
+	}
+	return &Volume{Kept: head.Seq - head.AnchorSeq + unsealed, PerDay: n * 86400 / int64(window/time.Second)}, nil
+}
+
 // SetRetention stores the retention an admin chose (see setting.NextAuditRetention). The stored row is read and
 // replaced in one transaction under its lock, so two admins saving together can't compute from a stale previous
 // value. The change is audited by SetSettings.

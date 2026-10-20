@@ -1923,10 +1923,20 @@
 		"other": "Streaming: %s destinations"
 	},
 	"admin.audit.streaming_off": "Streaming: off",
+	"admin.audit.log_reads_on": "Read logging: on",
+	"admin.audit.log_reads_off": "Read logging: off ([audit] LOG_READS)",
+	"admin.audit.write_errors": {
+		"one": "%s activity entry could not be written on this server since it started. The server log has the error.",
+		"other": "%s activity entries could not be written on this server since it started. The server log has the errors."
+	},
 	"admin.audit.retention": "Retention: %s",
 	"admin.audit_retention": "Audit log retention",
 	"admin.audit_retention.desc": "Audit entries older than the retention are deleted every night. The deletion is itself recorded, and the hash chain can still be verified afterwards. There is no option to keep entries forever.",
 	"admin.audit_retention.keep": "Keep audit entries for",
+	"admin.audit_retention.volume": "The log holds %s entries (about %s) and gained about %s entries a day over the last 30 days. Sizes are estimates at 1.5 KiB per entry.",
+	"admin.audit_retention.projection": "about %s entries, %s",
+	"admin.audit_retention.short_help": "SOC 2 and ISO 27001 audits usually need at least 12 months of evidence.",
+	"admin.audit_retention.short_hint": "The retention is shorter than 1 year. SOC 2 and ISO 27001 audits usually need at least 12 months of evidence.",
 	"admin.audit_retention.lower_help": "A longer retention applies at once. A shorter one takes effect after 7 days; until then the longer one is kept.",
 	"admin.audit_retention.pending": "lowering to %s takes effect %s",
 	"admin.audit_retention.saved": "The audit log retention was saved.",

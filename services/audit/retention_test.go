@@ -148,3 +148,37 @@ func TestSetRetentionUsesStoredRow(t *testing.T) {
 	require.Error(t, SetRetention(ctx, 31))
 	assert.Equal(t, s, read())
 }
+
+func TestGetVolume(t *testing.T) {
+	now := time.Now()
+	t.Run("empty", func(t *testing.T) {
+		require.NoError(t, unittest.PrepareTestDatabase())
+		v, err := GetVolume(t.Context(), now)
+		require.NoError(t, err)
+		assert.Equal(t, Volume{}, *v)
+	})
+	t.Run("sealed, purged and unsealed entries", func(t *testing.T) {
+		aged(t, 4, 100) // genesis + 4 sealed, 100 days ago
+		setRetention(t, setting.AuditRetentionState{Days: 30})
+		cleanup(t) // keeps the head entry and records a purge
+		setRetention(t, setting.AuditRetentionState{})
+		for range 59 {
+			require.NoError(t, db.Insert(t.Context(), &audit_model.Entry{
+				CreatedUnix: timeutil.TimeStamp(now.AddDate(0, 0, -10).Unix()), Category: "auth", Action: "auth.signin", Result: "success",
+			}))
+		}
+		all, err := db.GetEngine(t.Context()).Count(new(audit_model.Entry))
+		require.NoError(t, err)
+		v, err := GetVolume(t.Context(), now)
+		require.NoError(t, err)
+		assert.Equal(t, all, v.Kept, "head entry, purge entry and the unsealed ones")
+		assert.EqualValues(t, 2, v.PerDay, "60 entries (59 + the purge) in the last 30 days")
+	})
+	t.Run("a log younger than 30 days averages over its age", func(t *testing.T) {
+		aged(t, 9, 3) // genesis + 9 three days ago
+		v, err := GetVolume(t.Context(), now)
+		require.NoError(t, err)
+		assert.EqualValues(t, 10, v.Kept)
+		assert.EqualValues(t, 3, v.PerDay)
+	})
+}
