@@ -1,0 +1,185 @@
+// Copyright 2026 The spoved contributors. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package repository
+
+import (
+	"context"
+	"strings"
+
+	"forgejo.org/models/db"
+	git_model "forgejo.org/models/git"
+	issues_model "forgejo.org/models/issues"
+	repo_model "forgejo.org/models/repo"
+	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/git"
+	"forgejo.org/modules/gitrepo"
+	"forgejo.org/modules/log"
+
+	"xorm.io/builder"
+)
+
+// MaxDeleteMergedBranches is how many branches one DeleteMergedBranches call deletes at most.
+const MaxDeleteMergedBranches = 200
+
+// MergedBranchScope names the repositories of a "delete merged branches" run: one repository, the repositories of
+// a project or every repository of an organization. Exactly one field is set.
+type MergedBranchScope struct {
+	Repo  *repo_model.Repository
+	Group *repo_model.RepoGroup
+	Org   *user_model.User
+}
+
+// MergedBranches are the branches of one repository that DeleteMergedBranches would delete.
+type MergedBranches struct {
+	Repo     *repo_model.Repository
+	Branches []string
+}
+
+// mergedBranchRepos lists the repositories of the scope, without archived, mirror, empty, trashed and unfinished ones.
+func mergedBranchRepos(ctx context.Context, scope MergedBranchScope) ([]*repo_model.Repository, error) {
+	cond := builder.Eq{"is_archived": false, "is_mirror": false, "is_empty": false, "trashed_unix": 0, "status": repo_model.RepositoryReady}
+	switch {
+	case scope.Repo != nil:
+		cond["id"] = scope.Repo.ID
+	case scope.Group != nil:
+		cond["owner_id"], cond["group_id"] = scope.Group.OwnerID, scope.Group.ID
+	default:
+		cond["owner_id"] = scope.Org.ID
+	}
+	repos := make([]*repo_model.Repository, 0, 10)
+	return repos, db.GetEngine(ctx).Where(cond).OrderBy("group_name, lower_name").Find(&repos)
+}
+
+// mergedBranches returns the branches of repo whose tip is in the default branch, without the default branch, branches
+// at its tip, branches matched by a protection rule and the head or base branches of open pull requests.
+func mergedBranches(ctx context.Context, repo *repo_model.Repository, gitRepo *git.Repository) ([]string, error) {
+	tip, err := gitRepo.GetBranchCommitID(repo.DefaultBranch)
+	if err != nil {
+		if git.IsErrNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out, _, err := git.NewCommand(ctx, "for-each-ref", "--format=%(objectname) %(refname)").
+		AddOptionFormat("--merged=%s", tip).AddArguments("refs/heads/").RunStdString(&git.RunOpts{Dir: repo.RepoPath()})
+	if err != nil {
+		return nil, err
+	}
+	rules, err := git_model.FindProtectedBranchRulesForRepo(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	var prs []*issues_model.PullRequest
+	if err := db.GetEngine(ctx).Join("INNER", "issue", "issue.id = pull_request.issue_id").
+		Where(builder.Eq{"issue.is_closed": false, "pull_request.has_merged": false}).
+		And(builder.Eq{"pull_request.head_repo_id": repo.ID}.Or(builder.Eq{"pull_request.base_repo_id": repo.ID})).
+		Find(&prs); err != nil {
+		return nil, err
+	}
+	inUse := map[string]bool{repo.DefaultBranch: true}
+	for _, pr := range prs {
+		if pr.HeadRepoID == repo.ID {
+			inUse[pr.HeadBranch] = true
+		}
+		if pr.BaseRepoID == repo.ID {
+			inUse[pr.BaseBranch] = true
+		}
+	}
+	var branches []string
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
+		sha, ref, ok := strings.Cut(line, " ")
+		name, isBranch := strings.CutPrefix(ref, git.BranchPrefix)
+		if !ok || !isBranch || sha == tip || inUse[name] || rules.GetFirstMatched(name) != nil {
+			continue
+		}
+		branches = append(branches, name)
+	}
+	return branches, nil
+}
+
+// FindMergedBranches lists, per repository of the scope, the branches DeleteMergedBranches would delete. It deletes
+// nothing.
+func FindMergedBranches(ctx context.Context, scope MergedBranchScope) ([]*MergedBranches, error) {
+	repos, err := mergedBranchRepos(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	var found []*MergedBranches
+	for _, repo := range repos {
+		gitRepo, err := gitrepo.OpenRepository(ctx, repo)
+		if err != nil {
+			return nil, err
+		}
+		branches, err := mergedBranches(ctx, repo, gitRepo)
+		gitRepo.Close()
+		if err != nil {
+			return nil, err
+		}
+		if len(branches) > 0 {
+			found = append(found, &MergedBranches{Repo: repo, Branches: branches})
+		}
+	}
+	return found, nil
+}
+
+// DeleteMergedBranches deletes, through DeleteBranch, at most MaxDeleteMergedBranches of the branches that
+// FindMergedBranches lists at this moment, and records who started it with the totals. more tells the caller that
+// branches are left; a branch that failed to delete is tried again by the next call.
+func DeleteMergedBranches(ctx context.Context, doer *user_model.User, scope MergedBranchScope) (deleted, failed int, more bool, err error) {
+	repos, err := mergedBranchRepos(ctx, scope)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	touched := 0
+	for _, repo := range repos {
+		if deleted+failed >= MaxDeleteMergedBranches {
+			more = true
+			break
+		}
+		n, f, left, err := deleteMergedBranchesOf(ctx, doer, repo, MaxDeleteMergedBranches-deleted-failed)
+		if err != nil {
+			return deleted, failed, more, err
+		}
+		deleted, failed, more = deleted+n, failed+f, more || left
+		if n > 0 {
+			touched++
+		}
+	}
+	data := map[string]any{"counts": map[string]any{"deleted": deleted, "failed": failed, "repos": touched}}
+	switch {
+	case scope.Repo != nil:
+		err = repo_model.RecordRepo(ctx, "repo.merged_branches.deleted", scope.Repo, data)
+	case scope.Group != nil:
+		err = repo_model.RecordProject(ctx, "org.project.merged_branches_deleted", scope.Group, data)
+	default:
+		err = user_model.RecordOrg(ctx, "org.merged_branches.deleted", scope.Org, data)
+	}
+	return deleted, failed, more, err
+}
+
+func deleteMergedBranchesOf(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, limit int) (deleted, failed int, more bool, err error) {
+	gitRepo, err := gitrepo.OpenRepository(ctx, repo)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	defer gitRepo.Close()
+	branches, err := mergedBranches(ctx, repo, gitRepo)
+	if err != nil || len(branches) == 0 {
+		return 0, 0, false, err
+	}
+	if len(branches) > limit {
+		branches, more = branches[:limit], true
+	}
+	locked := PersonalRepoLocked(ctx, repo)
+	for _, name := range branches {
+		if err := DeleteBranch(ctx, doer, repo, gitRepo, name); err != nil {
+			log.Error("DeleteMergedBranches: branch %q of %-v: %v", name, repo, err)
+			failed++
+			continue
+		}
+		deleted++
+	}
+	ShrinkAfterDelete(ctx, repo, locked && deleted > 0)
+	return deleted, failed, more, nil
+}

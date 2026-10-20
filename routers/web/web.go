@@ -1159,6 +1159,7 @@ func registerRoutes(m *web.Route) {
 		m.Group("/{id}/settings", func() {
 			m.Combo("").Get(org.RepoGroupSettings).Post(web.Bind(forms.RepoGroupForm{}), org.RepoGroupSettingsPost)
 			m.Post("/delete", org.RepoGroupDeletePost)
+			m.Combo("/delete_merged").Get(org.RepoGroupDeleteMerged).Post(org.RepoGroupDeleteMergedPost)
 			m.Post("/teams/link", org.RepoGroupTeamLink)
 			m.Post("/teams/unlink", org.RepoGroupTeamUnlink)
 			m.Group("/hooks", func() {
@@ -1296,6 +1297,8 @@ func registerRoutes(m *web.Route) {
 
 				m.Combo("/branch_workflow").Get(org_setting.BranchWorkflow).
 					Post(web.Bind(forms.BranchWorkflowForm{}), org_setting.BranchWorkflowPost)
+				m.Combo("/branch_workflow/delete_merged").Get(org_setting.BranchWorkflowDeleteMerged).
+					Post(org_setting.BranchWorkflowDeleteMergedPost)
 
 				m.Group("/branches", func() {
 					m.Get("", org_setting.ProtectedBranchRules)
@@ -1476,6 +1479,8 @@ func registerRoutes(m *web.Route) {
 
 			m.Combo("/branch_workflow").Get(repo_setting.BranchWorkflow).
 				Post(web.Bind(forms.BranchWorkflowForm{}), context.RepoMustNotBeArchived(), repo_setting.BranchWorkflowPost)
+			m.Combo("/branch_workflow/delete_merged").Get(repo_setting.BranchWorkflowDeleteMerged).
+				Post(context.RepoMustNotBeArchived(), repo_setting.BranchWorkflowDeleteMergedPost)
 
 			m.Combo("/push_rules").Get(repo_setting.PushRules).
 				Post(web.Bind(forms.PushRuleForm{}), context.RepoMustNotBeArchived(), repo_setting.PushRulesPost)

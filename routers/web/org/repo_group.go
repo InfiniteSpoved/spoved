@@ -19,6 +19,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
+	repo_setting "forgejo.org/routers/web/repo/setting"
 	shared_user "forgejo.org/routers/web/shared/user"
 	"forgejo.org/services/context"
 	"forgejo.org/services/forms"
@@ -172,6 +173,10 @@ func NewRepoGroupPost(ctx *context.Context) {
 
 // RepoGroupSettings renders the settings of a project, `/{org}/{project}/-/settings`.
 func RepoGroupSettings(ctx *context.Context) {
+	renderRepoGroupSettings(ctx, false)
+}
+
+func renderRepoGroupSettings(ctx *context.Context, preview bool) {
 	group := ctx.Data["RepoGroup"].(*repo_model.RepoGroup)
 	if !prepareRepoGroupForm(ctx, "repo_group.settings") {
 		return
@@ -179,10 +184,21 @@ func RepoGroupSettings(ctx *context.Context) {
 	ctx.Data["name"] = group.Name
 	ctx.Data["description"] = group.Description
 	ctx.Data["RepoGroupLink"] = group.Link(ctx.Org.Organization.Name)
-	if !prepareRepoGroupTeams(ctx, group) {
+	if !prepareRepoGroupTeams(ctx, group) || !repo_setting.PrepareMergedBranches(ctx, repo_service.MergedBranchScope{Group: group}, group.Link(ctx.Org.Organization.Name)+"/-/settings", preview) {
 		return
 	}
 	ctx.HTML(http.StatusOK, tplRepoGroupSettings)
+}
+
+// RepoGroupDeleteMerged renders the settings of a project with the merged branches that would be deleted.
+func RepoGroupDeleteMerged(ctx *context.Context) {
+	renderRepoGroupSettings(ctx, true)
+}
+
+// RepoGroupDeleteMergedPost deletes the merged branches of the project's repositories.
+func RepoGroupDeleteMergedPost(ctx *context.Context) {
+	group := ctx.Data["RepoGroup"].(*repo_model.RepoGroup)
+	repo_setting.DeleteMergedBranchesPost(ctx, repo_service.MergedBranchScope{Group: group}, group.Link(ctx.Org.Organization.Name)+"/-/settings")
 }
 
 // prepareRepoGroupTeams lists the teams linked to the project, the other teams of the organization and the
@@ -260,7 +276,7 @@ func RepoGroupSettingsPost(ctx *context.Context) {
 		return
 	}
 	ctx.Data["RepoGroupLink"] = group.Link(org.Name)
-	if !prepareRepoGroupTeams(ctx, group) {
+	if !prepareRepoGroupTeams(ctx, group) || !repo_setting.PrepareMergedBranches(ctx, repo_service.MergedBranchScope{Group: group}, group.Link(org.Name)+"/-/settings", false) {
 		return
 	}
 	if ctx.HasError() {

@@ -1,0 +1,32 @@
+<h4 class="ui top attached header tw-mt-4" id="delete-merged">
+	{{ctx.Locale.Tr "repo.settings.delete_merged"}}
+</h4>
+<div class="ui attached segment">
+	<p>{{ctx.Locale.Tr "repo.settings.delete_merged.desc"}}</p>
+	{{if .MergedPreview}}
+		{{if .MergedBranches}}
+			<p>{{ctx.Locale.Tr "repo.settings.delete_merged.count" .MergedCount .MaxDeleteMerged}}</p>
+			<div class="flex-list">
+				{{range .MergedBranches}}
+					<div class="flex-item">
+						<div class="flex-item-main">
+							{{if $.MergedShowRepos}}<div class="flex-item-title tw-break-anywhere"><a href="{{.Repo.Link}}/branches">{{.Repo.FullName}}</a> ({{len .Branches}})</div>{{end}}
+							<div class="tw-flex tw-flex-wrap tw-gap-1">
+								{{range .Branches}}<span class="ui basic label tw-break-anywhere">{{.}}</span>{{end}}
+							</div>
+						</div>
+					</div>
+				{{end}}
+			</div>
+			<form class="ui form ignore-dirty tw-mt-4" action="{{.MergedLink}}" method="post">
+				<button class="ui red button">{{ctx.Locale.Tr "repo.settings.delete_merged.confirm"}}</button>
+				<a class="ui button" href="{{.MergedBackLink}}">{{ctx.Locale.Tr "cancel"}}</a>
+			</form>
+		{{else}}
+			<p>{{ctx.Locale.Tr "repo.settings.delete_merged.none"}}</p>
+			<a class="ui button" href="{{.MergedBackLink}}">{{ctx.Locale.Tr "repo.settings.delete_merged.back"}}</a>
+		{{end}}
+	{{else}}
+		<a class="ui button" href="{{.MergedLink}}#delete-merged">{{ctx.Locale.Tr "repo.settings.delete_merged.preview"}}</a>
+	{{end}}
+</div>
