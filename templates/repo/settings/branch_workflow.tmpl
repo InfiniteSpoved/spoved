@@ -36,7 +36,7 @@
 					<div class="ui checkbox">
 						<input id="inherit" name="inherit" type="checkbox" {{if .ModelInherit}}checked{{end}}>
 						<label for="inherit">{{ctx.Locale.Tr "repo.settings.branching_model.inherit"}}</label>
-						<p class="help">{{if .ModelSetBy}}{{.ModelSetBy}}{{else}}{{ctx.Locale.Tr "repo.settings.branching_model.inherit_desc"}}{{end}}</p>
+						<p class="help">{{if .ModelInheritDesc}}{{.ModelInheritDesc}}{{else}}{{ctx.Locale.Tr "repo.settings.branching_model.inherit_desc"}}{{end}}</p>
 					</div>
 				</div>
 				{{end}}

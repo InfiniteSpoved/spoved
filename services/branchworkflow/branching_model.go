@@ -29,6 +29,7 @@ const (
 
 	maxReleasePrefixes   = 10
 	maxReleasePrefixLen  = 100
+	maxDevelopmentBranch = 255
 	maxVersionPartDigits = 9
 )
 
@@ -41,10 +42,13 @@ func (e ErrInvalidBranchingModel) Error() string {
 	return fmt.Sprintf("invalid branch name or prefix %q", e.Value)
 }
 
+// ErrTooManyReleasePrefixes is returned for more than maxReleasePrefixes prefixes.
+var ErrTooManyReleasePrefixes = fmt.Errorf("at most %d release prefixes", maxReleasePrefixes)
+
 // NormalizeBranchingModel trims the values, drops empty and repeated prefixes and checks the rest.
 func NormalizeBranchingModel(m *repo_model.BranchingModel) (*repo_model.BranchingModel, error) {
 	out := &repo_model.BranchingModel{DevelopmentBranch: strings.TrimSpace(m.DevelopmentBranch)}
-	if out.DevelopmentBranch != "" && !git.IsValidRefPattern(out.DevelopmentBranch) {
+	if out.DevelopmentBranch != "" && (len(out.DevelopmentBranch) > maxDevelopmentBranch || !git.IsValidRefPattern(out.DevelopmentBranch)) {
 		return nil, ErrInvalidBranchingModel{out.DevelopmentBranch}
 	}
 	for _, p := range m.ReleasePrefixes {
@@ -59,7 +63,7 @@ func NormalizeBranchingModel(m *repo_model.BranchingModel) (*repo_model.Branchin
 		out.ReleasePrefixes = append(out.ReleasePrefixes, p)
 	}
 	if len(out.ReleasePrefixes) > maxReleasePrefixes {
-		return nil, ErrInvalidBranchingModel{out.ReleasePrefixes[maxReleasePrefixes]}
+		return nil, ErrTooManyReleasePrefixes
 	}
 	return out, nil
 }
@@ -143,16 +147,17 @@ func (c Chain) Forward(branch string) []string {
 // EffectiveModel is the branching model that applies to a repository and where it comes from.
 type EffectiveModel struct {
 	Model      repo_model.BranchingModel
-	Source     string // SourceInstance when neither the repository nor its organization has one
+	Source     string // SourceNone when neither the repository nor its organization has one
 	Locked     bool
 	SetBy      string                     // name of the organization when Source is SourceOrg
 	Configured *repo_model.BranchingModel // the repository's own value, nil when it inherits
+	Org        *repo_model.BranchingModel // the organization's value, nil when it has none
 }
 
 // ResolveModel combines the levels as Resolve does. There is no instance default: without one, no branch is a
 // release branch.
 func ResolveModel(org *repo_model.BranchingModel, orgLocked bool, repo *repo_model.BranchingModel) EffectiveModel {
-	e := EffectiveModel{Source: SourceInstance, Configured: repo}
+	e := EffectiveModel{Source: SourceNone, Configured: repo, Org: org}
 	switch {
 	case org != nil && orgLocked:
 		e.Model, e.Source, e.Locked = *org, SourceOrg, true
@@ -303,8 +308,24 @@ func SetRepoModel(ctx context.Context, repo *repo_model.Repository, m *repo_mode
 	if err != nil {
 		return ErrNoPullRequests
 	}
+	before := repoAuditModel(e.Configured)
 	u.PullRequestsConfig().BranchingModel = m
-	return repo_model.UpdateRepoUnit(ctx, u)
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		if err := repo_model.UpdateRepoUnit(ctx, u); err != nil {
+			return err
+		}
+		if changes := audit_model.Changes(before, repoAuditModel(m)); changes != nil {
+			return repo_model.RecordRepo(ctx, "repo.branch_workflow.changed", repo, changes)
+		}
+		return nil
+	})
+}
+
+func repoAuditModel(m *repo_model.BranchingModel) map[string]any {
+	data := auditModel(m, false)
+	delete(data, "model_locked")
+	data["inherit"] = m == nil
+	return data
 }
 
 // IsInvalidBranchingModel tells if err is an ErrInvalidBranchingModel and returns its value.

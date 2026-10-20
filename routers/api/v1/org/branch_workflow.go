@@ -160,7 +160,7 @@ func EditBranchingModel(ctx *context.APIContext) {
 
 	form := web.GetForm(ctx).(*api.OrgBranchingModel)
 	err := branchworkflow.SetOrgModel(ctx, ctx.Org().Organization.AsUser(), &repo_model.BranchingModel{DevelopmentBranch: form.DevelopmentBranch, ReleasePrefixes: form.ReleasePrefixes}, form.Enforce)
-	if _, ok := branchworkflow.IsInvalidBranchingModel(err); ok || errors.Is(err, branchworkflow.ErrLockWithoutValue) {
+	if _, ok := branchworkflow.IsInvalidBranchingModel(err); ok || errors.Is(err, branchworkflow.ErrLockWithoutValue) || errors.Is(err, branchworkflow.ErrTooManyReleasePrefixes) {
 		ctx.Error(http.StatusUnprocessableEntity, "SetOrgModel", err)
 		return
 	}

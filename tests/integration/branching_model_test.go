@@ -44,7 +44,7 @@ func TestBranchingModelSettings(t *testing.T) {
 			assert.Equal(t, 0, doc.doc.Find(".branching-model-chain").Length())
 			got := bmRepoAPI(t, ownerCtx, "org3", repo)
 			assert.True(t, got.Inherit)
-			assert.Equal(t, "instance", got.Source)
+			assert.Equal(t, "none", got.Source)
 			assert.Equal(t, "master", got.Effective.DevelopmentBranch)
 			assert.Empty(t, got.ReleaseBranches)
 		})
@@ -77,6 +77,12 @@ func TestBranchingModelSettings(t *testing.T) {
 			}), http.StatusSeeOther)
 			assert.Contains(t, bwFlash(owner), "bad..name cannot be part of a branch name")
 			req := NewRequestWithJSON(t, "PUT", "/api/v1/repos/org3/"+repo+"/branching-model", &api.EditRepoBranchingModelOption{ReleasePrefixes: []string{"rel ease/"}}).AddTokenAuth(ownerCtx.Token)
+			ownerCtx.Session.MakeRequest(t, req, http.StatusUnprocessableEntity)
+			owner.MakeRequest(t, NewRequestWithValues(t, "POST", settings+"/branching_model", map[string]string{
+				"release_prefixes": "a,b,c,d,e,f,g,h,i,j,k",
+			}), http.StatusSeeOther)
+			assert.Contains(t, bwFlash(owner), "Enter at most 10 release branch prefixes")
+			req = NewRequestWithJSON(t, "PUT", "/api/v1/repos/org3/"+repo+"/branching-model", &api.EditRepoBranchingModelOption{ReleasePrefixes: strings.Split("a,b,c,d,e,f,g,h,i,j,k", ",")}).AddTokenAuth(ownerCtx.Token)
 			ownerCtx.Session.MakeRequest(t, req, http.StatusUnprocessableEntity)
 			assert.Equal(t, "develop", bmRepoAPI(t, ownerCtx, "org3", repo).Own.DevelopmentBranch)
 		})
@@ -114,6 +120,8 @@ func TestBranchingModelSettings(t *testing.T) {
 			req = NewRequestWithJSON(t, "PUT", "/api/v1/orgs/org3/branching-model", &api.OrgBranchingModel{ReleasePrefixes: []string{"release/"}}).AddTokenAuth(ownerCtx.Token)
 			ownerCtx.Session.MakeRequest(t, req, http.StatusOK)
 			assert.Equal(t, "repo", bmRepoAPI(t, ownerCtx, "org3", repo).Source)
+			doc = NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", settings), http.StatusOK).Body)
+			assert.Contains(t, doc.doc.Find("#branching-model + .segment").Text(), "uses the branching model of organization org3")
 			req = NewRequestWithJSON(t, "PUT", "/api/v1/repos/org3/"+repo+"/branching-model", &api.EditRepoBranchingModelOption{Inherit: true}).AddTokenAuth(ownerCtx.Token)
 			ownerCtx.Session.MakeRequest(t, req, http.StatusOK)
 			got = bmRepoAPI(t, ownerCtx, "org3", repo)
@@ -123,7 +131,7 @@ func TestBranchingModelSettings(t *testing.T) {
 			// an empty list removes the organization's model
 			req = NewRequestWithJSON(t, "PUT", "/api/v1/orgs/org3/branching-model", &api.OrgBranchingModel{}).AddTokenAuth(ownerCtx.Token)
 			ownerCtx.Session.MakeRequest(t, req, http.StatusOK)
-			assert.Equal(t, "instance", bmRepoAPI(t, ownerCtx, "org3", repo).Source)
+			assert.Equal(t, "none", bmRepoAPI(t, ownerCtx, "org3", repo).Source)
 		})
 
 		t.Run("only owners and admins", func(t *testing.T) {

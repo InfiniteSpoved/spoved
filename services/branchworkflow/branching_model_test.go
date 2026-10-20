@@ -4,6 +4,7 @@
 package branchworkflow
 
 import (
+	"strings"
 	"testing"
 
 	repo_model "forgejo.org/models/repo"
@@ -71,12 +72,14 @@ func TestNormalizeBranchingModel(t *testing.T) {
 		{ReleasePrefixes: []string{"rel ease/"}},
 		{ReleasePrefixes: []string{"a,b/"}},
 		{ReleasePrefixes: []string{"/release"}},
-		{ReleasePrefixes: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}},
+		{DevelopmentBranch: strings.Repeat("d", 256)},
 	} {
 		_, err := NormalizeBranchingModel(bad)
 		_, ok := IsInvalidBranchingModel(err)
 		assert.True(t, ok, "%v", bad)
 	}
+	_, err = NormalizeBranchingModel(&repo_model.BranchingModel{ReleasePrefixes: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}})
+	require.ErrorIs(t, err, ErrTooManyReleasePrefixes)
 }
 
 func TestResolveModel(t *testing.T) {
@@ -84,7 +87,7 @@ func TestResolveModel(t *testing.T) {
 	own := &repo_model.BranchingModel{ReleasePrefixes: []string{"rel-"}}
 
 	e := ResolveModel(nil, false, nil)
-	assert.Equal(t, SourceInstance, e.Source)
+	assert.Equal(t, SourceNone, e.Source)
 	assert.Empty(t, e.Model.ReleasePrefixes)
 
 	e = ResolveModel(org, false, nil)
@@ -144,6 +147,6 @@ func TestSetOrgAndRepoModel(t *testing.T) {
 	repo = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})
 	eff, err = GetEffectiveModel(t.Context(), repo)
 	require.NoError(t, err)
-	assert.Equal(t, SourceInstance, eff.Source)
+	assert.Equal(t, SourceNone, eff.Source)
 	assert.Nil(t, eff.Configured)
 }

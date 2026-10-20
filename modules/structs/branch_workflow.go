@@ -58,7 +58,7 @@ type RepoBranchingModel struct {
 	Own *BranchingModel `json:"own,omitempty"`
 	// Effective is the branching model that applies; its development branch is resolved to a branch name
 	Effective BranchingModel `json:"effective"`
-	// Source tells where the effective value comes from: instance (no branching model), org or repo
+	// Source tells where the effective value comes from: none, org or repo
 	Source string `json:"source"`
 	// Locked is true when the organization enforces the branching model
 	Locked bool `json:"locked"`

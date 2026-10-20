@@ -183,6 +183,16 @@ func TestAuditOrgSettings(t *testing.T) {
 	data = auditData(t, orgOne(t, since, "org.branch_workflow.changed"))
 	assert.Equal(t, map[string]any{"development_branch": "", "release_prefixes": []any{}, "model_locked": false}, data["before"])
 	assert.Equal(t, map[string]any{"development_branch": "develop", "release_prefixes": []any{"release/"}, "model_locked": true}, data["after"])
+
+	require.NoError(t, branchworkflow.SetOrgModel(ctx, org3.AsUser(), nil, false))
+	since = auditMaxID(t)
+	repo3 := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})
+	require.NoError(t, branchworkflow.SetRepoModel(ctx, repo3, &repo_model.BranchingModel{ReleasePrefixes: []string{"rel-"}}))
+	repo3 = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})
+	require.NoError(t, branchworkflow.SetRepoModel(ctx, repo3, &repo_model.BranchingModel{ReleasePrefixes: []string{"rel-"}}))
+	data = auditData(t, auditOne(t, since, "repo.branch_workflow.changed"))
+	assert.Equal(t, map[string]any{"release_prefixes": []any{}, "inherit": true}, data["before"])
+	assert.Equal(t, map[string]any{"release_prefixes": []any{"rel-"}, "inherit": false}, data["after"])
 }
 
 // TestAuditOrgSettingsRollback checks that a failed entry fails the change and leaves no new value cached.

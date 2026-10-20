@@ -50,6 +50,9 @@ func BranchWorkflow(ctx *context.Context) {
 	if model.Source == branchworkflow.SourceOrg {
 		ctx.Data["ModelSetBy"] = ctx.Locale.TrString("repo.pulls.delete_after_merge.set_by_org", model.SetBy)
 	}
+	if model.Org != nil {
+		ctx.Data["ModelInheritDesc"] = ctx.Locale.TrString("repo.settings.branching_model.inherit_desc_org", ctx.Repo.Owner.Name)
+	}
 	ctx.Data["DevelopmentBranch"] = shownModel.DevelopmentBranch
 	ctx.Data["ReleasePrefixes"] = strings.Join(shownModel.ReleasePrefixes, ", ")
 	chain, err := branchworkflow.GetChain(ctx, ctx.Repo.Repository, model)
@@ -81,6 +84,8 @@ func BranchingModelPost(ctx *context.Context) {
 		ctx.Flash.Error(ctx.Tr("repo.settings.branching_model.invalid", value))
 	} else {
 		switch {
+		case errors.Is(err, branchworkflow.ErrTooManyReleasePrefixes):
+			ctx.Flash.Error(ctx.Tr("repo.settings.branching_model.too_many_prefixes"))
 		case errors.Is(err, branchworkflow.ErrLocked):
 			ctx.Error(http.StatusForbidden, ctx.Locale.TrString("repo.settings.branching_model.locked"))
 			return

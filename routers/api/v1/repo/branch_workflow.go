@@ -212,7 +212,7 @@ func EditBranchingModel(ctx *context.APIContext) {
 		model = &repo_model.BranchingModel{DevelopmentBranch: form.DevelopmentBranch, ReleasePrefixes: form.ReleasePrefixes}
 	}
 	err := branchworkflow.SetRepoModel(ctx, ctx.Repo().Repository, model)
-	if _, ok := branchworkflow.IsInvalidBranchingModel(err); ok {
+	if _, ok := branchworkflow.IsInvalidBranchingModel(err); ok || errors.Is(err, branchworkflow.ErrTooManyReleasePrefixes) {
 		ctx.Error(http.StatusUnprocessableEntity, "SetRepoModel", err)
 		return
 	}

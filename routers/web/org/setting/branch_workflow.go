@@ -73,6 +73,8 @@ func BranchingModelPost(ctx *context.Context) {
 		ctx.Flash.Error(ctx.Tr("repo.settings.branching_model.invalid", value))
 	} else {
 		switch {
+		case errors.Is(err, branchworkflow.ErrTooManyReleasePrefixes):
+			ctx.Flash.Error(ctx.Tr("repo.settings.branching_model.too_many_prefixes"))
 		case errors.Is(err, branchworkflow.ErrLockWithoutValue):
 			ctx.Flash.Error(ctx.Tr("org.settings.branching_model.enforce_needs_value"))
 		case err != nil:

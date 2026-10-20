@@ -166,7 +166,7 @@ var Fields = map[string][]string{
 		"name", "owner_id", "owner_name", "group_id", "group_name", "is_private", "is_template", "default_branch",
 		"is_mirror", "fork_id", "template_id", "units", "counts", "purge", "to_owner_id", "to_owner_name", "team_ids",
 		"interval", "enable_prune", "branch_filter", "tag_filter", "lfs", "lfs_endpoint", "address", "url_changed",
-		"credentials_changed",
+		"credentials_changed", "development_branch", "release_prefixes", "inherit",
 	},
 	"collaborator":       {"user_id", "mode"},
 	"branch":             {"name", "from", "to", "commit", "default"},
