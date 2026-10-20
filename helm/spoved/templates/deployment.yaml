@@ -1,0 +1,119 @@
+{{- $_ := required "rootUrl is required" .Values.rootUrl }}
+{{- $_ := required "database.host is required" .Values.database.host }}
+{{- $_ := required "database.existingSecret is required" .Values.database.existingSecret }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "spoved.fullname" . }}
+  labels:
+    {{- include "spoved.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "spoved.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "spoved.selector" . | nindent 8 }}
+        {{- with .Values.podLabels }}{{ toYaml . | nindent 8 }}{{ end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "spoved.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: spoved
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - {name: GITEA__SERVER__ROOT_URL, value: {{ .Values.rootUrl | quote }}}
+            {{- with .Values.sshDomain }}
+            - {name: GITEA__SERVER__SSH_DOMAIN, value: {{ . | quote }}}
+            {{- end }}
+            - {name: GITEA__SERVER__SSH_PORT, value: {{ .Values.sshPort | quote }}}
+            - {name: GITEA__SERVER__SSH_LISTEN_PORT, value: "2222"}
+            - {name: GITEA__DATABASE__DB_TYPE, value: {{ .Values.database.type | quote }}}
+            - {name: GITEA__DATABASE__HOST, value: {{ .Values.database.host | quote }}}
+            - {name: GITEA__DATABASE__NAME, value: {{ .Values.database.name | quote }}}
+            - {name: GITEA__DATABASE__USER, value: {{ .Values.database.user | quote }}}
+            - {name: GITEA__DATABASE__SSL_MODE, value: {{ .Values.database.sslMode | quote }}}
+            - name: GITEA__DATABASE__PASSWD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: {{ .Values.database.secretKey }}
+            {{- range $section, $keys := .Values.config }}
+            {{- range $key, $value := $keys }}
+            - name: {{ printf "GITEA__%s__%s" ($section | upper | replace "." "_0X2E_") ($key | upper) }}
+              value: {{ $value | toString | quote }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - {name: http, containerPort: 3000}
+            - {name: ssh, containerPort: 2222}
+          startupProbe:
+            httpGet: {path: /api/healthz, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /api/healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /api/healthz, port: http}
+            periodSeconds: 20
+            failureThreshold: 6
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/gitea}
+            - {name: tmp, mountPath: /tmp}
+            - {name: run, mountPath: /run/forgejo}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (include "spoved.fullname" .) }}
+        - name: tmp
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

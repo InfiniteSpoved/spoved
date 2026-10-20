@@ -1,0 +1,29 @@
+# GKE: Persistent Disk, GKE Ingress (Google Cloud Load Balancer), TCP load balancer for SSH, Cloud SQL for PostgreSQL.
+rootUrl: https://git.example.com/
+sshDomain: ssh.example.com
+database:
+  # Cloud SQL private IP, or 127.0.0.1:5432 with a Cloud SQL Auth Proxy sidecar.
+  host: 10.0.0.5:5432
+  existingSecret: spoved-db
+persistence:
+  storageClassName: premium-rwo
+service:
+  http:
+    type: ClusterIP
+    annotations:
+      cloud.google.com/neg: '{"ingress": true}'
+  ssh:
+    enabled: true
+    annotations:
+      networking.gke.io/load-balancer-type: External
+ingress:
+  enabled: true
+  className: gce
+  annotations:
+    kubernetes.io/ingress.global-static-ip-name: spoved
+    networking.gke.io/managed-certificates: spoved-cert
+  hosts:
+    - host: git.example.com
+serviceAccount:
+  annotations:
+    iam.gke.io/gcp-service-account: spoved@example-project.iam.gserviceaccount.com

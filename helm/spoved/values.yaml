@@ -1,0 +1,75 @@
+image:
+  repository: ghcr.io/infinitespoved/spoved
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Public URL of the instance (becomes server.ROOT_URL). Required.
+rootUrl: ""
+# Host name shown in SSH clone URLs (server.SSH_DOMAIN) and its public port.
+sshDomain: ""
+sshPort: 22
+
+database:
+  type: postgres
+  # host:port of the external PostgreSQL server. Required.
+  host: ""
+  name: spoved
+  user: spoved
+  sslMode: require
+  # Existing Secret holding the database password.
+  existingSecret: ""
+  secretKey: password
+
+# app.ini settings as GITEA__SECTION__KEY variables: config.<section>.<KEY>.
+# Do not put secrets here; use extraEnv with secretKeyRef or extraEnvFrom.
+config: {}
+#  service:
+#    DISABLE_REGISTRATION: "true"
+extraEnv: []
+extraEnvFrom: []
+
+persistence:
+  size: 20Gi
+  storageClassName: ""
+  accessModes: [ReadWriteOnce]
+  existingClaim: ""
+  annotations: {}
+
+service:
+  http:
+    type: ClusterIP
+    port: 3000
+    annotations: {}
+  ssh:
+    enabled: false
+    type: LoadBalancer
+    port: 22
+    annotations: {}
+    # Set to Local to keep client IPs.
+    externalTrafficPolicy: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  # - host: git.example.com
+  tls: []
+  # - secretName: spoved-tls
+  #   hosts: [git.example.com]
+
+serviceAccount:
+  create: true
+  name: ""
+  # For workload identity (AKS, EKS IRSA, GKE).
+  annotations: {}
+  labels: {}
+
+podAnnotations: {}
+podLabels: {}
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
