@@ -25,6 +25,11 @@ func TestInitDelegateHooks(t *testing.T) {
 	}
 	assert.FileExists(t, filepath.Join(dir, "hooks", "pre-receive.d", "gitea"))
 	assert.FileExists(t, filepath.Join(dir, "hooks", "post-receive.d", "gitea"))
+	for _, path := range []string{"pre-receive.d/gitea", "post-receive.d/gitea", "proc-receive"} {
+		content, err := os.ReadFile(filepath.Join(dir, "hooks", path))
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "\n"+hookEnv+" ", path)
+	}
 	// the update hook of the binary does nothing, so a push doesn't start it (and an old one is removed)
 	assert.NoFileExists(t, stale)
 	assert.DirExists(t, filepath.Join(dir, "hooks", "update.d"))
