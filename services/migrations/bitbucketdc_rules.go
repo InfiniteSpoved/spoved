@@ -653,6 +653,9 @@ type bitbucketBranchModel struct {
 		DisplayID string `json:"displayId"`
 		IsDefault bool   `json:"isDefault"`
 	} `json:"development"`
+	Production *struct {
+		DisplayID string `json:"displayId"`
+	} `json:"production"`
 	Types []struct {
 		ID     string `json:"id"`
 		Prefix string `json:"prefix"`
@@ -660,8 +663,9 @@ type bitbucketBranchModel struct {
 }
 
 // planBranchingModel plans the branching model that applies to a Bitbucket repository, its own or its project's, as
-// the repository's own branching model: the development branch (none when it is the default branch) and the release
-// prefix. Bitbucket's automatic merging follows only release branches, so the other branch types are left out.
+// the repository's own branching model: the development branch (none when it is the default branch), the production
+// branch and the release prefix. Bitbucket's automatic merging follows only release branches, so the other branch
+// types are left out.
 func (p *bitbucketPlanner) planBranchingModel(owner *BitbucketImportItem) error {
 	var bm bitbucketBranchModel
 	if err := p.d.callAPI("branch-utils/1.0/projects/"+p.project.key+"/repos/"+owner.slug+"/branchmodel", nil, &bm); errors.Is(err, errBitbucketNotFound) {
@@ -672,6 +676,9 @@ func (p *bitbucketPlanner) planBranchingModel(owner *BitbucketImportItem) error 
 	model := &repo_model.BranchingModel{}
 	if bm.Development != nil && !bm.Development.IsDefault {
 		model.DevelopmentBranch = bm.Development.DisplayID
+	}
+	if bm.Production != nil {
+		model.ProductionBranch = bm.Production.DisplayID
 	}
 	for _, t := range bm.Types {
 		if t.ID == "RELEASE" {
@@ -684,10 +691,14 @@ func (p *bitbucketPlanner) planBranchingModel(owner *BitbucketImportItem) error 
 		p.add(item, BitbucketSkipped, "not a valid branch name or prefix")
 		return nil
 	}
-	if len(model.ReleasePrefixes) == 0 {
+	if len(model.ReleasePrefixes) == 0 && model.ProductionBranch == "" {
 		return nil
 	}
-	item.Name = util.StripControl(strings.Join(model.ReleasePrefixes, ", ") + " → " + cmp.Or(model.DevelopmentBranch, "default branch"))
+	name := strings.Join(model.ReleasePrefixes, ", ")
+	if model.ProductionBranch != "" {
+		name = strings.TrimPrefix(name+", "+model.ProductionBranch, ", ")
+	}
+	item.Name = util.StripControl(name + " → " + cmp.Or(model.DevelopmentBranch, "default branch"))
 	item.branchingModel = model
 
 	status, reason := BitbucketPlanned, ""

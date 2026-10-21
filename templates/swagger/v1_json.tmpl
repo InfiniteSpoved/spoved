@@ -30506,6 +30506,16 @@
           "type": "string",
           "x-go-name": "DevelopmentBranch"
         },
+        "merge_forward": {
+          "description": "MergeForward merges a pull request merged into a release branch into every later release branch and the development branch, and one merged into the production branch into the development branch",
+          "type": "boolean",
+          "x-go-name": "MergeForward"
+        },
+        "production_branch": {
+          "description": "ProductionBranch is merged forward into the development branch; empty is none",
+          "type": "string",
+          "x-go-name": "ProductionBranch"
+        },
         "release_prefixes": {
           "description": "ReleasePrefixes start the names of release branches; the rest of the name is read as a version",
           "type": "array",
@@ -34132,6 +34142,14 @@
           "type": "boolean",
           "x-go-name": "Inherit"
         },
+        "merge_forward": {
+          "type": "boolean",
+          "x-go-name": "MergeForward"
+        },
+        "production_branch": {
+          "type": "string",
+          "x-go-name": "ProductionBranch"
+        },
         "release_prefixes": {
           "type": "array",
           "items": {
@@ -36956,8 +36974,18 @@
           "type": "boolean",
           "x-go-name": "Enforce"
         },
+        "merge_forward": {
+          "description": "MergeForward merges a pull request merged into a release branch into every later release branch and the development branch, and one merged into the production branch into the development branch",
+          "type": "boolean",
+          "x-go-name": "MergeForward"
+        },
+        "production_branch": {
+          "description": "ProductionBranch is merged forward into the development branch; empty is none",
+          "type": "string",
+          "x-go-name": "ProductionBranch"
+        },
         "release_prefixes": {
-          "description": "ReleasePrefixes start the names of release branches; empty removes the branching model",
+          "description": "ReleasePrefixes start the names of release branches; empty, with no production branch, removes the branching model",
           "type": "array",
           "items": {
             "type": "string"

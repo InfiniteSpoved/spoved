@@ -710,6 +710,33 @@
 					</div>
 				{{end}}
 			</div>
+		{{else if eq .Type 48 49}}
+			{{$info := .MergeForwardInfo}}
+			<div class="timeline-item event" id="{{.HashTag}}">
+				<span class="badge">{{if eq .Type 49}}{{svg "octicon-alert" 16}}{{else}}{{svg "octicon-git-merge" 16}}{{end}}</span>
+				{{template "shared/user/avatarlink" dict "user" .Poster}}
+				<span class="text grey muted-links">
+					{{template "shared/user/authorlink" .Poster}}
+					{{if eq .Type 48}}{{ctx.Locale.Tr "repo.pulls.merge_forward.merged_comment" $createdStr}}
+					{{else}}{{ctx.Locale.Tr "repo.pulls.merge_forward.stopped_comment" $info.Branch $createdStr}}{{end}}
+				</span>
+				<div class="detail flex-text-block merge-forward-detail">
+					{{if eq .Type 48}}
+						{{range $info.Steps}}
+							<span class="text grey muted-links"><a href="{{$.RepoLink}}/src/branch/{{PathEscapeSegments .Branch}}">{{.Branch}}</a> (<a class="ui sha" href="{{$.RepoLink}}/commit/{{PathEscape .SHA}}">{{ShortSha .SHA}}</a>)</span>
+						{{end}}
+					{{else}}
+						<span class="text grey muted-links">
+							{{if eq $info.Reason "conflict"}}{{ctx.Locale.Tr "repo.pulls.merge_forward.reason_conflict"}}
+							{{else if eq $info.Reason "refused"}}{{ctx.Locale.Tr "repo.pulls.merge_forward.reason_refused"}}
+							{{else if eq $info.Reason "merger"}}{{ctx.Locale.Tr "repo.pulls.merge_forward.reason_merger"}}
+							{{else}}{{ctx.Locale.Tr "repo.pulls.merge_forward.reason_error"}}{{end}}
+						</span>
+						{{if .RefIssueID}}<span class="text grey muted-links"><a href="{{.RefIssueLink ctx}}"><b>{{RenderRefIssueTitle $.Context (.RefIssueTitle ctx)}}</b> {{.RefIssueIdent ctx}}</a></span>{{end}}
+						{{if $info.PullFailed}}<span class="text grey">{{ctx.Locale.Tr "repo.pulls.merge_forward.pull_failed"}}</span>{{end}}
+					{{end}}
+				</div>
+			</div>
 		{{else if or (eq .Type 36) (eq .Type 37)}}
 			<div class="timeline-item event" id="{{.HashTag}}">
 				<span class="badge">{{svg "octicon-pin" 16}}</span>
