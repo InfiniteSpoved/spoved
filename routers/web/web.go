@@ -400,6 +400,7 @@ func Routes() *web.Route {
 	}
 
 	routes.Methods("GET,HEAD", "/robots.txt", gzipMid, misc.RobotsTxt)
+	routes.Methods("GET,HEAD", "/llms.txt", gzipMid, misc.LlmsTxt)
 	routes.Methods("GET,HEAD", "/manifest.json", gzipMid, misc.ManifestJSON)
 	routes.Get("/ssh_info", misc.SSHInfo)
 	routes.Get("/api/healthz", healthcheck.Check)
@@ -672,6 +673,7 @@ func registerRoutes(m *web.Route) {
 		m.Get("/users", explore.Users)
 		m.Get("/users/sitemap-{idx}.xml", sitemapEnabled, explore.Users)
 		m.Get("/organizations", explore.Organizations)
+		m.Get("/organizations/sitemap-{idx}.xml", sitemapEnabled, explore.Organizations)
 		m.Get("/groups", explore.RepoGroups)
 		m.Get("/code", func(ctx *context.Context) {
 			if unit.TypeCode.UnitGlobalDisabled() {

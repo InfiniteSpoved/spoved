@@ -551,7 +551,7 @@ func Wiki(ctx *context.Context) {
 	ctx.Data["Author"] = lastCommit.Author
 
 	ctx.Data["OpenGraphTitle"] = ctx.Data["Title"]
-	ctx.Data["OpenGraphURL"] = fmt.Sprintf("%s%s", setting.AppURL, ctx.Data["Link"])
+	ctx.Data["OpenGraphURL"] = ctx.Data["CanonicalURL"]
 
 	ctx.HTML(http.StatusOK, tplWikiView)
 }

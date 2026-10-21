@@ -84,6 +84,20 @@ func Home(ctx *context.Context) {
 	ctx.Data["IsRepoIndexerEnabled"] = setting.Indexer.RepoIndexerEnabled
 
 	ctx.Data["OpenGraphDescription"] = setting.UI.Meta.Description
+	site := map[string]any{
+		"@type":       "WebSite",
+		"name":        setting.AppDisplayName,
+		"url":         setting.AppURL,
+		"description": setting.UI.Meta.Description,
+	}
+	if !setting.Service.Explore.RequireSigninView {
+		site["potentialAction"] = map[string]any{
+			"@type":       "SearchAction",
+			"target":      setting.AppURL + "explore/repos?q={search_term_string}",
+			"query-input": "required name=search_term_string",
+		}
+	}
+	ctx.SetStructuredData(site)
 
 	ctx.HTML(http.StatusOK, tplHome)
 }
@@ -106,6 +120,25 @@ func HomeSitemap(ctx *context.Context) {
 		idx := 1
 		for i := 0; i < count; i += setting.UI.SitemapPagingNum {
 			m.Add(sitemap.URL{URL: setting.AppURL + "explore/users/sitemap-" + strconv.Itoa(idx) + ".xml"})
+			idx++
+		}
+	}
+
+	if !setting.Service.Explore.DisableOrganizationsPage {
+		_, cnt, err := user_model.SearchUsers(ctx, &user_model.SearchUserOptions{
+			Type:        user_model.UserTypeOrganization,
+			ListOptions: db.ListOptions{PageSize: 1},
+			Visible:     []structs.VisibleType{structs.VisibleTypePublic},
+			IsArchived:  optional.Some(false),
+		})
+		if err != nil {
+			ctx.ServerError("SearchUsers", err)
+			return
+		}
+		count := int(cnt)
+		idx := 1
+		for i := 0; i < count; i += setting.UI.SitemapPagingNum {
+			m.Add(sitemap.URL{URL: setting.AppURL + "explore/organizations/sitemap-" + strconv.Itoa(idx) + ".xml"})
 			idx++
 		}
 	}

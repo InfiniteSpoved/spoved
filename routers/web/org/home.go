@@ -56,6 +56,7 @@ func Home(ctx *context.Context) {
 	ctx.Data["OpenGraphImageURL"] = ctx.ContextUser.AvatarLink(ctx)
 	ctx.Data["OpenGraphURL"] = ctx.ContextUser.HTMLURL()
 	ctx.Data["OpenGraphDescription"] = ctx.ContextUser.Description
+	ctx.SetProfileStructuredData(ctx.ContextUser)
 
 	var orderBy db.SearchOrderBy
 	sortOrder := ctx.FormString("sort")
