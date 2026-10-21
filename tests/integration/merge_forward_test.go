@@ -4,6 +4,7 @@
 package integration
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -22,6 +23,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/gitrepo"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/test"
 	"forgejo.org/services/branchworkflow"
 	"forgejo.org/services/forms"
 	"forgejo.org/services/mergeforward"
@@ -325,6 +327,82 @@ func TestMergeForward(t *testing.T) {
 			assert.False(t, has(t, fmt.Sprintf("automerge/pr-%d/release/2.0", pr.Index), "fix7.txt"))
 			// the author of the pull request is told
 			unittest.AssertExistsAndLoadBean(t, &activities_model.Notification{UserID: user2.ID, IssueID: row.IssueID, CommentID: stopped[0].ID})
+		})
+
+		t.Run("a target that moves during a step is retried", func(t *testing.T) {
+			pr, row := mergedWithoutCascade(t, "fix-move", "fixmove.txt")
+			moved := false
+			defer test.MockVariableValue(&mergeforward.BeforeStepPush, func(_ context.Context, target string) {
+				if target == "release/2.0" && !moved {
+					moved = true
+					require.NoError(t, createOrReplaceFileInBranch(user2, repo, "moved.txt", "release/2.0", "moved"))
+				}
+			})()
+			_, err := mergeforward.Run(t.Context(), row.ID)
+			require.NoError(t, err)
+			assert.True(t, moved)
+			for _, b := range []string{"release/2.0", "develop"} {
+				assert.True(t, has(t, b, "fixmove.txt"), b)
+				assert.True(t, has(t, b, "moved.txt"), b)
+			}
+			list := comments(pr, issues_model.CommentTypePRMergedForward)
+			require.Len(t, list, 1)
+			assert.Len(t, list[0].MergeForwardInfo().Steps, 2)
+			assert.Empty(t, comments(pr, issues_model.CommentTypePRMergeForwardStopped))
+		})
+
+		t.Run("a target that keeps moving stops it", func(t *testing.T) {
+			pr, row := mergedWithoutCascade(t, "fix-moving", "fixmoving.txt")
+			moves := 0
+			defer test.MockVariableValue(&mergeforward.BeforeStepPush, func(_ context.Context, target string) {
+				if target == "release/2.0" {
+					moves++
+					require.NoError(t, createOrReplaceFileInBranch(user2, repo, "moving.txt", "release/2.0", strconv.Itoa(moves)))
+				}
+			})()
+			_, err := mergeforward.Run(t.Context(), row.ID)
+			require.NoError(t, err)
+			assert.Equal(t, 3, moves, "every attempt is retried")
+			assert.False(t, has(t, "release/2.0", "fixmoving.txt"))
+			stopped := comments(pr, issues_model.CommentTypePRMergeForwardStopped)
+			require.Len(t, stopped, 1)
+			assert.Equal(t, "release/2.0", stopped[0].MergeForwardInfo().Branch)
+			assert.Equal(t, mergeforward.ReasonError, stopped[0].MergeForwardInfo().Reason)
+		})
+
+		t.Run("a second cascade waits for the running one", func(t *testing.T) {
+			first, firstRow := mergedWithoutCascade(t, "fix-first", "fixfirst.txt")
+			// the second one is merged into release/1.9, so the first cascade, from release/1.10, doesn't carry it
+			setModel(t, false)
+			second := pull(t, "release/1.9", "fix-second", "fixsecond.txt", "fix")
+			merge(t, second)
+			setModel(t, true)
+			secondRow := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{IssueID: issueIDOf(t, repo, second.Index)})
+			called := false
+			defer test.MockVariableValue(&mergeforward.BeforeStepPush, func(ctx context.Context, target string) {
+				if called {
+					return
+				}
+				called = true
+				ran, err := mergeforward.Run(ctx, secondRow.ID)
+				require.NoError(t, err)
+				assert.False(t, ran, "the queue retries it")
+			})()
+			_, err := mergeforward.Run(t.Context(), firstRow.ID)
+			require.NoError(t, err)
+			require.True(t, called)
+			assert.True(t, has(t, "develop", "fixfirst.txt"))
+			assert.Empty(t, comments(first, issues_model.CommentTypePRMergeForwardStopped))
+			require.Len(t, comments(first, issues_model.CommentTypePRMergedForward), 1)
+			assert.False(t, has(t, "release/1.10", "fixsecond.txt"))
+			assert.Empty(t, comments(second, issues_model.CommentTypePRMergedForward))
+
+			// the retry runs once the first one is done
+			ran, err := mergeforward.Run(t.Context(), secondRow.ID)
+			require.NoError(t, err)
+			assert.True(t, ran)
+			assert.True(t, has(t, "develop", "fixsecond.txt"))
+			require.Len(t, comments(second, issues_model.CommentTypePRMergedForward), 1)
 		})
 
 		skipped := func(t *testing.T, pr api.PullRequest, by *user_model.User) {
