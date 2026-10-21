@@ -138,6 +138,7 @@ const (
 
 	CommentTypePRMergedForward       // 48 the merge was merged forward into later branches (Content is MergeForwardInfo)
 	CommentTypePRMergeForwardStopped // 49 merging forward stopped at a branch (Content is MergeForwardInfo, RefIssueID the pull request opened for it)
+	CommentTypePRMergeForwardSkipped // 50 the merge was not merged forward, by choice (Content is MergeForwardInfo with the first branch it would have reached)
 )
 
 var commentStrings = []string{
@@ -191,6 +192,7 @@ var commentStrings = []string{
 	"pull_auto_merge_skipped",
 	"pull_merged_forward",
 	"pull_merge_forward_stopped",
+	"pull_merge_forward_skipped",
 }
 
 func (t CommentType) String() string {

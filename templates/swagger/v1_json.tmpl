@@ -20035,6 +20035,9 @@
           "200": {
             "$ref": "#/responses/empty"
           },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
           "404": {
             "$ref": "#/responses/notFound"
           },
@@ -30511,6 +30514,16 @@
           "type": "boolean",
           "x-go-name": "MergeForward"
         },
+        "merge_forward_anyone_may_skip": {
+          "description": "MergeForwardAnyoneMaySkip lets everyone who merges choose not to merge forward; otherwise only those who may change the branching model",
+          "type": "boolean",
+          "x-go-name": "MergeForwardAnyoneMaySkip"
+        },
+        "merge_forward_never_bypass": {
+          "description": "MergeForwardNeverBypass makes a step that branch protection refuses open a pull request; otherwise a step counts as an extension of the approved pull request: whoever merged it must be allowed to merge into the target, whose required approvals and status checks are skipped",
+          "type": "boolean",
+          "x-go-name": "MergeForwardNeverBypass"
+        },
         "production_branch": {
           "description": "ProductionBranch is merged forward into the development branch; empty is none",
           "type": "string",
@@ -34146,6 +34159,16 @@
           "type": "boolean",
           "x-go-name": "MergeForward"
         },
+        "merge_forward_anyone_may_skip": {
+          "description": "MergeForwardAnyoneMaySkip lets everyone who merges choose not to merge forward; otherwise only those who may change the branching model",
+          "type": "boolean",
+          "x-go-name": "MergeForwardAnyoneMaySkip"
+        },
+        "merge_forward_never_bypass": {
+          "description": "MergeForwardNeverBypass makes a step that branch protection refuses open a pull request; otherwise a step counts as an extension of the approved pull request: whoever merged it must be allowed to merge into the target, whose required approvals and status checks are skipped",
+          "type": "boolean",
+          "x-go-name": "MergeForwardNeverBypass"
+        },
         "production_branch": {
           "type": "string",
           "x-go-name": "ProductionBranch"
@@ -36213,6 +36236,11 @@
           "type": "string",
           "x-go-name": "HeadCommitID"
         },
+        "merge_forward": {
+          "description": "false merges without merging forward into later branches of the branching model",
+          "type": "boolean",
+          "x-go-name": "MergeForward"
+        },
         "merge_when_checks_succeed": {
           "type": "boolean",
           "x-go-name": "MergeWhenChecksSucceed"
@@ -36978,6 +37006,16 @@
           "description": "MergeForward merges a pull request merged into a release branch into every later release branch and the development branch, and one merged into the production branch into the development branch",
           "type": "boolean",
           "x-go-name": "MergeForward"
+        },
+        "merge_forward_anyone_may_skip": {
+          "description": "MergeForwardAnyoneMaySkip lets everyone who merges choose not to merge forward; otherwise only those who may change the branching model",
+          "type": "boolean",
+          "x-go-name": "MergeForwardAnyoneMaySkip"
+        },
+        "merge_forward_never_bypass": {
+          "description": "MergeForwardNeverBypass makes a step that branch protection refuses open a pull request; otherwise a step counts as an extension of the approved pull request: whoever merged it must be allowed to merge into the target, whose required approvals and status checks are skipped",
+          "type": "boolean",
+          "x-go-name": "MergeForwardNeverBypass"
         },
         "production_branch": {
           "description": "ProductionBranch is merged forward into the development branch; empty is none",

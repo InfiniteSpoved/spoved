@@ -127,10 +127,12 @@ func renderBranchingModel(ctx *context.APIContext) {
 	res := &api.RepoBranchingModel{
 		Inherit: eff.Configured == nil,
 		Effective: api.BranchingModel{
-			DevelopmentBranch: eff.DevelopmentBranch(repo),
-			ReleasePrefixes:   append([]string{}, eff.Model.ReleasePrefixes...),
-			ProductionBranch:  eff.Model.ProductionBranch,
-			MergeForward:      eff.Model.MergeForward,
+			DevelopmentBranch:         eff.DevelopmentBranch(repo),
+			ReleasePrefixes:           append([]string{}, eff.Model.ReleasePrefixes...),
+			ProductionBranch:          eff.Model.ProductionBranch,
+			MergeForward:              eff.Model.MergeForward,
+			MergeForwardNeverBypass:   eff.Model.MergeForwardNeverBypass,
+			MergeForwardAnyoneMaySkip: eff.Model.MergeForwardAnyoneMaySkip,
 		},
 		Source:          eff.Source,
 		Locked:          eff.Locked,
@@ -138,7 +140,7 @@ func renderBranchingModel(ctx *context.APIContext) {
 		IgnoredBranches: append([]string{}, chain.Ignored...),
 	}
 	if eff.Configured != nil {
-		res.Own = &api.BranchingModel{DevelopmentBranch: eff.Configured.DevelopmentBranch, ReleasePrefixes: append([]string{}, eff.Configured.ReleasePrefixes...), ProductionBranch: eff.Configured.ProductionBranch, MergeForward: eff.Configured.MergeForward}
+		res.Own = &api.BranchingModel{DevelopmentBranch: eff.Configured.DevelopmentBranch, ReleasePrefixes: append([]string{}, eff.Configured.ReleasePrefixes...), ProductionBranch: eff.Configured.ProductionBranch, MergeForward: eff.Configured.MergeForward, MergeForwardNeverBypass: eff.Configured.MergeForwardNeverBypass, MergeForwardAnyoneMaySkip: eff.Configured.MergeForwardAnyoneMaySkip}
 	}
 	if eff.Locked {
 		res.LockedBy = eff.SetBy
@@ -211,7 +213,7 @@ func EditBranchingModel(ctx *context.APIContext) {
 	form := web.GetForm(ctx).(*api.EditRepoBranchingModelOption)
 	var model *repo_model.BranchingModel
 	if !form.Inherit {
-		model = &repo_model.BranchingModel{DevelopmentBranch: form.DevelopmentBranch, ReleasePrefixes: form.ReleasePrefixes, ProductionBranch: form.ProductionBranch, MergeForward: form.MergeForward}
+		model = &repo_model.BranchingModel{DevelopmentBranch: form.DevelopmentBranch, ReleasePrefixes: form.ReleasePrefixes, ProductionBranch: form.ProductionBranch, MergeForward: form.MergeForward, MergeForwardNeverBypass: form.MergeForwardNeverBypass, MergeForwardAnyoneMaySkip: form.MergeForwardAnyoneMaySkip}
 	}
 	err := branchworkflow.SetRepoModel(ctx, ctx.Repo().Repository, model)
 	if _, ok := branchworkflow.IsInvalidBranchingModel(err); ok || errors.Is(err, branchworkflow.ErrTooManyReleasePrefixes) {

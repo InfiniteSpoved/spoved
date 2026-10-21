@@ -40,6 +40,7 @@ var hiddenCommentTypeGroups = hiddenCommentTypeGroupsType{
 		/*25*/ issues_model.CommentTypeChangeTargetBranch,
 		/*48*/ issues_model.CommentTypePRMergedForward,
 		/*49*/ issues_model.CommentTypePRMergeForwardStopped,
+		/*50*/ issues_model.CommentTypePRMergeForwardSkipped,
 	},
 	"time_tracking": {
 		/*12*/ issues_model.CommentTypeStartTracking,

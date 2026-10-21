@@ -565,6 +565,8 @@ func actionToTemplate(issue *issues_model.Issue, actionType activities_model.Act
 			name = "assigned"
 		case issues_model.CommentTypePullRequestPush:
 			name = "push"
+		case issues_model.CommentTypePRMergeForwardStopped:
+			name = "merge_forward_stopped"
 		default:
 			name = "default"
 		}

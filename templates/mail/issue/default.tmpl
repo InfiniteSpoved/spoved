@@ -59,6 +59,14 @@
 			{{.locale.Tr "mail.issue.action.review_dismissed" .Doer.Name .Comment.Review.Reviewer.Name}}
 		{{else if eq .ActionName "ready_for_review"}}
 			{{.locale.Tr "mail.issue.action.ready_for_review" .Doer.Name}}
+		{{else if eq .ActionName "merge_forward_stopped"}}
+			{{$info := .Comment.MergeForwardInfo}}
+			{{.locale.Tr "mail.issue.action.merge_forward_stopped" .Issue.Index $info.Branch}}
+			{{if eq $info.Reason "conflict"}}{{.locale.Tr "repo.pulls.merge_forward.reason_conflict"}}
+			{{else if eq $info.Reason "refused"}}{{.locale.Tr "repo.pulls.merge_forward.reason_refused"}}
+			{{else if eq $info.Reason "merger"}}{{.locale.Tr "repo.pulls.merge_forward.reason_merger"}}
+			{{else}}{{.locale.Tr "repo.pulls.merge_forward.reason_error"}}{{end}}
+			{{if $info.PullFailed}}{{.locale.Tr "repo.pulls.merge_forward.pull_failed"}}{{else if .Comment.RefIssueID}}{{.locale.Tr "mail.issue.action.merge_forward_pull"}}{{end}}
 		{{end}}
 
 		{{- if eq .Body ""}}

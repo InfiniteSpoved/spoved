@@ -202,6 +202,19 @@ func GetDefaultMergeMessage(ctx context.Context, baseGitRepo *git.Repository, pr
 	return getMergeMessage(ctx, baseGitRepo, pr, mergeStyle, nil)
 }
 
+type withoutMergeForwardKey struct{}
+
+// WithoutMergeForward marks a merge, or a scheduled auto merge, made with ctx as one that is not merged forward.
+func WithoutMergeForward(ctx context.Context) context.Context {
+	return context.WithValue(ctx, withoutMergeForwardKey{}, true)
+}
+
+// MergeForwardSkipped reports whether ctx comes from WithoutMergeForward.
+func MergeForwardSkipped(ctx context.Context) bool {
+	skipped, _ := ctx.Value(withoutMergeForwardKey{}).(bool)
+	return skipped
+}
+
 // Merge merges pull request to base repository.
 // Caller should check PR is ready to be merged (review and status checks)
 func Merge(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, baseGitRepo *git.Repository, mergeStyle repo_model.MergeStyle, expectedHeadCommitID, message string, wasAutoMerged bool) error {

@@ -59,6 +59,20 @@
 			</div>
 			<div class="field">
 				<div class="ui checkbox">
+					<input id="merge_forward_never_bypass" name="merge_forward_never_bypass" type="checkbox" {{if .MergeForwardNeverBypass}}checked{{end}}>
+					<label for="merge_forward_never_bypass">{{ctx.Locale.Tr "repo.settings.branching_model.never_bypass"}}</label>
+					<p class="help">{{ctx.Locale.Tr "repo.settings.branching_model.never_bypass_desc"}}</p>
+				</div>
+			</div>
+			<div class="field">
+				<div class="ui checkbox">
+					<input id="merge_forward_anyone_may_skip" name="merge_forward_anyone_may_skip" type="checkbox" {{if .MergeForwardAnyoneMaySkip}}checked{{end}}>
+					<label for="merge_forward_anyone_may_skip">{{ctx.Locale.Tr "repo.settings.branching_model.anyone_may_skip"}}</label>
+					<p class="help">{{ctx.Locale.Tr "repo.settings.branching_model.anyone_may_skip_desc"}}</p>
+				</div>
+			</div>
+			<div class="field">
+				<div class="ui checkbox">
 					<input id="enforce_model" name="enforce_model" type="checkbox" {{if .EnforceModel}}checked{{end}}>
 					<label for="enforce_model">{{ctx.Locale.Tr "org.settings.branch_workflow.enforce"}}</label>
 					<p class="help">{{ctx.Locale.Tr "org.settings.branching_model.enforce_desc"}}</p>

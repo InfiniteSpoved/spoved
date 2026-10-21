@@ -584,3 +584,20 @@ func TestFallbackSubjectType(t *testing.T) {
 	pr.IsPull = true
 	assert.Contains(t, fallbackMailSubject(pr), "PR")
 }
+
+func TestComposeMergeForwardStoppedMessage(t *testing.T) {
+	defer MockMailSettings(nil)()
+	doer, _, issue, comment := prepareMailerTest(t)
+	comment.Type = issues_model.CommentTypePRMergeForwardStopped
+	comment.Content = `{"branch":"develop","reason":"conflict"}`
+
+	recipients := []*user_model.User{{Name: "Test", Email: "test@gitea.com"}}
+	msgs, err := composeIssueCommentMessages(&mailCommentContext{
+		Context: t.Context(), Issue: issue, Doer: doer, Comment: comment,
+	}, "en-US", recipients, false, "merge forward")
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.Contains(t, msgs[0].Body, "Merging #1 forward stopped at develop.")
+	assert.Contains(t, msgs[0].Body, "The merge has conflicts.")
+	assert.NotContains(t, msgs[0].Body, `"reason"`, "the comment's data is not shown")
+}

@@ -259,6 +259,13 @@ type BranchingModel struct {
 	ReleasePrefixes   []string `json:",omitempty"`
 	ProductionBranch  string   `json:",omitempty"` // "" is none; merges into it are merged forward into the development branch
 	MergeForward      bool     `json:",omitempty"` // a merge into a release or the production branch is merged forward
+	// MergeForwardNeverBypass makes a step that branch protection refuses open a pull request; otherwise a step is an
+	// extension of the approved pull request, allowed to whoever may merge into the target without its approvals
+	// and status checks
+	MergeForwardNeverBypass bool `json:",omitempty"`
+	// MergeForwardAnyoneMaySkip lets everyone who merges choose "Don't merge forward"; otherwise only those who may
+	// change the branching model
+	MergeForwardAnyoneMaySkip bool `json:",omitempty"`
 }
 
 // FromDB fills up a PullRequestsConfig from serialized format.

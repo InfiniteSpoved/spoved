@@ -710,6 +710,16 @@
 					</div>
 				{{end}}
 			</div>
+		{{else if eq .Type 50}}
+			{{$info := .MergeForwardInfo}}
+			<div class="timeline-item event" id="{{.HashTag}}">
+				<span class="badge">{{svg "octicon-git-merge" 16}}</span>
+				{{template "shared/user/avatarlink" dict "user" .Poster}}
+				<span class="text grey muted-links">
+					{{template "shared/user/authorlink" .Poster}}
+					{{ctx.Locale.Tr "repo.pulls.merge_forward.skipped_comment" $info.Branch $createdStr}}
+				</span>
+			</div>
 		{{else if eq .Type 48 49}}
 			{{$info := .MergeForwardInfo}}
 			<div class="timeline-item event" id="{{.HashTag}}">

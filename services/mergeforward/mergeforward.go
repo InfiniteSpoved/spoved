@@ -20,6 +20,7 @@ import (
 	activities_model "forgejo.org/models/activities"
 	audit_model "forgejo.org/models/audit"
 	issues_model "forgejo.org/models/issues"
+	"forgejo.org/models/organization"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
@@ -34,9 +35,11 @@ import (
 	"forgejo.org/modules/sync"
 	asymkey_service "forgejo.org/services/asymkey"
 	"forgejo.org/services/branchworkflow"
+	"forgejo.org/services/mailer"
 	notify_service "forgejo.org/services/notify"
 	pull_service "forgejo.org/services/pull"
 	repo_service "forgejo.org/services/repository"
+	webhook_service "forgejo.org/services/webhook"
 )
 
 // Reasons a cascade stops, stored in the timeline comment and the audit entry.
@@ -72,15 +75,19 @@ type notifier struct {
 	notify_service.NullNotifier
 }
 
-func (*notifier) MergePullRequest(_ context.Context, _ *user_model.User, pr *issues_model.PullRequest) {
-	queuePull(pr)
+func (*notifier) MergePullRequest(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest) {
+	queuePull(ctx, doer, pr)
 }
 
-func (*notifier) AutoMergePullRequest(_ context.Context, _ *user_model.User, pr *issues_model.PullRequest) {
-	queuePull(pr)
+func (*notifier) AutoMergePullRequest(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest) {
+	queuePull(ctx, doer, pr)
 }
 
-func queuePull(pr *issues_model.PullRequest) {
+func queuePull(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest) {
+	if pull_service.MergeForwardSkipped(ctx) {
+		recordSkipped(ctx, doer, pr)
+		return
+	}
 	if err := mergeForwardQueue.Push(pr.ID); err != nil && !errors.Is(err, queue.ErrAlreadyInQueue) {
 		log.Error("merge forward: queue pull request %d: %v", pr.ID, err)
 	}
@@ -127,8 +134,8 @@ func Run(ctx context.Context, prID int64) (bool, error) {
 	if repo.IsArchived || repo.IsMirror {
 		return true, nil
 	}
-	eff, err := branchworkflow.GetEffectiveModel(ctx, repo)
-	if err != nil || !eff.Model.MergeForward {
+	eff, targets, err := Targets(ctx, repo, pr.BaseBranch)
+	if err != nil || len(targets) == 0 {
 		return true, err
 	}
 
@@ -138,23 +145,11 @@ func Run(ctx context.Context, prID int64) (bool, error) {
 	if !locked {
 		return false, nil
 	}
-
-	chain, err := branchworkflow.GetChain(ctx, repo, eff)
-	if err != nil {
-		return true, err
-	}
-	targets := chain.Forward(pr.BaseBranch)
-	if chain.DevelopmentMissing && len(targets) > 0 {
-		targets = targets[:len(targets)-1]
-	}
-	if len(targets) == 0 {
-		return true, nil
-	}
 	if err := pr.LoadIssue(ctx); err != nil {
 		return true, err
 	}
 
-	c := &cascade{pr: pr, repo: repo}
+	c := &cascade{pr: pr, repo: repo, neverBypass: eff.Model.MergeForwardNeverBypass}
 	if c.merger, err = user_model.GetUserByID(ctx, pr.MergerID); err != nil && !user_model.IsErrUserNotExist(err) {
 		return true, err
 	}
@@ -168,6 +163,109 @@ func Run(ctx context.Context, prID int64) (bool, error) {
 		return true, c.stop(ctx, nil, pr.BaseBranch, targets[0], "", ReasonMerger)
 	}
 	return true, c.run(ctx, targets)
+}
+
+// Targets returns the effective branching model of the repository and the branches a merge into base is merged
+// forward into, in order; none when merging forward is off.
+func Targets(ctx context.Context, repo *repo_model.Repository, base string) (branchworkflow.EffectiveModel, []string, error) {
+	eff, err := branchworkflow.GetEffectiveModel(ctx, repo)
+	if err != nil || !eff.Model.MergeForward {
+		return eff, nil, err
+	}
+	chain, err := branchworkflow.GetChain(ctx, repo, eff)
+	if err != nil {
+		return eff, nil, err
+	}
+	targets := chain.Forward(base)
+	if chain.DevelopmentMissing && len(targets) > 0 {
+		targets = targets[:len(targets)-1]
+	}
+	return eff, targets, nil
+}
+
+// AllowsStep reports whether pusher's push of newCommitID onto oldCommitID of branch is a step of merging the pull
+// request prID forward that counts as an extension of it. The pre-receive hook asks it for a protected branch the
+// pusher may not push to; env holds the push's quarantine.
+func AllowsStep(ctx context.Context, repo *repo_model.Repository, prID int64, pusher *user_model.User, branch, oldCommitID, newCommitID string, env []string) (bool, error) {
+	pr, err := issues_model.GetPullRequestByID(ctx, prID)
+	if issues_model.IsErrPullRequestNotExist(err) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	if pr.BaseRepoID != repo.ID || !pr.HasMerged || pr.Status == issues_model.PullRequestStatusManuallyMerged || pusher == nil || pr.MergerID != pusher.ID {
+		return false, nil
+	}
+	eff, targets, err := Targets(ctx, repo, pr.BaseBranch)
+	i := slices.Index(targets, branch)
+	if err != nil || eff.Model.MergeForwardNeverBypass || i < 0 {
+		return false, err
+	}
+	source := pr.BaseBranch
+	if i > 0 {
+		source = targets[i-1]
+	}
+	// a step is a merge commit on top of the branch, of a commit of the branch before it
+	out, _, err := git.NewCommand(ctx, "rev-list", "--parents", "--max-count=1").AddDynamicArguments(newCommitID).RunStdString(&git.RunOpts{Dir: repo.RepoPath(), Env: env})
+	if err != nil {
+		return false, err
+	}
+	parents := strings.Fields(out)
+	if len(parents) != 3 || parents[1] != oldCommitID {
+		return false, nil
+	}
+	err = git.NewCommand(ctx, "merge-base", "--is-ancestor").AddDynamicArguments(parents[2], git.BranchPrefix+source).Run(&git.RunOpts{Dir: repo.RepoPath(), Env: env})
+	if git.IsErrorExitCode(err, 1) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// MaySkip reports whether doer, with perm in the repository, may merge a pull request into base without merging it
+// forward: everyone if the branching model says so, else whoever may change the branching model (a repository
+// administrator, or an owner of the organization that enforces it). It is also true when there is nothing to skip.
+func MaySkip(ctx context.Context, doer *user_model.User, perm access_model.Permission, repo *repo_model.Repository, base string) (bool, error) {
+	eff, targets, err := Targets(ctx, repo, base)
+	if err != nil || len(targets) == 0 || eff.Model.MergeForwardAnyoneMaySkip {
+		return err == nil, err
+	}
+	if doer == nil {
+		return false, nil
+	}
+	if doer.IsAdmin {
+		return true, nil
+	}
+	if !eff.Locked {
+		return perm.IsAdmin(), nil
+	}
+	if err := repo.LoadOwner(ctx); err != nil {
+		return false, err
+	}
+	return organization.OrgFromUser(repo.Owner).IsActingOwner(ctx, doer)
+}
+
+// recordSkipped records that doer merged pr without merging it forward, if it would have been.
+func recordSkipped(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest) {
+	if err := pr.LoadBaseRepo(ctx); err != nil {
+		log.Error("merge forward: load repository of %-v: %v", pr, err)
+		return
+	}
+	_, targets, err := Targets(ctx, pr.BaseRepo, pr.BaseBranch)
+	if err != nil || len(targets) == 0 {
+		if err != nil {
+			log.Error("merge forward: %-v: %v", pr, err)
+		}
+		return
+	}
+	if err := pr.LoadIssue(ctx); err != nil {
+		log.Error("merge forward: load issue of %-v: %v", pr, err)
+		return
+	}
+	c := &cascade{pr: pr, repo: pr.BaseRepo, merger: doer}
+	c.record(ctx, "repo.branch.merge_forward_skipped", pr.BaseBranch, map[string]any{"pull": pr.Index, "to": targets[0]})
+	if _, err := c.createComment(ctx, issues_model.CommentTypePRMergeForwardSkipped, issues_model.MergeForwardInfo{Branch: targets[0]}, nil); err != nil {
+		log.Error("merge forward: comment on %-v: %v", pr, err)
+	}
 }
 
 // mergerCanPush reports whether the user who merged can still write code in the repository: the branch rules of each
@@ -188,6 +286,8 @@ type cascade struct {
 	repo   *repo_model.Repository
 	merger *user_model.User
 	tmp    string
+
+	neverBypass bool // a step is a plain push of the merger, not an extension of the pull request
 }
 
 func (c *cascade) run(ctx context.Context, targets []string) error {
@@ -276,7 +376,7 @@ func (c *cascade) step(ctx context.Context, source, target string) (sha, sourceS
 		err = git.Push(ctx, c.tmp, git.PushOptions{
 			Remote: c.repo.RepoPath(),
 			Branch: sha + ":" + git.BranchPrefix + target,
-			Env:    repo_module.PushingEnvironment(ctx, c.merger, c.repo),
+			Env:    c.pushEnv(ctx),
 		})
 		switch {
 		case err == nil:
@@ -290,6 +390,15 @@ func (c *cascade) step(ctx context.Context, source, target string) (sha, sourceS
 		}
 	}
 	return "", sourceSHA, fmt.Errorf("%s kept moving", target)
+}
+
+func (c *cascade) pushEnv(ctx context.Context) []string {
+	env := repo_module.PushingEnvironment(ctx, c.merger, c.repo)
+	if !c.neverBypass {
+		// the hook checks it again, see AllowsStep
+		env = append(env, repo_module.EnvMergeForwardPRID+"="+strconv.FormatInt(c.pr.ID, 10))
+	}
+	return env
 }
 
 func (c *cascade) revParse(ctx context.Context, branch string) (string, error) {
@@ -384,7 +493,12 @@ func (c *cascade) stop(ctx context.Context, steps []issues_model.MergeForwardSte
 		return err
 	}
 	// the participants of the pull request (its author and the merger among them) are told it stopped; with no
-	// author to leave out, the merger is told too
+	// author to leave out, the merger is told too. Mail and webhooks go out as for a comment, but not the other
+	// notifiers: the activity feed would show the comment's data.
+	if err := mailer.MailParticipantsComment(ctx, comment, 0, c.pr.Issue, nil); err != nil {
+		log.Error("merge forward: mail %-v: %v", c.pr, err)
+	}
+	webhook_service.CommentCreated(ctx, c.merger, c.repo, c.pr.Issue, comment)
 	return activities_model.CreateOrUpdateIssueNotifications(ctx, c.pr.IssueID, comment.ID, 0, 0)
 }
 

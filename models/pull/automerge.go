@@ -23,9 +23,10 @@ type AutoMerge struct {
 	MergeStyle             repo_model.MergeStyle `xorm:"varchar(30)"`
 	Message                string                `xorm:"LONGTEXT"`
 	DeleteBranchAfterMerge bool                  `xorm:"NOT NULL DEFAULT false"`
-	ScheduledAfterUnix     timeutil.TimeStamp    `xorm:"NOT NULL DEFAULT 0"` // 0 = merge as soon as possible
-	HeadCommitID           string                `xorm:"VARCHAR(64)"`        // only merge this head; set for scheduled merges
-	GiveUpAfterUnix        timeutil.TimeStamp    `xorm:"NOT NULL DEFAULT 0"` // 0 = no deadline; cancelled when it passes
+	ScheduledAfterUnix     timeutil.TimeStamp    `xorm:"NOT NULL DEFAULT 0"`     // 0 = merge as soon as possible
+	HeadCommitID           string                `xorm:"VARCHAR(64)"`            // only merge this head; set for scheduled merges
+	GiveUpAfterUnix        timeutil.TimeStamp    `xorm:"NOT NULL DEFAULT 0"`     // 0 = no deadline; cancelled when it passes
+	SkipMergeForward       bool                  `xorm:"NOT NULL DEFAULT false"` // the merge is not merged forward
 	CreatedUnix            timeutil.TimeStamp    `xorm:"created"`
 }
 
@@ -54,7 +55,7 @@ func IsErrAlreadyScheduledToAutoMerge(err error) bool {
 }
 
 // ScheduleAutoMerge schedules a pull request to be merged when all checks succeed
-func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pullID int64, style repo_model.MergeStyle, message string, deleteBranch bool, scheduledAfter, giveUpAfter timeutil.TimeStamp, headCommitID string) error {
+func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pullID int64, style repo_model.MergeStyle, message string, deleteBranch bool, scheduledAfter, giveUpAfter timeutil.TimeStamp, headCommitID string, skipMergeForward bool) error {
 	// Check if we already have a merge scheduled for that pull request
 	if exists, _, err := GetScheduledMergeByPullID(ctx, pullID); err != nil {
 		return err
@@ -71,6 +72,7 @@ func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pullID int64,
 		ScheduledAfterUnix:     scheduledAfter,
 		HeadCommitID:           headCommitID,
 		GiveUpAfterUnix:        giveUpAfter,
+		SkipMergeForward:       skipMergeForward,
 	})
 	log.Trace("ScheduleAutoMerge %+v for PR %d", scheduledPRM, pullID)
 
