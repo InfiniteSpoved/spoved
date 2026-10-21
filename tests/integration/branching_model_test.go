@@ -51,12 +51,14 @@ func TestBranchingModelSettings(t *testing.T) {
 
 		t.Run("own model and chain preview", func(t *testing.T) {
 			owner.MakeRequest(t, NewRequestWithValues(t, "POST", settings+"/branching_model", map[string]string{
-				"development_branch": "develop", "release_prefixes": "release/, hotfix/", "production_branch": "master", "merge_forward": "on",
+				"development_branch": "develop", "release_prefixes": "release/, hotfix/", "production_branch": "master", "merge_forward": "on", "merge_forward_never_bypass": "on",
 			}), http.StatusSeeOther)
 			doc := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", settings), http.StatusOK).Body)
 			assert.False(t, doc.doc.Find(`input[name="inherit"]`).Is("[checked]"))
 			assert.Equal(t, "release/, hotfix/", doc.doc.Find(`input[name="release_prefixes"]`).AttrOr("value", ""))
 			assert.True(t, doc.doc.Find(`input[name="merge_forward"]`).Is("[checked]"))
+			assert.True(t, doc.doc.Find(`input[name="merge_forward_never_bypass"]`).Is("[checked]"))
+			assert.False(t, doc.doc.Find(`input[name="merge_forward_anyone_may_skip"]`).Is("[checked]"))
 			var chain []string
 			doc.doc.Find(".branching-model-chain .label").Each(func(_ int, s *goquery.Selection) {
 				chain = append(chain, strings.TrimSpace(s.Text()))
@@ -68,7 +70,7 @@ func TestBranchingModelSettings(t *testing.T) {
 			got := bmRepoAPI(t, ownerCtx, "org3", repo)
 			assert.False(t, got.Inherit)
 			assert.Equal(t, "repo", got.Source)
-			assert.Equal(t, &api.BranchingModel{DevelopmentBranch: "develop", ReleasePrefixes: []string{"release/", "hotfix/"}, ProductionBranch: "master", MergeForward: true}, got.Own)
+			assert.Equal(t, &api.BranchingModel{DevelopmentBranch: "develop", ReleasePrefixes: []string{"release/", "hotfix/"}, ProductionBranch: "master", MergeForward: true, MergeForwardNeverBypass: true}, got.Own)
 			assert.True(t, got.Effective.MergeForward)
 			assert.Equal(t, []string{"release/1.9", "hotfix/1.9.1", "release/1.10", "release/2.0"}, got.ReleaseBranches)
 			assert.Equal(t, []string{"release/next"}, got.IgnoredBranches)

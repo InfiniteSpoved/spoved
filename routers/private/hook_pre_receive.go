@@ -29,6 +29,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/web"
 	app_context "forgejo.org/services/context"
+	"forgejo.org/services/mergeforward"
 	pull_service "forgejo.org/services/pull"
 )
 
@@ -433,6 +434,13 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 
 	// 6. If we're not allowed to push directly
 	if !canPush {
+		// A merge forward step that counts as an extension of the approved pull request: whoever merged it must be
+		// allowed to merge into this branch; its approvals and status checks are not required. Protected files are
+		// never bypassed.
+		if ctx.opts.PullRequestID == 0 && ctx.opts.MergeForwardPRID != 0 && !changedProtectedfiles {
+			return preReceiveMergeForwardStep(ctx, protectBranch, oldCommitID, newCommitID, branchName)
+		}
+
 		// Is this is a merge from the UI/API?
 		if ctx.opts.PullRequestID == 0 {
 			// 6a. If we're not merging from the UI/API then there are two ways we got here:
@@ -537,6 +545,25 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 			})
 			return false
 		}
+	}
+	return true
+}
+
+func preReceiveMergeForwardStep(ctx *preReceiveContext, protectBranch *git_model.ProtectedBranch, oldCommitID, newCommitID, branchName string) bool {
+	repo := ctx.Repo.Repository
+	if !ctx.loadPusherAndPermission() {
+		return false
+	}
+	allowed, err := mergeforward.AllowsStep(ctx, repo, ctx.opts.MergeForwardPRID, ctx.user, branchName, oldCommitID, newCommitID, ctx.env)
+	if err != nil {
+		log.Error("Unable to check the merge forward step of pull request %d into %s in %-v: %v", ctx.opts.MergeForwardPRID, branchName, repo, err)
+		ctx.JSON(http.StatusInternalServerError, private.Response{Err: fmt.Sprintf("Unable to check the merge forward step: %v", err)})
+		return false
+	}
+	if !allowed || !git_model.IsUserMergeWhitelisted(ctx, protectBranch, ctx.user.ID, ctx.userPerm) {
+		log.Warn("Forbidden: User %d is not allowed to merge forward into protected branch: %s in %-v", ctx.opts.UserID, branchName, repo)
+		ctx.refuse(http.StatusForbidden, "protected_branch", git.BranchPrefix+branchName, fmt.Sprintf("Not allowed to push to protected branch %s", branchName))
+		return false
 	}
 	return true
 }

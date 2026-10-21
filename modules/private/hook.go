@@ -34,6 +34,7 @@ type HookOptions struct {
 	GitQuarantinePath               string
 	GitPushOptions                  map[string]string
 	PullRequestID                   int64
+	MergeForwardPRID                int64 // the merged pull request whose merge forward step this push is
 	PushTrigger                     repository.PushTrigger
 	DeployKeyKeyID                  int64 // public key ID if the pusher is a deploy key; UserID is then the repo's owner.
 	IsWiki                          bool

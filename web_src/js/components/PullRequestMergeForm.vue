@@ -173,6 +173,11 @@ export default {
           {{ mergeForm.textDeleteBranchForced }}
         </div>
       </div>
+
+      <div class="ui checkbox tw-ml-1" v-if="mergeForm.canSkipMergeForward && mergeStyle !== 'manually-merged'" :data-tooltip-content="mergeForm.textDontMergeForwardDesc">
+        <input name="skip_merge_forward" type="checkbox" id="skip-merge-forward">
+        <label for="skip-merge-forward">{{ mergeForm.textDontMergeForward }}</label>
+      </div>
     </form>
 
     <form v-if="showChangeTime" class="ui form change-time-form tw-mb-2" :action="mergeForm.baseLink+'/change_auto_merge_time'" method="post">

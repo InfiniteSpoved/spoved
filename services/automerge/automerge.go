@@ -64,6 +64,7 @@ func handler(items ...string) []string {
 
 // ScheduleAutoMerge if schedule is false and no error, pull can be merged directly.
 // A merge scheduled for a later time is pinned to the current head, so commits pushed before that time are not merged.
+// A ctx from pull_service.WithoutMergeForward stores that the merge is not merged forward.
 func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pull *issues_model.PullRequest, style repo_model.MergeStyle, message string, deleteBranch bool, scheduledAfter, giveUpAfter timeutil.TimeStamp, expectedHeadCommitID string) (scheduled bool, err error) {
 	var headCommitID string
 	if scheduledAfter != 0 {
@@ -84,7 +85,7 @@ func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pull *issues_
 	}
 
 	err = db.WithTx(ctx, func(ctx context.Context) error {
-		if err := pull_model.ScheduleAutoMerge(ctx, doer, pull.ID, style, message, deleteBranch, scheduledAfter, giveUpAfter, headCommitID); err != nil {
+		if err := pull_model.ScheduleAutoMerge(ctx, doer, pull.ID, style, message, deleteBranch, scheduledAfter, giveUpAfter, headCommitID, pull_service.MergeForwardSkipped(ctx)); err != nil {
 			return err
 		}
 		scheduled = true
@@ -441,6 +442,9 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 		return
 	}
 
+	if scheduledPRM.SkipMergeForward {
+		ctx = pull_service.WithoutMergeForward(ctx)
+	}
 	// only merge the head validated above: the merge fetches the head branch, which may have moved since
 	if err := pull_service.Merge(ctx, pr, doer, baseGitRepo, scheduledPRM.MergeStyle, sha, scheduledPRM.Message, true); err != nil {
 		log.Warn("Auto merge of %-v was removed but the merge failed: %v", pr, err)

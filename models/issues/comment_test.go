@@ -106,6 +106,8 @@ func TestMergeForwardCommentTypes(t *testing.T) {
 	assert.Equal(t, 48, int(issues_model.CommentTypePRMergedForward))
 	assert.Equal(t, 49, int(issues_model.CommentTypePRMergeForwardStopped))
 	assert.Equal(t, issues_model.CommentTypePRMergeForwardStopped, issues_model.AsCommentType("pull_merge_forward_stopped"))
+	assert.Equal(t, 50, int(issues_model.CommentTypePRMergeForwardSkipped))
+	assert.Equal(t, issues_model.CommentTypePRMergeForwardSkipped, issues_model.AsCommentType("pull_merge_forward_skipped"))
 
 	c := &issues_model.Comment{Content: `{"steps":[{"branch":"release/1.2","sha":"abc"}],"branch":"develop","reason":"conflict"}`}
 	assert.Equal(t, issues_model.MergeForwardInfo{Steps: []issues_model.MergeForwardStep{{Branch: "release/1.2", SHA: "abc"}}, Branch: "develop", Reason: "conflict"}, c.MergeForwardInfo())

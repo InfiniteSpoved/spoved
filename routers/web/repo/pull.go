@@ -58,6 +58,7 @@ import (
 	"forgejo.org/services/forms"
 	"forgejo.org/services/gitdiff"
 	issue_service "forgejo.org/services/issue"
+	"forgejo.org/services/mergeforward"
 	notify_service "forgejo.org/services/notify"
 	pull_service "forgejo.org/services/pull"
 	repo_service "forgejo.org/services/repository"
@@ -1528,6 +1529,19 @@ func MergePullRequest(ctx *context.Context) {
 		return
 	}
 
+	var mergeCtx stdCtx.Context = ctx
+	if form.SkipsMergeForward() {
+		allowed, err := mergeforward.MaySkip(ctx, ctx.Doer, ctx.Repo.Permission, ctx.Repo.Repository, pr.BaseBranch)
+		if err != nil {
+			ctx.ServerError("MaySkip", err)
+			return
+		} else if !allowed {
+			ctx.JSONError(ctx.Tr("repo.pulls.merge_forward.skip_not_allowed"))
+			return
+		}
+		mergeCtx = pull_service.WithoutMergeForward(ctx)
+	}
+
 	message := strings.TrimSpace(form.MergeTitleField)
 	if len(message) == 0 {
 		var err error
@@ -1559,7 +1573,7 @@ func MergePullRequest(ctx *context.Context) {
 		// delete all scheduled auto merges
 		_ = pull_model.DeleteScheduledAutoMerge(ctx, pr.ID)
 		// schedule auto merge
-		scheduled, err := automerge.ScheduleAutoMerge(ctx, ctx.Doer, pr, repo_model.MergeStyle(form.Do), message, form.DeleteBranchAfterMerge, scheduledAfter, giveUpAfter, form.HeadCommitID)
+		scheduled, err := automerge.ScheduleAutoMerge(mergeCtx, ctx.Doer, pr, repo_model.MergeStyle(form.Do), message, form.DeleteBranchAfterMerge, scheduledAfter, giveUpAfter, form.HeadCommitID)
 		if models.IsErrSHADoesNotMatch(err) {
 			ctx.JSONError(ctx.Tr("repo.pulls.auto_merge.head_changed"))
 			return
@@ -1578,7 +1592,7 @@ func MergePullRequest(ctx *context.Context) {
 	// the related work. All usage of `ctx` throughout the rest of this function should be only for error handling or UI
 	// interactions, and all effective work should use `workCtx` instead.
 	workCtx, cancelWorkCtx := stdCtx.WithTimeout(
-		stdCtx.WithoutCancel(ctx),
+		stdCtx.WithoutCancel(mergeCtx),
 		time.Duration(setting.Git.Timeout.Default)*time.Second,
 	)
 	defer cancelWorkCtx()

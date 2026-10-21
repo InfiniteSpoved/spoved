@@ -148,6 +148,8 @@ func prepareBranchWorkflow(ctx *context.Context) bool {
 	ctx.Data["DevelopmentBranch"] = shownModel.DevelopmentBranch
 	ctx.Data["ReleasePrefixes"] = strings.Join(shownModel.ReleasePrefixes, ", ")
 	ctx.Data["MergeForward"] = shownModel.MergeForward
+	ctx.Data["MergeForwardNeverBypass"] = shownModel.MergeForwardNeverBypass
+	ctx.Data["MergeForwardAnyoneMaySkip"] = shownModel.MergeForwardAnyoneMaySkip
 	ctx.Data["ProductionBranch"] = shownModel.ProductionBranch
 	chain, err := branchworkflow.GetChain(ctx, ctx.Repo.Repository, model)
 	if err != nil {
@@ -171,7 +173,7 @@ func BranchingModelPost(ctx *context.Context) {
 	form := web.GetForm(ctx).(*forms.BranchingModelForm)
 	var model *repo_model.BranchingModel
 	if !form.Inherit || !ctx.Repo.Owner.IsOrganization() {
-		model = &repo_model.BranchingModel{DevelopmentBranch: form.DevelopmentBranch, ProductionBranch: form.ProductionBranch, ReleasePrefixes: strings.Split(form.ReleasePrefixes, ","), MergeForward: form.MergeForward}
+		model = &repo_model.BranchingModel{DevelopmentBranch: form.DevelopmentBranch, ProductionBranch: form.ProductionBranch, ReleasePrefixes: strings.Split(form.ReleasePrefixes, ","), MergeForward: form.MergeForward, MergeForwardNeverBypass: form.MergeForwardNeverBypass, MergeForwardAnyoneMaySkip: form.MergeForwardAnyoneMaySkip}
 	}
 	err := branchworkflow.SetRepoModel(ctx, ctx.Repo.Repository, model)
 	if value, ok := branchworkflow.IsInvalidBranchingModel(err); ok {

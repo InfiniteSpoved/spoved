@@ -5,6 +5,7 @@ package repo
 
 import (
 	"cmp"
+	stdCtx "context"
 	"errors"
 	"fmt"
 	"math"
@@ -42,6 +43,7 @@ import (
 	"forgejo.org/services/forms"
 	"forgejo.org/services/gitdiff"
 	issue_service "forgejo.org/services/issue"
+	"forgejo.org/services/mergeforward"
 	notify_service "forgejo.org/services/notify"
 	pull_service "forgejo.org/services/pull"
 	repo_service "forgejo.org/services/repository"
@@ -945,6 +947,8 @@ func MergePullRequest(ctx *context.APIContext) {
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/empty"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 	//   "405":
@@ -1052,6 +1056,19 @@ func MergePullRequest(ctx *context.APIContext) {
 		form.Do = string(repo_model.MergeStyleMerge)
 	}
 
+	var mergeCtx stdCtx.Context = ctx
+	if form.SkipsMergeForward() {
+		allowed, err := mergeforward.MaySkip(ctx, ctx.Doer(), ctx.Repo().Permission, ctx.Repo().Repository, pr.BaseBranch)
+		if err != nil {
+			ctx.Error(http.StatusInternalServerError, "MaySkip", err)
+			return
+		} else if !allowed {
+			ctx.Error(http.StatusForbidden, "MergeForward", "not allowed to merge without merging forward")
+			return
+		}
+		mergeCtx = pull_service.WithoutMergeForward(ctx)
+	}
+
 	message := strings.TrimSpace(form.MergeTitleField)
 	if len(message) == 0 {
 		message, _, err = pull_service.GetDefaultMergeMessage(ctx, ctx.Repo().GitRepo, pr, repo_model.MergeStyle(form.Do))
@@ -1067,7 +1084,7 @@ func MergePullRequest(ctx *context.APIContext) {
 	}
 
 	if form.MergeWhenChecksSucceed {
-		scheduled, err := automerge.ScheduleAutoMerge(ctx, ctx.Doer(), pr, repo_model.MergeStyle(form.Do), message, form.DeleteBranchAfterMerge, scheduledAfter, giveUpAfter, form.HeadCommitID)
+		scheduled, err := automerge.ScheduleAutoMerge(mergeCtx, ctx.Doer(), pr, repo_model.MergeStyle(form.Do), message, form.DeleteBranchAfterMerge, scheduledAfter, giveUpAfter, form.HeadCommitID)
 		if err != nil {
 			if pull_model.IsErrAlreadyScheduledToAutoMerge(err) || models.IsErrSHADoesNotMatch(err) {
 				ctx.Error(http.StatusConflict, "ScheduleAutoMerge", err)
@@ -1082,7 +1099,7 @@ func MergePullRequest(ctx *context.APIContext) {
 		}
 	}
 
-	if err := pull_service.Merge(ctx, pr, ctx.Doer(), ctx.Repo().GitRepo, repo_model.MergeStyle(form.Do), form.HeadCommitID, message, false); err != nil {
+	if err := pull_service.Merge(mergeCtx, pr, ctx.Doer(), ctx.Repo().GitRepo, repo_model.MergeStyle(form.Do), form.HeadCommitID, message, false); err != nil {
 		if models.IsErrInvalidMergeStyle(err) {
 			ctx.Error(http.StatusMethodNotAllowed, "Invalid merge style", fmt.Errorf("%s is not an allowed merge style for this repository", repo_model.MergeStyle(form.Do)))
 		} else if models.IsErrMergeConflicts(err) {

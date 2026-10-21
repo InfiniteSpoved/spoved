@@ -407,6 +407,11 @@ func (m *webhookNotifier) UpdateComment(ctx context.Context, doer *user_model.Us
 func (m *webhookNotifier) CreateIssueComment(ctx context.Context, doer *user_model.User, repo *repo_model.Repository,
 	issue *issues_model.Issue, comment *issues_model.Comment, mentions []*user_model.User,
 ) {
+	CommentCreated(ctx, doer, repo, issue, comment)
+}
+
+// CommentCreated sends the comment created event of comment, for a comment that is created without the notifiers.
+func CommentCreated(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, issue *issues_model.Issue, comment *issues_model.Comment) {
 	var eventType webhook_module.HookEventType
 	var pullRequest *api.PullRequest
 	if issue.IsPull {

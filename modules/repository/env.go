@@ -28,6 +28,7 @@ const (
 	EnvKeyID             = "GITEA_KEY_ID"               // public key ID
 	EnvDeployPublicKeyID = "GITEA_DEPLOY_PUBLIC_KEY_ID" // public key ID of the deploy key in use
 	EnvPRID              = "GITEA_PR_ID"
+	EnvMergeForwardPRID  = "GITEA_MERGE_FORWARD_PR_ID" // the merged pull request a merge forward step carries, checked again by the hook
 	EnvPushTrigger       = "GITEA_PUSH_TRIGGER"
 	EnvIsInternal        = "GITEA_INTERNAL_PUSH"
 	EnvAppURL            = "GITEA_ROOT_URL"

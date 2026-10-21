@@ -26,8 +26,8 @@ func mailParticipantsComment(ctx context.Context, c *issues_model.Comment, opTyp
 	}
 
 	content := c.Content
-	if c.Type == issues_model.CommentTypePullRequestPush {
-		content = ""
+	if c.Type == issues_model.CommentTypePullRequestPush || c.Type == issues_model.CommentTypePRMergeForwardStopped {
+		content = "" // the template shows it; Content of a merge forward comment is its data
 	}
 	if err := mailIssueCommentToParticipants(
 		&mailCommentContext{

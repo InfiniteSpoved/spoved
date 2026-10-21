@@ -26,12 +26,14 @@ func (f *BranchWorkflowForm) Validate(req *http.Request, errs binding.Errors) bi
 
 // BranchingModelForm is the branching model section of the organization and repository branch workflow pages.
 type BranchingModelForm struct {
-	Inherit           bool // repositories of organizations only
-	DevelopmentBranch string
-	ProductionBranch  string
-	ReleasePrefixes   string // separated by commas
-	MergeForward      bool
-	EnforceModel      bool // organizations only
+	Inherit                   bool // repositories of organizations only
+	DevelopmentBranch         string
+	ProductionBranch          string
+	ReleasePrefixes           string // separated by commas
+	MergeForward              bool
+	MergeForwardNeverBypass   bool
+	MergeForwardAnyoneMaySkip bool
+	EnforceModel              bool // organizations only
 }
 
 // Validate validates the fields

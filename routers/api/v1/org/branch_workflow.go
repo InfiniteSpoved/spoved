@@ -101,6 +101,8 @@ func renderBranchingModel(ctx *context.APIContext) {
 		res.DevelopmentBranch = model.DevelopmentBranch
 		res.ReleasePrefixes = append(res.ReleasePrefixes, model.ReleasePrefixes...)
 		res.MergeForward = model.MergeForward
+		res.MergeForwardNeverBypass = model.MergeForwardNeverBypass
+		res.MergeForwardAnyoneMaySkip = model.MergeForwardAnyoneMaySkip
 		res.ProductionBranch = model.ProductionBranch
 	}
 	ctx.JSON(http.StatusOK, res)
@@ -161,7 +163,7 @@ func EditBranchingModel(ctx *context.APIContext) {
 	//     "$ref": "#/responses/validationError"
 
 	form := web.GetForm(ctx).(*api.OrgBranchingModel)
-	err := branchworkflow.SetOrgModel(ctx, ctx.Org().Organization.AsUser(), &repo_model.BranchingModel{DevelopmentBranch: form.DevelopmentBranch, ReleasePrefixes: form.ReleasePrefixes, ProductionBranch: form.ProductionBranch, MergeForward: form.MergeForward}, form.Enforce)
+	err := branchworkflow.SetOrgModel(ctx, ctx.Org().Organization.AsUser(), &repo_model.BranchingModel{DevelopmentBranch: form.DevelopmentBranch, ReleasePrefixes: form.ReleasePrefixes, ProductionBranch: form.ProductionBranch, MergeForward: form.MergeForward, MergeForwardNeverBypass: form.MergeForwardNeverBypass, MergeForwardAnyoneMaySkip: form.MergeForwardAnyoneMaySkip}, form.Enforce)
 	if _, ok := branchworkflow.IsInvalidBranchingModel(err); ok || errors.Is(err, branchworkflow.ErrLockWithoutValue) || errors.Is(err, branchworkflow.ErrTooManyReleasePrefixes) {
 		ctx.Error(http.StatusUnprocessableEntity, "SetOrgModel", err)
 		return

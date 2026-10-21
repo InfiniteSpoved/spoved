@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,11 +16,13 @@ import (
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
+	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/gitrepo"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/services/branchworkflow"
 	"forgejo.org/services/forms"
 	"forgejo.org/services/mergeforward"
 	"forgejo.org/tests"
@@ -39,13 +42,19 @@ func TestMergeForward(t *testing.T) {
 			testAPICreateBranch(t, owner, "org3", name, "master", b, http.StatusCreated)
 		}
 		repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{OwnerName: "org3", Name: name})
-		setModel := func(t *testing.T, mergeForward bool) {
+		// setModel sets the repository's branching model; change adjusts it before it is sent
+		setModel := func(t *testing.T, mergeForward bool, change ...func(*api.EditRepoBranchingModelOption)) {
 			t.Helper()
-			req := NewRequestWithJSON(t, "PUT", "/api/v1/repos/org3/"+name+"/branching-model", &api.EditRepoBranchingModelOption{
+			opts := &api.EditRepoBranchingModelOption{
 				DevelopmentBranch: "develop", ProductionBranch: "master", ReleasePrefixes: []string{"release/"}, MergeForward: mergeForward,
-			}).AddTokenAuth(ctx.Token)
+			}
+			for _, f := range change {
+				f(opts)
+			}
+			req := NewRequestWithJSON(t, "PUT", "/api/v1/repos/org3/"+name+"/branching-model", opts).AddTokenAuth(ctx.Token)
 			ctx.Session.MakeRequest(t, req, http.StatusOK)
 		}
+		neverBypass := func(o *api.EditRepoBranchingModelOption) { o.MergeForwardNeverBypass = true }
 		// pull opens a pull request into base from a new branch with one new file and returns it
 		pull := func(t *testing.T, base, branch, file, content string) api.PullRequest {
 			t.Helper()
@@ -188,7 +197,63 @@ func TestMergeForward(t *testing.T) {
 			assert.Equal(t, "develop", cont[0].MergeForwardInfo().Steps[0].Branch)
 		})
 
-		t.Run("a branch rule refuses a step", func(t *testing.T) {
+		t.Run("a step is an extension of the approved pull request", func(t *testing.T) {
+			// develop takes no pushes and needs an approval and a status check: the merger may merge into it
+			bwProtect(t, ctx, name, "develop", parameterProtectBranch{"required_approvals": "1", "enable_status_check": "true", "status_check_contexts": "ci"})
+			pr := pull(t, "release/2.0", "fix-ext", "ext.txt", "fix")
+			merge(t, pr)
+			assert.True(t, has(t, "develop", "ext.txt"))
+			merged := comments(pr, issues_model.CommentTypePRMergedForward)
+			require.Len(t, merged, 1)
+			assert.Equal(t, "develop", merged[0].MergeForwardInfo().Steps[0].Branch)
+
+			// the hook takes a step only from the merger, into a branch of the chain, as a merge commit on top of it
+			row := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{IssueID: issueIDOf(t, repo, pr.Index)})
+			user4 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})
+			gitRepo, err := gitrepo.OpenRepository(t.Context(), repo)
+			require.NoError(t, err)
+			defer gitRepo.Close()
+			head, err := gitRepo.GetBranchCommit("develop")
+			require.NoError(t, err)
+			parent, err := head.ParentID(0)
+			require.NoError(t, err)
+			for _, c := range []struct {
+				name           string
+				pusher         *user_model.User
+				branch, oldSHA string
+				allowed        bool
+			}{
+				{"the step", user2, "develop", parent.String(), true},
+				{"another pusher", user4, "develop", parent.String(), false},
+				{"a branch outside the chain", user2, "release/1.9", parent.String(), false},
+				{"not on top of the branch", user2, "develop", head.ID.String(), false},
+			} {
+				allowed, err := mergeforward.AllowsStep(t.Context(), repo, row.ID, c.pusher, c.branch, c.oldSHA, head.ID.String(), nil)
+				require.NoError(t, err)
+				assert.Equal(t, c.allowed, allowed, c.name)
+			}
+		})
+
+		t.Run("the merge allow list still applies", func(t *testing.T) {
+			bwProtect(t, ctx, name, "develop", parameterProtectBranch{"enable_merge_whitelist": "true", "merge_whitelist_users": "4"})
+			pr := pull(t, "release/2.0", "fix-mwl", "mwl.txt", "fix")
+			merge(t, pr)
+			assert.False(t, has(t, "develop", "mwl.txt"))
+			stopped := comments(pr, issues_model.CommentTypePRMergeForwardStopped)
+			require.Len(t, stopped, 1)
+			assert.Equal(t, mergeforward.ReasonRefused, stopped[0].MergeForwardInfo().Reason)
+		})
+
+		t.Run("protected files are never bypassed", func(t *testing.T) {
+			bwProtect(t, ctx, name, "develop", parameterProtectBranch{"protected_file_patterns": "*.lock"})
+			pr := pull(t, "release/2.0", "fix-lock", "deps.lock", "fix")
+			merge(t, pr)
+			assert.False(t, has(t, "develop", "deps.lock"))
+			require.Len(t, comments(pr, issues_model.CommentTypePRMergeForwardStopped), 1)
+		})
+
+		t.Run("a branch rule refuses a step when it never bypasses", func(t *testing.T) {
+			setModel(t, true, neverBypass)
 			bwProtect(t, ctx, name, "develop", parameterProtectBranch{})
 			pr := pull(t, "release/2.0", "fix-4", "fix4.txt", "fix")
 			merge(t, pr)
@@ -200,6 +265,7 @@ func TestMergeForward(t *testing.T) {
 		})
 
 		t.Run("a pull request title rule refuses the follow-up pull request", func(t *testing.T) {
+			setModel(t, true, neverBypass)
 			setPRTitleRule(t, repo.ID, git_model.PushRule{PRTitleRegex: `^ABC-\d+ `, PRTitleBranches: "develop"})
 			defer setPRTitleRule(t, repo.ID, git_model.PushRule{})
 			since := auditMaxID(t)
@@ -259,6 +325,107 @@ func TestMergeForward(t *testing.T) {
 			assert.False(t, has(t, fmt.Sprintf("automerge/pr-%d/release/2.0", pr.Index), "fix7.txt"))
 			// the author of the pull request is told
 			unittest.AssertExistsAndLoadBean(t, &activities_model.Notification{UserID: user2.ID, IssueID: row.IssueID, CommentID: stopped[0].ID})
+		})
+
+		skipped := func(t *testing.T, pr api.PullRequest, by *user_model.User) {
+			t.Helper()
+			list := comments(pr, issues_model.CommentTypePRMergeForwardSkipped)
+			require.Len(t, list, 1)
+			assert.Equal(t, by.ID, list[0].PosterID)
+			assert.Equal(t, "release/2.0", list[0].MergeForwardInfo().Branch)
+			assert.Empty(t, comments(pr, issues_model.CommentTypePRMergedForward))
+		}
+
+		t.Run("don't merge forward", func(t *testing.T) {
+			setModel(t, true)
+			since := auditMaxID(t)
+			pr := pull(t, "release/1.10", "fix-skip", "skip.txt", "fix")
+			no := false
+			doAPIMergePullRequestForm(t, ctx, "org3", name, pr.Index, &forms.MergePullRequestForm{Do: "merge", MergeForward: &no})
+			assert.True(t, has(t, "release/1.10", "skip.txt"))
+			assert.False(t, has(t, "release/2.0", "skip.txt"))
+			skipped(t, pr, user2)
+			entries := auditActions(t, since, "repo.branch.merge_forward_skipped")
+			require.Len(t, entries, 1)
+			assert.Equal(t, "release/1.10", entries[0].TargetName)
+			assert.Equal(t, user2.ID, entries[0].ActorID)
+
+			doc := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/org3/%s/pulls/%d", name, pr.Index)), http.StatusOK).Body)
+			assert.Contains(t, doc.doc.Find(".timeline").Text(), "chose not to merge this forward into release/2.0")
+		})
+
+		t.Run("don't merge forward in the merge box", func(t *testing.T) {
+			pr := pull(t, "release/1.10", "fix-skip-web", "skipweb.txt", "fix")
+			page := owner.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/org3/%s/pulls/%d", name, pr.Index)), http.StatusOK).Body.String()
+			assert.Contains(t, strings.ReplaceAll(page, " ", ""), "'canSkipMergeForward':true")
+			testPullMergeForm(t, owner, http.StatusOK, "org3", name, strconv.FormatInt(pr.Index, 10), optionsPullMerge{"do": "merge", "skip_merge_forward": "on"})
+			assert.True(t, has(t, "release/1.10", "skipweb.txt"))
+			assert.False(t, has(t, "release/2.0", "skipweb.txt"))
+			skipped(t, pr, user2)
+		})
+
+		t.Run("only those who may change the model may skip", func(t *testing.T) {
+			write := "write"
+			req := NewRequestWithJSON(t, "PUT", fmt.Sprintf("/api/v1/repos/org3/%s/collaborators/user4", name), &api.AddCollaboratorOption{Permission: &write}).AddTokenAuth(ctx.Token)
+			ctx.Session.MakeRequest(t, req, http.StatusNoContent)
+			user4 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})
+			ctx4 := NewAPITestContext(t, "user4", name, auth_model.AccessTokenScopeWriteRepository)
+			no := false
+
+			pr := pull(t, "release/1.10", "fix-skip-4", "skip4.txt", "fix")
+			page := loginUser(t, "user4").MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/org3/%s/pulls/%d", name, pr.Index)), http.StatusOK).Body.String()
+			assert.Contains(t, strings.ReplaceAll(page, " ", ""), "'canSkipMergeForward':false")
+			ctx4.ExpectedCode = http.StatusForbidden
+			doAPIMergePullRequestForm(t, ctx4, "org3", name, pr.Index, &forms.MergePullRequestForm{Do: "merge", MergeForward: &no})
+			assert.False(t, has(t, "release/1.10", "skip4.txt"), "nothing is merged")
+
+			setModel(t, true, func(o *api.EditRepoBranchingModelOption) { o.MergeForwardAnyoneMaySkip = true })
+			ctx4.ExpectedCode = http.StatusOK
+			doAPIMergePullRequestForm(t, ctx4, "org3", name, pr.Index, &forms.MergePullRequestForm{Do: "merge", MergeForward: &no})
+			assert.False(t, has(t, "release/2.0", "skip4.txt"))
+			skipped(t, pr, user4)
+			setModel(t, true)
+		})
+
+		t.Run("an organization that enforces the model", func(t *testing.T) {
+			setModel(t, false)
+			org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{Name: "org3"})
+			require.NoError(t, branchworkflow.SetOrgModel(t.Context(), org3, &repo_model.BranchingModel{DevelopmentBranch: "develop", ProductionBranch: "master", ReleasePrefixes: []string{"release/"}, MergeForward: true}, true))
+			defer func() { require.NoError(t, branchworkflow.SetOrgModel(t.Context(), org3, nil, false)) }()
+			pr := pull(t, "release/1.10", "fix-org", "org.txt", "fix")
+			merge(t, pr)
+			assert.True(t, has(t, "release/2.0", "org.txt"), "the repository's own model is not used while the organization enforces one")
+
+			// only an owner of the organization may skip it then: user4 may not even with write access
+			pr = pull(t, "release/1.10", "fix-org-skip", "orgskip.txt", "fix")
+			ctx4 := NewAPITestContext(t, "user4", name, auth_model.AccessTokenScopeWriteRepository)
+			ctx4.ExpectedCode = http.StatusForbidden
+			no := false
+			doAPIMergePullRequestForm(t, ctx4, "org3", name, pr.Index, &forms.MergePullRequestForm{Do: "merge", MergeForward: &no})
+			doAPIMergePullRequestForm(t, ctx, "org3", name, pr.Index, &forms.MergePullRequestForm{Do: "merge", MergeForward: &no})
+			assert.False(t, has(t, "release/2.0", "orgskip.txt"))
+		})
+
+		t.Run("an auto merge keeps don't merge forward", func(t *testing.T) {
+			setModel(t, true)
+			req := NewRequestWithJSON(t, "POST", fmt.Sprintf("/api/v1/repos/org3/%s/branch_protections", name), &api.CreateBranchProtectionOption{
+				RuleName: "release/1.10", EnablePush: true, EnableStatusCheck: true, StatusCheckContexts: []string{"ci"},
+			}).AddTokenAuth(ctx.Token)
+			ctx.Session.MakeRequest(t, req, http.StatusCreated)
+			pr := pull(t, "release/1.10", "fix-auto", "auto.txt", "fix")
+			no := false
+			ctx.ExpectedCode = http.StatusCreated
+			doAPIMergePullRequestForm(t, ctx, "org3", name, pr.Index, &forms.MergePullRequestForm{Do: "merge", MergeWhenChecksSucceed: true, MergeForward: &no})
+			ctx.ExpectedCode = 0
+			row := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{IssueID: issueIDOf(t, repo, pr.Index)})
+			unittest.AssertExistsAndLoadBean(t, &pull_model.AutoMerge{PullID: row.ID, SkipMergeForward: true})
+
+			// a passing check merges it
+			req = NewRequestWithJSON(t, "POST", fmt.Sprintf("/api/v1/repos/org3/%s/statuses/%s", name, pr.Head.Sha), &api.CreateStatusOption{State: api.CommitStatusSuccess, Context: "ci"}).AddTokenAuth(ctx.Token)
+			ctx.Session.MakeRequest(t, req, http.StatusCreated)
+			assert.True(t, has(t, "release/1.10", "auto.txt"))
+			assert.False(t, has(t, "release/2.0", "auto.txt"))
+			skipped(t, pr, user2)
 		})
 	})
 }

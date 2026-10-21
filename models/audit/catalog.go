@@ -191,6 +191,7 @@ var Actions = map[string]string{
 	"org.project.renamed":                  CategoryOrg,
 	"repo.branch.deleted":                  CategoryRepo,
 	"repo.branch.merge_forward_stopped":    CategoryRepo,
+	"repo.branch.merge_forward_skipped":    CategoryRepo,
 	"repo.branch.merged_forward":           CategoryRepo,
 	"repo.branch_workflow.changed":         CategoryRepo,
 	"repo.branch.renamed":                  CategoryRepo,

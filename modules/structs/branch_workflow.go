@@ -42,6 +42,10 @@ type BranchingModel struct {
 	ProductionBranch string `json:"production_branch"`
 	// MergeForward merges a pull request merged into a release branch into every later release branch and the development branch, and one merged into the production branch into the development branch
 	MergeForward bool `json:"merge_forward"`
+	// MergeForwardNeverBypass makes a step that branch protection refuses open a pull request; otherwise a step counts as an extension of the approved pull request: whoever merged it must be allowed to merge into the target, whose required approvals and status checks are skipped
+	MergeForwardNeverBypass bool `json:"merge_forward_never_bypass"`
+	// MergeForwardAnyoneMaySkip lets everyone who merges choose not to merge forward; otherwise only those who may change the branching model
+	MergeForwardAnyoneMaySkip bool `json:"merge_forward_anyone_may_skip"`
 }
 
 // OrgBranchingModel represents the branching model of an organization, and the body to change it
@@ -54,6 +58,10 @@ type OrgBranchingModel struct {
 	ProductionBranch string `json:"production_branch"`
 	// MergeForward merges a pull request merged into a release branch into every later release branch and the development branch, and one merged into the production branch into the development branch
 	MergeForward bool `json:"merge_forward"`
+	// MergeForwardNeverBypass makes a step that branch protection refuses open a pull request; otherwise a step counts as an extension of the approved pull request: whoever merged it must be allowed to merge into the target, whose required approvals and status checks are skipped
+	MergeForwardNeverBypass bool `json:"merge_forward_never_bypass"`
+	// MergeForwardAnyoneMaySkip lets everyone who merges choose not to merge forward; otherwise only those who may change the branching model
+	MergeForwardAnyoneMaySkip bool `json:"merge_forward_anyone_may_skip"`
 	// Enforce locks the branching model for all repositories of the organization; it needs a release prefix
 	Enforce bool `json:"enforce"`
 }
@@ -86,4 +94,8 @@ type EditRepoBranchingModelOption struct {
 	ReleasePrefixes   []string `json:"release_prefixes"`
 	ProductionBranch  string   `json:"production_branch"`
 	MergeForward      bool     `json:"merge_forward"`
+	// MergeForwardNeverBypass makes a step that branch protection refuses open a pull request; otherwise a step counts as an extension of the approved pull request: whoever merged it must be allowed to merge into the target, whose required approvals and status checks are skipped
+	MergeForwardNeverBypass bool `json:"merge_forward_never_bypass"`
+	// MergeForwardAnyoneMaySkip lets everyone who merges choose not to merge forward; otherwise only those who may change the branching model
+	MergeForwardAnyoneMaySkip bool `json:"merge_forward_anyone_may_skip"`
 }

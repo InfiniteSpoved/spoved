@@ -47,7 +47,7 @@ var ErrTooManyReleasePrefixes = fmt.Errorf("at most %d release prefixes", maxRel
 
 // NormalizeBranchingModel trims the values, drops empty and repeated prefixes and checks the rest.
 func NormalizeBranchingModel(m *repo_model.BranchingModel) (*repo_model.BranchingModel, error) {
-	out := &repo_model.BranchingModel{DevelopmentBranch: strings.TrimSpace(m.DevelopmentBranch), ProductionBranch: strings.TrimSpace(m.ProductionBranch), MergeForward: m.MergeForward}
+	out := &repo_model.BranchingModel{DevelopmentBranch: strings.TrimSpace(m.DevelopmentBranch), ProductionBranch: strings.TrimSpace(m.ProductionBranch), MergeForward: m.MergeForward, MergeForwardNeverBypass: m.MergeForwardNeverBypass, MergeForwardAnyoneMaySkip: m.MergeForwardAnyoneMaySkip}
 	for _, b := range []string{out.DevelopmentBranch, out.ProductionBranch} {
 		if b != "" && (len(b) > maxDevelopmentBranch || !git.IsValidRefPattern(b)) {
 			return nil, ErrInvalidBranchingModel{b}
@@ -252,11 +252,13 @@ func auditModel(m *repo_model.BranchingModel, locked bool) map[string]any {
 		m = &repo_model.BranchingModel{}
 	}
 	return map[string]any{
-		"development_branch": m.DevelopmentBranch,
-		"production_branch":  m.ProductionBranch,
-		"release_prefixes":   append([]string{}, m.ReleasePrefixes...),
-		"merge_forward":      m.MergeForward,
-		"model_locked":       locked,
+		"development_branch":            m.DevelopmentBranch,
+		"production_branch":             m.ProductionBranch,
+		"release_prefixes":              append([]string{}, m.ReleasePrefixes...),
+		"merge_forward":                 m.MergeForward,
+		"merge_forward_never_bypass":    m.MergeForwardNeverBypass,
+		"merge_forward_anyone_may_skip": m.MergeForwardAnyoneMaySkip,
+		"model_locked":                  locked,
 	}
 }
 

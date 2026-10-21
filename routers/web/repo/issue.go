@@ -59,6 +59,7 @@ import (
 	"forgejo.org/services/convert"
 	"forgejo.org/services/forms"
 	issue_service "forgejo.org/services/issue"
+	"forgejo.org/services/mergeforward"
 	pull_service "forgejo.org/services/pull"
 	repo_service "forgejo.org/services/repository"
 
@@ -2131,6 +2132,23 @@ func ViewIssue(ctx *context.Context) {
 		ctx.Data["DefaultDeleteBranchAfterMerge"] = deleteBranch.Mode >= repo_model.DeleteBranchDefaultOn
 		ctx.Data["DeleteBranchForced"] = deleteBranch.Mode == repo_model.DeleteBranchAlways
 		ctx.Data["DeleteBranchSetBy"] = branchworkflow.SetByText(ctx.Locale, deleteBranch)
+
+		if !pull.HasMerged {
+			_, targets, err := mergeforward.Targets(ctx, ctx.Repo.Repository, pull.BaseBranch)
+			if err != nil {
+				ctx.ServerError("mergeforward.Targets", err)
+				return
+			}
+			if len(targets) > 0 {
+				maySkip, err := mergeforward.MaySkip(ctx, ctx.Doer, ctx.Repo.Permission, ctx.Repo.Repository, pull.BaseBranch)
+				if err != nil {
+					ctx.ServerError("mergeforward.MaySkip", err)
+					return
+				}
+				ctx.Data["CanSkipMergeForward"] = maySkip
+				ctx.Data["MergeForwardTarget"] = targets[0]
+			}
+		}
 
 		if pull.HasMerged && ctx.IsSigned && ctx.Repo.CanCreateBranch() && !ctx.Repo.Repository.IsArchived {
 			revertBase, err := pull_service.GetRevertBase(ctx.Repo.GitRepo, pull)

@@ -543,12 +543,21 @@ type MergePullRequestForm struct {
 	ForceMerge             bool   `json:"force_merge,omitempty"`
 	MergeWhenChecksSucceed bool   `json:"merge_when_checks_succeed,omitempty"`
 	DeleteBranchAfterMerge bool   `json:"delete_branch_after_merge,omitempty"`
+	// false merges without merging forward into later branches of the branching model
+	MergeForward *bool `json:"merge_forward,omitempty" form:"-"`
+	// the web merge box's "Don't merge forward"
+	SkipMergeForward bool `json:"-"`
 	// do not merge before this time, only with merge_when_checks_succeed; the merge is pinned to the current head
 	// swagger:strfmt date-time
 	ScheduledAfter string `json:"scheduled_after,omitempty"`
 	// cancel the scheduled merge if it has not merged by this time, only with scheduled_after and after it
 	// swagger:strfmt date-time
 	GiveUpAfter string `json:"give_up_after,omitempty"`
+}
+
+// SkipsMergeForward reports whether the merge is not to be merged forward.
+func (f *MergePullRequestForm) SkipsMergeForward() bool {
+	return f.SkipMergeForward || f.MergeForward != nil && !*f.MergeForward
 }
 
 // ErrInvalidGiveUpAfter is returned for a give_up_after without scheduled_after, or not after it
