@@ -526,6 +526,16 @@ func serviceRPC(ctx *context.Context, h *serviceHandler, service string) {
 		return
 	}
 
+	release, err := git.AcquireOperation(ctx)
+	if err != nil {
+		if errors.Is(err, git.ErrServerBusy) {
+			ctx.Resp.Header().Set("Retry-After", strconv.Itoa(git.OperationRetryAfter))
+			ctx.PlainText(http.StatusServiceUnavailable, "The server is busy, please try again in a moment.")
+		}
+		return
+	}
+	defer release()
+
 	ctx.Resp.Header().Set("Content-Type", fmt.Sprintf("application/x-git-%s-result", service))
 
 	reqBody := ctx.Req.Body

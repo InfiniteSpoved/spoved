@@ -42,6 +42,7 @@ func Routes() *web.Route {
 	r.Get("/serv/none/{keyid}", ServNoCommand)
 	r.Get("/serv/command/{keyid}/{owner}/{repo}", ServCommand)
 	r.Get("/serv/command/{keyid}/{owner}/{group}/{repo}", ServCommand)
+	r.Get("/serv/slot", ServOperationSlot)
 	r.Post("/manager/shutdown", Shutdown)
 	r.Post("/manager/restart", Restart)
 	r.Post("/manager/reload-templates", ReloadTemplates)

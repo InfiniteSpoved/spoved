@@ -22,6 +22,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/git"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/private"
 	"forgejo.org/modules/ratelimit"
@@ -691,4 +692,23 @@ func visibleGroupRepository(ctx *context.PrivateContext, keyID int64, owner *use
 		return nil, notExist
 	}
 	return repo, nil
+}
+
+// ServOperationSlot holds one git operation slot (git.AcquireOperation) for `forgejo serv` while it runs git: it
+// answers 200 once it has the slot and keeps it until serv closes the connection. A request that gets no slot in
+// time is answered 503.
+func ServOperationSlot(ctx *context.PrivateContext) {
+	release, err := git.AcquireOperation(ctx)
+	if err != nil {
+		if errors.Is(err, git.ErrServerBusy) {
+			ctx.JSON(http.StatusServiceUnavailable, private.Response{
+				UserMsg: "The server is busy, please try again in a moment.",
+			})
+		}
+		return
+	}
+	defer release()
+	ctx.Resp.WriteHeader(http.StatusOK)
+	ctx.Resp.Flush()
+	<-ctx.Done()
 }

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -407,6 +408,15 @@ func runServ(ctx context.Context, c *cli.Command) error {
 	if err != nil {
 		return fail(ctx, "Invalid repository path", "%v", err)
 	}
+
+	release, extra := private.ServOperationSlot(ctx)
+	if extra.HasError() {
+		if extra.StatusCode == http.StatusServiceUnavailable {
+			return fail(ctx, extra.UserMsg, "")
+		}
+		return fail(ctx, extra.UserMsg, "ServOperationSlot: %v", extra.Error)
+	}
+	defer release()
 
 	var gitcmd *exec.Cmd
 	gitBinPath := filepath.Dir(git.GitExecutable) // e.g. /usr/bin

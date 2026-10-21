@@ -6,12 +6,15 @@ package private
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	asymkey_model "forgejo.org/models/asymkey"
 	"forgejo.org/models/perm"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/json"
 	"forgejo.org/modules/timeutil"
 )
 
@@ -75,4 +78,36 @@ func ServCommand(ctx context.Context, keyID int64, ownerName, repoName string, m
 	}
 	req := newInternalRequest(ctx, reqURL.String(), "GET")
 	return requestJSONResp(req, &ServCommandResults{})
+}
+
+// ServOperationSlot waits until the server gives this process one of its git operation slots, and holds it until
+// release is called (or the process exits). A busy server answers with status 503 and a message for the user.
+func ServOperationSlot(ctx context.Context) (release func(), extra ResponseExtra) {
+	ctx, cancel := context.WithCancel(ctx)
+	req := newInternalRequest(ctx, "/api/internal/serv/slot", "GET").SetTimeout(10*time.Second, 0)
+	resp, err := req.Response()
+	if err != nil {
+		cancel()
+		extra.UserMsg = "Internal Server Connection Error"
+		extra.Error = fmt.Errorf("unable to contact gitea %q: %w", req.GoString(), err)
+		return nil, extra
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer cancel()
+		defer resp.Body.Close()
+		var respErr Response
+		_ = json.NewDecoder(resp.Body).Decode(&respErr)
+		extra.StatusCode = resp.StatusCode
+		extra.UserMsg = respErr.UserMsg
+		if extra.UserMsg == "" {
+			extra.UserMsg = "Internal Server Error (no message for end users)"
+		}
+		extra.Error = responseError{statusCode: resp.StatusCode, errorString: respErr.Err}
+		return nil, extra
+	}
+	// the server keeps the slot until this connection closes
+	return func() {
+		resp.Body.Close()
+		cancel()
+	}, extra
 }
