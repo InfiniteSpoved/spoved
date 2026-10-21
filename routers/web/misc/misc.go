@@ -7,6 +7,7 @@ package misc
 import (
 	"net/http"
 	"path"
+	"strings"
 	"sync"
 
 	"forgejo.org/modules/httpcache"
@@ -60,7 +61,7 @@ func StaticRedirect(target string) func(w http.ResponseWriter, req *http.Request
 }
 
 var defaultRobotsTxt = sync.OnceValue(func() []byte {
-	return []byte(`# The default Forgejo robots.txt
+	return []byte(`# The default spoved robots.txt
 # For more information: ` + setting.AppDocsURL("admin/advanced/search-engines/") + `
 
 User-agent: *
@@ -143,8 +144,71 @@ func RobotsTxt(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	_, err := w.Write(defaultRobotsTxt())
+	robots := defaultRobotsTxt()
+	if sitemapPublic() {
+		robots = append(append([]byte{}, robots...), "\nSitemap: "+setting.AppURL+"sitemap.xml\n"...)
+	}
+	_, err := w.Write(robots)
 	if err != nil {
 		log.Error("failed to write robots.txt: %v", err)
 	}
+}
+
+// sitemapPublic tells whether anonymous visitors (crawlers) can read /sitemap.xml.
+func sitemapPublic() bool {
+	return setting.Other.EnableSitemap && !setting.Service.RequireSignInView && !setting.Service.Explore.RequireSigninView
+}
+
+// LlmsTxt serves /llms.txt (https://llmstxt.org): a Markdown overview of the site for AI
+// assistants and answer engines. custom/public/llms.txt replaces it, like robots.txt.
+func LlmsTxt(w http.ResponseWriter, req *http.Request) {
+	httpcache.SetCacheControlInHeader(w.Header(), setting.StaticCacheTime)
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+
+	llmsTxt := util.FilePathJoinAbs(setting.CustomPath, "public/llms.txt")
+	if ok, _ := util.IsExist(llmsTxt); ok {
+		http.ServeFile(w, req, llmsTxt)
+		return
+	}
+
+	if _, err := w.Write([]byte(defaultLlmsTxt())); err != nil {
+		log.Error("failed to write llms.txt: %v", err)
+	}
+}
+
+func defaultLlmsTxt() string {
+	oneLine := strings.NewReplacer("\r", " ", "\n", " ")
+	var b strings.Builder
+	b.WriteString("# " + oneLine.Replace(setting.AppDisplayName) + "\n\n")
+	if setting.UI.Meta.Description != "" {
+		b.WriteString("> " + oneLine.Replace(setting.UI.Meta.Description) + "\n\n")
+	}
+	b.WriteString("This site runs spoved, a self-hosted software forge: Git repositories, issues, pull requests, code review, packages and CI.\n")
+	if setting.Service.RequireSignInView {
+		b.WriteString("\nSign-in is required to view content on this site.\n")
+		return b.String()
+	}
+
+	if !setting.Service.Explore.RequireSigninView {
+		b.WriteString("\n## Explore\n\n")
+		b.WriteString("- [Repositories](" + setting.AppURL + "explore/repos): public repositories, searchable with `?q=`\n")
+		if !setting.Service.Explore.DisableUsersPage {
+			b.WriteString("- [Users](" + setting.AppURL + "explore/users): public user profiles\n")
+		}
+		if !setting.Service.Explore.DisableOrganizationsPage {
+			b.WriteString("- [Organizations](" + setting.AppURL + "explore/organizations): public organizations\n")
+		}
+	}
+
+	b.WriteString("\n## API\n\n")
+	b.WriteString("- REST API: " + setting.AppURL + "api/v1\n")
+	if setting.API.EnableSwagger {
+		b.WriteString("- [API reference](" + setting.AppURL + "api/swagger): OpenAPI documentation of the REST API\n")
+	}
+
+	if sitemapPublic() {
+		b.WriteString("\n## Optional\n\n")
+		b.WriteString("- [Sitemap](" + setting.AppURL + "sitemap.xml): public repositories, users and organizations\n")
+	}
+	return b.String()
 }

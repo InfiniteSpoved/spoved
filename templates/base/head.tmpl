@@ -6,9 +6,12 @@
 	<title>{{if .Title}}{{.Title}} - {{end}}{{if and (.Repository.Name) (not (StringUtils.HasPrefix .Title .Repository.FullName))}}{{.Repository.FullName}} - {{else}}{{if and (.ContextUser.IsOrganization) (.ContextUser.Name) (not (StringUtils.HasPrefix .Title .ContextUser.Name)) (not (StringUtils.HasPrefix .Title .ContextUser.FullName))}}{{.ContextUser.Name}} - {{end}}{{end}}{{AppDisplayName}}</title>
 	<link rel="manifest" href="{{AppSubUrl}}/manifest.json">
 	<meta name="author" content="{{if .Repository}}{{.Owner.Name}}{{else}}{{MetaAuthor}}{{end}}">
-	<meta name="description" content="{{if .Repository}}{{.Repository.Name}}{{if .Repository.Description}} - {{.Repository.Description}}{{end}}{{else}}{{MetaDescription}}{{end}}">
+	<meta name="description" content="{{if .Repository}}{{.Repository.Name}}{{if .Repository.Description}} - {{.Repository.Description}}{{end}}{{else if .OpenGraphDescription}}{{StringUtils.EllipsisString .OpenGraphDescription 300}}{{else}}{{MetaDescription}}{{end}}">
 	<meta name="keywords" content="{{MetaKeywords}}">
 	<meta name="referrer" content="same-origin">
+{{if .CanonicalURL}}
+	<link rel="canonical" href="{{.CanonicalURL}}">
+{{end}}
 {{if .GoGetImport}}
 	<meta name="go-import" content="{{.GoGetImport}} git {{.RepoCloneLink.HTTPS}}">
 	<meta name="go-source" content="{{.GoGetImport}} _ {{.GoDocDirectory}} {{.GoDocFile}}">

@@ -12,6 +12,8 @@
 {{end}}
 {{if .OpenGraphURL}}
 	<meta property="og:url" content="{{.OpenGraphURL}}">
+{{else if .CanonicalURL}}
+	<meta property="og:url" content="{{.CanonicalURL}}">
 {{else}}
 	<meta property="og:url" content="{{AppUrl}}{{.Link}}">
 {{end}}
@@ -31,7 +33,15 @@
 	{{if .OpenGraphImageAltText}}
 		<meta property="og:image:alt" content="{{.OpenGraphImageAltText}}">
 	{{end}}
+{{else if eq AssetUrlPrefix (print AppSubUrl "/assets")}}
+	<meta property="og:image" content="{{AppUrl}}assets/img/logo.png">
 {{else}}
-		<meta property="og:image" content="{{AssetUrlPrefix}}/img/logo.png">
+	<meta property="og:image" content="{{AssetUrlPrefix}}/img/logo.png">
 {{end}}
 <meta property="og:site_name" content="{{AppDisplayName}}">
+{{- /* X/Twitter reads og:* for title, description and image; summary cards are wide images with alt text */}}
+<meta name="twitter:card" content="{{if .OpenGraphImageAltText}}summary_large_image{{else}}summary{{end}}">
+{{- /* schema.org JSON-LD for search and answer engines, see https://schema.org (set by ctx.SetStructuredData) */}}
+{{if .StructuredData}}
+<script type="application/ld+json">{{.StructuredData}}</script>
+{{end}}

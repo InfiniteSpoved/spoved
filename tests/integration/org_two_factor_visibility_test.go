@@ -233,7 +233,7 @@ func TestOrgTwoFactorBanner(t *testing.T) {
 	_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET trashed_unix = 1 WHERE id = 5")
 	require.NoError(t, err)
 	// (the page echoes the requested URL and its render time, which differ by request)
-	same := regexp.MustCompile(`(?m)^.*(og:url|Page: <strong>|Template: <strong>).*$`)
+	same := regexp.MustCompile(`(?m)^.*(og:url|rel="canonical"|Page: <strong>|Template: <strong>).*$`)
 	want := same.ReplaceAllString(get(member, "/org3/repo3", http.StatusForbidden), "")
 	for _, path := range []string{"/org3/no-such-repo", "/org3/old-name", "/org3/old-trashed", "/org3/repo5"} {
 		assert.Equal(t, want, same.ReplaceAllString(get(member, path, http.StatusForbidden), ""), path)

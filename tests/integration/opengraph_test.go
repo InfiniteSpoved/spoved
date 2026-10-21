@@ -33,7 +33,7 @@ func TestOpenGraphProperties(t *testing.T) {
 				"og:url":         setting.AppURL,
 				"og:description": "spoved is a self-hosted Git forge.",
 				"og:type":        "website",
-				"og:image":       "/assets/img/logo.png",
+				"og:image":       setting.AppURL + "assets/img/logo.png",
 				"og:site_name":   siteName,
 			},
 		},
@@ -95,7 +95,7 @@ func TestOpenGraphProperties(t *testing.T) {
 			url:  "/user27/repo49/src/branch/master/test/test.txt",
 			expected: map[string]string{
 				"og:title":        "repo49/test/test.txt at master",
-				"og:url":          setting.AppURL + "/user27/repo49/src/branch/master/test/test.txt",
+				"og:url":          setting.AppURL + "user27/repo49/src/branch/master/test/test.txt",
 				"og:type":         "object",
 				"og:image":        setting.AppURL + "user27/repo49/-/summary-card",
 				"og:image:alt":    "Summary card of repository user27/repo49, described as: A wonderful repository with more than just a README.md",
@@ -109,7 +109,7 @@ func TestOpenGraphProperties(t *testing.T) {
 			url:  "/user2/repo1/wiki/Page-With-Spaced-Name",
 			expected: map[string]string{
 				"og:title":        "Page With Spaced Name",
-				"og:url":          setting.AppURL + "/user2/repo1/wiki/Page-With-Spaced-Name",
+				"og:url":          setting.AppURL + "user2/repo1/wiki/Page-With-Spaced-Name",
 				"og:type":         "object",
 				"og:image":        setting.AppURL + "user2/repo1/-/summary-card",
 				"og:image:alt":    "Summary card of repository user2/repo1",

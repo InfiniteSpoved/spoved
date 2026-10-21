@@ -72,6 +72,7 @@ func userProfile(ctx *context.Context) {
 	ctx.Data["OpenGraphImageURL"] = ctx.ContextUser.AvatarLink(ctx)
 	ctx.Data["OpenGraphURL"] = ctx.ContextUser.HTMLURL()
 	ctx.Data["OpenGraphDescription"] = ctx.ContextUser.Description
+	ctx.SetProfileStructuredData(ctx.ContextUser)
 
 	profileDbRepo, profileGitRepo, profileReadmeBlob, profileFunding, profileClose := shared_user.FindUserProfileReadme(ctx, ctx.Doer)
 	defer profileClose()

@@ -132,6 +132,7 @@ func TestRenameReservedUsername(t *testing.T) {
 		"favicon.ico",
 		"ghost",
 		"issues",
+		"llms.txt",
 		"login",
 		"manifest.json",
 		"metrics",

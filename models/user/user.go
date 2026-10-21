@@ -722,6 +722,7 @@ var (
 		"report_abuse",
 
 		"favicon.ico",
+		"llms.txt",      // overview for AI assistants
 		"manifest.json", // web app manifests
 		"robots.txt",    // search engine robots
 		"sitemap.xml",   // search engine sitemap
