@@ -30506,6 +30506,11 @@
           "type": "string",
           "x-go-name": "DevelopmentBranch"
         },
+        "merge_forward": {
+          "description": "MergeForward merges a pull request merged into a release branch into every later release branch and the development branch",
+          "type": "boolean",
+          "x-go-name": "MergeForward"
+        },
         "release_prefixes": {
           "description": "ReleasePrefixes start the names of release branches; the rest of the name is read as a version",
           "type": "array",
@@ -34132,6 +34137,10 @@
           "type": "boolean",
           "x-go-name": "Inherit"
         },
+        "merge_forward": {
+          "type": "boolean",
+          "x-go-name": "MergeForward"
+        },
         "release_prefixes": {
           "type": "array",
           "items": {
@@ -36955,6 +36964,11 @@
           "description": "Enforce locks the branching model for all repositories of the organization; it needs a release prefix",
           "type": "boolean",
           "x-go-name": "Enforce"
+        },
+        "merge_forward": {
+          "description": "MergeForward merges a pull request merged into a release branch into every later release branch and the development branch",
+          "type": "boolean",
+          "x-go-name": "MergeForward"
         },
         "release_prefixes": {
           "description": "ReleasePrefixes start the names of release branches; empty removes the branching model",

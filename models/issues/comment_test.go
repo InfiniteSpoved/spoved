@@ -101,6 +101,17 @@ func TestAutoMergeCommentTypes(t *testing.T) {
 	assert.Equal(t, "pull_auto_merge_time_changed", issues_model.CommentTypePRAutoMergeTimeChanged.String())
 }
 
+func TestMergeForwardCommentTypes(t *testing.T) {
+	// persisted values: never renumber
+	assert.Equal(t, 48, int(issues_model.CommentTypePRMergedForward))
+	assert.Equal(t, 49, int(issues_model.CommentTypePRMergeForwardStopped))
+	assert.Equal(t, issues_model.CommentTypePRMergeForwardStopped, issues_model.AsCommentType("pull_merge_forward_stopped"))
+
+	c := &issues_model.Comment{Content: `{"steps":[{"branch":"release/1.2","sha":"abc"}],"branch":"develop","reason":"conflict"}`}
+	assert.Equal(t, issues_model.MergeForwardInfo{Steps: []issues_model.MergeForwardStep{{Branch: "release/1.2", SHA: "abc"}}, Branch: "develop", Reason: "conflict"}, c.MergeForwardInfo())
+	assert.Zero(t, (&issues_model.Comment{Content: "garbage"}).MergeForwardInfo())
+}
+
 func TestAutoMergeInfo(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: 1})

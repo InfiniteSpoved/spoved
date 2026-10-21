@@ -52,6 +52,13 @@
 						<p class="help">{{ctx.Locale.Tr "repo.settings.branching_model.release_prefixes_desc"}}</p>
 					</div>
 				</div>
+				<div class="field">
+					<div class="ui checkbox">
+						<input id="merge_forward" name="merge_forward" type="checkbox" {{if .MergeForward}}checked{{end}} {{if .ModelLocked}}disabled{{end}}>
+						<label for="merge_forward">{{ctx.Locale.Tr "repo.settings.branching_model.merge_forward"}}</label>
+						<p class="help">{{ctx.Locale.Tr "repo.settings.branching_model.merge_forward_desc"}}</p>
+					</div>
+				</div>
 				{{if not .ModelLocked}}
 				<div class="field">
 					<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>

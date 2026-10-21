@@ -257,6 +257,7 @@ type PullRequestsConfig struct {
 type BranchingModel struct {
 	DevelopmentBranch string   `json:",omitempty"` // "" is the repository's default branch
 	ReleasePrefixes   []string `json:",omitempty"`
+	MergeForward      bool     `json:",omitempty"` // a merge into a release branch is merged into every later one
 }
 
 // FromDB fills up a PullRequestsConfig from serialized format.

@@ -135,6 +135,9 @@ const (
 	CommentTypePRAutoMergeTimeChanged // 45 the time of a scheduled auto merge was changed (Content is AutoMergeInfo)
 	CommentTypePRMergedBySchedule     // 46 the pull request was merged by its schedule
 	CommentTypePRAutoMergeSkipped     // 47 a scheduled auto merge was skipped (Content is AutoMergeInfo with a Reason)
+
+	CommentTypePRMergedForward       // 48 the merge was merged forward into later branches (Content is MergeForwardInfo)
+	CommentTypePRMergeForwardStopped // 49 merging forward stopped at a branch (Content is MergeForwardInfo, RefIssueID the pull request opened for it)
 )
 
 var commentStrings = []string{
@@ -186,6 +189,8 @@ var commentStrings = []string{
 	"pull_auto_merge_time_changed",
 	"pull_merged_by_schedule",
 	"pull_auto_merge_skipped",
+	"pull_merged_forward",
+	"pull_merge_forward_stopped",
 }
 
 func (t CommentType) String() string {
@@ -1485,6 +1490,26 @@ type AutoMergeInfo struct {
 
 // AutoMergeInfo decodes Content; comments without data (older ones) give the zero value.
 func (c *Comment) AutoMergeInfo() (info AutoMergeInfo) {
+	_ = json.Unmarshal([]byte(c.Content), &info)
+	return info
+}
+
+// MergeForwardInfo is the data of the merge forward timeline comments, stored as JSON in Content. Reason is a key
+// such as "conflict" or "refused".
+type MergeForwardInfo struct {
+	Steps  []MergeForwardStep `json:"steps,omitempty"`
+	Branch string             `json:"branch,omitempty"`
+	Reason string             `json:"reason,omitempty"`
+}
+
+// MergeForwardStep is a branch the merge was merged into and the merge commit.
+type MergeForwardStep struct {
+	Branch string `json:"branch"`
+	SHA    string `json:"sha"`
+}
+
+// MergeForwardInfo decodes Content; garbage gives the zero value.
+func (c *Comment) MergeForwardInfo() (info MergeForwardInfo) {
 	_ = json.Unmarshal([]byte(c.Content), &info)
 	return info
 }

@@ -38,6 +38,8 @@ type BranchingModel struct {
 	DevelopmentBranch string `json:"development_branch"`
 	// ReleasePrefixes start the names of release branches; the rest of the name is read as a version
 	ReleasePrefixes []string `json:"release_prefixes"`
+	// MergeForward merges a pull request merged into a release branch into every later release branch and the development branch
+	MergeForward bool `json:"merge_forward"`
 }
 
 // OrgBranchingModel represents the branching model of an organization, and the body to change it
@@ -46,6 +48,8 @@ type OrgBranchingModel struct {
 	DevelopmentBranch string `json:"development_branch"`
 	// ReleasePrefixes start the names of release branches; empty removes the branching model
 	ReleasePrefixes []string `json:"release_prefixes"`
+	// MergeForward merges a pull request merged into a release branch into every later release branch and the development branch
+	MergeForward bool `json:"merge_forward"`
 	// Enforce locks the branching model for all repositories of the organization; it needs a release prefix
 	Enforce bool `json:"enforce"`
 }
@@ -76,4 +80,5 @@ type EditRepoBranchingModelOption struct {
 	Inherit           bool     `json:"inherit"`
 	DevelopmentBranch string   `json:"development_branch"`
 	ReleasePrefixes   []string `json:"release_prefixes"`
+	MergeForward      bool     `json:"merge_forward"`
 }

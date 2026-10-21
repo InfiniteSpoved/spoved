@@ -29,7 +29,8 @@ type BranchingModelForm struct {
 	Inherit           bool // repositories of organizations only
 	DevelopmentBranch string
 	ReleasePrefixes   string // separated by commas
-	EnforceModel      bool   // organizations only
+	MergeForward      bool
+	EnforceModel      bool // organizations only
 }
 
 // Validate validates the fields

@@ -147,6 +147,7 @@ func prepareBranchWorkflow(ctx *context.Context) bool {
 	}
 	ctx.Data["DevelopmentBranch"] = shownModel.DevelopmentBranch
 	ctx.Data["ReleasePrefixes"] = strings.Join(shownModel.ReleasePrefixes, ", ")
+	ctx.Data["MergeForward"] = shownModel.MergeForward
 	chain, err := branchworkflow.GetChain(ctx, ctx.Repo.Repository, model)
 	if err != nil {
 		ctx.ServerError("GetChain", err)
@@ -169,7 +170,7 @@ func BranchingModelPost(ctx *context.Context) {
 	form := web.GetForm(ctx).(*forms.BranchingModelForm)
 	var model *repo_model.BranchingModel
 	if !form.Inherit || !ctx.Repo.Owner.IsOrganization() {
-		model = &repo_model.BranchingModel{DevelopmentBranch: form.DevelopmentBranch, ReleasePrefixes: strings.Split(form.ReleasePrefixes, ",")}
+		model = &repo_model.BranchingModel{DevelopmentBranch: form.DevelopmentBranch, ReleasePrefixes: strings.Split(form.ReleasePrefixes, ","), MergeForward: form.MergeForward}
 	}
 	err := branchworkflow.SetRepoModel(ctx, ctx.Repo.Repository, model)
 	if value, ok := branchworkflow.IsInvalidBranchingModel(err); ok {

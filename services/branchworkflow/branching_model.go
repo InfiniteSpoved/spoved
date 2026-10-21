@@ -47,7 +47,7 @@ var ErrTooManyReleasePrefixes = fmt.Errorf("at most %d release prefixes", maxRel
 
 // NormalizeBranchingModel trims the values, drops empty and repeated prefixes and checks the rest.
 func NormalizeBranchingModel(m *repo_model.BranchingModel) (*repo_model.BranchingModel, error) {
-	out := &repo_model.BranchingModel{DevelopmentBranch: strings.TrimSpace(m.DevelopmentBranch)}
+	out := &repo_model.BranchingModel{DevelopmentBranch: strings.TrimSpace(m.DevelopmentBranch), MergeForward: m.MergeForward}
 	if out.DevelopmentBranch != "" && (len(out.DevelopmentBranch) > maxDevelopmentBranch || !git.IsValidRefPattern(out.DevelopmentBranch)) {
 		return nil, ErrInvalidBranchingModel{out.DevelopmentBranch}
 	}
@@ -237,6 +237,7 @@ func auditModel(m *repo_model.BranchingModel, locked bool) map[string]any {
 	return map[string]any{
 		"development_branch": m.DevelopmentBranch,
 		"release_prefixes":   append([]string{}, m.ReleasePrefixes...),
+		"merge_forward":      m.MergeForward,
 		"model_locked":       locked,
 	}
 }
