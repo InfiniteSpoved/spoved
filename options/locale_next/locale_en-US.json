@@ -341,7 +341,7 @@
 	"repo.pulls.auto_merge.time_changed_comment": "changed the scheduled merge time of this pull request from %[1]s to %[2]s %[3]s",
 	"repo.pulls.auto_merge.merged_by_schedule_comment": "merged this pull request as scheduled %s",
 	"repo.pulls.auto_merge.skipped_comment": "could not merge this pull request as scheduled %s",
-	"repo.pulls.merge_forward.merged_comment": "merged this forward %s into:",
+	"repo.pulls.merge_forward.merged_comment": "merged this forward into later branches %s",
 	"repo.pulls.merge_forward.stopped_comment": "could not merge this forward into %s %s",
 	"repo.pulls.merge_forward.reason_conflict": "The merge has conflicts.",
 	"repo.pulls.merge_forward.reason_refused": "A branch rule refused the merge.",
