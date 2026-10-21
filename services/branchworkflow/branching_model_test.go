@@ -60,6 +60,15 @@ func TestBuildChain(t *testing.T) {
 	assert.True(t, BuildChain(m, "trunk", branches).DevelopmentMissing)
 
 	assert.Empty(t, BuildChain(repo_model.BranchingModel{}, "main", branches).Releases)
+
+	// the production branch is merged into the development branch only
+	c = BuildChain(repo_model.BranchingModel{ReleasePrefixes: []string{"release/"}, ProductionBranch: "main"}, "develop", branches)
+	assert.Equal(t, []string{"develop"}, c.Forward("main"))
+	assert.False(t, c.ProductionMissing)
+	c = BuildChain(repo_model.BranchingModel{ProductionBranch: "prod"}, "develop", branches)
+	assert.True(t, c.ProductionMissing)
+	assert.Empty(t, c.Forward("prod"))
+	assert.Empty(t, BuildChain(repo_model.BranchingModel{ProductionBranch: "develop"}, "develop", branches).Forward("develop"))
 }
 
 func TestNormalizeBranchingModel(t *testing.T) {
@@ -73,6 +82,8 @@ func TestNormalizeBranchingModel(t *testing.T) {
 		{ReleasePrefixes: []string{"a,b/"}},
 		{ReleasePrefixes: []string{"/release"}},
 		{DevelopmentBranch: strings.Repeat("d", 256)},
+		{ProductionBranch: "bad..name"},
+		{DevelopmentBranch: "main", ProductionBranch: "main"},
 	} {
 		_, err := NormalizeBranchingModel(bad)
 		_, ok := IsInvalidBranchingModel(err)

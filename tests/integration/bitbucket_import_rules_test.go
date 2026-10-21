@@ -124,6 +124,7 @@ func TestBitbucketImportRules(t *testing.T) {
 			),
 			"branch-utils/1.0/projects/RUL/repos/svc/branchmodel": map[string]any{
 				"development": map[string]any{"displayId": "develop", "isDefault": false},
+				"production":  map[string]any{"displayId": "master", "isDefault": true},
 				"types":       []map[string]string{{"id": "RELEASE", "prefix": "release/"}, {"id": "HOTFIX", "prefix": "hotfix/"}},
 			},
 			"branch-utils/1.0/projects/RUL/repos/lib/branchmodel": map[string]any{
@@ -358,7 +359,7 @@ func TestBitbucketImportRules(t *testing.T) {
 			eff, err := branchworkflow.GetEffectiveModel(ctx, svc)
 			require.NoError(t, err)
 			require.NotNil(t, eff.Configured)
-			assert.Equal(t, repo_model.BranchingModel{DevelopmentBranch: "develop", ReleasePrefixes: []string{"release/"}}, *eff.Configured, "only release branches cascade in Bitbucket")
+			assert.Equal(t, repo_model.BranchingModel{DevelopmentBranch: "develop", ProductionBranch: "master", ReleasePrefixes: []string{"release/"}}, *eff.Configured, "only release branches cascade in Bitbucket")
 			assert.Equal(t, migrations.BitbucketCreated, item(t, report, "branching_model", "RUL/svc branching model").Status)
 
 			lib, err := repo_model.GetRepositoryByPath(ctx, org.ID, group.Name, "lib")

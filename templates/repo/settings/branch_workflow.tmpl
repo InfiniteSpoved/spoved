@@ -53,6 +53,11 @@
 					</div>
 				</div>
 				<div class="field">
+					<label for="production_branch">{{ctx.Locale.Tr "repo.settings.branching_model.production_branch"}}</label>
+					<input id="production_branch" name="production_branch" value="{{.ProductionBranch}}" placeholder="main" maxlength="255" {{if .ModelLocked}}disabled{{end}}>
+					<p class="help">{{ctx.Locale.Tr "repo.settings.branching_model.production_branch_desc"}}</p>
+				</div>
+				<div class="field">
 					<div class="ui checkbox">
 						<input id="merge_forward" name="merge_forward" type="checkbox" {{if .MergeForward}}checked{{end}} {{if .ModelLocked}}disabled{{end}}>
 						<label for="merge_forward">{{ctx.Locale.Tr "repo.settings.branching_model.merge_forward"}}</label>
@@ -81,6 +86,14 @@
 			</div>
 			{{else}}
 			<p>{{ctx.Locale.Tr "repo.settings.branching_model.preview_no_releases"}}</p>
+			{{end}}
+			{{if and .Chain.Production (not .Chain.ProductionMissing)}}
+			<div class="flex-text-block tw-flex-wrap branching-model-production">
+				<span class="ui basic label">{{.Chain.Production}}</span>{{svg "octicon-arrow-right"}}<span class="ui primary basic label">{{.Chain.Development}}</span>
+			</div>
+			{{end}}
+			{{if .Chain.ProductionMissing}}
+			<div class="ui warning message">{{ctx.Locale.Tr "repo.settings.branching_model.production_missing" .Chain.Production}}</div>
 			{{end}}
 			{{if .Chain.DevelopmentMissing}}
 			<div class="ui warning message">{{ctx.Locale.Tr "repo.settings.branching_model.development_missing" .Chain.Development}}</div>

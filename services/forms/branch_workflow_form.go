@@ -28,6 +28,7 @@ func (f *BranchWorkflowForm) Validate(req *http.Request, errs binding.Errors) bi
 type BranchingModelForm struct {
 	Inherit           bool // repositories of organizations only
 	DevelopmentBranch string
+	ProductionBranch  string
 	ReleasePrefixes   string // separated by commas
 	MergeForward      bool
 	EnforceModel      bool // organizations only

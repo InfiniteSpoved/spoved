@@ -51,7 +51,7 @@ func TestBranchingModelSettings(t *testing.T) {
 
 		t.Run("own model and chain preview", func(t *testing.T) {
 			owner.MakeRequest(t, NewRequestWithValues(t, "POST", settings+"/branching_model", map[string]string{
-				"development_branch": "develop", "release_prefixes": "release/, hotfix/", "merge_forward": "on",
+				"development_branch": "develop", "release_prefixes": "release/, hotfix/", "production_branch": "master", "merge_forward": "on",
 			}), http.StatusSeeOther)
 			doc := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", settings), http.StatusOK).Body)
 			assert.False(t, doc.doc.Find(`input[name="inherit"]`).Is("[checked]"))
@@ -63,11 +63,12 @@ func TestBranchingModelSettings(t *testing.T) {
 			})
 			assert.Equal(t, []string{"release/1.9", "hotfix/1.9.1", "release/1.10", "release/2.0", "develop"}, chain)
 			assert.Equal(t, "release/next", strings.TrimSpace(doc.doc.Find(".branching-model-ignored code").Text()))
+			assert.Equal(t, "masterdevelop", strings.Join(strings.Fields(doc.doc.Find(".branching-model-production").Text()), ""))
 
 			got := bmRepoAPI(t, ownerCtx, "org3", repo)
 			assert.False(t, got.Inherit)
 			assert.Equal(t, "repo", got.Source)
-			assert.Equal(t, &api.BranchingModel{DevelopmentBranch: "develop", ReleasePrefixes: []string{"release/", "hotfix/"}, MergeForward: true}, got.Own)
+			assert.Equal(t, &api.BranchingModel{DevelopmentBranch: "develop", ReleasePrefixes: []string{"release/", "hotfix/"}, ProductionBranch: "master", MergeForward: true}, got.Own)
 			assert.True(t, got.Effective.MergeForward)
 			assert.Equal(t, []string{"release/1.9", "hotfix/1.9.1", "release/1.10", "release/2.0"}, got.ReleaseBranches)
 			assert.Equal(t, []string{"release/next"}, got.IgnoredBranches)

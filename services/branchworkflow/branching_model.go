@@ -47,9 +47,14 @@ var ErrTooManyReleasePrefixes = fmt.Errorf("at most %d release prefixes", maxRel
 
 // NormalizeBranchingModel trims the values, drops empty and repeated prefixes and checks the rest.
 func NormalizeBranchingModel(m *repo_model.BranchingModel) (*repo_model.BranchingModel, error) {
-	out := &repo_model.BranchingModel{DevelopmentBranch: strings.TrimSpace(m.DevelopmentBranch), MergeForward: m.MergeForward}
-	if out.DevelopmentBranch != "" && (len(out.DevelopmentBranch) > maxDevelopmentBranch || !git.IsValidRefPattern(out.DevelopmentBranch)) {
-		return nil, ErrInvalidBranchingModel{out.DevelopmentBranch}
+	out := &repo_model.BranchingModel{DevelopmentBranch: strings.TrimSpace(m.DevelopmentBranch), ProductionBranch: strings.TrimSpace(m.ProductionBranch), MergeForward: m.MergeForward}
+	for _, b := range []string{out.DevelopmentBranch, out.ProductionBranch} {
+		if b != "" && (len(b) > maxDevelopmentBranch || !git.IsValidRefPattern(b)) {
+			return nil, ErrInvalidBranchingModel{b}
+		}
+	}
+	if out.ProductionBranch != "" && out.ProductionBranch == out.DevelopmentBranch {
+		return nil, ErrInvalidBranchingModel{out.ProductionBranch}
 	}
 	for _, p := range m.ReleasePrefixes {
 		p = strings.TrimSpace(p)
@@ -90,8 +95,10 @@ type Chain struct {
 	Development string   // the branch every cascade ends in
 	Releases    []string // the release branches, in version order
 	Ignored     []string // branches with a release prefix whose rest is not a version
+	Production  string   // the production branch, "" when there is none
 
 	DevelopmentMissing bool // the development branch is not among the branches
+	ProductionMissing  bool // the production branch is not among the branches
 }
 
 // BuildChain orders the release branches by version. All prefixes share one order; equal versions follow the order
@@ -103,10 +110,17 @@ func BuildChain(m repo_model.BranchingModel, development string, branches []stri
 		version []uint64
 	}
 	c := Chain{Development: development, DevelopmentMissing: true}
+	if m.ProductionBranch != "" && m.ProductionBranch != development {
+		c.Production, c.ProductionMissing = m.ProductionBranch, true
+	}
 	var releases []release
 	for _, b := range branches {
 		if b == development {
 			c.DevelopmentMissing = false
+			continue
+		}
+		if b == c.Production {
+			c.ProductionMissing = false
 			continue
 		}
 		prefix := -1
@@ -135,8 +149,11 @@ func BuildChain(m repo_model.BranchingModel, development string, branches []stri
 }
 
 // Forward returns the branches a merge into branch is carried to: every later release branch, then the development
-// branch. It is empty when branch is not a release branch.
+// branch; from the production branch only the development branch. It is empty for any other branch.
 func (c Chain) Forward(branch string) []string {
+	if c.Production != "" && branch == c.Production && !c.ProductionMissing {
+		return []string{c.Development}
+	}
 	i := slices.Index(c.Releases, branch)
 	if i < 0 {
 		return nil
@@ -216,7 +233,7 @@ func (e EffectiveModel) DevelopmentBranch(repo *repo_model.Repository) string {
 
 // GetChain applies the model to the repository's branches.
 func GetChain(ctx context.Context, repo *repo_model.Repository, e EffectiveModel) (Chain, error) {
-	if len(e.Model.ReleasePrefixes) == 0 {
+	if len(e.Model.ReleasePrefixes) == 0 && e.Model.ProductionBranch == "" {
 		return Chain{Development: e.DevelopmentBranch(repo)}, nil
 	}
 	names, err := git_model.FindBranchNames(ctx, git_model.FindBranchOptions{
@@ -236,14 +253,15 @@ func auditModel(m *repo_model.BranchingModel, locked bool) map[string]any {
 	}
 	return map[string]any{
 		"development_branch": m.DevelopmentBranch,
+		"production_branch":  m.ProductionBranch,
 		"release_prefixes":   append([]string{}, m.ReleasePrefixes...),
 		"merge_forward":      m.MergeForward,
 		"model_locked":       locked,
 	}
 }
 
-// SetOrgModel stores the organization's branching model; nil or one without prefixes removes it. Enforcing needs
-// at least one release prefix.
+// SetOrgModel stores the organization's branching model; nil or one without prefixes and production branch removes
+// it. Enforcing needs one of them.
 func SetOrgModel(ctx context.Context, org *user_model.User, m *repo_model.BranchingModel, locked bool) error {
 	if m != nil {
 		var err error
@@ -251,7 +269,7 @@ func SetOrgModel(ctx context.Context, org *user_model.User, m *repo_model.Branch
 			return err
 		}
 	}
-	if m != nil && len(m.ReleasePrefixes) == 0 {
+	if m != nil && len(m.ReleasePrefixes) == 0 && m.ProductionBranch == "" {
 		m = nil
 	}
 	if locked && m == nil {

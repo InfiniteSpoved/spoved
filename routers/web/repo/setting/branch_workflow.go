@@ -148,12 +148,13 @@ func prepareBranchWorkflow(ctx *context.Context) bool {
 	ctx.Data["DevelopmentBranch"] = shownModel.DevelopmentBranch
 	ctx.Data["ReleasePrefixes"] = strings.Join(shownModel.ReleasePrefixes, ", ")
 	ctx.Data["MergeForward"] = shownModel.MergeForward
+	ctx.Data["ProductionBranch"] = shownModel.ProductionBranch
 	chain, err := branchworkflow.GetChain(ctx, ctx.Repo.Repository, model)
 	if err != nil {
 		ctx.ServerError("GetChain", err)
 		return false
 	}
-	ctx.Data["HasModel"] = len(model.Model.ReleasePrefixes) > 0
+	ctx.Data["HasModel"] = len(model.Model.ReleasePrefixes) > 0 || model.Model.ProductionBranch != ""
 	if len(chain.Ignored) > maxIgnoredShown {
 		ctx.Data["IgnoredMore"] = len(chain.Ignored) - maxIgnoredShown
 		chain.Ignored = chain.Ignored[:maxIgnoredShown]
@@ -170,7 +171,7 @@ func BranchingModelPost(ctx *context.Context) {
 	form := web.GetForm(ctx).(*forms.BranchingModelForm)
 	var model *repo_model.BranchingModel
 	if !form.Inherit || !ctx.Repo.Owner.IsOrganization() {
-		model = &repo_model.BranchingModel{DevelopmentBranch: form.DevelopmentBranch, ReleasePrefixes: strings.Split(form.ReleasePrefixes, ","), MergeForward: form.MergeForward}
+		model = &repo_model.BranchingModel{DevelopmentBranch: form.DevelopmentBranch, ProductionBranch: form.ProductionBranch, ReleasePrefixes: strings.Split(form.ReleasePrefixes, ","), MergeForward: form.MergeForward}
 	}
 	err := branchworkflow.SetRepoModel(ctx, ctx.Repo.Repository, model)
 	if value, ok := branchworkflow.IsInvalidBranchingModel(err); ok {

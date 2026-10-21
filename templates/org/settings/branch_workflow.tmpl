@@ -46,6 +46,11 @@
 				</div>
 			</div>
 			<div class="field">
+				<label for="production_branch">{{ctx.Locale.Tr "repo.settings.branching_model.production_branch"}}</label>
+				<input id="production_branch" name="production_branch" value="{{.ProductionBranch}}" placeholder="main" maxlength="255">
+				<p class="help">{{ctx.Locale.Tr "repo.settings.branching_model.production_branch_desc"}}</p>
+			</div>
+			<div class="field">
 				<div class="ui checkbox">
 					<input id="merge_forward" name="merge_forward" type="checkbox" {{if .MergeForward}}checked{{end}}>
 					<label for="merge_forward">{{ctx.Locale.Tr "repo.settings.branching_model.merge_forward"}}</label>

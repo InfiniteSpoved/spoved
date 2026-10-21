@@ -40,7 +40,7 @@ func TestMergeForward(t *testing.T) {
 		setModel := func(t *testing.T, mergeForward bool) {
 			t.Helper()
 			req := NewRequestWithJSON(t, "PUT", "/api/v1/repos/org3/"+name+"/branching-model", &api.EditRepoBranchingModelOption{
-				DevelopmentBranch: "develop", ReleasePrefixes: []string{"release/"}, MergeForward: mergeForward,
+				DevelopmentBranch: "develop", ProductionBranch: "master", ReleasePrefixes: []string{"release/"}, MergeForward: mergeForward,
 			}).AddTokenAuth(ctx.Token)
 			ctx.Session.MakeRequest(t, req, http.StatusOK)
 		}
@@ -113,6 +113,16 @@ func TestMergeForward(t *testing.T) {
 			for _, b := range []string{"release/1.10", "release/2.0", "develop"} {
 				assert.Contains(t, detail, b)
 			}
+		})
+
+		t.Run("a hotfix in the production branch reaches develop only", func(t *testing.T) {
+			pr := pull(t, "master", "hotfix-1", "hotfix.txt", "fix")
+			merge(t, pr)
+			assert.True(t, has(t, "develop", "hotfix.txt"))
+			assert.False(t, has(t, "release/2.0", "hotfix.txt"))
+			list := comments(pr, issues_model.CommentTypePRMergedForward)
+			require.Len(t, list, 1)
+			assert.Equal(t, []issues_model.MergeForwardStep{{Branch: "develop", SHA: list[0].MergeForwardInfo().Steps[0].SHA}}, list[0].MergeForwardInfo().Steps)
 		})
 
 		t.Run("nothing to merge", func(t *testing.T) {
