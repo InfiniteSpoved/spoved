@@ -10,8 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	activities_model "forgejo.org/models/activities"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
@@ -159,7 +161,7 @@ func TestMergeForward(t *testing.T) {
 			require.Len(t, stopped, 1)
 			assert.Equal(t, issues_model.MergeForwardInfo{Branch: "release/2.0", Reason: mergeforward.ReasonConflict}, stopped[0].MergeForwardInfo())
 
-			branch := fmt.Sprintf("automerge/pr-%d/release-2.0", pr.Index)
+			branch := fmt.Sprintf("automerge/pr-%d/release/2.0", pr.Index)
 			opened := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, HeadBranch: branch, BaseBranch: "release/2.0"})
 			assert.Equal(t, opened.IssueID, stopped[0].RefIssueID)
 			issue := unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: opened.IssueID})
@@ -195,6 +197,68 @@ func TestMergeForward(t *testing.T) {
 			require.Len(t, stopped, 1)
 			assert.Equal(t, issues_model.MergeForwardInfo{Branch: "develop", Reason: mergeforward.ReasonRefused}, stopped[0].MergeForwardInfo())
 			unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, HeadBranch: fmt.Sprintf("automerge/pr-%d/develop", pr.Index), BaseBranch: "develop"})
+		})
+
+		t.Run("a pull request title rule refuses the follow-up pull request", func(t *testing.T) {
+			setPRTitleRule(t, repo.ID, git_model.PushRule{PRTitleRegex: `^ABC-\d+ `, PRTitleBranches: "develop"})
+			defer setPRTitleRule(t, repo.ID, git_model.PushRule{})
+			since := auditMaxID(t)
+			pr := pull(t, "release/2.0", "fix-5", "fix5.txt", "fix")
+			merge(t, pr)
+			stopped := comments(pr, issues_model.CommentTypePRMergeForwardStopped)
+			require.Len(t, stopped, 1)
+			assert.Equal(t, issues_model.MergeForwardInfo{Branch: "develop", Reason: mergeforward.ReasonRefused, PullFailed: true}, stopped[0].MergeForwardInfo())
+			assert.Zero(t, stopped[0].RefIssueID)
+			entries := auditActions(t, since, "repo.branch.merge_forward_stopped")
+			require.Len(t, entries, 1)
+			assert.Equal(t, true, auditData(t, entries[0])["pull_failed"])
+			doc := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/org3/%s/pulls/%d", name, pr.Index)), http.StatusOK).Body)
+			assert.Contains(t, doc.doc.Find(".merge-forward-detail").Text(), "No pull request could be opened for it")
+		})
+
+		// mergedWithoutCascade merges a pull request into release/1.10 with merging forward off and turns it on again
+		mergedWithoutCascade := func(t *testing.T, branch, file string) (api.PullRequest, *issues_model.PullRequest) {
+			t.Helper()
+			setModel(t, false)
+			pr := pull(t, "release/1.10", branch, file, "fix")
+			merge(t, pr)
+			setModel(t, true)
+			return pr, unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{IssueID: issueIDOf(t, repo, pr.Index)})
+		}
+
+		t.Run("a pull request marked as merged manually is not merged forward", func(t *testing.T) {
+			pr, row := mergedWithoutCascade(t, "fix-6", "fix6.txt")
+			_, err := db.GetEngine(t.Context()).Exec("UPDATE pull_request SET status = ? WHERE id = ?", issues_model.PullRequestStatusManuallyMerged, row.ID)
+			require.NoError(t, err)
+			ran, err := mergeforward.Run(t.Context(), row.ID)
+			require.NoError(t, err)
+			assert.True(t, ran)
+			assert.False(t, has(t, "release/2.0", "fix6.txt"))
+			assert.Empty(t, comments(pr, issues_model.CommentTypePRMergedForward))
+			assert.Empty(t, comments(pr, issues_model.CommentTypePRMergeForwardStopped))
+
+			// the same pull request merged here is merged forward
+			_, err = db.GetEngine(t.Context()).Exec("UPDATE pull_request SET status = ? WHERE id = ?", row.Status, row.ID)
+			require.NoError(t, err)
+			_, err = mergeforward.Run(t.Context(), row.ID)
+			require.NoError(t, err)
+			assert.True(t, has(t, "release/2.0", "fix6.txt"))
+		})
+
+		t.Run("a merger without write access stops it", func(t *testing.T) {
+			pr, row := mergedWithoutCascade(t, "fix-7", "fix7.txt")
+			user4 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})
+			_, err := db.GetEngine(t.Context()).Exec("UPDATE pull_request SET merger_id = ? WHERE id = ?", user4.ID, row.ID)
+			require.NoError(t, err)
+			_, err = mergeforward.Run(t.Context(), row.ID)
+			require.NoError(t, err)
+			assert.False(t, has(t, "release/2.0", "fix7.txt"))
+			stopped := comments(pr, issues_model.CommentTypePRMergeForwardStopped)
+			require.Len(t, stopped, 1)
+			assert.Equal(t, issues_model.MergeForwardInfo{Branch: "release/2.0", Reason: mergeforward.ReasonMerger}, stopped[0].MergeForwardInfo())
+			assert.False(t, has(t, fmt.Sprintf("automerge/pr-%d/release/2.0", pr.Index), "fix7.txt"))
+			// the author of the pull request is told
+			unittest.AssertExistsAndLoadBean(t, &activities_model.Notification{UserID: user2.ID, IssueID: row.IssueID, CommentID: stopped[0].ID})
 		})
 	})
 }

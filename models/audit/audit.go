@@ -169,7 +169,7 @@ var Fields = map[string][]string{
 		"credentials_changed", "development_branch", "release_prefixes", "production_branch", "merge_forward", "inherit",
 	},
 	"collaborator":       {"user_id", "mode"},
-	"branch":             {"name", "from", "to", "commit", "default", "pull", "reason", "conflict_pull"},
+	"branch":             {"name", "from", "to", "commit", "default", "pull", "reason", "conflict_pull", "pull_failed"},
 	"tag":                {"name", "commit"},
 	"project":            {"name", "counts"},
 	"queue":              {"name"},

@@ -733,6 +733,7 @@
 							{{else}}{{ctx.Locale.Tr "repo.pulls.merge_forward.reason_error"}}{{end}}
 						</span>
 						{{if .RefIssueID}}<span class="text grey muted-links"><a href="{{.RefIssueLink ctx}}"><b>{{RenderRefIssueTitle $.Context (.RefIssueTitle ctx)}}</b> {{.RefIssueIdent ctx}}</a></span>{{end}}
+						{{if $info.PullFailed}}<span class="text grey">{{ctx.Locale.Tr "repo.pulls.merge_forward.pull_failed"}}</span>{{end}}
 					{{end}}
 				</div>
 			</div>

@@ -17,10 +17,12 @@ import (
 	"strings"
 	"time"
 
+	activities_model "forgejo.org/models/activities"
 	audit_model "forgejo.org/models/audit"
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/graceful"
@@ -92,9 +94,13 @@ func handler(items ...int64) (unhandled []int64) {
 	}
 	for _, id := range items {
 		ran, err := Run(ctx, id)
-		if err != nil {
+		switch {
+		case ctx.Err() != nil:
+			// shutting down: the queue keeps the item for the next start, and the steps done are skipped then
+			unhandled = append(unhandled, id)
+		case err != nil:
 			log.Error("merge forward of pull request %d: %v", id, err)
-		} else if !ran {
+		case !ran:
 			unhandled = append(unhandled, id)
 		}
 	}
@@ -104,14 +110,16 @@ func handler(items ...int64) (unhandled []int64) {
 // Run merges the merged pull request prID forward. It returns false, to be retried, while another cascade of the
 // repository runs.
 func Run(ctx context.Context, prID int64) (bool, error) {
-	ctx = audit_model.WithSystem(ctx, "merge_forward:"+strconv.FormatInt(prID, 10))
 	pr, err := issues_model.GetPullRequestByID(ctx, prID)
 	if err != nil {
 		return true, err
 	}
-	if !pr.HasMerged {
+	// a pull request marked as merged manually has a merger taken from a commit's author email (or the repository
+	// owner), not from someone who merged it here, so nothing is pushed as them
+	if !pr.HasMerged || pr.Status == issues_model.PullRequestStatusManuallyMerged {
 		return true, nil
 	}
+	ctx = audit_model.WithSystem(ctx, "merge_forward:"+strconv.FormatInt(pr.Index, 10))
 	if err := pr.LoadBaseRepo(ctx); err != nil {
 		return true, err
 	}
@@ -150,12 +158,29 @@ func Run(ctx context.Context, prID int64) (bool, error) {
 	if c.merger, err = user_model.GetUserByID(ctx, pr.MergerID); err != nil && !user_model.IsErrUserNotExist(err) {
 		return true, err
 	}
-	if c.merger == nil || !c.merger.IsActive || c.merger.ProhibitLogin {
+	canPush, err := c.mergerCanPush(ctx)
+	if err != nil {
+		return true, err
+	}
+	if !canPush {
 		// nobody to merge as; the ghost user is the poster of the entry
 		c.merger = user_model.NewGhostUser()
 		return true, c.stop(ctx, nil, pr.BaseBranch, targets[0], "", ReasonMerger)
 	}
 	return true, c.run(ctx, targets)
+}
+
+// mergerCanPush reports whether the user who merged can still write code in the repository: the branch rules of each
+// step are left to the push.
+func (c *cascade) mergerCanPush(ctx context.Context) (bool, error) {
+	if c.merger == nil || !c.merger.IsActive || c.merger.ProhibitLogin || !c.merger.IsIndividual() {
+		return false, nil
+	}
+	perm, err := access_model.GetUserRepoPermission(ctx, c.repo, c.merger)
+	if err != nil {
+		return false, err
+	}
+	return perm.CanWrite(unit.TypeCode), nil
 }
 
 type cascade struct {
@@ -192,6 +217,9 @@ func (c *cascade) run(ctx context.Context, targets []string) error {
 			case errors.Is(err, errRefused):
 				reason = ReasonRefused
 			default:
+				if ctx.Err() != nil {
+					return err // shutting down: retried at the next start, see handler
+				}
 				log.Error("merge forward of %-v from %s to %s: %v", c.pr, source, target, err)
 			}
 			return c.stop(ctx, steps, source, target, sourceSHA, reason)
@@ -299,6 +327,8 @@ func (c *cascade) commit(ctx context.Context, tree, source, target, targetSHA, s
 	return strings.TrimSpace(stdout.String()), nil
 }
 
+// record writes the summary entry of a step. It fails open, because the branch has already moved; the push itself is
+// recorded by the hook as the merger's push.
 func (c *cascade) record(ctx context.Context, action, target string, data map[string]any) {
 	if err := repo_model.RecordRepoTarget(ctx, c.repo, audit_model.Event{Action: action, TargetType: "branch", TargetName: target, Data: data}); err != nil {
 		log.Error("merge forward: record %s for %-v: %v", action, c.pr, err)
@@ -309,49 +339,62 @@ func (c *cascade) comment(ctx context.Context, steps []issues_model.MergeForward
 	if len(steps) == 0 {
 		return nil
 	}
-	return c.createComment(ctx, issues_model.CommentTypePRMergedForward, issues_model.MergeForwardInfo{Steps: steps}, nil)
+	_, err := c.createComment(ctx, issues_model.CommentTypePRMergedForward, issues_model.MergeForwardInfo{Steps: steps}, nil)
+	return err
 }
 
-func (c *cascade) createComment(ctx context.Context, typ issues_model.CommentType, info issues_model.MergeForwardInfo, ref *issues_model.PullRequest) error {
+func (c *cascade) createComment(ctx context.Context, typ issues_model.CommentType, info issues_model.MergeForwardInfo, ref *issues_model.PullRequest) (*issues_model.Comment, error) {
 	content, err := json.Marshal(info)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	opts := &issues_model.CreateCommentOptions{Type: typ, Doer: c.merger, Repo: c.repo, Issue: c.pr.Issue, Content: string(content)}
 	if ref != nil {
 		opts.RefRepoID, opts.RefIssueID, opts.RefIsPull = ref.BaseRepoID, ref.IssueID, true
 	}
-	_, err = issues_model.CreateComment(ctx, opts)
-	return err
+	return issues_model.CreateComment(ctx, opts)
 }
 
 // stop records where the cascade stopped and, for a conflict or a refused push, opens a pull request from a new
 // branch at sourceSHA into target.
 func (c *cascade) stop(ctx context.Context, steps []issues_model.MergeForwardStep, source, target, sourceSHA, reason string) error {
 	var opened *issues_model.PullRequest
+	info := issues_model.MergeForwardInfo{Branch: target, Reason: reason}
 	if (reason == ReasonConflict || reason == ReasonRefused) && sourceSHA != "" {
 		var err error
 		if opened, err = c.openPull(ctx, source, target, sourceSHA); err != nil {
-			log.Error("merge forward: open a pull request from %s into %s for %-v: %v", source, target, c.pr, err)
+			// e.g. a pull request title rule, or a branch name the push rules refuse
+			log.Warn("merge forward: open a pull request from %s into %s for %-v: %v", source, target, c.pr, err)
+			info.PullFailed = true
 		}
 	}
 	data := map[string]any{"from": source, "reason": reason, "pull": c.pr.Index}
 	if opened != nil {
 		data["conflict_pull"] = opened.Index
 	}
+	if info.PullFailed {
+		data["pull_failed"] = true
+	}
 	c.record(ctx, "repo.branch.merge_forward_stopped", target, data)
 	if err := c.comment(ctx, steps); err != nil {
 		return err
 	}
-	return c.createComment(ctx, issues_model.CommentTypePRMergeForwardStopped, issues_model.MergeForwardInfo{Branch: target, Reason: reason}, opened)
+	comment, err := c.createComment(ctx, issues_model.CommentTypePRMergeForwardStopped, info, opened)
+	if err != nil {
+		return err
+	}
+	// the participants of the pull request (its author and the merger among them) are told it stopped; with no
+	// author to leave out, the merger is told too
+	return activities_model.CreateOrUpdateIssueNotifications(ctx, c.pr.IssueID, comment.ID, 0, 0)
 }
 
 // BranchName is the branch the pull request of a stopped step comes from.
 func BranchName(pr *issues_model.PullRequest, target string) string {
-	return fmt.Sprintf("automerge/pr-%d/%s", pr.Index, strings.ReplaceAll(target, "/", "-"))
+	return fmt.Sprintf("automerge/pr-%d/%s", pr.Index, target)
 }
 
-// openPull opens the pull request of a stopped step, or returns the one already open for it.
+// openPull opens the pull request of a stopped step, or returns the one already open for it. The lookup and the
+// creation are not atomic across processes: two pods running the same step can open two pull requests for it.
 func (c *cascade) openPull(ctx context.Context, source, target, sourceSHA string) (*issues_model.PullRequest, error) {
 	branch := BranchName(c.pr, target)
 	if existing, err := issues_model.GetUnmergedPullRequest(ctx, c.repo.ID, c.repo.ID, branch, target, issues_model.PullRequestFlowGithub); err == nil {
@@ -364,11 +407,14 @@ func (c *cascade) openPull(ctx context.Context, source, target, sourceSHA string
 		return nil, err
 	}
 	defer gitRepo.Close()
-	// a branch left from an earlier run may hold someone's work: open the pull request from it as it is
-	if !gitRepo.IsBranchExist(branch) {
-		if err := repo_service.CreateNewBranchFromCommit(ctx, c.merger, c.repo, gitRepo, sourceSHA, branch); err != nil {
-			return nil, err
+	// a branch left from an earlier run may hold someone's work: open the pull request from it as it is, if it carries
+	// this merge
+	if gitRepo.IsBranchExist(branch) {
+		if err := git.NewCommand(ctx, "merge-base", "--is-ancestor").AddDynamicArguments(sourceSHA, git.BranchPrefix+branch).Run(&git.RunOpts{Dir: c.repo.RepoPath()}); err != nil {
+			return nil, fmt.Errorf("branch %s does not carry %s: %w", branch, sourceSHA, err)
 		}
+	} else if err := repo_service.CreateNewBranchFromCommit(ctx, c.merger, c.repo, gitRepo, sourceSHA, branch); err != nil {
+		return nil, err
 	}
 
 	var assignees []int64

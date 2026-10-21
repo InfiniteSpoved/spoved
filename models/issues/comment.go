@@ -1500,6 +1500,8 @@ type MergeForwardInfo struct {
 	Steps  []MergeForwardStep `json:"steps,omitempty"`
 	Branch string             `json:"branch,omitempty"`
 	Reason string             `json:"reason,omitempty"`
+	// PullFailed is set when the pull request for the stopped step could not be opened
+	PullFailed bool `json:"pull_failed,omitempty"`
 }
 
 // MergeForwardStep is a branch the merge was merged into and the merge commit.
