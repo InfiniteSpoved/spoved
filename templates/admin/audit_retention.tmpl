@@ -6,15 +6,17 @@
 		<div class="ui attached segment">
 			<p>{{ctx.Locale.Tr "admin.audit_retention.desc"}}</p>
 			<p id="audit-retention-line">{{.RetentionLine}}</p>
+			<p id="audit-volume">{{.VolumeLine}}</p>
+			{{if .ShortRetention}}<div class="ui warning message" id="audit-retention-short">{{ctx.Locale.Tr "admin.audit_retention.short_hint"}}</div>{{end}}
 			<form class="ui form" action="{{AppSubUrl}}/admin/audit/retention" method="post">
 				<div class="field">
 					<label for="days">{{ctx.Locale.Tr "admin.audit_retention.keep"}}</label>
 					<select id="days" name="days" class="ui dropdown">
 						{{range .Options}}
-							<option value="{{.}}" {{if eq . $.Current}}selected{{end}}>{{ctx.Locale.Tr (print "admin.audit_retention.option." .)}}</option>
+							<option value="{{.Days}}" {{if eq .Days $.Current}}selected{{end}}>{{ctx.Locale.Tr (print "admin.audit_retention.option." .Days)}}{{if .Projection}} · {{.Projection}}{{end}}</option>
 						{{end}}
 					</select>
-					<p class="help">{{ctx.Locale.Tr "admin.audit_retention.lower_help"}}</p>
+					<p class="help">{{ctx.Locale.Tr "admin.audit_retention.lower_help"}} {{ctx.Locale.Tr "admin.audit_retention.short_help"}}</p>
 				</div>
 				<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
 				<a class="ui button" href="{{AppSubUrl}}/admin/audit">{{ctx.Locale.Tr "admin.audit_retention.back"}}</a>

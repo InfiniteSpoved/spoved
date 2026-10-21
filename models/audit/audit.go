@@ -284,7 +284,7 @@ func Record(ctx context.Context, ev Event) error {
 	if err != nil {
 		return err
 	}
-	return InsertEntry(ctx, &Entry{
+	e := &Entry{
 		CreatedUnix:       timeutil.TimeStampNow(),
 		Action:            ev.Action,
 		Category:          category,
@@ -308,7 +308,12 @@ func Record(ctx context.Context, ev Event) error {
 		TargetID:          ev.TargetID,
 		TargetName:        Text(ev.TargetName, maxText),
 		Data:              encoded,
-	})
+	}
+	if err := InsertEntry(ctx, e); err != nil {
+		return err
+	}
+	db.AfterTx(ctx, func() { Written[category].Add(1) }) // a rolled-back entry isn't counted
+	return nil
 }
 
 // Changes returns the fields of after whose value differs from before, as data's "before" and "after"; nil when none

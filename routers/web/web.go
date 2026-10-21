@@ -395,7 +395,7 @@ func Routes() *web.Route {
 	}
 
 	if setting.Metrics.Enabled {
-		prometheus.MustRegister(metrics.NewCollector(), metrics.NewLogShippingCollector())
+		prometheus.MustRegister(metrics.NewCollector(), metrics.NewLogShippingCollector(), metrics.NewAuditCollector())
 		routes.Get("/metrics", gzipMid, Metrics)
 	}
 

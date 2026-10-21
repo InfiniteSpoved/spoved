@@ -29,13 +29,37 @@ func auditRetentionLine(ctx *context.Context) string {
 	return line
 }
 
-// AuditRetention shows the retention of the audit log and the form to change it.
+type auditRetentionOption struct {
+	Days       int
+	Projection string // "about N entries, S" at the current rate; "" while nothing was written
+}
+
+// AuditRetention shows the retention of the audit log, how much the log holds and would hold with each choice, and
+// the form to change it.
 func AuditRetention(ctx *context.Context) {
+	now := time.Now()
+	s := setting.Config().AuditRetention.Value(ctx)
+	vol, err := audit_service.GetVolume(ctx, now)
+	if err != nil {
+		ctx.ServerError("GetVolume", err)
+		return
+	}
+	options := make([]auditRetentionOption, 0, len(setting.AuditRetentionAllowed))
+	for _, days := range setting.AuditRetentionAllowed {
+		o := auditRetentionOption{Days: days}
+		if n := vol.PerDay * int64(days); n > 0 {
+			o.Projection = ctx.Locale.TrString("admin.audit_retention.projection", ctx.Locale.PrettyNumber(n), ctx.Locale.TrSize(n*audit_service.EntryBytes).String())
+		}
+		options = append(options, o)
+	}
 	ctx.Data["Title"] = ctx.Tr("admin.audit_retention")
 	ctx.Data["PageIsAdminAudit"] = true
 	ctx.Data["RetentionLine"] = auditRetentionLine(ctx)
-	ctx.Data["Options"] = setting.AuditRetentionAllowed
-	ctx.Data["Current"] = setting.Config().AuditRetention.Value(ctx).Effective(time.Now())
+	ctx.Data["Options"] = options
+	ctx.Data["Current"] = s.Effective(now)
+	ctx.Data["ShortRetention"] = s.Target() < setting.AuditRetentionDefault
+	ctx.Data["VolumeLine"] = ctx.Locale.TrString("admin.audit_retention.volume", ctx.Locale.PrettyNumber(vol.Kept),
+		ctx.Locale.TrSize(vol.Kept*audit_service.EntryBytes).String(), ctx.Locale.PrettyNumber(vol.PerDay))
 	ctx.HTML(http.StatusOK, tplAuditRetention)
 }
 

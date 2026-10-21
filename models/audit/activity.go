@@ -20,6 +20,15 @@ import (
 // WriteErrors counts activity entries that could not be written.
 var WriteErrors atomic.Int64
 
+// Written counts the entries this process wrote (and whose transaction committed), per category.
+var Written = func() map[string]*atomic.Int64 {
+	m := make(map[string]*atomic.Int64, len(Categories))
+	for _, c := range Categories {
+		m[c] = new(atomic.Int64)
+	}
+	return m
+}()
+
 // RecordActivity records what already happened (a sign-in, a credential use, a refusal) outside any change: a
 // failed write is logged and counted, never returned, so it doesn't fail the request. It reports whether the entry
 // was written.

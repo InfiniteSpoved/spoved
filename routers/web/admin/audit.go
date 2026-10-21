@@ -350,6 +350,8 @@ func Audit(ctx *context.Context) {
 	ctx.Data["StreamingCount"] = logshipping_service.StreamingCount() // a count only: auditors see no destination
 	ctx.Data["RetentionLine"] = auditRetentionLine(ctx)
 	ctx.Data["CanEditRetention"] = ctx.Doer.IsAdmin
+	ctx.Data["LogReads"] = setting.Audit.LogReads
+	ctx.Data["WriteErrors"] = audit_model.WriteErrors.Load()
 	if err := setSealStatus(ctx); err != nil {
 		ctx.ServerError("setSealStatus", err)
 		return

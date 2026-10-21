@@ -174,6 +174,11 @@ func OldestEntryTime(ctx context.Context) (timeutil.TimeStamp, error) {
 	return e.CreatedUnix, nil
 }
 
+// CountSince returns how many entries were written at or after since. It reads the created_unix index.
+func CountSince(ctx context.Context, since timeutil.TimeStamp) (int64, error) {
+	return db.GetEngine(ctx).Where("created_unix >= ?", since).Count(new(Entry))
+}
+
 // HasEntry reports whether an entry of the action exists for the target.
 func HasEntry(ctx context.Context, action, targetType string, targetID int64) (bool, error) {
 	return db.GetEngine(ctx).Where("action = ? AND target_type = ? AND target_id = ?", action, targetType, targetID).Exist(new(Entry))

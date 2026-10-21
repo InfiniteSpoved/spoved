@@ -4,6 +4,8 @@
 package audit_test
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -209,4 +211,32 @@ func TestWithLoginSource(t *testing.T) {
 	assert.Equal(t, ctx, audit_model.WithLoginSource(ctx, 7, "ldap"), "already that source")
 	assert.NotEqual(t, ctx, audit_model.WithLoginSource(ctx, 8, "other"))
 	assert.Equal(t, audit_model.ActorLoginSource, audit_model.ActorFromContext(audit_model.WithLoginSource(t.Context(), 7, "ldap")).Type)
+}
+
+// Written counts committed entries per category; a rolled-back one isn't counted.
+func TestRecordCountsWritten(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := audit_model.WithActor(t.Context(), &audit_model.Actor{Type: audit_model.ActorUser, ID: 2, Name: "user2"})
+	ev := audit_model.Event{Action: "audit.exported", Result: audit_model.ResultSuccess}
+	n := audit_model.Written["audit"].Load()
+
+	require.NoError(t, audit_model.Record(ctx, ev))
+	assert.Equal(t, n+1, audit_model.Written["audit"].Load(), "outside a transaction")
+
+	require.NoError(t, db.WithTx(ctx, func(ctx context.Context) error {
+		require.NoError(t, audit_model.Record(ctx, ev))
+		assert.Equal(t, n+1, audit_model.Written["audit"].Load(), "not before the commit")
+		return nil
+	}))
+	assert.Equal(t, n+2, audit_model.Written["audit"].Load(), "after the commit")
+
+	require.Error(t, db.WithTx(ctx, func(ctx context.Context) error {
+		require.NoError(t, audit_model.Record(ctx, ev))
+		return errors.New("roll back")
+	}))
+	assert.Equal(t, n+2, audit_model.Written["audit"].Load(), "rolled back")
+
+	for _, c := range audit_model.Categories {
+		assert.NotNil(t, audit_model.Written[c], c)
+	}
 }

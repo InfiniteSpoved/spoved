@@ -120,7 +120,9 @@
 				· {{ctx.Locale.Tr "admin.audit.export_cap" .ExportCap}}
 				· {{if .StreamingCount}}{{ctx.Locale.TrPluralString .StreamingCount "admin.audit.streaming" (printf "%d" .StreamingCount)}}{{else}}{{ctx.Locale.Tr "admin.audit.streaming_off"}}{{end}}
 				· {{.RetentionLine}}{{if .CanEditRetention}} (<a href="{{AppSubUrl}}/admin/audit/retention">{{ctx.Locale.Tr "admin.audit_retention.change"}}</a>){{end}}
+				· {{if .LogReads}}{{ctx.Locale.Tr "admin.audit.log_reads_on"}}{{else}}{{ctx.Locale.Tr "admin.audit.log_reads_off"}}{{end}}
 			</p>
+			{{if .WriteErrors}}<div class="ui warning message audit-write-errors">{{ctx.Locale.TrPluralString .WriteErrors "admin.audit.write_errors" (printf "%d" .WriteErrors)}}</div>{{end}}
 			{{if .SealLine}}<p class="text grey audit-seal">{{.SealLine}}{{if .Anchor}}<br>{{.Anchor}}{{end}}</p>{{end}}
 			{{if .Rows}}
 				<table class="ui very basic unstackable table audit-entries">
