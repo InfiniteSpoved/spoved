@@ -1,4 +1,5 @@
 // The web routes the Web IDE talks to; they run with the signed-in session, no token is involved.
+import {request as fetchRequest} from '../js/modules/fetch.js';
 import type {FileOperation, TreeEntry} from './workspace.ts';
 
 export type IDEConfig = {
@@ -14,6 +15,8 @@ export type IDEConfig = {
   canCreatePull: boolean;
   maxFileSize: number;
   theme: 'light' | 'dark' | 'auto' | 'high-contrast';
+  themeName: string;
+  assetUrlPrefix: string;
   strings: Record<string, string>;
 };
 
@@ -31,8 +34,8 @@ export class RequestError extends Error {
 
 export const escapePath = (path: string) => path.split('/').map(encodeURIComponent).join('/');
 
-async function request(url: string, init?: RequestInit): Promise<Response> {
-  const resp = await fetch(url, {...init, headers: {Accept: 'application/json', ...init?.headers}});
+async function request(url: string, opts: {method?: string; data?: unknown} = {}): Promise<Response> {
+  const resp = await fetchRequest(url, {...opts, headers: {Accept: 'application/json'}});
   if (resp.ok) return resp;
   let body: {error?: string; errorMessage?: string} = {};
   try {
@@ -72,11 +75,7 @@ export type CommitRequest = {
 };
 
 export async function commit(repoLink: string, branch: string, req: CommitRequest): Promise<{branch: string; commit: string}> {
-  return (await request(`${repoLink}/ide/branch/${escapePath(branch)}`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(req),
-  })).json();
+  return (await request(`${repoLink}/ide/branch/${escapePath(branch)}`, {method: 'POST', data: req})).json();
 }
 
 // opens a pull request through the compare page's form, so every check of that page applies; returns its link
@@ -84,6 +83,6 @@ export async function createPull(repoLink: string, base: string, head: string, t
   const form = new FormData();
   form.set('title', title);
   form.set('content', content);
-  const resp = await request(`${repoLink}/compare/${escapePath(base)}...${escapePath(head)}`, {method: 'POST', body: form});
+  const resp = await request(`${repoLink}/compare/${escapePath(base)}...${escapePath(head)}`, {method: 'POST', data: form});
   return (await resp.json()).redirect;
 }

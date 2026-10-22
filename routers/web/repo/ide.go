@@ -21,8 +21,8 @@ import (
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
-	"forgejo.org/modules/util"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/util"
 	"forgejo.org/services/context"
 	files_service "forgejo.org/services/repository/files"
 )
@@ -41,17 +41,17 @@ var ideCommitID = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 
 // ideConfig is what the Web IDE needs to start; the IDE reads and writes the repository only through the web routes.
 type ideConfig struct {
-	RepoLink        string `json:"repoLink"`
-	RepoName        string `json:"repoName"`
-	RefType         string `json:"refType"`
-	RefName         string `json:"refName"`
-	CommitID        string `json:"commitID"`
-	TreePath        string `json:"treePath"`
-	DefaultBranch   string `json:"defaultBranch"`
-	CanCommit       bool   `json:"canCommit"`
-	CanCreateBranch bool   `json:"canCreateBranch"`
-	CanCreatePull   bool   `json:"canCreatePull"`
-	MaxFileSize     int64  `json:"maxFileSize"`
+	RepoLink        string            `json:"repoLink"`
+	RepoName        string            `json:"repoName"`
+	RefType         string            `json:"refType"`
+	RefName         string            `json:"refName"`
+	CommitID        string            `json:"commitID"`
+	TreePath        string            `json:"treePath"`
+	DefaultBranch   string            `json:"defaultBranch"`
+	CanCommit       bool              `json:"canCommit"`
+	CanCreateBranch bool              `json:"canCreateBranch"`
+	CanCreatePull   bool              `json:"canCreatePull"`
+	MaxFileSize     int64             `json:"maxFileSize"`
 	Theme           string            `json:"theme"`
 	ThemeName       string            `json:"themeName"`
 	AssetURLPrefix  string            `json:"assetUrlPrefix"`
@@ -104,36 +104,36 @@ func WebIDE(ctx *context.Context) {
 		ThemeName:       theme,
 		AssetURLPrefix:  setting.StaticURLPrefix + "/assets",
 		Strings: map[string]string{
-			"commit": ctx.Locale.TrString("repo.ide.commit"),
-			"commitMessage": ctx.Locale.TrString("repo.ide.commit_message"),
+			"commit":                   ctx.Locale.TrString("repo.ide.commit"),
+			"commitMessage":            ctx.Locale.TrString("repo.ide.commit_message"),
 			"commitMessagePlaceholder": ctx.Locale.TrString("repo.ide.commit_message_placeholder"),
-			"commitToBranch": ctx.Locale.TrString("repo.ide.commit_to_branch"),
-			"commitToNewBranch": ctx.Locale.TrString("repo.ide.commit_to_new_branch"),
+			"commitToBranch":           ctx.Locale.TrString("repo.ide.commit_to_branch"),
+			"commitToNewBranch":        ctx.Locale.TrString("repo.ide.commit_to_new_branch"),
 			"commitToNewBranchAndPull": ctx.Locale.TrString("repo.ide.commit_to_new_branch_and_pull"),
-			"newBranchName": ctx.Locale.TrString("repo.ide.new_branch_name"),
-			"committed": ctx.Locale.TrString("repo.ide.committed"),
-			"pullCreated": ctx.Locale.TrString("repo.ide.pull_created"),
-			"openPull": ctx.Locale.TrString("repo.ide.open_pull"),
-			"nothingToCommit": ctx.Locale.TrString("repo.ide.nothing_to_commit"),
-			"changes": ctx.Locale.TrString("repo.ide.changes"),
-			"viewChanges": ctx.Locale.TrString("repo.ide.view_changes"),
-			"discard": ctx.Locale.TrString("repo.ide.discard"),
-			"discardAll": ctx.Locale.TrString("repo.ide.discard_all"),
-			"discardAllConfirm": ctx.Locale.TrString("repo.ide.discard_all_confirm"),
-			"preview": ctx.Locale.TrString("repo.ide.preview"),
-			"openInRepository": ctx.Locale.TrString("repo.ide.open_in_repository"),
-			"open": ctx.Locale.TrString("repo.ide.open"),
-			"added": ctx.Locale.TrString("repo.ide.added"),
-			"modified": ctx.Locale.TrString("repo.ide.modified"),
-			"deleted": ctx.Locale.TrString("repo.ide.deleted"),
-			"renamed": ctx.Locale.TrString("repo.ide.renamed"),
-			"signoff": ctx.Locale.TrString("repo.ide.signoff"),
-			"readOnly": ctx.Locale.TrString("repo.ide.read_only"),
-			"readOnlyShort": ctx.Locale.TrString("repo.ide.read_only_short"),
-			"submodule": ctx.Locale.TrString("repo.ide.submodule"),
-			"tooLarge": ctx.Locale.TrString("repo.ide.too_large"),
-			"lfs": ctx.Locale.TrString("repo.ide.lfs"),
-			"restoredOnOlderCommit": ctx.Locale.TrString("repo.ide.restored_on_older_commit"),
+			"newBranchName":            ctx.Locale.TrString("repo.ide.new_branch_name"),
+			"committed":                ctx.Locale.TrString("repo.ide.committed"),
+			"pullCreated":              ctx.Locale.TrString("repo.ide.pull_created"),
+			"openPull":                 ctx.Locale.TrString("repo.ide.open_pull"),
+			"nothingToCommit":          ctx.Locale.TrString("repo.ide.nothing_to_commit"),
+			"changes":                  ctx.Locale.TrString("repo.ide.changes"),
+			"viewChanges":              ctx.Locale.TrString("repo.ide.view_changes"),
+			"discard":                  ctx.Locale.TrString("repo.ide.discard"),
+			"discardAll":               ctx.Locale.TrString("repo.ide.discard_all"),
+			"discardAllConfirm":        ctx.Locale.TrString("repo.ide.discard_all_confirm"),
+			"preview":                  ctx.Locale.TrString("repo.ide.preview"),
+			"openInRepository":         ctx.Locale.TrString("repo.ide.open_in_repository"),
+			"open":                     ctx.Locale.TrString("repo.ide.open"),
+			"added":                    ctx.Locale.TrString("repo.ide.added"),
+			"modified":                 ctx.Locale.TrString("repo.ide.modified"),
+			"deleted":                  ctx.Locale.TrString("repo.ide.deleted"),
+			"renamed":                  ctx.Locale.TrString("repo.ide.renamed"),
+			"signoff":                  ctx.Locale.TrString("repo.ide.signoff"),
+			"readOnly":                 ctx.Locale.TrString("repo.ide.read_only"),
+			"readOnlyShort":            ctx.Locale.TrString("repo.ide.read_only_short"),
+			"submodule":                ctx.Locale.TrString("repo.ide.submodule"),
+			"tooLarge":                 ctx.Locale.TrString("repo.ide.too_large"),
+			"lfs":                      ctx.Locale.TrString("repo.ide.lfs"),
+			"restoredOnOlderCommit":    ctx.Locale.TrString("repo.ide.restored_on_older_commit"),
 		},
 	}
 	// the workbench needs inline styles and runs WebAssembly (syntax highlighting); the Markdown preview loads
@@ -263,6 +263,10 @@ func WebIDECommit(ctx *context.Context) {
 		}
 		branch = form.NewBranch
 	} else {
+		if !canCommit && !canCreateBranch {
+			ideCommitError(ctx, http.StatusForbidden, "forbidden", ctx.Locale.TrString("repo.editor.fork_before_edit"))
+			return
+		}
 		if !canCommit {
 			ideCommitError(ctx, http.StatusForbidden, "protected", ctx.Locale.TrString("repo.editor.cannot_commit_to_protected_branch", branch))
 			return

@@ -1,6 +1,6 @@
 // Markdown and image preview without VS Code webviews: images are shown from the file's bytes, Markdown is rendered
 // by spoved's own markup renderer (sanitized on the server) inside a sandboxed iframe that can't run scripts.
-import {getService, IFileService} from '@codingame/monaco-vscode-api';
+import {getService, IFileService, type IEditorGroup} from '@codingame/monaco-vscode-api';
 import type {URI} from '@codingame/monaco-vscode-api/vscode/vs/base/common/uri';
 import {
   registerEditor,
@@ -9,7 +9,7 @@ import {
   SimpleEditorInput,
   SimpleEditorPane,
 } from '@codingame/monaco-vscode-workbench-service-override';
-import type {IEditorGroup} from '@codingame/monaco-vscode-api';
+import {POST} from '../js/modules/fetch.js';
 import {escapePath, type IDEConfig} from './api.ts';
 import {repoPathOf} from './paths.ts';
 
@@ -29,7 +29,7 @@ export function registerPreview(config: IDEConfig) {
     form.set('branch_path', `${config.refType}/${escapePath(config.refName)}`);
     form.set('file_path', path);
     form.set('text', text);
-    const resp = await fetch(`${config.repoLink}/markup`, {method: 'POST', body: form});
+    const resp = await POST(`${config.repoLink}/markup`, {data: form});
     return resp.ok ? resp.text() : '';
   };
 
@@ -55,7 +55,7 @@ export function registerPreview(config: IDEConfig) {
         const extension = extensionOf(path);
         if (imageExtensions.includes(extension)) {
           URL.revokeObjectURL(url);
-          url = URL.createObjectURL(new Blob([content], {type: imageTypes[extension] ?? `image/${extension}`}));
+          url = URL.createObjectURL(new Blob([content as Uint8Array<ArrayBuffer>], {type: imageTypes[extension] ?? `image/${extension}`}));
           const img = document.createElement('img');
           img.src = url;
           img.alt = path;

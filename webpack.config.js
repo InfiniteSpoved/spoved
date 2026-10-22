@@ -37,7 +37,8 @@ if (isProduction) {
     onlyAllow: 'Apache-2.0; 0BSD; BSD-2-Clause; BSD-3-Clause; BlueOak-1.0.0; MIT; ISC; Unlicense; CC-BY-4.0',
     // argparse@2.0.1 - Python-2.0. It's used in the CLI file of markdown-it and js-yaml and not in the library code.
     // idiomorph@0.3.0. See https://github.com/bigskysoftware/idiomorph/pull/37
-    excludePackages: 'argparse@2.0.1;idiomorph@0.3.0',
+    // jschardet@3.1.4 - LGPL-2.1+. The Web IDE replaces it with a stub (web_src/ide/jschardet.ts), so it is not shipped.
+    excludePackages: 'argparse@2.0.1;idiomorph@0.3.0;jschardet@3.1.4',
   }, (err, dependencies) => {
     if (err) {
       throw err;
@@ -54,7 +55,11 @@ if (isProduction) {
       return {name: packageName, licenseName: licenses, body: formatLicenseText(licenseText)};
     });
     // The vendored draw.io viewer is not an npm package, so add its licence by hand.
-    const vendorModules = [{name: 'draw.io viewer (public/assets/vendor/drawio)', licenseName: 'Apache-2.0', body: formatLicenseText(readFileSync('public/assets/vendor/drawio/LICENSE', 'utf8'))}];
+    // The Web IDE's @codingame packages are built from microsoft/vscode and carry no licence file of their own.
+    const vendorModules = [
+      {name: 'draw.io viewer (public/assets/vendor/drawio)', licenseName: 'Apache-2.0', body: formatLicenseText(readFileSync('public/assets/vendor/drawio/LICENSE', 'utf8'))},
+      {name: 'Visual Studio Code (Web IDE, public/assets/ide)', licenseName: 'MIT', body: formatLicenseText(readFileSync('web_src/ide/LICENSE-vscode.txt', 'utf8'))},
+    ];
     const modules = [...goModules, ...jsModules, ...vendorModules];
     const licenseTxt = modules.map(({name, licenseName, body}) => {
       const title = licenseName ? `${name} - ${licenseName}` : name;

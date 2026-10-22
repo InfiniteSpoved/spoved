@@ -137,6 +137,11 @@ WEBPACK_CONFIGS := webpack.config.js tailwind.config.js
 WEBPACK_DEST := public/assets/js/index.js public/assets/css/index.css
 WEBPACK_DEST_ENTRIES := public/assets/js public/assets/css public/assets/fonts
 
+# the Web IDE is served from disk, never embedded; SKIP_IDE=1 builds without it (the IDE is then off)
+IDE_SOURCES := $(shell find web_src/ide -type f)
+IDE_DEST := public/assets/ide/ide.js
+IDE_DEST_DIR := public/assets/ide
+
 BINDATA_DEST := modules/migration/bindata.go modules/public/bindata.go modules/options/bindata.go modules/templates/bindata.go
 BINDATA_HASH := $(addsuffix .hash,$(BINDATA_DEST))
 
@@ -249,6 +254,7 @@ help:
 	@echo " - coverage-show-percent            display coverage-run per package coverage percentage"
 	@echo " - test-e2e-sqlite[\#name.test.e2e] test end to end using playwright and sqlite"
 	@echo " - webpack                          build webpack files"
+	@echo " - ide                              build the Web IDE (frontend builds it unless SKIP_IDE=1)"
 	@echo " - svg                              build svg files"
 	@echo " - fomantic                         build fomantic files"
 	@echo " - generate                         run \"go generate\""
@@ -347,7 +353,7 @@ node-check:
 
 .PHONY: clean-all
 clean-all: clean
-	rm -rf $(WEBPACK_DEST_ENTRIES) node_modules
+	rm -rf $(WEBPACK_DEST_ENTRIES) $(IDE_DEST_DIR) node_modules
 
 .PHONY: clean
 clean: clean-no-bindata
@@ -874,7 +880,7 @@ install: $(wildcard *.go) | verify-version
 build: frontend backend
 
 .PHONY: frontend
-frontend: $(WEBPACK_DEST)
+frontend: $(WEBPACK_DEST) $(if $(SKIP_IDE),,$(IDE_DEST))
 
 .PHONY: backend
 backend: go-check generate-backend $(EXECUTABLE)
@@ -1029,6 +1035,15 @@ $(WEBPACK_DEST): $(WEBPACK_SOURCES) $(WEBPACK_CONFIGS) package-lock.json
 	@echo "Running webpack..."
 	@BROWSERSLIST_IGNORE_OLD_DATA=true npx webpack
 	@touch $(WEBPACK_DEST)
+
+.PHONY: ide
+ide: $(IDE_DEST)
+
+$(IDE_DEST): $(IDE_SOURCES) package-lock.json
+	@$(MAKE) -s node-check node_modules
+	@echo "Building the Web IDE..."
+	@npx vite build --config web_src/ide/vite.config.js
+	@touch $(IDE_DEST)
 
 .PHONY: svg
 svg: node-check | node_modules

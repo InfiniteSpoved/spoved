@@ -219,6 +219,10 @@ export async function activate(vscode: VSCode, config: api.IDEConfig) {
     },
   }, {isCaseSensitive: true, isReadonly: true});
 
+  const included = (path: string, options: vscode.SearchOptions) =>
+    (!options.includes.length || options.includes.some((g) => minimatch(path, g, {dot: true, matchBase: true}))) &&
+    !options.excludes.some((g) => minimatch(path, g, {dot: true, matchBase: true}));
+
   // quick open (Ctrl+P) and search across the repository
   vscode.workspace.registerFileSearchProvider(SCHEME, {
     provideFileSearchResults(query, options) {
@@ -246,7 +250,7 @@ export async function activate(vscode: VSCode, config: api.IDEConfig) {
       }
       let count = 0;
       const report = (path: string, line: number, text: string) => {
-        const ranges = [...text.matchAll(re)].filter((m) => m[0].length).map((m) => new vscode.Range(line, m.index, line, m.index + m[0].length));
+        const ranges = Array.from(text.matchAll(re)).filter((m) => m[0].length).map((m) => new vscode.Range(line, m.index, line, m.index + m[0].length));
         if (!ranges.length || count >= options.maxResults) return;
         count++;
         progress.report({uri: uriOf(path), ranges, preview: {text, matches: ranges.map((r) => new vscode.Range(0, r.start.character, 0, r.end.character))}});
@@ -255,7 +259,7 @@ export async function activate(vscode: VSCode, config: api.IDEConfig) {
       const local = new Set([...ws.modified.keys(), ...ws.deleted]);
       for (const [path, content] of ws.modified) {
         if (!included(path, options) || content.includes(0)) continue;
-        new TextDecoder().decode(content).split('\n').forEach((text, i) => report(path, i, text));
+        for (const [i, text] of new TextDecoder().decode(content).split('\n').entries()) report(path, i, text);
       }
       let matches: api.SearchMatch[] = [];
       try {
@@ -266,15 +270,11 @@ export async function activate(vscode: VSCode, config: api.IDEConfig) {
       for (const match of matches) {
         if (token.isCancellationRequested) break;
         if (local.has(match.path) || !included(match.path, options)) continue;
-        match.lines.forEach((line, i) => report(match.path, line - 1, match.codes[i]));
+        for (const [i, line] of match.lines.entries()) report(match.path, line - 1, match.codes[i]);
       }
       return {limitHit: count >= options.maxResults};
     },
   });
-  const included = (path: string, options: vscode.SearchOptions) =>
-    (!options.includes.length || options.includes.some((g) => minimatch(path, g, {dot: true, matchBase: true}))) &&
-    !options.excludes.some((g) => minimatch(path, g, {dot: true, matchBase: true}));
-
   // source control: the changes, their diffs and the commit
   const scm = vscode.scm.createSourceControl(SCHEME, config.repoName, uriOf(''));
   scm.quickDiffProvider = {
@@ -299,6 +299,7 @@ export async function activate(vscode: VSCode, config: api.IDEConfig) {
         return {command: 'vscode.diff', title: s.open, arguments: [uriOf(change.from ?? change.path, BASE_SCHEME), uriOf(change.path), `${name} (${label[change.kind]})`]};
     }
   };
+  const decorationsChanged = new vscode.EventEmitter<undefined>();
   function refreshSCM() {
     const changes = ws.changes();
     group.resourceStates = changes.map((change) => ({
@@ -315,7 +316,6 @@ export async function activate(vscode: VSCode, config: api.IDEConfig) {
   }
 
   // the explorer shows the changes too
-  const decorationsChanged = new vscode.EventEmitter<undefined>();
   const badges = {added: 'A', modified: 'M', deleted: 'D', renamed: 'R'};
   const colors = {added: 'charts.green', modified: 'charts.yellow', deleted: 'charts.red', renamed: 'charts.blue'};
   vscode.window.registerFileDecorationProvider({
@@ -351,6 +351,12 @@ export async function activate(vscode: VSCode, config: api.IDEConfig) {
     const target = uri ?? vscode.window.activeTextEditor?.document.uri;
     if (target) vscode.commands.executeCommand('vscode.openWith', target, PREVIEW_EDITOR, vscode.ViewColumn.Beside);
   });
+
+  const branchItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  branchItem.text = `$(${config.refType === 'branch' ? 'git-branch' : config.refType === 'tag' ? 'tag' : 'git-commit'}) ${config.refName}`;
+  branchItem.tooltip = s.openInRepository;
+  branchItem.command = 'spoved.openInRepository';
+  branchItem.show();
 
   // after a commit, the IDE continues on the commit's branch with no changes left
   async function moveTo(branch: string, commit: string) {
@@ -445,11 +451,6 @@ export async function activate(vscode: VSCode, config: api.IDEConfig) {
     window.open(`${config.repoLink}/src/${config.refType}/${api.escapePath(config.refName)}${path ? `/${api.escapePath(path)}` : ''}`, '_blank', 'noopener');
   });
 
-  const branchItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  branchItem.text = `$(${config.refType === 'branch' ? 'git-branch' : config.refType === 'tag' ? 'tag' : 'git-commit'}) ${config.refName}`;
-  branchItem.tooltip = s.openInRepository;
-  branchItem.command = 'spoved.openInRepository';
-  branchItem.show();
   if (!canEdit) {
     const readonlyItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
     readonlyItem.text = `$(lock) ${s.readOnlyShort}`;

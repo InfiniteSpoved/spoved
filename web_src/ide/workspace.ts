@@ -83,15 +83,13 @@ export class Workspace {
 
   isDirectory(path: string): boolean {
     if (path === '' || this.dirs.has(path)) return true;
-    if (this.base.get(path)?.type === 'tree') {
-      if (![...this.deleted].some((p) => isUnder(p, path)) || this.files().some((p) => isUnder(p, path))) return true;
-    }
-    return [...this.modified.keys()].some((p) => p.startsWith(`${path}/`));
+    if (this.base.get(path)?.type === 'tree' && (!Array.from(this.deleted).some((p) => isUnder(p, path)) || this.files().some((p) => isUnder(p, path)))) return true;
+    return Array.from(this.modified.keys()).some((p) => p.startsWith(`${path}/`));
   }
 
   // every file of the working tree
   files(): string[] {
-    const files = [...this.modified.keys()];
+    const files = Array.from(this.modified.keys());
     for (const [path, entry] of this.base) {
       if (entry.type !== 'tree' && !this.deleted.has(path) && !this.modified.has(path)) files.push(path);
     }
@@ -122,7 +120,7 @@ export class Workspace {
     };
     for (const path of this.files()) add(path, true);
     for (const path of this.dirs) add(path, false);
-    return [...children];
+    return Array.from(children);
   }
 
   async readBase(entry: TreeEntry): Promise<Uint8Array> {
@@ -171,7 +169,7 @@ export class Workspace {
       this.renamedFrom.delete(file);
       if (this.base.get(file)?.type !== 'tree' && this.base.has(file)) this.deleted.add(file);
     }
-    for (const dir of [...this.dirs]) {
+    for (const dir of this.dirs) {
       if (isUnder(dir, path)) this.dirs.delete(dir);
     }
   }
@@ -183,14 +181,14 @@ export class Workspace {
     const moves = this.files().filter((file) => isUnder(file, from)).map((file) => [file, to + file.slice(from.length)]);
     const contents = await Promise.all(moves.map(([file]) => this.readFile(file)));
     const origins = moves.map(([file]) => this.renamedFrom.get(file) ?? (this.baseFile(file) ? file : undefined));
-    const dirs = [...this.dirs].filter((dir) => isUnder(dir, from));
+    const dirs = Array.from(this.dirs).filter((dir) => isUnder(dir, from));
     if (overwrite) this.deleteIfExists(to);
     this.delete(from);
-    moves.forEach(([, target], i) => {
+    for (const [i, [, target]] of moves.entries()) {
       this.modified.set(target, contents[i]);
       this.deleted.delete(target);
       if (origins[i] && origins[i] !== target && !this.baseFile(target)) this.renamedFrom.set(target, origins[i]);
-    });
+    }
     for (const dir of dirs) this.dirs.add(to + dir.slice(from.length));
     if (moves.length === 0 && dirs.length === 0) this.dirs.add(to);
   }
@@ -242,7 +240,7 @@ export class Workspace {
   }
 
   save(): SavedChanges {
-    return {commitID: this.commitID, modified: [...this.modified], deleted: [...this.deleted], renamedFrom: [...this.renamedFrom]};
+    return {commitID: this.commitID, modified: Array.from(this.modified), deleted: Array.from(this.deleted), renamedFrom: Array.from(this.renamedFrom)};
   }
 
   restore(saved: SavedChanges) {

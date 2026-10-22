@@ -83,6 +83,11 @@
 						</span>
 					{{end}}
 				{{end}}
+				{{if .IDELink}}
+					<a class="btn-octicon" href="{{.IDELink}}" data-ide-link data-tooltip-content="{{ctx.Locale.Tr "repo.ide.open_in_ide"}}">
+						{{svg "octicon-code-square"}}
+					</a>
+				{{end}}
 				{{if .Repository.CanEnableEditor}}
 					{{if and .CanEditFile (not .PersonalRepoLocked)}}
 						<a class="btn-octicon" href="{{.RepoLink}}/_edit/{{PathEscapeSegments .BranchName}}/{{PathEscapeSegments .TreePath}}" data-tooltip-content="{{.EditFileTooltip}}">

@@ -182,6 +182,7 @@ Projects group repositories under an organization (`org/project/repo`).
 |---|---|
 | **Company design tokens and themes** ([#104](https://github.com/InfiniteSpoved/spoved/pull/104)) | Light, dark, auto and high-contrast themes built on design tokens, with WCAG contrast checked in tests. Enable them with `[ui] THEMES` and `DEFAULT_THEME`. |
 | **draw.io diagrams** ([#103](https://github.com/InfiniteSpoved/spoved/pull/103)) | `.drawio` files render in the file view, sandboxed, with no requests outside the instance. `[markup] DRAWIO_ENABLED` turns it off. |
+| **Web IDE** ([#24](https://github.com/InfiniteSpoved/spoved/issues/24)) | VS Code in the browser: press `.` on a file, folder or pull request, edit, rename and delete files, and commit them in one commit to the branch or to a new branch with a pull request. Protected branches, push rules and quota apply as for any push. Its files are served from disk, not from the binary; `[ide] ENABLED` turns it off. See [`docs/web-ide.md`](docs/web-ide.md). |
 
 ### Development and quality
 

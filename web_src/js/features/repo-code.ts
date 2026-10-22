@@ -126,6 +126,16 @@ function showLineButton() {
 }
 
 export function initRepoCodeView() {
+  // "." opens the Web IDE, as on GitHub
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '.' || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('input, textarea, select, [contenteditable]')) return;
+    const link = document.querySelector<HTMLAnchorElement>('a[data-ide-link]');
+    if (!link) return;
+    e.preventDefault();
+    window.location.href = link.href;
+  });
   if (document.querySelector('.code-view .lines-num')) {
     document.addEventListener('click', (e) => {
       const target = e.target as Element;

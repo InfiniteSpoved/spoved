@@ -110,6 +110,8 @@ CMD ["/usr/bin/s6-svscan", "/etc/s6"]
 COPY --from=build-env /tmp/local /
 RUN cd /usr/local/bin ; ln -s gitea forgejo
 COPY --from=build-env /go/src/forgejo.org/gitea /app/gitea/gitea
+# the Web IDE is served from disk next to the binary, it is not embedded
+COPY --from=build-env /go/src/forgejo.org/public/assets/ide /app/gitea/public/assets/ide
 RUN ln -s /app/gitea/gitea /app/gitea/forgejo-cli
 COPY --from=build-env /go/src/forgejo.org/environment-to-ini /usr/local/bin/environment-to-ini
 COPY --from=build-env /go/src/forgejo.org/contrib/autocompletion/bash_autocomplete /etc/profile.d/gitea_bash_autocomplete.sh
