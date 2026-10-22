@@ -199,7 +199,7 @@ func TestMigrateWithWiki(t *testing.T) {
 		defer test.MockVariableValue(&setting.AppVer, "1.16.0")()
 		require.NoError(t, migrations_allowlist.Init())
 
-		repo := forgery.CreateRepository(t, nil, nil)
+		repo := forgery.CreateRepository(t, nil, &forgery.CreateRepositoryOptions{Files: forgery.FilesInit{}})
 		forgery.InitWiki(t, repo, "obscure-name")
 		user := repo.Owner
 
@@ -244,6 +244,12 @@ func TestMigrateWithWiki(t *testing.T) {
 				migratedRepo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{Name: migratedRepoName, WikiBranch: "obscure-name"})
 				// Step 7: check if the wiki is enabled
 				assert.True(t, migratedRepo.UnitEnabled(db.DefaultContext, unit.TypeWiki))
+				// Step 8: the repository and the wiki got a reachability bitmap
+				for _, path := range []string{migratedRepo.RepoPath(), migratedRepo.WikiPath()} {
+					bitmaps, err := filepath.Glob(filepath.Join(path, "objects", "pack", "multi-pack-index-*.bitmap"))
+					require.NoError(t, err)
+					assert.Len(t, bitmaps, 1, path)
+				}
 			})
 		}
 	})
