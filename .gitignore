@@ -89,6 +89,7 @@ cpu.out
 /public/assets/js
 /public/assets/css
 /public/assets/fonts
+/public/assets/ide
 /public/assets/licenses.txt
 /vendor
 /web_src/fomantic/node_modules

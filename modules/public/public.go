@@ -41,6 +41,17 @@ func FileHandlerFunc() http.HandlerFunc {
 	}
 }
 
+// IDEFileHandlerFunc serves the Web IDE's files, /assets/ide/*, from [ide] ASSETS_PATH: they are not in the binary.
+func IDEFileHandlerFunc() http.HandlerFunc {
+	return func(resp http.ResponseWriter, req *http.Request) {
+		if req.Method != "GET" && req.Method != "HEAD" {
+			resp.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleRequest(resp, req, os.DirFS(setting.IDE.AssetsPath), strings.TrimPrefix(req.URL.Path, "/assets/ide/"))
+	}
+}
+
 // parseAcceptEncoding parse Accept-Encoding: deflate, gzip;q=1.0, *;q=0.5 as compress methods
 func parseAcceptEncoding(val string) container.Set[string] {
 	parts := strings.Split(val, ";")

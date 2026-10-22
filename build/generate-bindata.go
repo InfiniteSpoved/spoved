@@ -118,6 +118,9 @@ type file struct {
 	UncompressedData []byte
 }
 
+// The Web IDE is served from disk ([ide] ASSETS_PATH), so it stays out of the binary.
+const ideAssets = "assets/ide"
+
 type direntry struct {
 	Name  string
 	IsDir bool
@@ -139,12 +142,18 @@ func generate(fsRoot fs.FS, packageName string, globalTime bool, output io.Write
 		}
 
 		if d.IsDir() {
+			if packageName == "public" && filePath == ideAssets {
+				return fs.SkipDir
+			}
 			entries, err := fs.ReadDir(fsRoot, filePath)
 			if err != nil {
 				return err
 			}
 			dirEntries := make([]direntry, 0, len(entries))
 			for _, entry := range entries {
+				if packageName == "public" && path.Join(filePath, entry.Name()) == ideAssets {
+					continue
+				}
 				dirEntries = append(dirEntries, direntry{Name: entry.Name(), IsDir: entry.IsDir()})
 			}
 			dirs[filePath] = dirEntries
