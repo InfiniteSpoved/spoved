@@ -58,6 +58,9 @@ var (
 
 	errConflict = errors.New("merge conflict")
 	errRefused  = errors.New("push refused")
+
+	// BeforeStepPush, set by tests, runs right before a step pushes its merge commit into target
+	BeforeStepPush func(ctx context.Context, target string)
 )
 
 // Init starts the queue and listens for merges.
@@ -372,6 +375,9 @@ func (c *cascade) step(ctx context.Context, source, target string) (sha, sourceS
 		sha, err = c.commit(ctx, tree, source, target, targetSHA, sourceSHA)
 		if err != nil {
 			return "", sourceSHA, err
+		}
+		if BeforeStepPush != nil {
+			BeforeStepPush(ctx, target)
 		}
 		err = git.Push(ctx, c.tmp, git.PushOptions{
 			Remote: c.repo.RepoPath(),
