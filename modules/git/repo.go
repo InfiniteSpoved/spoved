@@ -266,7 +266,8 @@ func Push(ctx context.Context, repoPath string, opts PushOptions) error {
 
 	stdout, stderr, err := cmd.RunStdString(&RunOpts{Env: opts.Env, Timeout: opts.Timeout, Dir: repoPath})
 	if err != nil {
-		if strings.Contains(stderr, "non-fast-forward") {
+		// "cannot lock ref ... is at X but expected Y": the branch moved after the push read it
+		if strings.Contains(stderr, "non-fast-forward") || (strings.Contains(stderr, "cannot lock ref") && strings.Contains(stderr, "but expected")) {
 			return &ErrPushOutOfDate{StdOut: stdout, StdErr: stderr, Err: err}
 		} else if strings.Contains(stderr, "! [remote rejected]") {
 			err := &ErrPushRejected{StdOut: stdout, StdErr: stderr, Err: err}

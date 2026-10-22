@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -168,4 +169,35 @@ func TestInitRepositoryWithNoTemplates(t *testing.T) {
 			require.ErrorIs(t, err, os.ErrNotExist, "info directory shouldn't exist")
 		})
 	}
+}
+
+func TestPushRefMovedDuringPush(t *testing.T) {
+	ctx := t.Context()
+	run := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=a", "GIT_AUTHOR_EMAIL=a@example.com", "GIT_COMMITTER_NAME=a", "GIT_COMMITTER_EMAIL=a@example.com")
+		out, err := cmd.Output()
+		require.NoError(t, err, args)
+		return strings.TrimSpace(string(out))
+	}
+	remote := t.TempDir()
+	local := t.TempDir()
+	run(remote, "init", "--bare", "-b", "main")
+	run(local, "init", "-b", "main")
+	run(local, "commit", "--allow-empty", "-m", "one")
+	run(local, "push", remote, "main")
+	moved := run(local, "commit-tree", "-m", "moved", "HEAD^{tree}", "-p", "HEAD")
+	run(local, "push", remote, moved+":refs/heads/moved")
+	run(local, "commit", "--allow-empty", "-m", "two")
+
+	// the git home sets core.hooksPath to the shared hooks, so point it back at the repository's own
+	run(remote, "config", "core.hooksPath", filepath.Join(remote, "hooks"))
+	// another push moves main after this one read it, so receive-pack can't lock the ref at the value it expects
+	hook := filepath.Join(remote, "hooks", "pre-receive")
+	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\necho "+moved+" > refs/heads/main\n"), 0o755))
+	err := Push(ctx, local, PushOptions{Remote: remote, Branch: "main"})
+	require.Error(t, err)
+	assert.True(t, IsErrPushOutOfDate(err), "%v", err)
 }
