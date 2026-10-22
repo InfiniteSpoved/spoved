@@ -11,6 +11,8 @@ import (
 	"time"
 
 	auth_model "forgejo.org/models/auth"
+	"forgejo.org/models/db"
+	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/perm"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/services/forms"
@@ -388,8 +390,13 @@ func TestOrgBranchProtectionMerge(t *testing.T) {
 		// must-fix 3: a stale approval that isn't dismissed doesn't count when the rule dismisses stale approvals.
 		// It is left stale by pushing before the rule dismisses.
 		t.Run("StaleApproval", func(t *testing.T) {
-			review(user4, pr.Index, api.ReviewStateApproved)
+			id := review(user4, pr.Index, api.ReviewStateApproved)
 			changeFile("obp-head", "", "b.txt")
+			// the push marks the review stale in the background
+			assert.Eventually(t, func() bool {
+				r, err := issues_model.GetReviewByID(db.DefaultContext, id)
+				return err == nil && r.Stale
+			}, 10*time.Second, 50*time.Millisecond)
 			dismiss := true
 			e.rule(e.owner, "PATCH", "master", api.EditOrgBranchProtectionOption{EditBranchProtectionOption: api.EditBranchProtectionOption{DismissStaleApprovals: &dismiss}}, http.StatusOK)
 			assert.Contains(t, merge(pr.Index, http.StatusMethodNotAllowed), "Does not have enough approvals")
