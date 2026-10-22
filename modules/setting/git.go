@@ -5,6 +5,7 @@ package setting
 
 import (
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -26,6 +27,8 @@ var Git = struct {
 	GCArgs                   []string `ini:"GC_ARGS" delim:" "`
 	PullRequestPushMessage   bool
 	DisablePartialClone      bool
+	MaxConcurrentOperations  int           // clone, fetch and push requests served at once over HTTP and SSH, 0 = no limit
+	OperationQueueTimeout    time.Duration // how long a request over the limit waits for a free slot before it is refused
 	Timeout                  struct {
 		Default int
 		Migrate int
@@ -46,6 +49,8 @@ var Git = struct {
 	GCArgs:                   []string{},
 	PullRequestPushMessage:   true,
 	DisablePartialClone:      false,
+	MaxConcurrentOperations:  4 * runtime.NumCPU(),
+	OperationQueueTimeout:    time.Minute,
 	Timeout: struct {
 		Default int
 		Migrate int
