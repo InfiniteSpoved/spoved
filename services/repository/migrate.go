@@ -88,6 +88,9 @@ func MigrateRepositoryGitData(ctx context.Context, u *user_model.User,
 	if err := git.WriteCommitGraph(ctx, repoPath); err != nil {
 		return repo, err
 	}
+	if err := git.WriteMultiPackIndexBitmap(ctx, repoPath); err != nil {
+		log.Warn("Migrate: %v", err)
+	}
 
 	if opts.Wiki {
 		wikiPath := repo.WikiPath()
@@ -137,6 +140,9 @@ func MigrateRepositoryGitData(ctx context.Context, u *user_model.User,
 
 				if err := git.WriteCommitGraph(ctx, wikiPath); err != nil {
 					return repo, err
+				}
+				if err := git.WriteMultiPackIndexBitmap(ctx, wikiPath); err != nil {
+					log.Warn("Migrate wiki: %v", err)
 				}
 			}
 		}
