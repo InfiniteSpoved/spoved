@@ -52,6 +52,9 @@ spec:
             {{- end }}
             - {name: GITEA__SERVER__SSH_PORT, value: {{ .Values.sshPort | quote }}}
             - {name: GITEA__SERVER__SSH_LISTEN_PORT, value: "2222"}
+            # the server makes the socket's folder private (chmod 0700), which fails on the root-owned emptyDir
+            # mounted at /run/forgejo: let it create a folder of its own there
+            - {name: GITEA__SERVER__INTERNAL_LISTENER_PATH, value: "/run/forgejo/private/internal.sock"}
             - {name: GITEA__DATABASE__DB_TYPE, value: {{ .Values.database.type | quote }}}
             - {name: GITEA__DATABASE__HOST, value: {{ .Values.database.host | quote }}}
             - {name: GITEA__DATABASE__NAME, value: {{ .Values.database.name | quote }}}
