@@ -385,7 +385,7 @@ export async function activate(vscode: VSCode, config: api.IDEConfig) {
       return;
     }
     let message = scm.inputBox.value.trim();
-    if (!message) message = (await vscode.window.showInputBox({prompt: s.commitMessage, placeHolder: s.commitMessagePlaceholder}))?.trim();
+    if (!message) message = (await vscode.window.showInputBox({prompt: s.commitMessage, placeHolder: s.commitMessagePlaceholder, ignoreFocusOut: true}))?.trim();
     if (!message) return;
 
     const onBranch = config.refType === 'branch' && config.canCommit && ws.commitID === config.commitID && forceNewBranch !== true;
@@ -398,7 +398,7 @@ export async function activate(vscode: VSCode, config: api.IDEConfig) {
       vscode.window.showErrorMessage(s.readOnly);
       return;
     }
-    const choice = (await vscode.window.showQuickPick(choices, {title: s.commit}))?.id;
+    const choice = (await vscode.window.showQuickPick(choices, {title: s.commit, ignoreFocusOut: true}))?.id;
     if (!choice) return;
     let newBranch: string;
     if (choice !== 'branch') {
@@ -406,6 +406,7 @@ export async function activate(vscode: VSCode, config: api.IDEConfig) {
         prompt: s.newBranchName,
         value: `${config.refName}-ide-${new Date().toISOString().slice(0, 10)}`,
         validateInput: (v) => v.trim() ? undefined : s.newBranchName,
+        ignoreFocusOut: true,
       }))?.trim();
       if (!newBranch) return;
     }
