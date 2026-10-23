@@ -26,11 +26,13 @@ var presets = []string{
 
 // legacy copies the conditions the call sites had before ShouldEmail existed:
 // comment batch (mail_issue.go), mention batch, assigned/review request (notify.go) and Actions (mail_actions.go).
+// Credential expiry (mail_credential_expiry.go) is newer and goes, like the Actions mail, to everybody but disabled.
 func legacy(pref string, e user_model.NotifyEvent) bool {
 	switch e {
 	case user_model.NotifyEventMention:
 		return pref == "enabled" || pref == "andyourown" || pref == "onmention"
-	case user_model.NotifyEventIssueAssigned, user_model.NotifyEventReviewRequestedMe, user_model.NotifyEventActionsFailed:
+	case user_model.NotifyEventIssueAssigned, user_model.NotifyEventReviewRequestedMe, user_model.NotifyEventActionsFailed,
+		user_model.NotifyEventCredentialExpiry:
 		return pref != "disabled"
 	}
 	return pref == "enabled" || pref == "andyourown" // thread and release mails

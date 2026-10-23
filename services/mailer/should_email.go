@@ -48,7 +48,8 @@ func (f *emailFilter) ShouldEmail(user *user_model.User, event user_model.Notify
 		return s.Enabled(event)
 	}
 	switch event {
-	case user_model.NotifyEventMention, user_model.NotifyEventIssueAssigned, user_model.NotifyEventReviewRequestedMe, user_model.NotifyEventActionsFailed:
+	case user_model.NotifyEventMention, user_model.NotifyEventIssueAssigned, user_model.NotifyEventReviewRequestedMe, user_model.NotifyEventActionsFailed,
+		user_model.NotifyEventCredentialExpiry:
 		return true // these mails always went to everybody but disabled, onmention included
 	}
 	return pref == user_model.EmailNotificationsEnabled || pref == user_model.EmailNotificationsAndYourOwn
