@@ -23,7 +23,7 @@ The person gives an issue number. You lead: you split the work, delegate it, che
 ## 3. Open the pull request
 
 - Branch off `develop` (the session's assigned branch if it has one), target `develop`, and fill in `.github/pull_request_template.md` with `Fixes #N` or `Part of #N`, the tests added and run, and threat notes for anything security-relevant.
-- Start the body with the attribution block the session requires, then assign the person and request their review (`issue_write` with `assignees`, `update_pull_request` with `reviewers`).
+- Start the body with the attribution block the session requires, then assign the person and request their review (`issue_write` with `assignees`, `update_pull_request` with `reviewers`; GitHub refuses the review request when the person is the author, so skip it then).
 - Subscribe to the pull request's activity and tell the person it is up, with the link.
 
 ## 4. Review with fresh agents
