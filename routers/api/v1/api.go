@@ -1065,6 +1065,11 @@ func Routes() *web.Route {
 					m.Combo("/{id}").Get(repo.GetDeployKey).
 						Delete(repo.DeleteDeploykey)
 				}, reqToken(), reqAdmin())
+				m.Group("/tokens", func() {
+					m.Combo("").Get(repo.ListAccessTokens).
+						Post(bind(api.CreateOwnedAccessTokenOption{}), repo.CreateAccessToken)
+					m.Delete("/{id}", repo.DeleteAccessToken)
+				}, reqToken(), reqAdmin())
 				m.Group("/times", func() {
 					m.Combo("").Get(repo.ListTrackedTimesByRepository)
 					m.Combo("/{timetrackingusername}").Get(repo.ListTrackedTimesByUser)
@@ -1475,6 +1480,11 @@ func Routes() *web.Route {
 					m.Combo("/repos/{repo}").Put(org.AddDeployKeyRepo).Delete(org.RemoveDeployKeyRepo)
 				})
 			}, reqToken(), org.HideInvisibleOrg, reqOrgOwnership())
+			m.Group("/tokens", func() {
+				m.Combo("").Get(org.ListAccessTokens).
+					Post(bind(api.CreateOwnedAccessTokenOption{}), org.CreateAccessToken)
+				m.Delete("/{id}", org.DeleteAccessToken)
+			}, reqToken(), org.HideInvisibleOrg, reqOrgOwnership())
 			m.Group("/projects", func() {
 				m.Get("", org.ListProjects)
 				m.Get("/{id}", org.GetProject)
@@ -1487,6 +1497,9 @@ func Routes() *web.Route {
 						Post(bind(api.CreateKeyOption{}), org.CreateProjectDeployKey)
 					m.Combo("/{id}/keys/{key_id}").Get(org.GetProjectDeployKey).
 						Delete(org.DeleteProjectDeployKey)
+					m.Combo("/{id}/tokens").Get(org.ListProjectAccessTokens).
+						Post(bind(api.CreateOwnedAccessTokenOption{}), org.CreateProjectAccessToken)
+					m.Delete("/{id}/tokens/{token_id}", org.DeleteProjectAccessToken)
 					m.Group("/{id}/branch_protections", func() {
 						m.Combo("").Get(org.ListProjectBranchProtections).
 							Post(bind(api.CreateOrgBranchProtectionOption{}), org.CreateProjectBranchProtection)

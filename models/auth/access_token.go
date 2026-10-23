@@ -91,6 +91,7 @@ type AccessToken struct {
 	OwnerID        int64                `xorm:"NOT NULL DEFAULT 0 INDEX(owner)"`
 	GroupID        int64                `xorm:"NOT NULL DEFAULT 0 INDEX(owner)"`
 	Mode           perm.AccessMode      `xorm:"NOT NULL DEFAULT 0"`
+	CreatorID      int64                `xorm:"NOT NULL DEFAULT 0"` // who created a token that isn't a personal one
 	Name           string
 	Token          string `xorm:"-"`
 	TokenHash      string `xorm:"UNIQUE"` // sha256 of token

@@ -30,6 +30,13 @@ func (t *AccessToken) IsOwnedByUser() bool {
 	return t.OwnerType == AccessTokenOwnerUser
 }
 
+// ReachesAllRepos reports whether the token reaches every repository its owner can: a personal or organization token
+// not limited to selected repositories. A project or repository token is limited by its owner, which is what the
+// scope policy's ACCESS_TOKEN_SCOPES_REQUIRING_REPO_RESTRICTION asks for.
+func (t *AccessToken) ReachesAllRepos() bool {
+	return t.ResourceAllRepos && (t.OwnerType == AccessTokenOwnerUser || t.OwnerType == AccessTokenOwnerOrg)
+}
+
 // ErrOwnedTokenScope is the refusal of a scope that a token of an organization, a project or a repository can't have.
 var ErrOwnedTokenScope = errors.New("scope not allowed for an organization, project or repository token")
 
@@ -80,6 +87,56 @@ func (t *AccessToken) CoversRepo(ctx context.Context, repoID, ownerID, groupID i
 	default:
 		return false, nil
 	}
+}
+
+// FindOwnedAccessTokensOptions lists the tokens of one owner: an organization's own (GroupID 0), one project's or one
+// repository's. Without an owner it matches nothing.
+type FindOwnedAccessTokensOptions struct {
+	db.ListOptions
+	OwnerType AccessTokenOwnerType
+	OwnerID   int64
+	GroupID   int64
+	Name      string
+}
+
+func (opts FindOwnedAccessTokensOptions) ToConds() builder.Cond {
+	if opts.OwnerType == AccessTokenOwnerUser || opts.OwnerID == 0 {
+		return builder.Expr("1 = 0")
+	}
+	cond := builder.Eq{"owner_type": opts.OwnerType, "owner_id": opts.OwnerID, "group_id": opts.GroupID}
+	if opts.Name != "" {
+		cond["name"] = opts.Name
+	}
+	return cond
+}
+
+func (opts FindOwnedAccessTokensOptions) ToOrders() string {
+	return "created_unix DESC, id DESC"
+}
+
+// DeleteOwnedAccessToken deletes (revokes) the token with the ID of the owner opts names.
+func DeleteOwnedAccessToken(ctx context.Context, opts FindOwnedAccessTokensOptions, id int64) error {
+	return db.WithTx(ctx, func(ctx context.Context) error {
+		t := &AccessToken{}
+		if has, err := db.GetEngine(ctx).Where(opts.ToConds()).And("id = ?", id).Get(t); err != nil {
+			return err
+		} else if !has {
+			return ErrAccessTokenNotExist{}
+		}
+		var repoIDs []int64
+		if err := db.GetEngine(ctx).Table("access_token_resource_repo").Where("token_id = ?", id).Cols("repo_id").Find(&repoIDs); err != nil {
+			return err
+		}
+		if _, err := db.GetEngine(ctx).Where("token_id = ?", id).Delete(&AccessTokenResourceRepo{}); err != nil {
+			return err
+		}
+		if cnt, err := db.GetEngine(ctx).Where(opts.ToConds()).And("id = ?", id).Delete(&AccessToken{}); err != nil {
+			return err
+		} else if cnt != 1 {
+			return ErrAccessTokenNotExist{}
+		}
+		return recordAccessToken(ctx, "deleted", t, map[string]any{"before": accessTokenFields(t, repoIDs)})
+	})
 }
 
 // GetOwnedAccessTokenByID returns the token of an organization, a project or a repository with the ID.

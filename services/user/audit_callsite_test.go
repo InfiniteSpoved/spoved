@@ -53,6 +53,7 @@ var auditedWrites = map[string]string{
 	// SSH keys and access tokens
 	"services/user.deleteUser":                     "counted in account.user.deleted (bulk, with the account)",
 	"models/auth.DeleteAccessTokenByID":            "records credential.access_token.deleted",
+	"models/auth.DeleteOwnedAccessToken":           "records credential.access_token.deleted",
 	"models/asymkey.deleteKeysMarkedForDeletion":   "records credential.ssh_key.deleted (login source sync)",
 	"services/asymkey.DeletePublicKey":             "records credential.ssh_key.deleted",
 	"models/asymkey.deleteGPGKey":                  "its one caller DeleteGPGKey records credential.gpg_key.deleted",

@@ -23,6 +23,12 @@ type AccessToken struct {
 	// When the token expires, omitted if never
 	// swagger:strfmt date-time
 	Expires *time.Time `json:"expires_at,omitempty"`
+	// The permission of a token of an organization, a project or a repository on the repositories it covers: read,
+	// write or admin. Omitted for a personal access token.
+	Permission string `json:"permission,omitempty"`
+	// The login of who created a token of an organization, a project or a repository. Omitted for a personal access
+	// token.
+	CreatedBy string `json:"created_by,omitempty"`
 }
 
 // AccessTokenList represents a list of API access token.
@@ -38,6 +44,28 @@ type CreateAccessTokenOption struct {
 	// If provided and not-empty, creates an access token with access only to specified repositories.
 	Repositories []*RepoTargetOption `json:"repositories"`
 	// When it expires. Required by default, at most 365 days from today ([security] *_EXPIRY_REQUIRED and *_MAX_LIFETIME_DAYS); omit for never only when the instance allows it
+	// swagger:strfmt date-time
+	ExpiresAt *time.Time `json:"expires_at"`
+}
+
+// CreateOwnedAccessTokenOption options to create an access token of an organization, a project or a repository
+// swagger:model CreateOwnedAccessTokenOption
+type CreateOwnedAccessTokenOption struct {
+	// required: true
+	Name string `json:"name" binding:"Required"`
+	// At least one of read:repository, write:repository, read:issue, write:issue, read:package, write:package and
+	// read:organization
+	// required: true
+	// example: ["write:repository"]
+	Scopes []string `json:"scopes"`
+	// What the token may do on the repositories it covers; the lower of this and its scopes applies
+	// required: true
+	// enum: read,write,admin
+	Permission string `json:"permission" binding:"Required;In(read,write,admin)"`
+	// Organization tokens only: the repositories it covers, as "repo" or "project/repo". Omitted or null covers
+	// every repository of the organization, also ones created later.
+	Repositories []string `json:"repositories"`
+	// When it expires. Required by default, at most 365 days from today ([security] ACCESS_TOKEN_EXPIRY_REQUIRED and ACCESS_TOKEN_MAX_LIFETIME_DAYS); omit for never only when the instance allows it
 	// swagger:strfmt date-time
 	ExpiresAt *time.Time `json:"expires_at"`
 }

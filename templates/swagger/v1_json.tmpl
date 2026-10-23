@@ -8010,6 +8010,156 @@
         }
       }
     },
+    "/orgs/{org}/projects/{id}/tokens": {
+      "get": {
+        "description": "Tokens that belong to the project, not to a user. Their values are never shown again.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "List the access tokens of a project",
+        "operationId": "orgProjectListAccessTokens",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the project",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/AccessTokenList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "post": {
+        "description": "The token belongs to the project, not to a user, and acts as its own identity with the given permission on every repository in the project. A token creating it must hold every scope it grants and must not expire before it.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Create an access token of a project",
+        "operationId": "orgProjectCreateAccessToken",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the project",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/CreateOwnedAccessTokenOption"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "$ref": "#/responses/AccessToken"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/projects/{id}/tokens/{token_id}": {
+      "delete": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Delete (revoke) an access token of a project",
+        "operationId": "orgProjectDeleteAccessToken",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the project",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the token",
+            "name": "token_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
     "/orgs/{org}/public_members": {
       "get": {
         "produces": [
@@ -8633,6 +8783,132 @@
                 }
               }
             }
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/tokens": {
+      "get": {
+        "description": "Tokens that belong to the organization, not to a user. Their values are never shown again.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "List the access tokens of an organization",
+        "operationId": "orgListAccessTokens",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/AccessTokenList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "post": {
+        "description": "The token belongs to the organization, not to a user, and acts as its own identity with the given permission on every repository of the organization, or only on the selected ones. A token creating it must hold every scope it grants and must not expire before it.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Create an access token of an organization",
+        "operationId": "orgCreateAccessToken",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/CreateOwnedAccessTokenOption"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "$ref": "#/responses/AccessToken"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/tokens/{id}": {
+      "delete": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Delete (revoke) an access token of an organization",
+        "operationId": "orgDeleteAccessToken",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the token",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
           },
           "404": {
             "$ref": "#/responses/notFound"
@@ -23590,6 +23866,153 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/tokens": {
+      "get": {
+        "description": "Tokens that belong to the repository, not to a user. Their values are never shown again.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "List the access tokens of a repository",
+        "operationId": "repoListAccessTokens",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/AccessTokenList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "post": {
+        "description": "The token belongs to the repository, not to a user, and acts as its own identity with the given permission on this repository only. A token creating it must hold every scope it grants and must not expire before it.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Create an access token of a repository",
+        "operationId": "repoCreateAccessToken",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/CreateOwnedAccessTokenOption"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "$ref": "#/responses/AccessToken"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/tokens/{id}": {
+      "delete": {
+        "tags": [
+          "repository"
+        ],
+        "summary": "Delete (revoke) an access token of a repository",
+        "operationId": "repoDeleteAccessToken",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the token",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/topics": {
       "get": {
         "produces": [
@@ -29009,6 +29432,11 @@
           "format": "date-time",
           "x-go-name": "Created"
         },
+        "created_by": {
+          "description": "The login of who created a token of an organization, a project or a repository. Omitted for a personal access\ntoken.",
+          "type": "string",
+          "x-go-name": "CreatedBy"
+        },
         "expires_at": {
           "description": "When the token expires, omitted if never",
           "type": "string",
@@ -29023,6 +29451,11 @@
         "name": {
           "type": "string",
           "x-go-name": "Name"
+        },
+        "permission": {
+          "description": "The permission of a token of an organization, a project or a repository on the repositories it covers: read,\nwrite or admin. Omitted for a personal access token.",
+          "type": "string",
+          "x-go-name": "Permission"
         },
         "repositories": {
           "description": "Indicates that an access token only has access to the specified repositories.  Will be null if the access token\nis not limited to a set of specified repositories.",
@@ -32203,6 +32636,57 @@
         "website": {
           "type": "string",
           "x-go-name": "Website"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "CreateOwnedAccessTokenOption": {
+      "description": "CreateOwnedAccessTokenOption options to create an access token of an organization, a project or a repository",
+      "type": "object",
+      "required": [
+        "name",
+        "scopes",
+        "permission"
+      ],
+      "properties": {
+        "expires_at": {
+          "description": "When it expires. Required by default, at most 365 days from today ([security] ACCESS_TOKEN_EXPIRY_REQUIRED and ACCESS_TOKEN_MAX_LIFETIME_DAYS); omit for never only when the instance allows it",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ExpiresAt"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "permission": {
+          "description": "What the token may do on the repositories it covers; the lower of this and its scopes applies",
+          "type": "string",
+          "enum": [
+            "read",
+            "write",
+            "admin"
+          ],
+          "x-go-name": "Permission"
+        },
+        "repositories": {
+          "description": "Organization tokens only: the repositories it covers, as \"repo\" or \"project/repo\". Omitted or null covers\nevery repository of the organization, also ones created later.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Repositories"
+        },
+        "scopes": {
+          "description": "At least one of read:repository, write:repository, read:issue, write:issue, read:package, write:package and\nread:organization",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Scopes",
+          "example": [
+            "write:repository"
+          ]
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -40721,6 +41205,10 @@
           "type": "string",
           "format": "date-time"
         },
+        "created_by": {
+          "type": "string",
+          "description": "The login of who created a token of an organization, a project or a repository. Omitted for a personal access\ntoken."
+        },
         "expires_at": {
           "type": "string",
           "format": "date-time",
@@ -40732,6 +41220,10 @@
         },
         "name": {
           "type": "string"
+        },
+        "permission": {
+          "type": "string",
+          "description": "The permission of a token of an organization, a project or a repository on the repositories it covers: read,\nwrite or admin. Omitted for a personal access token."
         },
         "repositories": {
           "type": "array",

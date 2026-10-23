@@ -48,6 +48,33 @@ func ValidateAccessToken(owner *user_model.User, token *auth_model.AccessToken, 
 	return ValidateRepositoryResource(token.ResourceAllRepos, token.Scope, len(repoResources))
 }
 
+// ErrOwnedTokenNoScope refuses a token of an organization, a project or a repository without a scope: it could do
+// nothing.
+var ErrOwnedTokenNoScope = errors.New("access token must have a scope")
+
+// ValidateOwnedAccessToken checks a new token of an organization, a project or a repository: the scopes and
+// permission such a token may have, the expiry policy and the instance's scope policy (no site admin is exempt: the
+// token acts as itself), and for an organization token limited to selected repositories, numRepos > 0 and
+// repository-only scopes, as for a personal one.
+func ValidateOwnedAccessToken(t *auth_model.AccessToken, numRepos int) error {
+	if t.Scope == "" {
+		return ErrOwnedTokenNoScope
+	}
+	if err := auth_model.ValidateOwnedTokenScope(t.Scope); err != nil {
+		return err
+	}
+	if err := auth_model.ValidateOwnedTokenMode(t.Mode); err != nil {
+		return err
+	}
+	if err := ValidateExpiry(setting.AccessTokenExpiry, t.ExpiresUnix); err != nil {
+		return err
+	}
+	if err := ValidateScopePolicy(&user_model.User{}, t.Scope, t.ReachesAllRepos()); err != nil {
+		return err
+	}
+	return ValidateRepositoryResource(t.ResourceAllRepos, t.Scope, numRepos)
+}
+
 var (
 	ErrSpecifiedReposNone         = errors.New("specified repository access token: must have at least one repository")
 	ErrSpecifiedReposNoPublicOnly = errors.New("specified repository access token: cannot be combined with public-only scope")

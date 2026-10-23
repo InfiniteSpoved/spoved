@@ -125,14 +125,14 @@ func TestOwnedAccessToken(t *testing.T) {
 
 		t.Run("project token", func(t *testing.T) {
 			org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
-			group, err := repo_model.CreateRepoGroup(db.DefaultContext, org3, "bots", "")
+			group, err := repo_model.CreateRepoGroup(audit_model.WithSystem(db.DefaultContext, "test"), org3, "bots", "")
 			require.NoError(t, err)
 			token := newOwnedAccessToken(t, auth_model.AccessTokenOwnerProject, 3, group.ID, perm_model.AccessModeRead, "read:repository")
 			doGitCloneFail(gitURL(token.Token, repo5))(t)
 			assert.Equal(t, http.StatusNotFound, apiStatus(t, "GET", "/api/v1/repos/org3/repo5", token.Token, nil))
 
 			user1 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
-			require.NoError(t, repo_service.MoveRepository(db.DefaultContext, user1, repo5, group.ID))
+			require.NoError(t, repo_service.MoveRepository(audit_model.WithSystem(db.DefaultContext, "test"), user1, repo5, group.ID))
 			repo5 := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 5})
 			require.NoError(t, git.Clone(t.Context(), gitURL(token.Token, repo5).String(), t.TempDir(), git.CloneRepoOptions{}))
 			assert.Equal(t, http.StatusOK, apiStatus(t, "GET", "/api/v1/repos/org3/bots/repo5/-", token.Token, nil))
@@ -202,7 +202,7 @@ func TestOwnedAccessToken(t *testing.T) {
 			require.NoError(t, err)
 			user1 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
 			repo3 := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})
-			require.NoError(t, repo_service.TransferOwnership(db.DefaultContext, user1, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), repo3, nil))
+			require.NoError(t, repo_service.TransferOwnership(audit_model.WithSystem(db.DefaultContext, "test"), user1, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), repo3, nil))
 
 			unittest.AssertNotExistsBean(t, &auth_model.AccessToken{ID: repoToken.ID})
 			unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: orgToken.ID})

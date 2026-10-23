@@ -237,6 +237,9 @@ type swaggerParameterBodies struct {
 	CreateAccessTokenOption api.CreateAccessTokenOption
 
 	// in:body
+	CreateOwnedAccessTokenOption api.CreateOwnedAccessTokenOption
+
+	// in:body
 	UserSettingsOptions api.UserSettingsOptions
 
 	// in:body
