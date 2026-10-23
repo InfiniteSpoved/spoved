@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/models/perm"
@@ -40,10 +41,12 @@ func (o OwnedTokenOwner) opts() auth_model.FindOwnedAccessTokensOptions {
 const maxOwnedTokenRepos = 1000
 
 // mayManageOwnedTokens refuses what must not manage credentials: a token of an organization, a project or a
-// repository, the Actions user, a token limited to public resources, and a credential another party holds for the user
-// (an OAuth2 grant or an authorized integration), which could otherwise mint a token that outlives the grant.
+// repository, the Actions user, a token limited to public resources, a credential another party holds for the user
+// (an OAuth2 grant or an authorized integration), and an HTTP signature (an SSH key or certificate, whose expiry the
+// request doesn't carry); these could otherwise mint a token that outlives them.
 func mayManageOwnedTokens(ctx *context.APIContext) bool {
-	if ctx.Doer().IsAccessTokenBot() || ctx.Doer().IsActions() || ctx.PublicOnly() || !auth_service.IsHeldByUser(ctx.Authentication()) {
+	if ctx.Doer().IsAccessTokenBot() || ctx.Doer().IsActions() || ctx.PublicOnly() || !auth_service.IsHeldByUser(ctx.Authentication()) ||
+		ctx.Authentication().Credential().Type == audit_model.CredentialSSHKey {
 		ctx.Error(http.StatusForbidden, "", "this credential can't manage access tokens")
 		return false
 	}

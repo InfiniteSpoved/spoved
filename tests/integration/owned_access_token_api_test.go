@@ -4,6 +4,7 @@
 package integration
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"testing"
@@ -16,12 +17,17 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/json"
+	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/tests"
 
+	"github.com/42wim/httpsig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 )
 
 func TestOwnedAccessTokenAPI(t *testing.T) {
@@ -116,6 +122,25 @@ func TestOwnedAccessTokenAPI(t *testing.T) {
 			create(t, path, oauth,
 				api.CreateOwnedAccessTokenOption{Name: name(), Scopes: []string{"read:repository"}, Permission: "read"}, http.StatusForbidden)
 			MakeRequest(t, NewRequest(t, "GET", path).AddTokenAuth(oauth), http.StatusForbidden)
+		})
+
+		t.Run("an HTTP signature can't manage tokens", func(t *testing.T) {
+			defer test.MockVariableValue(&setting.SSH.MinimumKeySizeCheck, false)()
+			keyToken := getUserToken(t, "user1", auth_model.AccessTokenScopeWriteUser)
+			sshSigner, err := ssh.ParsePrivateKey([]byte(httpsigPrivateKey))
+			require.NoError(t, err)
+			MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/user/keys", api.CreateKeyOption{
+				Title: "owned-token-httpsig", Key: string(ssh.MarshalAuthorizedKey(sshSigner.PublicKey())),
+			}).AddTokenAuth(keyToken), http.StatusCreated)
+
+			body, err := json.Marshal(api.CreateOwnedAccessTokenOption{Name: name(), Scopes: []string{"read:repository"}, Permission: "read"})
+			require.NoError(t, err)
+			req := NewRequestWithBody(t, "POST", path, bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			signer, _, err := httpsig.NewSSHSigner(sshSigner, httpsig.DigestSha512, []string{httpsig.RequestTarget, "(created)", "(expires)"}, httpsig.Signature, 10)
+			require.NoError(t, err)
+			require.NoError(t, signer.SignRequest(ssh.FingerprintSHA256(sshSigner.PublicKey()), req.Request, body))
+			MakeRequest(t, req, http.StatusForbidden)
 		})
 
 		t.Run("not after the creating token's expiry", func(t *testing.T) {
