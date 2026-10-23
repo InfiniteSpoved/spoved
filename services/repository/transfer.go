@@ -584,8 +584,8 @@ func CancelRepositoryTransfer(ctx context.Context, repo *repo_model.Repository, 
 }
 
 // transferCounts counts the rows transferring repo away from oldOwner removes, for its audit entry: the
-// collaborators who are members of the new owner (or it), the old organization's team rows and the deploy key
-// selections.
+// collaborators who are members of the new owner (or it), the old organization's team rows, the deploy key
+// selections, the repository's own access tokens and its selections in organization tokens.
 func transferCounts(ctx context.Context, repo *repo_model.Repository, oldOwner *user_model.User) (map[string]int64, error) {
 	counts := map[string]int64{"collaborators": 0}
 	for _, c := range []struct {
@@ -594,6 +594,8 @@ func transferCounts(ctx context.Context, repo *repo_model.Repository, oldOwner *
 	}{
 		{"teams", "team_repo", builder.Eq{"repo_id": repo.ID, "org_id": oldOwner.ID}},
 		{"deploy_key_selections", "org_deploy_key_repo", builder.Eq{"repo_id": repo.ID}},
+		{"access_tokens", "access_token", builder.Eq{"owner_type": auth_model.AccessTokenOwnerRepo, "owner_id": repo.ID}},
+		{"token_selections", "access_token_resource_repo", builder.Eq{"repo_id": repo.ID}.And(builder.In("token_id", builder.Select("id").From("access_token").Where(builder.Neq{"owner_type": auth_model.AccessTokenOwnerUser})))},
 	} {
 		n, err := db.GetEngine(ctx).Table(c.table).Where(c.cond).Count()
 		if err != nil {

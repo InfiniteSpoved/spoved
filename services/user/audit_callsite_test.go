@@ -72,6 +72,7 @@ var auditedWrites = map[string]string{
 	"models/actions.deleteRunner":                    "records credential.runner.deleted",
 	"models/actions.FixRunnersWithoutBelongingOwner": "doctor: runners of owners that no longer exist",
 	"models/actions.FixRunnersWithoutBelongingRepo":  "doctor: runners of repositories that no longer exist",
+	"models/auth.DeleteOwnedAccessTokens":            "its callers record repo.repository.deleted|transferred, org.project.deleted or org.organization.deleted with the counts (access_tokens)",
 	"models/organization.DeleteOrganization":         "its caller services/org.DeleteOrganization records org.organization.deleted with the counts; its repositories are deleted first, each recording repo.repository.deleted",
 
 	// login sources, user groups, quota, dynamic settings

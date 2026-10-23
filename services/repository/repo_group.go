@@ -118,6 +118,7 @@ func projectDeleteCounts(ctx context.Context, group *repo_model.RepoGroup) (map[
 		{"secrets", "secret", scope},
 		{"variables", "action_variable", scope},
 		{"deploy_keys", "org_deploy_key", builder.Eq{"org_id": group.OwnerID, "group_id": group.ID}},
+		{"access_tokens", "access_token", builder.Eq{"owner_type": auth_model.AccessTokenOwnerProject, "owner_id": group.OwnerID, "group_id": group.ID}},
 	} {
 		n, err := db.GetEngine(ctx).Table(c.table).Where(c.cond).Count()
 		if err != nil {
