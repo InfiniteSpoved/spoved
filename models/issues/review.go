@@ -257,6 +257,9 @@ type CreateReviewOptions struct {
 
 // IsOfficialReviewer check if at least one of the provided reviewers can make official reviews in issue (counts towards required approvals)
 func IsOfficialReviewer(ctx context.Context, issue *Issue, reviewer *user_model.User) (bool, error) {
+	if reviewer.IsAccessTokenBot() { // a token of an organization, a project or a repository is no reviewer
+		return false, nil
+	}
 	if err := issue.LoadPullRequest(ctx); err != nil {
 		return false, err
 	}

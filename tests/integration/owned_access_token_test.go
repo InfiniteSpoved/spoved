@@ -112,6 +112,18 @@ func TestOwnedAccessToken(t *testing.T) {
 			assert.Equal(t, http.StatusForbidden, apiStatus(t, "GET", "/api/v1/repos/org3/repo3", token.Token, nil), "no repository scope")
 		})
 
+		t.Run("an approval by a token never counts", func(t *testing.T) {
+			token := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, 1, 0, perm_model.AccessModeWrite, "write:repository")
+			req := NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/repo1/pulls/2/reviews", &api.CreatePullReviewOptions{Event: api.ReviewStateApproved}).AddTokenAuth(token.Token)
+			apiReview := &api.PullReview{}
+			DecodeJSON(t, MakeRequest(t, req, http.StatusOK), apiReview)
+			review := unittest.AssertExistsAndLoadBean(t, &issues_model.Review{ID: apiReview.ID})
+			assert.Equal(t, user_model.AccessTokenBotID(token.ID), review.ReviewerID)
+			assert.False(t, review.Official)
+			// user1's pending review on the same pull request is left alone
+			assert.Equal(t, issues_model.ReviewTypePending, unittest.AssertExistsAndLoadBean(t, &issues_model.Review{ID: 4}).Type)
+		})
+
 		t.Run("organization token", func(t *testing.T) {
 			all := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeRead, "read:repository")
 			selected := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeRead, "read:repository", repo5.ID)
