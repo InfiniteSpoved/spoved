@@ -75,7 +75,7 @@ narrowDialogStyle.textContent = `@media (max-width: 600px) {
     margin: 4px 0 !important;
   }
 }`;
-document.head.appendChild(narrowDialogStyle);
+document.head.append(narrowDialogStyle);
 
 // the workbench resolves the repository's folder before the extension below registers its file systems: make it
 // wait for them, or the explorer marks the folder as unresolvable for good
