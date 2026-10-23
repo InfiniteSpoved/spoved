@@ -186,7 +186,7 @@ func GetActionRepoPermission(ctx context.Context, repo *repo_model.Repository, t
 // it scheduled before (an auto merge, a scheduled run).
 func accessTokenBotPermission(ctx context.Context, repo *repo_model.Repository, t *auth_model.AccessToken) (Permission, error) {
 	var perm Permission
-	if t.IsExpired() {
+	if !t.IsUsable() {
 		return perm, nil
 	}
 	covers, err := t.CoversRepo(ctx, repo.ID, repo.OwnerID, repo.GroupID)

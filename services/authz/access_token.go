@@ -12,7 +12,9 @@ import (
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/timeutil"
 )
 
 func GetAuthorizationReducerForAccessToken(ctx context.Context, token *auth_model.AccessToken) (AuthorizationReducer, error) {
@@ -158,4 +160,29 @@ func ValidateRepositoryResource(resourceAllRepos bool, scope auth_model.AccessTo
 	}
 
 	return nil
+}
+
+// RotateOwnedAccessToken gives the token with the ID of the owner opts names a new secret, after checking its settings
+// against today's policies with the new expiry (RotationExpiry when expires is unset). Callers check who may rotate
+// it; oldHash and rotatedByID are as in auth_model.RotateOwnedAccessToken.
+func RotateOwnedAccessToken(ctx context.Context, opts auth_model.FindOwnedAccessTokensOptions, id int64, oldHash string, expires optional.Option[timeutil.TimeStamp], rotatedByID int64) (*auth_model.AccessToken, error) {
+	t := &auth_model.AccessToken{}
+	if has, err := db.GetEngine(ctx).Where(opts.ToConds()).And("id = ?", id).Get(t); err != nil {
+		return nil, err
+	} else if !has {
+		return nil, auth_model.ErrAccessTokenNotExist{}
+	}
+	if has, v := expires.Get(); has {
+		t.ExpiresUnix = v
+	} else {
+		t.ExpiresUnix = RotationExpiry(setting.AccessTokenExpiry, t.ExpiresUnix != 0)
+	}
+	numRepos, err := db.GetEngine(ctx).Table("access_token_resource_repo").Where("token_id = ?", id).Count()
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateOwnedAccessToken(t, int(numRepos)); err != nil {
+		return nil, err
+	}
+	return auth_model.RotateOwnedAccessToken(ctx, opts, id, oldHash, t.ExpiresUnix, rotatedByID)
 }

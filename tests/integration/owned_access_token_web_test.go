@@ -83,9 +83,24 @@ func TestOwnedAccessTokenWeb(t *testing.T) {
 		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo2/settings/keys/tokens/delete", map[string]string{"id": fmt.Sprint(tok.ID)}), http.StatusOK)
 		unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: tok.ID})
 
-		session.MakeRequest(t, NewRequestWithValues(t, "POST", link+"/tokens/delete", map[string]string{"id": fmt.Sprint(tok.ID)}), http.StatusOK)
-		unittest.AssertNotExistsBean(t, &auth_model.AccessToken{ID: tok.ID})
+		// rotate shows the new secret once, and the old one stops working
+		page = NewHTMLParser(t, session.MakeRequest(t, NewRequestWithValues(t, "POST", link+"/tokens/rotate", map[string]string{"id": fmt.Sprint(tok.ID)}), http.StatusOK).Body)
+		rotated := strings.TrimSpace(page.Find("#new-access-token-value").Text())
+		require.NotEmpty(t, rotated)
+		assert.NotEqual(t, value, rotated)
+		assert.Contains(t, page.Find("#new-access-token").Text(), "rotated")
+		assert.Contains(t, page.Find("#access-token-list .last-rotated").Text(), "user2")
 		assert.Equal(t, http.StatusUnauthorized, use(t, "/api/v1/repos/user2/repo1", value))
+		assert.Equal(t, http.StatusOK, use(t, "/api/v1/repos/user2/repo1", rotated))
+		other.MakeRequest(t, NewRequestWithValues(t, "POST", link+"/tokens/rotate", map[string]string{"id": fmt.Sprint(tok.ID)}), http.StatusNotFound)
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo2/settings/keys/tokens/rotate", map[string]string{"id": fmt.Sprint(tok.ID)}), http.StatusSeeOther)
+		assert.Equal(t, http.StatusOK, use(t, "/api/v1/repos/user2/repo1", rotated), "another repository's page doesn't rotate it")
+
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", link+"/tokens/delete", map[string]string{"id": fmt.Sprint(tok.ID)}), http.StatusOK)
+		assert.NotZero(t, unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: tok.ID}).RevokedUnix, "revoked, kept for its name")
+		assert.Equal(t, http.StatusUnauthorized, use(t, "/api/v1/repos/user2/repo1", rotated))
+		page = NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", link), http.StatusOK).Body)
+		assert.NotContains(t, page.Find("#access-token-list").Text(), n)
 	})
 
 	t.Run("organization", func(t *testing.T) {
@@ -142,7 +157,7 @@ func TestOwnedAccessTokenWeb(t *testing.T) {
 		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/settings/keys/tokens/delete", map[string]string{"id": fmt.Sprint(tok.ID)}), http.StatusOK)
 		unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: tok.ID})
 		session.MakeRequest(t, NewRequestWithValues(t, "POST", link+"/tokens/delete", map[string]string{"id": fmt.Sprint(tok.ID)}), http.StatusOK)
-		unittest.AssertNotExistsBean(t, &auth_model.AccessToken{ID: tok.ID})
+		assert.NotZero(t, unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: tok.ID}).RevokedUnix)
 	})
 
 	t.Run("name filter", func(t *testing.T) {

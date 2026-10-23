@@ -93,6 +93,7 @@ type AccessToken struct {
 	Mode           perm.AccessMode      `xorm:"NOT NULL DEFAULT 0"`
 	CreatorID      int64                `xorm:"NOT NULL DEFAULT 0"` // who created a token that isn't a personal one
 	Name           string
+	Description    string `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"`
 	Token          string `xorm:"-"`
 	TokenHash      string `xorm:"UNIQUE"` // sha256 of token
 	TokenSalt      string
@@ -105,6 +106,17 @@ type AccessToken struct {
 	HasUsed           bool               `xorm:"-"`
 
 	ExpiresUnix timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"` // 0 = never
+	LastUsedIP  string             `xorm:"VARCHAR(45) NOT NULL DEFAULT ''"`
+
+	// A token that isn't a personal one may rotate itself (POST /tokens/self/rotate). RotatedByID is the user who
+	// rotated it last, or the token's own identity (AccessTokenBotID) when it rotated itself.
+	SelfRotate  bool               `xorm:"NOT NULL DEFAULT false"`
+	RotatedUnix timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"`
+	RotatedByID int64              `xorm:"NOT NULL DEFAULT 0"`
+
+	// A revoked token that isn't a personal one keeps its row without a secret, so its name stays in history.
+	RevokedUnix timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0 INDEX"`
+	RevokedByID int64              `xorm:"NOT NULL DEFAULT 0"`
 
 	ResourceAllRepos bool `xorm:"NOT NULL DEFAULT TRUE"` // flag for whether AccessTokenResourceRepo instances will limit the resources this access token can access (false) or won't limit them (true).
 }
@@ -158,6 +170,8 @@ func accessTokenFields(t *AccessToken, repoIDs []int64) map[string]any {
 	}
 	if !t.IsOwnedByUser() {
 		fields["mode"] = t.Mode.String()
+		fields["description"] = t.Description
+		fields["self_rotate"] = t.SelfRotate
 	}
 	return fields
 }
@@ -205,10 +219,11 @@ func (t *AccessToken) DisplayPublicOnly() bool {
 	return publicOnly
 }
 
-// UpdateLastUsed updates the time this token was last used to now.
-func (t *AccessToken) UpdateLastUsed(ctx context.Context) error {
+// UpdateLastUsed records that this token was used now, from the client address ip ("" when unknown).
+func (t *AccessToken) UpdateLastUsed(ctx context.Context, ip string) error {
 	t.UpdatedUnix = timeutil.TimeStampNow()
-	_, err := db.GetEngine(ctx).ID(t.ID).Cols("updated_unix").NoAutoTime().Update(t)
+	t.LastUsedIP = ip
+	_, err := db.GetEngine(ctx).ID(t.ID).Cols("updated_unix", "last_used_ip").NoAutoTime().Update(t)
 	return err
 }
 
@@ -291,6 +306,9 @@ func GetAccessTokenBySHA(ctx context.Context, token string) (*AccessToken, error
 }
 
 func checkAccessTokenExpiry(t *AccessToken) (*AccessToken, error) {
+	if t.IsRevoked() {
+		return nil, ErrAccessTokenNotExist{}
+	}
 	if t.IsExpired() {
 		return nil, ErrAccessTokenExpired{ID: t.ID, UID: t.UID, Name: t.Name, Expires: t.ExpiresUnix}
 	}

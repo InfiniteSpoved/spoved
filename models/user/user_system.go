@@ -138,15 +138,15 @@ func NewAccessTokenBot(t *auth.AccessToken) *User {
 		Email:            name + "@" + setting.Service.NoReplyAddress,
 		KeepEmailPrivate: true,
 		LoginName:        name,
-		IsActive:         !t.IsExpired(),
+		IsActive:         t.IsUsable(),
 		Type:             UserTypeBot,
 		Visibility:       structs.VisibleTypePublic,
 		BotToken:         t,
 	}
 }
 
-// GetAccessTokenBot returns the identity with the user ID (see AccessTokenBotID), or ErrUserNotExist once its token
-// was deleted.
+// GetAccessTokenBot returns the identity with the user ID (see AccessTokenBotID), also of a revoked token (for its
+// name in history; it grants nothing), or ErrUserNotExist once its token was deleted with its owner.
 func GetAccessTokenBot(ctx context.Context, id int64) (*User, error) {
 	t, err := auth.GetOwnedAccessTokenByID(ctx, accessTokenBotIDBase-id)
 	if auth.IsErrAccessTokenNotExist(err) {

@@ -234,6 +234,13 @@ func AccessTokenNew(ctx *context.Context) {
 	}
 }
 
+// AccessTokenRotate gives an access token of the organization or of its project a new secret and shows it once
+func AccessTokenRotate(ctx *context.Context) {
+	if user.RotateOwnedToken(ctx, ownedTokenLevel(ctx)) && loadDeployKeys(ctx) {
+		ctx.HTML(http.StatusOK, tplSettingsDeployKeys)
+	}
+}
+
 // AccessTokenDelete revokes an access token of the organization or of its project
 func AccessTokenDelete(ctx *context.Context) {
 	user.DeleteOwnedToken(ctx, ownedTokenLevel(ctx))

@@ -144,6 +144,7 @@ var Actions = map[string]string{
 	"credential.access_token.deleted":           CategoryCredential,
 	"credential.access_token.expired":           CategoryCredential,
 	"credential.access_token.regenerated":       CategoryCredential,
+	"credential.access_token.rotated":           CategoryCredential,
 	"credential.deploy_key.created":             CategoryCredential,
 	"credential.deploy_key.deleted":             CategoryCredential,
 	"credential.deploy_key.expired":             CategoryCredential,

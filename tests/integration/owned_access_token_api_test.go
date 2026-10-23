@@ -219,4 +219,70 @@ func TestOwnedAccessTokenAPI(t *testing.T) {
 
 		MakeRequest(t, NewRequest(t, "DELETE", fmt.Sprintf("%s/%d", path, tok.ID)).AddTokenAuth(owner), http.StatusNoContent)
 	})
+
+	t.Run("rotate", func(t *testing.T) {
+		path := "/api/v1/repos/org3/repo3/tokens"
+		tok := create(t, path, owner, api.CreateOwnedAccessTokenOption{Name: name(), Scopes: []string{"read:repository"}, Permission: "read", Description: " release job "}, http.StatusCreated)
+		assert.Equal(t, "release job", tok.Description)
+		rotate := func(t *testing.T, path, token string, status int) *api.AccessToken {
+			t.Helper()
+			resp := MakeRequest(t, NewRequestWithJSON(t, "POST", path, api.RotateOwnedAccessTokenOption{}).AddTokenAuth(token), status)
+			if status != http.StatusOK {
+				return nil
+			}
+			var out api.AccessToken
+			DecodeJSON(t, resp, &out)
+			return &out
+		}
+
+		// another owner's route doesn't find it, and the token itself can't rotate others
+		rotate(t, fmt.Sprintf("/api/v1/repos/org3/repo5/tokens/%d/rotate", tok.ID), owner, http.StatusNotFound)
+		rotate(t, fmt.Sprintf("/api/v1/orgs/org3/tokens/%d/rotate", tok.ID), owner, http.StatusNotFound)
+		rotate(t, fmt.Sprintf("%s/%d/rotate", path, tok.ID), tok.Token, http.StatusForbidden)
+
+		// an expired token can be rotated, and comes back with the same settings
+		_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE access_token SET expires_unix = ? WHERE id = ?", timeutil.TimeStampNow().AddDuration(-time.Hour), tok.ID)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusUnauthorized, use(t, "/api/v1/repos/org3/repo3", tok.Token))
+		since := auditMaxID(t)
+		rotated := rotate(t, fmt.Sprintf("%s/%d/rotate", path, tok.ID), owner, http.StatusOK)
+		assert.Equal(t, tok.ID, rotated.ID)
+		assert.NotEqual(t, tok.Token, rotated.Token)
+		assert.Equal(t, "read", rotated.Permission)
+		assert.Equal(t, "user2", rotated.RotatedBy)
+		assert.False(t, rotated.RotatedBySelf)
+		assert.Equal(t, http.StatusOK, use(t, "/api/v1/repos/org3/repo3", rotated.Token))
+		assert.Equal(t, http.StatusUnauthorized, use(t, "/api/v1/repos/org3/repo3", tok.Token))
+		e := auditOne(t, since, "credential.access_token.rotated")
+		assert.Equal(t, tok.ID, e.TargetID)
+		assert.NotContains(t, e.Data, rotated.Token)
+
+		// self-rotate needs the setting, and only a token of an organization, a project or a repository has it
+		MakeRequest(t, NewRequest(t, "POST", "/api/v1/tokens/self/rotate").AddTokenAuth(rotated.Token), http.StatusForbidden)
+		MakeRequest(t, NewRequest(t, "POST", "/api/v1/tokens/self/rotate").AddTokenAuth(owner), http.StatusForbidden)
+		MakeRequest(t, NewRequest(t, "POST", "/api/v1/tokens/self/rotate"), http.StatusUnauthorized)
+
+		self := create(t, path, owner, api.CreateOwnedAccessTokenOption{Name: name(), Scopes: []string{"read:repository"}, Permission: "read", SelfRotate: true}, http.StatusCreated)
+		assert.True(t, self.SelfRotate)
+		resp := MakeRequest(t, NewRequest(t, "POST", "/api/v1/tokens/self/rotate").AddTokenAuth(self.Token), http.StatusOK)
+		var selfRotated api.AccessToken
+		DecodeJSON(t, resp, &selfRotated)
+		assert.Equal(t, self.ID, selfRotated.ID)
+		assert.True(t, selfRotated.RotatedBySelf)
+		assert.Empty(t, selfRotated.RotatedBy)
+		assert.Equal(t, http.StatusUnauthorized, use(t, "/api/v1/repos/org3/repo3", self.Token), "the old secret stops working")
+		assert.Equal(t, http.StatusOK, use(t, "/api/v1/repos/org3/repo3", selfRotated.Token))
+		MakeRequest(t, NewRequest(t, "POST", "/api/v1/tokens/self/rotate").AddTokenAuth(self.Token), http.StatusUnauthorized)
+
+		// a revoked token can't be rotated back
+		MakeRequest(t, NewRequest(t, "DELETE", fmt.Sprintf("%s/%d", path, self.ID)).AddTokenAuth(owner), http.StatusNoContent)
+		rotate(t, fmt.Sprintf("%s/%d/rotate", path, self.ID), owner, http.StatusNotFound)
+		MakeRequest(t, NewRequest(t, "POST", "/api/v1/tokens/self/rotate").AddTokenAuth(selfRotated.Token), http.StatusUnauthorized)
+		resp = MakeRequest(t, NewRequest(t, "GET", path).AddTokenAuth(owner), http.StatusOK)
+		var list []*api.AccessToken
+		DecodeJSON(t, resp, &list)
+		for _, l := range list {
+			assert.NotEqual(t, self.ID, l.ID, "a revoked token isn't listed")
+		}
+	})
 }

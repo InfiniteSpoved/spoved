@@ -11,6 +11,7 @@ import (
 
 	"forgejo.org/models/db"
 	"forgejo.org/models/perm"
+	"forgejo.org/modules/timeutil"
 
 	"xorm.io/builder"
 )
@@ -29,6 +30,16 @@ const (
 // IsOwnedByUser reports whether the token is a personal access token; any other token has no user (UID is 0).
 func (t *AccessToken) IsOwnedByUser() bool {
 	return t.OwnerType == AccessTokenOwnerUser
+}
+
+// IsRevoked reports whether the token was revoked; its row is kept without a secret so its name stays in history.
+func (t *AccessToken) IsRevoked() bool {
+	return t.RevokedUnix != 0
+}
+
+// IsUsable reports whether the token still grants anything: neither expired nor revoked.
+func (t *AccessToken) IsUsable() bool {
+	return !t.IsExpired() && !t.IsRevoked()
 }
 
 // ReachesAllRepos reports whether the token reaches every repository its owner can: a personal or organization token
@@ -105,7 +116,7 @@ func (opts FindOwnedAccessTokensOptions) ToConds() builder.Cond {
 	if opts.OwnerType == AccessTokenOwnerUser || opts.OwnerID == 0 {
 		return builder.Expr("1 = 0")
 	}
-	cond := builder.Eq{"owner_type": opts.OwnerType, "owner_id": opts.OwnerID, "group_id": opts.GroupID}
+	cond := builder.Eq{"owner_type": opts.OwnerType, "owner_id": opts.OwnerID, "group_id": opts.GroupID, "revoked_unix": 0}
 	if opts.Name != "" {
 		cond["name"] = opts.Name
 	}
@@ -118,13 +129,13 @@ func (opts FindOwnedAccessTokensOptions) ToConds() builder.Cond {
 // FindOwnedAccessTokensCoveringRepo returns the organization and project tokens that cover the repository with the
 // given ID, owner and project (0 = at the owner's root), newest first; the SQL form of CoversRepo for those levels.
 func FindOwnedAccessTokensCoveringRepo(ctx context.Context, repoID, ownerID, groupID int64) ([]*AccessToken, error) {
-	orgCond := builder.Eq{"owner_type": AccessTokenOwnerOrg, "owner_id": ownerID, "group_id": 0}.And(builder.Or(
+	orgCond := builder.Eq{"owner_type": AccessTokenOwnerOrg, "owner_id": ownerID, "group_id": 0, "revoked_unix": 0}.And(builder.Or(
 		builder.Eq{"resource_all_repos": true},
 		builder.In("id", builder.Select("token_id").From("access_token_resource_repo").Where(builder.Eq{"repo_id": repoID})),
 	))
 	cond := builder.Or(orgCond)
 	if groupID != 0 {
-		cond = cond.Or(builder.Eq{"owner_type": AccessTokenOwnerProject, "owner_id": ownerID, "group_id": groupID})
+		cond = cond.Or(builder.Eq{"owner_type": AccessTokenOwnerProject, "owner_id": ownerID, "group_id": groupID, "revoked_unix": 0})
 	}
 	tokens := make([]*AccessToken, 0, 4)
 	return tokens, db.GetEngine(ctx).Where(cond).OrderBy("created_unix DESC, id DESC").Find(&tokens)
@@ -134,8 +145,9 @@ func (opts FindOwnedAccessTokensOptions) ToOrders() string {
 	return "created_unix DESC, id DESC"
 }
 
-// DeleteOwnedAccessToken deletes (revokes) the token with the ID of the owner opts names.
-func DeleteOwnedAccessToken(ctx context.Context, opts FindOwnedAccessTokensOptions, id int64) error {
+// DeleteOwnedAccessToken revokes the token with the ID of the owner opts names. The row stays as a tombstone without
+// a secret, coverage or anything a lookup finds, so the token's identity keeps its name in history.
+func DeleteOwnedAccessToken(ctx context.Context, opts FindOwnedAccessTokensOptions, id, doerID int64) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
 		t := &AccessToken{}
 		if has, err := db.GetEngine(ctx).Where(opts.ToConds()).And("id = ?", id).Get(t); err != nil {
@@ -150,12 +162,49 @@ func DeleteOwnedAccessToken(ctx context.Context, opts FindOwnedAccessTokensOptio
 		if _, err := db.GetEngine(ctx).Where("token_id = ?", id).Delete(&AccessTokenResourceRepo{}); err != nil {
 			return err
 		}
-		if cnt, err := db.GetEngine(ctx).Where(opts.ToConds()).And("id = ?", id).Delete(&AccessToken{}); err != nil {
+		tomb := &AccessToken{
+			RevokedUnix: timeutil.TimeStampNow(),
+			RevokedByID: doerID,
+			// unique like any hash, and never the hex output of HashToken, so nothing can match it
+			TokenHash: fmt.Sprintf("revoked:%d", id),
+		}
+		if cnt, err := db.GetEngine(ctx).Where(opts.ToConds()).And("id = ? AND token_hash = ?", id, t.TokenHash).
+			Cols("revoked_unix", "revoked_by_id", "token_hash", "token_salt", "token_last_eight", "self_rotate").NoAutoTime().Update(tomb); err != nil {
 			return err
 		} else if cnt != 1 {
 			return ErrAccessTokenNotExist{}
 		}
 		return recordAccessToken(ctx, "deleted", t, map[string]any{"before": accessTokenFields(t, repoIDs)})
+	})
+}
+
+// RotateOwnedAccessToken gives the token with the ID of the owner opts names a new secret (in Token) and the expiry,
+// keeping everything else; an expired token may be rotated. oldHash, when set, must still be the token's hash (a
+// token rotating itself). rotatedByID is the user who rotated it, or the token's own identity.
+func RotateOwnedAccessToken(ctx context.Context, opts FindOwnedAccessTokensOptions, id int64, oldHash string, expires timeutil.TimeStamp, rotatedByID int64) (*AccessToken, error) {
+	t := &AccessToken{}
+	return t, db.WithTx(ctx, func(ctx context.Context) error {
+		if has, err := db.GetEngine(ctx).Where(opts.ToConds()).And("id = ?", id).Get(t); err != nil {
+			return err
+		} else if !has || oldHash != "" && t.TokenHash != oldHash {
+			return ErrAccessTokenNotExist{}
+		}
+		before := t.TokenHash
+		expiresBefore := t.ExpiresUnix
+		generateAccessToken(t)
+		t.ExpiresUnix = expires
+		t.RotatedUnix = timeutil.TimeStampNow()
+		t.RotatedByID = rotatedByID
+		if cnt, err := db.GetEngine(ctx).Where(opts.ToConds()).And("id = ? AND token_hash = ?", id, before).
+			Cols("token_salt", "token_hash", "token_last_eight", "expires_unix", "rotated_unix", "rotated_by_id").NoAutoTime().Update(t); err != nil {
+			return err
+		} else if cnt != 1 {
+			return ErrAccessTokenNotExist{} // rotated or revoked meanwhile
+		}
+		return recordAccessToken(ctx, "rotated", t, map[string]any{
+			"name": t.Name, "self": rotatedByID < 0,
+			"before": map[string]any{"expires": int64(expiresBefore)}, "after": map[string]any{"expires": int64(t.ExpiresUnix)},
+		})
 	})
 }
 

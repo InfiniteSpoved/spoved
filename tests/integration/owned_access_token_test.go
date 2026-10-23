@@ -15,6 +15,7 @@ import (
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	perm_model "forgejo.org/models/perm"
+	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
@@ -184,6 +185,20 @@ func TestOwnedAccessToken(t *testing.T) {
 			_, err = db.GetEngine(db.DefaultContext).ID(deleted.ID).Delete(&auth_model.AccessToken{})
 			require.NoError(t, err)
 			assert.Equal(t, http.StatusUnauthorized, apiStatus(t, "GET", "/api/v1/repos/org3/repo3", deleted.Token, nil))
+
+			// a revoked token keeps its identity's name for history, and grants nothing
+			revoked := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeWrite, "write:repository")
+			require.NoError(t, auth_model.DeleteOwnedAccessToken(audit_model.WithSystem(db.DefaultContext, "test"),
+				auth_model.FindOwnedAccessTokensOptions{OwnerType: auth_model.AccessTokenOwnerOrg, OwnerID: 3}, revoked.ID, 2))
+			assert.Equal(t, http.StatusUnauthorized, apiStatus(t, "GET", "/api/v1/repos/org3/repo3", revoked.Token, nil))
+			doGitCloneFail(gitURL(revoked.Token, repo3))(t)
+			bot, err := user_model.GetPossibleUserByID(db.DefaultContext, user_model.AccessTokenBotID(revoked.ID))
+			require.NoError(t, err)
+			assert.Equal(t, revoked.Name+" [bot]", bot.FullName)
+			assert.False(t, bot.IsActive)
+			perm, err := access_model.GetUserRepoPermission(db.DefaultContext, repo3, bot)
+			require.NoError(t, err)
+			assert.False(t, perm.HasAccess())
 		})
 
 		t.Run("sees owners and packages as an anonymous visitor does", func(t *testing.T) {

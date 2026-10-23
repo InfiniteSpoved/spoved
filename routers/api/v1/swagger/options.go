@@ -240,6 +240,9 @@ type swaggerParameterBodies struct {
 	CreateOwnedAccessTokenOption api.CreateOwnedAccessTokenOption
 
 	// in:body
+	RotateOwnedAccessTokenOption api.RotateOwnedAccessTokenOption
+
+	// in:body
 	UserSettingsOptions api.UserSettingsOptions
 
 	// in:body

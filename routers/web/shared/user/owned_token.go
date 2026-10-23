@@ -5,6 +5,7 @@ package user
 
 import (
 	"errors"
+	"html"
 	"slices"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"forgejo.org/models/perm"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/services/authz"
@@ -30,10 +32,13 @@ var OwnedTokenScopeCategories = []string{"repository", "issue", "package", "orga
 
 // OwnedTokenRow is one token in the list of the Keys and tokens page.
 type OwnedTokenRow struct {
-	Token       *auth_model.AccessToken
-	CreatedBy   *user_model.User
-	Repos       []*repo_model.Repository // the selected repositories of an organization token
-	ExpiresSoon bool                     // expires within 7 days
+	Token         *auth_model.AccessToken
+	CreatedBy     *user_model.User
+	RotatedBy     *user_model.User
+	RotatedSelf   bool                     // last rotated by the token itself
+	Repos         []*repo_model.Repository // the selected repositories of an organization token
+	ExpiresSoon   bool                     // expires within 7 days
+	RotateExpires string                   // the expiry date a rotation gives it, "" for none
 }
 
 // OwnedTokenLevel names the owner of the tokens a Keys and tokens page manages.
@@ -44,11 +49,14 @@ type OwnedTokenLevel struct {
 }
 
 func newOwnedTokenRows(ctx *context.Context, tokens []*auth_model.AccessToken) ([]*OwnedTokenRow, error) {
-	creatorIDs := make([]int64, 0, len(tokens))
+	userIDs := make([]int64, 0, 2*len(tokens))
 	for _, t := range tokens {
-		creatorIDs = append(creatorIDs, t.CreatorID)
+		userIDs = append(userIDs, t.CreatorID)
+		if t.RotatedByID > 0 {
+			userIDs = append(userIDs, t.RotatedByID)
+		}
 	}
-	creators, err := user_model.GetPossibleUserByIDs(ctx, creatorIDs)
+	users, err := user_model.GetPossibleUserByIDs(ctx, userIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -56,14 +64,27 @@ func newOwnedTokenRows(ctx *context.Context, tokens []*auth_model.AccessToken) (
 	if err != nil {
 		return nil, err
 	}
+	userByID := func(id int64) *user_model.User {
+		if i := slices.IndexFunc(users, func(u *user_model.User) bool { return u.ID == id }); i >= 0 {
+			return users[i]
+		}
+		return user_model.NewGhostUser()
+	}
 	soon := timeutil.TimeStampNow().AddDuration(7 * 24 * time.Hour)
 	rows := make([]*OwnedTokenRow, 0, len(tokens))
 	for _, t := range tokens {
-		row := &OwnedTokenRow{Token: t, Repos: reposByToken[t.ID], ExpiresSoon: t.ExpiresUnix != 0 && !t.IsExpired() && t.ExpiresUnix <= soon}
-		if i := slices.IndexFunc(creators, func(u *user_model.User) bool { return u.ID == t.CreatorID }); i >= 0 {
-			row.CreatedBy = creators[i]
-		} else {
-			row.CreatedBy = user_model.NewGhostUser()
+		row := &OwnedTokenRow{
+			Token:       t,
+			CreatedBy:   userByID(t.CreatorID),
+			RotatedSelf: t.RotatedByID == user_model.AccessTokenBotID(t.ID),
+			Repos:       reposByToken[t.ID],
+			ExpiresSoon: t.ExpiresUnix != 0 && !t.IsExpired() && t.ExpiresUnix <= soon,
+		}
+		if !row.RotatedSelf {
+			row.RotatedBy = userByID(t.RotatedByID)
+		}
+		if expires := authz.RotationExpiry(setting.AccessTokenExpiry, t.ExpiresUnix != 0); expires != 0 {
+			row.RotateExpires = expires.FormatDate()
 		}
 		slices.SortFunc(row.Repos, func(a, b *repo_model.Repository) int { return strings.Compare(a.FullName(), b.FullName()) })
 		rows = append(rows, row)
@@ -131,21 +152,27 @@ func LoadCoveringTokens(ctx *context.Context, repo *repo_model.Repository) bool 
 
 // OwnedTokenForm is what the create form posted, kept to show it again after a refusal.
 type OwnedTokenForm struct {
-	Name       string
-	Permission string
-	Scopes     []string
-	ExpiresAt  string
+	Name        string
+	Description string
+	Permission  string
+	Scopes      []string
+	ExpiresAt   string
+	SelfRotate  bool
 }
 
 // ReadOwnedTokenForm reads the create form and puts it back into the page data.
 func ReadOwnedTokenForm(ctx *context.Context) OwnedTokenForm {
 	f := OwnedTokenForm{
-		Name:       strings.TrimSpace(ctx.FormString("token_name")),
-		Permission: ctx.FormString("token_permission"),
-		Scopes:     slices.DeleteFunc(ctx.Req.Form["token_scopes"], func(s string) bool { return s == "" }),
-		ExpiresAt:  ctx.FormString("token_expires_at"),
+		Name:        strings.TrimSpace(ctx.FormString("token_name")),
+		Description: strings.TrimSpace(ctx.FormString("token_description")),
+		Permission:  ctx.FormString("token_permission"),
+		Scopes:      slices.DeleteFunc(ctx.Req.Form["token_scopes"], func(s string) bool { return s == "" }),
+		ExpiresAt:   ctx.FormString("token_expires_at"),
+		SelfRotate:  ctx.FormBool("token_self_rotate"),
 	}
 	ctx.Data["token_name"] = f.Name
+	ctx.Data["token_description"] = f.Description
+	ctx.Data["token_self_rotate"] = f.SelfRotate
 	ctx.Data["token_permission"] = f.Permission
 	ctx.Data["token_scopes"] = f.Scopes
 	ctx.Data["token_expires_at"] = f.ExpiresAt
@@ -164,6 +191,9 @@ func CreateOwnedToken(ctx *context.Context, level OwnedTokenLevel, f OwnedTokenF
 	if f.Name == "" || len(f.Name) > 255 {
 		ctx.Data["Err_TokenName"] = true
 		return refuse(ctx.Locale.TrString("owned_token.error.name"))
+	}
+	if len(f.Description) > 255 {
+		return refuse(ctx.Locale.TrString("owned_token.error.description"))
 	}
 	mode := perm.ParseAccessMode(f.Permission)
 	if f.Permission != "read" && f.Permission != "write" && f.Permission != "admin" {
@@ -184,6 +214,8 @@ func CreateOwnedToken(ctx *context.Context, level OwnedTokenLevel, f OwnedTokenF
 	}
 	t := &auth_model.AccessToken{
 		Name:             f.Name,
+		Description:      f.Description,
+		SelfRotate:       f.SelfRotate,
 		Scope:            scope,
 		OwnerType:        level.Opts.OwnerType,
 		OwnerID:          level.Opts.OwnerID,
@@ -216,16 +248,49 @@ func CreateOwnedToken(ctx *context.Context, level OwnedTokenLevel, f OwnedTokenF
 		return nil
 	}
 	// the value is shown once, in this answer; the form starts over
-	for _, k := range []string{"HasTokenError", "token_name", "token_permission", "token_scopes", "token_expires_at", "TokenScopeAll", "TokenScopeRepoIDs"} {
+	for _, k := range []string{"HasTokenError", "token_name", "token_description", "token_permission", "token_scopes", "token_expires_at", "token_self_rotate", "TokenScopeAll", "TokenScopeRepoIDs"} {
 		delete(ctx.Data, k)
 	}
+	return showNewOwnedToken(ctx, t)
+}
+
+// showNewOwnedToken puts a new or rotated token into the page data, so its secret shows once.
+func showNewOwnedToken(ctx *context.Context, t *auth_model.AccessToken) *auth_model.AccessToken {
+	reposByToken, err := repo_model.BulkGetRepositoriesForAccessTokens(ctx, []*auth_model.AccessToken{t}, nil)
+	if err != nil {
+		ctx.ServerError("BulkGetRepositoriesForAccessTokens", err)
+		return nil
+	}
 	ctx.Data["NewOwnedToken"] = t
+	ctx.Data["NewOwnedTokenRepos"] = reposByToken[t.ID]
 	return t
+}
+
+// RotateOwnedToken gives the token of the form's id of level a new secret with the default lifetime and shows it
+// once; a token of another owner is not found. It returns false when it answered already.
+func RotateOwnedToken(ctx *context.Context, level OwnedTokenLevel) bool {
+	t, err := authz.RotateOwnedAccessToken(ctx, level.Opts, ctx.FormInt64("id"), "", optional.None[timeutil.TimeStamp](), ctx.Doer.ID)
+	if err != nil {
+		if auth_model.IsErrAccessTokenNotExist(err) {
+			ctx.Flash.Error(ctx.Tr("error.not_found"))
+		} else if errors.Is(err, auth_model.ErrOwnedTokenScope) || errors.Is(err, authz.ErrOwnedTokenNoScope) {
+			ctx.Flash.Error(ctx.Tr("owned_token.error.scope"))
+		} else if has, msg := TranslateAccessTokenValidationError(ctx.Base, err).Get(); has {
+			ctx.Flash.Error(html.EscapeString(msg)) // rendered as HTML
+		} else {
+			ctx.ServerError("RotateOwnedAccessToken", err)
+			return false
+		}
+		ctx.Redirect(level.Link + "#access-tokens")
+		return false
+	}
+	ctx.Data["NewOwnedTokenRotated"] = true
+	return showNewOwnedToken(ctx, t) != nil
 }
 
 // DeleteOwnedToken revokes the token of the form's id of level; a token of another owner is not found.
 func DeleteOwnedToken(ctx *context.Context, level OwnedTokenLevel) {
-	if err := auth_model.DeleteOwnedAccessToken(ctx, level.Opts, ctx.FormInt64("id")); err != nil {
+	if err := auth_model.DeleteOwnedAccessToken(ctx, level.Opts, ctx.FormInt64("id"), ctx.Doer.ID); err != nil {
 		if auth_model.IsErrAccessTokenNotExist(err) {
 			ctx.Flash.Error(ctx.Tr("error.not_found"))
 		} else {

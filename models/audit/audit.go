@@ -110,7 +110,7 @@ type Event struct {
 
 // Fields lists the data keys kept per target type. Secrets (token values, hashes, salts, last eight) are never listed.
 var Fields = map[string][]string{
-	"access_token": {"name", "scopes", "expires", "resource_all_repos", "repo_ids", "mode"},
+	"access_token": {"name", "scopes", "expires", "resource_all_repos", "repo_ids", "mode", "description", "self_rotate", "self"},
 	"authorized_integration": {
 		"name", "issuer", "scopes", "resource_all_repos", "repo_ids", "ui", "claim_rules_changed",
 	},

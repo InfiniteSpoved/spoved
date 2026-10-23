@@ -35,6 +35,13 @@ func AccessTokenNew(ctx *context.Context) {
 	}
 }
 
+// AccessTokenRotate gives an access token of the repository a new secret and shows it once
+func AccessTokenRotate(ctx *context.Context) {
+	if user.RotateOwnedToken(ctx, repoTokenLevel(ctx)) && loadKeysPage(ctx) {
+		ctx.HTML(http.StatusOK, tplDeployKeys)
+	}
+}
+
 // AccessTokenDelete revokes an access token of the repository
 func AccessTokenDelete(ctx *context.Context) {
 	user.DeleteOwnedToken(ctx, repoTokenLevel(ctx))

@@ -29,6 +29,22 @@ type AccessToken struct {
 	// The login of who created a token of an organization, a project or a repository. Omitted for a personal access
 	// token.
 	CreatedBy string `json:"created_by,omitempty"`
+	// What a token of an organization, a project or a repository is for, if its creator said
+	Description string `json:"description,omitempty"`
+	// Whether a token of an organization, a project or a repository may rotate itself (POST /tokens/self/rotate)
+	SelfRotate bool `json:"self_rotate,omitempty"`
+	// When a token of an organization, a project or a repository was last used, omitted if never
+	// swagger:strfmt date-time
+	LastUsed *time.Time `json:"last_used_at,omitempty"`
+	// The client address of that use, omitted when unknown
+	LastUsedIP string `json:"last_used_ip,omitempty"`
+	// When a token of an organization, a project or a repository was last rotated, omitted if never
+	// swagger:strfmt date-time
+	Rotated *time.Time `json:"rotated_at,omitempty"`
+	// The login of who rotated it last, omitted when it rotated itself (rotated_by_self) or never was
+	RotatedBy string `json:"rotated_by,omitempty"`
+	// Whether it rotated itself last
+	RotatedBySelf bool `json:"rotated_by_self,omitempty"`
 }
 
 // AccessTokenList represents a list of API access token.
@@ -66,6 +82,19 @@ type CreateOwnedAccessTokenOption struct {
 	// every repository of the organization, also ones created later.
 	Repositories []string `json:"repositories"`
 	// When it expires. Required by default, at most 365 days from today ([security] ACCESS_TOKEN_EXPIRY_REQUIRED and ACCESS_TOKEN_MAX_LIFETIME_DAYS); omit for never only when the instance allows it
+	// swagger:strfmt date-time
+	ExpiresAt *time.Time `json:"expires_at"`
+	// What the token is for, at most 255 characters
+	Description string `json:"description" binding:"MaxSize(255)"`
+	// Let the token rotate itself with POST /tokens/self/rotate
+	SelfRotate bool `json:"self_rotate"`
+}
+
+// RotateOwnedAccessTokenOption options to rotate an access token of an organization, a project or a repository
+// swagger:model RotateOwnedAccessTokenOption
+type RotateOwnedAccessTokenOption struct {
+	// When the new secret expires; omitted gives the default lifetime (30 days, capped at the instance's maximum),
+	// or none for a token without an expiry where the instance allows it
 	// swagger:strfmt date-time
 	ExpiresAt *time.Time `json:"expires_at"`
 }

@@ -55,7 +55,7 @@ func (a *AccessToken) Verify(req *http.Request, w http.ResponseWriter, _ auth.Se
 		return &auth.AuthenticationError{Error: fmt.Errorf("access token CheckScopePolicyInUse: %w", err)}
 	}
 
-	if err = token.UpdateLastUsed(req.Context()); err != nil {
+	if err = token.UpdateLastUsed(req.Context(), auth.TokenUseIP(req)); err != nil {
 		log.Error("UpdateLastUsed:  %v", err)
 	}
 

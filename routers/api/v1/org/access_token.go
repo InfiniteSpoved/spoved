@@ -245,3 +245,91 @@ func DeleteProjectAccessToken(ctx *context.APIContext) {
 		utils.DeleteOwnedAccessToken(ctx, owner, ctx.ParamsInt64(":token_id"))
 	}
 }
+
+// RotateAccessToken rotates an access token of an organization
+func RotateAccessToken(ctx *context.APIContext) {
+	// swagger:operation POST /orgs/{org}/tokens/{id}/rotate organization orgRotateAccessToken
+	// ---
+	// summary: Rotate an access token of an organization, giving it a new secret shown only in this answer and keeping everything else
+	// description: The old secret stops working at once. An expired token may be rotated.
+	// consumes:
+	// - application/json
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: org
+	//   in: path
+	//   description: name of the organization
+	//   type: string
+	//   required: true
+	// - name: id
+	//   in: path
+	//   description: id of the token
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// - name: body
+	//   in: body
+	//   schema:
+	//     "$ref": "#/definitions/RotateOwnedAccessTokenOption"
+	// responses:
+	//   "200":
+	//     "$ref": "#/responses/AccessToken"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
+
+	if owner, ok := orgTokenOwner(ctx); ok {
+		utils.RotateOwnedAccessToken(ctx, owner, ctx.ParamsInt64(":id"))
+	}
+}
+
+// RotateProjectAccessToken rotates an access token of a project
+func RotateProjectAccessToken(ctx *context.APIContext) {
+	// swagger:operation POST /orgs/{org}/projects/{id}/tokens/{token_id}/rotate organization orgProjectRotateAccessToken
+	// ---
+	// summary: Rotate an access token of a project, giving it a new secret shown only in this answer and keeping everything else
+	// description: The old secret stops working at once. An expired token may be rotated.
+	// consumes:
+	// - application/json
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: org
+	//   in: path
+	//   description: name of the organization
+	//   type: string
+	//   required: true
+	// - name: id
+	//   in: path
+	//   description: id of the project
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// - name: token_id
+	//   in: path
+	//   description: id of the token
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// - name: body
+	//   in: body
+	//   schema:
+	//     "$ref": "#/definitions/RotateOwnedAccessTokenOption"
+	// responses:
+	//   "200":
+	//     "$ref": "#/responses/AccessToken"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
+
+	if owner, ok := projectTokenOwner(ctx); ok {
+		utils.RotateOwnedAccessToken(ctx, owner, ctx.ParamsInt64(":token_id"))
+	}
+}

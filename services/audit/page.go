@@ -16,7 +16,7 @@ var ActionKeys = []string{
 	"admin.queue.items_removed", "org.*", "org.organization.*", "org.team.*", "org.verified_domain.*",
 	"audit.*", "audit.exported", "audit.instance.started",
 	"credential.*", "credential.access_token.*", "credential.access_token.created", "credential.access_token.deleted",
-	"credential.access_token.regenerated",
+	"credential.access_token.regenerated", "credential.access_token.rotated",
 }
 
 // Page returns at most limit entries of f, newest first, from the keyset position of f (before_id, after_id), and

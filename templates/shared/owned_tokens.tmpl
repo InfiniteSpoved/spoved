@@ -8,11 +8,12 @@
 <div class="ui attached segment">
 	{{with .NewOwnedToken}}
 		<div class="ui positive message" id="new-access-token">
-			<p>{{ctx.Locale.Tr "owned_token.created" .Name}}</p>
+			<p>{{if $.NewOwnedTokenRotated}}{{ctx.Locale.Tr "owned_token.rotated" .Name}}{{else}}{{ctx.Locale.Tr "owned_token.created" .Name}}{{end}}</p>
 			<div class="tw-flex tw-items-center tw-gap-2 tw-my-2">
 				<code class="tw-break-anywhere" id="new-access-token-value">{{.Token}}</code>
 				<button class="ui basic label button" aria-label="{{ctx.Locale.Tr "copy"}}" data-clipboard-target="#new-access-token-value">{{svg "octicon-copy" 14}}</button>
 			</div>
+			<p id="new-access-token-summary">{{template "shared/owned_token_summary" (dict "ctxData" $ "Token" . "Repos" $.NewOwnedTokenRepos)}}</p>
 			<p class="tw-mb-1">{{ctx.Locale.Tr "owned_token.usage_git"}}</p>
 			<pre class="tw-my-1 tw-whitespace-pre-wrap tw-break-anywhere"><code>git clone {{$.OwnedTokenCloneURL}}</code></pre>
 			<p class="tw-mb-1">{{ctx.Locale.Tr "owned_token.usage_api"}}</p>
@@ -26,6 +27,10 @@
 			<div class="required field {{if .Err_TokenName}}error{{end}}">
 				<label for="access-token-name">{{ctx.Locale.Tr "owned_token.name"}}</label>
 				<input id="access-token-name" name="token_name" value="{{.token_name}}" maxlength="255" required>
+			</div>
+			<div class="field">
+				<label for="access-token-description">{{ctx.Locale.Tr "owned_token.description"}}</label>
+				<input id="access-token-description" name="token_description" value="{{.token_description}}" maxlength="255">
 			</div>
 			<div class="grouped fields">
 				<label>{{ctx.Locale.Tr "owned_token.permission"}}</label>
@@ -71,6 +76,13 @@
 				<input id="access-token-expires-at" name="token_expires_at" type="date" value="{{.token_expires_at}}"{{if .TokenExpiryMaxDate}} max="{{.TokenExpiryMaxDate}}"{{end}}{{if .TokenExpiryRequired}} required{{end}}>
 				{{if .TokenExpiryMaxDate}}<span class="help">{{ctx.Locale.Tr "credential.expires_at.max_help" .TokenExpiryMaxDays}}</span>{{else if not .TokenExpiryRequired}}<span class="help">{{ctx.Locale.Tr "credential.expires_at.help"}}</span>{{end}}
 			</div>
+			<div class="field">
+				<div class="ui checkbox">
+					<input id="access-token-self-rotate" name="token_self_rotate" type="checkbox" {{if .token_self_rotate}}checked{{end}}>
+					<label for="access-token-self-rotate">{{ctx.Locale.Tr "owned_token.self_rotate"}}</label>
+					<small class="tw-pl-[26px]">{{ctx.Locale.Tr "owned_token.self_rotate_help"}}</small>
+				</div>
+			</div>
 			<button class="ui primary button" id="access-token-create">{{ctx.Locale.Tr "owned_token.create"}}</button>
 			<button class="ui hide-panel button" data-panel="#add-access-token-panel">{{ctx.Locale.Tr "cancel"}}</button>
 		</form>
@@ -97,16 +109,24 @@
 							<span class="ui tiny basic label">{{if eq $t.Mode 1}}{{ctx.Locale.Tr "owned_token.permission.read_short"}}{{else if eq $t.Mode 2}}{{ctx.Locale.Tr "owned_token.permission.write_short"}}{{else}}{{ctx.Locale.Tr "owned_token.permission.admin_short"}}{{end}}</span>
 							{{if $t.IsExpired}}<span class="ui tiny red label">{{ctx.Locale.Tr "owned_token.expired"}}</span>{{else if .ExpiresSoon}}<span class="ui tiny yellow label">{{ctx.Locale.Tr "owned_token.expires_soon"}}</span>{{end}}
 						</div>
-						<div class="flex-item-body">{{ctx.Locale.Tr "owned_token.scopes"}}: {{StringUtils.Join $t.Scope.StringSlice ", "}}</div>
+						{{if $t.Description}}<div class="flex-item-body">{{$t.Description}}</div>{{end}}
+						<div class="flex-item-body">{{ctx.Locale.Tr "owned_token.scopes"}}: {{StringUtils.Join $t.Scope.StringSlice ", "}}{{if $t.SelfRotate}} · {{ctx.Locale.Tr "owned_token.self_rotate_short"}}{{end}}</div>
 						<div class="flex-item-body">
 							{{ctx.Locale.Tr "owned_token.coverage"}}:
 							{{if eq $.OwnedTokenLevel 1}}{{if $t.ResourceAllRepos}}{{ctx.Locale.Tr "owned_token.covers.org_all"}}{{else}}{{range $i, $r := .Repos}}{{if $i}}, {{end}}{{$r.FullName}}{{end}}{{end}}{{else if $.RepoGroup}}{{ctx.Locale.Tr "owned_token.covers.project" $.RepoGroup.Name}}{{else}}{{ctx.Locale.Tr "owned_token.covers.repo"}}{{end}}
 						</div>
 						<div class="flex-item-body">
-							<p>{{ctx.Locale.Tr "owned_token.created_by" .CreatedBy.GetDisplayName (DateUtils.AbsoluteShort $t.CreatedUnix)}} — {{svg "octicon-info"}} {{if $t.HasUsed}}{{ctx.Locale.Tr "settings.last_used"}} <span {{if $t.HasRecentActivity}}class="text green"{{end}}>{{DateUtils.AbsoluteShort $t.UpdatedUnix}}</span>{{else}}{{ctx.Locale.Tr "settings.no_activity"}}{{end}}{{template "shared/expiry_label" $t}}</p>
+							<p>{{ctx.Locale.Tr "owned_token.created_by" .CreatedBy.GetDisplayName (DateUtils.AbsoluteShort $t.CreatedUnix)}} — {{svg "octicon-info"}} {{if $t.HasUsed}}{{ctx.Locale.Tr "settings.last_used"}} <span {{if $t.HasRecentActivity}}class="text green"{{end}}>{{DateUtils.AbsoluteShort $t.UpdatedUnix}}</span>{{if $t.LastUsedIP}} ({{$t.LastUsedIP}}){{end}}{{else}}{{ctx.Locale.Tr "settings.no_activity"}}{{end}}{{template "shared/expiry_label" $t}}</p>
 						</div>
+						{{if $t.RotatedUnix}}
+							<div class="flex-item-body last-rotated">{{if .RotatedSelf}}{{ctx.Locale.Tr "owned_token.rotated_self" (DateUtils.AbsoluteShort $t.RotatedUnix)}}{{else}}{{ctx.Locale.Tr "owned_token.rotated_by" .RotatedBy.GetDisplayName (DateUtils.AbsoluteShort $t.RotatedUnix)}}{{end}}</div>
+						{{end}}
 					</div>
 					<div class="flex-item-trailing">
+						<button class="ui primary tiny button show-modal" data-modal="#rotate-access-token" data-modal-token-id="{{$t.ID}}" data-modal-name="{{$t.Name}}"
+							data-modal-rotate-expiry="{{if .RotateExpires}}{{ctx.Locale.TrString "owned_token.rotate_expiry" .RotateExpires}}{{else}}{{ctx.Locale.TrString "owned_token.rotate_no_expiry"}}{{end}}">
+							{{svg "octicon-sync" 16 "tw-mr-1"}}{{ctx.Locale.Tr "owned_token.rotate"}}
+						</button>
 						<button class="ui red tiny button delete-button" data-modal-id="revoke-access-token" data-url="{{$.OwnedTokensLink}}/delete" data-id="{{$t.ID}}" data-name="{{$t.Name}}">
 							{{svg "octicon-trash" 16 "tw-mr-1"}}{{ctx.Locale.Tr "owned_token.revoke"}}
 						</button>
@@ -135,3 +155,16 @@
 	</div>
 	{{template "base/modal_actions_confirm" (dict "ModalButtonTypes" "confirm" "ModalButtonOkText" (ctx.Locale.Tr "owned_token.revoke"))}}
 </div>
+
+<dialog class="modal" id="rotate-access-token">
+	<article>
+		<header>{{svg "octicon-sync"}} {{ctx.Locale.Tr "owned_token.rotate_title"}}</header>
+		<form class="ui form" action="{{.OwnedTokensLink}}/rotate" method="post">
+			<div class="content">
+				<input type="hidden" name="id" class="token-id">
+				<p>{{ctx.Locale.Tr "owned_token.rotate_desc" (`<strong class="name"></strong>`|TrustHTML)}} <span class="rotate-expiry"></span></p>
+			</div>
+			{{template "base/modal_actions_confirm" (dict "ModalButtonTypes" "confirm" "ModalButtonOkText" (ctx.Locale.Tr "owned_token.rotate"))}}
+		</form>
+	</article>
+</dialog>

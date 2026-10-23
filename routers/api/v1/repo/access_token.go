@@ -121,3 +121,47 @@ func DeleteAccessToken(ctx *context.APIContext) {
 
 	utils.DeleteOwnedAccessToken(ctx, repoTokenOwner(ctx), ctx.ParamsInt64(":id"))
 }
+
+// RotateAccessToken rotates an access token of a repository
+func RotateAccessToken(ctx *context.APIContext) {
+	// swagger:operation POST /repos/{owner}/{repo}/tokens/{id}/rotate repository repoRotateAccessToken
+	// ---
+	// summary: Rotate an access token of a repository, giving it a new secret shown only in this answer and keeping everything else
+	// description: The old secret stops working at once. An expired token may be rotated.
+	// consumes:
+	// - application/json
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: id
+	//   in: path
+	//   description: id of the token
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// - name: body
+	//   in: body
+	//   schema:
+	//     "$ref": "#/definitions/RotateOwnedAccessTokenOption"
+	// responses:
+	//   "200":
+	//     "$ref": "#/responses/AccessToken"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
+
+	utils.RotateOwnedAccessToken(ctx, repoTokenOwner(ctx), ctx.ParamsInt64(":id"))
+}
