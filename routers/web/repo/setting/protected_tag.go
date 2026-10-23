@@ -6,6 +6,7 @@ package setting
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	git_model "forgejo.org/models/git"
@@ -84,9 +85,9 @@ func EditProtectedTag(ctx *context.Context) {
 	}
 
 	ctx.Data["name_pattern"] = pt.NamePattern
-	ctx.Data["allowlist_users"] = strings.Join(base.Int64sToStrings(pt.AllowlistUserIDs), ",")
+	ctx.Data["allowlist_users"] = joinIDs(userIDsOnly(pt.AllowlistUserIDs))
 	ctx.Data["allowlist_teams"] = strings.Join(base.Int64sToStrings(pt.AllowlistTeamIDs), ",")
-	ctx.Data["allowlist_deploy_key_ids"] = strings.Join(base.Int64sToStrings(pt.AllowlistDeployKeyIDs), ",")
+	ctx.Data["allowlist_deploy_key_ids"] = joinIDs(append(slices.Clone(pt.AllowlistDeployKeyIDs), tokenIDsOnly(pt.AllowlistUserIDs)...))
 
 	ctx.HTML(http.StatusOK, tplTags)
 }
@@ -167,6 +168,12 @@ func setTagsContext(ctx *context.Context) error {
 		return err
 	}
 	ctx.Data["DeployKeys"] = deployKeys
+	tokens, err := getWriteTokens(ctx)
+	if err != nil {
+		ctx.ServerError("getWriteTokens", err)
+		return err
+	}
+	ctx.Data["AllowlistTokens"] = tokens
 
 	if ctx.Repo.Owner.IsOrganization() {
 		teams, err := organization.OrgFromUser(ctx.Repo.Owner).TeamsWithAccessToRepo(ctx, ctx.Repo.Repository.ID, perm.AccessModeRead)
@@ -180,15 +187,27 @@ func setTagsContext(ctx *context.Context) error {
 	return nil
 }
 
-// setAllowlistDeployKeyIDs sets the deploy keys allowed by the protected tag, keeping only the write
-// deploy keys of the repository. It returns false if an error response was written.
+// setAllowlistDeployKeyIDs sets the deploy keys and tokens allowed by the protected tag from its picker, keeping only
+// the write deploy keys and tokens that reach the repository; tokens join the users (call it after setting them). It
+// returns false if an error response was written.
 func setAllowlistDeployKeyIDs(ctx *context.Context, pt *git_model.ProtectedTag, keyIDs string) bool {
 	ids, _ := base.StringsToInt64s(strings.Split(keyIDs, ","))
 	var err error
-	pt.AllowlistDeployKeyIDs, err = git_model.FilterWriteDeployKeyIDs(ctx, ctx.Repo.Repository, ids)
+	pt.AllowlistDeployKeyIDs, err = git_model.FilterWriteDeployKeyIDs(ctx, ctx.Repo.Repository, keyIDsOnly(ids))
 	if err != nil {
 		ctx.ServerError("FilterWriteDeployKeyIDs", err)
 		return false
+	}
+	tokens, err := getWriteTokens(ctx)
+	if err != nil {
+		ctx.ServerError("getWriteTokens", err)
+		return false
+	}
+	pt.AllowlistUserIDs = userIDsOnly(pt.AllowlistUserIDs)
+	for _, id := range tokenIDsOnly(ids) {
+		if slices.ContainsFunc(tokens, func(t *allowlistToken) bool { return t.BotID == id }) {
+			pt.AllowlistUserIDs = append(pt.AllowlistUserIDs, id)
+		}
 	}
 	return true
 }

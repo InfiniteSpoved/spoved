@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"forgejo.org/models/auth"
+	"forgejo.org/models/db"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 )
@@ -154,7 +155,42 @@ func GetAccessTokenBot(ctx context.Context, id int64) (*User, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	return NewAccessTokenBot(t), nil
+	bot := NewAccessTokenBot(t)
+	bot.botTokensPath, err = accessTokensPath(ctx, t)
+	return bot, err
+}
+
+// accessTokensPath returns the path (below the root URL) of the Keys and tokens page that manages the token, "" when
+// its owner is gone.
+func accessTokensPath(ctx context.Context, t *auth.AccessToken) (string, error) {
+	var names struct {
+		OwnerName, Name, GroupName string
+	}
+	var has bool
+	var err error
+	switch t.OwnerType {
+	case auth.AccessTokenOwnerRepo:
+		has, err = db.GetEngine(ctx).Table("repository").Where("id = ?", t.OwnerID).Cols("owner_name", "name", "group_name").Get(&names)
+		if has && names.GroupName != "" {
+			return url.PathEscape(names.OwnerName) + "/" + url.PathEscape(names.GroupName) + "/" + url.PathEscape(names.Name) + "/settings/keys", err
+		} else if has {
+			return url.PathEscape(names.OwnerName) + "/" + url.PathEscape(names.Name) + "/settings/keys", err
+		}
+	case auth.AccessTokenOwnerOrg:
+		has, err = db.GetEngine(ctx).Table("user").Where("id = ?", t.OwnerID).Cols("name").Get(&names.Name)
+		if has {
+			return "org/" + url.PathEscape(names.Name) + "/settings/keys", err
+		}
+	case auth.AccessTokenOwnerProject:
+		if has, err = db.GetEngine(ctx).Table("user").Where("id = ?", t.OwnerID).Cols("name").Get(&names.OwnerName); err != nil || !has {
+			return "", err
+		}
+		has, err = db.GetEngine(ctx).Table("repo_group").Where("owner_id = ? AND id = ?", t.OwnerID, t.GroupID).Cols("name").Get(&names.Name)
+		if has {
+			return url.PathEscape(names.OwnerName) + "/" + url.PathEscape(names.Name) + "/-/settings/keys", err
+		}
+	}
+	return "", err
 }
 
 // IsAccessTokenBot reports whether the user is the identity of an organization, project or repository token.

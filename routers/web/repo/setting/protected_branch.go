@@ -15,6 +15,7 @@ import (
 	"time"
 
 	asymkey_model "forgejo.org/models/asymkey"
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	"forgejo.org/models/organization"
@@ -94,7 +95,7 @@ func SettingsProtectedBranch(c *context.Context) {
 		return
 	}
 	c.Data["Users"] = users
-	c.Data["whitelist_users"] = strings.Join(base.Int64sToStrings(rule.WhitelistUserIDs), ",")
+	c.Data["whitelist_users"] = joinIDs(userIDsOnly(rule.WhitelistUserIDs))
 	c.Data["merge_whitelist_users"] = strings.Join(base.Int64sToStrings(rule.MergeWhitelistUserIDs), ",")
 	c.Data["approvals_whitelist_users"] = strings.Join(base.Int64sToStrings(rule.ApprovalsWhitelistUserIDs), ",")
 	deployKeys, err := getWriteDeployKeys(c)
@@ -103,11 +104,18 @@ func SettingsProtectedBranch(c *context.Context) {
 		return
 	}
 	c.Data["DeployKeys"] = deployKeys
-	c.Data["whitelist_deploy_key_ids"] = strings.Join(base.Int64sToStrings(rule.WhitelistDeployKeyIDs), ",")
-	c.Data["delete_allowlist_users"] = strings.Join(base.Int64sToStrings(rule.DeleteAllowlistUserIDs), ",")
-	c.Data["delete_allowlist_deploy_key_ids"] = strings.Join(base.Int64sToStrings(rule.DeleteAllowlistDeployKeyIDs), ",")
-	c.Data["force_push_allowlist_users"] = strings.Join(base.Int64sToStrings(rule.ForcePushAllowlistUserIDs), ",")
-	c.Data["force_push_allowlist_deploy_key_ids"] = strings.Join(base.Int64sToStrings(rule.ForcePushAllowlistDeployKeyIDs), ",")
+	tokens, err := getWriteTokens(c)
+	if err != nil {
+		c.ServerError("getWriteTokens", err)
+		return
+	}
+	c.Data["AllowlistTokens"] = tokens
+	// the deploy key pickers also hold the tokens, which the rule stores as their identities' user IDs
+	c.Data["whitelist_deploy_key_ids"] = joinIDs(append(slices.Clone(rule.WhitelistDeployKeyIDs), tokenIDsOnly(rule.WhitelistUserIDs)...))
+	c.Data["delete_allowlist_users"] = joinIDs(userIDsOnly(rule.DeleteAllowlistUserIDs))
+	c.Data["delete_allowlist_deploy_key_ids"] = joinIDs(append(slices.Clone(rule.DeleteAllowlistDeployKeyIDs), tokenIDsOnly(rule.DeleteAllowlistUserIDs)...))
+	c.Data["force_push_allowlist_users"] = joinIDs(userIDsOnly(rule.ForcePushAllowlistUserIDs))
+	c.Data["force_push_allowlist_deploy_key_ids"] = joinIDs(append(slices.Clone(rule.ForcePushAllowlistDeployKeyIDs), tokenIDsOnly(rule.ForcePushAllowlistUserIDs)...))
 	c.Data["status_check_contexts"] = strings.Join(rule.StatusCheckContexts, "\n")
 	contexts, _ := git_model.FindRepoRecentCommitStatusContexts(c, c.Repo.Repository.ID, 7*24*time.Hour) // Find last week status check contexts
 	c.Data["recent_status_checks"] = contexts
@@ -252,6 +260,8 @@ func ProtectBranchFromForm(ctx *context.Context, f *forms.ProtectBranchForm, pro
 		if strings.TrimSpace(f.WhitelistDeployKeyIDs) != "" {
 			whitelistDeployKeys, _ = base.StringsToInt64s(strings.Split(f.WhitelistDeployKeyIDs, ","))
 		}
+		whitelistUsers = append(userIDsOnly(whitelistUsers), tokenIDsOnly(whitelistDeployKeys)...)
+		whitelistDeployKeys = keyIDsOnly(whitelistDeployKeys)
 	default:
 		protectBranch.CanPush = false
 		protectBranch.EnableWhitelist = false
@@ -329,12 +339,12 @@ func ProtectBranchFromForm(ctx *context.Context, f *forms.ProtectBranchForm, pro
 		ApprovalsUserIDs: approvalsWhitelistUsers,
 		ApprovalsTeamIDs: approvalsWhitelistTeams,
 
-		DeleteUserIDs:         parseIDList(f.DeleteAllowlistUsers),
+		DeleteUserIDs:         append(userIDsOnly(parseIDList(f.DeleteAllowlistUsers)), tokenIDsOnly(parseIDList(f.DeleteAllowlistDeployKeyIDs))...),
 		DeleteTeamIDs:         parseIDList(f.DeleteAllowlistTeams),
-		DeleteDeployKeyIDs:    parseIDList(f.DeleteAllowlistDeployKeyIDs),
-		ForcePushUserIDs:      parseIDList(f.ForcePushAllowlistUsers),
+		DeleteDeployKeyIDs:    keyIDsOnly(parseIDList(f.DeleteAllowlistDeployKeyIDs)),
+		ForcePushUserIDs:      append(userIDsOnly(parseIDList(f.ForcePushAllowlistUsers)), tokenIDsOnly(parseIDList(f.ForcePushAllowlistDeployKeyIDs))...),
 		ForcePushTeamIDs:      parseIDList(f.ForcePushAllowlistTeams),
-		ForcePushDeployKeyIDs: parseIDList(f.ForcePushAllowlistDeployKeyIDs),
+		ForcePushDeployKeyIDs: keyIDsOnly(parseIDList(f.ForcePushAllowlistDeployKeyIDs)),
 	}, ""
 }
 
@@ -443,6 +453,56 @@ func getWriteDeployKeys(ctx *context.Context) ([]*asymkey_model.DeployKey, error
 		}
 	}
 	return keys, nil
+}
+
+// allowlistToken is a token of the repository, or of its organization or project covering it, with write or admin
+// permission: what branch and tag protection may allow beside deploy keys. In the deploy key pickers its value is
+// its identity's user ID (negative, unlike a key ID), and the rule stores it with the users.
+type allowlistToken struct {
+	BotID     int64
+	Name      string
+	OwnerType auth_model.AccessTokenOwnerType
+}
+
+// getWriteTokens returns the tokens branch and tag protection rules of the repository may allow.
+func getWriteTokens(ctx *context.Context) ([]*allowlistToken, error) {
+	repo := ctx.Repo.Repository
+	tokens, err := db.Find[auth_model.AccessToken](ctx, auth_model.FindOwnedAccessTokensOptions{
+		ListOptions: db.ListOptionsAll, OwnerType: auth_model.AccessTokenOwnerRepo, OwnerID: repo.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	covering, err := auth_model.FindOwnedAccessTokensCoveringRepo(ctx, repo.ID, repo.OwnerID, repo.GroupID)
+	if err != nil {
+		return nil, err
+	}
+	var out []*allowlistToken
+	for _, t := range append(tokens, covering...) {
+		if t.Mode >= perm.AccessModeWrite && t.IsUsable() {
+			out = append(out, &allowlistToken{BotID: user_model.AccessTokenBotID(t.ID), Name: t.Name, OwnerType: t.OwnerType})
+		}
+	}
+	return out, nil
+}
+
+func joinIDs(ids []int64) string {
+	return strings.Join(base.Int64sToStrings(ids), ",")
+}
+
+// userIDsOnly drops the token identities from a user allow-list.
+func userIDsOnly(ids []int64) []int64 {
+	return slices.DeleteFunc(slices.Clone(ids), user_model.IsAccessTokenBotID)
+}
+
+// tokenIDsOnly keeps the token identities of an allow-list.
+func tokenIDsOnly(ids []int64) []int64 {
+	return slices.DeleteFunc(slices.Clone(ids), func(id int64) bool { return !user_model.IsAccessTokenBotID(id) })
+}
+
+// keyIDsOnly keeps the deploy key IDs a picker sent.
+func keyIDsOnly(ids []int64) []int64 {
+	return slices.DeleteFunc(slices.Clone(ids), func(id int64) bool { return id <= 0 })
 }
 
 // parseIDList parses the comma-separated IDs of a dropdown. An invalid list gives no IDs.

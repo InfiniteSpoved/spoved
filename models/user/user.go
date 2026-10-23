@@ -187,6 +187,8 @@ type User struct {
 	// BotToken is the token of an organization, a project or a repository this identity acts for (see
 	// NewAccessTokenBot); nil for every stored user.
 	BotToken *auth.AccessToken `xorm:"-"`
+	// botTokensPath is the path (below the root URL) of the list where BotToken is managed, "" when unknown
+	botTokensPath string `xorm:"-"`
 
 	// If you add new fields that might be used to store abusive content (mainly string fields),
 	// please also add them in the UserData struct and the corresponding constructor.
@@ -400,6 +402,12 @@ func (u *User) DashboardLink() string {
 
 // HomeLink returns the user or organization home page link.
 func (u *User) HomeLink() string {
+	if u.IsAccessTokenBot() { // no profile: the list where the token is managed
+		if u.botTokensPath == "" {
+			return ""
+		}
+		return setting.AppSubURL + "/" + u.botTokensPath
+	}
 	if u.IsGhost() {
 		return ""
 	}
@@ -408,6 +416,12 @@ func (u *User) HomeLink() string {
 
 // HTMLURL returns the user or organization's full link.
 func (u *User) HTMLURL() string {
+	if u.IsAccessTokenBot() {
+		if u.botTokensPath == "" {
+			return ""
+		}
+		return setting.AppURL + u.botTokensPath
+	}
 	if u.IsGhost() {
 		return ""
 	}
@@ -585,6 +599,9 @@ func (u *User) EmailTo(overrideMail ...string) string {
 // GetDisplayName returns full name if it's not empty and DEFAULT_SHOW_FULL_NAME is set,
 // returns username otherwise.
 func (u *User) GetDisplayName() string {
+	if u.IsAccessTokenBot() { // its name is the token's, its user name a placeholder
+		return u.FullName
+	}
 	if setting.UI.DefaultShowFullName {
 		trimmed := strings.TrimSpace(u.FullName)
 		if len(trimmed) > 0 {

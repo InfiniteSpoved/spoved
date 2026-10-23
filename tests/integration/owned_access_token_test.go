@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	perm_model "forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
@@ -21,6 +24,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
 	repo_service "forgejo.org/services/repository"
 
@@ -110,6 +114,14 @@ func TestOwnedAccessToken(t *testing.T) {
 			assert.Equal(t, user_model.AccessTokenBotID(token.ID), issue.PosterID)
 			assert.Equal(t, token.Name+" [bot]", apiIssue.Poster.FullName)
 
+			// the issue page names the token, marks it a bot and links to where it is managed, never to a profile
+			resp := loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/org3/repo3/issues/%d", apiIssue.Index)), http.StatusOK)
+			author := NewHTMLParser(t, resp.Body).Find(".timeline-item .comment-header a.author").First()
+			assert.Equal(t, token.Name, strings.TrimSpace(author.Text()))
+			href, _ := author.Attr("href")
+			assert.Equal(t, "/org3/repo3/settings/keys", href)
+			assert.Contains(t, author.Parent().Text(), "repository token")
+
 			assert.Equal(t, http.StatusForbidden, apiStatus(t, "GET", "/api/v1/repos/org3/repo3", token.Token, nil), "no repository scope")
 		})
 
@@ -123,6 +135,67 @@ func TestOwnedAccessToken(t *testing.T) {
 			assert.False(t, review.Official)
 			// user1's pending review on the same pull request is left alone
 			assert.Equal(t, issues_model.ReviewTypePending, unittest.AssertExistsAndLoadBean(t, &issues_model.Review{ID: 4}).Type)
+
+			// with a rule that requires approvals, the merge box shows it and says it doesn't count
+			pb := &git_model.ProtectedBranch{RepoID: 1, RuleName: "master", RequiredApprovals: 1}
+			require.NoError(t, git_model.UpdateProtectBranch(db.DefaultContext, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1}), pb, git_model.WhitelistOptions{}))
+			defer func() {
+				require.NoError(t, git_model.DeleteProtectedBranch(db.DefaultContext, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1}), pb.ID))
+			}()
+			session := loginUser(t, "user2")
+			testEditFileToNewBranch(t, session, "user2", "repo1", "master", "bot-approved", "README.md", "Hello, World\n(bot)\n")
+			elem := strings.Split(test.RedirectURL(testPullCreate(t, session, "user2", "repo1", true, "master", "bot-approved", "Approved by a bot")), "/")
+			req = NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/repo1/pulls/"+elem[4]+"/reviews", &api.CreatePullReviewOptions{Event: api.ReviewStateApproved}).AddTokenAuth(token.Token)
+			MakeRequest(t, req, http.StatusOK)
+			resp := session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/pulls/"+elem[4]), http.StatusOK)
+			uncounted := NewHTMLParser(t, resp.Body).Find(".uncounted-approval")
+			assert.Equal(t, 1, uncounted.Length())
+			assert.Contains(t, uncounted.Text(), token.Name+" (bot) approved · doesn't count")
+		})
+
+		t.Run("branch and tag protection allow write tokens", func(t *testing.T) {
+			session := loginUser(t, "user2")
+			allowed := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, repo3.ID, 0, perm_model.AccessModeWrite, "write:repository")
+			other := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeWrite, "write:repository")
+			reader := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, repo3.ID, 0, perm_model.AccessModeRead, "read:repository")
+			botID := func(t *auth_model.AccessToken) string { return strconv.FormatInt(user_model.AccessTokenBotID(t.ID), 10) }
+
+			// the pickers offer write tokens of the repository and those covering it, never read ones
+			for _, path := range []string{"/org3/repo3/settings/branches/edit", "/org3/repo3/settings/tags"} {
+				page := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", path), http.StatusOK).Body)
+				for _, tok := range []*auth_model.AccessToken{allowed, other} {
+					assert.Positive(t, page.Find(`.item[data-value="`+botID(tok)+`"]`).Length(), path)
+				}
+				assert.Zero(t, page.Find(`.item[data-value="`+botID(reader)+`"]`).Length(), path)
+			}
+
+			session.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/repo3/settings/branches/edit", map[string]string{
+				"rule_name": "bot-protected*", "enable_push": "whitelist", "whitelist_deploy_key_ids": botID(allowed) + "," + botID(reader),
+			}), http.StatusSeeOther)
+			pb, err := git_model.GetFirstMatchProtectedBranchRule(db.DefaultContext, repo3.ID, "bot-protected")
+			require.NoError(t, err)
+			require.NotNil(t, pb)
+			assert.Equal(t, []int64{user_model.AccessTokenBotID(allowed.ID)}, pb.WhitelistUserIDs, "a read token is dropped")
+			assert.Empty(t, pb.WhitelistDeployKeyIDs)
+			page := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/settings/branches/edit?rule_name=bot-protected*"), http.StatusOK).Body)
+			value, _ := page.Find(`input[name="whitelist_deploy_key_ids"]`).Attr("value")
+			assert.Equal(t, botID(allowed), value)
+
+			_, err = push(t, allowed.Token, repo3, "bot-protected")
+			require.NoError(t, err)
+			stderr, err := push(t, other.Token, repo3, "bot-protected-other")
+			require.Error(t, err)
+			assert.Contains(t, stderr, "protected branch")
+
+			session.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/repo3/settings/tags", map[string]string{
+				"name_pattern": "bot-*", "allowlist_deploy_key_ids": botID(other) + "," + botID(reader),
+			}), http.StatusSeeOther)
+			tags, err := git_model.GetProtectedTags(db.DefaultContext, repo3.ID)
+			require.NoError(t, err)
+			require.Len(t, tags, 1)
+			assert.Equal(t, []int64{user_model.AccessTokenBotID(other.ID)}, tags[0].AllowlistUserIDs)
+			assert.Empty(t, tags[0].AllowlistDeployKeyIDs)
+			require.NoError(t, git_model.DeleteProtectedTag(db.DefaultContext, tags[0]))
 		})
 
 		t.Run("organization token", func(t *testing.T) {
