@@ -17,6 +17,7 @@ It keeps everything Forgejo offers and adds a tamper-evident audit log, projects
 - **Organization guard rails**: required 2FA, verified email domains and repository policies per organization ([#331](https://github.com/InfiniteSpoved/spoved/pull/331), [#356](https://github.com/InfiniteSpoved/spoved/pull/356), [#336](https://github.com/InfiniteSpoved/spoved/pull/336)).
 - **Trash and restore**: deleted repositories and organizations stay recoverable for a retention period ([#281](https://github.com/InfiniteSpoved/spoved/pull/281), [#313](https://github.com/InfiniteSpoved/spoved/pull/313)).
 - **Exact and regex code search**: zoekt searches several branches at once ([#270](https://github.com/InfiniteSpoved/spoved/pull/270)).
+- **Faster git under load**: 2× the pushes and 2.3× the pulls of Forgejo with default settings, and pushes stay under a second with 3,000 users ([`docs/performance.md`](docs/performance.md)).
 
 ## Coming from GitHub, GitLab, Bitbucket or Azure DevOps?
 
