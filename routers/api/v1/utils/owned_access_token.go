@@ -189,29 +189,8 @@ func CreateOwnedAccessToken(ctx *context.APIContext, owner OwnedTokenOwner) {
 		t.ResourceAllRepos = false
 	}
 
-	opts := owner.opts()
-	opts.Name = t.Name
-	if exist, err := db.Exist[auth_model.AccessToken](ctx, opts.ToConds()); err != nil {
-		ctx.InternalServerError(err)
-		return
-	} else if exist {
-		ctx.Error(http.StatusUnprocessableEntity, "", "access token name has been used already")
-		return
-	}
-
-	if err := authz.ValidateOwnedAccessToken(t, len(repos)); err != nil {
-		if IsExpiryError(err) || errors.Is(err, authz.ErrScopeNotAllowed) || errors.Is(err, authz.ErrScopeNeedsRepoRestriction) ||
-			errors.Is(err, authz.ErrOwnedTokenNoScope) || errors.Is(err, auth_model.ErrOwnedTokenScope) ||
-			errors.Is(err, authz.ErrSpecifiedReposNone) || errors.Is(err, authz.ErrSpecifiedReposNoPublicOnly) ||
-			errors.Is(err, authz.ErrSpecifiedReposInvalidScope) {
-			ctx.Error(http.StatusUnprocessableEntity, "", err.Error())
-			return
-		}
-		ctx.InternalServerError(err)
-		return
-	}
-
-	if has, reqScope := ctx.Authentication().Scope().Get(); has {
+	// no scope, or one no such token may have, is refused below as invalid rather than as not held
+	if has, reqScope := ctx.Authentication().Scope().Get(); has && scope != "" && auth_model.ValidateOwnedTokenScope(scope) == nil {
 		var granted []auth_model.AccessTokenScope
 		for _, s := range scope.StringSlice() {
 			granted = append(granted, auth_model.AccessTokenScope(s))
@@ -229,11 +208,18 @@ func CreateOwnedAccessToken(ctx *context.APIContext, owner OwnedTokenOwner) {
 		return
 	}
 
-	resources := make([]*auth_model.AccessTokenResourceRepo, 0, len(repos))
+	repoIDs := make([]int64, 0, len(repos))
 	for _, repo := range repos {
-		resources = append(resources, &auth_model.AccessTokenResourceRepo{RepoID: repo.ID})
+		repoIDs = append(repoIDs, repo.ID)
 	}
-	if err := auth_model.NewAccessToken(ctx, t, resources); err != nil {
+	if err := authz.CreateOwnedAccessToken(ctx, t, repoIDs); err != nil {
+		if errors.Is(err, authz.ErrOwnedTokenNameTaken) || errors.Is(err, authz.ErrOwnedTokenRepoNotInOrg) || IsExpiryError(err) || errors.Is(err, authz.ErrScopeNotAllowed) ||
+			errors.Is(err, authz.ErrScopeNeedsRepoRestriction) || errors.Is(err, authz.ErrOwnedTokenNoScope) ||
+			errors.Is(err, auth_model.ErrOwnedTokenScope) || errors.Is(err, authz.ErrSpecifiedReposNone) ||
+			errors.Is(err, authz.ErrSpecifiedReposNoPublicOnly) || errors.Is(err, authz.ErrSpecifiedReposInvalidScope) {
+			ctx.Error(http.StatusUnprocessableEntity, "", err.Error())
+			return
+		}
 		ctx.InternalServerError(err)
 		return
 	}

@@ -7,11 +7,13 @@ import (
 	"errors"
 	"html/template"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
 
 	asymkey_model "forgejo.org/models/asymkey"
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
@@ -42,15 +44,34 @@ func deployKeyLevel(ctx *context.Context) (groupID int64, link string) {
 	return 0, ctx.Org.OrgLink + "/settings/keys"
 }
 
+// ownedTokenLevel names the access tokens of the page: the organization's, or its project's.
+func ownedTokenLevel(ctx *context.Context) user.OwnedTokenLevel {
+	org := ctx.Org.Organization
+	groupID, link := deployKeyLevel(ctx)
+	level := user.OwnedTokenLevel{
+		Opts:     auth_model.FindOwnedAccessTokensOptions{OwnerType: auth_model.AccessTokenOwnerOrg, OwnerID: org.ID},
+		Link:     link,
+		CloneURL: setting.AppURL + url.PathEscape(org.Name) + "/REPOSITORY.git",
+	}
+	if groupID != 0 {
+		level.Opts.OwnerType, level.Opts.GroupID = auth_model.AccessTokenOwnerProject, groupID
+		level.CloneURL = setting.AppURL + url.PathEscape(org.Name) + "/" + url.PathEscape(ctx.Data["RepoGroup"].(*repo_model.RepoGroup).Name) + "/REPOSITORY.git"
+	}
+	return level
+}
+
 // loadDeployKeys sets the page data: the keys of the organization and its live repositories, or the keys of the
 // project.
 func loadDeployKeys(ctx *context.Context) bool {
-	ctx.Data["Title"] = ctx.Tr("org.settings.deploy_keys")
+	ctx.Data["Title"] = ctx.Tr("owned_token.keys_and_tokens")
 	ctx.Data["PageIsSettingsDeployKeys"] = true
 	ctx.Data["DisableSSH"] = setting.SSH.Disabled
 	ctx.Data["ScopeAll"] = true
 	user.SetExpiryFormData(ctx.Base, setting.DeployKeyExpiry)
 
+	if !user.LoadOwnedTokens(ctx, ownedTokenLevel(ctx)) {
+		return false
+	}
 	orgID := ctx.Org.Organization.ID
 	groupID, link := deployKeyLevel(ctx)
 	keys, err := asymkey_model.FindOrgDeployKeys(ctx, orgID, groupID)
@@ -63,7 +84,7 @@ func loadDeployKeys(ctx *context.Context) bool {
 			ctx.ServerError("LoadHeaderCount", err)
 			return false
 		}
-		ctx.Data["Title"] = ctx.Tr("repo_group.deploy_keys")
+		ctx.Data["Title"] = ctx.Tr("owned_token.keys_and_tokens")
 		ctx.Data["PageIsViewRepoGroups"] = true
 		ctx.Data["RepoGroupLink"] = ctx.Data["RepoGroup"].(*repo_model.RepoGroup).Link(ctx.Org.Organization.Name)
 		ctx.Data["Link"] = link
@@ -198,6 +219,24 @@ func DeployKeysPost(ctx *context.Context) {
 
 	ctx.Flash.Success(ctx.Tr("repo.settings.add_key_success", key.Name))
 	ctx.Redirect(link)
+}
+
+// AccessTokenNew creates an access token of the organization or of its project and shows its value once
+func AccessTokenNew(ctx *context.Context) {
+	f := user.ReadOwnedTokenForm(ctx)
+	includesAllRepos, repoIDs := deployKeyScope(ctx)
+	ctx.Data["TokenScopeAll"], ctx.Data["TokenScopeRepoIDs"] = includesAllRepos, ctx.FormString("repo_ids")
+	if user.CreateOwnedToken(ctx, ownedTokenLevel(ctx), f, includesAllRepos, repoIDs); ctx.Written() {
+		return
+	}
+	if loadDeployKeys(ctx) {
+		ctx.HTML(http.StatusOK, tplSettingsDeployKeys)
+	}
+}
+
+// AccessTokenDelete revokes an access token of the organization or of its project
+func AccessTokenDelete(ctx *context.Context) {
+	user.DeleteOwnedToken(ctx, ownedTokenLevel(ctx))
 }
 
 // DeployKeyReposPost changes the repositories a deploy key of the organization covers

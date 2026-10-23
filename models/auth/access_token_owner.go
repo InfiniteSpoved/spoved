@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"forgejo.org/models/db"
 	"forgejo.org/models/perm"
@@ -97,6 +98,7 @@ type FindOwnedAccessTokensOptions struct {
 	OwnerID   int64
 	GroupID   int64
 	Name      string
+	Keyword   string // part of the name, any case
 }
 
 func (opts FindOwnedAccessTokensOptions) ToConds() builder.Cond {
@@ -107,7 +109,25 @@ func (opts FindOwnedAccessTokensOptions) ToConds() builder.Cond {
 	if opts.Name != "" {
 		cond["name"] = opts.Name
 	}
+	if opts.Keyword != "" {
+		return cond.And(builder.Like{"LOWER(name)", strings.ToLower(opts.Keyword)})
+	}
 	return cond
+}
+
+// FindOwnedAccessTokensCoveringRepo returns the organization and project tokens that cover the repository with the
+// given ID, owner and project (0 = at the owner's root), newest first; the SQL form of CoversRepo for those levels.
+func FindOwnedAccessTokensCoveringRepo(ctx context.Context, repoID, ownerID, groupID int64) ([]*AccessToken, error) {
+	orgCond := builder.Eq{"owner_type": AccessTokenOwnerOrg, "owner_id": ownerID, "group_id": 0}.And(builder.Or(
+		builder.Eq{"resource_all_repos": true},
+		builder.In("id", builder.Select("token_id").From("access_token_resource_repo").Where(builder.Eq{"repo_id": repoID})),
+	))
+	cond := builder.Or(orgCond)
+	if groupID != 0 {
+		cond = cond.Or(builder.Eq{"owner_type": AccessTokenOwnerProject, "owner_id": ownerID, "group_id": groupID})
+	}
+	tokens := make([]*AccessToken, 0, 4)
+	return tokens, db.GetEngine(ctx).Where(cond).OrderBy("created_unix DESC, id DESC").Find(&tokens)
 }
 
 func (opts FindOwnedAccessTokensOptions) ToOrders() string {

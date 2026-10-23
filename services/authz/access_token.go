@@ -7,8 +7,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	auth_model "forgejo.org/models/auth"
+	"forgejo.org/models/db"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/setting"
 )
@@ -73,6 +75,46 @@ func ValidateOwnedAccessToken(t *auth_model.AccessToken, numRepos int) error {
 		return err
 	}
 	return ValidateRepositoryResource(t.ResourceAllRepos, t.Scope, numRepos)
+}
+
+// ErrOwnedTokenNameTaken refuses a second token of the same owner with the same name.
+var (
+	ErrOwnedTokenNameTaken    = errors.New("access token name has been used already")
+	ErrOwnedTokenRepoNotInOrg = errors.New("a selected repository is not a repository of the organization")
+)
+
+// CreateOwnedAccessToken checks and stores a new token of an organization, a project or a repository (t names the
+// owner), covering repoIDs when it is an organization token limited to selected repositories. Callers check who may
+// create it; the web pages and the API share this.
+func CreateOwnedAccessToken(ctx context.Context, t *auth_model.AccessToken, repoIDs []int64) error {
+	exist, err := db.Exist[auth_model.AccessToken](ctx, auth_model.FindOwnedAccessTokensOptions{
+		OwnerType: t.OwnerType, OwnerID: t.OwnerID, GroupID: t.GroupID, Name: t.Name,
+	}.ToConds())
+	if err != nil {
+		return err
+	} else if exist {
+		return ErrOwnedTokenNameTaken
+	}
+	slices.Sort(repoIDs)
+	repoIDs = slices.Compact(repoIDs)
+	if err := ValidateOwnedAccessToken(t, len(repoIDs)); err != nil {
+		return err
+	}
+	if len(repoIDs) > 0 {
+		// only an organization token selects repositories, and only live ones of the organization
+		n, err := db.GetEngine(ctx).Table("repository").In("id", repoIDs).
+			And("owner_id = ? AND trashed_unix = 0", t.OwnerID).Count()
+		if err != nil {
+			return err
+		} else if t.OwnerType != auth_model.AccessTokenOwnerOrg || n != int64(len(repoIDs)) {
+			return ErrOwnedTokenRepoNotInOrg
+		}
+	}
+	resources := make([]*auth_model.AccessTokenResourceRepo, 0, len(repoIDs))
+	for _, id := range repoIDs {
+		resources = append(resources, &auth_model.AccessTokenResourceRepo{RepoID: id})
+	}
+	return auth_model.NewAccessToken(ctx, t, resources)
 }
 
 var (
