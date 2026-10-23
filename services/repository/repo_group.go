@@ -9,6 +9,7 @@ import (
 	"os"
 
 	asymkey_model "forgejo.org/models/asymkey"
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
@@ -83,6 +84,9 @@ func DeleteRepoGroup(ctx context.Context, owner *user_model.User, group *repo_mo
 			return err
 		}
 		if deletedPublicKey, err = asymkey_model.DeleteProjectDeployKeys(ctx, group.OwnerID, group.ID); err != nil {
+			return err
+		}
+		if err := auth_model.DeleteOwnedAccessTokens(ctx, auth_model.AccessTokenOwnerProject, group.OwnerID, group.ID); err != nil {
 			return err
 		}
 		return repo_model.DeleteRepoGroup(ctx, group)

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	actions_model "forgejo.org/models/actions"
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/avatars"
 	"forgejo.org/models/db"
 	"forgejo.org/models/perm"
@@ -506,6 +507,10 @@ func DeleteOrganization(ctx context.Context, org *Organization) error {
 		&user_model.Follow{FollowID: org.ID},
 	); err != nil {
 		return fmt.Errorf("DeleteBeans: %w", err)
+	}
+
+	if err := auth_model.DeleteOwnedAccessTokens(ctx, auth_model.AccessTokenOwnerOrg, org.ID, 0); err != nil {
+		return fmt.Errorf("DeleteOwnedAccessTokens: %w", err)
 	}
 
 	if _, err := db.GetEngine(ctx).ID(org.ID).Delete(new(user_model.User)); err != nil {

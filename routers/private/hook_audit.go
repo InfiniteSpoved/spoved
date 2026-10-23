@@ -73,7 +73,7 @@ func hookCredential(ctx context.Context, uid int64, value string) audit_model.Cr
 	case audit_model.CredentialSystem: // a push the server makes by itself, e.g. a scheduled merge
 		return audit_model.Credential{Type: typ}
 	case audit_model.CredentialAccessToken:
-		if t, has, err := db.GetByID[auth_model.AccessToken](ctx, id); err == nil && has && t.UID == uid {
+		if t, has, err := db.GetByID[auth_model.AccessToken](ctx, id); err == nil && has && (t.UID == uid || !t.IsOwnedByUser() && user_model.AccessTokenBotID(t.ID) == uid) {
 			c.Name = t.Name
 			return c
 		}

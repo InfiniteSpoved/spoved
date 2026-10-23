@@ -232,6 +232,9 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepo
 		); err != nil {
 			return fmt.Errorf("deleteBeans: %w", err)
 		}
+		if err := auth_model.DeleteOwnedAccessTokens(ctx, auth_model.AccessTokenOwnerRepo, repoID, 0); err != nil {
+			return fmt.Errorf("DeleteOwnedAccessTokens: %w", err)
+		}
 
 		if !opts.KeepMigrationBeans {
 			if err := db.DeleteBeans(ctx,

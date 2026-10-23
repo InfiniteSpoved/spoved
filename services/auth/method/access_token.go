@@ -9,7 +9,6 @@ import (
 	"net/http"
 
 	auth_model "forgejo.org/models/auth"
-	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
 	"forgejo.org/services/auth"
@@ -43,9 +42,11 @@ func (a *AccessToken) Verify(req *http.Request, w http.ResponseWriter, _ auth.Se
 	}
 
 	log.Trace("AccessToken: Valid AccessToken for user[%d]", token.UID)
-	u, err := user_model.GetUserByID(req.Context(), token.UID)
-	if err != nil {
-		return &auth.AuthenticationError{Error: fmt.Errorf("access token GetUserByID: %w", err)}
+	u, err := auth.AccessTokenUser(req.Context(), token)
+	if ownerErr := (*auth.CredentialOwnerError)(nil); errors.As(err, &ownerErr) {
+		return &auth.AuthenticationAttemptedIncorrectCredential{Error: err}
+	} else if err != nil {
+		return &auth.AuthenticationError{Error: fmt.Errorf("access token AccessTokenUser: %w", err)}
 	}
 
 	if err := authz.CheckScopePolicyInUse(u, token.Scope, token.ResourceAllRepos); errors.Is(err, authz.ErrScopePolicyEnforced) {

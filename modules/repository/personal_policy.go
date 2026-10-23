@@ -45,6 +45,10 @@ func UsableAdmin(u *user_model.User) bool {
 // (private false). Organizations are never restricted, and a usable site admin as doer or owner is exempt; a nil
 // doer is not. Refusals are logged.
 func CheckPersonalRepoPolicy(ctx context.Context, doer, owner *user_model.User, private bool) error {
+	// the identity of an organization, project or repository access token has no namespace
+	if owner.IsAccessTokenBot() {
+		return ErrPersonalRepoPolicy{Mode: setting.PersonalReposDisabled}
+	}
 	if owner.IsOrganization() || UsableAdmin(doer) || UsableAdmin(owner) {
 		return nil
 	}

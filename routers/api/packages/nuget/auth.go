@@ -47,9 +47,11 @@ func (a *Auth) Verify(req *http.Request, w http.ResponseWriter, sess auth.Sessio
 		return &auth.AuthenticationAttemptedIncorrectCredential{Error: err}
 	}
 
-	u, err := user_model.GetUserByID(req.Context(), token.UID)
-	if err != nil {
-		return &auth.AuthenticationError{Error: fmt.Errorf("nuget auth GetUserByID: %w", err)}
+	u, err := auth.AccessTokenUser(req.Context(), token)
+	if ownerErr := (*auth.CredentialOwnerError)(nil); errors.As(err, &ownerErr) {
+		return &auth.AuthenticationAttemptedIncorrectCredential{Error: err}
+	} else if err != nil {
+		return &auth.AuthenticationError{Error: fmt.Errorf("nuget auth AccessTokenUser: %w", err)}
 	}
 
 	if err := authz.CheckScopePolicyInUse(u, token.Scope, token.ResourceAllRepos); errors.Is(err, authz.ErrScopePolicyEnforced) {

@@ -14,6 +14,7 @@ import (
 	"forgejo.org/models"
 	asymkey_model "forgejo.org/models/asymkey"
 	audit_model "forgejo.org/models/audit"
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
@@ -205,6 +206,9 @@ func transferOwnership(ctx context.Context, doer *user_model.User, newOwnerName 
 	// rules unless the key still writes to the repository (its own deploy key, or a key of the new owner).
 	if err := db.DeleteBeans(ctx, &asymkey_model.OrgDeployKeyRepo{RepoID: repo.ID}); err != nil {
 		return fmt.Errorf("delete org deploy key selections: %w", err)
+	}
+	if err := auth_model.DropOwnedAccessTokensOfTransferredRepo(ctx, repo.ID); err != nil {
+		return fmt.Errorf("DropOwnedAccessTokensOfTransferredRepo: %w", err)
 	}
 	oldKeyIDs := make([]int64, 0, len(oldOrgKeys))
 	for _, key := range oldOrgKeys {

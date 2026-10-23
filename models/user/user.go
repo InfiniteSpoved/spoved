@@ -184,6 +184,10 @@ type User struct {
 	RestrictRepoVisibilityChange bool `xorm:"NOT NULL DEFAULT false"` // only owners change a repository's visibility
 	PrivateForkPolicy            int  `xorm:"NOT NULL DEFAULT 0"`     // PrivateForkAll, PrivateForkOrg or PrivateForkNone
 
+	// BotToken is the token of an organization, a project or a repository this identity acts for (see
+	// NewAccessTokenBot); nil for every stored user.
+	BotToken *auth.AccessToken `xorm:"-"`
+
 	// If you add new fields that might be used to store abusive content (mainly string fields),
 	// please also add them in the UserData struct and the corresponding constructor.
 }
@@ -1221,6 +1225,9 @@ func GetPossibleUserByID(ctx context.Context, id int64) (*User, error) {
 	case 0:
 		return nil, ErrUserNotExist{}
 	default:
+		if IsAccessTokenBotID(id) {
+			return GetAccessTokenBot(ctx, id)
+		}
 		return GetUserByID(ctx, id)
 	}
 }
@@ -1235,6 +1242,16 @@ func GetPossibleUserByIDs(ctx context.Context, ids []int64) ([]*User, error) {
 	}
 	if uniqueIDs.Remove(ActionsUserID) {
 		users = append(users, NewActionsUser())
+	}
+	for id := range uniqueIDs {
+		if IsAccessTokenBotID(id) {
+			uniqueIDs.Remove(id)
+			if bot, err := GetAccessTokenBot(ctx, id); err == nil {
+				users = append(users, bot)
+			} else if !IsErrUserNotExist(err) {
+				return nil, err
+			}
+		}
 	}
 	res, err := GetUserByIDs(ctx, uniqueIDs.Values())
 	if err != nil {
