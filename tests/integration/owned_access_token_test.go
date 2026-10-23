@@ -274,7 +274,7 @@ func TestOwnedAccessToken(t *testing.T) {
 			assert.False(t, perm.HasAccess())
 		})
 
-		t.Run("sees owners and packages as an anonymous visitor does", func(t *testing.T) {
+		t.Run("sees owners as an anonymous visitor does, and only its organization's packages", func(t *testing.T) {
 			token := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeAdmin, "read:organization,write:package")
 			bot, err := user_model.GetPossibleUserByID(db.DefaultContext, user_model.AccessTokenBotID(token.ID))
 			require.NoError(t, err)
@@ -288,9 +288,31 @@ func TestOwnedAccessToken(t *testing.T) {
 			for _, org := range orgs {
 				assert.Equal(t, "public", org.Visibility, org.UserName)
 			}
-			for _, owner := range []string{"user2", "limited_org", "org3"} {
+			for _, owner := range []string{"user2", "limited_org"} {
 				assert.NotEqual(t, http.StatusOK, apiStatus(t, "GET", "/api/v1/packages/"+owner, token.Token, nil), owner)
 			}
+
+			// an organization token covering every repository publishes and reads the organization's packages
+			assert.Equal(t, http.StatusOK, apiStatus(t, "GET", "/api/v1/packages/org3", token.Token, nil))
+			pkgURL := "/api/packages/org3/generic/bot-pkg/1.0/file.bin"
+			MakeRequest(t, NewRequestWithBody(t, "PUT", pkgURL, strings.NewReader("by a bot")).AddTokenAuth(token.Token), http.StatusCreated)
+			resp := MakeRequest(t, NewRequest(t, "GET", pkgURL).AddTokenAuth(token.Token), http.StatusOK)
+			assert.Equal(t, "by a bot", resp.Body.String())
+			var versions []*api.Package
+			DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/packages/org3?type=generic&q=bot-pkg").AddTokenAuth(token.Token), http.StatusOK), &versions)
+			require.Len(t, versions, 1)
+			assert.Equal(t, token.Name+" [bot]", versions[0].Creator.FullName)
+
+			// narrower tokens never reach packages, whatever scope is stored, and a read token can't publish
+			selected := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeWrite, "write:package", repo3.ID)
+			repoToken := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, repo3.ID, 0, perm_model.AccessModeWrite, "write:package")
+			for _, tok := range []*auth_model.AccessToken{selected, repoToken} {
+				assert.NotEqual(t, http.StatusOK, apiStatus(t, "GET", "/api/v1/packages/org3", tok.Token, nil))
+				assert.NotEqual(t, http.StatusCreated, MakeRequest(t, NewRequestWithBody(t, "PUT", "/api/packages/org3/generic/bot-pkg/1.1/file.bin", strings.NewReader("x")).AddTokenAuth(tok.Token), NoExpectedStatus).Code)
+			}
+			reader := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeRead, "write:package")
+			MakeRequest(t, NewRequest(t, "GET", pkgURL).AddTokenAuth(reader.Token), http.StatusOK)
+			assert.NotEqual(t, http.StatusCreated, MakeRequest(t, NewRequestWithBody(t, "PUT", "/api/packages/org3/generic/bot-pkg/1.2/file.bin", strings.NewReader("x")).AddTokenAuth(reader.Token), NoExpectedStatus).Code)
 		})
 
 		t.Run("transfer deletes the repository's tokens and stops the old owner's", func(t *testing.T) {

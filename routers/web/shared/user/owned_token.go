@@ -115,6 +115,9 @@ func LoadOwnedTokens(ctx *context.Context, level OwnedTokenLevel) bool {
 	ctx.Data["OwnedTokensKeyword"] = opts.Keyword
 	ctx.Data["OwnedTokenLevel"] = int(level.Opts.OwnerType)
 	ctx.Data["OwnedTokenScopeCategories"] = OwnedTokenScopeCategories
+	if level.Opts.OwnerType != auth_model.AccessTokenOwnerOrg { // packages belong to the organization: only its tokens reach them
+		ctx.Data["OwnedTokenScopeCategories"] = slices.DeleteFunc(slices.Clone(OwnedTokenScopeCategories), func(c string) bool { return c == "package" })
+	}
 	if count > ownedTokensPageSize || opts.Keyword != "" {
 		ctx.Data["OwnedTokensFilter"] = true
 	}
@@ -233,6 +236,9 @@ func CreateOwnedToken(ctx *context.Context, level OwnedTokenLevel, f OwnedTokenF
 		case errors.Is(err, authz.ErrOwnedTokenNoScope):
 			ctx.Data["Err_TokenScopes"] = true
 			return refuse(ctx.Locale.TrString("settings.at_least_one_permission"))
+		case errors.Is(err, auth_model.ErrOwnedTokenPackageScope):
+			ctx.Data["Err_TokenScopes"] = true
+			return refuse(ctx.Locale.TrString("owned_token.error.package_scope"))
 		case errors.Is(err, auth_model.ErrOwnedTokenScope):
 			ctx.Data["Err_TokenScopes"] = true
 			return refuse(ctx.Locale.TrString("owned_token.error.scope"))

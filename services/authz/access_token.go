@@ -58,7 +58,8 @@ var ErrOwnedTokenNoScope = errors.New("access token must have a scope")
 
 // ValidateOwnedAccessToken checks a new token of an organization, a project or a repository: the scopes and
 // permission such a token may have, the expiry policy and the instance's scope policy (no site admin is exempt: the
-// token acts as itself), and for an organization token limited to selected repositories, numRepos > 0 and
+// token acts as itself), package scopes only on an organization token covering every repository (see
+// AccessToken.PackageAccessMode), and for an organization token limited to selected repositories, numRepos > 0 and
 // repository-only scopes, as for a personal one.
 func ValidateOwnedAccessToken(t *auth_model.AccessToken, numRepos int) error {
 	if t.Scope == "" {
@@ -69,6 +70,11 @@ func ValidateOwnedAccessToken(t *auth_model.AccessToken, numRepos int) error {
 	}
 	if err := auth_model.ValidateOwnedTokenMode(t.Mode); err != nil {
 		return err
+	}
+	if hasPackage, err := t.Scope.HasScope(auth_model.AccessTokenScopeReadPackage); err != nil {
+		return err
+	} else if hasPackage && (t.OwnerType != auth_model.AccessTokenOwnerOrg || !t.ResourceAllRepos) {
+		return auth_model.ErrOwnedTokenPackageScope
 	}
 	if err := ValidateExpiry(setting.AccessTokenExpiry, t.ExpiresUnix); err != nil {
 		return err

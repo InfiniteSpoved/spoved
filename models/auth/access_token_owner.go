@@ -49,6 +49,19 @@ func (t *AccessToken) ReachesAllRepos() bool {
 	return t.ResourceAllRepos && (t.OwnerType == AccessTokenOwnerUser || t.OwnerType == AccessTokenOwnerOrg)
 }
 
+// PackageAccessMode is the token's access to the packages of the owner with the ID: its permission for an
+// organization token covering every repository of that organization, none otherwise. Packages belong to the
+// organization, not to a repository, so a narrower token never reaches them.
+func (t *AccessToken) PackageAccessMode(ownerID int64) perm.AccessMode {
+	if t.OwnerType != AccessTokenOwnerOrg || !t.ResourceAllRepos || t.OwnerID != ownerID || !t.IsUsable() {
+		return perm.AccessModeNone
+	}
+	return t.Mode
+}
+
+// ErrOwnedTokenPackageScope refuses a package scope on a token that can't reach packages (see PackageAccessMode).
+var ErrOwnedTokenPackageScope = fmt.Errorf("%w: package scopes need an organization token covering every repository", ErrOwnedTokenScope)
+
 // ErrOwnedTokenScope is the refusal of a scope that a token of an organization, a project or a repository can't have.
 var ErrOwnedTokenScope = errors.New("scope not allowed for an organization, project or repository token")
 

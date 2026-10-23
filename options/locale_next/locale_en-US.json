@@ -2903,6 +2903,7 @@
 	"owned_token.error.permission": "Choose read, write or admin.",
 	"owned_token.error.description": "Keep the description to at most 255 characters.",
 	"owned_token.error.name_taken": "A token named %s already exists here.",
+	"owned_token.error.package_scope": "Packages belong to the organization, so only an organization token covering all repositories can have the package scope.",
 	"owned_token.error.scope": "An organization, project or repository token can only hold repository, issue, package and organization (read) scopes.",
 	"owned_token.covering": "Organization and project tokens",
 	"owned_token.covering_desc": "These tokens also reach this repository.",

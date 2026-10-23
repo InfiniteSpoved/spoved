@@ -6,10 +6,13 @@ package authz
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"forgejo.org/models/auth"
+	"forgejo.org/models/perm"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/timeutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -97,4 +100,30 @@ func TestValidateAccessToken(t *testing.T) {
 		require.ErrorIs(t, err, ErrSpecifiedReposInvalidScope)
 		require.ErrorContains(t, err, string(auth.AccessTokenScopeReadAdmin))
 	})
+}
+
+func TestValidateOwnedAccessTokenPackageScope(t *testing.T) {
+	expires := timeutil.TimeStampNow().AddDuration(24 * time.Hour)
+	for _, c := range []struct {
+		name      string
+		ownerType auth.AccessTokenOwnerType
+		allRepos  bool
+		ok        bool
+	}{
+		{"organization, every repository", auth.AccessTokenOwnerOrg, true, true},
+		{"organization, selected repositories", auth.AccessTokenOwnerOrg, false, false},
+		{"project", auth.AccessTokenOwnerProject, true, false},
+		{"repository", auth.AccessTokenOwnerRepo, true, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			token := &auth.AccessToken{OwnerType: c.ownerType, ResourceAllRepos: c.allRepos, Mode: perm.AccessModeWrite, Scope: "read:package", ExpiresUnix: expires}
+			err := ValidateOwnedAccessToken(token, 1)
+			if c.ok {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, auth.ErrOwnedTokenPackageScope)
+			}
+			assert.Equal(t, c.ok, token.PackageAccessMode(token.OwnerID) == perm.AccessModeWrite)
+		})
+	}
 }

@@ -16,10 +16,10 @@ import (
 )
 
 func DeterminePackageAccessMode(ctx context.Context, owner, doer *user_model.User) (perm.AccessMode, error) {
-	// Packages of the repositories an organization, project or repository access token covers come later (#28); until
-	// then such a token reaches no package, not even the ones a signed-in member of the instance may read.
+	// a token of an organization, a project or a repository reaches only its organization's packages, and only when it
+	// covers every repository of it; never the ones a signed-in member of the instance may read
 	if doer.IsAccessTokenBot() {
-		return perm.AccessModeNone, nil
+		return doer.BotToken.PackageAccessMode(owner.ID), nil
 	}
 
 	if setting.Service.RequireSignInView && (doer == nil || doer.IsGhost()) {
