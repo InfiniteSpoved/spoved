@@ -54,7 +54,7 @@ async function commit(page: Page, message: string, choice: RegExp) {
   await page.locator('.scm-editor .monaco-editor').first().click();
   await page.keyboard.type(message);
   await page.keyboard.press('Control+Enter');
-  await page.locator('.quick-input-list .monaco-list-row', {hasText: choice}).click();
+  await page.locator('.monaco-dialog-box .monaco-button', {hasText: choice}).click();
 }
 
 const toast = (page: Page) => page.locator('.notifications-toasts');
@@ -115,7 +115,7 @@ test('commit to a new branch and open a pull request', async ({browser, request}
   await openIDE(page, `${link}/-/ide/branch/main/alpha.txt`);
 
   await editFile(page, 'alpha.txt', 'feature\n');
-  await commit(page, 'Feature from the IDE', /pull request/);
+  await commit(page, 'Feature from the IDE', /^New branch \+ PR$/);
   await page.keyboard.press('Control+a');
   await page.keyboard.type('ide-feature');
   await page.keyboard.press('Enter');
@@ -138,8 +138,8 @@ test('a protected branch only offers a new branch', async ({browser, request}, w
   await openIDE(page, `${link}/-/ide/branch/main`);
 
   await editFile(page, 'alpha.txt', 'x\n');
-  await commit(page, 'Protected', /^Commit to a new branch$/);
-  await expect(page.locator('.quick-input-list .monaco-list-row', {hasText: /^Commit to main/})).toHaveCount(0);
+  await commit(page, 'Protected', /^New branch$/);
+  await expect(page.locator('.monaco-dialog-box .monaco-button', {hasText: /^Commit to main/})).toHaveCount(0);
   await page.keyboard.press('Control+a');
   await page.keyboard.type('from-protected');
   await page.keyboard.press('Enter');
@@ -159,7 +159,7 @@ test('a branch with new commits offers a new branch', async ({browser, request},
   await commit(page, 'Stale', /^Commit to main/);
   await expect(toast(page)).toContainText('main has new commits');
   await toast(page).getByRole('button', {name: 'Commit to a new branch'}).click();
-  await page.locator('.quick-input-list .monaco-list-row', {hasText: /^Commit to a new branch$/}).click();
+  await page.locator('.monaco-dialog-box .monaco-button', {hasText: /^New branch$/}).click();
   await page.keyboard.press('Control+a');
   await page.keyboard.type('stale-branch');
   await page.keyboard.press('Enter');

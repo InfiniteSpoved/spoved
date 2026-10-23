@@ -56,6 +56,27 @@ const container = document.querySelector<HTMLElement>('#ide');
 const config: IDEConfig = JSON.parse(container.getAttribute('data-config'));
 container.textContent = '';
 
+// On a narrow (phone) screen a modal dialog's button row doesn't wrap, so three or
+// more options run off the edge. Stack the buttons vertically there so each stays
+// fully visible and tappable; wide screens keep the default horizontal row.
+const narrowDialogStyle = document.createElement('style');
+narrowDialogStyle.textContent = `@media (max-width: 600px) {
+  .monaco-dialog-box:not(.align-vertical) > .dialog-buttons-row { overflow: visible !important; }
+  .monaco-dialog-box:not(.align-vertical) > .dialog-buttons-row > .dialog-buttons {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    overflow: visible !important;
+    margin-left: 5px !important;
+    margin-right: 5px !important;
+  }
+  .monaco-dialog-box:not(.align-vertical) > .dialog-buttons-row > .dialog-buttons > .monaco-button {
+    width: auto !important;
+    margin: 4px 0 !important;
+  }
+}`;
+document.head.appendChild(narrowDialogStyle);
+
 // the workbench resolves the repository's folder before the extension below registers its file systems: make it
 // wait for them, or the explorer marks the folder as unresolvable for good
 let providersReady: () => void;

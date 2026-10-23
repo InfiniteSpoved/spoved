@@ -376,6 +376,41 @@ export async function activate(vscode: VSCode, config: api.IDEConfig) {
     refreshSCM();
   }
 
+  // A text prompt with a tappable confirm button. A mobile soft keyboard's Enter
+  // key often never reaches the quick input, so Enter can't be the only way to
+  // accept; the button in the title bar lets a touch user confirm with a tap.
+  function promptText(opts: {prompt: string; placeHolder?: string; value?: string; required?: boolean}): Promise<string | undefined> {
+    return new Promise((resolve) => {
+      const input = vscode.window.createInputBox();
+      input.title = s.commit;
+      input.prompt = opts.prompt;
+      if (opts.placeHolder) input.placeholder = opts.placeHolder;
+      if (opts.value) input.value = opts.value;
+      input.ignoreFocusOut = true;
+      const ok: vscode.QuickInputButton = {iconPath: new vscode.ThemeIcon('check'), tooltip: s.commit};
+      input.buttons = [ok];
+      let done = false;
+      const finish = (value?: string) => {
+        if (done) return;
+        done = true;
+        input.hide();
+        resolve(value);
+      };
+      const accept = () => {
+        const value = input.value.trim();
+        if (opts.required && !value) {
+          input.validationMessage = opts.prompt;
+          return;
+        }
+        finish(value);
+      };
+      input.onDidAccept(accept);
+      input.onDidTriggerButton((b) => { if (b === ok) accept(); });
+      input.onDidHide(() => finish(undefined));
+      input.show();
+    });
+  }
+
   let committing = false;
   vscode.commands.registerCommand('spoved.commit', async (forceNewBranch?: boolean) => {
     if (committing) return;
@@ -385,28 +420,36 @@ export async function activate(vscode: VSCode, config: api.IDEConfig) {
       return;
     }
     let message = scm.inputBox.value.trim();
-    if (!message) message = (await vscode.window.showInputBox({prompt: s.commitMessage, placeHolder: s.commitMessagePlaceholder, ignoreFocusOut: true}))?.trim();
+    if (!message) message = (await promptText({prompt: s.commitMessage, placeHolder: s.commitMessagePlaceholder, required: true}))?.trim();
     if (!message) return;
 
     const onBranch = config.refType === 'branch' && config.canCommit && ws.commitID === config.commitID && forceNewBranch !== true;
+    // Short labels: a modal's button row doesn't wrap, so long labels overflow a phone screen.
     const choices = [
       ...(onBranch ? [{label: s.commitToBranch.replace('%s', config.refName), id: 'branch'}] : []),
-      ...(config.canCreateBranch ? [{label: s.commitToNewBranch, id: 'new'}] : []),
-      ...(config.canCreatePull ? [{label: s.commitToNewBranchAndPull, id: 'pull'}] : []),
+      ...(config.canCreateBranch ? [{label: s.targetNewBranch, id: 'new'}] : []),
+      ...(config.canCreatePull ? [{label: s.targetNewBranchPull, id: 'pull'}] : []),
     ];
     if (!choices.length) {
       vscode.window.showErrorMessage(s.readOnly);
       return;
     }
-    const choice = (await vscode.window.showQuickPick(choices, {title: s.commit, ignoreFocusOut: true}))?.id;
+    // A modal dialog's buttons are plain tappable buttons; a quick-pick list's row
+    // selection and filter box are unreliable under a mobile soft keyboard.
+    let choice: string | undefined;
+    if (choices.length === 1) {
+      choice = choices[0].id;
+    } else {
+      const picked = await vscode.window.showInformationMessage(s.commit, {modal: true}, ...choices.map((c) => c.label));
+      choice = choices.find((c) => c.label === picked)?.id;
+    }
     if (!choice) return;
     let newBranch: string;
     if (choice !== 'branch') {
-      newBranch = (await vscode.window.showInputBox({
+      newBranch = (await promptText({
         prompt: s.newBranchName,
         value: `${config.refName}-ide-${new Date().toISOString().slice(0, 10)}`,
-        validateInput: (v) => v.trim() ? undefined : s.newBranchName,
-        ignoreFocusOut: true,
+        required: true,
       }))?.trim();
       if (!newBranch) return;
     }
