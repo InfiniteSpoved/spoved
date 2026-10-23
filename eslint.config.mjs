@@ -22,7 +22,7 @@ export default defineConfig(
   ...tseslint.configs.recommended,
   eslintPluginImportX.flatConfigs.typescript,
   {
-    ignores: ['web_src/js/vendor', 'web_src/fomantic', 'public/assets/js', 'public/assets/vendor', 'tests/e2e/reports/'],
+    ignores: ['web_src/js/vendor', 'web_src/fomantic', 'public/assets/js', 'public/assets/vendor', 'public/assets/ide', 'tests/e2e/reports/'],
   },
   {
     plugins: {

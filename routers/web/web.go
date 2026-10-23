@@ -371,6 +371,7 @@ func Routes() *web.Route {
 	routes.Use(context.RepoGroupResolver)
 
 	routes.Head("/", misc.DummyOK) // for health check - doesn't need to be passed through gzip handler
+	routes.Methods("GET, HEAD", "/assets/ide/*", public.IDEFileHandlerFunc())
 	routes.Methods("GET, HEAD, OPTIONS", "/assets/*", optionsCorsHandler(), public.FileHandlerFunc())
 	routes.Methods("GET, HEAD", "/avatars/*", resizingHandler("avatars", storage.Avatars, avatar.AllowedResizedAvatarSizes))
 	routes.Methods("GET, HEAD", "/repo-avatars/*", resizingHandler("repo-avatars", storage.RepoAvatars, avatar.AllowedResizedAvatarSizes))
@@ -1704,6 +1705,17 @@ func registerRoutes(m *web.Route) {
 				m.Post("/upload-remove", web.Bind(forms.RemoveUploadFileForm{}), repo.RemoveUploadFileFromServer)
 			}, repo.MustBeEditable, repo.MustBeAbleToUpload)
 		}, context.RepoRef(), canEnableEditor, context.RepoMustNotBeArchived())
+
+		m.Group("/ide", func() {
+			m.Get("/branch/*", context.RepoRefByType(context.RepoRefBranch), repo.WebIDE)
+			m.Post("/branch/*", context.RepoRefByType(context.RepoRefBranch), context.RepoMustNotBeArchived(), repo.MustBeEditable, context.EnforceQuotaWeb(quota_model.LimitSubjectSizeReposAll, context.QuotaTargetRepo), repo.WebIDECommit)
+			m.Get("/tag/*", context.RepoRefByType(context.RepoRefTag), repo.WebIDE)
+			m.Get("/commit/*", context.RepoRefByType(context.RepoRefCommit), repo.WebIDE)
+			// "-" is no valid branch name, so these never shadow a branch
+			m.Get("/-/tree/{sha}", repo.WebIDETree)
+			m.Get("/-/search/{sha}", common.RateLimitHeavy, repo.WebIDESearch)
+			m.Get("/*", context.RepoRefByType(context.RepoRefLegacy), repo.WebIDE)
+		}, repo.MustEnableIDE, repo.MustBeNotEmpty, reqRepoCodeReader)
 
 		m.Group("/branches", func() {
 			m.Group("/_new", func() {

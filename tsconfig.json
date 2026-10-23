@@ -3,6 +3,7 @@
     "*",
     "tests/e2e/**/*",
     "tools/**/*",
+    "web_src/ide/**/*",
     "web_src/js/**/*",
   ],
   "compilerOptions": {

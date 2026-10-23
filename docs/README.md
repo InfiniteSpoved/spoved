@@ -6,6 +6,7 @@
 - [`projects.md`](projects.md): web, git, LFS and API URLs of repositories in projects, redirects, and moving from Bitbucket Data Center.
 - [`audit-log.md`](audit-log.md): the site audit log page, its filters, the API and the exports.
 - [`personal-repositories.md`](personal-repositories.md): the site policy for repositories in users' own namespaces.
+- [`web-ide.md`](web-ide.md): the Web IDE, its settings, how it is built and deployed, and its Content Security Policy.
 - [`search-engines.md`](search-engines.md): canonical URLs, structured data, robots.txt, sitemap and llms.txt for search engines and AI assistants.
 
 Forgejo's [documentation](https://forgejo.org/docs/latest/) applies to everything spoved inherits.

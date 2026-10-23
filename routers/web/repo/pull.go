@@ -447,6 +447,9 @@ func setMergeTarget(ctx *context.Context, pull *issues_model.PullRequest) {
 	ctx.Data["BaseTarget"] = pull.BaseBranch
 	ctx.Data["HeadBranchLink"] = pull.GetHeadBranchLink(ctx)
 	ctx.Data["BaseBranchLink"] = pull.GetBaseBranchLink(ctx)
+	if !pull.HasMerged {
+		ctx.Data["IDELink"] = ideLink(ctx, pull)
+	}
 }
 
 // GetPullDiffStats get Pull Requests diff stats

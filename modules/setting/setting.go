@@ -199,6 +199,7 @@ func loadCommonSettingsFrom(cfg ConfigProvider) error {
 	}
 
 	loadUIFrom(cfg)
+	loadIDEFrom(cfg)
 	loadAdminFrom(cfg)
 	loadMaintenanceFrom(cfg)
 	loadIPAllowlistFrom(cfg)

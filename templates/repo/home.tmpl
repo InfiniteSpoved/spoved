@@ -4,6 +4,7 @@
 	<div class="ui container {{if .IsBlame}}fluid padded{{end}}">
 		{{template "base/alert" .}}
 		{{template "shared/personal_repo_limit" .}}
+		{{if and .IDELink (not .IsViewFile)}}<a class="tw-hidden" href="{{.IDELink}}" data-ide-link></a>{{end}}
 		{{if .BitbucketOrigin}}
 		<div class="ui info message tw-hidden" id="bitbucket-origin-banner" data-repo-id="{{.Repository.ID}}">
 			<button class="ui small basic button tw-float-right" id="bitbucket-origin-banner-dismiss">{{ctx.Locale.Tr "repo.bitbucket_origin.dismiss"}}</button>

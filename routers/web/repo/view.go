@@ -1263,6 +1263,9 @@ PostRecentBranchCheck:
 		treeLink += "/" + util.PathEscapeSegments(ctx.Repo.TreePath)
 	}
 	ctx.Data["TreeLink"] = treeLink
+	if ctx.Doer != nil && setting.IDEAvailable() {
+		ctx.Data["IDELink"] = ctx.Repo.RepoLink + "/-/ide/" + strings.TrimPrefix(treeLink, ctx.Repo.RepoLink+"/src/")
+	}
 	ctx.Data["TreeNames"] = treeNames
 	ctx.Data["BranchLink"] = branchLink
 	ctx.Data["CodeIndexerDisabled"] = !setting.Indexer.RepoIndexerEnabled

@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="{{ctx.Locale.Lang}}" data-theme="{{ThemeName .SignedUser}}">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="robots" content="noindex">
+	<title>{{.Title}}</title>
+	<link rel="icon" href="{{AppSubUrl}}/assets/img/favicon.svg" type="image/svg+xml">
+	<style>html, body, #ide { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; }</style>
+</head>
+<body>
+	<div id="ide" data-config="{{JsonUtils.EncodeToString .IDEConfig}}">
+		<p style="padding: 1em">{{ctx.Locale.Tr "repo.ide.loading"}}</p>
+		<noscript><p style="padding: 1em">{{ctx.Locale.Tr "repo.ide.noscript"}}</p></noscript>
+	</div>
+	<script type="module" src="{{AppSubUrl}}/assets/ide/ide.js?v={{AssetVersion}}"></script>
+</body>
+</html>
