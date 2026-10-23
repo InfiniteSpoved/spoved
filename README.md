@@ -208,7 +208,7 @@ Forgejo's [documentation](https://forgejo.org/docs/latest/) applies to everythin
 
 Changes go through pull requests into `develop` on this repository. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow, local test steps and conventions.
 
-Pick a [good first issue](https://github.com/InfiniteSpoved/spoved/issues?q=is%3Aopen+label%3A%22good+first+issue%22). The repository ships Claude Code skills in [`.claude/skills`](.claude/skills) (`coder`, `tester`, `security-review`, `screenshots`) that take an issue to a reviewed pull request with AI help; [`CONTRIBUTING.md`](CONTRIBUTING.md#ai-assisted-contributions) says how to disclose it.
+Pick a [good first issue](https://github.com/InfiniteSpoved/spoved/issues?q=is%3Aopen+label%3A%22good+first+issue%22). The repository ships Claude Code skills in [`.claude/skills`](.claude/skills) (`coder`, `issue-to-merge`, `tester`, `security-review`, `screenshots`) that take an issue to a reviewed pull request with AI help; [`CONTRIBUTING.md`](CONTRIBUTING.md#ai-assisted-contributions) says how to disclose it.
 
 ## License
 
