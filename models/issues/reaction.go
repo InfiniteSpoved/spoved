@@ -128,7 +128,7 @@ func (opts *FindReactionsOptions) toConds() builder.Cond {
 	} else if opts.CommentID == -1 {
 		cond = cond.And(builder.Eq{"reaction.comment_id": 0})
 	}
-	if opts.UserID > 0 {
+	if opts.UserID != 0 { // the Actions user and access token identities have negative IDs
 		cond = cond.And(builder.Eq{
 			"reaction.user_id":            opts.UserID,
 			"reaction.original_author_id": 0,

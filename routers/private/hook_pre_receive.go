@@ -122,7 +122,7 @@ func (ctx *preReceiveContext) CanCreatePullRequest() bool {
 	if !ctx.loadPusherAndPermission() {
 		return false
 	}
-	if ctx.actionTokenPermissions {
+	if ctx.actionTokenPermissions || ctx.user.IsAccessTokenBot() {
 		// a token with permissions must be granted pull-requests: write
 		return ctx.userPerm.CanWrite(unit.TypePullRequests)
 	}
