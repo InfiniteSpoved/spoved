@@ -14,6 +14,7 @@ import (
 
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
+	"forgejo.org/models/perm"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
@@ -81,10 +82,15 @@ func (err ErrAccessTokenExpired) Unwrap() error {
 
 var successfulAccessTokenCache *lru.Cache[string, any]
 
-// AccessToken represents a personal access token.
+// AccessToken represents a personal access token, or a token of an organization, a project or a repository (see
+// AccessTokenOwnerType), which has no user (UID 0) and acts with its own permission (Mode).
 type AccessToken struct {
-	ID             int64 `xorm:"pk autoincr"`
-	UID            int64 `xorm:"INDEX"`
+	ID             int64                `xorm:"pk autoincr"`
+	UID            int64                `xorm:"INDEX"`
+	OwnerType      AccessTokenOwnerType `xorm:"NOT NULL DEFAULT 0 INDEX(owner)"`
+	OwnerID        int64                `xorm:"NOT NULL DEFAULT 0 INDEX(owner)"`
+	GroupID        int64                `xorm:"NOT NULL DEFAULT 0 INDEX(owner)"`
+	Mode           perm.AccessMode      `xorm:"NOT NULL DEFAULT 0"`
 	Name           string
 	Token          string `xorm:"-"`
 	TokenHash      string `xorm:"UNIQUE"` // sha256 of token
@@ -142,19 +148,23 @@ func NewAccessToken(ctx context.Context, t *AccessToken, resources []*AccessToke
 }
 
 func accessTokenFields(t *AccessToken, repoIDs []int64) map[string]any {
-	return map[string]any{
+	fields := map[string]any{
 		"name":               t.Name,
 		"scopes":             string(t.Scope),
 		"expires":            int64(t.ExpiresUnix),
 		"resource_all_repos": t.ResourceAllRepos,
 		"repo_ids":           repoIDs,
 	}
+	if !t.IsOwnedByUser() {
+		fields["mode"] = t.Mode.String()
+	}
+	return fields
 }
 
 // recordAccessToken records a change of the token in the audit log. The token's owner is read from the row, never
 // from the doer, who may be an admin acting for the owner.
 func recordAccessToken(ctx context.Context, verb string, t *AccessToken, data map[string]any) error {
-	return audit_model.RecordCredential(ctx, audit_model.Event{
+	e := audit_model.Event{
 		Action:        "credential.access_token." + verb,
 		OwnerID:       t.UID,
 		SubjectUserID: t.UID,
@@ -162,7 +172,14 @@ func recordAccessToken(ctx context.Context, verb string, t *AccessToken, data ma
 		TargetID:      t.ID,
 		TargetName:    t.Name,
 		Data:          data,
-	})
+	}
+	switch t.OwnerType {
+	case AccessTokenOwnerOrg, AccessTokenOwnerProject:
+		e.OwnerID, e.GroupID = t.OwnerID, t.GroupID
+	case AccessTokenOwnerRepo:
+		e.OwnerID, e.RepoID = 0, t.OwnerID
+	}
+	return audit_model.RecordCredential(ctx, e)
 }
 
 func generateAccessToken(t *AccessToken) {

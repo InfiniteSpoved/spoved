@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	actions_model "forgejo.org/models/actions"
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/avatars"
 	"forgejo.org/models/db"
 	"forgejo.org/models/perm"
@@ -508,6 +509,10 @@ func DeleteOrganization(ctx context.Context, org *Organization) error {
 		return fmt.Errorf("DeleteBeans: %w", err)
 	}
 
+	if err := auth_model.DeleteOwnedAccessTokens(ctx, auth_model.AccessTokenOwnerOrg, org.ID, 0); err != nil {
+		return fmt.Errorf("DeleteOwnedAccessTokens: %w", err)
+	}
+
 	if _, err := db.GetEngine(ctx).ID(org.ID).Delete(new(user_model.User)); err != nil {
 		return fmt.Errorf("Delete: %w", err)
 	}
@@ -542,8 +547,9 @@ func GetUsersWhoCanCreateOrgRepo(ctx context.Context, orgID int64) (map[int64]*u
 // HasOrgOrUserVisible tells if the given user can see the given org or user
 func HasOrgOrUserVisible(ctx context.Context, orgOrUser, user *user_model.User) bool {
 	// If user is nil, it's an anonymous user/request.
-	// The Ghost user is handled like an anonymous user.
-	if user == nil || user.IsGhost() {
+	// The Ghost user and the identity of an organization, project or repository access token, which is no member of
+	// the instance, are handled like an anonymous user.
+	if user == nil || user.IsGhost() || user.IsAccessTokenBot() {
 		return orgOrUser.Visibility == structs.VisibleTypePublic
 	}
 

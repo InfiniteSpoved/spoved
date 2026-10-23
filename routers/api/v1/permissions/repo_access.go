@@ -32,17 +32,8 @@ func RepoAccess(ctx Context) {
 			ctx.Error(http.StatusInternalServerError, "GetActionRepoPermission", err)
 			return
 		}
-		// Creating an issue or a comment only needs read: a token with permissions writes only where they grant write.
 		if task.TokenPermissions != "" && !ctx.IsReadOnlyMethod() {
-			units := permission.Units
-			permission.Units = nil
-			for _, u := range units {
-				if permission.UnitsMode[u.Type] < perm.AccessModeWrite {
-					delete(permission.UnitsMode, u.Type)
-				} else {
-					permission.Units = append(permission.Units, u)
-				}
-			}
+			dropReadOnlyUnits(&permission)
 		}
 		ctx.SetPermission(&permission)
 	} else {
@@ -54,6 +45,10 @@ func RepoAccess(ctx Context) {
 		if err != nil {
 			ctx.Error(http.StatusInternalServerError, "GetUserRepoPermissionWithReducer", err)
 			return
+		}
+		// a read token of an organization, a project or a repository never writes
+		if ctx.Doer().IsAccessTokenBot() && !ctx.IsReadOnlyMethod() {
+			dropReadOnlyUnits(&permission)
 		}
 		ctx.SetPermission(&permission)
 	}
@@ -72,5 +67,19 @@ func RepoAccess(ctx Context) {
 	// Every repository of an archived organization is read-only, whatever the repository's own settings say.
 	if owner := ctx.Repository().Owner; !ctx.IsReadOnlyMethod() && owner.IsOrganization() && owner.IsArchived {
 		ctx.Error(http.StatusForbidden, "OrgArchived", "the organization is archived and read-only")
+	}
+}
+
+// dropReadOnlyUnits removes the units the permission only reads, for a write request of a token that writes only
+// where it was granted write: creating an issue or a comment only needs read.
+func dropReadOnlyUnits(permission *access_model.Permission) {
+	units := permission.Units
+	permission.Units = nil
+	for _, u := range units {
+		if permission.UnitsMode[u.Type] < perm.AccessModeWrite {
+			delete(permission.UnitsMode, u.Type)
+		} else {
+			permission.Units = append(permission.Units, u)
+		}
 	}
 }

@@ -191,7 +191,8 @@ func SearchUsers(ctx context.Context, opts *SearchUserOptions) (users []*User, _
 
 // BuildCanSeeUserCondition creates a condition which can be used to restrict results to users/orgs the actor can see
 func BuildCanSeeUserCondition(actor *User) builder.Cond {
-	if actor != nil {
+	// the identity of an organization, project or repository access token is no member of the instance
+	if actor != nil && !actor.IsAccessTokenBot() {
 		// If Admin - they see all users!
 		if !actor.IsAdmin {
 			// Users can see an organization they are a member of

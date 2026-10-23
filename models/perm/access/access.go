@@ -34,6 +34,11 @@ func init() {
 }
 
 func accessLevel(ctx context.Context, user *user_model.User, repo *repo_model.Repository) (perm.AccessMode, error) {
+	if user.IsAccessTokenBot() {
+		p, err := accessTokenBotPermission(ctx, repo, user.BotToken)
+		return p.AccessMode, err
+	}
+
 	mode := perm.AccessModeNone
 	var userID int64
 	restricted := false

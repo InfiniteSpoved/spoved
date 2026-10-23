@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	actions_model "forgejo.org/models/actions"
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
 	perm_model "forgejo.org/models/perm"
@@ -179,6 +180,31 @@ func GetActionRepoPermission(ctx context.Context, repo *repo_model.Repository, t
 	return perm, nil
 }
 
+// accessTokenBotPermission is what the token of an organization, a project or a repository may do in the repository:
+// its permission on every unit of a repository it covers, never above admin, and nothing in any other repository,
+// public ones included. No membership, team or collaboration counts. An expired token may do nothing, also in work
+// it scheduled before (an auto merge, a scheduled run).
+func accessTokenBotPermission(ctx context.Context, repo *repo_model.Repository, t *auth_model.AccessToken) (Permission, error) {
+	var perm Permission
+	if t.IsExpired() {
+		return perm, nil
+	}
+	covers, err := t.CoversRepo(ctx, repo.ID, repo.OwnerID, repo.GroupID)
+	if err != nil || !covers {
+		return perm, err
+	}
+	if err := repo.LoadUnits(ctx); err != nil {
+		return perm, err
+	}
+	perm.AccessMode = min(t.Mode, perm_model.AccessModeAdmin)
+	perm.Units = repo.Units
+	perm.UnitsMode = make(map[unit.Type]perm_model.AccessMode, len(repo.Units))
+	for _, u := range repo.Units {
+		perm.UnitsMode[u.Type] = perm.AccessMode
+	}
+	return perm, nil
+}
+
 // GetUserRepoPermission returns the user permissions to the repository, where the user's permissions may be
 // artificially restricted by a an authorization reducer.
 func GetUserRepoPermissionWithReducer(ctx context.Context, repo *repo_model.Repository, user *user_model.User, reducer authz.AuthorizationReducer) (Permission, error) {
@@ -276,6 +302,10 @@ func GetUserRepoPermission(ctx context.Context, repo *repo_model.Repository, use
 	if repo.IsTrashed() {
 		perm.AccessMode = perm_model.AccessModeNone
 		return perm, nil
+	}
+
+	if user.IsAccessTokenBot() {
+		return accessTokenBotPermission(ctx, repo, user.BotToken)
 	}
 
 	// anonymous user visit private repo.

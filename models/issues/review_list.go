@@ -104,7 +104,7 @@ func (opts *FindReviewOptions) toCond() builder.Cond {
 	if opts.IssueID > 0 {
 		cond = cond.And(builder.Eq{"issue_id": opts.IssueID})
 	}
-	if opts.ReviewerID > 0 {
+	if opts.ReviewerID != 0 { // the Actions user and access token identities have negative IDs
 		cond = cond.And(builder.Eq{"reviewer_id": opts.ReviewerID})
 	}
 	if len(opts.Types) > 0 {

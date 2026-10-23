@@ -9,6 +9,7 @@ import (
 
 	"forgejo.org/models"
 	asymkey_model "forgejo.org/models/asymkey"
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	org_model "forgejo.org/models/organization"
@@ -123,6 +124,7 @@ func deleteCounts(ctx context.Context, orgID int64) (map[string]int64, error) {
 		{"variables", "action_variable", builder.Eq{"owner_id": orgID}},
 		{"verified_domains", "org_verified_domain", builder.Eq{"org_id": orgID}},
 		{"branch_rules", "protected_branch", builder.Eq{"repo_id": 0, "org_id": orgID}},
+		{"access_tokens", "access_token", builder.In("owner_type", auth_model.AccessTokenOwnerOrg, auth_model.AccessTokenOwnerProject).And(builder.Eq{"owner_id": orgID})},
 	} {
 		n, err := db.GetEngine(ctx).Table(c.table).Where(c.cond).Count()
 		if err != nil {

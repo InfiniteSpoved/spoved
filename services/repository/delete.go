@@ -232,6 +232,9 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepo
 		); err != nil {
 			return fmt.Errorf("deleteBeans: %w", err)
 		}
+		if err := auth_model.DeleteOwnedAccessTokens(ctx, auth_model.AccessTokenOwnerRepo, repoID, 0); err != nil {
+			return fmt.Errorf("DeleteOwnedAccessTokens: %w", err)
+		}
 
 		if !opts.KeepMigrationBeans {
 			if err := db.DeleteBeans(ctx,
@@ -607,6 +610,7 @@ func deleteCounts(ctx context.Context, repoID int64) (map[string]int64, error) {
 		{"runners", "action_runner", builder.Eq{"repo_id": repoID}.And(builder.IsNull{"deleted"}.Or(builder.Eq{"deleted": 0}))},
 		{"runner_tokens", "action_runner_token", builder.Eq{"repo_id": repoID}},
 		{"token_selections", "access_token_resource_repo", builder.Eq{"repo_id": repoID}},
+		{"access_tokens", "access_token", builder.Eq{"owner_type": auth_model.AccessTokenOwnerRepo, "owner_id": repoID}},
 		{"secrets", "secret", builder.Eq{"repo_id": repoID}},
 		{"variables", "action_variable", builder.Eq{"repo_id": repoID}},
 		{"webhooks", "webhook", builder.Eq{"repo_id": repoID}},
