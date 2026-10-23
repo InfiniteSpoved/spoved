@@ -1,6 +1,6 @@
 # Git performance under load
 
-How spoved's git over HTTP holds up with 16 to 3,000 users, compared with the Forgejo commit spoved forked from.
+How spoved's git over HTTP holds up with 16 to 3,000 users, compared with the Forgejo commit spoved forked from, Gitea and Bitbucket Data Center.
 Measured on 2026-10-23.
 
 ## Result in short
@@ -8,6 +8,7 @@ Measured on 2026-10-23.
 - With default settings, spoved handles 2× the pushes and 2.3× the pulls of Forgejo.
 - With 3,000 users working at a normal pace, the slowest 10% of spoved's pushes take 0.29 s, where Forgejo's take 31 s.
 - spoved's defaults also beat Forgejo with hand-tuned settings.
+- It also leads Gitea and Bitbucket Data Center on every step ([Other git servers](#other-git-servers)).
 - The limit is CPU in the application (git and its hook processes), never the database.
 
 ## How it was tested
@@ -49,6 +50,26 @@ Tuned means `[database] MAX_OPEN_CONNS = 100`, `MAX_IDLE_CONNS = 100` and `[secu
 | Nonstop, 3,000 users | 19.4 ops/s, 0 refused | 24.7 ops/s, 1,954 refused as busy |
 | Realistic, 3,000 users: fetch median / 99th percentile | 0.04 s / 4.3 s | 0.02 s / 0.07 s |
 | Realistic, 3,000 users: push median / 99th percentile | 0.45 s / 5.0 s | 0.24 s / 0.35 s |
+
+## Other git servers
+
+The same steps on the same machine against Gitea 28.2.0 (the binary from the official image, run natively) and Bitbucket Data Center 10.5.1 (the official Docker image), each with default settings, a fresh database and the same seed.
+
+| Step | spoved | Forgejo | Gitea | Bitbucket |
+|---|---|---|---|---|
+| Pushes only, 16 users | **15.4 pushes/s** | 7.5 | 6.9 | 10.4 |
+| Pulls only, 16 users | **182.7 ops/s** | 77.8 | 70.9 | 22.6 |
+| Mixed, 100 users | **28.8 ops/s** | 15.4 | 12.6 | 23.4 |
+| Nonstop, 3,000 users: completed | **27.1 ops/s** | 17.8 | 2.4 | 12.2 |
+| Nonstop, 3,000 users: failed | 1,517 refused as busy (503) | 0 | 44,814 errors (500) | 0 |
+| Realistic, 3,000 users: push median / 90th percentile | **0.23 s / 0.29 s** | 0.92 s / 31.0 s | 2.08 s / 16.9 s | 1.32 s / 43.6 s |
+| Realistic, 3,000 users: fetch median / 90th percentile | **0.02 s / 0.04 s** | 0.14 s / 38.8 s | 0.41 s / 25.6 s | 1.13 s / 60.4 s |
+| Realistic, 3,000 users: errors | 0 | 0 | 175 | 0 |
+
+- **Gitea** doesn't cap its database pool by default. Under nonstop load it opened more connections than PostgreSQL allows ("too many clients"), so 99% of requests failed. With the tuned settings it completed 16.1 ops/s, but it started a git process for every request (617 at once, against spoved's 28), and the kernel killed it for running out of memory.
+- **Bitbucket** had no errors, but at 3,000 nonstop users it kept requests waiting for 2 to 4 minutes, and its pulls cost far more CPU than in the Go servers.
+- Bitbucket ran on Atlassian's 10-user developer license, so the 3,000 simulated users shared 9 accounts and 9 access tokens, where the other servers checked 3,000 different tokens. That favours Bitbucket. Bitbucket 10.5 also blocks basic authentication and enforces two-step verification by default, so the test turned both off (`-Dcom.atlassian.plugins.authentication.basic.auth.filter.force.allow=true`, `-Datlassian.authentication.2sv.enforcement.enabled=false`), ran it with search off and a 2 GB heap, and ran only the default-settings steps.
+- Azure DevOps Server (Windows Server and SQL Server only) and GitHub Enterprise Server (a virtual machine appliance) couldn't run on the test machine, so they aren't included.
 
 ## What made the difference
 
