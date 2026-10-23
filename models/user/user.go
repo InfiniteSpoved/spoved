@@ -1531,6 +1531,9 @@ func isUserVisibleToViewerCond(viewer *User) builder.Cond {
 
 // IsUserVisibleToViewer check if viewer is able to see user profile
 func IsUserVisibleToViewer(ctx context.Context, u, viewer *User) bool {
+	if viewer.IsAccessTokenBot() { // no member of the instance: sees what an anonymous viewer sees
+		viewer = nil
+	}
 	if viewer != nil && (viewer.IsAdmin || viewer.ID == u.ID) {
 		return true
 	}

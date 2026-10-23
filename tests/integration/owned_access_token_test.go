@@ -174,6 +174,25 @@ func TestOwnedAccessToken(t *testing.T) {
 			assert.Equal(t, http.StatusUnauthorized, apiStatus(t, "GET", "/api/v1/repos/org3/repo3", deleted.Token, nil))
 		})
 
+		t.Run("sees owners and packages as an anonymous visitor does", func(t *testing.T) {
+			token := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeAdmin, "read:organization,write:package")
+			bot, err := user_model.GetPossibleUserByID(db.DefaultContext, user_model.AccessTokenBotID(token.ID))
+			require.NoError(t, err)
+			assert.Equal(t, fmt.Sprintf("token+%d", token.ID), bot.Name, "never a valid user name")
+			limitedOrg := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 22})
+			assert.False(t, user_model.IsUserVisibleToViewer(db.DefaultContext, limitedOrg, bot))
+
+			assert.Equal(t, http.StatusNotFound, apiStatus(t, "GET", "/api/v1/orgs/limited_org", token.Token, nil))
+			var orgs []*api.Organization
+			DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/orgs?limit=50").AddTokenAuth(token.Token), http.StatusOK), &orgs)
+			for _, org := range orgs {
+				assert.Equal(t, "public", org.Visibility, org.UserName)
+			}
+			for _, owner := range []string{"user2", "limited_org", "org3"} {
+				assert.NotEqual(t, http.StatusOK, apiStatus(t, "GET", "/api/v1/packages/"+owner, token.Token, nil), owner)
+			}
+		})
+
 		t.Run("transfer deletes the repository's tokens and stops the old owner's", func(t *testing.T) {
 			repoToken := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, repo3.ID, 0, perm_model.AccessModeRead, "read:repository")
 			orgToken := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeRead, "read:repository", repo3.ID)

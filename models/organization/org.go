@@ -547,8 +547,9 @@ func GetUsersWhoCanCreateOrgRepo(ctx context.Context, orgID int64) (map[int64]*u
 // HasOrgOrUserVisible tells if the given user can see the given org or user
 func HasOrgOrUserVisible(ctx context.Context, orgOrUser, user *user_model.User) bool {
 	// If user is nil, it's an anonymous user/request.
-	// The Ghost user is handled like an anonymous user.
-	if user == nil || user.IsGhost() {
+	// The Ghost user and the identity of an organization, project or repository access token, which is no member of
+	// the instance, are handled like an anonymous user.
+	if user == nil || user.IsGhost() || user.IsAccessTokenBot() {
 		return orgOrUser.Visibility == structs.VisibleTypePublic
 	}
 

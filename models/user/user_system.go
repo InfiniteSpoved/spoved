@@ -128,7 +128,8 @@ func IsAccessTokenBotID(id int64) bool {
 // NewAccessTokenBot returns the identity the token of an organization, a project or a repository acts as. It is not
 // a user account: no login, no membership, no team, and its permission comes from the token only (BotToken).
 func NewAccessTokenBot(t *auth.AccessToken) *User {
-	name := fmt.Sprintf("token-%d", t.ID)
+	// "+" is not allowed in user names, so neither the name nor the no-reply address can be a real user's
+	name := fmt.Sprintf("token+%d", t.ID)
 	return &User{
 		ID:               AccessTokenBotID(t.ID),
 		Name:             name,

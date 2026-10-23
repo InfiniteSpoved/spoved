@@ -226,7 +226,7 @@ func GetAll(ctx *context.APIContext) {
 	//     "$ref": "#/responses/OrganizationList"
 
 	vMode := []api.VisibleType{api.VisibleTypePublic}
-	if ctx.IsSigned() && !ctx.PublicOnly() {
+	if ctx.IsSigned() && !ctx.PublicOnly() && !ctx.Doer().IsAccessTokenBot() {
 		vMode = append(vMode, api.VisibleTypeLimited)
 		if ctx.IsUserSiteAdmin() {
 			vMode = append(vMode, api.VisibleTypePrivate)
