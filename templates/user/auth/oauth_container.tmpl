@@ -1,4 +1,4 @@
-{{if or .OAuth2Providers .EnableOpenIDSignIn}}
+{{if or .OAuth2Providers .SAMLSources .EnableOpenIDSignIn}}
 {{if or (and .PageIsSignUp (not .DisableRegistration)) (and .PageIsSignIn .EnableInternalSignIn)}}
 	<div class="divider divider-text">
 		{{ctx.Locale.Tr "sign_in_or"}}
@@ -11,6 +11,16 @@
 				<a class="{{$provider.Name}} ui button tw-flex tw-items-center tw-justify-center tw-py-2 tw-w-full oauth-login-link" href="{{AppSubUrl}}/user/oauth2/{{$provider.DisplayName | PathEscape}}">
 					{{$provider.IconHTML 28}}
 					{{ctx.Locale.Tr "sign_in_with_provider" $provider.DisplayName}}
+				</a>
+			{{end}}
+			{{range $source := .SAMLSources}}
+				<a class="saml ui button tw-flex tw-items-center tw-justify-center tw-py-2 tw-w-full oauth-login-link" href="{{AppSubUrl}}/user/saml/{{$source.Name | PathEscape}}/login">
+					{{if $source.Cfg.IconURL}}
+						<img class="tw-object-contain tw-mr-2" width="28" height="28" src="{{$source.Cfg.IconURL}}" alt="">
+					{{else}}
+						{{svg "octicon-key" 28 "tw-mr-2"}}
+					{{end}}
+					{{ctx.Locale.Tr "sign_in_with_provider" $source.Name}}
 				</a>
 			{{end}}
 			{{if .EnableOpenIDSignIn}}

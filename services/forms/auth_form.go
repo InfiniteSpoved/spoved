@@ -15,7 +15,7 @@ import (
 // AuthenticationForm form for authentication
 type AuthenticationForm struct {
 	ID                            int64
-	Type                          int    `binding:"Range(2,7)"`
+	Type                          int    `binding:"Range(2,9)"`
 	Name                          string `binding:"Required;MaxSize(30)"`
 	Host                          string
 	Port                          int
@@ -90,6 +90,41 @@ type AuthenticationForm struct {
 	GroupUserGroupMapRemoval       bool
 	Oauth2GroupUserGroupMap        string `binding:"ValidQuotaGroupMap"`
 	Oauth2GroupUserGroupMapRemoval bool
+
+	SAMLIDPMetadataURL             string `form:"saml_idp_metadata_url" preprocess:"TrimSpace"`
+	SAMLIDPMetadata                string `form:"saml_idp_metadata" preprocess:"TrimSpace"`
+	SAMLIDPEntityID                string `form:"saml_idp_entity_id" preprocess:"TrimSpace"`
+	SAMLIDPSSOURL                  string `form:"saml_idp_sso_url" preprocess:"TrimSpace"`
+	SAMLIDPSLOURL                  string `form:"saml_idp_slo_url" preprocess:"TrimSpace"`
+	SAMLIDPCertificate             string `form:"saml_idp_certificate" preprocess:"TrimSpace"`
+	SAMLSPEntityID                 string `form:"saml_sp_entity_id" preprocess:"TrimSpace"`
+	SAMLSPCertificate              string `form:"saml_sp_certificate" preprocess:"TrimSpace"`
+	SAMLSPPrivateKey               string `form:"saml_sp_private_key" preprocess:"TrimSpace"`
+	SAMLSignRequests               bool   `form:"saml_sign_requests"`
+	SAMLRequireEncryptedAssertions bool   `form:"saml_require_encrypted_assertions"`
+	SAMLNameIDFormat               string `form:"saml_name_id_format"`
+	SAMLUserIDAttribute            string `form:"saml_user_id_attribute" preprocess:"TrimSpace"`
+	SAMLUsernameAttribute          string `form:"saml_username_attribute" preprocess:"TrimSpace"`
+	SAMLFullNameAttribute          string `form:"saml_full_name_attribute" preprocess:"TrimSpace"`
+	SAMLEmailAttribute             string `form:"saml_email_attribute" preprocess:"TrimSpace"`
+	SAMLForceAuthn                 bool   `form:"saml_force_authn"`
+	SAMLAllowIDPInitiated          bool   `form:"saml_allow_idp_initiated"`
+	SAMLSkipLocalTwoFA             bool   `form:"saml_skip_local_two_fa"`
+	SAMLIconURL                    string `form:"saml_icon_url" preprocess:"TrimSpace"`
+	SAMLRequiredClaimName          string `form:"saml_required_claim_name"`
+	SAMLRequiredClaimValue         string `form:"saml_required_claim_value"`
+	SAMLGroupClaimName             string `form:"saml_group_claim_name"`
+	SAMLAdminGroup                 string `form:"saml_admin_group"`
+	SAMLRestrictedGroup            string `form:"saml_restricted_group"`
+	SAMLGroupTeamMap               string `form:"saml_group_team_map" binding:"ValidGroupTeamMap"`
+	SAMLGroupTeamMapRemoval        bool   `form:"saml_group_team_map_removal"`
+	SAMLDynGroupMaps               string `form:"saml_dyn_group_maps" binding:"ValidDynGroupMaps"`
+	SAMLDynGroupMapsRemoval        bool   `form:"saml_dyn_group_maps_removal"`
+	SAMLQuotaGroupClaimName        string `form:"saml_quota_group_claim_name"`
+	SAMLQuotaGroupMap              string `form:"saml_quota_group_map" binding:"ValidQuotaGroupMap"`
+	SAMLQuotaGroupMapRemoval       bool   `form:"saml_quota_group_map_removal"`
+	SAMLGroupUserGroupMap          string `form:"saml_group_user_group_map" binding:"ValidQuotaGroupMap"`
+	SAMLGroupUserGroupMapRemoval   bool   `form:"saml_group_user_group_map_removal"`
 }
 
 // Validate validates fields

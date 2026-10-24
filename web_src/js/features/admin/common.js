@@ -150,7 +150,7 @@ export function initAdminCommon() {
   // New authentication
   if (document.querySelector('.admin.new.authentication')) {
     document.getElementById('auth_type')?.addEventListener('change', function () {
-      hideElem('.ldap, .dldap, .smtp, .pam, .oauth2, .has-tls, .search-page-size');
+      hideElem('.ldap, .dldap, .smtp, .pam, .oauth2, .saml, .has-tls, .search-page-size');
 
       for (const input of document.querySelectorAll('.ldap input[required], .binddnrequired input[required], .dldap input[required], .smtp input[required], .pam input[required], .oauth2 input[required], .has-tls input[required]')) {
         input.removeAttribute('required');
@@ -193,7 +193,11 @@ export function initAdminCommon() {
           }
           onOAuth2Change(true);
           break;
+        case '9': // SAML
+          showElem('.saml');
+          break;
       }
+      toggleElem('.auth-tips', authType !== '9'); // the tips are about other types
       if (authType === '2' || authType === '5') {
         onSecurityProtocolChange();
         onEnableLdapGroupsChange();
@@ -233,6 +237,27 @@ export function initAdminCommon() {
       document.getElementById('oauth2-callback-url').textContent = `${window.location.origin}${appSubUrl}/user/oauth2/${encodeURIComponent(el.target.value)}/callback`;
     });
     authNameEl.dispatchEvent(new Event('input'));
+
+    // The SAML URLs of the new source follow its name; the edit page shows the stored ones.
+    const samlEntityID = document.getElementById('saml-entity-id');
+    if (samlEntityID && document.querySelector('.admin.new.authentication')) {
+      const customEntityID = document.getElementById('saml_sp_entity_id');
+      const setSAMLURLs = () => {
+        const name = authNameEl.value;
+        // the server's own URL and path escaping (Go's url.PathEscape), so the copied URLs are the ones it uses
+        const segment = encodeURIComponent(name)
+          .replace(/%(24|26|2B|3A|3D|40)/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+          .replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+        const base = name ? `${samlEntityID.closest('.saml-sp-urls').getAttribute('data-saml-base')}${segment}` : '';
+        document.getElementById('saml-acs-url').value = base && `${base}/acs`;
+        document.getElementById('saml-slo-url').value = base && `${base}/slo`;
+        document.getElementById('saml-metadata-url').value = base && `${base}/metadata`;
+        samlEntityID.value = customEntityID.value.trim() || (base && `${base}/metadata`);
+      };
+      authNameEl.addEventListener('input', setSAMLURLs);
+      customEntityID.addEventListener('input', setSAMLURLs);
+      setSAMLURLs();
+    }
   }
 
   // Notice

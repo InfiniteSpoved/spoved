@@ -34,6 +34,7 @@ const (
 	OAuth2      // 6
 	_           // 7 (was SSPI)
 	Remote      // 8
+	SAML        // 9
 )
 
 // String returns the string name of the LoginType
@@ -54,6 +55,7 @@ var Names = map[Type]string{
 	PAM:    "PAM",
 	OAuth2: "OAuth2",
 	Remote: "Remote",
+	SAML:   "SAML",
 }
 
 // Config represents login config as far as the db is concerned
@@ -175,6 +177,11 @@ func (source *Source) IsPAM() bool {
 // IsOAuth2 returns true of this source is of the OAuth2 type.
 func (source *Source) IsOAuth2() bool {
 	return source.Type == OAuth2
+}
+
+// IsSAML returns true of this source is of the SAML type.
+func (source *Source) IsSAML() bool {
+	return source.Type == SAML
 }
 
 func (source *Source) IsRemote() bool {
@@ -386,4 +393,17 @@ func IsErrSourceInUse(err error) bool {
 
 func (err ErrSourceInUse) Error() string {
 	return fmt.Sprintf("login source is still used by some users [id: %d]", err.ID)
+}
+
+// GetActiveSSOSourceByName returns the active OAuth2 or SAML source with the given name: the sources whose accounts are
+// linked through external_login_user.
+func GetActiveSSOSourceByName(ctx context.Context, name string) (*Source, error) {
+	source := new(Source)
+	has, err := db.GetEngine(ctx).Where(builder.Eq{"name": name, "is_active": true}.And(builder.In("`type`", OAuth2, SAML))).Get(source)
+	if err != nil {
+		return nil, err
+	} else if !has {
+		return nil, fmt.Errorf("sso source not found, name: %q: %w", name, util.ErrNotExist)
+	}
+	return source, nil
 }

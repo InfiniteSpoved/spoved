@@ -34,6 +34,9 @@ var MaintenanceSignInRoutes = container.SetOf(
 	"GET /user/oauth2/{provider}",
 	"GET /user/oauth2/{provider}/callback",
 	"POST /user/logout",
+	"GET /user/saml/{source}/login",
+	"POST /user/saml/{source}/acs",
+	"GET /user/saml/{source}/slo",
 )
 
 // MaintenanceReadRoutes are POST routes that only read, open to everyone who may read in read-only mode.

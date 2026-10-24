@@ -49,6 +49,11 @@
 				<!-- OAuth2 -->
 				{{template "admin/auth/source/oauth" .}}
 
+				<!-- SAML -->
+				<div class="saml field {{if not (eq .type 9)}}tw-hidden{{end}}">
+					{{template "admin/auth/source/saml" .}}
+				</div>
+
 				<div class="ldap field">
 					<div class="ui checkbox">
 						<label><strong>{{ctx.Locale.Tr "admin.auths.attributes_in_bind"}}</strong></label>
@@ -74,10 +79,10 @@
 			</form>
 		</div>
 
-		<h4 class="ui top attached header">
+		<h4 class="ui top attached header auth-tips {{if eq .type 9}}tw-hidden{{end}}">
 			{{ctx.Locale.Tr "admin.auths.tips"}}
 		</h4>
-		<div class="ui attached segment">
+		<div class="ui attached segment auth-tips {{if eq .type 9}}tw-hidden{{end}}">
 			<h5>{{ctx.Locale.Tr "admin.auths.tips.gmail_settings"}}</h5>
 			<p>Host: smtp.gmail.com, Port: 587, Enable TLS Encryption: true</p>
 

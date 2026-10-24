@@ -901,6 +901,12 @@ func registerRoutes(m *web.Route) {
 			m.Get("/{provider}", auth.SignInOAuth)
 			m.Get("/{provider}/callback", auth.SignInOAuthCallback)
 		})
+		m.Group("/saml/{source}", func() {
+			m.Get("/metadata", auth.SAMLMetadata)
+			m.Get("/login", auth.SAMLSignIn)
+			m.Post("/acs", auth.SAMLACS)
+			m.Get("/slo", auth.SAMLSLO)
+		})
 	})
 	// ***** END: User *****
 
