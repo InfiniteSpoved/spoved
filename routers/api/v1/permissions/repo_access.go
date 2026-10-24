@@ -6,12 +6,15 @@ package permissions
 import (
 	"context"
 	"net/http"
+	"slices"
 
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/services/auth"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func RepoAccess(ctx Context) {
@@ -65,7 +68,7 @@ func RepoAccess(ctx Context) {
 	}
 
 	// Every repository of an archived organization is read-only, whatever the repository's own settings say.
-	if owner := ctx.Repository().Owner; !ctx.IsReadOnlyMethod() && owner.IsOrganization() && owner.IsArchived {
+	if owner := ctx.Repository().Owner; !ctx.IsReadOnlyMethod() && owner.IsOrganization() && owner.IsArchived && !isArchivedOrgOpenRoute(ctx) {
 		ctx.Error(http.StatusForbidden, "OrgArchived", "the organization is archived and read-only")
 	}
 }
@@ -82,4 +85,27 @@ func dropReadOnlyUnits(permission *access_model.Permission) {
 			permission.Units = append(permission.Units, u)
 		}
 	}
+}
+
+// CredentialRevokeRoutes revoke access tokens, on the web and in the API. They stay open while an organization is
+// archived (context.ArchivedOrgOpenRoutes) and in read-only maintenance mode (common.MaintenanceRevokeRoutes):
+// taking a leaked credential away must always be possible. They are kept here, the lowest package that needs them.
+var CredentialRevokeRoutes = []string{
+	"POST /user/settings/keys/tokens/delete",
+	"POST /org/{org}/settings/keys/tokens/delete",
+	"POST /org/{org}/groups/{id}/settings/keys/tokens/delete",
+	"POST /{username}/{reponame}/settings/keys/tokens/delete",
+	"DELETE /api/v1/users/{username}/tokens/{id}",
+	"DELETE /api/v1/orgs/{org}/tokens/{id}",
+	"DELETE /api/v1/orgs/{org}/projects/{id}/tokens/{token_id}",
+	"DELETE /api/v1/repos/{username}/{reponame}/tokens/{id}",
+	"DELETE /api/v1/repos/{username}/{groupname}/{reponame}/-/tokens/{id}",
+	"DELETE /api/v1/repositories/{repo_id}/tokens/{id}",
+}
+
+// isArchivedOrgOpenRoute reports whether the request's route stays writable in an archived organization (revoking a
+// token). Every route is a DELETE there, so the pattern decides.
+func isArchivedOrgOpenRoute(ctx Context) bool {
+	rctx := chi.RouteContext(ctx.Context())
+	return rctx != nil && slices.Contains(CredentialRevokeRoutes, http.MethodDelete+" "+rctx.RoutePattern())
 }
