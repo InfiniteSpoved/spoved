@@ -4,8 +4,10 @@
 package integration
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,6 +28,7 @@ import (
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
 	api "forgejo.org/modules/structs"
+	notify_service "forgejo.org/services/notify"
 	pull_service "forgejo.org/services/pull"
 	commitstatus_service "forgejo.org/services/repository/commitstatus"
 	files_service "forgejo.org/services/repository/files"
@@ -135,6 +138,57 @@ func requireStackMergeError(t *testing.T, err error, index int64) error {
 	return stackErr.Err
 }
 
+// retargetRecorder records the old target branch of the notified pull requests by index.
+type retargetRecorder struct {
+	notify_service.NullNotifier
+	mu  sync.Mutex
+	old map[int64]string
+}
+
+func (n *retargetRecorder) PullRequestChangeTargetBranch(_ context.Context, _ *user_model.User, pr *issues_model.PullRequest, oldBranch string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.old == nil {
+		n.old = map[int64]string{}
+	}
+	n.old[pr.Index] = oldBranch
+}
+
+func (n *retargetRecorder) get() map[int64]string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return maps.Clone(n.old)
+}
+
+// approvePull submits an approval of reviewer for the current head of pr.
+func approvePull(t *testing.T, repo *repo_model.Repository, pr *issues_model.PullRequest, reviewer *user_model.User) *issues_model.Review {
+	t.Helper()
+	gitRepo, err := gitrepo.OpenRepository(t.Context(), repo)
+	require.NoError(t, err)
+	defer gitRepo.Close()
+	sha, err := gitRepo.GetRefCommitID(pr.GetGitRefName())
+	require.NoError(t, err)
+	pr = unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID})
+	require.NoError(t, pr.LoadIssue(db.DefaultContext))
+	review, _, err := pull_service.SubmitReview(db.DefaultContext, reviewer, gitRepo, pr.Issue, issues_model.ReviewTypeApprove, "", sha, nil)
+	require.NoError(t, err)
+	return review
+}
+
+// waitChecked waits until the check queued by a push to the head of pr is done.
+func waitChecked(t *testing.T, prs ...*issues_model.PullRequest) {
+	t.Helper()
+	assert.Eventually(t, func() bool {
+		for _, pr := range prs {
+			pr, err := issues_model.GetPullRequestByID(db.DefaultContext, pr.ID)
+			if err != nil || pr.Status == issues_model.PullRequestStatusChecking {
+				return false
+			}
+		}
+		return true
+	}, 10*time.Second, 50*time.Millisecond)
+}
+
 func TestPullStack(t *testing.T) {
 	onApplicationRun(t, func(t *testing.T, u *url.URL) {
 		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
@@ -218,6 +272,8 @@ func TestPullStack(t *testing.T) {
 			assert.Equal(t, indexes(prs[:2]...), merged)
 			assertMerged(t, true, prs[:2]...)
 			assertMerged(t, false, prs[2])
+			// nothing is left based on the merged branch
+			assert.Equal(t, "main", unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: prs[2].ID}).BaseBranch)
 		})
 
 		t.Run("FailingCheck", func(t *testing.T) {
@@ -251,11 +307,98 @@ func TestPullStack(t *testing.T) {
 				return err == nil && pr.Status != issues_model.PullRequestStatusChecking
 			}, 10*time.Second, 50*time.Millisecond)
 
+			// every head is checked before anything is merged
 			merged, err := mergeStack(t, user2, repo, prs[2], repo_model.MergeStyleMerge, heads)
-			assert.Equal(t, indexes(prs[:2]...), merged)
+			assert.Empty(t, merged)
 			assert.True(t, models.IsErrSHADoesNotMatch(requireStackMergeError(t, err, prs[2].Index)))
-			assertMerged(t, true, prs[:2]...)
-			assertMerged(t, false, prs[2])
+			assertMerged(t, false, prs...)
+		})
+
+		t.Run("PushToMiddle", func(t *testing.T) {
+			repo, prs := newPullStack(t, user2, nil)
+			heads := stackHeads(t, repo, prs...)
+			stackCommit(t, user2, repo, "b", "b", "update", "b.txt", "pushed later")
+			assert.Eventually(t, func() bool {
+				return stackHeads(t, repo, prs[1])[0].HeadCommitID != heads[1].HeadCommitID
+			}, 10*time.Second, 50*time.Millisecond)
+			waitChecked(t, prs...)
+
+			merged, err := mergeStack(t, user2, repo, prs[2], repo_model.MergeStyleMerge, heads)
+			assert.Empty(t, merged)
+			assert.True(t, models.IsErrSHADoesNotMatch(requireStackMergeError(t, err, prs[1].Index)))
+			assertMerged(t, false, prs...)
+		})
+
+		t.Run("TitleRule", func(t *testing.T) {
+			repo, prs := newPullStack(t, user2, nil)
+			// refuse mode: a retarget to main is refused for a title that does not match
+			require.NoError(t, git_model.UpsertPushRule(t.Context(), &git_model.PushRule{RepoID: repo.ID, PRTitleRegex: `^OK`, PRTitleBranches: "main"}))
+			merged, err := mergeStack(t, user2, repo, prs[2], repo_model.MergeStyleMerge, stackHeads(t, repo, prs...))
+			assert.Empty(t, merged)
+			assert.True(t, git_model.IsErrPRTitleRule(requireStackMergeError(t, err, prs[1].Index)))
+			assertMerged(t, false, prs...)
+		})
+
+		t.Run("ApprovalsOnBase", func(t *testing.T) {
+			approver := forgery.CreateUser(t, nil)
+			writer := forgery.CreateUser(t, nil)
+			repo, prs := newPullStack(t, user2, map[*user_model.User]perm.AccessMode{approver: perm.AccessModeWrite, writer: perm.AccessModeWrite})
+			require.NoError(t, git_model.UpdateProtectBranch(db.DefaultContext, repo, &git_model.ProtectedBranch{
+				RepoID:                   repo.ID,
+				RuleName:                 "main",
+				RequiredApprovals:        1,
+				EnableApprovalsWhitelist: true,
+			}, git_model.WhitelistOptions{ApprovalsUserIDs: []int64{approver.ID}}))
+			approvePull(t, repo, prs[0], approver)
+			// a and b have no rule: anyone with write access reviews officially, but not on main
+			reviews := []*issues_model.Review{approvePull(t, repo, prs[1], writer), approvePull(t, repo, prs[2], writer)}
+			assert.True(t, reviews[0].Official)
+			assert.True(t, reviews[1].Official)
+
+			merged, err := mergeStack(t, user2, repo, prs[2], repo_model.MergeStyleMerge, stackHeads(t, repo, prs...))
+			assert.Empty(t, merged)
+			assert.True(t, models.IsErrDisallowedToMerge(requireStackMergeError(t, err, prs[1].Index)))
+			assertMerged(t, false, prs...)
+			// the check leaves the reviews as they were
+			for _, r := range reviews {
+				assert.True(t, unittest.AssertExistsAndLoadBean(t, &issues_model.Review{ID: r.ID}).Official)
+			}
+		})
+
+		t.Run("Notified", func(t *testing.T) {
+			repo, prs := newPullStack(t, user2, nil)
+			n := &retargetRecorder{}
+			notify_service.RegisterNotifier(n)
+			defer notify_service.UnregisterNotifier(n)
+			_, err := mergeStack(t, user2, repo, prs[1], repo_model.MergeStyleMerge, stackHeads(t, repo, prs[:2]...))
+			require.NoError(t, err)
+			// the second one is retargeted by the merge, the third one as a child of the last merged
+			assert.Equal(t, map[int64]string{prs[1].Index: "a", prs[2].Index: "b"}, n.get())
+		})
+
+		t.Run("SameHeadOnBase", func(t *testing.T) {
+			repo, prs := newPullStack(t, user2, nil)
+			// b already has a pull request to main: the retarget would be refused, so nothing is merged
+			stackPull(t, user2, repo, "main", "b")
+			merged, err := mergeStack(t, user2, repo, prs[1], repo_model.MergeStyleMerge, stackHeads(t, repo, prs[:2]...))
+			assert.Empty(t, merged)
+			assert.True(t, issues_model.IsErrPullRequestAlreadyExists(requireStackMergeError(t, err, prs[1].Index)))
+			assertMerged(t, false, prs...)
+		})
+
+		t.Run("BaseIsHead", func(t *testing.T) {
+			repo := forgery.CreateRepository(t, user2, &forgery.CreateRepositoryOptions{
+				Files: forgery.MapFS{"README.md": forgery.MapFile("stack")},
+			})
+			stackCommit(t, user2, repo, "main", "a", "create", "a.txt", "a")
+			stackCommit(t, user2, repo, "main", "b", "create", "b.txt", "b")
+			// two pull requests pointing at each other
+			p1 := stackPull(t, user2, repo, "b", "a")
+			p2 := stackPull(t, user2, repo, "a", "b")
+			merged, err := mergeStack(t, user2, repo, p1, repo_model.MergeStyleMerge, stackHeads(t, repo, p2, p1))
+			assert.Empty(t, merged)
+			require.Error(t, requireStackMergeError(t, err, p1.Index))
+			assertMerged(t, false, p1, p2)
 		})
 
 		t.Run("NotAllowed", func(t *testing.T) {
@@ -386,5 +529,124 @@ func TestPullRetargetOfficialReview(t *testing.T) {
 		pr.Issue.Repo = repo
 		require.NoError(t, pull_service.ChangeTargetBranch(db.DefaultContext, pr, user2, "a"))
 		assert.False(t, unittest.AssertExistsAndLoadBean(t, &issues_model.Review{ID: reviews[writer].ID}).Official)
+	})
+}
+
+// forcePushBranch points branch at a new commit made from main with the given file and queues the checks of the pull
+// requests like the push hook does, synchronously.
+func forcePushBranch(t *testing.T, user *user_model.User, repo *repo_model.Repository, branch, tmpBranch, path, content string) {
+	t.Helper()
+	gitRepo, err := gitrepo.OpenRepository(t.Context(), repo)
+	require.NoError(t, err)
+	defer gitRepo.Close()
+	oldID, err := gitRepo.GetBranchCommitID(branch)
+	require.NoError(t, err)
+	stackCommit(t, user, repo, "main", tmpBranch, "create", path, content)
+	newID, err := gitRepo.GetBranchCommitID(tmpBranch)
+	require.NoError(t, err)
+	_, _, err = git.NewCommand(t.Context(), "update-ref").AddDynamicArguments("refs/heads/"+branch, newID).RunStdString(&git.RunOpts{Dir: repo.RepoPath()})
+	require.NoError(t, err)
+	pull_service.TestPullRequest(t.Context(), user, repo.ID, time.Now().UnixNano(), branch, true, oldID, newID)
+}
+
+func TestPullStackStaleReviews(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+		isStale := func(r *issues_model.Review) bool {
+			return unittest.AssertExistsAndLoadBean(t, &issues_model.Review{ID: r.ID}).Stale
+		}
+		// main <- a (a.txt, evil.txt) <- b (b.txt), approved by an approver of main
+		setup := func(t *testing.T, dismissOnA bool) (*repo_model.Repository, []*issues_model.PullRequest, *user_model.User, *issues_model.Review) {
+			approver := forgery.CreateUser(t, nil)
+			repo := forgery.CreateRepository(t, user2, &forgery.CreateRepositoryOptions{
+				Files:         forgery.MapFS{"README.md": forgery.MapFile("stack")},
+				Collaborators: map[*user_model.User]perm.AccessMode{approver: perm.AccessModeWrite},
+			})
+			stackCommit(t, user2, repo, "main", "a", "create", "a.txt", "a")
+			stackCommit(t, user2, repo, "a", "a", "create", "evil.txt", "evil")
+			stackCommit(t, user2, repo, "a", "b", "create", "b.txt", "b")
+			a := stackPull(t, user2, repo, "main", "a")
+			b := stackPull(t, user2, repo, "a", "b")
+			require.NoError(t, git_model.UpdateProtectBranch(db.DefaultContext, repo, &git_model.ProtectedBranch{
+				RepoID:                   repo.ID,
+				RuleName:                 "main",
+				RequiredApprovals:        1,
+				EnableApprovalsWhitelist: true,
+				IgnoreStaleApprovals:     true,
+			}, git_model.WhitelistOptions{ApprovalsUserIDs: []int64{approver.ID}}))
+			if dismissOnA {
+				require.NoError(t, git_model.UpdateProtectBranch(db.DefaultContext, repo, &git_model.ProtectedBranch{
+					RepoID:                repo.ID,
+					RuleName:              "a",
+					DismissStaleApprovals: true,
+				}, git_model.WhitelistOptions{}))
+			}
+			waitChecked(t, a, b)
+			review := approvePull(t, repo, b, approver)
+			assert.False(t, isStale(review))
+			return repo, []*issues_model.PullRequest{a, b}, approver, review
+		}
+
+		t.Run("BaseForcePushed", func(t *testing.T) {
+			repo, prs, approver, review := setup(t, false)
+			forcePushBranch(t, user2, repo, "a", "a-new", "a.txt", "a")
+			assert.True(t, isStale(review))
+			assert.False(t, unittest.AssertExistsAndLoadBean(t, &issues_model.Review{ID: review.ID}).Dismissed)
+
+			// a is approved again at its new head, b only has the stale approval
+			waitChecked(t, prs...)
+			approvePull(t, repo, prs[0], approver)
+			merged, err := mergeStack(t, user2, repo, prs[1], repo_model.MergeStyleMerge, stackHeads(t, repo, prs...))
+			assert.Empty(t, merged)
+			innerErr := requireStackMergeError(t, err, prs[1].Index)
+			assert.True(t, models.IsErrDisallowedToMerge(innerErr), "%v", innerErr)
+			assertMerged(t, false, prs...)
+		})
+
+		t.Run("BaseForcePushedDismiss", func(t *testing.T) {
+			repo, _, _, review := setup(t, true)
+			forcePushBranch(t, user2, repo, "a", "a-new", "a.txt", "a")
+			r := unittest.AssertExistsAndLoadBean(t, &issues_model.Review{ID: review.ID})
+			assert.True(t, r.Stale)
+			assert.True(t, r.Dismissed)
+		})
+
+		t.Run("BaseMovedForward", func(t *testing.T) {
+			repo, _, _, review := setup(t, false)
+			gitRepo, err := gitrepo.OpenRepository(t.Context(), repo)
+			require.NoError(t, err)
+			defer gitRepo.Close()
+			oldID, err := gitRepo.GetBranchCommitID("a")
+			require.NoError(t, err)
+			stackCommit(t, user2, repo, "a", "a", "create", "more.txt", "more")
+			newID, err := gitRepo.GetBranchCommitID("a")
+			require.NoError(t, err)
+			pull_service.TestPullRequest(t.Context(), user2, repo.ID, time.Now().UnixNano(), "a", true, oldID, newID)
+			r := unittest.AssertExistsAndLoadBean(t, &issues_model.Review{ID: review.ID})
+			assert.False(t, r.Stale)
+			assert.False(t, r.Dismissed)
+		})
+
+		t.Run("Retarget", func(t *testing.T) {
+			repo, prs, _, review := setup(t, false)
+			b := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: prs[1].ID})
+			require.NoError(t, b.LoadIssue(db.DefaultContext))
+			b.Issue.Repo = repo
+			// main lacks the commits of a: the pull request now contributes them
+			require.NoError(t, pull_service.ChangeTargetBranch(db.DefaultContext, b, user2, "main"))
+			assert.True(t, isStale(review))
+		})
+
+		t.Run("MergedParentKeepsApprovals", func(t *testing.T) {
+			reviewer := forgery.CreateUser(t, nil)
+			repo, prs := newPullStack(t, user2, map[*user_model.User]perm.AccessMode{reviewer: perm.AccessModeWrite})
+			review := approvePull(t, repo, prs[1], reviewer)
+			// a lands by a merge commit and b is retargeted to main: its merge base is still the head of a
+			merged, err := mergeStack(t, user2, repo, prs[0], repo_model.MergeStyleMerge, stackHeads(t, repo, prs[0]))
+			require.NoError(t, err)
+			assert.Equal(t, indexes(prs[0]), merged)
+			assert.Equal(t, "main", unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: prs[1].ID}).BaseBranch)
+			assert.False(t, isStale(review))
+		})
 	})
 }

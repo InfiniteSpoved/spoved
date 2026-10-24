@@ -245,6 +245,7 @@ func changeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer 
 
 	// Set new target branch
 	oldBranch := pr.BaseBranch
+	oldMergeBase := pr.MergeBase
 	pr.BaseBranch = targetBranch
 
 	// Refresh patch
@@ -275,6 +276,8 @@ func changeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer 
 	}); err != nil {
 		return err
 	}
+
+	staleReviewsOnMergeBaseChange(ctx, doer, pr, oldMergeBase, pr.MergeBase)
 
 	// Create comment
 	options := &issues_model.CreateCommentOptions{
@@ -404,6 +407,12 @@ func TestPullRequest(ctx context.Context, doer *user_model.User, repoID, olderTh
 				log.Error("UpdateCommitDivergence: %v", err)
 			}
 		}
+		// the queued check stores the new merge base: compare it here, while the old one is still known
+		if mergeBase, err := mergeBaseOf(ctx, pr); err != nil {
+			log.Error("%-v merge base: %v", pr, err)
+		} else {
+			staleReviewsOnMergeBaseChange(ctx, doer, pr, pr.MergeBase, mergeBase)
+		}
 		AddToTaskQueue(ctx, pr)
 	}
 }
@@ -452,6 +461,55 @@ func CancelAutoMergeOnPush(ctx context.Context, pr *issues_model.PullRequest, pu
 	log.Info("Auto merge of %-v cancelled by a push", pr)
 }
 
+// mergeBaseOf returns the merge base of the base branch and the head of pr in its base repository.
+func mergeBaseOf(ctx context.Context, pr *issues_model.PullRequest) (string, error) {
+	if err := pr.LoadBaseRepo(ctx); err != nil {
+		return "", err
+	}
+	gitRepo, err := gitrepo.OpenRepository(ctx, pr.BaseRepo)
+	if err != nil {
+		return "", err
+	}
+	defer gitRepo.Close()
+	return gitRepo.GetMergeBaseSimple(git.BranchPrefix+pr.BaseBranch, pr.GetGitRefName())
+}
+
+// markReviewsStale marks the reviews of pr as stale and dismisses its approvals if a rule of its base branch says so.
+func markReviewsStale(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest) {
+	if err := issues_model.MarkReviewsAsStale(ctx, pr.IssueID); err != nil {
+		log.Error("MarkReviewsAsStale: %v", err)
+	}
+
+	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
+	if err != nil {
+		log.Error("GetMatchedProtectedBranchRules: %v", err)
+	}
+	if slices.ContainsFunc(rules, func(pb *git_model.ProtectedBranch) bool { return pb.DismissStaleApprovals }) {
+		if err := DismissApprovalReviews(ctx, doer, pr); err != nil {
+			log.Error("DismissApprovalReviews: %v", err)
+		}
+	}
+}
+
+// staleReviewsOnMergeBaseChange marks the reviews of pr as stale (see markReviewsStale) if its merge base changed from
+// oldMergeBase to newMergeBase and the two have different trees: the diff to the head then holds changes no reviewer
+// saw. The diff is the same for two merge bases with the same tree, e.g. when the base branch moves forward past it.
+func staleReviewsOnMergeBaseChange(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest, oldMergeBase, newMergeBase string) {
+	if oldMergeBase == "" || newMergeBase == "" || oldMergeBase == newMergeBase {
+		return
+	}
+	if err := pr.LoadBaseRepo(ctx); err != nil {
+		log.Error("%-v LoadBaseRepo: %v", pr, err)
+		return
+	}
+	trees, _, err := git.NewCommand(ctx, "rev-parse").AddDynamicArguments(oldMergeBase+"^{tree}", newMergeBase+"^{tree}").RunStdString(&git.RunOpts{Dir: pr.BaseRepo.RepoPath()})
+	if f := strings.Fields(trees); err == nil && len(f) == 2 && f[0] == f[1] {
+		return
+	}
+	// a tree that can't be read counts as changed
+	markReviewsStale(ctx, doer, pr)
+}
+
 // Mark old reviews as stale if diff to mergebase has changed.
 // Dismiss all approval reviews if protected branch rule item enabled.
 // Update commit divergence.
@@ -473,19 +531,7 @@ func ValidatePullRequest(ctx context.Context, pr *issues_model.PullRequest, newC
 		log.Error("CheckIfDiffDiffers: %v", err)
 	}
 	if changed {
-		if err := issues_model.MarkReviewsAsStale(ctx, pr.IssueID); err != nil {
-			log.Error("MarkReviewsAsStale: %v", err)
-		}
-
-		rules, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
-		if err != nil {
-			log.Error("GetMatchedProtectedBranchRules: %v", err)
-		}
-		if slices.ContainsFunc(rules, func(pb *git_model.ProtectedBranch) bool { return pb.DismissStaleApprovals }) {
-			if err := DismissApprovalReviews(ctx, doer, pr); err != nil {
-				log.Error("DismissApprovalReviews: %v", err)
-			}
-		}
+		markReviewsStale(ctx, doer, pr)
 	}
 	if err := issues_model.MarkReviewsAsNotStale(ctx, pr.IssueID, newCommitID); err != nil {
 		log.Error("MarkReviewsAsNotStale: %v", err)

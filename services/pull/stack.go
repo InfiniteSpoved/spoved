@@ -12,12 +12,17 @@ import (
 	"time"
 
 	"forgejo.org/models"
+	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
+	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
+	issue_service "forgejo.org/services/issue"
+	notify_service "forgejo.org/services/notify"
 )
 
 const (
@@ -30,6 +35,10 @@ const (
 var (
 	ErrStackChanged = errors.New("the stack changed")
 	ErrStackTooLong = errors.New("the stack is too long to merge at once")
+	// ErrStackBaseIsHead is returned when the target branch of the stack is the head branch of one of its pull requests.
+	ErrStackBaseIsHead = errors.New("the target branch is the head branch of a pull request of the stack")
+
+	errRollback = errors.New("roll back the check")
 )
 
 // StackEntry is a pull request of a stack.
@@ -186,8 +195,9 @@ func (e ErrStackMerge) Unwrap() error {
 // MergeStack merges the pull requests of the stack from the bottom up to pr into the base branch of the stack, each
 // one retargeted to it first. expected lists them as the client saw them, from the bottom; the call is refused with
 // ErrStackChanged unless it is the current chain. Every pull request must pass the merge checks as if it targeted the
-// base branch before anything is merged. It stops at the first failure with ErrStackMerge and returns the indexes of
-// the pull requests it merged, which stay merged. Branches are not deleted.
+// base branch, and still have the head the client saw, before anything is merged. It stops at the first failure with
+// ErrStackMerge and returns the indexes of the pull requests it merged, which stay merged. The pull requests based on
+// the last merged one are retargeted to the base branch. Branches are not deleted.
 func MergeStack(ctx context.Context, doer *user_model.User, perm *access_model.Permission, pr *issues_model.PullRequest, style repo_model.MergeStyle, expected []StackHead) ([]int64, error) {
 	chain := []*issues_model.PullRequest{pr}
 	stack, err := GetStack(ctx, pr)
@@ -216,25 +226,133 @@ func MergeStack(ctx context.Context, doer *user_model.User, perm *access_model.P
 	}
 
 	base := chain[0].BaseBranch
-	for _, p := range chain {
-		check := *p // never written
-		check.BaseBranch = base
-		if err := CheckPullMergeable(ctx, doer, perm, &check, MergeCheckTypeGeneral, false, style); err != nil {
+	if err := chain[0].LoadBaseRepo(ctx); err != nil {
+		return nil, err
+	}
+	gitRepo, err := gitrepo.OpenRepository(ctx, chain[0].BaseRepo)
+	if err != nil {
+		return nil, err
+	}
+	defer gitRepo.Close()
+	for i, p := range chain {
+		if err := checkStackPull(ctx, doer, perm, gitRepo, chain, p, expected[i].HeadCommitID, base, style); err != nil {
 			return nil, ErrStackMerge{Index: p.Index, Err: err}
 		}
 	}
 
 	merged := make([]int64, 0, len(chain))
+	var mergeErr error
 	for i, p := range chain {
 		if err := mergeStackPull(ctx, doer, perm, p, expected[i].HeadCommitID, base, style); err != nil {
 			if models.IsErrPullRequestHasMerged(err) {
 				err = ErrHasMerged
 			}
-			return merged, ErrStackMerge{Index: p.Index, Err: err}
+			mergeErr = ErrStackMerge{Index: p.Index, Err: err}
+			break
 		}
 		merged = append(merged, p.Index)
 	}
-	return merged, nil
+	if len(merged) > 0 {
+		// whatever happened, nothing is left based on a branch that is merged now
+		retargetStackChildren(ctx, doer, chain[len(merged)-1], base)
+	}
+	return merged, mergeErr
+}
+
+// checkStackPull checks that the pull request p of chain can be merged into base after its predecessors, without
+// changing anything: its head is the one the client saw, it can be retargeted, and the merge checks pass as if it
+// targeted base.
+func checkStackPull(ctx context.Context, doer *user_model.User, perm *access_model.Permission, gitRepo *git.Repository, chain []*issues_model.PullRequest, p *issues_model.PullRequest, headCommitID, base string, style repo_model.MergeStyle) error {
+	if sha, err := gitRepo.GetRefCommitID(p.GetGitRefName()); err != nil {
+		return err
+	} else if sha != headCommitID {
+		return models.ErrSHADoesNotMatch{GivenSHA: headCommitID, CurrentSHA: sha}
+	}
+
+	if p.BaseBranch != base {
+		if err := p.LoadBaseRepo(ctx); err != nil {
+			return err
+		}
+		if slices.ContainsFunc(chain, func(q *issues_model.PullRequest) bool { return q.HeadBranch == base }) {
+			return ErrStackBaseIsHead
+		}
+		existing, err := issues_model.GetUnmergedPullRequest(ctx, p.HeadRepoID, p.BaseRepoID, p.HeadBranch, base, issues_model.PullRequestFlowGithub)
+		if err == nil {
+			return issues_model.ErrPullRequestAlreadyExists{
+				ID:         existing.ID,
+				IssueID:    existing.Index,
+				HeadRepoID: existing.HeadRepoID,
+				BaseRepoID: existing.BaseRepoID,
+				HeadBranch: existing.HeadBranch,
+				BaseBranch: existing.BaseBranch,
+			}
+		} else if !issues_model.IsErrPullRequestNotExist(err) {
+			return err
+		}
+		if err := issue_service.CheckPRTitleRule(ctx, p.BaseRepo, base, p.Issue.Title, false); err != nil {
+			return err
+		}
+	}
+
+	// a copy of its own: the reviews count as they will on base, the check never writes
+	check := *p
+	check.BaseBranch = base
+	issue := *p.Issue
+	issue.PullRequest = &check
+	check.Issue = &issue
+	var checkErr error
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		if p.BaseBranch != base {
+			if err := issues_model.DowngradeOfficialReviews(ctx, &check); err != nil {
+				return err
+			}
+		}
+		checkErr = CheckPullMergeable(ctx, doer, perm, &check, MergeCheckTypeGeneral, false, style)
+		return errRollback
+	}); !errors.Is(err, errRollback) {
+		return err
+	}
+	return checkErr
+}
+
+// notifyRetarget notifies that the base branch of pr was changed from oldBase.
+func notifyRetarget(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest, oldBase string) {
+	if err := pr.LoadIssue(ctx); err != nil {
+		log.Error("%-v LoadIssue: %v", pr, err)
+		return
+	}
+	if err := pr.Issue.LoadRepo(ctx); err != nil {
+		log.Error("%-v LoadRepo: %v", pr, err)
+		return
+	}
+	if err := pr.Issue.LoadPoster(ctx); err != nil {
+		log.Error("%-v LoadPoster: %v", pr, err)
+		return
+	}
+	notify_service.PullRequestChangeTargetBranch(ctx, doer, pr, oldBase)
+}
+
+// retargetStackChildren retargets the open pull requests based on the head branch of the merged pull request to base,
+// whatever the setting for children on merge says.
+func retargetStackChildren(ctx context.Context, doer *user_model.User, merged *issues_model.PullRequest, base string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(setting.Git.Timeout.Default)*time.Second)
+	defer cancel()
+
+	children, err := issues_model.GetUnmergedPullRequestsByBaseInfo(ctx, merged.BaseRepoID, merged.HeadBranch)
+	if err != nil {
+		log.Error("GetUnmergedPullRequestsByBaseInfo: %v", err)
+		return
+	}
+	if err := RetargetBranchPulls(ctx, doer, merged.BaseRepoID, merged.HeadBranch, base); err != nil {
+		log.Error("RetargetBranchPulls: %v", err)
+	}
+	for _, c := range children {
+		if c, err := issues_model.GetPullRequestByID(ctx, c.ID); err != nil {
+			log.Error("GetPullRequestByID: %v", err)
+		} else if c.BaseBranch == base {
+			notifyRetarget(ctx, doer, c, merged.HeadBranch)
+		}
+	}
 }
 
 // mergeStackPull retargets the pull request p of a stack to base, unless it already targets it, and merges it.
@@ -260,9 +378,11 @@ func mergeStackPull(ctx context.Context, doer *user_model.User, perm *access_mod
 		if pr.BaseBranch != p.BaseBranch { // retargeted elsewhere meanwhile
 			return ErrStackChanged
 		}
-		if err := changeTargetBranch(ctx, pr, doer, base, false); err != nil {
+		oldBase := pr.BaseBranch
+		if err := changeTargetBranch(ctx, pr, doer, base, true); err != nil {
 			return err
 		}
+		notifyRetarget(ctx, doer, pr, oldBase)
 	}
 
 	err = CheckPullMergeable(ctx, doer, perm, pr, MergeCheckTypeGeneral, false, style)
