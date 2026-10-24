@@ -46,6 +46,8 @@ func ToAccessRows(ctx context.Context, rows []*accessreport.Row, doer *user_mode
 			ar.DeployKey = &api.AccessDeployKey{ID: r.DeployKey.ID, Name: r.DeployKey.Name, Fingerprint: r.DeployKey.Fingerprint, Expires: OptionalTime(r.DeployKey.ExpiresUnix)}
 		case r.OrgDeployKey != nil:
 			ar.DeployKey = &api.AccessDeployKey{ID: r.OrgDeployKey.ID, Name: r.OrgDeployKey.Name, Fingerprint: r.OrgDeployKey.Fingerprint, Expires: OptionalTime(r.OrgDeployKey.ExpiresUnix)}
+		case r.AccessToken != nil:
+			ar.AccessToken = &api.AccessAccessToken{ID: r.AccessToken.ID, Name: r.AccessToken.Name, Expires: OptionalTime(r.AccessToken.ExpiresUnix)}
 		case r.Team != nil:
 			ar.Type = "team"
 			ar.Team = &api.AccessTeam{ID: r.Team.ID, Name: r.Team.Name, NumMembers: r.Team.NumMembers}
@@ -93,6 +95,8 @@ func ToAccessReportLines(ctx context.Context, rows []*accessreport.Row, doer *us
 			}
 		case ar.DeployKey != nil:
 			base.Name = ar.DeployKey.Name
+		case ar.AccessToken != nil:
+			base.Name = ar.AccessToken.Name
 		case ar.Team != nil:
 			base.Name = ar.Team.Name
 		}

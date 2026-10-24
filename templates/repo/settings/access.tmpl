@@ -28,7 +28,7 @@
 						<label for="access-type">{{ctx.Locale.Tr "access_report.type"}}</label>
 						<select id="access-type" name="type">
 							<option value="">{{ctx.Locale.Tr "access_report.filter.any"}}</option>
-							{{range $t := StringUtils.Make "person" "bot" "key"}}
+							{{range $t := StringUtils.Make "person" "bot" "key" "token"}}
 								<option value="{{$t}}"{{if eq ($.Filter.Get "type") $t}} selected{{end}}>{{ctx.Locale.Tr (print "access_report.type." $t)}}</option>
 							{{end}}
 						</select>

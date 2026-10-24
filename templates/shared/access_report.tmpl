@@ -31,7 +31,7 @@
 				<label for="access-type">{{ctx.Locale.Tr "access_report.type"}}</label>
 				<select id="access-type" name="type">
 					<option value="">{{ctx.Locale.Tr "access_report.filter.any"}}</option>
-					{{range $t := StringUtils.Make "person" "bot" "key"}}
+					{{range $t := StringUtils.Make "person" "bot" "key" "token"}}
 						<option value="{{$t}}"{{if eq ($.Filter.Get "type") $t}} selected{{end}}>{{ctx.Locale.Tr (print "access_report.type." $t)}}</option>
 					{{end}}
 				</select>
@@ -78,7 +78,7 @@
 				{{range .Lines}}
 					<tr data-type="{{.Type}}" data-name="{{.Name}}" data-repo="{{.Repository}}" data-unit="{{.Unit}}" data-path="{{.Path}}" data-team="{{.Team}}"{{if not .Applied}} class="text grey"{{end}}>
 						<td>
-							{{if .Name}}{{.Name}}{{if .FullName}} <span class="text grey">{{.FullName}}</span>{{end}}{{if eq .Type "key"}} {{svg "octicon-key"}}{{else if eq .Type "bot"}} <span class="ui label">{{ctx.Locale.Tr "access_report.type.bot"}}</span>{{end}}
+							{{if .Name}}{{.Name}}{{if .FullName}} <span class="text grey">{{.FullName}}</span>{{end}}{{if eq .Type "key"}} {{svg "octicon-key"}}{{else if eq .Type "token"}} {{svg "fontawesome-send"}}{{else if eq .Type "bot"}} <span class="ui label">{{ctx.Locale.Tr "access_report.type.bot"}}</span>{{end}}
 							{{else}}<em>{{ctx.Locale.Tr (print "access_report.who." .Type)}}</em>{{end}}
 						</td>
 						<td><a href="{{AppSubUrl}}/{{.Repository}}">{{.Repository}}</a></td>

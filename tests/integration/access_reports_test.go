@@ -116,6 +116,23 @@ func TestOrgAccessReport(t *testing.T) {
 	}
 	assert.Equal(t, map[string]bool{"org3/repo3": true, "org3/repo5": true, "org3/repo21": true}, repos)
 
+	t.Run("access tokens", func(t *testing.T) {
+		orgToken := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeWrite, "write:repository")
+		repoToken := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, 3, 0, perm_model.AccessModeRead, "read:repository")
+		defer func() {
+			_, err := db.GetEngine(db.DefaultContext).In("id", orgToken.ID, repoToken.ID).Delete(&auth_model.AccessToken{})
+			require.NoError(t, err)
+		}()
+		tokens := pageLines(t, session, orgAccessReportLink+"?type=token")
+		assert.Contains(t, tokens, reportLine(orgToken.Name, "org3/repo5", "repo.code", "org_token", ""))
+		assert.Contains(t, tokens, reportLine(orgToken.Name, "org3/repo3", "repo.issues", "org_token", ""))
+		assert.Contains(t, tokens, reportLine(repoToken.Name, "org3/repo3", "repo.code", "repo_token", ""))
+		assert.NotContains(t, tokens, reportLine(repoToken.Name, "org3/repo5", "repo.code", "repo_token", ""))
+		doc := accessRows(t, session, "/org3/repo3/settings/access?type=token")
+		assert.Contains(t, doc.Find(`tr[data-token="`+orgToken.Name+`"]`).Text(), "Write")
+		assert.Contains(t, doc.Find(`tr[data-token="`+repoToken.Name+`"]`).Text(), "Repository access token")
+	})
+
 	t.Run("filters", func(t *testing.T) {
 		keys := pageLines(t, session, orgAccessReportLink+"?type=key")
 		assert.ElementsMatch(t, []string{

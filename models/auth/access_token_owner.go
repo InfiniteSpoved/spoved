@@ -154,6 +154,66 @@ func FindOwnedAccessTokensCoveringRepo(ctx context.Context, repoID, ownerID, gro
 	return tokens, db.GetEngine(ctx).Where(cond).OrderBy("created_unix DESC, id DESC").Find(&tokens)
 }
 
+// CoveredRepo names a repository for FindOwnedAccessTokensCoveringRepos: its ID, owner and project (0 = at the owner's
+// root).
+type CoveredRepo struct{ ID, OwnerID, GroupID int64 }
+
+// FindOwnedAccessTokensCoveringRepos returns, by repository ID, the tokens of the repository, its organization and its
+// project that cover it, expired ones too but never revoked ones, ordered by name; the bulk form of CoversRepo, in two
+// queries.
+func FindOwnedAccessTokensCoveringRepos(ctx context.Context, repos []CoveredRepo) (map[int64][]*AccessToken, error) {
+	out := make(map[int64][]*AccessToken, len(repos))
+	if len(repos) == 0 {
+		return out, nil
+	}
+	repoIDs := make([]int64, 0, len(repos))
+	ownerIDs := make([]int64, 0, len(repos))
+	for _, r := range repos {
+		repoIDs = append(repoIDs, r.ID)
+		ownerIDs = append(ownerIDs, r.OwnerID)
+	}
+	tokens := make([]*AccessToken, 0, 10)
+	if err := db.GetEngine(ctx).Where(builder.Eq{"revoked_unix": 0}.And(builder.Or(
+		builder.Eq{"owner_type": AccessTokenOwnerRepo}.And(builder.In("owner_id", repoIDs)),
+		builder.In("owner_type", AccessTokenOwnerOrg, AccessTokenOwnerProject).And(builder.In("owner_id", ownerIDs)),
+	))).OrderBy("name, id").Find(&tokens); err != nil {
+		return nil, err
+	}
+	var selectedIDs []int64
+	for _, t := range tokens {
+		if t.OwnerType == AccessTokenOwnerOrg && !t.ResourceAllRepos {
+			selectedIDs = append(selectedIDs, t.ID)
+		}
+	}
+	selected := make(map[[2]int64]bool)
+	if len(selectedIDs) > 0 {
+		var rows []*AccessTokenResourceRepo
+		if err := db.GetEngine(ctx).In("token_id", selectedIDs).In("repo_id", repoIDs).Find(&rows); err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			selected[[2]int64{r.TokenID, r.RepoID}] = true
+		}
+	}
+	for _, r := range repos {
+		for _, t := range tokens {
+			var covers bool
+			switch t.OwnerType {
+			case AccessTokenOwnerRepo:
+				covers = t.OwnerID == r.ID
+			case AccessTokenOwnerProject:
+				covers = t.OwnerID == r.OwnerID && t.GroupID != 0 && t.GroupID == r.GroupID
+			case AccessTokenOwnerOrg:
+				covers = t.OwnerID == r.OwnerID && t.GroupID == 0 && (t.ResourceAllRepos || selected[[2]int64{t.ID, r.ID}])
+			}
+			if covers {
+				out[r.ID] = append(out[r.ID], t)
+			}
+		}
+	}
+	return out, nil
+}
+
 func (opts FindOwnedAccessTokensOptions) ToOrders() string {
 	return "created_unix DESC, id DESC"
 }

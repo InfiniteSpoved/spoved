@@ -29365,6 +29365,27 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "AccessAccessToken": {
+      "description": "AccessAccessToken is an access token of a repository, a project or an organization in an access report",
+      "type": "object",
+      "properties": {
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Expires"
+        },
+        "id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "AccessCredential": {
       "description": "AccessCredential is an SSH key, access token or OAuth2 grant of a user",
       "type": "object",
@@ -29452,7 +29473,7 @@
           "x-go-name": "Applied"
         },
         "kind": {
-          "description": "owner, site_admin, auditor, org_owner, admin_team, team, collaborator, public, internal, org_member,\ndeploy_key, org_deploy_key, project_deploy_key or instance_roles",
+          "description": "owner, site_admin, auditor, org_owner, admin_team, team, collaborator, public, internal, org_member,\ndeploy_key, org_deploy_key, project_deploy_key, repo_token, project_token, org_token or instance_roles",
           "type": "string",
           "x-go-name": "Kind"
         },
@@ -29517,7 +29538,7 @@
           "x-go-name": "LastPush"
         },
         "name": {
-          "description": "user, deploy key or team name",
+          "description": "user, deploy key, access token or team name",
           "type": "string",
           "x-go-name": "Name"
         },
@@ -29543,7 +29564,7 @@
           "x-go-name": "TwoFactor"
         },
         "type": {
-          "description": "person, bot, key, team, anyone, signed_in, org_members or instance_roles",
+          "description": "person, bot, key, token, team, anyone, signed_in, org_members or instance_roles",
           "type": "string",
           "x-go-name": "Type"
         },
@@ -29571,6 +29592,9 @@
           "type": "string",
           "x-go-name": "Access"
         },
+        "access_token": {
+          "$ref": "#/definitions/AccessAccessToken"
+        },
         "deploy_key": {
           "$ref": "#/definitions/AccessDeployKey"
         },
@@ -29589,7 +29613,7 @@
           "$ref": "#/definitions/AccessTeam"
         },
         "type": {
-          "description": "person, bot, key, team, anyone, signed_in or instance_roles",
+          "description": "person, bot, key, token, team, anyone, signed_in or instance_roles",
           "type": "string",
           "x-go-name": "Type"
         },
