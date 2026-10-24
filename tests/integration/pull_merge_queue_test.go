@@ -522,6 +522,25 @@ jobs:
 			assert.True(t, merged(a))
 		})
 
+		t.Run("A merge pushed but never recorded is recorded", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			a := newPull(t)
+			add(t, session, a)
+			e := entry(a)
+			ok, err := pull_model.StartMergeQueueMerge(t.Context(), e.ID, e.TempCommitID)
+			require.NoError(t, err)
+			require.True(t, ok)
+			// the push went through, the server stopped before its post-receive hook
+			require.NoError(t, git.NewCommand(t.Context(), "update-ref").AddDynamicArguments(git.BranchPrefix+"main", e.TempCommitID).Run(&git.RunOpts{Dir: repo.RepoPath()}))
+			setStatus(t, statusCtx, e.TempCommitID, api.CommitStatusSuccess)
+			assert.False(t, merged(a)) // another server may still be recording it
+			_, err = db.GetEngine(t.Context()).Exec("UPDATE merge_queue_entry SET merging_unix = ? WHERE id = ?", timeutil.TimeStampNow()-3600, e.ID)
+			require.NoError(t, err)
+			setStatus(t, statusCtx, e.TempCommitID, api.CommitStatusSuccess)
+			assert.True(t, merged(a))
+			assert.Nil(t, entry(a))
+		})
+
 		t.Run("Stale build branches are deleted", func(t *testing.T) {
 			defer tests.PrintCurrentTest(t)()
 			a := newPull(t)

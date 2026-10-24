@@ -44,7 +44,8 @@ type MergeQueueEntry struct {
 	MergeStyle   repo_model.MergeStyle `xorm:"VARCHAR(30) NOT NULL"`
 	DeleteBranch bool                  `xorm:"NOT NULL DEFAULT false"`
 	SkipForward  bool                  `xorm:"NOT NULL DEFAULT false"` // not merged forward (services/mergeforward)
-	Merging      bool                  `xorm:"NOT NULL DEFAULT false"` // its build is being pushed to the branch: it can't be removed by hand
+	Forced       bool                  `xorm:"NOT NULL DEFAULT false"` // an admin added it skipping the branch protections exempt for admins
+	MergingUnix  timeutil.TimeStamp    `xorm:"NOT NULL DEFAULT 0"`     // when its build started being pushed to the branch (0 = not): it can't be removed by hand
 	HeadCommitID string                `xorm:"VARCHAR(64) NOT NULL"`   // the head of the pull request when it was added
 	BaseCommitID string                `xorm:"VARCHAR(64)"`            // what the build was made on: the branch or the entry ahead
 	TempCommitID string                `xorm:"INDEX VARCHAR(64)"`      // the build: base + this pull request
@@ -106,12 +107,6 @@ func FindMergeQueue(ctx context.Context, repoID int64, branch string) ([]*MergeQ
 	return entries, db.GetEngine(ctx).Where("repo_id = ? AND base_branch = ?", repoID, branch).Asc("position", "id").Find(&entries)
 }
 
-// FindMergeQueueOfRepo returns the entries of every queue of repoID.
-func FindMergeQueueOfRepo(ctx context.Context, repoID int64) ([]*MergeQueueEntry, error) {
-	entries := make([]*MergeQueueEntry, 0, 5)
-	return entries, db.GetEngine(ctx).Where("repo_id = ?", repoID).Find(&entries)
-}
-
 // FindMergeQueueRepoIDs returns the repositories with a merge queue entry or a rule that requires a merge queue: a
 // repository rule, or a project or organization rule (every repository of the organization).
 func FindMergeQueueRepoIDs(ctx context.Context) ([]int64, error) {
@@ -170,7 +165,7 @@ func ResetMergeQueueBuilds(ctx context.Context, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	_, err := db.GetEngine(ctx).Where(builder.In("id", ids)).Cols("status", "base_commit_id", "temp_commit_id", "started_unix", "merging").
+	_, err := db.GetEngine(ctx).Where(builder.In("id", ids)).Cols("status", "base_commit_id", "temp_commit_id", "started_unix", "merging_unix").
 		Update(&MergeQueueEntry{Status: MergeQueueWaiting})
 	return err
 }
@@ -178,17 +173,21 @@ func ResetMergeQueueBuilds(ctx context.Context, ids []int64) error {
 // StartMergeQueueMerge marks the entry as being merged at its build tempCommitID; false if it was removed or built
 // again meanwhile.
 func StartMergeQueueMerge(ctx context.Context, id int64, tempCommitID string) (bool, error) {
-	n, err := db.GetEngine(ctx).Exec("UPDATE merge_queue_entry SET merging = ? WHERE id = ? AND status = ? AND temp_commit_id = ?",
-		true, id, MergeQueueBuilding, tempCommitID)
+	n, err := db.GetEngine(ctx).Exec("UPDATE merge_queue_entry SET merging_unix = ? WHERE id = ? AND status = ? AND temp_commit_id = ? AND merging_unix = 0",
+		timeutil.TimeStampNow(), id, MergeQueueBuilding, tempCommitID)
 	if err != nil {
 		return false, err
 	}
-	rows, err := n.RowsAffected()
-	return rows > 0, err
+	if rows, err := n.RowsAffected(); err != nil || rows > 0 {
+		return rows > 0, err
+	}
+	// a merge of this build already started (on a server that stopped, or another one): the push decides
+	return db.GetEngine(ctx).Where("id = ? AND status = ? AND temp_commit_id = ? AND merging_unix <> 0", id, MergeQueueBuilding, tempCommitID).
+		Exist(&MergeQueueEntry{})
 }
 
 // DeleteMergeQueueEntryUnlessMerging removes the entry unless it is being merged; false if it wasn't removed.
 func DeleteMergeQueueEntryUnlessMerging(ctx context.Context, id int64) (bool, error) {
-	n, err := db.GetEngine(ctx).Where("id = ? AND merging = ?", id, false).Delete(&MergeQueueEntry{})
+	n, err := db.GetEngine(ctx).Where("id = ? AND merging_unix = 0", id).Delete(&MergeQueueEntry{})
 	return n > 0, err
 }

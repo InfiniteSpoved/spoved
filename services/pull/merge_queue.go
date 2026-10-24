@@ -8,7 +8,9 @@ import (
 	"fmt"
 
 	"forgejo.org/models"
+	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
+	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
@@ -16,6 +18,7 @@ import (
 	"forgejo.org/modules/log"
 	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
+	"forgejo.org/modules/timeutil"
 )
 
 // BuildMergeQueueCommit merges pr, at expectedHeadCommitID, with mergeStyle and the default message on top of the
@@ -122,7 +125,24 @@ func MergeQueued(ctx context.Context, pr *issues_model.PullRequest, doer *user_m
 	// only from the commit the build is on top of, so the push is a fast-forward and a branch moved meanwhile (also
 	// back to an ancestor) refuses it
 	ref := git.BranchPrefix + base
-	if err := git.Push(ctx, pr.BaseRepo.RepoPath(), git.PushOptions{Remote: ".", Branch: sha + ":" + ref, ForceWithLease: ref + ":" + expectedOld, Env: env}); err != nil {
+	tip, err := git.GetFullCommitID(ctx, pr.BaseRepo.RepoPath(), ref)
+	if err != nil {
+		return err
+	}
+	if tip == sha {
+		// an earlier push of the build went through, but its post-receive hook never recorded the merge
+		pr.MergedCommitID, pr.MergedBaseCommitID, pr.MergedUnix = sha, expectedOld, timeutil.TimeStampNow()
+		pr.Merger, pr.MergerID = doer, doer.ID
+		if err := db.WithTx(ctx, func(ctx context.Context) error {
+			if err := pull_model.DeleteScheduledAutoMerge(ctx, pr.ID); err != nil && !db.IsErrNotExist(err) {
+				return err
+			}
+			_, err := pr.SetMerged(ctx)
+			return err
+		}); err != nil {
+			return err
+		}
+	} else if err := git.Push(ctx, pr.BaseRepo.RepoPath(), git.PushOptions{Remote: ".", Branch: sha + ":" + ref, ForceWithLease: ref + ":" + expectedOld, Env: env}); err != nil {
 		return err
 	}
 	log.Trace("Merge queue fast-forwarded %s of %-v to %s for %-v", base, pr.BaseRepo, sha, pr)

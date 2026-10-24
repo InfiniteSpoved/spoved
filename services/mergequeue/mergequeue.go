@@ -84,6 +84,10 @@ var running = struct {
 // maxRounds bounds the passes in a row; more are left to the queue
 const maxRounds = 20
 
+// mergeStuckAfter is how long after a merge push started its build at the branch tip counts as merged but not
+// recorded (a server that stopped between the push and its post-receive hook)
+var mergeStuckAfter = 10 * time.Minute
+
 func claim(key string) bool {
 	running.Lock()
 	defer running.Unlock()
@@ -239,6 +243,7 @@ func Add(ctx context.Context, doer *user_model.User, perm *access_model.Permissi
 			MergeStyle:   style,
 			DeleteBranch: opts.DeleteBranch,
 			SkipForward:  opts.SkipForward,
+			Forced:       opts.Force,
 			HeadCommitID: head,
 			EnqueuedByID: doer.ID,
 		}); err != nil {
@@ -496,8 +501,8 @@ func (p *pass) checkEntries(entries []*pull_model.MergeQueueEntry) ([]*item, err
 	return live, nil
 }
 
-// ineligible returns why it may no longer be merged, "" if it may. The branch protection is checked as the merge
-// checked it when the entry was added: rules exempt for admins are skipped for repository and organization admins.
+// ineligible returns why it may no longer be merged, "" if it may. The branch protection is checked as when the entry
+// was added: rules exempt for admins are skipped only if an admin added it with force, and is still exempt.
 func (p *pass) ineligible(it *item) (string, error) {
 	pr := it.pr
 	if err := pr.LoadIssue(p.ctx); err != nil {
@@ -542,6 +547,9 @@ func (p *pass) ineligible(it *item) (string, error) {
 		return ReasonBlocked, nil
 	}
 	exempt := func(pb *git_model.ProtectedBranch) bool {
+		if !it.Forced {
+			return false
+		}
 		ok, err := pb.IsAdminExempt(p.ctx, doer, perm.IsAdmin())
 		if err != nil {
 			log.Error("IsAdminExempt: %v", err)
@@ -567,6 +575,9 @@ func (p *pass) checkChain(live []*item, tip string) (merging bool, err error) {
 			break
 		}
 		if live[i].TempCommitID == tip {
+			if i == 0 && live[0].MergingUnix != 0 && since(live[0].MergingUnix) > mergeStuckAfter {
+				p.finishMerge(live[0]) // its push went through but was never recorded
+			}
 			return true, nil
 		}
 		prev = live[i].TempCommitID
@@ -722,6 +733,20 @@ func (p *pass) merge(live []*item) (int, bool) {
 	return last + 1, true
 }
 
+// finishMerge records the merge of a build the branch is already at
+func (p *pass) finishMerge(it *item) {
+	log.Warn("Merge queue of %s in %-v: recording the merge of %-v, pushed at %s", p.branch, p.repo, it.pr, it.MergingUnix)
+	if err := pull_service.MergeQueued(p.ctx, it.pr, it.doer, p.branch, it.BaseCommitID, it.TempCommitID); err != nil && !models.IsErrPullRequestHasMerged(err) {
+		log.Error("Merge queue of %s in %-v: recording the merge of %-v: %v", p.branch, p.repo, it.pr, err)
+		return
+	}
+	if _, err := pull_model.DeleteMergeQueueEntry(p.ctx, it.ID); err != nil {
+		log.Error("DeleteMergeQueueEntry[%d]: %v", it.ID, err)
+	}
+	p.deleteHeadBranch(it)
+	p.again = true
+}
+
 // deleteHeadBranch deletes the head branch of a merged pull request if that was asked for, or the repository always
 // does it
 func (p *pass) deleteHeadBranch(it *item) {
@@ -798,27 +823,32 @@ func (p *pass) build(live []*item, tip string) error {
 
 // deleteStaleBranches deletes the build branches of the queue that belong to no entry
 func (p *pass) deleteStaleBranches() {
-	entries, err := pull_model.FindMergeQueue(p.ctx, p.repo.ID, p.branch)
-	if err != nil {
-		log.Error("FindMergeQueue: %v", err)
-		return
-	}
-	deleteStaleBuildBranches(p.ctx, p.repo, p.branch+"/", entries)
+	deleteStaleBuildBranches(p.ctx, p.repo, p.branch)
 }
 
-// deleteStaleBuildBranches deletes the build branches of repo below merge-queue/<prefix> that belong to none of entries
-func deleteStaleBuildBranches(ctx context.Context, repo *repo_model.Repository, prefix string, entries []*pull_model.MergeQueueEntry) {
-	live := make(map[int64]bool, len(entries))
-	for _, e := range entries {
-		live[e.ID] = true
-	}
-	prefix = git.BranchPrefix + pull_model.MergeQueueBranchPrefix + prefix
+// deleteStaleBuildBranches deletes the build branches of branch in repo that belong to no entry of its queue. It lists
+// the branches before it reads the entries, so a build another server makes meanwhile is never taken for a stale one.
+func deleteStaleBuildBranches(ctx context.Context, repo *repo_model.Repository, branch string) {
+	prefix := git.BranchPrefix + pull_model.MergeQueueBranchPrefix + branch + "/"
 	stdout, _, err := git.NewCommand(ctx, "for-each-ref", "--format=%(refname)").AddDynamicArguments(prefix).RunStdString(&git.RunOpts{Dir: repo.RepoPath()})
 	if err != nil {
 		log.Error("for-each-ref %s in %-v: %v", prefix, repo, err)
 		return
 	}
-	for ref := range strings.FieldsSeq(stdout) {
+	refs := strings.Fields(stdout)
+	if len(refs) == 0 {
+		return
+	}
+	entries, ferr := pull_model.FindMergeQueue(ctx, repo.ID, branch)
+	if ferr != nil {
+		log.Error("FindMergeQueue: %v", ferr)
+		return
+	}
+	live := make(map[int64]bool, len(entries))
+	for _, e := range entries {
+		live[e.ID] = true
+	}
+	for _, ref := range refs {
 		id, err := strconv.ParseInt(strings.TrimPrefix(ref, prefix), 10, 64)
 		if err != nil || live[id] {
 			continue // another branch's build ("main" and "main/x"), or a live one
@@ -846,33 +876,20 @@ func DeleteStaleBranches(ctx context.Context) error {
 		} else if err != nil {
 			return err
 		}
-		entries, err := pull_model.FindMergeQueueOfRepo(ctx, id)
-		if err != nil {
-			return err
-		}
-		keys := map[string]bool{}
-		for _, e := range entries {
-			keys[e.BaseBranch] = true
-		}
-		// one branch at a time, so a build of the branch "a/1" is never taken for build 1 of the branch "a"
 		stdout, _, err := git.NewCommand(ctx, "for-each-ref", "--format=%(refname:lstrip=3)").AddDynamicArguments(git.BranchPrefix + pull_model.MergeQueueBranchPrefix).RunStdString(&git.RunOpts{Dir: repo.RepoPath()})
 		if err != nil {
 			log.Error("for-each-ref in %-v: %v", repo, err)
 			continue
 		}
+		// one branch at a time, so a build of the branch "a/1" is never taken for build 1 of the branch "a"
+		branches := map[string]bool{}
 		for name := range strings.FieldsSeq(stdout) {
 			if i := strings.LastIndexByte(name, '/'); i > 0 {
-				keys[name[:i]] = true
+				branches[name[:i]] = true
 			}
 		}
-		for branch := range keys {
-			var of []*pull_model.MergeQueueEntry
-			for _, e := range entries {
-				if e.BaseBranch == branch {
-					of = append(of, e)
-				}
-			}
-			deleteStaleBuildBranches(ctx, repo, branch+"/", of)
+		for branch := range branches {
+			deleteStaleBuildBranches(ctx, repo, branch)
 		}
 	}
 	return nil
