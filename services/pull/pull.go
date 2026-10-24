@@ -502,6 +502,10 @@ func staleReviewsOnMergeBaseChange(ctx context.Context, doer *user_model.User, p
 		log.Error("%-v LoadBaseRepo: %v", pr, err)
 		return
 	}
+	// a merge base that only moved forward takes commits out of the pull request and adds none
+	if _, _, err := git.NewCommand(ctx, "merge-base", "--is-ancestor").AddDynamicArguments(oldMergeBase, newMergeBase).RunStdString(&git.RunOpts{Dir: pr.BaseRepo.RepoPath()}); err == nil {
+		return
+	}
 	trees, _, err := git.NewCommand(ctx, "rev-parse").AddDynamicArguments(oldMergeBase+"^{tree}", newMergeBase+"^{tree}").RunStdString(&git.RunOpts{Dir: pr.BaseRepo.RepoPath()})
 	if f := strings.Fields(trees); err == nil && len(f) == 2 && f[0] == f[1] {
 		return

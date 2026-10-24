@@ -648,5 +648,34 @@ func TestPullStackStaleReviews(t *testing.T) {
 			assert.Equal(t, "main", unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: prs[1].ID}).BaseBranch)
 			assert.False(t, isStale(review))
 		})
+
+		t.Run("SharedCommitsMergedFirst", func(t *testing.T) {
+			reviewer := forgery.CreateUser(t, nil)
+			repo := forgery.CreateRepository(t, user2, &forgery.CreateRepositoryOptions{
+				Files:         forgery.MapFS{"README.md": forgery.MapFile("stack")},
+				Collaborators: map[*user_model.User]perm.AccessMode{reviewer: perm.AccessModeWrite},
+			})
+			// x is built on y, both target main
+			stackCommit(t, user2, repo, "main", "y", "create", "y.txt", "y")
+			stackCommit(t, user2, repo, "y", "x", "create", "x.txt", "x")
+			y := stackPull(t, user2, repo, "main", "y")
+			x := stackPull(t, user2, repo, "main", "x")
+			waitChecked(t, y, x)
+			review := approvePull(t, repo, x, reviewer)
+
+			gitRepo, err := gitrepo.OpenRepository(t.Context(), repo)
+			require.NoError(t, err)
+			defer gitRepo.Close()
+			oldID, err := gitRepo.GetBranchCommitID("main")
+			require.NoError(t, err)
+			merged, err := mergeStack(t, user2, repo, y, repo_model.MergeStyleMerge, stackHeads(t, repo, y))
+			require.NoError(t, err)
+			assert.Equal(t, indexes(y), merged)
+			newID, err := gitRepo.GetBranchCommitID("main")
+			require.NoError(t, err)
+			// the merge base of x moved forward to the head of y: x only lost commits
+			pull_service.TestPullRequest(t.Context(), user2, repo.ID, time.Now().UnixNano(), "main", true, oldID, newID)
+			assert.False(t, isStale(review))
+		})
 	})
 }
