@@ -1,0 +1,17 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{ctx.Locale.Tr "auth.saml.continue_title"}}" class="page-content user signin">
+	<div class="ui middle very relaxed page grid">
+		<div class="column">
+			<form id="saml-post" class="ui form tw-max-w-2xl tw-m-auto" action="{{.Action}}" method="post">
+				<input type="hidden" name="SAMLResponse" value="{{.SAMLResponse}}">
+				<h2 class="ui top attached header">{{ctx.Locale.Tr "auth.saml.continue_title"}}</h2>
+				<div class="ui attached segment">
+					<p>{{ctx.Locale.Tr "auth.saml.continue_desc"}}</p>
+					<button class="ui primary button">{{ctx.Locale.Tr "auth.saml.continue"}}</button>
+				</div>
+			</form>
+			<script>document.getElementById('saml-post').submit();</script>
+		</div>
+	</div>
+</div>
+{{template "base/footer" .}}

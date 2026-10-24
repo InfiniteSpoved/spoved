@@ -1,0 +1,188 @@
+{{$cfg := .SAMLConfig}}
+<h5 class="ui dividing header">{{ctx.Locale.Tr "admin.auths.saml_idp"}}</h5>
+<p class="help">{{ctx.Locale.Tr "admin.auths.saml_idp_help"}}</p>
+<div class="field {{if .Err_SAML}}error{{end}}">
+	<label for="saml_idp_metadata_url">{{ctx.Locale.Tr "admin.auths.saml_idp_metadata_url"}}</label>
+	<input id="saml_idp_metadata_url" name="saml_idp_metadata_url" type="url" value="{{$cfg.IdPMetadataURL}}" placeholder="https://idp.example.com/metadata">
+	<p class="help">{{ctx.Locale.Tr "admin.auths.saml_idp_metadata_url_help"}}</p>
+</div>
+<div class="field {{if .Err_SAML}}error{{end}}">
+	<label for="saml_idp_metadata">{{ctx.Locale.Tr "admin.auths.saml_idp_metadata"}}</label>
+	<textarea id="saml_idp_metadata" name="saml_idp_metadata" rows="4" placeholder="<EntityDescriptor …>">{{$cfg.IdPMetadata}}</textarea>
+</div>
+<div class="field">
+	<label for="saml_idp_entity_id">{{ctx.Locale.Tr "admin.auths.saml_idp_entity_id"}}</label>
+	<input id="saml_idp_entity_id" name="saml_idp_entity_id" value="{{$cfg.IdPEntityID}}">
+	<p class="help">{{ctx.Locale.Tr "admin.auths.saml_idp_entity_id_help"}}</p>
+</div>
+<div class="field">
+	<label for="saml_idp_sso_url">{{ctx.Locale.Tr "admin.auths.saml_idp_sso_url"}}</label>
+	<input id="saml_idp_sso_url" name="saml_idp_sso_url" type="url" value="{{$cfg.IdPSSOURL}}">
+</div>
+<div class="field">
+	<label for="saml_idp_slo_url">{{ctx.Locale.Tr "admin.auths.saml_idp_slo_url"}}</label>
+	<input id="saml_idp_slo_url" name="saml_idp_slo_url" type="url" value="{{$cfg.IdPSLOURL}}">
+</div>
+<div class="field">
+	<label for="saml_idp_certificate">{{ctx.Locale.Tr "admin.auths.saml_idp_certificate"}}</label>
+	<textarea id="saml_idp_certificate" name="saml_idp_certificate" rows="4" placeholder="-----BEGIN CERTIFICATE-----">{{$cfg.IdPCertificate}}</textarea>
+</div>
+
+<h5 class="ui dividing header">{{ctx.Locale.Tr "admin.auths.saml_sp"}}</h5>
+{{if .SAMLMetadataURL}}
+	<div class="field">
+		<label>{{ctx.Locale.Tr "admin.auths.saml_sp_urls"}}</label>
+		<p>{{ctx.Locale.Tr "admin.auths.saml_sp_metadata_url"}} <a href="{{.SAMLMetadataURL}}" target="_blank" rel="noopener"><code>{{.SAMLMetadataURL}}</code></a></p>
+		<p>{{ctx.Locale.Tr "admin.auths.saml_sp_entity_id_current"}} <code>{{.SAMLEntityID}}</code></p>
+		<p>{{ctx.Locale.Tr "admin.auths.saml_sp_acs_url"}} <code>{{.SAMLACSURL}}</code></p>
+		<p>{{ctx.Locale.Tr "admin.auths.saml_sp_slo_url"}} <code>{{.SAMLSLOURL}}</code></p>
+	</div>
+{{end}}
+<div class="field">
+	<label for="saml_sp_entity_id">{{ctx.Locale.Tr "admin.auths.saml_sp_entity_id"}}</label>
+	<input id="saml_sp_entity_id" name="saml_sp_entity_id" value="{{$cfg.SPEntityID}}">
+	<p class="help">{{ctx.Locale.Tr "admin.auths.saml_sp_entity_id_help"}}</p>
+</div>
+<div class="field">
+	<label for="saml_sp_certificate">{{ctx.Locale.Tr "admin.auths.saml_sp_certificate"}}</label>
+	<textarea id="saml_sp_certificate" name="saml_sp_certificate" rows="4" placeholder="-----BEGIN CERTIFICATE-----">{{$cfg.SPCertificate}}</textarea>
+</div>
+<div class="field">
+	<label for="saml_sp_private_key">{{ctx.Locale.Tr "admin.auths.saml_sp_private_key"}}</label>
+	<textarea id="saml_sp_private_key" name="saml_sp_private_key" rows="4" autocomplete="off" placeholder="{{if .SAMLHasPrivateKey}}{{ctx.Locale.Tr "admin.auths.saml_sp_private_key_stored"}}{{else}}-----BEGIN PRIVATE KEY-----{{end}}"></textarea>
+	<p class="help">{{ctx.Locale.Tr "admin.auths.saml_sp_private_key_help"}}</p>
+</div>
+<div class="field">
+	<div class="ui checkbox">
+		<label for="saml_sign_requests"><strong>{{ctx.Locale.Tr "admin.auths.saml_sign_requests"}}</strong></label>
+		<input id="saml_sign_requests" name="saml_sign_requests" type="checkbox" {{if $cfg.SignRequests}}checked{{end}}>
+	</div>
+</div>
+<div class="field">
+	<div class="ui checkbox">
+		<label for="saml_require_encrypted_assertions"><strong>{{ctx.Locale.Tr "admin.auths.saml_require_encrypted_assertions"}}</strong></label>
+		<input id="saml_require_encrypted_assertions" name="saml_require_encrypted_assertions" type="checkbox" {{if $cfg.RequireEncryptedAssertions}}checked{{end}}>
+		<p class="help">{{ctx.Locale.Tr "admin.auths.saml_require_encrypted_assertions_help"}}</p>
+	</div>
+</div>
+
+<h5 class="ui dividing header">{{ctx.Locale.Tr "admin.auths.saml_users"}}</h5>
+<div class="field">
+	<label for="saml_name_id_format">{{ctx.Locale.Tr "admin.auths.saml_name_id_format"}}</label>
+	<select id="saml_name_id_format" name="saml_name_id_format">
+		{{range .SAMLNameIDFormats}}
+			<option value="{{.}}" {{if eq . $cfg.NameIDFormat}}selected{{end}}>{{.}}</option>
+		{{end}}
+	</select>
+</div>
+<div class="field">
+	<label for="saml_user_id_attribute">{{ctx.Locale.Tr "admin.auths.saml_user_id_attribute"}}</label>
+	<input id="saml_user_id_attribute" name="saml_user_id_attribute" value="{{$cfg.UserIDAttribute}}" placeholder="objectGUID">
+	<p class="help">{{ctx.Locale.Tr "admin.auths.saml_user_id_attribute_help"}}</p>
+</div>
+<div class="field">
+	<label for="saml_username_attribute">{{ctx.Locale.Tr "admin.auths.saml_username_attribute"}}</label>
+	<input id="saml_username_attribute" name="saml_username_attribute" value="{{$cfg.UsernameAttribute}}" placeholder="uid">
+</div>
+<div class="field">
+	<label for="saml_full_name_attribute">{{ctx.Locale.Tr "admin.auths.saml_full_name_attribute"}}</label>
+	<input id="saml_full_name_attribute" name="saml_full_name_attribute" value="{{$cfg.FullNameAttribute}}" placeholder="displayName">
+</div>
+<div class="field">
+	<label for="saml_email_attribute">{{ctx.Locale.Tr "admin.auths.saml_email_attribute"}}</label>
+	<input id="saml_email_attribute" name="saml_email_attribute" value="{{$cfg.EmailAttribute}}" placeholder="mail">
+	<p class="help">{{ctx.Locale.Tr "admin.auths.saml_email_attribute_help"}}</p>
+</div>
+<div class="field">
+	<label for="saml_icon_url">{{ctx.Locale.Tr "admin.auths.oauth2_icon_url"}}</label>
+	<input id="saml_icon_url" name="saml_icon_url" value="{{$cfg.IconURL}}">
+</div>
+<div class="field">
+	<div class="ui checkbox">
+		<label for="saml_force_authn"><strong>{{ctx.Locale.Tr "admin.auths.saml_force_authn"}}</strong></label>
+		<input id="saml_force_authn" name="saml_force_authn" type="checkbox" {{if $cfg.ForceAuthn}}checked{{end}}>
+		<p class="help">{{ctx.Locale.Tr "admin.auths.saml_force_authn_help"}}</p>
+	</div>
+</div>
+<div class="field">
+	<div class="ui checkbox">
+		<label for="saml_allow_idp_initiated"><strong>{{ctx.Locale.Tr "admin.auths.saml_allow_idp_initiated"}}</strong></label>
+		<input id="saml_allow_idp_initiated" name="saml_allow_idp_initiated" type="checkbox" {{if $cfg.AllowIdPInitiated}}checked{{end}}>
+		<p class="help">{{ctx.Locale.Tr "admin.auths.saml_allow_idp_initiated_help"}}</p>
+	</div>
+</div>
+<div class="field">
+	<div class="ui checkbox">
+		<label for="saml_skip_local_two_fa"><strong>{{ctx.Locale.Tr "admin.auths.skip_local_two_fa"}}</strong></label>
+		<input id="saml_skip_local_two_fa" name="skip_local_two_fa" type="checkbox" {{if $cfg.SkipLocalTwoFA}}checked{{end}}>
+		<p class="help">{{ctx.Locale.Tr "admin.auths.skip_local_two_fa_helper"}}</p>
+	</div>
+</div>
+
+<h5 class="ui dividing header">{{ctx.Locale.Tr "admin.auths.saml_groups"}}</h5>
+<div class="field">
+	<label for="saml_required_claim_name">{{ctx.Locale.Tr "admin.auths.saml_required_claim_name"}}</label>
+	<input id="saml_required_claim_name" name="saml_required_claim_name" value="{{$cfg.RequiredClaimName}}">
+	<p class="help">{{ctx.Locale.Tr "admin.auths.oauth2_required_claim_name_helper"}}</p>
+</div>
+<div class="field">
+	<label for="saml_required_claim_value">{{ctx.Locale.Tr "admin.auths.saml_required_claim_value"}}</label>
+	<input id="saml_required_claim_value" name="saml_required_claim_value" value="{{$cfg.RequiredClaimValue}}">
+	<p class="help">{{ctx.Locale.Tr "admin.auths.oauth2_required_claim_value_helper"}}</p>
+</div>
+<div class="field">
+	<label for="saml_group_claim_name">{{ctx.Locale.Tr "admin.auths.saml_group_claim_name"}}</label>
+	<input id="saml_group_claim_name" name="saml_group_claim_name" value="{{$cfg.GroupClaimName}}" placeholder="memberOf">
+</div>
+<div class="field">
+	<label for="saml_admin_group">{{ctx.Locale.Tr "admin.auths.oauth2_admin_group"}}</label>
+	<input id="saml_admin_group" name="saml_admin_group" value="{{$cfg.AdminGroup}}">
+</div>
+<div class="field">
+	<label for="saml_restricted_group">{{ctx.Locale.Tr "admin.auths.oauth2_restricted_group"}}</label>
+	<input id="saml_restricted_group" name="saml_restricted_group" value="{{$cfg.RestrictedGroup}}">
+</div>
+<div class="field">
+	<label for="saml_group_team_map">{{ctx.Locale.Tr "admin.auths.oauth2_map_group_to_team"}}</label>
+	<textarea id="saml_group_team_map" name="saml_group_team_map" rows="5" placeholder='{"Developer": {"MyOrganization": ["MyTeam1", "MyTeam2"]}}'>{{$cfg.GroupTeamMap}}</textarea>
+</div>
+<div class="field">
+	<div class="ui checkbox">
+		<label for="saml_group_team_map_removal">{{ctx.Locale.Tr "admin.auths.oauth2_map_group_to_team_removal"}}</label>
+		<input id="saml_group_team_map_removal" name="saml_group_team_map_removal" type="checkbox" {{if $cfg.GroupTeamMapRemoval}}checked{{end}}>
+	</div>
+</div>
+<div class="field {{if .Err_GroupUserGroupMap}}error{{end}}">
+	<label for="saml_group_user_group_map">{{ctx.Locale.Tr "admin.auths.oauth2_map_group_to_user_group"}}</label>
+	<textarea id="saml_group_user_group_map" name="saml_group_user_group_map" rows="5" placeholder='{"Developer": ["my-user-group"]}'>{{$cfg.GroupUserGroupMap}}</textarea>
+</div>
+<div class="field">
+	<div class="ui checkbox">
+		<label for="saml_group_user_group_map_removal">{{ctx.Locale.Tr "admin.auths.oauth2_map_group_to_user_group_removal"}}</label>
+		<input id="saml_group_user_group_map_removal" name="saml_group_user_group_map_removal" type="checkbox" {{if $cfg.GroupUserGroupMapRemoval}}checked{{end}}>
+	</div>
+</div>
+<div class="field">
+	<label for="saml_dyn_group_maps">{{ctx.Locale.Tr "admin.auths.oauth2_dyn_group_maps"}}</label>
+	<textarea id="saml_dyn_group_maps" name="saml_dyn_group_maps" rows="3" placeholder='["group-{org}-{team}"]'>{{$cfg.DynGroupMaps}}</textarea>
+</div>
+<div class="field">
+	<div class="ui checkbox">
+		<label for="saml_dyn_group_maps_removal">{{ctx.Locale.Tr "admin.auths.oauth2_dyn_group_maps_removal"}}</label>
+		<input id="saml_dyn_group_maps_removal" name="saml_dyn_group_maps_removal" type="checkbox" {{if $cfg.DynGroupMapsRemoval}}checked{{end}}>
+	</div>
+</div>
+<div class="field">
+	<label for="saml_quota_group_claim_name">{{ctx.Locale.Tr "admin.auths.saml_quota_group_claim_name"}}</label>
+	<input id="saml_quota_group_claim_name" name="saml_quota_group_claim_name" value="{{$cfg.QuotaGroupClaimName}}">
+</div>
+<div class="field">
+	<label for="saml_quota_group_map">{{ctx.Locale.Tr "admin.auths.oauth2_quota_group_map"}}</label>
+	<textarea id="saml_quota_group_map" name="saml_quota_group_map" rows="3" placeholder='{"Developer": ["MyQuotaGroup"]}'>{{$cfg.QuotaGroupMap}}</textarea>
+</div>
+<div class="field">
+	<div class="ui checkbox">
+		<label for="saml_quota_group_map_removal">{{ctx.Locale.Tr "admin.auths.oauth2_quota_group_map_removal"}}</label>
+		<input id="saml_quota_group_map_removal" name="saml_quota_group_map_removal" type="checkbox" {{if $cfg.QuotaGroupMapRemoval}}checked{{end}}>
+	</div>
+</div>

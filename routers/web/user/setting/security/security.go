@@ -6,7 +6,9 @@ package security
 
 import (
 	"net/http"
+	"slices"
 	"sort"
+	"strings"
 
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
@@ -138,6 +140,17 @@ func loadSecurityData(ctx *context.Context) {
 
 	ctx.Data["OrderedOAuth2Names"] = orderedOAuth2Names
 	ctx.Data["OAuth2Providers"] = oauth2Providers
+
+	samlSources, err := db.Find[auth_model.Source](ctx, auth_model.FindSourcesOptions{
+		IsActive:  optional.Some(true),
+		LoginType: auth_model.SAML,
+	})
+	if err != nil {
+		ctx.ServerError("FindSources", err)
+		return
+	}
+	slices.SortFunc(samlSources, func(a, b *auth_model.Source) int { return strings.Compare(a.Name, b.Name) })
+	ctx.Data["SAMLSources"] = samlSources
 
 	openid, err := user_model.GetUserOpenIDs(ctx, ctx.Doer.ID)
 	if err != nil {

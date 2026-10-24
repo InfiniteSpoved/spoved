@@ -422,6 +422,11 @@
 					</div>
 				{{end}}
 
+				<!-- SAML -->
+				{{if .Source.IsSAML}}
+					{{template "admin/auth/source/saml" .}}
+				{{end}}
+
 				{{if .Source.IsLDAP}}
 					<div class="inline field">
 						<div class="ui checkbox">

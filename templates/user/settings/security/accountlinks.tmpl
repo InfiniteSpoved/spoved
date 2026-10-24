@@ -1,8 +1,8 @@
 {{/* No account links, no way to add account links: Menu will not be shown. */}}
-{{if or .AccountLinks .OrderedOAuth2Names}}
+{{if or .AccountLinks .OrderedOAuth2Names .SAMLSources}}
 <h4 class="ui top attached header">
 	{{ctx.Locale.Tr "settings.manage_account_links"}}
-	{{if .OrderedOAuth2Names}}
+	{{if or .OrderedOAuth2Names .SAMLSources}}
 		<div class="ui right">
 			<div class="ui dropdown">
 				<div class="ui primary tiny button">{{ctx.Locale.Tr "settings.link_account"}}</div>
@@ -12,6 +12,12 @@
 						<a class="item" href="{{AppSubUrl}}/user/oauth2/{{$key}}">
 							{{$provider.IconHTML 20}}
 							{{$provider.DisplayName}}
+						</a>
+					{{end}}
+					{{range $source := .SAMLSources}}
+						<a class="item" href="{{AppSubUrl}}/user/saml/{{$source.Name | PathEscape}}/login">
+							{{svg "octicon-key" 20}}
+							{{$source.Name}}
 						</a>
 					{{end}}
 				</div>
@@ -29,7 +35,7 @@
 			<div class="flex-item">
 				{{$providerData := index $.OAuth2Providers $loginSource.Name}}
 				<div class="flex-item-leading">
-					{{$providerData.IconHTML 20}}
+					{{if $providerData}}{{$providerData.IconHTML 20}}{{else}}{{svg "octicon-key" 20}}{{end}}
 				</div>
 				<div class="flex-item-main">
 					<span class="flex-item-title" data-tooltip-content="{{$provider}}">

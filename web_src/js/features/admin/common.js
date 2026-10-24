@@ -150,7 +150,7 @@ export function initAdminCommon() {
   // New authentication
   if (document.querySelector('.admin.new.authentication')) {
     document.getElementById('auth_type')?.addEventListener('change', function () {
-      hideElem('.ldap, .dldap, .smtp, .pam, .oauth2, .has-tls, .search-page-size');
+      hideElem('.ldap, .dldap, .smtp, .pam, .oauth2, .saml, .has-tls, .search-page-size');
 
       for (const input of document.querySelectorAll('.ldap input[required], .binddnrequired input[required], .dldap input[required], .smtp input[required], .pam input[required], .oauth2 input[required], .has-tls input[required]')) {
         input.removeAttribute('required');
@@ -193,6 +193,9 @@ export function initAdminCommon() {
           }
           onOAuth2Change(true);
           break;
+        case '9': // SAML
+          showElem('.saml');
+          break;
       }
       if (authType === '2' || authType === '5') {
         onSecurityProtocolChange();
@@ -231,6 +234,8 @@ export function initAdminCommon() {
     authNameEl.addEventListener('input', (el) => {
       // appSubUrl is either empty or is a path that starts with `/` and doesn't have a trailing slash.
       document.getElementById('oauth2-callback-url').textContent = `${window.location.origin}${appSubUrl}/user/oauth2/${encodeURIComponent(el.target.value)}/callback`;
+      const samlMetadataURL = document.getElementById('saml-metadata-url');
+      if (samlMetadataURL) samlMetadataURL.textContent = `${window.location.origin}${appSubUrl}/user/saml/${encodeURIComponent(el.target.value)}/metadata`;
     });
     authNameEl.dispatchEvent(new Event('input'));
   }
