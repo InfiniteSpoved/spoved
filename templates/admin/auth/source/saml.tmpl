@@ -3,29 +3,29 @@
 <p class="help">{{ctx.Locale.Tr "admin.auths.saml_idp_help"}}</p>
 <div class="field {{if .Err_SAML}}error{{end}}">
 	<label for="saml_idp_metadata_url">{{ctx.Locale.Tr "admin.auths.saml_idp_metadata_url"}}</label>
-	<input id="saml_idp_metadata_url" name="saml_idp_metadata_url" type="url" value="{{$cfg.IdPMetadataURL}}" placeholder="https://idp.example.com/metadata">
+	<input id="saml_idp_metadata_url" name="saml_idp_metadata_url" type="url" value="{{$cfg.IDPMetadataURL}}" placeholder="https://idp.example.com/metadata">
 	<p class="help">{{ctx.Locale.Tr "admin.auths.saml_idp_metadata_url_help"}}</p>
 </div>
 <div class="field {{if .Err_SAML}}error{{end}}">
 	<label for="saml_idp_metadata">{{ctx.Locale.Tr "admin.auths.saml_idp_metadata"}}</label>
-	<textarea id="saml_idp_metadata" name="saml_idp_metadata" rows="4" placeholder="<EntityDescriptor …>">{{$cfg.IdPMetadata}}</textarea>
+	<textarea id="saml_idp_metadata" name="saml_idp_metadata" rows="4" placeholder="<EntityDescriptor …>">{{$cfg.IDPMetadata}}</textarea>
 </div>
 <div class="field">
 	<label for="saml_idp_entity_id">{{ctx.Locale.Tr "admin.auths.saml_idp_entity_id"}}</label>
-	<input id="saml_idp_entity_id" name="saml_idp_entity_id" value="{{$cfg.IdPEntityID}}">
+	<input id="saml_idp_entity_id" name="saml_idp_entity_id" value="{{$cfg.IDPEntityID}}">
 	<p class="help">{{ctx.Locale.Tr "admin.auths.saml_idp_entity_id_help"}}</p>
 </div>
 <div class="field">
 	<label for="saml_idp_sso_url">{{ctx.Locale.Tr "admin.auths.saml_idp_sso_url"}}</label>
-	<input id="saml_idp_sso_url" name="saml_idp_sso_url" type="url" value="{{$cfg.IdPSSOURL}}">
+	<input id="saml_idp_sso_url" name="saml_idp_sso_url" type="url" value="{{$cfg.IDPSSOURL}}">
 </div>
 <div class="field">
 	<label for="saml_idp_slo_url">{{ctx.Locale.Tr "admin.auths.saml_idp_slo_url"}}</label>
-	<input id="saml_idp_slo_url" name="saml_idp_slo_url" type="url" value="{{$cfg.IdPSLOURL}}">
+	<input id="saml_idp_slo_url" name="saml_idp_slo_url" type="url" value="{{$cfg.IDPSLOURL}}">
 </div>
 <div class="field">
 	<label for="saml_idp_certificate">{{ctx.Locale.Tr "admin.auths.saml_idp_certificate"}}</label>
-	<textarea id="saml_idp_certificate" name="saml_idp_certificate" rows="4" placeholder="-----BEGIN CERTIFICATE-----">{{$cfg.IdPCertificate}}</textarea>
+	<textarea id="saml_idp_certificate" name="saml_idp_certificate" rows="4" placeholder="-----BEGIN CERTIFICATE-----">{{$cfg.IDPCertificate}}</textarea>
 </div>
 
 <h5 class="ui dividing header">{{ctx.Locale.Tr "admin.auths.saml_sp"}}</h5>
@@ -107,7 +107,7 @@
 <div class="field">
 	<div class="ui checkbox">
 		<label for="saml_allow_idp_initiated"><strong>{{ctx.Locale.Tr "admin.auths.saml_allow_idp_initiated"}}</strong></label>
-		<input id="saml_allow_idp_initiated" name="saml_allow_idp_initiated" type="checkbox" {{if $cfg.AllowIdPInitiated}}checked{{end}}>
+		<input id="saml_allow_idp_initiated" name="saml_allow_idp_initiated" type="checkbox" {{if $cfg.AllowIDPInitiated}}checked{{end}}>
 		<p class="help">{{ctx.Locale.Tr "admin.auths.saml_allow_idp_initiated_help"}}</p>
 	</div>
 </div>

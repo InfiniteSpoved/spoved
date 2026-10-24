@@ -214,12 +214,12 @@ func parseOAuth2Config(form forms.AuthenticationForm) *oauth2.Source {
 
 func parseSAMLConfig(form forms.AuthenticationForm) *saml.Source {
 	return &saml.Source{
-		IdPMetadataURL:             form.SAMLIdPMetadataURL,
-		IdPMetadata:                form.SAMLIdPMetadata,
-		IdPEntityID:                form.SAMLIdPEntityID,
-		IdPSSOURL:                  form.SAMLIdPSSOURL,
-		IdPSLOURL:                  form.SAMLIdPSLOURL,
-		IdPCertificate:             form.SAMLIdPCertificate,
+		IDPMetadataURL:             form.SAMLIDPMetadataURL,
+		IDPMetadata:                form.SAMLIDPMetadata,
+		IDPEntityID:                form.SAMLIDPEntityID,
+		IDPSSOURL:                  form.SAMLIDPSSOURL,
+		IDPSLOURL:                  form.SAMLIDPSLOURL,
+		IDPCertificate:             form.SAMLIDPCertificate,
 		SPEntityID:                 form.SAMLSPEntityID,
 		SPCertificate:              form.SAMLSPCertificate,
 		SPPrivateKey:               form.SAMLSPPrivateKey,
@@ -231,7 +231,7 @@ func parseSAMLConfig(form forms.AuthenticationForm) *saml.Source {
 		EmailAttribute:             form.SAMLEmailAttribute,
 		RequireEncryptedAssertions: form.SAMLRequireEncryptedAssertions,
 		ForceAuthn:                 form.SAMLForceAuthn,
-		AllowIdPInitiated:          form.SAMLAllowIdPInitiated,
+		AllowIDPInitiated:          form.SAMLAllowIDPInitiated,
 		IconURL:                    form.SAMLIconURL,
 		SkipLocalTwoFA:             form.SkipLocalTwoFA,
 		RequiredClaimName:          form.SAMLRequiredClaimName,

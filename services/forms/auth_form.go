@@ -91,12 +91,12 @@ type AuthenticationForm struct {
 	Oauth2GroupUserGroupMap        string `binding:"ValidQuotaGroupMap"`
 	Oauth2GroupUserGroupMapRemoval bool
 
-	SAMLIdPMetadataURL             string `form:"saml_idp_metadata_url" preprocess:"TrimSpace"`
-	SAMLIdPMetadata                string `form:"saml_idp_metadata" preprocess:"TrimSpace"`
-	SAMLIdPEntityID                string `form:"saml_idp_entity_id" preprocess:"TrimSpace"`
-	SAMLIdPSSOURL                  string `form:"saml_idp_sso_url" preprocess:"TrimSpace"`
-	SAMLIdPSLOURL                  string `form:"saml_idp_slo_url" preprocess:"TrimSpace"`
-	SAMLIdPCertificate             string `form:"saml_idp_certificate" preprocess:"TrimSpace"`
+	SAMLIDPMetadataURL             string `form:"saml_idp_metadata_url" preprocess:"TrimSpace"`
+	SAMLIDPMetadata                string `form:"saml_idp_metadata" preprocess:"TrimSpace"`
+	SAMLIDPEntityID                string `form:"saml_idp_entity_id" preprocess:"TrimSpace"`
+	SAMLIDPSSOURL                  string `form:"saml_idp_sso_url" preprocess:"TrimSpace"`
+	SAMLIDPSLOURL                  string `form:"saml_idp_slo_url" preprocess:"TrimSpace"`
+	SAMLIDPCertificate             string `form:"saml_idp_certificate" preprocess:"TrimSpace"`
 	SAMLSPEntityID                 string `form:"saml_sp_entity_id" preprocess:"TrimSpace"`
 	SAMLSPCertificate              string `form:"saml_sp_certificate" preprocess:"TrimSpace"`
 	SAMLSPPrivateKey               string `form:"saml_sp_private_key" preprocess:"TrimSpace"`
@@ -108,7 +108,7 @@ type AuthenticationForm struct {
 	SAMLFullNameAttribute          string `form:"saml_full_name_attribute" preprocess:"TrimSpace"`
 	SAMLEmailAttribute             string `form:"saml_email_attribute" preprocess:"TrimSpace"`
 	SAMLForceAuthn                 bool   `form:"saml_force_authn"`
-	SAMLAllowIdPInitiated          bool   `form:"saml_allow_idp_initiated"`
+	SAMLAllowIDPInitiated          bool   `form:"saml_allow_idp_initiated"`
 	SAMLIconURL                    string `form:"saml_icon_url" preprocess:"TrimSpace"`
 	SAMLRequiredClaimName          string `form:"saml_required_claim_name"`
 	SAMLRequiredClaimValue         string `form:"saml_required_claim_value"`

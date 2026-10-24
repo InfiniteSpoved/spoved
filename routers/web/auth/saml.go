@@ -142,7 +142,9 @@ func SAMLSignIn(ctx *context.Context) {
 		samlUnavailable(ctx, authSource, err)
 		return
 	}
-	ctx.Redirect(u.String())
+	// not ctx.Redirect: it drops the cookie of a session that starts here, and the session holds the request ID
+	ctx.Resp.Header().Set("Cache-Control", "no-store")
+	http.Redirect(ctx.Resp, ctx.Req, u.String(), http.StatusSeeOther)
 }
 
 // SAMLACS receives the IdP's response and signs the user in.

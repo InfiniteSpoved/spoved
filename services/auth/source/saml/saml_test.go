@@ -85,10 +85,10 @@ func setup(t *testing.T) *fixture {
 
 	f := &fixture{idp: newKeyPair(t), sp: newKeyPair(t)}
 	f.source = &Source{
-		IdPEntityID:    idpEntityID,
-		IdPSSOURL:      "https://idp.example.com/sso",
-		IdPSLOURL:      "https://idp.example.com/slo",
-		IdPCertificate: f.idp.certPEM(),
+		IDPEntityID:    idpEntityID,
+		IDPSSOURL:      "https://idp.example.com/sso",
+		IDPSLOURL:      "https://idp.example.com/slo",
+		IDPCertificate: f.idp.certPEM(),
 		NameIDFormat:   string(saml.PersistentNameIDFormat),
 
 		UsernameAttribute: "uid",
@@ -296,8 +296,8 @@ func TestParseResponse(t *testing.T) {
 		_, err := f.source.ParseResponse(sp, resp, "")
 		require.ErrorContains(t, err, "IdP-initiated sign-in is off")
 
-		f.source.AllowIdPInitiated = true
-		defer func() { f.source.AllowIdPInitiated = false }()
+		f.source.AllowIDPInitiated = true
+		defer func() { f.source.AllowIDPInitiated = false }()
 		_, err = f.source.ParseResponse(f.serviceProvider(t), resp, "")
 		require.NoError(t, err)
 	})
@@ -459,7 +459,7 @@ func TestLogout(t *testing.T) {
 	assert.Contains(t, u, "&Signature=")
 }
 
-func TestParseIdPMetadata(t *testing.T) {
+func TestParseIDPMetadata(t *testing.T) {
 	kp := newKeyPair(t)
 	entity := func(id string) string {
 		return `<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="` + id + `">
@@ -470,22 +470,22 @@ func TestParseIdPMetadata(t *testing.T) {
 </IDPSSODescriptor></EntityDescriptor>`
 	}
 
-	ed, err := ParseIdPMetadata([]byte(entity("https://a")), "")
+	ed, err := ParseIDPMetadata([]byte(entity("https://a")), "")
 	require.NoError(t, err)
 	assert.Equal(t, "https://a", ed.EntityID)
 
 	both := `<EntitiesDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata">` + entity("https://a") + entity("https://b") + `</EntitiesDescriptor>`
-	_, err = ParseIdPMetadata([]byte(both), "")
+	_, err = ParseIDPMetadata([]byte(both), "")
 	require.ErrorContains(t, err, "several identity providers")
-	ed, err = ParseIdPMetadata([]byte(both), "https://b")
+	ed, err = ParseIDPMetadata([]byte(both), "https://b")
 	require.NoError(t, err)
 	assert.Equal(t, "https://b", ed.EntityID)
-	_, err = ParseIdPMetadata([]byte(both), "https://c")
+	_, err = ParseIDPMetadata([]byte(both), "https://c")
 	require.Error(t, err)
 
-	_, err = ParseIdPMetadata([]byte(strings.Replace(entity("https://a"), `use="signing"`, `use="encryption"`, 1)), "")
+	_, err = ParseIDPMetadata([]byte(strings.Replace(entity("https://a"), `use="signing"`, `use="encryption"`, 1)), "")
 	require.ErrorContains(t, err, "no signing certificate")
-	_, err = ParseIdPMetadata([]byte("<foo/>"), "")
+	_, err = ParseIDPMetadata([]byte("<foo/>"), "")
 	require.Error(t, err)
 
 	_, err = FetchMetadata(t.Context(), "http://idp.example.com/metadata", "")
@@ -527,11 +527,11 @@ func TestSourceConfig(t *testing.T) {
 	require.ErrorContains(t, s.Validate(t.Context()), "does not belong")
 
 	s = valid()
-	s.IdPCertificate = ""
+	s.IDPCertificate = ""
 	require.Error(t, s.Validate(t.Context()))
 
 	s = valid()
-	s.IdPSSOURL = "javascript:alert(1)"
+	s.IDPSSOURL = "javascript:alert(1)"
 	require.Error(t, s.Validate(t.Context()))
 }
 

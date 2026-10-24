@@ -58,7 +58,7 @@ func (source *Source) ParseResponse(sp *saml.ServiceProvider, samlResponse, requ
 	if err != nil {
 		return nil, invalid("the response is not base64")
 	}
-	if requestID == "" && !source.AllowIdPInitiated {
+	if requestID == "" && !source.AllowIDPInitiated {
 		return nil, invalid("no sign-in was started in this browser and IdP-initiated sign-in is off")
 	}
 	if source.RequireEncryptedAssertions {

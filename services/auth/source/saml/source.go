@@ -16,12 +16,12 @@ import (
 // identity provider (IdP) signs the assertions.
 type Source struct {
 	// The IdP: a metadata URL (refreshed hourly), metadata XML, or the entity ID, SSO URL and signing certificate.
-	IdPMetadataURL string
-	IdPMetadata    string
-	IdPEntityID    string
-	IdPSSOURL      string
-	IdPSLOURL      string
-	IdPCertificate string
+	IDPMetadataURL string
+	IDPMetadata    string
+	IDPEntityID    string
+	IDPSSOURL      string
+	IDPSLOURL      string
+	IDPCertificate string
 
 	// The SP: the entity ID defaults to the metadata URL. The key signs requests and decrypts assertions.
 	SPEntityID          string
@@ -40,7 +40,7 @@ type Source struct {
 
 	RequireEncryptedAssertions bool
 	ForceAuthn                 bool
-	AllowIdPInitiated          bool
+	AllowIDPInitiated          bool
 	IconURL                    string
 	SkipLocalTwoFA             bool
 

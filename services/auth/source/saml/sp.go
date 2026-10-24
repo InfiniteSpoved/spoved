@@ -124,7 +124,7 @@ func ParsePrivateKey(s string) (*rsa.PrivateKey, error) {
 // spKeyPair returns the SP key and certificate, nil if none is configured.
 func (source *Source) spKeyPair() (*rsa.PrivateKey, *x509.Certificate, error) {
 	if source.SPCertificate == "" && source.SPPrivateKey == "" {
-		return nil, nil, nil
+		return nil, nil, nil //nolint:nilnil // no key pair configured
 	}
 	if source.SPCertificate == "" || source.SPPrivateKey == "" {
 		return nil, nil, errors.New("the SP certificate and private key must be set together")
@@ -143,9 +143,9 @@ func (source *Source) spKeyPair() (*rsa.PrivateKey, *x509.Certificate, error) {
 	return key, cert, nil
 }
 
-// ParseIdPMetadata reads IdP metadata: an EntityDescriptor, or an EntitiesDescriptor holding the IdP with entityID
+// ParseIDPMetadata reads IdP metadata: an EntityDescriptor, or an EntitiesDescriptor holding the IdP with entityID
 // (or a single IdP when entityID is empty).
-func ParseIdPMetadata(data []byte, entityID string) (*saml.EntityDescriptor, error) {
+func ParseIDPMetadata(data []byte, entityID string) (*saml.EntityDescriptor, error) {
 	if err := xrv.Validate(bytes.NewReader(data)); err != nil {
 		return nil, fmt.Errorf("invalid metadata XML: %w", err)
 	}
@@ -188,7 +188,7 @@ func ParseIdPMetadata(data []byte, entityID string) (*saml.EntityDescriptor, err
 		}
 		return nil, errors.New("the metadata has no identity provider")
 	}
-	return found, checkIdP(found)
+	return found, checkIDP(found)
 }
 
 func flattenEntities(eds *saml.EntitiesDescriptor) []saml.EntityDescriptor {
@@ -199,8 +199,8 @@ func flattenEntities(eds *saml.EntitiesDescriptor) []saml.EntityDescriptor {
 	return list
 }
 
-// checkIdP checks that the IdP has an entity ID, a sign-in URL and a signing certificate.
-func checkIdP(ed *saml.EntityDescriptor) error {
+// checkIDP checks that the IdP has an entity ID, a sign-in URL and a signing certificate.
+func checkIDP(ed *saml.EntityDescriptor) error {
 	if ed.EntityID == "" {
 		return errors.New("the identity provider has no entity ID")
 	}
@@ -228,13 +228,13 @@ func checkIdP(ed *saml.EntityDescriptor) error {
 	return nil
 }
 
-// manualIdP builds the IdP metadata from the entity ID, URLs and certificate set by hand.
-func (source *Source) manualIdP() (*saml.EntityDescriptor, error) {
-	cert, err := ParseCertificate(source.IdPCertificate)
+// manualIDP builds the IdP metadata from the entity ID, URLs and certificate set by hand.
+func (source *Source) manualIDP() (*saml.EntityDescriptor, error) {
+	cert, err := ParseCertificate(source.IDPCertificate)
 	if err != nil {
 		return nil, fmt.Errorf("IdP certificate: %w", err)
 	}
-	for _, u := range []string{source.IdPSSOURL, source.IdPSLOURL} {
+	for _, u := range []string{source.IDPSSOURL, source.IDPSLOURL} {
 		if u != "" && !isHTTPURL(u) {
 			return nil, fmt.Errorf("%q is not an http(s) URL", u)
 		}
@@ -249,13 +249,13 @@ func (source *Source) manualIdP() (*saml.EntityDescriptor, error) {
 				}},
 			},
 		},
-		SingleSignOnServices: []saml.Endpoint{{Binding: saml.HTTPRedirectBinding, Location: source.IdPSSOURL}},
+		SingleSignOnServices: []saml.Endpoint{{Binding: saml.HTTPRedirectBinding, Location: source.IDPSSOURL}},
 	}
-	if source.IdPSLOURL != "" {
-		d.SingleLogoutServices = []saml.Endpoint{{Binding: saml.HTTPRedirectBinding, Location: source.IdPSLOURL}}
+	if source.IDPSLOURL != "" {
+		d.SingleLogoutServices = []saml.Endpoint{{Binding: saml.HTTPRedirectBinding, Location: source.IDPSLOURL}}
 	}
-	ed := &saml.EntityDescriptor{EntityID: source.IdPEntityID, IDPSSODescriptors: []saml.IDPSSODescriptor{d}}
-	return ed, checkIdP(ed)
+	ed := &saml.EntityDescriptor{EntityID: source.IDPEntityID, IDPSSODescriptors: []saml.IDPSSODescriptor{d}}
+	return ed, checkIDP(ed)
 }
 
 func isHTTPURL(s string) bool {
@@ -321,22 +321,22 @@ func FetchMetadata(ctx context.Context, metadataURL, entityID string) (*saml.Ent
 	if len(data) > maxMetadataSize {
 		return nil, errors.New("the metadata is larger than 10 MiB")
 	}
-	return ParseIdPMetadata(data, entityID)
+	return ParseIDPMetadata(data, entityID)
 }
 
-// LoadIdPMetadata returns the IdP metadata: fetched from the metadata URL (cached, refreshed hourly in the background,
+// LoadIDPMetadata returns the IdP metadata: fetched from the metadata URL (cached, refreshed hourly in the background,
 // the last good copy is kept when a refresh fails), parsed from the stored XML, or built from the manual settings.
-func (source *Source) LoadIdPMetadata(ctx context.Context, updated timeutil.TimeStamp) (*saml.EntityDescriptor, error) {
+func (source *Source) LoadIDPMetadata(ctx context.Context, updated timeutil.TimeStamp) (*saml.EntityDescriptor, error) {
 	switch {
-	case source.IdPMetadataURL != "":
-	case source.IdPMetadata != "":
-		return ParseIdPMetadata([]byte(source.IdPMetadata), source.IdPEntityID)
+	case source.IDPMetadataURL != "":
+	case source.IDPMetadata != "":
+		return ParseIDPMetadata([]byte(source.IDPMetadata), source.IDPEntityID)
 	default:
-		return source.manualIdP()
+		return source.manualIDP()
 	}
 
 	id := source.authSource.ID
-	key := fmt.Sprintf("%d|%s|%s", updated, source.IdPMetadataURL, source.IdPEntityID)
+	key := fmt.Sprintf("%d|%s|%s", updated, source.IDPMetadataURL, source.IDPEntityID)
 	metadataMu.Lock()
 	c := metadataCache[id]
 	if c != nil && c.key == key {
@@ -349,7 +349,7 @@ func (source *Source) LoadIdPMetadata(ctx context.Context, updated timeutil.Time
 	}
 	metadataMu.Unlock()
 
-	entity, err := FetchMetadata(ctx, source.IdPMetadataURL, source.IdPEntityID)
+	entity, err := FetchMetadata(ctx, source.IDPMetadataURL, source.IDPEntityID)
 	if err != nil {
 		return nil, err
 	}
@@ -362,7 +362,7 @@ func (source *Source) LoadIdPMetadata(ctx context.Context, updated timeutil.Time
 func (source *Source) refreshMetadata(c *cachedMetadata) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	entity, err := FetchMetadata(ctx, source.IdPMetadataURL, source.IdPEntityID)
+	entity, err := FetchMetadata(ctx, source.IDPMetadataURL, source.IDPEntityID)
 
 	metadataMu.Lock()
 	defer metadataMu.Unlock()
@@ -376,7 +376,7 @@ func (source *Source) refreshMetadata(c *cachedMetadata) {
 
 // ServiceProvider builds the SAML service provider of the source.
 func (source *Source) ServiceProvider(ctx context.Context) (*saml.ServiceProvider, error) {
-	idp, err := source.LoadIdPMetadata(ctx, source.authSource.UpdatedUnix)
+	idp, err := source.LoadIDPMetadata(ctx, source.authSource.UpdatedUnix)
 	if err != nil {
 		return nil, err
 	}
@@ -399,7 +399,7 @@ func (source *Source) newServiceProvider(idp *saml.EntityDescriptor) (*saml.Serv
 		SloURL:            *sloURL,
 		IDPMetadata:       idp,
 		AuthnNameIDFormat: saml.NameIDFormat(source.NameIDFormat),
-		AllowIDPInitiated: source.AllowIdPInitiated,
+		AllowIDPInitiated: source.AllowIDPInitiated,
 		LogoutBindings:    []string{saml.HTTPRedirectBinding},
 	}
 	if source.ForceAuthn {
@@ -433,16 +433,16 @@ func (source *Source) SPMetadata() (*saml.EntityDescriptor, error) {
 // Validate checks a configuration before it is stored: the IdP metadata loads, the SP key pair matches and the
 // options fit together.
 func (source *Source) Validate(ctx context.Context) error {
-	if source.IdPMetadataURL == "" && source.IdPMetadata == "" {
-		if source.IdPEntityID == "" || source.IdPSSOURL == "" || source.IdPCertificate == "" {
+	if source.IDPMetadataURL == "" && source.IDPMetadata == "" {
+		if source.IDPEntityID == "" || source.IDPSSOURL == "" || source.IDPCertificate == "" {
 			return errors.New("set an IdP metadata URL, the IdP metadata XML, or the IdP entity ID, SSO URL and certificate")
 		}
 	}
 	var err error
-	if source.IdPMetadataURL != "" {
-		_, err = FetchMetadata(ctx, source.IdPMetadataURL, source.IdPEntityID)
+	if source.IDPMetadataURL != "" {
+		_, err = FetchMetadata(ctx, source.IDPMetadataURL, source.IDPEntityID)
 	} else {
-		_, err = source.LoadIdPMetadata(ctx, 0)
+		_, err = source.LoadIDPMetadata(ctx, 0)
 	}
 	if err != nil {
 		return err
