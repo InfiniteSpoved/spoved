@@ -242,6 +242,7 @@ func addHook(ctx *context.APIContext, form *api.CreateHookOption, ownerID, group
 				WorkflowJobSkipped:       util.SliceContainsString(form.Events, string(webhook_module.HookEventWorkflowJobSkipped), true),
 				WorkflowJobSuccess:       util.SliceContainsString(form.Events, string(webhook_module.HookEventWorkflowJobSuccess), true),
 				WorkflowJobWaiting:       util.SliceContainsString(form.Events, string(webhook_module.HookEventWorkflowJobWaiting), true),
+				MergeGroup:               util.SliceContainsString(form.Events, string(webhook_module.HookEventMergeGroup), true),
 			},
 			BranchFilter: form.BranchFilter,
 		},
@@ -410,6 +411,7 @@ func editHook(ctx *context.APIContext, form *api.EditHookOption, w *webhook.Webh
 	w.Repository = util.SliceContainsString(form.Events, string(webhook_module.HookEventRepository), true)
 	w.Wiki = util.SliceContainsString(form.Events, string(webhook_module.HookEventWiki), true)
 	w.Release = util.SliceContainsString(form.Events, string(webhook_module.HookEventRelease), true)
+	w.MergeGroup = util.SliceContainsString(form.Events, string(webhook_module.HookEventMergeGroup), true)
 	w.BranchFilter = form.BranchFilter
 
 	// the request sets a new header unless it sends none and there was none; the stored one is never decrypted for this

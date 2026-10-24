@@ -1,0 +1,43 @@
+// Copyright 2026 The spoved contributors. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package forgejo_migrations
+
+import (
+	"testing"
+
+	migration_tests "forgejo.org/models/gitea_migrations/test"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type v18zzfOldProtectedBranch struct {
+	ID         int64 `xorm:"pk autoincr"`
+	RepoID     int64
+	BranchName string
+}
+
+func (v18zzfOldProtectedBranch) TableName() string {
+	return "protected_branch"
+}
+
+func Test_addMergeQueue(t *testing.T) {
+	x, deferable := migration_tests.PrepareTestEnv(t, 0, new(v18zzfOldProtectedBranch))
+	defer deferable()
+	require.NotNil(t, x)
+	_, err := x.Exec("INSERT INTO protected_branch (repo_id, branch_name) VALUES (1, 'main')")
+	require.NoError(t, err)
+
+	require.NoError(t, addMergeQueue(x))
+	require.NoError(t, addMergeQueue(x), "the migration can run again")
+
+	count, err := x.Table("protected_branch").Where("require_merge_queue = ? AND merge_queue_build_concurrency = 0 AND merge_queue_merge_style = ''", false).Count()
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count, "existing rules don't require a merge queue")
+
+	_, err = x.Exec("INSERT INTO merge_queue_entry (repo_id, base_branch, pull_id, position, merge_style, head_commit_id, enqueued_by_id) VALUES (1, 'main', 2, 1, 'merge', 'abc', 1)")
+	require.NoError(t, err)
+	_, err = x.Exec("INSERT INTO merge_queue_entry (repo_id, base_branch, pull_id, position, merge_style, head_commit_id, enqueued_by_id) VALUES (1, 'main', 2, 2, 'merge', 'abc', 1)")
+	require.Error(t, err, "a pull request is queued once")
+}

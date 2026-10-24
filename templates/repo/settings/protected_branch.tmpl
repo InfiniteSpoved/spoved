@@ -337,6 +337,56 @@
 					<span class="help">{{ctx.Locale.Tr "repo.settings.block_on_incomplete_tasks_desc"}}</span>
 				</label>
 			</fieldset>
+			<fieldset id="merge-queue-settings">
+				<legend>{{ctx.Locale.Tr "repo.settings.merge_queue"}}</legend>
+				<div class="grouped fields">
+					<div class="field">
+						<div class="ui checkbox">
+							<input name="require_merge_queue" type="checkbox" class="toggle-target-enabled" data-target="#merge_queue_box" {{if .Rule.RequireMergeQueue}}checked{{end}}>
+							<label>{{ctx.Locale.Tr "repo.settings.require_merge_queue"}}</label>
+							<p class="help">{{ctx.Locale.Tr "repo.settings.require_merge_queue_desc"}}</p>
+						</div>
+					</div>
+					<div id="merge_queue_box" class="checkbox-sub-item grouped fields {{if not .Rule.RequireMergeQueue}}disabled{{end}}">
+						<div class="field">
+							<label for="merge_queue_merge_style">{{ctx.Locale.Tr "repo.settings.merge_queue.merge_style"}}</label>
+							<select id="merge_queue_merge_style" name="merge_queue_merge_style">
+								<option value="" {{if not .Rule.MergeQueueMergeStyle}}selected{{end}}>{{ctx.Locale.Tr "repo.settings.merge_queue.merge_style_chosen"}}</option>
+								<option value="merge" {{if eq .Rule.MergeQueueMergeStyle "merge"}}selected{{end}}>{{ctx.Locale.Tr "repo.pulls.merge_pull_request"}}</option>
+								<option value="rebase" {{if eq .Rule.MergeQueueMergeStyle "rebase"}}selected{{end}}>{{ctx.Locale.Tr "repo.pulls.rebase_merge_pull_request"}}</option>
+								<option value="rebase-merge" {{if eq .Rule.MergeQueueMergeStyle "rebase-merge"}}selected{{end}}>{{ctx.Locale.Tr "repo.pulls.rebase_merge_commit_pull_request"}}</option>
+								<option value="squash" {{if eq .Rule.MergeQueueMergeStyle "squash"}}selected{{end}}>{{ctx.Locale.Tr "repo.pulls.squash_merge_pull_request"}}</option>
+							</select>
+							<p class="help tw-ml-0">{{ctx.Locale.Tr "repo.settings.merge_queue.merge_style_desc"}}</p>
+						</div>
+						<div class="field">
+							<label for="merge_queue_build_concurrency">{{ctx.Locale.Tr "repo.settings.merge_queue.build_concurrency"}}</label>
+							<input id="merge_queue_build_concurrency" name="merge_queue_build_concurrency" type="number" min="1" max="100" value="{{.Rule.MergeQueueConfig.BuildConcurrency}}">
+							<p class="help tw-ml-0">{{ctx.Locale.Tr "repo.settings.merge_queue.build_concurrency_desc"}}</p>
+						</div>
+						<div class="field">
+							<label for="merge_queue_check_timeout_minutes">{{ctx.Locale.Tr "repo.settings.merge_queue.check_timeout"}}</label>
+							<input id="merge_queue_check_timeout_minutes" name="merge_queue_check_timeout_minutes" type="number" min="1" max="1440" value="{{.Rule.MergeQueueConfig.CheckTimeout.Minutes}}">
+							<p class="help tw-ml-0">{{ctx.Locale.Tr "repo.settings.merge_queue.check_timeout_desc"}}</p>
+						</div>
+						<div class="field">
+							<label for="merge_queue_min_group_size">{{ctx.Locale.Tr "repo.settings.merge_queue.min_group_size"}}</label>
+							<input id="merge_queue_min_group_size" name="merge_queue_min_group_size" type="number" min="1" max="100" value="{{.Rule.MergeQueueConfig.MinGroupSize}}">
+							<p class="help tw-ml-0">{{ctx.Locale.Tr "repo.settings.merge_queue.min_group_size_desc"}}</p>
+						</div>
+						<div class="field">
+							<label for="merge_queue_wait_minutes">{{ctx.Locale.Tr "repo.settings.merge_queue.wait"}}</label>
+							<input id="merge_queue_wait_minutes" name="merge_queue_wait_minutes" type="number" min="1" max="1440" value="{{.Rule.MergeQueueConfig.WaitTime.Minutes}}">
+							<p class="help tw-ml-0">{{ctx.Locale.Tr "repo.settings.merge_queue.wait_desc"}}</p>
+						</div>
+						<div class="field">
+							<label for="merge_queue_max_group_size">{{ctx.Locale.Tr "repo.settings.merge_queue.max_group_size"}}</label>
+							<input id="merge_queue_max_group_size" name="merge_queue_max_group_size" type="number" min="1" max="100" value="{{.Rule.MergeQueueConfig.MaxGroupSize}}">
+							<p class="help tw-ml-0">{{ctx.Locale.Tr "repo.settings.merge_queue.max_group_size_desc"}}</p>
+						</div>
+					</div>
+				</div>
+			</fieldset>
 			<fieldset>
 				<legend>{{ctx.Locale.Tr "repo.settings.event_pull_request_enforcement"}}</legend>
 				<label>

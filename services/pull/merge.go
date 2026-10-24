@@ -268,9 +268,13 @@ func Merge(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.U
 	if err != nil {
 		return err
 	}
+	return afterMerge(ctx, pr, doer, wasAutoMerged)
+}
 
+// afterMerge notifies about the merge of pr, which the post-receive hook recorded, and closes the issues it references
+func afterMerge(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, wasAutoMerged bool) error {
 	// reload pull request because it has been updated by post receive hook
-	pr, err = issues_model.GetPullRequestByID(ctx, pr.ID)
+	pr, err := issues_model.GetPullRequestByID(ctx, pr.ID)
 	if err != nil {
 		return err
 	}
@@ -365,26 +369,8 @@ func doMergeAndPush(ctx context.Context, pr *issues_model.PullRequest, doer *use
 	}
 	defer cancel()
 
-	// Merge commits.
-	switch mergeStyle {
-	case repo_model.MergeStyleMerge:
-		if err := doMergeStyleMerge(mergeCtx, message); err != nil {
-			return "", err
-		}
-	case repo_model.MergeStyleRebase, repo_model.MergeStyleRebaseMerge:
-		if err := doMergeStyleRebase(mergeCtx, mergeStyle, message); err != nil {
-			return "", err
-		}
-	case repo_model.MergeStyleSquash:
-		if err := doMergeStyleSquash(mergeCtx, message); err != nil {
-			return "", err
-		}
-	case repo_model.MergeStyleFastForwardOnly:
-		if err := doMergeStyleFastForwardOnly(mergeCtx); err != nil {
-			return "", err
-		}
-	default:
-		return "", models.ErrInvalidMergeStyle{ID: pr.BaseRepo.ID, Style: mergeStyle}
+	if err := doMergeStyle(mergeCtx, mergeStyle, message); err != nil {
+		return "", err
 	}
 
 	// OK we should cache our current head and origin/headbranch
@@ -460,6 +446,22 @@ func doMergeAndPush(ctx context.Context, pr *issues_model.PullRequest, doer *use
 	mergeCtx.errbuf.Reset()
 
 	return mergeCommitID, nil
+}
+
+// doMergeStyle merges the commits of the temporary repository with mergeStyle
+func doMergeStyle(mergeCtx *mergeContext, mergeStyle repo_model.MergeStyle, message string) error {
+	switch mergeStyle {
+	case repo_model.MergeStyleMerge:
+		return doMergeStyleMerge(mergeCtx, message)
+	case repo_model.MergeStyleRebase, repo_model.MergeStyleRebaseMerge:
+		return doMergeStyleRebase(mergeCtx, mergeStyle, message)
+	case repo_model.MergeStyleSquash:
+		return doMergeStyleSquash(mergeCtx, message)
+	case repo_model.MergeStyleFastForwardOnly:
+		return doMergeStyleFastForwardOnly(mergeCtx)
+	default:
+		return models.ErrInvalidMergeStyle{ID: mergeCtx.pr.BaseRepo.ID, Style: mergeStyle}
+	}
 }
 
 func commitAndSignNoAuthor(ctx *mergeContext, message string) error {
@@ -548,18 +550,19 @@ func CheckPullBranchProtections(ctx context.Context, pr *issues_model.PullReques
 	if err != nil {
 		return nil, fmt.Errorf("LoadProtectedBranch: %v", err)
 	}
+	queued := git_model.MergeQueueRule(rules) != nil
 	for _, pb := range rules {
 		if exempt != nil && exempt(pb) {
 			continue
 		}
-		if pb, err := checkPullBranchProtection(ctx, pr, pb, skipProtectedFilesCheck); err != nil {
+		if pb, err := checkPullBranchProtection(ctx, pr, pb, skipProtectedFilesCheck, queued); err != nil {
 			return pb, err
 		}
 	}
 	return nil, nil
 }
 
-func checkPullBranchProtection(ctx context.Context, pr *issues_model.PullRequest, pb *git_model.ProtectedBranch, skipProtectedFilesCheck bool) (*git_model.ProtectedBranch, error) {
+func checkPullBranchProtection(ctx context.Context, pr *issues_model.PullRequest, pb *git_model.ProtectedBranch, skipProtectedFilesCheck, queued bool) (*git_model.ProtectedBranch, error) {
 	isPass, err := isPullCommitStatusPass(ctx, pr, pb)
 	if err != nil {
 		return nil, err
@@ -595,7 +598,7 @@ func checkPullBranchProtection(ctx context.Context, pr *issues_model.PullRequest
 		}
 	}
 
-	if issues_model.MergeBlockedByOutdatedBranch(pb, pr) {
+	if issues_model.MergeBlockedByOutdatedBranch(pb, pr, queued) {
 		return pb, models.ErrDisallowedToMerge{
 			Reason: "The head branch is behind the base branch",
 		}

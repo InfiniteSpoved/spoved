@@ -139,6 +139,9 @@ const (
 	CommentTypePRMergedForward       // 48 the merge was merged forward into later branches (Content is MergeForwardInfo)
 	CommentTypePRMergeForwardStopped // 49 merging forward stopped at a branch (Content is MergeForwardInfo, RefIssueID the pull request opened for it)
 	CommentTypePRMergeForwardSkipped // 50 the merge was not merged forward, by choice (Content is MergeForwardInfo with the first branch it would have reached)
+
+	CommentTypePRAddedToMergeQueue     // 51 the pull request was added to the merge queue
+	CommentTypePRRemovedFromMergeQueue // 52 the pull request left the merge queue without being merged (Content is AutoMergeInfo with a Reason)
 )
 
 var commentStrings = []string{
@@ -193,6 +196,8 @@ var commentStrings = []string{
 	"pull_merged_forward",
 	"pull_merge_forward_stopped",
 	"pull_merge_forward_skipped",
+	"pull_merge_queue_added",
+	"pull_merge_queue_removed",
 }
 
 func (t CommentType) String() string {
@@ -1521,7 +1526,8 @@ func (c *Comment) MergeForwardInfo() (info MergeForwardInfo) {
 // CreateAutoMergeComment is a internal function, only use it for the auto merge CommentTypes
 func CreateAutoMergeComment(ctx context.Context, typ CommentType, pr *PullRequest, doer *user_model.User, info AutoMergeInfo) (comment *Comment, err error) {
 	switch typ {
-	case CommentTypePRScheduledToAutoMerge, CommentTypePRUnScheduledToAutoMerge, CommentTypePRAutoMergeTimeChanged, CommentTypePRMergedBySchedule, CommentTypePRAutoMergeSkipped:
+	case CommentTypePRScheduledToAutoMerge, CommentTypePRUnScheduledToAutoMerge, CommentTypePRAutoMergeTimeChanged, CommentTypePRMergedBySchedule, CommentTypePRAutoMergeSkipped,
+		CommentTypePRAddedToMergeQueue, CommentTypePRRemovedFromMergeQueue:
 	default:
 		return nil, fmt.Errorf("comment type %d cannot be used to create an auto merge comment", typ)
 	}

@@ -173,7 +173,7 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 	}
 
 	// handle pull request merging, a pull request action should push at least 1 commit
-	if opts.PushTrigger == repo_module.PushTriggerPRMergeToBase {
+	if opts.PushTrigger == repo_module.PushTriggerPRMergeToBase || opts.PushTrigger == repo_module.PushTriggerMergeQueue {
 		handlePullRequestMerging(ctx, opts, repoID, updates)
 		if ctx.Written() {
 			return

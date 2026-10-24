@@ -874,7 +874,7 @@ func BranchProtectionFromCreateOption(ctx *context.APIContext, owner *user_model
 	if form.RequiredApprovals > 0 {
 		requiredApprovals = form.RequiredApprovals
 	}
-	return &git_model.ProtectedBranch{
+	pb := &git_model.ProtectedBranch{
 		RuleName:                       ruleName,
 		CanPush:                        form.EnablePush,
 		EnableWhitelist:                form.EnablePush && form.EnablePushWhitelist,
@@ -896,7 +896,19 @@ func BranchProtectionFromCreateOption(ctx *context.APIContext, owner *user_model
 		BlockOnUnresolvedConversations: form.BlockOnUnresolvedConversations,
 		IgnoreOutdatedConversations:    form.IgnoreOutdatedConversations,
 		BlockOnIncompleteTasks:         form.BlockOnIncompleteTasks,
-	}, opts, true
+		RequireMergeQueue:              form.RequireMergeQueue,
+		MergeQueueMergeStyle:           form.MergeQueueMergeStyle,
+		MergeQueueBuildConcurrency:     form.MergeQueueBuildConcurrency,
+		MergeQueueMinGroupSize:         form.MergeQueueMinGroupSize,
+		MergeQueueMaxGroupSize:         form.MergeQueueMaxGroupSize,
+		MergeQueueWaitMinutes:          form.MergeQueueWaitMinutes,
+		MergeQueueCheckTimeoutMinutes:  form.MergeQueueCheckTimeoutMinutes,
+	}
+	if err := pb.ValidateMergeQueue(); err != nil {
+		ctx.Error(http.StatusUnprocessableEntity, "ValidateMergeQueue", err)
+		return nil, opts, false
+	}
+	return pb, opts, true
 }
 
 // ApplyEditBranchProtectionOption changes protectBranch by the fields set in form and returns its allow-lists,
@@ -952,6 +964,25 @@ func ApplyEditBranchProtectionOption(ctx *context.APIContext, owner *user_model.
 	setIfNotNil(&protectBranch.IgnoreOutdatedConversations, form.IgnoreOutdatedConversations)
 	setIfNotNil(&protectBranch.BlockOnIncompleteTasks, form.BlockOnIncompleteTasks)
 	setIfNotNil(&protectBranch.ApplyToAdmins, form.ApplyToAdmins)
+	setIfNotNil(&protectBranch.RequireMergeQueue, form.RequireMergeQueue)
+	if form.MergeQueueMergeStyle != nil {
+		protectBranch.MergeQueueMergeStyle = *form.MergeQueueMergeStyle
+	}
+	for _, f := range []struct{ dst, src *int }{
+		{&protectBranch.MergeQueueBuildConcurrency, form.MergeQueueBuildConcurrency},
+		{&protectBranch.MergeQueueMinGroupSize, form.MergeQueueMinGroupSize},
+		{&protectBranch.MergeQueueMaxGroupSize, form.MergeQueueMaxGroupSize},
+		{&protectBranch.MergeQueueWaitMinutes, form.MergeQueueWaitMinutes},
+		{&protectBranch.MergeQueueCheckTimeoutMinutes, form.MergeQueueCheckTimeoutMinutes},
+	} {
+		if f.src != nil {
+			*f.dst = *f.src
+		}
+	}
+	if err := protectBranch.ValidateMergeQueue(); err != nil {
+		ctx.Error(http.StatusUnprocessableEntity, "ValidateMergeQueue", err)
+		return git_model.WhitelistOptions{}, false
+	}
 
 	opts := git_model.WhitelistOptions{
 		DeployKeyIDs:          protectBranch.WhitelistDeployKeyIDs,

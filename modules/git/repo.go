@@ -209,6 +209,7 @@ type PushOptions struct {
 	Remote               string
 	Branch               string
 	Force                bool
+	ForceWithLease       string // "<ref>:<expected commit>": the ref must be at the commit
 	Mirror               bool
 	Env                  []string
 	Timeout              time.Duration
@@ -249,6 +250,9 @@ func Push(ctx context.Context, repoPath string, opts PushOptions) error {
 	if opts.Force {
 		cmd.AddArguments("-f")
 	}
+	if opts.ForceWithLease != "" {
+		cmd.AddOptionFormat("--force-with-lease=%s", opts.ForceWithLease)
+	}
 	if opts.Mirror {
 		cmd.AddArguments("--mirror")
 	}
@@ -267,7 +271,7 @@ func Push(ctx context.Context, repoPath string, opts PushOptions) error {
 	stdout, stderr, err := cmd.RunStdString(&RunOpts{Env: opts.Env, Timeout: opts.Timeout, Dir: repoPath})
 	if err != nil {
 		// "cannot lock ref ... is at X but expected Y": the branch moved after the push read it
-		if strings.Contains(stderr, "non-fast-forward") || (strings.Contains(stderr, "cannot lock ref") && strings.Contains(stderr, "but expected")) {
+		if strings.Contains(stderr, "non-fast-forward") || strings.Contains(stderr, "(stale info)") || (strings.Contains(stderr, "cannot lock ref") && strings.Contains(stderr, "but expected")) {
 			return &ErrPushOutOfDate{StdOut: stdout, StdErr: stderr, Err: err}
 		} else if strings.Contains(stderr, "! [remote rejected]") {
 			err := &ErrPushRejected{StdOut: stdout, StdErr: stderr, Err: err}

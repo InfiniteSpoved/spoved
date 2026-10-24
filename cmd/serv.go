@@ -202,6 +202,7 @@ func servGitEnv(results *private.ServCommandResults, clientIP string) []string {
 		repo_module.EnvPusherID+"="+strconv.FormatInt(results.UserID, 10),
 		repo_module.EnvRepoID+"="+strconv.FormatInt(results.RepoID, 10),
 		repo_module.EnvPRID+"="+fmt.Sprintf("%d", 0),
+		repo_module.EnvPushTrigger+"=",
 		repo_module.EnvDeployPublicKeyID+"="+fmt.Sprintf("%d", results.DeployKeyKeyID),
 		repo_module.EnvKeyID+"="+fmt.Sprintf("%d", results.KeyID),
 		repo_module.EnvAppURL+"="+setting.AppURL,

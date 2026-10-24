@@ -291,6 +291,10 @@ func detectMatched(gitRepo *git.Repository, commit *git.Commit, triggedEvent web
 		webhook_module.HookEventPackage:
 		return matchPackageEvent(payload.(*api.PackagePayload), evt)
 
+	case // merge_group
+		webhook_module.HookEventMergeGroup:
+		return matchMergeGroupEvent(payload.(*api.MergeGroupPayload), evt)
+
 	default:
 		log.Warn("unsupported event %q", triggedEvent)
 		return false
@@ -742,6 +746,36 @@ func matchPackageEvent(payload *api.PackagePayload, evt *jobparser.Event) bool {
 			}
 		default:
 			log.Warn("package event unsupported condition %q", cond)
+		}
+	}
+	return matchTimes == len(evt.Acts())
+}
+
+// matchMergeGroupEvent matches the types (only checks_requested) and the branches, which are the branch the merge
+// queue merges into, not the branch of the build.
+func matchMergeGroupEvent(payload *api.MergeGroupPayload, evt *jobparser.Event) bool {
+	branch := git.RefName(payload.MergeGroup.BaseRef).BranchName()
+	matchTimes := 0
+	for cond, vals := range evt.Acts() {
+		switch cond {
+		case "types":
+			if slices.Contains(vals, payload.Action) {
+				matchTimes++
+			}
+		case "branches", "branches-ignore":
+			patterns, err := workflowpattern.CompilePatterns(vals...)
+			if err != nil {
+				break
+			}
+			skip := workflowpattern.Skip
+			if cond == "branches-ignore" {
+				skip = workflowpattern.Filter
+			}
+			if !skip(patterns, []string{branch}, &workflowpattern.EmptyTraceWriter{}) {
+				matchTimes++
+			}
+		default:
+			log.Warn("merge group event unsupported condition %q", cond)
 		}
 	}
 	return matchTimes == len(evt.Acts())

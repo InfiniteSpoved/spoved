@@ -44,6 +44,10 @@ func (protectBranch *ProtectedBranch) AuditFields() map[string]any {
 		"delete_allowlist_team_ids": ids(protectBranch.DeleteAllowlistTeamIDs), "delete_allowlist_deploy_key_ids": ids(protectBranch.DeleteAllowlistDeployKeyIDs),
 		"force_push_allowlist_user_ids": ids(protectBranch.ForcePushAllowlistUserIDs), "force_push_allowlist_team_ids": ids(protectBranch.ForcePushAllowlistTeamIDs),
 		"force_push_allowlist_deploy_key_ids": ids(protectBranch.ForcePushAllowlistDeployKeyIDs), "apply_to_selected_repos": protectBranch.ApplyToSelectedRepos,
+		"require_merge_queue": protectBranch.RequireMergeQueue, "merge_queue_merge_style": protectBranch.MergeQueueMergeStyle,
+		"merge_queue_build_concurrency": protectBranch.MergeQueueBuildConcurrency, "merge_queue_min_group_size": protectBranch.MergeQueueMinGroupSize,
+		"merge_queue_max_group_size": protectBranch.MergeQueueMaxGroupSize, "merge_queue_wait_minutes": protectBranch.MergeQueueWaitMinutes,
+		"merge_queue_check_timeout_minutes": protectBranch.MergeQueueCheckTimeoutMinutes,
 	}
 }
 

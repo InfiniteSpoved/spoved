@@ -45,6 +45,7 @@ const (
 	PushTriggerPRMergeToBase    PushTrigger = "pr-merge-to-base"
 	PushTriggerPRUpdateWithBase PushTrigger = "pr-update-with-base"
 	PushTriggerWeb              PushTrigger = "web" // any other push the server makes, e.g. the web editor
+	PushTriggerMergeQueue       PushTrigger = "merge-queue"
 )
 
 // AuditEnv is the hook environment that tells the audit log who pushes. All four keys are always set, and callers
