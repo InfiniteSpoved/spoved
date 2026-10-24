@@ -19,6 +19,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
+	"forgejo.org/modules/secret"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/services/authz"
@@ -29,8 +30,9 @@ import (
 // name filter shows.
 const ownedTokensPageSize = 20
 
-// newOwnedTokenSessionKey holds "id:rotated:secret" of a token that was just created or rotated, from the POST to the
-// page it redirects to; the page pops it, so a reload shows nothing and rotates nothing.
+// newOwnedTokenSessionKey prefixes the session key (see newOwnedTokenKey) that holds the encrypted
+// "id:rotated:time:secret" of a token that was just created or rotated, from the POST to the page it redirects to;
+// the page pops it, so a reload shows nothing and rotates nothing.
 const newOwnedTokenSessionKey = "newOwnedToken"
 
 // OwnedTokenRow is one token in the list of the Keys and tokens page.
@@ -274,42 +276,66 @@ func CreateOwnedToken(ctx *context.Context, level OwnedTokenLevel, f OwnedTokenF
 	return t
 }
 
-// rememberNewOwnedToken keeps the secret of a new or rotated token in the session and redirects to the page, which
-// shows it once (popNewOwnedToken): the answer to the POST has no secret to repeat on a reload.
+// newOwnedTokenKey is the session key of the secret shown on the page of one owner (an organization, a project or a
+// repository), so another owner's page never consumes it.
+func newOwnedTokenKey(ownerType auth_model.AccessTokenOwnerType, ownerID, groupID int64) string {
+	return fmt.Sprintf("%s:%d:%d:%d", newOwnedTokenSessionKey, ownerType, ownerID, groupID)
+}
+
+// newOwnedTokenMaxAge is how long a created or rotated secret waits in the session for its page.
+const newOwnedTokenMaxAge = 5 * time.Minute
+
+// rememberNewOwnedToken keeps the secret of a new or rotated token in the session, encrypted, and redirects to the
+// page, which shows it once (popNewOwnedToken): the answer to the POST has no secret to repeat on a reload.
 func rememberNewOwnedToken(ctx *context.Context, level OwnedTokenLevel, t *auth_model.AccessToken, rotated bool) {
-	if err := ctx.Session.Set(newOwnedTokenSessionKey, fmt.Sprintf("%d:%t:%s", t.ID, rotated, t.Token)); err != nil {
+	value, err := secret.EncryptSecret(setting.SecretKey, fmt.Sprintf("%d:%t:%d:%s", t.ID, rotated, time.Now().Unix(), t.Token))
+	if err == nil {
+		err = ctx.Session.Set(newOwnedTokenKey(t.OwnerType, t.OwnerID, t.GroupID), value)
+	}
+	if err != nil {
 		ctx.ServerError("Session.Set", err)
 		return
 	}
 	ctx.Redirect(level.Link+"#access-tokens", http.StatusSeeOther)
 }
 
-// popNewOwnedToken puts the token that rememberNewOwnedToken stored, if it is one of level's, into the page data and
-// forgets it. It returns false when it answered with an error.
+// popNewOwnedToken puts the token that rememberNewOwnedToken stored for level, if it is still fresh and its secret
+// still the token's, into the page data and forgets it. It returns false when it answered with an error.
 func popNewOwnedToken(ctx *context.Context, level OwnedTokenLevel) bool {
 	if ctx.Session == nil { // unit-test contexts have none
 		return true
 	}
-	v, ok := ctx.Session.Get(newOwnedTokenSessionKey).(string)
+	key := newOwnedTokenKey(level.Opts.OwnerType, level.Opts.OwnerID, level.Opts.GroupID)
+	v, ok := ctx.Session.Get(key).(string)
 	if !ok {
 		return true
 	}
-	if err := ctx.Session.Delete(newOwnedTokenSessionKey); err != nil {
+	if err := ctx.Session.Delete(key); err != nil {
 		ctx.ServerError("Session.Delete", err)
 		return false
 	}
-	idStr, rest, _ := strings.Cut(v, ":")
-	rotated, secret, _ := strings.Cut(rest, ":")
+	plain, err := secret.DecryptSecret(setting.SecretKey, v)
+	if err != nil {
+		return true
+	}
+	idStr, rest, _ := strings.Cut(plain, ":")
+	rotated, rest, _ := strings.Cut(rest, ":")
+	createdStr, secretValue, _ := strings.Cut(rest, ":")
 	id, _ := strconv.ParseInt(idStr, 10, 64)
+	created, _ := strconv.ParseInt(createdStr, 10, 64)
+	if secretValue == "" || time.Since(time.Unix(created, 0)) > newOwnedTokenMaxAge {
+		return true
+	}
 	t := &auth_model.AccessToken{}
 	if has, err := db.GetEngine(ctx).Where(level.Opts.ToConds()).And("id = ?", id).Get(t); err != nil {
 		ctx.ServerError("GetOwnedAccessToken", err)
 		return false
-	} else if !has || secret == "" { // another owner's page, or the token is gone
+	} else if !has || auth_model.HashToken(secretValue, t.TokenSalt) != t.TokenHash { // the token is gone or was rotated since
 		return true
 	}
-	t.Token = secret
+	t.Token = secretValue
 	ctx.Data["NewOwnedTokenRotated"] = rotated == "true"
+	ctx.Resp.Header().Set("Cache-Control", "no-store")
 	return showNewOwnedToken(ctx, t) != nil
 }
 

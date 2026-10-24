@@ -104,3 +104,20 @@ func TestSendCredentialExpiryNotices(t *testing.T) {
 	token("quiet", timeutil.TimeStampNow().AddDuration(time.Hour), &auth_model.AccessToken{UID: 2})
 	assert.Empty(t, send(t))
 }
+
+// The day count of the subject is the calendar days to the date the body names: just after midnight, 36 hours ahead
+// is tomorrow, not in two days.
+func TestCredentialExpiryNoticeCountsCalendarDays(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	timeutil.MockSet(time.Date(2026, 10, 1, 0, 30, 0, 0, time.UTC))
+	defer timeutil.MockUnset()
+	var messages []*Message
+	defer MockMailSettings(func(msgs ...*Message) { messages = append(messages, msgs...) })()
+
+	now := timeutil.TimeStampNow()
+	require.NoError(t, db.Insert(t.Context(), &auth_model.AccessToken{UID: 2, Name: "overnight", TokenHash: "overnight-hash", ExpiresUnix: now.AddDuration(36 * time.Hour)}))
+	require.NoError(t, SendCredentialExpiryNotices(t.Context()))
+	require.Len(t, messages, 1)
+	assert.Equal(t, "Access token overnight expires in 1 day", messages[0].Subject)
+	assert.Contains(t, messages[0].Body, "expires on 2026-10-02.")
+}

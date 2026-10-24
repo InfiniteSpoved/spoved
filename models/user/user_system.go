@@ -197,8 +197,14 @@ func GetAccessTokenBotNames(ctx context.Context, ids []int64) ([]string, error) 
 		tokenIDs = append(tokenIDs, accessTokenBotIDBase-id)
 	}
 	var names []string
-	err := db.GetEngine(ctx).Table("access_token").In("id", tokenIDs).Asc("id").Cols("name").Find(&names)
-	return names, err
+	for chunk := range slices.Chunk(tokenIDs, db.DefaultMaxInSize) {
+		var part []string
+		if err := db.GetEngine(ctx).Table("access_token").In("id", chunk).And("owner_type <> ?", auth.AccessTokenOwnerUser).Asc("id").Cols("name").Find(&part); err != nil {
+			return nil, err
+		}
+		names = append(names, part...)
+	}
+	return names, nil
 }
 
 // IsAccessTokenBot reports whether the user is the identity of an organization, project or repository token.

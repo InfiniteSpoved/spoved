@@ -17,6 +17,9 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/optional"
+	"forgejo.org/modules/timeutil"
+	"forgejo.org/services/authz"
 	"forgejo.org/tests"
 	"forgejo.org/tests/forgery"
 
@@ -183,6 +186,34 @@ func TestOwnedAccessTokenWeb(t *testing.T) {
 		unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: tok.ID})
 		session.MakeRequest(t, NewRequestWithValues(t, "POST", link+"/tokens/delete", map[string]string{"id": fmt.Sprint(tok.ID)}), http.StatusOK)
 		assert.NotZero(t, unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: tok.ID}).RevokedUnix)
+	})
+
+	t.Run("the secret is shown once, on the page of its own owner", func(t *testing.T) {
+		link := "/user2/repo1/settings/keys"
+		n := name()
+		resp := session.MakeRequest(t, NewRequestWithValues(t, "POST", link+"/tokens/new", map[string]string{"token_name": n, "token_permission": "read", "token_scopes": "read:repository"}), http.StatusSeeOther)
+		assert.NotContains(t, resp.Body.String(), "new-access-token-value")
+
+		// another owner's page doesn't consume it and shows nothing
+		for _, other := range []string{"/user2/repo2/settings/keys", "/org/org3/settings/keys"} {
+			page := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", other), http.StatusOK).Body)
+			assert.Zero(t, page.Find("#new-access-token-value").Length(), other)
+		}
+		resp = session.MakeRequest(t, NewRequest(t, "GET", link), http.StatusOK)
+		assert.Equal(t, "no-store", resp.Header().Get("Cache-Control"))
+		value := strings.TrimSpace(NewHTMLParser(t, resp.Body).Find("#new-access-token-value").Text())
+		require.NotEmpty(t, value)
+		assert.Equal(t, http.StatusOK, use(t, "/api/v1/repos/user2/repo1", value))
+		assert.NotEqual(t, "no-store", session.MakeRequest(t, NewRequest(t, "GET", link), http.StatusOK).Header().Get("Cache-Control"), "shown once")
+
+		// a rotation between the POST and the page leaves nothing to show
+		n = name()
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", link+"/tokens/new", map[string]string{"token_name": n, "token_permission": "read", "token_scopes": "read:repository"}), http.StatusSeeOther)
+		tok := unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{Name: n, OwnerType: auth_model.AccessTokenOwnerRepo, OwnerID: 1})
+		_, err := authz.RotateOwnedAccessToken(db.DefaultContext, auth_model.FindOwnedAccessTokensOptions{OwnerType: auth_model.AccessTokenOwnerRepo, OwnerID: 1}, tok.ID, tok.TokenHash, optional.None[timeutil.TimeStamp](), 2)
+		require.NoError(t, err)
+		page := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", link), http.StatusOK).Body)
+		assert.Zero(t, page.Find("#new-access-token-value").Length())
 	})
 
 	t.Run("name filter", func(t *testing.T) {

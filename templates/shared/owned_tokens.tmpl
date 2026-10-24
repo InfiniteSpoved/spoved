@@ -3,9 +3,7 @@
 <h4 class="ui top attached header tw-mt-4 tw-flex tw-flex-wrap tw-items-center tw-justify-between tw-gap-2" id="access-tokens">
 	{{ctx.Locale.Tr "owned_token.title"}}
 	{{if not $readOnly}}
-	<div class="ui right">
 		<button class="ui primary tiny show-panel toggle button" data-panel="#add-access-token-panel">{{ctx.Locale.Tr "owned_token.add"}}</button>
-	</div>
 	{{end}}
 </h4>
 <div class="ui attached segment">
@@ -110,7 +108,7 @@
 				{{$t := .Token}}
 				<div class="flex-item">
 					<div class="flex-item-leading">
-						<span class="text {{if $t.HasRecentActivity}}green{{end}}" {{if $t.HasRecentActivity}}data-tooltip-content="{{ctx.Locale.Tr "settings.token_state_desc"}}"{{end}}>{{svg "fontawesome-send" 32}}</span>
+						<span class="text {{if $t.HasRecentActivity}}green{{end}}" {{if $t.HasRecentActivity}}role="img" data-tooltip-content="{{ctx.Locale.Tr "settings.token_state_desc"}}"{{end}}>{{svg "fontawesome-send" 32}}</span>
 					</div>
 					<div class="flex-item-main">
 						<div class="flex-item-title">

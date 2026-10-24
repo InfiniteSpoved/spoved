@@ -105,9 +105,11 @@ type AccessReportLine struct {
 	// person, bot, key, token, team, anyone, signed_in, org_members or instance_roles
 	Type string `json:"type"`
 	// user, deploy key, access token or team name
-	Name       string `json:"name,omitempty"`
-	FullName   string `json:"full_name,omitempty"`
-	Repository string `json:"repository"`
+	Name     string `json:"name,omitempty"`
+	FullName string `json:"full_name,omitempty"`
+	// the API scopes of an access token, which can be fewer than the units its permission lists
+	Scopes     []string `json:"scopes,omitempty"`
+	Repository string   `json:"repository"`
 	// unit, e.g. repo.code, or * for all units
 	Unit string `json:"unit"`
 	// effective access to the unit

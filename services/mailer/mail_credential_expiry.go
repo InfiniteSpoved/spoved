@@ -86,7 +86,11 @@ func SendCredentialExpiryNotices(ctx context.Context) error {
 		}
 		r, err := c.recipients(ctx)
 		if err != nil {
-			log.Error("credential expiry notice: recipients of %s %d: %v", c.kind, c.id, err)
+			// give the claim back, so the next run tries again
+			log.Warn("credential expiry notice: recipients of %s %d: %v", c.kind, c.id, err)
+			if err := auth_model.ReleaseCredentialExpiryNotice(ctx, c.kind, c.id, c.expires, stage); err != nil {
+				log.Error("credential expiry notice: release the claim of %s %d: %v", c.kind, c.id, err)
+			}
 			continue
 		}
 		if len(r.users) == 0 {
@@ -297,7 +301,12 @@ func sendCredentialExpiryMail(c *expiringCredential, r *expiryRecipients, u *use
 	if stage == auth_model.ExpiryNoticeToday {
 		subject = locale.TrString("mail.credential_expiry.subject_today", kind, c.name)
 	} else {
-		days := int((time.Duration(c.expires-now)*time.Second + 24*time.Hour - 1) / (24 * time.Hour))
+		// whole calendar days, as the date in the body reads
+		day := func(t timeutil.TimeStamp) time.Time {
+			y, m, d := t.AsTimeInLocation(setting.DefaultUILocation).Date()
+			return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+		}
+		days := int(day(c.expires).Sub(day(now)) / (24 * time.Hour))
 		// the plural phrase escapes its arguments for HTML; its only argument is the number
 		subject = locale.TrString("mail.credential_expiry.subject_soon", kind, c.name, html.UnescapeString(string(locale.TrPluralString(days, "mail.credential_expiry.days", days))))
 	}

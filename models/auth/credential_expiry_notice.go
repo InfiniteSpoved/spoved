@@ -48,6 +48,12 @@ func ClaimCredentialExpiryNotice(ctx context.Context, kind string, credentialID 
 	return true, nil
 }
 
+// ReleaseCredentialExpiryNotice takes a claim back, so the next run sends the notice.
+func ReleaseCredentialExpiryNotice(ctx context.Context, kind string, credentialID int64, expires timeutil.TimeStamp, stage int) error {
+	_, err := db.GetEngine(ctx).Where("kind = ? AND credential_id = ? AND expires_unix = ? AND stage = ?", kind, credentialID, expires, stage).Delete(&CredentialExpiryNotice{})
+	return err
+}
+
 // DeleteOldCredentialExpiryNotices removes the notices of expiry dates before the given time.
 func DeleteOldCredentialExpiryNotices(ctx context.Context, before timeutil.TimeStamp) error {
 	_, err := db.GetEngine(ctx).Where("expires_unix < ?", before).Delete(&CredentialExpiryNotice{})

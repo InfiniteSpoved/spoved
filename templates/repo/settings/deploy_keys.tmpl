@@ -111,7 +111,7 @@
 									<span class="ui tiny basic label">{{if eq .Mode 1}}{{ctx.Locale.Tr "owned_token.permission.read_short"}}{{else if eq .Mode 2}}{{ctx.Locale.Tr "owned_token.permission.write_short"}}{{else}}{{ctx.Locale.Tr "owned_token.permission.admin_short"}}{{end}}</span>
 									{{if .IsExpired}}<span class="ui tiny red label">{{ctx.Locale.Tr "owned_token.expired"}}</span>{{end}}
 								</div>
-								<div class="flex-item-body">{{if .GroupID}}{{ctx.Locale.Tr "owned_token.covering_project"}}{{if $.CanManageOrgDeployKeys}} <a href="{{$.Repository.GroupLink}}/-/settings/keys#access-tokens">{{ctx.Locale.Tr "owned_token.covering_manage_project"}}</a>{{end}}{{else}}{{ctx.Locale.Tr "owned_token.covering_org"}}{{end}}</div>
+								<div class="flex-item-body">{{if .GroupID}}{{ctx.Locale.Tr "owned_token.covering_project"}}{{if $.CanManageOrgDeployKeys}} · <a href="{{$.Repository.GroupLink}}/-/settings/keys#access-tokens">{{ctx.Locale.Tr "owned_token.covering_manage_project"}}</a>{{end}}{{else}}{{ctx.Locale.Tr "owned_token.covering_org"}}{{end}}</div>
 								<div class="flex-item-body">{{ctx.Locale.Tr "owned_token.scopes"}}: {{StringUtils.Join .Scope.OrderedScopes ", "}}{{template "shared/expiry_label" .}}</div>
 							</div>
 						</div>

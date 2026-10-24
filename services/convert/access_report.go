@@ -96,7 +96,7 @@ func ToAccessReportLines(ctx context.Context, rows []*accessreport.Row, doer *us
 		case ar.DeployKey != nil:
 			base.Name = ar.DeployKey.Name
 		case ar.AccessToken != nil:
-			base.Name = ar.AccessToken.Name
+			base.Name, base.Scopes = ar.AccessToken.Name, ar.AccessToken.Scopes
 		case ar.Team != nil:
 			base.Name = ar.Team.Name
 		}

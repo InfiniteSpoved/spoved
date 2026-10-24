@@ -86,6 +86,19 @@ func TestOwnedAccessTokenRevokeWhenLocked(t *testing.T) {
 		}
 	})
 
+	t.Run("self-rotate when the owner is gone", func(t *testing.T) {
+		tok := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, 3, 0, perm_model.AccessModeRead, "read:repository")
+		_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE access_token SET self_rotate = ? WHERE id = ?", true, tok.ID)
+		require.NoError(t, err)
+		_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE `user` SET id = id + 1000 WHERE id = 3")
+		require.NoError(t, err)
+		defer func() {
+			_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE `user` SET id = id - 1000 WHERE id = 1003")
+			require.NoError(t, err)
+		}()
+		MakeRequest(t, NewRequest(t, "POST", "/api/v1/tokens/self/rotate").AddTokenAuth(tok.Token), http.StatusNotFound)
+	})
+
 	t.Run("read-only maintenance", func(t *testing.T) {
 		defer setMaintenance(t, setting.MaintenanceReadOnly, time.Time{})()
 

@@ -324,14 +324,20 @@ func RotateSelf(ctx *context.APIContext) {
 	ownerID := t.OwnerID
 	if t.OwnerType == auth_model.AccessTokenOwnerRepo {
 		repo, err := repo_model.GetRepositoryByID(ctx, t.OwnerID)
-		if err != nil {
+		if repo_model.IsErrRepoNotExist(err) {
+			ctx.NotFound()
+			return
+		} else if err != nil {
 			ctx.InternalServerError(err)
 			return
 		}
 		ownerID = repo.OwnerID
 	}
 	owner, err := user_model.GetUserByID(ctx, ownerID)
-	if err != nil {
+	if user_model.IsErrUserNotExist(err) {
+		ctx.NotFound()
+		return
+	} else if err != nil {
 		ctx.InternalServerError(err)
 		return
 	}

@@ -29558,6 +29558,14 @@
           "type": "string",
           "x-go-name": "Repository"
         },
+        "scopes": {
+          "description": "the API scopes of an access token, which can be fewer than the units its permission lists",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Scopes"
+        },
         "suspended": {
           "description": "the user can't sign in, or isn't activated",
           "type": "boolean",
