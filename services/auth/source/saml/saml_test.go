@@ -121,6 +121,11 @@ type responseOptions struct {
 	signer         *keyPair
 	encryptFor     *x509.Certificate
 	mutateResponse func(*etree.Element)
+
+	nameIDFormat   string            // persistent when empty
+	noConfirmation bool              // leave out the bearer SubjectConfirmation
+	noAudience     bool              // leave out the AudienceRestriction
+	friendlyNames  map[string]string // attribute name → FriendlyName
 }
 
 func (f *fixture) defaults() responseOptions {
@@ -152,11 +157,15 @@ func (f *fixture) response(t *testing.T, o responseOptions) string {
 	now := time.Now()
 	var attrs []saml.Attribute
 	for name, values := range o.attrs {
-		attr := saml.Attribute{Name: name, NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic"}
+		attr := saml.Attribute{Name: name, FriendlyName: o.friendlyNames[name], NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic"}
 		for _, v := range values {
 			attr.Values = append(attr.Values, saml.AttributeValue{Type: "xs:string", Value: v})
 		}
 		attrs = append(attrs, attr)
+	}
+	format := o.nameIDFormat
+	if format == "" {
+		format = string(saml.PersistentNameIDFormat)
 	}
 	a := &saml.Assertion{
 		ID:           newID(),
@@ -164,7 +173,7 @@ func (f *fixture) response(t *testing.T, o responseOptions) string {
 		Version:      "2.0",
 		Issuer:       saml.Issuer{Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity", Value: o.issuer},
 		Subject: &saml.Subject{
-			NameID: &saml.NameID{Format: string(saml.PersistentNameIDFormat), Value: o.nameID},
+			NameID: &saml.NameID{Format: format, Value: o.nameID},
 			SubjectConfirmations: []saml.SubjectConfirmation{{
 				Method: "urn:oasis:names:tc:SAML:2.0:cm:bearer",
 				SubjectConfirmationData: &saml.SubjectConfirmationData{
@@ -179,9 +188,15 @@ func (f *fixture) response(t *testing.T, o responseOptions) string {
 			NotOnOrAfter:         o.notOnOrAfter,
 			AudienceRestrictions: []saml.AudienceRestriction{{Audience: saml.Audience{Value: o.audience}}},
 		},
-		AuthnStatements:     []saml.AuthnStatement{{AuthnInstant: now, SessionIndex: "session-1"}},
-		AttributeStatements: []saml.AttributeStatement{{Attributes: attrs}},
+		AuthnStatements: []saml.AuthnStatement{{AuthnInstant: now, SessionIndex: "session-1"}},
 	}
+	if o.noConfirmation {
+		a.Subject.SubjectConfirmations = nil
+	}
+	if o.noAudience {
+		a.Conditions.AudienceRestrictions = nil
+	}
+	a.AttributeStatements = []saml.AttributeStatement{{Attributes: attrs}}
 	assertionEl := a.Element()
 	if o.signAssertion {
 		signed, err := o.signer.signingContext().SignEnveloped(assertionEl)
@@ -259,6 +274,15 @@ func TestParseResponse(t *testing.T) {
 		"wrong destination":     func(o *responseOptions) { o.destination = "https://evil.example.com/acs" },
 		"wrong recipient":       func(o *responseOptions) { o.recipient = "https://evil.example.com/acs" },
 		"other request":         func(o *responseOptions) { o.inResponseTo = "id-other" },
+		"unsolicited":           func(o *responseOptions) { o.inResponseTo = "" },
+		"no audience":           func(o *responseOptions) { o.noAudience = true },
+		"no subject confirmation": func(o *responseOptions) {
+			o.noConfirmation = true
+		},
+		"transient NameID": func(o *responseOptions) { o.nameIDFormat = string(saml.TransientNameIDFormat) },
+		"NameID of another format": func(o *responseOptions) {
+			o.nameIDFormat = string(saml.EmailAddressNameIDFormat)
+		},
 		"tampered after signing": func(o *responseOptions) {
 			o.mutateResponse = func(el *etree.Element) {
 				el.FindElement("./Assertion/Subject/NameID").SetText("admin")
@@ -300,6 +324,40 @@ func TestParseResponse(t *testing.T) {
 		defer func() { f.source.AllowIDPInitiated = false }()
 		_, err = f.source.ParseResponse(f.serviceProvider(t), resp, "")
 		require.NoError(t, err)
+
+		// a browser that started a sign-in takes only the answer to its own request, also when IdP-initiated
+		// sign-in is on
+		for _, inResponseTo := range []string{"", "id-other"} {
+			o.inResponseTo = inResponseTo
+			_, err = f.source.ParseResponse(f.serviceProvider(t), f.response(t, o), "id-request")
+			require.ErrorAs(t, err, &ErrInvalidResponse{}, inResponseTo)
+		}
+	})
+
+	t.Run("attribute with the same name and friendly name", func(t *testing.T) {
+		f.source.UserIDAttribute = "objectGUID"
+		defer func() { f.source.UserIDAttribute = "" }()
+		o := f.defaults()
+		o.attrs["objectGUID"] = []string{"guid-1"}
+		o.attrs["urn:oid:2.5.4.42"] = []string{"Alice"}
+		o.friendlyNames = map[string]string{"objectGUID": "objectGUID", "urn:oid:2.5.4.42": "uid"}
+		a, err := f.source.ParseResponse(sp, f.response(t, o), "id-request")
+		require.NoError(t, err)
+		assert.Equal(t, "guid-1", a.User.UserID)
+		// a friendly name never adds to an attribute of that name
+		assert.Equal(t, []string{"alice"}, a.User.RawData["uid"])
+		assert.Equal(t, []string{"Alice"}, a.User.RawData["urn:oid:2.5.4.42"])
+	})
+
+	t.Run("transient NameID with a user ID attribute", func(t *testing.T) {
+		f.source.UserIDAttribute = "objectGUID"
+		defer func() { f.source.UserIDAttribute = "" }()
+		o := f.defaults()
+		o.nameIDFormat = string(saml.TransientNameIDFormat)
+		o.attrs["objectGUID"] = []string{"guid-1"}
+		a, err := f.source.ParseResponse(sp, f.response(t, o), "id-request")
+		require.NoError(t, err)
+		assert.Equal(t, "guid-1", a.User.UserID)
 	})
 
 	t.Run("user ID attribute", func(t *testing.T) {
@@ -413,8 +471,10 @@ func TestLogout(t *testing.T) {
 				Use: "signing", KeyInfo: saml.KeyInfo{X509Data: saml.X509Data{X509Certificates: []saml.X509Certificate{{Data: base64.StdEncoding.EncodeToString(f.sp.cert.Raw)}}}},
 			}}}},
 		}}}}
-		require.NoError(t, verifyRedirectSignature(idpSide, parsed.RawQuery, "SAMLRequest"))
-		require.Error(t, verifyRedirectSignature(idpSide, strings.Replace(parsed.RawQuery, "SAMLRequest=", "SAMLRequest=A", 1), "SAMLRequest"))
+		_, _, err = verifyRedirectSignature(idpSide, parsed.RawQuery, "SAMLRequest")
+		require.NoError(t, err)
+		_, _, err = verifyRedirectSignature(idpSide, strings.Replace(parsed.RawQuery, "SAMLRequest=", "SAMLRequest=A", 1), "SAMLRequest")
+		require.Error(t, err)
 	})
 
 	// idpLogoutRequest builds a logout request signed by the IdP for the redirect binding.
@@ -452,6 +512,21 @@ func TestLogout(t *testing.T) {
 	require.ErrorContains(t, err, "is for")
 	_, _, err = ParseLogoutRequest(sp, idpLogoutRequest(t, f.idp, sloURL, true)+"&SigAlg=x")
 	require.ErrorContains(t, err, "duplicate")
+
+	// a parameter name spelled with escapes is not covered by the signature, so it is refused
+	forged := saml.LogoutRequest{
+		ID: newID(), Version: "2.0", IssueInstant: time.Now(), Destination: sloURL,
+		Issuer: &saml.Issuer{Value: idpEntityID}, NameID: &saml.NameID{Value: "victim"},
+	}
+	forgedURL, err := redirectURL(&saml.ServiceProvider{}, sloURL, "SAMLRequest", forged.Element(), "")
+	require.NoError(t, err)
+	parsedForged, err := url.Parse(forgedURL)
+	require.NoError(t, err)
+	forgedMessage := url.QueryEscape(parsedForged.Query().Get("SAMLRequest"))
+	for _, prefix := range []string{"SAML%52equest=" + forgedMessage, "Relay%53tate=https%3A%2F%2Fevil.example.com%2F"} {
+		_, _, err = ParseLogoutRequest(sp, prefix+"&"+idpLogoutRequest(t, f.idp, sloURL, true))
+		require.ErrorContains(t, err, "encoded", prefix)
+	}
 
 	u, err := LogoutResponseURL(sp, req.ID, relay)
 	require.NoError(t, err)

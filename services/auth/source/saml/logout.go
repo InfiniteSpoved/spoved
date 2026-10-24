@@ -132,17 +132,18 @@ func LogoutResponseURL(sp *saml.ServiceProvider, requestID, relayState string) (
 	return redirectURL(sp, location, "SAMLResponse", resp.Element(), relayState)
 }
 
-// rawQueryParam returns the raw (still URL-encoded) value of a parameter that must appear at most once.
+// rawQueryParam returns the raw (still URL-encoded) value of a parameter that must appear at most once, with its
+// name written plainly: the signed octets are the raw parameters, so no other spelling may name it.
 func rawQueryParam(rawQuery, name string) (string, bool, error) {
 	var value string
 	found := false
 	for part := range strings.SplitSeq(rawQuery, "&") {
 		k, v, _ := strings.Cut(part, "=")
-		if k != name {
+		if key, err := url.QueryUnescape(k); err != nil || key != name {
 			continue
 		}
-		if found {
-			return "", false, fmt.Errorf("duplicate query parameter %s", name)
+		if found || k != name {
+			return "", false, fmt.Errorf("duplicate or encoded query parameter %s", name)
 		}
 		value, found = v, true
 	}
@@ -175,42 +176,49 @@ func idpSigningCerts(sp *saml.ServiceProvider) []*x509.Certificate {
 }
 
 // verifyRedirectSignature checks the HTTP-Redirect binding signature of a message (SAML bindings §3.4.4.1): the
-// signed octets are the parameters exactly as received, in the order SAMLRequest, RelayState, SigAlg.
-func verifyRedirectSignature(sp *saml.ServiceProvider, rawQuery, param string) error {
+// signed octets are the parameters exactly as received, in the order SAMLRequest, RelayState, SigAlg. It returns the
+// decoded message and RelayState taken from those same signed parameters.
+func verifyRedirectSignature(sp *saml.ServiceProvider, rawQuery, param string) (message, relayState string, err error) {
 	rawMessage, _, err := rawQueryParam(rawQuery, param)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	rawRelay, hasRelay, err := rawQueryParam(rawQuery, "RelayState")
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	rawSigAlg, hasSigAlg, err := rawQueryParam(rawQuery, "SigAlg")
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	rawSig, hasSig, err := rawQueryParam(rawQuery, "Signature")
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	if !hasSigAlg || !hasSig {
-		return errors.New("the message is not signed")
+		return "", "", errors.New("the message is not signed")
+	}
+	if message, err = url.QueryUnescape(rawMessage); err != nil {
+		return "", "", err
+	}
+	if relayState, err = url.QueryUnescape(rawRelay); err != nil {
+		return "", "", err
 	}
 	sigAlg, err := url.QueryUnescape(rawSigAlg)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	hash, ok := sigAlgs[sigAlg]
 	if !ok {
-		return fmt.Errorf("unsupported signature algorithm %q", sigAlg)
+		return "", "", fmt.Errorf("unsupported signature algorithm %q", sigAlg)
 	}
 	sigB64, err := url.QueryUnescape(rawSig)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	sig, err := base64.StdEncoding.DecodeString(sigB64)
 	if err != nil {
-		return errors.New("the signature is not base64")
+		return "", "", errors.New("the signature is not base64")
 	}
 
 	signed := param + "=" + rawMessage
@@ -226,15 +234,15 @@ func verifyRedirectSignature(sp *saml.ServiceProvider, rawQuery, param string) e
 		switch pub := cert.PublicKey.(type) {
 		case *rsa.PublicKey:
 			if strings.Contains(sigAlg, "rsa-") && rsa.VerifyPKCS1v15(pub, hash, digest, sig) == nil {
-				return nil
+				return message, relayState, nil
 			}
 		case *ecdsa.PublicKey:
 			if strings.Contains(sigAlg, "ecdsa-") && verifyECDSA(pub, digest, sig) {
-				return nil
+				return message, relayState, nil
 			}
 		}
 	}
-	return errors.New("the signature does not match an IdP signing certificate")
+	return "", "", errors.New("the signature does not match an IdP signing certificate")
 }
 
 // verifyECDSA accepts an ASN.1 signature or the r||s concatenation of XML signatures.
@@ -252,14 +260,11 @@ func verifyECDSA(pub *ecdsa.PublicKey, digest, sig []byte) bool {
 // ParseLogoutRequest verifies a logout request the IdP sent with the HTTP-Redirect binding. It must be signed by the
 // IdP, addressed to this SP's logout URL and current.
 func ParseLogoutRequest(sp *saml.ServiceProvider, rawQuery string) (*saml.LogoutRequest, string, error) {
-	if err := verifyRedirectSignature(sp, rawQuery, "SAMLRequest"); err != nil {
-		return nil, "", err
-	}
-	values, err := url.ParseQuery(rawQuery)
+	message, relayState, err := verifyRedirectSignature(sp, rawQuery, "SAMLRequest")
 	if err != nil {
 		return nil, "", err
 	}
-	deflated, err := base64.StdEncoding.DecodeString(values.Get("SAMLRequest"))
+	deflated, err := base64.StdEncoding.DecodeString(message)
 	if err != nil {
 		return nil, "", errors.New("the request is not base64")
 	}
@@ -293,5 +298,5 @@ func ParseLogoutRequest(sp *saml.ServiceProvider, rawQuery string) (*saml.Logout
 	case req.NameID == nil || req.NameID.Value == "":
 		return nil, "", errors.New("the logout request has no NameID")
 	}
-	return &req, values.Get("RelayState"), nil
+	return &req, relayState, nil
 }

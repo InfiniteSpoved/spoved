@@ -205,8 +205,9 @@ func SignIn(ctx *context.Context) {
 		return
 	}
 
-	// with a single way to sign in, go straight to it
-	if !setting.Service.EnableInternalSignIn && len(oauth2Providers)+len(samlSources) == 1 {
+	// with a single way to sign in, go straight to it, unless it just failed: that would loop
+	flash, _ := ctx.Data["Flash"].(*middleware.Flash)
+	if !setting.Service.EnableInternalSignIn && len(oauth2Providers)+len(samlSources) == 1 && (flash == nil || flash.ErrorMsg == "") {
 		if len(samlSources) == 1 {
 			ctx.Redirect(setting.AppSubURL + "/user/saml/" + url.PathEscape(samlSources[0].Name) + "/login")
 			return

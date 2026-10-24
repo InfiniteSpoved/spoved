@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -67,11 +68,15 @@ func (source *Source) ParseResponse(sp *saml.ServiceProvider, samlResponse, requ
 		}
 	}
 
+	// The library skips InResponseTo whenever IdP-initiated sign-in is allowed: a browser that started a sign-in
+	// only takes the answer to its own request.
+	bound := *sp
+	bound.AllowIDPInitiated = requestID == ""
 	var ids []string
 	if requestID != "" {
 		ids = []string{requestID}
 	}
-	a, err := sp.ParseXMLResponse(raw, ids, sp.AcsURL)
+	a, err := bound.ParseXMLResponse(raw, ids, sp.AcsURL)
 	if err != nil {
 		var ire *saml.InvalidResponseError
 		if errors.As(err, &ire) && ire.PrivateErr != nil {
@@ -115,8 +120,9 @@ func checkReplay(sourceID int64, a *saml.Assertion) error {
 	sum := sha256.Sum256([]byte(a.ID))
 	key := fmt.Sprintf("saml_assertion_%d_%s", sourceID, hex.EncodeToString(sum[:]))
 
+	// at least as long as the library accepts the assertion after it was issued
 	ttl := time.Until(a.Conditions.NotOnOrAfter.Add(saml.MaxClockSkew))
-	ttl = min(max(ttl, time.Minute), 24*time.Hour)
+	ttl = min(max(ttl, time.Until(a.IssueInstant.Add(saml.MaxIssueDelay+2*saml.MaxClockSkew))), 24*time.Hour)
 
 	replayMu.Lock()
 	defer replayMu.Unlock()
@@ -129,9 +135,10 @@ func checkReplay(sourceID int64, a *saml.Assertion) error {
 	return nil
 }
 
-// attributes returns the values of each attribute, by name and by friendly name.
+// attributes returns the values of each attribute by name, and by friendly name where no attribute has that name.
 func attributes(a *saml.Assertion) map[string][]string {
 	attrs := map[string][]string{}
+	friendly := map[string][]string{}
 	for _, st := range a.AttributeStatements {
 		for _, attr := range st.Attributes {
 			var values []string
@@ -142,11 +149,17 @@ func attributes(a *saml.Assertion) map[string][]string {
 					values = append(values, v.Value)
 				}
 			}
-			for _, name := range []string{attr.Name, attr.FriendlyName} {
-				if name != "" {
-					attrs[name] = append(attrs[name], values...)
-				}
+			if attr.Name != "" {
+				attrs[attr.Name] = append(attrs[attr.Name], values...)
 			}
+			if attr.FriendlyName != "" {
+				friendly[attr.FriendlyName] = append(friendly[attr.FriendlyName], values...)
+			}
+		}
+	}
+	for name, values := range friendly {
+		if _, ok := attrs[name]; !ok {
+			attrs[name] = values
 		}
 	}
 	return attrs
@@ -166,8 +179,21 @@ func (source *Source) toAssertion(a *saml.Assertion) (*Assertion, error) {
 	if a.Subject == nil || a.Subject.NameID == nil || a.Subject.NameID.Value == "" {
 		return nil, invalid("the assertion has no NameID")
 	}
+	if !slices.ContainsFunc(a.Subject.SubjectConfirmations, func(c saml.SubjectConfirmation) bool {
+		return c.Method == "urn:oasis:names:tc:SAML:2.0:cm:bearer" && c.SubjectConfirmationData != nil
+	}) {
+		// without one the library checks neither the recipient nor the request the assertion answers
+		return nil, invalid("the assertion has no bearer subject confirmation")
+	}
 	attrs := attributes(a)
 	nameID := a.Subject.NameID
+	if source.UserIDAttribute == "" {
+		// the NameID is the account: a transient one, or one of another kind than configured, isn't a stable ID
+		if nameID.Format == string(saml.TransientNameIDFormat) ||
+			nameID.Format != "" && source.NameIDFormat != string(saml.UnspecifiedNameIDFormat) && nameID.Format != source.NameIDFormat {
+			return nil, invalid("the NameID format %q can't identify the account (configured: %q)", nameID.Format, source.NameIDFormat)
+		}
+	}
 
 	userID := nameID.Value
 	if source.UserIDAttribute != "" {

@@ -4,10 +4,15 @@
 package integration
 
 import (
+	"bytes"
+	"compress/flate"
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/pem"
 	"encoding/xml"
 	"fmt"
@@ -29,6 +34,7 @@ import (
 	"forgejo.org/modules/test"
 	"forgejo.org/tests"
 
+	"github.com/beevik/etree"
 	"github.com/crewjam/saml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -199,6 +205,7 @@ func TestSAMLSignIn(t *testing.T) {
 	p := newSAMLTestIDP(t)
 	source := addSAMLSource(t, "corp", p, map[string]string{
 		"saml_group_team_map": `{"dev": {"org3": ["team1"]}}`,
+		"saml_admin_group":    "admins",
 	})
 	require.True(t, source.IsSAML())
 
@@ -224,6 +231,13 @@ func TestSAMLSignIn(t *testing.T) {
 		isMember, err := organization.IsTeamMember(t.Context(), 3, 2, u.ID)
 		require.NoError(t, err)
 		assert.True(t, isMember, "group dev maps to org3/team1")
+	})
+
+	t.Run("admin group makes a site admin", func(t *testing.T) {
+		session := emptyTestSession(t)
+		postACS(t, session, "corp", samlSignIn(t, session, "corp", p, samlSession("guid-erin", "erin", "admins")))
+		assert.True(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{LowerName: "erin"}).IsAdmin)
+		assert.False(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{LowerName: "alice"}).IsAdmin)
 	})
 
 	t.Run("a response to an older request is refused", func(t *testing.T) {
@@ -280,6 +294,20 @@ func TestSAMLSignIn(t *testing.T) {
 		assert.Equal(t, "user2", signedInAs(t, other))
 	})
 
+	t.Run("single sign-in option", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.Service.EnableInternalSignIn, false)()
+		session := emptyTestSession(t)
+		resp := session.MakeRequest(t, NewRequest(t, "GET", "/user/login"), http.StatusSeeOther)
+		assert.Equal(t, "/user/saml/corp/login", test.RedirectURL(resp))
+
+		// after a failed sign-in the page shows the error instead of sending the browser around again
+		samlStart(t, session, "corp")
+		resp = postACS(t, session, "corp", samlResponse)
+		assert.Equal(t, "/user/login", test.RedirectURL(resp))
+		resp = session.MakeRequest(t, NewRequest(t, "GET", "/user/login"), http.StatusOK)
+		assert.Contains(t, resp.Body.String(), "corp")
+	})
+
 	t.Run("unknown source is not found", func(t *testing.T) {
 		MakeRequest(t, NewRequest(t, "GET", "/user/saml/nope/login"), http.StatusNotFound)
 		MakeRequest(t, NewRequest(t, "GET", "/user/saml/nope/metadata"), http.StatusNotFound)
@@ -327,6 +355,87 @@ func TestSAMLIDPInitiated(t *testing.T) {
 		assert.Equal(t, "/user/login", test.RedirectURL(resp))
 		assert.Empty(t, signedInAs(t, session))
 		unittest.AssertNotExistsBean(t, &user_model.User{LowerName: "dave"})
+	})
+
+	t.Run("a planted response never links to a signed-in user", func(t *testing.T) {
+		attacker := emptyTestSession(t)
+		ownAnswer := samlSignIn(t, attacker, "open", p, samlSession("guid-mallory", "mallory"))
+		for _, planted := range []string{ownAnswer, p.unsolicited(samlSession("guid-mallory", "mallory"))} {
+			victim := loginUser(t, "user2")
+			samlStart(t, victim, "open") // the attacker opens the sign-in in the victim's browser first
+			resp := postACS(t, victim, "open", planted)
+			assert.Equal(t, "/user/login", test.RedirectURL(resp))
+			assert.Equal(t, "user2", signedInAs(t, victim))
+		}
+		linked, err := db.GetEngine(t.Context()).Exist(&user_model.ExternalLoginUser{ExternalID: "guid-mallory"})
+		require.NoError(t, err)
+		assert.False(t, linked)
+		unittest.AssertNotExistsBean(t, &user_model.User{LowerName: "mallory"})
+	})
+
+	t.Run("never switches a signed-in user to another account", func(t *testing.T) {
+		victim := loginUser(t, "user2")
+		resp := postACS(t, victim, "open", p.unsolicited(samlSession("guid-carol", "carol")))
+		assert.Equal(t, "/user/login", test.RedirectURL(resp))
+		assert.Equal(t, "user2", signedInAs(t, victim))
+	})
+}
+
+// logoutRequest returns the query of a logout request the IdP sends with the HTTP-Redirect binding.
+func (p *samlTestIDP) logoutRequest(name, nameID string, sign bool) string {
+	p.t.Helper()
+	req := saml.LogoutRequest{
+		ID:           "id-logout-" + nameID,
+		Version:      "2.0",
+		IssueInstant: time.Now(),
+		Destination:  setting.AppURL + "user/saml/" + name + "/slo",
+		Issuer:       &saml.Issuer{Value: p.idp.MetadataURL.String()},
+		NameID:       &saml.NameID{Value: nameID},
+	}
+	doc := etree.NewDocument()
+	doc.SetRoot(req.Element())
+	data, err := doc.WriteToBytes()
+	require.NoError(p.t, err)
+	var deflated bytes.Buffer
+	w, _ := flate.NewWriter(&deflated, flate.BestCompression)
+	_, _ = w.Write(data)
+	require.NoError(p.t, w.Close())
+	query := "SAMLRequest=" + url.QueryEscape(base64.StdEncoding.EncodeToString(deflated.Bytes())) +
+		"&SigAlg=" + url.QueryEscape("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256")
+	if sign {
+		digest := sha256.Sum256([]byte(query))
+		sig, err := rsa.SignPKCS1v15(rand.Reader, p.idp.Key.(*rsa.PrivateKey), crypto.SHA256, digest[:])
+		require.NoError(p.t, err)
+		query += "&Signature=" + url.QueryEscape(base64.StdEncoding.EncodeToString(sig))
+	}
+	return query
+}
+
+func TestSAMLSingleLogout(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer test.MockVariableValue(&setting.OAuth2Client.EnableAutoRegistration, true)()
+
+	p := newSAMLTestIDP(t)
+	addSAMLSource(t, "corp", p, nil)
+	session := emptyTestSession(t)
+	postACS(t, session, "corp", samlSignIn(t, session, "corp", p, samlSession("guid-alice", "alice")))
+	require.Equal(t, "alice", signedInAs(t, session))
+
+	t.Run("unsigned request is refused", func(t *testing.T) {
+		session.MakeRequest(t, NewRequest(t, "GET", "/user/saml/corp/slo?"+p.logoutRequest("corp", "guid-alice", false)), http.StatusBadRequest)
+		assert.Equal(t, "alice", signedInAs(t, session))
+	})
+
+	t.Run("another user's logout keeps the session", func(t *testing.T) {
+		resp := session.MakeRequest(t, NewRequest(t, "GET", "/user/saml/corp/slo?"+p.logoutRequest("corp", "guid-bob", true)), http.StatusSeeOther)
+		assert.True(t, strings.HasPrefix(test.RedirectURL(resp), "https://idp.example.com/slo?SAMLResponse="))
+		assert.Equal(t, "alice", signedInAs(t, session))
+	})
+
+	t.Run("the user's logout signs out", func(t *testing.T) {
+		resp := session.MakeRequest(t, NewRequest(t, "GET", "/user/saml/corp/slo?"+p.logoutRequest("corp", "guid-alice", true)), http.StatusSeeOther)
+		assert.True(t, strings.HasPrefix(test.RedirectURL(resp), "https://idp.example.com/slo?SAMLResponse="))
+		assert.Empty(t, signedInAs(t, session))
 	})
 }
 

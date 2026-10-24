@@ -215,13 +215,15 @@ func SAMLACS(ctx *context.Context) {
 	}
 
 	// A response this browser didn't ask for may have been planted by someone else: it can sign in an account that
-	// is already linked, but never link, register or prompt for an account.
-	if requestID == "" && u == nil {
+	// is already linked, but never link, register or prompt for an account, nor switch a signed-in user to another.
+	if requestID == "" && (u == nil || ctx.Doer != nil && ctx.Doer.ID != u.ID) {
+		auth_service.RecordSignInFailure(ctx, 0, "saml_unsolicited")
 		ctx.Flash.Error(ctx.Tr("auth.saml.idp_initiated_unknown", authSource.Name))
 		ctx.Redirect(setting.AppSubURL + "/user/login")
 		return
 	}
 
+	// remembered for single logout
 	if ctx.Doer == nil {
 		for k, v := range map[string]any{
 			"samlSourceID":     authSource.ID,
@@ -238,12 +240,33 @@ func SAMLACS(ctx *context.Context) {
 	signInExternalUser(ctx, authSource, u, gothUser)
 }
 
+// samlSessionIdentity returns the SAML source and NameID that signed in the current user, if any. A sign-in that was
+// left unfinished (link, 2FA) leaves them in the session, so they count only while the signed-in user belongs to
+// that source.
+func samlSessionIdentity(ctx *context.Context) (int64, string) {
+	sourceID, _ := ctx.Session.Get("samlSourceID").(int64)
+	nameID, _ := ctx.Session.Get("samlNameID").(string)
+	if ctx.Doer == nil || sourceID == 0 || nameID == "" {
+		return 0, ""
+	}
+	if ctx.Doer.LoginType == auth.SAML && ctx.Doer.LoginSource == sourceID {
+		return sourceID, nameID
+	}
+	linked, err := db.GetEngine(ctx).Exist(&user_model.ExternalLoginUser{LoginSourceID: sourceID, UserID: ctx.Doer.ID})
+	if err != nil {
+		log.Error("SAML single logout: %v", err)
+	}
+	if !linked {
+		return 0, ""
+	}
+	return sourceID, nameID
+}
+
 // samlLogoutURL returns where to send the browser after signing out: the IdP's single logout when the session was
 // started by a SAML source that has one, else "".
 func samlLogoutURL(ctx *context.Context) string {
-	sourceID, _ := ctx.Session.Get("samlSourceID").(int64)
-	nameID, _ := ctx.Session.Get("samlNameID").(string)
-	if sourceID == 0 || nameID == "" {
+	sourceID, nameID := samlSessionIdentity(ctx)
+	if sourceID == 0 {
 		return ""
 	}
 	format, _ := ctx.Session.Get("samlNameIDFormat").(string)
@@ -291,9 +314,7 @@ func SAMLSLO(ctx *context.Context) {
 			ctx.Error(http.StatusBadRequest, "invalid logout request")
 			return
 		}
-		sourceID, _ := ctx.Session.Get("samlSourceID").(int64)
-		nameID, _ := ctx.Session.Get("samlNameID").(string)
-		if sourceID == authSource.ID && nameID == req.NameID.Value {
+		if sourceID, nameID := samlSessionIdentity(ctx); sourceID == authSource.ID && nameID == req.NameID.Value {
 			if ctx.Doer != nil {
 				eventsource.GetManager().SendMessage(ctx.Doer.ID, &eventsource.Event{
 					Name: "logout",

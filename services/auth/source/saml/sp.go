@@ -21,7 +21,9 @@ import (
 	"sync"
 	"time"
 
+	"forgejo.org/modules/graceful"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/process"
 	"forgejo.org/modules/proxy"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
@@ -266,9 +268,14 @@ func isHTTPURL(s string) bool {
 type cachedMetadata struct {
 	key        string
 	fetched    time.Time
-	entity     *saml.EntityDescriptor
+	entity     *saml.EntityDescriptor // nil: the last fetch failed with err
+	err        error
 	refreshing bool
 }
+
+// metadataRetry is how long a failed fetch is remembered before the next one, so a down IdP isn't asked on every
+// request.
+const metadataRetry = time.Minute
 
 var (
 	metadataMu    sync.Mutex
@@ -339,7 +346,11 @@ func (source *Source) LoadIDPMetadata(ctx context.Context, updated timeutil.Time
 	key := fmt.Sprintf("%d|%s|%s", updated, source.IDPMetadataURL, source.IDPEntityID)
 	metadataMu.Lock()
 	c := metadataCache[id]
-	if c != nil && c.key == key {
+	if c != nil && c.key == key && c.entity == nil && time.Since(c.fetched) < metadataRetry {
+		metadataMu.Unlock()
+		return nil, c.err
+	}
+	if c != nil && c.key == key && c.entity != nil {
 		if time.Since(c.fetched) >= metadataRefresh && !c.refreshing {
 			c.refreshing = true
 			go source.refreshMetadata(c)
@@ -350,18 +361,16 @@ func (source *Source) LoadIDPMetadata(ctx context.Context, updated timeutil.Time
 	metadataMu.Unlock()
 
 	entity, err := FetchMetadata(ctx, source.IDPMetadataURL, source.IDPEntityID)
-	if err != nil {
-		return nil, err
-	}
 	metadataMu.Lock()
-	metadataCache[id] = &cachedMetadata{key: key, fetched: time.Now(), entity: entity}
+	metadataCache[id] = &cachedMetadata{key: key, fetched: time.Now(), entity: entity, err: err}
 	metadataMu.Unlock()
-	return entity, nil
+	return entity, err
 }
 
 func (source *Source) refreshMetadata(c *cachedMetadata) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx, _, finished := process.GetManager().AddTypedContextTimeout(graceful.GetManager().ShutdownContext(), 30*time.Second,
+		"SAML metadata refresh: "+source.authSource.Name, process.SystemProcessType, true)
+	defer finished()
 	entity, err := FetchMetadata(ctx, source.IDPMetadataURL, source.IDPEntityID)
 
 	metadataMu.Lock()
@@ -369,6 +378,7 @@ func (source *Source) refreshMetadata(c *cachedMetadata) {
 	c.refreshing = false
 	if err != nil {
 		log.Warn("SAML source %q: refreshing the IdP metadata failed, keeping the last copy: %v", source.authSource.Name, err)
+		c.fetched = time.Now().Add(metadataRetry - metadataRefresh)
 		return
 	}
 	c.entity, c.fetched = entity, time.Now()
@@ -401,6 +411,15 @@ func (source *Source) newServiceProvider(idp *saml.EntityDescriptor) (*saml.Serv
 		AuthnNameIDFormat: saml.NameIDFormat(source.NameIDFormat),
 		AllowIDPInitiated: source.AllowIDPInitiated,
 		LogoutBindings:    []string{saml.HTTPRedirectBinding},
+	}
+	// the library also accepts an assertion that names no audience
+	sp.ValidateAudienceRestriction = func(a *saml.Assertion) error {
+		for _, r := range a.Conditions.AudienceRestrictions {
+			if r.Audience.Value == sp.EntityID {
+				return nil
+			}
+		}
+		return errors.New("the assertion is not addressed to this service provider")
 	}
 	if source.ForceAuthn {
 		sp.ForceAuthn = &source.ForceAuthn

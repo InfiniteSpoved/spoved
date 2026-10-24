@@ -488,6 +488,9 @@ func EditAuthSourcePost(ctx *context.Context) {
 			samlConfig.SPPrivateKey = old.SPPrivateKey
 		}
 		config = samlConfig
+		shown := *samlConfig
+		shown.SPPrivateKey = "" // never rendered back into the form
+		ctx.Data["SAMLConfig"] = &shown
 		if !validateSAMLConfig(ctx, form, samlConfig, tplAuthEdit) {
 			return
 		}
