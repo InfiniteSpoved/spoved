@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"forgejo.org/models/auth"
@@ -263,7 +262,7 @@ func LinkAccountPostRegister(ctx *context.Context) {
 		}
 	}
 
-	authSource, err := auth.GetActiveOAuth2SourceByName(ctx, gothUser.Provider)
+	authSource, err := auth.GetActiveSSOSourceByName(ctx, gothUser.Provider)
 	if err != nil {
 		ctx.ServerError("CreateUser", err)
 		return
@@ -273,7 +272,7 @@ func LinkAccountPostRegister(ctx *context.Context) {
 		Name:        form.UserName,
 		Email:       form.Email,
 		Passwd:      form.Password,
-		LoginType:   auth.OAuth2,
+		LoginType:   authSource.Type,
 		LoginSource: authSource.ID,
 		LoginName:   gothUser.UserID,
 	}
@@ -293,5 +292,5 @@ func LinkAccountPostRegister(ctx *context.Context) {
 		return
 	}
 
-	handleSignIn(ctx, u, false, "oauth2:"+strconv.FormatInt(authSource.ID, 10)+"+register", "")
+	handleSignIn(ctx, u, false, signInMethod(authSource)+"+register", "")
 }

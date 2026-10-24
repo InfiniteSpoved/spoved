@@ -40,6 +40,7 @@ import (
 	auth_service "forgejo.org/services/auth"
 	source_service "forgejo.org/services/auth/source"
 	"forgejo.org/services/auth/source/oauth2"
+	"forgejo.org/services/auth/source/saml"
 	"forgejo.org/services/context"
 	"forgejo.org/services/externalaccount"
 	"forgejo.org/services/forms"
@@ -1134,11 +1135,16 @@ func SignInOAuthCallback(ctx *context.Context) {
 		return
 	}
 
+	signInExternalUser(ctx, authSource, u, gothUser)
+}
+
+// signInExternalUser signs in u, the user an OAuth2 or SAML source identified, or links, registers or asks for an
+// account when there is none.
+func signInExternalUser(ctx *context.Context, authSource *auth.Source, u *user_model.User, gothUser goth.User) {
 	if u == nil {
 		if ctx.Doer != nil {
 			// attach user to already logged in user
-			err = externalaccount.LinkAccountToUser(ctx, ctx.Doer, gothUser)
-			if err != nil {
+			if err := externalaccount.LinkAccountToUser(ctx, ctx.Doer, gothUser); err != nil {
 				ctx.ServerError("UserLinkAccount", err)
 				return
 			}
@@ -1146,13 +1152,13 @@ func SignInOAuthCallback(ctx *context.Context) {
 			ctx.Redirect(setting.AppSubURL + "/user/settings/security")
 			return
 		} else if !setting.Service.AllowOnlyInternalRegistration && setting.OAuth2Client.EnableAutoRegistration {
-			// create new user with details from oauth2 provider
+			// create new user with details from the provider
 			if gothUser.UserID == "" {
 				log.Error("OAuth2 Provider %s returned empty or missing field: UserID", authSource.Name)
 				if authSource.IsOAuth2() && authSource.Cfg.(*oauth2.Source).Provider == "openidConnect" {
 					log.Error("You may need to change the 'OPENID_CONNECT_SCOPES' setting to request all required fields")
 				}
-				err = fmt.Errorf("OAuth2 Provider %s returned empty or missing field: UserID", authSource.Name)
+				err := fmt.Errorf("OAuth2 Provider %s returned empty or missing field: UserID", authSource.Name)
 				ctx.ServerError("CreateUser", err)
 				return
 			}
@@ -1181,7 +1187,7 @@ func SignInOAuthCallback(ctx *context.Context) {
 				Name:        uname,
 				FullName:    gothUser.Name,
 				Email:       gothUser.Email,
-				LoginType:   auth.OAuth2,
+				LoginType:   authSource.Type,
 				LoginSource: authSource.ID,
 				LoginName:   gothUser.UserID,
 			}
@@ -1190,9 +1196,7 @@ func SignInOAuthCallback(ctx *context.Context) {
 				IsActive: optional.Some(!setting.OAuth2Client.RegisterEmailConfirm && !setting.Service.RegisterManualConfirm),
 			}
 
-			source := authSource.Cfg.(*oauth2.Source)
-
-			isAdmin, isRestricted := getUserAdminAndRestrictedFromGroupClaims(source, &gothUser)
+			isAdmin, isRestricted := getUserAdminAndRestrictedFromGroupClaims(claimSettings(authSource), &gothUser)
 			u.IsAdmin = isAdmin.ValueOrDefault(false)
 			u.IsRestricted = isRestricted.ValueOrDefault(setting.Service.DefaultUserIsRestricted)
 
@@ -1225,6 +1229,14 @@ func SignInOAuthCallback(ctx *context.Context) {
 	handleOAuth2SignIn(ctx, authSource, u, gothUser)
 }
 
+// claimSettings returns the claim and group settings of an OAuth2 or SAML source.
+func claimSettings(authSource *auth.Source) *oauth2.Source {
+	if source, ok := authSource.Cfg.(*saml.Source); ok {
+		return source.ClaimSettings()
+	}
+	return authSource.Cfg.(*oauth2.Source)
+}
+
 func claimValueToStringSet(claimValue any) container.Set[string] {
 	var groups []string
 
@@ -1243,7 +1255,7 @@ func claimValueToStringSet(claimValue any) container.Set[string] {
 }
 
 func syncGroupsToTeams(ctx *context.Context, authSource *auth.Source, gothUser *goth.User, u *user_model.User) error {
-	source := authSource.Cfg.(*oauth2.Source)
+	source := claimSettings(authSource)
 	syncCtx := audit_model.WithLoginSource(ctx, authSource.ID, authSource.Name)
 	if source.GroupTeamMap != "" || source.GroupTeamMapRemoval ||
 		source.DynGroupMaps != "" || source.DynGroupMapsRemoval {
@@ -1272,7 +1284,7 @@ func syncGroupsToTeams(ctx *context.Context, authSource *auth.Source, gothUser *
 }
 
 func syncGroupsToUserGroups(ctx *context.Context, authSource *auth.Source, gothUser *goth.User, u *user_model.User) error {
-	source := authSource.Cfg.(*oauth2.Source)
+	source := claimSettings(authSource)
 	if source.GroupUserGroupMap == "" {
 		return nil
 	}
@@ -1284,7 +1296,7 @@ func syncGroupsToUserGroups(ctx *context.Context, authSource *auth.Source, gothU
 }
 
 func syncGroupsToQuotaGroups(ctx *context.Context, authSource *auth.Source, gothUser *goth.User, u *user_model.User) error {
-	source := authSource.Cfg.(*oauth2.Source)
+	source := claimSettings(authSource)
 	if source.QuotaGroupMap != "" || source.QuotaGroupMapRemoval {
 		quotaGroupMapping, err := auth_module.UnmarshalQuotaGroupMapping(source.QuotaGroupMap)
 		if err != nil {
@@ -1390,7 +1402,7 @@ func updateSSHPubIfNeed(
 	fetchedUser *goth.User,
 	user *user_model.User,
 ) error {
-	oauth2Source := authSource.Cfg.(*oauth2.Source)
+	oauth2Source := claimSettings(authSource)
 
 	if oauth2Source.ProvidesSSHKeys() {
 		sshKeys, err := getSSHKeys(oauth2Source, fetchedUser)
@@ -1418,7 +1430,8 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 	}
 
 	needs2FA := false
-	if !source.Cfg.(*oauth2.Source).SkipLocalTwoFA {
+	oauth2Source := claimSettings(source)
+	if !oauth2Source.SkipLocalTwoFA {
 		needs2FA, err = auth.HasTwoFactorByUID(ctx, u.ID)
 		if err != nil {
 			ctx.ServerError("UserSignIn", err)
@@ -1426,7 +1439,6 @@ func handleOAuth2SignIn(ctx *context.Context, source *auth.Source, u *user_model
 		}
 	}
 
-	oauth2Source := source.Cfg.(*oauth2.Source)
 	// the syncs below change the account from the provider: the audit log records the login source as their actor
 	syncCtx := audit_model.WithLoginSource(ctx, source.ID, source.Name)
 	groupTeamMapping, err := auth_module.UnmarshalGroupTeamMapping(oauth2Source.GroupTeamMap)
@@ -1662,28 +1674,35 @@ func oAuth2FetchUser(ctx *context.Context, authSource *auth.Source, request *htt
 		return goth.User{}, err
 	}
 
-	if oauth2Source.RequiredClaimName != "" {
-		claimInterface, has := gothUser.RawData[oauth2Source.RequiredClaimName]
+	if err := checkRequiredClaim(oauth2Source, &gothUser); err != nil {
+		return goth.User{}, err
+	}
+	return gothUser, nil
+}
+
+// checkRequiredClaim refuses the sign-in when the source requires a claim the user doesn't have.
+func checkRequiredClaim(source *oauth2.Source, gothUser *goth.User) error {
+	if source.RequiredClaimName != "" {
+		claimInterface, has := gothUser.RawData[source.RequiredClaimName]
 		if !has {
-			return goth.User{}, user_model.ErrUserProhibitLogin{Name: gothUser.UserID}
+			return user_model.ErrUserProhibitLogin{Name: gothUser.UserID}
 		}
 
-		if oauth2Source.RequiredClaimValue != "" {
+		if source.RequiredClaimValue != "" {
 			groups := claimValueToStringSet(claimInterface)
 
-			if !groups.Contains(oauth2Source.RequiredClaimValue) {
-				return goth.User{}, user_model.ErrUserProhibitLogin{Name: gothUser.UserID}
+			if !groups.Contains(source.RequiredClaimValue) {
+				return user_model.ErrUserProhibitLogin{Name: gothUser.UserID}
 			}
 		}
 	}
-
-	return gothUser, nil
+	return nil
 }
 
 func oAuth2GothUserToUser(ctx go_context.Context, authSource *auth.Source, gothUser goth.User) (*user_model.User, error) {
 	user := &user_model.User{
 		LoginName:   gothUser.UserID,
-		LoginType:   auth.OAuth2,
+		LoginType:   authSource.Type,
 		LoginSource: authSource.ID,
 	}
 
