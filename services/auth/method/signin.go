@@ -21,6 +21,7 @@ import (
 	_ "forgejo.org/services/auth/source/db"   // register the sources (and below)
 	_ "forgejo.org/services/auth/source/ldap" // register the ldap source
 	_ "forgejo.org/services/auth/source/pam"  // register the pam source
+	_ "forgejo.org/services/auth/source/saml" // register the saml source
 )
 
 // UserLimitKey returns the auth rate limit bucket key of a sign-in name. A user name and an activated email address
