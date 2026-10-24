@@ -1,6 +1,6 @@
 ---
 name: issue-to-merge
-description: Take a spoved issue the person names to merge-ready pull requests by splitting it into work items, delegating them to subagents, and running fresh quality, security, UX and red-team reviews before saying it is ready. Use when someone says "do issue #N", "get #N ready for merge" or "delegate #N".
+description: Use when someone names a spoved issue to take all the way to merge-ready pull requests, for example "do issue #N", "issue to merge #N", "get #N ready for merge" or "delegate #N".
 ---
 
 # Issue to merge
@@ -16,12 +16,13 @@ The questions the person asks most often are "is everything in #N done?", "did y
 - Read the issue and every comment (`mcp__github__issue_read`); maintainer comments are requirements. Read linked issues and pull requests that it builds on.
 - Check `develop` for each requirement before planning it: issue text goes stale, and parts may already be built. Say which parts are already done.
 - Write the requirements as a numbered list taken from the issue. Every later step refers to it, and the final report marks each one done, moved to a follow-up issue, or dropped with the person's OK.
-- Split the work into items, each one reviewable pull request (or one commit inside a pull request when the person asked for a single PR). For each item write: goal, the requirements it covers, files and functions, what stays out of scope, the tests that prove it, and which items it depends on.
+- Split the work into items, each one reviewable pull request (or one commit inside a pull request when the person asked for a single PR). For each item write: goal, the requirements it covers, files and functions, what stays out of scope, the tests that prove it, and which items it depends on. Where two items share a file or an interface, write what one produces and the other consumes, and settle any conflict before starting either.
 - Ask the person only about choices that change the goal, an API, a schema, permissions or a default. Recommend an option and keep working on it meanwhile. Save their decisions to project memory so later threads don't ask again.
 - When the feature copies a competitor (GitHub, GitLab, Bitbucket, Azure DevOps), write down how theirs behaves and where spoved will differ. The person will ask "does it work exactly like X?".
 - Split so every pull request can go green alone: code that neither production code nor tests reach fails the deadcode lint (`.deadcode-out`), so a backend item ships with its tests or a caller (API, CLI, UI).
 - Look for open pull requests and threads that touch the same area (`mcp__github__list_pull_requests`, `mcp__hearthbot__list_threads`) and write down how the features meet (for example a merge queue and a stacked merge). Decide the interaction in the plan rather than finding it as a review finding or a known gap.
 - **Threat model before coding** for anything in the full-review list of step 6: one Opus pass on the plan names the attackers, the inputs, the permission checks and the refusals, and the brief carries them. When the work uses a third-party security library (SAML, OIDC, JWT, crypto), read its documented caveats and modes first and refuse weak algorithms and IdP-initiated or unsolicited responses by default. Keep the threat model in the brief: only design-level notes go on the issue or pull request, and a weakness found in existing code goes to spovedOps (step 6).
+- Keep a ledger at `/mnt/project-files/issues/<N>/ledger.md`: the requirements with their status, the items with branch, PR and last commit, and every decision as `Ruling: <what> — <why> — <cost if wrong>`. Update it as each step ends. After a context compaction, trust the ledger and `git log` over your memory; re-running finished items is the most expensive mistake.
 - Post the plan on the issue, keep the list of items as your progress checklist, and say which item you start with.
 
 ## 2. Design UI before building it
@@ -34,12 +35,16 @@ If an item adds or changes screens, share mockups first (a design doc or canvas 
 - Pick the model by the work: coding, test fixing and CI log triage go to `model: "sonnet"`; planning, design questions and the reviews in step 6 stay on `model: "opus"`.
 - The rules every brief carries: branch off the latest `origin/develop`; `ponytail` at full level; tests first and never remove or skip one; `git commit -s`, stage files by name, no `package-lock.json`; run the local checks of `CLAUDE.md` "Testing" for the change; while iterating, run only the tests of the changed packages and their neighbours (`go test` on those packages, `make 'test-sqlite#TestName'` or the binary with `-test.run`, the e2e specs whose `@watch` covers the files) and leave the full suite to CI; report what was run, what wasn't, and every failure.
 - Batch fixes (you and every brief): push once per review round or CI failure, after all its fixes pass the targeted checks. Each push starts a full CI run (cancelling the last one), and parallel pull requests compete for the same runners.
+- Hand briefs and reports over as files, not pasted text: the brief goes in a file the subagent reads first (requirements and exact values only there), the subagent writes its full report next to it and returns only a status (`DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, `BLOCKED`), its commits and a one-line test summary. Everything pasted into or returned from a subagent stays in your context for the rest of the thread. Never paste the history of earlier items into a later brief.
+- Subagents don't start subagents: a coder never spawns its own reviewer or helpers. The reviews come from you in step 6, and a reviewer a coder starts is a duplicate at full cost.
+- For a fix, resume the coder that wrote the code (SendMessage with the findings) instead of starting a fresh one; its context is intact. If three fix rounds haven't closed a finding, hand it to a fresh agent on a stronger model with the report file.
 - Read each result yourself: the diff, the tests and the check output. A subagent's "done" is a claim; re-run anything that looks thin.
 
 ## 4. Test it the way it will be used
 
 Automated tests passing is not "tested". Before a pull request is ready, also:
 
+- **Prove a fix with red-green.** For a bug fix, revert the fix, see the new test fail, restore it and see it pass. Every "tested" or "passes" in a message names the command and what it printed in this round, never an earlier run or a subagent's word.
 - **Run it for real.** Build the branch (a production build for UI: `RUN_MODE = prod`, embedded assets), start it on a fresh database and drive the feature as a user would, through the web and the API. Say what you did and what you saw.
 - **Projects.** Repeat the main flow on a repository inside a project (`org/project/repo`): names, links, confirmations and lookups that assume `owner/repo` break there.
 - **Phones.** For UI, use the pages at 390 px with touch, not only screenshots: menus and prompts that close on focus loss, hidden buttons and on-screen keyboards have broken flows that passed desktop e2e.
