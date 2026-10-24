@@ -19,17 +19,21 @@ The questions the person asks most often are "is everything in #N done?", "did y
 - Split the work into items, each one reviewable pull request (or one commit inside a pull request when the person asked for a single PR). For each item write: goal, the requirements it covers, files and functions, what stays out of scope, the tests that prove it, and which items it depends on.
 - Ask the person only about choices that change the goal, an API, a schema, permissions or a default. Recommend an option and keep working on it meanwhile. Save their decisions to project memory so later threads don't ask again.
 - When the feature copies a competitor (GitHub, GitLab, Bitbucket, Azure DevOps), write down how theirs behaves and where spoved will differ. The person will ask "does it work exactly like X?".
+- Split so every pull request can go green alone: code without a caller fails the deadcode lint (`.deadcode-out`), so a backend item ships with the UI, API or CLI that calls it, not as a backend-only PR.
+- Look for open pull requests and threads that touch the same area (`list_pull_requests`, the project's threads) and write down how the features meet (for example a merge queue and a stacked merge). Decide the interaction in the plan rather than finding it as a review finding or a known gap.
+- **Threat model before coding** for anything in the full-review list of step 6: one Opus pass on the plan names the attackers, the inputs, the permission checks and the refusals, and the brief carries them. When the work uses a third-party security library (SAML, OIDC, JWT, crypto), read its documented caveats and modes first and refuse weak algorithms and unsolicited flows by default. Most later review rounds came from things this pass would have caught.
 - Post the plan on the issue, keep the list of items as your progress checklist, and say which item you start with.
 
 ## 2. Design UI before building it
 
-If an item adds or changes screens, share mockups first (a design doc or canvas with the screens, the empty and error states, and open questions with your recommendation) and wait for the person's UX review before building those screens. Backend items can go ahead meanwhile. Put each control where users of GitHub and GitLab look for it, not only in settings.
+If an item adds or changes screens, share mockups first (a design doc or canvas with the screens, the empty and error states, and open questions with your recommendation) and wait for the person's UX review before building those screens. Backend items can go ahead meanwhile. If the person hasn't answered within about an hour, send one short reminder with the link and the explicit ask ("reply go to build as drawn"), and keep building what doesn't depend on it; don't sit idle. Put each control where users of GitHub and GitLab look for it, not only in settings.
 
 ## 3. Delegate
 
 - Give each item to a subagent (Agent tool) with a self-contained brief: the issue number, the item's goal, requirements and tests, the files to start from, the relevant `CLAUDE.md` Learnings, and the rules below. Run independent items in parallel, each in its own worktree with a short path (`/home/user/wt-<x>`, long paths break the integration and e2e sockets). Run dependent items in order.
 - Pick the model by the work: coding, test fixing and CI log triage go to `model: "sonnet"`; planning, design questions and the reviews in step 6 stay on `model: "opus"`.
 - The rules every brief carries: branch off the latest `origin/develop`; `ponytail` at full level; tests first and never remove or skip one; `git commit -s`, stage files by name, no `package-lock.json`; run the local checks of `CLAUDE.md` "Testing" for the change; while iterating, run only the tests of the changed packages and their neighbours (`go test` on those packages, `make 'test-sqlite#TestName'` or the binary with `-test.run`, the e2e specs whose `@watch` covers the files) and leave the full suite to CI; report what was run, what wasn't, and every failure.
+- Batch fixes: collect every fix of a round, run the targeted checks, then push once. Each push starts a full CI run (cancelling the last one), and parallel pull requests compete for the same runners.
 - Read each result yourself: the diff, the tests and the check output. A subagent's "done" is a claim; re-run anything that looks thin.
 
 ## 4. Test it the way it will be used
@@ -40,6 +44,7 @@ Automated tests passing is not "tested". Before a pull request is ready, also:
 - **Projects.** Repeat the main flow on a repository inside a project (`org/project/repo`): names, links, confirmations and lookups that assume `owner/repo` break there.
 - **Phones.** For UI, use the pages at 390 px with touch, not only screenshots: menus and prompts that close on focus loss, hidden buttons and on-screen keyboards have broken flows that passed desktop e2e.
 - **Concurrency.** When the change runs on a push, merge, cron or queue path, test the races (a branch that moves mid-operation, two runs at once). If the suite can't reach a case, add a test hook rather than calling it untestable. For hot paths, run a stress test with many users in parallel and report lost or failed operations.
+- **Interoperability.** When the feature talks to an outside system (an identity provider, a registry, a CI runner, an import source), test it against a real open-source implementation in a container (for example Keycloak for SAML/OIDC), not only against mocks. If that isn't possible, say so in the ready message.
 - **Deployment.** If the change adds files outside the binary, a setting or a service, check that the release image and the deployment pipelines ship it, and say what an operator has to do.
 
 ## 5. Open the pull request
@@ -63,7 +68,7 @@ Start the reviewers as fresh agents pinned to the strongest model (Agent `model:
 3. **UX**, when there is UI: the `screenshots` skill (desktop and mobile, light and dark) and "is this the right experience?": can users find it, does the preview match what the action does, does a wide-scope destructive action ask for a stronger confirm, do the words read well (plurals, "1 branch"), is it consistent with GitHub/GitLab. Attach the screenshots to the pull request.
 4. **Red team**: try to break it as an attacker on a running instance from the branch (anonymous, other users, tokens with less scope, hidden repos, no shell or git CLI reachable), and fuzz every new input (very long values, wrong types, negative or huge numbers, control characters and Unicode look-alikes, path traversal, duplicates, missing fields); anything that answers 500, stores bad data or gets past a check is a finding. Report what got through with the exact steps.
 
-Fix every finding, or answer it with the reason it isn't one, then re-run the agent whose findings changed code. Follow up the lower-confidence notes too: past reviews found real bugs there. Post the findings as one review with `event: COMMENT`: reviews post under the person's account, and GitHub refuses approve or request changes on one's own pull request.
+Fix every finding, or answer it with the reason it isn't one, then re-run only the agent whose findings changed code, on the fix diff, with its earlier findings list, so it checks the fixes and their surroundings instead of the whole diff again. Fix verification and screenshot retakes can run on Sonnet; keep Opus for the judgement. If a reviewer still finds new issues after two rounds, stop and look for the root cause (a missing check at the shared chokepoint, a wrong design) or ask the person, instead of a third patch round. Follow up the lower-confidence notes too: past reviews found real bugs there. Post the findings as one review with `event: COMMENT`: reviews post under the person's account, and GitHub refuses approve or request changes on one's own pull request.
 
 A real vulnerability is never written in this repository. File it as an issue in `InfiniteSpoved/spovedOps` (private) with the details, and keep the spoved commit, pull request and comments neutral (they may name the spovedOps issue by number only).
 
@@ -71,12 +76,13 @@ A real vulnerability is never written in this repository. File it as an issue in
 
 - CI's **CI success** check must be green on the head. On a failure, read the job log, reproduce locally, fix the cause and push; "flaky" is not a cause. Failures known to be environmental are listed in `CLAUDE.md`; anything else is checked on `origin/develop` before calling it unrelated.
 - At each event, check whether `develop` moved and whether it still merges cleanly (`git merge-tree --write-tree origin/develop HEAD`), without waiting to be told. Merge it in right away only on a conflict, or when the new commits touch the same files or features as yours; otherwise leave it for the pre-merge check in step 8, so CI runs once instead of after every change on develop. Always merge with a merge commit (never rebase or force-push a pushed branch), then re-test where the new commits meet yours (shared pages, forms, settings).
+- `develop` moving sends no event, so do the check above whenever the thread wakes, and after you merge a pull request tell the coordinator, so the other open threads check theirs.
 - Don't sit polling CI: end the turn and pick it up when CI reports.
 - Answer every review comment: fix it or explain why not.
 
 ## 8. Ready to merge
 
-A pull request is ready when CI success is green on its head, it merges cleanly with the latest `develop`, the step 4 checks and the reviews step 6 calls for are done, and every review thread is answered. Then tell the person in one short message that it is ready to merge, with the link, what was tested (and what wasn't) and what the reviews found.
+A pull request is ready when CI success is green on its head, it merges cleanly with the latest `develop`, the step 4 checks and the reviews step 6 calls for are done, and every review thread is answered. Then tell the person in one short message that it is ready to merge, with the link, what was tested (and what wasn't), what the reviews found by severity and how each was fixed, screenshots from the running app for UI changes, and how confident you are that it works once merged and why. Give time estimates only when they are based on something measured (the last CI run, a timed test), and say what they depend on.
 
 When the person has approved it (or said to merge once approved and green), check again right before merging, because other pull requests merge in parallel: `git fetch origin develop` and `git merge-base --is-ancestor origin/develop HEAD`. If develop has moved, merge it in (merge commit, never a rebase), re-run the checks for the files where both sides meet, push, and wait for CI success on the new head before merging. Merge only a head that contains the develop you just fetched and is green. Then merge it with a merge commit (`merge_method: "merge"`). Then watch the CI run on `develop` that the merge starts: a new test can move others into another shard and expose an order-dependent test. If it goes red, fix it in a new pull request right away. Then start the next work item from the new `develop`.
 
@@ -94,6 +100,7 @@ When the last item is merged, go through the requirements list from step 1 and t
 - Build: `make backend`, `make frontend` (needed before e2e and screenshots), `make build` for both. Export `GITEA_I_AM_BEING_UNSAFE_RUNNING_AS_ROOT=true` in containers.
 - One integration test: `make 'test-sqlite#TestName'`; several after one build: `PROJECT_ROOT=$PWD PROJECT_CONF=tests/sqlite.ini ./integrations.sqlite.test -test.run 'A|B'`.
 - Shards: CI splits unit, integration and e2e tests round-robin with `.github/ci/shard.sh`; a test that fails only in a shard is order-dependent.
+- Lint traps: a new Go library needs `make go-licenses` (`assets/go-licenses.json`); unused code fails the deadcode check; a new cron task changes tests that count the registered tasks, so grep the tests for the count.
 - Known environmental or flaky failures: the SSH and outside-network lists in `CLAUDE.md`, `webauthn.test.e2e.ts`, and `rendering-iframe.test.e2e.ts` (rerun it alone).
 
 ## Never
