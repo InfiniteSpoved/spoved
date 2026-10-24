@@ -260,7 +260,11 @@ func ProtectBranchFromForm(ctx *context.Context, f *forms.ProtectBranchForm, pro
 		if strings.TrimSpace(f.WhitelistDeployKeyIDs) != "" {
 			whitelistDeployKeys, _ = base.StringsToInt64s(strings.Split(f.WhitelistDeployKeyIDs, ","))
 		}
-		whitelistUsers = append(user_model.WithoutTokenIDs(whitelistUsers), user_model.TokenIDsOnly(whitelistDeployKeys)...)
+		pushTokens, err := writeTokenIDs(ctx, whitelistDeployKeys)
+		if err != nil {
+			return opts, ctx.Tr("error.occurred")
+		}
+		whitelistUsers = append(user_model.WithoutTokenIDs(whitelistUsers), pushTokens...)
 		whitelistDeployKeys = keyIDsOnly(whitelistDeployKeys)
 	default:
 		protectBranch.CanPush = false
@@ -329,6 +333,15 @@ func ProtectBranchFromForm(ctx *context.Context, f *forms.ProtectBranchForm, pro
 		return opts, ctx.Tr("repo.settings.approval_rules_invalid", err.Error())
 	}
 
+	deleteTokens, err := writeTokenIDs(ctx, parseIDList(f.DeleteAllowlistDeployKeyIDs))
+	if err != nil {
+		return opts, ctx.Tr("error.occurred")
+	}
+	forcePushTokens, err := writeTokenIDs(ctx, parseIDList(f.ForcePushAllowlistDeployKeyIDs))
+	if err != nil {
+		return opts, ctx.Tr("error.occurred")
+	}
+
 	return git_model.WhitelistOptions{
 		ApprovalRules:    approvalRules,
 		UserIDs:          whitelistUsers,
@@ -339,10 +352,10 @@ func ProtectBranchFromForm(ctx *context.Context, f *forms.ProtectBranchForm, pro
 		ApprovalsUserIDs: approvalsWhitelistUsers,
 		ApprovalsTeamIDs: approvalsWhitelistTeams,
 
-		DeleteUserIDs:         append(user_model.WithoutTokenIDs(parseIDList(f.DeleteAllowlistUsers)), user_model.TokenIDsOnly(parseIDList(f.DeleteAllowlistDeployKeyIDs))...),
+		DeleteUserIDs:         append(user_model.WithoutTokenIDs(parseIDList(f.DeleteAllowlistUsers)), deleteTokens...),
 		DeleteTeamIDs:         parseIDList(f.DeleteAllowlistTeams),
 		DeleteDeployKeyIDs:    keyIDsOnly(parseIDList(f.DeleteAllowlistDeployKeyIDs)),
-		ForcePushUserIDs:      append(user_model.WithoutTokenIDs(parseIDList(f.ForcePushAllowlistUsers)), user_model.TokenIDsOnly(parseIDList(f.ForcePushAllowlistDeployKeyIDs))...),
+		ForcePushUserIDs:      append(user_model.WithoutTokenIDs(parseIDList(f.ForcePushAllowlistUsers)), forcePushTokens...),
 		ForcePushTeamIDs:      parseIDList(f.ForcePushAllowlistTeams),
 		ForcePushDeployKeyIDs: keyIDsOnly(parseIDList(f.ForcePushAllowlistDeployKeyIDs)),
 	}, ""
@@ -486,6 +499,22 @@ func getWriteTokens(ctx *context.Context) ([]*allowlistToken, error) {
 		}
 	}
 	return out, nil
+}
+
+// writeTokenIDs keeps the token identities among ids that getWriteTokens offers for the repository of the page: no
+// other token can be allowed, and an organization rule (no repository, no picker) takes none.
+func writeTokenIDs(ctx *context.Context, ids []int64) ([]int64, error) {
+	ids = user_model.TokenIDsOnly(ids)
+	if len(ids) == 0 || ctx.Repo.Repository == nil {
+		return nil, nil
+	}
+	tokens, err := getWriteTokens(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(ids, func(id int64) bool {
+		return !slices.ContainsFunc(tokens, func(t *allowlistToken) bool { return t.BotID == id })
+	}), nil
 }
 
 func joinIDs(ids []int64) string {

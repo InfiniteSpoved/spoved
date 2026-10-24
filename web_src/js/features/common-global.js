@@ -5,7 +5,7 @@ import {createDropzone} from './dropzone.js';
 import {showGlobalErrorMessage} from '../bootstrap.js';
 import {handleGlobalEnterQuickSubmit} from './comp/QuickSubmit.js';
 import {svg} from '../svg.js';
-import {hideElem, showElem, toggleElem, resetForms, initSubmitEventPolyfill, submitEventSubmitter} from '../utils/dom.js';
+import {hideElem, showElem, toggleElem, isElemHidden, resetForms, initSubmitEventPolyfill, submitEventSubmitter} from '../utils/dom.js';
 import {htmlEscape} from 'escape-goat';
 import {showTemporaryTooltip} from '../modules/tippy.js';
 import {showErrorToast} from '../modules/toast.js';
@@ -478,6 +478,9 @@ export function initGlobalButtons() {
       } else {
         showElem(sel);
       }
+      // a field marked `data-focus-on-show` gets the focus when its panel opens
+      const panel = document.querySelector(sel);
+      if (panel && !isElemHidden(panel)) panel.querySelector('[data-focus-on-show]')?.focus();
     });
   }
 

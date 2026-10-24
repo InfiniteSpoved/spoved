@@ -33,10 +33,6 @@ const ownedTokensPageSize = 20
 // page it redirects to; the page pops it, so a reload shows nothing and rotates nothing.
 const newOwnedTokenSessionKey = "newOwnedToken"
 
-// OwnedTokenScopeCategories are the scope categories a token of an organization, a project or a repository may hold,
-// in the order the form offers them; organization offers read only.
-var OwnedTokenScopeCategories = []string{"repository", "issue", "package", "organization"}
-
 // OwnedTokenRow is one token in the list of the Keys and tokens page.
 type OwnedTokenRow struct {
 	Token         *auth_model.AccessToken
@@ -45,7 +41,8 @@ type OwnedTokenRow struct {
 	RotatedSelf   bool                     // last rotated by the token itself
 	Repos         []*repo_model.Repository // the selected repositories of an organization token
 	ExpiresSoon   bool                     // expires within 7 days
-	RotateExpires string                   // the expiry date a rotation gives it, "" for none
+	ExpiresInDays int                      // days left, rounded up, when ExpiresSoon
+	RotateExpires string                   // the expiry date a rotation gives it as the rows show dates, "" for none
 }
 
 // OwnedTokenLevel names the owner of the tokens a Keys and tokens page manages.
@@ -53,6 +50,7 @@ type OwnedTokenLevel struct {
 	Opts     auth_model.FindOwnedAccessTokensOptions // OwnerType, OwnerID and GroupID
 	Link     string                                  // the Keys and tokens page
 	CloneURL string                                  // shown in the usage of a new token
+	Owner    *user_model.User                        // the organization, or the owner of the repository
 }
 
 func newOwnedTokenRows(ctx *context.Context, tokens []*auth_model.AccessToken) ([]*OwnedTokenRow, error) {
@@ -90,8 +88,11 @@ func newOwnedTokenRows(ctx *context.Context, tokens []*auth_model.AccessToken) (
 		if !row.RotatedSelf {
 			row.RotatedBy = userByID(t.RotatedByID)
 		}
+		if row.ExpiresSoon {
+			row.ExpiresInDays = int((time.Duration(t.ExpiresUnix-timeutil.TimeStampNow())*time.Second + 24*time.Hour - 1) / (24 * time.Hour))
+		}
 		if expires := authz.RotationExpiry(setting.AccessTokenExpiry, t.ExpiresUnix != 0); expires != 0 {
-			row.RotateExpires = expires.FormatDate()
+			row.RotateExpires = expires.AsTime().Format("Jan 2, 2006") // what <absolute-date> shows the rows in English
 		}
 		slices.SortFunc(row.Repos, func(a, b *repo_model.Repository) int { return strings.Compare(a.FullName(), b.FullName()) })
 		rows = append(rows, row)
@@ -124,9 +125,12 @@ func LoadOwnedTokens(ctx *context.Context, level OwnedTokenLevel) bool {
 	ctx.Data["OwnedTokensLink"] = level.Link + "/tokens"
 	ctx.Data["OwnedTokensKeyword"] = opts.Keyword
 	ctx.Data["OwnedTokenLevel"] = int(level.Opts.OwnerType)
-	ctx.Data["OwnedTokenScopeCategories"] = OwnedTokenScopeCategories
+	// an archived organization and a read-only instance refuse writes: tokens can only be revoked there
+	ctx.Data["OwnedTokensArchived"] = level.Owner.IsOrganization() && level.Owner.IsArchived
+	ctx.Data["OwnedTokensReadOnly"] = setting.GetMaintenance(ctx).ReadOnly()
+	ctx.Data["OwnedTokenScopeCategories"] = auth_model.OwnedTokenScopeCategories
 	if level.Opts.OwnerType != auth_model.AccessTokenOwnerOrg { // packages belong to the organization: only its tokens reach them
-		ctx.Data["OwnedTokenScopeCategories"] = slices.DeleteFunc(slices.Clone(OwnedTokenScopeCategories), func(c string) bool { return c == "package" })
+		ctx.Data["OwnedTokenScopeCategories"] = slices.DeleteFunc(slices.Clone(auth_model.OwnedTokenScopeCategories), func(c string) bool { return c == "package" })
 	}
 	if count > ownedTokensPageSize || opts.Keyword != "" {
 		ctx.Data["OwnedTokensFilter"] = true
@@ -201,6 +205,11 @@ func CreateOwnedToken(ctx *context.Context, level OwnedTokenLevel, f OwnedTokenF
 		ctx.Data["TokenError"] = msg
 		return nil
 	}
+	noScope := func() *auth_model.AccessToken { // shown under the Scopes field
+		ctx.Data["Err_TokenScopes"] = true
+		ctx.Data["TokenScopesError"] = ctx.Locale.TrString("owned_token.error.no_scope")
+		return nil
+	}
 	if f.Name == "" || len(f.Name) > 255 {
 		ctx.Data["Err_TokenName"] = true
 		return refuse(ctx.Locale.TrString("owned_token.error.name"))
@@ -214,8 +223,7 @@ func CreateOwnedToken(ctx *context.Context, level OwnedTokenLevel, f OwnedTokenF
 	}
 	scope, err := auth_model.AccessTokenScope(strings.Join(f.Scopes, ",")).Normalize()
 	if err != nil || scope == "" {
-		ctx.Data["Err_TokenScopes"] = true
-		return refuse(ctx.Locale.TrString("settings.at_least_one_permission"))
+		return noScope()
 	}
 	expires, expiryErr := ParseExpiryForm(ctx.Base, setting.AccessTokenExpiry, f.ExpiresAt)
 	if has, msg := expiryErr.Get(); has {
@@ -244,8 +252,7 @@ func CreateOwnedToken(ctx *context.Context, level OwnedTokenLevel, f OwnedTokenF
 			ctx.Data["Err_TokenName"] = true
 			return refuse(ctx.Locale.TrString("owned_token.error.name_taken", f.Name))
 		case errors.Is(err, authz.ErrOwnedTokenNoScope):
-			ctx.Data["Err_TokenScopes"] = true
-			return refuse(ctx.Locale.TrString("settings.at_least_one_permission"))
+			return noScope()
 		case errors.Is(err, auth_model.ErrOwnedTokenPackageScope):
 			ctx.Data["Err_TokenScopes"] = true
 			return refuse(ctx.Locale.TrString("owned_token.error.package_scope"))

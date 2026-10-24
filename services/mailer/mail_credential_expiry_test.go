@@ -57,7 +57,7 @@ func TestSendCredentialExpiryNotices(t *testing.T) {
 	got := send(t)
 	personal := got[user2+" Access token personal expires in 7 days"]
 	require.NotNil(t, personal, "%v", got)
-	assert.Contains(t, personal.Body, "of your account expires on 2026-10-08")
+	assert.Contains(t, personal.Body, "The access token personal of your account expires on 2026-10-08.")
 	assert.Contains(t, personal.Body, `href="https://try.gitea.io/user/settings/keys"`)
 	assert.Contains(t, personal.Body, "Regenerate it")
 	assert.NotContains(t, personal.Body, "Rotate it")

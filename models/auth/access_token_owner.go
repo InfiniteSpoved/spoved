@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"forgejo.org/models/db"
@@ -69,6 +70,24 @@ var ErrOwnedTokenScope = errors.New("scope not allowed for an organization, proj
 // writing an organization is refused when it is created and when it is used.
 const ownedTokenScopeBits = accessTokenScopeWriteRepositoryBits | accessTokenScopeWriteIssueBits |
 	accessTokenScopeWritePackageBits | accessTokenScopeReadOrganizationBits
+
+// OwnedTokenScopeCategories are the scope categories a token of an organization, a project or a repository may hold,
+// in the order the create form offers them; organization offers read only.
+var OwnedTokenScopeCategories = []string{"repository", "issue", "package", "organization"}
+
+// OrderedScopes is StringSlice in the order of OwnedTokenScopeCategories, the order of the create form.
+func (s AccessTokenScope) OrderedScopes() []string {
+	scopes := s.StringSlice()
+	position := func(scope string) int {
+		_, category, _ := strings.Cut(scope, ":")
+		if i := slices.Index(OwnedTokenScopeCategories, category); i >= 0 {
+			return i
+		}
+		return len(OwnedTokenScopeCategories)
+	}
+	slices.SortStableFunc(scopes, func(a, b string) int { return position(a) - position(b) })
+	return scopes
+}
 
 // ValidateOwnedTokenScope returns ErrOwnedTokenScope unless every scope is allowed for an organization, project or
 // repository token. An empty scope grants no API access and is allowed.

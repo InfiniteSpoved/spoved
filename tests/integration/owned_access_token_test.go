@@ -28,6 +28,7 @@ import (
 	"forgejo.org/modules/timeutil"
 	repo_service "forgejo.org/services/repository"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -114,13 +115,29 @@ func TestOwnedAccessToken(t *testing.T) {
 			assert.Equal(t, user_model.AccessTokenBotID(token.ID), issue.PosterID)
 			assert.Equal(t, token.Name+" [bot]", apiIssue.Poster.FullName)
 
-			// the issue page names the token, marks it a bot and links to where it is managed, never to a profile
-			resp := loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/org3/repo3/issues/%d", apiIssue.Index)), http.StatusOK)
-			author := NewHTMLParser(t, resp.Body).Find(".timeline-item .comment-header a.author").First()
-			assert.Equal(t, token.Name, strings.TrimSpace(author.Text()))
-			href, _ := author.Attr("href")
-			assert.Equal(t, "/org3/repo3/settings/keys", href)
-			assert.Contains(t, author.Parent().Text(), "repository token")
+			comment := &api.Comment{}
+			DecodeJSON(t, MakeRequest(t, NewRequestWithJSON(t, "POST", fmt.Sprintf("/api/v1/repos/org3/repo3/issues/%d/comments", apiIssue.Index), &api.CreateIssueCommentOption{Body: "by a repository token"}).AddTokenAuth(token.Token), http.StatusCreated), comment)
+
+			// the issue page names the token and marks it a bot, in the opening post and in the comment, as plain text:
+			// a token has no profile, and its Keys and tokens page is for the people who manage it
+			session := loginUser(t, "user2")
+			resp := session.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/org3/repo3/issues/%d", apiIssue.Index)), http.StatusOK)
+			authors := NewHTMLParser(t, resp.Body).Find(".timeline-item .comment-header .author")
+			require.Equal(t, 2, authors.Length(), "the issue and the comment")
+			authors.Each(func(_ int, author *goquery.Selection) {
+				assert.Equal(t, token.Name, strings.TrimSpace(author.Text()))
+				assert.False(t, author.Is("a"), "no link")
+				assert.Contains(t, author.Parent().Text(), "bot")
+				assert.Contains(t, author.Parent().Text(), "repository token")
+			})
+
+			// and so does the issue list
+			resp = session.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/issues"), http.StatusOK)
+			row := NewHTMLParser(t, resp.Body).Find("#issue-list .flex-item").FilterFunction(func(_ int, row *goquery.Selection) bool {
+				return strings.Contains(row.Text(), "by a repository token")
+			})
+			require.Equal(t, 1, row.Length())
+			assert.Contains(t, strings.Join(strings.Fields(row.Text()), " "), "by "+token.Name)
 
 			assert.Equal(t, http.StatusForbidden, apiStatus(t, "GET", "/api/v1/repos/org3/repo3", token.Token, nil), "no repository scope")
 		})
@@ -148,9 +165,17 @@ func TestOwnedAccessToken(t *testing.T) {
 			req = NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/repo1/pulls/"+elem[4]+"/reviews", &api.CreatePullReviewOptions{Event: api.ReviewStateApproved}).AddTokenAuth(token.Token)
 			MakeRequest(t, req, http.StatusOK)
 			resp := session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/pulls/"+elem[4]), http.StatusOK)
-			uncounted := NewHTMLParser(t, resp.Body).Find(".uncounted-approval")
+			doc := NewHTMLParser(t, resp.Body)
+			uncounted := doc.Find(".uncounted-approval")
 			assert.Equal(t, 1, uncounted.Length())
 			assert.Contains(t, uncounted.Text(), token.Name+" (bot) approved · doesn't count")
+			// the review in the timeline shows the token too, not Ghost
+			reviewItem := doc.Find(".timeline-item").FilterFunction(func(_ int, item *goquery.Selection) bool {
+				return strings.Contains(item.Text(), "approved these changes")
+			})
+			require.Equal(t, 1, reviewItem.Length())
+			text := strings.Join(strings.Fields(reviewItem.Text()), " ")
+			assert.True(t, strings.HasPrefix(text, token.Name+" bot repository token approved"), text)
 		})
 
 		t.Run("branch and tag protection allow write tokens", func(t *testing.T) {
@@ -158,6 +183,7 @@ func TestOwnedAccessToken(t *testing.T) {
 			allowed := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, repo3.ID, 0, perm_model.AccessModeWrite, "write:repository")
 			other := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeWrite, "write:repository")
 			reader := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, repo3.ID, 0, perm_model.AccessModeRead, "read:repository")
+			foreign := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, repo5.ID, 0, perm_model.AccessModeWrite, "write:repository") // another repository's
 			botID := func(t *auth_model.AccessToken) string {
 				return strconv.FormatInt(user_model.AccessTokenBotID(t.ID), 10)
 			}
@@ -172,12 +198,15 @@ func TestOwnedAccessToken(t *testing.T) {
 			}
 
 			session.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/repo3/settings/branches/edit", map[string]string{
-				"rule_name": "bot-protected*", "enable_push": "whitelist", "whitelist_deploy_key_ids": botID(allowed) + "," + botID(reader),
+				"rule_name": "bot-protected*", "enable_push": "whitelist", "whitelist_deploy_key_ids": botID(allowed) + "," + botID(reader) + "," + botID(foreign),
+				"delete_allowlist_deploy_key_ids": botID(foreign), "force_push_allowlist_deploy_key_ids": botID(reader) + "," + botID(allowed),
 			}), http.StatusSeeOther)
 			pb, err := git_model.GetFirstMatchProtectedBranchRule(db.DefaultContext, repo3.ID, "bot-protected")
 			require.NoError(t, err)
 			require.NotNil(t, pb)
-			assert.Equal(t, []int64{user_model.AccessTokenBotID(allowed.ID)}, pb.WhitelistUserIDs, "a read token is dropped")
+			assert.Equal(t, []int64{user_model.AccessTokenBotID(allowed.ID)}, pb.WhitelistUserIDs, "a read token and another repository's token are dropped")
+			assert.Empty(t, pb.DeleteAllowlistUserIDs)
+			assert.Equal(t, []int64{user_model.AccessTokenBotID(allowed.ID)}, pb.ForcePushAllowlistUserIDs)
 			assert.Empty(t, pb.WhitelistDeployKeyIDs)
 			page := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/settings/branches/edit?rule_name=bot-protected*"), http.StatusOK).Body)
 			value, _ := page.Find(`input[name="whitelist_deploy_key_ids"]`).Attr("value")

@@ -62,6 +62,8 @@ func TestOwnedAccessTokenWeb(t *testing.T) {
 		page, value := create(t, link, map[string]string{"token_name": n, "token_permission": "write", "token_scopes": "read:repository"})
 		require.NotEmpty(t, value)
 		assert.Contains(t, page.Find("#access-token-list").Text(), n)
+		assert.Contains(t, page.Find("#access-token-list").Text(), "Never used")
+		assert.Zero(t, page.Find("#access-token-list .text.green").Length(), "a token nobody used has no activity mark")
 		tok := unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{Name: n, OwnerType: auth_model.AccessTokenOwnerRepo, OwnerID: 1})
 		assert.Equal(t, perm_model.AccessModeWrite, tok.Mode)
 		assert.EqualValues(t, 2, tok.CreatorID)
@@ -76,6 +78,11 @@ func TestOwnedAccessTokenWeb(t *testing.T) {
 		assert.Equal(t, n, page.Find("#access-token-name").AttrOr("value", ""))
 		assert.Equal(t, "admin", page.Find(`input[name="token_permission"][checked]`).AttrOr("value", ""))
 		assert.Equal(t, "write:issue", page.Find(`#access-token-scope-issue option[selected]`).AttrOr("value", ""))
+		// no scope is said under the Scopes field, not in the box above the form
+		page, refused = create(t, link, map[string]string{"token_name": name(), "token_permission": "read"})
+		assert.Empty(t, refused)
+		assert.Equal(t, "Choose at least one scope.", strings.TrimSpace(page.Find("#access-token-scopes-error").Text()))
+		assert.Zero(t, page.Find("#access-token-error").Length())
 		for _, scope := range []string{"write:user", "write:admin", "write:organization", ""} {
 			_, refused = create(t, link, map[string]string{"token_name": name(), "token_permission": "read", "token_scopes": scope})
 			assert.Empty(t, refused, scope)

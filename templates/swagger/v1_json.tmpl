@@ -29382,6 +29382,14 @@
         "name": {
           "type": "string",
           "x-go-name": "Name"
+        },
+        "scopes": {
+          "description": "the API scopes of the token, which can be fewer than the units the permission lists",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Scopes"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"

@@ -17,6 +17,7 @@ func repoTokenLevel(ctx *context.Context) user.OwnedTokenLevel {
 		Opts:     auth_model.FindOwnedAccessTokensOptions{OwnerType: auth_model.AccessTokenOwnerRepo, OwnerID: repo.ID},
 		Link:     ctx.Repo.RepoLink + "/settings/keys",
 		CloneURL: repo.CloneLink().HTTPS,
+		Owner:    repo.Owner,
 	}
 }
 

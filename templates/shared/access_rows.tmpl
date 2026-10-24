@@ -20,6 +20,7 @@
 						{{svg "octicon-key"}} {{.DeployKey.Name}} <span class="text grey">{{.DeployKey.Fingerprint}}</span>
 					{{else if .AccessToken}}
 						{{svg "fontawesome-send"}} {{.AccessToken.Name}} <span class="ui label">{{ctx.Locale.Tr "access_report.type.bot"}}</span>
+						<div class="text grey">{{ctx.Locale.Tr "owned_token.scopes"}}: {{StringUtils.Join .AccessToken.Scopes ", "}}</div>
 					{{else if .Team}}
 						{{ctx.Locale.Tr "access_report.who.team" .Team.Name .Team.NumMembers}}
 					{{else}}

@@ -56,6 +56,18 @@ func TestOwnedAccessTokenRevokeWhenLocked(t *testing.T) {
 		MakeRequest(t, NewRequest(t, "DELETE", fmt.Sprintf("/api/v1/orgs/org3/tokens/%d", orgAPI.ID)).AddTokenAuth(owner), http.StatusNoContent)
 		revoked(t, orgAPI)
 
+		// the pages offer revoking only, and say why
+		keepsRevoke := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeRead, "read:repository")
+		for _, path := range []string{"/org/org3/settings/keys", "/org3/repo3/settings/keys"} {
+			page := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", path), http.StatusOK).Body)
+			assert.Contains(t, page.Find("#access-tokens-read-only").Text(), "archived", path)
+			assert.Zero(t, page.Find(`[data-panel="#add-access-token-panel"]`).Length(), path)
+			assert.Zero(t, page.Find("#add-access-token-panel").Length(), path)
+		}
+		page := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", "/org/org3/settings/keys"), http.StatusOK).Body)
+		assert.Zero(t, page.Find(`#access-token-list [data-modal="#rotate-access-token"]`).Length())
+		assert.Positive(t, page.Find(`#access-token-list .delete-button[data-id="`+fmt.Sprint(keepsRevoke.ID)+`"]`).Length())
+
 		// creating and rotating are still refused
 		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/repo3/tokens", create).AddTokenAuth(owner), http.StatusForbidden)
 		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/orgs/org3/tokens", create).AddTokenAuth(owner), http.StatusForbidden)
@@ -88,6 +100,10 @@ func TestOwnedAccessTokenRevokeWhenLocked(t *testing.T) {
 		require.NoError(t, auth_model.NewAccessToken(audit_model.WithSystem(db.DefaultContext, "test"), personal, nil))
 		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user/settings/keys/tokens/delete", map[string]string{"id": fmt.Sprint(personal.ID)}), http.StatusOK)
 		unittest.AssertNotExistsBean(t, &auth_model.AccessToken{ID: personal.ID})
+
+		page := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", "/org/org3/settings/keys"), http.StatusOK).Body)
+		assert.Contains(t, page.Find("#access-tokens-read-only").Text(), "read-only")
+		assert.Zero(t, page.Find("#add-access-token-panel").Length())
 
 		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/org3/repo3/tokens", create).AddTokenAuth(owner), http.StatusServiceUnavailable)
 	})

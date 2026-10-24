@@ -53,6 +53,8 @@ type AccessDeployKey struct {
 type AccessAccessToken struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
+	// the API scopes of the token, which can be fewer than the units the permission lists
+	Scopes []string `json:"scopes"`
 	// swagger:strfmt date-time
 	Expires *time.Time `json:"expires_at,omitempty"`
 }

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"net/url"
 	"slices"
 	"time"
@@ -287,24 +288,26 @@ func orgOwnerRecipients(ctx context.Context, orgID, groupID int64) (*expiryRecip
 
 func sendCredentialExpiryMail(c *expiringCredential, r *expiryRecipients, u *user_model.User, stage int, now timeutil.TimeStamp) error {
 	locale := translation.NewLocale(u.Language)
-	kind := locale.TrString("mail.credential_expiry.kind." + c.kind)
-	if c.kind == "org_deploy_key" {
-		kind = locale.TrString("mail.credential_expiry.kind.deploy_key")
+	kindKey := c.kind
+	if kindKey == "org_deploy_key" {
+		kindKey = "deploy_key"
 	}
+	kind := locale.TrString("mail.credential_expiry.kind." + kindKey)
 	var subject string
 	if stage == auth_model.ExpiryNoticeToday {
 		subject = locale.TrString("mail.credential_expiry.subject_today", kind, c.name)
 	} else {
 		days := int((time.Duration(c.expires-now)*time.Second + 24*time.Hour - 1) / (24 * time.Hour))
-		subject = locale.TrString("mail.credential_expiry.subject_soon", kind, c.name, days)
+		// the plural phrase escapes its arguments for HTML; its only argument is the number
+		subject = locale.TrString("mail.credential_expiry.subject_soon", kind, c.name, html.UnescapeString(string(locale.TrPluralString(days, "mail.credential_expiry.days", days))))
 	}
 	data := map[string]any{
 		"locale":   locale,
 		"Language": locale.Language(),
-		"Kind":     kind,
+		"Kind":     locale.TrString("mail.credential_expiry.kind_inline." + kindKey),
 		"Name":     c.name,
 		"Owner":    r.owner(locale),
-		"Expires":  c.expires.AsTimeInLocation(setting.DefaultUILocation).Format("2006-01-02 15:04 MST"),
+		"Expires":  c.expires.AsTimeInLocation(setting.DefaultUILocation).Format("2006-01-02"),
 		"IsToken":  c.kind == "access_token",
 		// a personal token is regenerated, the other tokens rotated
 		"IsPersonalToken": c.kind == "access_token" && c.userID != 0,

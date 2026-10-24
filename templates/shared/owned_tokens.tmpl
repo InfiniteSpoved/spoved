@@ -1,11 +1,17 @@
 {{/* The access tokens section of a Keys and tokens page (organization, project, repository); see routers/web/shared/user/owned_token.go */}}
-<h4 class="ui top attached header tw-mt-4" id="access-tokens">
+{{$readOnly := or .OwnedTokensArchived .OwnedTokensReadOnly}}
+<h4 class="ui top attached header tw-mt-4 tw-flex tw-flex-wrap tw-items-center tw-justify-between tw-gap-2" id="access-tokens">
 	{{ctx.Locale.Tr "owned_token.title"}}
+	{{if not $readOnly}}
 	<div class="ui right">
 		<button class="ui primary tiny show-panel toggle button" data-panel="#add-access-token-panel">{{ctx.Locale.Tr "owned_token.add"}}</button>
 	</div>
+	{{end}}
 </h4>
 <div class="ui attached segment">
+	{{if $readOnly}}
+		<div class="ui info message" id="access-tokens-read-only"><p>{{if .OwnedTokensArchived}}{{ctx.Locale.Tr "owned_token.read_only_archived"}}{{else}}{{ctx.Locale.Tr "owned_token.read_only_instance"}}{{end}}</p></div>
+	{{end}}
 	{{with .NewOwnedToken}}
 		<div class="ui positive message" id="new-access-token">
 			<p>{{if $.NewOwnedTokenRotated}}{{ctx.Locale.Tr "owned_token.rotated" .Name}}{{else}}{{ctx.Locale.Tr "owned_token.created" .Name}}{{end}}</p>
@@ -20,13 +26,14 @@
 			<pre class="tw-my-1 tw-whitespace-pre-wrap tw-break-anywhere"><code>curl -H "Authorization: token &lt;token&gt;" {{AppUrl}}api/v1/…</code></pre>
 		</div>
 	{{end}}
+	{{if not $readOnly}}
 	<div class="{{if not .HasTokenError}}tw-hidden{{end}} tw-mb-4" id="add-access-token-panel">
 		<form class="ui form" action="{{.OwnedTokensLink}}/new" method="post">
 			<p>{{if eq .OwnedTokenLevel 1}}{{ctx.Locale.Tr "owned_token.desc.org"}}{{else if eq .OwnedTokenLevel 2}}{{ctx.Locale.Tr "owned_token.desc.project"}}{{else}}{{ctx.Locale.Tr "owned_token.desc.repo"}}{{end}}</p>
 			{{if .TokenError}}<div class="ui negative message" id="access-token-error"><p>{{.TokenError}}</p></div>{{end}}
 			<div class="required field {{if .Err_TokenName}}error{{end}}">
 				<label for="access-token-name">{{ctx.Locale.Tr "owned_token.name"}}</label>
-				<input id="access-token-name" name="token_name" value="{{.token_name}}" maxlength="255" required>
+				<input id="access-token-name" name="token_name" data-focus-on-show value="{{.token_name}}" maxlength="255" required>
 			</div>
 			<div class="field">
 				<label for="access-token-description">{{ctx.Locale.Tr "owned_token.description"}}</label>
@@ -39,7 +46,7 @@
 						<div class="ui radio checkbox">
 							<input id="access-token-permission-{{$mode}}" name="token_permission" type="radio" value="{{$mode}}" {{if eq $.token_permission $mode}}checked{{end}}>
 							<label for="access-token-permission-{{$mode}}">
-								{{if eq $mode "read"}}{{ctx.Locale.Tr "owned_token.permission.read"}}{{else if eq $mode "write"}}{{ctx.Locale.Tr "owned_token.permission.write"}}{{else}}{{ctx.Locale.Tr "owned_token.permission.admin"}}{{end}}
+								{{if eq $mode "read"}}{{ctx.Locale.Tr "owned_token.permission.read"}}{{else if eq $mode "write"}}{{ctx.Locale.Tr "owned_token.permission.write"}}{{else if eq $.OwnedTokenLevel 3}}{{ctx.Locale.Tr "owned_token.permission.admin"}}{{else}}{{ctx.Locale.Tr "owned_token.permission.admin_many"}}{{end}}
 							</label>
 						</div>
 					</div>
@@ -48,6 +55,7 @@
 			<div class="field {{if .Err_TokenScopes}}error{{end}}">
 				<label>{{ctx.Locale.Tr "owned_token.scopes"}}</label>
 				<p class="help">{{ctx.Locale.Tr "owned_token.scopes_help"}}</p>
+				{{if .TokenScopesError}}<div class="ui basic red pointing prompt label" id="access-token-scopes-error">{{.TokenScopesError}}</div>{{end}}
 				{{range .OwnedTokenScopeCategories}}
 					<div class="field tw-pl-1 tw-pb-1 access-token-category">
 						<label class="category-label" for="access-token-scope-{{.}}">{{.}}</label>
@@ -87,6 +95,7 @@
 			<button class="ui hide-panel button" data-panel="#add-access-token-panel">{{ctx.Locale.Tr "cancel"}}</button>
 		</form>
 	</div>
+	{{end}}
 	{{if .OwnedTokensFilter}}
 		<form class="ui form tw-mb-4" action="{{.Link}}#access-tokens" method="get">
 			<div class="ui small fluid action input">
@@ -107,26 +116,28 @@
 						<div class="flex-item-title">
 							<span {{if $t.IsExpired}}class="tw-text-text-light-3"{{end}}>{{$t.Name}}</span>
 							<span class="ui tiny basic label">{{if eq $t.Mode 1}}{{ctx.Locale.Tr "owned_token.permission.read_short"}}{{else if eq $t.Mode 2}}{{ctx.Locale.Tr "owned_token.permission.write_short"}}{{else}}{{ctx.Locale.Tr "owned_token.permission.admin_short"}}{{end}}</span>
-							{{if $t.IsExpired}}<span class="ui tiny red label">{{ctx.Locale.Tr "owned_token.expired"}}</span>{{else if .ExpiresSoon}}<span class="ui tiny yellow label">{{ctx.Locale.Tr "owned_token.expires_soon"}}</span>{{end}}
+							{{if $t.IsExpired}}<span class="ui tiny red label">{{ctx.Locale.Tr "owned_token.expired"}}</span>{{else if .ExpiresSoon}}<span class="ui tiny yellow label">{{ctx.Locale.TrPluralString .ExpiresInDays "owned_token.expires_in_days" .ExpiresInDays}}</span>{{end}}
 						</div>
 						{{if $t.Description}}<div class="flex-item-body">{{$t.Description}}</div>{{end}}
-						<div class="flex-item-body">{{ctx.Locale.Tr "owned_token.scopes"}}: {{StringUtils.Join $t.Scope.StringSlice ", "}}{{if $t.SelfRotate}} · {{ctx.Locale.Tr "owned_token.self_rotate_short"}}{{end}}</div>
+						<div class="flex-item-body">{{ctx.Locale.Tr "owned_token.scopes"}}: {{StringUtils.Join $t.Scope.OrderedScopes ", "}}{{if $t.SelfRotate}} · {{ctx.Locale.Tr "owned_token.self_rotate_short"}}{{end}}</div>
 						<div class="flex-item-body">
 							{{ctx.Locale.Tr "owned_token.coverage"}}:
 							{{if eq $.OwnedTokenLevel 1}}{{if $t.ResourceAllRepos}}{{ctx.Locale.Tr "owned_token.covers.org_all"}}{{else}}{{range $i, $r := .Repos}}{{if $i}}, {{end}}{{$r.FullName}}{{end}}{{end}}{{else if $.RepoGroup}}{{ctx.Locale.Tr "owned_token.covers.project" $.RepoGroup.Name}}{{else}}{{ctx.Locale.Tr "owned_token.covers.repo"}}{{end}}
 						</div>
 						<div class="flex-item-body">
-							<p>{{ctx.Locale.Tr "owned_token.created_by" .CreatedBy.GetDisplayName (DateUtils.AbsoluteShort $t.CreatedUnix)}} — {{svg "octicon-info"}} {{if $t.HasUsed}}{{ctx.Locale.Tr "settings.last_used"}} <span {{if $t.HasRecentActivity}}class="text green"{{end}}>{{DateUtils.AbsoluteShort $t.UpdatedUnix}}</span>{{if $t.LastUsedIP}} ({{$t.LastUsedIP}}){{end}}{{else}}{{ctx.Locale.Tr "settings.no_activity"}}{{end}}{{template "shared/expiry_label" $t}}</p>
+							<p>{{ctx.Locale.Tr "owned_token.created_by" .CreatedBy.GetDisplayName (DateUtils.AbsoluteShort $t.CreatedUnix)}} — {{if $t.HasUsed}}{{ctx.Locale.Tr "settings.last_used"}} <span {{if $t.HasRecentActivity}}class="text green"{{end}}>{{DateUtils.AbsoluteShort $t.UpdatedUnix}}</span>{{if $t.LastUsedIP}} ({{$t.LastUsedIP}}){{end}}{{else}}{{ctx.Locale.Tr "owned_token.never_used"}}{{end}}{{template "shared/expiry_label" $t}}</p>
 						</div>
 						{{if $t.RotatedUnix}}
 							<div class="flex-item-body last-rotated">{{if .RotatedSelf}}{{ctx.Locale.Tr "owned_token.rotated_self" (DateUtils.AbsoluteShort $t.RotatedUnix)}}{{else}}{{ctx.Locale.Tr "owned_token.rotated_by" .RotatedBy.GetDisplayName (DateUtils.AbsoluteShort $t.RotatedUnix)}}{{end}}</div>
 						{{end}}
 					</div>
 					<div class="flex-item-trailing">
+						{{if not $readOnly}}
 						<button class="ui primary tiny button show-modal" data-modal="#rotate-access-token" data-modal-token-id="{{$t.ID}}" data-modal-name="{{$t.Name}}"
 							data-modal-rotate-expiry="{{if .RotateExpires}}{{ctx.Locale.TrString "owned_token.rotate_expiry" .RotateExpires}}{{else}}{{ctx.Locale.TrString "owned_token.rotate_no_expiry"}}{{end}}">
 							{{svg "octicon-sync" 16 "tw-mr-1"}}{{ctx.Locale.Tr "owned_token.rotate"}}
 						</button>
+						{{end}}
 						<button class="ui red tiny button delete-button" data-modal-id="revoke-access-token" data-url="{{$.OwnedTokensLink}}/delete" data-id="{{$t.ID}}" data-name="{{$t.Name}}">
 							{{svg "octicon-trash" 16 "tw-mr-1"}}{{ctx.Locale.Tr "owned_token.revoke"}}
 						</button>
@@ -139,8 +150,8 @@
 		<p>{{ctx.Locale.Tr "owned_token.no_match"}}</p>
 	{{else}}
 		<div class="tw-text-center tw-py-4" id="access-tokens-empty">
-			<p>{{ctx.Locale.Tr "owned_token.empty"}}</p>
-			<button class="ui primary tiny show-panel button" data-panel="#add-access-token-panel">{{ctx.Locale.Tr "owned_token.add"}}</button>
+			<p>{{if eq .OwnedTokenLevel 1}}{{ctx.Locale.Tr "owned_token.empty"}}{{else}}{{ctx.Locale.Tr "owned_token.empty_scoped"}}{{end}}</p>
+			{{if not $readOnly}}<button class="ui primary tiny show-panel button" data-panel="#add-access-token-panel">{{ctx.Locale.Tr "owned_token.add"}}</button>{{end}}
 		</div>
 	{{end}}
 </div>

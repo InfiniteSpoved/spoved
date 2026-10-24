@@ -52,6 +52,7 @@ func ownedTokenLevel(ctx *context.Context) user.OwnedTokenLevel {
 		Opts:     auth_model.FindOwnedAccessTokensOptions{OwnerType: auth_model.AccessTokenOwnerOrg, OwnerID: org.ID},
 		Link:     link,
 		CloneURL: setting.AppURL + url.PathEscape(org.Name) + "/REPOSITORY.git",
+		Owner:    org.AsUser(),
 	}
 	if groupID != 0 {
 		level.Opts.OwnerType, level.Opts.GroupID = auth_model.AccessTokenOwnerProject, groupID
