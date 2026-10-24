@@ -258,8 +258,8 @@ func verifyECDSA(pub *ecdsa.PublicKey, digest, sig []byte) bool {
 }
 
 // ParseLogoutRequest verifies a logout request the IdP sent with the HTTP-Redirect binding. It must be signed by the
-// IdP, addressed to this SP's logout URL and current.
-func ParseLogoutRequest(sp *saml.ServiceProvider, rawQuery string) (*saml.LogoutRequest, string, error) {
+// IdP, addressed to this SP's logout URL, current and used once.
+func (source *Source) ParseLogoutRequest(sp *saml.ServiceProvider, rawQuery string) (*saml.LogoutRequest, string, error) {
 	message, relayState, err := verifyRedirectSignature(sp, rawQuery, "SAMLRequest")
 	if err != nil {
 		return nil, "", err
@@ -297,6 +297,9 @@ func ParseLogoutRequest(sp *saml.ServiceProvider, rawQuery string) (*saml.Logout
 		return nil, "", errors.New("the logout request expired")
 	case req.NameID == nil || req.NameID.Value == "":
 		return nil, "", errors.New("the logout request has no NameID")
+	}
+	if err := useOnce("logout", source.authSource.ID, req.ID, saml.MaxIssueDelay+2*saml.MaxClockSkew); err != nil {
+		return nil, "", err
 	}
 	return &req, relayState, nil
 }

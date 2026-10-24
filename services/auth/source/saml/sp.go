@@ -31,6 +31,7 @@ import (
 	"github.com/crewjam/saml"
 	xrv "github.com/mattermost/xml-roundtrip-validator"
 	dsig "github.com/russellhaering/goxmldsig"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -301,8 +302,9 @@ type cachedMetadata struct {
 const metadataRetry = time.Minute
 
 var (
-	metadataMu    sync.Mutex
-	metadataCache = map[int64]*cachedMetadata{}
+	metadataMu      sync.Mutex
+	metadataCache   = map[int64]*cachedMetadata{}
+	metadataFetches singleflight.Group
 
 	// MetadataHTTPClient fetches IdP metadata; tests replace it.
 	MetadataHTTPClient = &http.Client{
@@ -383,10 +385,15 @@ func (source *Source) LoadIDPMetadata(ctx context.Context, updated timeutil.Time
 	}
 	metadataMu.Unlock()
 
-	entity, err := FetchMetadata(ctx, source.IDPMetadataURL, source.IDPEntityID)
-	metadataMu.Lock()
-	metadataCache[id] = &cachedMetadata{key: key, fetched: time.Now(), entity: entity, err: err}
-	metadataMu.Unlock()
+	// concurrent requests on a cold cache share one fetch
+	v, err, _ := metadataFetches.Do(fmt.Sprintf("%d|%s", id, key), func() (any, error) {
+		entity, err := FetchMetadata(ctx, source.IDPMetadataURL, source.IDPEntityID)
+		metadataMu.Lock()
+		metadataCache[id] = &cachedMetadata{key: key, fetched: time.Now(), entity: entity, err: err}
+		metadataMu.Unlock()
+		return entity, err
+	})
+	entity, _ := v.(*saml.EntityDescriptor)
 	return entity, err
 }
 
@@ -432,7 +439,6 @@ func (source *Source) newServiceProvider(idp *saml.EntityDescriptor) (*saml.Serv
 		SloURL:            *sloURL,
 		IDPMetadata:       idp,
 		AuthnNameIDFormat: saml.NameIDFormat(source.NameIDFormat),
-		AllowIDPInitiated: source.AllowIDPInitiated,
 		LogoutBindings:    []string{saml.HTTPRedirectBinding},
 	}
 	// the library also accepts an assertion that names no audience

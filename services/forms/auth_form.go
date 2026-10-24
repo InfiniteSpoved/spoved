@@ -109,6 +109,7 @@ type AuthenticationForm struct {
 	SAMLEmailAttribute             string `form:"saml_email_attribute" preprocess:"TrimSpace"`
 	SAMLForceAuthn                 bool   `form:"saml_force_authn"`
 	SAMLAllowIDPInitiated          bool   `form:"saml_allow_idp_initiated"`
+	SAMLSkipLocalTwoFA             bool   `form:"saml_skip_local_two_fa"`
 	SAMLIconURL                    string `form:"saml_icon_url" preprocess:"TrimSpace"`
 	SAMLRequiredClaimName          string `form:"saml_required_claim_name"`
 	SAMLRequiredClaimValue         string `form:"saml_required_claim_value"`

@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"encoding/base64"
 	"encoding/xml"
 	"errors"
 	"net/http"
@@ -154,7 +155,7 @@ func SAMLACS(ctx *context.Context) {
 		return
 	}
 	samlResponse := ctx.Req.PostFormValue("SAMLResponse")
-	if samlResponse == "" {
+	if samlResponse == "" || base64.StdEncoding.DecodedLen(len(samlResponse)) > saml_source.MaxResponseSize {
 		ctx.Error(http.StatusBadRequest, "no SAMLResponse")
 		return
 	}
@@ -166,11 +167,6 @@ func SAMLACS(ctx *context.Context) {
 		ctx.Data["Action"] = setting.AppSubURL + "/user/saml/" + url.PathEscape(authSource.Name) + "/acs"
 		ctx.Data["SAMLResponse"] = samlResponse
 		ctx.HTML(http.StatusOK, tplSAMLPost)
-		return
-	}
-
-	attempt := common.StartAuthAttempt(ctx)
-	if attempt == nil {
 		return
 	}
 
@@ -191,6 +187,11 @@ func SAMLACS(ctx *context.Context) {
 			return
 		}
 		ctx.Redirect(setting.AppSubURL + "/user/saml/" + url.PathEscape(authSource.Name) + "/login")
+		return
+	}
+
+	attempt := common.StartAuthAttempt(ctx)
+	if attempt == nil {
 		return
 	}
 
@@ -226,36 +227,36 @@ func SAMLACS(ctx *context.Context) {
 		return
 	}
 
-	// remembered for single logout
-	if ctx.Doer == nil {
-		for k, v := range map[string]any{
-			"samlSourceID":     authSource.ID,
-			"samlNameID":       a.NameID,
-			"samlNameIDFormat": a.NameIDFormat,
-			"samlSessionIndex": a.SessionIndex,
-		} {
-			if err := ctx.Session.Set(k, v); err != nil {
-				ctx.ServerError("Session.Set", err)
-				return
-			}
+	// remembered for single logout, with the account ID it belongs to
+	for k, v := range map[string]any{
+		"samlSourceID":     authSource.ID,
+		"samlUserID":       gothUser.UserID,
+		"samlNameID":       a.NameID,
+		"samlNameIDFormat": a.NameIDFormat,
+		"samlSessionIndex": a.SessionIndex,
+	} {
+		if err := ctx.Session.Set(k, v); err != nil {
+			ctx.ServerError("Session.Set", err)
+			return
 		}
 	}
 	signInExternalUser(ctx, authSource, u, gothUser)
 }
 
 // samlSessionIdentity returns the SAML source and NameID that signed in the current user, if any. A sign-in that was
-// left unfinished (link, 2FA) leaves them in the session, so they count only while the signed-in user belongs to
-// that source.
+// left unfinished (link, 2FA) or went to another account leaves them in the session, so they count only while the
+// signed-in user is the account of that SAML user.
 func samlSessionIdentity(ctx *context.Context) (int64, string) {
 	sourceID, _ := ctx.Session.Get("samlSourceID").(int64)
+	userID, _ := ctx.Session.Get("samlUserID").(string)
 	nameID, _ := ctx.Session.Get("samlNameID").(string)
-	if ctx.Doer == nil || sourceID == 0 || nameID == "" {
+	if ctx.Doer == nil || sourceID == 0 || userID == "" || nameID == "" {
 		return 0, ""
 	}
-	if ctx.Doer.LoginType == auth.SAML && ctx.Doer.LoginSource == sourceID {
+	if ctx.Doer.LoginType == auth.SAML && ctx.Doer.LoginSource == sourceID && ctx.Doer.LoginName == userID {
 		return sourceID, nameID
 	}
-	linked, err := db.GetEngine(ctx).Exist(&user_model.ExternalLoginUser{LoginSourceID: sourceID, UserID: ctx.Doer.ID})
+	linked, err := db.GetEngine(ctx).Exist(&user_model.ExternalLoginUser{LoginSourceID: sourceID, UserID: ctx.Doer.ID, ExternalID: userID})
 	if err != nil {
 		log.Error("SAML single logout: %v", err)
 	}
@@ -311,7 +312,7 @@ func SAMLSLO(ctx *context.Context) {
 			ctx.Error(http.StatusServiceUnavailable)
 			return
 		}
-		req, relayState, err := saml_source.ParseLogoutRequest(sp, ctx.Req.URL.RawQuery)
+		req, relayState, err := source.ParseLogoutRequest(sp, ctx.Req.URL.RawQuery)
 		if err != nil {
 			log.Info("SAML source %q refused a logout request from %s: %v", authSource.Name, ctx.RemoteAddr(), err)
 			ctx.Error(http.StatusBadRequest, "invalid logout request")

@@ -2919,7 +2919,7 @@
 	"admin.auths.saml_force_authn": "Ask the identity provider to sign the user in again (ForceAuthn)",
 	"admin.auths.saml_force_authn_help": "Users enter their credentials at every sign-in, even with an identity provider session.",
 	"admin.auths.saml_allow_idp_initiated": "Allow sign-in started at the identity provider",
-	"admin.auths.saml_allow_idp_initiated_help": "Accept sign-ins started at the identity provider (its app tile or portal). spoved then starts its own sign-in with the identity provider, so the account that is signed in there is the one signed in here. When this is off, such sign-ins are refused.",
+	"admin.auths.saml_allow_idp_initiated_help": "Accept sign-ins started at the identity provider (its app tile or portal). spoved then starts its own sign-in with the identity provider, so the account that is signed in there is the one signed in here. Users land on their start page, not on a page the identity provider names. When this is off, such sign-ins are refused.",
 	"admin.auths.saml_skip_local_two_fa": "Skip local 2FA",
 	"admin.auths.saml_skip_local_two_fa_help": "Leave unset to make local users who have 2FA still pass it when they sign in with this source.",
 	"admin.auths.saml_groups": "Groups",

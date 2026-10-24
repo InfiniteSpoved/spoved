@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -67,10 +68,12 @@ func (source *Source) ParseResponse(sp *saml.ServiceProvider, samlResponse, requ
 		}
 	}
 
-	// the library skips InResponseTo whenever IdP-initiated sign-in is allowed
-	bound := *sp
-	bound.AllowIDPInitiated = false
-	a, err := bound.ParseXMLResponse(raw, []string{requestID}, sp.AcsURL)
+	if err := checkKeyTransport(raw); err != nil {
+		return nil, err
+	}
+
+	// sp.AllowIDPInitiated stays false: the library skips InResponseTo when it is set
+	a, err := sp.ParseXMLResponse(raw, []string{requestID}, sp.AcsURL)
 	if err != nil {
 		var ire *saml.InvalidResponseError
 		if errors.As(err, &ire) && ire.PrivateErr != nil {
@@ -103,6 +106,21 @@ func checkNoPlainAssertion(raw []byte) error {
 	return nil
 }
 
+// checkKeyTransport refuses RSA PKCS#1 v1.5 key transport in an encrypted assertion: its padding errors are an
+// oracle for the SP key (Bleichenbacher).
+func checkKeyTransport(raw []byte) error {
+	doc := etree.NewDocument()
+	if err := doc.ReadFromBytes(raw); err != nil || doc.Root() == nil {
+		return invalid("the response is not XML")
+	}
+	for _, m := range doc.Root().FindElements("//EncryptionMethod") {
+		if m.SelectAttrValue("Algorithm", "") == "http://www.w3.org/2001/04/xmlenc#rsa-1_5" {
+			return invalid("the assertion key is encrypted with RSA PKCS#1 v1.5")
+		}
+	}
+	return nil
+}
+
 var replayMu sync.Mutex
 
 // checkReplay refuses an assertion ID seen before, until the assertion expires. The cache is per process unless the
@@ -111,24 +129,28 @@ func checkReplay(sourceID int64, a *saml.Assertion) error {
 	if a.ID == "" {
 		return invalid("the assertion has no ID")
 	}
-	c := cache.GetCache()
-	if c == nil {
-		return invalid("no cache to record the assertion ID")
-	}
-	sum := sha256.Sum256([]byte(a.ID))
-	key := fmt.Sprintf("saml_assertion_%d_%s", sourceID, hex.EncodeToString(sum[:]))
-
 	// at least as long as the library accepts the assertion after it was issued
 	ttl := time.Until(a.Conditions.NotOnOrAfter.Add(saml.MaxClockSkew))
 	ttl = min(max(ttl, time.Until(a.IssueInstant.Add(saml.MaxIssueDelay+2*saml.MaxClockSkew))), 24*time.Hour)
+	return useOnce("assertion", sourceID, a.ID, ttl)
+}
+
+// useOnce records a message ID for ttl and refuses one that was recorded before.
+func useOnce(kind string, sourceID int64, id string, ttl time.Duration) error {
+	c := cache.GetCache()
+	if c == nil {
+		return invalid("no cache to record the %s ID", kind)
+	}
+	sum := sha256.Sum256([]byte(id))
+	key := fmt.Sprintf("saml_%s_%d_%s", kind, sourceID, hex.EncodeToString(sum[:]))
 
 	replayMu.Lock()
 	defer replayMu.Unlock()
 	if c.IsExist(key) {
-		return invalid("the assertion was used before")
+		return invalid("the %s was used before", kind)
 	}
-	if err := c.Put(key, 1, int64(ttl/time.Second)); err != nil {
-		return invalid("record the assertion ID: %v", err)
+	if err := c.Put(key, 1, int64(ttl/time.Second)+1); err != nil {
+		return invalid("record the %s ID: %v", kind, err)
 	}
 	return nil
 }
@@ -209,13 +231,21 @@ func (source *Source) toAssertion(a *saml.Assertion) (*Assertion, error) {
 	for name, values := range attrs {
 		rawData[name] = values
 	}
-	username := first(attrs[source.UsernameAttribute])
-	rawData["preferred_username"] = username
-
+	// one value each: with several, which one would decide the account is up to the IdP's order
+	for _, name := range []string{source.UsernameAttribute, source.EmailAttribute} {
+		if len(attrs[name]) > 1 {
+			return nil, invalid("the attribute %q has %d values", name, len(attrs[name]))
+		}
+	}
 	email := first(attrs[source.EmailAttribute])
 	if email == "" && nameID.Format == string(saml.EmailAddressNameIDFormat) {
 		email = nameID.Value
 	}
+	username := first(attrs[source.UsernameAttribute])
+	if username == "" {
+		username, _, _ = strings.Cut(email, "@")
+	}
+	rawData["preferred_username"] = username
 
 	result := &Assertion{
 		User: goth.User{

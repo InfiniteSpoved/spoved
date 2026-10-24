@@ -235,7 +235,7 @@ func parseSAMLConfig(form forms.AuthenticationForm) *saml.Source {
 		ForceAuthn:                 form.SAMLForceAuthn,
 		AllowIDPInitiated:          form.SAMLAllowIDPInitiated,
 		IconURL:                    form.SAMLIconURL,
-		SkipLocalTwoFA:             form.SkipLocalTwoFA,
+		SkipLocalTwoFA:             form.SAMLSkipLocalTwoFA,
 		RequiredClaimName:          form.SAMLRequiredClaimName,
 		RequiredClaimValue:         form.SAMLRequiredClaimValue,
 		GroupClaimName:             form.SAMLGroupClaimName,
@@ -323,6 +323,7 @@ func validateSAMLConfig(ctx *context.Context, form forms.AuthenticationForm, con
 		if ve, ok := errors.AsType[*saml.ValidationError](err); ok {
 			ctx.Data["Err_SAML_"+ve.Field] = true
 			text = samlErrorText(ctx, ve)
+			ctx.Data["SAMLError"] = text // also shown under the field, far down the form
 		}
 		ctx.RenderWithErr(text, tpl, form)
 		return false
@@ -404,10 +405,11 @@ func NewAuthSourcePost(ctx *context.Context) {
 		}
 	case auth.SAML:
 		samlConfig := parseSAMLConfig(form)
-		samlConfig.SPPrivateKey = "" // never rendered back into the form
+		shown := *samlConfig
+		shown.SPPrivateKey = "" // never rendered back into the form
 		ctx.Data["SAMLKeyCleared"] = form.SAMLSPPrivateKey != ""
-		ctx.Data["SAMLConfig"] = samlConfig
-		config = parseSAMLConfig(form)
+		ctx.Data["SAMLConfig"] = &shown
+		config = samlConfig
 		if !ctx.HasError() && !validateSAMLConfig(ctx, form, config.(*saml.Source), tplAuthNew) {
 			return
 		}

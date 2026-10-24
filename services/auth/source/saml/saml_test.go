@@ -317,10 +317,8 @@ func TestParseResponse(t *testing.T) {
 		o := f.defaults()
 		o.inResponseTo = ""
 		resp := f.response(t, o)
-		// never accepted, also when IdP-initiated sign-in is on: the ACS starts a sign-in of its own instead
-		f.source.AllowIDPInitiated = true
-		defer func() { f.source.AllowIDPInitiated = false }()
-		_, err := f.source.ParseResponse(f.serviceProvider(t), resp, "")
+		// never accepted: with IdP-initiated sign-in on, the ACS starts a sign-in of its own instead
+		_, err := f.source.ParseResponse(sp, resp, "")
 		require.ErrorContains(t, err, "no sign-in was started")
 
 		// a browser that started a sign-in takes only the answer to its own request
@@ -328,6 +326,21 @@ func TestParseResponse(t *testing.T) {
 			o.inResponseTo = inResponseTo
 			_, err = f.source.ParseResponse(f.serviceProvider(t), f.response(t, o), "id-request")
 			require.ErrorAs(t, err, &ErrInvalidResponse{}, inResponseTo)
+		}
+	})
+
+	t.Run("username and email", func(t *testing.T) {
+		o := f.defaults()
+		delete(o.attrs, "uid")
+		a, err := f.source.ParseResponse(sp, f.response(t, o), "id-request")
+		require.NoError(t, err)
+		assert.Equal(t, "alice", a.User.NickName, "taken from the email address")
+
+		for _, name := range []string{"uid", "mail"} {
+			o := f.defaults()
+			o.attrs[name] = append(o.attrs[name], "other@example.com")
+			_, err := f.source.ParseResponse(sp, f.response(t, o), "id-request")
+			require.ErrorContains(t, err, "values", name)
 		}
 	})
 
@@ -458,6 +471,13 @@ func TestEncryptedAssertions(t *testing.T) {
 		require.ErrorContains(t, checkNoPlainAssertion([]byte(xml)), "unencrypted assertion")
 	}
 	require.NoError(t, checkNoPlainAssertion([]byte(`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"><EncryptedAssertion/></samlp:Response>`)))
+
+	// RSA PKCS#1 v1.5 key transport is refused, OAEP is accepted
+	keyTransport := func(alg string) []byte {
+		return []byte(`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" xmlns:xenc="http://www.w3.org/2001/04/xmlenc#"><saml:EncryptedAssertion><xenc:EncryptedData><xenc:EncryptedKey><xenc:EncryptionMethod Algorithm="` + alg + `"/></xenc:EncryptedKey></xenc:EncryptedData></saml:EncryptedAssertion></samlp:Response>`)
+	}
+	require.ErrorContains(t, checkKeyTransport(keyTransport("http://www.w3.org/2001/04/xmlenc#rsa-1_5")), "PKCS#1 v1.5")
+	require.NoError(t, checkKeyTransport(keyTransport("http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p")))
 }
 
 func TestLogout(t *testing.T) {
@@ -505,18 +525,21 @@ func TestLogout(t *testing.T) {
 	}
 	sloURL := "https://forge.example.com/user/saml/corp/slo"
 
-	req, relay, err := ParseLogoutRequest(sp, idpLogoutRequest(t, f.idp, sloURL, true))
+	signed := idpLogoutRequest(t, f.idp, sloURL, true)
+	req, relay, err := f.source.ParseLogoutRequest(sp, signed)
 	require.NoError(t, err)
 	assert.Equal(t, "alice-guid", req.NameID.Value)
 	assert.Equal(t, "relay", relay)
+	_, _, err = f.source.ParseLogoutRequest(sp, signed)
+	require.ErrorContains(t, err, "used before")
 
-	_, _, err = ParseLogoutRequest(sp, idpLogoutRequest(t, f.idp, sloURL, false))
+	_, _, err = f.source.ParseLogoutRequest(sp, idpLogoutRequest(t, f.idp, sloURL, false))
 	require.ErrorContains(t, err, "not signed")
-	_, _, err = ParseLogoutRequest(sp, idpLogoutRequest(t, newKeyPair(t), sloURL, true))
+	_, _, err = f.source.ParseLogoutRequest(sp, idpLogoutRequest(t, newKeyPair(t), sloURL, true))
 	require.ErrorContains(t, err, "does not match")
-	_, _, err = ParseLogoutRequest(sp, idpLogoutRequest(t, f.idp, "https://evil.example.com/slo", true))
+	_, _, err = f.source.ParseLogoutRequest(sp, idpLogoutRequest(t, f.idp, "https://evil.example.com/slo", true))
 	require.ErrorContains(t, err, "is for")
-	_, _, err = ParseLogoutRequest(sp, idpLogoutRequest(t, f.idp, sloURL, true)+"&SigAlg=x")
+	_, _, err = f.source.ParseLogoutRequest(sp, idpLogoutRequest(t, f.idp, sloURL, true)+"&SigAlg=x")
 	require.ErrorContains(t, err, "duplicate")
 
 	// a parameter name spelled with escapes is not covered by the signature, so it is refused
@@ -530,7 +553,7 @@ func TestLogout(t *testing.T) {
 	require.NoError(t, err)
 	forgedMessage := url.QueryEscape(parsedForged.Query().Get("SAMLRequest"))
 	for _, prefix := range []string{"SAML%52equest=" + forgedMessage, "Relay%53tate=https%3A%2F%2Fevil.example.com%2F"} {
-		_, _, err = ParseLogoutRequest(sp, prefix+"&"+idpLogoutRequest(t, f.idp, sloURL, true))
+		_, _, err = f.source.ParseLogoutRequest(sp, prefix+"&"+idpLogoutRequest(t, f.idp, sloURL, true))
 		require.ErrorContains(t, err, "encoded", prefix)
 	}
 

@@ -197,6 +197,7 @@ export function initAdminCommon() {
           showElem('.saml');
           break;
       }
+      toggleElem('.auth-tips', authType !== '9'); // the tips are about other types
       if (authType === '2' || authType === '5') {
         onSecurityProtocolChange();
         onEnableLdapGroupsChange();
@@ -243,7 +244,11 @@ export function initAdminCommon() {
       const customEntityID = document.getElementById('saml_sp_entity_id');
       const setSAMLURLs = () => {
         const name = authNameEl.value;
-        const base = name ? `${window.location.origin}${appSubUrl}/user/saml/${encodeURIComponent(name)}` : '';
+        // the server's own URL and path escaping (Go's url.PathEscape), so the copied URLs are the ones it uses
+        const segment = encodeURIComponent(name)
+          .replace(/%(24|26|2B|3A|3D|40)/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+          .replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+        const base = name ? `${samlEntityID.closest('.saml-sp-urls').getAttribute('data-saml-base')}${segment}` : '';
         document.getElementById('saml-acs-url').value = base && `${base}/acs`;
         document.getElementById('saml-slo-url').value = base && `${base}/slo`;
         document.getElementById('saml-metadata-url').value = base && `${base}/metadata`;

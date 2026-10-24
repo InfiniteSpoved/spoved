@@ -1,5 +1,5 @@
 {{$cfg := .SAMLConfig}}
-<div class="ui segment saml-sp-urls">
+<div class="ui segment saml-sp-urls" data-saml-base="{{AppUrl}}user/saml/">
 	<h5 class="ui header">{{ctx.Locale.Tr "admin.auths.saml_configure_idp"}}</h5>
 	<p class="help">{{ctx.Locale.Tr "admin.auths.saml_configure_idp_help"}}</p>
 	{{template "admin/auth/source/saml_url" (dict "id" "saml-entity-id" "label" (ctx.Locale.Tr "admin.auths.saml_sp_entity_id_label") "value" .SAMLEntityID "hint" (ctx.Locale.Tr "admin.auths.saml_sp_entity_id_hint") "waiting" (ctx.Locale.Tr "admin.auths.saml_sp_urls_waiting") "copy" (ctx.Locale.Tr "copy"))}}
@@ -17,28 +17,34 @@
 	<label for="saml_idp_metadata_url">{{ctx.Locale.Tr "admin.auths.saml_idp_metadata_url"}}</label>
 	<input id="saml_idp_metadata_url" name="saml_idp_metadata_url" type="url" value="{{$cfg.IDPMetadataURL}}" placeholder="https://idp.example.com/metadata">
 	<p class="help">{{ctx.Locale.Tr "admin.auths.saml_idp_metadata_url_help"}}</p>
+	{{if .Err_SAML_idp_metadata_url}}<p class="help tw-text-red">{{$.SAMLError}}</p>{{end}}
 </div>
 <div class="field {{if .Err_SAML_idp_metadata}}error{{end}}">
 	<label for="saml_idp_metadata">{{ctx.Locale.Tr "admin.auths.saml_idp_metadata"}}</label>
 	<textarea id="saml_idp_metadata" name="saml_idp_metadata" rows="4" placeholder="<EntityDescriptor …>">{{$cfg.IDPMetadata}}</textarea>
+	{{if .Err_SAML_idp_metadata}}<p class="help tw-text-red">{{$.SAMLError}}</p>{{end}}
 </div>
-<h6 class="ui header">{{ctx.Locale.Tr "admin.auths.saml_idp_manual"}}</h6>
+<h5 class="ui header">{{ctx.Locale.Tr "admin.auths.saml_idp_manual"}}</h5>
 <div class="field {{if .Err_SAML_idp_entity_id}}error{{end}}">
 	<label for="saml_idp_entity_id">{{ctx.Locale.Tr "admin.auths.saml_idp_entity_id"}}</label>
 	<input id="saml_idp_entity_id" name="saml_idp_entity_id" value="{{$cfg.IDPEntityID}}">
 	<p class="help">{{ctx.Locale.Tr "admin.auths.saml_idp_entity_id_help"}}</p>
+	{{if .Err_SAML_idp_entity_id}}<p class="help tw-text-red">{{$.SAMLError}}</p>{{end}}
 </div>
 <div class="field {{if .Err_SAML_idp_sso_url}}error{{end}}">
 	<label for="saml_idp_sso_url">{{ctx.Locale.Tr "admin.auths.saml_idp_sso_url"}}</label>
 	<input id="saml_idp_sso_url" name="saml_idp_sso_url" type="url" value="{{$cfg.IDPSSOURL}}">
+	{{if .Err_SAML_idp_sso_url}}<p class="help tw-text-red">{{$.SAMLError}}</p>{{end}}
 </div>
 <div class="field {{if .Err_SAML_idp_slo_url}}error{{end}}">
 	<label for="saml_idp_slo_url">{{ctx.Locale.Tr "admin.auths.saml_idp_slo_url"}}</label>
 	<input id="saml_idp_slo_url" name="saml_idp_slo_url" type="url" value="{{$cfg.IDPSLOURL}}">
+	{{if .Err_SAML_idp_slo_url}}<p class="help tw-text-red">{{$.SAMLError}}</p>{{end}}
 </div>
 <div class="field {{if .Err_SAML_idp_certificate}}error{{end}}">
 	<label for="saml_idp_certificate">{{ctx.Locale.Tr "admin.auths.saml_idp_certificate"}}</label>
 	<textarea id="saml_idp_certificate" name="saml_idp_certificate" rows="4" placeholder="-----BEGIN CERTIFICATE-----">{{$cfg.IDPCertificate}}</textarea>
+	{{if .Err_SAML_idp_certificate}}<p class="help tw-text-red">{{$.SAMLError}}</p>{{end}}
 </div>
 
 <h5 class="ui dividing header">{{ctx.Locale.Tr "admin.auths.saml_sp"}}</h5>
@@ -46,22 +52,26 @@
 	<label for="saml_sp_entity_id">{{ctx.Locale.Tr "admin.auths.saml_sp_entity_id"}}</label>
 	<input id="saml_sp_entity_id" name="saml_sp_entity_id" value="{{$cfg.SPEntityID}}">
 	<p class="help">{{ctx.Locale.Tr "admin.auths.saml_sp_entity_id_help"}}</p>
+	{{if .Err_SAML_sp_entity_id}}<p class="help tw-text-red">{{$.SAMLError}}</p>{{end}}
 </div>
 <div class="field {{if .Err_SAML_sp_certificate}}error{{end}}">
 	<label for="saml_sp_certificate">{{ctx.Locale.Tr "admin.auths.saml_sp_certificate"}}</label>
 	<textarea id="saml_sp_certificate" name="saml_sp_certificate" rows="4" placeholder="-----BEGIN CERTIFICATE-----">{{$cfg.SPCertificate}}</textarea>
+	{{if .Err_SAML_sp_certificate}}<p class="help tw-text-red">{{$.SAMLError}}</p>{{end}}
 </div>
 <div class="field {{if .Err_SAML_sp_private_key}}error{{end}}">
 	<label for="saml_sp_private_key">{{ctx.Locale.Tr "admin.auths.saml_sp_private_key"}}</label>
 	<textarea id="saml_sp_private_key" name="saml_sp_private_key" rows="4" autocomplete="off" placeholder="{{if .SAMLHasPrivateKey}}{{ctx.Locale.Tr "admin.auths.saml_sp_private_key_stored"}}{{else}}-----BEGIN PRIVATE KEY-----{{end}}"></textarea>
 	{{if .SAMLKeyCleared}}<p class="help tw-text-red">{{ctx.Locale.Tr "admin.auths.saml_private_key_again"}}</p>{{end}}
 	<p class="help">{{ctx.Locale.Tr "admin.auths.saml_sp_private_key_help"}}</p>
+	{{if .Err_SAML_sp_private_key}}<p class="help tw-text-red">{{$.SAMLError}}</p>{{end}}
 </div>
 <div class="field {{if .Err_SAML_sign_requests}}error{{end}}">
 	<div class="ui checkbox">
 		<label for="saml_sign_requests"><strong>{{ctx.Locale.Tr "admin.auths.saml_sign_requests"}}</strong></label>
 		<input id="saml_sign_requests" name="saml_sign_requests" type="checkbox" {{if $cfg.SignRequests}}checked{{end}}>
 		<p class="help">{{ctx.Locale.Tr "admin.auths.saml_sign_requests_help"}}</p>
+		{{if .Err_SAML_sign_requests}}<p class="help tw-text-red">{{$.SAMLError}}</p>{{end}}
 	</div>
 </div>
 <div class="field {{if .Err_SAML_require_encrypted_assertions}}error{{end}}">
@@ -69,6 +79,7 @@
 		<label for="saml_require_encrypted_assertions"><strong>{{ctx.Locale.Tr "admin.auths.saml_require_encrypted_assertions"}}</strong></label>
 		<input id="saml_require_encrypted_assertions" name="saml_require_encrypted_assertions" type="checkbox" {{if $cfg.RequireEncryptedAssertions}}checked{{end}}>
 		<p class="help">{{ctx.Locale.Tr "admin.auths.saml_require_encrypted_assertions_help"}}</p>
+		{{if .Err_SAML_require_encrypted_assertions}}<p class="help tw-text-red">{{$.SAMLError}}</p>{{end}}
 	</div>
 </div>
 
@@ -88,6 +99,7 @@
 	<label for="saml_user_id_attribute">{{ctx.Locale.Tr "admin.auths.saml_user_id_attribute"}}</label>
 	<input id="saml_user_id_attribute" name="saml_user_id_attribute" value="{{$cfg.UserIDAttribute}}" placeholder="objectGUID">
 	<p class="help">{{ctx.Locale.Tr "admin.auths.saml_user_id_attribute_help"}}</p>
+	{{if .Err_SAML_user_id_attribute}}<p class="help tw-text-red">{{$.SAMLError}}</p>{{end}}
 </div>
 <div class="field">
 	<label for="saml_username_attribute">{{ctx.Locale.Tr "admin.auths.saml_username_attribute"}}</label>
@@ -127,7 +139,7 @@
 <div class="field">
 	<div class="ui checkbox">
 		<label for="saml_skip_local_two_fa"><strong>{{ctx.Locale.Tr "admin.auths.saml_skip_local_two_fa"}}</strong></label>
-		<input id="saml_skip_local_two_fa" name="skip_local_two_fa" type="checkbox" {{if $cfg.SkipLocalTwoFA}}checked{{end}}>
+		<input id="saml_skip_local_two_fa" name="saml_skip_local_two_fa" type="checkbox" {{if $cfg.SkipLocalTwoFA}}checked{{end}}>
 		<p class="help">{{ctx.Locale.Tr "admin.auths.saml_skip_local_two_fa_help"}}</p>
 	</div>
 </div>
@@ -156,7 +168,7 @@
 	<label for="saml_restricted_group">{{ctx.Locale.Tr "admin.auths.saml_restricted_group"}}</label>
 	<input id="saml_restricted_group" name="saml_restricted_group" value="{{$cfg.RestrictedGroup}}">
 </div>
-<div class="field">
+<div class="field {{if .Err_SAMLGroupTeamMap}}error{{end}}">
 	<label for="saml_group_team_map">{{ctx.Locale.Tr "admin.auths.saml_map_group_to_team"}}</label>
 	<textarea id="saml_group_team_map" name="saml_group_team_map" rows="5" placeholder='{"Developer": {"MyOrganization": ["MyTeam1", "MyTeam2"]}}'>{{$cfg.GroupTeamMap}}</textarea>
 </div>
@@ -166,7 +178,7 @@
 		<input id="saml_group_team_map_removal" name="saml_group_team_map_removal" type="checkbox" {{if $cfg.GroupTeamMapRemoval}}checked{{end}}>
 	</div>
 </div>
-<div class="field {{if .Err_GroupUserGroupMap}}error{{end}}">
+<div class="field {{if or .Err_GroupUserGroupMap .Err_SAMLGroupUserGroupMap}}error{{end}}">
 	<label for="saml_group_user_group_map">{{ctx.Locale.Tr "admin.auths.saml_map_group_to_user_group"}}</label>
 	<textarea id="saml_group_user_group_map" name="saml_group_user_group_map" rows="5" placeholder='{"Developer": ["my-user-group"]}'>{{$cfg.GroupUserGroupMap}}</textarea>
 </div>
@@ -176,7 +188,7 @@
 		<input id="saml_group_user_group_map_removal" name="saml_group_user_group_map_removal" type="checkbox" {{if $cfg.GroupUserGroupMapRemoval}}checked{{end}}>
 	</div>
 </div>
-<div class="field">
+<div class="field {{if .Err_SAMLDynGroupMaps}}error{{end}}">
 	<label for="saml_dyn_group_maps">{{ctx.Locale.Tr "admin.auths.saml_dyn_group_maps"}}</label>
 	<textarea id="saml_dyn_group_maps" name="saml_dyn_group_maps" rows="3" placeholder='["group-{org}-{team}"]'>{{$cfg.DynGroupMaps}}</textarea>
 </div>
@@ -190,7 +202,7 @@
 	<label for="saml_quota_group_claim_name">{{ctx.Locale.Tr "admin.auths.saml_quota_group_claim_name"}}</label>
 	<input id="saml_quota_group_claim_name" name="saml_quota_group_claim_name" value="{{$cfg.QuotaGroupClaimName}}">
 </div>
-<div class="field">
+<div class="field {{if .Err_SAMLQuotaGroupMap}}error{{end}}">
 	<label for="saml_quota_group_map">{{ctx.Locale.Tr "admin.auths.saml_quota_group_map"}}</label>
 	<textarea id="saml_quota_group_map" name="saml_quota_group_map" rows="3" placeholder='{"Developer": ["MyQuotaGroup"]}'>{{$cfg.QuotaGroupMap}}</textarea>
 </div>

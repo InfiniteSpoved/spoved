@@ -32,6 +32,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
+	saml_source "forgejo.org/services/auth/source/saml"
 	"forgejo.org/tests"
 
 	"github.com/beevik/etree"
@@ -378,7 +379,7 @@ func TestSAMLIDPInitiated(t *testing.T) {
 func (p *samlTestIDP) logoutRequest(name, nameID string, sign bool) string {
 	p.t.Helper()
 	req := saml.LogoutRequest{
-		ID:           "id-logout-" + nameID,
+		ID:           fmt.Sprintf("id-logout-%s-%d", nameID, time.Now().UnixNano()),
 		Version:      "2.0",
 		IssueInstant: time.Now(),
 		Destination:  setting.AppURL + "user/saml/" + name + "/slo",
@@ -425,10 +426,46 @@ func TestSAMLSingleLogout(t *testing.T) {
 		assert.Equal(t, "alice", signedInAs(t, session))
 	})
 
+	logout := p.logoutRequest("corp", "guid-alice", true)
 	t.Run("the user's logout signs out", func(t *testing.T) {
-		resp := session.MakeRequest(t, NewRequest(t, "GET", "/user/saml/corp/slo?"+p.logoutRequest("corp", "guid-alice", true)), http.StatusSeeOther)
+		resp := session.MakeRequest(t, NewRequest(t, "GET", "/user/saml/corp/slo?"+logout), http.StatusSeeOther)
 		assert.True(t, strings.HasPrefix(test.RedirectURL(resp), "https://idp.example.com/slo?SAMLResponse="))
 		assert.Empty(t, signedInAs(t, session))
+	})
+
+	t.Run("a logout request is used once", func(t *testing.T) {
+		session := emptyTestSession(t)
+		postACS(t, session, "corp", samlSignIn(t, session, "corp", p, samlSession("guid-alice", "alice")))
+		session.MakeRequest(t, NewRequest(t, "GET", "/user/saml/corp/slo?"+logout), http.StatusBadRequest)
+		assert.Equal(t, "alice", signedInAs(t, session))
+	})
+
+	t.Run("switching to another account follows the new user", func(t *testing.T) {
+		carol := emptyTestSession(t)
+		postACS(t, carol, "corp", samlSignIn(t, carol, "corp", p, samlSession("guid-carol", "carol")))
+		session := emptyTestSession(t)
+		postACS(t, session, "corp", samlSignIn(t, session, "corp", p, samlSession("guid-alice", "alice")))
+		postACS(t, session, "corp", samlSignIn(t, session, "corp", p, samlSession("guid-carol", "carol")))
+		require.Equal(t, "carol", signedInAs(t, session))
+
+		session.MakeRequest(t, NewRequest(t, "GET", "/user/saml/corp/slo?"+p.logoutRequest("corp", "guid-alice", true)), http.StatusSeeOther)
+		assert.Equal(t, "carol", signedInAs(t, session))
+		session.MakeRequest(t, NewRequest(t, "GET", "/user/saml/corp/slo?"+p.logoutRequest("corp", "guid-carol", true)), http.StatusSeeOther)
+		assert.Empty(t, signedInAs(t, session))
+	})
+
+	t.Run("an unfinished sign-in doesn't follow a password sign-in", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.OAuth2Client.EnableAutoRegistration, false)()
+		session := emptyTestSession(t)
+		resp := postACS(t, session, "corp", samlSignIn(t, session, "corp", p, samlSession("guid-mallory", "mallory")))
+		require.Equal(t, "/user/link_account", test.RedirectURL(resp))
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user/login", map[string]string{
+			"user_name": "user2",
+			"password":  userPassword,
+		}), http.StatusSeeOther)
+		require.Equal(t, "user2", signedInAs(t, session))
+		session.MakeRequest(t, NewRequest(t, "GET", "/user/saml/corp/slo?"+p.logoutRequest("corp", "guid-mallory", true)), http.StatusSeeOther)
+		assert.Equal(t, "user2", signedInAs(t, session))
 	})
 }
 
@@ -458,6 +495,7 @@ func TestSAMLAdminForm(t *testing.T) {
 		doc := NewHTMLParser(t, resp.Body)
 		assert.Equal(t, 1, doc.Find(".saml-sp-urls ~ .field.error").Length())
 		assert.Equal(t, 1, doc.Find(".field.error #saml_idp_metadata").Length())
+		assert.Equal(t, 1, doc.Find(".field.error .help.tw-text-red").Length(), "the message is shown under the field")
 	})
 
 	t.Run("a private key is stored encrypted and never shown", func(t *testing.T) {
@@ -484,5 +522,37 @@ func TestSAMLAdminForm(t *testing.T) {
 		// the SP metadata names the key, and requests are signed
 		assert.NotNil(t, p.sp.SPSSODescriptors[0].KeyDescriptors)
 		assert.Contains(t, samlStart(t, emptyTestSession(t), "signed"), "&Signature=")
+
+		edit := func(t *testing.T, values map[string]string) *saml_source.Source {
+			payload := map[string]string{
+				"type":                fmt.Sprintf("%d", auth.SAML),
+				"name":                "signed",
+				"is_active":           "on",
+				"saml_idp_metadata":   p.metadataXML(),
+				"saml_name_id_format": string(saml.PersistentNameIDFormat),
+			}
+			maps.Copy(payload, values)
+			session.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/admin/auths/%d", signed.ID), payload), http.StatusSeeOther)
+			return unittest.AssertExistsAndLoadBean(t, &auth.Source{ID: signed.ID}).Cfg.(*saml_source.Source)
+		}
+		t.Run("an edit without the key keeps it", func(t *testing.T) {
+			cfg := edit(t, map[string]string{"saml_sp_certificate": certPEM, "saml_sign_requests": "on"})
+			assert.Contains(t, cfg.SPPrivateKey, "PRIVATE KEY")
+			assert.Contains(t, samlStart(t, emptyTestSession(t), "signed"), "&Signature=")
+		})
+		t.Run("an edit without certificate and key removes both", func(t *testing.T) {
+			cfg := edit(t, nil)
+			assert.Empty(t, cfg.SPCertificate)
+			assert.Empty(t, cfg.SPPrivateKey)
+			assert.NotContains(t, samlStart(t, emptyTestSession(t), "signed"), "&Signature=")
+		})
+	})
+
+	t.Run("only the SAML checkbox skips local 2FA", func(t *testing.T) {
+		// the hidden OAuth2 section of the add page has a checkbox of its own
+		source := addSAMLSource(t, "twofa", p, map[string]string{"skip_local_two_fa": "on"})
+		assert.False(t, source.Cfg.(*saml_source.Source).SkipLocalTwoFA)
+		source = addSAMLSource(t, "twofa2", p, map[string]string{"saml_skip_local_two_fa": "on"})
+		assert.True(t, source.Cfg.(*saml_source.Source).SkipLocalTwoFA)
 	})
 }
