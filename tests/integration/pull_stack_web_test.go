@@ -21,6 +21,7 @@ import (
 	"forgejo.org/modules/git"
 	api "forgejo.org/modules/structs"
 	commitstatus_service "forgejo.org/services/repository/commitstatus"
+	"forgejo.org/tests/forgery"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
@@ -129,15 +130,114 @@ func TestPullStackWeb(t *testing.T) {
 			assert.Zero(t, doc.Find("#pull-stack-merge button").Length())
 			assert.Zero(t, doc.Find("#merge-stack").Length())
 
-			// a failing check below blocks the button and names the pull request
+			// a failing check the rules don't require is a warning only
 			require.NoError(t, commitstatus_service.CreateCommitStatus(db.DefaultContext, repo, user2, heads[0].HeadCommitID,
 				&git_model.CommitStatus{State: api.CommitStatusFailure, Context: "ci"}))
 			doc = stackPage(t, owner, repo, prs[2])
-			assert.Contains(t, doc.Find("#pull-stack-merge").Text(), fmt.Sprintf("#%d can't be merged yet (checks failed)", prs[0].Index))
+			assert.Contains(t, doc.Find("#pull-stack-merge").Text(), fmt.Sprintf("#%d has failing checks that the rules don't require", prs[0].Index))
+			_, disabled = doc.Find("#pull-stack-merge button").Attr("disabled")
+			assert.False(t, disabled)
+			assert.Equal(t, 1, doc.Find("#merge-stack").Length())
+			assert.Contains(t, doc.Find("details.pull-stack li").First().Text(), "Checks failed")
+
+			// a required one blocks the button and names the pull request
+			require.NoError(t, git_model.UpdateProtectBranch(db.DefaultContext, repo, &git_model.ProtectedBranch{
+				RepoID:              repo.ID,
+				RuleName:            "main",
+				EnableStatusCheck:   true,
+				StatusCheckContexts: []string{"ci"},
+			}, git_model.WhitelistOptions{}))
+			doc = stackPage(t, owner, repo, prs[2])
+			assert.Contains(t, doc.Find("#pull-stack-merge").Text(), fmt.Sprintf("#%d can't be merged yet (required checks failed)", prs[0].Index))
+			assert.Equal(t, fmt.Sprintf("%s/pulls/%d", repo.Link(), prs[0].Index), doc.Find("#merge-stack-blocked a").AttrOr("href", ""))
 			_, disabled = doc.Find("#pull-stack-merge button").Attr("disabled")
 			assert.True(t, disabled)
+			assert.Equal(t, "merge-stack-blocked", doc.Find("#pull-stack-merge button").AttrOr("aria-describedby", ""))
 			assert.Zero(t, doc.Find("#merge-stack").Length())
-			assert.Contains(t, doc.Find("details.pull-stack li").First().Text(), "Checks failed")
+
+			// a pending required one too
+			require.NoError(t, commitstatus_service.CreateCommitStatus(db.DefaultContext, repo, user2, heads[0].HeadCommitID,
+				&git_model.CommitStatus{State: api.CommitStatusPending, Context: "ci"}))
+			doc = stackPage(t, owner, repo, prs[2])
+			assert.Contains(t, doc.Find("#pull-stack-merge").Text(), fmt.Sprintf("#%d can't be merged yet (waiting for required checks)", prs[0].Index))
+		})
+
+		t.Run("Labels", func(t *testing.T) {
+			repo, prs := newPullStack(t, user2, nil)
+			doc := stackPage(t, owner, repo, prs[2])
+			// the merge button of the box says it merges this pull request only
+			assert.Contains(t, doc.Find("script").Text(), "Merge this pull request only")
+			assert.Equal(t, "merge-stack-title", doc.Find("#merge-stack").AttrOr("aria-labelledby", ""))
+			assert.Equal(t, 1, doc.Find("#merge-stack-title").Length())
+			// the list announces its own numbers
+			assert.True(t, strings.HasPrefix(strings.TrimSpace(doc.Find("details.pull-stack li.pull-stack-row").First().Text()), "#"))
+		})
+
+		t.Run("Branching", func(t *testing.T) {
+			repo, prs := newPullStack(t, user2, nil)
+			stackCommit(t, user2, repo, "a", "d", "create", "d.txt", "d")
+			d := stackPull(t, user2, repo, "a", "d")
+
+			// a stack indents only where it branches
+			doc := stackPage(t, owner, repo, prs[0])
+			rows := doc.Find("details.pull-stack li.pull-stack-row")
+			require.Equal(t, 4, rows.Length())
+			indented := []bool{}
+			rows.Each(func(_ int, row *goquery.Selection) { indented = append(indented, row.HasClass("is-branch")) })
+			assert.Equal(t, []bool{false, true, false, true}, indented) // a, b, c on b, d
+			assert.Contains(t, rows.Eq(3).Text(), fmt.Sprintf("also on #%d", prs[0].Index))
+			assert.NotContains(t, rows.Eq(1).Text(), "also on")
+
+			// the dialog names the pull request the panel does not show, which moves too
+			doc = stackPage(t, owner, repo, prs[2])
+			text := strings.Join(strings.Fields(doc.Find("#merge-stack p").Text()), " ")
+			assert.Contains(t, text, fmt.Sprintf("#%d stays open and moves onto main.", d.Index))
+			assert.Equal(t, fmt.Sprintf("%s/pulls/%d", repo.Link(), d.Index), doc.Find("#merge-stack p a").AttrOr("href", ""))
+
+			flash := postMergeStack(t, owner, repo, prs[2], stackValues(stackFormHeads(doc), false))
+			assert.Equal(t, "Merged 3 pull requests into main.", flash)
+			assert.Equal(t, "main", unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: d.ID}).BaseBranch)
+		})
+
+		t.Run("Stopped", func(t *testing.T) {
+			repo := forgery.CreateRepository(t, user2, &forgery.CreateRepositoryOptions{
+				Files: forgery.MapFS{"f.txt": forgery.MapFile("one\n")},
+			})
+			stackCommit(t, user2, repo, "main", "a", "update", "f.txt", "one\ntwo\n")
+			stackCommit(t, user2, repo, "a", "a", "update", "f.txt", "one\ntwo\nthree\n")
+			a := stackPull(t, user2, repo, "main", "a")
+			stackCommit(t, user2, repo, "a", "b", "update", "f.txt", "one\nTWO\nthree\n")
+			b := stackPull(t, user2, repo, "a", "b")
+
+			// the squashed commit of a is no ancestor of b: b conflicts with main after the retarget
+			values := stackValues(stackFormHeads(stackPage(t, owner, repo, b)), false)
+			values.Set("do", "squash")
+			flash := postMergeStack(t, owner, repo, b, values)
+			assert.Equal(t, fmt.Sprintf("Merged 1 of 2 pull requests, then stopped at #%[2]d: it is not in a mergeable state, for example because of merge conflicts. #%[1]d is merged into main. #%[2]d is still open and now targets main. Fix #%[2]d, then merge it again.", a.Index, b.Index), flash)
+		})
+
+		t.Run("Conflict", func(t *testing.T) {
+			repo := forgery.CreateRepository(t, user2, &forgery.CreateRepositoryOptions{
+				Files: forgery.MapFS{"f.txt": forgery.MapFile("one\ntwo\nthree\n")},
+			})
+			stackCommit(t, user2, repo, "main", "a", "create", "a.txt", "a")
+			stackPull(t, user2, repo, "main", "a")
+			stackCommit(t, user2, repo, "a", "b", "update", "f.txt", "one\nB\nthree\n")
+			stackPull(t, user2, repo, "a", "b")
+			stackCommit(t, user2, repo, "b", "c", "create", "c.txt", "c")
+			c := stackPull(t, user2, repo, "b", "c")
+			stackCommit(t, user2, repo, "c", "c", "update", "f.txt", "one\nC\nthree\n")
+			// b changes the same line as c, which is based on the old b
+			stackCommit(t, user2, repo, "b", "b", "update", "f.txt", "one\nB again\nthree\n")
+			require.True(t, assert.Eventually(t, func() bool {
+				return unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: c.ID}).Status == issues_model.PullRequestStatusConflict
+			}, 10*time.Second, 50*time.Millisecond))
+
+			doc := stackPage(t, owner, repo, c)
+			assert.Contains(t, doc.Find("details.pull-stack li").Last().Text(), "Merge conflicts")
+			assert.Contains(t, doc.Find("#pull-stack-merge").Text(), fmt.Sprintf("#%d can't be merged yet (merge conflicts)", c.Index))
+			_, disabled := doc.Find("#pull-stack-merge button").Attr("disabled")
+			assert.True(t, disabled)
 		})
 
 		t.Run("Merge", func(t *testing.T) {

@@ -45,7 +45,12 @@
 		</div>
 		{{end}}
 		{{$showGeneralMergeForm := false}}
+		{{$stackedOnly := and .Stack .Stack.Parent (not .Issue.IsClosed) (not .Issue.PullRequest.HasMerged)}}
 		<div class="ui attached segment merge-section {{if not $.LatestCommitStatus}}no-header{{end}} flex-items-block">
+			{{if $stackedOnly}}
+				{{template "repo/issue/view_content/stack_merge" .}}
+				<div class="divider"></div>
+			{{end}}
 			{{if .Issue.PullRequest.HasMerged}}
 				{{if or .IsPullBranchDeletable .CanRevertPull}}
 					<div class="item item-section text tw-flex-1">
@@ -325,7 +330,7 @@
 								{
 									'name': 'merge',
 									'allowed': {{and $prConfig.AllowMerge (or (not .RequireSigned) .WillSign)}},
-									'textDoMerge': {{ctx.Locale.Tr "repo.pulls.merge_pull_request"}},
+									'textDoMerge': {{if $stackedOnly}}{{ctx.Locale.Tr "repo.pulls.stack.merge_only"}}{{else}}{{ctx.Locale.Tr "repo.pulls.merge_pull_request"}}{{end}},
 									'mergeTitleFieldText': defaultMergeTitle,
 									'mergeMessageFieldText': defaultMergeMessage,
 									'hideAutoMerge': generalHideAutoMerge,
@@ -333,14 +338,14 @@
 								{
 									'name': 'rebase',
 									'allowed': {{and $prConfig.AllowRebase (or (not .RequireSigned) .WillSign)}},
-									'textDoMerge': {{ctx.Locale.Tr "repo.pulls.rebase_merge_pull_request"}},
+									'textDoMerge': {{if $stackedOnly}}{{ctx.Locale.Tr "repo.pulls.stack.style_only" (ctx.Locale.Tr "repo.pulls.rebase_merge_pull_request")}}{{else}}{{ctx.Locale.Tr "repo.pulls.rebase_merge_pull_request"}}{{end}},
 									'hideMergeMessageTexts': true,
 									'hideAutoMerge': generalHideAutoMerge,
 								},
 								{
 									'name': 'rebase-merge',
 									'allowed': {{and $prConfig.AllowRebaseMerge (or (not .RequireSigned) .WillSign)}},
-									'textDoMerge': {{ctx.Locale.Tr "repo.pulls.rebase_merge_commit_pull_request"}},
+									'textDoMerge': {{if $stackedOnly}}{{ctx.Locale.Tr "repo.pulls.stack.style_only" (ctx.Locale.Tr "repo.pulls.rebase_merge_commit_pull_request")}}{{else}}{{ctx.Locale.Tr "repo.pulls.rebase_merge_commit_pull_request"}}{{end}},
 									'mergeTitleFieldText': defaultMergeTitle,
 									'mergeMessageFieldText': defaultMergeMessage,
 									'hideAutoMerge': generalHideAutoMerge,
@@ -348,7 +353,7 @@
 								{
 									'name': 'squash',
 									'allowed': {{and $prConfig.AllowSquash (or (not .RequireSigned) .WillSign)}},
-									'textDoMerge': {{ctx.Locale.Tr "repo.pulls.squash_merge_pull_request"}},
+									'textDoMerge': {{if $stackedOnly}}{{ctx.Locale.Tr "repo.pulls.stack.style_only" (ctx.Locale.Tr "repo.pulls.squash_merge_pull_request")}}{{else}}{{ctx.Locale.Tr "repo.pulls.squash_merge_pull_request"}}{{end}},
 									'mergeTitleFieldText': defaultSquashMergeTitle,
 									'mergeMessageFieldText': {{.GetCommitMessages}} + defaultSquashMergeMessage,
 									'hideAutoMerge': generalHideAutoMerge,
@@ -356,7 +361,7 @@
 								{
 									'name': 'fast-forward-only',
 									'allowed': {{$fastForwardStyleAllowed}},
-									'textDoMerge': {{ctx.Locale.Tr "repo.pulls.fast_forward_only_merge_pull_request"}},
+									'textDoMerge': {{if $stackedOnly}}{{ctx.Locale.Tr "repo.pulls.stack.style_only" (ctx.Locale.Tr "repo.pulls.fast_forward_only_merge_pull_request")}}{{else}}{{ctx.Locale.Tr "repo.pulls.fast_forward_only_merge_pull_request"}}{{end}},
 									'hideMergeMessageTexts': true,
 									'hideAutoMerge': generalHideAutoMerge,
 								},
@@ -489,7 +494,6 @@
 				{{template "repo/issue/view_content/pull_merge_instruction" dict "PullRequest" .Issue.PullRequest "ShowMergeInstructions" .ShowMergeInstructions "AutodetectManualMerge" .AutodetectManualMerge "DefaultMergeMessage" .DefaultMergeMessage "DefaultMergeBody" .DefaultMergeBody "IsPullFilesConflicted" .IsPullFilesConflicted}}
 			{{end}}
 		</div>
-		{{if and .Stack .Stack.Parent (not .Issue.IsClosed) (not .Issue.PullRequest.HasMerged)}}{{template "repo/issue/view_content/stack_merge" .}}{{end}}
 	</div>
 </div>
 {{end}}

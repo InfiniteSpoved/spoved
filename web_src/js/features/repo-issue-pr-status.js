@@ -8,3 +8,15 @@ export function initRepoPullRequestCommitStatus() {
     });
   }
 }
+
+// Open and close the dialogs of the buttons with command/commandfor (Invoker Commands) in browsers without support.
+export function initRepoPullStackDialog() {
+  if ('commandForElement' in HTMLButtonElement.prototype) return;
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest?.('button[command][commandfor]');
+    const dialog = btn && document.getElementById(btn.getAttribute('commandfor'));
+    if (!(dialog instanceof HTMLDialogElement)) return;
+    if (btn.getAttribute('command') === 'show-modal') dialog.showModal();
+    else if (btn.getAttribute('command') === 'close') dialog.close();
+  });
+}

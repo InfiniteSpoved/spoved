@@ -2856,19 +2856,33 @@
 	"repo.pulls.stack.check.error": "Checks failed",
 	"repo.pulls.stack.check.warning": "Checks passed with warnings",
 	"repo.pulls.stack.check.none": "No checks",
-	"repo.pulls.stack.stacked_on": "This pull request is stacked on %s: <strong>Merge</strong> would merge it into %s, not %s.",
+	"repo.pulls.stack.stacked_on": "This pull request is stacked on %s: merging only this pull request would merge it into %s, not %s.",
 	"repo.pulls.stack.merge_button": {
 		"one": "Merge stack (%d pull request) into %s",
 		"other": "Merge stack (%d pull requests) into %s"
 	},
-	"repo.pulls.stack.blocked_checks": "%s can't be merged yet (checks failed).",
+	"repo.pulls.stack.blocked_checks": "%s can't be merged yet (required checks failed).",
+	"repo.pulls.stack.blocked_checks_pending": "%s can't be merged yet (waiting for required checks).",
+	"repo.pulls.stack.blocked_conflict": "%s can't be merged yet (merge conflicts).",
+	"repo.pulls.stack.warn_checks": "%s has failing checks that the rules don't require.",
+	"repo.pulls.stack.warn_review": "%s has requested changes that the rules don't block on.",
+	"repo.pulls.stack.merges_in_order": "Merges %s in order.",
+	"repo.pulls.stack.merge_only": "Merge this pull request only",
+	"repo.pulls.stack.style_only": "%s (this pull request only)",
+	"repo.pulls.stack.also_on": "also on %s",
+	"repo.pulls.stack.conflict": "Merge conflicts",
+	"repo.pulls.stack.and": "and",
+	"repo.pulls.stack.and_more": "and %d more",
 	"repo.pulls.stack.blocked_review": "%s can't be merged yet (changes requested).",
 	"repo.pulls.stack.confirm_title": {
 		"one": "Merge %d pull request into %s?",
 		"other": "Merge %d pull requests into %s?"
 	},
 	"repo.pulls.stack.confirm_text": "They are merged one at a time, in this order. Each is moved onto %s first and checked again; the first one that can't merge stops the rest.",
-	"repo.pulls.stack.confirm_children": "The pull requests stacked on top of this one stay open and move onto %s.",
+	"repo.pulls.stack.confirm_children": {
+		"one": "%s stays open and moves onto %s.",
+		"other": "%s stay open and move onto %s."
+	},
 	"repo.pulls.stack.merge_style": "Merge style",
 	"repo.pulls.stack.delete_branches": {
 		"one": "Delete the merged branch",
@@ -2883,13 +2897,23 @@
 		"other": "Merged %d pull requests into %s."
 	},
 	"repo.pulls.stack.merged_partial": {
-		"one": "Merged %d of %d pull request, then stopped at #%d: %s",
-		"other": "Merged %d of %d pull requests, then stopped at #%d: %s"
+		"one": "Merged %d of %d pull request, then stopped at %s: %s",
+		"other": "Merged %d of %d pull requests, then stopped at %s: %s"
 	},
 	"repo.pulls.stack.nothing_merged": "Nothing was merged: %s",
-	"repo.pulls.stack.cant_merge": "#%d can't be merged: %s",
+	"repo.pulls.stack.cant_merge": "%s can't be merged: %s",
+	"repo.pulls.stack.not_mergeable": "it is not in a mergeable state, for example because of merge conflicts.",
+	"repo.pulls.stack.disallowed": "the rules of the target branch refuse it: %s",
+	"repo.pulls.stack.checking": "its conflict check is still running; try again in a moment.",
+	"repo.pulls.stack.unexpected": "an unexpected error occurred; the server log has the details.",
+	"repo.pulls.stack.now_merged_one": "%s is merged into %s.",
+	"repo.pulls.stack.now_merged_many": "%s are merged into %s.",
+	"repo.pulls.stack.now_open_one": "%s is still open and now targets %s.",
+	"repo.pulls.stack.now_open_many": "%s are still open; %s now targets %s.",
+	"repo.pulls.stack.fix_again": "Fix %s, then merge it again.",
+	"repo.pulls.stack.fix_from": "Fix %s, then merge the stack again from %s.",
 	"repo.pulls.stack.changed": "the stack changed since you opened this page.",
-	"repo.pulls.stack.head_changed": "the stack changed since you opened this page (#%d got new commits). Review it and try again.",
+	"repo.pulls.stack.head_changed": "the stack changed since you opened this page (%s got new commits). Review it and try again.",
 	"repo.pulls.stack.too_long": "the stack is too long to merge at once.",
 	"repo.pulls.stack.base_is_head": "the target branch is the head branch of a pull request of the stack.",
 	"repo.pulls.stack.already_exists": "a pull request from its branch to the target branch already exists.",

@@ -1,34 +1,40 @@
 {{$stack := .Stack}}
 {{$count := len $stack.Chain}}
-<div class="ui attached segment pull-stack-merge" id="pull-stack-merge">
+<div class="pull-stack-merge" id="pull-stack-merge">
 	<div>
 		{{ctx.Locale.Tr "repo.pulls.stack.stacked_on" (HTMLFormat `<a href="%s">#%d</a>` $stack.Parent.Link $stack.Parent.Index) (HTMLFormat "<code>%s</code>" .Issue.PullRequest.BaseBranch) (HTMLFormat "<code>%s</code>" $stack.Base)}}
 	</div>
 	{{if $stack.CanMerge}}
 		{{if $stack.Blocked}}
-			<div class="text red">{{svg "octicon-x" 16}} {{$stack.Blocked}}</div>
+			<div class="text red" id="merge-stack-blocked">{{svg "octicon-x" 16}} {{$stack.Blocked}}</div>
 		{{else if $stack.TooLong}}
-			<div class="text red">{{svg "octicon-x" 16}} {{ctx.Locale.Tr "repo.pulls.stack.chain_too_long" $stack.MaxMerge}}</div>
+			<div class="text red" id="merge-stack-blocked">{{svg "octicon-x" 16}} {{ctx.Locale.Tr "repo.pulls.stack.chain_too_long" $stack.MaxMerge}}</div>
 		{{end}}
-		<button type="button" class="ui primary button" command="show-modal" commandfor="merge-stack" {{if or $stack.Blocked $stack.TooLong}}disabled{{end}}>
-			{{ctx.Locale.TrPluralString $count "repo.pulls.stack.merge_button" $count $stack.Base}}
-		</button>
+		{{range $stack.Warnings}}
+			<div class="text yellow">{{svg "octicon-alert" 16}} {{.}}</div>
+		{{end}}
+		<div class="pull-stack-actions">
+			<button type="button" class="ui primary button" command="show-modal" commandfor="merge-stack" {{if or $stack.Blocked $stack.TooLong}}disabled aria-describedby="merge-stack-blocked"{{end}}>
+				{{ctx.Locale.TrPluralString $count "repo.pulls.stack.merge_button" $count $stack.Base}}
+			</button>
+			<span class="text grey">{{ctx.Locale.Tr "repo.pulls.stack.merges_in_order" $stack.ChainLinks}}</span>
+		</div>
 	{{end}}
 </div>
 {{if and $stack.CanMerge (not $stack.Blocked) (not $stack.TooLong)}}
-	<dialog class="modal" closedby="any" id="merge-stack">
+	<dialog class="modal" closedby="any" id="merge-stack" aria-labelledby="merge-stack-title">
 		<article>
-			<header>{{ctx.Locale.TrPluralString $count "repo.pulls.stack.confirm_title" $count $stack.Base}}</header>
+			<header id="merge-stack-title">{{ctx.Locale.TrPluralString $count "repo.pulls.stack.confirm_title" $count $stack.Base}}</header>
 			<form class="ui form" method="post" action="{{.Link}}/merge_stack">
 				<div class="content">
-					<ol>
+					<ol class="pull-stack-confirm-list" role="list">
 						{{range $stack.Chain}}
 							<li><a href="{{.Link}}">#{{.Index}}</a> {{.Title}} <span class="text grey">· {{ctx.Locale.TrPluralString .Commits "counters.n_commits" (ctx.Locale.PrettyNumber .Commits)}}</span></li>
 						{{end}}
 					</ol>
 					<p>
 						{{ctx.Locale.Tr "repo.pulls.stack.confirm_text" (HTMLFormat "<code>%s</code>" $stack.Base)}}
-						{{if $stack.HasDescendants}}{{ctx.Locale.Tr "repo.pulls.stack.confirm_children" (HTMLFormat "<code>%s</code>" $stack.Base)}}{{end}}
+						{{if $stack.ChildrenCount}}{{ctx.Locale.TrPluralString $stack.ChildrenCount "repo.pulls.stack.confirm_children" $stack.Children (HTMLFormat "<code>%s</code>" $stack.Base)}}{{end}}
 					</p>
 					<div class="field">
 						<label for="merge-stack-style">{{ctx.Locale.Tr "repo.pulls.stack.merge_style"}}</label>
