@@ -9,7 +9,7 @@
 			{{if eq $e.State "merging"}}
 				{{ctx.Locale.Tr "repo.pulls.merge_queue.state_merging"}}
 			{{else if eq $e.State "grouping"}}
-				{{ctx.Locale.Tr "repo.pulls.merge_queue.state_grouping" $e.GroupPassed $e.GroupMin (DateUtils.AbsoluteLong $e.GroupUntil)}}
+				{{ctx.Locale.Tr "repo.pulls.merge_queue.state_grouping" $e.GroupPassed $e.GroupMin (DateUtils.TimeSince $e.GroupUntil)}}
 			{{else if eq $e.State "passed"}}
 				{{if eq $e.Position 1}}{{ctx.Locale.Tr "repo.pulls.merge_queue.state_passed_first"}}{{else}}{{$ahead := Eval $e.Position "-" 1}}{{ctx.Locale.TrPluralString $ahead "repo.pulls.merge_queue.state_passed" $ahead}}{{end}}
 			{{else if eq $e.State "testing"}}

@@ -13,8 +13,9 @@ type MergeQueueEntry struct {
 	Number int64  `json:"number"`
 	Title  string `json:"title"`
 	// waiting: to be tested; testing: the required checks run on test_sha; passed: the checks passed, it merges
-	// once the pull requests ahead of it did
-	// enum: ["waiting", "testing", "passed"]
+	// once the pull requests ahead of it did; grouping: the checks passed, it waits for the minimum group size or
+	// the wait time; merging: test_sha is being pushed to the branch
+	// enum: ["waiting", "testing", "passed", "grouping", "merging"]
 	State                  string `json:"state"`
 	MergeStyle             string `json:"merge_style"`
 	DeleteBranchAfterMerge bool   `json:"delete_branch_after_merge"`

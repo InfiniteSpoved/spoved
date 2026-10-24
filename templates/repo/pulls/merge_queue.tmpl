@@ -27,7 +27,7 @@
 								<td><a href="{{$.RepoLink}}/pulls/{{.Pull.Index}}">{{.Pull.Issue.Title}}</a> <span class="text grey">#{{.Pull.Index}}</span></td>
 								<td>
 									{{if eq .State "merging"}}<span class="text green">{{svg "octicon-git-merge"}} {{ctx.Locale.Tr "repo.pulls.merge_queue.col_merging"}}</span>
-									{{else if eq .State "grouping"}}<span class="text green">{{svg "octicon-check"}} {{ctx.Locale.Tr "repo.pulls.merge_queue.col_grouping" .GroupPassed .GroupMin (DateUtils.AbsoluteLong .GroupUntil)}}</span>
+									{{else if eq .State "grouping"}}<span class="text green">{{svg "octicon-check"}} {{ctx.Locale.Tr "repo.pulls.merge_queue.col_grouping" .GroupPassed .GroupMin (DateUtils.TimeSince .GroupUntil)}}</span>
 									{{else if eq .State "passed"}}<span class="text green">{{svg "octicon-check"}} {{ctx.Locale.Tr "repo.pulls.merge_queue.col_passed"}}</span>
 									{{else if eq .State "testing"}}<span class="text yellow">{{svg "octicon-clock"}} {{ctx.Locale.Tr "repo.pulls.merge_queue.col_testing" (DateUtils.TimeSince .StartedUnix)}}</span>
 									{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.pulls.merge_queue.col_waiting"}}</span>{{end}}

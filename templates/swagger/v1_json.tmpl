@@ -36671,12 +36671,14 @@
           "x-go-name": "StartedAt"
         },
         "state": {
-          "description": "waiting: to be tested; testing: the required checks run on test_sha; passed: the checks passed, it merges\nonce the pull requests ahead of it did",
+          "description": "waiting: to be tested; testing: the required checks run on test_sha; passed: the checks passed, it merges\nonce the pull requests ahead of it did; grouping: the checks passed, it waits for the minimum group size or\nthe wait time; merging: test_sha is being pushed to the branch",
           "type": "string",
           "enum": [
             "waiting",
             "testing",
-            "passed"
+            "passed",
+            "grouping",
+            "merging"
           ],
           "x-go-name": "State"
         },

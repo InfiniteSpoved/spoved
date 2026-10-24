@@ -2888,7 +2888,7 @@
 	},
 	"repo.pulls.merge_queue.state_testing": "Checks are running on the queue's test commit, started %s. It leaves the queue if they don't finish within %v minutes.",
 	"repo.pulls.merge_queue.state_passed_first": "Checks passed on the test commit. It merges now.",
-	"repo.pulls.merge_queue.state_grouping": "Checks passed on the test commit. It merges together with others once %[2]d are ready (%[1]d so far), or at %[3]s at the latest.",
+	"repo.pulls.merge_queue.state_grouping": "Checks passed on the test commit. It merges together with others once %[2]d are ready (%[1]d so far), or %[3]s at the latest.",
 	"repo.pulls.merge_queue.state_merging": "Checks passed on the test commit. It is being merged.",
 	"repo.pulls.merge_queue.state_passed": {
 		"one": "Checks passed on the test commit. It merges after the %d pull request ahead of it.",
@@ -2905,7 +2905,7 @@
 	"repo.pulls.merge_queue.col_status": "Status",
 	"repo.pulls.merge_queue.col_added": "Added",
 	"repo.pulls.merge_queue.col_passed": "Checks passed",
-	"repo.pulls.merge_queue.col_grouping": "Checks passed, waiting for its group (%[1]d of %[2]d ready, until %[3]s)",
+	"repo.pulls.merge_queue.col_grouping": "Checks passed, waiting for its group (%[1]d of %[2]d ready, merges %[3]s at the latest)",
 	"repo.pulls.merge_queue.col_merging": "Merging",
 	"repo.pulls.merge_queue.col_testing": "Checks running, started %s",
 	"repo.pulls.merge_queue.col_waiting": "Waiting to be tested",
