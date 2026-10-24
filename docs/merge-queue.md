@@ -42,7 +42,8 @@ outdated branches is skipped, since the queue always tests on the latest branch.
    merges every passed entry ahead of it in one push, up to the maximum group size. "Skip merge forward" and "delete
    the branch after merging" are kept from when the entry was added.
 4. **Leave.** An entry leaves the queue, with a timeline comment saying why, when its checks fail or time out, new
-   commits are pushed to it, it is closed or retargeted, it conflicts with the entries ahead, the user who added it may
+   commits are pushed to it, it is closed or retargeted, it conflicts with the entries ahead, it changes nothing on top
+   of them (the same change is ahead of it), its test commit can't be built (its fork is gone, say), the user who added it may
    no longer merge it, it becomes blocked or a work in progress, the queue is turned off, or someone removes it. The
    entries behind it are tested again without it.
 
@@ -50,7 +51,9 @@ A push to the branch outside the queue (allowed by the push settings) rebuilds e
 
 ## Required checks
 
-The required status checks must pass on the test commit. An Actions job reports its status as
+The required status checks must pass on the test commit, and only statuses reported after the test commit was
+pushed count: with rebase onto an up-to-date branch the test commit is the head commit of the pull request, and its
+pull request checks don't stand in for the queue's. An Actions job reports its status as
 `workflow / job (merge_group)` there, and `workflow / job (pull_request)` on the pull request, so a check that must
 pass on both needs a pattern such as `ci / test (*)`.
 
@@ -75,5 +78,8 @@ everywhere (see [`projects.md`](projects.md)).
 - The cron task "Look at every merge queue" (every minute) handles check time-outs and group wait times; status
   updates and pushes trigger the queue at once. Several servers can run it at the same time.
 - Merge forward carries a queued merge on to the next release branches like any other merge, and "Update branch"
-  still works on a head branch; neither goes through a queue the target branch may require.
+  still works on a head branch: neither goes through a queue the target branch may require. This is a known gap: a
+  release branch that merge forward writes to is not protected by its own queue.
+- A merge whose push went through but whose hook never recorded it (a server that stopped mid-merge) is recorded by
+  the queue ten minutes later.
 - A merge by the queue shows in the timeline and feeds like any other merge, by the user who added the entry.

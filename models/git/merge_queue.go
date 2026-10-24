@@ -4,6 +4,8 @@
 package git
 
 import (
+	"fmt"
+	"slices"
 	"time"
 
 	"forgejo.org/modules/util"
@@ -42,7 +44,7 @@ func (protectBranch *ProtectedBranch) MergeQueueConfig() MergeQueueConfig {
 	return MergeQueueConfig{
 		BuildConcurrency: orDefault(protectBranch.MergeQueueBuildConcurrency, DefaultMergeQueueBuildConcurrency),
 		MinGroupSize:     orDefault(protectBranch.MergeQueueMinGroupSize, DefaultMergeQueueMinGroupSize),
-		MaxGroupSize:     orDefault(protectBranch.MergeQueueMaxGroupSize, DefaultMergeQueueMaxGroupSize),
+		MaxGroupSize:     orDefault(protectBranch.MergeQueueMaxGroupSize, min(DefaultMergeQueueMaxGroupSize, orDefault(protectBranch.MergeQueueBuildConcurrency, DefaultMergeQueueBuildConcurrency))),
 		WaitTime:         time.Duration(orDefault(protectBranch.MergeQueueWaitMinutes, DefaultMergeQueueWaitMinutes)) * time.Minute,
 		CheckTimeout:     time.Duration(orDefault(protectBranch.MergeQueueCheckTimeoutMinutes, DefaultMergeQueueCheckTimeout)) * time.Minute,
 		MergeStyle:       protectBranch.MergeQueueMergeStyle,
@@ -63,19 +65,39 @@ func MergeQueueRule(rules []*ProtectedBranch) *ProtectedBranch {
 // ErrInvalidMergeQueueConfig is returned for merge queue settings out of range
 var ErrInvalidMergeQueueConfig = util.NewInvalidArgumentErrorf("merge queue settings out of range: concurrency and group sizes 0 to %d, the minimum group size at most the maximum and the concurrency, times 0 to %d minutes, merge style merge, rebase, rebase-merge, squash or empty", MaxMergeQueueSize, MaxMergeQueueMinutes)
 
-// ValidateMergeQueue checks the merge queue settings of the rule; 0 means the default.
+// MergeQueueConfigError names the merge queue setting that is out of range: merge_style, build_concurrency,
+// min_group_size, max_group_size, wait or check_timeout
+type MergeQueueConfigError struct {
+	Field string
+}
+
+func (e *MergeQueueConfigError) Error() string {
+	return fmt.Sprintf("%s: %v", e.Field, ErrInvalidMergeQueueConfig)
+}
+
+func (e *MergeQueueConfigError) Unwrap() error { return ErrInvalidMergeQueueConfig }
+
+// ValidateMergeQueue checks the merge queue settings of the rule; 0 means the default. The error is a
+// *MergeQueueConfigError.
 func (protectBranch *ProtectedBranch) ValidateMergeQueue() error {
 	inRange := func(v, maxV int) bool { return v >= 0 && v <= maxV }
-	switch protectBranch.MergeQueueMergeStyle {
-	case "", "merge", "rebase", "rebase-merge", "squash":
-	default:
-		return ErrInvalidMergeQueueConfig
-	}
 	cfg := protectBranch.MergeQueueConfig()
-	if !inRange(protectBranch.MergeQueueBuildConcurrency, MaxMergeQueueSize) || !inRange(protectBranch.MergeQueueMinGroupSize, MaxMergeQueueSize) ||
-		!inRange(protectBranch.MergeQueueMaxGroupSize, MaxMergeQueueSize) || cfg.MinGroupSize > cfg.MaxGroupSize || cfg.MinGroupSize > cfg.BuildConcurrency ||
-		!inRange(protectBranch.MergeQueueWaitMinutes, MaxMergeQueueMinutes) || !inRange(protectBranch.MergeQueueCheckTimeoutMinutes, MaxMergeQueueMinutes) {
-		return ErrInvalidMergeQueueConfig
+	var field string
+	switch {
+	case !slices.Contains([]string{"", "merge", "rebase", "rebase-merge", "squash"}, protectBranch.MergeQueueMergeStyle):
+		field = "merge_style"
+	case !inRange(protectBranch.MergeQueueBuildConcurrency, MaxMergeQueueSize):
+		field = "build_concurrency"
+	case !inRange(protectBranch.MergeQueueMaxGroupSize, MaxMergeQueueSize) || protectBranch.MergeQueueMaxGroupSize > cfg.BuildConcurrency:
+		field = "max_group_size"
+	case !inRange(protectBranch.MergeQueueMinGroupSize, MaxMergeQueueSize) || cfg.MinGroupSize > cfg.MaxGroupSize:
+		field = "min_group_size"
+	case !inRange(protectBranch.MergeQueueWaitMinutes, MaxMergeQueueMinutes):
+		field = "wait"
+	case !inRange(protectBranch.MergeQueueCheckTimeoutMinutes, MaxMergeQueueMinutes):
+		field = "check_timeout"
+	default:
+		return nil
 	}
-	return nil
+	return &MergeQueueConfigError{Field: field}
 }

@@ -5,6 +5,7 @@ package pull
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"forgejo.org/models"
@@ -20,6 +21,13 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 )
+
+// ErrMergeQueueEmptyBuild is returned for a pull request that changes nothing on top of the commit it is built onto
+var ErrMergeQueueEmptyBuild = errors.New("the pull request changes nothing on top of the branch and the ones ahead of it")
+
+// ErrMergeQueueNotRecorded is returned when the push of a build went through but its hook didn't record the merge;
+// the queue records it later
+var ErrMergeQueueNotRecorded = errors.New("the push of the build was not recorded as its merge")
 
 // BuildMergeQueueCommit merges pr, at expectedHeadCommitID, with mergeStyle and the default message on top of the
 // commit onto of the base repository, as doer. It calls start with the new commit, and if start reports true it pushes
@@ -70,6 +78,9 @@ func BuildMergeQueueCommit(ctx context.Context, pr *issues_model.PullRequest, do
 		}
 	}
 
+	if mergeCommitID == onto {
+		return "", ErrMergeQueueEmptyBuild
+	}
 	if started, err := start(mergeCommitID); err != nil || !started {
 		return "", err
 	}
@@ -94,6 +105,9 @@ func MergeQueued(ctx context.Context, pr *issues_model.PullRequest, doer *user_m
 	}
 	if pr.HasMerged {
 		return models.ErrPullRequestHasMerged{ID: pr.ID, IssueID: pr.IssueID, HeadRepoID: pr.HeadRepoID, BaseRepoID: pr.BaseRepoID, HeadBranch: pr.HeadBranch, BaseBranch: pr.BaseBranch}
+	}
+	if sha == expectedOld {
+		return ErrMergeQueueEmptyBuild // the push would change nothing and nothing would record the merge
 	}
 	if pr.BaseBranch != base {
 		return &git.ErrPushOutOfDate{Err: fmt.Errorf("%v was retargeted from %s", pr, base)} // the next pass removes it
@@ -144,6 +158,11 @@ func MergeQueued(ctx context.Context, pr *issues_model.PullRequest, doer *user_m
 		}
 	} else if err := git.Push(ctx, pr.BaseRepo.RepoPath(), git.PushOptions{Remote: ".", Branch: sha + ":" + ref, ForceWithLease: ref + ":" + expectedOld, Env: env}); err != nil {
 		return err
+	}
+	if merged, err := issues_model.GetPullRequestByID(ctx, pr.ID); err != nil {
+		return err
+	} else if !merged.HasMerged {
+		return fmt.Errorf("%v: %w", pr, ErrMergeQueueNotRecorded)
 	}
 	log.Trace("Merge queue fast-forwarded %s of %-v to %s for %-v", base, pr.BaseRepo, sha, pr)
 	if err := afterMerge(ctx, pr, doer, false); err != nil {

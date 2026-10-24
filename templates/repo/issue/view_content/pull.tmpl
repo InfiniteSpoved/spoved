@@ -217,7 +217,7 @@
 					{{if $notAllOverridableChecksOk}}
 						<div class="item">
 							{{svg "octicon-dot-fill"}}
-							{{ctx.Locale.Tr "repo.pulls.required_status_check_administrator"}}
+							{{if .MergeQueueRule}}{{ctx.Locale.Tr "repo.pulls.merge_queue.admin_force"}}{{else}}{{ctx.Locale.Tr "repo.pulls.required_status_check_administrator"}}{{end}}
 						</div>
 					{{else}}
 						<div class="item">
@@ -238,11 +238,13 @@
 					{{end}}
 				{{end}}
 				{{template "repo/pulls/trust" .}}
-				{{template "repo/issue/view_content/update_branch_by_merge" $}}
+				{{if not .MergeQueueEntry}}{{/* a new commit would take it out of the queue */}}
+					{{template "repo/issue/view_content/update_branch_by_merge" $}}
+				{{end}}
 				{{if and .MergeQueueRule (not .MergeQueueEntry)}}
 					<div class="item" id="merge-queue-info">
 						{{svg "octicon-git-merge-queue"}}
-						<span>{{ctx.Locale.Tr "repo.pulls.merge_queue.info" .Issue.PullRequest.BaseBranch .MergeQueueLength}} <a href="{{.MergeQueueLink}}">{{ctx.Locale.Tr "repo.pulls.merge_queue.view"}}</a></span>
+						<span>{{ctx.Locale.Tr "repo.pulls.merge_queue.info" .Issue.PullRequest.BaseBranch}} {{if .MergeQueueLength}}{{ctx.Locale.TrPluralString .MergeQueueLength "repo.pulls.merge_queue.info_count" .MergeQueueLength}}{{else}}{{ctx.Locale.Tr "repo.pulls.merge_queue.info_empty"}}{{end}} <a href="{{.MergeQueueLink}}">{{ctx.Locale.Tr "repo.pulls.merge_queue.view"}}</a></span>
 					</div>
 				{{end}}
 				{{if .Issue.PullRequest.IsEmpty}}
@@ -384,10 +386,12 @@
 								msd.allowed = msd.allowed && ['merge', 'rebase', 'rebase-merge', 'squash'].includes(msd.name) && (!queueStyle || msd.name === queueStyle);
 								msd.hideMergeMessageTexts = true;
 							}
-							const queueStyles = mergeForm.mergeStyles.filter((msd) => msd.allowed).length;
+							// the button names the queue; the style menu keeps the style names
 							for (const msd of mergeForm.mergeStyles) {
-								msd.textDoMerge = queueStyles > 1 ? `${queueAdd} (${msd.textDoMerge})` : queueAdd;
+								msd.textQueueStyle = msd.textDoMerge;
+								msd.textDoMerge = queueAdd;
 							}
+							mergeForm.textAutoMergeButtonWhenSucceed = {{ctx.Locale.Tr "repo.pulls.merge_queue.add_when_succeed"}};
 							{{end}}
 							window.config.pageData.pullRequestMergeForm = mergeForm;
 						</script>

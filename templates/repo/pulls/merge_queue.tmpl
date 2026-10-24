@@ -11,7 +11,7 @@
 		</div>
 		{{if .Entries}}
 			<div class="ui attached segment tw-p-0 tw-overflow-x-auto">
-				<table class="ui very basic table tw-m-0" id="merge-queue-table">
+				<table class="ui very basic unstackable table tw-m-0" id="merge-queue-table">
 					<thead>
 						<tr>
 							<th scope="col">#</th>
@@ -26,7 +26,9 @@
 								<td>{{.Position}}</td>
 								<td><a href="{{$.RepoLink}}/pulls/{{.Pull.Index}}">{{.Pull.Issue.Title}}</a> <span class="text grey">#{{.Pull.Index}}</span></td>
 								<td>
-									{{if eq .State "passed"}}<span class="text green">{{svg "octicon-check"}} {{ctx.Locale.Tr "repo.pulls.merge_queue.col_passed"}}</span>
+									{{if eq .State "merging"}}<span class="text green">{{svg "octicon-git-merge"}} {{ctx.Locale.Tr "repo.pulls.merge_queue.col_merging"}}</span>
+									{{else if eq .State "grouping"}}<span class="text green">{{svg "octicon-check"}} {{ctx.Locale.Tr "repo.pulls.merge_queue.col_grouping" .GroupPassed .GroupMin (DateUtils.FullTime .GroupUntil)}}</span>
+									{{else if eq .State "passed"}}<span class="text green">{{svg "octicon-check"}} {{ctx.Locale.Tr "repo.pulls.merge_queue.col_passed"}}</span>
 									{{else if eq .State "testing"}}<span class="text yellow">{{svg "octicon-clock"}} {{ctx.Locale.Tr "repo.pulls.merge_queue.col_testing" (DateUtils.TimeSince .StartedUnix)}}</span>
 									{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.pulls.merge_queue.col_waiting"}}</span>{{end}}
 									{{if .TempCommitID}}<a class="tw-ml-1" href="{{$.RepoLink}}/commit/{{PathEscape .TempCommitID}}">{{ShortSha .TempCommitID}}</a>{{end}}

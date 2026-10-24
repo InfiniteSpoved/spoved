@@ -560,6 +560,61 @@ jobs:
 			assert.True(t, merged(a))
 		})
 
+		t.Run("A pull request that changes nothing on top leaves", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			a := newPull(t)
+			// b makes the same change as a
+			_, err := files_service.ChangeRepoFiles(t.Context(), repo, owner, &files_service.ChangeRepoFilesOptions{
+				OldBranch: "main",
+				NewBranch: a.HeadBranch + "-again",
+				Files: []*files_service.ChangeRepoFile{{
+					Operation:     "create",
+					TreePath:      a.HeadBranch + ".txt",
+					ContentReader: strings.NewReader(a.HeadBranch),
+				}},
+			})
+			require.NoError(t, err)
+			testPullCreate(t, session, owner.Name, repo.Name, true, "main", a.HeadBranch+"-again", "again")
+			b := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, HeadBranch: a.HeadBranch + "-again"})
+			head, err := gitRepo.GetRefCommitID(b.GetGitRefName())
+			require.NoError(t, err)
+			setStatus(t, statusCtx, head, api.CommitStatusSuccess)
+			c := newPull(t)
+
+			add(t, session, a)
+			testPullMergeForm(t, session, http.StatusOK, owner.Name, repo.Name, index(b), optionsPullMerge{"do": "rebase"})
+			add(t, session, c)
+			// b's rebase onto a's build is a's build: it leaves, and c is built behind a instead of the queue stalling
+			assert.Nil(t, entry(b))
+			assert.Equal(t, mergequeue.ReasonEmpty, removedReason(b))
+			ea, ec := entry(a), entry(c)
+			require.NotNil(t, ec)
+			assert.Equal(t, ea.TempCommitID, ec.BaseCommitID)
+			setStatus(t, statusCtx, ea.TempCommitID, api.CommitStatusSuccess)
+			setStatus(t, statusCtx, ec.TempCommitID, api.CommitStatusSuccess)
+			assert.True(t, merged(a))
+			assert.True(t, merged(c))
+			assert.False(t, merged(b))
+		})
+
+		t.Run("The pull request's own checks don't pass its build", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			a := newPull(t)
+			head, err := gitRepo.GetRefCommitID(a.GetGitRefName())
+			require.NoError(t, err)
+			// its "ci" status is older than the build
+			_, err = db.GetEngine(t.Context()).Exec("UPDATE commit_status SET created_unix = created_unix - 10 WHERE repo_id = ? AND sha = ?", repo.ID, head)
+			require.NoError(t, err)
+			// a rebase onto an up-to-date branch: the build is the head commit of the pull request
+			testPullMergeForm(t, session, http.StatusOK, owner.Name, repo.Name, index(a), optionsPullMerge{"do": "rebase"})
+			e := entry(a)
+			require.NotNil(t, e)
+			assert.Equal(t, head, e.TempCommitID)
+			assert.False(t, merged(a))
+			setStatus(t, statusCtx, e.TempCommitID, api.CommitStatusSuccess)
+			assert.True(t, merged(a))
+		})
+
 		t.Run("Turning the queue off empties it", func(t *testing.T) {
 			defer tests.PrintCurrentTest(t)()
 			a := newPull(t)

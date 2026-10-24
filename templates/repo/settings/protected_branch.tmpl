@@ -350,7 +350,7 @@
 					<div id="merge_queue_box" class="checkbox-sub-item grouped fields {{if not .Rule.RequireMergeQueue}}disabled{{end}}">
 						<div class="field">
 							<label for="merge_queue_merge_style">{{ctx.Locale.Tr "repo.settings.merge_queue.merge_style"}}</label>
-							<select id="merge_queue_merge_style" name="merge_queue_merge_style" class="ui dropdown">
+							<select id="merge_queue_merge_style" name="merge_queue_merge_style">
 								<option value="" {{if not .Rule.MergeQueueMergeStyle}}selected{{end}}>{{ctx.Locale.Tr "repo.settings.merge_queue.merge_style_chosen"}}</option>
 								<option value="merge" {{if eq .Rule.MergeQueueMergeStyle "merge"}}selected{{end}}>{{ctx.Locale.Tr "repo.pulls.merge_pull_request"}}</option>
 								<option value="rebase" {{if eq .Rule.MergeQueueMergeStyle "rebase"}}selected{{end}}>{{ctx.Locale.Tr "repo.pulls.rebase_merge_pull_request"}}</option>

@@ -11,5 +11,7 @@
 {{else if eq . "wip"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.wip"}}
 {{else if eq . "disabled"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.disabled"}}
 {{else if eq . "branch_missing"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.branch_missing"}}
+{{else if eq . "empty"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.empty"}}
+{{else if eq . "build_failed"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.build_failed"}}
 {{else if eq . "merge_failed"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.merge_failed"}}
 {{end}}

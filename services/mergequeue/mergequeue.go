@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -59,6 +60,8 @@ var (
 // Reasons an entry leaves the queue without being merged, shown by repo/issue/view_content/merge_queue_reason
 const (
 	ReasonRemoved       = "removed" // by a user
+	ReasonEmpty         = "empty"   // it changes nothing on top of the branch and the entries ahead
+	ReasonBuildFailed   = "build_failed"
 	ReasonChecksFailed  = "checks_failed"
 	ReasonTimeout       = "timeout"
 	ReasonHeadMoved     = "head_moved"
@@ -607,7 +610,7 @@ func (p *pass) checkResults(live []*item) ([]*item, error) {
 		if it.Status != pull_model.MergeQueueBuilding {
 			break
 		}
-		state, err := p.checksState(it.TempCommitID)
+		state, err := p.checksState(it.TempCommitID, it.StartedUnix)
 		if err != nil {
 			return nil, err
 		}
@@ -643,11 +646,14 @@ func (p *pass) checkResults(live []*item) ([]*item, error) {
 }
 
 // checksState is the state of the required status checks of every matching rule on sha; success without any
-func (p *pass) checksState(sha string) (stateResult, error) {
+func (p *pass) checksState(sha string, started timeutil.TimeStamp) (stateResult, error) {
 	statuses, _, err := git_model.GetLatestCommitStatus(p.ctx, p.repo.ID, sha, db.ListOptionsAll)
 	if err != nil {
 		return stateResult{}, err
 	}
+	// only statuses reported for the build count: a build can be the head commit of the pull request (rebase onto an
+	// up-to-date branch), whose own pull request checks don't test it in the queue
+	statuses = slices.DeleteFunc(statuses, func(s *git_model.CommitStatus) bool { return s.CreatedUnix < started })
 	result := stateResult{success: true}
 	for _, pb := range p.rules {
 		if !pb.EnableStatusCheck {
@@ -704,6 +710,10 @@ func (p *pass) merge(live []*item) (int, bool) {
 		}
 		if err := pull_service.MergeQueued(ctx, it.pr, it.doer, p.branch, it.BaseCommitID, it.TempCommitID); err != nil {
 			p.again = true
+			if errors.Is(err, pull_service.ErrMergeQueueNotRecorded) {
+				log.Error("Merge queue of %s in %-v: %v", p.branch, p.repo, err) // checkChain records it later
+				return i, false
+			}
 			if git.IsErrPushOutOfDate(err) {
 				// the branch moved: the next pass builds again on top of it
 				log.Info("Merge queue of %s in %-v: the branch moved before %-v was merged", p.branch, p.repo, it.pr)
@@ -798,6 +808,18 @@ func (p *pass) build(live []*item, tip string) error {
 				continue
 			case models.IsErrSHADoesNotMatch(err):
 				if err := p.remove(it, ReasonHeadMoved, ""); err != nil {
+					return err
+				}
+				continue
+			case errors.Is(err, pull_service.ErrMergeQueueEmptyBuild):
+				if err := p.remove(it, ReasonEmpty, ""); err != nil {
+					return err
+				}
+				continue
+			case !started && p.ctx.Err() == nil:
+				// it can't be built (its head repository is gone, say): it would stop the queue on every pass
+				log.Warn("Merge queue of %s in %-v: building %-v failed: %v", p.branch, p.repo, it.pr, err)
+				if err := p.remove(it, ReasonBuildFailed, ""); err != nil {
 					return err
 				}
 				continue

@@ -6,12 +6,16 @@
 	<div class="tw-flex tw-flex-col tw-gap-1">
 		<strong>{{ctx.Locale.Tr "repo.pulls.merge_queue.queued" .Issue.PullRequest.BaseBranch $e.Position .MergeQueueLength}}</strong>
 		<span>
-			{{if eq $e.State "passed"}}
-				{{if eq $e.Position 1}}{{ctx.Locale.Tr "repo.pulls.merge_queue.state_passed_first" (ShortSha $e.TempCommitID)}}{{else}}{{ctx.Locale.Tr "repo.pulls.merge_queue.state_passed" (ShortSha $e.TempCommitID) (Eval $e.Position "-" 1)}}{{end}}
+			{{if eq $e.State "merging"}}
+				{{ctx.Locale.Tr "repo.pulls.merge_queue.state_merging"}}
+			{{else if eq $e.State "grouping"}}
+				{{ctx.Locale.Tr "repo.pulls.merge_queue.state_grouping" $e.GroupPassed $e.GroupMin (DateUtils.FullTime $e.GroupUntil)}}
+			{{else if eq $e.State "passed"}}
+				{{if eq $e.Position 1}}{{ctx.Locale.Tr "repo.pulls.merge_queue.state_passed_first"}}{{else}}{{$ahead := Eval $e.Position "-" 1}}{{ctx.Locale.TrPluralString $ahead "repo.pulls.merge_queue.state_passed" $ahead}}{{end}}
 			{{else if eq $e.State "testing"}}
-				{{ctx.Locale.Tr "repo.pulls.merge_queue.state_testing" (ShortSha $e.TempCommitID) (DateUtils.TimeSince $e.StartedUnix) .MergeQueueConfig.CheckTimeout.Minutes}}
+				{{ctx.Locale.Tr "repo.pulls.merge_queue.state_testing" (DateUtils.TimeSince $e.StartedUnix) .MergeQueueConfig.CheckTimeout.Minutes}}
 			{{else}}
-				{{ctx.Locale.Tr "repo.pulls.merge_queue.state_waiting" .MergeQueueConfig.BuildConcurrency}}
+				{{ctx.Locale.TrPluralString .MergeQueueConfig.BuildConcurrency "repo.pulls.merge_queue.state_waiting" .MergeQueueConfig.BuildConcurrency}}
 			{{end}}
 		</span>
 		<span class="text grey">
@@ -20,7 +24,7 @@
 		</span>
 	</div>
 </div>
-<div class="tw-flex tw-flex-wrap tw-gap-2 tw-items-center">
+<div class="item tw-flex-wrap tw-gap-2" id="merge-queue-actions">
 	<a class="ui button" href="{{.MergeQueueLink}}">{{ctx.Locale.Tr "repo.pulls.merge_queue.view"}}</a>
 	{{if .CanRemoveFromMergeQueue}}
 		<form method="post" action="{{.Link}}/merge_queue/remove">

@@ -25,7 +25,7 @@
 										<span data-tooltip-content="{{ctx.Locale.Tr "repo.settings.protected_branch"}}">{{svg "octicon-shield-lock"}}</span>
 									{{end}}
 									{{if .DefaultBranchBranch.HasMergeQueue}}
-										<a class="muted" href="{{$.RepoLink}}/merge-queue/{{PathEscapeSegments .DefaultBranchBranch.DBBranch.Name}}" data-tooltip-content="{{ctx.Locale.Tr "repo.pulls.merge_queue.view"}}" aria-label="{{ctx.Locale.Tr "repo.pulls.merge_queue.view"}}">{{svg "octicon-git-merge-queue"}}</a>
+										<a class="muted merge-queue-link" href="{{$.RepoLink}}/merge-queue/{{PathEscapeSegments .DefaultBranchBranch.DBBranch.Name}}" data-tooltip-content="{{ctx.Locale.Tr "repo.pulls.merge_queue.view"}}" aria-label="{{ctx.Locale.Tr "repo.pulls.merge_queue.view"}}">{{svg "octicon-git-merge-queue"}}</a>
 									{{end}}
 									<button class="btn interact-fg tw-px-1" data-clipboard-text="{{.DefaultBranchBranch.DBBranch.Name}}" data-tooltip-content="{{ctx.Locale.Tr "copy_branch"}}">{{svg "octicon-copy" 14}}</button>
 									{{template "repo/commit_statuses" dict "Status" (index $.CommitStatus .DefaultBranchBranch.DBBranch.CommitID) "Statuses" (index $.CommitStatuses .DefaultBranchBranch.DBBranch.CommitID)}}
@@ -103,7 +103,7 @@
 										<span data-tooltip-content="{{ctx.Locale.Tr "repo.settings.protected_branch"}}">{{svg "octicon-shield-lock"}}</span>
 									{{end}}
 									{{if .HasMergeQueue}}
-										<a class="muted" href="{{$.RepoLink}}/merge-queue/{{PathEscapeSegments .DBBranch.Name}}" data-tooltip-content="{{ctx.Locale.Tr "repo.pulls.merge_queue.view"}}" aria-label="{{ctx.Locale.Tr "repo.pulls.merge_queue.view"}}">{{svg "octicon-git-merge-queue"}}</a>
+										<a class="muted merge-queue-link" href="{{$.RepoLink}}/merge-queue/{{PathEscapeSegments .DBBranch.Name}}" data-tooltip-content="{{ctx.Locale.Tr "repo.pulls.merge_queue.view"}}" aria-label="{{ctx.Locale.Tr "repo.pulls.merge_queue.view"}}">{{svg "octicon-git-merge-queue"}}</a>
 									{{end}}
 									<button class="btn interact-fg tw-px-1" data-clipboard-text="{{.DBBranch.Name}}" data-tooltip-content="{{ctx.Locale.Tr "copy_branch"}}">{{svg "octicon-copy" 14}}</button>
 									{{template "repo/commit_statuses" dict "Status" (index $.CommitStatus .DBBranch.CommitID) "Statuses" (index $.CommitStatuses .DBBranch.CommitID)}}

@@ -697,13 +697,22 @@
 			<div class="timeline-item event" id="{{.HashTag}}">
 				<span class="badge">{{if eq .Type 52}}{{svg "octicon-alert" 16}}{{else}}{{svg "octicon-git-merge-queue" 16}}{{end}}</span>
 				<span class="text grey muted-links">
-					{{template "repo/issue/view_content/comments_authorlink" dict "ctxData" $ "comment" .}}
-					{{if eq .Type 51}}{{ctx.Locale.Tr "repo.pulls.merge_queue.added_comment" $createdStr}}
-					{{else}}{{ctx.Locale.Tr "repo.pulls.merge_queue.removed_comment" $createdStr}}{{end}}
+					{{if eq .Type 51}}
+						{{template "repo/issue/view_content/comments_authorlink" dict "ctxData" $ "comment" .}}
+						{{ctx.Locale.Tr "repo.pulls.merge_queue.added_comment" $createdStr}}
+					{{else if eq $info.Reason "removed"}}
+						{{template "repo/issue/view_content/comments_authorlink" dict "ctxData" $ "comment" .}}
+						{{ctx.Locale.Tr "repo.pulls.merge_queue.removed_comment" $createdStr}}
+					{{else}}{{/* the queue removed it: no person did */}}
+						{{ctx.Locale.Tr "repo.pulls.merge_queue.left_comment" $createdStr}}
+					{{end}}
 				</span>
 				{{if eq .Type 52}}
 					<div class="detail flex-text-block">
-						<span class="text grey muted-links">{{template "repo/issue/view_content/merge_queue_reason" $info.Reason}}</span>
+						<span class="text grey muted-links">
+							{{template "repo/issue/view_content/merge_queue_reason" $info.Reason}}
+							{{if $info.SHA}}<a href="{{$.RepoLink}}/commit/{{PathEscape $info.SHA}}">{{ctx.Locale.Tr "repo.pulls.merge_queue.test_commit" (ShortSha $info.SHA)}}</a>{{end}}
+						</span>
 					</div>
 				{{end}}
 			</div>

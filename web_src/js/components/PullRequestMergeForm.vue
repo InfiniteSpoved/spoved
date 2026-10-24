@@ -229,7 +229,7 @@ export default {
               <!-- if can merge now, show one action "merge now", and an action "auto merge when succeed" -->
               <div class="item" v-if="msd.allowed && mergeForm.canMergeNow" :key="msd.name" @click.stop="switchMergeStyle(msd.name)">
                 <div class="action-text">
-                  {{ msd.textDoMerge }}
+                  {{ msd.textQueueStyle || msd.textDoMerge }}
                 </div>
                 <div v-if="!msd.hideAutoMerge" class="auto-merge-small" @click.stop="switchMergeStyle(msd.name, true)">
                   <svg-icon name="octicon-clock" :size="14"/>
@@ -242,7 +242,7 @@ export default {
               <!-- if can NOT merge now, only show one action "auto merge when succeed" -->
               <div class="item" v-if="msd.allowed && !mergeForm.canMergeNow && !msd.hideAutoMerge" :key="msd.name" @click.stop="switchMergeStyle(msd.name, true)">
                 <div class="action-text">
-                  {{ msd.textDoMerge }} {{ mergeForm.textAutoMergeButtonWhenSucceed }}
+                  {{ msd.textQueueStyle || msd.textDoMerge }} {{ mergeForm.textAutoMergeButtonWhenSucceed }}
                 </div>
               </div>
             </template>
@@ -276,6 +276,16 @@ export default {
 /* make the dropdown list left-aligned */
 .ui.merge-button {
   position: relative;
+  max-width: 100%;
+}
+.ui.merge-button .button-text {
+  white-space: normal;
+  text-align: start;
+}
+@media (max-width: 767.98px) {
+  .ui.merge-button > .ui.button {
+    min-height: 44px;
+  }
 }
 .ui.merge-button .ui.dropdown {
   position: static;

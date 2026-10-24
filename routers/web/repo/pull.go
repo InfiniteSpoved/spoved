@@ -1733,8 +1733,28 @@ func MergeQueue(ctx *context.Context) {
 	ctx.Data["Branch"] = branch
 	ctx.Data["Entries"] = view
 	ctx.Data["MergeQueueConfig"] = rule.MergeQueueConfig()
-	if rule.RepoID == ctx.Repo.Repository.ID && ctx.Repo.IsAdmin() {
-		ctx.Data["RuleLink"] = ctx.Repo.RepoLink + "/settings/branches/edit?rule_name=" + url.QueryEscape(rule.RuleName)
+	ruleQuery := "/settings/branches/edit?rule_name=" + url.QueryEscape(rule.RuleName)
+	if rule.RepoID == ctx.Repo.Repository.ID {
+		if ctx.Repo.IsAdmin() {
+			ctx.Data["RuleLink"] = ctx.Repo.RepoLink + ruleQuery
+		}
+	} else if ctx.Doer != nil && ctx.Repo.Owner.IsOrganization() {
+		// a project or organization rule: its settings are the organization owners'
+		owner, err := organization.GetOrgByID(ctx, ctx.Repo.Owner.ID)
+		if err != nil {
+			ctx.ServerError("GetOrgByID", err)
+			return
+		}
+		if isOwner, err := owner.IsActingOwner(ctx, ctx.Doer); err != nil {
+			ctx.ServerError("IsActingOwner", err)
+			return
+		} else if isOwner {
+			link := owner.OrganisationLink()
+			if rule.GroupID != 0 {
+				link += "/groups/" + strconv.FormatInt(rule.GroupID, 10)
+			}
+			ctx.Data["RuleLink"] = link + ruleQuery
+		}
 	}
 	ctx.HTML(http.StatusOK, tplMergeQueue)
 }
