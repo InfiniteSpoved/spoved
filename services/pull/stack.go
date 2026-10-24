@@ -13,6 +13,7 @@ import (
 
 	"forgejo.org/models"
 	"forgejo.org/models/db"
+	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
@@ -37,6 +38,9 @@ var (
 	ErrStackTooLong = errors.New("the stack is too long to merge at once")
 	// ErrStackBaseIsHead is returned when the target branch of the stack is the head branch of one of its pull requests.
 	ErrStackBaseIsHead = errors.New("the target branch is the head branch of a pull request of the stack")
+
+	// ErrStackMergeQueue is returned when the target branch of the stack merges only through the merge queue.
+	ErrStackMergeQueue = errors.New("the target branch requires the merge queue")
 
 	errRollback = errors.New("roll back the check")
 )
@@ -187,12 +191,23 @@ func (e ErrStackMerge) Unwrap() error {
 	return e.Err
 }
 
+// StackRequiresMergeQueue returns whether the base branch of the stack requires the merge queue, which Merge stack
+// can't use: it merges each pull request outside the queue.
+func StackRequiresMergeQueue(ctx context.Context, baseRepoID int64, base string) (bool, error) {
+	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, baseRepoID, base)
+	if err != nil {
+		return false, err
+	}
+	return git_model.MergeQueueRule(rules) != nil, nil
+}
+
 // MergeStack merges the pull requests of the stack from the bottom up to pr into the base branch of the stack, each
 // one retargeted to it first. expected lists them as the client saw them, from the bottom; the call is refused with
 // ErrStackChanged unless it is the current chain. Every pull request must pass the merge checks as if it targeted the
 // base branch, and still have the head the client saw, before anything is merged. It stops at the first failure with
 // ErrStackMerge and returns the indexes of the pull requests it merged, which stay merged. The pull requests based on
-// the merged ones are retargeted to the base branch. Branches are not deleted.
+// the merged ones are retargeted to the base branch. Branches are not deleted. It is refused with ErrStackMergeQueue
+// when the base branch requires the merge queue.
 func MergeStack(ctx context.Context, doer *user_model.User, perm *access_model.Permission, pr *issues_model.PullRequest, style repo_model.MergeStyle, expected []StackHead) ([]int64, error) {
 	chain := []*issues_model.PullRequest{pr}
 	stack, err := GetStack(ctx, pr)
@@ -223,6 +238,11 @@ func MergeStack(ctx context.Context, doer *user_model.User, perm *access_model.P
 	base := chain[0].BaseBranch
 	if err := chain[0].LoadBaseRepo(ctx); err != nil {
 		return nil, err
+	}
+	if queued, err := StackRequiresMergeQueue(ctx, chain[0].BaseRepoID, base); err != nil {
+		return nil, err
+	} else if queued {
+		return nil, ErrStackMergeQueue
 	}
 	gitRepo, err := gitrepo.OpenRepository(ctx, chain[0].BaseRepo)
 	if err != nil {

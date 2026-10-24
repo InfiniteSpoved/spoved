@@ -4,7 +4,9 @@
 	<div>
 		{{ctx.Locale.Tr "repo.pulls.stack.stacked_on" (HTMLFormat `<a href="%s">#%d</a>` $stack.Parent.Link $stack.Parent.Index) (HTMLFormat "<code>%s</code>" .Issue.PullRequest.BaseBranch) (HTMLFormat "<code>%s</code>" $stack.Base)}}
 	</div>
-	{{if $stack.CanMerge}}
+	{{if $stack.MergeQueue}}
+		<div class="text grey" id="merge-stack-queue">{{svg "octicon-info" 16}} {{ctx.Locale.Tr "repo.pulls.stack.merge_queue" (HTMLFormat "<code>%s</code>" $stack.Base)}}</div>
+	{{else if $stack.CanMerge}}
 		{{if $stack.Blocked}}
 			<div class="text red" id="merge-stack-blocked">{{svg "octicon-x" 16}} {{$stack.Blocked}}</div>
 		{{else if $stack.TooLong}}

@@ -235,3 +235,28 @@ test('Stacked pull requests: merge stops at a pull request that conflicts', asyn
     await h.cleanup();
   }
 });
+
+test('Stacked pull requests: no Merge stack when the base requires the merge queue', async ({page, request}) => {
+  const id = Date.now();
+  const h = stackHelpers(request);
+  const [a, b] = ['a', 'b'].map((n) => `stack-queue-${n}-${id}`);
+  const rule = `${stackApi}/branch_protections`;
+
+  try {
+    await h.write(a, 'master', `stack-queue-a-${id}.txt`, 'a');
+    await h.write(b, a, `stack-queue-b-${id}.txt`, 'b');
+    await h.open(a, 'master', `Queue A ${id}`);
+    const prB = await h.open(b, a, `Queue B ${id}`);
+    const res = await request.post(rule, {headers: adminAuth(), data: {rule_name: 'master', enable_push: true, require_merge_queue: true}});
+    expect(res.ok()).toBeTruthy();
+
+    await page.goto(`/user2/repo1/pulls/${prB}`);
+    const notice = page.locator('#pull-stack-merge');
+    await expect(notice).toContainText(`This pull request is stacked on`);
+    await expect(page.locator('#merge-stack-queue')).toContainText("Merge stack isn't available because master requires the merge queue. Add the pull requests to the queue from the bottom up.");
+    await expect(notice.getByRole('button', {name: /Merge stack/})).toHaveCount(0);
+  } finally {
+    await request.delete(`${rule}/master`, {headers: adminAuth()});
+    await h.cleanup();
+  }
+});

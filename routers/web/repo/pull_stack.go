@@ -71,6 +71,7 @@ type stackView struct {
 	Chain         []*stackRow // the pull requests merged by Merge stack, bottom first, this one last
 	ChainLinks    template.HTML
 	CanMerge      bool          // the viewer may merge the stack
+	MergeQueue    bool          // the base requires the merge queue, so there is no Merge stack
 	TooLong       bool          // the chain is longer than one merge takes
 	MaxMerge      int           // the most pull requests one merge takes
 	Blocked       template.HTML // why Merge stack is disabled
@@ -234,7 +235,11 @@ func prepareStack(ctx *context.Context, pull *issues_model.PullRequest, allowMer
 	view.DefaultStyle = string(cfg.GetDefaultMergeStyle())
 	view.DeleteDefault, _ = ctx.Data["DefaultDeleteBranchAfterMerge"].(bool)
 	view.DeleteForced, _ = ctx.Data["DeleteBranchForced"].(bool)
-	view.CanMerge = allowMerge && !ctx.Repo.PersonalRepoLocked && len(view.Styles) > 0
+	if view.MergeQueue, err = pull_service.StackRequiresMergeQueue(ctx, ctx.Repo.Repository.ID, stack.BaseBranch); err != nil {
+		ctx.ServerError("StackRequiresMergeQueue", err)
+		return
+	}
+	view.CanMerge = allowMerge && !view.MergeQueue && !ctx.Repo.PersonalRepoLocked && len(view.Styles) > 0
 	if view.CanMerge && !view.TooLong && view.Blocked == "" {
 		prepareStackChildren(ctx, view, stack, current)
 	}
@@ -328,6 +333,8 @@ func stackCause(ctx *context.Context, issue *issues_model.Issue, stopped int64, 
 		return ctx.Tr("repo.pulls.stack.changed"), true, true
 	case errors.Is(cause, pull_service.ErrStackTooLong):
 		return ctx.Tr("repo.pulls.stack.too_long"), true, true
+	case errors.Is(cause, pull_service.ErrStackMergeQueue):
+		return ctx.Tr("repo.pulls.stack.merge_queue_refused"), true, true
 	case errors.Is(cause, pull_service.ErrStackBaseIsHead):
 		return ctx.Tr("repo.pulls.stack.base_is_head"), false, true
 	case issues_model.IsErrPullRequestAlreadyExists(cause):

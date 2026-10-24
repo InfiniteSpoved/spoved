@@ -20,6 +20,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	api "forgejo.org/modules/structs"
+	pull_service "forgejo.org/services/pull"
 	commitstatus_service "forgejo.org/services/repository/commitstatus"
 	"forgejo.org/tests/forgery"
 
@@ -337,6 +338,41 @@ func TestPullStackWeb(t *testing.T) {
 			flash := postMergeStack(t, owner, f.pub, prs[1], stackValues(heads, true))
 			assert.Equal(t, "Merged 2 pull requests into main.", flash)
 			assertMerged(t, true, prs[:2]...)
+		})
+
+		t.Run("MergeQueue", func(t *testing.T) {
+			repo, prs := newPullStack(t, user2, nil)
+			heads := stackHeads(t, repo, prs...)
+			formHeads := make([]string, len(heads))
+			for i, h := range heads {
+				formHeads[i] = fmt.Sprintf("%d:%s", h.Index, h.HeadCommitID)
+			}
+			owner.MakeRequest(t, NewRequestWithValues(t, "POST", repo.Link()+"/settings/branches/edit", map[string]string{
+				"rule_name":           "main",
+				"enable_push":         "all",
+				"require_merge_queue": "true",
+			}), http.StatusSeeOther)
+
+			// the service refuses before anything merges or is retargeted
+			_, err := mergeStack(t, user2, repo, prs[2], repo_model.MergeStyleMerge, heads)
+			require.ErrorIs(t, err, pull_service.ErrStackMergeQueue)
+			assertMerged(t, false, prs...)
+			for i, pr := range prs[1:] {
+				pr = unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID})
+				assert.Equal(t, prs[i].HeadBranch, pr.BaseBranch)
+			}
+
+			// the page says so and has no button or dialog
+			doc := stackPage(t, owner, repo, prs[2])
+			assert.Equal(t, "Merge stack isn't available because main requires the merge queue. Add the pull requests to the queue from the bottom up.",
+				strings.Join(strings.Fields(doc.Find("#merge-stack-queue").Text()), " "))
+			assert.Zero(t, doc.Find("#pull-stack-merge button").Length())
+			assert.Zero(t, doc.Find("#merge-stack").Length())
+
+			// a stale page posts anyway
+			flash := postMergeStack(t, owner, repo, prs[2], stackValues(formHeads, false))
+			assert.Equal(t, "Nothing was merged: the target branch requires the merge queue. Add the pull requests to the queue from the bottom up.", flash)
+			assertMerged(t, false, prs...)
 		})
 
 		t.Run("MarksQueries", func(t *testing.T) {

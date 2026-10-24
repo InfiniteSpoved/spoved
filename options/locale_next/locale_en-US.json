@@ -2915,6 +2915,8 @@
 	"repo.pulls.stack.changed": "the stack changed since you opened this page.",
 	"repo.pulls.stack.head_changed": "the stack changed since you opened this page (%s got new commits). Review it and try again.",
 	"repo.pulls.stack.too_long": "the stack is too long to merge at once.",
+	"repo.pulls.stack.merge_queue": "Merge stack isn't available because %s requires the merge queue. Add the pull requests to the queue from the bottom up.",
+	"repo.pulls.stack.merge_queue_refused": "the target branch requires the merge queue. Add the pull requests to the queue from the bottom up.",
 	"repo.pulls.stack.base_is_head": "the target branch is the head branch of a pull request of the stack.",
 	"repo.pulls.stack.already_exists": "a pull request from its branch to the target branch already exists.",
 	"repo.pulls.stack.branch_kept": "#%d: %s",
