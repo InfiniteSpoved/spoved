@@ -76,7 +76,7 @@ A real vulnerability is never written in this repository. File it as an issue in
 
 ## 8. Ready to merge
 
-A pull request is ready when CI success is green on its head, it merges cleanly with the latest `develop`, the step 4 checks and all four reviews are done, and every review thread is answered. Then tell the person in one short message that it is ready to merge, with the link, what was tested (and what wasn't) and what the reviews found.
+A pull request is ready when CI success is green on its head, it merges cleanly with the latest `develop`, the step 4 checks and the reviews step 6 calls for are done, and every review thread is answered. Then tell the person in one short message that it is ready to merge, with the link, what was tested (and what wasn't) and what the reviews found.
 
 When the person has approved it (or said to merge once approved and green), check again right before merging, because other pull requests merge in parallel: `git fetch origin develop` and `git merge-base --is-ancestor origin/develop HEAD`. If develop has moved, merge it in (merge commit, never a rebase), re-run the checks for the files where both sides meet, push, and wait for CI success on the new head before merging. Merge only a head that contains the develop you just fetched and is green. Then merge it with a merge commit (`merge_method: "merge"`). Then watch the CI run on `develop` that the merge starts: a new test can move others into another shard and expose an order-dependent test. If it goes red, fix it in a new pull request right away. Then start the next work item from the new `develop`.
 
