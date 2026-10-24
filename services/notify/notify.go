@@ -10,6 +10,7 @@ import (
 	actions_model "forgejo.org/models/actions"
 	issues_model "forgejo.org/models/issues"
 	packages_model "forgejo.org/models/packages"
+	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
@@ -94,6 +95,13 @@ func MergePullRequest(ctx context.Context, doer *user_model.User, pr *issues_mod
 func AutoMergePullRequest(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest) {
 	for _, notifier := range notifiers {
 		notifier.AutoMergePullRequest(ctx, doer, pr)
+	}
+}
+
+// MergeGroupChecksRequested notifies that the merge queue built entry and waits for its checks
+func MergeGroupChecksRequested(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, entry *pull_model.MergeQueueEntry) {
+	for _, notifier := range notifiers {
+		notifier.MergeGroupChecksRequested(ctx, doer, repo, entry)
 	}
 }
 

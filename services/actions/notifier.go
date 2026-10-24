@@ -12,6 +12,7 @@ import (
 	packages_model "forgejo.org/models/packages"
 	perm_model "forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
+	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
@@ -719,6 +720,21 @@ func (n *actionsNotifier) PackageDelete(ctx context.Context, doer *user_model.Us
 func (n *actionsNotifier) AutoMergePullRequest(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest) {
 	ctx = withMethod(ctx, "AutoMergePullRequest")
 	n.MergePullRequest(ctx, doer, pr)
+}
+
+// MergeGroupChecksRequested runs the merge_group workflows of the merge queue build on the build's branch
+func (n *actionsNotifier) MergeGroupChecksRequested(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, entry *pull_model.MergeQueueEntry) {
+	ctx = withMethod(ctx, "MergeGroupChecksRequested")
+	payload, err := convert.ToMergeGroupPayload(ctx, doer, repo, entry)
+	if err != nil {
+		log.Error("ToMergeGroupPayload [entry: %d]: %v", entry.ID, err)
+		return
+	}
+	NewNotifyInput(repo, doer, webhook_module.HookEventMergeGroup).
+		WithRef(payload.MergeGroup.HeadRef).
+		WithCommit(entry.TempCommitID).
+		WithPayload(payload).
+		Notify(ctx)
 }
 
 func (n *actionsNotifier) PullRequestSynchronized(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest) {

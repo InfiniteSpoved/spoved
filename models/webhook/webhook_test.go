@@ -80,7 +80,7 @@ func TestWebhook_EventsArray(t *testing.T) {
 		"workflow_run_waiting",
 		"workflow_job_blocked", "workflow_job_cancelled", "workflow_job_failure",
 		"workflow_job_running", "workflow_job_skipped", "workflow_job_success",
-		"workflow_job_waiting",
+		"workflow_job_waiting", "merge_group",
 	},
 		(&Webhook{
 			HookEvent: &webhook_module.HookEvent{SendEverything: true},
@@ -172,7 +172,8 @@ func TestCreateWebhook(t *testing.T) {
 		"workflow_job_running": true,
 		"workflow_job_skipped": true,
 		"workflow_job_success": true,
-		"workflow_job_waiting": true
+		"workflow_job_waiting": true,
+		"merge_group": true
 	}
 }
 `,
@@ -223,6 +224,7 @@ func TestCreateWebhook(t *testing.T) {
 			string(webhook_module.HookEventWorkflowJobSkipped),
 			string(webhook_module.HookEventWorkflowJobSuccess),
 			string(webhook_module.HookEventWorkflowJobWaiting),
+			string(webhook_module.HookEventMergeGroup),
 		},
 			hookFromDb.EventsArray())
 	})

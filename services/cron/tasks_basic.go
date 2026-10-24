@@ -18,6 +18,7 @@ import (
 	"forgejo.org/services/auth"
 	automerge_service "forgejo.org/services/automerge"
 	logshipping_service "forgejo.org/services/logshipping"
+	mergequeue_service "forgejo.org/services/mergequeue"
 	"forgejo.org/services/migrations"
 	mirror_service "forgejo.org/services/mirror"
 	packages_cleanup_service "forgejo.org/services/packages/cleanup"
@@ -180,6 +181,16 @@ func registerStartScheduledAutoMerges() {
 	})
 }
 
+func registerProcessMergeQueues() {
+	RegisterTaskFatal("process_merge_queues", &BaseConfig{
+		Enabled:    true,
+		RunAtStart: true,
+		Schedule:   "@every 1m",
+	}, func(ctx context.Context, _ *user_model.User, _ Config) error {
+		return mergequeue_service.TriggerAll(ctx)
+	})
+}
+
 func registerStartScheduledDispatches() {
 	RegisterTaskFatal("start_scheduled_dispatches", &BaseConfig{
 		Enabled:    true,
@@ -215,6 +226,7 @@ func initBasicTasks() {
 	registerCleanupHookTaskTable()
 	registerCleanupAuditLog()
 	registerStartScheduledAutoMerges()
+	registerProcessMergeQueues()
 	registerStartScheduledDispatches()
 	registerReloadLogShipping()
 	if setting.Packages.Enabled {

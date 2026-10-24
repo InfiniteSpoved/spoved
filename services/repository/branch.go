@@ -17,6 +17,7 @@ import (
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/perm/access"
+	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
@@ -53,6 +54,7 @@ func CreateNewBranch(ctx context.Context, doer *user_model.User, repo *repo_mode
 type Branch struct {
 	DBBranch          *git_model.Branch
 	IsProtected       bool
+	HasMergeQueue     bool
 	CanDelete         bool // the branch isn't protected, or the doer is in the rule's delete allow-list
 	IsIncluded        bool
 	CommitsAhead      int
@@ -201,6 +203,7 @@ func loadOneBranch(ctx context.Context, doer *user_model.User, repo *repo_model.
 	return &Branch{
 		DBBranch:          dbBranch,
 		IsProtected:       isProtected,
+		HasMergeQueue:     git_model.MergeQueueRule(matched) != nil,
 		CanDelete:         canDelete,
 		IsIncluded:        isIncluded,
 		CommitsAhead:      divergence.Ahead,
@@ -364,11 +367,12 @@ func RenameBranch(ctx context.Context, repo *repo_model.Repository, doer *user_m
 		return "target_exist", nil
 	}
 
-	if gitRepo.IsBranchExist(to) {
+	// the merge queue's builds are its own
+	if gitRepo.IsBranchExist(to) || pull_model.IsMergeQueueBranch(to) {
 		return "target_exist", nil
 	}
 
-	if !gitRepo.IsBranchExist(from) {
+	if !gitRepo.IsBranchExist(from) || pull_model.IsMergeQueueBranch(from) {
 		return "from_not_exist", nil
 	}
 
@@ -451,6 +455,9 @@ func DeleteBranch(ctx context.Context, doer *user_model.User, repo *repo_model.R
 
 	if branchName == repo.DefaultBranch {
 		return ErrBranchIsDefault
+	}
+	if pull_model.IsMergeQueueBranch(branchName) {
+		return git_model.ErrBranchIsProtected
 	}
 
 	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, repo.ID, branchName)

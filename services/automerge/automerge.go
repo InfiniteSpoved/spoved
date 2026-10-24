@@ -26,6 +26,7 @@ import (
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 	"forgejo.org/services/branchworkflow"
+	"forgejo.org/services/mergequeue"
 	notify_service "forgejo.org/services/notify"
 	pull_service "forgejo.org/services/pull"
 	repo_service "forgejo.org/services/repository"
@@ -439,6 +440,18 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 		return
 	} else if !deleted {
 		log.Trace("Auto merge %-v was removed meanwhile", pr)
+		return
+	}
+
+	// a branch with a merge queue merges only through it: join the queue now that the checks succeeded
+	if rule, err := mergequeue.Rule(ctx, pr); err != nil {
+		log.Error("%-v mergequeue.Rule: %v", pr, err)
+		return
+	} else if rule != nil {
+		if err := mergequeue.Add(ctx, doer, &perm, pr, scheduledPRM.MergeStyle, sha, scheduledPRM.DeleteBranchAfterMerge, false); err != nil {
+			log.Warn("Auto merge of %-v was removed but adding it to the merge queue failed: %v", pr, err)
+			skipAutoMerge(ctx, pr, scheduledPRM, "merge_failed", sha)
+		}
 		return
 	}
 

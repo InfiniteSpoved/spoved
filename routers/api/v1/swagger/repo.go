@@ -176,6 +176,20 @@ type swaggerResponseReleaseList struct {
 	TotalCount int64 `json:"X-Total-Count"`
 }
 
+// MergeQueueEntry
+// swagger:response MergeQueueEntry
+type swaggerResponseMergeQueueEntry struct {
+	// in:body
+	Body api.MergeQueueEntry `json:"body"`
+}
+
+// MergeQueueEntryList
+// swagger:response MergeQueueEntryList
+type swaggerResponseMergeQueueEntryList struct {
+	// in:body
+	Body []api.MergeQueueEntry `json:"body"`
+}
+
 // PullRequest
 // swagger:response PullRequest
 type swaggerResponsePullRequest struct {

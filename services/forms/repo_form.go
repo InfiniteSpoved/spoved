@@ -284,6 +284,14 @@ type ProtectBranchForm struct {
 	IgnoreOutdatedConversations    bool
 	BlockOnIncompleteTasks         bool
 
+	RequireMergeQueue             bool
+	MergeQueueMergeStyle          string
+	MergeQueueBuildConcurrency    int
+	MergeQueueMinGroupSize        int
+	MergeQueueMaxGroupSize        int
+	MergeQueueWaitMinutes         int
+	MergeQueueCheckTimeoutMinutes int
+
 	DeleteAllowlistUsers           string `form:"delete_allowlist_users"`
 	DeleteAllowlistTeams           string `form:"delete_allowlist_teams"`
 	DeleteAllowlistDeployKeyIDs    string `form:"delete_allowlist_deploy_key_ids"`
@@ -349,6 +357,7 @@ type WebhookCoreForm struct {
 	WorkflowJobSkipped       bool
 	WorkflowJobSuccess       bool
 	WorkflowJobWaiting       bool
+	MergeGroup               bool
 	Active                   bool
 	BranchFilter             string `binding:"GlobPattern"`
 	AuthorizationHeader      string

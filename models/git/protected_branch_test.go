@@ -89,3 +89,28 @@ func TestCanDeployKeyPush(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateMergeQueue(t *testing.T) {
+	for _, tc := range []struct {
+		pb ProtectedBranch
+		ok bool
+	}{
+		{ProtectedBranch{}, true},
+		{ProtectedBranch{MergeQueueMergeStyle: "squash", MergeQueueBuildConcurrency: 100, MergeQueueMinGroupSize: 3, MergeQueueMaxGroupSize: 3, MergeQueueWaitMinutes: 1440, MergeQueueCheckTimeoutMinutes: 1440}, true},
+		{ProtectedBranch{MergeQueueMergeStyle: "fast-forward-only"}, false},
+		{ProtectedBranch{MergeQueueMergeStyle: "manually-merged"}, false},
+		{ProtectedBranch{MergeQueueBuildConcurrency: 101}, false},
+		{ProtectedBranch{MergeQueueBuildConcurrency: -1}, false},
+		{ProtectedBranch{MergeQueueMinGroupSize: 6}, false}, // above the default maximum
+		{ProtectedBranch{MergeQueueMinGroupSize: 4, MergeQueueMaxGroupSize: 3}, false},
+		{ProtectedBranch{MergeQueueWaitMinutes: 1441}, false},
+		{ProtectedBranch{MergeQueueCheckTimeoutMinutes: 1441}, false},
+	} {
+		err := tc.pb.ValidateMergeQueue()
+		if tc.ok {
+			assert.NoError(t, err, "%+v", tc.pb)
+		} else {
+			assert.ErrorIs(t, err, ErrInvalidMergeQueueConfig, "%+v", tc.pb)
+		}
+	}
+}

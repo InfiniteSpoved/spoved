@@ -59,6 +59,7 @@ import (
 	"forgejo.org/services/gitdiff"
 	issue_service "forgejo.org/services/issue"
 	"forgejo.org/services/mergeforward"
+	"forgejo.org/services/mergequeue"
 	notify_service "forgejo.org/services/notify"
 	pull_service "forgejo.org/services/pull"
 	repo_service "forgejo.org/services/repository"
@@ -72,6 +73,7 @@ const (
 	tplCompareDiff base.TplName = "repo/diff/compare"
 	tplPullCommits base.TplName = "repo/pulls/commits"
 	tplPullFiles   base.TplName = "repo/pulls/files"
+	tplMergeQueue  base.TplName = "repo/pulls/merge_queue"
 
 	pullRequestTemplateKey = "PullRequestTemplate"
 )
@@ -1480,36 +1482,20 @@ func MergePullRequest(ctx *context.Context) {
 		return
 	}
 
+	// a branch with a merge queue merges only through it; a merge when checks succeed joins it when they do
+	queueRule, err := mergequeue.Rule(ctx, pr)
+	if err != nil {
+		ctx.ServerError("mergequeue.Rule", err)
+		return
+	}
+	if queueRule != nil && !form.MergeWhenChecksSucceed {
+		addToMergeQueue(ctx, form, issue)
+		return
+	}
+
 	// start with merging by checking
 	if err := pull_service.CheckPullMergeable(ctx, ctx.Doer, &ctx.Repo.Permission, pr, mergeCheckType, form.ForceMerge, mergeStyle); err != nil {
-		switch {
-		case errors.Is(err, pull_service.ErrIsClosed):
-			if issue.IsPull {
-				ctx.JSONError(ctx.Tr("repo.pulls.is_closed"))
-			} else {
-				ctx.JSONError(ctx.Tr("repo.issues.closed_title"))
-			}
-		case errors.Is(err, pull_service.ErrUserNotAllowedToMerge):
-			ctx.JSONError(ctx.Tr("repo.pulls.update_not_allowed"))
-		case errors.Is(err, pull_service.ErrHasMerged):
-			ctx.JSONError(ctx.Tr("repo.pulls.has_merged"))
-		case errors.Is(err, pull_service.ErrIsWorkInProgress):
-			ctx.JSONError(ctx.Tr("repo.pulls.no_merge_wip"))
-		case git_model.IsErrPRTitleRule(err):
-			message, _ := issue_service.PRTitleRuleMessage(ctx.Locale, err)
-			ctx.JSONError(message)
-		case errors.Is(err, pull_service.ErrNotMergeableState):
-			ctx.JSONError(ctx.Tr("repo.pulls.no_merge_not_ready"))
-		case models.IsErrDisallowedToMerge(err):
-			ctx.JSONError(ctx.Tr("repo.pulls.no_merge_not_ready"))
-		case asymkey_service.IsErrWontSign(err):
-			ctx.JSONError(err.Error()) // has no translation ...
-		case errors.Is(err, pull_service.ErrDependenciesLeft):
-			ctx.JSONError(ctx.Tr("repo.issues.dependency.pr_close_blocked"))
-		default:
-			ctx.ServerError("WebCheck", err)
-		}
-
+		mergeCheckError(ctx, issue, err)
 		return
 	}
 
@@ -1589,6 +1575,10 @@ func MergePullRequest(ctx *context.Context) {
 			ctx.JSONRedirect(fmt.Sprintf("%s/pulls/%d", ctx.Repo.RepoLink, pr.Index))
 			return
 		}
+	}
+	if queueRule != nil {
+		addToMergeQueue(ctx, form, issue)
+		return
 	}
 
 	// If the HTTP request is cancelled by the user agent, don't stop work. We've started a merge and need to finish all
@@ -1724,6 +1714,107 @@ func MergePullRequest(ctx *context.Context) {
 	}
 
 	ctx.JSONRedirect(issue.Link())
+}
+
+// MergeQueue shows the merge queue of a branch
+func MergeQueue(ctx *context.Context) {
+	branch := ctx.Params("*")
+	view, rule, err := mergequeue.View(ctx, ctx.Repo.Repository, branch)
+	if err != nil {
+		ctx.ServerError("mergequeue.View", err)
+		return
+	}
+	if rule == nil {
+		ctx.NotFound("MergeQueue", nil)
+		return
+	}
+	ctx.Data["Title"] = ctx.Tr("repo.pulls.merge_queue.title", branch)
+	ctx.Data["PageIsPullList"] = true
+	ctx.Data["Branch"] = branch
+	ctx.Data["Entries"] = view
+	ctx.Data["MergeQueueConfig"] = rule.MergeQueueConfig()
+	if rule.RepoID == ctx.Repo.Repository.ID && ctx.Repo.IsAdmin() {
+		ctx.Data["RuleLink"] = ctx.Repo.RepoLink + "/settings/branches/edit?rule_name=" + url.QueryEscape(rule.RuleName)
+	}
+	ctx.HTML(http.StatusOK, tplMergeQueue)
+}
+
+// mergeCheckError answers a refused CheckPullMergeable
+func mergeCheckError(ctx *context.Context, issue *issues_model.Issue, err error) {
+	switch {
+	case errors.Is(err, pull_service.ErrIsClosed):
+		if issue.IsPull {
+			ctx.JSONError(ctx.Tr("repo.pulls.is_closed"))
+		} else {
+			ctx.JSONError(ctx.Tr("repo.issues.closed_title"))
+		}
+	case errors.Is(err, pull_service.ErrUserNotAllowedToMerge):
+		ctx.JSONError(ctx.Tr("repo.pulls.update_not_allowed"))
+	case errors.Is(err, pull_service.ErrHasMerged):
+		ctx.JSONError(ctx.Tr("repo.pulls.has_merged"))
+	case errors.Is(err, pull_service.ErrIsWorkInProgress):
+		ctx.JSONError(ctx.Tr("repo.pulls.no_merge_wip"))
+	case git_model.IsErrPRTitleRule(err):
+		message, _ := issue_service.PRTitleRuleMessage(ctx.Locale, err)
+		ctx.JSONError(message)
+	case errors.Is(err, pull_service.ErrNotMergeableState):
+		ctx.JSONError(ctx.Tr("repo.pulls.no_merge_not_ready"))
+	case models.IsErrDisallowedToMerge(err):
+		ctx.JSONError(ctx.Tr("repo.pulls.no_merge_not_ready"))
+	case asymkey_service.IsErrWontSign(err):
+		ctx.JSONError(err.Error()) // has no translation ...
+	case errors.Is(err, pull_service.ErrDependenciesLeft):
+		ctx.JSONError(ctx.Tr("repo.issues.dependency.pr_close_blocked"))
+	default:
+		ctx.ServerError("WebCheck", err)
+	}
+}
+
+// addToMergeQueue adds the pull request to the merge queue of its base branch
+func addToMergeQueue(ctx *context.Context, form *forms.MergePullRequestForm, issue *issues_model.Issue) {
+	err := mergequeue.Add(ctx, ctx.Doer, &ctx.Repo.Permission, issue.PullRequest, repo_model.MergeStyle(form.Do), form.HeadCommitID, form.DeleteBranchAfterMerge, form.ForceMerge)
+	if err == nil {
+		ctx.Flash.Success(ctx.Tr("repo.pulls.merge_queue.added"))
+		ctx.JSONRedirect(issue.Link())
+		return
+	}
+	if msg, ok := ctx.PersonalRepoRefusal(err); ok {
+		ctx.JSONError(msg)
+		return
+	}
+	switch {
+	case errors.As(err, &pull_model.ErrAlreadyInMergeQueue{}):
+		ctx.JSONError(ctx.Tr("repo.pulls.merge_queue.already_queued"))
+	case models.IsErrInvalidMergeStyle(err):
+		ctx.JSONError(ctx.Tr("repo.pulls.invalid_merge_option"))
+	case models.IsErrSHADoesNotMatch(err):
+		ctx.JSONError(ctx.Tr("repo.pulls.head_out_of_date"))
+	default:
+		mergeCheckError(ctx, issue, err)
+	}
+}
+
+// RemoveFromMergeQueue takes the pull request out of the merge queue
+func RemoveFromMergeQueue(ctx *context.Context) {
+	issue, ok := getPullInfo(ctx)
+	if !ok {
+		return
+	}
+	if err := mergequeue.Remove(ctx, ctx.Doer, ctx.Repo.Permission, issue.PullRequest); err != nil {
+		switch {
+		case errors.Is(err, util.ErrPermissionDenied):
+			ctx.Flash.Error(ctx.Tr("repo.pulls.merge_queue.no_permission"))
+		case errors.Is(err, mergequeue.ErrNotQueued):
+			ctx.Flash.Error(ctx.Tr("repo.pulls.merge_queue.not_queued"))
+		default:
+			ctx.ServerError("mergequeue.Remove", err)
+			return
+		}
+		ctx.Redirect(issue.Link())
+		return
+	}
+	ctx.Flash.Success(ctx.Tr("repo.pulls.merge_queue.removed"))
+	ctx.Redirect(issue.Link())
 }
 
 // CancelAutoMergePullRequest cancels a scheduled pr

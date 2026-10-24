@@ -1955,6 +1955,7 @@ func registerRoutes(m *web.Route) {
 		})
 
 		m.Get("/pulls/posters", repo.PullPosters)
+		m.Get("/merge-queue/*", repo.MergeQueue)
 		m.Group("/pulls/{index}", func() {
 			m.Get("", repo.SetWhitespaceBehavior, repo.GetPullDiffStats, context.EnsureOrg(), repo.ViewIssue)
 			m.Get(".diff", common.RateLimitHeavyPlain, repo.DownloadPullDiff)
@@ -1973,6 +1974,7 @@ func registerRoutes(m *web.Route) {
 			})
 			m.Post("/merge", context.RepoMustNotBeArchived(), web.Bind(forms.MergePullRequestForm{}), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.MergePullRequest)
 			m.Post("/cancel_auto_merge", context.RepoMustNotBeArchived(), repo.CancelAutoMergePullRequest)
+			m.Post("/merge_queue/remove", context.RepoMustNotBeArchived(), repo.RemoveFromMergeQueue)
 			m.Post("/change_auto_merge_time", context.RepoMustNotBeArchived(), web.Bind(forms.ChangeAutoMergeTimeForm{}), repo.ChangeAutoMergeTimePullRequest)
 			m.Post("/revert", context.RepoMustNotBeArchived(), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.RevertPullRequest)
 			m.Post("/update", repo.UpdatePullRequest)

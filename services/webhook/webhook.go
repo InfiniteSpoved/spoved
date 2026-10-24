@@ -140,6 +140,8 @@ func getPayloadBranch(p api.Payloader) string {
 		ref = pp.Ref
 	case *api.PushPayload:
 		ref = pp.Ref
+	case *api.MergeGroupPayload:
+		ref = pp.MergeGroup.BaseRef // the branch the queue merges into
 	}
 	if strings.HasPrefix(ref, git.BranchPrefix) {
 		return ref[len(git.BranchPrefix):]
@@ -229,6 +231,12 @@ func PrepareWebhook(ctx context.Context, w *webhook_model.Webhook, event webhook
 	if pushEvent, ok := p.(*api.PushPayload); ok &&
 		w.Type != webhook_module.FORGEJO && w.Type != webhook_module.GITEA && w.Type != webhook_module.GOGS &&
 		len(pushEvent.Commits) == 0 {
+		return nil
+	}
+
+	// Merge queue builds are for CI: chat services don't get them
+	if event == webhook_module.HookEventMergeGroup &&
+		w.Type != webhook_module.FORGEJO && w.Type != webhook_module.GITEA && w.Type != webhook_module.GOGS {
 		return nil
 	}
 

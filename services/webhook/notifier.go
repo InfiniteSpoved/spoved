@@ -12,6 +12,7 @@ import (
 	packages_model "forgejo.org/models/packages"
 	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
+	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
@@ -805,6 +806,17 @@ func (m *webhookNotifier) PullRequestSynchronized(ctx context.Context, doer *use
 		Sender:      convert.ToUser(ctx, doer, nil),
 	}); err != nil {
 		log.Error("PrepareWebhooks [pull_id: %v]: %v", pr.ID, err)
+	}
+}
+
+func (m *webhookNotifier) MergeGroupChecksRequested(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, entry *pull_model.MergeQueueEntry) {
+	payload, err := convert.ToMergeGroupPayload(ctx, doer, repo, entry)
+	if err != nil {
+		log.Error("ToMergeGroupPayload [entry: %d]: %v", entry.ID, err)
+		return
+	}
+	if err := PrepareWebhooks(ctx, EventSource{Repository: repo}, webhook_module.HookEventMergeGroup, payload); err != nil {
+		log.Error("PrepareWebhooks [merge queue entry: %d]: %v", entry.ID, err)
 	}
 }
 

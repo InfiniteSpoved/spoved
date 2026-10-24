@@ -1,0 +1,15 @@
+{{/* why a pull request left the merge queue without being merged; an unknown key shows nothing */}}
+{{if eq . "removed"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.removed"}}
+{{else if eq . "checks_failed"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.checks_failed"}}
+{{else if eq . "timeout"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.timeout"}}
+{{else if eq . "head_moved"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.head_moved"}}
+{{else if eq . "closed"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.closed"}}
+{{else if eq . "retargeted"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.retargeted"}}
+{{else if eq . "permission"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.permission"}}
+{{else if eq . "blocked"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.blocked"}}
+{{else if eq . "conflict"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.conflict"}}
+{{else if eq . "wip"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.wip"}}
+{{else if eq . "disabled"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.disabled"}}
+{{else if eq . "branch_missing"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.branch_missing"}}
+{{else if eq . "merge_failed"}}{{ctx.Locale.Tr "repo.pulls.merge_queue.reason.merge_failed"}}
+{{end}}
