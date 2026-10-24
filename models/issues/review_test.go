@@ -473,3 +473,20 @@ func TestAddTeamReviewRequest(t *testing.T) {
 		require.Nil(t, comment)
 	})
 }
+
+func TestFindTokenApproverIDs(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	bot := func(tokenID int64) int64 { return user_model.AccessTokenBotID(tokenID) }
+	for _, r := range []*issues_model.Review{
+		{IssueID: 2, ReviewerID: bot(1), Type: issues_model.ReviewTypeApprove},
+		{IssueID: 2, ReviewerID: bot(1), Type: issues_model.ReviewTypeApprove}, // twice, listed once
+		{IssueID: 2, ReviewerID: bot(2), Type: issues_model.ReviewTypeApprove, Dismissed: true},
+		{IssueID: 2, ReviewerID: bot(3), Type: issues_model.ReviewTypeReject},
+		{IssueID: 3, ReviewerID: bot(4), Type: issues_model.ReviewTypeApprove}, // another issue
+	} {
+		require.NoError(t, db.Insert(t.Context(), r))
+	}
+	ids, err := issues_model.FindTokenApproverIDs(t.Context(), 2)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{bot(1)}, ids, "users' approvals, dismissed ones, rejections and other issues are left out")
+}

@@ -13,6 +13,7 @@ import (
 
 	"forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 )
@@ -166,9 +167,33 @@ func GetAccessTokenBot(ctx context.Context, id int64) (*User, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	bot := NewAccessTokenBot(t)
-	bot.botTokensPath, err = accessTokensPath(ctx, t)
-	return bot, err
+	return NewAccessTokenBot(t), nil
+}
+
+// GetAccessTokenBotNames returns the token names of the identities with the user IDs (see AccessTokenBotID), in one
+// query; the identities of deleted tokens are left out.
+func GetAccessTokenBotNames(ctx context.Context, ids []int64) ([]string, error) {
+	tokenIDs := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		tokenIDs = append(tokenIDs, accessTokenBotIDBase-id)
+	}
+	var names []string
+	err := db.GetEngine(ctx).Table("access_token").In("id", tokenIDs).Asc("id").Cols("name").Find(&names)
+	return names, err
+}
+
+// getAccessTokenBotForDisplay is GetAccessTokenBot with the link to the page that manages the token, which the
+// places that show the identity use (GetPossibleUserByID); a failed lookup of the link leaves it empty.
+func getAccessTokenBotForDisplay(ctx context.Context, id int64) (*User, error) {
+	bot, err := GetAccessTokenBot(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if bot.botTokensPath, err = accessTokensPath(ctx, bot.BotToken); err != nil {
+		log.Error("accessTokensPath of token %d: %v", bot.BotToken.ID, err)
+		bot.botTokensPath = ""
+	}
+	return bot, nil
 }
 
 // accessTokensPath returns the path (below the root URL) of the Keys and tokens page that manages the token, "" when

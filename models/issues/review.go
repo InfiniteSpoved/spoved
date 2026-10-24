@@ -314,6 +314,16 @@ func isOfficialReviewerTeamOf(ctx context.Context, pb *git_model.ProtectedBranch
 	return slices.Contains(pb.ApprovalsWhitelistTeamIDs, team.ID)
 }
 
+// FindTokenApproverIDs returns the identities of access tokens (see user_model.AccessTokenBotID) whose approval of the
+// issue stands, not dismissed.
+func FindTokenApproverIDs(ctx context.Context, issueID int64) ([]int64, error) {
+	var ids []int64
+	err := db.GetEngine(ctx).Table("review").Distinct("reviewer_id").
+		Where("issue_id = ? AND type = ? AND dismissed = ? AND reviewer_id < ?", issueID, ReviewTypeApprove, false, user_model.AccessTokenBotID(0)).
+		Find(&ids)
+	return ids, err
+}
+
 // ValidReviewers returns the reviewers whose latest approval or rejection has reviewType and is valid, in review order.
 // They are not official reviewers: the caller decides who is eligible, evaluated now instead of when the review
 // was made. A reviewer must be able to log in and still have write access, and never is the author.

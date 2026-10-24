@@ -1243,7 +1243,7 @@ func GetPossibleUserByID(ctx context.Context, id int64) (*User, error) {
 		return nil, ErrUserNotExist{}
 	default:
 		if IsAccessTokenBotID(id) {
-			return GetAccessTokenBot(ctx, id)
+			return getAccessTokenBotForDisplay(ctx, id)
 		}
 		return GetUserByID(ctx, id)
 	}
@@ -1263,7 +1263,7 @@ func GetPossibleUserByIDs(ctx context.Context, ids []int64) ([]*User, error) {
 	for id := range uniqueIDs {
 		if IsAccessTokenBotID(id) {
 			uniqueIDs.Remove(id)
-			if bot, err := GetAccessTokenBot(ctx, id); err == nil {
+			if bot, err := getAccessTokenBotForDisplay(ctx, id); err == nil {
 				users = append(users, bot)
 			} else if !IsErrUserNotExist(err) {
 				return nil, err
