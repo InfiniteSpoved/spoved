@@ -709,9 +709,9 @@
 				</span>
 				{{if eq .Type 52}}
 					<div class="detail flex-text-block">
-						<span class="text grey muted-links">
+						<span class="tw-text-text-light-2 muted-links">{{/* wraps on phones, unlike .text in an event detail */}}
 							{{template "repo/issue/view_content/merge_queue_reason" $info.Reason}}
-							{{if $info.SHA}}<a href="{{$.RepoLink}}/commit/{{PathEscape $info.SHA}}">{{ctx.Locale.Tr "repo.pulls.merge_queue.test_commit" (ShortSha $info.SHA)}}</a>{{end}}
+							{{if $info.SHA}}<a class="tw-font-mono" href="{{$.RepoLink}}/commit/{{PathEscape $info.SHA}}">{{ShortSha $info.SHA}}</a>{{end}}
 						</span>
 					</div>
 				{{end}}

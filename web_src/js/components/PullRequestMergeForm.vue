@@ -278,6 +278,10 @@ export default {
   position: relative;
   max-width: 100%;
 }
+.ui.merge-button > .ui.button:first-child {
+  flex-shrink: 1;
+  min-width: 0;
+}
 .ui.merge-button .button-text {
   white-space: normal;
   text-align: start;
