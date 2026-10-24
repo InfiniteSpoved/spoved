@@ -825,3 +825,24 @@ func TestOwnedAccessTokenWebForm(t *testing.T) {
 		assert.EqualValues(t, 1, unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{Name: n, OwnerType: auth_model.AccessTokenOwnerRepo, OwnerID: 3}).CreatorID)
 	})
 }
+
+// A token whose stored scopes are no longer allowed is not rotated, whichever way it is asked for.
+func TestOwnedAccessTokenRotateRefusedForStoredScope(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	session := loginUser(t, "user2")
+	owner := getUserToken(t, "user2", auth_model.AccessTokenScopeWriteRepository)
+	tok := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, 1, 0, perm_model.AccessModeRead, "read:repository")
+	_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE access_token SET scope = 'all' WHERE id = ?", tok.ID)
+	require.NoError(t, err)
+	hash := unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: tok.ID}).TokenHash
+	since := auditMaxID(t)
+
+	MakeRequest(t, NewRequestWithJSON(t, "POST", fmt.Sprintf("/api/v1/repos/user2/repo1/tokens/%d/rotate", tok.ID), api.RotateOwnedAccessTokenOption{}).AddTokenAuth(owner), http.StatusUnprocessableEntity)
+	resp := session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/settings/keys/tokens/rotate", map[string]string{"id": fmt.Sprint(tok.ID)}), http.StatusSeeOther)
+	assert.Contains(t, resp.Header().Get("Location"), "/user2/repo1/settings/keys")
+	page := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/settings/keys"), http.StatusOK).Body)
+	assert.Contains(t, page.Find(".flash-error").Text(), "scope")
+
+	assert.Equal(t, hash, unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: tok.ID}).TokenHash, "nothing was rotated")
+	assert.Empty(t, auditSince(t, since), "and nothing recorded")
+}
