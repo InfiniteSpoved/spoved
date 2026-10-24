@@ -77,6 +77,12 @@ func SendCredentialExpiryNotices(ctx context.Context) error {
 		if c.expires <= now.AddDuration(24*time.Hour) {
 			stage = auth_model.ExpiryNoticeToday
 		}
+		// claim before the lookups: a credential nobody can be mailed about is not looked at again every hour
+		if claimed, err := auth_model.ClaimCredentialExpiryNotice(ctx, c.kind, c.id, c.expires, stage); err != nil {
+			return err
+		} else if !claimed {
+			continue
+		}
 		r, err := c.recipients(ctx)
 		if err != nil {
 			log.Error("credential expiry notice: recipients of %s %d: %v", c.kind, c.id, err)
@@ -85,13 +91,23 @@ func SendCredentialExpiryNotices(ctx context.Context) error {
 		if len(r.users) == 0 {
 			continue
 		}
-		if claimed, err := auth_model.ClaimCredentialExpiryNotice(ctx, c.kind, c.id, c.expires, stage); err != nil {
-			return err
-		} else if !claimed {
-			continue
+		var repoID int64 // 0: the user's own settings only
+		if r.repo != nil {
+			repoID = r.repo.ID
+		}
+		ids := make([]int64, len(r.users))
+		for i, u := range r.users {
+			ids[i] = u.ID
+		}
+		filter, err := newEmailFilter(ctx, repoID, ids...)
+		if err != nil {
+			log.Error("newEmailFilter: %v", err) // fall back to the preset and defaults
 		}
 		for _, u := range r.users {
-			if err := sendCredentialExpiryMail(ctx, c, r, u, stage, now); err != nil {
+			if !filter.ShouldEmail(u, user_model.NotifyEventCredentialExpiry) {
+				continue
+			}
+			if err := sendCredentialExpiryMail(c, r, u, stage, now); err != nil {
 				log.Error("credential expiry notice to %d: %v", u.ID, err)
 			}
 		}
@@ -269,14 +285,7 @@ func orgOwnerRecipients(ctx context.Context, orgID, groupID int64) (*expiryRecip
 	return r, nil
 }
 
-func sendCredentialExpiryMail(ctx context.Context, c *expiringCredential, r *expiryRecipients, u *user_model.User, stage int, now timeutil.TimeStamp) error {
-	repo := r.repo
-	if repo == nil {
-		repo = &repo_model.Repository{} // the user's own settings only
-	}
-	if !ShouldEmail(ctx, u, repo, user_model.NotifyEventCredentialExpiry) {
-		return nil
-	}
+func sendCredentialExpiryMail(c *expiringCredential, r *expiryRecipients, u *user_model.User, stage int, now timeutil.TimeStamp) error {
 	locale := translation.NewLocale(u.Language)
 	kind := locale.TrString("mail.credential_expiry.kind." + c.kind)
 	if c.kind == "org_deploy_key" {
@@ -290,16 +299,18 @@ func sendCredentialExpiryMail(ctx context.Context, c *expiringCredential, r *exp
 		subject = locale.TrString("mail.credential_expiry.subject_soon", kind, c.name, days)
 	}
 	data := map[string]any{
-		"locale":       locale,
-		"Language":     locale.Language(),
-		"Kind":         kind,
-		"Name":         c.name,
-		"Owner":        r.owner(locale),
-		"Expires":      c.expires.AsTimeInLocation(setting.DefaultUILocation).Format("2006-01-02 15:04 MST"),
-		"IsToken":      c.kind == "access_token",
-		"Link":         r.keysLink,
-		"Reason":       r.reason(locale),
-		"SettingsLink": setting.AppURL + "user/settings/notifications",
+		"locale":   locale,
+		"Language": locale.Language(),
+		"Kind":     kind,
+		"Name":     c.name,
+		"Owner":    r.owner(locale),
+		"Expires":  c.expires.AsTimeInLocation(setting.DefaultUILocation).Format("2006-01-02 15:04 MST"),
+		"IsToken":  c.kind == "access_token",
+		// a personal token is regenerated, the other tokens rotated
+		"IsPersonalToken": c.kind == "access_token" && c.userID != 0,
+		"Link":            r.keysLink,
+		"Reason":          r.reason(locale),
+		"SettingsLink":    setting.AppURL + "user/settings/notifications",
 	}
 	var content bytes.Buffer
 	if err := bodyTemplates.ExecuteTemplate(&content, string(tplCredentialExpiry), data); err != nil {

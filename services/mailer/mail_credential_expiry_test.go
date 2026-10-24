@@ -59,11 +59,13 @@ func TestSendCredentialExpiryNotices(t *testing.T) {
 	require.NotNil(t, personal, "%v", got)
 	assert.Contains(t, personal.Body, "of your account expires on 2026-10-08")
 	assert.Contains(t, personal.Body, `href="https://try.gitea.io/user/settings/keys"`)
-	assert.Contains(t, personal.Body, "Rotate it")
+	assert.Contains(t, personal.Body, "Regenerate it")
+	assert.NotContains(t, personal.Body, "Rotate it")
 	assert.NotContains(t, personal.Body, "expiry-1")
 
 	repo := got[user2+" Access token ci-repo expires in 3 days"]
 	require.NotNil(t, repo, "the owner of user2/repo1 administers it")
+	assert.Contains(t, repo.Body, "Rotate it")
 	assert.Contains(t, repo.Body, "of repository user2/repo1")
 	assert.Contains(t, repo.Body, "administrator of user2/repo1")
 	assert.Contains(t, repo.Body, `href="https://try.gitea.io/user2/repo1/settings/keys"`)
@@ -90,6 +92,11 @@ func TestSendCredentialExpiryNotices(t *testing.T) {
 	got = send(t)
 	assert.NotNil(t, got[user2+" Access token personal expires within a day"])
 	assert.NotNil(t, got[user2+" Access token later expires in 2 days"])
+
+	// a credential nobody can be mailed about is claimed once, not looked at again
+	gone := token("ownerless", timeutil.TimeStampNow().AddDuration(time.Hour), &auth_model.AccessToken{UID: 99999})
+	assert.Empty(t, send(t))
+	unittest.AssertExistsAndLoadBean(t, &auth_model.CredentialExpiryNotice{Kind: "access_token", CredentialID: gone.ID})
 
 	// someone who turned mail off gets none
 	_, err := db.GetEngine(t.Context()).ID(2).Cols("email_notifications_preference").Update(&user_model.User{EmailNotificationsPreference: user_model.EmailNotificationsDisabled})

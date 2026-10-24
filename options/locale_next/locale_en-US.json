@@ -2854,6 +2854,7 @@
 	"mail.credential_expiry.of_repo": "repository %s",
 	"mail.credential_expiry.effect": "Anything that uses it (CI, scripts) will lose access then.",
 	"mail.credential_expiry.rotate": "Rotate it to get a new secret with the same settings:",
+	"mail.credential_expiry.regenerate": "Regenerate it to get a new secret with the same settings:",
 	"mail.credential_expiry.replace": "Add a new key and remove this one before then:",
 	"mail.credential_expiry.open": "Open Keys and tokens",
 	"mail.credential_expiry.reason_self": "You get this mail because this key or token is yours.",
