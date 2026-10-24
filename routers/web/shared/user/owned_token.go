@@ -280,6 +280,9 @@ func rememberNewOwnedToken(ctx *context.Context, level OwnedTokenLevel, t *auth_
 // popNewOwnedToken puts the token that rememberNewOwnedToken stored, if it is one of level's, into the page data and
 // forgets it. It returns false when it answered with an error.
 func popNewOwnedToken(ctx *context.Context, level OwnedTokenLevel) bool {
+	if ctx.Session == nil { // unit-test contexts have none
+		return true
+	}
 	v, ok := ctx.Session.Get(newOwnedTokenSessionKey).(string)
 	if !ok {
 		return true

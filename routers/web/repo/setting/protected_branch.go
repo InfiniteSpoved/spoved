@@ -95,7 +95,7 @@ func SettingsProtectedBranch(c *context.Context) {
 		return
 	}
 	c.Data["Users"] = users
-	c.Data["whitelist_users"] = joinIDs(user_model.UserIDsOnly(rule.WhitelistUserIDs))
+	c.Data["whitelist_users"] = joinIDs(user_model.WithoutTokenIDs(rule.WhitelistUserIDs))
 	c.Data["merge_whitelist_users"] = strings.Join(base.Int64sToStrings(rule.MergeWhitelistUserIDs), ",")
 	c.Data["approvals_whitelist_users"] = strings.Join(base.Int64sToStrings(rule.ApprovalsWhitelistUserIDs), ",")
 	deployKeys, err := getWriteDeployKeys(c)
@@ -112,9 +112,9 @@ func SettingsProtectedBranch(c *context.Context) {
 	c.Data["AllowlistTokens"] = tokens
 	// the deploy key pickers also hold the tokens, which the rule stores as their identities' user IDs
 	c.Data["whitelist_deploy_key_ids"] = joinIDs(append(slices.Clone(rule.WhitelistDeployKeyIDs), user_model.TokenIDsOnly(rule.WhitelistUserIDs)...))
-	c.Data["delete_allowlist_users"] = joinIDs(user_model.UserIDsOnly(rule.DeleteAllowlistUserIDs))
+	c.Data["delete_allowlist_users"] = joinIDs(user_model.WithoutTokenIDs(rule.DeleteAllowlistUserIDs))
 	c.Data["delete_allowlist_deploy_key_ids"] = joinIDs(append(slices.Clone(rule.DeleteAllowlistDeployKeyIDs), user_model.TokenIDsOnly(rule.DeleteAllowlistUserIDs)...))
-	c.Data["force_push_allowlist_users"] = joinIDs(user_model.UserIDsOnly(rule.ForcePushAllowlistUserIDs))
+	c.Data["force_push_allowlist_users"] = joinIDs(user_model.WithoutTokenIDs(rule.ForcePushAllowlistUserIDs))
 	c.Data["force_push_allowlist_deploy_key_ids"] = joinIDs(append(slices.Clone(rule.ForcePushAllowlistDeployKeyIDs), user_model.TokenIDsOnly(rule.ForcePushAllowlistUserIDs)...))
 	c.Data["status_check_contexts"] = strings.Join(rule.StatusCheckContexts, "\n")
 	contexts, _ := git_model.FindRepoRecentCommitStatusContexts(c, c.Repo.Repository.ID, 7*24*time.Hour) // Find last week status check contexts
@@ -260,7 +260,7 @@ func ProtectBranchFromForm(ctx *context.Context, f *forms.ProtectBranchForm, pro
 		if strings.TrimSpace(f.WhitelistDeployKeyIDs) != "" {
 			whitelistDeployKeys, _ = base.StringsToInt64s(strings.Split(f.WhitelistDeployKeyIDs, ","))
 		}
-		whitelistUsers = append(user_model.UserIDsOnly(whitelistUsers), user_model.TokenIDsOnly(whitelistDeployKeys)...)
+		whitelistUsers = append(user_model.WithoutTokenIDs(whitelistUsers), user_model.TokenIDsOnly(whitelistDeployKeys)...)
 		whitelistDeployKeys = keyIDsOnly(whitelistDeployKeys)
 	default:
 		protectBranch.CanPush = false
@@ -339,10 +339,10 @@ func ProtectBranchFromForm(ctx *context.Context, f *forms.ProtectBranchForm, pro
 		ApprovalsUserIDs: approvalsWhitelistUsers,
 		ApprovalsTeamIDs: approvalsWhitelistTeams,
 
-		DeleteUserIDs:         append(user_model.UserIDsOnly(parseIDList(f.DeleteAllowlistUsers)), user_model.TokenIDsOnly(parseIDList(f.DeleteAllowlistDeployKeyIDs))...),
+		DeleteUserIDs:         append(user_model.WithoutTokenIDs(parseIDList(f.DeleteAllowlistUsers)), user_model.TokenIDsOnly(parseIDList(f.DeleteAllowlistDeployKeyIDs))...),
 		DeleteTeamIDs:         parseIDList(f.DeleteAllowlistTeams),
 		DeleteDeployKeyIDs:    keyIDsOnly(parseIDList(f.DeleteAllowlistDeployKeyIDs)),
-		ForcePushUserIDs:      append(user_model.UserIDsOnly(parseIDList(f.ForcePushAllowlistUsers)), user_model.TokenIDsOnly(parseIDList(f.ForcePushAllowlistDeployKeyIDs))...),
+		ForcePushUserIDs:      append(user_model.WithoutTokenIDs(parseIDList(f.ForcePushAllowlistUsers)), user_model.TokenIDsOnly(parseIDList(f.ForcePushAllowlistDeployKeyIDs))...),
 		ForcePushTeamIDs:      parseIDList(f.ForcePushAllowlistTeams),
 		ForcePushDeployKeyIDs: keyIDsOnly(parseIDList(f.ForcePushAllowlistDeployKeyIDs)),
 	}, ""

@@ -86,7 +86,7 @@ func EditProtectedTag(ctx *context.Context) {
 	}
 
 	ctx.Data["name_pattern"] = pt.NamePattern
-	ctx.Data["allowlist_users"] = joinIDs(user_model.UserIDsOnly(pt.AllowlistUserIDs))
+	ctx.Data["allowlist_users"] = joinIDs(user_model.WithoutTokenIDs(pt.AllowlistUserIDs))
 	ctx.Data["allowlist_teams"] = strings.Join(base.Int64sToStrings(pt.AllowlistTeamIDs), ",")
 	ctx.Data["allowlist_deploy_key_ids"] = joinIDs(append(slices.Clone(pt.AllowlistDeployKeyIDs), user_model.TokenIDsOnly(pt.AllowlistUserIDs)...))
 
@@ -204,7 +204,7 @@ func setAllowlistDeployKeyIDs(ctx *context.Context, pt *git_model.ProtectedTag, 
 		ctx.ServerError("getWriteTokens", err)
 		return false
 	}
-	pt.AllowlistUserIDs = user_model.UserIDsOnly(pt.AllowlistUserIDs)
+	pt.AllowlistUserIDs = user_model.WithoutTokenIDs(pt.AllowlistUserIDs)
 	for _, id := range user_model.TokenIDsOnly(ids) {
 		if slices.ContainsFunc(tokens, func(t *allowlistToken) bool { return t.BotID == id }) {
 			pt.AllowlistUserIDs = append(pt.AllowlistUserIDs, id)

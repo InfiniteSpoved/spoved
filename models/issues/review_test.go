@@ -476,7 +476,7 @@ func TestAddTeamReviewRequest(t *testing.T) {
 
 func TestFindTokenApproverIDs(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
-	bot := func(tokenID int64) int64 { return user_model.AccessTokenBotID(tokenID) }
+	bot := user_model.AccessTokenBotID
 	for _, r := range []*issues_model.Review{
 		{IssueID: 2, ReviewerID: bot(1), Type: issues_model.ReviewTypeApprove},
 		{IssueID: 2, ReviewerID: bot(1), Type: issues_model.ReviewTypeApprove}, // twice, listed once

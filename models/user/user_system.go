@@ -128,8 +128,8 @@ func IsAccessTokenBotID(id int64) bool {
 	return id < accessTokenBotIDBase
 }
 
-// UserIDsOnly drops the token identities from a user allow-list.
-func UserIDsOnly(ids []int64) []int64 {
+// WithoutTokenIDs drops the token identities from a user allow-list.
+func WithoutTokenIDs(ids []int64) []int64 {
 	return slices.DeleteFunc(slices.Clone(ids), IsAccessTokenBotID)
 }
 
