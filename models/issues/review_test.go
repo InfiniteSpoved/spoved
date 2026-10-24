@@ -352,6 +352,7 @@ func TestSubmitPendingReviewDeletesReviewRequest(t *testing.T) {
 		issues_model.ReviewTypeReject,
 		"test content",
 		reviewPending.CommitID,
+		"",
 		false,
 		[]string{},
 	)

@@ -24,8 +24,8 @@ type StackMark struct {
 }
 
 // FindStackMarks returns the marks of the open pull requests among issues, whose pull requests are loaded, that are in
-// a stack, by pull request ID, with one query for all of them. A parent is the only open pull request of the repository with its head branch, like in the
-// stack of a single pull request.
+// a stack, by pull request ID, with one query for all of them. A parent is the only open pull request of the
+// repository with its head branch, like in the stack of a single pull request.
 func FindStackMarks(ctx context.Context, issues IssueList) (map[int64]StackMark, error) {
 	prs := make(PullRequestList, 0, len(issues))
 	for _, issue := range issues {

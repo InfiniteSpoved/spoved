@@ -71,14 +71,14 @@ func GetStack(ctx context.Context, pr *issues_model.PullRequest) (*Stack, error)
 	truncated := false
 	var ancestors []*issues_model.PullRequest // parent first
 	for cur := pr; ; {
-		prs, err := issues_model.GetUnmergedPullRequestsByBranches(ctx, pr.BaseRepoID, []string{cur.BaseBranch})
+		prs, err := issues_model.GetUnmergedPullRequestsByHeadBranch(ctx, pr.BaseRepoID, cur.BaseBranch)
 		if err != nil {
 			return nil, err
 		}
 		var parent *issues_model.PullRequest
 		n := 0
 		for _, q := range prs {
-			if q.CanBeStackParent() && q.HeadBranch == cur.BaseBranch {
+			if q.CanBeStackParent() {
 				parent = q
 				n++
 			}
@@ -192,7 +192,7 @@ func (e ErrStackMerge) Unwrap() error {
 // ErrStackChanged unless it is the current chain. Every pull request must pass the merge checks as if it targeted the
 // base branch, and still have the head the client saw, before anything is merged. It stops at the first failure with
 // ErrStackMerge and returns the indexes of the pull requests it merged, which stay merged. The pull requests based on
-// the last merged one are retargeted to the base branch. Branches are not deleted.
+// the merged ones are retargeted to the base branch. Branches are not deleted.
 func MergeStack(ctx context.Context, doer *user_model.User, perm *access_model.Permission, pr *issues_model.PullRequest, style repo_model.MergeStyle, expected []StackHead) ([]int64, error) {
 	chain := []*issues_model.PullRequest{pr}
 	stack, err := GetStack(ctx, pr)
@@ -238,7 +238,11 @@ func MergeStack(ctx context.Context, doer *user_model.User, perm *access_model.P
 	merged := make([]int64, 0, len(chain))
 	var mergeErr error
 	for i, p := range chain {
-		if err := mergeStackPull(ctx, doer, perm, p, expected[i].HeadCommitID, base, style); err != nil {
+		var parent *issues_model.PullRequest // merged by the previous round
+		if i > 0 {
+			parent = chain[i-1]
+		}
+		if err := mergeStackPull(ctx, doer, perm, p, parent, expected[i].HeadCommitID, base, style); err != nil {
 			if models.IsErrPullRequestHasMerged(err) {
 				err = ErrHasMerged
 			}
@@ -249,7 +253,7 @@ func MergeStack(ctx context.Context, doer *user_model.User, perm *access_model.P
 	}
 	if len(merged) > 0 {
 		// whatever happened, nothing is left based on a branch that is merged now
-		retargetStackChildren(ctx, doer, chain[len(merged)-1], base)
+		retargetStackChildren(ctx, doer, chain[:len(merged)], base)
 	}
 	return merged, mergeErr
 }
@@ -289,6 +293,11 @@ func checkStackPull(ctx context.Context, doer *user_model.User, perm *access_mod
 		}
 	}
 
+	p, err := testChecking(ctx, p)
+	if err != nil {
+		return err
+	}
+
 	// a copy of its own: the reviews count as they will on base, the check never writes
 	check := *p
 	check.BaseBranch = base
@@ -301,6 +310,14 @@ func checkStackPull(ctx context.Context, doer *user_model.User, perm *access_mod
 			if err := issues_model.DowngradeOfficialReviews(ctx, &check); err != nil {
 				return err
 			}
+			// as changeTargetBranch will: the approvals that are stale now are dismissed if the rules of base say so
+			if dismiss, err := baseDismissesStale(ctx, &check); err != nil {
+				return err
+			} else if dismiss {
+				if err := issues_model.DismissStaleApprovals(ctx, check.IssueID); err != nil {
+					return err
+				}
+			}
 		}
 		checkErr = CheckPullMergeable(ctx, doer, perm, &check, MergeCheckTypeGeneral, false, style)
 		return errRollback
@@ -308,6 +325,25 @@ func checkStackPull(ctx context.Context, doer *user_model.User, perm *access_mod
 		return err
 	}
 	return checkErr
+}
+
+// testChecking runs the conflict check of pr if it is still queued and returns the pull request as it is then, or
+// ErrIsChecking if the check could not finish.
+func testChecking(ctx context.Context, pr *issues_model.PullRequest) (*issues_model.PullRequest, error) {
+	if !pr.IsChecking() {
+		return pr, nil
+	}
+	// a push to the base branch may have queued a check of the pull request: run it now
+	testPRProtected(ctx, pr.ID)
+	fresh, err := issues_model.GetPullRequestByID(ctx, pr.ID)
+	if err != nil {
+		return nil, err
+	}
+	if fresh.IsChecking() {
+		return nil, ErrIsChecking
+	}
+	fresh.Issue = pr.Issue
+	return fresh, nil
 }
 
 // notifyRetarget notifies that the base branch of pr was changed from oldBase.
@@ -327,31 +363,34 @@ func notifyRetarget(ctx context.Context, doer *user_model.User, pr *issues_model
 	notify_service.PullRequestChangeTargetBranch(ctx, doer, pr, oldBase)
 }
 
-// retargetStackChildren retargets the open pull requests based on the head branch of the merged pull request to base,
-// whatever the setting for children on merge says.
-func retargetStackChildren(ctx context.Context, doer *user_model.User, merged *issues_model.PullRequest, base string) {
+// retargetStackChildren retargets the open pull requests based on the head branch of one of the merged pull requests
+// to base, whatever the setting for children on merge says.
+func retargetStackChildren(ctx context.Context, doer *user_model.User, merged []*issues_model.PullRequest, base string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(setting.Git.Timeout.Default)*time.Second)
 	defer cancel()
 
-	children, err := issues_model.GetUnmergedPullRequestsByBaseInfo(ctx, merged.BaseRepoID, merged.HeadBranch)
-	if err != nil {
-		log.Error("GetUnmergedPullRequestsByBaseInfo: %v", err)
-		return
-	}
-	if err := RetargetBranchPulls(ctx, doer, merged.BaseRepoID, merged.HeadBranch, base); err != nil {
-		log.Error("RetargetBranchPulls: %v", err)
-	}
-	for _, c := range children {
-		if c, err := issues_model.GetPullRequestByID(ctx, c.ID); err != nil {
-			log.Error("GetPullRequestByID: %v", err)
-		} else if c.BaseBranch == base {
-			notifyRetarget(ctx, doer, c, merged.HeadBranch)
+	for _, m := range merged {
+		children, err := issues_model.GetUnmergedPullRequestsByBaseInfo(ctx, m.BaseRepoID, m.HeadBranch)
+		if err != nil {
+			log.Error("GetUnmergedPullRequestsByBaseInfo: %v", err)
+			continue
+		}
+		if err := retargetBranchPulls(ctx, doer, m.BaseRepoID, m.HeadBranch, base, m); err != nil {
+			log.Error("RetargetBranchPulls: %v", err)
+		}
+		for _, c := range children {
+			if c, err := issues_model.GetPullRequestByID(ctx, c.ID); err != nil {
+				log.Error("GetPullRequestByID: %v", err)
+			} else if c.BaseBranch == base {
+				notifyRetarget(ctx, doer, c, m.HeadBranch)
+			}
 		}
 	}
 }
 
-// mergeStackPull retargets the pull request p of a stack to base, unless it already targets it, and merges it.
-func mergeStackPull(ctx context.Context, doer *user_model.User, perm *access_model.Permission, p *issues_model.PullRequest, headCommitID, base string, style repo_model.MergeStyle) error {
+// mergeStackPull retargets the pull request p of a stack to base, unless it already targets it, and merges it. parent
+// is the pull request merged before it, nil for the first.
+func mergeStackPull(ctx context.Context, doer *user_model.User, perm *access_model.Permission, p, parent *issues_model.PullRequest, headCommitID, base string, style repo_model.MergeStyle) error {
 	// like the web merge, finish the work even if the request is cancelled
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(setting.Git.Timeout.Default)*time.Second)
 	defer cancel()
@@ -374,22 +413,16 @@ func mergeStackPull(ctx context.Context, doer *user_model.User, perm *access_mod
 			return ErrStackChanged
 		}
 		oldBase := pr.BaseBranch
-		if err := changeTargetBranch(ctx, pr, doer, base, true); err != nil {
+		if err := changeTargetBranch(ctx, pr, doer, base, true, parent); err != nil {
 			return err
 		}
 		notifyRetarget(ctx, doer, pr, oldBase)
 	}
 
-	err = CheckPullMergeable(ctx, doer, perm, pr, MergeCheckTypeGeneral, false, style)
-	if errors.Is(err, ErrIsChecking) {
-		// a push to base may have queued a check of the retargeted pull request: run it now
-		testPRProtected(ctx, pr.ID)
-		if pr, err = issues_model.GetPullRequestByID(ctx, p.ID); err != nil {
-			return err
-		}
-		err = CheckPullMergeable(ctx, doer, perm, pr, MergeCheckTypeGeneral, false, style)
+	if pr, err = testChecking(ctx, pr); err != nil {
+		return err
 	}
-	if err != nil {
+	if err := CheckPullMergeable(ctx, doer, perm, pr, MergeCheckTypeGeneral, false, style); err != nil {
 		return err
 	}
 

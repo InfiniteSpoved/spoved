@@ -28,6 +28,7 @@ import (
 	"forgejo.org/modules/graceful"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/optional"
 	"forgejo.org/modules/process"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/sync"
@@ -173,12 +174,14 @@ func NewPullRequest(ctx context.Context, repo *repo_model.Repository, issue *iss
 
 // ChangeTargetBranch changes the target branch of this pull request, as the given user.
 func ChangeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, targetBranch string) error {
-	return changeTargetBranch(ctx, pr, doer, targetBranch, true)
+	return changeTargetBranch(ctx, pr, doer, targetBranch, true, nil)
 }
 
 // changeTargetBranch does the work of ChangeTargetBranch. The system retarget after a branch is deleted
-// or merged must not be refused by the title rule, so it passes checkTitleRule false.
-func changeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, targetBranch string, checkTitleRule bool) (err error) {
+// or merged must not be refused by the title rule, so it passes checkTitleRule false. mergedParent is the pull request
+// of a stack that was based on and has been merged: when pr was made against its head commit, the reviews of pr stay
+// fresh although its merge base moves to a commit they never saw.
+func changeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, targetBranch string, checkTitleRule bool, mergedParent *issues_model.PullRequest) (err error) {
 	defer pullWorkingPool.Lock(fmt.Sprint(pr.ID))()
 
 	// Current target branch is already the same
@@ -277,7 +280,21 @@ func changeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer 
 		return err
 	}
 
-	staleReviewsOnMergeBaseChange(ctx, doer, pr, oldMergeBase, pr.MergeBase)
+	if mergedParent != nil && isMergedParentHead(ctx, pr, mergedParent, oldMergeBase) {
+		if err := issues_model.MoveReviewsMergeBase(ctx, pr.IssueID, pr.MergeBase); err != nil {
+			log.Error("MoveReviewsMergeBase: %v", err)
+		}
+	} else {
+		staleReviewsOnMergeBaseChange(ctx, doer, pr, oldMergeBase, pr.MergeBase)
+	}
+	// the approvals that were stale before count on the new base as its rules say
+	if dismiss, err := baseDismissesStale(ctx, pr); err != nil {
+		log.Error("%-v baseDismissesStale: %v", pr, err)
+	} else if dismiss {
+		if err := dismissApprovalReviews(ctx, doer, pr, optional.Some(true)); err != nil {
+			log.Error("DismissApprovalReviews: %v", err)
+		}
+	}
 
 	// Create comment
 	options := &issues_model.CreateCommentOptions{
@@ -474,20 +491,55 @@ func mergeBaseOf(ctx context.Context, pr *issues_model.PullRequest) (string, err
 	return gitRepo.GetMergeBaseSimple(git.BranchPrefix+pr.BaseBranch, pr.GetGitRefName())
 }
 
+// baseDismissesStale reports whether a rule of the base branch of pr dismisses stale approvals.
+func baseDismissesStale(ctx context.Context, pr *issues_model.PullRequest) (bool, error) {
+	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(rules, func(pb *git_model.ProtectedBranch) bool { return pb.DismissStaleApprovals }), nil
+}
+
 // markReviewsStale marks the reviews of pr as stale and dismisses its approvals if a rule of its base branch says so.
 func markReviewsStale(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest) {
 	if err := issues_model.MarkReviewsAsStale(ctx, pr.IssueID); err != nil {
 		log.Error("MarkReviewsAsStale: %v", err)
 	}
 
-	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
-	if err != nil {
+	if dismiss, err := baseDismissesStale(ctx, pr); err != nil {
 		log.Error("GetMatchedProtectedBranchRules: %v", err)
-	}
-	if slices.ContainsFunc(rules, func(pb *git_model.ProtectedBranch) bool { return pb.DismissStaleApprovals }) {
+	} else if dismiss {
 		if err := DismissApprovalReviews(ctx, doer, pr); err != nil {
 			log.Error("DismissApprovalReviews: %v", err)
 		}
+	}
+}
+
+// isMergedParentHead reports whether commit is the head commit of parent, a pull request that has been merged.
+func isMergedParentHead(ctx context.Context, pr, parent *issues_model.PullRequest, commit string) bool {
+	if commit == "" {
+		return false
+	}
+	parent, err := issues_model.GetPullRequestByID(ctx, parent.ID)
+	if err != nil || !parent.HasMerged {
+		return false
+	}
+	if err := pr.LoadBaseRepo(ctx); err != nil {
+		return false
+	}
+	gitRepo, err := gitrepo.OpenRepository(ctx, pr.BaseRepo)
+	if err != nil {
+		return false
+	}
+	defer gitRepo.Close()
+	head, err := gitRepo.GetRefCommitID(parent.GetGitRefName())
+	return err == nil && head == commit
+}
+
+// moveReviewsMergeBase records the new merge base on the reviews of pr that stay fresh.
+func moveReviewsMergeBase(ctx context.Context, pr *issues_model.PullRequest, mergeBase string) {
+	if err := issues_model.MoveReviewsMergeBase(ctx, pr.IssueID, mergeBase); err != nil {
+		log.Error("MoveReviewsMergeBase: %v", err)
 	}
 }
 
@@ -504,10 +556,12 @@ func staleReviewsOnMergeBaseChange(ctx context.Context, doer *user_model.User, p
 	}
 	// a merge base that only moved forward takes commits out of the pull request and adds none
 	if _, _, err := git.NewCommand(ctx, "merge-base", "--is-ancestor").AddDynamicArguments(oldMergeBase, newMergeBase).RunStdString(&git.RunOpts{Dir: pr.BaseRepo.RepoPath()}); err == nil {
+		moveReviewsMergeBase(ctx, pr, newMergeBase)
 		return
 	}
 	trees, _, err := git.NewCommand(ctx, "rev-parse").AddDynamicArguments(oldMergeBase+"^{tree}", newMergeBase+"^{tree}").RunStdString(&git.RunOpts{Dir: pr.BaseRepo.RepoPath()})
 	if f := strings.Fields(trees); err == nil && len(f) == 2 && f[0] == f[1] {
+		moveReviewsMergeBase(ctx, pr, newMergeBase)
 		return
 	}
 	// a tree that can't be read counts as changed
@@ -537,8 +591,13 @@ func ValidatePullRequest(ctx context.Context, pr *issues_model.PullRequest, newC
 	if changed {
 		markReviewsStale(ctx, doer, pr)
 	}
-	if err := issues_model.MarkReviewsAsNotStale(ctx, pr.IssueID, newCommitID); err != nil {
-		log.Error("MarkReviewsAsNotStale: %v", err)
+	// a head that is back is the reviewed diff only over the merge base the review was made against
+	if mergeBase, err := mergeBaseOf(ctx, pr); err != nil {
+		log.Error("%-v merge base: %v", pr, err)
+	} else if mergeBase != "" {
+		if err := issues_model.MarkReviewsAsNotStale(ctx, pr.IssueID, newCommitID, mergeBase); err != nil {
+			log.Error("MarkReviewsAsNotStale: %v", err)
+		}
 	}
 
 	divergence, err := git.GetDivergingCommits(ctx, testPatchCtx.gitRepo.Path, testPatchCtx.baseRev, testPatchCtx.headRev, testPatchCtx.env)
@@ -638,6 +697,12 @@ func RetargetChildrenOnMerge(ctx context.Context, doer *user_model.User, pr *iss
 // RetargetBranchPulls change target branch for all pull requests whose base branch is the branch
 // Both branch and targetBranch must be in the same repo (for security reasons)
 func RetargetBranchPulls(ctx context.Context, doer *user_model.User, repoID int64, branch, targetBranch string) error {
+	return retargetBranchPulls(ctx, doer, repoID, branch, targetBranch, nil)
+}
+
+// retargetBranchPulls is RetargetBranchPulls for the pull requests based on the head branch of mergedParent, see
+// changeTargetBranch.
+func retargetBranchPulls(ctx context.Context, doer *user_model.User, repoID int64, branch, targetBranch string, mergedParent *issues_model.PullRequest) error {
 	prs, err := issues_model.GetUnmergedPullRequestsByBaseInfo(ctx, repoID, branch)
 	if err != nil {
 		return err
@@ -651,7 +716,7 @@ func RetargetBranchPulls(ctx context.Context, doer *user_model.User, repoID int6
 	for _, pr := range prs {
 		if err = pr.Issue.LoadRepo(ctx); err != nil {
 			errs = append(errs, err)
-		} else if err = changeTargetBranch(ctx, pr, doer, targetBranch, false); err != nil &&
+		} else if err = changeTargetBranch(ctx, pr, doer, targetBranch, false, mergedParent); err != nil &&
 			!issues_model.IsErrIssueIsClosed(err) && !models.IsErrPullRequestHasMerged(err) &&
 			!issues_model.IsErrPullRequestAlreadyExists(err) {
 			errs = append(errs, err)
