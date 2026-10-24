@@ -4,7 +4,9 @@
 package admin
 
 import (
+	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
 	"net/url"
 	"slices"
@@ -100,7 +102,7 @@ func NewAuthSource(ctx *context.Context) {
 	// only the first as default
 	ctx.Data["oauth2_provider"] = oauth2providers[0].Name()
 	ctx.Data["SAMLConfig"] = &saml.Source{NameIDFormat: saml.NameIDFormats[0]}
-	ctx.Data["SAMLNameIDFormats"] = saml.NameIDFormats
+	ctx.Data["SAMLNameIDFormats"] = samlNameIDFormats(ctx)
 
 	ctx.HTML(http.StatusOK, tplAuthNew)
 }
@@ -251,14 +253,78 @@ func parseSAMLConfig(form forms.AuthenticationForm) *saml.Source {
 	}
 }
 
-// validateSAMLConfig renders an error and returns false when the SAML configuration can't be used.
+// samlNameIDFormats lists the NameID formats with their names for the select.
+func samlNameIDFormats(ctx *context.Context) []struct{ Value, Name string } {
+	names := []string{
+		ctx.Locale.TrString("admin.auths.saml_name_id_persistent"),
+		ctx.Locale.TrString("admin.auths.saml_name_id_email"),
+		ctx.Locale.TrString("admin.auths.saml_name_id_unspecified"),
+		ctx.Locale.TrString("admin.auths.saml_name_id_transient"),
+	}
+	formats := make([]struct{ Value, Name string }, len(saml.NameIDFormats))
+	for i, f := range saml.NameIDFormats {
+		formats[i].Value, formats[i].Name = f, names[i]
+	}
+	return formats
+}
+
+// samlErrorText is the text of a refused SAML configuration, in the words of the form.
+func samlErrorText(ctx *context.Context, ve *saml.ValidationError) template.HTML {
+	detail := ""
+	if ve.Detail != nil {
+		detail = ve.Detail.Error()
+	}
+	switch ve.Reason {
+	case "idp_missing":
+		return ctx.Tr("admin.auths.saml_err_idp_missing")
+	case "required":
+		return ctx.Tr("admin.auths.saml_err_idp_required")
+	case "not_http":
+		return ctx.Tr("admin.auths.saml_err_not_http")
+	case "metadata":
+		switch ve.Field {
+		case "idp_metadata_url":
+			return ctx.Tr("admin.auths.saml_err_metadata_url", detail)
+		case "idp_metadata":
+			return ctx.Tr("admin.auths.saml_err_metadata", detail)
+		}
+		return ctx.Tr("admin.auths.saml_err_metadata_manual", detail)
+	case "certificate":
+		if ve.Field == "idp_certificate" {
+			return ctx.Tr("admin.auths.saml_err_idp_certificate", detail)
+		}
+		return ctx.Tr("admin.auths.saml_err_sp_certificate", detail)
+	case "private_key":
+		return ctx.Tr("admin.auths.saml_err_sp_private_key", detail)
+	case "pair_certificate":
+		return ctx.Tr("admin.auths.saml_err_pair_certificate")
+	case "pair_key":
+		return ctx.Tr("admin.auths.saml_err_pair_key")
+	case "mismatch":
+		return ctx.Tr("admin.auths.saml_err_mismatch")
+	case "needs_key":
+		return ctx.Tr("admin.auths.saml_err_needs_key")
+	case "transient":
+		return ctx.Tr("admin.auths.saml_err_transient")
+	case "entity_id":
+		return ctx.Tr("admin.auths.saml_err_entity_id")
+	}
+	return ctx.Tr("admin.auths.saml_invalid", ve.Error())
+}
+
+// validateSAMLConfig renders an error and returns false when the SAML configuration can't be used. Only the field
+// that was refused is marked (Err_SAML_<field>).
 func validateSAMLConfig(ctx *context.Context, form forms.AuthenticationForm, config *saml.Source, tpl base.TplName) bool {
 	if !slices.Contains(saml.NameIDFormats, config.NameIDFormat) {
 		config.NameIDFormat = saml.NameIDFormats[0]
 	}
 	if err := config.Validate(ctx); err != nil {
-		ctx.Data["Err_SAML"] = true
-		ctx.RenderWithErr(ctx.Tr("admin.auths.saml_invalid", err.Error()), tpl, form)
+		text := ctx.Tr("admin.auths.saml_invalid", err.Error())
+		if ve, ok := errors.AsType[*saml.ValidationError](err); ok {
+			ctx.Data["Err_SAML_"+ve.Field] = true
+			text = samlErrorText(ctx, ve)
+		}
+		ctx.RenderWithErr(text, tpl, form)
 		return false
 	}
 	return true
@@ -307,7 +373,7 @@ func NewAuthSourcePost(ctx *context.Context) {
 	ctx.Data["SMTPAuths"] = smtp.Authenticators
 	oauth2providers := oauth2.GetSupportedOAuth2Providers()
 	ctx.Data["OAuth2Providers"] = oauth2providers
-	ctx.Data["SAMLNameIDFormats"] = saml.NameIDFormats
+	ctx.Data["SAMLNameIDFormats"] = samlNameIDFormats(ctx)
 	ctx.Data["SAMLConfig"] = &saml.Source{NameIDFormat: saml.NameIDFormats[0]}
 
 	hasTLS := false
@@ -339,6 +405,7 @@ func NewAuthSourcePost(ctx *context.Context) {
 	case auth.SAML:
 		samlConfig := parseSAMLConfig(form)
 		samlConfig.SPPrivateKey = "" // never rendered back into the form
+		ctx.Data["SAMLKeyCleared"] = form.SAMLSPPrivateKey != ""
 		ctx.Data["SAMLConfig"] = samlConfig
 		config = parseSAMLConfig(form)
 		if !ctx.HasError() && !validateSAMLConfig(ctx, form, config.(*saml.Source), tplAuthNew) {
@@ -425,7 +492,7 @@ func EditAuthSource(ctx *context.Context) {
 func setSAMLEditData(ctx *context.Context, source *auth.Source) {
 	cfg := source.Cfg.(*saml.Source)
 	ctx.Data["SAMLConfig"] = cfg
-	ctx.Data["SAMLNameIDFormats"] = saml.NameIDFormats
+	ctx.Data["SAMLNameIDFormats"] = samlNameIDFormats(ctx)
 	ctx.Data["SAMLHasPrivateKey"] = cfg.SPPrivateKey != ""
 	ctx.Data["SAMLMetadataURL"] = saml.MetadataURL(source.Name)
 	ctx.Data["SAMLACSURL"] = saml.ACSURL(source.Name)
@@ -490,6 +557,7 @@ func EditAuthSourcePost(ctx *context.Context) {
 		config = samlConfig
 		shown := *samlConfig
 		shown.SPPrivateKey = "" // never rendered back into the form
+		ctx.Data["SAMLKeyCleared"] = form.SAMLSPPrivateKey != ""
 		ctx.Data["SAMLConfig"] = &shown
 		if !validateSAMLConfig(ctx, form, samlConfig, tplAuthEdit) {
 			return

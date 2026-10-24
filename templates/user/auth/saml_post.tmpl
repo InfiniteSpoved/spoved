@@ -1,17 +1,28 @@
-{{template "base/head" .}}
-<div role="main" aria-label="{{ctx.Locale.Tr "auth.saml.continue_title"}}" class="page-content user signin">
-	<div class="ui middle very relaxed page grid">
-		<div class="column">
-			<form id="saml-post" class="ui form tw-max-w-2xl tw-m-auto" action="{{.Action}}" method="post">
-				<input type="hidden" name="SAMLResponse" value="{{.SAMLResponse}}">
-				<h2 class="ui top attached header">{{ctx.Locale.Tr "auth.saml.continue_title"}}</h2>
-				<div class="ui attached segment">
-					<p>{{ctx.Locale.Tr "auth.saml.continue_desc"}}</p>
-					<button class="ui primary button">{{ctx.Locale.Tr "auth.saml.continue"}}</button>
-				</div>
-			</form>
-			<script>document.getElementById('saml-post').submit();</script>
+{{/* A standalone page (no navbar, no links): it posts the response of the identity provider by itself. */}}
+<!DOCTYPE html>
+<html lang="{{ctx.Locale.Lang}}" data-theme="{{ThemeName .SignedUser}}">
+<head>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>{{ctx.Locale.Tr "auth.saml.continue_title"}} - {{AppDisplayName}}</title>
+	<link rel="icon" href="{{AssetUrlPrefix}}/img/favicon.svg" type="image/svg+xml">
+	<link rel="alternate icon" href="{{AssetUrlPrefix}}/img/favicon.png" type="image/png">
+	{{template "base/head_style" .}}
+</head>
+<body>
+	<div role="main" aria-label="{{ctx.Locale.Tr "auth.saml.continue_title"}}" class="page-content user signin">
+		<div class="ui middle very relaxed page grid">
+			<div class="column">
+				<form id="saml-post" class="ui form tw-max-w-2xl tw-m-auto" action="{{.Action}}" method="post">
+					<input type="hidden" name="SAMLResponse" value="{{.SAMLResponse}}">
+					<h2 class="ui top attached header">{{ctx.Locale.Tr "auth.saml.continue_title"}}</h2>
+					<div class="ui attached segment">
+						<p>{{ctx.Locale.Tr "auth.saml.continue_desc"}}</p>
+						<button class="ui primary button">{{ctx.Locale.Tr "auth.saml.continue"}}</button>
+					</div>
+				</form>
+				<script>document.getElementById('saml-post').submit();</script>
+			</div>
 		</div>
 	</div>
-</div>
-{{template "base/footer" .}}
+</body>
+</html>

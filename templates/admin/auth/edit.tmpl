@@ -16,6 +16,9 @@
 					<label for="auth_name">{{ctx.Locale.Tr "admin.auths.auth_name"}}</label>
 					<input id="auth_name" name="name" value="{{.Source.Name}}" autofocus required>
 				</div>
+				{{if .Source.IsSAML}}
+					<p class="help">{{ctx.Locale.Tr "admin.auths.saml_name_warning"}}</p>
+				{{end}}
 
 				<!-- LDAP and DLDAP -->
 				{{if or .Source.IsLDAP .Source.IsDLDAP}}

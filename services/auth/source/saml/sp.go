@@ -123,24 +123,47 @@ func ParsePrivateKey(s string) (*rsa.PrivateKey, error) {
 	return key, nil
 }
 
+// ValidationError says which field of the admin form Validate refused (Field is the form name without the "saml_"
+// prefix, e.g. "sp_private_key") and why (Reason, a short code the form turns into its own text). Detail is the
+// underlying error, if any; Error is the English text for logs.
+type ValidationError struct {
+	Field  string
+	Reason string
+	Detail error
+	text   string
+}
+
+func (e *ValidationError) Error() string { return e.text }
+func (e *ValidationError) Unwrap() error { return e.Detail }
+
+func invalidField(field, reason, text string, detail error) error {
+	if detail != nil {
+		text = fmt.Sprintf("%s: %v", text, detail)
+	}
+	return &ValidationError{Field: field, Reason: reason, Detail: detail, text: text}
+}
+
 // spKeyPair returns the SP key and certificate, nil if none is configured.
 func (source *Source) spKeyPair() (*rsa.PrivateKey, *x509.Certificate, error) {
 	if source.SPCertificate == "" && source.SPPrivateKey == "" {
 		return nil, nil, nil //nolint:nilnil // no key pair configured
 	}
-	if source.SPCertificate == "" || source.SPPrivateKey == "" {
-		return nil, nil, errors.New("the SP certificate and private key must be set together")
+	if source.SPCertificate == "" {
+		return nil, nil, invalidField("sp_certificate", "pair_certificate", "the SP certificate and private key must be set together", nil)
+	}
+	if source.SPPrivateKey == "" {
+		return nil, nil, invalidField("sp_private_key", "pair_key", "the SP certificate and private key must be set together", nil)
 	}
 	cert, err := ParseCertificate(source.SPCertificate)
 	if err != nil {
-		return nil, nil, fmt.Errorf("SP certificate: %w", err)
+		return nil, nil, invalidField("sp_certificate", "certificate", "SP certificate", err)
 	}
 	key, err := ParsePrivateKey(source.SPPrivateKey)
 	if err != nil {
-		return nil, nil, fmt.Errorf("SP private key: %w", err)
+		return nil, nil, invalidField("sp_private_key", "private_key", "SP private key", err)
 	}
 	if pub, ok := cert.PublicKey.(*rsa.PublicKey); !ok || !pub.Equal(&key.PublicKey) {
-		return nil, nil, errors.New("the SP certificate does not belong to the private key")
+		return nil, nil, invalidField("sp_private_key", "mismatch", "the SP certificate does not belong to the private key", nil)
 	}
 	return key, cert, nil
 }
@@ -452,32 +475,56 @@ func (source *Source) SPMetadata() (*saml.EntityDescriptor, error) {
 // Validate checks a configuration before it is stored: the IdP metadata loads, the SP key pair matches and the
 // options fit together.
 func (source *Source) Validate(ctx context.Context) error {
-	if source.IDPMetadataURL == "" && source.IDPMetadata == "" {
-		if source.IDPEntityID == "" || source.IDPSSOURL == "" || source.IDPCertificate == "" {
-			return errors.New("set an IdP metadata URL, the IdP metadata XML, or the IdP entity ID, SSO URL and certificate")
+	manual := source.IDPMetadataURL == "" && source.IDPMetadata == ""
+	if manual {
+		if source.IDPEntityID == "" && source.IDPSSOURL == "" && source.IDPCertificate == "" {
+			return invalidField("idp_metadata_url", "idp_missing", "set an IdP metadata URL, the IdP metadata XML, or the IdP entity ID, SSO URL and certificate", nil)
+		}
+		for _, f := range []struct{ field, value string }{{"idp_entity_id", source.IDPEntityID}, {"idp_sso_url", source.IDPSSOURL}, {"idp_certificate", source.IDPCertificate}} {
+			if f.value == "" {
+				return invalidField(f.field, "required", "set the IdP entity ID, SSO URL and certificate", nil)
+			}
+		}
+		if _, err := ParseCertificate(source.IDPCertificate); err != nil {
+			return invalidField("idp_certificate", "certificate", "IdP certificate", err)
+		}
+		for _, f := range []struct{ field, value string }{{"idp_sso_url", source.IDPSSOURL}, {"idp_slo_url", source.IDPSLOURL}} {
+			if f.value != "" && !isHTTPURL(f.value) {
+				return invalidField(f.field, "not_http", fmt.Sprintf("%q is not an http(s) URL", f.value), nil)
+			}
 		}
 	}
 	var err error
-	if source.IDPMetadataURL != "" {
+	field := "idp_metadata"
+	switch {
+	case source.IDPMetadataURL != "":
+		field = "idp_metadata_url"
 		_, err = FetchMetadata(ctx, source.IDPMetadataURL, source.IDPEntityID)
-	} else {
+	case manual:
+		field = "idp_entity_id"
+		_, err = source.LoadIDPMetadata(ctx, 0)
+	default:
 		_, err = source.LoadIDPMetadata(ctx, 0)
 	}
 	if err != nil {
-		return err
+		return invalidField(field, "metadata", "IdP metadata", err)
 	}
 	key, _, err := source.spKeyPair()
 	if err != nil {
 		return err
 	}
 	if key == nil && (source.SignRequests || source.RequireEncryptedAssertions) {
-		return errors.New("signing requests and encrypted assertions need the SP certificate and private key")
+		field := "require_encrypted_assertions"
+		if source.SignRequests {
+			field = "sign_requests"
+		}
+		return invalidField(field, "needs_key", "signing requests and encrypted assertions need the SP certificate and private key", nil)
 	}
 	if source.NameIDFormat == string(saml.TransientNameIDFormat) && source.UserIDAttribute == "" {
-		return errors.New("a transient NameID changes at every sign-in: set the attribute that holds the stable user ID")
+		return invalidField("user_id_attribute", "transient", "a transient NameID changes at every sign-in: set the attribute that holds the stable user ID", nil)
 	}
 	if source.SPEntityID != "" && !isHTTPURL(source.SPEntityID) && !strings.HasPrefix(source.SPEntityID, "urn:") {
-		return errors.New("the SP entity ID must be a URL or a URN")
+		return invalidField("sp_entity_id", "entity_id", "the SP entity ID must be a URL or a URN", nil)
 	}
 	return nil
 }

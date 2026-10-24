@@ -336,25 +336,18 @@ func TestSAMLIDPInitiated(t *testing.T) {
 	postACS(t, session, "open", samlSignIn(t, session, "open", p, samlSession("guid-carol", "carol")))
 	require.Equal(t, "carol", signedInAs(t, session))
 
-	t.Run("signs in a linked user once", func(t *testing.T) {
+	t.Run("starts a sign-in of its own", func(t *testing.T) {
+		// a response the attacker got for their own account, planted in the victim's browser
 		session := emptyTestSession(t)
-		samlResponse := p.unsolicited(samlSession("guid-carol", "carol"))
-		resp := postACS(t, session, "open", samlResponse)
-		assert.Equal(t, "/", test.RedirectURL(resp))
-		assert.Equal(t, "carol", signedInAs(t, session))
-
-		replay := emptyTestSession(t)
-		resp = postACS(t, replay, "open", samlResponse)
-		assert.Equal(t, "/user/login", test.RedirectURL(resp))
-		assert.Empty(t, signedInAs(t, replay))
-	})
-
-	t.Run("never registers or links", func(t *testing.T) {
-		session := emptyTestSession(t)
-		resp := postACS(t, session, "open", p.unsolicited(samlSession("guid-dave", "dave")))
-		assert.Equal(t, "/user/login", test.RedirectURL(resp))
+		planted := p.unsolicited(samlSession("guid-mallory", "mallory"))
+		resp := postACS(t, session, "open", planted)
+		assert.Equal(t, "/user/saml/open/login", test.RedirectURL(resp))
 		assert.Empty(t, signedInAs(t, session))
-		unittest.AssertNotExistsBean(t, &user_model.User{LowerName: "dave"})
+		unittest.AssertNotExistsBean(t, &user_model.User{LowerName: "mallory"})
+
+		// the IdP answers that sign-in for the browser's own user
+		postACS(t, session, "open", samlSignIn(t, session, "open", p, samlSession("guid-carol", "carol")))
+		assert.Equal(t, "carol", signedInAs(t, session))
 	})
 
 	t.Run("a planted response never links to a signed-in user", func(t *testing.T) {
@@ -376,7 +369,7 @@ func TestSAMLIDPInitiated(t *testing.T) {
 	t.Run("never switches a signed-in user to another account", func(t *testing.T) {
 		victim := loginUser(t, "user2")
 		resp := postACS(t, victim, "open", p.unsolicited(samlSession("guid-carol", "carol")))
-		assert.Equal(t, "/user/login", test.RedirectURL(resp))
+		assert.Equal(t, "/user/saml/open/login", test.RedirectURL(resp))
 		assert.Equal(t, "user2", signedInAs(t, victim))
 	})
 }
@@ -447,7 +440,10 @@ func TestSAMLAdminForm(t *testing.T) {
 
 	resp := session.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/admin/auths/%d", source.ID)), http.StatusOK)
 	doc := NewHTMLParser(t, resp.Body)
-	assert.Contains(t, doc.Find("form").Text(), setting.AppURL+"user/saml/corp/acs")
+	acs, _ := doc.Find("#saml-acs-url").Attr("value")
+	assert.Equal(t, setting.AppURL+"user/saml/corp/acs", acs)
+	metadata, _ := doc.Find("#saml-metadata-url").Attr("value")
+	assert.Equal(t, setting.AppURL+"user/saml/corp/metadata", metadata)
 
 	t.Run("invalid metadata is refused", func(t *testing.T) {
 		req := NewRequestWithValues(t, "POST", "/admin/auths/new", map[string]string{
@@ -456,8 +452,12 @@ func TestSAMLAdminForm(t *testing.T) {
 			"is_active":         "on",
 			"saml_idp_metadata": "<not-metadata/>",
 		})
-		session.MakeRequest(t, req, http.StatusOK)
+		resp := session.MakeRequest(t, req, http.StatusOK)
 		unittest.AssertNotExistsBean(t, &auth.Source{Name: "broken"})
+		// only the refused field is marked
+		doc := NewHTMLParser(t, resp.Body)
+		assert.Equal(t, 1, doc.Find(".saml-sp-urls ~ .field.error").Length())
+		assert.Equal(t, 1, doc.Find(".field.error #saml_idp_metadata").Length())
 	})
 
 	t.Run("a private key is stored encrypted and never shown", func(t *testing.T) {

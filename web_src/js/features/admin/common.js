@@ -234,10 +234,25 @@ export function initAdminCommon() {
     authNameEl.addEventListener('input', (el) => {
       // appSubUrl is either empty or is a path that starts with `/` and doesn't have a trailing slash.
       document.getElementById('oauth2-callback-url').textContent = `${window.location.origin}${appSubUrl}/user/oauth2/${encodeURIComponent(el.target.value)}/callback`;
-      const samlMetadataURL = document.getElementById('saml-metadata-url');
-      if (samlMetadataURL) samlMetadataURL.textContent = `${window.location.origin}${appSubUrl}/user/saml/${encodeURIComponent(el.target.value)}/metadata`;
     });
     authNameEl.dispatchEvent(new Event('input'));
+
+    // The SAML URLs of the new source follow its name; the edit page shows the stored ones.
+    const samlEntityID = document.getElementById('saml-entity-id');
+    if (samlEntityID && document.querySelector('.admin.new.authentication')) {
+      const customEntityID = document.getElementById('saml_sp_entity_id');
+      const setSAMLURLs = () => {
+        const name = authNameEl.value;
+        const base = name ? `${window.location.origin}${appSubUrl}/user/saml/${encodeURIComponent(name)}` : '';
+        document.getElementById('saml-acs-url').value = base && `${base}/acs`;
+        document.getElementById('saml-slo-url').value = base && `${base}/slo`;
+        document.getElementById('saml-metadata-url').value = base && `${base}/metadata`;
+        samlEntityID.value = customEntityID.value.trim() || (base && `${base}/metadata`);
+      };
+      authNameEl.addEventListener('input', setSAMLURLs);
+      customEntityID.addEventListener('input', setSAMLURLs);
+      setSAMLURLs();
+    }
   }
 
   // Notice
