@@ -686,17 +686,10 @@ func GetTeamReviewerByIssueIDAndTeamID(ctx context.Context, issueID, teamID int6
 	return review, err
 }
 
-// MarkReviewsAsStale marks existing reviews as stale
-func MarkReviewsAsStale(ctx context.Context, issueID int64) (err error) {
-	_, err = db.GetEngine(ctx).Exec("UPDATE `review` SET stale=? WHERE issue_id=?", true, issueID)
-
-	return err
-}
-
-// MarkReviewsAsNotStale marks existing reviews as not stale for a giving commit SHA, if they were made against the
-// given merge base: the same head over another merge base is another diff.
-func MarkReviewsAsNotStale(ctx context.Context, issueID int64, commitID, mergeBase string) (err error) {
-	_, err = db.GetEngine(ctx).Exec("UPDATE `review` SET stale=? WHERE issue_id=? AND commit_id=? AND merge_base=?", false, issueID, commitID, mergeBase)
+// UpdateReviewStale sets the stale flag of the review with the given ID: its freshness is decided per review from the
+// diff it saw (see services/pull), not by one query over the issue.
+func UpdateReviewStale(ctx context.Context, reviewID int64, stale bool) (err error) {
+	_, err = db.GetEngine(ctx).Exec("UPDATE `review` SET stale=? WHERE id=?", stale, reviewID)
 
 	return err
 }

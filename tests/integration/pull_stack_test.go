@@ -890,6 +890,118 @@ func TestPullStackStaleReviews(t *testing.T) {
 			hiddenChange(t, true)
 		})
 
+		// A writer hides a change behind a merge base, then force-pushes a new head whose TREE equals the previous
+		// head's while the change is now the pull request's own content, and relies on a race that leaves the pull
+		// request's recorded merge base at the clean base. Deciding staleness by comparing the two heads (equal trees
+		// over an equal merge base) wrongly keeps the approval; deciding it from the diff each review saw does not.
+		treeEqualMergeTrick := func(t *testing.T, ignoreStale bool) {
+			approver := forgery.CreateUser(t, nil)
+			writer := forgery.CreateUser(t, nil)
+			repo := forgery.CreateRepository(t, user2, &forgery.CreateRepositoryOptions{
+				Files: forgery.MapFS{"README.md": forgery.MapFile("stack")},
+				Collaborators: map[*user_model.User]perm.AccessMode{
+					approver: perm.AccessModeWrite,
+					writer:   perm.AccessModeWrite,
+				},
+			})
+			stackCommit(t, user2, repo, "main", "a", "create", "a.txt", "a")
+			stackCommit(t, user2, repo, "a", "b", "create", "b.txt", "b")
+			prs := []*issues_model.PullRequest{stackPull(t, user2, repo, "main", "a"), stackPull(t, user2, repo, "a", "b")}
+			require.NoError(t, git_model.UpdateProtectBranch(db.DefaultContext, repo, &git_model.ProtectedBranch{
+				RepoID:                repo.ID,
+				RuleName:              "main",
+				RequiredApprovals:     1,
+				DismissStaleApprovals: !ignoreStale,
+				IgnoreStaleApprovals:  ignoreStale,
+			}, git_model.WhitelistOptions{}))
+			waitChecked(t, prs...)
+			approvePull(t, repo, prs[0], approver)
+			review := approvePull(t, repo, prs[1], approver)
+
+			cloneURL, _ := url.Parse(u.String() + repo.FullName() + ".git")
+			cloneURL.User = url.UserPassword(writer.Name, userPassword)
+			dstPath := t.TempDir()
+			require.NoError(t, git.CloneWithArgs(t.Context(), nil, cloneURL.String(), dstPath, git.CloneRepoOptions{}))
+			doGitSetRemoteURL(dstPath, "origin", cloneURL)(t)
+			run := func(args ...string) string {
+				t.Helper()
+				stdout, _, err := git.NewCommand(t.Context()).AddArguments(git.ToTrustedCmdArgs(args)...).RunStdString(&git.RunOpts{Dir: dstPath})
+				require.NoError(t, err)
+				return strings.TrimSpace(stdout)
+			}
+			h1 := run("rev-parse", "origin/a") // a at its clean head, the merge base the review was made against
+			h2 := run("rev-parse", "origin/b") // b at its reviewed head
+
+			// 1. push U onto a, adding evil.txt
+			run("checkout", "-q", "a")
+			require.NoError(t, os.WriteFile(filepath.Join(dstPath, "evil.txt"), []byte("evil"), 0o600))
+			run("add", "evil.txt")
+			run("-c", "user.name=writer", "-c", "user.email=writer@example.com", "commit", "-q", "-m", "evil on a")
+			run("push", "-q", "origin", "a")
+			waitPullSynced(t, repo, prs...)
+
+			// 2. merge a(U) into b -> Y, push Y: evil is in b's merge base, not its diff, so the approval stays fresh
+			run("fetch", "-q", "origin")
+			run("checkout", "-q", "b")
+			run("-c", "user.name=writer", "-c", "user.email=writer@example.com", "merge", "--no-edit", "origin/a")
+			yCommit := run("rev-parse", "HEAD")
+			yTree := run("rev-parse", "HEAD^{tree}")
+			run("push", "-q", "origin", "b")
+			waitPullSynced(t, repo, prs...)
+			require.False(t, isStale(review), "the merge keeps evil out of the pull request's diff")
+
+			// 3. build Z = H2 + a commit that adds evil.txt, so Z's tree equals Y's, and land its objects in the base
+			//    repository under a throwaway ref (no pull request points at it, so nothing re-checks b here)
+			run("checkout", "-q", h2)
+			require.NoError(t, os.WriteFile(filepath.Join(dstPath, "evil.txt"), []byte("evil"), 0o600))
+			run("add", "evil.txt")
+			run("-c", "user.name=writer", "-c", "user.email=writer@example.com", "commit", "-q", "-m", "evil on b")
+			z := run("rev-parse", "HEAD")
+			require.Equal(t, yTree, run("rev-parse", "HEAD^{tree}"), "Z must have the same tree as Y for the trick")
+			run("push", "-q", "origin", z+":refs/heads/ztmp")
+			waitPullSynced(t, repo, prs...)
+
+			// The race the attacker wins: b's recorded merge base is back at the clean base (a was reset to H1 before
+			// b's merge base was recomputed) while its approval is still fresh, and a is reset to its clean head.
+			prB := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: prs[1].ID})
+			prB.MergeBase = h1
+			require.NoError(t, prB.UpdateColsIfNotMerged(db.DefaultContext, "merge_base"))
+			for _, ref := range []string{"refs/heads/a", prs[0].GetGitRefName()} {
+				_, _, resetErr := git.NewCommand(t.Context(), "update-ref").AddDynamicArguments(ref, h1).RunStdString(&git.RunOpts{Dir: repo.RepoPath()})
+				require.NoError(t, resetErr)
+			}
+			require.False(t, isStale(review))
+
+			// 4. move b's head from Y to Z through the real sync path: the diff now adds evil.txt as b's own content.
+			//    TestPullRequest runs the validation synchronously, so the staleness is decided when it returns.
+			_, _, moveErr := git.NewCommand(t.Context(), "update-ref").AddDynamicArguments("refs/heads/b", z).RunStdString(&git.RunOpts{Dir: repo.RepoPath()})
+			require.NoError(t, moveErr)
+			pull_service.TestPullRequest(t.Context(), writer, repo.ID, time.Now().UnixNano(), "b", true, yCommit, z)
+			assert.True(t, isStale(review), "Z carries evil as the pull request's own content")
+
+			// the stack stops at b and evil.txt never reaches main
+			approvePull(t, repo, prs[0], approver)
+			merged, err := mergeStack(t, user2, repo, prs[1], repo_model.MergeStyleMerge, stackHeads(t, repo, prs...))
+			assert.Empty(t, merged)
+			innerErr := requireStackMergeError(t, err, prs[1].Index)
+			assert.True(t, models.IsErrDisallowedToMerge(innerErr), "%v", innerErr)
+			assertMerged(t, false, prs...)
+
+			gitRepo, err := gitrepo.OpenRepository(t.Context(), repo)
+			require.NoError(t, err)
+			defer gitRepo.Close()
+			mainCommit, err := gitRepo.GetBranchCommit("main")
+			require.NoError(t, err)
+			_, err = mainCommit.GetTreeEntryByPath("evil.txt")
+			assert.True(t, git.IsErrNotExist(err), "%v", err)
+		}
+		t.Run("TreeEqualMergeTrickDismiss", func(t *testing.T) {
+			treeEqualMergeTrick(t, false)
+		})
+		t.Run("TreeEqualMergeTrickIgnoreStale", func(t *testing.T) {
+			treeEqualMergeTrick(t, true)
+		})
+
 		// updating the head from the base branch replays the reviewed changes: the approval stays fresh
 		for _, rebase := range []bool{false, true} {
 			t.Run(fmt.Sprintf("UpdateBranchKeepsApproval-rebase=%v", rebase), func(t *testing.T) {

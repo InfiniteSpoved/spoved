@@ -297,7 +297,7 @@ func procReceivePullRequest(ctx context.Context,
 	}
 
 	// Validate pull request.
-	pull_service.ValidatePullRequest(ctx, pr, newCommitID, currentCommitID, pusher)
+	pull_service.ValidatePullRequest(ctx, pr, newCommitID, pusher)
 
 	// TODO: call `InvalidateCodeComments`
 

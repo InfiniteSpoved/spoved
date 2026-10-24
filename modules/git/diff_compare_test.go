@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -466,6 +467,46 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 		require.NoError(t, NewCommand(t.Context(), "commit", "-am", "Return").Run(&RunOpts{Dir: tmpDir}))
 
 		changed, err := checkIfDiffDiffers(t, gitRepo, "main-3", "j-1", "j-2", nil)
+		require.NoError(t, err)
+		assert.True(t, changed)
+	})
+
+	t.Run("Tree equal over a different merge base", func(t *testing.T) {
+		// A review of Y saw only EVIL's absence: its diff over M1 (which already has EVIL) adds OWN.
+		// Z has the same tree as Y, but its merge base M2 lacks EVIL, so Z's diff adds OWN and EVIL.
+		// Comparing the two heads alone reads "no change" because the trees are equal; comparing each
+		// head to its own merge base must report a change.
+		require.NoError(t, NewCommand(t.Context(), "switch", "--orphan", "k-A").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "BASE"), []byte("base"), 0o600))
+		require.NoError(t, NewCommand(t.Context(), "add", "BASE").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, NewCommand(t.Context(), "commit", "-m", "A").Run(&RunOpts{Dir: tmpDir})) // M2 = A
+
+		// M1 = A + EVIL (the merge base the review was made against)
+		require.NoError(t, NewCommand(t.Context(), "switch", "-c", "k-M1", "k-A").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "EVIL"), []byte("evil"), 0o600))
+		require.NoError(t, NewCommand(t.Context(), "add", "EVIL").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, NewCommand(t.Context(), "commit", "-m", "M1").Run(&RunOpts{Dir: tmpDir}))
+
+		// Y = M1 + OWN, reviewed over M1: its diff is only OWN
+		require.NoError(t, NewCommand(t.Context(), "switch", "-c", "k-Y", "k-M1").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "OWN"), []byte("own"), 0o600))
+		require.NoError(t, NewCommand(t.Context(), "add", "OWN").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Y").Run(&RunOpts{Dir: tmpDir}))
+
+		// Z = A + OWN + EVIL, same tree as Y but EVIL is now the pull request's own content
+		require.NoError(t, NewCommand(t.Context(), "switch", "-c", "k-Z", "k-A").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "OWN"), []byte("own"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "EVIL"), []byte("evil"), 0o600))
+		require.NoError(t, NewCommand(t.Context(), "add", "OWN", "EVIL").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Z").Run(&RunOpts{Dir: tmpDir}))
+
+		yTree, _, treeErr := NewCommand(t.Context(), "rev-parse").AddDynamicArguments("k-Y^{tree}", "k-Z^{tree}").RunStdString(&RunOpts{Dir: tmpDir})
+		require.NoError(t, treeErr)
+		f := strings.Fields(yTree)
+		require.Len(t, f, 2)
+		require.Equal(t, f[0], f[1], "Y and Z must have the same tree for this test to be meaningful")
+
+		changed, err := gitRepo.CheckIfDiffDiffers("k-M1", "k-Y", "k-A", "k-Z", nil)
 		require.NoError(t, err)
 		assert.True(t, changed)
 	})
