@@ -49,8 +49,7 @@ type Assertion struct {
 }
 
 // ParseResponse verifies a base64 SAMLResponse posted to the ACS and returns the user it asserts. requestID is the ID
-// of the AuthnRequest this browser sent ("" if none): without it only an IdP-initiated sign-in can succeed, and only
-// when the source allows it.
+// of the AuthnRequest this browser sent: a response must answer it, so an unsolicited one is always refused.
 func (source *Source) ParseResponse(sp *saml.ServiceProvider, samlResponse, requestID string) (*Assertion, error) {
 	if base64.StdEncoding.DecodedLen(len(samlResponse)) > MaxResponseSize {
 		return nil, invalid("the response is larger than %d bytes", MaxResponseSize)
@@ -59,8 +58,8 @@ func (source *Source) ParseResponse(sp *saml.ServiceProvider, samlResponse, requ
 	if err != nil {
 		return nil, invalid("the response is not base64")
 	}
-	if requestID == "" && !source.AllowIDPInitiated {
-		return nil, invalid("no sign-in was started in this browser and IdP-initiated sign-in is off")
+	if requestID == "" {
+		return nil, invalid("no sign-in was started in this browser")
 	}
 	if source.RequireEncryptedAssertions {
 		if err := checkNoPlainAssertion(raw); err != nil {
@@ -68,15 +67,10 @@ func (source *Source) ParseResponse(sp *saml.ServiceProvider, samlResponse, requ
 		}
 	}
 
-	// The library skips InResponseTo whenever IdP-initiated sign-in is allowed: a browser that started a sign-in
-	// only takes the answer to its own request.
+	// the library skips InResponseTo whenever IdP-initiated sign-in is allowed
 	bound := *sp
-	bound.AllowIDPInitiated = requestID == ""
-	var ids []string
-	if requestID != "" {
-		ids = []string{requestID}
-	}
-	a, err := bound.ParseXMLResponse(raw, ids, sp.AcsURL)
+	bound.AllowIDPInitiated = false
+	a, err := bound.ParseXMLResponse(raw, []string{requestID}, sp.AcsURL)
 	if err != nil {
 		var ire *saml.InvalidResponseError
 		if errors.As(err, &ire) && ire.PrivateErr != nil {
@@ -90,17 +84,21 @@ func (source *Source) ParseResponse(sp *saml.ServiceProvider, samlResponse, requ
 	return source.toAssertion(a)
 }
 
-// checkNoPlainAssertion refuses a response that carries an unencrypted Assertion: the library would accept it
-// alongside, or instead of, an EncryptedAssertion.
+// checkNoPlainAssertion refuses a response that carries an unencrypted Assertion anywhere: the library would accept
+// it alongside, or instead of, an EncryptedAssertion.
 func checkNoPlainAssertion(raw []byte) error {
 	doc := etree.NewDocument()
 	if err := doc.ReadFromBytes(raw); err != nil || doc.Root() == nil {
 		return invalid("the response is not XML")
 	}
-	for _, el := range doc.Root().ChildElements() {
+	elements := []*etree.Element{doc.Root()}
+	for len(elements) > 0 {
+		el := elements[len(elements)-1]
+		elements = elements[:len(elements)-1]
 		if el.Tag == "Assertion" {
 			return invalid("the response holds an unencrypted assertion and this source requires encryption")
 		}
+		elements = append(elements, el.ChildElements()...)
 	}
 	return nil
 }

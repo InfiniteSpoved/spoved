@@ -181,6 +181,18 @@ func SAMLACS(ctx *context.Context) {
 	// a request is answered once
 	_ = ctx.Session.Delete("samlRequestID")
 	_ = ctx.Session.Delete("samlRequestSource")
+	if requestID == "" {
+		// A response this browser didn't ask for may have been planted by someone else, so it never signs anyone in.
+		// A sign-in started at the IdP starts one of ours instead, which the IdP answers for this browser's own user.
+		if !source.AllowIDPInitiated {
+			auth_service.RecordSignInFailure(ctx, 0, "saml_unsolicited")
+			ctx.Flash.Error(ctx.Tr("auth.saml.idp_initiated_unknown", authSource.Name))
+			ctx.Redirect(setting.AppSubURL + "/user/login")
+			return
+		}
+		ctx.Redirect(setting.AppSubURL + "/user/saml/" + url.PathEscape(authSource.Name) + "/login")
+		return
+	}
 
 	sp, err := source.ServiceProvider(ctx)
 	if err != nil {
@@ -211,15 +223,6 @@ func SAMLACS(ctx *context.Context) {
 			return
 		}
 		ctx.ServerError("UserSignIn", err)
-		return
-	}
-
-	// A response this browser didn't ask for may have been planted by someone else: it can sign in an account that
-	// is already linked, but never link, register or prompt for an account, nor switch a signed-in user to another.
-	if requestID == "" && (u == nil || ctx.Doer != nil && ctx.Doer.ID != u.ID) {
-		auth_service.RecordSignInFailure(ctx, 0, "saml_unsolicited")
-		ctx.Flash.Error(ctx.Tr("auth.saml.idp_initiated_unknown", authSource.Name))
-		ctx.Redirect(setting.AppSubURL + "/user/login")
 		return
 	}
 

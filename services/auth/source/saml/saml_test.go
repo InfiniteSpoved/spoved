@@ -317,16 +317,13 @@ func TestParseResponse(t *testing.T) {
 		o := f.defaults()
 		o.inResponseTo = ""
 		resp := f.response(t, o)
-		_, err := f.source.ParseResponse(sp, resp, "")
-		require.ErrorContains(t, err, "IdP-initiated sign-in is off")
-
+		// never accepted, also when IdP-initiated sign-in is on: the ACS starts a sign-in of its own instead
 		f.source.AllowIDPInitiated = true
 		defer func() { f.source.AllowIDPInitiated = false }()
-		_, err = f.source.ParseResponse(f.serviceProvider(t), resp, "")
-		require.NoError(t, err)
+		_, err := f.source.ParseResponse(f.serviceProvider(t), resp, "")
+		require.ErrorContains(t, err, "no sign-in was started")
 
-		// a browser that started a sign-in takes only the answer to its own request, also when IdP-initiated
-		// sign-in is on
+		// a browser that started a sign-in takes only the answer to its own request
 		for _, inResponseTo := range []string{"", "id-other"} {
 			o.inResponseTo = inResponseTo
 			_, err = f.source.ParseResponse(f.serviceProvider(t), f.response(t, o), "id-request")
@@ -452,6 +449,15 @@ func TestEncryptedAssertions(t *testing.T) {
 	a, err := f.source.ParseResponse(sp, f.response(t, o), "id-request")
 	require.NoError(t, err)
 	assert.Equal(t, "alice-guid", a.User.UserID)
+
+	// a plain assertion is refused at any depth
+	for _, xml := range []string{
+		`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"><saml:Assertion/></samlp:Response>`,
+		`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"><samlp:Extensions><x><saml:Assertion/></x></samlp:Extensions><saml:EncryptedAssertion/></samlp:Response>`,
+	} {
+		require.ErrorContains(t, checkNoPlainAssertion([]byte(xml)), "unencrypted assertion")
+	}
+	require.NoError(t, checkNoPlainAssertion([]byte(`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"><EncryptedAssertion/></samlp:Response>`)))
 }
 
 func TestLogout(t *testing.T) {
