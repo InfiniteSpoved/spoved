@@ -500,18 +500,30 @@ func baseDismissesStale(ctx context.Context, pr *issues_model.PullRequest) (bool
 	return slices.ContainsFunc(rules, func(pb *git_model.ProtectedBranch) bool { return pb.DismissStaleApprovals }), nil
 }
 
-// refreshReviewStaleness recomputes the stale flag of every non-dismissed review of pr from the diff that review
-// actually saw (review.MergeBase..review.CommitID): a review is fresh only if replaying that change onto the pull
-// request's current merge base yields the current head's tree, so a new head whose tree happens to equal an earlier
-// head's can no longer pass as unchanged. It then dismisses the stale approvals a rule of the base branch drops.
-// gitRepo must be open on the base repository, mergeBase is the pull request's current merge base with the base
-// branch and head its current head commit. A review without a recorded merge base, a conflict or any git error
+// refreshReviewStaleness recomputes the stale flag of the non-dismissed reviews of pr whose flag is ever read from the
+// diff that review actually saw (review.MergeBase..review.CommitID): a review is fresh only if replaying that change
+// onto the pull request's current merge base yields the current head's tree, so a new head whose tree happens to equal
+// an earlier head's can no longer pass as unchanged. It then dismisses the stale approvals a rule of the base branch
+// drops. gitRepo must be open on the base repository, mergeBase is the pull request's current merge base with the
+// base branch and head its current head commit. A review without a recorded merge base, a conflict or any git error
 // leaves the review stale (fail closed).
+//
+// Only the reviews whose stale flag is read are recomputed: an approval's gates a merge (GetGrantedApprovalsCount,
+// ValidReviewers' skipStale, the stack status count and Review.HTMLTypeColorName), and the sidebar shows a stale badge
+// for the approve, reject and request reviews GetReviewsByIssueID surfaces. A comment or pending review's stale flag is
+// read by nothing that gates or is displayed, so recomputing it would be pure waste; skipping it also bounds the
+// per-push git work by the reviewers rather than by the comment reviews a reader can create at will. A request review
+// records no merge base, so it still costs no git call.
 func refreshReviewStaleness(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest, gitRepo *git.Repository, mergeBase, head string, env []string) {
 	reviews, err := issues_model.FindReviews(ctx, issues_model.FindReviewOptions{
 		ListOptions: db.ListOptionsAll,
 		IssueID:     pr.IssueID,
-		Dismissed:   optional.Some(false),
+		Types: []issues_model.ReviewType{
+			issues_model.ReviewTypeApprove,
+			issues_model.ReviewTypeReject,
+			issues_model.ReviewTypeRequest,
+		},
+		Dismissed: optional.Some(false),
 	})
 	if err != nil {
 		log.Error("FindReviews: %v", err)

@@ -852,6 +852,15 @@ func TestPullRequestStaleReview(t *testing.T) {
 		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 		session := loginUser(t, user2.Name)
 
+		// Reviewers other than the pull request's poster: only an approval's stale flag is recomputed on a head push
+		// (a comment or pending review's is read by nothing that gates or is displayed), and a poster cannot approve
+		// their own pull request, so the staleness lifecycle is exercised through approvals by other users. The two
+		// approvals come from different users because a second approval by the same reviewer dismisses the first.
+		reviewer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+		reviewerSession := loginUser(t, reviewer.Name)
+		reviewer2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})
+		reviewer2Session := loginUser(t, reviewer2.Name)
+
 		// Create temporary repository.
 		repo := forgery.CreateRepository(t, user2, &forgery.CreateRepositoryOptions{
 			Files: forgery.MapFS{
@@ -917,32 +926,17 @@ func TestPullRequestStaleReview(t *testing.T) {
 		firstReview := func(t *testing.T, firstCommitID string, index int64) {
 			t.Helper()
 
-			resp := session.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/%s/pulls/%d/files/reviews/new_comment", repo.FullName(), index)), http.StatusOK)
-			doc := NewHTMLParser(t, resp.Body)
-
-			req := NewRequestWithValues(t, "POST", fmt.Sprintf("/%s/pulls/%d/files/reviews/comments", repo.FullName(), index), map[string]string{
-				"origin":           doc.GetInputValueByName("origin"),
-				"latest_commit_id": firstCommitID,
-				"side":             "proposed",
-				"line":             "1",
-				"path":             "FUNFACT",
-				"diff_start_cid":   doc.GetInputValueByName("diff_start_cid"),
-				"diff_end_cid":     doc.GetInputValueByName("diff_end_cid"),
-				"diff_base_cid":    doc.GetInputValueByName("diff_base_cid"),
-				"content":          "nitpicking comment",
-				"pending_review":   "",
-			})
-			session.MakeRequest(t, req, http.StatusOK)
-
-			req = NewRequestWithValues(t, "POST", "/"+repo.FullName()+"/pulls/1/files/reviews/submit", map[string]string{
+			req := NewRequestWithValues(t, "POST", fmt.Sprintf("/%s/pulls/%d/files/reviews/submit", repo.FullName(), index), map[string]string{
 				"commit_id": firstCommitID,
 				"content":   "looks good",
-				"type":      "comment",
+				"type":      "approve",
 			})
-			session.MakeRequest(t, req, http.StatusOK)
+			reviewerSession.MakeRequest(t, req, http.StatusOK)
 		}
 
 		staleReview := func(t *testing.T, firstCommitID string, index int64) {
+			t.Helper()
+
 			// Review based on the first commit, which is a stale review because the
 			// PR's head is at the seconnd commit.
 			req := NewRequestWithValues(t, "POST", fmt.Sprintf("/%s/pulls/%d/files/reviews/submit", repo.FullName(), index), map[string]string{
@@ -950,7 +944,7 @@ func TestPullRequestStaleReview(t *testing.T) {
 				"content":   "looks good",
 				"type":      "approve",
 			})
-			session.MakeRequest(t, req, http.StatusOK)
+			reviewer2Session.MakeRequest(t, req, http.StatusOK)
 		}
 
 		t.Run("Across repositories", func(t *testing.T) {

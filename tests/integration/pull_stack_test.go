@@ -184,6 +184,21 @@ func approvePull(t *testing.T, repo *repo_model.Repository, pr *issues_model.Pul
 	return review
 }
 
+// commentPull submits a comment review of reviewer for the current head of pr.
+func commentPull(t *testing.T, repo *repo_model.Repository, pr *issues_model.PullRequest, reviewer *user_model.User, content string) *issues_model.Review {
+	t.Helper()
+	gitRepo, err := gitrepo.OpenRepository(t.Context(), repo)
+	require.NoError(t, err)
+	defer gitRepo.Close()
+	sha, err := gitRepo.GetRefCommitID(pr.GetGitRefName())
+	require.NoError(t, err)
+	pr = unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID})
+	require.NoError(t, pr.LoadIssue(db.DefaultContext))
+	review, _, err := pull_service.SubmitReview(db.DefaultContext, reviewer, gitRepo, pr.Issue, issues_model.ReviewTypeComment, content, sha, nil)
+	require.NoError(t, err)
+	return review
+}
+
 // waitChecked waits until the check queued by a push to the head of pr is done.
 func waitChecked(t *testing.T, prs ...*issues_model.PullRequest) {
 	t.Helper()
@@ -1000,6 +1015,53 @@ func TestPullStackStaleReviews(t *testing.T) {
 		})
 		t.Run("TreeEqualMergeTrickIgnoreStale", func(t *testing.T) {
 			treeEqualMergeTrick(t, true)
+		})
+
+		// only an approval's stale flag gates a merge, so a head push recomputes approvals and leaves comment reviews
+		// (which a reader can create at will) untouched
+		t.Run("CommentReviewsNotRecomputed", func(t *testing.T) {
+			approver := forgery.CreateUser(t, nil)
+			reader := forgery.CreateUser(t, nil)
+			repo := forgery.CreateRepository(t, user2, &forgery.CreateRepositoryOptions{
+				Files: forgery.MapFS{"README.md": forgery.MapFile("stack")},
+				Collaborators: map[*user_model.User]perm.AccessMode{
+					approver: perm.AccessModeWrite,
+					reader:   perm.AccessModeRead,
+				},
+			})
+			stackCommit(t, user2, repo, "main", "a", "create", "a.txt", "a")
+			pr := stackPull(t, user2, repo, "main", "a")
+			require.NoError(t, git_model.UpdateProtectBranch(db.DefaultContext, repo, &git_model.ProtectedBranch{
+				RepoID:               repo.ID,
+				RuleName:             "main",
+				RequiredApprovals:    1,
+				IgnoreStaleApprovals: true,
+			}, git_model.WhitelistOptions{}))
+			rule, err := git_model.GetFirstMatchProtectedBranchRule(db.DefaultContext, repo.ID, "main")
+			require.NoError(t, err)
+			waitChecked(t, pr)
+
+			approval := approvePull(t, repo, pr, approver)
+			comments := []*issues_model.Review{
+				commentPull(t, repo, pr, reader, "a comment review"),
+				commentPull(t, repo, pr, reader, "another comment review"),
+				commentPull(t, repo, pr, reader, "a third comment review"),
+			}
+			require.False(t, isStale(approval))
+			loaded := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID})
+			assert.EqualValues(t, 1, issues_model.GetGrantedApprovalsCount(db.DefaultContext, rule, loaded))
+
+			// a head push that changes the diff stales the approval and gates the merge
+			forcePushBranch(t, user2, repo, "a", "a-new", "evil.txt", "evil")
+			waitPullSynced(t, repo, pr)
+			assert.True(t, isStale(approval))
+			loaded = unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: pr.ID})
+			assert.EqualValues(t, 0, issues_model.GetGrantedApprovalsCount(db.DefaultContext, rule, loaded))
+
+			// the comment reviews, which no merge gate reads, are left as they were: the push did no git work for them
+			for _, c := range comments {
+				assert.False(t, isStale(c), "comment review %d must not be recomputed", c.ID)
+			}
 		})
 
 		// updating the head from the base branch replays the reviewed changes: the approval stays fresh
