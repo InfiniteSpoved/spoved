@@ -102,7 +102,7 @@ func autoSignIn(ctx *context.Context) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("GetSourceByID: %w", err)
 	}
-	if !source.IsActive || !source.IsOAuth2() {
+	if !source.IsActive || (!source.IsOAuth2() && !source.IsSAML()) {
 		return false, nil
 	}
 
@@ -115,6 +115,10 @@ func autoSignIn(ctx *context.Context) (bool, error) {
 	}
 	isSucceed = true
 
+	if source.IsSAML() {
+		ctx.Redirect(fmt.Sprintf("%s/user/saml/%s/login", setting.AppSubURL, url.PathEscape(source.Name)))
+		return true, nil
+	}
 	ctx.Redirect(fmt.Sprintf("%s/user/oauth2/%s?prompt=none", setting.AppSubURL, url.PathEscape(source.Name)))
 	return true, nil
 }
@@ -196,8 +200,18 @@ func SignIn(ctx *context.Context) {
 		ctx.ServerError("UserSignIn", err)
 		return
 	}
+	samlSources, ok := loadSAMLSources(ctx)
+	if !ok {
+		return
+	}
 
-	if !setting.Service.EnableInternalSignIn && len(oauth2Providers) == 1 {
+	// with a single way to sign in, go straight to it, unless it just failed: that would loop
+	flash, _ := ctx.Data["Flash"].(*middleware.Flash)
+	if !setting.Service.EnableInternalSignIn && len(oauth2Providers)+len(samlSources) == 1 && (flash == nil || flash.ErrorMsg == "") {
+		if len(samlSources) == 1 {
+			ctx.Redirect(setting.AppSubURL + "/user/saml/" + url.PathEscape(samlSources[0].Name) + "/login")
+			return
+		}
 		ctx.Redirect(setting.AppSubURL + "/user/oauth2/" + url.PathEscape(oauth2Providers[0].DisplayName()))
 		return
 	}
@@ -225,6 +239,9 @@ func SignInPost(ctx *context.Context) {
 	oauth2Providers, err := oauth2.GetOAuth2Providers(ctx, optional.Some(true))
 	if err != nil {
 		ctx.ServerError("UserSignIn", err)
+		return
+	}
+	if _, ok := loadSAMLSources(ctx); !ok {
 		return
 	}
 	ctx.Data["OAuth2Providers"] = oauth2Providers
@@ -351,6 +368,8 @@ func signInMethod(source *auth.Source) string {
 		typ = "pam"
 	case auth.OAuth2:
 		typ = "oauth2"
+	case auth.SAML:
+		typ = "saml"
 	}
 	return typ + ":" + strconv.FormatInt(source.ID, 10)
 }
@@ -504,7 +523,12 @@ func SignOut(ctx *context.Context) {
 			Data: ctx.Session.ID(),
 		})
 	}
+	sloURL := samlLogoutURL(ctx)
 	HandleSignOut(ctx)
+	if sloURL != "" {
+		ctx.Redirect(sloURL)
+		return
+	}
 	ctx.Redirect(setting.AppSubURL + "/")
 }
 
@@ -527,6 +551,9 @@ func SignUp(ctx *context.Context) {
 	oauth2Providers, err := oauth2.GetOAuth2Providers(ctx, optional.Some(true))
 	if err != nil {
 		ctx.ServerError("UserSignUp", err)
+		return
+	}
+	if _, ok := loadSAMLSources(ctx); !ok {
 		return
 	}
 
@@ -561,6 +588,9 @@ func SignUpPost(ctx *context.Context) {
 	oauth2Providers, err := oauth2.GetOAuth2Providers(ctx, optional.Some(true))
 	if err != nil {
 		ctx.ServerError("UserSignUp", err)
+		return
+	}
+	if _, ok := loadSAMLSources(ctx); !ok {
 		return
 	}
 
@@ -658,7 +688,7 @@ func createUserInContext(ctx *context.Context, tpl base.TplName, form any, u *us
 				}
 
 				// TODO: probably we should respect 'remember' user's choice...
-				linkAccount(ctx, user, *gothUser, true, "oauth2:"+strconv.FormatInt(u.LoginSource, 10))
+				linkAccount(ctx, user, *gothUser, true, signInMethod(&auth.Source{ID: u.LoginSource, Type: u.LoginType}))
 				return false // user is already created here, all redirects are handled
 			case setting.OAuth2AccountLinkingLogin:
 				showLinkingLogin(ctx, *gothUser)

@@ -1,0 +1,9 @@
+{{/* A read-only value with a copy button. Params: id, label, value, hint, waiting, copy */}}
+<div class="field">
+	<label for="{{.id}}">{{.label}}</label>
+	<div class="ui fluid action input">
+		<input id="{{.id}}" type="text" value="{{.value}}" placeholder="{{.waiting}}" readonly>
+		<button type="button" class="ui icon button" data-clipboard-target="#{{.id}}" aria-label="{{.copy}}" data-tooltip-content="{{.copy}}">{{svg "octicon-copy" 16}}</button>
+	</div>
+	<p class="help">{{.hint}}</p>
+</div>
