@@ -158,7 +158,9 @@ func TestOwnedAccessToken(t *testing.T) {
 			allowed := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, repo3.ID, 0, perm_model.AccessModeWrite, "write:repository")
 			other := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeWrite, "write:repository")
 			reader := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, repo3.ID, 0, perm_model.AccessModeRead, "read:repository")
-			botID := func(t *auth_model.AccessToken) string { return strconv.FormatInt(user_model.AccessTokenBotID(t.ID), 10) }
+			botID := func(t *auth_model.AccessToken) string {
+				return strconv.FormatInt(user_model.AccessTokenBotID(t.ID), 10)
+			}
 
 			// the pickers offer write tokens of the repository and those covering it, never read ones
 			for _, path := range []string{"/org3/repo3/settings/branches/edit", "/org3/repo3/settings/tags"} {

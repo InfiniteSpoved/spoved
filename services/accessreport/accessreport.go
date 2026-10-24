@@ -76,8 +76,8 @@ type Row struct {
 	DeployKey    *asymkey_model.DeployKey
 	OrgDeployKey *asymkey_model.OrgDeployKey
 	AccessToken  *auth_model.AccessToken // a token of the repository, its project or its organization
-	Team         *organization.Team // a team shown as one row, for viewers outside the org
-	OrgMember    bool               // the user is a member of the repository's owner org
+	Team         *organization.Team      // a team shown as one row, for viewers outside the org
+	OrgMember    bool                    // the user is a member of the repository's owner org
 	Repo         *repo_model.Repository
 	Perm         access_model.Permission
 	Paths        []*Path

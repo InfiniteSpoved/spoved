@@ -12,8 +12,8 @@ type AccessRow struct {
 	User        *User              `json:"user,omitempty"`
 	DeployKey   *AccessDeployKey   `json:"deploy_key,omitempty"`
 	AccessToken *AccessAccessToken `json:"access_token,omitempty"`
-	Team       *AccessTeam      `json:"team,omitempty"`
-	Repository string           `json:"repository"`
+	Team        *AccessTeam        `json:"team,omitempty"`
+	Repository  string             `json:"repository"`
 	// highest access on any unit: none, read, write, admin or owner
 	Access string            `json:"access"`
 	Units  map[string]string `json:"units"`

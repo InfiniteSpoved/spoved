@@ -82,7 +82,7 @@ func SendCredentialExpiryNotices(ctx context.Context) error {
 			log.Error("credential expiry notice: recipients of %s %d: %v", c.kind, c.id, err)
 			continue
 		}
-		if r == nil || len(r.users) == 0 {
+		if len(r.users) == 0 {
 			continue
 		}
 		if claimed, err := auth_model.ClaimCredentialExpiryNotice(ctx, c.kind, c.id, c.expires, stage); err != nil {
@@ -151,13 +151,13 @@ func mailable(u *user_model.User) bool {
 	return u.IsIndividual() && u.IsMailable() && !u.ProhibitLogin && u.Email != ""
 }
 
-// recipients returns who gets the credential's mail; nil when its owner is gone (deleted, in the trash).
+// recipients returns who gets the credential's mail; nobody when its owner is gone (deleted, in the trash).
 func (c *expiringCredential) recipients(ctx context.Context) (*expiryRecipients, error) {
 	switch {
 	case c.userID != 0:
 		u, err := user_model.GetUserByID(ctx, c.userID)
 		if user_model.IsErrUserNotExist(err) {
-			return nil, nil
+			return &expiryRecipients{}, nil
 		} else if err != nil {
 			return nil, err
 		}
@@ -182,7 +182,7 @@ func (c *expiringCredential) recipients(ctx context.Context) (*expiryRecipients,
 func repoAdminRecipients(ctx context.Context, repoID int64) (*expiryRecipients, error) {
 	repo, err := repo_model.GetRepositoryByID(ctx, repoID)
 	if repo_model.IsErrRepoNotExist(err) {
-		return nil, nil
+		return &expiryRecipients{}, nil
 	} else if err != nil {
 		return nil, err
 	}
@@ -228,7 +228,7 @@ func repoAdminRecipients(ctx context.Context, repoID int64) (*expiryRecipients, 
 func orgOwnerRecipients(ctx context.Context, orgID, groupID int64) (*expiryRecipients, error) {
 	org, err := organization.GetOrgByID(ctx, orgID)
 	if organization.IsErrOrgNotExist(err) || user_model.IsErrUserNotExist(err) {
-		return nil, nil
+		return &expiryRecipients{}, nil
 	} else if err != nil {
 		return nil, err
 	}
@@ -240,7 +240,7 @@ func orgOwnerRecipients(ctx context.Context, orgID, groupID int64) (*expiryRecip
 	if groupID != 0 {
 		group, err := repo_model.GetRepoGroupByID(ctx, orgID, groupID)
 		if errors.Is(err, repo_model.ErrRepoGroupNotExist) {
-			return nil, nil
+			return &expiryRecipients{}, nil
 		} else if err != nil {
 			return nil, err
 		}
