@@ -116,11 +116,7 @@ func (issues IssueList) LoadPosters(ctx context.Context) error {
 }
 
 func getPostersByIDs(ctx context.Context, posterIDs []int64) (map[int64]*user_model.User, error) {
-	posterMaps, err := db.GetByIDs(ctx, "id", posterIDs, &user_model.User{})
-	if err != nil {
-		return nil, err
-	}
-	return posterMaps, nil
+	return user_model.GetUsersByIDsWithBots(ctx, posterIDs)
 }
 
 func (issues IssueList) getIssueIDs() []int64 {

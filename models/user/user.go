@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"net/mail"
 	"net/url"
 	"path/filepath"
@@ -187,8 +188,6 @@ type User struct {
 	// BotToken is the token of an organization, a project or a repository this identity acts for (see
 	// NewAccessTokenBot); nil for every stored user.
 	BotToken *auth.AccessToken `xorm:"-"`
-	// botTokensPath is the path (below the root URL) of the list where BotToken is managed, "" when unknown
-	botTokensPath string `xorm:"-"`
 
 	// If you add new fields that might be used to store abusive content (mainly string fields),
 	// please also add them in the UserData struct and the corresponding constructor.
@@ -402,13 +401,7 @@ func (u *User) DashboardLink() string {
 
 // HomeLink returns the user or organization home page link.
 func (u *User) HomeLink() string {
-	if u.IsAccessTokenBot() { // no profile: the list where the token is managed
-		if u.botTokensPath == "" {
-			return ""
-		}
-		return setting.AppSubURL + "/" + u.botTokensPath
-	}
-	if u.IsGhost() {
+	if u.IsAccessTokenBot() || u.IsGhost() { // a token has no profile; its page is for the people who manage it
 		return ""
 	}
 	return setting.AppSubURL + "/" + url.PathEscape(u.Name)
@@ -416,13 +409,7 @@ func (u *User) HomeLink() string {
 
 // HTMLURL returns the user or organization's full link.
 func (u *User) HTMLURL() string {
-	if u.IsAccessTokenBot() {
-		if u.botTokensPath == "" {
-			return ""
-		}
-		return setting.AppURL + u.botTokensPath
-	}
-	if u.IsGhost() {
+	if u.IsAccessTokenBot() || u.IsGhost() {
 		return ""
 	}
 	return setting.AppURL + url.PathEscape(u.Name)
@@ -1219,7 +1206,22 @@ func GetUserByIDs(ctx context.Context, ids []int64) ([]*User, error) {
 }
 
 func IsValidUserID(id int64) bool {
-	return id > 0 || id == GhostUserID || id == ActionsUserID
+	return id > 0 || id == GhostUserID || id == ActionsUserID || IsAccessTokenBotID(id)
+}
+
+// GetUsersByIDsWithBots is db.GetByIDs on the user table that also resolves the identities of access tokens (see
+// AccessTokenBotID) with one more query; a deleted token is left out, so GetUserFromMap falls back to Ghost.
+func GetUsersByIDsWithBots(ctx context.Context, ids []int64) (map[int64]*User, error) {
+	users, err := db.GetByIDs(ctx, "id", WithoutTokenIDs(ids), &User{})
+	if err != nil {
+		return nil, err
+	}
+	bots, err := GetAccessTokenBots(ctx, TokenIDsOnly(ids))
+	if err != nil {
+		return nil, err
+	}
+	maps.Copy(users, bots)
+	return users, nil
 }
 
 func GetUserFromMap(id int64, idMap map[int64]*User) (int64, *User) {
@@ -1243,7 +1245,7 @@ func GetPossibleUserByID(ctx context.Context, id int64) (*User, error) {
 		return nil, ErrUserNotExist{}
 	default:
 		if IsAccessTokenBotID(id) {
-			return getAccessTokenBotForDisplay(ctx, id)
+			return GetAccessTokenBot(ctx, id)
 		}
 		return GetUserByID(ctx, id)
 	}
@@ -1260,14 +1262,17 @@ func GetPossibleUserByIDs(ctx context.Context, ids []int64) ([]*User, error) {
 	if uniqueIDs.Remove(ActionsUserID) {
 		users = append(users, NewActionsUser())
 	}
+	bots, err := GetAccessTokenBots(ctx, TokenIDsOnly(uniqueIDs.Values()))
+	if err != nil {
+		return nil, err
+	}
+	for id, bot := range bots {
+		users = append(users, bot)
+		uniqueIDs.Remove(id)
+	}
 	for id := range uniqueIDs {
-		if IsAccessTokenBotID(id) {
+		if IsAccessTokenBotID(id) { // its token is gone
 			uniqueIDs.Remove(id)
-			if bot, err := getAccessTokenBotForDisplay(ctx, id); err == nil {
-				users = append(users, bot)
-			} else if !IsErrUserNotExist(err) {
-				return nil, err
-			}
 		}
 	}
 	res, err := GetUserByIDs(ctx, uniqueIDs.Values())

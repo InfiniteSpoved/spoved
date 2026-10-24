@@ -13,7 +13,6 @@ import (
 
 	"forgejo.org/models/auth"
 	"forgejo.org/models/db"
-	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 )
@@ -170,6 +169,26 @@ func GetAccessTokenBot(ctx context.Context, id int64) (*User, error) {
 	return NewAccessTokenBot(t), nil
 }
 
+// GetAccessTokenBots returns the identities with the user IDs (see AccessTokenBotID) by user ID, in one query; the
+// identities of deleted tokens are left out.
+func GetAccessTokenBots(ctx context.Context, ids []int64) (map[int64]*User, error) {
+	tokenIDs := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		tokenIDs = append(tokenIDs, accessTokenBotIDBase-id)
+	}
+	tokens := make([]*auth.AccessToken, 0, len(tokenIDs))
+	for chunk := range slices.Chunk(tokenIDs, db.DefaultMaxInSize) {
+		if err := db.GetEngine(ctx).In("id", chunk).And("owner_type <> ?", auth.AccessTokenOwnerUser).Find(&tokens); err != nil {
+			return nil, err
+		}
+	}
+	bots := make(map[int64]*User, len(tokens))
+	for _, t := range tokens {
+		bots[AccessTokenBotID(t.ID)] = NewAccessTokenBot(t)
+	}
+	return bots, nil
+}
+
 // GetAccessTokenBotNames returns the token names of the identities with the user IDs (see AccessTokenBotID), in one
 // query; the identities of deleted tokens are left out.
 func GetAccessTokenBotNames(ctx context.Context, ids []int64) ([]string, error) {
@@ -180,53 +199,6 @@ func GetAccessTokenBotNames(ctx context.Context, ids []int64) ([]string, error) 
 	var names []string
 	err := db.GetEngine(ctx).Table("access_token").In("id", tokenIDs).Asc("id").Cols("name").Find(&names)
 	return names, err
-}
-
-// getAccessTokenBotForDisplay is GetAccessTokenBot with the link to the page that manages the token, which the
-// places that show the identity use (GetPossibleUserByID); a failed lookup of the link leaves it empty.
-func getAccessTokenBotForDisplay(ctx context.Context, id int64) (*User, error) {
-	bot, err := GetAccessTokenBot(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if bot.botTokensPath, err = accessTokensPath(ctx, bot.BotToken); err != nil {
-		log.Error("accessTokensPath of token %d: %v", bot.BotToken.ID, err)
-		bot.botTokensPath = ""
-	}
-	return bot, nil
-}
-
-// accessTokensPath returns the path (below the root URL) of the Keys and tokens page that manages the token, "" when
-// its owner is gone.
-func accessTokensPath(ctx context.Context, t *auth.AccessToken) (string, error) {
-	var names struct {
-		OwnerName, Name, GroupName string
-	}
-	var has bool
-	var err error
-	switch t.OwnerType {
-	case auth.AccessTokenOwnerRepo:
-		has, err = db.GetEngine(ctx).Table("repository").Where("id = ?", t.OwnerID).Cols("owner_name", "name", "group_name").Get(&names)
-		if has && names.GroupName != "" {
-			return url.PathEscape(names.OwnerName) + "/" + url.PathEscape(names.GroupName) + "/" + url.PathEscape(names.Name) + "/settings/keys", err
-		} else if has {
-			return url.PathEscape(names.OwnerName) + "/" + url.PathEscape(names.Name) + "/settings/keys", err
-		}
-	case auth.AccessTokenOwnerOrg:
-		has, err = db.GetEngine(ctx).Table("user").Where("id = ?", t.OwnerID).Cols("name").Get(&names.Name)
-		if has {
-			return "org/" + url.PathEscape(names.Name) + "/settings/keys", err
-		}
-	case auth.AccessTokenOwnerProject:
-		if has, err = db.GetEngine(ctx).Table("user").Where("id = ?", t.OwnerID).Cols("name").Get(&names.OwnerName); err != nil || !has {
-			return "", err
-		}
-		has, err = db.GetEngine(ctx).Table("repo_group").Where("owner_id = ? AND id = ?", t.OwnerID, t.GroupID).Cols("name").Get(&names.Name)
-		if has {
-			return url.PathEscape(names.OwnerName) + "/" + url.PathEscape(names.Name) + "/-/settings/keys", err
-		}
-	}
-	return "", err
 }
 
 // IsAccessTokenBot reports whether the user is the identity of an organization, project or repository token.
