@@ -19,6 +19,7 @@ import (
 	"forgejo.org/modules/markup/markdown"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
+	apiv1_permissions "forgejo.org/routers/api/v1/permissions"
 	redirect_service "forgejo.org/services/redirect"
 
 	"github.com/go-chi/chi/v5"
@@ -38,13 +39,13 @@ func IsArchivedOrgWrite(req *http.Request, owner *user_model.User, exempt ...str
 	return !slices.Contains(exempt, req.Method+" "+chi.RouteContext(req.Context()).RoutePattern())
 }
 
-// ArchivedOrgOpenRoutes are the org routes that stay writable while the organization is archived.
-var ArchivedOrgOpenRoutes = []string{
+// ArchivedOrgOpenRoutes are the org and repository routes that stay writable while the organization is archived.
+var ArchivedOrgOpenRoutes = append([]string{
 	"POST /org/{org}/settings/unarchive",
 	"POST /org/{org}/settings/delete",
 	"POST /api/v1/orgs/{org}/unarchive",
 	"DELETE /api/v1/orgs/{org}",
-}
+}, apiv1_permissions.CredentialRevokeRoutes...)
 
 // Organization contains organization context
 type Organization struct {

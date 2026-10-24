@@ -2056,6 +2056,18 @@ func ViewIssue(ctx *context.Context) {
 				approvalRules = append(approvalRules, rules...)
 			}
 			ctx.Data["GrantedApprovals"] = issues_model.GetGrantedApprovalsCount(ctx, ctx.Data["ProtectedBranch"].(*git_model.ProtectedBranch), pull)
+			// an approval by a token of an organization, a project or a repository is shown, and said not to count
+			approverIDs, err := issues_model.FindTokenApproverIDs(ctx, issue.ID)
+			if err != nil {
+				ctx.ServerError("FindTokenApproverIDs", err)
+				return
+			}
+			uncounted, err := user_model.GetAccessTokenBotNames(ctx, approverIDs)
+			if err != nil {
+				ctx.ServerError("GetAccessTokenBotNames", err)
+				return
+			}
+			ctx.Data["UncountedApprovals"] = uncounted
 			if len(approvalRules) > 0 {
 				ctx.Data["ApprovalRules"] = approvalRules
 				if ctx.Repo.IsAdmin() {

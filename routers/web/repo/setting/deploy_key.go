@@ -19,9 +19,9 @@ import (
 	"forgejo.org/services/forms"
 )
 
-// DeployKeys render the deploy keys list of a repository page
-func DeployKeys(ctx *context.Context) {
-	ctx.Data["Title"] = ctx.Tr("repo.settings.deploy_keys") + " / " + ctx.Tr("secrets.secrets")
+// loadKeysPage sets the data of the Keys and tokens page of a repository.
+func loadKeysPage(ctx *context.Context) bool {
+	ctx.Data["Title"] = ctx.Tr("owned_token.keys_and_tokens")
 	ctx.Data["PageIsSettingsKeys"] = true
 	ctx.Data["DisableSSH"] = setting.SSH.Disabled
 	user.SetExpiryFormData(ctx.Base, setting.DeployKeyExpiry)
@@ -29,31 +29,23 @@ func DeployKeys(ctx *context.Context) {
 	keys, err := db.Find[asymkey_model.DeployKey](ctx, asymkey_model.ListDeployKeysOptions{RepoID: ctx.Repo.Repository.ID})
 	if err != nil {
 		ctx.ServerError("ListDeployKeys", err)
-		return
+		return false
 	}
 	ctx.Data["Deploykeys"] = keys
-	if !loadOrgDeployKeys(ctx) {
-		return
-	}
+	return loadOrgDeployKeys(ctx) && loadRepoAccessTokens(ctx)
+}
 
-	ctx.HTML(http.StatusOK, tplDeployKeys)
+// DeployKeys render the deploy keys list of a repository page
+func DeployKeys(ctx *context.Context) {
+	if loadKeysPage(ctx) {
+		ctx.HTML(http.StatusOK, tplDeployKeys)
+	}
 }
 
 // DeployKeysPost response for adding a deploy key of a repository
 func DeployKeysPost(ctx *context.Context) {
 	form := web.GetForm(ctx).(*forms.AddKeyForm)
-	ctx.Data["Title"] = ctx.Tr("repo.settings.deploy_keys")
-	ctx.Data["PageIsSettingsKeys"] = true
-	ctx.Data["DisableSSH"] = setting.SSH.Disabled
-	user.SetExpiryFormData(ctx.Base, setting.DeployKeyExpiry)
-
-	keys, err := db.Find[asymkey_model.DeployKey](ctx, asymkey_model.ListDeployKeysOptions{RepoID: ctx.Repo.Repository.ID})
-	if err != nil {
-		ctx.ServerError("ListDeployKeys", err)
-		return
-	}
-	ctx.Data["Deploykeys"] = keys
-	if !loadOrgDeployKeys(ctx) {
+	if !loadKeysPage(ctx) {
 		return
 	}
 

@@ -723,6 +723,10 @@ func Routes() *web.Route {
 			m.Get("/actions/run", misc.GetActionsRun)
 		})
 
+		// A token of an organization, a project or a repository rotating itself: needs no scope, only the token's own
+		// self-rotate setting
+		m.Post("/tokens/self/rotate", reqToken(), user.RotateSelfAccessToken)
+
 		// Notifications (requires 'notifications' scope)
 		m.Group("/notifications", func() {
 			m.Combo("").
@@ -1064,6 +1068,12 @@ func Routes() *web.Route {
 						Post(bind(api.CreateKeyOption{}), repo.CreateDeployKey)
 					m.Combo("/{id}").Get(repo.GetDeployKey).
 						Delete(repo.DeleteDeploykey)
+				}, reqToken(), reqAdmin())
+				m.Group("/tokens", func() {
+					m.Combo("").Get(repo.ListAccessTokens).
+						Post(bind(api.CreateOwnedAccessTokenOption{}), repo.CreateAccessToken)
+					m.Delete("/{id}", repo.DeleteAccessToken)
+					m.Post("/{id}/rotate", bind(api.RotateOwnedAccessTokenOption{}), repo.RotateAccessToken)
 				}, reqToken(), reqAdmin())
 				m.Group("/times", func() {
 					m.Combo("").Get(repo.ListTrackedTimesByRepository)
@@ -1480,6 +1490,12 @@ func Routes() *web.Route {
 					m.Combo("/repos/{repo}").Put(org.AddDeployKeyRepo).Delete(org.RemoveDeployKeyRepo)
 				})
 			}, reqToken(), org.HideInvisibleOrg, reqOrgOwnership())
+			m.Group("/tokens", func() {
+				m.Combo("").Get(org.ListAccessTokens).
+					Post(bind(api.CreateOwnedAccessTokenOption{}), org.CreateAccessToken)
+				m.Delete("/{id}", org.DeleteAccessToken)
+				m.Post("/{id}/rotate", bind(api.RotateOwnedAccessTokenOption{}), org.RotateAccessToken)
+			}, reqToken(), org.HideInvisibleOrg, reqOrgOwnership())
 			m.Group("/projects", func() {
 				m.Get("", org.ListProjects)
 				m.Get("/{id}", org.GetProject)
@@ -1492,6 +1508,10 @@ func Routes() *web.Route {
 						Post(bind(api.CreateKeyOption{}), org.CreateProjectDeployKey)
 					m.Combo("/{id}/keys/{key_id}").Get(org.GetProjectDeployKey).
 						Delete(org.DeleteProjectDeployKey)
+					m.Combo("/{id}/tokens").Get(org.ListProjectAccessTokens).
+						Post(bind(api.CreateOwnedAccessTokenOption{}), org.CreateProjectAccessToken)
+					m.Delete("/{id}/tokens/{token_id}", org.DeleteProjectAccessToken)
+					m.Post("/{id}/tokens/{token_id}/rotate", bind(api.RotateOwnedAccessTokenOption{}), org.RotateProjectAccessToken)
 					m.Group("/{id}/branch_protections", func() {
 						m.Combo("").Get(org.ListProjectBranchProtections).
 							Post(bind(api.CreateOrgBranchProtectionOption{}), org.CreateProjectBranchProtection)

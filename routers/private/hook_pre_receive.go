@@ -440,8 +440,8 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 			getUser = user_model.GetAccessTokenBot
 		}
 		user, err := getUser(ctx, ctx.opts.UserID)
-		// a token of an organization, a project or a repository deleted or expired since the push was authenticated
-		if user_model.IsAccessTokenBotID(ctx.opts.UserID) && (user_model.IsErrUserNotExist(err) || err == nil && user.BotToken.IsExpired()) {
+		// a token of an organization, a project or a repository revoked or expired since the push was authenticated
+		if user_model.IsAccessTokenBotID(ctx.opts.UserID) && (user_model.IsErrUserNotExist(err) || err == nil && !user.BotToken.IsUsable()) {
 			ctx.refuse(http.StatusForbidden, "permission", "", "The access token is no longer valid.")
 			return false
 		}
@@ -819,8 +819,8 @@ func (ctx *preReceiveContext) loadPusherAndPermission() bool {
 			getUser = user_model.GetAccessTokenBot
 		}
 		user, err := getUser(ctx, ctx.opts.UserID)
-		// a token of an organization, a project or a repository deleted or expired since the push was authenticated
-		if user_model.IsAccessTokenBotID(ctx.opts.UserID) && (user_model.IsErrUserNotExist(err) || err == nil && user.BotToken.IsExpired()) {
+		// a token of an organization, a project or a repository revoked or expired since the push was authenticated
+		if user_model.IsAccessTokenBotID(ctx.opts.UserID) && (user_model.IsErrUserNotExist(err) || err == nil && !user.BotToken.IsUsable()) {
 			ctx.refuse(http.StatusForbidden, "permission", "", "The access token is no longer valid.")
 			return false
 		}

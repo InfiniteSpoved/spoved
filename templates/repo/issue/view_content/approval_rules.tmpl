@@ -19,3 +19,9 @@
 		</ul>
 	</div>
 {{end}}
+{{range .UncountedApprovals}}
+	<div class="item text grey uncounted-approval">
+		{{svg "octicon-info"}}
+		{{ctx.Locale.Tr "owned_token.approval_uncounted" .}}
+	</div>
+{{end}}

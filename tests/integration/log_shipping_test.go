@@ -116,6 +116,7 @@ func apiShip(t *testing.T, method, path, token string, body any, status int) *ht
 func TestLogShippingDestinationLifecycle(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	defer cleanLogShipping(t)
+	bumpSettingsRevision(t) // fixtures reset the revision: a Save could reuse one an earlier test cached
 	sink := newShipSink(t, http.StatusOK)
 	token := getUserToken(t, "user1", auth_model.AccessTokenScopeWriteAdmin)
 
@@ -169,6 +170,7 @@ func TestLogShippingDestinationLifecycle(t *testing.T) {
 func TestLogShippingSecrets(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	defer cleanLogShipping(t)
+	bumpSettingsRevision(t)
 	newShipSink(t, http.StatusOK)
 	token := getUserToken(t, "user1", auth_model.AccessTokenScopeWriteAdmin)
 	admin := loginUser(t, "user1")
@@ -268,6 +270,7 @@ func TestLogShippingSecrets(t *testing.T) {
 func TestLogShippingTestEvent(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	defer cleanLogShipping(t)
+	bumpSettingsRevision(t)
 	ok := newShipSink(t, http.StatusOK)
 	token := getUserToken(t, "user1", auth_model.AccessTokenScopeWriteAdmin)
 	admin := loginUser(t, "user1")
@@ -319,6 +322,7 @@ func TestLogShippingTestEvent(t *testing.T) {
 func TestLogShippingAccess(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	defer cleanLogShipping(t)
+	bumpSettingsRevision(t)
 	sink := newShipSink(t, http.StatusOK)
 	adminToken := getUserToken(t, "user1", auth_model.AccessTokenScopeWriteAdmin)
 	var d api.LogShippingDestination
@@ -391,6 +395,7 @@ func TestLogShippingAccess(t *testing.T) {
 func TestLogShippingChangesAreLogged(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	defer cleanLogShipping(t)
+	bumpSettingsRevision(t)
 	newShipSink(t, http.StatusOK)
 	token := getUserToken(t, "user1", auth_model.AccessTokenScopeWriteAdmin)
 	checker, cleanup := test.NewLogChecker(log.DEFAULT, log.WARN)

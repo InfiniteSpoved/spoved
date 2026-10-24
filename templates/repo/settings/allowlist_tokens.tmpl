@@ -1,0 +1,7 @@
+{{/* The tokens a deploy key picker of branch and tag protection also offers: a list of allowlistToken (routers/web/repo/setting/protected_branch.go) */}}
+{{range .}}
+	<div class="item" data-value="{{.BotID}}">
+		{{svg "fontawesome-send"}}
+		{{.Name}} <span class="text grey">[bot] · {{if eq .OwnerType 1}}{{ctx.Locale.Tr "owned_token.level.org"}}{{else if eq .OwnerType 2}}{{ctx.Locale.Tr "owned_token.level.project"}}{{else}}{{ctx.Locale.Tr "owned_token.level.repo"}}{{end}}{{if .Expired}} · {{ctx.Locale.Tr "owned_token.expired"}}{{end}}</span>
+	</div>
+{{end}}

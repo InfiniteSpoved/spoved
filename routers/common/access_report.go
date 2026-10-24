@@ -104,7 +104,7 @@ func (r *AccessReport) Export(ctx *context.Base, format string) error {
 	if format == "csv" {
 		ctx.SetServeHeaders(&context.ServeHeaderOptions{ContentType: "text/csv", ContentTypeCharset: "utf-8", Filename: "access-report.csv"})
 		w := csv.NewWriter(ctx.Resp)
-		header := []string{"type", "name", "full_name", "repository", "unit", "access", "path", "team", "user_groups", "grant", "applied"}
+		header := []string{"type", "name", "full_name", "repository", "unit", "access", "path", "team", "user_groups", "grant", "applied", "scopes"}
 		if r.Admin {
 			header = append(header, "last_sign_in", "last_push", "two_factor", "account_source", "suspended")
 		}
@@ -122,7 +122,7 @@ func (r *AccessReport) Export(ctx *context.Base, format string) error {
 			}
 			rec := []string{
 				l.Type, l.Name, l.FullName, l.Repository, l.Unit, l.Access, l.Path,
-				l.Team, strings.Join(groups, "; "), l.Grant, strconv.FormatBool(l.Applied),
+				l.Team, strings.Join(groups, "; "), l.Grant, strconv.FormatBool(l.Applied), strings.Join(l.Scopes, "; "),
 			}
 			if r.Admin {
 				rec = append(rec, csvTime(l.LastLogin), csvTime(l.LastPush), csvBool(l.TwoFactor), l.AccountSource, csvBool(l.Suspended))

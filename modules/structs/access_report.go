@@ -7,12 +7,13 @@ import "time"
 
 // AccessRow is the access of one identity to a repository, and every path that gives it
 type AccessRow struct {
-	// person, bot, key, team, anyone, signed_in or instance_roles
-	Type       string           `json:"type"`
-	User       *User            `json:"user,omitempty"`
-	DeployKey  *AccessDeployKey `json:"deploy_key,omitempty"`
-	Team       *AccessTeam      `json:"team,omitempty"`
-	Repository string           `json:"repository"`
+	// person, bot, key, token, team, anyone, signed_in or instance_roles
+	Type        string             `json:"type"`
+	User        *User              `json:"user,omitempty"`
+	DeployKey   *AccessDeployKey   `json:"deploy_key,omitempty"`
+	AccessToken *AccessAccessToken `json:"access_token,omitempty"`
+	Team        *AccessTeam        `json:"team,omitempty"`
+	Repository  string             `json:"repository"`
 	// highest access on any unit: none, read, write, admin or owner
 	Access string            `json:"access"`
 	Units  map[string]string `json:"units"`
@@ -22,7 +23,7 @@ type AccessRow struct {
 // AccessPath is one source of access
 type AccessPath struct {
 	// owner, site_admin, auditor, org_owner, admin_team, team, collaborator, public, internal, org_member,
-	// deploy_key, org_deploy_key, project_deploy_key or instance_roles
+	// deploy_key, org_deploy_key, project_deploy_key, repo_token, project_token, org_token or instance_roles
 	Kind       string             `json:"kind"`
 	Access     string             `json:"access"`
 	Units      map[string]string  `json:"units,omitempty"`
@@ -44,6 +45,16 @@ type AccessDeployKey struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`
 	Fingerprint string `json:"fingerprint"`
+	// swagger:strfmt date-time
+	Expires *time.Time `json:"expires_at,omitempty"`
+}
+
+// AccessAccessToken is an access token of a repository, a project or an organization in an access report
+type AccessAccessToken struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	// the API scopes of the token, which can be fewer than the units the permission lists
+	Scopes []string `json:"scopes"`
 	// swagger:strfmt date-time
 	Expires *time.Time `json:"expires_at,omitempty"`
 }
@@ -91,12 +102,14 @@ type UserAccess struct {
 
 // AccessReportLine is one path that gives an identity access to one unit of a repository
 type AccessReportLine struct {
-	// person, bot, key, team, anyone, signed_in, org_members or instance_roles
+	// person, bot, key, token, team, anyone, signed_in, org_members or instance_roles
 	Type string `json:"type"`
-	// user, deploy key or team name
-	Name       string `json:"name,omitempty"`
-	FullName   string `json:"full_name,omitempty"`
-	Repository string `json:"repository"`
+	// user, deploy key, access token or team name
+	Name     string `json:"name,omitempty"`
+	FullName string `json:"full_name,omitempty"`
+	// the API scopes of an access token, which can be fewer than the units its permission lists
+	Scopes     []string `json:"scopes,omitempty"`
+	Repository string   `json:"repository"`
 	// unit, e.g. repo.code, or * for all units
 	Unit string `json:"unit"`
 	// effective access to the unit

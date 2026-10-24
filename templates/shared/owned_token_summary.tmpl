@@ -1,0 +1,7 @@
+{{/* One line of what a token of an organization, a project or a repository can do: ctxData, Token, Repos (an organization token's selected repositories) */}}
+{{- $t := .Token -}}
+{{- ctx.Locale.Tr "owned_token.summary" -}}{{" "}}
+{{- if eq $t.Mode 1}}{{ctx.Locale.Tr "owned_token.permission.read_short"}}{{else if eq $t.Mode 2}}{{ctx.Locale.Tr "owned_token.permission.write_short"}}{{else}}{{ctx.Locale.Tr "owned_token.permission.admin_short"}}{{end}}
+{{- " · "}}{{StringUtils.Join $t.Scope.OrderedScopes ", "}}{{if $t.SelfRotate}}, {{ctx.Locale.Tr "owned_token.self_rotate_short"}}{{end}}
+{{- " · "}}{{if eq $t.OwnerType 1}}{{if $t.ResourceAllRepos}}{{ctx.Locale.Tr "owned_token.covers.org_all"}}{{else}}{{range $i, $r := .Repos}}{{if $i}}, {{end}}{{$r.FullName}}{{end}}{{end}}{{else if eq $t.OwnerType 2}}{{ctx.Locale.Tr "owned_token.covers.project" .ctxData.RepoGroup.Name}}{{else}}{{ctx.Locale.Tr "owned_token.covers.repo"}}{{end}}
+{{- " · "}}{{if $t.ExpiresUnix}}{{ctx.Locale.Tr "owned_token.summary_expires" (DateUtils.AbsoluteShort $t.ExpiresUnix)}}{{else}}{{ctx.Locale.Tr "owned_token.summary_no_expiry"}}{{end}}

@@ -368,3 +368,25 @@ func UpdateOauth2Application(ctx *context.APIContext) {
 
 	ctx.JSON(http.StatusOK, convert.ToOAuth2Application(app))
 }
+
+// RotateSelfAccessToken gives the token of an organization, a project or a repository that authenticated the request a
+// new secret
+func RotateSelfAccessToken(ctx *context.APIContext) {
+	// swagger:operation POST /tokens/self/rotate user rotateSelfAccessToken
+	// ---
+	// summary: Rotate the access token of an organization, a project or a repository that makes this request
+	// description: The token must allow self-rotate. Its old secret stops working at once, and the new one, shown only in this answer, gets the default lifetime (30 days, capped at the instance's maximum), or keeps none where the instance allows it.
+	// produces:
+	// - application/json
+	// responses:
+	//   "200":
+	//     "$ref": "#/responses/AccessToken"
+	//   "401":
+	//     "$ref": "#/responses/unauthorized"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
+
+	utils.RotateSelf(ctx)
+}

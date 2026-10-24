@@ -31,7 +31,7 @@ test('add a project deploy key, see it in the list, and delete it', async ({page
   await expect(page).toHaveURL(`/org3/${project}`);
 
   await page.goto(`/org3/${project}/-/settings`);
-  await page.getByRole('link', {name: 'Deploy keys'}).click();
+  await page.getByRole('link', {name: 'Keys and tokens'}).click();
   await expect(page).toHaveURL(`/org3/${project}/-/settings/keys`);
 
   await page.locator('.org-setting-content > h4').getByRole('button', {name: 'Add deploy key'}).click();

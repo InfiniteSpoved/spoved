@@ -119,7 +119,7 @@ func GetPackageDescriptor(ctx context.Context, pv *PackageVersion) (*PackageDesc
 			return nil, err
 		}
 	}
-	creator, err := user_model.GetUserByID(ctx, pv.CreatorID)
+	creator, err := user_model.GetPossibleUserByID(ctx, pv.CreatorID) // also a token identity
 	if err != nil {
 		if errors.Is(err, util.ErrNotExist) {
 			creator = user_model.NewGhostUser()

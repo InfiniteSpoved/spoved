@@ -633,7 +633,7 @@ func RepoAssignment(ctx *Context) context.CancelFunc {
 		return nil
 	}
 	// Every repository of an archived organization is read-only, whatever the repository's own settings say.
-	if IsArchivedOrgWrite(ctx.Req, owner) {
+	if IsArchivedOrgWrite(ctx.Req, owner, ArchivedOrgOpenRoutes...) {
 		ctx.Error(http.StatusForbidden, ctx.Locale.TrString("org.archived.readonly"))
 		return nil
 	}

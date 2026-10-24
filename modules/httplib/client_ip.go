@@ -6,6 +6,9 @@ package httplib
 import (
 	"context"
 	"net/http"
+	"net/netip"
+
+	"forgejo.org/modules/setting"
 )
 
 type ambiguousClientIPKey struct{}
@@ -32,4 +35,13 @@ func IsClientIPAmbiguous(req *http.Request) bool {
 func AmbiguousClientIP(req *http.Request) (peer string, candidates []string, ok bool) {
 	v, ok := req.Context().Value(ambiguousClientIPKey{}).(ambiguousClientIP)
 	return v.peer, v.candidates, ok
+}
+
+// ClientIP returns the client address of the request, invalid if it can't be parsed or a trusted proxy sent
+// disagreeing X-Real-IP and X-Forwarded-For headers.
+func ClientIP(req *http.Request) netip.Addr {
+	if IsClientIPAmbiguous(req) {
+		return netip.Addr{}
+	}
+	return setting.IPFromRemoteAddr(req.RemoteAddr)
 }

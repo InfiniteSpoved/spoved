@@ -18,6 +18,7 @@ import (
 	"forgejo.org/services/auth"
 	automerge_service "forgejo.org/services/automerge"
 	logshipping_service "forgejo.org/services/logshipping"
+	"forgejo.org/services/mailer"
 	mergequeue_service "forgejo.org/services/mergequeue"
 	"forgejo.org/services/migrations"
 	mirror_service "forgejo.org/services/mirror"
@@ -218,11 +219,22 @@ func registerReloadLogShipping() {
 	})
 }
 
+func registerCredentialExpiryNotices() {
+	RegisterTaskFatal("credential_expiry_notices", &BaseConfig{
+		Enabled:    true,
+		RunAtStart: false,
+		Schedule:   "@every 1h",
+	}, func(ctx context.Context, _ *user_model.User, _ Config) error {
+		return mailer.SendCredentialExpiryNotices(ctx)
+	})
+}
+
 func initBasicTasks() {
 	if setting.Mirror.Enabled {
 		registerUpdateMirrorTask()
 	}
 	registerRepoHealthCheck()
+	registerCredentialExpiryNotices()
 	registerCheckRepoStats()
 	registerArchiveCleanup()
 	registerSyncExternalUsers()

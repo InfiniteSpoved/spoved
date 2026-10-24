@@ -10,6 +10,7 @@ import (
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/setting"
+	"forgejo.org/routers/api/v1/permissions"
 	"forgejo.org/services/context"
 
 	"github.com/go-chi/chi/v5"
@@ -59,6 +60,9 @@ var MaintenanceReadRoutes = container.SetOf(
 	"POST /api/v1/repositories/{repo_id}/markdown/raw",
 )
 
+// MaintenanceRevokeRoutes are the routes that revoke credentials, open to everyone who may revoke in read-only mode.
+var MaintenanceRevokeRoutes = container.SetOf(permissions.CredentialRevokeRoutes...)
+
 // MaintenanceAdminRoutes are the admin settings a site admin can still change in read-only mode.
 var MaintenanceAdminRoutes = container.SetOf(
 	"POST /admin/maintenance",
@@ -98,7 +102,7 @@ func isMaintenanceWriteAllowed(req *http.Request, doer *user_model.User) bool {
 		return true
 	}
 	route := maintenanceRoute(req)
-	return MaintenanceSignInRoutes.Contains(route) || MaintenanceReadRoutes.Contains(route) ||
+	return MaintenanceSignInRoutes.Contains(route) || MaintenanceReadRoutes.Contains(route) || MaintenanceRevokeRoutes.Contains(route) ||
 		IsMaintenanceAdmin(doer) && MaintenanceAdminRoutes.Contains(route)
 }
 

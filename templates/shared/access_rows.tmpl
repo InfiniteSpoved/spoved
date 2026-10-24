@@ -10,7 +10,7 @@
 	</thead>
 	<tbody>
 		{{range .Rows}}
-			<tr data-type="{{.Type}}"{{if .User}} data-user="{{.User.UserName}}"{{else if .DeployKey}} data-key="{{.DeployKey.Name}}"{{else if .Team}} data-team="{{.Team.Name}}"{{end}} data-repo="{{.Repository}}">
+			<tr data-type="{{.Type}}"{{if .User}} data-user="{{.User.UserName}}"{{else if .DeployKey}} data-key="{{.DeployKey.Name}}"{{else if .AccessToken}} data-token="{{.AccessToken.Name}}"{{else if .Team}} data-team="{{.Team.Name}}"{{end}} data-repo="{{.Repository}}">
 				<td>
 					{{if $.ShowRepo}}
 						<a href="{{AppSubUrl}}/{{.Repository}}">{{.Repository}}</a>
@@ -18,6 +18,9 @@
 						<a href="{{.User.HTMLURL}}">{{.User.UserName}}</a>{{if eq .Type "bot"}} <span class="ui label">{{ctx.Locale.Tr "access_report.type.bot"}}</span>{{end}}
 					{{else if .DeployKey}}
 						{{svg "octicon-key"}} {{.DeployKey.Name}} <span class="text grey">{{.DeployKey.Fingerprint}}</span>
+					{{else if .AccessToken}}
+						{{svg "fontawesome-send"}} {{.AccessToken.Name}} <span class="ui label">{{ctx.Locale.Tr "access_report.type.bot"}}</span>
+						<div class="text grey">{{ctx.Locale.Tr "owned_token.scopes"}}: {{StringUtils.Join .AccessToken.Scopes ", "}}</div>
 					{{else if .Team}}
 						{{ctx.Locale.Tr "access_report.who.team" .Team.Name .Team.NumMembers}}
 					{{else}}
