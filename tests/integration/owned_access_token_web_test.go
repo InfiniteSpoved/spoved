@@ -6,6 +6,7 @@ package integration
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -28,11 +29,20 @@ func TestOwnedAccessTokenWeb(t *testing.T) {
 	session := loginUser(t, "user2")
 	name := func() string { return fmt.Sprintf("web-token-%d", tokenCounter.Add(1)) }
 
+	// follow answers a POST: a refusal is the page itself, a success redirects to the page that shows the value once
+	follow := func(t *testing.T, resp *httptest.ResponseRecorder) *HTMLDoc {
+		t.Helper()
+		if resp.Code == http.StatusSeeOther {
+			link, _, _ := strings.Cut(resp.Header().Get("Location"), "#")
+			resp = session.MakeRequest(t, NewRequest(t, "GET", link), http.StatusOK)
+		}
+		require.Equal(t, http.StatusOK, resp.Code)
+		return NewHTMLParser(t, resp.Body)
+	}
 	// create posts the form and returns the page and the value shown once ("" when refused)
 	create := func(t *testing.T, keysLink string, form map[string]string) (*HTMLDoc, string) {
 		t.Helper()
-		resp := session.MakeRequest(t, NewRequestWithValues(t, "POST", keysLink+"/tokens/new", form), http.StatusOK)
-		page := NewHTMLParser(t, resp.Body)
+		page := follow(t, session.MakeRequest(t, NewRequestWithValues(t, "POST", keysLink+"/tokens/new", form), NoExpectedStatus))
 		return page, strings.TrimSpace(page.Find("#new-access-token-value").Text())
 	}
 	use := func(t *testing.T, path, token string) int {
@@ -84,9 +94,17 @@ func TestOwnedAccessTokenWeb(t *testing.T) {
 		unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: tok.ID})
 
 		// rotate shows the new secret once, and the old one stops working
-		page = NewHTMLParser(t, session.MakeRequest(t, NewRequestWithValues(t, "POST", link+"/tokens/rotate", map[string]string{"id": fmt.Sprint(tok.ID)}), http.StatusOK).Body)
+		resp := session.MakeRequest(t, NewRequestWithValues(t, "POST", link+"/tokens/rotate", map[string]string{"id": fmt.Sprint(tok.ID)}), http.StatusSeeOther)
+		assert.NotContains(t, resp.Body.String(), "new-access-token-value", "the POST answer holds no secret")
+		page = follow(t, resp)
 		rotated := strings.TrimSpace(page.Find("#new-access-token-value").Text())
 		require.NotEmpty(t, rotated)
+		// a reload shows nothing and rotates nothing; the secret was shown once
+		for range 2 {
+			reloaded := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", link), http.StatusOK).Body)
+			assert.Zero(t, reloaded.Find("#new-access-token-value").Length())
+			assert.Equal(t, http.StatusOK, use(t, "/api/v1/repos/user2/repo1", rotated))
+		}
 		assert.NotEqual(t, value, rotated)
 		assert.Contains(t, page.Find("#new-access-token").Text(), "rotated")
 		assert.Contains(t, page.Find("#access-token-list .last-rotated").Text(), "user2")

@@ -5,8 +5,11 @@ package user
 
 import (
 	"errors"
+	"fmt"
 	"html"
+	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +28,10 @@ import (
 // ownedTokensPageSize is how many tokens the Keys and tokens page lists at once; above it the list pages and a
 // name filter shows.
 const ownedTokensPageSize = 20
+
+// newOwnedTokenSessionKey holds "id:rotated:secret" of a token that was just created or rotated, from the POST to the
+// page it redirects to; the page pops it, so a reload shows nothing and rotates nothing.
+const newOwnedTokenSessionKey = "newOwnedToken"
 
 // OwnedTokenScopeCategories are the scope categories a token of an organization, a project or a repository may hold,
 // in the order the form offers them; organization offers read only.
@@ -108,6 +115,9 @@ func LoadOwnedTokens(ctx *context.Context, level OwnedTokenLevel) bool {
 		ctx.ServerError("newOwnedTokenRows", err)
 		return false
 	}
+	if !popNewOwnedToken(ctx, level) {
+		return false
+	}
 	ctx.Data["Link"] = level.Link
 	ctx.Data["OwnedTokens"] = rows
 	ctx.Data["OwnedTokenCloneURL"] = level.CloneURL
@@ -184,8 +194,8 @@ func ReadOwnedTokenForm(ctx *context.Context) OwnedTokenForm {
 }
 
 // CreateOwnedToken creates the token the form describes for level, covering repoIDs for an organization token
-// limited to selected repositories (allRepos false). On success it returns the token, whose secret the caller shows
-// once (NewOwnedToken); on a refusal it sets TokenError and returns nil. Only the page's own owners reach it (the routes check).
+// limited to selected repositories (allRepos false). On success it redirects to the page, which shows the secret
+// once, and returns the token; on a refusal it sets TokenError and returns nil. Only the page's own owners reach it (the routes check).
 func CreateOwnedToken(ctx *context.Context, level OwnedTokenLevel, f OwnedTokenForm, allRepos bool, repoIDs []int64) *auth_model.AccessToken {
 	refuse := func(msg string) *auth_model.AccessToken {
 		ctx.Data["TokenError"] = msg
@@ -253,11 +263,44 @@ func CreateOwnedToken(ctx *context.Context, level OwnedTokenLevel, f OwnedTokenF
 		ctx.ServerError("CreateOwnedAccessToken", err)
 		return nil
 	}
-	// the value is shown once, in this answer; the form starts over
-	for _, k := range []string{"HasTokenError", "token_name", "token_description", "token_permission", "token_scopes", "token_expires_at", "token_self_rotate", "TokenScopeAll", "TokenScopeRepoIDs"} {
-		delete(ctx.Data, k)
+	rememberNewOwnedToken(ctx, level, t, false)
+	return t
+}
+
+// rememberNewOwnedToken keeps the secret of a new or rotated token in the session and redirects to the page, which
+// shows it once (popNewOwnedToken): the answer to the POST has no secret to repeat on a reload.
+func rememberNewOwnedToken(ctx *context.Context, level OwnedTokenLevel, t *auth_model.AccessToken, rotated bool) {
+	if err := ctx.Session.Set(newOwnedTokenSessionKey, fmt.Sprintf("%d:%t:%s", t.ID, rotated, t.Token)); err != nil {
+		ctx.ServerError("Session.Set", err)
+		return
 	}
-	return showNewOwnedToken(ctx, t)
+	ctx.Redirect(level.Link+"#access-tokens", http.StatusSeeOther)
+}
+
+// popNewOwnedToken puts the token that rememberNewOwnedToken stored, if it is one of level's, into the page data and
+// forgets it. It returns false when it answered with an error.
+func popNewOwnedToken(ctx *context.Context, level OwnedTokenLevel) bool {
+	v, ok := ctx.Session.Get(newOwnedTokenSessionKey).(string)
+	if !ok {
+		return true
+	}
+	if err := ctx.Session.Delete(newOwnedTokenSessionKey); err != nil {
+		ctx.ServerError("Session.Delete", err)
+		return false
+	}
+	idStr, rest, _ := strings.Cut(v, ":")
+	rotated, secret, _ := strings.Cut(rest, ":")
+	id, _ := strconv.ParseInt(idStr, 10, 64)
+	t := &auth_model.AccessToken{}
+	if has, err := db.GetEngine(ctx).Where(level.Opts.ToConds()).And("id = ?", id).Get(t); err != nil {
+		ctx.ServerError("GetOwnedAccessToken", err)
+		return false
+	} else if !has || secret == "" { // another owner's page, or the token is gone
+		return true
+	}
+	t.Token = secret
+	ctx.Data["NewOwnedTokenRotated"] = rotated == "true"
+	return showNewOwnedToken(ctx, t) != nil
 }
 
 // showNewOwnedToken puts a new or rotated token into the page data, so its secret shows once.
@@ -272,8 +315,8 @@ func showNewOwnedToken(ctx *context.Context, t *auth_model.AccessToken) *auth_mo
 	return t
 }
 
-// RotateOwnedToken gives the token of the form's id of level a new secret with the default lifetime and shows it
-// once; a token of another owner is not found. It returns false when it answered already.
+// RotateOwnedToken gives the token of the form's id of level a new secret with the default lifetime and redirects to
+// the page, which shows it once; a token of another owner is not found. It always answers, so it returns false.
 func RotateOwnedToken(ctx *context.Context, level OwnedTokenLevel) bool {
 	t, err := authz.RotateOwnedAccessToken(ctx, level.Opts, ctx.FormInt64("id"), "", optional.None[timeutil.TimeStamp](), ctx.Doer.ID)
 	if err != nil {
@@ -290,8 +333,8 @@ func RotateOwnedToken(ctx *context.Context, level OwnedTokenLevel) bool {
 		ctx.Redirect(level.Link + "#access-tokens")
 		return false
 	}
-	ctx.Data["NewOwnedTokenRotated"] = true
-	return showNewOwnedToken(ctx, t) != nil
+	rememberNewOwnedToken(ctx, level, t, true)
+	return false
 }
 
 // DeleteOwnedToken revokes the token of the form's id of level; a token of another owner is not found.
