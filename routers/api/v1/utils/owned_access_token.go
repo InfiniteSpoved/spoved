@@ -320,6 +320,25 @@ func RotateSelf(ctx *context.APIContext) {
 		ctx.Error(http.StatusForbidden, "", "this token may not rotate itself")
 		return
 	}
+	// the organization that owns the token, or the owner of the repository it belongs to
+	ownerID := t.OwnerID
+	if t.OwnerType == auth_model.AccessTokenOwnerRepo {
+		repo, err := repo_model.GetRepositoryByID(ctx, t.OwnerID)
+		if err != nil {
+			ctx.InternalServerError(err)
+			return
+		}
+		ownerID = repo.OwnerID
+	}
+	owner, err := user_model.GetUserByID(ctx, ownerID)
+	if err != nil {
+		ctx.InternalServerError(err)
+		return
+	}
+	if context.IsArchivedOrgWrite(ctx.Req, owner, context.ArchivedOrgOpenRoutes...) {
+		ctx.Error(http.StatusForbidden, "OrgArchived", "the organization is archived and read-only")
+		return
+	}
 	opts := auth_model.FindOwnedAccessTokensOptions{OwnerType: t.OwnerType, OwnerID: t.OwnerID, GroupID: t.GroupID}
 	rotated, err := authz.RotateOwnedAccessToken(ctx, opts, t.ID, t.TokenHash, optional.None[timeutil.TimeStamp](), bot.ID)
 	writeRotated(ctx, rotated, err)

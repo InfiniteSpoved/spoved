@@ -62,6 +62,16 @@ func TestOwnedAccessTokenRevokeWhenLocked(t *testing.T) {
 		live := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeRead, "read:repository")
 		MakeRequest(t, NewRequest(t, "POST", fmt.Sprintf("/api/v1/orgs/org3/tokens/%d/rotate", live.ID)).AddTokenAuth(owner), http.StatusForbidden)
 		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/settings/keys/tokens/rotate", map[string]string{"id": fmt.Sprint(live.ID)}), http.StatusForbidden)
+
+		// a token rotating itself is a write too
+		for _, tok := range []*auth_model.AccessToken{
+			newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeRead, "read:repository"),
+			newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, 3, 0, perm_model.AccessModeRead, "read:repository"),
+		} {
+			_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE access_token SET self_rotate = ? WHERE id = ?", true, tok.ID)
+			require.NoError(t, err)
+			MakeRequest(t, NewRequest(t, "POST", "/api/v1/tokens/self/rotate").AddTokenAuth(tok.Token), http.StatusForbidden)
+		}
 	})
 
 	t.Run("read-only maintenance", func(t *testing.T) {
