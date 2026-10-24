@@ -141,3 +141,34 @@ type PullApprovalRule struct {
 	// Approvers are the logins of the users whose approvals count; empty for "Default"
 	Approvers []string `json:"approvers"`
 }
+
+// PullRequestStack is the stack of a pull request: the open pull requests of the repository based on each other's
+// head branch, from the bottom one, whose base branch is the stack's, depth-first
+type PullRequestStack struct {
+	// BaseBranch is the base branch of the bottom pull request
+	BaseBranch string `json:"base_branch"`
+	// Truncated is true when the stack has more pull requests than are listed
+	Truncated    bool                  `json:"truncated"`
+	PullRequests []*StackedPullRequest `json:"pull_requests"`
+}
+
+// StackedPullRequest is a pull request of a stack
+type StackedPullRequest struct {
+	Number     int64  `json:"number"`
+	Title      string `json:"title"`
+	HTMLURL    string `json:"html_url"`
+	HeadBranch string `json:"head_branch"`
+	BaseBranch string `json:"base_branch"`
+	// ParentNumber is the number of the pull request this one is based on, 0 for the bottom one
+	ParentNumber int64 `json:"parent_number"`
+	Depth        int   `json:"depth"`
+	// Current is true for the pull request the stack was requested for
+	Current bool `json:"current"`
+	// Draft is true for a work-in-progress title
+	Draft bool `json:"draft"`
+	// ReviewState is "approved", "changes_requested" or "pending", from the official reviews
+	// enum: approved,changes_requested,pending
+	ReviewState string `json:"review_state"`
+	// CheckState is the combined commit status of the head commit, empty without any
+	CheckState CommitStatusState `json:"check_state"`
+}

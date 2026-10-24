@@ -17,6 +17,7 @@ import (
 	"forgejo.org/modules/util"
 
 	"code.forgejo.org/xorm/xorm"
+	"xorm.io/builder"
 )
 
 // PullRequestsOptions holds the options for PRs
@@ -161,6 +162,28 @@ func GetUnmergedPullRequestsByBaseInfo(ctx context.Context, repoID int64, branch
 			repoID, branch, false, false).
 		OrderBy("issue.updated_unix DESC").
 		Join("INNER", "issue", "issue.id=pull_request.issue_id").
+		Find(&prs)
+}
+
+// GetUnmergedPullRequestsByHeadBranch returns the open pull requests into the repository whose head branch is branch.
+// A head branch of a fork or of an AGit pull request is no branch of the repository: the caller tells them apart.
+func GetUnmergedPullRequestsByHeadBranch(ctx context.Context, repoID int64, branch string) (PullRequestList, error) {
+	prs := make(PullRequestList, 0, 2)
+	return prs, db.GetEngine(ctx).
+		Join("INNER", "issue", "issue.id = pull_request.issue_id").
+		Where(builder.Eq{"pull_request.base_repo_id": repoID, "pull_request.head_branch": branch, "pull_request.has_merged": false, "issue.is_closed": false}).
+		Find(&prs)
+}
+
+// GetUnmergedPullRequestsByBranches returns the open pull requests into the repository whose base or head branch is
+// one of branches. A head branch of a fork or of an AGit pull request is no branch of the repository: the caller
+// tells them apart.
+func GetUnmergedPullRequestsByBranches(ctx context.Context, repoID int64, branches []string) (PullRequestList, error) {
+	prs := make(PullRequestList, 0, len(branches))
+	return prs, db.GetEngine(ctx).
+		Join("INNER", "issue", "issue.id = pull_request.issue_id").
+		Where(builder.Eq{"pull_request.base_repo_id": repoID, "pull_request.has_merged": false, "issue.is_closed": false}).
+		And(builder.In("pull_request.base_branch", branches).Or(builder.In("pull_request.head_branch", branches))).
 		Find(&prs)
 }
 

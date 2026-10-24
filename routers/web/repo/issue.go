@@ -341,6 +341,13 @@ func issues(ctx *context.Context, milestoneID, projectID int64, isPullOption opt
 		return
 	}
 
+	if isPullOption.ValueOrZeroValue() {
+		if ctx.Data["StackMarks"], err = issues_model.FindStackMarks(ctx, issues); err != nil {
+			ctx.ServerError("FindStackMarks", err)
+			return
+		}
+	}
+
 	ctx.Data["Issues"] = issues
 	ctx.Data["CommitLastStatus"] = lastStatus
 	ctx.Data["CommitStatuses"] = commitStatuses
@@ -2145,6 +2152,11 @@ func ViewIssue(ctx *context.Context) {
 		ctx.Data["DefaultDeleteBranchAfterMerge"] = deleteBranch.Mode >= repo_model.DeleteBranchDefaultOn
 		ctx.Data["DeleteBranchForced"] = deleteBranch.Mode == repo_model.DeleteBranchAlways
 		ctx.Data["DeleteBranchSetBy"] = branchworkflow.SetByText(ctx.Locale, deleteBranch)
+
+		prepareStack(ctx, pull, allowMerge)
+		if ctx.Written() {
+			return
+		}
 
 		if !pull.HasMerged {
 			_, targets, err := mergeforward.Targets(ctx, ctx.Repo.Repository, pull.BaseBranch)

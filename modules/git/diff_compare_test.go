@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -45,7 +46,7 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 			require.NoError(t, NewCommand(t.Context(), "add", "README").Run(&RunOpts{Dir: tmpDir}))
 			require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Changes to the README").Run(&RunOpts{Dir: tmpDir}))
 
-			changed, err := gitRepo.CheckIfDiffDiffers("main", "a-1", "a-2", nil)
+			changed, err := checkIfDiffDiffers(t, gitRepo, "main", "a-1", "a-2", nil)
 			require.NoError(t, err)
 			assert.True(t, changed)
 		})
@@ -64,7 +65,7 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 			require.NoError(t, NewCommand(t.Context(), "switch", "-c", "a-4").Run(&RunOpts{Dir: tmpDir}))
 			require.NoError(t, NewCommand(t.Context(), "commit", "--allow-empty", "-m", "No changes to the README").Run(&RunOpts{Dir: tmpDir}))
 
-			changed, err := gitRepo.CheckIfDiffDiffers("main", "a-3", "a-4", nil)
+			changed, err := checkIfDiffDiffers(t, gitRepo, "main", "a-3", "a-4", nil)
 			require.NoError(t, err)
 			assert.False(t, changed)
 		})
@@ -89,7 +90,7 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 			require.NoError(t, NewCommand(t.Context(), "add", "README").Run(&RunOpts{Dir: tmpDir}))
 			require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Changed to the README").Run(&RunOpts{Dir: tmpDir}))
 
-			changed, err := gitRepo.CheckIfDiffDiffers("main", "b-1", "b-2", nil)
+			changed, err := checkIfDiffDiffers(t, gitRepo, "main", "b-1", "b-2", nil)
 			require.NoError(t, err)
 			assert.True(t, changed)
 		})
@@ -107,7 +108,7 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 			require.NoError(t, NewCommand(t.Context(), "add", "README").Run(&RunOpts{Dir: tmpDir}))
 			require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Changed to the README").Run(&RunOpts{Dir: tmpDir}))
 
-			changed, err := gitRepo.CheckIfDiffDiffers("main", "b-3", "b-4", nil)
+			changed, err := checkIfDiffDiffers(t, gitRepo, "main", "b-3", "b-4", nil)
 			require.NoError(t, err)
 			assert.False(t, changed)
 		})
@@ -140,7 +141,7 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 			require.NoError(t, NewCommand(t.Context(), "add", "FUNFACT").Run(&RunOpts{Dir: tmpDir}))
 			require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Changes to the funfact").Run(&RunOpts{Dir: tmpDir}))
 
-			changed, err := gitRepo.CheckIfDiffDiffers("main-D", "c-1", "c-2", nil)
+			changed, err := checkIfDiffDiffers(t, gitRepo, "main-D", "c-1", "c-2", nil)
 			require.NoError(t, err)
 			assert.True(t, changed)
 		})
@@ -158,7 +159,7 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 			require.NoError(t, NewCommand(t.Context(), "add", "README").Run(&RunOpts{Dir: tmpDir}))
 			require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Changes to the README").Run(&RunOpts{Dir: tmpDir}))
 
-			changed, err := gitRepo.CheckIfDiffDiffers("main-D", "c-3", "c-4", nil)
+			changed, err := checkIfDiffDiffers(t, gitRepo, "main-D", "c-3", "c-4", nil)
 			require.NoError(t, err)
 			assert.False(t, changed)
 		})
@@ -193,7 +194,7 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 			require.NoError(t, NewCommand(t.Context(), "add", "FUNFACT").Run(&RunOpts{Dir: tmpDir}))
 			require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Changes to the funfact").Run(&RunOpts{Dir: tmpDir}))
 
-			changed, err := gitRepo.CheckIfDiffDiffers("main-D", "d-1", "d-2", nil)
+			changed, err := checkIfDiffDiffers(t, gitRepo, "main-D", "d-1", "d-2", nil)
 			require.NoError(t, err)
 			assert.True(t, changed)
 		})
@@ -213,7 +214,7 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 			require.NoError(t, NewCommand(t.Context(), "add", "README").Run(&RunOpts{Dir: tmpDir}))
 			require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Changes to the README").Run(&RunOpts{Dir: tmpDir}))
 
-			changed, err := gitRepo.CheckIfDiffDiffers("main-D", "d-3", "d-4", nil)
+			changed, err := checkIfDiffDiffers(t, gitRepo, "main-D", "d-3", "d-4", nil)
 			require.NoError(t, err)
 			assert.False(t, changed)
 		})
@@ -247,10 +248,11 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 		require.NoError(t, NewCommand(t.Context(), "switch", "-c", "e-2").Run(&RunOpts{Dir: tmpDir}))
 		require.NoError(t, NewCommand(t.Context(), "rebase", "main-D-2").Run(&RunOpts{Dir: tmpDir}))
 
-		// The diff changed, because it no longer shows the change made to `README`.
-		changed, err := gitRepo.CheckIfDiffDiffers("main-D-2", "e-1", "e-2", nil)
+		// The diff no longer shows the change made to `README`, but replaying B onto D gives exactly C: the pull request
+		// still makes the reviewed changes.
+		changed, err := checkIfDiffDiffers(t, gitRepo, "main-D-2", "e-1", "e-2", nil)
 		require.NoError(t, err)
-		assert.False(t, changed) // This should be true.
+		assert.False(t, changed)
 	})
 
 	t.Run("Directory", func(t *testing.T) {
@@ -275,7 +277,7 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 				require.NoError(t, NewCommand(t.Context(), "add", "docs/README").Run(&RunOpts{Dir: tmpDir}))
 				require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Changed to the README").Run(&RunOpts{Dir: tmpDir}))
 
-				changed, err := gitRepo.CheckIfDiffDiffers("main", "f-1", "f-2", nil)
+				changed, err := checkIfDiffDiffers(t, gitRepo, "main", "f-1", "f-2", nil)
 				require.NoError(t, err)
 				assert.True(t, changed)
 			})
@@ -295,7 +297,7 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 				require.NoError(t, NewCommand(t.Context(), "add", "docs/README").Run(&RunOpts{Dir: tmpDir}))
 				require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Changes to the README").Run(&RunOpts{Dir: tmpDir}))
 
-				changed, err := gitRepo.CheckIfDiffDiffers("main", "f-3", "f-4", nil)
+				changed, err := checkIfDiffDiffers(t, gitRepo, "main", "f-3", "f-4", nil)
 				require.NoError(t, err)
 				assert.False(t, changed)
 			})
@@ -316,7 +318,7 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 			require.NoError(t, NewCommand(t.Context(), "add", "documentation/README").Run(&RunOpts{Dir: tmpDir}))
 			require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Changes to the README").Run(&RunOpts{Dir: tmpDir}))
 
-			changed, err := gitRepo.CheckIfDiffDiffers("main", "f-5", "f-6", nil)
+			changed, err := checkIfDiffDiffers(t, gitRepo, "main", "f-5", "f-6", nil)
 			require.NoError(t, err)
 			assert.True(t, changed)
 		})
@@ -335,7 +337,7 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 			require.NoError(t, NewCommand(t.Context(), "add", "README").Run(&RunOpts{Dir: tmpDir}))
 			require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Changes to the README").Run(&RunOpts{Dir: tmpDir}))
 
-			changed, err := gitRepo.CheckIfDiffDiffers("main", "f-7", "f-8", nil)
+			changed, err := checkIfDiffDiffers(t, gitRepo, "main", "f-7", "f-8", nil)
 			require.NoError(t, err)
 			assert.True(t, changed)
 		})
@@ -373,9 +375,10 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 		require.NoError(t, NewCommand(t.Context(), "switch", "-c", "g-3", "g-1").Run(&RunOpts{Dir: tmpDir}))
 		require.NoError(t, NewCommand(t.Context(), "rebase", "g-2").Run(&RunOpts{Dir: tmpDir}))
 
-		changed, err := gitRepo.CheckIfDiffDiffers("g-2", "g-1", "g-3", nil)
+		// a clean rebase is the reviewed change replayed onto D
+		changed, err := checkIfDiffDiffers(t, gitRepo, "g-2", "g-1", "g-3", nil)
 		require.NoError(t, err)
-		assert.True(t, changed)
+		assert.False(t, changed)
 	})
 
 	t.Run("Rebasing change not shown", func(t *testing.T) {
@@ -413,9 +416,108 @@ func TestCheckIfDiffDiffers(t *testing.T) {
 		require.NoError(t, NewCommand(t.Context(), "switch", "-c", "h-3").Run(&RunOpts{Dir: tmpDir}))
 		require.NoError(t, NewCommand(t.Context(), "rebase", "h-2").Run(&RunOpts{Dir: tmpDir}))
 
-		changed, err := gitRepo.CheckIfDiffDiffers("h-2", "h-1", "h-3", nil)
+		changed, err := checkIfDiffDiffers(t, gitRepo, "h-2", "h-1", "h-3", nil)
 		require.NoError(t, err)
 
+		// h-3 is created from h-2, so the rebase does nothing: the pull request lost the change to the last line
+		assert.True(t, changed)
+	})
+
+	t.Run("Change the base branch also has", func(t *testing.T) {
+		//   B--C
+		//  /
+		// A--D
+		// D is the base reference and adds EXTRA, C adds the same EXTRA on top of B. The combined diff of C, B and D
+		// shows nothing, but the pull request now adds EXTRA, which goes in once D is reset to A.
+		require.NoError(t, NewCommand(t.Context(), "switch", "-c", "main-5", "main").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, NewCommand(t.Context(), "switch", "-c", "i-1", "main-5").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "REVIEWED"), []byte("ok"), 0o600))
+		require.NoError(t, NewCommand(t.Context(), "add", "REVIEWED").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Reviewed").Run(&RunOpts{Dir: tmpDir}))
+
+		require.NoError(t, NewCommand(t.Context(), "switch", "main-5").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "EXTRA"), []byte("not reviewed"), 0o600))
+		require.NoError(t, NewCommand(t.Context(), "add", "EXTRA").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Extra").Run(&RunOpts{Dir: tmpDir}))
+
+		require.NoError(t, NewCommand(t.Context(), "switch", "-c", "i-2", "i-1").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "EXTRA"), []byte("not reviewed"), 0o600))
+		require.NoError(t, NewCommand(t.Context(), "add", "EXTRA").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Extra").Run(&RunOpts{Dir: tmpDir}))
+
+		changed, err := checkIfDiffDiffers(t, gitRepo, "main-5", "i-1", "i-2", nil)
+		require.NoError(t, err)
+		assert.True(t, changed)
+
+		// merging the base branch into the head keeps the reviewed changes
+		require.NoError(t, NewCommand(t.Context(), "switch", "-c", "i-3", "i-1").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, NewCommand(t.Context(), "merge", "--no-edit", "main-5").Run(&RunOpts{Dir: tmpDir}))
+		changed, err = checkIfDiffDiffers(t, gitRepo, "main-5", "i-1", "i-3", nil)
+		require.NoError(t, err)
 		assert.False(t, changed)
 	})
+
+	t.Run("Line moved", func(t *testing.T) {
+		// the same added line in another place is a different change
+		require.NoError(t, NewCommand(t.Context(), "switch", "-c", "j-1", "main-3").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "REBASE"), append([]byte("return\n"), bytes.Repeat([]byte{'b', 'b', 'b', '\n'}, 100)...), 0o600))
+		require.NoError(t, NewCommand(t.Context(), "commit", "-am", "Return").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, NewCommand(t.Context(), "switch", "-c", "j-2", "main-3").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "REBASE"), append(bytes.Repeat([]byte{'b', 'b', 'b', '\n'}, 100), []byte("return\n")...), 0o600))
+		require.NoError(t, NewCommand(t.Context(), "commit", "-am", "Return").Run(&RunOpts{Dir: tmpDir}))
+
+		changed, err := checkIfDiffDiffers(t, gitRepo, "main-3", "j-1", "j-2", nil)
+		require.NoError(t, err)
+		assert.True(t, changed)
+	})
+
+	t.Run("Tree equal over a different merge base", func(t *testing.T) {
+		// A review of Y saw only EVIL's absence: its diff over M1 (which already has EVIL) adds OWN.
+		// Z has the same tree as Y, but its merge base M2 lacks EVIL, so Z's diff adds OWN and EVIL.
+		// Comparing the two heads alone reads "no change" because the trees are equal; comparing each
+		// head to its own merge base must report a change.
+		require.NoError(t, NewCommand(t.Context(), "switch", "--orphan", "k-A").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "BASE"), []byte("base"), 0o600))
+		require.NoError(t, NewCommand(t.Context(), "add", "BASE").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, NewCommand(t.Context(), "commit", "-m", "A").Run(&RunOpts{Dir: tmpDir})) // M2 = A
+
+		// M1 = A + EVIL (the merge base the review was made against)
+		require.NoError(t, NewCommand(t.Context(), "switch", "-c", "k-M1", "k-A").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "EVIL"), []byte("evil"), 0o600))
+		require.NoError(t, NewCommand(t.Context(), "add", "EVIL").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, NewCommand(t.Context(), "commit", "-m", "M1").Run(&RunOpts{Dir: tmpDir}))
+
+		// Y = M1 + OWN, reviewed over M1: its diff is only OWN
+		require.NoError(t, NewCommand(t.Context(), "switch", "-c", "k-Y", "k-M1").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "OWN"), []byte("own"), 0o600))
+		require.NoError(t, NewCommand(t.Context(), "add", "OWN").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Y").Run(&RunOpts{Dir: tmpDir}))
+
+		// Z = A + OWN + EVIL, same tree as Y but EVIL is now the pull request's own content
+		require.NoError(t, NewCommand(t.Context(), "switch", "-c", "k-Z", "k-A").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "OWN"), []byte("own"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "EVIL"), []byte("evil"), 0o600))
+		require.NoError(t, NewCommand(t.Context(), "add", "OWN", "EVIL").Run(&RunOpts{Dir: tmpDir}))
+		require.NoError(t, NewCommand(t.Context(), "commit", "-m", "Z").Run(&RunOpts{Dir: tmpDir}))
+
+		yTree, _, treeErr := NewCommand(t.Context(), "rev-parse").AddDynamicArguments("k-Y^{tree}", "k-Z^{tree}").RunStdString(&RunOpts{Dir: tmpDir})
+		require.NoError(t, treeErr)
+		f := strings.Fields(yTree)
+		require.Len(t, f, 2)
+		require.Equal(t, f[0], f[1], "Y and Z must have the same tree for this test to be meaningful")
+
+		changed, err := gitRepo.CheckIfDiffDiffers("k-M1", "k-Y", "k-A", "k-Z", nil)
+		require.NoError(t, err)
+		assert.True(t, changed)
+	})
+}
+
+// checkIfDiffDiffers compares the diffs of oldCommitID and newCommitID, each from its merge base with base.
+func checkIfDiffDiffers(t *testing.T, gitRepo *Repository, base, oldCommitID, newCommitID string, env []string) (bool, error) {
+	t.Helper()
+	oldMergeBase, err := gitRepo.GetMergeBaseSimple(base, oldCommitID)
+	require.NoError(t, err)
+	newMergeBase, err := gitRepo.GetMergeBaseSimple(base, newCommitID)
+	require.NoError(t, err)
+	return gitRepo.CheckIfDiffDiffers(oldMergeBase, oldCommitID, newMergeBase, newCommitID, env)
 }

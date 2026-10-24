@@ -127,6 +127,16 @@ func ValidateCodeCommentSuggestions(content string) error {
 	return nil
 }
 
+// reviewMergeBase returns the merge base a review of pr made now is made against, empty if it can't be told: a review
+// without one never comes back from stale by the head alone.
+func reviewMergeBase(ctx context.Context, pr *issues_model.PullRequest) string {
+	mergeBase, err := mergeBaseOf(ctx, pr)
+	if err != nil {
+		log.Warn("%-v merge base: %v", pr, err)
+	}
+	return mergeBase
+}
+
 // checkCanReview refuses users blocked by the owner of the repository. A block by the poster of the
 // pull request doesn't count: it must not keep a reviewer from requesting changes.
 func checkCanReview(ctx context.Context, doer *user_model.User, issue *issues_model.Issue) error {
@@ -205,12 +215,17 @@ func CreateCodeComment(ctx context.Context, doer *user_model.User, gitRepo *git.
 			return nil, err
 		}
 
+		if err := issue.LoadPullRequest(ctx); err != nil {
+			return nil, err
+		}
+		mergeBase := reviewMergeBase(ctx, issue.PullRequest)
 		if review, err = issues_model.CreateReview(ctx, issues_model.CreateReviewOptions{
-			Type:     issues_model.ReviewTypePending,
-			Reviewer: doer,
-			Issue:    issue,
-			Official: false,
-			CommitID: latestCommitID,
+			Type:      issues_model.ReviewTypePending,
+			Reviewer:  doer,
+			Issue:     issue,
+			Official:  false,
+			CommitID:  latestCommitID,
+			MergeBase: mergeBase,
 		}); err != nil {
 			return nil, err
 		}
@@ -441,14 +456,23 @@ func SubmitReview(ctx context.Context, doer *user_model.User, gitRepo *git.Repos
 				return nil, nil, err
 			}
 
-			stale, err = testPatchCtx.gitRepo.CheckIfDiffDiffers(testPatchCtx.baseRev, commitID, headCommitID, testPatchCtx.env)
+			// the reviewed commit's diff and the head's, each from its merge base with the base branch
+			reviewedMergeBase, err := testPatchCtx.gitRepo.GetMergeBaseSimple(testPatchCtx.baseRev, commitID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("GetMergeBaseSimple: %w", err)
+			}
+			headMergeBase, err := testPatchCtx.gitRepo.GetMergeBaseSimple(testPatchCtx.baseRev, headCommitID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("GetMergeBaseSimple: %w", err)
+			}
+			stale, err = testPatchCtx.gitRepo.CheckIfDiffDiffers(reviewedMergeBase, commitID, headMergeBase, headCommitID, testPatchCtx.env)
 			if err != nil {
 				return nil, nil, fmt.Errorf("CheckIfDiffDiffers: %w", err)
 			}
 		}
 	}
 
-	review, comm, err := issues_model.SubmitReview(ctx, doer, issue, reviewType, content, commitID, stale, attachmentUUIDs)
+	review, comm, err := issues_model.SubmitReview(ctx, doer, issue, reviewType, content, commitID, reviewMergeBase(ctx, pr), stale, attachmentUUIDs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -477,11 +501,17 @@ func SubmitReview(ctx context.Context, doer *user_model.User, gitRepo *git.Repos
 
 // DismissApprovalReviews dismiss all approval reviews because of new commits
 func DismissApprovalReviews(ctx context.Context, doer *user_model.User, pull *issues_model.PullRequest) error {
+	return dismissApprovalReviews(ctx, doer, pull, optional.None[bool]())
+}
+
+// dismissApprovalReviews dismisses the approval reviews of pull, only the stale ones if stale is set.
+func dismissApprovalReviews(ctx context.Context, doer *user_model.User, pull *issues_model.PullRequest, stale optional.Option[bool]) error {
 	reviews, err := issues_model.FindReviews(ctx, issues_model.FindReviewOptions{
 		ListOptions: db.ListOptionsAll,
 		IssueID:     pull.IssueID,
 		Types:       []issues_model.ReviewType{issues_model.ReviewTypeApprove},
 		Dismissed:   optional.Some(false),
+		Stale:       stale,
 	})
 	if err != nil {
 		return err

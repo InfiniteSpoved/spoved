@@ -97,6 +97,7 @@ type FindReviewOptions struct {
 	ReviewerID   int64
 	OfficialOnly bool
 	Dismissed    optional.Option[bool]
+	Stale        optional.Option[bool]
 }
 
 func (opts *FindReviewOptions) toCond() builder.Cond {
@@ -115,6 +116,9 @@ func (opts *FindReviewOptions) toCond() builder.Cond {
 	}
 	if has, value := opts.Dismissed.Get(); has {
 		cond = cond.And(builder.Eq{"dismissed": value})
+	}
+	if has, value := opts.Stale.Get(); has {
+		cond = cond.And(builder.Eq{"stale": value})
 	}
 	return cond
 }
