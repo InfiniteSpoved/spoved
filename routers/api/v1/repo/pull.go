@@ -1828,44 +1828,14 @@ func GetPullRequestStack(ctx *context.APIContext) {
 	}
 	res.BaseBranch, res.Truncated = stack.BaseBranch, stack.Truncated
 
-	issues := make(issues_model.IssueList, len(stack.Entries))
-	heads := make(map[int64]string, len(stack.Entries))
-	shas := make([]string, 0, len(stack.Entries))
-	for i, e := range stack.Entries {
-		e.PR.Issue.Repo = ctx.Repo().Repository
-		issues[i] = e.PR.Issue
-		if sha, err := ctx.Repo().GitRepo.GetRefCommitID(e.PR.GetGitRefName()); err == nil {
-			heads[e.PR.ID] = sha
-			shas = append(shas, sha)
-		}
-	}
-	approvals, err := issues.GetApprovalCounts(ctx)
+	statuses, err := pull_service.StackStatuses(ctx, ctx.Repo().Repository, ctx.Repo().GitRepo, stack)
 	if err != nil {
-		ctx.Error(http.StatusInternalServerError, "GetApprovalCounts", err)
-		return
-	}
-	statuses, err := git_model.GetLatestCommitStatusForRepoCommitIDs(ctx, ctx.Repo().Repository.ID, shas)
-	if err != nil {
-		ctx.Error(http.StatusInternalServerError, "GetLatestCommitStatusForRepoCommitIDs", err)
+		ctx.Error(http.StatusInternalServerError, "StackStatuses", err)
 		return
 	}
 
 	for _, e := range stack.Entries {
-		review := "pending"
-		for _, c := range approvals[e.PR.IssueID] {
-			if c.Type == issues_model.ReviewTypeReject {
-				review = "changes_requested"
-				break
-			} else if c.Type == issues_model.ReviewTypeApprove {
-				review = "approved"
-			}
-		}
-		var check api.CommitStatusState
-		if sha, ok := heads[e.PR.ID]; ok {
-			if s := git_model.CalcCommitStatus(statuses[sha]); s != nil {
-				check = s.State
-			}
-		}
+		status := statuses[e.PR.ID]
 		res.PullRequests = append(res.PullRequests, &api.StackedPullRequest{
 			Number:       e.PR.Index,
 			Title:        e.PR.Issue.Title,
@@ -1876,8 +1846,8 @@ func GetPullRequestStack(ctx *context.APIContext) {
 			Depth:        e.Depth,
 			Current:      e.PR.ID == pr.ID,
 			Draft:        e.PR.IsWorkInProgress(ctx),
-			ReviewState:  review,
-			CheckState:   check,
+			ReviewState:  status.Review,
+			CheckState:   status.Check,
 		})
 	}
 	ctx.JSON(http.StatusOK, res)

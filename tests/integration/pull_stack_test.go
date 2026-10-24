@@ -82,6 +82,12 @@ func newPullStack(t *testing.T, user *user_model.User, collaborators map[*user_m
 		Files:         forgery.MapFS{"README.md": forgery.MapFile("stack")},
 		Collaborators: collaborators,
 	})
+	return repo, addPullStack(t, user, repo)
+}
+
+// addPullStack creates the stack main <- a <- b <- c in repo, each branch adding its own file.
+func addPullStack(t *testing.T, user *user_model.User, repo *repo_model.Repository) []*issues_model.PullRequest {
+	t.Helper()
 	prs := make([]*issues_model.PullRequest, 0, 3)
 	base := "main"
 	for _, head := range []string{"a", "b", "c"} {
@@ -89,7 +95,7 @@ func newPullStack(t *testing.T, user *user_model.User, collaborators map[*user_m
 		prs = append(prs, stackPull(t, user, repo, base, head))
 		base = head
 	}
-	return repo, prs
+	return prs
 }
 
 func stackHeads(t *testing.T, repo *repo_model.Repository, prs ...*issues_model.PullRequest) []pull_service.StackHead {

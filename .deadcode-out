@@ -10,7 +10,6 @@ forgejo.org/cmd/forgejo
 	ContextSetStdin
 
 forgejo.org/models
-	IsErrSHANotFound
 	IsErrMergeDivergingFastForwardOnly
 
 forgejo.org/models/auth

@@ -702,6 +702,12 @@ func buildIssueOverview(ctx *context.Context, unitType unit.Type) {
 		return
 	}
 	ctx.Data["Issues"] = issues
+	if unitType == unit.TypePullRequests {
+		if ctx.Data["StackMarks"], err = issues_model.FindStackMarks(ctx, issues); err != nil {
+			ctx.ServerError("FindStackMarks", err)
+			return
+		}
+	}
 
 	approvalCounts, err := issues.GetApprovalCounts(ctx)
 	if err != nil {

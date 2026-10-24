@@ -489,6 +489,7 @@
 				{{template "repo/issue/view_content/pull_merge_instruction" dict "PullRequest" .Issue.PullRequest "ShowMergeInstructions" .ShowMergeInstructions "AutodetectManualMerge" .AutodetectManualMerge "DefaultMergeMessage" .DefaultMergeMessage "DefaultMergeBody" .DefaultMergeBody "IsPullFilesConflicted" .IsPullFilesConflicted}}
 			{{end}}
 		</div>
+		{{if and .Stack .Stack.Parent (not .Issue.IsClosed) (not .Issue.PullRequest.HasMerged)}}{{template "repo/issue/view_content/stack_merge" .}}{{end}}
 	</div>
 </div>
 {{end}}

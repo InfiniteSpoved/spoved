@@ -94,6 +94,14 @@
 							</div>
 						</div>
 					{{end}}
+					{{if and .IsPull $.StackMarks}}
+						{{$mark := index $.StackMarks .PullRequest.ID}}
+						{{if $mark.ParentIndex}}
+							<a class="pull-stack-mark muted" href="{{.Repo.Link}}/pulls/{{$mark.ParentIndex}}">{{ctx.Locale.Tr "repo.pulls.stack.stacked_on_mark" $mark.ParentIndex}}</a>
+						{{else if $mark.Bottom}}
+							<span class="pull-stack-mark">{{ctx.Locale.Tr "repo.pulls.stack.bottom_mark"}}</span>
+						{{end}}
+					{{end}}
 					{{if and .Milestone (ne $.listType "milestone")}}
 						<a class="milestone flex-text-inline tw-max-w-[300px]" {{if $.RepoLink}}href="{{$.RepoLink}}/milestone/{{.Milestone.ID}}"{{else}}href="{{.Repo.Link}}/milestone/{{.Milestone.ID}}"{{end}}>
 							{{svg "octicon-milestone" 14}}

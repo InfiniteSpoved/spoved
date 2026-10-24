@@ -2838,5 +2838,62 @@
 	"repo.ide.branch_moved": "%s has new commits since the Web IDE opened. Commit to a new branch instead.",
 	"repo.ide.commit_failed": "The commit failed.",
 	"repo.ide.loading": "Loading the Web IDE…",
-	"repo.ide.noscript": "The Web IDE needs JavaScript."
+	"repo.ide.noscript": "The Web IDE needs JavaScript.",
+	"repo.pulls.stack.title": {
+		"one": "%d pull request into %s",
+		"other": "%d pull requests into %s"
+	},
+	"repo.pulls.stack.heading": "Stack",
+	"repo.pulls.stack.this": "(this pull request)",
+	"repo.pulls.stack.truncated": "Showing %d pull requests; the stack has more.",
+	"repo.pulls.stack.chain_too_long": "Merge stack merges at most %d pull requests at a time.",
+	"repo.pulls.stack.review.approved": "Approved",
+	"repo.pulls.stack.review.changes_requested": "Changes requested",
+	"repo.pulls.stack.review.pending": "Review pending",
+	"repo.pulls.stack.check.success": "Checks passed",
+	"repo.pulls.stack.check.pending": "Checks running",
+	"repo.pulls.stack.check.failure": "Checks failed",
+	"repo.pulls.stack.check.error": "Checks failed",
+	"repo.pulls.stack.check.warning": "Checks passed with warnings",
+	"repo.pulls.stack.check.none": "No checks",
+	"repo.pulls.stack.stacked_on": "This pull request is stacked on %s: <strong>Merge</strong> would merge it into %s, not %s.",
+	"repo.pulls.stack.merge_button": {
+		"one": "Merge stack (%d pull request) into %s",
+		"other": "Merge stack (%d pull requests) into %s"
+	},
+	"repo.pulls.stack.blocked_checks": "%s can't be merged yet (checks failed).",
+	"repo.pulls.stack.blocked_review": "%s can't be merged yet (changes requested).",
+	"repo.pulls.stack.confirm_title": {
+		"one": "Merge %d pull request into %s?",
+		"other": "Merge %d pull requests into %s?"
+	},
+	"repo.pulls.stack.confirm_text": "They are merged one at a time, in this order. Each is moved onto %s first and checked again; the first one that can't merge stops the rest.",
+	"repo.pulls.stack.confirm_children": "The pull requests stacked on top of this one stay open and move onto %s.",
+	"repo.pulls.stack.merge_style": "Merge style",
+	"repo.pulls.stack.delete_branches": {
+		"one": "Delete the merged branch",
+		"other": "Delete the %d merged branches"
+	},
+	"repo.pulls.stack.confirm_button": {
+		"one": "Merge %d pull request",
+		"other": "Merge %d pull requests"
+	},
+	"repo.pulls.stack.merged": {
+		"one": "Merged %d pull request into %s.",
+		"other": "Merged %d pull requests into %s."
+	},
+	"repo.pulls.stack.merged_partial": {
+		"one": "Merged %d of %d pull request, then stopped at #%d: %s",
+		"other": "Merged %d of %d pull requests, then stopped at #%d: %s"
+	},
+	"repo.pulls.stack.nothing_merged": "Nothing was merged: %s",
+	"repo.pulls.stack.cant_merge": "#%d can't be merged: %s",
+	"repo.pulls.stack.changed": "the stack changed since you opened this page.",
+	"repo.pulls.stack.head_changed": "the stack changed since you opened this page (#%d got new commits). Review it and try again.",
+	"repo.pulls.stack.too_long": "the stack is too long to merge at once.",
+	"repo.pulls.stack.base_is_head": "the target branch is the head branch of a pull request of the stack.",
+	"repo.pulls.stack.already_exists": "a pull request from its branch to the target branch already exists.",
+	"repo.pulls.stack.branch_kept": "#%d: %s",
+	"repo.pulls.stack.stacked_on_mark": "Stacked on #%d",
+	"repo.pulls.stack.bottom_mark": "Bottom of a stack"
 }

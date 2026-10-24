@@ -55,11 +55,6 @@ type Stack struct {
 	Entries    []*StackEntry
 }
 
-// canBeParent reports whether the head branch of pr is a branch of its base repository.
-func canBeParent(pr *issues_model.PullRequest) bool {
-	return pr.Flow == issues_model.PullRequestFlowGithub && pr.HeadRepoID == pr.BaseRepoID
-}
-
 // GetStack returns the stack of the open pull request pr: its ancestors from the bottom up, pr and its descendants
 // depth-first by index. A parent is the only open pull request of the repository whose head branch is the base branch
 // of its child; a parent that is ambiguous ends the chain. The stack has no entries when pr has no parent and no
@@ -83,7 +78,7 @@ func GetStack(ctx context.Context, pr *issues_model.PullRequest) (*Stack, error)
 		var parent *issues_model.PullRequest
 		n := 0
 		for _, q := range prs {
-			if canBeParent(q) && q.HeadBranch == cur.BaseBranch {
+			if q.CanBeStackParent() && q.HeadBranch == cur.BaseBranch {
 				parent = q
 				n++
 			}
@@ -106,7 +101,7 @@ func GetStack(ctx context.Context, pr *issues_model.PullRequest) (*Stack, error)
 		parents := map[string]*issues_model.PullRequest{}
 		heads := make([]string, 0, len(level))
 		for _, p := range level {
-			if canBeParent(p) {
+			if p.CanBeStackParent() {
 				parents[p.HeadBranch] = p
 				heads = append(heads, p.HeadBranch)
 			}
@@ -120,7 +115,7 @@ func GetStack(ctx context.Context, pr *issues_model.PullRequest) (*Stack, error)
 		}
 		owners := map[string]int{} // open pull requests with this head branch
 		for _, q := range prs {
-			if canBeParent(q) {
+			if q.CanBeStackParent() {
 				owners[q.HeadBranch]++
 			}
 		}
