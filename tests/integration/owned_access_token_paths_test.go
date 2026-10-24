@@ -17,6 +17,7 @@ import (
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
+	"forgejo.org/models/organization"
 	perm_model "forgejo.org/models/perm"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
@@ -30,6 +31,7 @@ import (
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/services/mailer"
+	org_service "forgejo.org/services/org"
 	repo_service "forgejo.org/services/repository"
 	"forgejo.org/tests"
 
@@ -845,4 +847,56 @@ func TestOwnedAccessTokenRotateRefusedForStoredScope(t *testing.T) {
 
 	assert.Equal(t, hash, unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: tok.ID}).TokenHash, "nothing was rotated")
 	assert.Empty(t, auditSince(t, since), "and nothing recorded")
+}
+
+// Deleting what a token belongs to deletes the token, and nothing else's.
+func TestOwnedAccessTokenDeletedWithOwner(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	sys := audit_model.WithSystem(db.DefaultContext, "test")
+	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	use := func(path, token string) int {
+		return MakeRequest(t, NewRequest(t, "GET", path).AddTokenAuth(token), NoExpectedStatus).Code
+	}
+
+	t.Run("repository", func(t *testing.T) {
+		repo, err := repo_service.CreateRepository(db.DefaultContext, user2, user2, repo_service.CreateRepoOptions{Name: "token-owner", Readme: "Default", AutoInit: true, DefaultBranch: "main"})
+		require.NoError(t, err)
+		tok := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, repo.ID, 0, perm_model.AccessModeRead, "read:repository")
+		other := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, 1, 0, perm_model.AccessModeRead, "read:repository")
+		assert.Equal(t, http.StatusOK, use("/api/v1/repos/user2/token-owner", tok.Token))
+		require.NoError(t, repo_service.DeleteRepositoryPermanently(sys, user2, repo, false))
+		unittest.AssertNotExistsBean(t, &auth_model.AccessToken{ID: tok.ID})
+		unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: other.ID})
+		assert.Equal(t, http.StatusUnauthorized, use("/api/v1/repos/user2/repo1", tok.Token))
+	})
+
+	t.Run("project", func(t *testing.T) {
+		org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+		group, err := repo_model.CreateRepoGroup(sys, org3, "token-owner-project", "")
+		require.NoError(t, err)
+		keep, err := repo_model.CreateRepoGroup(sys, org3, "token-keeper-project", "")
+		require.NoError(t, err)
+		tok := newOwnedAccessToken(t, auth_model.AccessTokenOwnerProject, 3, group.ID, perm_model.AccessModeRead, "read:repository")
+		kept := newOwnedAccessToken(t, auth_model.AccessTokenOwnerProject, 3, keep.ID, perm_model.AccessModeRead, "read:repository")
+		orgTok := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeRead, "read:repository")
+		require.NoError(t, repo_service.DeleteRepoGroup(sys, org3, group))
+		unittest.AssertNotExistsBean(t, &auth_model.AccessToken{ID: tok.ID})
+		unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: kept.ID})
+		unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: orgTok.ID})
+	})
+
+	t.Run("organization", func(t *testing.T) {
+		org := &organization.Organization{Name: "token-owner-org"}
+		require.NoError(t, organization.CreateOrganization(db.DefaultContext, org, user2))
+		group, err := repo_model.CreateRepoGroup(sys, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: org.ID}), "p", "")
+		require.NoError(t, err)
+		orgTok := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, org.ID, 0, perm_model.AccessModeRead, "read:repository")
+		projectTok := newOwnedAccessToken(t, auth_model.AccessTokenOwnerProject, org.ID, group.ID, perm_model.AccessModeRead, "read:repository")
+		other := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeRead, "read:repository")
+		require.NoError(t, org_service.DeleteOrganization(sys, org, true))
+		unittest.AssertNotExistsBean(t, &auth_model.AccessToken{ID: orgTok.ID})
+		unittest.AssertNotExistsBean(t, &auth_model.AccessToken{ID: projectTok.ID})
+		unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: other.ID})
+		assert.Equal(t, http.StatusUnauthorized, use("/api/v1/repos/org3/repo3", orgTok.Token))
+	})
 }
