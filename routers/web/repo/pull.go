@@ -1450,6 +1450,53 @@ func UpdatePullRequest(ctx *context.Context) {
 	ctx.Redirect(issue.Link())
 }
 
+// mergeCheckMessage returns the message for an error of pull_service.CheckPullMergeable, a string or template.HTML for
+// ctx.JSONError. It is false for any other error.
+func mergeCheckMessage(ctx *context.Context, issue *issues_model.Issue, err error) (any, bool) {
+	switch {
+	case errors.Is(err, pull_service.ErrIsClosed):
+		if issue.IsPull {
+			return ctx.Tr("repo.pulls.is_closed"), true
+		}
+		return ctx.Tr("repo.issues.closed_title"), true
+	case errors.Is(err, pull_service.ErrUserNotAllowedToMerge):
+		return ctx.Tr("repo.pulls.update_not_allowed"), true
+	case errors.Is(err, pull_service.ErrHasMerged):
+		return ctx.Tr("repo.pulls.has_merged"), true
+	case errors.Is(err, pull_service.ErrIsWorkInProgress):
+		return ctx.Tr("repo.pulls.no_merge_wip"), true
+	case git_model.IsErrPRTitleRule(err):
+		message, _ := issue_service.PRTitleRuleMessage(ctx.Locale, err)
+		return message, true
+	case errors.Is(err, pull_service.ErrNotMergeableState):
+		return ctx.Tr("repo.pulls.no_merge_not_ready"), true
+	case models.IsErrDisallowedToMerge(err):
+		return ctx.Tr("repo.pulls.no_merge_not_ready"), true
+	case asymkey_service.IsErrWontSign(err):
+		return err.Error(), true // has no translation ...
+	case errors.Is(err, pull_service.ErrDependenciesLeft):
+		return ctx.Tr("repo.issues.dependency.pr_close_blocked"), true
+	}
+	return nil, false
+}
+
+// branchKeptMessage returns why the head branch of a merged pull request was not deleted, false for any other error.
+func branchKeptMessage(ctx *context.Context, err error) (template.HTML, bool) {
+	switch {
+	case errors.Is(err, repo_service.ErrBranchIsDefault):
+		return ctx.Tr("repo.pulls.delete_after_merge.head_branch.is_default"), true
+	case errors.Is(err, git_model.ErrBranchIsProtected):
+		return ctx.Tr("repo.pulls.delete_after_merge.head_branch.is_protected"), true
+	case errors.Is(err, util.ErrPermissionDenied):
+		return ctx.Tr("repo.pulls.delete_after_merge.head_branch.insufficient_branch"), true
+	case errors.Is(err, repo_service.ErrBranchInUse):
+		return ctx.Tr("repo.pulls.delete_after_merge.head_branch.in_use"), true
+	case errors.Is(err, repo_service.ErrBranchHasNewCommits):
+		return ctx.Tr("repo.pulls.delete_after_merge.head_branch.has_new_commits"), true
+	}
+	return "", false
+}
+
 // MergePullRequest response for merging pull request
 func MergePullRequest(ctx *context.Context) {
 	form := web.GetForm(ctx).(*forms.MergePullRequestForm)
@@ -1692,18 +1739,9 @@ func MergePullRequest(ctx *context.Context) {
 			if !form.DeleteBranchAfterMerge {
 				flash = ctx.Flash.Info // deletion was forced by the setting: a kept branch is not an error
 			}
-			switch {
-			case errors.Is(err, repo_service.ErrBranchIsDefault):
-				flash(ctx.Tr("repo.pulls.delete_after_merge.head_branch.is_default"))
-			case errors.Is(err, git_model.ErrBranchIsProtected):
-				flash(ctx.Tr("repo.pulls.delete_after_merge.head_branch.is_protected"))
-			case errors.Is(err, util.ErrPermissionDenied):
-				flash(ctx.Tr("repo.pulls.delete_after_merge.head_branch.insufficient_branch"))
-			case errors.Is(err, repo_service.ErrBranchInUse):
-				flash(ctx.Tr("repo.pulls.delete_after_merge.head_branch.in_use"))
-			case errors.Is(err, repo_service.ErrBranchHasNewCommits):
-				flash(ctx.Tr("repo.pulls.delete_after_merge.head_branch.has_new_commits"))
-			default:
+			if message, ok := branchKeptMessage(ctx, err); ok {
+				flash(message)
+			} else {
 				ctx.ServerError("DeleteBranchAfterMerge", err)
 				return
 			}
@@ -1761,31 +1799,9 @@ func MergeQueue(ctx *context.Context) {
 
 // mergeCheckError answers a refused CheckPullMergeable
 func mergeCheckError(ctx *context.Context, issue *issues_model.Issue, err error) {
-	switch {
-	case errors.Is(err, pull_service.ErrIsClosed):
-		if issue.IsPull {
-			ctx.JSONError(ctx.Tr("repo.pulls.is_closed"))
-		} else {
-			ctx.JSONError(ctx.Tr("repo.issues.closed_title"))
-		}
-	case errors.Is(err, pull_service.ErrUserNotAllowedToMerge):
-		ctx.JSONError(ctx.Tr("repo.pulls.update_not_allowed"))
-	case errors.Is(err, pull_service.ErrHasMerged):
-		ctx.JSONError(ctx.Tr("repo.pulls.has_merged"))
-	case errors.Is(err, pull_service.ErrIsWorkInProgress):
-		ctx.JSONError(ctx.Tr("repo.pulls.no_merge_wip"))
-	case git_model.IsErrPRTitleRule(err):
-		message, _ := issue_service.PRTitleRuleMessage(ctx.Locale, err)
+	if message, ok := mergeCheckMessage(ctx, issue, err); ok {
 		ctx.JSONError(message)
-	case errors.Is(err, pull_service.ErrNotMergeableState):
-		ctx.JSONError(ctx.Tr("repo.pulls.no_merge_not_ready"))
-	case models.IsErrDisallowedToMerge(err):
-		ctx.JSONError(ctx.Tr("repo.pulls.no_merge_not_ready"))
-	case asymkey_service.IsErrWontSign(err):
-		ctx.JSONError(err.Error()) // has no translation ...
-	case errors.Is(err, pull_service.ErrDependenciesLeft):
-		ctx.JSONError(ctx.Tr("repo.issues.dependency.pr_close_blocked"))
-	default:
+	} else {
 		ctx.ServerError("WebCheck", err)
 	}
 }

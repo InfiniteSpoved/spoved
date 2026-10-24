@@ -74,6 +74,7 @@
 @import "./repo/list-header.css";
 @import "./repo/linebutton.css";
 @import "./repo/wiki.css";
+@import "./repo/pull-stack.css";
 @import "./repo/header.css";
 
 @import "./editor/fileeditor.css";

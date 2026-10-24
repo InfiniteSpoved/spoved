@@ -564,6 +564,14 @@ type MergePullRequestForm struct {
 	GiveUpAfter string `json:"give_up_after,omitempty"`
 }
 
+// MergeStackForm is the form of the "Merge stack" dialog.
+type MergeStackForm struct {
+	Do string `binding:"Required;In(merge,rebase,rebase-merge,squash,fast-forward-only)"`
+	// "<index>:<head commit>" of each pull request, from the bottom of the stack to the one merged from, as the page showed them
+	Heads                  []string `form:"head"`
+	DeleteBranchAfterMerge bool
+}
+
 // SkipsMergeForward reports whether the merge is not to be merged forward.
 func (f *MergePullRequestForm) SkipsMergeForward() bool {
 	return f.SkipMergeForward || f.MergeForward != nil && !*f.MergeForward

@@ -28,6 +28,7 @@ import (
 	"forgejo.org/modules/graceful"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/optional"
 	"forgejo.org/modules/process"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/sync"
@@ -173,12 +174,14 @@ func NewPullRequest(ctx context.Context, repo *repo_model.Repository, issue *iss
 
 // ChangeTargetBranch changes the target branch of this pull request, as the given user.
 func ChangeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, targetBranch string) error {
-	return changeTargetBranch(ctx, pr, doer, targetBranch, true)
+	return changeTargetBranch(ctx, pr, doer, targetBranch, true, nil)
 }
 
 // changeTargetBranch does the work of ChangeTargetBranch. The system retarget after a branch is deleted
-// or merged must not be refused by the title rule, so it passes checkTitleRule false.
-func changeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, targetBranch string, checkTitleRule bool) (err error) {
+// or merged must not be refused by the title rule, so it passes checkTitleRule false. mergedParent is the pull request
+// of a stack that was based on and has been merged: when pr was made against its head commit, the reviews of pr stay
+// fresh although its merge base moves to a commit they never saw.
+func changeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, targetBranch string, checkTitleRule bool, mergedParent *issues_model.PullRequest) (err error) {
 	defer pullWorkingPool.Lock(fmt.Sprint(pr.ID))()
 
 	// Current target branch is already the same
@@ -245,6 +248,7 @@ func changeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer 
 
 	// Set new target branch
 	oldBranch := pr.BaseBranch
+	oldMergeBase := pr.MergeBase
 	pr.BaseBranch = targetBranch
 
 	// Refresh patch
@@ -266,8 +270,30 @@ func changeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer 
 	pr.CommitsAhead = divergence.Ahead
 	pr.CommitsBehind = divergence.Behind
 
-	if err := pr.UpdateColsIfNotMerged(ctx, "merge_base", "status", "conflicted_files", "changed_protected_files", "base_branch", "commits_ahead", "commits_behind"); err != nil {
+	// a review counts only if its reviewer is an official reviewer for the new base branch
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		if err := pr.UpdateColsIfNotMerged(ctx, "merge_base", "status", "conflicted_files", "changed_protected_files", "base_branch", "commits_ahead", "commits_behind"); err != nil {
+			return err
+		}
+		return issues_model.DowngradeOfficialReviews(ctx, pr)
+	}); err != nil {
 		return err
+	}
+
+	if mergedParent != nil && isMergedParentHead(ctx, pr, mergedParent, oldMergeBase) {
+		if err := issues_model.MoveReviewsMergeBase(ctx, pr.IssueID, pr.MergeBase); err != nil {
+			log.Error("MoveReviewsMergeBase: %v", err)
+		}
+	} else {
+		staleReviewsOnMergeBaseChange(ctx, doer, pr, oldMergeBase, pr.MergeBase)
+	}
+	// the approvals that were stale before count on the new base as its rules say
+	if dismiss, err := baseDismissesStale(ctx, pr); err != nil {
+		log.Error("%-v baseDismissesStale: %v", pr, err)
+	} else if dismiss {
+		if err := dismissApprovalReviews(ctx, doer, pr, optional.Some(true)); err != nil {
+			log.Error("DismissApprovalReviews: %v", err)
+		}
 	}
 
 	// Create comment
@@ -367,7 +393,7 @@ func TestPullRequest(ctx context.Context, doer *user_model.User, repoID, olderTh
 		}
 		if err == nil {
 			for _, pr := range prs {
-				ValidatePullRequest(ctx, pr, newCommitID, oldCommitID, doer)
+				ValidatePullRequest(ctx, pr, newCommitID, doer)
 
 				pr.HeadCommitID = newCommitID
 				notify_service.PullRequestSynchronized(ctx, doer, pr)
@@ -397,6 +423,12 @@ func TestPullRequest(ctx context.Context, doer *user_model.User, repoID, olderTh
 			if err != nil {
 				log.Error("UpdateCommitDivergence: %v", err)
 			}
+		}
+		// the queued check stores the new merge base: compare it here, while the old one is still known
+		if mergeBase, err := mergeBaseOf(ctx, pr); err != nil {
+			log.Error("%-v merge base: %v", pr, err)
+		} else {
+			staleReviewsOnMergeBaseChange(ctx, doer, pr, pr.MergeBase, mergeBase)
 		}
 		AddToTaskQueue(ctx, pr)
 	}
@@ -446,10 +478,130 @@ func CancelAutoMergeOnPush(ctx context.Context, pr *issues_model.PullRequest, pu
 	log.Info("Auto merge of %-v cancelled by a push", pr)
 }
 
-// Mark old reviews as stale if diff to mergebase has changed.
-// Dismiss all approval reviews if protected branch rule item enabled.
-// Update commit divergence.
-func ValidatePullRequest(ctx context.Context, pr *issues_model.PullRequest, newCommitID, oldCommitID string, doer *user_model.User) {
+// mergeBaseOf returns the merge base of the base branch and the head of pr in its base repository.
+func mergeBaseOf(ctx context.Context, pr *issues_model.PullRequest) (string, error) {
+	if err := pr.LoadBaseRepo(ctx); err != nil {
+		return "", err
+	}
+	gitRepo, err := gitrepo.OpenRepository(ctx, pr.BaseRepo)
+	if err != nil {
+		return "", err
+	}
+	defer gitRepo.Close()
+	return gitRepo.GetMergeBaseSimple(git.BranchPrefix+pr.BaseBranch, pr.GetGitRefName())
+}
+
+// baseDismissesStale reports whether a rule of the base branch of pr dismisses stale approvals.
+func baseDismissesStale(ctx context.Context, pr *issues_model.PullRequest) (bool, error) {
+	rules, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(rules, func(pb *git_model.ProtectedBranch) bool { return pb.DismissStaleApprovals }), nil
+}
+
+// refreshReviewStaleness recomputes the stale flag of every non-dismissed review of pr from the diff that review
+// actually saw (review.MergeBase..review.CommitID): a review is fresh only if replaying that change onto the pull
+// request's current merge base yields the current head's tree, so a new head whose tree happens to equal an earlier
+// head's can no longer pass as unchanged. It then dismisses the stale approvals a rule of the base branch drops.
+// gitRepo must be open on the base repository, mergeBase is the pull request's current merge base with the base
+// branch and head its current head commit. A review without a recorded merge base, a conflict or any git error
+// leaves the review stale (fail closed).
+func refreshReviewStaleness(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest, gitRepo *git.Repository, mergeBase, head string, env []string) {
+	reviews, err := issues_model.FindReviews(ctx, issues_model.FindReviewOptions{
+		ListOptions: db.ListOptionsAll,
+		IssueID:     pr.IssueID,
+		Dismissed:   optional.Some(false),
+	})
+	if err != nil {
+		log.Error("FindReviews: %v", err)
+		return
+	}
+	for _, review := range reviews {
+		stale := true
+		if mergeBase != "" && review.MergeBase != "" {
+			if changed, err := gitRepo.CheckIfDiffDiffers(review.MergeBase, review.CommitID, mergeBase, head, env); err != nil {
+				log.Error("CheckIfDiffDiffers: %v", err)
+			} else {
+				stale = changed
+			}
+		}
+		if review.Stale != stale {
+			if err := issues_model.UpdateReviewStale(ctx, review.ID, stale); err != nil {
+				log.Error("UpdateReviewStale: %v", err)
+			}
+		}
+	}
+
+	if dismiss, err := baseDismissesStale(ctx, pr); err != nil {
+		log.Error("GetMatchedProtectedBranchRules: %v", err)
+	} else if dismiss {
+		if err := dismissApprovalReviews(ctx, doer, pr, optional.Some(true)); err != nil {
+			log.Error("DismissApprovalReviews: %v", err)
+		}
+	}
+}
+
+// isMergedParentHead reports whether commit is the head commit of parent, a pull request that has been merged.
+func isMergedParentHead(ctx context.Context, pr, parent *issues_model.PullRequest, commit string) bool {
+	if commit == "" {
+		return false
+	}
+	parent, err := issues_model.GetPullRequestByID(ctx, parent.ID)
+	if err != nil || !parent.HasMerged {
+		return false
+	}
+	if err := pr.LoadBaseRepo(ctx); err != nil {
+		return false
+	}
+	gitRepo, err := gitrepo.OpenRepository(ctx, pr.BaseRepo)
+	if err != nil {
+		return false
+	}
+	defer gitRepo.Close()
+	head, err := gitRepo.GetRefCommitID(parent.GetGitRefName())
+	return err == nil && head == commit
+}
+
+// staleReviewsOnMergeBaseChange refreshes the reviews of pr when its merge base changed from oldMergeBase to
+// newMergeBase while its head did not move. A merge base that only moved forward, or onto a tree-identical commit,
+// takes commits out of the pull request and adds none, so its head is still exactly what every review approved and
+// they stay fresh; their recorded merge base is left untouched so a later head move is still judged against the diff
+// they actually saw. Otherwise (e.g. a retarget onto a base that lacks the pull request's commits) each review's
+// freshness is decided from the diff it saw (see refreshReviewStaleness).
+func staleReviewsOnMergeBaseChange(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest, oldMergeBase, newMergeBase string) {
+	if oldMergeBase == "" || newMergeBase == "" || oldMergeBase == newMergeBase {
+		return
+	}
+	if err := pr.LoadBaseRepo(ctx); err != nil {
+		log.Error("%-v LoadBaseRepo: %v", pr, err)
+		return
+	}
+	// a merge base that only moved forward takes commits out of the pull request and adds none
+	if _, _, err := git.NewCommand(ctx, "merge-base", "--is-ancestor").AddDynamicArguments(oldMergeBase, newMergeBase).RunStdString(&git.RunOpts{Dir: pr.BaseRepo.RepoPath()}); err == nil {
+		return
+	}
+	trees, _, treesErr := git.NewCommand(ctx, "rev-parse").AddDynamicArguments(oldMergeBase+"^{tree}", newMergeBase+"^{tree}").RunStdString(&git.RunOpts{Dir: pr.BaseRepo.RepoPath()})
+	if f := strings.Fields(trees); treesErr == nil && len(f) == 2 && f[0] == f[1] {
+		return
+	}
+	gitRepo, err := git.OpenRepository(ctx, pr.BaseRepo.RepoPath())
+	if err != nil {
+		log.Error("%-v OpenRepository: %v", pr, err)
+		return
+	}
+	defer gitRepo.Close()
+	head, err := gitRepo.GetRefCommitID(pr.GetGitRefName())
+	if err != nil {
+		log.Error("%-v GetRefCommitID: %v", pr, err)
+		return
+	}
+	refreshReviewStaleness(ctx, doer, pr, gitRepo, newMergeBase, head, nil)
+}
+
+// ValidatePullRequest refreshes the staleness of the reviews of pr after its head moved to newCommitID, deciding each
+// review from the diff it saw (see refreshReviewStaleness), and updates the commit divergence.
+func ValidatePullRequest(ctx context.Context, pr *issues_model.PullRequest, newCommitID string, doer *user_model.User) {
 	objectFormat := git.ObjectFormatFromName(pr.BaseRepo.ObjectFormatName)
 	if newCommitID == "" || newCommitID == objectFormat.EmptyObjectID().String() {
 		return
@@ -462,28 +614,11 @@ func ValidatePullRequest(ctx context.Context, pr *issues_model.PullRequest, newC
 		return
 	}
 
-	changed, err := testPatchCtx.gitRepo.CheckIfDiffDiffers(testPatchCtx.baseRev, oldCommitID, newCommitID, testPatchCtx.env)
+	mergeBase, err := testPatchCtx.gitRepo.GetMergeBaseSimple(testPatchCtx.baseRev, newCommitID)
 	if err != nil {
-		log.Error("CheckIfDiffDiffers: %v", err)
+		log.Error("%-v merge base: %v", pr, err)
 	}
-	if changed {
-		if err := issues_model.MarkReviewsAsStale(ctx, pr.IssueID); err != nil {
-			log.Error("MarkReviewsAsStale: %v", err)
-		}
-
-		rules, err := git_model.GetMatchedProtectedBranchRules(ctx, pr.BaseRepoID, pr.BaseBranch)
-		if err != nil {
-			log.Error("GetMatchedProtectedBranchRules: %v", err)
-		}
-		if slices.ContainsFunc(rules, func(pb *git_model.ProtectedBranch) bool { return pb.DismissStaleApprovals }) {
-			if err := DismissApprovalReviews(ctx, doer, pr); err != nil {
-				log.Error("DismissApprovalReviews: %v", err)
-			}
-		}
-	}
-	if err := issues_model.MarkReviewsAsNotStale(ctx, pr.IssueID, newCommitID); err != nil {
-		log.Error("MarkReviewsAsNotStale: %v", err)
-	}
+	refreshReviewStaleness(ctx, doer, pr, testPatchCtx.gitRepo, mergeBase, newCommitID, testPatchCtx.env)
 
 	divergence, err := git.GetDivergingCommits(ctx, testPatchCtx.gitRepo.Path, testPatchCtx.baseRev, testPatchCtx.headRev, testPatchCtx.env)
 	if err != nil {
@@ -582,6 +717,12 @@ func RetargetChildrenOnMerge(ctx context.Context, doer *user_model.User, pr *iss
 // RetargetBranchPulls change target branch for all pull requests whose base branch is the branch
 // Both branch and targetBranch must be in the same repo (for security reasons)
 func RetargetBranchPulls(ctx context.Context, doer *user_model.User, repoID int64, branch, targetBranch string) error {
+	return retargetBranchPulls(ctx, doer, repoID, branch, targetBranch, nil)
+}
+
+// retargetBranchPulls is RetargetBranchPulls for the pull requests based on the head branch of mergedParent, see
+// changeTargetBranch.
+func retargetBranchPulls(ctx context.Context, doer *user_model.User, repoID int64, branch, targetBranch string, mergedParent *issues_model.PullRequest) error {
 	prs, err := issues_model.GetUnmergedPullRequestsByBaseInfo(ctx, repoID, branch)
 	if err != nil {
 		return err
@@ -595,7 +736,7 @@ func RetargetBranchPulls(ctx context.Context, doer *user_model.User, repoID int6
 	for _, pr := range prs {
 		if err = pr.Issue.LoadRepo(ctx); err != nil {
 			errs = append(errs, err)
-		} else if err = changeTargetBranch(ctx, pr, doer, targetBranch, false); err != nil &&
+		} else if err = changeTargetBranch(ctx, pr, doer, targetBranch, false, mergedParent); err != nil &&
 			!issues_model.IsErrIssueIsClosed(err) && !models.IsErrPullRequestHasMerged(err) &&
 			!issues_model.IsErrPullRequestAlreadyExists(err) {
 			errs = append(errs, err)

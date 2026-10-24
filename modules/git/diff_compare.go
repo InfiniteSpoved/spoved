@@ -3,54 +3,36 @@
 package git
 
 import (
-	"bytes"
-	"context"
-	"fmt"
-	"os"
-
-	"forgejo.org/modules/log"
-	"forgejo.org/modules/util"
+	"strings"
 )
 
-// CheckIfDiffDiffers returns if the diff of the newCommitID and
-// oldCommitID with the merge base of the base branch has changed.
-//
-// Informally it checks if the following two diffs are exactly the same in their
-// contents, thus ignoring different commit IDs, headers and messages:
-// 1. git diff --merge-base baseReference newCommitID
-// 2. git diff --merge-base baseReference oldCommitID
-func (repo *Repository) CheckIfDiffDiffers(base, oldCommitID, newCommitID string, env []string) (hasChanged bool, err error) {
-	cmd := NewCommand(repo.Ctx, "diff", "--name-only", "-z").AddDynamicArguments(newCommitID, oldCommitID, base)
-	stdoutReader, stdoutWriter, err := os.Pipe()
-	if err != nil {
-		return false, fmt.Errorf("unable to open pipe for to run diff: %w", err)
-	}
-
-	stderr := new(bytes.Buffer)
-	if err := cmd.Run(&RunOpts{
-		Dir:    repo.Path,
-		Stdout: stdoutWriter,
-		Stderr: stderr,
-		PipelineFunc: func(ctx context.Context, cancel context.CancelFunc) error {
-			_ = stdoutWriter.Close()
-			defer func() {
-				_ = stdoutReader.Close()
-			}()
-			return util.IsEmptyReader(stdoutReader)
-		},
-	}); err != nil {
-		if err == util.ErrNotEmpty {
+// CheckIfDiffDiffers returns if the changes of newCommitID over newMergeBase differ from the changes of oldCommitID
+// over oldMergeBase, the diff a reviewer saw. They are the same only if replaying the old changes onto newMergeBase
+// (a 3-way merge with oldMergeBase as its base, as a rebase or merging the base branch does) gives exactly the tree
+// of newCommitID, so commit IDs, messages and line numbers don't matter but every byte of the result does. A
+// conflict counts as changed, and so does a Git without merge-tree --merge-base (before 2.40) when the merge bases
+// differ.
+func (repo *Repository) CheckIfDiffDiffers(oldMergeBase, oldCommitID, newMergeBase, newCommitID string, env []string) (hasChanged bool, err error) {
+	want := oldCommitID + "^{tree}"
+	if oldMergeBase != newMergeBase {
+		if CheckGitVersionAtLeast("2.40") != nil {
 			return true, nil
 		}
-		err = ConcatenateError(err, stderr.String())
-
-		log.Error("Unable to run git diff on %s %s %s in %q: Error: %v",
-			newCommitID, oldCommitID, base,
-			repo.Path,
-			err)
-
-		return false, fmt.Errorf("Unable to run git diff --name-only -z %s %s %s: %w", newCommitID, oldCommitID, base, err)
+		stdout, _, err := NewCommand(repo.Ctx, "merge-tree", "--write-tree", "--no-messages").
+			AddOptionFormat("--merge-base=%s", oldMergeBase).
+			AddDynamicArguments(newMergeBase, oldCommitID).
+			RunStdString(&RunOpts{Dir: repo.Path, Env: env})
+		if IsErrorExitCode(err, 1) {
+			return true, nil // conflict
+		} else if err != nil {
+			return true, err
+		}
+		want, _, _ = strings.Cut(stdout, "\n")
 	}
-
-	return false, nil
+	stdout, _, err := NewCommand(repo.Ctx, "rev-parse").AddDynamicArguments(want, newCommitID+"^{tree}").RunStdString(&RunOpts{Dir: repo.Path, Env: env})
+	if err != nil {
+		return true, err
+	}
+	trees := strings.Fields(stdout)
+	return len(trees) != 2 || trees[0] != trees[1], nil
 }

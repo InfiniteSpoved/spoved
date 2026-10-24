@@ -21472,6 +21472,50 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/pulls/{index}/stack": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Get the stack of a pull request, the open pull requests based on each other's head branch",
+        "operationId": "repoGetPullRequestStack",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "index of the pull request",
+            "name": "index",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/PullRequestStack"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/pulls/{index}/tasks": {
       "get": {
         "produces": [
@@ -39159,6 +39203,30 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "PullRequestStack": {
+      "description": "PullRequestStack is the stack of a pull request: the open pull requests of the repository based on each other's\nhead branch, from the bottom one, whose base branch is the stack's, depth-first",
+      "type": "object",
+      "properties": {
+        "base_branch": {
+          "description": "BaseBranch is the base branch of the bottom pull request",
+          "type": "string",
+          "x-go-name": "BaseBranch"
+        },
+        "pull_requests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StackedPullRequest"
+          },
+          "x-go-name": "PullRequests"
+        },
+        "truncated": {
+          "description": "Truncated is true when the stack has more pull requests than are listed",
+          "type": "boolean",
+          "x-go-name": "Truncated"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "PullReview": {
       "description": "PullReview represents a pull request review",
       "type": "object",
@@ -40629,6 +40697,68 @@
             "type": "string"
           },
           "x-go-name": "Groups"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "StackedPullRequest": {
+      "description": "StackedPullRequest is a pull request of a stack",
+      "type": "object",
+      "properties": {
+        "base_branch": {
+          "type": "string",
+          "x-go-name": "BaseBranch"
+        },
+        "check_state": {
+          "$ref": "#/definitions/CommitStatusState"
+        },
+        "current": {
+          "description": "Current is true for the pull request the stack was requested for",
+          "type": "boolean",
+          "x-go-name": "Current"
+        },
+        "depth": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Depth"
+        },
+        "draft": {
+          "description": "Draft is true for a work-in-progress title",
+          "type": "boolean",
+          "x-go-name": "Draft"
+        },
+        "head_branch": {
+          "type": "string",
+          "x-go-name": "HeadBranch"
+        },
+        "html_url": {
+          "type": "string",
+          "x-go-name": "HTMLURL"
+        },
+        "number": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Number"
+        },
+        "parent_number": {
+          "description": "ParentNumber is the number of the pull request this one is based on, 0 for the bottom one",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ParentNumber"
+        },
+        "review_state": {
+          "description": "ReviewState is \"approved\", \"changes_requested\" or \"pending\", from the official reviews",
+          "type": "string",
+          "enum": [
+            "approved",
+            "changes_requested",
+            "pending"
+          ],
+          "x-go-name": "ReviewState"
+        },
+        "title": {
+          "type": "string",
+          "x-go-name": "Title"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -43127,6 +43257,12 @@
         "items": {
           "$ref": "#/definitions/PullRequest"
         }
+      }
+    },
+    "PullRequestStack": {
+      "description": "PullRequestStack",
+      "schema": {
+        "$ref": "#/definitions/PullRequestStack"
       }
     },
     "PullReview": {

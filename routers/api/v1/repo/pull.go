@@ -1792,6 +1792,83 @@ func GetPullRequestApprovals(ctx *context.APIContext) {
 	ctx.JSON(http.StatusOK, rules)
 }
 
+// GetPullRequestStack gets the stack of a pull request
+func GetPullRequestStack(ctx *context.APIContext) {
+	// swagger:operation GET /repos/{owner}/{repo}/pulls/{index}/stack repository repoGetPullRequestStack
+	// ---
+	// summary: Get the stack of a pull request, the open pull requests based on each other's head branch
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: index
+	//   in: path
+	//   description: index of the pull request
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// responses:
+	//   "200":
+	//     "$ref": "#/responses/PullRequestStack"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+
+	pr, err := issues_model.GetPullRequestByIndex(ctx, ctx.Repo().Repository.ID, ctx.ParamsInt64(":index"))
+	if err != nil {
+		if issues_model.IsErrPullRequestNotExist(err) {
+			ctx.NotFound()
+		} else {
+			ctx.Error(http.StatusInternalServerError, "GetPullRequestByIndex", err)
+		}
+		return
+	}
+
+	stack, err := pull_service.GetStack(ctx, pr)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "GetStack", err)
+		return
+	}
+	res := &api.PullRequestStack{PullRequests: []*api.StackedPullRequest{}}
+	if len(stack.Entries) == 0 {
+		ctx.JSON(http.StatusOK, res)
+		return
+	}
+	res.BaseBranch, res.Truncated = stack.BaseBranch, stack.Truncated
+
+	statuses, err := pull_service.StackStatuses(ctx, ctx.Repo().Repository, ctx.Repo().GitRepo, stack)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "StackStatuses", err)
+		return
+	}
+
+	for _, e := range stack.Entries {
+		status := statuses[e.PR.ID]
+		res.PullRequests = append(res.PullRequests, &api.StackedPullRequest{
+			Number:       e.PR.Index,
+			Title:        e.PR.Issue.Title,
+			HTMLURL:      e.PR.Issue.HTMLURL(),
+			HeadBranch:   e.PR.HeadBranch,
+			BaseBranch:   e.PR.BaseBranch,
+			ParentNumber: e.ParentIndex,
+			Depth:        e.Depth,
+			Current:      e.PR.ID == pr.ID,
+			Draft:        e.PR.IsWorkInProgress(ctx),
+			ReviewState:  status.Review,
+			CheckState:   status.Check,
+		})
+	}
+	ctx.JSON(http.StatusOK, res)
+}
+
 // GetPullRequestFiles gets all changed files associated with a given PR
 func GetPullRequestFiles(ctx *context.APIContext) {
 	// swagger:operation GET /repos/{owner}/{repo}/pulls/{index}/files repository repoGetPullRequestFiles

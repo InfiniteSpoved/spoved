@@ -133,8 +133,10 @@ type Review struct {
 	IssueID          int64  `xorm:"index"`
 	Content          string `xorm:"TEXT"`
 	// Official is a review made by an assigned approver (counts towards approval)
-	Official  bool   `xorm:"NOT NULL DEFAULT false"`
-	CommitID  string `xorm:"VARCHAR(64)"`
+	Official bool   `xorm:"NOT NULL DEFAULT false"`
+	CommitID string `xorm:"VARCHAR(64)"`
+	// MergeBase is the merge base of the pull request when the review was made; empty on a review made before it was recorded
+	MergeBase string `xorm:"VARCHAR(64)"`
 	Stale     bool   `xorm:"NOT NULL DEFAULT false"`
 	Dismissed bool   `xorm:"NOT NULL DEFAULT false"`
 
@@ -252,6 +254,7 @@ type CreateReviewOptions struct {
 	ReviewerTeam *organization.Team
 	Official     bool
 	CommitID     string
+	MergeBase    string
 	Stale        bool
 }
 
@@ -456,6 +459,7 @@ func CreateReview(ctx context.Context, opts CreateReviewOptions) (*Review, error
 		Content:      opts.Content,
 		Official:     opts.Official,
 		CommitID:     opts.CommitID,
+		MergeBase:    opts.MergeBase,
 		Stale:        opts.Stale,
 	}
 
@@ -530,8 +534,9 @@ func IsContentEmptyErr(err error) bool {
 	return ok
 }
 
-// SubmitReview creates a review out of the existing pending review or creates a new one if no pending review exist
-func SubmitReview(ctx context.Context, doer *user_model.User, issue *Issue, reviewType ReviewType, content, commitID string, stale bool, attachmentUUIDs []string) (*Review, *Comment, error) {
+// SubmitReview creates a review out of the existing pending review or creates a new one if no pending review exist.
+// mergeBase is the merge base of the pull request the review is made against, empty if unknown.
+func SubmitReview(ctx context.Context, doer *user_model.User, issue *Issue, reviewType ReviewType, content, commitID, mergeBase string, stale bool, attachmentUUIDs []string) (*Review, *Comment, error) {
 	ctx, committer, err := db.TxContext(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -563,13 +568,14 @@ func SubmitReview(ctx context.Context, doer *user_model.User, issue *Issue, revi
 
 		// No current review. Create a new one!
 		if review, err = CreateReview(ctx, CreateReviewOptions{
-			Type:     reviewType,
-			Issue:    issue,
-			Reviewer: doer,
-			Content:  content,
-			Official: official,
-			CommitID: commitID,
-			Stale:    stale,
+			Type:      reviewType,
+			Issue:     issue,
+			Reviewer:  doer,
+			Content:   content,
+			Official:  official,
+			CommitID:  commitID,
+			MergeBase: mergeBase,
+			Stale:     stale,
 		}); err != nil {
 			return nil, nil, err
 		}
@@ -601,9 +607,10 @@ func SubmitReview(ctx context.Context, doer *user_model.User, issue *Issue, revi
 		review.Content = content
 		review.Type = reviewType
 		review.CommitID = commitID
+		review.MergeBase = mergeBase
 		review.Stale = stale
 
-		if _, err := sess.ID(review.ID).Cols("content, type, official, commit_id, stale").Update(review); err != nil {
+		if _, err := sess.ID(review.ID).Cols("content, type, official, commit_id, merge_base, stale").Update(review); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -689,16 +696,25 @@ func GetTeamReviewerByIssueIDAndTeamID(ctx context.Context, issueID, teamID int6
 	return review, err
 }
 
-// MarkReviewsAsStale marks existing reviews as stale
-func MarkReviewsAsStale(ctx context.Context, issueID int64) (err error) {
-	_, err = db.GetEngine(ctx).Exec("UPDATE `review` SET stale=? WHERE issue_id=?", true, issueID)
+// UpdateReviewStale sets the stale flag of the review with the given ID: its freshness is decided per review from the
+// diff it saw (see services/pull), not by one query over the issue.
+func UpdateReviewStale(ctx context.Context, reviewID int64, stale bool) (err error) {
+	_, err = db.GetEngine(ctx).Exec("UPDATE `review` SET stale=? WHERE id=?", stale, reviewID)
 
 	return err
 }
 
-// MarkReviewsAsNotStale marks existing reviews as not stale for a giving commit SHA
-func MarkReviewsAsNotStale(ctx context.Context, issueID int64, commitID string) (err error) {
-	_, err = db.GetEngine(ctx).Exec("UPDATE `review` SET stale=? WHERE issue_id=? AND commit_id=?", false, issueID, commitID)
+// MoveReviewsMergeBase records mergeBase as the merge base of the reviews of the issue that are not stale: the merge
+// base changed without changing what they saw.
+func MoveReviewsMergeBase(ctx context.Context, issueID int64, mergeBase string) (err error) {
+	_, err = db.GetEngine(ctx).Exec("UPDATE `review` SET merge_base=? WHERE issue_id=? AND stale=?", mergeBase, issueID, false)
+
+	return err
+}
+
+// DismissStaleApprovals dismisses the approvals of the issue that are stale, without a comment or notification.
+func DismissStaleApprovals(ctx context.Context, issueID int64) (err error) {
+	_, err = db.GetEngine(ctx).Exec("UPDATE `review` SET dismissed=? WHERE issue_id=? AND type=? AND stale=?", true, issueID, ReviewTypeApprove, true)
 
 	return err
 }
@@ -899,6 +915,46 @@ func restoreLatestOfficialReview(ctx context.Context, issueID, reviewerID int64)
 		}
 	}
 
+	return nil
+}
+
+// DowngradeOfficialReviews clears the official flag of the reviews of pr whose reviewer, or reviewer team, can't make
+// official reviews for its current base branch. It is called after the base branch changed and never sets the flag.
+func DowngradeOfficialReviews(ctx context.Context, pr *PullRequest) error {
+	if err := pr.LoadIssue(ctx); err != nil {
+		return err
+	}
+	pr.Issue.PullRequest = pr // the base branch the checks read
+
+	reviews := make([]*Review, 0, 4)
+	if err := db.GetEngine(ctx).Where("issue_id = ? AND official = ?", pr.IssueID, true).Find(&reviews); err != nil {
+		return err
+	}
+	for _, r := range reviews {
+		var official bool
+		var err error
+		if r.ReviewerTeamID != 0 {
+			if err = r.LoadReviewerTeam(ctx); organization.IsErrTeamNotExist(err) {
+				err = nil
+			} else if err == nil {
+				official, err = IsOfficialReviewerTeam(ctx, pr.Issue, r.ReviewerTeam)
+			}
+		} else if r.ReviewerID != 0 {
+			if err = r.LoadReviewer(ctx); err == nil {
+				official, err = IsOfficialReviewer(ctx, pr.Issue, r.Reviewer)
+			}
+		} else {
+			continue // a migrated review has no reviewer to check
+		}
+		if err != nil {
+			return err
+		}
+		if !official {
+			if _, err := db.Exec(ctx, "UPDATE `review` SET official=? WHERE id=?", false, r.ID); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 

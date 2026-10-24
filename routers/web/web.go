@@ -1988,6 +1988,7 @@ func registerRoutes(m *web.Route) {
 				}, reqSignIn, reqRepoCodeWriter)
 			})
 			m.Post("/merge", context.RepoMustNotBeArchived(), web.Bind(forms.MergePullRequestForm{}), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.MergePullRequest)
+			m.Post("/merge_stack", context.RepoMustNotBeArchived(), web.Bind(forms.MergeStackForm{}), context.EnforceQuotaWeb(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.MergeStack)
 			m.Post("/cancel_auto_merge", context.RepoMustNotBeArchived(), repo.CancelAutoMergePullRequest)
 			m.Post("/merge_queue/remove", context.RepoMustNotBeArchived(), repo.RemoveFromMergeQueue)
 			m.Post("/change_auto_merge_time", context.RepoMustNotBeArchived(), web.Bind(forms.ChangeAutoMergeTimeForm{}), repo.ChangeAutoMergeTimePullRequest)

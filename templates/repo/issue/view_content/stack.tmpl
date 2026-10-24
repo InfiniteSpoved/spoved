@@ -1,0 +1,27 @@
+<details class="pull-stack" open>
+	<summary>
+		{{svg "octicon-stack" 16}}
+		<strong>{{ctx.Locale.Tr "repo.pulls.stack.heading"}}</strong>
+		<span class="text grey">{{ctx.Locale.TrPluralString (len .Stack.Rows) "repo.pulls.stack.title" (len .Stack.Rows) (HTMLFormat "<code>%s</code>" .Stack.Base)}}</span>
+	</summary>
+	<ol class="pull-stack-list" role="list">
+		{{range $row := .Stack.Rows}}
+			<li class="pull-stack-row{{if $row.Indent}} is-branch{{end}}" {{if $row.Current}}aria-current="true"{{end}}>
+				<span class="pull-stack-title gt-ellipsis">
+					{{if $row.Current}}
+						<strong>#{{$row.Index}} {{$row.Title}}</strong> <span class="text grey">{{ctx.Locale.Tr "repo.pulls.stack.this"}}</span>
+					{{else}}
+						<a href="{{$row.Link}}">#{{$row.Index}} {{$row.Title}}</a>
+					{{end}}
+					{{if $row.AlsoOn}}<span class="text grey">· {{ctx.Locale.Tr "repo.pulls.stack.also_on" (HTMLFormat `<a href="%s">#%d</a>` $row.AlsoOn.Link $row.AlsoOn.Index)}}</span>{{end}}
+				</span>
+				{{if $row.Conflict}}<span class="pull-stack-state text red">{{svg "octicon-alert" 14}}{{ctx.Locale.Tr "repo.pulls.stack.conflict"}}</span>{{end}}
+				<span class="pull-stack-state text {{$row.Review.Class}}">{{svg $row.Review.Icon 14}}{{$row.Review.Text}}</span>
+				<span class="pull-stack-state text {{$row.Check.Class}}">{{svg $row.Check.Icon 14}}{{$row.Check.Text}}</span>
+			</li>
+		{{end}}
+	</ol>
+	{{if .Stack.Truncated}}
+		<div class="pull-stack-note text grey">{{ctx.Locale.Tr "repo.pulls.stack.truncated" (len .Stack.Rows)}}</div>
+	{{end}}
+</details>

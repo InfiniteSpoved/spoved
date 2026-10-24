@@ -8,6 +8,7 @@
 
 	{{$createdStr:= DateUtils.TimeSince .Issue.CreatedUnix}}
 	<div class="issue-content-left comment-list prevent-before-timeline">
+		{{if and .Issue.IsPull .Stack}}{{template "repo/issue/view_content/stack" .}}{{end}}
 		<div class="ui timeline">
 			<div id="{{.Issue.HashTag}}" class="timeline-item comment first">
 				{{if .Issue.OriginalAuthor}}

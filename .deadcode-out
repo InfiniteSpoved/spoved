@@ -10,7 +10,6 @@ forgejo.org/cmd/forgejo
 	ContextSetStdin
 
 forgejo.org/models
-	IsErrSHANotFound
 	IsErrMergeDivergingFastForwardOnly
 
 forgejo.org/models/auth
@@ -286,6 +285,9 @@ forgejo.org/services/context
 
 forgejo.org/services/notify
 	UnregisterNotifier
+
+forgejo.org/services/pull
+	DismissApprovalReviews
 
 forgejo.org/services/repository
 	IsErrForkAlreadyExist

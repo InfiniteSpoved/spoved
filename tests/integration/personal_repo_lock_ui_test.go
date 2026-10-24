@@ -38,6 +38,7 @@ var refusedWrites = map[string]*regexp.Regexp{
 	"wiki edit":      regexp.MustCompile(`[?&]action=_(new|edit)`),
 	"notes":          regexp.MustCompile(`/notes$`),
 	"merge":          regexp.MustCompile(`/pulls/\d+/merge$`),
+	"merge stack":    regexp.MustCompile(`/pulls/\d+/merge_stack$`),
 	"revert":         regexp.MustCompile(`/pulls/\d+/revert$`),
 	"update":         regexp.MustCompile(`/pulls/\d+/update`),
 	"suggestion":     regexp.MustCompile(`/apply_suggestion`),
