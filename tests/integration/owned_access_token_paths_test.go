@@ -6,6 +6,7 @@ package integration
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -715,4 +716,112 @@ func TestOwnedAccessTokenPreReceiveRevoked(t *testing.T) {
 		require.Error(t, extra.Error, ref)
 		assert.Contains(t, extra.UserMsg, "The access token is no longer valid.", ref)
 	}
+}
+
+// The create form of the Keys and tokens pages: the expiry policy, a package scope at the wrong level, a token that
+// rotates itself, and who may open the page.
+func TestOwnedAccessTokenWebForm(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	session := loginUser(t, "user2")
+	org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+	group, err := repo_model.CreateRepoGroup(audit_model.WithSystem(db.DefaultContext, "test"), org3, "tokens-form", "")
+	require.NoError(t, err)
+	pages := []struct {
+		name      string
+		link      string
+		ownerType auth_model.AccessTokenOwnerType
+		ownerID   int64
+		groupID   int64
+		extra     map[string]string
+	}{
+		{"repository", "/user2/repo1/settings/keys", auth_model.AccessTokenOwnerRepo, 1, 0, nil},
+		{"organization", "/org/org3/settings/keys", auth_model.AccessTokenOwnerOrg, 3, 0, map[string]string{"scope": "all"}},
+		{"project", "/org3/tokens-form/-/settings/keys", auth_model.AccessTokenOwnerProject, 3, group.ID, nil},
+	}
+	form := func(n string, extra map[string]string, kv ...string) map[string]string {
+		f := map[string]string{"token_name": n, "token_permission": "read", "token_scopes": "read:repository"}
+		maps.Copy(f, extra)
+		for i := 0; i < len(kv); i += 2 {
+			f[kv[i]] = kv[i+1]
+		}
+		return f
+	}
+	count := func(ownerType auth_model.AccessTokenOwnerType, ownerID, groupID int64) int64 {
+		n, err := db.GetEngine(db.DefaultContext).Where("owner_type = ? AND owner_id = ? AND group_id = ?", ownerType, ownerID, groupID).Count(new(auth_model.AccessToken))
+		require.NoError(t, err)
+		return n
+	}
+	day := func(d int) string { return time.Now().AddDate(0, 0, d).Format("2006-01-02") }
+
+	for _, p := range pages {
+		t.Run(p.name, func(t *testing.T) {
+			defer test.MockVariableValue(&setting.AccessTokenExpiry, setting.CredentialExpiryPolicy{Required: true, MaxLifetimeDays: 30})()
+			before := count(p.ownerType, p.ownerID, p.groupID)
+			refuse := func(f map[string]string) {
+				t.Helper()
+				resp := session.MakeRequest(t, NewRequestWithValues(t, "POST", p.link+"/tokens/new", f), http.StatusOK)
+				assert.Equal(t, 1, NewHTMLParser(t, resp.Body).Find("#access-token-error, #access-token-scopes-error").Length(), f["token_name"])
+			}
+			n := fmt.Sprintf("web-form-%d", tokenCounter.Add(1))
+			refuse(form(n, p.extra, "token_expires_at", ""))         // required
+			refuse(form(n, p.extra, "token_expires_at", day(-1)))    // past
+			refuse(form(n, p.extra, "token_expires_at", day(90)))    // over the maximum
+			refuse(form(n, p.extra, "token_expires_at", "tomorrow")) // not a date
+			if p.ownerType != auth_model.AccessTokenOwnerOrg {       // an organization token covering every repository may have it
+				refuse(form(n, p.extra, "token_expires_at", day(5), "token_scopes", "read:package"))
+			}
+			refuse(form(strings.Repeat("n", 300), p.extra, "token_expires_at", day(5)))
+			refuse(form(n, p.extra, "token_expires_at", day(5), "token_description", strings.Repeat("d", 300)))
+			assert.Equal(t, before, count(p.ownerType, p.ownerID, p.groupID), "nothing was created")
+
+			session.MakeRequest(t, NewRequestWithValues(t, "POST", p.link+"/tokens/new", form(n, p.extra, "token_expires_at", day(5), "token_self_rotate", "on", "token_description", " nightly ")), http.StatusSeeOther)
+			tok := unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{Name: n, OwnerType: p.ownerType, OwnerID: p.ownerID, GroupID: p.groupID})
+			assert.True(t, tok.SelfRotate)
+			assert.Equal(t, "nightly", tok.Description)
+			assert.InDelta(t, time.Now().AddDate(0, 0, 5).Unix(), int64(tok.ExpiresUnix), 2*24*3600, "the date, whatever the time zone")
+			assert.Equal(t, before+1, count(p.ownerType, p.ownerID, p.groupID))
+		})
+	}
+
+	t.Run("package scope on an organization token", func(t *testing.T) {
+		n := fmt.Sprintf("web-package-%d", tokenCounter.Add(1))
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/settings/keys/tokens/new", form(n, map[string]string{"scope": "all"}, "token_scopes", "read:package")), http.StatusSeeOther)
+		assert.Equal(t, auth_model.AccessTokenScope("read:package"), unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{Name: n, OwnerType: auth_model.AccessTokenOwnerOrg, OwnerID: 3}).Scope)
+		n = fmt.Sprintf("web-package-%d", tokenCounter.Add(1))
+		session.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/settings/keys/tokens/new", form(n, map[string]string{"scope": "selected", "repo_ids": "3"}, "token_scopes", "read:package")), http.StatusOK)
+		unittest.AssertNotExistsBean(t, &auth_model.AccessToken{Name: n, OwnerType: auth_model.AccessTokenOwnerOrg, OwnerID: 3})
+	})
+
+	t.Run("who may open the pages", func(t *testing.T) {
+		// a collaborator with write, a member who isn't an owner, a stranger and anonymous
+		for _, c := range []struct {
+			user, link string
+		}{
+			{"user4", "/user5/repo4/settings/keys"},
+			{"user4", "/org/org3/settings/keys"},
+			{"user4", "/org3/tokens-form/-/settings/keys"},
+			{"user8", "/org3/repo3/settings/keys"},
+		} {
+			s := loginUser(t, c.user)
+			s.MakeRequest(t, NewRequest(t, "GET", c.link), http.StatusNotFound)
+			before, err := db.GetEngine(db.DefaultContext).Count(new(auth_model.AccessToken))
+			require.NoError(t, err)
+			s.MakeRequest(t, NewRequestWithValues(t, "POST", c.link+"/tokens/new", form("denied", map[string]string{"scope": "all"})), http.StatusNotFound)
+			after, err := db.GetEngine(db.DefaultContext).Count(new(auth_model.AccessToken))
+			require.NoError(t, err)
+			assert.Equal(t, before, after, c.user+" "+c.link)
+		}
+		for _, link := range []string{"/user2/repo1/settings/keys", "/org/org3/settings/keys"} {
+			resp := MakeRequest(t, NewRequest(t, "GET", link), http.StatusSeeOther)
+			assert.Contains(t, resp.Header().Get("Location"), "/user/login")
+			MakeRequest(t, NewRequestWithValues(t, "POST", link+"/tokens/new", form("denied", map[string]string{"scope": "all"})), http.StatusSeeOther)
+		}
+		unittest.AssertNotExistsBean(t, &auth_model.AccessToken{Name: "denied"})
+
+		// a site admin manages the tokens of any repository
+		admin := loginUser(t, "user1")
+		n := fmt.Sprintf("web-admin-%d", tokenCounter.Add(1))
+		admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/repo3/settings/keys/tokens/new", form(n, nil)), http.StatusSeeOther)
+		assert.EqualValues(t, 1, unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{Name: n, OwnerType: auth_model.AccessTokenOwnerRepo, OwnerID: 3}).CreatorID)
+	})
 }
