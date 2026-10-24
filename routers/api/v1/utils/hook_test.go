@@ -128,6 +128,7 @@ func TestHookEventInclusion(t *testing.T) {
 			string(webhook_module.HookEventWorkflowJobSkipped),
 			string(webhook_module.HookEventWorkflowJobSuccess),
 			string(webhook_module.HookEventWorkflowJobWaiting),
+			string(webhook_module.HookEventMergeGroup),
 		},
 	}
 	hook, ok := addHook(ctx, &opts, 2, 0, 1)

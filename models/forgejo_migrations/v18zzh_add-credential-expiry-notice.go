@@ -16,7 +16,7 @@ func init() {
 	})
 }
 
-type v18zzgCredentialExpiryNotice struct {
+type v18zzhCredentialExpiryNotice struct {
 	ID           int64              `xorm:"pk autoincr"`
 	Kind         string             `xorm:"VARCHAR(20) NOT NULL UNIQUE(notice)"`
 	CredentialID int64              `xorm:"NOT NULL UNIQUE(notice)"`
@@ -25,10 +25,10 @@ type v18zzgCredentialExpiryNotice struct {
 	CreatedUnix  timeutil.TimeStamp `xorm:"created"`
 }
 
-func (v18zzgCredentialExpiryNotice) TableName() string {
+func (v18zzhCredentialExpiryNotice) TableName() string {
 	return "credential_expiry_notice"
 }
 
 func addCredentialExpiryNotice(x *xorm.Engine) error {
-	return x.Sync(new(v18zzgCredentialExpiryNotice))
+	return x.Sync(new(v18zzhCredentialExpiryNotice))
 }

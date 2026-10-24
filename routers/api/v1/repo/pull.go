@@ -44,6 +44,7 @@ import (
 	"forgejo.org/services/gitdiff"
 	issue_service "forgejo.org/services/issue"
 	"forgejo.org/services/mergeforward"
+	"forgejo.org/services/mergequeue"
 	notify_service "forgejo.org/services/notify"
 	pull_service "forgejo.org/services/pull"
 	repo_service "forgejo.org/services/repository"
@@ -1010,6 +1011,17 @@ func MergePullRequest(ctx *context.APIContext) {
 		return
 	}
 
+	// a branch with a merge queue merges only through it; a merge when checks succeed joins it when they do
+	queueRule, err := mergequeue.Rule(ctx, pr)
+	if err != nil {
+		ctx.InternalServerError(err)
+		return
+	}
+	if queueRule != nil && (!form.MergeWhenChecksSucceed || manuallyMerged) {
+		ctx.Error(http.StatusMethodNotAllowed, "Merge", "the base branch requires a merge queue: add the pull request to it with POST .../pulls/{index}/merge-queue")
+		return
+	}
+
 	// start with merging by checking
 	if err := pull_service.CheckPullMergeable(ctx, ctx.Doer(), &ctx.Repo().Permission, pr, mergeCheckType, form.ForceMerge, mergeStyle); err != nil {
 		if errors.Is(err, pull_service.ErrIsClosed) {
@@ -1097,6 +1109,10 @@ func MergePullRequest(ctx *context.APIContext) {
 			ctx.Status(http.StatusCreated)
 			return
 		}
+	}
+	if queueRule != nil {
+		addToMergeQueue(ctx, form, pr)
+		return
 	}
 
 	if err := pull_service.Merge(mergeCtx, pr, ctx.Doer(), ctx.Repo().GitRepo, repo_model.MergeStyle(form.Do), form.HeadCommitID, message, false); err != nil {

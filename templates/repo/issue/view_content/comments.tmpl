@@ -692,6 +692,30 @@
 					{{end}}
 				</span>
 			</div>
+		{{else if eq .Type 51 52}}
+			{{$info := .AutoMergeInfo}}
+			<div class="timeline-item event" id="{{.HashTag}}">
+				<span class="badge">{{if eq .Type 52}}{{svg "octicon-alert" 16}}{{else}}{{svg "octicon-git-merge-queue" 16}}{{end}}</span>
+				<span class="text grey muted-links">
+					{{if eq .Type 51}}
+						{{template "repo/issue/view_content/comments_authorlink" dict "ctxData" $ "comment" .}}
+						{{ctx.Locale.Tr "repo.pulls.merge_queue.added_comment" $createdStr}}
+					{{else if eq $info.Reason "removed"}}
+						{{template "repo/issue/view_content/comments_authorlink" dict "ctxData" $ "comment" .}}
+						{{ctx.Locale.Tr "repo.pulls.merge_queue.removed_comment" $createdStr}}
+					{{else}}{{/* the queue removed it: no person did */}}
+						{{ctx.Locale.Tr "repo.pulls.merge_queue.left_comment" $createdStr}}
+					{{end}}
+				</span>
+				{{if eq .Type 52}}
+					<div class="detail flex-text-block">
+						<span class="tw-text-text-light-2 muted-links">{{/* wraps on phones, unlike .text in an event detail */}}
+							{{template "repo/issue/view_content/merge_queue_reason" $info.Reason}}
+							{{if $info.SHA}}<a class="tw-font-mono" href="{{$.RepoLink}}/commit/{{PathEscape $info.SHA}}">{{ShortSha $info.SHA}}</a>{{end}}
+						</span>
+					</div>
+				{{end}}
+			</div>
 		{{else if eq .Type 34 35 45 46 47}}
 			{{$info := .AutoMergeInfo}}
 			<div class="timeline-item event" id="{{.HashTag}}">

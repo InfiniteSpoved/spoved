@@ -1135,6 +1135,7 @@ func Routes() *web.Route {
 
 				m.Get("/editorconfig/{filename}", context.ReferencesGitRepo(), context.RepoRefForAPI, reqRepoReader(unit.TypeCode), repo.GetEditorconfig)
 				m.Get("/search/code", reqRepoReader(unit.TypeCode), common.RateLimitAPIHeavy, repo.SearchCode)
+				m.Get("/merge-queue/*", reqRepoReader(unit.TypePullRequests), repo.ListMergeQueue)
 				m.Group("/pulls", func() {
 					m.Combo("").Get(repo.ListPullRequests).
 						Post(reqToken(), mustNotBeArchived(), bind(api.CreatePullRequestOption{}), repo.CreatePullRequest)
@@ -1150,6 +1151,9 @@ func Routes() *web.Route {
 						m.Combo("/merge").Get(repo.IsPullRequestMerged).
 							Post(reqToken(), mustNotBeArchived(), bind(forms.MergePullRequestForm{}), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.MergePullRequest).
 							Delete(reqToken(), mustNotBeArchived(), repo.CancelScheduledAutoMerge)
+						m.Combo("/merge-queue").
+							Post(reqToken(), mustNotBeArchived(), bind(forms.MergePullRequestForm{}), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.AddToMergeQueue).
+							Delete(reqToken(), mustNotBeArchived(), repo.RemoveFromMergeQueue)
 						m.Post("/revert", reqToken(), mustNotBeArchived(), reqRepoWriter(unit.TypeCode), context.EnforceQuotaAPI(quota_model.LimitSubjectSizeGitAll, context.QuotaTargetRepo), repo.RevertPullRequest)
 						m.Group("/tasks", func() {
 							m.Combo("").

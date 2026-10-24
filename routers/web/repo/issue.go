@@ -60,6 +60,7 @@ import (
 	"forgejo.org/services/forms"
 	issue_service "forgejo.org/services/issue"
 	"forgejo.org/services/mergeforward"
+	"forgejo.org/services/mergequeue"
 	pull_service "forgejo.org/services/pull"
 	repo_service "forgejo.org/services/repository"
 
@@ -2020,7 +2021,7 @@ func ViewIssue(ctx *context.Context) {
 				}
 				ctx.Data["IsBlockedByRejection"] = ctx.Data["IsBlockedByRejection"] == true || issues_model.MergeBlockedByRejectedReview(ctx, pb, pull)
 				ctx.Data["IsBlockedByOfficialReviewRequests"] = ctx.Data["IsBlockedByOfficialReviewRequests"] == true || issues_model.MergeBlockedByOfficialReviewRequests(ctx, pb, pull)
-				ctx.Data["IsBlockedByOutdatedBranch"] = ctx.Data["IsBlockedByOutdatedBranch"] == true || issues_model.MergeBlockedByOutdatedBranch(pb, pull)
+				ctx.Data["IsBlockedByOutdatedBranch"] = ctx.Data["IsBlockedByOutdatedBranch"] == true || issues_model.MergeBlockedByOutdatedBranch(pb, pull, git_model.MergeQueueRule(pbs) != nil)
 				if pb.BlockOnUnresolvedConversations && ctx.Data["IsBlockedByUnresolvedConversations"] != true {
 					unresolved, err := issues_model.FindUnresolvedConversations(ctx, pull.IssueID, pb.IgnoreOutdatedConversations)
 					if err != nil {
@@ -2191,6 +2192,32 @@ func ViewIssue(ctx *context.Context) {
 		if err != nil {
 			ctx.ServerError("GetScheduledMergeByPullID", err)
 			return
+		}
+		if !pull.HasMerged {
+			view, rule, err := mergequeue.View(ctx, ctx.Repo.Repository, pull.BaseBranch)
+			if err != nil {
+				ctx.ServerError("mergequeue.View", err)
+				return
+			}
+			if rule != nil {
+				ctx.Data["MergeQueueRule"] = rule
+				ctx.Data["MergeQueueConfig"] = rule.MergeQueueConfig()
+				ctx.Data["MergeQueueLength"] = len(view)
+				ctx.Data["MergeQueueLink"] = ctx.Repo.RepoLink + "/merge-queue/" + util.PathEscapeSegments(pull.BaseBranch)
+				ctx.Data["CanSkipMergeForward"] = false // the queue merges forward
+				for _, v := range view {
+					if v.PullID != pull.ID {
+						continue
+					}
+					ctx.Data["MergeQueueEntry"] = v
+					canRemove, err := mergequeue.MayRemove(ctx, ctx.Doer, ctx.Repo.Permission, pull, v.MergeQueueEntry)
+					if err != nil {
+						ctx.ServerError("mergequeue.MayRemove", err)
+						return
+					}
+					ctx.Data["CanRemoveFromMergeQueue"] = canRemove && !ctx.Repo.Repository.IsArchived
+				}
+			}
 		}
 		if ctx.IsSigned {
 			if ctx.Data["UserTimeZone"], err = user_model.GetUserTimeZone(ctx, ctx.Doer.ID); err != nil {

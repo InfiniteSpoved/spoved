@@ -14,7 +14,7 @@ func init() {
 	})
 }
 
-type v18zzfAccessToken struct {
+type v18zzgAccessToken struct {
 	ID          int64  `xorm:"pk autoincr"`
 	CreatorID   int64  `xorm:"NOT NULL DEFAULT 0"`
 	Description string `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"`
@@ -26,10 +26,10 @@ type v18zzfAccessToken struct {
 	LastUsedIP  string `xorm:"VARCHAR(45) NOT NULL DEFAULT ''"`
 }
 
-func (v18zzfAccessToken) TableName() string {
+func (v18zzgAccessToken) TableName() string {
 	return "access_token"
 }
 
 func addAccessTokenLifecycle(x *xorm.Engine) error {
-	return x.Sync(new(v18zzfAccessToken))
+	return x.Sync(new(v18zzgAccessToken))
 }

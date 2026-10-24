@@ -20,6 +20,7 @@ import (
 	"forgejo.org/modules/log"
 	api "forgejo.org/modules/structs"
 	shared_automerge "forgejo.org/services/shared/automerge"
+	shared_mergequeue "forgejo.org/services/shared/mergequeue"
 )
 
 func getCacheKey(repoID int64, branchName string) string {
@@ -115,6 +116,9 @@ func CreateCommitStatus(ctx context.Context, repo *repo_model.Repository, creato
 			log.Error("deleteCommitStatusCache[%d:%s] failed: %v", repo.ID, repo.DefaultBranch, err)
 		}
 	}
+
+	// a merge queue build waits for every result, failures included
+	shared_mergequeue.TriggerBySHA(ctx, repo.ID, commit.ID.String())
 
 	if status.State.IsSuccess() {
 		if err := shared_automerge.StartPRCheckAndAutoMergeBySHA(ctx, sha, repo); err != nil {

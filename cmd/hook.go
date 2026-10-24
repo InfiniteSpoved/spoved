@@ -223,6 +223,7 @@ Forgejo or set your environment appropriately.`, "")
 		MergeForwardPRID:                mergeForwardPRID,
 		DeployKeyKeyID:                  deployKeyKeyID,
 		ActionTaskID:                    actionTaskID,
+		PushTrigger:                     repo_module.PushTrigger(os.Getenv(repo_module.EnvPushTrigger)),
 	}
 	setHookAudit(&hookOptions)
 

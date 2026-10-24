@@ -374,6 +374,11 @@ func (w *Webhook) HasWorkflowJobWaitingEvent() bool {
 	return w.SendEverything || (w.ChooseEvents && w.WorkflowJobWaiting)
 }
 
+// HasMergeGroupEvent returns if the hook gets the builds of merge queues
+func (w *Webhook) HasMergeGroupEvent() bool {
+	return w.SendEverything || (w.ChooseEvents && w.MergeGroup)
+}
+
 // EventCheckers returns event checkers
 func (w *Webhook) EventCheckers() []struct {
 	Has  func() bool
@@ -422,6 +427,7 @@ func (w *Webhook) EventCheckers() []struct {
 		{w.HasWorkflowJobSkippedEvent, webhook_module.HookEventWorkflowJobSkipped},
 		{w.HasWorkflowJobSuccessEvent, webhook_module.HookEventWorkflowJobSuccess},
 		{w.HasWorkflowJobWaitingEvent, webhook_module.HookEventWorkflowJobWaiting},
+		{w.HasMergeGroupEvent, webhook_module.HookEventMergeGroup},
 	}
 }
 

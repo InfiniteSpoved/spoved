@@ -9,6 +9,7 @@ import (
 	actions_model "forgejo.org/models/actions"
 	issues_model "forgejo.org/models/issues"
 	packages_model "forgejo.org/models/packages"
+	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
@@ -59,6 +60,10 @@ func (*NullNotifier) MergePullRequest(ctx context.Context, doer *user_model.User
 
 // AutoMergePullRequest places a place holder function
 func (*NullNotifier) AutoMergePullRequest(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest) {
+}
+
+// MergeGroupChecksRequested places a place holder function
+func (*NullNotifier) MergeGroupChecksRequested(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, entry *pull_model.MergeQueueEntry) {
 }
 
 // PullRequestSynchronized places a place holder function

@@ -34,6 +34,7 @@ const (
 	HookEventPackage                   HookEventType = "package"
 	HookEventSchedule                  HookEventType = "schedule"
 	HookEventWorkflowDispatch          HookEventType = "workflow_dispatch"
+	HookEventMergeGroup                HookEventType = "merge_group"
 	HookEventActionRunFailure          HookEventType = "action_run_failure"
 	HookEventActionRunSuccess          HookEventType = "action_run_success"
 	HookEventWorkflowRunBlocked        HookEventType = "workflow_run_blocked"
@@ -114,6 +115,8 @@ func (h HookEventType) Event() string {
 		return "workflow_job_success"
 	case HookEventWorkflowJobWaiting:
 		return "workflow_job_waiting"
+	case HookEventMergeGroup:
+		return "merge_group"
 	}
 	return ""
 }

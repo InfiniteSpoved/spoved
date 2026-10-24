@@ -1,0 +1,48 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content repository merge-queue">
+	{{template "repo/header" .}}
+	<div class="ui container">
+		<div class="tw-flex tw-flex-wrap tw-items-baseline tw-justify-between tw-gap-2 tw-mb-4">
+			<h2 class="tw-m-0">{{ctx.Locale.Tr "repo.pulls.merge_queue.title" .Branch}}</h2>
+			<span class="text grey">
+				{{ctx.Locale.Tr "repo.pulls.merge_queue.summary" (len .Entries) .MergeQueueConfig.BuildConcurrency .MergeQueueConfig.MaxGroupSize}}
+				{{if .RuleLink}}· <a href="{{.RuleLink}}">{{ctx.Locale.Tr "repo.pulls.merge_queue.rule_settings"}}</a>{{end}}
+			</span>
+		</div>
+		{{if .Entries}}
+			<div class="ui attached segment tw-p-0 tw-overflow-x-auto">
+				<table class="ui very basic unstackable table tw-m-0" id="merge-queue-table">
+					<thead>
+						<tr>
+							<th scope="col">#</th>
+							<th scope="col">{{ctx.Locale.Tr "repo.pulls.merge_queue.col_pull"}}</th>
+							<th scope="col">{{ctx.Locale.Tr "repo.pulls.merge_queue.col_status"}}</th>
+							<th scope="col">{{ctx.Locale.Tr "repo.pulls.merge_queue.col_added"}}</th>
+						</tr>
+					</thead>
+					<tbody>
+						{{range .Entries}}
+							<tr>
+								<td>{{.Position}}</td>
+								<td><a href="{{$.RepoLink}}/pulls/{{.Pull.Index}}">{{.Pull.Issue.Title}}</a> <span class="text grey">#{{.Pull.Index}}</span></td>
+								<td>
+									{{if eq .State "merging"}}<span class="text green">{{svg "octicon-git-merge"}} {{ctx.Locale.Tr "repo.pulls.merge_queue.col_merging"}}</span>
+									{{else if eq .State "grouping"}}<span class="text green">{{svg "octicon-check"}} {{ctx.Locale.Tr "repo.pulls.merge_queue.col_grouping" .GroupPassed .GroupMin (DateUtils.TimeDuration .GroupUntil)}}</span>
+									{{else if eq .State "passed"}}<span class="text green">{{svg "octicon-check"}} {{ctx.Locale.Tr "repo.pulls.merge_queue.col_passed"}}</span>
+									{{else if eq .State "testing"}}<span class="text yellow">{{svg "octicon-clock"}} {{ctx.Locale.Tr "repo.pulls.merge_queue.col_testing" (DateUtils.TimeSince .StartedUnix)}}</span>
+									{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.pulls.merge_queue.col_waiting"}}</span>{{end}}
+									{{if .TempCommitID}}<a class="tw-ml-1" href="{{$.RepoLink}}/commit/{{PathEscape .TempCommitID}}">{{ShortSha .TempCommitID}}</a>{{end}}
+								</td>
+								<td class="text grey">{{.EnqueuedBy.GetDisplayName}} · {{DateUtils.TimeSince .EnqueuedUnix}}</td>
+							</tr>
+						{{end}}
+					</tbody>
+				</table>
+			</div>
+			<p class="text grey tw-mt-4">{{ctx.Locale.Tr "repo.pulls.merge_queue.explain"}}</p>
+		{{else}}
+			<div class="ui attached segment tw-text-center tw-py-8" id="merge-queue-empty">{{ctx.Locale.Tr "repo.pulls.merge_queue.empty" .Branch}}</div>
+		{{end}}
+	</div>
+</div>
+{{template "base/footer" .}}

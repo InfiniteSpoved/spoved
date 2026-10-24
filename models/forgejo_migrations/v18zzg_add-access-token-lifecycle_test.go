@@ -12,19 +12,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type v18zzfOldAccessToken struct {
+type v18zzgOldAccessToken struct {
 	ID        int64 `xorm:"pk autoincr"`
 	UID       int64 `xorm:"INDEX"`
 	Name      string
 	TokenHash string `xorm:"UNIQUE"`
 }
 
-func (v18zzfOldAccessToken) TableName() string {
+func (v18zzgOldAccessToken) TableName() string {
 	return "access_token"
 }
 
 func Test_addAccessTokenLifecycle(t *testing.T) {
-	x, deferable := migration_tests.PrepareTestEnv(t, 0, new(v18zzfOldAccessToken))
+	x, deferable := migration_tests.PrepareTestEnv(t, 0, new(v18zzgOldAccessToken))
 	defer deferable()
 	require.NotNil(t, x)
 	_, err := x.Exec("INSERT INTO access_token (uid, name, token_hash) VALUES (2, 'old', 'h')")

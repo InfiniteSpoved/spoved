@@ -75,6 +75,23 @@ type BranchProtection struct {
 	// Block merging while tasks of the pull request are open.
 	BlockOnIncompleteTasks bool `json:"block_on_incomplete_tasks"`
 
+	// Merge pull requests into matching branches only through a merge queue, which tests each one on top of the
+	// branch and the pull requests ahead of it. The other settings are used only while it is set; 0 means the default.
+	RequireMergeQueue bool `json:"require_merge_queue"`
+	// merge style of every pull request in the queue; empty: the one chosen when adding
+	// enum: ["", "merge", "rebase", "rebase-merge", "squash"]
+	MergeQueueMergeStyle string `json:"merge_queue_merge_style"`
+	// pull requests tested at a time, 0 to 100 (default 5)
+	MergeQueueBuildConcurrency int `json:"merge_queue_build_concurrency"`
+	// passed pull requests to wait for before merging, 0 to 100 (default 1)
+	MergeQueueMinGroupSize int `json:"merge_queue_min_group_size"`
+	// pull requests merged at once, 0 to 100 (default 5)
+	MergeQueueMaxGroupSize int `json:"merge_queue_max_group_size"`
+	// longest wait for the minimum group size, from when the first pull request was added, 0 to 1440 (default 5)
+	MergeQueueWaitMinutes int `json:"merge_queue_wait_minutes"`
+	// time the required checks may take on a test commit before the pull request leaves the queue, 0 to 1440 (default 60)
+	MergeQueueCheckTimeoutMinutes int `json:"merge_queue_check_timeout_minutes"`
+
 	// Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.
 	// The default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.
 	DeleteAllowlistUsernames    []string `json:"delete_allowlist_usernames"`
@@ -131,6 +148,23 @@ type CreateBranchProtectionOption struct {
 	// Block merging while tasks of the pull request are open.
 	BlockOnIncompleteTasks bool `json:"block_on_incomplete_tasks"`
 
+	// Merge pull requests into matching branches only through a merge queue, which tests each one on top of the
+	// branch and the pull requests ahead of it. The other settings are used only while it is set; 0 means the default.
+	RequireMergeQueue bool `json:"require_merge_queue"`
+	// merge style of every pull request in the queue; empty: the one chosen when adding
+	// enum: ["", "merge", "rebase", "rebase-merge", "squash"]
+	MergeQueueMergeStyle string `json:"merge_queue_merge_style"`
+	// pull requests tested at a time, 0 to 100 (default 5)
+	MergeQueueBuildConcurrency int `json:"merge_queue_build_concurrency"`
+	// passed pull requests to wait for before merging, 0 to 100 (default 1)
+	MergeQueueMinGroupSize int `json:"merge_queue_min_group_size"`
+	// pull requests merged at once, 0 to 100 (default 5)
+	MergeQueueMaxGroupSize int `json:"merge_queue_max_group_size"`
+	// longest wait for the minimum group size, from when the first pull request was added, 0 to 1440 (default 5)
+	MergeQueueWaitMinutes int `json:"merge_queue_wait_minutes"`
+	// time the required checks may take on a test commit before the pull request leaves the queue, 0 to 1440 (default 60)
+	MergeQueueCheckTimeoutMinutes int `json:"merge_queue_check_timeout_minutes"`
+
 	// Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.
 	// The default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.
 	DeleteAllowlistUsernames    []string `json:"delete_allowlist_usernames"`
@@ -179,6 +213,15 @@ type EditBranchProtectionOption struct {
 	IgnoreOutdatedConversations    *bool `json:"ignore_outdated_conversations"`
 	// Block merging while tasks of the pull request are open.
 	BlockOnIncompleteTasks *bool `json:"block_on_incomplete_tasks"`
+
+	// see BranchProtection
+	RequireMergeQueue             *bool   `json:"require_merge_queue"`
+	MergeQueueMergeStyle          *string `json:"merge_queue_merge_style"`
+	MergeQueueBuildConcurrency    *int    `json:"merge_queue_build_concurrency"`
+	MergeQueueMinGroupSize        *int    `json:"merge_queue_min_group_size"`
+	MergeQueueMaxGroupSize        *int    `json:"merge_queue_max_group_size"`
+	MergeQueueWaitMinutes         *int    `json:"merge_queue_wait_minutes"`
+	MergeQueueCheckTimeoutMinutes *int    `json:"merge_queue_check_timeout_minutes"`
 
 	// Users, teams and deploy keys (public key IDs) allowed to delete matching branches. Empty lists block everyone.
 	// The default branch can never be deleted. IDs which are not write deploy keys of the repository are ignored.

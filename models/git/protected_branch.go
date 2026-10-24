@@ -82,6 +82,16 @@ type ProtectedBranch struct {
 	// Organization rules only: apply to the repositories in protected_branch_repo instead of all repositories of the organization.
 	ApplyToSelectedRepos bool `xorm:"NOT NULL DEFAULT false"`
 
+	// Merges go through the merge queue, which tests each pull request combined with the ones ahead of it.
+	// A zero number means its default, see MergeQueueConfig.
+	RequireMergeQueue             bool   `xorm:"NOT NULL DEFAULT false"`
+	MergeQueueBuildConcurrency    int    `xorm:"NOT NULL DEFAULT 0"`
+	MergeQueueMinGroupSize        int    `xorm:"NOT NULL DEFAULT 0"`
+	MergeQueueMaxGroupSize        int    `xorm:"NOT NULL DEFAULT 0"`
+	MergeQueueWaitMinutes         int    `xorm:"NOT NULL DEFAULT 0"`
+	MergeQueueCheckTimeoutMinutes int    `xorm:"NOT NULL DEFAULT 0"`
+	MergeQueueMergeStyle          string `xorm:"VARCHAR(30) NOT NULL DEFAULT ''"` // "" = the style chosen for the pull request
+
 	CreatedUnix timeutil.TimeStamp `xorm:"created"`
 	UpdatedUnix timeutil.TimeStamp `xorm:"updated"`
 }
