@@ -7,6 +7,8 @@ description: Take a spoved issue the person names to merge-ready pull requests b
 
 The person gives an issue number. You lead: you split the work, delegate it, check what comes back and drive every pull request to merge-ready. The `coder` skill is the procedure for one pull request; this skill runs it for a whole issue with subagents. Read `CLAUDE.md` (conventions and Learnings) and `CONTRIBUTING.md` first.
 
+Spend effort where it pays: the strongest model for planning and reviews, a cheaper one for mechanical work, targeted tests while iterating, and the full checks once on the final head. Several small issues can share one thread, with one pull request each, so setup, the cheat sheet below and the develop check are shared.
+
 The questions the person asks most often are "is everything in #N done?", "did you really test it?" and "is the PR ready to merge?". Work so that you can answer each one with evidence before they ask.
 
 ## 1. Read and split
@@ -26,7 +28,8 @@ If an item adds or changes screens, share mockups first (a design doc or canvas 
 ## 3. Delegate
 
 - Give each item to a subagent (Agent tool) with a self-contained brief: the issue number, the item's goal, requirements and tests, the files to start from, the relevant `CLAUDE.md` Learnings, and the rules below. Run independent items in parallel, each in its own worktree with a short path (`/home/user/wt-<x>`, long paths break the integration and e2e sockets). Run dependent items in order.
-- The rules every brief carries: branch off the latest `origin/develop`; `ponytail` at full level; tests first and never remove or skip one; `git commit -s`, stage files by name, no `package-lock.json`; run the local checks of `CLAUDE.md` "Testing" for the change; report what was run, what wasn't, and every failure.
+- Pick the model by the work: coding, test fixing and CI log triage go to `model: "sonnet"`; planning, design questions and the reviews in step 6 stay on `model: "opus"`.
+- The rules every brief carries: branch off the latest `origin/develop`; `ponytail` at full level; tests first and never remove or skip one; `git commit -s`, stage files by name, no `package-lock.json`; run the local checks of `CLAUDE.md` "Testing" for the change; while iterating, run only the tests of the changed packages and their neighbours (`go test` on those packages, `make 'test-sqlite#TestName'` or the binary with `-test.run`, the e2e specs whose `@watch` covers the files) and leave the full suite to CI; report what was run, what wasn't, and every failure.
 - Read each result yourself: the diff, the tests and the check output. A subagent's "done" is a claim; re-run anything that looks thin.
 
 ## 4. Test it the way it will be used
@@ -48,7 +51,12 @@ Automated tests passing is not "tested". Before a pull request is ready, also:
 
 ## 6. Review with fresh agents
 
-Before calling a pull request ready, start four fresh agents pinned to the strongest model (Agent `model: "opus"`). Give each the pull request number and the diff, not your conclusions, so their read isn't anchored on yours:
+Review once, on the final diff (after the step 4 checks, not after every push). Size the review to the change:
+
+- **Small changes** (docs, skills, comments, a one-file fix that touches none of the areas below): one fresh Opus agent does a combined quality and security review.
+- **Everything that touches sign-in, permissions, roles, tokens, keys or secrets, git paths (hooks, serv, git HTTP, LFS), input that reaches HTML/SQL/git/a shell, uploads, redirects, webhooks or outbound requests, or any UI**: all four reviews below. When unsure, use all four.
+
+Start the reviewers as fresh agents pinned to the strongest model (Agent `model: "opus"`), all in one message so they run in parallel. Give each only the pull request number, the diff, the requirements list from step 1 and the threat notes from the PR body, not the thread history or your conclusions, so their read isn't anchored on yours:
 
 1. **Quality**: correctness, sustainable and robust design, missing tests, reuse of existing helpers, `CLAUDE.md` conventions and Learnings, smallest diff, and that every requirement the PR claims is met.
 2. **Security**: the `security-review` skill on the diff (permissions, hidden = missing, data exposure, injection, redirects, outbound requests, secrets, audit).
@@ -62,18 +70,31 @@ A real vulnerability is never written in this repository. File it as an issue in
 ## 7. Keep it green
 
 - CI's **CI success** check must be green on the head. On a failure, read the job log, reproduce locally, fix the cause and push; "flaky" is not a cause. Failures known to be environmental are listed in `CLAUDE.md`; anything else is checked on `origin/develop` before calling it unrelated.
-- Check `develop` for new commits at every event, without waiting to be told. When it moves, merge `origin/develop` into the branch with a merge commit (never rebase or force-push a pushed branch), then re-test where the new commits meet yours (shared pages, forms, settings).
+- At each event, check whether `develop` moved and whether it still merges cleanly (`git merge-tree --write-tree origin/develop HEAD`), without waiting to be told. Merge it in right away only on a conflict, or when the new commits touch the same files or features as yours; otherwise leave it for the pre-merge check in step 8, so CI runs once instead of after every change on develop. Always merge with a merge commit (never rebase or force-push a pushed branch), then re-test where the new commits meet yours (shared pages, forms, settings).
+- Don't sit polling CI: end the turn and pick it up when CI reports.
 - Answer every review comment: fix it or explain why not.
 
 ## 8. Ready to merge
 
-A pull request is ready when CI success is green on its head, it contains the latest `develop`, the step 4 checks and all four reviews are done, and every review thread is answered. Then tell the person in one short message that it is ready to merge, with the link, what was tested (and what wasn't) and what the reviews found.
+A pull request is ready when CI success is green on its head, it merges cleanly with the latest `develop`, the step 4 checks and all four reviews are done, and every review thread is answered. Then tell the person in one short message that it is ready to merge, with the link, what was tested (and what wasn't) and what the reviews found.
 
 When the person has approved it (or said to merge once approved and green), check again right before merging, because other pull requests merge in parallel: `git fetch origin develop` and `git merge-base --is-ancestor origin/develop HEAD`. If develop has moved, merge it in (merge commit, never a rebase), re-run the checks for the files where both sides meet, push, and wait for CI success on the new head before merging. Merge only a head that contains the develop you just fetched and is green. Then merge it with a merge commit (`merge_method: "merge"`). Then watch the CI run on `develop` that the merge starts: a new test can move others into another shard and expose an order-dependent test. If it goes red, fix it in a new pull request right away. Then start the next work item from the new `develop`.
+
+When several pull requests are approved together, merge them one at a time and do the develop check once per pull request: merge the latest develop (which already holds the ones merged before it) into the next one, let CI run once, then merge. Don't re-merge develop into the others while one is still waiting.
 
 ## 9. Close the issue
 
 When the last item is merged, go through the requirements list from step 1 and the issues linked from the issue, including follow-ups opened during the work. Tell the person what is done, what is in an open follow-up issue, and anything left. Never say "everything is done" without that check. Then close the issue with a comment listing the pull requests, unless a `Fixes` already closed it.
+
+## Cheat sheet
+
+`CLAUDE.md` (Testing, Learnings) is the full reference; this is what each run otherwise rediscovers.
+
+- Find code: `tools/codemap.sh` once, then `tools/codemap.sh query "<symbol>"`. Web routes are in `routers/web/web.go`, API routes in `routers/api/v1/api.go` (repo routes through `mountRepoRoutes`), templates in `templates/`, new strings in `options/locale_next/locale_en-US.json`, migrations in `models/forgejo_migrations/`.
+- Build: `make backend`, `make frontend` (needed before e2e and screenshots), `make build` for both. Export `GITEA_I_AM_BEING_UNSAFE_RUNNING_AS_ROOT=true` in containers.
+- One integration test: `make 'test-sqlite#TestName'`; several after one build: `PROJECT_ROOT=$PWD PROJECT_CONF=tests/sqlite.ini ./integrations.sqlite.test -test.run 'A|B'`.
+- Shards: CI splits unit, integration and e2e tests round-robin with `.github/ci/shard.sh`; a test that fails only in a shard is order-dependent.
+- Known environmental or flaky failures: the SSH and outside-network lists in `CLAUDE.md`, `webauthn.test.e2e.ts`, and `rendering-iframe.test.e2e.ts` (rerun it alone).
 
 ## Never
 
