@@ -266,7 +266,13 @@ func changeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer 
 	pr.CommitsAhead = divergence.Ahead
 	pr.CommitsBehind = divergence.Behind
 
-	if err := pr.UpdateColsIfNotMerged(ctx, "merge_base", "status", "conflicted_files", "changed_protected_files", "base_branch", "commits_ahead", "commits_behind"); err != nil {
+	// a review counts only if its reviewer is an official reviewer for the new base branch
+	if err := db.WithTx(ctx, func(ctx context.Context) error {
+		if err := pr.UpdateColsIfNotMerged(ctx, "merge_base", "status", "conflicted_files", "changed_protected_files", "base_branch", "commits_ahead", "commits_behind"); err != nil {
+			return err
+		}
+		return issues_model.DowngradeOfficialReviews(ctx, pr)
+	}); err != nil {
 		return err
 	}
 

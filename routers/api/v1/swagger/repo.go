@@ -228,6 +228,13 @@ type swaggerResponsePullApprovalRuleList struct {
 	Body []api.PullApprovalRule `json:"body"`
 }
 
+// PullRequestStack
+// swagger:response PullRequestStack
+type swaggerResponsePullRequestStack struct {
+	// in:body
+	Body api.PullRequestStack `json:"body"`
+}
+
 // PullReviewListWithoutPagination - Review requests without pagination headers
 // swagger:response PullReviewListWithoutPagination
 type swaggerPullReviewListWithoutPagination struct {

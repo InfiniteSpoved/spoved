@@ -892,6 +892,46 @@ func restoreLatestOfficialReview(ctx context.Context, issueID, reviewerID int64)
 	return nil
 }
 
+// DowngradeOfficialReviews clears the official flag of the reviews of pr whose reviewer, or reviewer team, can't make
+// official reviews for its current base branch. It is called after the base branch changed and never sets the flag.
+func DowngradeOfficialReviews(ctx context.Context, pr *PullRequest) error {
+	if err := pr.LoadIssue(ctx); err != nil {
+		return err
+	}
+	pr.Issue.PullRequest = pr // the base branch the checks read
+
+	reviews := make([]*Review, 0, 4)
+	if err := db.GetEngine(ctx).Where("issue_id = ? AND official = ?", pr.IssueID, true).Find(&reviews); err != nil {
+		return err
+	}
+	for _, r := range reviews {
+		var official bool
+		var err error
+		if r.ReviewerTeamID != 0 {
+			if err = r.LoadReviewerTeam(ctx); organization.IsErrTeamNotExist(err) {
+				err = nil
+			} else if err == nil {
+				official, err = IsOfficialReviewerTeam(ctx, pr.Issue, r.ReviewerTeam)
+			}
+		} else if r.ReviewerID != 0 {
+			if err = r.LoadReviewer(ctx); err == nil {
+				official, err = IsOfficialReviewer(ctx, pr.Issue, r.Reviewer)
+			}
+		} else {
+			continue // a migrated review has no reviewer to check
+		}
+		if err != nil {
+			return err
+		}
+		if !official {
+			if _, err := db.Exec(ctx, "UPDATE `review` SET official=? WHERE id=?", false, r.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // AddTeamReviewRequest add a review request from one team
 func AddTeamReviewRequest(ctx context.Context, issue *Issue, reviewer *organization.Team, doer *user_model.User) (*Comment, error) {
 	ctx, committer, err := db.TxContext(ctx)
