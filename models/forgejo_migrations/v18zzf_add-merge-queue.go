@@ -31,23 +31,24 @@ func (v18zzfProtectedBranch) TableName() string {
 }
 
 type v18zzfMergeQueueEntry struct {
-	ID           int64              `xorm:"pk autoincr"`
-	RepoID       int64              `xorm:"INDEX(queue) NOT NULL"`
-	BaseBranch   string             `xorm:"INDEX(queue) VARCHAR(255) NOT NULL"`
-	PullID       int64              `xorm:"UNIQUE NOT NULL"`
-	Position     int64              `xorm:"NOT NULL"`
-	Status       int                `xorm:"NOT NULL DEFAULT 0"`
-	MergeStyle   string             `xorm:"VARCHAR(30) NOT NULL"`
-	DeleteBranch bool               `xorm:"NOT NULL DEFAULT false"`
-	SkipForward  bool               `xorm:"NOT NULL DEFAULT false"`
-	Forced       bool               `xorm:"NOT NULL DEFAULT false"`
-	MergingUnix  timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"`
-	HeadCommitID string             `xorm:"VARCHAR(64) NOT NULL"`
-	BaseCommitID string             `xorm:"VARCHAR(64)"`
-	TempCommitID string             `xorm:"INDEX VARCHAR(64)"`
-	EnqueuedByID int64              `xorm:"NOT NULL"`
-	EnqueuedUnix timeutil.TimeStamp `xorm:"created"`
-	StartedUnix  timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"`
+	ID            int64              `xorm:"pk autoincr"`
+	RepoID        int64              `xorm:"INDEX(queue) NOT NULL"`
+	BaseBranch    string             `xorm:"INDEX(queue) VARCHAR(255) NOT NULL"`
+	PullID        int64              `xorm:"UNIQUE NOT NULL"`
+	Position      int64              `xorm:"NOT NULL"`
+	Status        int                `xorm:"NOT NULL DEFAULT 0"`
+	MergeStyle    string             `xorm:"VARCHAR(30) NOT NULL"`
+	DeleteBranch  bool               `xorm:"NOT NULL DEFAULT false"`
+	SkipForward   bool               `xorm:"NOT NULL DEFAULT false"`
+	Forced        bool               `xorm:"NOT NULL DEFAULT false"`
+	BuildFailures int                `xorm:"NOT NULL DEFAULT 0"`
+	MergingUnix   timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"`
+	HeadCommitID  string             `xorm:"VARCHAR(64) NOT NULL"`
+	BaseCommitID  string             `xorm:"VARCHAR(64)"`
+	TempCommitID  string             `xorm:"INDEX VARCHAR(64)"`
+	EnqueuedByID  int64              `xorm:"NOT NULL"`
+	EnqueuedUnix  timeutil.TimeStamp `xorm:"created"`
+	StartedUnix   timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"`
 }
 
 func (v18zzfMergeQueueEntry) TableName() string {

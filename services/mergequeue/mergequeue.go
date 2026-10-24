@@ -91,6 +91,9 @@ const maxRounds = 20
 // recorded (a server that stopped between the push and its post-receive hook)
 var mergeStuckAfter = 10 * time.Minute
 
+// maxBuildFailures is how many failed builds in a row take an entry out of the queue
+const maxBuildFailures = 3
+
 func claim(key string) bool {
 	running.Lock()
 	defer running.Unlock()
@@ -578,8 +581,9 @@ func (p *pass) checkChain(live []*item, tip string) (merging bool, err error) {
 			break
 		}
 		if live[i].TempCommitID == tip {
-			if i == 0 && live[0].MergingUnix != 0 && since(live[0].MergingUnix) > mergeStuckAfter {
-				p.finishMerge(live[0]) // its push went through but was never recorded
+			// its build is in the branch: pushed by the queue and never recorded, or pushed by a user who may push
+			if i == 0 && (live[0].MergingUnix == 0 || since(live[0].MergingUnix) > mergeStuckAfter) {
+				p.finishMerge(live[0])
 			}
 			return true, nil
 		}
@@ -708,7 +712,7 @@ func (p *pass) merge(live []*item) (int, bool) {
 		if it.SkipForward {
 			ctx = pull_service.WithoutMergeForward(ctx)
 		}
-		if err := pull_service.MergeQueued(ctx, it.pr, it.doer, p.branch, it.BaseCommitID, it.TempCommitID); err != nil {
+		if err := pull_service.MergeQueued(ctx, it.pr, it.doer, p.branch, it.BaseCommitID, it.TempCommitID, false); err != nil {
 			p.again = true
 			if errors.Is(err, pull_service.ErrMergeQueueNotRecorded) {
 				log.Error("Merge queue of %s in %-v: %v", p.branch, p.repo, err) // checkChain records it later
@@ -745,8 +749,17 @@ func (p *pass) merge(live []*item) (int, bool) {
 
 // finishMerge records the merge of a build the branch is already at
 func (p *pass) finishMerge(it *item) {
-	log.Warn("Merge queue of %s in %-v: recording the merge of %-v, pushed at %s", p.branch, p.repo, it.pr, it.MergingUnix)
-	if err := pull_service.MergeQueued(p.ctx, it.pr, it.doer, p.branch, it.BaseCommitID, it.TempCommitID); err != nil && !models.IsErrPullRequestHasMerged(err) {
+	// a server that started merging it since this pass read the queue records it itself
+	if e, err := pull_model.GetMergeQueueEntryByPullID(p.ctx, it.PullID); err != nil || e == nil || e.ID != it.ID ||
+		(e.MergingUnix != 0 && since(e.MergingUnix) <= mergeStuckAfter) {
+		return
+	}
+	log.Warn("Merge queue of %s in %-v: recording the merge of %-v at %s", p.branch, p.repo, it.pr, it.TempCommitID)
+	ctx := p.ctx
+	if it.SkipForward {
+		ctx = pull_service.WithoutMergeForward(ctx)
+	}
+	if err := pull_service.MergeQueued(ctx, it.pr, it.doer, p.branch, it.BaseCommitID, it.TempCommitID, true); err != nil && !models.IsErrPullRequestHasMerged(err) {
 		log.Error("Merge queue of %s in %-v: recording the merge of %-v: %v", p.branch, p.repo, it.pr, err)
 		return
 	}
@@ -817,12 +830,16 @@ func (p *pass) build(live []*item, tip string) error {
 				}
 				continue
 			case !started && p.ctx.Err() == nil:
-				// it can't be built (its head repository is gone, say): it would stop the queue on every pass
-				log.Warn("Merge queue of %s in %-v: building %-v failed: %v", p.branch, p.repo, it.pr, err)
-				if err := p.remove(it, ReasonBuildFailed, ""); err != nil {
-					return err
+				// a build that keeps failing (its head repository is gone, say) would stop the queue on every pass
+				if n, ferr := pull_model.AddMergeQueueBuildFailure(p.ctx, it.ID); ferr != nil {
+					log.Error("AddMergeQueueBuildFailure[%d]: %v", it.ID, ferr)
+				} else if n >= maxBuildFailures {
+					log.Warn("Merge queue of %s in %-v: building %-v failed %d times: %v", p.branch, p.repo, it.pr, n, err)
+					if err := p.remove(it, ReasonBuildFailed, ""); err != nil {
+						return err
+					}
+					continue
 				}
-				continue
 			}
 			if started { // the push failed: build it again
 				if rerr := pull_model.ResetMergeQueueBuilds(p.ctx, []int64{it.ID}); rerr != nil {

@@ -597,6 +597,59 @@ jobs:
 			assert.False(t, merged(b))
 		})
 
+		t.Run("A build that keeps failing leaves", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			a := newPull(t)
+			add(t, session, a)
+			setStatus(t, statusCtx, entry(a).TempCommitID, api.CommitStatusSuccess)
+			require.True(t, merged(a))
+			// b makes a's change again: a squash of it onto the branch commits nothing
+			_, err := files_service.ChangeRepoFiles(t.Context(), repo, owner, &files_service.ChangeRepoFilesOptions{
+				OldBranch: "main",
+				NewBranch: a.HeadBranch + "-squash",
+				Files: []*files_service.ChangeRepoFile{{
+					Operation:     "create",
+					TreePath:      a.HeadBranch + "-squash.txt",
+					ContentReader: strings.NewReader("x"),
+				}},
+			})
+			require.NoError(t, err)
+			testPullCreate(t, session, owner.Name, repo.Name, true, "main", a.HeadBranch+"-squash", "squash")
+			b := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, HeadBranch: a.HeadBranch + "-squash"})
+			head, err := gitRepo.GetRefCommitID(b.GetGitRefName())
+			require.NoError(t, err)
+			setStatus(t, statusCtx, head, api.CommitStatusSuccess)
+			testPullMergeForm(t, session, http.StatusOK, owner.Name, repo.Name, index(b), optionsPullMerge{"do": "squash"})
+			e := entry(b)
+			require.NotNil(t, e)
+			// its file lands on the branch by another way, so the squash has nothing left to commit
+			_, err = files_service.ChangeRepoFiles(t.Context(), repo, owner, &files_service.ChangeRepoFilesOptions{
+				OldBranch: "main",
+				Files: []*files_service.ChangeRepoFile{{
+					Operation:     "create",
+					TreePath:      a.HeadBranch + "-squash.txt",
+					ContentReader: strings.NewReader("x"),
+				}},
+			})
+			require.NoError(t, err)
+			for range 3 {
+				_ = mergequeue.Process(t.Context(), repo.ID, "main")
+			}
+			assert.Nil(t, entry(b))
+			assert.Equal(t, mergequeue.ReasonBuildFailed, removedReason(b))
+		})
+
+		t.Run("A build pushed to the branch by a user is recorded", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			a := newPull(t)
+			add(t, session, a)
+			e := entry(a)
+			require.NoError(t, git.NewCommand(t.Context(), "update-ref").AddDynamicArguments(git.BranchPrefix+"main", e.TempCommitID).Run(&git.RunOpts{Dir: repo.RepoPath()}))
+			require.NoError(t, mergequeue.Process(t.Context(), repo.ID, "main"))
+			assert.True(t, merged(a))
+			assert.Nil(t, entry(a))
+		})
+
 		t.Run("The pull request's own checks don't pass its build", func(t *testing.T) {
 			defer tests.PrintCurrentTest(t)()
 			a := newPull(t)

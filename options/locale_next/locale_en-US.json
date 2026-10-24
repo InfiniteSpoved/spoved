@@ -2855,7 +2855,7 @@
 	"repo.pulls.merge_queue.reason.disabled": "The merge queue was turned off for the branch.",
 	"repo.pulls.merge_queue.reason.branch_missing": "The target branch no longer exists.",
 	"repo.pulls.merge_queue.reason.empty": "The pull request changes nothing on top of the branch and the pull requests ahead of it.",
-	"repo.pulls.merge_queue.reason.build_failed": "The queue could not build its test commit, for example because the head repository is gone.",
+	"repo.pulls.merge_queue.reason.build_failed": "The queue failed to build its test commit three times in a row, for example because the head repository is gone or the pull request changes nothing.",
 	"repo.pulls.merge_queue.reason.merge_failed": "The merge failed. Add the pull request to the queue again, or ask a repository admin.",
 	"repo.pulls.merge_queue.added": "The pull request was added to the merge queue.",
 	"repo.pulls.merge_queue.removed": "The pull request was removed from the merge queue.",

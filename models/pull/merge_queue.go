@@ -35,23 +35,24 @@ const (
 // MergeQueueEntry is a pull request in the merge queue of its base branch. An entry is deleted when the pull request
 // leaves the queue; the timeline of the pull request records why.
 type MergeQueueEntry struct {
-	ID           int64                 `xorm:"pk autoincr"`
-	RepoID       int64                 `xorm:"INDEX(queue) NOT NULL"`
-	BaseBranch   string                `xorm:"INDEX(queue) VARCHAR(255) NOT NULL"`
-	PullID       int64                 `xorm:"UNIQUE NOT NULL"`
-	Position     int64                 `xorm:"NOT NULL"`
-	Status       MergeQueueStatus      `xorm:"NOT NULL DEFAULT 0"`
-	MergeStyle   repo_model.MergeStyle `xorm:"VARCHAR(30) NOT NULL"`
-	DeleteBranch bool                  `xorm:"NOT NULL DEFAULT false"`
-	SkipForward  bool                  `xorm:"NOT NULL DEFAULT false"` // not merged forward (services/mergeforward)
-	Forced       bool                  `xorm:"NOT NULL DEFAULT false"` // an admin added it skipping the branch protections exempt for admins
-	MergingUnix  timeutil.TimeStamp    `xorm:"NOT NULL DEFAULT 0"`     // when its build started being pushed to the branch (0 = not): it can't be removed by hand
-	HeadCommitID string                `xorm:"VARCHAR(64) NOT NULL"`   // the head of the pull request when it was added
-	BaseCommitID string                `xorm:"VARCHAR(64)"`            // what the build was made on: the branch or the entry ahead
-	TempCommitID string                `xorm:"INDEX VARCHAR(64)"`      // the build: base + this pull request
-	EnqueuedByID int64                 `xorm:"NOT NULL"`
-	EnqueuedUnix timeutil.TimeStamp    `xorm:"created"`
-	StartedUnix  timeutil.TimeStamp    `xorm:"NOT NULL DEFAULT 0"`
+	ID            int64                 `xorm:"pk autoincr"`
+	RepoID        int64                 `xorm:"INDEX(queue) NOT NULL"`
+	BaseBranch    string                `xorm:"INDEX(queue) VARCHAR(255) NOT NULL"`
+	PullID        int64                 `xorm:"UNIQUE NOT NULL"`
+	Position      int64                 `xorm:"NOT NULL"`
+	Status        MergeQueueStatus      `xorm:"NOT NULL DEFAULT 0"`
+	MergeStyle    repo_model.MergeStyle `xorm:"VARCHAR(30) NOT NULL"`
+	DeleteBranch  bool                  `xorm:"NOT NULL DEFAULT false"`
+	SkipForward   bool                  `xorm:"NOT NULL DEFAULT false"` // not merged forward (services/mergeforward)
+	Forced        bool                  `xorm:"NOT NULL DEFAULT false"` // an admin added it skipping the branch protections exempt for admins
+	BuildFailures int                   `xorm:"NOT NULL DEFAULT 0"`     // failed builds in a row
+	MergingUnix   timeutil.TimeStamp    `xorm:"NOT NULL DEFAULT 0"`     // when its build started being pushed to the branch (0 = not): it can't be removed by hand
+	HeadCommitID  string                `xorm:"VARCHAR(64) NOT NULL"`   // the head of the pull request when it was added
+	BaseCommitID  string                `xorm:"VARCHAR(64)"`            // what the build was made on: the branch or the entry ahead
+	TempCommitID  string                `xorm:"INDEX VARCHAR(64)"`      // the build: base + this pull request
+	EnqueuedByID  int64                 `xorm:"NOT NULL"`
+	EnqueuedUnix  timeutil.TimeStamp    `xorm:"created"`
+	StartedUnix   timeutil.TimeStamp    `xorm:"NOT NULL DEFAULT 0"`
 }
 
 func init() {
@@ -151,13 +152,23 @@ func DeleteMergeQueueEntry(ctx context.Context, id int64) (bool, error) {
 
 // StartMergeQueueBuild records the build of a waiting entry; false if the entry is no longer waiting.
 func StartMergeQueueBuild(ctx context.Context, id int64, baseCommitID, tempCommitID string) (bool, error) {
-	n, err := db.GetEngine(ctx).Exec("UPDATE merge_queue_entry SET status = ?, base_commit_id = ?, temp_commit_id = ?, started_unix = ? WHERE id = ? AND status = ?",
+	n, err := db.GetEngine(ctx).Exec("UPDATE merge_queue_entry SET status = ?, base_commit_id = ?, temp_commit_id = ?, started_unix = ?, build_failures = 0 WHERE id = ? AND status = ?",
 		MergeQueueBuilding, baseCommitID, tempCommitID, timeutil.TimeStampNow(), id, MergeQueueWaiting)
 	if err != nil {
 		return false, err
 	}
 	rows, err := n.RowsAffected()
 	return rows > 0, err
+}
+
+// AddMergeQueueBuildFailure counts a failed build of the entry and returns the failures in a row
+func AddMergeQueueBuildFailure(ctx context.Context, id int64) (int, error) {
+	if _, err := db.GetEngine(ctx).Exec("UPDATE merge_queue_entry SET build_failures = build_failures + 1 WHERE id = ?", id); err != nil {
+		return 0, err
+	}
+	e := &MergeQueueEntry{}
+	_, err := db.GetEngine(ctx).ID(id).Cols("build_failures").Get(e)
+	return e.BuildFailures, err
 }
 
 // ResetMergeQueueBuilds makes the entries wait to be built again.

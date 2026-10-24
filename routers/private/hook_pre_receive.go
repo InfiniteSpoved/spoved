@@ -532,14 +532,29 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 			return false
 		}
 
+		// a merge queue entry an admin added without force gets no admin exemption, as when the queue checked it
+		noExempt := false
+		if ctx.opts.PushTrigger == repo_module.PushTriggerMergeQueue {
+			e, err := pull_model.GetMergeQueueEntryByPullID(ctx, pr.ID)
+			if err != nil {
+				log.Error("GetMergeQueueEntryByPullID: %v", err)
+				ctx.JSON(http.StatusInternalServerError, private.Response{Err: "GetMergeQueueEntryByPullID failed"})
+				return false
+			}
+			noExempt = e == nil || !e.Forced
+		}
+
 		// If we're an admin for the instance, we can ignore checks
-		if ctx.user.IsAdmin {
+		if ctx.user.IsAdmin && !noExempt {
 			return true
 		}
 
 		// The rule may be skipped by admins if it doesn't apply to them: repository admins for a
 		// repository rule, organization owners for an organization rule.
 		exempt := func(pb *git_model.ProtectedBranch) bool {
+			if noExempt {
+				return false
+			}
 			ok, err := pb.IsAdminExempt(ctx, ctx.user, ctx.userPerm.IsAdmin())
 			if err != nil {
 				log.Error("IsAdminExempt: %v", err)

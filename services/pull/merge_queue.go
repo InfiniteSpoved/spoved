@@ -96,7 +96,7 @@ func BuildMergeQueueCommit(ctx context.Context, pr *issues_model.PullRequest, do
 // MergeQueued fast-forwards base, the base branch of pr, from expectedOld to sha, a tested merge queue build that has pr
 // on top of expectedOld, as doer. The push runs the hooks: they check the branch protection again and mark pr merged.
 // An error after the push is only logged: the branch has moved.
-func MergeQueued(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, base, expectedOld, sha string) error {
+func MergeQueued(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, base, expectedOld, sha string, record bool) error {
 	defer pullWorkingPool.Lock(fmt.Sprint(pr.ID))()
 
 	pr, err := issues_model.GetPullRequestByID(ctx, pr.ID)
@@ -144,6 +144,9 @@ func MergeQueued(ctx context.Context, pr *issues_model.PullRequest, doer *user_m
 		return err
 	}
 	if tip == sha {
+		if !record {
+			return fmt.Errorf("%v: %w", pr, ErrMergeQueueNotRecorded) // the queue records it once nobody else may
+		}
 		// an earlier push of the build went through, but its post-receive hook never recorded the merge
 		pr.MergedCommitID, pr.MergedBaseCommitID, pr.MergedUnix = sha, expectedOld, timeutil.TimeStampNow()
 		pr.Merger, pr.MergerID = doer, doer.ID
@@ -151,7 +154,10 @@ func MergeQueued(ctx context.Context, pr *issues_model.PullRequest, doer *user_m
 			if err := pull_model.DeleteScheduledAutoMerge(ctx, pr.ID); err != nil && !db.IsErrNotExist(err) {
 				return err
 			}
-			_, err := pr.SetMerged(ctx)
+			ok, err := pr.SetMerged(ctx)
+			if err == nil && !ok { // the hook recorded it meanwhile and its merge sends the events
+				err = models.ErrPullRequestHasMerged{ID: pr.ID, IssueID: pr.IssueID, HeadRepoID: pr.HeadRepoID, BaseRepoID: pr.BaseRepoID, HeadBranch: pr.HeadBranch, BaseBranch: pr.BaseBranch}
+			}
 			return err
 		}); err != nil {
 			return err
@@ -160,7 +166,7 @@ func MergeQueued(ctx context.Context, pr *issues_model.PullRequest, doer *user_m
 		return err
 	}
 	if merged, err := issues_model.GetPullRequestByID(ctx, pr.ID); err != nil {
-		return err
+		return fmt.Errorf("%v: %w: %w", pr, ErrMergeQueueNotRecorded, err) // the branch moved: never removed as failed
 	} else if !merged.HasMerged {
 		return fmt.Errorf("%v: %w", pr, ErrMergeQueueNotRecorded)
 	}
