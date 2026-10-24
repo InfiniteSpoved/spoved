@@ -142,10 +142,7 @@ func auditPeer(remoteAddr string, peer netip.Addr) string {
 // ClientIP returns the client address of the request, invalid if it can't be parsed or a trusted proxy sent
 // disagreeing X-Real-IP and X-Forwarded-For headers.
 func ClientIP(req *http.Request) netip.Addr {
-	if httplib.IsClientIPAmbiguous(req) {
-		return netip.Addr{}
-	}
-	return setting.IPFromRemoteAddr(req.RemoteAddr)
+	return httplib.ClientIP(req)
 }
 
 func stripSlashesMiddleware(next http.Handler) http.Handler {

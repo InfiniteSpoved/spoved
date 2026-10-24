@@ -11,7 +11,6 @@ import (
 	auth_model "forgejo.org/models/auth"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/httplib"
-	"forgejo.org/modules/setting"
 )
 
 // AccessTokenUser returns who a valid access token acts as: the user of a personal access token, or the identity of
@@ -31,12 +30,9 @@ func AccessTokenUser(ctx context.Context, token *auth_model.AccessToken) (*user_
 }
 
 // TokenUseIP is the client address a token's last use records: "" when it can't be parsed or a trusted proxy sent
-// disagreeing headers (the address may be one the client chose), as common.ClientIP decides.
+// disagreeing headers (the address may be one the client chose), as httplib.ClientIP decides.
 func TokenUseIP(req *http.Request) string {
-	if httplib.IsClientIPAmbiguous(req) {
-		return ""
-	}
-	if ip := setting.IPFromRemoteAddr(req.RemoteAddr); ip.IsValid() {
+	if ip := httplib.ClientIP(req); ip.IsValid() {
 		return ip.Unmap().String()
 	}
 	return ""
