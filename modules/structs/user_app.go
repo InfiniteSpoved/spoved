@@ -68,7 +68,7 @@ type CreateAccessTokenOption struct {
 // swagger:model CreateOwnedAccessTokenOption
 type CreateOwnedAccessTokenOption struct {
 	// required: true
-	Name string `json:"name" binding:"Required"`
+	Name string `json:"name" binding:"Required;MaxSize(255)"`
 	// At least one of read:repository, write:repository, read:issue, write:issue, read:package, write:package and
 	// read:organization
 	// required: true

@@ -83,10 +83,13 @@ func ValidateOwnedTokenScope(scope AccessTokenScope) error {
 	return nil
 }
 
-// ValidateOwnedTokenMode returns an error unless mode is read, write or admin.
+// ErrOwnedTokenMode is the refusal of a permission other than read, write or admin.
+var ErrOwnedTokenMode = errors.New("invalid access token permission")
+
+// ValidateOwnedTokenMode returns ErrOwnedTokenMode unless mode is read, write or admin.
 func ValidateOwnedTokenMode(mode perm.AccessMode) error {
 	if mode < perm.AccessModeRead || mode > perm.AccessModeAdmin {
-		return fmt.Errorf("invalid access token permission: %v", mode)
+		return fmt.Errorf("%w: %v", ErrOwnedTokenMode, mode)
 	}
 	return nil
 }

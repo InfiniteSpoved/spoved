@@ -186,6 +186,11 @@ func CreateOwnedAccessToken(ctx *context.APIContext, owner OwnedTokenOwner) {
 		return
 	}
 	form := web.GetForm(ctx).(*api.CreateOwnedAccessTokenOption)
+	name := strings.TrimSpace(form.Name)
+	if name == "" {
+		ctx.Error(http.StatusUnprocessableEntity, "", "name is required")
+		return
+	}
 
 	scope, err := auth_model.AccessTokenScope(strings.Join(form.Scopes, ",")).Normalize()
 	if err != nil {
@@ -193,7 +198,7 @@ func CreateOwnedAccessToken(ctx *context.APIContext, owner OwnedTokenOwner) {
 		return
 	}
 	t := &auth_model.AccessToken{
-		Name:             form.Name,
+		Name:             name,
 		Description:      strings.TrimSpace(form.Description),
 		SelfRotate:       form.SelfRotate,
 		Scope:            scope,
@@ -266,7 +271,7 @@ func mayGrant(ctx *context.APIContext, scope auth_model.AccessTokenScope, expire
 func isOwnedTokenValidationError(err error) bool {
 	return errors.Is(err, authz.ErrOwnedTokenNameTaken) || errors.Is(err, authz.ErrOwnedTokenRepoNotInOrg) || IsExpiryError(err) || errors.Is(err, authz.ErrScopeNotAllowed) ||
 		errors.Is(err, authz.ErrScopeNeedsRepoRestriction) || errors.Is(err, authz.ErrOwnedTokenNoScope) ||
-		errors.Is(err, auth_model.ErrOwnedTokenScope) || errors.Is(err, authz.ErrSpecifiedReposNone) ||
+		errors.Is(err, auth_model.ErrOwnedTokenScope) || errors.Is(err, auth_model.ErrOwnedTokenMode) || errors.Is(err, authz.ErrSpecifiedReposNone) ||
 		errors.Is(err, authz.ErrSpecifiedReposNoPublicOnly) || errors.Is(err, authz.ErrSpecifiedReposInvalidScope)
 }
 

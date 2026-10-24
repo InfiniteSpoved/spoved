@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,6 +96,10 @@ func TestOwnedAccessTokenAPI(t *testing.T) {
 		}{
 			{"no scope", api.CreateOwnedAccessTokenOption{Name: name(), Permission: "read"}, http.StatusUnprocessableEntity},
 			{"user scope", api.CreateOwnedAccessTokenOption{Name: name(), Scopes: []string{"write:user"}, Permission: "read"}, http.StatusUnprocessableEntity},
+			{"empty permission", api.CreateOwnedAccessTokenOption{Name: name(), Scopes: []string{"read:repository"}}, http.StatusUnprocessableEntity},
+			{"none permission", api.CreateOwnedAccessTokenOption{Name: name(), Scopes: []string{"read:repository"}, Permission: "none"}, http.StatusUnprocessableEntity},
+			{"blank name", api.CreateOwnedAccessTokenOption{Name: "  ", Scopes: []string{"read:repository"}, Permission: "read"}, http.StatusUnprocessableEntity},
+			{"long name", api.CreateOwnedAccessTokenOption{Name: strings.Repeat("n", 300), Scopes: []string{"read:repository"}, Permission: "read"}, http.StatusUnprocessableEntity},
 			{"owner permission", api.CreateOwnedAccessTokenOption{Name: name(), Scopes: []string{"read:repository"}, Permission: "owner"}, http.StatusUnprocessableEntity},
 			{"repositories", api.CreateOwnedAccessTokenOption{Name: name(), Scopes: []string{"read:repository"}, Permission: "read", Repositories: []string{"repo3"}}, http.StatusUnprocessableEntity},
 			{"scope the creator lacks", api.CreateOwnedAccessTokenOption{Name: name(), Scopes: []string{"write:package"}, Permission: "write"}, http.StatusForbidden},
