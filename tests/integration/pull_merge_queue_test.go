@@ -24,6 +24,8 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
+	"forgejo.org/modules/private"
+	repo_module "forgejo.org/modules/repository"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/timeutil"
 	webhook_module "forgejo.org/modules/webhook"
@@ -147,6 +149,16 @@ jobs:
 			req := NewRequestWithJSON(t, "POST", fmt.Sprintf("/api/v1/repos/%s/pulls/%s/merge", repo.FullName(), index(pr)), &forms.MergePullRequestForm{Do: "merge"}).AddTokenAuth(token)
 			MakeRequest(t, req, http.StatusMethodNotAllowed)
 			assert.False(t, merged(pr))
+
+			// the hook refuses a merge of the pull request that isn't the queue's
+			head, err := gitRepo.GetRefCommitID(pr.GetGitRefName())
+			require.NoError(t, err)
+			extra := private.HookPreReceive(t.Context(), repo.ID, private.HookOptions{
+				OldCommitIDs: []string{mainTip()}, NewCommitIDs: []string{head}, RefFullNames: []git.RefName{git.RefNameFromBranch("main")},
+				UserID: owner.ID, UserName: owner.Name, PullRequestID: pr.ID, PushTrigger: repo_module.PushTriggerPRMergeToBase,
+			})
+			require.Error(t, extra.Error)
+			assert.Contains(t, extra.UserMsg, "requires a merge queue")
 
 			// fast-forward only can't be combined with the pull requests ahead
 			testPullMergeForm(t, session, http.StatusBadRequest, owner.Name, repo.Name, index(pr), optionsPullMerge{"do": "fast-forward-only"})
@@ -410,6 +422,43 @@ jobs:
 			assert.True(t, merged(pr))
 		})
 
+		t.Run("A fork's build runs like the fork's pull request", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			forker := forgery.CreateUser(t, nil)
+			fork, err := repo_service.ForkRepositoryAndUpdates(t.Context(), forker, forker, repo_service.ForkRepoOptions{BaseRepo: repo, Name: repo.Name})
+			require.NoError(t, err)
+			// the fork changes the workflows: they must not run with the base repository's trust
+			_, err = files_service.ChangeRepoFiles(t.Context(), fork, forker, &files_service.ChangeRepoFilesOptions{
+				OldBranch: "main",
+				NewBranch: "from-fork",
+				Files: []*files_service.ChangeRepoFile{{
+					Operation:     "create",
+					TreePath:      ".forgejo/workflows/fork.yml",
+					ContentReader: strings.NewReader("on: merge_group\njobs:\n  leak:\n    runs-on: docker\n    steps:\n      - run: true\n"),
+				}},
+			})
+			require.NoError(t, err)
+			forkToken := getTokenForLoggedInUser(t, loginUser(t, forker.Name), auth_model.AccessTokenScopeWriteRepository)
+			req := NewRequestWithJSON(t, "POST", fmt.Sprintf("/api/v1/repos/%s/pulls", repo.FullName()), &api.CreatePullRequestOption{Head: forker.Name + ":from-fork", Base: "main", Title: "from a fork"}).AddTokenAuth(forkToken)
+			var pull api.PullRequest
+			DecodeJSON(t, MakeRequest(t, req, http.StatusCreated), &pull)
+			setStatus(t, statusCtx, pull.Head.Sha, api.CommitStatusSuccess)
+			pr := unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{BaseRepoID: repo.ID, Index: pull.Index})
+
+			add(t, session, pr)
+			e := entry(pr)
+			require.NotNil(t, e)
+			runs, err := db.Find[actions_model.ActionRun](t.Context(), actions_model.FindRunOptions{RepoID: repo.ID, CommitSHA: e.TempCommitID})
+			require.NoError(t, err)
+			require.NotEmpty(t, runs)
+			for _, run := range runs {
+				assert.True(t, run.IsForkPullRequest, run.WorkflowID)
+				assert.NotEqual(t, "fork.yml", run.WorkflowID)
+			}
+			setStatus(t, statusCtx, e.TempCommitID, api.CommitStatusSuccess)
+			assert.True(t, merged(pr))
+		})
+
 		t.Run("Web pages", func(t *testing.T) {
 			defer tests.PrintCurrentTest(t)()
 			a := newPull(t)
@@ -454,6 +503,42 @@ jobs:
 			session.MakeRequest(t, NewRequest(t, "POST", prLink(b)+"/merge_queue/remove"), http.StatusSeeOther)
 			htmlDoc = NewHTMLParser(t, readerSession.MakeRequest(t, NewRequest(t, "GET", queue), http.StatusOK).Body)
 			htmlDoc.AssertElement(t, "#merge-queue-empty", true)
+		})
+
+		t.Run("A merge under way can't be removed", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			a := newPull(t)
+			add(t, session, a)
+			e := entry(a)
+			require.NotEmpty(t, e.TempCommitID)
+			ok, err := pull_model.StartMergeQueueMerge(t.Context(), e.ID, e.TempCommitID)
+			require.NoError(t, err)
+			require.True(t, ok)
+			req := NewRequest(t, "DELETE", fmt.Sprintf("/api/v1/repos/%s/pulls/%s/merge-queue", repo.FullName(), index(a))).AddTokenAuth(token)
+			MakeRequest(t, req, http.StatusConflict)
+			require.NotNil(t, entry(a))
+			// the queue goes on and merges it
+			setStatus(t, statusCtx, e.TempCommitID, api.CommitStatusSuccess)
+			assert.True(t, merged(a))
+		})
+
+		t.Run("Stale build branches are deleted", func(t *testing.T) {
+			defer tests.PrintCurrentTest(t)()
+			a := newPull(t)
+			add(t, session, a)
+			e := entry(a)
+			stale := git.BranchPrefix + pull_model.MergeQueueBranchPrefix + "main/999999"
+			other := git.BranchPrefix + pull_model.MergeQueueBranchPrefix + "main/x/" + strconv.FormatInt(e.ID, 10)
+			for _, ref := range []string{stale, other} {
+				require.NoError(t, git.NewCommand(t.Context(), "update-ref").AddDynamicArguments(ref, mainTip()).Run(&git.RunOpts{Dir: repo.RepoPath()}))
+			}
+			require.NoError(t, mergequeue.DeleteStaleBranches(t.Context()))
+			assert.False(t, gitRepo.IsBranchExist(strings.TrimPrefix(stale, git.BranchPrefix)))
+			// another branch's build with the ID of a live entry of main is no build of main
+			assert.False(t, gitRepo.IsBranchExist(strings.TrimPrefix(other, git.BranchPrefix)))
+			assert.True(t, gitRepo.IsBranchExist(e.TempBranch()))
+			setStatus(t, statusCtx, e.TempCommitID, api.CommitStatusSuccess)
+			assert.True(t, merged(a))
 		})
 
 		t.Run("Turning the queue off empties it", func(t *testing.T) {

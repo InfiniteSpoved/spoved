@@ -2859,7 +2859,7 @@
 	"repo.pulls.merge_queue.already_queued": "The pull request is already in the merge queue.",
 	"repo.pulls.merge_queue.not_queued": "The pull request is not in the merge queue.",
 	"repo.pulls.merge_queue.no_permission": "You may not remove this pull request from the merge queue.",
-	"repo.settings.merge_queue.invalid": "The merge queue settings are out of range: pull requests tested at a time and group sizes 1 to 100, the minimum group size at most the maximum, and times 1 to 1440 minutes.",
+	"repo.settings.merge_queue.invalid": "The merge queue settings are out of range: pull requests tested at a time and group sizes 1 to 100, the minimum group size at most the maximum and at most the pull requests tested at a time, and times 1 to 1440 minutes.",
 	"repo.settings.event_merge_group": "Merge queue",
 	"repo.settings.event_merge_group_desc": "A pull request in a merge queue was built and is ready to be tested (merge_group).",
 	"admin.dashboard.process_merge_queues": "Look at every merge queue for check time-outs and group wait times",
@@ -2901,5 +2901,7 @@
 	"repo.settings.merge_queue.wait": "…but at most (minutes)",
 	"repo.settings.merge_queue.wait_desc": "Counted from when the first one joined the queue.",
 	"repo.settings.merge_queue.max_group_size": "Maximum group size",
-	"repo.settings.merge_queue.max_group_size_desc": "Pull requests merged at once, at most as many as are tested at a time."
+	"repo.settings.merge_queue.max_group_size_desc": "Pull requests merged at once, at most as many as are tested at a time.",
+	"repo.pulls.merge_queue.merging": "The pull request is being merged and can no longer be removed from the merge queue.",
+	"admin.dashboard.delete_stale_merge_queue_branches": "Delete merge queue build branches that belong to no pull request in the queue"
 }

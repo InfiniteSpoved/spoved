@@ -1017,7 +1017,7 @@ func MergePullRequest(ctx *context.APIContext) {
 		ctx.InternalServerError(err)
 		return
 	}
-	if queueRule != nil && !form.MergeWhenChecksSucceed {
+	if queueRule != nil && (!form.MergeWhenChecksSucceed || manuallyMerged) {
 		ctx.Error(http.StatusMethodNotAllowed, "Merge", "the base branch requires a merge queue: add the pull request to it with POST .../pulls/{index}/merge-queue")
 		return
 	}

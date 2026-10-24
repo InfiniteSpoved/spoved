@@ -61,7 +61,7 @@ func MergeQueueRule(rules []*ProtectedBranch) *ProtectedBranch {
 }
 
 // ErrInvalidMergeQueueConfig is returned for merge queue settings out of range
-var ErrInvalidMergeQueueConfig = util.NewInvalidArgumentErrorf("merge queue settings out of range: concurrency and group sizes 0 to %d, the minimum group size at most the maximum, times 0 to %d minutes, merge style merge, rebase, rebase-merge, squash or empty", MaxMergeQueueSize, MaxMergeQueueMinutes)
+var ErrInvalidMergeQueueConfig = util.NewInvalidArgumentErrorf("merge queue settings out of range: concurrency and group sizes 0 to %d, the minimum group size at most the maximum and the concurrency, times 0 to %d minutes, merge style merge, rebase, rebase-merge, squash or empty", MaxMergeQueueSize, MaxMergeQueueMinutes)
 
 // ValidateMergeQueue checks the merge queue settings of the rule; 0 means the default.
 func (protectBranch *ProtectedBranch) ValidateMergeQueue() error {
@@ -73,7 +73,7 @@ func (protectBranch *ProtectedBranch) ValidateMergeQueue() error {
 	}
 	cfg := protectBranch.MergeQueueConfig()
 	if !inRange(protectBranch.MergeQueueBuildConcurrency, MaxMergeQueueSize) || !inRange(protectBranch.MergeQueueMinGroupSize, MaxMergeQueueSize) ||
-		!inRange(protectBranch.MergeQueueMaxGroupSize, MaxMergeQueueSize) || cfg.MinGroupSize > cfg.MaxGroupSize ||
+		!inRange(protectBranch.MergeQueueMaxGroupSize, MaxMergeQueueSize) || cfg.MinGroupSize > cfg.MaxGroupSize || cfg.MinGroupSize > cfg.BuildConcurrency ||
 		!inRange(protectBranch.MergeQueueWaitMinutes, MaxMergeQueueMinutes) || !inRange(protectBranch.MergeQueueCheckTimeoutMinutes, MaxMergeQueueMinutes) {
 		return ErrInvalidMergeQueueConfig
 	}

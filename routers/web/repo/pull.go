@@ -1488,7 +1488,7 @@ func MergePullRequest(ctx *context.Context) {
 		ctx.ServerError("mergequeue.Rule", err)
 		return
 	}
-	if queueRule != nil && !form.MergeWhenChecksSucceed {
+	if queueRule != nil && (!form.MergeWhenChecksSucceed || manuallyMerged) {
 		addToMergeQueue(ctx, form, issue)
 		return
 	}
@@ -1772,7 +1772,23 @@ func mergeCheckError(ctx *context.Context, issue *issues_model.Issue, err error)
 
 // addToMergeQueue adds the pull request to the merge queue of its base branch
 func addToMergeQueue(ctx *context.Context, form *forms.MergePullRequestForm, issue *issues_model.Issue) {
-	err := mergequeue.Add(ctx, ctx.Doer, &ctx.Repo.Permission, issue.PullRequest, repo_model.MergeStyle(form.Do), form.HeadCommitID, form.DeleteBranchAfterMerge, form.ForceMerge)
+	if form.SkipsMergeForward() {
+		allowed, err := mergeforward.MaySkip(ctx, ctx.Doer, ctx.Repo.Permission, ctx.Repo.Repository, issue.PullRequest.BaseBranch)
+		if err != nil {
+			ctx.ServerError("MaySkip", err)
+			return
+		} else if !allowed {
+			ctx.JSONError(ctx.Tr("repo.pulls.merge_forward.skip_not_allowed"))
+			return
+		}
+	}
+	err := mergequeue.Add(ctx, ctx.Doer, &ctx.Repo.Permission, issue.PullRequest, mergequeue.AddOptions{
+		Style:        repo_model.MergeStyle(form.Do),
+		ExpectedHead: form.HeadCommitID,
+		DeleteBranch: form.DeleteBranchAfterMerge,
+		SkipForward:  form.SkipsMergeForward(),
+		Force:        form.ForceMerge,
+	})
 	if err == nil {
 		ctx.Flash.Success(ctx.Tr("repo.pulls.merge_queue.added"))
 		ctx.JSONRedirect(issue.Link())
@@ -1789,6 +1805,8 @@ func addToMergeQueue(ctx *context.Context, form *forms.MergePullRequestForm, iss
 		ctx.JSONError(ctx.Tr("repo.pulls.invalid_merge_option"))
 	case models.IsErrSHADoesNotMatch(err):
 		ctx.JSONError(ctx.Tr("repo.pulls.head_out_of_date"))
+	case errors.Is(err, util.ErrPermissionDenied):
+		ctx.JSONError(ctx.Tr("repo.pulls.no_merge_access"))
 	default:
 		mergeCheckError(ctx, issue, err)
 	}
@@ -1806,6 +1824,8 @@ func RemoveFromMergeQueue(ctx *context.Context) {
 			ctx.Flash.Error(ctx.Tr("repo.pulls.merge_queue.no_permission"))
 		case errors.Is(err, mergequeue.ErrNotQueued):
 			ctx.Flash.Error(ctx.Tr("repo.pulls.merge_queue.not_queued"))
+		case errors.Is(err, mergequeue.ErrMerging):
+			ctx.Flash.Error(ctx.Tr("repo.pulls.merge_queue.merging"))
 		default:
 			ctx.ServerError("mergequeue.Remove", err)
 			return

@@ -730,11 +730,53 @@ func (n *actionsNotifier) MergeGroupChecksRequested(ctx context.Context, doer *u
 		log.Error("ToMergeGroupPayload [entry: %d]: %v", entry.ID, err)
 		return
 	}
-	NewNotifyInput(repo, doer, webhook_module.HookEventMergeGroup).
+	fork, err := mergeGroupForkPull(ctx, repo, entry)
+	if err != nil {
+		log.Error("mergeGroupForkPull [entry: %d]: %v", entry.ID, err)
+		return
+	}
+	input := NewNotifyInput(repo, doer, webhook_module.HookEventMergeGroup).
 		WithRef(payload.MergeGroup.HeadRef).
 		WithCommit(entry.TempCommitID).
-		WithPayload(payload).
-		Notify(ctx)
+		WithPayload(payload)
+	if fork != nil {
+		// the build holds the code of a fork: run it like that pull request's own runs (no secrets, read-only
+		// token, the base's workflows unless its poster is trusted)
+		input.WithPullRequestData(fork)
+	}
+	input.Notify(ctx)
+}
+
+// mergeGroupForkPull returns a fork pull request whose code is in the build of entry (it and the entries ahead of it),
+// one whose poster isn't trusted with Actions first; nil if there is none.
+func mergeGroupForkPull(ctx context.Context, repo *repo_model.Repository, entry *pull_model.MergeQueueEntry) (*issues_model.PullRequest, error) {
+	entries, err := pull_model.FindMergeQueue(ctx, repo.ID, entry.BaseBranch)
+	if err != nil {
+		return nil, err
+	}
+	var fork *issues_model.PullRequest
+	for _, e := range entries {
+		pr, err := issues_model.GetPullRequestByID(ctx, e.PullID)
+		if err != nil {
+			return nil, err
+		}
+		if pr.IsForkPullRequest() {
+			trust, err := GetPullRequestPosterIsTrustedWithActions(ctx, pr)
+			if err != nil {
+				return nil, err
+			}
+			if !trust.IsTrusted() {
+				return pr, nil
+			}
+			if fork == nil {
+				fork = pr
+			}
+		}
+		if e.ID == entry.ID {
+			break
+		}
+	}
+	return fork, nil
 }
 
 func (n *actionsNotifier) PullRequestSynchronized(ctx context.Context, doer *user_model.User, pr *issues_model.PullRequest) {

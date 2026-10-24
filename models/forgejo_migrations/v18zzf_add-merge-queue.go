@@ -39,6 +39,8 @@ type v18zzfMergeQueueEntry struct {
 	Status       int                `xorm:"NOT NULL DEFAULT 0"`
 	MergeStyle   string             `xorm:"VARCHAR(30) NOT NULL"`
 	DeleteBranch bool               `xorm:"NOT NULL DEFAULT false"`
+	SkipForward  bool               `xorm:"NOT NULL DEFAULT false"`
+	Merging      bool               `xorm:"NOT NULL DEFAULT false"`
 	HeadCommitID string             `xorm:"VARCHAR(64) NOT NULL"`
 	BaseCommitID string             `xorm:"VARCHAR(64)"`
 	TempCommitID string             `xorm:"INDEX VARCHAR(64)"`

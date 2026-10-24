@@ -20,6 +20,7 @@ import (
 	"forgejo.org/services/convert"
 	"forgejo.org/services/forms"
 	issue_service "forgejo.org/services/issue"
+	"forgejo.org/services/mergeforward"
 	"forgejo.org/services/mergequeue"
 	pull_service "forgejo.org/services/pull"
 )
@@ -147,9 +148,28 @@ func AddToMergeQueue(ctx *context.APIContext) {
 }
 
 func addToMergeQueue(ctx *context.APIContext, form *forms.MergePullRequestForm, pr *issues_model.PullRequest) {
-	err := mergequeue.Add(ctx, ctx.Doer(), &ctx.Repo().Permission, pr, repo_model.MergeStyle(form.Do), form.HeadCommitID, form.DeleteBranchAfterMerge, form.ForceMerge)
+	if form.SkipsMergeForward() {
+		allowed, err := mergeforward.MaySkip(ctx, ctx.Doer(), ctx.Repo().Permission, ctx.Repo().Repository, pr.BaseBranch)
+		if err != nil {
+			ctx.InternalServerError(err)
+			return
+		} else if !allowed {
+			ctx.Error(http.StatusForbidden, "MergeForward", "not allowed to merge without merging forward")
+			return
+		}
+	}
+	err := mergequeue.Add(ctx, ctx.Doer(), &ctx.Repo().Permission, pr, mergequeue.AddOptions{
+		Style:        repo_model.MergeStyle(form.Do),
+		ExpectedHead: form.HeadCommitID,
+		DeleteBranch: form.DeleteBranchAfterMerge,
+		SkipForward:  form.SkipsMergeForward(),
+		Force:        form.ForceMerge,
+	})
 	switch {
 	case err == nil:
+	case errors.Is(err, util.ErrPermissionDenied):
+		ctx.Error(http.StatusForbidden, "AddToMergeQueue", "user may not add the pull request to the merge queue")
+		return
 	case errors.Is(err, mergequeue.ErrNotRequired):
 		ctx.Error(http.StatusMethodNotAllowed, "AddToMergeQueue", "the base branch has no merge queue")
 		return
@@ -215,6 +235,8 @@ func RemoveFromMergeQueue(ctx *context.APIContext) {
 	//     "$ref": "#/responses/forbidden"
 	//   "404":
 	//     "$ref": "#/responses/notFound"
+	//   "409":
+	//     "$ref": "#/responses/error"
 	//   "423":
 	//     "$ref": "#/responses/repoArchivedError"
 
@@ -228,6 +250,8 @@ func RemoveFromMergeQueue(ctx *context.APIContext) {
 			ctx.Error(http.StatusForbidden, "RemoveFromMergeQueue", "user may not remove the pull request from the merge queue")
 		case errors.Is(err, mergequeue.ErrNotQueued):
 			ctx.NotFound()
+		case errors.Is(err, mergequeue.ErrMerging):
+			ctx.Error(http.StatusConflict, "RemoveFromMergeQueue", "the pull request is being merged")
 		default:
 			ctx.InternalServerError(err)
 		}

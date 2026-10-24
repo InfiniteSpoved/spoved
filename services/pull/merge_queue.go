@@ -19,9 +19,10 @@ import (
 )
 
 // BuildMergeQueueCommit merges pr, at expectedHeadCommitID, with mergeStyle and the default message on top of the
-// commit onto of the base repository, as doer, and pushes the result to branch of the base repository without running
-// the hooks. It returns the new commit.
-func BuildMergeQueueCommit(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, mergeStyle repo_model.MergeStyle, expectedHeadCommitID, onto, branch string) (string, error) {
+// commit onto of the base repository, as doer. It calls start with the new commit, and if start reports true it pushes
+// the commit to branch of the base repository without running the hooks. It returns the new commit, "" when start
+// reported false.
+func BuildMergeQueueCommit(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, mergeStyle repo_model.MergeStyle, expectedHeadCommitID, onto, branch string, start func(sha string) (bool, error)) (string, error) {
 	if err := pr.LoadBaseRepo(ctx); err != nil {
 		return "", err
 	}
@@ -66,6 +67,9 @@ func BuildMergeQueueCommit(ctx context.Context, pr *issues_model.PullRequest, do
 		}
 	}
 
+	if started, err := start(mergeCommitID); err != nil || !started {
+		return "", err
+	}
 	// the build is no push of a user: no hooks, so no push events, feeds or branch rows
 	mergeCtx.env = repo_module.InternalPushingEnvironment(ctx, doer, pr.BaseRepo)
 	if err := git.NewCommand(ctx, "push", "--force", "origin").AddDynamicArguments(baseBranch + ":" + git.BranchPrefix + branch).
@@ -75,9 +79,10 @@ func BuildMergeQueueCommit(ctx context.Context, pr *issues_model.PullRequest, do
 	return mergeCommitID, nil
 }
 
-// MergeQueued fast-forwards the base branch of pr to sha, a tested merge queue build that has pr on top of the
-// branch, as doer. The push runs the hooks: they check the branch protection again and mark pr merged.
-func MergeQueued(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, sha string) error {
+// MergeQueued fast-forwards base, the base branch of pr, from expectedOld to sha, a tested merge queue build that has pr
+// on top of expectedOld, as doer. The push runs the hooks: they check the branch protection again and mark pr merged.
+// An error after the push is only logged: the branch has moved.
+func MergeQueued(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, base, expectedOld, sha string) error {
 	defer pullWorkingPool.Lock(fmt.Sprint(pr.ID))()
 
 	pr, err := issues_model.GetPullRequestByID(ctx, pr.ID)
@@ -86,6 +91,9 @@ func MergeQueued(ctx context.Context, pr *issues_model.PullRequest, doer *user_m
 	}
 	if pr.HasMerged {
 		return models.ErrPullRequestHasMerged{ID: pr.ID, IssueID: pr.IssueID, HeadRepoID: pr.HeadRepoID, BaseRepoID: pr.BaseRepoID, HeadBranch: pr.HeadBranch, BaseBranch: pr.BaseBranch}
+	}
+	if pr.BaseBranch != base {
+		return &git.ErrPushOutOfDate{Err: fmt.Errorf("%v was retargeted from %s", pr, base)} // the next pass removes it
 	}
 	if err := pr.LoadIssue(ctx); err != nil {
 		return err
@@ -111,10 +119,15 @@ func MergeQueued(ctx context.Context, pr *issues_model.PullRequest, doer *user_m
 	}
 	env := append(repo_module.FullPushingEnvironment(ctx, headUser, doer, pr.BaseRepo, pr.BaseRepo.Name, pr.ID),
 		repo_module.EnvPushTrigger+"="+string(repo_module.PushTriggerMergeQueue))
-	// without --force: git refuses the push unless it fast-forwards the branch
-	if err := git.Push(ctx, pr.BaseRepo.RepoPath(), git.PushOptions{Remote: ".", Branch: sha + ":" + git.BranchPrefix + pr.BaseBranch, Env: env}); err != nil {
+	// only from the commit the build is on top of, so the push is a fast-forward and a branch moved meanwhile (also
+	// back to an ancestor) refuses it
+	ref := git.BranchPrefix + base
+	if err := git.Push(ctx, pr.BaseRepo.RepoPath(), git.PushOptions{Remote: ".", Branch: sha + ":" + ref, ForceWithLease: ref + ":" + expectedOld, Env: env}); err != nil {
 		return err
 	}
-	log.Trace("Merge queue fast-forwarded %s of %-v to %s for %-v", pr.BaseBranch, pr.BaseRepo, sha, pr)
-	return afterMerge(ctx, pr, doer, false)
+	log.Trace("Merge queue fast-forwarded %s of %-v to %s for %-v", base, pr.BaseRepo, sha, pr)
+	if err := afterMerge(ctx, pr, doer, false); err != nil {
+		log.Error("after the merge queue merged %-v: %v", pr, err)
+	}
+	return nil
 }

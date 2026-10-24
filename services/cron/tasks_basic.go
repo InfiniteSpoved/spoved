@@ -189,6 +189,13 @@ func registerProcessMergeQueues() {
 	}, func(ctx context.Context, _ *user_model.User, _ Config) error {
 		return mergequeue_service.TriggerAll(ctx)
 	})
+	RegisterTaskFatal("delete_stale_merge_queue_branches", &BaseConfig{
+		Enabled:    true,
+		RunAtStart: false,
+		Schedule:   "@every 24h",
+	}, func(ctx context.Context, _ *user_model.User, _ Config) error {
+		return mergequeue_service.DeleteStaleBranches(ctx)
+	})
 }
 
 func registerStartScheduledDispatches() {

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"forgejo.org/models"
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
@@ -51,6 +52,8 @@ var (
 	ErrNotRequired = errors.New("the target branch does not use a merge queue")
 	// ErrNotQueued is returned when a pull request that is not queued is removed
 	ErrNotQueued = errors.New("the pull request is not in the merge queue")
+	// ErrMerging is returned when the pull request can no longer be removed: the queue is merging it
+	ErrMerging = errors.New("the pull request is being merged")
 )
 
 // Reasons an entry leaves the queue without being merged, shown by repo/issue/view_content/merge_queue_reason
@@ -92,16 +95,22 @@ func claim(key string) bool {
 	return true
 }
 
-// release ends the claim unless the pass must run again, which it reports
-func release(key string, again bool) bool {
+// next reports whether the pass must run again, and clears the request
+func next(key string, again bool) bool {
 	running.Lock()
 	defer running.Unlock()
-	if again || running.again[key] {
-		running.again[key] = false
-		return true
-	}
+	again = again || running.again[key]
+	running.again[key] = false
+	return again
+}
+
+// release ends the claim; it reports whether a pass was asked for since the last next
+func release(key string) bool {
+	running.Lock()
+	defer running.Unlock()
+	again := running.again[key]
 	delete(running.again, key)
-	return false
+	return again
 }
 
 // Init starts the queue that runs the passes
@@ -126,7 +135,7 @@ func handler(items ...string) []string {
 			log.Error("could not parse merge queue key %q", key)
 			continue
 		}
-		ctx, _, finished := process.GetManager().AddContext(graceful.GetManager().HammerContext(), fmt.Sprintf("Merge queue of %s in repository %d", branch, repoID))
+		ctx, _, finished := process.GetManager().AddContext(audit_model.WithSystem(graceful.GetManager().HammerContext(), "merge_queue:"+key), fmt.Sprintf("Merge queue of %s in repository %d", branch, repoID))
 		if err := Process(ctx, repoID, branch); err != nil {
 			log.Error("Merge queue of %s in repository %d: %v", branch, repoID, err)
 		}
@@ -164,9 +173,21 @@ func queueStyle(rule *git_model.ProtectedBranch, style repo_model.MergeStyle) re
 	return style
 }
 
-// Add adds pr to the merge queue of its base branch for doer, after the checks of a merge with style. expectedHead,
-// if set, must be the head of the pull request.
-func Add(ctx context.Context, doer *user_model.User, perm *access_model.Permission, pr *issues_model.PullRequest, style repo_model.MergeStyle, expectedHead string, deleteBranch, adminSkipProtectionCheck bool) error {
+// AddOptions are the choices of a merge that adds a pull request to the merge queue
+type AddOptions struct {
+	Style        repo_model.MergeStyle
+	ExpectedHead string // if set, the head of the pull request must be this commit
+	DeleteBranch bool
+	SkipForward  bool // don't merge it forward; the caller checked that doer may skip it
+	Force        bool // a site or repository admin's merge that skips the exempt branch protections
+}
+
+// Add adds pr to the merge queue of its base branch for doer, after the checks of a merge with opts.
+func Add(ctx context.Context, doer *user_model.User, perm *access_model.Permission, pr *issues_model.PullRequest, opts AddOptions) error {
+	// the queue merges as the user who added it, and access token identities and the Actions user are no users
+	if doer == nil || doer.ID <= 0 {
+		return util.ErrPermissionDenied
+	}
 	if err := pr.LoadBaseRepo(ctx); err != nil {
 		return err
 	}
@@ -176,7 +197,7 @@ func Add(ctx context.Context, doer *user_model.User, perm *access_model.Permissi
 	} else if rule == nil {
 		return ErrNotRequired
 	}
-	style = queueStyle(rule, style)
+	style := queueStyle(rule, opts.Style)
 	// fast-forward only can't be combined with the pull requests ahead
 	if style != repo_model.MergeStyleMerge && style != repo_model.MergeStyleRebase && style != repo_model.MergeStyleRebaseMerge && style != repo_model.MergeStyleSquash {
 		return models.ErrInvalidMergeStyle{ID: pr.BaseRepoID, Style: style}
@@ -193,7 +214,7 @@ func Add(ctx context.Context, doer *user_model.User, perm *access_model.Permissi
 	} else if l.Reached() {
 		return quota_model.ErrPersonalRepoLimit{PersonalRepoLimit: l, OwnerID: pr.BaseRepo.OwnerID}
 	}
-	if err := pull_service.CheckPullMergeable(ctx, doer, perm, pr, pull_service.MergeCheckTypeGeneral, adminSkipProtectionCheck, style); err != nil {
+	if err := pull_service.CheckPullMergeable(ctx, doer, perm, pr, pull_service.MergeCheckTypeGeneral, opts.Force, style); err != nil {
 		return err
 	}
 
@@ -206,8 +227,8 @@ func Add(ctx context.Context, doer *user_model.User, perm *access_model.Permissi
 	if err != nil {
 		return err
 	}
-	if expectedHead != "" && expectedHead != head {
-		return models.ErrSHADoesNotMatch{GivenSHA: expectedHead, CurrentSHA: head}
+	if opts.ExpectedHead != "" && opts.ExpectedHead != head {
+		return models.ErrSHADoesNotMatch{GivenSHA: opts.ExpectedHead, CurrentSHA: head}
 	}
 
 	if err := db.WithTx(ctx, func(ctx context.Context) error {
@@ -216,7 +237,8 @@ func Add(ctx context.Context, doer *user_model.User, perm *access_model.Permissi
 			BaseBranch:   pr.BaseBranch,
 			PullID:       pr.ID,
 			MergeStyle:   style,
-			DeleteBranch: deleteBranch,
+			DeleteBranch: opts.DeleteBranch,
+			SkipForward:  opts.SkipForward,
 			HeadCommitID: head,
 			EnqueuedByID: doer.ID,
 		}); err != nil {
@@ -269,8 +291,21 @@ func Remove(ctx context.Context, doer *user_model.User, perm access_model.Permis
 // removeEntry deletes entry with a timeline comment by doer, unless it was deleted meanwhile
 func removeEntry(ctx context.Context, pr *issues_model.PullRequest, entry *pull_model.MergeQueueEntry, doer *user_model.User, reason, sha string) error {
 	return db.WithTx(ctx, func(ctx context.Context) error {
-		if deleted, err := pull_model.DeleteMergeQueueEntry(ctx, entry.ID); err != nil || !deleted {
+		del := pull_model.DeleteMergeQueueEntry
+		if reason == ReasonRemoved {
+			del = pull_model.DeleteMergeQueueEntryUnlessMerging // a merge under way wins over a removal by hand
+		}
+		if deleted, err := del(ctx, entry.ID); err != nil {
 			return err
+		} else if !deleted {
+			if reason == ReasonRemoved {
+				if e, err := pull_model.GetMergeQueueEntryByPullID(ctx, pr.ID); err != nil {
+					return err
+				} else if e != nil {
+					return ErrMerging
+				}
+			}
+			return nil
 		}
 		_, err := issues_model.CreateAutoMergeComment(ctx, issues_model.CommentTypePRRemovedFromMergeQueue, pr, doer, issues_model.AutoMergeInfo{Reason: reason, SHA: sha})
 		return err
@@ -302,21 +337,24 @@ func Process(ctx context.Context, repoID int64, branch string) error {
 	if !claim(key) {
 		return nil
 	}
-	for round := 1; ; round++ {
+	more := false
+	defer func() {
+		// on every way out, errors and panics included, so the branch is never left claimed
+		if release(key) || more {
+			shared.Trigger(repoID, branch)
+		}
+	}()
+	for range maxRounds {
 		again, err := processOnce(ctx, repoID, branch)
 		if err != nil {
-			release(key, false)
 			return err
 		}
-		if !release(key, again) {
-			return nil
-		}
-		if round == maxRounds {
-			release(key, false)
-			shared.Trigger(repoID, branch)
+		if !next(key, again) {
 			return nil
 		}
 	}
+	more = true
+	return nil
 }
 
 func processOnce(ctx context.Context, repoID int64, branch string) (again bool, err error) {
@@ -342,6 +380,11 @@ func processOnce(ctx context.Context, repoID int64, branch string) (again bool, 
 		again = p.again
 	}()
 	if len(entries) == 0 || repo.IsArchived {
+		return false, nil
+	}
+	if err := repo.LoadOwner(ctx); err != nil {
+		return false, err
+	} else if repo.Owner.IsArchived { // an archived organization's repositories take no writes
 		return false, nil
 	}
 	// the builds and merges go to this repository, which the size limit of its owner's personal repositories locks
@@ -374,7 +417,7 @@ func processOnce(ctx context.Context, repoID int64, branch string) (again bool, 
 	if err != nil {
 		return false, err
 	}
-	if err := p.checkChain(live, tip); err != nil {
+	if merging, err := p.checkChain(live, tip); err != nil || merging {
 		return false, err
 	}
 	if live, err = p.checkResults(live); err != nil {
@@ -453,9 +496,8 @@ func (p *pass) checkEntries(entries []*pull_model.MergeQueueEntry) ([]*item, err
 	return live, nil
 }
 
-// ineligible returns why it may no longer be merged, "" if it may. The branch protection is checked as the
-// pre-receive hook will check it when the queue merges: site admins skip it, rules exempt for admins are skipped
-// for repository and organization admins.
+// ineligible returns why it may no longer be merged, "" if it may. The branch protection is checked as the merge
+// checked it when the entry was added: rules exempt for admins are skipped for repository and organization admins.
 func (p *pass) ineligible(it *item) (string, error) {
 	pr := it.pr
 	if err := pr.LoadIssue(p.ctx); err != nil {
@@ -499,9 +541,6 @@ func (p *pass) ineligible(it *item) (string, error) {
 	} else if !noDeps {
 		return ReasonBlocked, nil
 	}
-	if doer.IsAdmin {
-		return "", nil
-	}
 	exempt := func(pb *git_model.ProtectedBranch) bool {
 		ok, err := pb.IsAdminExempt(p.ctx, doer, perm.IsAdmin())
 		if err != nil {
@@ -520,7 +559,18 @@ func (p *pass) ineligible(it *item) (string, error) {
 
 // checkChain makes the builds that are not on top of the branch tip and the builds ahead of them wait to be built
 // again: after a push to the branch, or when an entry ahead left the queue
-func (p *pass) checkChain(live []*item, tip string) error {
+func (p *pass) checkChain(live []*item, tip string) (merging bool, err error) {
+	// the branch is at a build of the chain: another server merged it and marks the pull requests merged, its pass
+	// goes on from there
+	for i, prev := 0, ""; i < len(live) && live[i].Status != pull_model.MergeQueueWaiting && (i == 0 || live[i].BaseCommitID == prev); i++ {
+		if live[i].BaseCommitID == tip {
+			break
+		}
+		if live[i].TempCommitID == tip {
+			return true, nil
+		}
+		prev = live[i].TempCommitID
+	}
 	prev, valid := tip, true
 	var reset []int64
 	for _, it := range live {
@@ -536,7 +586,7 @@ func (p *pass) checkChain(live []*item, tip string) error {
 		reset = append(reset, it.ID)
 		it.Status, it.BaseCommitID, it.TempCommitID, it.StartedUnix = pull_model.MergeQueueWaiting, "", "", 0
 	}
-	return pull_model.ResetMergeQueueBuilds(p.ctx, reset)
+	return false, pull_model.ResetMergeQueueBuilds(p.ctx, reset)
 }
 
 // checkResults reads the required status checks of the builds. The first failed build leaves the queue and the builds
@@ -630,7 +680,18 @@ func (p *pass) merge(live []*item) (int, bool) {
 	}
 	for i := 0; i <= last; i++ {
 		it := live[i]
-		if err := pull_service.MergeQueued(p.ctx, it.pr, it.doer, it.TempCommitID); err != nil {
+		if ok, err := pull_model.StartMergeQueueMerge(p.ctx, it.ID, it.TempCommitID); err != nil || !ok {
+			if err != nil {
+				log.Error("StartMergeQueueMerge[%d]: %v", it.ID, err)
+			}
+			p.again = true // removed or built again meanwhile
+			return i, false
+		}
+		ctx := p.ctx
+		if it.SkipForward {
+			ctx = pull_service.WithoutMergeForward(ctx)
+		}
+		if err := pull_service.MergeQueued(ctx, it.pr, it.doer, p.branch, it.BaseCommitID, it.TempCommitID); err != nil {
 			p.again = true
 			if git.IsErrPushOutOfDate(err) {
 				// the branch moved: the next pass builds again on top of it
@@ -697,7 +758,12 @@ func (p *pass) build(live []*item, tip string) error {
 			continue
 		}
 		rule := git_model.MergeQueueRule(p.rules)
-		sha, err := pull_service.BuildMergeQueueCommit(p.ctx, it.pr, it.doer, queueStyle(rule, it.MergeStyle), it.HeadCommitID, prev, it.TempBranch())
+		// the build is claimed before it is pushed, so another server building the same entry never pushes over it
+		started := false
+		sha, err := pull_service.BuildMergeQueueCommit(p.ctx, it.pr, it.doer, queueStyle(rule, it.MergeStyle), it.HeadCommitID, prev, it.TempBranch(), func(sha string) (ok bool, err error) {
+			started, err = pull_model.StartMergeQueueBuild(p.ctx, it.ID, prev, sha)
+			return started, err
+		})
 		if err != nil {
 			switch {
 			case models.IsErrMergeConflicts(err), models.IsErrRebaseConflicts(err), models.IsErrMergeUnrelatedHistories(err):
@@ -711,11 +777,15 @@ func (p *pass) build(live []*item, tip string) error {
 				}
 				continue
 			}
+			if started { // the push failed: build it again
+				if rerr := pull_model.ResetMergeQueueBuilds(p.ctx, []int64{it.ID}); rerr != nil {
+					log.Error("ResetMergeQueueBuilds [%d]: %v", it.ID, rerr)
+				}
+			}
 			return fmt.Errorf("build of %v: %w", it.pr, err)
 		}
-		started, err := pull_model.StartMergeQueueBuild(p.ctx, it.ID, prev, sha)
-		if err != nil || !started {
-			return err
+		if sha == "" {
+			return nil // another server builds it
 		}
 		it.Status, it.BaseCommitID, it.TempCommitID, it.StartedUnix = pull_model.MergeQueueBuilding, prev, sha, timeutil.TimeStampNow()
 		log.Trace("Merge queue of %s in %-v: built %-v at %s", p.branch, p.repo, it.pr, sha)
@@ -733,14 +803,19 @@ func (p *pass) deleteStaleBranches() {
 		log.Error("FindMergeQueue: %v", err)
 		return
 	}
+	deleteStaleBuildBranches(p.ctx, p.repo, p.branch+"/", entries)
+}
+
+// deleteStaleBuildBranches deletes the build branches of repo below merge-queue/<prefix> that belong to none of entries
+func deleteStaleBuildBranches(ctx context.Context, repo *repo_model.Repository, prefix string, entries []*pull_model.MergeQueueEntry) {
 	live := make(map[int64]bool, len(entries))
 	for _, e := range entries {
 		live[e.ID] = true
 	}
-	prefix := git.BranchPrefix + pull_model.MergeQueueBranchPrefix + p.branch + "/"
-	stdout, _, err := git.NewCommand(p.ctx, "for-each-ref", "--format=%(refname)").AddDynamicArguments(prefix).RunStdString(&git.RunOpts{Dir: p.repo.RepoPath()})
+	prefix = git.BranchPrefix + pull_model.MergeQueueBranchPrefix + prefix
+	stdout, _, err := git.NewCommand(ctx, "for-each-ref", "--format=%(refname)").AddDynamicArguments(prefix).RunStdString(&git.RunOpts{Dir: repo.RepoPath()})
 	if err != nil {
-		log.Error("for-each-ref %s in %-v: %v", prefix, p.repo, err)
+		log.Error("for-each-ref %s in %-v: %v", prefix, repo, err)
 		return
 	}
 	for ref := range strings.FieldsSeq(stdout) {
@@ -748,10 +823,59 @@ func (p *pass) deleteStaleBranches() {
 		if err != nil || live[id] {
 			continue // another branch's build ("main" and "main/x"), or a live one
 		}
-		if err := git.NewCommand(p.ctx, "update-ref", "-d").AddDynamicArguments(ref).Run(&git.RunOpts{Dir: p.repo.RepoPath()}); err != nil {
-			log.Error("Unable to delete %s in %-v: %v", ref, p.repo, err)
+		if err := git.NewCommand(ctx, "update-ref", "-d").AddDynamicArguments(ref).Run(&git.RunOpts{Dir: repo.RepoPath()}); err != nil {
+			log.Error("Unable to delete %s in %-v: %v", ref, repo, err)
 		}
 	}
+}
+
+// DeleteStaleBranches deletes the build branches that belong to no entry in the repositories that have a merge
+// queue rule (repository, project or organization), or entries: the ones a pass that ended early left behind
+func DeleteStaleBranches(ctx context.Context) error {
+	repoIDs, err := pull_model.FindMergeQueueRepoIDs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, id := range repoIDs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		repo, err := repo_model.GetRepositoryByID(ctx, id)
+		if repo_model.IsErrRepoNotExist(err) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		entries, err := pull_model.FindMergeQueueOfRepo(ctx, id)
+		if err != nil {
+			return err
+		}
+		keys := map[string]bool{}
+		for _, e := range entries {
+			keys[e.BaseBranch] = true
+		}
+		// one branch at a time, so a build of the branch "a/1" is never taken for build 1 of the branch "a"
+		stdout, _, err := git.NewCommand(ctx, "for-each-ref", "--format=%(refname:lstrip=3)").AddDynamicArguments(git.BranchPrefix + pull_model.MergeQueueBranchPrefix).RunStdString(&git.RunOpts{Dir: repo.RepoPath()})
+		if err != nil {
+			log.Error("for-each-ref in %-v: %v", repo, err)
+			continue
+		}
+		for name := range strings.FieldsSeq(stdout) {
+			if i := strings.LastIndexByte(name, '/'); i > 0 {
+				keys[name[:i]] = true
+			}
+		}
+		for branch := range keys {
+			var of []*pull_model.MergeQueueEntry
+			for _, e := range entries {
+				if e.BaseBranch == branch {
+					of = append(of, e)
+				}
+			}
+			deleteStaleBuildBranches(ctx, repo, branch+"/", of)
+		}
+	}
+	return nil
 }
 
 // since is the time from t to now, on the clock the tests can set

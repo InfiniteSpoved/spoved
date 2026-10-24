@@ -103,6 +103,7 @@ func TestValidateMergeQueue(t *testing.T) {
 		{ProtectedBranch{MergeQueueBuildConcurrency: -1}, false},
 		{ProtectedBranch{MergeQueueMinGroupSize: 6}, false}, // above the default maximum
 		{ProtectedBranch{MergeQueueMinGroupSize: 4, MergeQueueMaxGroupSize: 3}, false},
+		{ProtectedBranch{MergeQueueMinGroupSize: 3, MergeQueueMaxGroupSize: 10, MergeQueueBuildConcurrency: 2}, false}, // never that many passed at once
 		{ProtectedBranch{MergeQueueWaitMinutes: 1441}, false},
 		{ProtectedBranch{MergeQueueCheckTimeoutMinutes: 1441}, false},
 	} {

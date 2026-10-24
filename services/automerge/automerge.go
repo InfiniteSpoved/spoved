@@ -448,7 +448,7 @@ func handlePullRequestAutoMerge(pullID int64, sha string) {
 		log.Error("%-v mergequeue.Rule: %v", pr, err)
 		return
 	} else if rule != nil {
-		if err := mergequeue.Add(ctx, doer, &perm, pr, scheduledPRM.MergeStyle, sha, scheduledPRM.DeleteBranchAfterMerge, false); err != nil {
+		if err := mergequeue.Add(ctx, doer, &perm, pr, mergequeue.AddOptions{Style: scheduledPRM.MergeStyle, ExpectedHead: sha, DeleteBranch: scheduledPRM.DeleteBranchAfterMerge, SkipForward: scheduledPRM.SkipMergeForward}); err != nil {
 			log.Warn("Auto merge of %-v was removed but adding it to the merge queue failed: %v", pr, err)
 			skipAutoMerge(ctx, pr, scheduledPRM, "merge_failed", sha)
 		}

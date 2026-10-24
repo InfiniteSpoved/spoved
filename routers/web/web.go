@@ -1955,7 +1955,7 @@ func registerRoutes(m *web.Route) {
 		})
 
 		m.Get("/pulls/posters", repo.PullPosters)
-		m.Get("/merge-queue/*", repo.MergeQueue)
+		m.Get("/merge-queue/*", reqRepoPullsReader, repo.MustAllowPulls, repo.MergeQueue)
 		m.Group("/pulls/{index}", func() {
 			m.Get("", repo.SetWhitespaceBehavior, repo.GetPullDiffStats, context.EnsureOrg(), repo.ViewIssue)
 			m.Get(".diff", common.RateLimitHeavyPlain, repo.DownloadPullDiff)
