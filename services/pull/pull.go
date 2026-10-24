@@ -584,17 +584,23 @@ func ValidatePullRequest(ctx context.Context, pr *issues_model.PullRequest, newC
 		return
 	}
 
-	changed, err := testPatchCtx.gitRepo.CheckIfDiffDiffers(testPatchCtx.baseRev, oldCommitID, newCommitID, testPatchCtx.env)
+	// the reviews are fresh only if the pull request's diff, each from its own merge base, is still the one reviewed;
+	// anything that can't be compared counts as changed
+	mergeBase, err := testPatchCtx.gitRepo.GetMergeBaseSimple(testPatchCtx.baseRev, newCommitID)
 	if err != nil {
-		log.Error("CheckIfDiffDiffers: %v", err)
+		log.Error("%-v merge base: %v", pr, err)
+	}
+	changed := true
+	if err == nil && mergeBase != "" && pr.MergeBase != "" {
+		if changed, err = testPatchCtx.gitRepo.CheckIfDiffDiffers(pr.MergeBase, oldCommitID, mergeBase, newCommitID, testPatchCtx.env); err != nil {
+			log.Error("CheckIfDiffDiffers: %v", err)
+		}
 	}
 	if changed {
 		markReviewsStale(ctx, doer, pr)
 	}
 	// a head that is back is the reviewed diff only over the merge base the review was made against
-	if mergeBase, err := mergeBaseOf(ctx, pr); err != nil {
-		log.Error("%-v merge base: %v", pr, err)
-	} else if mergeBase != "" {
+	if mergeBase != "" {
 		if err := issues_model.MarkReviewsAsNotStale(ctx, pr.IssueID, newCommitID, mergeBase); err != nil {
 			log.Error("MarkReviewsAsNotStale: %v", err)
 		}

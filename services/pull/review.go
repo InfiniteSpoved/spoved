@@ -456,7 +456,16 @@ func SubmitReview(ctx context.Context, doer *user_model.User, gitRepo *git.Repos
 				return nil, nil, err
 			}
 
-			stale, err = testPatchCtx.gitRepo.CheckIfDiffDiffers(testPatchCtx.baseRev, commitID, headCommitID, testPatchCtx.env)
+			// the reviewed commit's diff and the head's, each from its merge base with the base branch
+			reviewedMergeBase, err := testPatchCtx.gitRepo.GetMergeBaseSimple(testPatchCtx.baseRev, commitID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("GetMergeBaseSimple: %w", err)
+			}
+			headMergeBase, err := testPatchCtx.gitRepo.GetMergeBaseSimple(testPatchCtx.baseRev, headCommitID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("GetMergeBaseSimple: %w", err)
+			}
+			stale, err = testPatchCtx.gitRepo.CheckIfDiffDiffers(reviewedMergeBase, commitID, headMergeBase, headCommitID, testPatchCtx.env)
 			if err != nil {
 				return nil, nil, fmt.Errorf("CheckIfDiffDiffers: %w", err)
 			}

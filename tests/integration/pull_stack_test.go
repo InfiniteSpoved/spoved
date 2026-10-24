@@ -10,6 +10,8 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +29,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
+	"forgejo.org/modules/process"
 	api "forgejo.org/modules/structs"
 	notify_service "forgejo.org/services/notify"
 	pull_service "forgejo.org/services/pull"
@@ -193,6 +196,34 @@ func waitChecked(t *testing.T, prs ...*issues_model.PullRequest) {
 		}
 		return true
 	}, 10*time.Second, 50*time.Millisecond)
+}
+
+// waitPullSynced waits until the pull request refs of prs point at their head branches and no test task started by a
+// push is running, so what the push changed on their reviews is done.
+func waitPullSynced(t *testing.T, repo *repo_model.Repository, prs ...*issues_model.PullRequest) {
+	t.Helper()
+	gitRepo, err := gitrepo.OpenRepository(db.DefaultContext, repo)
+	require.NoError(t, err)
+	defer gitRepo.Close()
+	assert.Eventually(t, func() bool {
+		for _, pr := range prs {
+			head, err := gitRepo.GetRefCommitID(pr.GetGitRefName())
+			if err != nil {
+				return false
+			}
+			if branch, err := gitRepo.GetBranchCommitID(pr.HeadBranch); err != nil || branch != head {
+				return false
+			}
+		}
+		processes, _ := process.GetManager().Processes(true, true)
+		for _, p := range processes {
+			if strings.HasPrefix(p.Description, "AddTestPullRequestTask") {
+				return false
+			}
+		}
+		return true
+	}, 10*time.Second, 50*time.Millisecond)
+	waitChecked(t, prs...)
 }
 
 func TestPullStack(t *testing.T) {
@@ -776,6 +807,113 @@ func TestPullStackStaleReviews(t *testing.T) {
 		t.Run("PushedAwayAndBackOverOtherBase", func(t *testing.T) {
 			assert.True(t, pushedAwayAndBack(t, true))
 		})
+
+		// A writer hides a change in b with real pushes: the change goes on a and on b, so b's diff over a doesn't show
+		// it, then a is pushed back. b's approval must not count for the change it never showed.
+		hiddenChange := func(t *testing.T, ignoreStale bool) {
+			approver := forgery.CreateUser(t, nil)
+			writer := forgery.CreateUser(t, nil)
+			repo := forgery.CreateRepository(t, user2, &forgery.CreateRepositoryOptions{
+				Files: forgery.MapFS{"README.md": forgery.MapFile("stack")},
+				Collaborators: map[*user_model.User]perm.AccessMode{
+					approver: perm.AccessModeWrite,
+					writer:   perm.AccessModeWrite,
+				},
+			})
+			stackCommit(t, user2, repo, "main", "a", "create", "a.txt", "a")
+			stackCommit(t, user2, repo, "a", "b", "create", "b.txt", "b")
+			prs := []*issues_model.PullRequest{stackPull(t, user2, repo, "main", "a"), stackPull(t, user2, repo, "a", "b")}
+			require.NoError(t, git_model.UpdateProtectBranch(db.DefaultContext, repo, &git_model.ProtectedBranch{
+				RepoID:                repo.ID,
+				RuleName:              "main",
+				RequiredApprovals:     1,
+				DismissStaleApprovals: !ignoreStale,
+				IgnoreStaleApprovals:  ignoreStale,
+			}, git_model.WhitelistOptions{}))
+			waitChecked(t, prs...)
+			approvePull(t, repo, prs[0], approver)
+			review := approvePull(t, repo, prs[1], approver)
+
+			cloneURL, _ := url.Parse(u.String() + repo.FullName() + ".git")
+			cloneURL.User = url.UserPassword(writer.Name, userPassword)
+			dstPath := t.TempDir()
+			require.NoError(t, git.CloneWithArgs(t.Context(), nil, cloneURL.String(), dstPath, git.CloneRepoOptions{}))
+			doGitSetRemoteURL(dstPath, "origin", cloneURL)(t)
+			run := func(args ...string) string {
+				t.Helper()
+				stdout, _, err := git.NewCommand(t.Context()).AddArguments(git.ToTrustedCmdArgs(args)...).RunStdString(&git.RunOpts{Dir: dstPath})
+				require.NoError(t, err)
+				return strings.TrimSpace(stdout)
+			}
+			addEvil := func(branch string) {
+				t.Helper()
+				run("checkout", "-q", branch)
+				require.NoError(t, os.WriteFile(filepath.Join(dstPath, "evil.txt"), []byte("evil"), 0o600))
+				run("add", "evil.txt")
+				run("-c", "user.name=writer", "-c", "user.email=writer@example.com", "commit", "-q", "-m", "evil")
+				run("push", "-q", "origin", branch)
+			}
+			h1 := run("rev-parse", "origin/a")
+
+			// 1. a gets the change: its approval is stale
+			addEvil("a")
+			waitPullSynced(t, repo, prs...)
+			// 2. b gets the same change, which its diff over a doesn't show
+			addEvil("b")
+			waitPullSynced(t, repo, prs...)
+			assert.True(t, isStale(review))
+			// 3. a is pushed back: b now adds the change, and its approval stays stale
+			run("push", "-q", "--force", "origin", h1+":refs/heads/a")
+			waitPullSynced(t, repo, prs...)
+			assert.True(t, isStale(review))
+
+			// 4. a is approved again at its old head; the stack stops at b and the change never reaches main
+			approvePull(t, repo, prs[0], approver)
+			merged, err := mergeStack(t, user2, repo, prs[1], repo_model.MergeStyleMerge, stackHeads(t, repo, prs...))
+			assert.Empty(t, merged)
+			innerErr := requireStackMergeError(t, err, prs[1].Index)
+			assert.True(t, models.IsErrDisallowedToMerge(innerErr), "%v", innerErr)
+			assertMerged(t, false, prs...)
+
+			gitRepo, err := gitrepo.OpenRepository(t.Context(), repo)
+			require.NoError(t, err)
+			defer gitRepo.Close()
+			mainCommit, err := gitRepo.GetBranchCommit("main")
+			require.NoError(t, err)
+			_, err = mainCommit.GetTreeEntryByPath("evil.txt")
+			assert.True(t, git.IsErrNotExist(err), "%v", err)
+		}
+		t.Run("HiddenChangeDismiss", func(t *testing.T) {
+			hiddenChange(t, false)
+		})
+		t.Run("HiddenChangeIgnoreStale", func(t *testing.T) {
+			hiddenChange(t, true)
+		})
+
+		// updating the head from the base branch replays the reviewed changes: the approval stays fresh
+		for _, rebase := range []bool{false, true} {
+			t.Run(fmt.Sprintf("UpdateBranchKeepsApproval-rebase=%v", rebase), func(t *testing.T) {
+				reviewer := forgery.CreateUser(t, nil)
+				lines := strings.Repeat("line\n", 20)
+				repo := forgery.CreateRepository(t, user2, &forgery.CreateRepositoryOptions{
+					Files:         forgery.MapFS{"README.md": forgery.MapFile("stack"), "f.txt": forgery.MapFile("first\n" + lines + "last\n")},
+					Collaborators: map[*user_model.User]perm.AccessMode{reviewer: perm.AccessModeWrite},
+				})
+				stackCommit(t, user2, repo, "main", "x", "update", "f.txt", "first\n"+lines+"changed by x\n")
+				x := stackPull(t, user2, repo, "main", "x")
+				waitChecked(t, x)
+				review := approvePull(t, repo, x, reviewer)
+				// main changes the same file elsewhere
+				stackCommit(t, user2, repo, "main", "main", "update", "f.txt", "changed by main\n"+lines+"last\n")
+				waitPullSynced(t, repo, x)
+				require.False(t, isStale(review))
+
+				x = unittest.AssertExistsAndLoadBean(t, &issues_model.PullRequest{ID: x.ID})
+				require.NoError(t, pull_service.Update(db.DefaultContext, x, user2, "update", rebase))
+				waitPullSynced(t, repo, x)
+				assert.False(t, isStale(review))
+			})
+		}
 
 		for _, style := range []repo_model.MergeStyle{repo_model.MergeStyleSquash, repo_model.MergeStyleRebase} {
 			for _, ignoreStale := range []bool{false, true} {
