@@ -44,6 +44,11 @@ const (
 	KindOrgDeployKey Kind = "org_deploy_key"
 	// KindProjectDeployKey is an organization deploy key of the repository's project.
 	KindProjectDeployKey Kind = "project_deploy_key"
+	// KindRepoToken, KindProjectToken and KindOrgToken are access tokens of the repository, its project and its
+	// organization.
+	KindRepoToken    Kind = "repo_token"
+	KindProjectToken Kind = "project_token"
+	KindOrgToken     Kind = "org_token"
 	// KindInstanceRoles stands for the site admins and auditors, whom only site admins see by name.
 	KindInstanceRoles Kind = "instance_roles"
 )
@@ -70,8 +75,9 @@ type Row struct {
 	Anonymous    bool             // pseudo-row for anyone, signed in or not; otherwise a pseudo-row is for any signed-in user, or any member of the private owner org (KindOrgMember)
 	DeployKey    *asymkey_model.DeployKey
 	OrgDeployKey *asymkey_model.OrgDeployKey
-	Team         *organization.Team // a team shown as one row, for viewers outside the org
-	OrgMember    bool               // the user is a member of the repository's owner org
+	AccessToken  *auth_model.AccessToken // a token of the repository, its project or its organization
+	Team         *organization.Team      // a team shown as one row, for viewers outside the org
+	OrgMember    bool                    // the user is a member of the repository's owner org
 	Repo         *repo_model.Repository
 	Perm         access_model.Permission
 	Paths        []*Path
@@ -190,7 +196,39 @@ func Compute(ctx context.Context, opts Options) ([]*Row, error) {
 			rows = append(rows, deployKeyRow(&Row{OrgDeployKey: &k.OrgDeployKey, Repo: repo}, kind, k.Mode, k.IsExpired()))
 		}
 	}
+	covered := make([]auth_model.CoveredRepo, 0, len(repos))
+	for _, r := range repos {
+		if !r.IsTrashed() {
+			covered = append(covered, auth_model.CoveredRepo{ID: r.ID, OwnerID: r.OwnerID, GroupID: r.GroupID})
+		}
+	}
+	tokens, err := auth_model.FindOwnedAccessTokensCoveringRepos(ctx, covered)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range covered {
+		for _, t := range tokens[r.ID] {
+			rows = append(rows, tokenRow(byID[r.ID], t))
+		}
+	}
 	return rows, nil
+}
+
+// tokenRow fills the access of an access token row as accessTokenBotPermission decides it: the token's permission on
+// every unit, none once it has expired (the path stays, not applied).
+func tokenRow(repo *repo_model.Repository, t *auth_model.AccessToken) *Row {
+	kind := map[auth_model.AccessTokenOwnerType]Kind{
+		auth_model.AccessTokenOwnerRepo: KindRepoToken, auth_model.AccessTokenOwnerProject: KindProjectToken, auth_model.AccessTokenOwnerOrg: KindOrgToken,
+	}[t.OwnerType]
+	mode := min(t.Mode, perm_model.AccessModeAdmin)
+	r := &Row{AccessToken: t, Repo: repo, Paths: []*Path{{Kind: kind, Mode: mode, Applied: t.IsUsable()}}}
+	if t.IsUsable() {
+		r.Perm = access_model.Permission{AccessMode: mode, Units: repo.Units, UnitsMode: make(map[unit.Type]perm_model.AccessMode, len(repo.Units))}
+		for _, u := range repo.Units {
+			r.Perm.UnitsMode[u.Type] = mode
+		}
+	}
+	return r
 }
 
 // deployKeyRow fills the access of a deploy key row: the code only, read at most on an archived repository, and none

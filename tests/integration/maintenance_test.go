@@ -337,7 +337,7 @@ func TestMaintenanceAllowed(t *testing.T) {
 		routes.Add(method + " " + strings.ReplaceAll(route, "/*/", "/"))
 		return nil
 	}))
-	for _, list := range []container.Set[string]{common.MaintenanceSignInRoutes, common.MaintenanceReadRoutes, common.MaintenanceAdminRoutes} {
+	for _, list := range []container.Set[string]{common.MaintenanceSignInRoutes, common.MaintenanceReadRoutes, common.MaintenanceRevokeRoutes, common.MaintenanceAdminRoutes} {
 		for r := range list {
 			assert.True(t, routes.Contains(r), r)
 		}

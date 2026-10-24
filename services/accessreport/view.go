@@ -80,7 +80,7 @@ func ForRepos(ctx context.Context, repoIDs []int64, admin bool, doer *user_model
 			hideGroups(r, !isOwner)
 		}
 	}
-	// Compute lists the deploy keys after all the repositories
+	// Compute lists the deploy keys and tokens after all the repositories
 	slices.SortStableFunc(rows, func(a, b *Row) int { return cmp.Compare(a.Repo.ID, b.Repo.ID) })
 	if !admin {
 		f.InactiveDays = 0
@@ -115,11 +115,13 @@ func hideGroups(r *Row, all bool) {
 	}
 }
 
-// Type is the type of identity of the row: person, bot or key, or "" for the other rows.
+// Type is the type of identity of the row: person, bot, key or token, or "" for the other rows.
 func (r *Row) Type() string {
 	switch {
 	case r.DeployKey != nil, r.OrgDeployKey != nil:
 		return "key"
+	case r.AccessToken != nil:
+		return "token"
 	case r.User == nil:
 		return ""
 	case r.User.Type == user_model.UserTypeBot:
@@ -133,7 +135,7 @@ func (r *Row) Type() string {
 type Filter struct {
 	Mode         perm_model.AccessMode // at least this access, on Unit if set
 	Unit         unit.Type
-	Type         string // person, bot or key
+	Type         string // person, bot, key or token
 	ExternalOnly bool   // collaborators who aren't members of the owner org
 	InactiveDays int    // users who haven't signed in for that many days
 }

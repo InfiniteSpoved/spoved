@@ -8010,6 +8010,218 @@
         }
       }
     },
+    "/orgs/{org}/projects/{id}/tokens": {
+      "get": {
+        "description": "Tokens that belong to the project, not to a user. Their values are never shown again.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "List the access tokens of a project",
+        "operationId": "orgProjectListAccessTokens",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the project",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/AccessTokenList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "post": {
+        "description": "The token belongs to the project, not to a user, and acts as its own identity with the given permission on every repository in the project. A token creating it must hold every scope it grants and must not expire before it.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Create an access token of a project",
+        "operationId": "orgProjectCreateAccessToken",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the project",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/CreateOwnedAccessTokenOption"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "$ref": "#/responses/AccessToken"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/projects/{id}/tokens/{token_id}": {
+      "delete": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Delete (revoke) an access token of a project",
+        "operationId": "orgProjectDeleteAccessToken",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the project",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the token",
+            "name": "token_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/projects/{id}/tokens/{token_id}/rotate": {
+      "post": {
+        "description": "The old secret stops working at once. An expired token may be rotated.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Rotate an access token of a project, giving it a new secret shown only in this answer and keeping everything else",
+        "operationId": "orgProjectRotateAccessToken",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the project",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the token",
+            "name": "token_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/RotateOwnedAccessTokenOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/AccessToken"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/orgs/{org}/public_members": {
       "get": {
         "produces": [
@@ -8636,6 +8848,186 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/tokens": {
+      "get": {
+        "description": "Tokens that belong to the organization, not to a user. Their values are never shown again.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "List the access tokens of an organization",
+        "operationId": "orgListAccessTokens",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/AccessTokenList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "post": {
+        "description": "The token belongs to the organization, not to a user, and acts as its own identity with the given permission on every repository of the organization, or only on the selected ones. A token creating it must hold every scope it grants and must not expire before it.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Create an access token of an organization",
+        "operationId": "orgCreateAccessToken",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/CreateOwnedAccessTokenOption"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "$ref": "#/responses/AccessToken"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/tokens/{id}": {
+      "delete": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Delete (revoke) an access token of an organization",
+        "operationId": "orgDeleteAccessToken",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the token",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/tokens/{id}/rotate": {
+      "post": {
+        "description": "The old secret stops working at once. An expired token may be rotated.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Rotate an access token of an organization, giving it a new secret shown only in this answer and keeping everything else",
+        "operationId": "orgRotateAccessToken",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the token",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/RotateOwnedAccessTokenOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/AccessToken"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -23754,6 +24146,214 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/tokens": {
+      "get": {
+        "description": "Tokens that belong to the repository, not to a user. Their values are never shown again.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "List the access tokens of a repository",
+        "operationId": "repoListAccessTokens",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/AccessTokenList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "post": {
+        "description": "The token belongs to the repository, not to a user, and acts as its own identity with the given permission on this repository only. A token creating it must hold every scope it grants and must not expire before it.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Create an access token of a repository",
+        "operationId": "repoCreateAccessToken",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/CreateOwnedAccessTokenOption"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "$ref": "#/responses/AccessToken"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/tokens/{id}": {
+      "delete": {
+        "tags": [
+          "repository"
+        ],
+        "summary": "Delete (revoke) an access token of a repository",
+        "operationId": "repoDeleteAccessToken",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the token",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/tokens/{id}/rotate": {
+      "post": {
+        "description": "The old secret stops working at once. An expired token may be rotated.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Rotate an access token of a repository, giving it a new secret shown only in this answer and keeping everything else",
+        "operationId": "repoRotateAccessToken",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the token",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/RotateOwnedAccessTokenOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/AccessToken"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/topics": {
       "get": {
         "produces": [
@@ -25283,6 +25883,33 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/tokens/self/rotate": {
+      "post": {
+        "description": "The token must allow self-rotate. Its old secret stops working at once, and the new one, shown only in this answer, gets the default lifetime (30 days, capped at the instance's maximum), or keeps none where the instance allows it.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "user"
+        ],
+        "summary": "Rotate the access token of an organization, a project or a repository that makes this request",
+        "operationId": "rotateSelfAccessToken",
+        "responses": {
+          "200": {
+            "$ref": "#/responses/AccessToken"
+          },
+          "401": {
+            "$ref": "#/responses/unauthorized"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
           }
         }
       }
@@ -28902,6 +29529,35 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "AccessAccessToken": {
+      "description": "AccessAccessToken is an access token of a repository, a project or an organization in an access report",
+      "type": "object",
+      "properties": {
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Expires"
+        },
+        "id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "scopes": {
+          "description": "the API scopes of the token, which can be fewer than the units the permission lists",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Scopes"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "AccessCredential": {
       "description": "AccessCredential is an SSH key, access token or OAuth2 grant of a user",
       "type": "object",
@@ -28989,7 +29645,7 @@
           "x-go-name": "Applied"
         },
         "kind": {
-          "description": "owner, site_admin, auditor, org_owner, admin_team, team, collaborator, public, internal, org_member,\ndeploy_key, org_deploy_key, project_deploy_key or instance_roles",
+          "description": "owner, site_admin, auditor, org_owner, admin_team, team, collaborator, public, internal, org_member,\ndeploy_key, org_deploy_key, project_deploy_key, repo_token, project_token, org_token or instance_roles",
           "type": "string",
           "x-go-name": "Kind"
         },
@@ -29054,7 +29710,7 @@
           "x-go-name": "LastPush"
         },
         "name": {
-          "description": "user, deploy key or team name",
+          "description": "user, deploy key, access token or team name",
           "type": "string",
           "x-go-name": "Name"
         },
@@ -29065,6 +29721,14 @@
         "repository": {
           "type": "string",
           "x-go-name": "Repository"
+        },
+        "scopes": {
+          "description": "the API scopes of an access token, which can be fewer than the units its permission lists",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Scopes"
         },
         "suspended": {
           "description": "the user can't sign in, or isn't activated",
@@ -29080,7 +29744,7 @@
           "x-go-name": "TwoFactor"
         },
         "type": {
-          "description": "person, bot, key, team, anyone, signed_in, org_members or instance_roles",
+          "description": "person, bot, key, token, team, anyone, signed_in, org_members or instance_roles",
           "type": "string",
           "x-go-name": "Type"
         },
@@ -29108,6 +29772,9 @@
           "type": "string",
           "x-go-name": "Access"
         },
+        "access_token": {
+          "$ref": "#/definitions/AccessAccessToken"
+        },
         "deploy_key": {
           "$ref": "#/definitions/AccessDeployKey"
         },
@@ -29126,7 +29793,7 @@
           "$ref": "#/definitions/AccessTeam"
         },
         "type": {
-          "description": "person, bot, key, team, anyone, signed_in or instance_roles",
+          "description": "person, bot, key, token, team, anyone, signed_in or instance_roles",
           "type": "string",
           "x-go-name": "Type"
         },
@@ -29173,6 +29840,16 @@
           "format": "date-time",
           "x-go-name": "Created"
         },
+        "created_by": {
+          "description": "The login of who created a token of an organization, a project or a repository. Omitted for a personal access\ntoken.",
+          "type": "string",
+          "x-go-name": "CreatedBy"
+        },
+        "description": {
+          "description": "What a token of an organization, a project or a repository is for, if its creator said",
+          "type": "string",
+          "x-go-name": "Description"
+        },
         "expires_at": {
           "description": "When the token expires, omitted if never",
           "type": "string",
@@ -29184,9 +29861,25 @@
           "format": "int64",
           "x-go-name": "ID"
         },
+        "last_used_at": {
+          "description": "When a token of an organization, a project or a repository was last used, omitted if never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "LastUsed"
+        },
+        "last_used_ip": {
+          "description": "The client address of that use, omitted when unknown",
+          "type": "string",
+          "x-go-name": "LastUsedIP"
+        },
         "name": {
           "type": "string",
           "x-go-name": "Name"
+        },
+        "permission": {
+          "description": "The permission of a token of an organization, a project or a repository on the repositories it covers: read,\nwrite or admin. Omitted for a personal access token.",
+          "type": "string",
+          "x-go-name": "Permission"
         },
         "repositories": {
           "description": "Indicates that an access token only has access to the specified repositories.  Will be null if the access token\nis not limited to a set of specified repositories.",
@@ -29196,12 +29889,33 @@
           },
           "x-go-name": "Repositories"
         },
+        "rotated_at": {
+          "description": "When a token of an organization, a project or a repository was last rotated, omitted if never",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Rotated"
+        },
+        "rotated_by": {
+          "description": "The login of who rotated it last, omitted when it rotated itself (rotated_by_self) or never was",
+          "type": "string",
+          "x-go-name": "RotatedBy"
+        },
+        "rotated_by_self": {
+          "description": "Whether it rotated itself last",
+          "type": "boolean",
+          "x-go-name": "RotatedBySelf"
+        },
         "scopes": {
           "type": "array",
           "items": {
             "type": "string"
           },
           "x-go-name": "Scopes"
+        },
+        "self_rotate": {
+          "description": "Whether a token of an organization, a project or a repository may rotate itself (POST /tokens/self/rotate)",
+          "type": "boolean",
+          "x-go-name": "SelfRotate"
         },
         "sha1": {
           "type": "string",
@@ -32508,6 +33222,67 @@
         "website": {
           "type": "string",
           "x-go-name": "Website"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "CreateOwnedAccessTokenOption": {
+      "description": "CreateOwnedAccessTokenOption options to create an access token of an organization, a project or a repository",
+      "type": "object",
+      "required": [
+        "name",
+        "scopes",
+        "permission"
+      ],
+      "properties": {
+        "description": {
+          "description": "What the token is for, at most 255 characters",
+          "type": "string",
+          "x-go-name": "Description"
+        },
+        "expires_at": {
+          "description": "When it expires. Required by default, at most 365 days from today ([security] ACCESS_TOKEN_EXPIRY_REQUIRED and ACCESS_TOKEN_MAX_LIFETIME_DAYS); omit for never only when the instance allows it",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ExpiresAt"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "permission": {
+          "description": "What the token may do on the repositories it covers; the lower of this and its scopes applies",
+          "type": "string",
+          "enum": [
+            "read",
+            "write",
+            "admin"
+          ],
+          "x-go-name": "Permission"
+        },
+        "repositories": {
+          "description": "Organization tokens only: the repositories it covers, as \"repo\" or \"project/repo\". Omitted or null covers\nevery repository of the organization, also ones created later.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Repositories"
+        },
+        "scopes": {
+          "description": "At least one of read:repository, write:repository, read:issue, write:issue, read:package, write:package and\nread:organization",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Scopes",
+          "example": [
+            "write:repository"
+          ]
+        },
+        "self_rotate": {
+          "description": "Let the token rotate itself with POST /tokens/self/rotate",
+          "type": "boolean",
+          "x-go-name": "SelfRotate"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -39713,6 +40488,19 @@
       "type": "string",
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "RotateOwnedAccessTokenOption": {
+      "description": "RotateOwnedAccessTokenOption options to rotate an access token of an organization, a project or a repository",
+      "type": "object",
+      "properties": {
+        "expires_at": {
+          "description": "When the new secret expires; omitted gives the default lifetime (30 days, capped at the instance's maximum),\nor none for a token without an expiry where the instance allows it",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ExpiresAt"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "ScheduledWorkflowRun": {
       "description": "ScheduledWorkflowRun represents a manual workflow run that starts at a chosen time",
       "type": "object",
@@ -41207,6 +41995,14 @@
           "type": "string",
           "format": "date-time"
         },
+        "created_by": {
+          "type": "string",
+          "description": "The login of who created a token of an organization, a project or a repository. Omitted for a personal access\ntoken."
+        },
+        "description": {
+          "type": "string",
+          "description": "What a token of an organization, a project or a repository is for, if its creator said"
+        },
         "expires_at": {
           "type": "string",
           "format": "date-time",
@@ -41216,19 +42012,49 @@
           "type": "integer",
           "format": "int64"
         },
+        "last_used_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When a token of an organization, a project or a repository was last used, omitted if never"
+        },
+        "last_used_ip": {
+          "type": "string",
+          "description": "The client address of that use, omitted when unknown"
+        },
         "name": {
           "type": "string"
+        },
+        "permission": {
+          "type": "string",
+          "description": "The permission of a token of an organization, a project or a repository on the repositories it covers: read,\nwrite or admin. Omitted for a personal access token."
         },
         "repositories": {
           "type": "array",
           "items": {},
           "description": "Indicates that an access token only has access to the specified repositories.  Will be null if the access token\nis not limited to a set of specified repositories."
         },
+        "rotated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When a token of an organization, a project or a repository was last rotated, omitted if never"
+        },
+        "rotated_by": {
+          "type": "string",
+          "description": "The login of who rotated it last, omitted when it rotated itself (rotated_by_self) or never was"
+        },
+        "rotated_by_self": {
+          "type": "boolean",
+          "description": "Whether it rotated itself last"
+        },
         "scopes": {
           "type": "array",
           "items": {
             "type": "string"
           }
+        },
+        "self_rotate": {
+          "type": "boolean",
+          "description": "Whether a token of an organization, a project or a repository may rotate itself (POST /tokens/self/rotate)"
         },
         "sha1": {
           "type": "string"

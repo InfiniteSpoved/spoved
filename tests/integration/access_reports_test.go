@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -116,6 +117,47 @@ func TestOrgAccessReport(t *testing.T) {
 	}
 	assert.Equal(t, map[string]bool{"org3/repo3": true, "org3/repo5": true, "org3/repo21": true}, repos)
 
+	t.Run("access tokens", func(t *testing.T) {
+		orgToken := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeWrite, "write:repository")
+		repoToken := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, 3, 0, perm_model.AccessModeRead, "read:repository")
+		defer func() {
+			_, err := db.GetEngine(db.DefaultContext).In("id", orgToken.ID, repoToken.ID).Delete(&auth_model.AccessToken{})
+			require.NoError(t, err)
+		}()
+		tokens := pageLines(t, session, orgAccessReportLink+"?type=token")
+		assert.Contains(t, tokens, reportLine(orgToken.Name, "org3/repo5", "repo.code", "org_token", ""))
+		assert.Contains(t, tokens, reportLine(orgToken.Name, "org3/repo3", "repo.issues", "org_token", ""))
+		assert.Contains(t, tokens, reportLine(repoToken.Name, "org3/repo3", "repo.code", "repo_token", ""))
+		assert.NotContains(t, tokens, reportLine(repoToken.Name, "org3/repo5", "repo.code", "repo_token", ""))
+		// the report names the scopes of a token, in the page, the JSON and the CSV
+		rows := accessRows(t, session, orgAccessReportLink+"?type=token").Find(`table.access-report-lines tbody tr[data-name="` + orgToken.Name + `"]`)
+		require.Positive(t, rows.Length())
+		assert.Contains(t, rows.First().Text(), "Scopes: write:repository")
+		_, jsonTokens := jsonLines(t, session.MakeRequest(t, NewRequest(t, "GET", orgAccessReportLink+"?type=token&format=json"), http.StatusOK))
+		scopesOf := func(lines []*api.AccessReportLine, name string) []string {
+			for _, l := range lines {
+				if l.Name == name {
+					return l.Scopes
+				}
+			}
+			return nil
+		}
+		assert.Equal(t, []string{"write:repository"}, scopesOf(jsonTokens, orgToken.Name))
+		header, _, records := csvLines(t, session.MakeRequest(t, NewRequest(t, "GET", orgAccessReportLink+"?type=token&format=csv"), http.StatusOK))
+		scopesCol := slices.Index(header, "scopes")
+		require.GreaterOrEqual(t, scopesCol, 0)
+		assert.Contains(t, slices.Collect(func(yield func(string) bool) {
+			for _, rec := range records {
+				if rec[1] == repoToken.Name && !yield(rec[scopesCol]) {
+					return
+				}
+			}
+		}), "read:repository")
+		doc := accessRows(t, session, "/org3/repo3/settings/access?type=token")
+		assert.Contains(t, doc.Find(`tr[data-token="`+orgToken.Name+`"]`).Text(), "Write")
+		assert.Contains(t, doc.Find(`tr[data-token="`+repoToken.Name+`"]`).Text(), "Repository access token")
+	})
+
 	t.Run("filters", func(t *testing.T) {
 		keys := pageLines(t, session, orgAccessReportLink+"?type=key")
 		assert.ElementsMatch(t, []string{
@@ -158,6 +200,23 @@ func TestInstanceAccessReport(t *testing.T) {
 	assert.Contains(t, lines, reportLine("user2", "user2/repo1", "repo.code", "owner", ""))
 	assert.Contains(t, lines, reportLine("user5", "org3/repo3", "repo.code", "team", "team1"))
 	assert.Contains(t, lines, reportLine("user1", "org3/repo3", "repo.code", "site_admin", ""))
+
+	// a token line names its scopes in the page and the exports
+	token := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, 3, 0, perm_model.AccessModeRead, "read:repository")
+	rows := accessRows(t, loginUser(t, "user1"), link+"?type=token").Find(`table.access-report-lines tbody tr[data-name="` + token.Name + `"]`)
+	require.Positive(t, rows.Length())
+	assert.Contains(t, rows.First().Text(), "Scopes: read:repository")
+	_, exported := jsonLines(t, loginUser(t, "user1").MakeRequest(t, NewRequest(t, "GET", link+"?type=token&format=json"), http.StatusOK))
+	var found bool
+	for _, l := range exported {
+		if l.Name == token.Name {
+			found = true
+			assert.Equal(t, []string{"read:repository"}, l.Scopes)
+		}
+	}
+	assert.True(t, found)
+	header, _, _ := csvLines(t, loginUser(t, "user1").MakeRequest(t, NewRequest(t, "GET", link+"?type=token&format=csv"), http.StatusOK))
+	assert.Contains(t, header, "scopes")
 }
 
 // setAccessReportPeople gives user5 TOTP and suspends them, makes user4 an LDAP user, and records pushes:

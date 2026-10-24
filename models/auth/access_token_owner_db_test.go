@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"testing"
 
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	"forgejo.org/models/perm"
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/timeutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -55,4 +58,55 @@ func TestDeleteOwnedAccessTokens(t *testing.T) {
 	assert.False(t, exists(repo))
 	require.Error(t, auth_model.DeleteOwnedAccessTokens(t.Context(), auth_model.AccessTokenOwnerUser, 1, 0))
 	assert.True(t, exists(1))
+}
+
+func TestRotateAndRevokeOwnedAccessToken(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := audit_model.WithSystem(t.Context(), "test")
+	opts := auth_model.FindOwnedAccessTokensOptions{OwnerType: auth_model.AccessTokenOwnerRepo, OwnerID: 1}
+	token := &auth_model.AccessToken{Name: "rotate-me", OwnerType: auth_model.AccessTokenOwnerRepo, OwnerID: 1, Mode: perm.AccessModeWrite, Scope: "read:repository", ResourceAllRepos: true}
+	require.NoError(t, auth_model.NewAccessToken(ctx, token, nil))
+	first := token.Token
+
+	_, err := auth_model.RotateOwnedAccessToken(ctx, opts, token.ID, "not-the-hash", 0, 2)
+	require.ErrorAs(t, err, &auth_model.ErrAccessTokenNotExist{}, "a token rotating itself must still hold the secret it authenticated with")
+	_, err = auth_model.RotateOwnedAccessToken(ctx, auth_model.FindOwnedAccessTokensOptions{OwnerType: auth_model.AccessTokenOwnerRepo, OwnerID: 2}, token.ID, "", 0, 2)
+	require.ErrorAs(t, err, &auth_model.ErrAccessTokenNotExist{}, "another repository's token is not found")
+
+	expires := timeutil.TimeStampNow().Add(3600)
+	rotated, err := auth_model.RotateOwnedAccessToken(ctx, opts, token.ID, token.TokenHash, expires, 2)
+	require.NoError(t, err)
+	assert.Equal(t, token.ID, rotated.ID)
+	assert.NotEqual(t, first, rotated.Token)
+	_, err = auth_model.GetAccessTokenBySHA(ctx, first)
+	require.ErrorAs(t, err, &auth_model.ErrAccessTokenNotExist{}, "the old secret stops working")
+	got, err := auth_model.GetAccessTokenBySHA(ctx, rotated.Token)
+	require.NoError(t, err)
+	assert.Equal(t, expires, got.ExpiresUnix)
+	assert.EqualValues(t, 2, got.RotatedByID)
+	assert.NotZero(t, got.RotatedUnix)
+	assert.Equal(t, "rotate-me", got.Name)
+	unittest.AssertExistsAndLoadBean(t, &audit_model.Entry{Action: "credential.access_token.rotated", TargetID: token.ID})
+
+	require.NoError(t, auth_model.DeleteOwnedAccessToken(ctx, opts, token.ID, 2))
+	_, err = auth_model.GetAccessTokenBySHA(ctx, rotated.Token)
+	require.ErrorAs(t, err, &auth_model.ErrAccessTokenNotExist{}, "a revoked token stops working")
+	tomb, err := auth_model.GetOwnedAccessTokenByID(ctx, token.ID)
+	require.NoError(t, err, "the tombstone keeps the name for history")
+	assert.Equal(t, "rotate-me", tomb.Name)
+	assert.True(t, tomb.IsRevoked())
+	assert.False(t, tomb.IsUsable())
+	assert.Empty(t, tomb.TokenLastEight)
+	assert.EqualValues(t, 2, tomb.RevokedByID)
+
+	count, err := db.Count[auth_model.AccessToken](ctx, opts)
+	require.NoError(t, err)
+	assert.Zero(t, count, "a revoked token isn't listed")
+	require.ErrorAs(t, auth_model.DeleteOwnedAccessToken(ctx, opts, token.ID, 2), &auth_model.ErrAccessTokenNotExist{})
+	_, err = auth_model.RotateOwnedAccessToken(ctx, opts, token.ID, "", 0, 2)
+	require.ErrorAs(t, err, &auth_model.ErrAccessTokenNotExist{}, "a revoked token can't be rotated back")
+
+	// its name can be used again
+	again := &auth_model.AccessToken{Name: "rotate-me", OwnerType: auth_model.AccessTokenOwnerRepo, OwnerID: 1, Mode: perm.AccessModeRead, Scope: "read:repository", ResourceAllRepos: true}
+	require.NoError(t, auth_model.NewAccessToken(ctx, again, nil))
 }

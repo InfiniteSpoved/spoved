@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"net/mail"
 	"net/url"
 	"path/filepath"
@@ -400,7 +401,7 @@ func (u *User) DashboardLink() string {
 
 // HomeLink returns the user or organization home page link.
 func (u *User) HomeLink() string {
-	if u.IsGhost() {
+	if u.IsAccessTokenBot() || u.IsGhost() { // a token has no profile; its page is for the people who manage it
 		return ""
 	}
 	return setting.AppSubURL + "/" + url.PathEscape(u.Name)
@@ -408,7 +409,7 @@ func (u *User) HomeLink() string {
 
 // HTMLURL returns the user or organization's full link.
 func (u *User) HTMLURL() string {
-	if u.IsGhost() {
+	if u.IsAccessTokenBot() || u.IsGhost() {
 		return ""
 	}
 	return setting.AppURL + url.PathEscape(u.Name)
@@ -585,6 +586,9 @@ func (u *User) EmailTo(overrideMail ...string) string {
 // GetDisplayName returns full name if it's not empty and DEFAULT_SHOW_FULL_NAME is set,
 // returns username otherwise.
 func (u *User) GetDisplayName() string {
+	if u.IsAccessTokenBot() { // its name is the token's, its user name a placeholder
+		return u.FullName
+	}
 	if setting.UI.DefaultShowFullName {
 		trimmed := strings.TrimSpace(u.FullName)
 		if len(trimmed) > 0 {
@@ -1202,7 +1206,22 @@ func GetUserByIDs(ctx context.Context, ids []int64) ([]*User, error) {
 }
 
 func IsValidUserID(id int64) bool {
-	return id > 0 || id == GhostUserID || id == ActionsUserID
+	return id > 0 || id == GhostUserID || id == ActionsUserID || IsAccessTokenBotID(id)
+}
+
+// GetUsersByIDsWithBots is db.GetByIDs on the user table that also resolves the identities of access tokens (see
+// AccessTokenBotID) with one more query; a deleted token is left out, so GetUserFromMap falls back to Ghost.
+func GetUsersByIDsWithBots(ctx context.Context, ids []int64) (map[int64]*User, error) {
+	users, err := db.GetByIDs(ctx, "id", WithoutTokenIDs(ids), &User{})
+	if err != nil {
+		return nil, err
+	}
+	bots, err := GetAccessTokenBots(ctx, TokenIDsOnly(ids))
+	if err != nil {
+		return nil, err
+	}
+	maps.Copy(users, bots)
+	return users, nil
 }
 
 func GetUserFromMap(id int64, idMap map[int64]*User) (int64, *User) {
@@ -1243,14 +1262,17 @@ func GetPossibleUserByIDs(ctx context.Context, ids []int64) ([]*User, error) {
 	if uniqueIDs.Remove(ActionsUserID) {
 		users = append(users, NewActionsUser())
 	}
+	bots, err := GetAccessTokenBots(ctx, TokenIDsOnly(uniqueIDs.Values()))
+	if err != nil {
+		return nil, err
+	}
+	for id, bot := range bots {
+		users = append(users, bot)
+		uniqueIDs.Remove(id)
+	}
 	for id := range uniqueIDs {
-		if IsAccessTokenBotID(id) {
+		if IsAccessTokenBotID(id) { // its token is gone
 			uniqueIDs.Remove(id)
-			if bot, err := GetAccessTokenBot(ctx, id); err == nil {
-				users = append(users, bot)
-			} else if !IsErrUserNotExist(err) {
-				return nil, err
-			}
 		}
 	}
 	res, err := GetUserByIDs(ctx, uniqueIDs.Values())

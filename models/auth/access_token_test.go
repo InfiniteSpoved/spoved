@@ -150,7 +150,7 @@ func TestUpdateLastUsed(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	token := unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: 2})
 
-	require.NoError(t, token.UpdateLastUsed(t.Context()))
+	require.NoError(t, token.UpdateLastUsed(t.Context(), ""))
 
 	token = unittest.AssertExistsAndLoadBean(t, &auth_model.AccessToken{ID: 2})
 	assert.Equal(t, timeutil.TimeStampNow(), token.UpdatedUnix)

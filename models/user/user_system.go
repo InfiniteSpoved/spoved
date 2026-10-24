@@ -8,9 +8,11 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"forgejo.org/models/auth"
+	"forgejo.org/models/db"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 )
@@ -125,6 +127,16 @@ func IsAccessTokenBotID(id int64) bool {
 	return id < accessTokenBotIDBase
 }
 
+// WithoutTokenIDs drops the token identities from a user allow-list.
+func WithoutTokenIDs(ids []int64) []int64 {
+	return slices.DeleteFunc(slices.Clone(ids), IsAccessTokenBotID)
+}
+
+// TokenIDsOnly keeps the token identities of an allow-list.
+func TokenIDsOnly(ids []int64) []int64 {
+	return slices.DeleteFunc(slices.Clone(ids), func(id int64) bool { return !IsAccessTokenBotID(id) })
+}
+
 // NewAccessTokenBot returns the identity the token of an organization, a project or a repository acts as. It is not
 // a user account: no login, no membership, no team, and its permission comes from the token only (BotToken).
 func NewAccessTokenBot(t *auth.AccessToken) *User {
@@ -138,15 +150,15 @@ func NewAccessTokenBot(t *auth.AccessToken) *User {
 		Email:            name + "@" + setting.Service.NoReplyAddress,
 		KeepEmailPrivate: true,
 		LoginName:        name,
-		IsActive:         !t.IsExpired(),
+		IsActive:         t.IsUsable(),
 		Type:             UserTypeBot,
 		Visibility:       structs.VisibleTypePublic,
 		BotToken:         t,
 	}
 }
 
-// GetAccessTokenBot returns the identity with the user ID (see AccessTokenBotID), or ErrUserNotExist once its token
-// was deleted.
+// GetAccessTokenBot returns the identity with the user ID (see AccessTokenBotID), also of a revoked token (for its
+// name in history; it grants nothing), or ErrUserNotExist once its token was deleted with its owner.
 func GetAccessTokenBot(ctx context.Context, id int64) (*User, error) {
 	t, err := auth.GetOwnedAccessTokenByID(ctx, accessTokenBotIDBase-id)
 	if auth.IsErrAccessTokenNotExist(err) {
@@ -155,6 +167,44 @@ func GetAccessTokenBot(ctx context.Context, id int64) (*User, error) {
 		return nil, err
 	}
 	return NewAccessTokenBot(t), nil
+}
+
+// GetAccessTokenBots returns the identities with the user IDs (see AccessTokenBotID) by user ID, in one query; the
+// identities of deleted tokens are left out.
+func GetAccessTokenBots(ctx context.Context, ids []int64) (map[int64]*User, error) {
+	tokenIDs := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		tokenIDs = append(tokenIDs, accessTokenBotIDBase-id)
+	}
+	tokens := make([]*auth.AccessToken, 0, len(tokenIDs))
+	for chunk := range slices.Chunk(tokenIDs, db.DefaultMaxInSize) {
+		if err := db.GetEngine(ctx).In("id", chunk).And("owner_type <> ?", auth.AccessTokenOwnerUser).Find(&tokens); err != nil {
+			return nil, err
+		}
+	}
+	bots := make(map[int64]*User, len(tokens))
+	for _, t := range tokens {
+		bots[AccessTokenBotID(t.ID)] = NewAccessTokenBot(t)
+	}
+	return bots, nil
+}
+
+// GetAccessTokenBotNames returns the token names of the identities with the user IDs (see AccessTokenBotID), in one
+// query; the identities of deleted tokens are left out.
+func GetAccessTokenBotNames(ctx context.Context, ids []int64) ([]string, error) {
+	tokenIDs := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		tokenIDs = append(tokenIDs, accessTokenBotIDBase-id)
+	}
+	var names []string
+	for chunk := range slices.Chunk(tokenIDs, db.DefaultMaxInSize) {
+		var part []string
+		if err := db.GetEngine(ctx).Table("access_token").In("id", chunk).And("owner_type <> ?", auth.AccessTokenOwnerUser).Asc("id").Cols("name").Find(&part); err != nil {
+			return nil, err
+		}
+		names = append(names, part...)
+	}
+	return names, nil
 }
 
 // IsAccessTokenBot reports whether the user is the identity of an organization, project or repository token.

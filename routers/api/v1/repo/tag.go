@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"forgejo.org/models"
@@ -603,7 +604,8 @@ func EditTagProtection(ctx *context.APIContext) {
 			ctx.Error(http.StatusInternalServerError, "GetUserIDsByNames", err)
 			return
 		}
-		pt.AllowlistUserIDs = whitelistUsers
+		// the web form stores token identities in the same list; names can't name them
+		pt.AllowlistUserIDs = slices.Concat(whitelistUsers, user_model.TokenIDsOnly(pt.AllowlistUserIDs))
 	}
 
 	if form.AllowlistDeployKeyIDs != nil {

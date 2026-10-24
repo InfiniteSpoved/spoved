@@ -579,8 +579,14 @@ func updateUserWhitelist(ctx context.Context, repo *repo_model.Repository, curre
 
 	whitelist = make([]int64, 0, len(newWhitelist))
 	for _, userID := range newWhitelist {
-		user, err := user_model.GetUserByID(ctx, userID)
-		if err != nil {
+		getUser := user_model.GetUserByID
+		if user_model.IsAccessTokenBotID(userID) { // a token of an organization, a project or the repository
+			getUser = user_model.GetAccessTokenBot
+		}
+		user, err := getUser(ctx, userID)
+		if user_model.IsAccessTokenBotID(userID) && user_model.IsErrUserNotExist(err) {
+			continue
+		} else if err != nil {
 			return nil, fmt.Errorf("GetUserByID [user_id: %d, repo_id: %d]: %v", userID, repo.ID, err)
 		}
 		perm, err := access_model.GetUserRepoPermission(ctx, repo, user)

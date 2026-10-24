@@ -129,7 +129,7 @@ func (comments CommentList) loadAssignees(ctx context.Context) error {
 	}
 
 	assigneeIDs := comments.getAssigneeIDs()
-	assignees, err := db.GetByIDs(ctx, "id", assigneeIDs, &user_model.User{})
+	assignees, err := user_model.GetUsersByIDsWithBots(ctx, assigneeIDs)
 	if err != nil {
 		return err
 	}

@@ -1202,6 +1202,9 @@ func registerRoutes(m *web.Route) {
 			m.Group("/keys", func() {
 				m.Combo("").Get(org_setting.DeployKeys).Post(web.Bind(forms.AddKeyForm{}), org_setting.DeployKeysPost)
 				m.Post("/delete", org_setting.DeleteDeployKey)
+				m.Post("/tokens/new", org_setting.AccessTokenNew)
+				m.Post("/tokens/rotate", org_setting.AccessTokenRotate)
+				m.Post("/tokens/delete", org_setting.AccessTokenDelete)
 			})
 			m.Group("/branches", func() {
 				m.Combo("/edit").Get(org_setting.SettingsProtectedBranch).
@@ -1343,6 +1346,9 @@ func registerRoutes(m *web.Route) {
 					m.Combo("").Get(org_setting.DeployKeys).Post(web.Bind(forms.AddKeyForm{}), org_setting.DeployKeysPost)
 					m.Post("/{id}/repos", org_setting.DeployKeyReposPost)
 					m.Post("/delete", org_setting.DeleteDeployKey)
+					m.Post("/tokens/new", org_setting.AccessTokenNew)
+					m.Post("/tokens/rotate", org_setting.AccessTokenRotate)
+					m.Post("/tokens/delete", org_setting.AccessTokenDelete)
 				})
 				m.Group("/redirects", func() {
 					m.Get("", org.Redirects)
@@ -1519,6 +1525,9 @@ func registerRoutes(m *web.Route) {
 				m.Combo("").Get(repo_setting.DeployKeys).
 					Post(web.Bind(forms.AddKeyForm{}), repo_setting.DeployKeysPost)
 				m.Post("/delete", repo_setting.DeleteDeployKey)
+				m.Post("/tokens/new", repo_setting.AccessTokenNew)
+				m.Post("/tokens/rotate", repo_setting.AccessTokenRotate)
+				m.Post("/tokens/delete", repo_setting.AccessTokenDelete)
 			})
 
 			m.Group("/lfs", func() {

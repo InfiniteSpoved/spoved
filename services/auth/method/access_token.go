@@ -49,13 +49,13 @@ func (a *AccessToken) Verify(req *http.Request, w http.ResponseWriter, _ auth.Se
 		return &auth.AuthenticationError{Error: fmt.Errorf("access token AccessTokenUser: %w", err)}
 	}
 
-	if err := authz.CheckScopePolicyInUse(u, token.Scope, token.ResourceAllRepos); errors.Is(err, authz.ErrScopePolicyEnforced) {
+	if err := authz.CheckScopePolicyInUse(u, token.Scope, token.ReachesAllRepos()); errors.Is(err, authz.ErrScopePolicyEnforced) {
 		return &auth.AuthenticationAttemptedIncorrectCredential{Error: &auth.CredentialOwnerError{Err: fmt.Errorf("%w; replace it with a token that follows the policy", err)}, UserID: u.ID}
 	} else if err != nil {
 		return &auth.AuthenticationError{Error: fmt.Errorf("access token CheckScopePolicyInUse: %w", err)}
 	}
 
-	if err = token.UpdateLastUsed(req.Context()); err != nil {
+	if err = token.UpdateLastUsed(req.Context(), auth.TokenUseIP(req)); err != nil {
 		log.Error("UpdateLastUsed:  %v", err)
 	}
 

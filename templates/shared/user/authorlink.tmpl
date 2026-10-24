@@ -1,6 +1,11 @@
 {{if eq .ID -1}}
 	<a class="author text black tw-font-semibold muted"
 		data-tooltip-content="{{ctx.Locale.Tr "user.ghost.tooltip"}}">Ghost</a>
+{{else if .IsAccessTokenBot}}
+	{{/* a token of an organization, a project or a repository: its name, the bot label and its level; plain text, as it has no profile */}}
+	<span class="author text black tw-font-semibold">{{.BotToken.Name}}</span>
+	<span class="ui basic label tw-p-1 tw-align-baseline">bot</span>
+	<span class="text grey">{{if eq .BotToken.OwnerType 1}}{{ctx.Locale.Tr "owned_token.level.org"}}{{else if eq .BotToken.OwnerType 2}}{{ctx.Locale.Tr "owned_token.level.project"}}{{else}}{{ctx.Locale.Tr "owned_token.level.repo"}}{{end}}{{if .BotToken.IsRevoked}} · {{ctx.Locale.Tr "owned_token.level.revoked"}}{{end}}</span>
 {{else}}
 	<a class="author text black tw-font-semibold muted"{{if gt .ID 0}} href="{{.HomeLink}}"{{end}}>{{.GetDisplayName}}</a>
 	{{if .IsBot}}<span class="ui basic label tw-p-1 tw-align-baseline">bot</span>{{end}}

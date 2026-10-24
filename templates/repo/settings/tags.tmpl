@@ -66,6 +66,7 @@
 													{{.Name}}
 												</div>
 											{{end}}
+											{{template "repo/settings/allowlist_tokens" .AllowlistTokens}}
 										</div>
 									</div>
 								</div>
@@ -118,6 +119,11 @@
 												{{range $.DeployKeys}}
 													{{if SliceUtils.Contains $deployKeyIDs .KeyID}}
 														<span class="ui basic label">{{svg "octicon-key"}} {{.Name}}</span>
+													{{end}}
+												{{end}}
+												{{range $.AllowlistTokens}}
+													{{if SliceUtils.Contains $userIDs .BotID}}
+														<span class="ui basic label">{{svg "fontawesome-send"}} {{.Name}} [bot]{{if .Expired}} ({{ctx.Locale.Tr "owned_token.expired"}}){{end}}</span>
 													{{end}}
 												{{end}}
 											{{else}}

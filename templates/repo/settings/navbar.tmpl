@@ -53,7 +53,7 @@
 				</a>
 			{{end}}
 			<a class="{{if .PageIsSettingsKeys}}active {{end}}item" href="{{.RepoLink}}/settings/keys">
-				{{ctx.Locale.Tr "repo.settings.deploy_keys"}}
+				{{ctx.Locale.Tr "owned_token.keys_and_tokens"}}
 			</a>
 			{{if .LFSStartServer}}
 				<details class="item toggleable-item" {{if .PageIsSettingsLFS}}open{{end}}>

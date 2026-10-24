@@ -1025,11 +1025,13 @@ func ApplyEditBranchProtectionOption(ctx *context.APIContext, owner *user_model.
 	return opts, true
 }
 
-// getAllowlistIDs resolves the user and team names, keeping userIDs or teamIDs for a nil list.
+// getAllowlistIDs resolves the user and team names, keeping userIDs or teamIDs for a nil list. The token identities
+// of userIDs stay when the user names are replaced: names can't name them.
 // Teams are looked up in owner. On error it writes the response and returns false.
 func getAllowlistIDs(ctx *context.APIContext, owner *user_model.User, usernames, teams []string, userIDs, teamIDs []int64) ([]int64, []int64, bool) {
 	var err error
 	if usernames != nil {
+		tokenIDs := user_model.TokenIDsOnly(userIDs)
 		if userIDs, err = user_model.GetUserIDsByNames(ctx, usernames, false); err != nil {
 			if user_model.IsErrUserNotExist(err) {
 				ctx.Error(http.StatusUnprocessableEntity, "User does not exist", err)
@@ -1038,6 +1040,7 @@ func getAllowlistIDs(ctx *context.APIContext, owner *user_model.User, usernames,
 			}
 			return nil, nil, false
 		}
+		userIDs = append(userIDs, tokenIDs...)
 	}
 	if teams != nil && owner.IsOrganization() {
 		if teamIDs, err = organization.GetTeamIDsByNames(ctx, owner.ID, teams, false); err != nil {

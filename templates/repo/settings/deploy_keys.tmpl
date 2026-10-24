@@ -1,7 +1,7 @@
 {{template "repo/settings/layout_head" (dict "ctxData" . "pageClass" "repository settings")}}
 	<div class="repo-setting-content">
 		<h4 class="ui top attached header">
-			{{ctx.Locale.Tr "repo.settings.deploy_keys"}}
+			{{ctx.Locale.Tr "owned_token.deploy_keys_ssh"}}
 			<div class="ui right">
 			{{if not .DisableSSH}}
 				<button class="ui primary tiny show-panel toggle button" data-panel="#add-deploy-key-panel">{{ctx.Locale.Tr "repo.settings.add_deploy_key"}}</button>
@@ -96,6 +96,29 @@
 			</div>
 		{{end}}
 		</div>
+		{{template "shared/owned_tokens" .}}
+		{{if .CoveringTokens}}
+			<h4 class="ui top attached header tw-mt-4">{{ctx.Locale.Tr "owned_token.covering"}}</h4>
+			<div class="ui attached segment">
+				<p>{{ctx.Locale.Tr "owned_token.covering_desc"}}{{if .CanManageOrgDeployKeys}} <a href="{{AppSubUrl}}/org/{{PathEscape .Repository.OwnerName}}/settings/keys#access-tokens">{{ctx.Locale.Tr "owned_token.covering_manage_org"}}</a>{{end}}</p>
+				<div class="flex-list" id="covering-access-tokens">
+					{{range .CoveringTokens}}
+						<div class="flex-item">
+							<div class="flex-item-leading">{{svg "fontawesome-send" 32}}</div>
+							<div class="flex-item-main">
+								<div class="flex-item-title">
+									<span {{if .IsExpired}}class="tw-text-text-light-3"{{end}}>{{.Name}}</span>
+									<span class="ui tiny basic label">{{if eq .Mode 1}}{{ctx.Locale.Tr "owned_token.permission.read_short"}}{{else if eq .Mode 2}}{{ctx.Locale.Tr "owned_token.permission.write_short"}}{{else}}{{ctx.Locale.Tr "owned_token.permission.admin_short"}}{{end}}</span>
+									{{if .IsExpired}}<span class="ui tiny red label">{{ctx.Locale.Tr "owned_token.expired"}}</span>{{end}}
+								</div>
+								<div class="flex-item-body">{{if .GroupID}}{{ctx.Locale.Tr "owned_token.covering_project"}}{{if $.CanManageOrgDeployKeys}} · <a href="{{$.Repository.GroupLink}}/-/settings/keys#access-tokens">{{ctx.Locale.Tr "owned_token.covering_manage_project"}}</a>{{end}}{{else}}{{ctx.Locale.Tr "owned_token.covering_org"}}{{end}}</div>
+								<div class="flex-item-body">{{ctx.Locale.Tr "owned_token.scopes"}}: {{StringUtils.Join .Scope.OrderedScopes ", "}}{{template "shared/expiry_label" .}}</div>
+							</div>
+						</div>
+					{{end}}
+				</div>
+			</div>
+		{{end}}
 	</div>
 
 <div class="ui g-modal-confirm delete modal" id="delete-deploy-key">

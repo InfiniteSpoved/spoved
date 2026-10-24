@@ -87,3 +87,14 @@ func ValidateExpiry(p setting.CredentialExpiryPolicy, expires timeutil.TimeStamp
 	}
 	return nil
 }
+
+// RotationExpiry is the expiry a rotated credential gets: the date the create forms suggest, or, where the policy
+// suggests none, 30 days for a credential that had an expiry and none for one that had none.
+func RotationExpiry(p setting.CredentialExpiryPolicy, hadExpiry bool) timeutil.TimeStamp {
+	if p.Required || p.MaxLifetimeDays > 0 || hadExpiry {
+		p.Required = true
+		expires, _ := ParseExpiryDate(DefaultExpiryDate(p))
+		return expires
+	}
+	return 0
+}

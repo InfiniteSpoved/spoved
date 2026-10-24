@@ -16,6 +16,7 @@
 	<div id="deploy-key-repos-{{.ID}}" class="field tw-pl-[26px]">
 		<div class="ui multiple search selection dropdown">
 			<input type="hidden" name="repo_ids" value="{{.RepoIDs}}">
+			<input class="search" type="text" autocomplete="off" aria-label="{{ctx.Locale.Tr "org.settings.deploy_key_select_repos"}}">
 			<div class="default text">{{ctx.Locale.Tr "org.settings.deploy_key_select_repos"}}</div>
 			<div class="menu">
 				{{range .ctxData.Repos}}
