@@ -45,6 +45,10 @@ func (du *DateUtils) TimeSince(time any) template.HTML {
 	return TimeSince(time)
 }
 
+func (du *DateUtils) TimeDuration(time any) template.HTML {
+	return TimeDuration(time)
+}
+
 // ParseLegacy parses the datetime in legacy format, eg: "2016-01-02" in server's timezone.
 // It shouldn't be used in new code. New code should use Time or TimeStamp as much as possible.
 func (du *DateUtils) ParseLegacy(datetime string) time.Time {
@@ -157,8 +161,8 @@ func TimeSince(then any) template.HTML {
 	return timeSinceTo(then, time.Now())
 }
 
-// TimeDuration renders the duration between the argument start and now as `<relative-time>` element. It renders only
-// the duration, for example, `5 minutes, 2 seconds`, whereas TimeSince would output `5 minutes, 2 seconds ago`.
+// TimeDuration renders the duration between the argument start (past or future) and now as `<relative-time>` element.
+// It renders only the duration, for example, `5 minutes, 2 seconds`, whereas TimeSince would output `5 minutes, 2 seconds ago`.
 func TimeDuration(start any) template.HTML {
 	startTime, isZero := anyToTime(start)
 	if isZero {
@@ -166,6 +170,6 @@ func TimeDuration(start any) template.HTML {
 	}
 
 	markup := fmt.Sprintf(`<relative-time datetime="%[1]s" format="duration" prefix="" data-tooltip-content data-tooltip-interactive="true">%[2]s</relative-time>`,
-		startTime.Format(time.RFC3339), timeutil.TimeStampNow().AsTime().Sub(startTime).Truncate(time.Second))
+		startTime.Format(time.RFC3339), timeutil.TimeStampNow().AsTime().Sub(startTime).Abs().Truncate(time.Second))
 	return template.HTML(markup)
 }

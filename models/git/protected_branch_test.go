@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBranchRuleMatch(t *testing.T) {
@@ -88,4 +89,36 @@ func TestCanDeployKeyPush(t *testing.T) {
 			assert.Equal(t, c.allowed, c.rule.CanDeployKeyPush(c.keyID))
 		})
 	}
+}
+
+func TestValidateMergeQueue(t *testing.T) {
+	for _, tc := range []struct {
+		pb ProtectedBranch
+		ok bool
+	}{
+		{ProtectedBranch{}, true},
+		{ProtectedBranch{MergeQueueMergeStyle: "squash", MergeQueueBuildConcurrency: 100, MergeQueueMinGroupSize: 3, MergeQueueMaxGroupSize: 3, MergeQueueWaitMinutes: 1440, MergeQueueCheckTimeoutMinutes: 1440}, true},
+		{ProtectedBranch{MergeQueueMergeStyle: "fast-forward-only"}, false},
+		{ProtectedBranch{MergeQueueMergeStyle: "manually-merged"}, false},
+		{ProtectedBranch{MergeQueueBuildConcurrency: 101}, false},
+		{ProtectedBranch{MergeQueueBuildConcurrency: -1}, false},
+		{ProtectedBranch{MergeQueueMinGroupSize: 6}, false}, // above the default maximum
+		{ProtectedBranch{MergeQueueMinGroupSize: 4, MergeQueueMaxGroupSize: 3}, false},
+		{ProtectedBranch{MergeQueueMinGroupSize: 3, MergeQueueMaxGroupSize: 10, MergeQueueBuildConcurrency: 2}, false}, // never that many passed at once
+		{ProtectedBranch{MergeQueueMaxGroupSize: 5, MergeQueueBuildConcurrency: 2}, false},
+		{ProtectedBranch{MergeQueueBuildConcurrency: 2}, true}, // the default maximum is capped at it
+		{ProtectedBranch{MergeQueueWaitMinutes: 1441}, false},
+		{ProtectedBranch{MergeQueueCheckTimeoutMinutes: 1441}, false},
+	} {
+		err := tc.pb.ValidateMergeQueue()
+		if tc.ok {
+			require.NoError(t, err, "%+v", tc.pb)
+		} else {
+			require.ErrorIs(t, err, ErrInvalidMergeQueueConfig, "%+v", tc.pb)
+		}
+	}
+	var cfgErr *MergeQueueConfigError
+	require.ErrorAs(t, (&ProtectedBranch{MergeQueueMaxGroupSize: 5, MergeQueueBuildConcurrency: 2}).ValidateMergeQueue(), &cfgErr)
+	assert.Equal(t, "max_group_size", cfgErr.Field)
+	assert.Equal(t, 2, (&ProtectedBranch{MergeQueueBuildConcurrency: 2}).MergeQueueConfig().MaxGroupSize)
 }

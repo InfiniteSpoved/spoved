@@ -10,6 +10,7 @@ import (
 	"forgejo.org/models/actions"
 	"forgejo.org/models/issues"
 	"forgejo.org/models/packages"
+	"forgejo.org/models/pull"
 	"forgejo.org/models/repo"
 	"forgejo.org/models/user"
 	"forgejo.org/modules/git"
@@ -1370,6 +1371,64 @@ func (_c *MockNotifier_IssueClearLabels_Call) Return() *MockNotifier_IssueClearL
 }
 
 func (_c *MockNotifier_IssueClearLabels_Call) RunAndReturn(run func(ctx context.Context, doer *user.User, issue *issues.Issue)) *MockNotifier_IssueClearLabels_Call {
+	_c.Run(run)
+	return _c
+}
+
+// MergeGroupChecksRequested provides a mock function for the type MockNotifier
+func (_mock *MockNotifier) MergeGroupChecksRequested(ctx context.Context, doer *user.User, repo1 *repo.Repository, entry *pull.MergeQueueEntry) {
+	_mock.Called(ctx, doer, repo1, entry)
+	return
+}
+
+// MockNotifier_MergeGroupChecksRequested_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MergeGroupChecksRequested'
+type MockNotifier_MergeGroupChecksRequested_Call struct {
+	*mock.Call
+}
+
+// MergeGroupChecksRequested is a helper method to define mock.On call
+//   - ctx context.Context
+//   - doer *user.User
+//   - repo1 *repo.Repository
+//   - entry *pull.MergeQueueEntry
+func (_e *MockNotifier_Expecter) MergeGroupChecksRequested(ctx, doer, repo1, entry any) *MockNotifier_MergeGroupChecksRequested_Call {
+	return &MockNotifier_MergeGroupChecksRequested_Call{Call: _e.mock.On("MergeGroupChecksRequested", ctx, doer, repo1, entry)}
+}
+
+func (_c *MockNotifier_MergeGroupChecksRequested_Call) Run(run func(ctx context.Context, doer *user.User, repo1 *repo.Repository, entry *pull.MergeQueueEntry)) *MockNotifier_MergeGroupChecksRequested_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *user.User
+		if args[1] != nil {
+			arg1 = args[1].(*user.User)
+		}
+		var arg2 *repo.Repository
+		if args[2] != nil {
+			arg2 = args[2].(*repo.Repository)
+		}
+		var arg3 *pull.MergeQueueEntry
+		if args[3] != nil {
+			arg3 = args[3].(*pull.MergeQueueEntry)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockNotifier_MergeGroupChecksRequested_Call) Return() *MockNotifier_MergeGroupChecksRequested_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockNotifier_MergeGroupChecksRequested_Call) RunAndReturn(run func(ctx context.Context, doer *user.User, repo1 *repo.Repository, entry *pull.MergeQueueEntry)) *MockNotifier_MergeGroupChecksRequested_Call {
 	_c.Run(run)
 	return _c
 }

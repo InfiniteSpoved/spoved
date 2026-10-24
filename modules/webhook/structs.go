@@ -43,6 +43,7 @@ type HookEvents struct {
 	WorkflowJobSkipped       bool `json:"workflow_job_skipped"`
 	WorkflowJobSuccess       bool `json:"workflow_job_success"`
 	WorkflowJobWaiting       bool `json:"workflow_job_waiting"`
+	MergeGroup               bool `json:"merge_group"`
 }
 
 // HookEvent represents events that will deliver a hook.

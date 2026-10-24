@@ -44,11 +44,28 @@ func (ctx *mergeContext) RunOpts() *git.RunOpts {
 }
 
 func createTemporaryRepoForMerge(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, expectedHeadCommitID string) (mergeCtx *mergeContext, cancel context.CancelFunc, err error) {
+	return createTemporaryRepoForMergeOnto(ctx, pr, doer, expectedHeadCommitID, "")
+}
+
+// createTemporaryRepoForMergeOnto is createTemporaryRepoForMerge with "base" at the commit onto of the base repository
+// instead of the base branch, if onto is not empty
+func createTemporaryRepoForMergeOnto(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, expectedHeadCommitID, onto string) (mergeCtx *mergeContext, cancel context.CancelFunc, err error) {
 	// Clone base repo.
 	prCtx, cancel, err := createTemporaryRepoForPR(ctx, pr)
 	if err != nil {
 		log.Error("createTemporaryRepoForPR: %v", err)
 		return nil, cancel, err
+	}
+
+	// the temporary repository borrows the objects of the base repository, so its commits can be used directly
+	for _, ref := range []string{git.BranchPrefix + baseBranch, git.BranchPrefix + "original_" + baseBranch} {
+		if onto == "" {
+			break
+		}
+		if err := git.NewCommand(ctx, "update-ref").AddDynamicArguments(ref, onto).Run(prCtx.RunOpts()); err != nil {
+			defer cancel()
+			return nil, nil, fmt.Errorf("unable to set %s to %s in the temporary repository for %v: %w\n%s", ref, onto, pr, err, prCtx.errbuf.String())
+		}
 	}
 
 	mergeCtx = &mergeContext{

@@ -12,15 +12,15 @@ func init() {
 	})
 }
 
-type v18zzfReview struct {
+type v18zzgReview struct {
 	ID        int64  `xorm:"pk autoincr"`
 	MergeBase string `xorm:"VARCHAR(64)"`
 }
 
-func (v18zzfReview) TableName() string {
+func (v18zzgReview) TableName() string {
 	return "review"
 }
 
 func addReviewMergeBase(x *xorm.Engine) error {
-	return x.Sync(new(v18zzfReview))
+	return x.Sync(new(v18zzgReview))
 }

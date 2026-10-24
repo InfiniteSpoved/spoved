@@ -5,6 +5,7 @@
 - [`actions-projects.md`](actions-projects.md): secrets, variables, context names and OIDC claims for repositories in projects.
 - [`projects.md`](projects.md): web, git, LFS and API URLs of repositories in projects, redirects, and moving from Bitbucket Data Center.
 - [`audit-log.md`](audit-log.md): the site audit log page, its filters, the API and the exports.
+- [`merge-queue.md`](merge-queue.md): the merge queue for protected branches, its settings, the `merge_group` event and the API.
 - [`personal-repositories.md`](personal-repositories.md): the site policy for repositories in users' own namespaces.
 - [`web-ide.md`](web-ide.md): the Web IDE, its settings, how it is built and deployed, and its Content Security Policy.
 - [`search-engines.md`](search-engines.md): canonical URLs, structured data, robots.txt, sitemap and llms.txt for search engines and AI assistants.

@@ -18858,6 +18858,49 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/merge-queue/{branch}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "List the merge queue of a branch, in order",
+        "operationId": "repoListMergeQueue",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "the branch the pull requests merge into",
+            "name": "branch",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/MergeQueueEntryList"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/milestones": {
       "get": {
         "produces": [
@@ -20100,6 +20143,127 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          },
+          "423": {
+            "$ref": "#/responses/repoArchivedError"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/pulls/{index}/merge-queue": {
+      "post": {
+        "description": "The base branch must have a branch protection rule that requires a merge queue. The queue tests the pull request on top of the branch and the pull requests ahead of it and merges it once the required status checks pass there. The merge title and message fields are ignored; the merge message is the title and description of the pull request.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Add a pull request to the merge queue of its base branch",
+        "operationId": "repoAddToMergeQueue",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "index of the pull request",
+            "name": "index",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/MergePullRequestOption"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "$ref": "#/responses/MergeQueueEntry"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "405": {
+            "$ref": "#/responses/error"
+          },
+          "409": {
+            "$ref": "#/responses/error"
+          },
+          "413": {
+            "$ref": "#/responses/quotaExceeded"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          },
+          "423": {
+            "$ref": "#/responses/repoArchivedError"
+          }
+        }
+      },
+      "delete": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Remove a pull request from the merge queue",
+        "operationId": "repoRemoveFromMergeQueue",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "index of the pull request",
+            "name": "index",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/error"
           },
           "423": {
             "$ref": "#/responses/repoArchivedError"
@@ -30467,6 +30631,48 @@
           "type": "boolean",
           "x-go-name": "IgnoreStaleApprovals"
         },
+        "merge_queue_build_concurrency": {
+          "description": "pull requests tested at a time, 0 to 100 (default 5)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueBuildConcurrency"
+        },
+        "merge_queue_check_timeout_minutes": {
+          "description": "time the required checks may take on a test commit before the pull request leaves the queue, 0 to 1440 (default 60)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueCheckTimeoutMinutes"
+        },
+        "merge_queue_max_group_size": {
+          "description": "pull requests merged at once, 0 to 100 (default 5)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueMaxGroupSize"
+        },
+        "merge_queue_merge_style": {
+          "description": "merge style of every pull request in the queue; empty: the one chosen when adding",
+          "type": "string",
+          "enum": [
+            "",
+            "merge",
+            "rebase",
+            "rebase-merge",
+            "squash"
+          ],
+          "x-go-name": "MergeQueueMergeStyle"
+        },
+        "merge_queue_min_group_size": {
+          "description": "passed pull requests to wait for before merging, 0 to 100 (default 1)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueMinGroupSize"
+        },
+        "merge_queue_wait_minutes": {
+          "description": "longest wait for the minimum group size, from when the first pull request was added, 0 to 1440 (default 5)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueWaitMinutes"
+        },
         "merge_whitelist_teams": {
           "type": "array",
           "items": {
@@ -30511,6 +30717,11 @@
             "type": "string"
           },
           "x-go-name": "PushWhitelistUsernames"
+        },
+        "require_merge_queue": {
+          "description": "Merge pull requests into matching branches only through a merge queue, which tests each one on top of the\nbranch and the pull requests ahead of it. The other settings are used only while it is set; 0 means the default.",
+          "type": "boolean",
+          "x-go-name": "RequireMergeQueue"
         },
         "require_signed_commits": {
           "type": "boolean",
@@ -31389,6 +31600,48 @@
           "type": "boolean",
           "x-go-name": "IgnoreStaleApprovals"
         },
+        "merge_queue_build_concurrency": {
+          "description": "pull requests tested at a time, 0 to 100 (default 5)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueBuildConcurrency"
+        },
+        "merge_queue_check_timeout_minutes": {
+          "description": "time the required checks may take on a test commit before the pull request leaves the queue, 0 to 1440 (default 60)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueCheckTimeoutMinutes"
+        },
+        "merge_queue_max_group_size": {
+          "description": "pull requests merged at once, 0 to 100 (default 5)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueMaxGroupSize"
+        },
+        "merge_queue_merge_style": {
+          "description": "merge style of every pull request in the queue; empty: the one chosen when adding",
+          "type": "string",
+          "enum": [
+            "",
+            "merge",
+            "rebase",
+            "rebase-merge",
+            "squash"
+          ],
+          "x-go-name": "MergeQueueMergeStyle"
+        },
+        "merge_queue_min_group_size": {
+          "description": "passed pull requests to wait for before merging, 0 to 100 (default 1)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueMinGroupSize"
+        },
+        "merge_queue_wait_minutes": {
+          "description": "longest wait for the minimum group size, from when the first pull request was added, 0 to 1440 (default 5)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueWaitMinutes"
+        },
         "merge_whitelist_teams": {
           "type": "array",
           "items": {
@@ -31433,6 +31686,11 @@
             "type": "string"
           },
           "x-go-name": "PushWhitelistUsernames"
+        },
+        "require_merge_queue": {
+          "description": "Merge pull requests into matching branches only through a merge queue, which tests each one on top of the\nbranch and the pull requests ahead of it. The other settings are used only while it is set; 0 means the default.",
+          "type": "boolean",
+          "x-go-name": "RequireMergeQueue"
         },
         "require_signed_commits": {
           "type": "boolean",
@@ -32079,6 +32337,48 @@
           "type": "boolean",
           "x-go-name": "IgnoreStaleApprovals"
         },
+        "merge_queue_build_concurrency": {
+          "description": "pull requests tested at a time, 0 to 100 (default 5)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueBuildConcurrency"
+        },
+        "merge_queue_check_timeout_minutes": {
+          "description": "time the required checks may take on a test commit before the pull request leaves the queue, 0 to 1440 (default 60)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueCheckTimeoutMinutes"
+        },
+        "merge_queue_max_group_size": {
+          "description": "pull requests merged at once, 0 to 100 (default 5)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueMaxGroupSize"
+        },
+        "merge_queue_merge_style": {
+          "description": "merge style of every pull request in the queue; empty: the one chosen when adding",
+          "type": "string",
+          "enum": [
+            "",
+            "merge",
+            "rebase",
+            "rebase-merge",
+            "squash"
+          ],
+          "x-go-name": "MergeQueueMergeStyle"
+        },
+        "merge_queue_min_group_size": {
+          "description": "passed pull requests to wait for before merging, 0 to 100 (default 1)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueMinGroupSize"
+        },
+        "merge_queue_wait_minutes": {
+          "description": "longest wait for the minimum group size, from when the first pull request was added, 0 to 1440 (default 5)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueWaitMinutes"
+        },
         "merge_whitelist_teams": {
           "type": "array",
           "items": {
@@ -32130,6 +32430,11 @@
             "type": "string"
           },
           "x-go-name": "Repos"
+        },
+        "require_merge_queue": {
+          "description": "Merge pull requests into matching branches only through a merge queue, which tests each one on top of the\nbranch and the pull requests ahead of it. The other settings are used only while it is set; 0 means the default.",
+          "type": "boolean",
+          "x-go-name": "RequireMergeQueue"
         },
         "require_signed_commits": {
           "type": "boolean",
@@ -33338,6 +33643,35 @@
           "type": "boolean",
           "x-go-name": "IgnoreStaleApprovals"
         },
+        "merge_queue_build_concurrency": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueBuildConcurrency"
+        },
+        "merge_queue_check_timeout_minutes": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueCheckTimeoutMinutes"
+        },
+        "merge_queue_max_group_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueMaxGroupSize"
+        },
+        "merge_queue_merge_style": {
+          "type": "string",
+          "x-go-name": "MergeQueueMergeStyle"
+        },
+        "merge_queue_min_group_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueMinGroupSize"
+        },
+        "merge_queue_wait_minutes": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueWaitMinutes"
+        },
         "merge_whitelist_teams": {
           "type": "array",
           "items": {
@@ -33382,6 +33716,11 @@
             "type": "string"
           },
           "x-go-name": "PushWhitelistUsernames"
+        },
+        "require_merge_queue": {
+          "description": "see BranchProtection",
+          "type": "boolean",
+          "x-go-name": "RequireMergeQueue"
         },
         "require_signed_commits": {
           "type": "boolean",
@@ -33854,6 +34193,35 @@
           "type": "boolean",
           "x-go-name": "IgnoreStaleApprovals"
         },
+        "merge_queue_build_concurrency": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueBuildConcurrency"
+        },
+        "merge_queue_check_timeout_minutes": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueCheckTimeoutMinutes"
+        },
+        "merge_queue_max_group_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueMaxGroupSize"
+        },
+        "merge_queue_merge_style": {
+          "type": "string",
+          "x-go-name": "MergeQueueMergeStyle"
+        },
+        "merge_queue_min_group_size": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueMinGroupSize"
+        },
+        "merge_queue_wait_minutes": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueWaitMinutes"
+        },
         "merge_whitelist_teams": {
           "type": "array",
           "items": {
@@ -33905,6 +34273,11 @@
             "type": "string"
           },
           "x-go-name": "Repos"
+        },
+        "require_merge_queue": {
+          "description": "see BranchProtection",
+          "type": "boolean",
+          "x-go-name": "RequireMergeQueue"
         },
         "require_signed_commits": {
           "type": "boolean",
@@ -36299,6 +36672,72 @@
       "x-go-name": "MergePullRequestForm",
       "x-go-package": "forgejo.org/services/forms"
     },
+    "MergeQueueEntry": {
+      "description": "MergeQueueEntry is a pull request in the merge queue of a branch",
+      "type": "object",
+      "properties": {
+        "delete_branch_after_merge": {
+          "type": "boolean",
+          "x-go-name": "DeleteBranchAfterMerge"
+        },
+        "enqueued_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "EnqueuedAt"
+        },
+        "enqueued_by": {
+          "$ref": "#/definitions/User"
+        },
+        "head_sha": {
+          "description": "the head of the pull request when it was added",
+          "type": "string",
+          "x-go-name": "HeadSHA"
+        },
+        "merge_style": {
+          "type": "string",
+          "x-go-name": "MergeStyle"
+        },
+        "number": {
+          "description": "index of the pull request",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Number"
+        },
+        "position": {
+          "description": "position in the queue, from 1",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Position"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "StartedAt"
+        },
+        "state": {
+          "description": "waiting: to be tested; testing: the required checks run on test_sha; passed: the checks passed, it merges\nonce the pull requests ahead of it did; grouping: the checks passed, it waits for the minimum group size or\nthe wait time; merging: test_sha is being pushed to the branch",
+          "type": "string",
+          "enum": [
+            "waiting",
+            "testing",
+            "passed",
+            "grouping",
+            "merging"
+          ],
+          "x-go-name": "State"
+        },
+        "test_sha": {
+          "description": "the commit the queue tests: the branch, the pull requests ahead and this one",
+          "type": "string",
+          "x-go-name": "TestSHA"
+        },
+        "title": {
+          "type": "string",
+          "x-go-name": "Title"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "MigrateRepoOptions": {
       "description": "MigrateRepoOptions options for migrating repository's\nthis is used to interact with api v1",
       "type": "object",
@@ -36930,6 +37369,48 @@
           "type": "boolean",
           "x-go-name": "IgnoreStaleApprovals"
         },
+        "merge_queue_build_concurrency": {
+          "description": "pull requests tested at a time, 0 to 100 (default 5)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueBuildConcurrency"
+        },
+        "merge_queue_check_timeout_minutes": {
+          "description": "time the required checks may take on a test commit before the pull request leaves the queue, 0 to 1440 (default 60)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueCheckTimeoutMinutes"
+        },
+        "merge_queue_max_group_size": {
+          "description": "pull requests merged at once, 0 to 100 (default 5)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueMaxGroupSize"
+        },
+        "merge_queue_merge_style": {
+          "description": "merge style of every pull request in the queue; empty: the one chosen when adding",
+          "type": "string",
+          "enum": [
+            "",
+            "merge",
+            "rebase",
+            "rebase-merge",
+            "squash"
+          ],
+          "x-go-name": "MergeQueueMergeStyle"
+        },
+        "merge_queue_min_group_size": {
+          "description": "passed pull requests to wait for before merging, 0 to 100 (default 1)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueMinGroupSize"
+        },
+        "merge_queue_wait_minutes": {
+          "description": "longest wait for the minimum group size, from when the first pull request was added, 0 to 1440 (default 5)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "MergeQueueWaitMinutes"
+        },
         "merge_whitelist_teams": {
           "type": "array",
           "items": {
@@ -36982,6 +37463,11 @@
             "type": "string"
           },
           "x-go-name": "Repos"
+        },
+        "require_merge_queue": {
+          "description": "Merge pull requests into matching branches only through a merge queue, which tests each one on top of the\nbranch and the pull requests ahead of it. The other settings are used only while it is set; 0 means the default.",
+          "type": "boolean",
+          "x-go-name": "RequireMergeQueue"
         },
         "require_signed_commits": {
           "type": "boolean",
@@ -41622,6 +42108,21 @@
       "description": "MarkupRender is a rendered markup document",
       "schema": {
         "type": "string"
+      }
+    },
+    "MergeQueueEntry": {
+      "description": "MergeQueueEntry",
+      "schema": {
+        "$ref": "#/definitions/MergeQueueEntry"
+      }
+    },
+    "MergeQueueEntryList": {
+      "description": "MergeQueueEntryList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/MergeQueueEntry"
+        }
       }
     },
     "Milestone": {

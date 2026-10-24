@@ -392,6 +392,31 @@ type WorkflowDispatchPayload struct {
 	Workflow   string            `json:"workflow"`
 }
 
+// MergeGroup is a build of the merge queue: the target branch with the pull requests up to one of them merged
+type MergeGroup struct {
+	HeadSHA    string         `json:"head_sha"`
+	HeadRef    string         `json:"head_ref"`
+	BaseSHA    string         `json:"base_sha"`
+	BaseRef    string         `json:"base_ref"`
+	HeadCommit *PayloadCommit `json:"head_commit"`
+}
+
+// HookMergeGroupChecksRequested is the action of the merge_group event: the queue waits for the checks of the build
+const HookMergeGroupChecksRequested = "checks_requested"
+
+// MergeGroupPayload is the payload of the merge_group event
+type MergeGroupPayload struct {
+	Action     string      `json:"action"`
+	MergeGroup *MergeGroup `json:"merge_group"`
+	Repository *Repository `json:"repository"`
+	Sender     *User       `json:"sender"`
+}
+
+// JSONPayload implements Payload
+func (p *MergeGroupPayload) JSONPayload() ([]byte, error) {
+	return json.MarshalIndent(p, "", "  ")
+}
+
 // ReviewPayload FIXME
 type ReviewPayload struct {
 	Type    string `json:"type"`

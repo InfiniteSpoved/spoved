@@ -216,6 +216,11 @@ func DeletePullsByBaseRepoID(ctx context.Context, repoID int64) error {
 		return err
 	}
 
+	if _, err := db.GetEngine(ctx).In("pull_id", deleteCond).
+		Delete(&pull_model.MergeQueueEntry{}); err != nil {
+		return err
+	}
+
 	_, err := db.DeleteByBean(ctx, &PullRequest{BaseRepoID: repoID})
 	return err
 }
@@ -982,9 +987,10 @@ func MergeBlockedByOfficialReviewRequests(ctx context.Context, protectBranch *gi
 	return has
 }
 
-// MergeBlockedByOutdatedBranch returns true if merge is blocked by an outdated head branch
-func MergeBlockedByOutdatedBranch(protectBranch *git_model.ProtectedBranch, pr *PullRequest) bool {
-	return protectBranch.BlockOnOutdatedBranch && pr.CommitsBehind > 0
+// MergeBlockedByOutdatedBranch returns true if merge is blocked by an outdated head branch. A merge queue (queued)
+// tests every pull request on top of the branch, so it never needs the head to be up to date.
+func MergeBlockedByOutdatedBranch(protectBranch *git_model.ProtectedBranch, pr *PullRequest, queued bool) bool {
+	return protectBranch.BlockOnOutdatedBranch && !queued && pr.CommitsBehind > 0
 }
 
 // FindUnresolvedConversations returns the first comment of each unresolved code conversation of the issue,

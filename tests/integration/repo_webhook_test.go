@@ -505,6 +505,7 @@ func testWebhookFormsSharedChooseEvents(t *testing.T, htmlForm *goquery.Selectio
 		"workflow_job_skipped",
 		"workflow_job_success",
 		"workflow_job_waiting",
+		"merge_group",
 	}
 
 	// check all types of webhooks are present in the form

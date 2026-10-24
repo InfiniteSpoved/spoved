@@ -59,6 +59,7 @@ import (
 	"forgejo.org/services/gitdiff"
 	issue_service "forgejo.org/services/issue"
 	"forgejo.org/services/mergeforward"
+	"forgejo.org/services/mergequeue"
 	notify_service "forgejo.org/services/notify"
 	pull_service "forgejo.org/services/pull"
 	repo_service "forgejo.org/services/repository"
@@ -72,6 +73,7 @@ const (
 	tplCompareDiff base.TplName = "repo/diff/compare"
 	tplPullCommits base.TplName = "repo/pulls/commits"
 	tplPullFiles   base.TplName = "repo/pulls/files"
+	tplMergeQueue  base.TplName = "repo/pulls/merge_queue"
 
 	pullRequestTemplateKey = "PullRequestTemplate"
 )
@@ -1527,14 +1529,20 @@ func MergePullRequest(ctx *context.Context) {
 		return
 	}
 
+	// a branch with a merge queue merges only through it; a merge when checks succeed joins it when they do
+	queueRule, err := mergequeue.Rule(ctx, pr)
+	if err != nil {
+		ctx.ServerError("mergequeue.Rule", err)
+		return
+	}
+	if queueRule != nil && (!form.MergeWhenChecksSucceed || manuallyMerged) {
+		addToMergeQueue(ctx, form, issue)
+		return
+	}
+
 	// start with merging by checking
 	if err := pull_service.CheckPullMergeable(ctx, ctx.Doer, &ctx.Repo.Permission, pr, mergeCheckType, form.ForceMerge, mergeStyle); err != nil {
-		if message, ok := mergeCheckMessage(ctx, issue, err); ok {
-			ctx.JSONError(message)
-		} else {
-			ctx.ServerError("WebCheck", err)
-		}
-
+		mergeCheckError(ctx, issue, err)
 		return
 	}
 
@@ -1614,6 +1622,10 @@ func MergePullRequest(ctx *context.Context) {
 			ctx.JSONRedirect(fmt.Sprintf("%s/pulls/%d", ctx.Repo.RepoLink, pr.Index))
 			return
 		}
+	}
+	if queueRule != nil {
+		addToMergeQueue(ctx, form, issue)
+		return
 	}
 
 	// If the HTTP request is cancelled by the user agent, don't stop work. We've started a merge and need to finish all
@@ -1740,6 +1752,125 @@ func MergePullRequest(ctx *context.Context) {
 	}
 
 	ctx.JSONRedirect(issue.Link())
+}
+
+// MergeQueue shows the merge queue of a branch
+func MergeQueue(ctx *context.Context) {
+	branch := ctx.Params("*")
+	view, rule, err := mergequeue.View(ctx, ctx.Repo.Repository, branch)
+	if err != nil {
+		ctx.ServerError("mergequeue.View", err)
+		return
+	}
+	if rule == nil {
+		ctx.NotFound("MergeQueue", nil)
+		return
+	}
+	ctx.Data["Title"] = ctx.Tr("repo.pulls.merge_queue.title", branch)
+	ctx.Data["PageIsPullList"] = true
+	ctx.Data["Branch"] = branch
+	ctx.Data["Entries"] = view
+	ctx.Data["MergeQueueConfig"] = rule.MergeQueueConfig()
+	ruleQuery := "/settings/branches/edit?rule_name=" + url.QueryEscape(rule.RuleName)
+	if rule.RepoID == ctx.Repo.Repository.ID {
+		if ctx.Repo.IsAdmin() {
+			ctx.Data["RuleLink"] = ctx.Repo.RepoLink + ruleQuery
+		}
+	} else if ctx.Doer != nil && ctx.Repo.Owner.IsOrganization() {
+		// a project or organization rule: its settings are the organization owners'
+		owner, err := organization.GetOrgByID(ctx, ctx.Repo.Owner.ID)
+		if err != nil {
+			ctx.ServerError("GetOrgByID", err)
+			return
+		}
+		if isOwner, err := owner.IsActingOwner(ctx, ctx.Doer); err != nil {
+			ctx.ServerError("IsActingOwner", err)
+			return
+		} else if isOwner {
+			link := owner.OrganisationLink()
+			if rule.GroupID != 0 {
+				link += "/groups/" + strconv.FormatInt(rule.GroupID, 10)
+			}
+			ctx.Data["RuleLink"] = link + ruleQuery
+		}
+	}
+	ctx.HTML(http.StatusOK, tplMergeQueue)
+}
+
+// mergeCheckError answers a refused CheckPullMergeable
+func mergeCheckError(ctx *context.Context, issue *issues_model.Issue, err error) {
+	if message, ok := mergeCheckMessage(ctx, issue, err); ok {
+		ctx.JSONError(message)
+	} else {
+		ctx.ServerError("WebCheck", err)
+	}
+}
+
+// addToMergeQueue adds the pull request to the merge queue of its base branch
+func addToMergeQueue(ctx *context.Context, form *forms.MergePullRequestForm, issue *issues_model.Issue) {
+	if form.SkipsMergeForward() {
+		allowed, err := mergeforward.MaySkip(ctx, ctx.Doer, ctx.Repo.Permission, ctx.Repo.Repository, issue.PullRequest.BaseBranch)
+		if err != nil {
+			ctx.ServerError("MaySkip", err)
+			return
+		} else if !allowed {
+			ctx.JSONError(ctx.Tr("repo.pulls.merge_forward.skip_not_allowed"))
+			return
+		}
+	}
+	err := mergequeue.Add(ctx, ctx.Doer, &ctx.Repo.Permission, issue.PullRequest, mergequeue.AddOptions{
+		Style:        repo_model.MergeStyle(form.Do),
+		ExpectedHead: form.HeadCommitID,
+		DeleteBranch: form.DeleteBranchAfterMerge,
+		SkipForward:  form.SkipsMergeForward(),
+		Force:        form.ForceMerge,
+	})
+	if err == nil {
+		ctx.Flash.Success(ctx.Tr("repo.pulls.merge_queue.added"))
+		ctx.JSONRedirect(issue.Link())
+		return
+	}
+	if msg, ok := ctx.PersonalRepoRefusal(err); ok {
+		ctx.JSONError(msg)
+		return
+	}
+	switch {
+	case errors.As(err, &pull_model.ErrAlreadyInMergeQueue{}):
+		ctx.JSONError(ctx.Tr("repo.pulls.merge_queue.already_queued"))
+	case models.IsErrInvalidMergeStyle(err):
+		ctx.JSONError(ctx.Tr("repo.pulls.invalid_merge_option"))
+	case models.IsErrSHADoesNotMatch(err):
+		ctx.JSONError(ctx.Tr("repo.pulls.head_out_of_date"))
+	case errors.Is(err, util.ErrPermissionDenied):
+		ctx.JSONError(ctx.Tr("repo.pulls.no_merge_access"))
+	default:
+		mergeCheckError(ctx, issue, err)
+	}
+}
+
+// RemoveFromMergeQueue takes the pull request out of the merge queue
+func RemoveFromMergeQueue(ctx *context.Context) {
+	issue, ok := getPullInfo(ctx)
+	if !ok {
+		return
+	}
+	if err := mergequeue.Remove(ctx, ctx.Doer, ctx.Repo.Permission, issue.PullRequest); err != nil {
+		switch {
+		case errors.Is(err, util.ErrPermissionDenied):
+			ctx.Flash.Error(ctx.Tr("repo.pulls.merge_queue.no_permission"))
+		case errors.Is(err, mergequeue.ErrNotQueued):
+			ctx.Flash.Error(ctx.Tr("repo.pulls.merge_queue.not_queued"))
+		case errors.Is(err, mergequeue.ErrMerging):
+			ctx.Flash.Error(ctx.Tr("repo.pulls.merge_queue.merging"))
+		default:
+			ctx.ServerError("mergequeue.Remove", err)
+			return
+		}
+		ctx.Redirect(issue.Link())
+		return
+	}
+	ctx.Flash.Success(ctx.Tr("repo.pulls.merge_queue.removed"))
+	ctx.Redirect(issue.Link())
 }
 
 // CancelAutoMergePullRequest cancels a scheduled pr

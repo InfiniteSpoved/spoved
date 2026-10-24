@@ -210,6 +210,7 @@ func ParseHookEvent(form forms.WebhookCoreForm) *webhook_module.HookEvent {
 			WorkflowJobSkipped:       form.WorkflowJobSkipped,
 			WorkflowJobSuccess:       form.WorkflowJobSuccess,
 			WorkflowJobWaiting:       form.WorkflowJobWaiting,
+			MergeGroup:               form.MergeGroup,
 		},
 		BranchFilter: form.BranchFilter,
 	}

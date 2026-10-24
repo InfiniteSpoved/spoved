@@ -313,6 +313,16 @@ func ProtectBranchFromForm(ctx *context.Context, f *forms.ProtectBranchForm, pro
 	protectBranch.IgnoreOutdatedConversations = f.IgnoreOutdatedConversations
 	protectBranch.BlockOnIncompleteTasks = f.BlockOnIncompleteTasks
 	protectBranch.ApplyToAdmins = f.ApplyToAdmins
+	protectBranch.RequireMergeQueue = f.RequireMergeQueue
+	protectBranch.MergeQueueMergeStyle = f.MergeQueueMergeStyle
+	protectBranch.MergeQueueBuildConcurrency = f.MergeQueueBuildConcurrency
+	protectBranch.MergeQueueMinGroupSize = f.MergeQueueMinGroupSize
+	protectBranch.MergeQueueMaxGroupSize = f.MergeQueueMaxGroupSize
+	protectBranch.MergeQueueWaitMinutes = f.MergeQueueWaitMinutes
+	protectBranch.MergeQueueCheckTimeoutMinutes = f.MergeQueueCheckTimeoutMinutes
+	if cfgErr, ok := errors.AsType[*git_model.MergeQueueConfigError](protectBranch.ValidateMergeQueue()); ok {
+		return opts, ctx.Tr("repo.settings.merge_queue.invalid." + cfgErr.Field)
+	}
 
 	approvalRules, err := approvalRulesFromForm(ctx, owner)
 	if err != nil {

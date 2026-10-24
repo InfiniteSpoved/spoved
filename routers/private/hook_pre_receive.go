@@ -18,6 +18,7 @@ import (
 	issues_model "forgejo.org/models/issues"
 	perm_model "forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
+	pull_model "forgejo.org/models/pull"
 	quota_model "forgejo.org/models/quota"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
@@ -290,6 +291,11 @@ func HookPreReceive(ctx *app_context.PrivateContext) {
 
 func preReceiveBranch(ctx *preReceiveContext, oldCommitID, newCommitID string, refFullName git.RefName) {
 	branchName := refFullName.BranchName()
+	// the merge queue writes its builds without hooks: every push that runs them is someone else's
+	if pull_model.IsMergeQueueBranch(branchName) {
+		ctx.refuse(http.StatusForbidden, "protected_branch", refFullName.String(), fmt.Sprintf("branches under %s are written by the merge queue only", pull_model.MergeQueueBranchPrefix))
+		return
+	}
 	if !ctx.assertCanWriteCodeToBranch(branchName) {
 		return
 	}
@@ -391,6 +397,14 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 			ctx.refuse(http.StatusForbidden, "protected_branch", git.BranchPrefix+branchName, fmt.Sprintf("branch %s is protected from unverified commit %s", branchName, unverifiedCommit))
 			return false
 		}
+	}
+
+	// A merge into a branch whose rule requires a merge queue comes from the queue. Pushes are not merges: whoever may
+	// push to the branch still can.
+	if protectBranch.RequireMergeQueue && ctx.opts.PullRequestID != 0 && ctx.opts.PushTrigger == repo_module.PushTriggerPRMergeToBase {
+		log.Warn("Forbidden: Branch: %s in %-v requires a merge queue, pull request %d was merged directly", branchName, repo, ctx.opts.PullRequestID)
+		ctx.refuse(http.StatusForbidden, "merge_queue", git.BranchPrefix+branchName, fmt.Sprintf("branch %s requires a merge queue: add the pull request to the merge queue", branchName))
+		return false
 	}
 
 	// Now there are several tests which can be overridden:
@@ -518,14 +532,29 @@ func preReceiveBranchRule(ctx *preReceiveContext, protectBranch *git_model.Prote
 			return false
 		}
 
+		// a merge queue entry an admin added without force gets no admin exemption, as when the queue checked it
+		noExempt := false
+		if ctx.opts.PushTrigger == repo_module.PushTriggerMergeQueue {
+			e, err := pull_model.GetMergeQueueEntryByPullID(ctx, pr.ID)
+			if err != nil {
+				log.Error("GetMergeQueueEntryByPullID: %v", err)
+				ctx.JSON(http.StatusInternalServerError, private.Response{Err: "GetMergeQueueEntryByPullID failed"})
+				return false
+			}
+			noExempt = e == nil || !e.Forced
+		}
+
 		// If we're an admin for the instance, we can ignore checks
-		if ctx.user.IsAdmin {
+		if ctx.user.IsAdmin && !noExempt {
 			return true
 		}
 
 		// The rule may be skipped by admins if it doesn't apply to them: repository admins for a
 		// repository rule, organization owners for an organization rule.
 		exempt := func(pb *git_model.ProtectedBranch) bool {
+			if noExempt {
+				return false
+			}
 			ok, err := pb.IsAdminExempt(ctx, ctx.user, ctx.userPerm.IsAdmin())
 			if err != nil {
 				log.Error("IsAdminExempt: %v", err)
