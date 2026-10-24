@@ -13,6 +13,7 @@ import (
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/web"
@@ -85,9 +86,9 @@ func EditProtectedTag(ctx *context.Context) {
 	}
 
 	ctx.Data["name_pattern"] = pt.NamePattern
-	ctx.Data["allowlist_users"] = joinIDs(userIDsOnly(pt.AllowlistUserIDs))
+	ctx.Data["allowlist_users"] = joinIDs(user_model.UserIDsOnly(pt.AllowlistUserIDs))
 	ctx.Data["allowlist_teams"] = strings.Join(base.Int64sToStrings(pt.AllowlistTeamIDs), ",")
-	ctx.Data["allowlist_deploy_key_ids"] = joinIDs(append(slices.Clone(pt.AllowlistDeployKeyIDs), tokenIDsOnly(pt.AllowlistUserIDs)...))
+	ctx.Data["allowlist_deploy_key_ids"] = joinIDs(append(slices.Clone(pt.AllowlistDeployKeyIDs), user_model.TokenIDsOnly(pt.AllowlistUserIDs)...))
 
 	ctx.HTML(http.StatusOK, tplTags)
 }
@@ -203,8 +204,8 @@ func setAllowlistDeployKeyIDs(ctx *context.Context, pt *git_model.ProtectedTag, 
 		ctx.ServerError("getWriteTokens", err)
 		return false
 	}
-	pt.AllowlistUserIDs = userIDsOnly(pt.AllowlistUserIDs)
-	for _, id := range tokenIDsOnly(ids) {
+	pt.AllowlistUserIDs = user_model.UserIDsOnly(pt.AllowlistUserIDs)
+	for _, id := range user_model.TokenIDsOnly(ids) {
 		if slices.ContainsFunc(tokens, func(t *allowlistToken) bool { return t.BotID == id }) {
 			pt.AllowlistUserIDs = append(pt.AllowlistUserIDs, id)
 		}

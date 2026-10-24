@@ -123,7 +123,7 @@
 												{{end}}
 												{{range $.AllowlistTokens}}
 													{{if SliceUtils.Contains $userIDs .BotID}}
-														<span class="ui basic label">{{svg "fontawesome-send"}} {{.Name}} [bot]</span>
+														<span class="ui basic label">{{svg "fontawesome-send"}} {{.Name}} [bot]{{if .Expired}} ({{ctx.Locale.Tr "owned_token.expired"}}){{end}}</span>
 													{{end}}
 												{{end}}
 											{{else}}

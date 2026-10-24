@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"forgejo.org/models/auth"
@@ -124,6 +125,16 @@ func AccessTokenBotID(tokenID int64) int64 {
 // IsAccessTokenBotID reports whether the user ID is the identity of an access token (see AccessTokenBotID).
 func IsAccessTokenBotID(id int64) bool {
 	return id < accessTokenBotIDBase
+}
+
+// UserIDsOnly drops the token identities from a user allow-list.
+func UserIDsOnly(ids []int64) []int64 {
+	return slices.DeleteFunc(slices.Clone(ids), IsAccessTokenBotID)
+}
+
+// TokenIDsOnly keeps the token identities of an allow-list.
+func TokenIDsOnly(ids []int64) []int64 {
+	return slices.DeleteFunc(slices.Clone(ids), func(id int64) bool { return !IsAccessTokenBotID(id) })
 }
 
 // NewAccessTokenBot returns the identity the token of an organization, a project or a repository acts as. It is not

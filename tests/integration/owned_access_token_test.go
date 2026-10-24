@@ -200,6 +200,58 @@ func TestOwnedAccessToken(t *testing.T) {
 			require.NoError(t, git_model.DeleteProtectedTag(db.DefaultContext, tags[0]))
 		})
 
+		t.Run("allow-lists keep tokens through API edits and expiry", func(t *testing.T) {
+			session := loginUser(t, "user2")
+			apiToken := getUserToken(t, "user2", auth_model.AccessTokenScopeWriteRepository)
+			tok := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, repo3.ID, 0, perm_model.AccessModeWrite, "write:repository")
+			botID := user_model.AccessTokenBotID(tok.ID)
+			id := strconv.FormatInt(botID, 10)
+
+			session.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/repo3/settings/branches/edit", map[string]string{
+				"rule_name": "keep-bot*", "enable_push": "whitelist", "whitelist_deploy_key_ids": id,
+			}), http.StatusSeeOther)
+			session.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/repo3/settings/tags", map[string]string{
+				"name_pattern": "keep-bot-*", "allowlist_deploy_key_ids": id,
+			}), http.StatusSeeOther)
+
+			// naming users through the API replaces the users and leaves the tokens
+			MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/repos/org3/repo3/branch_protections/keep-bot*", &api.EditBranchProtectionOption{
+				PushWhitelistUsernames: []string{"user2"}, MergeWhitelistUsernames: []string{"user2"},
+			}).AddTokenAuth(apiToken), http.StatusOK)
+			pb, err := git_model.GetFirstMatchProtectedBranchRule(db.DefaultContext, repo3.ID, "keep-bot")
+			require.NoError(t, err)
+			require.NotNil(t, pb)
+			assert.ElementsMatch(t, []int64{2, botID}, pb.WhitelistUserIDs)
+			assert.Equal(t, []int64{2}, pb.MergeWhitelistUserIDs)
+
+			tags, err := git_model.GetProtectedTags(db.DefaultContext, repo3.ID)
+			require.NoError(t, err)
+			require.Len(t, tags, 1)
+			MakeRequest(t, NewRequestWithJSON(t, "PATCH", fmt.Sprintf("/api/v1/repos/org3/repo3/tag_protections/%d", tags[0].ID), &api.EditTagProtectionOption{
+				WhitelistUsernames: []string{"user2"},
+			}).AddTokenAuth(apiToken), http.StatusOK)
+			tags, err = git_model.GetProtectedTags(db.DefaultContext, repo3.ID)
+			require.NoError(t, err)
+			require.Len(t, tags, 1)
+			assert.ElementsMatch(t, []int64{2, botID}, tags[0].AllowlistUserIDs)
+
+			// an expired token stays in a tag rule that is saved again, and shows
+			_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE access_token SET expires_unix = ? WHERE id = ?", timeutil.TimeStampNow().AddDuration(-time.Hour), tok.ID)
+			require.NoError(t, err)
+			page := NewHTMLParser(t, session.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/settings/tags"), http.StatusOK).Body)
+			assert.Contains(t, page.Find("table").Text(), tok.Name+" [bot] (Expired)")
+			session.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/org3/repo3/settings/tags/%d", tags[0].ID), map[string]string{
+				"name_pattern": "keep-bot-*", "allowlist_users": "2", "allowlist_deploy_key_ids": id,
+			}), http.StatusSeeOther)
+			tags, err = git_model.GetProtectedTags(db.DefaultContext, repo3.ID)
+			require.NoError(t, err)
+			require.Len(t, tags, 1)
+			assert.ElementsMatch(t, []int64{2, botID}, tags[0].AllowlistUserIDs)
+
+			require.NoError(t, git_model.DeleteProtectedTag(db.DefaultContext, tags[0]))
+			require.NoError(t, git_model.DeleteProtectedBranch(db.DefaultContext, repo3, pb.ID))
+		})
+
 		t.Run("organization token", func(t *testing.T) {
 			all := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeRead, "read:repository")
 			selected := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeRead, "read:repository", repo5.ID)
