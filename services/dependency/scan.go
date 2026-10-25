@@ -187,7 +187,7 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 		if auxNames[base] {
 			aux[e.path] = e
 		}
-		if dependency.FormatFor(base) != nil {
+		if dependency.FormatForPath(e.path) != nil {
 			manifests = append(manifests, e)
 		}
 	})
@@ -258,7 +258,7 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 			skip(m.path, repo_model.DependencySkipInvalidPath)
 			continue
 		}
-		format := dependency.FormatFor(path.Base(m.path))
+		format := dependency.FormatForPath(m.path)
 		limit := cfg.MaxManifestSize
 		if format.Small {
 			limit = min(limit, dependency.MaxSmallManifestSize)

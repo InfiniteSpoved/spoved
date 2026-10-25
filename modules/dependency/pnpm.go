@@ -4,7 +4,11 @@
 package dependency
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
+	"slices"
 	"sort"
 	"strings"
 
@@ -31,13 +35,38 @@ type pnpmLockfile struct {
 	} `yaml:"packages"`
 }
 
+// maxPnpmDocuments bounds the documents of one file; pnpm 10+ writes two.
+const maxPnpmDocuments = 8
+
 // parsePnpmLock reads lockfile versions 5, 6 and 9. A package is direct if any importer (the root project or a
-// workspace project) lists it.
+// workspace project) lists it. pnpm 10+ can write several YAML documents: a first one for the tooling pnpm itself
+// needs (configDependencies, packageManagerDependencies) and then the lockfile of the project. All documents are
+// read and merged, except that the tooling document is left out when a later one has importers.
 func parsePnpmLock(data []byte, _ Finder) ([]Dependency, error) {
-	var lock pnpmLockfile
-	if err := yaml.Unmarshal(data, &lock); err != nil {
-		return nil, parseErr("pnpm-lock.yaml")
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	var docs []pnpmLockfile
+	for {
+		var d pnpmLockfile
+		err := dec.Decode(&d)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil || len(docs) >= maxPnpmDocuments {
+			return nil, parseErr("pnpm-lock.yaml")
+		}
+		docs = append(docs, d)
 	}
+	if len(docs) > 1 && slices.ContainsFunc(docs[1:], func(d pnpmLockfile) bool { return len(d.Importers) > 0 }) {
+		docs = docs[1:]
+	}
+	var all []Dependency
+	for _, d := range docs {
+		all = append(all, pnpmDocument(d)...)
+	}
+	return all, nil
+}
+
+func pnpmDocument(lock pnpmLockfile) []Dependency {
 	oldKeys := strings.HasPrefix(fmt.Sprint(lock.LockfileVersion), "5") // name/version instead of name@version
 	direct := map[string]bool{}
 	imp := func(i pnpmImporter) {
@@ -67,7 +96,7 @@ func parsePnpmLock(data []byte, _ Finder) ([]Dependency, error) {
 		}
 		deps = append(deps, Dependency{Name: name, Version: version, Direct: direct[name]})
 	}
-	return deps, nil
+	return deps
 }
 
 // pnpmKey splits a key of "packages": `/name@1.2.3(peer@1)`, `name@1.2.3` or, in v5, `/@scope/name/1.2.3_peer`.

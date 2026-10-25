@@ -9,7 +9,7 @@ import (
 )
 
 func init() {
-	register(&Format{Ecosystem: PyPI, Small: true, match: func(b string) bool { return b == "requirements.txt" }, parse: parseRequirements})
+	register(&Format{Ecosystem: PyPI, Small: true, match: isRequirementsName, parse: parseRequirements})
 	register(&Format{Ecosystem: PyPI, match: func(b string) bool { return b == "poetry.lock" }, parse: parsePoetryLock})
 }
 
@@ -17,6 +17,11 @@ var pyName = `[A-Za-z0-9][A-Za-z0-9._-]*`
 
 // a pinned requirement: name, optional [extras], ==version, optional markers or hashes
 var reqPin = regexp.MustCompile(`^(` + pyName + `)\s*(?:\[[^\]]*\])?\s*===?\s*([A-Za-z0-9][A-Za-z0-9._+!*-]*)\s*(?:;.*|\\)?$`)
+
+// isRequirementsName is requirements.txt, requirements-dev.txt, dev-requirements.txt and the like.
+func isRequirementsName(b string) bool {
+	return strings.HasSuffix(b, ".txt") && (strings.HasPrefix(b, "requirements") || strings.HasSuffix(b, "-requirements.txt"))
+}
 
 // parseRequirements reads exact pins (`name==1.2.3`). Options (`-r`, `-c`, `--index-url`, ...), URLs, unpinned
 // requirements and comments are ignored: nothing is followed or fetched.

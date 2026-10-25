@@ -250,6 +250,31 @@ func TestSBOMSchemas(t *testing.T) {
 	})
 }
 
+func TestSPDXDownloadLocation(t *testing.T) {
+	defer test.MockVariableValue(&setting.AppVer, "11.0.0+test")()
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	id := uuid.MustParse("11111111-2222-3333-4444-555555555555")
+	for appURL, want := range map[string]string{
+		"https://git.example.com:3000/": "git+https://git.example.com:3000/acme/payments/api.git@0123456789abcdef0123456789abcdef01234567",
+		"http://localhost:3300/":        "NOASSERTION",
+		"https://intranet/":             "NOASSERTION",
+	} {
+		t.Run(appURL, func(t *testing.T) {
+			defer test.MockVariableValue(&setting.AppURL, appURL)()
+			doc, err := testSBOM().GenerateSPDX(now, id)
+			require.NoError(t, err)
+			validateDoc(t, loadSchema(t, spdxBase, ""), doc)
+			var out struct {
+				Packages []struct {
+					DownloadLocation string `json:"downloadLocation"`
+				} `json:"packages"`
+			}
+			require.NoError(t, json.Unmarshal(doc, &out))
+			assert.Equal(t, want, out.Packages[0].DownloadLocation)
+		})
+	}
+}
+
 func TestSBOMFileName(t *testing.T) {
 	r := &repo_model.Repository{OwnerName: "acme", GroupID: 3, GroupName: "payments", Name: "api"}
 	assert.Equal(t, "acme-payments-api.spdx.json", SBOMFileName(r, FormatSPDX))

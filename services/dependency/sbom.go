@@ -5,6 +5,7 @@ package dependency
 
 import (
 	"context"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -102,8 +103,14 @@ func (s *SBOM) skippedNote() string {
 	return "Manifests that were not read: " + strings.Join(parts, ", ")
 }
 
-func (s *SBOM) cloneURL() string {
-	return s.Repo.CloneLink().HTTPS
+// downloadLocation is the SPDX download location of the scanned commit. The SPDX validators (spdx-tools) refuse a
+// host without a dot (localhost, a single-label intranet name), so then it is NOASSERTION.
+func (s *SBOM) downloadLocation(sha string) string {
+	clone := s.Repo.CloneLink().HTTPS
+	if u, err := url.Parse(clone); err != nil || !strings.Contains(u.Hostname(), ".") {
+		return "NOASSERTION"
+	}
+	return "git+" + clone + "@" + sha
 }
 
 func toolName() string { return "spoved-" + setting.AppVer }
@@ -161,7 +168,7 @@ func (s *SBOM) GenerateSPDX(now time.Time, id uuid.UUID) ([]byte, error) {
 		doc["comment"] = note
 	}
 	pkgs := []spdxPackage{{
-		Name: s.Repo.FullName(), SPDXID: root, VersionInfo: sha, DownloadLocation: "git+" + s.cloneURL() + "@" + sha,
+		Name: s.Repo.FullName(), SPDXID: root, VersionInfo: sha, DownloadLocation: s.downloadLocation(sha),
 		LicenseConcluded: "NOASSERTION", LicenseDeclared: "NOASSERTION", CopyrightText: "NOASSERTION", Primary: "APPLICATION",
 	}}
 	rels := []spdxRelationship{{"SPDXRef-DOCUMENT", "DESCRIBES", root}}
@@ -231,7 +238,7 @@ func (s *SBOM) GenerateCycloneDX(now time.Time, id uuid.UUID) ([]byte, error) {
 		"tools":     map[string]any{"components": []cdxComponent{{Type: "application", BOMRef: "tool", Name: "spoved", Version: setting.AppVer}}},
 		"component": cdxComponent{
 			Type: "application", BOMRef: root, Name: s.Repo.FullName(), Version: sha,
-			ExternalReferences: []map[string]string{{"type": "vcs", "url": s.cloneURL()}},
+			ExternalReferences: []map[string]string{{"type": "vcs", "url": s.Repo.CloneLink().HTTPS}},
 		},
 	}
 	if note := s.skippedNote(); note != "" {

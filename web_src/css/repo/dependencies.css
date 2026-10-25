@@ -1,0 +1,82 @@
+.repo-dependencies-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.repo-dependencies-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.repo-dependencies-filters input[type="search"] {
+  flex: 1;
+  min-width: 240px;
+}
+
+.repo-dependencies-filters label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.repo-dependencies-table {
+  border: 1px solid var(--color-secondary);
+  border-radius: var(--border-radius);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.repo-dependencies-row {
+  display: grid;
+  grid-template-columns: 2.2fr 1fr 0.9fr 1fr 1.6fr;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-secondary);
+  overflow-wrap: anywhere;
+}
+
+.repo-dependencies-row:last-child {
+  border-bottom: 0;
+}
+
+.repo-dependencies-head {
+  background: var(--color-box-header);
+  font-weight: var(--font-weight-semibold);
+}
+
+.repo-dependencies-note {
+  border-top: 1px solid var(--color-secondary);
+  padding-top: 12px;
+}
+
+@media (max-width: 767.98px) {
+  .repo-dependencies-header {
+    flex-direction: column;
+  }
+
+  /* each row becomes a card: name, then version, ecosystem, relationship and licence on one line, then the manifest */
+  .repo-dependencies-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
+
+  .repo-dependencies-row.repo-dependencies-head {
+    display: none;
+  }
+
+  .repo-dependencies-row .repo-dependencies-package {
+    flex-basis: 100%;
+  }
+
+  .repo-dependencies-row > :last-child {
+    flex-basis: 100%;
+  }
+}

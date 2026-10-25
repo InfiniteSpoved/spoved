@@ -134,6 +134,40 @@ func TestPnpm(t *testing.T) {
 	assert.True(t, direct)
 }
 
+func TestPnpmMultiDocument(t *testing.T) {
+	deps := parseFixture(t, "vite/pnpm-lock.yaml")
+	m := index(deps)
+	assert.GreaterOrEqual(t, len(deps), 60, "the project's document is read")
+	for k := range m {
+		assert.NotContains(t, k, "@pnpm/exe", "the tooling document is left out: %s", k)
+	}
+	var direct int
+	for _, d := range deps {
+		if d.Direct {
+			direct++
+		}
+	}
+	assert.Positive(t, direct)
+
+	// without importers in a later document, every document counts
+	two := "lockfileVersion: '9.0'\npackages:\n  a@1.0.0:\n    resolution: {}\n---\nlockfileVersion: '9.0'\npackages:\n  b@2.0.0:\n    resolution: {}\n"
+	got, err := FormatFor("pnpm-lock.yaml").Parse([]byte(two), nil)
+	require.NoError(t, err)
+	assert.Len(t, got, 2)
+	_, err = FormatFor("pnpm-lock.yaml").Parse([]byte("a: [\n---\nb: 1"), nil)
+	require.Error(t, err)
+}
+
+func TestFormatForPath(t *testing.T) {
+	for p, want := range map[string]bool{
+		"requirements.txt": true, "a/requirements-dev.txt": true, "dev-requirements.txt": true, "requirements_test.txt": true,
+		"requirements/base.txt": true, "x/requirements/prod.txt": true,
+		"requirements/base.md": false, "requirements/sub/base.txt": false, "notes.txt": false, "requirements.md": false,
+	} {
+		assert.Equal(t, want, FormatForPath(p) != nil, p)
+	}
+}
+
 func TestPython(t *testing.T) {
 	m := index(parseFixture(t, "defectdojo/requirements.txt"))
 	for _, d := range m {
@@ -343,7 +377,7 @@ func TestFormatFor(t *testing.T) {
 	for _, n := range []string{"go.mod", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "requirements.txt", "poetry.lock", "pom.xml", "x.csproj", "packages.lock.json", "Cargo.lock", "Gemfile.lock", "composer.lock"} {
 		assert.NotNil(t, FormatFor(n), n)
 	}
-	for _, n := range []string{"go.sum", "package.json", "Go.mod", "requirements-dev.txt", "x.csproj.user", "composer.json", ""} {
+	for _, n := range []string{"go.sum", "package.json", "Go.mod", "requirements.md", "x.csproj.user", "composer.json", ""} {
 		assert.Nil(t, FormatFor(n), n)
 	}
 }

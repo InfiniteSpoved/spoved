@@ -3222,5 +3222,60 @@
 	"admin.auths.saml_dyn_group_maps_removal": "Remove users from all teams they are not added to by the group mappings.",
 	"admin.auths.saml_quota_group_claim_name": "Attribute that holds the quota groups (optional)",
 	"admin.auths.saml_quota_group_map": "Map quota group values to quota groups (optional, needs the quota group attribute)",
-	"admin.auths.saml_quota_group_map_removal": "Remove users from synchronized quota groups if they no longer have the matching value."
+	"admin.auths.saml_quota_group_map_removal": "Remove users from synchronized quota groups if they no longer have the matching value.",
+	"repo.dependencies.title": "Dependencies",
+	"repo.dependencies.summary": "%s from %s on %s at %s, updated %s",
+	"repo.dependencies.packages": {
+		"one": "%d package",
+		"other": "%d packages"
+	},
+	"repo.dependencies.manifests": {
+		"one": "%d manifest",
+		"other": "%d manifests"
+	},
+	"repo.dependencies.stale": "Updated for %s; %s is at %s, rescanning.",
+	"repo.dependencies.export": "Export SBOM",
+	"repo.dependencies.export_spdx": "SPDX 2.3 (JSON)",
+	"repo.dependencies.export_cyclonedx": "CycloneDX 1.6 (JSON)",
+	"repo.dependencies.export_disabled": "Export SBOM is disabled until the first scan finishes.",
+	"repo.dependencies.export_empty": "Export SBOM is still offered: the document lists only the repository itself.",
+	"repo.dependencies.running": "Reading the manifests on %s…",
+	"repo.dependencies.running_hint": "This usually takes a few seconds. Reload the page to see the result.",
+	"repo.dependencies.failed": "The first scan failed",
+	"repo.dependencies.error.timeout": "The scan took too long. It is tried again after the next push.",
+	"repo.dependencies.error.tree_too_large": "The repository has more files than the scan reads.",
+	"repo.dependencies.error.other": "The scan could not finish. It is tried again after the next push.",
+	"repo.dependencies.rescan_failed": "The last scan failed. The list below is from the last scan that worked.",
+	"repo.dependencies.none": "No supported manifests on %s",
+	"repo.dependencies.none_hint": "spoved reads go.mod, package-lock.json, yarn.lock, pnpm-lock.yaml, requirements.txt (also requirements-dev.txt and the files in a requirements directory), poetry.lock, pom.xml, *.csproj, packages.lock.json, Cargo.lock, Gemfile.lock and composer.lock. Push one to the default branch and this page fills in.",
+	"repo.dependencies.skipped": {
+		"one": "%d manifest was skipped",
+		"other": "%d manifests were skipped"
+	},
+	"repo.dependencies.skipped_note": {
+		"one": "The list and the SBOM contain the %d manifest that was read. The SBOM says which were skipped.",
+		"other": "The list and the SBOM contain the %d manifests that were read. The SBOM says which were skipped."
+	},
+	"repo.dependencies.skip.manifest_too_large": "larger than the size limit",
+	"repo.dependencies.skip.too_many_manifests": "over the limit of manifests per repository",
+	"repo.dependencies.skip.too_many_dependencies": "over the limit of dependencies per repository",
+	"repo.dependencies.skip.parse_error": "could not be parsed",
+	"repo.dependencies.skip.invalid_path": "the path is not valid",
+	"repo.dependencies.skip.read_error": "could not be read",
+	"repo.dependencies.skip.internal_error": "could not be read",
+	"repo.dependencies.search": "Search packages",
+	"repo.dependencies.ecosystem": "Ecosystem",
+	"repo.dependencies.relationship": "Relationship",
+	"repo.dependencies.manifest": "Manifest",
+	"repo.dependencies.all": "All",
+	"repo.dependencies.all_count": "All (%d)",
+	"repo.dependencies.direct": "Direct",
+	"repo.dependencies.transitive": "Transitive",
+	"repo.dependencies.filter": "Filter",
+	"repo.dependencies.package": "Package",
+	"repo.dependencies.version": "Version",
+	"repo.dependencies.license": "Licence",
+	"repo.dependencies.license_unknown": "Unknown",
+	"repo.dependencies.no_match": "No package matches the filters.",
+	"repo.dependencies.note": "Licences come from the lockfile where it records them (npm, Composer); others show Unknown and NOASSERTION in the SBOM. The manifest link opens the file at the scanned commit. The SBOM names this repository %s."
 }

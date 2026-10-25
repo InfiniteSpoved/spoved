@@ -1936,9 +1936,10 @@ func registerRoutes(m *web.Route) {
 				m.Get("/data", repo.CodeFrequencyData)
 			}, repo.MustBeNotEmpty, context.RequireRepoReaderOr(unit.TypeCode))
 			m.Group("/dependencies", func() {
+				m.Get("", repo.Dependencies)
 				m.Get("/sbom", common.RateLimitHeavyPlain, repo.DependenciesSBOM)
 			}, repo.MustEnableDependencyGraph, repo.MustBeNotEmpty, context.RequireRepoReaderOr(unit.TypeCode))
-		}, context.RepoRef(), context.RequireRepoReaderOr(unit.TypeCode, unit.TypePullRequests, unit.TypeIssues, unit.TypeReleases))
+		}, context.RepoRef(), repo.SetDependencyGraphNav, context.RequireRepoReaderOr(unit.TypeCode, unit.TypePullRequests, unit.TypeIssues, unit.TypeReleases))
 
 		m.Group("/activity_author_data", func() {
 			m.Get("", repo.ActivityAuthors)

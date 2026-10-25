@@ -13,6 +13,7 @@
 			{{if .PageIsCodeFrequency}}{{template "repo/code_frequency" .}}{{end}}
 			{{if .PageIsRecentCommits}}{{template "repo/recent_commits" .}}{{end}}
 			{{if .PageIsMetrics}}{{template "shared/metrics" .}}{{end}}
+			{{if .PageIsDependencies}}{{template "repo/dependencies" .}}{{end}}
 		</div>
 	</div>
 </div>

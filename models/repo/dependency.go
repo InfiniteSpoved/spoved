@@ -230,3 +230,44 @@ func UnscannedDependencyRepoIDs(ctx context.Context, retryBefore timeutil.TimeSt
 		Find(&ids)
 	return ids, err
 }
+
+// DependencyFacet is one value of a filter with the number of dependencies that have it.
+type DependencyFacet struct {
+	Value string `xorm:"value"`
+	Count int    `xorm:"cnt"`
+}
+
+// DependencyFacets are the counts behind the filters of the Dependencies page.
+type DependencyFacets struct {
+	Ecosystems []DependencyFacet
+	Manifests  []DependencyFacet
+	Direct     int
+	Transitive int
+}
+
+// GetDependencyFacets counts the dependencies of the repository by ecosystem, by manifest and by relationship:
+// one GROUP BY query for each list.
+func GetDependencyFacets(ctx context.Context, repoID int64) (*DependencyFacets, error) {
+	f := &DependencyFacets{}
+	if err := db.GetEngine(ctx).Table("repo_dependency").Where("repo_id = ?", repoID).Select("ecosystem AS value, COUNT(*) AS cnt").GroupBy("ecosystem").OrderBy("ecosystem").Find(&f.Ecosystems); err != nil {
+		return nil, err
+	}
+	if err := db.GetEngine(ctx).Table("repo_dependency").Where("repo_id = ?", repoID).Select("manifest_path AS value, COUNT(*) AS cnt").GroupBy("manifest_path").OrderBy("manifest_path").Find(&f.Manifests); err != nil {
+		return nil, err
+	}
+	var rel []struct {
+		Direct bool `xorm:"direct"`
+		Count  int  `xorm:"cnt"`
+	}
+	if err := db.GetEngine(ctx).Table("repo_dependency").Where("repo_id = ?", repoID).Select("direct, COUNT(*) AS cnt").GroupBy("direct").Find(&rel); err != nil {
+		return nil, err
+	}
+	for _, r := range rel {
+		if r.Direct {
+			f.Direct = r.Count
+		} else {
+			f.Transitive = r.Count
+		}
+	}
+	return f, nil
+}

@@ -1,0 +1,113 @@
+<div class="repo-dependencies">
+	<div class="repo-dependencies-header">
+		<div>
+			<h2 class="ui header tw-mb-1">{{ctx.Locale.Tr "repo.dependencies.title"}}</h2>
+			{{if and .Scan (not .ScanNeverRead)}}
+				<div class="text grey">
+					{{ctx.Locale.Tr "repo.dependencies.summary" (ctx.Locale.TrPluralString .Scan.DependencyCount "repo.dependencies.packages" .Scan.DependencyCount) (ctx.Locale.TrPluralString .Scan.ManifestCount "repo.dependencies.manifests" .Scan.ManifestCount) (HTMLFormat `<code>%s</code>` .Repository.DefaultBranch) (HTMLFormat `<a href="%s/commit/%s"><code>%s</code></a>` .RepoLink .Scan.CommitSHA .ShortSHA) (DateUtils.TimeSince .ScannedTime)}}
+				</div>
+			{{end}}
+			{{if .StaleHead}}
+				<div class="text grey" id="dependencies-stale">{{ctx.Locale.Tr "repo.dependencies.stale" (HTMLFormat `<code>%s</code>` .ShortSHA) .Repository.DefaultBranch (HTMLFormat `<code>%s</code>` .StaleHead)}}</div>
+			{{end}}
+		</div>
+		<div class="ui dropdown basic compact button{{if or (not .Scan) .ScanNeverRead}} disabled{{end}}" id="dependencies-export">
+			{{ctx.Locale.Tr "repo.dependencies.export"}} {{svg "octicon-triangle-down" 14 "dropdown icon"}}
+			<div class="menu">
+				<a class="item" href="{{.RepoLink}}/activity/dependencies/sbom?format=spdx">
+					<div><strong>{{ctx.Locale.Tr "repo.dependencies.export_spdx"}}</strong></div>
+					<div class="text grey small">{{.SBOMSPDXName}}</div>
+				</a>
+				<a class="item" href="{{.RepoLink}}/activity/dependencies/sbom?format=cyclonedx">
+					<div><strong>{{ctx.Locale.Tr "repo.dependencies.export_cyclonedx"}}</strong></div>
+					<div class="text grey small">{{.SBOMCycloneDXName}}</div>
+				</a>
+			</div>
+		</div>
+	</div>
+
+	{{if not .Scan}}
+		<div class="ui info message" id="dependencies-running">
+			<div class="header">{{ctx.Locale.Tr "repo.dependencies.running" .Repository.DefaultBranch}}</div>
+			<p>{{ctx.Locale.Tr "repo.dependencies.running_hint"}}</p>
+		</div>
+		<p class="text grey">{{ctx.Locale.Tr "repo.dependencies.export_disabled"}}</p>
+	{{else if .ScanNeverRead}}
+		<div class="ui negative message" id="dependencies-failed">
+			<div class="header">{{ctx.Locale.Tr "repo.dependencies.failed"}}</div>
+			<p>{{if eq .Scan.Error "timeout"}}{{ctx.Locale.Tr "repo.dependencies.error.timeout"}}{{else if eq .Scan.Error "tree_too_large"}}{{ctx.Locale.Tr "repo.dependencies.error.tree_too_large"}}{{else}}{{ctx.Locale.Tr "repo.dependencies.error.other"}}{{end}}</p>
+		</div>
+	{{else}}
+		{{if .ScanFailed}}
+			<div class="ui warning message" id="dependencies-rescan-failed">{{ctx.Locale.Tr "repo.dependencies.rescan_failed"}}</div>
+		{{end}}
+		{{if .Skipped}}
+			<div class="ui warning message" id="dependencies-skipped">
+				<div class="header">{{ctx.Locale.TrPluralString (len .Skipped) "repo.dependencies.skipped" (len .Skipped)}}</div>
+				<ul class="tw-mb-0">
+					{{range .Skipped}}
+						<li><a href="{{$.RepoLink}}/src/commit/{{$.Scan.CommitSHA}}/{{PathEscapeSegments .Path}}">{{.Path}}</a>: {{if eq .Code "manifest_too_large"}}{{ctx.Locale.Tr "repo.dependencies.skip.manifest_too_large"}}{{else if eq .Code "too_many_manifests"}}{{ctx.Locale.Tr "repo.dependencies.skip.too_many_manifests"}}{{else if eq .Code "too_many_dependencies"}}{{ctx.Locale.Tr "repo.dependencies.skip.too_many_dependencies"}}{{else if eq .Code "parse_error"}}{{ctx.Locale.Tr "repo.dependencies.skip.parse_error"}}{{else if eq .Code "invalid_path"}}{{ctx.Locale.Tr "repo.dependencies.skip.invalid_path"}}{{else if eq .Code "read_error"}}{{ctx.Locale.Tr "repo.dependencies.skip.read_error"}}{{else}}{{ctx.Locale.Tr "repo.dependencies.skip.internal_error"}}{{end}}</li>
+					{{end}}
+				</ul>
+				<p class="tw-mt-2 tw-mb-0">{{ctx.Locale.TrPluralString .Scan.ManifestCount "repo.dependencies.skipped_note" .Scan.ManifestCount}}</p>
+			</div>
+		{{end}}
+
+		{{if and (not .Scan.DependencyCount) (not .Skipped)}}
+			<div class="ui info message" id="dependencies-none">
+				<div class="header">{{ctx.Locale.Tr "repo.dependencies.none" .Repository.DefaultBranch}}</div>
+				<p>{{ctx.Locale.Tr "repo.dependencies.none_hint"}}</p>
+			</div>
+			<p class="text grey">{{ctx.Locale.Tr "repo.dependencies.export_empty"}}</p>
+		{{else if .Scan.DependencyCount}}
+			<form class="repo-dependencies-filters" method="get" action="{{.RepoLink}}/activity/dependencies">
+				<input type="search" name="q" value="{{.Query}}" maxlength="100" placeholder="{{ctx.Locale.Tr "repo.dependencies.search"}}" aria-label="{{ctx.Locale.Tr "repo.dependencies.search"}}">
+				<label>{{ctx.Locale.Tr "repo.dependencies.ecosystem"}}
+					<select name="ecosystem">
+						<option value="">{{ctx.Locale.Tr "repo.dependencies.all_count" .Scan.DependencyCount}}</option>
+						{{range .Facets.Ecosystems}}<option value="{{.Value}}"{{if eq .Value $.Ecosystem}} selected{{end}}>{{.Value}} ({{.Count}})</option>{{end}}
+					</select>
+				</label>
+				<label>{{ctx.Locale.Tr "repo.dependencies.relationship"}}
+					<select name="relationship">
+						<option value="">{{ctx.Locale.Tr "repo.dependencies.all"}}</option>
+						<option value="direct"{{if eq .Relationship "direct"}} selected{{end}}>{{ctx.Locale.Tr "repo.dependencies.direct"}} ({{.Facets.Direct}})</option>
+						<option value="transitive"{{if eq .Relationship "transitive"}} selected{{end}}>{{ctx.Locale.Tr "repo.dependencies.transitive"}} ({{.Facets.Transitive}})</option>
+					</select>
+				</label>
+				<label>{{ctx.Locale.Tr "repo.dependencies.manifest"}}
+					<select name="manifest">
+						<option value="">{{ctx.Locale.Tr "repo.dependencies.all_count" (len .Facets.Manifests)}}</option>
+						{{range .Facets.Manifests}}<option value="{{.Value}}"{{if eq .Value $.Manifest}} selected{{end}}>{{.Value}} ({{.Count}})</option>{{end}}
+					</select>
+				</label>
+				<button class="ui basic compact button" type="submit">{{ctx.Locale.Tr "repo.dependencies.filter"}}</button>
+			</form>
+
+			{{if .Dependencies}}
+				<div class="repo-dependencies-table" role="table" aria-label="{{ctx.Locale.Tr "repo.dependencies.title"}}">
+					<div class="repo-dependencies-row repo-dependencies-head" role="row">
+						<span role="columnheader">{{ctx.Locale.Tr "repo.dependencies.package"}}</span>
+						<span role="columnheader">{{ctx.Locale.Tr "repo.dependencies.version"}}</span>
+						<span role="columnheader">{{ctx.Locale.Tr "repo.dependencies.relationship"}}</span>
+						<span role="columnheader">{{ctx.Locale.Tr "repo.dependencies.license"}}</span>
+						<span role="columnheader">{{ctx.Locale.Tr "repo.dependencies.manifest"}}</span>
+					</div>
+					{{range .Dependencies}}
+						<div class="repo-dependencies-row" role="row">
+							<span class="repo-dependencies-package" role="cell"><span class="ui basic mini label">{{.Ecosystem}}</span> <strong>{{.Name}}</strong></span>
+							<span role="cell"><code>{{.Version}}</code></span>
+							<span role="cell">{{if .Direct}}{{ctx.Locale.Tr "repo.dependencies.direct"}}{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.dependencies.transitive"}}</span>{{end}}</span>
+							<span role="cell">{{if .License}}{{.License}}{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.dependencies.license_unknown"}}</span>{{end}}</span>
+							<span role="cell"><a href="{{$.RepoLink}}/src/commit/{{$.Scan.CommitSHA}}/{{PathEscapeSegments .ManifestPath}}">{{.ManifestPath}}</a></span>
+						</div>
+					{{end}}
+				</div>
+				{{template "base/paginate" .}}
+			{{else}}
+				<div class="ui info message" id="dependencies-no-match">{{ctx.Locale.Tr "repo.dependencies.no_match"}}</div>
+			{{end}}
+			<div class="text grey small repo-dependencies-note">{{ctx.Locale.Tr "repo.dependencies.note" (HTMLFormat `<code>%s</code>` .Repository.FullName)}}</div>
+		{{end}}
+	{{end}}
+</div>

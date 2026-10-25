@@ -95,6 +95,19 @@ func FormatFor(base string) *Format {
 	return nil
 }
 
+// FormatForPath is FormatFor for a path in the repository: it also knows the Django layout, where any *.txt file
+// directly inside a directory named requirements is a requirements file.
+func FormatForPath(p string) *Format {
+	base := path.Base(p)
+	if f := FormatFor(base); f != nil {
+		return f
+	}
+	if strings.HasSuffix(base, ".txt") && path.Base(path.Dir(p)) == "requirements" {
+		return FormatFor("requirements.txt")
+	}
+	return nil
+}
+
 // Parse reads a manifest. A panic of a parser is an ErrParse, and every row is validated: names, versions and
 // licenses are cut of control characters and bidirectional marks, a row with an empty or too long value is dropped,
 // and a package listed twice in one manifest is one row.

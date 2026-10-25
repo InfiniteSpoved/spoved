@@ -36,6 +36,7 @@ import (
 	repo_service "forgejo.org/services/repository"
 	"forgejo.org/tests/forgery"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -143,6 +144,8 @@ func TestDependencyGraphScanOnPush(t *testing.T) {
 				"go.mod":                             depGoMod,
 				"web/package-lock.json":              depLockV3,
 				"web/package.json":                   `{"dependencies":{"left-pad":"^1.3.0"}}`,
+				"requirements/base.txt":              "flask==3.0.0\n",
+				"dev-requirements.txt":               "pytest==8.0.0\n",
 				"requirements.txt":                   "django==4.2\n-r ../../../../etc/passwd\n--index-url http://169.254.169.254\n",
 				"vendor/go.mod":                      depGoMod,
 				"a/node_modules/x/package-lock.json": depLockV3,
@@ -152,7 +155,7 @@ func TestDependencyGraphScanOnPush(t *testing.T) {
 			require.Eventually(t, func() bool { return scanned(sha) }, 10*time.Second, 50*time.Millisecond)
 
 			rows := depRows(t, repo.ID)
-			require.Len(t, rows, 5, "%v", rows)
+			require.Len(t, rows, 7, "%v", rows)
 			gin := rows["Go|github.com/gin-gonic/gin@v1.9.1|go.mod"]
 			require.NotNil(t, gin)
 			assert.True(t, gin.Direct)
@@ -162,6 +165,8 @@ func TestDependencyGraphScanOnPush(t *testing.T) {
 			assert.True(t, left.Direct)
 			assert.Equal(t, "WTFPL", left.License)
 			assert.Contains(t, rows, "PyPI|django@4.2|requirements.txt")
+			assert.Contains(t, rows, "PyPI|flask@3.0.0|requirements/base.txt")
+			assert.Contains(t, rows, "PyPI|pytest@8.0.0|dev-requirements.txt")
 			assert.Contains(t, rows, "Go|example.com/vend@v1.0.0|vendored/go.mod")
 			assert.Equal(t, []repo_model.SkippedManifest{{Path: "bad/pom.xml", Code: "parse_error"}}, depScanOf(t, repo.ID).SkippedManifests())
 		})
@@ -175,7 +180,7 @@ func TestDependencyGraphScanOnPush(t *testing.T) {
 			t.Helper()
 			time.Sleep(300 * time.Millisecond) // queues are immediate; this is only for a late goroutine
 			assert.Equal(t, "sentinel", depScanOf(t, repo.ID).CommitSHA)
-			assert.Len(t, depRows(t, repo.ID), 5)
+			assert.Len(t, depRows(t, repo.ID), 7)
 		}
 
 		t.Run("other branches, tags and refs/for don't scan", func(t *testing.T) {
@@ -189,7 +194,7 @@ func TestDependencyGraphScanOnPush(t *testing.T) {
 		})
 
 		t.Run("a push that removes manifests drops their rows", func(t *testing.T) {
-			sha := depPush(t, u, token, repo, "refs/heads/main", nil, "go.mod", "web", "vendored", "bad", "requirements.txt")
+			sha := depPush(t, u, token, repo, "refs/heads/main", nil, "go.mod", "web", "vendored", "bad", "requirements.txt", "requirements", "dev-requirements.txt")
 			require.Eventually(t, func() bool { return scanned(sha) }, 10*time.Second, 50*time.Millisecond)
 			assert.Empty(t, depRows(t, repo.ID))
 			assert.Zero(t, depScanOf(t, repo.ID).ManifestCount)
@@ -202,7 +207,7 @@ func TestDependencyGraphScanOnPush(t *testing.T) {
 			session.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/dep-push/settings/branches?action=default_branch", map[string]string{"branch": "feature"}), http.StatusSeeOther)
 			require.Eventually(t, func() bool { return depScanOf(t, repo.ID).CommitSHA != "sentinel" }, 10*time.Second, 50*time.Millisecond)
 			rows := depRows(t, repo.ID)
-			assert.Len(t, rows, 4, "%v", rows)
+			assert.Len(t, rows, 6, "%v", rows)
 			assert.Contains(t, rows, "Go|example.com/other@v1.0.0|go.mod")
 			assert.NotContains(t, rows, "Go|github.com/gin-gonic/gin@v1.9.1|go.mod")
 		})
@@ -505,6 +510,7 @@ func TestDependencyGraphIssuesOnlyReader(t *testing.T) {
 		session := loginUserWithPassword(t, member.Name, userPassword)
 		session.MakeRequest(t, NewRequest(t, "GET", "/org3/dep-issues/issues"), http.StatusOK)
 		session.MakeRequest(t, NewRequest(t, "GET", "/org3/dep-issues/activity/dependencies/sbom"), http.StatusNotFound)
+		session.MakeRequest(t, NewRequest(t, "GET", "/org3/dep-issues/activity/dependencies"), http.StatusNotFound)
 		token := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeReadRepository)
 		for _, tail := range []string{"/dependencies", "/sbom"} {
 			MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/org3/dep-issues"+tail).AddTokenAuth(token), http.StatusForbidden)
@@ -512,6 +518,7 @@ func TestDependencyGraphIssuesOnlyReader(t *testing.T) {
 
 		// a reader of the code gets both
 		session = loginUserWithPassword(t, reader.Name, userPassword)
+		session.MakeRequest(t, NewRequest(t, "GET", "/org3/dep-issues/activity/dependencies"), http.StatusOK)
 		session.MakeRequest(t, NewRequest(t, "GET", "/org3/dep-issues/activity/dependencies/sbom"), http.StatusOK)
 	})
 }
@@ -600,6 +607,139 @@ func TestDependencyGraphProject(t *testing.T) {
 			// a revoked token is refused
 			require.NoError(t, auth_model.DeleteOwnedAccessToken(sys, auth_model.FindOwnedAccessTokensOptions{OwnerType: auth_model.AccessTokenOwnerProject, OwnerID: 3, GroupID: group.ID}, covering.ID, 2))
 			MakeRequest(t, NewRequest(t, "GET", forms[0]+"/dependencies").AddTokenAuth(covering.Token), http.StatusUnauthorized)
+		})
+	})
+}
+
+func TestDependencyGraphPage(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		enableDependencyGraph(t)
+		sys := audit_model.WithSystem(db.DefaultContext, "test")
+		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+		session := loginUser(t, "user2")
+		page := func(session *TestSession, path string, status int) *HTMLDoc {
+			resp := session.MakeRequest(t, NewRequest(t, "GET", path), status)
+			return NewHTMLParser(t, resp.Body)
+		}
+		rowsOf := func(doc *HTMLDoc) []string {
+			var names []string
+			doc.Find(".repo-dependencies-row:not(.repo-dependencies-head) .repo-dependencies-package strong").Each(func(_ int, s *goquery.Selection) {
+				names = append(names, s.Text())
+			})
+			return names
+		}
+
+		repo := depNewRepo(t, user2, user2, "dep-page", true, 0)
+
+		t.Run("first scan running, then no manifests", func(t *testing.T) {
+			// the first read queues the scan, which runs at once with immediate queues: the page shows what it saw
+			doc := page(session, "/user2/dep-page/activity/dependencies", http.StatusOK)
+			doc.AssertElement(t, "#dependencies-running", true)
+			doc.AssertElement(t, "#dependencies-export.disabled", true)
+			doc = page(session, "/user2/dep-page/activity/dependencies", http.StatusOK)
+			doc.AssertElement(t, "#dependencies-none", true)
+			doc.AssertElement(t, "#dependencies-export.disabled", false)
+		})
+
+		t.Run("list, filters, escaping, paging", func(t *testing.T) {
+			d := func(eco, name, version string, direct bool, license, manifest string) *repo_model.Dependency {
+				return &repo_model.Dependency{Ecosystem: eco, Name: name, Version: version, Direct: direct, License: license, ManifestPath: manifest}
+			}
+			deps := []*repo_model.Dependency{
+				d("Go", "golang.org/x/net", "v0.17.0", true, "BSD-3-Clause", "go.mod"),
+				d("npm", "express", "4.18.2", true, "MIT", "web/package-lock.json"),
+				d("npm", "body-parser", "1.20.1", false, "MIT", "web/package-lock.json"),
+				d("PyPI", "requests", "2.31.0", true, "", "tools/requirements.txt"),
+				d("npm", `<script>alert(1)</script>`, `"><img src=x onerror=alert(2)>`, false, "", "web/dir with space/package-lock.json"),
+			}
+			storeScan(t, repo, deps...)
+			doc := page(session, "/user2/dep-page/activity/dependencies", http.StatusOK)
+			assert.Equal(t, []string{"golang.org/x/net", "requests", "<script>alert(1)</script>", "body-parser", "express"}, rowsOf(doc))
+			assert.Zero(t, doc.Find("script:contains('alert(1)')").Length(), "the name is escaped")
+			assert.Zero(t, doc.Find("img[src='x']").Length())
+			doc.AssertElement(t, "#dependencies-stale", true) // the stored scan names another commit than the branch head
+			assert.Equal(t, "Unknown", strings.TrimSpace(doc.Find(".repo-dependencies-row").Eq(3).Find("[role=cell]").Eq(3).Text()))
+			doc.AssertAttrPredicate(t, `.repo-dependencies-row a[href*="dir%20with%20space"]`, "href", func(v string) {
+				assert.Equal(t, "/user2/dep-page/src/commit/"+strings.Repeat("a", 40)+"/web/dir%20with%20space/package-lock.json", v)
+			})
+			doc.AssertAttrEqual(t, "#dependencies-export a.item:first-child", "href", "/user2/dep-page/activity/dependencies/sbom?format=spdx")
+			assert.Contains(t, doc.Find("#dependencies-export").Text(), "user2-dep-page.spdx.json")
+			assert.Contains(t, doc.Find("#dependencies-export").Text(), "user2-dep-page.cdx.json")
+			assert.Contains(t, doc.Find("select[name=ecosystem]").Text(), "npm (3)")
+			assert.Contains(t, doc.Find("select[name=relationship]").Text(), "Direct (3)")
+			assert.Contains(t, doc.Find("select[name=manifest]").Text(), "web/package-lock.json (2)")
+
+			assert.Equal(t, []string{"<script>alert(1)</script>", "body-parser"}, rowsOf(page(session, "/user2/dep-page/activity/dependencies?ecosystem=npm&relationship=transitive", http.StatusOK)))
+			assert.Equal(t, []string{"body-parser", "express"}, rowsOf(page(session, "/user2/dep-page/activity/dependencies?manifest=web/package-lock.json", http.StatusOK)))
+			assert.Equal(t, []string{"express"}, rowsOf(page(session, "/user2/dep-page/activity/dependencies?q=EXPR", http.StatusOK)))
+			assert.Equal(t, []string{"requests"}, rowsOf(page(session, "/user2/dep-page/activity/dependencies?relationship=direct&ecosystem=PyPI", http.StatusOK)))
+			// unknown filter values are ignored, never an error
+			assert.Len(t, rowsOf(page(session, "/user2/dep-page/activity/dependencies?ecosystem=Cobol&manifest=nope&relationship=x", http.StatusOK)), 5)
+			noMatch := page(session, "/user2/dep-page/activity/dependencies?q=zzz", http.StatusOK)
+			noMatch.AssertElement(t, "#dependencies-no-match", true)
+
+			// paging: 50 rows a page
+			many := make([]*repo_model.Dependency, 0, 120)
+			for i := range 120 {
+				many = append(many, d("Go", fmt.Sprintf("example.com/p%03d", i), "v1.0.0", false, "MIT", "go.mod"))
+			}
+			storeScan(t, repo, many...)
+			first := rowsOf(page(session, "/user2/dep-page/activity/dependencies", http.StatusOK))
+			assert.Len(t, first, 50)
+			assert.Equal(t, "example.com/p000", first[0])
+			third := page(session, "/user2/dep-page/activity/dependencies?page=3&q=example", http.StatusOK)
+			assert.Len(t, rowsOf(third), 20)
+			assert.Positive(t, third.Find(`.pagination a[href*="q=example"]`).Length())
+		})
+
+		t.Run("skipped manifests", func(t *testing.T) {
+			scan := depScanOf(t, repo.ID)
+			scan.SetSkippedManifests([]repo_model.SkippedManifest{{Path: "legacy/pom.xml", Code: "parse_error"}, {Path: "vendor-tools/yarn.lock", Code: "manifest_too_large"}, {Path: "x/Cargo.lock", Code: "<b>made up</b>"}})
+			require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(), scan, nil))
+			doc := page(session, "/user2/dep-page/activity/dependencies", http.StatusOK)
+			items := doc.Find("#dependencies-skipped li")
+			require.Equal(t, 3, items.Length())
+			assert.Contains(t, items.Eq(0).Text(), "legacy/pom.xml: could not be parsed")
+			assert.Contains(t, items.Eq(1).Text(), "larger than the size limit")
+			assert.NotContains(t, items.Eq(2).Text(), "made up", "a code outside the list is not shown")
+			assert.Contains(t, doc.Find("#dependencies-skipped .header").Text(), "3 manifests were skipped")
+		})
+
+		t.Run("menu item", func(t *testing.T) {
+			for _, tail := range []string{"/activity", "/activity/contributors", "/activity/dependencies"} {
+				doc := page(session, "/user2/dep-page"+tail, http.StatusOK)
+				doc.AssertElement(t, `.flex-container-nav a[href="/user2/dep-page/activity/dependencies"]`, true)
+			}
+			defer test.MockVariableValue(&setting.DependencyGraph.Enabled, false)()
+			doc := page(session, "/user2/dep-page/activity", http.StatusOK)
+			doc.AssertElement(t, `.flex-container-nav a[href="/user2/dep-page/activity/dependencies"]`, false)
+			session.MakeRequest(t, NewRequest(t, "GET", "/user2/dep-page/activity/dependencies"), http.StatusNotFound)
+		})
+
+		t.Run("hidden is missing", func(t *testing.T) {
+			other := loginUser(t, "user4")
+			hidden := other.MakeRequest(t, NewRequest(t, "GET", "/user2/dep-page/activity/dependencies"), http.StatusNotFound)
+			missing := other.MakeRequest(t, NewRequest(t, "GET", "/user2/nothing/activity/dependencies"), http.StatusNotFound)
+			assert.Equal(t, missing.Body.String(), hidden.Body.String())
+			MakeRequest(t, NewRequest(t, "GET", "/user2/dep-page/activity/dependencies"), http.StatusNotFound)
+		})
+
+		t.Run("project", func(t *testing.T) {
+			org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+			group, err := repo_model.CreateRepoGroup(sys, org3, "dep-page-proj", "")
+			require.NoError(t, err)
+			leaf := depNewRepo(t, org3, user2, "leaf", true, group.ID)
+			storeScan(t, leaf, &repo_model.Dependency{Ecosystem: "Go", Name: "example.com/inproject", Version: "v1", Direct: true})
+			doc := page(session, "/org3/dep-page-proj/leaf/activity/dependencies", http.StatusOK)
+			assert.Equal(t, []string{"example.com/inproject"}, rowsOf(doc))
+			doc.AssertAttrEqual(t, "#dependencies-export a.item:first-child", "href", "/org3/dep-page-proj/leaf/activity/dependencies/sbom?format=spdx")
+			assert.Contains(t, doc.Find("#dependencies-export").Text(), "org3-dep-page-proj-leaf.spdx.json")
+			doc.AssertAttrPredicate(t, ".repo-dependencies-row a", "href", func(v string) {
+				assert.True(t, strings.HasPrefix(v, "/org3/dep-page-proj/leaf/src/commit/"), v)
+			})
+			assert.Contains(t, doc.Find(".repo-dependencies-note").Text(), "org3/dep-page-proj/leaf")
+			other := loginUser(t, "user4")
+			other.MakeRequest(t, NewRequest(t, "GET", "/org3/dep-page-proj/leaf/activity/dependencies"), http.StatusNotFound)
 		})
 	})
 }

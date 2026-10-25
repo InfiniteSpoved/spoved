@@ -98,6 +98,33 @@ func DeclareGitRepos(t *testing.T) {
 		_, err := db.Exec(db.DefaultContext, "UPDATE repository SET original_service_type = ? WHERE id = ?", api.BitbucketDataCenterService, repo.ID)
 		require.NoError(t, err)
 	})
+	// the Dependencies page (dependencies.test.e2e.ts): a stored scan, as a push to the default branch would leave
+	newRepo(t, 2, "dependencies-test", nil, []FileChanges{{
+		Filename: "go.mod",
+		Versions: []string{"module example.com/m\n\ngo 1.22\n"},
+	}}, func(_ *user_model.User, repo *repo_model.Repository) {
+		deps := []*repo_model.Dependency{
+			{RepoID: repo.ID, Ecosystem: "Go", Name: "golang.org/x/net", Version: "v0.17.0", ManifestPath: "go.mod", Direct: true, License: "BSD-3-Clause"},
+			{RepoID: repo.ID, Ecosystem: "npm", Name: "express", Version: "4.18.2", ManifestPath: "web/package-lock.json", Direct: true, License: "MIT"},
+			{RepoID: repo.ID, Ecosystem: "npm", Name: "body-parser", Version: "1.20.1", ManifestPath: "web/package-lock.json", License: "MIT"},
+			{RepoID: repo.ID, Ecosystem: "PyPI", Name: "requests", Version: "2.31.0", ManifestPath: "tools/requirements.txt", Direct: true},
+		}
+		scan := &repo_model.DependencyScan{
+			RepoID: repo.ID, CommitSHA: strings.Repeat("a", 40), ScannedUnix: timeutil.TimeStampNow(), Status: repo_model.DependencyScanOK,
+			ManifestCount: 3, DependencyCount: len(deps),
+		}
+		require.NoError(t, repo_model.ReplaceRepoDependencies(db.DefaultContext, scan, deps))
+	})
+	// a repository whose code unit is off: its readers see the issues but not the code
+	newRepo(t, 2, "dependencies-no-code", map[unit_model.Type]convert.Conversion{unit_model.TypeIssues: nil}, []FileChanges{{
+		Filename: "go.mod",
+		Versions: []string{"module example.com/m\n\ngo 1.22\n"},
+	}}, func(_ *user_model.User, repo *repo_model.Repository) {
+		_, err := db.Exec(db.DefaultContext, "DELETE FROM repo_unit WHERE repo_id = ? AND type = ?", repo.ID, unit_model.TypeCode)
+		require.NoError(t, err)
+		scan := &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: strings.Repeat("a", 40), ScannedUnix: timeutil.TimeStampNow(), Status: repo_model.DependencyScanOK}
+		require.NoError(t, repo_model.ReplaceRepoDependencies(db.DefaultContext, scan, []*repo_model.Dependency{}))
+	})
 	newRepo(t, 2, "language-stats-test", nil, []FileChanges{{
 		Filename: "main.rs",
 		Versions: []string{"fn main() {", "println!(\"Hello World!\");", "}"},
