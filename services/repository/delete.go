@@ -227,6 +227,8 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepo
 			&actions_model.ActionArtifact{RepoID: repoID},
 			&actions_model.ActionUser{RepoID: repoID},
 			&repo_model.RepoArchiveDownloadCount{RepoID: repoID},
+			&repo_model.Dependency{RepoID: repoID},
+			&repo_model.DependencyScan{RepoID: repoID},
 			&actions_model.ActionRunnerToken{RepoID: optional.Some(repoID)},
 			&auth_model.AccessTokenResourceRepo{RepoID: repoID},
 		); err != nil {

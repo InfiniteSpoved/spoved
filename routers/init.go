@@ -45,6 +45,7 @@ import (
 	"forgejo.org/services/authz"
 	"forgejo.org/services/automerge"
 	"forgejo.org/services/cron"
+	dependency_service "forgejo.org/services/dependency"
 	federation_service "forgejo.org/services/federation"
 	feed_service "forgejo.org/services/feed"
 	indexer_service "forgejo.org/services/indexer"
@@ -162,6 +163,7 @@ func InitWebInstalled(ctx context.Context) {
 	mustInit(automerge.Init)
 	mustInit(mergequeue.Init)
 	mustInit(mergeforward.Init)
+	mustInit(dependency_service.Init)
 	mustInit(task.Init)
 	mustInit(migrations_allowlist.Init)
 	eventsource.GetManager().Init()

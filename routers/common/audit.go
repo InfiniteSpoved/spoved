@@ -263,7 +263,7 @@ func WebCredential(c audit_model.Credential) bool {
 	return c.Type == audit_model.CredentialSession || c.Type == audit_model.CredentialReverseProxy
 }
 
-// RecordDownload records, after it was served, a download of kind archive, raw, lfs, release_asset or attachment
+// RecordDownload records, after it was served, a download of kind archive, raw, lfs, release_asset, attachment or sbom
 // (activity.download) with the bytes written. It records nothing for an anonymous request, a 304 or an error, nor
 // for a web session unless [audit] LOG_READS is on. A redirect (ServeDirect) is recorded without bytes and never
 // with its URL. repo may be nil (an unlinked attachment): the target is then the actor. It marks the request, so that

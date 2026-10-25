@@ -1,0 +1,6 @@
+Files under gin, ripgrep, mastodon, defectdojo, hyper-app, nodegoat, koel, poetry, webgoat, eshop and vite are copies
+(some lock files cut to their first entries) of manifests of well-known open-source projects, kept under those
+projects' licenses: gin-gonic/gin (MIT), BurntSushi/ripgrep (MIT/Unlicense), mastodon/mastodon (AGPL-3.0),
+DefectDojo/django-DefectDojo (BSD-3-Clause), vercel/hyper (MIT), OWASP/NodeGoat (Apache-2.0), koel/koel (MIT),
+python-poetry/poetry (MIT), WebGoat/WebGoat (GPL-2.0), dotnet-architecture/eShopOnWeb (MIT), vitejs/vite (MIT).
+The other directories are small hand-written files.

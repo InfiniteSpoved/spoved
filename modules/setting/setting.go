@@ -200,6 +200,9 @@ func loadCommonSettingsFrom(cfg ConfigProvider) error {
 
 	loadUIFrom(cfg)
 	loadIDEFrom(cfg)
+	if err := loadDependencyGraphFrom(cfg); err != nil {
+		return err
+	}
 	loadAdminFrom(cfg)
 	loadMaintenanceFrom(cfg)
 	loadIPAllowlistFrom(cfg)
