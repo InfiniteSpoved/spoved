@@ -39,6 +39,7 @@ import (
 	"forgejo.org/services/convert"
 	"forgejo.org/services/issue"
 	mirror_service "forgejo.org/services/mirror"
+	notify_service "forgejo.org/services/notify"
 	repo_service "forgejo.org/services/repository"
 	wiki_service "forgejo.org/services/wiki"
 )
@@ -845,6 +846,8 @@ func updateBasicProperties(ctx *context.APIContext, opts api.EditRepoOption) err
 		defer ctx.Repo().GitRepo.Close()
 	}
 
+	oldDefaultBranch := repo.DefaultBranch
+
 	// Default branch only updated if changed and exist or the repository is empty
 	if opts.DefaultBranch != nil && repo.DefaultBranch != *opts.DefaultBranch && (repo.IsEmpty || ctx.Repo().GitRepo.IsBranchExist(*opts.DefaultBranch)) {
 		if !repo.IsEmpty {
@@ -871,6 +874,10 @@ func updateBasicProperties(ctx *context.APIContext, opts api.EditRepoOption) err
 	if err := repo_service.UpdateRepository(ctx, repo, visibilityChanged); err != nil {
 		ctx.Error(http.StatusInternalServerError, "UpdateRepository", err)
 		return err
+	}
+
+	if repo.DefaultBranch != oldDefaultBranch {
+		notify_service.ChangeDefaultBranch(ctx, repo)
 	}
 
 	log.Trace("Repository basic settings updated: %s/%s", owner.Name, repo.Name)

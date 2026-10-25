@@ -209,6 +209,22 @@ func TestDependencyGraphScanOnPush(t *testing.T) {
 	})
 }
 
+func TestDependencyGraphAPIDefaultBranch(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		enableDependencyGraph(t)
+		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+		token := getUserToken(t, "user2", auth_model.AccessTokenScopeWriteRepository)
+		repo := depNewRepo(t, user2, user2, "dep-api-branch", true, 0)
+		depPush(t, u, token, repo, "refs/heads/feature", map[string]string{"go.mod": "module other\n\nrequire example.com/other v1.0.0\n"})
+		_, err := db.GetEngine(t.Context()).Exec("DELETE FROM repo_dependency_scan WHERE repo_id = ?", repo.ID)
+		require.NoError(t, err)
+
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/repos/user2/dep-api-branch", &api.EditRepoOption{DefaultBranch: new("feature")}).AddTokenAuth(token), http.StatusOK)
+		require.Eventually(t, func() bool { s := depScanOf(t, repo.ID); return s != nil && s.Error == "" }, 10*time.Second, 50*time.Millisecond)
+		assert.Contains(t, depRows(t, repo.ID), "Go|example.com/other@v1.0.0|go.mod")
+	})
+}
+
 func TestDependencyGraphMirrorSync(t *testing.T) {
 	defer test.MockVariableValue(&setting.Migrations.AllowUnencrypted, true)()
 	prev := setting.Migrations.AllowedDomains
