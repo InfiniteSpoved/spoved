@@ -105,15 +105,23 @@ func (s *DependencyScan) SkippedManifests() []SkippedManifest {
 	return l
 }
 
-// SetSkippedManifests stores the list (at most 100 entries, so a repository full of bad manifests stays small).
+// maxSkippedBytes keeps the stored list below the size of a MySQL TEXT column.
+const maxSkippedBytes = 60000
+
+// SetSkippedManifests stores the list (at most 100 entries and maxSkippedBytes of JSON, so a repository full of bad
+// manifests stays small).
 func (s *DependencyScan) SetSkippedManifests(l []SkippedManifest) {
 	if len(l) > maxSkippedManifestsStored {
 		l = l[:maxSkippedManifestsStored]
 	}
 	s.Skipped = ""
-	if len(l) > 0 {
+	for len(l) > 0 {
 		b, _ := json.Marshal(l)
-		s.Skipped = string(b)
+		if len(b) <= maxSkippedBytes {
+			s.Skipped = string(b)
+			return
+		}
+		l = l[:len(l)-1]
 	}
 }
 
@@ -185,7 +193,7 @@ func (o *DependencySearchOptions) ToConds() builder.Cond {
 }
 
 func (o *DependencySearchOptions) ToOrders() string {
-	return "ecosystem ASC, name ASC, version ASC, manifest_path ASC, id ASC"
+	return "LOWER(name) ASC, name ASC, ecosystem ASC, version ASC, manifest_path ASC, id ASC"
 }
 
 // containsFold is "col contains q, ignoring case", with % and _ in q taken literally ('!' is the escape character,
@@ -201,11 +209,6 @@ func containsFold(col, q string) builder.Cond {
 		q = strings.ToUpper(q)
 	}
 	return builder.Expr("UPPER("+col+") LIKE ? ESCAPE '!'", "%"+q+"%")
-}
-
-// CountRepoDependencies counts the dependencies of a repository, for the pages that show only a number.
-func CountRepoDependencies(ctx context.Context, repoID int64) (int64, error) {
-	return db.GetEngine(ctx).Where("repo_id = ?", repoID).Count(new(Dependency))
 }
 
 // UnscannedDependencyRepoIDs returns up to limit repositories that need a scan: ready, not empty, not trashed, and

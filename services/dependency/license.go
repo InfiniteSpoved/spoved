@@ -10,16 +10,18 @@ import (
 )
 
 var (
-	spdxCanonical = sync.OnceValue(func() map[string]string {
-		m := make(map[string]string, len(spdxLicenseIDs))
-		for _, id := range spdxLicenseIDs {
-			m[strings.ToLower(id)] = id
-		}
-		return m
-	})
-	licenseToken = regexp.MustCompile(`\(|\)|[^\s()]+`)
-	exceptionID  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.+-]*$`)
+	spdxCanonical    = sync.OnceValue(func() map[string]string { return canonicalIDs(spdxLicenseIDs) })
+	spdxExceptionMap = sync.OnceValue(func() map[string]string { return canonicalIDs(spdxExceptionIDs) })
+	licenseToken     = regexp.MustCompile(`\(|\)|[^\s()]+`)
 )
+
+func canonicalIDs(ids []string) map[string]string {
+	m := make(map[string]string, len(ids))
+	for _, id := range ids {
+		m[strings.ToLower(id)] = id
+	}
+	return m
+}
 
 // normalizeLicense returns the stored license text as a valid SPDX license expression: identifiers in their
 // canonical case, AND/OR/WITH in capitals. ok is false for anything that isn't one (free text, LicenseRef, empty).
@@ -91,9 +93,9 @@ func (p *licenseParser) term(depth int) bool {
 	p.out = append(p.out, id)
 	if strings.EqualFold(p.peek(), "WITH") {
 		p.pos++
-		ex := p.peek()
-		if !exceptionID.MatchString(ex) {
-			return false
+		ex, known := spdxExceptionMap()[strings.ToLower(p.peek())]
+		if !known {
+			return false // not an exception of the SPDX list (a license id after WITH is no exception either)
 		}
 		p.pos++
 		p.out = append(p.out, "WITH", ex)

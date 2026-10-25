@@ -3,7 +3,10 @@
 
 package dependency
 
-import "strings"
+import (
+	"context"
+	"strings"
+)
 
 func init() {
 	register(&Format{Ecosystem: RubyGems, Small: true, match: func(b string) bool { return b == "Gemfile.lock" }, parse: parseGemfileLock})
@@ -11,11 +14,11 @@ func init() {
 
 // parseGemfileLock reads the specs of the GEM and GIT sections (PATH gems are the project's own); the names listed
 // in DEPENDENCIES are direct.
-func parseGemfileLock(data []byte, _ Finder) ([]Dependency, error) {
+func parseGemfileLock(ctx context.Context, data []byte, _ Finder) ([]Dependency, error) {
 	var deps []Dependency
 	section, inSpecs := "", false
 	direct := map[string]bool{}
-	sc := newScanner(data)
+	sc := newScanner(ctx, data)
 	for sc.Scan() {
 		line := sc.Text()
 		if line == "" {
@@ -36,7 +39,8 @@ func parseGemfileLock(data []byte, _ Finder) ([]Dependency, error) {
 		case (section == "GEM" || section == "GIT") && inSpecs && indent == 4:
 			name, rest, ok := strings.Cut(trimmed, " (")
 			if ok {
-				deps = append(deps, Dependency{Name: name, Version: strings.TrimSuffix(rest, ")")})
+				version, _, _ := strings.Cut(strings.TrimSuffix(rest, ")"), "-") // 1.15.4-x86_64-linux: a platform build of 1.15.4
+				deps = append(deps, Dependency{Name: name, Version: version})
 			}
 		}
 	}

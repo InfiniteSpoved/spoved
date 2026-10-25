@@ -9,6 +9,8 @@ import (
 	"errors"
 	"io"
 	"strings"
+
+	"golang.org/x/text/encoding/charmap"
 )
 
 // decodeXML decodes a manifest into v. Go's decoder doesn't fetch external entities or expand custom ones (an entity
@@ -20,8 +22,12 @@ func decodeXML(data []byte, v any, what string) error {
 		d := xml.NewDecoder(bytes.NewReader(data))
 		d.Strict = true
 		d.CharsetReader = func(label string, in io.Reader) (io.Reader, error) {
-			if l := strings.ToLower(label); l == "utf-8" || l == "us-ascii" {
+			switch strings.ToLower(label) {
+			case "utf-8", "us-ascii":
 				return in, nil
+			case "iso-8859-1", "latin1", "latin-1", "iso_8859-1":
+				// many older poms declare it; every byte maps to the code point of the same value
+				return charmap.ISO8859_1.NewDecoder().Reader(in), nil
 			}
 			return nil, errors.New("charset")
 		}

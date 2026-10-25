@@ -4,7 +4,7 @@
 package dependency
 
 import (
-	"bytes"
+	"context"
 	"sort"
 	"strings"
 
@@ -46,7 +46,13 @@ func (l *npmLicense) UnmarshalJSON(b []byte) error {
 	return nil // the license is a hint, a strange one is not an error
 }
 
-type npmDeps map[string]any
+// npmIgnored is a JSON value that is checked but not kept: only the keys of the dependency maps are used, and a
+// hostile file must not cost more memory than its size.
+type npmIgnored struct{}
+
+func (*npmIgnored) UnmarshalJSON([]byte) error { return nil }
+
+type npmDeps map[string]npmIgnored
 
 type npmPackage struct {
 	Name                 string     `json:"name"`
@@ -72,16 +78,20 @@ type npmLockfile struct {
 
 // parseNPMLock reads lockfileVersion 2 and 3 from "packages" (the root, the empty key, says which ones are direct)
 // and version 1 from the "dependencies" tree (the direct ones come from the package.json next to the file, if any).
-func parseNPMLock(data []byte, find Finder) ([]Dependency, error) {
+func parseNPMLock(ctx context.Context, data []byte, find Finder) ([]Dependency, error) {
 	var lock npmLockfile
-	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&lock); err != nil {
+	if err := json.Unmarshal(data, &lock); err != nil {
 		return nil, parseErr("package-lock.json")
 	}
 	var deps []Dependency
 	if len(lock.Packages) > 0 {
+		// the root project and the workspace members (entries outside node_modules) ask for their dependencies
 		direct := map[string]bool{}
-		if root := lock.Packages[""]; root != nil {
-			for _, m := range []npmDeps{root.Dependencies, root.DevDependencies, root.OptionalDependencies, root.PeerDependencies} {
+		for k, p := range lock.Packages {
+			if p == nil || (k != "" && strings.Contains(k, "node_modules/")) {
+				continue
+			}
+			for _, m := range []npmDeps{p.Dependencies, p.DevDependencies, p.OptionalDependencies, p.PeerDependencies} {
 				for n := range m {
 					direct[n] = true
 				}
@@ -101,12 +111,13 @@ func parseNPMLock(data []byte, find Finder) ([]Dependency, error) {
 			if i < 0 {
 				continue // a workspace member, not a registry package
 			}
-			name := k[i+len("node_modules/"):]
+			installed := k[i+len("node_modules/"):]
+			name := installed
 			if p.Name != "" {
 				name = p.Name // an alias: the entry is installed under another name
 			}
 			nested := strings.Count(k, "node_modules/") > 1
-			deps = append(deps, Dependency{Name: name, Version: p.Version, License: string(p.License), Direct: !nested && direct[name]})
+			deps = append(deps, Dependency{Name: name, Version: p.Version, License: string(p.License), Direct: !nested && (direct[installed] || direct[name])})
 		}
 		return deps, nil
 	}
@@ -144,6 +155,41 @@ func npmPackageJSONDeps(data []byte) map[string]bool {
 	for _, m := range []npmDeps{p.Dependencies, p.DevDependencies, p.OptionalDependencies, p.PeerDependencies} {
 		for n := range m {
 			out[n] = true
+		}
+	}
+	return out
+}
+
+// npmRange is a version range of a package.json; a value that isn't a string reads as empty.
+type npmRange string
+
+func (r *npmRange) UnmarshalJSON(b []byte) error {
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		*r = npmRange(s)
+	}
+	return nil
+}
+
+// npmPackageJSONRanges returns what a package.json asks for: dependency name to range (the last one wins when
+// several sections name it). nil data gives an empty map.
+func npmPackageJSONRanges(data []byte) map[string]string {
+	out := map[string]string{}
+	if data == nil {
+		return out
+	}
+	var p struct {
+		Dependencies         map[string]npmRange `json:"dependencies"`
+		DevDependencies      map[string]npmRange `json:"devDependencies"`
+		OptionalDependencies map[string]npmRange `json:"optionalDependencies"`
+		PeerDependencies     map[string]npmRange `json:"peerDependencies"`
+	}
+	if json.Unmarshal(data, &p) != nil {
+		return out
+	}
+	for _, m := range []map[string]npmRange{p.Dependencies, p.DevDependencies, p.OptionalDependencies, p.PeerDependencies} {
+		for n, r := range m {
+			out[n] = string(r)
 		}
 	}
 	return out

@@ -293,12 +293,13 @@ func TestNormalizeLicense(t *testing.T) {
 		"( MIT )":                       "(MIT)",
 		"GPL-2.0+":                      "GPL-2.0+",
 		"GPL-2.0-only WITH Classpath-exception-2.0": "GPL-2.0-only WITH Classpath-exception-2.0",
+		"gpl-2.0-only with classpath-exception-2.0": "GPL-2.0-only WITH Classpath-exception-2.0",
 	} {
 		got, ok := normalizeLicense(in)
 		assert.True(t, ok, in)
 		assert.Equal(t, want, got, in)
 	}
-	for _, in := range []string{"", "Proprietary", "MIT OR", "OR MIT", "(MIT", "MIT)", "LicenseRef-x", "NOASSERTION", "MIT; DROP", "MIT WITH", "MIT WITH <x>", "<script>", strings.Repeat("(", 20) + "MIT" + strings.Repeat(")", 20)} {
+	for _, in := range []string{"", "Proprietary", "MIT OR", "OR MIT", "(MIT", "MIT)", "LicenseRef-x", "NOASSERTION", "MIT; DROP", "MIT WITH", "MIT WITH <x>", "MIT WITH Nonsense-exception", "GPL-2.0-only WITH MIT", "MIT WITH LGPL-2.1-only", "Classpath-exception-2.0", "<script>", strings.Repeat("(", 20) + "MIT" + strings.Repeat(")", 20)} {
 		_, ok := normalizeLicense(in)
 		assert.False(t, ok, in)
 	}

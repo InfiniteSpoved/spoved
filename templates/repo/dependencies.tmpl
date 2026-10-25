@@ -4,7 +4,7 @@
 			<h2 class="ui header tw-mb-1">{{ctx.Locale.Tr "repo.dependencies.title"}}</h2>
 			{{if and .Scan (not .ScanNeverRead)}}
 				<div class="text grey">
-					{{ctx.Locale.Tr "repo.dependencies.summary" (ctx.Locale.TrPluralString .Scan.DependencyCount "repo.dependencies.packages" .Scan.DependencyCount) (ctx.Locale.TrPluralString .Scan.ManifestCount "repo.dependencies.manifests" .Scan.ManifestCount) (HTMLFormat `<code>%s</code>` .Repository.DefaultBranch) (HTMLFormat `<a href="%s/commit/%s"><code>%s</code></a>` .RepoLink .Scan.CommitSHA .ShortSHA) (DateUtils.TimeSince .ScannedTime)}}
+					{{ctx.Locale.Tr "repo.dependencies.summary" (ctx.Locale.TrPluralString .Scan.DependencyCount "repo.dependencies.packages" (ctx.Locale.PrettyNumber .Scan.DependencyCount)) (ctx.Locale.TrPluralString .ManifestsWithPackages "repo.dependencies.manifests" (ctx.Locale.PrettyNumber .ManifestsWithPackages)) (HTMLFormat `<code>%s</code>` .Repository.DefaultBranch) (HTMLFormat `<a href="%s/commit/%s"><code>%s</code></a>` .RepoLink .Scan.CommitSHA .ShortSHA) (DateUtils.TimeSince .ScannedTime)}}
 				</div>
 			{{end}}
 			{{if .StaleHead}}
@@ -60,29 +60,35 @@
 			</div>
 			<p class="text grey">{{ctx.Locale.Tr "repo.dependencies.export_empty"}}</p>
 		{{else if .Scan.DependencyCount}}
-			<form class="repo-dependencies-filters" method="get" action="{{.RepoLink}}/activity/dependencies">
+			<form class="ui form repo-dependencies-filters" method="get" action="{{.RepoLink}}/activity/dependencies">
 				<input type="search" name="q" value="{{.Query}}" maxlength="100" placeholder="{{ctx.Locale.Tr "repo.dependencies.search"}}" aria-label="{{ctx.Locale.Tr "repo.dependencies.search"}}">
 				<label>{{ctx.Locale.Tr "repo.dependencies.ecosystem"}}
 					<select name="ecosystem">
-						<option value="">{{ctx.Locale.Tr "repo.dependencies.all_count" .Scan.DependencyCount}}</option>
-						{{range .Facets.Ecosystems}}<option value="{{.Value}}"{{if eq .Value $.Ecosystem}} selected{{end}}>{{.Value}} ({{.Count}})</option>{{end}}
+						<option value="">{{ctx.Locale.Tr "repo.dependencies.all_count" (ctx.Locale.PrettyNumber .TotalPackages)}}</option>
+						{{range .Facets.Ecosystems}}<option value="{{.Value}}"{{if eq .Value $.Ecosystem}} selected{{end}}>{{.Value}} ({{ctx.Locale.PrettyNumber .Count}})</option>{{end}}
 					</select>
 				</label>
 				<label>{{ctx.Locale.Tr "repo.dependencies.relationship"}}
 					<select name="relationship">
 						<option value="">{{ctx.Locale.Tr "repo.dependencies.all"}}</option>
-						<option value="direct"{{if eq .Relationship "direct"}} selected{{end}}>{{ctx.Locale.Tr "repo.dependencies.direct"}} ({{.Facets.Direct}})</option>
-						<option value="transitive"{{if eq .Relationship "transitive"}} selected{{end}}>{{ctx.Locale.Tr "repo.dependencies.transitive"}} ({{.Facets.Transitive}})</option>
+						<option value="direct"{{if eq .Relationship "direct"}} selected{{end}}>{{ctx.Locale.Tr "repo.dependencies.direct"}} ({{ctx.Locale.PrettyNumber .Facets.Direct}})</option>
+						<option value="transitive"{{if eq .Relationship "transitive"}} selected{{end}}>{{ctx.Locale.Tr "repo.dependencies.transitive"}} ({{ctx.Locale.PrettyNumber .Facets.Transitive}})</option>
 					</select>
 				</label>
 				<label>{{ctx.Locale.Tr "repo.dependencies.manifest"}}
 					<select name="manifest">
-						<option value="">{{ctx.Locale.Tr "repo.dependencies.all_count" (len .Facets.Manifests)}}</option>
-						{{range .Facets.Manifests}}<option value="{{.Value}}"{{if eq .Value $.Manifest}} selected{{end}}>{{.Value}} ({{.Count}})</option>{{end}}
+						<option value="">{{ctx.Locale.Tr "repo.dependencies.all_count" (ctx.Locale.PrettyNumber .ManifestsWithPackages)}}</option>
+						{{range .Facets.Manifests}}<option value="{{.Value}}"{{if eq .Value $.Manifest}} selected{{end}}>{{.Value}} ({{ctx.Locale.PrettyNumber .Count}})</option>{{end}}
 					</select>
 				</label>
-				<button class="ui basic compact button" type="submit">{{ctx.Locale.Tr "repo.dependencies.filter"}}</button>
+				<button class="ui basic button" type="submit">{{ctx.Locale.Tr "repo.dependencies.filter"}}</button>
 			</form>
+			{{if .HasFilter}}
+				<div class="text grey tw-mb-3" id="dependencies-matches">
+					{{ctx.Locale.Tr "repo.dependencies.matches" (ctx.Locale.PrettyNumber .Total) (ctx.Locale.PrettyNumber .TotalPackages)}}
+					<a href="{{.RepoLink}}/activity/dependencies">{{ctx.Locale.Tr "repo.dependencies.clear"}}</a>
+				</div>
+			{{end}}
 
 			{{if .Dependencies}}
 				<div class="repo-dependencies-table" role="table" aria-label="{{ctx.Locale.Tr "repo.dependencies.title"}}">
@@ -99,7 +105,7 @@
 							<span role="cell"><code>{{.Version}}</code></span>
 							<span role="cell">{{if .Direct}}{{ctx.Locale.Tr "repo.dependencies.direct"}}{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.dependencies.transitive"}}</span>{{end}}</span>
 							<span role="cell">{{if .License}}{{.License}}{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.dependencies.license_unknown"}}</span>{{end}}</span>
-							<span role="cell"><a href="{{$.RepoLink}}/src/commit/{{$.Scan.CommitSHA}}/{{PathEscapeSegments .ManifestPath}}">{{.ManifestPath}}</a></span>
+							<span role="cell"><a href="{{$.RepoLink}}/src/commit/{{$.Scan.CommitSHA}}/{{PathEscapeSegments .ManifestPath}}">{{range $i, $part := StringUtils.Split .ManifestPath "/"}}{{if $i}}/<wbr>{{end}}{{$part}}{{end}}</a></span>
 						</div>
 					{{end}}
 				</div>

@@ -3226,19 +3226,19 @@
 	"repo.dependencies.title": "Dependencies",
 	"repo.dependencies.summary": "%s from %s on %s at %s, updated %s",
 	"repo.dependencies.packages": {
-		"one": "%d package",
-		"other": "%d packages"
+		"one": "%s package",
+		"other": "%s packages"
 	},
 	"repo.dependencies.manifests": {
-		"one": "%d manifest",
-		"other": "%d manifests"
+		"one": "%s manifest",
+		"other": "%s manifests"
 	},
 	"repo.dependencies.stale": "Updated for %s; %s is at %s, rescanning.",
 	"repo.dependencies.export": "Export SBOM",
 	"repo.dependencies.export_spdx": "SPDX 2.3 (JSON)",
 	"repo.dependencies.export_cyclonedx": "CycloneDX 1.6 (JSON)",
-	"repo.dependencies.export_disabled": "Export SBOM is disabled until the first scan finishes.",
-	"repo.dependencies.export_empty": "Export SBOM is still offered: the document lists only the repository itself.",
+	"repo.dependencies.export_disabled": "You can export an SBOM once the first scan finishes.",
+	"repo.dependencies.export_empty": "You can still export an SBOM; it lists only this repository.",
 	"repo.dependencies.running": "Reading the manifests on %s…",
 	"repo.dependencies.running_hint": "This usually takes a few seconds. Reload the page to see the result.",
 	"repo.dependencies.failed": "The first scan failed",
@@ -3268,14 +3268,16 @@
 	"repo.dependencies.relationship": "Relationship",
 	"repo.dependencies.manifest": "Manifest",
 	"repo.dependencies.all": "All",
-	"repo.dependencies.all_count": "All (%d)",
+	"repo.dependencies.all_count": "All (%s)",
 	"repo.dependencies.direct": "Direct",
 	"repo.dependencies.transitive": "Transitive",
 	"repo.dependencies.filter": "Filter",
 	"repo.dependencies.package": "Package",
 	"repo.dependencies.version": "Version",
-	"repo.dependencies.license": "Licence",
+	"repo.dependencies.license": "License",
 	"repo.dependencies.license_unknown": "Unknown",
 	"repo.dependencies.no_match": "No package matches the filters.",
-	"repo.dependencies.note": "Licences come from the lockfile where it records them (npm, Composer); others show Unknown and NOASSERTION in the SBOM. The manifest link opens the file at the scanned commit. The SBOM names this repository %s."
+	"repo.dependencies.matches": "%s of %s packages match.",
+	"repo.dependencies.clear": "Clear filters",
+	"repo.dependencies.note": "Licenses come from the lockfile where it records them (npm, Composer); others show Unknown and NOASSERTION in the SBOM. The manifest link opens the file at the scanned commit. The SBOM names this repository %s."
 }

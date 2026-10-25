@@ -785,6 +785,33 @@ func updateBasicProperties(ctx *context.APIContext, opts api.EditRepoOption) err
 	repo.Name = newRepoName
 	repo.LowerName = strings.ToLower(newRepoName)
 
+	// The default branch goes first, through the service the web settings use (it also drops the schedules and
+	// cancels the scheduled runs of the old branch, and notifies); it is only changed if the branch exists, and in an
+	// empty repository only the name is stored.
+	emptyRepoBranchChanged := false
+	if opts.DefaultBranch != nil && repo.DefaultBranch != *opts.DefaultBranch {
+		if repo.IsEmpty {
+			repo.DefaultBranch = *opts.DefaultBranch
+			emptyRepoBranchChanged = true
+		} else {
+			if ctx.Repo().GitRepo == nil {
+				var err error
+				ctx.Repo().GitRepo, err = gitrepo.OpenRepository(ctx, repo)
+				if err != nil {
+					ctx.Error(http.StatusInternalServerError, "Unable to OpenRepository", err)
+					return err
+				}
+				defer ctx.Repo().GitRepo.Close()
+			}
+			if ctx.Repo().GitRepo.IsBranchExist(*opts.DefaultBranch) {
+				if err := repo_service.SetRepoDefaultBranch(ctx, repo, ctx.Repo().GitRepo, *opts.DefaultBranch); err != nil {
+					ctx.Error(http.StatusInternalServerError, "SetRepoDefaultBranch", err)
+					return err
+				}
+			}
+		}
+	}
+
 	if opts.Description != nil {
 		repo.Description = *opts.Description
 	}
@@ -836,29 +863,6 @@ func updateBasicProperties(ctx *context.APIContext, opts api.EditRepoOption) err
 		repo.IsTemplate = *opts.Template
 	}
 
-	if ctx.Repo().GitRepo == nil && !repo.IsEmpty {
-		var err error
-		ctx.Repo().GitRepo, err = gitrepo.OpenRepository(ctx, repo)
-		if err != nil {
-			ctx.Error(http.StatusInternalServerError, "Unable to OpenRepository", err)
-			return err
-		}
-		defer ctx.Repo().GitRepo.Close()
-	}
-
-	oldDefaultBranch := repo.DefaultBranch
-
-	// Default branch only updated if changed and exist or the repository is empty
-	if opts.DefaultBranch != nil && repo.DefaultBranch != *opts.DefaultBranch && (repo.IsEmpty || ctx.Repo().GitRepo.IsBranchExist(*opts.DefaultBranch)) {
-		if !repo.IsEmpty {
-			if err := gitrepo.SetDefaultBranch(ctx, ctx.Repo().Repository, *opts.DefaultBranch); err != nil {
-				ctx.Error(http.StatusInternalServerError, "SetDefaultBranch", err)
-				return err
-			}
-		}
-		repo.DefaultBranch = *opts.DefaultBranch
-	}
-
 	// Wiki branch is updated if changed
 	if opts.WikiBranch != nil && repo.WikiBranch != *opts.WikiBranch {
 		if err := wiki_service.NormalizeWikiBranch(ctx, repo, *opts.WikiBranch); err != nil {
@@ -876,7 +880,7 @@ func updateBasicProperties(ctx *context.APIContext, opts api.EditRepoOption) err
 		return err
 	}
 
-	if repo.DefaultBranch != oldDefaultBranch {
+	if emptyRepoBranchChanged {
 		notify_service.ChangeDefaultBranch(ctx, repo)
 	}
 

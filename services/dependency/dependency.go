@@ -9,6 +9,7 @@ package dependency
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	repo_model "forgejo.org/models/repo"
@@ -33,7 +34,41 @@ const (
 var (
 	scanQueue *queue.WorkerPoolQueue[int64]
 	scanSlots = make(chan struct{}, maxConcurrentScans)
+
+	// repoScans holds the repositories being scanned in this process: the unique queue forgets an ID once it is
+	// popped, so a push during a scan queues the repository again, and the second scan must wait for the first.
+	repoScans = struct {
+		sync.Mutex
+		running map[int64]*repoScan
+	}{running: map[int64]*repoScan{}}
 )
+
+type repoScan struct {
+	mu   sync.Mutex
+	refs int
+}
+
+// lockRepoScan waits until no other scan of the repository runs in this process. The caller holds no database
+// connection or transaction while it waits.
+func lockRepoScan(repoID int64) (unlock func()) {
+	repoScans.Lock()
+	rs := repoScans.running[repoID]
+	if rs == nil {
+		rs = &repoScan{}
+		repoScans.running[repoID] = rs
+	}
+	rs.refs++
+	repoScans.Unlock()
+	rs.mu.Lock()
+	return func() {
+		rs.mu.Unlock()
+		repoScans.Lock()
+		if rs.refs--; rs.refs == 0 {
+			delete(repoScans.running, repoID)
+		}
+		repoScans.Unlock()
+	}
+}
 
 // Init starts the queue and listens for pushes. It does nothing until [dependency_graph] ENABLED is on, but the
 // notifier is always registered, so the setting is read when a push happens.
@@ -87,10 +122,16 @@ func Enqueue(repoID int64) {
 	}
 }
 
+// EnqueueIfUnscanned queues a scan only for a repository that has no scan row at all; one whose scans fail is left
+// to the cron, so a reader can't queue it again with every request.
+func EnqueueIfUnscanned(ctx context.Context, repoID int64) {
+	if scan, err := repo_model.GetRepoDependencyScan(ctx, repoID); err == nil && scan == nil {
+		Enqueue(repoID)
+	}
+}
+
 func handler(items ...int64) (unhandled []int64) {
 	ctx := graceful.GetManager().ShutdownContext()
-	scanSlots <- struct{}{}
-	defer func() { <-scanSlots }()
 	for _, id := range items {
 		if err := Scan(ctx, id); err != nil {
 			if ctx.Err() != nil {

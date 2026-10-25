@@ -1936,7 +1936,7 @@ func registerRoutes(m *web.Route) {
 				m.Get("/data", repo.CodeFrequencyData)
 			}, repo.MustBeNotEmpty, context.RequireRepoReaderOr(unit.TypeCode))
 			m.Group("/dependencies", func() {
-				m.Get("", repo.Dependencies)
+				m.Get("", common.RateLimitHeavy, repo.Dependencies)
 				m.Get("/sbom", common.RateLimitHeavyPlain, repo.DependenciesSBOM)
 			}, repo.MustEnableDependencyGraph, repo.MustBeNotEmpty, context.RequireRepoReaderOr(unit.TypeCode))
 		}, context.RepoRef(), repo.SetDependencyGraphNav, context.RequireRepoReaderOr(unit.TypeCode, unit.TypePullRequests, unit.TypeIssues, unit.TypeReleases))

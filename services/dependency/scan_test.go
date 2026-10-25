@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -142,8 +143,8 @@ func TestScan(t *testing.T) {
 
 	// a push that removes the manifests drops their rows
 	sha2 := commitFiles(t, repo, map[string]string{"README.md": "hi"}, nil)
-	parseManifest = func(_ context.Context, f *dependency.Format, data []byte, find dependency.Finder) ([]dependency.Dependency, error) {
-		return f.Parse(data, find)
+	parseManifest = func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder) ([]dependency.Dependency, error) {
+		return f.Parse(ctx, data, find)
 	}
 	require.NoError(t, Scan(t.Context(), repo.ID))
 	assert.Empty(t, rowsOf(t, repo.ID))
@@ -235,7 +236,7 @@ func TestScanTimeoutKeepsOldRows(t *testing.T) {
 	defer test.MockVariableValue(&setting.DependencyGraph.ScanTimeout, 100*time.Millisecond)()
 	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder) ([]dependency.Dependency, error) {
 		<-ctx.Done() // a parser that takes too long
-		return f.Parse(data, find)
+		return f.Parse(ctx, data, find)
 	})()
 	require.NoError(t, Scan(t.Context(), repo.ID))
 
@@ -319,7 +320,8 @@ func TestEnqueueUnscanned(t *testing.T) {
 	require.NoError(t, EnqueueUnscanned(t.Context()))
 }
 
-// TestQueueDedup pushes a repository 20 times while its scan is blocked: one running, at most one waiting.
+// TestQueueDedup: 20 pushes of one repository are one queued item, with the queue not running (nothing is
+// timing-dependent), and pushes while a scan runs leave at most one waiting.
 func TestQueueDedup(t *testing.T) {
 	enable(t)
 	cfg, err := setting.NewConfigProviderFromData("[queue.dependency_graph]\nTYPE = channel\nMAX_WORKERS = 1\nBATCH_LENGTH = 1\n")
@@ -335,18 +337,19 @@ func TestQueueDedup(t *testing.T) {
 	})
 	require.NotNil(t, q)
 	defer test.MockVariableValue(&scanQueue, q)()
-	go q.Run()
 
-	Enqueue(1)
+	for range 20 {
+		Enqueue(1)
+	}
+	assert.Equal(t, 1, q.GetQueueItemNumber(), "twenty pushes of one repository are one item")
+	go q.Run()
 	require.Eventually(t, func() bool { return started.Load() == 1 }, 5*time.Second, 10*time.Millisecond)
 	for range 20 {
 		Enqueue(1)
 	}
-	assert.LessOrEqual(t, q.GetQueueItemNumber(), 1)
+	assert.LessOrEqual(t, q.GetQueueItemNumber(), 1, "one scan runs, at most one waits")
 	close(release)
-	require.Eventually(t, func() bool { return handled.Load() >= 2 }, 5*time.Second, 10*time.Millisecond)
-	time.Sleep(100 * time.Millisecond)
-	assert.EqualValues(t, 2, handled.Load(), "one scan that ran and one that waited")
+	require.Eventually(t, func() bool { return handled.Load() >= 2 && q.GetQueueItemNumber() == 0 }, 5*time.Second, 10*time.Millisecond)
 
 	t.Run("disabled", func(t *testing.T) {
 		defer test.MockVariableValue(&setting.DependencyGraph.Enabled, false)()
@@ -396,4 +399,110 @@ func TestNotifier(t *testing.T) {
 	n.PushCommits(t.Context(), nil, repo, push("refs/heads/master"), nil)
 	n.ChangeDefaultBranch(t.Context(), repo)
 	assert.False(t, queued(), "the feature is off")
+}
+
+// commitOnTop adds a commit with the files on top of the default branch and returns its SHA.
+func commitOnTop(t *testing.T, repo *repo_model.Repository, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	run := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"}, args...)...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null")
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(out))
+		return strings.TrimSpace(string(out))
+	}
+	run("clone", "-q", "-b", repo.DefaultBranch, repo.RepoPath(), ".")
+	for p, c := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, p), []byte(c), 0o644))
+	}
+	run("add", "-A")
+	run("commit", "-q", "-m", "on top")
+	run("push", "-q", repo.RepoPath(), "HEAD:refs/heads/"+repo.DefaultBranch)
+	return run("rev-parse", "HEAD")
+}
+
+// blockFirstParse makes the first parse wait until release is closed; started is closed when it is waiting.
+func blockFirstParse(t *testing.T) (started <-chan struct{}, release func()) {
+	t.Helper()
+	st, rel := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	t.Cleanup(test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder) ([]dependency.Dependency, error) {
+		once.Do(func() {
+			close(st)
+			<-rel
+		})
+		return f.Parse(ctx, data, find)
+	}))
+	var relOnce sync.Once
+	release = func() { relOnce.Do(func() { close(rel) }) }
+	t.Cleanup(release)
+	return st, release
+}
+
+func TestScansOfOneRepositoryAreSerialized(t *testing.T) {
+	repo := enable(t)
+	commitFiles(t, repo, map[string]string{"go.mod": goMod}, nil)
+	started, release := blockFirstParse(t)
+
+	first := make(chan error, 1)
+	go func() { first <- Scan(t.Context(), repo.ID) }()
+	<-started
+	// the branch moves while the first scan reads its commit
+	sha2 := commitFiles(t, repo, map[string]string{"go.mod": "module m\n\nrequire example.com/new v1.0.0\n"}, nil)
+	second := make(chan error, 1)
+	go func() { second <- Scan(t.Context(), repo.ID) }()
+
+	select {
+	case <-second:
+		t.Fatal("the second scan ran while the first one held the repository")
+	case <-time.After(200 * time.Millisecond):
+	}
+	release()
+	require.NoError(t, <-first)
+	require.NoError(t, <-second)
+
+	scan, err := repo_model.GetRepoDependencyScan(t.Context(), repo.ID)
+	require.NoError(t, err)
+	assert.Equal(t, sha2, scan.CommitSHA)
+	rows := rowsOf(t, repo.ID)
+	assert.Len(t, rows, 1)
+	assert.Contains(t, rows, "Go|example.com/new@v1.0.0|go.mod")
+}
+
+func TestScanNeverReplacesNewerRows(t *testing.T) {
+	repo := enable(t)
+	sha1 := commitFiles(t, repo, map[string]string{"go.mod": goMod}, nil)
+	started, release := blockFirstParse(t)
+
+	done := make(chan error, 1)
+	go func() { done <- Scan(t.Context(), repo.ID) }()
+	<-started
+
+	// another process scans a later commit of the branch and stores it while this scan is still reading
+	sha2 := commitOnTop(t, repo, map[string]string{"go.mod": "module m\n\nrequire example.com/newer v1.0.0\n"})
+	require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(),
+		&repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: sha2, Status: repo_model.DependencyScanOK, ManifestCount: 1, DependencyCount: 1, ScannedUnix: timeutil.TimeStampNow()},
+		[]*repo_model.Dependency{{RepoID: repo.ID, Ecosystem: "Go", Name: "example.com/newer", Version: "v1.0.0", ManifestPath: "go.mod", Direct: true}}))
+	release()
+	require.NoError(t, <-done)
+
+	scan, err := repo_model.GetRepoDependencyScan(t.Context(), repo.ID)
+	require.NoError(t, err)
+	assert.Equal(t, sha2, scan.CommitSHA, "the older result (%s) must not replace it", sha1)
+	rows := rowsOf(t, repo.ID)
+	assert.Len(t, rows, 1)
+	assert.Contains(t, rows, "Go|example.com/newer@v1.0.0|go.mod")
+}
+
+func TestScanWithoutDefaultBranchIsRecorded(t *testing.T) {
+	repo := enable(t)
+	_, err := db.GetEngine(t.Context()).ID(repo.ID).Cols("default_branch").Update(&repo_model.Repository{DefaultBranch: ""})
+	require.NoError(t, err)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	scan, err := repo_model.GetRepoDependencyScan(t.Context(), repo.ID)
+	require.NoError(t, err)
+	require.NotNil(t, scan, "a row, or the cron offers the repository on every run")
+	assert.Equal(t, repo_model.DependencyScanFailed, scan.Status)
 }

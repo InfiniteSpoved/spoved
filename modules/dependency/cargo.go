@@ -3,7 +3,10 @@
 
 package dependency
 
-import "strings"
+import (
+	"context"
+	"strings"
+)
 
 func init() {
 	register(&Format{Ecosystem: Cargo, match: func(b string) bool { return b == "Cargo.lock" }, parse: parseCargoLock})
@@ -16,11 +19,11 @@ type cargoPackage struct {
 
 // parseCargoLock reads the [[package]] tables. A package without a `source` belongs to the project itself (the root
 // or a workspace member, or a path dependency) and is not a dependency; what such packages depend on is direct.
-func parseCargoLock(data []byte, _ Finder) ([]Dependency, error) {
+func parseCargoLock(ctx context.Context, data []byte, _ Finder) ([]Dependency, error) {
 	var pkgs []*cargoPackage
 	var cur *cargoPackage
 	inDeps := false
-	sc := newScanner(data)
+	sc := newScanner(ctx, data)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		switch {

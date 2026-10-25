@@ -5,6 +5,7 @@ package dependency
 
 import (
 	"bytes"
+	"context"
 	"sort"
 	"strings"
 
@@ -53,7 +54,7 @@ func (m msbuildPackage) version() string {
 // parseCsproj lists the PackageReference items. A reference without a version takes it from the nearest
 // Directory.Packages.props (central package management) above the project; VersionOverride wins. $(Property) is
 // resolved from the same file's properties, else the version is empty.
-func parseCsproj(data []byte, find Finder) ([]Dependency, error) {
+func parseCsproj(ctx context.Context, data []byte, find Finder) ([]Dependency, error) {
 	var proj msbuildProject
 	if err := decodeXML(data, &proj, "csproj"); err != nil {
 		return nil, err
@@ -102,7 +103,7 @@ type nugetLock struct {
 
 // parseNuGetLock reads packages.lock.json: type Direct is direct, Transitive is not; "Project" entries (other
 // projects of the solution) are not packages. A package in several target frameworks is one row.
-func parseNuGetLock(data []byte, _ Finder) ([]Dependency, error) {
+func parseNuGetLock(ctx context.Context, data []byte, _ Finder) ([]Dependency, error) {
 	var l nugetLock
 	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&l); err != nil {
 		return nil, parseErr("packages.lock.json")

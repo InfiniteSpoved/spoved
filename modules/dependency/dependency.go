@@ -9,9 +9,9 @@ package dependency
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"path"
 	"slices"
 	"strings"
@@ -77,7 +77,7 @@ type Format struct {
 	// Small formats are limited to MaxSmallManifestSize.
 	Small bool
 	match func(base string) bool
-	parse func(data []byte, find Finder) ([]Dependency, error)
+	parse func(ctx context.Context, data []byte, find Finder) ([]Dependency, error)
 }
 
 var formats []*Format
@@ -111,7 +111,7 @@ func FormatForPath(p string) *Format {
 // Parse reads a manifest. A panic of a parser is an ErrParse, and every row is validated: names, versions and
 // licenses are cut of control characters and bidirectional marks, a row with an empty or too long value is dropped,
 // and a package listed twice in one manifest is one row.
-func (f *Format) Parse(data []byte, find Finder) (deps []Dependency, err error) {
+func (f *Format) Parse(ctx context.Context, data []byte, find Finder) (deps []Dependency, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			deps, err = nil, fmt.Errorf("%w: panic", ErrParse)
@@ -120,7 +120,10 @@ func (f *Format) Parse(data []byte, find Finder) (deps []Dependency, err error) 
 	if find == nil {
 		find = func(string, bool) []byte { return nil }
 	}
-	raw, err := f.parse(data, find)
+	raw, err := f.parse(ctx, data, find)
+	if err == nil {
+		err = ctx.Err()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -166,11 +169,32 @@ func validate(eco string, in []Dependency) []Dependency {
 	return out
 }
 
-// newScanner reads lines of at most maxLineLen bytes.
-func newScanner(data []byte) *bufio.Scanner {
+// lineScanner reads lines of at most maxLineLen bytes and stops (Err reports why) once the context is done, so a
+// scan that timed out doesn't finish a long file.
+type lineScanner struct {
+	*bufio.Scanner
+	ctx context.Context
+	n   int
+}
+
+func newScanner(ctx context.Context, data []byte) *lineScanner {
 	s := bufio.NewScanner(bytes.NewReader(data))
 	s.Buffer(make([]byte, 0, 4096), maxLineLen)
-	return s
+	return &lineScanner{Scanner: s, ctx: ctx}
+}
+
+func (l *lineScanner) Scan() bool {
+	if l.n++; l.n%1024 == 0 && l.ctx.Err() != nil {
+		return false
+	}
+	return l.Scanner.Scan()
+}
+
+func (l *lineScanner) Err() error {
+	if err := l.ctx.Err(); err != nil {
+		return err
+	}
+	return l.Scanner.Err()
 }
 
 func parseErr(format string, a ...any) error {
@@ -245,41 +269,6 @@ func purlEscape(s string) string {
 		}
 	}
 	return b.String()
-}
-
-// RegistryURL returns the page of a package in its registry, built from a fixed base and the escaped name, or "".
-func RegistryURL(eco, name string) string {
-	switch eco {
-	case Go:
-		return "https://pkg.go.dev/" + escapePath(name)
-	case NPM:
-		return "https://www.npmjs.com/package/" + escapePath(name)
-	case PyPI:
-		return "https://pypi.org/project/" + url.PathEscape(strings.ReplaceAll(strings.ToLower(name), "_", "-"))
-	case NuGet:
-		return "https://www.nuget.org/packages/" + url.PathEscape(name)
-	case Cargo:
-		return "https://crates.io/crates/" + url.PathEscape(name)
-	case RubyGems:
-		return "https://rubygems.org/gems/" + url.PathEscape(name)
-	case Packagist:
-		return "https://packagist.org/packages/" + escapePath(name)
-	case Maven:
-		g, a, ok := strings.Cut(name, ":")
-		if !ok {
-			return ""
-		}
-		return "https://central.sonatype.com/artifact/" + url.PathEscape(g) + "/" + url.PathEscape(a)
-	}
-	return ""
-}
-
-func escapePath(s string) string {
-	parts := strings.Split(s, "/")
-	for i, p := range parts {
-		parts[i] = url.PathEscape(p)
-	}
-	return strings.Join(parts, "/")
 }
 
 // SafeText cuts a string for display or storage as validate does.

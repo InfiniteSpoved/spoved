@@ -30,11 +30,11 @@ var (
 	excludedSegments = map[string]bool{"vendor": true, "node_modules": true, "testdata": true}
 
 	// auxNames are the files a parser may ask for next to a manifest (see dependency.Finder)
-	auxNames = map[string]bool{"package.json": true, "composer.json": true, "pyproject.toml": true, "Directory.Packages.props": true}
+	auxNames = map[string]bool{"package.json": true, "composer.json": true, "pyproject.toml": true, "Directory.Packages.props": true, "pom.xml": true}
 
 	// parseManifest parses one manifest; tests replace it
-	parseManifest = func(_ context.Context, f *dependency.Format, data []byte, find dependency.Finder) ([]dependency.Dependency, error) {
-		return f.Parse(data, find)
+	parseManifest = func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder) ([]dependency.Dependency, error) {
+		return f.Parse(ctx, data, find)
 	}
 )
 
@@ -119,22 +119,44 @@ func hasExcludedSegment(p string) bool {
 // Scan reads the manifests of the repository's default branch, at the head as it is when the scan starts, and
 // replaces the stored dependencies. A scan that fails keeps the old dependencies and records an error code.
 func Scan(ctx context.Context, repoID int64) error {
+	requeue, err := scan(ctx, repoID)
+	if requeue {
+		Enqueue(repoID) // after the scan's lock is released: with immediate queues this runs the next scan at once
+	}
+	return err
+}
+
+// scan is Scan; requeue is true when the branch moved while it ran.
+func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	if !setting.DependencyGraph.Enabled {
-		return nil
+		return false, nil
 	}
 	repo, err := repo_model.GetRepositoryByID(ctx, repoID)
 	if repo_model.IsErrRepoNotExist(err) {
-		return nil // deleted or trashed since it was queued
+		return false, nil // deleted or trashed since it was queued
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
-	if repo.IsEmpty || repo.Status != repo_model.RepositoryReady || repo.DefaultBranch == "" {
-		return nil
+	if repo.IsEmpty || repo.Status != repo_model.RepositoryReady {
+		return false, nil
+	}
+	// one scan of a repository at a time, and at most maxConcurrentScans of all, counted only while one runs
+	unlock := lockRepoScan(repo.ID)
+	defer unlock()
+	select {
+	case scanSlots <- struct{}{}:
+		defer func() { <-scanSlots }()
+	case <-ctx.Done():
+		return false, ctx.Err()
 	}
 	old, err := repo_model.GetRepoDependencyScan(ctx, repo.ID)
 	if err != nil {
-		return err
+		return false, err
+	}
+	if repo.DefaultBranch == "" {
+		// store the outcome, or the cron would offer this repository again on every run
+		return false, fail(ctx, repo, old, repo_model.DependencyErrGit, errors.New("no default branch"))
 	}
 
 	scanCtx, cancel, finished := process.GetManager().AddContextTimeout(ctx, setting.DependencyGraph.ScanTimeout, fmt.Sprintf("dependency scan of repository %d", repo.ID))
@@ -143,23 +165,41 @@ func Scan(ctx context.Context, repoID int64) error {
 
 	gitRepo, err := gitrepo.OpenRepository(scanCtx, repo)
 	if err != nil {
-		return fail(ctx, repo, old, repo_model.DependencyErrGit, err)
+		return false, fail(ctx, repo, old, repo_model.DependencyErrGit, err)
 	}
 	defer gitRepo.Close()
 	sha, err := gitRepo.GetBranchCommitID(repo.DefaultBranch)
 	if err != nil {
-		return fail(ctx, repo, old, repo_model.DependencyErrGit, err)
+		return false, fail(ctx, repo, old, repo_model.DependencyErrGit, err)
 	}
 	if old != nil && old.CommitSHA == sha && old.Error == "" {
-		return nil // nothing changed, e.g. a mirror sync of other branches
+		return false, nil // nothing changed, e.g. a mirror sync of other branches
 	}
 
-	scan, deps, code, err := scanCommit(scanCtx, repo, gitRepo, sha)
+	result, deps, code, err := scanCommit(scanCtx, repo, gitRepo, sha)
 	if err != nil {
-		return fail(ctx, repo, old, code, err)
+		return false, fail(ctx, repo, old, code, err)
+	}
+	// Never replace the rows of a newer commit with the result for an older one (another process may have scanned
+	// the branch while this scan ran).
+	if cur, err := repo_model.GetRepoDependencyScan(ctx, repo.ID); err != nil {
+		return false, err
+	} else if cur != nil && cur.CommitSHA != "" && cur.CommitSHA != sha && cur.Error == "" && isAncestor(scanCtx, gitRepo, sha, cur.CommitSHA) {
+		return false, nil
 	}
 	// the stored rows belong to sha; the database write is not bound to the scan's time budget
-	return repo_model.ReplaceRepoDependencies(ctx, scan, deps)
+	if err := repo_model.ReplaceRepoDependencies(ctx, result, deps); err != nil {
+		return false, err
+	}
+	// the branch moved while the scan ran: the next scan is the one that ends on the head
+	head, err := gitRepo.GetBranchCommitID(repo.DefaultBranch)
+	return err == nil && head != sha, nil
+}
+
+// isAncestor reports whether commit ancestor is an ancestor of (or the same as) descendant.
+func isAncestor(ctx context.Context, gitRepo *git.Repository, ancestor, descendant string) bool {
+	_, _, err := git.NewCommand(ctx, "merge-base", "--is-ancestor").AddDynamicArguments(ancestor, descendant).RunStdString(&git.RunOpts{Dir: gitRepo.Path})
+	return err == nil
 }
 
 // fail records the error code of a scan and keeps the old rows (and the commit they belong to).
@@ -243,7 +283,11 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 	var skipped []repo_model.SkippedManifest
 	skip := func(p, code string) {
 		if len(skipped) < 100 {
-			skipped = append(skipped, repo_model.SkippedManifest{Path: dependency.SafeText(p), Code: code})
+			p = dependency.SafeText(p)
+			if len(p) > dependency.MaxPathLen {
+				p = strings.ToValidUTF8(p[:dependency.MaxPathLen], "") // cut on a rune boundary
+			}
+			skipped = append(skipped, repo_model.SkippedManifest{Path: p, Code: code})
 		}
 	}
 	for i, m := range manifests {

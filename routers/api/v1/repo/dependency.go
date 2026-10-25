@@ -5,12 +5,12 @@ package repo
 
 import (
 	"net/http"
-	"slices"
 	"time"
 
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/dependency"
+	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/routers/api/v1/utils"
@@ -103,10 +103,19 @@ func ListDependencies(ctx *context.APIContext) {
 		RepoID:      ctx.Repo().Repository.ID,
 		Q:           ctx.FormString("q"),
 		Ecosystem:   ctx.FormString("ecosystem"),
-		Direct:      ctx.FormOptionalBool("direct"),
 		Manifest:    ctx.FormString("manifest"),
 	}
-	if opts.Ecosystem != "" && !slices.Contains(dependency.Ecosystems, opts.Ecosystem) {
+	switch ctx.FormString("direct") {
+	case "":
+	case "true":
+		opts.Direct = optional.Some(true)
+	case "false":
+		opts.Direct = optional.Some(false)
+	default:
+		ctx.Error(http.StatusUnprocessableEntity, "", "direct must be true or false")
+		return
+	}
+	if opts.Ecosystem != "" && !dependency.IsEcosystem(opts.Ecosystem) {
 		ctx.Error(http.StatusUnprocessableEntity, "", "unknown ecosystem")
 		return
 	}
@@ -188,7 +197,7 @@ func GetSBOM(ctx *context.APIContext) {
 		return
 	}
 	if sbom == nil {
-		dependency_service.Enqueue(repo.ID)
+		dependency_service.EnqueueIfUnscanned(ctx, repo.ID)
 		ctx.Error(http.StatusConflict, "", "the repository has not been scanned yet")
 		return
 	}

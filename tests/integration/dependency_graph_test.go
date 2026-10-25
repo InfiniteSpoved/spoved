@@ -26,6 +26,7 @@ import (
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
+	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
@@ -115,6 +116,24 @@ func depNewRepo(t *testing.T, owner, doer *user_model.User, name string, private
 // storeScan stores a finished scan with the given dependencies, as a push would have.
 func storeScan(t *testing.T, repo *repo_model.Repository, deps ...*repo_model.Dependency) {
 	t.Helper()
+	storeScanAt(t, repo, strings.Repeat("a", 40), deps...)
+}
+
+// headOf is the commit the default branch of the repository points to.
+func headOf(t *testing.T, repo *repo_model.Repository) string {
+	t.Helper()
+	gitRepo, err := gitrepo.OpenRepository(t.Context(), repo)
+	require.NoError(t, err)
+	defer gitRepo.Close()
+	sha, err := gitRepo.GetBranchCommitID(repo.DefaultBranch)
+	require.NoError(t, err)
+	return sha
+}
+
+// storeScanAt is storeScan for the given commit; a page whose scan names another commit than the branch head
+// queues a new scan (which runs at once with immediate queues), so tests of the page store the head.
+func storeScanAt(t *testing.T, repo *repo_model.Repository, sha string, deps ...*repo_model.Dependency) {
+	t.Helper()
 	for _, d := range deps {
 		d.RepoID = repo.ID
 		if d.ManifestPath == "" {
@@ -122,7 +141,7 @@ func storeScan(t *testing.T, repo *repo_model.Repository, deps ...*repo_model.De
 		}
 	}
 	scan := &repo_model.DependencyScan{
-		RepoID: repo.ID, CommitSHA: strings.Repeat("a", 40), Status: repo_model.DependencyScanOK, ManifestCount: 1, DependencyCount: len(deps),
+		RepoID: repo.ID, CommitSHA: sha, Status: repo_model.DependencyScanOK, ManifestCount: 1, DependencyCount: len(deps),
 		ScannedUnix: 1700000000,
 	}
 	require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(), scan, append([]*repo_model.Dependency{}, deps...)))
@@ -224,7 +243,13 @@ func TestDependencyGraphAPIDefaultBranch(t *testing.T) {
 		_, err := db.GetEngine(t.Context()).Exec("DELETE FROM repo_dependency_scan WHERE repo_id = ?", repo.ID)
 		require.NoError(t, err)
 
+		// a schedule of the old default branch, as the web settings route would drop it
+		require.NoError(t, db.Insert(t.Context(), &actions_model.ActionSchedule{RepoID: repo.ID, OwnerID: user2.ID, WorkflowID: "cron.yml", Ref: "refs/heads/main", Title: "cron"}))
+		unittest.AssertExistsAndLoadBean(t, &actions_model.ActionSchedule{RepoID: repo.ID})
+
 		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/repos/user2/dep-api-branch", &api.EditRepoOption{DefaultBranch: new("feature")}).AddTokenAuth(token), http.StatusOK)
+		unittest.AssertNotExistsBean(t, &actions_model.ActionSchedule{RepoID: repo.ID})
+		assert.Equal(t, "feature", unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repo.ID}).DefaultBranch)
 		require.Eventually(t, func() bool { s := depScanOf(t, repo.ID); return s != nil && s.Error == "" }, 10*time.Second, 50*time.Millisecond)
 		assert.Contains(t, depRows(t, repo.ID), "Go|example.com/other@v1.0.0|go.mod")
 	})
@@ -323,7 +348,8 @@ func TestDependencyGraphAccess(t *testing.T) {
 			assert.Equal(t, "ok", list.Scan.Status)
 			assert.Equal(t, strings.Repeat("a", 40), list.Scan.CommitSHA)
 			assert.Len(t, list.Dependencies, 3)
-			assert.Equal(t, "pkg:golang/github.com/gin-gonic/gin@v1.9.1", list.Dependencies[0].PURL)
+			assert.Equal(t, "pkg:npm/100%25_sure@1", list.Dependencies[0].PURL, "sorted by name, ignoring case")
+			assert.Equal(t, "pkg:golang/github.com/gin-gonic/gin@v1.9.1", list.Dependencies[1].PURL)
 
 			DecodeJSON(t, get(apiPriv+"/dependencies?q=%25", ownerToken, http.StatusOK), &list)
 			require.Len(t, list.Dependencies, 1)
@@ -335,6 +361,9 @@ func TestDependencyGraphAccess(t *testing.T) {
 			DecodeJSON(t, get(apiPriv+"/dependencies?manifest=go.mod&limit=2&page=2", ownerToken, http.StatusOK), &list)
 			assert.Len(t, list.Dependencies, 1)
 			get(apiPriv+"/dependencies?ecosystem=Cobol", ownerToken, http.StatusUnprocessableEntity)
+			for _, bad := range []string{"2", "maybe", "yes"} {
+				get(apiPriv+"/dependencies?direct="+bad, ownerToken, http.StatusUnprocessableEntity)
+			}
 			get(apiPriv+"/dependencies?q="+strings.Repeat("a", 101), ownerToken, http.StatusUnprocessableEntity)
 
 			resp := get(apiPriv+"/sbom", ownerToken, http.StatusOK)
@@ -431,8 +460,7 @@ func TestDependencyGraphAccess(t *testing.T) {
 			get(apiPriv+"/dependencies", taskToken(priv, code), http.StatusOK)
 			none := actions_model.TokenPermissions{unit.TypeIssues: perm_model.AccessModeWrite}.Encode()
 			for _, tail := range []string{"/dependencies", "/sbom"} {
-				resp := MakeRequest(t, NewRequest(t, "GET", apiPriv+tail).AddTokenAuth(taskToken(priv, none)), NoExpectedStatus)
-				assert.Contains(t, []int{http.StatusForbidden, http.StatusNotFound}, resp.Code, "contents: none is refused")
+				get(apiPriv+tail, taskToken(priv, none), http.StatusForbidden) // contents: none is refused
 			}
 			// the token of a run in repo2 on another private repository
 			other := depNewRepo(t, user2, user2, "dep-other", true, 0)
@@ -652,15 +680,16 @@ func TestDependencyGraphPage(t *testing.T) {
 				d("PyPI", "requests", "2.31.0", true, "", "tools/requirements.txt"),
 				d("npm", `<script>alert(1)</script>`, `"><img src=x onerror=alert(2)>`, false, "", "web/dir with space/package-lock.json"),
 			}
-			storeScan(t, repo, deps...)
+			head := headOf(t, repo)
+			storeScanAt(t, repo, head, deps...)
 			doc := page(session, "/user2/dep-page/activity/dependencies", http.StatusOK)
-			assert.Equal(t, []string{"golang.org/x/net", "requests", "<script>alert(1)</script>", "body-parser", "express"}, rowsOf(doc))
+			assert.Equal(t, []string{"<script>alert(1)</script>", "body-parser", "express", "golang.org/x/net", "requests"}, rowsOf(doc))
 			assert.Zero(t, doc.Find("script:contains('alert(1)')").Length(), "the name is escaped")
 			assert.Zero(t, doc.Find("img[src='x']").Length())
-			doc.AssertElement(t, "#dependencies-stale", true) // the stored scan names another commit than the branch head
-			assert.Equal(t, "Unknown", strings.TrimSpace(doc.Find(".repo-dependencies-row").Eq(3).Find("[role=cell]").Eq(3).Text()))
+			doc.AssertElement(t, "#dependencies-stale", false)
+			assert.Equal(t, "Unknown", strings.TrimSpace(doc.Find(".repo-dependencies-row").Eq(1).Find("[role=cell]").Eq(3).Text()))
 			doc.AssertAttrPredicate(t, `.repo-dependencies-row a[href*="dir%20with%20space"]`, "href", func(v string) {
-				assert.Equal(t, "/user2/dep-page/src/commit/"+strings.Repeat("a", 40)+"/web/dir%20with%20space/package-lock.json", v)
+				assert.Equal(t, "/user2/dep-page/src/commit/"+head+"/web/dir%20with%20space/package-lock.json", v)
 			})
 			doc.AssertAttrEqual(t, "#dependencies-export a.item:first-child", "href", "/user2/dep-page/activity/dependencies/sbom?format=spdx")
 			assert.Contains(t, doc.Find("#dependencies-export").Text(), "user2-dep-page.spdx.json")
@@ -674,7 +703,8 @@ func TestDependencyGraphPage(t *testing.T) {
 			assert.Equal(t, []string{"express"}, rowsOf(page(session, "/user2/dep-page/activity/dependencies?q=EXPR", http.StatusOK)))
 			assert.Equal(t, []string{"requests"}, rowsOf(page(session, "/user2/dep-page/activity/dependencies?relationship=direct&ecosystem=PyPI", http.StatusOK)))
 			// unknown filter values are ignored, never an error
-			assert.Len(t, rowsOf(page(session, "/user2/dep-page/activity/dependencies?ecosystem=Cobol&manifest=nope&relationship=x", http.StatusOK)), 5)
+			assert.Len(t, rowsOf(page(session, "/user2/dep-page/activity/dependencies?manifest=nope&relationship=x", http.StatusOK)), 5)
+			page(session, "/user2/dep-page/activity/dependencies?ecosystem=Cobol", http.StatusUnprocessableEntity)
 			noMatch := page(session, "/user2/dep-page/activity/dependencies?q=zzz", http.StatusOK)
 			noMatch.AssertElement(t, "#dependencies-no-match", true)
 
@@ -683,13 +713,26 @@ func TestDependencyGraphPage(t *testing.T) {
 			for i := range 120 {
 				many = append(many, d("Go", fmt.Sprintf("example.com/p%03d", i), "v1.0.0", false, "MIT", "go.mod"))
 			}
-			storeScan(t, repo, many...)
+			storeScanAt(t, repo, head, many...)
 			first := rowsOf(page(session, "/user2/dep-page/activity/dependencies", http.StatusOK))
 			assert.Len(t, first, 50)
 			assert.Equal(t, "example.com/p000", first[0])
 			third := page(session, "/user2/dep-page/activity/dependencies?page=3&q=example", http.StatusOK)
 			assert.Len(t, rowsOf(third), 20)
 			assert.Positive(t, third.Find(`.pagination a[href*="q=example"]`).Length())
+		})
+
+		t.Run("a scan of an older commit is rescanned", func(t *testing.T) {
+			storeScan(t, repo, &repo_model.Dependency{Ecosystem: "Go", Name: "example.com/old", Version: "v1", Direct: true})
+			doc := page(session, "/user2/dep-page/activity/dependencies", http.StatusOK)
+			doc.AssertElement(t, "#dependencies-stale", true)
+			assert.Equal(t, headOf(t, repo), depScanOf(t, repo.ID).CommitSHA, "the scan was queued again")
+			// a failed last scan is left to the cron: no new scan from the page
+			scan := depScanOf(t, repo.ID)
+			scan.CommitSHA, scan.Status, scan.Error = strings.Repeat("b", 40), repo_model.DependencyScanFailed, repo_model.DependencyErrTimeout
+			require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(), scan, nil))
+			page(session, "/user2/dep-page/activity/dependencies", http.StatusOK)
+			assert.Equal(t, strings.Repeat("b", 40), depScanOf(t, repo.ID).CommitSHA)
 		})
 
 		t.Run("skipped manifests", func(t *testing.T) {
@@ -729,7 +772,7 @@ func TestDependencyGraphPage(t *testing.T) {
 			group, err := repo_model.CreateRepoGroup(sys, org3, "dep-page-proj", "")
 			require.NoError(t, err)
 			leaf := depNewRepo(t, org3, user2, "leaf", true, group.ID)
-			storeScan(t, leaf, &repo_model.Dependency{Ecosystem: "Go", Name: "example.com/inproject", Version: "v1", Direct: true})
+			storeScanAt(t, leaf, headOf(t, leaf), &repo_model.Dependency{Ecosystem: "Go", Name: "example.com/inproject", Version: "v1", Direct: true})
 			doc := page(session, "/org3/dep-page-proj/leaf/activity/dependencies", http.StatusOK)
 			assert.Equal(t, []string{"example.com/inproject"}, rowsOf(doc))
 			doc.AssertAttrEqual(t, "#dependencies-export a.item:first-child", "href", "/org3/dep-page-proj/leaf/activity/dependencies/sbom?format=spdx")

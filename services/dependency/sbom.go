@@ -6,6 +6,7 @@ package dependency
 import (
 	"context"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,8 +43,7 @@ func LoadSBOM(ctx context.Context, repo *repo_model.Repository) (*SBOM, error) {
 		return nil, err
 	}
 	var deps []*repo_model.Dependency
-	if err := db.GetEngine(ctx).Where("repo_id = ?", repo.ID).OrderBy("ecosystem, name, version, manifest_path, id").
-		Limit(setting.DependencyGraph.MaxDependencies).Find(&deps); err != nil {
+	if err := db.GetEngine(ctx).Where("repo_id = ?", repo.ID).OrderBy("ecosystem, name, version, manifest_path, id").Find(&deps); err != nil {
 		return nil, err
 	}
 	return &SBOM{Repo: repo, Scan: scan, Deps: deps}, nil
@@ -83,7 +83,7 @@ func (s *SBOM) components() []*component {
 		if c.license == "" {
 			c.license = d.License
 		}
-		if d.ManifestPath != "" && (len(c.manifests) == 0 || c.manifests[len(c.manifests)-1] != d.ManifestPath) {
+		if d.ManifestPath != "" && !slices.Contains(c.manifests, d.ManifestPath) {
 			c.manifests = append(c.manifests, d.ManifestPath)
 		}
 	}

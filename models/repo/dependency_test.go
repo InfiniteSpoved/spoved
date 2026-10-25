@@ -37,8 +37,7 @@ func TestReplaceRepoDependencies(t *testing.T) {
 	// a failed scan keeps the rows and the commit
 	fail := &repo_model.DependencyScan{RepoID: 1, CommitSHA: "aaaa", Status: repo_model.DependencyScanFailed, Error: repo_model.DependencyErrTimeout}
 	require.NoError(t, repo_model.ReplaceRepoDependencies(ctx, fail, nil))
-	n, err := repo_model.CountRepoDependencies(ctx, 1)
-	require.NoError(t, err)
+	n := countDeps(t, 1)
 	assert.EqualValues(t, 2, n)
 	got, _ = repo_model.GetRepoDependencyScan(ctx, 1)
 	assert.Equal(t, "timeout", got.Error)
@@ -46,9 +45,9 @@ func TestReplaceRepoDependencies(t *testing.T) {
 	// a scan replaces the rows of its repository only
 	second := []*repo_model.Dependency{{RepoID: 1, Ecosystem: "Go", Name: "c", Version: "v3", ManifestPath: "go.mod", Direct: true}}
 	require.NoError(t, repo_model.ReplaceRepoDependencies(ctx, &repo_model.DependencyScan{RepoID: 1, CommitSHA: "bbbb", Status: repo_model.DependencyScanOK}, second))
-	n, _ = repo_model.CountRepoDependencies(ctx, 1)
+	n = countDeps(t, 1)
 	assert.EqualValues(t, 1, n)
-	n, _ = repo_model.CountRepoDependencies(ctx, 2)
+	n = countDeps(t, 2)
 	assert.EqualValues(t, 1, n)
 	count, err := db.GetEngine(ctx).Where("repo_id = 1").Count(new(repo_model.DependencyScan))
 	require.NoError(t, err)
@@ -56,7 +55,7 @@ func TestReplaceRepoDependencies(t *testing.T) {
 
 	// an empty result (no manifests) clears the rows
 	require.NoError(t, repo_model.ReplaceRepoDependencies(ctx, &repo_model.DependencyScan{RepoID: 1, CommitSHA: "cccc", Status: repo_model.DependencyScanOK}, []*repo_model.Dependency{}))
-	n, _ = repo_model.CountRepoDependencies(ctx, 1)
+	n = countDeps(t, 1)
 	assert.EqualValues(t, 0, n)
 }
 
@@ -100,9 +99,16 @@ func TestSearchRepoDependencies(t *testing.T) {
 	assert.Equal(t, []string{"100%_sure"}, names(&repo_model.DependencySearchOptions{Q: "%"}), "% is a literal")
 	assert.Equal(t, []string{"100%_sure", "Left_Pad2"}, names(&repo_model.DependencySearchOptions{Q: "_"}), "_ is a literal")
 	assert.Equal(t, []string{"x!y"}, names(&repo_model.DependencySearchOptions{Q: "!"}))
-	assert.Equal(t, []string{"Left_Pad2", "left-pad"}, names(&repo_model.DependencySearchOptions{Q: "LEFT"}))
+	assert.Equal(t, []string{"left-pad", "Left_Pad2"}, names(&repo_model.DependencySearchOptions{Q: "LEFT"}), "sorted by name, ignoring case")
 	assert.Equal(t, []string{"go-thing"}, names(&repo_model.DependencySearchOptions{Ecosystem: "Go"}))
 	assert.Equal(t, []string{"other"}, names(&repo_model.DependencySearchOptions{Direct: optional.Some(true)}))
 	assert.Equal(t, []string{"go-thing"}, names(&repo_model.DependencySearchOptions{Manifest: "go.mod"}))
 	assert.Empty(t, names(&repo_model.DependencySearchOptions{Q: "left-pad", Ecosystem: "Go"}))
+}
+
+func countDeps(t *testing.T, repoID int64) int64 {
+	t.Helper()
+	n, err := db.GetEngine(t.Context()).Where("repo_id = ?", repoID).Count(new(repo_model.Dependency))
+	require.NoError(t, err)
+	return n
 }

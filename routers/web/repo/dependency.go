@@ -40,7 +40,7 @@ func DependenciesSBOM(ctx *context.Context) {
 		return
 	}
 	if sbom == nil {
-		dependency_service.Enqueue(repo.ID)
+		dependency_service.EnqueueIfUnscanned(ctx, repo.ID)
 		ctx.Error(http.StatusConflict, "the repository has not been scanned yet")
 		return
 	}
@@ -85,8 +85,10 @@ func Dependencies(ctx *context.Context) {
 	ctx.Data["ScannedTime"] = scan.ScannedUnix
 	if scan.CommitSHA != "" {
 		ctx.Data["ShortSHA"] = base.ShortSha(scan.CommitSHA)
-		if head, err := ctx.Repo.GitRepo.GetBranchCommitID(repo.DefaultBranch); err == nil && head != scan.CommitSHA {
+		// "rescanning" is true: the scan is queued again (the unique queue dedupes) unless the last one failed
+		if head, err := ctx.Repo.GitRepo.GetBranchCommitID(repo.DefaultBranch); err == nil && head != scan.CommitSHA && scan.Status == repo_model.DependencyScanOK {
 			ctx.Data["StaleHead"] = base.ShortSha(head)
+			dependency_service.Enqueue(repo.ID)
 		}
 	}
 	if scan.CommitSHA == "" {
@@ -100,7 +102,8 @@ func Dependencies(ctx *context.Context) {
 		return
 	}
 	ctx.Data["Facets"] = facets
-	ctx.Data["TotalDirectAndTransitive"] = facets.Direct + facets.Transitive
+	ctx.Data["TotalPackages"] = facets.Direct + facets.Transitive
+	ctx.Data["ManifestsWithPackages"] = len(facets.Manifests)
 
 	opts := &repo_model.DependencySearchOptions{
 		ListOptions: db.ListOptions{Page: max(ctx.FormInt("page"), 1), PageSize: dependencyPageSize},
@@ -109,7 +112,11 @@ func Dependencies(ctx *context.Context) {
 	if q := ctx.FormTrim("q"); len(q) <= repo_model.MaxDependencyQuery {
 		opts.Q = q
 	}
-	if eco := ctx.FormString("ecosystem"); slices.Contains(dependency.Ecosystems, eco) {
+	if eco := ctx.FormString("ecosystem"); eco != "" {
+		if !dependency.IsEcosystem(eco) { // as the API does
+			ctx.Error(http.StatusUnprocessableEntity, "unknown ecosystem")
+			return
+		}
 		opts.Ecosystem = eco
 	}
 	relationship := ctx.FormString("relationship")
