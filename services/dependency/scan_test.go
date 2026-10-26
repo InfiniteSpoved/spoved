@@ -5,6 +5,7 @@ package dependency
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -21,6 +22,7 @@ import (
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
+	vulnerability_model "forgejo.org/models/vulnerability"
 	"forgejo.org/modules/dependency"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/queue"
@@ -662,7 +664,7 @@ func TestLostWriteRequeuesWhenHeadMoved(t *testing.T) {
 		err     error
 	}, 1)
 	go func() {
-		r, err := scan(t.Context(), repo.ID)
+		r, err := scan(t.Context(), repo.ID, new(bool))
 		done <- struct {
 			requeue bool
 			err     error
@@ -690,7 +692,7 @@ func TestScanRequeuesWhenHeadUnreadable(t *testing.T) {
 		require.NoError(t, err, string(out))
 		return orig(ctx, f, data, find, maxRows)
 	})()
-	requeue, err := scan(t.Context(), repo.ID)
+	requeue, err := scan(t.Context(), repo.ID, new(bool))
 	require.NoError(t, err)
 	assert.True(t, requeue)
 	assert.Len(t, rowsOf(t, repo.ID), 2, "the scan of the commit read at the start is stored")
@@ -851,4 +853,36 @@ func TestScanLockFilesFirst(t *testing.T) {
 	skipped := scan.SkippedManifests()
 	require.Len(t, skipped, 100)
 	assert.Equal(t, "a002/package.json", skipped[0].Path)
+}
+
+// A refresh that fails after a scan queues a rematch, and with an immediate queue (the handler runs inside Push) one
+// scan slot is enough: the scan has released its lock and slot by then.
+func TestFailedRefreshRequeuesWithoutDeadlock(t *testing.T) {
+	repo := enable(t)
+	commitFiles(t, repo, map[string]string{"go.mod": goMod}, nil)
+	scanSlotsOnce.Do(func() {})
+	defer test.MockVariableValue(&scanSlots, make(chan struct{}, 1))()
+	defer test.MockVariableValue(&refreshAlerts, func(context.Context, int64, func(context.Context) (bool, error)) (vulnerability_model.ApplyStats, error) {
+		return vulnerability_model.ApplyStats{}, errors.New("refresh failed")
+	})()
+	var rematched atomic.Int32
+	defer test.MockVariableValue(&RematchAlerts, func(id int64) {
+		// what Rematch does, run synchronously as an immediate queue does
+		unlock := LockRepoScan(id)
+		defer unlock()
+		release, err := AcquireSlot(t.Context())
+		if err == nil {
+			release()
+			rematched.Add(1)
+		}
+	})()
+	done := make(chan error, 1)
+	go func() { done <- Scan(t.Context(), repo.ID) }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("the scan waits for a slot it holds itself")
+	}
+	assert.EqualValues(t, 1, rematched.Load())
 }

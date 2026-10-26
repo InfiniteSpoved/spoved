@@ -51,9 +51,9 @@ type repoScan struct {
 	refs int
 }
 
-// lockRepoScan waits until no other scan of the repository runs in this process. The caller holds no database
+// LockRepoScan waits until no other scan or alert refresh of the repository runs in this process. Take it before a slot. The caller holds no database
 // connection or transaction while it waits.
-func lockRepoScan(repoID int64) (unlock func()) {
+func LockRepoScan(repoID int64) (unlock func()) {
 	repoScans.Lock()
 	rs := repoScans.running[repoID]
 	if rs == nil {

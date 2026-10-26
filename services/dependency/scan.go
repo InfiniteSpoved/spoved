@@ -137,21 +137,30 @@ func AcquireSlot(ctx context.Context) (release func(), err error) {
 	}
 }
 
+// refreshAlerts is the alert refresh after a scan (tests replace it).
+var refreshAlerts = vulnerability_model.RefreshAlerts
+
 // RematchAlerts queues a repository for a rematch of its vulnerability alerts; services/vulnerability sets it.
 var RematchAlerts = func(repoID int64) {}
 
 // Scan reads the manifests of the repository's default branch, at the head as it is when the scan starts, and
 // replaces the stored dependencies. A scan that fails keeps the old dependencies and records an error code.
 func Scan(ctx context.Context, repoID int64) error {
-	requeue, err := scan(ctx, repoID)
+	var rematch bool
+	requeue, err := scan(ctx, repoID, &rematch)
+	// after the scan's lock and slot are released: with immediate queues these run at once, and a rematch waits for both
+	if rematch {
+		RematchAlerts(repoID)
+	}
 	if requeue {
-		Enqueue(repoID) // after the scan's lock is released: with immediate queues this runs the next scan at once
+		Enqueue(repoID)
 	}
 	return err
 }
 
-// scan is Scan; requeue is true when the branch moved while it ran.
-func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
+// scan is Scan; requeue is true when the branch moved while it ran, and *rematch is set when the alerts must be
+// matched again (the refresh failed or was overtaken by newer advisory data).
+func scan(ctx context.Context, repoID int64, rematch *bool) (requeue bool, err error) {
 	if !SiteEnabled(ctx) {
 		return false, nil
 	}
@@ -169,7 +178,7 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 		return false, nil
 	}
 	// one scan of a repository at a time, and at most MAX_CONCURRENT_SCANS of all, counted only while one runs
-	unlock := lockRepoScan(repo.ID)
+	unlock := LockRepoScan(repo.ID)
 	defer unlock()
 	release, err := AcquireSlot(ctx)
 	if err != nil {
@@ -219,10 +228,11 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	if written {
 		// the alerts follow the rows, under the same check of the switches; if this fails, the rows are right and the
 		// repository is queued for a rematch
-		if _, err := vulnerability_model.RefreshAlerts(ctx, repo.ID, stillOn(repo.ID)); err != nil {
+		st, err := refreshAlerts(ctx, repo.ID, stillOn(repo.ID))
+		if err != nil {
 			log.Error("vulnerability alerts: refresh repository %d: %v", repo.ID, err)
-			RematchAlerts(repo.ID)
 		}
+		*rematch = err != nil || st.Requeue
 	}
 	// turned off between the check and the write: the switch's purge may have run before the write, so delete here
 	if !stillEnabled(ctx, repo.ID) {
