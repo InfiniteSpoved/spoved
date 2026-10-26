@@ -635,8 +635,8 @@ jobs:
 			// a pass started by the push above can still hold the branch, and Process then returns at once
 			assert.Eventually(t, func() bool {
 				_ = mergequeue.Process(db.DefaultContext, repo.ID, "main")
-				e, err := pull_model.GetMergeQueueEntryByPullID(db.DefaultContext, b.ID)
-				return err == nil && e == nil
+				got, err := pull_model.GetMergeQueueEntryByPullID(db.DefaultContext, b.ID)
+				return err == nil && got == nil
 			}, 30*time.Second, 100*time.Millisecond)
 			assert.Equal(t, mergequeue.ReasonBuildFailed, removedReason(b))
 		})
@@ -647,8 +647,13 @@ jobs:
 			add(t, session, a)
 			e := entry(a)
 			require.NoError(t, git.NewCommand(t.Context(), "update-ref").AddDynamicArguments(git.BranchPrefix+"main", e.TempCommitID).Run(&git.RunOpts{Dir: repo.RepoPath()}))
-			require.NoError(t, mergequeue.Process(t.Context(), repo.ID, "main"))
-			assert.True(t, merged(a))
+			// a pass of the subtest before may still hold the branch, and Process then returns at once
+			assert.Eventually(t, func() bool {
+				_ = mergequeue.Process(db.DefaultContext, repo.ID, "main")
+				pr := &issues_model.PullRequest{}
+				has, err := db.GetEngine(db.DefaultContext).ID(a.ID).Get(pr)
+				return err == nil && has && pr.HasMerged
+			}, 30*time.Second, 100*time.Millisecond)
 			assert.Nil(t, entry(a))
 		})
 
