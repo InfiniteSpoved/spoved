@@ -5,7 +5,6 @@ package dependency
 
 import (
 	"context"
-	"errors"
 	"runtime"
 	"runtime/debug"
 	"strconv"
@@ -138,6 +137,13 @@ func peakHeap(f func()) (peak uint64, elapsed time.Duration) {
 // a few seconds: the work of a parse is O(the limits), not O(the shape of the input).
 func TestHostileTinyEntriesPeakHeap(t *testing.T) {
 	const big, small = 20 << 20, 1 << 20
+	const yarnV1Head = "# yarn lockfile v1\n\n"
+	// the work is linear in the file (the frameworks case is ~6M JSON tokens, ~0.3 s), so the bound only catches a
+	// superlinear parse; the race detector makes the same work 10-20 times slower
+	timeBound := 5 * time.Second
+	if raceEnabled {
+		timeBound = 60 * time.Second
+	}
 	line := func(format string) func([]byte, int) []byte {
 		return func(b []byte, i int) []byte {
 			before, after, _ := strings.Cut(format, "%")
@@ -162,19 +168,29 @@ func TestHostileTinyEntriesPeakHeap(t *testing.T) {
 		{"composer license list", "composer.lock", func() []byte { return fill(`{"packages":[{"name":"a","license":[`, `"x"]}]}`, big, line(`"%",`)) }},
 		{"nuget lock", "packages.lock.json", func() []byte { return fill(`{"dependencies":{"f":{`, `"z":{}}}}`, big, line(`"%":{},`)) }},
 		{"nuget lock frameworks", "packages.lock.json", func() []byte { return fill(`{"dependencies":{`, `"z":{}}}`, big, line(`"%":{"a":{}},`)) }},
-		{"yarn", "yarn.lock", func() []byte { return fill("", "", big, line("%@1:\n")) }},
+		// the shapes are ones the readers accept (yamlgrammar.go), so the parse runs to the cap, not to a refusal
+		{"yarn", "yarn.lock", func() []byte { return fill(yarnV1Head, "", big, line("%@1:\n  version \"1\"\n")) }},
 		{"yarn descriptors", "yarn.lock", func() []byte {
-			return fill("", "", big, func(b []byte, i int) []byte {
+			return fill(yarnV1Head, "", big, func(b []byte, i int) []byte {
 				for j := range 50 {
-					b = hexID(append(b, ' '), i*50+j)
-					b = append(b, "@1,"...)
+					if j > 0 {
+						b = append(b, ", "...)
+					}
+					b = hexID(append(b, "a@"...), i*50+j)
 				}
-				return append(b, "a@1:\n"...)
+				return append(b, ":\n  version \"1\"\n"...)
 			})
 		}},
-		{"pnpm packages", "pnpm-lock.yaml", func() []byte { return fill("lockfileVersion: '9.0'\npackages:\n", "", big, line("  %@1:\n")) }},
-		{"pnpm v5 dependencies", "pnpm-lock.yaml", func() []byte { return fill("lockfileVersion: 5.4\ndependencies:\n", "", big, line("  %: 1\n")) }},
-		{"pnpm importer dependencies", "pnpm-lock.yaml", func() []byte { return fill("importers:\n  .:\n    dependencies:\n", "", big, line("      %: 1\n")) }},
+		{"yarn berry", "yarn.lock", func() []byte {
+			return fill("__metadata:\n  version: 8\n\n", "", big, line("\"%@npm:1\":\n  version: 1.0.0\n  resolution: \"a@npm:1.0.0\"\n"))
+		}},
+		{"pnpm packages", "pnpm-lock.yaml", func() []byte {
+			return fill("lockfileVersion: '9.0'\npackages:\n", "", big, line("  %@1.0.0:\n    resolution: {integrity: x}\n"))
+		}},
+		{"pnpm v5 dependencies", "pnpm-lock.yaml", func() []byte { return fill("lockfileVersion: 5.4\ndependencies:\n", "", big, line("  %: 1.0.0\n")) }},
+		{"pnpm importer dependencies", "pnpm-lock.yaml", func() []byte {
+			return fill("lockfileVersion: 5.4\nimporters:\n  .:\n    dependencies:\n", "", big, line("      %: 1.0.0\n"))
+		}},
 		{"poetry", "poetry.lock", func() []byte { return fill("", "", big, line("[[package]]\nname = \"%\"\n")) }},
 		{"cargo", "Cargo.lock", func() []byte { return fill("", "", big, line("[[package]]\nname = \"%\"\nsource = \"s\"\n")) }},
 		{"cargo dependency lines", "Cargo.lock", func() []byte {
@@ -202,10 +218,10 @@ func TestHostileTinyEntriesPeakHeap(t *testing.T) {
 			})
 			t.Logf("%s: %d MiB file, peak %d MiB, %v, %d rows, %v", c.name, len(data)>>20, peak>>20, elapsed.Round(time.Millisecond), rows, err)
 			assert.Less(t, peak, uint64(64<<20), "peak heap above the baseline")
-			assert.Less(t, elapsed, 5*time.Second)
+			assert.Less(t, elapsed, timeBound)
 			// a file this size is refused at the cap, or (a shape that keeps few rows) read in full
 			if err != nil {
-				assert.True(t, isLimit(err) || errors.Is(err, ErrParse), "%v", err)
+				assert.True(t, isLimit(err), "%v", err)
 			}
 		})
 	}
