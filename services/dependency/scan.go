@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	repo_model "forgejo.org/models/repo"
+	vulnerability_model "forgejo.org/models/vulnerability"
 	"forgejo.org/modules/dependency"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
@@ -202,9 +203,16 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	if err != nil {
 		return false, err
 	}
+	if written {
+		// the alerts follow the rows, under the same check of the switches; if this fails, the rows are right and the
+		// alerts catch up at the next scan or rematch
+		if _, err := vulnerability_model.RefreshAlerts(ctx, repo.ID, stillOn(repo.ID)); err != nil {
+			log.Error("vulnerability alerts: refresh repository %d: %v", repo.ID, err)
+		}
+	}
 	// turned off between the check and the write: the switch's purge may have run before the write, so delete here
 	if !stillEnabled(ctx, repo.ID) {
-		return false, repo_model.DeleteRepoDependencies(ctx, repo.ID)
+		return false, DeleteRepoRows(ctx, repo.ID)
 	}
 	// the head now, read with the outer context (the scan's time budget may be spent); if it can't be read, the
 	// next scan decides (the unique queue makes a needless one cheap)
@@ -231,6 +239,10 @@ func stillEnabled(ctx context.Context, repoID int64) bool {
 func stillOn(repoID int64) func(context.Context) (bool, error) {
 	return func(ctx context.Context) (bool, error) { return enabledStored(ctx, repoID) }
 }
+
+// StillOn is the check of the switches inside a transaction that writes something that depends on them (see
+// enabledStored).
+func StillOn(repoID int64) func(context.Context) (bool, error) { return stillOn(repoID) }
 
 // headCommit reads the commit the default branch points at now.
 func headCommit(ctx context.Context, repo *repo_model.Repository) (string, error) {

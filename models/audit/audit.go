@@ -207,7 +207,11 @@ var Fields = map[string][]string{
 		"delete_allowlist_deploy_key_ids", "force_push_allowlist_user_ids", "force_push_allowlist_team_ids",
 		"force_push_allowlist_deploy_key_ids", "apply_to_selected_repos", "approval_rules", "repo_ids",
 	},
-	"tag_protection": {"name_pattern", "allowlist_user_ids", "allowlist_team_ids", "allowlist_deploy_key_ids"},
+	"vulnerability_alert": {
+		"alert_id", "advisory_id", "ecosystem", "package", "manifest", "reason", "comment", "previous_state", "previous_reason",
+	},
+	"vulnerability_mirror": {"ecosystems"},
+	"tag_protection":       {"name_pattern", "allowlist_user_ids", "allowlist_team_ids", "allowlist_deploy_key_ids"},
 	"push_rule": {
 		"commit_message_regex", "commit_message_banned_regex", "branch_name_regex", "require_verified_author_email",
 		"max_file_size_mb", "banned_file_patterns", "pr_title_regex", "pr_title_banned_regex", "pr_title_message",

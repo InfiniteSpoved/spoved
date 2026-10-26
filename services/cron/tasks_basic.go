@@ -26,6 +26,7 @@ import (
 	packages_cleanup_service "forgejo.org/services/packages/cleanup"
 	repo_service "forgejo.org/services/repository"
 	archiver_service "forgejo.org/services/repository/archiver"
+	vulnerability_service "forgejo.org/services/vulnerability"
 )
 
 func registerUpdateMirrorTask() {
@@ -161,6 +162,17 @@ func registerDependencyGraphScan() {
 	})
 }
 
+func registerVulnerabilityMirrorUpdate() {
+	RegisterTaskFatal("vulnerability_mirror_update", &BaseConfig{
+		Enabled:    true,
+		RunAtStart: false,
+		Schedule:   "@every 1h",
+	}, func(ctx context.Context, _ *user_model.User, _ Config) error {
+		// UPDATE_INTERVAL decides which ecosystems are due; nothing happens while the dependency graph is off
+		return vulnerability_service.UpdateDue(ctx)
+	})
+}
+
 func registerCleanupHookTaskTable() {
 	RegisterTaskFatal("cleanup_hook_task_table", &CleanupHookTaskConfig{
 		BaseConfig: BaseConfig{
@@ -264,6 +276,7 @@ func initBasicTasks() {
 	registerCleanupHookTaskTable()
 	registerCleanupAuditLog()
 	registerDependencyGraphScan()
+	registerVulnerabilityMirrorUpdate()
 	registerStartScheduledAutoMerges()
 	registerProcessMergeQueues()
 	registerStartScheduledDispatches()

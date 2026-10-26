@@ -1252,6 +1252,13 @@ func Routes() *web.Route {
 					m.Get("/dependencies", repo.ListDependencies)
 					m.Get("/sbom", common.RateLimitAPIHeavy, repo.GetSBOM)
 				}, reqRepoReader(unit.TypeCode), repo.MustEnableDependencyGraph)
+				// Only writers and auditors see them: everyone else gets the 404 of a missing repository, decided by the
+				// gate before anything else (a filter, an archived repository) is looked at
+				m.Group("/vulnerability-alerts", func() {
+					m.Get("", repo.ListVulnerabilityAlerts)
+					m.Combo("/{id}").Get(repo.GetVulnerabilityAlert).
+						Patch(reqToken(), mustNotBeArchived(), bind(api.EditVulnerabilityAlertOption{}), repo.EditVulnerabilityAlert)
+				}, repo.MustSeeVulnerabilityAlerts)
 				m.Get("/activities/feeds", repo.ListRepoActivityFeeds)
 				m.Get("/new_pin_allowed", repo.AreNewIssuePinsAllowed)
 				m.Group("/avatar", func() {
