@@ -855,34 +855,52 @@ func TestScanLockFilesFirst(t *testing.T) {
 	assert.Equal(t, "a002/package.json", skipped[0].Path)
 }
 
-// A refresh that fails after a scan queues a rematch, and with an immediate queue (the handler runs inside Push) one
-// scan slot is enough: the scan has released its lock and slot by then.
+// A refresh that fails or asks for a requeue after a scan queues a rematch, and with an immediate queue (the handler
+// runs inside Push) one scan slot is enough: the scan has released its lock and slot by then.
 func TestFailedRefreshRequeuesWithoutDeadlock(t *testing.T) {
-	repo := enable(t)
-	commitFiles(t, repo, map[string]string{"go.mod": goMod}, nil)
-	scanSlotsOnce.Do(func() {})
-	defer test.MockVariableValue(&scanSlots, make(chan struct{}, 1))()
-	defer test.MockVariableValue(&refreshAlerts, func(context.Context, int64, func(context.Context) (bool, error)) (vulnerability_model.ApplyStats, error) {
-		return vulnerability_model.ApplyStats{}, errors.New("refresh failed")
-	})()
-	var rematched atomic.Int32
-	defer test.MockVariableValue(&RematchAlerts, func(id int64) {
-		// what Rematch does, run synchronously as an immediate queue does
-		unlock := LockRepoScan(id)
-		defer unlock()
-		release, err := AcquireSlot(t.Context())
-		if err == nil {
+	for name, result := range map[string]struct {
+		stats vulnerability_model.ApplyStats
+		err   error
+	}{
+		"failed":   {err: errors.New("refresh failed")},
+		"requeue":  {stats: vulnerability_model.ApplyStats{Requeue: true}},
+		"all done": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := enable(t)
+			commitFiles(t, repo, map[string]string{"go.mod": goMod}, nil)
+			// create the real slots first, so the mock below restores them whatever ran before
+			release, err := AcquireSlot(t.Context())
+			require.NoError(t, err)
 			release()
-			rematched.Add(1)
-		}
-	})()
-	done := make(chan error, 1)
-	go func() { done <- Scan(t.Context(), repo.ID) }()
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(15 * time.Second):
-		t.Fatal("the scan waits for a slot it holds itself")
+			defer test.MockVariableValue(&scanSlots, make(chan struct{}, 1))()
+			defer test.MockVariableValue(&refreshAlerts, func(context.Context, int64, func(context.Context) (bool, error)) (vulnerability_model.ApplyStats, error) {
+				return result.stats, result.err
+			})()
+			var rematched atomic.Int32
+			defer test.MockVariableValue(&RematchAlerts, func(id int64) {
+				// what Rematch does, run synchronously as an immediate queue does
+				unlock := LockRepoScan(id)
+				defer unlock()
+				release, err := AcquireSlot(t.Context())
+				if err == nil {
+					release()
+					rematched.Add(1)
+				}
+			})()
+			done := make(chan error, 1)
+			go func() { done <- Scan(t.Context(), repo.ID) }()
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-time.After(15 * time.Second):
+				t.Fatal("the scan waits for a slot it holds itself")
+			}
+			if name == "all done" {
+				assert.Zero(t, rematched.Load())
+			} else {
+				assert.EqualValues(t, 1, rematched.Load())
+			}
+		})
 	}
-	assert.EqualValues(t, 1, rematched.Load())
 }
