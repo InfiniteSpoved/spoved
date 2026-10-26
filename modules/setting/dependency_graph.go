@@ -6,6 +6,7 @@ package setting
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -84,8 +85,14 @@ func loadOSVMirrorFrom(sec ConfigSection) (err error) {
 	}
 	g.OSVMirrorUser = strings.TrimSpace(sec.Key("OSV_MIRROR_USER").String())
 	g.OSVMirrorHosts = strings.TrimSpace(sec.Key("OSV_MIRROR_ALLOWED_HOSTS").String())
+	if err := checkHostList(g.OSVMirrorHosts); err != nil {
+		return fmt.Errorf("[dependency_graph] OSV_MIRROR_ALLOWED_HOSTS: %w", err)
+	}
 	if g.OSVMirrorToken, err = loadOSVMirrorToken(sec); err != nil {
 		return err
+	}
+	if g.OSVMirrorUser != "" && g.OSVMirrorToken == "" {
+		return errors.New("[dependency_graph] OSV_MIRROR_USER is set without OSV_MIRROR_TOKEN or OSV_MIRROR_TOKEN_URI")
 	}
 	if g.OSVMirrorToken != "" {
 		log.RegisterSecret(g.OSVMirrorToken)
@@ -142,7 +149,7 @@ func loadOSVMirrorToken(sec ConfigSection) (string, error) {
 	case token != "" && uri != "":
 		return "", errors.New("[dependency_graph] OSV_MIRROR_TOKEN and OSV_MIRROR_TOKEN_URI are both set, use only one")
 	case uri == "":
-		return strings.TrimSpace(token), nil
+		return checkOSVMirrorToken(strings.TrimSpace(token))
 	case !strings.HasPrefix(uri, "file:"):
 		return "", errors.New("[dependency_graph] OSV_MIRROR_TOKEN_URI must be a file: URI")
 	}
@@ -150,5 +157,36 @@ func loadOSVMirrorToken(sec ConfigSection) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("[dependency_graph] OSV_MIRROR_TOKEN_URI: %w", err)
 	}
+	return checkOSVMirrorToken(token)
+}
+
+// checkOSVMirrorToken accepts 8 to 1024 characters (every registered secret is redacted from the logs wherever it
+// occurs, so a short one would blank out ordinary text). The message never holds the token.
+func checkOSVMirrorToken(token string) (string, error) {
+	if token != "" && (len(token) < 8 || len(token) > 1024) {
+		return "", errors.New("[dependency_graph] the OSV mirror token must be 8 to 1024 characters")
+	}
 	return token, nil
+}
+
+// checkHostList refuses an entry that is no builtin (external, private, loopback), CIDR, address or host name pattern.
+func checkHostList(list string) error {
+	for entry := range strings.SplitSeq(list, ",") {
+		entry = strings.ToLower(strings.TrimSpace(entry))
+		if entry == "" {
+			continue
+		}
+		if strings.Contains(entry, "/") {
+			if _, _, err := net.ParseCIDR(entry); err != nil {
+				return fmt.Errorf("%q is not a CIDR network", entry)
+			}
+			continue
+		}
+		for _, r := range entry {
+			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || strings.ContainsRune("*?.-_:[]", r)) {
+				return fmt.Errorf("%q is not a host name, address, CIDR network or one of external, private, loopback", entry)
+			}
+		}
+	}
+	return nil
 }

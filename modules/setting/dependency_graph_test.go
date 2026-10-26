@@ -6,6 +6,7 @@ package setting
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,21 +70,32 @@ func TestOSVMirrorCredentialSettings(t *testing.T) {
 	}
 	t.Cleanup(func() { require.NoError(t, load("")) })
 
-	require.NoError(t, load("[dependency_graph]\nOSV_MIRROR_URL = https://art.example/artifactory/osv\nOSV_MIRROR_TOKEN = s3cret-token\nOSV_MIRROR_USER = ci\nOSV_MIRROR_ALLOWED_HOSTS = private, loopback\n"))
-	assert.Equal(t, "s3cret-token", DependencyGraph.OSVMirrorToken)
+	require.NoError(t, load("[dependency_graph]\nOSV_MIRROR_URL = https://art.example/artifactory/osv\nOSV_MIRROR_TOKEN = s3cret-token-123\nOSV_MIRROR_USER = ci\nOSV_MIRROR_ALLOWED_HOSTS = private, loopback\n"))
+	assert.Equal(t, "s3cret-token-123", DependencyGraph.OSVMirrorToken)
 	assert.Equal(t, "ci", DependencyGraph.OSVMirrorUser)
 	assert.Equal(t, "private, loopback", DependencyGraph.OSVMirrorHosts)
 
 	file := filepath.Join(t.TempDir(), "token")
-	require.NoError(t, os.WriteFile(file, []byte("from-file\n"), 0o600))
+	require.NoError(t, os.WriteFile(file, []byte("from-file-token\n"), 0o600))
 	require.NoError(t, load("[dependency_graph]\nOSV_MIRROR_TOKEN_URI = file:"+file+"\n"))
-	assert.Equal(t, "from-file", DependencyGraph.OSVMirrorToken)
+	assert.Equal(t, "from-file-token", DependencyGraph.OSVMirrorToken)
 
-	err := load("[dependency_graph]\nOSV_MIRROR_TOKEN = a\nOSV_MIRROR_TOKEN_URI = file:" + file + "\n")
+	err := load("[dependency_graph]\nOSV_MIRROR_TOKEN = abcdefgh\nOSV_MIRROR_TOKEN_URI = file:" + file + "\n")
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "from-file")
 	require.Error(t, load("[dependency_graph]\nOSV_MIRROR_TOKEN_URI = http://x/y\n"))
 	require.Error(t, load("[dependency_graph]\nOSV_MIRROR_TOKEN_URI = file:/does/not/exist\n"), "an error, not an exit")
+
+	err = load("[dependency_graph]\nOSV_MIRROR_TOKEN = short\n")
+	require.Error(t, err, "under 8 characters")
+	assert.NotContains(t, err.Error(), "short")
+	require.Error(t, load("[dependency_graph]\nOSV_MIRROR_TOKEN = "+strings.Repeat("a", 1025)+"\n"))
+	require.NoError(t, load("[dependency_graph]\nOSV_MIRROR_TOKEN = "+strings.Repeat("a", 1024)+"\n"))
+	require.Error(t, load("[dependency_graph]\nOSV_MIRROR_USER = ci\n"), "a user without a token")
+	require.NoError(t, load("[dependency_graph]\nOSV_MIRROR_ALLOWED_HOSTS = external, 10.0.0.0/8, *.corp.example, art.example:8443\n"))
+	for _, bad := range []string{"10.0.0.0/33", "bad host", "http://art.example", "a|b"} {
+		require.Error(t, load("[dependency_graph]\nOSV_MIRROR_ALLOWED_HOSTS = "+bad+"\n"), bad)
+	}
 
 	err = load("[dependency_graph]\nOSV_MIRROR_URL = https://user:pw@art.example/x\n")
 	require.Error(t, err)
