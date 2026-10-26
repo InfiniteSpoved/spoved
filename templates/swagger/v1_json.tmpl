@@ -36248,6 +36248,31 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "EditVulnerabilityAlertOption": {
+      "type": "object",
+      "title": "EditVulnerabilityAlertOption dismisses or reopens a vulnerability alert.",
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "dismissed_comment": {
+          "description": "A comment of at most 280 characters",
+          "type": "string",
+          "x-go-name": "DismissedComment"
+        },
+        "dismissed_reason": {
+          "description": "Why the alert is dismissed; required to dismiss, not allowed to reopen: fix_started, no_bandwidth,\ntolerable_risk, inaccurate or not_used",
+          "type": "string",
+          "x-go-name": "DismissedReason"
+        },
+        "state": {
+          "description": "dismissed or open; fixed is set by the system only",
+          "type": "string",
+          "x-go-name": "State"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "Email": {
       "description": "Email an email address belonging to a user",
       "type": "object",

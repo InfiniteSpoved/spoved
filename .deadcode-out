@@ -305,6 +305,10 @@ forgejo.org/services/repository/gitgraph
 forgejo.org/services/stats
 	Flush
 
+forgejo.org/services/vulnerability
+	UpdateNow
+	Running
+
 forgejo.org/services/webhook
 	NewNotifier
 

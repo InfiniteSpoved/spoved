@@ -122,6 +122,8 @@ type swaggerParameterBodies struct {
 	EditReleaseOption api.EditReleaseOption
 	// in:body
 	GenerateReleaseNotesOption api.GenerateReleaseNotesOption
+	// in:body
+	EditVulnerabilityAlertOption api.EditVulnerabilityAlertOption
 
 	// in:body
 	CreateRepoOption api.CreateRepoOption
