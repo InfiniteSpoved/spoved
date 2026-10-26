@@ -43,6 +43,23 @@ func TestDeleteRepository(t *testing.T) {
 		unittest.AssertExistsIf(t, false, &auth_model.AccessTokenResourceRepo{RepoID: repo.ID})
 	})
 
+	t.Run("Dependency graph", func(t *testing.T) {
+		repo := forgery.CreateRepository(t, user2, nil)
+		other := forgery.CreateRepository(t, user2, nil)
+		for _, r := range []*repo_model.Repository{repo, other} {
+			require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(),
+				&repo_model.DependencyScan{RepoID: r.ID, CommitSHA: "abc", Status: repo_model.DependencyScanOK},
+				[]*repo_model.Dependency{{RepoID: r.ID, Ecosystem: "Go", Name: "x", Version: "v1"}}))
+		}
+
+		require.NoError(t, repo_service.DeleteRepository(t.Context(), user2, repo, false))
+
+		unittest.AssertExistsIf(t, false, &repo_model.Dependency{RepoID: repo.ID})
+		unittest.AssertExistsIf(t, false, &repo_model.DependencyScan{RepoID: repo.ID})
+		unittest.AssertExistsIf(t, true, &repo_model.Dependency{RepoID: other.ID})
+		unittest.AssertExistsIf(t, true, &repo_model.DependencyScan{RepoID: other.ID})
+	})
+
 	t.Run("Attachment", func(t *testing.T) {
 		repo := forgery.CreateRepository(t, user2, nil)
 

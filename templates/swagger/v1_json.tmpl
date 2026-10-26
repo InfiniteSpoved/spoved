@@ -13785,6 +13785,82 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/dependencies": {
+      "get": {
+        "description": "Answers 404 while the dependency graph is turned off. A repository that was not scanned yet is queued and answers an empty list with the scan status \"pending\".",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "List the dependencies the manifests of a repository's default branch declare",
+        "operationId": "repoListDependencies",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "part of the name of the dependency (at most 100 characters)",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "only this ecosystem (Go, npm, PyPI, Maven, NuGet, crates.io, RubyGems or Packagist)",
+            "name": "ecosystem",
+            "in": "query"
+          },
+          {
+            "type": "boolean",
+            "description": "only the direct (true) or only the transitive (false) dependencies; any value strconv.ParseBool accepts (1, t, T, TRUE, true, True, 0, f, F, FALSE, false, False)",
+            "name": "direct",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "only the dependencies of this manifest (its path in the repository)",
+            "name": "manifest",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/DependencyList"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/diffpatch": {
       "post": {
         "consumes": [
@@ -22838,6 +22914,59 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/sbom": {
+      "get": {
+        "description": "Answers 404 while the dependency graph is turned off, and 409 while the repository has not been scanned yet (it is queued). The document is made from the stored dependencies, as a file to save.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Download the software bill of materials (SBOM) of a repository's default branch",
+        "operationId": "repoGetSBOM",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "enum": [
+              "spdx",
+              "cyclonedx"
+            ],
+            "type": "string",
+            "description": "spdx (SPDX 2.3, the default) or cyclonedx (CycloneDX 1.6)",
+            "name": "format",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/SBOM"
+          },
+          "400": {
+            "$ref": "#/responses/error"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/error"
           }
         }
       }
@@ -34093,6 +34222,113 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "Dependency": {
+      "type": "object",
+      "title": "Dependency is a package that a manifest of the repository's default branch declares.",
+      "properties": {
+        "direct": {
+          "description": "Whether the project itself declares it, not only another dependency",
+          "type": "boolean",
+          "x-go-name": "Direct"
+        },
+        "ecosystem": {
+          "description": "The ecosystem, named as OSV names it: Go, npm, PyPI, Maven, NuGet, crates.io, RubyGems or Packagist",
+          "type": "string",
+          "x-go-name": "Ecosystem"
+        },
+        "license": {
+          "description": "The license as the manifest states it, empty if it doesn't",
+          "type": "string",
+          "x-go-name": "License"
+        },
+        "manifest_path": {
+          "description": "The path of the manifest in the repository",
+          "type": "string",
+          "x-go-name": "ManifestPath"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "purl": {
+          "description": "The package URL (purl) of the dependency",
+          "type": "string",
+          "x-go-name": "PURL"
+        },
+        "requirement": {
+          "description": "The version range the manifest declares when it doesn't fix the version (a manifest without a lock file)",
+          "type": "string",
+          "x-go-name": "Requirement"
+        },
+        "version": {
+          "description": "The version, empty if the manifest doesn't fix it",
+          "type": "string",
+          "x-go-name": "Version"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "DependencyList": {
+      "type": "object",
+      "title": "DependencyList is a page of the dependencies of a repository and the state of its scan.",
+      "properties": {
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Dependency"
+          },
+          "x-go-name": "Dependencies"
+        },
+        "scan": {
+          "$ref": "#/definitions/DependencyScan"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "DependencyScan": {
+      "type": "object",
+      "title": "DependencyScan is the state of the last scan of a repository.",
+      "properties": {
+        "commit_sha": {
+          "description": "The commit of the default branch the dependencies were read from",
+          "type": "string",
+          "x-go-name": "CommitSHA"
+        },
+        "dependency_count": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "DependencyCount"
+        },
+        "error": {
+          "description": "The reason of a failed last scan: timeout, tree_too_large, git_error or internal_error. The dependencies of\nthe last good scan are kept.",
+          "type": "string",
+          "x-go-name": "Error"
+        },
+        "manifest_count": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ManifestCount"
+        },
+        "scanned_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ScannedAt"
+        },
+        "skipped_manifests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SkippedManifest"
+          },
+          "x-go-name": "SkippedManifests"
+        },
+        "status": {
+          "description": "pending (never scanned), ok or failed",
+          "type": "string",
+          "x-go-name": "Status"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "DeployKey": {
       "description": "DeployKey a deploy key",
       "type": "object",
@@ -40701,6 +40937,28 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "SkippedManifest": {
+      "type": "object",
+      "title": "SkippedManifest is a manifest that was not read, or (code partially_read) read only in part.",
+      "properties": {
+        "code": {
+          "description": "parse_error, manifest_too_large, too_many_manifests, too_many_dependencies, too_many_entries, invalid_path,\nread_error or partially_read",
+          "type": "string",
+          "x-go-name": "Code"
+        },
+        "lines": {
+          "description": "partially_read: the lines naming a dependency that could not be read",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Lines"
+        },
+        "path": {
+          "type": "string",
+          "x-go-name": "Path"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "StackedPullRequest": {
       "description": "StackedPullRequest is a pull request of a stack",
       "type": "object",
@@ -42590,6 +42848,19 @@
         "$ref": "#/definitions/DeleteActionRunsResult"
       }
     },
+    "DependencyList": {
+      "description": "DependencyList",
+      "schema": {
+        "$ref": "#/definitions/DependencyList"
+      },
+      "headers": {
+        "X-Total-Count": {
+          "type": "integer",
+          "format": "int64",
+          "description": "The total number of dependencies that match"
+        }
+      }
+    },
     "DeployKey": {
       "description": "DeployKey",
       "schema": {
@@ -43554,6 +43825,10 @@
           "$ref": "#/definitions/ActionRunJob"
         }
       }
+    },
+    "SBOM": {
+      "description": "SBOM is an SPDX 2.3 or CycloneDX 1.6 JSON document",
+      "schema": {}
     },
     "ScheduledWorkflowRun": {
       "description": "ScheduledWorkflowRun is a manual workflow run that starts at a chosen time",

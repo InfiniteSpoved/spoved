@@ -638,3 +638,20 @@ type swaggerResponseAccessRowList struct {
 	// in:body
 	Body []api.AccessRow `json:"body"`
 }
+
+// DependencyList
+// swagger:response DependencyList
+type swaggerResponseDependencyList struct {
+	// in:body
+	Body api.DependencyList `json:"body"`
+
+	// The total number of dependencies that match
+	TotalCount int64 `json:"X-Total-Count"`
+}
+
+// SBOM is an SPDX 2.3 or CycloneDX 1.6 JSON document
+// swagger:response SBOM
+type swaggerResponseSBOM struct {
+	// in:body
+	Body any `json:"body"`
+}

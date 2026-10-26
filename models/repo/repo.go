@@ -174,6 +174,7 @@ type Repository struct {
 	BaseRepo                        *Repository        `xorm:"-"`
 	IsTemplate                      bool               `xorm:"INDEX NOT NULL DEFAULT false"`
 	TemplateID                      int64              `xorm:"INDEX"`
+	DependencyGraphDisabled         bool               `xorm:"NOT NULL DEFAULT false"` // a repository admin turned it off (services/dependency.Enabled)
 	Size                            int64              `xorm:"NOT NULL DEFAULT 0"`
 	GitSize                         int64              `xorm:"NOT NULL DEFAULT 0"`
 	LFSSize                         int64              `xorm:"NOT NULL DEFAULT 0"`

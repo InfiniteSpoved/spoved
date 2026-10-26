@@ -47,6 +47,9 @@
 			<a class="{{if .PageIsSettingsPushRules}}active {{end}}item" href="{{.RepoLink}}/settings/push_rules">
 				{{ctx.Locale.Tr "repo.settings.push_rules"}}
 			</a>
+			<a class="{{if .PageIsSettingsCodeSecurity}}active {{end}}item" href="{{.RepoLink}}/settings/code_security" data-tooltip-content="{{ctx.Locale.Tr "repo.dependency_graph"}}">
+				{{ctx.Locale.Tr "repo.settings.code_security"}}
+			</a>
 			{{if .SignedUser.CanEditGitHook}}
 				<a class="{{if .PageIsSettingsGitHooks}}active {{end}}item" href="{{.RepoLink}}/settings/hooks/git">
 					{{ctx.Locale.Tr "repo.settings.githooks"}}

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>org.example</groupId><artifactId>parent</artifactId><version>3.1.0</version></parent>
+  <artifactId>demo</artifactId>
+  <properties>
+    <junit.version>4.13.2</junit.version>
+    <jackson>2.15.0</jackson>
+  </properties>
+  <dependencyManagement>
+    <dependencies>
+      <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId><version>2.0.9</version></dependency>
+    </dependencies>
+  </dependencyManagement>
+  <dependencies>
+    <dependency><groupId>junit</groupId><artifactId>junit</artifactId><version>${junit.version}</version><scope>test</scope></dependency>
+    <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-core</artifactId><version>${jackson}</version></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>sibling</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId></dependency>
+    <dependency><groupId>org.unknown</groupId><artifactId>bom-managed</artifactId></dependency>
+    <dependency><groupId>org.unknown</groupId><artifactId>unresolved</artifactId><version>${not.defined}</version></dependency>
+  </dependencies>
+</project>

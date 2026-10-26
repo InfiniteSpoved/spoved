@@ -1,0 +1,78 @@
+lockfileVersion: '6.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+dependencies:
+  react:
+    specifier: ^18.2.0
+    version: 18.2.0
+  react-dom:
+    specifier: ^18.2.0
+    version: 18.2.0(react@18.2.0)
+  localpkg:
+    specifier: file:../localpkg
+    version: file:../localpkg
+  linked:
+    specifier: link:../linked
+    version: link:../linked
+  strw:
+    specifier: npm:string-width@^4.2.0
+    version: /string-width@4.2.3
+
+devDependencies:
+  '@types/node':
+    specifier: ^20.8.7
+    version: 20.8.7
+
+packages:
+
+  /@types/node@20.8.7:
+    resolution: {integrity: sha512-X, tarball: https://example.test/x.tgz}
+    dependencies:
+      undici-types: 5.25.3
+    dev: true
+
+  /js-tokens@4.0.0:
+    resolution: {integrity: sha512-Y}
+    dev: false
+
+  /loose-envify@1.4.0:
+    resolution: {integrity: sha512-Z}
+    hasBin: true
+    dependencies:
+      js-tokens: 4.0.0
+    dev: false
+
+  /react-dom@18.2.0(react@18.2.0):
+    resolution: {integrity: sha512-A}
+    peerDependencies:
+      react: ^18.2.0
+    dependencies:
+      loose-envify: 1.4.0
+      react: 18.2.0
+    dev: false
+
+  /react@17.0.2:
+    resolution: {integrity: sha512-B}
+    dev: false
+
+  /react@18.2.0:
+    resolution: {integrity: sha512-C}
+    engines: {node: '>=0.10.0'}
+    dev: false
+
+  /string-width@4.2.3:
+    resolution: {integrity: sha512-D}
+    dev: false
+
+  /undici-types@5.25.3:
+    resolution: {integrity: sha512-E}
+    dev: true
+
+  file:../localpkg:
+    resolution: {directory: ../localpkg, type: directory}
+    name: localpkg
+    version: 1.0.0
+    dev: false

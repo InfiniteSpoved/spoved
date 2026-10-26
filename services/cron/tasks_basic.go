@@ -17,6 +17,7 @@ import (
 	audit_service "forgejo.org/services/audit"
 	"forgejo.org/services/auth"
 	automerge_service "forgejo.org/services/automerge"
+	dependency_service "forgejo.org/services/dependency"
 	logshipping_service "forgejo.org/services/logshipping"
 	"forgejo.org/services/mailer"
 	mergequeue_service "forgejo.org/services/mergequeue"
@@ -142,6 +143,24 @@ func registerCleanupAuditLog() {
 	})
 }
 
+func registerDependencyGraphScan() {
+	RegisterTaskFatal("dependency_graph_scan", &BaseConfig{
+		Enabled:    true,
+		RunAtStart: true,
+		Schedule:   "@every 1h",
+	}, func(ctx context.Context, _ *user_model.User, _ Config) error {
+		// the rows of repositories the dependency graph is off for (all of them while the site switch is off) go
+		// first: a switch change deletes only a bounded number at once, and a scan may have written after it
+		for more := true; more; {
+			var err error
+			if more, err = dependency_service.PurgeDisabled(ctx, 50); err != nil {
+				return err
+			}
+		}
+		return dependency_service.EnqueueUnscanned(ctx) // does nothing while the site switch is off
+	})
+}
+
 func registerCleanupHookTaskTable() {
 	RegisterTaskFatal("cleanup_hook_task_table", &CleanupHookTaskConfig{
 		BaseConfig: BaseConfig{
@@ -244,6 +263,7 @@ func initBasicTasks() {
 	}
 	registerCleanupHookTaskTable()
 	registerCleanupAuditLog()
+	registerDependencyGraphScan()
 	registerStartScheduledAutoMerges()
 	registerProcessMergeQueues()
 	registerStartScheduledDispatches()

@@ -947,6 +947,7 @@ func registerRoutes(m *web.Route) {
 			m.Post("/test_mail", admin.SendTestMail)
 			m.Post("/test_cache", admin.TestCache)
 			m.Get("/settings", admin.ConfigSettings)
+			m.Combo("/dependency-graph").Get(admin.DependencyGraph).Post(admin.DependencyGraphPost)
 		})
 
 		m.Group("/monitor", func() {
@@ -1307,6 +1308,7 @@ func registerRoutes(m *web.Route) {
 
 				m.Get("/repos", org_setting.Repos)
 
+				m.Combo("/code_security").Get(org_setting.CodeSecurity).Post(org_setting.CodeSecurityPost)
 				m.Combo("/branch_workflow").Get(org_setting.BranchWorkflow).
 					Post(web.Bind(forms.BranchWorkflowForm{}), org_setting.BranchWorkflowPost)
 				m.Post("/branch_workflow/branching_model", web.Bind(forms.BranchingModelForm{}), org_setting.BranchingModelPost)
@@ -1493,6 +1495,7 @@ func registerRoutes(m *web.Route) {
 				m.Post("/{id}", web.Bind(forms.ProtectTagForm{}), context.RepoMustNotBeArchived(), repo_setting.EditProtectedTagPost)
 			})
 
+			m.Combo("/code_security").Get(repo_setting.CodeSecurity).Post(context.RepoMustNotBeArchived(), repo_setting.CodeSecurityPost)
 			m.Combo("/branch_workflow").Get(repo_setting.BranchWorkflow).
 				Post(web.Bind(forms.BranchWorkflowForm{}), context.RepoMustNotBeArchived(), repo_setting.BranchWorkflowPost)
 			m.Post("/branch_workflow/branching_model", web.Bind(forms.BranchingModelForm{}), context.RepoMustNotBeArchived(), repo_setting.BranchingModelPost)
@@ -1935,7 +1938,11 @@ func registerRoutes(m *web.Route) {
 				m.Get("", repo.RecentCommits)
 				m.Get("/data", repo.CodeFrequencyData)
 			}, repo.MustBeNotEmpty, context.RequireRepoReaderOr(unit.TypeCode))
-		}, context.RepoRef(), context.RequireRepoReaderOr(unit.TypeCode, unit.TypePullRequests, unit.TypeIssues, unit.TypeReleases))
+			m.Group("/dependencies", func() {
+				m.Get("", common.RateLimitHeavy, repo.Dependencies)
+				m.Get("/sbom", common.RateLimitHeavyPlain, repo.DependenciesSBOM)
+			}, context.RequireRepoReaderOr(unit.TypeCode), repo.MustEnableDependencyGraph, repo.MustBeNotEmpty)
+		}, context.RepoRef(), repo.SetDependencyGraphNav, context.RequireRepoReaderOr(unit.TypeCode, unit.TypePullRequests, unit.TypeIssues, unit.TypeReleases))
 
 		m.Group("/activity_author_data", func() {
 			m.Get("", repo.ActivityAuthors)

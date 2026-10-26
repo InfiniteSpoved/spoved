@@ -1,0 +1,165 @@
+.repo-dependencies-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.repo-dependencies-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.repo-dependencies-filters input[type="search"] {
+  flex: 1;
+  min-width: 240px;
+  width: auto;
+}
+
+.repo-dependencies-filters label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+}
+
+.repo-dependencies-filters select {
+  min-width: 0;
+  max-width: min(100%, 22em);
+  text-overflow: ellipsis;
+}
+
+.repo-dependencies-table {
+  border: 1px solid var(--color-secondary);
+  border-radius: var(--border-radius);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.repo-dependencies-row {
+  display: grid;
+  grid-template-columns: 2.2fr 1fr 0.9fr 1fr 1.6fr;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-secondary);
+  overflow-wrap: anywhere;
+}
+
+.repo-dependencies-row:last-child {
+  border-bottom: 0;
+}
+
+.repo-dependencies-head {
+  background: var(--color-box-header);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* the "not pinned" label of a row without a lock file */
+.repo-dependencies-not-pinned {
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  color: var(--color-warning-text);
+  border-radius: 10px;
+  padding: 0 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* the hint of the manifests without a lock file: a header in the body text colour, so it reads on the info background
+   in both themes */
+.repo-dependencies-hint .header {
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* long manifest paths wrap instead of widening the page */
+.repo-dependencies-paths a,
+.repo-dependencies-paths .header {
+  overflow-wrap: anywhere;
+}
+
+.repo-dependencies-note {
+  border-top: 1px solid var(--color-secondary);
+  padding-top: 12px;
+}
+
+@media (max-width: 767.98px) {
+  .repo-dependencies-header {
+    flex-direction: column;
+  }
+
+  /* each row becomes a card: name, then version, ecosystem, relationship and license on one line, then the manifest */
+  .repo-dependencies-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
+
+  .repo-dependencies-row.repo-dependencies-head {
+    display: none;
+  }
+
+  .repo-dependencies-row .repo-dependencies-package {
+    flex-basis: 100%;
+  }
+
+  .repo-dependencies-row > :last-child {
+    flex-basis: 100%;
+  }
+
+  /* full-width controls, at least 44px tall */
+  .repo-dependencies-filters input[type="search"],
+  .repo-dependencies-filters select,
+  .repo-dependencies-filters .button {
+    flex-basis: 100%;
+    max-width: 100%;
+    min-height: 44px;
+  }
+
+  .repo-dependencies-filters label {
+    flex-basis: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    min-height: 0;
+    gap: 4px;
+  }
+}
+
+/* the dependency graph switches (Site administration, organization and repository settings): the help text under
+   its label in a lighter colour, "Apply to all repositories" as a sub-option of "Enable" */
+.dependency-graph-switch .ui.checkbox label .help {
+  display: block;
+  font-weight: var(--font-weight-normal);
+  color: var(--color-text-light);
+}
+
+.dependency-graph-switch .dependency-graph-sub-option {
+  margin-inline-start: 1.85714em;
+}
+
+@media (max-width: 767.98px) {
+  /* tap targets of at least 44px: the whole label of an option, and the button */
+  .dependency-graph-switch .ui.checkbox {
+    display: block;
+  }
+
+  .dependency-graph-switch .ui.checkbox label {
+    min-height: 44px;
+    padding-block: 10px;
+  }
+
+  .dependency-graph-switch .ui.checkbox input[type="checkbox"] {
+    top: 11px;
+  }
+
+  .dependency-graph-switch .ui.button {
+    min-height: 44px;
+  }
+}

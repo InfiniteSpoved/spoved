@@ -1248,6 +1248,10 @@ func Routes() *web.Route {
 					m.Get("/issue_config/validate", repo.ValidateIssueConfig)
 				}, reqRepoReader(unit.TypeIssues), context.ReferencesGitRepo())
 				m.Get("/languages", reqRepoReader(unit.TypeCode), repo.GetLanguages)
+				m.Group("", func() {
+					m.Get("/dependencies", repo.ListDependencies)
+					m.Get("/sbom", common.RateLimitAPIHeavy, repo.GetSBOM)
+				}, reqRepoReader(unit.TypeCode), repo.MustEnableDependencyGraph)
 				m.Get("/activities/feeds", repo.ListRepoActivityFeeds)
 				m.Get("/new_pin_allowed", repo.AreNewIssuePinsAllowed)
 				m.Group("/avatar", func() {

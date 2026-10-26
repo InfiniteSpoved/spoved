@@ -850,6 +850,7 @@
 	"admin.dashboard.cleanup_packages": "Clean up expired packages",
 	"admin.dashboard.cleanup_actions": "Clean up expired logs and artifacts from actions",
 	"admin.dashboard.cleanup_audit_log": "Delete audit log entries older than the retention",
+	"admin.dashboard.dependency_graph_scan": "Scan the dependencies of repositories that were not scanned yet",
 	"admin.dashboard.update_checker": "Update checker",
 	"admin.dashboard.delete_old_system_notices": "Delete all old system notices from database",
 	"admin.dashboard.gc_lfs": "Garbage collect LFS meta objects",
@@ -2148,6 +2149,7 @@
 	"admin.audit.action.org.verified_domain.required_changed": "Changed the verified email domain requirement of organization %s",
 	"admin.audit.action.org.units.changed": "Changed the units of organization %s",
 	"admin.audit.action.org.branch_workflow.changed": "Changed the branch workflow of organization %s",
+	"admin.audit.action.org.dependency_graph.changed": "Changed the dependency graph switch of organization %s",
 	"admin.audit.action.repo.branch_workflow.changed": "Changed the branching model of repository %s",
 	"admin.audit.action.org.project.created": "Created project %s",
 	"admin.audit.action.org.project.renamed": "Renamed project %s",
@@ -3221,5 +3223,121 @@
 	"admin.auths.saml_dyn_group_maps_removal": "Remove users from all teams they are not added to by the group mappings.",
 	"admin.auths.saml_quota_group_claim_name": "Attribute that holds the quota groups (optional)",
 	"admin.auths.saml_quota_group_map": "Map quota group values to quota groups (optional, needs the quota group attribute)",
-	"admin.auths.saml_quota_group_map_removal": "Remove users from synchronized quota groups if they no longer have the matching value."
+	"admin.auths.saml_quota_group_map_removal": "Remove users from synchronized quota groups if they no longer have the matching value.",
+	"repo.dependency_graph": "Dependency graph",
+	"repo.settings.code_security": "Code security",
+	"repo.settings.dependency_graph.enable": "Enable for %s",
+	"repo.settings.dependency_graph.off_help": "Off: the Dependencies page and SBOM export are removed and the stored package list is deleted.",
+	"repo.settings.dependency_graph.set_by_org": "Set by the %s organization. When the organization lifts this, the repository setting (on) applies again.",
+	"repo.settings.dependency_graph.set_by_org_own_off": "Set by the %s organization. When the organization lifts this, the repository setting (off) applies again.",
+	"repo.settings.dependency_graph.change_in_org": "Change it in the organization settings.",
+	"repo.settings.dependency_graph.ask_org": "Ask an owner of %s to change it.",
+	"repo.settings.dependency_graph.change_in_admin": "Change it in Site administration.",
+	"repo.settings.dependency_graph.ask_admin": "Ask a site administrator to change it.",
+	"repo.settings.dependency_graph.saved": "The dependency graph setting has been saved.",
+	"repo.settings.dependency_graph.org_off": "Turned off by the %s organization.",
+	"repo.settings.dependency_graph.site_off": "Turned off by the site administrator.",
+	"repo.settings.dependency_graph.locked": "The dependency graph of this repository is set by the organization or the site administrator and can't be changed here.",
+	"org.settings.code_security": "Code security",
+	"org.settings.dependency_graph.enable": "Enable for repositories in %s",
+	"org.settings.dependency_graph.enable_help": "Repository admins can still turn it off for their repository. Off: nothing in this organization is scanned, its Dependencies pages and SBOM exports answer 404, and the stored package lists are deleted.",
+	"org.settings.dependency_graph.locked": "Apply to all repositories",
+	"org.settings.dependency_graph.locked_help": "Repositories can't change it. Use this to require the inventory for compliance.",
+	"admin.dependency_graph": "Dependency graph",
+	"admin.dependency_graph.desc": "Reads lock files and manifests on each repository's default branch to list its packages and export an SBOM. Changes apply within a few seconds; no restart.",
+	"admin.dependency_graph.enable": "Enable the dependency graph on this instance",
+	"admin.dependency_graph.off_help": "Off: nothing is scanned anywhere, every Dependencies page and SBOM export answers 404, and stored package lists are deleted.",
+	"admin.dependency_graph.file_default_on": "Starting value from app.ini %s: on. Once saved here, this value wins.",
+	"admin.dependency_graph.file_default_off": "Starting value from app.ini %s: off. Once saved here, this value wins.",
+	"admin.dependency_graph.updated": "Last changed %s by %s.",
+	"admin.dependency_graph.audit": "Each change is recorded in the audit log.",
+	"repo.dependencies.title": "Dependencies",
+	"repo.dependencies.summary": "%s from %s on %s at %s, updated %s",
+	"repo.dependencies.packages": {
+		"one": "%s package",
+		"other": "%s packages"
+	},
+	"repo.dependencies.manifests": {
+		"one": "%s manifest",
+		"other": "%s manifests"
+	},
+	"repo.dependencies.stale": "Updated for %s; %s is at %s, rescanning.",
+	"repo.dependencies.export": "Export SBOM",
+	"repo.dependencies.export_spdx": "SPDX 2.3 (JSON)",
+	"repo.dependencies.export_cyclonedx": "CycloneDX 1.6 (JSON)",
+	"repo.dependencies.export_disabled": "You can export an SBOM once the first scan finishes.",
+	"repo.dependencies.export_empty": "You can still export an SBOM; it lists only this repository.",
+	"repo.dependencies.running": "Reading the manifests on %s…",
+	"repo.dependencies.running_hint": "This usually takes a few seconds. Reload the page to see the result.",
+	"repo.dependencies.failed": "The first scan failed",
+	"repo.dependencies.error.timeout": "The scan took too long. It is tried again after the next push.",
+	"repo.dependencies.error.tree_too_large": "The repository has more files than the scan reads.",
+	"repo.dependencies.error.other": "The scan could not finish. It is tried again after the next push.",
+	"repo.dependencies.rescan_failed": "The last scan failed. The list below is from the last scan that worked.",
+	"repo.dependencies.none": "No supported manifests on %s",
+	"repo.dependencies.none_hint": "spoved reads go.mod, package-lock.json, yarn.lock, pnpm-lock.yaml, requirements.txt (also requirements-dev.txt and the files in a requirements directory), poetry.lock, pom.xml, *.csproj, packages.lock.json, Cargo.lock, Gemfile.lock and composer.lock, and without a lock file package.json, Cargo.toml, pyproject.toml, Gemfile and composer.json. Push one to the default branch and this page fills in.",
+	"repo.dependencies.skipped": {
+		"one": "%d manifest was skipped",
+		"other": "%d manifests were skipped"
+	},
+	"repo.dependencies.skipped_note": {
+		"one": "The list and the SBOM contain the %d manifest that was read. The SBOM says which were skipped.",
+		"other": "The list and the SBOM contain the %d manifests that were read. The SBOM says which were skipped."
+	},
+	"repo.dependencies.skip.manifest_too_large": "larger than the size limit",
+	"repo.dependencies.skip.too_many_manifests": "over the limit of manifests per repository",
+	"repo.dependencies.skip.too_many_dependencies": "over the limit of dependencies per repository",
+	"repo.dependencies.skip.too_many_entries": "has too many entries to be read",
+	"repo.dependencies.skip.parse_error": "could not be parsed",
+	"repo.dependencies.skip.invalid_path": "the path is not valid",
+	"repo.dependencies.skip.read_error": "could not be read",
+	"repo.dependencies.skip.internal_error": "could not be read",
+	"repo.dependencies.search": "Search packages",
+	"repo.dependencies.ecosystem": "Ecosystem",
+	"repo.dependencies.relationship": "Relationship",
+	"repo.dependencies.manifest": "Manifest",
+	"repo.dependencies.all": "All",
+	"repo.dependencies.all_count": "All (%s)",
+	"repo.dependencies.direct": "Direct",
+	"repo.dependencies.transitive": "Transitive",
+	"repo.dependencies.filter": "Filter",
+	"repo.dependencies.package": "Package",
+	"repo.dependencies.version": "Version",
+	"repo.dependencies.license": "License",
+	"repo.dependencies.license_unknown": "Unknown",
+	"repo.dependencies.no_match": "No package matches the filters.",
+	"repo.dependencies.matches": "%s of %s packages match.",
+	"repo.dependencies.clear": "Clear filters",
+	"repo.dependencies.note": "Licenses come from the lockfile where it records them (npm, Composer); others show Unknown and NOASSERTION in the SBOM. The manifest link opens the file at the scanned commit. The SBOM names this repository %s.",
+	"repo.dependencies.unpinned": {
+		"one": "%d manifest has no lock file",
+		"other": "%d manifests have no lock file"
+	},
+	"repo.dependencies.unpinned_outside": {
+		"one": "%[1]d manifest is not a workspace of %[2]s",
+		"other": "%[1]d manifests are not workspaces of %[2]s"
+	},
+	"repo.dependencies.unpinned_outside_hint": {
+		"one": "Only its direct dependencies are listed, with the version ranges it declares. Add it to that lock file's workspaces, or commit its own %s, for exact versions and transitive packages.",
+		"other": "Only their direct dependencies are listed, with the version ranges they declare. Add them to that lock file's workspaces, or commit their own %s, for exact versions and transitive packages."
+	},
+	"repo.dependencies.unpinned_more": {
+		"one": "and %d more",
+		"other": "and %d more"
+	},
+	"repo.dependencies.unpinned_pypi": "uv.lock and pdm.lock are not read yet.",
+	"repo.dependencies.unpinned_hint": {
+		"one": "Only its direct dependencies are listed, with the version ranges it declares. Commit %s for exact versions and transitive packages.",
+		"other": "Only their direct dependencies are listed, with the version ranges they declare. Commit %s for exact versions and transitive packages."
+	},
+	"repo.dependencies.partial": {
+		"one": "%d manifest was read only in part",
+		"other": "%d manifests were read only in part"
+	},
+	"repo.dependencies.partial_lines": {
+		"one": "%d line that names a dependency is in a form that could not be read, and is not listed",
+		"other": "%d lines that name a dependency are in a form that could not be read, and are not listed"
+	},
+	"repo.dependencies.locks_or": "%s or %s",
+	"repo.dependencies.not_pinned": "not pinned"
 }

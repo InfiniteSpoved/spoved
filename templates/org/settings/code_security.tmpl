@@ -1,0 +1,40 @@
+{{template "org/settings/layout_head" (dict "ctxData" . "pageClass" "organization settings code-security")}}
+<div class="org-setting-content">
+	<h4 class="ui top attached header">
+		{{ctx.Locale.Tr "repo.dependency_graph"}}
+	</h4>
+	<div class="ui attached segment">
+		{{if not .SiteEnabled}}
+			<div class="ui warning message" id="dependency-graph-site-off">
+				{{ctx.Locale.Tr "repo.settings.dependency_graph.site_off"}}
+				{{if .CanChangeThere}}<a href="{{AppSubUrl}}/admin/config/dependency-graph">{{ctx.Locale.Tr "repo.settings.dependency_graph.change_in_admin"}}</a>{{else}}{{ctx.Locale.Tr "repo.settings.dependency_graph.ask_admin"}}{{end}}
+			</div>
+		{{end}}
+		<form class="ui form dependency-graph-switch" action="{{.OrgLink}}/settings/code_security" method="post">
+			<fieldset {{if not .SiteEnabled}}disabled{{end}}>
+				<div class="field">
+					<div class="ui checkbox{{if not .SiteEnabled}} disabled{{end}}">
+						<input id="dependency-graph-enabled" name="enabled" type="checkbox" {{if .Enabled}}checked{{end}}>
+						<label for="dependency-graph-enabled">
+							<strong>{{ctx.Locale.Tr "org.settings.dependency_graph.enable" .Org.Name}}</strong>
+							<span class="help">{{ctx.Locale.Tr "org.settings.dependency_graph.enable_help"}}</span>
+						</label>
+					</div>
+				</div>
+				<div class="field dependency-graph-sub-option">
+					<div class="ui checkbox{{if not .SiteEnabled}} disabled{{end}}">
+						<input id="dependency-graph-locked" name="locked" type="checkbox" {{if .Locked}}checked{{end}}>
+						<label for="dependency-graph-locked">
+							<strong>{{ctx.Locale.Tr "org.settings.dependency_graph.locked"}}</strong>
+							<span class="help">{{ctx.Locale.Tr "org.settings.dependency_graph.locked_help"}}</span>
+						</label>
+					</div>
+				</div>
+				{{if .SiteEnabled}}
+					<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+				{{end}}
+			</fieldset>
+		</form>
+	</div>
+</div>
+{{template "org/settings/layout_footer" .}}

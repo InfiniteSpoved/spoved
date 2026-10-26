@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net6.0": {
+      "Newtonsoft.Json": {"type": "Direct", "requested": "[13.0.1, )", "resolved": "13.0.1", "contentHash": "x"},
+      "Microsoft.Extensions.Logging": {"type": "Transitive", "resolved": "6.0.0", "contentHash": "y"},
+      "Other.Project": {"type": "Project"}
+    },
+    "net8.0": {
+      "Newtonsoft.Json": {"type": "Direct", "requested": "[13.0.1, )", "resolved": "13.0.1", "contentHash": "x"},
+      "Microsoft.Extensions.Logging": {"type": "Transitive", "resolved": "8.0.0", "contentHash": "z"}
+    }
+  }
+}

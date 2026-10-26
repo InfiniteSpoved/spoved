@@ -14,6 +14,11 @@
 		<a class="{{if .PageIsRecentCommits}}active{{end}} item" href="{{.RepoLink}}/activity/recent-commits">
 			{{ctx.Locale.Tr "repo.activity.navbar.recent_commits"}}
 		</a>
+		{{if .DependencyGraphEnabled}}
+			<a class="{{if .PageIsDependencies}}active {{end}}item" href="{{.RepoLink}}/activity/dependencies">
+				{{ctx.Locale.Tr "repo.dependencies.title"}}
+			</a>
+		{{end}}
 	{{end}}
 	{{if $.Permission.CanRead $.UnitTypePullRequests}}
 		<a class="{{if .PageIsMetrics}}active {{end}}item" href="{{.RepoLink}}/activity/metrics">
