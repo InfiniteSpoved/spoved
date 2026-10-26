@@ -84,8 +84,8 @@ func (b *yamlBlock) line(indent int, opens bool) bool {
 // end reports whether the block may end here (not right after a key line).
 func (b *yamlBlock) end() bool { return !b.open }
 
-// unquoteYAML returns the text of a scalar that matched yScalar: a single-quoted scalar has `”` for `'`, a double-
-// quoted one has no escape.
+// unquoteYAML returns the text of a scalar that matched yScalar: a single-quoted scalar has two single quotes for
+// one, a double-quoted one has no escape.
 func unquoteYAML(s string) string {
 	if len(s) >= 2 {
 		switch s[0] {

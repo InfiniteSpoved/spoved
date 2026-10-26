@@ -21,6 +21,8 @@ import (
 	"forgejo.org/modules/repository"
 	"forgejo.org/modules/timeutil"
 	notify_service "forgejo.org/services/notify"
+
+	"xorm.io/builder"
 )
 
 const (
@@ -104,6 +106,13 @@ func (*notifier) ChangeDefaultBranch(ctx context.Context, repo *repo_model.Repos
 	enqueueIfEnabled(ctx, repo)
 }
 
+// TransferRepository: the new owner's switch decides now (an organization that is off or locks it, or none).
+func (*notifier) TransferRepository(ctx context.Context, _ *user_model.User, repo *repo_model.Repository, _ string) {
+	if err := applyDependencyGraphState(ctx, builder.Eq{"repository.id": repo.ID}); err != nil {
+		log.Error("dependency graph: apply the switches to transferred repository %d: %v", repo.ID, err)
+	}
+}
+
 // enqueueDefaultBranch queues the repository if ref is its default branch: tags, other branches and refs like
 // refs/for/* or refs/pull/* never start a scan.
 func enqueueDefaultBranch(ctx context.Context, repo *repo_model.Repository, ref git.RefName) {
@@ -155,10 +164,15 @@ func handler(items ...int64) (unhandled []int64) {
 // batches of 500 per call (the next call takes the next ones once these are scanned). A repository whose last scan
 // failed waits a day. Repositories the dependency graph is off for are left out.
 func EnqueueUnscanned(ctx context.Context) error {
+	return enqueueUnscanned(ctx, nil)
+}
+
+// enqueueUnscanned is EnqueueUnscanned for the repositories that match scope (nil for all).
+func enqueueUnscanned(ctx context.Context, scope builder.Cond) error {
 	if !SiteEnabled(ctx) {
 		return nil
 	}
-	ids, err := repo_model.UnscannedDependencyRepoIDs(ctx, timeutil.TimeStampNow().Add(-int64(failedRetry/time.Second)), cronBatch)
+	ids, err := repo_model.UnscannedDependencyRepoIDs(ctx, timeutil.TimeStampNow().Add(-int64(failedRetry/time.Second)), scope, cronBatch)
 	if err != nil {
 		return err
 	}

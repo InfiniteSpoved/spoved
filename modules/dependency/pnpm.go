@@ -133,6 +133,9 @@ func parsePnpmLock(s *sink, data []byte, _ Finder) error {
 	if env || qkey >= 0 || !blk.end() {
 		return bad()
 	}
+	if s.info.Dirs == nil {
+		s.info.Dirs = []string{"."} // a lockfile of one project has no importers
+	}
 	return doc.emitDependencies(s)
 }
 
@@ -141,6 +144,9 @@ func parsePnpmLock(s *sink, data []byte, _ Finder) error {
 // lines down to the depth that is read must be keys, and the values read must be scalars; anything else is refused.
 func (d *pnpmDoc) line(s *sink, path []string, depth int, raw, value string, isKey, explicit bool, pkg **pnpmPackage) error {
 	bad := parseErr("pnpm-lock.yaml")
+	if len(path) == 0 {
+		return bad // a sequence item before any key
+	}
 	section := path[0]
 	importers, packages, rootDeps := section == "importers", section == "packages", pnpmDepSection(section)
 	readDepth := 0
@@ -181,6 +187,12 @@ func (d *pnpmDoc) line(s *sink, path []string, depth int, raw, value string, isK
 	case importers && depth == 1, importers && depth == 2 && pnpmDepSection(key):
 		if value != "" && value != "{}" {
 			return bad
+		}
+		if depth == 1 { // a project the lock was resolved for: the root (".") or a workspace member
+			if err := s.entry(); err != nil {
+				return err
+			}
+			s.info.Dirs = append(s.info.Dirs, key)
 		}
 	case importers && depth == 3 && pnpmDepSection(path[2]), rootDeps && depth == 1:
 		if value != "" { // v5: `name: 1.2.3`

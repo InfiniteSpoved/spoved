@@ -71,6 +71,9 @@ func parseCargoLock(s *sink, data []byte, _ Finder) error {
 		if p.source != "" {
 			continue
 		}
+		if p.name != "" { // the root package or a workspace member: a Cargo.toml this lock covers
+			s.info.Members = append(s.info.Members, p.name)
+		}
 		for _, d := range p.deps {
 			f := strings.Fields(d)
 			if len(f) >= 2 {

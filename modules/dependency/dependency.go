@@ -78,14 +78,13 @@ type Format struct {
 	Ecosystem string
 	// Small formats are limited to MaxSmallManifestSize.
 	Small bool
-	// Unpinned formats are manifests read only when no lock file covers them (Locks next to the manifest, or with
-	// LocksAbove in any directory above it too, as a workspace root's lock covers its members): they list the direct
-	// dependencies with the ranges they declare, no versions.
-	Unpinned   bool
-	Locks      []string
-	LocksAbove bool
-	match      func(base string) bool
-	parse      func(s *sink, data []byte, find Finder) error
+	// Unpinned formats are manifests read only when no lock file read by the scan covers them (see Covered): they
+	// list the direct dependencies with the ranges they declare, no versions.
+	Unpinned bool
+	Locks    []string
+	cover    coverRule
+	match    func(base string) bool
+	parse    func(s *sink, data []byte, find Finder) error
 }
 
 var formats []*Format
@@ -146,6 +145,7 @@ type sink struct {
 	index      map[[2]string]int // name, version -> position in rows
 	entries    int
 	ticks      int
+	info       Info // what a lock file covers, what a manifest is, what was not read
 }
 
 func newSink(ctx context.Context, maxRows int) *sink {
@@ -185,14 +185,36 @@ func (s *sink) entry() error {
 	return s.tick()
 }
 
-// ParseLimited reads a manifest and returns at most maxRows rows, or ErrTooManyDependencies. A panic of a parser is
-// an ErrParse, and every row is validated: names, versions and licenses are cut of control characters and
-// bidirectional marks, a row with an empty or too long value is dropped, and a package listed twice in one manifest
-// is one row.
-func (f *Format) ParseLimited(ctx context.Context, data []byte, find Finder, maxRows int) (deps []Dependency, err error) {
+// Info is what a parse learns besides the rows: what a lock file covers (see Covers) and what a manifest without a
+// lock file is.
+type Info struct {
+	// a lock file: the directories (relative to the lock's, "." for its own) of the projects it was resolved for,
+	// and glob patterns of more (a yarn v1 root's package.json workspaces); nil for the lock files that cover only
+	// the manifest next to them
+	Dirs, Globs []string
+	// Cargo.lock: the names of the packages of the project itself (the root and the workspace members)
+	Members []string
+	// Cargo.toml: the package's name ("" for a virtual workspace) and whether it is a workspace root itself
+	Name         string
+	OwnWorkspace bool
+	// lines of the manifest that name a dependency but could not be read (a Gemfile's gem calls that are not plain)
+	Unread int
+}
+
+// Result is what ParseFull returns.
+type Result struct {
+	Deps []Dependency
+	Info Info
+}
+
+// ParseFull reads a manifest and returns at most maxRows rows, or ErrTooManyDependencies, with the Info of the
+// parse. A panic of a parser is an ErrParse, and every row is validated: names, versions and licenses are cut of
+// control characters and bidirectional marks, a row with an empty or too long value is dropped, and a package listed
+// twice in one manifest is one row.
+func (f *Format) ParseFull(ctx context.Context, data []byte, find Finder, maxRows int) (res *Result, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			deps, err = nil, fmt.Errorf("%w: panic", ErrParse)
+			res, err = nil, fmt.Errorf("%w: panic", ErrParse)
 		}
 	}()
 	if find == nil {
@@ -206,7 +228,7 @@ func (f *Format) ParseLimited(ctx context.Context, data []byte, find Finder, max
 	if err != nil {
 		return nil, err
 	}
-	return validate(f.Ecosystem, s.rows), nil
+	return &Result{Deps: validate(f.Ecosystem, s.rows), Info: s.info}, nil
 }
 
 func clean(s string) string {

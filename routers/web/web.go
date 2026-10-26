@@ -1495,7 +1495,7 @@ func registerRoutes(m *web.Route) {
 				m.Post("/{id}", web.Bind(forms.ProtectTagForm{}), context.RepoMustNotBeArchived(), repo_setting.EditProtectedTagPost)
 			})
 
-			m.Combo("/code_security").Get(repo_setting.CodeSecurity).Post(repo_setting.CodeSecurityPost)
+			m.Combo("/code_security").Get(repo_setting.CodeSecurity).Post(context.RepoMustNotBeArchived(), repo_setting.CodeSecurityPost)
 			m.Combo("/branch_workflow").Get(repo_setting.BranchWorkflow).
 				Post(web.Bind(forms.BranchWorkflowForm{}), context.RepoMustNotBeArchived(), repo_setting.BranchWorkflowPost)
 			m.Post("/branch_workflow/branching_model", web.Bind(forms.BranchingModelForm{}), context.RepoMustNotBeArchived(), repo_setting.BranchingModelPost)
@@ -1941,7 +1941,7 @@ func registerRoutes(m *web.Route) {
 			m.Group("/dependencies", func() {
 				m.Get("", common.RateLimitHeavy, repo.Dependencies)
 				m.Get("/sbom", common.RateLimitHeavyPlain, repo.DependenciesSBOM)
-			}, repo.MustEnableDependencyGraph, repo.MustBeNotEmpty, context.RequireRepoReaderOr(unit.TypeCode))
+			}, context.RequireRepoReaderOr(unit.TypeCode), repo.MustEnableDependencyGraph, repo.MustBeNotEmpty)
 		}, context.RepoRef(), repo.SetDependencyGraphNav, context.RequireRepoReaderOr(unit.TypeCode, unit.TypePullRequests, unit.TypeIssues, unit.TypeReleases))
 
 		m.Group("/activity_author_data", func() {

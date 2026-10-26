@@ -4,7 +4,9 @@
 package repo
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"slices"
 	"strings"
 
@@ -50,6 +52,7 @@ const (
 	DependencySkipParse              = "parse_error"
 	DependencySkipInvalidPath        = "invalid_path"
 	DependencySkipRead               = "read_error"
+	DependencySkipPartial            = "partially_read" // read, but Lines lines that name a dependency were not
 	maxSkippedManifestsStored    int = 100
 )
 
@@ -59,13 +62,15 @@ var DependencyScanErrors = []string{DependencyErrTimeout, DependencyErrTreeTooLa
 // DependencySkipCodes are the values of SkippedManifest.Code.
 var DependencySkipCodes = []string{
 	DependencySkipTooLarge, DependencySkipTooMany, DependencySkipTooManyDeps, DependencySkipTooManyEntries, DependencySkipParse,
-	DependencySkipInvalidPath, DependencySkipRead,
+	DependencySkipInvalidPath, DependencySkipRead, DependencySkipPartial,
 }
 
-// SkippedManifest is a manifest the scan didn't read, with the reason.
+// SkippedManifest is a manifest the scan didn't read, with the reason, or (DependencySkipPartial) read only in
+// part.
 type SkippedManifest struct {
-	Path string `json:"path"`
-	Code string `json:"code"`
+	Path  string `json:"path"`
+	Code  string `json:"code"`
+	Lines int    `json:"lines,omitempty"` // DependencySkipPartial: the lines that were not read
 }
 
 // DependencyScan is the result of the last scan of a repository: the commit the rows belong to, and when the
@@ -140,8 +145,9 @@ func GetRepoDependencyScan(ctx context.Context, repoID int64) (*DependencyScan, 
 // the scan row is still the one the caller read (expect, nil if there was none; same commit, time, status and error,
 // so a scan of the same commit that finished meanwhile counts as another row): another process that finished a
 // scan meanwhile wins, on any number of servers. It reports whether it wrote. With a nil deps the old rows stay and
-// only the status of the scan row changes (a failed scan).
-func ReplaceRepoDependenciesIf(ctx context.Context, scan *DependencyScan, deps []*Dependency, expect *DependencyScan) (written bool, err error) {
+// only the status of the scan row changes (a failed scan). enabled, if set, is asked inside the transaction once the
+// scan row is locked: when it says off (the switch changed while the scan ran), nothing is written.
+func ReplaceRepoDependenciesIf(ctx context.Context, scan *DependencyScan, deps []*Dependency, expect *DependencyScan, enabled func(context.Context) (bool, error)) (written bool, err error) {
 	err = db.WithTx(ctx, func(ctx context.Context) error {
 		e := db.GetEngine(ctx)
 		cols := []string{"commit_sha", "scanned_unix", "status", "error", "manifest_count", "dependency_count", "skipped"}
@@ -160,6 +166,11 @@ func ReplaceRepoDependenciesIf(ctx context.Context, scan *DependencyScan, deps [
 				return err
 			}
 		}
+		if enabled != nil {
+			if on, err := enabled(ctx); err != nil || !on {
+				return cmp.Or(err, errDependencyGraphOff)
+			}
+		}
 		if deps != nil {
 			if _, err := e.Where("repo_id = ?", scan.RepoID).Delete(new(Dependency)); err != nil {
 				return err
@@ -173,6 +184,9 @@ func ReplaceRepoDependenciesIf(ctx context.Context, scan *DependencyScan, deps [
 		written = true
 		return nil
 	})
+	if errors.Is(err, errDependencyGraphOff) {
+		return false, nil
+	}
 	if err != nil && expect == nil {
 		// the first scan of another process stored its row first: that is a lost write, not a failure
 		if cur, gerr := GetRepoDependencyScan(ctx, scan.RepoID); gerr == nil && cur != nil {
@@ -180,6 +194,19 @@ func ReplaceRepoDependenciesIf(ctx context.Context, scan *DependencyScan, deps [
 		}
 	}
 	return written, err
+}
+
+// errDependencyGraphOff rolls back a write of ReplaceRepoDependenciesIf that the switches no longer allow.
+var errDependencyGraphOff = errors.New("dependency graph turned off")
+
+// ReplaceRepoDependencies stores a scan row and its rows as a scan that read the scan row as it is now (for tests).
+func ReplaceRepoDependencies(ctx context.Context, scan *DependencyScan, deps []*Dependency) error {
+	cur, err := GetRepoDependencyScan(ctx, scan.RepoID)
+	if err != nil {
+		return err
+	}
+	_, err = ReplaceRepoDependenciesIf(ctx, scan, deps, cur, nil)
+	return err
 }
 
 // The organization's dependency graph switch, as user settings of the organization: DependencyGraphOrgKey is
@@ -208,25 +235,35 @@ func DependencyGraphOffCond() builder.Cond {
 	)
 }
 
-// DeleteRepoDependencies removes the rows and the scan row of a repository.
+// DeleteRepoDependencies removes the scan row and the rows of a repository, in that order: the scan's write
+// (ReplaceRepoDependenciesIf) locks the scan row first too, so the two never wait for each other the other way round.
 func DeleteRepoDependencies(ctx context.Context, repoID int64) error {
 	e := db.GetEngine(ctx)
-	if _, err := e.Where("repo_id = ?", repoID).Delete(new(Dependency)); err != nil {
+	if _, err := e.Where("repo_id = ?", repoID).Delete(new(DependencyScan)); err != nil {
 		return err
 	}
-	_, err := e.Where("repo_id = ?", repoID).Delete(new(DependencyScan))
+	_, err := e.Where("repo_id = ?", repoID).Delete(new(Dependency))
 	return err
 }
 
-// ScannedDependencyRepoIDs returns up to limit repositories that have a scan row and match cond (on the repository
-// table; nil for all, also a scan row whose repository is gone).
+// ScannedDependencyRepoIDs returns up to limit repositories, in ID order, that have a scan row or rows and match
+// cond (on the repository table; nil for all, also rows whose repository is gone).
 func ScannedDependencyRepoIDs(ctx context.Context, cond builder.Cond, limit int) ([]int64, error) {
 	var ids []int64
-	sess := db.GetEngine(ctx).Table("repo_dependency_scan").Select("repo_dependency_scan.repo_id")
-	if cond != nil {
-		sess = sess.Join("INNER", "repository", "repository.id = repo_dependency_scan.repo_id").Where(cond)
+	for _, table := range []string{"repo_dependency_scan", "repo_dependency"} {
+		var found []int64
+		sess := db.GetEngine(ctx).Table(table).Select("DISTINCT " + table + ".repo_id")
+		if cond != nil {
+			sess = sess.Join("INNER", "repository", "repository.id = "+table+".repo_id").Where(cond)
+		}
+		if err := sess.OrderBy(table + ".repo_id").Limit(limit).Find(&found); err != nil {
+			return nil, err
+		}
+		ids = append(ids, found...)
 	}
-	return ids, sess.OrderBy("repo_dependency_scan.repo_id").Limit(limit).Find(&ids)
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	return ids[:min(len(ids), limit)], nil
 }
 
 // DependencySearchOptions selects the dependencies of one repository.
@@ -280,14 +317,19 @@ func containsFold(col, q string) builder.Cond {
 
 // UnscannedDependencyRepoIDs returns up to limit repositories that need a scan: ready, not empty, not trashed, and
 // either without a scan row or with a scan of another commit than the default branch's head (as the branch table
-// has it), except when the last scan failed after retryBefore.
-func UnscannedDependencyRepoIDs(ctx context.Context, retryBefore timeutil.TimeStamp, limit int) ([]int64, error) {
+// has it), except when the last scan failed after retryBefore; scope (on the repository table, nil for all) narrows
+// them.
+func UnscannedDependencyRepoIDs(ctx context.Context, retryBefore timeutil.TimeStamp, scope builder.Cond, limit int) ([]int64, error) {
 	var ids []int64
+	if scope == nil {
+		scope = builder.NewCond()
+	}
 	err := db.GetEngine(ctx).Table("repository").Select("repository.id").
 		Join("LEFT", "repo_dependency_scan", "repo_dependency_scan.repo_id = repository.id").
 		Join("LEFT", "branch", "branch.repo_id = repository.id AND branch.name = repository.default_branch AND branch.is_deleted = ?", false).
 		Where(builder.Eq{"repository.is_empty": false, "repository.status": RepositoryReady, "repository.trashed_unix": 0}).
 		And(builder.Not{DependencyGraphOffCond()}).
+		And(scope).
 		And(builder.Or(
 			builder.IsNull{"repo_dependency_scan.id"},
 			builder.And(

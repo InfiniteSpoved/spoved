@@ -137,7 +137,7 @@ func TestScan(t *testing.T) {
 
 	// a second scan of the same commit reads nothing
 	var parses atomic.Int32
-	defer test.MockVariableValue(&parseManifest, func(context.Context, *dependency.Format, []byte, dependency.Finder, int) ([]dependency.Dependency, error) {
+	defer test.MockVariableValue(&parseManifest, func(context.Context, *dependency.Format, []byte, dependency.Finder, int) (*dependency.Result, error) {
 		parses.Add(1)
 		return nil, nil
 	})()
@@ -146,8 +146,8 @@ func TestScan(t *testing.T) {
 
 	// a push that removes the manifests drops their rows
 	sha2 := commitFiles(t, repo, map[string]string{"README.md": "hi"}, nil)
-	parseManifest = func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
-		return f.ParseLimited(ctx, data, find, maxRows)
+	parseManifest = func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) (*dependency.Result, error) {
+		return f.ParseFull(ctx, data, find, maxRows)
 	}
 	require.NoError(t, Scan(t.Context(), repo.ID))
 	assert.Empty(t, rowsOf(t, repo.ID))
@@ -237,9 +237,9 @@ func TestScanTimeoutKeepsOldRows(t *testing.T) {
 
 	commitFiles(t, repo, map[string]string{"go.mod": "module m\n\nrequire example.com/new v1.0.0\n"}, nil)
 	defer test.MockVariableValue(&setting.DependencyGraph.ScanTimeout, 100*time.Millisecond)()
-	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
+	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) (*dependency.Result, error) {
 		<-ctx.Done() // a parser that takes too long
-		return f.ParseLimited(ctx, data, find, maxRows)
+		return f.ParseFull(ctx, data, find, maxRows)
 	})()
 	require.NoError(t, Scan(t.Context(), repo.ID))
 
@@ -290,32 +290,32 @@ func TestScanSkips(t *testing.T) {
 func TestEnqueueUnscanned(t *testing.T) {
 	repo := enable(t)
 	commitFiles(t, repo, map[string]string{"go.mod": goMod}, nil)
-	ids, err := repo_model.UnscannedDependencyRepoIDs(t.Context(), 0, 1000)
+	ids, err := repo_model.UnscannedDependencyRepoIDs(t.Context(), 0, nil, 1000)
 	require.NoError(t, err)
 	assert.Contains(t, ids, repo.ID, "never scanned")
 
-	require.NoError(t, replaceDependencies(t.Context(), &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: "old", Status: "ok"}, []*repo_model.Dependency{}))
-	ids, _ = repo_model.UnscannedDependencyRepoIDs(t.Context(), 0, 1000)
+	require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(), &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: "old", Status: "ok"}, []*repo_model.Dependency{}))
+	ids, _ = repo_model.UnscannedDependencyRepoIDs(t.Context(), 0, nil, 1000)
 	assert.Contains(t, ids, repo.ID, "scanned at another commit than the head of the branch table")
 
 	var head string
 	_, err = db.GetEngine(t.Context()).SQL("SELECT commit_id FROM branch WHERE repo_id = ? AND name = ?", repo.ID, repo.DefaultBranch).Get(&head)
 	require.NoError(t, err)
 	require.NotEmpty(t, head)
-	require.NoError(t, replaceDependencies(t.Context(), &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: head, Status: "ok"}, []*repo_model.Dependency{}))
-	ids, _ = repo_model.UnscannedDependencyRepoIDs(t.Context(), 0, 1000)
+	require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(), &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: head, Status: "ok"}, []*repo_model.Dependency{}))
+	ids, _ = repo_model.UnscannedDependencyRepoIDs(t.Context(), 0, nil, 1000)
 	assert.NotContains(t, ids, repo.ID, "up to date")
 
 	// a failed scan of a new head waits for the retry time
 	_, err = db.GetEngine(t.Context()).Exec("UPDATE repo_dependency_scan SET commit_sha = 'old', error = 'timeout', scanned_unix = ? WHERE repo_id = ?", timeutil.TimeStampNow(), repo.ID)
 	require.NoError(t, err)
-	ids, _ = repo_model.UnscannedDependencyRepoIDs(t.Context(), timeutil.TimeStampNow().Add(-3600), 1000)
+	ids, _ = repo_model.UnscannedDependencyRepoIDs(t.Context(), timeutil.TimeStampNow().Add(-3600), nil, 1000)
 	assert.NotContains(t, ids, repo.ID)
-	ids, _ = repo_model.UnscannedDependencyRepoIDs(t.Context(), timeutil.TimeStampNow().Add(3600), 1000)
+	ids, _ = repo_model.UnscannedDependencyRepoIDs(t.Context(), timeutil.TimeStampNow().Add(3600), nil, 1000)
 	assert.Contains(t, ids, repo.ID)
 
 	// the batch is limited
-	ids, _ = repo_model.UnscannedDependencyRepoIDs(t.Context(), timeutil.TimeStampNow().Add(3600), 1)
+	ids, _ = repo_model.UnscannedDependencyRepoIDs(t.Context(), timeutil.TimeStampNow().Add(3600), nil, 1)
 	assert.Len(t, ids, 1)
 
 	// disabled: the cron task does nothing
@@ -431,12 +431,12 @@ func blockFirstParse(t *testing.T) (started <-chan struct{}, release func()) {
 	t.Helper()
 	st, rel := make(chan struct{}), make(chan struct{})
 	var once sync.Once
-	t.Cleanup(test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
+	t.Cleanup(test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) (*dependency.Result, error) {
 		once.Do(func() {
 			close(st)
 			<-rel
 		})
-		return f.ParseLimited(ctx, data, find, maxRows)
+		return f.ParseFull(ctx, data, find, maxRows)
 	}))
 	var relOnce sync.Once
 	release = func() { relOnce.Do(func() { close(rel) }) }
@@ -485,7 +485,7 @@ func TestScanNeverReplacesNewerRows(t *testing.T) {
 
 	// another process scans a later commit of the branch and stores it while this scan is still reading
 	sha2 := commitOnTop(t, repo, map[string]string{"go.mod": "module m\n\nrequire example.com/newer v1.0.0\n"})
-	require.NoError(t, replaceDependencies(t.Context(),
+	require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(),
 		&repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: sha2, Status: repo_model.DependencyScanOK, ManifestCount: 1, DependencyCount: 1, ScannedUnix: timeutil.TimeStampNow()},
 		[]*repo_model.Dependency{{RepoID: repo.ID, Ecosystem: "Go", Name: "example.com/newer", Version: "v1.0.0", ManifestPath: "go.mod", Direct: true}}))
 	release()
@@ -536,9 +536,9 @@ func TestFailedScanKeepsNewerRow(t *testing.T) {
 	repo := enable(t)
 	commitFiles(t, repo, map[string]string{"go.mod": goMod}, nil)
 	defer test.MockVariableValue(&setting.DependencyGraph.ScanTimeout, 300*time.Millisecond)()
-	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, _ *dependency.Format, _ []byte, _ dependency.Finder, _ int) ([]dependency.Dependency, error) {
+	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, _ *dependency.Format, _ []byte, _ dependency.Finder, _ int) (*dependency.Result, error) {
 		other := &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: "other", Status: repo_model.DependencyScanOK, ScannedUnix: timeutil.TimeStampNow()}
-		require.NoError(t, replaceDependencies(context.Background(), other, []*repo_model.Dependency{}))
+		require.NoError(t, repo_model.ReplaceRepoDependencies(context.Background(), other, []*repo_model.Dependency{}))
 		<-ctx.Done()
 		return nil, ctx.Err()
 	})()
@@ -563,7 +563,7 @@ func TestScanStopsAtDependencyCap(t *testing.T) {
 	}, nil)
 	var parses atomic.Int32
 	orig := parseManifest
-	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
+	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) (*dependency.Result, error) {
 		parses.Add(1)
 		return orig(ctx, f, data, find, maxRows)
 	})()
@@ -595,7 +595,7 @@ func TestHelperCacheKeepsOneCopyPerBlob(t *testing.T) {
 
 	var reads atomic.Int32
 	orig := parseManifest
-	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
+	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) (*dependency.Result, error) {
 		if b := find("package.json", false); b != nil {
 			reads.Add(1)
 		}
@@ -628,16 +628,6 @@ func TestHelperCacheKeepsOneCopyPerBlob(t *testing.T) {
 	assert.Len(t, rowsOf(t, repo.ID), 400)
 }
 
-// replaceDependencies stores a scan row and its dependencies as a scan that read the row as it is now.
-func replaceDependencies(ctx context.Context, scan *repo_model.DependencyScan, deps []*repo_model.Dependency) error {
-	cur, err := repo_model.GetRepoDependencyScan(ctx, scan.RepoID)
-	if err != nil {
-		return err
-	}
-	_, err = repo_model.ReplaceRepoDependenciesIf(ctx, scan, deps, cur)
-	return err
-}
-
 // A manifest that is over the entry budget is given up on its own: the manifests after it are still read, and only
 // the scan-wide row cap ends the scan.
 func TestScanEntryBudgetSkipsOnlyThatManifest(t *testing.T) {
@@ -647,7 +637,7 @@ func TestScanEntryBudgetSkipsOnlyThatManifest(t *testing.T) {
 		"b/go.mod": "module b\n\nrequire example.com/small v1.0.0\n",
 	}, nil)
 	orig := parseManifest
-	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
+	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) (*dependency.Result, error) {
 		if strings.Contains(string(data), "huge") {
 			return nil, dependency.ErrTooManyEntries
 		}
@@ -680,7 +670,7 @@ func TestLostWriteRequeuesWhenHeadMoved(t *testing.T) {
 	}()
 	<-started
 	// another process stores an older result; the head this scan read is a different commit
-	require.NoError(t, replaceDependencies(t.Context(), &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: "other", Status: repo_model.DependencyScanOK, ScannedUnix: timeutil.TimeStampNow()}, []*repo_model.Dependency{}))
+	require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(), &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: "other", Status: repo_model.DependencyScanOK, ScannedUnix: timeutil.TimeStampNow()}, []*repo_model.Dependency{}))
 	release()
 	res := <-done
 	require.NoError(t, res.err)
@@ -695,7 +685,7 @@ func TestScanRequeuesWhenHeadUnreadable(t *testing.T) {
 	repo := enable(t)
 	commitFiles(t, repo, map[string]string{"go.mod": goMod}, nil)
 	orig := parseManifest
-	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
+	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) (*dependency.Result, error) {
 		out, err := exec.Command("git", "-C", repo.RepoPath(), "update-ref", "-d", "refs/heads/"+repo.DefaultBranch).CombinedOutput()
 		require.NoError(t, err, string(out))
 		return orig(ctx, f, data, find, maxRows)
@@ -765,42 +755,68 @@ func TestScanParsesSharedHelperOnce(t *testing.T) {
 	}
 }
 
-// A manifest without a lock file is read for its direct dependencies and their ranges; a lock file next to it, or
-// above it for the formats with workspaces (npm, Cargo), covers it, whatever the lock file holds.
+// A manifest without a lock file is read for its direct dependencies and their ranges. Only a lock file the scan
+// read, with rows, covers a manifest: the one next to it, and for npm and Cargo the root and the workspace members
+// the lock names. Anything else is read on its own, never left out silently.
 func TestScanFallbackManifests(t *testing.T) {
 	repo := enable(t)
+	rootLock := `{"lockfileVersion":3,"packages":{"":{"dependencies":{"left-pad":"^1.3.0"}},"packages/a":{"name":"a"},` +
+		`"node_modules/left-pad":{"version":"1.3.0"},"node_modules/express":{"version":"4.18.0"}}}`
+	cargoLock := "version = 3\n\n[[package]]\nname = \"member\"\nversion = \"0.1.0\"\n\n[[package]]\nname = \"rand\"\nversion = \"0.8.5\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n"
 	commitFiles(t, repo, map[string]string{
-		// a monorepo: the root lock covers every member's package.json
-		"package-lock.json":              lockV3,
+		// a monorepo: the root lock covers the root and its workspace member, not another project below it
+		"package-lock.json":              rootLock,
 		"package.json":                   `{"dependencies":{"left-pad":"^1.3.0"}}`,
 		"packages/a/package.json":        `{"dependencies":{"express":"^4.18.0"}}`,
+		"docs/package.json":              `{"devDependencies":{"lodash":"~4.17.20"}}`,
 		"crates/x/Cargo.toml":            "[dependencies]\nserde = \"1\"\n",
-		"rust/Cargo.lock":                "not a lock file",
-		"rust/member/Cargo.toml":         "[dependencies]\nrand = \"0.8\"\n",
-		"ruby/Gemfile":                   "gem \"rails\", \"~> 7.1\"\n",
+		"rust/Cargo.lock":                cargoLock,
+		"rust/member/Cargo.toml":         "[package]\nname = \"member\"\n[dependencies]\nrand = \"0.8\"\n",
+		"rust/fuzz/Cargo.toml":           "[package]\nname = \"member\"\n[workspace]\n[dependencies]\nlibfuzzer-sys = \"0.4\"\n",
+		"bad/Cargo.lock":                 "not a lock file", // no rows
+		"bad/Cargo.toml":                 "[dependencies]\nanyhow = \"1\"\n",
+		"bad/package-lock.json":          "{",
+		"bad/package.json":               `{"dependencies":{"chalk":"^5"}}`,
+		"ruby/Gemfile":                   "gem \"rails\", \"~> 7.1\"\ngem(\"odd\")\n",
 		"ruby/sub/Gemfile.lock":          "GEM\n  specs:\n",
+		"empty/Gemfile":                  "gem \"rack\"\n",
+		"empty/Gemfile.lock":             "",
 		"py/pyproject.toml":              "[project]\ndependencies = [\"requests>=2\"]\n",
 		"py-uv/pyproject.toml":           "[project]\ndependencies = [\"httpx\"]\n",
 		"py-uv/uv.lock":                  "version = 1\n",
 		"php/composer.json":              `{"require":{"monolog/monolog":"^3"}}`,
 		"vendor/lib/package.json":        `{"dependencies":{"vendored":"1"}}`,
 		"node_modules/package-lock.json": lockV3, // excluded: covers nothing
-		"tools/package.json":             `{"devDependencies":{"lodash":"~4.17.20"}}`,
 	}, nil)
 	require.NoError(t, Scan(t.Context(), repo.ID))
 	rows := rowsOf(t, repo.ID)
 	assert.ElementsMatch(t, []string{
 		"npm|left-pad@1.3.0|package-lock.json",
-		"crates.io|serde@|crates/x/Cargo.toml",
+		"npm|express@4.18.0|package-lock.json",
+		"npm|lodash@|docs/package.json",                 // no workspace member of the root lock
+		"crates.io|serde@|crates/x/Cargo.toml",          // no lock above
+		"crates.io|rand@0.8.5|rust/Cargo.lock",          // the member is covered
+		"crates.io|libfuzzer-sys@|rust/fuzz/Cargo.toml", // a workspace of its own
+		"crates.io|anyhow@|bad/Cargo.toml",              // the lock next to it has no rows
+		"npm|chalk@|bad/package.json",                   // the lock next to it can't be read
 		"RubyGems|rails@|ruby/Gemfile",
+		"RubyGems|rack@|empty/Gemfile", // an empty lock covers nothing
 		"PyPI|requests@|py/pyproject.toml",
+		"PyPI|httpx@|py-uv/pyproject.toml", // uv.lock has no reader
 		"Packagist|monolog/monolog@|php/composer.json",
-	}, keys(rows), "tools/package.json is covered by the root lock, rust/member by rust/Cargo.lock, py-uv by uv.lock")
+	}, keys(rows))
 	assert.Equal(t, "1", rows["crates.io|serde@|crates/x/Cargo.toml"].Requirement)
 	assert.Equal(t, "~> 7.1", rows["RubyGems|rails@|ruby/Gemfile"].Requirement)
 	assert.Equal(t, ">=2", rows["PyPI|requests@|py/pyproject.toml"].Requirement)
 	assert.True(t, rows["Packagist|monolog/monolog@|php/composer.json"].Direct)
 	assert.Empty(t, rows["npm|left-pad@1.3.0|package-lock.json"].Requirement)
+	scan, err := repo_model.GetRepoDependencyScan(t.Context(), repo.ID)
+	require.NoError(t, err)
+	// the unread lock stays in the list, and so does a Gemfile read in part
+	assert.Equal(t, []repo_model.SkippedManifest{
+		{Path: "bad/package-lock.json", Code: repo_model.DependencySkipParse},
+		{Path: "ruby/Gemfile", Code: repo_model.DependencySkipPartial, Lines: 1},
+	}, scan.SkippedManifests())
 
 	// without the root lock, every package.json is read
 	commitFiles(t, repo, map[string]string{
@@ -811,4 +827,25 @@ func TestScanFallbackManifests(t *testing.T) {
 	rows = rowsOf(t, repo.ID)
 	assert.ElementsMatch(t, []string{"npm|left-pad@|package.json", "npm|express@|packages/a/package.json"}, keys(rows))
 	assert.Equal(t, "^4.18.0", rows["npm|express@|packages/a/package.json"].Requirement)
+}
+
+// Lock files are read before the manifests without one, so those never push a lock file out of MaxManifests or the
+// list of skipped manifests (security re-review 4, L6).
+func TestScanLockFilesFirst(t *testing.T) {
+	repo := enable(t)
+	defer test.MockVariableValue(&setting.DependencyGraph.MaxManifests, 3)()
+	files := map[string]string{"z/package-lock.json": lockV3}
+	for i := range 120 {
+		files[fmt.Sprintf("a%03d/package.json", i)] = `{"dependencies":{"x":"1"}}`
+	}
+	commitFiles(t, repo, files, nil)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	rows := rowsOf(t, repo.ID)
+	assert.Contains(t, rows, "npm|left-pad@1.3.0|z/package-lock.json")
+	assert.Len(t, rows, 3) // the lock and two package.json files
+	scan, err := repo_model.GetRepoDependencyScan(t.Context(), repo.ID)
+	require.NoError(t, err)
+	skipped := scan.SkippedManifests()
+	require.Len(t, skipped, 100)
+	assert.Equal(t, "a002/package.json", skipped[0].Path)
 }

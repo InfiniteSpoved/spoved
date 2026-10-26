@@ -40939,12 +40939,18 @@
     },
     "SkippedManifest": {
       "type": "object",
-      "title": "SkippedManifest is a manifest that was not read.",
+      "title": "SkippedManifest is a manifest that was not read, or (code partially_read) read only in part.",
       "properties": {
         "code": {
-          "description": "parse_error, manifest_too_large, too_many_manifests, too_many_dependencies, too_many_entries, invalid_path or read_error",
+          "description": "parse_error, manifest_too_large, too_many_manifests, too_many_dependencies, too_many_entries, invalid_path,\nread_error or partially_read",
           "type": "string",
           "x-go-name": "Code"
+        },
+        "lines": {
+          "description": "partially_read: the lines naming a dependency that could not be read",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Lines"
         },
         "path": {
           "type": "string",

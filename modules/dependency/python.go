@@ -162,59 +162,19 @@ func normalizePyName(n string) string {
 	return strings.ToLower(strings.NewReplacer("_", "-", ".", "-").Replace(n))
 }
 
-var pepArray = regexp.MustCompile(`^([A-Za-z0-9_.-]+)\s*=\s*\[(.*)$`)
-
-// pyprojectDeps returns the normalized names a pyproject.toml asks for: the keys of [tool.poetry.dependencies] and
-// of its groups, and the entries of the PEP 621 `dependencies` and `optional-dependencies` arrays.
+// pyprojectDeps returns the normalized names a pyproject.toml asks for, as the reader without a lock file reads
+// them (parsePyproject); a file it can't read marks nothing direct.
 func pyprojectDeps(s *sink, data []byte) map[string]bool {
 	out := map[string]bool{}
 	if data == nil {
 		return out
 	}
-	section, inArray := "", false
-	sc := newScanner(s, data)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || line[0] == '#' {
-			continue
-		}
-		if line[0] == '[' {
-			section, inArray = strings.Trim(line, "[] "), false
-			continue
-		}
-		poetry := section == "tool.poetry.dependencies" || section == "tool.poetry.dev-dependencies" ||
-			(strings.HasPrefix(section, "tool.poetry.group.") && strings.HasSuffix(section, ".dependencies"))
-		switch {
-		case poetry:
-			if k, _, ok := strings.Cut(line, "="); ok {
-				if k = strings.Trim(strings.TrimSpace(k), `"'`); k != "" && k != "python" {
-					if len(out) < s.maxEntries {
-						out[normalizePyName(k)] = true
-					}
-				}
-			}
-		case section == "project" || section == "project.optional-dependencies" || section == "dependency-groups":
-			if !inArray {
-				m := pepArray.FindStringSubmatch(line)
-				if m == nil || (section == "project" && m[1] != "dependencies") {
-					continue
-				}
-				inArray, line = true, m[2]
-			}
-			// {include-group = "test"} names a group of requirements, not a package
-			for _, m := range pepAll.FindAllStringSubmatch(tomlInline.ReplaceAllString(line, ""), -1) {
-				if len(out) < s.maxEntries {
-					out[normalizePyName(m[1])] = true
-				}
-			}
-			if strings.Contains(line, "]") {
-				inArray = false
-			}
-		}
+	h := newSink(s.ctx, maxHelperKeys)
+	if parsePyproject(h, data, nil) != nil {
+		return out
+	}
+	for _, d := range h.rows {
+		out[normalizePyName(d.Name)] = true
 	}
 	return out
 }
-
-var tomlInline = regexp.MustCompile(`\{[^}]*\}`)
-
-var pepAll = regexp.MustCompile(`"(` + pyName + `)`)

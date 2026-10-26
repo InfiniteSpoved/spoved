@@ -4,6 +4,7 @@
 package dependency
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -40,11 +41,24 @@ func TestResolve(t *testing.T) {
 	assert.False(t, Resolve(true, true, false, false), "without a lock the repository's own switch decides")
 }
 
+// lastRevision is the highest settings revision a test of this package stored.
+var lastRevision int
+
+// bumpRevision moves the settings revision past every one an earlier test stored: fixtures reset it, and a value is
+// cached by revision, so two tests storing different values under one revision would read the first one's.
+func bumpRevision(t *testing.T) {
+	t.Helper()
+	lastRevision = max(lastRevision, system_model.GetRevision(db.DefaultContext)) + 1
+	_, err := db.Exec(db.DefaultContext, "UPDATE system_setting SET version=? WHERE setting_key='revision'", lastRevision)
+	require.NoError(t, err)
+	config.GetDynGetter().InvalidateCache()
+}
+
 // storeSiteSwitch stores the site switch as the admin page does and moves the settings revision past the cached one.
 func storeSiteSwitch(t *testing.T, mode string) {
 	t.Helper()
-	require.NoError(t, system_model.SetSettings(t.Context(), map[string]string{setting.Config().DependencyGraph.DynKey(): `{"mode":"` + mode + `"}`}))
-	config.GetDynGetter().InvalidateCache()
+	require.NoError(t, system_model.SetSettings(db.DefaultContext, map[string]string{setting.Config().DependencyGraph.DynKey(): `{"mode":"` + mode + `"}`}))
+	bumpRevision(t)
 }
 
 func setOrgSwitch(t *testing.T, orgID int64, on, locked bool) {
@@ -55,9 +69,9 @@ func setOrgSwitch(t *testing.T, orgID int64, on, locked bool) {
 			value = "false"
 		}
 		if v {
-			require.NoError(t, user_model.SetUserSetting(t.Context(), orgID, k, value))
+			require.NoError(t, user_model.SetUserSetting(db.DefaultContext, orgID, k, value))
 		} else {
-			require.NoError(t, user_model.DeleteUserSetting(t.Context(), orgID, k))
+			require.NoError(t, user_model.DeleteUserSetting(db.DefaultContext, orgID, k))
 		}
 	}
 }
@@ -90,14 +104,14 @@ func TestDependencyGraphOffCondMatchesEnabled(t *testing.T) {
 		}
 	}
 	setOrgSwitch(t, 3, true, false)
-	_, err := db.GetEngine(t.Context()).Exec("UPDATE repository SET dependency_graph_disabled = ?", false)
+	_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET dependency_graph_disabled = ?", false)
 	require.NoError(t, err)
 }
 
 func storeRows(t *testing.T, repoIDs ...int64) {
 	t.Helper()
 	for _, id := range repoIDs {
-		require.NoError(t, replaceDependencies(t.Context(), &repo_model.DependencyScan{RepoID: id, CommitSHA: "abc", Status: repo_model.DependencyScanOK},
+		require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(), &repo_model.DependencyScan{RepoID: id, CommitSHA: "abc", Status: repo_model.DependencyScanOK},
 			[]*repo_model.Dependency{{RepoID: id, Ecosystem: "Go", Name: "x", Version: "v1"}}))
 	}
 }
@@ -185,17 +199,115 @@ func TestSetOrgSwitch(t *testing.T) {
 	setOrgSwitch(t, 3, true, false)
 }
 
+// Every change of an organization's switch deletes the rows of its repositories that are now off at once, and of
+// no other owner's; a save that changes nothing does nothing.
+func TestSetOrgSwitchApplies(t *testing.T) {
+	enable(t)
+	org := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+	t.Cleanup(func() {
+		setOrgSwitch(t, 3, true, false)
+		_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET dependency_graph_disabled = ?", false)
+		require.NoError(t, err)
+	})
+	// repository 3 (org 3) and 23 (org 17) turned it off themselves, then org 3 locked it on
+	_, err := db.GetEngine(t.Context()).Exec("UPDATE repository SET dependency_graph_disabled = ? WHERE id IN (3, 23)", true)
+	require.NoError(t, err)
+	require.NoError(t, SetOrgSwitch(t.Context(), org, true, true))
+	storeRows(t, 3, 23) // 23's rows are left over: another organization's, which org 3's switch must not touch
+
+	// the lock lifted: repository 3's own off applies again, and its rows go now, not at the next cron run
+	require.NoError(t, SetOrgSwitch(t.Context(), org, true, false))
+	assert.False(t, Enabled(t.Context(), unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 3})))
+	assert.False(t, hasRows(t, 3))
+	assert.True(t, hasRows(t, 23), "another organization's repository")
+
+	// the same values again: nothing is recorded or deleted
+	storeRows(t, 3)
+	before := lastAudit(t, "org.dependency_graph.changed").ID
+	require.NoError(t, SetOrgSwitch(t.Context(), org, true, false))
+	assert.Equal(t, before, lastAudit(t, "org.dependency_graph.changed").ID)
+	assert.True(t, hasRows(t, 3))
+}
+
+// A transfer changes the organization whose switch decides: the notifier applies the new owner's at once.
+func TestTransferAppliesSwitches(t *testing.T) {
+	enable(t)
+	t.Cleanup(func() {
+		setOrgSwitch(t, 3, true, false)
+		_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET owner_id = 2, dependency_graph_disabled = ? WHERE id = 1", false)
+		require.NoError(t, err)
+	})
+	transfer := func(repoID, ownerID int64) {
+		_, err := db.GetEngine(t.Context()).Exec("UPDATE repository SET owner_id = ? WHERE id = ?", ownerID, repoID)
+		require.NoError(t, err)
+		(&notifier{}).TransferRepository(t.Context(), nil, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repoID}), "")
+	}
+
+	// into an organization that is off
+	setOrgSwitch(t, 3, false, false)
+	storeRows(t, 1)
+	transfer(1, 3)
+	assert.False(t, hasRows(t, 1))
+
+	// out of an organization that locked it on, to an owner where its own off applies
+	setOrgSwitch(t, 3, true, true)
+	_, err := db.GetEngine(t.Context()).Exec("UPDATE repository SET dependency_graph_disabled = ? WHERE id = 1", true)
+	require.NoError(t, err)
+	storeRows(t, 1)
+	transfer(1, 3)
+	assert.True(t, hasRows(t, 1), "still on: locked")
+	transfer(1, 2)
+	assert.False(t, hasRows(t, 1))
+}
+
+// The check inside the scan's write transaction reads the stored rows, and agrees with Enabled.
+func TestEnabledStored(t *testing.T) {
+	enable(t)
+	t.Cleanup(func() {
+		setOrgSwitch(t, 3, true, false)
+		_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET dependency_graph_disabled = ?", false)
+		require.NoError(t, err)
+		storeSiteSwitch(t, "")
+	})
+	stored := func(id int64) bool {
+		var on bool
+		require.NoError(t, db.WithTx(t.Context(), func(ctx context.Context) (err error) {
+			on, err = enabledStored(ctx, id)
+			return err
+		}))
+		return on
+	}
+	for _, c := range []struct {
+		site          string
+		orgOn, locked bool
+		repoOff       bool
+	}{
+		{"", true, false, false}, {"off", true, false, false}, {"", false, false, false}, {"", true, false, true}, {"", true, true, true}, {"maybe", true, false, false},
+	} {
+		storeSiteSwitch(t, c.site)
+		setOrgSwitch(t, 3, c.orgOn, c.locked)
+		_, err := db.GetEngine(t.Context()).Exec("UPDATE repository SET dependency_graph_disabled = ? WHERE id IN (1, 3)", c.repoOff)
+		require.NoError(t, err)
+		for _, id := range []int64{1, 3} {
+			want := Enabled(t.Context(), unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: id}))
+			assert.Equal(t, want, stored(id), "%+v: repository %d", c, id)
+		}
+	}
+	assert.False(t, stored(1_000_000), "a repository that is gone")
+}
+
 func TestSetSiteEnabled(t *testing.T) {
 	enable(t)
 	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
 	storeRows(t, 1, 3)
 	t.Cleanup(func() {
-		require.NoError(t, system_model.SetSettings(t.Context(), map[string]string{setting.Config().DependencyGraph.DynKey(): ""}))
-		config.GetDynGetter().InvalidateCache()
+		require.NoError(t, system_model.SetSettings(db.DefaultContext, map[string]string{setting.Config().DependencyGraph.DynKey(): ""}))
+		bumpRevision(t)
 	})
 
 	// a stored value wins over app.ini, both ways
 	require.NoError(t, SetSiteEnabled(t.Context(), admin, false))
+	bumpRevision(t)
 	assert.False(t, SiteEnabled(t.Context()), "stored off wins over ENABLED = true")
 	assert.False(t, hasRows(t, 1))
 	assert.False(t, hasRows(t, 3))
@@ -205,6 +317,7 @@ func TestSetSiteEnabled(t *testing.T) {
 
 	defer test.MockVariableValue(&setting.DependencyGraph.Enabled, false)()
 	require.NoError(t, SetSiteEnabled(t.Context(), admin, true))
+	bumpRevision(t)
 	assert.True(t, SiteEnabled(t.Context()), "stored on wins over ENABLED = false")
 
 	// a value that can't be read fails closed

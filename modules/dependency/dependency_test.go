@@ -811,6 +811,17 @@ func TestYarnFailsClosed(t *testing.T) {
 		"v1 unquoted version":              "# yarn lockfile v1\n\na@^1.0.0:\n  version 1.0\n",
 		"v1 field twice":                   "# yarn lockfile v1\n\na@^1.0.0:\n  version \"1.0.0\"\n  \"version\" \"6.6.6\"\n",
 		"v1 boolean word":                  "# yarn lockfile v1\n\na@^1.0.0:\n  version \"1.0.0\"\n  trueish \"x\"\n",
+		// yarn takes a header with any of JavaScript's white space for version 1 (security re-review 4, M3): a
+		// berry body behind it is no version 1 file
+		"v1 header with NBSP, berry body":   "#\u00a0yarn lockfile v1\n\n\"evil@npm:^6.6.6\":\n  version: 1.0.0\n  resolution: \"a@npm:1.0.0\"\n",
+		"v1 header with U+3000":             "# yarn\u3000lockfile v1\n\n\"evil@npm:^6.6.6\":\n  version: 1.0.0\n  resolution: \"a@npm:1.0.0\"\n",
+		"v1 header with U+2028":             "#\u2028yarn lockfile v1\n\n\"evil@npm:^6.6.6\":\n  version: 1.0.0\n  resolution: \"a@npm:1.0.0\"\n",
+		"v1 header in capitals":             "# YARN LOCKFILE V1\n\n\"evil@npm:^6.6.6\":\n  version: 1.0.0\n  resolution: \"a@npm:1.0.0\"\n",
+		"v1 behind a BOM is no v1 for yarn": "\ufeff# yarn lockfile v1\n\na@^1:\n  version \"1.0.0\"\n",
+		// berry resolutions other than npm: never the `version:` unchecked (S-L5)
+		"patch of another version": berry + "\"lodash@patch:lodash@npm%3A^4#./p.patch\":\n  version: 4.17.21\n  resolution: \"lodash@patch:lodash@npm%3A4.17.4#./p.patch::version=4.17.4&hash=x\"\n",
+		"patch of another package": berry + "\"a@patch:a@npm%3A^1#./p.patch\":\n  version: 1.0.0\n  resolution: \"a@patch:evil@npm%3A1.0.0#./p.patch\"\n",
+		"patch that won't decode":  berry + "\"a@patch:a@npm%3A^1#./p.patch\":\n  version: 1.0.0\n  resolution: \"a@patch:a@npm%ZZ1.0.0#./p.patch\"\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			deps, err := FormatFor("yarn.lock").Parse(t.Context(), []byte(in), nil)
@@ -834,11 +845,14 @@ func TestYarnFailsClosed(t *testing.T) {
 	require.Len(t, deps, 1)
 	assert.Equal(t, "evil", deps[0].Name)
 	assert.Equal(t, "6.6.6", deps[0].Version)
-	// a BOM is stripped (both readers do), and a header over 1024 characters is written as `? header` / `:`
+	// a BOM is stripped in a berry file, as js-yaml does, and a header over 1024 characters is written as
+	// `? header` / `:`
 	long := "a@npm:" + strings.Repeat("1", 1100)
 	for _, in := range []string{
-		"\ufeff" + v1,
+		"\ufeff" + berry + "\"a@npm:^1\":\n  version: 1.0.0\n  resolution: \"a@npm:1.0.0\"\n",
 		berry + "? \"" + long + "\"\n:\n  version: 1.0.0\n  resolution: \"a@npm:1.0.0\"\n",
+		// a Kelvin sign is no k for JavaScript's /i: this is no version 1 header, the file is read as berry
+		"# yarn loc\u212afile v1\n" + berry + "\"a@npm:^1\":\n  version: 1.0.0\n  resolution: \"a@npm:1.0.0\"\n",
 	} {
 		deps, err = FormatFor("yarn.lock").Parse(t.Context(), []byte(in), nil)
 		require.NoError(t, err)
@@ -868,24 +882,25 @@ func TestHelperCacheParsesSharedPackageJSONOnce(t *testing.T) {
 		return deps
 	}
 
+	// the parses are what the cache charged to its parse budget
+	parses := func(h *HelperCache, budget int64, pkg []byte) int64 { return (budget - h.parseLeft) / int64(len(pkg)) }
 	h := NewHelperCache(8<<20, 8<<20)
 	require.True(t, h.Keep(pkg))
 	ctx := WithHelperCache(t.Context(), h)
-	before := npmPackageJSONParses.Load()
 	start := time.Now()
 	for range 400 {
 		assert.True(t, parse(ctx)[0].Direct)
 	}
-	assert.EqualValues(t, 1, npmPackageJSONParses.Load()-before)
+	assert.EqualValues(t, 1, parses(h, 8<<20, pkg))
 	assert.Less(t, time.Since(start), 3*time.Second)
 
 	// a file the scan doesn't keep is parsed each time, until the parse budget is spent: then it counts as absent
-	before = npmPackageJSONParses.Load()
-	ctx = WithHelperCache(t.Context(), NewHelperCache(8<<20, int64(2*len(pkg))))
+	h = NewHelperCache(8<<20, int64(2*len(pkg)))
+	ctx = WithHelperCache(t.Context(), h)
 	assert.True(t, parse(ctx)[0].Direct)
 	assert.True(t, parse(ctx)[0].Direct)
 	assert.False(t, parse(ctx)[0].Direct)
-	assert.EqualValues(t, 2, npmPackageJSONParses.Load()-before)
+	assert.EqualValues(t, 2, parses(h, int64(2*len(pkg)), pkg))
 
 	// over the key limit: absent, and the result (nothing) is cached like any other
 	sb.Reset()
@@ -898,9 +913,45 @@ func TestHelperCacheParsesSharedPackageJSONOnce(t *testing.T) {
 	h = NewHelperCache(8<<20, 8<<20)
 	require.True(t, h.Keep(pkg))
 	ctx = WithHelperCache(t.Context(), h)
-	before = npmPackageJSONParses.Load()
 	for range 400 {
 		assert.False(t, parse(ctx)[0].Direct)
 	}
-	assert.EqualValues(t, 1, npmPackageJSONParses.Load()-before)
+	assert.EqualValues(t, 1, parses(h, 8<<20, pkg))
+}
+
+// A berry entry takes its version from its resolution: an npm one or the npm locator a patch applies to; a git
+// or URL resolution names none, and the project's own packages are left out. The workspaces are what the lock
+// covers.
+func TestYarnBerryResolutions(t *testing.T) {
+	const berry = "__metadata:\n  version: 8\n\n"
+	entry := func(header, version, resolution string) string {
+		return "\"" + header + "\":\n  version: " + version + "\n  resolution: \"" + resolution + "\"\n\n"
+	}
+	in := berry +
+		entry("lodash@patch:lodash@npm%3A^4#./p.patch", "4.17.4", "lodash@patch:lodash@npm%3A4.17.4#./p.patch::version=4.17.4&hash=x") +
+		entry("@s/a@patch:@s/a@npm%3A^1#./p.patch", "1.0.0", "@s/a@patch:@s/a@npm%3A1.0.0#./p.patch::version=1.0.0&hash=y") +
+		entry("g@https://github.com/x/g.git", "9.9.9", "g@https://github.com/x/g.git#commit=abc") +
+		entry("e@exec:./gen.js", "1.0.0", "e@exec:./gen.js#./gen.js::hash=z") +
+		entry("app@workspace:.", "0.0.0-use.local", "app@workspace:.") +
+		entry("lib@workspace:packages/lib", "0.0.0-use.local", "lib@workspace:packages/lib")
+	r, err := FormatFor("yarn.lock").ParseFull(t.Context(), []byte(in), nil, 100)
+	require.NoError(t, err)
+	got := map[string]string{}
+	for _, d := range r.Deps {
+		got[d.Name] = d.Version
+	}
+	assert.Equal(t, map[string]string{"lodash": "4.17.4", "@s/a": "1.0.0", "g": ""}, got)
+	assert.Equal(t, []string{".", "packages/lib"}, r.Info.Dirs)
+
+	// version 1: the root and the workspaces of the package.json next to it
+	v1 := "# yarn lockfile v1\n\na@^1:\n  version \"1.0.0\"\n"
+	find := func(name string, _ bool) []byte {
+		if name == "package.json" {
+			return []byte(`{"workspaces": {"packages": ["packages/*"]}, "dependencies": {"a": "^1"}}`)
+		}
+		return nil
+	}
+	r, err = FormatFor("yarn.lock").ParseFull(t.Context(), []byte(v1), find, 100)
+	require.NoError(t, err)
+	assert.Equal(t, Info{Dirs: []string{"."}, Globs: []string{"packages/*"}}, r.Info)
 }

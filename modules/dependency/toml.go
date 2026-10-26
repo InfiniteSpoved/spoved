@@ -4,6 +4,7 @@
 package dependency
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -22,6 +23,7 @@ const maxTOMLDepth = 32
 // text of the value).
 type tomlStmt struct {
 	Header bool
+	Array  bool // an array of tables, [[key]]
 	Key    []string
 	Value  string
 }
@@ -194,6 +196,10 @@ func (r *tomlReader) value(depth int) bool {
 	start := r.pos
 	for !r.eof() {
 		c := r.data[r.pos]
+		if c == ' ' && tomlDate.Match(r.data[start:r.pos]) && tomlTimeStart.Match(r.data[r.pos+1:]) {
+			r.pos++ // `1979-05-27 07:32:00`: a date and a time may be parted by a space
+			continue
+		}
 		if c == ',' || c == ']' || c == '}' || c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '#' {
 			break
 		}
@@ -204,6 +210,11 @@ func (r *tomlReader) value(depth int) bool {
 	}
 	return r.pos > start
 }
+
+var (
+	tomlDate      = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
+	tomlTimeStart = regexp.MustCompile(`^[0-9]{2}:`)
+)
 
 // blankLines skips blanks, and inside an array also newlines and comments.
 func (r *tomlReader) blankLines(newlines bool) {
@@ -263,7 +274,7 @@ func (r *tomlReader) next() (st tomlStmt, ok bool, err error) {
 		if !r.lineEnd() {
 			return st, false, ErrParse
 		}
-		return tomlStmt{Header: true, Key: key}, true, nil
+		return tomlStmt{Header: true, Array: array, Key: key}, true, nil
 	}
 	key, ok := r.key()
 	if !ok || r.peek() != '=' {
@@ -292,8 +303,9 @@ func tomlUnquote(raw string) (string, bool) {
 		return "", false
 	}
 	body := raw[1 : len(raw)-1]
-	if len(raw) >= 6 && raw[1] == q && raw[2] == q {
-		body = strings.TrimPrefix(raw[3:len(raw)-3], "\n")
+	multi := len(raw) >= 6 && raw[1] == q && raw[2] == q
+	if multi {
+		body = strings.TrimPrefix(strings.TrimPrefix(raw[3:len(raw)-3], "\r\n"), "\n")
 	}
 	if q == '\'' {
 		return body, true
@@ -307,6 +319,13 @@ func tomlUnquote(raw string) (string, bool) {
 		}
 		if i++; i >= len(body) {
 			return "", false
+		}
+		if multi {
+			// a line-ending backslash: the newline and the whitespace after it are left out
+			if j := i + len(body[i:]) - len(strings.TrimLeft(body[i:], " \t")); j < len(body) && (body[j] == '\n' || body[j] == '\r') {
+				i = j + len(body[j:]) - len(strings.TrimLeft(body[j:], " \t\r\n")) - 1
+				continue
+			}
 		}
 		switch body[i] {
 		case 'b':
@@ -336,14 +355,13 @@ func tomlUnquote(raw string) (string, bool) {
 			b.WriteRune(rune(v))
 			i += n
 		default:
-			return "", false // a line-ending backslash and anything else: not in the files this reads
+			return "", false // not an escape of TOML
 		}
 	}
 	return b.String(), true
 }
 
-// tomlTable reads an inline table into key -> raw value (dotted keys are joined with "."); ok is false if raw isn't
-// one.
+// tomlTable reads an inline table into key -> raw value; ok is false if raw isn't one or has a dotted key.
 func tomlTable(s *sink, raw string) (map[string]string, bool) {
 	if !strings.HasPrefix(raw, "{") {
 		return nil, false
@@ -365,11 +383,13 @@ func tomlTable(s *sink, raw string) (map[string]string, bool) {
 		if !r.value(1) {
 			return nil, false
 		}
-		k := strings.Join(key, ".")
-		if _, dup := out[k]; dup {
+		if len(key) != 1 {
+			return nil, false // `version.workspace = true`: a field this reader doesn't descend into
+		}
+		if _, dup := out[key[0]]; dup {
 			return nil, false
 		}
-		out[k] = raw[start:r.pos]
+		out[key[0]] = raw[start:r.pos]
 		r.space()
 		switch r.peek() {
 		case ',':

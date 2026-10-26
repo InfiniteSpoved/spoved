@@ -4,6 +4,7 @@
 package dependency
 
 import (
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -23,10 +24,17 @@ func init() {
 // column 0, fields 2 spaces deeper, nested maps 2 more, scalars complete on their line and without escapes, and no
 // key twice where a later one would win in yarn's reader.
 func parseYarnLock(s *sink, data []byte, find Finder) error {
-	asked := s.npmPackageJSON(find("package.json", false))
+	var asked map[string]string
+	var workspaces []string
+	if p := s.npmPackage(find("package.json", false)); p != nil {
+		asked, workspaces = p.asked, p.workspaces
+	}
+	legacy := yarnLegacyRe.Match(data) // on the bytes as yarn reads them: a BOM in front makes it no version 1 file
 	data, err := prepass(data, true)
 	sc := scannerOf(s, data, err)
-	if err == nil && yarnLegacyRe.Match(data) {
+	if err == nil && legacy {
+		// version 1 lists no workspaces: the lock covers the root and the workspaces its package.json declares
+		s.info.Dirs, s.info.Globs = []string{"."}, workspaces
 		err = parseYarnV1(s, sc, asked)
 	} else {
 		err = parseYarnBerry(s, sc, asked)
@@ -37,8 +45,15 @@ func parseYarnLock(s *sink, data []byte, find Finder) error {
 	return scanErr(sc.Err(), "yarn.lock")
 }
 
-// yarnLegacyRe is how yarn berry tells a version 1 lockfile (LEGACY_REGEXP of @yarnpkg/parsers).
-var yarnLegacyRe = regexp.MustCompile(`(?i)\A(?:#.*\r?\n)*?#\s+yarn\s+lockfile\s+v1\r?\n`)
+// yarnLegacyRe is how yarn berry tells a version 1 lockfile: LEGACY_REGEXP of @yarnpkg/parsers,
+// `/^(#.*(\r?\n))*?#\s+yarn\s+lockfile\s+v1\r?\n/i`, written out with JavaScript's classes: `.` is anything but
+// \n, \r, U+2028 and U+2029, `\s` holds the Unicode spaces (U+00A0, U+FEFF, ...), and /i without the u flag folds
+// only ASCII letters (the Kelvin sign is no k).
+var yarnLegacyRe = regexp.MustCompile(`\A(?:#[^\n\r\x{2028}\x{2029}]*\r?\n)*?#` + jsSpace + `+[yY][aA][rR][nN]` + jsSpace +
+	`+[lL][oO][cC][kK][fF][iI][lL][eE]` + jsSpace + `+[vV]1\r?\n`)
+
+// jsSpace is JavaScript's \s.
+const jsSpace = `[\t\n\v\f\r \x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]`
 
 // yarnKeySep splits the descriptors of a berry header as yarn does.
 var yarnKeySep = regexp.MustCompile(` *, *`)
@@ -176,24 +191,24 @@ func parseYarnBerry(s *sink, sc *lineScanner, asked map[string]string) error {
 		if m == nil {
 			return bad() // yarn refuses an entry without a resolution it can read
 		}
-		name, ref := m[2], m[3]
-		if m[1] != "" {
-			name = "@" + m[1] + "/" + m[2]
-		}
-		if yarnLocalRange(ref) {
+		name, ref := berryName(m), m[3]
+		if dir, ok := strings.CutPrefix(ref, "workspace:"); ok {
+			s.info.Dirs = append(s.info.Dirs, dir) // a project the lock was resolved for
 			return nil
 		}
-		if r, ok := strings.CutPrefix(ref, "npm:"); ok {
-			if r, _, _ = strings.Cut(r, "::"); r != cur.version {
-				return bad()
-			}
+		version, local, ok := berryVersion(name, ref, cur.version)
+		if !ok {
+			return bad()
+		}
+		if local {
+			return nil
 		}
 		direct := false
 		for _, d := range yarnKeySep.Split(cur.header, -1) {
 			_, _, dir, _ := yarnDescriptor(d, asked)
 			direct = direct || dir
 		}
-		return s.emit(Dependency{Name: name, Version: cur.version, Direct: direct})
+		return s.emit(Dependency{Name: name, Version: version, Direct: direct})
 	}
 	qkey := false // a `? header` line, whose `:` line is next
 	for sc.Scan() {
@@ -258,6 +273,42 @@ func parseYarnBerry(s *sink, sc *lineScanner, asked map[string]string) error {
 		return bad()
 	}
 	return flush()
+}
+
+// berryName is the package a berryLocatorRe match names.
+func berryName(m []string) string {
+	if m[1] != "" {
+		return "@" + m[1] + "/" + m[2]
+	}
+	return m[2]
+}
+
+// berryVersion is the version a berry resolution of package name installs: an npm reference names it (and the
+// entry's `version:` must agree), a patch the one of the locator it patches, and a git or URL reference none (its
+// `version:` is what the package says of itself). local is true for the project's own packages (workspace:, link:,
+// portal:, file:, exec:). ok is false for a reference that doesn't read as one.
+func berryVersion(name, ref, version string) (v string, local, ok bool) {
+	if yarnLocalRange(ref) || strings.HasPrefix(ref, "exec:") {
+		return "", true, true
+	}
+	if r, found := strings.CutPrefix(ref, "npm:"); found {
+		r, _, _ = strings.Cut(r, "::")
+		return r, false, r == version
+	}
+	if r, found := strings.CutPrefix(ref, "patch:"); found {
+		// `patch:name@npm%3A1.2.3#./patch::version=1.2.3&hash=...`: the patched locator, URL-encoded
+		r, _, _ = strings.Cut(r, "#")
+		inner, err := url.PathUnescape(r)
+		if err != nil {
+			return "", false, false
+		}
+		m := berryLocatorRe.FindStringSubmatch(inner)
+		if m == nil || berryName(m) != name {
+			return "", false, false // a patch of another package
+		}
+		return berryVersion(name, m[3], version)
+	}
+	return "", false, true
 }
 
 // splitYarnDescriptor splits `name@range` (the name may start with @scope/).

@@ -24,22 +24,24 @@ func CodeSecurity(ctx *context.Context) {
 		return
 	}
 	ctx.Data["SiteEnabled"] = dependency_service.SiteEnabled(ctx)
+	ctx.Data["CanChangeThere"] = ctx.Doer.IsAdmin // the site switch
 	ctx.Data["Enabled"] = sw.On
 	ctx.Data["Locked"] = sw.Locked
 	ctx.HTML(http.StatusOK, tplSettingsCodeSecurity)
 }
 
 // CodeSecurityPost stores the switch; off deletes the stored package lists of every repository of the organization.
+// While the site switch is off, the save is refused with a message on the settings page.
 func CodeSecurityPost(ctx *context.Context) {
 	err := dependency_service.SetOrgSwitch(ctx, ctx.Org.Organization.AsUser(), ctx.FormBool("enabled"), ctx.FormBool("locked"))
-	if errors.Is(err, dependency_service.ErrSwitchLocked) {
-		ctx.Error(http.StatusForbidden, ctx.Locale.TrString("org.settings.dependency_graph.site_off"))
-		return
-	}
-	if err != nil {
+	switch {
+	case errors.Is(err, dependency_service.ErrSwitchLocked):
+		ctx.Flash.Error(ctx.Tr("repo.settings.dependency_graph.site_off"))
+	case err != nil:
 		ctx.ServerError("SetOrgSwitch", err)
 		return
+	default:
+		ctx.Flash.Success(ctx.Tr("repo.settings.dependency_graph.saved"))
 	}
-	ctx.Flash.Success(ctx.Tr("org.settings.update_setting_success"))
 	ctx.Redirect(ctx.Org.OrgLink + "/settings/code_security")
 }

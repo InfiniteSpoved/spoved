@@ -61,7 +61,8 @@
   font-weight: var(--font-weight-semibold);
 }
 
-.repo-dependencies-unpinned {
+/* the "not pinned" label of a row without a lock file */
+.repo-dependencies-not-pinned {
   background: var(--color-warning-bg);
   border: 1px solid var(--color-warning-border);
   color: var(--color-warning-text);
@@ -69,6 +70,19 @@
   padding: 0 6px;
   font-size: 12px;
   white-space: nowrap;
+}
+
+/* the hint of the manifests without a lock file: a header in the body text colour, so it reads on the info background
+   in both themes */
+.repo-dependencies-hint .header {
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* long manifest paths wrap instead of widening the page */
+.repo-dependencies-paths a,
+.repo-dependencies-paths .header {
+  overflow-wrap: anywhere;
 }
 
 .repo-dependencies-note {
@@ -115,5 +129,37 @@
     align-items: stretch;
     min-height: 0;
     gap: 4px;
+  }
+}
+
+/* the dependency graph switches (Site administration, organization and repository settings): the help text under
+   its label in a lighter colour, "Apply to all repositories" as a sub-option of "Enable" */
+.dependency-graph-switch .ui.checkbox label .help {
+  display: block;
+  font-weight: var(--font-weight-normal);
+  color: var(--color-text-light);
+}
+
+.dependency-graph-switch .dependency-graph-sub-option {
+  margin-inline-start: 1.85714em;
+}
+
+@media (max-width: 767.98px) {
+  /* tap targets of at least 44px: the whole label of an option, and the button */
+  .dependency-graph-switch .ui.checkbox {
+    display: block;
+  }
+
+  .dependency-graph-switch .ui.checkbox label {
+    min-height: 44px;
+    padding-block: 10px;
+  }
+
+  .dependency-graph-switch .ui.checkbox input[type="checkbox"] {
+    top: 11px;
+  }
+
+  .dependency-graph-switch .ui.button {
+    min-height: 44px;
   }
 }

@@ -1251,7 +1251,7 @@ func Routes() *web.Route {
 				m.Group("", func() {
 					m.Get("/dependencies", repo.ListDependencies)
 					m.Get("/sbom", common.RateLimitAPIHeavy, repo.GetSBOM)
-				}, repo.MustEnableDependencyGraph, reqRepoReader(unit.TypeCode))
+				}, reqRepoReader(unit.TypeCode), repo.MustEnableDependencyGraph)
 				m.Get("/activities/feeds", repo.ListRepoActivityFeeds)
 				m.Get("/new_pin_allowed", repo.AreNewIssuePinsAllowed)
 				m.Group("/avatar", func() {

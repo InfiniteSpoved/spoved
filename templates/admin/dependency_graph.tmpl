@@ -8,16 +8,21 @@
 			{{if .UpdatedUnix}}
 				<p class="help">{{ctx.Locale.Tr "admin.dependency_graph.updated" (DateUtils.AbsoluteShort .UpdatedUnix) .UpdatedBy}}</p>
 			{{end}}
-			<form class="ui form" action="{{AppSubUrl}}/admin/config/dependency-graph" method="post">
-				<div class="inline field">
+			<form class="ui form dependency-graph-switch" action="{{AppSubUrl}}/admin/config/dependency-graph" method="post">
+				<div class="field">
 					<div class="ui checkbox">
 						<input id="dependency-graph-enabled" name="enabled" type="checkbox" {{if .Enabled}}checked{{end}}>
-						<label for="dependency-graph-enabled"><strong>{{ctx.Locale.Tr "admin.dependency_graph.enable"}}</strong></label>
+						<label for="dependency-graph-enabled">
+							<strong>{{ctx.Locale.Tr "admin.dependency_graph.enable"}}</strong>
+							<span class="help">{{ctx.Locale.Tr "admin.dependency_graph.off_help"}}</span>
+						</label>
 					</div>
-					<p class="help">{{ctx.Locale.Tr "admin.dependency_graph.off_help"}}</p>
 				</div>
 				<p class="help" id="dependency-graph-file-default">{{if .FileDefault}}{{ctx.Locale.Tr "admin.dependency_graph.file_default_on" (HTMLFormat "<code>%s</code>" "[dependency_graph] ENABLED")}}{{else}}{{ctx.Locale.Tr "admin.dependency_graph.file_default_off" (HTMLFormat "<code>%s</code>" "[dependency_graph] ENABLED")}}{{end}}</p>
-				<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+				<div class="field">
+					<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+				</div>
+				<p class="help">{{ctx.Locale.Tr "admin.dependency_graph.audit"}}</p>
 			</form>
 		</div>
 	</div>

@@ -18,6 +18,8 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/setting/config"
+
+	"xorm.io/builder"
 )
 
 // The switches of the dependency graph, at three levels:
@@ -59,19 +61,29 @@ type OrgSwitch struct {
 // GetOrgSwitch reads the switch of an organization, once per request.
 func GetOrgSwitch(ctx context.Context, orgID int64) (OrgSwitch, error) {
 	return cache.GetWithContextCache(ctx, "dependency_graph_org", orgID, func() (OrgSwitch, error) {
-		stored, err := user_model.GetSettings(ctx, orgID, []string{repo_model.DependencyGraphOrgKey, repo_model.DependencyGraphOrgLockedKey})
-		if err != nil {
-			return OrgSwitch{}, err
-		}
-		s := OrgSwitch{On: true}
-		if v := stored[repo_model.DependencyGraphOrgKey]; v != nil && v.SettingValue == "false" {
-			s.On = false
-		}
-		if v := stored[repo_model.DependencyGraphOrgLockedKey]; v != nil && v.SettingValue == "true" {
-			s.Locked = true
-		}
-		return s, nil
+		return readOrgSwitch(ctx, orgID)
 	})
+}
+
+// readOrgSwitch reads the stored switch of an organization (no cache).
+func readOrgSwitch(ctx context.Context, orgID int64) (OrgSwitch, error) {
+	stored, err := user_model.GetSettings(ctx, orgID, []string{repo_model.DependencyGraphOrgKey, repo_model.DependencyGraphOrgLockedKey})
+	if err != nil {
+		return OrgSwitch{}, err
+	}
+	return orgSwitchOf(stored), nil
+}
+
+// orgSwitchOf is the switch the stored settings of an organization say (no row = on, unlocked).
+func orgSwitchOf(stored map[string]*user_model.Setting) OrgSwitch {
+	s := OrgSwitch{On: true}
+	if v := stored[repo_model.DependencyGraphOrgKey]; v != nil && v.SettingValue == "false" {
+		s.On = false
+	}
+	if v := stored[repo_model.DependencyGraphOrgLockedKey]; v != nil && v.SettingValue == "true" {
+		s.Locked = true
+	}
+	return s
 }
 
 // RepoSwitch is the state of the switches for a repository.
@@ -119,6 +131,40 @@ func Enabled(ctx context.Context, repo *repo_model.Repository) bool {
 	return s.Enabled
 }
 
+// enabledStored is Enabled read from the stored rows, without a cache, inside the caller's transaction: the scan's
+// last check before it writes. The site setting's row is locked until the transaction ends, so a site switch
+// stored meanwhile either waits for the write (and its purge then sees the rows) or is seen here.
+func enabledStored(ctx context.Context, repoID int64) (bool, error) {
+	raw, has, err := system_model.GetSettingForUpdate(ctx, setting.Config().DependencyGraph.DynKey())
+	if err != nil {
+		return false, err
+	}
+	var site setting.DependencyGraphState
+	if has && raw != "" && json.Unmarshal([]byte(raw), &site) != nil {
+		return false, nil // as the setting reads it: a value that can't be parsed is off
+	}
+	if !site.Enabled() {
+		return false, nil
+	}
+	repo, err := repo_model.GetRepositoryByID(ctx, repoID)
+	if repo_model.IsErrRepoNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := repo.LoadOwner(ctx); err != nil {
+		return false, err
+	}
+	org := OrgSwitch{On: true}
+	if repo.Owner.IsOrganization() {
+		if org, err = readOrgSwitch(ctx, repo.OwnerID); err != nil {
+			return false, err
+		}
+	}
+	return Resolve(true, org.On, org.Locked, !repo.DependencyGraphDisabled), nil
+}
+
 // SetSiteEnabled stores the site switch (recorded as admin.setting.changed by SetSettings). Turning it off deletes
 // the stored rows of every repository; turning it on queues the repositories that need a scan.
 func SetSiteEnabled(ctx context.Context, doer *user_model.User, on bool) error {
@@ -140,21 +186,29 @@ func SetSiteEnabled(ctx context.Context, doer *user_model.User, on bool) error {
 	if was != on {
 		log.Info("Dependency graph turned %s by %s", mode, doer.Name)
 	}
-	return afterSwitch(ctx, on)
+	return applyDependencyGraphState(ctx, nil)
 }
 
-// SetOrgSwitch stores an organization's switch; the site must be on.
+// SetOrgSwitch stores an organization's switch; the site must be on. A save that changes nothing does nothing
+// else; a change applies to the organization's repositories only (in projects and in the trash too).
 func SetOrgSwitch(ctx context.Context, org *user_model.User, on, locked bool) error {
 	if !SiteEnabled(ctx) {
 		return ErrSwitchLocked
 	}
+	changed := false
 	err := db.WithTx(ctx, func(ctx context.Context) error {
-		stored, err := user_model.GetSettings(ctx, org.ID, []string{repo_model.DependencyGraphOrgKey, repo_model.DependencyGraphOrgLockedKey})
+		before, err := readOrgSwitch(ctx, org.ID)
 		if err != nil {
 			return err
 		}
-		beforeOn := stored[repo_model.DependencyGraphOrgKey] == nil || stored[repo_model.DependencyGraphOrgKey].SettingValue != "false"
-		beforeLocked := stored[repo_model.DependencyGraphOrgLockedKey] != nil && stored[repo_model.DependencyGraphOrgLockedKey].SettingValue == "true"
+		changes := audit_model.Changes(
+			map[string]any{"dependency_graph": before.On, "dependency_graph_locked": before.Locked},
+			map[string]any{"dependency_graph": on, "dependency_graph_locked": locked},
+		)
+		if changes == nil {
+			return nil
+		}
+		changed = true
 		if on {
 			err = user_model.DeleteUserSetting(ctx, org.ID, repo_model.DependencyGraphOrgKey)
 		} else {
@@ -171,18 +225,12 @@ func SetOrgSwitch(ctx context.Context, org *user_model.User, on, locked bool) er
 		if err != nil {
 			return err
 		}
-		if changes := audit_model.Changes(
-			map[string]any{"dependency_graph": beforeOn, "dependency_graph_locked": beforeLocked},
-			map[string]any{"dependency_graph": on, "dependency_graph_locked": locked},
-		); changes != nil {
-			return user_model.RecordOrg(ctx, "org.dependency_graph.changed", org, changes)
-		}
-		return nil
+		return user_model.RecordOrg(ctx, "org.dependency_graph.changed", org, changes)
 	})
-	if err != nil {
+	if err != nil || !changed {
 		return err
 	}
-	return afterSwitch(ctx, on)
+	return applyDependencyGraphState(ctx, builder.Eq{"repository.owner_id": org.ID})
 }
 
 // SetRepoSwitch stores the repository's own switch, unless a higher level decides. Turning it off deletes the rows
@@ -221,23 +269,31 @@ func SetRepoSwitch(ctx context.Context, repo *repo_model.Repository, on bool) er
 	return nil
 }
 
-// afterSwitch runs after a site or organization switch was stored: off deletes the rows of the repositories that
-// are now off (a bounded number of batches; the cron task deletes the rest), on queues a batch of the repositories
-// that need a scan (the scans run MAX_CONCURRENT_SCANS at a time).
-func afterSwitch(ctx context.Context, on bool) error {
-	if on {
-		return EnqueueUnscanned(ctx)
+// applyDependencyGraphState brings the stored rows in line with the switches after an input of Resolve changed
+// (the site or an organization switch, a transfer to another owner), for the repositories that match scope (on the
+// repository table; nil for all): the rows of those that are now off are deleted at once (a bounded number of
+// batches; the cron task deletes the rest), and those that need a scan are queued (MAX_CONCURRENT_SCANS run at a
+// time). A move into a project changes no input: the owner, and so the organization's switch, stays.
+func applyDependencyGraphState(ctx context.Context, scope builder.Cond) error {
+	if _, err := purgeDisabled(ctx, purgeBatchesPerCall, scope); err != nil {
+		return err
 	}
-	_, err := PurgeDisabled(ctx, purgeBatchesPerCall)
-	return err
+	return enqueueUnscanned(ctx, scope)
 }
 
 // PurgeDisabled deletes the stored rows of the repositories the dependency graph is off for (all of them while the
 // site is off), in at most batches transactions; more is true when rows are left.
 func PurgeDisabled(ctx context.Context, batches int) (more bool, err error) {
-	cond := repo_model.DependencyGraphOffCond()
-	if !SiteEnabled(ctx) {
-		cond = nil // every scan row, also one whose repository is gone
+	return purgeDisabled(ctx, batches, nil)
+}
+
+func purgeDisabled(ctx context.Context, batches int, scope builder.Cond) (more bool, err error) {
+	cond := builder.Cond(nil) // while the site is off: every scan row and row, also one whose repository is gone
+	if SiteEnabled(ctx) {
+		cond = repo_model.DependencyGraphOffCond()
+		if scope != nil {
+			cond = builder.And(cond, scope)
+		}
 	}
 	for range batches {
 		ids, err := repo_model.ScannedDependencyRepoIDs(ctx, cond, purgeBatch)

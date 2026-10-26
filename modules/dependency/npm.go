@@ -4,8 +4,9 @@
 package dependency
 
 import (
+	"bytes"
+	"cmp"
 	"strings"
-	"sync/atomic"
 
 	"forgejo.org/modules/json"
 )
@@ -54,6 +55,12 @@ func parseNPMLock(s *sink, data []byte, find Finder) error {
 				packageKeys++
 				workspace := k == "" || !strings.Contains(k, "node_modules/")
 				e := entry{key: k}
+				if workspace { // the root ("") and the workspace members the lock was resolved for
+					if err := s.entry(); err != nil {
+						return err
+					}
+					s.info.Dirs = append(s.info.Dirs, cmp.Or(k, "."))
+				}
 				if !workspace {
 					// every kept entry becomes a row (or the scan fails): the cap is the one of the rows
 					if err := s.entry(); err != nil || len(pkgs) >= s.maxRows {
@@ -116,6 +123,7 @@ func parseNPMLock(s *sink, data []byte, find Finder) error {
 		}
 		return nil
 	}
+	s.info.Dirs = []string{"."} // version 1 has no workspaces
 	for _, d := range v1 {
 		if err := s.emit(d); err != nil {
 			return err
@@ -161,39 +169,55 @@ func (r *npmRange) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// npmPackageJSONParses counts the parses of package.json files (the test of the helper cache reads it).
-var npmPackageJSONParses atomic.Int64
+// npmPackage is what a lock file's reader takes from the package.json next to it.
+type npmPackage struct {
+	asked      map[string]string
+	workspaces []string
+}
 
 // npmPackageJSON returns what a package.json asks for: dependency name to range (the last one wins when several
 // sections name it); the names are the declared dependencies. It is nil when there is no package.json, when it
 // names more than maxHelperKeys dependencies or when the scan's helper parse budget is spent: then nothing is
-// direct. The result is kept in the scan's helper cache, so a package.json that many manifests share is parsed once.
+// direct.
 func (s *sink) npmPackageJSON(data []byte) map[string]string {
+	if p := s.npmPackage(data); p != nil {
+		return p.asked
+	}
+	return nil
+}
+
+// npmPackage reads a package.json, nil as npmPackageJSON says. The result is kept in the scan's helper cache, so a
+// package.json that many manifests share is parsed once.
+func (s *sink) npmPackage(data []byte) *npmPackage {
 	if data == nil {
 		return nil
 	}
-	out, _ := helperParsed(s.ctx, "package.json", data, func() (map[string]string, int64) {
-		npmPackageJSONParses.Add(1)
-		out := map[string]string{}
+	out, _ := helperParsed(s.ctx, "package.json", data, func() (*npmPackage, int64) {
+		out := &npmPackage{asked: map[string]string{}}
 		var p struct {
 			Dependencies         map[string]npmRange `json:"dependencies"`
 			DevDependencies      map[string]npmRange `json:"devDependencies"`
 			OptionalDependencies map[string]npmRange `json:"optionalDependencies"`
 			PeerDependencies     map[string]npmRange `json:"peerDependencies"`
+			Workspaces           npmWorkspaceList    `json:"workspaces"`
 		}
-		if json.Unmarshal(data, &p) != nil {
+		if json.Unmarshal(bytes.TrimPrefix(data, utf8BOM), &p) != nil {
 			return out, 0
 		}
-		if len(p.Dependencies)+len(p.DevDependencies)+len(p.OptionalDependencies)+len(p.PeerDependencies) > maxHelperKeys {
+		if len(p.Dependencies)+len(p.DevDependencies)+len(p.OptionalDependencies)+len(p.PeerDependencies)+len(p.Workspaces) > maxHelperKeys {
 			return nil, 0
 		}
 		var cost int64
 		for _, m := range []map[string]npmRange{p.Dependencies, p.DevDependencies, p.OptionalDependencies, p.PeerDependencies} {
 			for n, r := range m {
-				out[n] = string(r)
+				out.asked[n] = string(r)
 				cost += int64(len(n)+len(r)) + 64
 			}
 		}
+		for _, w := range p.Workspaces {
+			cost += int64(len(w)) + 16
+		}
+		out.workspaces = p.Workspaces
 		return out, cost
 	})
 	return out
@@ -202,4 +226,23 @@ func (s *sink) npmPackageJSON(data []byte) map[string]string {
 func declaredIn(m map[string]string, name string) bool {
 	_, ok := m[name]
 	return ok
+}
+
+// npmWorkspaceList is the workspaces of a package.json: `["packages/*"]` or `{"packages": [...]}`; anything else
+// reads as none.
+type npmWorkspaceList []string
+
+func (w *npmWorkspaceList) UnmarshalJSON(b []byte) error {
+	var list []string
+	if json.Unmarshal(b, &list) != nil {
+		var obj struct {
+			Packages []string `json:"packages"`
+		}
+		if json.Unmarshal(b, &obj) != nil {
+			return nil
+		}
+		list = obj.Packages
+	}
+	*w = list
+	return nil
 }

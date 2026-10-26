@@ -66,9 +66,24 @@ func (j *jsonStream) skip() error {
 // object reads an object and calls fn for every key; fn has to read or skip the value. A value that is not an
 // object is skipped and reported as ok == false.
 func (j *jsonStream) object(fn func(key string) error) (ok bool, err error) {
+	return j.objectOr(false, fn)
+}
+
+// objectOr is object; with emptyList, `[]` (what PHP's json_encode writes for an empty map) is an empty object.
+func (j *jsonStream) objectOr(emptyList bool, fn func(key string) error) (ok bool, err error) {
 	t, err := j.tok()
 	if err != nil {
 		return false, err
+	}
+	if d, isDelim := t.(stdjson.Delim); emptyList && isDelim && d == '[' {
+		t, err := j.tok()
+		if err != nil {
+			return false, err
+		}
+		if d, isDelim := t.(stdjson.Delim); isDelim && d == ']' {
+			return true, nil
+		}
+		return false, parseErr("json: a list") // with items
 	}
 	if d, isDelim := t.(stdjson.Delim); !isDelim || d != '{' {
 		return false, j.skipRest(t)

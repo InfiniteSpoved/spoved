@@ -18,6 +18,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/setting"
 	dependency_service "forgejo.org/services/dependency"
+	repo_service "forgejo.org/services/repository"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -105,8 +106,18 @@ func TestDependencyGraphSwitches(t *testing.T) {
 			assert.Contains(t, e.Data, "dependency_graph.enabled")
 			assert.Contains(t, e.Data, `"mode":"off"`)
 			// the organization and repository forms can't change anything while the site is off
-			owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/settings/code_security", map[string]string{"enabled": "on"}), http.StatusForbidden)
-			owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/settings/code_security", map[string]string{"enabled": "on"}), http.StatusForbidden)
+			// the refusal is a message on the settings page, as other settings pages answer
+			owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/settings/code_security", map[string]string{"enabled": "on", "locked": "on"}), http.StatusSeeOther)
+			assert.Contains(t, bwFlash(owner), "error")
+			assert.Contains(t, bwFlash(owner), "Turned off by the site administrator.")
+			owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/settings/code_security", map[string]string{}), http.StatusSeeOther)
+			assert.Contains(t, bwFlash(owner), "can't be changed here")
+			sw, err := dependency_service.GetRepoSwitch(t.Context(), unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1}))
+			require.NoError(t, err)
+			assert.True(t, sw.Own, "the refused repository save changed nothing")
+			org, err := dependency_service.GetOrgSwitch(t.Context(), org3.ID)
+			require.NoError(t, err)
+			assert.False(t, org.Locked, "the refused organization save changed nothing")
 
 			admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/config/dependency-graph", map[string]string{"enabled": "on"}), http.StatusSeeOther)
 			bumpSettingsRevision(t)
@@ -137,7 +148,18 @@ func TestDependencyGraphSwitches(t *testing.T) {
 			doc := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/settings/code_security"), http.StatusOK).Body)
 			doc.AssertElement(t, "fieldset[disabled] #dependency-graph-enabled[checked]", true)
 			assert.Contains(t, doc.Find("#dependency-graph-set-by").Text(), "Set by the org3 organization.")
-			owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/repo3/settings/code_security", map[string]string{"enabled": "on"}), http.StatusForbidden)
+			assert.Contains(t, doc.Find("#dependency-graph-set-by").Text(), "the repository setting (off) applies again", "the repository's own stored choice")
+			doc.AssertElement(t, `.dependency-graph-decided a[href$="/org/org3/settings/code_security"]`, true)
+			owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/repo3/settings/code_security", map[string]string{"enabled": "on"}), http.StatusSeeOther)
+			assert.Contains(t, bwFlash(owner), "can't be changed here")
+
+			// lifting the lock brings back repo3's own off, and its rows go at once
+			store()
+			owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/settings/code_security", map[string]string{"enabled": "on"}), http.StatusSeeOther)
+			check(repo3, http.StatusNotFound)
+			assert.False(t, hasRows(repo3), "rows deleted when the lock is lifted")
+			assert.True(t, hasRows(leaf), "a repository that stays on keeps its rows")
+			owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org/org3/settings/code_security", map[string]string{"enabled": "on", "locked": "on"}), http.StatusSeeOther)
 
 			// off for the organization: every repository of it (also in a project) answers 404 and loses its rows
 			store()
@@ -167,6 +189,13 @@ func TestDependencyGraphSwitches(t *testing.T) {
 			owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/dep-switch/leaf/settings/code_security", map[string]string{"enabled": "on"}), http.StatusSeeOther)
 			store()
 			check(leaf, http.StatusOK)
+		})
+
+		t.Run("archived repository", func(t *testing.T) {
+			require.NoError(t, repo_service.SetArchiveRepoState(sys, personal, true))
+			defer func() { require.NoError(t, repo_service.SetArchiveRepoState(sys, personal, false)) }()
+			owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/user2/repo1/settings/code_security", map[string]string{}), http.StatusNotFound)
+			assert.True(t, dependency_service.Enabled(t.Context(), unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})))
 		})
 
 		t.Run("only owners and admins", func(t *testing.T) {

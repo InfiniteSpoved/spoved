@@ -4,6 +4,8 @@
 package dependency
 
 import (
+	"bytes"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -15,11 +17,11 @@ import (
 
 func init() {
 	register(&Format{
-		Ecosystem: NPM, Small: true, Unpinned: true, Locks: []string{"package-lock.json", "yarn.lock", "pnpm-lock.yaml"}, LocksAbove: true,
+		Ecosystem: NPM, Small: true, Unpinned: true, Locks: []string{"package-lock.json", "yarn.lock", "pnpm-lock.yaml"}, cover: coverWorkspaces,
 		match: func(b string) bool { return b == "package.json" }, parse: parsePackageJSON,
 	})
 	register(&Format{
-		Ecosystem: Cargo, Small: true, Unpinned: true, Locks: []string{"Cargo.lock"}, LocksAbove: true,
+		Ecosystem: Cargo, Small: true, Unpinned: true, Locks: []string{"Cargo.lock"}, cover: coverMembers,
 		match: func(b string) bool { return b == "Cargo.toml" }, parse: parseCargoToml,
 	})
 	register(&Format{
@@ -31,7 +33,7 @@ func init() {
 		match: func(b string) bool { return b == "composer.json" }, parse: parseComposerJSON,
 	})
 	register(&Format{
-		Ecosystem: PyPI, Small: true, Unpinned: true, Locks: []string{"poetry.lock", "uv.lock"},
+		Ecosystem: PyPI, Small: true, Unpinned: true, Locks: []string{"poetry.lock"}, // uv.lock has no reader, so it covers nothing
 		match: func(b string) bool { return b == "pyproject.toml" }, parse: parsePyproject,
 	})
 }
@@ -46,19 +48,60 @@ func IsLockName(base string) bool {
 	return false
 }
 
-// Covered reports whether a lock file covers the manifest at p (has tells whether a path is in the tree): one of
-// its Locks next to it, or with LocksAbove in a directory above it.
-func (f *Format) Covered(p string, has func(string) bool) bool {
-	for dir := pathDir(p); ; dir = pathDir(dir) {
+// coverRule is how a lock file covers the manifests of a format.
+type coverRule int
+
+const (
+	coverNextTo     coverRule = iota // the manifest next to it
+	coverWorkspaces                  // npm: the projects it was resolved for (Info.Dirs, Info.Globs), in its directory or below
+	coverMembers                     // Cargo: the manifest next to it, and below it the members it names (Info.Members)
+)
+
+// Covered reports whether a lock file the scan read covers the manifest at p. locks holds the lock files that
+// parsed and gave rows, by path, with their Info; a lock that is missing, unread or empty covers nothing. own is
+// the manifest's Info, nil before it is read: a Cargo.toml below a Cargo.lock is covered only when it names a
+// member of that lock and is no workspace root itself, so the caller reads it and asks again.
+func (f *Format) Covered(p string, locks map[string]*Info, own *Info) bool {
+	mdir := pathDir(p)
+	for dir := mdir; ; dir = pathDir(dir) {
+		rel := "."
+		if dir != mdir {
+			rel = strings.TrimPrefix(mdir, pathJoin(dir, ""))
+		}
 		for _, l := range f.Locks {
-			if has(pathJoin(dir, l)) {
+			info := locks[pathJoin(dir, l)]
+			switch {
+			case info == nil:
+			case f.cover == coverWorkspaces && (slices.Contains(info.Dirs, rel) || globsMatch(info.Globs, rel)):
+				return true
+			case f.cover != coverWorkspaces && rel == ".":
+				return true
+			case f.cover == coverMembers && own != nil && own.Name != "" && !own.OwnWorkspace && slices.Contains(info.Members, own.Name):
 				return true
 			}
 		}
-		if !f.LocksAbove || dir == "" {
+		if f.cover == coverNextTo || dir == "" {
 			return false
 		}
 	}
+}
+
+// globsMatch reports whether dir matches one of the workspace patterns and none of their negations (`!x`). A
+// pattern is matched segment by segment (`**` as one segment), so a member is never taken for more than yarn does;
+// one that isn't matched is read on its own.
+func globsMatch(globs []string, dir string) bool {
+	found := false
+	for _, g := range globs {
+		neg := strings.HasPrefix(g, "!")
+		g = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(g, "!"), "./"), "/")
+		if ok, err := path.Match(g, dir); err == nil && ok {
+			if neg {
+				return false
+			}
+			found = true
+		}
+	}
+	return found
 }
 
 func pathDir(p string) string {
@@ -83,31 +126,67 @@ var npmFallbackKeys = map[string]bool{"dependencies": true, "devDependencies": t
 // a path) is the project's own and left out; an alias (`npm:real@^1`) is the real package; a git or URL range
 // keeps the row without a requirement.
 func parsePackageJSON(s *sink, data []byte, _ Finder) error {
-	j := newJSONStream(s, data)
+	return jsonSections(s, data, "package.json", npmFallbackKeys, func(name, r string) error {
+		if d, keep := npmRequirement(name, r); keep {
+			return s.emit(d)
+		}
+		return nil
+	})
+}
+
+// jsonSections reads the sections of a JSON manifest named in keys, each an object of name -> range (`[]` is an
+// empty one), and calls row for each pair. A key given twice counts as the last one, as JSON.parse and
+// json_decode read it: a later section replaces an earlier one, a later name in a section an earlier one.
+func jsonSections(s *sink, data []byte, file string, keys map[string]bool, row func(name, r string) error) error {
+	type pair struct{ name, r string }
+	sections := map[string][]pair{}
+	var order []string
+	j := newJSONStream(s, bytes.TrimPrefix(data, utf8BOM))
 	ok, err := j.object(func(key string) error {
-		if !npmFallbackKeys[key] {
+		if !keys[key] {
 			return j.skip()
 		}
-		ok, err := j.object(func(name string) error {
+		var pairs []pair
+		at := map[string]int{}
+		ok, err := j.objectOr(true, func(name string) error {
 			r, err := j.str()
 			if err != nil {
 				return err
 			}
-			d, keep := npmRequirement(name, r)
-			if !keep {
+			if i, dup := at[name]; dup {
+				pairs[i].r = r
 				return nil
 			}
-			return s.emit(d)
+			if err := s.entry(); err != nil {
+				return err
+			}
+			at[name] = len(pairs)
+			pairs = append(pairs, pair{name, r})
+			return nil
 		})
 		if err == nil && !ok {
-			return parseErr("package.json: %s is no object", key)
+			return parseErr("%s: %s is no object", file, key)
 		}
+		if _, seen := sections[key]; !seen {
+			order = append(order, key)
+		}
+		sections[key] = pairs
 		return err
 	})
 	if err == nil && !ok {
-		return parseErr("package.json")
+		err = parseErr("%s", file)
 	}
-	return scanErr(err, "package.json")
+	if err != nil {
+		return scanErr(err, file)
+	}
+	for _, key := range order {
+		for _, p := range sections[key] {
+			if err := row(p.name, p.r); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func npmRequirement(name, r string) (Dependency, bool) {
@@ -130,27 +209,12 @@ func npmRequirement(name, r string) (Dependency, bool) {
 // parseComposerJSON reads require and require-dev; platform packages (php, ext-*, lib-*, composer-plugin-api)
 // have no vendor and are left out.
 func parseComposerJSON(s *sink, data []byte, _ Finder) error {
-	j := newJSONStream(s, data)
-	ok, err := j.object(func(key string) error {
-		if key != "require" && key != "require-dev" {
-			return j.skip()
+	return jsonSections(s, data, "composer.json", map[string]bool{"require": true, "require-dev": true}, func(name, r string) error {
+		if !strings.Contains(name, "/") {
+			return nil
 		}
-		ok, err := j.object(func(name string) error {
-			r, err := j.str()
-			if err != nil || !strings.Contains(name, "/") {
-				return err
-			}
-			return s.emit(Dependency{Name: strings.ToLower(name), Requirement: r, Direct: true})
-		})
-		if err == nil && !ok {
-			return parseErr("composer.json: %s is no object", key)
-		}
-		return err
+		return s.emit(Dependency{Name: strings.ToLower(name), Requirement: r, Direct: true})
 	})
-	if err == nil && !ok {
-		return parseErr("composer.json")
-	}
-	return scanErr(err, "composer.json")
 }
 
 // tomlDep is a dependency of a TOML dependency table: its value (`name = "1.0"`) or its fields (an inline table,
@@ -161,11 +225,23 @@ type tomlDep struct {
 	fields map[string]string
 }
 
-// tomlDeps reads the dependency tables of a TOML manifest. table returns the length of the key path that names a
-// dependency table (0 for none): the next key is a dependency, and one more a field of it. A dependency or field
-// given twice is a parse error, as it is for cargo and poetry. The arrays whose dotted key path keepArray accepts
-// are returned in file order.
-func tomlDeps(s *sink, data []byte, table func(path []string) int, keepArray func(key string) bool) ([]*tomlDep, [][2]string, error) {
+// tomlSpec says which parts of a TOML manifest are read. table returns the length of the key path that names a
+// dependency table (0 for none): the next key is a dependency, and one more a field of it. array returns the
+// length of the key path of an array that is read (0 for none). parent tells a proper prefix of those paths
+// (`project`, `target.'cfg(unix)'`): a value there, an inline table such as `project = {...}`, would hold what
+// is read in a form this reader doesn't descend into, so it is a parse error. other, if set, sees every header
+// and statement, with its full key path (and "" as the value of a header).
+type tomlSpec struct {
+	table, array func(path []string) int
+	parent       func(path []string) bool
+	other        func(path []string, value string)
+}
+
+// tomlDeps reads the dependency tables and arrays of a TOML manifest; the arrays come back in file order as (key
+// path, raw value). Whatever it can't read inside the parts it reads is a parse error, never left out: a
+// dependency or field given twice (as for cargo and poetry), an inline table at a parent level, a key below a
+// dependency's fields or below an array, an array of tables there.
+func tomlDeps(s *sink, data []byte, spec tomlSpec) ([]*tomlDep, [][2]string, error) {
 	data, err := prepass(data, false)
 	if err != nil {
 		return nil, nil, err
@@ -198,7 +274,14 @@ func tomlDeps(s *sink, data []byte, table func(path []string) int, keepArray fun
 		}
 		if st.Header {
 			header = st.Key
-			if k := table(header); k > 0 && len(header) == k+1 { // [dependencies.serde]
+			if spec.other != nil {
+				spec.other(header, "")
+			}
+			k := spec.table(header)
+			switch {
+			case spec.array(header) > 0, st.Array && (k > 0 || spec.parent(header)):
+				return nil, nil, parseErr("toml: a table where an array or a table is read") // [project.dependencies], [[dependencies]]
+			case k > 0 && len(header) == k+1: // [dependencies.serde]
 				d, err := dep(header, k)
 				if err != nil {
 					return nil, nil, err
@@ -211,15 +294,25 @@ func tomlDeps(s *sink, data []byte, table func(path []string) int, keepArray fun
 			continue
 		}
 		full := append(append([]string(nil), header...), st.Key...)
-		k := table(full)
+		if spec.other != nil {
+			spec.other(full, st.Value)
+		}
+		if spec.parent(full) {
+			return nil, nil, parseErr("toml: %s as one value", strings.Join(full, ".")) // `project = {...}`
+		}
+		if a := spec.array(full); a > 0 {
+			if len(full) > a {
+				return nil, nil, parseErr("toml: a key below an array")
+			}
+			if err := s.entry(); err != nil {
+				return nil, nil, err
+			}
+			arrays = append(arrays, [2]string{strings.Join(full, "."), st.Value})
+			continue
+		}
+		k := spec.table(full)
 		switch {
 		case k == 0:
-			if key := strings.Join(full, "."); keepArray != nil && keepArray(key) {
-				if err := s.entry(); err != nil {
-					return nil, nil, err
-				}
-				arrays = append(arrays, [2]string{key, st.Value})
-			}
 			continue
 		case len(full) == k:
 			return nil, nil, parseErr("toml: a dependency table as one value") // `dependencies = {...}`: not written by cargo or poetry
@@ -254,51 +347,100 @@ func tomlDeps(s *sink, data []byte, table func(path []string) int, keepArray fun
 				return nil, nil, err
 			}
 			d.fields[rest[0]] = st.Value
+		default:
+			return nil, nil, parseErr("toml: a key below a dependency's field") // `serde.version.x = ...`
 		}
 	}
 }
 
-// tomlStr is the string a raw value holds, or "" for any other value.
-func tomlStr(raw string) string {
+// tomlStr is the string a raw value holds; ok is false for any other value and for a string that doesn't decode.
+func tomlStr(raw string) (string, bool) {
 	if raw == "" || (raw[0] != '"' && raw[0] != '\'') {
-		return ""
+		return "", false
 	}
-	v, _ := tomlUnquote(raw)
-	return v
+	return tomlUnquote(raw)
+}
+
+// tomlField is the string of a dependency's field, "" if it has none; a field that isn't a string is a parse error.
+func tomlField(d *tomlDep, key string) (string, error) {
+	raw, has := d.fields[key]
+	if !has {
+		return "", nil
+	}
+	v, ok := tomlStr(raw)
+	if !ok {
+		return "", parseErr("toml: field %s", key)
+	}
+	return v, nil
+}
+
+// pathHas reports whether p is want, an element of "" matching any key.
+func pathHas(p []string, want ...string) bool {
+	if len(p) != len(want) {
+		return false
+	}
+	for i, w := range want {
+		if w != "" && p[i] != w {
+			return false
+		}
+	}
+	return true
 }
 
 var cargoDepTables = map[string]bool{"dependencies": true, "dev-dependencies": true, "build-dependencies": true, "dev_dependencies": true, "build_dependencies": true}
 
 // parseCargoToml reads [dependencies], [dev-dependencies], [build-dependencies], their [target.X.*] forms and
 // [workspace.dependencies]. A path dependency is the project's own; `package` renames; `workspace = true` takes
-// the range from the workspace root, so the row has none.
+// the range from the workspace root, so the row has none. Info says which package it is and whether it is a
+// workspace root, for the Cargo.lock above it (see Covered).
 func parseCargoToml(s *sink, data []byte, _ Finder) error {
-	deps, _, err := tomlDeps(s, data, func(p []string) int {
-		switch {
-		case len(p) >= 1 && cargoDepTables[p[0]]:
-			return 1
-		case len(p) >= 2 && p[0] == "workspace" && p[1] == "dependencies":
-			return 2
-		case len(p) >= 3 && p[0] == "target" && cargoDepTables[p[2]]:
-			return 3
-		}
-		return 0
-	}, nil)
+	deps, _, err := tomlDeps(s, data, tomlSpec{
+		table: func(p []string) int {
+			switch {
+			case len(p) >= 1 && cargoDepTables[p[0]]:
+				return 1
+			case len(p) >= 2 && p[0] == "workspace" && p[1] == "dependencies":
+				return 2
+			case len(p) >= 3 && p[0] == "target" && cargoDepTables[p[2]]:
+				return 3
+			}
+			return 0
+		},
+		array: func([]string) int { return 0 },
+		parent: func(p []string) bool {
+			return pathHas(p, "workspace") || pathHas(p, "target") || pathHas(p, "target", "")
+		},
+		other: func(p []string, value string) {
+			if p[0] == "workspace" {
+				s.info.OwnWorkspace = true
+			}
+			if pathHas(p, "package", "name") {
+				s.info.Name, _ = tomlStr(value) // not a string (`name.workspace = true`): no name, read on its own
+			}
+		},
+	})
 	if err != nil {
 		return err
 	}
 	for _, d := range deps {
 		row := Dependency{Name: d.name, Direct: true}
 		if d.fields == nil {
-			if row.Requirement = tomlStr(d.value); row.Requirement == "" {
+			var ok bool
+			if row.Requirement, ok = tomlStr(d.value); !ok {
 				return parseErr("Cargo.toml: dependency value")
 			}
 		} else {
 			if _, local := d.fields["path"]; local {
 				continue
 			}
-			row.Requirement = tomlStr(d.fields["version"])
-			if p := tomlStr(d.fields["package"]); p != "" {
+			if row.Requirement, err = tomlField(d, "version"); err != nil {
+				return err
+			}
+			p, err := tomlField(d, "package")
+			if err != nil {
+				return err
+			}
+			if p != "" {
 				row.Name = p
 			}
 		}
@@ -309,20 +451,36 @@ func parseCargoToml(s *sink, data []byte, _ Finder) error {
 	return nil
 }
 
+// pyDirectRef is a PEP 508 direct reference, `name @ url` (with extras): installed from that URL, not the index.
+var pyDirectRef = regexp.MustCompile(`^(` + pyName + `)\s*(?:\[[^\]]*\])?\s*@`)
+
 // parsePyproject reads the PEP 621 arrays (project.dependencies, project.optional-dependencies, PEP 735
 // dependency-groups) and poetry's dependency tables (tool.poetry.dependencies, dev-dependencies and groups),
-// leaving out python itself and path dependencies.
+// leaving out python itself and path dependencies. A direct reference (`name @ url`) is a row without a range.
 func parsePyproject(s *sink, data []byte, _ Finder) error {
-	deps, arrays, err := tomlDeps(s, data, func(p []string) int {
-		switch {
-		case len(p) >= 3 && p[0] == "tool" && p[1] == "poetry" && (p[2] == "dependencies" || p[2] == "dev-dependencies"):
-			return 3
-		case len(p) >= 5 && p[0] == "tool" && p[1] == "poetry" && p[2] == "group" && p[4] == "dependencies":
-			return 5
-		}
-		return 0
-	}, func(key string) bool {
-		return key == "project.dependencies" || strings.HasPrefix(key, "project.optional-dependencies.") || strings.HasPrefix(key, "dependency-groups.")
+	deps, arrays, err := tomlDeps(s, data, tomlSpec{
+		table: func(p []string) int {
+			switch {
+			case len(p) >= 3 && p[0] == "tool" && p[1] == "poetry" && (p[2] == "dependencies" || p[2] == "dev-dependencies"):
+				return 3
+			case len(p) >= 5 && p[0] == "tool" && p[1] == "poetry" && p[2] == "group" && p[4] == "dependencies":
+				return 5
+			}
+			return 0
+		},
+		array: func(p []string) int {
+			switch {
+			case len(p) >= 2 && p[0] == "project" && p[1] == "dependencies", len(p) >= 2 && p[0] == "dependency-groups":
+				return 2
+			case len(p) >= 3 && p[0] == "project" && p[1] == "optional-dependencies":
+				return 3
+			}
+			return 0
+		},
+		parent: func(p []string) bool {
+			return pathHas(p, "project") || pathHas(p, "project", "optional-dependencies") || pathHas(p, "dependency-groups") ||
+				pathHas(p, "tool") || pathHas(p, "tool", "poetry") || pathHas(p, "tool", "poetry", "group") || pathHas(p, "tool", "poetry", "group", "")
+		},
 	})
 	if err != nil {
 		return err
@@ -333,13 +491,21 @@ func parsePyproject(s *sink, data []byte, _ Finder) error {
 			return err
 		}
 		for _, item := range items {
-			req := tomlStr(item)
-			if req == "" {
-				continue // {include-group = "x"}
-			}
-			d, ok := pyRequirement(strings.TrimSpace(req))
+			req, ok := tomlStr(item)
 			if !ok {
-				continue
+				if strings.HasPrefix(a[0], "dependency-groups.") && strings.HasPrefix(item, "{") {
+					continue // {include-group = "x"}: the requirements of another group, read there
+				}
+				return parseErr("pyproject.toml: %s holds no requirement", a[0])
+			}
+			req = strings.TrimSpace(req)
+			d, ok := pyRequirement(req)
+			if !ok {
+				m := pyDirectRef.FindStringSubmatch(req)
+				if m == nil {
+					return parseErr("pyproject.toml: requirement")
+				}
+				d = Dependency{Name: m[1], Direct: true}
 			}
 			d.Version = ""
 			if err := s.emit(d); err != nil {
@@ -357,10 +523,13 @@ func parsePyproject(s *sink, data []byte, _ Finder) error {
 			if _, local := d.fields["path"]; local {
 				continue
 			}
-			row.Requirement = tomlStr(d.fields["version"])
+			if row.Requirement, err = tomlField(d, "version"); err != nil {
+				return err
+			}
 		case strings.HasPrefix(d.value, "["): // several constraints, by python version
 		default:
-			if row.Requirement = tomlStr(d.value); row.Requirement == "" {
+			var ok bool
+			if row.Requirement, ok = tomlStr(d.value); !ok {
 				return parseErr("pyproject.toml: dependency value")
 			}
 		}
@@ -373,8 +542,10 @@ func parsePyproject(s *sink, data []byte, _ Finder) error {
 
 var (
 	gemName     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-	gemPathOpt  = regexp.MustCompile(`(?:^|[\s,{(])(?::path\s*=>|path:)`)
-	gemCallHead = regexp.MustCompile(`^gem[ \t]+`)
+	gemCallHead = regexp.MustCompile(`^gem(?:[ \t(]|$)`)
+	gemOption   = regexp.MustCompile(`^(?::([A-Za-z_][A-Za-z0-9_]*)\s*=>|([A-Za-z_][A-Za-z0-9_]*):(?:\s|$))`)
+	gemModifier = regexp.MustCompile(`^(?:if|unless)\b`)
+	rubyHeredoc = regexp.MustCompile(`<<([~-]?)(?:"(\w+)"|'(\w+)'|([A-Za-z_]\w*))`)
 )
 
 // rubyString reads a string literal at the start of t: single-quoted or double-quoted without any escape or
@@ -394,47 +565,124 @@ func rubyString(t string) (string, string, bool) {
 	return v, t[2+end:], true
 }
 
-// parseGemfile reads the lines `gem "name"[, "range"...][, option: value...]`, wherever they are (groups and
-// conditions are not evaluated, so a gem of any group or branch is listed). Every other line is skipped, and so is
-// a gem with a path option (the project's own).
-func parseGemfile(s *sink, data []byte, _ Finder) error {
-	sc := newScanner(s, data)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		head := gemCallHead.FindString(line)
-		if head == "" {
-			continue
-		}
-		name, rest, ok := rubyString(line[len(head):])
-		if !ok || !gemName.MatchString(name) {
-			continue
-		}
-		var ranges []string
-		plain := true
-		for {
-			rest = strings.TrimLeft(rest, " \t")
-			if rest == "" || rest[0] == '#' {
-				break
+// rubyArgs splits the arguments of a call written without parentheses at the commas outside strings and brackets,
+// up to a comment or a modifier (`if`, `unless`). ok is false when a string or a bracket doesn't end on the line or
+// a `;` starts another statement; a last argument that is empty is a call continued on the next line.
+func rubyArgs(t string) (args []string, ok bool) {
+	depth, start := 0, 0
+	for i := 0; i < len(t); i++ {
+		switch c := t[i]; {
+		case c == '"' || c == '\'':
+			j := i + 1
+			for ; j < len(t) && t[j] != c; j++ {
+				if t[j] == '\\' {
+					j++
+				}
 			}
-			if rest[0] != ',' {
-				plain = false // `gem "x" if ...`, a block, a call: not a plain line
-				break
+			if j >= len(t) {
+				return nil, false
 			}
-			rest = strings.TrimLeft(rest[1:], " \t")
-			r, after, ok := rubyString(rest)
-			if !ok {
-				// options: `require: false`, `git: "..."`; a path is local
-				plain = !gemPathOpt.MatchString(" " + rest)
-				break
+			i = j
+		case c == '(' || c == '[' || c == '{':
+			depth++
+		case c == ')' || c == ']' || c == '}':
+			if depth--; depth < 0 {
+				return nil, false
 			}
-			ranges, rest = append(ranges, strings.TrimSpace(r)), after
-		}
-		if !plain {
-			continue
-		}
-		if err := s.emit(Dependency{Name: name, Requirement: strings.Join(ranges, ", "), Direct: true}); err != nil {
-			return err
+		case c == ';' || c == '#' && depth > 0:
+			return nil, false
+		case depth > 0:
+		case c == ',':
+			args, start = append(args, strings.TrimSpace(t[start:i])), i+1
+		case c == '#' || (c == ' ' || c == '\t') && gemModifier.MatchString(t[i+1:]):
+			return append(args, strings.TrimSpace(t[start:i])), true
 		}
 	}
+	return append(args, strings.TrimSpace(t[start:])), depth == 0
+}
+
+// parseGemfile reads the calls `gem "name"[, "range"...][, option: value...]` on one line, wherever they are
+// (groups and conditions, a modifier `if` included, are not evaluated, so a gem of any group or branch is listed);
+// a version that isn't a plain string leaves the row without a range, and a gem with a path option is the
+// project's own. Lines inside `=begin`/`=end` and heredocs are no code. A gem line in another form (`gem(...)`,
+// a name that isn't a plain string, options continued on the next line, several statements) is counted in
+// Info.Unread, so the page says the file was read only in part.
+func parseGemfile(s *sink, data []byte, _ Finder) error {
+	sc := newScanner(s, data)
+	heredoc, indented, comment := "", false, false
+	for sc.Scan() {
+		raw := sc.Text()
+		line := strings.TrimSpace(raw)
+		switch {
+		case comment:
+			comment = !strings.HasPrefix(raw, "=end")
+			continue
+		case heredoc != "":
+			if line == heredoc && (indented || raw == heredoc) {
+				heredoc = ""
+			}
+			continue
+		case strings.HasPrefix(raw, "=begin") && (len(raw) == 6 || raw[6] == ' ' || raw[6] == '\t'):
+			comment = true
+			continue
+		}
+		code := line
+		if args, ok := rubyArgs(line); ok && len(args) > 0 {
+			code = strings.Join(args, ",") // without the comment
+		}
+		if m := rubyHeredoc.FindStringSubmatch(code); m != nil {
+			heredoc, indented = m[2]+m[3]+m[4], m[1] != ""
+		}
+		if !gemCallHead.MatchString(line) {
+			continue
+		}
+		d, local, ok := gemLine(strings.TrimLeft(line[3:], " \t"))
+		switch {
+		case !ok:
+			s.info.Unread++
+		case !local:
+			if err := s.emit(d); err != nil {
+				return err
+			}
+		}
+	}
+	if heredoc != "" || comment {
+		return parseErr("Gemfile: unterminated heredoc or =begin")
+	}
 	return scanErr(sc.Err(), "Gemfile")
+}
+
+// gemLine reads the arguments of one `gem` call. local is true for a gem with a path option; ok is false for a
+// call this reader can't read whole.
+func gemLine(t string) (d Dependency, local, ok bool) {
+	args, ok := rubyArgs(t)
+	if !ok || strings.HasPrefix(t, "(") || args[len(args)-1] == "" {
+		return d, false, false
+	}
+	name, rest, ok := rubyString(args[0])
+	if !ok || strings.TrimSpace(rest) != "" || !gemName.MatchString(name) {
+		return d, false, false
+	}
+	var ranges []string
+	versions := true // the arguments before the options are versions
+	for _, a := range args[1:] {
+		m := gemOption.FindStringSubmatch(a)
+		if m == nil {
+			if !versions {
+				return d, false, false // a version after an option
+			}
+			if r, rest, ok := rubyString(a); ok && strings.TrimSpace(rest) == "" {
+				ranges = append(ranges, strings.TrimSpace(r))
+			} else {
+				ranges = nil // a version Ruby computes (`rack_version`): the row has no range
+				versions = false
+			}
+			continue
+		}
+		versions = false
+		if m[1] == "path" || m[2] == "path" {
+			local = true
+		}
+	}
+	return Dependency{Name: name, Requirement: strings.Join(ranges, ", "), Direct: true}, local, true
 }

@@ -40,6 +40,6 @@ func DependencyGraphPost(ctx *context.Context) {
 		ctx.ServerError("SetSiteEnabled", err)
 		return
 	}
-	ctx.Flash.Success(ctx.Tr("admin.dependency_graph.saved"))
+	ctx.Flash.Success(ctx.Tr("repo.settings.dependency_graph.saved"))
 	ctx.Redirect(setting.AppSubURL + "/admin/config/dependency-graph")
 }

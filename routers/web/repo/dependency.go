@@ -53,24 +53,36 @@ func DependenciesSBOM(ctx *context.Context) {
 // dependencyPageSize is the number of rows on a page of the Dependencies page.
 const dependencyPageSize = 50
 
-// unpinnedManifest is a manifest read without a lock file, with the lock files that would pin it.
-type unpinnedManifest struct {
-	Path  string
+// unpinnedGroup is the manifests of one ecosystem that were read without a lock file, with the lock files that
+// would pin them.
+type unpinnedGroup struct {
+	Paths string
+	Count int
 	Locks string
 }
 
-func unpinnedManifests(ctx *context.Context, manifests []repo_model.DependencyFacet) []unpinnedManifest {
-	var out []unpinnedManifest
+func unpinnedManifests(ctx *context.Context, manifests []repo_model.DependencyFacet) []*unpinnedGroup {
+	var out []*unpinnedGroup
+	byEcosystem := map[string]*unpinnedGroup{}
 	for _, m := range manifests {
 		f := dependency.FormatForPath(m.Value)
 		if f == nil || !f.Unpinned {
 			continue
 		}
-		locks := f.Locks[len(f.Locks)-1]
-		if n := len(f.Locks); n > 1 {
-			locks = ctx.Locale.TrString("repo.dependencies.locks_or", strings.Join(f.Locks[:n-1], ", "), locks)
+		g := byEcosystem[f.Ecosystem]
+		if g == nil {
+			locks := f.Locks[len(f.Locks)-1]
+			if n := len(f.Locks); n > 1 {
+				locks = ctx.Locale.TrString("repo.dependencies.locks_or", strings.Join(f.Locks[:n-1], ", "), locks)
+			}
+			g = &unpinnedGroup{Locks: locks}
+			byEcosystem[f.Ecosystem] = g
+			out = append(out, g)
+		} else {
+			g.Paths += ", "
 		}
-		out = append(out, unpinnedManifest{Path: m.Value, Locks: locks})
+		g.Paths += m.Value
+		g.Count++
 	}
 	return out
 }
@@ -104,7 +116,16 @@ func Dependencies(ctx *context.Context) {
 	ctx.Data["Scan"] = scan
 	ctx.Data["ScanFailed"] = scan.Status == repo_model.DependencyScanFailed
 	ctx.Data["ScanNeverRead"] = scan.CommitSHA == ""
-	ctx.Data["Skipped"] = scan.SkippedManifests()
+	var skipped, partial []repo_model.SkippedManifest
+	for _, m := range scan.SkippedManifests() {
+		if m.Code == repo_model.DependencySkipPartial {
+			partial = append(partial, m)
+		} else {
+			skipped = append(skipped, m)
+		}
+	}
+	ctx.Data["Skipped"] = skipped
+	ctx.Data["Partial"] = partial
 	ctx.Data["ScannedTime"] = scan.ScannedUnix
 	if scan.CommitSHA != "" {
 		ctx.Data["ShortSHA"] = base.ShortSha(scan.CommitSHA)

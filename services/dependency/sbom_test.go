@@ -338,7 +338,7 @@ func TestSBOMUnpinned(t *testing.T) {
 	}
 	unpinned := sp.Packages[byPURL["pkg:npm/express"]]
 	assert.Empty(t, unpinned.VersionInfo)
-	assert.Equal(t, "not pinned (no lock file); declared range: ^4.18.0 | ~4.18", unpinned.Comment)
+	assert.Equal(t, "not pinned (no lock file); declared range: ^4.18.0; ~4.18", unpinned.Comment)
 	pinned := sp.Packages[byPURL["pkg:npm/express@4.18.2"]]
 	assert.Equal(t, "4.18.2", pinned.VersionInfo)
 	assert.Empty(t, pinned.Comment)

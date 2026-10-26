@@ -3228,7 +3228,13 @@
 	"repo.settings.code_security": "Code security",
 	"repo.settings.dependency_graph.enable": "Enable for %s",
 	"repo.settings.dependency_graph.off_help": "Off: the Dependencies page and SBOM export are removed and the stored package list is deleted.",
-	"repo.settings.dependency_graph.set_by_org": "Set by the %s organization.",
+	"repo.settings.dependency_graph.set_by_org": "Set by the %s organization. When the organization lifts this, the repository setting (on) applies again.",
+	"repo.settings.dependency_graph.set_by_org_own_off": "Set by the %s organization. When the organization lifts this, the repository setting (off) applies again.",
+	"repo.settings.dependency_graph.change_in_org": "Change it in the organization settings.",
+	"repo.settings.dependency_graph.ask_org": "Ask an owner of %s to change it.",
+	"repo.settings.dependency_graph.change_in_admin": "Change it in Site administration.",
+	"repo.settings.dependency_graph.ask_admin": "Ask a site administrator to change it.",
+	"repo.settings.dependency_graph.saved": "The dependency graph setting has been saved.",
 	"repo.settings.dependency_graph.org_off": "Turned off by the %s organization.",
 	"repo.settings.dependency_graph.site_off": "Turned off by the site administrator.",
 	"repo.settings.dependency_graph.locked": "The dependency graph of this repository is set by the organization or the site administrator and can't be changed here.",
@@ -3237,7 +3243,6 @@
 	"org.settings.dependency_graph.enable_help": "Repository admins can still turn it off for their repository. Off: nothing in this organization is scanned, its Dependencies pages and SBOM exports answer 404, and the stored package lists are deleted.",
 	"org.settings.dependency_graph.locked": "Apply to all repositories",
 	"org.settings.dependency_graph.locked_help": "Repositories can't change it. Use this to require the inventory for compliance.",
-	"org.settings.dependency_graph.site_off": "Turned off by the site administrator.",
 	"admin.dependency_graph": "Dependency graph",
 	"admin.dependency_graph.desc": "Reads lock files and manifests on each repository's default branch to list its packages and export an SBOM. Changes apply within a few seconds; no restart.",
 	"admin.dependency_graph.enable": "Enable the dependency graph on this instance",
@@ -3245,7 +3250,7 @@
 	"admin.dependency_graph.file_default_on": "Starting value from app.ini %s: on. Once saved here, this value wins.",
 	"admin.dependency_graph.file_default_off": "Starting value from app.ini %s: off. Once saved here, this value wins.",
 	"admin.dependency_graph.updated": "Last changed %s by %s.",
-	"admin.dependency_graph.saved": "The dependency graph setting has been saved.",
+	"admin.dependency_graph.audit": "Each change is recorded in the audit log.",
 	"repo.dependencies.title": "Dependencies",
 	"repo.dependencies.summary": "%s from %s on %s at %s, updated %s",
 	"repo.dependencies.packages": {
@@ -3304,8 +3309,22 @@
 	"repo.dependencies.matches": "%s of %s packages match.",
 	"repo.dependencies.clear": "Clear filters",
 	"repo.dependencies.note": "Licenses come from the lockfile where it records them (npm, Composer); others show Unknown and NOASSERTION in the SBOM. The manifest link opens the file at the scanned commit. The SBOM names this repository %s.",
-	"repo.dependencies.unpinned": "%s has no lock file",
-	"repo.dependencies.unpinned_hint": "Only its direct dependencies are listed, with the version ranges it declares. Commit %s for exact versions and transitive packages.",
+	"repo.dependencies.unpinned": {
+		"one": "%s has no lock file",
+		"other": "%s have no lock file"
+	},
+	"repo.dependencies.unpinned_hint": {
+		"one": "Only its direct dependencies are listed, with the version ranges it declares. Commit %s for exact versions and transitive packages.",
+		"other": "Only their direct dependencies are listed, with the version ranges they declare. Commit %s for exact versions and transitive packages."
+	},
+	"repo.dependencies.partial": {
+		"one": "%d manifest was read only in part",
+		"other": "%d manifests were read only in part"
+	},
+	"repo.dependencies.partial_lines": {
+		"one": "%d line that names a dependency is in a form that could not be read, and is not listed",
+		"other": "%d lines that name a dependency are in a form that could not be read, and are not listed"
+	},
 	"repo.dependencies.locks_or": "%s or %s",
 	"repo.dependencies.not_pinned": "not pinned"
 }

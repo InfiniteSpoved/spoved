@@ -4,28 +4,38 @@
 			{{ctx.Locale.Tr "repo.dependency_graph"}}
 		</h4>
 		<div class="ui attached segment">
-			<form class="ui form" action="{{.RepoLink}}/settings/code_security" method="post">
+			<form class="ui form dependency-graph-switch" action="{{.RepoLink}}/settings/code_security" method="post">
 				<fieldset {{if not .CanChange}}disabled{{end}}>
-					<div class="inline field">
+					<div class="field">
 						<div class="ui checkbox{{if not .CanChange}} disabled{{end}}">
-							<input id="dependency-graph-enabled" name="enabled" type="checkbox" {{if .Switch.Enabled}}checked{{end}}>
-							<label for="dependency-graph-enabled"><strong>{{ctx.Locale.Tr "repo.settings.dependency_graph.enable" .Repository.FullName}}</strong></label>
+							<input id="dependency-graph-enabled" name="enabled" type="checkbox" aria-describedby="dependency-graph-set-by" {{if .Switch.Enabled}}checked{{end}}>
+							<label for="dependency-graph-enabled">
+								<strong>{{ctx.Locale.Tr "repo.settings.dependency_graph.enable" .Repository.FullName}}</strong>
+								{{if .CanChange}}<span class="help" id="dependency-graph-set-by">{{ctx.Locale.Tr "repo.settings.dependency_graph.off_help"}}</span>{{end}}
+							</label>
 						</div>
-						<p class="help" id="dependency-graph-set-by">
-							{{if not .Switch.Site}}
-								{{ctx.Locale.Tr "repo.settings.dependency_graph.site_off"}}
-							{{else if and .Switch.Org (not .Switch.Org.On)}}
-								{{ctx.Locale.Tr "repo.settings.dependency_graph.org_off" .Repository.OwnerName}}
-							{{else if and .Switch.Org .Switch.Org.Locked}}
-								{{ctx.Locale.Tr "repo.settings.dependency_graph.set_by_org" .Repository.OwnerName}}
-							{{else}}
-								{{ctx.Locale.Tr "repo.settings.dependency_graph.off_help"}}
-							{{end}}
-						</p>
 					</div>
-					<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+					{{if .CanChange}}
+						<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+					{{end}}
 				</fieldset>
 			</form>
+			{{if not .CanChange}}
+				{{/* outside the disabled label, so it keeps the full text contrast */}}
+				<p class="help dependency-graph-decided" id="dependency-graph-set-by">
+					{{if not .Switch.Site}}
+						{{ctx.Locale.Tr "repo.settings.dependency_graph.site_off"}}
+						{{if .CanChangeThere}}<a href="{{AppSubUrl}}/admin/config/dependency-graph">{{ctx.Locale.Tr "repo.settings.dependency_graph.change_in_admin"}}</a>{{else}}{{ctx.Locale.Tr "repo.settings.dependency_graph.ask_admin"}}{{end}}
+					{{else}}
+						{{if not .Switch.Org.On}}
+							{{ctx.Locale.Tr "repo.settings.dependency_graph.org_off" .Repository.OwnerName}}
+						{{else}}
+							{{if .Switch.Own}}{{ctx.Locale.Tr "repo.settings.dependency_graph.set_by_org" .Repository.OwnerName}}{{else}}{{ctx.Locale.Tr "repo.settings.dependency_graph.set_by_org_own_off" .Repository.OwnerName}}{{end}}
+						{{end}}
+						{{if .CanChangeThere}}<a href="{{.Repository.Owner.OrganisationLink}}/settings/code_security">{{ctx.Locale.Tr "repo.settings.dependency_graph.change_in_org"}}</a>{{else}}{{ctx.Locale.Tr "repo.settings.dependency_graph.ask_org" .Repository.OwnerName}}{{end}}
+					{{end}}
+				</p>
+			{{end}}
 		</div>
 	</div>
 {{template "repo/settings/layout_footer" .}}

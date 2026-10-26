@@ -25,12 +25,15 @@ type Dependency struct {
 	License string `json:"license"`
 }
 
-// SkippedManifest is a manifest that was not read.
+// SkippedManifest is a manifest that was not read, or (code partially_read) read only in part.
 // swagger:model
 type SkippedManifest struct {
 	Path string `json:"path"`
-	// parse_error, manifest_too_large, too_many_manifests, too_many_dependencies, too_many_entries, invalid_path or read_error
+	// parse_error, manifest_too_large, too_many_manifests, too_many_dependencies, too_many_entries, invalid_path,
+	// read_error or partially_read
 	Code string `json:"code"`
+	// partially_read: the lines naming a dependency that could not be read
+	Lines int `json:"lines,omitempty"`
 }
 
 // DependencyScan is the state of the last scan of a repository.

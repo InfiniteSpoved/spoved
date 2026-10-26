@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"path"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -42,8 +41,8 @@ var (
 	auxNames = map[string]bool{"package.json": true, "composer.json": true, "pyproject.toml": true, "Directory.Packages.props": true, "pom.xml": true}
 
 	// parseManifest parses one manifest; tests replace it
-	parseManifest = func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
-		return f.ParseLimited(ctx, data, find, maxRows)
+	parseManifest = func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) (*dependency.Result, error) {
+		return f.ParseFull(ctx, data, find, maxRows)
 	}
 )
 
@@ -199,7 +198,7 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	if !stillEnabled(ctx, repo.ID) {
 		return false, nil // turned off while the scan ran
 	}
-	written, err := repo_model.ReplaceRepoDependenciesIf(ctx, result, deps, old)
+	written, err := repo_model.ReplaceRepoDependenciesIf(ctx, result, deps, old, stillOn(repo.ID))
 	if err != nil {
 		return false, err
 	}
@@ -228,6 +227,11 @@ func stillEnabled(ctx context.Context, repoID int64) bool {
 	return err == nil && Enabled(ctx, repo)
 }
 
+// stillOn is the check of the switches inside the transaction that stores a scan (see enabledStored).
+func stillOn(repoID int64) func(context.Context) (bool, error) {
+	return func(ctx context.Context) (bool, error) { return enabledStored(ctx, repoID) }
+}
+
 // headCommit reads the commit the default branch points at now.
 func headCommit(ctx context.Context, repo *repo_model.Repository) (string, error) {
 	gitRepo, err := gitrepo.OpenRepository(ctx, repo)
@@ -244,40 +248,38 @@ func fail(ctx context.Context, repo *repo_model.Repository, old *repo_model.Depe
 	if ctx.Err() != nil {
 		return ctx.Err() // shutting down: not a failure of the repository
 	}
+	if !stillEnabled(ctx, repo.ID) {
+		return nil // turned off while the scan ran: nothing is stored
+	}
 	log.Warn("dependency graph: scan of repository %d failed (%s): %v", repo.ID, code, cause)
 	s := &repo_model.DependencyScan{RepoID: repo.ID, ScannedUnix: timeutil.TimeStampNow(), Status: repo_model.DependencyScanFailed, Error: code}
 	if old != nil {
 		s.CommitSHA = old.CommitSHA // the condition of the write; the stored commit and counts stay
 	}
-	_, err := repo_model.ReplaceRepoDependenciesIf(ctx, s, nil, old)
+	_, err := repo_model.ReplaceRepoDependenciesIf(ctx, s, nil, old, stillOn(repo.ID))
 	return err
 }
 
 func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.Repository, sha string) (*repo_model.DependencyScan, []*repo_model.Dependency, string, error) {
 	cfg := &setting.DependencyGraph
-	var manifests []treeEntry
+	var manifests, unpinned []treeEntry
 	aux := map[string]treeEntry{}
-	locks := map[string]bool{}
 	err := walkTree(ctx, gitRepo, sha, cfg.MaxTreeEntries, func(e treeEntry) {
 		if hasExcludedSegment(e.path) {
 			return
 		}
-		base := path.Base(e.path)
-		if auxNames[base] {
+		if auxNames[path.Base(e.path)] {
 			aux[e.path] = e
 		}
-		if dependency.IsLockName(base) {
-			locks[e.path] = true
-		}
-		if dependency.FormatForPath(e.path) != nil {
+		if f := dependency.FormatForPath(e.path); f != nil && f.Unpinned {
+			unpinned = append(unpinned, e)
+		} else if f != nil {
 			manifests = append(manifests, e)
 		}
 	})
-	// a manifest without a lock file is read only when no lock file covers it (a lock that can't be read still does)
-	manifests = slices.DeleteFunc(manifests, func(e treeEntry) bool {
-		f := dependency.FormatForPath(e.path)
-		return f.Unpinned && f.Covered(e.path, func(p string) bool { return locks[p] })
-	})
+	// the manifests without a lock file come last: they are read only when no lock file read before covers them, and
+	// they never push a lock file out of MaxManifests or the list of skipped manifests
+	manifests = append(manifests, unpinned...)
 	switch {
 	case errors.Is(err, errTreeTooLarge):
 		return nil, nil, repo_model.DependencyErrTreeTooLarge, err
@@ -338,19 +340,19 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 	deps := []*repo_model.Dependency{}
 	var skipped []repo_model.SkippedManifest
 	skip := func(p, code string) {
-		if len(skipped) < 100 {
-			p = dependency.SafeText(p)
-			if len(p) > dependency.MaxPathLen {
-				p = strings.ToValidUTF8(p[:dependency.MaxPathLen], "") // cut on a rune boundary
-			}
-			skipped = append(skipped, repo_model.SkippedManifest{Path: p, Code: code})
-		}
+		skipped = appendSkipped(skipped, repo_model.SkippedManifest{Path: p, Code: code})
 	}
+	locks := map[string]*dependency.Info{} // the lock files read, with rows: what they cover (see Format.Covered)
+	read := 0                              // the manifests counted against MaxManifests
 	for i, m := range manifests {
 		if ctx.Err() != nil {
 			return nil, nil, repo_model.DependencyErrTimeout, ctx.Err()
 		}
-		if i >= cfg.MaxManifests {
+		format := dependency.FormatForPath(m.path)
+		if format.Unpinned && format.Covered(m.path, locks, nil) {
+			continue
+		}
+		if read++; read > cfg.MaxManifests {
 			skip(m.path, repo_model.DependencySkipTooMany)
 			continue
 		}
@@ -358,7 +360,6 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 			skip(m.path, repo_model.DependencySkipInvalidPath)
 			continue
 		}
-		format := dependency.FormatForPath(m.path)
 		limit := cfg.MaxManifestSize
 		if format.Small {
 			limit = min(limit, dependency.MaxSmallManifestSize)
@@ -372,7 +373,7 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 			skip(m.path, repo_model.DependencySkipRead)
 			continue
 		}
-		parsed, err := parseManifest(ctx, format, data, find(m.path), cfg.MaxDependencies-len(deps))
+		res, err := parseManifest(ctx, format, data, find(m.path), cfg.MaxDependencies-len(deps))
 		if ctx.Err() != nil {
 			return nil, nil, repo_model.DependencyErrTimeout, ctx.Err()
 		}
@@ -387,7 +388,9 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 			}
 			// the stored rows reached the cap: every later manifest stays unread
 			for _, rest := range manifests[i+1:] {
-				skip(rest.path, repo_model.DependencySkipTooManyDeps)
+				if f := dependency.FormatForPath(rest.path); !f.Unpinned || !f.Covered(rest.path, locks, nil) {
+					skip(rest.path, repo_model.DependencySkipTooManyDeps)
+				}
 			}
 			break
 		}
@@ -395,8 +398,20 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 			skip(m.path, repo_model.DependencySkipParse)
 			continue
 		}
+		if res == nil {
+			res = &dependency.Result{}
+		}
+		if format.Unpinned && format.Covered(m.path, locks, &res.Info) {
+			continue // a workspace member, which the root's Cargo.lock covers
+		}
+		if dependency.IsLockName(path.Base(m.path)) && len(res.Deps) > 0 {
+			locks[m.path] = &res.Info // an empty lock covers nothing: its manifests are read on their own
+		}
+		if res.Info.Unread > 0 {
+			skipped = appendSkipped(skipped, repo_model.SkippedManifest{Path: m.path, Code: repo_model.DependencySkipPartial, Lines: res.Info.Unread})
+		}
 		scan.ManifestCount++
-		for _, d := range parsed {
+		for _, d := range res.Deps {
 			deps = append(deps, &repo_model.Dependency{
 				RepoID: repo.ID, Ecosystem: d.Ecosystem, Name: d.Name, Version: d.Version, Requirement: d.Requirement,
 				ManifestPath: m.path, Direct: d.Direct, License: d.License,
@@ -406,4 +421,16 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 	scan.DependencyCount = len(deps)
 	scan.SetSkippedManifests(skipped)
 	return scan, deps, "", nil
+}
+
+// appendSkipped adds a manifest to the list of skipped ones, which keeps the first 100.
+func appendSkipped(skipped []repo_model.SkippedManifest, m repo_model.SkippedManifest) []repo_model.SkippedManifest {
+	if len(skipped) >= 100 {
+		return skipped
+	}
+	m.Path = dependency.SafeText(m.Path)
+	if len(m.Path) > dependency.MaxPathLen {
+		m.Path = strings.ToValidUTF8(m.Path[:dependency.MaxPathLen], "") // cut on a rune boundary
+	}
+	return append(skipped, m)
 }

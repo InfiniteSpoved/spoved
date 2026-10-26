@@ -42,7 +42,7 @@ func ToAPIDependencyScan(scan *repo_model.DependencyScan) api.DependencyScan {
 		out.ScannedAt = &at
 	}
 	for _, m := range scan.SkippedManifests() {
-		out.SkippedManifests = append(out.SkippedManifests, api.SkippedManifest{Path: m.Path, Code: m.Code})
+		out.SkippedManifests = append(out.SkippedManifests, api.SkippedManifest{Path: m.Path, Code: m.Code, Lines: m.Lines})
 	}
 	return out
 }

@@ -87,7 +87,7 @@ func (s *SBOM) components() []*component {
 		if d.ManifestPath != "" && !slices.Contains(c.manifests, d.ManifestPath) {
 			c.manifests = append(c.manifests, d.ManifestPath)
 		}
-		if d.Version == "" && d.Requirement != "" && !slices.Contains(c.requirements, d.Requirement) {
+		if d.Requirement != "" && !slices.Contains(c.requirements, d.Requirement) {
 			c.requirements = append(c.requirements, d.Requirement)
 		}
 	}
@@ -188,7 +188,7 @@ func (s *SBOM) GenerateSPDX(now time.Time, id uuid.UUID) ([]byte, error) {
 			p.SourceInfo = "found in " + strings.Join(c.manifests, ", ")
 		}
 		if len(c.requirements) > 0 {
-			p.Comment = "not pinned (no lock file); declared range: " + strings.Join(c.requirements, " | ")
+			p.Comment = "not pinned (no lock file); declared range: " + strings.Join(c.requirements, "; ")
 		}
 		if c.license != "" {
 			if expr, ok := normalizeLicense(c.license); ok {
