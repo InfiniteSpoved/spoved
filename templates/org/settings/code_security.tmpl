@@ -1,0 +1,31 @@
+{{template "org/settings/layout_head" (dict "ctxData" . "pageClass" "organization settings code-security")}}
+<div class="org-setting-content">
+	<h4 class="ui top attached header">
+		{{ctx.Locale.Tr "repo.dependency_graph"}}
+	</h4>
+	<div class="ui attached segment">
+		{{if not .SiteEnabled}}
+			<div class="ui info message" id="dependency-graph-site-off">{{ctx.Locale.Tr "org.settings.dependency_graph.site_off"}}</div>
+		{{end}}
+		<form class="ui form" action="{{.OrgLink}}/settings/code_security" method="post">
+			<fieldset {{if not .SiteEnabled}}disabled{{end}}>
+				<div class="inline field">
+					<div class="ui checkbox{{if not .SiteEnabled}} disabled{{end}}">
+						<input id="dependency-graph-enabled" name="enabled" type="checkbox" {{if .Enabled}}checked{{end}}>
+						<label for="dependency-graph-enabled"><strong>{{ctx.Locale.Tr "org.settings.dependency_graph.enable" .Org.Name}}</strong></label>
+					</div>
+					<p class="help">{{ctx.Locale.Tr "org.settings.dependency_graph.enable_help"}}</p>
+				</div>
+				<div class="inline field">
+					<div class="ui checkbox{{if not .SiteEnabled}} disabled{{end}}">
+						<input id="dependency-graph-locked" name="locked" type="checkbox" {{if .Locked}}checked{{end}}>
+						<label for="dependency-graph-locked"><strong>{{ctx.Locale.Tr "org.settings.dependency_graph.locked"}}</strong></label>
+					</div>
+					<p class="help">{{ctx.Locale.Tr "org.settings.dependency_graph.locked_help"}}</p>
+				</div>
+				<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+			</fieldset>
+		</form>
+	</div>
+</div>
+{{template "org/settings/layout_footer" .}}

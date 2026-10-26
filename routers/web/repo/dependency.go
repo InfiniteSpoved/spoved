@@ -13,15 +13,15 @@ import (
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/dependency"
 	"forgejo.org/modules/optional"
-	"forgejo.org/modules/setting"
 	"forgejo.org/routers/common"
 	"forgejo.org/services/context"
 	dependency_service "forgejo.org/services/dependency"
 )
 
-// MustEnableDependencyGraph answers 404 while [dependency_graph] is off.
+// MustEnableDependencyGraph answers 404 while the dependency graph is off for the repository (site, organization
+// or repository switch), as if the page didn't exist.
 func MustEnableDependencyGraph(ctx *context.Context) {
-	if !setting.DependencyGraph.Enabled {
+	if !dependency_service.Enabled(ctx, ctx.Repo.Repository) {
 		ctx.NotFound("MustEnableDependencyGraph", nil)
 	}
 }
@@ -54,7 +54,7 @@ const dependencyPageSize = 50
 
 // SetDependencyGraphNav tells the Activity menu whether to show the Dependencies item.
 func SetDependencyGraphNav(ctx *context.Context) {
-	ctx.Data["DependencyGraphEnabled"] = setting.DependencyGraph.Enabled
+	ctx.Data["DependencyGraphEnabled"] = dependency_service.Enabled(ctx, ctx.Repo.Repository)
 }
 
 // Dependencies renders the list of the packages of the default branch, with the filters and the SBOM export.

@@ -45,6 +45,15 @@ func (v18zzjRepoDependencyScan) TableName() string {
 	return "repo_dependency_scan"
 }
 
+// v18zzjRepository adds the repository's own switch of the dependency graph.
+type v18zzjRepository struct {
+	DependencyGraphDisabled bool `xorm:"NOT NULL DEFAULT false"`
+}
+
+func (v18zzjRepository) TableName() string {
+	return "repository"
+}
+
 func addRepoDependency(x *xorm.Engine) error {
-	return x.Sync(new(v18zzjRepoDependency), new(v18zzjRepoDependencyScan))
+	return x.Sync(new(v18zzjRepoDependency), new(v18zzjRepoDependencyScan), new(v18zzjRepository))
 }

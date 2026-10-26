@@ -126,6 +126,9 @@
 				<a class="{{if .PageIsAdminConfigSettings}}active {{end}}item" href="{{AppSubUrl}}/admin/config/settings">
 					{{ctx.Locale.Tr "admin.config_settings"}}
 				</a>
+				<a class="{{if .PageIsAdminConfigDependencyGraph}}active {{end}}item" href="{{AppSubUrl}}/admin/config/dependency-graph">
+					{{ctx.Locale.Tr "admin.dependency_graph"}}
+				</a>
 			</div>
 		</details>
 		<a class="{{if .PageIsAdminAnnouncements}}active {{end}}item" href="{{AppSubUrl}}/admin/announcements">

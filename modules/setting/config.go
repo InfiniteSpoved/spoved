@@ -65,6 +65,7 @@ type ConfigStruct struct {
 	OrgCategoryOwnersCanAssign *config.Value[bool]
 	LogShipping                *config.Value[LogShippingState]
 	AuditRetention             *config.Value[AuditRetentionState]
+	DependencyGraph            *config.Value[DependencyGraphState]
 }
 
 var (
@@ -91,6 +92,7 @@ func initDefaultConfig() {
 		OrgCategoryOwnersCanAssign: config.ValueJSON[bool]("org_category.owners_can_assign"),
 		LogShipping:                config.ValueJSON[LogShippingState]("log_shipping.destinations"),
 		AuditRetention:             config.ValueJSON[AuditRetentionState]("audit.retention_days"),
+		DependencyGraph:            config.ValueJSON[DependencyGraphState]("dependency_graph.enabled").WithInvalid(DependencyGraphState{Mode: "invalid"}),
 	}
 }
 

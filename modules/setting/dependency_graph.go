@@ -31,3 +31,22 @@ func loadDependencyGraphFrom(rootCfg ConfigProvider) (err error) {
 	DependencyGraph.ScanTimeout = max(DependencyGraph.ScanTimeout, time.Second)
 	return nil
 }
+
+// DependencyGraphState is stored as JSON in the "dependency_graph.enabled" system setting. An empty Mode means the
+// app.ini default ([dependency_graph] ENABLED); once the switch is saved in Site administration, the stored value wins.
+type DependencyGraphState struct {
+	Mode        string `json:"mode"` // "on", "off" or "" (app.ini)
+	UpdatedBy   int64  `json:"updated_by"`
+	UpdatedUnix int64  `json:"updated_unix"`
+}
+
+// Enabled is the site switch in force. A stored value that can't be parsed or isn't known reads as off.
+func (s DependencyGraphState) Enabled() bool {
+	switch s.Mode {
+	case "":
+		return DependencyGraph.Enabled
+	case "on":
+		return true
+	}
+	return false
+}

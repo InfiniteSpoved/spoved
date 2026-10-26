@@ -181,6 +181,53 @@ func ReplaceRepoDependenciesIf(ctx context.Context, scan *DependencyScan, deps [
 	return written, err
 }
 
+// The organization's dependency graph switch, as user settings of the organization: DependencyGraphOrgKey is
+// "false" while the owners turned it off (no row = on), DependencyGraphOrgLockedKey is "true" while repositories
+// can't change it. They live here because the SQL form of the rule (DependencyGraphOffCond) reads them.
+const (
+	DependencyGraphOrgKey       = "dependency_graph.enabled"
+	DependencyGraphOrgLockedKey = "dependency_graph.locked"
+)
+
+// orgSettingCond is an EXISTS on the user setting key = value of the repository's owner.
+func orgSettingCond(key, value string) builder.Cond {
+	return builder.Exists(builder.Select("1").From("user_setting").Where(builder.And(
+		builder.Expr("user_setting.user_id = repository.owner_id"),
+		builder.Eq{"user_setting.setting_key": key, "user_setting.setting_value": value},
+	)))
+}
+
+// DependencyGraphOffCond is, on the repository table, the repositories whose organization or own setting turns the
+// dependency graph off: the SQL form of services/dependency.Enabled without the site switch (the caller checks
+// that). Only organizations store the settings, so for a personal repository only its own flag counts.
+func DependencyGraphOffCond() builder.Cond {
+	return builder.Or(
+		orgSettingCond(DependencyGraphOrgKey, "false"),
+		builder.And(builder.Eq{"repository.dependency_graph_disabled": true}, builder.Not{orgSettingCond(DependencyGraphOrgLockedKey, "true")}),
+	)
+}
+
+// DeleteRepoDependencies removes the rows and the scan row of a repository.
+func DeleteRepoDependencies(ctx context.Context, repoID int64) error {
+	e := db.GetEngine(ctx)
+	if _, err := e.Where("repo_id = ?", repoID).Delete(new(Dependency)); err != nil {
+		return err
+	}
+	_, err := e.Where("repo_id = ?", repoID).Delete(new(DependencyScan))
+	return err
+}
+
+// ScannedDependencyRepoIDs returns up to limit repositories that have a scan row and match cond (on the repository
+// table; nil for all, also a scan row whose repository is gone).
+func ScannedDependencyRepoIDs(ctx context.Context, cond builder.Cond, limit int) ([]int64, error) {
+	var ids []int64
+	sess := db.GetEngine(ctx).Table("repo_dependency_scan").Select("repo_dependency_scan.repo_id")
+	if cond != nil {
+		sess = sess.Join("INNER", "repository", "repository.id = repo_dependency_scan.repo_id").Where(cond)
+	}
+	return ids, sess.OrderBy("repo_dependency_scan.repo_id").Limit(limit).Find(&ids)
+}
+
 // DependencySearchOptions selects the dependencies of one repository.
 type DependencySearchOptions struct {
 	db.ListOptions
@@ -239,6 +286,7 @@ func UnscannedDependencyRepoIDs(ctx context.Context, retryBefore timeutil.TimeSt
 		Join("LEFT", "repo_dependency_scan", "repo_dependency_scan.repo_id = repository.id").
 		Join("LEFT", "branch", "branch.repo_id = repository.id AND branch.name = repository.default_branch AND branch.is_deleted = ?", false).
 		Where(builder.Eq{"repository.is_empty": false, "repository.status": RepositoryReady, "repository.trashed_unix": 0}).
+		And(builder.Not{DependencyGraphOffCond()}).
 		And(builder.Or(
 			builder.IsNull{"repo_dependency_scan.id"},
 			builder.And(

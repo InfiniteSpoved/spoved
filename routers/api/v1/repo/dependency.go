@@ -12,7 +12,6 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/dependency"
 	"forgejo.org/modules/optional"
-	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/routers/api/v1/utils"
 	"forgejo.org/routers/common"
@@ -20,9 +19,10 @@ import (
 	dependency_service "forgejo.org/services/dependency"
 )
 
-// MustEnableDependencyGraph answers 404 while [dependency_graph] is off, as if the routes didn't exist.
+// MustEnableDependencyGraph answers 404 while the dependency graph is off for the repository (site, organization
+// or repository switch), as if the routes didn't exist.
 func MustEnableDependencyGraph(ctx *context.APIContext) {
-	if !setting.DependencyGraph.Enabled {
+	if !dependency_service.Enabled(ctx, ctx.Repo().Repository) {
 		ctx.NotFound()
 	}
 }

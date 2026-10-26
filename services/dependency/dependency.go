@@ -19,7 +19,6 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/queue"
 	"forgejo.org/modules/repository"
-	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	notify_service "forgejo.org/services/notify"
 )
@@ -72,8 +71,8 @@ func lockRepoScan(repoID int64) (unlock func()) {
 	}
 }
 
-// Init starts the queue and listens for pushes. It does nothing until [dependency_graph] ENABLED is on, but the
-// notifier is always registered, so the setting is read when a push happens.
+// Init starts the queue and listens for pushes. Both are always set up, whatever the switches say: they are read
+// when a push happens and again when a scan runs, so turning the dependency graph on or off needs no restart.
 func Init() error {
 	notify_service.RegisterNotifier(&notifier{})
 	scanQueue = queue.CreateUniqueQueue(graceful.GetManager().ShutdownContext(), "dependency_graph", handler)
@@ -97,26 +96,32 @@ func (*notifier) SyncPushCommits(ctx context.Context, _ *user_model.User, repo *
 }
 
 // MigrateRepository: a migrated or mirrored repository arrives without a push.
-func (*notifier) MigrateRepository(_ context.Context, _, _ *user_model.User, repo *repo_model.Repository) {
-	Enqueue(repo.ID)
+func (*notifier) MigrateRepository(ctx context.Context, _, _ *user_model.User, repo *repo_model.Repository) {
+	enqueueIfEnabled(ctx, repo)
 }
 
-func (*notifier) ChangeDefaultBranch(_ context.Context, repo *repo_model.Repository) {
-	Enqueue(repo.ID)
+func (*notifier) ChangeDefaultBranch(ctx context.Context, repo *repo_model.Repository) {
+	enqueueIfEnabled(ctx, repo)
 }
 
 // enqueueDefaultBranch queues the repository if ref is its default branch: tags, other branches and refs like
 // refs/for/* or refs/pull/* never start a scan.
-func enqueueDefaultBranch(_ context.Context, repo *repo_model.Repository, ref git.RefName) {
+func enqueueDefaultBranch(ctx context.Context, repo *repo_model.Repository, ref git.RefName) {
 	if ref.IsBranch() && ref.BranchName() == repo.DefaultBranch {
+		enqueueIfEnabled(ctx, repo)
+	}
+}
+
+func enqueueIfEnabled(ctx context.Context, repo *repo_model.Repository) {
+	if Enabled(ctx, repo) {
 		Enqueue(repo.ID)
 	}
 }
 
 // Enqueue queues a scan of the repository. A repository that is already queued isn't queued twice. It does nothing
-// when the feature is off.
+// while the site switch is off; the scan checks every switch (Enabled) again before any work.
 func Enqueue(repoID int64) {
-	if !setting.DependencyGraph.Enabled || scanQueue == nil {
+	if scanQueue == nil || !SiteEnabled(graceful.GetManager().ShutdownContext()) {
 		return
 	}
 	if err := scanQueue.Push(repoID); err != nil && !errors.Is(err, queue.ErrAlreadyInQueue) {
@@ -148,9 +153,9 @@ func handler(items ...int64) (unhandled []int64) {
 
 // EnqueueUnscanned queues the repositories that have no scan or whose default branch moved since the last one, in
 // batches of 500 per call (the next call takes the next ones once these are scanned). A repository whose last scan
-// failed waits a day.
+// failed waits a day. Repositories the dependency graph is off for are left out.
 func EnqueueUnscanned(ctx context.Context) error {
-	if !setting.DependencyGraph.Enabled {
+	if !SiteEnabled(ctx) {
 		return nil
 	}
 	ids, err := repo_model.UnscannedDependencyRepoIDs(ctx, timeutil.TimeStampNow().Add(-int64(failedRetry/time.Second)), cronBatch)

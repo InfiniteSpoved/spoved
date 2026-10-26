@@ -177,6 +177,7 @@ var Actions = map[string]string{
 	"credential.ssh_key.expired":                CategoryCredential,
 
 	"org.branch_workflow.changed":          CategoryOrg,
+	"org.dependency_graph.changed":         CategoryOrg,
 	"org.merged_branches.deleted":          CategoryOrg,
 	"org.organization.archived":            CategoryOrg,
 	"org.organization.created":             CategoryOrg,

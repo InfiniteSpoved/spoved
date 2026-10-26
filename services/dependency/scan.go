@@ -136,7 +136,7 @@ func Scan(ctx context.Context, repoID int64) error {
 
 // scan is Scan; requeue is true when the branch moved while it ran.
 func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
-	if !setting.DependencyGraph.Enabled {
+	if !SiteEnabled(ctx) {
 		return false, nil
 	}
 	repo, err := repo_model.GetRepositoryByID(ctx, repoID)
@@ -145,6 +145,9 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	}
 	if err != nil {
 		return false, err
+	}
+	if !Enabled(ctx, repo) {
+		return false, nil
 	}
 	if repo.IsEmpty || repo.Status != repo_model.RepositoryReady {
 		return false, nil
@@ -192,9 +195,16 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	// The stored rows belong to sha; the database write is not bound to the scan's time budget. It happens only if
 	// the row is still the one read at the start, so a scan another process finished meanwhile is kept (the head
 	// read at the start is the one to store, even if it is an older commit than the stored one after a force push).
+	if !stillEnabled(ctx, repo.ID) {
+		return false, nil // turned off while the scan ran
+	}
 	written, err := repo_model.ReplaceRepoDependenciesIf(ctx, result, deps, old)
 	if err != nil {
 		return false, err
+	}
+	// turned off between the check and the write: the switch's purge may have run before the write, so delete here
+	if !stillEnabled(ctx, repo.ID) {
+		return false, repo_model.DeleteRepoDependencies(ctx, repo.ID)
 	}
 	// the head now, read with the outer context (the scan's time budget may be spent); if it can't be read, the
 	// next scan decides (the unique queue makes a needless one cheap)
@@ -209,6 +219,12 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	}
 	// the branch moved while the scan ran: the next scan is the one that ends on the head
 	return head != sha, nil
+}
+
+// stillEnabled reads the switches again with the repository as it is stored now.
+func stillEnabled(ctx context.Context, repoID int64) bool {
+	repo, err := repo_model.GetRepositoryByID(ctx, repoID)
+	return err == nil && Enabled(ctx, repo)
 }
 
 // headCommit reads the commit the default branch points at now.

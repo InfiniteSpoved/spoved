@@ -1,0 +1,24 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin dependency-graph")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">
+			{{ctx.Locale.Tr "admin.dependency_graph"}}
+		</h4>
+		<div class="ui attached segment">
+			<p>{{ctx.Locale.Tr "admin.dependency_graph.desc"}}</p>
+			{{if .UpdatedUnix}}
+				<p class="help">{{ctx.Locale.Tr "admin.dependency_graph.updated" (DateUtils.AbsoluteShort .UpdatedUnix) .UpdatedBy}}</p>
+			{{end}}
+			<form class="ui form" action="{{AppSubUrl}}/admin/config/dependency-graph" method="post">
+				<div class="inline field">
+					<div class="ui checkbox">
+						<input id="dependency-graph-enabled" name="enabled" type="checkbox" {{if .Enabled}}checked{{end}}>
+						<label for="dependency-graph-enabled"><strong>{{ctx.Locale.Tr "admin.dependency_graph.enable"}}</strong></label>
+					</div>
+					<p class="help">{{ctx.Locale.Tr "admin.dependency_graph.off_help"}}</p>
+				</div>
+				<p class="help" id="dependency-graph-file-default">{{if .FileDefault}}{{ctx.Locale.Tr "admin.dependency_graph.file_default_on" (HTMLFormat "<code>%s</code>" "[dependency_graph] ENABLED")}}{{else}}{{ctx.Locale.Tr "admin.dependency_graph.file_default_off" (HTMLFormat "<code>%s</code>" "[dependency_graph] ENABLED")}}{{end}}</p>
+				<button class="ui primary button">{{ctx.Locale.Tr "save"}}</button>
+			</form>
+		</div>
+	</div>
+{{template "admin/layout_footer" .}}

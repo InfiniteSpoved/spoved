@@ -149,7 +149,15 @@ func registerDependencyGraphScan() {
 		RunAtStart: true,
 		Schedule:   "@every 1h",
 	}, func(ctx context.Context, _ *user_model.User, _ Config) error {
-		return dependency_service.EnqueueUnscanned(ctx) // does nothing while [dependency_graph] is off
+		// the rows of repositories the dependency graph is off for (all of them while the site switch is off) go
+		// first: a switch change deletes only a bounded number at once, and a scan may have written after it
+		for more := true; more; {
+			var err error
+			if more, err = dependency_service.PurgeDisabled(ctx, 50); err != nil {
+				return err
+			}
+		}
+		return dependency_service.EnqueueUnscanned(ctx) // does nothing while the site switch is off
 	})
 }
 
