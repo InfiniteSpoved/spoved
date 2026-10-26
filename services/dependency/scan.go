@@ -125,6 +125,21 @@ func hasExcludedSegment(p string) bool {
 	return false
 }
 
+// AcquireSlot waits for one of the MAX_CONCURRENT_SCANS slots that scans and alert rematches share in this process;
+// release gives it back.
+func AcquireSlot(ctx context.Context) (release func(), err error) {
+	scanSlotsOnce.Do(func() { scanSlots = make(chan struct{}, max(setting.DependencyGraph.MaxConcurrentScans, 1)) })
+	select {
+	case scanSlots <- struct{}{}:
+		return func() { <-scanSlots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// RematchAlerts queues a repository for a rematch of its vulnerability alerts; services/vulnerability sets it.
+var RematchAlerts = func(repoID int64) {}
+
 // Scan reads the manifests of the repository's default branch, at the head as it is when the scan starts, and
 // replaces the stored dependencies. A scan that fails keeps the old dependencies and records an error code.
 func Scan(ctx context.Context, repoID int64) error {
@@ -156,13 +171,11 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	// one scan of a repository at a time, and at most MAX_CONCURRENT_SCANS of all, counted only while one runs
 	unlock := lockRepoScan(repo.ID)
 	defer unlock()
-	scanSlotsOnce.Do(func() { scanSlots = make(chan struct{}, max(setting.DependencyGraph.MaxConcurrentScans, 1)) })
-	select {
-	case scanSlots <- struct{}{}:
-		defer func() { <-scanSlots }()
-	case <-ctx.Done():
-		return false, ctx.Err()
+	release, err := AcquireSlot(ctx)
+	if err != nil {
+		return false, err
 	}
+	defer release()
 	old, err := repo_model.GetRepoDependencyScan(ctx, repo.ID)
 	if err != nil {
 		return false, err
@@ -205,9 +218,10 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	}
 	if written {
 		// the alerts follow the rows, under the same check of the switches; if this fails, the rows are right and the
-		// alerts catch up at the next scan or rematch
+		// repository is queued for a rematch
 		if _, err := vulnerability_model.RefreshAlerts(ctx, repo.ID, stillOn(repo.ID)); err != nil {
 			log.Error("vulnerability alerts: refresh repository %d: %v", repo.ID, err)
+			RematchAlerts(repo.ID)
 		}
 	}
 	// turned off between the check and the write: the switch's purge may have run before the write, so delete here

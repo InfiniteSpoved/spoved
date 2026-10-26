@@ -167,3 +167,13 @@
     min-height: 44px;
   }
 }
+
+@media (max-width: 767.98px) {
+  /* the alert count is a link: a target of at least 44px */
+  .repo-dependencies-alerts a.ui.label {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    font-size: 13px;
+  }
+}

@@ -6,6 +6,8 @@ package admin
 import (
 	"errors"
 	"net/http"
+	"strconv"
+	"time"
 
 	user_model "forgejo.org/models/user"
 	vulnerability_model "forgejo.org/models/vulnerability"
@@ -41,11 +43,23 @@ func DependencyGraph(ctx *context.Context) {
 	}
 	ctx.Data["MirrorStatuses"] = statuses
 	ctx.Data["MirrorURL"] = setting.DependencyGraph.OSVMirrorURL
-	ctx.Data["MirrorInterval"] = setting.DependencyGraph.UpdateInterval.String()
+	ctx.Data["MirrorInterval"] = shortDuration(setting.DependencyGraph.UpdateInterval)
 	ctx.Data["MirrorRunning"] = vulnerability_service.Running()
+	ctx.Data["MirrorSiteOn"] = dependency_service.SiteEnabled(ctx)
 	// the auditor reads the page; only a site admin changes anything
 	ctx.Data["CanChange"] = ctx.Doer.IsAdmin
 	ctx.HTML(http.StatusOK, tplDependencyGraph)
+}
+
+// shortDuration writes a duration as 24h or 90m, not 24h0m0s.
+func shortDuration(d time.Duration) string {
+	switch {
+	case d >= time.Hour && d%time.Hour == 0:
+		return strconv.FormatInt(int64(d/time.Hour), 10) + "h"
+	case d >= time.Minute && d%time.Minute == 0:
+		return strconv.FormatInt(int64(d/time.Minute), 10) + "m"
+	}
+	return d.String()
 }
 
 // DependencyGraphUpdateAdvisories starts an update of the advisory mirror ("Update now").
@@ -55,6 +69,8 @@ func DependencyGraphUpdateAdvisories(ctx *context.Context) {
 		ctx.Flash.Success(ctx.Tr("admin.dependency_graph.advisories.started"))
 	case errors.Is(err, vulnerability_service.ErrNoMirror):
 		ctx.Flash.Error(ctx.Tr("admin.dependency_graph.advisories.no_mirror"))
+	case errors.Is(err, vulnerability_service.ErrSiteOff):
+		ctx.Flash.Error(ctx.Tr("admin.dependency_graph.advisories.site_off"))
 	case errors.Is(err, vulnerability_service.ErrAlreadyRunning):
 		ctx.Flash.Error(ctx.Tr("admin.dependency_graph.advisories.running"))
 	case errors.Is(err, vulnerability_service.ErrTooSoon):

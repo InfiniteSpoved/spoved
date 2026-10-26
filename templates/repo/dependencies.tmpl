@@ -136,7 +136,7 @@
 							<span role="cell">{{if .Direct}}{{ctx.Locale.Tr "repo.dependencies.direct"}}{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.dependencies.transitive"}}</span>{{end}}</span>
 							<span role="cell">{{if .License}}{{.License}}{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.dependencies.license_unknown"}}</span>{{end}}</span>
 							<span role="cell"><a href="{{$.RepoLink}}/src/commit/{{$.Scan.CommitSHA}}/{{PathEscapeSegments .ManifestPath}}">{{range $i, $part := StringUtils.Split .ManifestPath "/"}}{{if $i}}/<wbr>{{end}}{{$part}}{{end}}</a></span>
-							{{if $.ShowAlertCounts}}{{$n := index $.AlertCounts .ID}}<span role="cell" class="repo-dependencies-alerts">{{if $n}}<a class="ui red basic mini label" href="{{$.RepoLink}}/security/alerts?q={{.Name | QueryEscape}}&ecosystem={{.Ecosystem | QueryEscape}}">{{ctx.Locale.TrPluralString $n "repo.dependencies.alert_count" $n}}</a>{{end}}</span>{{end}}
+							{{if $.ShowAlertCounts}}{{$n := index $.AlertCounts .ID}}<span role="cell" class="repo-dependencies-alerts">{{if $n}}<a class="ui red basic mini label" href="{{$.RepoLink}}/security/alerts?package={{.Name | QueryEscape}}&ecosystem={{.Ecosystem | QueryEscape}}&manifest={{.ManifestPath | QueryEscape}}">{{ctx.Locale.TrPluralString $n "repo.dependencies.alert_count" $n}}</a>{{end}}</span>{{end}}
 						</div>
 					{{end}}
 				</div>

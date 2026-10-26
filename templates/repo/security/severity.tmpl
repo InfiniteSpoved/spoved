@@ -1,6 +1,6 @@
-{{/* The severity label of an alert: the dot is the severity, one of critical, high, moderate, low or unknown */}}
+{{/* The severity label of an alert: the dot is the severity, one of critical, high, moderate, low or unknown. High and moderate use the theme's error and warning colours, which keep their text readable in every theme. */}}
 {{if eq . "critical"}}<span class="ui small red label vuln-severity">{{ctx.Locale.Tr "repo.security.severity.critical"}}</span>
-{{else if eq . "high"}}<span class="ui small orange label vuln-severity">{{ctx.Locale.Tr "repo.security.severity.high"}}</span>
-{{else if eq . "moderate"}}<span class="ui small yellow label vuln-severity">{{ctx.Locale.Tr "repo.security.severity.moderate"}}</span>
+{{else if eq . "high"}}<span class="ui small label vuln-severity vuln-severity-high">{{ctx.Locale.Tr "repo.security.severity.high"}}</span>
+{{else if eq . "moderate"}}<span class="ui small label vuln-severity vuln-severity-moderate">{{ctx.Locale.Tr "repo.security.severity.moderate"}}</span>
 {{else if eq . "low"}}<span class="ui small basic label vuln-severity">{{ctx.Locale.Tr "repo.security.severity.low"}}</span>
 {{else}}<span class="ui small basic label vuln-severity">{{ctx.Locale.Tr "repo.security.severity.unknown"}}</span>{{end}}

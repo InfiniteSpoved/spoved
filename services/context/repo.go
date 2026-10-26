@@ -1251,11 +1251,17 @@ func UnitTypes() func(ctx *Context) {
 	}
 }
 
+// IsAlertAuditorView is IsAuditorView for the alerts of the repository in ctx.Repo: the auditor role doesn't reach
+// a repository of an organization whose two-factor requirement blocks the auditor.
+func (ctx *Context) IsAlertAuditorView() bool {
+	return ctx.IsSigned && ctx.Repo.Owner != nil && vulnerability_service.AuditorView(ctx, ctx.Doer, ctx.Repo.Owner, ctx.IsReadOnlyMethod(), auth.IsHeldByUser(ctx.Authentication))
+}
+
 // setSecurityTab decides whether the repository header shows the Security tab and its count of open alerts: only for
 // someone who may see the alerts (a writer of the code, an admin, or an auditor reading) while the dependency graph is
 // on. Everyone else costs no query. One count query per page view, for those who see the tab.
 func (ctx *Context) setSecurityTab() {
-	if ctx.Repo.Repository == nil || !vulnerability_service.CanSeeAlerts(&ctx.Repo.Permission, ctx.IsAuditorView()) || !dependency_service.Enabled(ctx, ctx.Repo.Repository) {
+	if ctx.Repo.Repository == nil || !vulnerability_service.CanSeeAlerts(&ctx.Repo.Permission, ctx.IsAlertAuditorView()) || !dependency_service.Enabled(ctx, ctx.Repo.Repository) {
 		return
 	}
 	counts, err := vulnerability_model.CountAlertsByState(ctx, ctx.Repo.Repository.ID)

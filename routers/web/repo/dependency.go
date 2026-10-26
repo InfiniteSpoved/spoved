@@ -15,6 +15,7 @@ import (
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/dependency"
 	"forgejo.org/modules/optional"
+	"forgejo.org/modules/vulnerability"
 	"forgejo.org/routers/common"
 	"forgejo.org/services/context"
 	dependency_service "forgejo.org/services/dependency"
@@ -203,19 +204,15 @@ func Dependencies(ctx *context.Context) {
 	}
 	ctx.Data["Dependencies"] = rows
 	// the alert counts per package: for those who may see the alerts only, one query for the page's rows
-	if vulnerability_service.CanSeeAlerts(&ctx.Repo.Permission, ctx.IsAuditorView()) && len(rows) > 0 {
-		names := make([]string, 0, len(rows))
-		for _, r := range rows {
-			names = append(names, r.Name)
-		}
-		counts, err := vulnerability_model.CountOpenAlertsForNames(ctx, repo.ID, names)
+	if vulnerability_service.CanSeeAlerts(&ctx.Repo.Permission, ctx.IsAlertAuditorView()) && len(rows) > 0 {
+		counts, err := vulnerability_model.CountOpenAlerts(ctx, repo.ID)
 		if err != nil {
-			ctx.ServerError("CountOpenAlertsForNames", err)
+			ctx.ServerError("CountOpenAlerts", err)
 			return
 		}
 		perRow := make(map[int64]int64, len(rows))
 		for _, r := range rows {
-			perRow[r.ID] = counts[[2]string{r.Ecosystem, r.Name}]
+			perRow[r.ID] = counts[[3]string{r.Ecosystem, vulnerability.NormalizeName(r.Ecosystem, r.Name), r.ManifestPath}]
 		}
 		ctx.Data["ShowAlertCounts"] = true
 		ctx.Data["AlertCounts"] = perRow
