@@ -3270,7 +3270,7 @@
 	"repo.dependencies.error.other": "The scan could not finish. It is tried again after the next push.",
 	"repo.dependencies.rescan_failed": "The last scan failed. The list below is from the last scan that worked.",
 	"repo.dependencies.none": "No supported manifests on %s",
-	"repo.dependencies.none_hint": "spoved reads go.mod, package-lock.json, yarn.lock, pnpm-lock.yaml, requirements.txt (also requirements-dev.txt and the files in a requirements directory), poetry.lock, pom.xml, *.csproj, packages.lock.json, Cargo.lock, Gemfile.lock and composer.lock. Push one to the default branch and this page fills in.",
+	"repo.dependencies.none_hint": "spoved reads go.mod, package-lock.json, yarn.lock, pnpm-lock.yaml, requirements.txt (also requirements-dev.txt and the files in a requirements directory), poetry.lock, pom.xml, *.csproj, packages.lock.json, Cargo.lock, Gemfile.lock and composer.lock, and without a lock file package.json, Cargo.toml, pyproject.toml, Gemfile and composer.json. Push one to the default branch and this page fills in.",
 	"repo.dependencies.skipped": {
 		"one": "%d manifest was skipped",
 		"other": "%d manifests were skipped"
@@ -3303,5 +3303,9 @@
 	"repo.dependencies.no_match": "No package matches the filters.",
 	"repo.dependencies.matches": "%s of %s packages match.",
 	"repo.dependencies.clear": "Clear filters",
-	"repo.dependencies.note": "Licenses come from the lockfile where it records them (npm, Composer); others show Unknown and NOASSERTION in the SBOM. The manifest link opens the file at the scanned commit. The SBOM names this repository %s."
+	"repo.dependencies.note": "Licenses come from the lockfile where it records them (npm, Composer); others show Unknown and NOASSERTION in the SBOM. The manifest link opens the file at the scanned commit. The SBOM names this repository %s.",
+	"repo.dependencies.unpinned": "%s has no lock file",
+	"repo.dependencies.unpinned_hint": "Only its direct dependencies are listed, with the version ranges it declares. Commit %s for exact versions and transitive packages.",
+	"repo.dependencies.locks_or": "%s or %s",
+	"repo.dependencies.not_pinned": "not pinned"
 }

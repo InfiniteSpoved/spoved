@@ -26,6 +26,7 @@ type Dependency struct {
 	Ecosystem    string `xorm:"VARCHAR(16) INDEX(ecosystem_name) NOT NULL"` // an OSV ecosystem name
 	Name         string `xorm:"VARCHAR(512) INDEX(ecosystem_name) NOT NULL"`
 	Version      string `xorm:"VARCHAR(256) NOT NULL DEFAULT ''"`
+	Requirement  string `xorm:"VARCHAR(256) NOT NULL DEFAULT ''"`  // the declared range of a row without a version (a manifest without a lock file)
 	ManifestPath string `xorm:"VARCHAR(1024) NOT NULL DEFAULT ''"` // the git path of the manifest, never a file system path
 	Direct       bool   `xorm:"NOT NULL DEFAULT false"`
 	License      string `xorm:"VARCHAR(256) NOT NULL DEFAULT ''"`

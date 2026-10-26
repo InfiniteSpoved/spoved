@@ -13,6 +13,8 @@ type Dependency struct {
 	Name      string `json:"name"`
 	// The version, empty if the manifest doesn't fix it
 	Version string `json:"version"`
+	// The version range the manifest declares when it doesn't fix the version (a manifest without a lock file)
+	Requirement string `json:"requirement,omitempty"`
 	// The package URL (purl) of the dependency
 	PURL string `json:"purl"`
 	// The path of the manifest in the repository

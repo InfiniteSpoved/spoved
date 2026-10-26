@@ -312,3 +312,76 @@ func TestSchemasRejectInvalid(t *testing.T) {
 		require.Error(t, s.Validate(v), "the schema check is not a no-op")
 	}
 }
+
+// A package of a manifest without a lock file has no version: a versionless purl, and the declared ranges as the
+// CycloneDX property spoved:requirement and in the SPDX package comment.
+func TestSBOMUnpinned(t *testing.T) {
+	defer test.MockVariableValue(&setting.AppURL, "https://git.example.com/")()
+	s := unpinnedSBOM()
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	id := uuid.MustParse("11111111-2222-3333-4444-555555555555")
+
+	spdx, err := s.GenerateSPDX(now, id)
+	require.NoError(t, err)
+	validateDoc(t, loadSchema(t, spdxBase, ""), spdx)
+	var sp struct {
+		Packages []struct {
+			Name, VersionInfo, Comment string
+			ExternalRefs               []struct{ ReferenceLocator string } `json:"externalRefs"`
+		} `json:"packages"`
+	}
+	require.NoError(t, json.Unmarshal(spdx, &sp))
+	require.Len(t, sp.Packages, 4)
+	byPURL := map[string]int{}
+	for i, p := range sp.Packages[1:] {
+		byPURL[p.ExternalRefs[0].ReferenceLocator] = i + 1
+	}
+	unpinned := sp.Packages[byPURL["pkg:npm/express"]]
+	assert.Empty(t, unpinned.VersionInfo)
+	assert.Equal(t, "not pinned (no lock file); declared range: ^4.18.0 | ~4.18", unpinned.Comment)
+	pinned := sp.Packages[byPURL["pkg:npm/express@4.18.2"]]
+	assert.Equal(t, "4.18.2", pinned.VersionInfo)
+	assert.Empty(t, pinned.Comment)
+	assert.Empty(t, sp.Packages[byPURL["pkg:cargo/serde"]].Comment, "no range: nothing to say")
+
+	cdx, err := s.GenerateCycloneDX(now, id)
+	require.NoError(t, err)
+	validateDoc(t, loadSchema(t, cdxBase+"bom-1.6.schema.json", ""), cdx)
+	var cd struct {
+		Components []struct {
+			BOMRef     string `json:"bom-ref"`
+			Version    string
+			PURL       string
+			Properties []struct{ Name, Value string }
+		} `json:"components"`
+	}
+	require.NoError(t, json.Unmarshal(cdx, &cd))
+	require.Len(t, cd.Components, 3)
+	for _, c := range cd.Components {
+		var reqs []string
+		for _, p := range c.Properties {
+			if p.Name == "spoved:requirement" {
+				reqs = append(reqs, p.Value)
+			}
+		}
+		switch c.PURL {
+		case "pkg:npm/express":
+			assert.Empty(t, c.Version)
+			assert.Equal(t, []string{"^4.18.0", "~4.18"}, reqs)
+		default:
+			assert.Empty(t, reqs, c.PURL)
+		}
+	}
+}
+
+func unpinnedSBOM() *SBOM {
+	repo := &repo_model.Repository{ID: 7, OwnerName: "acme", Name: "api"}
+	scan := &repo_model.DependencyScan{RepoID: 7, CommitSHA: "0123456789abcdef0123456789abcdef01234567"}
+	return &SBOM{Repo: repo, Scan: scan, Deps: []*repo_model.Dependency{
+		{Ecosystem: "npm", Name: "express", Requirement: "^4.18.0", ManifestPath: "web/package.json", Direct: true},
+		{Ecosystem: "npm", Name: "express", Requirement: "~4.18", ManifestPath: "api/package.json", Direct: true},
+		{Ecosystem: "npm", Name: "express", Requirement: "^4.18.0", ManifestPath: "docs/package.json", Direct: true},
+		{Ecosystem: "npm", Name: "express", Version: "4.18.2", ManifestPath: "package-lock.json", Direct: true},
+		{Ecosystem: "crates.io", Name: "serde", ManifestPath: "Cargo.toml", Direct: true},
+	}}
+}

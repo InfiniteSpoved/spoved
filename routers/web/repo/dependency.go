@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strings"
 
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
@@ -51,6 +52,28 @@ func DependenciesSBOM(ctx *context.Context) {
 
 // dependencyPageSize is the number of rows on a page of the Dependencies page.
 const dependencyPageSize = 50
+
+// unpinnedManifest is a manifest read without a lock file, with the lock files that would pin it.
+type unpinnedManifest struct {
+	Path  string
+	Locks string
+}
+
+func unpinnedManifests(ctx *context.Context, manifests []repo_model.DependencyFacet) []unpinnedManifest {
+	var out []unpinnedManifest
+	for _, m := range manifests {
+		f := dependency.FormatForPath(m.Value)
+		if f == nil || !f.Unpinned {
+			continue
+		}
+		locks := f.Locks[len(f.Locks)-1]
+		if n := len(f.Locks); n > 1 {
+			locks = ctx.Locale.TrString("repo.dependencies.locks_or", strings.Join(f.Locks[:n-1], ", "), locks)
+		}
+		out = append(out, unpinnedManifest{Path: m.Value, Locks: locks})
+	}
+	return out
+}
 
 // SetDependencyGraphNav tells the Activity menu whether to show the Dependencies item.
 func SetDependencyGraphNav(ctx *context.Context) {
@@ -104,6 +127,7 @@ func Dependencies(ctx *context.Context) {
 	ctx.Data["Facets"] = facets
 	ctx.Data["TotalPackages"] = facets.Direct + facets.Transitive
 	ctx.Data["ManifestsWithPackages"] = len(facets.Manifests)
+	ctx.Data["UnpinnedManifests"] = unpinnedManifests(ctx, facets.Manifests)
 
 	opts := &repo_model.DependencySearchOptions{
 		ListOptions: db.ListOptions{Page: max(ctx.FormInt("page"), 1), PageSize: dependencyPageSize},

@@ -275,14 +275,14 @@ func TestPython(t *testing.T) {
 	assert.Equal(t, []Dependency{
 		{Ecosystem: PyPI, Name: "Django", Version: "4.2.1", Direct: true},
 		{Ecosystem: PyPI, Name: "requests", Version: "2.31.0", Direct: true},
-		{Ecosystem: PyPI, Name: "flask", Direct: true},
-		{Ecosystem: PyPI, Name: "foo", Direct: true},
-	}, deps, "a range or a wildcard keeps the name with no version; URLs and options are dropped")
+		{Ecosystem: PyPI, Name: "flask", Requirement: ">=2", Direct: true},
+		{Ecosystem: PyPI, Name: "foo", Requirement: "==1.*", Direct: true},
+	}, deps, "a range or a wildcard keeps the name with no version, and the range; URLs and options are dropped")
 
 	deps, err = f.Parse(t.Context(), []byte("flask>=2.0\nrequests\nDjango==4.2.1 --hash=sha256:abc\nnumpy==1.26.0 \\\n    --hash=sha256:def\npkg @ https://example.test/p.whl\n-c constraints.txt\n"), nil)
 	require.NoError(t, err)
 	assert.Equal(t, []Dependency{
-		{Ecosystem: PyPI, Name: "flask", Direct: true},
+		{Ecosystem: PyPI, Name: "flask", Requirement: ">=2.0", Direct: true},
 		{Ecosystem: PyPI, Name: "requests", Direct: true},
 		{Ecosystem: PyPI, Name: "Django", Version: "4.2.1", Direct: true},
 		{Ecosystem: PyPI, Name: "numpy", Version: "1.26.0", Direct: true},
@@ -492,7 +492,7 @@ func TestHostile(t *testing.T) {
 	})
 	t.Run("broken input is a parse error, never a panic", func(t *testing.T) {
 		inputs := []string{"", "\x00\xff\xfe", "{", "[[[[", strings.Repeat(`{"a":`, 20000), strings.Repeat("x", 100000), "[[package]]\nname", "module", "\"@\":\n  version"}
-		for _, name := range []string{"go.mod", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "requirements.txt", "poetry.lock", "pom.xml", "a.csproj", "packages.lock.json", "Cargo.lock", "Gemfile.lock", "composer.lock"} {
+		for _, name := range []string{"go.mod", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "requirements.txt", "poetry.lock", "pom.xml", "a.csproj", "packages.lock.json", "Cargo.lock", "Gemfile.lock", "composer.lock", "package.json", "composer.json", "Cargo.toml", "pyproject.toml", "Gemfile"} {
 			for _, in := range inputs {
 				_, _ = FormatFor(name).Parse(t.Context(), []byte(in), nil)
 			}
@@ -517,7 +517,7 @@ func TestFormatFor(t *testing.T) {
 	for _, n := range []string{"go.mod", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "requirements.txt", "poetry.lock", "pom.xml", "x.csproj", "packages.lock.json", "Cargo.lock", "Gemfile.lock", "composer.lock"} {
 		assert.NotNil(t, FormatFor(n), n)
 	}
-	for _, n := range []string{"go.sum", "package.json", "Go.mod", "requirements.md", "x.csproj.user", "composer.json", ""} {
+	for _, n := range []string{"go.sum", "Go.mod", "requirements.md", "x.csproj.user", "gemfile", "uv.lock", ""} {
 		assert.Nil(t, FormatFor(n), n)
 	}
 }

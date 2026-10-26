@@ -199,6 +199,14 @@ func TestHostileTinyEntriesPeakHeap(t *testing.T) {
 		{"requirements", "requirements.txt", func() []byte { return fill("", "", small, line("%\n")) }},
 		{"gemfile", "Gemfile.lock", func() []byte { return fill("GEM\n  specs:\n", "", small, line("    % (1)\n")) }},
 		{"go.mod", "go.mod", func() []byte { return fill("module m\n", "", small, line("require example.com/% v1.0.0\n")) }},
+		// the manifests read without a lock file are small formats too
+		{"package.json", "package.json", func() []byte { return fill(`{"dependencies":{`, `"z":"1"}}`, small, line(`"%":"^1",`)) }},
+		{"composer.json", "composer.json", func() []byte { return fill(`{"require":{`, `"a/z":"1"}}`, small, line(`"a/%":"^1",`)) }},
+		{"Cargo.toml", "Cargo.toml", func() []byte { return fill("[dependencies]\n", "", small, line("% = { version = \"1\" }\n")) }},
+		{"Cargo.toml fields", "Cargo.toml", func() []byte { return fill("[dependencies.a]\n", "", small, line("% = 1\n")) }},
+		{"pyproject.toml", "pyproject.toml", func() []byte { return fill("[project]\ndependencies = [\n", "]\n", small, line("\"%>=1\",\n")) }},
+		{"pyproject.toml nested", "pyproject.toml", func() []byte { return fill("[tool.x]\nk = [", "0]\n", small, line("[[[%]]],")) }},
+		{"Gemfile", "Gemfile", func() []byte { return fill("", "", small, line("gem \"%\", \"~> 1\", \">= 1.0\"\n")) }},
 		{"pom", "pom.xml", func() []byte {
 			return fill("<project><dependencies>", "</dependencies></project>", small, line("<dependency><groupId>g</groupId><artifactId>%</artifactId></dependency>"))
 		}},

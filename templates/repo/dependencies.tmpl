@@ -53,6 +53,13 @@
 			</div>
 		{{end}}
 
+		{{range .UnpinnedManifests}}
+			<div class="ui info message dependencies-unpinned">
+				<div class="header">{{ctx.Locale.Tr "repo.dependencies.unpinned" .Path}}</div>
+				<p>{{ctx.Locale.Tr "repo.dependencies.unpinned_hint" .Locks}}</p>
+			</div>
+		{{end}}
+
 		{{if and (not .Scan.DependencyCount) (not .Skipped)}}
 			<div class="ui info message" id="dependencies-none">
 				<div class="header">{{ctx.Locale.Tr "repo.dependencies.none" .Repository.DefaultBranch}}</div>
@@ -102,7 +109,7 @@
 					{{range .Dependencies}}
 						<div class="repo-dependencies-row" role="row">
 							<span class="repo-dependencies-package" role="cell"><span class="ui basic mini label">{{.Ecosystem}}</span> <strong>{{.Name}}</strong></span>
-							<span role="cell"><code>{{.Version}}</code></span>
+							<span role="cell">{{if .Version}}<code>{{.Version}}</code>{{else if .Requirement}}<code>{{.Requirement}}</code> <span class="repo-dependencies-unpinned">{{ctx.Locale.Tr "repo.dependencies.not_pinned"}}</span>{{end}}</span>
 							<span role="cell">{{if .Direct}}{{ctx.Locale.Tr "repo.dependencies.direct"}}{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.dependencies.transitive"}}</span>{{end}}</span>
 							<span role="cell">{{if .License}}{{.License}}{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.dependencies.license_unknown"}}</span>{{end}}</span>
 							<span role="cell"><a href="{{$.RepoLink}}/src/commit/{{$.Scan.CommitSHA}}/{{PathEscapeSegments .ManifestPath}}">{{range $i, $part := StringUtils.Split .ManifestPath "/"}}{{if $i}}/<wbr>{{end}}{{$part}}{{end}}</a></span>

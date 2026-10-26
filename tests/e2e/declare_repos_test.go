@@ -118,6 +118,21 @@ func DeclareGitRepos(t *testing.T) {
 		}
 		require.NoError(t, replaceDependencies(db.DefaultContext, scan, deps))
 	})
+	// a manifest without a lock file: its direct dependencies with their ranges, not pinned
+	newRepo(t, 11, "dependencies-unpinned", nil, []FileChanges{{
+		Filename: "web/package.json",
+		Versions: []string{`{"dependencies":{"express":"^4.18.0"}}`},
+	}}, func(_ *user_model.User, repo *repo_model.Repository) {
+		deps := []*repo_model.Dependency{
+			{RepoID: repo.ID, Ecosystem: "npm", Name: "express", Requirement: "^4.18.0", ManifestPath: "web/package.json", Direct: true},
+			{RepoID: repo.ID, Ecosystem: "npm", Name: "lodash", Requirement: "~4.17.20", ManifestPath: "web/package.json", Direct: true},
+		}
+		scan := &repo_model.DependencyScan{
+			RepoID: repo.ID, CommitSHA: headCommit(t, repo), ScannedUnix: timeutil.TimeStampNow(), Status: repo_model.DependencyScanOK,
+			ManifestCount: 1, DependencyCount: len(deps),
+		}
+		require.NoError(t, replaceDependencies(db.DefaultContext, scan, deps))
+	})
 	// a repository whose code unit is off: its readers see the issues but not the code
 	newRepo(t, 11, "dependencies-no-code", map[unit_model.Type]convert.Conversion{unit_model.TypeIssues: nil}, []FileChanges{{
 		Filename: "go.mod",

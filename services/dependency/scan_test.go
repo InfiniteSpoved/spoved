@@ -764,3 +764,51 @@ func TestScanParsesSharedHelperOnce(t *testing.T) {
 		})
 	}
 }
+
+// A manifest without a lock file is read for its direct dependencies and their ranges; a lock file next to it, or
+// above it for the formats with workspaces (npm, Cargo), covers it, whatever the lock file holds.
+func TestScanFallbackManifests(t *testing.T) {
+	repo := enable(t)
+	commitFiles(t, repo, map[string]string{
+		// a monorepo: the root lock covers every member's package.json
+		"package-lock.json":              lockV3,
+		"package.json":                   `{"dependencies":{"left-pad":"^1.3.0"}}`,
+		"packages/a/package.json":        `{"dependencies":{"express":"^4.18.0"}}`,
+		"crates/x/Cargo.toml":            "[dependencies]\nserde = \"1\"\n",
+		"rust/Cargo.lock":                "not a lock file",
+		"rust/member/Cargo.toml":         "[dependencies]\nrand = \"0.8\"\n",
+		"ruby/Gemfile":                   "gem \"rails\", \"~> 7.1\"\n",
+		"ruby/sub/Gemfile.lock":          "GEM\n  specs:\n",
+		"py/pyproject.toml":              "[project]\ndependencies = [\"requests>=2\"]\n",
+		"py-uv/pyproject.toml":           "[project]\ndependencies = [\"httpx\"]\n",
+		"py-uv/uv.lock":                  "version = 1\n",
+		"php/composer.json":              `{"require":{"monolog/monolog":"^3"}}`,
+		"vendor/lib/package.json":        `{"dependencies":{"vendored":"1"}}`,
+		"node_modules/package-lock.json": lockV3, // excluded: covers nothing
+		"tools/package.json":             `{"devDependencies":{"lodash":"~4.17.20"}}`,
+	}, nil)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	rows := rowsOf(t, repo.ID)
+	assert.ElementsMatch(t, []string{
+		"npm|left-pad@1.3.0|package-lock.json",
+		"crates.io|serde@|crates/x/Cargo.toml",
+		"RubyGems|rails@|ruby/Gemfile",
+		"PyPI|requests@|py/pyproject.toml",
+		"Packagist|monolog/monolog@|php/composer.json",
+	}, keys(rows), "tools/package.json is covered by the root lock, rust/member by rust/Cargo.lock, py-uv by uv.lock")
+	assert.Equal(t, "1", rows["crates.io|serde@|crates/x/Cargo.toml"].Requirement)
+	assert.Equal(t, "~> 7.1", rows["RubyGems|rails@|ruby/Gemfile"].Requirement)
+	assert.Equal(t, ">=2", rows["PyPI|requests@|py/pyproject.toml"].Requirement)
+	assert.True(t, rows["Packagist|monolog/monolog@|php/composer.json"].Direct)
+	assert.Empty(t, rows["npm|left-pad@1.3.0|package-lock.json"].Requirement)
+
+	// without the root lock, every package.json is read
+	commitFiles(t, repo, map[string]string{
+		"package.json":            `{"dependencies":{"left-pad":"^1.3.0"}}`,
+		"packages/a/package.json": `{"dependencies":{"express":"^4.18.0"}}`,
+	}, nil)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	rows = rowsOf(t, repo.ID)
+	assert.ElementsMatch(t, []string{"npm|left-pad@|package.json", "npm|express@|packages/a/package.json"}, keys(rows))
+	assert.Equal(t, "^4.18.0", rows["npm|express@|packages/a/package.json"].Requirement)
+}

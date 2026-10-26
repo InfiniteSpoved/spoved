@@ -61,11 +61,12 @@ var ErrParse = errors.New("dependency: cannot parse manifest")
 
 // Dependency is one package a manifest declares or locks.
 type Dependency struct {
-	Ecosystem string
-	Name      string
-	Version   string // "" if the manifest doesn't fix it
-	License   string // as the manifest states it, "" if unknown
-	Direct    bool   // declared by the project itself, not only needed by another dependency
+	Ecosystem   string
+	Name        string
+	Version     string // "" if the manifest doesn't fix it
+	Requirement string // the range the manifest declares when it doesn't fix the version ("^4.18.0"), else ""
+	License     string // as the manifest states it, "" if unknown
+	Direct      bool   // declared by the project itself, not only needed by another dependency
 }
 
 // Finder returns the content of the file name next to the manifest, or with up, in the nearest directory above it
@@ -77,8 +78,14 @@ type Format struct {
 	Ecosystem string
 	// Small formats are limited to MaxSmallManifestSize.
 	Small bool
-	match func(base string) bool
-	parse func(s *sink, data []byte, find Finder) error
+	// Unpinned formats are manifests read only when no lock file covers them (Locks next to the manifest, or with
+	// LocksAbove in any directory above it too, as a workspace root's lock covers its members): they list the direct
+	// dependencies with the ranges they declare, no versions.
+	Unpinned   bool
+	Locks      []string
+	LocksAbove bool
+	match      func(base string) bool
+	parse      func(s *sink, data []byte, find Finder) error
 }
 
 var formats []*Format
@@ -220,12 +227,18 @@ func validate(eco string, in []Dependency) []Dependency {
 		if len(d.Name) > MaxNameLen*2 || len(d.Version) > MaxVersionLen*2 || len(d.License) > MaxLicenseLen*2 {
 			continue // not worth cleaning
 		}
-		d.Name, d.Version, d.License = clean(d.Name), clean(d.Version), clean(d.License)
+		if len(d.Requirement) > MaxVersionLen*2 {
+			d.Requirement = ""
+		}
+		d.Name, d.Version, d.License, d.Requirement = clean(d.Name), clean(d.Version), clean(d.License), clean(d.Requirement)
 		if d.Name == "" || len(d.Name) > MaxNameLen || len(d.Version) > MaxVersionLen {
 			continue
 		}
 		if len(d.License) > MaxLicenseLen {
 			d.License = ""
+		}
+		if len(d.Requirement) > MaxVersionLen || d.Version != "" {
+			d.Requirement = "" // a pinned row needs none
 		}
 		k := [3]string{eco, d.Name, d.Version}
 		if i, ok := seen[k]; ok {

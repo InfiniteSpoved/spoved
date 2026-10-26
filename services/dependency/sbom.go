@@ -63,6 +63,7 @@ type component struct {
 	purl, ecosystem, name, version, license string
 	direct                                  bool
 	manifests                               []string
+	requirements                            []string // the declared ranges of a package without a version
 }
 
 func (s *SBOM) components() []*component {
@@ -85,6 +86,9 @@ func (s *SBOM) components() []*component {
 		}
 		if d.ManifestPath != "" && !slices.Contains(c.manifests, d.ManifestPath) {
 			c.manifests = append(c.manifests, d.ManifestPath)
+		}
+		if d.Version == "" && d.Requirement != "" && !slices.Contains(c.requirements, d.Requirement) {
+			c.requirements = append(c.requirements, d.Requirement)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].purl < out[j].purl })
@@ -131,6 +135,7 @@ type spdxPackage struct {
 	LicenseComments  string       `json:"licenseComments,omitempty"`
 	CopyrightText    string       `json:"copyrightText"`
 	SourceInfo       string       `json:"sourceInfo,omitempty"`
+	Comment          string       `json:"comment,omitempty"`
 	ExternalRefs     []spdxExtRef `json:"externalRefs,omitempty"`
 	Primary          string       `json:"primaryPackagePurpose,omitempty"`
 }
@@ -181,6 +186,9 @@ func (s *SBOM) GenerateSPDX(now time.Time, id uuid.UUID) ([]byte, error) {
 		}
 		if len(c.manifests) > 0 {
 			p.SourceInfo = "found in " + strings.Join(c.manifests, ", ")
+		}
+		if len(c.requirements) > 0 {
+			p.Comment = "not pinned (no lock file); declared range: " + strings.Join(c.requirements, " | ")
 		}
 		if c.license != "" {
 			if expr, ok := normalizeLicense(c.license); ok {
@@ -266,6 +274,9 @@ func (s *SBOM) GenerateCycloneDX(now time.Time, id uuid.UUID) ([]byte, error) {
 		}
 		for _, m := range c.manifests {
 			cc.Properties = append(cc.Properties, cdxProperty{Name: "spoved:manifest", Value: m})
+		}
+		for _, r := range c.requirements {
+			cc.Properties = append(cc.Properties, cdxProperty{Name: "spoved:requirement", Value: r})
 		}
 		comps = append(comps, cc)
 		if c.direct {

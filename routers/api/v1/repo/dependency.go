@@ -140,7 +140,7 @@ func ListDependencies(ctx *context.APIContext) {
 	resp := api.DependencyList{Scan: ToAPIDependencyScan(scan), Dependencies: make([]*api.Dependency, 0, len(rows))}
 	for _, d := range rows {
 		resp.Dependencies = append(resp.Dependencies, &api.Dependency{
-			Ecosystem: d.Ecosystem, Name: d.Name, Version: d.Version, PURL: dependency.PURL(d.Ecosystem, d.Name, d.Version),
+			Ecosystem: d.Ecosystem, Name: d.Name, Version: d.Version, Requirement: d.Requirement, PURL: dependency.PURL(d.Ecosystem, d.Name, d.Version),
 			ManifestPath: d.ManifestPath, Direct: d.Direct, License: d.License,
 		})
 	}

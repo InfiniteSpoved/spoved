@@ -76,6 +76,26 @@ test('download both SBOM formats', async ({page}) => {
   expect(cdxDoc.components).toHaveLength(4);
 });
 
+test('a manifest without a lock file', async ({page}) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({width, height: 900});
+    await page.goto('/user11/dependencies-unpinned/activity/dependencies');
+    const hint = page.locator('.dependencies-unpinned');
+    await expect(hint).toHaveCount(1);
+    await expect(hint).toContainText('web/package.json has no lock file');
+    await expect(hint).toContainText('Commit package-lock.json, yarn.lock or pnpm-lock.yaml for exact versions and transitive packages.');
+    const express = page.locator('.repo-dependencies-row', {hasText: 'express'});
+    await expect(express).toContainText('^4.18.0');
+    await expect(express.locator('.repo-dependencies-unpinned')).toHaveText('not pinned');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await screenshot(page);
+  }
+  // a pinned row has no label
+  await page.goto('/user11/dependencies-test/activity/dependencies');
+  await expect(page.locator('.repo-dependencies-unpinned')).toHaveCount(0);
+  await expect(page.locator('.dependencies-unpinned')).toHaveCount(0);
+});
+
 test('a reader without access to the code gets nothing', async ({page}) => {
   const response = await page.goto('/user11/dependencies-no-code/activity/dependencies');
   expect(response?.status()).toBe(404);

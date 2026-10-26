@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -256,6 +257,7 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 	cfg := &setting.DependencyGraph
 	var manifests []treeEntry
 	aux := map[string]treeEntry{}
+	locks := map[string]bool{}
 	err := walkTree(ctx, gitRepo, sha, cfg.MaxTreeEntries, func(e treeEntry) {
 		if hasExcludedSegment(e.path) {
 			return
@@ -264,9 +266,17 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 		if auxNames[base] {
 			aux[e.path] = e
 		}
+		if dependency.IsLockName(base) {
+			locks[e.path] = true
+		}
 		if dependency.FormatForPath(e.path) != nil {
 			manifests = append(manifests, e)
 		}
+	})
+	// a manifest without a lock file is read only when no lock file covers it (a lock that can't be read still does)
+	manifests = slices.DeleteFunc(manifests, func(e treeEntry) bool {
+		f := dependency.FormatForPath(e.path)
+		return f.Unpinned && f.Covered(e.path, func(p string) bool { return locks[p] })
 	})
 	switch {
 	case errors.Is(err, errTreeTooLarge):
@@ -388,7 +398,7 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 		scan.ManifestCount++
 		for _, d := range parsed {
 			deps = append(deps, &repo_model.Dependency{
-				RepoID: repo.ID, Ecosystem: d.Ecosystem, Name: d.Name, Version: d.Version,
+				RepoID: repo.ID, Ecosystem: d.Ecosystem, Name: d.Name, Version: d.Version, Requirement: d.Requirement,
 				ManifestPath: m.path, Direct: d.Direct, License: d.License,
 			})
 		}

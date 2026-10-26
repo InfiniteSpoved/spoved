@@ -40,28 +40,11 @@ func parseRequirements(s *sink, data []byte, _ Finder) error {
 		if line == "" || line[0] == '#' || line[0] == '-' {
 			continue
 		}
-		if i := strings.Index(line, ";"); i >= 0 { // environment marker
-			line = strings.TrimSpace(line[:i])
-		}
 		if i := strings.Index(line, " --"); i >= 0 { // per-requirement options such as --hash
 			line = strings.TrimSpace(line[:i])
 		}
-		m := reqLine.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		spec := strings.TrimSpace(m[2])
-		d := Dependency{Name: m[1], Direct: true}
-		switch {
-		case spec == "":
-		case spec[0] == '<' || spec[0] == '>' || spec[0] == '!' || spec[0] == '~' || spec[0] == '=':
-			if p := reqPin.FindStringSubmatch(spec); p != nil && !strings.Contains(p[1], "*") {
-				d.Version = p[1]
-			}
-		default:
-			continue // `name @ url`, a path, a URL
-		}
-		if requirementIsFile(d.Name) {
+		d, ok := pyRequirement(line)
+		if !ok {
 			continue
 		}
 		if err := s.emit(d); err != nil {
@@ -69,6 +52,34 @@ func parseRequirements(s *sink, data []byte, _ Finder) error {
 		}
 	}
 	return scanErr(sc.Err(), "requirements.txt")
+}
+
+// pyRequirement reads one PEP 508 requirement (a requirements.txt line without its options, or an entry of a
+// pyproject.toml array): the name, the version if it is pinned to one (`==1.2.3`) and the specifier as written.
+// ok is false for a direct reference (`name @ url`), a path or a URL, and for anything that isn't a requirement.
+func pyRequirement(line string) (d Dependency, ok bool) {
+	if i := strings.Index(line, ";"); i >= 0 { // environment marker
+		line = strings.TrimSpace(line[:i])
+	}
+	m := reqLine.FindStringSubmatch(line)
+	if m == nil {
+		return d, false
+	}
+	spec := strings.TrimSpace(m[2])
+	if strings.HasPrefix(spec, "(") && strings.HasSuffix(spec, ")") { // the older `name (>=1.0)`
+		spec = strings.TrimSpace(spec[1 : len(spec)-1])
+	}
+	d = Dependency{Name: m[1], Direct: true, Requirement: spec}
+	switch {
+	case spec == "":
+	case spec[0] == '<' || spec[0] == '>' || spec[0] == '!' || spec[0] == '~' || spec[0] == '=':
+		if p := reqPin.FindStringSubmatch(spec); p != nil && !strings.Contains(p[1], "*") {
+			d.Version = p[1]
+		}
+	default:
+		return d, false // `name @ url`, a path, a URL
+	}
+	return d, !requirementIsFile(d.Name)
 }
 
 // requirementIsFile tells a local archive or wheel (pip accepts `foo-1.0-py3-none-any.whl` and `./x.tar.gz`) from a

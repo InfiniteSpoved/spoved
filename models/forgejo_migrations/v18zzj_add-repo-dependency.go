@@ -20,6 +20,7 @@ type v18zzjRepoDependency struct {
 	Ecosystem    string `xorm:"VARCHAR(16) INDEX(ecosystem_name) NOT NULL"`
 	Name         string `xorm:"VARCHAR(512) INDEX(ecosystem_name) NOT NULL"`
 	Version      string `xorm:"VARCHAR(256) NOT NULL DEFAULT ''"`
+	Requirement  string `xorm:"VARCHAR(256) NOT NULL DEFAULT ''"`
 	ManifestPath string `xorm:"VARCHAR(1024) NOT NULL DEFAULT ''"`
 	Direct       bool   `xorm:"NOT NULL DEFAULT false"`
 	License      string `xorm:"VARCHAR(256) NOT NULL DEFAULT ''"`
