@@ -1,0 +1,16 @@
+{{/* The status of one ecosystem of the advisory mirror: the dot is the error class, "" for OK. Never raw text. */}}
+{{if eq . ""}}<span class="text green">{{ctx.Locale.Tr "admin.dependency_graph.advisories.ok"}}</span>
+{{else}}<span class="text yellow">{{if eq . "blocked_host"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.blocked_host"}}
+{{else if eq . "connection_failed"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.connection_failed"}}
+{{else if eq . "timeout"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.timeout"}}
+{{else if eq . "status 4xx"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.status_4xx"}}
+{{else if eq . "status 5xx"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.status_5xx"}}
+{{else if eq . "too_large"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.too_large"}}
+{{else if eq . "too_many_entries"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.too_many_entries"}}
+{{else if eq . "bad_zip"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.bad_zip"}}
+{{else if eq . "too_many_skipped"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.too_many_skipped"}}
+{{else if eq . "shrunk"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.shrunk"}}
+{{else if eq . "mass_withdrawn"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.mass_withdrawn"}}
+{{else if eq . "redirect_refused"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.redirect_refused"}}
+{{else if eq . "no_mirror"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.no_mirror"}}
+{{else}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.internal_error"}}{{end}}</span>{{end}}

@@ -1,0 +1,28 @@
+{{/* The dismiss dialog; the buttons that open it set the form's action and the advisory in the title */}}
+<dialog class="modal" id="dismiss-alert-modal">
+	<article>
+		<header>{{ctx.Locale.Tr "repo.security.dismiss.title"}} <span id="dismiss-alert-title"></span></header>
+		<form class="ui form ignore-dirty" method="post" action="{{.DismissAction}}">
+			<div class="content">
+				<input type="hidden" name="from" value="{{.From}}">
+				<div class="grouped fields">
+					<label>{{ctx.Locale.Tr "repo.security.dismiss.reason"}}</label>
+					<div class="field"><div class="ui radio checkbox"><input type="radio" id="dismiss-reason-not_used" name="reason" value="not_used" checked><label for="dismiss-reason-not_used">{{ctx.Locale.Tr "repo.security.reason.not_used"}}</label></div></div>
+					<div class="field"><div class="ui radio checkbox"><input type="radio" id="dismiss-reason-tolerable_risk" name="reason" value="tolerable_risk"><label for="dismiss-reason-tolerable_risk">{{ctx.Locale.Tr "repo.security.reason.tolerable_risk"}}</label></div></div>
+					<div class="field"><div class="ui radio checkbox"><input type="radio" id="dismiss-reason-fix_started" name="reason" value="fix_started"><label for="dismiss-reason-fix_started">{{ctx.Locale.Tr "repo.security.reason.fix_started"}}</label></div></div>
+					<div class="field"><div class="ui radio checkbox"><input type="radio" id="dismiss-reason-no_bandwidth" name="reason" value="no_bandwidth"><label for="dismiss-reason-no_bandwidth">{{ctx.Locale.Tr "repo.security.reason.no_bandwidth"}}</label></div></div>
+					<div class="field"><div class="ui radio checkbox"><input type="radio" id="dismiss-reason-inaccurate" name="reason" value="inaccurate"><label for="dismiss-reason-inaccurate">{{ctx.Locale.Tr "repo.security.reason.inaccurate"}}</label></div></div>
+				</div>
+				<div class="field">
+					<label for="dismiss-comment">{{ctx.Locale.Tr "repo.security.dismiss.comment"}}</label>
+					<textarea id="dismiss-comment" name="comment" rows="2" maxlength="{{.MaxCommentRunes}}"></textarea>
+				</div>
+				<p class="help">{{ctx.Locale.Tr "repo.security.dismiss.help"}}</p>
+			</div>
+			<div class="actions">
+				<button type="button" class="ui small basic cancel button">{{svg "octicon-x"}} {{ctx.Locale.Tr "cancel"}}</button>
+				<button class="ui small red approve button" type="submit">{{ctx.Locale.Tr "repo.security.dismiss.submit"}}</button>
+			</div>
+		</form>
+	</article>
+</dialog>

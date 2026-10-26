@@ -27,6 +27,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	unit_model "forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
+	vulnerability_model "forgejo.org/models/vulnerability"
 	"forgejo.org/modules/cache"
 	"forgejo.org/modules/card"
 	"forgejo.org/modules/git"
@@ -39,8 +40,10 @@ import (
 	"forgejo.org/modules/util"
 	asymkey_service "forgejo.org/services/asymkey"
 	"forgejo.org/services/auth"
+	dependency_service "forgejo.org/services/dependency"
 	funding_service "forgejo.org/services/funding"
 	redirect_service "forgejo.org/services/redirect"
+	vulnerability_service "forgejo.org/services/vulnerability"
 
 	"github.com/editorconfig/editorconfig-core-go/v2"
 )
@@ -677,6 +680,7 @@ func RepoAssignment(ctx *Context) context.CancelFunc {
 		return nil
 	}
 	ctx.Data["NumOpenActionRuns"] = actions.RepoNumOpenActions(ctx, ctx.Repo.Repository.ID)
+	ctx.setSecurityTab()
 
 	ctx.Data["Title"] = owner.Name + "/" + repo.Name
 	ctx.Data["Repository"] = repo
@@ -1245,4 +1249,21 @@ func UnitTypes() func(ctx *Context) {
 		ctx.Data["UnitTypePackages"] = unit_model.TypePackages
 		ctx.Data["UnitTypeActions"] = unit_model.TypeActions
 	}
+}
+
+// setSecurityTab decides whether the repository header shows the Security tab and its count of open alerts: only for
+// someone who may see the alerts (a writer of the code, an admin, or an auditor reading) while the dependency graph is
+// on. Everyone else costs no query. One count query per page view, for those who see the tab.
+func (ctx *Context) setSecurityTab() {
+	if ctx.Repo.Repository == nil || !vulnerability_service.CanSeeAlerts(&ctx.Repo.Permission, ctx.IsAuditorView()) || !dependency_service.Enabled(ctx, ctx.Repo.Repository) {
+		return
+	}
+	counts, err := vulnerability_model.CountAlertsByState(ctx, ctx.Repo.Repository.ID)
+	if err != nil {
+		log.Error("count the vulnerability alerts of repository %d: %v", ctx.Repo.Repository.ID, err)
+		return
+	}
+	ctx.Data["ShowSecurityTab"] = true
+	ctx.Data["VulnAlertCounts"] = counts
+	ctx.Data["NumOpenVulnAlerts"] = counts[vulnerability_model.StateOpen]
 }

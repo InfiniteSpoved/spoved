@@ -255,7 +255,7 @@ func TestAdminAuditRoutes(t *testing.T) {
 		}
 		path = strings.ReplaceAll(path, "*", "x")
 		resp := auditor.MakeRequest(t, NewRequest(t, method, path), NoExpectedStatus)
-		if method == "GET" && route == "/admin/audit" {
+		if method == "GET" && (route == "/admin/audit" || route == "/admin/config/dependency-graph") {
 			assert.Equal(t, http.StatusOK, resp.Code, route)
 		} else {
 			assert.Contains(t, []int{http.StatusForbidden, http.StatusNotFound}, resp.Code, method+" "+route)

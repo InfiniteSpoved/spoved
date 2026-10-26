@@ -20,12 +20,14 @@ import (
 	unit_model "forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	vulnerability_model "forgejo.org/models/vulnerability"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/indexer/stats"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/timeutil"
+	"forgejo.org/modules/vulnerability"
 	actions_service "forgejo.org/services/actions"
 	issue_service "forgejo.org/services/issue"
 	pull_service "forgejo.org/services/pull"
@@ -116,6 +118,34 @@ func DeclareGitRepos(t *testing.T) {
 			ManifestCount: 3, DependencyCount: len(deps),
 		}
 		require.NoError(t, repo_model.ReplaceRepoDependencies(db.DefaultContext, scan, deps))
+	})
+	// the vulnerability alerts (vulnerability-alerts.test.e2e.ts): two confirmed alerts, one on a range (may be affected)
+	newRepo(t, 11, "vulnerability-alerts-test", nil, []FileChanges{{
+		Filename: "web/package-lock.json",
+		Versions: []string{"{}"},
+	}}, func(_ *user_model.User, repo *repo_model.Repository) {
+		advisory := func(id, summary, name, fixed, level string) *vulnerability.Advisory {
+			return &vulnerability.Advisory{
+				ID: id, Summary: summary, Details: "Details of " + id + " with a [link](https://example.org/" + id + ").", Level: level, Modified: time.Unix(1700000000, 0),
+				Affected: []vulnerability.Affected{{Name: name, Ranges: []vulnerability.Range{{Type: "SEMVER", Events: []vulnerability.Event{{Introduced: "0"}, {Fixed: fixed}}}}}},
+			}
+		}
+		_, err := vulnerability_model.ImportBatch(db.DefaultContext, "npm", []*vulnerability.Advisory{
+			advisory("GHSA-qwcr-r2fm-qrc7", "body-parser vulnerable to denial of service when url encoding is enabled", "body-parser", "1.20.3", vulnerability.SeverityHigh),
+			advisory("GHSA-35jh-r3h4-6jhm", "Command Injection in lodash", "lodash", "4.17.21", vulnerability.SeverityCritical),
+		}, &vulnerability_model.ChangedSet{})
+		require.NoError(t, err)
+		deps := []*repo_model.Dependency{
+			{RepoID: repo.ID, Ecosystem: "npm", Name: "body-parser", Version: "1.20.1", ManifestPath: "web/package-lock.json", Direct: true},
+			{RepoID: repo.ID, Ecosystem: "npm", Name: "lodash", Requirement: "~4.17.20", ManifestPath: "web/package.json", Direct: true},
+		}
+		scan := &repo_model.DependencyScan{
+			RepoID: repo.ID, CommitSHA: headCommit(t, repo), ScannedUnix: timeutil.TimeStampNow(), Status: repo_model.DependencyScanOK,
+			ManifestCount: 2, DependencyCount: len(deps),
+		}
+		require.NoError(t, repo_model.ReplaceRepoDependencies(db.DefaultContext, scan, deps))
+		_, err = vulnerability_model.RefreshAlerts(db.DefaultContext, repo.ID, nil)
+		require.NoError(t, err)
 	})
 	// a manifest without a lock file: its direct dependencies with their ranges, not pinned
 	newRepo(t, 11, "dependencies-unpinned", nil, []FileChanges{{

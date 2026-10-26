@@ -52,6 +52,10 @@
   overflow-wrap: anywhere;
 }
 
+.repo-dependencies-row.repo-dependencies-with-alerts {
+  grid-template-columns: 2.2fr 1fr 0.9fr 1fr 1.6fr 0.9fr;
+}
+
 .repo-dependencies-row:last-child {
   border-bottom: 0;
 }
