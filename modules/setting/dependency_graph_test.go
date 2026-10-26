@@ -30,3 +30,30 @@ func TestDependencyGraphSettings(t *testing.T) {
 	assert.Equal(t, 1, DependencyGraph.MaxDependencies)
 	DependencyGraph.Enabled = false
 }
+
+func TestOSVMirrorSettings(t *testing.T) {
+	load := func(ini string) error {
+		cfg, err := NewConfigProviderFromData(ini)
+		assert.NoError(t, err)
+		return loadDependencyGraphFrom(cfg)
+	}
+	t.Cleanup(func() { assert.NoError(t, load("")) })
+
+	assert.NoError(t, load(""))
+	assert.Equal(t, DefaultOSVMirrorURL, DependencyGraph.OSVMirrorURL)
+	assert.Equal(t, 24*time.Hour, DependencyGraph.UpdateInterval)
+
+	assert.NoError(t, load("[dependency_graph]\nOSV_MIRROR_URL = http://mirror.example:8080/osv/\nUPDATE_INTERVAL = 1m\n"))
+	assert.Equal(t, "http://mirror.example:8080/osv", DependencyGraph.OSVMirrorURL)
+	assert.Equal(t, time.Hour, DependencyGraph.UpdateInterval, "raised to the minimum")
+
+	assert.NoError(t, load("[dependency_graph]\nOSV_MIRROR_URL =\nUPDATE_INTERVAL = 9000h\n"))
+	assert.Empty(t, DependencyGraph.OSVMirrorURL, "empty: no download")
+	assert.Equal(t, MaxUpdateInterval, DependencyGraph.UpdateInterval)
+
+	for _, bad := range []string{
+		"ftp://mirror.example/", "https://user:pw@mirror.example/", "https://mirror.example/?a=b", "https:///x", "mirror.example", "http://[::1",
+	} {
+		assert.Error(t, load("[dependency_graph]\nOSV_MIRROR_URL = "+bad+"\n"), bad)
+	}
+}

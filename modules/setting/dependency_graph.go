@@ -3,7 +3,17 @@
 
 package setting
 
-import "time"
+import (
+	"errors"
+	"net/url"
+	"strings"
+	"time"
+
+	"forgejo.org/modules/log"
+)
+
+// DefaultOSVMirrorURL is the public OSV bucket.
+const DefaultOSVMirrorURL = "https://osv-vulnerabilities.storage.googleapis.com"
 
 // DependencyGraph holds the dependency graph settings, [dependency_graph]: the manifests of the default branch are
 // read into a list of dependencies per repository, and an SBOM can be exported from it.
@@ -15,6 +25,15 @@ var DependencyGraph = struct {
 	MaxTreeEntries     int   // entries of the tree a scan walks
 	ScanTimeout        time.Duration
 	MaxConcurrentScans int // scans running at once in this process
+
+	// The OSV mirror (services/vulnerability). An empty OSVMirrorURL means no download (offline).
+	OSVMirrorURL        string
+	UpdateInterval      time.Duration
+	OSVMaxDownload      int64 // bytes of one ecosystem's all.zip
+	OSVMaxEntries       int   // entries of one zip
+	OSVMaxEntrySize     int64 // uncompressed bytes of one entry
+	OSVMaxUncompressed  int64 // uncompressed bytes of one zip
+	OSVEcosystemTimeout time.Duration
 }{}
 
 func loadDependencyGraphFrom(rootCfg ConfigProvider) (err error) {
@@ -29,6 +48,55 @@ func loadDependencyGraphFrom(rootCfg ConfigProvider) (err error) {
 		return err
 	}
 	DependencyGraph.ScanTimeout = max(DependencyGraph.ScanTimeout, time.Second)
+	return loadOSVMirrorFrom(sec)
+}
+
+// MinUpdateInterval and MaxUpdateInterval bound [dependency_graph] UPDATE_INTERVAL.
+const (
+	MinUpdateInterval = time.Hour
+	MaxUpdateInterval = 30 * 24 * time.Hour
+)
+
+func loadOSVMirrorFrom(sec ConfigSection) (err error) {
+	g := &DependencyGraph
+	g.OSVMirrorURL = DefaultOSVMirrorURL
+	if sec.HasKey("OSV_MIRROR_URL") {
+		g.OSVMirrorURL = strings.TrimSpace(sec.Key("OSV_MIRROR_URL").String())
+	}
+	if g.OSVMirrorURL != "" {
+		u, err := url.Parse(g.OSVMirrorURL)
+		switch {
+		case err != nil:
+			return errors.New("[dependency_graph] OSV_MIRROR_URL is not a valid URL")
+		case u.Scheme != "https" && u.Scheme != "http", u.Hostname() == "":
+			return errors.New("[dependency_graph] OSV_MIRROR_URL must be an http(s) URL with a host")
+		case u.User != nil, u.RawQuery != "", u.Fragment != "", u.ForceQuery:
+			return errors.New("[dependency_graph] OSV_MIRROR_URL must have no user info, query or fragment")
+		}
+		if u.Scheme == "http" {
+			log.Warn("[dependency_graph] OSV_MIRROR_URL uses http: the advisory data is not protected in transit")
+		}
+		g.OSVMirrorURL = strings.TrimRight(u.Scheme+"://"+u.Host+u.EscapedPath(), "/")
+	}
+	if g.UpdateInterval, err = sec.Key("UPDATE_INTERVAL").MustDuration(24 * time.Hour); err != nil {
+		return err
+	}
+	if g.UpdateInterval < MinUpdateInterval {
+		log.Warn("[dependency_graph] UPDATE_INTERVAL %s is below the minimum, using %s", g.UpdateInterval, MinUpdateInterval)
+		g.UpdateInterval = MinUpdateInterval
+	}
+	if g.UpdateInterval > MaxUpdateInterval {
+		log.Warn("[dependency_graph] UPDATE_INTERVAL %s is above the maximum, using %s", g.UpdateInterval, MaxUpdateInterval)
+		g.UpdateInterval = MaxUpdateInterval
+	}
+	g.OSVMaxDownload = max(sec.Key("OSV_MAX_DOWNLOAD").MustInt64(512<<20), 1)
+	g.OSVMaxEntries = max(sec.Key("OSV_MAX_ENTRIES").MustInt(500000), 1)
+	g.OSVMaxEntrySize = max(sec.Key("OSV_MAX_ENTRY_SIZE").MustInt64(4<<20), 1)
+	g.OSVMaxUncompressed = max(sec.Key("OSV_MAX_UNCOMPRESSED").MustInt64(4<<30), 1)
+	if g.OSVEcosystemTimeout, err = sec.Key("OSV_ECOSYSTEM_TIMEOUT").MustDuration(15 * time.Minute); err != nil {
+		return err
+	}
+	g.OSVEcosystemTimeout = max(g.OSVEcosystemTimeout, time.Second)
 	return nil
 }
 
