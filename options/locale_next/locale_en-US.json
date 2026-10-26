@@ -3259,6 +3259,7 @@
 	"repo.dependencies.skip.manifest_too_large": "larger than the size limit",
 	"repo.dependencies.skip.too_many_manifests": "over the limit of manifests per repository",
 	"repo.dependencies.skip.too_many_dependencies": "over the limit of dependencies per repository",
+	"repo.dependencies.skip.too_many_entries": "has too many entries to be read",
 	"repo.dependencies.skip.parse_error": "could not be parsed",
 	"repo.dependencies.skip.invalid_path": "the path is not valid",
 	"repo.dependencies.skip.read_error": "could not be read",

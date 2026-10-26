@@ -4,7 +4,6 @@
 package dependency
 
 import (
-	"errors"
 	"strings"
 )
 
@@ -128,7 +127,7 @@ func parseNuGetLock(s *sink, data []byte, _ Finder) error {
 		return err
 	})
 	if err != nil {
-		if errors.Is(err, ErrTooManyDependencies) || s.ctx.Err() != nil {
+		if isLimit(err) || s.ctx.Err() != nil {
 			return err
 		}
 		return parseErr("packages.lock.json")

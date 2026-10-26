@@ -293,7 +293,7 @@ func TestEnqueueUnscanned(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, ids, repo.ID, "never scanned")
 
-	require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(), &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: "old", Status: "ok"}, []*repo_model.Dependency{}))
+	require.NoError(t, replaceDependencies(t.Context(), &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: "old", Status: "ok"}, []*repo_model.Dependency{}))
 	ids, _ = repo_model.UnscannedDependencyRepoIDs(t.Context(), 0, 1000)
 	assert.Contains(t, ids, repo.ID, "scanned at another commit than the head of the branch table")
 
@@ -301,7 +301,7 @@ func TestEnqueueUnscanned(t *testing.T) {
 	_, err = db.GetEngine(t.Context()).SQL("SELECT commit_id FROM branch WHERE repo_id = ? AND name = ?", repo.ID, repo.DefaultBranch).Get(&head)
 	require.NoError(t, err)
 	require.NotEmpty(t, head)
-	require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(), &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: head, Status: "ok"}, []*repo_model.Dependency{}))
+	require.NoError(t, replaceDependencies(t.Context(), &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: head, Status: "ok"}, []*repo_model.Dependency{}))
 	ids, _ = repo_model.UnscannedDependencyRepoIDs(t.Context(), 0, 1000)
 	assert.NotContains(t, ids, repo.ID, "up to date")
 
@@ -484,7 +484,7 @@ func TestScanNeverReplacesNewerRows(t *testing.T) {
 
 	// another process scans a later commit of the branch and stores it while this scan is still reading
 	sha2 := commitOnTop(t, repo, map[string]string{"go.mod": "module m\n\nrequire example.com/newer v1.0.0\n"})
-	require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(),
+	require.NoError(t, replaceDependencies(t.Context(),
 		&repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: sha2, Status: repo_model.DependencyScanOK, ManifestCount: 1, DependencyCount: 1, ScannedUnix: timeutil.TimeStampNow()},
 		[]*repo_model.Dependency{{RepoID: repo.ID, Ecosystem: "Go", Name: "example.com/newer", Version: "v1.0.0", ManifestPath: "go.mod", Direct: true}}))
 	release()
@@ -537,7 +537,7 @@ func TestFailedScanKeepsNewerRow(t *testing.T) {
 	defer test.MockVariableValue(&setting.DependencyGraph.ScanTimeout, 300*time.Millisecond)()
 	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, _ *dependency.Format, _ []byte, _ dependency.Finder, _ int) ([]dependency.Dependency, error) {
 		other := &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: "other", Status: repo_model.DependencyScanOK, ScannedUnix: timeutil.TimeStampNow()}
-		require.NoError(t, repo_model.ReplaceRepoDependencies(context.Background(), other, []*repo_model.Dependency{}))
+		require.NoError(t, replaceDependencies(context.Background(), other, []*repo_model.Dependency{}))
 		<-ctx.Done()
 		return nil, ctx.Err()
 	})()
@@ -621,4 +621,93 @@ func TestHelperCacheKeepsOneCopyPerBlob(t *testing.T) {
 	assert.EqualValues(t, 400, reads.Load())
 	assert.Less(t, int64(peak.Load())-int64(base.HeapInuse), int64(48<<20), "400 copies would be 400 MiB")
 	assert.Len(t, rowsOf(t, repo.ID), 400)
+}
+
+// replaceDependencies stores a scan row and its dependencies as a scan that read the row as it is now.
+func replaceDependencies(ctx context.Context, scan *repo_model.DependencyScan, deps []*repo_model.Dependency) error {
+	cur, err := repo_model.GetRepoDependencyScan(ctx, scan.RepoID)
+	if err != nil {
+		return err
+	}
+	_, err = repo_model.ReplaceRepoDependenciesIf(ctx, scan, deps, cur)
+	return err
+}
+
+// A manifest that is over the entry budget is given up on its own: the manifests after it are still read, and only
+// the scan-wide row cap ends the scan.
+func TestScanEntryBudgetSkipsOnlyThatManifest(t *testing.T) {
+	repo := enable(t)
+	commitFiles(t, repo, map[string]string{
+		"a/go.mod": "module a\n\nrequire example.com/huge v1.0.0\n",
+		"b/go.mod": "module b\n\nrequire example.com/small v1.0.0\n",
+	}, nil)
+	orig := parseManifest
+	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
+		if strings.Contains(string(data), "huge") {
+			return nil, dependency.ErrTooManyEntries
+		}
+		return orig(ctx, f, data, find, maxRows)
+	})()
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	scan, _ := repo_model.GetRepoDependencyScan(t.Context(), repo.ID)
+	assert.Equal(t, repo_model.DependencyScanOK, scan.Status)
+	assert.Equal(t, []repo_model.SkippedManifest{{Path: "a/go.mod", Code: "too_many_entries"}}, scan.SkippedManifests())
+	rows := rowsOf(t, repo.ID)
+	assert.Len(t, rows, 1)
+	assert.Contains(t, rows, "Go|example.com/small@v1.0.0|b/go.mod")
+}
+
+// The write that loses to another process asks for a new scan when what that process stored isn't the head.
+func TestLostWriteRequeuesWhenHeadMoved(t *testing.T) {
+	repo := enable(t)
+	commitFiles(t, repo, map[string]string{"go.mod": goMod}, nil)
+	started, release := blockFirstParse(t)
+	done := make(chan struct {
+		requeue bool
+		err     error
+	}, 1)
+	go func() {
+		r, err := scan(t.Context(), repo.ID)
+		done <- struct {
+			requeue bool
+			err     error
+		}{r, err}
+	}()
+	<-started
+	// another process stores an older result; the head this scan read is a different commit
+	require.NoError(t, replaceDependencies(t.Context(), &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: "other", Status: repo_model.DependencyScanOK, ScannedUnix: timeutil.TimeStampNow()}, []*repo_model.Dependency{}))
+	release()
+	res := <-done
+	require.NoError(t, res.err)
+	assert.True(t, res.requeue)
+	scan, _ := repo_model.GetRepoDependencyScan(t.Context(), repo.ID)
+	assert.Equal(t, "other", scan.CommitSHA)
+}
+
+// 400 lock files that share one key-heavy package.json: the package.json is read and parsed once.
+func TestScanParsesSharedHelperOnce(t *testing.T) {
+	repo := enable(t)
+	var sb strings.Builder
+	sb.WriteString(`{"dependencies":{`)
+	for i := range 20000 {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		sb.WriteString(`"pkg-` + strconv.Itoa(i) + `":"^1.0.0"`)
+	}
+	sb.WriteString(`}}`)
+	files := map[string]string{}
+	for i := range 400 {
+		files["d"+strconv.Itoa(i)+"/package.json"] = sb.String() // the same blob in every directory
+		files["d"+strconv.Itoa(i)+"/yarn.lock"] = "# yarn lockfile v1\n\npkg-1@^1.0.0:\n  version \"1.0.0\"\n"
+	}
+	commitFiles(t, repo, files, nil)
+	defer test.MockVariableValue(&setting.DependencyGraph.MaxManifests, 1000)()
+	start := time.Now()
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	assert.Less(t, time.Since(start), 10*time.Second)
+	assert.Len(t, rowsOf(t, repo.ID), 400)
+	for _, r := range rowsOf(t, repo.ID) {
+		assert.True(t, r.Direct)
+	}
 }

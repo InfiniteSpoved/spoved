@@ -4,7 +4,6 @@
 package dependency
 
 import (
-	"errors"
 	"strings"
 
 	"forgejo.org/modules/json"
@@ -73,7 +72,7 @@ func parseComposerLock(s *sink, data []byte, find Finder) error {
 		return err
 	})
 	if err != nil {
-		if errors.Is(err, ErrTooManyDependencies) || s.ctx.Err() != nil {
+		if isLimit(err) || s.ctx.Err() != nil {
 			return err
 		}
 		return parseErr("composer.lock")

@@ -27,7 +27,7 @@ type Dependency struct {
 // swagger:model
 type SkippedManifest struct {
 	Path string `json:"path"`
-	// parse_error, manifest_too_large, too_many_manifests, too_many_dependencies, invalid_path or read_error
+	// parse_error, manifest_too_large, too_many_manifests, too_many_dependencies, too_many_entries, invalid_path or read_error
 	Code string `json:"code"`
 }
 

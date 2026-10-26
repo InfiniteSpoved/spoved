@@ -4,8 +4,8 @@
 package dependency
 
 import (
-	"errors"
 	"strings"
+	"sync/atomic"
 
 	"forgejo.org/modules/json"
 )
@@ -19,8 +19,6 @@ func init() {
 type npmIgnored struct{}
 
 func (*npmIgnored) UnmarshalJSON([]byte) error { return nil }
-
-type npmDeps map[string]npmIgnored
 
 // npmDependencyKeys are the sections of a package.json (and of a lockfile's root entry) that name dependencies.
 var npmDependencyKeys = map[string]bool{"dependencies": true, "devDependencies": true, "optionalDependencies": true, "peerDependencies": true}
@@ -46,7 +44,7 @@ func parseNPMLock(s *sink, data []byte, find Finder) error {
 		direct[n] = true
 		return nil
 	}
-	pkgJSON := npmPackageJSONDeps(find("package.json", false))
+	pkgJSON := s.npmPackageJSON(find("package.json", false))
 	var v1 []Dependency
 	j := newJSONStream(s, data)
 	ok, err := j.object(func(key string) error {
@@ -93,7 +91,7 @@ func parseNPMLock(s *sink, data []byte, find Finder) error {
 		}
 	})
 	if err != nil {
-		if errors.Is(err, ErrTooManyDependencies) || s.ctx.Err() != nil {
+		if isLimit(err) || s.ctx.Err() != nil {
 			return err
 		}
 		return parseErr("package-lock.json")
@@ -127,12 +125,12 @@ func parseNPMLock(s *sink, data []byte, find Finder) error {
 }
 
 // readV1Tree reads the "dependencies" object of lockfileVersion 1: name -> {version, dependencies: {...}}.
-func readV1Tree(j *jsonStream, s *sink, top bool, out *[]Dependency, direct map[string]bool) error {
+func readV1Tree(j *jsonStream, s *sink, top bool, out *[]Dependency, declared map[string]string) error {
 	_, err := j.object(func(name string) error {
 		if err := s.entry(); err != nil || len(*out) >= s.maxRows {
 			return cmpOr(err, ErrTooManyDependencies)
 		}
-		d := Dependency{Name: name, Direct: top && direct[name]}
+		d := Dependency{Name: name, Direct: top && declaredIn(declared, name)}
 		idx := len(*out)
 		*out = append(*out, d)
 		_, err := j.object(func(f string) error {
@@ -142,7 +140,7 @@ func readV1Tree(j *jsonStream, s *sink, top bool, out *[]Dependency, direct map[
 				(*out)[idx].Version = v
 				return err
 			case "dependencies":
-				return readV1Tree(j, s, false, out, direct)
+				return readV1Tree(j, s, false, out, declared)
 			default:
 				return j.skip()
 			}
@@ -150,29 +148,6 @@ func readV1Tree(j *jsonStream, s *sink, top bool, out *[]Dependency, direct map[
 		return err
 	})
 	return err
-}
-
-// npmPackageJSONDeps returns the names a package.json declares; nil data gives an empty set.
-func npmPackageJSONDeps(data []byte) map[string]bool {
-	out := map[string]bool{}
-	if data == nil {
-		return out
-	}
-	var p struct {
-		Dependencies         npmDeps `json:"dependencies"`
-		DevDependencies      npmDeps `json:"devDependencies"`
-		OptionalDependencies npmDeps `json:"optionalDependencies"`
-		PeerDependencies     npmDeps `json:"peerDependencies"`
-	}
-	if json.Unmarshal(data, &p) != nil {
-		return out
-	}
-	for _, m := range []npmDeps{p.Dependencies, p.DevDependencies, p.OptionalDependencies, p.PeerDependencies} {
-		for n := range m {
-			out[n] = true
-		}
-	}
-	return out
 }
 
 // npmRange is a version range of a package.json; a value that isn't a string reads as empty.
@@ -186,26 +161,40 @@ func (r *npmRange) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// npmPackageJSONRanges returns what a package.json asks for: dependency name to range (the last one wins when
-// several sections name it). nil data gives an empty map.
-func npmPackageJSONRanges(data []byte) map[string]string {
-	out := map[string]string{}
+// npmPackageJSONParses counts the parses of package.json files (the test of the helper cache reads it).
+var npmPackageJSONParses atomic.Int64
+
+// npmPackageJSON returns what a package.json asks for: dependency name to range (the last one wins when several
+// sections name it); the names are the declared dependencies. nil data gives an empty map. The result is kept in
+// the scan's helper cache, so a package.json that many manifests share is parsed once.
+func (s *sink) npmPackageJSON(data []byte) map[string]string {
 	if data == nil {
-		return out
+		return map[string]string{}
 	}
-	var p struct {
-		Dependencies         map[string]npmRange `json:"dependencies"`
-		DevDependencies      map[string]npmRange `json:"devDependencies"`
-		OptionalDependencies map[string]npmRange `json:"optionalDependencies"`
-		PeerDependencies     map[string]npmRange `json:"peerDependencies"`
-	}
-	if json.Unmarshal(data, &p) != nil {
-		return out
-	}
-	for _, m := range []map[string]npmRange{p.Dependencies, p.DevDependencies, p.OptionalDependencies, p.PeerDependencies} {
-		for n, r := range m {
-			out[n] = string(r)
+	return helperParsed(s.ctx, data, func() (map[string]string, int64) {
+		npmPackageJSONParses.Add(1)
+		out := map[string]string{}
+		var p struct {
+			Dependencies         map[string]npmRange `json:"dependencies"`
+			DevDependencies      map[string]npmRange `json:"devDependencies"`
+			OptionalDependencies map[string]npmRange `json:"optionalDependencies"`
+			PeerDependencies     map[string]npmRange `json:"peerDependencies"`
 		}
-	}
-	return out
+		if json.Unmarshal(data, &p) != nil {
+			return out, 0
+		}
+		var cost int64
+		for _, m := range []map[string]npmRange{p.Dependencies, p.DevDependencies, p.OptionalDependencies, p.PeerDependencies} {
+			for n, r := range m {
+				out[n] = string(r)
+				cost += int64(len(n)+len(r)) + 64
+			}
+		}
+		return out, cost
+	})
+}
+
+func declaredIn(m map[string]string, name string) bool {
+	_, ok := m[name]
+	return ok
 }

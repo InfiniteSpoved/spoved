@@ -4,6 +4,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"os"
@@ -115,7 +116,7 @@ func DeclareGitRepos(t *testing.T) {
 			RepoID: repo.ID, CommitSHA: headCommit(t, repo), ScannedUnix: timeutil.TimeStampNow(), Status: repo_model.DependencyScanOK,
 			ManifestCount: 3, DependencyCount: len(deps),
 		}
-		require.NoError(t, repo_model.ReplaceRepoDependencies(db.DefaultContext, scan, deps))
+		require.NoError(t, replaceDependencies(db.DefaultContext, scan, deps))
 	})
 	// a repository whose code unit is off: its readers see the issues but not the code
 	newRepo(t, 11, "dependencies-no-code", map[unit_model.Type]convert.Conversion{unit_model.TypeIssues: nil}, []FileChanges{{
@@ -125,7 +126,7 @@ func DeclareGitRepos(t *testing.T) {
 		_, err := db.Exec(db.DefaultContext, "DELETE FROM repo_unit WHERE repo_id = ? AND type = ?", repo.ID, unit_model.TypeCode)
 		require.NoError(t, err)
 		scan := &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: headCommit(t, repo), ScannedUnix: timeutil.TimeStampNow(), Status: repo_model.DependencyScanOK}
-		require.NoError(t, repo_model.ReplaceRepoDependencies(db.DefaultContext, scan, []*repo_model.Dependency{}))
+		require.NoError(t, replaceDependencies(db.DefaultContext, scan, []*repo_model.Dependency{}))
 	})
 	newRepo(t, 2, "language-stats-test", nil, []FileChanges{{
 		Filename: "main.rs",
@@ -664,4 +665,14 @@ func headCommit(t *testing.T, repo *repo_model.Repository) string {
 	sha, err := gitRepo.GetBranchCommitID(repo.DefaultBranch)
 	require.NoError(t, err)
 	return sha
+}
+
+// replaceDependencies stores a scan row and its dependencies as a scan that read the row as it is now.
+func replaceDependencies(ctx context.Context, scan *repo_model.DependencyScan, deps []*repo_model.Dependency) error {
+	cur, err := repo_model.GetRepoDependencyScan(ctx, scan.RepoID)
+	if err != nil {
+		return err
+	}
+	_, err = repo_model.ReplaceRepoDependenciesIf(ctx, scan, deps, cur)
+	return err
 }

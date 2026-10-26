@@ -187,12 +187,21 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	// The stored rows belong to sha; the database write is not bound to the scan's time budget. It happens only if
 	// the row is still the one read at the start, so a scan another process finished meanwhile is kept (the head
 	// read at the start is the one to store, even if it is an older commit than the stored one after a force push).
-	if _, err := repo_model.ReplaceRepoDependenciesIf(ctx, result, deps, old); err != nil {
+	written, err := repo_model.ReplaceRepoDependenciesIf(ctx, result, deps, old)
+	if err != nil {
 		return false, err
 	}
+	head, headErr := gitRepo.GetBranchCommitID(repo.DefaultBranch)
+	if headErr != nil {
+		return false, nil
+	}
+	if !written {
+		// another process stored its result first: if that isn't the head, the next scan is still due
+		cur, err := repo_model.GetRepoDependencyScan(ctx, repo.ID)
+		return err == nil && (cur == nil || cur.CommitSHA != head), nil
+	}
 	// the branch moved while the scan ran: the next scan is the one that ends on the head
-	head, err := gitRepo.GetBranchCommitID(repo.DefaultBranch)
-	return err == nil && head != sha, nil
+	return head != sha, nil
 }
 
 // fail records the error code of a scan and keeps the old rows (and the commit they belong to); it does not
@@ -253,7 +262,8 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 	// helper files by blob ID: the same blob is kept once however many directories hold it, and what doesn't fit
 	// the budget is read again on each use
 	cache := map[string][]byte{}
-	var cached int64
+	helpers := dependency.NewHelperCache(helperCacheBudget) // the files above and what is parsed from them
+	ctx = dependency.WithHelperCache(ctx, helpers)
 	find := func(manifestPath string) dependency.Finder {
 		return func(name string, up bool) []byte {
 			for dir := path.Dir(manifestPath); ; dir = path.Dir(dir) {
@@ -266,9 +276,8 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 					if err != nil {
 						b = nil
 					}
-					if cached+int64(len(b)) <= helperCacheBudget {
+					if helpers.Charge(int64(len(b))) {
 						cache[e.id] = b
-						cached += int64(len(b))
 					}
 					return b
 				}
@@ -320,6 +329,10 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 		parsed, err := parseManifest(ctx, format, data, find(m.path), cfg.MaxDependencies-len(deps))
 		if ctx.Err() != nil {
 			return nil, nil, repo_model.DependencyErrTimeout, ctx.Err()
+		}
+		if errors.Is(err, dependency.ErrTooManyEntries) {
+			skip(m.path, repo_model.DependencySkipTooManyEntries) // this file only: the next one is read
+			continue
 		}
 		if errors.Is(err, dependency.ErrTooManyDependencies) {
 			// the cap is reached: this manifest and every later one stay unread

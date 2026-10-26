@@ -18,7 +18,7 @@ func init() {
 // (`alias@npm:real@range`) names the real package. Workspaces and packages from the disk (link:, portal:, file:,
 // workspace:) are not listed.
 func parseYarnLock(s *sink, data []byte, find Finder) error {
-	asked := npmPackageJSONRanges(find("package.json", false))
+	asked := s.npmPackageJSON(find("package.json", false))
 	var name string
 	var direct, local bool
 	var version string
@@ -31,19 +31,36 @@ func parseYarnLock(s *sink, data []byte, find Finder) error {
 		return err
 	}
 	sc := newScanner(s, data)
+	bad := func() error { return parseErr("yarn.lock") }
+	prev := 0 // the indentation of the previous line
+	haveVersion := false
 	for sc.Scan() {
 		line := sc.Text()
-		switch {
-		case strings.TrimSpace(line) == "" || strings.HasPrefix(line, "#"):
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(line, "#") {
 			continue
-		case line[0] != ' ':
+		}
+		trimmed := strings.TrimLeft(line, " ")
+		indent := len(line) - len(trimmed)
+		// only the shapes yarn writes: a header `a@^1, "b@^2":` (v1) or `"a@npm:^1, a@npm:^2":` (berry) at column 0,
+		// fields at 2 spaces and nested maps below them; no tabs, flow collections, comments or trailing spaces
+		if strings.ContainsRune(line[:indent], '\t') || strings.HasPrefix(trimmed, "\t") || indent%2 != 0 || indent > prev+2 ||
+			line != strings.TrimRight(line, " \t") || !yarnQuotesOK(trimmed) {
+			return bad()
+		}
+		prev = indent
+		if indent == 0 {
 			if err := flush(); err != nil {
 				return err
 			}
-			if !strings.HasSuffix(line, ":") || strings.HasPrefix(line, "__metadata") {
+			haveVersion = false
+			header, ok := strings.CutSuffix(line, ":")
+			if !ok || header == "" || strings.ContainsAny(header, "{}[]") {
+				return bad()
+			}
+			if strings.HasPrefix(line, "__metadata") {
 				continue
 			}
-			for desc := range strings.SplitSeq(strings.TrimSuffix(line, ":"), ",") {
+			for desc := range strings.SplitSeq(header, ",") {
 				desc = strings.Trim(strings.TrimSpace(desc), `"`)
 				alias, rng, ok := splitYarnDescriptor(desc)
 				if !ok {
@@ -65,9 +82,17 @@ func parseYarnLock(s *sink, data []byte, find Finder) error {
 					direct = true
 				}
 			}
-		case len(line) > 2 && line[1] == ' ' && line[2] != ' ':
-			rest := strings.TrimSpace(line)
-			if v, ok := strings.CutPrefix(rest, "version"); ok {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") || strings.HasSuffix(trimmed, "}") || strings.HasSuffix(trimmed, "]") {
+			return bad() // a flow collection
+		}
+		if indent == 2 {
+			if v, ok := strings.CutPrefix(trimmed, "version"); ok && (v == "" || v[0] == ' ' || v[0] == ':') {
+				if haveVersion {
+					return bad() // the later one would win in yarn's parser
+				}
+				haveVersion = true
 				version = strings.Trim(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(v), ":")), `"`)
 			}
 		}
@@ -76,6 +101,23 @@ func parseYarnLock(s *sink, data []byte, find Finder) error {
 		return scanErr(err, "yarn.lock")
 	}
 	return flush()
+}
+
+// yarnQuotesOK reports whether the double quotes of a line pair up (a backslash escapes the next character inside
+// them) and no single quote starts a scalar. Descriptors, resolutions and checksums contain no other quotes.
+func yarnQuotesOK(l string) bool {
+	in := false
+	for i := 0; i < len(l); i++ {
+		switch c := l[i]; {
+		case in && c == '\\':
+			i++
+		case c == '"':
+			in = !in
+		case !in && c == '\'' && (i == 0 || l[i-1] == ' ' || l[i-1] == ','):
+			return false
+		}
+	}
+	return !in
 }
 
 // splitYarnDescriptor splits `name@range` (the name may start with @scope/).

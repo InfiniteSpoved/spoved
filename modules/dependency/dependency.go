@@ -15,6 +15,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 )
@@ -108,10 +109,18 @@ func FormatForPath(p string) *Format {
 	return nil
 }
 
-// ErrTooManyDependencies is returned when a manifest holds more rows than the caller allows, or so many entries that
-// reading it would cost more than that many rows do. It stops the parser at once: the work and the memory of a parse
-// are bounded by the limit, not by the shape of the input.
+// ErrTooManyDependencies is returned when a manifest holds more rows than the caller allows. It stops the parser at
+// once: the work and the memory of a parse are bounded by the limit, not by the shape of the input.
 var ErrTooManyDependencies = errors.New("dependency: too many dependencies")
+
+// ErrTooManyEntries is returned when a manifest holds so many intermediate entries that reading it would cost more
+// than the allowed rows do, though it may keep few rows. Only that manifest is given up.
+var ErrTooManyEntries = errors.New("dependency: too many entries")
+
+// isLimit reports an error that stops a parse because a limit was reached.
+func isLimit(err error) bool {
+	return errors.Is(err, ErrTooManyDependencies) || errors.Is(err, ErrTooManyEntries)
+}
 
 // DefaultMaxDependencies is the row limit of Parse.
 const DefaultMaxDependencies = 50000
@@ -121,7 +130,7 @@ const DefaultMaxDependencies = 50000
 const entryFactor = 4
 
 // sink receives the rows of a parse. emit counts the rows, entry counts everything else a parser keeps in memory;
-// both fail with ErrTooManyDependencies past their limit, and both look at the context now and then.
+// emit fails with ErrTooManyDependencies and entry with ErrTooManyEntries past their limit, and both look at the context now and then.
 type sink struct {
 	ctx        context.Context
 	maxRows    int
@@ -164,14 +173,9 @@ func (s *sink) emit(d Dependency) error {
 // entry accounts for one intermediate entry a parser is about to keep.
 func (s *sink) entry() error {
 	if s.entries++; s.entries > s.maxEntries {
-		return ErrTooManyDependencies
+		return ErrTooManyEntries
 	}
 	return s.tick()
-}
-
-// Parse is ParseLimited with DefaultMaxDependencies.
-func (f *Format) Parse(ctx context.Context, data []byte, find Finder) ([]Dependency, error) {
-	return f.ParseLimited(ctx, data, find, DefaultMaxDependencies)
 }
 
 // ParseLimited reads a manifest and returns at most maxRows rows, or ErrTooManyDependencies. A panic of a parser is
@@ -269,7 +273,7 @@ func scanErr(err error, format string) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrTooManyDependencies) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || isLimit(err) {
 		return err
 	}
 	return parseErr("%s", format)
@@ -363,4 +367,61 @@ func cmpOr(err, other error) error {
 		return err
 	}
 	return other
+}
+
+// HelperCache keeps the parsed helper files (the package.json next to a lock file, ...) of one scan, by the memory
+// of the file the caller passes: the scan hands the same slice out for the same blob, so a file shared by many
+// manifests is parsed once. Its budget is shared with the scan's cache of the files themselves.
+type HelperCache struct {
+	mu     sync.Mutex
+	left   int64
+	parsed map[*byte]map[string]string
+}
+
+// NewHelperCache returns a cache that holds at most budget bytes (of files and of parsed results together).
+func NewHelperCache(budget int64) *HelperCache {
+	return &HelperCache{left: budget, parsed: map[*byte]map[string]string{}}
+}
+
+// Charge reserves n bytes of the budget and reports whether they were available.
+func (h *HelperCache) Charge(n int64) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if n > h.left {
+		return false
+	}
+	h.left -= n
+	return true
+}
+
+type helperCacheKey struct{}
+
+// WithHelperCache returns a context whose parses use h.
+func WithHelperCache(ctx context.Context, h *HelperCache) context.Context {
+	return context.WithValue(ctx, helperCacheKey{}, h)
+}
+
+// helperParsed returns parse()'s result for data from the cache of ctx, parsing and storing it (when the budget
+// allows) the first time. Without a cache it just parses. The key is the address of data, which the scan keeps alive
+// for as long as the cache lives.
+func helperParsed(ctx context.Context, data []byte, parse func() (map[string]string, int64)) map[string]string {
+	h, _ := ctx.Value(helperCacheKey{}).(*HelperCache)
+	if h == nil || len(data) == 0 {
+		out, _ := parse()
+		return out
+	}
+	key := &data[0]
+	h.mu.Lock()
+	out, ok := h.parsed[key]
+	h.mu.Unlock()
+	if ok {
+		return out
+	}
+	out, cost := parse()
+	if h.Charge(cost + int64(len(data))) {
+		h.mu.Lock()
+		h.parsed[key] = out
+		h.mu.Unlock()
+	}
+	return out
 }

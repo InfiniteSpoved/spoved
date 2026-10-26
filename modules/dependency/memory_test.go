@@ -205,7 +205,7 @@ func TestHostileTinyEntriesPeakHeap(t *testing.T) {
 			assert.Less(t, elapsed, 5*time.Second)
 			// a file this size is refused at the cap, or (a shape that keeps few rows) read in full
 			if err != nil {
-				assert.True(t, errors.Is(err, ErrTooManyDependencies) || errors.Is(err, ErrParse), "%v", err)
+				assert.True(t, isLimit(err) || errors.Is(err, ErrParse), "%v", err)
 			}
 		})
 	}

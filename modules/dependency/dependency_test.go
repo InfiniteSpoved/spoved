@@ -618,6 +618,13 @@ url = "https://example.test/x.git"
 
 // pnpm reads its lockfile with a full YAML parser. Valid YAML this reader would read differently is refused (a
 // parse error), never read into partial or invented rows.
+// pnpmHidden is a lockfile whose package a@1.0.0 carries lines (the argument) that a YAML reader that lets a quote run
+// over lines would use to swallow the section after it and then list evil@6.6.6.
+func pnpmHidden(lines string) string {
+	return "lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    dependencies:\n      a:\n        specifier: ^1\n        version: 1.0.0\n\npackages:\n\n" +
+		"  a@1.0.0:\n    resolution: {integrity: sha512-a}\n" + lines + "  evil@6.6.6:\n    resolution: {integrity: sha512-e}\n"
+}
+
 func TestPnpmFailsClosed(t *testing.T) {
 	const head = "lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    dependencies:\n      a:\n        specifier: ^1\n        version: 1.0.0\n\npackages:\n\n"
 	const a = "  a@1.0.0:\n    resolution: {integrity: sha512-a}\n\n"
@@ -642,6 +649,17 @@ func TestPnpmFailsClosed(t *testing.T) {
 		"explicit key without its value": head + "  ? " + strings.Repeat("x", 1100) + "@1.0.0\n  b@1.0.0:\n    resolution: {}\n",
 		"sequence item as a key":         head + "  - a@1.0.0\n",
 		"unterminated flow deeper down":  head + "  b@1.0.0:\n    peerDependenciesMeta:\n      x: {optional: [\n  evil@6.6.6:\n    resolution: {}\n",
+		"open quote in a deep item":      pnpmHidden("    cpu:\n      - \"x64\nsettings:\n  foo: \"\n"),
+		"open single quote in an item":   pnpmHidden("    cpu:\n      - 'x64\nsettings:\n  foo: '\n"),
+		"open quote in a mapping item":   pnpmHidden("    cpu:\n      - k: \"x64\nsettings:\n  foo: \"\n"),
+		"quote inside a flow value":      pnpmHidden("    cpu: [x64, \"a]\nsettings:\n  foo: \"]\n"),
+		"single quote inside a flow":     pnpmHidden("    cpu: [x64, 'a]\nsettings:\n  foo: ']\n"),
+		"open quote in a flow mapping":   pnpmHidden("    resolution2: {integrity: \"x}\nsettings:\n  foo: \"}\n"),
+		"unbalanced bracket":             pnpmHidden("    cpu: [x64\n"),
+		"trailing space":                 head + "  b@1.0.0: \n    resolution: {}\n",
+		"trailing comment on a header":   head + "  b@1.0.0: # c\n    resolution: {}\n",
+		"flow mapping as a package":      head + "  b@1.0.0: {resolution: {integrity: x}, name: evil, version: 6.6.6}\n",
+		"importers deep open quote":      "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      a:\n        specifier: ^1\n        version: 1.0.0\n      x:\n        - \"q\nsettings:\n  z: \"\n      evil:\n        version: 6.6.6\n",
 		"top-level flow":                 "lockfileVersion: '9.0'\nsettings: {\npackages:\n  a@1.0.0:\n    resolution: {}\n",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -713,4 +731,74 @@ func TestGemPlatformSuffix(t *testing.T) {
 	} {
 		assert.Equal(t, want, gemVersion(in), in)
 	}
+}
+
+// yarn.lock: only the shapes yarn writes are read; any other line is a parse error, never a hidden entry.
+func TestYarnFailsClosed(t *testing.T) {
+	const berry = "__metadata:\n  version: 8\n\n"
+	for name, in := range map[string]string{
+		"header with a trailing space":  berry + "\"evil@npm:^6.6.6\": \n  version: 6.6.6\n",
+		"header with a comment":         berry + "\"c@npm:^1\": # x\n  version: 1.0.0\n",
+		"flow entry":                    berry + "\"evil@npm:^6.6.6\": {version: 6.6.6, resolution: \"evil@npm:6.6.6\"}\n",
+		"four-space fields":             berry + "\"evil@npm:^6.6.6\":\n    version: 6.6.6\n",
+		"odd indentation":               berry + "\"evil@npm:^6.6.6\":\n   version: 6.6.6\n",
+		"tab":                           berry + "\"evil@npm:^6.6.6\":\n\tversion: 6.6.6\n",
+		"open quote in a field":         berry + "\"evil@npm:^6.6.6\":\n  version: 6.6.6\n  resolution: \"evil@npm:6.6.6\n",
+		"open quote in a header":        berry + "\"evil@npm:^6.6.6:\n  version: 6.6.6\n",
+		"two versions":                  berry + "\"evil@npm:^6.6.6\":\n  version: 1.0.0\n  version: 6.6.6\n",
+		"v1 header with trailing space": "# yarn lockfile v1\n\nevil@^6.6.6: \n  version \"6.6.6\"\n",
+		"v1 four-space fields":          "# yarn lockfile v1\n\nevil@^6.6.6:\n    version \"6.6.6\"\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			deps, err := FormatFor("yarn.lock").Parse(t.Context(), []byte(in), nil)
+			require.ErrorIs(t, err, ErrParse)
+			assert.Empty(t, deps)
+		})
+	}
+	// what yarn writes still reads
+	in := berry + "\"a@npm:^1, a@npm:^1.2\":\n  version: 1.2.0\n  resolution: \"a@npm:1.2.0\"\n  dependencies:\n    b: \"npm:^2\"\n  checksum: 10/abc\n  languageName: node\n  linkType: hard\n"
+	deps, err := FormatFor("yarn.lock").Parse(t.Context(), []byte(in), nil)
+	require.NoError(t, err)
+	require.Len(t, deps, 1)
+	assert.Equal(t, "1.2.0", deps[0].Version)
+	v1 := "# yarn lockfile v1\n\n\"@s/a@^1\", a@^1.1:\n  version \"1.2.0\"\n  resolved \"https://r/a.tgz#abc\"\n  dependencies:\n    b \"^2\"\n"
+	deps, err = FormatFor("yarn.lock").Parse(t.Context(), []byte(v1), nil)
+	require.NoError(t, err)
+	require.Len(t, deps, 1)
+}
+
+// A package.json shared by many manifests is parsed once per scan, whatever the number of lock files.
+func TestHelperCacheParsesSharedPackageJSONOnce(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString(`{"dependencies":{`)
+	for i := range 20000 {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		fmt.Fprintf(&sb, `"pkg-%d":"^1.%d.0"`, i, i)
+	}
+	sb.WriteString(`}}`)
+	pkg := []byte(sb.String())
+	lock := []byte("# yarn lockfile v1\n\npkg-1@^1.1.0:\n  version \"1.1.0\"\n")
+	find := func(string, bool) []byte { return pkg }
+
+	ctx := WithHelperCache(t.Context(), NewHelperCache(8<<20))
+	before := npmPackageJSONParses.Load()
+	start := time.Now()
+	for range 400 {
+		deps, err := FormatFor("yarn.lock").ParseLimited(ctx, lock, find, 1000)
+		require.NoError(t, err)
+		require.Len(t, deps, 1)
+		assert.True(t, deps[0].Direct)
+	}
+	assert.EqualValues(t, 1, npmPackageJSONParses.Load()-before)
+	assert.Less(t, time.Since(start), 3*time.Second)
+
+	// without a cache it is parsed each time; a cache with no budget left parses each time too
+	before = npmPackageJSONParses.Load()
+	_, err := FormatFor("yarn.lock").ParseLimited(WithHelperCache(t.Context(), NewHelperCache(10)), lock, find, 1000)
+	require.NoError(t, err)
+	_, err = FormatFor("yarn.lock").ParseLimited(WithHelperCache(t.Context(), NewHelperCache(10)), lock, find, 1000)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, npmPackageJSONParses.Load()-before)
 }

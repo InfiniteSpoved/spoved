@@ -42,13 +42,14 @@ const (
 	DependencyErrGit          = "git_error"
 	DependencyErrInternal     = "internal_error"
 
-	DependencySkipTooLarge        = "manifest_too_large"
-	DependencySkipTooMany         = "too_many_manifests"
-	DependencySkipTooManyDeps     = "too_many_dependencies"
-	DependencySkipParse           = "parse_error"
-	DependencySkipInvalidPath     = "invalid_path"
-	DependencySkipRead            = "read_error"
-	maxSkippedManifestsStored int = 100
+	DependencySkipTooLarge           = "manifest_too_large"
+	DependencySkipTooMany            = "too_many_manifests"
+	DependencySkipTooManyDeps        = "too_many_dependencies"
+	DependencySkipTooManyEntries     = "too_many_entries"
+	DependencySkipParse              = "parse_error"
+	DependencySkipInvalidPath        = "invalid_path"
+	DependencySkipRead               = "read_error"
+	maxSkippedManifestsStored    int = 100
 )
 
 // DependencyScanErrors are the values of DependencyScan.Error.
@@ -56,7 +57,7 @@ var DependencyScanErrors = []string{DependencyErrTimeout, DependencyErrTreeTooLa
 
 // DependencySkipCodes are the values of SkippedManifest.Code.
 var DependencySkipCodes = []string{
-	DependencySkipTooLarge, DependencySkipTooMany, DependencySkipTooManyDeps, DependencySkipParse,
+	DependencySkipTooLarge, DependencySkipTooMany, DependencySkipTooManyDeps, DependencySkipTooManyEntries, DependencySkipParse,
 	DependencySkipInvalidPath, DependencySkipRead,
 }
 
@@ -135,7 +136,8 @@ func GetRepoDependencyScan(ctx context.Context, repoID int64) (*DependencyScan, 
 }
 
 // ReplaceRepoDependenciesIf replaces the rows of the repository in one transaction and stores the scan, but only if
-// the scan row is still the one the caller read (expect, nil if there was none): another process that finished a
+// the scan row is still the one the caller read (expect, nil if there was none; same commit, time, status and error,
+// so a scan of the same commit that finished meanwhile counts as another row): another process that finished a
 // scan meanwhile wins, on any number of servers. It reports whether it wrote. With a nil deps the old rows stay and
 // only the status of the scan row changes (a failed scan).
 func ReplaceRepoDependenciesIf(ctx context.Context, scan *DependencyScan, deps []*Dependency, expect *DependencyScan) (written bool, err error) {
@@ -154,7 +156,8 @@ func ReplaceRepoDependenciesIf(ctx context.Context, scan *DependencyScan, deps [
 			}
 		} else {
 			// the conditional update is also the row lock that serializes writers
-			n, err := e.Where("id = ? AND repo_id = ? AND commit_sha = ?", expect.ID, scan.RepoID, expect.CommitSHA).Cols(cols...).Update(scan)
+			n, err := e.Where("id = ? AND repo_id = ? AND commit_sha = ? AND scanned_unix = ? AND status = ? AND error = ?",
+				expect.ID, scan.RepoID, expect.CommitSHA, expect.ScannedUnix, expect.Status, expect.Error).Cols(cols...).Update(scan)
 			if err != nil || n == 0 {
 				return err
 			}
@@ -173,16 +176,6 @@ func ReplaceRepoDependenciesIf(ctx context.Context, scan *DependencyScan, deps [
 		return nil
 	})
 	return written, err
-}
-
-// ReplaceRepoDependencies is ReplaceRepoDependenciesIf against the row as it is now.
-func ReplaceRepoDependencies(ctx context.Context, scan *DependencyScan, deps []*Dependency) error {
-	cur, err := GetRepoDependencyScan(ctx, scan.RepoID)
-	if err != nil {
-		return err
-	}
-	_, err = ReplaceRepoDependenciesIf(ctx, scan, deps, cur)
-	return err
 }
 
 // DependencySearchOptions selects the dependencies of one repository.

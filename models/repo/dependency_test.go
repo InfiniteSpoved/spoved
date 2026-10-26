@@ -4,6 +4,7 @@
 package repo_test
 
 import (
+	"context"
 	"testing"
 
 	"forgejo.org/models/db"
@@ -25,7 +26,7 @@ func TestReplaceRepoDependencies(t *testing.T) {
 	}
 	scan := &repo_model.DependencyScan{RepoID: 1, CommitSHA: "aaaa", Status: repo_model.DependencyScanOK, ManifestCount: 2, DependencyCount: 2}
 	scan.SetSkippedManifests([]repo_model.SkippedManifest{{Path: "x/yarn.lock", Code: repo_model.DependencySkipParse}})
-	require.NoError(t, repo_model.ReplaceRepoDependencies(ctx, scan, first))
+	require.NoError(t, replaceDependencies(ctx, scan, first))
 	other := &repo_model.Dependency{RepoID: 2, Ecosystem: "Go", Name: "z"}
 	require.NoError(t, db.Insert(ctx, other))
 
@@ -36,7 +37,7 @@ func TestReplaceRepoDependencies(t *testing.T) {
 
 	// a failed scan keeps the rows and the commit
 	fail := &repo_model.DependencyScan{RepoID: 1, CommitSHA: "aaaa", Status: repo_model.DependencyScanFailed, Error: repo_model.DependencyErrTimeout}
-	require.NoError(t, repo_model.ReplaceRepoDependencies(ctx, fail, nil))
+	require.NoError(t, replaceDependencies(ctx, fail, nil))
 	n := countDeps(t, 1)
 	assert.EqualValues(t, 2, n)
 	got, _ = repo_model.GetRepoDependencyScan(ctx, 1)
@@ -44,7 +45,7 @@ func TestReplaceRepoDependencies(t *testing.T) {
 
 	// a scan replaces the rows of its repository only
 	second := []*repo_model.Dependency{{RepoID: 1, Ecosystem: "Go", Name: "c", Version: "v3", ManifestPath: "go.mod", Direct: true}}
-	require.NoError(t, repo_model.ReplaceRepoDependencies(ctx, &repo_model.DependencyScan{RepoID: 1, CommitSHA: "bbbb", Status: repo_model.DependencyScanOK}, second))
+	require.NoError(t, replaceDependencies(ctx, &repo_model.DependencyScan{RepoID: 1, CommitSHA: "bbbb", Status: repo_model.DependencyScanOK}, second))
 	n = countDeps(t, 1)
 	assert.EqualValues(t, 1, n)
 	n = countDeps(t, 2)
@@ -54,7 +55,7 @@ func TestReplaceRepoDependencies(t *testing.T) {
 	assert.EqualValues(t, 1, count, "one scan row")
 
 	// an empty result (no manifests) clears the rows
-	require.NoError(t, repo_model.ReplaceRepoDependencies(ctx, &repo_model.DependencyScan{RepoID: 1, CommitSHA: "cccc", Status: repo_model.DependencyScanOK}, []*repo_model.Dependency{}))
+	require.NoError(t, replaceDependencies(ctx, &repo_model.DependencyScan{RepoID: 1, CommitSHA: "cccc", Status: repo_model.DependencyScanOK}, []*repo_model.Dependency{}))
 	n = countDeps(t, 1)
 	assert.EqualValues(t, 0, n)
 }
@@ -81,8 +82,8 @@ func TestSearchRepoDependencies(t *testing.T) {
 		rows = append(rows, &repo_model.Dependency{RepoID: 1, Ecosystem: "npm", Name: n, Version: "1", ManifestPath: "a/package-lock.json", Direct: n == "other"})
 	}
 	rows = append(rows, &repo_model.Dependency{RepoID: 1, Ecosystem: "Go", Name: "go-thing", ManifestPath: "go.mod"}, &repo_model.Dependency{RepoID: 2, Ecosystem: "Go", Name: "left-pad"})
-	require.NoError(t, repo_model.ReplaceRepoDependencies(ctx, &repo_model.DependencyScan{RepoID: 1, Status: "ok"}, rows[:6]))
-	require.NoError(t, repo_model.ReplaceRepoDependencies(ctx, &repo_model.DependencyScan{RepoID: 2, Status: "ok"}, rows[6:]))
+	require.NoError(t, replaceDependencies(ctx, &repo_model.DependencyScan{RepoID: 1, Status: "ok"}, rows[:6]))
+	require.NoError(t, replaceDependencies(ctx, &repo_model.DependencyScan{RepoID: 2, Status: "ok"}, rows[6:]))
 
 	names := func(o *repo_model.DependencySearchOptions) []string {
 		o.RepoID = 1
@@ -146,4 +147,36 @@ func TestReplaceRepoDependenciesIf(t *testing.T) {
 	assert.Equal(t, "cccc", got.CommitSHA)
 	assert.Empty(t, got.Error)
 	assert.EqualValues(t, 1, countDeps(t, 1))
+}
+
+// replaceDependencies stores a scan row and its dependencies as a scan that read the row as it is now.
+func replaceDependencies(ctx context.Context, scan *repo_model.DependencyScan, deps []*repo_model.Dependency) error {
+	cur, err := repo_model.GetRepoDependencyScan(ctx, scan.RepoID)
+	if err != nil {
+		return err
+	}
+	_, err = repo_model.ReplaceRepoDependenciesIf(ctx, scan, deps, cur)
+	return err
+}
+
+// A failing scan can't flip the row of a scan of the same commit that finished while it ran.
+func TestReplaceRepoDependenciesIfSameCommitRescanned(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := t.Context()
+	first := &repo_model.DependencyScan{RepoID: 1, CommitSHA: "aaaa", Status: repo_model.DependencyScanOK, ScannedUnix: 100}
+	require.NoError(t, replaceDependencies(ctx, first, []*repo_model.Dependency{}))
+	read, err := repo_model.GetRepoDependencyScan(ctx, 1)
+	require.NoError(t, err)
+
+	// another process rescans the same commit meanwhile
+	ok, err := repo_model.ReplaceRepoDependenciesIf(ctx, &repo_model.DependencyScan{RepoID: 1, CommitSHA: "aaaa", Status: repo_model.DependencyScanOK, ScannedUnix: 101}, []*repo_model.Dependency{}, read)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	ok, err = repo_model.ReplaceRepoDependenciesIf(ctx, &repo_model.DependencyScan{RepoID: 1, CommitSHA: "aaaa", Status: repo_model.DependencyScanFailed, Error: "timeout", ScannedUnix: 102}, nil, read)
+	require.NoError(t, err)
+	assert.False(t, ok)
+	got, _ := repo_model.GetRepoDependencyScan(ctx, 1)
+	assert.Equal(t, repo_model.DependencyScanOK, got.Status)
+	assert.Empty(t, got.Error)
 }

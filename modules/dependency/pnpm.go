@@ -82,6 +82,11 @@ func parsePnpmLock(s *sink, data []byte, _ Finder) error {
 		indent := len(line) - len(trimmed)
 		cur.seen = true
 		interpreted := indent == 0 || section == "importers" || section == "packages" || rootDeps
+		// every line of the file, in every section, must be a shape pnpm writes: a quote or bracket left open on
+		// any line would make a YAML reader treat the lines after it as text and see other packages than we do
+		if line != strings.TrimRight(line, " \t") || (!explicit && !pnpmLineShape(trimmed)) {
+			return bad()
+		}
 		if explicit {
 			// the value of an explicit key: `: resolution: {...}` is a line at the content column (indent + 2)
 			rest, ok := strings.CutPrefix(trimmed, ":")
@@ -94,18 +99,10 @@ func parsePnpmLock(s *sink, data []byte, _ Finder) error {
 			if trimmed == "" {
 				continue
 			}
-		} else if interpreted && indent > pnpmReadDepth(section, rootDeps) {
-			// inside the value of an entry (a sequence of peer names, a nested map): nothing here is read, but a
-			// value that runs on over lines would hide the lines after it
-			if _, rest, ok := yamlKey(trimmed); ok && badYAMLValue(rest) {
-				return bad()
-			}
-			continue
-		} else if interpreted {
-			if indent%2 != 0 || indent > prev+2 {
-				return bad()
-			}
-			prev = indent
+		} else if indent%2 != 0 || indent > prev+2 {
+			return bad()
+		} else if prev = indent; interpreted && indent > pnpmReadDepth(section, rootDeps) {
+			continue // inside the value of an entry: nothing here is read
 		}
 		if indent == 2 && section == "packages" && strings.HasPrefix(trimmed, "? ") {
 			// js-yaml writes a key over 1024 characters as `? key` and the mapping after `: `
@@ -179,6 +176,9 @@ func parsePnpmLock(s *sink, data []byte, _ Finder) error {
 		case section == "packages":
 			switch indent {
 			case 2:
+				if rest != "" {
+					return bad() // pnpm writes the fields of a package below it; a flow mapping is read differently
+				}
 				if err := s.entry(); err != nil || len(cur.packages) >= s.maxRows {
 					return cmpOr(err, ErrTooManyDependencies)
 				}
@@ -214,6 +214,111 @@ func parsePnpmLock(s *sink, data []byte, _ Finder) error {
 		}
 	}
 	return nil
+}
+
+// pnpmLineShape reports whether a line, without its indentation, is one of the shapes pnpm writes: `key:`,
+// `key: scalar`, `- scalar` or `- key: scalar`, where a scalar is plain, single-quoted (only `”` inside), double-quoted
+// or a flow collection whose brackets and quotes balance on the line. Anything else (a trailing comment or space, an
+// anchor, alias, tag or block scalar, a quote left open) is not.
+func pnpmLineShape(t string) bool {
+	if t == "-" {
+		return false
+	}
+	if rest, ok := strings.CutPrefix(t, "- "); ok {
+		t = rest
+		if t == "" || t[0] == ' ' {
+			return false
+		}
+	}
+	key, raw, ok := yamlKeyRaw(t)
+	if !ok {
+		return pnpmValueShape(t) // a sequence item that is a bare scalar
+	}
+	if key == "" || strings.ContainsRune("?&*!|>%@`", rune(t[0])) {
+		return false
+	}
+	if raw == "" {
+		return true
+	}
+	if raw[0] != ' ' || len(raw) == 1 || raw[1] == ' ' {
+		return false
+	}
+	return pnpmValueShape(raw[1:])
+}
+
+// pnpmValueShape checks one scalar or flow collection that fills the rest of a line.
+func pnpmValueShape(v string) bool {
+	switch v[0] {
+	case '&', '*', '!', '|', '>', '%', '@', '`', '#', ' ':
+		return false
+	case '"', '\'':
+		n := quotedEnd(v)
+		return n == len(v)
+	case '{', '[':
+		return flowShape(v)
+	}
+	return !strings.Contains(v, " #") && !strings.Contains(v, ": ") && !strings.HasSuffix(v, ":")
+}
+
+// quotedEnd returns the length of the quoted scalar at the start of v, or -1 when it doesn't close.
+func quotedEnd(v string) int {
+	q := v[0]
+	for i := 1; i < len(v); i++ {
+		switch {
+		case q == '"' && v[i] == '\\':
+			i++
+		case v[i] == q:
+			if q == '\'' && i+1 < len(v) && v[i+1] == '\'' {
+				i++
+				continue
+			}
+			return i + 1
+		}
+	}
+	return -1
+}
+
+// flowShape checks a flow collection on one line: brackets pair up, quoted scalars (which start only where a scalar
+// does) close, and nothing follows the end.
+func flowShape(v string) bool {
+	var stack []byte
+	atStart := true
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		switch {
+		case atStart && (c == '"' || c == '\''):
+			n := quotedEnd(v[i:])
+			if n < 0 {
+				return false
+			}
+			i += n - 1
+			atStart = false
+			continue
+		case atStart && strings.IndexByte("&*!|>%@`", c) >= 0:
+			return false
+		case c == '{' || c == '[':
+			if len(stack) >= 16 {
+				return false
+			}
+			stack = append(stack, map[byte]byte{'{': '}', '[': ']'}[c])
+			atStart = true
+			continue
+		case c == '}' || c == ']':
+			if len(stack) == 0 || stack[len(stack)-1] != c {
+				return false
+			}
+			stack = stack[:len(stack)-1]
+			if len(stack) == 0 && i != len(v)-1 {
+				return false
+			}
+		case c == '#' && i > 0 && v[i-1] == ' ':
+			return false
+		}
+		if c != ' ' {
+			atStart = c == ',' || c == ':' // spaces keep it: a scalar starts after the delimiter
+		}
+	}
+	return len(stack) == 0
 }
 
 // pnpmReadDepth is the deepest indentation of a line the reader looks at in a section.
@@ -352,6 +457,27 @@ func (d *pnpmDoc) emitDependencies(s *sink) error {
 		}
 	}
 	return nil
+}
+
+// yamlKeyRaw is yamlKey without trimming: rest is what follows the key's colon exactly as written (" value", or "").
+func yamlKeyRaw(s string) (key, rest string, ok bool) {
+	if s[0] == '\'' || s[0] == '"' {
+		n := quotedEnd(s)
+		if n < 0 || n >= len(s) || s[n] != ':' {
+			return "", "", false
+		}
+		return unquoteYAML(s[:n]), s[n+1:], true
+	}
+	if s[0] == '-' || s[0] == '[' || s[0] == '{' {
+		return "", "", false
+	}
+	if i := strings.Index(s, ": "); i >= 0 {
+		return s[:i], s[i+1:], true
+	}
+	if k, ok := strings.CutSuffix(s, ":"); ok {
+		return k, "", true
+	}
+	return "", "", false
 }
 
 // yamlKey splits `key: rest` (key plain or quoted) of a block mapping line. A line that is not a mapping entry
