@@ -11,5 +11,6 @@
 {{else if eq . "too_many_skipped"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.too_many_skipped"}}
 {{else if eq . "shrunk"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.shrunk"}}
 {{else if eq . "mass_withdrawn"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.mass_withdrawn"}}
+{{else if eq . "auth_failed"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.auth_failed"}}
 {{else if eq . "redirect_refused"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.redirect_refused"}}
 {{else}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.internal_error"}}{{end}}</span>{{end}}

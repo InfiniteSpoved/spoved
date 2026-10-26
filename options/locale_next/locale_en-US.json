@@ -3446,6 +3446,7 @@
 	"admin.dependency_graph.advisories.error.blocked_host": "Download failed (host not allowed); old data kept",
 	"admin.dependency_graph.advisories.error.connection_failed": "Download failed (connection); old data kept",
 	"admin.dependency_graph.advisories.error.timeout": "Download timed out; the update stopped and the part already read was kept",
+	"admin.dependency_graph.advisories.error.auth_failed": "The mirror refused the credentials; old data kept",
 	"admin.dependency_graph.advisories.error.status_4xx": "The mirror refused the request; old data kept",
 	"admin.dependency_graph.advisories.error.status_5xx": "The mirror reported a server error; old data kept",
 	"admin.dependency_graph.advisories.error.too_large": "The download is larger than allowed; the update stopped and the part already read was kept",

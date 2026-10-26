@@ -4,6 +4,8 @@
 package setting
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -57,4 +59,34 @@ func TestOSVMirrorSettings(t *testing.T) {
 	} {
 		assert.Error(t, load("[dependency_graph]\nOSV_MIRROR_URL = "+bad+"\n"), bad)
 	}
+}
+
+func TestOSVMirrorCredentialSettings(t *testing.T) {
+	load := func(ini string) error {
+		cfg, err := NewConfigProviderFromData(ini)
+		require.NoError(t, err)
+		return loadDependencyGraphFrom(cfg)
+	}
+	t.Cleanup(func() { require.NoError(t, load("")) })
+
+	require.NoError(t, load("[dependency_graph]\nOSV_MIRROR_URL = https://art.example/artifactory/osv\nOSV_MIRROR_TOKEN = s3cret-token\nOSV_MIRROR_USER = ci\nOSV_MIRROR_ALLOWED_HOSTS = private, loopback\n"))
+	assert.Equal(t, "s3cret-token", DependencyGraph.OSVMirrorToken)
+	assert.Equal(t, "ci", DependencyGraph.OSVMirrorUser)
+	assert.Equal(t, "private, loopback", DependencyGraph.OSVMirrorHosts)
+
+	file := filepath.Join(t.TempDir(), "token")
+	require.NoError(t, os.WriteFile(file, []byte("from-file\n"), 0o600))
+	require.NoError(t, load("[dependency_graph]\nOSV_MIRROR_TOKEN_URI = file:"+file+"\n"))
+	assert.Equal(t, "from-file", DependencyGraph.OSVMirrorToken)
+
+	err := load("[dependency_graph]\nOSV_MIRROR_TOKEN = a\nOSV_MIRROR_TOKEN_URI = file:" + file + "\n")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "from-file")
+	require.Error(t, load("[dependency_graph]\nOSV_MIRROR_TOKEN_URI = http://x/y\n"))
+	require.Error(t, load("[dependency_graph]\nOSV_MIRROR_TOKEN_URI = file:/does/not/exist\n"), "an error, not an exit")
+
+	err = load("[dependency_graph]\nOSV_MIRROR_URL = https://user:pw@art.example/x\n")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "OSV_MIRROR_TOKEN")
+	assert.NotContains(t, err.Error(), "pw")
 }

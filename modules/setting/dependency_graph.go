@@ -5,6 +5,7 @@ package setting
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -28,6 +29,9 @@ var DependencyGraph = struct {
 
 	// The OSV mirror (services/vulnerability). An empty OSVMirrorURL means no download (offline).
 	OSVMirrorURL        string
+	OSVMirrorToken      string // sent to the mirror's own scheme and host only; never shown, registered with log.RegisterSecret
+	OSVMirrorUser       string // with it, the token is the password of Basic auth instead of a Bearer token
+	OSVMirrorHosts      string // hostmatcher list that replaces [webhook] ALLOWED_HOST_LIST for the mirror, when set
 	UpdateInterval      time.Duration
 	OSVMaxDownload      int64 // bytes of one ecosystem's all.zip
 	OSVMaxEntries       int   // entries of one zip
@@ -71,12 +75,23 @@ func loadOSVMirrorFrom(sec ConfigSection) (err error) {
 		case u.Scheme != "https" && u.Scheme != "http", u.Hostname() == "":
 			return errors.New("[dependency_graph] OSV_MIRROR_URL must be an http(s) URL with a host")
 		case u.User != nil, u.RawQuery != "", u.Fragment != "", u.ForceQuery:
-			return errors.New("[dependency_graph] OSV_MIRROR_URL must have no user info, query or fragment")
+			return errors.New("[dependency_graph] OSV_MIRROR_URL must have no user info, query or fragment (put a credential in OSV_MIRROR_TOKEN or OSV_MIRROR_TOKEN_URI)")
 		}
 		if u.Scheme == "http" {
 			log.Warn("[dependency_graph] OSV_MIRROR_URL uses http: the advisory data is not protected in transit")
 		}
 		g.OSVMirrorURL = strings.TrimRight(u.Scheme+"://"+u.Host+u.EscapedPath(), "/")
+	}
+	g.OSVMirrorUser = strings.TrimSpace(sec.Key("OSV_MIRROR_USER").String())
+	g.OSVMirrorHosts = strings.TrimSpace(sec.Key("OSV_MIRROR_ALLOWED_HOSTS").String())
+	if g.OSVMirrorToken, err = loadOSVMirrorToken(sec); err != nil {
+		return err
+	}
+	if g.OSVMirrorToken != "" {
+		log.RegisterSecret(g.OSVMirrorToken)
+		if strings.HasPrefix(g.OSVMirrorURL, "http://") {
+			log.Warn("[dependency_graph] OSV_MIRROR_TOKEN is sent over http: it is not protected in transit")
+		}
 	}
 	if g.UpdateInterval, err = sec.Key("UPDATE_INTERVAL").MustDuration(24 * time.Hour); err != nil {
 		return err
@@ -117,4 +132,23 @@ func (s DependencyGraphState) Enabled() bool {
 		return true
 	}
 	return false
+}
+
+// loadOSVMirrorToken reads OSV_MIRROR_TOKEN or OSV_MIRROR_TOKEN_URI (a file: URI). It does not use loadSecret, which
+// exits the process and whose errors could echo a token pasted into the URI by mistake.
+func loadOSVMirrorToken(sec ConfigSection) (string, error) {
+	token, uri := sec.Key("OSV_MIRROR_TOKEN").String(), sec.Key("OSV_MIRROR_TOKEN_URI").String()
+	switch {
+	case token != "" && uri != "":
+		return "", errors.New("[dependency_graph] OSV_MIRROR_TOKEN and OSV_MIRROR_TOKEN_URI are both set, use only one")
+	case uri == "":
+		return strings.TrimSpace(token), nil
+	case !strings.HasPrefix(uri, "file:"):
+		return "", errors.New("[dependency_graph] OSV_MIRROR_TOKEN_URI must be a file: URI")
+	}
+	token, err := loadSecretFromURI(uri)
+	if err != nil {
+		return "", fmt.Errorf("[dependency_graph] OSV_MIRROR_TOKEN_URI: %w", err)
+	}
+	return token, nil
 }
