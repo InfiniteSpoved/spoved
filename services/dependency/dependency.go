@@ -108,8 +108,15 @@ func (*notifier) ChangeDefaultBranch(ctx context.Context, repo *repo_model.Repos
 
 // TransferRepository: the new owner's switch decides now (an organization that is off or locks it, or none).
 func (*notifier) TransferRepository(ctx context.Context, _ *user_model.User, repo *repo_model.Repository, _ string) {
-	if err := applyDependencyGraphState(ctx, builder.Eq{"repository.id": repo.ID}); err != nil {
-		log.Error("dependency graph: apply the switches to transferred repository %d: %v", repo.ID, err)
+	ApplyRepo(ctx, repo.ID)
+}
+
+// ApplyRepo brings the stored rows of a repository in line with the switches after its owner changed (a transfer,
+// a trash restore to a new owner): deleted at once when it is now off, queued when it needs a scan. Errors are
+// logged; the cron task catches up.
+func ApplyRepo(ctx context.Context, repoID int64) {
+	if err := applyDependencyGraphState(ctx, builder.Eq{"repository.id": repoID}); err != nil {
+		log.Error("dependency graph: apply the switches to repository %d after an owner change: %v", repoID, err)
 	}
 }
 

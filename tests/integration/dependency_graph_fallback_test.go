@@ -57,9 +57,11 @@ func TestDependencyGraphFallbackManifests(t *testing.T) {
 			hints = append(hints, strings.Join(strings.Fields(s.Text()), " "))
 		})
 		assert.Equal(t, []string{
-			"docs/package.json, lib/other/package.json, web/package.json have no lock file Only their direct dependencies are listed, with the version ranges they declare. Commit package-lock.json, yarn.lock or pnpm-lock.yaml for exact versions and transitive packages.",
-			"rust/Cargo.toml has no lock file Only its direct dependencies are listed, with the version ranges it declares. Commit Cargo.lock for exact versions and transitive packages.",
+			"2 manifests have no lock file docs/package.json web/package.json Only their direct dependencies are listed, with the version ranges they declare. Commit package-lock.json, yarn.lock or pnpm-lock.yaml for exact versions and transitive packages.",
+			"1 manifest is not a workspace of lib/package-lock.json lib/other/package.json Only its direct dependencies are listed, with the version ranges it declares. Add it to that lock file's workspaces, or commit its own package-lock.json, yarn.lock or pnpm-lock.yaml, for exact versions and transitive packages.",
+			"1 manifest has no lock file rust/Cargo.toml Only its direct dependencies are listed, with the version ranges it declares. Commit Cargo.lock for exact versions and transitive packages.",
 		}, hints)
+		assert.Equal(t, 4, doc.Find(".repo-dependencies-hint li a").Length(), "one link per manifest")
 		cells := map[string]string{}
 		doc.Find(".repo-dependencies-row:not(.repo-dependencies-head)").Each(func(_ int, s *goquery.Selection) {
 			cells[s.Find(".repo-dependencies-package strong").Text()] = strings.Join(strings.Fields(s.Find("[role=cell]").Eq(1).Text()), " ")

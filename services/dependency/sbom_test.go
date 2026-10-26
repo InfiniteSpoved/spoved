@@ -61,7 +61,7 @@ func validateDoc(t *testing.T, s *jsonschema.Schema, doc []byte) {
 func testSBOM() *SBOM {
 	repo := &repo_model.Repository{ID: 7, OwnerName: "acme", GroupID: 3, GroupName: "payments", Name: "api"}
 	scan := &repo_model.DependencyScan{RepoID: 7, CommitSHA: "0123456789abcdef0123456789abcdef01234567"}
-	scan.SetSkippedManifests([]repo_model.SkippedManifest{{Path: "web/yarn.lock", Code: repo_model.DependencySkipParse}})
+	scan.SetSkippedManifests([]repo_model.SkippedManifest{{Path: "web/yarn.lock", Code: repo_model.DependencySkipParse}, {Path: "Gemfile", Code: repo_model.DependencySkipPartial, Lines: 2}})
 	d := func(eco, name, version, manifest, license string, direct bool) *repo_model.Dependency {
 		return &repo_model.Dependency{RepoID: 7, Ecosystem: eco, Name: name, Version: version, ManifestPath: manifest, License: license, Direct: direct}
 	}
@@ -122,6 +122,7 @@ func TestSBOMSchemas(t *testing.T) {
 		assert.Equal(t, []string{"Tool: spoved-11.0.0+test"}, out.CreationInfo.Creators)
 		assert.Equal(t, "2026-10-25T12:00:00Z", out.CreationInfo.Created)
 		assert.Contains(t, out.Comment, "web/yarn.lock (parse_error)")
+		assert.Contains(t, out.Comment, "read only in part: web/yarn.lock (parse_error), Gemfile (partially_read, 2 lines)")
 		root := out.Packages[0]
 		assert.Equal(t, "acme/payments/api", root.Name)
 		assert.Equal(t, "0123456789abcdef0123456789abcdef01234567", root.VersionInfo)

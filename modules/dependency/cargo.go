@@ -18,7 +18,15 @@ type cargoPackage struct {
 
 // parseCargoLock reads the [[package]] tables. A package without a `source` belongs to the project itself (the root
 // or a workspace member, or a path dependency) and is not a dependency; what such packages depend on is direct.
-func parseCargoLock(s *sink, data []byte, _ Finder) error {
+// The workspace members the lock covers come from the Cargo.toml next to it: without one that can be read, the
+// lock covers no Cargo.toml below it.
+func parseCargoLock(s *sink, data []byte, find Finder) error {
+	if root := find("Cargo.toml", false); root != nil {
+		rs := newSink(s.ctx, maxHelperKeys)
+		if parseCargoToml(rs, root, nil) == nil {
+			s.info.Globs, s.info.Excludes = rs.info.Globs, rs.info.Excludes
+		}
+	}
 	var pkgs []*cargoPackage
 	var cur *cargoPackage
 	inDeps := false

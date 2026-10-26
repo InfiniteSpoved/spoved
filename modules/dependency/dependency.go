@@ -192,8 +192,11 @@ type Info struct {
 	// and glob patterns of more (a yarn v1 root's package.json workspaces); nil for the lock files that cover only
 	// the manifest next to them
 	Dirs, Globs []string
-	// Cargo.lock: the names of the packages of the project itself (the root and the workspace members)
-	Members []string
+	// Cargo.lock: the names of the packages of the project itself (the root and the workspace members); Globs and
+	// Excludes are then the workspace.members and workspace.exclude of the Cargo.toml next to it (also a
+	// Cargo.toml's own)
+	Members  []string
+	Excludes []string
 	// Cargo.toml: the package's name ("" for a virtual workspace) and whether it is a workspace root itself
 	Name         string
 	OwnWorkspace bool

@@ -24,6 +24,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
+	dependency_service "forgejo.org/services/dependency"
 	org_service "forgejo.org/services/org"
 	packages_service "forgejo.org/services/packages"
 	repo_service "forgejo.org/services/repository"
@@ -237,6 +238,9 @@ func RestoreRepo(ctx context.Context, doer *user_model.User, id int64, opts Rest
 	issue_indexer.UpdateRepoIndexer(ctx, repo.ID)
 	if setting.Indexer.RepoIndexerEnabled {
 		code_indexer.UpdateRepoIndexer(repo)
+	}
+	if newOwner != nil { // the new owner's dependency graph switch applies
+		dependency_service.ApplyRepo(ctx, repo.ID)
 	}
 	if owner.IsTrashed() { // a tombstone has nothing left to keep once its last repository is gone
 		return removeTombstone(ctx, oldOwnerID)

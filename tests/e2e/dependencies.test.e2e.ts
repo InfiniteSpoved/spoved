@@ -82,7 +82,8 @@ test('a manifest without a lock file', async ({page}) => {
     await page.goto('/user11/dependencies-unpinned/activity/dependencies');
     const hint = page.locator('.repo-dependencies-hint');
     await expect(hint).toHaveCount(1);
-    await expect(hint).toContainText('web/package.json has no lock file');
+    await expect(hint.locator('.header')).toContainText('1 manifest has no lock file');
+    await expect(hint.locator('li')).toHaveText(['web/package.json']);
     await expect(hint).toContainText('Commit package-lock.json, yarn.lock or pnpm-lock.yaml for exact versions and transitive packages.');
     const express = page.locator('.repo-dependencies-row', {hasText: 'express'});
     await expect(express).toContainText('^4.18.0');

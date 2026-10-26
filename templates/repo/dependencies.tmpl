@@ -66,8 +66,19 @@
 
 		{{range .UnpinnedManifests}}
 			<div class="ui info message repo-dependencies-hint repo-dependencies-paths">
-				<div class="header">{{ctx.Locale.TrPluralString .Count "repo.dependencies.unpinned" .Paths}}</div>
-				<p>{{ctx.Locale.TrPluralString .Count "repo.dependencies.unpinned_hint" .Locks}}</p>
+				<div class="header">
+					{{if .Outside}}{{ctx.Locale.TrPluralString .Count "repo.dependencies.unpinned_outside" .Count .Outside}}{{else}}{{ctx.Locale.TrPluralString .Count "repo.dependencies.unpinned" .Count}}{{end}}
+				</div>
+				<ul>
+					{{range .Paths}}
+						<li><a href="{{$.RepoLink}}/src/commit/{{$.Scan.CommitSHA}}/{{PathEscapeSegments .}}">{{.}}</a></li>
+					{{end}}
+					{{if .More}}<li>{{ctx.Locale.TrPluralString .More "repo.dependencies.unpinned_more" .More}}</li>{{end}}
+				</ul>
+				<p>
+					{{if .Outside}}{{ctx.Locale.TrPluralString .Count "repo.dependencies.unpinned_outside_hint" .Locks}}{{else}}{{ctx.Locale.TrPluralString .Count "repo.dependencies.unpinned_hint" .Locks}}{{end}}
+					{{if .PyPI}}{{ctx.Locale.Tr "repo.dependencies.unpinned_pypi"}}{{end}}
+				</p>
 			</div>
 		{{end}}
 

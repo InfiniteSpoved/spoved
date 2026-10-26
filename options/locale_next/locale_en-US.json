@@ -3310,9 +3310,22 @@
 	"repo.dependencies.clear": "Clear filters",
 	"repo.dependencies.note": "Licenses come from the lockfile where it records them (npm, Composer); others show Unknown and NOASSERTION in the SBOM. The manifest link opens the file at the scanned commit. The SBOM names this repository %s.",
 	"repo.dependencies.unpinned": {
-		"one": "%s has no lock file",
-		"other": "%s have no lock file"
+		"one": "%d manifest has no lock file",
+		"other": "%d manifests have no lock file"
 	},
+	"repo.dependencies.unpinned_outside": {
+		"one": "%[1]d manifest is not a workspace of %[2]s",
+		"other": "%[1]d manifests are not workspaces of %[2]s"
+	},
+	"repo.dependencies.unpinned_outside_hint": {
+		"one": "Only its direct dependencies are listed, with the version ranges it declares. Add it to that lock file's workspaces, or commit its own %s, for exact versions and transitive packages.",
+		"other": "Only their direct dependencies are listed, with the version ranges they declare. Add them to that lock file's workspaces, or commit their own %s, for exact versions and transitive packages."
+	},
+	"repo.dependencies.unpinned_more": {
+		"one": "and %d more",
+		"other": "and %d more"
+	},
+	"repo.dependencies.unpinned_pypi": "uv.lock and pdm.lock are not read yet.",
 	"repo.dependencies.unpinned_hint": {
 		"one": "Only its direct dependencies are listed, with the version ranges it declares. Commit %s for exact versions and transitive packages.",
 		"other": "Only their direct dependencies are listed, with the version ranges they declare. Commit %s for exact versions and transitive packages."

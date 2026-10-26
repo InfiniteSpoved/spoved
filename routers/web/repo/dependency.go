@@ -53,35 +53,50 @@ func DependenciesSBOM(ctx *context.Context) {
 // dependencyPageSize is the number of rows on a page of the Dependencies page.
 const dependencyPageSize = 50
 
+// maxHintPaths is the number of manifests a "no lock file" hint lists by name.
+const maxHintPaths = 10
+
 // unpinnedGroup is the manifests of one ecosystem that were read without a lock file, with the lock files that
-// would pin them.
+// would pin them; Outside is the lock file above them that doesn't list them as its projects ("" if none).
 type unpinnedGroup struct {
-	Paths string
-	Count int
-	Locks string
+	Paths   []string // the first maxHintPaths
+	More    int
+	Count   int
+	Locks   string
+	Outside string
+	PyPI    bool
 }
 
 func unpinnedManifests(ctx *context.Context, manifests []repo_model.DependencyFacet) []*unpinnedGroup {
+	read := map[string]bool{} // the manifests with rows, the lock files the scan read among them
+	for _, m := range manifests {
+		read[m.Value] = true
+	}
+	has := func(p string) bool { return read[p] }
 	var out []*unpinnedGroup
-	byEcosystem := map[string]*unpinnedGroup{}
+	groups := map[[2]string]*unpinnedGroup{}
 	for _, m := range manifests {
 		f := dependency.FormatForPath(m.Value)
 		if f == nil || !f.Unpinned {
 			continue
 		}
-		g := byEcosystem[f.Ecosystem]
+		outside := f.LockAbove(m.Value, has)
+		key := [2]string{f.Ecosystem, outside}
+		g := groups[key]
 		if g == nil {
 			locks := f.Locks[len(f.Locks)-1]
 			if n := len(f.Locks); n > 1 {
 				locks = ctx.Locale.TrString("repo.dependencies.locks_or", strings.Join(f.Locks[:n-1], ", "), locks)
 			}
-			g = &unpinnedGroup{Locks: locks}
-			byEcosystem[f.Ecosystem] = g
+			g = &unpinnedGroup{Locks: locks, Outside: outside, PyPI: f.Ecosystem == dependency.PyPI}
+			groups[key] = g
 			out = append(out, g)
-		} else {
-			g.Paths += ", "
 		}
-		g.Paths += m.Value
+		if len(g.Paths) < maxHintPaths {
+			g.Paths = append(g.Paths, m.Value)
+		} else {
+			g.More++
+		}
 		g.Count++
 	}
 	return out

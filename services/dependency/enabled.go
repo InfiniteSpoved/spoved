@@ -71,19 +71,14 @@ func readOrgSwitch(ctx context.Context, orgID int64) (OrgSwitch, error) {
 	if err != nil {
 		return OrgSwitch{}, err
 	}
-	return orgSwitchOf(stored), nil
-}
-
-// orgSwitchOf is the switch the stored settings of an organization say (no row = on, unlocked).
-func orgSwitchOf(stored map[string]*user_model.Setting) OrgSwitch {
-	s := OrgSwitch{On: true}
+	s := OrgSwitch{On: true} // no row = on, unlocked
 	if v := stored[repo_model.DependencyGraphOrgKey]; v != nil && v.SettingValue == "false" {
 		s.On = false
 	}
 	if v := stored[repo_model.DependencyGraphOrgLockedKey]; v != nil && v.SettingValue == "true" {
 		s.Locked = true
 	}
-	return s
+	return s, nil
 }
 
 // RepoSwitch is the state of the switches for a repository.
@@ -132,8 +127,10 @@ func Enabled(ctx context.Context, repo *repo_model.Repository) bool {
 }
 
 // enabledStored is Enabled read from the stored rows, without a cache, inside the caller's transaction: the scan's
-// last check before it writes. The site setting's row is locked until the transaction ends, so a site switch
-// stored meanwhile either waits for the write (and its purge then sees the rows) or is seen here.
+// last check before it writes. When the site setting has a row, it is locked until the transaction ends, so a site
+// switch stored meanwhile either waits for the write (and its purge then sees the rows) or is seen here. Without
+// a row, and for the organization's settings (read without a lock), a change that commits during the write is
+// caught by the scan's check after the write.
 func enabledStored(ctx context.Context, repoID int64) (bool, error) {
 	raw, has, err := system_model.GetSettingForUpdate(ctx, setting.Config().DependencyGraph.DynKey())
 	if err != nil {

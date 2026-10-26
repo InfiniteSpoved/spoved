@@ -771,6 +771,8 @@ func TestScanFallbackManifests(t *testing.T) {
 		"docs/package.json":              `{"devDependencies":{"lodash":"~4.17.20"}}`,
 		"crates/x/Cargo.toml":            "[dependencies]\nserde = \"1\"\n",
 		"rust/Cargo.lock":                cargoLock,
+		"rust/Cargo.toml":                "[workspace]\nmembers = [\"member\", \"tools/*\"]\nexclude = [\"tools/app\"]\n",
+		"rust/tools/app/Cargo.toml":      "[package]\nname = \"member\"\n[dependencies]\nevil = \"1\"\n",
 		"rust/member/Cargo.toml":         "[package]\nname = \"member\"\n[dependencies]\nrand = \"0.8\"\n",
 		"rust/fuzz/Cargo.toml":           "[package]\nname = \"member\"\n[workspace]\n[dependencies]\nlibfuzzer-sys = \"0.4\"\n",
 		"bad/Cargo.lock":                 "not a lock file", // no rows
@@ -797,6 +799,7 @@ func TestScanFallbackManifests(t *testing.T) {
 		"crates.io|serde@|crates/x/Cargo.toml",          // no lock above
 		"crates.io|rand@0.8.5|rust/Cargo.lock",          // the member is covered
 		"crates.io|libfuzzer-sys@|rust/fuzz/Cargo.toml", // a workspace of its own
+		"crates.io|evil@|rust/tools/app/Cargo.toml",     // excluded from the workspace, though a member has its name
 		"crates.io|anyhow@|bad/Cargo.toml",              // the lock next to it has no rows
 		"npm|chalk@|bad/package.json",                   // the lock next to it can't be read
 		"RubyGems|rails@|ruby/Gemfile",

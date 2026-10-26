@@ -160,3 +160,29 @@ func TestTeamGroupTrashRestore(t *testing.T) {
 	assert.Equal(t, before+1, numRepos())
 	unittest.CheckConsistencyFor(t, &user_model.User{}, &repo_model.Repository{}, &organization.Team{})
 }
+
+// A restore to a new owner applies that owner's dependency graph switch at once: an organization that is off
+// deletes the rows the repository kept in the trash.
+func TestRestoreToNewOwnerAppliesDependencyGraph(t *testing.T) {
+	unittest.PrepareTestEnv(t)
+	t.Cleanup(test.MockVariableValue(&setting.DependencyGraph.Enabled, true))
+	ctx := t.Context()
+	doer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	require.NoError(t, user_model.SetUserSetting(ctx, 3, repo_model.DependencyGraphOrgKey, "false")) // org3 is off
+	t.Cleanup(func() {
+		require.NoError(t, user_model.DeleteUserSetting(db.DefaultContext, 3, repo_model.DependencyGraphOrgKey))
+	})
+
+	repo, err := repo_service.CreateRepositoryDirectly(ctx, doer, user2, repo_service.CreateRepoOptions{Name: "dep-restore", AutoInit: true, Readme: "Default"})
+	require.NoError(t, err)
+	require.NoError(t, repo_model.ReplaceRepoDependencies(ctx, &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: "abc", Status: repo_model.DependencyScanOK},
+		[]*repo_model.Dependency{{RepoID: repo.ID, Ecosystem: "Go", Name: "x", Version: "v1"}}))
+	require.NoError(t, repo_service.TrashRepository(ctx, doer, repo))
+	require.NoError(t, RestoreRepo(ctx, doer, repo.ID, RestoreOptions{NewOwner: "org3"}))
+
+	unittest.AssertNotExistsBean(t, &repo_model.Dependency{RepoID: repo.ID})
+	scan, err := repo_model.GetRepoDependencyScan(ctx, repo.ID)
+	require.NoError(t, err)
+	assert.Nil(t, scan)
+}

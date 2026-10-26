@@ -5,6 +5,7 @@ package dependency
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"slices"
 	"sort"
@@ -103,8 +104,11 @@ func (s *SBOM) skippedNote() string {
 	parts := make([]string, len(skipped))
 	for i, m := range skipped {
 		parts[i] = m.Path + " (" + m.Code + ")"
+		if m.Code == repo_model.DependencySkipPartial {
+			parts[i] = fmt.Sprintf("%s (%s, %d lines)", m.Path, m.Code, m.Lines)
+		}
 	}
-	return "Manifests that were not read: " + strings.Join(parts, ", ")
+	return "Manifests that were not read or read only in part: " + strings.Join(parts, ", ")
 }
 
 // downloadLocation is the SPDX download location of the scanned commit. The SPDX validators (spdx-tools) refuse a

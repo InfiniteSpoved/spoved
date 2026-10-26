@@ -38,7 +38,7 @@ var (
 	excludedSegments = map[string]bool{"vendor": true, "node_modules": true, "testdata": true}
 
 	// auxNames are the files a parser may ask for next to a manifest (see dependency.Finder)
-	auxNames = map[string]bool{"package.json": true, "composer.json": true, "pyproject.toml": true, "Directory.Packages.props": true, "pom.xml": true}
+	auxNames = map[string]bool{"package.json": true, "composer.json": true, "pyproject.toml": true, "Cargo.toml": true, "Directory.Packages.props": true, "pom.xml": true}
 
 	// parseManifest parses one manifest; tests replace it
 	parseManifest = func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) (*dependency.Result, error) {

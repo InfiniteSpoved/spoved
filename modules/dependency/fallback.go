@@ -76,12 +76,29 @@ func (f *Format) Covered(p string, locks map[string]*Info, own *Info) bool {
 				return true
 			case f.cover != coverWorkspaces && rel == ".":
 				return true
-			case f.cover == coverMembers && own != nil && own.Name != "" && !own.OwnWorkspace && slices.Contains(info.Members, own.Name):
+			case f.cover == coverMembers && own != nil && own.Name != "" && !own.OwnWorkspace && slices.Contains(info.Members, own.Name) &&
+				globsMatch(info.Globs, rel) && !underAny(info.Excludes, rel):
 				return true
 			}
 		}
 		if f.cover == coverNextTo || dir == "" {
 			return false
+		}
+	}
+}
+
+// LockAbove returns the nearest lock file in a directory that could cover the manifest at p and for which has is
+// true (the locks the scan read), or "". A manifest that fell back below such a lock is not one of the projects
+// that lock was resolved for. For formats whose lock covers only the manifest next to it, only that directory counts.
+func (f *Format) LockAbove(p string, has func(path string) bool) string {
+	for dir := pathDir(p); ; dir = pathDir(dir) {
+		for _, l := range f.Locks {
+			if lp := pathJoin(dir, l); has(lp) {
+				return lp
+			}
+		}
+		if f.cover == coverNextTo || dir == "" {
+			return ""
 		}
 	}
 }
@@ -102,6 +119,17 @@ func globsMatch(globs []string, dir string) bool {
 		}
 	}
 	return found
+}
+
+// underAny reports whether dir is one of the directories or below one (Cargo's workspace.exclude).
+func underAny(dirs []string, dir string) bool {
+	for _, d := range dirs {
+		d = strings.TrimSuffix(strings.TrimPrefix(d, "./"), "/")
+		if dir == d || strings.HasPrefix(dir, d+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func pathDir(p string) string {
@@ -387,6 +415,23 @@ func pathHas(p []string, want ...string) bool {
 	return true
 }
 
+// tomlStrings reads an array of strings; ok is false for anything else.
+func tomlStrings(s *sink, raw string) ([]string, bool) {
+	items, err := tomlArray(s, raw)
+	if err != nil {
+		return nil, false
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		v, ok := tomlStr(item)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, v)
+	}
+	return out, true
+}
+
 var cargoDepTables = map[string]bool{"dependencies": true, "dev-dependencies": true, "build-dependencies": true, "dev_dependencies": true, "build_dependencies": true}
 
 // parseCargoToml reads [dependencies], [dev-dependencies], [build-dependencies], their [target.X.*] forms and
@@ -394,6 +439,7 @@ var cargoDepTables = map[string]bool{"dependencies": true, "dev-dependencies": t
 // the range from the workspace root, so the row has none. Info says which package it is and whether it is a
 // workspace root, for the Cargo.lock above it (see Covered).
 func parseCargoToml(s *sink, data []byte, _ Finder) error {
+	badExclude := false
 	deps, _, err := tomlDeps(s, data, tomlSpec{
 		table: func(p []string) int {
 			switch {
@@ -414,6 +460,16 @@ func parseCargoToml(s *sink, data []byte, _ Finder) error {
 			if p[0] == "workspace" {
 				s.info.OwnWorkspace = true
 			}
+			if pathHas(p, "workspace", "members") || pathHas(p, "workspace", "exclude") {
+				list, ok := tomlStrings(s, value)
+				switch {
+				case p[1] == "members" && ok:
+					s.info.Globs = list
+				case p[1] == "exclude":
+					s.info.Excludes = list
+					badExclude = !ok
+				}
+			}
 			if pathHas(p, "package", "name") {
 				s.info.Name, _ = tomlStr(value) // not a string (`name.workspace = true`): no name, read on its own
 			}
@@ -421,6 +477,9 @@ func parseCargoToml(s *sink, data []byte, _ Finder) error {
 	})
 	if err != nil {
 		return err
+	}
+	if badExclude {
+		s.info.Globs = nil // an exclude list that can't be read: no member is known
 	}
 	for _, d := range deps {
 		row := Dependency{Name: d.name, Direct: true}
@@ -455,8 +514,10 @@ func parseCargoToml(s *sink, data []byte, _ Finder) error {
 var pyDirectRef = regexp.MustCompile(`^(` + pyName + `)\s*(?:\[[^\]]*\])?\s*@`)
 
 // parsePyproject reads the PEP 621 arrays (project.dependencies, project.optional-dependencies, PEP 735
-// dependency-groups) and poetry's dependency tables (tool.poetry.dependencies, dev-dependencies and groups),
-// leaving out python itself and path dependencies. A direct reference (`name @ url`) is a row without a range.
+// dependency-groups), uv's and PDM's dev arrays (tool.uv.dev-dependencies, tool.pdm.dev-dependencies.*) and
+// poetry's dependency tables (tool.poetry.dependencies, dev-dependencies and groups), leaving out python itself and
+// path dependencies. A direct reference (`name @ url`) is a row without a range. Hatch environments
+// (tool.hatch.envs.*) are the tool's own environments, not the project's dependencies, and are not read.
 func parsePyproject(s *sink, data []byte, _ Finder) error {
 	deps, arrays, err := tomlDeps(s, data, tomlSpec{
 		table: func(p []string) int {
@@ -474,11 +535,16 @@ func parsePyproject(s *sink, data []byte, _ Finder) error {
 				return 2
 			case len(p) >= 3 && p[0] == "project" && p[1] == "optional-dependencies":
 				return 3
+			case len(p) >= 3 && p[0] == "tool" && p[1] == "uv" && p[2] == "dev-dependencies":
+				return 3
+			case len(p) >= 4 && p[0] == "tool" && p[1] == "pdm" && p[2] == "dev-dependencies":
+				return 4
 			}
 			return 0
 		},
 		parent: func(p []string) bool {
 			return pathHas(p, "project") || pathHas(p, "project", "optional-dependencies") || pathHas(p, "dependency-groups") ||
+				pathHas(p, "tool", "uv") || pathHas(p, "tool", "pdm") || pathHas(p, "tool", "pdm", "dev-dependencies") ||
 				pathHas(p, "tool") || pathHas(p, "tool", "poetry") || pathHas(p, "tool", "poetry", "group") || pathHas(p, "tool", "poetry", "group", "")
 		},
 	})
@@ -546,7 +612,42 @@ var (
 	gemOption   = regexp.MustCompile(`^(?::([A-Za-z_][A-Za-z0-9_]*)\s*=>|([A-Za-z_][A-Za-z0-9_]*):(?:\s|$))`)
 	gemModifier = regexp.MustCompile(`^(?:if|unless)\b`)
 	rubyHeredoc = regexp.MustCompile(`<<([~-]?)(?:"(\w+)"|'(\w+)'|([A-Za-z_]\w*))`)
+	// a gem call that doesn't start its line: after another statement, a block opener or a block's parameters
+	gemCallInside = regexp.MustCompile(`(?:[;{(|]|\b(?:do|then|else|begin))\s*gem(?:[ \t(]|$)`)
 )
+
+// rubyCode is a line of Ruby without its comment and with every string literal emptied (`""`), except the quoted
+// tag of a heredoc. ok is false when a string doesn't end on the line.
+func rubyCode(t string) (code string, ok bool) {
+	var b strings.Builder
+	for i := 0; i < len(t); i++ {
+		c := t[i]
+		switch c {
+		case '#':
+			return b.String(), true
+		case '"', '\'':
+			j := i + 1
+			for ; j < len(t) && t[j] != c; j++ {
+				if t[j] == '\\' {
+					j++
+				}
+			}
+			if j >= len(t) {
+				return "", false
+			}
+			if cur := b.String(); strings.HasSuffix(cur, "<<") || strings.HasSuffix(cur, "<<~") || strings.HasSuffix(cur, "<<-") {
+				b.WriteString(t[i : j+1])
+			} else {
+				b.WriteByte(c)
+				b.WriteByte(c)
+			}
+			i = j
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String(), true
+}
 
 // rubyString reads a string literal at the start of t: single-quoted or double-quoted without any escape or
 // interpolation (anything else is no plain literal). It returns the content and the rest.
@@ -604,43 +705,52 @@ func rubyArgs(t string) (args []string, ok bool) {
 // parseGemfile reads the calls `gem "name"[, "range"...][, option: value...]` on one line, wherever they are
 // (groups and conditions, a modifier `if` included, are not evaluated, so a gem of any group or branch is listed);
 // a version that isn't a plain string leaves the row without a range, and a gem with a path option is the
-// project's own. Lines inside `=begin`/`=end` and heredocs are no code. A gem line in another form (`gem(...)`,
-// a name that isn't a plain string, options continued on the next line, several statements) is counted in
-// Info.Unread, so the page says the file was read only in part.
+// project's own. Lines inside `=begin`/`=end` and after `__END__` are no code. A gem line in another form
+// (`gem(...)`, a name that isn't a plain string, options continued on the next line, several statements, a call
+// inside a block on one line, a gem line inside a heredoc) is counted in Info.Unread, so the page says the file
+// was read only in part.
 func parseGemfile(s *sink, data []byte, _ Finder) error {
 	sc := newScanner(s, data)
 	heredoc, indented, comment := "", false, false
+	rubyMark := func(raw, mark string) bool {
+		return strings.HasPrefix(raw, mark) && (len(raw) == len(mark) || raw[len(mark)] == ' ' || raw[len(mark)] == '\t')
+	}
 	for sc.Scan() {
 		raw := sc.Text()
 		line := strings.TrimSpace(raw)
 		switch {
 		case comment:
-			comment = !strings.HasPrefix(raw, "=end")
+			comment = !rubyMark(raw, "=end")
 			continue
 		case heredoc != "":
 			if line == heredoc && (indented || raw == heredoc) {
 				heredoc = ""
+			} else if gemCallHead.MatchString(line) {
+				s.info.Unread++ // text to Ruby, unless the heredoc was misread: never hidden
 			}
 			continue
-		case strings.HasPrefix(raw, "=begin") && (len(raw) == 6 || raw[6] == ' ' || raw[6] == '\t'):
+		case rubyMark(raw, "=begin"):
 			comment = true
 			continue
+		case raw == "__END__":
+			return scanErr(sc.Err(), "Gemfile")
 		}
-		code := line
-		if args, ok := rubyArgs(line); ok && len(args) > 0 {
-			code = strings.Join(args, ",") // without the comment
-		}
-		if m := rubyHeredoc.FindStringSubmatch(code); m != nil {
+		code, codeOK := rubyCode(line)
+		if m := rubyHeredoc.FindStringSubmatch(code); codeOK && m != nil {
 			heredoc, indented = m[2]+m[3]+m[4], m[1] != ""
 		}
+		inside := codeOK && gemCallInside.MatchString(code)
 		if !gemCallHead.MatchString(line) {
+			if inside {
+				s.info.Unread++
+			}
 			continue
 		}
 		d, local, ok := gemLine(strings.TrimLeft(line[3:], " \t"))
-		switch {
-		case !ok:
+		if !ok || inside {
 			s.info.Unread++
-		case !local:
+		}
+		if ok && !local {
 			if err := s.emit(d); err != nil {
 				return err
 			}

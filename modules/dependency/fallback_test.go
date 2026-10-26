@@ -49,6 +49,15 @@ func TestUnpinnedFormats(t *testing.T) {
 	assert.False(t, IsLockName("uv.lock"))
 }
 
+func TestLockAbove(t *testing.T) {
+	read := map[string]bool{"package-lock.json": true, "rust/Cargo.lock": true, "Gemfile.lock": true}
+	has := func(p string) bool { return read[p] }
+	assert.Equal(t, "package-lock.json", FormatFor("package.json").LockAbove("docs/site/package.json", has))
+	assert.Equal(t, "rust/Cargo.lock", FormatFor("Cargo.toml").LockAbove("rust/tools/app/Cargo.toml", has))
+	assert.Empty(t, FormatFor("Cargo.toml").LockAbove("crates/x/Cargo.toml", has))
+	assert.Empty(t, FormatFor("Gemfile").LockAbove("ruby/Gemfile", has), "a Gemfile.lock covers only the Gemfile next to it")
+}
+
 func TestCovered(t *testing.T) {
 	root := &Info{Dirs: []string{".", "apps/web"}}
 	locks := map[string]*Info{"package-lock.json": root, "ruby/Gemfile.lock": {}, "py/poetry.lock": {}}
@@ -73,13 +82,17 @@ func TestCovered(t *testing.T) {
 	// a lock file that wasn't read (or uv.lock, which has no reader) is not in locks: it covers nothing
 	assert.False(t, py.Covered("uv/pyproject.toml", map[string]*Info{"uv/uv.lock": {}}, nil))
 	// Cargo: next to the lock always; below it only a member the lock names that has no workspace of its own
-	locks["Cargo.lock"] = &Info{Members: []string{"app", "a"}}
+	locks["Cargo.lock"] = &Info{Members: []string{"app", "a"}, Globs: []string{"crates/*", "tools/*"}, Excludes: []string{"tools/a"}}
 	assert.True(t, cargo.Covered("Cargo.toml", locks, nil), "the workspace root, also a virtual one")
 	assert.False(t, cargo.Covered("crates/a/Cargo.toml", locks, nil), "below the lock: read first")
 	assert.True(t, cargo.Covered("crates/a/Cargo.toml", locks, &Info{Name: "a"}))
 	assert.False(t, cargo.Covered("crates/b/Cargo.toml", locks, &Info{Name: "b"}), "not a member")
 	assert.False(t, cargo.Covered("fuzz/Cargo.toml", locks, &Info{Name: "a", OwnWorkspace: true}), "a workspace of its own")
 	assert.False(t, cargo.Covered("x/Cargo.toml", locks, &Info{}), "no name")
+	assert.False(t, cargo.Covered("tools/a/Cargo.toml", locks, &Info{Name: "a"}), "excluded, though a member has its name")
+	assert.False(t, cargo.Covered("lib/a/Cargo.toml", locks, &Info{Name: "a"}), "no workspace member (a path dependency)")
+	assert.False(t, cargo.Covered("crates/a/Cargo.toml", map[string]*Info{"Cargo.lock": {Members: []string{"a"}}}, &Info{Name: "a"}),
+		"no Cargo.toml read next to the lock: nothing below it is covered")
 }
 
 func TestFallbackRealFixtures(t *testing.T) {
@@ -253,8 +266,10 @@ path = "src/x.rs"
 func TestCargoTomlInfo(t *testing.T) {
 	for content, want := range map[string]Info{
 		"[package]\nname = \"app\"\n":                                          {Name: "app"},
-		"[package]\nname = \"fuzz\"\n[workspace]\nmembers = [\".\"]\n":         {Name: "fuzz", OwnWorkspace: true},
-		"[workspace]\nmembers = [\"a\"]\n":                                     {OwnWorkspace: true},
+		"[package]\nname = \"fuzz\"\n[workspace]\nmembers = [\".\"]\n":         {Name: "fuzz", OwnWorkspace: true, Globs: []string{"."}},
+		"[workspace]\nmembers = [\"a\"]\n":                                     {OwnWorkspace: true, Globs: []string{"a"}},
+		"[workspace]\nmembers = [\"a/*\"]\nexclude = [\"a/x\"]\n":              {OwnWorkspace: true, Globs: []string{"a/*"}, Excludes: []string{"a/x"}},
+		"[workspace]\nmembers = [\"a/*\"]\nexclude = [1]\n":                    {OwnWorkspace: true},
 		"[package]\nname.workspace = true\n":                                   {},
 		"package.name = \"dotted\"\n[workspace.dependencies]\nserde = \"1\"\n": {Name: "dotted", OwnWorkspace: true},
 	} {
@@ -300,8 +315,18 @@ ruff = "^0.4"
 
 [tool.poetry.dependencies.rich]
 version = "^13"
+
+[tool.uv]
+dev-dependencies = ["uvdev>=1"]
+
+[tool.pdm.dev-dependencies]
+test = ["pdmdev~=2"]
+
+[tool.hatch.envs.default]
+dependencies = ["hatchenv"]
 `)
 	assert.Equal(t, map[string]string{
+		"uvdev": ">=1", "pdmdev": "~=2", // hatch environments are the tool's own, not read
 		"requests": ">=2.31,<3", "Flask": ">=3.0", "tomli": "", "exact": "==1.2.3", "bare": "", "pytest": ">=7",
 		"coverage": "", "httpx": "^0.27", "numpy": "", "pydantic": "^2", "ruff": "^0.4", "rich": "^13",
 		"pkg": "", "multi-line": ">=1", // a direct reference is a row without a range
@@ -318,6 +343,9 @@ version = "^13"
 		"poetry inline":            "[tool]\npoetry = { dependencies = { evil = \"^1\" } }\n",
 		"group inline":             "[tool.poetry]\ngroup = { dev = { dependencies = { evil = \"^1\" } } }\n",
 		"one group inline":         "[tool.poetry.group]\ndev = { dependencies = { evil = \"^1\" } }\n",
+		"uv inline":                "[tool]\nuv = { dev-dependencies = [\"evil\"] }\n",
+		"pdm inline":               "[tool.pdm]\ndev-dependencies = { test = [\"evil\"] }\n",
+		"uv dev as a table":        "[tool.uv.dev-dependencies]\nevil = \"1\"\n",
 		"dependencies as a table":  "[project.dependencies]\nevil = \">=1\"\n",
 		"optional as a table":      "[project.optional-dependencies.dev]\nevil = \">=1\"\n",
 		"below an array":           "[project]\ndependencies.x = [\"evil\"]\n",
@@ -377,7 +405,7 @@ gem "after"
 	}, got)
 	r, err := FormatFor("Gemfile").ParseFull(t.Context(), []byte(src), nil, 100)
 	require.NoError(t, err)
-	assert.Zero(t, r.Info.Unread)
+	assert.Equal(t, 1, r.Info.Unread, "the gem line in the heredoc")
 
 	// gem lines in a form this reader doesn't read are counted, never dropped silently
 	r, err = FormatFor("Gemfile").ParseFull(t.Context(), []byte(`gem "a"
@@ -396,6 +424,36 @@ end
 	assert.Equal(t, 8, r.Info.Unread)
 	require.Len(t, r.Deps, 1)
 	assert.Equal(t, "a", r.Deps[0].Name)
+
+	// a heredoc mark Ruby doesn't read as one (in a comment or a string) hides nothing; a gem call that doesn't
+	// start its line is counted
+	for name, c := range map[string]struct {
+		src    string
+		rows   []string
+		unread int
+	}{
+		"mark in a comment":         {"gem \"a\"\nfoo; bar # <<X\ngem \"evil\"\nX\n", []string{"a", "evil"}, 0},
+		"mark in a multi-line call": {"foo(1, # <<X\ngem \"evil\"\nX\n", []string{"evil"}, 0},
+		"mark in a string":          {"gem \"a\", \"<<EOF\"\ngem \"evil\"\nEOF\n", []string{"a", "evil"}, 0},
+		"real heredoc":              {"x = <<~'EOS'\n  gem \"evil\"\nEOS\ngem \"b\"\n", []string{"b"}, 1},
+		"block on one line":         {"group :dev do gem \"evil\" end\n", nil, 1},
+		"braces":                    {"platforms(:mri) { gem \"evil\" }\n", nil, 1},
+		"after a statement":         {"x = 1; gem \"evil\"\n", nil, 1},
+		"then":                      {"if true then gem \"evil\" end\n", nil, 1},
+		"block parameter":           {"%w[evil1 evil2].each { |g| gem g }\n", nil, 1},
+		"after a modifier":          {"gem \"a\" if x; gem \"evil\"\n", []string{"a"}, 1},
+		"=endx is no end":           {"=begin\n=endx\ngem \"ghost\"\n=end\ngem \"b\"\n", []string{"b"}, 0},
+		"__END__":                   {"gem \"b\"\n__END__\ngem \"ghost\"\n", []string{"b"}, 0},
+	} {
+		r, err := FormatFor("Gemfile").ParseFull(t.Context(), []byte(c.src), nil, 100)
+		require.NoError(t, err, name)
+		var rows []string
+		for _, d := range r.Deps {
+			rows = append(rows, d.Name)
+		}
+		assert.Equal(t, c.rows, rows, name)
+		assert.Equal(t, c.unread, r.Info.Unread, name)
+	}
 
 	for name, bad := range map[string]string{
 		"unterminated =begin":  "=begin\ngem \"a\"\n",
