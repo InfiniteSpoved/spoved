@@ -7,3 +7,13 @@ export function initRepoDependencies() {
     if (form) form.requestSubmit();
   });
 }
+
+// the security alert filters are always open on a wide screen and fold behind "Filters" on a phone
+export function initRepoSecurityFilters() {
+  const box = document.querySelector('details.repo-security-filterbox');
+  if (!box) return;
+  const wide = window.matchMedia('(min-width: 768px)');
+  const sync = () => { if (wide.matches) box.open = true; };
+  sync();
+  wide.addEventListener('change', sync);
+}

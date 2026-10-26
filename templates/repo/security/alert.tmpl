@@ -10,9 +10,9 @@
 		<div class="repo-security-badges">
 			{{template "repo/security/severity" $alert.Severity}}
 			{{if $alert.Score}}<span class="text grey">{{ctx.Locale.Tr "repo.security.cvss" $alert.Score}}</span>{{end}}
-			{{if eq $alert.State "open"}}<span class="ui small green label" id="alert-state">{{ctx.Locale.Tr "repo.security.state.open"}}</span>
+			{{if eq $alert.State "open"}}<span class="ui small label vuln-state vuln-state-open" id="alert-state">{{ctx.Locale.Tr "repo.security.state.open"}}</span>
 			{{else if eq $alert.State "dismissed"}}<span class="ui small basic label" id="alert-state">{{ctx.Locale.Tr "repo.security.state.dismissed"}}</span>
-			{{else}}<span class="ui small blue label" id="alert-state">{{ctx.Locale.Tr "repo.security.state.fixed"}}</span>{{end}}
+			{{else}}<span class="ui small label vuln-state vuln-state-fixed" id="alert-state">{{ctx.Locale.Tr "repo.security.state.fixed"}}</span>{{end}}
 			{{template "repo/security/match" $alert.MatchKind}}
 			<span class="text grey">{{ctx.Locale.Tr "repo.security.first_seen" (DateUtils.TimeSince $alert.CreatedUnix) .Repository.DefaultBranch}}{{if .ScanCommit}} {{ctx.Locale.Tr "repo.security.scanned_at" (HTMLFormat "<a href=\"%s/commit/%s\"><code>%s</code></a>" .RepoLink .ScanCommit (ShortSha .ScanCommit))}}{{end}}</span>
 		</div>
@@ -27,7 +27,7 @@
 		<dl class="repo-security-facts">
 			<dt>{{ctx.Locale.Tr "repo.dependencies.package"}}</dt>
 			<dd>{{$alert.PackageName}} <span class="ui basic mini label">{{$alert.Ecosystem}}</span></dd>
-			<dt>{{ctx.Locale.Tr "repo.security.version_in_use"}}</dt>
+			<dt>{{if eq $alert.State "fixed"}}{{ctx.Locale.Tr "repo.security.version_was"}}{{else}}{{ctx.Locale.Tr "repo.security.version_in_use"}}{{end}}</dt>
 			<dd>{{if $alert.Version}}<code>{{$alert.Version}}</code>{{else if $alert.Requirement}}<code>{{$alert.Requirement}}</code> <span class="text grey">{{ctx.Locale.Tr "repo.dependencies.not_pinned"}}</span>{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.security.version_none"}}</span>{{end}}</dd>
 			{{if $alert.Affected}}
 				<dt>{{ctx.Locale.Tr "repo.security.affected_versions"}}</dt>
@@ -63,7 +63,7 @@
 			</div>
 		{{else if eq $alert.State "fixed"}}
 			<div class="ui message" id="alert-fixed-note">
-				{{if eq $alert.FixedReason "withdrawn"}}{{ctx.Locale.Tr "repo.security.fixed_withdrawn" (DateUtils.TimeSince $alert.FixedUnix)}}{{else}}{{ctx.Locale.Tr "repo.security.fixed_change" (DateUtils.TimeSince $alert.FixedUnix)}}{{end}}
+				{{if eq $alert.FixedReason "withdrawn"}}{{ctx.Locale.Tr "repo.security.fixed_withdrawn" (DateUtils.TimeSince $alert.FixedUnix)}}{{else if and .ScanCommit .CurrentVersion}}{{ctx.Locale.Tr "repo.security.fixed_change_now" (DateUtils.TimeSince $alert.FixedUnix) (HTMLFormat "<a href=\"%s/commit/%s\"><code>%s</code></a>" .RepoLink .ScanCommit (ShortSha .ScanCommit)) (HTMLFormat "<code>%s</code>" .CurrentVersion)}}{{else}}{{ctx.Locale.Tr "repo.security.fixed_change" (DateUtils.TimeSince $alert.FixedUnix)}}{{end}}
 			</div>
 		{{end}}
 

@@ -44,7 +44,7 @@
 								<td>{{.Ecosystem}}</td>
 								<td>{{ctx.Locale.PrettyNumber .AdvisoryCount}}</td>
 								<td>{{if .SuccessUnix}}{{DateUtils.TimeSince .SuccessUnix}}{{else}}<span class="text grey">{{ctx.Locale.Tr "admin.dependency_graph.advisories.never"}}</span>{{end}}</td>
-								<td>{{template "admin/advisory_status" .Error}}</td>
+								<td>{{template "admin/advisory_status" (dict "Error" .Error "HasData" (ne .SuccessUnix 0))}}</td>
 							</tr>
 						{{end}}
 					</tbody>

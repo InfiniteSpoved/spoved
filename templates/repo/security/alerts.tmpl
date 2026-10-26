@@ -16,6 +16,8 @@
 		</div>
 
 		{{if .TotalAlerts}}
+		<details class="repo-security-filterbox"{{if .HasFilter}} open{{end}}>
+		<summary class="repo-security-filter-toggle">{{svg "octicon-filter"}} {{ctx.Locale.Tr "repo.security.filters_toggle"}}</summary>
 		<form class="ui form repo-security-filters" method="get" action="{{.RepoLink}}/security/alerts">
 			<input type="hidden" name="state" value="{{.State}}">
 			{{if .FilterPackage}}<input type="hidden" name="package" value="{{.FilterPackage}}">{{end}}
@@ -47,6 +49,13 @@
 			</label>
 			<button class="ui basic button" type="submit">{{ctx.Locale.Tr "repo.dependencies.filter"}}</button>
 		</form>
+		</details>
+		{{end}}
+		{{if or .FilterPackage .FilterManifest}}
+			<div class="repo-security-chips">
+				{{if .FilterPackage}}<a class="repo-security-chip" href="{{.NoPackageURL}}" aria-label="{{ctx.Locale.Tr "repo.security.filter.remove"}}: {{ctx.Locale.Tr "repo.security.filter.package" .FilterPackage}}">{{ctx.Locale.Tr "repo.security.filter.package" .FilterPackage}} {{svg "octicon-x" 12}}</a>{{end}}
+				{{if .FilterManifest}}<a class="repo-security-chip" href="{{.NoManifestURL}}" aria-label="{{ctx.Locale.Tr "repo.security.filter.remove"}}: {{ctx.Locale.Tr "repo.security.filter.manifest" .FilterManifest}}">{{ctx.Locale.Tr "repo.security.filter.manifest" .FilterManifest}} {{svg "octicon-x" 12}}</a>{{end}}
+			</div>
 		{{end}}
 		{{if and .HasFilter .Alerts}}
 			<div class="text grey tw-mb-3" id="security-matches">
@@ -77,7 +86,7 @@
 							{{if .Version}}<code>{{.Version}}</code>{{else if .Requirement}}<code>{{.Requirement}}</code>{{end}}
 							{{template "repo/security/match" .MatchKind}}
 						</span>
-						<span role="cell" class="repo-security-fixed"><span class="repo-security-cell-label">{{ctx.Locale.Tr "repo.security.fixed_in"}}</span> {{range $i, $v := .Fixed}}{{if $i}}, {{end}}<code>{{$v}}</code>{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.security.no_fix"}}</span>{{end}}</span>
+						<span role="cell" class="repo-security-fixed">{{if eq .State "fixed"}}<span class="text grey">{{if .Version}}{{ctx.Locale.Tr "repo.security.was_version" .Version}}{{end}}{{if .FixedUnix}} · {{DateUtils.TimeSince .FixedUnix}}{{end}}</span>{{else}}<span class="repo-security-cell-label">{{ctx.Locale.Tr "repo.security.fixed_in"}}</span> {{range $i, $v := .Fixed}}{{if $i}}, {{end}}<code>{{$v}}</code>{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.security.no_fix"}}</span>{{end}}{{end}}</span>
 						<span role="cell" class="repo-security-manifest"><span class="repo-security-cell-label">{{ctx.Locale.Tr "repo.security.in_manifest"}}</span> {{range $i, $part := StringUtils.Split .ManifestPath "/"}}{{if $i}}/<wbr>{{end}}{{$part}}{{end}}</span>
 						<span role="cell" class="repo-security-actions">
 							{{if and $.CanDismissAlerts (eq .State "open")}}

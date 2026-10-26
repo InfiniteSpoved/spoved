@@ -2,5 +2,5 @@
 {{if eq . "critical"}}<span class="ui small red label vuln-severity">{{ctx.Locale.Tr "repo.security.severity.critical"}}</span>
 {{else if eq . "high"}}<span class="ui small label vuln-severity vuln-severity-high">{{ctx.Locale.Tr "repo.security.severity.high"}}</span>
 {{else if eq . "moderate"}}<span class="ui small label vuln-severity vuln-severity-moderate">{{ctx.Locale.Tr "repo.security.severity.moderate"}}</span>
-{{else if eq . "low"}}<span class="ui small basic label vuln-severity">{{ctx.Locale.Tr "repo.security.severity.low"}}</span>
-{{else}}<span class="ui small basic label vuln-severity">{{ctx.Locale.Tr "repo.security.severity.unknown"}}</span>{{end}}
+{{else if eq . "low"}}<span class="ui small label vuln-severity vuln-severity-neutral">{{ctx.Locale.Tr "repo.security.severity.low"}}</span>
+{{else}}<span class="ui small label vuln-severity vuln-severity-neutral">{{ctx.Locale.Tr "repo.security.severity.unknown"}}</span>{{end}}
