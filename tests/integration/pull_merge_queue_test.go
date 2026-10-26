@@ -632,10 +632,12 @@ jobs:
 				}},
 			})
 			require.NoError(t, err)
-			for range 3 {
-				_ = mergequeue.Process(t.Context(), repo.ID, "main")
-			}
-			assert.Nil(t, entry(b))
+			// a pass started by the push above can still hold the branch, and Process then returns at once
+			assert.Eventually(t, func() bool {
+				_ = mergequeue.Process(db.DefaultContext, repo.ID, "main")
+				e, err := pull_model.GetMergeQueueEntryByPullID(db.DefaultContext, b.ID)
+				return err == nil && e == nil
+			}, 30*time.Second, 100*time.Millisecond)
 			assert.Equal(t, mergequeue.ReasonBuildFailed, removedReason(b))
 		})
 
