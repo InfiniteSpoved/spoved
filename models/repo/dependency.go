@@ -271,6 +271,10 @@ func GetDependencyFacets(ctx context.Context, repoID int64) (*DependencyFacets, 
 	if err := db.GetEngine(ctx).Table("repo_dependency").Where("repo_id = ?", repoID).Select("ecosystem AS value, COUNT(*) AS cnt").GroupBy("ecosystem").OrderBy("ecosystem").Find(&f.Ecosystems); err != nil {
 		return nil, err
 	}
+	// Ecosystem names mix cases (npm, RubyGems): list them alphabetically, as the table sorts them.
+	slices.SortFunc(f.Ecosystems, func(a, b DependencyFacet) int {
+		return strings.Compare(strings.ToLower(a.Value), strings.ToLower(b.Value))
+	})
 	if err := db.GetEngine(ctx).Table("repo_dependency").Where("repo_id = ?", repoID).Select("manifest_path AS value, COUNT(*) AS cnt").GroupBy("manifest_path").OrderBy("manifest_path").Find(&f.Manifests); err != nil {
 		return nil, err
 	}

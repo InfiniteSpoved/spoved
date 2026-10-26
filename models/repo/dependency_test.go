@@ -105,6 +105,13 @@ func TestSearchRepoDependencies(t *testing.T) {
 	assert.Equal(t, []string{"other"}, names(&repo_model.DependencySearchOptions{Direct: optional.Some(true)}))
 	assert.Equal(t, []string{"go-thing"}, names(&repo_model.DependencySearchOptions{Manifest: "go.mod"}))
 	assert.Empty(t, names(&repo_model.DependencySearchOptions{Q: "left-pad", Ecosystem: "Go"}))
+
+	require.NoError(t, replaceDependencies(ctx, &repo_model.DependencyScan{RepoID: 2, Status: "ok"}, []*repo_model.Dependency{
+		{RepoID: 2, Ecosystem: "RubyGems", Name: "rails"}, {RepoID: 2, Ecosystem: "npm", Name: "a"}, {RepoID: 2, Ecosystem: "npm", Name: "b"}, {RepoID: 2, Ecosystem: "Go", Name: "c"},
+	}))
+	facets, err := repo_model.GetDependencyFacets(ctx, 2)
+	require.NoError(t, err)
+	assert.Equal(t, []repo_model.DependencyFacet{{Value: "Go", Count: 1}, {Value: "npm", Count: 2}, {Value: "RubyGems", Count: 1}}, facets.Ecosystems, "ecosystems sorted ignoring case")
 }
 
 func countDeps(t *testing.T, repoID int64) int64 {
