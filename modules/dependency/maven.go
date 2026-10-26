@@ -4,7 +4,6 @@
 package dependency
 
 import (
-	"context"
 	"maps"
 	"strings"
 )
@@ -21,13 +20,14 @@ type pomDependency struct {
 }
 
 type pomProject struct {
-	GroupID string `xml:"groupId"`
-	Version string `xml:"version"`
-	Parent  struct {
-		GroupID      string `xml:"groupId"`
-		ArtifactID   string `xml:"artifactId"`
-		Version      string `xml:"version"`
-		RelativePath string `xml:"relativePath"`
+	GroupID    string `xml:"groupId"`
+	ArtifactID string `xml:"artifactId"`
+	Version    string `xml:"version"`
+	Parent     struct {
+		GroupID      string  `xml:"groupId"`
+		ArtifactID   string  `xml:"artifactId"`
+		Version      string  `xml:"version"`
+		RelativePath *string `xml:"relativePath"`
 	} `xml:"parent"`
 	Properties struct {
 		Items []xmlProp `xml:",any"`
@@ -84,29 +84,30 @@ func (sc *pomScope) resolve(s string) string {
 // version is a literal or a `${property}` of the file, of `project.version`, of the managed versions or, one level
 // up, of the parent pom in the same repository (the pom the child's <relativePath> points at, ../pom.xml by
 // default). Anything else gives an empty version; nothing is fetched.
-func parsePOM(ctx context.Context, data []byte, find Finder) ([]Dependency, error) {
+func parsePOM(s *sink, data []byte, find Finder) error {
 	var p pomProject
 	if err := decodeXML(data, &p, "pom.xml"); err != nil {
-		return nil, err
+		return err
 	}
 	var parent *pomScope
-	if strings.TrimSpace(p.Parent.ArtifactID) != "" {
-		rel := strings.TrimSpace(p.Parent.RelativePath)
-		switch {
-		case rel == "":
-			rel = "../pom.xml"
-		case !strings.HasSuffix(rel, ".xml"):
+	// An empty <relativePath/> means "don't look on disk" (Maven's rule); a pom found where the path points is the
+	// parent only if its coordinates are the ones the child names.
+	if strings.TrimSpace(p.Parent.ArtifactID) != "" && (p.Parent.RelativePath == nil || strings.TrimSpace(*p.Parent.RelativePath) != "") {
+		rel := "../pom.xml"
+		if p.Parent.RelativePath != nil {
+			rel = strings.TrimSpace(*p.Parent.RelativePath)
+		}
+		if !strings.HasSuffix(rel, ".xml") {
 			rel = strings.TrimSuffix(rel, "/") + "/pom.xml"
 		}
 		if pd := find(rel, false); pd != nil {
 			var pp pomProject
-			if decodeXML(pd, &pp, "pom.xml") == nil {
+			if decodeXML(pd, &pp, "pom.xml") == nil && pp.isParentOf(&p) {
 				parent = newPomScope(&pp, nil)
 			}
 		}
 	}
 	sc := newPomScope(&p, parent)
-	var deps []Dependency
 	for _, d := range p.Dependencies {
 		g, a := sc.resolve(d.GroupID), sc.resolve(d.ArtifactID)
 		if g == "" || a == "" {
@@ -116,7 +117,25 @@ func parsePOM(ctx context.Context, data []byte, find Finder) ([]Dependency, erro
 		if v == "" {
 			v = sc.managed[g+":"+a]
 		}
-		deps = append(deps, Dependency{Name: g + ":" + a, Version: v, Direct: true})
+		if err := s.emit(Dependency{Name: g + ":" + a, Version: v, Direct: true}); err != nil {
+			return err
+		}
 	}
-	return deps, nil
+	return nil
+}
+
+// isParentOf tells whether pom p is the parent the child names: the same groupId and artifactId (the group may be
+// inherited from p's own parent) and, if the child names a version, the same version.
+func (p *pomProject) isParentOf(child *pomProject) bool {
+	group := strings.TrimSpace(p.GroupID)
+	if group == "" {
+		group = strings.TrimSpace(p.Parent.GroupID)
+	}
+	version := strings.TrimSpace(p.Version)
+	if version == "" {
+		version = strings.TrimSpace(p.Parent.Version)
+	}
+	c := child.Parent
+	return group == strings.TrimSpace(c.GroupID) && strings.TrimSpace(p.ArtifactID) == strings.TrimSpace(c.ArtifactID) &&
+		(strings.TrimSpace(c.Version) == "" || version == strings.TrimSpace(c.Version))
 }

@@ -4,9 +4,15 @@
 package dependency
 
 import (
+	"context"
+	"errors"
 	"runtime"
+	"runtime/debug"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -75,4 +81,165 @@ func itoa(i int) string {
 		s = append([]byte{digits[i%10]}, s...)
 	}
 	return string(s)
+}
+
+// fill repeats gen(i) until the result is at least size bytes.
+func fill(prefix, suffix string, size int, gen func(b []byte, i int) []byte) []byte {
+	b := make([]byte, 0, size+1024)
+	b = append(b, prefix...)
+	for i := 0; len(b) < size; i++ {
+		b = gen(b, i)
+	}
+	return append(b, suffix...)
+}
+
+func hexID(b []byte, i int) []byte {
+	b = append(b, "p"...)
+	return strconv.AppendInt(b, int64(i), 16)
+}
+
+// peakHeap runs f and returns the highest HeapInuse seen above the heap before it, sampled every 2 ms.
+func peakHeap(f func()) (peak uint64, elapsed time.Duration) {
+	old := debug.SetGCPercent(20)
+	defer debug.SetGCPercent(old)
+	runtime.GC()
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	base := m.HeapInuse
+	var top atomic.Uint64
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		var s runtime.MemStats
+		for {
+			runtime.ReadMemStats(&s)
+			if s.HeapInuse > top.Load() {
+				top.Store(s.HeapInuse)
+			}
+			select {
+			case <-stop:
+				return
+			case <-time.After(2 * time.Millisecond):
+			}
+		}
+	}()
+	start := time.Now()
+	f()
+	elapsed = time.Since(start)
+	close(stop)
+	<-done
+	if top.Load() < base {
+		return 0, elapsed
+	}
+	return top.Load() - base, elapsed
+}
+
+// For every parser, a file of the maximum size made of tiny entries must stop at the cap with a bounded heap and in
+// a few seconds: the work of a parse is O(the limits), not O(the shape of the input).
+func TestHostileTinyEntriesPeakHeap(t *testing.T) {
+	const big, small = 20 << 20, 1 << 20
+	line := func(format string) func([]byte, int) []byte {
+		return func(b []byte, i int) []byte {
+			before, after, _ := strings.Cut(format, "%")
+			b = append(b, before...)
+			b = hexID(b, i)
+			return append(b, after...)
+		}
+	}
+	cases := []struct {
+		name, file string
+		data       func() []byte
+	}{
+		{"npm v3 packages", "package-lock.json", func() []byte {
+			return fill(`{"packages":{`, `"z":{}}}`, big, line(`"node_modules/%":{"version":"1"},`))
+		}},
+		{"npm v3 root dependency names", "package-lock.json", func() []byte { return fill(`{"packages":{"":{"dependencies":{`, `"z":"1"}}}}`, big, line(`"%":"1",`)) }},
+		{"npm v1 tree", "package-lock.json", func() []byte { return fill(`{"dependencies":{`, `"z":{}}}`, big, line(`"%":{"version":"1"},`)) }},
+		{"npm v1 nested", "package-lock.json", func() []byte {
+			return fill(`{"dependencies":{"a":{"dependencies":{`, `"z":{}}}}}`, big, line(`"%":{"version":"1"},`))
+		}},
+		{"composer packages", "composer.lock", func() []byte { return fill(`{"packages":[`, `{}]}`, big, line(`{"name":"%"},`)) }},
+		{"composer license list", "composer.lock", func() []byte { return fill(`{"packages":[{"name":"a","license":[`, `"x"]}]}`, big, line(`"%",`)) }},
+		{"nuget lock", "packages.lock.json", func() []byte { return fill(`{"dependencies":{"f":{`, `"z":{}}}}`, big, line(`"%":{},`)) }},
+		{"nuget lock frameworks", "packages.lock.json", func() []byte { return fill(`{"dependencies":{`, `"z":{}}}`, big, line(`"%":{"a":{}},`)) }},
+		{"yarn", "yarn.lock", func() []byte { return fill("", "", big, line("%@1:\n")) }},
+		{"yarn descriptors", "yarn.lock", func() []byte {
+			return fill("", "", big, func(b []byte, i int) []byte {
+				for j := range 50 {
+					b = hexID(append(b, ' '), i*50+j)
+					b = append(b, "@1,"...)
+				}
+				return append(b, "a@1:\n"...)
+			})
+		}},
+		{"pnpm packages", "pnpm-lock.yaml", func() []byte { return fill("lockfileVersion: '9.0'\npackages:\n", "", big, line("  %@1:\n")) }},
+		{"pnpm v5 dependencies", "pnpm-lock.yaml", func() []byte { return fill("lockfileVersion: 5.4\ndependencies:\n", "", big, line("  %: 1\n")) }},
+		{"pnpm importer dependencies", "pnpm-lock.yaml", func() []byte { return fill("importers:\n  .:\n    dependencies:\n", "", big, line("      %: 1\n")) }},
+		{"poetry", "poetry.lock", func() []byte { return fill("", "", big, line("[[package]]\nname = \"%\"\n")) }},
+		{"cargo", "Cargo.lock", func() []byte { return fill("", "", big, line("[[package]]\nname = \"%\"\nsource = \"s\"\n")) }},
+		{"cargo dependency lines", "Cargo.lock", func() []byte {
+			return fill("[[package]]\nname = \"a\"\ndependencies = [\n", "]\n", big, line(" \"% 1\",\n"))
+		}},
+		{"requirements", "requirements.txt", func() []byte { return fill("", "", small, line("%\n")) }},
+		{"gemfile", "Gemfile.lock", func() []byte { return fill("GEM\n  specs:\n", "", small, line("    % (1)\n")) }},
+		{"go.mod", "go.mod", func() []byte { return fill("module m\n", "", small, line("require example.com/% v1.0.0\n")) }},
+		{"pom", "pom.xml", func() []byte {
+			return fill("<project><dependencies>", "</dependencies></project>", small, line("<dependency><groupId>g</groupId><artifactId>%</artifactId></dependency>"))
+		}},
+		{"csproj", "a.csproj", func() []byte {
+			return fill("<Project><ItemGroup>", "</ItemGroup></Project>", small, line(`<PackageReference Include="%" Version="1"/>`))
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var err error
+			var rows int
+			data := c.data()
+			peak, elapsed := peakHeap(func() {
+				var deps []Dependency
+				deps, err = FormatFor(c.file).ParseLimited(t.Context(), data, nil, 50000)
+				rows = len(deps)
+			})
+			t.Logf("%s: %d MiB file, peak %d MiB, %v, %d rows, %v", c.name, len(data)>>20, peak>>20, elapsed.Round(time.Millisecond), rows, err)
+			assert.Less(t, peak, uint64(64<<20), "peak heap above the baseline")
+			assert.Less(t, elapsed, 5*time.Second)
+			// a file this size is refused at the cap, or (a shape that keeps few rows) read in full
+			if err != nil {
+				assert.True(t, errors.Is(err, ErrTooManyDependencies) || errors.Is(err, ErrParse), "%v", err)
+			}
+		})
+	}
+}
+
+// The limit applies to the rows of the whole scan: the parser is told how many are left.
+func TestParseLimited(t *testing.T) {
+	f := FormatFor("go.mod")
+	data := []byte("module m\nrequire (\n\texample.com/a v1.0.0\n\texample.com/b v1.0.0\n\texample.com/c v1.0.0\n)\n")
+	_, err := f.ParseLimited(t.Context(), data, nil, 2)
+	require.ErrorIs(t, err, ErrTooManyDependencies)
+	deps, err := f.ParseLimited(t.Context(), data, nil, 3)
+	require.NoError(t, err)
+	assert.Len(t, deps, 3)
+	// a package listed twice is one row
+	deps, err = FormatFor("packages.lock.json").ParseLimited(t.Context(), []byte(`{"dependencies":{"net6":{"A":{"type":"Direct","resolved":"1"}},"net8":{"A":{"type":"Transitive","resolved":"1"}}}}`), nil, 1)
+	require.NoError(t, err)
+	assert.Len(t, deps, 1)
+	assert.True(t, deps[0].Direct)
+}
+
+// A parse stops when its context ends, JSON included.
+func TestParseStopsWithContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	for name, data := range map[string][]byte{
+		"package-lock.json":  fill(`{"x":[`, `0]}`, 4<<20, func(b []byte, i int) []byte { return append(b, "0,"...) }),
+		"composer.lock":      fill(`{"x":[`, `0]}`, 4<<20, func(b []byte, i int) []byte { return append(b, "0,"...) }),
+		"packages.lock.json": fill(`{"x":[`, `0]}`, 4<<20, func(b []byte, i int) []byte { return append(b, "0,"...) }),
+		"go.mod":             fill("module m\n", "", 1<<20, func(b []byte, i int) []byte { return append(b, "// x\n"...) }),
+	} {
+		start := time.Now()
+		_, err := FormatFor(name).Parse(ctx, data, nil)
+		require.ErrorIs(t, err, context.Canceled, name)
+		assert.Less(t, time.Since(start), time.Second, name)
+	}
 }

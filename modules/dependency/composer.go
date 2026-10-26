@@ -4,8 +4,7 @@
 package dependency
 
 import (
-	"bytes"
-	"context"
+	"errors"
 	"strings"
 
 	"forgejo.org/modules/json"
@@ -15,26 +14,11 @@ func init() {
 	register(&Format{Ecosystem: Packagist, match: func(b string) bool { return b == "composer.lock" }, parse: parseComposerLock})
 }
 
-type composerPackage struct {
-	Name    string   `json:"name"`
-	Version string   `json:"version"`
-	License []string `json:"license"`
-	Dist    struct {
-		Type string `json:"type"`
-	} `json:"dist"`
-}
-
-// parseComposerLock reads packages and packages-dev. A license array lists alternatives, so it becomes an SPDX
-// "A OR B" expression. composer.lock doesn't say what the project requires: the direct packages are the ones the
-// composer.json next to it requires (require and require-dev). Without a composer.json none is marked direct.
-func parseComposerLock(ctx context.Context, data []byte, find Finder) ([]Dependency, error) {
-	var lock struct {
-		Packages    []composerPackage `json:"packages"`
-		PackagesDev []composerPackage `json:"packages-dev"`
-	}
-	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&lock); err != nil {
-		return nil, parseErr("composer.lock")
-	}
+// parseComposerLock reads packages and packages-dev, streamed: each package is emitted as it is read. A license
+// array lists alternatives, so it becomes an SPDX "A OR B" expression. composer.lock doesn't say what the project
+// requires: the direct packages are the ones the composer.json next to it requires (require and require-dev).
+// Without a composer.json none is marked direct.
+func parseComposerLock(s *sink, data []byte, find Finder) error {
 	direct := map[string]bool{}
 	if cj := find("composer.json", false); cj != nil {
 		var c struct {
@@ -49,14 +33,53 @@ func parseComposerLock(ctx context.Context, data []byte, find Finder) ([]Depende
 			}
 		}
 	}
-	var deps []Dependency
-	for _, list := range [][]composerPackage{lock.Packages, lock.PackagesDev} {
-		for _, p := range list {
-			if p.Dist.Type == "path" {
-				continue // a package from a path repository is part of the project, not a dependency
+	j := newJSONStream(s, data)
+	readPackage := func() error {
+		var name, version, license string
+		var path bool
+		ok, err := j.object(func(f string) error {
+			var err error
+			switch f {
+			case "name":
+				name, err = j.str()
+			case "version":
+				version, err = j.str()
+			case "license":
+				license, err = j.license()
+			case "dist":
+				_, err = j.object(func(k string) error {
+					if k != "type" {
+						return j.skip()
+					}
+					t, err := j.str()
+					path = t == "path"
+					return err
+				})
+			default:
+				err = j.skip()
 			}
-			deps = append(deps, Dependency{Name: p.Name, Version: p.Version, License: strings.Join(p.License, " OR "), Direct: direct[strings.ToLower(p.Name)]})
+			return err
+		})
+		if err != nil || !ok || path { // a package from a path repository is part of the project, not a dependency
+			return err
 		}
+		return s.emit(Dependency{Name: name, Version: version, License: license, Direct: direct[strings.ToLower(name)]})
 	}
-	return deps, nil
+	ok, err := j.object(func(key string) error {
+		if key != "packages" && key != "packages-dev" {
+			return j.skip()
+		}
+		_, err := j.array(readPackage)
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, ErrTooManyDependencies) || s.ctx.Err() != nil {
+			return err
+		}
+		return parseErr("composer.lock")
+	}
+	if !ok {
+		return parseErr("composer.lock")
+	}
+	return nil
 }

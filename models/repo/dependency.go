@@ -134,11 +134,31 @@ func GetRepoDependencyScan(ctx context.Context, repoID int64) (*DependencyScan, 
 	return s, nil
 }
 
-// ReplaceRepoDependencies replaces the rows of the repository in one transaction and stores the scan. With a nil
-// deps the old rows stay and only the scan row changes (a failed scan).
-func ReplaceRepoDependencies(ctx context.Context, scan *DependencyScan, deps []*Dependency) error {
-	return db.WithTx(ctx, func(ctx context.Context) error {
+// ReplaceRepoDependenciesIf replaces the rows of the repository in one transaction and stores the scan, but only if
+// the scan row is still the one the caller read (expect, nil if there was none): another process that finished a
+// scan meanwhile wins, on any number of servers. It reports whether it wrote. With a nil deps the old rows stay and
+// only the status of the scan row changes (a failed scan).
+func ReplaceRepoDependenciesIf(ctx context.Context, scan *DependencyScan, deps []*Dependency, expect *DependencyScan) (written bool, err error) {
+	err = db.WithTx(ctx, func(ctx context.Context) error {
 		e := db.GetEngine(ctx)
+		cols := []string{"commit_sha", "scanned_unix", "status", "error", "manifest_count", "dependency_count", "skipped"}
+		if deps == nil {
+			cols = []string{"scanned_unix", "status", "error"}
+		}
+		if expect == nil {
+			if cur, err := GetRepoDependencyScan(ctx, scan.RepoID); err != nil || cur != nil {
+				return err
+			}
+			if _, err := e.Insert(scan); err != nil {
+				return err
+			}
+		} else {
+			// the conditional update is also the row lock that serializes writers
+			n, err := e.Where("id = ? AND repo_id = ? AND commit_sha = ?", expect.ID, scan.RepoID, expect.CommitSHA).Cols(cols...).Update(scan)
+			if err != nil || n == 0 {
+				return err
+			}
+		}
 		if deps != nil {
 			if _, err := e.Where("repo_id = ?", scan.RepoID).Delete(new(Dependency)); err != nil {
 				return err
@@ -149,17 +169,20 @@ func ReplaceRepoDependencies(ctx context.Context, scan *DependencyScan, deps []*
 				}
 			}
 		}
-		old, err := GetRepoDependencyScan(ctx, scan.RepoID)
-		if err != nil {
-			return err
-		}
-		if old == nil {
-			_, err = e.Insert(scan)
-			return err
-		}
-		_, err = e.ID(old.ID).Cols("commit_sha", "scanned_unix", "status", "error", "manifest_count", "dependency_count", "skipped").Update(scan)
-		return err
+		written = true
+		return nil
 	})
+	return written, err
+}
+
+// ReplaceRepoDependencies is ReplaceRepoDependenciesIf against the row as it is now.
+func ReplaceRepoDependencies(ctx context.Context, scan *DependencyScan, deps []*Dependency) error {
+	cur, err := GetRepoDependencyScan(ctx, scan.RepoID)
+	if err != nil {
+		return err
+	}
+	_, err = ReplaceRepoDependenciesIf(ctx, scan, deps, cur)
+	return err
 }
 
 // DependencySearchOptions selects the dependencies of one repository.

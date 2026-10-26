@@ -112,3 +112,38 @@ func countDeps(t *testing.T, repoID int64) int64 {
 	require.NoError(t, err)
 	return n
 }
+
+func TestReplaceRepoDependenciesIf(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	ctx := t.Context()
+	row := func(name string) []*repo_model.Dependency {
+		return []*repo_model.Dependency{{RepoID: 1, Ecosystem: "Go", Name: name, Version: "v1", ManifestPath: "go.mod"}}
+	}
+
+	// no row yet: the first writer inserts, the second (who also read "none") writes nothing
+	ok, err := repo_model.ReplaceRepoDependenciesIf(ctx, &repo_model.DependencyScan{RepoID: 1, CommitSHA: "aaaa", Status: "ok"}, row("a"), nil)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	ok, err = repo_model.ReplaceRepoDependenciesIf(ctx, &repo_model.DependencyScan{RepoID: 1, CommitSHA: "bbbb", Status: "ok"}, row("b"), nil)
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	// two scans that both read "aaaa": the first replaces, the second finds another commit and writes nothing
+	read, err := repo_model.GetRepoDependencyScan(ctx, 1)
+	require.NoError(t, err)
+	ok, err = repo_model.ReplaceRepoDependenciesIf(ctx, &repo_model.DependencyScan{RepoID: 1, CommitSHA: "cccc", Status: "ok"}, row("c"), read)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	ok, err = repo_model.ReplaceRepoDependenciesIf(ctx, &repo_model.DependencyScan{RepoID: 1, CommitSHA: "dddd", Status: "ok"}, row("d"), read)
+	require.NoError(t, err)
+	assert.False(t, ok)
+	// neither a failure of the stale scan
+	ok, err = repo_model.ReplaceRepoDependenciesIf(ctx, &repo_model.DependencyScan{RepoID: 1, CommitSHA: "aaaa", Status: repo_model.DependencyScanFailed, Error: "timeout"}, nil, read)
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	got, _ := repo_model.GetRepoDependencyScan(ctx, 1)
+	assert.Equal(t, "cccc", got.CommitSHA)
+	assert.Empty(t, got.Error)
+	assert.EqualValues(t, 1, countDeps(t, 1))
+}

@@ -4,7 +4,6 @@
 package dependency
 
 import (
-	"context"
 	"strings"
 )
 
@@ -19,15 +18,18 @@ type cargoPackage struct {
 
 // parseCargoLock reads the [[package]] tables. A package without a `source` belongs to the project itself (the root
 // or a workspace member, or a path dependency) and is not a dependency; what such packages depend on is direct.
-func parseCargoLock(ctx context.Context, data []byte, _ Finder) ([]Dependency, error) {
+func parseCargoLock(s *sink, data []byte, _ Finder) error {
 	var pkgs []*cargoPackage
 	var cur *cargoPackage
 	inDeps := false
-	sc := newScanner(ctx, data)
+	sc := newScanner(s, data)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		switch {
 		case line == "[[package]]":
+			if err := s.entry(); err != nil {
+				return err
+			}
 			cur, inDeps = &cargoPackage{}, false
 			pkgs = append(pkgs, cur)
 		case cur == nil || line == "" || line[0] == '#':
@@ -38,8 +40,11 @@ func parseCargoLock(ctx context.Context, data []byte, _ Finder) ([]Dependency, e
 				inDeps = false
 				continue
 			}
-			if s := strings.Trim(strings.TrimSuffix(line, ","), `"`); s != "" {
-				cur.deps = append(cur.deps, s)
+			if d := strings.Trim(strings.TrimSuffix(line, ","), `"`); d != "" {
+				if err := s.entry(); err != nil {
+					return err
+				}
+				cur.deps = append(cur.deps, d)
 			}
 		default:
 			k, v, ok := strings.Cut(line, "=")
@@ -58,8 +63,8 @@ func parseCargoLock(ctx context.Context, data []byte, _ Finder) ([]Dependency, e
 			}
 		}
 	}
-	if sc.Err() != nil {
-		return nil, parseErr("Cargo.lock")
+	if err := sc.Err(); err != nil {
+		return scanErr(err, "Cargo.lock")
 	}
 	direct := map[string]bool{} // "name" or "name version"
 	for _, p := range pkgs {
@@ -69,18 +74,25 @@ func parseCargoLock(ctx context.Context, data []byte, _ Finder) ([]Dependency, e
 		for _, d := range p.deps {
 			f := strings.Fields(d)
 			if len(f) >= 2 {
+				if err := s.entry(); err != nil {
+					return err
+				}
 				direct[f[0]+" "+f[1]] = true
 			} else if len(f) == 1 {
+				if err := s.entry(); err != nil {
+					return err
+				}
 				direct[f[0]] = true
 			}
 		}
 	}
-	var deps []Dependency
 	for _, p := range pkgs {
 		if p.source == "" || p.name == "" {
 			continue
 		}
-		deps = append(deps, Dependency{Name: p.name, Version: p.version, Direct: direct[p.name] || direct[p.name+" "+p.version]})
+		if err := s.emit(Dependency{Name: p.name, Version: p.version, Direct: direct[p.name] || direct[p.name+" "+p.version]}); err != nil {
+			return err
+		}
 	}
-	return deps, nil
+	return nil
 }

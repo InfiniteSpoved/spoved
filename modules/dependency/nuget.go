@@ -4,12 +4,8 @@
 package dependency
 
 import (
-	"bytes"
-	"context"
-	"sort"
+	"errors"
 	"strings"
-
-	"forgejo.org/modules/json"
 )
 
 func init() {
@@ -54,10 +50,10 @@ func (m msbuildPackage) version() string {
 // parseCsproj lists the PackageReference items. A reference without a version takes it from the nearest
 // Directory.Packages.props (central package management) above the project; VersionOverride wins. $(Property) is
 // resolved from the same file's properties, else the version is empty.
-func parseCsproj(ctx context.Context, data []byte, find Finder) ([]Dependency, error) {
+func parseCsproj(s *sink, data []byte, find Finder) error {
 	var proj msbuildProject
 	if err := decodeXML(data, &proj, "csproj"); err != nil {
-		return nil, err
+		return err
 	}
 	props := proj.props()
 	central := map[string]string{}
@@ -67,12 +63,14 @@ func parseCsproj(ctx context.Context, data []byte, find Finder) ([]Dependency, e
 			cprops := cp.props()
 			for _, g := range cp.ItemGroups {
 				for _, v := range g.PackageVersions {
+					if err := s.entry(); err != nil {
+						return err
+					}
 					central[strings.ToLower(v.Include)] = expandProps(strings.TrimSpace(v.version()), cprops, "$(", ")")
 				}
 			}
 		}
 	}
-	var deps []Dependency
 	for _, g := range proj.ItemGroups {
 		for _, r := range g.PackageReferences {
 			name := strings.TrimSpace(r.Include)
@@ -88,45 +86,55 @@ func parseCsproj(ctx context.Context, data []byte, find Finder) ([]Dependency, e
 			} else {
 				v = expandProps(v, props, "$(", ")")
 			}
-			deps = append(deps, Dependency{Name: name, Version: v, Direct: true})
-		}
-	}
-	return deps, nil
-}
-
-type nugetLock struct {
-	Dependencies map[string]map[string]struct {
-		Type     string `json:"type"`
-		Resolved string `json:"resolved"`
-	} `json:"dependencies"`
-}
-
-// parseNuGetLock reads packages.lock.json: type Direct is direct, Transitive is not; "Project" entries (other
-// projects of the solution) are not packages. A package in several target frameworks is one row.
-func parseNuGetLock(ctx context.Context, data []byte, _ Finder) ([]Dependency, error) {
-	var l nugetLock
-	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&l); err != nil {
-		return nil, parseErr("packages.lock.json")
-	}
-	fws := make([]string, 0, len(l.Dependencies))
-	for k := range l.Dependencies {
-		fws = append(fws, k)
-	}
-	sort.Strings(fws)
-	var deps []Dependency
-	for _, fw := range fws {
-		names := make([]string, 0, len(l.Dependencies[fw]))
-		for n := range l.Dependencies[fw] {
-			names = append(names, n)
-		}
-		sort.Strings(names)
-		for _, n := range names {
-			d := l.Dependencies[fw][n]
-			if d.Type == "Project" {
-				continue
+			if err := s.emit(Dependency{Name: name, Version: v, Direct: true}); err != nil {
+				return err
 			}
-			deps = append(deps, Dependency{Name: n, Version: d.Resolved, Direct: d.Type == "Direct"})
 		}
 	}
-	return deps, nil
+	return nil
+}
+
+// parseNuGetLock reads packages.lock.json, streamed: type Direct is direct, Transitive is not; "Project" entries
+// (other projects of the solution) are not packages. A package in several target frameworks is one row.
+func parseNuGetLock(s *sink, data []byte, _ Finder) error {
+	j := newJSONStream(s, data)
+	readFramework := func(string) error {
+		_, err := j.object(func(name string) error {
+			var typ, resolved string
+			ok, err := j.object(func(f string) error {
+				var err error
+				switch f {
+				case "type":
+					typ, err = j.str()
+				case "resolved":
+					resolved, err = j.str()
+				default:
+					err = j.skip()
+				}
+				return err
+			})
+			if err != nil || !ok || typ == "Project" {
+				return err
+			}
+			return s.emit(Dependency{Name: name, Version: resolved, Direct: typ == "Direct"})
+		})
+		return err
+	}
+	ok, err := j.object(func(key string) error {
+		if key != "dependencies" {
+			return j.skip()
+		}
+		_, err := j.object(readFramework)
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, ErrTooManyDependencies) || s.ctx.Err() != nil {
+			return err
+		}
+		return parseErr("packages.lock.json")
+	}
+	if !ok {
+		return parseErr("packages.lock.json")
+	}
+	return nil
 }

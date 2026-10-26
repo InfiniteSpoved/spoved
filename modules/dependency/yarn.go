@@ -4,7 +4,6 @@
 package dependency
 
 import (
-	"context"
 	"strings"
 )
 
@@ -18,26 +17,29 @@ func init() {
 // berry `name@npm:range`), so another version of the same package is not. An alias descriptor
 // (`alias@npm:real@range`) names the real package. Workspaces and packages from the disk (link:, portal:, file:,
 // workspace:) are not listed.
-func parseYarnLock(ctx context.Context, data []byte, find Finder) ([]Dependency, error) {
+func parseYarnLock(s *sink, data []byte, find Finder) error {
 	asked := npmPackageJSONRanges(find("package.json", false))
-	var deps []Dependency
 	var name string
 	var direct, local bool
 	var version string
-	flush := func() {
+	flush := func() error {
+		var err error
 		if name != "" && !local {
-			deps = append(deps, Dependency{Name: name, Version: version, Direct: direct})
+			err = s.emit(Dependency{Name: name, Version: version, Direct: direct})
 		}
 		name, version, direct, local = "", "", false, false
+		return err
 	}
-	sc := newScanner(ctx, data)
+	sc := newScanner(s, data)
 	for sc.Scan() {
 		line := sc.Text()
 		switch {
 		case strings.TrimSpace(line) == "" || strings.HasPrefix(line, "#"):
 			continue
 		case line[0] != ' ':
-			flush()
+			if err := flush(); err != nil {
+				return err
+			}
 			if !strings.HasSuffix(line, ":") || strings.HasPrefix(line, "__metadata") {
 				continue
 			}
@@ -70,11 +72,10 @@ func parseYarnLock(ctx context.Context, data []byte, find Finder) ([]Dependency,
 			}
 		}
 	}
-	if sc.Err() != nil {
-		return nil, parseErr("yarn.lock")
+	if err := sc.Err(); err != nil {
+		return scanErr(err, "yarn.lock")
 	}
-	flush()
-	return deps, nil
+	return flush()
 }
 
 // splitYarnDescriptor splits `name@range` (the name may start with @scope/).

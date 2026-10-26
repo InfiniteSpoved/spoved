@@ -26,6 +26,9 @@ import (
 var (
 	errTreeTooLarge = errors.New("tree too large")
 
+	// helperCacheBudget is the total size of the helper files (package.json, ...) one scan keeps in memory
+	helperCacheBudget int64 = 8 << 20
+
 	// excludedSegments are directory names whose content is never scanned (vendored or generated copies)
 	excludedSegments = map[string]bool{"vendor": true, "node_modules": true, "testdata": true}
 
@@ -33,8 +36,8 @@ var (
 	auxNames = map[string]bool{"package.json": true, "composer.json": true, "pyproject.toml": true, "Directory.Packages.props": true, "pom.xml": true}
 
 	// parseManifest parses one manifest; tests replace it
-	parseManifest = func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder) ([]dependency.Dependency, error) {
-		return f.Parse(ctx, data, find)
+	parseManifest = func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
+		return f.ParseLimited(ctx, data, find, maxRows)
 	}
 )
 
@@ -141,9 +144,10 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	if repo.IsEmpty || repo.Status != repo_model.RepositoryReady {
 		return false, nil
 	}
-	// one scan of a repository at a time, and at most maxConcurrentScans of all, counted only while one runs
+	// one scan of a repository at a time, and at most MAX_CONCURRENT_SCANS of all, counted only while one runs
 	unlock := lockRepoScan(repo.ID)
 	defer unlock()
+	scanSlotsOnce.Do(func() { scanSlots = make(chan struct{}, max(setting.DependencyGraph.MaxConcurrentScans, 1)) })
 	select {
 	case scanSlots <- struct{}{}:
 		defer func() { <-scanSlots }()
@@ -180,15 +184,10 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	if err != nil {
 		return false, fail(ctx, repo, old, code, err)
 	}
-	// Never replace the rows of a newer commit with the result for an older one (another process may have scanned
-	// the branch while this scan ran).
-	if cur, err := repo_model.GetRepoDependencyScan(ctx, repo.ID); err != nil {
-		return false, err
-	} else if cur != nil && cur.CommitSHA != "" && cur.CommitSHA != sha && cur.Error == "" && isAncestor(scanCtx, gitRepo, sha, cur.CommitSHA) {
-		return false, nil
-	}
-	// the stored rows belong to sha; the database write is not bound to the scan's time budget
-	if err := repo_model.ReplaceRepoDependencies(ctx, result, deps); err != nil {
+	// The stored rows belong to sha; the database write is not bound to the scan's time budget. It happens only if
+	// the row is still the one read at the start, so a scan another process finished meanwhile is kept (the head
+	// read at the start is the one to store, even if it is an older commit than the stored one after a force push).
+	if _, err := repo_model.ReplaceRepoDependenciesIf(ctx, result, deps, old); err != nil {
 		return false, err
 	}
 	// the branch moved while the scan ran: the next scan is the one that ends on the head
@@ -196,13 +195,8 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	return err == nil && head != sha, nil
 }
 
-// isAncestor reports whether commit ancestor is an ancestor of (or the same as) descendant.
-func isAncestor(ctx context.Context, gitRepo *git.Repository, ancestor, descendant string) bool {
-	_, _, err := git.NewCommand(ctx, "merge-base", "--is-ancestor").AddDynamicArguments(ancestor, descendant).RunStdString(&git.RunOpts{Dir: gitRepo.Path})
-	return err == nil
-}
-
-// fail records the error code of a scan and keeps the old rows (and the commit they belong to).
+// fail records the error code of a scan and keeps the old rows (and the commit they belong to); it does not
+// overwrite a row another process wrote meanwhile.
 func fail(ctx context.Context, repo *repo_model.Repository, old *repo_model.DependencyScan, code string, cause error) error {
 	if ctx.Err() != nil {
 		return ctx.Err() // shutting down: not a failure of the repository
@@ -210,9 +204,10 @@ func fail(ctx context.Context, repo *repo_model.Repository, old *repo_model.Depe
 	log.Warn("dependency graph: scan of repository %d failed (%s): %v", repo.ID, code, cause)
 	s := &repo_model.DependencyScan{RepoID: repo.ID, ScannedUnix: timeutil.TimeStampNow(), Status: repo_model.DependencyScanFailed, Error: code}
 	if old != nil {
-		s.CommitSHA, s.ManifestCount, s.DependencyCount, s.Skipped = old.CommitSHA, old.ManifestCount, old.DependencyCount, old.Skipped
+		s.CommitSHA = old.CommitSHA // the condition of the write; the stored commit and counts stay
 	}
-	return repo_model.ReplaceRepoDependencies(ctx, s, nil)
+	_, err := repo_model.ReplaceRepoDependenciesIf(ctx, s, nil, old)
+	return err
 }
 
 func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.Repository, sha string) (*repo_model.DependencyScan, []*repo_model.Dependency, string, error) {
@@ -255,20 +250,26 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 		defer r.Close()
 		return io.ReadAll(io.LimitReader(r, limit+1))
 	}
+	// helper files by blob ID: the same blob is kept once however many directories hold it, and what doesn't fit
+	// the budget is read again on each use
 	cache := map[string][]byte{}
+	var cached int64
 	find := func(manifestPath string) dependency.Finder {
 		return func(name string, up bool) []byte {
 			for dir := path.Dir(manifestPath); ; dir = path.Dir(dir) {
 				p := path.Join(dir, name)
 				if e, ok := aux[p]; ok {
-					if b, seen := cache[p]; seen {
+					if b, seen := cache[e.id]; seen {
 						return b
 					}
 					b, err := readBlob(e, dependency.MaxSmallManifestSize)
 					if err != nil {
 						b = nil
 					}
-					cache[p] = b
+					if cached+int64(len(b)) <= helperCacheBudget {
+						cache[e.id] = b
+						cached += int64(len(b))
+					}
 					return b
 				}
 				if !up || dir == "." {
@@ -316,16 +317,20 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 			skip(m.path, repo_model.DependencySkipRead)
 			continue
 		}
-		parsed, err := parseManifest(ctx, format, data, find(m.path))
+		parsed, err := parseManifest(ctx, format, data, find(m.path), cfg.MaxDependencies-len(deps))
 		if ctx.Err() != nil {
 			return nil, nil, repo_model.DependencyErrTimeout, ctx.Err()
 		}
+		if errors.Is(err, dependency.ErrTooManyDependencies) {
+			// the cap is reached: this manifest and every later one stay unread
+			skip(m.path, repo_model.DependencySkipTooManyDeps)
+			for _, rest := range manifests[i+1:] {
+				skip(rest.path, repo_model.DependencySkipTooManyDeps)
+			}
+			break
+		}
 		if err != nil {
 			skip(m.path, repo_model.DependencySkipParse)
-			continue
-		}
-		if len(deps)+len(parsed) > cfg.MaxDependencies {
-			skip(m.path, repo_model.DependencySkipTooManyDeps)
 			continue
 		}
 		scan.ManifestCount++

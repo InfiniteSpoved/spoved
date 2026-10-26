@@ -77,7 +77,7 @@ type Format struct {
 	// Small formats are limited to MaxSmallManifestSize.
 	Small bool
 	match func(base string) bool
-	parse func(ctx context.Context, data []byte, find Finder) ([]Dependency, error)
+	parse func(s *sink, data []byte, find Finder) error
 }
 
 var formats []*Format
@@ -108,10 +108,77 @@ func FormatForPath(p string) *Format {
 	return nil
 }
 
-// Parse reads a manifest. A panic of a parser is an ErrParse, and every row is validated: names, versions and
-// licenses are cut of control characters and bidirectional marks, a row with an empty or too long value is dropped,
-// and a package listed twice in one manifest is one row.
-func (f *Format) Parse(ctx context.Context, data []byte, find Finder) (deps []Dependency, err error) {
+// ErrTooManyDependencies is returned when a manifest holds more rows than the caller allows, or so many entries that
+// reading it would cost more than that many rows do. It stops the parser at once: the work and the memory of a parse
+// are bounded by the limit, not by the shape of the input.
+var ErrTooManyDependencies = errors.New("dependency: too many dependencies")
+
+// DefaultMaxDependencies is the row limit of Parse.
+const DefaultMaxDependencies = 50000
+
+// entryFactor is how many intermediate entries (map keys, lockfile entries, lines with a key) a parse may keep per
+// allowed row.
+const entryFactor = 4
+
+// sink receives the rows of a parse. emit counts the rows, entry counts everything else a parser keeps in memory;
+// both fail with ErrTooManyDependencies past their limit, and both look at the context now and then.
+type sink struct {
+	ctx        context.Context
+	maxRows    int
+	maxEntries int
+	rows       []Dependency
+	index      map[[2]string]int // name, version -> position in rows
+	entries    int
+	ticks      int
+}
+
+func newSink(ctx context.Context, maxRows int) *sink {
+	return &sink{ctx: ctx, maxRows: maxRows, maxEntries: maxRows * entryFactor, index: map[[2]string]int{}}
+}
+
+func (s *sink) tick() error {
+	if s.ticks++; s.ticks&255 == 0 {
+		return s.ctx.Err()
+	}
+	return nil
+}
+
+// emit adds a row; a package listed again (same name and version) is merged into the first row.
+func (s *sink) emit(d Dependency) error {
+	k := [2]string{d.Name, d.Version}
+	if i, ok := s.index[k]; ok {
+		s.rows[i].Direct = s.rows[i].Direct || d.Direct
+		if s.rows[i].License == "" {
+			s.rows[i].License = d.License
+		}
+		return s.tick()
+	}
+	if len(s.rows) >= s.maxRows {
+		return ErrTooManyDependencies
+	}
+	s.index[k] = len(s.rows)
+	s.rows = append(s.rows, d)
+	return s.tick()
+}
+
+// entry accounts for one intermediate entry a parser is about to keep.
+func (s *sink) entry() error {
+	if s.entries++; s.entries > s.maxEntries {
+		return ErrTooManyDependencies
+	}
+	return s.tick()
+}
+
+// Parse is ParseLimited with DefaultMaxDependencies.
+func (f *Format) Parse(ctx context.Context, data []byte, find Finder) ([]Dependency, error) {
+	return f.ParseLimited(ctx, data, find, DefaultMaxDependencies)
+}
+
+// ParseLimited reads a manifest and returns at most maxRows rows, or ErrTooManyDependencies. A panic of a parser is
+// an ErrParse, and every row is validated: names, versions and licenses are cut of control characters and
+// bidirectional marks, a row with an empty or too long value is dropped, and a package listed twice in one manifest
+// is one row.
+func (f *Format) ParseLimited(ctx context.Context, data []byte, find Finder, maxRows int) (deps []Dependency, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			deps, err = nil, fmt.Errorf("%w: panic", ErrParse)
@@ -120,14 +187,15 @@ func (f *Format) Parse(ctx context.Context, data []byte, find Finder) (deps []De
 	if find == nil {
 		find = func(string, bool) []byte { return nil }
 	}
-	raw, err := f.parse(ctx, data, find)
+	s := newSink(ctx, max(maxRows, 0))
+	err = f.parse(s, data, find)
 	if err == nil {
 		err = ctx.Err()
 	}
 	if err != nil {
 		return nil, err
 	}
-	return validate(f.Ecosystem, raw), nil
+	return validate(f.Ecosystem, s.rows), nil
 }
 
 func clean(s string) string {
@@ -173,28 +241,38 @@ func validate(eco string, in []Dependency) []Dependency {
 // scan that timed out doesn't finish a long file.
 type lineScanner struct {
 	*bufio.Scanner
-	ctx context.Context
-	n   int
+	s *sink
 }
 
-func newScanner(ctx context.Context, data []byte) *lineScanner {
-	s := bufio.NewScanner(bytes.NewReader(data))
-	s.Buffer(make([]byte, 0, 4096), maxLineLen)
-	return &lineScanner{Scanner: s, ctx: ctx}
+func newScanner(s *sink, data []byte) *lineScanner {
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	sc.Buffer(make([]byte, 0, 4096), maxLineLen)
+	return &lineScanner{Scanner: sc, s: s}
 }
 
 func (l *lineScanner) Scan() bool {
-	if l.n++; l.n%1024 == 0 && l.ctx.Err() != nil {
+	if l.s.tick() != nil {
 		return false
 	}
 	return l.Scanner.Scan()
 }
 
 func (l *lineScanner) Err() error {
-	if err := l.ctx.Err(); err != nil {
+	if err := l.s.ctx.Err(); err != nil {
 		return err
 	}
 	return l.Scanner.Err()
+}
+
+// scanErr turns the error of a line scan into the parse error, keeping the context and limit errors as they are.
+func scanErr(err error, format string) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrTooManyDependencies) {
+		return err
+	}
+	return parseErr("%s", format)
 }
 
 func parseErr(format string, a ...any) error {
@@ -277,4 +355,12 @@ func SafeText(s string) string { return clean(s) }
 // ValidPath reports whether p can be stored as the path of a manifest.
 func ValidPath(p string) bool {
 	return p != "" && len(p) <= MaxPathLen && utf8.ValidString(p) && clean(p) == p && path.Clean(p) == p
+}
+
+// cmpOr returns err if it is set, else other.
+func cmpOr(err, other error) error {
+	if err != nil {
+		return err
+	}
+	return other
 }

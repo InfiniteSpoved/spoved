@@ -5,6 +5,7 @@ package repo
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"forgejo.org/models/db"
@@ -76,7 +77,7 @@ func ListDependencies(ctx *context.APIContext) {
 	//   type: string
 	// - name: direct
 	//   in: query
-	//   description: only the direct (true) or only the transitive (false) dependencies
+	//   description: only the direct (true) or only the transitive (false) dependencies; any value strconv.ParseBool accepts (1, t, T, TRUE, true, True, 0, f, F, FALSE, false, False)
 	//   type: boolean
 	// - name: manifest
 	//   in: query
@@ -105,15 +106,13 @@ func ListDependencies(ctx *context.APIContext) {
 		Ecosystem:   ctx.FormString("ecosystem"),
 		Manifest:    ctx.FormString("manifest"),
 	}
-	switch ctx.FormString("direct") {
-	case "":
-	case "true":
-		opts.Direct = optional.Some(true)
-	case "false":
-		opts.Direct = optional.Some(false)
-	default:
-		ctx.Error(http.StatusUnprocessableEntity, "", "direct must be true or false")
-		return
+	if v := ctx.FormString("direct"); v != "" {
+		direct, err := strconv.ParseBool(v)
+		if err != nil {
+			ctx.Error(http.StatusUnprocessableEntity, "", "direct must be a boolean")
+			return
+		}
+		opts.Direct = optional.Some(direct)
 	}
 	if opts.Ecosystem != "" && !dependency.IsEcosystem(opts.Ecosystem) {
 		ctx.Error(http.StatusUnprocessableEntity, "", "unknown ecosystem")

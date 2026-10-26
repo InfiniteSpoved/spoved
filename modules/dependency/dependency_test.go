@@ -4,7 +4,6 @@
 package dependency
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path"
@@ -237,9 +236,8 @@ func TestPnpmMultiDocument(t *testing.T) {
 	got, err := FormatFor("pnpm-lock.yaml").Parse(t.Context(), []byte(two), nil)
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
-	got, err = FormatFor("pnpm-lock.yaml").Parse(t.Context(), []byte("a: [\n---\nb: 1"), nil)
-	require.NoError(t, err)
-	assert.Empty(t, got)
+	_, err = FormatFor("pnpm-lock.yaml").Parse(t.Context(), []byte("a: [\n---\nb: 1"), nil)
+	require.ErrorIs(t, err, ErrParse, "a flow collection that doesn't end on its line is refused")
 }
 
 func TestFormatForPath(t *testing.T) {
@@ -437,8 +435,8 @@ func TestHostile(t *testing.T) {
 	})
 	t.Run("maven parent in the same repository", func(t *testing.T) {
 		files := map[string]string{
-			"../pom.xml":    `<project><version>2.0</version><properties><lib.version>1.5</lib.version></properties><dependencyManagement><dependencies><dependency><groupId>org.x</groupId><artifactId>managed</artifactId><version>${lib.version}</version></dependency></dependencies></dependencyManagement></project>`,
-			"../../pom.xml": `<project><properties><lib.version>9</lib.version></properties></project>`,
+			"../pom.xml":    `<project><groupId>org.x</groupId><artifactId>parent</artifactId><version>2.0</version><properties><lib.version>1.5</lib.version></properties><dependencyManagement><dependencies><dependency><groupId>org.x</groupId><artifactId>managed</artifactId><version>${lib.version}</version></dependency></dependencies></dependencyManagement></project>`,
+			"../../pom.xml": `<project><groupId>org.x</groupId><artifactId>parent</artifactId><version>2.0</version><properties><lib.version>9</lib.version></properties></project>`,
 		}
 		find := func(n string, _ bool) []byte {
 			if c, ok := files[n]; ok {
@@ -456,6 +454,13 @@ func TestHostile(t *testing.T) {
 		// a relativePath names another parent; without a parent the versions stay empty
 		m = parseText(t, "pom.xml", strings.Replace(child, "</parent>", "<relativePath>../../pom.xml</relativePath></parent>", 1), find)
 		assert.Contains(t, m, "org.x:prop@9")
+		// an empty <relativePath/> means no parent on the disk; a pom with other coordinates is not the parent
+		m = parseText(t, "pom.xml", strings.Replace(child, "</parent>", "<relativePath/></parent>", 1), find)
+		assert.Contains(t, m, "org.x:prop@")
+		m = parseText(t, "pom.xml", strings.Replace(child, "<artifactId>parent</artifactId>", "<artifactId>spring-boot-starter-parent</artifactId>", 1), find)
+		assert.Contains(t, m, "org.x:prop@")
+		m = parseText(t, "pom.xml", strings.Replace(child, "<version>2.0</version></parent>", "<version>3.0</version></parent>", 1), find)
+		assert.Contains(t, m, "org.x:prop@")
 		m = parseText(t, "pom.xml", child, nil)
 		assert.Contains(t, m, "org.x:managed@")
 		assert.Contains(t, m, "org.x:prop@")
@@ -480,7 +485,7 @@ func TestHostile(t *testing.T) {
 		}
 	})
 	t.Run("a parser panic is a parse error", func(t *testing.T) {
-		f := &Format{Ecosystem: Go, parse: func(context.Context, []byte, Finder) ([]Dependency, error) { panic("boom") }}
+		f := &Format{Ecosystem: Go, parse: func(*sink, []byte, Finder) error { panic("boom") }}
 		_, err := f.Parse(t.Context(), nil, nil)
 		require.ErrorIs(t, err, ErrParse)
 	})
@@ -584,7 +589,7 @@ url = "https://example.test/x.git"
 		assert.Contains(t, m, "fromgit@0.3.0")
 	})
 	t.Run("pyproject include-group is not a package", func(t *testing.T) {
-		m := pyprojectDeps(t.Context(), []byte("[dependency-groups]\ndev = [\"pytest>=8\", {include-group = \"test\"}]\n"))
+		m := pyprojectDeps(newSink(t.Context(), 1000), []byte("[dependency-groups]\ndev = [\"pytest>=8\", {include-group = \"test\"}]\n"))
 		assert.True(t, m["pytest"])
 		assert.False(t, m["test"])
 	})
@@ -609,4 +614,103 @@ url = "https://example.test/x.git"
 		assert.True(t, m["chalk@5.0.0"].Direct, "a workspace member's dependency is direct")
 		assert.False(t, m["other@1.0.0"].Direct)
 	})
+}
+
+// pnpm reads its lockfile with a full YAML parser. Valid YAML this reader would read differently is refused (a
+// parse error), never read into partial or invented rows.
+func TestPnpmFailsClosed(t *testing.T) {
+	const head = "lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    dependencies:\n      a:\n        specifier: ^1\n        version: 1.0.0\n\npackages:\n\n"
+	const a = "  a@1.0.0:\n    resolution: {integrity: sha512-a}\n\n"
+	f := FormatFor("pnpm-lock.yaml")
+	for name, in := range map[string]string{
+		"anchor":                         head + "  &p a@1.0.0:\n    resolution: {}\n",
+		"alias section":                  "lockfileVersion: '9.0'\npackages: *p\n",
+		"flow packages":                  "lockfileVersion: '9.0'\npackages: {a@1.0.0: {resolution: {}}, evil@6.6.6: {resolution: {}}}\n",
+		"json style file":                `{"lockfileVersion":"9.0","packages":{"evil@6.6.6":{}}}`,
+		"block scalar packages":          "lockfileVersion: '9.0'\npackages: |\n  fake@1.0.0:\n    resolution: {}\n",
+		"block scalar in a package":      head + a + "  b@1.0.0:\n    description: |\n  fake@9.9.9:\n      x\n",
+		"folded value":                   head + "  b@1.0.0:\n    description: >\n      text\n",
+		"four-space indentation":         "lockfileVersion: '9.0'\npackages:\n    a@1.0.0:\n        resolution: {}\n    evil@6.6.6:\n        resolution: {}\n",
+		"odd indentation":                head + "   evil@6.6.6:\n    resolution: {}\n",
+		"tab":                            head + "\ta@1.0.0:\n",
+		"merge key":                      head + a + "  <<: *p\n",
+		"alias value":                    head + "  b@1.0.0:\n    resolution: *r\n",
+		"tag":                            head + "  b@1.0.0:\n    resolution: !!map {}\n",
+		"escape in a key":                head + a + "  \"\\x65vil@6.6.6\":\n    resolution: {}\n",
+		"unterminated quote":             head + "  b@1.0.0:\n    description: \"foo\n      bar: baz\"\n",
+		"multi-line flow mapping":        head + "  b@1.0.0:\n    resolution: {integrity: x,\n      tarball: y}\n",
+		"explicit key without its value": head + "  ? " + strings.Repeat("x", 1100) + "@1.0.0\n  b@1.0.0:\n    resolution: {}\n",
+		"sequence item as a key":         head + "  - a@1.0.0\n",
+		"unterminated flow deeper down":  head + "  b@1.0.0:\n    peerDependenciesMeta:\n      x: {optional: [\n  evil@6.6.6:\n    resolution: {}\n",
+		"top-level flow":                 "lockfileVersion: '9.0'\nsettings: {\npackages:\n  a@1.0.0:\n    resolution: {}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			deps, err := f.Parse(t.Context(), []byte(in), nil)
+			require.ErrorIs(t, err, ErrParse)
+			assert.Empty(t, deps)
+		})
+	}
+	// forms pnpm writes still read
+	for name, in := range map[string]string{
+		"crlf":            strings.ReplaceAll(head+a, "\n", "\r\n"),
+		"comments":        head + "# c\n" + a + "  # d\n",
+		"empty section":   "lockfileVersion: '9.0'\n\npackages: {}\n",
+		"quoted key":      head + "  'a@1.0.0':\n    resolution: {integrity: sha512-a}\n",
+		"double quoted":   head + "  \"a@1.0.0\":\n    resolution: {integrity: sha512-a}\n",
+		"flow value":      head + "  a@1.0.0:\n    resolution: {integrity: sha512-a, tarball: 'https://x/y.tgz'}\n    engines: {node: '>=12'}\n    cpu: [x64]\n",
+		"peer sequences":  head + "  a@1.0.0:\n    resolution: {integrity: sha512-a}\n    transitivePeerDependencies:\n      - '@algolia/client-search'\n      - b\n    peerDependenciesMeta:\n      b:\n        optional: true\n",
+		"snapshot values": head + a + "snapshots:\n\n  a@1.0.0: {}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			deps, err := f.Parse(t.Context(), []byte(in), nil)
+			require.NoError(t, err)
+			if name != "empty section" {
+				require.Len(t, deps, 1)
+				assert.Equal(t, "a", deps[0].Name)
+			}
+		})
+	}
+}
+
+// js-yaml writes a key over 1024 characters as `? key` and the mapping after `: `.
+func TestPnpmExplicitKey(t *testing.T) {
+	long := "foo@1.0.0(" + strings.Repeat("peer@1.0.0(", 120) + strings.Repeat(")", 121)
+	in := "lockfileVersion: '6.0'\n\nimporters:\n\n  .:\n    dependencies:\n      foo:\n        specifier: 1.0.0\n        version: 1.0.0(" + strings.Repeat("peer@1.0.0(", 120) + strings.Repeat(")", 121) +
+		"\n\npackages:\n\n  ? /" + long + "\n  : resolution: {integrity: sha512-a}\n    engines: {node: '>=12'}\n    dev: false\n\n  /bar@2.0.0:\n    resolution: {integrity: sha512-b}\n    dev: false\n"
+	require.Greater(t, len(long), 1024)
+	m := index(mustParse(t, "pnpm-lock.yaml", in))
+	require.Contains(t, m, "foo@1.0.0")
+	assert.True(t, m["foo@1.0.0"].Direct)
+	assert.Contains(t, m, "bar@2.0.0")
+	assert.Len(t, m, 2)
+}
+
+func mustParse(t *testing.T, name, in string) []Dependency {
+	t.Helper()
+	deps, err := FormatFor(name).Parse(t.Context(), []byte(in), nil)
+	require.NoError(t, err)
+	return deps
+}
+
+func TestPnpmGitDependencyStaysDirect(t *testing.T) {
+	in := "lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    dependencies:\n      mousetrap:\n        specifier: github:chabou/mousetrap#c95e\n        version: https://codeload.github.com/chabou/mousetrap/tar.gz/c95e\n\npackages:\n\n  mousetrap@https://codeload.github.com/chabou/mousetrap/tar.gz/c95e:\n    resolution: {tarball: 'https://codeload.github.com/chabou/mousetrap/tar.gz/c95e'}\n    version: 1.6.1\n"
+	deps := mustParse(t, "pnpm-lock.yaml", in)
+	require.Len(t, deps, 1)
+	assert.True(t, deps[0].Direct)
+	assert.Equal(t, "1.6.1", deps[0].Version)
+}
+
+func TestRequirementsFilesAreNotPackages(t *testing.T) {
+	deps := mustParse(t, "requirements.txt", "foo-1.0-py3-none-any.whl\n./x.tar.gz\nbar.zip\nreal==1.0\n")
+	require.Len(t, deps, 1)
+	assert.Equal(t, "real", deps[0].Name)
+}
+
+func TestGemPlatformSuffix(t *testing.T) {
+	for in, want := range map[string]string{
+		"1.15.4-x86_64-linux": "1.15.4", "1.15.4-arm64-darwin": "1.15.4", "1.0-java": "1.0", "1.2-x64-mingw32": "1.2",
+		"1.0.0-rc1": "1.0.0-rc1", "2.0.0.pre1": "2.0.0.pre1", "1.0.0-beta": "1.0.0-beta",
+	} {
+		assert.Equal(t, want, gemVersion(in), in)
+	}
 }

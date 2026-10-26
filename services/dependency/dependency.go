@@ -25,7 +25,6 @@ import (
 )
 
 const (
-	maxConcurrentScans = 2
 	// failedRetry is how long the cron task leaves a repository alone after a failed scan
 	failedRetry = 24 * time.Hour
 	cronBatch   = 500
@@ -33,7 +32,10 @@ const (
 
 var (
 	scanQueue *queue.WorkerPoolQueue[int64]
-	scanSlots = make(chan struct{}, maxConcurrentScans)
+	// scanSlots counts the scans running in this process; its size is [dependency_graph] MAX_CONCURRENT_SCANS,
+	// read when the first scan needs a slot
+	scanSlots     chan struct{}
+	scanSlotsOnce sync.Once
 
 	// repoScans holds the repositories being scanned in this process: the unique queue forgets an ID once it is
 	// popped, so a push during a scan queues the repository again, and the second scan must wait for the first.

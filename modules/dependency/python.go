@@ -4,7 +4,6 @@
 package dependency
 
 import (
-	"context"
 	"regexp"
 	"strings"
 )
@@ -30,9 +29,8 @@ func isRequirementsName(b string) bool {
 // with a marker or a --hash option on the line) is stored with that version; one with a range or a bare name is
 // stored with an empty version, since the file doesn't fix it. Options (`-r`, `-c`, `--index-url`, ...), URLs and
 // comments are ignored: nothing is followed or fetched.
-func parseRequirements(ctx context.Context, data []byte, _ Finder) ([]Dependency, error) {
-	var deps []Dependency
-	sc := newScanner(ctx, data)
+func parseRequirements(s *sink, data []byte, _ Finder) error {
+	sc := newScanner(s, data)
 	for sc.Scan() {
 		line := sc.Text()
 		if i := strings.Index(line, " #"); i >= 0 {
@@ -63,34 +61,51 @@ func parseRequirements(ctx context.Context, data []byte, _ Finder) ([]Dependency
 		default:
 			continue // `name @ url`, a path, a URL
 		}
-		deps = append(deps, d)
+		if requirementIsFile(d.Name) {
+			continue
+		}
+		if err := s.emit(d); err != nil {
+			return err
+		}
 	}
-	if sc.Err() != nil {
-		return nil, parseErr("requirements.txt")
+	return scanErr(sc.Err(), "requirements.txt")
+}
+
+// requirementIsFile tells a local archive or wheel (pip accepts `foo-1.0-py3-none-any.whl` and `./x.tar.gz`) from a
+// package name.
+func requirementIsFile(name string) bool {
+	l := strings.ToLower(name)
+	for _, ext := range []string{".whl", ".tar.gz", ".tgz", ".zip", ".tar.bz2", ".tar.xz", ".egg"} {
+		if strings.HasSuffix(l, ext) {
+			return true
+		}
 	}
-	return deps, nil
+	return false
 }
 
 // parsePoetryLock reads the [[package]] tables of poetry.lock. The lock file doesn't say what the project asks for,
 // so the direct packages come from the pyproject.toml next to it, if there is one.
-func parsePoetryLock(ctx context.Context, data []byte, find Finder) ([]Dependency, error) {
-	direct := pyprojectDeps(ctx, find("pyproject.toml", false))
-	var deps []Dependency
+func parsePoetryLock(s *sink, data []byte, find Finder) error {
+	direct := pyprojectDeps(s, find("pyproject.toml", false))
 	var cur *Dependency
 	inPackage, inSource, onDisk := false, false, false
-	flush := func() {
+	flush := func() error {
+		var err error
 		if cur != nil && cur.Name != "" && !onDisk {
 			cur.Direct = direct[normalizePyName(cur.Name)]
-			deps = append(deps, *cur)
+			err = s.emit(*cur)
 		}
 		cur, onDisk = nil, false
+		return err
 	}
-	sc := newScanner(ctx, data)
+	sc := newScanner(s, data)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		switch {
 		case line == "[[package]]":
-			flush()
+			if err := flush(); err != nil {
+				return err
+			}
 			cur, inPackage, inSource = &Dependency{}, true, false
 		case strings.HasPrefix(line, "["):
 			inPackage, inSource = false, line == "[package.source]" // [package.dependencies], [metadata], ...
@@ -112,11 +127,10 @@ func parsePoetryLock(ctx context.Context, data []byte, find Finder) ([]Dependenc
 			}
 		}
 	}
-	if sc.Err() != nil {
-		return nil, parseErr("poetry.lock")
+	if err := sc.Err(); err != nil {
+		return scanErr(err, "poetry.lock")
 	}
-	flush()
-	return deps, nil
+	return flush()
 }
 
 func tomlString(v string) string {
@@ -135,13 +149,13 @@ var pepArray = regexp.MustCompile(`^([A-Za-z0-9_.-]+)\s*=\s*\[(.*)$`)
 
 // pyprojectDeps returns the normalized names a pyproject.toml asks for: the keys of [tool.poetry.dependencies] and
 // of its groups, and the entries of the PEP 621 `dependencies` and `optional-dependencies` arrays.
-func pyprojectDeps(ctx context.Context, data []byte) map[string]bool {
+func pyprojectDeps(s *sink, data []byte) map[string]bool {
 	out := map[string]bool{}
 	if data == nil {
 		return out
 	}
 	section, inArray := "", false
-	sc := newScanner(ctx, data)
+	sc := newScanner(s, data)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || line[0] == '#' {
@@ -157,7 +171,9 @@ func pyprojectDeps(ctx context.Context, data []byte) map[string]bool {
 		case poetry:
 			if k, _, ok := strings.Cut(line, "="); ok {
 				if k = strings.Trim(strings.TrimSpace(k), `"'`); k != "" && k != "python" {
-					out[normalizePyName(k)] = true
+					if len(out) < s.maxEntries {
+						out[normalizePyName(k)] = true
+					}
 				}
 			}
 		case section == "project" || section == "project.optional-dependencies" || section == "dependency-groups":
@@ -170,7 +186,9 @@ func pyprojectDeps(ctx context.Context, data []byte) map[string]bool {
 			}
 			// {include-group = "test"} names a group of requirements, not a package
 			for _, m := range pepAll.FindAllStringSubmatch(tomlInline.ReplaceAllString(line, ""), -1) {
-				out[normalizePyName(m[1])] = true
+				if len(out) < s.maxEntries {
+					out[normalizePyName(m[1])] = true
+				}
 			}
 			if strings.Contains(line, "]") {
 				inArray = false

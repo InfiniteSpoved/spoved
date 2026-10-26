@@ -4,7 +4,7 @@
 package dependency
 
 import (
-	"context"
+	"regexp"
 	"strings"
 )
 
@@ -14,11 +14,11 @@ func init() {
 
 // parseGemfileLock reads the specs of the GEM and GIT sections (PATH gems are the project's own); the names listed
 // in DEPENDENCIES are direct.
-func parseGemfileLock(ctx context.Context, data []byte, _ Finder) ([]Dependency, error) {
+func parseGemfileLock(s *sink, data []byte, _ Finder) error {
 	var deps []Dependency
 	section, inSpecs := "", false
 	direct := map[string]bool{}
-	sc := newScanner(ctx, data)
+	sc := newScanner(s, data)
 	for sc.Scan() {
 		line := sc.Text()
 		if line == "" {
@@ -33,22 +33,38 @@ func parseGemfileLock(ctx context.Context, data []byte, _ Finder) ([]Dependency,
 		switch {
 		case section == "DEPENDENCIES" && indent == 2:
 			name, _, _ := strings.Cut(trimmed, " ")
+			if err := s.entry(); err != nil {
+				return err
+			}
 			direct[strings.TrimSuffix(name, "!")] = true
 		case (section == "GEM" || section == "GIT") && indent == 2:
 			inSpecs = trimmed == "specs:"
 		case (section == "GEM" || section == "GIT") && inSpecs && indent == 4:
 			name, rest, ok := strings.Cut(trimmed, " (")
 			if ok {
-				version, _, _ := strings.Cut(strings.TrimSuffix(rest, ")"), "-") // 1.15.4-x86_64-linux: a platform build of 1.15.4
-				deps = append(deps, Dependency{Name: name, Version: version})
+				if err := s.entry(); err != nil {
+					return err
+				}
+				deps = append(deps, Dependency{Name: name, Version: gemVersion(strings.TrimSuffix(rest, ")"))})
 			}
 		}
 	}
-	if sc.Err() != nil {
-		return nil, parseErr("Gemfile.lock")
+	if err := sc.Err(); err != nil {
+		return scanErr(err, "Gemfile.lock")
 	}
-	for i := range deps {
-		deps[i].Direct = direct[deps[i].Name]
+	for _, d := range deps {
+		d.Direct = direct[d.Name]
+		if err := s.emit(d); err != nil {
+			return err
+		}
 	}
-	return deps, nil
+	return nil
+}
+
+// gemPlatform matches the platform suffix of a precompiled gem version (1.15.4-x86_64-linux); a prerelease such as
+// 1.0.0-rc1 is not one.
+var gemPlatform = regexp.MustCompile(`-(?:java|jruby|universal-[a-z0-9_.-]+|x86-[a-z0-9_.-]+|x86_64-[a-z0-9_.-]+|arm64-[a-z0-9_.-]+|aarch64-[a-z0-9_.-]+|arm-[a-z0-9_.-]+|mingw[a-z0-9_.-]*|mswin[a-z0-9_.-]*|x64-[a-z0-9_.-]+|ruby)$`)
+
+func gemVersion(v string) string {
+	return gemPlatform.ReplaceAllString(v, "")
 }

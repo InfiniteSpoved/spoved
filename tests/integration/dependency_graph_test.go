@@ -358,6 +358,10 @@ func TestDependencyGraphAccess(t *testing.T) {
 			assert.Len(t, list.Dependencies, 1)
 			DecodeJSON(t, get(apiPriv+"/dependencies?direct=false", ownerToken, http.StatusOK), &list)
 			assert.Len(t, list.Dependencies, 1)
+			for v, want := range map[string]int{"1": 2, "t": 2, "TRUE": 2, "F": 1, "0": 1} {
+				DecodeJSON(t, get(apiPriv+"/dependencies?direct="+v, ownerToken, http.StatusOK), &list)
+				assert.Len(t, list.Dependencies, want, v)
+			}
 			DecodeJSON(t, get(apiPriv+"/dependencies?manifest=go.mod&limit=2&page=2", ownerToken, http.StatusOK), &list)
 			assert.Len(t, list.Dependencies, 1)
 			get(apiPriv+"/dependencies?ecosystem=Cobol", ownerToken, http.StatusUnprocessableEntity)
@@ -730,7 +734,7 @@ func TestDependencyGraphPage(t *testing.T) {
 			// a failed last scan is left to the cron: no new scan from the page
 			scan := depScanOf(t, repo.ID)
 			scan.CommitSHA, scan.Status, scan.Error = strings.Repeat("b", 40), repo_model.DependencyScanFailed, repo_model.DependencyErrTimeout
-			require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(), scan, nil))
+			require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(), scan, []*repo_model.Dependency{}))
 			page(session, "/user2/dep-page/activity/dependencies", http.StatusOK)
 			assert.Equal(t, strings.Repeat("b", 40), depScanOf(t, repo.ID).CommitSHA)
 		})
@@ -738,7 +742,7 @@ func TestDependencyGraphPage(t *testing.T) {
 		t.Run("skipped manifests", func(t *testing.T) {
 			scan := depScanOf(t, repo.ID)
 			scan.SetSkippedManifests([]repo_model.SkippedManifest{{Path: "legacy/pom.xml", Code: "parse_error"}, {Path: "vendor-tools/yarn.lock", Code: "manifest_too_large"}, {Path: "x/Cargo.lock", Code: "<b>made up</b>"}})
-			require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(), scan, nil))
+			require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(), scan, []*repo_model.Dependency{}))
 			doc := page(session, "/user2/dep-page/activity/dependencies", http.StatusOK)
 			items := doc.Find("#dependencies-skipped li")
 			require.Equal(t, 3, items.Length())

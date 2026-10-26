@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -134,7 +136,7 @@ func TestScan(t *testing.T) {
 
 	// a second scan of the same commit reads nothing
 	var parses atomic.Int32
-	defer test.MockVariableValue(&parseManifest, func(context.Context, *dependency.Format, []byte, dependency.Finder) ([]dependency.Dependency, error) {
+	defer test.MockVariableValue(&parseManifest, func(context.Context, *dependency.Format, []byte, dependency.Finder, int) ([]dependency.Dependency, error) {
 		parses.Add(1)
 		return nil, nil
 	})()
@@ -143,8 +145,8 @@ func TestScan(t *testing.T) {
 
 	// a push that removes the manifests drops their rows
 	sha2 := commitFiles(t, repo, map[string]string{"README.md": "hi"}, nil)
-	parseManifest = func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder) ([]dependency.Dependency, error) {
-		return f.Parse(ctx, data, find)
+	parseManifest = func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
+		return f.ParseLimited(ctx, data, find, maxRows)
 	}
 	require.NoError(t, Scan(t.Context(), repo.ID))
 	assert.Empty(t, rowsOf(t, repo.ID))
@@ -234,9 +236,9 @@ func TestScanTimeoutKeepsOldRows(t *testing.T) {
 
 	commitFiles(t, repo, map[string]string{"go.mod": "module m\n\nrequire example.com/new v1.0.0\n"}, nil)
 	defer test.MockVariableValue(&setting.DependencyGraph.ScanTimeout, 100*time.Millisecond)()
-	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder) ([]dependency.Dependency, error) {
+	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
 		<-ctx.Done() // a parser that takes too long
-		return f.Parse(ctx, data, find)
+		return f.ParseLimited(ctx, data, find, maxRows)
 	})()
 	require.NoError(t, Scan(t.Context(), repo.ID))
 
@@ -299,7 +301,7 @@ func TestEnqueueUnscanned(t *testing.T) {
 	_, err = db.GetEngine(t.Context()).SQL("SELECT commit_id FROM branch WHERE repo_id = ? AND name = ?", repo.ID, repo.DefaultBranch).Get(&head)
 	require.NoError(t, err)
 	require.NotEmpty(t, head)
-	require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(), &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: head, Status: "ok"}, nil))
+	require.NoError(t, repo_model.ReplaceRepoDependencies(t.Context(), &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: head, Status: "ok"}, []*repo_model.Dependency{}))
 	ids, _ = repo_model.UnscannedDependencyRepoIDs(t.Context(), 0, 1000)
 	assert.NotContains(t, ids, repo.ID, "up to date")
 
@@ -428,12 +430,12 @@ func blockFirstParse(t *testing.T) (started <-chan struct{}, release func()) {
 	t.Helper()
 	st, rel := make(chan struct{}), make(chan struct{})
 	var once sync.Once
-	t.Cleanup(test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder) ([]dependency.Dependency, error) {
+	t.Cleanup(test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
 		once.Do(func() {
 			close(st)
 			<-rel
 		})
-		return f.Parse(ctx, data, find)
+		return f.ParseLimited(ctx, data, find, maxRows)
 	}))
 	var relOnce sync.Once
 	release = func() { relOnce.Do(func() { close(rel) }) }
@@ -505,4 +507,118 @@ func TestScanWithoutDefaultBranchIsRecorded(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, scan, "a row, or the cron offers the repository on every run")
 	assert.Equal(t, repo_model.DependencyScanFailed, scan.Status)
+}
+
+// A force push back to an older commit must be scanned and stored: only the same commit is skipped.
+func TestScanAfterForcePushBackToOlderCommit(t *testing.T) {
+	repo := enable(t)
+	shaA := commitFiles(t, repo, map[string]string{"go.mod": goMod}, nil)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	shaB := commitOnTop(t, repo, map[string]string{"go.mod": "module m\n\nrequire example.com/newer v1.0.0\n"})
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	scan, _ := repo_model.GetRepoDependencyScan(t.Context(), repo.ID)
+	require.Equal(t, shaB, scan.CommitSHA)
+
+	_, _, err := git.NewCommand(t.Context(), "update-ref").AddDynamicArguments("refs/heads/"+repo.DefaultBranch, shaA).RunStdString(&git.RunOpts{Dir: repo.RepoPath()})
+	require.NoError(t, err)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+
+	scan, _ = repo_model.GetRepoDependencyScan(t.Context(), repo.ID)
+	assert.Equal(t, shaA, scan.CommitSHA)
+	rows := rowsOf(t, repo.ID)
+	assert.Len(t, rows, 2)
+	assert.Contains(t, rows, "Go|github.com/gin-gonic/gin@v1.9.1|go.mod")
+}
+
+// A scan that times out on a row another process replaced meanwhile doesn't overwrite it.
+func TestFailedScanKeepsNewerRow(t *testing.T) {
+	repo := enable(t)
+	commitFiles(t, repo, map[string]string{"go.mod": goMod}, nil)
+	defer test.MockVariableValue(&setting.DependencyGraph.ScanTimeout, 300*time.Millisecond)()
+	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, _ *dependency.Format, _ []byte, _ dependency.Finder, _ int) ([]dependency.Dependency, error) {
+		other := &repo_model.DependencyScan{RepoID: repo.ID, CommitSHA: "other", Status: repo_model.DependencyScanOK, ScannedUnix: timeutil.TimeStampNow()}
+		require.NoError(t, repo_model.ReplaceRepoDependencies(context.Background(), other, []*repo_model.Dependency{}))
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})()
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	scan, _ := repo_model.GetRepoDependencyScan(t.Context(), repo.ID)
+	assert.Equal(t, "other", scan.CommitSHA)
+	assert.Equal(t, repo_model.DependencyScanOK, scan.Status)
+	assert.Empty(t, scan.Error)
+}
+
+// The cap ends the whole scan: the manifest that reaches it and every later one are skipped, none is read.
+func TestScanStopsAtDependencyCap(t *testing.T) {
+	repo := enable(t)
+	defer test.MockVariableValue(&setting.DependencyGraph.MaxDependencies, 3)()
+	commitFiles(t, repo, map[string]string{
+		"a/go.mod": "module a\n\nrequire (\n\texample.com/a v1.0.0\n\texample.com/b v1.0.0\n)\n",
+		"b/go.mod": "module b\n\nrequire (\n\texample.com/c v1.0.0\n\texample.com/d v1.0.0\n)\n",
+		"c/go.mod": "module c\n\nrequire example.com/e v1.0.0\n",
+	}, nil)
+	var parses atomic.Int32
+	orig := parseManifest
+	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
+		parses.Add(1)
+		return orig(ctx, f, data, find, maxRows)
+	})()
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	scan, _ := repo_model.GetRepoDependencyScan(t.Context(), repo.ID)
+	assert.Equal(t, 1, scan.ManifestCount)
+	assert.Equal(t, 2, scan.DependencyCount)
+	assert.ElementsMatch(t, []repo_model.SkippedManifest{
+		{Path: "b/go.mod", Code: "too_many_dependencies"},
+		{Path: "c/go.mod", Code: "too_many_dependencies"},
+	}, scan.SkippedManifests())
+	assert.EqualValues(t, 2, parses.Load(), "the third manifest is not parsed")
+}
+
+// 400 directories with the same 1 MiB package.json keep one copy of it, not 400.
+func TestHelperCacheKeepsOneCopyPerBlob(t *testing.T) {
+	repo := enable(t)
+	pkg := `{"dependencies":{"left-pad":"^1.3.0"},"x":"` + strings.Repeat("a", 1<<20-200) + `"}`
+	files := map[string]string{}
+	for i := range 400 {
+		d := "d" + strconv.Itoa(i)
+		files[d+"/package-lock.json"] = lockV3
+		files[d+"/package.json"] = pkg
+	}
+	commitFiles(t, repo, files, nil)
+	defer test.MockVariableValue(&setting.DependencyGraph.MaxManifests, 1000)()
+	defer test.MockVariableValue(&setting.DependencyGraph.MaxDependencies, 100000)()
+
+	var reads atomic.Int32
+	orig := parseManifest
+	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
+		if b := find("package.json", false); b != nil {
+			reads.Add(1)
+		}
+		return orig(ctx, f, data, find, maxRows)
+	})()
+	defer debug.SetGCPercent(debug.SetGCPercent(20))
+	runtime.GC()
+	var base runtime.MemStats
+	runtime.ReadMemStats(&base)
+	var peak atomic.Uint64
+	stop := make(chan struct{})
+	go func() {
+		var m runtime.MemStats
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(2 * time.Millisecond):
+				runtime.ReadMemStats(&m)
+				if m.HeapInuse > peak.Load() {
+					peak.Store(m.HeapInuse)
+				}
+			}
+		}
+	}()
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	close(stop)
+	assert.EqualValues(t, 400, reads.Load())
+	assert.Less(t, int64(peak.Load())-int64(base.HeapInuse), int64(48<<20), "400 copies would be 400 MiB")
+	assert.Len(t, rowsOf(t, repo.ID), 400)
 }

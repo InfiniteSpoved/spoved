@@ -47,6 +47,9 @@ forgejo.org/models/perm/access
 	AccessLevel
 	GetRepoWriters
 
+forgejo.org/models/repo
+	ReplaceRepoDependencies
+
 forgejo.org/models/user
 	IsErrUserWrongType
 	IsErrExternalLoginUserAlreadyExist
@@ -73,6 +76,9 @@ forgejo.org/modules/base
 
 forgejo.org/modules/cache
 	WithNoCacheContext
+
+forgejo.org/modules/dependency
+	Format.Parse
 
 forgejo.org/modules/emoji
 	ReplaceCodes

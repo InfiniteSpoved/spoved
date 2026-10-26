@@ -4,9 +4,7 @@
 package dependency
 
 import (
-	"context"
 	"slices"
-	"sort"
 	"strings"
 )
 
@@ -33,14 +31,21 @@ type pnpmPackage struct {
 // parsePnpmLock reads lockfile versions 5, 6 and 9. pnpm writes plain block-style YAML, so the file is read line
 // by line: a YAML library builds a node tree of the whole document first, which costs about a hundred times the
 // size of a hostile file (flow sequences such as `[0,0,0,...]` under any key). The line reader keeps only the keys
-// it needs, so its memory is bounded by the number of lines.
+// it needs and counts every one.
+//
+// The reader accepts only the subset pnpm writes, and fails closed (a parse error, never partial rows) on any
+// valid YAML it would read differently from pnpm's own parser: in the sections it reads (importers, packages and
+// the top-level dependency maps of v5) a key must be a plain or single/double-quoted scalar without escapes, the
+// indentation is 2 spaces per level (no tabs, no jumps), and anchors, aliases, tags, merge keys, block scalars, flow
+// mappings in place of a section, unterminated quotes and explicit `?` keys are refused. The one explicit key it
+// understands is the `? key` / `: value` form pnpm writes for keys over 1024 characters.
 //
 // A package is direct if an importer (the root project or a workspace project) lists it, with the version where the
 // lockfile names one. pnpm 10+ can write several YAML documents: a first one for the tooling pnpm itself needs and
 // then the lockfile of the project. All documents are read, except that the tooling document is left out when a
 // later one has importers. Packages that are files or links on the disk are not listed.
-func parsePnpmLock(ctx context.Context, data []byte, _ Finder) ([]Dependency, error) {
-	sc := newScanner(ctx, data)
+func parsePnpmLock(s *sink, data []byte, _ Finder) error {
+	sc := newScanner(s, data)
 	var docs []*pnpmDoc
 	cur := newPnpmDoc()
 	docs = append(docs, cur)
@@ -50,27 +55,80 @@ func parsePnpmLock(ctx context.Context, data []byte, _ Finder) ([]Dependency, er
 	var depName string    // the dependency whose specifier/version lines follow
 	var pkg *pnpmPackage  // the package whose name/version lines follow
 	rootDeps := false     // v5: the dependency maps at the top level belong to the root project
+	prev := 0             // the indentation of the previous line of an interpreted section
+	explicit := false     // the previous line was `? key`, its `: value` line is next
+	bad := func() error { return parseErr("pnpm-lock.yaml") }
 
 	for sc.Scan() {
 		line := sc.Text()
 		if strings.HasPrefix(line, "---") && strings.TrimSpace(line) == "---" {
 			if cur.seen { // a leading `---` starts the first document
 				if len(docs) >= maxPnpmDocuments {
-					return nil, parseErr("pnpm-lock.yaml")
+					return bad()
 				}
 				cur = newPnpmDoc()
 				docs = append(docs, cur)
 			}
-			section, importerDeps, depName, pkg, rootDeps = "", false, "", nil, false
+			section, importerDeps, depName, pkg, rootDeps, prev, explicit = "", false, "", nil, false, 0, false
 			continue
 		}
 		trimmed := strings.TrimLeft(line, " ")
+		if strings.ContainsRune(line[:len(line)-len(trimmed)], '\t') || strings.HasPrefix(trimmed, "\t") {
+			return bad()
+		}
 		if trimmed == "" || trimmed[0] == '#' || strings.TrimSpace(trimmed) == "" {
 			continue
 		}
 		indent := len(line) - len(trimmed)
 		cur.seen = true
+		interpreted := indent == 0 || section == "importers" || section == "packages" || rootDeps
+		if explicit {
+			// the value of an explicit key: `: resolution: {...}` is a line at the content column (indent + 2)
+			rest, ok := strings.CutPrefix(trimmed, ":")
+			if !ok || indent != 2 || (rest != "" && rest[0] != ' ') {
+				return bad()
+			}
+			explicit = false
+			trimmed = strings.TrimLeft(rest, " ")
+			indent, prev = 4, 4
+			if trimmed == "" {
+				continue
+			}
+		} else if interpreted && indent > pnpmReadDepth(section, rootDeps) {
+			// inside the value of an entry (a sequence of peer names, a nested map): nothing here is read, but a
+			// value that runs on over lines would hide the lines after it
+			if _, rest, ok := yamlKey(trimmed); ok && badYAMLValue(rest) {
+				return bad()
+			}
+			continue
+		} else if interpreted {
+			if indent%2 != 0 || indent > prev+2 {
+				return bad()
+			}
+			prev = indent
+		}
+		if indent == 2 && section == "packages" && strings.HasPrefix(trimmed, "? ") {
+			// js-yaml writes a key over 1024 characters as `? key` and the mapping after `: `
+			k := strings.TrimSpace(trimmed[2:])
+			if k == "" || strings.ContainsAny(k[:1], "&*!|>{[\"'%@`") && !(k[0] == '\'' || k[0] == '"') {
+				return bad()
+			}
+			key, ok := explicitKey(k)
+			if !ok {
+				return bad()
+			}
+			if err := s.entry(); err != nil || len(cur.packages) >= s.maxRows {
+				return cmpOr(err, ErrTooManyDependencies)
+			}
+			cur.packages = append(cur.packages, pnpmPackage{key: key})
+			pkg = &cur.packages[len(cur.packages)-1]
+			explicit = true
+			continue
+		}
 		key, rest, ok := yamlKey(trimmed)
+		if interpreted && (!ok || key == "" || strings.ContainsRune("?&*!|>%@`", rune(trimmed[0])) || (trimmed[0] != '\'' && trimmed[0] != '"' && strings.HasPrefix(key, "<<")) || badYAMLValue(rest)) {
+			return bad()
+		}
 		if !ok {
 			continue
 		}
@@ -78,6 +136,9 @@ func parsePnpmLock(ctx context.Context, data []byte, _ Finder) ([]Dependency, er
 		case indent == 0:
 			section, importerDeps, depName, pkg = key, false, "", nil
 			rootDeps = pnpmDepSection(key)
+			if (section == "importers" || section == "packages" || rootDeps) && rest != "" && rest != "{}" {
+				return bad() // a flow mapping, an alias or a block scalar in place of the section
+			}
 			if key == "lockfileVersion" {
 				cur.version = unquoteYAML(rest)
 			}
@@ -92,47 +153,136 @@ func parsePnpmLock(ctx context.Context, data []byte, _ Finder) ([]Dependency, er
 				if importerDeps {
 					depName = key
 					if rest != "" {
-						cur.addDirect(depName, rest) // v5: `name: 1.2.3`
+						if err := cur.addDirect(s, depName, rest); err != nil { // v5: `name: 1.2.3`
+							return err
+						}
 					}
 				}
 			case 8:
 				if importerDeps && depName != "" && key == "version" {
-					cur.addDirect(depName, rest)
+					if err := cur.addDirect(s, depName, rest); err != nil {
+						return err
+					}
 				}
 			}
 		case rootDeps && indent == 2:
 			depName = key
 			if rest != "" {
-				cur.addDirect(key, rest) // v5: the root project's dependencies at the top level
+				if err := cur.addDirect(s, key, rest); err != nil { // v5: the root project's dependencies at the top level
+					return err
+				}
 			}
 		case rootDeps && indent == 4 && key == "version" && depName != "":
-			cur.addDirect(depName, rest) // v6: `version:` under the name
+			if err := cur.addDirect(s, depName, rest); err != nil { // v6: `version:` under the name
+				return err
+			}
 		case section == "packages":
 			switch indent {
 			case 2:
+				if err := s.entry(); err != nil || len(cur.packages) >= s.maxRows {
+					return cmpOr(err, ErrTooManyDependencies)
+				}
 				cur.packages = append(cur.packages, pnpmPackage{key: key})
 				pkg = &cur.packages[len(cur.packages)-1]
 			case 4:
-				if pkg != nil && key == "name" {
-					pkg.name = unquoteYAML(rest)
-				} else if pkg != nil && key == "version" {
-					pkg.version = unquoteYAML(rest)
+				if pkg != nil && (key == "name" || key == "version") {
+					if escaped(rest) {
+						return bad()
+					}
+					if key == "name" {
+						pkg.name = unquoteYAML(rest)
+					} else {
+						pkg.version = unquoteYAML(rest)
+					}
 				}
 			}
 		}
 	}
-	if sc.Err() != nil {
-		return nil, parseErr("pnpm-lock.yaml")
+	if err := sc.Err(); err != nil {
+		return scanErr(err, "pnpm-lock.yaml")
+	}
+	if explicit {
+		return bad()
 	}
 
 	if len(docs) > 1 && slices.ContainsFunc(docs[1:], func(d *pnpmDoc) bool { return d.importers > 0 }) {
 		docs = docs[1:]
 	}
-	var all []Dependency
 	for _, d := range docs {
-		all = append(all, d.dependencies()...)
+		if err := d.emitDependencies(s); err != nil {
+			return err
+		}
 	}
-	return all, nil
+	return nil
+}
+
+// pnpmReadDepth is the deepest indentation of a line the reader looks at in a section.
+func pnpmReadDepth(section string, rootDeps bool) int {
+	switch {
+	case section == "importers":
+		return 8
+	case section == "packages", rootDeps:
+		return 4
+	}
+	return 0 // top-level keys
+}
+
+// escaped reports a double-quoted scalar with an escape sequence, which YAML decodes and this reader doesn't.
+func escaped(v string) bool {
+	return strings.HasPrefix(v, `"`) && strings.Contains(v, `\`)
+}
+
+// badYAMLValue reports a value the reader can't take at face value in the sections it reads: an anchor, an alias, a
+// tag, a block scalar, or a quote or flow collection that doesn't end on the line.
+func badYAMLValue(v string) bool {
+	if v == "" {
+		return false
+	}
+	switch v[0] {
+	case '&', '*', '!', '|', '>':
+		return true
+	case '\'', '"':
+		return !quoteClosed(v)
+	case '{':
+		return v[len(v)-1] != '}'
+	case '[':
+		return v[len(v)-1] != ']'
+	}
+	return false
+}
+
+// quoteClosed reports whether the quoted scalar at the start of v ends on the line and nothing but a comment follows.
+func quoteClosed(v string) bool {
+	q := v[0]
+	for i := 1; i < len(v); i++ {
+		switch {
+		case q == '"' && v[i] == '\\':
+			i++
+		case v[i] == q:
+			if q == '\'' && i+1 < len(v) && v[i+1] == '\'' {
+				i++
+				continue
+			}
+			rest := strings.TrimSpace(v[i+1:])
+			return rest == "" || rest[0] == '#'
+		}
+	}
+	return false
+}
+
+// explicitKey reads the key of an `? key` line: a plain scalar, or a quoted one without escapes.
+func explicitKey(k string) (string, bool) {
+	switch k[0] {
+	case '\'', '"':
+		if !quoteClosed(k) || (k[0] == '"' && strings.Contains(k, "\\")) {
+			return "", false
+		}
+		return unquoteYAML(k[:strings.LastIndexByte(k, k[0])+1]), true
+	}
+	if i := strings.Index(k, " #"); i >= 0 {
+		k = strings.TrimSpace(k[:i])
+	}
+	return k, k != ""
 }
 
 func newPnpmDoc() *pnpmDoc { return &pnpmDoc{direct: map[string]map[string]bool{}} }
@@ -142,10 +292,13 @@ func pnpmDepSection(k string) bool {
 }
 
 // addDirect records that an importer resolves name to value (`1.2.3`, `1.2.3(react@18)`, `link:../x`, `other@1.0.0`).
-func (d *pnpmDoc) addDirect(name, value string) {
+func (d *pnpmDoc) addDirect(s *sink, name, value string) error {
+	if escaped(value) {
+		return parseErr("pnpm-lock.yaml")
+	}
 	value = unquoteYAML(value)
 	if pnpmLocal(value) {
-		return
+		return nil
 	}
 	version := strings.TrimPrefix(value, "/")
 	if i := strings.IndexAny(version, "(_"); i >= 0 {
@@ -155,9 +308,18 @@ func (d *pnpmDoc) addDirect(name, value string) {
 		name, version = version[:i], version[i+1:]
 	}
 	if d.direct[name] == nil {
+		if err := s.entry(); err != nil {
+			return err
+		}
 		d.direct[name] = map[string]bool{}
 	}
-	d.direct[name][version] = true
+	if !d.direct[name][version] {
+		if err := s.entry(); err != nil {
+			return err
+		}
+		d.direct[name][version] = true
+	}
+	return nil
 }
 
 // pnpmLocal tells a file, link or workspace reference from a registry version.
@@ -165,12 +327,9 @@ func pnpmLocal(s string) bool {
 	return strings.HasPrefix(s, "link:") || strings.HasPrefix(s, "file:") || strings.HasPrefix(s, "workspace:") || strings.Contains(s, "@file:") || strings.Contains(s, "@link:")
 }
 
-func (d *pnpmDoc) dependencies() []Dependency {
+func (d *pnpmDoc) emitDependencies(s *sink) error {
 	oldKeys := strings.HasPrefix(d.version, "5") // name/version instead of name@version
-	pkgs := slices.Clone(d.packages)
-	sort.Slice(pkgs, func(i, j int) bool { return pkgs[i].key < pkgs[j].key })
-	var deps []Dependency
-	for _, p := range pkgs {
+	for _, p := range d.packages {
 		if pnpmLocal(p.key) || pnpmLocal(p.version) || strings.HasPrefix(strings.TrimPrefix(p.key, "/"), "file:") {
 			continue
 		}
@@ -182,9 +341,17 @@ func (d *pnpmDoc) dependencies() []Dependency {
 			version = p.version
 		}
 		v := d.direct[name]
-		deps = append(deps, Dependency{Name: name, Version: version, Direct: v != nil && (v[version] || v[""])})
+		// a git or tarball importer dependency names its source in the importer; the package key has the version
+		pkgVersionKey := ""
+		if _, kv := pnpmKey(p.key, oldKeys); kv != "" {
+			pkgVersionKey = kv
+		}
+		direct := v != nil && (v[version] || v[""] || (pkgVersionKey != "" && v[pkgVersionKey]))
+		if err := s.emit(Dependency{Name: name, Version: version, Direct: direct}); err != nil {
+			return err
+		}
 	}
-	return deps
+	return nil
 }
 
 // yamlKey splits `key: rest` (key plain or quoted) of a block mapping line. A line that is not a mapping entry
@@ -208,6 +375,9 @@ func yamlKey(s string) (key, rest string, ok bool) {
 		}
 		if i >= len(s) || i+1 >= len(s) || s[i+1] != ':' {
 			return "", "", false
+		}
+		if q == '"' && strings.Contains(s[:i+1], "\\") {
+			return "", "", false // an escape: YAML decodes it, this reader doesn't
 		}
 		key = unquoteYAML(s[:i+1])
 		rest = s[i+2:]

@@ -14,7 +14,9 @@ import (
 	unit_model "forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/test"
 	"forgejo.org/tests"
 
 	"github.com/stretchr/testify/assert"
@@ -465,4 +467,28 @@ func TestAPIRepoEditCancelAutoMergeOnPush(t *testing.T) {
 		prUnit := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1}).MustGetUnit(t.Context(), unit_model.TypePullRequests)
 		assert.Equal(t, value, prUnit.PullRequestsConfig().CancelAutoMergeOnPush)
 	}
+}
+
+// A refused change (here ForcePrivate) leaves the default branch as it was.
+func TestAPIRepoEditRefusalKeepsDefaultBranch(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	repo1 := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
+	token := getTokenForLoggedInUser(t, loginUser(t, user2.Name), auth_model.AccessTokenScopeWriteRepository)
+
+	MakeRequest(t, NewRequestWithJSON(t, "POST", fmt.Sprintf("/api/v1/repos/%s/%s/branches", user2.Name, repo1.Name),
+		&api.CreateBranchRepoOption{BranchName: "other", OldRefName: repo1.DefaultBranch}).AddTokenAuth(token), http.StatusCreated)
+	_, err := db.GetEngine(db.DefaultContext).ID(repo1.ID).Cols("is_private").Update(&repo_model.Repository{IsPrivate: true})
+	require.NoError(t, err)
+	defer test.MockVariableValue(&setting.Repository.ForcePrivate, true)()
+
+	other, public := "other", false
+	MakeRequest(t, NewRequestWithJSON(t, "PATCH", fmt.Sprintf("/api/v1/repos/%s/%s", user2.Name, repo1.Name),
+		&api.EditRepoOption{DefaultBranch: &other, Private: &public}).AddTokenAuth(token), http.StatusUnprocessableEntity)
+	assert.Equal(t, repo1.DefaultBranch, unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repo1.ID}).DefaultBranch)
+
+	// without the refused part the change goes through
+	MakeRequest(t, NewRequestWithJSON(t, "PATCH", fmt.Sprintf("/api/v1/repos/%s/%s", user2.Name, repo1.Name),
+		&api.EditRepoOption{DefaultBranch: &other}).AddTokenAuth(token), http.StatusOK)
+	assert.Equal(t, "other", unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repo1.ID}).DefaultBranch)
 }
