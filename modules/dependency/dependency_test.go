@@ -820,7 +820,7 @@ func TestYarnFailsClosed(t *testing.T) {
 		"v1 behind a BOM is no v1 for yarn": "\ufeff# yarn lockfile v1\n\na@^1:\n  version \"1.0.0\"\n",
 		// berry resolutions other than npm: never the `version:` unchecked (S-L5)
 		"patch of another version": berry + "\"lodash@patch:lodash@npm%3A^4#./p.patch\":\n  version: 4.17.21\n  resolution: \"lodash@patch:lodash@npm%3A4.17.4#./p.patch::version=4.17.4&hash=x\"\n",
-		"patch of another package": berry + "\"a@patch:a@npm%3A^1#./p.patch\":\n  version: 1.0.0\n  resolution: \"a@patch:evil@npm%3A1.0.0#./p.patch\"\n",
+		"patch of a patch":         berry + "\"a@patch:a@npm%3A^1#./p.patch\":\n  version: 1.0.0\n  resolution: \"a@patch:a@patch%3Aa@npm%253A1.0.0#./p.patch\"\n",
 		"patch that won't decode":  berry + "\"a@patch:a@npm%3A^1#./p.patch\":\n  version: 1.0.0\n  resolution: \"a@patch:a@npm%ZZ1.0.0#./p.patch\"\n",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -835,6 +835,13 @@ func TestYarnFailsClosed(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, deps, 1)
 	assert.Equal(t, "1.2.0", deps[0].Version)
+	// a patched alias (yarn writes `typescript@npm:@typescript/typescript6@6.0.2` patched so): the real package
+	in = berry + "\"typescript@patch:typescript@npm%3A@typescript/typescript6@6.0.2#optional!builtin<compat/typescript>\":\n  version: 6.0.2\n  resolution: \"typescript@patch:@typescript/typescript6@npm%3A6.0.2#optional!builtin<compat/typescript>::version=6.0.2&hash=5786d5\"\n"
+	deps, err = FormatFor("yarn.lock").Parse(t.Context(), []byte(in), nil)
+	require.NoError(t, err)
+	require.Len(t, deps, 1)
+	assert.Equal(t, "@typescript/typescript6", deps[0].Name)
+	assert.Equal(t, "6.0.2", deps[0].Version)
 	v1 := "# yarn lockfile v1\n\n\"@s/a@^1\", \"@s/a@^1.1\":\n  version \"1.2.0\"\n  resolved \"https://r/a.tgz#abc\"\n  dependencies:\n    b \"^2\"\n"
 	deps, err = FormatFor("yarn.lock").Parse(t.Context(), []byte(v1), nil)
 	require.NoError(t, err)
