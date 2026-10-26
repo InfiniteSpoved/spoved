@@ -4,6 +4,7 @@
 package dependency
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -141,10 +142,10 @@ debug@^2.6.9:
 debug@^4.3.4:
   version "4.3.4"
 
-"string-width-cjs@npm:string-width@^4.2.0", "string-width@^4.1.0", str@npm:string-width@^4.2.0:
+"string-width-cjs@npm:string-width@^4.2.0", "string-width@^4.1.0", "str@npm:string-width@^4.2.0":
   version "4.2.3"
 
-local@link:../local:
+"local@link:../local":
   version "1.0.0"
 `)
 		assert.Len(t, m, 3)
@@ -160,23 +161,29 @@ local@link:../local:
 
 "debug@npm:^4.3.4":
   version: 4.3.4
+  resolution: "debug@npm:4.3.4"
   languageName: node
 
 "string-width-cjs@npm:string-width@^4.2.0":
   version: 4.2.3
+  resolution: "string-width@npm:4.2.3"
   languageName: node
 
 "local@link:../local::locator=app%40workspace%3A.":
   version: 0.0.0-use.local
+  resolution: "local@link:../local::locator=app%40workspace%3A."
 
 "portal-pkg@portal:../p::locator=app%40workspace%3A.":
   version: 0.0.0-use.local
+  resolution: "portal-pkg@portal:../p::locator=app%40workspace%3A."
 
 "file-pkg@file:../f#../f::hash=abc&locator=app%40workspace%3A.":
   version: 1.0.0
+  resolution: "file-pkg@file:../f#../f::hash=abc&locator=app%40workspace%3A."
 
 "app@workspace:.":
   version: 0.0.0-use.local
+  resolution: "app@workspace:."
 `)
 		assert.Len(t, m, 2)
 		assert.True(t, m["debug@4.3.4"].Direct)
@@ -231,11 +238,18 @@ func TestPnpmMultiDocument(t *testing.T) {
 	}
 	assert.Positive(t, direct)
 
-	// without importers in a later document, every document counts
+	// pnpm reads one document: a second one that doesn't follow an environment document is refused
 	two := "lockfileVersion: '9.0'\npackages:\n  a@1.0.0:\n    resolution: {}\n---\nlockfileVersion: '9.0'\npackages:\n  b@2.0.0:\n    resolution: {}\n"
-	got, err := FormatFor("pnpm-lock.yaml").Parse(t.Context(), []byte(two), nil)
+	_, err := FormatFor("pnpm-lock.yaml").Parse(t.Context(), []byte(two), nil)
+	require.ErrorIs(t, err, ErrParse)
+	got, err := FormatFor("pnpm-lock.yaml").Parse(t.Context(), []byte("---\n"+two), nil)
 	require.NoError(t, err)
-	assert.Len(t, got, 2)
+	require.Len(t, got, 1, "after an environment document, the next one is the lockfile")
+	assert.Equal(t, "b", got[0].Name)
+	_, err = FormatFor("pnpm-lock.yaml").Parse(t.Context(), []byte("---\n"+two+"---\nlockfileVersion: '9.0'\n"), nil)
+	require.ErrorIs(t, err, ErrParse, "a third document")
+	_, err = FormatFor("pnpm-lock.yaml").Parse(t.Context(), []byte("---\nlockfileVersion: '9.0'\n"), nil)
+	require.ErrorIs(t, err, ErrParse, "an environment document without the lockfile after it")
 	_, err = FormatFor("pnpm-lock.yaml").Parse(t.Context(), []byte("a: [\n---\nb: 1"), nil)
 	require.ErrorIs(t, err, ErrParse, "a flow collection that doesn't end on its line is refused")
 }
@@ -661,6 +675,33 @@ func TestPnpmFailsClosed(t *testing.T) {
 		"flow mapping as a package":      head + "  b@1.0.0: {resolution: {integrity: x}, name: evil, version: 6.6.6}\n",
 		"importers deep open quote":      "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      a:\n        specifier: ^1\n        version: 1.0.0\n      x:\n        - \"q\nsettings:\n  z: \"\n      evil:\n        version: 6.6.6\n",
 		"top-level flow":                 "lockfileVersion: '9.0'\nsettings: {\npackages:\n  a@1.0.0:\n    resolution: {}\n",
+		"comments":                       head + "# c\n" + a + "  # d\n",
+
+		// round 4 (rereview-security-3) and the differential fuzz against pnpm's loader (@zkochan/js-yaml): each
+		// of these read other rows than pnpm before
+		"N1 quote after ?":               pnpmHidden("    cpu:\n      ? \"x\nsettings:\n  foo: ? \"\n"),
+		"N1 quote after a nested -":      pnpmHidden("    cpu:\n      - - \"x\nsettings:\n  foo: - \"\n"),
+		"N1 quote after - ?":             pnpmHidden("    cpu:\n      - ? \"x\nsettings:\n  foo: - ? \"\n"),
+		"N1 single quote after ?":        pnpmHidden("    cpu:\n      ? 'x\nsettings:\n  foo: ? '\n"),
+		"N2 lone CR in an item":          head + "  a@1.0.0:\n    resolution: {integrity: sha512-a}\n    os:\n      - x\r  evil@6.6.6:\r    resolution:\r      integrity:\r        sha512-e\n  b@2.0.0:\n    resolution: {integrity: sha512-b}\n",
+		"N2 lone CR hides a section":     "lockfileVersion: '9.0'\nsettings:\n  x: y\rpackages:\r  a@1.0.0:\r    resolution: {integrity: x}\n",
+		"N2 lone CR at the start":        "\rpackages:\n  a@1.0.0:\n    resolution: {integrity: x}\n",
+		"N3 space before the colon":      "lockfileVersion: '9.0'\npackages :\n  evil@6.6.6:\n    resolution: {integrity: e}\n",
+		"N3 tab before the colon":        "lockfileVersion: '9.0'\npackages\t:\n  evil@6.6.6:\n    resolution: {integrity: e}\n",
+		"N3 tab in lockfileVersion key":  "lockfileVersion\t: 5.4\npackages:\n  /react-dom/18.2.0_react@18.2.0:\n    resolution: {integrity: x}\n",
+		"N5 value on the next line":      head + "  a@1.0.0:\n    resolution: {integrity: x}\n    name:\n      evil\n    version:\n      6.6.6\n",
+		"N5 plain continuation":          head + "  a@1.0.0:\n    resolution: {integrity: x}\n    version: 1.0.0\n      6\n",
+		"N5 importer version below":      "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      a:\n        specifier: ^1\n        version:\n          1.0.0\n",
+		"a number for js-yaml":           head + "  a@1.0.0:\n    resolution: {integrity: x}\n    version: 1.0\n",
+		"a number as a key":              head + "  1.0:\n    resolution: {integrity: x}\n",
+		"a sequence as lockfileVersion":  "lockfileVersion: [5.4]\ndependencies:\n  lodash: 4.17.21\npackages:\n  /lodash/4.17.21:\n    resolution: {integrity: x}\n",
+		"a sequence as a dependency map": "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies: [a]\n",
+		"--- without the lockfile":       "---\npackages:\n  /react-dom/18.2.0_react@18.2.0:\n    resolution: {integrity: x}\n",
+		"--- CRLF without the lockfile":  "---\r\npackages:\r\n  p-try@2.2.0:\r\n    resolution: {integrity: x}\r\n",
+		"a second document":              head + a + "---\n" + head + "  evil@6.6.6:\n    resolution: {integrity: e}\n",
+		"a document end marker":          head + a + "...\n",
+		"double-quoted escape value":     head + "  a@1.0.0:\n    resolution: {integrity: x}\n    version: \"\\x36.6.6\"\n",
+		"explicit key outside packages":  "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      ? a\n      : version: 1.0.0\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			deps, err := f.Parse(t.Context(), []byte(in), nil)
@@ -670,14 +711,16 @@ func TestPnpmFailsClosed(t *testing.T) {
 	}
 	// forms pnpm writes still read
 	for name, in := range map[string]string{
-		"crlf":            strings.ReplaceAll(head+a, "\n", "\r\n"),
-		"comments":        head + "# c\n" + a + "  # d\n",
-		"empty section":   "lockfileVersion: '9.0'\n\npackages: {}\n",
-		"quoted key":      head + "  'a@1.0.0':\n    resolution: {integrity: sha512-a}\n",
-		"double quoted":   head + "  \"a@1.0.0\":\n    resolution: {integrity: sha512-a}\n",
-		"flow value":      head + "  a@1.0.0:\n    resolution: {integrity: sha512-a, tarball: 'https://x/y.tgz'}\n    engines: {node: '>=12'}\n    cpu: [x64]\n",
-		"peer sequences":  head + "  a@1.0.0:\n    resolution: {integrity: sha512-a}\n    transitivePeerDependencies:\n      - '@algolia/client-search'\n      - b\n    peerDependenciesMeta:\n      b:\n        optional: true\n",
-		"snapshot values": head + a + "snapshots:\n\n  a@1.0.0: {}\n",
+		"crlf":                           strings.ReplaceAll(head+a, "\n", "\r\n"),
+		"empty section":                  "lockfileVersion: '9.0'\n\npackages: {}\n",
+		"quoted key":                     head + "  'a@1.0.0':\n    resolution: {integrity: sha512-a}\n",
+		"double quoted":                  head + "  \"a@1.0.0\":\n    resolution: {integrity: sha512-a}\n",
+		"flow value":                     head + "  a@1.0.0:\n    resolution: {integrity: sha512-a, tarball: 'https://x/y.tgz'}\n    engines: {node: '>=12'}\n    cpu: [x64]\n",
+		"peer sequences":                 head + "  a@1.0.0:\n    resolution: {integrity: sha512-a}\n    transitivePeerDependencies:\n      - '@algolia/client-search'\n      - b\n    peerDependenciesMeta:\n      b:\n        optional: true\n",
+		"snapshot values":                head + a + "snapshots:\n\n  a@1.0.0: {}\n",
+		"byte order mark":                "\ufeff" + head + a, // removed, as pnpm does
+		"after the environment document": "---\nlockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    configDependencies: {}\n\n---\n" + head + a,
+		"a --- line in the environment document's first line": "---\n---\nlockfileVersion: '9.0'\n---\n" + head + a,
 	} {
 		t.Run(name, func(t *testing.T) {
 			deps, err := f.Parse(t.Context(), []byte(in), nil)
@@ -748,6 +791,26 @@ func TestYarnFailsClosed(t *testing.T) {
 		"two versions":                  berry + "\"evil@npm:^6.6.6\":\n  version: 1.0.0\n  version: 6.6.6\n",
 		"v1 header with trailing space": "# yarn lockfile v1\n\nevil@^6.6.6: \n  version \"6.6.6\"\n",
 		"v1 four-space fields":          "# yarn lockfile v1\n\nevil@^6.6.6:\n    version \"6.6.6\"\n",
+		// classes the differential fuzz against @yarnpkg/parsers and @yarnpkg/lockfile found (fix round 4)
+		"lone CR":                          berry + "\"a@npm:^1\":\r  version: 1.0.0\r  resolution: \"a@npm:1.0.0\"\n",
+		"escape in a header":               berry + "\"\\u0065vil@npm:^6.6.6\":\n  version: 6.6.6\n  resolution: \"evil@npm:6.6.6\"\n",
+		"comment after a value":            berry + "\"a@npm:^1\":\n  version: \"6.6.6\" # c\n  resolution: \"a@npm:6.6.6\"\n",
+		"value on the next line":           berry + "\"a@npm:^1\":\n  version:\n    6.6.6\n  resolution: \"a@npm:6.6.6\"\n",
+		"quoted field key":                 berry + "\"a@npm:^1\":\n  version: 1.0.0\n  \"version\": 6.6.6\n  resolution: \"a@npm:1.0.0\"\n",
+		"explicit field key":               berry + "\"a@npm:^1\":\n  version: 1.0.0\n  ? version\n  : 6.6.6\n  resolution: \"a@npm:1.0.0\"\n",
+		"version against resolution":       berry + "\"a@npm:^1\":\n  version: 1.0.0\n  resolution: \"a@npm:6.6.6\"\n",
+		"no resolution":                    berry + "\"a@npm:^1\":\n  version: 1.0.0\n",
+		"header twice":                     berry + "\"a@npm:^1\":\n  version: 1.0.0\n  resolution: \"a@npm:1.0.0\"\n\n\"a@npm:^1\":\n  version: 6.6.6\n  resolution: \"a@npm:6.6.6\"\n",
+		"v1 escape in a header":            "# yarn lockfile v1\n\n\"\\u0065vil@^6.6.6\":\n  version \"6.6.6\"\n",
+		"v1 indented line after a comment": "# yarn lockfile v1\n  version \"6.6.6\"\na@^1.0.0:\n  version \"1.0.0\"\n",
+		"v1 indented line after a blank":   "# yarn lockfile v1\n\na@^1.0.0:\n\n  version \"6.6.6\"\n",
+		"v1 white space line":              "# yarn lockfile v1\n\na@^1.0.0:\n    \n  version \"6.6.6\"\n",
+		"v1 lone CR":                       "# yarn lockfile v1\n\na@^1.0.0:\n  version \"1.0.0\"\r\revil@^6.6.6:\r  version \"6.6.6\"\n",
+		"v1 two packages in a header":      "# yarn lockfile v1\n\na@^1.0.0, evil@^6.6.6:\n  version \"1.0.0\"\n",
+		"v1 descriptor twice":              "# yarn lockfile v1\n\na@^1.0.0:\n  version \"1.0.0\"\n\na@^1.0.0:\n  version \"6.6.6\"\n",
+		"v1 unquoted version":              "# yarn lockfile v1\n\na@^1.0.0:\n  version 1.0\n",
+		"v1 field twice":                   "# yarn lockfile v1\n\na@^1.0.0:\n  version \"1.0.0\"\n  \"version\" \"6.6.6\"\n",
+		"v1 boolean word":                  "# yarn lockfile v1\n\na@^1.0.0:\n  version \"1.0.0\"\n  trueish \"x\"\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			deps, err := FormatFor("yarn.lock").Parse(t.Context(), []byte(in), nil)
@@ -761,17 +824,34 @@ func TestYarnFailsClosed(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, deps, 1)
 	assert.Equal(t, "1.2.0", deps[0].Version)
-	v1 := "# yarn lockfile v1\n\n\"@s/a@^1\", a@^1.1:\n  version \"1.2.0\"\n  resolved \"https://r/a.tgz#abc\"\n  dependencies:\n    b \"^2\"\n"
+	v1 := "# yarn lockfile v1\n\n\"@s/a@^1\", \"@s/a@^1.1\":\n  version \"1.2.0\"\n  resolved \"https://r/a.tgz#abc\"\n  dependencies:\n    b \"^2\"\n"
 	deps, err = FormatFor("yarn.lock").Parse(t.Context(), []byte(v1), nil)
 	require.NoError(t, err)
 	require.Len(t, deps, 1)
+	// the package is the one the resolution names (what yarn installs), not the header's
+	deps, err = FormatFor("yarn.lock").Parse(t.Context(), []byte(berry+"\"a@npm:^1.0.0\":\n  version: 6.6.6\n  resolution: \"evil@npm:6.6.6\"\n"), nil)
+	require.NoError(t, err)
+	require.Len(t, deps, 1)
+	assert.Equal(t, "evil", deps[0].Name)
+	assert.Equal(t, "6.6.6", deps[0].Version)
+	// a BOM is stripped (both readers do), and a header over 1024 characters is written as `? header` / `:`
+	long := "a@npm:" + strings.Repeat("1", 1100)
+	for _, in := range []string{
+		"\ufeff" + v1,
+		berry + "? \"" + long + "\"\n:\n  version: 1.0.0\n  resolution: \"a@npm:1.0.0\"\n",
+	} {
+		deps, err = FormatFor("yarn.lock").Parse(t.Context(), []byte(in), nil)
+		require.NoError(t, err)
+		require.Len(t, deps, 1)
+	}
 }
 
-// A package.json shared by many manifests is parsed once per scan, whatever the number of lock files.
+// A package.json shared by many manifests is parsed once per scan, whatever the number of lock files; parses
+// that the cache doesn't serve are bounded by the parse budget, and a package.json over the key limit is absent.
 func TestHelperCacheParsesSharedPackageJSONOnce(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString(`{"dependencies":{`)
-	for i := range 20000 {
+	for i := range 5000 {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
@@ -781,24 +861,46 @@ func TestHelperCacheParsesSharedPackageJSONOnce(t *testing.T) {
 	pkg := []byte(sb.String())
 	lock := []byte("# yarn lockfile v1\n\npkg-1@^1.1.0:\n  version \"1.1.0\"\n")
 	find := func(string, bool) []byte { return pkg }
-
-	ctx := WithHelperCache(t.Context(), NewHelperCache(8<<20))
-	before := npmPackageJSONParses.Load()
-	start := time.Now()
-	for range 400 {
+	parse := func(ctx context.Context) []Dependency {
 		deps, err := FormatFor("yarn.lock").ParseLimited(ctx, lock, find, 1000)
 		require.NoError(t, err)
 		require.Len(t, deps, 1)
-		assert.True(t, deps[0].Direct)
+		return deps
+	}
+
+	h := NewHelperCache(8<<20, 8<<20)
+	require.True(t, h.Keep(pkg))
+	ctx := WithHelperCache(t.Context(), h)
+	before := npmPackageJSONParses.Load()
+	start := time.Now()
+	for range 400 {
+		assert.True(t, parse(ctx)[0].Direct)
 	}
 	assert.EqualValues(t, 1, npmPackageJSONParses.Load()-before)
 	assert.Less(t, time.Since(start), 3*time.Second)
 
-	// without a cache it is parsed each time; a cache with no budget left parses each time too
+	// a file the scan doesn't keep is parsed each time, until the parse budget is spent: then it counts as absent
 	before = npmPackageJSONParses.Load()
-	_, err := FormatFor("yarn.lock").ParseLimited(WithHelperCache(t.Context(), NewHelperCache(10)), lock, find, 1000)
-	require.NoError(t, err)
-	_, err = FormatFor("yarn.lock").ParseLimited(WithHelperCache(t.Context(), NewHelperCache(10)), lock, find, 1000)
-	require.NoError(t, err)
+	ctx = WithHelperCache(t.Context(), NewHelperCache(8<<20, int64(2*len(pkg))))
+	assert.True(t, parse(ctx)[0].Direct)
+	assert.True(t, parse(ctx)[0].Direct)
+	assert.False(t, parse(ctx)[0].Direct)
 	assert.EqualValues(t, 2, npmPackageJSONParses.Load()-before)
+
+	// over the key limit: absent, and the result (nothing) is cached like any other
+	sb.Reset()
+	sb.WriteString(`{"dependencies":{"pkg-1":"^1.1.0"`)
+	for i := range 100000 {
+		fmt.Fprintf(&sb, `,"%05x":""`, i)
+	}
+	sb.WriteString(`}}`)
+	pkg = []byte(sb.String())
+	h = NewHelperCache(8<<20, 8<<20)
+	require.True(t, h.Keep(pkg))
+	ctx = WithHelperCache(t.Context(), h)
+	before = npmPackageJSONParses.Load()
+	for range 400 {
+		assert.False(t, parse(ctx)[0].Direct)
+	}
+	assert.EqualValues(t, 1, npmPackageJSONParses.Load()-before)
 }

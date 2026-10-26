@@ -245,25 +245,75 @@ func validate(eco string, in []Dependency) []Dependency {
 // scan that timed out doesn't finish a long file.
 type lineScanner struct {
 	*bufio.Scanner
-	s *sink
+	s   *sink
+	err error // the byte pre-pass refused the file
+	n   int   // the number of the current line
 }
 
+// newScanner reads the lines of a text manifest after the byte pre-pass: a leading UTF-8 byte order mark is removed
+// (as js-yaml, yarn and pip do), and a carriage return that doesn't end a CRLF line is refused, since YAML, yarn and
+// TOML read it as a line break that bufio.ScanLines doesn't see.
 func newScanner(s *sink, data []byte) *lineScanner {
+	data, err := prepass(data, false)
+	return scannerOf(s, data, err)
+}
+
+// newYAMLScanner is newScanner for the YAML lock files (pnpm, yarn): it also refuses tabs, NUL and every other
+// control character, a byte order mark after the start, and invalid UTF-8, none of which pnpm or yarn writes.
+func newYAMLScanner(s *sink, data []byte) *lineScanner {
+	data, err := prepass(data, true)
+	return scannerOf(s, data, err)
+}
+
+func scannerOf(s *sink, data []byte, err error) *lineScanner {
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 0, 4096), maxLineLen)
-	return &lineScanner{Scanner: sc, s: s}
+	return &lineScanner{Scanner: sc, s: s, err: err}
+}
+
+var utf8BOM = []byte("\xef\xbb\xbf")
+
+// prepass is the check of a text manifest's bytes before any line logic (see newScanner and newYAMLScanner).
+func prepass(data []byte, strict bool) ([]byte, error) {
+	data = bytes.TrimPrefix(data, utf8BOM)
+	for rest := data; ; {
+		i := bytes.IndexByte(rest, '\r')
+		if i < 0 {
+			break
+		}
+		if i+1 >= len(rest) || rest[i+1] != '\n' {
+			return nil, parseErr("carriage return")
+		}
+		rest = rest[i+2:]
+	}
+	if !strict {
+		return data, nil
+	}
+	if !utf8.Valid(data) {
+		return nil, parseErr("invalid UTF-8")
+	}
+	for _, r := range string(data) { // every \r is part of a CRLF here
+		if (r < 0x20 && r != '\n' && r != '\r') || (r >= 0x7f && r <= 0x9f) || r == 0xfeff || r == 0xfffe || r == 0xffff {
+			return nil, parseErr("control character")
+		}
+	}
+	return data, nil
 }
 
 func (l *lineScanner) Scan() bool {
-	if l.s.tick() != nil {
+	if l.err != nil || l.s.tick() != nil {
 		return false
 	}
+	l.n++
 	return l.Scanner.Scan()
 }
 
 func (l *lineScanner) Err() error {
 	if err := l.s.ctx.Err(); err != nil {
 		return err
+	}
+	if l.err != nil {
+		return l.err
 	}
 	return l.Scanner.Err()
 }
@@ -369,29 +419,56 @@ func cmpOr(err, other error) error {
 	return other
 }
 
-// HelperCache keeps the parsed helper files (the package.json next to a lock file, ...) of one scan, by the memory
-// of the file the caller passes: the scan hands the same slice out for the same blob, so a file shared by many
-// manifests is parsed once. Its budget is shared with the scan's cache of the files themselves.
+// maxHelperKeys is the number of names a helper file (a package.json, composer.json, Directory.Packages.props) may
+// contribute; real ones have a few hundred. A larger one counts as absent: the manifest's packages are read, but none
+// is marked direct (or gets a central version) through it.
+const maxHelperKeys = 10000
+
+// HelperCache bounds the work of the helper files (the package.json next to a lock file, ...) of one scan. It keeps
+// what is parsed from a file by parser and blob, so a file shared by many manifests is parsed once: the scan hands
+// out one slice per blob and registers it with Keep, which also charges its size to the memory budget the parsed
+// results share. And it counts the bytes of helper files parsed (each parse not served from the cache) against a
+// parse budget; once that is spent, further helpers count as absent, however many manifests ask for them.
 type HelperCache struct {
-	mu     sync.Mutex
-	left   int64
-	parsed map[*byte]map[string]string
+	mu        sync.Mutex
+	left      int64 // memory: the kept files and the results parsed from them
+	parseLeft int64 // the bytes of helper files that may still be parsed
+	kept      map[*byte]bool
+	parsed    map[helperKey]any
 }
 
-// NewHelperCache returns a cache that holds at most budget bytes (of files and of parsed results together).
-func NewHelperCache(budget int64) *HelperCache {
-	return &HelperCache{left: budget, parsed: map[*byte]map[string]string{}}
+type helperKey struct {
+	parser string
+	data   *byte // the blob, by the slice the scan keeps of it
 }
 
-// Charge reserves n bytes of the budget and reports whether they were available.
-func (h *HelperCache) Charge(n int64) bool {
+// NewHelperCache returns a cache that keeps at most budget bytes (of files and parsed results together) and parses
+// at most parseBudget bytes of helper files.
+func NewHelperCache(budget, parseBudget int64) *HelperCache {
+	return &HelperCache{left: budget, parseLeft: parseBudget, kept: map[*byte]bool{}, parsed: map[helperKey]any{}}
+}
+
+// Keep reserves the size of a file the caller keeps and hands out again for the same blob, and reports whether it
+// fit; only what is parsed from a kept file is cached.
+func (h *HelperCache) Keep(data []byte) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if n > h.left {
+	if int64(len(data)) > h.left {
 		return false
 	}
-	h.left -= n
+	h.left -= int64(len(data))
+	if len(data) > 0 {
+		h.kept[&data[0]] = true
+	}
 	return true
+}
+
+// CanParse reports whether a helper file of n bytes may still be parsed (else it counts as absent, and the caller
+// need not read it).
+func (h *HelperCache) CanParse(n int64) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return n <= h.parseLeft
 }
 
 type helperCacheKey struct{}
@@ -401,27 +478,35 @@ func WithHelperCache(ctx context.Context, h *HelperCache) context.Context {
 	return context.WithValue(ctx, helperCacheKey{}, h)
 }
 
-// helperParsed returns parse()'s result for data from the cache of ctx, parsing and storing it (when the budget
-// allows) the first time. Without a cache it just parses. The key is the address of data, which the scan keeps alive
-// for as long as the cache lives.
-func helperParsed(ctx context.Context, data []byte, parse func() (map[string]string, int64)) map[string]string {
+// helperParsed returns parse()'s result (and its memory cost) for the helper file data, read by the named parser:
+// from the cache of ctx if it is there, else parsed (charged to the parse budget) and kept when data is a kept file
+// and the memory budget allows. ok is false when the parse budget is spent: the helper then counts as absent.
+// Without a cache it just parses.
+func helperParsed[T any](ctx context.Context, parser string, data []byte, parse func() (T, int64)) (out T, ok bool) {
 	h, _ := ctx.Value(helperCacheKey{}).(*HelperCache)
 	if h == nil || len(data) == 0 {
-		out, _ := parse()
-		return out
+		out, _ = parse()
+		return out, true
 	}
-	key := &data[0]
+	key := helperKey{parser, &data[0]}
 	h.mu.Lock()
-	out, ok := h.parsed[key]
-	h.mu.Unlock()
-	if ok {
-		return out
-	}
-	out, cost := parse()
-	if h.Charge(cost + int64(len(data))) {
-		h.mu.Lock()
-		h.parsed[key] = out
+	if v, found := h.parsed[key]; found {
 		h.mu.Unlock()
+		return v.(T), true
 	}
-	return out
+	if int64(len(data)) > h.parseLeft {
+		h.mu.Unlock()
+		return out, false
+	}
+	h.parseLeft -= int64(len(data))
+	kept := h.kept[key.data]
+	h.mu.Unlock()
+	out, cost := parse()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if cost += 64; kept && cost <= h.left {
+		h.left -= cost
+		h.parsed[key] = out
+	}
+	return out, true
 }

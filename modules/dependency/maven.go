@@ -101,9 +101,15 @@ func parsePOM(s *sink, data []byte, find Finder) error {
 			rel = strings.TrimSuffix(rel, "/") + "/pom.xml"
 		}
 		if pd := find(rel, false); pd != nil {
-			var pp pomProject
-			if decodeXML(pd, &pp, "pom.xml") == nil && pp.isParentOf(&p) {
-				parent = newPomScope(&pp, nil)
+			pp, _ := helperParsed(s.ctx, "pom.xml", pd, func() (*pomProject, int64) {
+				var pp pomProject
+				if decodeXML(pd, &pp, "pom.xml") != nil {
+					return nil, 0
+				}
+				return &pp, int64(len(pd))
+			})
+			if pp != nil && pp.isParentOf(&p) {
+				parent = newPomScope(pp, nil)
 			}
 		}
 	}

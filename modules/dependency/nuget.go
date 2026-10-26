@@ -55,20 +55,28 @@ func parseCsproj(s *sink, data []byte, find Finder) error {
 		return err
 	}
 	props := proj.props()
-	central := map[string]string{}
+	var central map[string]string
 	if cd := find("Directory.Packages.props", true); cd != nil {
-		var cp msbuildProject
-		if decodeXML(cd, &cp, "Directory.Packages.props") == nil { // a broken props file only costs the versions
+		// a broken props file, or one over maxHelperKeys, only costs the versions
+		central, _ = helperParsed(s.ctx, "Directory.Packages.props", cd, func() (map[string]string, int64) {
+			var cp msbuildProject
+			if decodeXML(cd, &cp, "Directory.Packages.props") != nil {
+				return nil, 0
+			}
 			cprops := cp.props()
+			out, cost := map[string]string{}, int64(0)
 			for _, g := range cp.ItemGroups {
 				for _, v := range g.PackageVersions {
-					if err := s.entry(); err != nil {
-						return err
+					if len(out) >= maxHelperKeys {
+						return nil, 0
 					}
-					central[strings.ToLower(v.Include)] = expandProps(strings.TrimSpace(v.version()), cprops, "$(", ")")
+					version := expandProps(strings.TrimSpace(v.version()), cprops, "$(", ")")
+					out[strings.ToLower(v.Include)] = version
+					cost += int64(len(v.Include)+len(version)) + 64
 				}
 			}
-		}
+			return out, cost
+		})
 	}
 	for _, g := range proj.ItemGroups {
 		for _, r := range g.PackageReferences {

@@ -5,6 +5,7 @@ package dependency
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -548,7 +549,8 @@ func TestFailedScanKeepsNewerRow(t *testing.T) {
 	assert.Empty(t, scan.Error)
 }
 
-// The cap ends the whole scan: the manifest that reaches it and every later one are skipped, none is read.
+// Only the stored rows reaching the cap end the scan: a manifest with more rows than are left is skipped on its
+// own, and once the cap is reached the manifest that finds no room and every later one are skipped unread.
 func TestScanStopsAtDependencyCap(t *testing.T) {
 	repo := enable(t)
 	defer test.MockVariableValue(&setting.DependencyGraph.MaxDependencies, 3)()
@@ -556,6 +558,8 @@ func TestScanStopsAtDependencyCap(t *testing.T) {
 		"a/go.mod": "module a\n\nrequire (\n\texample.com/a v1.0.0\n\texample.com/b v1.0.0\n)\n",
 		"b/go.mod": "module b\n\nrequire (\n\texample.com/c v1.0.0\n\texample.com/d v1.0.0\n)\n",
 		"c/go.mod": "module c\n\nrequire example.com/e v1.0.0\n",
+		"d/go.mod": "module d\n\nrequire example.com/f v1.0.0\n",
+		"e/go.mod": "module e\n\nrequire example.com/g v1.0.0\n",
 	}, nil)
 	var parses atomic.Int32
 	orig := parseManifest
@@ -565,13 +569,14 @@ func TestScanStopsAtDependencyCap(t *testing.T) {
 	})()
 	require.NoError(t, Scan(t.Context(), repo.ID))
 	scan, _ := repo_model.GetRepoDependencyScan(t.Context(), repo.ID)
-	assert.Equal(t, 1, scan.ManifestCount)
-	assert.Equal(t, 2, scan.DependencyCount)
+	assert.Equal(t, 2, scan.ManifestCount)
+	assert.Equal(t, 3, scan.DependencyCount)
 	assert.ElementsMatch(t, []repo_model.SkippedManifest{
 		{Path: "b/go.mod", Code: "too_many_dependencies"},
-		{Path: "c/go.mod", Code: "too_many_dependencies"},
+		{Path: "d/go.mod", Code: "too_many_dependencies"},
+		{Path: "e/go.mod", Code: "too_many_dependencies"},
 	}, scan.SkippedManifests())
-	assert.EqualValues(t, 2, parses.Load(), "the third manifest is not parsed")
+	assert.EqualValues(t, 4, parses.Load(), "the manifest after the one that found no room is not parsed")
 }
 
 // 400 directories with the same 1 MiB package.json keep one copy of it, not 400.
@@ -684,30 +689,78 @@ func TestLostWriteRequeuesWhenHeadMoved(t *testing.T) {
 	assert.Equal(t, "other", scan.CommitSHA)
 }
 
-// 400 lock files that share one key-heavy package.json: the package.json is read and parsed once.
+// When the head can't be read after the write, the scan asks for another one rather than leave a moved branch to
+// the cron.
+func TestScanRequeuesWhenHeadUnreadable(t *testing.T) {
+	repo := enable(t)
+	commitFiles(t, repo, map[string]string{"go.mod": goMod}, nil)
+	orig := parseManifest
+	defer test.MockVariableValue(&parseManifest, func(ctx context.Context, f *dependency.Format, data []byte, find dependency.Finder, maxRows int) ([]dependency.Dependency, error) {
+		out, err := exec.Command("git", "-C", repo.RepoPath(), "update-ref", "-d", "refs/heads/"+repo.DefaultBranch).CombinedOutput()
+		require.NoError(t, err, string(out))
+		return orig(ctx, f, data, find, maxRows)
+	})()
+	requeue, err := scan(t.Context(), repo.ID)
+	require.NoError(t, err)
+	assert.True(t, requeue)
+	assert.Len(t, rowsOf(t, repo.ID), 2, "the scan of the commit read at the start is stored")
+}
+
+// keyHeavyPackageJSON is the package.json of the security review: about 1 MiB of 100 000 short keys, ten times what
+// a helper may contribute. n makes one key differ, so each n gives another blob.
+func keyHeavyPackageJSON(n int) string {
+	var sb strings.Builder
+	sb.WriteString(`{"dependencies":{"pkg-1":"^1.0.0","n` + strconv.Itoa(n) + `":""`)
+	for i := range 100000 {
+		fmt.Fprintf(&sb, `,"%05x":""`, i)
+	}
+	sb.WriteString(`}}`)
+	return sb.String()
+}
+
+// Lock files that share one package.json: it is read and parsed once. A key-heavy one (over the helper key
+// limit) counts as absent, so its packages are not direct, and neither 400 lock files sharing it nor 100 that each
+// have their own cost more than a few seconds: the scan parses a bounded number of helper bytes.
 func TestScanParsesSharedHelperOnce(t *testing.T) {
 	repo := enable(t)
+	defer test.MockVariableValue(&setting.DependencyGraph.MaxManifests, 1000)()
 	var sb strings.Builder
 	sb.WriteString(`{"dependencies":{`)
-	for i := range 20000 {
+	for i := range 5000 {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
 		sb.WriteString(`"pkg-` + strconv.Itoa(i) + `":"^1.0.0"`)
 	}
 	sb.WriteString(`}}`)
-	files := map[string]string{}
-	for i := range 400 {
-		files["d"+strconv.Itoa(i)+"/package.json"] = sb.String() // the same blob in every directory
-		files["d"+strconv.Itoa(i)+"/yarn.lock"] = "# yarn lockfile v1\n\npkg-1@^1.0.0:\n  version \"1.0.0\"\n"
-	}
-	commitFiles(t, repo, files, nil)
-	defer test.MockVariableValue(&setting.DependencyGraph.MaxManifests, 1000)()
-	start := time.Now()
-	require.NoError(t, Scan(t.Context(), repo.ID))
-	assert.Less(t, time.Since(start), 10*time.Second)
-	assert.Len(t, rowsOf(t, repo.ID), 400)
-	for _, r := range rowsOf(t, repo.ID) {
-		assert.True(t, r.Direct)
+	const lock = "# yarn lockfile v1\n\npkg-1@^1.0.0:\n  version \"1.0.0\"\n"
+	for _, tc := range []struct {
+		name   string
+		dirs   int
+		pkg    func(i int) string
+		direct bool
+	}{
+		{"shared", 400, func(int) string { return sb.String() }, true},
+		{"shared key-heavy", 400, func(int) string { return keyHeavyPackageJSON(0) }, false},
+		{"distinct key-heavy", 100, keyHeavyPackageJSON, false}, // 100 MiB of helpers, 8 MiB may be parsed
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{}
+			for i := range tc.dirs {
+				files["d"+strconv.Itoa(i)+"/package.json"] = tc.pkg(i)
+				files["d"+strconv.Itoa(i)+"/yarn.lock"] = lock
+			}
+			commitFiles(t, repo, files, nil)
+			start := time.Now()
+			require.NoError(t, Scan(t.Context(), repo.ID))
+			took := time.Since(start)
+			t.Logf("scan: %v", took)
+			assert.Less(t, took, 5*time.Second)
+			rows := rowsOf(t, repo.ID)
+			assert.Len(t, rows, tc.dirs)
+			for _, r := range rows {
+				assert.Equal(t, tc.direct, r.Direct)
+			}
+		})
 	}
 }

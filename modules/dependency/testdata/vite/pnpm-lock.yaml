@@ -204,7 +204,6 @@ importers:
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
-      '@types/picomatch':
 
 packages:
 

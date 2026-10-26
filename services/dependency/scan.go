@@ -26,8 +26,13 @@ import (
 var (
 	errTreeTooLarge = errors.New("tree too large")
 
-	// helperCacheBudget is the total size of the helper files (package.json, ...) one scan keeps in memory
+	// helperCacheBudget is the total size of the helper files (package.json, ...) one scan keeps in memory, with
+	// what is parsed from them
 	helperCacheBudget int64 = 8 << 20
+
+	// helperParseBudget is the total size of the helper files one scan parses (a file kept in the cache is parsed
+	// once); past it, a helper counts as absent (see dependency.HelperCache)
+	helperParseBudget int64 = 8 << 20
 
 	// excludedSegments are directory names whose content is never scanned (vendored or generated copies)
 	excludedSegments = map[string]bool{"vendor": true, "node_modules": true, "testdata": true}
@@ -191,9 +196,11 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	head, headErr := gitRepo.GetBranchCommitID(repo.DefaultBranch)
+	// the head now, read with the outer context (the scan's time budget may be spent); if it can't be read, the
+	// next scan decides (the unique queue makes a needless one cheap)
+	head, headErr := headCommit(ctx, repo)
 	if headErr != nil {
-		return false, nil
+		return true, nil
 	}
 	if !written {
 		// another process stored its result first: if that isn't the head, the next scan is still due
@@ -202,6 +209,16 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	}
 	// the branch moved while the scan ran: the next scan is the one that ends on the head
 	return head != sha, nil
+}
+
+// headCommit reads the commit the default branch points at now.
+func headCommit(ctx context.Context, repo *repo_model.Repository) (string, error) {
+	gitRepo, err := gitrepo.OpenRepository(ctx, repo)
+	if err != nil {
+		return "", err
+	}
+	defer gitRepo.Close()
+	return gitRepo.GetBranchCommitID(repo.DefaultBranch)
 }
 
 // fail records the error code of a scan and keeps the old rows (and the commit they belong to); it does not
@@ -262,7 +279,7 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 	// helper files by blob ID: the same blob is kept once however many directories hold it, and what doesn't fit
 	// the budget is read again on each use
 	cache := map[string][]byte{}
-	helpers := dependency.NewHelperCache(helperCacheBudget) // the files above and what is parsed from them
+	helpers := dependency.NewHelperCache(helperCacheBudget, helperParseBudget) // the files above and what is parsed from them
 	ctx = dependency.WithHelperCache(ctx, helpers)
 	find := func(manifestPath string) dependency.Finder {
 		return func(name string, up bool) []byte {
@@ -272,11 +289,14 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 					if b, seen := cache[e.id]; seen {
 						return b
 					}
+					if !helpers.CanParse(e.size) {
+						return nil // the scan's helper budget is spent: the helper counts as absent
+					}
 					b, err := readBlob(e, dependency.MaxSmallManifestSize)
 					if err != nil {
 						b = nil
 					}
-					if helpers.Charge(int64(len(b))) {
+					if helpers.Keep(b) {
 						cache[e.id] = b
 					}
 					return b
@@ -335,8 +355,11 @@ func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.R
 			continue
 		}
 		if errors.Is(err, dependency.ErrTooManyDependencies) {
-			// the cap is reached: this manifest and every later one stay unread
 			skip(m.path, repo_model.DependencySkipTooManyDeps)
+			if len(deps) < cfg.MaxDependencies {
+				continue // this file alone has more rows than are left: the next one may fit
+			}
+			// the stored rows reached the cap: every later manifest stays unread
 			for _, rest := range manifests[i+1:] {
 				skip(rest.path, repo_model.DependencySkipTooManyDeps)
 			}

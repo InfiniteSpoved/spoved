@@ -86,7 +86,13 @@ func requirementIsFile(name string) bool {
 // parsePoetryLock reads the [[package]] tables of poetry.lock. The lock file doesn't say what the project asks for,
 // so the direct packages come from the pyproject.toml next to it, if there is one.
 func parsePoetryLock(s *sink, data []byte, find Finder) error {
-	direct := pyprojectDeps(s, find("pyproject.toml", false))
+	var direct map[string]bool
+	if pp := find("pyproject.toml", false); pp != nil {
+		direct, _ = helperParsed(s.ctx, "pyproject.toml", pp, func() (map[string]bool, int64) {
+			m := pyprojectDeps(s, pp)
+			return m, int64(len(m)) * 96
+		})
+	}
 	var cur *Dependency
 	inPackage, inSource, onDisk := false, false, false
 	flush := func() error {

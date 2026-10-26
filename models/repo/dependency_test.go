@@ -128,7 +128,7 @@ func TestReplaceRepoDependenciesIf(t *testing.T) {
 		return []*repo_model.Dependency{{RepoID: 1, Ecosystem: "Go", Name: name, Version: "v1", ManifestPath: "go.mod"}}
 	}
 
-	// no row yet: the first writer inserts, the second (who also read "none") writes nothing
+	// no row yet: the first writer inserts, the second (who also read "none") hits the unique key and writes nothing
 	ok, err := repo_model.ReplaceRepoDependenciesIf(ctx, &repo_model.DependencyScan{RepoID: 1, CommitSHA: "aaaa", Status: "ok"}, row("a"), nil)
 	require.NoError(t, err)
 	assert.True(t, ok)

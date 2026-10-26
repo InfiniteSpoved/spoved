@@ -57,7 +57,7 @@ func parseNPMLock(s *sink, data []byte, find Finder) error {
 				if !workspace {
 					// every kept entry becomes a row (or the scan fails): the cap is the one of the rows
 					if err := s.entry(); err != nil || len(pkgs) >= s.maxRows {
-						return cmpOr(err, ErrTooManyDependencies)
+						return cmpOr(err, ErrTooManyEntries)
 					}
 				}
 				_, err := j.object(func(f string) error {
@@ -128,7 +128,7 @@ func parseNPMLock(s *sink, data []byte, find Finder) error {
 func readV1Tree(j *jsonStream, s *sink, top bool, out *[]Dependency, declared map[string]string) error {
 	_, err := j.object(func(name string) error {
 		if err := s.entry(); err != nil || len(*out) >= s.maxRows {
-			return cmpOr(err, ErrTooManyDependencies)
+			return cmpOr(err, ErrTooManyEntries)
 		}
 		d := Dependency{Name: name, Direct: top && declaredIn(declared, name)}
 		idx := len(*out)
@@ -165,13 +165,14 @@ func (r *npmRange) UnmarshalJSON(b []byte) error {
 var npmPackageJSONParses atomic.Int64
 
 // npmPackageJSON returns what a package.json asks for: dependency name to range (the last one wins when several
-// sections name it); the names are the declared dependencies. nil data gives an empty map. The result is kept in
-// the scan's helper cache, so a package.json that many manifests share is parsed once.
+// sections name it); the names are the declared dependencies. It is nil when there is no package.json, when it
+// names more than maxHelperKeys dependencies or when the scan's helper parse budget is spent: then nothing is
+// direct. The result is kept in the scan's helper cache, so a package.json that many manifests share is parsed once.
 func (s *sink) npmPackageJSON(data []byte) map[string]string {
 	if data == nil {
-		return map[string]string{}
+		return nil
 	}
-	return helperParsed(s.ctx, data, func() (map[string]string, int64) {
+	out, _ := helperParsed(s.ctx, "package.json", data, func() (map[string]string, int64) {
 		npmPackageJSONParses.Add(1)
 		out := map[string]string{}
 		var p struct {
@@ -183,6 +184,9 @@ func (s *sink) npmPackageJSON(data []byte) map[string]string {
 		if json.Unmarshal(data, &p) != nil {
 			return out, 0
 		}
+		if len(p.Dependencies)+len(p.DevDependencies)+len(p.OptionalDependencies)+len(p.PeerDependencies) > maxHelperKeys {
+			return nil, 0
+		}
 		var cost int64
 		for _, m := range []map[string]npmRange{p.Dependencies, p.DevDependencies, p.OptionalDependencies, p.PeerDependencies} {
 			for n, r := range m {
@@ -192,6 +196,7 @@ func (s *sink) npmPackageJSON(data []byte) map[string]string {
 		}
 		return out, cost
 	})
+	return out
 }
 
 func declaredIn(m map[string]string, name string) bool {

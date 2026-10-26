@@ -148,11 +148,8 @@ func ReplaceRepoDependenciesIf(ctx context.Context, scan *DependencyScan, deps [
 			cols = []string{"scanned_unix", "status", "error"}
 		}
 		if expect == nil {
-			if cur, err := GetRepoDependencyScan(ctx, scan.RepoID); err != nil || cur != nil {
-				return err
-			}
 			if _, err := e.Insert(scan); err != nil {
-				return err
+				return err // the unique key on repo_id refuses it if another process inserted first
 			}
 		} else {
 			// the conditional update is also the row lock that serializes writers
@@ -175,6 +172,12 @@ func ReplaceRepoDependenciesIf(ctx context.Context, scan *DependencyScan, deps [
 		written = true
 		return nil
 	})
+	if err != nil && expect == nil {
+		// the first scan of another process stored its row first: that is a lost write, not a failure
+		if cur, gerr := GetRepoDependencyScan(ctx, scan.RepoID); gerr == nil && cur != nil {
+			return false, nil
+		}
+	}
 	return written, err
 }
 
