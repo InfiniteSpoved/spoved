@@ -19,6 +19,7 @@
 		</label>
 		<label class="{{if not $vulns}}security-search-wide{{end}}{{if eq $s.ErrorField "version"}} invalid{{end}}">{{if $vulns}}{{ctx.Locale.Tr "security_search.version"}}{{else}}{{ctx.Locale.Tr "security_search.version_or_range"}}{{end}}
 			<input name="version" value="{{$s.Form.Version}}" maxlength="256" placeholder="{{if $vulns}}{{ctx.Locale.Tr "security_search.version_placeholder"}}{{else}}{{ctx.Locale.Tr "security_search.range_placeholder"}}{{end}}"{{if eq $s.ErrorField "version"}} aria-invalid="true"{{end}}{{if not $vulns}} aria-describedby="{{if eq $s.ErrorField "version"}}security-search-error {{end}}security-search-range-help"{{else if eq $s.ErrorField "version"}} aria-describedby="security-search-error"{{end}}>
+			{{if not $vulns}}<small class="security-search-help" id="security-search-range-help">{{ctx.Locale.Tr "security_search.range_help"}}</small>{{end}}
 		</label>
 		{{if $vulns}}
 			<label{{if eq $s.ErrorField "state"}} class="invalid"{{end}}>{{ctx.Locale.Tr "security_search.state"}}
@@ -44,7 +45,6 @@
 		{{end}}
 		<button class="ui primary button" type="submit">{{ctx.Locale.Tr "security_search.search"}}</button>
 	</form>
-	{{if not $vulns}}<p class="security-search-help" id="security-search-range-help">{{ctx.Locale.Tr "security_search.range_help"}}</p>{{end}}
 
 	{{if not $s.Searched}}
 		<div class="ui message">{{if $vulns}}{{ctx.Locale.Tr "security_search.hint_vulnerabilities"}}{{else}}{{ctx.Locale.Tr "security_search.hint_dependencies"}}{{end}}</div>
@@ -64,7 +64,11 @@
 			<div class="ui info message">
 				{{$state := $s.Form.State}}{{if not $state}}{{$state = "open"}}{{end}}
 				{{if and $vulns $s.Form.Advisory (ne $state "all")}}
-					{{if $s.Admin}}{{ctx.Locale.Tr "security_search.none_advisory_state_admin" $s.Form.Advisory (ctx.Locale.Tr (print "repo.security.state." $state))}}{{else}}{{ctx.Locale.Tr "security_search.none_advisory_state_org" .Org.Name $s.Form.Advisory (ctx.Locale.Tr (print "repo.security.state." $state))}}{{end}}
+					{{if $s.Admin}}
+						{{if eq $state "open"}}{{ctx.Locale.Tr "security_search.none_advisory_open_admin" $s.Form.Advisory}}{{else if eq $state "dismissed"}}{{ctx.Locale.Tr "security_search.none_advisory_dismissed_admin" $s.Form.Advisory}}{{else}}{{ctx.Locale.Tr "security_search.none_advisory_fixed_admin" $s.Form.Advisory}}{{end}}
+					{{else}}
+						{{if eq $state "open"}}{{ctx.Locale.Tr "security_search.none_advisory_open_org" .Org.Name $s.Form.Advisory}}{{else if eq $state "dismissed"}}{{ctx.Locale.Tr "security_search.none_advisory_dismissed_org" .Org.Name $s.Form.Advisory}}{{else}}{{ctx.Locale.Tr "security_search.none_advisory_fixed_org" .Org.Name $s.Form.Advisory}}{{end}}
+					{{end}}
 				{{else if and $vulns $s.Form.Advisory}}
 					{{if $s.Admin}}{{ctx.Locale.Tr "security_search.none_advisory_admin" $s.Form.Advisory}}{{else}}{{ctx.Locale.Tr "security_search.none_advisory_org" .Org.Name $s.Form.Advisory}}{{end}}
 				{{else if $s.Admin}}{{ctx.Locale.Tr "security_search.none_admin"}}{{else}}{{ctx.Locale.Tr "security_search.none_org" .Org.Name}}{{end}}
@@ -113,7 +117,7 @@
 								{{if $s.Admin}}<td><span class="security-search-cl">{{ctx.Locale.Tr "security_search.owner"}}: </span>{{.Repo.OwnerName}}</td>{{end}}
 								<td><a href="{{.Repo.Link}}">{{.Repo.FullName}}</a></td>
 								<td><span class="ui basic mini label">{{.Ecosystem}}</span> {{.Package}} <code>{{if .Version}}{{.Version}}{{else}}{{.Requirement}}{{end}}</code></td>
-								<td><span class="security-search-cl">{{ctx.Locale.Tr "repo.security.fixed_in"}} </span>{{range $i, $v := .FixedVersions}}{{if $i}}, {{end}}<code>{{$v}}</code>{{else}}{{ctx.Locale.Tr "repo.security.no_fix"}}{{end}}</td>
+								<td><span class="security-search-cl">{{ctx.Locale.Tr "repo.security.fixed_in"}}: </span>{{range $i, $v := .FixedVersions}}{{if $i}}, {{end}}<code>{{$v}}</code>{{else}}{{ctx.Locale.Tr "repo.security.no_fix"}}{{end}}</td>
 								<td><span class="security-search-cl">{{ctx.Locale.Tr "security_search.in"}} </span>{{.ManifestPath}}</td>
 								<td><span class="security-search-cl">{{ctx.Locale.Tr "security_search.state"}}: </span><a href="{{.Repo.Link}}/security/alerts/{{.ID}}">{{ctx.Locale.Tr (print "repo.security.state." .State)}}</a></td>
 							</tr>
@@ -123,7 +127,7 @@
 							<tr>
 								{{if $s.Admin}}<td><span class="security-search-cl">{{ctx.Locale.Tr "security_search.owner"}}: </span>{{.Repo.OwnerName}}</td>{{end}}
 								<td><a href="{{.Repo.Link}}">{{.Repo.FullName}}</a></td>
-								<td><span class="security-search-cl">{{ctx.Locale.Tr "security_search.version"}} </span>{{if .Version}}<code>{{.Version}}</code>{{else}}<code>{{.Requirement}}</code>{{if .Uncertain}} <span class="ui basic mini label security-search-may">{{ctx.Locale.Tr "security_search.may_match"}}</span>{{end}}{{end}}</td>
+								<td><span class="security-search-cl">{{ctx.Locale.Tr "security_search.version"}}: </span>{{if .Version}}<code>{{.Version}}</code>{{else}}<code>{{.Requirement}}</code>{{if .Uncertain}} <span class="ui basic mini label security-search-may">{{ctx.Locale.Tr "security_search.may_match"}}</span>{{end}}{{end}}</td>
 								<td><span class="security-search-cl">{{ctx.Locale.Tr "security_search.in"}} </span>{{.ManifestPath}}</td>
 								<td><span class="security-search-cl">{{ctx.Locale.Tr "repo.dependencies.direct"}}: </span>{{if .Direct}}{{ctx.Locale.Tr "modal.yes"}}{{else}}{{ctx.Locale.Tr "modal.no"}}{{end}}</td>
 							</tr>

@@ -23,7 +23,6 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/vulnerability"
-	"forgejo.org/modules/vulnerability/version"
 	"forgejo.org/routers/common"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
@@ -64,14 +63,12 @@ func (f Form) Query() url.Values {
 	return q
 }
 
-// isRange tells a requirement from an exact version: the one field of the dependency form holds either. It is a
-// version when the ecosystem's own parser accepts it, else a requirement.
-func isRange(ecosystem, s string) bool {
-	if s == "" {
-		return false
-	}
-	_, err := version.Parse(ecosystem, s)
-	return err != nil
+// isRange tells a requirement from an exact version: the one field of the dependency form holds either. It is a range
+// when it is operator-shaped; anything else is an exact version, matched as written in the lock file whatever a version
+// parser would say of it (so "dev-main", "1!2.0" and "4.17" stay exact).
+func isRange(s string) bool {
+	return strings.ContainsAny(s[:min(1, len(s))], "^~<>=") || strings.HasPrefix(s, "!=") || strings.ContainsAny(s, " ,|*") ||
+		strings.HasSuffix(strings.ToLower(s), ".x")
 }
 
 // clip caps a typed value echoed in a message.
@@ -84,7 +81,7 @@ func clip(s string) string {
 
 func (f Form) usage() dependency_service.UsageFilter {
 	u := dependency_service.UsageFilter{Ecosystem: f.Ecosystem, Name: f.Name}
-	if isRange(f.Ecosystem, f.Version) {
+	if isRange(f.Version) {
 		u.Range = f.Version
 	} else {
 		u.Version = f.Version
@@ -148,15 +145,11 @@ func validate(ctx *context.Context, kind string, f Form) (field, msg string) {
 		return "ecosystem", ctx.Locale.TrString("security_search.invalid_ecosystem")
 	case kind == Vulnerabilities && f.Advisory != "" && !vulnerability.ValidID(f.Advisory):
 		return "advisory", ctx.Locale.TrString("security_search.invalid_advisory", clip(f.Advisory))
-	case kind == Vulnerabilities && f.Advisory == "" && f.Name == "":
-		return "name", ctx.Locale.TrString("security_search.need_advisory_or_package")
-	case kind == Vulnerabilities && f.Advisory == "" && f.Ecosystem == "":
-		return "ecosystem", ctx.Locale.TrString("security_search.need_advisory_or_package")
-	case kind == Dependencies && f.Ecosystem == "":
+	case f.Name != "" && f.Ecosystem == "":
 		return "ecosystem", ctx.Locale.TrString("security_search.need_ecosystem")
-	case kind == Dependencies && f.Name == "":
+	case f.Name == "" && (f.Version != "" || kind == Dependencies || f.Advisory == ""):
 		return "name", ctx.Locale.TrString("security_search.need_package")
-	case kind == Dependencies && isRange(f.Ecosystem, f.Version):
+	case kind == Dependencies && isRange(f.Version):
 		if _, ok := vulnerability.ParseRangeFilter(f.Ecosystem, f.Version); !ok {
 			return "version", ctx.Locale.TrString("security_search.invalid_range", clip(f.Version))
 		}

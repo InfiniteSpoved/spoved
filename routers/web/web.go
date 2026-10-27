@@ -351,6 +351,7 @@ func verifyAuthWithOptions(options *common.VerifyOptions) func(ctx *context.Cont
 				return
 			}
 			ctx.Data["PageIsAdmin"] = true
+			admin.SetSecuritySearchNav(ctx)
 		}
 	}
 }

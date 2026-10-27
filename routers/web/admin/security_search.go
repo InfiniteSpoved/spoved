@@ -27,6 +27,11 @@ func AuditExportReq(ctx *context.Context) {
 	}
 }
 
+// SetSecuritySearchNav lets the admin menu show the two search pages only while they exist.
+func SetSecuritySearchNav(ctx *context.Context) {
+	ctx.Data["SecuritySearchEnabled"] = dependency_service.SiteEnabled(ctx)
+}
+
 // MustEnableSecuritySearch answers 404 to the search pages and downloads (after the access gate) while the dependency graph is
 // off for the instance, so a download of nothing is never recorded.
 func MustEnableSecuritySearch(ctx *context.Context) {
