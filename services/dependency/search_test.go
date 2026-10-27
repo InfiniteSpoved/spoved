@@ -224,3 +224,57 @@ func TestExportUsageSnapshot(t *testing.T) {
 	assert.Equal(t, 3, secondRows)
 	assert.Len(t, got, 6) // the two deleted rows were sent already
 }
+
+// A repository rescanned during the export (its rows deleted and inserted again, with new IDs) is exported with its
+// current rows; the repository before it is not touched and nothing is repeated.
+func TestExportUsageRescan(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&setting.DependencyGraph.Enabled, true)()
+	defer test.MockVariableValue(&ExportBatch, 2)()
+	ctx := db.DefaultContext
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	scope := SearchScope{Doer: admin, Admin: true}
+	insert := func(repoID int64, manifests ...string) {
+		for _, m := range manifests {
+			require.NoError(t, db.Insert(ctx, &repo_model.Dependency{RepoID: repoID, Ecosystem: dependency.Go, Name: "example.com/x", Version: "v1.0.0", ManifestPath: m}))
+		}
+	}
+	insert(1, "a/go.mod", "b/go.mod")
+	insert(2, "a/go.mod", "b/go.mod", "c/go.mod")
+	f := UsageFilter{Ecosystem: dependency.Go, Name: "example.com/x"}
+	all, _, err := SearchUsage(ctx, scope, f, db.ListOptions{Page: 1, PageSize: 50})
+	require.NoError(t, err)
+	require.Len(t, all, 5)
+	second := all[4].RepoID
+
+	rescanned := false
+	afterExportBatch = func() {
+		if !rescanned {
+			rescanned = true
+			_, err := db.GetEngine(ctx).Where("repo_id = ?", second).Delete(&repo_model.Dependency{})
+			require.NoError(t, err)
+			insert(second, "a/go.mod", "d/go.mod")
+		}
+	}
+	defer func() { afterExportBatch = nil }()
+
+	var got []*UsageRow
+	require.NoError(t, ExportUsage(ctx, scope, f, func(n int64) error { assert.EqualValues(t, 5, n); return nil }, func(rows []*UsageRow) error {
+		got = append(got, rows...)
+		return nil
+	}))
+	var firstIDs []int64
+	var secondManifests []string
+	seen := map[int64]bool{}
+	for _, r := range got {
+		assert.False(t, seen[r.ID], "row %d repeated", r.ID)
+		seen[r.ID] = true
+		if r.RepoID == second {
+			secondManifests = append(secondManifests, r.ManifestPath)
+		} else {
+			firstIDs = append(firstIDs, r.ID)
+		}
+	}
+	assert.Len(t, firstIDs, 2)
+	assert.Equal(t, []string{"a/go.mod", "d/go.mod"}, secondManifests)
+}

@@ -53,7 +53,7 @@ func SearchDependencies(ctx *context.APIContext) {
 	//   type: integer
 	// - name: format
 	//   in: query
-	//   description: csv or json sends every matching row as a download (at most 100000, else 422; no paging) and records an audit entry; without it the answer is paged
+	//   description: csv or json sends every matching row as a download (at most 100000, else 422; no paging) and records an audit entry; without it the answer is paged. Alert export rows leave out the advisory details and references (empty), which the paged answer keeps
 	//   type: string
 	//   enum: [csv, json]
 	// responses:
@@ -119,7 +119,7 @@ func SearchVulnerabilityAlerts(ctx *context.APIContext) {
 	//   type: integer
 	// - name: format
 	//   in: query
-	//   description: csv or json sends every matching row as a download (at most 100000, else 422; no paging) and records an audit entry; without it the answer is paged
+	//   description: csv or json sends every matching row as a download (at most 100000, else 422; no paging) and records an audit entry; without it the answer is paged. Alert export rows leave out the advisory details and references (empty), which the paged answer keeps
 	//   type: string
 	//   enum: [csv, json]
 	// responses:

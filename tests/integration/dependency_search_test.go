@@ -778,27 +778,48 @@ func TestDependencySearchExport(t *testing.T) {
 		assert.Contains(t, resp.Body.String(), "narrow by version or range")
 	})
 
-	t.Run("at most two exports run at once", func(t *testing.T) {
+	t.Run("one export per user and two at once", func(t *testing.T) {
 		since := auditMaxID(t)
-		for range cap(repo_api.ExportSlots) {
-			repo_api.ExportSlots <- struct{}{}
-		}
+		release, ok := repo_api.TakeExportSlot(2) // user2 is exporting
+		require.True(t, ok)
+		t.Cleanup(release)
 		resp := dsGet(t, orgDeps+q+"&format=csv", owner, http.StatusTooManyRequests)
 		assert.Empty(t, resp.Header().Get("Content-Disposition"))
 		assert.Empty(t, auditActions(t, since, "org.dependency_graph.exported"))
-		<-repo_api.ExportSlots
+		dsGet(t, adminDeps+q+"&format=csv", admin, http.StatusOK) // another user is not held back
+		releaseOther, ok := repo_api.TakeExportSlot(99)
+		require.True(t, ok)
+		t.Cleanup(releaseOther)
+		dsGet(t, adminDeps+q+"&format=csv", admin, http.StatusTooManyRequests) // the process is full
+		release()
+		releaseOther()
 		dsGet(t, orgDeps+q+"&format=csv", owner, http.StatusOK)
-		<-repo_api.ExportSlots
 		assert.Empty(t, repo_api.ExportSlots)
+	})
+
+	t.Run("an export over its time budget ends after a batch", func(t *testing.T) {
+		defer test.MockVariableValue(&repo_api.ExportTimeLimit, -time.Second)()
+		req := NewRequest(t, "GET", adminDeps+q+"&format=json").AddTokenAuth(admin)
+		assert.PanicsWithValue(t, http.ErrAbortHandler, func() { MakeRequest(t, req, http.StatusOK) })
+		assert.Empty(t, repo_api.ExportSlots, "the slot is given back")
 	})
 
 	t.Run("an alert export leaves out the advisory texts", func(t *testing.T) {
 		long := strings.Repeat("long-advisory-text ", 50)
+		var before []*vulnerability_model.Advisory
+		require.NoError(t, db.GetEngine(t.Context()).Find(&before))
+		t.Cleanup(func() {
+			for _, a := range before {
+				_, err := db.GetEngine(db.DefaultContext).ID(a.ID).Cols("details", "summary").Update(a)
+				require.NoError(t, err)
+			}
+		})
 		_, err := db.GetEngine(t.Context()).Exec("UPDATE vulnerability_advisory SET details = ?, summary = 'short summary'", long)
 		require.NoError(t, err)
 		body := dsGet(t, adminAlerts+q+"&state=all&format=json", admin, http.StatusOK).Body.String()
 		assert.NotContains(t, body, "long-advisory-text")
 		assert.Contains(t, body, "short summary")
+		assert.Contains(t, body, `"references":[]`)
 		assert.Contains(t, dsGet(t, adminAlerts+q+"&state=all&limit=50", admin, http.StatusOK).Body.String(), "long-advisory-text") // the paged answer keeps them
 	})
 
@@ -815,4 +836,32 @@ func TestDependencySearchExport(t *testing.T) {
 		dsGet(t, orgDeps+q+"&format=xml", owner, http.StatusUnprocessableEntity)
 		dsGet(t, adminAlerts+q+"&format=CSV", admin, http.StatusUnprocessableEntity)
 	})
+}
+
+// An alert dismissed while a state=open export runs is not exported; what was already sent stays.
+func TestDependencySearchExportAlertSnapshot(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	newSearchFixture(t)
+	admin := getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin, auth_model.AccessTokenScopeReadRepository)
+	path := "/api/v1/admin/vulnerability-alerts?ecosystem=npm&name=lodash"
+	paged, _ := dsAlerts(t, path+"&limit=50", admin)
+	require.Greater(t, len(paged), 1)
+	want := paged[:1] // the first batch; the rest is dismissed before it is read
+
+	defer test.MockVariableValue(&dependency_service.ExportBatch, 1)()
+	done := false
+	defer test.MockVariableValue(&vulnerability_service.AfterExportBatch, func() {
+		if !done {
+			done = true
+			_, err := db.GetEngine(t.Context()).Exec("UPDATE repo_vulnerability_alert SET state = 'dismissed'")
+			require.NoError(t, err)
+		}
+	})()
+	var list []*api.RepoVulnerabilityAlert
+	DecodeJSON(t, dsGet(t, path+"&format=json", admin, http.StatusOK), &list)
+	var got []string
+	for _, a := range list {
+		got = append(got, fmt.Sprintf("%s %s %s %s %s", a.Repository.FullName, a.Advisory.ID, a.Version, a.State, a.Severity))
+	}
+	assert.Equal(t, want, got)
 }

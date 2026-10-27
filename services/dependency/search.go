@@ -105,15 +105,44 @@ type UsageRow struct {
 	Uncertain bool // the row has no version and its requirement overlaps the range
 }
 
-// TooManyMatches is a search or export with too many rows; it names the filter the route has, unless it is given.
+// TooManyMatches is an export with too many rows; it names the filter the route has, unless it is given.
 func TooManyMatches(scope SearchScope) error {
+	return util.NewInvalidArgumentErrorf("too many matches, %snarrow by version or range", scopeAdvice(scope))
+}
+
+// scopeAdvice is "add a project filter, " (organization routes) or "add an owner filter, " (instance routes) while
+// the filter is not given, else "".
+func scopeAdvice(scope SearchScope) string {
 	switch {
 	case scope.Org != nil && scope.Project == "":
-		return util.NewInvalidArgumentErrorf("too many matches, add a project filter, or narrow by version or range")
+		return "add a project filter, "
 	case scope.Org == nil && scope.Owner == "":
-		return util.NewInvalidArgumentErrorf("too many matches, add an owner filter, or narrow by version or range")
+		return "add an owner filter, "
 	}
-	return util.NewInvalidArgumentErrorf("too many matches, narrow by version or range")
+	return ""
+}
+
+// tooManyCandidates is a range search that reads more than MaxUsageCandidates rows.
+func tooManyCandidates(scope SearchScope) error {
+	advice := "give an exact version"
+	if a := scopeAdvice(scope); a != "" {
+		advice = a + "or give an exact version"
+	}
+	return util.NewInvalidArgumentErrorf("too many candidates for a range search: %s", advice)
+}
+
+// RepoBatches splits rows (the repositories' rows are contiguous) into batches of at least size rows that end on a
+// repository boundary, so a batch holds whole repositories.
+func RepoBatches[T any](rows []T, repoID func(T) int64, size int) [][]T {
+	var out [][]T
+	start := 0
+	for i := 1; i <= len(rows); i++ {
+		if i == len(rows) || (i-start >= size && repoID(rows[i]) != repoID(rows[i-1])) {
+			out = append(out, rows[start:i])
+			start = i
+		}
+	}
+	return out
 }
 
 // usagePlan is a validated dependency search: the options, and for a range search the rows inside the range.
@@ -122,6 +151,7 @@ type usagePlan struct {
 	kept      []*repo_model.Dependency // range search: the candidates inside the range, in order
 	uncertain map[int64]bool
 	ranged    bool
+	filter    *vulnerability.RangeFilter
 	total     int64
 }
 
@@ -158,9 +188,9 @@ func planUsage(ctx context.Context, scope SearchScope, f UsageFilter) (*usagePla
 		return nil, err
 	}
 	if len(candidates) > MaxUsageCandidates {
-		return nil, TooManyMatches(scope)
+		return nil, tooManyCandidates(scope)
 	}
-	p.ranged, p.uncertain = true, map[int64]bool{}
+	p.ranged, p.filter, p.uncertain = true, filter, map[int64]bool{}
 	for _, d := range candidates {
 		if in, unsure := filter.Match(d.Version, d.Requirement); in {
 			p.kept = append(p.kept, d)
@@ -258,36 +288,75 @@ var ExportBatch = 500
 // afterExportBatch is called after each batch of an export (a hook for tests).
 var afterExportBatch func()
 
+// loadBatch loads the rows of one batch of the snapshot, in its order, as the plan selects them now: by ID and
+// the plan's conditions (a repository moved out of reach, a row that left the filter, is dropped). A repository
+// whose snapshot rows are not all there (a scan replaced them) is read again as a whole.
+func (p *usagePlan) loadBatch(ctx context.Context, batch []*repo_model.Dependency) ([]*repo_model.Dependency, error) {
+	ids := make([]int64, len(batch))
+	for i, d := range batch {
+		ids[i] = d.ID
+	}
+	loaded, err := repo_model.GetDependencyUsageByIDs(ctx, p.opts, ids)
+	if err != nil {
+		return nil, err
+	}
+	var out []*repo_model.Dependency
+	for start := 0; start < len(batch); {
+		end := start
+		complete := true
+		for end < len(batch) && batch[end].RepoID == batch[start].RepoID {
+			complete = complete && loaded[batch[end].ID] != nil
+			end++
+		}
+		var rows []*repo_model.Dependency
+		if complete {
+			for _, d := range batch[start:end] {
+				rows = append(rows, loaded[d.ID])
+			}
+		} else if rows, err = repo_model.FindDependencyUsage(ctx, p.opts.OfRepository(batch[start].RepoID), 0, 0); err != nil {
+			return nil, err
+		}
+		for _, d := range rows {
+			if !p.ranged {
+				out = append(out, d)
+			} else if in, unsure := p.filter.Match(d.Version, d.Requirement); in {
+				p.uncertain[d.ID] = unsure
+				out = append(out, d)
+			}
+		}
+		start = end
+	}
+	return out, nil
+}
+
 // ExportUsage lists every row SearchUsage would, in the same order. It reads the ordered IDs once, so the cap and
-// the count come from one snapshot, and loads the rows batch by batch by ID: a row deleted meanwhile is dropped,
-// no other row is skipped or repeated. start is called once with the count before the first emit (not at all if
-// the count is above MaxExportRows or the filter is wrong, which are errors wrapping util.ErrInvalidArgument); a
-// start error is returned as it is.
+// the count come from one snapshot, and loads the rows batch by batch, each batch holding whole repositories: a
+// row deleted meanwhile is dropped, a repository rescanned meanwhile is exported with its current rows, no other
+// row is skipped or repeated. start is called once with the count before the first emit (not at all if the count
+// is above MaxExportRows or the filter is wrong, which are errors wrapping util.ErrInvalidArgument); a start
+// error is returned as it is.
 func ExportUsage(ctx context.Context, scope SearchScope, f UsageFilter, start func(total int64) error, emit func([]*UsageRow) error) error {
 	p, err := planUsage(ctx, scope, f)
 	if err != nil {
 		return err
 	}
-	var ids []int64
-	switch {
-	case p.total == 0:
-	case p.ranged:
-		for _, d := range p.kept {
-			ids = append(ids, d.ID)
-		}
-	default:
-		if ids, err = repo_model.FindDependencyUsageIDs(ctx, p.opts, MaxExportRows+1); err != nil {
+	if p.total > int64(MaxExportRows) {
+		return TooManyMatches(scope)
+	}
+	snapshot := p.kept
+	if p.total > 0 && !p.ranged {
+		if snapshot, err = repo_model.FindDependencyUsageSnapshot(ctx, p.opts, MaxExportRows+1); err != nil {
 			return err
 		}
 	}
-	if len(ids) > MaxExportRows {
+	if len(snapshot) > MaxExportRows {
 		return TooManyMatches(scope)
 	}
-	if err := start(int64(len(ids))); err != nil {
+	if err := start(int64(len(snapshot))); err != nil {
 		return err
 	}
-	for batch := range slices.Chunk(ids, ExportBatch) {
-		deps, err := loadDependencies(ctx, batch)
+	for _, batch := range RepoBatches(snapshot, func(d *repo_model.Dependency) int64 { return d.RepoID }, ExportBatch) {
+		deps, err := p.loadBatch(ctx, batch)
 		if err != nil {
 			return err
 		}
