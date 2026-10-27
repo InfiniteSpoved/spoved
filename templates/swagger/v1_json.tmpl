@@ -24844,6 +24844,218 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/vulnerability-alerts": {
+      "get": {
+        "description": "The dependencies of the default branch matched against the OSV advisories mirrored on this server. Only people who can write to the code, and auditors, see them; everyone else gets 404, as does a repository the dependency graph is turned off for.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "List the vulnerability alerts of a repository",
+        "operationId": "repoListVulnerabilityAlerts",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "enum": [
+              "open",
+              "dismissed",
+              "fixed",
+              "closed"
+            ],
+            "type": "string",
+            "description": "only alerts in this state; closed is dismissed and fixed",
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "critical",
+              "high",
+              "moderate",
+              "low",
+              "unknown"
+            ],
+            "type": "string",
+            "description": "only alerts of this severity",
+            "name": "severity",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "only this ecosystem (Go, npm, PyPI, Maven, NuGet, crates.io, RubyGems or Packagist)",
+            "name": "ecosystem",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "affected",
+              "may_be_affected",
+              "version_unknown"
+            ],
+            "type": "string",
+            "description": "only this kind of match",
+            "name": "match",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "part of the package name (at most 256 bytes)",
+            "name": "package",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "part of the manifest path (at most 256 bytes)",
+            "name": "manifest",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/VulnerabilityAlertList"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/vulnerability-alerts/{id}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Get a vulnerability alert",
+        "operationId": "repoGetVulnerabilityAlert",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the alert",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/VulnerabilityAlert"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "patch": {
+        "description": "Dismissing needs one of the five reasons and takes an optional comment of at most 280 characters; a dismissed alert stays dismissed while its dependency still matches. Reopening takes neither. The state fixed is set by the system only.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Dismiss or reopen a vulnerability alert",
+        "operationId": "repoEditVulnerabilityAlert",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "id of the alert",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/EditVulnerabilityAlertOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/VulnerabilityAlert"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/conflict"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          },
+          "423": {
+            "$ref": "#/responses/repoArchivedError"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/wiki/new": {
       "post": {
         "consumes": [
@@ -36036,6 +36248,31 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "EditVulnerabilityAlertOption": {
+      "type": "object",
+      "title": "EditVulnerabilityAlertOption dismisses or reopens a vulnerability alert.",
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "dismissed_comment": {
+          "description": "A comment of at most 280 characters",
+          "type": "string",
+          "x-go-name": "DismissedComment"
+        },
+        "dismissed_reason": {
+          "description": "Why the alert is dismissed; required to dismiss, not allowed to reopen: fix_started, no_bandwidth,\ntolerable_risk, inaccurate or not_used",
+          "type": "string",
+          "x-go-name": "DismissedReason"
+        },
+        "state": {
+          "description": "dismissed or open; fixed is set by the system only",
+          "type": "string",
+          "x-go-name": "State"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "Email": {
       "description": "Email an email address belonging to a user",
       "type": "object",
@@ -42223,6 +42460,181 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "VulnerabilityAdvisory": {
+      "description": "VulnerabilityAdvisory is the OSV advisory an alert is about, as mirrored on this server. The texts are raw data\nfrom the advisory's author: clients must escape them.",
+      "type": "object",
+      "properties": {
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "Aliases"
+        },
+        "details": {
+          "type": "string",
+          "x-go-name": "Details"
+        },
+        "id": {
+          "description": "The OSV ID (GHSA-..., PYSEC-..., ...)",
+          "type": "string",
+          "x-go-name": "ID"
+        },
+        "modified": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Modified"
+        },
+        "published": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Published"
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/VulnerabilityReference"
+          },
+          "x-go-name": "References"
+        },
+        "score": {
+          "description": "The CVSS v3 base score, absent if the advisory has no usable vector",
+          "type": "number",
+          "format": "double",
+          "x-go-name": "Score"
+        },
+        "severity": {
+          "description": "critical, high, moderate, low or unknown",
+          "type": "string",
+          "x-go-name": "Severity"
+        },
+        "summary": {
+          "type": "string",
+          "x-go-name": "Summary"
+        },
+        "vector": {
+          "description": "The CVSS vector the score comes from",
+          "type": "string",
+          "x-go-name": "Vector"
+        },
+        "withdrawn": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "Withdrawn"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "VulnerabilityAlert": {
+      "type": "object",
+      "title": "VulnerabilityAlert is a dependency of the repository that matches an advisory.",
+      "properties": {
+        "advisory": {
+          "$ref": "#/definitions/VulnerabilityAdvisory"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "CreatedAt"
+        },
+        "dismissed_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "DismissedAt"
+        },
+        "dismissed_by": {
+          "$ref": "#/definitions/User"
+        },
+        "dismissed_comment": {
+          "type": "string",
+          "x-go-name": "DismissedComment"
+        },
+        "dismissed_reason": {
+          "description": "fix_started, no_bandwidth, tolerable_risk, inaccurate or not_used",
+          "type": "string",
+          "x-go-name": "DismissedReason"
+        },
+        "ecosystem": {
+          "description": "The ecosystem, named as OSV names it",
+          "type": "string",
+          "x-go-name": "Ecosystem"
+        },
+        "fixed_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "FixedAt"
+        },
+        "fixed_reason": {
+          "description": "fixed (the dependency changed) or withdrawn (the advisory was withdrawn), for a fixed alert",
+          "type": "string",
+          "x-go-name": "FixedReason"
+        },
+        "fixed_versions": {
+          "description": "The versions the advisory names as the fix of this package",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "FixedVersions"
+        },
+        "id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "manifest_path": {
+          "description": "The path of the manifest in the repository",
+          "type": "string",
+          "x-go-name": "ManifestPath"
+        },
+        "match": {
+          "description": "affected, may_be_affected (no version, but the declared range allows an affected one) or version_unknown",
+          "type": "string",
+          "x-go-name": "Match"
+        },
+        "package": {
+          "description": "The package as the manifest writes it",
+          "type": "string",
+          "x-go-name": "Package"
+        },
+        "requirement": {
+          "description": "The range the manifest declares when it doesn't fix the version",
+          "type": "string",
+          "x-go-name": "Requirement"
+        },
+        "severity": {
+          "description": "critical, high, moderate, low or unknown",
+          "type": "string",
+          "x-go-name": "Severity"
+        },
+        "state": {
+          "description": "open, dismissed or fixed",
+          "type": "string",
+          "x-go-name": "State"
+        },
+        "version": {
+          "description": "The version of the dependency, empty if the manifest doesn't fix it",
+          "type": "string",
+          "x-go-name": "Version"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "VulnerabilityReference": {
+      "type": "object",
+      "title": "VulnerabilityReference is a link of an advisory (an http or https URL).",
+      "properties": {
+        "type": {
+          "type": "string",
+          "x-go-name": "Type"
+        },
+        "url": {
+          "type": "string",
+          "x-go-name": "URL"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "WatchInfo": {
       "description": "WatchInfo represents an API watch status of one repository",
       "type": "object",
@@ -44160,6 +44572,28 @@
           "type": "integer",
           "format": "int64",
           "description": "The total number of variables"
+        }
+      }
+    },
+    "VulnerabilityAlert": {
+      "description": "VulnerabilityAlert",
+      "schema": {
+        "$ref": "#/definitions/VulnerabilityAlert"
+      }
+    },
+    "VulnerabilityAlertList": {
+      "description": "VulnerabilityAlertList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/VulnerabilityAlert"
+        }
+      },
+      "headers": {
+        "X-Total-Count": {
+          "type": "integer",
+          "format": "int64",
+          "description": "The total number of alerts that match"
         }
       }
     },

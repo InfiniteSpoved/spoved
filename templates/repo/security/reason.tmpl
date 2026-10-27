@@ -1,0 +1,6 @@
+{{/* The text of a dismissal reason: the dot is the reason code */}}
+{{if eq . "fix_started"}}{{ctx.Locale.Tr "repo.security.reason.fix_started"}}
+{{else if eq . "no_bandwidth"}}{{ctx.Locale.Tr "repo.security.reason.no_bandwidth"}}
+{{else if eq . "tolerable_risk"}}{{ctx.Locale.Tr "repo.security.reason.tolerable_risk"}}
+{{else if eq . "inaccurate"}}{{ctx.Locale.Tr "repo.security.reason.inaccurate"}}
+{{else if eq . "not_used"}}{{ctx.Locale.Tr "repo.security.reason.not_used"}}{{end}}

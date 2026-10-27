@@ -52,6 +52,10 @@
   overflow-wrap: anywhere;
 }
 
+.repo-dependencies-row.repo-dependencies-with-alerts {
+  grid-template-columns: 2.2fr 1fr 0.9fr 1fr 1.6fr 0.9fr;
+}
+
 .repo-dependencies-row:last-child {
   border-bottom: 0;
 }
@@ -144,6 +148,93 @@
   margin-inline-start: 1.85714em;
 }
 
+/* the dependency graph settings (Site administration): two fields per row, a unit after a number, folded limits */
+.dependency-graph-settings .dg-section {
+  margin-block: 1.5em 0.75em;
+}
+
+.dependency-graph-settings .dg-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 1em;
+}
+
+.dependency-graph-settings .dg-unit-input {
+  display: flex;
+}
+
+.dependency-graph-settings .dg-unit-input input {
+  flex: 1;
+  min-width: 0;
+}
+
+.dependency-graph-settings .dg-unit-input .dg-unit {
+  display: flex;
+  align-items: center;
+  padding-inline: 0.75em;
+  border: 1px solid var(--color-input-border);
+  border-inline-start: none;
+  border-radius: 0 var(--border-radius) var(--border-radius) 0;
+  background: var(--color-box-header);
+  color: var(--color-text-light);
+}
+
+.dependency-graph-settings .dg-unit-input:has(.dg-unit) input {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+
+.dependency-graph-settings .dg-fold {
+  margin-block: 0.5em 1em;
+}
+
+.dependency-graph-settings .dg-fold summary {
+  cursor: pointer;
+  margin-block-end: 0.75em;
+}
+
+.dependency-graph-settings .dg-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+}
+
+.dependency-graph-settings .dg-actions .ui.button {
+  margin: 0;
+}
+
+.dependency-graph-settings .dg-actions #dg-test-hint,
+.dependency-graph-settings .dg-actions #dg-test-result {
+  align-self: center;
+}
+
+.dependency-graph-settings .dg-hint {
+  color: var(--color-text-light);
+}
+
+/* the normal gap between the token block and the next field */
+.dependency-graph-settings #dg-mirror-fields {
+  margin-bottom: 1em;
+}
+
+/* the message of a refused save, at its field and next to Save */
+.dependency-graph-settings .dg-error {
+  margin-block: 0.25em;
+  color: var(--color-error-text);
+}
+
+/* the auditor's read-only view: the values in full contrast, not faded like disabled controls */
+.dependency-graph-settings .dg-read-only .field :disabled,
+.dependency-graph-settings .dg-read-only .ui.checkbox input[disabled] ~ label {
+  opacity: 1;
+}
+
+/* the auditor's source and sign-in, as text */
+.dependency-graph-settings .dg-summary > strong {
+  display: block;
+  margin-bottom: 0.25em;
+}
+
 @media (max-width: 767.98px) {
   /* tap targets of at least 44px: the whole label of an option, and the button */
   .dependency-graph-switch .ui.checkbox {
@@ -155,11 +246,32 @@
     padding-block: 10px;
   }
 
-  .dependency-graph-switch .ui.checkbox input[type="checkbox"] {
+  .dependency-graph-switch .ui.checkbox input[type="checkbox"],
+  .dependency-graph-switch .ui.checkbox input[type="radio"] {
     top: 11px;
+  }
+
+  .dependency-graph-settings .dg-fold summary {
+    min-height: 44px;
+    padding-block: 11px;
   }
 
   .dependency-graph-switch .ui.button {
     min-height: 44px;
+  }
+
+  /* phone: the fields stack */
+  .dependency-graph-settings .dg-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 767.98px) {
+  /* the alert count is a link: a target of at least 44px */
+  .repo-dependencies-alerts a.ui.label {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    font-size: 13px;
   }
 }

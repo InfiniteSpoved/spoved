@@ -22,8 +22,8 @@ const (
 )
 
 // selfAuditedKeys are written by code that records its own entry for them (log shipping records each destination
-// without its keys), so SetSettings leaves them out of its entry.
-var selfAuditedKeys = []string{"log_shipping.destinations"}
+// without its keys, the dependency graph settings without the mirror token), so SetSettings leaves them out of its entry.
+var selfAuditedKeys = []string{"log_shipping.destinations", "dependency_graph.config"}
 
 // recordSettings records admin.setting.changed for the keys whose value differs from before (the stored values,
 // absent = not stored yet), and nothing when none does. The values of the keys listed in audit_model.Fields["setting"]

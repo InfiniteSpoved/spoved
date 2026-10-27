@@ -917,6 +917,7 @@ func registerRoutes(m *web.Route) {
 	// ***** START: Admin *****
 	// the audit log is outside adminReq for the auditor; only GET routes may be (TestAdminAuditRoutes)
 	m.Get("/admin/audit", reqSignIn, admin.AuditReq, admin.Audit)
+	m.Get("/admin/config/dependency-graph", reqSignIn, admin.AuditReq, admin.DependencyGraph)
 	m.Group("/admin", func() {
 		m.Get("", admin.Dashboard)
 		m.Get("/system_status", admin.SystemStatus)
@@ -947,7 +948,10 @@ func registerRoutes(m *web.Route) {
 			m.Post("/test_mail", admin.SendTestMail)
 			m.Post("/test_cache", admin.TestCache)
 			m.Get("/settings", admin.ConfigSettings)
-			m.Combo("/dependency-graph").Get(admin.DependencyGraph).Post(admin.DependencyGraphPost)
+			m.Post("/dependency-graph", admin.DependencyGraphPost)
+			m.Post("/dependency-graph/update-advisories", admin.DependencyGraphUpdateAdvisories)
+			m.Post("/dependency-graph/settings", admin.DependencyGraphSettingsPost)
+			m.Post("/dependency-graph/test-connection", admin.DependencyGraphTestConnection)
 		})
 
 		m.Group("/monitor", func() {
@@ -1943,6 +1947,15 @@ func registerRoutes(m *web.Route) {
 				m.Get("/sbom", common.RateLimitHeavyPlain, repo.DependenciesSBOM)
 			}, context.RequireRepoReaderOr(unit.TypeCode), repo.MustEnableDependencyGraph, repo.MustBeNotEmpty)
 		}, context.RepoRef(), repo.SetDependencyGraphNav, context.RequireRepoReaderOr(unit.TypeCode, unit.TypePullRequests, unit.TypeIssues, unit.TypeReleases))
+
+		m.Group("/security/alerts", func() {
+			m.Get("", repo.SecurityAlerts)
+			m.Group("/{id}", func() {
+				m.Get("", repo.SecurityAlert)
+				m.Post("/dismiss", context.RepoMustNotBeArchived(), repo.SecurityAlertDismiss)
+				m.Post("/reopen", context.RepoMustNotBeArchived(), repo.SecurityAlertReopen)
+			})
+		}, repo.MustSeeAlerts)
 
 		m.Group("/activity_author_data", func() {
 			m.Get("", repo.ActivityAuthors)

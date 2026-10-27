@@ -179,6 +179,15 @@
 					</a>
 				{{end}}
 
+				{{if .ShowSecurityTab}}
+					<a class="{{if .PageIsSecurity}}active {{end}}item" href="{{.RepoLink}}/security/alerts">
+						{{svg "octicon-shield"}} {{ctx.Locale.Tr "repo.security"}}
+						{{if .NumOpenVulnAlerts}}
+							<span class="ui small label" id="security-open-alerts">{{CountFmt .NumOpenVulnAlerts}}</span>
+						{{end}}
+					</a>
+				{{end}}
+
 				{{template "custom/extra_tabs" .}}
 
 				{{if and RepoFlagsEnabled .SignedUser.IsAdmin}}

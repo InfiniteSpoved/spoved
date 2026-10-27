@@ -13,6 +13,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	system_model "forgejo.org/models/system"
 	user_model "forgejo.org/models/user"
+	vulnerability_model "forgejo.org/models/vulnerability"
 	"forgejo.org/modules/cache"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
@@ -124,6 +125,15 @@ func Enabled(ctx context.Context, repo *repo_model.Repository) bool {
 		return false
 	}
 	return s.Enabled
+}
+
+// DeleteRepoRows removes everything stored for a repository's dependency graph: the scan row, the rows and the
+// vulnerability alerts, in the caller's transaction.
+func DeleteRepoRows(ctx context.Context, repoID int64) error {
+	if err := repo_model.DeleteRepoDependencies(ctx, repoID); err != nil {
+		return err
+	}
+	return vulnerability_model.DeleteRepoAlerts(ctx, repoID)
 }
 
 // enabledStored is Enabled read from the stored rows, without a cache, inside the caller's transaction: the scan's
@@ -254,7 +264,7 @@ func SetRepoSwitch(ctx context.Context, repo *repo_model.Repository, on bool) er
 		if on {
 			return nil
 		}
-		return repo_model.DeleteRepoDependencies(ctx, repo.ID)
+		return DeleteRepoRows(ctx, repo.ID)
 	})
 	if err != nil {
 		repo.DependencyGraphDisabled = !s.Own
@@ -299,7 +309,7 @@ func purgeDisabled(ctx context.Context, batches int, scope builder.Cond) (more b
 		}
 		if err := db.WithTx(ctx, func(ctx context.Context) error {
 			for _, id := range ids {
-				if err := repo_model.DeleteRepoDependencies(ctx, id); err != nil {
+				if err := DeleteRepoRows(ctx, id); err != nil {
 					return err
 				}
 			}

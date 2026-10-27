@@ -66,6 +66,7 @@ type ConfigStruct struct {
 	LogShipping                *config.Value[LogShippingState]
 	AuditRetention             *config.Value[AuditRetentionState]
 	DependencyGraph            *config.Value[DependencyGraphState]
+	DependencyGraphConfig      *config.Value[DependencyGraphConfig]
 }
 
 var (
@@ -93,6 +94,7 @@ func initDefaultConfig() {
 		LogShipping:                config.ValueJSON[LogShippingState]("log_shipping.destinations"),
 		AuditRetention:             config.ValueJSON[AuditRetentionState]("audit.retention_days"),
 		DependencyGraph:            config.ValueJSON[DependencyGraphState]("dependency_graph.enabled").WithInvalid(DependencyGraphState{Mode: "invalid"}),
+		DependencyGraphConfig:      config.ValueJSON[DependencyGraphConfig]("dependency_graph.config").WithInvalid(DependencyGraphConfig{Invalid: true}),
 	}
 }
 

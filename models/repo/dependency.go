@@ -303,8 +303,13 @@ func (o *DependencySearchOptions) ToOrders() string {
 // containsFold is "col contains q, ignoring case", with % and _ in q taken literally ('!' is the escape character,
 // the one way SQLite, MySQL and PostgreSQL all agree on).
 func containsFold(col, q string) builder.Cond {
-	if len(q) > MaxDependencyQuery {
-		q = q[:MaxDependencyQuery]
+	return ContainsFold(col, q, MaxDependencyQuery)
+}
+
+// ContainsFold is containsFold for a search text of up to maxLen bytes.
+func ContainsFold(col, q string, maxLen int) builder.Cond {
+	if len(q) > maxLen {
+		q = q[:maxLen]
 	}
 	q = strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(q)
 	if setting.Database.Type.IsSQLite3() {

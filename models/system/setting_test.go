@@ -121,3 +121,21 @@ func TestGetRevisionConcurrentInsert(t *testing.T) {
 		unittest.AssertCount(t, &system.Setting{}, 1)
 	}
 }
+
+func TestEnsureSetting(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	const key = "test.ensure_setting"
+	require.NoError(t, system.EnsureSetting(db.DefaultContext, key))
+	require.NoError(t, system.EnsureSetting(db.DefaultContext, key), "a second insert does nothing")
+	v, has, err := system.GetSettingForUpdate(db.DefaultContext, key)
+	require.NoError(t, err)
+	assert.True(t, has)
+	assert.Empty(t, v)
+
+	require.NoError(t, system.SetSettings(db.DefaultContext, map[string]string{key: "kept"}))
+	require.NoError(t, system.EnsureSetting(db.DefaultContext, key))
+	v, _, err = system.GetSettingForUpdate(db.DefaultContext, key)
+	require.NoError(t, err)
+	assert.Equal(t, "kept", v, "an existing value is never replaced")
+	unittest.AssertCount(t, &system.Setting{SettingKey: key}, 1)
+}

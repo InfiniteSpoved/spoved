@@ -99,20 +99,15 @@ func CheckEndpoint(endpoint string) error {
 }
 
 // checkLoop refuses the instance itself as a destination: shipping its own access log to itself would make every
-// delivery log another request, forever. A proxy or alias in front of the instance is not detected.
+// delivery log another request, forever. Host and port are compared, so an agent on another port of this machine is
+// fine. A proxy, an alias or a DNS name of this machine (other than the configured ones) is not detected.
 func checkLoop(endpoint string) error {
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		return util.NewInvalidArgumentErrorf("invalid endpoint")
 	}
-	self := []string{setting.Domain, setting.SSH.Domain}
-	if a, err := url.Parse(setting.AppURL); err == nil {
-		self = append(self, a.Hostname())
-	}
-	for _, h := range self {
-		if h != "" && strings.EqualFold(h, u.Hostname()) {
-			return util.NewInvalidArgumentErrorf("the endpoint is this instance, which would ship its logs to itself")
-		}
+	if setting.IsInstanceHost(u.Hostname(), setting.URLPort(u)) {
+		return util.NewInvalidArgumentErrorf("the endpoint is this instance, which would ship its logs to itself")
 	}
 	return nil
 }

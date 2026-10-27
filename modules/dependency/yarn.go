@@ -196,7 +196,7 @@ func parseYarnBerry(s *sink, sc *lineScanner, asked map[string]string) error {
 			s.info.Dirs = append(s.info.Dirs, dir) // a project the lock was resolved for
 			return nil
 		}
-		version, local, ok := berryVersion(name, ref, cur.version)
+		name, version, local, ok := berryVersion(name, ref, cur.version)
 		if !ok {
 			return bad()
 		}
@@ -283,32 +283,33 @@ func berryName(m []string) string {
 	return m[2]
 }
 
-// berryVersion is the version a berry resolution of package name installs: an npm reference names it (and the
-// entry's `version:` must agree), a patch the one of the locator it patches, and a git or URL reference none (its
+// berryVersion is the package and version a berry resolution of package name installs: an npm reference names the
+// version (and the entry's `version:` must agree), a patch the package and version of the locator it patches (an
+// aliased package, `ts@patch:@scope/ts6@npm%3A6.0.2#…`, is the real one), and a git or URL reference no version (its
 // `version:` is what the package says of itself). local is true for the project's own packages (workspace:, link:,
 // portal:, file:, exec:). ok is false for a reference that doesn't read as one.
-func berryVersion(name, ref, version string) (v string, local, ok bool) {
+func berryVersion(name, ref, version string) (real, v string, local, ok bool) {
 	if yarnLocalRange(ref) || strings.HasPrefix(ref, "exec:") {
-		return "", true, true
+		return name, "", true, true
 	}
 	if r, found := strings.CutPrefix(ref, "npm:"); found {
 		r, _, _ = strings.Cut(r, "::")
-		return r, false, r == version
+		return name, r, false, r == version
 	}
 	if r, found := strings.CutPrefix(ref, "patch:"); found {
 		// `patch:name@npm%3A1.2.3#./patch::version=1.2.3&hash=...`: the patched locator, URL-encoded
 		r, _, _ = strings.Cut(r, "#")
 		inner, err := url.PathUnescape(r)
 		if err != nil {
-			return "", false, false
+			return "", "", false, false
 		}
 		m := berryLocatorRe.FindStringSubmatch(inner)
-		if m == nil || berryName(m) != name {
-			return "", false, false // a patch of another package
+		if m == nil || strings.HasPrefix(m[3], "patch:") {
+			return "", "", false, false
 		}
-		return berryVersion(name, m[3], version)
+		return berryVersion(berryName(m), m[3], version)
 	}
-	return "", false, true
+	return name, "", false, true
 }
 
 // splitYarnDescriptor splits `name@range` (the name may start with @scope/).

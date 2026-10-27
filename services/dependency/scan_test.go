@@ -5,6 +5,7 @@ package dependency
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,7 +21,9 @@ import (
 
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
+	system_model "forgejo.org/models/system"
 	"forgejo.org/models/unittest"
+	vulnerability_model "forgejo.org/models/vulnerability"
 	"forgejo.org/modules/dependency"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/queue"
@@ -662,7 +665,7 @@ func TestLostWriteRequeuesWhenHeadMoved(t *testing.T) {
 		err     error
 	}, 1)
 	go func() {
-		r, err := scan(t.Context(), repo.ID)
+		r, err := scan(t.Context(), repo.ID, new(bool))
 		done <- struct {
 			requeue bool
 			err     error
@@ -690,7 +693,7 @@ func TestScanRequeuesWhenHeadUnreadable(t *testing.T) {
 		require.NoError(t, err, string(out))
 		return orig(ctx, f, data, find, maxRows)
 	})()
-	requeue, err := scan(t.Context(), repo.ID)
+	requeue, err := scan(t.Context(), repo.ID, new(bool))
 	require.NoError(t, err)
 	assert.True(t, requeue)
 	assert.Len(t, rowsOf(t, repo.ID), 2, "the scan of the commit read at the start is stored")
@@ -851,4 +854,101 @@ func TestScanLockFilesFirst(t *testing.T) {
 	skipped := scan.SkippedManifests()
 	require.Len(t, skipped, 100)
 	assert.Equal(t, "a002/package.json", skipped[0].Path)
+}
+
+// A refresh that fails or asks for a requeue after a scan queues a rematch, and with an immediate queue (the handler
+// runs inside Push) one scan slot is enough: the scan has released its lock and slot by then.
+func TestFailedRefreshRequeuesWithoutDeadlock(t *testing.T) {
+	for name, result := range map[string]struct {
+		stats vulnerability_model.ApplyStats
+		err   error
+	}{
+		"failed":   {err: errors.New("refresh failed")},
+		"requeue":  {stats: vulnerability_model.ApplyStats{Requeue: true}},
+		"all done": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := enable(t)
+			commitFiles(t, repo, map[string]string{"go.mod": goMod}, nil)
+			defer test.MockVariableValue(&setting.DependencyGraph.MaxConcurrentScans, 1)()
+			defer test.MockVariableValue(&refreshAlerts, func(context.Context, int64, func(context.Context) (bool, error)) (vulnerability_model.ApplyStats, error) {
+				return result.stats, result.err
+			})()
+			var rematched atomic.Int32
+			defer test.MockVariableValue(&RematchAlerts, func(id int64) {
+				// what Rematch does, run synchronously as an immediate queue does
+				unlock := LockRepoScan(id)
+				defer unlock()
+				release, err := AcquireSlot(t.Context())
+				if err == nil {
+					release()
+					rematched.Add(1)
+				}
+			})()
+			done := make(chan error, 1)
+			go func() { done <- Scan(t.Context(), repo.ID) }()
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-time.After(15 * time.Second):
+				t.Fatal("the scan waits for a slot it holds itself")
+			}
+			if name == "all done" {
+				assert.Zero(t, rematched.Load())
+			} else {
+				assert.EqualValues(t, 1, rematched.Load())
+			}
+		})
+	}
+}
+
+func TestAcquireSlotLiveLimit(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	setLimit := func(n int) {
+		require.NoError(t, system_model.SetSettings(db.DefaultContext, map[string]string{setting.Config().DependencyGraphConfig.DynKey(): fmt.Sprintf(`{"limits":{"max_concurrent_scans":%d}}`, n)}))
+		bumpRevision(t)
+	}
+	t.Cleanup(func() {
+		require.NoError(t, system_model.SetSettings(db.DefaultContext, map[string]string{setting.Config().DependencyGraphConfig.DynKey(): ""}))
+		bumpRevision(t)
+	})
+	setLimit(2)
+	a, err := AcquireSlot(t.Context())
+	require.NoError(t, err)
+	b, err := AcquireSlot(t.Context())
+	require.NoError(t, err)
+
+	// the limit is lowered: the two running scans keep their slots, a third waits
+	setLimit(1)
+	ctx, cancel := context.WithTimeout(t.Context(), 1500*time.Millisecond)
+	defer cancel()
+	_, err = AcquireSlot(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	a()
+	a() // a second call gives nothing back
+	ctx2, cancel2 := context.WithTimeout(t.Context(), 1500*time.Millisecond)
+	defer cancel2()
+	_, err = AcquireSlot(ctx2)
+	require.ErrorIs(t, err, context.DeadlineExceeded, "one runs, the limit is one")
+
+	// a raised limit admits a waiting scan without a release
+	got := make(chan func(), 1)
+	go func() {
+		release, err := AcquireSlot(t.Context())
+		if err == nil {
+			got <- release
+		}
+	}()
+	time.Sleep(100 * time.Millisecond)
+	setLimit(3)
+	select {
+	case release := <-got:
+		release()
+	case <-time.After(5 * time.Second):
+		t.Fatal("the raised limit was not seen")
+	}
+	b()
+	scanSlots.Lock()
+	assert.Zero(t, scanSlots.running)
+	scanSlots.Unlock()
 }

@@ -1,0 +1,3 @@
+{{/* The match kind of an alert; a confirmed match (affected) shows nothing */}}
+{{if eq . "may_be_affected"}}<span class="vuln-match vuln-match-may">{{ctx.Locale.Tr "repo.security.match.may_be_affected"}}</span>
+{{else if eq . "version_unknown"}}<span class="vuln-match vuln-match-unknown">{{ctx.Locale.Tr "repo.security.match.version_unknown"}}</span>{{end}}

@@ -1,0 +1,135 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content repository security-alerts">
+	{{template "repo/header" .}}
+	<div class="ui container">
+		{{template "base/alert" .}}
+		<h2 class="ui header repo-security-heading">{{ctx.Locale.Tr "repo.security.alerts.title"}}</h2>
+		<div class="repo-security-header">
+			<nav class="repo-security-tabs" aria-label="{{ctx.Locale.Tr "repo.security.alerts.title"}}">
+				<a class="item{{if eq .State "open"}} active{{end}}"{{if eq .State "open"}} aria-current="page"{{end}} href="{{.RepoLink}}/security/alerts">{{ctx.Locale.TrPluralString .Counts.open "repo.security.tab.open" (ctx.Locale.PrettyNumber .Counts.open)}}</a>
+				<a class="item{{if eq .State "fixed"}} active{{end}}"{{if eq .State "fixed"}} aria-current="page"{{end}} href="{{.RepoLink}}/security/alerts?state=fixed">{{ctx.Locale.TrPluralString .Counts.fixed "repo.security.tab.fixed" (ctx.Locale.PrettyNumber .Counts.fixed)}}</a>
+				<a class="item{{if eq .State "dismissed"}} active{{end}}"{{if eq .State "dismissed"}} aria-current="page"{{end}} href="{{.RepoLink}}/security/alerts?state=dismissed">{{ctx.Locale.TrPluralString .Counts.dismissed "repo.security.tab.dismissed" (ctx.Locale.PrettyNumber .Counts.dismissed)}}</a>
+			</nav>
+			<div class="text grey" id="security-updated">
+				{{if .MirrorUpdated}}{{ctx.Locale.Tr "repo.security.mirror_updated" (DateUtils.TimeSince .MirrorUpdated)}}{{else}}{{ctx.Locale.Tr "repo.security.mirror_never"}}{{end}}
+			</div>
+		</div>
+
+		{{if .TotalAlerts}}
+		<details class="repo-security-filterbox"{{if .HasFilter}} open{{end}}>
+		<summary class="repo-security-filter-toggle">{{svg "octicon-filter"}} {{ctx.Locale.Tr "repo.security.filters_toggle"}}</summary>
+		<form class="ui form repo-security-filters" method="get" action="{{.RepoLink}}/security/alerts">
+			<input type="hidden" name="state" value="{{.State}}">
+			{{if .FilterPackage}}<input type="hidden" name="package" value="{{.FilterPackage}}">{{end}}
+			{{if .FilterManifest}}<input type="hidden" name="manifest" value="{{.FilterManifest}}">{{end}}
+			<input type="search" name="q" value="{{.Query}}" maxlength="256" placeholder="{{ctx.Locale.Tr "repo.security.search"}}" aria-label="{{ctx.Locale.Tr "repo.security.search"}}">
+			<label>{{ctx.Locale.Tr "repo.security.severity"}}
+				<select name="severity">
+					<option value="">{{ctx.Locale.Tr "repo.security.all"}}</option>
+					<option value="critical"{{if eq .Severity "critical"}} selected{{end}}>{{ctx.Locale.Tr "repo.security.severity.critical"}}</option>
+					<option value="high"{{if eq .Severity "high"}} selected{{end}}>{{ctx.Locale.Tr "repo.security.severity.high"}}</option>
+					<option value="moderate"{{if eq .Severity "moderate"}} selected{{end}}>{{ctx.Locale.Tr "repo.security.severity.moderate"}}</option>
+					<option value="low"{{if eq .Severity "low"}} selected{{end}}>{{ctx.Locale.Tr "repo.security.severity.low"}}</option>
+					<option value="unknown"{{if eq .Severity "unknown"}} selected{{end}}>{{ctx.Locale.Tr "repo.security.severity.unknown"}}</option>
+				</select>
+			</label>
+			<label>{{ctx.Locale.Tr "repo.dependencies.ecosystem"}}
+				<select name="ecosystem">
+					<option value="">{{ctx.Locale.Tr "repo.security.all"}}</option>
+					{{range .Ecosystems}}<option value="{{.}}"{{if eq . $.Ecosystem}} selected{{end}}>{{.}}</option>{{end}}
+				</select>
+			</label>
+			<label>{{ctx.Locale.Tr "repo.security.match"}}
+				<select name="match">
+					<option value="">{{ctx.Locale.Tr "repo.security.all"}}</option>
+					<option value="affected"{{if eq .Match "affected"}} selected{{end}}>{{ctx.Locale.Tr "repo.security.match.affected"}}</option>
+					<option value="may_be_affected"{{if eq .Match "may_be_affected"}} selected{{end}}>{{ctx.Locale.Tr "repo.security.match.may_be_affected"}}</option>
+					<option value="version_unknown"{{if eq .Match "version_unknown"}} selected{{end}}>{{ctx.Locale.Tr "repo.security.match.version_unknown"}}</option>
+				</select>
+			</label>
+			<button class="ui basic button" type="submit">{{ctx.Locale.Tr "repo.dependencies.filter"}}</button>
+		</form>
+		</details>
+		{{end}}
+		{{if or .FilterPackage .FilterManifest}}
+			<div class="repo-security-chips">
+				{{if .FilterPackage}}<a class="repo-security-chip" href="{{.NoPackageURL}}" aria-label="{{ctx.Locale.Tr "repo.security.filter.remove"}}: {{ctx.Locale.Tr "repo.security.filter.package" .FilterPackage}}">{{ctx.Locale.Tr "repo.security.filter.package" .FilterPackage}} {{svg "octicon-x" 12}}</a>{{end}}
+				{{if .FilterManifest}}<a class="repo-security-chip" href="{{.NoManifestURL}}" aria-label="{{ctx.Locale.Tr "repo.security.filter.remove"}}: {{ctx.Locale.Tr "repo.security.filter.manifest" .FilterManifest}}">{{ctx.Locale.Tr "repo.security.filter.manifest" .FilterManifest}} {{svg "octicon-x" 12}}</a>{{end}}
+			</div>
+		{{end}}
+		{{if and .HasFilter .Alerts}}
+			<div class="text grey tw-mb-3" id="security-matches">
+				{{ctx.Locale.TrPluralString .Total "repo.security.matches" (ctx.Locale.PrettyNumber .Total)}}
+				<a class="repo-security-clear" href="{{.RepoLink}}/security/alerts?state={{.State}}">{{ctx.Locale.Tr "repo.dependencies.clear"}}</a>
+			</div>
+		{{end}}
+
+		{{if .Alerts}}
+			<div class="repo-security-table" role="table" aria-label="{{ctx.Locale.Tr "repo.security.alerts.title"}}">
+				<div class="repo-security-row repo-security-head" role="row">
+					<span role="columnheader">{{ctx.Locale.Tr "repo.security.severity"}}</span>
+					<span role="columnheader">{{ctx.Locale.Tr "repo.security.advisory"}}</span>
+					<span role="columnheader">{{ctx.Locale.Tr "repo.dependencies.package"}}</span>
+					<span role="columnheader">{{ctx.Locale.Tr "repo.security.fixed_in"}}</span>
+					<span role="columnheader">{{ctx.Locale.Tr "repo.dependencies.manifest"}}</span>
+					<span role="columnheader"></span>
+				</div>
+				{{range .Alerts}}
+					<div class="repo-security-row" role="row">
+						<span role="cell" class="repo-security-severity">{{template "repo/security/severity" .Severity}}</span>
+						<span role="cell" class="repo-security-title">
+							<a href="{{$.RepoLink}}/security/alerts/{{.ID}}"><strong>{{.Title}}</strong></a>
+							<span class="text grey small">{{if .Advisory}}{{range $i, $id := .ShortIDs}}{{if $i}} · {{end}}{{$id}}{{end}}{{if .Score}} · {{ctx.Locale.Tr "repo.security.cvss" .Score}}{{end}}{{end}}</span>
+						</span>
+						<span role="cell" class="repo-security-package">
+							<span class="ui basic mini label">{{.Ecosystem}}</span> {{.PackageName}}
+							{{if .Version}}<code>{{.Version}}</code>{{else if .Requirement}}<code>{{.Requirement}}</code>{{end}}
+							{{template "repo/security/match" .MatchKind}}
+						</span>
+						<span role="cell" class="repo-security-fixed">{{if eq .State "fixed"}}<span class="text grey">{{if .Version}}{{ctx.Locale.Tr "repo.security.was_version" .Version}}{{end}}{{if .FixedUnix}} · {{DateUtils.TimeSince .FixedUnix}}{{end}}</span>{{else}}<span class="repo-security-cell-label">{{ctx.Locale.Tr "repo.security.fixed_in"}}</span> {{range $i, $v := .Fixed}}{{if $i}}, {{end}}<code>{{$v}}</code>{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.security.no_fix"}}</span>{{end}}{{end}}</span>
+						<span role="cell" class="repo-security-manifest"><span class="repo-security-cell-label">{{ctx.Locale.Tr "repo.security.in_manifest"}}</span> {{range $i, $part := StringUtils.Split .ManifestPath "/"}}{{if $i}}/<wbr>{{end}}{{$part}}{{end}}</span>
+						<span role="cell" class="repo-security-actions">
+							{{if and $.CanDismissAlerts (eq .State "open")}}
+								<button type="button" class="ui basic compact button show-modal repo-security-dismiss" data-modal="#dismiss-alert-modal" data-modal-form.action="{{$.RepoLink}}/security/alerts/{{.ID}}/dismiss" data-modal-dismiss-alert-title="{{if .Advisory}}{{.Advisory.OSVID}}{{end}}">{{ctx.Locale.Tr "repo.security.dismiss_button"}}</button>
+								<div class="ui jump dropdown icon button repo-security-overflow" aria-label="{{ctx.Locale.Tr "repo.more_operations"}}">
+									{{svg "octicon-kebab-horizontal"}}
+									<div class="menu">
+										<a class="item show-modal" role="button" data-modal="#dismiss-alert-modal" data-modal-form.action="{{$.RepoLink}}/security/alerts/{{.ID}}/dismiss" data-modal-dismiss-alert-title="{{if .Advisory}}{{.Advisory.OSVID}}{{end}}">{{ctx.Locale.Tr "repo.security.dismiss_button"}}</a>
+									</div>
+								</div>
+							{{else if eq .State "dismissed"}}
+								<span class="repo-security-dismissal">
+									{{template "repo/security/reason" .DismissedReason}}
+									<span class="text grey">· {{if .DismissedBy}}{{.DismissedBy.GetDisplayName}}, {{end}}{{DateUtils.TimeSince .DismissedUnix}}</span>
+								</span>
+								{{if $.CanDismissAlerts}}
+									<form method="post" action="{{$.RepoLink}}/security/alerts/{{.ID}}/reopen">
+										<input type="hidden" name="redirect_to" value="{{$.ListURL}}">
+										<button class="ui basic compact button">{{ctx.Locale.Tr "repo.security.reopen"}}</button>
+									</form>
+								{{end}}
+							{{end}}
+						</span>
+					</div>
+				{{end}}
+			</div>
+			{{template "base/paginate" .}}
+		{{else if .HasFilter}}
+			<div class="ui info message" id="security-no-match">
+				{{ctx.Locale.Tr "repo.security.no_match"}}
+				<a class="repo-security-clear" href="{{.RepoLink}}/security/alerts?state={{.State}}">{{ctx.Locale.Tr "repo.dependencies.clear"}}</a>
+			</div>
+		{{else if .TotalAlerts}}
+			<div class="ui info message" id="security-empty-state">
+				{{if eq .State "fixed"}}{{ctx.Locale.Tr "repo.security.empty_state.fixed"}}{{else if eq .State "dismissed"}}{{ctx.Locale.Tr "repo.security.empty_state.dismissed"}}{{else}}{{ctx.Locale.Tr "repo.security.empty_state.open"}}{{end}}
+			</div>
+		{{else}}
+			<div class="ui info message" id="security-empty">
+				<div class="header">{{ctx.Locale.Tr "repo.security.empty"}}</div>
+				<p>{{ctx.Locale.Tr "repo.security.empty_hint"}}</p>
+			</div>
+		{{end}}
+	</div>
+</div>
+{{if .CanDismissAlerts}}{{template "repo/security/dismiss_modal" (dict "DismissAction" "" "From" "list" "RedirectTo" .ListURL "MaxCommentRunes" .MaxCommentRunes)}}{{end}}
+{{template "base/footer" .}}

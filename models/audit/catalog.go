@@ -20,6 +20,7 @@ var Actions = map[string]string{
 	"admin.actions_variable.created":         CategoryAdmin,
 	"admin.actions_variable.deleted":         CategoryAdmin,
 	"admin.actions_variable.updated":         CategoryAdmin,
+	"admin.vulnerability_mirror.updated":     CategoryAdmin,
 	"admin.webhook.created":                  CategoryAdmin,
 	"admin.webhook.deleted":                  CategoryAdmin,
 	"admin.webhook.updated":                  CategoryAdmin,
@@ -84,7 +85,8 @@ var Actions = map[string]string{
 	"account.user.role_revoked":              CategoryAccount,
 	"account.user.updated":                   CategoryAccount,
 
-	"admin.cron.run":                                CategoryAdmin,
+	"admin.cron.run": CategoryAdmin,
+	"admin.dependency_graph.settings_changed":       CategoryAdmin,
 	"admin.log_shipping.created":                    CategoryAdmin,
 	"admin.log_shipping.deleted":                    CategoryAdmin,
 	"admin.log_shipping.updated":                    CategoryAdmin,
@@ -127,6 +129,8 @@ var Actions = map[string]string{
 	"activity.git.push":                    CategoryActivity,
 	"activity.git.push.refused":            CategoryActivity,
 	"activity.git.push.refused.aggregated": CategoryActivity,
+
+	"activity.dependency_graph.connection_tested": CategoryActivity,
 
 	"audit.chain.started":    CategoryAudit,
 	"audit.exported":         CategoryAudit,
@@ -219,6 +223,8 @@ var Actions = map[string]string{
 	"repo.transfer.rejected":               CategoryRepo,
 	"repo.transfer.started":                CategoryRepo,
 	"repo.units.changed":                   CategoryRepo,
+	"repo.vulnerability_alert.dismissed":   CategoryRepo,
+	"repo.vulnerability_alert.reopened":    CategoryRepo,
 	"org.team.created":                     CategoryOrg,
 	"org.team.deleted":                     CategoryOrg,
 	"org.team.invite_created":              CategoryOrg,

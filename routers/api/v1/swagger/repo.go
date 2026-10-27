@@ -655,3 +655,20 @@ type swaggerResponseSBOM struct {
 	// in:body
 	Body any `json:"body"`
 }
+
+// VulnerabilityAlertList
+// swagger:response VulnerabilityAlertList
+type swaggerResponseVulnerabilityAlertList struct {
+	// in:body
+	Body []api.VulnerabilityAlert `json:"body"`
+
+	// The total number of alerts that match
+	TotalCount int64 `json:"X-Total-Count"`
+}
+
+// VulnerabilityAlert
+// swagger:response VulnerabilityAlert
+type swaggerResponseVulnerabilityAlert struct {
+	// in:body
+	Body api.VulnerabilityAlert `json:"body"`
+}

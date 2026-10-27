@@ -175,3 +175,15 @@ func StripControl(s string) string {
 		return r
 	}, s)
 }
+
+// StripFormatting removes the bidirectional-control and zero-width characters (U+200B to U+200F, U+202A to U+202E,
+// U+2066 to U+2069 and U+FEFF) from text of an outside source that is shown next to other text: they reorder or
+// hide parts of it.
+func StripFormatting(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 0x200b && r <= 0x200f || r >= 0x202a && r <= 0x202e || r >= 0x2066 && r <= 0x2069 || r == 0xfeff {
+			return -1
+		}
+		return r
+	}, s)
+}

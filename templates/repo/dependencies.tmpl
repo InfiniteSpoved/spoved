@@ -121,20 +121,22 @@
 
 			{{if .Dependencies}}
 				<div class="repo-dependencies-table" role="table" aria-label="{{ctx.Locale.Tr "repo.dependencies.title"}}">
-					<div class="repo-dependencies-row repo-dependencies-head" role="row">
+					<div class="repo-dependencies-row repo-dependencies-head{{if .ShowAlertCounts}} repo-dependencies-with-alerts{{end}}" role="row">
 						<span role="columnheader">{{ctx.Locale.Tr "repo.dependencies.package"}}</span>
 						<span role="columnheader">{{ctx.Locale.Tr "repo.dependencies.version"}}</span>
 						<span role="columnheader">{{ctx.Locale.Tr "repo.dependencies.relationship"}}</span>
 						<span role="columnheader">{{ctx.Locale.Tr "repo.dependencies.license"}}</span>
 						<span role="columnheader">{{ctx.Locale.Tr "repo.dependencies.manifest"}}</span>
+						{{if .ShowAlertCounts}}<span role="columnheader">{{ctx.Locale.Tr "repo.dependencies.alerts"}}</span>{{end}}
 					</div>
 					{{range .Dependencies}}
-						<div class="repo-dependencies-row" role="row">
+						<div class="repo-dependencies-row{{if $.ShowAlertCounts}} repo-dependencies-with-alerts{{end}}" role="row">
 							<span class="repo-dependencies-package" role="cell"><span class="ui basic mini label">{{.Ecosystem}}</span> <strong>{{.Name}}</strong></span>
 							<span role="cell">{{if .Version}}<code>{{.Version}}</code>{{else if .Requirement}}<code>{{.Requirement}}</code> <span class="repo-dependencies-not-pinned">{{ctx.Locale.Tr "repo.dependencies.not_pinned"}}</span>{{end}}</span>
 							<span role="cell">{{if .Direct}}{{ctx.Locale.Tr "repo.dependencies.direct"}}{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.dependencies.transitive"}}</span>{{end}}</span>
 							<span role="cell">{{if .License}}{{.License}}{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.dependencies.license_unknown"}}</span>{{end}}</span>
 							<span role="cell"><a href="{{$.RepoLink}}/src/commit/{{$.Scan.CommitSHA}}/{{PathEscapeSegments .ManifestPath}}">{{range $i, $part := StringUtils.Split .ManifestPath "/"}}{{if $i}}/<wbr>{{end}}{{$part}}{{end}}</a></span>
+							{{if $.ShowAlertCounts}}{{$n := index $.AlertCounts .ID}}<span role="cell" class="repo-dependencies-alerts">{{if $n}}<a class="ui red basic mini label" href="{{$.RepoLink}}/security/alerts?package={{.Name | QueryEscape}}&ecosystem={{.Ecosystem | QueryEscape}}&manifest={{.ManifestPath | QueryEscape}}">{{ctx.Locale.TrPluralString $n "repo.dependencies.alert_count" $n}}</a>{{end}}</span>{{end}}
 						</div>
 					{{end}}
 				</div>

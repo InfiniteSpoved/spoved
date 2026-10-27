@@ -33,10 +33,12 @@ const (
 
 var (
 	scanQueue *queue.WorkerPoolQueue[int64]
-	// scanSlots counts the scans running in this process; its size is [dependency_graph] MAX_CONCURRENT_SCANS,
-	// read when the first scan needs a slot
-	scanSlots     chan struct{}
-	scanSlotsOnce sync.Once
+	// scanSlots counts the scans and rematches running in this process (AcquireSlot)
+	scanSlots struct {
+		sync.Mutex
+		running int
+		freed   chan struct{} // closed and replaced when a slot is given back
+	}
 
 	// repoScans holds the repositories being scanned in this process: the unique queue forgets an ID once it is
 	// popped, so a push during a scan queues the repository again, and the second scan must wait for the first.
@@ -51,9 +53,9 @@ type repoScan struct {
 	refs int
 }
 
-// lockRepoScan waits until no other scan of the repository runs in this process. The caller holds no database
+// LockRepoScan waits until no other scan or alert refresh of the repository runs in this process. Take it before a slot. The caller holds no database
 // connection or transaction while it waits.
-func lockRepoScan(repoID int64) (unlock func()) {
+func LockRepoScan(repoID int64) (unlock func()) {
 	repoScans.Lock()
 	rs := repoScans.running[repoID]
 	if rs == nil {

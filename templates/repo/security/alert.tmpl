@@ -1,0 +1,84 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content repository security-alert">
+	{{template "repo/header" .}}
+	<div class="ui container">
+		{{template "base/alert" .}}
+		{{$alert := .Alert}}
+		<div class="breadcrumb tw-mb-3">
+			<a href="{{.RepoLink}}/security/alerts">{{ctx.Locale.Tr "repo.security.alerts.title"}}</a> › {{if $alert.Advisory}}{{$alert.Advisory.OSVID}}{{else}}{{$alert.PackageName}}{{end}}
+		</div>
+		<div class="repo-security-badges">
+			{{template "repo/security/severity" $alert.Severity}}
+			{{if $alert.Score}}<span class="text grey">{{ctx.Locale.Tr "repo.security.cvss" $alert.Score}}</span>{{end}}
+			{{if eq $alert.State "open"}}<span class="ui small label vuln-state vuln-state-open" id="alert-state">{{ctx.Locale.Tr "repo.security.state.open"}}</span>
+			{{else if eq $alert.State "dismissed"}}<span class="ui small basic label" id="alert-state">{{ctx.Locale.Tr "repo.security.state.dismissed"}}</span>
+			{{else}}<span class="ui small label vuln-state vuln-state-fixed" id="alert-state">{{ctx.Locale.Tr "repo.security.state.fixed"}}</span>{{end}}
+			{{template "repo/security/match" $alert.MatchKind}}
+			<span class="text grey">{{ctx.Locale.Tr "repo.security.first_seen" (DateUtils.TimeSince $alert.CreatedUnix) .Repository.DefaultBranch}}{{if .ScanCommit}} {{ctx.Locale.Tr "repo.security.scanned_at" (HTMLFormat "<a href=\"%s/commit/%s\"><code>%s</code></a>" .RepoLink .ScanCommit (ShortSha .ScanCommit))}}{{end}}</span>
+		</div>
+		<h2 class="ui header tw-mt-2">{{$alert.Title}}</h2>
+		{{if .Withdrawn}}<div class="ui warning message">{{ctx.Locale.Tr "repo.security.withdrawn"}}</div>{{end}}
+		{{if $alert.Advisory}}
+			<div class="repo-security-ids">
+				<code>{{$alert.Advisory.OSVID}}</code>{{range $alert.Aliases}} <code>{{.}}</code>{{end}}
+			</div>
+		{{end}}
+
+		<dl class="repo-security-facts">
+			<dt>{{ctx.Locale.Tr "repo.dependencies.package"}}</dt>
+			<dd>{{$alert.PackageName}} <span class="ui basic mini label">{{$alert.Ecosystem}}</span></dd>
+			<dt>{{if eq $alert.State "fixed"}}{{ctx.Locale.Tr "repo.security.version_was"}}{{else}}{{ctx.Locale.Tr "repo.security.version_in_use"}}{{end}}</dt>
+			<dd>{{if $alert.Version}}<code>{{$alert.Version}}</code>{{else if $alert.Requirement}}<code>{{$alert.Requirement}}</code> <span class="text grey">{{ctx.Locale.Tr "repo.dependencies.not_pinned"}}</span>{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.security.version_none"}}</span>{{end}}</dd>
+			{{if $alert.Affected}}
+				<dt>{{ctx.Locale.Tr "repo.security.affected_versions"}}</dt>
+				<dd>{{range $i, $v := $alert.Affected}}{{if $i}}<br>{{end}}<code>{{$v}}</code>{{end}}</dd>
+			{{end}}
+			<dt>{{ctx.Locale.Tr "repo.security.fixed_in"}}</dt>
+			<dd>{{range $i, $v := $alert.Fixed}}{{if $i}}, {{end}}<code>{{$v}}</code>{{else}}<span class="text grey">{{ctx.Locale.Tr "repo.security.no_fix"}}</span>{{end}}</dd>
+			<dt>{{ctx.Locale.Tr "repo.dependencies.manifest"}}</dt>
+			<dd>{{$alert.ManifestPath}}</dd>
+		</dl>
+		{{if eq $alert.MatchKind "may_be_affected"}}<p class="ui info message" id="alert-match-hint">{{ctx.Locale.Tr "repo.security.hint.may_be_affected"}}</p>
+		{{else if eq $alert.MatchKind "version_unknown"}}<p class="ui info message" id="alert-match-hint">{{ctx.Locale.Tr "repo.security.hint.version_unknown"}}</p>{{end}}
+
+		{{if $alert.Advisory}}
+			{{if .DetailsHTML}}
+				<h3>{{ctx.Locale.Tr "repo.security.details"}}</h3>
+				<div class="markup repo-security-details" id="alert-details">{{.DetailsHTML}}</div>
+			{{end}}
+			{{if .References}}
+				<h3>{{ctx.Locale.Tr "repo.security.references"}}</h3>
+				<ul class="repo-security-references">
+					{{range .References}}<li><a href="{{.URL}}" target="_blank" rel="nofollow noopener noreferrer">{{.URL}}</a></li>{{end}}
+				</ul>
+			{{end}}
+			<p class="text grey small">{{ctx.Locale.Tr "repo.security.source" (DateUtils.AbsoluteShort $alert.Advisory.ModifiedUnix)}}</p>
+		{{end}}
+
+		{{if eq $alert.State "dismissed"}}
+			<div class="ui message" id="alert-dismissed-note">
+				{{if $alert.DismissedBy}}{{ctx.Locale.Tr "repo.security.dismissed_by" (DateUtils.TimeSince $alert.DismissedUnix) $alert.DismissedBy.GetDisplayName}}{{else}}{{ctx.Locale.Tr "repo.security.dismissed_at" (DateUtils.TimeSince $alert.DismissedUnix)}}{{end}}
+				<strong>{{template "repo/security/reason" $alert.DismissedReason}}</strong>
+				{{if $alert.DismissedComment}}<div class="tw-mt-1 tw-whitespace-pre-wrap">{{$alert.DismissedComment}}</div>{{end}}
+			</div>
+		{{else if eq $alert.State "fixed"}}
+			<div class="ui message" id="alert-fixed-note">
+				{{if eq $alert.FixedReason "withdrawn"}}{{ctx.Locale.Tr "repo.security.fixed_withdrawn" (DateUtils.TimeSince $alert.FixedUnix)}}{{else if and .ScanCommit .CurrentVersion}}{{ctx.Locale.Tr "repo.security.fixed_change_now" (DateUtils.TimeSince $alert.FixedUnix) (HTMLFormat "<a href=\"%s/commit/%s\"><code>%s</code></a>" .RepoLink .ScanCommit (ShortSha .ScanCommit)) (HTMLFormat "<code>%s</code>" .CurrentVersion)}}{{else}}{{ctx.Locale.Tr "repo.security.fixed_change" (DateUtils.TimeSince $alert.FixedUnix)}}{{end}}
+			</div>
+		{{end}}
+
+		<div class="repo-security-buttons">
+			{{if and .CanDismissAlerts (eq $alert.State "open")}}
+				<button type="button" class="ui basic button show-modal" id="alert-dismiss" data-modal="#dismiss-alert-modal" data-modal-dismiss-alert-title="{{if $alert.Advisory}}{{$alert.Advisory.OSVID}}{{end}}">{{ctx.Locale.Tr "repo.security.dismiss_button"}}</button>
+			{{end}}
+			{{if and .CanDismissAlerts (eq $alert.State "dismissed")}}
+				<form method="post" action="{{.RepoLink}}/security/alerts/{{$alert.ID}}/reopen">
+					<button class="ui basic button" id="alert-reopen">{{ctx.Locale.Tr "repo.security.reopen"}}</button>
+				</form>
+			{{end}}
+			<a href="{{.RepoLink}}/activity/dependencies{{.DependenciesQuery}}">{{ctx.Locale.Tr "repo.security.view_dependencies"}}</a>
+		</div>
+	</div>
+</div>
+{{if .CanDismissAlerts}}{{template "repo/security/dismiss_modal" (dict "DismissAction" (printf "%s/security/alerts/%d/dismiss" .RepoLink $alert.ID) "From" "alert" "MaxCommentRunes" .MaxCommentRunes)}}{{end}}
+{{template "base/footer" .}}

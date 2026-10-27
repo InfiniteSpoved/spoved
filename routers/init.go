@@ -63,6 +63,7 @@ import (
 	"forgejo.org/services/stats"
 	"forgejo.org/services/task"
 	"forgejo.org/services/uinotification"
+	vulnerability_service "forgejo.org/services/vulnerability"
 	"forgejo.org/services/webhook"
 )
 
@@ -164,6 +165,7 @@ func InitWebInstalled(ctx context.Context) {
 	mustInit(mergequeue.Init)
 	mustInit(mergeforward.Init)
 	mustInit(dependency_service.Init)
+	mustInit(vulnerability_service.Init)
 	mustInit(task.Init)
 	mustInit(migrations_allowlist.Init)
 	eventsource.GetManager().Init()

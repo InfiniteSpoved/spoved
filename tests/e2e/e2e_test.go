@@ -132,7 +132,7 @@ func TestE2e(t *testing.T) {
 				defer test.MockVariableValue(&setting.Quota.Enabled, true)()
 				defer test.MockVariableValue(&testE2eWebRoutes, routers.NormalRoutes())()
 			}
-			if testname == "dependencies.test.e2e" {
+			if testname == "dependencies.test.e2e" || testname == "vulnerability-alerts.test.e2e" {
 				defer test.MockVariableValue(&setting.DependencyGraph.Enabled, true)()
 			}
 			if testname == "runner-management.test.e2e" {

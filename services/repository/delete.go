@@ -26,6 +26,7 @@ import (
 	secret_model "forgejo.org/models/secret"
 	system_model "forgejo.org/models/system"
 	user_model "forgejo.org/models/user"
+	vulnerability_model "forgejo.org/models/vulnerability"
 	"forgejo.org/models/webhook"
 	actions_module "forgejo.org/modules/actions"
 	"forgejo.org/modules/lfs"
@@ -229,6 +230,7 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepo
 			&repo_model.RepoArchiveDownloadCount{RepoID: repoID},
 			&repo_model.Dependency{RepoID: repoID},
 			&repo_model.DependencyScan{RepoID: repoID},
+			&vulnerability_model.Alert{RepoID: repoID},
 			&actions_model.ActionRunnerToken{RepoID: optional.Some(repoID)},
 			&auth_model.AccessTokenResourceRepo{RepoID: repoID},
 		); err != nil {

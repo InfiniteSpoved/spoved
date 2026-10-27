@@ -256,12 +256,20 @@ input:-webkit-autofill:active,
 }
 
 .ui.form .field > label,
+.ui.form .grouped.fields > label,
 .ui.form .inline.fields > label,
 .ui.form .inline.fields .field > label,
 .ui.form .inline.fields .field > p,
 .ui.form .inline.field > label,
 .ui.form .inline.field > p {
   color: var(--color-text);
+}
+
+/* the label of a refused field: Fomantic's fixed red fails contrast in the dark theme */
+.ui.ui.form .field.error label,
+.ui.ui.form .fields.error .field label,
+.ui.ui.form .fields.error > label {
+  color: var(--color-error-text);
 }
 
 .ui.form .required.fields > .field > label::after,

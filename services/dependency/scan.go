@@ -12,8 +12,11 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	repo_model "forgejo.org/models/repo"
+	vulnerability_model "forgejo.org/models/vulnerability"
 	"forgejo.org/modules/dependency"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
@@ -124,18 +127,70 @@ func hasExcludedSegment(p string) bool {
 	return false
 }
 
+// AcquireSlot waits for one of the slots (the scans at once in force) that scans and alert rematches share in this
+// process; release gives it back. The limit is read at every attempt: a lower one lets the running scans finish, a
+// higher one admits a waiting scan within a second.
+func AcquireSlot(ctx context.Context) (release func(), err error) {
+	for {
+		limit := setting.DependencyGraphSettings(ctx).MaxConcurrentScans // outside the lock: it may query the database
+		scanSlots.Lock()
+		if scanSlots.running < max(limit, 1) {
+			scanSlots.running++
+			scanSlots.Unlock()
+			var once sync.Once
+			return func() { once.Do(releaseSlot) }, nil
+		}
+		if scanSlots.freed == nil {
+			scanSlots.freed = make(chan struct{})
+		}
+		freed := scanSlots.freed
+		scanSlots.Unlock()
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-freed:
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		}
+		timer.Stop()
+	}
+}
+
+func releaseSlot() {
+	scanSlots.Lock()
+	defer scanSlots.Unlock()
+	scanSlots.running--
+	if scanSlots.freed != nil {
+		close(scanSlots.freed)
+		scanSlots.freed = nil
+	}
+}
+
+// refreshAlerts is the alert refresh after a scan (tests replace it).
+var refreshAlerts = vulnerability_model.RefreshAlerts
+
+// RematchAlerts queues a repository for a rematch of its vulnerability alerts; services/vulnerability sets it.
+var RematchAlerts = func(repoID int64) {}
+
 // Scan reads the manifests of the repository's default branch, at the head as it is when the scan starts, and
 // replaces the stored dependencies. A scan that fails keeps the old dependencies and records an error code.
 func Scan(ctx context.Context, repoID int64) error {
-	requeue, err := scan(ctx, repoID)
+	var rematch bool
+	requeue, err := scan(ctx, repoID, &rematch)
+	// after the scan's lock and slot are released: with immediate queues these run at once, and a rematch waits for both
+	if rematch {
+		RematchAlerts(repoID)
+	}
 	if requeue {
-		Enqueue(repoID) // after the scan's lock is released: with immediate queues this runs the next scan at once
+		Enqueue(repoID)
 	}
 	return err
 }
 
-// scan is Scan; requeue is true when the branch moved while it ran.
-func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
+// scan is Scan; requeue is true when the branch moved while it ran, and *rematch is set when the alerts must be
+// matched again (the refresh failed or was overtaken by newer advisory data).
+func scan(ctx context.Context, repoID int64, rematch *bool) (requeue bool, err error) {
 	if !SiteEnabled(ctx) {
 		return false, nil
 	}
@@ -153,15 +208,13 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 		return false, nil
 	}
 	// one scan of a repository at a time, and at most MAX_CONCURRENT_SCANS of all, counted only while one runs
-	unlock := lockRepoScan(repo.ID)
+	unlock := LockRepoScan(repo.ID)
 	defer unlock()
-	scanSlotsOnce.Do(func() { scanSlots = make(chan struct{}, max(setting.DependencyGraph.MaxConcurrentScans, 1)) })
-	select {
-	case scanSlots <- struct{}{}:
-		defer func() { <-scanSlots }()
-	case <-ctx.Done():
-		return false, ctx.Err()
+	release, err := AcquireSlot(ctx)
+	if err != nil {
+		return false, err
 	}
+	defer release()
 	old, err := repo_model.GetRepoDependencyScan(ctx, repo.ID)
 	if err != nil {
 		return false, err
@@ -171,7 +224,8 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 		return false, fail(ctx, repo, old, repo_model.DependencyErrGit, errors.New("no default branch"))
 	}
 
-	scanCtx, cancel, finished := process.GetManager().AddContextTimeout(ctx, setting.DependencyGraph.ScanTimeout, fmt.Sprintf("dependency scan of repository %d", repo.ID))
+	cfg := setting.DependencyGraphSettings(ctx)
+	scanCtx, cancel, finished := process.GetManager().AddContextTimeout(ctx, cfg.ScanTimeout, fmt.Sprintf("dependency scan of repository %d", repo.ID))
 	defer finished()
 	defer cancel()
 
@@ -188,7 +242,7 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 		return false, nil // nothing changed, e.g. a mirror sync of other branches
 	}
 
-	result, deps, code, err := scanCommit(scanCtx, repo, gitRepo, sha)
+	result, deps, code, err := scanCommit(scanCtx, &cfg, repo, gitRepo, sha)
 	if err != nil {
 		return false, fail(ctx, repo, old, code, err)
 	}
@@ -202,9 +256,18 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	if err != nil {
 		return false, err
 	}
+	if written {
+		// the alerts follow the rows, under the same check of the switches; if this fails, the rows are right and the
+		// repository is queued for a rematch
+		st, err := refreshAlerts(ctx, repo.ID, stillOn(repo.ID))
+		if err != nil {
+			log.Error("vulnerability alerts: refresh repository %d: %v", repo.ID, err)
+		}
+		*rematch = err != nil || st.Requeue
+	}
 	// turned off between the check and the write: the switch's purge may have run before the write, so delete here
 	if !stillEnabled(ctx, repo.ID) {
-		return false, repo_model.DeleteRepoDependencies(ctx, repo.ID)
+		return false, DeleteRepoRows(ctx, repo.ID)
 	}
 	// the head now, read with the outer context (the scan's time budget may be spent); if it can't be read, the
 	// next scan decides (the unique queue makes a needless one cheap)
@@ -231,6 +294,10 @@ func stillEnabled(ctx context.Context, repoID int64) bool {
 func stillOn(repoID int64) func(context.Context) (bool, error) {
 	return func(ctx context.Context) (bool, error) { return enabledStored(ctx, repoID) }
 }
+
+// StillOn is the check of the switches inside a transaction that writes something that depends on them (see
+// enabledStored).
+func StillOn(repoID int64) func(context.Context) (bool, error) { return stillOn(repoID) }
 
 // headCommit reads the commit the default branch points at now.
 func headCommit(ctx context.Context, repo *repo_model.Repository) (string, error) {
@@ -260,8 +327,7 @@ func fail(ctx context.Context, repo *repo_model.Repository, old *repo_model.Depe
 	return err
 }
 
-func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.Repository, sha string) (*repo_model.DependencyScan, []*repo_model.Dependency, string, error) {
-	cfg := &setting.DependencyGraph
+func scanCommit(ctx context.Context, cfg *setting.DependencyGraphOptions, repo *repo_model.Repository, gitRepo *git.Repository, sha string) (*repo_model.DependencyScan, []*repo_model.Dependency, string, error) {
 	var manifests, unpinned []treeEntry
 	aux := map[string]treeEntry{}
 	err := walkTree(ctx, gitRepo, sha, cfg.MaxTreeEntries, func(e treeEntry) {
