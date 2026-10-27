@@ -15,6 +15,7 @@ import (
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/dependency"
+	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/util"
@@ -102,6 +103,9 @@ func TestSearchUsageValidation(t *testing.T) {
 	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
 	scope := SearchScope{Doer: admin, Admin: true}
 	for name, f := range map[string]UsageFilter{
+		"nothing":                {},
+		"ecosystem only":         {Ecosystem: dependency.NPM},
+		"direct only":            {Direct: optional.Some(true)},
 		"name without ecosystem": {Name: "x"},
 		"unknown ecosystem":      {Ecosystem: "Cobol", Name: "x"},
 		"version and range":      {Ecosystem: dependency.NPM, Name: "x", Version: "1.0.0", Range: "^1"},
@@ -113,4 +117,12 @@ func TestSearchUsageValidation(t *testing.T) {
 		_, _, err := SearchUsage(t.Context(), scope, f, db.ListOptions{})
 		require.ErrorIs(t, err, util.ErrInvalidArgument, name)
 	}
+}
+
+func TestSearchScopeNeedsAnOrganizationOrAnAdmin(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&setting.DependencyGraph.Enabled, true)()
+	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+	_, _, err := SearchScope{Doer: user}.RepoCond(db.DefaultContext)
+	require.Error(t, err)
 }

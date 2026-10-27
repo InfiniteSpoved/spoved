@@ -30,6 +30,8 @@ func (o *DependencyUsageOptions) cond() builder.Cond {
 		cond = cond.And(builder.Eq{"`repo_dependency`.ecosystem": o.Ecosystem})
 	}
 	if o.Name != "" {
+		// the lowercased and PyPI-normalized forms are expressions, so the (ecosystem, name) index serves their first
+		// column only, as in the match of repositories against advisories (RepoIDsUsing)
 		cond = cond.And(builder.Expr(vulnerability.SQLNormalizedName(o.Ecosystem, "`repo_dependency`.name")+" = ?", vulnerability.NormalizeName(o.Ecosystem, o.Name)))
 	}
 	if o.Version != "" {
@@ -41,9 +43,11 @@ func (o *DependencyUsageOptions) cond() builder.Cond {
 	return cond
 }
 
-// RepoNameOrder sorts joined rows by the full name of the repository: owner, then the project or, for a root
-// repository, its own name, then its name (the order of owner/name and owner/project/name as text, without
-// concatenating in SQL, which differs per database).
+// dependencyUsageOrder is the order of the search: repository (RepoNameOrder), manifest path, name, version.
+const dependencyUsageOrder = RepoNameOrder + ", `repo_dependency`.manifest_path, `repo_dependency`.name, `repo_dependency`.version, `repo_dependency`.id"
+
+// RepoNameOrder sorts joined rows by owner, then project or name, then name: a root repository sorts by its own name
+// where a repository in a project sorts by the project's (no concatenation in SQL, which differs per database).
 const RepoNameOrder = "LOWER(`repository`.owner_name), CASE WHEN `repository`.group_name = '' THEN `repository`.lower_name ELSE LOWER(`repository`.group_name) END, `repository`.lower_name"
 
 // CountDependencyUsage counts the rows.
@@ -51,11 +55,29 @@ func CountDependencyUsage(ctx context.Context, o *DependencyUsageOptions) (int64
 	return db.GetEngine(ctx).Table("repo_dependency").Join("INNER", "repository", "`repository`.id = `repo_dependency`.repo_id").Where(o.cond()).Count()
 }
 
+// FindDependencyUsageCandidates is FindDependencyUsage for a range search, which reads up to limit rows only to
+// decide whether each is inside the range: only id, repo_id, version and requirement are loaded.
+func FindDependencyUsageCandidates(ctx context.Context, o *DependencyUsageOptions, limit int) ([]*Dependency, error) {
+	var rows []*Dependency
+	return rows, db.GetEngine(ctx).Select("`repo_dependency`.id, `repo_dependency`.repo_id, `repo_dependency`.version, `repo_dependency`.requirement").
+		Join("INNER", "repository", "`repository`.id = `repo_dependency`.repo_id").Where(o.cond()).
+		OrderBy(dependencyUsageOrder).Limit(limit).Find(&rows)
+}
+
+// GetDependenciesByIDs loads full rows by ID.
+func GetDependenciesByIDs(ctx context.Context, ids []int64) (map[int64]*Dependency, error) {
+	rows := make(map[int64]*Dependency, len(ids))
+	if len(ids) == 0 {
+		return rows, nil
+	}
+	return rows, db.GetEngine(ctx).In("id", ids).Find(&rows)
+}
+
 // FindDependencyUsage returns the rows ordered by repository full name, manifest path, name, version, skipping skip
 // and returning at most limit (all if 0).
 func FindDependencyUsage(ctx context.Context, o *DependencyUsageOptions, skip, limit int) ([]*Dependency, error) {
 	sess := db.GetEngine(ctx).Select("`repo_dependency`.*").Join("INNER", "repository", "`repository`.id = `repo_dependency`.repo_id").Where(o.cond()).
-		OrderBy(RepoNameOrder + ", `repo_dependency`.manifest_path, `repo_dependency`.name, `repo_dependency`.version, `repo_dependency`.id")
+		OrderBy(dependencyUsageOrder)
 	if limit > 0 {
 		sess = sess.Limit(limit, skip)
 	}

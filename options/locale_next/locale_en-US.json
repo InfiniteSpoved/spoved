@@ -2088,6 +2088,8 @@
 	"admin.audit.action.audit.instance.started": "Started the instance",
 	"admin.audit.action.activity.api.sudo": "API request as another user",
 	"admin.audit.action.activity.dependency_graph.connection_tested": "Tested the connection to the advisory mirror",
+	"admin.audit.action.activity.dependency_graph.searched": "Searched the dependencies or vulnerability alerts of every owner",
+	"admin.audit.action.activity.dependency_graph.searched.aggregated": "Searches of the dependencies or vulnerability alerts of every owner (aggregated)",
 	"admin.audit.action.activity.api.sudo.aggregated": "API requests as another user (aggregated)",
 	"admin.audit.action.activity.api.write": "API write request",
 	"admin.audit.action.activity.api.write.aggregated": "Failed API write requests (aggregated)",

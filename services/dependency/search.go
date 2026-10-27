@@ -29,7 +29,7 @@ type SearchScope struct {
 	Org        *organization.Organization // nil: every owner (the instance routes)
 	Doer       *user_model.User
 	Admin      bool         // doer acts as a site admin or auditor: sees every repository that is not hidden by a rule of the instance
-	TokenRepos builder.Cond // what the credential may read (Reducer().RepoReadAccessFilter()), nil for none
+	TokenRepos builder.Cond // what the credential may read (Reducer().RepoReadAccessFilter()); defense in depth, the routes already refuse restricted tokens
 	Project    string       // org only: a project of the organization
 	Owner      string       // instance only: an owner name
 }
@@ -39,6 +39,9 @@ type SearchScope struct {
 // two-factor requirement) and the dependency graph being on. empty is true when a project or owner filter names
 // nothing, so the answer is an empty list (cond is then not to be used). It reads dynamic settings: call it before building a session.
 func (s SearchScope) RepoCond(ctx context.Context) (cond builder.Cond, empty bool, err error) {
+	if s.Org == nil && !s.Admin {
+		return builder.NewCond(), false, errors.New("a search of every owner is for site admins only")
+	}
 	if !SiteEnabled(ctx) {
 		return builder.NewCond(), true, nil
 	}
@@ -102,8 +105,13 @@ type UsageRow struct {
 	Uncertain bool // the row has no version and its requirement overlaps the range
 }
 
-// ErrTooManyMatches is a range search with more candidates than MaxUsageCandidates.
-var ErrTooManyMatches = util.NewInvalidArgumentErrorf("too many matches, add an owner or project filter")
+// tooManyMatches is a range search with more candidates than MaxUsageCandidates; it names the filter the route has.
+func tooManyMatches(scope SearchScope) error {
+	if scope.Org != nil {
+		return util.NewInvalidArgumentErrorf("too many matches, add a project filter")
+	}
+	return util.NewInvalidArgumentErrorf("too many matches, add an owner filter")
+}
 
 // SearchUsage lists the dependency rows of the repositories in scope that match f, and how many there are. The
 // errors that wrap util.ErrInvalidArgument are the caller's mistakes (a 422). With a range, the candidates (by
@@ -112,14 +120,14 @@ func SearchUsage(ctx context.Context, scope SearchScope, f UsageFilter, lo db.Li
 	if err := ValidateSearchPackage(f.Ecosystem, f.Name, f.Version); err != nil {
 		return nil, 0, err
 	}
+	if f.Ecosystem == "" || f.Name == "" {
+		return nil, 0, util.NewInvalidArgumentErrorf("ecosystem and name are required")
+	}
 	if f.Version != "" && f.Range != "" {
 		return nil, 0, util.NewInvalidArgumentErrorf("version and range exclude each other")
 	}
 	var filter *vulnerability.RangeFilter
 	if f.Range != "" {
-		if f.Name == "" {
-			return nil, 0, util.NewInvalidArgumentErrorf("range needs an ecosystem and a name")
-		}
 		var ok bool
 		if filter, ok = vulnerability.ParseRangeFilter(f.Ecosystem, f.Range); !ok {
 			return nil, 0, util.NewInvalidArgumentErrorf("range is not a requirement of the ecosystem")
@@ -144,12 +152,12 @@ func SearchUsage(ctx context.Context, scope SearchScope, f UsageFilter, lo db.Li
 			return nil, 0, err
 		}
 	} else {
-		candidates, err := repo_model.FindDependencyUsage(ctx, opts, 0, MaxUsageCandidates+1)
+		candidates, err := repo_model.FindDependencyUsageCandidates(ctx, opts, MaxUsageCandidates+1)
 		if err != nil {
 			return nil, 0, err
 		}
 		if len(candidates) > MaxUsageCandidates {
-			return nil, 0, ErrTooManyMatches
+			return nil, 0, tooManyMatches(scope)
 		}
 		uncertain = map[int64]bool{}
 		kept := candidates[:0]
@@ -160,9 +168,22 @@ func SearchUsage(ctx context.Context, scope SearchScope, f UsageFilter, lo db.Li
 			}
 		}
 		total = int64(len(kept))
-		rows = kept[min(skip, len(kept)):]
-		if take > 0 && len(rows) > take {
-			rows = rows[:take]
+		kept = kept[min(skip, len(kept)):]
+		if take > 0 && len(kept) > take {
+			kept = kept[:take]
+		}
+		pageIDs := make([]int64, len(kept))
+		for i, d := range kept {
+			pageIDs[i] = d.ID
+		}
+		full, err := repo_model.GetDependenciesByIDs(ctx, pageIDs)
+		if err != nil {
+			return nil, 0, err
+		}
+		for _, d := range kept {
+			if row := full[d.ID]; row != nil { // deleted by a scan since the query: dropped
+				rows = append(rows, row)
+			}
 		}
 	}
 	ids := make([]int64, 0, len(rows))

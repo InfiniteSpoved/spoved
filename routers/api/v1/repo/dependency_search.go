@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 
+	audit_model "forgejo.org/models/audit"
 	repo_model "forgejo.org/models/repo"
 	vulnerability_model "forgejo.org/models/vulnerability"
 	"forgejo.org/modules/optional"
@@ -32,13 +33,52 @@ func searchFailed(ctx *context.APIContext, err error) {
 	ctx.Error(http.StatusInternalServerError, "search", err)
 }
 
+// MustEnableDependencySearch answers 404 to everyone while the dependency graph is off for the site, before any gate
+// can tell the caller anything else.
+func MustEnableDependencySearch(ctx *context.APIContext) {
+	if !dependency_service.SiteEnabled(ctx) {
+		ctx.NotFound()
+	}
+}
+
+// readScopeFilters reads the project filter (organization routes) or the owner filter (instance routes); the one the
+// route doesn't take is a 422.
+func readScopeFilters(ctx *context.APIContext, scope *dependency_service.SearchScope) bool {
+	scope.Project, scope.Owner = ctx.FormString("project"), ctx.FormString("owner")
+	switch {
+	case scope.Org != nil && scope.Owner != "":
+		ctx.Error(http.StatusUnprocessableEntity, "", "owner is a filter of the instance routes")
+	case scope.Org == nil && scope.Project != "":
+		ctx.Error(http.StatusUnprocessableEntity, "", "project is a filter of the organization routes")
+	default:
+		return true
+	}
+	return false
+}
+
+// recordInstanceSearch writes the audit entry of a search across every owner (one per request, aggregated per
+// minute and kind, fail open): the route kind, the filters given and the total, never a repository name. The
+// organization routes record nothing: an owner reads their own organization.
+func recordInstanceSearch(ctx *context.APIContext, scope dependency_service.SearchScope, kind string, filters map[string]string, total int64) {
+	doer := ctx.Doer()
+	if scope.Org != nil || doer == nil {
+		return
+	}
+	data := map[string]any{"kind": kind, "total": total}
+	for k, v := range filters {
+		if v != "" {
+			data[k] = v
+		}
+	}
+	audit_model.RecordAggregated(ctx.Req.Context(), audit_model.Event{
+		Action: "activity.dependency_graph.searched", Result: audit_model.ResultSuccess, OwnerID: doer.ID, SubjectUserID: doer.ID,
+		TargetType: "dependency_search", TargetID: doer.ID, TargetName: doer.Name, Data: data,
+	}, strconv.FormatInt(doer.ID, 10)+"|"+kind)
+}
+
 // SearchDependencyUsage answers the dependency search of the org and instance routes. The route's gate has decided
 // who may ask; scope says which repositories the answer covers.
 func SearchDependencyUsage(ctx *context.APIContext, scope dependency_service.SearchScope) {
-	if !dependency_service.SiteEnabled(ctx) {
-		ctx.NotFound()
-		return
-	}
 	f := dependency_service.UsageFilter{
 		Ecosystem: ctx.FormString("ecosystem"), Name: ctx.FormString("name"), Version: ctx.FormString("version"), Range: ctx.FormString("range"),
 	}
@@ -50,7 +90,9 @@ func SearchDependencyUsage(ctx *context.APIContext, scope dependency_service.Sea
 		}
 		f.Direct = optional.Some(direct)
 	}
-	scope.Project, scope.Owner = ctx.FormString("project"), ctx.FormString("owner")
+	if !readScopeFilters(ctx, &scope) {
+		return
+	}
 	lo := utils.GetListOptions(ctx)
 	rows, total, err := dependency_service.SearchUsage(ctx, scope, f, lo)
 	if err != nil {
@@ -64,6 +106,7 @@ func SearchDependencyUsage(ctx *context.APIContext, scope dependency_service.Sea
 			ManifestPath: r.ManifestPath, Direct: r.Direct, Uncertain: r.Uncertain,
 		})
 	}
+	recordInstanceSearch(ctx, scope, "dependencies", map[string]string{"ecosystem": f.Ecosystem, "name": f.Name, "owner": scope.Owner}, total)
 	ctx.SetLinkHeader(int(total), lo.PageSize)
 	ctx.SetTotalCountHeader(total)
 	ctx.JSON(http.StatusOK, out)
@@ -71,15 +114,13 @@ func SearchDependencyUsage(ctx *context.APIContext, scope dependency_service.Sea
 
 // SearchVulnerabilityAlerts answers the alert search of the org and instance routes, as SearchDependencyUsage does.
 func SearchVulnerabilityAlerts(ctx *context.APIContext, scope dependency_service.SearchScope) {
-	if !dependency_service.SiteEnabled(ctx) {
-		ctx.NotFound()
-		return
-	}
 	f := vulnerability_service.AlertFilter{
 		Advisory: ctx.FormString("advisory"), Ecosystem: ctx.FormString("ecosystem"), Name: ctx.FormString("name"), Version: ctx.FormString("version"),
 		State: ctx.FormString("state"), Severity: ctx.FormString("severity"),
 	}
-	scope.Project, scope.Owner = ctx.FormString("project"), ctx.FormString("owner")
+	if !readScopeFilters(ctx, &scope) {
+		return
+	}
 	lo := utils.GetListOptions(ctx)
 	hits, total, err := vulnerability_service.SearchAlerts(ctx, scope, f, lo)
 	if err != nil {
@@ -99,6 +140,7 @@ func SearchVulnerabilityAlerts(ctx *context.APIContext, scope dependency_service
 	for i, h := range hits {
 		out[i] = &api.RepoVulnerabilityAlert{VulnerabilityAlert: *converted[i], Repository: toDependencyRepository(h.Repo)}
 	}
+	recordInstanceSearch(ctx, scope, "alerts", map[string]string{"advisory": f.Advisory, "ecosystem": f.Ecosystem, "name": f.Name, "owner": scope.Owner, "state": f.State}, total)
 	ctx.SetLinkHeader(int(total), lo.PageSize)
 	ctx.SetTotalCountHeader(total)
 	ctx.JSON(http.StatusOK, out)

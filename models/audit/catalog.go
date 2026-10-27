@@ -130,7 +130,9 @@ var Actions = map[string]string{
 	"activity.git.push.refused":            CategoryActivity,
 	"activity.git.push.refused.aggregated": CategoryActivity,
 
-	"activity.dependency_graph.connection_tested": CategoryActivity,
+	"activity.dependency_graph.connection_tested":   CategoryActivity,
+	"activity.dependency_graph.searched":            CategoryActivity,
+	"activity.dependency_graph.searched.aggregated": CategoryActivity,
 
 	"audit.chain.started":    CategoryAudit,
 	"audit.exported":         CategoryAudit,

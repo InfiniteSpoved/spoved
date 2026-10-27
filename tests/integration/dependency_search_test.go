@@ -134,7 +134,7 @@ func dsAlerts(t *testing.T, path, token string) (rows []string, total string) {
 func TestOrgDependencySearch(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	f := newSearchFixture(t)
-	token := getUserToken(t, "user2", auth_model.AccessTokenScopeReadOrganization)
+	token := getUserToken(t, "user2", auth_model.AccessTokenScopeReadOrganization, auth_model.AccessTokenScopeReadRepository)
 	base := "/api/v1/orgs/org3/dependencies"
 
 	t.Run("by ecosystem and name", func(t *testing.T) {
@@ -197,8 +197,10 @@ func TestOrgDependencySearch(t *testing.T) {
 
 	t.Run("bad requests", func(t *testing.T) {
 		for _, q := range []string{
-			"name=lodash",            // name needs an ecosystem
-			"ecosystem=Cobol&name=x", // unknown ecosystem
+			"", "ecosystem=npm", "direct=true", // the search needs an ecosystem and a name
+			"ecosystem=npm&name=lodash&owner=org17",              // a filter of the instance routes
+			"name=lodash",                                        // name needs an ecosystem
+			"ecosystem=Cobol&name=x",                             // unknown ecosystem
 			"ecosystem=npm&name=lodash&range=%5E%5E%5E",          // unparseable range
 			"ecosystem=npm&name=lodash&version=1.0.0&range=%5E1", // version and range
 			"ecosystem=npm&name=" + strings.Repeat("a", 513),     // name too long
@@ -209,9 +211,18 @@ func TestOrgDependencySearch(t *testing.T) {
 		dsGet(t, base+"?ecosystem=npm&name="+strings.Repeat("a", 512), token, http.StatusOK)
 	})
 
+	t.Run("a page number that overflows", func(t *testing.T) {
+		for _, q := range []string{"", "&range=" + url.QueryEscape("^4")} {
+			rows, _, total := dsUsage(t, base+"?ecosystem=npm&name=lodash&page=9223372036854775807"+q, token)
+			assert.Empty(t, rows)
+			assert.NotEqual(t, "0", total, "the total is the real one")
+		}
+	})
+
 	t.Run("candidate cap", func(t *testing.T) {
 		defer test.MockVariableValue(&dependency_service.MaxUsageCandidates, 5)()
-		dsGet(t, base+"?ecosystem=npm&name=lodash&range="+url.QueryEscape("^4"), token, http.StatusUnprocessableEntity)
+		resp := dsGet(t, base+"?ecosystem=npm&name=lodash&range="+url.QueryEscape("^4"), token, http.StatusUnprocessableEntity)
+		assert.Contains(t, resp.Body.String(), "add a project filter")
 		// the plain search and a narrower one are not capped
 		dsGet(t, base+"?ecosystem=npm&name=lodash", token, http.StatusOK)
 		rows, _, _ := dsUsage(t, base+"?ecosystem=npm&name=lodash&project=dep-proj&range="+url.QueryEscape("^4"), token)
@@ -252,7 +263,7 @@ func TestOrgDependencySearch(t *testing.T) {
 func TestOrgVulnerabilitySearch(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	f := newSearchFixture(t)
-	token := getUserToken(t, "user2", auth_model.AccessTokenScopeReadOrganization)
+	token := getUserToken(t, "user2", auth_model.AccessTokenScopeReadOrganization, auth_model.AccessTokenScopeReadRepository)
 	base := "/api/v1/orgs/org3/vulnerability-alerts"
 
 	// dismiss the alert of GHSA-aaaa on repo3's lock file and mark repo5's CVE-2023-2222 alert fixed
@@ -349,8 +360,20 @@ func TestOrgVulnerabilitySearch(t *testing.T) {
 		assert.Empty(t, rows)
 	})
 
+	t.Run("paging past the end", func(t *testing.T) {
+		rows, total := dsAlerts(t, base+"?ecosystem=npm&name=lodash&state=all&limit=2&page=100", token)
+		assert.Empty(t, rows)
+		all, allTotal := dsAlerts(t, base+"?ecosystem=npm&name=lodash&state=all&limit=50", token)
+		assert.NotEmpty(t, all)
+		assert.Equal(t, allTotal, total, "the total is the real one on a page past the end")
+		rows, total = dsAlerts(t, base+"?ecosystem=npm&name=lodash&state=all&page=9223372036854775807", token)
+		assert.Empty(t, rows)
+		assert.Equal(t, allTotal, total)
+	})
+
 	t.Run("bad requests", func(t *testing.T) {
 		for _, q := range []string{
+			"ecosystem=npm&name=lodash&owner=org17",          // a filter of the instance routes
 			"", "state=open", "ecosystem=npm", "name=lodash", // neither an advisory nor ecosystem and name
 			"advisory=bad%20id!", "advisory=" + strings.Repeat("A", 65),
 			"advisory=CVE-2024-1111&state=bogus", "advisory=CVE-2024-1111&severity=bogus", "ecosystem=Cobol&name=x",
@@ -363,8 +386,8 @@ func TestOrgVulnerabilitySearch(t *testing.T) {
 func TestDependencySearchVisibility(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	f := newSearchFixture(t)
-	owner := getUserToken(t, "user2", auth_model.AccessTokenScopeReadOrganization)
-	admin := getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin)
+	owner := getUserToken(t, "user2", auth_model.AccessTokenScopeReadOrganization, auth_model.AccessTokenScopeReadRepository)
+	admin := getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin, auth_model.AccessTokenScopeReadRepository)
 	q := "?ecosystem=npm&name=lodash&limit=50"
 	listed := func(t *testing.T, repo *repo_model.Repository, want bool, why string) {
 		t.Helper()
@@ -429,26 +452,25 @@ func TestOrgDependencySearchAccess(t *testing.T) {
 	newSearchFixture(t)
 	q := "?ecosystem=npm&name=lodash"
 	paths := []string{"/api/v1/orgs/org3/dependencies" + q, "/api/v1/orgs/org3/vulnerability-alerts" + q}
-	check := func(t *testing.T, who, token string, status int) {
+	check := func(t *testing.T, _, token string, status int) {
 		t.Helper()
 		for _, p := range paths {
 			dsGet(t, p, token, status)
-			_ = who
 		}
 	}
 	scope := auth_model.AccessTokenScopeReadOrganization
 	t.Run("owner and site admin", func(t *testing.T) {
-		check(t, "owner", getUserToken(t, "user2", scope), http.StatusOK)
-		check(t, "admin", getUserToken(t, "user1", scope), http.StatusOK)
+		check(t, "owner", getUserToken(t, "user2", scope, auth_model.AccessTokenScopeReadRepository), http.StatusOK)
+		check(t, "admin", getUserToken(t, "user1", scope, auth_model.AccessTokenScopeReadRepository), http.StatusOK)
 	})
 	t.Run("a member who is not an owner", func(t *testing.T) {
-		check(t, "member", getUserToken(t, "user4", scope), http.StatusForbidden)
+		check(t, "member", getUserToken(t, "user4", scope, auth_model.AccessTokenScopeReadRepository), http.StatusForbidden)
 	})
 	t.Run("a non-member of a public organization", func(t *testing.T) {
-		check(t, "stranger", getUserToken(t, "user8", scope), http.StatusForbidden)
+		check(t, "stranger", getUserToken(t, "user8", scope, auth_model.AccessTokenScopeReadRepository), http.StatusForbidden)
 	})
 	t.Run("a non-member of a private organization", func(t *testing.T) {
-		stranger := getUserToken(t, "user2", scope)
+		stranger := getUserToken(t, "user2", scope, auth_model.AccessTokenScopeReadRepository)
 		for _, p := range []string{"/api/v1/orgs/privated_org/dependencies" + q, "/api/v1/orgs/privated_org/vulnerability-alerts" + q} {
 			dsGet(t, p, stranger, http.StatusNotFound)
 		}
@@ -457,9 +479,10 @@ func TestOrgDependencySearchAccess(t *testing.T) {
 		check(t, "anonymous", "", http.StatusUnauthorized)
 	})
 	t.Run("tokens", func(t *testing.T) {
-		check(t, "public only", getUserToken(t, "user2", scope, auth_model.AccessTokenScopePublicOnly), http.StatusForbidden)
-		check(t, "specific repositories", createFineGrainedRepoAccessToken(t, "user2", []auth_model.AccessTokenScope{scope}, []int64{3}), http.StatusForbidden)
+		check(t, "public only", getUserToken(t, "user2", scope, auth_model.AccessTokenScopeReadRepository, auth_model.AccessTokenScopePublicOnly), http.StatusForbidden)
+		check(t, "specific repositories", createFineGrainedRepoAccessToken(t, "user2", []auth_model.AccessTokenScope{scope, auth_model.AccessTokenScopeReadRepository}, []int64{3}), http.StatusForbidden)
 		check(t, "wrong scope", getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository), http.StatusForbidden)
+		check(t, "organization scope only", getUserToken(t, "user2", scope), http.StatusForbidden)
 		org := newOwnedAccessToken(t, auth_model.AccessTokenOwnerOrg, 3, 0, perm_model.AccessModeAdmin, scope)
 		check(t, "org-owned token", org.Token, http.StatusForbidden)
 		repoToken := newOwnedAccessToken(t, auth_model.AccessTokenOwnerRepo, 3, 0, perm_model.AccessModeRead, auth_model.AccessTokenScopeReadRepository)
@@ -469,22 +492,28 @@ func TestOrgDependencySearchAccess(t *testing.T) {
 	t.Run("an owner blocked by the two-factor requirement", func(t *testing.T) {
 		_, err := db.Exec(t.Context(), "UPDATE `user` SET require_two_factor = ? WHERE id = 3", true)
 		require.NoError(t, err)
-		check(t, "blocked owner", getUserToken(t, "user2", scope), http.StatusForbidden)
+		check(t, "blocked owner", getUserToken(t, "user2", scope, auth_model.AccessTokenScopeReadRepository), http.StatusForbidden)
 		_, err = db.Exec(t.Context(), "UPDATE `user` SET require_two_factor = ? WHERE id = 3", false)
 		require.NoError(t, err)
 	})
 	t.Run("an archived organization", func(t *testing.T) {
 		org := unittest.AssertExistsAndLoadBean(t, &organization.Organization{ID: 3})
 		require.NoError(t, org_service.ArchiveOrganization(audit_model.WithSystem(t.Context(), "test"), org, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), false))
-		check(t, "owner", getUserToken(t, "user2", scope), http.StatusOK)
+		check(t, "owner", getUserToken(t, "user2", scope, auth_model.AccessTokenScopeReadRepository), http.StatusOK)
 	})
 	t.Run("the site switch is off", func(t *testing.T) {
 		defer test.MockVariableValue(&setting.DependencyGraph.Enabled, false)()
-		owner := getUserToken(t, "user2", scope)
-		admin := getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin)
-		check(t, "owner", owner, http.StatusNotFound)
-		for _, p := range []string{"/api/v1/admin/dependencies", "/api/v1/admin/vulnerability-alerts"} {
-			dsGet(t, p+q, admin, http.StatusNotFound)
+		both := auth_model.AccessTokenScopeReadRepository
+		// every caller gets 404, before the owner and audit-reader gates
+		for _, token := range []string{
+			getUserToken(t, "user2", scope, both), getUserToken(t, "user4", scope, both), getUserToken(t, "user8", scope, both), "",
+		} {
+			check(t, "", token, http.StatusNotFound)
+		}
+		for _, token := range []string{getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin, both), getUserToken(t, "user2", auth_model.AccessTokenScopeReadAdmin, both), ""} {
+			for _, p := range []string{"/api/v1/admin/dependencies", "/api/v1/admin/vulnerability-alerts"} {
+				dsGet(t, p+q, token, http.StatusNotFound)
+			}
 		}
 	})
 }
@@ -501,21 +530,32 @@ func TestAdminDependencySearch(t *testing.T) {
 		}
 	}
 	scope := auth_model.AccessTokenScopeReadAdmin
-	admin := getUserToken(t, "user1", scope)
+	admin := getUserToken(t, "user1", scope, auth_model.AccessTokenScopeReadRepository)
 
 	t.Run("who may ask", func(t *testing.T) {
 		check(admin, http.StatusOK)
 		_, err := db.GetEngine(t.Context()).Exec("UPDATE `user` SET is_auditor = ? WHERE id = 8", true)
 		require.NoError(t, err)
-		check(getUserToken(t, "user8", scope), http.StatusOK)
-		check(getUserToken(t, "user2", scope), http.StatusForbidden) // owner of org3
+		check(getUserToken(t, "user8", scope, auth_model.AccessTokenScopeReadRepository), http.StatusOK)
+		check(getUserToken(t, "user2", scope, auth_model.AccessTokenScopeReadRepository), http.StatusForbidden) // owner of org3
 		check(getUserToken(t, "user1", auth_model.AccessTokenScopeReadRepository), http.StatusForbidden)
 		check("", http.StatusUnauthorized)
 	})
 	t.Run("restricted tokens have no admin override", func(t *testing.T) {
-		check(getUserToken(t, "user1", scope, auth_model.AccessTokenScopePublicOnly), http.StatusForbidden)
-		check(createFineGrainedRepoAccessToken(t, "user1", []auth_model.AccessTokenScope{scope}, []int64{3}), http.StatusForbidden)
-		check(getUserToken(t, "user8", scope, auth_model.AccessTokenScopePublicOnly), http.StatusForbidden)
+		check(getUserToken(t, "user1", scope, auth_model.AccessTokenScopeReadRepository, auth_model.AccessTokenScopePublicOnly), http.StatusForbidden)
+		check(createFineGrainedRepoAccessToken(t, "user1", []auth_model.AccessTokenScope{scope, auth_model.AccessTokenScopeReadRepository}, []int64{3}), http.StatusForbidden)
+		check(getUserToken(t, "user8", scope, auth_model.AccessTokenScopeReadRepository, auth_model.AccessTokenScopePublicOnly), http.StatusForbidden)
+	})
+	t.Run("a filter of the organization routes", func(t *testing.T) {
+		dsGet(t, paths[0]+"&project=dep-proj", admin, http.StatusUnprocessableEntity)
+		dsGet(t, paths[1]+"&project=dep-proj", admin, http.StatusUnprocessableEntity)
+		dsGet(t, "/api/v1/admin/dependencies", admin, http.StatusUnprocessableEntity)
+		dsGet(t, "/api/v1/admin/dependencies?ecosystem=npm", admin, http.StatusUnprocessableEntity)
+	})
+	t.Run("the cap names the owner filter", func(t *testing.T) {
+		defer test.MockVariableValue(&dependency_service.MaxUsageCandidates, 2)()
+		resp := dsGet(t, paths[0]+"&range="+url.QueryEscape("^4"), admin, http.StatusUnprocessableEntity)
+		assert.Contains(t, resp.Body.String(), "add an owner filter")
 	})
 	t.Run("every owner, and the owner filter", func(t *testing.T) {
 		rows, _, total := dsUsage(t, paths[0], admin)
@@ -539,7 +579,7 @@ func TestDependencySearchQueryCount(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	newSearchFixture(t)
 	ctx := t.Context()
-	owner := getUserToken(t, "user2", auth_model.AccessTokenScopeReadOrganization)
+	owner := getUserToken(t, "user2", auth_model.AccessTokenScopeReadOrganization, auth_model.AccessTokenScopeReadRepository)
 	rangeQ := "&range=" + url.QueryEscape("^4")
 	paths := []string{
 		"/api/v1/orgs/org3/dependencies?ecosystem=npm&name=lodash&limit=50",
@@ -569,4 +609,36 @@ func TestDependencySearchQueryCount(t *testing.T) {
 	require.Len(t, rows, 18)
 	assert.Equal(t, "18", total)
 	assert.Equal(t, few, count(), "the number of queries doesn't grow with the repositories on the page")
+}
+
+func TestAdminDependencySearchAudit(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	newSearchFixture(t)
+	audit_model.ResetActivity()
+	admin := getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin, auth_model.AccessTokenScopeReadRepository)
+	since := auditMaxID(t)
+	dsGet(t, "/api/v1/admin/dependencies?ecosystem=npm&name=lodash&owner=org3", admin, http.StatusOK)
+	e := auditActivity(t, since, "activity.dependency_graph.searched")
+	assert.EqualValues(t, 1, e.ActorID)
+	data := auditData(t, e)
+	assert.Equal(t, "dependencies", data["kind"])
+	assert.Equal(t, "npm", data["ecosystem"])
+	assert.Equal(t, "lodash", data["name"])
+	assert.Equal(t, "org3", data["owner"])
+	assert.EqualValues(t, 6, data["total"])
+	assert.NotContains(t, e.Data, "repo")
+
+	dsGet(t, "/api/v1/admin/vulnerability-alerts?advisory=CVE-2024-1111&state=all", admin, http.StatusOK)
+	dsGet(t, "/api/v1/admin/vulnerability-alerts?advisory=CVE-2024-1111&state=all", admin, http.StatusOK)
+	written := auditActions(t, since, "activity.dependency_graph.searched") // the first of each kind is written at once
+	require.Len(t, written, 2)
+	assert.Equal(t, "alerts", auditData(t, written[1])["kind"])
+	audit_model.FlushAggregated(t.Context(), true)
+	assert.EqualValues(t, 1, auditData(t, auditActivity(t, since, "activity.dependency_graph.searched.aggregated"))["count"])
+
+	// an owner reading their own organization leaves no such entry
+	since = auditMaxID(t)
+	dsGet(t, "/api/v1/orgs/org3/dependencies?ecosystem=npm&name=lodash", getUserToken(t, "user2", auth_model.AccessTokenScopeReadOrganization, auth_model.AccessTokenScopeReadRepository), http.StatusOK)
+	audit_model.FlushAggregated(t.Context(), true)
+	assert.Empty(t, auditActions(t, since, "activity.dependency_graph.searched"))
 }

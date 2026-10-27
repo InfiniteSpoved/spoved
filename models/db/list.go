@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"math"
 
 	"forgejo.org/modules/setting"
 
@@ -48,6 +49,9 @@ var (
 // GetSkipTake returns the skip and take values
 func (opts *ListOptions) GetSkipTake() (skip, take int) {
 	opts.SetDefaultValues()
+	if opts.Page-1 > math.MaxInt/opts.PageSize { // a page number that would overflow reads as past the end
+		return math.MaxInt, opts.PageSize
+	}
 	return (opts.Page - 1) * opts.PageSize, opts.PageSize
 }
 
