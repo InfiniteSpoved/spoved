@@ -31,7 +31,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/vulnerability"
-	repo_api "forgejo.org/routers/api/v1/repo"
+	"forgejo.org/routers/common"
 	dependency_service "forgejo.org/services/dependency"
 	org_service "forgejo.org/services/org"
 	vulnerability_service "forgejo.org/services/vulnerability"
@@ -780,29 +780,29 @@ func TestDependencySearchExport(t *testing.T) {
 
 	t.Run("one export per user and two at once", func(t *testing.T) {
 		since := auditMaxID(t)
-		release, ok := repo_api.TakeExportSlot(2) // user2 is exporting
+		release, ok := common.TakeExportSlot(2) // user2 is exporting
 		require.True(t, ok)
 		t.Cleanup(release)
 		resp := dsGet(t, orgDeps+q+"&format=csv", owner, http.StatusTooManyRequests)
 		assert.Empty(t, resp.Header().Get("Content-Disposition"))
 		assert.Empty(t, auditActions(t, since, "org.dependency_graph.exported"))
 		dsGet(t, adminDeps+q+"&format=csv", admin, http.StatusOK) // another user is not held back
-		releaseOther, ok := repo_api.TakeExportSlot(99)
+		releaseOther, ok := common.TakeExportSlot(99)
 		require.True(t, ok)
 		t.Cleanup(releaseOther)
 		dsGet(t, adminDeps+q+"&format=csv", admin, http.StatusTooManyRequests) // the process is full
 		release()
 		releaseOther()
 		dsGet(t, orgDeps+q+"&format=csv", owner, http.StatusOK)
-		assert.Zero(t, repo_api.ExportsRunning())
+		assert.Zero(t, common.ExportsRunning())
 	})
 
 	t.Run("an export over its time budget ends after a batch", func(t *testing.T) {
-		defer test.MockVariableValue(&repo_api.ExportTimeLimit, -time.Second)()
+		defer test.MockVariableValue(&common.ExportTimeLimit, -time.Second)()
 		defer test.MockVariableValue(&dependency_service.ExportBatch, 1)() // several batches: the first is sent, the second is refused
 		req := NewRequest(t, "GET", adminDeps+q+"&format=json").AddTokenAuth(admin)
 		assert.PanicsWithValue(t, http.ErrAbortHandler, func() { MakeRequest(t, req, http.StatusOK) })
-		assert.Zero(t, repo_api.ExportsRunning(), "the slot is given back")
+		assert.Zero(t, common.ExportsRunning(), "the slot is given back")
 	})
 
 	t.Run("an alert export leaves out the advisory texts", func(t *testing.T) {
