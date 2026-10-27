@@ -4,6 +4,7 @@
 package integration
 
 import (
+	"bytes"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"forgejo.org/modules/test"
 	vulnerability_service "forgejo.org/services/vulnerability"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -183,6 +185,75 @@ func TestDependencyGraphSettingsAdmin(t *testing.T) {
 			doc := NewHTMLParser(t, admin.MakeRequest(t, NewRequest(t, "GET", page), http.StatusOK).Body)
 			assert.Contains(t, doc.Find("#advisory-mirror").Text(), zipSrv.URL+"/osv")
 			assert.Contains(t, doc.Find("#advisory-mirror").Text(), "12h", "the saved interval")
+		})
+
+		t.Run("page", func(t *testing.T) {
+			// the form as the page shows it: posted back unchanged, it changes nothing
+			formValues := func(doc *HTMLDoc) map[string]string {
+				values := map[string]string{}
+				doc.Find("form.dependency-graph-settings input[name]").Each(func(_ int, sel *goquery.Selection) {
+					name, _ := sel.Attr("name")
+					typ, _ := sel.Attr("type")
+					if (typ == "radio" || typ == "checkbox") && sel.AttrOr("checked", "-") == "-" {
+						return
+					}
+					values[name] = sel.AttrOr("value", "on")
+				})
+				return values
+			}
+			doc := NewHTMLParser(t, admin.MakeRequest(t, NewRequest(t, "GET", page), http.StatusOK).Body)
+			values := formValues(doc)
+			assert.Equal(t, "12", values["update_interval"])
+			assert.Equal(t, "mirror", values["source"])
+			assert.Equal(t, "none", values["sign_in"])
+			assert.Empty(t, values["token"])
+			assert.Equal(t, "60", values["scan_timeout"], "the app.ini value")
+			assert.Contains(t, doc.Find("#dg-update_interval").Parent().Parent().Find(".dg-app-default").Text(), "app.ini: 24.")
+			assert.Empty(t, doc.Find("#dg-scan_timeout").Parent().Parent().Find(".dg-app-default").Text(), "the same as app.ini: no hint")
+			since, before := auditMaxID(t), stored()
+			post(admin, page+"/settings", values, http.StatusSeeOther)
+			assert.Contains(t, bwFlash(admin), "Nothing changed.")
+			assert.Equal(t, before, stored())
+			assert.Equal(t, since, auditMaxID(t))
+
+			// one form: the switch is saved with the settings
+			t.Cleanup(func() {
+				require.NoError(t, system_model.SetSettings(db.DefaultContext, map[string]string{setting.Config().DependencyGraph.DynKey(): ""}))
+				bumpSettingsRevision(t)
+			})
+			delete(values, "enabled")
+			values["max_concurrent_scans"] = "3"
+			post(admin, page+"/settings", values, http.StatusSeeOther)
+			doc = NewHTMLParser(t, admin.MakeRequest(t, NewRequest(t, "GET", page), http.StatusOK).Body)
+			doc.AssertElement(t, "#dependency-graph-enabled[checked]", false)
+			assert.Equal(t, 3, setting.DependencyGraphSettings(t.Context()).MaxConcurrentScans)
+			values["enabled"] = "on"
+			post(admin, page+"/settings", values, http.StatusSeeOther)
+			doc = NewHTMLParser(t, admin.MakeRequest(t, NewRequest(t, "GET", page), http.StatusOK).Body)
+			doc.AssertElement(t, "#dependency-graph-enabled[checked]", true)
+
+			// a saved token shows only as "saved"
+			values["sign_in"], values["token"] = "token", token
+			post(admin, page+"/settings", values, http.StatusSeeOther)
+			body := admin.MakeRequest(t, NewRequest(t, "GET", page), http.StatusOK).Body.String()
+			assert.NotContains(t, body, token)
+			doc = NewHTMLParser(t, bytes.NewBufferString(body))
+			assert.Contains(t, doc.Find("#dg-token").AttrOr("placeholder", ""), "saved, leave empty to keep it")
+			doc.AssertElement(t, "#dg-remove-token", true)
+		})
+
+		t.Run("auditor reads", func(t *testing.T) {
+			_, err := db.GetEngine(t.Context()).Exec("UPDATE `user` SET is_auditor = ? WHERE id = 8", true)
+			require.NoError(t, err)
+			defer func() {
+				_, err := db.GetEngine(t.Context()).Exec("UPDATE `user` SET is_auditor = ? WHERE id = 8", false)
+				require.NoError(t, err)
+			}()
+			doc := NewHTMLParser(t, loginUser(t, "user8").MakeRequest(t, NewRequest(t, "GET", page), http.StatusOK).Body)
+			doc.AssertElement(t, "fieldset[disabled] #dg-update_interval", true)
+			doc.AssertElement(t, "fieldset[disabled] #dg-source-mirror", true)
+			doc.AssertElement(t, "#dependency-graph-save", false)
+			doc.AssertElement(t, "#dependency-graph-test", false)
 		})
 
 		t.Run("access", func(t *testing.T) {
