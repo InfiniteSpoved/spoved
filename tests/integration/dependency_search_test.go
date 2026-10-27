@@ -4,10 +4,14 @@
 package integration
 
 import (
+	"context"
+	"encoding/csv"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -643,4 +647,130 @@ func TestAdminDependencySearchAudit(t *testing.T) {
 	dsGet(t, "/api/v1/orgs/org3/dependencies?ecosystem=npm&name=lodash", getUserToken(t, "user2", auth_model.AccessTokenScopeReadOrganization, auth_model.AccessTokenScopeReadRepository), http.StatusOK)
 	audit_model.FlushAggregated(t.Context(), true)
 	assert.Empty(t, auditActions(t, since, "activity.dependency_graph.searched"))
+}
+
+func TestDependencySearchExport(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	f := newSearchFixture(t)
+	audit_model.ResetActivity()
+	owner := getUserToken(t, "user2", auth_model.AccessTokenScopeReadOrganization, auth_model.AccessTokenScopeReadRepository)
+	admin := getUserToken(t, "user1", auth_model.AccessTokenScopeReadAdmin, auth_model.AccessTokenScopeReadRepository)
+	today := time.Now().UTC().Format("2006-01-02")
+	const orgDeps, adminDeps = "/api/v1/orgs/org3/dependencies", "/api/v1/admin/dependencies"
+	const orgAlerts, adminAlerts = "/api/v1/orgs/org3/vulnerability-alerts", "/api/v1/admin/vulnerability-alerts"
+	q := "?ecosystem=npm&name=lodash"
+
+	readCSV := func(t *testing.T, resp *httptest.ResponseRecorder) [][]string {
+		t.Helper()
+		records, err := csv.NewReader(resp.Body).ReadAll()
+		require.NoError(t, err)
+		return records
+	}
+
+	t.Run("csv and json, all rows, on both mounts", func(t *testing.T) {
+		for _, c := range []struct {
+			path, token, owner, audit string
+			rows                      int
+		}{{orgDeps, owner, "org3", "org.dependency_graph.exported", 6}, {adminDeps, admin, "instance", "admin.dependency_graph.exported", 7}} {
+			since := auditMaxID(t)
+			resp := dsGet(t, c.path+q+"&limit=1&format=csv", c.token, http.StatusOK) // no paging
+			assert.Equal(t, "nosniff", resp.Header().Get("X-Content-Type-Options"))
+			assert.Equal(t, "text/csv; charset=utf-8", resp.Header().Get("Content-Type"))
+			assert.Contains(t, resp.Header().Get("Content-Disposition"), `attachment; filename="dependencies-`+c.owner+"-"+today+`.csv"`)
+			records := readCSV(t, resp)
+			require.Len(t, records, c.rows+1)
+			assert.Equal(t, []string{"repository", "ecosystem", "name", "version", "requirement", "manifest", "direct", "uncertain"}, records[0])
+			var names []string
+			for _, r := range records[1:] {
+				names = append(names, r[0])
+			}
+			assert.Contains(t, names, "org3/dep-proj/leaf")
+
+			resp = dsGet(t, c.path+q+"&limit=1&format=json", c.token, http.StatusOK)
+			assert.Contains(t, resp.Header().Get("Content-Disposition"), `dependencies-`+c.owner+"-"+today+`.json"`)
+			assert.Equal(t, "application/json; charset=utf-8", resp.Header().Get("Content-Type"))
+			var list []*api.DependencyUsage
+			DecodeJSON(t, resp, &list)
+			assert.Len(t, list, c.rows)
+
+			e := auditActions(t, since, c.audit)
+			require.Len(t, e, 2)
+			assert.Equal(t, map[string]any{"kind": "dependencies", "format": "csv", "ecosystem": "npm", "name": "lodash", "count": float64(c.rows)}, auditData(t, e[0]))
+			assert.NotContains(t, e[0].Data, "leaf")
+			assert.Empty(t, auditActions(t, since, "activity.dependency_graph.searched"))
+		}
+		resp := dsGet(t, orgAlerts+q+"&state=all&format=csv", owner, http.StatusOK)
+		assert.Contains(t, resp.Header().Get("Content-Disposition"), `vulnerability-alerts-org3-`+today+`.csv"`)
+		records := readCSV(t, resp)
+		assert.Equal(t, []string{"repository", "advisory", "aliases", "severity", "ecosystem", "package", "version", "fixed in", "manifest", "state"}, records[0])
+		paged, _ := dsAlerts(t, orgAlerts+q+"&state=all&limit=50", owner)
+		assert.Len(t, records, len(paged)+1)
+		var found bool
+		for _, r := range records[1:] {
+			found = found || (r[1] == "GHSA-aaaa-bbbb-cccc" && r[2] == "CVE-2024-1111" && r[3] == "high" && r[7] == "4.17.21")
+		}
+		assert.True(t, found)
+		var list []*api.RepoVulnerabilityAlert
+		DecodeJSON(t, dsGet(t, adminAlerts+q+"&state=all&format=json", admin, http.StatusOK), &list)
+		assert.NotEmpty(t, list)
+		assert.Equal(t, "[]\n", dsGet(t, adminAlerts+"?advisory=CVE-9999-0000&format=json", admin, http.StatusOK).Body.String())
+	})
+
+	t.Run("cells that a spreadsheet would run are prefixed", func(t *testing.T) {
+		storeScanAt(t, f.repo5, strings.Repeat("a", 40), searchDep(dependency.NPM, `=HYPERLINK("x")`, "1.0.0", "", "+cmd", true))
+		records := readCSV(t, dsGet(t, orgDeps+"?ecosystem=npm&name="+url.QueryEscape(`=HYPERLINK("x")`)+"&format=csv", owner, http.StatusOK))
+		require.Len(t, records, 2)
+		assert.Equal(t, `'=HYPERLINK("x")`, records[1][2])
+		assert.Equal(t, "'+cmd", records[1][5])
+	})
+
+	t.Run("hidden repositories are not exported", func(t *testing.T) {
+		_, err := db.GetEngine(t.Context()).Exec("UPDATE repository SET trashed_unix = 1 WHERE id = ?", f.repo3.ID)
+		require.NoError(t, err)
+		defer func() {
+			_, err := db.GetEngine(t.Context()).Exec("UPDATE repository SET trashed_unix = 0 WHERE id = ?", f.repo3.ID)
+			require.NoError(t, err)
+		}()
+		for _, path := range []string{orgDeps, adminDeps} {
+			for _, r := range readCSV(t, dsGet(t, path+q+"&format=csv", map[bool]string{true: owner, false: admin}[path == orgDeps], http.StatusOK))[1:] {
+				assert.NotEqual(t, f.repo3.FullName(), r[0])
+			}
+		}
+	})
+
+	t.Run("a range search exports what the Go filter keeps", func(t *testing.T) {
+		records := readCSV(t, dsGet(t, adminDeps+q+"&range="+url.QueryEscape("^4.17")+"&format=csv", admin, http.StatusOK))
+		require.NotEmpty(t, records[1:])
+		for _, r := range records[1:] {
+			assert.True(t, slices.Contains([]string{"4.17.0", "4.17.20", "4.17.21"}, r[3]) || (r[3] == "" && r[7] == "true"), r) // 3.9.0 and 3.10.1 are out
+		}
+		rows, _, _ := dsUsage(t, adminDeps+q+"&range="+url.QueryEscape("^4.17")+"&limit=50", admin)
+		assert.Len(t, records, len(rows)+1)
+	})
+
+	t.Run("too many rows", func(t *testing.T) {
+		defer test.MockVariableValue(&dependency_service.MaxExportRows, 2)()
+		since := auditMaxID(t)
+		resp := dsGet(t, orgDeps+q+"&format=csv", owner, http.StatusUnprocessableEntity)
+		assert.Contains(t, resp.Body.String(), "add a project filter")
+		assert.Empty(t, resp.Header().Get("Content-Disposition"))
+		resp = dsGet(t, adminAlerts+q+"&state=all&format=json", admin, http.StatusUnprocessableEntity)
+		assert.Contains(t, resp.Body.String(), "add an owner filter")
+		assert.Empty(t, auditActions(t, since, "org.dependency_graph.exported"))
+		assert.Empty(t, auditActions(t, since, "admin.dependency_graph.exported"))
+	})
+
+	t.Run("a failed audit insert sends nothing", func(t *testing.T) {
+		defer test.MockVariableValue(&audit_model.InsertEntry, func(context.Context, *audit_model.Entry) error { return errors.New("audit down") })()
+		for _, c := range []struct{ path, token string }{{orgDeps + q, owner}, {adminDeps + q, admin}, {orgAlerts + q, owner}, {adminAlerts + q, admin}} {
+			resp := dsGet(t, c.path+"&format=csv", c.token, http.StatusInternalServerError)
+			assert.Empty(t, resp.Header().Get("Content-Disposition"))
+			assert.NotContains(t, resp.Body.String(), "lodash")
+		}
+	})
+
+	t.Run("unknown format", func(t *testing.T) {
+		dsGet(t, orgDeps+q+"&format=xml", owner, http.StatusUnprocessableEntity)
+		dsGet(t, adminAlerts+q+"&format=CSV", admin, http.StatusUnprocessableEntity)
+	})
 }

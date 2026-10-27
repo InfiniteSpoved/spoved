@@ -17,6 +17,7 @@ func SearchDependencies(ctx *context.APIContext) {
 	// description: Lists the dependencies of all repositories on the instance, by repository name. Site admins and auditors with a token for all resources only.
 	// produces:
 	// - application/json
+	// - text/csv
 	// parameters:
 	// - name: owner
 	//   in: query
@@ -50,6 +51,11 @@ func SearchDependencies(ctx *context.APIContext) {
 	//   in: query
 	//   description: page size of results
 	//   type: integer
+	// - name: format
+	//   in: query
+	//   description: csv or json sends every matching row as a download (at most 100000, else 422; no paging) and records an audit entry; without it the answer is paged
+	//   type: string
+	//   enum: [csv, json]
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/DependencyUsageList"
@@ -71,6 +77,7 @@ func SearchVulnerabilityAlerts(ctx *context.APIContext) {
 	// description: Lists the vulnerability alerts of all repositories on the instance. Site admins and auditors with a token for all resources only.
 	// produces:
 	// - application/json
+	// - text/csv
 	// parameters:
 	// - name: owner
 	//   in: query
@@ -110,6 +117,11 @@ func SearchVulnerabilityAlerts(ctx *context.APIContext) {
 	//   in: query
 	//   description: page size of results
 	//   type: integer
+	// - name: format
+	//   in: query
+	//   description: csv or json sends every matching row as a download (at most 100000, else 422; no paging) and records an audit entry; without it the answer is paged
+	//   type: string
+	//   enum: [csv, json]
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/RepoVulnerabilityAlertList"

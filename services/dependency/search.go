@@ -105,70 +105,82 @@ type UsageRow struct {
 	Uncertain bool // the row has no version and its requirement overlaps the range
 }
 
-// tooManyMatches is a range search with more candidates than MaxUsageCandidates; it names the filter the route has.
-func tooManyMatches(scope SearchScope) error {
+// TooManyMatches is a search or export with too many rows; it names the filter the route has.
+func TooManyMatches(scope SearchScope) error {
 	if scope.Org != nil {
 		return util.NewInvalidArgumentErrorf("too many matches, add a project filter")
 	}
 	return util.NewInvalidArgumentErrorf("too many matches, add an owner filter")
 }
 
-// SearchUsage lists the dependency rows of the repositories in scope that match f, and how many there are. The
-// errors that wrap util.ErrInvalidArgument are the caller's mistakes (a 422). With a range, the candidates (by
-// package) are read up to MaxUsageCandidates, filtered by version in Go, and only then counted and paged.
-func SearchUsage(ctx context.Context, scope SearchScope, f UsageFilter, lo db.ListOptions) ([]*UsageRow, int64, error) {
+// usagePlan is a validated dependency search: the options, and for a range search the rows inside the range.
+type usagePlan struct {
+	opts      *repo_model.DependencyUsageOptions
+	kept      []*repo_model.Dependency // range search: the candidates inside the range, in order
+	uncertain map[int64]bool
+	ranged    bool
+	total     int64
+}
+
+// planUsage validates f and counts the rows. With a range, the candidates (by package) are read up to
+// MaxUsageCandidates and filtered by version in Go.
+func planUsage(ctx context.Context, scope SearchScope, f UsageFilter) (*usagePlan, error) {
 	if err := ValidateSearchPackage(f.Ecosystem, f.Name, f.Version); err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	if f.Ecosystem == "" || f.Name == "" {
-		return nil, 0, util.NewInvalidArgumentErrorf("ecosystem and name are required")
+		return nil, util.NewInvalidArgumentErrorf("ecosystem and name are required")
 	}
 	if f.Version != "" && f.Range != "" {
-		return nil, 0, util.NewInvalidArgumentErrorf("version and range exclude each other")
+		return nil, util.NewInvalidArgumentErrorf("version and range exclude each other")
 	}
 	var filter *vulnerability.RangeFilter
 	if f.Range != "" {
 		var ok bool
 		if filter, ok = vulnerability.ParseRangeFilter(f.Ecosystem, f.Range); !ok {
-			return nil, 0, util.NewInvalidArgumentErrorf("range is not a requirement of the ecosystem")
+			return nil, util.NewInvalidArgumentErrorf("range is not a requirement of the ecosystem")
 		}
 	}
 	repoCond, empty, err := scope.RepoCond(ctx)
 	if err != nil || empty {
-		return nil, 0, err
+		return &usagePlan{}, err
 	}
-	opts := &repo_model.DependencyUsageOptions{RepoCond: repoCond, Ecosystem: f.Ecosystem, Name: f.Name, Version: f.Version, Direct: f.Direct}
-	lo.SetDefaultValues()
-	skip, take := lo.GetSkipTake()
-
-	var rows []*repo_model.Dependency
-	var uncertain map[int64]bool
-	var total int64
+	p := &usagePlan{opts: &repo_model.DependencyUsageOptions{RepoCond: repoCond, Ecosystem: f.Ecosystem, Name: f.Name, Version: f.Version, Direct: f.Direct}}
 	if filter == nil {
-		if total, err = repo_model.CountDependencyUsage(ctx, opts); err != nil || total == 0 {
-			return nil, 0, err
+		p.total, err = repo_model.CountDependencyUsage(ctx, p.opts)
+		return p, err
+	}
+	candidates, err := repo_model.FindDependencyUsageCandidates(ctx, p.opts, MaxUsageCandidates+1)
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) > MaxUsageCandidates {
+		return nil, TooManyMatches(scope)
+	}
+	p.ranged, p.uncertain = true, map[int64]bool{}
+	for _, d := range candidates {
+		if in, unsure := filter.Match(d.Version, d.Requirement); in {
+			p.kept = append(p.kept, d)
+			p.uncertain[d.ID] = unsure
 		}
-		if rows, err = repo_model.FindDependencyUsage(ctx, opts, skip, take); err != nil {
-			return nil, 0, err
+	}
+	p.total = int64(len(p.kept))
+	return p, nil
+}
+
+// page loads the rows from skip on, at most take (all if 0), with their repositories.
+func (p *usagePlan) page(ctx context.Context, skip, take int) ([]*UsageRow, error) {
+	if p.total == 0 {
+		return nil, nil
+	}
+	var rows []*repo_model.Dependency
+	if !p.ranged {
+		var err error
+		if rows, err = repo_model.FindDependencyUsage(ctx, p.opts, skip, take); err != nil {
+			return nil, err
 		}
 	} else {
-		candidates, err := repo_model.FindDependencyUsageCandidates(ctx, opts, MaxUsageCandidates+1)
-		if err != nil {
-			return nil, 0, err
-		}
-		if len(candidates) > MaxUsageCandidates {
-			return nil, 0, tooManyMatches(scope)
-		}
-		uncertain = map[int64]bool{}
-		kept := candidates[:0]
-		for _, d := range candidates {
-			if in, unsure := filter.Match(d.Version, d.Requirement); in {
-				kept = append(kept, d)
-				uncertain[d.ID] = unsure
-			}
-		}
-		total = int64(len(kept))
-		kept = kept[min(skip, len(kept)):]
+		kept := p.kept[min(skip, len(p.kept)):]
 		if take > 0 && len(kept) > take {
 			kept = kept[:take]
 		}
@@ -178,7 +190,7 @@ func SearchUsage(ctx context.Context, scope SearchScope, f UsageFilter, lo db.Li
 		}
 		full, err := repo_model.GetDependenciesByIDs(ctx, pageIDs)
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		for _, d := range kept {
 			if row := full[d.ID]; row != nil { // deleted by a scan since the query: dropped
@@ -194,13 +206,59 @@ func SearchUsage(ctx context.Context, scope SearchScope, f UsageFilter, lo db.Li
 	}
 	repos, err := repo_model.GetRepositoriesMapByIDs(ctx, ids)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	out := make([]*UsageRow, 0, len(rows))
 	for _, d := range rows {
 		if repo := repos[d.RepoID]; repo != nil { // gone since the query: dropped
-			out = append(out, &UsageRow{Dependency: d, Repo: repo, Uncertain: uncertain[d.ID]})
+			out = append(out, &UsageRow{Dependency: d, Repo: repo, Uncertain: p.uncertain[d.ID]})
 		}
 	}
-	return out, total, nil
+	return out, nil
+}
+
+// SearchUsage lists the dependency rows of the repositories in scope that match f, and how many there are. The
+// errors that wrap util.ErrInvalidArgument are the caller's mistakes (a 422). With a range, the rows are filtered
+// by version in Go before they are counted and paged.
+func SearchUsage(ctx context.Context, scope SearchScope, f UsageFilter, lo db.ListOptions) ([]*UsageRow, int64, error) {
+	p, err := planUsage(ctx, scope, f)
+	if err != nil || p.total == 0 {
+		return nil, 0, err
+	}
+	lo.SetDefaultValues()
+	skip, take := lo.GetSkipTake()
+	rows, err := p.page(ctx, skip, take)
+	return rows, p.total, err
+}
+
+// MaxExportRows is the most rows an export holds (a variable for tests); above it the export is refused.
+var MaxExportRows = 100_000
+
+// ExportBatch is how many rows an export reads at a time (a variable for tests).
+var ExportBatch = 500
+
+// ExportUsage reads every row SearchUsage would list, in the same order, in batches. start is called once with the
+// row count before the first emit (not at all if the count is above MaxExportRows or the filter is wrong, which are
+// errors wrapping util.ErrInvalidArgument); a start error is returned as it is.
+func ExportUsage(ctx context.Context, scope SearchScope, f UsageFilter, start func(total int64) error, emit func([]*UsageRow) error) error {
+	p, err := planUsage(ctx, scope, f)
+	if err != nil {
+		return err
+	}
+	if p.total > int64(MaxExportRows) {
+		return TooManyMatches(scope)
+	}
+	if err := start(p.total); err != nil {
+		return err
+	}
+	for skip := 0; int64(skip) < p.total; skip += ExportBatch {
+		rows, err := p.page(ctx, skip, ExportBatch)
+		if err != nil {
+			return err
+		}
+		if err := emit(rows); err != nil {
+			return err
+		}
+	}
+	return nil
 }

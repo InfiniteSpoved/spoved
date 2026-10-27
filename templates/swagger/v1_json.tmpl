@@ -1059,7 +1059,8 @@
       "get": {
         "description": "Lists the dependencies of all repositories on the instance, by repository name. Site admins and auditors with a token for all resources only.",
         "produces": [
-          "application/json"
+          "application/json",
+          "text/csv"
         ],
         "tags": [
           "admin"
@@ -1113,6 +1114,16 @@
             "type": "integer",
             "description": "page size of results",
             "name": "limit",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "csv",
+              "json"
+            ],
+            "type": "string",
+            "description": "csv or json sends every matching row as a download (at most 100000, else 422; no paging) and records an audit entry; without it the answer is paged",
+            "name": "format",
             "in": "query"
           }
         ],
@@ -3713,7 +3724,8 @@
       "get": {
         "description": "Lists the vulnerability alerts of all repositories on the instance. Site admins and auditors with a token for all resources only.",
         "produces": [
-          "application/json"
+          "application/json",
+          "text/csv"
         ],
         "tags": [
           "admin"
@@ -3786,6 +3798,16 @@
             "type": "integer",
             "description": "page size of results",
             "name": "limit",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "csv",
+              "json"
+            ],
+            "type": "string",
+            "description": "csv or json sends every matching row as a download (at most 100000, else 422; no paging) and records an audit entry; without it the answer is paged",
+            "name": "format",
             "in": "query"
           }
         ],
@@ -5846,7 +5868,8 @@
       "get": {
         "description": "Lists the dependencies of the organization's repositories, by repository name. Only organization owners (and site admins) with a token for all resources may ask; a repository is listed only where the dependency graph is on and the caller can read its code. A package nobody visible uses gives the empty list.",
         "produces": [
-          "application/json"
+          "application/json",
+          "text/csv"
         ],
         "tags": [
           "organization"
@@ -5907,6 +5930,16 @@
             "type": "integer",
             "description": "page size of results",
             "name": "limit",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "csv",
+              "json"
+            ],
+            "type": "string",
+            "description": "csv or json sends every matching row as a download (at most 100000, else 422; no paging) and records an audit entry; without it the answer is paged",
+            "name": "format",
             "in": "query"
           }
         ],
@@ -9367,7 +9400,8 @@
       "get": {
         "description": "Lists the vulnerability alerts of the organization's repositories. Only organization owners (and site admins) with a token for all resources may ask; a repository is listed only where the dependency graph is on and the caller can read its code. An advisory that affects nothing visible, or that is unknown, gives the empty list.",
         "produces": [
-          "application/json"
+          "application/json",
+          "text/csv"
         ],
         "tags": [
           "organization"
@@ -9447,6 +9481,16 @@
             "type": "integer",
             "description": "page size of results",
             "name": "limit",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "csv",
+              "json"
+            ],
+            "type": "string",
+            "description": "csv or json sends every matching row as a download (at most 100000, else 422; no paging) and records an audit entry; without it the answer is paged",
+            "name": "format",
             "in": "query"
           }
         ],

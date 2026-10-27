@@ -20,6 +20,7 @@ func SearchDependencies(ctx *context.APIContext) {
 	// description: Lists the dependencies of the organization's repositories, by repository name. Only organization owners (and site admins) with a token for all resources may ask; a repository is listed only where the dependency graph is on and the caller can read its code. A package nobody visible uses gives the empty list.
 	// produces:
 	// - application/json
+	// - text/csv
 	// parameters:
 	// - name: org
 	//   in: path
@@ -58,6 +59,11 @@ func SearchDependencies(ctx *context.APIContext) {
 	//   in: query
 	//   description: page size of results
 	//   type: integer
+	// - name: format
+	//   in: query
+	//   description: csv or json sends every matching row as a download (at most 100000, else 422; no paging) and records an audit entry; without it the answer is paged
+	//   type: string
+	//   enum: [csv, json]
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/DependencyUsageList"
@@ -83,6 +89,7 @@ func SearchVulnerabilityAlerts(ctx *context.APIContext) {
 	// description: Lists the vulnerability alerts of the organization's repositories. Only organization owners (and site admins) with a token for all resources may ask; a repository is listed only where the dependency graph is on and the caller can read its code. An advisory that affects nothing visible, or that is unknown, gives the empty list.
 	// produces:
 	// - application/json
+	// - text/csv
 	// parameters:
 	// - name: org
 	//   in: path
@@ -127,6 +134,11 @@ func SearchVulnerabilityAlerts(ctx *context.APIContext) {
 	//   in: query
 	//   description: page size of results
 	//   type: integer
+	// - name: format
+	//   in: query
+	//   description: csv or json sends every matching row as a download (at most 100000, else 422; no paging) and records an audit entry; without it the answer is paged
+	//   type: string
+	//   enum: [csv, json]
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/RepoVulnerabilityAlertList"

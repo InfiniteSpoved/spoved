@@ -126,3 +126,45 @@ func TestSearchScopeNeedsAnOrganizationOrAnAdmin(t *testing.T) {
 	_, _, err := SearchScope{Doer: user}.RepoCond(db.DefaultContext)
 	require.Error(t, err)
 }
+
+// An export reads batch after batch and lists the rows of SearchUsage, in its order; start sees the count first.
+func TestExportUsageBatches(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&setting.DependencyGraph.Enabled, true)()
+	defer test.MockVariableValue(&ExportBatch, 2)()
+	ctx := db.DefaultContext
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	scope := SearchScope{Doer: admin, Admin: true}
+	for _, id := range []int64{1, 2, 3, 4, 5} {
+		require.NoError(t, db.Insert(ctx, &repo_model.Dependency{RepoID: id, Ecosystem: dependency.Go, Name: "example.com/x", Version: "v1.0.0", ManifestPath: "go.mod"}))
+	}
+	f := UsageFilter{Ecosystem: dependency.Go, Name: "example.com/x"}
+	want, total, err := SearchUsage(ctx, scope, f, db.ListOptions{Page: 1, PageSize: 50})
+	require.NoError(t, err)
+	require.Greater(t, total, int64(2))
+
+	var got, wantIDs []int64
+	batches := 0
+	require.NoError(t, ExportUsage(ctx, scope, f, func(n int64) error {
+		assert.Equal(t, total, n)
+		assert.Empty(t, got)
+		return nil
+	}, func(rows []*UsageRow) error {
+		batches++
+		for _, r := range rows {
+			got = append(got, r.ID)
+		}
+		return nil
+	}))
+	for _, r := range want {
+		wantIDs = append(wantIDs, r.ID)
+	}
+	assert.Equal(t, wantIDs, got)
+	assert.Equal(t, (int(total)+1)/2, batches)
+
+	defer test.MockVariableValue(&MaxExportRows, 2)()
+	called := false
+	err = ExportUsage(ctx, scope, f, func(int64) error { called = true; return nil }, func([]*UsageRow) error { return nil })
+	require.ErrorIs(t, err, util.ErrInvalidArgument)
+	assert.False(t, called, "nothing starts above the cap")
+}
