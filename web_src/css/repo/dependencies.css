@@ -208,6 +208,15 @@
   align-self: center;
 }
 
+.dependency-graph-settings .dg-hint {
+  color: var(--color-text-light);
+}
+
+/* the normal gap between the token block and the next field */
+.dependency-graph-settings #dg-mirror-fields {
+  margin-bottom: 1em;
+}
+
 /* the message of a refused save, at its field and next to Save */
 .dependency-graph-settings .dg-error {
   margin-block: 0.25em;

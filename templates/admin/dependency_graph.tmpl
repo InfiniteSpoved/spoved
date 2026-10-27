@@ -142,7 +142,7 @@
 				{{if .CanChange}}<div class="field dg-actions">
 					<button class="ui primary button" id="dependency-graph-save"{{if $f.ErrorMessage}} aria-describedby="dg-save-error"{{end}}>{{ctx.Locale.Tr "save"}}</button>
 					<button class="ui basic button" id="dependency-graph-test" formaction="{{AppSubUrl}}/admin/config/dependency-graph/test-connection" aria-describedby="dg-test-hint">{{ctx.Locale.Tr "admin.dependency_graph.settings.test_connection"}}</button>
-					<span class="help tw-hidden" id="dg-test-hint">{{ctx.Locale.Tr "admin.dependency_graph.settings.test_save_first"}}</span>
+					<span class="dg-hint tw-hidden" id="dg-test-hint">{{ctx.Locale.Tr "admin.dependency_graph.settings.test_save_first"}}</span>
 					<span id="dg-test-result" role="status"></span>
 				</div>
 				<div id="dg-save-error" role="alert">{{if $f.ErrorMessage}}<p class="dg-error">{{$f.ErrorMessage}}</p>{{end}}</div>{{end}}

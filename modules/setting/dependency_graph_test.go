@@ -238,7 +238,7 @@ func TestDependencyGraphLimits(t *testing.T) {
 
 func TestCheckPageHostList(t *testing.T) {
 	for _, ok := range []string{"", "external", "art.example", "art.example, external", "10.1.2.3", "2001:db8::1", "10.1.0.0/16", "192.168.4.0/24", "2001:db8::/48", "127.0.0.0/16"} {
-		assert.NoError(t, CheckPageHostList(ok), ok)
+		require.NoError(t, CheckPageHostList(ok), ok)
 	}
 	for _, bad := range []string{"*", "*.example", "art?.example", "loopback", "private", "0.0.0.0/0", "10.0.0.0/8", "2001:db8::/32", "bad host", "-x.example", "10.0.0.0/33", "127.0.0.1", "::1", "0.0.0.0", "169.254.169.254", "fe80::1", "localhost", "a.localhost."} {
 		assert.Error(t, CheckPageHostList(bad), bad)

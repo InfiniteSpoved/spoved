@@ -16,6 +16,19 @@ import {FakeData, fakeName, loginAs, adminAuth} from './shared/fake-data.ts';
 test.describe('as the site admin', () => {
   test.use({user: 'user1'});
 
+  // the source the instance starts with: restored after each test, which also drops every saved limit
+  let source = '';
+
+  test.beforeEach(async ({page}) => {
+    await page.goto('/admin/config/dependency-graph');
+    source = await page.locator('input[name="source"]:checked').inputValue();
+  });
+
+  test.afterEach(async ({page}) => {
+    const resp = await page.request.post('/admin/config/dependency-graph/settings', {form: {source}, maxRedirects: 0});
+    expect(resp.status()).toBe(303);
+  });
+
   test('Dependency graph settings are saved on the page', async ({page}) => {
     const response = await page.goto('/admin/config/dependency-graph');
     expect(response?.status()).toBe(200);
@@ -28,10 +41,14 @@ test.describe('as the site admin', () => {
     await page.locator('label[for="dg-source-public"]').click();
     await expect(page.locator('#dg-mirror_url')).toBeHidden();
 
+    // the test uses the saved settings: not while the form has unsaved changes
     await scans.fill('2');
+    await expect(page.locator('#dependency-graph-test')).toBeDisabled();
+    await expect(page.locator('#dg-test-hint')).toHaveText('Save first to test the new settings.');
     await page.locator('#dependency-graph-save').click();
     await expect(page.locator('#flash-message')).toContainText('The dependency graph settings were saved.');
     await expect(scans).toHaveValue('2');
+    await expect(page.locator('#dependency-graph-test')).toBeEnabled();
     await expect(page.locator('#dg-max_concurrent_scans').locator('xpath=../..').locator('.dg-app-default')).toContainText('app.ini: 1.');
 
     // back to the app.ini value: no hint
@@ -40,6 +57,33 @@ test.describe('as the site admin', () => {
     await expect(page.locator('#flash-message')).toContainText('The dependency graph settings were saved.');
     await expect(scans).toHaveValue('1');
     await expect(page.locator('#dg-max_concurrent_scans').locator('xpath=../..').locator('.dg-app-default')).toHaveCount(0);
+  });
+
+  test('A refused save shows the form again at the refused field', async ({page}) => {
+    await page.goto('/admin/config/dependency-graph');
+    // a field in a closed fold: the browser doesn't block the save, the server refuses it and opens the fold
+    await page.locator('#dg-download-limits summary').click();
+    await page.locator('#dg-osv_max_entry_size').fill('2000');
+    await page.locator('#dg-download-limits summary').click();
+    await page.locator('#dependency-graph-save').click();
+    await expect(page.locator('#dg-save-error')).toContainText('Largest advisory must be more than 0 and at most 1024.');
+    await expect(page.locator('#dg-download-limits')).toHaveAttribute('open', '');
+    const field = page.locator('#dg-osv_max_entry_size');
+    await expect(field).toHaveValue('2000');
+    await expect(field).toHaveAttribute('aria-invalid', 'true');
+    await expect(field).toBeFocused();
+    await expect(page.locator('#dependency-graph-test')).toBeDisabled();
+  });
+
+  test('The None source hides what it does not use', async ({page}) => {
+    await page.goto('/admin/config/dependency-graph');
+    await page.locator('label[for="dg-source-none"]').click();
+    await expect(page.locator('label[for="dg-source-none"]')).toContainText('advisories already downloaded are kept');
+    await expect(page.locator('#dg-allowed_hosts')).toBeHidden();
+    await expect(page.locator('#dg-update_interval')).toBeHidden();
+    await expect(page.locator('#dg-download-limits')).toBeHidden();
+    await expect(page.locator('#dependency-graph-test')).toBeHidden();
+    await expect(page.locator('#advisory-mirror-table')).toBeVisible();
   });
 });
 
@@ -67,6 +111,7 @@ test.describe('as an auditor', () => {
     const response = await page.goto('/admin/config/dependency-graph');
     expect(response?.status()).toBe(200);
     await expect(page.locator('#dg-max_concurrent_scans')).toBeDisabled();
+    await expect(page.locator('#dg-read-only')).toContainText('Read-only: only site administrators can change these settings');
     await expect(page.locator('#dependency-graph-save')).toHaveCount(0);
     await expect(page.locator('#dependency-graph-test')).toHaveCount(0);
     const post = await page.request.post('/admin/config/dependency-graph/settings', {form: {source: 'public', max_concurrent_scans: '5'}, maxRedirects: 0});
