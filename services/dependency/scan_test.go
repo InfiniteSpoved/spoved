@@ -21,6 +21,7 @@ import (
 
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
+	system_model "forgejo.org/models/system"
 	"forgejo.org/models/unittest"
 	vulnerability_model "forgejo.org/models/vulnerability"
 	"forgejo.org/modules/dependency"
@@ -869,11 +870,7 @@ func TestFailedRefreshRequeuesWithoutDeadlock(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			repo := enable(t)
 			commitFiles(t, repo, map[string]string{"go.mod": goMod}, nil)
-			// create the real slots first, so the mock below restores them whatever ran before
-			release, err := AcquireSlot(t.Context())
-			require.NoError(t, err)
-			release()
-			defer test.MockVariableValue(&scanSlots, make(chan struct{}, 1))()
+			defer test.MockVariableValue(&setting.DependencyGraph.MaxConcurrentScans, 1)()
 			defer test.MockVariableValue(&refreshAlerts, func(context.Context, int64, func(context.Context) (bool, error)) (vulnerability_model.ApplyStats, error) {
 				return result.stats, result.err
 			})()
@@ -903,4 +900,55 @@ func TestFailedRefreshRequeuesWithoutDeadlock(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAcquireSlotLiveLimit(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	setLimit := func(n int) {
+		require.NoError(t, system_model.SetSettings(db.DefaultContext, map[string]string{setting.Config().DependencyGraphConfig.DynKey(): fmt.Sprintf(`{"limits":{"max_concurrent_scans":%d}}`, n)}))
+		bumpRevision(t)
+	}
+	t.Cleanup(func() {
+		require.NoError(t, system_model.SetSettings(db.DefaultContext, map[string]string{setting.Config().DependencyGraphConfig.DynKey(): ""}))
+		bumpRevision(t)
+	})
+	setLimit(2)
+	a, err := AcquireSlot(t.Context())
+	require.NoError(t, err)
+	b, err := AcquireSlot(t.Context())
+	require.NoError(t, err)
+
+	// the limit is lowered: the two running scans keep their slots, a third waits
+	setLimit(1)
+	ctx, cancel := context.WithTimeout(t.Context(), 1500*time.Millisecond)
+	defer cancel()
+	_, err = AcquireSlot(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	a()
+	a() // a second call gives nothing back
+	ctx2, cancel2 := context.WithTimeout(t.Context(), 1500*time.Millisecond)
+	defer cancel2()
+	_, err = AcquireSlot(ctx2)
+	require.ErrorIs(t, err, context.DeadlineExceeded, "one runs, the limit is one")
+
+	// a raised limit admits a waiting scan without a release
+	got := make(chan func(), 1)
+	go func() {
+		release, err := AcquireSlot(t.Context())
+		if err == nil {
+			got <- release
+		}
+	}()
+	time.Sleep(100 * time.Millisecond)
+	setLimit(3)
+	select {
+	case release := <-got:
+		release()
+	case <-time.After(5 * time.Second):
+		t.Fatal("the raised limit was not seen")
+	}
+	b()
+	scanSlots.Lock()
+	assert.Zero(t, scanSlots.running)
+	scanSlots.Unlock()
 }

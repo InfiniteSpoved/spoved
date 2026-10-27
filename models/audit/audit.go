@@ -211,7 +211,13 @@ var Fields = map[string][]string{
 		"alert_id", "advisory_id", "ecosystem", "package", "manifest", "reason", "comment", "previous_state", "previous_reason",
 	},
 	"vulnerability_mirror": {"ecosystems"},
-	"tag_protection":       {"name_pattern", "allowlist_user_ids", "allowlist_team_ids", "allowlist_deploy_key_ids"},
+	// dependency_graph: the settings saved in Site administration; the mirror token only as token_changed
+	"dependency_graph": {
+		"source", "mirror_url", "sign_in", "user", "allowed_hosts", "token_changed", "max_concurrent_scans", "scan_timeout",
+		"max_manifest_size", "max_manifests", "max_dependencies", "max_tree_entries", "update_interval", "osv_max_download",
+		"osv_max_entries", "osv_max_entry_size", "osv_max_uncompressed", "osv_ecosystem_timeout",
+	},
+	"tag_protection": {"name_pattern", "allowlist_user_ids", "allowlist_team_ids", "allowlist_deploy_key_ids"},
 	"push_rule": {
 		"commit_message_regex", "commit_message_banned_regex", "branch_name_regex", "require_verified_author_email",
 		"max_file_size_mb", "banned_file_patterns", "pr_title_regex", "pr_title_banned_regex", "pr_title_message",

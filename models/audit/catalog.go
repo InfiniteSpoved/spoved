@@ -85,7 +85,8 @@ var Actions = map[string]string{
 	"account.user.role_revoked":              CategoryAccount,
 	"account.user.updated":                   CategoryAccount,
 
-	"admin.cron.run":                                CategoryAdmin,
+	"admin.cron.run": CategoryAdmin,
+	"admin.dependency_graph.settings_changed":       CategoryAdmin,
 	"admin.log_shipping.created":                    CategoryAdmin,
 	"admin.log_shipping.deleted":                    CategoryAdmin,
 	"admin.log_shipping.updated":                    CategoryAdmin,

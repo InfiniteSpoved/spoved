@@ -950,6 +950,8 @@ func registerRoutes(m *web.Route) {
 			m.Get("/settings", admin.ConfigSettings)
 			m.Post("/dependency-graph", admin.DependencyGraphPost)
 			m.Post("/dependency-graph/update-advisories", admin.DependencyGraphUpdateAdvisories)
+			m.Post("/dependency-graph/settings", admin.DependencyGraphSettingsPost)
+			m.Post("/dependency-graph/test-connection", admin.DependencyGraphTestConnection)
 		})
 
 		m.Group("/monitor", func() {

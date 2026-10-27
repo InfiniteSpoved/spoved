@@ -12,5 +12,6 @@
 {{else if eq .Error "shrunk"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.shrunk"}}{{if $.HasData}}; {{ctx.Locale.Tr "admin.dependency_graph.advisories.old_data_kept"}}{{end}}
 {{else if eq .Error "mass_withdrawn"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.mass_withdrawn"}}
 {{else if eq .Error "auth_failed"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.auth_failed"}}{{if $.HasData}}; {{ctx.Locale.Tr "admin.dependency_graph.advisories.old_data_kept"}}{{end}}
+{{else if eq .Error "config_invalid"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.config_invalid"}}{{if $.HasData}}; {{ctx.Locale.Tr "admin.dependency_graph.advisories.old_data_kept"}}{{end}}
 {{else if eq .Error "redirect_refused"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.redirect_refused"}}{{if $.HasData}}; {{ctx.Locale.Tr "admin.dependency_graph.advisories.old_data_kept"}}{{end}}
 {{else}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.internal_error"}}{{end}}</span>{{end}}

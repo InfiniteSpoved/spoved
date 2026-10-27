@@ -12,6 +12,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	repo_model "forgejo.org/models/repo"
 	vulnerability_model "forgejo.org/models/vulnerability"
@@ -125,15 +127,43 @@ func hasExcludedSegment(p string) bool {
 	return false
 }
 
-// AcquireSlot waits for one of the MAX_CONCURRENT_SCANS slots that scans and alert rematches share in this process;
-// release gives it back.
+// AcquireSlot waits for one of the slots (the scans at once in force) that scans and alert rematches share in this
+// process; release gives it back. The limit is read at every attempt: a lower one lets the running scans finish, a
+// higher one admits a waiting scan within a second.
 func AcquireSlot(ctx context.Context) (release func(), err error) {
-	scanSlotsOnce.Do(func() { scanSlots = make(chan struct{}, max(setting.DependencyGraph.MaxConcurrentScans, 1)) })
-	select {
-	case scanSlots <- struct{}{}:
-		return func() { <-scanSlots }, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	for {
+		limit := setting.DependencyGraphSettings(ctx).MaxConcurrentScans // outside the lock: it may query the database
+		scanSlots.Lock()
+		if scanSlots.running < max(limit, 1) {
+			scanSlots.running++
+			scanSlots.Unlock()
+			var once sync.Once
+			return func() { once.Do(releaseSlot) }, nil
+		}
+		if scanSlots.freed == nil {
+			scanSlots.freed = make(chan struct{})
+		}
+		freed := scanSlots.freed
+		scanSlots.Unlock()
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-freed:
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		}
+		timer.Stop()
+	}
+}
+
+func releaseSlot() {
+	scanSlots.Lock()
+	defer scanSlots.Unlock()
+	scanSlots.running--
+	if scanSlots.freed != nil {
+		close(scanSlots.freed)
+		scanSlots.freed = nil
 	}
 }
 
@@ -194,7 +224,8 @@ func scan(ctx context.Context, repoID int64, rematch *bool) (requeue bool, err e
 		return false, fail(ctx, repo, old, repo_model.DependencyErrGit, errors.New("no default branch"))
 	}
 
-	scanCtx, cancel, finished := process.GetManager().AddContextTimeout(ctx, setting.DependencyGraph.ScanTimeout, fmt.Sprintf("dependency scan of repository %d", repo.ID))
+	cfg := setting.DependencyGraphSettings(ctx)
+	scanCtx, cancel, finished := process.GetManager().AddContextTimeout(ctx, cfg.ScanTimeout, fmt.Sprintf("dependency scan of repository %d", repo.ID))
 	defer finished()
 	defer cancel()
 
@@ -211,7 +242,7 @@ func scan(ctx context.Context, repoID int64, rematch *bool) (requeue bool, err e
 		return false, nil // nothing changed, e.g. a mirror sync of other branches
 	}
 
-	result, deps, code, err := scanCommit(scanCtx, repo, gitRepo, sha)
+	result, deps, code, err := scanCommit(scanCtx, &cfg, repo, gitRepo, sha)
 	if err != nil {
 		return false, fail(ctx, repo, old, code, err)
 	}
@@ -296,8 +327,7 @@ func fail(ctx context.Context, repo *repo_model.Repository, old *repo_model.Depe
 	return err
 }
 
-func scanCommit(ctx context.Context, repo *repo_model.Repository, gitRepo *git.Repository, sha string) (*repo_model.DependencyScan, []*repo_model.Dependency, string, error) {
-	cfg := &setting.DependencyGraph
+func scanCommit(ctx context.Context, cfg *setting.DependencyGraphOptions, repo *repo_model.Repository, gitRepo *git.Repository, sha string) (*repo_model.DependencyScan, []*repo_model.Dependency, string, error) {
 	var manifests, unpinned []treeEntry
 	aux := map[string]treeEntry{}
 	err := walkTree(ctx, gitRepo, sha, cfg.MaxTreeEntries, func(e treeEntry) {

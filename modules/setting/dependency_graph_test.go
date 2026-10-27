@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"forgejo.org/modules/secret"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -101,4 +103,123 @@ func TestOSVMirrorCredentialSettings(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "OSV_MIRROR_TOKEN")
 	assert.NotContains(t, err.Error(), "pw")
+}
+
+func TestDependencyGraphConfigMerge(t *testing.T) {
+	load := func(ini string) {
+		cfg, err := NewConfigProviderFromData(ini)
+		require.NoError(t, err)
+		require.NoError(t, loadDependencyGraphFrom(cfg))
+	}
+	t.Cleanup(func() { load("") })
+	defer func(k string) { SecretKey = k }(SecretKey)
+	SecretKey = "dependency-graph-test-key"
+	enc := func(s string) *string {
+		v, err := secret.EncryptSecret(SecretKey, s)
+		require.NoError(t, err)
+		return &v
+	}
+	str := func(s string) *string { return &s }
+
+	load("[dependency_graph]\nOSV_MIRROR_URL = https://art.example/osv\nOSV_MIRROR_TOKEN = app-ini-token-1\nOSV_MIRROR_USER = ci\nOSV_MIRROR_ALLOWED_HOSTS = private\nMAX_CONCURRENT_SCANS = 3\n")
+
+	t.Run("nothing stored is app.ini", func(t *testing.T) {
+		o := DependencyGraphConfig{}.Merge()
+		assert.Equal(t, DependencyGraph, o)
+		assert.Equal(t, 3, o.MaxConcurrentScans)
+		assert.Equal(t, "app-ini-token-1", o.OSVMirrorToken)
+	})
+
+	t.Run("stored values win", func(t *testing.T) {
+		o := DependencyGraphConfig{
+			Limits: map[string]int64{"max_concurrent_scans": 7, "update_interval": 2 * 3600, "scan_timeout": 90, "osv_max_download": 1 << 20},
+			Source: OSVSourceMirror, MirrorURL: "https://other.example/osv", SignIn: OSVSignInToken,
+			TokenEnc: enc("stored-token-1"), TokenOrigin: "https://other.example", Hosts: str("10.0.0.0/8"),
+		}.Merge()
+		assert.Equal(t, 7, o.MaxConcurrentScans)
+		assert.Equal(t, 2*time.Hour, o.UpdateInterval)
+		assert.Equal(t, 90*time.Second, o.ScanTimeout)
+		assert.EqualValues(t, 1<<20, o.OSVMaxDownload)
+		assert.Equal(t, "https://other.example/osv", o.OSVMirrorURL)
+		assert.Equal(t, "stored-token-1", o.OSVMirrorToken)
+		assert.Empty(t, o.OSVMirrorUser, "Bearer")
+		assert.Equal(t, "10.0.0.0/8", o.OSVMirrorHosts)
+		assert.False(t, o.MirrorConfigInvalid)
+		assert.Equal(t, 500, o.MaxManifests, "not stored: app.ini")
+	})
+
+	t.Run("an invalid stored field falls back to app.ini", func(t *testing.T) {
+		o := DependencyGraphConfig{
+			Limits: map[string]int64{"max_concurrent_scans": 65, "update_interval": 60, "unknown": 1},
+			Source: OSVSourceMirror, MirrorURL: "ftp://x.example/", SignIn: OSVSignInBasic, User: "ci",
+		}.Merge()
+		assert.Equal(t, 3, o.MaxConcurrentScans)
+		assert.Equal(t, 24*time.Hour, o.UpdateInterval)
+		assert.Equal(t, "https://art.example/osv", o.OSVMirrorURL)
+		assert.Equal(t, "app-ini-token-1", o.OSVMirrorToken, "the app.ini token, for the app.ini host")
+		assert.False(t, o.MirrorConfigInvalid)
+	})
+
+	t.Run("an invalid host list turns the mirror off", func(t *testing.T) {
+		o := DependencyGraphConfig{Source: OSVSourcePublic, Hosts: str("bad host")}.Merge()
+		assert.True(t, o.MirrorConfigInvalid)
+		assert.Equal(t, "private", o.OSVMirrorHosts, "never the stored list")
+		assert.True(t, DependencyGraphConfig{Invalid: true}.Merge().MirrorConfigInvalid, "a value that can't be parsed")
+		assert.True(t, DependencyGraphConfig{TokenEnc: str("not-hex")}.Merge().MirrorConfigInvalid, "a token that can't be decrypted")
+		assert.True(t, DependencyGraphConfig{SignIn: "odd"}.Merge().MirrorConfigInvalid)
+	})
+
+	t.Run("sources", func(t *testing.T) {
+		o := DependencyGraphConfig{Source: OSVSourcePublic}.Merge()
+		assert.Equal(t, DefaultOSVMirrorURL, o.OSVMirrorURL)
+		assert.Empty(t, o.OSVMirrorToken, "no credential to the public bucket")
+		o = DependencyGraphConfig{Source: OSVSourceNone}.Merge()
+		assert.Empty(t, o.OSVMirrorURL)
+		assert.Empty(t, o.OSVMirrorToken)
+	})
+
+	t.Run("a token goes only to its own origin", func(t *testing.T) {
+		// the app.ini token is for art.example: a stored URL elsewhere doesn't get it
+		o := DependencyGraphConfig{Source: OSVSourceMirror, MirrorURL: "https://evil.example/osv", SignIn: OSVSignInToken}.Merge()
+		assert.Empty(t, o.OSVMirrorToken)
+		// a stored token entered for another host
+		o = DependencyGraphConfig{Source: OSVSourceMirror, MirrorURL: "http://art.example/osv", SignIn: OSVSignInBasic, User: "ci", TokenEnc: enc("stored-token-1"), TokenOrigin: "https://art.example"}.Merge()
+		assert.Empty(t, o.OSVMirrorToken, "another scheme")
+		assert.Empty(t, o.OSVMirrorUser)
+		o = DependencyGraphConfig{Source: OSVSourceMirror, MirrorURL: "https://art.example/other", SignIn: OSVSignInBasic, User: "bot", TokenEnc: enc("stored-token-1"), TokenOrigin: "https://art.example"}.Merge()
+		assert.Equal(t, "stored-token-1", o.OSVMirrorToken)
+		assert.Equal(t, "bot", o.OSVMirrorUser)
+		o = DependencyGraphConfig{Source: OSVSourceMirror, MirrorURL: "https://art.example/osv", SignIn: OSVSignInNone}.Merge()
+		assert.Empty(t, o.OSVMirrorToken)
+	})
+}
+
+func TestDependencyGraphLimits(t *testing.T) {
+	for _, l := range DependencyGraphLimits {
+		assert.NoError(t, l.Check(l.Min), l.Name)
+		assert.NoError(t, l.Check(l.Max), l.Name)
+		require.ErrorContains(t, l.Check(l.Max+1), l.Name)
+		require.Error(t, l.Check(l.Min-1), l.Name)
+		_, ok := dependencyGraphLimitDefaults[l.Name]
+		assert.True(t, ok, l.Name)
+	}
+	l, _ := DependencyGraphLimitByName("max_concurrent_scans")
+	assert.EqualValues(t, 64, l.Max)
+	l, _ = DependencyGraphLimitByName("update_interval")
+	assert.EqualValues(t, 720*3600, l.Max)
+	assert.EqualValues(t, 3600, l.Min)
+	for _, name := range []string{"scan_timeout", "osv_ecosystem_timeout"} {
+		l, _ = DependencyGraphLimitByName(name)
+		assert.EqualValues(t, 24*3600, l.Max, name)
+	}
+
+	cfg, err := NewConfigProviderFromData("[dependency_graph]\nMAX_CONCURRENT_SCANS = 500\nSCAN_TIMEOUT = 48h\n")
+	require.NoError(t, err)
+	require.NoError(t, loadDependencyGraphFrom(cfg))
+	t.Cleanup(func() {
+		cfg, _ := NewConfigProviderFromData("")
+		require.NoError(t, loadDependencyGraphFrom(cfg))
+	})
+	assert.Equal(t, 64, DependencyGraph.MaxConcurrentScans, "app.ini is held to the same bounds")
+	assert.Equal(t, 24*time.Hour, DependencyGraph.ScanTimeout)
 }

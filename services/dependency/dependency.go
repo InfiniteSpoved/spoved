@@ -33,10 +33,12 @@ const (
 
 var (
 	scanQueue *queue.WorkerPoolQueue[int64]
-	// scanSlots counts the scans running in this process; its size is [dependency_graph] MAX_CONCURRENT_SCANS,
-	// read when the first scan needs a slot
-	scanSlots     chan struct{}
-	scanSlotsOnce sync.Once
+	// scanSlots counts the scans and rematches running in this process (AcquireSlot)
+	scanSlots struct {
+		sync.Mutex
+		running int
+		freed   chan struct{} // closed and replaced when a slot is given back
+	}
 
 	// repoScans holds the repositories being scanned in this process: the unique queue forgets an ID once it is
 	// popped, so a push during a scan queues the repository again, and the second scan must wait for the first.
