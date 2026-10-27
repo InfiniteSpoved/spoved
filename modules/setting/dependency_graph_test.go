@@ -321,10 +321,14 @@ func TestInstanceAndLoopbackHosts(t *testing.T) {
 		{"::ffff:127.0.0.1", "3000"},
 		{"localhost", "2222"},
 		{"0.0.0.0", "3000"},
+		{"git.example", "80"},   // the public names on any port: a proxy may serve them there
+		{"git.example", "4318"}, //
+		{"127.0.0.1", "03000"},  // ports compare as numbers
+		{"[::1%lo]", "3000"},    // the zone is ignored
 	} {
 		assert.True(t, IsInstanceHost(hp[0], hp[1]), hp)
 	}
-	for _, hp := range [][2]string{{"git.example", "4318"}, {"10.0.0.5", "4318"}, {"localhost", "4318"}, {"127.0.0.1", "4318"}, {"art.example", "3000"}} {
+	for _, hp := range [][2]string{{"10.0.0.5", "4318"}, {"localhost", "4318"}, {"127.0.0.1", "4318"}, {"art.example", "3000"}} {
 		assert.False(t, IsInstanceHost(hp[0], hp[1]), hp)
 	}
 	for _, h := range []string{

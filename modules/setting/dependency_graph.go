@@ -614,27 +614,30 @@ func MirrorBlockedHosts() string {
 	return strings.Join(blocked, ",")
 }
 
-// IsInstanceHost reports whether host (and port: "" means any port) names this instance: the host and port of
-// AppURL or LocalURL, the domain, the HTTP address or a loopback or unspecified address on the HTTP port, and the SSH
-// domain or listen address on the SSH port (any case, a trailing dot ignored). Log shipping (with the endpoint's port)
-// and the advisory mirror (any port) refuse it.
+// IsInstanceHost reports whether host (and port: "" means any port) names this instance: the public names (the
+// host of AppURL, the domain and the SSH domain) on any port, since a proxy may serve them on other ports too, the
+// host and port of LocalURL, the HTTP address or a loopback or unspecified address on the HTTP port, and the SSH
+// listen address on the SSH port (any case, a trailing dot and an IPv6 zone ignored, ports compared as numbers).
+// Log shipping (with the endpoint's port) and the advisory mirror (any port) refuse it.
 func IsInstanceHost(host, port string) bool {
 	host = strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
+	if i := strings.IndexByte(host, '%'); i >= 0 {
+		host = host[:i]
+	}
 	if host == "" {
 		return false
 	}
 	type hostPort struct{ host, port string }
-	self := []hostPort{{HTTPAddr, HTTPPort}, {SSH.Domain, strconv.Itoa(SSH.Port)}}
+	self := []hostPort{{HTTPAddr, HTTPPort}, {SSH.Domain, ""}, {Domain, ""}}
 	if SSH.StartBuiltinServer {
 		self = append(self, hostPort{SSH.ListenHost, strconv.Itoa(SSH.ListenPort)})
 	}
-	for _, raw := range []string{AppURL, LocalURL} {
-		if u, err := url.Parse(raw); err == nil {
-			p := URLPort(u)
-			self = append(self, hostPort{u.Hostname(), p}, hostPort{Domain, p}) // the domain is served there too
-		}
+	if u, err := url.Parse(AppURL); err == nil {
+		self = append(self, hostPort{u.Hostname(), ""})
 	}
-	self = append(self, hostPort{Domain, HTTPPort})
+	if u, err := url.Parse(LocalURL); err == nil {
+		self = append(self, hostPort{u.Hostname(), URLPort(u)})
+	}
 	if IsLoopbackHost(host) {
 		self = append(self, hostPort{host, HTTPPort})
 		if SSH.StartBuiltinServer {
@@ -642,11 +645,18 @@ func IsInstanceHost(host, port string) bool {
 		}
 	}
 	for _, s := range self {
-		if h := strings.TrimSuffix(strings.Trim(s.host, "[]"), "."); h != "" && strings.EqualFold(h, host) && (port == "" || port == s.port) {
+		if h := strings.TrimSuffix(strings.Trim(s.host, "[]"), "."); h != "" && strings.EqualFold(h, host) && (port == "" || s.port == "" || samePort(port, s.port)) {
 			return true
 		}
 	}
 	return false
+}
+
+// samePort compares two ports as numbers, so "03000" is 3000.
+func samePort(a, b string) bool {
+	x, errA := strconv.Atoi(a)
+	y, errB := strconv.Atoi(b)
+	return errA == nil && errB == nil && x == y
 }
 
 // URLPort is the port of u, or the default port of its scheme (http, https).

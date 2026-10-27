@@ -80,8 +80,6 @@ func GetAllSettings(ctx context.Context) (revision int, res map[string]string, e
 	return revision, res, nil
 }
 
-// GetSettingForUpdate returns the stored value of key (has = false when it isn't stored) and, inside a transaction,
-// locks its row until the transaction ends, so that a read-modify-write of the value can't lose a concurrent one.
 // EnsureSetting stores key with an empty value unless it exists, so that GetSettingForUpdate has a row to lock on the
 // first save too. Concurrent callers don't fail: the insert does nothing on a conflict (a failed statement would also
 // abort a PostgreSQL transaction).
@@ -95,6 +93,8 @@ func EnsureSetting(ctx context.Context, key string) error {
 	return err
 }
 
+// GetSettingForUpdate returns the stored value of key (has = false when it isn't stored) and, inside a transaction,
+// locks its row until the transaction ends, so that a read-modify-write of the value can't lose a concurrent one.
 func GetSettingForUpdate(ctx context.Context, key string) (value string, has bool, err error) {
 	if _, err := db.Exec(ctx, "UPDATE system_setting SET version=version WHERE setting_key=?", key); err != nil {
 		return "", false, err
