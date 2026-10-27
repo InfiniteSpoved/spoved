@@ -1,5 +1,6 @@
-{{/* The status of one ecosystem of the advisory mirror: the dot holds the error class ("" for OK) and whether data from an earlier update exists. Never raw text. */}}
-{{if eq .Error ""}}<span class="text green">{{ctx.Locale.Tr "admin.dependency_graph.advisories.ok"}}</span>
+{{/* The status of one ecosystem of the advisory mirror: the dot holds the error class ("" for OK, or not updated yet without data) and whether data from an earlier update exists. Never raw text. */}}
+{{if and (eq .Error "") (not .HasData)}}<span class="text grey">{{ctx.Locale.Tr "admin.dependency_graph.advisories.not_updated"}}</span>
+{{else if eq .Error ""}}<span class="text green">{{ctx.Locale.Tr "admin.dependency_graph.advisories.ok"}}</span>
 {{else}}<span class="text yellow">{{if eq .Error "blocked_host"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.blocked_host"}}{{if $.HasData}}; {{ctx.Locale.Tr "admin.dependency_graph.advisories.old_data_kept"}}{{end}}
 {{else if eq .Error "connection_failed"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.connection_failed"}}{{if $.HasData}}; {{ctx.Locale.Tr "admin.dependency_graph.advisories.old_data_kept"}}{{end}}
 {{else if eq .Error "timeout"}}{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.timeout"}}

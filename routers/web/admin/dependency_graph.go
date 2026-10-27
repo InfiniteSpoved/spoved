@@ -27,6 +27,12 @@ const tplDependencyGraph base.TplName = "admin/dependency_graph"
 // DependencyGraph shows the dependency graph settings: the site switch, the scan limits, the advisory source and the
 // status of the advisory mirror.
 func DependencyGraph(ctx *context.Context) {
+	stored := setting.Config().DependencyGraphConfig.Value(ctx)
+	cfg := stored.Merge()
+	renderDependencyGraph(ctx, dependencyGraphForm(stored, &cfg), http.StatusOK)
+}
+
+func renderDependencyGraph(ctx *context.Context, form dependencyGraphFormData, status int) {
 	ctx.Data["Title"] = ctx.Tr("admin.dependency_graph")
 	ctx.Data["PageIsAdminConfig"] = true
 	ctx.Data["PageIsAdminConfigDependencyGraph"] = true
@@ -51,6 +57,10 @@ func DependencyGraph(ctx *context.Context) {
 		ctx.ServerError("Statuses", err)
 		return
 	}
+	if form.Revision, err = vulnerability_service.SettingsRevision(ctx); err != nil {
+		ctx.ServerError("SettingsRevision", err)
+		return
+	}
 	ctx.Data["MirrorStatuses"] = statuses
 	cfg := stored.Merge()
 	ctx.Data["MirrorURL"] = cfg.OSVMirrorURL
@@ -58,11 +68,11 @@ func DependencyGraph(ctx *context.Context) {
 	ctx.Data["MirrorRunning"] = vulnerability_service.Running()
 	ctx.Data["MirrorSiteOn"] = dependency_service.SiteEnabled(ctx)
 	ctx.Data["MirrorConfigInvalid"] = cfg.MirrorConfigInvalid
-	ctx.Data["Form"] = dependencyGraphForm(stored, &cfg)
+	ctx.Data["Form"] = form
 	ctx.Data["DefaultOSVMirrorURL"] = setting.DefaultOSVMirrorURL
 	// the auditor reads the page; only a site admin changes anything
 	ctx.Data["CanChange"] = ctx.Doer.IsAdmin
-	ctx.HTML(http.StatusOK, tplDependencyGraph)
+	ctx.HTML(status, tplDependencyGraph)
 }
 
 // dependencyGraphField is one field of the settings form: its value in force and, when a saved value differs from
@@ -73,31 +83,43 @@ type dependencyGraphField struct {
 
 // dependencyGraphFormData is the settings form. It never holds the token, only whether one is in force.
 type dependencyGraphFormData struct {
-	Limits                   map[string]dependencyGraphField
-	Source, SignIn           string
-	MirrorURL, User, Hosts   dependencyGraphField
-	HasToken                 bool
-	SourceDefault, AppSource string
+	Limits                 map[string]dependencyGraphField
+	Source, SignIn         string
+	MirrorURL, User, Hosts dependencyGraphField
+	HasToken               bool // a token is in force for the mirror
+	TokenSaved             bool // a token is saved on this page (it can be removed whatever the source)
+	SourceDefault          string
+	HostsFromAppIni        bool // an empty host list is app.ini's OSV_MIRROR_ALLOWED_HOSTS, else the webhook list
+	Revision               string
+
+	// a refused save: the field (a limit name, mirror_url, ..., or "" for the whole form) and its message
+	ErrorField   string
+	ErrorMessage template.HTML
+	TokenAgain   bool // a token was entered: it isn't shown again
 }
 
-// appIniSource is the source app.ini's OSV_MIRROR_URL stands for.
-func appIniSource() string {
-	switch setting.DependencyGraph.OSVMirrorURL {
-	case "":
-		return setting.OSVSourceNone
-	case setting.DefaultOSVMirrorURL:
-		return setting.OSVSourcePublic
+// Open reports whether the fold holding the refused field is open.
+func (f dependencyGraphFormData) Open(fold string) bool {
+	switch f.ErrorField {
+	case "max_manifest_size", "max_manifests", "max_dependencies", "max_tree_entries":
+		return fold == "repository"
+	case "osv_max_download", "osv_max_uncompressed", "osv_max_entries", "osv_max_entry_size", "osv_ecosystem_timeout":
+		return fold == "download"
 	}
-	return setting.OSVSourceMirror
+	return false
 }
 
-// dependencyGraphLimitText is a limit in its form unit.
+// dependencyGraphLimitText is a limit in its form unit, exactly (0.5 for half a MiB).
 func dependencyGraphLimitText(name string, v int64) string {
-	return strconv.FormatInt(v/max(dependencyGraphFormUnits[name], 1), 10)
+	unit := dependencyGraphFormUnits[name]
+	if unit <= 1 {
+		return strconv.FormatInt(v, 10)
+	}
+	return strconv.FormatFloat(float64(v)/float64(unit), 'f', -1, 64)
 }
 
 func dependencyGraphForm(stored setting.DependencyGraphConfig, cfg *setting.DependencyGraphOptions) dependencyGraphFormData {
-	f := dependencyGraphFormData{Limits: map[string]dependencyGraphField{}, AppSource: appIniSource()}
+	f := dependencyGraphFormData{Limits: map[string]dependencyGraphField{}}
 	for _, l := range setting.DependencyGraphLimits {
 		field := dependencyGraphField{Value: dependencyGraphLimitText(l.Name, l.Get(cfg))}
 		if _, ok := stored.Limits[l.Name]; ok {
@@ -107,33 +129,31 @@ func dependencyGraphForm(stored setting.DependencyGraphConfig, cfg *setting.Depe
 		}
 		f.Limits[l.Name] = field
 	}
+	appSource := setting.DependencyGraphAppSource()
 	f.Source = stored.Source
 	if f.Source == "" {
-		f.Source = f.AppSource
-	} else if f.Source != f.AppSource {
-		f.SourceDefault = f.AppSource
+		f.Source = appSource
+	} else if f.Source != appSource {
+		f.SourceDefault = appSource
 	}
 	f.MirrorURL.Value = stored.MirrorURL
-	if f.MirrorURL.Value == "" && f.AppSource == setting.OSVSourceMirror {
+	if f.MirrorURL.Value == "" && appSource == setting.OSVSourceMirror {
 		f.MirrorURL.Value = setting.DependencyGraph.OSVMirrorURL
 	}
-	if f.AppSource == setting.OSVSourceMirror && stored.MirrorURL != "" && stored.MirrorURL != setting.DependencyGraph.OSVMirrorURL {
+	if appSource == setting.OSVSourceMirror && stored.MirrorURL != "" && stored.MirrorURL != setting.DependencyGraph.OSVMirrorURL {
 		f.MirrorURL.Default = setting.DependencyGraph.OSVMirrorURL
 	}
 	f.SignIn, f.User.Value = stored.SignIn, stored.User
 	if f.SignIn == "" {
-		switch {
-		case setting.DependencyGraph.OSVMirrorUser != "":
-			f.SignIn, f.User.Value = setting.OSVSignInBasic, setting.DependencyGraph.OSVMirrorUser
-		case setting.DependencyGraph.OSVMirrorToken != "":
-			f.SignIn = setting.OSVSignInToken
-		default:
-			f.SignIn = setting.OSVSignInNone
-		}
+		f.SignIn, f.User.Value = setting.DependencyGraphAppSignIn(), setting.DependencyGraph.OSVMirrorUser
 	}
-	f.HasToken = cfg.OSVMirrorToken != "" || stored.TokenEnc != nil && *stored.TokenEnc != ""
-	f.Hosts.Value = cfg.OSVMirrorHosts
-	if stored.Hosts != nil && strings.TrimSpace(*stored.Hosts) != setting.DependencyGraph.OSVMirrorHosts {
+	f.TokenSaved = stored.TokenEnc != nil && *stored.TokenEnc != ""
+	f.HasToken = cfg.OSVMirrorToken != "" || f.TokenSaved
+	if stored.Hosts != nil {
+		f.Hosts.Value = *stored.Hosts // only a saved list: an empty field follows app.ini
+	}
+	f.HostsFromAppIni = setting.DependencyGraph.OSVMirrorHosts != ""
+	if f.HostsFromAppIni && f.Hosts.Value != "" && f.Hosts.Value != setting.DependencyGraph.OSVMirrorHosts {
 		f.Hosts.Default = setting.DependencyGraph.OSVMirrorHosts
 	}
 	return f
@@ -189,7 +209,7 @@ var dependencyGraphFormUnits = map[string]int64{
 
 // DependencyGraphSettingsPost saves the dependency graph settings and the site switch. An empty limit or host list,
 // or a value equal to app.ini, is the app.ini value; an unchanged field keeps what it is; an empty token keeps the one
-// in force.
+// in force. A refused save shows the form again with the posted values (never the token).
 func DependencyGraphSettingsPost(ctx *context.Context) {
 	in := vulnerability_service.SettingsInput{
 		Limits:      map[string]int64{},
@@ -200,6 +220,9 @@ func DependencyGraphSettingsPost(ctx *context.Context) {
 		Token:       strings.TrimSpace(ctx.FormString("token")),
 		RemoveToken: ctx.FormBool("remove_token"),
 		Hosts:       ctx.FormString("allowed_hosts"),
+	}
+	if rev := ctx.FormString("revision"); rev != "" {
+		in.Revision = &rev
 	}
 	stored := setting.Config().DependencyGraphConfig.Value(ctx)
 	cfg := stored.Merge()
@@ -216,13 +239,12 @@ func DependencyGraphSettingsPost(ctx *context.Context) {
 			}
 			continue
 		}
-		unit := max(dependencyGraphFormUnits[l.Name], 1)
-		v, perr := strconv.ParseInt(text, 10, 64)
-		if perr != nil || v > math.MaxInt64/unit || v < math.MinInt64/unit {
+		v, ok := parseDependencyGraphLimit(l.Name, text)
+		if !ok {
 			err = &vulnerability_service.SettingsError{Field: l.Name, Reason: vulnerability_service.SettingsInvalid}
 			break
 		}
-		in.Limits[l.Name] = v * unit
+		in.Limits[l.Name] = v
 	}
 	changed := false
 	if err == nil {
@@ -237,7 +259,11 @@ func DependencyGraphSettingsPost(ctx *context.Context) {
 	var serr *vulnerability_service.SettingsError
 	switch {
 	case errors.As(err, &serr):
-		ctx.Flash.Error(dependencyGraphSettingsError(ctx, serr))
+		refuseDependencyGraphSettings(ctx, serr.Field, dependencyGraphSettingsError(ctx, serr))
+		return
+	case errors.Is(err, vulnerability_service.ErrSettingsChanged):
+		refuseDependencyGraphSettings(ctx, "", ctx.Tr("admin.dependency_graph.settings.error.changed"))
+		return
 	case err != nil:
 		ctx.ServerError("SaveSettings", err)
 		return
@@ -249,14 +275,61 @@ func DependencyGraphSettingsPost(ctx *context.Context) {
 	ctx.Redirect(setting.AppSubURL + "/admin/config/dependency-graph")
 }
 
+// parseDependencyGraphLimit reads a limit in its form unit: a count is a whole number, a size or time may have
+// decimals and is rounded to the byte or second. The bounds are the save's check.
+func parseDependencyGraphLimit(name, text string) (int64, bool) {
+	unit, ok := dependencyGraphFormUnits[name]
+	if !ok {
+		v, err := strconv.ParseInt(text, 10, 64)
+		return v, err == nil
+	}
+	f, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, false
+	}
+	v := math.Round(f * float64(unit))
+	if v >= math.MaxInt64 || v <= math.MinInt64 {
+		return 0, false
+	}
+	return int64(v), true
+}
+
+// refuseDependencyGraphSettings shows the form again with the posted values (never the token) and the message at the
+// refused field and next to Save. The values in force and the revision are read again, so a save over someone
+// else's change shows theirs as the app.ini hints and can be made again on purpose.
+func refuseDependencyGraphSettings(ctx *context.Context, field string, msg template.HTML) {
+	stored := setting.Config().DependencyGraphConfig.Value(ctx)
+	cfg := stored.Merge()
+	f := dependencyGraphForm(stored, &cfg)
+	for _, l := range setting.DependencyGraphLimits {
+		if text := strings.TrimSpace(ctx.FormString(l.Name)); text != "" {
+			f.Limits[l.Name] = dependencyGraphField{Value: text, Default: f.Limits[l.Name].Default}
+		}
+	}
+	switch source := ctx.FormString("source"); source {
+	case setting.OSVSourcePublic, setting.OSVSourceMirror, setting.OSVSourceNone:
+		f.Source = source
+	}
+	switch signIn := ctx.FormString("sign_in"); signIn {
+	case setting.OSVSignInNone, setting.OSVSignInToken, setting.OSVSignInBasic:
+		f.SignIn = signIn
+	}
+	f.MirrorURL.Value, f.User.Value, f.Hosts.Value = ctx.FormString("mirror_url"), ctx.FormString("user"), ctx.FormString("allowed_hosts")
+	f.TokenAgain = strings.TrimSpace(ctx.FormString("token")) != ""
+	f.ErrorField, f.ErrorMessage = field, msg
+	renderDependencyGraph(ctx, f, http.StatusUnprocessableEntity)
+}
+
 // dependencyGraphSettingsError is the message of a refused save, from literal keys only.
 func dependencyGraphSettingsError(ctx *context.Context, e *vulnerability_service.SettingsError) template.HTML {
 	field := dependencyGraphFieldLabel(ctx, e.Field)
 	switch e.Reason {
 	case vulnerability_service.SettingsOutOfRange:
 		l, _ := setting.DependencyGraphLimitByName(e.Field)
-		unit := max(dependencyGraphFormUnits[e.Field], 1)
-		return ctx.Tr("admin.dependency_graph.settings.error.out_of_range", field, (l.Min+unit-1)/unit, l.Max/unit)
+		if unit := dependencyGraphFormUnits[e.Field]; unit > 1 && l.Min < unit {
+			return ctx.Tr("admin.dependency_graph.settings.error.out_of_range_max", field, dependencyGraphLimitText(e.Field, l.Max))
+		}
+		return ctx.Tr("admin.dependency_graph.settings.error.out_of_range", field, dependencyGraphLimitText(e.Field, l.Min), dependencyGraphLimitText(e.Field, l.Max))
 	case vulnerability_service.SettingsOwnHost:
 		return ctx.Tr("admin.dependency_graph.settings.error.own_host")
 	case vulnerability_service.SettingsTokenRequired:
@@ -265,6 +338,10 @@ func dependencyGraphSettingsError(ctx *context.Context, e *vulnerability_service
 		return ctx.Tr("admin.dependency_graph.settings.error.token_host_changed")
 	case vulnerability_service.SettingsUserRequired:
 		return ctx.Tr("admin.dependency_graph.settings.error.user_required")
+	case vulnerability_service.SettingsHostsNotAllowed:
+		return ctx.Tr("admin.dependency_graph.settings.error.hosts_not_allowed", field)
+	case vulnerability_service.SettingsTokenNeedsHTTPS:
+		return ctx.Tr("admin.dependency_graph.settings.error.token_needs_https")
 	}
 	return ctx.Tr("admin.dependency_graph.settings.error.invalid", field)
 }
@@ -312,23 +389,35 @@ func dependencyGraphFieldLabel(ctx *context.Context, field string) string {
 	return field
 }
 
-// DependencyGraphTestConnection tests the saved mirror settings; the answer is a class, never error text.
+// DependencyGraphTestConnection tests the saved mirror settings; the answer is a class, never error text. With
+// inline=1 (the page's script) the message comes back as JSON, else as a flash.
 func DependencyGraphTestConnection(ctx *context.Context) {
 	class, err := vulnerability_service.TestConnection(ctx)
+	var msg template.HTML
 	switch {
 	case errors.Is(err, vulnerability_service.ErrNoMirror):
-		ctx.Flash.Error(ctx.Tr("admin.dependency_graph.test.no_mirror"))
+		msg = ctx.Tr("admin.dependency_graph.test.no_mirror")
 	case errors.Is(err, vulnerability_service.ErrSiteOff):
-		ctx.Flash.Error(ctx.Tr("admin.dependency_graph.advisories.site_off"))
+		msg = ctx.Tr("admin.dependency_graph.advisories.site_off")
 	case errors.Is(err, vulnerability_service.ErrTestTooSoon):
-		ctx.Flash.Error(ctx.Tr("admin.dependency_graph.test.too_soon"))
+		msg = ctx.Tr("admin.dependency_graph.test.too_soon")
 	case err != nil:
 		ctx.ServerError("TestConnection", err)
 		return
 	case class == vulnerability_service.ConnectionOK:
-		ctx.Flash.Success(ctx.Tr("admin.dependency_graph.test.ok"))
+		msg = ctx.Tr("admin.dependency_graph.test.ok")
 	default:
-		ctx.Flash.Error(dependencyGraphTestError(ctx, class))
+		msg = dependencyGraphTestError(ctx, class)
+	}
+	ok := err == nil && class == vulnerability_service.ConnectionOK
+	if ctx.FormString("inline") == "1" {
+		ctx.JSON(http.StatusOK, map[string]any{"ok": ok, "message": string(msg)})
+		return
+	}
+	if ok {
+		ctx.Flash.Success(msg)
+	} else {
+		ctx.Flash.Error(msg)
 	}
 	ctx.Redirect(setting.AppSubURL + "/admin/config/dependency-graph")
 }

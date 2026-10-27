@@ -134,7 +134,7 @@ func TestDependencyGraphConfigMerge(t *testing.T) {
 		o := DependencyGraphConfig{
 			Limits: map[string]int64{"max_concurrent_scans": 7, "update_interval": 2 * 3600, "scan_timeout": 90, "osv_max_download": 1 << 20},
 			Source: OSVSourceMirror, MirrorURL: "https://other.example/osv", SignIn: OSVSignInToken,
-			TokenEnc: enc("stored-token-1"), TokenOrigin: "https://other.example", Hosts: str("10.0.0.0/8"),
+			TokenEnc: enc("stored-token-1"), TokenOrigin: "https://other.example", Hosts: str("10.1.0.0/16"),
 		}.Merge()
 		assert.Equal(t, 7, o.MaxConcurrentScans)
 		assert.Equal(t, 2*time.Hour, o.UpdateInterval)
@@ -143,27 +143,37 @@ func TestDependencyGraphConfigMerge(t *testing.T) {
 		assert.Equal(t, "https://other.example/osv", o.OSVMirrorURL)
 		assert.Equal(t, "stored-token-1", o.OSVMirrorToken)
 		assert.Empty(t, o.OSVMirrorUser, "Bearer")
-		assert.Equal(t, "10.0.0.0/8", o.OSVMirrorHosts)
+		assert.Equal(t, "10.1.0.0/16", o.OSVMirrorHosts)
+		assert.True(t, o.OSVMirrorHostsFromPage, "a page list: the dial check blocks the internal addresses")
 		assert.False(t, o.MirrorConfigInvalid)
 		assert.Equal(t, 500, o.MaxManifests, "not stored: app.ini")
 	})
 
-	t.Run("an invalid stored field falls back to app.ini", func(t *testing.T) {
-		o := DependencyGraphConfig{
-			Limits: map[string]int64{"max_concurrent_scans": 65, "update_interval": 60, "unknown": 1},
-			Source: OSVSourceMirror, MirrorURL: "ftp://x.example/", SignIn: OSVSignInBasic, User: "ci",
-		}.Merge()
+	t.Run("an invalid stored limit falls back to app.ini", func(t *testing.T) {
+		o := DependencyGraphConfig{Limits: map[string]int64{"max_concurrent_scans": 17, "update_interval": 60, "unknown": 1}}.Merge()
 		assert.Equal(t, 3, o.MaxConcurrentScans)
 		assert.Equal(t, 24*time.Hour, o.UpdateInterval)
-		assert.Equal(t, "https://art.example/osv", o.OSVMirrorURL)
-		assert.Equal(t, "app-ini-token-1", o.OSVMirrorToken, "the app.ini token, for the app.ini host")
+		assert.False(t, o.MirrorConfigInvalid)
+	})
+
+	t.Run("an unusable stored mirror URL turns the mirror off", func(t *testing.T) {
+		o := DependencyGraphConfig{Source: OSVSourceMirror, MirrorURL: "ftp://x.example/", SignIn: OSVSignInBasic, User: "ci"}.Merge()
+		assert.True(t, o.MirrorConfigInvalid, "never another source than the one chosen")
+	})
+
+	t.Run("an empty stored host list is app.ini's", func(t *testing.T) {
+		o := DependencyGraphConfig{Hosts: str(" ")}.Merge()
+		assert.Equal(t, "private", o.OSVMirrorHosts)
+		assert.False(t, o.OSVMirrorHostsFromPage)
 		assert.False(t, o.MirrorConfigInvalid)
 	})
 
 	t.Run("an invalid host list turns the mirror off", func(t *testing.T) {
-		o := DependencyGraphConfig{Source: OSVSourcePublic, Hosts: str("bad host")}.Merge()
-		assert.True(t, o.MirrorConfigInvalid)
-		assert.Equal(t, "private", o.OSVMirrorHosts, "never the stored list")
+		for _, bad := range []string{"bad host", "loopback", "*", "10.0.0.0/8"} {
+			o := DependencyGraphConfig{Source: OSVSourcePublic, Hosts: str(bad)}.Merge()
+			assert.True(t, o.MirrorConfigInvalid, bad)
+			assert.Equal(t, "private", o.OSVMirrorHosts, "never the stored list")
+		}
 		assert.True(t, DependencyGraphConfig{Invalid: true}.Merge().MirrorConfigInvalid, "a value that can't be parsed")
 		assert.True(t, DependencyGraphConfig{TokenEnc: str("not-hex")}.Merge().MirrorConfigInvalid, "a token that can't be decrypted")
 		assert.True(t, DependencyGraphConfig{SignIn: "odd"}.Merge().MirrorConfigInvalid)
@@ -204,7 +214,9 @@ func TestDependencyGraphLimits(t *testing.T) {
 		assert.True(t, ok, l.Name)
 	}
 	l, _ := DependencyGraphLimitByName("max_concurrent_scans")
-	assert.EqualValues(t, 64, l.Max)
+	assert.EqualValues(t, 16, l.Max)
+	l, _ = DependencyGraphLimitByName("max_manifest_size")
+	assert.EqualValues(t, 100<<20, l.Max)
 	l, _ = DependencyGraphLimitByName("update_interval")
 	assert.EqualValues(t, 720*3600, l.Max)
 	assert.EqualValues(t, 3600, l.Min)
@@ -220,6 +232,36 @@ func TestDependencyGraphLimits(t *testing.T) {
 		cfg, _ := NewConfigProviderFromData("")
 		require.NoError(t, loadDependencyGraphFrom(cfg))
 	})
-	assert.Equal(t, 64, DependencyGraph.MaxConcurrentScans, "app.ini is held to the same bounds")
+	assert.Equal(t, 16, DependencyGraph.MaxConcurrentScans, "app.ini is held to the same bounds")
 	assert.Equal(t, 24*time.Hour, DependencyGraph.ScanTimeout)
+}
+
+func TestCheckPageHostList(t *testing.T) {
+	for _, ok := range []string{"", "external", "art.example", "art.example, external", "10.1.2.3", "2001:db8::1", "10.1.0.0/16", "192.168.4.0/24", "2001:db8::/48", "127.0.0.0/16"} {
+		assert.NoError(t, CheckPageHostList(ok), ok)
+	}
+	for _, bad := range []string{"*", "*.example", "art?.example", "loopback", "private", "0.0.0.0/0", "10.0.0.0/8", "2001:db8::/32", "bad host", "-x.example", "10.0.0.0/33", "127.0.0.1", "::1", "0.0.0.0", "169.254.169.254", "fe80::1", "localhost", "a.localhost."} {
+		assert.Error(t, CheckPageHostList(bad), bad)
+	}
+}
+
+func TestInstanceAndLoopbackHosts(t *testing.T) {
+	defer func(app, local, domain, ssh, addr string) {
+		AppURL, LocalURL, Domain, SSH.Domain, HTTPAddr = app, local, domain, ssh, addr
+	}(AppURL, LocalURL, Domain, SSH.Domain, HTTPAddr)
+	AppURL, LocalURL, Domain, SSH.Domain, HTTPAddr = "https://git.example/", "http://10.0.0.5:3000/", "git.example", "ssh.git.example", "10.0.0.5"
+	for _, h := range []string{"git.example", "GIT.example.", "ssh.git.example", "10.0.0.5", "[10.0.0.5]"} {
+		assert.True(t, IsInstanceHost(h), h)
+	}
+	for _, h := range []string{"", "art.example", "example"} {
+		assert.False(t, IsInstanceHost(h), h)
+	}
+	for _, h := range []string{"localhost", "LOCALHOST.", "a.localhost", "127.0.0.1", "127.9.9.9", "[::1]", "0.0.0.0", "::"} {
+		assert.True(t, IsLoopbackHost(h), h)
+	}
+	for _, h := range []string{"art.example", "10.0.0.1", "localhost.example"} {
+		assert.False(t, IsLoopbackHost(h), h)
+	}
+	assert.Contains(t, MirrorBlockedHosts(), "169.254.0.0/16")
+	assert.Contains(t, MirrorBlockedHosts(), "10.0.0.5", "the address this instance listens on")
 }

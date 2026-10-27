@@ -10,10 +10,12 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/secret"
+	"forgejo.org/modules/setting/config"
 )
 
 // DefaultOSVMirrorURL is the public OSV bucket.
@@ -44,8 +46,11 @@ type DependencyGraphOptions struct {
 	OSVEcosystemTimeout time.Duration
 
 	// MirrorConfigInvalid is set by DependencyGraphSettings when the saved mirror settings can't be used (the
-	// configuration, its host list or its token can't be read): the mirror downloads nothing then.
+	// configuration, its URL, host list, sign-in or token can't be read): the mirror downloads nothing then.
 	MirrorConfigInvalid bool
+	// OSVMirrorHostsFromPage marks a host list saved in Site administration: it is narrower by rule
+	// (CheckPageHostList), and the mirror's dial check also blocks the internal addresses (MirrorBlockedHosts).
+	OSVMirrorHostsFromPage bool
 }
 
 // DependencyGraph is the [dependency_graph] section of app.ini, the defaults of DependencyGraphSettings.
@@ -62,9 +67,9 @@ type DependencyGraphLimit struct {
 
 // DependencyGraphLimits are the numeric settings, checked by the same bounds in app.ini and in Site administration.
 var DependencyGraphLimits = []DependencyGraphLimit{
-	{"max_concurrent_scans", "MAX_CONCURRENT_SCANS", 1, 64, false, func(o *DependencyGraphOptions) any { return &o.MaxConcurrentScans }},
+	{"max_concurrent_scans", "MAX_CONCURRENT_SCANS", 1, 16, false, func(o *DependencyGraphOptions) any { return &o.MaxConcurrentScans }},
 	{"scan_timeout", "SCAN_TIMEOUT", 1, 24 * 3600, true, func(o *DependencyGraphOptions) any { return &o.ScanTimeout }},
-	{"max_manifest_size", "MAX_MANIFEST_SIZE", 1, 1 << 30, false, func(o *DependencyGraphOptions) any { return &o.MaxManifestSize }},
+	{"max_manifest_size", "MAX_MANIFEST_SIZE", 1, 100 << 20, false, func(o *DependencyGraphOptions) any { return &o.MaxManifestSize }},
 	{"max_manifests", "MAX_MANIFESTS", 1, 100000, false, func(o *DependencyGraphOptions) any { return &o.MaxManifests }},
 	{"max_dependencies", "MAX_DEPENDENCIES", 1, 1000000, false, func(o *DependencyGraphOptions) any { return &o.MaxDependencies }},
 	{"max_tree_entries", "MAX_TREE_ENTRIES", 1, 10000000, false, func(o *DependencyGraphOptions) any { return &o.MaxTreeEntries }},
@@ -321,6 +326,28 @@ const (
 	OSVSignInBasic = "basic" // the token as the password of User
 )
 
+// DependencyGraphAppSource is the source app.ini's OSV_MIRROR_URL stands for.
+func DependencyGraphAppSource() string {
+	switch DependencyGraph.OSVMirrorURL {
+	case "":
+		return OSVSourceNone
+	case DefaultOSVMirrorURL:
+		return OSVSourcePublic
+	}
+	return OSVSourceMirror
+}
+
+// DependencyGraphAppSignIn is the sign-in app.ini's OSV_MIRROR_TOKEN and OSV_MIRROR_USER stand for.
+func DependencyGraphAppSignIn() string {
+	switch {
+	case DependencyGraph.OSVMirrorToken == "":
+		return OSVSignInNone
+	case DependencyGraph.OSVMirrorUser != "":
+		return OSVSignInBasic
+	}
+	return OSVSignInToken
+}
+
 // DependencyGraphConfig is stored as JSON in the "dependency_graph.config" system setting: the dependency graph
 // settings saved in Site administration (the site switch is DependencyGraphState). Every field is optional: what isn't
 // stored is the app.ini value. Invalid marks a stored value that can't be parsed.
@@ -342,10 +369,30 @@ type DependencyGraphConfig struct {
 	UpdatedUnix int64 `json:"updated_unix,omitempty"`
 }
 
+// mergedDependencyGraph caches DependencyGraphSettings: Merge (its logs, the token's decryption) runs once per
+// settings revision, app.ini values and secret key.
+var mergedDependencyGraph struct {
+	sync.Mutex
+	revision  int
+	base      DependencyGraphOptions
+	secretKey string
+	merged    DependencyGraphOptions
+	ok        bool
+}
+
 // DependencyGraphSettings is the dependency graph configuration in force: the values saved in Site administration
 // over app.ini. Read it before building a query, never while one is being built.
 func DependencyGraphSettings(ctx context.Context) DependencyGraphOptions {
-	return Config().DependencyGraphConfig.Value(ctx).Merge()
+	stored := Config().DependencyGraphConfig.Value(ctx) // outside the lock: it may query the database
+	revision := config.GetDynGetter().GetRevision(ctx)
+	m := &mergedDependencyGraph
+	m.Lock()
+	defer m.Unlock()
+	if m.ok && m.revision == revision && m.base == DependencyGraph && m.secretKey == SecretKey {
+		return m.merged
+	}
+	m.revision, m.base, m.secretKey, m.merged, m.ok = revision, DependencyGraph, SecretKey, stored.Merge(), true
+	return m.merged
 }
 
 // Merge applies the stored values over app.ini. A stored value that can't be used is logged and its app.ini value is
@@ -378,7 +425,9 @@ func (c DependencyGraphConfig) Merge() DependencyGraphOptions {
 		o.OSVMirrorURL = ""
 	case OSVSourceMirror:
 		if u, err := CheckOSVMirrorURL(c.MirrorURL); err != nil {
-			log.Error("dependency_graph.config: the mirror URL %v, using the app.ini value", err)
+			// never another source than the one chosen: the mirror may be there to keep the server off the internet
+			log.Error("dependency_graph.config: the mirror URL %v, the mirror is off", err)
+			o.MirrorConfigInvalid = true
 		} else {
 			o.OSVMirrorURL = u
 		}
@@ -424,13 +473,111 @@ func (c DependencyGraphConfig) Merge() DependencyGraphOptions {
 		user = ""
 	}
 	o.OSVMirrorToken, o.OSVMirrorUser = token, user
-	if c.Hosts != nil {
-		if err := CheckHostList(*c.Hosts); err != nil {
-			log.Error("dependency_graph.config: the allowed hosts can't be read, the mirror is off")
+	if c.Hosts != nil && strings.TrimSpace(*c.Hosts) != "" { // a stored empty list is the app.ini value
+		if err := CheckPageHostList(*c.Hosts); err != nil {
+			log.Error("dependency_graph.config: the allowed hosts can't be used, the mirror is off")
 			o.MirrorConfigInvalid = true
 		} else {
-			o.OSVMirrorHosts = strings.TrimSpace(*c.Hosts)
+			o.OSVMirrorHosts, o.OSVMirrorHostsFromPage = strings.TrimSpace(*c.Hosts), true
 		}
 	}
 	return o
+}
+
+// CheckPageHostList checks a host list saved in Site administration, which may only name what to download from:
+// exact host names (no wildcard, not localhost), single IP addresses (not loopback, link-local or unspecified),
+// networks no wider than /16 (IPv4) or /48 (IPv6), and "external". The wider app.ini syntax (private, loopback,
+// patterns) stays in OSV_MIRROR_ALLOWED_HOSTS. A network may still contain internal addresses: the mirror's dial
+// check blocks those (MirrorBlockedHosts).
+func CheckPageHostList(list string) error {
+	for entry := range strings.SplitSeq(list, ",") {
+		entry = strings.ToLower(strings.TrimSpace(entry))
+		switch {
+		case entry == "", entry == "external":
+			continue
+		case strings.Contains(entry, "/"):
+			_, ipNet, err := net.ParseCIDR(entry)
+			if err != nil {
+				return fmt.Errorf("%q is not a network", entry)
+			}
+			ones, bits := ipNet.Mask.Size()
+			if bits == 32 && ones < 16 || bits == 128 && ones < 48 {
+				return fmt.Errorf("%q is wider than /16 (IPv4) or /48 (IPv6)", entry)
+			}
+		case net.ParseIP(strings.Trim(entry, "[]")) != nil:
+			if ip := net.ParseIP(strings.Trim(entry, "[]")); ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() {
+				return fmt.Errorf("%q is a loopback, link-local or unspecified address", entry)
+			}
+		default:
+			if entry == "private" || entry == "loopback" || !isHostName(entry) || IsLoopbackHost(entry) {
+				return fmt.Errorf("%q is not a host name, address, network or external", entry)
+			}
+		}
+	}
+	return nil
+}
+
+// isHostName accepts an exact DNS name: labels of letters, digits and hyphens.
+func isHostName(s string) bool {
+	if len(s) > 253 {
+		return false
+	}
+	for label := range strings.SplitSeq(strings.TrimSuffix(s, "."), ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, r := range label {
+			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// MirrorBlockedHosts is what a host list saved in Site administration never reaches, whatever it names: loopback,
+// link-local (cloud metadata), unspecified addresses and the addresses this instance listens on.
+func MirrorBlockedHosts() string {
+	blocked := []string{"loopback", "169.254.0.0/16", "fe80::/10", "0.0.0.0/8", "::/128"}
+	if ip := net.ParseIP(HTTPAddr); ip != nil && !ip.IsUnspecified() {
+		blocked = append(blocked, ip.String())
+	} else if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, a := range addrs { // listening on every address: every address of this machine
+			if n, ok := a.(*net.IPNet); ok {
+				blocked = append(blocked, n.IP.String())
+			}
+		}
+	}
+	return strings.Join(blocked, ",")
+}
+
+// IsInstanceHost reports whether host names this instance: the host of AppURL or LocalURL, the domain, the SSH
+// domain or the HTTP address (any case, a trailing dot ignored). Log shipping and the advisory mirror refuse it.
+func IsInstanceHost(host string) bool {
+	host = strings.TrimSuffix(strings.Trim(host, "[]"), ".")
+	if host == "" {
+		return false
+	}
+	self := []string{Domain, SSH.Domain, HTTPAddr}
+	for _, raw := range []string{AppURL, LocalURL} {
+		if u, err := url.Parse(raw); err == nil {
+			self = append(self, u.Hostname())
+		}
+	}
+	for _, h := range self {
+		if h = strings.TrimSuffix(h, "."); h != "" && strings.EqualFold(h, host) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsLoopbackHost reports whether host is "localhost" (or a name under it), or a loopback or unspecified address.
+func IsLoopbackHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
 }

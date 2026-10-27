@@ -1,9 +1,11 @@
-{{/* One numeric field of the dependency graph settings: Name, Label, Unit ("" for none), Field (Value, Default), Help. */}}
-<div class="field dg-field">
+{{/* One numeric field of the dependency graph settings: Name, Label, Unit ("" for none), Field (Value, Default), Help, Form (for a refused save). */}}
+{{$invalid := eq .Form.ErrorField .Name}}
+<div class="field dg-field{{if $invalid}} error{{end}}">
 	<label for="dg-{{.Name}}">{{.Label}}</label>
 	<div class="dg-unit-input">
-		<input id="dg-{{.Name}}" name="{{.Name}}" type="number" inputmode="numeric" min="1" value="{{.Field.Value}}">
-		{{if .Unit}}<span class="dg-unit">{{.Unit}}</span>{{end}}
+		<input id="dg-{{.Name}}" name="{{.Name}}" type="number" step="any" inputmode="{{if .Unit}}decimal{{else}}numeric{{end}}" value="{{.Field.Value}}"{{if $invalid}} aria-invalid="true" autofocus{{end}} aria-describedby="{{if .Unit}}dg-{{.Name}}-unit {{end}}{{if or .Help .Field.Default}}dg-{{.Name}}-help {{end}}{{if $invalid}}dg-{{.Name}}-error{{end}}">
+		{{if .Unit}}<span class="dg-unit" id="dg-{{.Name}}-unit">{{.Unit}}</span>{{end}}
 	</div>
-	{{if or .Help .Field.Default}}<p class="help">{{if .Help}}{{.Help}}{{end}}{{if .Field.Default}} <span class="dg-app-default">{{ctx.Locale.Tr "admin.dependency_graph.settings.app_default" .Field.Default}}</span>{{end}}</p>{{end}}
+	{{if $invalid}}<p class="dg-error" id="dg-{{.Name}}-error">{{.Form.ErrorMessage}}</p>{{end}}
+	{{if or .Help .Field.Default}}<p class="help" id="dg-{{.Name}}-help">{{if .Help}}{{.Help}}{{end}}{{if .Field.Default}} <span class="dg-app-default">{{ctx.Locale.Tr "admin.dependency_graph.settings.app_default" .Field.Default}}</span>{{end}}</p>{{end}}
 </div>

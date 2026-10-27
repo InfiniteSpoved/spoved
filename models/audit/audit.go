@@ -215,7 +215,7 @@ var Fields = map[string][]string{
 	"dependency_graph": {
 		"source", "mirror_url", "sign_in", "user", "allowed_hosts", "token_changed", "max_concurrent_scans", "scan_timeout",
 		"max_manifest_size", "max_manifests", "max_dependencies", "max_tree_entries", "update_interval", "osv_max_download",
-		"osv_max_entries", "osv_max_entry_size", "osv_max_uncompressed", "osv_ecosystem_timeout",
+		"osv_max_entries", "osv_max_entry_size", "osv_max_uncompressed", "osv_ecosystem_timeout", "class", "host",
 	},
 	"tag_protection": {"name_pattern", "allowlist_user_ids", "allowlist_team_ids", "allowlist_deploy_key_ids"},
 	"push_rule": {

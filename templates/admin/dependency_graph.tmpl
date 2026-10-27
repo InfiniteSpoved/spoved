@@ -7,9 +7,11 @@
 			<p>{{ctx.Locale.Tr "admin.dependency_graph.desc"}}</p>
 			<p class="help">{{if .UpdatedUnix}}{{ctx.Locale.Tr "admin.dependency_graph.updated" (DateUtils.AbsoluteShort .UpdatedUnix) .UpdatedBy}} {{end}}{{ctx.Locale.Tr "admin.dependency_graph.settings.app_ini" (HTMLFormat "<code>%s</code>" "[dependency_graph]")}}</p>
 			{{$f := .Form}}
-			<form class="ui form dependency-graph-switch dependency-graph-settings" action="{{AppSubUrl}}/admin/config/dependency-graph/settings" method="post">
-				<fieldset{{if not .CanChange}} disabled{{end}}>
+			{{if not .CanChange}}<p class="ui info message" id="dg-read-only">{{ctx.Locale.Tr "admin.dependency_graph.settings.read_only"}}</p>{{end}}
+			<form class="ui form dependency-graph-switch dependency-graph-settings" action="{{AppSubUrl}}/admin/config/dependency-graph/settings" method="post" novalidate{{if $f.ErrorMessage}} data-unsaved{{end}}>
+				<fieldset{{if not .CanChange}} disabled class="dg-read-only"{{end}}>
 				<input type="hidden" name="enabled_shown" value="1">
+				<input type="hidden" name="revision" value="{{$f.Revision}}">
 				<div class="field">
 					<div class="ui checkbox">
 						<input id="dependency-graph-enabled" name="enabled" type="checkbox" {{if .Enabled}}checked{{end}}>
@@ -23,23 +25,23 @@
 
 				<h5 class="dg-section">{{ctx.Locale.Tr "admin.dependency_graph.settings.scanning"}}</h5>
 				<div class="dg-row">
-					{{template "admin/dependency_graph_limit" (dict "Name" "max_concurrent_scans" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.max_concurrent_scans") "Unit" "" "Field" (index $f.Limits "max_concurrent_scans") "Help" (ctx.Locale.Tr "admin.dependency_graph.settings.max_concurrent_scans_help"))}}
-					{{template "admin/dependency_graph_limit" (dict "Name" "scan_timeout" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.scan_timeout") "Unit" (ctx.Locale.Tr "admin.dependency_graph.settings.unit.seconds") "Field" (index $f.Limits "scan_timeout") "Help" "")}}
+					{{template "admin/dependency_graph_limit" (dict "Name" "max_concurrent_scans" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.max_concurrent_scans") "Unit" "" "Field" (index $f.Limits "max_concurrent_scans") "Help" (ctx.Locale.Tr "admin.dependency_graph.settings.max_concurrent_scans_help") "Form" $f)}}
+					{{template "admin/dependency_graph_limit" (dict "Name" "scan_timeout" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.scan_timeout") "Unit" (ctx.Locale.Tr "admin.dependency_graph.settings.unit.seconds") "Field" (index $f.Limits "scan_timeout") "Help" "" "Form" $f)}}
 				</div>
-				<details class="dg-fold" id="dg-repository-limits">
+				<details class="dg-fold" id="dg-repository-limits"{{if $f.Open "repository"}} open{{end}}>
 					<summary>{{ctx.Locale.Tr "admin.dependency_graph.settings.repository_limits"}}</summary>
 					<div class="dg-row">
-						{{template "admin/dependency_graph_limit" (dict "Name" "max_manifest_size" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.max_manifest_size") "Unit" (ctx.Locale.Tr "admin.dependency_graph.settings.unit.mib") "Field" (index $f.Limits "max_manifest_size") "Help" "")}}
-						{{template "admin/dependency_graph_limit" (dict "Name" "max_manifests" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.max_manifests") "Unit" "" "Field" (index $f.Limits "max_manifests") "Help" "")}}
+						{{template "admin/dependency_graph_limit" (dict "Name" "max_manifest_size" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.max_manifest_size") "Unit" (ctx.Locale.Tr "admin.dependency_graph.settings.unit.mib") "Field" (index $f.Limits "max_manifest_size") "Help" "" "Form" $f)}}
+						{{template "admin/dependency_graph_limit" (dict "Name" "max_manifests" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.max_manifests") "Unit" "" "Field" (index $f.Limits "max_manifests") "Help" "" "Form" $f)}}
 					</div>
 					<div class="dg-row">
-						{{template "admin/dependency_graph_limit" (dict "Name" "max_dependencies" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.max_dependencies") "Unit" "" "Field" (index $f.Limits "max_dependencies") "Help" "")}}
-						{{template "admin/dependency_graph_limit" (dict "Name" "max_tree_entries" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.max_tree_entries") "Unit" "" "Field" (index $f.Limits "max_tree_entries") "Help" "")}}
+						{{template "admin/dependency_graph_limit" (dict "Name" "max_dependencies" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.max_dependencies") "Unit" "" "Field" (index $f.Limits "max_dependencies") "Help" "" "Form" $f)}}
+						{{template "admin/dependency_graph_limit" (dict "Name" "max_tree_entries" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.max_tree_entries") "Unit" "" "Field" (index $f.Limits "max_tree_entries") "Help" "" "Form" $f)}}
 					</div>
 				</details>
 
 				<h5 class="dg-section">{{ctx.Locale.Tr "admin.dependency_graph.settings.advisory_database"}}</h5>
-				<div class="grouped fields" role="radiogroup" aria-labelledby="dg-source-label">
+				<div class="grouped fields{{if eq $f.ErrorField "source"}} error{{end}}" role="radiogroup" aria-labelledby="dg-source-label">
 					<label id="dg-source-label">{{ctx.Locale.Tr "admin.dependency_graph.settings.source"}}</label>
 					<div class="field"><div class="ui radio checkbox">
 						<input id="dg-source-public" type="radio" name="source" value="public"{{if eq $f.Source "public"}} checked{{end}}>
@@ -54,15 +56,26 @@
 						<label for="dg-source-none">{{ctx.Locale.Tr "admin.dependency_graph.settings.source_none"}}</label>
 					</div></div>
 					{{if $f.SourceDefault}}<p class="help dg-app-default">{{if eq $f.SourceDefault "public"}}{{ctx.Locale.Tr "admin.dependency_graph.settings.app_default" (ctx.Locale.Tr "admin.dependency_graph.settings.source_public")}}{{else if eq $f.SourceDefault "mirror"}}{{ctx.Locale.Tr "admin.dependency_graph.settings.app_default" (ctx.Locale.Tr "admin.dependency_graph.settings.source_mirror")}}{{else}}{{ctx.Locale.Tr "admin.dependency_graph.settings.app_default" (ctx.Locale.Tr "admin.dependency_graph.settings.source_none_short")}}{{end}}</p>{{end}}
+					{{if eq $f.ErrorField "source"}}<p class="dg-error" id="dg-source-error">{{$f.ErrorMessage}}</p>{{end}}
 				</div>
+				{{if and $f.TokenSaved .CanChange}}<div class="field{{if eq $f.Source "mirror"}} tw-hidden{{end}}" id="dg-token-unused">
+					<p class="help">{{ctx.Locale.Tr "admin.dependency_graph.settings.token_unused"}}</p>
+					<div class="ui checkbox">
+						<input id="dg-remove-token-unused" name="remove_token" type="checkbox">
+						<label for="dg-remove-token-unused">{{ctx.Locale.Tr "admin.dependency_graph.settings.remove_token"}}</label>
+					</div>
+				</div>{{end}}
 
 				<div id="dg-mirror-fields">
-					<div class="field">
+					{{$invalid := eq $f.ErrorField "mirror_url"}}
+					<div class="field{{if $invalid}} error{{end}}">
 						<label for="dg-mirror_url">{{ctx.Locale.Tr "admin.dependency_graph.settings.mirror_url"}}</label>
-						<input id="dg-mirror_url" name="mirror_url" type="url" value="{{$f.MirrorURL.Value}}" placeholder="https://artifactory.example/artifactory/osv-remote" autocomplete="off">
-						<p class="help">{{ctx.Locale.Tr "admin.dependency_graph.settings.mirror_url_help" (HTMLFormat "<code>%s</code>" "<URL>/<ecosystem>/all.zip") (HTMLFormat "<code>%s</code>" "…/npm/all.zip")}}{{if $f.MirrorURL.Default}} <span class="dg-app-default">{{ctx.Locale.Tr "admin.dependency_graph.settings.app_default" $f.MirrorURL.Default}}</span>{{end}}</p>
+						<input id="dg-mirror_url" name="mirror_url" type="url" value="{{$f.MirrorURL.Value}}" placeholder="https://artifactory.example/artifactory/osv-remote" autocomplete="off" aria-describedby="dg-mirror_url-help{{if $invalid}} dg-mirror_url-error{{end}}"{{if $invalid}} aria-invalid="true" autofocus{{end}}>
+						{{if $invalid}}<p class="dg-error" id="dg-mirror_url-error">{{$f.ErrorMessage}}</p>{{end}}
+						<p class="help" id="dg-mirror_url-help">{{ctx.Locale.Tr "admin.dependency_graph.settings.mirror_url_help" (HTMLFormat "<code>%s</code>" "<URL>/<ecosystem>/all.zip") (HTMLFormat "<code>%s</code>" "…/npm/all.zip")}}{{if $f.MirrorURL.Default}} <span class="dg-app-default">{{ctx.Locale.Tr "admin.dependency_graph.settings.app_default" $f.MirrorURL.Default}}</span>{{end}}</p>
 					</div>
-					<div class="grouped fields" role="radiogroup" aria-labelledby="dg-sign-in-label">
+					{{$invalid = eq $f.ErrorField "sign_in"}}
+					<div class="grouped fields{{if $invalid}} error{{end}}" role="radiogroup" aria-labelledby="dg-sign-in-label">
 						<label id="dg-sign-in-label">{{ctx.Locale.Tr "admin.dependency_graph.settings.sign_in"}}</label>
 						<div class="field"><div class="ui radio checkbox">
 							<input id="dg-sign-in-none" type="radio" name="sign_in" value="none"{{if eq $f.SignIn "none"}} checked{{end}}>
@@ -76,72 +89,90 @@
 							<input id="dg-sign-in-basic" type="radio" name="sign_in" value="basic"{{if eq $f.SignIn "basic"}} checked{{end}}>
 							<label for="dg-sign-in-basic">{{ctx.Locale.Tr "admin.dependency_graph.settings.sign_in_basic"}}</label>
 						</div></div>
+						{{if $invalid}}<p class="dg-error" id="dg-sign_in-error">{{$f.ErrorMessage}}</p>{{end}}
 					</div>
-					<div class="field" id="dg-user-field">
+					{{$invalid = eq $f.ErrorField "user"}}
+					<div class="field{{if $invalid}} error{{end}}" id="dg-user-field">
 						<label for="dg-user">{{ctx.Locale.Tr "admin.dependency_graph.settings.user"}}</label>
-						<input id="dg-user" name="user" type="text" value="{{$f.User.Value}}" autocomplete="off" maxlength="256">
+						<input id="dg-user" name="user" type="text" value="{{$f.User.Value}}" autocomplete="off" maxlength="256" aria-describedby="dg-user-help{{if $invalid}} dg-user-error{{end}}"{{if $invalid}} aria-invalid="true" autofocus{{end}}>
+						{{if $invalid}}<p class="dg-error" id="dg-user-error">{{$f.ErrorMessage}}</p>{{end}}
+						<p class="help" id="dg-user-help">{{ctx.Locale.Tr "admin.dependency_graph.settings.user_help"}}</p>
 					</div>
-					<div class="field" id="dg-token-field">
-						<label for="dg-token">{{ctx.Locale.Tr "admin.dependency_graph.settings.token"}}</label>
-						<input id="dg-token" name="token" type="password" value="" autocomplete="new-password" maxlength="1024"{{if $f.HasToken}} placeholder="{{ctx.Locale.Tr "admin.dependency_graph.settings.token_saved"}}"{{end}}>
-						<p class="help">{{ctx.Locale.Tr "admin.dependency_graph.settings.token_help"}}</p>
-						{{if $f.HasToken}}<div class="ui checkbox">
+					{{$invalid = eq $f.ErrorField "token"}}
+					<div class="field{{if $invalid}} error{{end}}" id="dg-token-field">
+						<label for="dg-token" data-label-token="{{ctx.Locale.Tr "admin.dependency_graph.settings.token"}}" data-label-basic="{{ctx.Locale.Tr "admin.dependency_graph.settings.token_basic"}}">{{if eq $f.SignIn "basic"}}{{ctx.Locale.Tr "admin.dependency_graph.settings.token_basic"}}{{else}}{{ctx.Locale.Tr "admin.dependency_graph.settings.token"}}{{end}}</label>
+						<input id="dg-token" name="token" type="password" value="" autocomplete="new-password" maxlength="1024"{{if $f.HasToken}} placeholder="{{if .CanChange}}{{ctx.Locale.Tr "admin.dependency_graph.settings.token_saved"}}{{else}}{{ctx.Locale.Tr "admin.dependency_graph.settings.token_saved_read_only"}}{{end}}"{{end}} aria-describedby="dg-token-help{{if $f.TokenAgain}} dg-token-again{{end}}{{if $invalid}} dg-token-error{{end}}"{{if $invalid}} aria-invalid="true" autofocus{{end}}>
+						{{if $invalid}}<p class="dg-error" id="dg-token-error">{{$f.ErrorMessage}}</p>{{end}}
+						{{if $f.TokenAgain}}<p class="dg-error" id="dg-token-again">{{ctx.Locale.Tr "admin.dependency_graph.settings.token_again"}}</p>{{end}}
+						<p class="help" id="dg-token-help">{{ctx.Locale.Tr "admin.dependency_graph.settings.token_help"}}</p>
+					</div>
+					{{if and $f.HasToken .CanChange}}<div class="field" id="dg-remove-token-field">
+						<div class="ui checkbox">
 							<input id="dg-remove-token" name="remove_token" type="checkbox">
 							<label for="dg-remove-token">{{ctx.Locale.Tr "admin.dependency_graph.settings.remove_token"}}</label>
-						</div>{{end}}
-					</div>
+						</div>
+					</div>{{end}}
 				</div>
 
-				<div class="field">
-					<label for="dg-allowed_hosts">{{ctx.Locale.Tr "admin.dependency_graph.settings.allowed_hosts"}}</label>
-					<input id="dg-allowed_hosts" name="allowed_hosts" type="text" value="{{$f.Hosts.Value}}" placeholder="{{ctx.Locale.Tr "admin.dependency_graph.settings.allowed_hosts_placeholder"}}" autocomplete="off">
-					<p class="help">{{ctx.Locale.Tr "admin.dependency_graph.settings.allowed_hosts_help" (HTMLFormat "<code>%s</code>" "external") (HTMLFormat "<code>%s</code>" "private") (HTMLFormat "<code>%s</code>" "loopback")}}{{if $f.Hosts.Default}} <span class="dg-app-default">{{ctx.Locale.Tr "admin.dependency_graph.settings.app_default" $f.Hosts.Default}}</span>{{end}}</p>
+				<div id="dg-download-fields">
+					{{$invalid := eq $f.ErrorField "allowed_hosts"}}
+					{{$fallback := ctx.Locale.Tr "admin.dependency_graph.settings.allowed_hosts_webhook"}}
+					{{if $f.HostsFromAppIni}}{{$fallback = ctx.Locale.Tr "admin.dependency_graph.settings.allowed_hosts_app_ini"}}{{end}}
+					<div class="field{{if $invalid}} error{{end}}">
+						<label for="dg-allowed_hosts">{{ctx.Locale.Tr "admin.dependency_graph.settings.allowed_hosts"}}</label>
+						<input id="dg-allowed_hosts" name="allowed_hosts" type="text" value="{{$f.Hosts.Value}}" placeholder="{{ctx.Locale.Tr "admin.dependency_graph.settings.allowed_hosts_placeholder" $fallback}}" autocomplete="off" aria-describedby="dg-allowed_hosts-help{{if $invalid}} dg-allowed_hosts-error{{end}}"{{if $invalid}} aria-invalid="true" autofocus{{end}}>
+						{{if $invalid}}<p class="dg-error" id="dg-allowed_hosts-error">{{$f.ErrorMessage}}</p>{{end}}
+						<p class="help" id="dg-allowed_hosts-help">{{ctx.Locale.Tr "admin.dependency_graph.settings.allowed_hosts_help" (HTMLFormat "<code>%s</code>" "external") $fallback}}{{if $f.Hosts.Default}} <span class="dg-app-default">{{ctx.Locale.Tr "admin.dependency_graph.settings.app_default" $f.Hosts.Default}}</span>{{end}}</p>
+					</div>
+					{{template "admin/dependency_graph_limit" (dict "Name" "update_interval" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.update_interval") "Unit" (ctx.Locale.Tr "admin.dependency_graph.settings.unit.hours") "Field" (index $f.Limits "update_interval") "Help" (ctx.Locale.Tr "admin.dependency_graph.settings.update_interval_help") "Form" $f)}}
+					<details class="dg-fold" id="dg-download-limits"{{if $f.Open "download"}} open{{end}}>
+						<summary>{{ctx.Locale.Tr "admin.dependency_graph.settings.download_limits"}}</summary>
+						<div class="dg-row">
+							{{template "admin/dependency_graph_limit" (dict "Name" "osv_max_download" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.osv_max_download") "Unit" (ctx.Locale.Tr "admin.dependency_graph.settings.unit.mib") "Field" (index $f.Limits "osv_max_download") "Help" "" "Form" $f)}}
+							{{template "admin/dependency_graph_limit" (dict "Name" "osv_max_uncompressed" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.osv_max_uncompressed") "Unit" (ctx.Locale.Tr "admin.dependency_graph.settings.unit.mib") "Field" (index $f.Limits "osv_max_uncompressed") "Help" "" "Form" $f)}}
+						</div>
+						<div class="dg-row">
+							{{template "admin/dependency_graph_limit" (dict "Name" "osv_max_entries" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.osv_max_entries") "Unit" "" "Field" (index $f.Limits "osv_max_entries") "Help" "" "Form" $f)}}
+							{{template "admin/dependency_graph_limit" (dict "Name" "osv_max_entry_size" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.osv_max_entry_size") "Unit" (ctx.Locale.Tr "admin.dependency_graph.settings.unit.mib") "Field" (index $f.Limits "osv_max_entry_size") "Help" "" "Form" $f)}}
+						</div>
+						{{template "admin/dependency_graph_limit" (dict "Name" "osv_ecosystem_timeout" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.osv_ecosystem_timeout") "Unit" (ctx.Locale.Tr "admin.dependency_graph.settings.unit.minutes") "Field" (index $f.Limits "osv_ecosystem_timeout") "Help" "" "Form" $f)}}
+					</details>
 				</div>
-				{{template "admin/dependency_graph_limit" (dict "Name" "update_interval" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.update_interval") "Unit" (ctx.Locale.Tr "admin.dependency_graph.settings.unit.hours") "Field" (index $f.Limits "update_interval") "Help" (ctx.Locale.Tr "admin.dependency_graph.settings.update_interval_help"))}}
-				<details class="dg-fold" id="dg-download-limits">
-					<summary>{{ctx.Locale.Tr "admin.dependency_graph.settings.download_limits"}}</summary>
-					<div class="dg-row">
-						{{template "admin/dependency_graph_limit" (dict "Name" "osv_max_download" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.osv_max_download") "Unit" (ctx.Locale.Tr "admin.dependency_graph.settings.unit.mib") "Field" (index $f.Limits "osv_max_download") "Help" "")}}
-						{{template "admin/dependency_graph_limit" (dict "Name" "osv_max_uncompressed" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.osv_max_uncompressed") "Unit" (ctx.Locale.Tr "admin.dependency_graph.settings.unit.mib") "Field" (index $f.Limits "osv_max_uncompressed") "Help" "")}}
-					</div>
-					<div class="dg-row">
-						{{template "admin/dependency_graph_limit" (dict "Name" "osv_max_entries" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.osv_max_entries") "Unit" "" "Field" (index $f.Limits "osv_max_entries") "Help" "")}}
-						{{template "admin/dependency_graph_limit" (dict "Name" "osv_max_entry_size" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.osv_max_entry_size") "Unit" (ctx.Locale.Tr "admin.dependency_graph.settings.unit.mib") "Field" (index $f.Limits "osv_max_entry_size") "Help" "")}}
-					</div>
-					{{template "admin/dependency_graph_limit" (dict "Name" "osv_ecosystem_timeout" "Label" (ctx.Locale.Tr "admin.dependency_graph.settings.osv_ecosystem_timeout") "Unit" (ctx.Locale.Tr "admin.dependency_graph.settings.unit.minutes") "Field" (index $f.Limits "osv_ecosystem_timeout") "Help" "")}}
-				</details>
 
 				{{if .CanChange}}<div class="field dg-actions">
-					<button class="ui primary button" id="dependency-graph-save">{{ctx.Locale.Tr "save"}}</button>
-					<button class="ui basic button" id="dependency-graph-test" formaction="{{AppSubUrl}}/admin/config/dependency-graph/test-connection" formnovalidate>{{ctx.Locale.Tr "admin.dependency_graph.settings.test_connection"}}</button>
-				</div>{{end}}
+					<button class="ui primary button" id="dependency-graph-save"{{if $f.ErrorMessage}} aria-describedby="dg-save-error"{{end}}>{{ctx.Locale.Tr "save"}}</button>
+					<button class="ui basic button" id="dependency-graph-test" formaction="{{AppSubUrl}}/admin/config/dependency-graph/test-connection" aria-describedby="dg-test-hint">{{ctx.Locale.Tr "admin.dependency_graph.settings.test_connection"}}</button>
+					<span class="help tw-hidden" id="dg-test-hint">{{ctx.Locale.Tr "admin.dependency_graph.settings.test_save_first"}}</span>
+					<span id="dg-test-result" role="status"></span>
+				</div>
+				<div id="dg-save-error" role="alert">{{if $f.ErrorMessage}}<p class="dg-error">{{$f.ErrorMessage}}</p>{{end}}</div>{{end}}
 				</fieldset>
-				<p class="help">{{ctx.Locale.Tr "admin.dependency_graph.settings.audit"}}</p>
+				{{if .CanChange}}<p class="help">{{ctx.Locale.Tr "admin.dependency_graph.settings.audit"}}</p>{{end}}
 			</form>
 		</div>
 		<h4 class="ui top attached header">{{ctx.Locale.Tr "admin.dependency_graph.advisories"}}</h4>
 		<div class="ui attached segment" id="advisory-mirror">
+			{{if .MirrorRunning}}<p class="ui info message" id="advisory-updating" role="status">{{ctx.Locale.Tr "admin.dependency_graph.advisories.updating_hint"}}</p>{{end}}
+			{{if and .MirrorURL .MirrorConfigInvalid}}<p class="ui warning message" id="advisory-config-invalid">{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.config_invalid"}}</p>{{end}}
+			<table class="ui table" id="advisory-mirror-table">
+				<thead><tr>
+					<th>{{ctx.Locale.Tr "repo.dependencies.ecosystem"}}</th>
+					<th>{{ctx.Locale.Tr "admin.dependency_graph.advisories.count"}}</th>
+					<th>{{ctx.Locale.Tr "admin.dependency_graph.advisories.last_update"}}</th>
+					<th>{{ctx.Locale.Tr "admin.dependency_graph.advisories.status"}}</th>
+				</tr></thead>
+				<tbody>
+					{{range .MirrorStatuses}}
+						<tr>
+							<td>{{.Ecosystem}}</td>
+							<td>{{ctx.Locale.PrettyNumber .AdvisoryCount}}</td>
+							<td>{{if .SuccessUnix}}{{DateUtils.TimeSince .SuccessUnix}}{{else}}<span class="text grey">{{ctx.Locale.Tr "admin.dependency_graph.advisories.never"}}</span>{{end}}</td>
+							<td>{{template "admin/advisory_status" (dict "Error" .Error "HasData" (ne .SuccessUnix 0))}}</td>
+						</tr>
+					{{end}}
+				</tbody>
+			</table>
 			{{if .MirrorURL}}
-				{{if .MirrorRunning}}<p class="ui info message" id="advisory-updating" role="status">{{ctx.Locale.Tr "admin.dependency_graph.advisories.updating_hint"}}</p>{{end}}
-				{{if .MirrorConfigInvalid}}<p class="ui warning message" id="advisory-config-invalid">{{ctx.Locale.Tr "admin.dependency_graph.advisories.error.config_invalid"}}</p>{{end}}
-				<table class="ui table" id="advisory-mirror-table">
-					<thead><tr>
-						<th>{{ctx.Locale.Tr "repo.dependencies.ecosystem"}}</th>
-						<th>{{ctx.Locale.Tr "admin.dependency_graph.advisories.count"}}</th>
-						<th>{{ctx.Locale.Tr "admin.dependency_graph.advisories.last_update"}}</th>
-						<th>{{ctx.Locale.Tr "admin.dependency_graph.advisories.status"}}</th>
-					</tr></thead>
-					<tbody>
-						{{range .MirrorStatuses}}
-							<tr>
-								<td>{{.Ecosystem}}</td>
-								<td>{{ctx.Locale.PrettyNumber .AdvisoryCount}}</td>
-								<td>{{if .SuccessUnix}}{{DateUtils.TimeSince .SuccessUnix}}{{else}}<span class="text grey">{{ctx.Locale.Tr "admin.dependency_graph.advisories.never"}}</span>{{end}}</td>
-								<td>{{template "admin/advisory_status" (dict "Error" .Error "HasData" (ne .SuccessUnix 0))}}</td>
-							</tr>
-						{{end}}
-					</tbody>
-				</table>
 				<p class="help">{{ctx.Locale.Tr "admin.dependency_graph.advisories.source" (HTMLFormat "<code>%s</code>" .MirrorURL) .MirrorInterval}}</p>
 				{{if not .MirrorSiteOn}}<p class="help" id="advisory-site-off">{{ctx.Locale.Tr "admin.dependency_graph.advisories.site_off"}}</p>{{end}}
 				{{if and .CanChange .MirrorSiteOn}}
@@ -151,7 +182,7 @@
 					</form>
 				{{end}}
 			{{else}}
-				<p>{{ctx.Locale.Tr "admin.dependency_graph.advisories.no_mirror"}}</p>
+				<p id="advisory-no-mirror">{{ctx.Locale.Tr "admin.dependency_graph.advisories.no_mirror"}}</p>
 			{{end}}
 		</div>
 	</div>

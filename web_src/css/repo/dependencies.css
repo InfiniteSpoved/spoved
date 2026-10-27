@@ -203,6 +203,23 @@
   margin: 0;
 }
 
+.dependency-graph-settings .dg-actions #dg-test-hint,
+.dependency-graph-settings .dg-actions #dg-test-result {
+  align-self: center;
+}
+
+/* the message of a refused save, at its field and next to Save */
+.dependency-graph-settings .dg-error {
+  margin-block: 0.25em;
+  color: var(--color-error-text);
+}
+
+/* the auditor's read-only view: the values in full contrast, not faded like disabled controls */
+.dependency-graph-settings .dg-read-only .field :disabled,
+.dependency-graph-settings .dg-read-only .ui.checkbox input[disabled] ~ label {
+  opacity: 1;
+}
+
 @media (max-width: 767.98px) {
   /* tap targets of at least 44px: the whole label of an option, and the button */
   .dependency-graph-switch .ui.checkbox {
@@ -214,8 +231,14 @@
     padding-block: 10px;
   }
 
-  .dependency-graph-switch .ui.checkbox input[type="checkbox"] {
+  .dependency-graph-switch .ui.checkbox input[type="checkbox"],
+  .dependency-graph-switch .ui.checkbox input[type="radio"] {
     top: 11px;
+  }
+
+  .dependency-graph-settings .dg-fold summary {
+    min-height: 44px;
+    padding-block: 11px;
   }
 
   .dependency-graph-switch .ui.button {

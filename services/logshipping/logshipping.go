@@ -105,14 +105,8 @@ func checkLoop(endpoint string) error {
 	if err != nil {
 		return util.NewInvalidArgumentErrorf("invalid endpoint")
 	}
-	self := []string{setting.Domain, setting.SSH.Domain}
-	if a, err := url.Parse(setting.AppURL); err == nil {
-		self = append(self, a.Hostname())
-	}
-	for _, h := range self {
-		if h != "" && strings.EqualFold(h, u.Hostname()) {
-			return util.NewInvalidArgumentErrorf("the endpoint is this instance, which would ship its logs to itself")
-		}
+	if setting.IsInstanceHost(u.Hostname()) {
+		return util.NewInvalidArgumentErrorf("the endpoint is this instance, which would ship its logs to itself")
 	}
 	return nil
 }
