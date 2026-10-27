@@ -1441,7 +1441,7 @@ func Routes() *web.Route {
 			m.Group("", func() {
 				m.Get("/dependencies", org.SearchDependencies)
 				m.Get("/vulnerability-alerts", org.SearchVulnerabilityAlerts)
-			}, repo.MustEnableDependencySearch, tokenRequiresScopes(auth_model.AccessTokenScopeCategoryRepository), reqToken(), org.HideInvisibleOrg, reqOrgOwnership(), common.RateLimitAPIHeavy)
+			}, repo.MustEnableDependencySearch, reqToken(), org.HideInvisibleOrg, tokenRequiresScopes(auth_model.AccessTokenScopeCategoryRepository), reqOrgOwnership(), common.RateLimitAPIHeavy)
 			m.Combo("/branch-workflow").Get(reqToken(), reqOrgOwnership(), org.GetBranchWorkflow).
 				Put(reqToken(), reqOrgOwnership(), bind(api.OrgBranchWorkflow{}), org.EditBranchWorkflow)
 			m.Combo("/branching-model").Get(reqToken(), reqOrgOwnership(), org.GetBranchingModel).

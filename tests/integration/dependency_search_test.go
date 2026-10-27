@@ -473,6 +473,7 @@ func TestOrgDependencySearchAccess(t *testing.T) {
 		stranger := getUserToken(t, "user2", scope, auth_model.AccessTokenScopeReadRepository)
 		for _, p := range []string{"/api/v1/orgs/privated_org/dependencies" + q, "/api/v1/orgs/privated_org/vulnerability-alerts" + q} {
 			dsGet(t, p, stranger, http.StatusNotFound)
+			dsGet(t, p, getUserToken(t, "user2", scope), http.StatusNotFound) // the scope check can't tell the org exists
 		}
 	})
 	t.Run("anonymous", func(t *testing.T) {
@@ -539,6 +540,7 @@ func TestAdminDependencySearch(t *testing.T) {
 		check(getUserToken(t, "user8", scope, auth_model.AccessTokenScopeReadRepository), http.StatusOK)
 		check(getUserToken(t, "user2", scope, auth_model.AccessTokenScopeReadRepository), http.StatusForbidden) // owner of org3
 		check(getUserToken(t, "user1", auth_model.AccessTokenScopeReadRepository), http.StatusForbidden)
+		check(getUserToken(t, "user1", scope), http.StatusForbidden) // admin scope only
 		check("", http.StatusUnauthorized)
 	})
 	t.Run("restricted tokens have no admin override", func(t *testing.T) {

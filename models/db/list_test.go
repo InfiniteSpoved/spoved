@@ -59,6 +59,7 @@ func TestGetSkipTakeNeverNegative(t *testing.T) {
 		opts := db.ListOptions{Page: page, PageSize: 50}
 		skip, take := opts.GetSkipTake()
 		assert.GreaterOrEqual(t, skip, 0, "page %d", page)
+		assert.GreaterOrEqual(t, skip+take, 0, "page %d", page) // bleve adds the page size
 		assert.Equal(t, 50, take)
 	}
 	opts := db.ListOptions{Page: 3, PageSize: 10}
@@ -66,5 +67,5 @@ func TestGetSkipTakeNeverNegative(t *testing.T) {
 	assert.Equal(t, 20, skip)
 	opts = db.ListOptions{Page: math.MaxInt, PageSize: 50}
 	skip, _ = opts.GetSkipTake()
-	assert.Equal(t, math.MaxInt, skip)
+	assert.Equal(t, math.MaxInt/2, skip)
 }
