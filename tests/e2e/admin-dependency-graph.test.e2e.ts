@@ -47,9 +47,11 @@ test.describe('as an auditor', () => {
   test.use({user: null, storageState: {cookies: [], origins: []}});
 
   let data: FakeData;
+
   test.beforeEach(({request}) => {
     data = new FakeData(request);
   });
+
   test.afterEach(async () => {
     await data.cleanup();
   });
