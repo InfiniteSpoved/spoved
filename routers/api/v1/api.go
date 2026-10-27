@@ -1435,6 +1435,11 @@ func Routes() *web.Route {
 			m.Get("/access-report", reqToken(), reqOrgOwnership(), org.GetAccessReport)
 			// the runs of private repositories are repository data, so the repository scope is needed as well
 			m.Get("/actions/runs", reqToken(), reqOrgMembership(), tokenRequiresScopes(auth_model.AccessTokenScopeCategoryRepository), org.ListActionRuns)
+			// owners only in this version; org.HideInvisibleOrg answers 404 before the owner check can tell the org exists
+			m.Group("", func() {
+				m.Get("/dependencies", org.SearchDependencies)
+				m.Get("/vulnerability-alerts", org.SearchVulnerabilityAlerts)
+			}, reqToken(), org.HideInvisibleOrg, reqOrgOwnership())
 			m.Combo("/branch-workflow").Get(reqToken(), reqOrgOwnership(), org.GetBranchWorkflow).
 				Put(reqToken(), reqOrgOwnership(), bind(api.OrgBranchWorkflow{}), org.EditBranchWorkflow)
 			m.Combo("/branching-model").Get(reqToken(), reqOrgOwnership(), org.GetBranchingModel).
@@ -1617,6 +1622,10 @@ func Routes() *web.Route {
 
 		// outside reqSiteAdmin for the auditor; ReqAuditReader decides
 		m.Get("/admin/audit", tokenRequiresScopes(auth_model.AccessTokenScopeCategoryAdmin), reqToken(), admin.ReqAuditReader, admin.ListAuditEvents)
+		m.Group("/admin", func() {
+			m.Get("/dependencies", admin.SearchDependencies)
+			m.Get("/vulnerability-alerts", admin.SearchVulnerabilityAlerts)
+		}, tokenRequiresScopes(auth_model.AccessTokenScopeCategoryAdmin), reqToken(), admin.ReqAuditReader, common.RateLimitAPIHeavy)
 		m.Group("/admin", func() {
 			m.Group("/cron", func() {
 				m.Get("", admin.ListCronTasks)
