@@ -4,6 +4,7 @@
 package repo
 
 import (
+	stdctx "context"
 	"encoding/csv"
 	"errors"
 	"net/http"
@@ -104,6 +105,9 @@ func toRepoAlerts(ctx *context.APIContext, hits []*vulnerability_service.AlertHi
 	return out, nil
 }
 
+// ExportSlots limits the exports that run at once in this process; an export that finds no free slot is a 429.
+var ExportSlots = make(chan struct{}, 2)
+
 // exportRow is a row of an export: the object of the JSON form and the cells of the CSV form.
 type exportRow struct {
 	obj   any
@@ -113,7 +117,6 @@ type exportRow struct {
 // recordExport writes the audit entry of an export (fail closed, before the first byte): the kind, the format, the
 // filters given and the row count, never a repository name.
 func recordExport(ctx *context.APIContext, scope dependency_service.SearchScope, kind, format string, filters map[string]string, count int64) error {
-	doer := ctx.Doer()
 	data := map[string]any{"kind": kind, "format": format, "count": count}
 	for k, v := range filters {
 		if v != "" {
@@ -126,9 +129,9 @@ func recordExport(ctx *context.APIContext, scope dependency_service.SearchScope,
 	if scope.Org != nil {
 		e.Action, e.OwnerID, e.TargetID, e.TargetName = "org.dependency_graph.exported", scope.Org.ID, scope.Org.ID, scope.Org.Name
 	} else {
-		e.OwnerID, e.TargetID, e.TargetName = doer.ID, doer.ID, doer.Name
+		e.OwnerID, e.TargetID, e.TargetName = ctx.Doer().ID, ctx.Doer().ID, ctx.Doer().Name
 	}
-	if doer != nil {
+	if doer := ctx.Doer(); doer != nil {
 		e.SubjectUserID = doer.ID
 	}
 	return audit_model.Record(ctx.Req.Context(), e)
@@ -140,13 +143,19 @@ func recordExport(ctx *context.APIContext, scope dependency_service.SearchScope,
 func serveExport(ctx *context.APIContext, scope dependency_service.SearchScope, kind, format string, filters map[string]string, header []string,
 	run func(start func(total int64) error, emit func([]exportRow) error) error,
 ) {
-	started, sep := false, "["
+	select {
+	case ExportSlots <- struct{}{}:
+		defer func() { <-ExportSlots }()
+	default:
+		ctx.Error(http.StatusTooManyRequests, "", "too many exports are running, try again shortly")
+		return
+	}
+	sep := "["
 	cw, enc := csv.NewWriter(ctx.Resp), json.NewEncoder(ctx.Resp)
 	err := run(func(total int64) error {
 		if err := recordExport(ctx, scope, kind, format, filters, total); err != nil {
 			return err
 		}
-		started = true
 		name, owner, contentType := "dependencies", "instance", "text/csv"
 		if kind == "alerts" {
 			name = "vulnerability-alerts"
@@ -201,7 +210,13 @@ func serveExport(ctx *context.APIContext, scope dependency_service.SearchScope, 
 	}
 	switch {
 	case err == nil:
-	case !started:
+	case errors.Is(err, stdctx.Canceled):
+		log.Info("serveExport: the client went away: %v", err)
+		if ctx.Resp.WrittenStatus() != 0 {
+			panic(http.ErrAbortHandler)
+		}
+	case ctx.Resp.WrittenStatus() == 0: // no byte is out: an ordinary error answer
+		ctx.Resp.Header().Del("Content-Disposition")
 		searchFailed(ctx, err)
 	default:
 		log.Error("serveExport: %v", err)
@@ -298,6 +313,7 @@ func SearchVulnerabilityAlerts(ctx *context.APIContext, scope dependency_service
 					}
 					out := make([]exportRow, len(alerts))
 					for i, a := range alerts {
+						a.Advisory.Details, a.Advisory.References = "", nil // the full texts stay in the paged answer; an export of 100000 rows would carry them each
 						out[i] = exportRow{obj: a, cells: []string{
 							a.Repository.FullName, a.Advisory.ID, strings.Join(a.Advisory.Aliases, " "), a.Severity, a.Ecosystem, a.Package, a.Version,
 							strings.Join(a.FixedVersions, " "), a.ManifestPath, a.State,

@@ -84,3 +84,10 @@ func FindDependencyUsage(ctx context.Context, o *DependencyUsageOptions, skip, l
 	var rows []*Dependency
 	return rows, sess.Find(&rows)
 }
+
+// FindDependencyUsageIDs returns the IDs of the rows in the order of FindDependencyUsage, at most limit.
+func FindDependencyUsageIDs(ctx context.Context, o *DependencyUsageOptions, limit int) ([]int64, error) {
+	var ids []int64
+	return ids, db.GetEngine(ctx).Table("repo_dependency").Select("`repo_dependency`.id").Join("INNER", "repository", "`repository`.id = `repo_dependency`.repo_id").Where(o.cond()).
+		OrderBy(dependencyUsageOrder).Limit(limit).Find(&ids)
+}

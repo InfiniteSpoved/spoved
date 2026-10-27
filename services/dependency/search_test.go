@@ -168,3 +168,59 @@ func TestExportUsageBatches(t *testing.T) {
 	require.ErrorIs(t, err, util.ErrInvalidArgument)
 	assert.False(t, called, "nothing starts above the cap")
 }
+
+// Rows deleted while an export runs are dropped; no other row is skipped or repeated, since the export loads by the
+// IDs it read first (an OFFSET read would skip a row of the second repository here).
+func TestExportUsageSnapshot(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&setting.DependencyGraph.Enabled, true)()
+	defer test.MockVariableValue(&ExportBatch, 2)()
+	ctx := db.DefaultContext
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	scope := SearchScope{Doer: admin, Admin: true}
+	for _, id := range []int64{1, 2} {
+		for _, m := range []string{"a/go.mod", "b/go.mod", "c/go.mod"} {
+			require.NoError(t, db.Insert(ctx, &repo_model.Dependency{RepoID: id, Ecosystem: dependency.Go, Name: "example.com/x", Version: "v1.0.0", ManifestPath: m}))
+		}
+	}
+	f := UsageFilter{Ecosystem: dependency.Go, Name: "example.com/x"}
+	all, _, err := SearchUsage(ctx, scope, f, db.ListOptions{Page: 1, PageSize: 50})
+	require.NoError(t, err)
+	require.Len(t, all, 6)
+	first, second := all[0].RepoID, all[5].RepoID
+	require.NotEqual(t, first, second)
+
+	deleted := false
+	afterExportBatch = func() {
+		if !deleted { // after the first batch (two rows of the first repository): they go
+			deleted = true
+			_, err := db.GetEngine(ctx).Where("repo_id = ? AND manifest_path <> ?", first, "c/go.mod").Delete(&repo_model.Dependency{})
+			require.NoError(t, err)
+		}
+	}
+	defer func() { afterExportBatch = nil }()
+
+	var got []int64
+	var count int64
+	require.NoError(t, ExportUsage(ctx, scope, f, func(n int64) error { count = n; return nil }, func(rows []*UsageRow) error {
+		for _, r := range rows {
+			got = append(got, r.ID)
+		}
+		return nil
+	}))
+	assert.EqualValues(t, 6, count)
+	seen := map[int64]bool{}
+	secondRows := 0
+	for _, id := range got {
+		assert.False(t, seen[id], "row %d repeated", id)
+		seen[id] = true
+	}
+	for _, r := range all {
+		if r.RepoID == second {
+			assert.True(t, seen[r.ID], "row %d of the other repository is missing", r.ID)
+			secondRows++
+		}
+	}
+	assert.Equal(t, 3, secondRows)
+	assert.Len(t, got, 6) // the two deleted rows were sent already
+}

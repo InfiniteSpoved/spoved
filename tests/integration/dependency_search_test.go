@@ -31,6 +31,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/vulnerability"
+	repo_api "forgejo.org/routers/api/v1/repo"
 	dependency_service "forgejo.org/services/dependency"
 	org_service "forgejo.org/services/org"
 	vulnerability_service "forgejo.org/services/vulnerability"
@@ -671,7 +672,8 @@ func TestDependencySearchExport(t *testing.T) {
 		for _, c := range []struct {
 			path, token, owner, audit string
 			rows                      int
-		}{{orgDeps, owner, "org3", "org.dependency_graph.exported", 6}, {adminDeps, admin, "instance", "admin.dependency_graph.exported", 7}} {
+			actorID                   int64
+		}{{orgDeps, owner, "org3", "org.dependency_graph.exported", 6, 2}, {adminDeps, admin, "instance", "admin.dependency_graph.exported", 7, 1}} {
 			since := auditMaxID(t)
 			resp := dsGet(t, c.path+q+"&limit=1&format=csv", c.token, http.StatusOK) // no paging
 			assert.Equal(t, "nosniff", resp.Header().Get("X-Content-Type-Options"))
@@ -697,6 +699,8 @@ func TestDependencySearchExport(t *testing.T) {
 			require.Len(t, e, 2)
 			assert.Equal(t, map[string]any{"kind": "dependencies", "format": "csv", "ecosystem": "npm", "name": "lodash", "count": float64(c.rows)}, auditData(t, e[0]))
 			assert.NotContains(t, e[0].Data, "leaf")
+			assert.Equal(t, audit_model.ActorUser, e[0].ActorType)
+			assert.Equal(t, c.actorID, e[0].ActorID)
 			assert.Empty(t, auditActions(t, since, "activity.dependency_graph.searched"))
 		}
 		resp := dsGet(t, orgAlerts+q+"&state=all&format=csv", owner, http.StatusOK)
@@ -725,17 +729,22 @@ func TestDependencySearchExport(t *testing.T) {
 	})
 
 	t.Run("hidden repositories are not exported", func(t *testing.T) {
+		exported := func(path, token string) (names []string) {
+			for _, r := range readCSV(t, dsGet(t, path+q+"&format=csv", token, http.StatusOK))[1:] {
+				names = append(names, r[0])
+			}
+			return names
+		}
+		assert.Contains(t, exported(orgDeps, owner), f.repo3.FullName())
+		assert.Contains(t, exported(adminDeps, admin), f.repo3.FullName())
 		_, err := db.GetEngine(t.Context()).Exec("UPDATE repository SET trashed_unix = 1 WHERE id = ?", f.repo3.ID)
 		require.NoError(t, err)
 		defer func() {
 			_, err := db.GetEngine(t.Context()).Exec("UPDATE repository SET trashed_unix = 0 WHERE id = ?", f.repo3.ID)
 			require.NoError(t, err)
 		}()
-		for _, path := range []string{orgDeps, adminDeps} {
-			for _, r := range readCSV(t, dsGet(t, path+q+"&format=csv", map[bool]string{true: owner, false: admin}[path == orgDeps], http.StatusOK))[1:] {
-				assert.NotEqual(t, f.repo3.FullName(), r[0])
-			}
-		}
+		assert.NotContains(t, exported(orgDeps, owner), f.repo3.FullName())
+		assert.NotContains(t, exported(adminDeps, admin), f.repo3.FullName())
 	})
 
 	t.Run("a range search exports what the Go filter keeps", func(t *testing.T) {
@@ -758,6 +767,39 @@ func TestDependencySearchExport(t *testing.T) {
 		assert.Contains(t, resp.Body.String(), "add an owner filter")
 		assert.Empty(t, auditActions(t, since, "org.dependency_graph.exported"))
 		assert.Empty(t, auditActions(t, since, "admin.dependency_graph.exported"))
+	})
+
+	t.Run("the advice names the filter that is missing", func(t *testing.T) {
+		defer test.MockVariableValue(&dependency_service.MaxExportRows, 2)()
+		resp := dsGet(t, orgDeps+q+"&format=csv", owner, http.StatusUnprocessableEntity)
+		assert.Contains(t, resp.Body.String(), "narrow by version or range")
+		resp = dsGet(t, adminDeps+q+"&owner=org3&format=csv", admin, http.StatusUnprocessableEntity)
+		assert.NotContains(t, resp.Body.String(), "add an owner filter")
+		assert.Contains(t, resp.Body.String(), "narrow by version or range")
+	})
+
+	t.Run("at most two exports run at once", func(t *testing.T) {
+		since := auditMaxID(t)
+		for range cap(repo_api.ExportSlots) {
+			repo_api.ExportSlots <- struct{}{}
+		}
+		resp := dsGet(t, orgDeps+q+"&format=csv", owner, http.StatusTooManyRequests)
+		assert.Empty(t, resp.Header().Get("Content-Disposition"))
+		assert.Empty(t, auditActions(t, since, "org.dependency_graph.exported"))
+		<-repo_api.ExportSlots
+		dsGet(t, orgDeps+q+"&format=csv", owner, http.StatusOK)
+		<-repo_api.ExportSlots
+		assert.Empty(t, repo_api.ExportSlots)
+	})
+
+	t.Run("an alert export leaves out the advisory texts", func(t *testing.T) {
+		long := strings.Repeat("long-advisory-text ", 50)
+		_, err := db.GetEngine(t.Context()).Exec("UPDATE vulnerability_advisory SET details = ?, summary = 'short summary'", long)
+		require.NoError(t, err)
+		body := dsGet(t, adminAlerts+q+"&state=all&format=json", admin, http.StatusOK).Body.String()
+		assert.NotContains(t, body, "long-advisory-text")
+		assert.Contains(t, body, "short summary")
+		assert.Contains(t, dsGet(t, adminAlerts+q+"&state=all&limit=50", admin, http.StatusOK).Body.String(), "long-advisory-text") // the paged answer keeps them
 	})
 
 	t.Run("a failed audit insert sends nothing", func(t *testing.T) {
