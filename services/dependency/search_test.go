@@ -278,3 +278,60 @@ func TestExportUsageRescan(t *testing.T) {
 	assert.Len(t, firstIDs, 2)
 	assert.Equal(t, []string{"a/go.mod", "d/go.mod"}, secondManifests)
 }
+
+// A rescanned repository that shares a batch with another one is read again on its own; the other keeps its rows.
+// With a range, the filter and the uncertain flag apply to the rows read again.
+func TestExportUsageRescanSharedBatch(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&setting.DependencyGraph.Enabled, true)()
+	ctx := db.DefaultContext // ExportBatch stays large: both repositories are in one batch
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	scope := SearchScope{Doer: admin, Admin: true}
+	insert := func(repoID int64, version, requirement, manifest string) {
+		require.NoError(t, db.Insert(ctx, &repo_model.Dependency{RepoID: repoID, Ecosystem: dependency.NPM, Name: "lodash", Version: version, Requirement: requirement, ManifestPath: manifest}))
+	}
+	insert(1, "4.17.21", "", "a")
+	insert(2, "4.17.1", "", "a")
+	insert(2, "4.17.2", "", "b")
+	for name, f := range map[string]UsageFilter{
+		"plain": {Ecosystem: dependency.NPM, Name: "lodash"},
+		"range": {Ecosystem: dependency.NPM, Name: "lodash", Range: "^4.17.0"},
+	} {
+		all, _, err := SearchUsage(ctx, scope, f, db.ListOptions{Page: 1, PageSize: 50})
+		require.NoError(t, err)
+		require.Len(t, all, 3, name)
+		second := all[2].RepoID
+
+		rescanned := false
+		afterExportSnapshot = func() {
+			if !rescanned {
+				rescanned = true
+				_, err := db.GetEngine(ctx).Where("repo_id = ?", second).Delete(&repo_model.Dependency{})
+				require.NoError(t, err)
+				insert(second, "4.17.9", "", "a")
+				insert(second, "2.0.0", "", "b")  // out of the range
+				insert(second, "", "^4.0.0", "c") // overlaps it: uncertain
+			}
+		}
+		var got []string
+		require.NoError(t, ExportUsage(ctx, scope, f, func(n int64) error { assert.EqualValues(t, 3, n, name); return nil }, func(rows []*UsageRow) error {
+			for _, r := range rows {
+				got = append(got, fmt.Sprintf("%d %s %s %v", r.RepoID, r.Version, r.ManifestPath, r.Uncertain))
+			}
+			return nil
+		}))
+		afterExportSnapshot = nil
+		want := []string{fmt.Sprintf("%d 4.17.21 a false", all[0].RepoID), fmt.Sprintf("%d 4.17.9 a false", second)}
+		if name == "plain" {
+			want = append(want, fmt.Sprintf("%d 2.0.0 b false", second), fmt.Sprintf("%d  c false", second))
+		} else {
+			want = append(want, fmt.Sprintf("%d  c true", second))
+		}
+		assert.Equal(t, want, got, name)
+
+		_, err = db.GetEngine(ctx).Where("repo_id = ?", second).Delete(&repo_model.Dependency{})
+		require.NoError(t, err)
+		insert(second, "4.17.1", "", "a")
+		insert(second, "4.17.2", "", "b")
+	}
+}

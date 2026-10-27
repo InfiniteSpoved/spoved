@@ -106,8 +106,8 @@ func toRepoAlerts(ctx *context.APIContext, hits []*vulnerability_service.AlertHi
 	return out, nil
 }
 
-// ExportSlots limits the exports that run at once in this process; an export that finds no free slot is a 429.
-var ExportSlots = make(chan struct{}, 2)
+// exportSlots limits the exports that run at once in this process; an export that finds no free slot is a 429.
+var exportSlots = make(chan struct{}, 2)
 
 // ExportTimeLimit is how long one export may run; it is checked between batches (a variable for tests).
 var ExportTimeLimit = 10 * time.Minute
@@ -125,7 +125,7 @@ func TakeExportSlot(doerID int64) (release func(), ok bool) {
 		return nil, false
 	}
 	select {
-	case ExportSlots <- struct{}{}:
+	case exportSlots <- struct{}{}:
 		exporting[doerID] = true
 		var once sync.Once
 		return func() { // giving back twice is harmless
@@ -133,13 +133,16 @@ func TakeExportSlot(doerID int64) (release func(), ok bool) {
 				exportingMu.Lock()
 				defer exportingMu.Unlock()
 				delete(exporting, doerID)
-				<-ExportSlots
+				<-exportSlots
 			})
 		}, true
 	default:
 		return nil, false
 	}
 }
+
+// ExportsRunning is how many exports hold a slot (for tests).
+func ExportsRunning() int { return len(exportSlots) }
 
 var errExportTimeLimit = errors.New("the export took too long")
 
@@ -184,6 +187,7 @@ func serveExport(ctx *context.APIContext, scope dependency_service.SearchScope, 
 	}
 	defer release()
 	deadline := time.Now().Add(ExportTimeLimit)
+	batches := 0
 	sep := "["
 	cw, enc := csv.NewWriter(ctx.Resp), json.NewEncoder(ctx.Resp)
 	err := run(func(total int64) error {
@@ -210,7 +214,13 @@ func serveExport(ctx *context.APIContext, scope dependency_service.SearchScope, 
 		}
 		return nil
 	}, func(rows []exportRow) error {
-		for _, r := range rows {
+		if batches++; batches > 1 && time.Now().After(deadline) { // before the next batch is written, never after the last
+			return errExportTimeLimit
+		}
+		for n, r := range rows {
+			if n%100 == 99 && time.Now().After(deadline) {
+				return errExportTimeLimit
+			}
 			if format == "json" {
 				if _, err := ctx.Resp.Write([]byte(sep)); err != nil {
 					return err
@@ -228,9 +238,6 @@ func serveExport(ctx *context.APIContext, scope dependency_service.SearchScope, 
 			if err := cw.Write(cells); err != nil {
 				return err
 			}
-		}
-		if time.Now().After(deadline) {
-			return errExportTimeLimit
 		}
 		return nil
 	})
@@ -253,6 +260,11 @@ func serveExport(ctx *context.APIContext, scope dependency_service.SearchScope, 
 			log.Info("serveExport: cancelled: %v", err)
 			ctx.Resp.Header().Del("Content-Type")
 			ctx.Resp.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if errors.Is(err, errExportTimeLimit) {
+			log.Info("serveExport: %v", err)
+			ctx.Error(http.StatusInternalServerError, "", err.Error())
 			return
 		}
 		searchFailed(ctx, err)

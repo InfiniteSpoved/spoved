@@ -285,8 +285,8 @@ var MaxExportRows = 100_000
 // ExportBatch is how many rows an export loads at a time (a variable for tests).
 var ExportBatch = 500
 
-// afterExportBatch is called after each batch of an export (a hook for tests).
-var afterExportBatch func()
+// afterExportBatch is called after each batch of an export, afterExportSnapshot once the snapshot is read (hooks for tests).
+var afterExportBatch, afterExportSnapshot func()
 
 // loadBatch loads the rows of one batch of the snapshot, in its order, as the plan selects them now: by ID and
 // the plan's conditions (a repository moved out of reach, a row that left the filter, is dropped). A repository
@@ -300,21 +300,29 @@ func (p *usagePlan) loadBatch(ctx context.Context, batch []*repo_model.Dependenc
 	if err != nil {
 		return nil, err
 	}
+	// the repositories of the batch with a snapshot row that is gone (a scan replaced them) are read again as a whole, in one query
+	var stale []int64
+	for _, d := range batch {
+		if loaded[d.ID] == nil && !slices.Contains(stale, d.RepoID) {
+			stale = append(stale, d.RepoID)
+		}
+	}
+	current, err := repo_model.FindDependencyUsageOfRepos(ctx, p.opts, stale)
+	if err != nil {
+		return nil, err
+	}
 	var out []*repo_model.Dependency
 	for start := 0; start < len(batch); {
 		end := start
-		complete := true
 		for end < len(batch) && batch[end].RepoID == batch[start].RepoID {
-			complete = complete && loaded[batch[end].ID] != nil
 			end++
 		}
-		var rows []*repo_model.Dependency
-		if complete {
+		rows := current[batch[start].RepoID]
+		if !slices.Contains(stale, batch[start].RepoID) {
+			rows = nil
 			for _, d := range batch[start:end] {
 				rows = append(rows, loaded[d.ID])
 			}
-		} else if rows, err = repo_model.FindDependencyUsage(ctx, p.opts.OfRepository(batch[start].RepoID), 0, 0); err != nil {
-			return nil, err
 		}
 		for _, d := range rows {
 			if !p.ranged {
@@ -354,6 +362,9 @@ func ExportUsage(ctx context.Context, scope SearchScope, f UsageFilter, start fu
 	}
 	if err := start(int64(len(snapshot))); err != nil {
 		return err
+	}
+	if afterExportSnapshot != nil {
+		afterExportSnapshot()
 	}
 	for _, batch := range RepoBatches(snapshot, func(d *repo_model.Dependency) int64 { return d.RepoID }, ExportBatch) {
 		deps, err := p.loadBatch(ctx, batch)

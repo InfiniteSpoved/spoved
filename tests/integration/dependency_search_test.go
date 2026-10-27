@@ -794,14 +794,15 @@ func TestDependencySearchExport(t *testing.T) {
 		release()
 		releaseOther()
 		dsGet(t, orgDeps+q+"&format=csv", owner, http.StatusOK)
-		assert.Empty(t, repo_api.ExportSlots)
+		assert.Zero(t, repo_api.ExportsRunning())
 	})
 
 	t.Run("an export over its time budget ends after a batch", func(t *testing.T) {
 		defer test.MockVariableValue(&repo_api.ExportTimeLimit, -time.Second)()
+		defer test.MockVariableValue(&dependency_service.ExportBatch, 1)() // several batches: the first is sent, the second is refused
 		req := NewRequest(t, "GET", adminDeps+q+"&format=json").AddTokenAuth(admin)
 		assert.PanicsWithValue(t, http.ErrAbortHandler, func() { MakeRequest(t, req, http.StatusOK) })
-		assert.Empty(t, repo_api.ExportSlots, "the slot is given back")
+		assert.Zero(t, repo_api.ExportsRunning(), "the slot is given back")
 	})
 
 	t.Run("an alert export leaves out the advisory texts", func(t *testing.T) {
