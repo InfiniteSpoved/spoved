@@ -138,8 +138,8 @@ func TestOrgSecurityPages(t *testing.T) {
 			"org3/repo3 | npm lodash ^4.0.0 | Fixed in 4.17.21 | in package.json | State: Open",
 			"org3/repo5 | npm lodash 3.10.1 | Fixed in 4.17.21 | in package-lock.json | State: Open",
 		}, secRows(t, resp))
-		assert.Equal(t, "3 repositories affected", secText(t, resp, "#security-search-total"))
-		assert.Equal(t, "High GHSA-aaaa-bbbb-cccc in lodash GHSA-aaaa-bbbb-cccc · CVE-2024-1111 · npm lodash", secText(t, resp, ".security-search-card"))
+		assert.Equal(t, "4 alerts in 3 repositories", secText(t, resp, "#security-search-total"))
+		assert.Equal(t, "High GHSA-aaaa-bbbb-cccc in lodash GHSA-aaaa-bbbb-cccc · CVE-2024-1111 · CVSS 7.5", secText(t, resp, ".security-search-card"))
 		// each state links the repository's alert page
 		var link string
 		NewHTMLParser(t, bytes.NewBufferString(resp.Body.String())).Find("table.security-search-table tbody tr").First().Find("a").Last().Each(func(_ int, a *goquery.Selection) { link, _ = a.Attr("href") })
@@ -169,7 +169,7 @@ func TestOrgSecurityPages(t *testing.T) {
 			"org3/repo21 | Version 3.9.0 | in a-old/package-lock.json | Direct: No",
 			"org3/repo21 | Version 4.17.21 | in package-lock.json | Direct: Yes",
 			"org3/repo3 | Version 4.17.20 | in package-lock.json | Direct: No",
-			"org3/repo3 | Version ^4.0.0 may match | in package.json | Direct: Yes",
+			"org3/repo3 | Version ^4.0.0 | in package.json | Direct: Yes",
 			"org3/repo5 | Version 3.10.1 | in package-lock.json | Direct: Yes",
 		}, secRows(t, resp))
 		assert.Equal(t, "6 uses in 4 repositories", secText(t, resp, "#security-search-total"))
@@ -225,13 +225,34 @@ func TestOrgSecurityPages(t *testing.T) {
 		// nothing matches: an advisory that is unknown and one nothing uses give the same page
 		unaffected := secGet(t, owner, vulns+"?advisory=GHSA-cccc-dddd-eeee", http.StatusOK)
 		var unknown *httptest.ResponseRecorder
-		assert.Contains(t, secText(t, unaffected, ".info.message"), "No repository in org3 is affected by GHSA-cccc-dddd-eeee. Clear the search")
+		assert.Contains(t, secText(t, unaffected, ".info.message"), `No repository in org3 has an alert for GHSA-cccc-dddd-eeee with the state "Open". Clear the search`)
 		unknown = secGet(t, owner, vulns+"?advisory=GHSA-zzzz-zzzz-zzzz", http.StatusOK)
 		assert.Equal(t, strings.ReplaceAll(secMain(t, unaffected), "GHSA-cccc-dddd-eeee", "GHSA-zzzz-zzzz-zzzz"), secMain(t, unknown))
+		all := secGet(t, owner, vulns+"?advisory=GHSA-cccc-dddd-eeee&state=all", http.StatusOK)
+		assert.Contains(t, secText(t, all, ".info.message"), "No repository in org3 is affected by GHSA-cccc-dddd-eeee. Clear the search")
 		assert.Empty(t, NewHTMLParser(t, bytes.NewBufferString(unaffected.Body.String())).Find(".security-search-card").Nodes)
 
+		// forms that name nothing run no search: they cost the same, and less than a search
+		_ = secGet(t, owner, deps, http.StatusOK)
+		blank := countQueries(t, func() { secGet(t, owner, deps+"?ecosystem=npm&direct=true", http.StatusOK) })
+		assert.Equal(t, withoutSearch, blank)
+
+		// a package without an ecosystem marks the ecosystem, a version alone marks the package
+		resp := secGet(t, owner, deps+"?name=lodash", http.StatusOK)
+		assert.Equal(t, "Choose an ecosystem.", secText(t, resp, ".negative.message"))
+		assert.Contains(t, resp.Body.String(), `<select name="ecosystem" aria-invalid="true" aria-describedby="security-search-error">`)
+		assert.Contains(t, resp.Body.String(), `<option value="" selected>Choose an ecosystem</option>`)
+		resp = secGet(t, owner, vulns+"?name=lodash", http.StatusOK)
+		assert.Contains(t, resp.Body.String(), `<select name="ecosystem" aria-invalid="true"`)
+		resp = secGet(t, owner, vulns+"?version=1.0.0", http.StatusOK)
+		assert.Contains(t, resp.Body.String(), `<input name="name" value="" maxlength="512"`+" "+`placeholder="e.g. lodash" aria-invalid="true"`)
+
+		// a long wrong value is cut in the message
+		resp = secGet(t, owner, vulns+"?advisory="+strings.Repeat("a", 40)+"%20"+strings.Repeat("b", 100), http.StatusOK)
+		assert.NotContains(t, secText(t, resp, ".negative.message"), strings.Repeat("b", 30))
+
 		// invalid input marks the field
-		resp := secGet(t, owner, vulns+"?advisory="+url.QueryEscape("CVE 2026"), http.StatusOK)
+		resp = secGet(t, owner, vulns+"?advisory="+url.QueryEscape("CVE 2026"), http.StatusOK)
 		assert.Equal(t, `"CVE 2026" is not an advisory ID. Use the form CVE-2026-12345 or GHSA-xxxx-xxxx-xxxx.`, secText(t, resp, ".negative.message"))
 		assert.Contains(t, resp.Body.String(), `<label class="security-search-wide invalid">`)
 		assert.Contains(t, resp.Body.String(), `aria-invalid="true"`)
@@ -245,8 +266,9 @@ func TestOrgSecurityPages(t *testing.T) {
 		// too broad
 		defer test.MockVariableValue(&dependency_service.MaxUsageCandidates, 2)()
 		resp = secGet(t, owner, deps+"?ecosystem=npm&name=lodash&version="+url.QueryEscape("^4"), http.StatusOK)
-		assert.Equal(t, "More than 2 uses match. Choose a project or a narrower range.", secText(t, resp, ".warning.message"))
+		assert.Equal(t, "More than 2 matches. Choose a project or narrow the search.", secText(t, resp, ".warning.message"))
 		assert.Empty(t, secRows(t, resp))
+		assert.Contains(t, resp.Body.String(), `class="ui warning message" role="alert"`)
 	})
 
 	t.Run("hidden repositories are never shown", func(t *testing.T) {
@@ -312,13 +334,13 @@ func TestAdminSecurityPages(t *testing.T) {
 		resp := secGet(t, admin, vulns+"?advisory=CVE-2024-1111&state=all", http.StatusOK)
 		rows := secRows(t, resp)
 		require.NotEmpty(t, rows)
-		assert.Contains(t, rows, "org3 | org3/repo5 | npm lodash 3.10.1 | Fixed in 4.17.21 | in package-lock.json | State: Open")
-		assert.Contains(t, secText(t, resp, "#security-search-total"), "repositories in 2 owners")
+		assert.Contains(t, rows, "Owner: org3 | org3/repo5 | npm lodash 3.10.1 | Fixed in 4.17.21 | in package-lock.json | State: Open")
+		assert.Regexp(t, `^\d+ alerts in \d+ repositories in 2 owners$`, secText(t, resp, "#security-search-total"))
 		assert.Contains(t, secText(t, resp, ".security-search-card"), "GHSA-aaaa-bbbb-cccc")
 		assert.Contains(t, resp.Body.String(), `href="/admin/config/dependency-graph/dependencies"`)
 		resp = secGet(t, admin, vulns+"?advisory=CVE-2024-1111&state=all&owner=org17", http.StatusOK)
 		for _, r := range secRows(t, resp) {
-			assert.True(t, strings.HasPrefix(r, "org17 | org17/"), r)
+			assert.True(t, strings.HasPrefix(r, "Owner: org17 | org17/"), r)
 		}
 		assert.Contains(t, secText(t, resp, "#security-search-total"), "in 1 owner")
 
@@ -347,24 +369,58 @@ func TestAdminSecurityPages(t *testing.T) {
 	})
 
 	t.Run("hidden repositories are never shown", func(t *testing.T) {
-		_, err := db.GetEngine(t.Context()).Exec("UPDATE repository SET trashed_unix = 1 WHERE id = ?", f.repo5.ID)
-		require.NoError(t, err)
-		for _, p := range []string{deps, vulns} {
-			for _, r := range secRows(t, secGet(t, admin, p+"?ecosystem=npm&name=lodash&state=all", http.StatusOK)) {
-				assert.NotContains(t, r, "org3/repo5 |")
-			}
+		exec := func(query string, args ...any) {
+			t.Helper()
+			_, err := db.GetEngine(t.Context()).Exec(append([]any{query}, args...)...)
+			require.NoError(t, err)
 		}
-		_, err = db.GetEngine(t.Context()).Exec("UPDATE repository SET trashed_unix = 0 WHERE id = ?", f.repo5.ID)
+		shown := func(repo *repo_model.Repository) bool {
+			for _, p := range []string{deps, vulns} {
+				for _, r := range secRows(t, secGet(t, admin, p+"?ecosystem=npm&name=lodash&state=all", http.StatusOK)) {
+					if strings.Contains(r, repo.FullName()+" |") {
+						return true
+					}
+				}
+			}
+			return false
+		}
+		assert.True(t, shown(f.repo5))
+		exec("UPDATE repository SET trashed_unix = 1 WHERE id = ?", f.repo5.ID)
+		assert.False(t, shown(f.repo5), "trashed")
+		exec("UPDATE repository SET trashed_unix = 0 WHERE id = ?", f.repo5.ID)
+		require.NoError(t, db.Insert(t.Context(), &repo_model.OrgUnit{OrgID: 3, Type: unit.TypeCode, Disabled: true}))
+		assert.False(t, shown(f.repo3), "Code hidden")
+		_, err := db.DeleteByBean(t.Context(), &repo_model.OrgUnit{OrgID: 3, Type: unit.TypeCode})
 		require.NoError(t, err)
+		exec("UPDATE repository SET dependency_graph_disabled = ? WHERE id = ?", true, f.repo3.ID)
+		assert.False(t, shown(f.repo3), "graph off for the repository")
+		exec("UPDATE repository SET dependency_graph_disabled = ? WHERE id = ?", false, f.repo3.ID)
+		assert.True(t, shown(f.repo3))
+	})
+
+	t.Run("states", func(t *testing.T) {
+		resp := secGet(t, admin, deps+"?ecosystem=npm&name=lodash&version="+url.QueryEscape(">=x y"), http.StatusOK)
+		assert.Contains(t, secText(t, resp, ".negative.message"), "is not a version range")
+		resp = secGet(t, admin, vulns+"?advisory="+url.QueryEscape("CVE 2026"), http.StatusOK)
+		assert.Contains(t, secText(t, resp, ".negative.message"), "is not an advisory ID")
+		resp = secGet(t, admin, vulns+"?advisory=GHSA-cccc-dddd-eeee", http.StatusOK)
+		assert.Contains(t, secText(t, resp, ".info.message"), `No repository on this instance has an alert for GHSA-cccc-dddd-eeee with the state "Open".`)
+		defer test.MockVariableValue(&dependency_service.MaxUsageCandidates, 2)()
+		resp = secGet(t, admin, deps+"?ecosystem=npm&name=lodash&version="+url.QueryEscape("^4"), http.StatusOK)
+		assert.Equal(t, "More than 2 matches. Choose an owner or narrow the search.", secText(t, resp, ".warning.message"))
 	})
 
 	t.Run("the instance switch is off", func(t *testing.T) {
 		defer test.MockVariableValue(&setting.DependencyGraph.Enabled, false)()
 		since := auditMaxID(t)
-		resp := secGet(t, admin, deps+"?ecosystem=npm&name=lodash", http.StatusOK)
-		assert.Contains(t, secText(t, resp, ".ui.message"), "turned off for this instance")
-		assert.Empty(t, secRows(t, resp))
+		for _, p := range []string{vulns, deps} {
+			secGet(t, admin, p+"?ecosystem=npm&name=lodash", http.StatusNotFound)
+			secGet(t, loginUser(t, "user8"), p, http.StatusNotFound)
+			secGet(t, loginUser(t, "user2"), p, http.StatusForbidden) // the gate comes first
+			admin.MakeRequest(t, NewRequestWithValues(t, "POST", p+"/export", map[string]string{"format": "csv", "ecosystem": "npm", "name": "lodash"}), http.StatusNotFound)
+		}
 		assert.Empty(t, auditActions(t, since, "activity.dependency_graph.searched"))
+		assert.Empty(t, auditActions(t, since, "admin.dependency_graph.exported"))
 	})
 }
 
@@ -449,7 +505,6 @@ func TestSecurityPagesExport(t *testing.T) {
 		MakeRequest(t, NewRequestWithValues(t, "POST", orgDeps+"/export", map[string]string{"format": "csv"}), http.StatusSeeOther)
 		assert.Empty(t, auditActions(t, since, "org.dependency_graph.exported"))
 		assert.Empty(t, auditActions(t, since, "admin.dependency_graph.exported"))
-		post(t, owner, orgDeps, "xml", clone(dep), http.StatusUnprocessableEntity)
 	})
 
 	t.Run("a cross-origin post is refused", func(t *testing.T) {
@@ -494,6 +549,15 @@ func TestSecurityPagesExport(t *testing.T) {
 		t.Run("a filter that is wrong", func(t *testing.T) {
 			refused(owner, orgVulns, "csv", map[string]string{"advisory": "CVE 2026"}, "The search is not valid.")
 		})
+		t.Run("an unknown format", func(t *testing.T) {
+			refused(owner, orgDeps, "xml", clone(dep), "The search is not valid.")
+		})
+		t.Run("too many candidates", func(t *testing.T) {
+			defer test.MockVariableValue(&dependency_service.MaxUsageCandidates, 2)()
+			r := clone(dep)
+			r["version"] = "^4"
+			refused(owner, orgDeps, "csv", r, "More than 2 matches. Choose a project or narrow the search.")
+		})
 		t.Run("a failed audit insert", func(t *testing.T) {
 			defer test.MockVariableValue(&audit_model.InsertEntry, func(context.Context, *audit_model.Entry) error { return errors.New("audit down") })()
 			since := auditMaxID(t)
@@ -502,6 +566,18 @@ func TestSecurityPagesExport(t *testing.T) {
 			assert.NotContains(t, resp.Body.String(), "lodash")
 			assert.Empty(t, auditActions(t, since, "org.dependency_graph.exported"))
 		})
+	})
+
+	t.Run("an archived organization still downloads", func(t *testing.T) {
+		_, err := db.GetEngine(t.Context()).Exec("UPDATE `user` SET archived_unix = 1 WHERE id = 3")
+		require.NoError(t, err)
+		defer func() {
+			_, err := db.GetEngine(t.Context()).Exec("UPDATE `user` SET archived_unix = 0 WHERE id = 3")
+			require.NoError(t, err)
+		}()
+		secGet(t, owner, orgDeps, http.StatusOK)
+		post(t, owner, orgDeps, "csv", clone(dep), http.StatusOK)
+		post(t, owner, orgVulns, "json", clone(vul), http.StatusOK)
 	})
 
 	assert.Zero(t, common.ExportsRunning())

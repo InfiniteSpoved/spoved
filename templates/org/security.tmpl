@@ -9,7 +9,6 @@
 			<a class="item{{if eq .Search.Kind "dependencies"}} active{{end}}"{{if eq .Search.Kind "dependencies"}} aria-current="page"{{end}} href="{{.OrgLink}}/security/dependencies">{{ctx.Locale.Tr "security_search.dependencies"}}</a>
 		</nav>
 		{{template "shared/security_search" .}}
-		{{if eq .Search.Kind "vulnerabilities"}}<p class="security-search-note">{{ctx.Locale.Tr "security_search.org_note"}}</p>{{end}}
 	</div>
 </div>
 {{template "base/footer" .}}

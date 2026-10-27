@@ -8,20 +8,22 @@ package security
 import (
 	"errors"
 	"maps"
-	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	vulnerability_model "forgejo.org/models/vulnerability"
 	"forgejo.org/modules/dependency"
+	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/vulnerability"
+	"forgejo.org/modules/vulnerability/version"
 	"forgejo.org/routers/common"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
@@ -62,14 +64,27 @@ func (f Form) Query() url.Values {
 	return q
 }
 
-// isRange tells a requirement from an exact version: the one field of the dependency form holds either.
-func isRange(s string) bool {
-	return strings.ContainsAny(s, "^~<>=|,*! ") || strings.HasSuffix(strings.ToLower(s), ".x")
+// isRange tells a requirement from an exact version: the one field of the dependency form holds either. It is a
+// version when the ecosystem's own parser accepts it, else a requirement.
+func isRange(ecosystem, s string) bool {
+	if s == "" {
+		return false
+	}
+	_, err := version.Parse(ecosystem, s)
+	return err != nil
+}
+
+// clip caps a typed value echoed in a message.
+func clip(s string) string {
+	if len(s) <= 64 {
+		return s
+	}
+	return strings.ToValidUTF8(s[:64], "") + "…"
 }
 
 func (f Form) usage() dependency_service.UsageFilter {
 	u := dependency_service.UsageFilter{Ecosystem: f.Ecosystem, Name: f.Name}
-	if isRange(f.Version) {
+	if isRange(f.Ecosystem, f.Version) {
 		u.Range = f.Version
 	} else {
 		u.Version = f.Version
@@ -117,31 +132,33 @@ type Page struct {
 	Searched             bool
 	Error, ErrorField    string // the message of a refused form and the field it names; Error is also set for a too-broad search (TooBroad)
 	TooBroad             bool
-	SiteOff              bool
 	Usage                []*dependency_service.UsageRow
 	Alerts               []*alertRow
 	Advisory             *api.VulnerabilityAdvisory // the card of an advisory search that found alerts
-	AdvisoryPackage      string
+	AdvisoryScore        string                     // the CVSS score as text, "" when the advisory has none
 	Total, Repos, Owners int64
 }
 
-// validate checks the form the way the user typed it, so a mistake names its field in the user's language; what it
-// lets through is checked again by the services.
+// validate checks the form the way the user typed it, so a mistake names its field in the user's language. It mirrors
+// the checks of dependency_service.SearchUsage / vulnerability_service.SearchAlerts (ecosystem, advisory ID, state,
+// name needs an ecosystem, range syntax); what it lets through is checked again by the services.
 func validate(ctx *context.Context, kind string, f Form) (field, msg string) {
 	switch {
 	case f.Ecosystem != "" && !dependency.IsEcosystem(f.Ecosystem):
 		return "ecosystem", ctx.Locale.TrString("security_search.invalid_ecosystem")
 	case kind == Vulnerabilities && f.Advisory != "" && !vulnerability.ValidID(f.Advisory):
-		return "advisory", ctx.Locale.TrString("security_search.invalid_advisory", f.Advisory)
-	case kind == Vulnerabilities && f.Advisory == "" && (f.Ecosystem == "" || f.Name == ""):
-		return "advisory", ctx.Locale.TrString("security_search.need_advisory_or_package")
+		return "advisory", ctx.Locale.TrString("security_search.invalid_advisory", clip(f.Advisory))
+	case kind == Vulnerabilities && f.Advisory == "" && f.Name == "":
+		return "name", ctx.Locale.TrString("security_search.need_advisory_or_package")
+	case kind == Vulnerabilities && f.Advisory == "" && f.Ecosystem == "":
+		return "ecosystem", ctx.Locale.TrString("security_search.need_advisory_or_package")
 	case kind == Dependencies && f.Ecosystem == "":
 		return "ecosystem", ctx.Locale.TrString("security_search.need_ecosystem")
 	case kind == Dependencies && f.Name == "":
 		return "name", ctx.Locale.TrString("security_search.need_package")
-	case kind == Dependencies && isRange(f.Version):
+	case kind == Dependencies && isRange(f.Ecosystem, f.Version):
 		if _, ok := vulnerability.ParseRangeFilter(f.Ecosystem, f.Version); !ok {
-			return "version", ctx.Locale.TrString("security_search.invalid_range", f.Version)
+			return "version", ctx.Locale.TrString("security_search.invalid_range", clip(f.Version))
 		}
 	case kind == Vulnerabilities && f.State != "" && f.State != "all" && !slices.Contains(vulnerability_model.States, f.State):
 		return "state", ctx.Locale.TrString("security_search.invalid_state")
@@ -164,10 +181,6 @@ func Search(ctx *context.Context, scope dependency_service.SearchScope, kind, li
 		}
 		page.Projects = groups
 	}
-	if !dependency_service.SiteEnabled(ctx) {
-		page.SiteOff = true
-		return true
-	}
 	if !page.Searched {
 		return true
 	}
@@ -189,13 +202,10 @@ func Search(ctx *context.Context, scope dependency_service.SearchScope, kind, li
 	switch {
 	case errors.Is(err, dependency_service.ErrTooMany):
 		page.TooBroad = true
-		if limit := ctx.Locale.PrettyNumber(dependency_service.MaxUsageCandidates); page.Admin {
-			page.Error = ctx.Locale.TrString("security_search.too_broad_admin", limit)
-		} else {
-			page.Error = ctx.Locale.TrString("security_search.too_broad_org", limit)
-		}
-	case errors.Is(err, util.ErrInvalidArgument):
-		page.Error = err.Error()
+		page.Error = tooBroad(ctx, page.Admin)
+	case errors.Is(err, util.ErrInvalidArgument): // the form passed validate, so this is a mistake only the service knows
+		log.Info("security search refused: %v", err)
+		page.Error = ctx.Locale.TrString("security_search.invalid_search")
 	case err != nil:
 		ctx.ServerError("Search", err)
 		return false
@@ -209,6 +219,14 @@ func Search(ctx *context.Context, scope dependency_service.SearchScope, kind, li
 		ctx.Data["Page"] = pager
 	}
 	return true
+}
+
+func tooBroad(ctx *context.Context, admin bool) string {
+	limit := ctx.Locale.PrettyNumber(dependency_service.MaxUsageCandidates)
+	if admin {
+		return ctx.Locale.TrString("security_search.too_broad_admin", limit)
+	}
+	return ctx.Locale.TrString("security_search.too_broad_org", limit)
 }
 
 func searchUsage(ctx *context.Context, scope dependency_service.SearchScope, page *Page, lo db.ListOptions) error {
@@ -242,7 +260,10 @@ func searchAlerts(ctx *context.Context, scope dependency_service.SearchScope, pa
 	}
 	if f.Advisory != "" { // the card comes from a found alert, so an unknown advisory and an unaffected one answer alike
 		first := converted[0]
-		page.Advisory, page.AdvisoryPackage = &first.Advisory, first.Ecosystem+" "+first.Package
+		page.Advisory = &first.Advisory
+		if sc := first.Advisory.Score; sc != nil {
+			page.AdvisoryScore = strconv.FormatFloat(*sc, 'f', 1, 64)
+		}
 	}
 	return nil
 }
@@ -252,15 +273,14 @@ func searchAlerts(ctx *context.Context, scope dependency_service.SearchScope, pa
 func Export(ctx *context.Context, scope dependency_service.SearchScope, kind, link string) {
 	f := readForm(ctx)
 	format := ctx.FormString("format")
-	if format != "csv" && format != "json" {
-		ctx.Error(http.StatusUnprocessableEntity)
-		return
-	}
 	scope = f.scope(scope)
 	var err error
-	if kind == Vulnerabilities {
+	switch {
+	case format != "csv" && format != "json":
+		err = util.NewInvalidArgumentErrorf("unknown format")
+	case kind == Vulnerabilities:
 		err = common.ExportAlerts(ctx.Base, ctx.Doer, scope, f.alerts(), format)
-	} else {
+	default:
 		err = common.ExportDependencies(ctx.Base, ctx.Doer, scope, f.usage(), format)
 	}
 	if err == nil {
@@ -269,11 +289,14 @@ func Export(ctx *context.Context, scope dependency_service.SearchScope, kind, li
 	switch {
 	case errors.Is(err, common.ErrExportBusy):
 		ctx.Flash.Error(ctx.Tr("security_search.export_busy"))
+	case errors.Is(err, dependency_service.ErrTooManyCandidates):
+		ctx.Flash.Error(tooBroad(ctx, scope.Org == nil))
 	case errors.Is(err, dependency_service.ErrTooMany):
 		ctx.Flash.Error(ctx.Tr("security_search.export_too_many", ctx.Locale.PrettyNumber(dependency_service.MaxExportRows)))
 	case errors.Is(err, common.ErrExportTimeLimit):
 		ctx.Flash.Error(ctx.Tr("security_search.export_time_limit"))
 	case errors.Is(err, util.ErrInvalidArgument):
+		log.Info("security export refused: %v", err)
 		ctx.Flash.Error(ctx.Tr("security_search.export_invalid"))
 	default:
 		ctx.ServerError("Export", err)

@@ -27,6 +27,14 @@ func AuditExportReq(ctx *context.Context) {
 	}
 }
 
+// MustEnableSecuritySearch answers 404 to the search pages and downloads (after the access gate) while the dependency graph is
+// off for the instance, so a download of nothing is never recorded.
+func MustEnableSecuritySearch(ctx *context.Context) {
+	if !dependency_service.SiteEnabled(ctx) {
+		ctx.NotFound("MustEnableSecuritySearch", nil)
+	}
+}
+
 func securitySearchScope(ctx *context.Context) dependency_service.SearchScope {
 	return dependency_service.SearchScope{Doer: ctx.Doer, Admin: true}
 }
@@ -43,7 +51,11 @@ func securitySearch(ctx *context.Context, kind string) {
 	if !shared_security.Search(ctx, securitySearchScope(ctx), kind, setting.AppSubURL+securitySearchLink+kind) {
 		return
 	}
-	ctx.Data["Title"] = ctx.Tr("security_search.title")
+	if kind == shared_security.Vulnerabilities {
+		ctx.Data["Title"] = ctx.Tr("security_search.vulnerabilities")
+	} else {
+		ctx.Data["Title"] = ctx.Tr("security_search.dependencies")
+	}
 	ctx.Data["PageIsAdminConfig"] = true
 	ctx.Data["PageIsAdminConfigDependencyGraphVulnerabilities"] = kind == shared_security.Vulnerabilities
 	ctx.Data["PageIsAdminConfigDependencyGraphDependencies"] = kind == shared_security.Dependencies

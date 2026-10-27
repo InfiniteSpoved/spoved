@@ -88,8 +88,10 @@ func newSearchFixture(t *testing.T) *searchFixture {
 			Affected: []vulnerability.Affected{{Name: name, Ranges: []vulnerability.Range{{Type: "SEMVER", Events: []vulnerability.Event{{Introduced: "0"}, {Fixed: fixed}}}}}},
 		}
 	}
+	scored := advisory("GHSA-aaaa-bbbb-cccc", []string{"CVE-2024-1111"}, vulnerability.SeverityHigh, "lodash", "4.17.21")
+	scored.Score = 7.5
 	_, err = vulnerability_model.ImportBatch(t.Context(), dependency.NPM, []*vulnerability.Advisory{
-		advisory("GHSA-aaaa-bbbb-cccc", []string{"CVE-2024-1111"}, vulnerability.SeverityHigh, "lodash", "4.17.21"),
+		scored,
 		advisory("CVE-2023-2222", nil, vulnerability.SeverityCritical, "lodash", "3.10.2"),
 		advisory("GHSA-cccc-dddd-eeee", []string{"CVE-2020-3333"}, vulnerability.SeverityLow, "never-used", "2.0.0"),
 	}, &vulnerability_model.ChangedSet{})

@@ -116,6 +116,15 @@ func (e tooManyError) Is(target error) bool {
 	return target == ErrTooMany || target == util.ErrInvalidArgument
 }
 
+// ErrTooManyCandidates is the ErrTooMany of a range search that reads more than MaxUsageCandidates rows.
+var ErrTooManyCandidates = errors.New("too many candidates")
+
+type tooManyCandidatesError struct{ tooManyError }
+
+func (e tooManyCandidatesError) Is(target error) bool {
+	return target == ErrTooManyCandidates || e.tooManyError.Is(target)
+}
+
 // TooManyMatches is an export with too many rows; it names the filter the route has, unless it is given.
 func TooManyMatches(scope SearchScope) error {
 	return tooManyError("too many matches, " + scopeAdvice(scope) + "narrow by version or range")
@@ -139,7 +148,7 @@ func tooManyCandidates(scope SearchScope) error {
 	if a := scopeAdvice(scope); a != "" {
 		advice = a + "or give an exact version"
 	}
-	return tooManyError("too many candidates for a range search: " + advice)
+	return tooManyCandidatesError{tooManyError("too many candidates for a range search: " + advice)}
 }
 
 // RepoBatches splits rows (the repositories' rows are contiguous) into batches of at least size rows that end on a

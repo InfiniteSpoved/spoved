@@ -921,10 +921,10 @@ func registerRoutes(m *web.Route) {
 	// the dependency and vulnerability search is read-only: the auditor searches and, as the audited download is no
 	// change, posts it too (TestAdminAuditRoutes)
 	m.Group("/admin/config/dependency-graph", func() {
-		m.Get("/vulnerabilities", admin.AuditReq, admin.SecurityVulnerabilities)
-		m.Get("/dependencies", admin.AuditReq, admin.SecurityDependencies)
-		m.Post("/vulnerabilities/export", admin.AuditExportReq, common.RateLimitHeavy, admin.SecurityVulnerabilitiesExport)
-		m.Post("/dependencies/export", admin.AuditExportReq, common.RateLimitHeavy, admin.SecurityDependenciesExport)
+		m.Get("/vulnerabilities", admin.AuditReq, admin.MustEnableSecuritySearch, admin.SecurityVulnerabilities)
+		m.Get("/dependencies", admin.AuditReq, admin.MustEnableSecuritySearch, admin.SecurityDependencies)
+		m.Post("/vulnerabilities/export", admin.AuditExportReq, admin.MustEnableSecuritySearch, common.RateLimitHeavy, admin.SecurityVulnerabilitiesExport)
+		m.Post("/dependencies/export", admin.AuditExportReq, admin.MustEnableSecuritySearch, common.RateLimitHeavy, admin.SecurityDependenciesExport)
 	}, reqSignIn)
 	m.Group("/admin", func() {
 		m.Get("", admin.Dashboard)

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"forgejo.org/modules/log"
 	"forgejo.org/modules/optional"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
@@ -27,6 +28,11 @@ func searchFailed(ctx *context.APIContext, err error) {
 	}
 	if errors.Is(err, common.ErrExportBusy) {
 		ctx.Error(http.StatusTooManyRequests, "", err.Error())
+		return
+	}
+	if errors.Is(err, common.ErrExportTimeLimit) { // stopped before the first byte: an ordinary answer, not a fault
+		log.Info("serveExport: %v", err)
+		ctx.Error(http.StatusInternalServerError, "", err.Error())
 		return
 	}
 	ctx.Error(http.StatusInternalServerError, "search", err)

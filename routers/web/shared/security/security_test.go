@@ -4,7 +4,9 @@
 package security
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"forgejo.org/modules/optional"
 
@@ -12,16 +14,51 @@ import (
 )
 
 func TestFormVersionOrRange(t *testing.T) {
-	for _, v := range []string{"4.17.20", "v1.2.3", "1.0.0-rc.1", "2.1.0+build", "1"} {
-		assert.False(t, isRange(v), v)
-		assert.Equal(t, v, Form{Version: v}.usage().Version, v)
-		assert.Empty(t, Form{Version: v}.usage().Range, v)
+	for _, c := range [][2]string{
+		{"npm", "4.17.20"},
+		{"npm", "v1.2.3"},
+		{"npm", "1.0.0-rc.1"},
+		{"npm", "2.1.0+build"},
+		{"PyPI", "4.17"},
+		{"PyPI", "1!2.0"},
+		{"Go", "v1.2.3"},
+		{"Maven", "1.0-SNAPSHOT"},
+	} {
+		v := c[1]
+		assert.False(t, isRange(c[0], v), c)
+		assert.Equal(t, v, Form{Ecosystem: c[0], Version: v}.usage().Version, c)
+		assert.Empty(t, Form{Ecosystem: c[0], Version: v}.usage().Range, c)
 	}
-	for _, v := range []string{"^4.0.0", "~1.2", ">=2,<3", ">1 <2", "1.x", "1.2.X", "*", "1 - 2", "[1.0,2.0)", "1 || 2", "!=1.0"} {
-		assert.True(t, isRange(v), v)
-		assert.Equal(t, v, Form{Version: v}.usage().Range, v)
-		assert.Empty(t, Form{Version: v}.usage().Version, v)
+	for _, c := range [][2]string{
+		{"npm", "^4.0.0"},
+		{"npm", "~1.2"},
+		{"npm", ">=2,<3"},
+		{"npm", ">1 <2"},
+		{"npm", "1.x"},
+		{"npm", "1.2.X"},
+		{"npm", "*"},
+		{"npm", "1"},
+		{"npm", "4.17"},
+		{"npm", "1 - 2"},
+		{"npm", "1 || 2"},
+		{"Maven", "[1.0,2.0)"},
+		{"PyPI", "!=1.0"},
+	} {
+		v := c[1]
+		assert.True(t, isRange(c[0], v), c)
+		assert.Equal(t, v, Form{Ecosystem: c[0], Version: v}.usage().Range, c)
+		assert.Empty(t, Form{Ecosystem: c[0], Version: v}.usage().Version, c)
 	}
+	assert.False(t, isRange("npm", ""))
+}
+
+func TestClip(t *testing.T) {
+	assert.Equal(t, "CVE-1", clip("CVE-1"))
+	long := strings.Repeat("é", 100)
+	got := clip(long)
+	assert.True(t, utf8.ValidString(got))
+	assert.LessOrEqual(t, len(got), 64+len("…"))
+	assert.True(t, strings.HasSuffix(got, "…"))
 }
 
 func TestFormSearched(t *testing.T) {

@@ -44,6 +44,8 @@ func IsArchivedOrgWrite(req *http.Request, owner *user_model.User, exempt ...str
 var ArchivedOrgOpenRoutes = append([]string{
 	"POST /org/{org}/settings/unarchive",
 	"POST /org/{org}/settings/delete",
+	"POST /org/{org}/security/vulnerabilities/export", // a download is audited, it changes nothing
+	"POST /org/{org}/security/dependencies/export",
 	"POST /api/v1/orgs/{org}/unarchive",
 	"DELETE /api/v1/orgs/{org}",
 }, apiv1_permissions.CredentialRevokeRoutes...)
