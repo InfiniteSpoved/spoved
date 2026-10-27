@@ -4,6 +4,7 @@
 package setting
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"forgejo.org/modules/secret"
+	"forgejo.org/modules/setting/config"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -145,6 +147,7 @@ func TestDependencyGraphConfigMerge(t *testing.T) {
 		assert.Empty(t, o.OSVMirrorUser, "Bearer")
 		assert.Equal(t, "10.1.0.0/16", o.OSVMirrorHosts)
 		assert.True(t, o.OSVMirrorHostsFromPage, "a page list: the dial check blocks the internal addresses")
+		assert.True(t, o.OSVMirrorURLFromPage, "a page URL: the dial check blocks the internal addresses")
 		assert.False(t, o.MirrorConfigInvalid)
 		assert.Equal(t, 500, o.MaxManifests, "not stored: app.ini")
 	})
@@ -201,6 +204,7 @@ func TestDependencyGraphConfigMerge(t *testing.T) {
 		assert.Equal(t, "bot", o.OSVMirrorUser)
 		o = DependencyGraphConfig{Source: OSVSourceMirror, MirrorURL: "https://art.example/osv", SignIn: OSVSignInNone}.Merge()
 		assert.Empty(t, o.OSVMirrorToken)
+		assert.False(t, o.OSVMirrorURLFromPage, "app.ini's URL saved again is not from the page")
 	})
 }
 
@@ -237,31 +241,105 @@ func TestDependencyGraphLimits(t *testing.T) {
 }
 
 func TestCheckPageHostList(t *testing.T) {
-	for _, ok := range []string{"", "external", "art.example", "art.example, external", "10.1.2.3", "2001:db8::1", "10.1.0.0/16", "192.168.4.0/24", "2001:db8::/48", "127.0.0.0/16"} {
+	for _, ok := range []string{
+		"", "external", "art.example", "art.example, external", "10.1.2.3", "2001:db8::1", "10.1.0.0/16", "192.168.4.0/24",
+		"2001:db8::/48", "127.0.0.0/16", "::ffff:10.1.0.0/112", "::ffff:10.1.2.3",
+	} {
 		require.NoError(t, CheckPageHostList(ok), ok)
 	}
-	for _, bad := range []string{"*", "*.example", "art?.example", "loopback", "private", "0.0.0.0/0", "10.0.0.0/8", "2001:db8::/32", "bad host", "-x.example", "10.0.0.0/33", "127.0.0.1", "::1", "0.0.0.0", "169.254.169.254", "fe80::1", "localhost", "a.localhost."} {
+	for _, bad := range []string{
+		"*", "*.example", "art?.example", "loopback", "private", "0.0.0.0/0", "10.0.0.0/8", "2001:db8::/32", "bad host",
+		"-x.example", "10.0.0.0/33", "127.0.0.1", "::1", "0.0.0.0", "169.254.169.254", "fe80::1", "localhost", "a.localhost.",
+		// IPv4-mapped networks are IPv4: /96 is all of IPv4, /104 a /8
+		"::ffff:0:0/96", "::ffff:0.0.0.0/96", "::ffff:10.0.0.0/104", "::ffff:0:0/80",
+		// NAT64, 6to4 and Teredo stand for IPv4 addresses
+		"64:ff9b::/96", "64:ff9b::a9fe:a9fe", "64:ff9b:1::/48", "2002::/16", "2002:a9fe:a9fe::/48", "2002:a9fe:a9fe::1", "2001::/32", "2001:0:1::/48",
+		// internal addresses, also inside a network
+		"169.254.0.0/16", "::ffff:169.254.0.0/112", "fd00:ec2::254", "fd00:ec2::/48", "100.100.100.200", "100.100.0.0/16",
+		"168.63.129.16", "168.63.0.0/16", "0.0.0.0/16",
+		// numeric forms the C resolver reads as loopback
+		"127.1", "2130706433", "0177.0.0.1", "0x7f000001", "0",
+	} {
 		assert.Error(t, CheckPageHostList(bad), bad)
 	}
 }
 
+// flipGetter is a settings cache that refreshes (another goroutine) right after the first row was read.
+type flipGetter struct {
+	rev    int
+	values map[int]string
+	flips  bool
+}
+
+func (g *flipGetter) GetValue(ctx context.Context, key string) (string, bool) {
+	v, ok := g.values[g.rev]
+	if g.flips {
+		g.flips = false
+		g.rev++
+	}
+	return v, ok
+}
+func (g *flipGetter) GetRevision(ctx context.Context) int { return g.rev }
+func (g *flipGetter) InvalidateCache()                    {}
+
+func TestDependencyGraphSettingsNeverCachesAnOlderValue(t *testing.T) {
+	defer config.SetDynGetter(config.GetDynGetter())
+	defer func() { mergedDependencyGraph.ok = false }()
+	g := &flipGetter{rev: 900001, values: map[int]string{
+		900001: `{"allowed_hosts":"wide.example"}`,
+		900002: `{"allowed_hosts":"narrow.example"}`,
+	}, flips: true}
+	config.SetDynGetter(g)
+	mergedDependencyGraph.ok = false
+
+	assert.Equal(t, "wide.example", DependencyGraphSettings(t.Context()).OSVMirrorHosts, "the row read during the refresh")
+	assert.Equal(t, 900002, g.rev)
+	assert.Equal(t, "narrow.example", DependencyGraphSettings(t.Context()).OSVMirrorHosts, "the new row, not the old one under the new revision")
+}
+
 func TestInstanceAndLoopbackHosts(t *testing.T) {
-	defer func(app, local, domain, ssh, addr string) {
-		AppURL, LocalURL, Domain, SSH.Domain, HTTPAddr = app, local, domain, ssh, addr
-	}(AppURL, LocalURL, Domain, SSH.Domain, HTTPAddr)
-	AppURL, LocalURL, Domain, SSH.Domain, HTTPAddr = "https://git.example/", "http://10.0.0.5:3000/", "git.example", "ssh.git.example", "10.0.0.5"
-	for _, h := range []string{"git.example", "GIT.example.", "ssh.git.example", "10.0.0.5", "[10.0.0.5]"} {
-		assert.True(t, IsInstanceHost(h), h)
+	defer func(app, local, domain, ssh, addr, port string, sshPort, listenPort int, builtin bool, listen string) {
+		AppURL, LocalURL, Domain, SSH.Domain, HTTPAddr, HTTPPort = app, local, domain, ssh, addr, port
+		SSH.Port, SSH.ListenPort, SSH.StartBuiltinServer, SSH.ListenHost = sshPort, listenPort, builtin, listen
+	}(AppURL, LocalURL, Domain, SSH.Domain, HTTPAddr, HTTPPort, SSH.Port, SSH.ListenPort, SSH.StartBuiltinServer, SSH.ListenHost)
+	AppURL, LocalURL, Domain, SSH.Domain, HTTPAddr, HTTPPort = "https://git.example/", "http://10.0.0.5:3000/", "git.example", "ssh.git.example", "10.0.0.5", "3000"
+	SSH.Port, SSH.ListenPort, SSH.StartBuiltinServer, SSH.ListenHost = 22, 2222, true, "10.0.0.6"
+	for _, h := range []string{"git.example", "GIT.example.", "ssh.git.example", "10.0.0.5", "[10.0.0.5]", "10.0.0.6", "127.0.0.1", "localhost"} {
+		assert.True(t, IsInstanceHost(h, ""), h)
 	}
 	for _, h := range []string{"", "art.example", "example"} {
-		assert.False(t, IsInstanceHost(h), h)
+		assert.False(t, IsInstanceHost(h, ""), h)
 	}
-	for _, h := range []string{"localhost", "LOCALHOST.", "a.localhost", "127.0.0.1", "127.9.9.9", "[::1]", "0.0.0.0", "::"} {
+	for _, hp := range [][2]string{
+		{"git.example", "443"},
+		{"git.example", "3000"},
+		{"10.0.0.5", "3000"},
+		{"ssh.git.example", "22"},
+		{"10.0.0.6", "2222"},
+		{"127.0.0.1", "3000"},
+		{"[::1]", "3000"},
+		{"::ffff:127.0.0.1", "3000"},
+		{"localhost", "2222"},
+		{"0.0.0.0", "3000"},
+	} {
+		assert.True(t, IsInstanceHost(hp[0], hp[1]), hp)
+	}
+	for _, hp := range [][2]string{{"git.example", "4318"}, {"10.0.0.5", "4318"}, {"localhost", "4318"}, {"127.0.0.1", "4318"}, {"art.example", "3000"}} {
+		assert.False(t, IsInstanceHost(hp[0], hp[1]), hp)
+	}
+	for _, h := range []string{
+		"localhost", "LOCALHOST.", "a.localhost", "127.0.0.1", "127.9.9.9", "[::1]", "0.0.0.0", "::",
+		"127.1", "2130706433", "0177.0.0.1", "0x7f000001", "0", "0x7f.1",
+	} {
 		assert.True(t, IsLoopbackHost(h), h)
 	}
-	for _, h := range []string{"art.example", "10.0.0.1", "localhost.example"} {
+	for _, h := range []string{"art.example", "10.0.0.1", "localhost.example", "", "0xcafe.example", "123.example"} {
 		assert.False(t, IsLoopbackHost(h), h)
 	}
-	assert.Contains(t, MirrorBlockedHosts(), "169.254.0.0/16")
-	assert.Contains(t, MirrorBlockedHosts(), "10.0.0.5", "the address this instance listens on")
+	blocked := MirrorBlockedHosts()
+	for _, h := range []string{"loopback", "169.254.0.0/16", "fd00:ec2::254/128", "100.100.100.200/32", "168.63.129.16/32"} {
+		assert.Contains(t, blocked, h)
+	}
+	assert.Contains(t, blocked, "10.0.0.5", "the address the HTTP server listens on")
+	assert.Contains(t, blocked, "10.0.0.6", "the address the built-in SSH server listens on")
 }

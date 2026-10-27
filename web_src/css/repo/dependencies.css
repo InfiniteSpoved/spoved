@@ -229,6 +229,12 @@
   opacity: 1;
 }
 
+/* the auditor's source and sign-in, as text */
+.dependency-graph-settings .dg-summary > strong {
+  display: block;
+  margin-bottom: 0.25em;
+}
+
 @media (max-width: 767.98px) {
   /* tap targets of at least 44px: the whole label of an option, and the button */
   .dependency-graph-switch .ui.checkbox {

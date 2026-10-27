@@ -45,14 +45,8 @@ func GetRevision(ctx context.Context) int {
 	if err != nil {
 		return 0
 	} else if !exist {
-		// Concurrent first callers may all get here: insert only if absent (an error would also abort a PostgreSQL
-		// transaction), then read whichever row was stored.
-		insert := "INSERT INTO system_setting (setting_key, setting_value, version, created, updated) VALUES (?, '', 1, ?, ?) ON CONFLICT (setting_key) DO NOTHING"
-		if setting.Database.Type.IsMySQL() {
-			insert = "INSERT IGNORE INTO system_setting (setting_key, setting_value, version, created, updated) VALUES (?, '', 1, ?, ?)"
-		}
-		now := timeutil.TimeStampNow()
-		if _, err = db.Exec(ctx, insert, keyRevision, now, now); err != nil {
+		// Concurrent first callers may all get here: insert only if absent, then read whichever row was stored.
+		if err = EnsureSetting(ctx, keyRevision); err != nil {
 			return 0
 		}
 		if revision, exist, err = db.Get[Setting](ctx, builder.Eq{"setting_key": keyRevision}); err != nil || !exist {
@@ -88,6 +82,19 @@ func GetAllSettings(ctx context.Context) (revision int, res map[string]string, e
 
 // GetSettingForUpdate returns the stored value of key (has = false when it isn't stored) and, inside a transaction,
 // locks its row until the transaction ends, so that a read-modify-write of the value can't lose a concurrent one.
+// EnsureSetting stores key with an empty value unless it exists, so that GetSettingForUpdate has a row to lock on the
+// first save too. Concurrent callers don't fail: the insert does nothing on a conflict (a failed statement would also
+// abort a PostgreSQL transaction).
+func EnsureSetting(ctx context.Context, key string) error {
+	insert := "INSERT INTO system_setting (setting_key, setting_value, version, created, updated) VALUES (?, '', 1, ?, ?) ON CONFLICT (setting_key) DO NOTHING"
+	if setting.Database.Type.IsMySQL() {
+		insert = "INSERT IGNORE INTO system_setting (setting_key, setting_value, version, created, updated) VALUES (?, '', 1, ?, ?)"
+	}
+	now := timeutil.TimeStampNow()
+	_, err := db.Exec(ctx, insert, key, now, now)
+	return err
+}
+
 func GetSettingForUpdate(ctx context.Context, key string) (value string, has bool, err error) {
 	if _, err := db.Exec(ctx, "UPDATE system_setting SET version=version WHERE setting_key=?", key); err != nil {
 		return "", false, err

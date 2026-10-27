@@ -127,11 +127,14 @@ func TestDependencyGraphSettingsAdmin(t *testing.T) {
 				"own host":                    {map[string]string{"mirror_url": setting.AppURL + "osv"}, "dg-mirror_url", "points to this instance"},
 				"loopback":                    {map[string]string{"mirror_url": "https://127.0.0.1:8443/osv"}, "dg-mirror_url", "points to this instance or to localhost"},
 				"token over http":             {map[string]string{"mirror_url": "http://art.example/osv"}, "dg-mirror_url", "sent only over https"},
-				"out of range":                {map[string]string{"update_interval": "721"}, "dg-update_interval", "Update every must be 1 to 720"},
+				"out of range":                {map[string]string{"update_interval": "721"}, "dg-update_interval", "Update every must be 1 to 720 hours."},
 				"scans at once":               {map[string]string{"max_concurrent_scans": "17"}, "dg-max_concurrent_scans", "Scans at once must be 1 to 16"},
-				"largest lock file":           {map[string]string{"max_manifest_size": "100.5"}, "dg-max_manifest_size", "Largest lock file must be more than 0 and at most 100"},
+				"largest lock file":           {map[string]string{"max_manifest_size": "100.5"}, "dg-max_manifest_size", "Largest lock file must be more than 0 and at most 100 MiB."},
 				"a count with decimals":       {map[string]string{"max_manifests": "1.5"}, "dg-max_manifests", "Lock files per repository: the value can"},
 				"page host list too wide":     {map[string]string{"allowed_hosts": "*"}, "dg-allowed_hosts", "Hosts the mirror may be on: only exact host names"},
+				"cloud metadata host":         {map[string]string{"allowed_hosts": "fd00:ec2::254"}, "dg-allowed_hosts", "never internal or cloud metadata addresses"},
+				"IPv4-mapped network":         {map[string]string{"allowed_hosts": "::ffff:0:0/96"}, "dg-allowed_hosts", "Hosts the mirror may be on: only exact host names"},
+				"numeric loopback":            {map[string]string{"mirror_url": "https://127.1:8443/osv"}, "dg-mirror_url", "points to this instance or to localhost"},
 				"basic without a user":        {map[string]string{"sign_in": "basic"}, "dg-user", "Basic sign-in needs a username"},
 			} {
 				t.Run(name, func(t *testing.T) {
@@ -142,7 +145,9 @@ func TestDependencyGraphSettingsAdmin(t *testing.T) {
 					body := resp.Body.String()
 					assert.NotContains(t, body, token, "the token is never sent back")
 					doc := NewHTMLParser(t, bytes.NewBufferString(body))
-					assert.Contains(t, doc.Find("#dg-save-error[role=alert]").Text(), c.message)
+					assert.Contains(t, doc.Find("#dg-form-error[role=alert][tabindex='-1']").Text(), c.message, "at the top of the form")
+					doc.AssertElement(t, "#dg-form-error[autofocus]", false) // the field gets the focus
+					assert.Contains(t, doc.Find("#dg-save-error").Text(), c.message, "and next to Save")
 					input := doc.Find("#" + c.field)
 					assert.Equal(t, "true", input.AttrOr("aria-invalid", ""))
 					assert.Contains(t, input.AttrOr("aria-describedby", ""), c.field+"-error")
@@ -155,10 +160,29 @@ func TestDependencyGraphSettingsAdmin(t *testing.T) {
 						}
 					}
 					if values["token"] != "" {
-						assert.Contains(t, doc.Find("#dg-token-again").Text(), "Enter the token again")
+						assert.Equal(t, "Enter the token again (it was not saved).", strings.TrimSpace(doc.Find("#dg-token-again").Text()))
+						assert.Equal(t, "Leave empty to keep the saved token", doc.Find("#dg-token").AttrOr("placeholder", ""))
 					}
 				})
 			}
+
+			t.Run("the posted switch, remove token and hidden fields", func(t *testing.T) {
+				require.NotEmpty(t, setting.DependencyGraphSettings(t.Context()).OSVMirrorToken)
+				values := maps.Clone(form)
+				values["token"], values["remove_token"], values["enabled_shown"], values["max_concurrent_scans"] = "", "on", "1", "17"
+				delete(values, "enabled")
+				doc := NewHTMLParser(t, post(admin, page+"/settings", values, http.StatusUnprocessableEntity).Body)
+				doc.AssertElement(t, "#dependency-graph-enabled[checked]", false) // the switch as posted
+				doc.AssertElement(t, "#dg-remove-token[checked]", true)           // the tick as posted
+				doc.AssertElement(t, "#dg-remove-token[disabled]", false)
+				doc.AssertElement(t, "#dg-remove-token-field.tw-hidden", false)
+
+				// a refused host list under None: the download fields are never hidden by the server
+				values = map[string]string{"source": "none", "allowed_hosts": "private"}
+				doc = NewHTMLParser(t, post(admin, page+"/settings", values, http.StatusUnprocessableEntity).Body)
+				doc.AssertElement(t, "#dg-download-fields.tw-hidden", false)
+				doc.AssertElement(t, "#dg-download-fields #dg-allowed_hosts[aria-invalid=true][autofocus]", true)
+			})
 
 			t.Run("a refused field in a fold opens it", func(t *testing.T) {
 				values := maps.Clone(form)
@@ -181,6 +205,8 @@ func TestDependencyGraphSettingsAdmin(t *testing.T) {
 				values["token"], values["revision"] = "", shown
 				doc = NewHTMLParser(t, post(admin, page+"/settings", values, http.StatusUnprocessableEntity).Body)
 				assert.Contains(t, doc.Find("#dg-save-error").Text(), "Someone else changed these settings; review and save again")
+				msg := doc.Find("#dg-form-error[role=alert][tabindex='-1'][autofocus]")
+				assert.Contains(t, msg.Text(), "Someone else changed these settings", "no field: the message at the top takes the focus")
 				assert.Equal(t, changed, stored())
 				assert.Equal(t, "2", doc.Find("#dg-max_concurrent_scans").AttrOr("value", ""), "the posted values")
 				// saved again from the new form, on purpose
@@ -414,7 +440,11 @@ func TestDependencyGraphSettingsAdmin(t *testing.T) {
 			}()
 			doc := NewHTMLParser(t, loginUser(t, "user8").MakeRequest(t, NewRequest(t, "GET", page), http.StatusOK).Body)
 			doc.AssertElement(t, "fieldset[disabled] #dg-update_interval", true)
-			doc.AssertElement(t, "fieldset[disabled] #dg-source-mirror", true)
+			doc.AssertElement(t, "#dg-source-mirror", false) // the source as text, not as faded radios
+			doc.AssertElement(t, `input[name="sign_in"]`, false)
+			assert.Contains(t, doc.Find("#dg-source-summary").Text(), "A mirror or proxy")
+			assert.Equal(t, "mirror", doc.Find("#dg-source-summary").AttrOr("data-source", ""))
+			assert.Contains(t, doc.Find("#dg-sign-in-summary").Text(), "Access token (Bearer)")
 			assert.Contains(t, doc.Find("#dg-read-only").Text(), "Read-only: only site administrators can change these settings")
 			assert.Equal(t, "A token is saved.", doc.Find("#dg-token").AttrOr("placeholder", ""))
 			doc.AssertElement(t, "#dependency-graph-save", false)

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -51,6 +52,9 @@ type DependencyGraphOptions struct {
 	// OSVMirrorHostsFromPage marks a host list saved in Site administration: it is narrower by rule
 	// (CheckPageHostList), and the mirror's dial check also blocks the internal addresses (MirrorBlockedHosts).
 	OSVMirrorHostsFromPage bool
+	// OSVMirrorURLFromPage marks a mirror URL saved in Site administration (other than app.ini's): the mirror's dial
+	// check blocks the internal addresses then too, so a DNS name of this machine is refused when it is dialled.
+	OSVMirrorURLFromPage bool
 }
 
 // DependencyGraph is the [dependency_graph] section of app.ini, the defaults of DependencyGraphSettings.
@@ -383,8 +387,9 @@ var mergedDependencyGraph struct {
 // DependencyGraphSettings is the dependency graph configuration in force: the values saved in Site administration
 // over app.ini. Read it before building a query, never while one is being built.
 func DependencyGraphSettings(ctx context.Context) DependencyGraphOptions {
-	stored := Config().DependencyGraphConfig.Value(ctx) // outside the lock: it may query the database
+	// the revision first: a value read after it is never older than its key (a newer one is merged again next time)
 	revision := config.GetDynGetter().GetRevision(ctx)
+	stored := Config().DependencyGraphConfig.Value(ctx) // outside the lock: it may query the database
 	m := &mergedDependencyGraph
 	m.Lock()
 	defer m.Unlock()
@@ -429,6 +434,7 @@ func (c DependencyGraphConfig) Merge() DependencyGraphOptions {
 			log.Error("dependency_graph.config: the mirror URL %v, the mirror is off", err)
 			o.MirrorConfigInvalid = true
 		} else {
+			o.OSVMirrorURLFromPage = u != o.OSVMirrorURL
 			o.OSVMirrorURL = u
 		}
 	default:
@@ -486,12 +492,14 @@ func (c DependencyGraphConfig) Merge() DependencyGraphOptions {
 
 // CheckPageHostList checks a host list saved in Site administration, which may only name what to download from:
 // exact host names (no wildcard, not localhost), single IP addresses (not loopback, link-local or unspecified),
-// networks no wider than /16 (IPv4) or /48 (IPv6), and "external". The wider app.ini syntax (private, loopback,
-// patterns) stays in OSV_MIRROR_ALLOWED_HOSTS. A network may still contain internal addresses: the mirror's dial
-// check blocks those (MirrorBlockedHosts).
+// networks no wider than /16 (IPv4) or /48 (IPv6), and "external". An IPv4-mapped network (::ffff:a.b.c.d/n) counts
+// as IPv4, and nothing may touch the internal addresses (mirrorInternalNets) or the IPv6 forms of IPv4 (NAT64, 6to4,
+// Teredo). The wider app.ini syntax (private, loopback, patterns) stays in OSV_MIRROR_ALLOWED_HOSTS. A network may
+// still contain loopback or this machine's addresses: the mirror's dial check blocks those (MirrorBlockedHosts).
 func CheckPageHostList(list string) error {
 	for entry := range strings.SplitSeq(list, ",") {
 		entry = strings.ToLower(strings.TrimSpace(entry))
+		var n *net.IPNet
 		switch {
 		case entry == "", entry == "external":
 			continue
@@ -500,21 +508,65 @@ func CheckPageHostList(list string) error {
 			if err != nil {
 				return fmt.Errorf("%q is not a network", entry)
 			}
-			ones, bits := ipNet.Mask.Size()
+			n = ipv4Form(ipNet)
+			ones, bits := n.Mask.Size()
 			if bits == 32 && ones < 16 || bits == 128 && ones < 48 {
 				return fmt.Errorf("%q is wider than /16 (IPv4) or /48 (IPv6)", entry)
 			}
 		case net.ParseIP(strings.Trim(entry, "[]")) != nil:
-			if ip := net.ParseIP(strings.Trim(entry, "[]")); ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() {
+			ip := net.ParseIP(strings.Trim(entry, "[]"))
+			if ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() {
 				return fmt.Errorf("%q is a loopback, link-local or unspecified address", entry)
 			}
+			n = ipv4Form(&net.IPNet{IP: ip, Mask: net.CIDRMask(8*len(ip), 8*len(ip))})
 		default:
 			if entry == "private" || entry == "loopback" || !isHostName(entry) || IsLoopbackHost(entry) {
 				return fmt.Errorf("%q is not a host name, address, network or external", entry)
 			}
+			continue
+		}
+		for _, internal := range mirrorInternalNets {
+			if _, in, _ := net.ParseCIDR(internal); netsOverlap(n, ipv4Form(in)) {
+				return fmt.Errorf("%q is or contains an internal address (link-local, cloud metadata or unspecified)", entry)
+			}
+		}
+		if len(n.IP) == net.IPv6len {
+			for _, embedded := range ipv6FormsOfIPv4 {
+				if _, in, _ := net.ParseCIDR(embedded); netsOverlap(n, in) {
+					return fmt.Errorf("%q is an IPv6 form of IPv4 addresses (NAT64, 6to4, Teredo or IPv4-mapped), name the IPv4 address or network", entry)
+				}
+			}
 		}
 	}
 	return nil
+}
+
+// mirrorInternalNets are the internal addresses a host list saved in Site administration never names or reaches:
+// link-local (169.254.169.254 is the metadata service of most clouds), the unspecified addresses, and the cloud
+// metadata services outside link-local: AWS over IPv6 (fd00:ec2::254), Alibaba Cloud (100.100.100.200) and the
+// Azure WireServer (168.63.129.16).
+var mirrorInternalNets = []string{
+	"169.254.0.0/16", "fe80::/10", "0.0.0.0/8", "::/128",
+	"fd00:ec2::254/128", "100.100.100.200/32", "168.63.129.16/32",
+}
+
+// ipv6FormsOfIPv4 are the IPv6 networks that stand for IPv4 addresses: IPv4-mapped (an entry inside it is read as
+// IPv4 by ipv4Form, so only a wider one meets it), NAT64 (RFC 6052, RFC 8215), 6to4 and Teredo.
+var ipv6FormsOfIPv4 = []string{"::ffff:0:0/96", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16", "2001::/32"}
+
+// ipv4Form returns an IPv4-mapped network (::ffff:a.b.c.d/n, n >= 96) as the IPv4 network it stands for, which is
+// also how net.IPNet.Contains (and so the dial check) reads it; any other network is returned as it is.
+func ipv4Form(n *net.IPNet) *net.IPNet {
+	ones, bits := n.Mask.Size()
+	if ip4 := n.IP.To4(); ip4 != nil && bits == 128 && ones >= 96 {
+		return &net.IPNet{IP: ip4, Mask: net.CIDRMask(ones-96, 32)}
+	}
+	return n
+}
+
+// netsOverlap reports whether two networks share an address (networks of one family either nest or are apart).
+func netsOverlap(a, b *net.IPNet) bool {
+	return len(a.IP) == len(b.IP) && (a.Contains(b.IP) || b.Contains(a.IP))
 }
 
 // isHostName accepts an exact DNS name: labels of letters, digits and hyphens.
@@ -535,14 +587,25 @@ func isHostName(s string) bool {
 	return true
 }
 
-// MirrorBlockedHosts is what a host list saved in Site administration never reaches, whatever it names: loopback,
-// link-local (cloud metadata), unspecified addresses and the addresses this instance listens on.
+// MirrorBlockedHosts is what the mirror never reaches when its URL or host list was saved in Site administration,
+// whatever the list names: loopback, the internal addresses (mirrorInternalNets) and the addresses this instance's
+// HTTP and built-in SSH servers listen on (every address of this machine when one listens on all of them).
 func MirrorBlockedHosts() string {
-	blocked := []string{"loopback", "169.254.0.0/16", "fe80::/10", "0.0.0.0/8", "::/128"}
-	if ip := net.ParseIP(HTTPAddr); ip != nil && !ip.IsUnspecified() {
-		blocked = append(blocked, ip.String())
-	} else if addrs, err := net.InterfaceAddrs(); err == nil {
-		for _, a := range addrs { // listening on every address: every address of this machine
+	blocked := append([]string{"loopback"}, mirrorInternalNets...)
+	allAddrs := false
+	listen := []string{HTTPAddr}
+	if SSH.StartBuiltinServer {
+		listen = append(listen, SSH.ListenHost)
+	}
+	for _, addr := range listen {
+		if ip := net.ParseIP(addr); ip != nil && !ip.IsUnspecified() {
+			blocked = append(blocked, ip.String())
+		} else {
+			allAddrs = true // a name or an unspecified address: assume every address
+		}
+	}
+	if addrs, err := net.InterfaceAddrs(); allAddrs && err == nil {
+		for _, a := range addrs {
 			if n, ok := a.(*net.IPNet); ok {
 				blocked = append(blocked, n.IP.String())
 			}
@@ -551,33 +614,77 @@ func MirrorBlockedHosts() string {
 	return strings.Join(blocked, ",")
 }
 
-// IsInstanceHost reports whether host names this instance: the host of AppURL or LocalURL, the domain, the SSH
-// domain or the HTTP address (any case, a trailing dot ignored). Log shipping and the advisory mirror refuse it.
-func IsInstanceHost(host string) bool {
-	host = strings.TrimSuffix(strings.Trim(host, "[]"), ".")
+// IsInstanceHost reports whether host (and port: "" means any port) names this instance: the host and port of
+// AppURL or LocalURL, the domain, the HTTP address or a loopback or unspecified address on the HTTP port, and the SSH
+// domain or listen address on the SSH port (any case, a trailing dot ignored). Log shipping (with the endpoint's port)
+// and the advisory mirror (any port) refuse it.
+func IsInstanceHost(host, port string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
 	if host == "" {
 		return false
 	}
-	self := []string{Domain, SSH.Domain, HTTPAddr}
+	type hostPort struct{ host, port string }
+	self := []hostPort{{HTTPAddr, HTTPPort}, {SSH.Domain, strconv.Itoa(SSH.Port)}}
+	if SSH.StartBuiltinServer {
+		self = append(self, hostPort{SSH.ListenHost, strconv.Itoa(SSH.ListenPort)})
+	}
 	for _, raw := range []string{AppURL, LocalURL} {
 		if u, err := url.Parse(raw); err == nil {
-			self = append(self, u.Hostname())
+			p := URLPort(u)
+			self = append(self, hostPort{u.Hostname(), p}, hostPort{Domain, p}) // the domain is served there too
 		}
 	}
-	for _, h := range self {
-		if h = strings.TrimSuffix(h, "."); h != "" && strings.EqualFold(h, host) {
+	self = append(self, hostPort{Domain, HTTPPort})
+	if IsLoopbackHost(host) {
+		self = append(self, hostPort{host, HTTPPort})
+		if SSH.StartBuiltinServer {
+			self = append(self, hostPort{host, strconv.Itoa(SSH.ListenPort)})
+		}
+	}
+	for _, s := range self {
+		if h := strings.TrimSuffix(strings.Trim(s.host, "[]"), "."); h != "" && strings.EqualFold(h, host) && (port == "" || port == s.port) {
 			return true
 		}
 	}
 	return false
 }
 
-// IsLoopbackHost reports whether host is "localhost" (or a name under it), or a loopback or unspecified address.
+// URLPort is the port of u, or the default port of its scheme (http, https).
+func URLPort(u *url.URL) string {
+	if p := u.Port(); p != "" || u.Scheme != "http" && u.Scheme != "https" {
+		return p
+	}
+	if u.Scheme == "http" {
+		return "80"
+	}
+	return "443"
+}
+
+// IsLoopbackHost reports whether host is "localhost" (or a name under it), a loopback or unspecified address, or a
+// numeric form the C resolver reads as an address (127.1, 2130706433, 0177.0.0.1, 0x7f000001): no real name looks
+// like one, so it is refused as if it were loopback.
 func IsLoopbackHost(host string) bool {
 	host = strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return true
 	}
 	ip := net.ParseIP(host)
-	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
+	if ip == nil {
+		return isNumericHost(host)
+	}
+	return ip.IsLoopback() || ip.IsUnspecified()
+}
+
+// isNumericHost reports whether every label of host is decimal or 0x hexadecimal: the inet_aton forms.
+func isNumericHost(host string) bool {
+	for label := range strings.SplitSeq(host, ".") {
+		if hex, ok := strings.CutPrefix(label, "0x"); ok {
+			if strings.TrimLeft(hex, "0123456789abcdef") != "" {
+				return false
+			}
+		} else if label == "" || strings.TrimLeft(label, "0123456789") != "" {
+			return false
+		}
+	}
+	return true
 }

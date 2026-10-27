@@ -39,6 +39,9 @@ func renderDependencyGraph(ctx *context.Context, form dependencyGraphFormData, s
 	s := setting.Config().DependencyGraph.Value(ctx)
 	stored := setting.Config().DependencyGraphConfig.Value(ctx)
 	ctx.Data["Enabled"] = s.Enabled()
+	if form.PostedEnabled != nil {
+		ctx.Data["Enabled"] = *form.PostedEnabled // a refused save shows the switch as posted
+	}
 	ctx.Data["FileDefault"] = setting.DependencyGraph.Enabled
 	// the later of the two saves: the switch and the settings
 	by, at := s.UpdatedBy, s.UpdatedUnix
@@ -96,6 +99,9 @@ type dependencyGraphFormData struct {
 	ErrorField   string
 	ErrorMessage template.HTML
 	TokenAgain   bool // a token was entered: it isn't shown again
+	RemoveToken  bool // "Remove the token" was ticked
+	// the site switch as posted, when it was
+	PostedEnabled *bool
 }
 
 // Open reports whether the fold holding the refused field is open.
@@ -316,6 +322,11 @@ func refuseDependencyGraphSettings(ctx *context.Context, field string, msg templ
 	}
 	f.MirrorURL.Value, f.User.Value, f.Hosts.Value = ctx.FormString("mirror_url"), ctx.FormString("user"), ctx.FormString("allowed_hosts")
 	f.TokenAgain = strings.TrimSpace(ctx.FormString("token")) != ""
+	f.RemoveToken = ctx.FormBool("remove_token")
+	if ctx.FormString("enabled_shown") != "" {
+		on := ctx.FormBool("enabled")
+		f.PostedEnabled = &on
+	}
 	f.ErrorField, f.ErrorMessage = field, msg
 	renderDependencyGraph(ctx, f, http.StatusUnprocessableEntity)
 }
@@ -326,10 +337,14 @@ func dependencyGraphSettingsError(ctx *context.Context, e *vulnerability_service
 	switch e.Reason {
 	case vulnerability_service.SettingsOutOfRange:
 		l, _ := setting.DependencyGraphLimitByName(e.Field)
-		if unit := dependencyGraphFormUnits[e.Field]; unit > 1 && l.Min < unit {
-			return ctx.Tr("admin.dependency_graph.settings.error.out_of_range_max", field, dependencyGraphLimitText(e.Field, l.Max))
+		maxText := dependencyGraphLimitText(e.Field, l.Max)
+		if unit := dependencyGraphUnitLabel(ctx, e.Field); unit != "" {
+			maxText += " " + unit
 		}
-		return ctx.Tr("admin.dependency_graph.settings.error.out_of_range", field, dependencyGraphLimitText(e.Field, l.Min), dependencyGraphLimitText(e.Field, l.Max))
+		if unit := dependencyGraphFormUnits[e.Field]; unit > 1 && l.Min < unit {
+			return ctx.Tr("admin.dependency_graph.settings.error.out_of_range_max", field, maxText)
+		}
+		return ctx.Tr("admin.dependency_graph.settings.error.out_of_range", field, dependencyGraphLimitText(e.Field, l.Min), maxText)
 	case vulnerability_service.SettingsOwnHost:
 		return ctx.Tr("admin.dependency_graph.settings.error.own_host")
 	case vulnerability_service.SettingsTokenRequired:
@@ -344,6 +359,21 @@ func dependencyGraphSettingsError(ctx *context.Context, e *vulnerability_service
 		return ctx.Tr("admin.dependency_graph.settings.error.token_needs_https")
 	}
 	return ctx.Tr("admin.dependency_graph.settings.error.invalid", field)
+}
+
+// dependencyGraphUnitLabel is the unit of a limit in the form ("" for a count), as the form shows it.
+func dependencyGraphUnitLabel(ctx *context.Context, name string) string {
+	switch dependencyGraphFormUnits[name] {
+	case 1:
+		return ctx.Locale.TrString("admin.dependency_graph.settings.unit.seconds")
+	case 60:
+		return ctx.Locale.TrString("admin.dependency_graph.settings.unit.minutes")
+	case 3600:
+		return ctx.Locale.TrString("admin.dependency_graph.settings.unit.hours")
+	case 1 << 20:
+		return ctx.Locale.TrString("admin.dependency_graph.settings.unit.mib")
+	}
+	return ""
 }
 
 // dependencyGraphFieldLabel is the label of a field of the settings form.

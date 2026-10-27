@@ -9,6 +9,7 @@
 			{{$f := .Form}}
 			{{if not .CanChange}}<p class="ui info message" id="dg-read-only">{{ctx.Locale.Tr "admin.dependency_graph.settings.read_only"}}</p>{{end}}
 			<form class="ui form dependency-graph-switch dependency-graph-settings" action="{{AppSubUrl}}/admin/config/dependency-graph/settings" method="post" novalidate{{if $f.ErrorMessage}} data-unsaved{{end}}>
+				{{if $f.ErrorMessage}}<div class="ui negative message" id="dg-form-error" role="alert" tabindex="-1"{{if not $f.ErrorField}} autofocus{{end}}>{{$f.ErrorMessage}}</div>{{end}}
 				<fieldset{{if not .CanChange}} disabled class="dg-read-only"{{end}}>
 				<input type="hidden" name="enabled_shown" value="1">
 				<input type="hidden" name="revision" value="{{$f.Revision}}">
@@ -41,6 +42,7 @@
 				</details>
 
 				<h5 class="dg-section">{{ctx.Locale.Tr "admin.dependency_graph.settings.advisory_database"}}</h5>
+				{{if .CanChange}}
 				<div class="grouped fields{{if eq $f.ErrorField "source"}} error{{end}}" role="radiogroup" aria-labelledby="dg-source-label">
 					<label id="dg-source-label">{{ctx.Locale.Tr "admin.dependency_graph.settings.source"}}</label>
 					<div class="field"><div class="ui radio checkbox">
@@ -55,13 +57,20 @@
 						<input id="dg-source-none" type="radio" name="source" value="none"{{if eq $f.Source "none"}} checked{{end}}>
 						<label for="dg-source-none">{{ctx.Locale.Tr "admin.dependency_graph.settings.source_none"}}</label>
 					</div></div>
-					{{if $f.SourceDefault}}<p class="help dg-app-default">{{if eq $f.SourceDefault "public"}}{{ctx.Locale.Tr "admin.dependency_graph.settings.app_default" (ctx.Locale.Tr "admin.dependency_graph.settings.source_public")}}{{else if eq $f.SourceDefault "mirror"}}{{ctx.Locale.Tr "admin.dependency_graph.settings.app_default" (ctx.Locale.Tr "admin.dependency_graph.settings.source_mirror")}}{{else}}{{ctx.Locale.Tr "admin.dependency_graph.settings.app_default" (ctx.Locale.Tr "admin.dependency_graph.settings.source_none_short")}}{{end}}</p>{{end}}
+					{{template "admin/dependency_graph_source_default" $f}}
 					{{if eq $f.ErrorField "source"}}<p class="dg-error" id="dg-source-error">{{$f.ErrorMessage}}</p>{{end}}
 				</div>
+				{{else}}
+				<div class="field dg-summary" id="dg-source-summary" data-source="{{$f.Source}}">
+					<strong>{{ctx.Locale.Tr "admin.dependency_graph.settings.source"}}</strong>
+					<div>{{if eq $f.Source "public"}}{{ctx.Locale.Tr "admin.dependency_graph.settings.source_public"}} <span class="text grey">{{.DefaultOSVMirrorURL}}</span>{{else if eq $f.Source "mirror"}}{{ctx.Locale.Tr "admin.dependency_graph.settings.source_mirror"}}{{else}}{{ctx.Locale.Tr "admin.dependency_graph.settings.source_none_short"}}{{end}}</div>
+					{{template "admin/dependency_graph_source_default" $f}}
+				</div>
+				{{end}}
 				{{if and $f.TokenSaved .CanChange}}<div class="field{{if eq $f.Source "mirror"}} tw-hidden{{end}}" id="dg-token-unused">
 					<p class="help">{{ctx.Locale.Tr "admin.dependency_graph.settings.token_unused"}}</p>
 					<div class="ui checkbox">
-						<input id="dg-remove-token-unused" name="remove_token" type="checkbox">
+						<input id="dg-remove-token-unused" name="remove_token" type="checkbox"{{if $f.RemoveToken}} checked{{end}}{{if eq $f.Source "mirror"}} disabled{{end}}>
 						<label for="dg-remove-token-unused">{{ctx.Locale.Tr "admin.dependency_graph.settings.remove_token"}}</label>
 					</div>
 				</div>{{end}}
@@ -74,6 +83,7 @@
 						{{if $invalid}}<p class="dg-error" id="dg-mirror_url-error">{{$f.ErrorMessage}}</p>{{end}}
 						<p class="help" id="dg-mirror_url-help">{{ctx.Locale.Tr "admin.dependency_graph.settings.mirror_url_help" (HTMLFormat "<code>%s</code>" "<URL>/<ecosystem>/all.zip") (HTMLFormat "<code>%s</code>" "…/npm/all.zip")}}{{if $f.MirrorURL.Default}} <span class="dg-app-default">{{ctx.Locale.Tr "admin.dependency_graph.settings.app_default" $f.MirrorURL.Default}}</span>{{end}}</p>
 					</div>
+					{{if .CanChange}}
 					{{$invalid = eq $f.ErrorField "sign_in"}}
 					<div class="grouped fields{{if $invalid}} error{{end}}" role="radiogroup" aria-labelledby="dg-sign-in-label">
 						<label id="dg-sign-in-label">{{ctx.Locale.Tr "admin.dependency_graph.settings.sign_in"}}</label>
@@ -91,6 +101,12 @@
 						</div></div>
 						{{if $invalid}}<p class="dg-error" id="dg-sign_in-error">{{$f.ErrorMessage}}</p>{{end}}
 					</div>
+					{{else}}
+					<div class="field dg-summary" id="dg-sign-in-summary" data-sign-in="{{$f.SignIn}}">
+						<strong>{{ctx.Locale.Tr "admin.dependency_graph.settings.sign_in"}}</strong>
+						<div>{{if eq $f.SignIn "token"}}{{ctx.Locale.Tr "admin.dependency_graph.settings.sign_in_token"}}{{else if eq $f.SignIn "basic"}}{{ctx.Locale.Tr "admin.dependency_graph.settings.sign_in_basic"}}{{else}}{{ctx.Locale.Tr "admin.dependency_graph.settings.sign_in_none"}}{{end}}</div>
+					</div>
+					{{end}}
 					{{$invalid = eq $f.ErrorField "user"}}
 					<div class="field{{if $invalid}} error{{end}}" id="dg-user-field">
 						<label for="dg-user">{{ctx.Locale.Tr "admin.dependency_graph.settings.user"}}</label>
@@ -101,14 +117,14 @@
 					{{$invalid = eq $f.ErrorField "token"}}
 					<div class="field{{if $invalid}} error{{end}}" id="dg-token-field">
 						<label for="dg-token" data-label-token="{{ctx.Locale.Tr "admin.dependency_graph.settings.token"}}" data-label-basic="{{ctx.Locale.Tr "admin.dependency_graph.settings.token_basic"}}">{{if eq $f.SignIn "basic"}}{{ctx.Locale.Tr "admin.dependency_graph.settings.token_basic"}}{{else}}{{ctx.Locale.Tr "admin.dependency_graph.settings.token"}}{{end}}</label>
-						<input id="dg-token" name="token" type="password" value="" autocomplete="new-password" maxlength="1024"{{if $f.HasToken}} placeholder="{{if .CanChange}}{{ctx.Locale.Tr "admin.dependency_graph.settings.token_saved"}}{{else}}{{ctx.Locale.Tr "admin.dependency_graph.settings.token_saved_read_only"}}{{end}}"{{end}} aria-describedby="dg-token-help{{if $f.TokenAgain}} dg-token-again{{end}}{{if $invalid}} dg-token-error{{end}}"{{if $invalid}} aria-invalid="true" autofocus{{end}}>
+						<input id="dg-token" name="token" type="password" value="" autocomplete="new-password" maxlength="1024"{{if $f.HasToken}} placeholder="{{if not .CanChange}}{{ctx.Locale.Tr "admin.dependency_graph.settings.token_saved_read_only"}}{{else if $f.TokenAgain}}{{ctx.Locale.Tr "admin.dependency_graph.settings.token_keep"}}{{else}}{{ctx.Locale.Tr "admin.dependency_graph.settings.token_saved"}}{{end}}"{{end}} aria-describedby="dg-token-help{{if $f.TokenAgain}} dg-token-again{{end}}{{if $invalid}} dg-token-error{{end}}"{{if $invalid}} aria-invalid="true" autofocus{{end}}>
 						{{if $invalid}}<p class="dg-error" id="dg-token-error">{{$f.ErrorMessage}}</p>{{end}}
 						{{if $f.TokenAgain}}<p class="dg-error" id="dg-token-again">{{ctx.Locale.Tr "admin.dependency_graph.settings.token_again"}}</p>{{end}}
 						<p class="help" id="dg-token-help">{{ctx.Locale.Tr "admin.dependency_graph.settings.token_help"}}</p>
 					</div>
-					{{if and $f.HasToken .CanChange}}<div class="field" id="dg-remove-token-field">
+					{{if and $f.HasToken .CanChange}}<div class="field{{if ne $f.Source "mirror"}} tw-hidden{{end}}" id="dg-remove-token-field">
 						<div class="ui checkbox">
-							<input id="dg-remove-token" name="remove_token" type="checkbox">
+							<input id="dg-remove-token" name="remove_token" type="checkbox"{{if $f.RemoveToken}} checked{{end}}{{if ne $f.Source "mirror"}} disabled{{end}}>
 							<label for="dg-remove-token">{{ctx.Locale.Tr "admin.dependency_graph.settings.remove_token"}}</label>
 						</div>
 					</div>{{end}}
@@ -145,7 +161,7 @@
 					<span class="dg-hint tw-hidden" id="dg-test-hint">{{ctx.Locale.Tr "admin.dependency_graph.settings.test_save_first"}}</span>
 					<span id="dg-test-result" role="status"></span>
 				</div>
-				<div id="dg-save-error" role="alert">{{if $f.ErrorMessage}}<p class="dg-error">{{$f.ErrorMessage}}</p>{{end}}</div>{{end}}
+				<div id="dg-save-error">{{if $f.ErrorMessage}}<p class="dg-error">{{$f.ErrorMessage}}</p>{{end}}</div>{{end}}
 				</fieldset>
 				{{if .CanChange}}<p class="help">{{ctx.Locale.Tr "admin.dependency_graph.settings.audit"}}</p>{{end}}
 			</form>

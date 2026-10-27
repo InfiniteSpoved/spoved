@@ -301,7 +301,7 @@ func TestSaveRejectsDatabaseLogsLoopsAndBadHeaders(t *testing.T) {
 	for name, in := range map[string]Input{
 		"database log":       base(func(in *Input) { in.LogTypes = &[]string{"database"} }),
 		"app url host":       base(func(in *Input) { in.Endpoint = new("https://git.example.org/api") }),
-		"app url host case":  base(func(in *Input) { in.Endpoint = new("https://GIT.example.org:8443/api") }),
+		"app url host case":  base(func(in *Input) { in.Endpoint = new("https://GIT.example.org.:443/api") }),
 		"domain":             base(func(in *Input) { in.Endpoint = new("https://ssh.example.org/api") }),
 		"header crlf name":   base(hdr("X-A\r\nX-B", "value-123")),
 		"header crlf value":  base(hdr("X-A", "value-123\r\nX-B: w")),
@@ -328,6 +328,21 @@ func TestSaveRejectsDatabaseLogsLoopsAndBadHeaders(t *testing.T) {
 		require.ErrorIs(t, err, util.ErrInvalidArgument, name)
 		assert.NotContains(t, err.Error(), "X-B: w", name)
 	}
+
+	// the instance is its host and port: another port of the same host (a local agent) is fine
+	for i, e := range []string{"https://git.example.org:8443/api", "http://localhost:4318/in", "http://127.0.0.1:4318/in"} {
+		_, err := Save(t.Context(), u, "", base(func(in *Input) { in.Name, in.Endpoint = new(fmt.Sprint("agent-", i)), new(e) }))
+		require.NoError(t, err, e)
+	}
+	func() {
+		defer test.MockVariableValue(&setting.HTTPAddr, "0.0.0.0")()
+		defer test.MockVariableValue(&setting.HTTPPort, "3000")()
+		defer test.MockVariableValue(&setting.LocalURL, "http://localhost:3000/")()
+		for _, e := range []string{"http://127.0.0.1:3000/in", "http://[::1]:3000/in", "http://[::ffff:127.0.0.1]:3000/in", "http://localhost:3000/in"} {
+			_, err := Save(t.Context(), u, "", base(func(in *Input) { in.Endpoint = new(e) }))
+			require.ErrorIs(t, err, util.ErrInvalidArgument, e)
+		}
+	}()
 
 	// names are stored in canonical form
 	d, err := Save(t.Context(), u, "", base(hdr("x-team", "team-ops-secret-value")))
