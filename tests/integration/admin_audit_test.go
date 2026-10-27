@@ -255,9 +255,14 @@ func TestAdminAuditRoutes(t *testing.T) {
 		}
 		path = strings.ReplaceAll(path, "*", "x")
 		resp := auditor.MakeRequest(t, NewRequest(t, method, path), NoExpectedStatus)
-		if method == "GET" && (route == "/admin/audit" || route == "/admin/config/dependency-graph") {
+		switch {
+		case method == "GET" && (route == "/admin/audit" || strings.HasPrefix(route, "/admin/config/dependency-graph")):
 			assert.Equal(t, http.StatusOK, resp.Code, route)
-		} else {
+		case method == "POST" && strings.HasPrefix(route, "/admin/config/dependency-graph/") && strings.HasSuffix(route, "/export"):
+			// the audited download of the dependency and vulnerability search is open to the auditor: it gets past the
+			// gate and is told the form names no format
+			assert.Equal(t, http.StatusUnprocessableEntity, resp.Code, method+" "+route)
+		default:
 			assert.Contains(t, []int{http.StatusForbidden, http.StatusNotFound}, resp.Code, method+" "+route)
 		}
 		return nil

@@ -49,6 +49,11 @@
 				{{svg "octicon-graph"}} {{ctx.Locale.Tr "metrics.title"}}
 			</a>
 			{{end}}
+			{{if .EnableSecurity}}
+			<a class="{{if $.PageIsOrgSecurity}}active {{end}}item" href="{{$.OrgLink}}/security">
+				{{svg "octicon-shield"}} {{ctx.Locale.Tr "security_search.title"}}
+			</a>
+			{{end}}
 			{{if .NumMembers}}
 			<a class="{{if $.PageIsOrgMembers}}active {{end}}item" href="{{$.OrgLink}}/members">
 				{{svg "octicon-person"}} {{ctx.Locale.Tr "org.members"}}

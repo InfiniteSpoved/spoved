@@ -105,9 +105,20 @@ type UsageRow struct {
 	Uncertain bool // the row has no version and its requirement overlaps the range
 }
 
+// ErrTooMany is a search with too many rows to answer; the errors that wrap it also wrap util.ErrInvalidArgument.
+var ErrTooMany = errors.New("too many matches")
+
+type tooManyError string
+
+func (e tooManyError) Error() string { return string(e) }
+
+func (e tooManyError) Is(target error) bool {
+	return target == ErrTooMany || target == util.ErrInvalidArgument
+}
+
 // TooManyMatches is an export with too many rows; it names the filter the route has, unless it is given.
 func TooManyMatches(scope SearchScope) error {
-	return util.NewInvalidArgumentErrorf("too many matches, %snarrow by version or range", scopeAdvice(scope))
+	return tooManyError("too many matches, " + scopeAdvice(scope) + "narrow by version or range")
 }
 
 // scopeAdvice is "add a project filter, " (organization routes) or "add an owner filter, " (instance routes) while
@@ -128,7 +139,7 @@ func tooManyCandidates(scope SearchScope) error {
 	if a := scopeAdvice(scope); a != "" {
 		advice = a + "or give an exact version"
 	}
-	return util.NewInvalidArgumentErrorf("too many candidates for a range search: %s", advice)
+	return tooManyError("too many candidates for a range search: " + advice)
 }
 
 // RepoBatches splits rows (the repositories' rows are contiguous) into batches of at least size rows that end on a
@@ -265,18 +276,54 @@ func (p *usagePlan) withRepos(ctx context.Context, rows []*repo_model.Dependency
 	return out, nil
 }
 
+// UsageResult is a page of a dependency search with its totals: all rows, and the repositories and owners they touch.
+type UsageResult struct {
+	Rows                 []*UsageRow
+	Total, Repos, Owners int64
+}
+
 // SearchUsage lists the dependency rows of the repositories in scope that match f, and how many there are. The
 // errors that wrap util.ErrInvalidArgument are the caller's mistakes (a 422). With a range, the rows are filtered
 // by version in Go before they are counted and paged.
 func SearchUsage(ctx context.Context, scope SearchScope, f UsageFilter, lo db.ListOptions) ([]*UsageRow, int64, error) {
+	r, err := searchUsage(ctx, scope, f, lo, false)
+	return r.Rows, r.Total, err
+}
+
+// SearchUsageSummary is SearchUsage with the counts of repositories and owners (owners for the instance search only).
+func SearchUsageSummary(ctx context.Context, scope SearchScope, f UsageFilter, lo db.ListOptions) (*UsageResult, error) {
+	return searchUsage(ctx, scope, f, lo, true)
+}
+
+func searchUsage(ctx context.Context, scope SearchScope, f UsageFilter, lo db.ListOptions, summary bool) (*UsageResult, error) {
 	p, err := planUsage(ctx, scope, f)
 	if err != nil || p.total == 0 {
-		return nil, 0, err
+		return &UsageResult{}, err
 	}
 	lo.SetDefaultValues()
 	skip, take := lo.GetSkipTake()
-	rows, err := p.page(ctx, skip, take)
-	return rows, p.total, err
+	res := &UsageResult{Total: p.total}
+	if res.Rows, err = p.page(ctx, skip, take); err != nil || !summary {
+		return res, err
+	}
+	if !p.ranged {
+		c, err := repo_model.CountDependencyUsageRepos(ctx, p.opts)
+		res.Repos, res.Owners = c.Repos, c.Owners
+		return res, err
+	}
+	seen := map[int64]bool{}
+	var repoIDs []int64
+	for _, d := range p.kept {
+		if !seen[d.RepoID] {
+			seen[d.RepoID] = true
+			repoIDs = append(repoIDs, d.RepoID)
+		}
+	}
+	res.Repos = int64(len(repoIDs))
+	if scope.Org == nil {
+		res.Owners, err = repo_model.CountDistinctOwners(ctx, repoIDs)
+	}
+	return res, err
 }
 
 // MaxExportRows is the most rows an export holds (a variable for tests); above it the export is refused.

@@ -1,0 +1,15 @@
+{{template "base/head" .}}
+<div role="main" aria-label="{{.Title}}" class="page-content organization security-search">
+	{{template "org/header" .}}
+	<div class="ui container">
+		{{template "base/alert" .}}
+		<h2 class="ui header">{{ctx.Locale.Tr "security_search.title"}}</h2>
+		<nav class="repo-security-tabs" aria-label="{{ctx.Locale.Tr "security_search.title"}}">
+			<a class="item{{if eq .Search.Kind "vulnerabilities"}} active{{end}}"{{if eq .Search.Kind "vulnerabilities"}} aria-current="page"{{end}} href="{{.OrgLink}}/security/vulnerabilities">{{ctx.Locale.Tr "security_search.vulnerabilities"}}</a>
+			<a class="item{{if eq .Search.Kind "dependencies"}} active{{end}}"{{if eq .Search.Kind "dependencies"}} aria-current="page"{{end}} href="{{.OrgLink}}/security/dependencies">{{ctx.Locale.Tr "security_search.dependencies"}}</a>
+		</nav>
+		{{template "shared/security_search" .}}
+		{{if eq .Search.Kind "vulnerabilities"}}<p class="security-search-note">{{ctx.Locale.Tr "security_search.org_note"}}</p>{{end}}
+	</div>
+</div>
+{{template "base/footer" .}}

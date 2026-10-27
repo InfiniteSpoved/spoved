@@ -20,6 +20,7 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 	apiv1_permissions "forgejo.org/routers/api/v1/permissions"
+	dependency_service "forgejo.org/services/dependency"
 	redirect_service "forgejo.org/services/redirect"
 
 	"github.com/go-chi/chi/v5"
@@ -219,6 +220,7 @@ func HandleOrgAssignment(ctx *Context, args ...bool) {
 	ctx.Data["IsOrganizationMember"] = ctx.Org.IsMember
 	ctx.Data["IsPackageEnabled"] = setting.Packages.Enabled
 	ctx.Data["EnableActions"] = repo_model.ActionsAvailable(ctx, ctx.ContextUser)
+	ctx.Data["EnableSecurity"] = ctx.Org.IsOwner && dependency_service.OrgEnabled(ctx, org.ID) // the Security tab: owners, while the dependency graph is on
 	ctx.Data["IsRepoIndexerEnabled"] = setting.Indexer.RepoIndexerEnabled
 	ctx.Data["IsModerationEnabled"] = setting.Moderation.Enabled
 	ctx.Data["IsPublicMember"] = func(uid int64) bool {

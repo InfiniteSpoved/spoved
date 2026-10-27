@@ -320,3 +320,17 @@ func purgeDisabled(ctx context.Context, batches int, scope builder.Cond) (more b
 	}
 	return true, nil
 }
+
+// OrgEnabled tells whether the dependency graph is on for an organization: the site switch and the organization's
+// own. An error reads as off.
+func OrgEnabled(ctx context.Context, orgID int64) bool {
+	if !SiteEnabled(ctx) {
+		return false // no query while the site is off
+	}
+	s, err := GetOrgSwitch(ctx, orgID)
+	if err != nil {
+		log.Error("dependency graph: read the switch of organization %d: %v", orgID, err)
+		return false
+	}
+	return s.On
+}

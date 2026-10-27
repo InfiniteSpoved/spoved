@@ -147,6 +147,31 @@ func DeclareGitRepos(t *testing.T) {
 		_, err = vulnerability_model.RefreshAlerts(db.DefaultContext, repo.ID, nil)
 		require.NoError(t, err)
 	})
+	// the Security tab of org3 (org-security.test.e2e.ts): minimatch in two repositories, one of them also with a range only
+	func() {
+		advisory := &vulnerability.Advisory{
+			ID: "GHSA-23c5-xmqv-rm74", Aliases: []string{"CVE-2026-27904"}, Summary: "minimatch ReDoS: nested *() extglobs generate catastrophically backtracking regular expressions",
+			Details: "Details.", Level: vulnerability.SeverityHigh, Modified: time.Unix(1700000000, 0),
+			Affected: []vulnerability.Affected{{Name: "minimatch", Ranges: []vulnerability.Range{
+				{Type: "SEMVER", Events: []vulnerability.Event{{Introduced: "0"}, {Fixed: "3.1.4"}}},
+				{Type: "SEMVER", Events: []vulnerability.Event{{Introduced: "9.0.0"}, {Fixed: "9.0.7"}}},
+			}}},
+		}
+		_, err := vulnerability_model.ImportBatch(db.DefaultContext, "npm", []*vulnerability.Advisory{advisory}, &vulnerability_model.ChangedSet{})
+		require.NoError(t, err)
+		for id, deps := range map[int64][]*repo_model.Dependency{
+			3: {
+				{RepoID: 3, Ecosystem: "npm", Name: "minimatch", Version: "3.0.4", ManifestPath: "package-lock.json"},
+				{RepoID: 3, Ecosystem: "npm", Name: "minimatch", Requirement: "^3.0.0", ManifestPath: "package.json", Direct: true},
+			},
+			5: {{RepoID: 5, Ecosystem: "npm", Name: "minimatch", Version: "9.0.1", ManifestPath: "pnpm-lock.yaml"}},
+		} {
+			scan := &repo_model.DependencyScan{RepoID: id, CommitSHA: strings.Repeat("a", 40), ScannedUnix: timeutil.TimeStampNow(), Status: repo_model.DependencyScanOK, ManifestCount: 2, DependencyCount: len(deps)}
+			require.NoError(t, repo_model.ReplaceRepoDependencies(db.DefaultContext, scan, deps))
+			_, err = vulnerability_model.RefreshAlerts(db.DefaultContext, id, nil)
+			require.NoError(t, err)
+		}
+	}()
 	// a manifest without a lock file: its direct dependencies with their ranges, not pinned
 	newRepo(t, 11, "dependencies-unpinned", nil, []FileChanges{{
 		Filename: "web/package.json",

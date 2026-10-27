@@ -1,0 +1,9 @@
+{{template "admin/layout_head" (dict "ctxData" . "pageClass" "admin security-search")}}
+	<div class="admin-setting-content">
+		<h4 class="ui top attached header">{{if eq .Search.Kind "vulnerabilities"}}{{ctx.Locale.Tr "security_search.admin_vulnerabilities"}}{{else}}{{ctx.Locale.Tr "security_search.admin_dependencies"}}{{end}}</h4>
+		<div class="ui attached segment">
+			{{template "shared/security_search" .}}
+			<p class="security-search-note">{{ctx.Locale.Tr "security_search.admin_note"}}</p>
+		</div>
+	</div>
+{{template "admin/layout_footer" .}}
