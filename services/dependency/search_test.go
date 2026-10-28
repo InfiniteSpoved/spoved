@@ -126,3 +126,212 @@ func TestSearchScopeNeedsAnOrganizationOrAnAdmin(t *testing.T) {
 	_, _, err := SearchScope{Doer: user}.RepoCond(db.DefaultContext)
 	require.Error(t, err)
 }
+
+// An export reads batch after batch and lists the rows of SearchUsage, in its order; start sees the count first.
+func TestExportUsageBatches(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&setting.DependencyGraph.Enabled, true)()
+	defer test.MockVariableValue(&ExportBatch, 2)()
+	ctx := db.DefaultContext
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	scope := SearchScope{Doer: admin, Admin: true}
+	for _, id := range []int64{1, 2, 3, 4, 5} {
+		require.NoError(t, db.Insert(ctx, &repo_model.Dependency{RepoID: id, Ecosystem: dependency.Go, Name: "example.com/x", Version: "v1.0.0", ManifestPath: "go.mod"}))
+	}
+	f := UsageFilter{Ecosystem: dependency.Go, Name: "example.com/x"}
+	want, total, err := SearchUsage(ctx, scope, f, db.ListOptions{Page: 1, PageSize: 50})
+	require.NoError(t, err)
+	require.Greater(t, total, int64(2))
+
+	var got, wantIDs []int64
+	batches := 0
+	require.NoError(t, ExportUsage(ctx, scope, f, func(n int64) error {
+		assert.Equal(t, total, n)
+		assert.Empty(t, got)
+		return nil
+	}, func(rows []*UsageRow) error {
+		batches++
+		for _, r := range rows {
+			got = append(got, r.ID)
+		}
+		return nil
+	}))
+	for _, r := range want {
+		wantIDs = append(wantIDs, r.ID)
+	}
+	assert.Equal(t, wantIDs, got)
+	assert.Equal(t, (int(total)+1)/2, batches)
+
+	defer test.MockVariableValue(&MaxExportRows, 2)()
+	called := false
+	err = ExportUsage(ctx, scope, f, func(int64) error { called = true; return nil }, func([]*UsageRow) error { return nil })
+	require.ErrorIs(t, err, util.ErrInvalidArgument)
+	assert.False(t, called, "nothing starts above the cap")
+}
+
+// Rows deleted while an export runs are dropped; no other row is skipped or repeated, since the export loads by the
+// IDs it read first (an OFFSET read would skip a row of the second repository here).
+func TestExportUsageSnapshot(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&setting.DependencyGraph.Enabled, true)()
+	defer test.MockVariableValue(&ExportBatch, 2)()
+	ctx := db.DefaultContext
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	scope := SearchScope{Doer: admin, Admin: true}
+	for _, id := range []int64{1, 2} {
+		for _, m := range []string{"a/go.mod", "b/go.mod", "c/go.mod"} {
+			require.NoError(t, db.Insert(ctx, &repo_model.Dependency{RepoID: id, Ecosystem: dependency.Go, Name: "example.com/x", Version: "v1.0.0", ManifestPath: m}))
+		}
+	}
+	f := UsageFilter{Ecosystem: dependency.Go, Name: "example.com/x"}
+	all, _, err := SearchUsage(ctx, scope, f, db.ListOptions{Page: 1, PageSize: 50})
+	require.NoError(t, err)
+	require.Len(t, all, 6)
+	first, second := all[0].RepoID, all[5].RepoID
+	require.NotEqual(t, first, second)
+
+	deleted := false
+	afterExportBatch = func() {
+		if !deleted { // after the first batch (two rows of the first repository): they go
+			deleted = true
+			_, err := db.GetEngine(ctx).Where("repo_id = ? AND manifest_path <> ?", first, "c/go.mod").Delete(&repo_model.Dependency{})
+			require.NoError(t, err)
+		}
+	}
+	defer func() { afterExportBatch = nil }()
+
+	var got []int64
+	var count int64
+	require.NoError(t, ExportUsage(ctx, scope, f, func(n int64) error { count = n; return nil }, func(rows []*UsageRow) error {
+		for _, r := range rows {
+			got = append(got, r.ID)
+		}
+		return nil
+	}))
+	assert.EqualValues(t, 6, count)
+	seen := map[int64]bool{}
+	secondRows := 0
+	for _, id := range got {
+		assert.False(t, seen[id], "row %d repeated", id)
+		seen[id] = true
+	}
+	for _, r := range all {
+		if r.RepoID == second {
+			assert.True(t, seen[r.ID], "row %d of the other repository is missing", r.ID)
+			secondRows++
+		}
+	}
+	assert.Equal(t, 3, secondRows)
+	assert.Len(t, got, 6) // the two deleted rows were sent already
+}
+
+// A repository rescanned during the export (its rows deleted and inserted again, with new IDs) is exported with its
+// current rows; the repository before it is not touched and nothing is repeated.
+func TestExportUsageRescan(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&setting.DependencyGraph.Enabled, true)()
+	defer test.MockVariableValue(&ExportBatch, 2)()
+	ctx := db.DefaultContext
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	scope := SearchScope{Doer: admin, Admin: true}
+	insert := func(repoID int64, manifests ...string) {
+		for _, m := range manifests {
+			require.NoError(t, db.Insert(ctx, &repo_model.Dependency{RepoID: repoID, Ecosystem: dependency.Go, Name: "example.com/x", Version: "v1.0.0", ManifestPath: m}))
+		}
+	}
+	insert(1, "a/go.mod", "b/go.mod")
+	insert(2, "a/go.mod", "b/go.mod", "c/go.mod")
+	f := UsageFilter{Ecosystem: dependency.Go, Name: "example.com/x"}
+	all, _, err := SearchUsage(ctx, scope, f, db.ListOptions{Page: 1, PageSize: 50})
+	require.NoError(t, err)
+	require.Len(t, all, 5)
+	second := all[4].RepoID
+
+	rescanned := false
+	afterExportBatch = func() {
+		if !rescanned {
+			rescanned = true
+			_, err := db.GetEngine(ctx).Where("repo_id = ?", second).Delete(&repo_model.Dependency{})
+			require.NoError(t, err)
+			insert(second, "a/go.mod", "d/go.mod")
+		}
+	}
+	defer func() { afterExportBatch = nil }()
+
+	var got []*UsageRow
+	require.NoError(t, ExportUsage(ctx, scope, f, func(n int64) error { assert.EqualValues(t, 5, n); return nil }, func(rows []*UsageRow) error {
+		got = append(got, rows...)
+		return nil
+	}))
+	var firstIDs []int64
+	var secondManifests []string
+	seen := map[int64]bool{}
+	for _, r := range got {
+		assert.False(t, seen[r.ID], "row %d repeated", r.ID)
+		seen[r.ID] = true
+		if r.RepoID == second {
+			secondManifests = append(secondManifests, r.ManifestPath)
+		} else {
+			firstIDs = append(firstIDs, r.ID)
+		}
+	}
+	assert.Len(t, firstIDs, 2)
+	assert.Equal(t, []string{"a/go.mod", "d/go.mod"}, secondManifests)
+}
+
+// A rescanned repository that shares a batch with another one is read again on its own; the other keeps its rows.
+// With a range, the filter and the uncertain flag apply to the rows read again.
+func TestExportUsageRescanSharedBatch(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&setting.DependencyGraph.Enabled, true)()
+	ctx := db.DefaultContext // ExportBatch stays large: both repositories are in one batch
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	scope := SearchScope{Doer: admin, Admin: true}
+	insert := func(repoID int64, version, requirement, manifest string) {
+		require.NoError(t, db.Insert(ctx, &repo_model.Dependency{RepoID: repoID, Ecosystem: dependency.NPM, Name: "lodash", Version: version, Requirement: requirement, ManifestPath: manifest}))
+	}
+	insert(1, "4.17.21", "", "a")
+	insert(2, "4.17.1", "", "a")
+	insert(2, "4.17.2", "", "b")
+	for name, f := range map[string]UsageFilter{
+		"plain": {Ecosystem: dependency.NPM, Name: "lodash"},
+		"range": {Ecosystem: dependency.NPM, Name: "lodash", Range: "^4.17.0"},
+	} {
+		all, _, err := SearchUsage(ctx, scope, f, db.ListOptions{Page: 1, PageSize: 50})
+		require.NoError(t, err)
+		require.Len(t, all, 3, name)
+		second := all[2].RepoID
+
+		rescanned := false
+		afterExportSnapshot = func() {
+			if !rescanned {
+				rescanned = true
+				_, err := db.GetEngine(ctx).Where("repo_id = ?", second).Delete(&repo_model.Dependency{})
+				require.NoError(t, err)
+				insert(second, "4.17.9", "", "a")
+				insert(second, "2.0.0", "", "b")  // out of the range
+				insert(second, "", "^4.0.0", "c") // overlaps it: uncertain
+			}
+		}
+		var got []string
+		require.NoError(t, ExportUsage(ctx, scope, f, func(n int64) error { assert.EqualValues(t, 3, n, name); return nil }, func(rows []*UsageRow) error {
+			for _, r := range rows {
+				got = append(got, fmt.Sprintf("%d %s %s %v", r.RepoID, r.Version, r.ManifestPath, r.Uncertain))
+			}
+			return nil
+		}))
+		afterExportSnapshot = nil
+		want := []string{fmt.Sprintf("%d 4.17.21 a false", all[0].RepoID), fmt.Sprintf("%d 4.17.9 a false", second)}
+		if name == "plain" {
+			want = append(want, fmt.Sprintf("%d 2.0.0 b false", second), fmt.Sprintf("%d  c false", second))
+		} else {
+			want = append(want, fmt.Sprintf("%d  c true", second))
+		}
+		assert.Equal(t, want, got, name)
+
+		_, err = db.GetEngine(ctx).Where("repo_id = ?", second).Delete(&repo_model.Dependency{})
+		require.NoError(t, err)
+		insert(second, "4.17.1", "", "a")
+		insert(second, "4.17.2", "", "b")
+	}
+}

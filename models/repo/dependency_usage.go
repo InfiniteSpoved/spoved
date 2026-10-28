@@ -5,6 +5,8 @@ package repo
 
 import (
 	"context"
+	"maps"
+	"slices"
 
 	"forgejo.org/models/db"
 	"forgejo.org/modules/optional"
@@ -43,8 +45,8 @@ func (o *DependencyUsageOptions) cond() builder.Cond {
 	return cond
 }
 
-// dependencyUsageOrder is the order of the search: repository (RepoNameOrder), manifest path, name, version.
-const dependencyUsageOrder = RepoNameOrder + ", `repo_dependency`.manifest_path, `repo_dependency`.name, `repo_dependency`.version, `repo_dependency`.id"
+// dependencyUsageOrder is the order of the search: repository (RepoNameOrder, then its ID), manifest path, name, version.
+const dependencyUsageOrder = RepoNameOrder + ", `repository`.id, `repo_dependency`.manifest_path, `repo_dependency`.name, `repo_dependency`.version, `repo_dependency`.id"
 
 // RepoNameOrder sorts joined rows by owner, then project or name, then name: a root repository sorts by its own name
 // where a repository in a project sorts by the project's (no concatenation in SQL, which differs per database).
@@ -83,4 +85,48 @@ func FindDependencyUsage(ctx context.Context, o *DependencyUsageOptions, skip, l
 	}
 	var rows []*Dependency
 	return rows, sess.Find(&rows)
+}
+
+// FindDependencyUsageSnapshot returns the rows in the order of FindDependencyUsage, at most limit, with only id and
+// repo_id loaded: the snapshot an export streams from.
+func FindDependencyUsageSnapshot(ctx context.Context, o *DependencyUsageOptions, limit int) ([]*Dependency, error) {
+	var rows []*Dependency
+	return rows, db.GetEngine(ctx).Select("`repo_dependency`.id, `repo_dependency`.repo_id").Join("INNER", "repository", "`repository`.id = `repo_dependency`.repo_id").Where(o.cond()).
+		OrderBy(dependencyUsageOrder).Limit(limit).Find(&rows)
+}
+
+// UsageChunk is how many IDs one IN list of the export queries holds (SQLite allows 32766 variables per statement).
+const UsageChunk = 500
+
+// GetDependencyUsageByIDs loads the rows with the given IDs that o still selects (same visibility, same filters).
+func GetDependencyUsageByIDs(ctx context.Context, o *DependencyUsageOptions, ids []int64) (map[int64]*Dependency, error) {
+	rows := make(map[int64]*Dependency, len(ids))
+	for chunk := range slices.Chunk(ids, UsageChunk) {
+		part := map[int64]*Dependency{}
+		if err := db.GetEngine(ctx).Select("`repo_dependency`.*").Join("INNER", "repository", "`repository`.id = `repo_dependency`.repo_id").
+			Where(o.cond().And(builder.In("`repo_dependency`.id", chunk))).Find(&part); err != nil {
+			return nil, err
+		}
+		maps.Copy(rows, part)
+	}
+	return rows, nil
+}
+
+// FindDependencyUsageOfRepos returns the current rows o selects in the given repositories, grouped by repository, each
+// group in the order of FindDependencyUsage.
+func FindDependencyUsageOfRepos(ctx context.Context, o *DependencyUsageOptions, repoIDs []int64) (map[int64][]*Dependency, error) {
+	out := make(map[int64][]*Dependency, len(repoIDs))
+	for chunk := range slices.Chunk(repoIDs, UsageChunk) {
+		var rows []*Dependency
+		n := *o
+		n.RepoCond = o.RepoCond.And(builder.In("`repository`.id", chunk))
+		if err := db.GetEngine(ctx).Select("`repo_dependency`.*").Join("INNER", "repository", "`repository`.id = `repo_dependency`.repo_id").Where(n.cond()).
+			OrderBy(dependencyUsageOrder).Find(&rows); err != nil {
+			return nil, err
+		}
+		for _, d := range rows {
+			out[d.RepoID] = append(out[d.RepoID], d)
+		}
+	}
+	return out, nil
 }
