@@ -794,7 +794,7 @@ func TestDependencySearchExport(t *testing.T) {
 		release()
 		releaseOther()
 		dsGet(t, orgDeps+q+"&format=csv", owner, http.StatusOK)
-		assert.Zero(t, repo_api.ExportsRunning())
+		assertExportSlotsFree(t)
 	})
 
 	t.Run("an export over its time budget ends after a batch", func(t *testing.T) {
@@ -802,7 +802,7 @@ func TestDependencySearchExport(t *testing.T) {
 		defer test.MockVariableValue(&dependency_service.ExportBatch, 1)() // several batches: the first is sent, the second is refused
 		req := NewRequest(t, "GET", adminDeps+q+"&format=json").AddTokenAuth(admin)
 		assert.PanicsWithValue(t, http.ErrAbortHandler, func() { MakeRequest(t, req, http.StatusOK) })
-		assert.Zero(t, repo_api.ExportsRunning(), "the slot is given back")
+		assertExportSlotsFree(t) // the slot is given back
 	})
 
 	t.Run("an alert export leaves out the advisory texts", func(t *testing.T) {
@@ -865,4 +865,17 @@ func TestDependencySearchExportAlertSnapshot(t *testing.T) {
 		got = append(got, fmt.Sprintf("%s %s %s %s %s", a.Repository.FullName, a.Advisory.ID, a.Version, a.State, a.Severity))
 	}
 	assert.Equal(t, want, got)
+}
+
+// assertExportSlotsFree checks that both export slots of the process can be taken.
+func assertExportSlotsFree(t *testing.T) {
+	t.Helper()
+	release1, ok1 := repo_api.TakeExportSlot(-101)
+	release2, ok2 := repo_api.TakeExportSlot(-102)
+	for _, release := range []func(){release1, release2} {
+		if release != nil {
+			release()
+		}
+	}
+	assert.True(t, ok1 && ok2, "every export slot is free")
 }

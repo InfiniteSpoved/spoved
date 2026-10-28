@@ -141,9 +141,6 @@ func TakeExportSlot(doerID int64) (release func(), ok bool) {
 	}
 }
 
-// ExportsRunning is how many exports hold a slot (for tests).
-func ExportsRunning() int { return len(exportSlots) }
-
 var errExportTimeLimit = errors.New("the export took too long")
 
 // exportRow is a row of an export: the object of the JSON form and the cells of the CSV form.
