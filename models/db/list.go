@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"math"
 
 	"forgejo.org/modules/setting"
 
@@ -48,7 +49,16 @@ var (
 // GetSkipTake returns the skip and take values
 func (opts *ListOptions) GetSkipTake() (skip, take int) {
 	opts.SetDefaultValues()
-	return (opts.Page - 1) * opts.PageSize, opts.PageSize
+	return pageOffset(opts.Page, opts.PageSize), opts.PageSize
+}
+
+// pageOffset is (page-1)*pageSize, except that a page number that would overflow reads as past the end: half of
+// MaxInt, so that a caller adding the page size (bleve's collector) can't overflow either.
+func pageOffset(page, pageSize int) int {
+	if pageSize > 0 && page-1 > math.MaxInt/2/pageSize {
+		return math.MaxInt / 2
+	}
+	return (page - 1) * pageSize
 }
 
 func (opts ListOptions) GetPage() int {
@@ -153,7 +163,7 @@ func Find[T any](ctx context.Context, opts FindOptions) ([]*T, error) {
 		if page == 0 {
 			page = 1
 		}
-		sess.Limit(pageSize, (page-1)*pageSize)
+		sess.Limit(pageSize, pageOffset(page, pageSize))
 	}
 
 	findPageSize := defaultFindSliceSize
@@ -187,7 +197,7 @@ func FindAndCount[T any](ctx context.Context, opts FindOptions) ([]*T, int64, er
 	sess := GetEngine(ctx).Where(opts.ToConds())
 	page, pageSize := opts.GetPage(), opts.GetPageSize()
 	if !opts.IsListAll() && pageSize > 0 && page >= 1 {
-		sess.Limit(pageSize, (page-1)*pageSize)
+		sess.Limit(pageSize, pageOffset(page, pageSize))
 	}
 	if joinOpt, ok := opts.(FindOptionsJoin); ok {
 		for _, joinFunc := range joinOpt.ToJoins() {

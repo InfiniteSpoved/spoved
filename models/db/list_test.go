@@ -4,6 +4,7 @@
 package db_test
 
 import (
+	"math"
 	"testing"
 
 	"forgejo.org/models/db"
@@ -51,4 +52,20 @@ func TestFind(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, cnt, newCnt)
 	assert.Len(t, repoUnits, repoUnitCount)
+}
+
+func TestGetSkipTakeNeverNegative(t *testing.T) {
+	for _, page := range []int{1, 2, 1 << 30, math.MaxInt / 2, math.MaxInt} {
+		opts := db.ListOptions{Page: page, PageSize: 50}
+		skip, take := opts.GetSkipTake()
+		assert.GreaterOrEqual(t, skip, 0, "page %d", page)
+		assert.GreaterOrEqual(t, skip+take, 0, "page %d", page) // bleve adds the page size
+		assert.Equal(t, 50, take)
+	}
+	opts := db.ListOptions{Page: 3, PageSize: 10}
+	skip, _ := opts.GetSkipTake()
+	assert.Equal(t, 20, skip)
+	opts = db.ListOptions{Page: math.MaxInt, PageSize: 50}
+	skip, _ = opts.GetSkipTake()
+	assert.Equal(t, math.MaxInt/2, skip)
 }

@@ -59,3 +59,30 @@ type DependencyList struct {
 	Scan         DependencyScan `json:"scan"`
 	Dependencies []*Dependency  `json:"dependencies"`
 }
+
+// DependencyRepository names a repository in a search result.
+// swagger:model
+type DependencyRepository struct {
+	ID int64 `json:"id"`
+	// The full name: owner/name, or owner/project/name for a repository in a project
+	FullName string `json:"full_name"`
+	HTMLURL  string `json:"html_url"`
+	Private  bool   `json:"private"`
+}
+
+// DependencyUsage is a dependency of one repository in the result of an organization or instance search.
+// swagger:model
+type DependencyUsage struct {
+	Repository DependencyRepository `json:"repository"`
+	// The ecosystem, named as OSV names it
+	Ecosystem string `json:"ecosystem"`
+	Name      string `json:"name"`
+	// The version, empty if the manifest doesn't fix it
+	Version string `json:"version"`
+	// The version range the manifest declares when it doesn't fix the version
+	Requirement  string `json:"requirement,omitempty"`
+	ManifestPath string `json:"manifest_path"`
+	Direct       bool   `json:"direct"`
+	// Set by a range search for a row without a version whose requirement overlaps the range
+	Uncertain bool `json:"uncertain"`
+}

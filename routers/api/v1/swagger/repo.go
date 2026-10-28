@@ -672,3 +672,23 @@ type swaggerResponseVulnerabilityAlert struct {
 	// in:body
 	Body api.VulnerabilityAlert `json:"body"`
 }
+
+// DependencyUsageList
+// swagger:response DependencyUsageList
+type swaggerResponseDependencyUsageList struct {
+	// in:body
+	Body []api.DependencyUsage `json:"body"`
+
+	// The total number of dependencies that match
+	TotalCount int64 `json:"X-Total-Count"`
+}
+
+// RepoVulnerabilityAlertList
+// swagger:response RepoVulnerabilityAlertList
+type swaggerResponseRepoVulnerabilityAlertList struct {
+	// in:body
+	Body []api.RepoVulnerabilityAlert `json:"body"`
+
+	// The total number of alerts that match
+	TotalCount int64 `json:"X-Total-Count"`
+}

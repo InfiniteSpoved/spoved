@@ -1055,6 +1055,83 @@
         }
       }
     },
+    "/admin/dependencies": {
+      "get": {
+        "description": "Lists the dependencies of all repositories on the instance, by repository name. Site admins and auditors with a token for all resources only.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Find the repositories on the instance that use a package",
+        "operationId": "adminSearchDependencies",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "only the repositories of this owner",
+            "name": "owner",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "the ecosystem (Go, npm, PyPI, Maven, NuGet, crates.io, RubyGems or Packagist); needed with name",
+            "name": "ecosystem",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "the package name, compared as the ecosystem's registry does (at most 512 bytes)",
+            "name": "name",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "an exact version; excludes range",
+            "name": "version",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "a requirement in the ecosystem's syntax (for example ^1.2.0 or \u003e=2,\u003c3); excludes version. Rows without a version whose requirement overlaps it are listed with uncertain set. Answers 422 above 20000 candidate rows.",
+            "name": "range",
+            "in": "query"
+          },
+          {
+            "type": "boolean",
+            "description": "only the direct (true) or only the transitive (false) dependencies",
+            "name": "direct",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/DependencyUsageList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/admin/emails": {
       "get": {
         "produces": [
@@ -3632,6 +3709,102 @@
         }
       }
     },
+    "/admin/vulnerability-alerts": {
+      "get": {
+        "description": "Lists the vulnerability alerts of all repositories on the instance. Site admins and auditors with a token for all resources only.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "admin"
+        ],
+        "summary": "Find the repositories on the instance that an advisory or a package affects",
+        "operationId": "adminSearchVulnerabilityAlerts",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "only the repositories of this owner",
+            "name": "owner",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "an OSV ID or an alias (CVE-..., GHSA-..., PYSEC-...); an unknown one gives the empty list",
+            "name": "advisory",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "the ecosystem (Go, npm, PyPI, Maven, NuGet, crates.io, RubyGems or Packagist); needed with name",
+            "name": "ecosystem",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "the package name, compared as the ecosystem's registry does (at most 512 bytes). Without advisory, ecosystem and name are required",
+            "name": "name",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "an exact version",
+            "name": "version",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "open",
+              "dismissed",
+              "fixed",
+              "all"
+            ],
+            "type": "string",
+            "description": "open (the default), dismissed, fixed or all",
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "critical",
+              "high",
+              "moderate",
+              "low",
+              "unknown"
+            ],
+            "type": "string",
+            "description": "only alerts of this severity",
+            "name": "severity",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/RepoVulnerabilityAlertList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
     "/announcements": {
       "get": {
         "description": "Announcements the user dismissed are left out. The most severe ones come first.",
@@ -5656,6 +5829,90 @@
         "responses": {
           "200": {
             "$ref": "#/responses/OrgBranchingModel"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/dependencies": {
+      "get": {
+        "description": "Lists the dependencies of the organization's repositories, by repository name. Only organization owners (and site admins) with a token for all resources may ask; a repository is listed only where the dependency graph is on and the caller can read its code. A package nobody visible uses gives the empty list.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Find the repositories of an organization that use a package",
+        "operationId": "orgSearchDependencies",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "only the repositories of this project of the organization",
+            "name": "project",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "the ecosystem (Go, npm, PyPI, Maven, NuGet, crates.io, RubyGems or Packagist); needed with name",
+            "name": "ecosystem",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "the package name, compared as the ecosystem's registry does (at most 512 bytes)",
+            "name": "name",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "an exact version; excludes range",
+            "name": "version",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "a requirement in the ecosystem's syntax (for example ^1.2.0 or \u003e=2,\u003c3); excludes version. Rows without a version whose requirement overlaps it are listed with uncertain set. Answers 422 above 20000 candidate rows.",
+            "name": "range",
+            "in": "query"
+          },
+          {
+            "type": "boolean",
+            "description": "only the direct (true) or only the transitive (false) dependencies",
+            "name": "direct",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/DependencyUsageList"
           },
           "403": {
             "$ref": "#/responses/forbidden"
@@ -9096,6 +9353,109 @@
         "responses": {
           "204": {
             "$ref": "#/responses/empty"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/orgs/{org}/vulnerability-alerts": {
+      "get": {
+        "description": "Lists the vulnerability alerts of the organization's repositories. Only organization owners (and site admins) with a token for all resources may ask; a repository is listed only where the dependency graph is on and the caller can read its code. An advisory that affects nothing visible, or that is unknown, gives the empty list.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "organization"
+        ],
+        "summary": "Find the repositories of an organization that an advisory or a package affects",
+        "operationId": "orgSearchVulnerabilityAlerts",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "name of the organization",
+            "name": "org",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "only the repositories of this project of the organization",
+            "name": "project",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "an OSV ID or an alias (CVE-..., GHSA-..., PYSEC-...); an unknown one gives the empty list",
+            "name": "advisory",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "the ecosystem (Go, npm, PyPI, Maven, NuGet, crates.io, RubyGems or Packagist); needed with name",
+            "name": "ecosystem",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "the package name, compared as the ecosystem's registry does (at most 512 bytes). Without advisory, ecosystem and name are required",
+            "name": "name",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "an exact version",
+            "name": "version",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "open",
+              "dismissed",
+              "fixed",
+              "all"
+            ],
+            "type": "string",
+            "description": "open (the default), dismissed, fixed or all",
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "critical",
+              "high",
+              "moderate",
+              "low",
+              "unknown"
+            ],
+            "type": "string",
+            "description": "only alerts of this severity",
+            "name": "severity",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/RepoVulnerabilityAlertList"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
           },
           "404": {
             "$ref": "#/responses/notFound"
@@ -34497,6 +34857,31 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "DependencyRepository": {
+      "type": "object",
+      "title": "DependencyRepository names a repository in a search result.",
+      "properties": {
+        "full_name": {
+          "description": "The full name: owner/name, or owner/project/name for a repository in a project",
+          "type": "string",
+          "x-go-name": "FullName"
+        },
+        "html_url": {
+          "type": "string",
+          "x-go-name": "HTMLURL"
+        },
+        "id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "private": {
+          "type": "boolean",
+          "x-go-name": "Private"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "DependencyScan": {
       "type": "object",
       "title": "DependencyScan is the state of the last scan of a repository.",
@@ -34537,6 +34922,48 @@
           "description": "pending (never scanned), ok or failed",
           "type": "string",
           "x-go-name": "Status"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "DependencyUsage": {
+      "type": "object",
+      "title": "DependencyUsage is a dependency of one repository in the result of an organization or instance search.",
+      "properties": {
+        "direct": {
+          "type": "boolean",
+          "x-go-name": "Direct"
+        },
+        "ecosystem": {
+          "description": "The ecosystem, named as OSV names it",
+          "type": "string",
+          "x-go-name": "Ecosystem"
+        },
+        "manifest_path": {
+          "type": "string",
+          "x-go-name": "ManifestPath"
+        },
+        "name": {
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "repository": {
+          "$ref": "#/definitions/DependencyRepository"
+        },
+        "requirement": {
+          "description": "The version range the manifest declares when it doesn't fix the version",
+          "type": "string",
+          "x-go-name": "Requirement"
+        },
+        "uncertain": {
+          "description": "Set by a range search for a row without a version whose requirement overlaps the range",
+          "type": "boolean",
+          "x-go-name": "Uncertain"
+        },
+        "version": {
+          "description": "The version, empty if the manifest doesn't fix it",
+          "type": "string",
+          "x-go-name": "Version"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -40660,6 +41087,104 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "RepoVulnerabilityAlert": {
+      "type": "object",
+      "title": "RepoVulnerabilityAlert is a vulnerability alert in the result of an organization or instance search.",
+      "properties": {
+        "advisory": {
+          "$ref": "#/definitions/VulnerabilityAdvisory"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "CreatedAt"
+        },
+        "dismissed_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "DismissedAt"
+        },
+        "dismissed_by": {
+          "$ref": "#/definitions/User"
+        },
+        "dismissed_comment": {
+          "type": "string",
+          "x-go-name": "DismissedComment"
+        },
+        "dismissed_reason": {
+          "description": "fix_started, no_bandwidth, tolerable_risk, inaccurate or not_used",
+          "type": "string",
+          "x-go-name": "DismissedReason"
+        },
+        "ecosystem": {
+          "description": "The ecosystem, named as OSV names it",
+          "type": "string",
+          "x-go-name": "Ecosystem"
+        },
+        "fixed_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "FixedAt"
+        },
+        "fixed_reason": {
+          "description": "fixed (the dependency changed) or withdrawn (the advisory was withdrawn), for a fixed alert",
+          "type": "string",
+          "x-go-name": "FixedReason"
+        },
+        "fixed_versions": {
+          "description": "The versions the advisory names as the fix of this package",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "FixedVersions"
+        },
+        "id": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ID"
+        },
+        "manifest_path": {
+          "description": "The path of the manifest in the repository",
+          "type": "string",
+          "x-go-name": "ManifestPath"
+        },
+        "match": {
+          "description": "affected, may_be_affected (no version, but the declared range allows an affected one) or version_unknown",
+          "type": "string",
+          "x-go-name": "Match"
+        },
+        "package": {
+          "description": "The package as the manifest writes it",
+          "type": "string",
+          "x-go-name": "Package"
+        },
+        "repository": {
+          "$ref": "#/definitions/DependencyRepository"
+        },
+        "requirement": {
+          "description": "The range the manifest declares when it doesn't fix the version",
+          "type": "string",
+          "x-go-name": "Requirement"
+        },
+        "severity": {
+          "description": "critical, high, moderate, low or unknown",
+          "type": "string",
+          "x-go-name": "Severity"
+        },
+        "state": {
+          "description": "open, dismissed or fixed",
+          "type": "string",
+          "x-go-name": "State"
+        },
+        "version": {
+          "description": "The version of the dependency, empty if the manifest doesn't fix it",
+          "type": "string",
+          "x-go-name": "Version"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "Repository": {
       "description": "Repository represents a repository",
       "type": "object",
@@ -43273,6 +43798,22 @@
         }
       }
     },
+    "DependencyUsageList": {
+      "description": "DependencyUsageList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/DependencyUsage"
+        }
+      },
+      "headers": {
+        "X-Total-Count": {
+          "type": "integer",
+          "format": "int64",
+          "description": "The total number of dependencies that match"
+        }
+      }
+    },
     "DeployKey": {
       "description": "DeployKey",
       "schema": {
@@ -44196,6 +44737,22 @@
       "description": "RepoNewIssuePinsAllowed",
       "schema": {
         "$ref": "#/definitions/NewIssuePinsAllowed"
+      }
+    },
+    "RepoVulnerabilityAlertList": {
+      "description": "RepoVulnerabilityAlertList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/RepoVulnerabilityAlert"
+        }
+      },
+      "headers": {
+        "X-Total-Count": {
+          "type": "integer",
+          "format": "int64",
+          "description": "The total number of alerts that match"
+        }
       }
     },
     "Repository": {
