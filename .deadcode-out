@@ -148,9 +148,6 @@ forgejo.org/modules/markup/console
 	Render
 	RenderString
 
-forgejo.org/modules/markup/markdown
-	RenderRawString
-
 forgejo.org/modules/markup/mdstripper
 	stripRenderer.AddOptions
 	StripMarkdown

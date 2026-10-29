@@ -616,5 +616,5 @@ func TestSecurityPagesExport(t *testing.T) {
 		post(t, owner, orgVulns, "json", clone(vul), http.StatusOK)
 	})
 
-	assert.Zero(t, common.ExportsRunning())
+	assertExportSlotsFree(t)
 }
