@@ -363,7 +363,6 @@ func TestQueueDedup(t *testing.T) {
 	assert.LessOrEqual(t, q.GetQueueItemNumber(), 1, "one scan runs, at most one waits")
 	close(release)
 	require.Eventually(t, func() bool { return handled.Load() >= 2 && q.GetQueueItemNumber() == 0 }, 5*time.Second, 10*time.Millisecond)
-
 }
 
 // TestNotifier: only the default branch of the repository queues a scan; tags, other branches and the refs of AGit
