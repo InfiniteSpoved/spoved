@@ -129,6 +129,14 @@
 				<a class="{{if .PageIsAdminConfigDependencyGraph}}active {{end}}item" href="{{AppSubUrl}}/admin/config/dependency-graph">
 					{{ctx.Locale.Tr "admin.dependency_graph"}}
 				</a>
+				{{if .SecuritySearchEnabled}}
+					<a class="{{if .PageIsAdminConfigDependencyGraphVulnerabilities}}active {{end}}item security-search-nav" href="{{AppSubUrl}}/admin/config/dependency-graph/vulnerabilities">
+						{{ctx.Locale.Tr "security_search.vulnerabilities"}}
+					</a>
+					<a class="{{if .PageIsAdminConfigDependencyGraphDependencies}}active {{end}}item security-search-nav" href="{{AppSubUrl}}/admin/config/dependency-graph/dependencies">
+						{{ctx.Locale.Tr "security_search.dependencies"}}
+					</a>
+				{{end}}
 			</div>
 		</details>
 		<a class="{{if .PageIsAdminAnnouncements}}active {{end}}item" href="{{AppSubUrl}}/admin/announcements">

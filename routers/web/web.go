@@ -351,6 +351,7 @@ func verifyAuthWithOptions(options *common.VerifyOptions) func(ctx *context.Cont
 				return
 			}
 			ctx.Data["PageIsAdmin"] = true
+			admin.SetSecuritySearchNav(ctx)
 		}
 	}
 }
@@ -918,6 +919,14 @@ func registerRoutes(m *web.Route) {
 	// the audit log is outside adminReq for the auditor; only GET routes may be (TestAdminAuditRoutes)
 	m.Get("/admin/audit", reqSignIn, admin.AuditReq, admin.Audit)
 	m.Get("/admin/config/dependency-graph", reqSignIn, admin.AuditReq, admin.DependencyGraph)
+	// the dependency and vulnerability search is read-only: the auditor searches and, as the audited download is no
+	// change, posts it too (TestAdminAuditRoutes)
+	m.Group("/admin/config/dependency-graph", func() {
+		m.Get("/vulnerabilities", admin.AuditReq, admin.MustEnableSecuritySearch, admin.SecurityVulnerabilities)
+		m.Get("/dependencies", admin.AuditReq, admin.MustEnableSecuritySearch, admin.SecurityDependencies)
+		m.Post("/vulnerabilities/export", admin.AuditExportReq, admin.MustEnableSecuritySearch, common.RateLimitHeavy, admin.SecurityVulnerabilitiesExport)
+		m.Post("/dependencies/export", admin.AuditExportReq, admin.MustEnableSecuritySearch, common.RateLimitHeavy, admin.SecurityDependenciesExport)
+	}, reqSignIn)
 	m.Group("/admin", func() {
 		m.Get("", admin.Dashboard)
 		m.Get("/system_status", admin.SystemStatus)
@@ -1382,6 +1391,15 @@ func registerRoutes(m *web.Route) {
 					})
 				}, packagesEnabled, org.MustEnablePackages)
 			}, ctxDataSet("EnableOAuth2", setting.OAuth2.Enabled, "EnableQuota", setting.Quota.Enabled, "PageIsOrgSettings", true), org.SettingsMenu)
+
+			// the dependency and vulnerability search: acting owners and site admins, while the dependency graph is on
+			m.Group("/security", func() {
+				m.Get("", org.SecurityIndex)
+				m.Get("/vulnerabilities", org.SecurityVulnerabilities)
+				m.Get("/dependencies", org.SecurityDependencies)
+				m.Post("/vulnerabilities/export", common.RateLimitHeavy, org.SecurityVulnerabilitiesExport)
+				m.Post("/dependencies/export", common.RateLimitHeavy, org.SecurityDependenciesExport)
+			}, org.MustEnableSecurity)
 		}, context.OrgAssignment(true, true))
 	}, reqSignIn)
 	// ***** END: Organization *****

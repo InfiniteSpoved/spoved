@@ -40,7 +40,9 @@ var auditTabs = []string{"changes", "signins", "activity", "all"}
 func AuditReq(ctx *context.Context) {
 	if !common.UsableAuditReader(ctx.Doer) || !ctx.Doer.IsAdmin && !ctx.IsAuditorView() {
 		ctx.Error(http.StatusForbidden)
+		return
 	}
+	SetSecuritySearchNav(ctx)
 }
 
 // auditRow is an entry as the page shows it.

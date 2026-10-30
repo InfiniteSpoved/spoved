@@ -31,7 +31,7 @@ import (
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/vulnerability"
-	repo_api "forgejo.org/routers/api/v1/repo"
+	"forgejo.org/routers/common"
 	dependency_service "forgejo.org/services/dependency"
 	org_service "forgejo.org/services/org"
 	vulnerability_service "forgejo.org/services/vulnerability"
@@ -88,8 +88,10 @@ func newSearchFixture(t *testing.T) *searchFixture {
 			Affected: []vulnerability.Affected{{Name: name, Ranges: []vulnerability.Range{{Type: "SEMVER", Events: []vulnerability.Event{{Introduced: "0"}, {Fixed: fixed}}}}}},
 		}
 	}
+	scored := advisory("GHSA-aaaa-bbbb-cccc", []string{"CVE-2024-1111"}, vulnerability.SeverityHigh, "lodash", "4.17.21")
+	scored.Score = 7.5
 	_, err = vulnerability_model.ImportBatch(t.Context(), dependency.NPM, []*vulnerability.Advisory{
-		advisory("GHSA-aaaa-bbbb-cccc", []string{"CVE-2024-1111"}, vulnerability.SeverityHigh, "lodash", "4.17.21"),
+		scored,
 		advisory("CVE-2023-2222", nil, vulnerability.SeverityCritical, "lodash", "3.10.2"),
 		advisory("GHSA-cccc-dddd-eeee", []string{"CVE-2020-3333"}, vulnerability.SeverityLow, "never-used", "2.0.0"),
 	}, &vulnerability_model.ChangedSet{})
@@ -780,14 +782,14 @@ func TestDependencySearchExport(t *testing.T) {
 
 	t.Run("one export per user and two at once", func(t *testing.T) {
 		since := auditMaxID(t)
-		release, ok := repo_api.TakeExportSlot(2) // user2 is exporting
+		release, ok := common.TakeExportSlot(2) // user2 is exporting
 		require.True(t, ok)
 		t.Cleanup(release)
 		resp := dsGet(t, orgDeps+q+"&format=csv", owner, http.StatusTooManyRequests)
 		assert.Empty(t, resp.Header().Get("Content-Disposition"))
 		assert.Empty(t, auditActions(t, since, "org.dependency_graph.exported"))
 		dsGet(t, adminDeps+q+"&format=csv", admin, http.StatusOK) // another user is not held back
-		releaseOther, ok := repo_api.TakeExportSlot(99)
+		releaseOther, ok := common.TakeExportSlot(99)
 		require.True(t, ok)
 		t.Cleanup(releaseOther)
 		dsGet(t, adminDeps+q+"&format=csv", admin, http.StatusTooManyRequests) // the process is full
@@ -798,7 +800,7 @@ func TestDependencySearchExport(t *testing.T) {
 	})
 
 	t.Run("an export over its time budget ends after a batch", func(t *testing.T) {
-		defer test.MockVariableValue(&repo_api.ExportTimeLimit, -time.Second)()
+		defer test.MockVariableValue(&common.ExportTimeLimit, -time.Second)()
 		defer test.MockVariableValue(&dependency_service.ExportBatch, 1)() // several batches: the first is sent, the second is refused
 		req := NewRequest(t, "GET", adminDeps+q+"&format=json").AddTokenAuth(admin)
 		assert.PanicsWithValue(t, http.ErrAbortHandler, func() { MakeRequest(t, req, http.StatusOK) })
@@ -870,8 +872,8 @@ func TestDependencySearchExportAlertSnapshot(t *testing.T) {
 // assertExportSlotsFree checks that both export slots of the process can be taken.
 func assertExportSlotsFree(t *testing.T) {
 	t.Helper()
-	release1, ok1 := repo_api.TakeExportSlot(-101)
-	release2, ok2 := repo_api.TakeExportSlot(-102)
+	release1, ok1 := common.TakeExportSlot(-101)
+	release2, ok2 := common.TakeExportSlot(-102)
 	for _, release := range []func(){release1, release2} {
 		if release != nil {
 			release()

@@ -238,6 +238,7 @@ func TestAdminAuditAccess(t *testing.T) {
 // admin route stays behind adminReq.
 func TestAdminAuditRoutes(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
+	enableDependencyGraph(t) // the search pages answer 404 while it is off
 	setUserFlag(t, 2, "is_auditor", true)
 	auditor := loginUser(t, "user2")
 
@@ -255,9 +256,14 @@ func TestAdminAuditRoutes(t *testing.T) {
 		}
 		path = strings.ReplaceAll(path, "*", "x")
 		resp := auditor.MakeRequest(t, NewRequest(t, method, path), NoExpectedStatus)
-		if method == "GET" && (route == "/admin/audit" || route == "/admin/config/dependency-graph") {
+		switch {
+		case method == "GET" && (route == "/admin/audit" || strings.HasPrefix(route, "/admin/config/dependency-graph")):
 			assert.Equal(t, http.StatusOK, resp.Code, route)
-		} else {
+		case method == "POST" && strings.HasPrefix(route, "/admin/config/dependency-graph/") && strings.HasSuffix(route, "/export"):
+			// the audited download of the dependency and vulnerability search is open to the auditor: it gets past the
+			// gate and is sent back to the page: the form names no format
+			assert.Equal(t, http.StatusSeeOther, resp.Code, method+" "+route)
+		default:
 			assert.Contains(t, []int{http.StatusForbidden, http.StatusNotFound}, resp.Code, method+" "+route)
 		}
 		return nil

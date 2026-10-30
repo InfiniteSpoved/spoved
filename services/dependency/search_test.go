@@ -335,3 +335,69 @@ func TestExportUsageRescanSharedBatch(t *testing.T) {
 		insert(second, "4.17.2", "", "b")
 	}
 }
+
+// The summary counts the repositories and owners of the whole result, for a plain and for a range search, where the
+// page holds one row.
+func TestSearchUsageSummary(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&setting.DependencyGraph.Enabled, true)()
+	ctx := db.DefaultContext
+	// repositories 1 and 2 of user2, 3 of org3, 23 of org17
+	for _, id := range []int64{1, 2, 3, 23} {
+		require.NoError(t, db.Insert(ctx, &repo_model.Dependency{RepoID: id, Ecosystem: dependency.NPM, Name: "lodash", Version: "4.17.21", ManifestPath: "package-lock.json"}))
+	}
+	require.NoError(t, db.Insert(ctx, &repo_model.Dependency{RepoID: 1, Ecosystem: dependency.NPM, Name: "lodash", Version: "4.17.20", ManifestPath: "other/package-lock.json"}))
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	scope := SearchScope{Doer: admin, Admin: true}
+	for name, f := range map[string]UsageFilter{
+		"plain": {Ecosystem: dependency.NPM, Name: "lodash"},
+		"range": {Ecosystem: dependency.NPM, Name: "lodash", Range: "^4.17.0"},
+	} {
+		res, err := SearchUsageSummary(ctx, scope, f, db.ListOptions{Page: 1, PageSize: 1})
+		require.NoError(t, err, name)
+		assert.Len(t, res.Rows, 1, name)
+		assert.EqualValues(t, 5, res.Total, name)
+		assert.EqualValues(t, 4, res.Repos, name)
+		assert.EqualValues(t, 3, res.Owners, name)
+	}
+	org := unittest.AssertExistsAndLoadBean(t, &organization.Organization{ID: 3})
+	res, err := SearchUsageSummary(ctx, SearchScope{Org: org, Doer: admin, Admin: true}, UsageFilter{Ecosystem: dependency.NPM, Name: "lodash", Range: "^4"}, db.ListOptions{})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, res.Repos)
+	assert.Zero(t, res.Owners, "an organization's search doesn't count owners")
+	res, err = SearchUsageSummary(ctx, scope, UsageFilter{Ecosystem: dependency.NPM, Name: "nothing-uses-this"}, db.ListOptions{})
+	require.NoError(t, err)
+	assert.Zero(t, res.Total+res.Repos+res.Owners)
+}
+
+// A search that is too broad says so in a way a page can tell from a wrong filter, and both are the caller's.
+func TestSearchTooMany(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&setting.DependencyGraph.Enabled, true)()
+	defer test.MockVariableValue(&MaxUsageCandidates, 1)()
+	ctx := db.DefaultContext
+	for _, id := range []int64{1, 2} {
+		require.NoError(t, db.Insert(ctx, &repo_model.Dependency{RepoID: id, Ecosystem: dependency.NPM, Name: "lodash", Version: "4.17.21", ManifestPath: "package-lock.json"}))
+	}
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	_, err := SearchUsageSummary(ctx, SearchScope{Doer: admin, Admin: true}, UsageFilter{Ecosystem: dependency.NPM, Name: "lodash", Range: "^4"}, db.ListOptions{})
+	require.ErrorIs(t, err, ErrTooMany)
+	require.ErrorIs(t, err, util.ErrInvalidArgument)
+	assert.Contains(t, err.Error(), "add an owner filter")
+	_, err = SearchUsageSummary(ctx, SearchScope{Doer: admin, Admin: true}, UsageFilter{Name: "lodash"}, db.ListOptions{})
+	require.ErrorIs(t, err, util.ErrInvalidArgument)
+	assert.NotErrorIs(t, err, ErrTooMany)
+}
+
+func TestOrgEnabled(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	defer test.MockVariableValue(&setting.DependencyGraph.Enabled, true)()
+	ctx := db.DefaultContext
+	assert.True(t, OrgEnabled(ctx, 3))
+	require.NoError(t, user_model.SetUserSetting(ctx, 3, repo_model.DependencyGraphOrgKey, "false"))
+	assert.False(t, OrgEnabled(ctx, 3))
+	assert.True(t, OrgEnabled(ctx, 17), "another organization")
+	require.NoError(t, user_model.SetUserSetting(ctx, 3, repo_model.DependencyGraphOrgKey, "true"))
+	defer test.MockVariableValue(&setting.DependencyGraph.Enabled, false)()
+	assert.False(t, OrgEnabled(ctx, 3), "the site switch is off")
+}

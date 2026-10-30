@@ -130,3 +130,31 @@ func FindDependencyUsageOfRepos(ctx context.Context, o *DependencyUsageOptions, 
 	}
 	return out, nil
 }
+
+// UsageRepoCounts is how many repositories, and how many owners of them, a search result touches.
+type UsageRepoCounts struct {
+	Repos  int64 `xorm:"repos"`
+	Owners int64 `xorm:"owners"`
+}
+
+// CountDependencyUsageRepos counts the distinct repositories and owners of the rows o selects.
+func CountDependencyUsageRepos(ctx context.Context, o *DependencyUsageOptions) (c UsageRepoCounts, err error) {
+	_, err = db.GetEngine(ctx).Table("repo_dependency").Join("INNER", "repository", "`repository`.id = `repo_dependency`.repo_id").Where(o.cond()).
+		Select("COUNT(DISTINCT `repo_dependency`.repo_id) AS repos, COUNT(DISTINCT `repository`.owner_id) AS owners").Get(&c)
+	return c, err
+}
+
+// CountDistinctOwners counts the distinct owners of the repositories with the given IDs.
+func CountDistinctOwners(ctx context.Context, repoIDs []int64) (int64, error) {
+	owners := map[int64]bool{}
+	for chunk := range slices.Chunk(repoIDs, UsageChunk) {
+		var ids []int64
+		if err := db.GetEngine(ctx).Table("repository").Distinct("owner_id").In("id", chunk).Find(&ids); err != nil {
+			return 0, err
+		}
+		for _, id := range ids {
+			owners[id] = true
+		}
+	}
+	return int64(len(owners)), nil
+}

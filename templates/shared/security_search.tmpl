@@ -1,0 +1,142 @@
+{{/* The dependency and vulnerability search of the organization's Security tab and the instance pages: .Search is the shared/security Page */}}
+{{$s := .Search}}
+{{$vulns := eq $s.Kind "vulnerabilities"}}
+	<form class="security-search-form" method="get" action="{{$s.Link}}">
+		{{if $vulns}}
+			<label class="security-search-wide{{if eq $s.ErrorField "advisory"}} invalid{{end}}">{{ctx.Locale.Tr "repo.security.advisory"}}
+				<input name="advisory" value="{{$s.Form.Advisory}}" maxlength="64" placeholder="{{ctx.Locale.Tr "security_search.advisory_placeholder"}}"{{if eq $s.ErrorField "advisory"}} aria-invalid="true" aria-describedby="security-search-error"{{end}}>
+			</label>
+			<span class="security-search-or">{{ctx.Locale.Tr "security_search.or"}}</span>
+		{{end}}
+		<label{{if eq $s.ErrorField "ecosystem"}} class="invalid"{{end}}>{{ctx.Locale.Tr "repo.dependencies.ecosystem"}}
+			<select name="ecosystem"{{if eq $s.ErrorField "ecosystem"}} aria-invalid="true" aria-describedby="security-search-error"{{end}}>
+				<option value=""{{if not $s.Form.Ecosystem}} selected{{end}}>{{if $vulns}}{{ctx.Locale.Tr "security_search.any"}}{{else}}{{ctx.Locale.Tr "security_search.choose_ecosystem"}}{{end}}</option>
+				{{range $s.Ecosystems}}<option value="{{.}}"{{if eq . $s.Form.Ecosystem}} selected{{end}}>{{.}}</option>{{end}}
+			</select>
+		</label>
+		<label{{if eq $s.ErrorField "name"}} class="invalid"{{end}}>{{ctx.Locale.Tr "repo.dependencies.package"}}
+			<input name="name" value="{{$s.Form.Name}}" maxlength="512" placeholder="{{ctx.Locale.Tr "security_search.package_placeholder"}}"{{if eq $s.ErrorField "name"}} aria-invalid="true" aria-describedby="security-search-error"{{end}}>
+		</label>
+		<label class="{{if not $vulns}}security-search-wide{{end}}{{if eq $s.ErrorField "version"}} invalid{{end}}">{{if $vulns}}{{ctx.Locale.Tr "security_search.version"}}{{else}}{{ctx.Locale.Tr "security_search.version_or_range"}}{{end}}
+			<input name="version" value="{{$s.Form.Version}}" maxlength="256" placeholder="{{if $vulns}}{{ctx.Locale.Tr "security_search.version_placeholder"}}{{else}}{{ctx.Locale.Tr "security_search.range_placeholder"}}{{end}}"{{if eq $s.ErrorField "version"}} aria-invalid="true"{{end}}{{if not $vulns}} aria-describedby="{{if eq $s.ErrorField "version"}}security-search-error {{end}}security-search-range-help"{{else if eq $s.ErrorField "version"}} aria-describedby="security-search-error"{{end}}>
+			{{if not $vulns}}<small class="security-search-help" id="security-search-range-help">{{ctx.Locale.Tr "security_search.range_help"}}</small>{{end}}
+		</label>
+		{{if $vulns}}
+			<label{{if eq $s.ErrorField "state"}} class="invalid"{{end}}>{{ctx.Locale.Tr "security_search.state"}}
+				<select name="state"{{if eq $s.ErrorField "state"}} aria-invalid="true" aria-describedby="security-search-error"{{end}}>
+					{{range $s.States}}<option value="{{if ne . "open"}}{{.}}{{end}}"{{if or (eq . $s.Form.State) (and (eq . "open") (eq $s.Form.State ""))}} selected{{end}}>{{if eq . "all"}}{{ctx.Locale.Tr "security_search.state_all"}}{{else}}{{ctx.Locale.Tr (print "repo.security.state." .)}}{{end}}</option>{{end}}
+				</select>
+			</label>
+		{{end}}
+		{{if $s.Admin}}
+			<label>{{ctx.Locale.Tr "security_search.owner"}}
+				<input name="owner" value="{{$s.Form.Owner}}" maxlength="255" placeholder="{{ctx.Locale.Tr "security_search.owner_placeholder"}}">
+			</label>
+		{{else}}
+			<label>{{ctx.Locale.Tr "security_search.project"}}
+				<select name="project">
+					<option value="">{{ctx.Locale.Tr "security_search.all"}}</option>
+					{{range $s.Projects}}<option value="{{.Name}}"{{if eq .Name $s.Form.Project}} selected{{end}}>{{.Name}}</option>{{end}}
+				</select>
+			</label>
+		{{end}}
+		{{if not $vulns}}
+			<label class="security-search-check"><input type="checkbox" name="direct" value="true"{{if $s.Form.Direct}} checked{{end}}> {{ctx.Locale.Tr "security_search.direct_only"}}</label>
+		{{end}}
+		<button class="ui primary button" type="submit">{{ctx.Locale.Tr "security_search.search"}}</button>
+	</form>
+
+	{{if not $s.Searched}}
+		<div class="ui message">{{if $vulns}}{{ctx.Locale.Tr "security_search.hint_vulnerabilities"}}{{else}}{{ctx.Locale.Tr "security_search.hint_dependencies"}}{{end}}</div>
+	{{else if $s.TooBroad}}
+		<div class="ui warning message" role="alert">{{$s.Error}}</div>
+	{{else if $s.Error}}
+		<div class="ui negative message" id="security-search-error" role="alert">{{$s.Error}}</div>
+	{{else}}
+		{{if $s.Advisory}}
+			<div class="security-search-card">
+				{{template "repo/security/severity" $s.Advisory.Severity}}
+				<span class="security-search-title">{{$s.Advisory.Summary}}</span>
+				<div class="text grey small tw-mt-1">{{$s.Advisory.ID}}{{range $s.Advisory.Aliases}} · {{.}}{{end}}{{with $s.AdvisoryScore}} · {{ctx.Locale.Tr "repo.security.cvss" .}}{{end}}</div>
+			</div>
+		{{end}}
+		{{if not $s.Total}}
+			<div class="ui info message">
+				{{$state := $s.Form.State}}{{if not $state}}{{$state = "open"}}{{end}}
+				{{if and $vulns $s.Form.Advisory (ne $state "all")}}
+					{{if $s.Admin}}
+						{{if eq $state "open"}}{{ctx.Locale.Tr "security_search.none_advisory_open_admin" $s.Form.Advisory}}{{else if eq $state "dismissed"}}{{ctx.Locale.Tr "security_search.none_advisory_dismissed_admin" $s.Form.Advisory}}{{else}}{{ctx.Locale.Tr "security_search.none_advisory_fixed_admin" $s.Form.Advisory}}{{end}}
+					{{else}}
+						{{if eq $state "open"}}{{ctx.Locale.Tr "security_search.none_advisory_open_org" .Org.Name $s.Form.Advisory}}{{else if eq $state "dismissed"}}{{ctx.Locale.Tr "security_search.none_advisory_dismissed_org" .Org.Name $s.Form.Advisory}}{{else}}{{ctx.Locale.Tr "security_search.none_advisory_fixed_org" .Org.Name $s.Form.Advisory}}{{end}}
+					{{end}}
+				{{else if and $vulns $s.Form.Advisory}}
+					{{if $s.Admin}}{{ctx.Locale.Tr "security_search.none_advisory_admin" $s.Form.Advisory}}{{else}}{{ctx.Locale.Tr "security_search.none_advisory_org" .Org.Name $s.Form.Advisory}}{{end}}
+				{{else if $s.Admin}}{{ctx.Locale.Tr "security_search.none_admin"}}{{else}}{{ctx.Locale.Tr "security_search.none_org" .Org.Name}}{{end}}
+				<a href="{{$s.Link}}">{{ctx.Locale.Tr "security_search.clear"}}</a>
+			</div>
+		{{else}}
+			<div class="security-search-bar">
+				<strong id="security-search-total">
+					{{if $vulns}}{{ctx.Locale.TrPluralString $s.Total "security_search.alerts" (ctx.Locale.PrettyNumber $s.Total)}}{{else}}{{ctx.Locale.TrPluralString $s.Total "security_search.uses" (ctx.Locale.PrettyNumber $s.Total)}}{{end}}
+					{{ctx.Locale.TrPluralString $s.Repos "security_search.in_repos" (ctx.Locale.PrettyNumber $s.Repos)}}{{if $s.Admin}} {{ctx.Locale.TrPluralString $s.Owners "security_search.in_owners" (ctx.Locale.PrettyNumber $s.Owners)}}{{end}}
+				</strong>
+				<form method="post" action="{{$s.Link}}/export">
+					{{with $s.Form.Advisory}}<input type="hidden" name="advisory" value="{{.}}">{{end}}
+					{{with $s.Form.Ecosystem}}<input type="hidden" name="ecosystem" value="{{.}}">{{end}}
+					{{with $s.Form.Name}}<input type="hidden" name="name" value="{{.}}">{{end}}
+					{{with $s.Form.Version}}<input type="hidden" name="version" value="{{.}}">{{end}}
+					{{with $s.Form.State}}<input type="hidden" name="state" value="{{.}}">{{end}}
+					{{with $s.Form.Project}}<input type="hidden" name="project" value="{{.}}">{{end}}
+					{{with $s.Form.Owner}}<input type="hidden" name="owner" value="{{.}}">{{end}}
+					{{if $s.Form.Direct}}<input type="hidden" name="direct" value="true">{{end}}
+					<button class="ui basic small button" type="submit" name="format" value="csv">{{ctx.Locale.Tr "security_search.download_csv"}}</button>
+					<button class="ui basic small button" type="submit" name="format" value="json">{{ctx.Locale.Tr "security_search.download_json"}}</button>
+				</form>
+			</div>
+			<table class="security-search-table">
+				<thead>
+					<tr>
+						{{if $s.Admin}}<th>{{ctx.Locale.Tr "security_search.owner"}}</th>{{end}}
+						<th>{{ctx.Locale.Tr "security_search.repository"}}</th>
+						{{if $vulns}}
+							<th>{{ctx.Locale.Tr "repo.dependencies.package"}}</th>
+							<th>{{ctx.Locale.Tr "repo.security.fixed_in"}}</th>
+							<th>{{ctx.Locale.Tr "repo.dependencies.manifest"}}</th>
+							<th>{{ctx.Locale.Tr "security_search.state"}}</th>
+						{{else}}
+							<th>{{ctx.Locale.Tr "security_search.version"}}</th>
+							<th>{{ctx.Locale.Tr "repo.dependencies.manifest"}}</th>
+							<th>{{ctx.Locale.Tr "repo.dependencies.direct"}}</th>
+						{{end}}
+					</tr>
+				</thead>
+				<tbody>
+					{{if $vulns}}
+						{{range $s.Alerts}}
+							<tr>
+								{{if $s.Admin}}<td><span class="security-search-cl">{{ctx.Locale.Tr "security_search.owner"}}: </span>{{.Repo.OwnerName}}</td>{{end}}
+								<td><a href="{{.Repo.Link}}">{{.Repo.FullName}}</a></td>
+								<td><span class="ui basic mini label">{{.Ecosystem}}</span> {{.Package}} <code>{{if .Version}}{{.Version}}{{else}}{{.Requirement}}{{end}}</code></td>
+								<td><span class="security-search-cl">{{ctx.Locale.Tr "repo.security.fixed_in"}}: </span>{{range $i, $v := .FixedVersions}}{{if $i}}, {{end}}<code>{{$v}}</code>{{else}}{{ctx.Locale.Tr "repo.security.no_fix"}}{{end}}</td>
+								<td><span class="security-search-cl">{{ctx.Locale.Tr "security_search.in"}} </span>{{.ManifestPath}}</td>
+								<td><span class="security-search-cl">{{ctx.Locale.Tr "security_search.state"}}: </span><a href="{{.Repo.Link}}/security/alerts/{{.ID}}">{{ctx.Locale.Tr (print "repo.security.state." .State)}}</a></td>
+							</tr>
+						{{end}}
+					{{else}}
+						{{range $s.Usage}}
+							<tr>
+								{{if $s.Admin}}<td><span class="security-search-cl">{{ctx.Locale.Tr "security_search.owner"}}: </span>{{.Repo.OwnerName}}</td>{{end}}
+								<td><a href="{{.Repo.Link}}">{{.Repo.FullName}}</a></td>
+								<td><span class="security-search-cl">{{ctx.Locale.Tr "security_search.version"}}: </span>{{if .Version}}<code>{{.Version}}</code>{{else}}<code>{{.Requirement}}</code>{{if .Uncertain}} <span class="ui basic mini label security-search-may">{{ctx.Locale.Tr "security_search.may_match"}}</span>{{end}}{{end}}</td>
+								<td><span class="security-search-cl">{{ctx.Locale.Tr "security_search.in"}} </span>{{.ManifestPath}}</td>
+								<td><span class="security-search-cl">{{ctx.Locale.Tr "repo.dependencies.direct"}}: </span>{{if .Direct}}{{ctx.Locale.Tr "modal.yes"}}{{else}}{{ctx.Locale.Tr "modal.no"}}{{end}}</td>
+							</tr>
+						{{end}}
+					{{end}}
+				</tbody>
+			</table>
+			{{template "base/paginate" .}}
+			{{if not $vulns}}<p class="security-search-note">{{ctx.Locale.Tr "security_search.uncertain_note"}}</p>{{end}}
+			{{if and $vulns (not $s.Admin)}}<p class="security-search-note">{{ctx.Locale.Tr "security_search.org_note"}}</p>{{end}}
+		{{end}}
+	{{end}}
