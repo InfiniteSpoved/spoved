@@ -344,6 +344,13 @@ func TestQueueDedup(t *testing.T) {
 	require.NotNil(t, q)
 	defer test.MockVariableValue(&scanQueue, q)()
 
+	// checked before the queue runs: once it ran, a worker can still hold a popped item and start it late
+	t.Run("disabled", func(t *testing.T) {
+		defer test.MockVariableValue(&setting.DependencyGraph.Enabled, false)()
+		Enqueue(1)
+		assert.Equal(t, 0, q.GetQueueItemNumber())
+	})
+
 	for range 20 {
 		Enqueue(1)
 	}
@@ -357,13 +364,6 @@ func TestQueueDedup(t *testing.T) {
 	close(release)
 	require.Eventually(t, func() bool { return handled.Load() >= 2 && q.GetQueueItemNumber() == 0 }, 5*time.Second, 10*time.Millisecond)
 
-	t.Run("disabled", func(t *testing.T) {
-		defer test.MockVariableValue(&setting.DependencyGraph.Enabled, false)()
-		before := started.Load()
-		Enqueue(1)
-		time.Sleep(100 * time.Millisecond)
-		assert.Equal(t, before, started.Load())
-	})
 }
 
 // TestNotifier: only the default branch of the repository queues a scan; tags, other branches and the refs of AGit
