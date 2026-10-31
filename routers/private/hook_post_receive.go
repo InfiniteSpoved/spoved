@@ -29,6 +29,7 @@ import (
 	"forgejo.org/modules/web"
 	app_context "forgejo.org/services/context"
 	repo_service "forgejo.org/services/repository"
+	secretscan_service "forgejo.org/services/secretscan"
 )
 
 // HookPostReceive updates services and users
@@ -43,7 +44,7 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 
 	repoID := ctx.ParamsInt64(":repoid")
 
-	// a wiki push is only measured again, for the size limit of personal repositories (no feeds for wikis)
+	// a wiki push is measured again, for the size limit of personal repositories, and scanned for secrets (no feeds for wikis)
 	if opts.IsWiki {
 		repo := loadRepository(ctx)
 		if ctx.Written() {
@@ -52,6 +53,7 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 		if err := repo_module.UpdateRepoSize(ctx, repo); err != nil {
 			log.Error("UpdateRepoSize after a wiki push to %-v: %v", repo, err)
 		}
+		secretscan_service.EnqueueIfEnabled(ctx, repo)
 		ctx.JSON(http.StatusOK, private.HookPostReceiveResult{})
 		return
 	}
