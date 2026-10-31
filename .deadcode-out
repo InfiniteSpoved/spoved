@@ -188,7 +188,6 @@ forgejo.org/modules/setting
 	NewConfigProviderFromData
 	GitConfigType.GetOption
 	InitLoggersForTest
-	SecretScanningLimit.Get
 	checkSigningOnlySymmetric
 	checkValidationOnlySymmetric
 	onlySymmetric

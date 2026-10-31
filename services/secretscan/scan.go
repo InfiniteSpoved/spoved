@@ -368,8 +368,7 @@ func (r *run) slice(tips []tip) (requeue bool, err error) {
 		}
 		var uerr error
 		if stop, uerr = r.runUnit(group, tipIDs(pending[:n])); uerr != nil {
-			var ab *abort
-			if errors.As(uerr, &ab) {
+			if ab, ok := errors.AsType[*abort](uerr); ok {
 				return ab.requeue, nil
 			}
 			if r.ctx.Err() != nil {
@@ -515,11 +514,11 @@ func (r *run) object(cw io.Writer, cr *bufio.Reader, bw io.Writer, br *bufio.Rea
 		u.skipped++
 		return nil // never read
 	}
-	if r.scanner.blobs+u.blobs+1 > r.maxBlobs {
+	if r.blobs+u.blobs+1 > r.maxBlobs {
 		u.limit(stopBlobs)
 		return nil
 	}
-	if r.scanner.bytes+u.bytes+size > r.maxBytes {
+	if r.bytes+u.bytes+size > r.maxBytes {
 		u.limit(stopBytes)
 		return nil
 	}
@@ -696,9 +695,9 @@ func (r *run) storeUnit(group int, add []string, u *unit) error {
 		r.done, r.totBlobs, r.totBytes, r.totSkipped = saved.done, saved.totBlobs, saved.totBytes, saved.totSkipped
 		return err
 	}
-	r.scanner.blobs += u.blobs
-	r.scanner.bytes += u.bytes
-	r.scanner.progress = true
+	r.blobs += u.blobs
+	r.bytes += u.bytes
+	r.progress = true
 	r.capped = r.capped || capped || u.capped
 	r.partial += u.partial
 	return nil
@@ -708,7 +707,7 @@ func (r *run) storeUnit(group int, add []string, u *unit) error {
 // stop the limit that ended the slice. A failure, or a limit hit with nothing stored by this slice, backs off; a
 // limit hit after progress asks for the next slice at once.
 func (r *run) end(tips []tip, endErr, stop string, group int) (requeue bool, err error) {
-	if endErr == "" && (stop == "" || r.scanner.progress) {
+	if endErr == "" && (stop == "" || r.progress) {
 		pending := notIn(tips, r.done)
 		switch {
 		case stop != "":
@@ -772,8 +771,7 @@ func (r *run) fail(status, code string, group int) error {
 // storeFinal is store without alerts; an overtaken scan is not an error of the repository.
 func (r *run) storeFinal(st *secretscan_model.Scan) error {
 	if _, err := r.store(st, 0, nil); err != nil {
-		var ab *abort
-		if errors.As(err, &ab) {
+		if _, ok := errors.AsType[*abort](err); ok {
 			return nil
 		}
 		return err
