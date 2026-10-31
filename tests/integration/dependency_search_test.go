@@ -608,6 +608,13 @@ func TestAdminDependencySearch(t *testing.T) {
 			assert.True(t, strings.HasPrefix(a, "org17/"), a)
 		}
 	})
+	t.Run("a name in every ecosystem", func(t *testing.T) {
+		npm, npmTotal := dsAlerts(t, paths[1], admin)
+		anyEco, anyTotal := dsAlerts(t, "/api/v1/admin/vulnerability-alerts?name=lodash&limit=50", admin)
+		require.NotEmpty(t, npm)
+		assert.Equal(t, npm, anyEco)
+		assert.Equal(t, npmTotal, anyTotal)
+	})
 }
 
 func TestDependencySearchQueryCount(t *testing.T) {
