@@ -5,52 +5,54 @@ package secretdetection
 
 import (
 	"bytes"
-	"fmt"
 	"sort"
+	"unicode/utf16"
+	"unicode/utf8"
+
+	"forgejo.org/modules/keying"
 )
 
 const (
-	// DefaultMaxLineLength: of a longer line (minified JS, base64 blobs) only
-	// the first bytes are scanned. A token cut at that point is not found, or
-	// found truncated.
-	DefaultMaxLineLength = 16 << 10
-	// DefaultMaxMatchesPerRule bounds the regex matches one rule may produce
-	// per Scan, whatever the content looks like.
+	// DefaultMaxContentSize is used when Detector.MaxContentSize is not set.
+	DefaultMaxContentSize = 10 << 20
+	// DefaultMaxMatchesPerRule is the number of findings one rule may report
+	// per Scan, when Detector.MaxMatchesPerRule is not set. Only accepted
+	// findings count: placeholders and other rejected matches never use it up.
 	DefaultMaxMatchesPerRule = 100
+	// DefaultMaxSecretLen is the longest secret reported (Rule.MaxSecretLen
+	// overrides it): a longer capture is a bad pattern or not a secret.
+	DefaultMaxSecretLen = 1 << 10
+
+	// maxAttemptsPerRule bounds the regex matches one rule is asked for per
+	// Scan, accepted or not.
+	maxAttemptsPerRule = 10000
 
 	binarySniffLen = 8000 // as git
 	lfsPointerHead = "version https://git-lfs.github.com/spec/v1"
+	lfsBlobMax     = 1024 // as modules/lfs BlobSizeCutoff
 )
 
-// Finding is a secret found at a place. It deliberately carries the secret
-// only privately: callers get its Fingerprint, never the bytes, and must never
-// store or log the secret. String and GoString leave it out so a Finding is
-// safe to print.
+// Finding is a secret found at a place. It never holds the secret: only its
+// fingerprint, so printing or logging a Finding, however it is nested, can't
+// leak it. Callers must never store or log the secret they scanned either.
 type Finding struct {
 	RuleID    string
 	StartLine int // 1-based, line of the first byte of the secret
 	EndLine   int // 1-based, line of its last byte (PEM blocks span lines)
 	StartCol  int // 1-based byte column in StartLine
-	secret    []byte
+	// Fingerprint is Fingerprint(secret) (of the normalized secret, see
+	// Rule.Normalize).
+	Fingerprint string
 }
-
-// Fingerprint is Fingerprint(secret).
-func (f Finding) Fingerprint() string { return Fingerprint(f.secret) }
-
-func (f Finding) String() string {
-	return fmt.Sprintf("%s at %d:%d-%d", f.RuleID, f.StartLine, f.StartCol, f.EndLine)
-}
-
-func (f Finding) GoString() string { return "secretdetection.Finding(" + f.String() + ")" }
 
 // Detector scans content with a fixed set of rules. Set the limits right after
 // NewDetector; after that a Detector may be used by many goroutines.
 type Detector struct {
-	// MaxContentSize cuts the content scanned (bytes); 0 = no limit.
+	// MaxContentSize cuts the content scanned (bytes); 0 or less means
+	// DefaultMaxContentSize.
 	MaxContentSize int
-	// MaxLineLength: see DefaultMaxLineLength.
-	MaxLineLength int
-	// MaxMatchesPerRule: see DefaultMaxMatchesPerRule.
+	// MaxMatchesPerRule is the findings per rule; 0 or less means
+	// DefaultMaxMatchesPerRule.
 	MaxMatchesPerRule int
 
 	rules []*compiledRule
@@ -58,7 +60,7 @@ type Detector struct {
 
 // NewDetector compiles rules. Which rules to pass is the caller's decision.
 func NewDetector(rules []Rule) (*Detector, error) {
-	d := &Detector{MaxLineLength: DefaultMaxLineLength, MaxMatchesPerRule: DefaultMaxMatchesPerRule}
+	d := &Detector{}
 	for _, r := range rules {
 		c, err := compileRule(r)
 		if err != nil {
@@ -69,63 +71,158 @@ func NewDetector(rules []Rule) (*Detector, error) {
 	return d, nil
 }
 
-// Scan returns the secrets in content. Binary content (a NUL byte in the first
-// 8000 bytes, as git decides) and git LFS pointer files give nothing.
+type rawFinding struct {
+	rule        *compiledRule
+	start, end  int
+	fingerprint string
+}
+
+// Scan returns the secrets in content, ordered by position. Binary content (a
+// NUL byte in the first 8000 bytes, as git decides; UTF-16 text with a byte
+// order mark is decoded first) and git LFS pointer files give nothing.
 func (d *Detector) Scan(content []byte) []Finding {
-	if bytes.IndexByte(content[:min(len(content), binarySniffLen)], 0) >= 0 || bytes.HasPrefix(content, []byte(lfsPointerHead)) {
+	maxSize := d.MaxContentSize
+	if maxSize <= 0 {
+		maxSize = DefaultMaxContentSize
+	}
+	maxFindings := d.MaxMatchesPerRule
+	if maxFindings <= 0 {
+		maxFindings = DefaultMaxMatchesPerRule
+	}
+	if content = text(content, maxSize); content == nil {
 		return nil
 	}
-	if d.MaxContentSize > 0 && len(content) > d.MaxContentSize {
-		content = content[:d.MaxContentSize]
-	}
 	lower := asciiLower(content)
-	spans := d.spans(content)
 
-	var findings []Finding
-	var lineStarts []int // built on the first finding
-	var taken [][2]int   // spans of the secrets found: an overlapping one is the same secret, the first rule wins
+	var macKey []byte
+	var found []rawFinding
 	for _, r := range d.rules {
 		if !hasKeyword(lower, r.Keywords) {
 			continue
 		}
-		budget := d.MaxMatchesPerRule
-		for _, sp := range spans {
-			if budget <= 0 {
-				break
+		maxLen := r.MaxSecretLen
+		if maxLen <= 0 {
+			maxLen = DefaultMaxSecretLen
+		}
+		accepted := 0
+		for _, m := range r.re.FindAllSubmatchIndex(content, maxAttemptsPerRule) {
+			start, end := m[2*r.SecretGroup], m[2*r.SecretGroup+1]
+			if start < 0 || end <= start || end-start > maxLen || !r.boundaryOK(content, start, end) {
+				continue
 			}
-			for _, m := range r.re.FindAllSubmatchIndex(content[sp[0]:sp[1]], budget) {
-				budget--
-				start, end := m[2*r.SecretGroup], m[2*r.SecretGroup+1]
-				if start < 0 || end <= start {
+			secret := content[start:end]
+			if r.Normalize != nil {
+				if secret = r.Normalize(secret); len(secret) == 0 {
 					continue
 				}
-				start, end = start+sp[0], end+sp[0]
-				secret := content[start:end]
-				if !r.accepts(secret) || overlaps(taken, start, end) {
-					continue
-				}
-				taken = append(taken, [2]int{start, end})
-				if lineStarts == nil {
-					lineStarts = lineStartOffsets(content)
-				}
-				startLine, endLine := lineOf(lineStarts, start), lineOf(lineStarts, end-1)
-				findings = append(findings, Finding{
-					RuleID:    r.ID,
-					StartLine: startLine,
-					EndLine:   endLine,
-					StartCol:  start - lineStarts[startLine-1] + 1,
-					secret:    secret,
-				})
+			}
+			if !r.accepts(secret) || overlaps(found, start, end) {
+				continue
+			}
+			if macKey == nil {
+				macKey = keying.MACKey(keying.SecretScanning)
+			}
+			found = append(found, rawFinding{r, start, end, fingerprint(macKey, secret)})
+			if accepted++; accepted >= maxFindings {
+				break
 			}
 		}
 	}
-	sort.SliceStable(findings, func(i, j int) bool {
-		if findings[i].StartLine != findings[j].StartLine {
-			return findings[i].StartLine < findings[j].StartLine
+	sort.SliceStable(found, func(i, j int) bool { return found[i].start < found[j].start })
+
+	// One forward pass over the content turns offsets into lines, so memory
+	// stays O(findings) however many lines there are.
+	findings := make([]Finding, len(found))
+	pos, line, lineStart := 0, 1, 0
+	for i, f := range found {
+		for {
+			e := lineBreakEnd(content, pos, f.start)
+			if e < 0 {
+				break
+			}
+			pos, line, lineStart = e, line+1, e
 		}
-		return findings[i].StartCol < findings[j].StartCol
-	})
+		pos = f.start
+		endLine := line
+		for p := f.start; ; {
+			e := lineBreakEnd(content, p, f.end-1)
+			if e < 0 {
+				break
+			}
+			p, endLine = e, endLine+1
+		}
+		findings[i] = Finding{RuleID: f.rule.ID, StartLine: line, EndLine: endLine, StartCol: f.start - lineStart + 1, Fingerprint: f.fingerprint}
+	}
 	return findings
+}
+
+// text returns the content to scan as UTF-8, cut to maxSize bytes, or nil if
+// there is nothing to scan: binary, an LFS pointer or empty.
+func text(content []byte, maxSize int) []byte {
+	if len(content) >= 2 {
+		switch {
+		case content[0] == 0xFF && content[1] == 0xFE:
+			content = decodeUTF16(content[2:min(len(content), 2*maxSize+2)], false)
+		case content[0] == 0xFE && content[1] == 0xFF:
+			content = decodeUTF16(content[2:min(len(content), 2*maxSize+2)], true)
+		default:
+			if bytes.IndexByte(content[:min(len(content), binarySniffLen)], 0) >= 0 || isLFSPointer(content) {
+				return nil
+			}
+		}
+	}
+	if len(content) > maxSize {
+		content = content[:maxSize]
+	}
+	if len(content) == 0 {
+		return nil
+	}
+	return content
+}
+
+func decodeUTF16(b []byte, bigEndian bool) []byte {
+	units := make([]uint16, len(b)/2)
+	for i := range units {
+		if bigEndian {
+			units[i] = uint16(b[2*i])<<8 | uint16(b[2*i+1])
+		} else {
+			units[i] = uint16(b[2*i+1])<<8 | uint16(b[2*i])
+		}
+	}
+	out := make([]byte, 0, len(b))
+	for _, r := range utf16.Decode(units) {
+		out = utf8.AppendRune(out, r)
+	}
+	return out
+}
+
+// isLFSPointer is true for what git-lfs writes as a pointer (the checks of
+// modules/lfs ReadPointerFromBuffer): at most 1024 bytes, the version line, an
+// "oid sha256:<64 hex>" line and a "size <n>" line. Anything else that starts
+// with the version line is a file like any other.
+func isLFSPointer(content []byte) bool {
+	if len(content) > lfsBlobMax || !bytes.HasPrefix(content, []byte(lfsPointerHead)) {
+		return false
+	}
+	lines := bytes.Split(content, []byte("\n"))
+	if len(lines) < 3 || len(lines) > 4 || len(lines) == 4 && len(lines[3]) > 0 || !bytes.HasPrefix(lines[1], []byte("oid sha256:")) || len(lines[1]) != len("oid sha256:")+64 {
+		return false
+	}
+	for _, c := range lines[1][len("oid sha256:"):] {
+		if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f') {
+			return false
+		}
+	}
+	size := bytes.TrimPrefix(lines[2], []byte("size "))
+	if len(size) == 0 {
+		return false
+	}
+	for _, c := range size {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // accepts checks the secret itself, never the text around it: context such as
@@ -142,61 +239,33 @@ func (r *compiledRule) accepts(secret []byte) bool {
 	return r.Check == nil || r.Check(secret)
 }
 
-func overlaps(taken [][2]int, start, end int) bool {
-	for _, t := range taken {
-		if start < t[1] && t[0] < end {
+// overlaps: a secret overlapping one already found is the same secret, the
+// first rule wins.
+func overlaps(found []rawFinding, start, end int) bool {
+	for _, f := range found {
+		if start < f.end && f.start < end {
 			return true
 		}
 	}
 	return false
 }
 
-// spans returns the byte ranges to scan: the content, minus the part of every
-// line beyond MaxLineLength. Lines that are short enough stay in one range, so
-// patterns across lines (PEM) still match.
-func (d *Detector) spans(content []byte) [][2]int {
-	maxLen := d.MaxLineLength
-	if maxLen <= 0 {
-		return [][2]int{{0, len(content)}}
-	}
-	var spans [][2]int
-	begin := 0
-	for pos := 0; pos < len(content); {
-		next := len(content)
-		if nl := bytes.IndexByte(content[pos:], '\n'); nl >= 0 {
-			next = pos + nl + 1
+// lineBreakEnd returns the offset just past the first line break that starts
+// in c[from:to], or -1. A line ends at LF, CRLF or a lone CR.
+func lineBreakEnd(c []byte, from, to int) int {
+	for from < to {
+		i := bytes.IndexAny(c[from:to], "\r\n")
+		if i < 0 {
+			return -1
 		}
-		if next-pos > maxLen {
-			if pos+maxLen > begin {
-				spans = append(spans, [2]int{begin, pos + maxLen})
-			}
-			begin = next
+		i += from
+		if c[i] == '\r' && i+1 < len(c) && c[i+1] == '\n' {
+			from = i + 1 // the LF counts
+			continue
 		}
-		pos = next
+		return i + 1
 	}
-	if begin < len(content) {
-		spans = append(spans, [2]int{begin, len(content)})
-	}
-	return spans
-}
-
-// lineStartOffsets lists the offset of the first byte of every line. Lines end
-// at '\n', so CRLF files count like LF ones.
-func lineStartOffsets(content []byte) []int {
-	starts := []int{0}
-	for pos := 0; ; {
-		nl := bytes.IndexByte(content[pos:], '\n')
-		if nl < 0 {
-			return starts
-		}
-		pos += nl + 1
-		starts = append(starts, pos)
-	}
-}
-
-// lineOf returns the 1-based line of a byte offset.
-func lineOf(starts []int, off int) int {
-	return sort.SearchInts(starts, off+1)
+	return -1
 }
 
 // asciiLower lowers A-Z only, so offsets stay the same as in content.
