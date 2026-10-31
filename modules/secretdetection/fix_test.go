@@ -185,7 +185,8 @@ func TestSecretLengthCaps(t *testing.T) {
 	d := allRulesDetector(t)
 	assert.Len(t, scanOf(d, []byte(pemBlock("RSA PRIVATE KEY", 100))), 1, "a 4096 bit key is about 3.3 KiB")
 	assert.Len(t, scanOf(d, []byte(pemBlock("RSA PRIVATE KEY", 240))), 1, "a 16384 bit key is about 12 KiB")
-	assert.Empty(t, scanOf(d, []byte(pemBlock("RSA PRIVATE KEY", 280))), "over 16 KiB")
+	assert.Len(t, scanOf(d, []byte(pemBlock("PGP PRIVATE KEY BLOCK", 600))), 1, "a PGP export with subkeys is about 40 KiB")
+	assert.Empty(t, scanOf(d, []byte(pemBlock("RSA PRIVATE KEY", 1100))), "over 64 KiB")
 }
 
 func TestScanDropsOversizedSecret(t *testing.T) { TestSecretLengthCaps(t) }

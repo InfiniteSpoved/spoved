@@ -240,7 +240,7 @@ var builtinRules = []Rule{
 // source holds no full key literal.
 var azuriteKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/" + "K1SZFPTOtr/KBHBeksoGMGw=="
 
-const maxPrivateKeyLen = 16 << 10
+const maxPrivateKeyLen = 64 << 10 // PGP exports with several subkeys pass 16 KiB
 
 // normalizePEM is the canonical form of a private key body: up to three
 // layers of string escaping undone (JSON, PHP, shell: \\, \/, \n, \r, \t,
