@@ -133,6 +133,9 @@ forgejo.org/modules/jwtx
 	NewVerifier
 	Verifier.Parse
 
+forgejo.org/modules/keying
+	MACKey
+
 forgejo.org/modules/log
 	eventWriterBuffer.Close
 	eventWriterBuffer.Write
