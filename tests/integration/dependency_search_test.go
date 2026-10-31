@@ -378,10 +378,36 @@ func TestOrgVulnerabilitySearch(t *testing.T) {
 		assert.Equal(t, allTotal, total)
 	})
 
+	t.Run("a name in every ecosystem", func(t *testing.T) {
+		npm, npmTotal := dsAlerts(t, base+"?ecosystem=npm&name=lodash&state=all", token)
+		anyEco, anyTotal := dsAlerts(t, base+"?name=lodash&state=all", token)
+		require.NotEmpty(t, npm)
+		assert.Equal(t, npm, anyEco)
+		assert.Equal(t, npmTotal, anyTotal)
+
+		// each ecosystem compares the name as its registry does
+		_, err := vulnerability_model.ImportBatch(t.Context(), dependency.PyPI, []*vulnerability.Advisory{{
+			ID: "PYSEC-2026-1", Summary: "in foo-bar", Level: vulnerability.SeverityModerate, Modified: time.Unix(100, 0),
+			Affected: []vulnerability.Affected{{Name: "foo-bar", Versions: []string{"2.1.0", "3.0.0"}}},
+		}}, &vulnerability_model.ChangedSet{})
+		require.NoError(t, err)
+		require.NoError(t, vulnerability_service.Rematch(t.Context(), f.repo3.ID))
+		require.NoError(t, vulnerability_service.Rematch(t.Context(), f.repo5.ID))
+		for _, name := range []string{"Foo_Bar", "foo-bar", "FOO.BAR"} {
+			rows, _ := dsAlerts(t, base+"?name="+name, token)
+			assert.Equal(t, []string{"org3/repo3 PYSEC-2026-1 2.1.0 open moderate", "org3/repo5 PYSEC-2026-1 3.0.0 open moderate"}, rows, name)
+		}
+		rows, _ := dsAlerts(t, base+"?name=Lodash", token) // npm names are case sensitive, and PyPI has no lodash
+		assert.Empty(t, rows)
+		rows, _ = dsAlerts(t, base+"?name=foo-bar&version=3.0.0", token)
+		assert.Equal(t, []string{"org3/repo5 PYSEC-2026-1 3.0.0 open moderate"}, rows)
+	})
+
 	t.Run("bad requests", func(t *testing.T) {
 		for _, q := range []string{
-			"ecosystem=npm&name=lodash&owner=org17",          // a filter of the instance routes
-			"", "state=open", "ecosystem=npm", "name=lodash", // neither an advisory nor ecosystem and name
+			"ecosystem=npm&name=lodash&owner=org17", // a filter of the instance routes
+			"", "state=open", "ecosystem=npm",       // neither an advisory nor a name
+			"version=1.0.0", // a version needs a name
 			"advisory=bad%20id!", "advisory=" + strings.Repeat("A", 65),
 			"advisory=CVE-2024-1111&state=bogus", "advisory=CVE-2024-1111&severity=bogus", "ecosystem=Cobol&name=x",
 		} {
@@ -581,6 +607,13 @@ func TestAdminDependencySearch(t *testing.T) {
 		for _, a := range alerts {
 			assert.True(t, strings.HasPrefix(a, "org17/"), a)
 		}
+	})
+	t.Run("a name in every ecosystem", func(t *testing.T) {
+		npm, npmTotal := dsAlerts(t, paths[1], admin)
+		anyEco, anyTotal := dsAlerts(t, "/api/v1/admin/vulnerability-alerts?name=lodash&limit=50", admin)
+		require.NotEmpty(t, npm)
+		assert.Equal(t, npm, anyEco)
+		assert.Equal(t, npmTotal, anyTotal)
 	})
 }
 

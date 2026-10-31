@@ -79,10 +79,8 @@ func ValidateSearchPackage(ecosystem, name, version string) error {
 	switch {
 	case ecosystem != "" && !dependency.IsEcosystem(ecosystem):
 		return util.NewInvalidArgumentErrorf("unknown ecosystem")
-	case name != "" && ecosystem == "":
-		return util.NewInvalidArgumentErrorf("name needs an ecosystem")
 	case version != "" && name == "":
-		return util.NewInvalidArgumentErrorf("version needs an ecosystem and a name")
+		return util.NewInvalidArgumentErrorf("version needs a name")
 	case len(name) > vulnerability.MaxNameLen:
 		return util.NewInvalidArgumentErrorf("name is too long")
 	case len(version) > dependency.MaxVersionLen:

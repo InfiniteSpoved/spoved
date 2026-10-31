@@ -106,11 +106,11 @@ func SearchVulnerabilityAlerts(ctx *context.APIContext) {
 	//   type: string
 	// - name: ecosystem
 	//   in: query
-	//   description: the ecosystem (Go, npm, PyPI, Maven, NuGet, crates.io, RubyGems or Packagist); needed with name
+	//   description: the ecosystem (Go, npm, PyPI, Maven, NuGet, crates.io, RubyGems or Packagist); empty matches every ecosystem
 	//   type: string
 	// - name: name
 	//   in: query
-	//   description: the package name, compared as the ecosystem's registry does (at most 512 bytes). Without advisory, ecosystem and name are required
+	//   description: the package name, compared as the ecosystem's registry does (at most 512 bytes). Without advisory, name is required; without ecosystem it matches in every ecosystem
 	//   type: string
 	// - name: version
 	//   in: query
