@@ -49,7 +49,7 @@ func Test_addSecretScanning(t *testing.T) {
 	assert.Equal(t, []int64{0}, version)
 	// the progress and backoff columns start at zero (nothing to retry), and the large-file count has its name
 	var progress []int64
-	require.NoError(t, x.SQL("SELECT fail_count + retry_unix + retry_group + skipped_large FROM secret_scan WHERE kind = 'wiki'").Find(&progress))
+	require.NoError(t, x.SQL("SELECT fail_count + retry_unix + holes + skipped_large FROM secret_scan WHERE kind = 'wiki'").Find(&progress))
 	assert.Equal(t, []int64{0}, progress)
 	_, err = x.Exec("UPDATE secret_scan SET retry_unix = 5 WHERE kind = 'wiki'")
 	require.NoError(t, err, "the cron task finds due rows by retry_unix")

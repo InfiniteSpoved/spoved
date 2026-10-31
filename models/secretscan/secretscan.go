@@ -22,14 +22,18 @@ import (
 	"xorm.io/builder"
 )
 
-// The two git repositories of a repository.
+// The git repositories a scan covers, each with its own state row: the refs of the repository other than
+// refs/pull/*, its wiki, and refs/pull/* (which any reader can write, so it neither delays nor shares progress with
+// the first).
 const (
 	KindRepo = "repo"
 	KindWiki = "wiki"
+	KindPull = "pull"
 )
 
-// Scan statuses. Incomplete means a budget (time, bytes, files, alerts) ended the scan: its tips are stored, so the
-// next scan reads only what is new, and the cron task doesn't retry it. Failed keeps the earlier tips.
+// Scan statuses. Incomplete means the scan is under way (a slice ended at a limit; the next one goes on from the
+// tips stored) or has holes: parts that were not scanned (see Scan.Holes). It stays incomplete until a scan finds no
+// hole, and a trigger with nothing new doesn't change it. Failed keeps the earlier tips.
 const (
 	StatusOK         = "ok"
 	StatusIncomplete = "incomplete"
@@ -58,8 +62,8 @@ type Scan struct {
 	ID     int64  `xorm:"pk autoincr"`
 	RepoID int64  `xorm:"UNIQUE(repo_kind) NOT NULL"`
 	Kind   string `xorm:"VARCHAR(8) UNIQUE(repo_kind) NOT NULL"`
-	// ScannedTips is a JSON list of object IDs whose whole reachable set is scanned. It holds the tips of every ref,
-	// refs/pull/* included, so it is never shown: no API or page returns it (only status, counts and the error code).
+	// ScannedTips is a JSON list of commit IDs whose whole history is scanned. It holds ref tips (those of refs/pull/*
+	// in the pull row), so it is never shown: no API or page returns it (only status, counts and the error code).
 	ScannedTips string `xorm:"LONGTEXT"`
 	Status      string `xorm:"VARCHAR(16) NOT NULL DEFAULT ''"`
 	Error       string `xorm:"VARCHAR(32) NOT NULL DEFAULT ''"` // a code, never text from git
@@ -68,12 +72,13 @@ type Scan struct {
 	Bytes        int64 `xorm:"NOT NULL DEFAULT 0"`
 	SkippedLarge int64 `xorm:"NOT NULL DEFAULT 0"`
 	Version      int64 `xorm:"NOT NULL DEFAULT 0"` // compare-and-swap counter of the row
-	// FailCount counts the failed or budget-stopped scans in a row; RetryUnix is when the cron task and the next
-	// trigger may try again (0 = nothing to retry), RetryGroup the group of tips (see services/secretscan) the last
-	// scan stopped in: until then only the groups before it are scanned.
-	FailCount   int                `xorm:"NOT NULL DEFAULT 0"`
-	RetryUnix   timeutil.TimeStamp `xorm:"INDEX NOT NULL DEFAULT 0"`
-	RetryGroup  int                `xorm:"NOT NULL DEFAULT 0"`
+	// FailCount counts the failed or limit-stopped slices in a row without progress; RetryUnix is when the cron task
+	// and the next trigger may try again (0 = nothing to retry; while a scan is under way it is a safety net).
+	FailCount int                `xorm:"NOT NULL DEFAULT 0"`
+	RetryUnix timeutil.TimeStamp `xorm:"INDEX NOT NULL DEFAULT 0"`
+	// Holes counts what was marked done without being scanned: files of a commit that alone was over the slice limits,
+	// files the detector could not scan whole, and secrets left out for the alert cap. Error says why for the last.
+	Holes       int64              `xorm:"NOT NULL DEFAULT 0"`
 	UpdatedUnix timeutil.TimeStamp `xorm:"INDEX updated"`
 }
 
@@ -183,11 +188,11 @@ var ErrScanMoved = errors.New("the scan state changed meanwhile")
 func Save(ctx context.Context, old, s *Scan) error {
 	if old == nil {
 		// the unique key decides who inserts first; no row inserted is the lost race
-		insert := "INSERT INTO secret_scan (repo_id, kind, scanned_tips, status, error, blobs, bytes, skipped_large, fail_count, retry_unix, retry_group, version, updated_unix) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?) ON CONFLICT (repo_id, kind) DO NOTHING"
+		insert := "INSERT INTO secret_scan (repo_id, kind, scanned_tips, status, error, blobs, bytes, skipped_large, fail_count, retry_unix, holes, version, updated_unix) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?) ON CONFLICT (repo_id, kind) DO NOTHING"
 		if setting.Database.Type.IsMySQL() {
-			insert = "INSERT IGNORE INTO secret_scan (repo_id, kind, scanned_tips, status, error, blobs, bytes, skipped_large, fail_count, retry_unix, retry_group, version, updated_unix) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)"
+			insert = "INSERT IGNORE INTO secret_scan (repo_id, kind, scanned_tips, status, error, blobs, bytes, skipped_large, fail_count, retry_unix, holes, version, updated_unix) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)"
 		}
-		res, err := db.Exec(ctx, insert, s.RepoID, s.Kind, s.ScannedTips, s.Status, s.Error, s.Blobs, s.Bytes, s.SkippedLarge, s.FailCount, s.RetryUnix, s.RetryGroup, timeutil.TimeStampNow())
+		res, err := db.Exec(ctx, insert, s.RepoID, s.Kind, s.ScannedTips, s.Status, s.Error, s.Blobs, s.Bytes, s.SkippedLarge, s.FailCount, s.RetryUnix, s.Holes, timeutil.TimeStampNow())
 		if err != nil {
 			return err
 		}
@@ -197,7 +202,7 @@ func Save(ctx context.Context, old, s *Scan) error {
 		return nil
 	}
 	n, err := db.GetEngine(ctx).Where("id = ? AND version = ?", old.ID, old.Version).
-		Cols("scanned_tips", "status", "error", "blobs", "bytes", "skipped_large", "fail_count", "retry_unix", "retry_group").Incr("version").Update(s)
+		Cols("scanned_tips", "status", "error", "blobs", "bytes", "skipped_large", "fail_count", "retry_unix", "holes").Incr("version").Update(s)
 	if err != nil {
 		return err
 	}

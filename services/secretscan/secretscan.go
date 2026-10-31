@@ -1,15 +1,17 @@
 // Copyright 2026 The spoved contributors. All rights reserved.
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package secretscan looks for secrets in the git objects of every repository and its wiki and stores alerts
-// (models/secretscan). A scan reads the objects reachable from all refs that the stored scan state doesn't cover, so the
-// first scan reads the whole history and every later one only what is new. Scans run from a unique queue of
-// repository IDs, started by pushes, pull requests, migrations, forks, transfers and wiki changes, and by a cron task
-// for repositories that were never scanned or whose scan has to go on or try again.
+// Package secretscan looks for secrets in the commits of every repository and its wiki and stores alerts
+// (models/secretscan). A scan reads the commits of all refs that the stored scan state doesn't cover, so the first
+// scan reads the whole history and every later one only what is new. Scans run from a unique queue of repository IDs,
+// started by pushes, pull requests, migrations, forks, transfers and wiki changes, and by a cron task for
+// repositories that were never scanned or whose scan has to go on or try again.
 //
-// One queue item is one slice of work (see Scan). Progress is stored per unit of tips (the default branch first, then
-// the other branches, tags and refs/pull/* last), so a repository too big for a slice, or one whose scan failed,
-// goes on from the last unit; a limit that one unit alone exceeds is met by storing a prefix of its commits.
+// One queue item is one slice of work (see Scan): one pass of `git log --raw`, oldest commits first, that ends at a
+// commit boundary when a limit is hit and stores the heads of the commits handled as done tips, in the transaction
+// that stores their alerts. A commit that alone is over the limits is scanned as far as it fits and the rest is
+// counted as a hole. The repository, its wiki and refs/pull/* (which any reader can write) have a state row each, so
+// none of them delays or shares progress with another. What only a ref to a tree or a file reaches is not scanned.
 package secretscan
 
 import (
@@ -21,7 +23,6 @@ import (
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
 	user_model "forgejo.org/models/user"
-	"forgejo.org/modules/git"
 	"forgejo.org/modules/graceful"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/queue"
@@ -94,13 +95,6 @@ func (*notifier) ForkRepository(ctx context.Context, _ *user_model.User, parent,
 		}
 	}
 	Enqueue(fork.ID)
-}
-
-// CreateRef: a tag of a file (a lightweight tag on a blob) is a ref no push event of commits names.
-func (*notifier) CreateRef(ctx context.Context, _ *user_model.User, repo *repo_model.Repository, refFullName git.RefName, _ string) {
-	if refFullName.IsTag() {
-		EnqueueIfEnabled(ctx, repo)
-	}
 }
 
 // NewPullRequest and PullRequestSynchronized: the head of a pull request from a fork, and of an AGit push, is a ref

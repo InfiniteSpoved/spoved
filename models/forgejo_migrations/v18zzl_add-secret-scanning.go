@@ -27,7 +27,7 @@ type v18zzlSecretScan struct {
 	Version      int64  `xorm:"NOT NULL DEFAULT 0"`
 	FailCount    int    `xorm:"NOT NULL DEFAULT 0"`
 	RetryUnix    int64  `xorm:"INDEX NOT NULL DEFAULT 0"`
-	RetryGroup   int    `xorm:"NOT NULL DEFAULT 0"`
+	Holes        int64  `xorm:"NOT NULL DEFAULT 0"`
 	UpdatedUnix  int64  `xorm:"INDEX updated"`
 }
 

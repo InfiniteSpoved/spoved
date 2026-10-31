@@ -91,13 +91,10 @@ func Enabled(ctx context.Context, repo *repo_model.Repository) bool {
 // meanwhile either waits for the write or is seen here. The organization's settings are read without a lock; a
 // change that commits during the write only leaves rows, which turning it off keeps anyway.
 func enabledStored(ctx context.Context, repoID int64) (enabled bool, ownerID int64, err error) {
-	// the repository row is locked until the transaction ends: DeleteRepositoryDirectly takes the same lock first, so
-	// a delete either waits for this write (and removes its rows) or has committed (no row, nothing is written)
-	res, err := db.Exec(ctx, "UPDATE repository SET id = id WHERE id = ?", repoID)
-	if err != nil {
-		return false, 0, err
-	}
-	if n, err := res.RowsAffected(); err != nil || n == 0 {
+	// Lock the repository row until the transaction ends: DeleteRepositoryDirectly takes the same lock first, so a
+	// delete either waits for this write (and removes its rows) or has committed (the lookup below finds nothing).
+	// The affected rows aren't checked: MySQL counts changed rows, so this no-op UPDATE reports 0 there.
+	if _, err := db.Exec(ctx, "UPDATE repository SET id = id WHERE id = ?", repoID); err != nil {
 		return false, 0, err
 	}
 	raw, has, err := system_model.GetSettingForUpdate(ctx, setting.Config().SecretScanning.DynKey())
