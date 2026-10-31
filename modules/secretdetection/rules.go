@@ -34,7 +34,9 @@ package secretdetection
 
 import (
 	"encoding/base64"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"forgejo.org/modules/json"
@@ -63,20 +65,21 @@ var builtinRules = []Rule{
 		ID: "aws-secret-access-key", Name: "AWS secret access key", Type: "aws",
 		Keywords:    []string{"aws"},
 		Regex:       `(?i)aws[\w.-]{0,30}secret[\w.-]{0,30}["']?(?:\s*(?::=|=>|[:=])\s*|\s+)["']?([A-Za-z0-9/+=]{40})(?:[^A-Za-z0-9/+=]|$)`,
-		SecretGroup: 1, MinEntropy: 4,
+		SecretGroup: 1, MinEntropy: 4, Window: 256,
 	},
 	{
 		// ... or within 120 bytes after an access key ID.
 		ID: "aws-secret-access-key-near-id", Name: "AWS secret access key next to a key ID", Type: "aws",
 		Keywords:    []string{"akia", "asia", "abia", "acca", "a3t"},
 		Regex:       `\b(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16}\b[\s\S]{0,120}?[^A-Za-z0-9/+=]([A-Za-z0-9/+=]{40})(?:[^A-Za-z0-9/+=]|$)`,
-		SecretGroup: 1, MinEntropy: 4.3,
+		SecretGroup: 1, MinEntropy: 4.3, Window: 256,
 	},
 	{
 		ID: "azure-storage-account-key", Name: "Azure storage account key", Type: "azure",
-		Keywords:    []string{"accountkey", "storage_key", "storage_account_key", "storagekey", "storageaccountkey"},
+		Keywords:    []string{"accountkey", "storage_key", "storage_account_key", "storageaccount_key", "storagekey", "storageaccountkey"},
 		Regex:       `(?i)(?:accountkey|storage_?(?:account_?)?key)["']?\s*[:=]\s*["']?([A-Za-z0-9+/]{86}==)`,
 		SecretGroup: 1, MinEntropy: 4,
+		Allowlist: []string{"^" + regexp.QuoteMeta(azuriteKey) + "$"},
 	},
 	{
 		// Service Bus, Event Hub and IoT Hub connection strings.
@@ -91,6 +94,7 @@ var builtinRules = []Rule{
 		Keywords:    []string{"azdo"},
 		Regex:       `([A-Za-z0-9]{76}AZDO[A-Za-z0-9]{4})`,
 		SecretGroup: 1, MinEntropy: 3.5, TokenChars: alnumChars,
+		Window: 100, // the regex has no literal prefix: run it only around "azdo"
 	},
 	{
 		ID: "azure-ad-client-secret", Name: "Azure AD client secret", Type: "azure",
@@ -104,7 +108,7 @@ var builtinRules = []Rule{
 		// one fingerprint wherever it is stored.
 		ID: "gcp-service-account-key", Name: "GCP service account private key", Type: "gcp",
 		Keywords:    []string{"service_account"},
-		Regex:       `"type"\s*:\s*"service_account"[\s\S]{0,600}?"private_key"\s*:\s*"-----BEGIN (?:RSA )?PRIVATE KEY-----\s*((?:\\[nr]|[A-Za-z0-9+/=\s]){64,}?)(?:\\[nr]|\s)*-----END (?:RSA )?PRIVATE KEY-----`,
+		Regex:       `"type"\s*:\s*"service_account"[\s\S]{0,600}?"private_key"\s*:\s*"-----BEGIN (?:RSA )?PRIVATE KEY-----\s*((?:\\+[nrt/]|\\u[0-9a-fA-F]{4}|[A-Za-z0-9+/=\s]){64,}?)(?:\\+[nrt]|\s)*-----END (?:RSA )?PRIVATE KEY-----`,
 		SecretGroup: 1, MinEntropy: 3, Normalize: normalizePEM, MaxSecretLen: maxPrivateKeyLen,
 	},
 	{
@@ -180,7 +184,7 @@ var builtinRules = []Rule{
 		// optional armor headers (Proc-Type, Comment) in front.
 		ID: "private-key", Name: "Private key", Type: "private-key",
 		Keywords:    []string{"-----begin"},
-		Regex:       `(?i)-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----\s*((?:[A-Za-z][A-Za-z-]{1,29}:[^\r\n]{0,200}[\r\n]+\s*)*[A-Za-z0-9+/=\s\\]{64,}?)\s*-----END[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----`,
+		Regex:       `(?i)-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----(?:\s|\\+[nrt])*((?:[A-Za-z][A-Za-z-]{1,29}:[^\r\n\\]{0,200}(?:[\r\n]|\\+[nrt])+\s*)*[A-Za-z0-9+/=\s\\]{64,}?)\s*-----END[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----`,
 		SecretGroup: 1, MinEntropy: 3, Normalize: normalizePEM, MaxSecretLen: maxPrivateKeyLen,
 	},
 	{
@@ -226,21 +230,35 @@ var builtinRules = []Rule{
 		ID: "generic-secret-assignment", Name: "Generic secret assignment", Type: "generic",
 		Keywords:    []string{"secret", "password", "passwd", "token", "key"},
 		Regex:       `(?i)(?:secret|password|passwd|token|key)[\w.-]{0,20}["']?\s*(?::=|[:=])\s*["']([^\s"'\x60]{20,100})["']`,
-		SecretGroup: 1, MinEntropy: 3.5, DefaultOff: true,
+		SecretGroup: 1, MinEntropy: 3.5, DefaultOff: true, Window: 256,
 		Allowlist: []string{`^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$`},
 	},
 }
 
-const maxPrivateKeyLen = 8 << 10
+// azuriteKey is the storage account key of the Azurite emulator, the same on
+// every machine and in the Azure documentation. It is built from parts so the
+// source holds no full key literal.
+var azuriteKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/" + "K1SZFPTOtr/KBHBeksoGMGw=="
 
-// normalizePEM is the canonical form of a private key body: the armor header
-// lines (Proc-Type, Comment, ...) dropped, JSON \n and \r escapes read as line
-// breaks, all whitespace removed. It returns nothing unless what is left is
-// base64, so a match that is only text between two dashed lines is refused.
+const maxPrivateKeyLen = 16 << 10
+
+// normalizePEM is the canonical form of a private key body: up to three
+// layers of string escaping undone (JSON, PHP, shell: \\, \/, \n, \r, \t,
+// \uXXXX), the armor header lines (Proc-Type, Comment, ...) dropped and all
+// whitespace removed. If what is left is not base64 (text between the two
+// dashed lines, an escape this doesn't know), the whitespace-stripped raw body
+// is used instead: a match is never dropped, it only gets a less stable
+// fingerprint.
 func normalizePEM(secret []byte) []byte {
-	s := strings.NewReplacer(`\r`, "\n", `\n`, "\n", "\r", "\n").Replace(string(secret))
+	s := string(secret)
+	for range 3 {
+		if !strings.Contains(s, `\`) {
+			break
+		}
+		s = unescape(s)
+	}
 	var out []byte
-	for line := range strings.SplitSeq(s, "\n") {
+	for line := range strings.SplitSeq(strings.ReplaceAll(s, "\r", "\n"), "\n") {
 		if strings.Contains(line, ":") {
 			continue
 		}
@@ -250,11 +268,44 @@ func normalizePEM(secret []byte) []byte {
 			case 'A' <= c && c <= 'Z' || 'a' <= c && c <= 'z' || '0' <= c && c <= '9' || c == '+' || c == '/' || c == '=':
 				out = append(out, c)
 			default:
-				return nil
+				return stripSpace(secret)
 			}
 		}
 	}
 	return out
+}
+
+func stripSpace(b []byte) []byte {
+	return slices.DeleteFunc(slices.Clone(b), func(c byte) bool { return c <= ' ' })
+}
+
+// unescape undoes one layer of backslash escapes.
+func unescape(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 == len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		i++
+		switch s[i] {
+		case 'n', 'r', 't':
+			b.WriteByte(map[byte]byte{'n': '\n', 'r': '\r', 't': '\t'}[s[i]])
+		case '\\', '/':
+			b.WriteByte(s[i])
+		case 'u':
+			if n, err := strconv.ParseUint(s[min(i+1, len(s)):min(i+5, len(s))], 16, 16); err == nil && i+5 <= len(s) {
+				b.WriteRune(rune(n))
+				i += 4
+				continue
+			}
+			b.WriteString(`\u`)
+		default:
+			b.WriteByte('\\')
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }
 
 // jwtHeaderHasAlg: the first part of a JWT is a JSON object with "alg".

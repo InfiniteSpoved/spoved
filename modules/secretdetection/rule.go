@@ -52,14 +52,23 @@ type Rule struct {
 
 	// TokenChars, if set, are the bytes a token is made of: a match is
 	// dropped when the byte before or after the secret is one of them (so the
-	// secret is not part of a longer word), except that a JSON escape (\n, \r,
-	// \t) or a URL escape (%XX) may stand right before it. RE2 has no lookaround
+	// secret is not part of a longer word), except that an escape (\n, \r,
+	// \t, \xXX, \uXXXX) or a URL escape (%XX) may stand right before it. RE2 has no lookaround
 	// and a consumed boundary would hide a neighbouring token, so this is
 	// checked here, not in the regex.
 	TokenChars string
 
 	// MaxSecretLen drops a longer capture; 0 means DefaultMaxSecretLen.
-	MaxSecretLen int
+	// MinSecretLen drops a shorter one; 0 means no minimum.
+	MaxSecretLen, MinSecretLen int
+
+	// Window, if above 0, runs the regex only on the Window bytes before and
+	// after each keyword hit (windows that touch are merged), at most
+	// MaxWindowBytes per Scan; what lies beyond is not scanned and Scan
+	// reports it. The regex can't match anything that doesn't lie within
+	// Window bytes of a keyword. Needs keywords. Anchors (^, \b) at the edge
+	// of a window see the edge as the start of the text.
+	Window int
 
 	// DefaultOff marks noisy rules (generic ones) that callers should not
 	// enable unless asked to.
@@ -137,10 +146,15 @@ func (r *compiledRule) boundaryOK(c []byte, start, end int) bool {
 	if start == 0 || !r.tokenSet[c[start-1]] {
 		return true
 	}
-	if start >= 2 && c[start-2] == '\\' && strings.IndexByte("nrt", c[start-1]) >= 0 {
-		return true // JSON escape
+	switch {
+	case start >= 2 && c[start-2] == '\\' && strings.IndexByte("nrt", c[start-1]) >= 0:
+		return true // JSON or C escape
+	case start >= 3 && c[start-3] == '%' && isHex(c[start-2]) && isHex(c[start-1]):
+		return true // URL encoding
+	case start >= 4 && c[start-4] == '\\' && c[start-3] == 'x' && isHex(c[start-2]) && isHex(c[start-1]):
+		return true // \xXX
 	}
-	return start >= 3 && c[start-3] == '%' && isHex(c[start-2]) && isHex(c[start-1])
+	return start >= 6 && c[start-6] == '\\' && c[start-5] == 'u' && isHex(c[start-4]) && isHex(c[start-3]) && isHex(c[start-2]) && isHex(c[start-1])
 }
 
 func isHex(b byte) bool {

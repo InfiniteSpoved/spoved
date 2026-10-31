@@ -27,7 +27,7 @@ func TestPlaceholdersDoNotHideARealSecret(t *testing.T) {
 		"jwt without alg": strings.Repeat(jwtNoAlg()+"\n", 150) + "x " + real,
 	} {
 		t.Run(name, func(t *testing.T) {
-			fs := d.Scan([]byte(content))
+			fs := scanOf(d, []byte(content))
 			found := false
 			for _, f := range fs {
 				found = found || f.RuleID == "github-token" || f.RuleID == "aws-access-key-id"
@@ -45,10 +45,10 @@ func TestZeroLimitsMeanDefaults(t *testing.T) {
 	d := allRulesDetector(t)
 	d.MaxMatchesPerRule = 0
 	d.MaxContentSize = 0
-	assert.Len(t, d.Scan([]byte("ghp_"+fake(36, alnum))), 1)
+	assert.Len(t, scanOf(d, []byte("ghp_"+fake(36, alnum))), 1)
 	d.MaxMatchesPerRule = -1
 	d.MaxContentSize = -1
-	assert.Len(t, d.Scan([]byte("ghp_"+fake(36, alnum))), 1)
+	assert.Len(t, scanOf(d, []byte("ghp_"+fake(36, alnum))), 1)
 }
 
 func TestLongLinesAreScanned(t *testing.T) {
@@ -61,7 +61,7 @@ func TestLongLinesAreScanned(t *testing.T) {
 		"CR only":   strings.Repeat(strings.Repeat("a", 100)+"\r", 400) + token,
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.Len(t, d.Scan([]byte(content)), 1)
+			assert.Len(t, scanOf(d, []byte(content)), 1)
 		})
 	}
 }
@@ -74,21 +74,25 @@ func TestLineNumbers(t *testing.T) {
 	}{{"LF", "\n"}, {"CRLF", "\r\n"}, {"CR", "\r"}} {
 		t.Run(tt.name, func(t *testing.T) {
 			content := "one" + tt.eol + "two" + tt.eol + tt.eol + "  x=" + token + tt.eol + "five"
-			fs := d.Scan([]byte(content))
+			fs := scanOf(d, []byte(content))
 			require.Len(t, fs, 1)
+			if tt.eol == "\r" { // as git counts: only LF ends a line
+				assert.Equal(t, [3]int{1, 1, 14}, [3]int{fs[0].StartLine, fs[0].EndLine, fs[0].StartCol})
+				return
+			}
 			assert.Equal(t, [3]int{4, 4, 5}, [3]int{fs[0].StartLine, fs[0].EndLine, fs[0].StartCol})
 		})
 	}
 	t.Run("mixed endings", func(t *testing.T) {
 		content := "a\r\nb\rc\nd\r\r\n" + token
-		fs := d.Scan([]byte(content))
+		fs := scanOf(d, []byte(content))
 		require.Len(t, fs, 1)
-		assert.Equal(t, 6, fs[0].StartLine)
+		assert.Equal(t, 4, fs[0].StartLine, "only LF ends a line")
 		assert.Equal(t, 1, fs[0].StartCol)
 	})
 	t.Run("several findings and a PEM block", func(t *testing.T) {
-		pem := strings.ReplaceAll(pemBlock("RSA PRIVATE KEY", 4), "\n", "\r")
-		fs := d.Scan([]byte(token + "\r" + pem + token))
+		pem := pemBlock("RSA PRIVATE KEY", 4)
+		fs := scanOf(d, []byte(token+"\r\n"+pem+token))
 		require.Len(t, fs, 3)
 		assert.Equal(t, [2]int{1, 1}, [2]int{fs[0].StartLine, fs[0].EndLine})
 		assert.Equal(t, [2]int{3, 6}, [2]int{fs[1].StartLine, fs[1].EndLine})
@@ -101,12 +105,12 @@ func TestLFSPointerOnlySkipsRealPointers(t *testing.T) {
 	token := "ghp_" + fake(36, alnum)
 	oid := fake(64, "0123456789abcdef")
 	pointer := "version https://git-lfs.github.com/spec/v1\noid sha256:" + oid + "\nsize 12345\n"
-	assert.Empty(t, d.Scan([]byte(pointer)))
-	assert.NotEmpty(t, d.Scan([]byte(pointer+"GITHUB_TOKEN="+token+"\n")), "other content after the pointer")
-	assert.NotEmpty(t, d.Scan([]byte("version https://git-lfs.github.com/spec/v1\nGITHUB_TOKEN="+token+"\n")))
-	assert.NotEmpty(t, d.Scan([]byte("version https://git-lfs.github.com/spec/v10000 "+token)))
-	assert.NotEmpty(t, d.Scan([]byte(pointer+strings.Repeat("# padding\n", 100)+token)), "longer than 1024 bytes")
-	assert.NotEmpty(t, d.Scan([]byte("version https://git-lfs.github.com/spec/v1\noid sha256:short\nsize 1\n"+token)))
+	assert.Empty(t, scanOf(d, []byte(pointer)))
+	assert.NotEmpty(t, scanOf(d, []byte(pointer+"GITHUB_TOKEN="+token+"\n")), "other content after the pointer")
+	assert.NotEmpty(t, scanOf(d, []byte("version https://git-lfs.github.com/spec/v1\nGITHUB_TOKEN="+token+"\n")))
+	assert.NotEmpty(t, scanOf(d, []byte("version https://git-lfs.github.com/spec/v10000 "+token)))
+	assert.NotEmpty(t, scanOf(d, []byte(pointer+strings.Repeat("# padding\n", 100)+token)), "longer than 1024 bytes")
+	assert.NotEmpty(t, scanOf(d, []byte("version https://git-lfs.github.com/spec/v1\noid sha256:short\nsize 1\n"+token)))
 }
 
 func TestUTF16IsDecoded(t *testing.T) {
@@ -125,16 +129,16 @@ func TestUTF16IsDecoded(t *testing.T) {
 	}
 	for name, content := range map[string][]byte{"LE": encode(binary.LittleEndian, true), "BE": encode(binary.BigEndian, true)} {
 		t.Run(name, func(t *testing.T) {
-			fs := d.Scan(content)
+			fs := scanOf(d, content)
 			require.Len(t, fs, 1)
 			assert.Equal(t, 2, fs[0].StartLine)
 			assert.Equal(t, 14, fs[0].StartCol)
 		})
 	}
-	assert.Empty(t, d.Scan(encode(binary.LittleEndian, false)), "no BOM: binary")
-	assert.Empty(t, d.Scan([]byte("\x00\nGITHUB_TOKEN="+token)))
-	assert.Empty(t, d.Scan([]byte("\xff\xfe")), "BOM only")
-	assert.Empty(t, d.Scan([]byte("\xff\xfeg")), "odd length")
+	assert.Empty(t, scanOf(d, encode(binary.LittleEndian, false)), "no BOM: binary")
+	assert.Empty(t, scanOf(d, []byte("\x00\nGITHUB_TOKEN="+token)))
+	assert.Empty(t, scanOf(d, []byte("\xff\xfe")), "BOM only")
+	assert.Empty(t, scanOf(d, []byte("\xff\xfeg")), "odd length")
 }
 
 func TestTokenBoundaries(t *testing.T) {
@@ -175,12 +179,13 @@ func TestTokenBoundaries(t *testing.T) {
 func TestSecretLengthCaps(t *testing.T) {
 	long, err := NewDetector([]Rule{{ID: "r", Regex: `(?s)BEGIN(.*)END`, SecretGroup: 1, Keywords: []string{"begin"}}})
 	require.NoError(t, err)
-	assert.Len(t, long.Scan([]byte("BEGIN"+fake(1000, b64)+"END")), 1)
-	assert.Empty(t, long.Scan([]byte("BEGIN"+strings.Repeat(fake(64, b64), 17)+"END")), "over 1 KiB")
+	assert.Len(t, scanOf(long, []byte("BEGIN"+fake(1000, b64)+"END")), 1)
+	assert.Empty(t, scanOf(long, []byte("BEGIN"+strings.Repeat(fake(64, b64), 17)+"END")), "over 1 KiB")
 
 	d := allRulesDetector(t)
-	assert.Len(t, d.Scan([]byte(pemBlock("RSA PRIVATE KEY", 100))), 1, "a 4096 bit key is about 3.3 KiB")
-	assert.Empty(t, d.Scan([]byte(pemBlock("RSA PRIVATE KEY", 150))), "over 8 KiB")
+	assert.Len(t, scanOf(d, []byte(pemBlock("RSA PRIVATE KEY", 100))), 1, "a 4096 bit key is about 3.3 KiB")
+	assert.Len(t, scanOf(d, []byte(pemBlock("RSA PRIVATE KEY", 240))), 1, "a 16384 bit key is about 12 KiB")
+	assert.Empty(t, scanOf(d, []byte(pemBlock("RSA PRIVATE KEY", 280))), "over 16 KiB")
 }
 
 func TestScanDropsOversizedSecret(t *testing.T) { TestSecretLengthCaps(t) }
@@ -204,16 +209,16 @@ func TestPrivateKeyFingerprintIsStable(t *testing.T) {
 	}
 	var want string
 	for name, content := range forms {
-		fs := d.Scan([]byte(content))
+		fs := scanOf(d, []byte(content))
 		require.Len(t, fs, 1, name)
 		if want == "" {
 			want = fpOf(fs[0])
 		}
 		assert.Equal(t, want, fpOf(fs[0]), name)
 	}
-	assert.Equal(t, "gcp-service-account-key", d.Scan([]byte(gcp))[0].RuleID)
+	assert.Equal(t, "gcp-service-account-key", scanOf(d, []byte(gcp))[0].RuleID)
 	// a different key is a different fingerprint
-	other := d.Scan([]byte(pemBlock("RSA PRIVATE KEY", 5)))
+	other := scanOf(d, []byte(pemBlock("RSA PRIVATE KEY", 5)))
 	require.Len(t, other, 1)
 	assert.NotEqual(t, want, fpOf(other[0]))
 }
@@ -234,7 +239,7 @@ func TestForgejoTokenContexts(t *testing.T) {
 	hex40 := fake(40, hexa)
 	count := func(content string) int {
 		n := 0
-		for _, f := range d.Scan([]byte(content)) {
+		for _, f := range scanOf(d, []byte(content)) {
 			if strings.HasPrefix(f.RuleID, "forgejo-access-token") {
 				n++
 			}
@@ -392,7 +397,7 @@ func FuzzScan(f *testing.F) {
 	f.Fuzz(func(t *testing.T, content []byte, maxSize, maxFindings uint8) {
 		d.MaxContentSize = int(maxSize) * 8 // 0 is the default
 		d.MaxMatchesPerRule = int(maxFindings) % 5
-		fs := d.Scan(content)
+		fs := scanOf(d, content)
 		lines := 1 + bytes.Count(content, []byte("\n")) + bytes.Count(content, []byte("\r")) - bytes.Count(content, []byte("\r\n"))
 		if len(content) >= 2 && (content[0] == 0xFF && content[1] == 0xFE || content[0] == 0xFE && content[1] == 0xFF) {
 			lines = len(content) // decoded text may have more line breaks than bytes of the original
@@ -410,4 +415,10 @@ func FuzzScan(f *testing.F) {
 			}
 		}
 	})
+}
+
+// scanOf is the findings of Scan.
+func scanOf(d *Detector, content []byte) []Finding {
+	fs, _ := d.Scan(content)
+	return fs
 }
