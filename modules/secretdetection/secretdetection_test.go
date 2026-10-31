@@ -609,21 +609,32 @@ func TestCorpusIsFixedOrdinaryText(t *testing.T) {
 // Scan time must grow linearly with the size of the content, whatever it
 // looks like. Run with: go test -run xxx -bench . ./modules/secretdetection/
 func BenchmarkScan(b *testing.B) {
-	d := allRulesDetector(b)
+	detectors := map[string]*Detector{"default-rules": defaultRulesDetector(b), "all-rules": allRulesDetector(b)}
 	for _, size := range []int{1 << 20, 10 << 20} {
 		inputs := map[string][]byte{
 			"minified-js":   minifiedJS(size),
 			"random-base64": randomBase64(size),
+			"azdo-hostile":  azdoHostile(size),
 		}
-		for name, content := range inputs {
-			b.Run(fmt.Sprintf("%s/%dMiB", name, size>>20), func(b *testing.B) {
-				b.SetBytes(int64(len(content)))
-				for b.Loop() {
-					scanOf(d, content)
-				}
-			})
+		for dname, d := range detectors {
+			for name, content := range inputs {
+				b.Run(fmt.Sprintf("%s/%s/%dMiB", dname, name, size>>20), func(b *testing.B) {
+					b.SetBytes(int64(len(content)))
+					for b.Loop() {
+						scanOf(d, content)
+					}
+				})
+			}
 		}
 	}
+}
+
+// azdoHostile is the worst text for azure-devops-pat: every "AZDO" has 76
+// alphanumerics before it and 4 after, so each hit passes the cheap check
+// and costs a regex run.
+func azdoHostile(size int) []byte {
+	unit := strings.Repeat("a", 76) + "AZDO" + "bcde"
+	return []byte(strings.Repeat(unit, size/len(unit)+1)[:size])
 }
 
 // BenchmarkScanGoSources scans the Go files of routers/ and models/ one by

@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf16"
 
 	"github.com/stretchr/testify/assert"
@@ -154,4 +155,36 @@ func TestSentenceAndSuffixBoundaries(t *testing.T) {
 	key := "AIza" + fake(35, alnum)
 	assert.Equal(t, 1, countRule(d, "key "+key+"-backup", "gcp-api-key"), "hyphen after the key")
 	assert.Zero(t, countRule(d, "key "+key+"q", "gcp-api-key"))
+}
+
+// TestHostileAzureDevOpsBlobIsBounded: three shapes of a 10 MiB blob made for
+// azure-devops-pat (lowercase hits, capitals without the 76 bytes before, and
+// capitals that pass the check every time) all stay fast, with every default
+// rule on. The target is under 1 s; the bound is generous for slow machines.
+func TestHostileAzureDevOpsBlobIsBounded(t *testing.T) {
+	d := defaultRulesDetector(t)
+	const size = 10 << 20
+	for name, blob := range map[string][]byte{
+		"lowercase": []byte(strings.Repeat("azdo "+strings.Repeat("a", 120)+"\n", size/126+1)[:size]),
+		"no prefix": []byte(strings.Repeat("AZDO "+strings.Repeat("a", 120)+"\n", size/126+1)[:size]),
+		"every hit": azdoHostile(size),
+	} {
+		start := time.Now()
+		_, complete := d.Scan(blob)
+		assert.True(t, complete, name)
+		assert.Less(t, time.Since(start), 5*time.Second*slowdown, name)
+	}
+}
+
+// TestDefaultRulesScanMinifiedJSFast: a keyword on every few bytes (token,
+// key, akia) costs a few bytes per hit. Measured about 50 MB/s; the bound is
+// 5 MB/s (a tenth), so a slow machine passes and a pass over everything per
+// rule does not.
+func TestDefaultRulesScanMinifiedJSFast(t *testing.T) {
+	d := defaultRulesDetector(t)
+	js := minifiedJS(4 << 20)
+	start := time.Now()
+	_, complete := d.Scan(js)
+	assert.True(t, complete)
+	assert.Less(t, time.Since(start), time.Duration(float64(len(js))/5e6*float64(time.Second))*time.Duration(slowdown))
 }

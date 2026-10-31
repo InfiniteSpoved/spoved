@@ -65,14 +65,14 @@ var builtinRules = []Rule{
 		ID: "aws-secret-access-key", Name: "AWS secret access key", Type: "aws",
 		Keywords:    []string{"aws"},
 		Regex:       `(?i)aws[\w.-]{0,30}secret[\w.-]{0,30}["']?(?:\s*(?::=|=>|[:=])\s*|\s+)["']?([A-Za-z0-9/+=]{40})(?:[^A-Za-z0-9/+=]|$)`,
-		SecretGroup: 1, MinEntropy: 4, Window: 256,
+		SecretGroup: 1, MinEntropy: 4, Window: 256, Anchored: true,
 	},
 	{
 		// ... or within 120 bytes after an access key ID.
 		ID: "aws-secret-access-key-near-id", Name: "AWS secret access key next to a key ID", Type: "aws",
 		Keywords:    []string{"akia", "asia", "abia", "acca", "a3t"},
 		Regex:       `\b(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16}\b[\s\S]{0,120}?[^A-Za-z0-9/+=]([A-Za-z0-9/+=]{40})(?:[^A-Za-z0-9/+=]|$)`,
-		SecretGroup: 1, MinEntropy: 4.3, Window: 256,
+		SecretGroup: 1, MinEntropy: 4.3, Window: 256, Anchored: true,
 	},
 	{
 		ID: "azure-storage-account-key", Name: "Azure storage account key", Type: "azure",
@@ -94,7 +94,9 @@ var builtinRules = []Rule{
 		Keywords:    []string{"azdo"},
 		Regex:       `([A-Za-z0-9]{76}AZDO[A-Za-z0-9]{4})`,
 		SecretGroup: 1, MinEntropy: 3.5, TokenChars: alnumChars,
-		Window: 100, // the regex has no literal prefix: run it only around "azdo"
+		// The regex has no literal prefix: the hit "AZDO" (this case only) sits
+		// 76 bytes into the match, and 76 alphanumerics must come before it.
+		Window: 4, Anchored: true, KeywordOffset: 76, HitCheck: azdoHit,
 	},
 	{
 		ID: "azure-ad-client-secret", Name: "Azure AD client secret", Type: "azure",
@@ -150,7 +152,7 @@ var builtinRules = []Rule{
 		ID: "forgejo-access-token", Name: "Forgejo, Gitea or spoved access token", Type: "forgejo",
 		Keywords:    []string{"token"},
 		Regex:       `(?i:token)[\w.-]{0,20}["']?\s*[:=]\s*["']?([0-9a-f]{40})`,
-		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars, Window: 100, Anchored: true,
 	},
 	{
 		ID: "forgejo-access-token-header", Name: "Forgejo, Gitea or spoved access token in an Authorization header", Type: "forgejo",
@@ -230,9 +232,31 @@ var builtinRules = []Rule{
 		ID: "generic-secret-assignment", Name: "Generic secret assignment", Type: "generic",
 		Keywords:    []string{"secret", "password", "passwd", "token", "key"},
 		Regex:       `(?i)(?:secret|password|passwd|token|key)[\w.-]{0,20}["']?\s*(?::=|[:=])\s*["']([^\s"'\x60]{20,100})["']`,
-		SecretGroup: 1, MinEntropy: 3.5, DefaultOff: true, Window: 256,
+		SecretGroup: 1, MinEntropy: 3.5, DefaultOff: true, Window: 256, Anchored: true,
 		Allowlist: []string{`^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$`},
 	},
+}
+
+// azdoHit: AZDO in capitals with 76 alphanumeric bytes before it and 4 after.
+func azdoHit(c []byte, p int) bool {
+	if p < 76 || p+8 > len(c) || string(c[p:p+4]) != "AZDO" {
+		return false
+	}
+	for _, b := range c[p-76 : p] {
+		if !isAlnum(b) {
+			return false
+		}
+	}
+	for _, b := range c[p+4 : p+8] {
+		if !isAlnum(b) {
+			return false
+		}
+	}
+	return true
+}
+
+func isAlnum(b byte) bool {
+	return '0' <= b && b <= '9' || 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z'
 }
 
 // azuriteKey is the storage account key of the Azurite emulator, the same on

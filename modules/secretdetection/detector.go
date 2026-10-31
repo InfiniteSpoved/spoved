@@ -112,9 +112,73 @@ func (d *Detector) Scan(content []byte) (findings []Finding, complete bool) {
 		if maxLen <= 0 {
 			maxLen = DefaultMaxSecretLen
 		}
+		accepted, rejected := 0, 0
+		// handle takes one match (offsets relative to base) and says whether
+		// the rule is done for this Scan.
+		handle := func(base int, m []int) (stop bool) {
+			start, end := m[2*r.SecretGroup], m[2*r.SecretGroup+1]
+			if start < 0 || end <= start {
+				return false
+			}
+			start, end = start+base, end+base
+			secret := content[start:end]
+			ok := (!r.KeywordInMatch || hasKeyword(lower[base+m[0]:base+m[1]], r.Keywords)) &&
+				end-start <= maxLen && r.boundaryOK(content, start, end)
+			if ok && r.Normalize != nil {
+				secret = r.Normalize(secret)
+				ok = len(secret) > 0
+			}
+			if ok {
+				ok = len(secret) >= r.MinSecretLen && r.accepts(secret) && !overlaps(found, start, end)
+			}
+			if !ok {
+				if rejected++; r.RejectCap > 0 && rejected >= r.RejectCap {
+					complete = false
+					return true
+				}
+				return false
+			}
+			if macKey == nil {
+				macKey = keying.MACKey(keying.SecretScanning)
+			}
+			found = append(found, rawFinding{r, start, end, fingerprint(macKey, secret)})
+			if accepted++; accepted >= maxFindings {
+				complete = false
+				return true
+			}
+			return false
+		}
+		if r.Anchored {
+			// The match starts at a keyword hit: try the anchored regex on
+			// the bytes after it, which costs a few bytes per hit and not a
+			// pass over everything between hits.
+		anchoredLoop:
+			for _, k := range r.Keywords {
+				for next, off := 0, 0; ; {
+					i := bytes.Index(lower[off:], []byte(k))
+					if i < 0 {
+						break
+					}
+					p := off + i
+					off = p + 1
+					start := p - r.KeywordOffset
+					if p < next || start < 0 || r.HitCheck != nil && !r.HitCheck(content, p) {
+						continue
+					}
+					m := r.anchored.FindSubmatchIndex(content[start:min(len(content), p+len(k)+r.Window)])
+					if m == nil {
+						continue
+					}
+					next = start + max(m[1], 1)
+					if handle(start, m) {
+						break anchoredLoop
+					}
+				}
+			}
+			continue
+		}
 		ranges, ok := r.ranges(lower)
 		complete = complete && ok
-		accepted, rejected := 0, 0
 	rangeLoop:
 		for _, rg := range ranges {
 			// One match at a time, so memory stays O(findings) however many
@@ -126,34 +190,7 @@ func (d *Detector) Scan(content []byte) (findings []Finding, complete bool) {
 				}
 				base := pos
 				pos += max(m[1], 1)
-				start, end := m[2*r.SecretGroup], m[2*r.SecretGroup+1]
-				if start < 0 || end <= start {
-					continue
-				}
-				start, end = start+base, end+base
-				secret := content[start:end]
-				ok := (!r.KeywordInMatch || hasKeyword(lower[base+m[0]:base+m[1]], r.Keywords)) &&
-					end-start <= maxLen && r.boundaryOK(content, start, end)
-				if ok && r.Normalize != nil {
-					secret = r.Normalize(secret)
-					ok = len(secret) > 0
-				}
-				if ok {
-					ok = len(secret) >= r.MinSecretLen && r.accepts(secret) && !overlaps(found, start, end)
-				}
-				if !ok {
-					if rejected++; r.RejectCap > 0 && rejected >= r.RejectCap {
-						complete = false
-						break rangeLoop
-					}
-					continue
-				}
-				if macKey == nil {
-					macKey = keying.MACKey(keying.SecretScanning)
-				}
-				found = append(found, rawFinding{r, start, end, fingerprint(macKey, secret)})
-				if accepted++; accepted >= maxFindings {
-					complete = false
+				if handle(base, m) {
 					break rangeLoop
 				}
 			}

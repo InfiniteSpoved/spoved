@@ -88,6 +88,18 @@ type Rule struct {
 	// of a window see the edge as the start of the text.
 	Window, WindowBudget int
 
+	// Anchored says every match starts KeywordOffset bytes before a keyword
+	// hit (so the regex starts with the keyword, or the keyword sits at a
+	// fixed offset into it). The regex then runs anchored on the bytes from
+	// there to Window bytes after the hit, once per hit, instead of over
+	// whole windows: a keyword that is everywhere (token, key) costs a few
+	// bytes per hit. HitCheck, if set, is a cheap exact test of the hit in
+	// Go (case, bytes around) that must pass before the regex runs. Needs
+	// keywords and Window; \b and ^ at the start see the start of the text.
+	Anchored      bool
+	KeywordOffset int
+	HitCheck      func(content []byte, hit int) bool
+
 	// DefaultOff marks noisy rules (generic ones) that callers should not
 	// enable unless asked to.
 	DefaultOff bool
@@ -96,6 +108,7 @@ type Rule struct {
 type compiledRule struct {
 	Rule
 	re        *regexp.Regexp
+	anchored  *regexp.Regexp
 	allowlist []*regexp.Regexp
 	tokenSet  *[256]bool
 }
@@ -117,6 +130,14 @@ func compileRule(r Rule) (*compiledRule, error) {
 		return nil, fmt.Errorf("secretdetection: rule %s: secret group %d does not exist", r.ID, r.SecretGroup)
 	}
 	c := &compiledRule{Rule: r, re: re}
+	if r.Anchored {
+		if len(r.Keywords) == 0 || r.Window <= 0 {
+			return nil, fmt.Errorf("secretdetection: rule %s: an anchored rule needs keywords and a window", r.ID)
+		}
+		if c.anchored, err = regexp.Compile(`^(?:` + r.Regex + `)`); err != nil {
+			return nil, fmt.Errorf("secretdetection: rule %s: %w", r.ID, err)
+		}
+	}
 	if r.TokenChars != "" {
 		c.tokenSet = new([256]bool)
 		for i := range len(r.TokenChars) {
