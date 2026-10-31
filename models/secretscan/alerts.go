@@ -134,17 +134,17 @@ func (o *LocationSearchOptions) ToConds() builder.Cond {
 
 func (o *LocationSearchOptions) ToOrders() string { return "id" }
 
-// FindFingerprints returns the fingerprints of every alert of the repository, open or resolved.
-func FindFingerprints(ctx context.Context, repoID int64) (map[string]struct{}, error) {
-	var fps []string
-	if err := db.GetEngine(ctx).Table("secret_scanning_alert").Where("repo_id = ?", repoID).Cols("fingerprint").Find(&fps); err != nil {
-		return nil, err
+// AnyFingerprint tells whether an alert of the repository, open or resolved, has one of the fingerprints (looked up
+// in chunks). With codeOnly, an alert that is only in the wiki doesn't count.
+func AnyFingerprint(ctx context.Context, repoID int64, fingerprints []string, codeOnly bool) (bool, error) {
+	for chunk := range slices.Chunk(fingerprints, 500) {
+		opts := &AlertSearchOptions{RepoID: repoID, CodeOnly: codeOnly}
+		cond := opts.ToConds().And(builder.In("fingerprint", chunk))
+		if has, err := db.GetEngine(ctx).Where(cond).Exist(new(Alert)); err != nil || has {
+			return has, err
+		}
 	}
-	out := make(map[string]struct{}, len(fps))
-	for _, f := range fps {
-		out[f] = struct{}{}
-	}
-	return out, nil
+	return false, nil
 }
 
 // HasCodeLocation tells whether the alert has a stored place outside the wiki.

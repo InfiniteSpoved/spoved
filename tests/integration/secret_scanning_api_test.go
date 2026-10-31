@@ -689,6 +689,19 @@ func TestSecretScanningAPIWikiNeedsWikiRead(t *testing.T) {
 		}
 		assert.Equal(t, secretscan_model.StateOpen, secretAlertRow(t, repo.ID, 2).State)
 
+		t.Run("the comment check doesn't confirm a secret that is only in the wiki", func(t *testing.T) {
+			wikiSecret := "wJalrXUtn" + "FEMI/K7MDENG/" + "bPxRfiCY" + "Zq3vT8kLm1"
+			_, err := db.GetEngine(t.Context()).Exec("UPDATE secret_scanning_alert SET fingerprint = ? WHERE repo_id = ? AND `index` = 2", secretdetection.Fingerprint([]byte(wikiSecret)), repo.ID)
+			require.NoError(t, err)
+			one := "/api/v1/repos/org3/secret-wiki-read/secret-scanning/alerts/1"
+			resolve := func(user, comment string, status int) {
+				MakeRequest(t, NewRequestWithJSON(t, "PATCH", one, map[string]string{"state": "resolved", "resolution": "revoked", "resolution_comment": comment}).AddTokenAuth(getUserToken(t, user, auth_model.AccessTokenScopeWriteRepository)), status)
+			}
+			resolve("user5", "old key "+wikiSecret, http.StatusOK)
+			MakeRequest(t, NewRequestWithJSON(t, "PATCH", one, map[string]string{"state": "open"}).AddTokenAuth(getUserToken(t, "user2", auth_model.AccessTokenScopeWriteRepository)), http.StatusOK)
+			resolve("user2", "old key "+wikiSecret, http.StatusUnprocessableEntity)
+		})
+
 		t.Run("an auditor reads the wiki places", func(t *testing.T) {
 			_, err := db.GetEngine(t.Context()).Exec("UPDATE `user` SET is_auditor = ? WHERE id = 8", true)
 			require.NoError(t, err)
@@ -794,12 +807,18 @@ func TestSecretScanningAPIComment(t *testing.T) {
 			"https://paste.example/" + bare,
 			bare + "-old",
 			"cfg.token." + bare,
+			bare + "_old", "tok_" + bare, bare + "+1", bare + "==", "a=" + bare + "=b", "/srv/" + bare + "_bak/x",
+			strings.Repeat("a/", 50) + strings.Repeat("A=", 400) + strings.Repeat("/a", 50),
 			strings.ToUpper(lowerSecret),
 			strings.ToLower(upperSecret),
 			// invisible marks inside it
 			bare[:10] + "\u034f" + bare[10:],
 			bare[:10] + "\ufe0f" + bare[10:],
 			bare[:10] + "\u3164" + bare[10:],
+			bare[:10] + "\u2800" + bare[10:],
+			// a comment the check can't finish within its budget is refused
+			strings.Repeat("a.=", 333),
+			strings.Repeat("ab.=", 250),
 			// another alert's secret is no more welcome here
 			"it was " + otherSecret,
 			"it was " + otherSecret[:10] + "\u034f" + otherSecret[10:],

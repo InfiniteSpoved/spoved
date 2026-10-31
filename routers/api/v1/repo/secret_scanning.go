@@ -242,7 +242,7 @@ func EditSecretScanningAlert(ctx *context.APIContext) {
 		}
 		alert, err = secretscan_service.Reopen(ctx, ctx.Repo().Repository, alert.Index)
 	case "resolved":
-		alert, err = secretscan_service.Close(ctx, ctx.Repo().Repository, ctx.Doer(), alert.Index, form.Resolution, form.ResolutionComment)
+		alert, err = secretscan_service.Close(ctx, ctx.Repo().Repository, ctx.Doer(), alert.Index, form.Resolution, form.ResolutionComment, ctx.Permission().CanRead(unit.TypeWiki))
 	default:
 		ctx.Error(http.StatusUnprocessableEntity, "", "state must be open or resolved")
 		return
