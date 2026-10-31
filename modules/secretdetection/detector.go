@@ -186,24 +186,31 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 			active = append(active, r)
 		}
 	}
+	// ruleRun is one rule's progress, so that a rule that used up its share
+	// can continue where it stopped.
+	type ruleRun struct {
+		r             *compiledRule
+		accepted      int
+		rejected      int
+		done          bool
+		ki, off, next int // anchored: keyword, search offset, end of the last match
+		ranges        [][2]int
+		haveRanges    bool
+		ri, pos       int // windowed and whole-content: range and position in it
+		inRange       bool
+	}
+	runs := make([]*ruleRun, len(active))
 	for i, r := range active {
-		if work >= budget {
-			complete = false
-			break
-		}
-		// A rule may spend its fair share of what is left: an expensive rule
-		// stops alone, and the rules after it still run. A pass over the whole
-		// content is always allowed twice.
-		// The share is a quarter of what is left at the least, so that naming
-		// every keyword in one line does not shrink it, and a rule always
-		// gets two passes over the content.
-		limit := work + (budget-work)/min(len(active)-i, 4)
-		limit = max(limit, min(budget, work+2*len(content)*r.cost))
+		runs[i] = &ruleRun{r: r}
+	}
+	// run works on one rule until it is finished or `work` passes limit, and
+	// says whether the rule is finished.
+	run := func(st *ruleRun, limit int) bool {
+		r := st.r
 		maxLen := r.MaxSecretLen
 		if maxLen <= 0 {
 			maxLen = DefaultMaxSecretLen
 		}
-		accepted, rejected := 0, 0
 		// handle takes one match (offsets relative to base) and says whether
 		// the rule is done for this Scan.
 		handle := func(base int, m []int) (stop bool) {
@@ -223,7 +230,7 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 				ok = len(secret) >= r.MinSecretLen && r.accepts(secret) && !overlaps(found, start, end)
 			}
 			if !ok {
-				if rejected++; r.RejectCap > 0 && rejected >= r.RejectCap {
+				if st.rejected++; r.RejectCap > 0 && st.rejected >= r.RejectCap {
 					complete = false
 					return true
 				}
@@ -233,7 +240,7 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 				macKey = keying.MACKey(keying.SecretScanning)
 			}
 			found = append(found, rawFinding{r, start, end, fingerprint(macKey, secret)})
-			if accepted++; accepted >= maxFindings {
+			if st.accepted++; st.accepted >= maxFindings {
 				complete = false
 				return true
 			}
@@ -243,24 +250,24 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 			// The match starts at a keyword hit: try the anchored regex on
 			// the bytes after it, which costs a few bytes per hit and not a
 			// pass over everything between hits.
-		anchoredLoop:
-			for _, k := range r.Keywords {
-				for next, off := 0, 0; ; {
-					i := bytes.Index(lower[off:], []byte(k))
+			for ; st.ki < len(r.Keywords); st.ki, st.off, st.next = st.ki+1, 0, 0 {
+				k := r.Keywords[st.ki]
+				for {
+					if work > limit {
+						return false
+					}
+					i := bytes.Index(lower[st.off:], []byte(k))
 					if i < 0 {
 						break
 					}
-					p := off + i
-					off = p + 1
+					p := st.off + i
+					st.off = p + 1
 					start := p - r.KeywordOffset
-					if p < next || start < 0 {
+					if p < st.next || start < 0 {
 						continue
 					}
 					if r.HitCheck != nil {
-						if work += hitCheckCost; work > limit {
-							complete = false
-							break anchoredLoop
-						}
+						work += hitCheckCost
 						if !r.HitCheck(lower, content, p) {
 							continue
 						}
@@ -272,35 +279,36 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 					work += callCost
 					if m == nil {
 						work += len(win) * r.cost
-					} else {
-						work += m[1] * r.cost
-					}
-					if work > limit {
-						complete = false
-						break anchoredLoop
-					}
-					if m == nil {
 						continue
 					}
-					next = start + max(m[1], 1)
+					work += m[1] * r.cost
+					st.next = start + max(m[1], 1)
 					if handle(start, m) {
-						break anchoredLoop
+						return true
 					}
 				}
 			}
-			continue
+			return true
 		}
-		ranges, spent, ok := r.ranges(lower, limit-work)
-		work += spent
-		if !ok {
-			complete = false
-			continue
+		if !st.haveRanges {
+			ranges, spent, ok := r.ranges(lower, limit-work)
+			work += spent
+			if !ok {
+				return false
+			}
+			st.ranges, st.haveRanges = ranges, true
 		}
-	rangeLoop:
-		for _, rg := range ranges {
+		for ; st.ri < len(st.ranges); st.ri, st.inRange = st.ri+1, false {
+			rg := st.ranges[st.ri]
+			if !st.inRange {
+				st.pos, st.inRange = rg[0], true
+			}
 			// One match at a time, so memory stays O(findings) however many
 			// matches the rule rejects.
-			for pos := rg[0]; pos < rg[1]; {
+			for st.pos < rg[1] {
+				if work > limit {
+					return false
+				}
 				// A window rule gets the regex in pieces of workChunk bytes
 				// that overlap by Window, so no single call can run far past
 				// the budget; a match that starts in the overlap is found in
@@ -309,33 +317,60 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 				// so a call can't run far past it.
 				size := min(workChunk, max(2*r.Window+64, (limit-work)/r.cost))
 				end, last := rg[1], true
-				if r.Window > 0 && end-pos > size {
-					end, last = pos+size, false
+				if r.Window > 0 && end-st.pos > size {
+					end, last = st.pos+size, false
 				}
-				m := r.re.FindSubmatchIndex(content[pos:end])
+				m := r.re.FindSubmatchIndex(content[st.pos:end])
 				work += callCost
 				if m == nil {
-					work += (end - pos) * r.cost
+					work += (end - st.pos) * r.cost
 				} else {
 					work += m[1] * r.cost
 				}
-				if work > limit {
-					complete = false
-					break rangeLoop
-				}
-				if m == nil || !last && m[0] >= end-pos-r.Window {
+				if m == nil || !last && m[0] >= end-st.pos-r.Window {
 					if last {
 						break
 					}
-					pos = end - r.Window
+					st.pos = end - r.Window
 					continue
 				}
-				base := pos
-				pos += max(m[1], 1)
+				base := st.pos
+				st.pos += max(m[1], 1)
 				if handle(base, m) {
-					break rangeLoop
+					return true
 				}
 			}
+		}
+		return true
+	}
+	// First every rule runs on its fair share of what is left (a rule that
+	// needs less passes the rest on), so decoys for early rules can't starve
+	// later ones; then the work that is left goes to the rules that stopped,
+	// each continuing where it stopped.
+	for i, st := range runs {
+		if work >= budget {
+			break
+		}
+		st.done = run(st, work+(budget-work)/(len(runs)-i))
+	}
+	for i, st := range runs {
+		if st.done {
+			continue
+		}
+		if work >= budget {
+			break
+		}
+		stopped := 0
+		for _, s := range runs[i:] {
+			if !s.done {
+				stopped++
+			}
+		}
+		st.done = run(st, work+(budget-work)/stopped)
+	}
+	for _, st := range runs {
+		if !st.done {
+			complete = false
 		}
 	}
 	sort.SliceStable(found, func(i, j int) bool { return found[i].start < found[j].start })

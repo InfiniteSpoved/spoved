@@ -80,6 +80,7 @@ var builtinRules = []Rule{
 		Keywords:    []string{"accountkey", "storage_key", "storage_account_key", "storageaccount_key", "storagekey", "storageaccountkey"},
 		Regex:       `(?i)(?:accountkey|storage_?(?:account_?)?key)["']?\s*[:=]\s*["']?([A-Za-z0-9+/]{86}==)`,
 		SecretGroup: 1, MinEntropy: 4,
+		Window:    512,
 		Allowlist: []string{"^" + regexp.QuoteMeta(azuriteKey) + "$"},
 	},
 	{
@@ -88,6 +89,7 @@ var builtinRules = []Rule{
 		Keywords:    []string{"sharedaccesskey"},
 		Regex:       `(?i)sharedaccesskey["']?\s*[:=]\s*["']?([A-Za-z0-9+/]{43}=)`,
 		SecretGroup: 1, MinEntropy: 4,
+		Window: 512,
 	},
 	{
 		// The 84 character PAT format (2024) has AZDO at bytes 77 to 80.
@@ -104,6 +106,7 @@ var builtinRules = []Rule{
 		Keywords:    []string{"q~"},
 		Regex:       `([a-zA-Z0-9_~.]{3}\dQ~[a-zA-Z0-9_~.-]{31,34})`,
 		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars + "_~.-", TrailingOK: ".",
+		Window: 64,
 	},
 	{
 		// type and private_key sit in the same JSON object, type first. The
@@ -142,6 +145,7 @@ var builtinRules = []Rule{
 		Keywords:    []string{"glpat-", "gldt-", "glrt-", "glptt-", "glft-", "glimt-", "glagent-", "glcbt-", "glsoat-", "glffct-", "gloas-", "gr1348941"},
 		Regex:       `(gl(?:pat|dt|rt|ptt|ft|imt|agent|cbt|soat|ffct|oas)-[0-9A-Za-z_-]{20,300}(?:\.[0-9a-z]{9})?|GR1348941[0-9A-Za-z_-]{20})`,
 		SecretGroup: 1, MinEntropy: 3, TokenChars: wordChars,
+		Window: 400,
 	},
 	// An access token of Forgejo, Gitea and spoved is 40 hex characters (hex
 	// of 20 random bytes, models/auth/access_token.go) with no prefix, so it
@@ -160,6 +164,7 @@ var builtinRules = []Rule{
 		Keywords:    []string{"authorization"},
 		Regex:       `(?i:authorization)["']?\s*[:=]\s*["']?(?i:token|bearer)\s+([0-9a-f]{40})`,
 		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars,
+		Window: 512,
 	},
 	{
 		ID: "forgejo-access-token-netrc", Name: "Forgejo, Gitea or spoved access token in a .netrc file", Type: "forgejo",
@@ -209,6 +214,7 @@ var builtinRules = []Rule{
 		Keywords:    []string{"sk_live_", "rk_live_"},
 		Regex:       `((?:sk|rk)_live_[0-9A-Za-z]{10,247})`,
 		SecretGroup: 1, MinEntropy: 2, TokenChars: alnumChars,
+		Window: 300,
 	},
 	{
 		// Its own rule so users can mark test keys as "used in tests".
@@ -216,6 +222,7 @@ var builtinRules = []Rule{
 		Keywords:    []string{"sk_test_", "rk_test_"},
 		Regex:       `((?:sk|rk)_test_[0-9A-Za-z]{10,247})`,
 		SecretGroup: 1, MinEntropy: 2, TokenChars: alnumChars,
+		Window: 300,
 	},
 	{
 		// Three base64url parts; header and payload start with eyJ (`{"`). The
