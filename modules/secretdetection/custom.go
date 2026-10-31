@@ -32,6 +32,8 @@ const (
 	MaxCustomKeywords   = 5
 	// MinCustomSecretLen is the shortest secret a custom rule reports.
 	MinCustomSecretLen = 8
+	// MaxCustomRules is how many custom rules a Detector takes.
+	MaxCustomRules = 50
 	// MaxCorpusMatches is how often a custom pattern may match the ordinary
 	// text corpus; more means it matches ordinary files (`.*`, `\w+`, a hash).
 	MaxCorpusMatches = 10
@@ -111,17 +113,24 @@ func ValidateCustomRule(name, pattern, testString string, keywords []string) err
 
 // CustomRule is the Rule of a custom pattern: the secret is capture group 1 if
 // the pattern has one, else the whole match, and at least 8 bytes. It runs in
-// windows around the (lowercased) keywords: the secret length cap on each side
-// plus room for the context.
+// windows around the (lowercased) keywords: as many bytes on each side as the
+// longest match of the pattern, so a match that holds a keyword lies inside.
 func CustomRule(id, name, pattern string, keywords []string) Rule {
 	r := Rule{
 		ID: id, Name: name, Type: "custom", Regex: pattern,
-		MinSecretLen: MinCustomSecretLen, Window: DefaultMaxSecretLen + 256, // a longer secret is cut by the window, so it is over the cap
-		WindowBudget: MaxWindowBytes, KeywordInMatch: true, RejectCap: MaxRejectedPerRule,
+		MinSecretLen: MinCustomSecretLen, Window: DefaultMaxSecretLen + 256,
+		KeywordInMatch: true, RejectCap: MaxRejectedPerRule,
 		Allowlist: slices.Clone(placeholders),
 	}
 	if re, err := regexp.Compile(pattern); err == nil {
 		r.SecretGroup = min(re.NumSubexp(), 1)
+	}
+	if parsed, err := syntax.Parse(pattern, syntax.Perl); err == nil {
+		// Unbounded repeats are refused by validation, so this is finite; a
+		// rule built without validation keeps the default.
+		if n := maxMatchLen(parsed.Simplify()); n > 0 {
+			r.Window = n
+		}
 	}
 	for _, k := range keywords {
 		r.Keywords = append(r.Keywords, strings.ToLower(k))
@@ -179,6 +188,54 @@ func checkComplexity(pattern string) error {
 		return ErrPatternTooComplex
 	}
 	return nil
+}
+
+// maxMatchLen is the most bytes a match of r can have (a pattern without
+// unbounded repeats). A class or literal counts 4 bytes if it can hold a
+// non-ASCII rune (the case folds of k and s are 3 bytes).
+func maxMatchLen(r *syntax.Regexp) int {
+	switch r.Op {
+	case syntax.OpLiteral:
+		n := 0
+		for _, c := range r.Rune {
+			switch {
+			case c >= 0x80:
+				n += 4
+			case r.Flags&syntax.FoldCase != 0 && strings.ContainsRune("ksKS", c):
+				n += 3
+			default:
+				n++
+			}
+		}
+		return n
+	case syntax.OpCharClass:
+		for i := 1; i < len(r.Rune); i += 2 {
+			if r.Rune[i] >= 0x80 {
+				return 4
+			}
+		}
+		return 1
+	case syntax.OpAnyChar, syntax.OpAnyCharNotNL:
+		return 4
+	case syntax.OpStar, syntax.OpPlus:
+		return -1 << 30 // unbounded: callers fall back
+	case syntax.OpConcat, syntax.OpAlternate:
+		total := 0
+		for _, sub := range r.Sub {
+			n := maxMatchLen(sub)
+			if r.Op == syntax.OpConcat {
+				total += n
+			} else {
+				total = max(total, n)
+			}
+		}
+		return total
+	case syntax.OpRepeat:
+		return max(r.Max, 0) * maxMatchLen(r.Sub[0])
+	case syntax.OpQuest, syntax.OpCapture:
+		return maxMatchLen(r.Sub[0])
+	}
+	return 0
 }
 
 // unbounded: the simplified pattern has a * or + (an x{n,} became one).

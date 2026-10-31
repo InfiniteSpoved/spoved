@@ -64,15 +64,16 @@ func TestCustomKeywordMustBeInTheMatchWhenScanning(t *testing.T) {
 	assert.Empty(t, scanOf(d, []byte("acme_ and "+word+"\n")))
 }
 
-func TestWindowsAreCutNotDropped(t *testing.T) {
-	// one merged window of 1.5 MiB, the secret in its first MiB
+func TestCustomWindowsAreNeverCut(t *testing.T) {
+	// one merged window of 1.7 MiB with the secret at its far end: a cut
+	// window used to hide it, or fingerprint a shortened secret
 	dense := strings.Repeat("acme_ filler text goes here\n", 60000)
-	require.Greater(t, len(dense), MaxWindowBytes+MaxWindowBytes/2)
 	secret := "acme_" + fake(12, alnum)
 	d := customDetector(t, `acme_[A-Za-z0-9]{12}`, "acme_")
-	fs, complete := d.Scan([]byte(secret + "\n" + dense))
-	assert.Len(t, fs, 1, "the first window is cut to the budget, not dropped")
-	assert.False(t, complete)
+	fs, complete := d.Scan([]byte(dense + secret + "\n"))
+	assert.Len(t, fs, 1)
+	assert.True(t, complete)
+	assert.Equal(t, Fingerprint([]byte(secret)), fs[0].Fingerprint)
 }
 
 func TestBuiltInWindowedRulesHaveNoBudget(t *testing.T) {
@@ -130,15 +131,17 @@ func TestUTF16IsDecodedLeniently(t *testing.T) {
 		assert.Len(t, fs, 1, name)
 		assert.True(t, complete, name)
 	}
-	// without a NUL in the first 8000 bytes a BOM is just bytes
-	fs, _ := d.Scan([]byte("\xff\xfe GITHUB_TOKEN=" + token))
+	// CJK text has no NUL byte: with a BOM it is decoded, and a secret after it is found
+	cjk := strings.Repeat("日本語の設定ファイル。", 400)
+	fs, complete := d.Scan(utf16Bytes(le, cjk+"\r\nGITHUB_TOKEN="+token+"\r\n", true))
 	assert.Len(t, fs, 1)
+	assert.True(t, complete)
 	// UTF-32 and other NUL-heavy data stays binary
 	var u32 []byte
 	for _, r := range body {
 		u32 = le.AppendUint32(u32, uint32(r))
 	}
-	fs, complete := d.Scan(u32)
+	fs, complete = d.Scan(u32)
 	assert.Empty(t, fs)
 	assert.True(t, complete)
 	// nothing could be read from a body that is there: not "complete"

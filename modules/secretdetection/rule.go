@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"regexp/syntax"
 	"strings"
 )
 
@@ -50,15 +51,13 @@ type Rule struct {
 	// express.
 	Check func(secret []byte) bool
 
-	// TokenChars, if set, are the bytes a token is made of: a match is
-	// dropped when the byte before or after the secret is one of them. That is
-	// deliberate: a token right after a token character is part of a longer
-	// word (a hash, an identifier), not a key of its own, and RE2 can't say so
-	// with \b without consuming the neighbour. TrailingOK lists bytes that
-	// may follow anyway. An escape that an escape (\n, \r,
-	// \t, \xXX, \uXXXX) or a URL escape (%XX) may stand right before it. RE2 has no lookaround
-	// and a consumed boundary would hide a neighbouring token, so this is
-	// checked here, not in the regex.
+	// TokenChars, if set, are the bytes a token is made of. A match is dropped
+	// when the byte before or after the secret is one of them: a token glued
+	// to a token character is part of a longer word (a hash, an identifier),
+	// not a key of its own. RE2 has no lookaround, and a boundary consumed by
+	// the regex would hide a neighbouring token, so this is checked in Go.
+	// Before the secret an escape is not glued: \n, \r, \t, \xXX, \uXXXX or
+	// a URL escape (%XX). TrailingOK lists bytes that may follow anyway.
 	TokenChars string
 
 	// MaxSecretLen drops a longer capture; 0 means DefaultMaxSecretLen.
@@ -79,26 +78,19 @@ type Rule struct {
 	// scanning, not only for its test string.
 	KeywordInMatch bool
 
-	// Window, if above 0, runs the regex only on the Window bytes before and
-	// after each keyword hit (windows that touch are merged). WindowBudget, if
-	// above 0, caps the bytes of windows per Scan (the last window is cut, not
-	// dropped); what lies beyond is not scanned and Scan reports it. Without a
-	// budget the whole content may be covered. The regex can't match anything that doesn't lie within
-	// Window bytes of a keyword. Needs keywords. Anchors (^, \b) at the edge
-	// of a window see the edge as the start of the text.
-	Window, WindowBudget int
-
-	// Anchored says every match starts KeywordOffset bytes before a keyword
-	// hit (so the regex starts with the keyword, or the keyword sits at a
-	// fixed offset into it). The regex then runs anchored on the bytes from
-	// there to Window bytes after the hit, once per hit, instead of over
-	// whole windows: a keyword that is everywhere (token, key) costs a few
-	// bytes per hit. HitCheck, if set, is a cheap exact test of the hit in
-	// Go (case, bytes around) that must pass before the regex runs. Needs
-	// keywords and Window; \b and ^ at the start see the start of the text.
+	// Window, if above 0, runs the regex only near keyword hits. A plain
+	// window rule gets the Window bytes before and after each hit (windows
+	// that touch are merged). An Anchored rule says every match starts
+	// KeywordOffset bytes before a keyword hit (the regex starts with the
+	// keyword, or the keyword sits at a fixed offset into it): the regex then
+	// runs anchored on the bytes from there to Window bytes after the hit,
+	// once per hit that HitCheck (a cheap exact test in Go: case, bytes
+	// around; lower is the ASCII-lowercased content) lets through. \b and ^
+	// at the start of a window see the start of the text. Needs keywords.
+	Window        int
 	Anchored      bool
 	KeywordOffset int
-	HitCheck      func(content []byte, hit int) bool
+	HitCheck      func(lower, content []byte, hit int) bool
 
 	// DefaultOff marks noisy rules (generic ones) that callers should not
 	// enable unless asked to.
@@ -109,6 +101,7 @@ type compiledRule struct {
 	Rule
 	re        *regexp.Regexp
 	anchored  *regexp.Regexp
+	cost      int // work units per byte the regex is given, see Detector.MaxWork
 	allowlist []*regexp.Regexp
 	tokenSet  *[256]bool
 }
@@ -130,6 +123,15 @@ func compileRule(r Rule) (*compiledRule, error) {
 		return nil, fmt.Errorf("secretdetection: rule %s: secret group %d does not exist", r.ID, r.SecretGroup)
 	}
 	c := &compiledRule{Rule: r, re: re}
+	c.cost = 1 // a pass over the content with a literal prefix is about 8 times cheaper than a window
+	if r.Anchored || r.Window > 0 {
+		c.cost = 8
+	}
+	if r.Type == "custom" {
+		// The NFA costs about 3 units per instruction per byte (measured:
+		// 150 instructions run at 1 MB/s).
+		c.cost = max(8, 3*progSize(r.Regex))
+	}
 	if r.Anchored {
 		if len(r.Keywords) == 0 || r.Window <= 0 {
 			return nil, fmt.Errorf("secretdetection: rule %s: an anchored rule needs keywords and a window", r.ID)
@@ -198,4 +200,17 @@ func (r *compiledRule) boundaryOK(c []byte, start, end int) bool {
 
 func isHex(b byte) bool {
 	return '0' <= b && b <= '9' || 'a' <= b && b <= 'f' || 'A' <= b && b <= 'F'
+}
+
+// progSize is the number of instructions of the simplified pattern.
+func progSize(pattern string) int {
+	parsed, err := syntax.Parse(pattern, syntax.Perl)
+	if err != nil {
+		return MaxCustomProgSize
+	}
+	prog, err := syntax.Compile(parsed.Simplify())
+	if err != nil {
+		return MaxCustomProgSize
+	}
+	return len(prog.Inst)
 }

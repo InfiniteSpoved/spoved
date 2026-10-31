@@ -33,6 +33,7 @@
 package secretdetection
 
 import (
+	"bytes"
 	"encoding/base64"
 	"regexp"
 	"slices"
@@ -65,14 +66,14 @@ var builtinRules = []Rule{
 		ID: "aws-secret-access-key", Name: "AWS secret access key", Type: "aws",
 		Keywords:    []string{"aws"},
 		Regex:       `(?i)aws[\w.-]{0,30}secret[\w.-]{0,30}["']?(?:\s*(?::=|=>|[:=])\s*|\s+)["']?([A-Za-z0-9/+=]{40})(?:[^A-Za-z0-9/+=]|$)`,
-		SecretGroup: 1, MinEntropy: 4, Window: 256, Anchored: true,
+		SecretGroup: 1, MinEntropy: 4, Window: 512, Anchored: true, HitCheck: awsSecretHit,
 	},
 	{
 		// ... or within 120 bytes after an access key ID.
 		ID: "aws-secret-access-key-near-id", Name: "AWS secret access key next to a key ID", Type: "aws",
 		Keywords:    []string{"akia", "asia", "abia", "acca", "a3t"},
 		Regex:       `\b(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16}\b[\s\S]{0,120}?[^A-Za-z0-9/+=]([A-Za-z0-9/+=]{40})(?:[^A-Za-z0-9/+=]|$)`,
-		SecretGroup: 1, MinEntropy: 4.3, Window: 256, Anchored: true,
+		SecretGroup: 1, MinEntropy: 4.3, Window: 256, Anchored: true, HitCheck: awsIDHit,
 	},
 	{
 		ID: "azure-storage-account-key", Name: "Azure storage account key", Type: "azure",
@@ -152,7 +153,7 @@ var builtinRules = []Rule{
 		ID: "forgejo-access-token", Name: "Forgejo, Gitea or spoved access token", Type: "forgejo",
 		Keywords:    []string{"token"},
 		Regex:       `(?i:token)[\w.-]{0,20}["']?\s*[:=]\s*["']?([0-9a-f]{40})`,
-		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars, Window: 100, Anchored: true,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars, Window: 512, Anchored: true, HitCheck: tokenHit,
 	},
 	{
 		ID: "forgejo-access-token-header", Name: "Forgejo, Gitea or spoved access token in an Authorization header", Type: "forgejo",
@@ -232,13 +233,17 @@ var builtinRules = []Rule{
 		ID: "generic-secret-assignment", Name: "Generic secret assignment", Type: "generic",
 		Keywords:    []string{"secret", "password", "passwd", "token", "key"},
 		Regex:       `(?i)(?:secret|password|passwd|token|key)[\w.-]{0,20}["']?\s*(?::=|[:=])\s*["']([^\s"'\x60]{20,100})["']`,
-		SecretGroup: 1, MinEntropy: 3.5, DefaultOff: true, Window: 256, Anchored: true,
+		SecretGroup: 1, MinEntropy: 3.5, DefaultOff: true, Window: 512, Anchored: true, HitCheck: genericHit,
 		Allowlist: []string{`^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$`},
 	},
 }
 
+// The hit checks below are the cheap exact tests of the hot rules: they let a
+// keyword hit through to the regex only if the bytes around it have the shape
+// of a match, so text that is all keywords costs a few comparisons per hit.
+
 // azdoHit: AZDO in capitals with 76 alphanumeric bytes before it and 4 after.
-func azdoHit(c []byte, p int) bool {
+func azdoHit(_, c []byte, p int) bool {
 	if p < 76 || p+8 > len(c) || string(c[p:p+4]) != "AZDO" {
 		return false
 	}
@@ -253,6 +258,135 @@ func azdoHit(c []byte, p int) bool {
 		}
 	}
 	return true
+}
+
+func isWord(b byte) bool { return isAlnum(b) || b == '_' }
+
+func isBlank(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f' || b == '\v'
+}
+
+func isQuote(b byte) bool { return b == '"' || b == '\'' }
+
+// valueAfter follows the shape name[\w.-]{0,gap}["']?, blanks, an assignment
+// operator (:=, =>, : or =; with blankOnly a run of blanks alone will do),
+// blanks, an optional quote (a required one with needQuote), and returns where
+// the value starts. Blanks are bounded at 500 bytes, as the window is.
+func valueAfter(c []byte, i, gap int, blankOnly, needQuote bool) (int, bool) {
+	for n := 0; i < len(c) && n < gap && (isWord(c[i]) || c[i] == '.' || c[i] == '-'); n++ {
+		i++
+	}
+	if i < len(c) && isQuote(c[i]) {
+		i++
+	}
+	skip := func() int {
+		start := i
+		for end := i + 500; i < len(c) && i < end && isBlank(c[i]); i++ {
+		}
+		return i - start
+	}
+	blanks := skip()
+	switch {
+	case i+1 < len(c) && (c[i] == ':' && c[i+1] == '=' || c[i] == '=' && c[i+1] == '>'):
+		i += 2
+	case i < len(c) && (c[i] == ':' || c[i] == '='):
+		i++
+	case blankOnly && blanks > 0:
+	default:
+		return 0, false
+	}
+	skip()
+	if i < len(c) && isQuote(c[i]) {
+		i++
+	} else if needQuote {
+		return 0, false
+	}
+	return i, true
+}
+
+func isHexLower(b byte) bool { return '0' <= b && b <= '9' || 'a' <= b && b <= 'f' }
+
+func isB64(b byte) bool { return isAlnum(b) || b == '/' || b == '+' || b == '=' }
+
+// run is the length of the run of bytes ok accepts at c[i:], up to max+1.
+func run(c []byte, i, max int, ok func(byte) bool) int {
+	n := 0
+	for i+n < len(c) && n <= max && ok(c[i+n]) {
+		n++
+	}
+	return n
+}
+
+// tokenHit: "token", a short name rest, an assignment, then 40 lowercase hex
+// digits (as the pattern; capitals are the pattern's business, the hit only
+// needs the digits to be there).
+func tokenHit(_, c []byte, p int) bool {
+	i, ok := valueAfter(c, p+len("token"), 20, false, false)
+	return ok && run(c, i, 40, func(b byte) bool { return isHexLower(b) || 'A' <= b && b <= 'F' }) >= 40
+}
+
+// genericHit: one of the generic rule's words, a quoted assignment, then 20 to
+// 100 bytes without blanks or quotes and a closing quote.
+func genericHit(lower, c []byte, p int) bool {
+	for _, w := range []string{"secret", "password", "passwd", "token", "key"} {
+		if !bytes.HasPrefix(lower[p:], []byte(w)) {
+			continue
+		}
+		i, ok := valueAfter(c, p+len(w), 20, false, true)
+		if !ok {
+			continue
+		}
+		n := run(c, i, 100, func(b byte) bool { return !isBlank(b) && !isQuote(b) && b != '`' })
+		if n >= 20 && n <= 100 && i+n < len(c) && isQuote(c[i+n]) {
+			return true
+		}
+	}
+	return false
+}
+
+// awsSecretHit: "aws", then within the 30 bytes the pattern allows a "secret",
+// then an assignment and 40 base64 bytes.
+func awsSecretHit(lower, c []byte, p int) bool {
+	limit := min(len(lower), p+3+30+len("secret"))
+	for from := p; ; {
+		j := bytes.Index(lower[from:limit], []byte("secret"))
+		if j < 0 {
+			return false
+		}
+		if i, ok := valueAfter(c, from+j+len("secret"), 30, true, false); ok && run(c, i, 40, isB64) >= 40 {
+			return true
+		}
+		from += j + 1
+	}
+}
+
+// awsIDHit: a key ID that starts a word, has 16 more of A-Z2-7 and ends it,
+// with a 40 byte base64 run in the 140 bytes after it.
+func awsIDHit(_, c []byte, p int) bool {
+	if p > 0 && isWord(c[p-1]) || p+20 > len(c) {
+		return false
+	}
+	switch {
+	case string(c[p:p+4]) == "AKIA", string(c[p:p+4]) == "ASIA", string(c[p:p+4]) == "ABIA", string(c[p:p+4]) == "ACCA":
+	case string(c[p:p+3]) == "A3T" && ('A' <= c[p+3] && c[p+3] <= 'Z' || '0' <= c[p+3] && c[p+3] <= '9'):
+	default:
+		return false
+	}
+	for _, b := range c[p+4 : p+20] {
+		if !('A' <= b && b <= 'Z' || '2' <= b && b <= '7') {
+			return false
+		}
+	}
+	if p+20 < len(c) && isWord(c[p+20]) {
+		return false
+	}
+	// the secret: 40 base64 bytes after a non-base64 byte, within 121 bytes
+	for i, n := p+20, 0; i < len(c) && n < 162; i, n = i+1, n+1 {
+		if !isB64(c[i]) && run(c, i+1, 40, isB64) >= 40 {
+			return true
+		}
+	}
+	return false
 }
 
 func isAlnum(b byte) bool {
