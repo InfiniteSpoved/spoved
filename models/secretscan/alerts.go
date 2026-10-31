@@ -51,6 +51,9 @@ type AlertSearchOptions struct {
 	State       string   // open or resolved
 	Resolutions []string // closed states
 	SecretTypes []string // rule IDs
+	Sort        string   // created (the default) or updated
+	Ascending   bool
+	CodeOnly    bool // only alerts that have a place outside the wiki
 }
 
 func (o *AlertSearchOptions) ToConds() builder.Cond {
@@ -67,13 +70,29 @@ func (o *AlertSearchOptions) ToConds() builder.Cond {
 	if len(o.SecretTypes) > 0 {
 		cond = cond.And(builder.In("rule_id", o.SecretTypes))
 	}
+	if o.CodeOnly {
+		cond = cond.And(builder.Expr("EXISTS (SELECT 1 FROM secret_scanning_location WHERE secret_scanning_location.alert_id = secret_scanning_alert.id AND secret_scanning_location.kind <> ?)", KindWiki))
+	}
 	return cond
 }
 
-func (o *AlertSearchOptions) ToOrders() string { return "id DESC" }
+func (o *AlertSearchOptions) ToOrders() string {
+	col, dir := "id", " DESC"
+	if o.Sort == "updated" {
+		col = "updated_unix"
+	}
+	if o.Ascending {
+		dir = ""
+	}
+	return col + dir + ", id" + dir
+}
 
-// ParseFilters checks the state and the comma lists of the list filters.
-func (o *AlertSearchOptions) ParseFilters(state, resolution, secretType string) error {
+// ParseFilters checks the state, the comma lists and the order of the list filters.
+func (o *AlertSearchOptions) ParseFilters(state, resolution, secretType, sort, direction string) error {
+	if sort != "" && sort != "created" && sort != "updated" || direction != "" && direction != "asc" && direction != "desc" {
+		return util.NewInvalidArgumentErrorf("sort must be created or updated, direction asc or desc")
+	}
+	o.Sort, o.Ascending = sort, direction == "asc"
 	if state != "" && state != StateOpen && state != "resolved" {
 		return util.NewInvalidArgumentErrorf("state must be open or resolved")
 	}
@@ -115,14 +134,35 @@ func (o *LocationSearchOptions) ToConds() builder.Cond {
 
 func (o *LocationSearchOptions) ToOrders() string { return "id" }
 
-// CountCodeLocations counts the stored places of the alerts that are not in the wiki, in one query.
-func CountCodeLocations(ctx context.Context, repoID int64, alertIDs []int64) (map[int64]int, error) {
+// FindFingerprints returns the fingerprints of every alert of the repository, open or resolved.
+func FindFingerprints(ctx context.Context, repoID int64) (map[string]struct{}, error) {
+	var fps []string
+	if err := db.GetEngine(ctx).Table("secret_scanning_alert").Where("repo_id = ?", repoID).Cols("fingerprint").Find(&fps); err != nil {
+		return nil, err
+	}
+	out := make(map[string]struct{}, len(fps))
+	for _, f := range fps {
+		out[f] = struct{}{}
+	}
+	return out, nil
+}
+
+// HasCodeLocation tells whether the alert has a stored place outside the wiki.
+func HasCodeLocation(ctx context.Context, repoID, alertID int64) (bool, error) {
+	return db.GetEngine(ctx).Where(builder.Eq{"repo_id": repoID, "alert_id": alertID}.And(builder.Neq{"kind": KindWiki})).Exist(new(Location))
+}
+
+// CountLocations counts the stored places of the alerts in one query, without those in the wiki when noWiki is set.
+func CountLocations(ctx context.Context, repoID int64, alertIDs []int64, noWiki bool) (map[int64]int, error) {
 	var rows []struct {
 		AlertID int64
 		N       int
 	}
-	err := db.GetEngine(ctx).Table("secret_scanning_location").Select("alert_id, COUNT(*) AS n").
-		Where(builder.Eq{"repo_id": repoID}.And(builder.In("alert_id", alertIDs)).And(builder.Neq{"kind": KindWiki})).GroupBy("alert_id").Find(&rows)
+	cond := builder.Eq{"repo_id": repoID}.And(builder.In("alert_id", alertIDs))
+	if noWiki {
+		cond = cond.And(builder.Neq{"kind": KindWiki})
+	}
+	err := db.GetEngine(ctx).Table("secret_scanning_location").Select("alert_id, COUNT(*) AS n").Where(cond).GroupBy("alert_id").Find(&rows)
 	out := make(map[int64]int, len(rows))
 	for _, r := range rows {
 		out[r.AlertID] = r.N

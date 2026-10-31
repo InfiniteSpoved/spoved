@@ -141,6 +141,7 @@ func TestSecretScanningAPI(t *testing.T) {
 				assert.Len(t, one.Fingerprint, 64)
 				assert.Equal(t, b.repo.HTMLURL()+"/security/secrets/1", one.HTMLURL)
 				assert.Equal(t, b.repo.APIURL()+"/secret-scanning/alerts/1/locations", one.LocationsURL)
+				assert.Equal(t, b.repo.APIURL()+"/secret-scanning/alerts/1", one.URL)
 				assert.Equal(t, 1, one.LocationsCount)
 				assert.Nil(t, one.ResolvedBy)
 				assert.Empty(t, one.Resolution)
@@ -151,18 +152,23 @@ func TestSecretScanningAPI(t *testing.T) {
 				assert.Equal(t, "1", resp.Header().Get("X-Total-Count"))
 				require.Len(t, locs, 1)
 				l := locs[0]
-				assert.Equal(t, "repo", l.Kind)
-				assert.Equal(t, "deploy/env", l.Path)
-				assert.Equal(t, 3, l.StartLine)
-				assert.Equal(t, "commitsha1", l.CommitSHA)
-				assert.Equal(t, "An Author", l.CommitAuthorName)
-				assert.Equal(t, "author@example.com", l.CommitAuthorEmail)
-				require.NotNil(t, l.CommitDate)
-				assert.Equal(t, b.repo.HTMLURL()+"/src/commit/commitsha1/deploy/env#L3", l.HTMLURL)
+				assert.Equal(t, "commit", l.Type)
+				d := l.Details
+				assert.Equal(t, "deploy/env", d.Path)
+				assert.Equal(t, 3, d.StartLine)
+				assert.Equal(t, "commitsha1", d.CommitSHA)
+				assert.Equal(t, b.repo.APIURL()+"/git/commits/commitsha1", d.CommitURL)
+				assert.Equal(t, "An Author", d.CommitAuthorName)
+				assert.Equal(t, "author@example.com", d.CommitAuthorEmail)
+				require.NotNil(t, d.CommitDate)
+				assert.Equal(t, b.repo.HTMLURL()+"/src/commit/commitsha1/deploy/env#L3", d.HTMLURL)
+				assert.False(t, d.PullRef)
+				locs = nil // decoding into old elements keeps their fields
 				DecodeJSON(t, do(t, "GET", b.base+"/3/locations", readToken, nil, http.StatusOK), &locs)
 				require.Len(t, locs, 1)
-				assert.Equal(t, "wiki", locs[0].Kind)
-				assert.Equal(t, b.repo.HTMLURL()+"/wiki/Home", locs[0].HTMLURL)
+				assert.Equal(t, "wiki_commit", locs[0].Type)
+				assert.Equal(t, b.repo.HTMLURL()+"/wiki/Home", locs[0].Details.PageURL)
+				assert.Empty(t, locs[0].Details.CommitURL, "the API has no wiki commits")
 			}
 		})
 
@@ -182,10 +188,15 @@ func TestSecretScanningAPI(t *testing.T) {
 				n, _ := count(query)
 				assert.Equal(t, want, n, query)
 			}
+			var list []*api.SecretScanningAlert
+			DecodeJSON(t, do(t, "GET", base+"?direction=asc", readToken, nil, http.StatusOK), &list)
+			assert.Equal(t, []int64{1, 2, 3}, []int64{list[0].Number, list[1].Number, list[2].Number})
+			DecodeJSON(t, do(t, "GET", base+"?sort=updated&direction=desc", readToken, nil, http.StatusOK), &list)
+			assert.Len(t, list, 3)
 			n, total := count("?limit=2&page=2")
 			assert.Equal(t, 1, n)
 			assert.Equal(t, "3", total)
-			for _, bad := range []string{"state=closed", "state=revoked", "state=bogus", "resolution=fixed", "resolution=revoked,bogus", "secret_type=" + strings.Repeat("a", 65)} {
+			for _, bad := range []string{"state=closed", "state=revoked", "state=bogus", "resolution=fixed", "resolution=revoked,bogus", "sort=name", "direction=up", "secret_type=" + strings.Repeat("a", 65)} {
 				do(t, "GET", base+"?"+bad, readToken, nil, http.StatusUnprocessableEntity)
 			}
 		})
@@ -314,6 +325,14 @@ func TestSecretScanningAPI(t *testing.T) {
 				do(t, "PATCH", b.base+"/1", auditor, closeBody, http.StatusNotFound)
 				unchanged(t, b.repo, 1)
 			}
+			// not the alerts of a repository whose code the auditor can't read (the Code unit is off)
+			removeCodeUnit(t, root.ID)
+			for _, name := range []string{"plain", "id"} {
+				do(t, "GET", bases[name].base, auditor, nil, http.StatusNotFound)
+				do(t, "GET", bases[name].base+"/1", auditor, nil, http.StatusNotFound)
+				do(t, "GET", bases[name].base+"/1/locations", auditor, nil, http.StatusNotFound)
+				do(t, "GET", strings.TrimSuffix(bases[name].base, "/alerts")+"/status", auditor, nil, http.StatusNotFound)
+			}
 		})
 
 		t.Run("job tokens", func(t *testing.T) {
@@ -395,8 +414,20 @@ func TestSecretScanningAPI(t *testing.T) {
 					assert.Equal(t, "open", data["state"])
 					assert.NotEqual(t, "open", data["previous_state"])
 				}
-				// reopening an open alert changes nothing and records nothing
+				// won't fix, the resolution GitHub has besides ours
 				since := auditMaxID(t)
+				var wf api.SecretScanningAlert
+				DecodeJSON(t, do(t, "PATCH", b.base+"/1", writeToken, map[string]string{"state": "resolved", "resolution": "wont_fix", "resolution_comment": "accepted"}, http.StatusOK), &wf)
+				assert.Equal(t, "resolved", wf.State, name)
+				assert.Equal(t, "wont_fix", wf.Resolution)
+				assert.Equal(t, secretscan_model.StateWontFix, secretAlertRow(t, b.repo.ID, 1).State)
+				assert.Equal(t, "wont_fix", auditData(t, auditOne(t, since, "repo.secret_alert.closed"))["state"])
+				DecodeJSON(t, do(t, "GET", b.base+"?resolution=wont_fix", readToken, nil, http.StatusOK), &list)
+				assert.Len(t, list, 1)
+				do(t, "PATCH", b.base+"/1", writeToken, map[string]string{"state": "open"}, http.StatusOK)
+
+				// reopening an open alert changes nothing and records nothing
+				since = auditMaxID(t)
 				do(t, "PATCH", b.base+"/1", writeToken, map[string]string{"state": "open"}, http.StatusOK)
 				n, err := db.GetEngine(t.Context()).Where("id > ? AND action LIKE ?", since, "repo.secret_alert.%").Count(new(audit_model.Entry))
 				require.NoError(t, err)
@@ -431,6 +462,11 @@ func TestSecretScanningAPI(t *testing.T) {
 				{"state": "open", "resolution": "revoked"},
 			} {
 				do(t, "PATCH", one, writeToken, bad, http.StatusUnprocessableEntity)
+			}
+			msg := do(t, "PATCH", one, writeToken, map[string]string{"state": "resolved"}, http.StatusUnprocessableEntity).Body.String()
+			assert.Contains(t, msg, "resolution")
+			for _, r := range secretscan_model.ClosedStates {
+				assert.Contains(t, msg, r)
 			}
 			do(t, "PATCH", one, writeToken, resolve("revoked", strings.Repeat("é", 500)), http.StatusOK) // 1000 bytes
 			do(t, "PATCH", one, writeToken, map[string]string{"state": "open"}, http.StatusOK)
@@ -564,7 +600,8 @@ func TestSecretScanningAPI(t *testing.T) {
 	})
 }
 
-// the wiki is closed to a Code writer without Wiki access: its places are not listed or counted for them
+// the wiki is closed to a Code writer without Wiki access: its places are not listed or counted for them, and an
+// alert that is only in the wiki is missing
 func TestSecretScanningAPIWikiNeedsWikiRead(t *testing.T) {
 	onApplicationRun(t, func(t *testing.T, u *url.URL) {
 		defer test.MockVariableValue(&setting.SecretScanning.Enabled, true)()
@@ -573,8 +610,14 @@ func TestSecretScanningAPIWikiNeedsWikiRead(t *testing.T) {
 		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 		user5 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5})
 		repo := depNewRepo(t, org3, user2, "secret-wiki-read", true, 0)
-		seedSecretAlert(t, repo, "github-token", "github", secretscan_model.KindRepo, "code.txt")
-		seedSecretAlert(t, repo, "github-token", "github", secretscan_model.KindWiki, "Deploy-Credentials.md")
+		seedSecretAlert(t, repo, "github-token", "github", secretscan_model.KindRepo, "code.txt")              // 1: code only
+		seedSecretAlert(t, repo, "github-token", "github", secretscan_model.KindWiki, "Deploy-Credentials.md") // 2: wiki only
+		both := seedSecretAlert(t, repo, "aws-access-key-id", "aws", secretscan_model.KindRepo, "both.txt")    // 3: code and wiki
+		l := secretscan_model.NewLocation(repo.ID, secretscan_model.KindWiki, "blobw", "Both.md", 1, 1, "wikicommit", "Wiki Author", "wiki@example.com", 1700000000)
+		l.AlertID = both.ID
+		_, err := db.GetEngine(ctx).Insert(l)
+		require.NoError(t, err)
+		require.NoError(t, secretscan_model.Save(ctx, nil, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindWiki, ScannedTips: "[]", Status: secretscan_model.StatusFailed, Error: "git_error"}))
 
 		team := &organization.Team{OrgID: org3.ID, Name: "codeonly", LowerName: "codeonly", AccessMode: perm_model.AccessModeWrite}
 		require.NoError(t, db.Insert(ctx, team))
@@ -588,39 +631,84 @@ func TestSecretScanningAPIWikiNeedsWikiRead(t *testing.T) {
 		require.True(t, perm.CanWrite(unit.TypeCode))
 		require.False(t, perm.CanRead(unit.TypeWiki))
 
-		base := "/api/v1/repos/org3/secret-wiki-read/secret-scanning/alerts"
-		for name, b := range map[string]string{"plain": base, "id": fmt.Sprintf("/api/v1/repositories/%d/secret-scanning/alerts", repo.ID)} {
-			get := func(token, path string) (*httptest.ResponseRecorder, []*api.SecretScanningLocation) {
-				resp := MakeRequest(t, NewRequest(t, "GET", b+path).AddTokenAuth(token), http.StatusOK)
-				var locs []*api.SecretScanningLocation
-				DecodeJSON(t, resp, &locs)
-				return resp, locs
+		numbers := func(list []*api.SecretScanningAlert) (out []int64) {
+			for _, a := range list {
+				out = append(out, a.Number)
 			}
-			codeOnly := getUserToken(t, "user5", auth_model.AccessTokenScopeReadRepository)
-			resp, locs := get(codeOnly, "/2/locations")
-			assert.Empty(t, locs, name)
-			assert.Equal(t, "0", resp.Header().Get("X-Total-Count"))
-			assert.NotContains(t, resp.Body.String(), "Deploy-Credentials")
-			_, locs = get(codeOnly, "/1/locations")
-			assert.Len(t, locs, 1, name)
-
-			for _, path := range []string{"/2", ""} {
-				resp := MakeRequest(t, NewRequest(t, "GET", b+path).AddTokenAuth(codeOnly), http.StatusOK)
-				assert.NotContains(t, resp.Body.String(), "Deploy-Credentials", name)
-				assert.NotContains(t, resp.Body.String(), "author@example.com", name)
-			}
-			var one api.SecretScanningAlert
-			DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", b+"/2").AddTokenAuth(codeOnly), http.StatusOK), &one)
-			assert.Zero(t, one.LocationsCount, "the wiki place is not counted")
-
-			// the owner reads the wiki
-			owner := getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository)
-			_, locs = get(owner, "/2/locations")
-			require.Len(t, locs, 1)
-			assert.Equal(t, "Deploy-Credentials.md", locs[0].Path)
-			DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", b+"/2").AddTokenAuth(owner), http.StatusOK), &one)
-			assert.Equal(t, 1, one.LocationsCount)
+			return out
 		}
+		codeOnly := getUserToken(t, "user5", auth_model.AccessTokenScopeReadRepository)
+		owner := getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository)
+		check := func(t *testing.T, name, b, token string, wantList []int64, wikiShown bool) {
+			t.Helper()
+			get := func(path string, code int) *httptest.ResponseRecorder {
+				return MakeRequest(t, NewRequest(t, "GET", b+path).AddTokenAuth(token), code)
+			}
+			var list []*api.SecretScanningAlert
+			resp := get("/alerts", http.StatusOK)
+			DecodeJSON(t, resp, &list)
+			assert.Equal(t, wantList, numbers(list), name)
+			assert.Equal(t, fmt.Sprint(len(wantList)), resp.Header().Get("X-Total-Count"), name)
+
+			var one api.SecretScanningAlert
+			var locs []*api.SecretScanningLocation
+			if wikiShown {
+				get("/alerts/2", http.StatusOK)
+				DecodeJSON(t, get("/alerts/2/locations", http.StatusOK), &locs)
+				require.Len(t, locs, 1, name)
+				assert.Equal(t, "Deploy-Credentials.md", locs[0].Details.Path)
+			} else {
+				get("/alerts/2", http.StatusNotFound)
+				get("/alerts/2/locations", http.StatusNotFound)
+			}
+			// the alert in both: the count is what the locations endpoint's total says
+			DecodeJSON(t, get("/alerts/3", http.StatusOK), &one)
+			resp = get("/alerts/3/locations", http.StatusOK)
+			body := resp.Body.String()
+			locs = nil
+			DecodeJSON(t, resp, &locs)
+			assert.Equal(t, fmt.Sprint(one.LocationsCount), resp.Header().Get("X-Total-Count"), name)
+			assert.Len(t, locs, one.LocationsCount, name)
+			assert.Equal(t, wikiShown, one.LocationsCount == 2, name)
+			assert.Equal(t, wikiShown, strings.Contains(body, "Both.md"), name)
+			assert.Equal(t, wikiShown, strings.Contains(body, "wiki@example.com"), name)
+		}
+		for name, b := range map[string]string{
+			"plain": "/api/v1/repos/org3/secret-wiki-read/secret-scanning", "id": fmt.Sprintf("/api/v1/repositories/%d/secret-scanning", repo.ID),
+		} {
+			check(t, name, b, codeOnly, []int64{3, 1}, false)
+			check(t, name, b, owner, []int64{3, 2, 1}, true)
+			// the state of the wiki scan is for those who can read the wiki
+			var st api.SecretScanningStatus
+			DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", b+"/status").AddTokenAuth(codeOnly), http.StatusOK), &st)
+			assert.Equal(t, "pending", st.Status, name)
+			DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", b+"/status").AddTokenAuth(owner), http.StatusOK), &st)
+			assert.Equal(t, secretscan_model.StatusFailed, st.Status, name)
+			// the wiki alert can't be reached by guessing its number
+			MakeRequest(t, NewRequestWithJSON(t, "PATCH", b+"/alerts/2", map[string]string{"state": "resolved", "resolution": "revoked"}).AddTokenAuth(getUserToken(t, "user5", auth_model.AccessTokenScopeWriteRepository)), http.StatusNotFound)
+		}
+		assert.Equal(t, secretscan_model.StateOpen, secretAlertRow(t, repo.ID, 2).State)
+
+		t.Run("an auditor reads the wiki places", func(t *testing.T) {
+			_, err := db.GetEngine(t.Context()).Exec("UPDATE `user` SET is_auditor = ? WHERE id = 8", true)
+			require.NoError(t, err)
+			defer func() {
+				_, err := db.GetEngine(t.Context()).Exec("UPDATE `user` SET is_auditor = ? WHERE id = 8", false)
+				require.NoError(t, err)
+			}()
+			check(t, "auditor", "/api/v1/repos/org3/secret-wiki-read/secret-scanning", getUserToken(t, "user8", auth_model.AccessTokenScopeReadRepository), []int64{3, 2, 1}, true)
+		})
+
+		t.Run("with the Wiki unit off nobody sees wiki places", func(t *testing.T) {
+			var row repo_model.RepoUnit
+			has, err := db.GetEngine(t.Context()).Where("repo_id = ? AND type = ?", repo.ID, unit.TypeWiki).Get(&row)
+			require.NoError(t, err)
+			require.True(t, has)
+			_, err = db.GetEngine(t.Context()).ID(row.ID).Delete(new(repo_model.RepoUnit))
+			require.NoError(t, err)
+			defer func() { require.NoError(t, db.Insert(t.Context(), &row)) }()
+			check(t, "owner", "/api/v1/repos/org3/secret-wiki-read/secret-scanning", owner, []int64{3, 1}, false)
+		})
 	})
 }
 
@@ -649,11 +737,13 @@ func TestSecretScanningAPILocations(t *testing.T) {
 		resp := MakeRequest(t, NewRequest(t, "GET", base+"?limit=2&page=2").AddTokenAuth(token), http.StatusOK)
 		DecodeJSON(t, resp, &locs)
 		assert.Equal(t, "6", resp.Header().Get("X-Total-Count"))
-		assert.Equal(t, []string{"p2.txt", "p3.txt"}, []string{locs[0].Path, locs[1].Path}, "in the order they were found")
+		assert.Equal(t, []string{"p2.txt", "p3.txt"}, []string{locs[0].Details.Path, locs[1].Details.Path}, "in the order they were found")
 		DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", base+"?limit=2&page=3").AddTokenAuth(token), http.StatusOK), &locs)
 		require.Len(t, locs, 2)
-		assert.Equal(t, "pull", locs[1].Kind)
-		assert.Equal(t, repo.HTMLURL()+"/src/commit/pullcommit/dir/pull%20file.txt#L7-L9", locs[1].HTMLURL)
+		assert.Equal(t, "commit", locs[1].Type)
+		assert.True(t, locs[1].Details.PullRef)
+		assert.Equal(t, repo.HTMLURL()+"/src/commit/pullcommit/dir/pull%20file.txt#L7-L9", locs[1].Details.HTMLURL)
+		assert.Equal(t, repo.APIURL()+"/git/blobs/blobx", locs[1].Details.BlobURL)
 		MakeRequest(t, NewRequest(t, "GET", base).AddTokenAuth(getUserToken(t, "user4", auth_model.AccessTokenScopeReadRepository)), http.StatusNotFound)
 		MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/org3/secret-locations/secret-scanning/alerts/9/locations").AddTokenAuth(token), http.StatusNotFound)
 	})
@@ -677,6 +767,17 @@ func TestSecretScanningAPIComment(t *testing.T) {
 			return MakeRequest(t, NewRequestWithJSON(t, "PATCH", one, map[string]string{"state": "resolved", "resolution": "revoked", "resolution_comment": comment}).AddTokenAuth(token), status)
 		}
 		zw := "\u200b"
+		// secrets of other alerts that are written lower and upper case in a comment
+		lowerSecret, upperSecret := strings.ToLower(bare), strings.ToUpper(bare)
+		for i, secret := range []string{lowerSecret, upperSecret} {
+			a := seedSecretAlert(t, repo, "generic-secret-assignment", "generic", secretscan_model.KindRepo, fmt.Sprintf("case%d", i))
+			_, err = db.GetEngine(t.Context()).Exec("UPDATE secret_scanning_alert SET fingerprint = ? WHERE id = ?", secretdetection.Fingerprint([]byte(secret)), a.ID)
+			require.NoError(t, err)
+		}
+		other := seedSecretAlert(t, repo, "github-token", "github", secretscan_model.KindRepo, "other")
+		otherSecret := "ghp" + "_" + "Ab1Cd2Ef3Gh4" + "Ij5Kl6Mn7Op8" + "Qr9St0Uv1Wx2"
+		_, err = db.GetEngine(t.Context()).Exec("UPDATE secret_scanning_alert SET fingerprint = ? WHERE id = ?", secretdetection.Fingerprint([]byte(otherSecret)), other.ID)
+		require.NoError(t, err)
 		for _, bad := range []string{
 			"rotated, the old key was " + bare,
 			"AWS_SECRET=" + bare,
@@ -684,9 +785,27 @@ func TestSecretScanningAPIComment(t *testing.T) {
 			bare[:10] + zw + bare[10:],
 			bare[:10] + "\u2060" + bare[10:],
 			bare[:10] + "\u00ad" + bare[10:],
+			// punctuation and markdown around it, a path, a URL, a comment key, a suffix, the case
+			"the old key was " + bare + ".",
+			"old key: **" + bare + "**",
+			"old key " + bare + "!",
+			bare + "/",
+			"#" + bare,
+			"https://paste.example/" + bare,
+			bare + "-old",
+			"cfg.token." + bare,
+			strings.ToUpper(lowerSecret),
+			strings.ToLower(upperSecret),
+			// invisible marks inside it
+			bare[:10] + "\u034f" + bare[10:],
+			bare[:10] + "\ufe0f" + bare[10:],
+			bare[:10] + "\u3164" + bare[10:],
+			// another alert's secret is no more welcome here
+			"it was " + otherSecret,
+			"it was " + otherSecret[:10] + "\u034f" + otherSecret[10:],
 		} {
 			patch(bad, http.StatusUnprocessableEntity)
-			assert.Equal(t, secretscan_model.StateOpen, secretAlertRow(t, repo.ID, 1).State)
+			assert.Equal(t, secretscan_model.StateOpen, secretAlertRow(t, repo.ID, 1).State, bad)
 		}
 		// a token for another alert is no secret of this one, and a short word is none either
 		patch("rotated, see INC-4242", http.StatusOK)
@@ -703,7 +822,20 @@ func TestSecretScanningAPIComment(t *testing.T) {
 		for _, row := range rows {
 			for col, v := range row {
 				assert.NotContains(t, string(v), bare[:20], "audit_event.%s", col)
+				assert.NotContains(t, string(v), otherSecret[4:20], "audit_event.%s", col)
 			}
 		}
 	})
+}
+
+// removeCodeUnit turns the Code unit of the repository off until the test ends.
+func removeCodeUnit(t *testing.T, repoID int64) {
+	t.Helper()
+	var row repo_model.RepoUnit
+	has, err := db.GetEngine(t.Context()).Where("repo_id = ? AND type = ?", repoID, unit.TypeCode).Get(&row)
+	require.NoError(t, err)
+	require.True(t, has)
+	_, err = db.GetEngine(t.Context()).ID(row.ID).Delete(new(repo_model.RepoUnit))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Insert(db.DefaultContext, &row)) })
 }

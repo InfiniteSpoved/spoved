@@ -5,7 +5,6 @@ package secretscan
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"slices"
 	"strings"
@@ -20,6 +19,8 @@ import (
 	"forgejo.org/modules/secretdetection"
 	"forgejo.org/modules/util"
 	vulnerability_service "forgejo.org/services/vulnerability"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // ErrConflict is a change of an alert that its state doesn't allow any more (it changed meanwhile): the caller
@@ -38,10 +39,13 @@ var commentDetector = sync.OnceValues(func() (*secretdetection.Detector, error) 
 	return secretdetection.NewDetector(secretdetection.BuiltinRules())
 })
 
-// checkComment refuses a comment the detector finds a secret in, or that holds the secret of the alert itself: a
-// token of 16 to 4096 bytes whose fingerprint is the alert's (also after "key=" or "key:"), which the rules of a
-// secret that needs context (an AWS secret key) don't see.
-func checkComment(comment, fingerprint string) error {
+// checkComment refuses a comment the detector finds a secret in, or that holds the secret of an alert of the
+// repository (fingerprints is the set of theirs): the rules don't see a secret that needs its context (an AWS secret
+// key). The candidates are the words of the comment (also after "key=" or "key:", and without the characters around
+// them that can't be in a secret, as in "**secret**" and "secret!"), every run of the characters a secret is made
+// of (also without dots at the ends) and the parts of those runs between . / - # and : (any number of them from either end), each as it is, lower-cased
+// and upper-cased, when it has 16 to 4096 bytes.
+func checkComment(comment string, fingerprints map[string]struct{}) error {
 	d, err := commentDetector()
 	if err != nil {
 		return err
@@ -49,19 +53,82 @@ func checkComment(comment, fingerprint string) error {
 	if found, _ := d.Scan([]byte(comment)); len(found) > 0 {
 		return ErrCommentSecret
 	}
-	for tok := range strings.FieldsFuncSeq(comment, func(r rune) bool { return unicode.IsSpace(r) || strings.ContainsRune("\"'`,;()<>[]{}", r) }) {
-		for rest := tok; ; {
-			if len(rest) >= 16 && len(rest) <= 4096 && subtle.ConstantTimeCompare([]byte(secretdetection.Fingerprint([]byte(rest))), []byte(fingerprint)) == 1 {
-				return ErrCommentSecret
+	if len(fingerprints) == 0 {
+		return nil
+	}
+	tried := map[string]struct{}{}
+	try := func(c string) bool {
+		if len(c) < 16 || len(c) > 4096 {
+			return false
+		}
+		for _, v := range []string{c, strings.ToLower(c), strings.ToUpper(c)} {
+			if _, ok := tried[v]; ok {
+				continue
+			}
+			tried[v] = struct{}{}
+			if _, hit := fingerprints[secretdetection.Fingerprint([]byte(v))]; hit {
+				return true
+			}
+		}
+		return false
+	}
+	inSecret := func(r rune) bool {
+		return r < unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("+/=_-.", r))
+	}
+	tryWord := func(w string) bool { // the word, and what follows each = and :
+		for rest := w; ; {
+			if try(rest) {
+				return true
 			}
 			i := strings.IndexAny(rest, "=:")
 			if i < 0 {
-				break
+				return false
 			}
 			rest = rest[i+1:]
 		}
 	}
+	for w := range strings.FieldsFuncSeq(comment, func(r rune) bool { return unicode.IsSpace(r) || strings.ContainsRune("\"'`,;()<>[]{}", r) }) {
+		if tryWord(w) || tryWord(strings.TrimFunc(w, func(r rune) bool { return !inSecret(r) })) {
+			return ErrCommentSecret
+		}
+	}
+	for run := range strings.FieldsFuncSeq(comment, func(r rune) bool { return !inSecret(r) }) {
+		if tryWord(run) || tryWord(strings.Trim(run, ".")) {
+			return ErrCommentSecret
+		}
+		// what lies between the . / - # and : of the run (a secret can hold some of them: every start and end)
+		starts, ends := []int{0}, []int{len(run)}
+		for i, r := range run {
+			if strings.ContainsRune("./-#:", r) {
+				starts, ends = append(starts, i+1), append(ends, i)
+			}
+		}
+		for _, from := range capped(starts) {
+			for _, to := range capped(ends) {
+				if from < to && tryWord(run[from:to]) {
+					return ErrCommentSecret
+				}
+			}
+		}
+	}
 	return nil
+}
+
+// capped keeps the first and the last 50 of the positions: a comment is short, but one made of delimiters would
+// otherwise have as many candidates as the square of its length.
+func capped(positions []int) []int {
+	if len(positions) <= 100 {
+		return positions
+	}
+	return slices.Concat(positions[:50], positions[len(positions)-50:])
+}
+
+// invisible removes what shows as nothing next to a letter: combining marks, format characters and fillers.
+func invisible(r rune) rune {
+	if unicode.In(r, unicode.Mn, unicode.Me, unicode.Cf) || r == 0x115f || r == 0x1160 || r == 0x3164 || r == 0xffa0 { // and the Hangul fillers
+		return -1
+	}
+	return r
 }
 
 // Close closes an open alert of the repository as revoked, false_positive, used_in_tests or wont_fix (the reason is the
@@ -70,7 +137,10 @@ func checkComment(comment, fingerprint string) error {
 // ErrConflict, an archived repository ErrArchived.
 func Close(ctx context.Context, repo *repo_model.Repository, doer *user_model.User, index int64, state, comment string) (*secretscan_model.Alert, error) {
 	if !slices.Contains(secretscan_model.ClosedStates, state) {
-		return nil, util.NewInvalidArgumentErrorf("state must be one of %v, or open", secretscan_model.ClosedStates)
+		return nil, util.NewInvalidArgumentErrorf("resolution must be one of %v", secretscan_model.ClosedStates)
+	}
+	if len(comment) > 4*secretscan_model.MaxCommentLen {
+		return nil, util.NewInvalidArgumentErrorf("the comment is longer than %d bytes", secretscan_model.MaxCommentLen)
 	}
 	// no control, bidi or other format characters (they hide a secret from the detector and reorder text)
 	comment = strings.Map(func(r rune) rune {
@@ -83,12 +153,17 @@ func Close(ctx context.Context, repo *repo_model.Repository, doer *user_model.Us
 		return nil, util.NewInvalidArgumentErrorf("the comment is longer than %d bytes", secretscan_model.MaxCommentLen)
 	}
 	if comment != "" {
-		alert, err := secretscan_model.GetAlert(ctx, repo.ID, index)
+		// read outside the transaction, only for the check: the fingerprints of every alert of the repository (a comment
+		// must hold none of their secrets); the transaction below changes the one alert with a conditional UPDATE
+		fingerprints, err := secretscan_model.FindFingerprints(ctx, repo.ID)
 		if err != nil {
 			return nil, err
 		}
-		if err := checkComment(comment, alert.Fingerprint); err != nil {
-			return nil, err
+		// the text as it reads: combining marks and format characters out, look-alikes folded (NFKC)
+		for _, text := range []string{comment, strings.Map(invisible, norm.NFKC.String(comment))} {
+			if err := checkComment(text, fingerprints); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return changeAlert(ctx, repo, "", func(ctx context.Context) (*secretscan_model.Alert, bool, error) {

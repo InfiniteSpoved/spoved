@@ -6,6 +6,7 @@ package repo
 import (
 	"errors"
 	"net/http"
+	"slices"
 
 	"forgejo.org/models/db"
 	secretscan_model "forgejo.org/models/secretscan"
@@ -30,7 +31,8 @@ func ListSecretScanningAlerts(ctx *context.APIContext) {
 	// summary: List the secret alerts of a repository
 	// description: Secrets found in the code and wiki of the repository, newest first. The alerts never hold the
 	//   secret. Only people who can write to the code, and auditors, see them; everyone else gets 404, as does a
-	//   repository secret scanning is turned off for.
+	//   repository secret scanning is turned off for. Someone who can't read the wiki (with the Wiki unit off, nobody
+	//   can) doesn't see an alert that is only in the wiki, nor its places in the wiki.
 	// produces:
 	// - application/json
 	// parameters:
@@ -57,6 +59,16 @@ func ListSecretScanningAlerts(ctx *context.APIContext) {
 	//   in: query
 	//   description: only alerts of these secret types (rule IDs), comma separated
 	//   type: string
+	// - name: sort
+	//   in: query
+	//   description: what to sort by, newest first unless direction is asc
+	//   type: string
+	//   enum: [created, updated]
+	// - name: direction
+	//   in: query
+	//   description: the order
+	//   type: string
+	//   enum: [asc, desc]
 	// - name: page
 	//   in: query
 	//   description: page number of results to return (1-based)
@@ -75,7 +87,8 @@ func ListSecretScanningAlerts(ctx *context.APIContext) {
 
 	repo := ctx.Repo().Repository
 	opts := &secretscan_model.AlertSearchOptions{ListOptions: utils.GetListOptions(ctx), RepoID: repo.ID}
-	if err := opts.ParseFilters(ctx.FormString("state"), ctx.FormString("resolution"), ctx.FormString("secret_type")); err != nil {
+	opts.CodeOnly = !ctx.Permission().CanRead(unit.TypeWiki) // an alert that is only in the wiki is not for them
+	if err := opts.ParseFilters(ctx.FormString("state"), ctx.FormString("resolution"), ctx.FormString("secret_type"), ctx.FormString("sort"), ctx.FormString("direction")); err != nil {
 		ctx.Error(http.StatusUnprocessableEntity, "", err.Error())
 		return
 	}
@@ -124,6 +137,9 @@ func GetSecretScanningStatus(ctx *context.APIContext) {
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "FindScans", err)
 		return
+	}
+	if !ctx.Permission().CanRead(unit.TypeWiki) { // the wiki's state is for those who can read it
+		scans = slices.DeleteFunc(scans, func(s *secretscan_model.Scan) bool { return s.Kind == secretscan_model.KindWiki })
 	}
 	ctx.JSON(http.StatusOK, convert.ToSecretScanningStatus(scans))
 }
@@ -263,6 +279,17 @@ func loadSecretScanningAlert(ctx *context.APIContext) *secretscan_model.Alert {
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "GetAlert", err)
 		return nil
+	}
+	if !ctx.Permission().CanRead(unit.TypeWiki) { // an alert that is only in the wiki is missing for them
+		has, err := secretscan_model.HasCodeLocation(ctx, alert.RepoID, alert.ID)
+		if err != nil {
+			ctx.Error(http.StatusInternalServerError, "HasCodeLocation", err)
+			return nil
+		}
+		if !has {
+			ctx.NotFound()
+			return nil
+		}
 	}
 	return alert
 }

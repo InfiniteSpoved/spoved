@@ -5,24 +5,39 @@ package structs
 
 import "time"
 
-// SecretScanningLocation is a place a secret was found: a file at a line, in the commit that brought it. Path and
+// SecretScanningLocationDetails is where a secret was found: a file at a line, in the commit that brought it, as
+// GitHub names them. Fields that spoved can't fill (the columns, the URLs of a wiki commit) are left out. Path and
 // the commit author are text from git, not checked by spoved: clients must escape them.
 // swagger:model
-type SecretScanningLocation struct {
-	// repo (the code of the repository), wiki, or pull (a commit only a refs/pull/* ref reaches)
-	Kind      string `json:"kind"`
+type SecretScanningLocationDetails struct {
 	Path      string `json:"path"`
 	StartLine int    `json:"start_line"`
 	EndLine   int    `json:"end_line"`
-	CommitSHA string `json:"commit_sha"`
 	BlobSHA   string `json:"blob_sha"`
-	// the author of the commit, as it names itself (anyone can write any name)
+	// the API URL of the blob (not for the wiki)
+	BlobURL   string `json:"blob_url,omitempty"`
+	CommitSHA string `json:"commit_sha"`
+	// the API URL of the commit (not for the wiki)
+	CommitURL string `json:"commit_url,omitempty"`
+	// the page, for the wiki
+	PageURL string `json:"page_url,omitempty"`
+	// spoved: the file at that commit in the web interface (empty when the place has no commit, and for the wiki)
+	HTMLURL string `json:"html_url,omitempty"`
+	// spoved: the author of the commit, as it names itself (anyone can write any name)
 	CommitAuthorName  string `json:"commit_author_name"`
 	CommitAuthorEmail string `json:"commit_author_email"`
 	// swagger:strfmt date-time
 	CommitDate *time.Time `json:"commit_date,omitempty"`
-	// the file at that commit (the page, for the wiki); empty when the place has no commit
-	HTMLURL string `json:"html_url"`
+	// spoved: true when only a refs/pull/* ref reaches the commit
+	PullRef bool `json:"pull_ref,omitempty"`
+}
+
+// SecretScanningLocation is a place a secret was found.
+// swagger:model
+type SecretScanningLocation struct {
+	// commit (the code of the repository, or a pull ref) or wiki_commit
+	Type    string                        `json:"type"`
+	Details SecretScanningLocationDetails `json:"details"`
 }
 
 // SecretScanningAlert is a secret found in the code or wiki of a repository. It never holds the secret. The shape
@@ -30,6 +45,8 @@ type SecretScanningLocation struct {
 // swagger:model
 type SecretScanningAlert struct {
 	Number int64 `json:"number"`
+	// the API URL of the alert
+	URL string `json:"url"`
 	// open or resolved
 	State string `json:"state"`
 	// why the alert is resolved: false_positive, wont_fix, revoked or used_in_tests; empty while open
@@ -52,7 +69,8 @@ type SecretScanningAlert struct {
 	HTMLURL string `json:"html_url"`
 	// the places of the alert, paged
 	LocationsURL string `json:"locations_url"`
-	// the places seen, also those over the stored cap; without the wiki places for a viewer who can't read the wiki
+	// the places of the alert as the locations endpoint lists them for the viewer (places in the wiki only count for
+	// someone who can read the wiki; with the Wiki unit off nobody does)
 	LocationsCount int `json:"locations_count"`
 	// true while only refs/pull/* (which any reader can write) reach the secret
 	ViaPull bool `json:"via_pull"`

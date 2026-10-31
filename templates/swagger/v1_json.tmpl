@@ -23461,7 +23461,7 @@
     },
     "/repos/{owner}/{repo}/secret-scanning/alerts": {
       "get": {
-        "description": "Secrets found in the code and wiki of the repository, newest first. The alerts never hold the secret. Only people who can write to the code, and auditors, see them; everyone else gets 404, as does a repository secret scanning is turned off for.",
+        "description": "Secrets found in the code and wiki of the repository, newest first. The alerts never hold the secret. Only people who can write to the code, and auditors, see them; everyone else gets 404, as does a repository secret scanning is turned off for. Someone who can't read the wiki (with the Wiki unit off, nobody can) doesn't see an alert that is only in the wiki, nor its places in the wiki.",
         "produces": [
           "application/json"
         ],
@@ -23505,6 +23505,26 @@
             "type": "string",
             "description": "only alerts of these secret types (rule IDs), comma separated",
             "name": "secret_type",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "created",
+              "updated"
+            ],
+            "type": "string",
+            "description": "what to sort by, newest first unless direction is asc",
+            "name": "sort",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string",
+            "description": "the order",
+            "name": "direction",
             "in": "query"
           },
           {
@@ -42016,7 +42036,7 @@
           "x-go-name": "HTMLURL"
         },
         "locations_count": {
-          "description": "the places seen, also those over the stored cap; without the wiki places for a viewer who can't read the wiki",
+          "description": "the places of the alert as the locations endpoint lists them for the viewer (places in the wiki only count for\nsomeone who can read the wiki; with the Wiki unit off nobody does)",
           "type": "integer",
           "format": "int64",
           "x-go-name": "LocationsCount"
@@ -42068,6 +42088,11 @@
           "format": "date-time",
           "x-go-name": "UpdatedAt"
         },
+        "url": {
+          "description": "the API URL of the alert",
+          "type": "string",
+          "x-go-name": "URL"
+        },
         "via_pull": {
           "description": "true while only refs/pull/* (which any reader can write) reach the secret",
           "type": "boolean",
@@ -42077,19 +42102,39 @@
       "x-go-package": "forgejo.org/modules/structs"
     },
     "SecretScanningLocation": {
-      "description": "SecretScanningLocation is a place a secret was found: a file at a line, in the commit that brought it. Path and\nthe commit author are text from git, not checked by spoved: clients must escape them.",
+      "type": "object",
+      "title": "SecretScanningLocation is a place a secret was found.",
+      "properties": {
+        "details": {
+          "$ref": "#/definitions/SecretScanningLocationDetails"
+        },
+        "type": {
+          "description": "commit (the code of the repository, or a pull ref) or wiki_commit",
+          "type": "string",
+          "x-go-name": "Type"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "SecretScanningLocationDetails": {
+      "description": "SecretScanningLocationDetails is where a secret was found: a file at a line, in the commit that brought it, as\nGitHub names them. Fields that spoved can't fill (the columns, the URLs of a wiki commit) are left out. Path and\nthe commit author are text from git, not checked by spoved: clients must escape them.",
       "type": "object",
       "properties": {
         "blob_sha": {
           "type": "string",
           "x-go-name": "BlobSHA"
         },
+        "blob_url": {
+          "description": "the API URL of the blob (not for the wiki)",
+          "type": "string",
+          "x-go-name": "BlobURL"
+        },
         "commit_author_email": {
           "type": "string",
           "x-go-name": "CommitAuthorEmail"
         },
         "commit_author_name": {
-          "description": "the author of the commit, as it names itself (anyone can write any name)",
+          "description": "spoved: the author of the commit, as it names itself (anyone can write any name)",
           "type": "string",
           "x-go-name": "CommitAuthorName"
         },
@@ -42102,24 +42147,34 @@
           "type": "string",
           "x-go-name": "CommitSHA"
         },
+        "commit_url": {
+          "description": "the API URL of the commit (not for the wiki)",
+          "type": "string",
+          "x-go-name": "CommitURL"
+        },
         "end_line": {
           "type": "integer",
           "format": "int64",
           "x-go-name": "EndLine"
         },
         "html_url": {
-          "description": "the file at that commit (the page, for the wiki); empty when the place has no commit",
+          "description": "spoved: the file at that commit in the web interface (empty when the place has no commit, and for the wiki)",
           "type": "string",
           "x-go-name": "HTMLURL"
         },
-        "kind": {
-          "description": "repo (the code of the repository), wiki, or pull (a commit only a refs/pull/* ref reaches)",
+        "page_url": {
+          "description": "the page, for the wiki",
           "type": "string",
-          "x-go-name": "Kind"
+          "x-go-name": "PageURL"
         },
         "path": {
           "type": "string",
           "x-go-name": "Path"
+        },
+        "pull_ref": {
+          "description": "spoved: true when only a refs/pull/* ref reaches the commit",
+          "type": "boolean",
+          "x-go-name": "PullRef"
         },
         "start_line": {
           "type": "integer",

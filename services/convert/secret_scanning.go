@@ -17,8 +17,9 @@ import (
 	"forgejo.org/modules/util"
 )
 
-// ToSecretScanningAlerts converts alerts of one repository (one query for the users who closed them). Without
-// canReadWiki the count holds only the stored places that are not in the wiki.
+// ToSecretScanningAlerts converts alerts of one repository (one query for the users who closed them, one for the
+// places). The count is the one the locations endpoint gives the viewer: without canReadWiki, places in the wiki
+// are not in it.
 func ToSecretScanningAlerts(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, alerts []*secretscan_model.Alert, canReadWiki bool) ([]*api.SecretScanningAlert, error) {
 	var userIDs, alertIDs []int64
 	for _, a := range alerts {
@@ -31,11 +32,9 @@ func ToSecretScanningAlerts(ctx context.Context, doer *user_model.User, repo *re
 	if err != nil {
 		return nil, err
 	}
-	var codeCounts map[int64]int
-	if !canReadWiki && len(alertIDs) > 0 {
-		if codeCounts, err = secretscan_model.CountCodeLocations(ctx, repo.ID, alertIDs); err != nil {
-			return nil, err
-		}
+	counts, err := secretscan_model.CountLocations(ctx, repo.ID, alertIDs, !canReadWiki)
+	if err != nil {
+		return nil, err
 	}
 	names := map[string]string{}
 	for _, r := range secretdetection.BuiltinRules() {
@@ -46,12 +45,10 @@ func ToSecretScanningAlerts(ctx context.Context, doer *user_model.User, repo *re
 		index := strconv.FormatInt(a.Index, 10)
 		res := &api.SecretScanningAlert{
 			Number: a.Index, State: secretscan_model.StateOpen, SecretType: a.RuleID, SecretTypeDisplayName: cmp.Or(names[a.RuleID], a.RuleID),
-			Fingerprint: a.Fingerprint, ViaPull: a.ViaPull, LocationsCount: a.LocationCount,
+			Fingerprint: a.Fingerprint, ViaPull: a.ViaPull, LocationsCount: counts[a.ID],
+			URL:       repo.APIURL() + "/secret-scanning/alerts/" + index,
 			CreatedAt: time.Unix(int64(a.CreatedUnix), 0).UTC(), UpdatedAt: time.Unix(int64(a.UpdatedUnix), 0).UTC(),
 			HTMLURL: repo.HTMLURL() + "/security/secrets/" + index, LocationsURL: repo.APIURL() + "/secret-scanning/alerts/" + index + "/locations",
-		}
-		if !canReadWiki {
-			res.LocationsCount = codeCounts[a.ID]
 		}
 		if a.State != secretscan_model.StateOpen {
 			res.State, res.Resolution, res.ResolutionComment = "resolved", a.Reason, a.Comment
@@ -69,26 +66,28 @@ func ToSecretScanningAlerts(ctx context.Context, doer *user_model.User, repo *re
 	return out, nil
 }
 
-// ToSecretScanningLocations converts places of an alert of the repository; wikiURL turns the path of a wiki place
-// into its page URL.
+// ToSecretScanningLocations converts places of an alert of the repository, in GitHub's shape; wikiURL turns the
+// path of a wiki place into its page URL.
 func ToSecretScanningLocations(repo *repo_model.Repository, locs []*secretscan_model.Location, wikiURL func(path string) string) []*api.SecretScanningLocation {
 	out := make([]*api.SecretScanningLocation, 0, len(locs))
 	for _, l := range locs {
-		res := &api.SecretScanningLocation{
-			Kind: l.Kind, Path: l.Path, StartLine: l.StartLine, EndLine: l.EndLine, CommitSHA: l.CommitID, BlobSHA: l.BlobID,
-			CommitAuthorName: l.AuthorName, CommitAuthorEmail: l.AuthorEmail,
-		}
+		res := &api.SecretScanningLocation{Type: "commit", Details: api.SecretScanningLocationDetails{
+			Path: l.Path, StartLine: l.StartLine, EndLine: l.EndLine, BlobSHA: l.BlobID, CommitSHA: l.CommitID,
+			CommitAuthorName: l.AuthorName, CommitAuthorEmail: l.AuthorEmail, PullRef: l.Kind == secretscan_model.KindPull,
+		}}
 		if l.CommitUnix != 0 {
 			t := time.Unix(l.CommitUnix, 0).UTC()
-			res.CommitDate = &t
+			res.Details.CommitDate = &t
 		}
 		switch {
 		case l.Kind == secretscan_model.KindWiki:
-			res.HTMLURL = wikiURL(l.Path)
+			res.Type, res.Details.PageURL = "wiki_commit", wikiURL(l.Path)
 		case l.CommitID != "":
-			res.HTMLURL = repo.HTMLURL() + "/src/commit/" + l.CommitID + "/" + util.PathEscapeSegments(l.Path) + "#L" + strconv.Itoa(l.StartLine)
+			res.Details.BlobURL = repo.APIURL() + "/git/blobs/" + l.BlobID
+			res.Details.CommitURL = repo.APIURL() + "/git/commits/" + l.CommitID
+			res.Details.HTMLURL = repo.HTMLURL() + "/src/commit/" + l.CommitID + "/" + util.PathEscapeSegments(l.Path) + "#L" + strconv.Itoa(l.StartLine)
 			if l.EndLine > l.StartLine {
-				res.HTMLURL += "-L" + strconv.Itoa(l.EndLine)
+				res.Details.HTMLURL += "-L" + strconv.Itoa(l.EndLine)
 			}
 		}
 		out = append(out, res)
