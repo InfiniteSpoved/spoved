@@ -100,7 +100,7 @@ var builtinRules = []Rule{
 		ID: "azure-ad-client-secret", Name: "Azure AD client secret", Type: "azure",
 		Keywords:    []string{"q~"},
 		Regex:       `([a-zA-Z0-9_~.]{3}\dQ~[a-zA-Z0-9_~.-]{31,34})`,
-		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars + "_~.-",
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars + "_~.-", TrailingOK: ".",
 	},
 	{
 		// type and private_key sit in the same JSON object, type first. The
@@ -115,7 +115,7 @@ var builtinRules = []Rule{
 		ID: "gcp-api-key", Name: "GCP API key", Type: "gcp",
 		Keywords:    []string{"aiza"},
 		Regex:       `(AIza[\w-]{35})`,
-		SecretGroup: 1, MinEntropy: 3.5, TokenChars: wordChars,
+		SecretGroup: 1, MinEntropy: 3.5, TokenChars: wordChars, TrailingOK: "-",
 	},
 	{
 		// ghp_ personal, gho_ OAuth, ghu_ user-to-server, ghs_ server-to-server, ghr_ refresh.
@@ -279,6 +279,8 @@ func stripSpace(b []byte) []byte {
 	return slices.DeleteFunc(slices.Clone(b), func(c byte) bool { return c <= ' ' })
 }
 
+var controlEscapes = map[byte]byte{'n': '\n', 'r': '\r', 't': '\t'}
+
 // unescape undoes one layer of backslash escapes.
 func unescape(s string) string {
 	var b strings.Builder
@@ -290,7 +292,7 @@ func unescape(s string) string {
 		i++
 		switch s[i] {
 		case 'n', 'r', 't':
-			b.WriteByte(map[byte]byte{'n': '\n', 'r': '\r', 't': '\t'}[s[i]])
+			b.WriteByte(controlEscapes[s[i]])
 		case '\\', '/':
 			b.WriteByte(s[i])
 		case 'u':

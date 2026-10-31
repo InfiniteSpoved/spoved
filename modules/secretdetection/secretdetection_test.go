@@ -512,7 +512,7 @@ func TestValidateCustomRule(t *testing.T) {
 	acme := []string{"acme"}
 	require.NoError(t, ValidateCustomRule("Acme token", `ACME-[0-9]{8}`, "x = ACME-12345678", acme))
 	require.NoError(t, ValidateCustomRule("Acme token", `acme_token=([a-z0-9]{12})`, "acme_token=abcdef123456", []string{"ACME_TOKEN"}))
-	require.NoError(t, ValidateCustomRule("Acme token", `(?i)acme[_-]?key\s*=\s*["']?([a-z0-9]{16,40})`, "ACME_KEY = 'abcdef0123456789'", []string{"acme"}))
+	require.NoError(t, ValidateCustomRule("Acme token", `(?i)acme[_-]?key\s{0,3}=\s{0,3}["']?([a-z0-9]{16,40})`, "ACME_KEY = 'abcdef0123456789'", []string{"acme"}))
 
 	long := "A" + strings.Repeat("b", MaxCustomPatternLen)
 	tests := []struct {
@@ -525,7 +525,7 @@ func TestValidateCustomRule(t *testing.T) {
 		{"long", long, long, []string{"abb"}, ErrPatternTooLong},
 		{"invalid", `ACME-(`, "ACME-", acme, ErrPatternInvalid},
 		{"backtracking syntax", `(?=ACME)ACME`, "ACME", acme, ErrPatternInvalid},
-		{"empty", `[0-9]*`, "123", acme, ErrPatternMatchesEmpty},
+		{"empty", `[0-9]{0,5}`, "123", acme, ErrPatternMatchesEmpty},
 		{"empty alternative", `ACME|`, "ACME", acme, ErrPatternMatchesEmpty},
 		{"no match in test", `ACME-[0-9]{8}`, "ACME-1234", acme, ErrPatternNoMatchInTest},
 		{"empty test", `ACME-[0-9]{8}`, "", acme, ErrPatternNoMatchInTest},
@@ -538,19 +538,19 @@ func TestValidateCustomRule(t *testing.T) {
 		{"secret too short", `ACME-([0-9]{4})`, "ACME-1234", acme, ErrSecretTooShort},
 		{"one byte group", `(a)CME_[0-9]{4}`, "aCME_1234", []string{"cme"}, ErrSecretTooShort},
 		// Broad patterns: they match ordinary files, so every push would be blocked.
-		{"everything", `.+`, "zzq-anything", []string{"zzq"}, ErrPatternMatchesTooMuch},
-		{"dot run", `.{8,}`, "zzq and the rest", []string{"zzq"}, ErrPatternMatchesTooMuch},
-		{"words", `\w{3,}`, "zzqabcdefgh", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"everything", `.{1,50}`, "zzq-anything", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"dot run", `.{8,50}`, "zzq and the rest", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"words", `\w{3,50}`, "zzqabcdefgh", []string{"zzq"}, ErrPatternMatchesTooMuch},
 		{"md5", `[0-9a-f]{32}`, strings.Repeat("0a1b2c3d", 4), []string{"0a1"}, ErrPatternMatchesTooMuch},
 		{"git sha", `[0-9a-f]{40}`, strings.Repeat("0a1b2c3d4e", 4), []string{"0a1"}, ErrPatternMatchesTooMuch},
 		{"uuid", `[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`, "0a1b2c3d-0a1b-0a1b-0a1b-0a1b2c3d4e5f", []string{"0a1"}, ErrPatternMatchesTooMuch},
-		{"long alnum", `[A-Za-z0-9]{20,}`, "zzq" + strings.Repeat("A1", 10), []string{"zzq"}, ErrPatternMatchesTooMuch},
-		{"non-space", `\S{12,}`, "zzq-abcdefghijk", []string{"zzq"}, ErrPatternMatchesTooMuch},
-		{"url", `https?://\S+`, "http://zzq.test/a", []string{"zzq"}, ErrPatternMatchesTooMuch},
-		{"long word", `[a-z]{9,}`, "zzqabcdefghi", []string{"zzq"}, ErrPatternMatchesTooMuch},
-		{"tab", `\t.{8,}`, "\tzzq-abcdefgh", []string{"zzq"}, ErrPatternMatchesTooMuch},
-		{"brace", `\{[^}]{8,}`, "{zzq-abcdefgh}", []string{"zzq"}, ErrPatternMatchesTooMuch},
-		{"non-ASCII", `[^\x00-\x7f]+zzq[a-z]*`, "é zzqabcdefgh", []string{"zzq"}, ErrPatternNoMatchInTest},
+		{"long alnum", `[A-Za-z0-9]{20,50}`, "zzq" + strings.Repeat("A1", 10), []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"non-space", `\S{12,50}`, "zzq-abcdefghijk", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"url", `https?://\S{1,50}`, "http://zzq.test/a", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"long word", `[a-z]{9,50}`, "zzqabcdefghi", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"tab", `\t.{8,50}`, "\tzzq-abcdefgh", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"brace", `\{[^}]{8,50}`, "{zzq-abcdefgh}", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"non-ASCII", `[^\x00-\x7f]{1,5}zzq[a-z]{0,20}`, "é zzqabcdefgh", []string{"zzq"}, ErrPatternNoMatchInTest},
 		{"non-ASCII text", `[^\x00-\x7f]{1,20}`, "éééééééé", []string{"é"}, ErrKeywordMissing},
 		// Slow patterns from the reviews (at least 10 KB/s to 0.5 MB/s on any text).
 		{"repeat product", `(?:\pL{0,9}){0,100}ZZQ`, "abcdefghZZQ", []string{"zzq"}, ErrPatternTooComplex},

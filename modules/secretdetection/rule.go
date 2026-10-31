@@ -51,8 +51,11 @@ type Rule struct {
 	Check func(secret []byte) bool
 
 	// TokenChars, if set, are the bytes a token is made of: a match is
-	// dropped when the byte before or after the secret is one of them (so the
-	// secret is not part of a longer word), except that an escape (\n, \r,
+	// dropped when the byte before or after the secret is one of them. That is
+	// deliberate: a token right after a token character is part of a longer
+	// word (a hash, an identifier), not a key of its own, and RE2 can't say so
+	// with \b without consuming the neighbour. TrailingOK lists bytes that
+	// may follow anyway. An escape that an escape (\n, \r,
 	// \t, \xXX, \uXXXX) or a URL escape (%XX) may stand right before it. RE2 has no lookaround
 	// and a consumed boundary would hide a neighbouring token, so this is
 	// checked here, not in the regex.
@@ -62,13 +65,28 @@ type Rule struct {
 	// MinSecretLen drops a shorter one; 0 means no minimum.
 	MaxSecretLen, MinSecretLen int
 
+	// TrailingOK are bytes that may follow the secret although they are in
+	// TokenChars (a full stop ending a sentence, a hyphen in "key-backup").
+	TrailingOK string
+
+	// RejectCap, if above 0, stops the rule for this Scan after that many
+	// matches were thrown away (and Scan reports it). Custom rules have one,
+	// built-in rules are known to be cheap and have none.
+	RejectCap int
+
+	// KeywordInMatch drops a match that holds none of the rule's keywords
+	// (compared lowercase), so a custom pattern's keyword promise holds when
+	// scanning, not only for its test string.
+	KeywordInMatch bool
+
 	// Window, if above 0, runs the regex only on the Window bytes before and
-	// after each keyword hit (windows that touch are merged), at most
-	// MaxWindowBytes per Scan; what lies beyond is not scanned and Scan
-	// reports it. The regex can't match anything that doesn't lie within
+	// after each keyword hit (windows that touch are merged). WindowBudget, if
+	// above 0, caps the bytes of windows per Scan (the last window is cut, not
+	// dropped); what lies beyond is not scanned and Scan reports it. Without a
+	// budget the whole content may be covered. The regex can't match anything that doesn't lie within
 	// Window bytes of a keyword. Needs keywords. Anchors (^, \b) at the edge
 	// of a window see the edge as the start of the text.
-	Window int
+	Window, WindowBudget int
 
 	// DefaultOff marks noisy rules (generic ones) that callers should not
 	// enable unless asked to.
@@ -140,7 +158,7 @@ func (r *compiledRule) boundaryOK(c []byte, start, end int) bool {
 	if r.tokenSet == nil {
 		return true
 	}
-	if end < len(c) && r.tokenSet[c[end]] {
+	if end < len(c) && r.tokenSet[c[end]] && strings.IndexByte(r.TrailingOK, c[end]) < 0 {
 		return false
 	}
 	if start == 0 || !r.tokenSet[c[start-1]] {

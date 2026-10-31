@@ -24,6 +24,9 @@ const (
 	DefaultMaxSecretLen = 1 << 10
 	// MaxWindowBytes is how much of the content a rule with Rule.Window runs on.
 	MaxWindowBytes = 1 << 20
+	// MaxRejectedPerRule is how many matches of one rule a Scan may throw away
+	// (placeholders, boundaries, low entropy) before the rule stops.
+	MaxRejectedPerRule = 10000
 
 	binarySniffLen = 8000 // as git
 	lfsPointerHead = "version https://git-lfs.github.com/spec/v1"
@@ -77,11 +80,13 @@ type rawFinding struct {
 
 // Scan returns the secrets in content, ordered by position, and whether it
 // looked at everything: complete is false when the content was cut at
-// MaxContentSize, a rule with a Window reached MaxWindowBytes, or a rule
-// reached MaxMatchesPerRule (so there may be more findings). Callers record
-// that a scan was partial. Binary content (a NUL byte in the first 8000
-// bytes, as git decides) and git LFS pointer files give nothing and count as
-// complete. UTF-16 text with a byte order mark is decoded first.
+// MaxContentSize, a rule with a WindowBudget used it up, or a rule reached
+// MaxMatchesPerRule or a custom rule MaxRejectedPerRule (so there may be more findings).
+// Callers record that a scan was partial and must not treat it as clean.
+// Binary content (a NUL byte in the first 8000 bytes, as git decides) and git
+// LFS pointer files give nothing and count as complete. UTF-16 text (a NUL
+// in the first 8000 bytes and a byte order mark, or NULs on one side of every
+// byte pair) is decoded first.
 func (d *Detector) Scan(content []byte) (findings []Finding, complete bool) {
 	maxSize := d.MaxContentSize
 	if maxSize <= 0 {
@@ -109,7 +114,7 @@ func (d *Detector) Scan(content []byte) (findings []Finding, complete bool) {
 		}
 		ranges, ok := r.ranges(lower)
 		complete = complete && ok
-		accepted := 0
+		accepted, rejected := 0, 0
 	rangeLoop:
 		for _, rg := range ranges {
 			// One match at a time, so memory stays O(findings) however many
@@ -126,16 +131,21 @@ func (d *Detector) Scan(content []byte) (findings []Finding, complete bool) {
 					continue
 				}
 				start, end = start+base, end+base
-				if end-start > maxLen || !r.boundaryOK(content, start, end) {
-					continue
-				}
 				secret := content[start:end]
-				if r.Normalize != nil {
-					if secret = r.Normalize(secret); len(secret) == 0 {
-						continue
-					}
+				ok := (!r.KeywordInMatch || hasKeyword(lower[base+m[0]:base+m[1]], r.Keywords)) &&
+					end-start <= maxLen && r.boundaryOK(content, start, end)
+				if ok && r.Normalize != nil {
+					secret = r.Normalize(secret)
+					ok = len(secret) > 0
 				}
-				if len(secret) < r.MinSecretLen || !r.accepts(secret) || overlaps(found, start, end) {
+				if ok {
+					ok = len(secret) >= r.MinSecretLen && r.accepts(secret) && !overlaps(found, start, end)
+				}
+				if !ok {
+					if rejected++; r.RejectCap > 0 && rejected >= r.RejectCap {
+						complete = false
+						break rangeLoop
+					}
 					continue
 				}
 				if macKey == nil {
@@ -174,19 +184,28 @@ func (d *Detector) Scan(content []byte) (findings []Finding, complete bool) {
 
 // text returns the content to scan as UTF-8, cut to maxSize bytes (complete is
 // false then), or nothing if there is nothing to scan: binary, an LFS pointer
-// or empty.
+// or empty. Only a file with a NUL in its first 8000 bytes is tried as UTF-16
+// (with a byte order mark, or without one when the NULs sit on one side of
+// the byte pairs, as in UTF-16 ASCII text); one without is read as bytes, so
+// a Latin-1 file that starts with FF FE is not turned into garbage.
 func text(content []byte, maxSize int) (out []byte, complete bool) {
-	if len(content) >= 2 && (content[0] == 0xFF && content[1] == 0xFE || content[0] == 0xFE && content[1] == 0xFF) {
-		// UTF-16 only if the rest decodes cleanly, else it is bytes like any other.
-		cut := len(content) > maxSize+2
-		if decoded, ok := decodeUTF16(content[2:min(len(content), maxSize+2)], content[0] == 0xFE, cut); ok {
-			if len(decoded) > maxSize {
-				return decoded[:maxSize], false
-			}
-			return decoded, !cut
+	if bytes.IndexByte(content[:min(len(content), binarySniffLen)], 0) >= 0 {
+		bigEndian, bom, ok := utf16Order(content)
+		if !ok {
+			return nil, true // binary
 		}
+		body := content[2*boolInt(bom):]
+		cut := len(body) > maxSize
+		decoded := decodeUTF16(body[:min(len(body), maxSize)], bigEndian, cut)
+		if len(decoded) == 0 {
+			return nil, false // there was a body and nothing could be read from it
+		}
+		if len(decoded) > maxSize {
+			return decoded[:maxSize], false
+		}
+		return decoded, !cut
 	}
-	if bytes.IndexByte(content[:min(len(content), binarySniffLen)], 0) >= 0 || isLFSPointer(content) {
+	if isLFSPointer(content) {
 		return nil, true
 	}
 	if len(content) > maxSize {
@@ -195,44 +214,76 @@ func text(content []byte, maxSize int) (out []byte, complete bool) {
 	return content, true
 }
 
-// decodeUTF16 decodes b (after the byte order mark) to UTF-8. It fails on an
-// odd length or an unpaired surrogate, so a file that merely starts with FF FE
-// is not taken for UTF-16. If cut, b ends where the size limit fell: a last
-// unit that is a lone high surrogate, or an odd last byte, is dropped.
-func decodeUTF16(b []byte, bigEndian, cut bool) ([]byte, bool) {
-	if cut {
-		b = b[:len(b)&^1]
+func boolInt(b bool) int {
+	if b {
+		return 1
 	}
-	if len(b)%2 != 0 {
-		return nil, false
+	return 0
+}
+
+// utf16Order says whether content (which has a NUL in its first 8000 bytes)
+// is UTF-16, and its byte order: a byte order mark decides, else the NULs
+// must be in the high (or low) byte of at least a quarter of the byte pairs
+// and almost never in the other byte. UTF-32 and other binary data fail both.
+func utf16Order(content []byte) (bigEndian, bom, ok bool) {
+	if len(content) >= 2 {
+		switch {
+		case content[0] == 0xFF && content[1] == 0xFE:
+			return false, true, true
+		case content[0] == 0xFE && content[1] == 0xFF:
+			return true, true, true
+		}
 	}
+	sniff := content[:min(len(content), binarySniffLen)]
+	pairs, evenNUL, oddNUL := len(sniff)/2, 0, 0
+	for i := 0; i+1 < len(sniff); i += 2 {
+		if sniff[i] == 0 {
+			evenNUL++
+		}
+		if sniff[i+1] == 0 {
+			oddNUL++
+		}
+	}
+	switch {
+	case oddNUL*4 >= pairs && evenNUL*10 <= oddNUL:
+		return false, false, true
+	case evenNUL*4 >= pairs && oddNUL*10 <= evenNUL:
+		return true, false, true
+	}
+	return false, false, false
+}
+
+// decodeUTF16 decodes b to UTF-8 the way readers with replacement do: an odd
+// last byte is dropped and an unpaired surrogate becomes U+FFFD, so a key in
+// the valid part of a damaged file is still found. If cut, b ends where the
+// size limit fell and a high surrogate in the last unit is dropped.
+func decodeUTF16(b []byte, bigEndian, cut bool) []byte {
+	n := len(b) / 2
 	unit := func(i int) rune {
 		if bigEndian {
 			return rune(b[2*i])<<8 | rune(b[2*i+1])
 		}
 		return rune(b[2*i+1])<<8 | rune(b[2*i])
 	}
-	n := len(b) / 2
-	out := make([]byte, 0, len(b)*3/2) // at most 3 bytes per unit
+	out := make([]byte, 0, n*3/2+4) // at most 3 bytes per unit
 	for i := 0; i < n; i++ {
-		u := unit(i)
-		switch {
-		case utf16.IsSurrogate(u) && i+1 < n:
-			r := utf16.DecodeRune(u, unit(i+1))
-			if r == utf8.RuneError {
-				return nil, false
+		switch u := unit(i); {
+		case 0xD800 <= u && u < 0xDC00:
+			switch {
+			case i+1 < n && 0xDC00 <= unit(i+1) && unit(i+1) < 0xE000:
+				out = utf8.AppendRune(out, utf16.DecodeRune(u, unit(i+1)))
+				i++
+			case i+1 == n && cut:
+			default:
+				out = utf8.AppendRune(out, utf8.RuneError)
 			}
-			out = utf8.AppendRune(out, r)
-			i++
-		case utf16.IsSurrogate(u):
-			if !cut {
-				return nil, false
-			}
+		case 0xDC00 <= u && u < 0xE000:
+			out = utf8.AppendRune(out, utf8.RuneError)
 		default:
 			out = utf8.AppendRune(out, u)
 		}
 	}
-	return out, true
+	return out
 }
 
 // isLFSPointer is true for what git-lfs writes as a pointer (the checks of
@@ -267,14 +318,18 @@ func isLFSPointer(content []byte) bool {
 }
 
 // ranges returns the byte ranges the rule's regex runs on: all of the content,
-// or for a rule with a Window the merged windows around keyword hits, at most
-// MaxWindowBytes of them (ok is false when more were left out).
+// or for a rule with a Window the windows around keyword hits, merged once. A
+// rule with a WindowBudget gets at most that many bytes: the window that
+// crosses it is cut (never dropped) and ok is false.
 func (r *compiledRule) ranges(lower []byte) (out [][2]int, ok bool) {
 	if r.Window <= 0 {
 		return [][2]int{{0, len(lower)}}, true
 	}
 	ok = true
+	budget := r.WindowBudget
 	for _, k := range r.Keywords {
+		// Windows of one keyword, merged as they come. With a budget this
+		// stops once they alone fill it: the union can't be smaller.
 		var cur [2]int
 		have, total := false, 0
 		for off := 0; ; {
@@ -294,8 +349,8 @@ func (r *compiledRule) ranges(lower []byte) (out [][2]int, ok bool) {
 				total += cur[1] - cur[0]
 			}
 			cur, have = [2]int{lo, hi}, true
-			if total > MaxWindowBytes {
-				ok, have = false, false
+			if budget > 0 && total >= budget {
+				ok = false
 				break
 			}
 		}
@@ -304,7 +359,7 @@ func (r *compiledRule) ranges(lower []byte) (out [][2]int, ok bool) {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i][0] < out[j][0] })
-	merged, total := out[:0], 0
+	merged := out[:0]
 	for _, w := range out {
 		if n := len(merged); n > 0 && w[0] <= merged[n-1][1] {
 			merged[n-1][1] = max(merged[n-1][1], w[1])
@@ -312,9 +367,17 @@ func (r *compiledRule) ranges(lower []byte) (out [][2]int, ok bool) {
 		}
 		merged = append(merged, w)
 	}
-	for i, w := range merged {
-		if total += w[1] - w[0]; total > MaxWindowBytes {
-			return merged[:i], false
+	if budget > 0 {
+		total := 0
+		for i, w := range merged {
+			if n := w[1] - w[0]; total+n > budget {
+				merged[i][1] = w[0] + budget - total
+				if merged[i][1] == merged[i][0] {
+					return merged[:i], false
+				}
+				return merged[:i+1], false
+			}
+			total += w[1] - w[0]
 		}
 	}
 	return merged, ok

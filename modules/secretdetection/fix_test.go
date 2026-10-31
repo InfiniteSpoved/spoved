@@ -135,7 +135,7 @@ func TestUTF16IsDecoded(t *testing.T) {
 			assert.Equal(t, 14, fs[0].StartCol)
 		})
 	}
-	assert.Empty(t, scanOf(d, encode(binary.LittleEndian, false)), "no BOM: binary")
+	assert.Len(t, scanOf(d, encode(binary.LittleEndian, false)), 1, "no BOM: NULs on one side of the pairs is UTF-16 ASCII")
 	assert.Empty(t, scanOf(d, []byte("\x00\nGITHUB_TOKEN="+token)))
 	assert.Empty(t, scanOf(d, []byte("\xff\xfe")), "BOM only")
 	assert.Empty(t, scanOf(d, []byte("\xff\xfeg")), "odd length")
