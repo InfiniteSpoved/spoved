@@ -24,6 +24,7 @@ import (
 	project_model "forgejo.org/models/project"
 	repo_model "forgejo.org/models/repo"
 	secret_model "forgejo.org/models/secret"
+	secretscan_model "forgejo.org/models/secretscan"
 	system_model "forgejo.org/models/system"
 	user_model "forgejo.org/models/user"
 	vulnerability_model "forgejo.org/models/vulnerability"
@@ -93,6 +94,12 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepo
 		IsolationLevel: sql.LevelReadCommitted,
 	}, func(ctx context.Context) error {
 		sess := db.GetEngine(ctx)
+
+		// lock the repository row first: a secret scan that stores its result takes the same lock before it writes,
+		// so it either finishes before the rows below are deleted or finds no repository (no orphan rows)
+		if _, err := db.Exec(ctx, "UPDATE `repository` SET id = id WHERE id = ?", repoID); err != nil {
+			return fmt.Errorf("lock repository: %w", err)
+		}
 
 		counts, err := deleteCounts(ctx, repo.ID)
 		if err != nil {
@@ -231,6 +238,9 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepo
 			&repo_model.Dependency{RepoID: repoID},
 			&repo_model.DependencyScan{RepoID: repoID},
 			&vulnerability_model.Alert{RepoID: repoID},
+			&secretscan_model.Scan{RepoID: repoID},
+			&secretscan_model.Alert{RepoID: repoID},
+			&secretscan_model.Location{RepoID: repoID},
 			&actions_model.ActionRunnerToken{RepoID: optional.Some(repoID)},
 			&auth_model.AccessTokenResourceRepo{RepoID: repoID},
 		); err != nil {
@@ -281,6 +291,9 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepo
 
 		// Delete issue index
 		if err := db.DeleteResourceIndex(ctx, "issue_index", repoID); err != nil {
+			return err
+		}
+		if err := db.DeleteResourceIndex(ctx, "secret_scanning_alert_index", repoID); err != nil {
 			return err
 		}
 

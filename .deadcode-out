@@ -133,9 +133,6 @@ forgejo.org/modules/jwtx
 	NewVerifier
 	Verifier.Parse
 
-forgejo.org/modules/keying
-	MACKey
-
 forgejo.org/modules/log
 	eventWriterBuffer.Close
 	eventWriterBuffer.Write
@@ -177,6 +174,15 @@ forgejo.org/modules/queue/lqinternal
 
 forgejo.org/modules/ratelimit
 	ResetForTest
+
+forgejo.org/modules/secretdetection
+	ValidateCustomRule
+	CustomRule
+	keywordsInMatch
+	checkComplexity
+	maxMatchLen
+	unbounded
+	Fingerprint
 
 forgejo.org/modules/setting
 	NewConfigProviderFromData

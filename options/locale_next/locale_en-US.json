@@ -851,6 +851,7 @@
 	"admin.dashboard.cleanup_actions": "Clean up expired logs and artifacts from actions",
 	"admin.dashboard.cleanup_audit_log": "Delete audit log entries older than the retention",
 	"admin.dashboard.dependency_graph_scan": "Scan the dependencies of repositories that were not scanned yet",
+	"admin.dashboard.secret_scanning_scan": "Scan repositories that were not scanned for secrets yet",
 	"admin.dashboard.vulnerability_mirror_update": "Update the vulnerability database from the OSV mirror and match it against the dependencies",
 	"admin.dashboard.update_checker": "Update checker",
 	"admin.dashboard.delete_old_system_notices": "Delete all old system notices from database",

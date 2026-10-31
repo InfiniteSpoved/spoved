@@ -175,6 +175,7 @@ type Repository struct {
 	IsTemplate                      bool               `xorm:"INDEX NOT NULL DEFAULT false"`
 	TemplateID                      int64              `xorm:"INDEX"`
 	DependencyGraphDisabled         bool               `xorm:"NOT NULL DEFAULT false"` // a repository admin turned it off (services/dependency.Enabled)
+	SecretScanningDisabled          bool               `xorm:"NOT NULL DEFAULT false"` // a repository admin turned it off (services/secretscan.Enabled)
 	Size                            int64              `xorm:"NOT NULL DEFAULT 0"`
 	GitSize                         int64              `xorm:"NOT NULL DEFAULT 0"`
 	LFSSize                         int64              `xorm:"NOT NULL DEFAULT 0"`

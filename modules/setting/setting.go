@@ -203,6 +203,9 @@ func loadCommonSettingsFrom(cfg ConfigProvider) error {
 	if err := loadDependencyGraphFrom(cfg); err != nil {
 		return err
 	}
+	if err := loadSecretScanningFrom(cfg); err != nil {
+		return err
+	}
 	loadAdminFrom(cfg)
 	loadMaintenanceFrom(cfg)
 	loadIPAllowlistFrom(cfg)
