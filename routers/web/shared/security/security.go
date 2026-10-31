@@ -138,14 +138,14 @@ type Page struct {
 
 // validate checks the form the way the user typed it, so a mistake names its field in the user's language. It mirrors
 // the checks of dependency_service.SearchUsage / vulnerability_service.SearchAlerts (ecosystem, advisory ID, state,
-// name needs an ecosystem, range syntax); what it lets through is checked again by the services.
+// a dependency name needs an ecosystem, range syntax); what it lets through is checked again by the services.
 func validate(ctx *context.Context, kind string, f Form) (field, msg string) {
 	switch {
 	case f.Ecosystem != "" && !dependency.IsEcosystem(f.Ecosystem):
 		return "ecosystem", ctx.Locale.TrString("security_search.invalid_ecosystem")
 	case kind == Vulnerabilities && f.Advisory != "" && !vulnerability.ValidID(f.Advisory):
 		return "advisory", ctx.Locale.TrString("security_search.invalid_advisory", clip(f.Advisory))
-	case f.Name != "" && f.Ecosystem == "":
+	case kind == Dependencies && f.Name != "" && f.Ecosystem == "":
 		return "ecosystem", ctx.Locale.TrString("security_search.need_ecosystem")
 	case f.Name == "" && (f.Version != "" || kind == Dependencies || f.Advisory == ""):
 		return "name", ctx.Locale.TrString("security_search.need_package")

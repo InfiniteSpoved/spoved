@@ -256,11 +256,11 @@ func TestOrgSecurityPages(t *testing.T) {
 		assert.Less(t, blank, searched)
 		assert.Equal(t, blank, stable(deps+"?ecosystem=npm&direct=true&state=all"))
 
-		// a name without an ecosystem marks the ecosystem, a version without a name marks the package, advisory or not
+		// a name with "Any" ecosystem searches every ecosystem, a version without a name marks the package, advisory or not
 		for _, q := range []string{"?name=lodash", "?advisory=CVE-2024-1111&name=lodash"} {
 			resp := secGet(t, owner, vulns+q, http.StatusOK)
-			assert.Equal(t, "Choose an ecosystem.", secText(t, resp, ".negative.message"), q)
-			assert.Contains(t, resp.Body.String(), `<select name="ecosystem" aria-invalid="true"`, q)
+			assert.Empty(t, NewHTMLParser(t, bytes.NewBufferString(resp.Body.String())).Find(".negative.message").Nodes, q)
+			assert.NotEmpty(t, secRows(t, resp), q)
 		}
 		for _, q := range []string{"?version=1.0.0", "?advisory=CVE-2024-1111&version=1.0.0", "?ecosystem=npm&advisory=CVE-2024-1111&version=1.0.0"} {
 			resp := secGet(t, owner, vulns+q, http.StatusOK)

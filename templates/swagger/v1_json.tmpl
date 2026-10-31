@@ -3747,13 +3747,13 @@
           },
           {
             "type": "string",
-            "description": "the ecosystem (Go, npm, PyPI, Maven, NuGet, crates.io, RubyGems or Packagist); needed with name",
+            "description": "the ecosystem (Go, npm, PyPI, Maven, NuGet, crates.io, RubyGems or Packagist); empty matches every ecosystem",
             "name": "ecosystem",
             "in": "query"
           },
           {
             "type": "string",
-            "description": "the package name, compared as the ecosystem's registry does (at most 512 bytes). Without advisory, ecosystem and name are required",
+            "description": "the package name, compared as the ecosystem's registry does (at most 512 bytes). Without advisory, name is required; without ecosystem it matches in every ecosystem",
             "name": "name",
             "in": "query"
           },
@@ -9430,13 +9430,13 @@
           },
           {
             "type": "string",
-            "description": "the ecosystem (Go, npm, PyPI, Maven, NuGet, crates.io, RubyGems or Packagist); needed with name",
+            "description": "the ecosystem (Go, npm, PyPI, Maven, NuGet, crates.io, RubyGems or Packagist); empty matches every ecosystem",
             "name": "ecosystem",
             "in": "query"
           },
           {
             "type": "string",
-            "description": "the package name, compared as the ecosystem's registry does (at most 512 bytes). Without advisory, ecosystem and name are required",
+            "description": "the package name, compared as the ecosystem's registry does (at most 512 bytes). Without advisory, name is required; without ecosystem it matches in every ecosystem",
             "name": "name",
             "in": "query"
           },
