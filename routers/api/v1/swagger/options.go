@@ -126,6 +126,9 @@ type swaggerParameterBodies struct {
 	EditVulnerabilityAlertOption api.EditVulnerabilityAlertOption
 
 	// in:body
+	EditSecretScanningAlertOption api.EditSecretScanningAlertOption
+
+	// in:body
 	CreateRepoOption api.CreateRepoOption
 	// in:body
 	EditRepoOption api.EditRepoOption

@@ -2242,6 +2242,8 @@
 	"admin.audit.action.repo.tag.created": "Created tag %s",
 	"admin.audit.action.repo.tag.deleted": "Deleted tag %s",
 	"admin.audit.action.repo.collaborator.added": "Added collaborator %s",
+	"admin.audit.action.repo.secret_alert.closed": "Closed the secret alert for %s",
+	"admin.audit.action.repo.secret_alert.reopened": "Reopened the secret alert for %s",
 	"admin.audit.action.repo.vulnerability_alert.dismissed": "Dismissed the vulnerability alert for %s",
 	"admin.audit.action.repo.vulnerability_alert.reopened": "Reopened the vulnerability alert for %s",
 	"admin.audit.action.admin.vulnerability_mirror.updated": "Started an update of the vulnerability database",
