@@ -159,3 +159,17 @@ func BenchmarkExpandPRKOnce(b *testing.B) {
 		once()
 	}
 }
+
+func TestMACKey(t *testing.T) {
+	Init([]byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07})
+
+	key := MACKey(SecretScanning)
+	assert.Len(t, key, 32)
+	assert.Equal(t, key, MACKey(SecretScanning))
+	assert.NotEqual(t, key, MACKey("other"))
+
+	// Not the key an AEAD context with the same name would use.
+	aeadKey, err := hkdf.Expand(hash, prk.Load().([]byte), SecretScanning, 32)
+	require.NoError(t, err)
+	assert.NotEqual(t, aeadKey, key)
+}

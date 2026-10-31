@@ -45,6 +45,12 @@ var (
 	PullMirror = deriveKey("pullmirror")
 )
 
+// Contexts of MAC keys, see MACKey.
+const (
+	// Used to fingerprint secrets found by the secret scanner.
+	SecretScanning = "secret_scanning"
+)
+
 var (
 	// The hash used for HKDF.
 	hash = sha256.New
@@ -100,6 +106,22 @@ func expandPRK(prk []byte, context string) cipher.AEAD {
 		panic(err)
 	}
 	return e
+}
+
+// MACKey derives a 32 byte key for HMAC from the main IKM for a given context.
+// Context only exposes an AEAD, which can't be used for a MAC, so this expands
+// the same PRK directly. The "mac:" prefix keeps it apart from the AEAD keys
+// (whose HKDF info is the bare context name), so a MAC key never equals one.
+func MACKey(context string) []byte {
+	buf, _ := prk.Load().([]byte)
+	if len(buf) != sha256.Size {
+		panic("keying: not initialized")
+	}
+	key, err := hkdf.Expand(hash, buf, "mac:"+context, sha256.Size)
+	if err != nil {
+		panic(err)
+	}
+	return key
 }
 
 type Context struct {
