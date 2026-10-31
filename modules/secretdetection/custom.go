@@ -32,6 +32,8 @@ const (
 	MaxCustomKeywords   = 5
 	// MinCustomSecretLen is the shortest secret a custom rule reports.
 	MinCustomSecretLen = 8
+	// MaxCustomRules is how many custom rules a Detector takes.
+	MaxCustomRules = 50
 	// MaxCorpusMatches is how often a custom pattern may match the ordinary
 	// text corpus; more means it matches ordinary files (`.*`, `\w+`, a hash).
 	MaxCorpusMatches = 10
@@ -42,7 +44,7 @@ var (
 	ErrCustomNameInvalid     = errors.New("rule name is empty or too long")
 	ErrPatternTooLong        = errors.New("pattern is too long")
 	ErrPatternInvalid        = errors.New("pattern is not a valid RE2 expression")
-	ErrPatternTooComplex     = errors.New("pattern has nested or too large repeats, or compiles to too many instructions")
+	ErrPatternTooComplex     = errors.New("pattern is too complex")
 	ErrPatternMatchesEmpty   = errors.New("pattern matches the empty string")
 	ErrTestStringTooLong     = errors.New("test string is too long")
 	ErrKeywordMissing        = errors.New("a rule needs 1 to 5 keywords of 3 to 64 bytes, and every one must appear in the match of the test string")
@@ -55,8 +57,9 @@ var (
 // The cost of a pattern is bounded by its shape, not measured: RE2 is linear,
 // but the cost per byte grows with the size of the program and with repeats
 // that can nest or add up. So the pattern is at most 1024 bytes and compiles to
-// at most 300 instructions, no repeat (x{n,m}, x*, x+) stands inside another,
-// and the maxima of the counted repeats add up to at most 256. It can't match
+// at most 300 instructions, has no unbounded repeat (x*, x+, x{n,}), no repeat
+// stands inside another, and the maxima of the counted repeats add up to at
+// most 256. It can't match
 // the empty string. keywords (1 to 5, 3 to 64 bytes) are literals that all
 // appear in the text the pattern matches in testString (at most 4 KiB): the
 // rule runs only in windows around them (see Rule.Window), which keeps a
@@ -110,16 +113,24 @@ func ValidateCustomRule(name, pattern, testString string, keywords []string) err
 
 // CustomRule is the Rule of a custom pattern: the secret is capture group 1 if
 // the pattern has one, else the whole match, and at least 8 bytes. It runs in
-// windows around the (lowercased) keywords: the secret length cap on each side
-// plus room for the context.
+// windows around the (lowercased) keywords: as many bytes on each side as the
+// longest match of the pattern, so a match that holds a keyword lies inside.
 func CustomRule(id, name, pattern string, keywords []string) Rule {
 	r := Rule{
-		ID: id, Name: name, Type: "custom", Regex: pattern,
-		MinSecretLen: MinCustomSecretLen, Window: DefaultMaxSecretLen + 256, // a longer secret is cut by the window, so it is over the cap
+		ID: id, Name: name, Type: "custom", Regex: pattern, custom: true,
+		MinSecretLen: MinCustomSecretLen, Window: DefaultMaxSecretLen + 256,
+		KeywordInMatch: true, RejectCap: MaxRejectedPerRule,
 		Allowlist: slices.Clone(placeholders),
 	}
 	if re, err := regexp.Compile(pattern); err == nil {
 		r.SecretGroup = min(re.NumSubexp(), 1)
+	}
+	if parsed, err := syntax.Parse(pattern, syntax.Perl); err == nil {
+		// Unbounded repeats are refused by validation, so this is finite; a
+		// rule built without validation keeps the default.
+		if n := maxMatchLen(parsed.Simplify()); n > 0 && n < workChunk {
+			r.Window = n
+		}
 	}
 	for _, k := range keywords {
 		r.Keywords = append(r.Keywords, strings.ToLower(k))
@@ -168,11 +179,71 @@ func checkComplexity(pattern string) error {
 	if tooBig(parsed, false) || sum > MaxCustomRepeatSum {
 		return ErrPatternTooComplex
 	}
-	prog, err := syntax.Compile(parsed.Simplify())
+	simple := parsed.Simplify() // x{2,} becomes xx+, so this sees every unbounded repeat
+	if unbounded(simple) {
+		return ErrPatternTooComplex
+	}
+	prog, err := syntax.Compile(simple)
 	if err != nil || len(prog.Inst) > MaxCustomProgSize {
 		return ErrPatternTooComplex
 	}
 	return nil
+}
+
+// maxMatchLen is the most bytes a match of r can have (a pattern without
+// unbounded repeats). A class or literal counts 4 bytes if it can hold a
+// non-ASCII rune (the case folds of k and s are 3 bytes).
+func maxMatchLen(r *syntax.Regexp) int {
+	switch r.Op {
+	case syntax.OpLiteral:
+		n := 0
+		for _, c := range r.Rune {
+			switch {
+			case c >= 0x80:
+				n += 4
+			case r.Flags&syntax.FoldCase != 0 && strings.ContainsRune("ksKS", c):
+				n += 3
+			default:
+				n++
+			}
+		}
+		return n
+	case syntax.OpCharClass:
+		for i := 1; i < len(r.Rune); i += 2 {
+			if r.Rune[i] >= 0x80 {
+				return 4
+			}
+		}
+		return 1
+	case syntax.OpAnyChar, syntax.OpAnyCharNotNL:
+		return 4
+	case syntax.OpStar, syntax.OpPlus:
+		return -1 << 30 // unbounded: callers fall back
+	case syntax.OpConcat, syntax.OpAlternate:
+		total := 0
+		for _, sub := range r.Sub {
+			n := maxMatchLen(sub)
+			if r.Op == syntax.OpConcat {
+				total += n
+			} else {
+				total = max(total, n)
+			}
+		}
+		return total
+	case syntax.OpRepeat:
+		return max(r.Max, 0) * maxMatchLen(r.Sub[0])
+	case syntax.OpQuest, syntax.OpCapture:
+		return maxMatchLen(r.Sub[0])
+	}
+	return 0
+}
+
+// unbounded: the simplified pattern has a * or + (an x{n,} became one).
+func unbounded(r *syntax.Regexp) bool {
+	if r.Op == syntax.OpStar || r.Op == syntax.OpPlus {
+		return true
+	}
+	return slices.ContainsFunc(r.Sub, unbounded)
 }
 
 // corpus is a fixed 64 KiB of ordinary files: prose, code with tabs and

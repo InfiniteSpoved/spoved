@@ -5,6 +5,8 @@ package secretdetection
 
 import (
 	"bytes"
+	"fmt"
+	"slices"
 	"sort"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -22,8 +24,22 @@ const (
 	// DefaultMaxSecretLen is the longest secret reported (Rule.MaxSecretLen
 	// overrides it): a longer capture is a bad pattern or not a secret.
 	DefaultMaxSecretLen = 1 << 10
-	// MaxWindowBytes is how much of the content a rule with Rule.Window runs on.
-	MaxWindowBytes = 1 << 20
+	// MinMaxWork and WorkPerByte give the default Detector.MaxWork: the
+	// larger of MinMaxWork and WorkPerByte times the content length.
+	MinMaxWork  = 16 << 20
+	WorkPerByte = 3
+	// workChunk is the most bytes one regex call gets in a window rule, and
+	// hitCheckCost the work units charged for one HitCheck.
+	workChunk    = 64 << 10
+	hitCheckCost = 64
+	// hitCost is the work units charged for finding one keyword hit.
+	hitCost = 16
+	// callCost is the work units charged for every regex call, whatever its input
+	// (the NFA setup and the match bookkeeping, about 2.5 microseconds).
+	callCost = 700
+	// MaxRejectedPerRule is how many matches of one rule a Scan may throw away
+	// (placeholders, boundaries, low entropy) before the rule stops.
+	MaxRejectedPerRule = 10000
 
 	binarySniffLen = 8000 // as git
 	lfsPointerHead = "version https://git-lfs.github.com/spec/v1"
@@ -52,13 +68,34 @@ type Detector struct {
 	// MaxMatchesPerRule is the findings per rule; 0 or less means
 	// DefaultMaxMatchesPerRule.
 	MaxMatchesPerRule int
+	// MaxWork is the one CPU bound of a Scan. Every regex run is charged the
+	// bytes it is given times the rule's cost (1 for a pass over the content
+	// by a built-in rule, 8 for a window or a keyword hit, more for a custom
+	// rule with a big program), in eighths of a byte: past MaxWork*8 the Scan
+	// stops and returns complete=false. 0 or less means the larger of
+	// MinMaxWork and WorkPerByte times the content length.
+	MaxWork int
 
 	rules []*compiledRule
 }
 
 // NewDetector compiles rules. Which rules to pass is the caller's decision.
+// Custom rules (made by CustomRule) run after the built-in ones, whatever
+// the order given, so a built-in finding wins an overlap with a custom one
+// (the first finding of a place is kept).
 func NewDetector(rules []Rule) (*Detector, error) {
 	d := &Detector{}
+	// custom rules last (stable), so they can't starve the built-in ones
+	rules = slices.SortedStableFunc(slices.Values(rules), func(a, b Rule) int { return boolInt(a.custom) - boolInt(b.custom) })
+	custom := 0
+	for _, r := range rules {
+		if r.custom {
+			custom++
+		}
+	}
+	if custom > MaxCustomRules {
+		return nil, fmt.Errorf("secretdetection: %d custom rules, at most %d", custom, MaxCustomRules)
+	}
 	for _, r := range rules {
 		c, err := compileRule(r)
 		if err != nil {
@@ -77,11 +114,13 @@ type rawFinding struct {
 
 // Scan returns the secrets in content, ordered by position, and whether it
 // looked at everything: complete is false when the content was cut at
-// MaxContentSize, a rule with a Window reached MaxWindowBytes, or a rule
-// reached MaxMatchesPerRule (so there may be more findings). Callers record
-// that a scan was partial. Binary content (a NUL byte in the first 8000
-// bytes, as git decides) and git LFS pointer files give nothing and count as
-// complete. UTF-16 text with a byte order mark is decoded first.
+// MaxContentSize, the MaxWork budget ran out, or a rule reached
+// MaxMatchesPerRule or a custom rule MaxRejectedPerRule (so there may be more
+// findings).
+// Callers record that a scan was partial and must not treat it as clean.
+// Binary content (a NUL byte in the first 8000 bytes, as git decides) and git
+// LFS pointer files give nothing and count as complete. UTF-16 text (a byte
+// order mark, or NULs on one side of every byte pair) is decoded first.
 func (d *Detector) Scan(content []byte) (findings []Finding, complete bool) {
 	maxSize := d.MaxContentSize
 	if maxSize <= 0 {
@@ -91,62 +130,247 @@ func (d *Detector) Scan(content []byte) (findings []Finding, complete bool) {
 	if maxFindings <= 0 {
 		maxFindings = DefaultMaxMatchesPerRule
 	}
-	content, complete = text(content, maxSize)
+	raw := content
+	content, complete = text(raw, maxSize)
 	if len(content) == 0 {
 		return nil, complete
 	}
+	findings, ok := d.scanText(content, maxFindings)
+	complete = complete && ok
+	if bomWithoutNUL(raw) {
+		// Decoded as UTF-16, but with no NUL in the first 8000 bytes it may
+		// as well be a Latin-1 file that starts with FF FE: scan the bytes
+		// too, and keep one finding per (rule, fingerprint).
+		extra, ok := d.scanText(raw[:min(len(raw), maxSize)], maxFindings)
+		complete = complete && ok
+		seen := make(map[[2]string]bool, len(findings))
+		for _, f := range findings {
+			seen[[2]string{f.RuleID, f.Fingerprint}] = true
+		}
+		for _, f := range extra {
+			if !seen[[2]string{f.RuleID, f.Fingerprint}] {
+				findings = append(findings, f)
+			}
+		}
+		sort.SliceStable(findings, func(i, j int) bool {
+			return findings[i].StartLine < findings[j].StartLine ||
+				findings[i].StartLine == findings[j].StartLine && findings[i].StartCol < findings[j].StartCol
+		})
+	}
+	return findings, complete
+}
+
+// bomWithoutNUL: content starts with a UTF-16 byte order mark and has no NUL
+// in its first 8000 bytes (CJK text, or not UTF-16 at all).
+func bomWithoutNUL(content []byte) bool {
+	return len(content) >= 2 && (content[0] == 0xFF && content[1] == 0xFE || content[0] == 0xFE && content[1] == 0xFF) &&
+		bytes.IndexByte(content[:min(len(content), binarySniffLen)], 0) < 0
+}
+
+// scanText runs the rules on text that is UTF-8 (or taken as bytes).
+func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding, complete bool) {
+	complete = true
 	lower := asciiLower(content)
+	budget := d.MaxWork
+	if budget <= 0 {
+		budget = max(MinMaxWork, WorkPerByte*len(content))
+	}
+	budget *= 8
+	work := 0
 
 	var macKey []byte
 	var found []rawFinding
+	var active []*compiledRule
 	for _, r := range d.rules {
-		if !hasKeyword(lower, r.Keywords) {
-			continue
+		if hasKeyword(lower, r.Keywords) {
+			active = append(active, r)
 		}
+	}
+	// ruleRun is one rule's progress, so that a rule that used up its share
+	// can continue where it stopped.
+	type ruleRun struct {
+		r             *compiledRule
+		accepted      int
+		rejected      int
+		done          bool
+		ki, off, next int // anchored: keyword, search offset, end of the last match
+		ranges        [][2]int
+		haveRanges    bool
+		ri, pos       int // windowed and whole-content: range and position in it
+		inRange       bool
+	}
+	runs := make([]*ruleRun, len(active))
+	for i, r := range active {
+		runs[i] = &ruleRun{r: r}
+	}
+	// run works on one rule until it is finished or `work` passes limit, and
+	// says whether the rule is finished.
+	run := func(st *ruleRun, limit int) bool {
+		r := st.r
 		maxLen := r.MaxSecretLen
 		if maxLen <= 0 {
 			maxLen = DefaultMaxSecretLen
 		}
-		ranges, ok := r.ranges(lower)
-		complete = complete && ok
-		accepted := 0
-	rangeLoop:
-		for _, rg := range ranges {
-			// One match at a time, so memory stays O(findings) however many
-			// matches the rule rejects.
-			for pos := rg[0]; pos < rg[1]; {
-				m := r.re.FindSubmatchIndex(content[pos:rg[1]])
-				if m == nil {
-					break
+		// handle takes one match (offsets relative to base) and says whether
+		// the rule is done for this Scan.
+		handle := func(base int, m []int) (stop bool) {
+			start, end := m[2*r.SecretGroup], m[2*r.SecretGroup+1]
+			if start < 0 || end <= start {
+				return false
+			}
+			start, end = start+base, end+base
+			secret := content[start:end]
+			ok := (!r.KeywordInMatch || hasKeyword(lower[base+m[0]:base+m[1]], r.Keywords)) &&
+				end-start <= maxLen && r.boundaryOK(content, start, end)
+			if ok && r.Normalize != nil {
+				secret = r.Normalize(secret)
+				ok = len(secret) > 0
+			}
+			if ok {
+				ok = len(secret) >= r.MinSecretLen && r.accepts(secret) && !overlaps(found, start, end)
+			}
+			if !ok {
+				if st.rejected++; r.RejectCap > 0 && st.rejected >= r.RejectCap {
+					complete = false
+					return true
 				}
-				base := pos
-				pos += max(m[1], 1)
-				start, end := m[2*r.SecretGroup], m[2*r.SecretGroup+1]
-				if start < 0 || end <= start {
-					continue
-				}
-				start, end = start+base, end+base
-				if end-start > maxLen || !r.boundaryOK(content, start, end) {
-					continue
-				}
-				secret := content[start:end]
-				if r.Normalize != nil {
-					if secret = r.Normalize(secret); len(secret) == 0 {
+				return false
+			}
+			if macKey == nil {
+				macKey = keying.MACKey(keying.SecretScanning)
+			}
+			found = append(found, rawFinding{r, start, end, fingerprint(macKey, secret)})
+			if st.accepted++; st.accepted >= maxFindings {
+				complete = false
+				return true
+			}
+			return false
+		}
+		if r.Anchored {
+			// The match starts at a keyword hit: try the anchored regex on
+			// the bytes after it, which costs a few bytes per hit and not a
+			// pass over everything between hits.
+			for ; st.ki < len(r.Keywords); st.ki, st.off, st.next = st.ki+1, 0, 0 {
+				k := r.Keywords[st.ki]
+				for {
+					if work > limit {
+						return false
+					}
+					i := bytes.Index(lower[st.off:], []byte(k))
+					if i < 0 {
+						break
+					}
+					p := st.off + i
+					st.off = p + 1
+					start := p - r.KeywordOffset
+					if p < st.next || start < 0 {
 						continue
 					}
-				}
-				if len(secret) < r.MinSecretLen || !r.accepts(secret) || overlaps(found, start, end) {
-					continue
-				}
-				if macKey == nil {
-					macKey = keying.MACKey(keying.SecretScanning)
-				}
-				found = append(found, rawFinding{r, start, end, fingerprint(macKey, secret)})
-				if accepted++; accepted >= maxFindings {
-					complete = false
-					break rangeLoop
+					if r.HitCheck != nil {
+						work += hitCheckCost
+						if !r.HitCheck(lower, content, p) {
+							continue
+						}
+					}
+					win := content[start:min(len(content), p+len(k)+r.Window)]
+					m := r.anchored.FindSubmatchIndex(win)
+					// charge what the regex read: up to the match end, or the
+					// whole window when it found nothing
+					work += callCost
+					if m == nil {
+						work += len(win) * r.cost
+						continue
+					}
+					work += m[1] * r.cost
+					st.next = start + max(m[1], 1)
+					if handle(start, m) {
+						return true
+					}
 				}
 			}
+			return true
+		}
+		if !st.haveRanges {
+			ranges, spent, ok := r.ranges(lower, limit-work)
+			work += spent
+			if !ok {
+				return false
+			}
+			st.ranges, st.haveRanges = ranges, true
+		}
+		for ; st.ri < len(st.ranges); st.ri, st.inRange = st.ri+1, false {
+			rg := st.ranges[st.ri]
+			if !st.inRange {
+				st.pos, st.inRange = rg[0], true
+			}
+			// One match at a time, so memory stays O(findings) however many
+			// matches the rule rejects.
+			for st.pos < rg[1] {
+				if work > limit {
+					return false
+				}
+				// A window rule gets the regex in pieces of workChunk bytes
+				// that overlap by Window, so no single call can run far past
+				// the budget; a match that starts in the overlap is found in
+				// the next piece.
+				// The piece is no bigger than what is left of the rule's share,
+				// so a call can't run far past it.
+				size := min(workChunk, max(2*r.Window+64, (limit-work)/r.cost))
+				end, last := rg[1], true
+				if r.Window > 0 && end-st.pos > size {
+					end, last = st.pos+size, false
+				}
+				m := r.re.FindSubmatchIndex(content[st.pos:end])
+				work += callCost
+				if m == nil {
+					work += (end - st.pos) * r.cost
+				} else {
+					work += m[1] * r.cost
+				}
+				if m == nil || !last && m[0] >= end-st.pos-r.Window {
+					if last {
+						break
+					}
+					st.pos = end - r.Window
+					continue
+				}
+				base := st.pos
+				st.pos += max(m[1], 1)
+				if handle(base, m) {
+					return true
+				}
+			}
+		}
+		return true
+	}
+	// First every rule runs on its fair share of what is left (a rule that
+	// needs less passes the rest on), so decoys for early rules can't starve
+	// later ones; then the work that is left goes to the rules that stopped,
+	// each continuing where it stopped.
+	for i, st := range runs {
+		if work >= budget {
+			break
+		}
+		st.done = run(st, work+(budget-work)/(len(runs)-i))
+	}
+	for i, st := range runs {
+		if st.done {
+			continue
+		}
+		if work >= budget {
+			break
+		}
+		stopped := 0
+		for _, s := range runs[i:] {
+			if !s.done {
+				stopped++
+			}
+		}
+		st.done = run(st, work+(budget-work)/stopped)
+	}
+	for _, st := range runs {
+		if !st.done {
+			complete = false
 		}
 	}
 	sort.SliceStable(found, func(i, j int) bool { return found[i].start < found[j].start })
@@ -174,19 +398,28 @@ func (d *Detector) Scan(content []byte) (findings []Finding, complete bool) {
 
 // text returns the content to scan as UTF-8, cut to maxSize bytes (complete is
 // false then), or nothing if there is nothing to scan: binary, an LFS pointer
-// or empty.
+// or empty. A file with a byte order mark is UTF-16 (CJK text has no NUL);
+// one without is tried as UTF-16 only if it has a NUL in its first 8000 bytes
+// and the NULs sit on one side of the byte pairs, as in UTF-16 ASCII text.
 func text(content []byte, maxSize int) (out []byte, complete bool) {
-	if len(content) >= 2 && (content[0] == 0xFF && content[1] == 0xFE || content[0] == 0xFE && content[1] == 0xFF) {
-		// UTF-16 only if the rest decodes cleanly, else it is bytes like any other.
-		cut := len(content) > maxSize+2
-		if decoded, ok := decodeUTF16(content[2:min(len(content), maxSize+2)], content[0] == 0xFE, cut); ok {
-			if len(decoded) > maxSize {
-				return decoded[:maxSize], false
-			}
-			return decoded, !cut
+	hasBOM := len(content) >= 2 && (content[0] == 0xFF && content[1] == 0xFE || content[0] == 0xFE && content[1] == 0xFF)
+	if hasBOM || bytes.IndexByte(content[:min(len(content), binarySniffLen)], 0) >= 0 {
+		bigEndian, bom, ok := utf16Order(content)
+		if !ok {
+			return nil, true // binary
 		}
+		body := content[2*boolInt(bom):]
+		cut := len(body) > maxSize
+		decoded := decodeUTF16(body[:min(len(body), maxSize)], bigEndian, cut)
+		if len(decoded) == 0 {
+			return nil, false // there was a body and nothing could be read from it
+		}
+		if len(decoded) > maxSize {
+			return decoded[:maxSize], false
+		}
+		return decoded, !cut
 	}
-	if bytes.IndexByte(content[:min(len(content), binarySniffLen)], 0) >= 0 || isLFSPointer(content) {
+	if isLFSPointer(content) {
 		return nil, true
 	}
 	if len(content) > maxSize {
@@ -195,44 +428,76 @@ func text(content []byte, maxSize int) (out []byte, complete bool) {
 	return content, true
 }
 
-// decodeUTF16 decodes b (after the byte order mark) to UTF-8. It fails on an
-// odd length or an unpaired surrogate, so a file that merely starts with FF FE
-// is not taken for UTF-16. If cut, b ends where the size limit fell: a last
-// unit that is a lone high surrogate, or an odd last byte, is dropped.
-func decodeUTF16(b []byte, bigEndian, cut bool) ([]byte, bool) {
-	if cut {
-		b = b[:len(b)&^1]
+func boolInt(b bool) int {
+	if b {
+		return 1
 	}
-	if len(b)%2 != 0 {
-		return nil, false
+	return 0
+}
+
+// utf16Order says whether content (which has a NUL in its first 8000 bytes)
+// is UTF-16, and its byte order: a byte order mark decides, else the NULs
+// must be in the high (or low) byte of at least a quarter of the byte pairs
+// and almost never in the other byte. UTF-32 and other binary data fail both.
+func utf16Order(content []byte) (bigEndian, bom, ok bool) {
+	if len(content) >= 2 {
+		switch {
+		case content[0] == 0xFF && content[1] == 0xFE:
+			return false, true, true
+		case content[0] == 0xFE && content[1] == 0xFF:
+			return true, true, true
+		}
 	}
+	sniff := content[:min(len(content), binarySniffLen)]
+	pairs, evenNUL, oddNUL := len(sniff)/2, 0, 0
+	for i := 0; i+1 < len(sniff); i += 2 {
+		if sniff[i] == 0 {
+			evenNUL++
+		}
+		if sniff[i+1] == 0 {
+			oddNUL++
+		}
+	}
+	switch {
+	case oddNUL*4 >= pairs && evenNUL*10 <= oddNUL:
+		return false, false, true
+	case evenNUL*4 >= pairs && oddNUL*10 <= evenNUL:
+		return true, false, true
+	}
+	return false, false, false
+}
+
+// decodeUTF16 decodes b to UTF-8 the way readers with replacement do: an odd
+// last byte is dropped and an unpaired surrogate becomes U+FFFD, so a key in
+// the valid part of a damaged file is still found. If cut, b ends where the
+// size limit fell and a high surrogate in the last unit is dropped.
+func decodeUTF16(b []byte, bigEndian, cut bool) []byte {
+	n := len(b) / 2
 	unit := func(i int) rune {
 		if bigEndian {
 			return rune(b[2*i])<<8 | rune(b[2*i+1])
 		}
 		return rune(b[2*i+1])<<8 | rune(b[2*i])
 	}
-	n := len(b) / 2
-	out := make([]byte, 0, len(b)*3/2) // at most 3 bytes per unit
+	out := make([]byte, 0, n*3/2+4) // at most 3 bytes per unit
 	for i := 0; i < n; i++ {
-		u := unit(i)
-		switch {
-		case utf16.IsSurrogate(u) && i+1 < n:
-			r := utf16.DecodeRune(u, unit(i+1))
-			if r == utf8.RuneError {
-				return nil, false
+		switch u := unit(i); {
+		case 0xD800 <= u && u < 0xDC00:
+			switch {
+			case i+1 < n && 0xDC00 <= unit(i+1) && unit(i+1) < 0xE000:
+				out = utf8.AppendRune(out, utf16.DecodeRune(u, unit(i+1)))
+				i++
+			case i+1 == n && cut:
+			default:
+				out = utf8.AppendRune(out, utf8.RuneError)
 			}
-			out = utf8.AppendRune(out, r)
-			i++
-		case utf16.IsSurrogate(u):
-			if !cut {
-				return nil, false
-			}
+		case 0xDC00 <= u && u < 0xE000:
+			out = utf8.AppendRune(out, utf8.RuneError)
 		default:
 			out = utf8.AppendRune(out, u)
 		}
 	}
-	return out, true
+	return out
 }
 
 // isLFSPointer is true for what git-lfs writes as a pointer (the checks of
@@ -267,16 +532,17 @@ func isLFSPointer(content []byte) bool {
 }
 
 // ranges returns the byte ranges the rule's regex runs on: all of the content,
-// or for a rule with a Window the merged windows around keyword hits, at most
-// MaxWindowBytes of them (ok is false when more were left out).
-func (r *compiledRule) ranges(lower []byte) (out [][2]int, ok bool) {
+// or for a rule with a Window the windows around keyword hits, merged.
+// Finding the windows costs hitCost work units per keyword hit; ok is false
+// when that is more than allow.
+func (r *compiledRule) ranges(lower []byte, allow int) (out [][2]int, spent int, ok bool) {
 	if r.Window <= 0 {
-		return [][2]int{{0, len(lower)}}, true
+		return [][2]int{{0, len(lower)}}, 0, true
 	}
-	ok = true
 	for _, k := range r.Keywords {
+		// Windows of one keyword, merged as they come.
 		var cur [2]int
-		have, total := false, 0
+		have := false
 		for off := 0; ; {
 			i := bytes.Index(lower[off:], []byte(k))
 			if i < 0 {
@@ -284,6 +550,9 @@ func (r *compiledRule) ranges(lower []byte) (out [][2]int, ok bool) {
 			}
 			p := off + i
 			off = p + 1
+			if spent += hitCost; spent > allow {
+				return nil, spent, false
+			}
 			lo, hi := max(0, p-r.Window), min(len(lower), p+len(k)+r.Window)
 			if have && lo <= cur[1] {
 				cur[1] = hi
@@ -291,20 +560,15 @@ func (r *compiledRule) ranges(lower []byte) (out [][2]int, ok bool) {
 			}
 			if have {
 				out = append(out, cur)
-				total += cur[1] - cur[0]
 			}
 			cur, have = [2]int{lo, hi}, true
-			if total > MaxWindowBytes {
-				ok, have = false, false
-				break
-			}
 		}
 		if have {
 			out = append(out, cur)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i][0] < out[j][0] })
-	merged, total := out[:0], 0
+	merged := out[:0]
 	for _, w := range out {
 		if n := len(merged); n > 0 && w[0] <= merged[n-1][1] {
 			merged[n-1][1] = max(merged[n-1][1], w[1])
@@ -312,12 +576,7 @@ func (r *compiledRule) ranges(lower []byte) (out [][2]int, ok bool) {
 		}
 		merged = append(merged, w)
 	}
-	for i, w := range merged {
-		if total += w[1] - w[0]; total > MaxWindowBytes {
-			return merged[:i], false
-		}
-	}
-	return merged, ok
+	return merged, spent, true
 }
 
 // accepts checks the secret itself, never the text around it: context such as
