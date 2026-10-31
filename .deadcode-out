@@ -180,6 +180,8 @@ forgejo.org/modules/secretdetection
 	CustomRule
 	keywordsInMatch
 	checkComplexity
+	maxMatchLen
+	unbounded
 	Fingerprint
 
 forgejo.org/modules/setting
