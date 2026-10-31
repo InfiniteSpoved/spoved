@@ -65,7 +65,7 @@ var builtinRules = []Rule{
 		// it counts after aws_secret_access_key (or similar) = ... or a space.
 		ID: "aws-secret-access-key", Name: "AWS secret access key", Type: "aws",
 		Keywords:    []string{"aws"},
-		Regex:       `(?i)aws[\w.-]{0,30}secret[\w.-]{0,30}["']?(?:\s*(?::=|=>|[:=])\s*|\s+)["']?([A-Za-z0-9/+=]{40})(?:[^A-Za-z0-9/+=]|$)`,
+		Regex:       `(?i)aws[\w.-]{0,30}secret[\w.-]{0,30}(?:\\?["'])?(?:\s*(?::=|=>|[:=])\s*|\s+)(?:\\?["'])?([A-Za-z0-9/+=]{40})(?:[^A-Za-z0-9/+=]|$)`,
 		SecretGroup: 1, MinEntropy: 4, Window: 512, Anchored: true, HitCheck: awsSecretHit,
 	},
 	{
@@ -152,7 +152,7 @@ var builtinRules = []Rule{
 	{
 		ID: "forgejo-access-token", Name: "Forgejo, Gitea or spoved access token", Type: "forgejo",
 		Keywords:    []string{"token"},
-		Regex:       `(?i:token)[\w.-]{0,20}["']?\s*[:=]\s*["']?([0-9a-f]{40})`,
+		Regex:       `(?i:token)[\w.-]{0,20}(?:\\?["'])?\s*[:=]\s*(?:\\?["'])?([0-9a-f]{40})`,
 		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars, Window: 512, Anchored: true, HitCheck: tokenHit,
 	},
 	{
@@ -232,7 +232,7 @@ var builtinRules = []Rule{
 		// Dotted names (locale keys, settings) are no secrets.
 		ID: "generic-secret-assignment", Name: "Generic secret assignment", Type: "generic",
 		Keywords:    []string{"secret", "password", "passwd", "token", "key"},
-		Regex:       `(?i)(?:secret|password|passwd|token|key)[\w.-]{0,20}["']?\s*(?::=|[:=])\s*["']([^\s"'\x60]{20,100})["']`,
+		Regex:       `(?i)(?:secret|password|passwd|token|key)[\w.-]{0,20}(?:\\?["'])?\s*(?::=|[:=])\s*\\?["']([^\s"'\x60\\]{20,100})\\?["']`,
 		SecretGroup: 1, MinEntropy: 3.5, DefaultOff: true, Window: 512, Anchored: true, HitCheck: genericHit,
 		Allowlist: []string{`^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$`},
 	},
@@ -268,6 +268,18 @@ func isBlank(b byte) bool {
 
 func isQuote(b byte) bool { return b == '"' || b == '\'' }
 
+// quoteLen is the length of the quote at c[i]: 1, or 2 with a backslash before
+// it (JSON inside a string), else 0.
+func quoteLen(c []byte, i int) int {
+	switch {
+	case i < len(c) && isQuote(c[i]):
+		return 1
+	case i+1 < len(c) && c[i] == '\\' && isQuote(c[i+1]):
+		return 2
+	}
+	return 0
+}
+
 // valueAfter follows the shape name[\w.-]{0,gap}["']?, blanks, an assignment
 // operator (:=, =>, : or =; with blankOnly a run of blanks alone will do),
 // blanks, an optional quote (a required one with needQuote), and returns where
@@ -276,9 +288,7 @@ func valueAfter(c []byte, i, gap int, blankOnly, needQuote bool) (int, bool) {
 	for n := 0; i < len(c) && n < gap && (isWord(c[i]) || c[i] == '.' || c[i] == '-'); n++ {
 		i++
 	}
-	if i < len(c) && isQuote(c[i]) {
-		i++
-	}
+	i += quoteLen(c, i)
 	skip := func() int {
 		start := i
 		for end := i + 500; i < len(c) && i < end && isBlank(c[i]); i++ {
@@ -296,12 +306,11 @@ func valueAfter(c []byte, i, gap int, blankOnly, needQuote bool) (int, bool) {
 		return 0, false
 	}
 	skip()
-	if i < len(c) && isQuote(c[i]) {
-		i++
-	} else if needQuote {
+	q := quoteLen(c, i)
+	if q == 0 && needQuote {
 		return 0, false
 	}
-	return i, true
+	return i + q, true
 }
 
 func isHexLower(b byte) bool { return '0' <= b && b <= '9' || 'a' <= b && b <= 'f' }
@@ -336,8 +345,8 @@ func genericHit(lower, c []byte, p int) bool {
 		if !ok {
 			continue
 		}
-		n := run(c, i, 100, func(b byte) bool { return !isBlank(b) && !isQuote(b) && b != '`' })
-		if n >= 20 && n <= 100 && i+n < len(c) && isQuote(c[i+n]) {
+		n := run(c, i, 100, func(b byte) bool { return !isBlank(b) && !isQuote(b) && b != '`' && b != '\\' })
+		if n >= 20 && n <= 100 && quoteLen(c, i+n) > 0 {
 			return true
 		}
 	}

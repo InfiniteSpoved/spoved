@@ -117,7 +117,7 @@ func ValidateCustomRule(name, pattern, testString string, keywords []string) err
 // longest match of the pattern, so a match that holds a keyword lies inside.
 func CustomRule(id, name, pattern string, keywords []string) Rule {
 	r := Rule{
-		ID: id, Name: name, Type: "custom", Regex: pattern,
+		ID: id, Name: name, Type: "custom", Regex: pattern, custom: true,
 		MinSecretLen: MinCustomSecretLen, Window: DefaultMaxSecretLen + 256,
 		KeywordInMatch: true, RejectCap: MaxRejectedPerRule,
 		Allowlist: slices.Clone(placeholders),
@@ -128,7 +128,7 @@ func CustomRule(id, name, pattern string, keywords []string) Rule {
 	if parsed, err := syntax.Parse(pattern, syntax.Perl); err == nil {
 		// Unbounded repeats are refused by validation, so this is finite; a
 		// rule built without validation keeps the default.
-		if n := maxMatchLen(parsed.Simplify()); n > 0 {
+		if n := maxMatchLen(parsed.Simplify()); n > 0 && n < workChunk {
 			r.Window = n
 		}
 	}

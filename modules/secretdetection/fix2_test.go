@@ -219,6 +219,20 @@ func TestPrivateKeyEscapesNeverDropAKey(t *testing.T) {
 func TestUTF16OnlyWhenItIsUTF16(t *testing.T) {
 	d := allRulesDetector(t)
 	token := "ghp_" + fake(36, alnum)
+	// Without a NUL in the first 8000 bytes the file is scanned as UTF-16 and
+	// as bytes, so a Latin-1 file or a damaged one still gives its secret.
+	for name, content := range map[string]string{
+		"fake LE BOM":    "\xff\xfe\nGITHUB_TOKEN=" + token + "\n",
+		"fake BE BOM":    "\xfe\xff\nGITHUB_TOKEN=" + token + "\n",
+		"latin-1 start":  "\xff\xfe  GITHUB_TOKEN=" + token,
+		"odd length":     "\xff\xfeGITHUB_TOKEN=" + token,
+		"lone surrogate": "\xff\xfeA\xd8AA GITHUB_TOKEN=" + token,
+		"swapped unit":   "\xff\xfeA\xdcA\xd8 GITHUB_TOKEN=" + token,
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Len(t, scanOf(d, []byte(content)), 1)
+		})
+	}
 	// a real surrogate pair before the token
 	text := "emoji \U0001F600\nGITHUB_TOKEN=" + token
 	fs := scanOf(d, append([]byte{0xFF, 0xFE}, utf16LE(strings.NewReplacer("\U0001F600", "😀").Replace(text))...))

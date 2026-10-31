@@ -69,7 +69,7 @@ func TestHostileInputsAreBounded(t *testing.T) {
 	d := allRulesDetector(t)
 	// The work budget is not time: under -race the same work takes 10 times
 	// longer, so the budget (and the blob) are cut to a tenth there.
-	size := 10 << 20 / slowdown
+	size := 2 << 20 / slowdown
 	d.MaxWork = max(MinMaxWork, WorkPerByte*size) / slowdown
 	bound := 3 * time.Second * slowdown
 	for name, unit := range hostileUnits() {

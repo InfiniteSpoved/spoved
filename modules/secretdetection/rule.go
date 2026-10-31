@@ -92,6 +92,10 @@ type Rule struct {
 	KeywordOffset int
 	HitCheck      func(lower, content []byte, hit int) bool
 
+	// custom marks a rule made by CustomRule: it costs more per byte, is capped
+	// in number and runs after the built-in ones.
+	custom bool
+
 	// DefaultOff marks noisy rules (generic ones) that callers should not
 	// enable unless asked to.
 	DefaultOff bool
@@ -122,12 +126,15 @@ func compileRule(r Rule) (*compiledRule, error) {
 	if r.SecretGroup < 0 || r.SecretGroup > re.NumSubexp() {
 		return nil, fmt.Errorf("secretdetection: rule %s: secret group %d does not exist", r.ID, r.SecretGroup)
 	}
+	if r.Window >= workChunk {
+		return nil, fmt.Errorf("secretdetection: rule %s: window %d is not below %d", r.ID, r.Window, workChunk)
+	}
 	c := &compiledRule{Rule: r, re: re}
 	c.cost = 1 // a pass over the content with a literal prefix is about 8 times cheaper than a window
 	if r.Anchored || r.Window > 0 {
 		c.cost = 8
 	}
-	if r.Type == "custom" {
+	if r.custom {
 		// The NFA costs about 3 units per instruction per byte (measured:
 		// 150 instructions run at 1 MB/s).
 		c.cost = max(8, 3*progSize(r.Regex))
