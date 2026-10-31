@@ -673,6 +673,13 @@ type swaggerResponseVulnerabilityAlert struct {
 	Body api.VulnerabilityAlert `json:"body"`
 }
 
+// SecretScanningStatus
+// swagger:response SecretScanningStatus
+type swaggerResponseSecretScanningStatus struct {
+	// in:body
+	Body api.SecretScanningStatus `json:"body"`
+}
+
 // SecretScanningAlertList
 // swagger:response SecretScanningAlertList
 type swaggerResponseSecretScanningAlertList struct {

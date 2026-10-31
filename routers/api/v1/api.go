@@ -1259,11 +1259,14 @@ func Routes() *web.Route {
 					m.Combo("/{id}").Get(repo.GetVulnerabilityAlert).
 						Patch(reqToken(), mustNotBeArchived(), bind(api.EditVulnerabilityAlertOption{}), repo.EditVulnerabilityAlert)
 				}, repo.MustSeeVulnerabilityAlerts)
-				// the same gate for the secret alerts
-				m.Group("/secret-scanning/alerts", func() {
-					m.Get("", repo.ListSecretScanningAlerts)
-					m.Combo("/{index}").Get(repo.GetSecretScanningAlert).
-						Patch(reqToken(), mustNotBeArchived(), bind(api.EditSecretScanningAlertOption{}), repo.EditSecretScanningAlert)
+				// the same gate for the secret alerts and the scan status
+				m.Group("/secret-scanning", func() {
+					m.Get("/status", repo.GetSecretScanningStatus)
+					m.Group("/alerts", func() {
+						m.Get("", repo.ListSecretScanningAlerts)
+						m.Combo("/{index}").Get(repo.GetSecretScanningAlert).
+							Patch(reqToken(), mustNotBeArchived(), bind(api.EditSecretScanningAlertOption{}), repo.EditSecretScanningAlert)
+					})
 				}, repo.MustSeeSecretAlerts)
 				m.Get("/activities/feeds", repo.ListRepoActivityFeeds)
 				m.Get("/new_pin_allowed", repo.AreNewIssuePinsAllowed)

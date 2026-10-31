@@ -23643,6 +23643,43 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/secret-scanning/status": {
+      "get": {
+        "description": "One summary for the code, the wiki and the pull refs. Visible to the same people as the alerts.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "How far the secret scan of a repository has come",
+        "operationId": "repoGetSecretScanningStatus",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/SecretScanningStatus"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/signing-key.gpg": {
       "get": {
         "produces": [
@@ -41976,6 +42013,11 @@
           "type": "string",
           "format": "date-time",
           "x-go-name": "UpdatedAt"
+        },
+        "via_pull": {
+          "description": "true while only refs/pull/* (which any reader can write) reach the secret",
+          "type": "boolean",
+          "x-go-name": "ViaPull"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -42029,6 +42071,40 @@
           "type": "integer",
           "format": "int64",
           "x-go-name": "StartLine"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "SecretScanningStatus": {
+      "type": "object",
+      "title": "SecretScanningStatus sums up how far the scan of a repository (its code, its wiki and its pull refs) has come.",
+      "properties": {
+        "holes": {
+          "description": "files and secrets that were marked done without being scanned",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Holes"
+        },
+        "last_scanned": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "LastScanned"
+        },
+        "reason": {
+          "description": "a code (max_scan_bytes, over_limit, max_alerts, timeout, git_error, ...), empty when ok",
+          "type": "string",
+          "x-go-name": "Reason"
+        },
+        "skipped_large": {
+          "description": "files over the size limit that were not read",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "SkippedLarge"
+        },
+        "status": {
+          "description": "pending (not scanned yet), ok, incomplete (under way, or with parts that were not scanned) or failed",
+          "type": "string",
+          "x-go-name": "Status"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -45243,6 +45319,12 @@
           "format": "int64",
           "description": "The total number of alerts that match"
         }
+      }
+    },
+    "SecretScanningStatus": {
+      "description": "SecretScanningStatus",
+      "schema": {
+        "$ref": "#/definitions/SecretScanningStatus"
       }
     },
     "ServerVersion": {

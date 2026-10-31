@@ -33,7 +33,7 @@ func ToSecretScanningAlerts(ctx context.Context, doer *user_model.User, repo *re
 	for _, a := range alerts {
 		res := &api.SecretScanningAlert{
 			Number: a.Index, State: a.State, Resolution: a.Reason, ResolutionComment: a.Comment, RuleID: a.RuleID,
-			SecretType: a.SecretType, SecretTypeDisplayName: a.RuleID, Fingerprint: a.Fingerprint,
+			SecretType: a.SecretType, SecretTypeDisplayName: a.RuleID, Fingerprint: a.Fingerprint, ViaPull: a.ViaPull,
 			CreatedAt: time.Unix(int64(a.CreatedUnix), 0).UTC(), UpdatedAt: time.Unix(int64(a.UpdatedUnix), 0).UTC(),
 			HTMLURL: repo.HTMLURL() + "/security/secrets/" + strconv.FormatInt(a.Index, 10), LocationsCount: a.LocationCount,
 		}
@@ -70,6 +70,26 @@ func toSecretScanningLocation(repo *repo_model.Repository, l *secretscan_model.L
 		res.HTMLURL = wikiURL(l.Path)
 	case l.CommitID != "":
 		res.HTMLURL = repo.HTMLURL() + "/src/commit/" + l.CommitID + "/" + util.PathEscapeSegments(l.Path) + "#L" + strconv.Itoa(l.StartLine)
+	}
+	return res
+}
+
+// ToSecretScanningStatus sums up the state rows of a repository's code, wiki and pull refs: failed beats incomplete
+// beats ok (the reason is the code of the row that decides), holes and skipped files add up, and no row is pending.
+// The scanned tips never leave the model.
+func ToSecretScanningStatus(scans []*secretscan_model.Scan) *api.SecretScanningStatus {
+	res := &api.SecretScanningStatus{Status: "pending"}
+	rank := map[string]int{secretscan_model.StatusOK: 1, secretscan_model.StatusIncomplete: 2, secretscan_model.StatusFailed: 3}
+	best := 0
+	for _, s := range scans {
+		res.Holes += s.Holes
+		res.SkippedLarge += s.SkippedLarge
+		if t := s.UpdatedUnix.AsTimePtr(); t != nil && (res.LastScanned == nil || t.After(*res.LastScanned)) {
+			res.LastScanned = t
+		}
+		if r := rank[s.Status]; r > best {
+			best, res.Status, res.Reason = r, s.Status, s.Error
+		}
 	}
 	return res
 }

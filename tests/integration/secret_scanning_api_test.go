@@ -442,12 +442,65 @@ func TestSecretScanningAPI(t *testing.T) {
 			unchanged(root, 1)
 		})
 
+		t.Run("scan status", func(t *testing.T) {
+			statusOf := func(name string) string { return strings.TrimSuffix(bases[name].base, "/alerts") + "/status" }
+			var st api.SecretScanningStatus
+			DecodeJSON(t, do("GET", statusOf("project"), readToken, nil, http.StatusOK), &st)
+			assert.Equal(t, "pending", st.Status, "no scan yet")
+
+			tips := `["` + strings.Repeat("a", 40) + `"]`
+			save := func(kind, status, code string, holes, skipped int64) {
+				require.NoError(t, secretscan_model.Save(t.Context(), nil, &secretscan_model.Scan{
+					RepoID: root.ID, Kind: kind, ScannedTips: tips, Status: status, Error: code, Holes: holes, SkippedLarge: skipped,
+				}))
+			}
+			save(secretscan_model.KindRepo, secretscan_model.StatusOK, "", 0, 2)
+			save(secretscan_model.KindWiki, secretscan_model.StatusIncomplete, "over_limit", 3, 0)
+			save(secretscan_model.KindPull, secretscan_model.StatusOK, "", 1, 0)
+			for _, name := range []string{"plain", "id"} {
+				resp := do("GET", statusOf(name), readToken, nil, http.StatusOK)
+				DecodeJSON(t, resp, &st)
+				assert.Equal(t, secretscan_model.StatusIncomplete, st.Status)
+				assert.Equal(t, "over_limit", st.Reason)
+				assert.EqualValues(t, 4, st.Holes)
+				assert.EqualValues(t, 2, st.SkippedLarge)
+				require.NotNil(t, st.LastScanned)
+				assert.NotContains(t, resp.Body.String(), "scanned_tips")
+				assert.NotContains(t, resp.Body.String(), strings.Repeat("a", 40), "no tips")
+			}
+			// a failed kind decides
+			_, err := db.GetEngine(t.Context()).Exec("UPDATE secret_scan SET status = ?, error = ? WHERE repo_id = ? AND kind = ?", secretscan_model.StatusFailed, "git_error", root.ID, secretscan_model.KindPull)
+			require.NoError(t, err)
+			DecodeJSON(t, do("GET", statusOf("plain"), readToken, nil, http.StatusOK), &st)
+			assert.Equal(t, secretscan_model.StatusFailed, st.Status)
+			assert.Equal(t, "git_error", st.Reason)
+			// the same gate as the alerts
+			do("GET", statusOf("plain"), "", nil, http.StatusNotFound)
+			do("GET", statusOf("plain"), getUserToken(t, "user4", auth_model.AccessTokenScopeReadRepository), nil, http.StatusNotFound)
+		})
+
+		t.Run("an alert only a pull ref reaches says so", func(t *testing.T) {
+			a := seedSecretAlert(t, root, "github-token", "github", secretscan_model.KindRepo, "pull.txt")
+			_, err := db.GetEngine(t.Context()).Exec("UPDATE secret_scanning_alert SET via_pull = ? WHERE id = ?", true, a.ID)
+			require.NoError(t, err)
+			var one api.SecretScanningAlert
+			DecodeJSON(t, do("GET", fmt.Sprintf("%s/%d", bases["plain"].base, a.Index), readToken, nil, http.StatusOK), &one)
+			assert.True(t, one.ViaPull)
+			DecodeJSON(t, do("GET", bases["plain"].base+"/1", readToken, nil, http.StatusOK), &one)
+			assert.False(t, one.ViaPull)
+			_, err = db.GetEngine(t.Context()).Exec("DELETE FROM secret_scanning_location WHERE alert_id = ?", a.ID)
+			require.NoError(t, err)
+			_, err = db.GetEngine(t.Context()).Exec("DELETE FROM secret_scanning_alert WHERE id = ?", a.ID)
+			require.NoError(t, err)
+		})
+
 		t.Run("switched off", func(t *testing.T) {
 			root.SecretScanningDisabled = true
 			require.NoError(t, repo_model.UpdateRepositoryCols(t.Context(), root, "secret_scanning_disabled"))
 			for _, name := range []string{"plain", "id"} {
 				do("GET", bases[name].base, writeToken, nil, http.StatusNotFound)
 				do("GET", bases[name].base+"/1", writeToken, nil, http.StatusNotFound)
+				do("GET", strings.TrimSuffix(bases[name].base, "/alerts")+"/status", writeToken, nil, http.StatusNotFound)
 				do("PATCH", bases[name].base+"/1", writeToken, closeBody, http.StatusNotFound)
 			}
 			unchanged(root, 1)

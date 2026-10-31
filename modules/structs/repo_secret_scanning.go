@@ -48,6 +48,8 @@ type SecretScanningAlert struct {
 	// swagger:strfmt date-time
 	UpdatedAt time.Time `json:"updated_at"`
 	HTMLURL   string    `json:"html_url"`
+	// true while only refs/pull/* (which any reader can write) reach the secret
+	ViaPull bool `json:"via_pull"`
 	// every place seen, also those over the stored cap
 	LocationsCount int `json:"locations_count"`
 	// the stored places (only when one alert is read; at most 100)
@@ -62,4 +64,19 @@ type EditSecretScanningAlertOption struct {
 	State string `json:"state"`
 	// optional, at most 1000 bytes; refused when it looks like a secret
 	Comment string `json:"comment"`
+}
+
+// SecretScanningStatus sums up how far the scan of a repository (its code, its wiki and its pull refs) has come.
+// swagger:model
+type SecretScanningStatus struct {
+	// pending (not scanned yet), ok, incomplete (under way, or with parts that were not scanned) or failed
+	Status string `json:"status"`
+	// a code (max_scan_bytes, over_limit, max_alerts, timeout, git_error, ...), empty when ok
+	Reason string `json:"reason"`
+	// files and secrets that were marked done without being scanned
+	Holes int64 `json:"holes"`
+	// files over the size limit that were not read
+	SkippedLarge int64 `json:"skipped_large"`
+	// swagger:strfmt date-time
+	LastScanned *time.Time `json:"last_scanned"`
 }

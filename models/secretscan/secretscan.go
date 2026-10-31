@@ -178,6 +178,11 @@ func GetScan(ctx context.Context, repoID int64, kind string) (*Scan, error) {
 	return s, nil
 }
 
+// FindScans returns the state rows of a repository: its code, its wiki and its pull refs.
+func FindScans(ctx context.Context, repoID int64) (scans []*Scan, err error) {
+	return scans, db.GetEngine(ctx).Where("repo_id = ?", repoID).Find(&scans)
+}
+
 // ErrScanMoved is a state row that another process changed since it was read.
 var ErrScanMoved = errors.New("the scan state changed meanwhile")
 

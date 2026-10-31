@@ -124,6 +124,39 @@ func ListSecretScanningAlerts(ctx *context.APIContext) {
 	ctx.JSON(http.StatusOK, list)
 }
 
+// GetSecretScanningStatus sums up the scan of a repository
+func GetSecretScanningStatus(ctx *context.APIContext) {
+	// swagger:operation GET /repos/{owner}/{repo}/secret-scanning/status repository repoGetSecretScanningStatus
+	// ---
+	// summary: How far the secret scan of a repository has come
+	// description: One summary for the code, the wiki and the pull refs. Visible to the same people as the alerts.
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// responses:
+	//   "200":
+	//     "$ref": "#/responses/SecretScanningStatus"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+
+	scans, err := secretscan_model.FindScans(ctx, ctx.Repo().Repository.ID)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "FindScans", err)
+		return
+	}
+	ctx.JSON(http.StatusOK, convert.ToSecretScanningStatus(scans))
+}
+
 // GetSecretScanningAlert gets a secret alert with its places
 func GetSecretScanningAlert(ctx *context.APIContext) {
 	// swagger:operation GET /repos/{owner}/{repo}/secret-scanning/alerts/{index} repository repoGetSecretScanningAlert
