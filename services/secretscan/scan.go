@@ -49,25 +49,16 @@ const (
 )
 
 const (
-	// maxTips is the most refs (distinct tips) of a repository a scan reads; the tips are stored as one text
-	maxTips = 100_000
-	// maxFindingBlobs is the most files with findings one slice keeps in memory
-	maxFindingBlobs = 100_000
-	// maxSliceCommits is the most commits one slice handles (commits without files cost no budget otherwise)
-	maxSliceCommits = 200_000
-	// maxSeen is the most blob IDs one slice remembers as read; more are read again
-	maxSeen = 1_000_000
-	// maxLocBytes is the most path text one slice keeps for the places of its findings; more places are counted
-	maxLocBytes = 32 << 20
-	// maxHeads and maxDone bound the stored tips of a scan under way (any subset of them is safe: git reads the rest again)
-	maxHeads = 1000
-	maxDone  = 2000
-	// alertBatch is the number of alerts looked up and written together
-	alertBatch = 200
+	maxTips         = 100_000   // refs (distinct tips) of a repository a scan reads; the tips are stored as one text
+	maxFindingBlobs = 100_000   // files with findings one slice keeps in memory
+	maxSliceCommits = 200_000   // commits one slice handles (commits without files cost no budget otherwise)
+	maxSeen         = 1_000_000 // blob IDs one slice remembers as read; more are read again
+	maxLocBytes     = 32 << 20  // path text one slice keeps for the places of its findings; more places are counted
+	alertBatch      = 200       // alerts looked up and written together
 
-	// A scan that fails, or whose slice makes no progress, is tried again (by the next trigger, the cron task) only
-	// after retryBase, doubling per failure in a row up to retryMax. While a scan is under way the row's retry time
-	// is retryBase ahead, so the cron task picks it up if the queue lost it.
+	// A scan that fails is tried again (by the next trigger, the cron task) only after retryBase, doubling per
+	// failure in a row up to retryMax. While a scan is under way the row's retry time is retryBase ahead, so the
+	// cron task picks it up if the queue lost it.
 	retryBase = 10 * time.Minute
 	retryMax  = 24 * time.Hour
 )
@@ -137,9 +128,7 @@ func releaseSlot() {
 // Scan reads the commits of the repository (its refs other than refs/pull/*, its wiki, and then refs/pull/*) that the
 // stored scan states don't cover and stores the alerts and the new states. One call is one slice: at most
 // MAX_SCAN_BYTES and MAX_SCAN_BLOBS of files within SCAN_TIMEOUT. A repository with more is continued by the next
-// slice, from the last commit handled, queued behind the other repositories, so one big repository never holds up
-// the rest. A scan that fails keeps what it stored and backs off; a scan that is overtaken (a push meanwhile, a
-// transfer, another process) is queued again.
+// slice, queued behind the other repositories. A scan that fails backs off; one that is overtaken is queued again.
 func Scan(ctx context.Context, repoID int64) error {
 	requeue, err := scan(ctx, repoID)
 	// after the scan's lock and slot are released: with immediate queues this runs at once
@@ -210,8 +199,9 @@ type scanner struct {
 	detector     *secretdetection.Detector
 	// the files read in this slice, over all kinds: the limits are for the slice
 	blobs, bytes int64
-	progress     bool // a kind handled a commit
-	full         bool // a kind stopped at a limit: the rest waits for the next slice
+	entries      int64 // entries git was asked about
+	progress     bool  // a kind handled a commit
+	full         bool  // a kind stopped at a limit: the rest waits for the next slice
 }
 
 // blobFinding is a finding with its fingerprint: the secret itself is gone.
@@ -260,6 +250,7 @@ type run struct {
 	seen                 map[string]struct{} // blobs read (or too large)
 	keys                 map[string]struct{} // distinct (rule, fingerprint)
 	locBytes             int
+	exclude              []string // commits the log leaves out besides done: the branches' tips, for the pull refs
 	buf                  []byte
 }
 
@@ -294,10 +285,7 @@ func (s *scanner) scanKind(kind string) (requeue bool, err error) {
 
 	tips, err := refTips(s.scanCtx, r.gitRepo.Path, kind == secretscan_model.KindPull)
 	if err != nil {
-		if s.ctx.Err() != nil {
-			return false, s.ctx.Err()
-		}
-		return r.fail(secretscan_model.StatusFailed, errGit)
+		return r.gitFailed()
 	}
 	if len(tips) > maxTips {
 		return r.fail(secretscan_model.StatusFailed, errTooManyRef)
@@ -317,22 +305,39 @@ func (s *scanner) scanKind(kind string) (requeue bool, err error) {
 	}
 	afterTips(s.repo.ID, kind)
 	if r.done, err = existingTips(s.scanCtx, r.gitRepo, stored); err != nil {
-		return r.fail(secretscan_model.StatusFailed, errGit)
+		return r.gitFailed()
+	}
+	if kind == secretscan_model.KindPull { // what the branches have scanned is theirs: the pull scan reads only the rest
+		if b, _ := secretscan_model.GetScan(s.ctx, s.repo.ID, secretscan_model.KindRepo); b != nil {
+			var bt []string
+			_ = json.Unmarshal([]byte(b.ScannedTips), &bt)
+			if r.exclude, err = existingTips(s.scanCtx, r.gitRepo, bt); err != nil {
+				return r.gitFailed()
+			}
+		}
 	}
 	pending := missing(tips, r.done)
 	complete := true
 	if len(pending) > 0 {
 		if complete, err = r.walk(pending); err != nil {
-			if s.ctx.Err() != nil {
-				return false, s.ctx.Err()
-			}
-			if errors.Is(err, errAborted) {
+			if errors.Is(err, errAborted) && s.ctx.Err() == nil {
 				return r.fail(secretscan_model.StatusFailed, errPanic)
 			}
-			return r.fail(secretscan_model.StatusFailed, errGit)
+			return r.gitFailed()
 		}
 	}
 	return r.finish(tips, complete)
+}
+
+// gitFailed fails a scan whose git call failed: a timeout of the slice is a timeout, a shut down is no failure.
+func (r *run) gitFailed() (requeue bool, err error) {
+	switch {
+	case r.ctx.Err() != nil:
+		return false, r.ctx.Err()
+	case r.scanCtx.Err() != nil:
+		return r.fail(secretscan_model.StatusIncomplete, stopTimeout)
+	}
+	return r.fail(secretscan_model.StatusFailed, errGit)
 }
 
 // missing are the tips that are not in done.
@@ -362,21 +367,24 @@ func heads(commits []*commitInfo) []string {
 	return out
 }
 
-// walk reads the commits of the range in one pass, oldest first: every commit comes after its parents, so the
-// commits handled so far are always closed under ancestors, and their heads can stand as done tips. It reads each
-// blob the first time the slice sees it. A limit ends it at a commit boundary, with everything before that commit
-// handled (complete is false then). The first commit of the slice is never cut off: if it alone is over the limits,
-// the files that fit are scanned, the others are counted as holes, and it is handled.
+// walk reads the commits of the range in one pass, oldest first: the commits handled so far are closed under
+// ancestors, so their heads can stand as done tips. A limit ends it at a commit boundary (complete is false). The
+// first commit of the slice is never cut off: what fits is scanned, the rest is counted as holes, and it is handled.
 func (r *run) walk(pending []string) (complete bool, err error) {
 	err = r.gitRepo.WithCatFileBatchCheck(r.scanCtx, func(cw io.Writer, cr *bufio.Reader) error {
 		return r.gitRepo.WithCatFileBatch(r.scanCtx, func(bw io.Writer, br *bufio.Reader) error {
-			return logCommits(r.scanCtx, r.gitRepo.Path, rangeInput(pending, r.done), r.startCommit,
+			return logCommits(r.scanCtx, r.gitRepo.Path, rangeInput(pending, slices.Concat(r.done, r.exclude)), r.startCommit,
 				func(c change) error { return r.file(cw, cr, bw, br, c) })
 		})
 	})
 	switch {
 	case r.scanCtx.Err() != nil && r.ctx.Err() == nil:
-		r.stop = stopTimeout // the commit that was read when the time ran out is not handled
+		r.stop = stopTimeout // the commit that was read when the time ran out is not handled...
+		if o := r.old; r.cur != nil && len(r.handled) == 0 && !r.progress && o != nil && o.FailCount > 0 && o.Error == stopTimeout {
+			r.handled = append(r.handled, r.cur) // ...unless it ran out in a try before too: what was read stands, the rest is a hole
+			r.holes++
+			r.stop = stopHole
+		}
 		return false, nil
 	case err == nil:
 		if r.cur != nil {
@@ -432,6 +440,9 @@ func (r *run) file(cw io.Writer, cr *bufio.Reader, bw io.Writer, br *bufio.Reade
 	if _, ok := r.seen[c.NewID]; ok {
 		return nil
 	}
+	if r.entries++; r.entries > r.cfg.MaxScanBlobs { // every entry git is asked about counts, not only the files read
+		return r.limit(stopBlobs)
+	}
 	if _, err := io.WriteString(cw, c.NewID+"\n"); err != nil {
 		return err
 	}
@@ -451,9 +462,6 @@ func (r *run) file(cw io.Writer, cr *bufio.Reader, bw io.Writer, br *bufio.Reade
 	if size > r.cfg.MaxBlobSize {
 		r.totSkipped++
 		return nil // never read
-	}
-	if r.blobs+1 > r.cfg.MaxScanBlobs {
-		return r.limit(stopBlobs)
 	}
 	if r.bytes+size > r.cfg.MaxScanBytes {
 		return r.limit(stopBytes)
@@ -484,8 +492,7 @@ func (r *run) file(cw io.Writer, cr *bufio.Reader, bw io.Writer, br *bufio.Reade
 	return r.scanBlob(c, buf)
 }
 
-// addPlace keeps a path of the blob, up to MAX_LOCATIONS_PER_ALERT per blob and a text budget per slice; the others
-// are counted. The path is hashed once, here.
+// addPlace keeps a path of the blob (up to MAX_LOCATIONS_PER_ALERT, and a text budget per slice), else counts it.
 func (r *run) addPlace(fb *foundBlob, path string) {
 	if int64(len(fb.places)) >= r.cfg.MaxLocationsPerAlert || r.locBytes > maxLocBytes {
 		fb.extra++
@@ -495,9 +502,8 @@ func (r *run) addPlace(fb *foundBlob, path string) {
 	fb.places = append(fb.places, place{path: path, hash: secretscan_model.PathHash(path), commit: r.cur})
 }
 
-// scanBlob runs the detector over one blob. A panic (in a rule, or the fingerprint before the keying is set up)
-// is recovered here, so the process survives and the log names the blob, and it fails the scan: skipping the blob
-// would leave a hole in what the stored state calls scanned.
+// scanBlob runs the detector over one blob. A panic is recovered and fails the scan: skipping the blob would leave
+// a hole in what the stored state calls scanned.
 func (r *run) scanBlob(c change, content []byte) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
@@ -528,8 +534,7 @@ func (r *run) scanBlob(c change, content []byte) (err error) {
 	return nil
 }
 
-// candidates turns the findings of the blobs into alerts with their places. An alert keeps at most
-// MAX_LOCATIONS_PER_ALERT places, the others are only counted, so the work is about the findings and the places once.
+// candidates turns the findings of the blobs into alerts with their places (at most MAX_LOCATIONS_PER_ALERT each).
 func (r *run) candidates() []*candidate {
 	byKey := map[string]*candidate{}
 	for _, id := range slices.Sorted(maps.Keys(r.found)) {
@@ -577,9 +582,9 @@ func locKind(kind string) string {
 	return kind
 }
 
-// finish stores what the slice did in one transaction: the alerts and the row, with the new done tips (the tips of
-// the refs when the whole range was read, else the heads of the commits handled and the done tips before). Done tips
-// move only here, and only once the transaction has committed.
+// finish stores what the slice did in one transaction: the alerts and the row, with the new done tips (the ref tips
+// when the whole range was read, else the heads of the commits handled and the done tips before). They move only here,
+// after the commit.
 func (r *run) finish(tips []string, complete bool) (requeue bool, err error) {
 	if !complete && len(r.handled) == 0 {
 		if r.progress { // a kind before used the slice
@@ -590,10 +595,7 @@ func (r *run) finish(tips []string, complete bool) (requeue bool, err error) {
 	}
 	done := tips
 	if !complete {
-		h := heads(r.handled)
-		done = slices.Concat(h[:min(len(h), maxHeads)], r.done[:min(len(r.done), maxDone-maxHeads)])
-		slices.Sort(done)
-		done = slices.Compact(done)
+		done = slices.Compact(slices.Sorted(slices.Values(slices.Concat(heads(r.handled), r.done)))) // every head: dropping one would read its history again
 	}
 	tipsJSON, _ := json.Marshal(done) // a list of strings
 	st := &secretscan_model.Scan{
@@ -635,8 +637,7 @@ func (r *run) finish(tips []string, complete bool) (requeue bool, err error) {
 	return !complete, nil
 }
 
-// fail stores a failed or limit-stopped slice that handled nothing: the earlier row, with the backoff of the failures
-// in a row. It never stores tips.
+// fail stores a slice that handled nothing: the earlier row with the backoff, never new tips.
 func (r *run) fail(status, code string) (requeue bool, err error) {
 	log.Warn("secret scanning: scan of repository %d (%s) failed: %s", r.repo.ID, r.kind, code)
 	st := &secretscan_model.Scan{RepoID: r.repo.ID, Kind: r.kind, ScannedTips: "[]", Status: status, Error: code, FailCount: 1}
@@ -653,10 +654,9 @@ func (r *run) fail(status, code string) (requeue bool, err error) {
 	return false, nil
 }
 
-// write stores the alerts and the state row in one transaction, after the last check of the switches. The write is
-// discarded when secret scanning was turned off or the repository is gone, and the slice is dropped (abort, queued
-// again) when the repository changed owner (the new owner's switch and rules decide) or another process wrote the
-// state first.  Secrets left out for the alert cap are added to the row's holes.
+// write stores the alerts and the state row in one transaction, after the last check of the switches. It is discarded
+// when scanning was turned off, and the slice is dropped (queued again) when the owner changed or another process wrote
+// the state first. Secrets left out for the alert cap are added to the row's holes.
 func (r *run) write(st *secretscan_model.Scan, cands []*candidate) error {
 	cfg := setting.SecretScanningSettings(r.ctx) // before the transaction: it may query the database
 	err := db.WithTx(r.ctx, func(ctx context.Context) error {

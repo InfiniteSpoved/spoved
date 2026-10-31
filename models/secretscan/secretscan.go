@@ -22,18 +22,16 @@ import (
 	"xorm.io/builder"
 )
 
-// The git repositories a scan covers, each with its own state row: the refs of the repository other than
-// refs/pull/*, its wiki, and refs/pull/* (which any reader can write, so it neither delays nor shares progress with
-// the first).
+// The git repositories a scan covers, each with its own state row: the refs other than refs/pull/*, the wiki, and
+// refs/pull/* (which any reader can write).
 const (
 	KindRepo = "repo"
 	KindWiki = "wiki"
 	KindPull = "pull"
 )
 
-// Scan statuses. Incomplete means the scan is under way (a slice ended at a limit; the next one goes on from the
-// tips stored) or has holes: parts that were not scanned (see Scan.Holes). It stays incomplete until a scan finds no
-// hole, and a trigger with nothing new doesn't change it. Failed keeps the earlier tips.
+// Scan statuses. Incomplete: the scan is under way (a slice ended at a limit) or has holes, parts that were not
+// scanned (Scan.Holes); holes stay until the state is reset, and a trigger with nothing new changes nothing.
 const (
 	StatusOK         = "ok"
 	StatusIncomplete = "incomplete"

@@ -358,7 +358,7 @@ func dueRepos(t *testing.T, now timeutil.TimeStamp) []int64 {
 }
 
 func TestScanBudgets(t *testing.T) {
-	// every subtest has its own repository: holes stay on a row until a scan finds none
+	// every subtest has its own repository: holes stay on a row
 	fresh := func(t *testing.T) (*repo_model.Repository, *work) {
 		repo := enable(t)
 		require.NoError(t, Scan(t.Context(), repo.ID)) // the history the fixture has
@@ -414,7 +414,7 @@ func TestScanBudgets(t *testing.T) {
 			require.NoError(t, Scan(t.Context(), repo.ID))
 			assert.NotNil(t, alertFor(t, repo.ID, after))
 			s = scanOf(t, repo.ID, secretscan_model.KindRepo)
-			assert.Equal(t, secretscan_model.StatusIncomplete, s.Status, "incomplete until a scan finds no hole")
+			assert.Equal(t, secretscan_model.StatusIncomplete, s.Status, "a hole stays")
 			assert.Equal(t, stopHole, s.Error)
 			assert.EqualValues(t, 1, s.Holes)
 			require.NoError(t, Scan(t.Context(), repo.ID))
@@ -1130,7 +1130,7 @@ func TestScanContinuesWithinATip(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(s.ScannedTips), &tips))
 		assert.NotEqual(t, currentTips(t, repo), tips, "a commit inside the tip stands for what is done")
 	}
-	assert.GreaterOrEqual(t, slices, 2, "two slices stop at the limit, the third finishes")
+	assert.Equal(t, 2, slices, "two slices stop at the limit, the third finishes")
 	s := scanOf(t, repo.ID, secretscan_model.KindRepo)
 	assert.Equal(t, secretscan_model.StatusOK, s.Status)
 	assert.EqualValues(t, 6, s.Blobs, "every file once")
@@ -1205,7 +1205,7 @@ func TestScanPullRefsHaveTheirOwnShare(t *testing.T) {
 	junk("2")
 	require.NoError(t, Scan(t.Context(), repo.ID))
 	_, pulls = openAlerts(t, repo.ID)
-	assert.Equal(t, limit/2-1, pulls, "the real key (a pull ref reaches it too) takes one place of the share")
+	assert.Equal(t, limit/2, pulls, "the real key is the branches' and takes no place of the share")
 }
 
 // a fork PR's key is found as a pull ref, and again when the PR is merged: the alert is no longer a pull-ref one, and
@@ -1487,4 +1487,154 @@ func TestScansOfOneRepositoryDoNotOverlap(t *testing.T) {
 	locked, unlock = repoScans.TryLock(strconv.FormatInt(repo.ID, 10))
 	unlock()
 	assert.True(t, locked, "and free afterwards")
+}
+
+// the pull scan leaves the branch history to the branch scan: its range excludes the branch row's done tips, and the
+// secrets of the branches don't use up its share
+func TestScanPullScanExcludesBranchHistory(t *testing.T) {
+	repo := enable(t)
+	w := newWork(t, repo)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	open, _ := openAlerts(t, repo.ID)
+	defer test.MockVariableValue(&setting.SecretScanning.MaxAlertsPerRepo, open+8)()
+	mains := commitsWithKeys(w, "m", 6)
+	w.pushDefault()
+	w.git("checkout", "-q", "-b", "pr")
+	pull := token("only-in-the-pr")
+	w.commit(map[string]string{"pr.txt": pull + "\n"})
+	w.push("refs/pull/7/head")
+
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	for _, tok := range mains {
+		assert.NotNil(t, alertFor(t, repo.ID, tok))
+	}
+	a := alertFor(t, repo.ID, pull)
+	require.NotNil(t, a, "the share of the pull refs holds the secret of the PR")
+	assert.True(t, a.ViaPull)
+	s := scanOf(t, repo.ID, secretscan_model.KindPull)
+	assert.Equal(t, secretscan_model.StatusOK, s.Status)
+	assert.EqualValues(t, 1, s.Blobs, "the history of the branches is not read again")
+}
+
+// progress is never dropped: PR refs that don't fit one slice are all done after a bounded number of slices, and every
+// blob is read once
+func TestScanManyPullRefsFinish(t *testing.T) {
+	repo := enable(t)
+	w := newWork(t, repo)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	defer test.MockVariableValue(&setting.SecretScanning.MaxScanBlobs, 4)()
+	var toks []string
+	for i := range 12 {
+		w.git("checkout", "-q", "-B", "pr", repo.DefaultBranch)
+		tok := token(fmt.Sprintf("many-%d", i))
+		toks = append(toks, tok)
+		w.commit(map[string]string{fmt.Sprintf("p%d.txt", i): tok + "\n"})
+		w.push(fmt.Sprintf("refs/pull/%d/head", i+1))
+	}
+	slices := 0
+	for ; slices < 12; slices++ {
+		require.NoError(t, Scan(t.Context(), repo.ID))
+		if scanOf(t, repo.ID, secretscan_model.KindPull).Status == secretscan_model.StatusOK {
+			break
+		}
+	}
+	assert.LessOrEqual(t, slices, 3, "12 files, 4 per slice")
+	assert.EqualValues(t, 12, scanOf(t, repo.ID, secretscan_model.KindPull).Blobs, "every blob once")
+	for _, tok := range toks {
+		assert.NotNil(t, alertFor(t, repo.ID, tok))
+	}
+}
+
+// a commit that can't be handled within the time is tried once more, then it is a hole and the scan goes on
+func TestScanTimeoutCommitBecomesAHole(t *testing.T) {
+	repo := enable(t)
+	w := newWork(t, repo)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	slow := token("slow-commit")
+	w.commit(map[string]string{"slow.txt": "SLOW " + slow + "\n"})
+	w.pushDefault()
+	defer test.MockVariableValue(&scanContent, func(d *secretdetection.Detector, c []byte) ([]secretdetection.Finding, bool) {
+		if strings.Contains(string(c), "SLOW") {
+			cancelScan(repo.ID)
+		}
+		return d.Scan(c)
+	})()
+
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	s := scanOf(t, repo.ID, secretscan_model.KindRepo)
+	assert.Equal(t, 1, s.FailCount, "the first time it is a failure with a backoff")
+	later(t, 11*time.Minute)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	s = scanOf(t, repo.ID, secretscan_model.KindRepo)
+	assert.Equal(t, secretscan_model.StatusIncomplete, s.Status)
+	assert.Equal(t, stopHole, s.Error)
+	assert.Zero(t, s.FailCount)
+	assert.EqualValues(t, 1, s.Holes)
+	assert.Contains(t, s.ScannedTips, w.git("rev-parse", "HEAD"), "the commit is done")
+
+	afterSlow := token("after-the-slow-commit")
+	w.commit(map[string]string{"later.txt": afterSlow + "\n"})
+	w.pushDefault()
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	assert.NotNil(t, alertFor(t, repo.ID, afterSlow), "the next commit is scanned")
+	assert.Equal(t, secretscan_model.StatusIncomplete, scanOf(t, repo.ID, secretscan_model.KindRepo).Status, "the hole stays")
+}
+
+// entries that are no blobs (submodules) count against MAX_SCAN_BLOBS too, so a commit of them is cut by the limit
+func TestScanEntriesOtherThanBlobsAreLimited(t *testing.T) {
+	repo := enable(t)
+	w := newWork(t, repo)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	defer test.MockVariableValue(&setting.SecretScanning.MaxScanBlobs, 5)()
+	var tree strings.Builder
+	for i := range 20 {
+		fmt.Fprintf(&tree, "160000 commit %040x\tsub%d\n", i+1, i)
+	}
+	treeCmd := exec.Command("git", "mktree", "--missing")
+	treeCmd.Dir = w.dir
+	treeCmd.Stdin = strings.NewReader(tree.String())
+	out, err := treeCmd.CombinedOutput()
+	require.NoError(t, err, string(out))
+	commit := w.git("commit-tree", strings.TrimSpace(string(out)), "-p", "HEAD", "-m", "gitlinks")
+	w.git("push", "-q", "--force", repo.RepoPath(), commit+":refs/heads/"+repo.DefaultBranch)
+	w.git("reset", "-q", "--hard", commit)
+	tok := token("after-gitlinks")
+	w.commit(map[string]string{"k.txt": tok + "\n"})
+	w.pushDefault()
+
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	s := scanOf(t, repo.ID, secretscan_model.KindRepo)
+	assert.Equal(t, secretscan_model.StatusIncomplete, s.Status)
+	assert.Equal(t, stopHole, s.Error)
+	assert.Positive(t, s.Holes, "the commit of entries is a hole, not a wait for the time")
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	assert.NotNil(t, alertFor(t, repo.ID, tok))
+}
+
+// a tag of a tag reaches its commit
+func TestScanNestedTagIsPeeled(t *testing.T) {
+	repo := enable(t)
+	w := newWork(t, repo)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	w.git("checkout", "-q", "-b", "hidden")
+	tok := token("nested-tag")
+	w.commit(map[string]string{"n.txt": tok + "\n"})
+	w.git("tag", "-a", "-m", "one", "inner")
+	w.git("tag", "-a", "-m", "two", "outer", "inner")
+	w.git("push", "-q", "--force", repo.RepoPath(), "refs/tags/outer:refs/tags/outer")
+
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	assert.NotNil(t, alertFor(t, repo.ID, tok))
+}
+
+// time running out while the refs are read is a timeout, not a git error
+func TestScanTimeoutReadingTipsIsATimeout(t *testing.T) {
+	repo := enable(t)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	defer test.MockVariableValue(&afterTips, func(id int64, _ string) { cancelScan(id) })()
+	w := newWork(t, repo)
+	w.commit(map[string]string{"y.txt": "y\n"})
+	w.pushDefault()
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	assert.Equal(t, stopTimeout, scanOf(t, repo.ID, secretscan_model.KindRepo).Error)
 }

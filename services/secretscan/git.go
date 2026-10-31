@@ -69,29 +69,37 @@ func isObjectID(b []byte) bool {
 }
 
 // refTips returns the commits the refs point to, sorted and without duplicates: for the refs under refs/pull/ (which
-// any reader can write) or for all the others. A tag object is peeled to its commit; a ref to a tree or a file has no
-// commit and is not scanned (what only such a ref reaches is not read).
+// any reader can write) or for all the others. A tag object is peeled to its commit; a ref to a tree or a file has no commit and is not
+// scanned (what only such a ref reaches is not read).
 func refTips(ctx context.Context, dir string, pull bool) ([]string, error) {
 	seen := map[string]struct{}{}
+	var tags strings.Builder // tag objects: git peels them with ^{commit}
 	w := &splitWriter{sep: '\n', fn: func(line []byte) error {
-		f := strings.Fields(string(line)) // object, type, peeled object, peeled type, ref (empty fields drop out)
-		if len(f) < 3 || strings.HasPrefix(f[len(f)-1], "refs/pull/") != pull {
+		f := strings.Fields(string(line)) // object, type, ref
+		if len(f) != 3 || strings.HasPrefix(f[2], "refs/pull/") != pull || !isObjectID([]byte(f[0])) {
 			return nil
 		}
-		id := ""
-		switch {
-		case f[1] == "commit":
-			id = f[0]
-		case f[1] == "tag" && len(f) == 5 && f[3] == "commit":
-			id = f[2]
-		}
-		if isObjectID([]byte(id)) {
-			seen[id] = struct{}{}
+		switch f[1] {
+		case "commit":
+			seen[f[0]] = struct{}{}
+		case "tag":
+			tags.WriteString(f[0] + "^{commit}\n")
 		}
 		return nil
 	}}
-	if err := git.NewCommand(ctx, "for-each-ref", "--format=%(objectname) %(objecttype) %(*objectname) %(*objecttype) %(refname)").Run(&git.RunOpts{Dir: dir, Stdout: w, Stderr: io.Discard, UseContextTimeout: true}); err != nil {
+	if err := git.NewCommand(ctx, "for-each-ref", "--format=%(objectname) %(objecttype) %(refname)").Run(&git.RunOpts{Dir: dir, Stdout: w, Stderr: io.Discard, UseContextTimeout: true}); err != nil {
 		return nil, err
+	}
+	if tags.Len() > 0 { // a missing object or a tag of a tree or file answers "missing"
+		out, _, err := git.NewCommand(ctx, "cat-file", "--batch-check").RunStdString(&git.RunOpts{Dir: dir, Stdin: strings.NewReader(tags.String()), UseContextTimeout: true})
+		if err != nil {
+			return nil, err
+		}
+		for line := range strings.SplitSeq(out, "\n") {
+			if f := strings.Fields(line); len(f) >= 2 && f[1] == "commit" && isObjectID([]byte(f[0])) {
+				seen[f[0]] = struct{}{}
+			}
+		}
 	}
 	return slices.Sorted(maps.Keys(seen)), nil
 }
@@ -123,17 +131,11 @@ func existingTips(ctx context.Context, gitRepo *git.Repository, tips []string) (
 // rangeInput is the standard input of log: the tips to read and, after `--not`, the tips already scanned. Thousands
 // of refs never go on the command line.
 func rangeInput(tips, scanned []string) *strings.Reader {
-	var b strings.Builder
-	for _, id := range tips {
-		b.WriteString(id + "\n")
-	}
+	in := strings.Join(tips, "\n") + "\n"
 	if len(scanned) > 0 {
-		b.WriteString("--not\n")
-		for _, id := range scanned {
-			b.WriteString(id + "\n")
-		}
+		in += "--not\n" + strings.Join(scanned, "\n") + "\n"
 	}
-	return strings.NewReader(b.String())
+	return strings.NewReader(in)
 }
 
 // commitInfo is the header of a commit of the log.
@@ -150,15 +152,13 @@ type change struct {
 	NewID, Path string
 }
 
-// logCommits runs `git log --raw -z` over the range, the oldest commits first (every commit comes after its parents
-// in the range), and calls commit at the start of each commit and file for every file that the commit added or
-// changed (the diff of a merge is the one against its first parent). A commit is complete when the next one starts,
-// or when logCommits returns nil. An error of commit or file stops git and is returned as it is. Paths come from
-// the NUL-terminated output, so a path with a newline stays one path.
+// logCommits runs `git log --raw -z` over the range, oldest commits first, and calls commit at the start of each
+// commit and file for every file it added or changed (a merge's diff is against its first parent). A commit is
+// complete when the next one starts or logCommits returns nil. An error of commit or file stops git and is returned.
 func logCommits(ctx context.Context, dir string, input io.Reader, commit func(commitInfo) error, file func(change) error) error {
 	p := &logParser{commit: commit, file: file}
 	w := &splitWriter{sep: 0, fn: p.token}
-	err := git.NewCommand(ctx, "log", "--stdin", "--raw", "-z", "--no-renames", "--no-abbrev", "--topo-order", "--reverse", "--diff-merges=first-parent", "--format=%H%x00%P%x00%an%x00%ae%x00%ct").
+	err := git.NewCommand(ctx, "-c", "log.showSignature=false", "log", "--stdin", "--root", "--raw", "-z", "--no-renames", "--no-abbrev", "--topo-order", "--reverse", "--diff-merges=first-parent", "--format=%H%x00%P%x00%an%x00%ae%x00%ct").
 		Run(&git.RunOpts{Dir: dir, Stdin: input, Stdout: w, Stderr: io.Discard, UseContextTimeout: true})
 	if w.err != nil {
 		return w.err

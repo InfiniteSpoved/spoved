@@ -7,11 +7,11 @@
 // started by pushes, pull requests, migrations, forks, transfers and wiki changes, and by a cron task for
 // repositories that were never scanned or whose scan has to go on or try again.
 //
-// One queue item is one slice of work (see Scan): one pass of `git log --raw`, oldest commits first, that ends at a
-// commit boundary when a limit is hit and stores the heads of the commits handled as done tips, in the transaction
-// that stores their alerts. A commit that alone is over the limits is scanned as far as it fits and the rest is
-// counted as a hole. The repository, its wiki and refs/pull/* (which any reader can write) have a state row each, so
-// none of them delays or shares progress with another. What only a ref to a tree or a file reaches is not scanned.
+// One queue item is one slice (see Scan): one pass of `git log --raw`, oldest commits first, that ends at a commit
+// boundary at a limit and stores the heads of the commits handled as done tips with their alerts. A commit that alone
+// is over the limits is scanned as far as it fits, the rest is counted as a hole. The repository, its wiki and
+// refs/pull/* (which any reader can write) have a state row each. What only a ref to a tree or a file reaches is not
+// scanned.
 package secretscan
 
 import (
