@@ -232,7 +232,7 @@ var builtinRules = []Rule{
 		// Dotted names (locale keys, settings) are no secrets.
 		ID: "generic-secret-assignment", Name: "Generic secret assignment", Type: "generic",
 		Keywords:    []string{"secret", "password", "passwd", "token", "key"},
-		Regex:       `(?i)(?:secret|password|passwd|token|key)[\w.-]{0,20}(?:\\?["'])?\s*(?::=|[:=])\s*\\?["']([^\s"'\x60\\]{20,100})\\?["']`,
+		Regex:       `(?i)(?:secret|password|passwd|token|key)[\w.-]{0,20}(?:\\?["'])?\s*(?::=|[:=])\s*\\?["']((?:[^\s"'\x60\\]|\\[^\s"'\x60]){20,100})\\?["']`,
 		SecretGroup: 1, MinEntropy: 3.5, DefaultOff: true, Window: 512, Anchored: true, HitCheck: genericHit,
 		Allowlist: []string{`^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$`},
 	},
@@ -345,8 +345,24 @@ func genericHit(lower, c []byte, p int) bool {
 		if !ok {
 			continue
 		}
-		n := run(c, i, 100, func(b byte) bool { return !isBlank(b) && !isQuote(b) && b != '`' && b != '\\' })
-		if n >= 20 && n <= 100 && quoteLen(c, i+n) > 0 {
+		// units of the pattern: a byte, or a backslash with the byte it escapes
+		// (a backslash before a quote ends the value instead)
+		n, j := 0, i
+	units:
+		for j < len(c) && n <= 100 {
+			switch b := c[j]; {
+			case isBlank(b) || isQuote(b) || b == '`':
+				break units
+			case b == '\\':
+				if j+1 >= len(c) || isBlank(c[j+1]) || isQuote(c[j+1]) || c[j+1] == '`' {
+					break units
+				}
+				j++
+			}
+			j++
+			n++
+		}
+		if n >= 20 && n <= 100 && quoteLen(c, j) > 0 {
 			return true
 		}
 	}

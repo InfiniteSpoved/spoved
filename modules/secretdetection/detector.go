@@ -80,6 +80,9 @@ type Detector struct {
 }
 
 // NewDetector compiles rules. Which rules to pass is the caller's decision.
+// Custom rules (made by CustomRule) run after the built-in ones, whatever
+// the order given, so a built-in finding wins an overlap with a custom one
+// (the first finding of a place is kept).
 func NewDetector(rules []Rule) (*Detector, error) {
 	d := &Detector{}
 	// custom rules last (stable), so they can't starve the built-in ones
@@ -191,10 +194,11 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 		// A rule may spend its fair share of what is left: an expensive rule
 		// stops alone, and the rules after it still run. A pass over the whole
 		// content is always allowed twice.
-		limit := work + (budget-work)/(len(active)-i)
-		if r.Window == 0 && !r.Anchored {
-			limit = max(limit, min(budget, work+2*len(content)*r.cost))
-		}
+		// The share is a quarter of what is left at the least, so that naming
+		// every keyword in one line does not shrink it, and a rule always
+		// gets two passes over the content.
+		limit := work + (budget-work)/min(len(active)-i, 4)
+		limit = max(limit, min(budget, work+2*len(content)*r.cost))
 		maxLen := r.MaxSecretLen
 		if maxLen <= 0 {
 			maxLen = DefaultMaxSecretLen

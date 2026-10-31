@@ -131,8 +131,11 @@ func compileRule(r Rule) (*compiledRule, error) {
 	}
 	c := &compiledRule{Rule: r, re: re}
 	c.cost = 1 // a pass over the content with a literal prefix is about 8 times cheaper than a window
-	if r.Anchored || r.Window > 0 {
+	if prefix, _ := re.LiteralPrefix(); r.Anchored || r.Window > 0 || prefix == "" {
 		c.cost = 8
+		if prefix == "" && !r.Anchored && r.Window == 0 {
+			c.cost = 12 // without a prefix the NFA reads every byte: about 30 ns each
+		}
 	}
 	if r.custom {
 		// The NFA costs about 3 units per instruction per byte (measured:
