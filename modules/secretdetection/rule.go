@@ -39,8 +39,36 @@ type Rule struct {
 	// finding (placeholders like EXAMPLE, xxxx, ${VAR}, <token>).
 	Allowlist []string
 
-	// Check is an optional extra test on the secret that RE2 can't express.
+	// Normalize is optional: it turns the captured secret into its canonical
+	// form (a key with its line breaks and indentation removed), and the
+	// entropy, allowlist, Check and the fingerprint all work on that form, so
+	// one secret has one fingerprint however it is wrapped. Returning nothing
+	// refuses the match.
+	Normalize func(secret []byte) []byte
+
+	// Check is an optional extra test on the (normalized) secret that RE2 can't
+	// express.
 	Check func(secret []byte) bool
+
+	// TokenChars, if set, are the bytes a token is made of: a match is
+	// dropped when the byte before or after the secret is one of them (so the
+	// secret is not part of a longer word), except that an escape (\n, \r,
+	// \t, \xXX, \uXXXX) or a URL escape (%XX) may stand right before it. RE2 has no lookaround
+	// and a consumed boundary would hide a neighbouring token, so this is
+	// checked here, not in the regex.
+	TokenChars string
+
+	// MaxSecretLen drops a longer capture; 0 means DefaultMaxSecretLen.
+	// MinSecretLen drops a shorter one; 0 means no minimum.
+	MaxSecretLen, MinSecretLen int
+
+	// Window, if above 0, runs the regex only on the Window bytes before and
+	// after each keyword hit (windows that touch are merged), at most
+	// MaxWindowBytes per Scan; what lies beyond is not scanned and Scan
+	// reports it. The regex can't match anything that doesn't lie within
+	// Window bytes of a keyword. Needs keywords. Anchors (^, \b) at the edge
+	// of a window see the edge as the start of the text.
+	Window int
 
 	// DefaultOff marks noisy rules (generic ones) that callers should not
 	// enable unless asked to.
@@ -51,6 +79,7 @@ type compiledRule struct {
 	Rule
 	re        *regexp.Regexp
 	allowlist []*regexp.Regexp
+	tokenSet  *[256]bool
 }
 
 func compileRule(r Rule) (*compiledRule, error) {
@@ -70,6 +99,12 @@ func compileRule(r Rule) (*compiledRule, error) {
 		return nil, fmt.Errorf("secretdetection: rule %s: secret group %d does not exist", r.ID, r.SecretGroup)
 	}
 	c := &compiledRule{Rule: r, re: re}
+	if r.TokenChars != "" {
+		c.tokenSet = new([256]bool)
+		for i := range len(r.TokenChars) {
+			c.tokenSet[r.TokenChars[i]] = true
+		}
+	}
 	for _, a := range r.Allowlist {
 		are, err := regexp.Compile(a)
 		if err != nil {
@@ -98,4 +133,30 @@ func entropy(b []byte) float64 {
 		}
 	}
 	return e
+}
+
+// boundaryOK is the TokenChars check for the secret at c[start:end].
+func (r *compiledRule) boundaryOK(c []byte, start, end int) bool {
+	if r.tokenSet == nil {
+		return true
+	}
+	if end < len(c) && r.tokenSet[c[end]] {
+		return false
+	}
+	if start == 0 || !r.tokenSet[c[start-1]] {
+		return true
+	}
+	switch {
+	case start >= 2 && c[start-2] == '\\' && strings.IndexByte("nrt", c[start-1]) >= 0:
+		return true // JSON or C escape
+	case start >= 3 && c[start-3] == '%' && isHex(c[start-2]) && isHex(c[start-1]):
+		return true // URL encoding
+	case start >= 4 && c[start-4] == '\\' && c[start-3] == 'x' && isHex(c[start-2]) && isHex(c[start-1]):
+		return true // \xXX
+	}
+	return start >= 6 && c[start-6] == '\\' && c[start-5] == 'u' && isHex(c[start-4]) && isHex(c[start-3]) && isHex(c[start-2]) && isHex(c[start-1])
+}
+
+func isHex(b byte) bool {
+	return '0' <= b && b <= '9' || 'a' <= b && b <= 'f' || 'A' <= b && b <= 'F'
 }

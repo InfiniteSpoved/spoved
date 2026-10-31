@@ -8,12 +8,16 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"math/rand/v2"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"forgejo.org/modules/json"
 	"forgejo.org/modules/keying"
 
 	"github.com/stretchr/testify/assert"
@@ -64,8 +68,8 @@ func allRulesDetector(t testing.TB) *Detector {
 
 func countRule(d *Detector, content, id string) int {
 	n := 0
-	for _, f := range d.Scan([]byte(content)) {
-		if f.RuleID == id {
+	for _, f := range scanOf(d, []byte(content)) {
+		if f.RuleID == id || strings.HasPrefix(f.RuleID, id+"-") {
 			n++
 		}
 	}
@@ -104,11 +108,7 @@ func TestRules(t *testing.T) {
 	jwt := func(header, payload, sig string) string { return b64url(header) + "." + b64url(payload) + "." + sig }
 	payload := `{"sub":"1234567890","name":"Jane Roe"}`
 
-	tests := []struct {
-		rule      string
-		positives []string
-		negatives []string
-	}{
+	tests := []ruleTest{
 		{
 			"aws-access-key-id",
 			[]string{"id = AKIA" + fake(16, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"), `"ASIA` + fake(16, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567") + `"`},
@@ -186,7 +186,7 @@ func TestRules(t *testing.T) {
 			[]string{
 				"ghp_" + strings.Repeat("A", 36), // no entropy
 				"ghp_" + fake(35, alnum),
-				"ghp_" + fake(37, alnum),
+				"ghp_" + fake(300, alnum),
 				"ghp_<token>",
 				"xghp_" + fake(36, alnum),
 				"ghx_" + fake(36, alnum),
@@ -306,6 +306,7 @@ func TestRules(t *testing.T) {
 		},
 	}
 
+	tests = append(tests, moreRuleTests()...)
 	covered := map[string]bool{}
 	for _, tt := range tests {
 		covered[tt.rule] = true
@@ -335,49 +336,64 @@ func TestFindingFields(t *testing.T) {
 	t.Run("lines and columns", func(t *testing.T) {
 		for _, eol := range []string{"\n", "\r\n"} {
 			content := "first" + eol + "second line" + eol + "  token: " + token + eol + "last" + eol
-			fs := d.Scan([]byte(content))
+			fs := scanOf(d, []byte(content))
 			require.Len(t, fs, 1)
 			assert.Equal(t, "github-token", fs[0].RuleID)
 			assert.Equal(t, 3, fs[0].StartLine)
 			assert.Equal(t, 3, fs[0].EndLine)
 			assert.Equal(t, 10, fs[0].StartCol)
-			assert.Equal(t, Fingerprint([]byte(token)), fs[0].Fingerprint())
+			assert.Equal(t, Fingerprint([]byte(token)), fs[0].Fingerprint)
 		}
 	})
 	t.Run("first and last line", func(t *testing.T) {
-		fs := d.Scan([]byte(token))
+		fs := scanOf(d, []byte(token))
 		require.Len(t, fs, 1)
 		assert.Equal(t, [3]int{1, 1, 1}, [3]int{fs[0].StartLine, fs[0].EndLine, fs[0].StartCol})
 	})
 	t.Run("multi-line PEM block", func(t *testing.T) {
 		for _, eol := range []string{"\n", "\r\n"} {
 			pem := strings.ReplaceAll(pemBlock("RSA PRIVATE KEY", 5), "\n", eol)
-			fs := d.Scan([]byte("a" + eol + "b" + eol + pem + "c" + eol))
+			fs := scanOf(d, []byte("a"+eol+"b"+eol+pem+"c"+eol))
 			require.Len(t, fs, 1)
 			// BEGIN is line 3, the body is lines 4 to 8, END is line 9.
 			assert.Equal(t, [3]int{4, 8, 1}, [3]int{fs[0].StartLine, fs[0].EndLine, fs[0].StartCol})
 		}
 	})
 	t.Run("sorted by position", func(t *testing.T) {
-		fs := d.Scan([]byte("sk_test_" + fake(24, alnum) + "\n" + token + "\n"))
+		fs := scanOf(d, []byte("sk_test_"+fake(24, alnum)+"\n"+token+"\n"))
 		require.Len(t, fs, 2)
 		assert.Equal(t, "stripe-test-key", fs[0].RuleID)
 		assert.Equal(t, "github-token", fs[1].RuleID)
 	})
 	t.Run("one finding per secret", func(t *testing.T) {
 		content := "AWS_ACCESS_KEY_ID=AKIA" + fake(16, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567") + "\nAWS_SECRET_ACCESS_KEY=" + fake(40, b64) + "\n"
-		fs := d.Scan([]byte(content))
+		fs := scanOf(d, []byte(content))
 		require.Len(t, fs, 2)
 		assert.Equal(t, "aws-access-key-id", fs[0].RuleID)
 		assert.Equal(t, "aws-secret-access-key", fs[1].RuleID)
 	})
 	t.Run("printing never shows the secret", func(t *testing.T) {
-		fs := d.Scan([]byte(token))
+		fs := scanOf(d, []byte(token))
 		require.Len(t, fs, 1)
-		for _, out := range []string{fmt.Sprint(fs[0]), fmt.Sprintf("%v %+v %#v %s", fs[0], fs[0], fs[0], fs[0]), fmt.Sprint(&fs[0]), fmt.Sprint(fs)} {
-			assert.NotContains(t, out, token[4:])
-			assert.NotContains(t, out, fmt.Sprint([]byte(token[4:12])), "no byte dump")
+		type wrap struct {
+			name string
+			f    Finding
+			p    *Finding
+			fs   []Finding
 		}
+		w := wrap{"x", fs[0], &fs[0], fs}
+		for _, v := range []any{fs[0], &fs[0], fs, w, &w, map[string]any{"w": w}, map[string]Finding{"f": fs[0]}, []any{w}, struct{ f Finding }{fs[0]}} {
+			for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%d", "%x", "%q", "%T"} {
+				out := fmt.Sprintf(verb, v)
+				assert.NotContains(t, out, token[4:], verb)
+				assert.NotContains(t, out, fmt.Sprint([]byte(token[4:12])), verb)
+				assert.NotContains(t, out, fmt.Sprintf("%x", token[4:12]), verb)
+				assert.NotContains(t, out, fmt.Sprintf("%#v", []byte(token[4:12]))[9:], verb)
+			}
+		}
+		out, err := json.Marshal(w.fs)
+		require.NoError(t, err)
+		assert.NotContains(t, string(out), token[4:])
 	})
 }
 
@@ -385,40 +401,36 @@ func TestScanSkips(t *testing.T) {
 	d := allRulesDetector(t)
 	token := "ghp_" + fake(36, alnum)
 
-	assert.Len(t, d.Scan([]byte(token)), 1)
-	assert.Empty(t, d.Scan(nil))
-	assert.Empty(t, d.Scan([]byte("")))
+	assert.Len(t, scanOf(d, []byte(token)), 1)
+	assert.Empty(t, scanOf(d, nil))
+	assert.Empty(t, scanOf(d, []byte("")))
 
 	t.Run("binary", func(t *testing.T) {
-		assert.Empty(t, d.Scan([]byte("\x00"+token)))
-		assert.Empty(t, d.Scan([]byte(strings.Repeat("a", 7999)+"\x00"+token)))
+		assert.Empty(t, scanOf(d, []byte("\x00"+token)))
+		assert.Empty(t, scanOf(d, []byte(strings.Repeat("a", 7999)+"\x00"+token)))
 		// A NUL after the first 8000 bytes doesn't make it binary, as in git.
-		assert.Len(t, d.Scan([]byte(token+"\n"+strings.Repeat("a", 8000)+"\x00")), 1)
+		assert.Len(t, scanOf(d, []byte(token+"\n"+strings.Repeat("a", 8000)+"\x00")), 1)
 	})
 	t.Run("LFS pointer", func(t *testing.T) {
 		pointer := "version https://git-lfs.github.com/spec/v1\noid sha256:" + fake(16, hexa) + "\nsize 12345\n"
-		assert.Empty(t, d.Scan([]byte(pointer+"token = "+token)))
+		assert.Empty(t, scanOf(d, []byte(pointer)))
+		assert.Len(t, scanOf(d, []byte(pointer+"token = "+token)), 1, "not only a pointer")
 	})
 	t.Run("max content size", func(t *testing.T) {
 		content := []byte(strings.Repeat("a\n", 100) + token)
 		d := allRulesDetector(t)
 		d.MaxContentSize = len(content) - 1
-		assert.Empty(t, d.Scan(content))
+		assert.Empty(t, scanOf(d, content))
 		d.MaxContentSize = len(content)
-		assert.Len(t, d.Scan(content), 1)
+		assert.Len(t, scanOf(d, content), 1)
 	})
 	t.Run("long lines", func(t *testing.T) {
-		d := allRulesDetector(t)
-		d.MaxLineLength = 100
-		long := strings.Repeat("a", 500) + " " + token // beyond the cut
-		fs := d.Scan([]byte("x\n" + long + "\n" + token + "\n" + long))
-		require.Len(t, fs, 1)
-		assert.Equal(t, 3, fs[0].StartLine)
-		// A token before the cut is found, a PEM block over short lines still is.
-		fs = d.Scan([]byte(token + " " + strings.Repeat("a", 500) + "\n" + pemBlock("RSA PRIVATE KEY", 3)))
-		assert.Len(t, fs, 2)
-		d.MaxLineLength = 0
-		assert.Len(t, d.Scan([]byte(long)), 1)
+		long := strings.Repeat("a", 4<<20) + " " + token
+		fs := scanOf(d, []byte("x\n"+long+"\n"+token+"\n"+long))
+		require.Len(t, fs, 3)
+		assert.Equal(t, 2, fs[0].StartLine)
+		assert.Equal(t, 3, fs[1].StartLine)
+		assert.Equal(t, 4, fs[2].StartLine)
 	})
 	t.Run("matches per rule", func(t *testing.T) {
 		d := allRulesDetector(t)
@@ -426,9 +438,9 @@ func TestScanSkips(t *testing.T) {
 		for i := range 300 {
 			b.WriteString("ghp_" + fake(36, alnum)[i%10:] + fake(i%10, alnum) + "\n")
 		}
-		assert.Len(t, d.Scan([]byte(b.String())), DefaultMaxMatchesPerRule)
+		assert.Len(t, scanOf(d, []byte(b.String())), DefaultMaxMatchesPerRule)
 		d.MaxMatchesPerRule = 5
-		assert.Len(t, d.Scan([]byte(b.String())), 5)
+		assert.Len(t, scanOf(d, []byte(b.String())), 5)
 	})
 }
 
@@ -469,12 +481,12 @@ func TestNewDetectorRefusesBadRules(t *testing.T) {
 func TestRuleAllowlistAndKeywords(t *testing.T) {
 	d, err := NewDetector([]Rule{{ID: "r", Regex: `secret-([0-9]{6})`, SecretGroup: 1, Keywords: []string{"secret-"}, Allowlist: []string{`000000`}}})
 	require.NoError(t, err)
-	assert.Len(t, d.Scan([]byte("secret-123456")), 1)
-	assert.Empty(t, d.Scan([]byte("secret-000000")))
+	assert.Len(t, scanOf(d, []byte("secret-123456")), 1)
+	assert.Empty(t, scanOf(d, []byte("secret-000000")))
 	d, err = NewDetector([]Rule{{ID: "r", Regex: `[0-9]{6}`, Keywords: []string{"needle"}}})
 	require.NoError(t, err)
-	assert.Empty(t, d.Scan([]byte("123456")))
-	assert.Len(t, d.Scan([]byte("Needle 123456")), 1)
+	assert.Empty(t, scanOf(d, []byte("123456")))
+	assert.Len(t, scanOf(d, []byte("Needle 123456")), 1)
 }
 
 func TestFingerprint(t *testing.T) {
@@ -489,34 +501,66 @@ func TestFingerprint(t *testing.T) {
 	// The same secret found by two rules has the same fingerprint.
 	d := allRulesDetector(t)
 	hex40 := fake(40, hexa)
-	fs := d.Scan([]byte("token = " + hex40 + "\n"))
-	fs = append(fs, d.Scan([]byte("https://bob:"+hex40+"@git.corp.test/"))...)
+	fs := scanOf(d, []byte("token = "+hex40+"\n"))
+	fs = append(fs, scanOf(d, []byte("https://bob:"+hex40+"@git.corp.test/"))...)
 	require.Len(t, fs, 2)
-	assert.Equal(t, fs[0].Fingerprint(), fs[1].Fingerprint())
-	assert.Equal(t, Fingerprint([]byte(hex40)), fs[0].Fingerprint())
+	assert.Equal(t, fs[0].Fingerprint, fs[1].Fingerprint)
+	assert.Equal(t, Fingerprint([]byte(hex40)), fs[0].Fingerprint)
 }
 
 func TestValidateCustomRule(t *testing.T) {
-	require.NoError(t, ValidateCustomRule("Acme token", `ACME-[0-9]{8}`, "x = ACME-12345678"))
-	require.NoError(t, ValidateCustomRule("Acme token", `acme_token=([a-z0-9]{12})`, "acme_token=abcdef123456"))
+	acme := []string{"acme"}
+	require.NoError(t, ValidateCustomRule("Acme token", `ACME-[0-9]{8}`, "x = ACME-12345678", acme))
+	require.NoError(t, ValidateCustomRule("Acme token", `acme_token=([a-z0-9]{12})`, "acme_token=abcdef123456", []string{"ACME_TOKEN"}))
+	require.NoError(t, ValidateCustomRule("Acme token", `(?i)acme[_-]?key\s*=\s*["']?([a-z0-9]{16,40})`, "ACME_KEY = 'abcdef0123456789'", []string{"acme"}))
 
+	long := "A" + strings.Repeat("b", MaxCustomPatternLen)
 	tests := []struct {
 		name, pattern, test string
+		keywords            []string
 		want                error
 	}{
-		{"", `ACME-[0-9]{8}`, "ACME-12345678", ErrCustomNameInvalid},
-		{strings.Repeat("n", MaxCustomNameLen+1), `ACME-[0-9]{8}`, "ACME-12345678", ErrCustomNameInvalid},
-		{"long", "A" + strings.Repeat("b", MaxCustomPatternLen), "A" + strings.Repeat("b", MaxCustomPatternLen), ErrPatternTooLong},
-		{"invalid", `ACME-(`, "ACME-", ErrPatternInvalid},
-		{"backtracking syntax", `(?=ACME)ACME`, "ACME", ErrPatternInvalid},
-		{"empty", `[0-9]*`, "123", ErrPatternMatchesEmpty},
-		{"empty alternative", `ACME|`, "ACME", ErrPatternMatchesEmpty},
-		{"no match in test", `ACME-[0-9]{8}`, "ACME-1234", ErrPatternNoMatchInTest},
-		{"empty test", `ACME-[0-9]{8}`, "", ErrPatternNoMatchInTest},
-		{"everything", `.+`, "anything", ErrPatternMatchesTooMuch},
-		{"dot star in text", `x.*`, "x", ErrPatternMatchesTooMuch},
-		{"words", `\w{3,}`, "abc", ErrPatternMatchesTooMuch},
-		{"digits", `[0-9]`, "1", ErrPatternMatchesTooMuch},
+		{"", `ACME-[0-9]{8}`, "ACME-12345678", acme, ErrCustomNameInvalid},
+		{strings.Repeat("n", MaxCustomNameLen+1), `ACME-[0-9]{8}`, "ACME-12345678", acme, ErrCustomNameInvalid},
+		{"long", long, long, []string{"abb"}, ErrPatternTooLong},
+		{"invalid", `ACME-(`, "ACME-", acme, ErrPatternInvalid},
+		{"backtracking syntax", `(?=ACME)ACME`, "ACME", acme, ErrPatternInvalid},
+		{"empty", `[0-9]*`, "123", acme, ErrPatternMatchesEmpty},
+		{"empty alternative", `ACME|`, "ACME", acme, ErrPatternMatchesEmpty},
+		{"no match in test", `ACME-[0-9]{8}`, "ACME-1234", acme, ErrPatternNoMatchInTest},
+		{"empty test", `ACME-[0-9]{8}`, "", acme, ErrPatternNoMatchInTest},
+		{"test string too long", `ACME-[0-9]{8}`, "ACME-12345678" + strings.Repeat(" ", MaxCustomTestStringLen), acme, ErrTestStringTooLong},
+		{"no keywords", `ACME-[0-9]{8}`, "ACME-12345678", nil, ErrKeywordMissing},
+		{"short keyword", `ACME-[0-9]{8}`, "ACME-12345678", []string{"ac"}, ErrKeywordMissing},
+		{"one short keyword", `ACME-[0-9]{8}`, "ACME-12345678", []string{"acme", "a"}, ErrKeywordMissing},
+		{"keyword not in the match", `ACME-[0-9]{8}`, "ACME-12345678", []string{"other"}, ErrKeywordMissing},
+		{"keyword only next to the match", `ACME-[0-9]{8}`, "other ACME-12345678", []string{"other"}, ErrKeywordMissing},
+		{"secret too short", `ACME-([0-9]{4})`, "ACME-1234", acme, ErrSecretTooShort},
+		{"one byte group", `(a)CME_[0-9]{4}`, "aCME_1234", []string{"cme"}, ErrSecretTooShort},
+		// Broad patterns: they match ordinary files, so every push would be blocked.
+		{"everything", `.+`, "zzq-anything", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"dot run", `.{8,}`, "zzq and the rest", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"words", `\w{3,}`, "zzqabcdefgh", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"md5", `[0-9a-f]{32}`, strings.Repeat("0a1b2c3d", 4), []string{"0a1"}, ErrPatternMatchesTooMuch},
+		{"git sha", `[0-9a-f]{40}`, strings.Repeat("0a1b2c3d4e", 4), []string{"0a1"}, ErrPatternMatchesTooMuch},
+		{"uuid", `[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`, "0a1b2c3d-0a1b-0a1b-0a1b-0a1b2c3d4e5f", []string{"0a1"}, ErrPatternMatchesTooMuch},
+		{"long alnum", `[A-Za-z0-9]{20,}`, "zzq" + strings.Repeat("A1", 10), []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"non-space", `\S{12,}`, "zzq-abcdefghijk", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"url", `https?://\S+`, "http://zzq.test/a", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"long word", `[a-z]{9,}`, "zzqabcdefghi", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"tab", `\t.{8,}`, "\tzzq-abcdefgh", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"brace", `\{[^}]{8,}`, "{zzq-abcdefgh}", []string{"zzq"}, ErrPatternMatchesTooMuch},
+		{"non-ASCII", `[^\x00-\x7f]+zzq[a-z]*`, "é zzqabcdefgh", []string{"zzq"}, ErrPatternNoMatchInTest},
+		{"non-ASCII text", `[^\x00-\x7f]{1,20}`, "éééééééé", []string{"é"}, ErrKeywordMissing},
+		// Slow patterns from the reviews (at least 10 KB/s to 0.5 MB/s on any text).
+		{"repeat product", `(?:\pL{0,9}){0,100}ZZQ`, "abcdefghZZQ", []string{"zzq"}, ErrPatternTooComplex},
+		{"repeat chain", strings.Repeat(`[\w-]{0,100}`, 60) + "ZZQ", "abcdefghZZQ", []string{"zzq"}, ErrPatternTooComplex},
+		{"ten repeats", strings.Repeat(`\w{0,100}`, 10) + "ZZQ", "abcdefghZZQ", []string{"zzq"}, ErrPatternTooComplex},
+		{"big repeat", `([^@]{1,1000}[^#]{1,1000})@#QZ`, "abcdefgh@#QZ", []string{"@#q"}, ErrPatternTooComplex},
+		{"big repeat 2", `ACME` + strings.Repeat(`[\s\S]{0,1000}`, 10) + "Z", "ACMEabcdefghZ", acme, ErrPatternTooComplex},
+		{"big min", `(\w{1000}\w{1000})QZZ`, "QZZ", []string{"qzz"}, ErrPatternTooComplex},
+		{"repeat sum", `zzq[a-z]{101}[0-9]{101}[A-Z]{101}`, "zzq" + strings.Repeat("a", 101) + strings.Repeat("1", 101) + strings.Repeat("A", 101), []string{"zzq"}, ErrPatternTooComplex},
+		{"unicode classes", `(?i)(?:[\pL\pN_]{1,100}[\pL\pN_]{1,100}){1,100}QZJ`, "abcdefghQZJ", []string{"qzj"}, ErrPatternInvalid},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -524,9 +568,33 @@ func TestValidateCustomRule(t *testing.T) {
 			if tt.want != ErrCustomNameInvalid {
 				name = "rule"
 			}
-			assert.ErrorIs(t, ValidateCustomRule(name, tt.pattern, tt.test), tt.want)
+			start := time.Now()
+			require.ErrorIs(t, ValidateCustomRule(name, tt.pattern, tt.test, tt.keywords), tt.want)
+			assert.Less(t, time.Since(start), 2*time.Second, "validation must stay fast")
 		})
 	}
+}
+
+func TestCustomRuleRuns(t *testing.T) {
+	rule := CustomRule("custom-1", "Acme", `ACME-([0-9]{8})`, []string{"ACME"})
+	assert.Equal(t, []string{"acme"}, rule.Keywords)
+	assert.Equal(t, 1, rule.SecretGroup)
+	d, err := NewDetector([]Rule{rule})
+	require.NoError(t, err)
+	fs := scanOf(d, []byte("x = ACME-12345678"))
+	require.Len(t, fs, 1)
+	assert.Equal(t, "custom-1", fs[0].RuleID)
+	assert.Empty(t, scanOf(d, []byte("x = 12345678")), "no keyword, no run")
+	assert.Equal(t, 0, CustomRule("c", "n", `ACME-[0-9]{8}`, nil).SecretGroup)
+}
+
+func TestCustomRuleSecretLength(t *testing.T) {
+	// The length cap applies to custom rules too.
+	rule := CustomRule("c", "n", `acme=([a-z0-9]+)`, []string{"acme"})
+	d, err := NewDetector([]Rule{rule})
+	require.NoError(t, err)
+	assert.Len(t, scanOf(d, []byte("acme="+strings.Repeat("a1", 500))), 1)
+	assert.Empty(t, scanOf(d, []byte("acme="+strings.Repeat("a1", 600))))
 }
 
 func TestCorpusIsFixedOrdinaryText(t *testing.T) {
@@ -535,32 +603,58 @@ func TestCorpusIsFixedOrdinaryText(t *testing.T) {
 	assert.GreaterOrEqual(t, len(c), 64<<10)
 	assert.Equal(t, c, corpus())
 	// No built-in secret rule fires on it.
-	assert.Empty(t, allRulesDetector(t).Scan(c))
+	assert.Empty(t, scanOf(allRulesDetector(t), c))
 }
 
 // Scan time must grow linearly with the size of the content, whatever it
 // looks like. Run with: go test -run xxx -bench . ./modules/secretdetection/
 func BenchmarkScan(b *testing.B) {
 	d := allRulesDetector(b)
-	noCut, err := NewDetector(BuiltinRules())
-	require.NoError(b, err)
-	noCut.MaxLineLength = 0 // the match cap alone must keep it linear
-
 	for _, size := range []int{1 << 20, 10 << 20} {
 		inputs := map[string][]byte{
 			"minified-js":   minifiedJS(size),
 			"random-base64": randomBase64(size),
 		}
 		for name, content := range inputs {
-			for dname, det := range map[string]*Detector{"default": d, "no-line-cut": noCut} {
-				b.Run(fmt.Sprintf("%s/%dMiB/%s", name, size>>20, dname), func(b *testing.B) {
-					b.SetBytes(int64(len(content)))
-					for b.Loop() {
-						det.Scan(content)
-					}
-				})
-			}
+			b.Run(fmt.Sprintf("%s/%dMiB", name, size>>20), func(b *testing.B) {
+				b.SetBytes(int64(len(content)))
+				for b.Loop() {
+					scanOf(d, content)
+				}
+			})
 		}
+	}
+}
+
+// BenchmarkScanGoSources scans the Go files of routers/ and models/ one by
+// one, as a push is scanned, and reports the throughput over all of them. Code
+// is full of the keywords token and ://, so it shows what the keyword gate
+// does not save.
+func BenchmarkScanGoSources(b *testing.B) {
+	var files [][]byte
+	var total int64
+	for _, dir := range []string{"../../routers", "../../models"} {
+		_ = filepath.WalkDir(dir, func(p string, e fs.DirEntry, err error) error {
+			if err == nil && !e.IsDir() && strings.HasSuffix(p, ".go") {
+				c, _ := os.ReadFile(p)
+				files = append(files, c)
+				total += int64(len(c))
+			}
+			return nil
+		})
+	}
+	if len(files) == 0 {
+		b.Skip("no sources")
+	}
+	for name, d := range map[string]*Detector{"default-rules": defaultRulesDetector(b), "all-rules": allRulesDetector(b)} {
+		b.Run(name, func(b *testing.B) {
+			b.SetBytes(total)
+			for b.Loop() {
+				for _, f := range files {
+					scanOf(d, f)
+				}
+			}
+		})
 	}
 }
 

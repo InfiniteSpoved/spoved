@@ -1,0 +1,10 @@
+// Copyright 2026 The spoved contributors. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//go:build race
+
+package secretdetection
+
+// slowdown scales the time bounds of tests: the race detector makes code
+// about ten times slower.
+const slowdown = 10

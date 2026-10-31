@@ -34,7 +34,9 @@ package secretdetection
 
 import (
 	"encoding/base64"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"forgejo.org/modules/json"
@@ -44,102 +46,154 @@ import (
 // runs of x, ${VAR} and {{ var }} templates, <token> markers.
 var placeholders = []string{`(?i)example`, `(?i)x{5,}`, `\$\{`, `\{\{`, `<[^<>\s]{2,40}>`}
 
+// Sets of bytes for Rule.TokenChars.
+const (
+	alnumChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	wordChars  = alnumChars + "_-"
+)
+
 var builtinRules = []Rule{
 	{
 		ID: "aws-access-key-id", Name: "AWS access key ID", Type: "aws",
 		Keywords:    []string{"akia", "asia", "abia", "acca", "a3t"},
-		Regex:       `\b((?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16})\b`,
-		SecretGroup: 1, MinEntropy: 3,
+		Regex:       `((?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16})`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars,
 	},
 	{
 		// The secret key is 40 base64 characters, which is too common alone:
-		// it counts after aws_secret_access_key (or similar) = ...
+		// it counts after aws_secret_access_key (or similar) = ... or a space.
 		ID: "aws-secret-access-key", Name: "AWS secret access key", Type: "aws",
 		Keywords:    []string{"aws"},
-		Regex:       `(?i)aws[\w.-]{0,30}secret[\w.-]{0,30}["']?\s*(?::=|=>|[:=])\s*["']?([A-Za-z0-9/+=]{40})(?:[^A-Za-z0-9/+=]|$)`,
-		SecretGroup: 1, MinEntropy: 4,
+		Regex:       `(?i)aws[\w.-]{0,30}secret[\w.-]{0,30}["']?(?:\s*(?::=|=>|[:=])\s*|\s+)["']?([A-Za-z0-9/+=]{40})(?:[^A-Za-z0-9/+=]|$)`,
+		SecretGroup: 1, MinEntropy: 4, Window: 256,
 	},
 	{
 		// ... or within 120 bytes after an access key ID.
 		ID: "aws-secret-access-key-near-id", Name: "AWS secret access key next to a key ID", Type: "aws",
 		Keywords:    []string{"akia", "asia", "abia", "acca", "a3t"},
 		Regex:       `\b(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16}\b[\s\S]{0,120}?[^A-Za-z0-9/+=]([A-Za-z0-9/+=]{40})(?:[^A-Za-z0-9/+=]|$)`,
-		SecretGroup: 1, MinEntropy: 4.3,
+		SecretGroup: 1, MinEntropy: 4.3, Window: 256,
 	},
 	{
 		ID: "azure-storage-account-key", Name: "Azure storage account key", Type: "azure",
-		Keywords:    []string{"accountkey"},
-		Regex:       `(?i)accountkey=([A-Za-z0-9+/]{86}==)`,
+		Keywords:    []string{"accountkey", "storage_key", "storage_account_key", "storageaccount_key", "storagekey", "storageaccountkey"},
+		Regex:       `(?i)(?:accountkey|storage_?(?:account_?)?key)["']?\s*[:=]\s*["']?([A-Za-z0-9+/]{86}==)`,
 		SecretGroup: 1, MinEntropy: 4,
+		Allowlist: []string{"^" + regexp.QuoteMeta(azuriteKey) + "$"},
+	},
+	{
+		// Service Bus, Event Hub and IoT Hub connection strings.
+		ID: "azure-shared-access-key", Name: "Azure shared access key", Type: "azure",
+		Keywords:    []string{"sharedaccesskey"},
+		Regex:       `(?i)sharedaccesskey["']?\s*[:=]\s*["']?([A-Za-z0-9+/]{43}=)`,
+		SecretGroup: 1, MinEntropy: 4,
+	},
+	{
+		// The 84 character PAT format (2024) has AZDO at bytes 77 to 80.
+		ID: "azure-devops-pat", Name: "Azure DevOps personal access token", Type: "azure",
+		Keywords:    []string{"azdo"},
+		Regex:       `([A-Za-z0-9]{76}AZDO[A-Za-z0-9]{4})`,
+		SecretGroup: 1, MinEntropy: 3.5, TokenChars: alnumChars,
+		Window: 100, // the regex has no literal prefix: run it only around "azdo"
 	},
 	{
 		ID: "azure-ad-client-secret", Name: "Azure AD client secret", Type: "azure",
 		Keywords:    []string{"q~"},
-		Regex:       `(?:^|[\\'"\x60\s>=:(,)])([a-zA-Z0-9_~.]{3}\dQ~[a-zA-Z0-9_~.-]{31,34})(?:$|[\\'"\x60\s<),])`,
-		SecretGroup: 1, MinEntropy: 3,
+		Regex:       `([a-zA-Z0-9_~.]{3}\dQ~[a-zA-Z0-9_~.-]{31,34})`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars + "_~.-",
 	},
 	{
-		// type and private_key sit in the same JSON object, type first.
+		// type and private_key sit in the same JSON object, type first. The
+		// secret is the key body, as for the private-key rule, so one key has
+		// one fingerprint wherever it is stored.
 		ID: "gcp-service-account-key", Name: "GCP service account private key", Type: "gcp",
 		Keywords:    []string{"service_account"},
-		Regex:       `"type"\s*:\s*"service_account"[\s\S]{0,600}?"private_key"\s*:\s*"(-----BEGIN (?:RSA )?PRIVATE KEY-----(?:\\[nr]|[A-Za-z0-9+/=\s]){64,}?-----END (?:RSA )?PRIVATE KEY-----)`,
-		SecretGroup: 1,
+		Regex:       `"type"\s*:\s*"service_account"[\s\S]{0,600}?"private_key"\s*:\s*"-----BEGIN (?:RSA )?PRIVATE KEY-----\s*((?:\\+[nrt/]|\\u[0-9a-fA-F]{4}|[A-Za-z0-9+/=\s]){64,}?)(?:\\+[nrt]|\s)*-----END (?:RSA )?PRIVATE KEY-----`,
+		SecretGroup: 1, MinEntropy: 3, Normalize: normalizePEM, MaxSecretLen: maxPrivateKeyLen,
 	},
 	{
 		ID: "gcp-api-key", Name: "GCP API key", Type: "gcp",
 		Keywords:    []string{"aiza"},
-		Regex:       `\b(AIza[\w-]{35})(?:[\x60'"\s;]|\\[nr]|$)`,
-		SecretGroup: 1, MinEntropy: 3.5,
+		Regex:       `(AIza[\w-]{35})`,
+		SecretGroup: 1, MinEntropy: 3.5, TokenChars: wordChars,
 	},
 	{
 		// ghp_ personal, gho_ OAuth, ghu_ user-to-server, ghs_ server-to-server, ghr_ refresh.
 		ID: "github-token", Name: "GitHub token", Type: "github",
 		Keywords:    []string{"ghp_", "gho_", "ghu_", "ghs_", "ghr_"},
-		Regex:       `\b(gh[pousr]_[0-9A-Za-z]{36})\b`,
-		SecretGroup: 1, MinEntropy: 3,
+		Regex:       `(gh[pousr]_[0-9A-Za-z]{36,251})`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars,
 	},
 	{
 		ID: "github-fine-grained-pat", Name: "GitHub fine-grained personal access token", Type: "github",
 		Keywords:    []string{"github_pat_"},
-		Regex:       `\b(github_pat_[0-9A-Za-z_]{82})\b`,
-		SecretGroup: 1, MinEntropy: 3,
+		Regex:       `(github_pat_[0-9A-Za-z_]{82})`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars + "_",
 	},
 	{
-		// personal, deploy, runner, pipeline trigger, feature flag, incoming mail,
-		// agent and OAuth application secret tokens.
+		// personal, deploy, runner, pipeline trigger, feature flag, incoming
+		// mail, agent, CI job, SCIM, feature flag client and OAuth application
+		// secret tokens, the routable form (a dot and 9 characters at the
+		// end) and the runner registration token.
 		ID: "gitlab-token", Name: "GitLab token", Type: "gitlab",
-		Keywords:    []string{"glpat-", "gldt-", "glrt-", "glptt-", "glft-", "glimt-", "glagent-", "gloas-"},
-		Regex:       `\b(gl(?:pat|dt|rt|ptt|ft|imt|agent|oas)-[0-9A-Za-z_-]{20,50})(?:[^0-9A-Za-z_-]|$)`,
-		SecretGroup: 1, MinEntropy: 3,
+		Keywords:    []string{"glpat-", "gldt-", "glrt-", "glptt-", "glft-", "glimt-", "glagent-", "glcbt-", "glsoat-", "glffct-", "gloas-", "gr1348941"},
+		Regex:       `(gl(?:pat|dt|rt|ptt|ft|imt|agent|cbt|soat|ffct|oas)-[0-9A-Za-z_-]{20,300}(?:\.[0-9a-z]{9})?|GR1348941[0-9A-Za-z_-]{20})`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: wordChars,
+	},
+	// An access token of Forgejo, Gitea and spoved is 40 hex characters (hex
+	// of 20 random bytes, models/auth/access_token.go) with no prefix, so it
+	// only counts in a context that says it is a credential. One rule per
+	// context, so each regex starts with its own words: `token = <hex>`,
+	// `Authorization: token <hex>` (also as a JSON or YAML key), a .netrc
+	// password and the password of a URL (https://user:<hex>@host).
+	{
+		ID: "forgejo-access-token", Name: "Forgejo, Gitea or spoved access token", Type: "forgejo",
+		Keywords:    []string{"token"},
+		Regex:       `(?i:token)[\w.-]{0,20}["']?\s*[:=]\s*["']?([0-9a-f]{40})`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars,
 	},
 	{
-		// An access token of Forgejo, Gitea and spoved is 40 hex characters
-		// (hex of 20 random bytes, models/auth/access_token.go) with no prefix,
-		// so it only counts in a context that says it is a credential:
-		// `token = <hex>`, `Authorization: token <hex>`, a .netrc password or
-		// the password of a URL (https://user:<hex>@host).
-		ID: "forgejo-access-token", Name: "Forgejo, Gitea or spoved access token", Type: "forgejo",
-		Keywords: []string{"token", "bearer", "machine", "://"},
-		Regex: `(?i)(?:[\w.-]{0,30}token[\w.-]{0,20}["']?\s*[:=]\s*["']?` +
-			`|authorization:\s*(?:token|bearer)\s+` +
-			`|machine\s+\S{1,100}\s+login\s+\S{1,100}\s+password\s+` +
-			`|://(?:[^\s/:@]{1,100}:)?)([0-9a-f]{40})\b`,
-		SecretGroup: 1, MinEntropy: 3,
+		ID: "forgejo-access-token-header", Name: "Forgejo, Gitea or spoved access token in an Authorization header", Type: "forgejo",
+		Keywords:    []string{"authorization"},
+		Regex:       `(?i:authorization)["']?\s*[:=]\s*["']?(?i:token|bearer)\s+([0-9a-f]{40})`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars,
+	},
+	{
+		ID: "forgejo-access-token-netrc", Name: "Forgejo, Gitea or spoved access token in a .netrc file", Type: "forgejo",
+		Keywords:    []string{"machine"},
+		Regex:       `machine\s+\S{1,64}\s+login\s+\S{1,64}\s+password\s+([0-9a-f]{40})`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars,
+	},
+	{
+		ID: "forgejo-access-token-url", Name: "Forgejo, Gitea or spoved access token in a URL", Type: "forgejo",
+		Keywords:    []string{"://"},
+		Regex:       `://(?:[^\s/:@]{1,64}:)?([0-9a-f]{40})@`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars,
+	},
+	{
+		// OAuth2 application client secrets (gto_) and authorization codes
+		// (gta_) of the instance: base32 of 32 random bytes (models/auth/oauth2.go).
+		ID: "forgejo-oauth2-secret", Name: "Forgejo, Gitea or spoved OAuth2 secret", Type: "forgejo",
+		Keywords:    []string{"gto_", "gta_"},
+		Regex:       `(gt[ao]_[a-z2-7]{52})`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars,
 	},
 	{
 		// PEM private keys, RSA, EC, DSA, OPENSSH, PGP and plain PKCS#8. The
-		// secret is the block body, without the BEGIN and END lines.
+		// secret is the block body, without the BEGIN and END lines, with
+		// optional armor headers (Proc-Type, Comment) in front.
 		ID: "private-key", Name: "Private key", Type: "private-key",
 		Keywords:    []string{"-----begin"},
-		Regex:       `(?i)-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----\s*([A-Za-z0-9+/=\s:,.\\-]{64,}?)\s*-----END[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----`,
-		SecretGroup: 1, MinEntropy: 3,
+		Regex:       `(?i)-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----(?:\s|\\+[nrt])*((?:[A-Za-z][A-Za-z-]{1,29}:[^\r\n\\]{0,200}(?:[\r\n]|\\+[nrt])+\s*)*[A-Za-z0-9+/=\s\\]{64,}?)\s*-----END[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----`,
+		SecretGroup: 1, MinEntropy: 3, Normalize: normalizePEM, MaxSecretLen: maxPrivateKeyLen,
 	},
 	{
-		// xoxb bot, xoxp user, xoxa app, xoxr refresh.
+		// xoxb bot, xoxp user, xoxa app, xoxr refresh (also the legacy forms
+		// with one group of digits), xapp app-level, xoxe rotating tokens.
 		ID: "slack-token", Name: "Slack token", Type: "slack",
-		Keywords:    []string{"xoxb-", "xoxp-", "xoxa-", "xoxr-"},
-		Regex:       `\b(xox[bpar]-[0-9]{1,14}(?:-[0-9A-Za-z]{8,40}){2,3})\b`,
-		SecretGroup: 1, MinEntropy: 2,
+		Keywords:    []string{"xoxb-", "xoxp-", "xoxa-", "xoxr-", "xapp-", "xoxe"},
+		Regex:       `(xapp-[0-9]-[A-Za-z0-9]{6,}-[0-9]{8,}-[A-Za-z0-9]{32,}|xoxe\.xox[bp]-[0-9]-[A-Za-z0-9]{100,}|xoxe-[0-9]-[A-Za-z0-9]{100,}|xox[bpar]-[0-9]{1,14}(?:-[0-9A-Za-z]{8,40}){1,3})`,
+		SecretGroup: 1, MinEntropy: 2, TokenChars: alnumChars,
 	},
 	{
 		ID: "slack-webhook-url", Name: "Slack webhook URL", Type: "slack",
@@ -150,31 +204,108 @@ var builtinRules = []Rule{
 	{
 		ID: "stripe-live-key", Name: "Stripe live secret key", Type: "stripe",
 		Keywords:    []string{"sk_live_", "rk_live_"},
-		Regex:       `\b((?:sk|rk)_live_[0-9A-Za-z]{10,99})\b`,
-		SecretGroup: 1, MinEntropy: 2,
+		Regex:       `((?:sk|rk)_live_[0-9A-Za-z]{10,247})`,
+		SecretGroup: 1, MinEntropy: 2, TokenChars: alnumChars,
 	},
 	{
 		// Its own rule so users can mark test keys as "used in tests".
 		ID: "stripe-test-key", Name: "Stripe test secret key", Type: "stripe",
 		Keywords:    []string{"sk_test_", "rk_test_"},
-		Regex:       `\b((?:sk|rk)_test_[0-9A-Za-z]{10,99})\b`,
-		SecretGroup: 1, MinEntropy: 2,
+		Regex:       `((?:sk|rk)_test_[0-9A-Za-z]{10,247})`,
+		SecretGroup: 1, MinEntropy: 2, TokenChars: alnumChars,
 	},
 	{
 		// Three base64url parts; header and payload start with eyJ (`{"`). The
-		// signature may be empty (alg none, which still counts).
+		// signature may be empty (alg none, which still counts). The token of
+		// jwt.io's documentation is no secret.
 		ID: "jwt", Name: "JSON Web Token", Type: "jwt",
 		Keywords:    []string{"eyj"},
-		Regex:       `\b(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*)`,
-		SecretGroup: 1, MinEntropy: 3,
-		Check: jwtHeaderHasAlg,
+		Regex:       `(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*)`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: wordChars,
+		Check:     jwtHeaderHasAlg,
+		Allowlist: []string{`\.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c$`},
 	},
 	{
+		// Dotted names (locale keys, settings) are no secrets.
 		ID: "generic-secret-assignment", Name: "Generic secret assignment", Type: "generic",
 		Keywords:    []string{"secret", "password", "passwd", "token", "key"},
 		Regex:       `(?i)(?:secret|password|passwd|token|key)[\w.-]{0,20}["']?\s*(?::=|[:=])\s*["']([^\s"'\x60]{20,100})["']`,
-		SecretGroup: 1, MinEntropy: 3.5, DefaultOff: true,
+		SecretGroup: 1, MinEntropy: 3.5, DefaultOff: true, Window: 256,
+		Allowlist: []string{`^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$`},
 	},
+}
+
+// azuriteKey is the storage account key of the Azurite emulator, the same on
+// every machine and in the Azure documentation. It is built from parts so the
+// source holds no full key literal.
+var azuriteKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/" + "K1SZFPTOtr/KBHBeksoGMGw=="
+
+const maxPrivateKeyLen = 64 << 10 // PGP exports with several subkeys pass 16 KiB
+
+// normalizePEM is the canonical form of a private key body: up to three
+// layers of string escaping undone (JSON, PHP, shell: \\, \/, \n, \r, \t,
+// \uXXXX), the armor header lines (Proc-Type, Comment, ...) dropped and all
+// whitespace removed. If what is left is not base64 (text between the two
+// dashed lines, an escape this doesn't know), the whitespace-stripped raw body
+// is used instead: a match is never dropped, it only gets a less stable
+// fingerprint.
+func normalizePEM(secret []byte) []byte {
+	s := string(secret)
+	for range 3 {
+		if !strings.Contains(s, `\`) {
+			break
+		}
+		s = unescape(s)
+	}
+	var out []byte
+	for line := range strings.SplitSeq(strings.ReplaceAll(s, "\r", "\n"), "\n") {
+		if strings.Contains(line, ":") {
+			continue
+		}
+		for _, c := range []byte(line) {
+			switch {
+			case c <= ' ':
+			case 'A' <= c && c <= 'Z' || 'a' <= c && c <= 'z' || '0' <= c && c <= '9' || c == '+' || c == '/' || c == '=':
+				out = append(out, c)
+			default:
+				return stripSpace(secret)
+			}
+		}
+	}
+	return out
+}
+
+func stripSpace(b []byte) []byte {
+	return slices.DeleteFunc(slices.Clone(b), func(c byte) bool { return c <= ' ' })
+}
+
+// unescape undoes one layer of backslash escapes.
+func unescape(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 == len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		i++
+		switch s[i] {
+		case 'n', 'r', 't':
+			b.WriteByte(map[byte]byte{'n': '\n', 'r': '\r', 't': '\t'}[s[i]])
+		case '\\', '/':
+			b.WriteByte(s[i])
+		case 'u':
+			if n, err := strconv.ParseUint(s[min(i+1, len(s)):min(i+5, len(s))], 16, 16); err == nil && i+5 <= len(s) {
+				b.WriteRune(rune(n))
+				i += 4
+				continue
+			}
+			b.WriteString(`\u`)
+		default:
+			b.WriteByte('\\')
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }
 
 // jwtHeaderHasAlg: the first part of a JWT is a JSON object with "alg".
@@ -198,7 +329,7 @@ func BuiltinRules() []Rule {
 	rules := make([]Rule, len(builtinRules))
 	for i, r := range builtinRules {
 		r.Keywords = slices.Clone(r.Keywords)
-		r.Allowlist = slices.Clone(placeholders)
+		r.Allowlist = append(slices.Clone(placeholders), r.Allowlist...)
 		rules[i] = r
 	}
 	return rules
