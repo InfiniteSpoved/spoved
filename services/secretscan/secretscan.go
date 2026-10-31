@@ -5,19 +5,23 @@
 // (models/secretscan). A scan reads the objects reachable from all refs that the stored scan state doesn't cover, so the
 // first scan reads the whole history and every later one only what is new. Scans run from a unique queue of
 // repository IDs, started by pushes, pull requests, migrations, forks, transfers and wiki changes, and by a cron task
-// for repositories that were never scanned.
+// for repositories that were never scanned or whose scan has to go on or try again.
+//
+// One queue item is one slice of work (see Scan). Progress is stored per unit of tips (the default branch first, then
+// the other branches, tags and refs/pull/* last), so a repository too big for a slice, or one whose scan failed,
+// goes on from the last unit; a limit that one unit alone exceeds is met by storing a prefix of its commits.
 package secretscan
 
 import (
 	"context"
 	"errors"
 	"sync"
-	"time"
 
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/git"
 	"forgejo.org/modules/graceful"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/queue"
@@ -26,11 +30,8 @@ import (
 	notify_service "forgejo.org/services/notify"
 )
 
-const (
-	// failedRetry is how long the cron task leaves a repository alone after a failed scan
-	failedRetry = 24 * time.Hour
-	cronBatch   = 500
-)
+// cronBatch is the most repositories one run of the cron task queues
+const cronBatch = 500
 
 var (
 	scanQueue *queue.WorkerPoolQueue[int64]
@@ -41,41 +42,7 @@ var (
 		running int
 		freed   chan struct{} // closed and replaced when a slot is given back
 	}
-
-	// repoScans holds the repositories being scanned in this process: the unique queue forgets an ID once it is
-	// popped, so a push during a scan queues the repository again, and the second scan must wait for the first.
-	repoScans = struct {
-		sync.Mutex
-		running map[int64]*repoScan
-	}{running: map[int64]*repoScan{}}
 )
-
-type repoScan struct {
-	mu   sync.Mutex
-	refs int
-}
-
-// lockRepoScan waits until no other scan of the repository runs in this process. Take it before a slot. The caller
-// holds no database connection or transaction while it waits.
-func lockRepoScan(repoID int64) (unlock func()) {
-	repoScans.Lock()
-	rs := repoScans.running[repoID]
-	if rs == nil {
-		rs = &repoScan{}
-		repoScans.running[repoID] = rs
-	}
-	rs.refs++
-	repoScans.Unlock()
-	rs.mu.Lock()
-	return func() {
-		rs.mu.Unlock()
-		repoScans.Lock()
-		if rs.refs--; rs.refs == 0 {
-			delete(repoScans.running, repoID)
-		}
-		repoScans.Unlock()
-	}
-}
 
 // Init starts the queue and listens for changes. Both are always set up, whatever the switches say: they are read
 // when something happens and again when a scan runs, so turning secret scanning on or off needs no restart.
@@ -127,6 +94,13 @@ func (*notifier) ForkRepository(ctx context.Context, _ *user_model.User, parent,
 		}
 	}
 	Enqueue(fork.ID)
+}
+
+// CreateRef: a tag of a file (a lightweight tag on a blob) is a ref no push event of commits names.
+func (*notifier) CreateRef(ctx context.Context, _ *user_model.User, repo *repo_model.Repository, refFullName git.RefName, _ string) {
+	if refFullName.IsTag() {
+		EnqueueIfEnabled(ctx, repo)
+	}
 }
 
 // NewPullRequest and PullRequestSynchronized: the head of a pull request from a fork, and of an AGit push, is a ref
@@ -188,14 +162,15 @@ func handler(items ...int64) (unhandled []int64) {
 	return unhandled
 }
 
-// EnqueueUnscanned queues the repositories that have no scan state or whose last scan failed more than a day ago, in
-// batches of 500 per call (the next call takes the next ones once these are scanned). An incomplete scan is not
-// retried: the budget that ended it would end it again. Repositories secret scanning is off for are left out.
+// EnqueueUnscanned queues the repositories that have no scan state (empty ones too: their wiki may hold a secret) or a
+// state of either kind (a wiki's too) whose retry time has come: a failed scan after its backoff, or a scan that a
+// limit stopped (which goes on from the tips it stored). Repositories secret scanning is off for are left out. It
+// queues 500 per call; the next call takes the next ones once these are scanned.
 func EnqueueUnscanned(ctx context.Context) error {
 	if !SiteEnabled(ctx) {
 		return nil
 	}
-	ids, err := secretscan_model.UnscannedRepoIDs(ctx, timeutil.TimeStampNow().Add(-int64(failedRetry/time.Second)), nil, cronBatch)
+	ids, err := secretscan_model.UnscannedRepoIDs(ctx, timeutil.TimeStampNow(), cronBatch)
 	if err != nil {
 		return err
 	}

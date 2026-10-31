@@ -4,12 +4,17 @@
 package secretscan
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +23,7 @@ import (
 	secretscan_model "forgejo.org/models/secretscan"
 	system_model "forgejo.org/models/system"
 	"forgejo.org/models/unittest"
+	"forgejo.org/modules/git"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/queue"
@@ -26,7 +32,9 @@ import (
 	"forgejo.org/modules/setting/config"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
+	repo_service "forgejo.org/services/repository"
 
+	"code.forgejo.org/xorm/xorm/contexts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -40,8 +48,8 @@ func token(seed string) string {
 // enable turns secret scanning on with generous budgets and returns user2/repo1, a repository with a history.
 func enable(t *testing.T) *repo_model.Repository {
 	t.Helper()
-	require.NoError(t, unittest.PrepareTestDatabase())
-	bumpRevision(t) // a site switch an earlier test stored is cached by revision
+	unittest.PrepareTestEnv(t) // the database and the git repositories: a test never sees what another one left
+	bumpRevision(t)            // a site switch an earlier test stored is cached by revision
 	t.Cleanup(test.MockVariableValue(&setting.SecretScanning.Enabled, true))
 	t.Cleanup(test.MockVariableValue(&setting.SecretScanning.GenericRules, false))
 	t.Cleanup(test.MockVariableValue(&setting.SecretScanning.MaxConcurrentScans, 1))
@@ -115,6 +123,14 @@ func (w *work) push(ref string) {
 }
 
 func (w *work) pushDefault() { w.push("refs/heads/" + w.repo.DefaultBranch) }
+
+// currentTips are the sorted IDs the refs of the repository point to.
+func currentTips(t *testing.T, repo *repo_model.Repository) []string {
+	t.Helper()
+	tips, err := readTips(t.Context(), repo.RepoPath(), repo.DefaultBranch)
+	require.NoError(t, err)
+	return tipIDs(tips)
+}
 
 func scanOf(t *testing.T, repoID int64, kind string) *secretscan_model.Scan {
 	t.Helper()
@@ -325,6 +341,28 @@ func TestScanAuthorTextIsNoRecord(t *testing.T) {
 	assert.Equal(t, "100644 100644 "+zero+" "+strings.Repeat("a", 40)+" A", locs[0].AuthorName, "git itself drops the leading colon of a name")
 }
 
+// later moves the clock forward until the end of the test: the backoff of a failed scan is counted from it.
+func later(t *testing.T, d time.Duration) {
+	t.Helper()
+	timeutil.MockSet(timeutil.TimeStampNow().AsTime().Add(d))
+	t.Cleanup(timeutil.MockUnset)
+}
+
+// openAlerts counts the open alerts of the repository.
+func openAlerts(t *testing.T, repoID int64) (total, viaPull int64) {
+	t.Helper()
+	total, viaPull, err := secretscan_model.CountOpenAlerts(t.Context(), repoID)
+	require.NoError(t, err)
+	return total, viaPull
+}
+
+func dueRepos(t *testing.T, now timeutil.TimeStamp) []int64 {
+	t.Helper()
+	ids, err := secretscan_model.UnscannedRepoIDs(t.Context(), now, 1000)
+	require.NoError(t, err)
+	return ids
+}
+
 func TestScanBudgets(t *testing.T) {
 	repo := enable(t)
 	require.NoError(t, Scan(t.Context(), repo.ID)) // the history the fixture has
@@ -337,62 +375,99 @@ func TestScanBudgets(t *testing.T) {
 		w.pushDefault()
 		require.NoError(t, Scan(t.Context(), repo.ID))
 		s := scanOf(t, repo.ID, secretscan_model.KindRepo)
-		assert.Equal(t, secretscan_model.StatusOK, s.Status)
+		assert.Equal(t, secretscan_model.StatusOK, s.Status, "the status stays ok")
 		assert.EqualValues(t, 1, s.Blobs)
-		assert.EqualValues(t, 1, s.SkippedLarge)
+		assert.EqualValues(t, 1, s.SkippedLarge, "and the file is counted")
 		assert.EqualValues(t, len(token("small"))+1, s.Bytes, "the big file's bytes were not read")
 		assert.NotNil(t, alertFor(t, repo.ID, token("small")))
 		assert.Nil(t, alertFor(t, repo.ID, token("big")))
 	})
 
-	t.Run("MAX_SCAN_BLOBS ends the scan as incomplete, and the cron leaves it", func(t *testing.T) {
-		defer test.MockVariableValue(&setting.SecretScanning.MaxScanBlobs, 1)()
-		w.commit(map[string]string{"b1.txt": token("b1") + "\n", "b2.txt": token("b2") + "\n"})
-		w.pushDefault()
-		before := len(alertsOf(t, repo.ID))
-		require.NoError(t, Scan(t.Context(), repo.ID))
-		s := scanOf(t, repo.ID, secretscan_model.KindRepo)
-		assert.Equal(t, secretscan_model.StatusIncomplete, s.Status)
-		assert.Equal(t, stopBlobs, s.Error)
-		assert.EqualValues(t, 1, s.Blobs)
-		assert.Len(t, alertsOf(t, repo.ID), before+1, "what was read is kept")
-		var tips []string
-		require.NoError(t, json.Unmarshal([]byte(s.ScannedTips), &tips))
-		assert.Contains(t, tips, w.git("rev-parse", "HEAD"), "the tips read at the start are stored")
+	// a limit that one commit alone is over: nothing of it is stored, the scan backs off, and a raised limit finishes it
+	for name, c := range map[string]struct {
+		limit *int64
+		value int64
+		code  string
+	}{
+		"MAX_SCAN_BLOBS": {&setting.SecretScanning.MaxScanBlobs, 1, stopBlobs},
+		"MAX_SCAN_BYTES": {&setting.SecretScanning.MaxScanBytes, int64(len(token("c1")) + 10), stopBytes},
+	} {
+		t.Run(name+" backs off, keeps no half result, and a raised limit lets the scan finish", func(t *testing.T) {
+			restore := test.MockVariableValue(c.limit, c.value)
+			defer restore()
+			now := time.Now().Truncate(time.Second)
+			timeutil.MockSet(now)
+			defer timeutil.MockUnset()
+			w.commit(map[string]string{"c1.txt": token("c1"+name) + "\n", "c2.txt": token("c2"+name) + "\n"})
+			w.pushDefault()
+			before := len(alertsOf(t, repo.ID))
+			require.NoError(t, Scan(t.Context(), repo.ID))
+			s := scanOf(t, repo.ID, secretscan_model.KindRepo)
+			assert.Equal(t, secretscan_model.StatusIncomplete, s.Status)
+			assert.Equal(t, c.code, s.Error)
+			assert.Equal(t, 1, s.FailCount)
+			assert.EqualValues(t, now.Unix()+600, s.RetryUnix, "ten minutes")
+			assert.Len(t, alertsOf(t, repo.ID), before, "the unit is dropped whole: nothing of it is stored")
+			var tips []string
+			require.NoError(t, json.Unmarshal([]byte(s.ScannedTips), &tips))
+			assert.NotContains(t, tips, w.git("rev-parse", "HEAD"), "the commit is not stored as scanned")
 
-		ids, err := secretscan_model.UnscannedRepoIDs(t.Context(), timeutil.TimeStampNow().Add(-86400), nil, 100)
-		require.NoError(t, err)
-		assert.NotContains(t, ids, repo.ID, "an incomplete scan is not retried")
-	})
+			assert.NotContains(t, dueRepos(t, timeutil.TimeStamp(now.Unix())), repo.ID, "the cron waits for the backoff")
+			assert.Contains(t, dueRepos(t, timeutil.TimeStamp(now.Unix()+601)), repo.ID, "and then retries an incomplete scan")
+			require.NoError(t, Scan(t.Context(), repo.ID))
+			assert.Equal(t, s.Version, scanOf(t, repo.ID, secretscan_model.KindRepo).Version, "a push during the backoff doesn't try again")
 
-	t.Run("MAX_SCAN_BYTES ends the scan as incomplete", func(t *testing.T) {
-		defer test.MockVariableValue(&setting.SecretScanning.MaxScanBytes, int64(len(token("c1"))+10))()
-		w.commit(map[string]string{"c1.txt": token("c1") + "\n", "c2.txt": token("c2") + "\n"})
-		w.pushDefault()
-		require.NoError(t, Scan(t.Context(), repo.ID))
-		s := scanOf(t, repo.ID, secretscan_model.KindRepo)
-		assert.Equal(t, secretscan_model.StatusIncomplete, s.Status)
-		assert.Equal(t, stopBytes, s.Error)
-		assert.EqualValues(t, 1, s.Blobs)
-		assert.LessOrEqual(t, s.Bytes, setting.SecretScanning.MaxScanBytes)
-	})
+			restore()
+			later(t, 11*time.Minute)
+			require.NoError(t, Scan(t.Context(), repo.ID))
+			s = scanOf(t, repo.ID, secretscan_model.KindRepo)
+			assert.Equal(t, secretscan_model.StatusOK, s.Status)
+			assert.Zero(t, s.FailCount)
+			assert.Zero(t, s.RetryUnix)
+			assert.Len(t, alertsOf(t, repo.ID), before+2)
+		})
+	}
 
-	t.Run("MAX_ALERTS_PER_REPO and MAX_LOCATIONS_PER_ALERT", func(t *testing.T) {
-		alerts := len(alertsOf(t, repo.ID))
-		defer test.MockVariableValue(&setting.SecretScanning.MaxAlertsPerRepo, int64(alerts+1))()
+	t.Run("MAX_LOCATIONS_PER_ALERT: places over the cap are counted, not stored", func(t *testing.T) {
 		defer test.MockVariableValue(&setting.SecretScanning.MaxLocationsPerAlert, 2)()
 		same := token("same")
-		w.commit(map[string]string{"s1.txt": same + "\n", "s2.txt": same + "\n", "s3.txt": same + "\n", "s4.txt": same + "\n", "n1.txt": token("n1") + "\n", "n2.txt": token("n2") + "\n"})
+		w.commit(map[string]string{"s1.txt": same + "\n", "s2.txt": same + "\n", "s3.txt": same + "\n", "s4.txt": same + "\n"})
+		w.pushDefault()
+		require.NoError(t, Scan(t.Context(), repo.ID))
+		assert.Equal(t, secretscan_model.StatusOK, scanOf(t, repo.ID, secretscan_model.KindRepo).Status)
+		a := alertFor(t, repo.ID, same)
+		require.NotNil(t, a)
+		assert.Len(t, locationsOf(t, a.ID), 2)
+		assert.Equal(t, 4, a.LocationCount, "every place seen is counted")
+
+		w.commit(map[string]string{"s5.txt": same + " again\n"}) // another blob: git lists only new ones
+		w.pushDefault()
+		require.NoError(t, Scan(t.Context(), repo.ID))
+		a = alertFor(t, repo.ID, same)
+		assert.Len(t, locationsOf(t, a.ID), 2, "a later place has no row either")
+		assert.Equal(t, 5, a.LocationCount)
+	})
+
+	t.Run("MAX_ALERTS_PER_REPO counts open alerts only", func(t *testing.T) {
+		open, _ := openAlerts(t, repo.ID)
+		defer test.MockVariableValue(&setting.SecretScanning.MaxAlertsPerRepo, open+1)()
+		all := len(alertsOf(t, repo.ID))
+		w.commit(map[string]string{"n1.txt": token("n1") + "\n", "n2.txt": token("n2") + "\n"})
 		w.pushDefault()
 		require.NoError(t, Scan(t.Context(), repo.ID))
 		s := scanOf(t, repo.ID, secretscan_model.KindRepo)
 		assert.Equal(t, secretscan_model.StatusIncomplete, s.Status)
 		assert.Equal(t, stopAlerts, s.Error)
-		assert.Len(t, alertsOf(t, repo.ID), alerts+1)
-		if a := alertFor(t, repo.ID, same); a != nil {
-			assert.Len(t, locationsOf(t, a.ID), 2)
-			assert.Equal(t, 4, a.LocationCount, "the places over the cap are counted")
-		}
+		assert.Zero(t, s.RetryUnix, "a full alert list is not retried")
+		assert.Len(t, alertsOf(t, repo.ID), all+1, "one of the two found a place")
+
+		// closing an alert makes room: closed alerts don't count
+		_, err := db.Exec(t.Context(), "UPDATE secret_scanning_alert SET state = ? WHERE id = ?", secretscan_model.StateRevoked, alertsOf(t, repo.ID)[0].ID)
+		require.NoError(t, err)
+		w.commit(map[string]string{"n3.txt": token("n3") + "\n"})
+		w.pushDefault()
+		require.NoError(t, Scan(t.Context(), repo.ID))
+		assert.NotNil(t, alertFor(t, repo.ID, token("n3")))
 	})
 }
 
@@ -507,8 +582,7 @@ func TestScanPushDuringScan(t *testing.T) {
 	first, second := token("first"), token("second")
 	w.commit(map[string]string{"1.txt": first + "\n"})
 	w.pushDefault()
-	startTips, err := currentTips(t.Context(), repo.RepoPath())
-	require.NoError(t, err)
+	startTips := currentTips(t, repo)
 
 	hold, release := holdScan(t)
 	done := scanInBackground(t, repo.ID)
@@ -530,9 +604,7 @@ func TestScanPushDuringScan(t *testing.T) {
 	assert.NotNil(t, alertFor(t, repo.ID, second))
 	assert.EqualValues(t, 1, scanOf(t, repo.ID, secretscan_model.KindRepo).Blobs)
 	require.NoError(t, json.Unmarshal([]byte(scanOf(t, repo.ID, secretscan_model.KindRepo).ScannedTips), &tips))
-	endTips, err := currentTips(t.Context(), repo.RepoPath())
-	require.NoError(t, err)
-	assert.Equal(t, endTips, tips)
+	assert.Equal(t, currentTips(t, repo), tips)
 }
 
 func TestScanSwitchOffDuringScan(t *testing.T) {
@@ -697,6 +769,14 @@ func TestSwitches(t *testing.T) {
 		optOut(org, false)
 		setOrg(true, false)
 	})
+	t.Run("settings of a personal owner never count", func(t *testing.T) {
+		_, err := db.Exec(t.Context(), "INSERT INTO user_setting (user_id, setting_key, setting_value) VALUES (?, ?, 'false')", repo.OwnerID, secretscan_model.OrgKey)
+		require.NoError(t, err)
+		assert.True(t, Enabled(t.Context(), reload(repo)))
+		var off []int64
+		require.NoError(t, db.GetEngine(t.Context()).Table("repository").Select("id").Where("id = ?", repo.ID).And(secretscan_model.OffCond()).Find(&off))
+		assert.Empty(t, off, "the SQL form agrees")
+	})
 	t.Run("site off", func(t *testing.T) {
 		defer test.MockVariableValue(&setting.SecretScanning.Enabled, false)()
 		assert.False(t, Enabled(t.Context(), reload(repo)))
@@ -806,11 +886,14 @@ func TestNotifierEnqueues(t *testing.T) {
 		"transfer":  func() { n.TransferRepository(t.Context(), nil, repo, "old") },
 		"wiki new":  func() { n.NewWikiPage(t.Context(), nil, repo, "p", "") },
 		"wiki edit": func() { n.EditWikiPage(t.Context(), nil, repo, "p", "") },
+		"tag":       func() { n.CreateRef(t.Context(), nil, repo, git.RefName("refs/tags/v1"), "abc") }, // a tag of a file
 	}
 	for name, fire := range events {
 		fire()
 		assert.True(t, queued(), name)
 	}
+	n.CreateRef(t.Context(), nil, repo, git.RefName("refs/heads/topic"), "abc")
+	assert.False(t, queued(), "a branch comes with a push of commits")
 	// the queue holds a repository once
 	Enqueue(repo.ID)
 	require.ErrorIs(t, q.Push(repo.ID), queue.ErrAlreadyInQueue)
@@ -838,54 +921,47 @@ func TestEnqueueUnscanned(t *testing.T) {
 	}
 	ready := func() []int64 {
 		var all []int64
-		require.NoError(t, db.GetEngine(t.Context()).Table("repository").Select("id").Where("is_empty = ? AND status = ? AND trashed_unix = 0", false, repo_model.RepositoryReady).Find(&all))
+		require.NoError(t, db.GetEngine(t.Context()).Table("repository").Select("id").Where("status = ? AND trashed_unix = 0", repo_model.RepositoryReady).Find(&all))
 		return all
 	}
 	require.NoError(t, EnqueueUnscanned(t.Context()))
 	got := ids()
 	assert.NotEmpty(t, got)
-	for _, id := range ready() {
+	for _, id := range ready() { // empty repositories too: their wiki may hold a secret
 		assert.True(t, got[id], id)
 	}
+	var empty []int64
+	require.NoError(t, db.GetEngine(t.Context()).Table("repository").Select("id").Where("is_empty = ? AND status = ? AND trashed_unix = 0", true, repo_model.RepositoryReady).Find(&empty))
+	require.NotEmpty(t, empty, "the fixtures have an empty repository")
+	assert.True(t, got[empty[0]], "an empty repository is queued")
 
-	// states: ok and incomplete are left alone, a failure waits a day
-	save := func(id int64, status string, age time.Duration) {
-		require.NoError(t, secretscan_model.Save(t.Context(), nil, &secretscan_model.Scan{RepoID: id, Kind: secretscan_model.KindRepo, Status: status, ScannedTips: "[]"}))
-		_, err := db.Exec(t.Context(), "UPDATE secret_scan SET updated_unix = ? WHERE repo_id = ? AND kind = 'repo'", time.Now().Add(-age).Unix(), id)
-		require.NoError(t, err)
+	now := timeutil.TimeStampNow()
+	save := func(id int64, kind, status string, retry timeutil.TimeStamp) {
+		require.NoError(t, secretscan_model.Save(t.Context(), nil, &secretscan_model.Scan{RepoID: id, Kind: kind, Status: status, ScannedTips: "[]", RetryUnix: retry, FailCount: 1}))
 	}
-	save(1, secretscan_model.StatusOK, 0)
-	save(2, secretscan_model.StatusIncomplete, 48*time.Hour)
-	save(3, secretscan_model.StatusFailed, time.Hour)
-	save(4, secretscan_model.StatusFailed, 48*time.Hour)
+	repoKind, wikiKind := secretscan_model.KindRepo, secretscan_model.KindWiki
+	save(1, repoKind, secretscan_model.StatusOK, 0)
+	save(2, repoKind, secretscan_model.StatusIncomplete, now.Add(3600)) // under way or backing off
+	save(3, repoKind, secretscan_model.StatusFailed, now.Add(3600))
+	save(4, repoKind, secretscan_model.StatusFailed, now.Add(-1))     // the backoff is over
+	save(6, repoKind, secretscan_model.StatusIncomplete, now.Add(-1)) // a limit stopped it: it goes on
+	save(7, repoKind, secretscan_model.StatusOK, 0)                   // the repository is done...
+	save(7, wikiKind, secretscan_model.StatusFailed, now.Add(-1))     // ...its wiki failed, and is due
 	_, err := db.Exec(t.Context(), "UPDATE repository SET secret_scanning_disabled = ? WHERE id = ?", true, 5)
 	require.NoError(t, err)
 	require.NoError(t, EnqueueUnscanned(t.Context()))
 	got = ids()
 	assert.False(t, got[1], "scanned")
-	assert.False(t, got[2], "incomplete: not retried")
-	assert.False(t, got[3], "failed an hour ago")
-	assert.True(t, got[4], "failed two days ago")
+	assert.False(t, got[2], "incomplete, backing off")
+	assert.False(t, got[3], "failed, backing off")
+	assert.True(t, got[4], "failed, backoff over")
 	assert.False(t, got[5], "turned off by its admin")
+	assert.True(t, got[6], "a stopped scan goes on")
+	assert.True(t, got[7], "a failed wiki scan is retried")
 
 	defer test.MockVariableValue(&setting.SecretScanning.Enabled, false)()
 	require.NoError(t, EnqueueUnscanned(t.Context()))
 	assert.Empty(t, ids(), "the site switch is off")
-}
-
-func TestSettingsMerge(t *testing.T) {
-	enable(t)
-	ctx := t.Context()
-	assert.EqualValues(t, 1, setting.SecretScanningSettings(ctx).MaxConcurrentScans)
-	generic := true
-	cfg := setting.SecretScanningConfig{GenericRules: &generic, Limits: map[string]int64{"max_alerts_per_repo": 5, "scan_timeout": 90, "max_blob_size": 0, "nope": 1}}
-	o := cfg.Merge()
-	assert.True(t, o.GenericRules)
-	assert.EqualValues(t, 5, o.MaxAlertsPerRepo)
-	assert.Equal(t, 90*time.Second, o.ScanTimeout)
-	assert.EqualValues(t, 1<<20, o.MaxBlobSize, "out of bounds: the app.ini value")
-	assert.Equal(t, setting.SecretScanning.MaxScanBytes, o.MaxScanBytes)
-	assert.Equal(t, setting.SecretScanning.MaxScanBytes, setting.SecretScanningConfig{Invalid: true}.Merge().MaxScanBytes)
 }
 
 func TestScanCanary(t *testing.T) {
@@ -923,4 +999,435 @@ func TestScanCanary(t *testing.T) {
 	seen, stopped := lc.Check(5 * time.Second)
 	require.True(t, stopped)
 	assert.Equal(t, []bool{false, false, false}, seen, "the secret is in no log line")
+}
+
+type sqlCounter struct {
+	on atomic.Bool
+	n  atomic.Int64
+}
+
+func (c *sqlCounter) BeforeProcess(ctx *contexts.ContextHook) (context.Context, error) {
+	if c.on.Load() {
+		c.n.Add(1)
+	}
+	return db.TracingHook{}.BeforeProcess(ctx)
+}
+
+func (c *sqlCounter) AfterProcess(ctx *contexts.ContextHook) error {
+	return db.TracingHook{}.AfterProcess(ctx)
+}
+
+var (
+	queryCounter     = &sqlCounter{}
+	queryCounterOnce sync.Once
+)
+
+// countQueries runs fn and returns the number of statements it ran.
+func countQueries(t *testing.T, fn func()) int64 {
+	t.Helper()
+	queryCounterOnce.Do(func() {
+		x, err := db.GetMasterEngine(db.GetEngine(db.DefaultContext))
+		require.NoError(t, err)
+		x.AddHook(queryCounter)
+	})
+	queryCounter.n.Store(0)
+	queryCounter.on.Store(true)
+	defer queryCounter.on.Store(false)
+	fn()
+	return queryCounter.n.Load()
+}
+
+// commitsWithKeys adds n commits, each with one file holding its own key, and returns the keys.
+func commitsWithKeys(w *work, prefix string, n int) []string {
+	var toks []string
+	for i := range n {
+		tok := token(fmt.Sprintf("%s-%d", prefix, i))
+		toks = append(toks, tok)
+		w.commit(map[string]string{fmt.Sprintf("%s%d.txt", prefix, i): tok + "\n"})
+	}
+	return toks
+}
+
+func TestScanTipsInPriorityOrder(t *testing.T) {
+	repo := enable(t)
+	mockQueue(t)
+	w := newWork(t, repo)
+	require.NoError(t, Scan(t.Context(), repo.ID)) // the history the fixture has
+	def, branch, tag, pull := token("p-def"), token("p-branch"), token("p-tag"), token("p-pull")
+
+	w.git("checkout", "-q", "-b", "pr")
+	w.commit(map[string]string{"pull.txt": pull + "\n"})
+	w.push("refs/pull/4/head")
+	w.git("checkout", "-q", "-b", "side", repo.DefaultBranch)
+	w.commit(map[string]string{"branch.txt": branch + "\n"})
+	w.push("refs/heads/side")
+	w.git("checkout", "-q", "-b", "rel", repo.DefaultBranch)
+	w.commit(map[string]string{"tag.txt": tag + "\n"})
+	w.push("refs/tags/v1")
+	w.git("checkout", "-q", repo.DefaultBranch)
+	w.commit(map[string]string{"def.txt": def + "\n"})
+	w.pushDefault()
+
+	defer test.MockVariableValue(&setting.SecretScanning.MaxScanBlobs, 1)()
+	for _, step := range []struct {
+		key  string
+		done []string
+	}{{def, nil}, {branch, []string{def}}, {tag, []string{def, branch}}, {pull, []string{def, branch, tag}}} {
+		require.NoError(t, Scan(t.Context(), repo.ID))
+		assert.NotNil(t, alertFor(t, repo.ID, step.key), "this slice scans its group: %s", step.key)
+	}
+	s := scanOf(t, repo.ID, secretscan_model.KindRepo)
+	assert.Equal(t, secretscan_model.StatusOK, s.Status)
+	a := alertFor(t, repo.ID, pull)
+	assert.True(t, a.ViaPull)
+	assert.False(t, alertFor(t, repo.ID, def).ViaPull)
+}
+
+func TestScanContinuesWithinATip(t *testing.T) {
+	repo := enable(t)
+	q := mockQueue(t)
+	w := newWork(t, repo)
+	require.NoError(t, Scan(t.Context(), repo.ID)) // the history the fixture has
+	base := len(alertsOf(t, repo.ID))
+	toks := commitsWithKeys(w, "m", 6)
+	w.commit(map[string]string{"big.bin": strings.Repeat("x", 500)})
+	w.pushDefault()
+	defer test.MockVariableValue(&setting.SecretScanning.MaxBlobSize, 100)()
+	size := int64(len(toks[0]) + 1)
+	restore := test.MockVariableValue(&setting.SecretScanning.MaxScanBytes, 2*size)
+	defer restore()
+
+	// one tip alone is bigger than a slice: each slice stores a prefix of its commits and queues the next one
+	var last int64
+	slices := 0
+	for ; slices < 20; slices++ {
+		require.NoError(t, Scan(t.Context(), repo.ID))
+		s := scanOf(t, repo.ID, secretscan_model.KindRepo)
+		if s.Status == secretscan_model.StatusOK {
+			break
+		}
+		assert.Equal(t, secretscan_model.StatusIncomplete, s.Status)
+		assert.Equal(t, stopBytes, s.Error)
+		assert.Zero(t, s.FailCount, "progress is no failure")
+		assert.Greater(t, s.Blobs, last, "every slice makes progress")
+		assert.LessOrEqual(t, s.Blobs-last, int64(2), "and reads at most the limit")
+		last = s.Blobs
+		has, err := q.Has(repo.ID)
+		require.NoError(t, err)
+		assert.True(t, has, "the next slice is queued behind the others")
+		require.NoError(t, q.RemoveAllItems(t.Context()))
+		var tips []string
+		require.NoError(t, json.Unmarshal([]byte(s.ScannedTips), &tips))
+		assert.NotEqual(t, currentTips(t, repo), tips, "a commit inside the tip stands for what is done")
+	}
+	assert.GreaterOrEqual(t, slices, 3)
+	s := scanOf(t, repo.ID, secretscan_model.KindRepo)
+	assert.Equal(t, secretscan_model.StatusOK, s.Status)
+	assert.EqualValues(t, 6, s.Blobs, "every file once")
+	assert.EqualValues(t, 1, s.SkippedLarge, "the large file is counted once over the slices")
+	assert.Len(t, alertsOf(t, repo.ID), base+6)
+	assert.Equal(t, secretscan_model.CurrentKeyVersion, alertFor(t, repo.ID, toks[5]).KeyVersion)
+	var tips []string
+	require.NoError(t, json.Unmarshal([]byte(s.ScannedTips), &tips))
+	assert.Equal(t, currentTips(t, repo), tips, "the commits that stood in for the tip are gone")
+}
+
+func TestScanRaisedLimitFinishes(t *testing.T) {
+	repo := enable(t)
+	mockQueue(t)
+	w := newWork(t, repo)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	base := len(alertsOf(t, repo.ID))
+	toks := commitsWithKeys(w, "r", 5)
+	w.pushDefault()
+	restore := test.MockVariableValue(&setting.SecretScanning.MaxScanBlobs, 2)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	assert.Equal(t, secretscan_model.StatusIncomplete, scanOf(t, repo.ID, secretscan_model.KindRepo).Status)
+	assert.Less(t, len(alertsOf(t, repo.ID)), base+5)
+	restore()
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	assert.Equal(t, secretscan_model.StatusOK, scanOf(t, repo.ID, secretscan_model.KindRepo).Status)
+	for _, tok := range toks {
+		assert.NotNil(t, alertFor(t, repo.ID, tok))
+	}
+}
+
+func TestScanPullRefsHaveTheirOwnShare(t *testing.T) {
+	repo := enable(t)
+	w := newWork(t, repo)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	open, _ := openAlerts(t, repo.ID)
+	limit := 2*open + 8
+	defer test.MockVariableValue(&setting.SecretScanning.MaxAlertsPerRepo, limit)()
+
+	// a reader's pull ref holds more junk keys than the repository may have alerts
+	junk := func(round string) {
+		w.git("checkout", "-q", "-b", "junk"+round, repo.DefaultBranch)
+		files := map[string]string{}
+		for i := range limit + 3 {
+			files[fmt.Sprintf("j%d.txt", i)] = token(fmt.Sprintf("junk%s-%d", round, i)) + "\n"
+		}
+		w.commit(files)
+		w.push("refs/pull/" + round + "/head")
+	}
+	junk("1")
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	s := scanOf(t, repo.ID, secretscan_model.KindRepo)
+	assert.Equal(t, secretscan_model.StatusIncomplete, s.Status)
+	assert.Equal(t, stopAlerts, s.Error)
+	_, pulls := openAlerts(t, repo.ID)
+	assert.Equal(t, limit/2, pulls, "half of the cap at most")
+
+	// the real key on the default branch still gets its alert
+	w.git("checkout", "-q", repo.DefaultBranch)
+	real := token("real-key")
+	w.commit(map[string]string{"real.txt": real + "\n"})
+	w.pushDefault()
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	a := alertFor(t, repo.ID, real)
+	require.NotNil(t, a)
+	assert.False(t, a.ViaPull)
+	assert.Equal(t, secretscan_model.StatusOK, scanOf(t, repo.ID, secretscan_model.KindRepo).Status)
+
+	// closed alerts don't count against the share
+	_, err := db.Exec(t.Context(), "UPDATE secret_scanning_alert SET state = ? WHERE via_pull = ? AND repo_id = ?", secretscan_model.StateRevoked, true, repo.ID)
+	require.NoError(t, err)
+	junk("2")
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	_, pulls = openAlerts(t, repo.ID)
+	assert.Equal(t, limit/2, pulls)
+
+	// a secret a pull ref held first and a branch holds too is no longer a pull-ref one
+	w.git("checkout", "-q", repo.DefaultBranch)
+	w.commit(map[string]string{"again.txt": token("junk2-0") + "\n"})
+	w.pushDefault()
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	assert.False(t, alertFor(t, repo.ID, token("junk2-0")).ViaPull)
+}
+
+func TestScanManyPlacesIsBounded(t *testing.T) {
+	repo := enable(t)
+	w := newWork(t, repo)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	tok := token("many")
+	files := map[string]string{}
+	for b := range 50 { // 50 blobs, each at 400 paths
+		for p := range 400 {
+			files[fmt.Sprintf("d%d/f%03d.txt", b, p)] = fmt.Sprintf("# version %d\nKEY=%s\n", b, tok)
+		}
+	}
+	w.commit(files)
+	w.pushDefault()
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	start := time.Now()
+	queries := countQueries(t, func() { require.NoError(t, Scan(t.Context(), repo.ID)) })
+	elapsed := time.Since(start)
+	runtime.ReadMemStats(&after)
+
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(100<<20), "allocated")
+	assert.Less(t, elapsed, 2*time.Second)
+	assert.Less(t, queries, int64(40), "no query per place")
+	a := alertFor(t, repo.ID, tok)
+	require.NotNil(t, a)
+	assert.Len(t, locationsOf(t, a.ID), 100, "capped")
+	assert.Greater(t, a.LocationCount, 100, "the others are counted")
+	assert.Equal(t, secretscan_model.StatusOK, scanOf(t, repo.ID, secretscan_model.KindRepo).Status)
+}
+
+func TestScanHostilePathDoesNotStopTheScan(t *testing.T) {
+	repo := enable(t)
+	w := newWork(t, repo)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	hostile, real := token("hostile-name"), token("real-after")
+
+	// a file name of 1.5 MiB in one ref (git's tree objects allow it)
+	blobCmd := exec.Command("git", "hash-object", "-w", "--stdin")
+	blobCmd.Dir = w.dir
+	blobCmd.Stdin = strings.NewReader("k=" + hostile + "\n")
+	out, err := blobCmd.CombinedOutput()
+	require.NoError(t, err, string(out))
+	name := strings.Repeat("a", 3<<19) + ".txt"
+	treeCmd := exec.Command("git", "mktree")
+	treeCmd.Dir = w.dir
+	treeCmd.Stdin = strings.NewReader("100644 blob " + strings.TrimSpace(string(out)) + "\t" + name + "\n")
+	out, err = treeCmd.CombinedOutput()
+	require.NoError(t, err, string(out))
+	commit := w.git("commit-tree", strings.TrimSpace(string(out)), "-p", "HEAD", "-m", "long")
+	w.git("push", "-q", "--force", repo.RepoPath(), commit+":refs/heads/longname")
+	w.commit(map[string]string{"real.txt": real + "\n"})
+	w.pushDefault()
+
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	s := scanOf(t, repo.ID, secretscan_model.KindRepo)
+	assert.Equal(t, secretscan_model.StatusOK, s.Status)
+	assert.NotNil(t, alertFor(t, repo.ID, real), "the scan went on")
+	a := alertFor(t, repo.ID, hostile)
+	require.NotNil(t, a)
+	locs := locationsOf(t, a.ID)
+	require.Len(t, locs, 1)
+	assert.LessOrEqual(t, len(locs[0].Path), 4096)
+	assert.True(t, strings.HasPrefix(locs[0].Path, "aaaa"))
+}
+
+func TestScanBackoffAndPriority(t *testing.T) {
+	repo := enable(t)
+	w := newWork(t, repo)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	now := time.Now().Truncate(time.Second)
+	timeutil.MockSet(now)
+	defer timeutil.MockUnset()
+	good, junk := token("bo-good"), token("bo-junk")
+	boom := true
+	defer test.MockVariableValue(&scanContent, func(d *secretdetection.Detector, c []byte) ([]secretdetection.Finding, bool) {
+		if boom && strings.Contains(string(c), "BOOM") {
+			panic("boom")
+		}
+		return d.Scan(c)
+	})()
+
+	// a pull ref fails the scan: its group is the one that waits
+	w.git("checkout", "-q", "-b", "pr")
+	w.commit(map[string]string{"p.txt": "BOOM " + junk + "\n"})
+	w.push("refs/pull/3/head")
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	s := scanOf(t, repo.ID, secretscan_model.KindRepo)
+	assert.Equal(t, secretscan_model.StatusFailed, s.Status)
+	assert.Equal(t, errPanic, s.Error)
+	assert.Equal(t, 1, s.FailCount)
+	assert.Equal(t, groupPull, s.RetryGroup)
+	assert.EqualValues(t, now.Unix()+600, s.RetryUnix)
+
+	// during the backoff the groups before it are scanned, so a key pushed to the default branch is found at once
+	w.git("checkout", "-q", repo.DefaultBranch)
+	w.commit(map[string]string{"g.txt": good + "\n"})
+	w.pushDefault()
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	assert.NotNil(t, alertFor(t, repo.ID, good))
+	cur := scanOf(t, repo.ID, secretscan_model.KindRepo)
+	assert.Equal(t, secretscan_model.StatusFailed, cur.Status, "the failure still waits")
+	assert.Equal(t, s.RetryUnix, cur.RetryUnix)
+	assert.Equal(t, 1, cur.FailCount)
+	assert.Nil(t, alertFor(t, repo.ID, junk))
+	assert.NotContains(t, dueRepos(t, timeutil.TimeStamp(now.Unix())), repo.ID)
+
+	// each failure in a row doubles the delay, up to a day
+	later(t, 11*time.Minute)
+	assert.Contains(t, dueRepos(t, timeutil.TimeStampNow()), repo.ID)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	cur = scanOf(t, repo.ID, secretscan_model.KindRepo)
+	assert.Equal(t, 2, cur.FailCount)
+	assert.Equal(t, timeutil.TimeStampNow().Add(1200), cur.RetryUnix)
+	_, err := db.Exec(t.Context(), "UPDATE secret_scan SET fail_count = 20 WHERE repo_id = ?", repo.ID)
+	require.NoError(t, err)
+	later(t, 25*time.Hour)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	cur = scanOf(t, repo.ID, secretscan_model.KindRepo)
+	assert.Equal(t, timeutil.TimeStampNow().Add(86400), cur.RetryUnix, "at most a day")
+
+	// the cause goes away: the scan finishes after the backoff
+	boom = false
+	later(t, 25*time.Hour)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	cur = scanOf(t, repo.ID, secretscan_model.KindRepo)
+	assert.Equal(t, secretscan_model.StatusOK, cur.Status)
+	assert.Zero(t, cur.FailCount)
+	assert.Zero(t, cur.RetryUnix)
+	a := alertFor(t, repo.ID, junk)
+	require.NotNil(t, a)
+	assert.True(t, a.ViaPull)
+}
+
+func TestScanTimeoutStoresNoFakePlaces(t *testing.T) {
+	repo := enable(t)
+	w := newWork(t, repo)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	tok := token("slow")
+	commit := w.commit(map[string]string{"slow.txt": tok + "\n"})
+	w.pushDefault()
+	slow := true
+	defer test.MockVariableValue(&scanContent, func(d *secretdetection.Detector, c []byte) ([]secretdetection.Finding, bool) {
+		if slow {
+			time.Sleep(1500 * time.Millisecond)
+		}
+		return d.Scan(c)
+	})()
+	restore := test.MockVariableValue(&setting.SecretScanning.ScanTimeout, 500*time.Millisecond)
+
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	s := scanOf(t, repo.ID, secretscan_model.KindRepo)
+	assert.Equal(t, secretscan_model.StatusIncomplete, s.Status)
+	assert.Equal(t, stopTimeout, s.Error)
+	assert.Equal(t, 1, s.FailCount)
+	assert.Nil(t, alertFor(t, repo.ID, tok), "the blob was found, but its places were not: it is left for the next scan")
+	n, err := db.GetEngine(t.Context()).Where("repo_id = ?", repo.ID).Count(new(secretscan_model.Location))
+	require.NoError(t, err)
+	assert.Zero(t, n)
+
+	slow = false
+	restore()
+	later(t, 11*time.Minute)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	a := alertFor(t, repo.ID, tok)
+	require.NotNil(t, a)
+	locs := locationsOf(t, a.ID)
+	require.Len(t, locs, 1)
+	assert.Equal(t, commit, locs[0].CommitID)
+	assert.Equal(t, "slow.txt", locs[0].Path)
+}
+
+func TestScanStoreFailureIsStored(t *testing.T) {
+	repo := enable(t)
+	w := newWork(t, repo)
+	// an alert that already has the number the next one gets: the write fails on the unique key
+	_, err := db.GetEngine(t.Context()).Insert(&secretscan_model.Alert{RepoID: repo.ID, Index: 1, RuleID: "x", Fingerprint: "y", State: secretscan_model.StateOpen})
+	require.NoError(t, err)
+	w.commit(map[string]string{"k.txt": token("store-fail") + "\n"})
+	w.pushDefault()
+	err = Scan(t.Context(), repo.ID)
+	require.ErrorContains(t, err, errStore)
+	s := scanOf(t, repo.ID, secretscan_model.KindRepo)
+	require.NotNil(t, s)
+	assert.Equal(t, secretscan_model.StatusFailed, s.Status)
+	assert.Equal(t, errStore, s.Error)
+	assert.Equal(t, 1, s.FailCount)
+	assert.Positive(t, s.RetryUnix)
+}
+
+func TestScanRepoDeletedDuringScan(t *testing.T) {
+	repo := enable(t)
+	w := newWork(t, repo)
+	w.commit(map[string]string{"1.txt": token("deleted") + "\n"})
+	w.pushDefault()
+
+	hold, release := holdScan(t)
+	done := scanInBackground(t, repo.ID)
+	hold()
+	require.NoError(t, repo_service.DeleteRepositoryDirectly(t.Context(), repo.ID, repo_service.DeleteRepositoryOpts{}))
+	release()
+	require.NoError(t, <-done)
+
+	for _, table := range []string{"secret_scan", "secret_scanning_alert", "secret_scanning_location"} {
+		n, err := db.GetEngine(t.Context()).Table(table).Where("repo_id = ?", repo.ID).Count()
+		require.NoError(t, err)
+		assert.Zero(t, n, table)
+	}
+}
+
+func TestScansOfOneRepositoryDoNotOverlap(t *testing.T) {
+	repo := enable(t)
+	hold, release := holdScan(t)
+	first := scanInBackground(t, repo.ID)
+	hold()
+	second := scanInBackground(t, repo.ID)
+	select {
+	case <-second:
+		require.Fail(t, "the second scan ran while the first one held the repository")
+	case <-time.After(300 * time.Millisecond):
+	}
+	release()
+	require.NoError(t, <-first)
+	require.NoError(t, <-second)
 }

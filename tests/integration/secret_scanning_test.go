@@ -24,6 +24,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/queue"
 	"forgejo.org/modules/secretdetection"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
@@ -55,25 +56,35 @@ func secretLocations(t *testing.T, alertID int64) []*secretscan_model.Location {
 	return locs
 }
 
-// secretAlertOf finds the alert of the token's secret, which waits for the scan the push queued.
-func secretAlertOf(t *testing.T, repoID int64, tok string) *secretscan_model.Alert {
+// secretAlertWith finds the alert of the token's secret with at least places stored places, or returns nil. It runs
+// inside Eventually: no require, no t.Context().
+func secretAlertWith(repoID int64, tok string, places int64) *secretscan_model.Alert {
+	var alerts []*secretscan_model.Alert
+	if err := db.GetEngine(db.DefaultContext).Where("repo_id = ? AND rule_id = ? AND fingerprint = ?", repoID, "github-token", secretFingerprint(tok)).Find(&alerts); err != nil {
+		return nil
+	}
+	for _, a := range alerts {
+		if n, err := db.GetEngine(db.DefaultContext).Where("alert_id = ?", a.ID).Count(new(secretscan_model.Location)); err == nil && n >= places {
+			return a
+		}
+	}
+	return nil
+}
+
+// secretAlertPlaces waits for the scan the push queued to store the alert of the token's secret with its places.
+func secretAlertPlaces(t *testing.T, repoID int64, tok string, places int64) *secretscan_model.Alert {
 	t.Helper()
 	var found *secretscan_model.Alert
 	require.Eventually(t, func() bool {
-		var alerts []*secretscan_model.Alert
-		if err := db.GetEngine(db.DefaultContext).Where("repo_id = ? AND rule_id = ?", repoID, "github-token").Find(&alerts); err != nil {
-			return false
-		}
-		for _, a := range alerts {
-			locs, err := secretscan_model.CountLocations(db.DefaultContext, a.ID)
-			if err == nil && locs > 0 && a.Fingerprint == secretFingerprint(tok) {
-				found = a
-				return true
-			}
-		}
-		return false
+		found = secretAlertWith(repoID, tok, places)
+		return found != nil
 	}, 20*time.Second, 50*time.Millisecond)
 	return found
+}
+
+func secretAlertOf(t *testing.T, repoID int64, tok string) *secretscan_model.Alert {
+	t.Helper()
+	return secretAlertPlaces(t, repoID, tok, 1)
 }
 
 func secretFingerprint(tok string) string {
@@ -131,10 +142,7 @@ func TestSecretScanning(t *testing.T) {
 
 		t.Run("the same key in another file is a place, not an alert; the second scan reads only what is new", func(t *testing.T) {
 			depPush(t, u, token, repo, "refs/heads/main", map[string]string{"scripts/run.sh": "export T=" + first + "\n"})
-			require.Eventually(t, func() bool {
-				a := secretAlertOf(t, repo.ID, first)
-				return len(secretLocations(t, a.ID)) == 2
-			}, 20*time.Second, 50*time.Millisecond)
+			secretAlertPlaces(t, repo.ID, first, 2)
 			assert.Len(t, secretAlerts(t, repo.ID), 1)
 			s, err := secretscan_model.GetScan(t.Context(), repo.ID, secretscan_model.KindRepo)
 			require.NoError(t, err)
@@ -213,7 +221,8 @@ func TestSecretScanning(t *testing.T) {
 			require.NoError(t, repo_model.UpdateRepositoryCols(t.Context(), repo, "secret_scanning_disabled"))
 			late := secretToken("late")
 			depPush(t, u, token, repo, "refs/heads/main", map[string]string{"late.txt": late + "\n"})
-			time.Sleep(500 * time.Millisecond) // queues are immediate; this is only for a late goroutine
+			// a scan the push queued has run when the queues are flushed
+			require.NoError(t, queue.GetManager().FlushAll(t.Context(), 10*time.Second))
 			assert.Len(t, secretAlerts(t, repo.ID), before)
 
 			repo.SecretScanningDisabled = false

@@ -6,6 +6,7 @@ package secretscan
 import (
 	"context"
 
+	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
 	system_model "forgejo.org/models/system"
@@ -90,6 +91,15 @@ func Enabled(ctx context.Context, repo *repo_model.Repository) bool {
 // meanwhile either waits for the write or is seen here. The organization's settings are read without a lock; a
 // change that commits during the write only leaves rows, which turning it off keeps anyway.
 func enabledStored(ctx context.Context, repoID int64) (enabled bool, ownerID int64, err error) {
+	// the repository row is locked until the transaction ends: DeleteRepositoryDirectly takes the same lock first, so
+	// a delete either waits for this write (and removes its rows) or has committed (no row, nothing is written)
+	res, err := db.Exec(ctx, "UPDATE repository SET id = id WHERE id = ?", repoID)
+	if err != nil {
+		return false, 0, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return false, 0, err
+	}
 	raw, has, err := system_model.GetSettingForUpdate(ctx, setting.Config().SecretScanning.DynKey())
 	if err != nil {
 		return false, 0, err

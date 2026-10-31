@@ -6,8 +6,8 @@ package secretscan
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
-	"errors"
 	"io"
 	"slices"
 	"strconv"
@@ -16,13 +16,13 @@ import (
 	"forgejo.org/modules/git"
 )
 
-// maxRecord is the longest line or record read from git: a path is at most 4096 bytes in any file system we serve,
-// so a longer one means the output isn't what we expect.
-const maxRecord = 1 << 20
+// maxRecord is the most bytes kept of one line or record read from git. A path is at most 4096 bytes in any file
+// system we serve and a tree entry of a pushed object can be much longer: the rest is dropped, the leading bytes
+// (the object ID first) are kept.
+const maxRecord = 16 << 10
 
-var errRecordTooLong = errors.New("record too long")
-
-// splitWriter calls fn for every sep-terminated record git writes. fn must not keep the slice.
+// splitWriter calls fn for every sep-terminated record git writes. A record over maxRecord is cut to its leading
+// bytes. fn must not keep the slice.
 type splitWriter struct {
 	sep byte
 	buf []byte
@@ -34,23 +34,25 @@ func (w *splitWriter) Write(p []byte) (int, error) {
 	if w.err != nil {
 		return 0, w.err
 	}
-	w.buf = append(w.buf, p...)
-	for {
-		i := bytes.IndexByte(w.buf, w.sep)
+	n := len(p)
+	for len(p) > 0 {
+		i := bytes.IndexByte(p, w.sep)
+		chunk := p
+		if i >= 0 {
+			chunk = p[:i]
+		}
+		w.buf = append(w.buf, chunk[:min(len(chunk), max(maxRecord-len(w.buf), 0))]...)
 		if i < 0 {
 			break
 		}
-		if err := w.fn(w.buf[:i]); err != nil {
+		if err := w.fn(w.buf); err != nil {
 			w.err = err
 			return 0, err
 		}
-		w.buf = w.buf[i+1:]
+		w.buf = w.buf[:0]
+		p = p[i+1:]
 	}
-	if len(w.buf) > maxRecord {
-		w.err = errRecordTooLong
-		return 0, w.err
-	}
-	return len(p), nil
+	return n, nil
 }
 
 // isObjectID tells whether b is a full SHA-1 or SHA-256 object ID in lower case hex.
@@ -73,21 +75,119 @@ func leadingID(line []byte) (id, name []byte, ok bool) {
 	return id, name, isObjectID(id)
 }
 
-// currentTips returns the sorted object IDs all refs of the repository point to (branches, tags, pull request refs,
-// anything else).
-func currentTips(ctx context.Context, dir string) ([]string, error) {
-	var tips []string
+// The groups of tips, in the order they are scanned: what the owner pushes comes before what a reader can write
+// (refs/pull/* of fork pull requests and AGit pushes), so the pull refs can't use up the budgets first.
+const (
+	groupDefault = iota // the default branch
+	groupBranch         // the other branches
+	groupOther          // tags and any other ref
+	groupPull           // refs/pull/*
+)
+
+// tip is an object ID that refs point to, with the group of the best ref that does.
+type tip struct {
+	id    string
+	group int
+}
+
+// readTips returns the objects all refs of the repository point to, sorted by group and then ID. defaultBranch is
+// the name of the branch the first group is made of.
+func readTips(ctx context.Context, dir, defaultBranch string) ([]tip, error) {
+	best := map[string]int{}
 	w := &splitWriter{sep: '\n', fn: func(line []byte) error {
-		if isObjectID(line) {
-			tips = append(tips, string(line))
+		id, name, ok := leadingID(line)
+		if !ok {
+			return nil
+		}
+		g := groupOther
+		switch ref := string(name); {
+		case ref == "refs/heads/"+defaultBranch:
+			g = groupDefault
+		case strings.HasPrefix(ref, "refs/heads/"):
+			g = groupBranch
+		case strings.HasPrefix(ref, "refs/pull/"):
+			g = groupPull
+		}
+		if old, seen := best[string(id)]; !seen || g < old {
+			best[string(id)] = g
 		}
 		return nil
 	}}
-	if err := git.NewCommand(ctx, "for-each-ref", "--format=%(objectname)").Run(&git.RunOpts{Dir: dir, Stdout: w, Stderr: io.Discard, UseContextTimeout: true}); err != nil {
+	if err := git.NewCommand(ctx, "for-each-ref", "--format=%(objectname) %(refname)").Run(&git.RunOpts{Dir: dir, Stdout: w, Stderr: io.Discard, UseContextTimeout: true}); err != nil {
 		return nil, err
 	}
-	slices.Sort(tips)
-	return slices.Compact(tips), nil
+	tips := make([]tip, 0, len(best))
+	for id, g := range best {
+		tips = append(tips, tip{id, g})
+	}
+	slices.SortFunc(tips, func(a, b tip) int { return cmp.Or(cmp.Compare(a.group, b.group), cmp.Compare(a.id, b.id)) })
+	return tips, nil
+}
+
+// tipIDs is the sorted list of IDs of the tips.
+func tipIDs(tips []tip) []string {
+	ids := make([]string, len(tips))
+	for i, t := range tips {
+		ids[i] = t.id
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// commitNode is a commit of a range with its parents.
+type commitNode struct {
+	id      string
+	parents []string
+}
+
+// listCommits returns the commits of the range, parents before children, at most limit of them (the first ones in
+// that order).
+func listCommits(ctx context.Context, dir string, input io.Reader, limit int) ([]commitNode, error) {
+	var commits []commitNode
+	w := &splitWriter{sep: '\n', fn: func(line []byte) error {
+		var node commitNode
+		for i, f := range strings.Fields(string(line)) {
+			if !isObjectID([]byte(f)) {
+				return nil
+			}
+			if i == 0 {
+				node.id = f
+			} else {
+				node.parents = append(node.parents, f)
+			}
+		}
+		if node.id != "" {
+			commits = append(commits, node)
+		}
+		if len(commits) >= limit {
+			return errStopped
+		}
+		return nil
+	}}
+	err := git.NewCommand(ctx, "rev-list", "--topo-order", "--reverse", "--parents", "--stdin").
+		Run(&git.RunOpts{Dir: dir, Stdin: input, Stdout: w, Stderr: io.Discard, UseContextTimeout: true})
+	if len(commits) >= limit {
+		return commits, nil // git was cut off by the limit
+	}
+	return commits, err
+}
+
+// heads are the commits that no other commit of the list has as a parent: the tips that stand for all of them.
+func heads(commits []commitNode) []string {
+	isParent := map[string]bool{}
+	for _, c := range commits {
+		for _, p := range c.parents {
+			isParent[p] = true
+		}
+	}
+	var out []string
+	for _, c := range commits {
+		if !isParent[c.id] {
+			out = append(out, c.id)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // existingTips keeps the IDs that are objects of the repository: a stored tip can be gone after the garbage

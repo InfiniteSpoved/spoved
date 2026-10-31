@@ -47,6 +47,12 @@ func Test_addSecretScanning(t *testing.T) {
 	var version []int64
 	require.NoError(t, x.SQL("SELECT version FROM secret_scan WHERE kind = 'wiki'").Find(&version))
 	assert.Equal(t, []int64{0}, version)
+	// the progress and backoff columns start at zero (nothing to retry), and the large-file count has its name
+	var progress []int64
+	require.NoError(t, x.SQL("SELECT fail_count + retry_unix + retry_group + skipped_large FROM secret_scan WHERE kind = 'wiki'").Find(&progress))
+	assert.Equal(t, []int64{0}, progress)
+	_, err = x.Exec("UPDATE secret_scan SET retry_unix = 5 WHERE kind = 'wiki'")
+	require.NoError(t, err, "the cron task finds due rows by retry_unix")
 
 	fp := strings.Repeat("f", 64)
 	insertAlert := "INSERT INTO secret_scanning_alert (repo_id, `index`, rule_id, fingerprint) VALUES (?, ?, ?, ?)"
@@ -61,6 +67,9 @@ func Test_addSecretScanning(t *testing.T) {
 	var state []string
 	require.NoError(t, x.SQL("SELECT state FROM secret_scanning_alert WHERE repo_id = 1").Find(&state))
 	assert.Equal(t, []string{"open"}, state)
+	var viaPull []bool
+	require.NoError(t, x.SQL("SELECT via_pull FROM secret_scanning_alert WHERE repo_id = 1").Find(&viaPull))
+	assert.Equal(t, []bool{false}, viaPull, "an alert is not a pull-ref one by default")
 
 	insertLocation := "INSERT INTO secret_scanning_location (alert_id, repo_id, kind, blob_id, path, path_hash, start_line) VALUES (1, 1, ?, 'b1', 'p', 'h', ?)"
 	_, err = x.Exec(insertLocation, "repo", 3)

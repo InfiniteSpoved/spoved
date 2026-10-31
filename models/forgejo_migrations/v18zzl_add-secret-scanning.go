@@ -15,17 +15,20 @@ func init() {
 }
 
 type v18zzlSecretScan struct {
-	ID          int64  `xorm:"pk autoincr"`
-	RepoID      int64  `xorm:"UNIQUE(repo_kind) NOT NULL"`
-	Kind        string `xorm:"VARCHAR(8) UNIQUE(repo_kind) NOT NULL"`
-	ScannedTips string `xorm:"LONGTEXT"`
-	Status      string `xorm:"VARCHAR(16) NOT NULL DEFAULT ''"`
-	Error       string `xorm:"VARCHAR(32) NOT NULL DEFAULT ''"`
-	Blobs       int64  `xorm:"NOT NULL DEFAULT 0"`
-	Bytes       int64  `xorm:"NOT NULL DEFAULT 0"`
-	Skipped     int64  `xorm:"'skipped_large' NOT NULL DEFAULT 0"`
-	Version     int64  `xorm:"NOT NULL DEFAULT 0"`
-	UpdatedUnix int64  `xorm:"INDEX updated"`
+	ID           int64  `xorm:"pk autoincr"`
+	RepoID       int64  `xorm:"UNIQUE(repo_kind) NOT NULL"`
+	Kind         string `xorm:"VARCHAR(8) UNIQUE(repo_kind) NOT NULL"`
+	ScannedTips  string `xorm:"LONGTEXT"`
+	Status       string `xorm:"VARCHAR(16) NOT NULL DEFAULT ''"`
+	Error        string `xorm:"VARCHAR(32) NOT NULL DEFAULT ''"`
+	Blobs        int64  `xorm:"NOT NULL DEFAULT 0"`
+	Bytes        int64  `xorm:"NOT NULL DEFAULT 0"`
+	SkippedLarge int64  `xorm:"NOT NULL DEFAULT 0"`
+	Version      int64  `xorm:"NOT NULL DEFAULT 0"`
+	FailCount    int    `xorm:"NOT NULL DEFAULT 0"`
+	RetryUnix    int64  `xorm:"INDEX NOT NULL DEFAULT 0"`
+	RetryGroup   int    `xorm:"NOT NULL DEFAULT 0"`
+	UpdatedUnix  int64  `xorm:"INDEX updated"`
 }
 
 func (v18zzlSecretScan) TableName() string {
@@ -46,6 +49,7 @@ type v18zzlSecretScanningAlert struct {
 	ClosedByID    int64  `xorm:"NOT NULL DEFAULT 0"`
 	ClosedUnix    int64  `xorm:"NOT NULL DEFAULT 0"`
 	LocationCount int    `xorm:"NOT NULL DEFAULT 0"`
+	ViaPull       bool   `xorm:"NOT NULL DEFAULT false"`
 	CreatedUnix   int64  `xorm:"created"`
 	UpdatedUnix   int64  `xorm:"updated"`
 }
@@ -55,18 +59,18 @@ func (v18zzlSecretScanningAlert) TableName() string {
 }
 
 type v18zzlSecretScanningLocation struct {
-	ID         int64  `xorm:"pk autoincr"`
-	AlertID    int64  `xorm:"UNIQUE(alert_location) NOT NULL"`
-	RepoID     int64  `xorm:"INDEX NOT NULL"`
-	Kind       string `xorm:"VARCHAR(8) UNIQUE(alert_location) NOT NULL"`
-	BlobID     string `xorm:"VARCHAR(64) UNIQUE(alert_location) NOT NULL"`
-	Path       string `xorm:"TEXT"`
-	PathHash   string `xorm:"VARCHAR(64) UNIQUE(alert_location) NOT NULL"`
-	StartLine  int    `xorm:"UNIQUE(alert_location) NOT NULL DEFAULT 0"`
-	EndLine    int    `xorm:"NOT NULL DEFAULT 0"`
-	CommitID   string `xorm:"VARCHAR(64) NOT NULL DEFAULT ''"`
-	AuthorName string `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"`
-	// AuthorEmail is the commit's text, for display only
+	ID        int64  `xorm:"pk autoincr"`
+	AlertID   int64  `xorm:"UNIQUE(alert_location) NOT NULL"`
+	RepoID    int64  `xorm:"INDEX NOT NULL"`
+	Kind      string `xorm:"VARCHAR(8) UNIQUE(alert_location) NOT NULL"`
+	BlobID    string `xorm:"VARCHAR(64) UNIQUE(alert_location) NOT NULL"`
+	Path      string `xorm:"TEXT"`
+	PathHash  string `xorm:"VARCHAR(64) UNIQUE(alert_location) NOT NULL"`
+	StartLine int    `xorm:"UNIQUE(alert_location) NOT NULL DEFAULT 0"`
+	EndLine   int    `xorm:"NOT NULL DEFAULT 0"`
+	CommitID  string `xorm:"VARCHAR(64) NOT NULL DEFAULT ''"`
+	// AuthorName and AuthorEmail are the commit's text, for display only
+	AuthorName  string `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"`
 	AuthorEmail string `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"`
 	CommitUnix  int64  `xorm:"NOT NULL DEFAULT 0"`
 }

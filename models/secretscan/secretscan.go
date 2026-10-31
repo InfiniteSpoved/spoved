@@ -38,16 +38,18 @@ const (
 
 // Alert states.
 const (
-	StateOpen         = "open"
-	StateRevoked      = "revoked"
-	StateFalsePos     = "false_positive"
-	StateUsedInTests  = "used_in_tests"
-	CurrentKeyVersion = 1 // the version of the fingerprint key (modules/keying)
+	StateOpen        = "open"
+	StateRevoked     = "revoked"
+	StateFalsePos    = "false_positive"
+	StateUsedInTests = "used_in_tests"
 )
+
+// CurrentKeyVersion is the version of the fingerprint key (modules/keying).
+const CurrentKeyVersion = 1
 
 // Caps of stored text (bytes).
 const (
-	MaxPathLen   = 4096
+	maxPathLen   = 4096
 	maxAuthorLen = 255
 )
 
@@ -56,16 +58,23 @@ type Scan struct {
 	ID     int64  `xorm:"pk autoincr"`
 	RepoID int64  `xorm:"UNIQUE(repo_kind) NOT NULL"`
 	Kind   string `xorm:"VARCHAR(8) UNIQUE(repo_kind) NOT NULL"`
-	// ScannedTips is a JSON list of object IDs whose whole reachable set is scanned (see TipList)
+	// ScannedTips is a JSON list of object IDs whose whole reachable set is scanned. It holds the tips of every ref,
+	// refs/pull/* included, so it is never shown: no API or page returns it (only status, counts and the error code).
 	ScannedTips string `xorm:"LONGTEXT"`
 	Status      string `xorm:"VARCHAR(16) NOT NULL DEFAULT ''"`
 	Error       string `xorm:"VARCHAR(32) NOT NULL DEFAULT ''"` // a code, never text from git
 	// Blobs, Bytes and SkippedLarge count the last scan: the files read, their size and the files over MAX_BLOB_SIZE
-	Blobs        int64              `xorm:"NOT NULL DEFAULT 0"`
-	Bytes        int64              `xorm:"NOT NULL DEFAULT 0"`
-	SkippedLarge int64              `xorm:"NOT NULL DEFAULT 0"`
-	Version      int64              `xorm:"NOT NULL DEFAULT 0"` // compare-and-swap counter of the row
-	UpdatedUnix  timeutil.TimeStamp `xorm:"INDEX updated"`
+	Blobs        int64 `xorm:"NOT NULL DEFAULT 0"`
+	Bytes        int64 `xorm:"NOT NULL DEFAULT 0"`
+	SkippedLarge int64 `xorm:"NOT NULL DEFAULT 0"`
+	Version      int64 `xorm:"NOT NULL DEFAULT 0"` // compare-and-swap counter of the row
+	// FailCount counts the failed or budget-stopped scans in a row; RetryUnix is when the cron task and the next
+	// trigger may try again (0 = nothing to retry), RetryGroup the group of tips (see services/secretscan) the last
+	// scan stopped in: until then only the groups before it are scanned.
+	FailCount   int                `xorm:"NOT NULL DEFAULT 0"`
+	RetryUnix   timeutil.TimeStamp `xorm:"INDEX NOT NULL DEFAULT 0"`
+	RetryGroup  int                `xorm:"NOT NULL DEFAULT 0"`
+	UpdatedUnix timeutil.TimeStamp `xorm:"INDEX updated"`
 }
 
 func (*Scan) TableName() string { return "secret_scan" }
@@ -85,8 +94,11 @@ type Alert struct {
 	ClosedByID    int64              `xorm:"NOT NULL DEFAULT 0"`
 	ClosedUnix    timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"`
 	LocationCount int                `xorm:"NOT NULL DEFAULT 0"` // every place seen, also those over the cap that have no row
-	CreatedUnix   timeutil.TimeStamp `xorm:"created"`
-	UpdatedUnix   timeutil.TimeStamp `xorm:"updated"`
+	// ViaPull is true while only refs/pull/* (which any reader can write) reach the secret: such alerts have their
+	// own share of the alert cap
+	ViaPull     bool               `xorm:"NOT NULL DEFAULT false"`
+	CreatedUnix timeutil.TimeStamp `xorm:"created"`
+	UpdatedUnix timeutil.TimeStamp `xorm:"updated"`
 }
 
 func (*Alert) TableName() string { return "secret_scanning_alert" }
@@ -98,7 +110,7 @@ type Location struct {
 	RepoID    int64  `xorm:"INDEX NOT NULL"`
 	Kind      string `xorm:"VARCHAR(8) UNIQUE(alert_location) NOT NULL"`
 	BlobID    string `xorm:"VARCHAR(64) UNIQUE(alert_location) NOT NULL"`
-	Path      string `xorm:"TEXT"` // text from git: stripped of control characters, capped at MaxPathLen
+	Path      string `xorm:"TEXT"` // text from git: stripped of control characters, capped at maxPathLen
 	PathHash  string `xorm:"VARCHAR(64) UNIQUE(alert_location) NOT NULL"`
 	StartLine int    `xorm:"UNIQUE(alert_location) NOT NULL DEFAULT 0"`
 	EndLine   int    `xorm:"NOT NULL DEFAULT 0"`
@@ -134,9 +146,9 @@ func PathHash(path string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// CleanText makes text of a commit or a path safe to store and show: no control or format characters, valid
+// cleanText makes text of a commit or a path safe to store and show: no control or format characters, valid
 // UTF-8, at most max bytes.
-func CleanText(s string, max int) string {
+func cleanText(s string, max int) string {
 	s = util.StripFormatting(util.StripControl(strings.ToValidUTF8(s, "?")))
 	if len(s) > max {
 		s = strings.ToValidUTF8(s[:max], "")
@@ -147,9 +159,9 @@ func CleanText(s string, max int) string {
 // NewLocation fills a location from the text git gave; the caller sets the alert.
 func NewLocation(repoID int64, kind, blobID, path string, startLine, endLine int, commitID, authorName, authorEmail string, commitUnix int64) *Location {
 	return &Location{
-		RepoID: repoID, Kind: kind, BlobID: blobID, Path: CleanText(path, MaxPathLen), PathHash: PathHash(path),
+		RepoID: repoID, Kind: kind, BlobID: blobID, Path: cleanText(path, maxPathLen), PathHash: PathHash(path),
 		StartLine: startLine, EndLine: endLine, CommitID: commitID,
-		AuthorName: CleanText(authorName, maxAuthorLen), AuthorEmail: CleanText(authorEmail, maxAuthorLen), CommitUnix: commitUnix,
+		AuthorName: cleanText(authorName, maxAuthorLen), AuthorEmail: cleanText(authorEmail, maxAuthorLen), CommitUnix: commitUnix,
 	}
 }
 
@@ -171,12 +183,11 @@ var ErrScanMoved = errors.New("the scan state changed meanwhile")
 func Save(ctx context.Context, old, s *Scan) error {
 	if old == nil {
 		// the unique key decides who inserts first; no row inserted is the lost race
-		insert := "INSERT INTO secret_scan (repo_id, kind, scanned_tips, status, error, blobs, bytes, skipped_large, version, updated_unix) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?) ON CONFLICT (repo_id, kind) DO NOTHING"
+		insert := "INSERT INTO secret_scan (repo_id, kind, scanned_tips, status, error, blobs, bytes, skipped_large, fail_count, retry_unix, retry_group, version, updated_unix) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?) ON CONFLICT (repo_id, kind) DO NOTHING"
 		if setting.Database.Type.IsMySQL() {
-			insert = strings.Replace(insert, "INSERT", "INSERT IGNORE", 1)
-			insert = strings.Replace(insert, " ON CONFLICT (repo_id, kind) DO NOTHING", "", 1)
+			insert = "INSERT IGNORE INTO secret_scan (repo_id, kind, scanned_tips, status, error, blobs, bytes, skipped_large, fail_count, retry_unix, retry_group, version, updated_unix) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)"
 		}
-		res, err := db.Exec(ctx, insert, s.RepoID, s.Kind, s.ScannedTips, s.Status, s.Error, s.Blobs, s.Bytes, s.SkippedLarge, timeutil.TimeStampNow())
+		res, err := db.Exec(ctx, insert, s.RepoID, s.Kind, s.ScannedTips, s.Status, s.Error, s.Blobs, s.Bytes, s.SkippedLarge, s.FailCount, s.RetryUnix, s.RetryGroup, timeutil.TimeStampNow())
 		if err != nil {
 			return err
 		}
@@ -186,7 +197,7 @@ func Save(ctx context.Context, old, s *Scan) error {
 		return nil
 	}
 	n, err := db.GetEngine(ctx).Where("id = ? AND version = ?", old.ID, old.Version).
-		Cols("scanned_tips", "status", "error", "blobs", "bytes", "skipped_large").Incr("version").Update(s)
+		Cols("scanned_tips", "status", "error", "blobs", "bytes", "skipped_large", "fail_count", "retry_unix", "retry_group").Incr("version").Update(s)
 	if err != nil {
 		return err
 	}
@@ -196,19 +207,43 @@ func Save(ctx context.Context, old, s *Scan) error {
 	return nil
 }
 
-// GetAlertByKey returns the alert of a secret in a repository, or nil.
-func GetAlertByKey(ctx context.Context, repoID int64, ruleID, fingerprint string) (*Alert, error) {
-	a := &Alert{}
-	has, err := db.GetEngine(ctx).Where("repo_id = ? AND rule_id = ? AND fingerprint = ?", repoID, ruleID, fingerprint).Get(a)
-	if err != nil || !has {
-		return nil, err
+// GetAlertsByFingerprints returns the alerts of a repository with one of the fingerprints, in one query (the
+// caller matches the rule: the same fingerprint under another rule is another alert).
+func GetAlertsByFingerprints(ctx context.Context, repoID int64, fingerprints []string) ([]*Alert, error) {
+	var alerts []*Alert
+	if len(fingerprints) == 0 {
+		return alerts, nil
 	}
-	return a, nil
+	return alerts, db.GetEngine(ctx).Where("repo_id = ?", repoID).In("fingerprint", fingerprints).Find(&alerts)
 }
 
-// CountAlerts is the number of alerts of a repository.
-func CountAlerts(ctx context.Context, repoID int64) (int64, error) {
-	return db.GetEngine(ctx).Where("repo_id = ?", repoID).Count(new(Alert))
+// CountOpenAlerts counts the open alerts of a repository, in one query: all of them, and those that only
+// refs/pull/* reach. Closed alerts don't count towards the caps.
+func CountOpenAlerts(ctx context.Context, repoID int64) (total, viaPull int64, err error) {
+	var rows []struct {
+		ViaPull bool  `xorm:"via_pull"`
+		N       int64 `xorm:"n"`
+	}
+	if err := db.GetEngine(ctx).Table("secret_scanning_alert").Select("via_pull, COUNT(*) AS n").
+		Where("repo_id = ? AND state = ?", repoID, StateOpen).GroupBy("via_pull").Find(&rows); err != nil {
+		return 0, 0, err
+	}
+	for _, r := range rows {
+		total += r.N
+		if r.ViaPull {
+			viaPull += r.N
+		}
+	}
+	return total, viaPull, nil
+}
+
+// ClearViaPull marks alerts as reached by something other than refs/pull/*.
+func ClearViaPull(ctx context.Context, alertIDs []int64) error {
+	if len(alertIDs) == 0 {
+		return nil
+	}
+	_, err := db.GetEngine(ctx).In("id", alertIDs).Cols("via_pull").Update(&Alert{ViaPull: false})
+	return err
 }
 
 // InsertAlert stores a new alert and gives it the next number of its repository; call it in a transaction.
@@ -232,33 +267,63 @@ func AddLocationCount(ctx context.Context, alertID int64, n int) error {
 	return err
 }
 
-// HasLocation tells whether an alert has a place at this file and line (the blob may differ: a file edited around
-// the secret is the same place).
-func HasLocation(ctx context.Context, alertID int64, kind, pathHash string, startLine int) (bool, error) {
-	return db.GetEngine(ctx).Where("alert_id = ? AND kind = ? AND path_hash = ? AND start_line = ?", alertID, kind, pathHash, startLine).Exist(new(Location))
+// PlaceKey is what makes a place of an alert: its kind, file path and line (the blob may differ: a file edited
+// around the secret is the same place).
+type PlaceKey struct {
+	Kind, PathHash string
+	StartLine      int
 }
 
-// CountLocations is the number of stored places of an alert.
-func CountLocations(ctx context.Context, alertID int64) (int64, error) {
-	return db.GetEngine(ctx).Where("alert_id = ?", alertID).Count(new(Location))
-}
-
-// UnscannedRepoIDs returns up to limit repositories the cron task should scan: ready, not empty, not trashed, secret
-// scanning not turned off below the site, and without a state row for the repository, or whose last scan failed
-// before retryBefore. An incomplete scan is left alone.
-func UnscannedRepoIDs(ctx context.Context, retryBefore timeutil.TimeStamp, scope builder.Cond, limit int) ([]int64, error) {
-	var ids []int64
-	if scope == nil {
-		scope = builder.NewCond()
+// StoredPlaces returns, for each of the alerts, the places that have a row, in one query. The number of rows is the
+// number of stored places.
+func StoredPlaces(ctx context.Context, alertIDs []int64) (map[int64]map[PlaceKey]bool, error) {
+	places := map[int64]map[PlaceKey]bool{}
+	if len(alertIDs) == 0 {
+		return places, nil
 	}
+	var rows []*Location
+	if err := db.GetEngine(ctx).Cols("alert_id", "kind", "path_hash", "start_line").In("alert_id", alertIDs).Find(&rows); err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		if places[r.AlertID] == nil {
+			places[r.AlertID] = map[PlaceKey]bool{}
+		}
+		places[r.AlertID][PlaceKey{r.Kind, r.PathHash, r.StartLine}] = true
+	}
+	return places, nil
+}
+
+// InsertLocations stores places in batches of a few rows per statement.
+func InsertLocations(ctx context.Context, locs []*Location) error {
+	const batch = 50 // 14 columns each: under SQLite's limit of 999 variables
+	for len(locs) > 0 {
+		n := min(batch, len(locs))
+		if _, err := db.GetEngine(ctx).Insert(locs[:n]); err != nil {
+			return err
+		}
+		locs = locs[n:]
+	}
+	return nil
+}
+
+// UnscannedRepoIDs returns up to limit repositories the cron task should scan: ready, not trashed, secret scanning
+// not turned off below the site, and without a state row for the repository (an empty one included: its wiki may
+// hold a secret, and the scan stores a row for it), or with a state row of either kind (a wiki too) whose retry time
+// (a failed or budget-stopped scan) has come.
+func UnscannedRepoIDs(ctx context.Context, now timeutil.TimeStamp, limit int) ([]int64, error) {
+	var ids []int64
 	err := db.GetEngine(ctx).Table("repository").Select("repository.id").
 		Join("LEFT", "secret_scan", "secret_scan.repo_id = repository.id AND secret_scan.kind = ?", KindRepo).
-		Where(builder.Eq{"repository.is_empty": false, "repository.status": repo_model.RepositoryReady, "repository.trashed_unix": 0}).
+		Where(builder.Eq{"repository.status": repo_model.RepositoryReady, "repository.trashed_unix": 0}).
 		And(builder.Not{OffCond()}).
-		And(scope).
 		And(builder.Or(
 			builder.IsNull{"secret_scan.id"},
-			builder.And(builder.Eq{"secret_scan.status": StatusFailed}, builder.Lt{"secret_scan.updated_unix": int64(retryBefore)}),
+			builder.Exists(builder.Select("1").From("secret_scan", "due").Where(builder.And(
+				builder.Expr("due.repo_id = repository.id"),
+				builder.Gt{"due.retry_unix": 0},
+				builder.Lte{"due.retry_unix": int64(now)},
+			))),
 		)).
 		OrderBy("repository.id").Limit(limit).
 		Find(&ids)
@@ -275,10 +340,12 @@ func OffCond() builder.Cond {
 	)
 }
 
-// orgSettingCond is an EXISTS on the user setting key = value of the repository's owner.
+// orgSettingCond is an EXISTS on the user setting key = value of the repository's owner, when that owner is an
+// organization (as services/secretscan.Enabled reads it: a personal owner's settings never count).
 func orgSettingCond(key, value string) builder.Cond {
 	return builder.Exists(builder.Select("1").From("user_setting").Where(builder.And(
 		builder.Expr("user_setting.user_id = repository.owner_id"),
 		builder.Eq{"user_setting.setting_key": key, "user_setting.setting_value": value},
+		builder.In("user_setting.user_id", builder.Select("id").From("`user`").Where(builder.Eq{"type": 1})), // user_model.UserTypeOrganization (models/user can't be imported here)
 	)))
 }

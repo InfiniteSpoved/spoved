@@ -95,6 +95,12 @@ func DeleteRepositoryDirectly(ctx context.Context, repoID int64, opts DeleteRepo
 	}, func(ctx context.Context) error {
 		sess := db.GetEngine(ctx)
 
+		// lock the repository row first: a secret scan that stores its result takes the same lock before it writes,
+		// so it either finishes before the rows below are deleted or finds no repository (no orphan rows)
+		if _, err := db.Exec(ctx, "UPDATE `repository` SET id = id WHERE id = ?", repoID); err != nil {
+			return fmt.Errorf("lock repository: %w", err)
+		}
+
 		counts, err := deleteCounts(ctx, repo.ID)
 		if err != nil {
 			return err
