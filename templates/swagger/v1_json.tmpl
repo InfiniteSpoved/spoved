@@ -23488,26 +23488,23 @@
           {
             "enum": [
               "open",
-              "closed",
-              "revoked",
-              "false_positive",
-              "used_in_tests"
+              "resolved"
             ],
             "type": "string",
-            "description": "only alerts in this state; closed is every closed state",
+            "description": "only alerts in this state",
             "name": "state",
             "in": "query"
           },
           {
             "type": "string",
-            "description": "only this secret type (aws, github, ...)",
-            "name": "secret_type",
+            "description": "only alerts resolved with one of these resolutions, comma separated",
+            "name": "resolution",
             "in": "query"
           },
           {
             "type": "string",
-            "description": "only this rule",
-            "name": "rule",
+            "description": "only alerts of these secret types (rule IDs), comma separated",
+            "name": "secret_type",
             "in": "query"
           },
           {
@@ -23538,7 +23535,7 @@
     },
     "/repos/{owner}/{repo}/secret-scanning/alerts/{index}": {
       "get": {
-        "description": "The alert with its places, at most 100 (locations_count is the number of all of them).",
+        "description": "The alert; its places are at locations_url.",
         "produces": [
           "application/json"
         ],
@@ -23581,7 +23578,7 @@
         }
       },
       "patch": {
-        "description": "Closing needs one of the states revoked, false_positive and used_in_tests, which is also its resolution, and takes an optional comment of at most 1000 bytes that must not look like a secret. State open reopens a closed alert. An alert that is not open can't be closed again (409).",
+        "description": "State resolved needs a resolution (false_positive, wont_fix, revoked or used_in_tests) and takes an optional resolution_comment of at most 1000 bytes that must not look like a secret or hold the secret of the alert. State open reopens a resolved alert. An alert that is not open can't be resolved again, and one that is not resolved can't be reopened by two requests at once (409).",
         "consumes": [
           "application/json"
         ],
@@ -23639,6 +23636,63 @@
           },
           "423": {
             "$ref": "#/responses/repoArchivedError"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/secret-scanning/alerts/{index}/locations": {
+      "get": {
+        "description": "In the order they were found. Places in the wiki are left out for people who can't read the wiki.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "List the places of a secret alert",
+        "operationId": "repoListSecretScanningAlertLocations",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "number of the alert",
+            "name": "index",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/SecretScanningLocationList"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
           }
         }
       }
@@ -36704,18 +36758,23 @@
     },
     "EditSecretScanningAlertOption": {
       "type": "object",
-      "title": "EditSecretScanningAlertOption closes or reopens an alert.",
+      "title": "EditSecretScanningAlertOption resolves or reopens an alert.",
       "required": [
         "state"
       ],
       "properties": {
-        "comment": {
-          "description": "optional, at most 1000 bytes; refused when it looks like a secret",
+        "resolution": {
+          "description": "required when resolving: false_positive, wont_fix, revoked or used_in_tests",
           "type": "string",
-          "x-go-name": "Comment"
+          "x-go-name": "Resolution"
+        },
+        "resolution_comment": {
+          "description": "optional when resolving, at most 1000 bytes; refused when it looks like a secret",
+          "type": "string",
+          "x-go-name": "ResolutionComment"
         },
         "state": {
-          "description": "open to reopen, or the closed state: revoked, false_positive or used_in_tests",
+          "description": "open to reopen, resolved to resolve",
           "type": "string",
           "x-go-name": "State"
         }
@@ -41938,8 +41997,8 @@
       "x-go-package": "forgejo.org/modules/structs"
     },
     "SecretScanningAlert": {
+      "description": "SecretScanningAlert is a secret found in the code or wiki of a repository. It never holds the secret. The shape\nfollows GitHub's secret scanning alerts.",
       "type": "object",
-      "title": "SecretScanningAlert is a secret found in the code or wiki of a repository. It never holds the secret.",
       "properties": {
         "created_at": {
           "type": "string",
@@ -41952,22 +42011,20 @@
           "x-go-name": "Fingerprint"
         },
         "html_url": {
+          "description": "the page of the alert in the web interface (not there yet)",
           "type": "string",
           "x-go-name": "HTMLURL"
         },
-        "locations": {
-          "description": "the stored places (only when one alert is read; at most 100)",
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/SecretScanningLocation"
-          },
-          "x-go-name": "Locations"
-        },
         "locations_count": {
-          "description": "every place seen, also those over the stored cap",
+          "description": "the places seen, also those over the stored cap; without the wiki places for a viewer who can't read the wiki",
           "type": "integer",
           "format": "int64",
           "x-go-name": "LocationsCount"
+        },
+        "locations_url": {
+          "description": "the places of the alert, paged",
+          "type": "string",
+          "x-go-name": "LocationsURL"
         },
         "number": {
           "type": "integer",
@@ -41975,7 +42032,7 @@
           "x-go-name": "Number"
         },
         "resolution": {
-          "description": "the reason the alert was closed with: the same as its closed state, empty while open",
+          "description": "why the alert is resolved: false_positive, wont_fix, revoked or used_in_tests; empty while open",
           "type": "string",
           "x-go-name": "Resolution"
         },
@@ -41991,21 +42048,18 @@
         "resolved_by": {
           "$ref": "#/definitions/User"
         },
-        "rule_id": {
-          "type": "string",
-          "x-go-name": "RuleID"
-        },
         "secret_type": {
-          "description": "the group of the rule (aws, github, ...)",
+          "description": "the rule that found the secret (aws-access-key-id, ...)",
           "type": "string",
           "x-go-name": "SecretType"
         },
         "secret_type_display_name": {
+          "description": "the name of that rule",
           "type": "string",
           "x-go-name": "SecretTypeDisplayName"
         },
         "state": {
-          "description": "open, revoked, false_positive or used_in_tests",
+          "description": "open or resolved",
           "type": "string",
           "x-go-name": "State"
         },
@@ -42059,7 +42113,7 @@
           "x-go-name": "HTMLURL"
         },
         "kind": {
-          "description": "repo (the repository) or wiki",
+          "description": "repo (the code of the repository), wiki, or pull (a commit only a refs/pull/* ref reaches)",
           "type": "string",
           "x-go-name": "Kind"
         },
@@ -42086,6 +42140,7 @@
           "x-go-name": "Holes"
         },
         "last_scanned": {
+          "description": "when the last scan that did not fail ended",
           "type": "string",
           "format": "date-time",
           "x-go-name": "LastScanned"
@@ -45318,6 +45373,15 @@
           "type": "integer",
           "format": "int64",
           "description": "The total number of alerts that match"
+        }
+      }
+    },
+    "SecretScanningLocationList": {
+      "description": "SecretScanningLocationList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/SecretScanningLocation"
         }
       }
     },

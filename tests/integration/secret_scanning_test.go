@@ -207,10 +207,10 @@ func TestSecretScanning(t *testing.T) {
 			bodies := []string{
 				MakeRequest(t, NewRequest(t, "GET", base).AddTokenAuth(token), http.StatusOK).Body.String(),
 				MakeRequest(t, NewRequest(t, "GET", one).AddTokenAuth(token), http.StatusOK).Body.String(),
-				MakeRequest(t, NewRequestWithJSON(t, "PATCH", one, map[string]string{"state": "revoked", "comment": "rotated"}).AddTokenAuth(token), http.StatusOK).Body.String(),
+				MakeRequest(t, NewRequestWithJSON(t, "PATCH", one, map[string]string{"state": "resolved", "resolution": "revoked", "resolution_comment": "rotated"}).AddTokenAuth(token), http.StatusOK).Body.String(),
 				MakeRequest(t, NewRequestWithJSON(t, "PATCH", one, map[string]string{"state": "open"}).AddTokenAuth(token), http.StatusOK).Body.String(),
 			}
-			MakeRequest(t, NewRequestWithJSON(t, "PATCH", one, map[string]string{"state": "revoked", "comment": "leaked " + canary}).AddTokenAuth(token), http.StatusUnprocessableEntity)
+			MakeRequest(t, NewRequestWithJSON(t, "PATCH", one, map[string]string{"state": "resolved", "resolution": "revoked", "resolution_comment": "leaked " + canary}).AddTokenAuth(token), http.StatusUnprocessableEntity)
 			for _, b := range bodies {
 				assert.NotContains(t, b, canary)
 				assert.NotContains(t, b, body)

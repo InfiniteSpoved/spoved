@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 
 	"forgejo.org/models/db"
 	"forgejo.org/modules/timeutil"
@@ -16,7 +17,7 @@ import (
 )
 
 // ClosedStates are the states an alert is closed with; its reason is the same word.
-var ClosedStates = []string{StateRevoked, StateFalsePos, StateUsedInTests}
+var ClosedStates = []string{StateRevoked, StateFalsePos, StateUsedInTests, StateWontFix}
 
 // MaxCommentLen is the longest comment of a closed alert, in bytes.
 const MaxCommentLen = 1000
@@ -46,35 +47,87 @@ func GetAlert(ctx context.Context, repoID, index int64) (*Alert, error) {
 // AlertSearchOptions selects the alerts of one repository, newest first.
 type AlertSearchOptions struct {
 	db.ListOptions
-	RepoID     int64
-	State      string // open, closed (any closed state) or one closed state
-	SecretType string
-	RuleID     string
+	RepoID      int64
+	State       string   // open or resolved
+	Resolutions []string // closed states
+	SecretTypes []string // rule IDs
 }
 
 func (o *AlertSearchOptions) ToConds() builder.Cond {
 	cond := builder.NewCond().And(builder.Eq{"repo_id": o.RepoID})
 	switch o.State {
-	case "":
-	case "closed":
+	case StateOpen:
+		cond = cond.And(builder.Eq{"state": StateOpen})
+	case "resolved":
 		cond = cond.And(builder.In("state", ClosedStates))
-	default:
-		cond = cond.And(builder.Eq{"state": o.State})
 	}
-	if o.SecretType != "" {
-		cond = cond.And(builder.Eq{"secret_type": o.SecretType})
+	if len(o.Resolutions) > 0 {
+		cond = cond.And(builder.In("state", o.Resolutions))
 	}
-	if o.RuleID != "" {
-		cond = cond.And(builder.Eq{"rule_id": o.RuleID})
+	if len(o.SecretTypes) > 0 {
+		cond = cond.And(builder.In("rule_id", o.SecretTypes))
 	}
 	return cond
 }
 
 func (o *AlertSearchOptions) ToOrders() string { return "id DESC" }
 
-// ValidSearchState tells whether s is a state the list can be filtered by.
-func ValidSearchState(s string) bool {
-	return s == "" || s == StateOpen || s == "closed" || slices.Contains(ClosedStates, s)
+// ParseFilters checks the state and the comma lists of the list filters.
+func (o *AlertSearchOptions) ParseFilters(state, resolution, secretType string) error {
+	if state != "" && state != StateOpen && state != "resolved" {
+		return util.NewInvalidArgumentErrorf("state must be open or resolved")
+	}
+	if len(resolution) > MaxFilterLen*8 || len(secretType) > MaxFilterLen*8 {
+		return util.NewInvalidArgumentErrorf("the filter is too long")
+	}
+	o.State = state
+	for r := range strings.SplitSeq(resolution, ",") {
+		if r = strings.TrimSpace(r); r != "" && !slices.Contains(ClosedStates, r) {
+			return util.NewInvalidArgumentErrorf("unknown resolution")
+		} else if r != "" {
+			o.Resolutions = append(o.Resolutions, r)
+		}
+	}
+	for t := range strings.SplitSeq(secretType, ",") {
+		if t = strings.TrimSpace(t); len(t) > MaxFilterLen {
+			return util.NewInvalidArgumentErrorf("the filter is too long")
+		} else if t != "" {
+			o.SecretTypes = append(o.SecretTypes, t)
+		}
+	}
+	return nil
+}
+
+// LocationSearchOptions pages the places of one alert, in the order they were found.
+type LocationSearchOptions struct {
+	db.ListOptions
+	RepoID, AlertID int64
+	NoWiki          bool // leave out the places of the wiki
+}
+
+func (o *LocationSearchOptions) ToConds() builder.Cond {
+	cond := builder.NewCond().And(builder.Eq{"repo_id": o.RepoID, "alert_id": o.AlertID})
+	if o.NoWiki {
+		cond = cond.And(builder.Neq{"kind": KindWiki})
+	}
+	return cond
+}
+
+func (o *LocationSearchOptions) ToOrders() string { return "id" }
+
+// CountCodeLocations counts the stored places of the alerts that are not in the wiki, in one query.
+func CountCodeLocations(ctx context.Context, repoID int64, alertIDs []int64) (map[int64]int, error) {
+	var rows []struct {
+		AlertID int64
+		N       int
+	}
+	err := db.GetEngine(ctx).Table("secret_scanning_location").Select("alert_id, COUNT(*) AS n").
+		Where(builder.Eq{"repo_id": repoID}.And(builder.In("alert_id", alertIDs)).And(builder.Neq{"kind": KindWiki})).GroupBy("alert_id").Find(&rows)
+	out := make(map[int64]int, len(rows))
+	for _, r := range rows {
+		out[r.AlertID] = r.N
+	}
+	return out, err
 }
 
 // FindLocations returns up to limit places of an alert in the order they were found.

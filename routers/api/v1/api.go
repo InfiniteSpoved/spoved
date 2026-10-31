@@ -1266,6 +1266,7 @@ func Routes() *web.Route {
 						m.Get("", repo.ListSecretScanningAlerts)
 						m.Combo("/{index}").Get(repo.GetSecretScanningAlert).
 							Patch(reqToken(), mustNotBeArchived(), bind(api.EditSecretScanningAlertOption{}), repo.EditSecretScanningAlert)
+						m.Get("/{index}/locations", repo.ListSecretScanningAlertLocations)
 					})
 				}, repo.MustSeeSecretAlerts)
 				m.Get("/activities/feeds", repo.ListRepoActivityFeeds)

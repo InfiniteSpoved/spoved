@@ -4,6 +4,7 @@
 package convert
 
 import (
+	"cmp"
 	"context"
 	"strconv"
 	"time"
@@ -16,11 +17,12 @@ import (
 	"forgejo.org/modules/util"
 )
 
-// ToSecretScanningAlerts converts alerts of one repository (one query for the users who closed them). locs, by
-// alert ID, are the places to list; wikiURL turns the path of a wiki place into its page URL.
-func ToSecretScanningAlerts(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, alerts []*secretscan_model.Alert, locs map[int64][]*secretscan_model.Location, wikiURL func(path string) string) ([]*api.SecretScanningAlert, error) {
-	var userIDs []int64
+// ToSecretScanningAlerts converts alerts of one repository (one query for the users who closed them). Without
+// canReadWiki the count holds only the stored places that are not in the wiki.
+func ToSecretScanningAlerts(ctx context.Context, doer *user_model.User, repo *repo_model.Repository, alerts []*secretscan_model.Alert, canReadWiki bool) ([]*api.SecretScanningAlert, error) {
+	var userIDs, alertIDs []int64
 	for _, a := range alerts {
+		alertIDs = append(alertIDs, a.ID)
 		if a.ClosedByID != 0 {
 			userIDs = append(userIDs, a.ClosedByID)
 		}
@@ -29,16 +31,30 @@ func ToSecretScanningAlerts(ctx context.Context, doer *user_model.User, repo *re
 	if err != nil {
 		return nil, err
 	}
+	var codeCounts map[int64]int
+	if !canReadWiki && len(alertIDs) > 0 {
+		if codeCounts, err = secretscan_model.CountCodeLocations(ctx, repo.ID, alertIDs); err != nil {
+			return nil, err
+		}
+	}
+	names := map[string]string{}
+	for _, r := range secretdetection.BuiltinRules() {
+		names[r.ID] = r.Name
+	}
 	out := make([]*api.SecretScanningAlert, 0, len(alerts))
 	for _, a := range alerts {
+		index := strconv.FormatInt(a.Index, 10)
 		res := &api.SecretScanningAlert{
-			Number: a.Index, State: a.State, Resolution: a.Reason, ResolutionComment: a.Comment, RuleID: a.RuleID,
-			SecretType: a.SecretType, SecretTypeDisplayName: a.RuleID, Fingerprint: a.Fingerprint, ViaPull: a.ViaPull,
+			Number: a.Index, State: secretscan_model.StateOpen, SecretType: a.RuleID, SecretTypeDisplayName: cmp.Or(names[a.RuleID], a.RuleID),
+			Fingerprint: a.Fingerprint, ViaPull: a.ViaPull, LocationsCount: a.LocationCount,
 			CreatedAt: time.Unix(int64(a.CreatedUnix), 0).UTC(), UpdatedAt: time.Unix(int64(a.UpdatedUnix), 0).UTC(),
-			HTMLURL: repo.HTMLURL() + "/security/secrets/" + strconv.FormatInt(a.Index, 10), LocationsCount: a.LocationCount,
+			HTMLURL: repo.HTMLURL() + "/security/secrets/" + index, LocationsURL: repo.APIURL() + "/secret-scanning/alerts/" + index + "/locations",
 		}
-		if rule, ok := secretdetection.RuleByID(a.RuleID); ok {
-			res.SecretTypeDisplayName = rule.Name
+		if !canReadWiki {
+			res.LocationsCount = codeCounts[a.ID]
+		}
+		if a.State != secretscan_model.StateOpen {
+			res.State, res.Resolution, res.ResolutionComment = "resolved", a.Reason, a.Comment
 		}
 		if a.ClosedByID != 0 {
 			_, u := user_model.GetUserFromMap(a.ClosedByID, users)
@@ -48,30 +64,36 @@ func ToSecretScanningAlerts(ctx context.Context, doer *user_model.User, repo *re
 			t := time.Unix(int64(a.ClosedUnix), 0).UTC()
 			res.ResolvedAt = &t
 		}
-		for _, l := range locs[a.ID] {
-			res.Locations = append(res.Locations, toSecretScanningLocation(repo, l, wikiURL))
-		}
 		out = append(out, res)
 	}
 	return out, nil
 }
 
-func toSecretScanningLocation(repo *repo_model.Repository, l *secretscan_model.Location, wikiURL func(string) string) *api.SecretScanningLocation {
-	res := &api.SecretScanningLocation{
-		Kind: l.Kind, Path: l.Path, StartLine: l.StartLine, EndLine: l.EndLine, CommitSHA: l.CommitID, BlobSHA: l.BlobID,
-		CommitAuthorName: l.AuthorName, CommitAuthorEmail: l.AuthorEmail,
+// ToSecretScanningLocations converts places of an alert of the repository; wikiURL turns the path of a wiki place
+// into its page URL.
+func ToSecretScanningLocations(repo *repo_model.Repository, locs []*secretscan_model.Location, wikiURL func(path string) string) []*api.SecretScanningLocation {
+	out := make([]*api.SecretScanningLocation, 0, len(locs))
+	for _, l := range locs {
+		res := &api.SecretScanningLocation{
+			Kind: l.Kind, Path: l.Path, StartLine: l.StartLine, EndLine: l.EndLine, CommitSHA: l.CommitID, BlobSHA: l.BlobID,
+			CommitAuthorName: l.AuthorName, CommitAuthorEmail: l.AuthorEmail,
+		}
+		if l.CommitUnix != 0 {
+			t := time.Unix(l.CommitUnix, 0).UTC()
+			res.CommitDate = &t
+		}
+		switch {
+		case l.Kind == secretscan_model.KindWiki:
+			res.HTMLURL = wikiURL(l.Path)
+		case l.CommitID != "":
+			res.HTMLURL = repo.HTMLURL() + "/src/commit/" + l.CommitID + "/" + util.PathEscapeSegments(l.Path) + "#L" + strconv.Itoa(l.StartLine)
+			if l.EndLine > l.StartLine {
+				res.HTMLURL += "-L" + strconv.Itoa(l.EndLine)
+			}
+		}
+		out = append(out, res)
 	}
-	if l.CommitUnix != 0 {
-		t := time.Unix(l.CommitUnix, 0).UTC()
-		res.CommitDate = &t
-	}
-	switch {
-	case l.Kind == secretscan_model.KindWiki:
-		res.HTMLURL = wikiURL(l.Path)
-	case l.CommitID != "":
-		res.HTMLURL = repo.HTMLURL() + "/src/commit/" + l.CommitID + "/" + util.PathEscapeSegments(l.Path) + "#L" + strconv.Itoa(l.StartLine)
-	}
-	return res
+	return out
 }
 
 // ToSecretScanningStatus sums up the state rows of a repository's code, wiki and pull refs: failed beats incomplete
@@ -84,7 +106,7 @@ func ToSecretScanningStatus(scans []*secretscan_model.Scan) *api.SecretScanningS
 	for _, s := range scans {
 		res.Holes += s.Holes
 		res.SkippedLarge += s.SkippedLarge
-		if t := s.UpdatedUnix.AsTimePtr(); t != nil && (res.LastScanned == nil || t.After(*res.LastScanned)) {
+		if t := s.UpdatedUnix.AsTimePtr(); s.Status != secretscan_model.StatusFailed && t != nil && (res.LastScanned == nil || t.After(*res.LastScanned)) {
 			res.LastScanned = t
 		}
 		if r := rank[s.Status]; r > best {

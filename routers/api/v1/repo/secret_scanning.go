@@ -8,42 +8,20 @@ import (
 	"net/http"
 
 	"forgejo.org/models/db"
-	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
+	"forgejo.org/models/unit"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	"forgejo.org/routers/api/v1/utils"
-	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 	secretscan_service "forgejo.org/services/secretscan"
-	vulnerability_service "forgejo.org/services/vulnerability"
 	wiki_service "forgejo.org/services/wiki"
 )
 
-// maxAlertLocations is the number of places one alert read lists.
-const maxAlertLocations = 100
-
-// MustSeeSecretAlerts is the one gate of the secret alert routes, like MustSeeVulnerabilityAlerts: everyone who may
-// not see alerts (a reader, an anonymous user, a token that only reads, a repository secret scanning is off for)
-// gets the plain 404 of a missing repository, decided before anything else is looked at. Writers and admins pass,
-// and so does an auditor reading with their own credential. An Actions job token never sees alerts (GET is a 404, a
-// write a 403).
-func MustSeeSecretAlerts(ctx *context.APIContext) {
-	if ctx.Authentication().ActionsTaskID().Has() {
-		if ctx.IsReadOnlyMethod() {
-			ctx.NotFound()
-		} else {
-			ctx.Error(http.StatusForbidden, "", "an Actions job token can't change secret alerts")
-		}
-		return
-	}
-	auditor := vulnerability_service.AuditorView(ctx, ctx.Doer(), ctx.Repo().Owner, ctx.IsReadOnlyMethod(), auth.IsHeldByUser(ctx.Authentication()))
-	if !vulnerability_service.CanSeeAlerts(ctx.Permission(), auditor) || !secretscan_service.Enabled(ctx, ctx.Repo().Repository) {
-		ctx.NotFound()
-	}
-}
+// MustSeeSecretAlerts is the gate of the secret alert routes (see mustSeeAlerts); scanning off is a 404 too.
+var MustSeeSecretAlerts = mustSeeAlerts("secret", secretscan_service.Enabled)
 
 // ListSecretScanningAlerts lists the secret alerts of a repository
 func ListSecretScanningAlerts(ctx *context.APIContext) {
@@ -68,16 +46,16 @@ func ListSecretScanningAlerts(ctx *context.APIContext) {
 	//   required: true
 	// - name: state
 	//   in: query
-	//   description: only alerts in this state; closed is every closed state
+	//   description: only alerts in this state
 	//   type: string
-	//   enum: [open, closed, revoked, false_positive, used_in_tests]
+	//   enum: [open, resolved]
+	// - name: resolution
+	//   in: query
+	//   description: only alerts resolved with one of these resolutions, comma separated
+	//   type: string
 	// - name: secret_type
 	//   in: query
-	//   description: only this secret type (aws, github, ...)
-	//   type: string
-	// - name: rule
-	//   in: query
-	//   description: only this rule
+	//   description: only alerts of these secret types (rule IDs), comma separated
 	//   type: string
 	// - name: page
 	//   in: query
@@ -96,16 +74,9 @@ func ListSecretScanningAlerts(ctx *context.APIContext) {
 	//     "$ref": "#/responses/validationError"
 
 	repo := ctx.Repo().Repository
-	opts := &secretscan_model.AlertSearchOptions{
-		ListOptions: utils.GetListOptions(ctx), RepoID: repo.ID,
-		State: ctx.FormString("state"), SecretType: ctx.FormString("secret_type"), RuleID: ctx.FormString("rule"),
-	}
-	if !secretscan_model.ValidSearchState(opts.State) {
-		ctx.Error(http.StatusUnprocessableEntity, "", "unknown state")
-		return
-	}
-	if len(opts.SecretType) > secretscan_model.MaxFilterLen || len(opts.RuleID) > secretscan_model.MaxFilterLen {
-		ctx.Error(http.StatusUnprocessableEntity, "", "the filter is too long")
+	opts := &secretscan_model.AlertSearchOptions{ListOptions: utils.GetListOptions(ctx), RepoID: repo.ID}
+	if err := opts.ParseFilters(ctx.FormString("state"), ctx.FormString("resolution"), ctx.FormString("secret_type")); err != nil {
+		ctx.Error(http.StatusUnprocessableEntity, "", err.Error())
 		return
 	}
 	opts.SetDefaultValues()
@@ -114,7 +85,7 @@ func ListSecretScanningAlerts(ctx *context.APIContext) {
 		ctx.Error(http.StatusInternalServerError, "FindAndCount", err)
 		return
 	}
-	list, err := convert.ToSecretScanningAlerts(ctx, ctx.Doer(), repo, alerts, nil, nil)
+	list, err := convert.ToSecretScanningAlerts(ctx, ctx.Doer(), repo, alerts, ctx.Permission().CanRead(unit.TypeWiki))
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "ToSecretScanningAlerts", err)
 		return
@@ -162,7 +133,7 @@ func GetSecretScanningAlert(ctx *context.APIContext) {
 	// swagger:operation GET /repos/{owner}/{repo}/secret-scanning/alerts/{index} repository repoGetSecretScanningAlert
 	// ---
 	// summary: Get a secret alert
-	// description: The alert with its places, at most 100 (locations_count is the number of all of them).
+	// description: The alert; its places are at locations_url.
 	// produces:
 	// - application/json
 	// parameters:
@@ -200,9 +171,10 @@ func EditSecretScanningAlert(ctx *context.APIContext) {
 	// swagger:operation PATCH /repos/{owner}/{repo}/secret-scanning/alerts/{index} repository repoEditSecretScanningAlert
 	// ---
 	// summary: Close or reopen a secret alert
-	// description: Closing needs one of the states revoked, false_positive and used_in_tests, which is also its
-	//   resolution, and takes an optional comment of at most 1000 bytes that must not look like a secret. State open
-	//   reopens a closed alert. An alert that is not open can't be closed again (409).
+	// description: State resolved needs a resolution (false_positive, wont_fix, revoked or used_in_tests) and takes an
+	//   optional resolution_comment of at most 1000 bytes that must not look like a secret or hold the secret of the
+	//   alert. State open reopens a resolved alert. An alert that is not open can't be resolved again, and one that
+	//   is not resolved can't be reopened by two requests at once (409).
 	// consumes:
 	// - application/json
 	// produces:
@@ -246,14 +218,18 @@ func EditSecretScanningAlert(ctx *context.APIContext) {
 		return
 	}
 	var err error
-	if form.State == secretscan_model.StateOpen {
-		if form.Comment != "" {
-			ctx.Error(http.StatusUnprocessableEntity, "", "a comment is only for closing")
+	switch form.State {
+	case secretscan_model.StateOpen:
+		if form.Resolution != "" || form.ResolutionComment != "" {
+			ctx.Error(http.StatusUnprocessableEntity, "", "a resolution and a comment are only for resolving")
 			return
 		}
 		alert, err = secretscan_service.Reopen(ctx, ctx.Repo().Repository, alert.Index)
-	} else {
-		alert, err = secretscan_service.Close(ctx, ctx.Repo().Repository, ctx.Doer(), alert.Index, form.State, form.Comment)
+	case "resolved":
+		alert, err = secretscan_service.Close(ctx, ctx.Repo().Repository, ctx.Doer(), alert.Index, form.Resolution, form.ResolutionComment)
+	default:
+		ctx.Error(http.StatusUnprocessableEntity, "", "state must be open or resolved")
+		return
 	}
 	switch {
 	case errors.Is(err, util.ErrInvalidArgument):
@@ -292,13 +268,7 @@ func loadSecretScanningAlert(ctx *context.APIContext) *secretscan_model.Alert {
 }
 
 func respondSecretScanningAlert(ctx *context.APIContext, alert *secretscan_model.Alert) {
-	repo := ctx.Repo().Repository
-	locs, err := secretscan_model.FindLocations(ctx, repo.ID, alert.ID, maxAlertLocations)
-	if err != nil {
-		ctx.Error(http.StatusInternalServerError, "FindLocations", err)
-		return
-	}
-	list, err := convert.ToSecretScanningAlerts(ctx, ctx.Doer(), repo, []*secretscan_model.Alert{alert}, map[int64][]*secretscan_model.Location{alert.ID: locs}, wikiPageURL(repo))
+	list, err := convert.ToSecretScanningAlerts(ctx, ctx.Doer(), ctx.Repo().Repository, []*secretscan_model.Alert{alert}, ctx.Permission().CanRead(unit.TypeWiki))
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "ToSecretScanningAlerts", err)
 		return
@@ -306,13 +276,58 @@ func respondSecretScanningAlert(ctx *context.APIContext, alert *secretscan_model
 	ctx.JSON(http.StatusOK, list[0])
 }
 
-// wikiPageURL turns the git path of a wiki file into the URL of its page ("" for a name that is no page).
-func wikiPageURL(repo *repo_model.Repository) func(string) string {
-	return func(path string) string {
-		wp, err := wiki_service.GitPathToWebPath(path)
-		if err != nil {
-			return ""
-		}
-		return repo.HTMLURL() + "/wiki/" + wiki_service.WebPathToURLPath(wp)
+// ListSecretScanningAlertLocations lists the places of a secret alert
+func ListSecretScanningAlertLocations(ctx *context.APIContext) {
+	// swagger:operation GET /repos/{owner}/{repo}/secret-scanning/alerts/{index}/locations repository repoListSecretScanningAlertLocations
+	// ---
+	// summary: List the places of a secret alert
+	// description: In the order they were found. Places in the wiki are left out for people who can't read the wiki.
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: index
+	//   in: path
+	//   description: number of the alert
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// - name: page
+	//   in: query
+	//   description: page number of results to return (1-based)
+	//   type: integer
+	// - name: limit
+	//   in: query
+	//   description: page size of results
+	//   type: integer
+	// responses:
+	//   "200":
+	//     "$ref": "#/responses/SecretScanningLocationList"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+
+	alert := loadSecretScanningAlert(ctx)
+	if alert == nil {
+		return
 	}
+	repo := ctx.Repo().Repository
+	opts := &secretscan_model.LocationSearchOptions{ListOptions: utils.GetListOptions(ctx), RepoID: repo.ID, AlertID: alert.ID, NoWiki: !ctx.Permission().CanRead(unit.TypeWiki)}
+	opts.SetDefaultValues()
+	locs, total, err := db.FindAndCount[secretscan_model.Location](ctx, opts)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "FindAndCount", err)
+		return
+	}
+	ctx.SetLinkHeader(int(total), opts.PageSize)
+	ctx.SetTotalCountHeader(total)
+	ctx.JSON(http.StatusOK, convert.ToSecretScanningLocations(repo, locs, func(path string) string { return wiki_service.PageHTMLURL(repo, path) }))
 }

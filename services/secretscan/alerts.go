@@ -5,9 +5,12 @@ package secretscan
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
+	"unicode"
 
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
@@ -16,6 +19,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/secretdetection"
 	"forgejo.org/modules/util"
+	vulnerability_service "forgejo.org/services/vulnerability"
 )
 
 // ErrConflict is a change of an alert that its state doesn't allow any more (it changed meanwhile): the caller
@@ -34,7 +38,33 @@ var commentDetector = sync.OnceValues(func() (*secretdetection.Detector, error) 
 	return secretdetection.NewDetector(secretdetection.BuiltinRules())
 })
 
-// Close closes an open alert of the repository as revoked, false_positive or used_in_tests (the reason is the
+// checkComment refuses a comment the detector finds a secret in, or that holds the secret of the alert itself: a
+// token of 16 to 4096 bytes whose fingerprint is the alert's (also after "key=" or "key:"), which the rules of a
+// secret that needs context (an AWS secret key) don't see.
+func checkComment(comment, fingerprint string) error {
+	d, err := commentDetector()
+	if err != nil {
+		return err
+	}
+	if found, _ := d.Scan([]byte(comment)); len(found) > 0 {
+		return ErrCommentSecret
+	}
+	for tok := range strings.FieldsFuncSeq(comment, func(r rune) bool { return unicode.IsSpace(r) || strings.ContainsRune("\"'`,;()<>[]{}", r) }) {
+		for rest := tok; ; {
+			if len(rest) >= 16 && len(rest) <= 4096 && subtle.ConstantTimeCompare([]byte(secretdetection.Fingerprint([]byte(rest))), []byte(fingerprint)) == 1 {
+				return ErrCommentSecret
+			}
+			i := strings.IndexAny(rest, "=:")
+			if i < 0 {
+				break
+			}
+			rest = rest[i+1:]
+		}
+	}
+	return nil
+}
+
+// Close closes an open alert of the repository as revoked, false_positive, used_in_tests or wont_fix (the reason is the
 // state), with an optional comment of at most 1,000 bytes. The audit entry is written in the same transaction. A
 // bad state or comment is util.ErrInvalidArgument, an unknown alert util.ErrNotExist, an alert that isn't open
 // ErrConflict, an archived repository ErrArchived.
@@ -42,17 +72,23 @@ func Close(ctx context.Context, repo *repo_model.Repository, doer *user_model.Us
 	if !slices.Contains(secretscan_model.ClosedStates, state) {
 		return nil, util.NewInvalidArgumentErrorf("state must be one of %v, or open", secretscan_model.ClosedStates)
 	}
-	comment = util.StripControl(comment)
+	// no control, bidi or other format characters (they hide a secret from the detector and reorder text)
+	comment = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, vulnerability_service.CleanComment(comment))
 	if len(comment) > secretscan_model.MaxCommentLen {
 		return nil, util.NewInvalidArgumentErrorf("the comment is longer than %d bytes", secretscan_model.MaxCommentLen)
 	}
 	if comment != "" {
-		d, err := commentDetector()
+		alert, err := secretscan_model.GetAlert(ctx, repo.ID, index)
 		if err != nil {
 			return nil, err
 		}
-		if found, _ := d.Scan([]byte(comment)); len(found) > 0 {
-			return nil, ErrCommentSecret
+		if err := checkComment(comment, alert.Fingerprint); err != nil {
+			return nil, err
 		}
 	}
 	return changeAlert(ctx, repo, "", func(ctx context.Context) (*secretscan_model.Alert, bool, error) {
