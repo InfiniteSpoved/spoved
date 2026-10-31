@@ -57,9 +57,9 @@ var (
 
 	// scanContent runs the detector and says whether it scanned all of the content (false: cut at the detector's size
 	// limit, or a rule ran out of its budget). It computes the keyed fingerprints, so it panics before the keying is
-	// set up. A test replaces it. The engine reports completeness from its next version on; until then it is true.
-	scanContent = func(d *secretdetection.Detector, content []byte) (findings []secretdetection.Finding, complete bool) {
-		return d.Scan(content), true
+	// set up. A test replaces it.
+	scanContent = func(d *secretdetection.Detector, content []byte) ([]secretdetection.Finding, bool) {
+		return d.Scan(content)
 	}
 
 	// afterTips runs when the tips of a scan are read, before any object is (tests hold a scan here)
@@ -395,7 +395,7 @@ func (r *run) scanBlob(id, name string, content []byte) (err error) {
 	}
 	fb := &foundBlob{name: name, locs: map[string]*change{}}
 	for _, f := range findings {
-		bf := blobFinding{ruleID: f.RuleID, fingerprint: f.Fingerprint(), start: f.StartLine, end: f.EndLine}
+		bf := blobFinding{ruleID: f.RuleID, fingerprint: f.Fingerprint, start: f.StartLine, end: f.EndLine}
 		if _, seen := r.keys[bf.ruleID+"|"+bf.fingerprint]; !seen {
 			if int64(len(r.keys)) >= r.cfg.MaxAlertsPerRepo {
 				r.stop = stopAlerts

@@ -177,7 +177,10 @@ forgejo.org/modules/ratelimit
 
 forgejo.org/modules/secretdetection
 	ValidateCustomRule
-	customRule
+	CustomRule
+	keywordsInMatch
+	checkComplexity
+	Fingerprint
 
 forgejo.org/modules/setting
 	NewConfigProviderFromData

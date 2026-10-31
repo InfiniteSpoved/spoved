@@ -424,7 +424,10 @@ func TestScanPartlyScannedBlobIsIncomplete(t *testing.T) {
 	w := newWork(t, repo)
 	w.commit(map[string]string{"p.txt": token("partial") + "\n"})
 	w.pushDefault()
-	defer test.MockVariableValue(&scanContent, func(d *secretdetection.Detector, c []byte) ([]secretdetection.Finding, bool) { return d.Scan(c), false })()
+	defer test.MockVariableValue(&scanContent, func(d *secretdetection.Detector, c []byte) ([]secretdetection.Finding, bool) {
+		r, _ := d.Scan(c)
+		return r, false
+	})()
 	require.NoError(t, Scan(t.Context(), repo.ID))
 	s := scanOf(t, repo.ID, secretscan_model.KindRepo)
 	assert.Equal(t, secretscan_model.StatusIncomplete, s.Status)
