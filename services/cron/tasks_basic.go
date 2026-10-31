@@ -26,6 +26,7 @@ import (
 	packages_cleanup_service "forgejo.org/services/packages/cleanup"
 	repo_service "forgejo.org/services/repository"
 	archiver_service "forgejo.org/services/repository/archiver"
+	secretscan_service "forgejo.org/services/secretscan"
 	vulnerability_service "forgejo.org/services/vulnerability"
 )
 
@@ -162,6 +163,16 @@ func registerDependencyGraphScan() {
 	})
 }
 
+func registerSecretScanningScan() {
+	RegisterTaskFatal("secret_scanning_scan", &BaseConfig{
+		Enabled:    true,
+		RunAtStart: true,
+		Schedule:   "@every 1h",
+	}, func(ctx context.Context, _ *user_model.User, _ Config) error {
+		return secretscan_service.EnqueueUnscanned(ctx) // does nothing while the site switch is off
+	})
+}
+
 func registerVulnerabilityMirrorUpdate() {
 	RegisterTaskFatal("vulnerability_mirror_update", &BaseConfig{
 		Enabled:    true,
@@ -276,6 +287,7 @@ func initBasicTasks() {
 	registerCleanupHookTaskTable()
 	registerCleanupAuditLog()
 	registerDependencyGraphScan()
+	registerSecretScanningScan()
 	registerVulnerabilityMirrorUpdate()
 	registerStartScheduledAutoMerges()
 	registerProcessMergeQueues()

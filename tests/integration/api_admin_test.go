@@ -433,7 +433,7 @@ func TestAPICron(t *testing.T) {
 
 		var crons []api.Cron
 		DecodeJSON(t, resp, &crons)
-		assert.Len(t, crons, 41)
+		assert.Len(t, crons, 42)
 	})
 
 	t.Run("Execute", func(t *testing.T) {

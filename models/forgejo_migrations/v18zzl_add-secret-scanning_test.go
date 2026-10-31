@@ -1,0 +1,75 @@
+// Copyright 2026 The spoved contributors. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package forgejo_migrations
+
+import (
+	"strings"
+	"testing"
+
+	migration_tests "forgejo.org/models/gitea_migrations/test"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type v18zzlTestRepository struct {
+	ID   int64 `xorm:"pk autoincr"`
+	Name string
+}
+
+func (v18zzlTestRepository) TableName() string {
+	return "repository"
+}
+
+func Test_addSecretScanning(t *testing.T) {
+	x, deferable := migration_tests.PrepareTestEnv(t, 0)
+	defer deferable()
+	require.NotNil(t, x)
+	// a repository that exists before the migration
+	require.NoError(t, x.Sync(new(v18zzlTestRepository)))
+	_, err := x.Insert(&v18zzlTestRepository{Name: "before"})
+	require.NoError(t, err)
+
+	require.NoError(t, addSecretScanning(x))
+	require.NoError(t, addSecretScanning(x), "the migration can run again")
+
+	var disabled []bool
+	require.NoError(t, x.SQL("SELECT secret_scanning_disabled FROM repository WHERE name = 'before'").Find(&disabled))
+	assert.Equal(t, []bool{false}, disabled, "secret scanning is on for a repository by default")
+
+	_, err = x.Exec("INSERT INTO secret_scan (repo_id, kind, scanned_tips, status) VALUES (1, 'repo', ?, 'ok')", strings.Repeat("a", 70000))
+	require.NoError(t, err, "a long list of tips fits (MySQL TEXT would cut it)")
+	_, err = x.Exec("INSERT INTO secret_scan (repo_id, kind) VALUES (1, 'repo')")
+	require.Error(t, err, "one state row per repository and kind")
+	_, err = x.Exec("INSERT INTO secret_scan (repo_id, kind) VALUES (1, 'wiki')")
+	require.NoError(t, err)
+	var version []int64
+	require.NoError(t, x.SQL("SELECT version FROM secret_scan WHERE kind = 'wiki'").Find(&version))
+	assert.Equal(t, []int64{0}, version)
+
+	fp := strings.Repeat("f", 64)
+	insertAlert := "INSERT INTO secret_scanning_alert (repo_id, `index`, rule_id, fingerprint) VALUES (?, ?, ?, ?)"
+	_, err = x.Exec(insertAlert, 1, 1, "github-token", fp)
+	require.NoError(t, err)
+	_, err = x.Exec(insertAlert, 1, 2, "github-token", fp)
+	require.Error(t, err, "one alert per repository, rule and fingerprint")
+	_, err = x.Exec(insertAlert, 1, 1, "gitlab-token", fp)
+	require.Error(t, err, "one alert per repository and number")
+	_, err = x.Exec(insertAlert, 2, 1, "github-token", fp)
+	require.NoError(t, err, "the same secret in another repository")
+	var state []string
+	require.NoError(t, x.SQL("SELECT state FROM secret_scanning_alert WHERE repo_id = 1").Find(&state))
+	assert.Equal(t, []string{"open"}, state)
+
+	insertLocation := "INSERT INTO secret_scanning_location (alert_id, repo_id, kind, blob_id, path, path_hash, start_line) VALUES (1, 1, ?, 'b1', 'p', 'h', ?)"
+	_, err = x.Exec(insertLocation, "repo", 3)
+	require.NoError(t, err)
+	_, err = x.Exec(insertLocation, "repo", 3)
+	require.Error(t, err, "one location per alert, kind, blob, path and line")
+	_, err = x.Exec(insertLocation, "wiki", 3)
+	require.NoError(t, err)
+
+	_, err = x.Exec("INSERT INTO secret_scanning_alert_index (group_id, max_index) VALUES (1, 1)")
+	require.NoError(t, err)
+}

@@ -133,9 +133,6 @@ forgejo.org/modules/jwtx
 	NewVerifier
 	Verifier.Parse
 
-forgejo.org/modules/keying
-	MACKey
-
 forgejo.org/modules/log
 	eventWriterBuffer.Close
 	eventWriterBuffer.Write
@@ -178,10 +175,15 @@ forgejo.org/modules/queue/lqinternal
 forgejo.org/modules/ratelimit
 	ResetForTest
 
+forgejo.org/modules/secretdetection
+	ValidateCustomRule
+	customRule
+
 forgejo.org/modules/setting
 	NewConfigProviderFromData
 	GitConfigType.GetOption
 	InitLoggersForTest
+	SecretScanningLimit.Get
 	checkSigningOnlySymmetric
 	checkValidationOnlySymmetric
 	onlySymmetric

@@ -60,6 +60,7 @@ import (
 	release_service "forgejo.org/services/release"
 	repo_service "forgejo.org/services/repository"
 	"forgejo.org/services/repository/archiver"
+	secretscan_service "forgejo.org/services/secretscan"
 	"forgejo.org/services/stats"
 	"forgejo.org/services/task"
 	"forgejo.org/services/uinotification"
@@ -165,6 +166,7 @@ func InitWebInstalled(ctx context.Context) {
 	mustInit(mergequeue.Init)
 	mustInit(mergeforward.Init)
 	mustInit(dependency_service.Init)
+	mustInit(secretscan_service.Init)
 	mustInit(vulnerability_service.Init)
 	mustInit(task.Init)
 	mustInit(migrations_allowlist.Init)
