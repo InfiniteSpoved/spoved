@@ -138,9 +138,12 @@ func GetSecretScanningStatus(ctx *context.APIContext) {
 		ctx.Error(http.StatusInternalServerError, "FindScans", err)
 		return
 	}
-	if !ctx.Permission().CanRead(unit.TypeWiki) { // the wiki's state is for those who can read it
-		scans = slices.DeleteFunc(scans, func(s *secretscan_model.Scan) bool { return s.Kind == secretscan_model.KindWiki })
-	}
+	// the wiki's state is for those who can read it, the text's for those who can read its units
+	canReadWiki := ctx.Permission().CanRead(unit.TypeWiki)
+	canReadText := secretscan_service.TextStatusVisible(ctx, ctx.Repo().Repository, ctx.Permission().CanRead)
+	scans = slices.DeleteFunc(scans, func(s *secretscan_model.Scan) bool {
+		return s.Kind == secretscan_model.KindWiki && !canReadWiki || s.Kind == secretscan_model.KindIssue && !canReadText
+	})
 	ctx.JSON(http.StatusOK, convert.ToSecretScanningStatus(scans))
 }
 

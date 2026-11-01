@@ -79,6 +79,42 @@ func MarkTextGone(ctx context.Context, repoID int64, kind string, id int64) erro
 	return err
 }
 
+// MarkOrphanTextGone marks removed the places of the repository's issues and comments that no longer exist: rows
+// deleted without a notifier (a purged user's comments, say). The end of a backfill runs it, one query per kind.
+func MarkOrphanTextGone(ctx context.Context, repoID int64) error {
+	now := int64(timeutil.TimeStampNow())
+	for kind, table := range map[string]string{KindIssue: "issue", KindComment: "comment"} {
+		if _, err := db.GetEngine(ctx).Where(builder.Eq{"repo_id": repoID, "kind": kind, "removed_unix": 0}.
+			And(builder.NotIn("source_id", builder.Select("id").From(table)))).
+			Cols("removed_unix").Update(&Location{RemovedUnix: now}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CountOpenTextAlertsByPoster counts, for each of the posters, the open alerts that only pull refs or text reach
+// (ViaPull) and that have a place in a text of theirs, in one query.
+func CountOpenTextAlertsByPoster(ctx context.Context, repoID int64, posters []int64) (map[int64]int64, error) {
+	out := map[int64]int64{}
+	if len(posters) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		PosterID int64
+		N        int64
+	}
+	err := db.GetEngine(ctx).Table("secret_scanning_location").Select("secret_scanning_location.poster_id, COUNT(DISTINCT secret_scanning_location.alert_id) AS n").
+		Join("INNER", "secret_scanning_alert", "secret_scanning_alert.id = secret_scanning_location.alert_id").
+		Where(builder.Eq{"secret_scanning_location.repo_id": repoID, "secret_scanning_alert.state": StateOpen, "secret_scanning_alert.via_pull": true}.
+			And(builder.In("secret_scanning_location.kind", TextKinds), builder.In("secret_scanning_location.poster_id", posters))).
+		GroupBy("secret_scanning_location.poster_id").Find(&rows)
+	for _, r := range rows {
+		out[r.PosterID] = r.N
+	}
+	return out, err
+}
+
 // AddTextHoles adds to the holes of the repository's text scan row (the text over the size limit that was cut, or that
 // the detector could not scan whole). A repository whose text was not scanned yet has no row: its backfill counts them.
 func AddTextHoles(ctx context.Context, repoID, n int64) error {

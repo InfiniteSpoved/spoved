@@ -21,6 +21,7 @@ import (
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
+	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/graceful"
 	"forgejo.org/modules/json"
@@ -29,6 +30,8 @@ import (
 	"forgejo.org/modules/secretdetection"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
+
+	"xorm.io/builder"
 )
 
 // The text of issues, pull requests and comments is scanned from a second unique queue of items: "i:<issue ID>" (title
@@ -53,11 +56,15 @@ const (
 // maxTextItems is the issues and comments one slice of the backfill reads (a variable for the tests).
 var maxTextItems = 2000
 
-// textCommentTypes are the comment types that carry text a person wrote.
-var textCommentTypes = []issues_model.CommentType{issues_model.CommentTypeComment, issues_model.CommentTypeCode, issues_model.CommentTypeReview}
+// maxTextRetries is how often an item whose scan failed (a store error, a lost connection) is queued again.
+const maxTextRetries = 5
 
-// dataURI is the payload of a data: URI, which would only feed the entropy rules and the cost; the rest of the line stays.
-var dataURI = regexp.MustCompile(`(?i)(data:[a-z0-9.+/-]{0,64};base64,)[a-z0-9+/=_-]{1000,}`)
+// textCommentTypes are the comment types that carry text a person wrote (a dismissed review's message too).
+var textCommentTypes = []issues_model.CommentType{issues_model.CommentTypeComment, issues_model.CommentTypeCode, issues_model.CommentTypeReview, issues_model.CommentTypeDismissReview}
+
+// dataURI is the payload of a data: URI, which would only feed the entropy rules and the cost; the rest of the line
+// stays. The payload is the base64 alphabet only, so a token glued to its end (after a "_" or "-") is still scanned.
+var dataURI = regexp.MustCompile(`(?i)(data:[a-z0-9.+/-]{0,64};base64,)[a-z0-9+/=]{1000,}`)
 
 func stripDataURIs(s string) string {
 	if !strings.Contains(s, "base64,") {
@@ -89,6 +96,8 @@ func enqueueTextGone(ctx context.Context, kind string, repoID, id int64) {
 	enqueueText(ctx, fmt.Sprintf("x:%s:%d:%d", kind, repoID, id))
 }
 
+// textHandler runs the items. One that fails is queued again with its try counted ("#n"), at most maxTextRetries
+// times: the backfill of a repository runs once, so a dropped item would leave its text unscanned.
 func textHandler(items ...string) (unhandled []string) {
 	ctx := graceful.GetManager().ShutdownContext()
 	for _, item := range items {
@@ -98,20 +107,41 @@ func textHandler(items ...string) (unhandled []string) {
 				continue
 			}
 			log.Error("secret scanning: scan of text %q: %v", item, err)
+			if next, ok := retryTextItem(item); ok {
+				unhandled = append(unhandled, next)
+			}
 		}
 	}
 	return unhandled
 }
 
+// retryTextItem is the item with its try counted, or false once it has had maxTextRetries tries.
+func retryTextItem(item string) (string, bool) {
+	base, tries, _ := strings.Cut(item, "#")
+	n, _ := strconv.Atoi(tries)
+	if n >= maxTextRetries {
+		return "", false
+	}
+	return base + "#" + strconv.Itoa(n+1), true
+}
+
+// lockText holds the repository against its scan and the other text items (repoScans) from before its text is read
+// until the store, so that a pass never stores what an older read of the text found.
+func lockText(repoID int64) func() {
+	return repoScans.Lock(strconv.FormatInt(repoID, 10))
+}
+
 // handleText runs one queue item. A panic (the keying is not set up, a detector bug) is logged and drops the item.
 func handleText(ctx context.Context, item string) (err error) {
+	var repoID int64
 	defer func() {
 		if p := recover(); p != nil {
-			log.Error("secret scanning: panic (%T) scanning text %q", p, item)
+			log.Error("secret scanning: panic (%T) scanning text %q of repository %d", p, item, repoID)
 			err = nil
 		}
 	}()
-	parts := strings.Split(item, ":")
+	base, _, _ := strings.Cut(item, "#")
+	parts := strings.Split(base, ":")
 	nums := make([]int64, 0, 3)
 	for _, p := range parts[1:] {
 		if n, perr := strconv.ParseInt(p, 10, 64); perr == nil {
@@ -120,17 +150,29 @@ func handleText(ctx context.Context, item string) (err error) {
 	}
 	switch {
 	case parts[0] == "i" && len(nums) == 1:
-		return scanIssueText(ctx, nums[0])
+		return scanIssueText(ctx, nums[0], &repoID)
 	case parts[0] == "c" && len(nums) == 1:
-		return scanCommentText(ctx, nums[0])
+		return scanCommentText(ctx, nums[0], &repoID)
 	case parts[0] == "x" && len(parts) == 4 && len(nums) == 2:
+		repoID = nums[0]
+		defer lockText(repoID)()
 		return secretscan_model.MarkTextGone(ctx, nums[0], parts[1], nums[1])
 	}
 	return nil
 }
 
-// textRepo returns the repository when its text is to be scanned: scanning is on for it and text is part of it.
-func textRepo(ctx context.Context, repoID int64) (*repo_model.Repository, setting.SecretScanningOptions, bool) {
+// textUnit is the unit an issue's text belongs to.
+func textUnit(isPull bool) unit.Type {
+	if isPull {
+		return unit.TypePullRequests
+	}
+	return unit.TypeIssues
+}
+
+// textRepo returns the repository when the text of an issue (a pull request with isPull) is to be scanned: scanning
+// is on for it, text is part of it and the unit is on (the unit policy and the organization's units included). Text
+// in a unit that is off or hidden is not scanned: no alert tells of it.
+func textRepo(ctx context.Context, repoID int64, isPull bool) (*repo_model.Repository, setting.SecretScanningOptions, bool) {
 	cfg := setting.SecretScanningSettings(ctx)
 	if !cfg.ScanText || !SiteEnabled(ctx) {
 		return nil, cfg, false
@@ -142,10 +184,21 @@ func textRepo(ctx context.Context, repoID int64) (*repo_model.Repository, settin
 		}
 		return nil, cfg, false
 	}
-	return repo, cfg, Enabled(ctx, repo) && repo.Status == repo_model.RepositoryReady
+	return repo, cfg, Enabled(ctx, repo) && repo.Status == repo_model.RepositoryReady && repo.UnitEnabled(ctx, textUnit(isPull))
 }
 
-func scanIssueText(ctx context.Context, id int64) error {
+// TextStatusVisible tells whether a viewer may see the state of the repository's text scan (its holes and status):
+// it covers the Issues and Pull requests units that are on, so the viewer must be able to read each of them.
+func TextStatusVisible(ctx context.Context, repo *repo_model.Repository, canRead func(unit.Type) bool) bool {
+	for _, u := range []unit.Type{unit.TypeIssues, unit.TypePullRequests} {
+		if repo.UnitEnabled(ctx, u) && !canRead(u) {
+			return false
+		}
+	}
+	return true
+}
+
+func scanIssueText(ctx context.Context, id int64, repoID *int64) error {
 	issue, err := issues_model.GetIssueByID(ctx, id)
 	if err != nil {
 		if issues_model.IsErrIssueNotExist(err) {
@@ -153,9 +206,17 @@ func scanIssueText(ctx context.Context, id int64) error {
 		}
 		return err
 	}
-	repo, cfg, ok := textRepo(ctx, issue.RepoID)
+	*repoID = issue.RepoID
+	repo, cfg, ok := textRepo(ctx, issue.RepoID, issue.IsPull)
 	if !ok {
 		return nil
+	}
+	defer lockText(repo.ID)()
+	if issue, err = issues_model.GetIssueByID(ctx, id); err != nil { // as it is now, under the lock
+		if issues_model.IsErrIssueNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	t, err := newTextScan(ctx, repo, cfg)
 	if err != nil {
@@ -165,7 +226,7 @@ func scanIssueText(ctx context.Context, id int64) error {
 	return t.flush(nil)
 }
 
-func scanCommentText(ctx context.Context, id int64) error {
+func scanCommentText(ctx context.Context, id int64, repoID *int64) error {
 	c, err := issues_model.GetCommentByID(ctx, id)
 	if err != nil {
 		if issues_model.IsErrCommentNotExist(err) {
@@ -180,9 +241,17 @@ func scanCommentText(ctx context.Context, id int64) error {
 		}
 		return err
 	}
-	repo, cfg, ok := textRepo(ctx, issue.RepoID)
+	*repoID = issue.RepoID
+	repo, cfg, ok := textRepo(ctx, issue.RepoID, issue.IsPull)
 	if !ok || !slices.Contains(textCommentTypes, c.Type) {
 		return nil
+	}
+	defer lockText(repo.ID)()
+	if c, err = issues_model.GetCommentByID(ctx, id); err != nil { // as it is now, under the lock
+		if issues_model.IsErrCommentNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	if pending, err := pendingReviews(ctx, []*issues_model.Comment{c}); err != nil || pending[c.ReviewID] {
 		return err // a draft is not published: it is scanned when the review is submitted
@@ -299,21 +368,30 @@ func (t *textScan) addComment(c *issues_model.Comment) {
 	t.add(secretscan_model.TextSource{Kind: secretscan_model.KindComment, ID: c.ID}, c.IssueID, poster(c.PosterID, c.OriginalAuthorID), c.Content)
 }
 
-// add scans one text. A text over MAX_TEXT_BYTES is cut (a hole), as is one the detector could not scan whole.
+// add scans one text. Its data: URI payloads are dropped first; a text still over MAX_TEXT_BYTES is cut (a hole), as
+// is one the detector could not scan whole. Only a text read to its end tells which of its places are gone.
 func (t *textScan) add(src secretscan_model.TextSource, issueID, posterID int64, text string) {
 	places := map[secretscan_model.PlaceKey]bool{}
-	t.found[src] = places
 	t.read += int64(len(text))
+	text = stripDataURIs(text)
+	whole := true
 	if int64(len(text)) > t.cfg.MaxTextBytes {
 		text = strings.ToValidUTF8(text[:t.cfg.MaxTextBytes], "")
 		t.holes++
+		whole = false
 	}
+	defer func() {
+		if whole {
+			t.found[src] = places
+		}
+	}()
 	if text == "" {
 		return
 	}
-	findings, complete := scanContent(t.detector, []byte(stripDataURIs(text)))
+	findings, complete := scanContent(t.detector, []byte(text))
 	if !complete {
 		t.holes++
+		whole = false
 	}
 	byKey := t.cands[src.Kind]
 	if byKey == nil {
@@ -330,7 +408,7 @@ func (t *textScan) add(src secretscan_model.TextSource, issueID, posterID int64,
 				t.holes++
 				continue
 			}
-			c = &candidate{ruleID: f.RuleID, fingerprint: f.Fingerprint, locs: map[string]*secretscan_model.Location{}}
+			c = &candidate{ruleID: f.RuleID, fingerprint: f.Fingerprint, locs: map[string]*secretscan_model.Location{}, poster: posterID}
 			byKey[key] = c
 		}
 		lk := loc.PathHash + ":" + strconv.Itoa(loc.StartLine)
@@ -359,12 +437,24 @@ func (t *textScan) flush(more func(ctx context.Context, left int64) error) error
 		if owner != t.repo.OwnerID {
 			return errOwnerMoved
 		}
+		var posters []int64
+		for _, byKey := range t.cands {
+			for _, c := range byKey {
+				if c.poster != 0 && !slices.Contains(posters, c.poster) {
+					posters = append(posters, c.poster)
+				}
+			}
+		}
+		byPoster, err := secretscan_model.CountOpenTextAlertsByPoster(ctx, t.repo.ID, posters)
+		if err != nil {
+			return err
+		}
 		var left int64
 		for _, kind := range slices.Sorted(maps.Keys(t.cands)) {
 			cands := slices.SortedFunc(maps.Values(t.cands[kind]), func(a, b *candidate) int {
 				return cmp.Or(cmp.Compare(a.ruleID, b.ruleID), cmp.Compare(a.fingerprint, b.fingerprint))
 			})
-			l, err := writeAlerts(ctx, t.cfg, t.repo.ID, kind, true, cands)
+			l, err := writeAlerts(ctx, t.cfg, t.repo.ID, kind, true, cands, byPoster)
 			if err != nil {
 				return err
 			}
@@ -384,20 +474,32 @@ func (t *textScan) flush(more func(ctx context.Context, left int64) error) error
 	return err
 }
 
-// textCursor is where the scan of a repository's text is: issues up to Issue are done, Cur is the issue whose comments
-// are being read (its title and body are done) and Comment the last comment of it that is.
+// textCursor is where the scan of a repository's text is: issues up to Issue are done; Batch, when set, is the last
+// issue of the batch under way (issues after Issue up to it: their titles and bodies are done), whose comments are
+// done up to comment Comment of issue CIssue (in issue, then comment order).
 type textCursor struct {
 	Issue   int64 `json:"i"`
-	Cur     int64 `json:"p,omitempty"`
+	Batch   int64 `json:"b,omitempty"`
+	CIssue  int64 `json:"p,omitempty"`
 	Comment int64 `json:"c,omitempty"`
 }
 
-// scanText reads the text of the repository that is there already, one slice per call, after its code was scanned. It
-// goes on from the cursor kept in the state row of kind issue and is done once that row has no retry time. A text that
-// a notifier scan reads meanwhile is stored once (the places are unique).
+// scanText reads the text of the repository that is there already, one slice per call, after its code. It goes on
+// from the cursor kept in the state row of kind issue and is done once that row has a status and no retry time (a row
+// that Rescan or turning the text scan on reset has none: it starts again). Issues are read a batch at a time, and
+// the comments of a batch with one query per page; only the issues and pull requests whose unit is on.
 func (s *scanner) scanText() (requeue bool, err error) {
 	if !s.cfg.ScanText {
 		return false, nil
+	}
+	var isPull []bool
+	for _, pull := range []bool{false, true} {
+		if s.repo.UnitEnabled(s.ctx, textUnit(pull)) {
+			isPull = append(isPull, pull)
+		}
+	}
+	if len(isPull) == 0 {
+		return false, nil // no text to read: a unit turned on later reads it then
 	}
 	old, err := secretscan_model.GetScan(s.ctx, s.repo.ID, secretscan_model.KindIssue)
 	if err != nil {
@@ -405,10 +507,10 @@ func (s *scanner) scanText() (requeue bool, err error) {
 	}
 	var cur textCursor
 	if old != nil {
-		if old.RetryUnix == 0 || old.FailCount > 0 && timeutil.TimeStampNow() < old.RetryUnix {
+		if old.Status != "" && (old.RetryUnix == 0 || old.FailCount > 0 && timeutil.TimeStampNow() < old.RetryUnix) {
 			return false, nil // done, or a failure waiting out its backoff
 		}
-		_ = json.Unmarshal([]byte(old.ScannedTips), &cur) // a state that can't be read reads everything again
+		_ = json.Unmarshal([]byte(old.ScannedTips), &cur) // a state that can't be read (a reset row) reads everything again
 	}
 	t, err := newTextScan(s.ctx, s.repo, s.cfg)
 	if err != nil {
@@ -417,44 +519,59 @@ func (s *scanner) scanText() (requeue bool, err error) {
 	items := 0
 	done := false
 	more := func() bool { return items < maxTextItems && t.read < maxTextSliceBytes && s.scanCtx.Err() == nil }
+	issueCond := builder.Eq{"repo_id": s.repo.ID}.And(builder.In("is_pull", isPull))
 	for more() && !done {
-		if cur.Cur == 0 {
-			var issues []*issues_model.Issue
-			if err := db.GetEngine(s.ctx).Where("repo_id = ? AND id > ?", s.repo.ID, cur.Issue).OrderBy("id").Limit(textBatch).Find(&issues); err != nil {
+		var issues []*issues_model.Issue
+		if cur.Batch == 0 { // a new batch: its titles and bodies
+			if err := db.GetEngine(s.ctx).Where(issueCond.And(builder.Gt{"id": cur.Issue})).OrderBy("id").Limit(textBatch).Find(&issues); err != nil {
 				return false, err
 			}
 			if len(issues) == 0 {
 				done = true
 				break
 			}
-			cur.Cur = issues[0].ID
-			t.addIssue(issues[0])
-			items++
-			continue
-		}
-		var comments []*issues_model.Comment
-		if err := db.GetEngine(s.ctx).Where("issue_id = ? AND id > ?", cur.Cur, cur.Comment).In("type", textCommentTypes).
-			OrderBy("id").Limit(textBatch).Find(&comments); err != nil {
-			return false, err
-		}
-		pending, err := pendingReviews(s.ctx, comments)
-		if err != nil {
-			return false, err
-		}
-		read := 0
-		for _, c := range comments {
-			cur.Comment = c.ID // a draft is skipped; its review's submission scans it
-			read++
-			if !pending[c.ReviewID] {
-				t.addComment(c)
+			for _, issue := range issues {
+				t.addIssue(issue)
 				items++
 			}
-			if !more() {
-				break
-			}
+			cur.Batch = issues[len(issues)-1].ID
+		} else if err := db.GetEngine(s.ctx).Cols("id").Where(issueCond.And(builder.Gt{"id": cur.Issue}, builder.Lte{"id": cur.Batch})).Find(&issues); err != nil {
+			return false, err // the batch a slice ended in: its issues again, for their comments
 		}
-		if read == len(comments) && len(comments) < textBatch { // the issue's comments are all read
-			cur.Issue, cur.Cur, cur.Comment = cur.Cur, 0, 0
+		ids := make([]int64, 0, len(issues))
+		for _, issue := range issues {
+			ids = append(ids, issue.ID)
+		}
+		for more() && cur.Batch != 0 { // its comments, a page at a time
+			var comments []*issues_model.Comment
+			if len(ids) > 0 {
+				if err := db.GetEngine(s.ctx).Where(builder.In("issue_id", ids).And(builder.In("type", textCommentTypes),
+					builder.Or(builder.Gt{"issue_id": cur.CIssue}, builder.Eq{"issue_id": cur.CIssue}.And(builder.Gt{"id": cur.Comment})))).
+					OrderBy("issue_id, id").Limit(textBatch).Find(&comments); err != nil {
+					return false, err
+				}
+			}
+			pending, err := pendingReviews(s.ctx, comments)
+			if err != nil {
+				return false, err
+			}
+			read := 0
+			for _, c := range comments {
+				cur.CIssue, cur.Comment = c.IssueID, c.ID
+				read++
+				items++
+				if pending[c.ReviewID] {
+					t.read += int64(len(c.Content)) // a draft is skipped, but it was read; its review's submission scans it
+				} else {
+					t.addComment(c)
+				}
+				if !more() {
+					break
+				}
+			}
+			if read == len(comments) && len(comments) < textBatch { // the batch is done
+				cur = textCursor{Issue: cur.Batch}
+			}
 		}
 	}
 	return s.saveText(old, cur, t, done)
@@ -468,6 +585,11 @@ func (s *scanner) saveText(old *secretscan_model.Scan, cur textCursor, t *textSc
 		st.Holes = old.Holes
 	}
 	err = t.flush(func(ctx context.Context, left int64) error {
+		if done { // the texts deleted without a notifier (a purged user's comments) were not read
+			if err := secretscan_model.MarkOrphanTextGone(ctx, s.repo.ID); err != nil {
+				return err
+			}
+		}
 		st.Holes += t.holes + left
 		switch {
 		case !done:

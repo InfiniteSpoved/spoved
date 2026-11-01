@@ -74,7 +74,8 @@ type Scan struct {
 	RepoID int64  `xorm:"UNIQUE(repo_kind) NOT NULL"`
 	Kind   string `xorm:"VARCHAR(8) UNIQUE(repo_kind) NOT NULL"`
 	// ScannedTips is a JSON list of commit IDs whose whole history is scanned. It holds ref tips (those of refs/pull/*
-	// in the pull row), so it is never shown: no API or page returns it (only status, counts and the error code).
+	// in the pull row), so it is never shown: no API or page returns it (only status, counts and the error code). In
+	// the row of kind issue (the text scan) it holds the backfill's cursor, a JSON object of issue and comment IDs.
 	ScannedTips string `xorm:"LONGTEXT"`
 	Status      string `xorm:"VARCHAR(16) NOT NULL DEFAULT ''"`
 	Error       string `xorm:"VARCHAR(32) NOT NULL DEFAULT ''"` // a code, never text from git
@@ -490,6 +491,21 @@ func MarkRequeue(ctx context.Context, orgID int64) error {
 	}
 	_, err := db.GetEngine(ctx).NoAutoTime().
 		Where(builder.And(builder.Eq{"kind": KindRepo}, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scannedRepoCond(orgID))))).
+		Incr("requeue").Update(&Scan{})
+	return err
+}
+
+// ResetTextScans makes every repository's text scan start from the beginning (its row reset as ResetScans does) and
+// marks the scanned repositories to be scanned again, in the transaction that turns the text scan on: text written
+// while it was off was not scanned.
+func ResetTextScans(ctx context.Context) error {
+	if _, err := db.GetEngine(ctx).Exec(
+		"UPDATE secret_scan SET scanned_tips = '[]', status = '', error = '', fail_count = 0, retry_unix = 0, holes = 0, version = version + 1 WHERE kind = ?", KindIssue,
+	); err != nil {
+		return err
+	}
+	_, err := db.GetEngine(ctx).NoAutoTime().
+		Where(builder.And(builder.Eq{"kind": KindRepo}, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scannedRepoCond(0))))).
 		Incr("requeue").Update(&Scan{})
 	return err
 }

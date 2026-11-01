@@ -126,9 +126,10 @@ func scanStatus(ctx *context.Context, canReadWiki bool) (*api.SecretScanningStat
 	if err != nil {
 		return nil, err
 	}
-	if !canReadWiki {
-		scans = slices.DeleteFunc(scans, func(s *secretscan_model.Scan) bool { return s.Kind == secretscan_model.KindWiki })
-	}
+	canReadText := secretscan_service.TextStatusVisible(ctx, ctx.Repo.Repository, ctx.Repo.CanRead)
+	scans = slices.DeleteFunc(scans, func(s *secretscan_model.Scan) bool {
+		return s.Kind == secretscan_model.KindWiki && !canReadWiki || s.Kind == secretscan_model.KindIssue && !canReadText
+	})
 	return convert.ToSecretScanningStatus(scans), nil
 }
 

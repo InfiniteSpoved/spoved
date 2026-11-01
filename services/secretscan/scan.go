@@ -200,11 +200,12 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 			states[kind] = readKindState(ctx, repo.ID, kind)
 		}
 	}
-	if err == nil && !requeue {
-		// the text there is already is read after the code, a slice at a time
-		var rq bool
-		rq, err = s.scanText()
+	if !requeue && ctx.Err() == nil {
+		// the text there is already is read after the code, a slice at a time; it doesn't depend on the code's tips, so
+		// a code scan that failed (and backs off) doesn't hold it up
+		rq, terr := s.scanText()
 		requeue = requeue || rq
+		err = errors.Join(err, terr)
 	}
 	finishDigest(ctx, repo, mark, states) // waits for the kinds the push touched, never for the pull refs
 	if mark == nil && states[secretscan_model.KindRepo].current {
@@ -253,6 +254,7 @@ type candidate struct {
 	ruleID, fingerprint string
 	locs                map[string]*secretscan_model.Location // by path hash and line
 	extra               int
+	poster              int64 // of a secret in text: who wrote the first place found (0: nobody known)
 }
 
 // run is the scan of one git repository (the repository, its wiki or its pull refs) in one slice.
@@ -704,7 +706,7 @@ func (r *run) write(st *secretscan_model.Scan, cands []*candidate) error {
 		if owner != r.repo.OwnerID {
 			return errOwnerMoved
 		}
-		left, err := writeAlerts(ctx, cfg, r.repo.ID, locKind(r.kind), r.kind == secretscan_model.KindPull, cands)
+		left, err := writeAlerts(ctx, cfg, r.repo.ID, locKind(r.kind), r.kind == secretscan_model.KindPull, cands, nil)
 		if err != nil {
 			return err
 		}
@@ -753,7 +755,9 @@ func customCap(limit int64) int64 { return max(limit/2, 1) }
 // when half of that many open alerts are of that kind: the branches and tags always have room. Custom patterns have
 // half as many of their own on top (customCap), so they never take a built-in rule's room, and their pull-only alerts
 // a quarter of that share.
-func writeAlerts(ctx context.Context, cfg setting.SecretScanningOptions, repoID int64, kind string, viaPull bool, cands []*candidate) (left int64, err error) {
+// byPoster, for text (nil for code), counts the open alerts of each poster (CountOpenTextAlertsByPoster): one poster
+// opens at most a quarter of the pull refs' share, so a reader posting tokens can't take all of it.
+func writeAlerts(ctx context.Context, cfg setting.SecretScanningOptions, repoID int64, kind string, viaPull bool, cands []*candidate, byPoster map[int64]int64) (left int64, err error) {
 	if len(cands) == 0 {
 		return 0, nil
 	}
@@ -769,6 +773,7 @@ func writeAlerts(ctx context.Context, cfg setting.SecretScanningOptions, repoID 
 		}
 		return &n.Total, &n.ViaPull, cfg.MaxAlertsPerRepo, max(cfg.MaxAlertsPerRepo/2, 1)
 	}
+	posterCap := max(max(cfg.MaxAlertsPerRepo/2, 1)/4, 1)
 	for batch := range slices.Chunk(cands, alertBatch) {
 		fingerprints := make([]string, len(batch))
 		for i, c := range batch {
@@ -791,9 +796,13 @@ func writeAlerts(ctx context.Context, cfg setting.SecretScanningOptions, repoID 
 				rule, _ := secretdetection.RuleByID(c.ruleID)
 				_, custom := secretscan_model.ParseCustomRuleID(c.ruleID)
 				total, pulls, limit, pullLimit := counts(custom)
-				if *total >= limit || viaPull && *pulls >= pullLimit {
+				byThem := byPoster != nil && c.poster != 0
+				if *total >= limit || viaPull && *pulls >= pullLimit || byThem && byPoster[c.poster] >= posterCap {
 					left++
 					break
+				}
+				if byThem {
+					byPoster[c.poster]++
 				}
 				if custom {
 					rule.Type = "custom"

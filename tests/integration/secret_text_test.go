@@ -12,7 +12,10 @@ import (
 
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
+	"forgejo.org/models/unit"
+	"forgejo.org/models/unittest"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
@@ -126,5 +129,46 @@ func TestSecretScanningTextSwitch(t *testing.T) {
 		bumpSettingsRevision(t)
 		assert.EqualValues(t, 64<<10, effective().MaxTextBytes)
 		admin.MakeRequest(t, NewRequestWithValues(t, "POST", "/admin/config/secret-scanning/limits", map[string]string{"max_text_bytes": "0.5"}), http.StatusUnprocessableEntity)
+	})
+}
+
+// A text-only alert in a repository without a wiki (so nobody can read it) is listed, and it can be opened and closed
+// on the page and through the API: its places stay hidden, the alert itself is the code writers'.
+func TestSecretTextOnlyAlertWithoutWiki(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer test.MockVariableValue(&setting.SecretScanning.Enabled, true)()
+	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
+	_, err := db.GetEngine(t.Context()).Where("repo_id = ? AND type = ?", repo.ID, unit.TypeWiki).Delete(new(repo_model.RepoUnit))
+	require.NoError(t, err)
+	a := seedSecretAlert(t, repo, "github-token", "github", secretscan_model.KindComment, "")
+	b := seedSecretAlert(t, repo, "github-token", "github", secretscan_model.KindIssue, "body")
+	session := loginUser(t, "user2")
+	write := getUserToken(t, "user2", auth_model.AccessTokenScopeWriteRepository)
+	const alerts = "/api/v1/repos/user2/repo1/secret-scanning/alerts"
+
+	var list []*api.SecretScanningAlert
+	DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", alerts).AddTokenAuth(write), http.StatusOK), &list)
+	numbers := map[int64]bool{}
+	for _, al := range list {
+		numbers[al.Number] = true
+	}
+	assert.True(t, numbers[a.Index] && numbers[b.Index], "listed")
+	assert.Contains(t, session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/security/secrets"), http.StatusOK).Body.String(),
+		fmt.Sprintf("/user2/repo1/security/secrets/%d", a.Index))
+
+	session.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/user2/repo1/security/secrets/%d", a.Index)), http.StatusOK)
+	MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("%s/%d", alerts, a.Index)).AddTokenAuth(write), http.StatusOK)
+	session.MakeRequest(t, NewRequestWithValues(t, "POST", fmt.Sprintf("/user2/repo1/security/secrets/%d/close", a.Index), map[string]string{"reason": "revoked"}), http.StatusSeeOther)
+	assert.Equal(t, secretscan_model.StateRevoked, secretAlertRow(t, repo.ID, a.Index).State)
+	MakeRequest(t, NewRequestWithJSON(t, "PATCH", fmt.Sprintf("%s/%d", alerts, b.Index), map[string]string{"state": "resolved", "resolution": "revoked"}).AddTokenAuth(write), http.StatusOK)
+	assert.Equal(t, secretscan_model.StateRevoked, secretAlertRow(t, repo.ID, b.Index).State)
+
+	var locs []*api.SecretScanningLocation
+	DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("%s/%d/locations", alerts, a.Index)).AddTokenAuth(write), http.StatusOK), &locs)
+	assert.Empty(t, locs, "the places in text stay hidden")
+
+	t.Run("a path search doesn't find the places in text", func(t *testing.T) {
+		body := session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/security/secrets?state=closed&q=body"), http.StatusOK).Body.String()
+		assert.NotContains(t, body, fmt.Sprintf("/user2/repo1/security/secrets/%d\"", b.Index))
 	})
 }

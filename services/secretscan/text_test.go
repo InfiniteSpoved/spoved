@@ -5,13 +5,19 @@ package secretscan
 
 import (
 	"fmt"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
+	"forgejo.org/models/unit"
+	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/queue"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
@@ -105,9 +111,13 @@ func TestScanTextIssueAndComment(t *testing.T) {
 		found, err := secretscan_model.FindLocations(t.Context(), repo.ID, a.ID, 10)
 		require.NoError(t, err)
 		assert.Empty(t, found)
+		// the alert itself is listed for viewers without Wiki read, so it can be opened by them too
 		has, err := secretscan_model.HasCodeLocation(t.Context(), repo.ID, a.ID)
 		require.NoError(t, err)
-		assert.False(t, has)
+		assert.True(t, has)
+		got, err := secretscan_model.GetVisibleAlert(t.Context(), repo.ID, a.Index, false)
+		require.NoError(t, err)
+		assert.Equal(t, a.ID, got.ID)
 	})
 
 	t.Run("the same text again stores nothing new", func(t *testing.T) {
@@ -369,7 +379,253 @@ func TestScanTextNotifierQueuesItems(t *testing.T) {
 func TestStripDataURIs(t *testing.T) {
 	long := strings.Repeat("A", 1200)
 	assert.Equal(t, "see data:image/png;base64, here", stripDataURIs("see data:image/png;base64,"+long+" here"))
+	assert.Equal(t, "data:image/png;base64,_x-y", stripDataURIs("data:image/png;base64,"+long+"_x-y"), "only the base64 alphabet is the payload")
 	short := "data:image/png;base64," + strings.Repeat("A", 100)
 	assert.Equal(t, short, stripDataURIs(short), "a short payload is kept")
 	assert.Equal(t, "no uri "+long, stripDataURIs("no uri "+long))
+}
+
+// A text, a second text and the code holding the same new secret, handled at once: every pass stores, one alert.
+func TestScanTextConcurrentWithCode(t *testing.T) {
+	repo := enableText(t)
+	tok := token("concurrent")
+	w := newWork(t, repo)
+	w.commit(map[string]string{"conf.txt": tok + "\n"})
+	w.pushDefault()
+	issue := newIssue(t, repo, "t", tok)
+	c := newComment(t, issue, tok)
+
+	var wg sync.WaitGroup
+	errs := make([]error, 3)
+	for i, run := range []func() error{
+		func() error { return Scan(t.Context(), repo.ID) },
+		func() error { return handleText(t.Context(), fmt.Sprintf("i:%d", issue.ID)) },
+		func() error { return handleText(t.Context(), fmt.Sprintf("c:%d", c.ID)) },
+	} {
+		wg.Go(func() { errs[i] = run() })
+	}
+	wg.Wait()
+	for _, err := range errs {
+		require.NoError(t, err)
+	}
+	a := alertFor(t, repo.ID, tok)
+	require.NotNil(t, a)
+	assert.Len(t, alertsOf(t, repo.ID), 1)
+	kinds := map[string]bool{}
+	for _, l := range locationsOf(t, a.ID) {
+		kinds[l.Kind] = true
+	}
+	assert.Equal(t, map[string]bool{secretscan_model.KindRepo: true, secretscan_model.KindIssue: true, secretscan_model.KindComment: true}, kinds)
+	assert.False(t, a.ViaPull, "the code reaches it")
+}
+
+func TestRetryTextItem(t *testing.T) {
+	next, ok := retryTextItem("i:5")
+	assert.True(t, ok)
+	assert.Equal(t, "i:5#1", next)
+	next, ok = retryTextItem(next)
+	assert.True(t, ok)
+	assert.Equal(t, "i:5#2", next)
+	_, ok = retryTextItem(fmt.Sprintf("i:5#%d", maxTextRetries))
+	assert.False(t, ok, "bounded")
+
+	repo := enableText(t)
+	issue := newIssue(t, repo, "t", token("retried"))
+	require.NoError(t, handleText(t.Context(), fmt.Sprintf("i:%d#3", issue.ID)))
+	assert.NotNil(t, alertFor(t, repo.ID, token("retried")), "a retried item is the item")
+}
+
+// Rescan resets the text row too: the text is read again and its holes are counted again.
+func TestScanTextRescan(t *testing.T) {
+	repo := enableText(t)
+	defer test.MockVariableValue(&setting.SecretScanning.MaxTextBytes, 1<<10)()
+	newIssue(t, repo, "t", strings.Repeat("y", 3000))
+	_, err := scan(t.Context(), repo.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, scanOf(t, repo.ID, secretscan_model.KindIssue).Holes)
+	later := token("before-rescan")
+	newIssue(t, repo, "t", later) // written without a notifier
+
+	_, err = secretscan_model.ResetScans(t.Context(), repo.ID)
+	require.NoError(t, err)
+	_, err = scan(t.Context(), repo.ID)
+	require.NoError(t, err)
+	s := scanOf(t, repo.ID, secretscan_model.KindIssue)
+	assert.EqualValues(t, 1, s.Holes, "counted again, not forgotten")
+	assert.Equal(t, secretscan_model.StatusIncomplete, s.Status)
+	assert.NotNil(t, alertFor(t, repo.ID, later), "read again")
+}
+
+// Turning the text scan on (again) resets the text rows and marks the scanned repositories, in the save.
+func TestScanTextSwitchOnRequeues(t *testing.T) {
+	repo := enableText(t)
+	ctx := audit_model.WithSystem(t.Context(), "test")
+	_, err := scan(ctx, repo.ID)
+	require.NoError(t, err)
+	require.NoError(t, secretscan_model.ClearRequeue(ctx, repo.ID, scanOf(t, repo.ID, secretscan_model.KindRepo).Requeue))
+	require.Equal(t, secretscan_model.StatusOK, scanOf(t, repo.ID, secretscan_model.KindIssue).Status)
+	asked := 0
+	defer test.MockVariableValue(&requeue, func() { asked++ })()
+	doer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+
+	_, err = SaveSwitches(ctx, doer, true, false, false)
+	require.NoError(t, err)
+	bumpRevision(t)
+	assert.Zero(t, asked, "turning it off queues nothing")
+	assert.Equal(t, secretscan_model.StatusOK, scanOf(t, repo.ID, secretscan_model.KindIssue).Status)
+
+	_, err = SaveSwitches(ctx, doer, true, false, true)
+	require.NoError(t, err)
+	bumpRevision(t)
+	assert.Equal(t, 1, asked)
+	assert.Empty(t, scanOf(t, repo.ID, secretscan_model.KindIssue).Status, "reset: the next scan reads the text again")
+	assert.Positive(t, scanOf(t, repo.ID, secretscan_model.KindRepo).Requeue)
+
+	written := token("while-off")
+	newIssue(t, repo, "t", written)
+	_, err = scan(ctx, repo.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, alertFor(t, repo.ID, written))
+}
+
+// The backfill reads issues a batch at a time and their comments with one query per page, not one per issue.
+func TestScanTextBackfillQueries(t *testing.T) {
+	repo := enableText(t)
+	_, err := scan(t.Context(), repo.ID) // the code first
+	require.NoError(t, err)
+	backfill := func() int64 {
+		_, err := db.GetEngine(t.Context()).Where("repo_id = ? AND kind = ?", repo.ID, secretscan_model.KindIssue).Delete(new(secretscan_model.Scan))
+		require.NoError(t, err)
+		s := &scanner{ctx: t.Context(), scanCtx: t.Context(), repo: repo, cfg: setting.SecretScanningSettings(t.Context())}
+		return countQueries(t, func() {
+			requeue, err := s.scanText()
+			require.NoError(t, err)
+			require.False(t, requeue)
+		})
+	}
+	for range 5 {
+		newComment(t, newIssue(t, repo, "t", "x"), "y")
+	}
+	few := backfill()
+	for range 40 {
+		issue := newIssue(t, repo, "t", "x")
+		newComment(t, issue, "y")
+		newComment(t, issue, "z")
+	}
+	many := backfill()
+	assert.LessOrEqual(t, many, few+2, "no query per issue (%d issues: %d queries, 45: %d)", 5, few, many)
+}
+
+// Data URIs are dropped before the cut, so a big inline image doesn't use up the limit; a token glued to the end of
+// a payload is still scanned.
+func TestScanTextDataURIBeforeCut(t *testing.T) {
+	repo := enableText(t)
+	defer test.MockVariableValue(&setting.SecretScanning.MaxTextBytes, 1<<10)()
+	after, glued := token("after-image"), token("glued")
+	issue := newIssue(t, repo, "t", "![x](data:image/png;base64,"+strings.Repeat("QUJD", 2000)+")\n"+after+"\n![y](data:image/png;base64,"+strings.Repeat("QUJD", 300)+"_"+glued+")")
+	require.NoError(t, handleText(t.Context(), fmt.Sprintf("i:%d", issue.ID)))
+	assert.NotNil(t, alertFor(t, repo.ID, after), "the image didn't use up the limit")
+	assert.NotNil(t, alertFor(t, repo.ID, glued))
+}
+
+// Text in an Issues or Pull requests unit that is off is not scanned, and its state is for readers of those units.
+func TestScanTextUnitOff(t *testing.T) {
+	repo := enableText(t)
+	tok, prTok := token("unit-off"), token("unit-off-pr")
+	issue := newIssue(t, repo, "t", tok)
+	pr := newIssue(t, repo, "t", prTok)
+	_, err := db.GetEngine(t.Context()).Table("issue").Where("id = ?", pr.ID).Update(map[string]any{"is_pull": true})
+	require.NoError(t, err)
+	_, err = db.GetEngine(t.Context()).Where("repo_id = ? AND type = ?", repo.ID, unit.TypePullRequests).Delete(new(repo_model.RepoUnit))
+	require.NoError(t, err)
+	repo = unittestRepo(t, repo.ID)
+
+	require.NoError(t, handleText(t.Context(), fmt.Sprintf("i:%d", pr.ID)))
+	assert.Nil(t, alertFor(t, repo.ID, prTok), "the pull requests unit is off")
+	_, err = scan(t.Context(), repo.ID)
+	require.NoError(t, err)
+	assert.Nil(t, alertFor(t, repo.ID, prTok), "the backfill skips it too")
+	assert.NotNil(t, alertFor(t, repo.ID, tok), "the issues unit is on")
+	_ = issue
+
+	readsAll := func(unit.Type) bool { return true }
+	readsIssues := func(u unit.Type) bool { return u == unit.TypeIssues }
+	assert.True(t, TextStatusVisible(t.Context(), repo, readsAll))
+	assert.True(t, TextStatusVisible(t.Context(), repo, readsIssues), "the pull requests unit is off: its text isn't scanned")
+	assert.False(t, TextStatusVisible(t.Context(), repo, func(unit.Type) bool { return false }))
+}
+
+// A text that was cut or not scanned whole never marks the places past what was read as gone.
+func TestScanTextCutKeepsPlaces(t *testing.T) {
+	repo := enableText(t)
+	tok := token("past-the-cut")
+	issue := newIssue(t, repo, "t", strings.Repeat("x", 3000)+"\n"+tok)
+	require.NoError(t, handleText(t.Context(), fmt.Sprintf("i:%d", issue.ID)))
+	a := alertFor(t, repo.ID, tok)
+	require.NotNil(t, a)
+	defer test.MockVariableValue(&setting.SecretScanning.MaxTextBytes, 1<<10)()
+	require.NoError(t, handleText(t.Context(), fmt.Sprintf("i:%d", issue.ID)))
+	for _, l := range locationsOf(t, a.ID) {
+		assert.Zero(t, l.RemovedUnix, "not read: not known to be gone")
+	}
+}
+
+// Comments deleted without a notifier (a purged user's) are marked gone by the next backfill.
+func TestScanTextOrphanPlaces(t *testing.T) {
+	repo := enableText(t)
+	tok := token("orphan")
+	c := newComment(t, newIssue(t, repo, "t", "x"), tok)
+	_, err := scan(t.Context(), repo.ID)
+	require.NoError(t, err)
+	a := alertFor(t, repo.ID, tok)
+	require.NotNil(t, a)
+	_, err = db.GetEngine(t.Context()).ID(c.ID).Delete(new(issues_model.Comment))
+	require.NoError(t, err)
+	_, err = secretscan_model.ResetScans(t.Context(), repo.ID)
+	require.NoError(t, err)
+	_, err = scan(t.Context(), repo.ID)
+	require.NoError(t, err)
+	locs := locationsOf(t, a.ID)
+	require.Len(t, locs, 1)
+	assert.NotZero(t, locs[0].RemovedUnix)
+}
+
+// The text backfill runs when the code scan fails.
+func TestScanTextAfterCodeFailure(t *testing.T) {
+	repo := enableText(t)
+	tok := token("code-failed")
+	newIssue(t, repo, "t", tok)
+	path := repo.RepoPath()
+	require.NoError(t, os.Rename(path, path+".away"))
+	defer func() { require.NoError(t, os.Rename(path+".away", path)) }()
+	_, _ = scan(t.Context(), repo.ID)
+	assert.Equal(t, secretscan_model.StatusFailed, scanOf(t, repo.ID, secretscan_model.KindRepo).Status)
+	assert.NotNil(t, alertFor(t, repo.ID, tok))
+}
+
+// One poster opens at most a quarter of the share of alerts text and pull refs have.
+func TestScanTextPosterShare(t *testing.T) {
+	repo := enableText(t)
+	defer test.MockVariableValue(&setting.SecretScanning.MaxAlertsPerRepo, 8)() // share 4, a poster 1
+	var mine, theirs []string
+	for i := range 3 {
+		mine = append(mine, token(fmt.Sprintf("poster-a-%d", i)))
+		theirs = append(theirs, token(fmt.Sprintf("poster-b-%d", i)))
+	}
+	issue := newIssue(t, repo, "t", strings.Join(mine, "\n")) // poster 2
+	require.NoError(t, handleText(t.Context(), fmt.Sprintf("i:%d", issue.ID)))
+	assert.Len(t, alertsOf(t, repo.ID), 1)
+	c := newComment(t, issue, strings.Join(theirs, "\n")) // poster 3
+	require.NoError(t, handleText(t.Context(), fmt.Sprintf("c:%d", c.ID)))
+	assert.Len(t, alertsOf(t, repo.ID), 2, "another poster still has their share")
+}
+
+// A dismissed review's message is text a person wrote.
+func TestScanTextDismissReview(t *testing.T) {
+	repo := enableText(t)
+	tok := token("dismissed")
+	c := &issues_model.Comment{Type: issues_model.CommentTypeDismissReview, IssueID: newIssue(t, repo, "t", "x").ID, PosterID: 2, Content: tok}
+	require.NoError(t, db.Insert(t.Context(), c))
+	require.NoError(t, handleText(t.Context(), fmt.Sprintf("c:%d", c.ID)))
+	assert.NotNil(t, alertFor(t, repo.ID, tok))
 }

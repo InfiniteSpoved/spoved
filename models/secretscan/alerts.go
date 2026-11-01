@@ -45,7 +45,8 @@ func GetAlert(ctx context.Context, repoID, index int64) (*Alert, error) {
 	return a, nil
 }
 
-// GetVisibleAlert is GetAlert for a viewer: without Wiki read, an alert that is only in the wiki is not there.
+// GetVisibleAlert is GetAlert for a viewer: without Wiki read, an alert that is only in the wiki is not there (the
+// rule of AlertSearchOptions.CodeOnly, so every alert a list shows can be opened).
 func GetVisibleAlert(ctx context.Context, repoID, index int64, canReadWiki bool) (*Alert, error) {
 	alert, err := GetAlert(ctx, repoID, index)
 	if err != nil || canReadWiki {
@@ -96,7 +97,7 @@ type AlertSearchOptions struct {
 	Ascending   bool
 	CodeOnly    bool     // only alerts that have a place outside the wiki
 	Kinds       []string // only alerts that have a place of one of these kinds (KindRepo, KindWiki, KindPull)
-	PathQuery   string   // only alerts with a place whose path holds this text (the wiki's places only without CodeOnly)
+	PathQuery   string   // only alerts with a place whose path holds this text (the wiki's places only without CodeOnly, never the text's)
 }
 
 func (o *AlertSearchOptions) ToConds() builder.Cond {
@@ -125,10 +126,8 @@ func (o *AlertSearchOptions) ToConds() builder.Cond {
 		))))
 	}
 	if o.PathQuery != "" {
-		in := builder.And(builder.Expr("secret_scanning_location.alert_id = secret_scanning_alert.id"), likeContains("secret_scanning_location.path", o.PathQuery))
-		if o.CodeOnly {
-			in = in.And(builder.Neq{"secret_scanning_location.kind": KindWiki})
-		}
+		in := builder.And(builder.Expr("secret_scanning_location.alert_id = secret_scanning_alert.id"), likeContains("secret_scanning_location.path", o.PathQuery),
+			readableKinds(o.CodeOnly))
 		cond = cond.And(builder.Exists(builder.Select("1").From("secret_scanning_location").Where(in)))
 	}
 	return cond
@@ -201,9 +200,10 @@ func AnyFingerprint(ctx context.Context, repoID int64, fingerprints []string, co
 	return false, nil
 }
 
-// HasCodeLocation tells whether the alert has a stored place outside the wiki.
+// HasCodeLocation tells whether the alert has a stored place outside the wiki, the rule of AlertSearchOptions.CodeOnly
+// (a place in text counts: such an alert is listed, so it can be opened and closed; the place itself is not shown).
 func HasCodeLocation(ctx context.Context, repoID, alertID int64) (bool, error) {
-	return db.GetEngine(ctx).Where(builder.Eq{"repo_id": repoID, "alert_id": alertID}.And(readableKinds(true))).Exist(new(Location))
+	return db.GetEngine(ctx).Where(builder.Eq{"repo_id": repoID, "alert_id": alertID}.And(builder.Neq{"kind": KindWiki})).Exist(new(Location))
 }
 
 // CountLocations counts the stored places of the alerts in one query, without those in the wiki when noWiki is set.
