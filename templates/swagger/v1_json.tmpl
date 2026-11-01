@@ -23459,6 +23459,301 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/secret-scanning/alerts": {
+      "get": {
+        "description": "Secrets found in the code and wiki of the repository, newest first. The alerts never hold the secret. Only people who can write to the code, and auditors, see them; everyone else gets 404, as does a repository secret scanning is turned off for. Someone who can't read the wiki (with the Wiki unit off, nobody can) doesn't see an alert that is only in the wiki, nor its places in the wiki.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "List the secret alerts of a repository",
+        "operationId": "repoListSecretScanningAlerts",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "enum": [
+              "open",
+              "resolved"
+            ],
+            "type": "string",
+            "description": "only alerts in this state",
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "only alerts resolved with one of these resolutions, comma separated",
+            "name": "resolution",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "only alerts of these secret types (rule IDs), comma separated",
+            "name": "secret_type",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "created",
+              "updated"
+            ],
+            "type": "string",
+            "description": "what to sort by, newest first unless direction is asc",
+            "name": "sort",
+            "in": "query"
+          },
+          {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string",
+            "description": "the order",
+            "name": "direction",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/SecretScanningAlertList"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/secret-scanning/alerts/{index}": {
+      "get": {
+        "description": "The alert; its places are at locations_url.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Get a secret alert",
+        "operationId": "repoGetSecretScanningAlert",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "number of the alert",
+            "name": "index",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/SecretScanningAlert"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      },
+      "patch": {
+        "description": "State resolved needs a resolution (false_positive, wont_fix, revoked or used_in_tests) and takes an optional resolution_comment of at most 1000 bytes that must not look like a secret or hold the secret of the alert. State open reopens a resolved alert. An alert that is not open can't be resolved again, and one that is not resolved can't be reopened by two requests at once (409).",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Close or reopen a secret alert",
+        "operationId": "repoEditSecretScanningAlert",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "number of the alert",
+            "name": "index",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/EditSecretScanningAlertOption"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/SecretScanningAlert"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/conflict"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          },
+          "423": {
+            "$ref": "#/responses/repoArchivedError"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/secret-scanning/alerts/{index}/locations": {
+      "get": {
+        "description": "In the order they were found. Places in the wiki are left out for people who can't read the wiki.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "List the places of a secret alert",
+        "operationId": "repoListSecretScanningAlertLocations",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "number of the alert",
+            "name": "index",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "description": "page number of results to return (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "page size of results",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/SecretScanningLocationList"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/secret-scanning/status": {
+      "get": {
+        "description": "One summary for the code, the wiki and the pull refs. Visible to the same people as the alerts.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "How far the secret scan of a repository has come",
+        "operationId": "repoGetSecretScanningStatus",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/SecretScanningStatus"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/signing-key.gpg": {
       "get": {
         "produces": [
@@ -36481,6 +36776,31 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "EditSecretScanningAlertOption": {
+      "type": "object",
+      "title": "EditSecretScanningAlertOption resolves or reopens an alert.",
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "resolution": {
+          "description": "required when resolving: false_positive, wont_fix, revoked or used_in_tests",
+          "type": "string",
+          "x-go-name": "Resolution"
+        },
+        "resolution_comment": {
+          "description": "optional when resolving, at most 1000 bytes; refused when it looks like a secret",
+          "type": "string",
+          "x-go-name": "ResolutionComment"
+        },
+        "state": {
+          "description": "open to reopen, resolved to resolve",
+          "type": "string",
+          "x-go-name": "State"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "EditTagProtectionOption": {
       "description": "EditTagProtectionOption options for editing a tag protection",
       "type": "object",
@@ -41696,6 +42016,209 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "SecretScanningAlert": {
+      "description": "SecretScanningAlert is a secret found in the code or wiki of a repository. It never holds the secret. The shape\nfollows GitHub's secret scanning alerts.",
+      "type": "object",
+      "properties": {
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "CreatedAt"
+        },
+        "fingerprint": {
+          "description": "the keyed fingerprint of the secret: the same secret has the same one in every location",
+          "type": "string",
+          "x-go-name": "Fingerprint"
+        },
+        "html_url": {
+          "description": "the page of the alert in the web interface (not there yet)",
+          "type": "string",
+          "x-go-name": "HTMLURL"
+        },
+        "locations_count": {
+          "description": "the places of the alert as the locations endpoint lists them for the viewer (places in the wiki only count for\nsomeone who can read the wiki; with the Wiki unit off nobody does)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "LocationsCount"
+        },
+        "locations_url": {
+          "description": "the places of the alert, paged",
+          "type": "string",
+          "x-go-name": "LocationsURL"
+        },
+        "number": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Number"
+        },
+        "resolution": {
+          "description": "why the alert is resolved: false_positive, wont_fix, revoked or used_in_tests; empty while open",
+          "type": "string",
+          "x-go-name": "Resolution"
+        },
+        "resolution_comment": {
+          "type": "string",
+          "x-go-name": "ResolutionComment"
+        },
+        "resolved_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "ResolvedAt"
+        },
+        "resolved_by": {
+          "$ref": "#/definitions/User"
+        },
+        "secret_type": {
+          "description": "the rule that found the secret (aws-access-key-id, ...)",
+          "type": "string",
+          "x-go-name": "SecretType"
+        },
+        "secret_type_display_name": {
+          "description": "the name of that rule",
+          "type": "string",
+          "x-go-name": "SecretTypeDisplayName"
+        },
+        "state": {
+          "description": "open or resolved",
+          "type": "string",
+          "x-go-name": "State"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "UpdatedAt"
+        },
+        "url": {
+          "description": "the API URL of the alert",
+          "type": "string",
+          "x-go-name": "URL"
+        },
+        "via_pull": {
+          "description": "true while only refs/pull/* (which any reader can write) reach the secret",
+          "type": "boolean",
+          "x-go-name": "ViaPull"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "SecretScanningLocation": {
+      "type": "object",
+      "title": "SecretScanningLocation is a place a secret was found.",
+      "properties": {
+        "details": {
+          "$ref": "#/definitions/SecretScanningLocationDetails"
+        },
+        "type": {
+          "description": "commit (the code of the repository, or a pull ref) or wiki_commit",
+          "type": "string",
+          "x-go-name": "Type"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "SecretScanningLocationDetails": {
+      "description": "SecretScanningLocationDetails is where a secret was found: a file at a line, in the commit that brought it, as\nGitHub names them. Fields that spoved can't fill (the columns, the URLs of a wiki commit) are left out. Path and\nthe commit author are text from git, not checked by spoved: clients must escape them.",
+      "type": "object",
+      "properties": {
+        "blob_sha": {
+          "type": "string",
+          "x-go-name": "BlobSHA"
+        },
+        "blob_url": {
+          "description": "the API URL of the blob (not for the wiki)",
+          "type": "string",
+          "x-go-name": "BlobURL"
+        },
+        "commit_author_email": {
+          "type": "string",
+          "x-go-name": "CommitAuthorEmail"
+        },
+        "commit_author_name": {
+          "description": "spoved: the author of the commit, as it names itself (anyone can write any name)",
+          "type": "string",
+          "x-go-name": "CommitAuthorName"
+        },
+        "commit_date": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "CommitDate"
+        },
+        "commit_sha": {
+          "type": "string",
+          "x-go-name": "CommitSHA"
+        },
+        "commit_url": {
+          "description": "the API URL of the commit (not for the wiki)",
+          "type": "string",
+          "x-go-name": "CommitURL"
+        },
+        "end_line": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "EndLine"
+        },
+        "html_url": {
+          "description": "spoved: the file at that commit in the web interface (empty when the place has no commit, and for the wiki)",
+          "type": "string",
+          "x-go-name": "HTMLURL"
+        },
+        "page_url": {
+          "description": "the page, for the wiki",
+          "type": "string",
+          "x-go-name": "PageURL"
+        },
+        "path": {
+          "type": "string",
+          "x-go-name": "Path"
+        },
+        "pull_ref": {
+          "description": "spoved: true when only a refs/pull/* ref reaches the commit",
+          "type": "boolean",
+          "x-go-name": "PullRef"
+        },
+        "start_line": {
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "StartLine"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
+    "SecretScanningStatus": {
+      "type": "object",
+      "title": "SecretScanningStatus sums up how far the scan of a repository (its code, its wiki and its pull refs) has come.",
+      "properties": {
+        "holes": {
+          "description": "files and secrets that were marked done without being scanned",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "Holes"
+        },
+        "last_scanned": {
+          "description": "when the last scan that did not fail ended",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "LastScanned"
+        },
+        "reason": {
+          "description": "a code (max_scan_bytes, over_limit, max_alerts, timeout, git_error, ...), empty when ok",
+          "type": "string",
+          "x-go-name": "Reason"
+        },
+        "skipped_large": {
+          "description": "files over the size limit that were not read",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "SkippedLarge"
+        },
+        "status": {
+          "description": "pending (not scanned yet), ok, incomplete (under way, or with parts that were not scanned) or failed",
+          "type": "string",
+          "x-go-name": "Status"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "ServerVersion": {
       "description": "ServerVersion wraps the version of the server",
       "type": "object",
@@ -44884,6 +45407,43 @@
           "format": "int64",
           "description": "The total number of secrets"
         }
+      }
+    },
+    "SecretScanningAlert": {
+      "description": "SecretScanningAlert",
+      "schema": {
+        "$ref": "#/definitions/SecretScanningAlert"
+      }
+    },
+    "SecretScanningAlertList": {
+      "description": "SecretScanningAlertList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/SecretScanningAlert"
+        }
+      },
+      "headers": {
+        "X-Total-Count": {
+          "type": "integer",
+          "format": "int64",
+          "description": "The total number of alerts that match"
+        }
+      }
+    },
+    "SecretScanningLocationList": {
+      "description": "SecretScanningLocationList",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/SecretScanningLocation"
+        }
+      }
+    },
+    "SecretScanningStatus": {
+      "description": "SecretScanningStatus",
+      "schema": {
+        "$ref": "#/definitions/SecretScanningStatus"
       }
     },
     "ServerVersion": {

@@ -182,7 +182,6 @@ forgejo.org/modules/secretdetection
 	checkComplexity
 	maxMatchLen
 	unbounded
-	Fingerprint
 
 forgejo.org/modules/setting
 	NewConfigProviderFromData

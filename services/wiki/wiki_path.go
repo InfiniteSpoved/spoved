@@ -170,3 +170,12 @@ func ToWikiPageMetaData(wikiName WebPath, lastCommit *git.Commit, repo *repo_mod
 		LastCommit: convert.ToWikiCommit(lastCommit),
 	}
 }
+
+// PageHTMLURL is the URL of the page of the wiki file at this git path ("" for a name that is no page).
+func PageHTMLURL(repo *repo_model.Repository, gitPath string) string {
+	wp, err := GitPathToWebPath(gitPath)
+	if err != nil {
+		return ""
+	}
+	return repo.HTMLURL() + "/wiki/" + WebPathToURLPath(wp)
+}

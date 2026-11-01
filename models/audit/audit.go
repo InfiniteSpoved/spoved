@@ -212,7 +212,8 @@ var Fields = map[string][]string{
 	"vulnerability_alert": {
 		"alert_id", "advisory_id", "ecosystem", "package", "manifest", "reason", "comment", "previous_state", "previous_reason",
 	},
-	"vulnerability_mirror": {"ecosystems"},
+	"secret_scanning_alert": {"index", "rule", "fingerprint", "path", "previous_state", "state", "comment"},
+	"vulnerability_mirror":  {"ecosystems"},
 	// dependency_graph: the settings saved in Site administration; the mirror token only as token_changed
 	"dependency_graph": {
 		"source", "mirror_url", "sign_in", "user", "allowed_hosts", "token_changed", "max_concurrent_scans", "scan_timeout",

@@ -44,6 +44,7 @@ const (
 	StateRevoked     = "revoked"
 	StateFalsePos    = "false_positive"
 	StateUsedInTests = "used_in_tests"
+	StateWontFix     = "wont_fix"
 )
 
 // CurrentKeyVersion is the version of the fingerprint key (modules/keying).
@@ -176,6 +177,11 @@ func GetScan(ctx context.Context, repoID int64, kind string) (*Scan, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// FindScans returns the state rows of a repository: its code, its wiki and its pull refs.
+func FindScans(ctx context.Context, repoID int64) (scans []*Scan, err error) {
+	return scans, db.GetEngine(ctx).Where("repo_id = ?", repoID).OrderBy("kind").Find(&scans)
 }
 
 // ErrScanMoved is a state row that another process changed since it was read.

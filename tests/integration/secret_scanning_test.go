@@ -6,6 +6,7 @@ package integration
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
@@ -197,7 +199,26 @@ func TestSecretScanning(t *testing.T) {
 			defer cancel()
 			lc.Filter(canary, body).StopMark("secret-canary-stop")
 			depPush(t, u, token, repo, "refs/heads/main", map[string]string{"canary.env": "T=" + canary + "\n"})
-			require.NotNil(t, secretAlertOf(t, repo.ID, canary))
+			alert := secretAlertOf(t, repo.ID, canary)
+
+			// the API answers (list, get, close with a comment, reopen) and its audit rows never hold the secret
+			base := "/api/v1/repos/user2/secret-push/secret-scanning/alerts"
+			one := fmt.Sprintf("%s/%d", base, alert.Index)
+			bodies := []string{
+				MakeRequest(t, NewRequest(t, "GET", base).AddTokenAuth(token), http.StatusOK).Body.String(),
+				MakeRequest(t, NewRequest(t, "GET", one).AddTokenAuth(token), http.StatusOK).Body.String(),
+				MakeRequest(t, NewRequestWithJSON(t, "PATCH", one, map[string]string{"state": "resolved", "resolution": "revoked", "resolution_comment": "rotated"}).AddTokenAuth(token), http.StatusOK).Body.String(),
+				MakeRequest(t, NewRequestWithJSON(t, "PATCH", one, map[string]string{"state": "open"}).AddTokenAuth(token), http.StatusOK).Body.String(),
+			}
+			MakeRequest(t, NewRequestWithJSON(t, "PATCH", one, map[string]string{"state": "resolved", "resolution": "revoked", "resolution_comment": "leaked " + canary}).AddTokenAuth(token), http.StatusUnprocessableEntity)
+			for _, b := range bodies {
+				assert.NotContains(t, b, canary)
+				assert.NotContains(t, b, body)
+			}
+			assert.Contains(t, bodies[1], secretFingerprint(canary), "the fingerprint is shown to the writer")
+			audited, err := db.GetEngine(t.Context()).Where("action LIKE ?", "repo.secret_alert.%").Count(new(audit_model.Entry))
+			require.NoError(t, err)
+			assert.EqualValues(t, 2, audited)
 
 			for _, table := range []string{"secret_scan", "secret_scanning_alert", "secret_scanning_location", "secret_scanning_alert_index", "audit_event"} {
 				rows, err := db.GetEngine(t.Context()).Query("SELECT * FROM " + table)

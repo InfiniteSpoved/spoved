@@ -673,6 +673,37 @@ type swaggerResponseVulnerabilityAlert struct {
 	Body api.VulnerabilityAlert `json:"body"`
 }
 
+// SecretScanningLocationList
+// swagger:response SecretScanningLocationList
+type swaggerResponseSecretScanningLocationList struct {
+	// in:body
+	Body []api.SecretScanningLocation `json:"body"`
+}
+
+// SecretScanningStatus
+// swagger:response SecretScanningStatus
+type swaggerResponseSecretScanningStatus struct {
+	// in:body
+	Body api.SecretScanningStatus `json:"body"`
+}
+
+// SecretScanningAlertList
+// swagger:response SecretScanningAlertList
+type swaggerResponseSecretScanningAlertList struct {
+	// in:body
+	Body []api.SecretScanningAlert `json:"body"`
+
+	// The total number of alerts that match
+	TotalCount int64 `json:"X-Total-Count"`
+}
+
+// SecretScanningAlert
+// swagger:response SecretScanningAlert
+type swaggerResponseSecretScanningAlert struct {
+	// in:body
+	Body api.SecretScanningAlert `json:"body"`
+}
+
 // DependencyUsageList
 // swagger:response DependencyUsageList
 type swaggerResponseDependencyUsageList struct {
