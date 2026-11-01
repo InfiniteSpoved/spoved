@@ -16,8 +16,11 @@ import (
 	actions_service "forgejo.org/services/actions"
 )
 
-// TextUnitsTurnedOn runs after a change of a repository's units that turned its Issues or Pull requests unit on
-// committed. Secret scanning sets it to queue the repository (services/secretscan can't be imported here).
+// TextUnitsTurnedOn runs after a committed change of a repository's units that turned its Issues or Pull requests unit
+// on (UpdateRepositoryUnits reset its secret scanning text scan in the same transaction). Secret scanning sets it to
+// queue the repository: services/secretscan's tests import this package, so it can't be imported here. Known limit:
+// lifting the site unit policy or an organization's unit setting doesn't reset the text scan (text kept while the
+// unit was hidden is read only by a Rescan).
 var TextUnitsTurnedOn = func(context.Context, *repo_model.Repository) {}
 
 // UpdateRepositoryUnits updates a repository's units

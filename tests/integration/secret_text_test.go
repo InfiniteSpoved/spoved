@@ -191,4 +191,15 @@ func TestSecretTextUnitTurnedOn(t *testing.T) {
 	write := getUserToken(t, "user2", auth_model.AccessTokenScopeWriteRepository)
 	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/repos/user2/repo1", api.EditRepoOption{HasPullRequests: new(true)}).AddTokenAuth(write), http.StatusOK)
 	require.Eventually(t, func() bool { return secretAlertWith(1, tok, 1) != nil }, 10*time.Second, 50*time.Millisecond)
+
+	t.Run("saving the same units again doesn't reset the text scan", func(t *testing.T) {
+		before, err := secretscan_model.GetScan(t.Context(), 1, secretscan_model.KindIssue)
+		require.NoError(t, err)
+		require.NotNil(t, before)
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/repos/user2/repo1", api.EditRepoOption{HasPullRequests: new(true)}).AddTokenAuth(write), http.StatusOK)
+		after, err := secretscan_model.GetScan(t.Context(), 1, secretscan_model.KindIssue)
+		require.NoError(t, err)
+		assert.Equal(t, before.Status, after.Status)
+		assert.Equal(t, before.Version, after.Version)
+	})
 }

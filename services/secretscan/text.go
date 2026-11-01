@@ -72,7 +72,8 @@ var (
 )
 
 // pushTextLater queues an item again after the delay (the queue's own re-push of an unhandled item has none). An
-// item that a stop catches in the delay is lost (logged); its text is read again by a Rescan.
+// item waiting in the timer when the process stops or crashes is lost without a log line (known limit): the next
+// edit of its text or a Rescan reads it again.
 var pushTextLater = func(item string, delay time.Duration) {
 	time.AfterFunc(delay, func() {
 		if err := pushTextQueue(item); err != nil && !errors.Is(err, queue.ErrAlreadyInQueue) {
@@ -149,7 +150,8 @@ func textTries(item string) (base string, failed, busy int) {
 	f, b, _ := strings.Cut(tries, ".")
 	failed, _ = strconv.Atoi(f)
 	busy, _ = strconv.Atoi(b)
-	return base, failed, busy
+	// clamped, so that a bad item can't make a negative or huge shift in the delays
+	return base, min(max(failed, 0), maxTextRetries), min(max(busy, 0), maxTextBusy)
 }
 
 // nextTextItem is the item to queue again after a failure (or a busy repository) with the delay, or false once it
@@ -180,7 +182,6 @@ type textJob struct {
 // the store, so that a pass never stores what an older read of the text found. A repository that is locked is
 // errTextBusy unless the job waits.
 func (j *textJob) lock(repoID int64) (func(), error) {
-	j.repoID = repoID
 	key := strconv.FormatInt(repoID, 10)
 	if j.wait {
 		return repoScans.Lock(key), nil
@@ -216,6 +217,7 @@ func handleText(ctx context.Context, item string) (err error) {
 	case parts[0] == "c" && len(nums) == 1:
 		return scanCommentText(ctx, nums[0], job)
 	case parts[0] == "x" && len(parts) == 4 && len(nums) == 2:
+		job.repoID = nums[0]
 		unlock, err := job.lock(nums[0])
 		if err != nil {
 			return err

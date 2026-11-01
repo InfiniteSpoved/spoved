@@ -201,6 +201,7 @@ func AdvanceNotifyFloor(ctx context.Context, repoID int64) error {
 // secret_scan.repo_id), and reports how many marks there were: a mark that waited across a switch off and on keeps its
 // boundary and its alerts, but its digest goes to the administrators only; a later push must not be credited to the
 // old pusher.
+// cond must not read secret_scan (MySQL refuses an UPDATE that reads its own table in a subquery, error 1093).
 func DetachNotifyPushers(ctx context.Context, cond builder.Cond) (int64, error) {
 	where, args, err := builder.ToSQL(cond)
 	if err != nil {

@@ -471,10 +471,15 @@ func FindOrgOffRepos(ctx context.Context, orgID int64, opts db.ListOptions) (rep
 // scannedRepoCond is the ready repositories that have a scan state and secret scanning isn't off for below the site
 // (an organization's, or all of them with 0).
 func scannedRepoCond(orgID int64) builder.Cond {
+	return builder.And(readyRepoCond(orgID), builder.Exists(builder.Select("1").From("secret_scan").Where(builder.Expr("secret_scan.repo_id = repository.id"))))
+}
+
+// readyRepoCond is scannedRepoCond without the scan state: for an UPDATE of secret_scan rows, whose rows are the scan
+// state, and which must not read secret_scan in a subquery (MySQL refuses it, error 1093).
+func readyRepoCond(orgID int64) builder.Cond {
 	cond := builder.And(
 		builder.Eq{"repository.status": repo_model.RepositoryReady, "repository.trashed_unix": 0},
 		builder.Not{OffCond()},
-		builder.Exists(builder.Select("1").From("secret_scan").Where(builder.Expr("secret_scan.repo_id = repository.id"))),
 	)
 	if orgID != 0 {
 		cond = cond.And(builder.Eq{"repository.owner_id": orgID})
@@ -486,11 +491,11 @@ func scannedRepoCond(orgID int64) builder.Cond {
 // It runs in the transaction that saves the switch, so the mark and the setting stand or fall together.
 func MarkRequeue(ctx context.Context, orgID int64) error {
 	// a digest mark that waited while scanning was off keeps its alerts, but not its pusher (a later push is not theirs)
-	if _, err := DetachNotifyPushers(ctx, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scannedRepoCond(orgID)))); err != nil {
+	if _, err := DetachNotifyPushers(ctx, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(readyRepoCond(orgID)))); err != nil {
 		return err
 	}
 	_, err := db.GetEngine(ctx).NoAutoTime().
-		Where(builder.And(builder.Eq{"kind": KindRepo}, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scannedRepoCond(orgID))))).
+		Where(builder.And(builder.Eq{"kind": KindRepo}, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(readyRepoCond(orgID))))).
 		Incr("requeue").Update(&Scan{})
 	return err
 }
@@ -502,7 +507,7 @@ func MarkRequeue(ctx context.Context, orgID int64) error {
 // status tells it the row is not done.
 func ResetTextScans(ctx context.Context, repoID int64) error {
 	reset := builder.Eq{"kind": KindIssue}
-	scanned := scannedRepoCond(0)
+	scanned := readyRepoCond(0) // the rows updated are the scan state
 	if repoID != 0 {
 		reset["repo_id"] = repoID
 		scanned = scanned.And(builder.Eq{"repository.id": repoID})

@@ -704,3 +704,18 @@ func TestScanTextDismissReview(t *testing.T) {
 	require.NoError(t, handleText(t.Context(), fmt.Sprintf("c:%d", c.ID)))
 	assert.NotNil(t, alertFor(t, repo.ID, tok))
 }
+
+// Resetting one repository's text scan leaves the other repositories' rows alone.
+func TestResetTextScansOneRepository(t *testing.T) {
+	enableText(t)
+	for _, id := range []int64{1, 2} {
+		require.NoError(t, secretscan_model.Save(t.Context(), nil, &secretscan_model.Scan{RepoID: id, Kind: secretscan_model.KindIssue, ScannedTips: `{"i":5}`, Status: secretscan_model.StatusOK}))
+	}
+	other := scanOf(t, 2, secretscan_model.KindIssue)
+	require.NoError(t, secretscan_model.ResetTextScans(t.Context(), 1))
+	assert.Empty(t, scanOf(t, 1, secretscan_model.KindIssue).Status)
+	after := scanOf(t, 2, secretscan_model.KindIssue)
+	assert.Equal(t, secretscan_model.StatusOK, after.Status)
+	assert.Equal(t, other.Version, after.Version)
+	assert.JSONEq(t, `{"i":5}`, after.ScannedTips)
+}
