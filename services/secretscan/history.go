@@ -18,6 +18,7 @@ import (
 type Event struct {
 	Reopened       bool
 	Redacted       bool
+	HistoryOnly    bool // a redaction that found the secret no longer in the text
 	State, Comment string
 	ActorID        int64
 	ActorName      string
@@ -36,11 +37,14 @@ func AlertHistory(ctx context.Context, repoID, alertID int64) ([]*Event, error) 
 	}
 	events := make([]*Event, 0, len(entries))
 	for _, e := range entries {
-		var data struct{ State, Comment string }
+		var data struct {
+			State, Comment string
+			HistoryOnly    bool `json:"history_only"`
+		}
 		_ = json.Unmarshal([]byte(e.Data), &data) // text we wrote ourselves; an unreadable row shows without details
 		events = append(events, &Event{
 			Reopened: e.Action == "repo.secret_alert.reopened", Redacted: e.Action == "repo.secret_alert.text_redacted", State: data.State, Comment: data.Comment,
-			ActorID: e.ActorID, ActorName: e.ActorName, CreatedUnix: e.CreatedUnix,
+			HistoryOnly: data.HistoryOnly, ActorID: e.ActorID, ActorName: e.ActorName, CreatedUnix: e.CreatedUnix,
 		})
 	}
 	slices.Reverse(events)

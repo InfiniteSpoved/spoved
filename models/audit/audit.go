@@ -215,7 +215,7 @@ var Fields = map[string][]string{
 	"vulnerability_alert": {
 		"alert_id", "advisory_id", "ecosystem", "package", "manifest", "reason", "comment", "previous_state", "previous_reason",
 	},
-	"secret_scanning_alert": {"index", "rule", "fingerprint", "path", "previous_state", "state", "comment", "issue", "field", "comment_id", "replaced", "history_only"},
+	"secret_scanning_alert": {"index", "rule", "fingerprint", "path", "previous_state", "state", "comment", "issue", "field", "comment_id", "replaced", "history_only", "cleaned"},
 	"vulnerability_mirror":  {"ecosystems"},
 	// dependency_graph: the settings saved in Site administration; the mirror token only as token_changed
 	"dependency_graph": {

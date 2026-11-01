@@ -54,6 +54,7 @@ test.describe('the owner of a repository', () => {
     await expect(dialog.locator('#secret-redact-where')).toHaveText(`Issue #${n} · comment`);
     await dialog.getByRole('button', {name: 'Redact', exact: true}).click();
     await expect(page.locator('.flash-success')).toContainText('The secret was already gone from the text. Its earlier versions were deleted from the edit history.');
+    await expect(page.locator('#secret-activity')).toContainText('cleaned up an issue or pull request text the secret was already gone from');
     await screenshot(page);
 
     // then nothing is left to remove
@@ -65,5 +66,11 @@ test.describe('the owner of a repository', () => {
     await page.goto(`/user11/secret-redact-test/issues/${n}`);
     await expect(page.locator('.comment-list .render-content').first()).toContainText('[secret removed]');
     await expect(page.locator('.comment-list').first()).not.toContainText('ghp_');
+
+    // the body's "edited" menu: the emptied first version shows as deleted, the redaction as user11's edit
+    await page.locator('.timeline-item.comment.first .content-history-menu').click();
+    const versions = page.locator('.timeline-item.comment.first .content-history-menu .menu .item');
+    await expect(versions).toHaveCount(2);
+    await expect(versions.locator('[data-history-is-deleted="1"]')).toHaveCount(1);
   });
 });

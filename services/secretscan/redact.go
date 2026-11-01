@@ -49,6 +49,13 @@ var (
 	ErrRedactChanged = errors.New("the text changed meanwhile")
 )
 
+// RedactResult is what a redaction did: the copies it replaced in the text, and whether it removed the secret
+// anywhere else (edit history, review body, title changes, feed).
+type RedactResult struct {
+	Replaced int
+	Cleaned  bool
+}
+
 // RedactedMark is what takes the place of the secret.
 const RedactedMark = "[secret removed]"
 
@@ -70,25 +77,26 @@ func redact(d *secretdetection.Detector, text, ruleID, fingerprint string) (stri
 }
 
 // RedactText removes the secret of an alert from one text of an issue or pull request, for someone who may close the
-// alert (the caller checks that) and reads the text (access), and returns how many copies it replaced. The secret is
+// alert (the caller checks that) and reads the text (access). The secret is
 // found again by the detector in the text as it is now (nothing of it is stored) and every span of it is replaced
 // with RedactedMark; a text the detector can't read whole is refused (ErrRedactManual), as a redaction that misses a
 // copy would claim too much. In one transaction the text is written back on condition that it did not change since it
 // was read (else ErrRedactChanged), the versions of its edit history are emptied (and the secret is removed from a
 // review's own copy of its body, from the title changes of the timeline and from the activity feed), the alert's
-// places in it are marked removed and an audit entry is recorded. When the secret is already gone from the text, the
-// rest is still done (0 copies replaced) as long as the place is open or a copy is left somewhere; else ErrRedactGone.
+// places in it are marked removed and an audit entry is recorded. When the secret is already gone from the text, only
+// the history versions that hold it are emptied (clean ones stay) and the rest is done, as long as the place is open or
+// a copy is left somewhere; else ErrRedactGone.
 // It runs no notifier and recreates no cross reference: nobody is mailed and no webhook fires; the edit shows in the
 // history as the doer's. A text reported as abusive keeps its moderation copy (made before the write, as any edit
 // does). A locked issue can be redacted. An unknown alert or text, a text the alert has no place in and one the doer
 // can't read are util.ErrNotExist.
-func RedactText(ctx context.Context, repo *repo_model.Repository, doer *user_model.User, index int64, target RedactTarget, access secretscan_model.TextAccess, canReadWiki bool) (int, error) {
+func RedactText(ctx context.Context, repo *repo_model.Repository, doer *user_model.User, index int64, target RedactTarget, access secretscan_model.TextAccess, canReadWiki bool) (RedactResult, error) {
 	if repo.IsArchived {
-		return 0, ErrArchived
+		return RedactResult{}, ErrArchived
 	}
 	alert, err := secretscan_model.GetVisibleAlert(ctx, repo.ID, index, canReadWiki)
 	if err != nil {
-		return 0, err
+		return RedactResult{}, err
 	}
 	var issue *issues_model.Issue
 	var comment *issues_model.Comment
@@ -96,36 +104,36 @@ func RedactText(ctx context.Context, repo *repo_model.Repository, doer *user_mod
 	switch {
 	case target.Comment > 0 && (target.Field == "" || target.Field == "comment"):
 		if comment, err = issues_model.GetCommentByID(ctx, target.Comment); err != nil {
-			return 0, err
+			return RedactResult{}, err
 		}
 		if issue, err = issues_model.GetIssueByID(ctx, comment.IssueID); err != nil {
-			return 0, err
+			return RedactResult{}, err
 		}
 		src = secretscan_model.TextSource{Kind: secretscan_model.KindComment, ID: comment.ID}
 	case target.Comment == 0 && target.Issue > 0 && (target.Field == "title" || target.Field == "body"):
 		if issue, err = issues_model.GetIssueByIndex(ctx, repo.ID, target.Issue); err != nil {
-			return 0, err
+			return RedactResult{}, err
 		}
 		src = secretscan_model.TextSource{Kind: secretscan_model.KindIssue, ID: issue.ID, Field: target.Field}
 	default:
-		return 0, ErrRedactTarget
+		return RedactResult{}, ErrRedactTarget
 	}
 	// a text the doer can't read is missing, as one the alert is not in: the answer tells nothing about it
 	if issue.RepoID != repo.ID || !(issue.IsPull && access.Pulls || !issue.IsPull && access.Issues) {
-		return 0, util.ErrNotExist
+		return RedactResult{}, util.ErrNotExist
 	}
 	has, open, err := secretscan_model.TextPlaceState(ctx, repo.ID, alert.ID, src)
 	if err != nil {
-		return 0, err
+		return RedactResult{}, err
 	} else if !has {
-		return 0, util.ErrNotExist
+		return RedactResult{}, util.ErrNotExist
 	}
 	d, err := textDetector(ctx, repo, setting.SecretScanningSettings(ctx))
 	if err != nil {
-		return 0, err
+		return RedactResult{}, err
 	}
 	if !d.HasRule(alert.RuleID) {
-		return 0, ErrRedactPattern
+		return RedactResult{}, ErrRedactPattern
 	}
 	text := issue.Content
 	switch {
@@ -136,7 +144,7 @@ func RedactText(ctx context.Context, repo *repo_model.Repository, doer *user_mod
 	}
 	redacted, n, complete := redact(d, text, alert.RuleID, alert.Fingerprint)
 	if !complete {
-		return 0, ErrRedactManual
+		return RedactResult{}, ErrRedactManual
 	}
 	redactAll := func(s string) (string, bool) {
 		out, n, _ := redact(d, s, alert.RuleID, alert.Fingerprint)
@@ -147,13 +155,14 @@ func RedactText(ctx context.Context, repo *repo_model.Repository, doer *user_mod
 		_, n, complete := redact(d, s, alert.RuleID, alert.Fingerprint)
 		return n > 0 || !complete
 	}
+	cleaned := false
 	err = db.WithTx(ctx, func(ctx context.Context) error {
 		var left int64 // copies found outside the text: history versions, review body, title changes, feed rows
 		var k int64
 		var err error
 		switch {
 		case comment != nil:
-			if left, err = eraseHistory(ctx, issue.ID, comment.ID, comment.PosterID, comment.CreatedUnix, n > 0, n > 0 || open, holds); err != nil {
+			if left, err = eraseHistory(ctx, issue.ID, comment.ID, comment.PosterID, comment.CreatedUnix, n > 0, holds); err != nil {
 				return err
 			}
 			if n > 0 {
@@ -202,7 +211,7 @@ func RedactText(ctx context.Context, repo *repo_model.Repository, doer *user_mod
 			}
 			left += k
 		default:
-			if left, err = eraseHistory(ctx, issue.ID, 0, issue.PosterID, issue.CreatedUnix, n > 0, n > 0 || open, holds); err != nil {
+			if left, err = eraseHistory(ctx, issue.ID, 0, issue.PosterID, issue.CreatedUnix, n > 0, holds); err != nil {
 				return err
 			}
 			if n > 0 {
@@ -222,6 +231,7 @@ func RedactText(ctx context.Context, repo *repo_model.Repository, doer *user_mod
 				}
 			}
 		}
+		cleaned = left > 0
 		if n == 0 && !open && left == 0 {
 			return ErrRedactGone
 		}
@@ -237,13 +247,14 @@ func RedactText(ctx context.Context, repo *repo_model.Repository, doer *user_mod
 		}
 		if n == 0 {
 			data["history_only"] = true
+			data["cleaned"] = left > 0
 		}
 		return repo_model.RecordRepoTarget(ctx, repo, audit_model.Event{
 			Action: "repo.secret_alert.text_redacted", TargetType: "secret_scanning_alert", TargetID: alert.ID, TargetName: alert.RuleID, Data: data,
 		})
 	})
 	if err != nil {
-		return 0, err
+		return RedactResult{}, err
 	}
 	// after the commit: the search index drops the old text, and the text is scanned again (its other places may have
 	// moved when a secret of several lines became one); a scan by nobody (0) mails nobody
@@ -253,33 +264,39 @@ func RedactText(ctx context.Context, repo *repo_model.Repository, doer *user_mod
 	} else {
 		enqueueIssueText(ctx, issue.ID, 0)
 	}
-	return n, nil
+	return RedactResult{Replaced: n, Cleaned: cleaned}, nil
 }
 
-// eraseHistory empties the versions in the edit history of a text (an issue's body: commentID 0) when one of them
-// holds the secret, or always with force, and returns how many it emptied. A text that was never edited and is
-// written now (writing) first gets the entry of its first version, empty, so that the history shows the edit.
-func eraseHistory(ctx context.Context, issueID, commentID, posterID int64, created timeutil.TimeStamp, writing, force bool, holds func(string) bool) (int64, error) {
+// eraseHistory empties versions in the edit history of a text (an issue's body: commentID 0): all of them when the
+// text is rewritten (rewrite), else only the ones that hold the secret. It returns how many it emptied. A text that
+// was never edited and is rewritten now first gets the entry of its first version, empty, so that the history shows
+// the edit.
+func eraseHistory(ctx context.Context, issueID, commentID, posterID int64, created timeutil.TimeStamp, rewrite bool, holds func(string) bool) (int64, error) {
 	cond := builder.Eq{"issue_id": issueID, "comment_id": commentID, "is_deleted": false}
-	if !force {
+	if !rewrite {
 		var versions []*issues_model.ContentHistory
 		if err := db.GetEngine(ctx).Where(cond).Cols("id", "content_text").Find(&versions); err != nil {
 			return 0, err
 		}
-		if !slices.ContainsFunc(versions, func(v *issues_model.ContentHistory) bool { return holds(v.ContentText) }) {
+		var ids []int64
+		for _, v := range versions {
+			if holds(v.ContentText) {
+				ids = append(ids, v.ID)
+			}
+		}
+		if len(ids) == 0 {
 			return 0, nil
 		}
+		return db.GetEngine(ctx).In("id", ids).Cols("is_deleted", "content_text").Update(&issues_model.ContentHistory{IsDeleted: true})
 	}
-	if writing {
-		// soft-deleted versions count here too, so a text redacted before gets no second first version
-		has, err := issues_model.HasIssueContentHistory(ctx, issueID, commentID)
-		if err != nil {
+	// soft-deleted versions count here too, so a text redacted before gets no second first version
+	has, err := issues_model.HasIssueContentHistory(ctx, issueID, commentID)
+	if err != nil {
+		return 0, err
+	}
+	if !has {
+		if err := issues_model.SaveIssueContentHistory(ctx, posterID, issueID, commentID, created, "", true); err != nil {
 			return 0, err
-		}
-		if !has {
-			if err := issues_model.SaveIssueContentHistory(ctx, posterID, issueID, commentID, created, "", true); err != nil {
-				return 0, err
-			}
 		}
 	}
 	return db.GetEngine(ctx).Where(cond).Cols("is_deleted", "content_text").Update(&issues_model.ContentHistory{IsDeleted: true})

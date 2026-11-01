@@ -20,9 +20,12 @@ import (
 	secretscan_model "forgejo.org/models/secretscan"
 	"forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/queue"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
+	issue_service "forgejo.org/services/issue"
 	"forgejo.org/services/mailer"
 	maintenance_service "forgejo.org/services/maintenance"
 	repo_service "forgejo.org/services/repository"
@@ -151,17 +154,16 @@ func TestSecretTextRedact(t *testing.T) {
 		history = nil
 		require.NoError(t, db.GetEngine(t.Context()).Where("comment_id = ?", s.comment.ID).Find(&history))
 		require.Len(t, history, 2)
-		for _, h := range history {
-			assert.True(t, h.IsDeleted)
-			assert.Empty(t, h.ContentText)
-		}
+		assert.True(t, history[0].IsDeleted, "the version that held the secret")
+		assert.Empty(t, history[0].ContentText)
+		assert.False(t, history[1].IsDeleted, "a clean version stays")
+		assert.Equal(t, "again (edited)", history[1].ContentText)
 		data = auditData(t, auditOne(t, since, "repo.secret_alert.text_redacted"))
 		assert.Equal(t, true, data["history_only"])
 		assert.EqualValues(t, 0, data["replaced"])
 
 		// a target that names no text: 404
 		secretPost(t, owner, page+"/redact", url.Values{"issue": {"9301"}, "field": {"path"}}, http.StatusNotFound)
-		assert.Zero(t, mails, "a redaction mails nobody")
 	})
 
 	t.Run("refused", func(t *testing.T) {
@@ -282,6 +284,16 @@ func TestSecretTextRedact(t *testing.T) {
 		})
 		bumpSettingsRevision(t)
 		MakeRequest(t, NewRequestWithJSON(t, "POST", path, body).AddTokenAuth(write), http.StatusNotFound)
-		assert.Zero(t, mails)
 	})
+
+	// nothing in the whole flow mailed anyone, also from a queue that ran late
+	require.NoError(t, queue.GetManager().FlushAll(t.Context(), 10*time.Second))
+	assert.Zero(t, mails, "a redaction mails nobody")
+
+	// and the count does see mail: a plain comment by user2 on user5's issue mails user5
+	issue := unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{RepoID: 1, Index: 9301})
+	_, err := issue_service.CreateIssueComment(sys, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), repo, issue, "a plain comment", nil)
+	require.NoError(t, err)
+	require.NoError(t, queue.GetManager().FlushAll(t.Context(), 10*time.Second))
+	assert.Positive(t, mails)
 }

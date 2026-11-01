@@ -4143,7 +4143,7 @@
 	"repo.secrets.redact.button": "Redact…",
 	"repo.secrets.redact.title": "Redact the secret",
 	"repo.secrets.redact.replace": "Every copy of the secret still in this text is replaced with %s. The rest of the text stays as it is.",
-	"repo.secrets.redact.history": "The earlier versions in its edit history are deleted. For a title, the secret is removed from the title changes in the timeline instead.",
+	"repo.secrets.redact.history": "Its earlier versions are deleted from the edit history. If the secret is already gone from the text, only the versions that hold it.",
 	"repo.secrets.redact.undo": "This can't be undone. The edit is shown as yours, and nobody is notified.",
 	"repo.secrets.redact.revoke": "The credential still works until you revoke it. Notification mails, webhook deliveries and other copies already sent keep the secret.",
 	"repo.secrets.redact.submit": "Redact",
@@ -4156,6 +4156,9 @@
 	"repo.secrets.redact.history_only": "The secret was already gone from the text. Its earlier versions were deleted from the edit history.",
 	"repo.secrets.redact.history_only_title": "The secret was already gone from the title. It was removed from the title changes of the timeline.",
 	"repo.secrets.redact.pattern": "The pattern that found this secret was deleted or turned off, so it can't be found again. Edit the text by hand, then delete its old versions from the \"edited\" menu.",
+	"repo.secrets.redact.history_title": "The secret is also removed from the title changes in the timeline (a title has no edit history).",
+	"repo.secrets.redact.marked_removed": "The secret was already gone from this text and nothing else here held it. Its place is now marked removed.",
+	"repo.secrets.activity.redacted_history": "cleaned up an issue or pull request text the secret was already gone from",
 	"repo.secrets.activity.redacted": "removed the secret from an issue or pull request text",
 	"admin.audit.action.repo.secret_alert.text_redacted": "Removed the secret of the alert for %s from the text of an issue or pull request"
 }

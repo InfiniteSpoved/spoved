@@ -542,17 +542,19 @@ func SecretAlertRedact(ctx *context.Context) {
 		return
 	}
 	target := secretscan_service.RedactTarget{Issue: ctx.FormInt64("issue"), Field: ctx.FormString("field"), Comment: ctx.FormInt64("comment")}
-	n, err := secretscan_service.RedactText(ctx, ctx.Repo.Repository, ctx.Doer, ctx.ParamsInt64(":index"), target, secretTextAccess(ctx), ctx.Repo.CanRead(unit.TypeWiki))
+	res, err := secretscan_service.RedactText(ctx, ctx.Repo.Repository, ctx.Doer, ctx.ParamsInt64(":index"), target, secretTextAccess(ctx), ctx.Repo.CanRead(unit.TypeWiki))
 	title := target.Field == "title"
 	switch {
-	case err == nil && n > 0 && title:
+	case err == nil && res.Replaced > 0 && title:
 		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.done_title", secretscan_service.RedactedMark))
-	case err == nil && n > 0:
+	case err == nil && res.Replaced > 0:
 		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.done", secretscan_service.RedactedMark))
-	case err == nil && title:
+	case err == nil && res.Cleaned && title:
 		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.history_only_title"))
-	case err == nil:
+	case err == nil && res.Cleaned:
 		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.history_only"))
+	case err == nil:
+		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.marked_removed"))
 	case errors.Is(err, secretscan_service.ErrRedactTarget):
 		ctx.NotFound("SecretAlertRedact", err)
 		return
