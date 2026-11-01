@@ -103,6 +103,9 @@ func Notifications(ctx *context.Context) {
 		{ctx.Tr("settings.notifications.group.credentials"), []*notifyRow{
 			row(user_model.NotifyEventCredentialExpiry, ctx.Tr("settings.notifications.event.credential_expiry")),
 		}},
+		{ctx.Tr("settings.notifications.group.security"), []*notifyRow{
+			row(user_model.NotifyEventSecretAlert, ctx.Tr("settings.notifications.event.secret_alert")),
+		}},
 		{ctx.Tr("settings.notifications.group.own"), []*notifyRow{
 			row(user_model.NotifyEventOwnActions, ctx.Tr("settings.notifications.event.own_actions")),
 		}},

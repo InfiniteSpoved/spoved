@@ -2948,6 +2948,47 @@
 	"mail.credential_expiry.kind_inline.access_token": "access token",
 	"mail.credential_expiry.kind_inline.ssh_key": "SSH key",
 	"mail.credential_expiry.kind_inline.deploy_key": "deploy key",
+	"mail.secret_digest.subject": {
+		"one": "New secret found in %s",
+		"other": "New secrets found in %s"
+	},
+	"mail.secret_digest.subject_pusher": {
+		"one": "Your push to %s contained a secret",
+		"other": "Your push to %s contained secrets"
+	},
+	"mail.secret_digest.intro": {
+		"one": "A scan of %[1]s found %[2]d secret that was not in the alert list yet.",
+		"other": "A scan of %[1]s found %[2]d secrets that were not in the alert list yet."
+	},
+	"mail.secret_digest.intro_pusher": {
+		"one": "Your push to %[1]s contains %[2]d secret.",
+		"other": "Your push to %[1]s contains %[2]d secrets."
+	},
+	"mail.secret_digest.where_commit": "%s (commit %s)",
+	"mail.secret_digest.where_wiki": "the wiki",
+	"mail.secret_digest.wiki_place": "%s (wiki)",
+	"mail.secret_digest.col_type": "Secret type",
+	"mail.secret_digest.col_found": "Found",
+	"mail.secret_digest.places": {
+		"one": "Location",
+		"other": "Locations"
+	},
+	"mail.secret_digest.places_capped": "Locations (%d of %d)",
+	"mail.secret_digest.more": {
+		"one": "…and %d more location in the alerts.",
+		"other": "…and %d more locations in the alerts."
+	},
+	"mail.secret_digest.open": {
+		"one": "View secret alert",
+		"other": "View secret alerts"
+	},
+	"mail.secret_digest.advice_admin": "Revoke each credential with its provider first, then close the alert. Removing it from the code is not enough: it stays in git history.",
+	"mail.secret_digest.advice_pusher": "Revoke the credential with its provider now. Removing it from the code is not enough: it stays in git history.",
+	"mail.secret_digest.foot_admin": "You receive this because you can manage secret alerts in %s. The email never contains the secrets.",
+	"mail.secret_digest.foot_pusher": "You receive this because you pushed these commits to %s. The email never contains the secrets.",
+	"mail.secret_digest.settings": "Notification settings",
+	"settings.notifications.group.security": "Security",
+	"settings.notifications.event.secret_alert": "A scan finds new secrets in a repository I administer or push to",
 	"mail.credential_expiry.days": {
 		"one": "%d day",
 		"other": "%d days"

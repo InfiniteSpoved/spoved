@@ -361,10 +361,15 @@ Forgejo or set your environment appropriately.`, "")
 	pusherID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvPusherID), 10, 64)
 	prID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvPRID), 10, 64)
 	pusherName := os.Getenv(repo_module.EnvPusherName)
+	// who really pushed: a deploy key or an Actions task pushes under another user's ID
+	deployKeyKeyID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvDeployPublicKeyID), 10, 64)
+	actionTaskID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvActionTaskID), 10, 64)
 
 	hookOptions := private.HookOptions{
 		UserName:                        pusherName,
 		UserID:                          pusherID,
+		DeployKeyKeyID:                  deployKeyKeyID,
+		ActionTaskID:                    actionTaskID,
 		GitAlternativeObjectDirectories: os.Getenv(private.GitAlternativeObjectDirectories),
 		GitObjectDirectory:              os.Getenv(private.GitObjectDirectory),
 		GitQuarantinePath:               os.Getenv(private.GitQuarantinePath),

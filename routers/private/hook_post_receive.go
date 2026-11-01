@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -32,6 +33,15 @@ import (
 	secretscan_service "forgejo.org/services/secretscan"
 )
 
+// hookPusherID is the person who pushed: a deploy key or an Actions task pushes under the repository owner's or the
+// Actions user's ID, which names nobody who pushed.
+func hookPusherID(opts *private.HookOptions) int64 {
+	if opts.DeployKeyKeyID != 0 || opts.ActionTaskID != 0 {
+		return 0
+	}
+	return opts.UserID
+}
+
 // HookPostReceive updates services and users
 func HookPostReceive(ctx *app_context.PrivateContext) {
 	opts := web.GetForm(ctx).(*private.HookOptions)
@@ -52,6 +62,9 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 		}
 		if err := repo_module.UpdateRepoSize(ctx, repo); err != nil {
 			log.Error("UpdateRepoSize after a wiki push to %-v: %v", repo, err)
+		}
+		if slices.ContainsFunc(opts.NewCommitIDs, func(id string) bool { return !git.IsEmptyCommitID(id, nil) }) { // not only deletions
+			secretscan_service.MarkPush(ctx, repo, hookPusherID(opts), "", "")
 		}
 		secretscan_service.EnqueueIfEnabled(ctx, repo)
 		ctx.JSON(http.StatusOK, private.HookPostReceiveResult{})
@@ -160,6 +173,12 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 			}
 		}
 
+		for _, u := range updates { // the digest names the first ref that isn't a deletion
+			if !u.IsDelRef() {
+				secretscan_service.MarkPush(ctx, repo, hookPusherID(opts), u.RefFullName.ShortName(), u.NewCommitID)
+				break
+			}
+		}
 		if err := repo_service.PushUpdates(updates); err != nil {
 			log.Error("Failed to Update: %d Total Updates: %d", repoID, len(updates))
 			for i, update := range updates {

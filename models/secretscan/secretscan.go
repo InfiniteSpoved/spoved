@@ -80,8 +80,17 @@ type Scan struct {
 	Holes int64 `xorm:"NOT NULL DEFAULT 0"`
 	// Requeue marks a repository to scan again after a switch turned on (set with the setting, cleared when the scan
 	// takes the row), so that a restart doesn't lose it: the cron task queues marked rows too.
-	Requeue     int64              `xorm:"INDEX NOT NULL DEFAULT 0"`
-	UpdatedUnix timeutil.TimeStamp `xorm:"INDEX updated"`
+	Requeue int64 `xorm:"INDEX NOT NULL DEFAULT 0"`
+	// The digest mark (repository row only, see notify.go): a push marked the repository while its scan was complete,
+	// and the scan that finishes next mails the alerts above NotifyAlertID. Zero NotifyAfterUnix means no mark;
+	// NotifySeq counts every marking push, so a clear that raced a newer push is refused.
+	NotifyAfterUnix timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"`
+	NotifySeq       int64              `xorm:"NOT NULL DEFAULT 0"`
+	NotifyAlertID   int64              `xorm:"NOT NULL DEFAULT 0"`
+	NotifyPusherID  int64              `xorm:"NOT NULL DEFAULT 0"`
+	NotifyRef       string             `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"`
+	NotifyCommit    string             `xorm:"VARCHAR(64) NOT NULL DEFAULT ''"`
+	UpdatedUnix     timeutil.TimeStamp `xorm:"INDEX updated"`
 }
 
 func (*Scan) TableName() string { return "secret_scan" }
@@ -422,7 +431,7 @@ func RequeuedRepoIDsAfter(ctx context.Context, after int64, limit int) ([]int64,
 	return ids, db.GetEngine(ctx).Table("repository").Select("repository.id").
 		Where(builder.Gt{"repository.id": after}).And(scannedRepoCond(0)).
 		And(builder.Exists(builder.Select("1").From("secret_scan", "marked").Where(builder.And(
-			builder.Expr("marked.repo_id = repository.id"), builder.Eq{"marked.kind": KindRepo}, builder.Gt{"marked.requeue": 0},
-		)))).
+			builder.Expr("marked.repo_id = repository.id"), builder.Eq{"marked.kind": KindRepo},
+			builder.Gt{"marked.requeue": 0})))).
 		OrderBy("repository.id").Limit(limit).Find(&ids)
 }

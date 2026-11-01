@@ -179,6 +179,7 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	defer cancel()
 
 	s := &scanner{ctx: ctx, scanCtx: scanCtx, repo: repo, cfg: cfg, detector: detector}
+	mark := readMark(ctx, repo.ID) // before any ref is read: a push after this keeps its own mark for the next scan
 	kinds := []string{secretscan_model.KindRepo}
 	if repo.HasWiki() {
 		kinds = append(kinds, secretscan_model.KindWiki)
@@ -187,6 +188,9 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 		rq, kerr := s.scanKind(kind)
 		requeue = requeue || rq
 		err = errors.Join(err, kerr)
+	}
+	if err == nil && !requeue {
+		finishDigest(ctx, repo, mark)
 	}
 	return requeue, err
 }
