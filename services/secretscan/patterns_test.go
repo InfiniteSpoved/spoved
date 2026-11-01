@@ -82,6 +82,8 @@ func TestValidatePattern(t *testing.T) {
 		"NUL in name":          func(in *PatternInput) { in.Name = "a\x00b" },
 		"bidi in name":         func(in *PatternInput) { in.Name = "a\u202eb" },
 		"zero-width in name":   func(in *PatternInput) { in.Name = "a\u200bb" },
+		"isolate in name":      func(in *PatternInput) { in.Name = "a\u2066b" },
+		"BOM in name":          func(in *PatternInput) { in.Name = "a\ufeffb" },
 		"not UTF-8 in name":    func(in *PatternInput) { in.Name = "a\xffb" },
 		"NUL in pattern":       func(in *PatternInput) { in.Pattern = "acme-key-[a-z0-9]{20}\x00?" },
 		"not UTF-8 in pattern": func(in *PatternInput) { in.Pattern = "acme-key-[a-z0-9]{20}(?:\xff)?" },
@@ -643,7 +645,7 @@ func TestRenamePatternChecksTheName(t *testing.T) {
 	ctx, admin := patternCtx(t)
 	p, err := CreatePattern(ctx, admin, SitePatterns, acmeInput("rule"))
 	require.NoError(t, err)
-	for _, name := range []string{"a\u202eb", "a\u200bb", "a\x00b", strings.Repeat("n", MaxPatternNameLen+1)} {
+	for _, name := range []string{"a\u202eb", "a\u200bb", "a\u2066b", "a\ufeffb", "a\x00b", strings.Repeat("n", MaxPatternNameLen+1)} {
 		require.ErrorIs(t, RenamePattern(ctx, SitePatterns, p.ID, name), secretdetection.ErrCustomNameInvalid, "%q", name)
 	}
 	err = RenamePattern(ctx, SitePatterns, p.ID, "leak "+token("rename"))
