@@ -82,9 +82,9 @@ func SendSecretPosterNotice(ctx context.Context, repo *repo_model.Repository, n 
 	}
 	if n.Field != "title" { // a title has no edit history
 		var last issues_model.ContentHistory
-		if has, err := db.GetEngine(ctx).Where("issue_id = ? AND comment_id = ? AND is_deleted = ?", issue.ID, n.CommentID, false).Desc("id").Get(&last); err != nil {
+		if has, err := db.GetEngine(ctx).Where("issue_id = ? AND comment_id = ?", issue.ID, n.CommentID).Desc("id").Get(&last); err != nil {
 			return err
-		} else if has && last.PosterID != u.ID { // somebody else wrote the text as it is now
+		} else if has && last.PosterID != u.ID { // somebody else wrote the text as it is now (a soft-deleted row still counts)
 			return nil
 		}
 	}
