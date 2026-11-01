@@ -6,7 +6,10 @@
 
 package secretdetection
 
-import "bytes"
+import (
+	"bytes"
+	"strings"
+)
 
 const uuidPattern = `[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`
 
@@ -504,9 +507,10 @@ var gitleaksServiceRules = []Rule{
 		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
 	},
 	{
+		// hapikey is a query parameter, so & and # end the key too
 		ID: "hubspot-api-key", Name: "HubSpot API key", Type: "hubspot",
 		Keywords:    []string{"hubspot", "hapikey"},
-		Regex:       assignRegex(`hubspot[_.-]?(?:api[_.-]?)?(?:key|token)|hapikey`, uuidPattern),
+		Regex:       strings.Replace(assignRegex(`hubspot[_.-]?(?:api[_.-]?)?(?:key|token)|hapikey`, uuidPattern), `(?:[\x60'"\s;]`, `(?:[\x60'"\s;&#]`, 1),
 		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
 	},
 	{
@@ -650,9 +654,10 @@ var gitleaksServiceRules = []Rule{
 		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
 	},
 	{
-		ID: "trello-access-token", Name: "Trello API token", Type: "trello",
+		// the 32-character key (gitleaks) or the 64-hex user token (trufflehog)
+		ID: "trello-access-token", Name: "Trello API key or token", Type: "trello",
 		Keywords:    []string{"trello"},
-		Regex:       assignRegex(`trello`, `[A-Za-z0-9-]{32}`),
+		Regex:       assignRegex(`trello`, `[a-fA-F0-9]{64}|[A-Za-z0-9-]{32}`),
 		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
 	},
 	{

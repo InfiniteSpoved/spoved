@@ -739,7 +739,10 @@ func (g *keywordGate) add(keywords []string) []int {
 // the first occurrence (-1: nowhere) and, up to the hit limit, all of them.
 func (g *keywordGate) find(lower []byte) *keywordHits {
 	n := len(g.words)
-	h := &keywordHits{lower: lower, words: g.words, first: make([]int, n), at: make([][]int, n), from: make([]int, n), limit: len(lower)/8 + keptHitsBase}
+	h := &keywordHits{lower: lower, words: g.words, first: make([]int, n), at: make([][]int32, n), from: make([]int, n), limit: len(lower)/16 + keptHitsBase}
+	if len(lower) > math.MaxInt32 {
+		h.limit = 0 // offsets are kept as int32
+	}
 	first := h.first
 	for i := range first {
 		first[i] = -1
@@ -775,7 +778,7 @@ func (g *keywordGate) find(lower []byte) *keywordHits {
 					left--
 				}
 				if collect {
-					h.at[id] = append(h.at[id], p)
+					h.at[id] = append(h.at[id], int32(p))
 					h.total++
 				}
 			}
@@ -796,19 +799,20 @@ func (g *keywordGate) find(lower []byte) *keywordHits {
 	return h
 }
 
-// keptHitsBase plus an eighth of the content length is how many keyword hits
-// a scan keeps (a variable for tests).
+// keptHitsBase plus a 16th of the content length is how many keyword hits a
+// scan keeps (a variable for tests).
 var keptHitsBase = 1024
 
 // keywordHits are the keyword occurrences of one scan, shared by its rules,
 // so a keyword that several rules use is searched once. at holds a keyword's
-// occurrences in order, every one before from; at most about limit are kept
-// in all, so memory stays below the content's size.
+// occurrences in order, every one before from. At most about limit are kept
+// in all, as int32: a quarter of the content's size live, and up to about
+// four times that allocated while the lists grow.
 type keywordHits struct {
 	lower        []byte
 	words        []string
 	first        []int
-	at           [][]int
+	at           [][]int32
 	from         []int
 	total, limit int
 }
@@ -816,8 +820,9 @@ type keywordHits struct {
 // next returns the first occurrence of keyword id at or after off (-1: none).
 func (h *keywordHits) next(id, off int) int {
 	at := h.at[id]
-	if i, _ := slices.BinarySearch(at, off); i < len(at) {
-		return at[i]
+	if len(at) > 0 && off <= int(at[len(at)-1]) {
+		i, _ := slices.BinarySearch(at, int32(off))
+		return int(at[i])
 	}
 	from := min(max(off, h.from[id]), len(h.lower))
 	p := bytes.Index(h.lower[from:], []byte(h.words[id]))
@@ -829,7 +834,7 @@ func (h *keywordHits) next(id, off int) int {
 		if p < 0 {
 			h.from[id] = len(h.lower)
 		} else {
-			h.at[id], h.from[id] = append(at, p), p+1
+			h.at[id], h.from[id] = append(at, int32(p)), p+1
 			h.total++
 		}
 	}

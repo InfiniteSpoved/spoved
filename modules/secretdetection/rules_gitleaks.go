@@ -47,8 +47,10 @@
 // airtable personal access token and the facebook app token run on their own
 // shape and near the word facebook, lob-api-key only where a live_ or test_
 // value follows, the Flutterwave encryption key has its dash, hubspot-api-key
-// needs a key name (hubspot_api_key, hubspot_token, hapikey: not a form ID), gitleaks'
-// airtable-personnal-access-token is airtable-personal-access-token, and the
+// needs a key name (hubspot_api_key, hubspot_token, hapikey: not a form ID)
+// and ends at & or # too, trello-access-token also takes the 64-hex user token
+// (as trufflehog), gitleaks' airtable-personnal-access-token is
+// airtable-personal-access-token, and the
 // public keys (flutterwave-public-key, lob-pub-api-key, mailgun-pub-key, the
 // mapbox pk. token, new-relic-browser-api-token) and the bare numeric IDs
 // (discord-client-id, asana-client-id) are left out. Public values a shape

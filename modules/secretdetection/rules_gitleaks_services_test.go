@@ -287,7 +287,7 @@ func gitleaksServiceRuleTests() []ruleTest {
 			[]string{"secret_key => \"sk_" + fake(29, alnum) + "\"", "\"secret_key\" => sk_" + fake(29, alnum) + ",", "\"other_key\" => \"sk_" + fake(29, alnum) + "\""},
 		},
 		{"freshbooks-access-token", []string{set("FRESHBOOKS_TOKEN", fake(64, alnum))}, []string{set("freshbooks", fake(65, alnum))}},
-		{"hubspot-api-key", []string{set("HUBSPOT_API_KEY", strings.ToUpper(uuid)), set("hubspot_token", uuid), "url?hapikey=" + uuid + " "}, []string{set("api_key", uuid), set("hubspot_form_id", uuid), set("hubspot_portal", uuid)}},
+		{"hubspot-api-key", []string{set("HUBSPOT_API_KEY", strings.ToUpper(uuid)), set("hubspot_token", uuid), "url?hapikey=" + uuid + " ", "https://api.hubapi.local/contacts/v1/lists?hapikey=" + uuid + "&count=2", "lists?hapikey=" + uuid + "#top", "lists?hapikey=" + uuid}, []string{set("api_key", uuid), set("hubspot_form_id", uuid), set("hubspot_portal", uuid)}},
 		{
 			"intra42-client-secret",
 			[]string{"INTRA_SECRET=s-s4t2ud-" + fake(64, hexa), "s-s4t2af-" + fake(64, hexa)},
@@ -354,7 +354,7 @@ func gitleaksServiceRuleTests() []ruleTest {
 		},
 		{"snyk-api-token", []string{set("SNYK_TOKEN", uuid), set("snyk_api_key", uuid)}, []string{set("snyk_org", uuid)}},
 		{"squarespace-access-token", []string{set("SQUARESPACE_API_KEY", uuid)}, []string{set("square_key", uuid)}},
-		{"trello-access-token", []string{set("TRELLO_TOKEN", fake(32, alnum)), set("trello_api_key", fake(20, alnum)+"-"+fake(11, alnum))}, []string{set("trello", fake(31, alnum)), set("trello", strings.Repeat("ab", 16))}},
+		{"trello-access-token", []string{set("TRELLO_TOKEN", fake(32, alnum)), set("trello_api_key", fake(20, alnum)+"-"+fake(11, alnum)), set("TRELLO_TOKEN", fake(64, hexa)), "trello_token: " + fake(64, hexa) + "\n"}, []string{set("trello", fake(31, alnum)), set("trello", strings.Repeat("ab", 16))}},
 		{"twitch-api-token", []string{set("TWITCH_CLIENT_SECRET", fake(30, lowerAlnum))}, []string{set("twitch", fake(31, alnum))}},
 		{"twitter-api-key", []string{set("TWITTER_API_KEY", fake(25, alnum))}, []string{set("twitter", fake(26, alnum))}},
 		{"twitter-api-secret", []string{set("twitter_api_secret", fake(50, alnum))}, []string{set("twitter", fake(49, alnum))}},
