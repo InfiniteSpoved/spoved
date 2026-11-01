@@ -39,6 +39,10 @@ func TestCommentCandidatesBudget(t *testing.T) {
 	}
 	c := newCommentCandidates()
 	require.ErrorIs(t, c.addComment(parts.String()), ErrCommentTooCostly)
+	// a run with more delimiters than positions are tried is refused, never cut (its middle could be the secret)
+	c = newCommentCandidates()
+	far := strings.Repeat("/", 51) + strings.Repeat("a", 300) + "/" + strings.Repeat("b", 40) + "/" + strings.Repeat("a", 300) + strings.Repeat("/", 51)
+	require.ErrorIs(t, c.addComment(far), ErrCommentTooCostly)
 
 	// the budget is shared by the texts of a comment, and a repeated candidate is counted once
 	c = newCommentCandidates()

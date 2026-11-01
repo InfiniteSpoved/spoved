@@ -817,6 +817,8 @@ func TestSecretScanningAPIComment(t *testing.T) {
 			bare[:10] + "\u2800" + bare[10:],
 			// a comment the check can't finish within its budget is refused
 			distinctParts(250),
+			// a secret between two far clusters of delimiters, whose pairs are all repeats or too long
+			strings.Repeat("/", 51) + strings.Repeat("a", 300) + "/" + bare + "/" + strings.Repeat("a", 300) + strings.Repeat("/", 51),
 			// another alert's secret is no more welcome here
 			"it was " + otherSecret,
 			"it was " + otherSecret[:10] + "\u034f" + otherSecret[10:],

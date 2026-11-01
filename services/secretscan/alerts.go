@@ -139,8 +139,12 @@ func (c *commentCandidates) addComment(comment string) error {
 				starts, ends = append(starts, i+1), append(ends, i)
 			}
 		}
-		for _, from := range capped(starts) {
-			for _, to := range capped(ends) {
+		// a run of more than 100 delimiters is refused, not cut: dropping positions could drop the secret's own ends
+		if len(starts) > maxRunPositions {
+			return ErrCommentTooCostly
+		}
+		for _, from := range starts {
+			for _, to := range ends {
 				if from < to && to-from <= maxCandidateLen {
 					if err := c.add(run[from:to]); err != nil {
 						return err
@@ -152,14 +156,9 @@ func (c *commentCandidates) addComment(comment string) error {
 	return nil
 }
 
-// capped keeps the first and the last 50 of the positions: a comment is short, but one made of delimiters would
+// maxRunPositions is the most delimiters a run may hold: a comment is short, but one made of delimiters would
 // otherwise have as many candidates as the square of its length.
-func capped(positions []int) []int {
-	if len(positions) <= 100 {
-		return positions
-	}
-	return slices.Concat(positions[:50], positions[len(positions)-50:])
-}
+const maxRunPositions = 100
 
 // invisible removes what shows as nothing next to a letter: combining marks, format characters and fillers.
 func invisible(r rune) rune {
