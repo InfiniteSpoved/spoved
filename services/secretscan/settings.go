@@ -215,7 +215,7 @@ func SaveSwitches(ctx context.Context, doer *user_model.User, enabled, generic, 
 		return stateChanged, cfgChanged
 	}, func(ctx context.Context) error {
 		if textOn {
-			if err := secretscan_model.ResetTextScans(ctx); err != nil {
+			if err := secretscan_model.ResetTextScans(ctx, 0); err != nil {
 				return err
 			}
 		}

@@ -10,10 +10,15 @@ import (
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
+	secretscan_model "forgejo.org/models/secretscan"
 	"forgejo.org/models/unit"
 	"forgejo.org/modules/log"
 	actions_service "forgejo.org/services/actions"
 )
+
+// TextUnitsTurnedOn runs after a change of a repository's units that turned its Issues or Pull requests unit on
+// committed. Secret scanning sets it to queue the repository (services/secretscan can't be imported here).
+var TextUnitsTurnedOn = func(context.Context, *repo_model.Repository) {}
 
 // UpdateRepositoryUnits updates a repository's units
 func UpdateRepositoryUnits(ctx context.Context, repo *repo_model.Repository, units []repo_model.RepoUnit, deleteUnitTypes []unit.Type) (err error) {
@@ -51,6 +56,18 @@ func UpdateRepositoryUnits(ctx context.Context, repo *repo_model.Repository, uni
 	for _, u := range units {
 		after = append(after, u.Type)
 	}
+	// text in an Issues or Pull requests unit that was off was not scanned for secrets: its text scan starts again
+	textOn := false
+	for _, t := range []unit.Type{unit.TypeIssues, unit.TypePullRequests} {
+		if slices.Contains(after, t) && !slices.Contains(stored, t) {
+			textOn = true
+		}
+	}
+	if textOn {
+		if err := secretscan_model.ResetTextScans(ctx, repo.ID); err != nil {
+			return err
+		}
+	}
 	if b, a := unitNames(stored), unitNames(after); !slices.Equal(b, a) {
 		if err = repo_model.RecordRepo(ctx, "repo.units.changed", repo, map[string]any{
 			"before": map[string]any{"units": b}, "after": map[string]any{"units": a},
@@ -69,7 +86,13 @@ func UpdateRepositoryUnits(ctx context.Context, repo *repo_model.Repository, uni
 		}
 	}
 
-	return committer.Commit()
+	if err := committer.Commit(); err != nil {
+		return err
+	}
+	if textOn {
+		TextUnitsTurnedOn(ctx, repo)
+	}
+	return nil
 }
 
 // SetArchiveRepoState archives or unarchives repo, and records the change.

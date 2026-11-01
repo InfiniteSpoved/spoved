@@ -4,11 +4,14 @@
 package secretscan
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
@@ -18,6 +21,7 @@ import (
 	"forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/json"
 	"forgejo.org/modules/queue"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
@@ -399,8 +403,8 @@ func TestScanTextConcurrentWithCode(t *testing.T) {
 	errs := make([]error, 3)
 	for i, run := range []func() error{
 		func() error { return Scan(t.Context(), repo.ID) },
-		func() error { return handleText(t.Context(), fmt.Sprintf("i:%d", issue.ID)) },
-		func() error { return handleText(t.Context(), fmt.Sprintf("c:%d", c.ID)) },
+		func() error { return untilFree(t, fmt.Sprintf("i:%d", issue.ID)) },
+		func() error { return untilFree(t, fmt.Sprintf("c:%d", c.ID)) },
 	} {
 		wg.Go(func() { errs[i] = run() })
 	}
@@ -419,20 +423,91 @@ func TestScanTextConcurrentWithCode(t *testing.T) {
 	assert.False(t, a.ViaPull, "the code reaches it")
 }
 
-func TestRetryTextItem(t *testing.T) {
-	next, ok := retryTextItem("i:5")
+// untilFree runs a text item until the repository is not busy (the queue would bring it back later).
+func untilFree(t *testing.T, item string) error {
+	for {
+		err := handleText(t.Context(), item)
+		if !errors.Is(err, errTextBusy) {
+			return err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestNextTextItem(t *testing.T) {
+	next, delay, ok := nextTextItem("i:5", false)
 	assert.True(t, ok)
-	assert.Equal(t, "i:5#1", next)
-	next, ok = retryTextItem(next)
+	assert.Equal(t, "i:5#1.0", next)
+	assert.Equal(t, 2*time.Second, delay)
+	next, delay, ok = nextTextItem(next, false)
 	assert.True(t, ok)
-	assert.Equal(t, "i:5#2", next)
-	_, ok = retryTextItem(fmt.Sprintf("i:5#%d", maxTextRetries))
+	assert.Equal(t, "i:5#2.0", next)
+	assert.Equal(t, 4*time.Second, delay, "a backoff")
+	_, _, ok = nextTextItem(fmt.Sprintf("i:5#%d.0", maxTextRetries), false)
 	assert.False(t, ok, "bounded")
+	next, delay, ok = nextTextItem("i:5#1.0", true)
+	assert.True(t, ok)
+	assert.Equal(t, "i:5#1.1", next, "busy is counted apart")
+	assert.Equal(t, 5*time.Second, delay)
+	next, _, _ = nextTextItem(fmt.Sprintf("i:5#0.%d", maxTextBusy), true)
+	assert.Equal(t, fmt.Sprintf("i:5#0.%d", maxTextBusy), next)
 
 	repo := enableText(t)
 	issue := newIssue(t, repo, "t", token("retried"))
-	require.NoError(t, handleText(t.Context(), fmt.Sprintf("i:%d#3", issue.ID)))
+	require.NoError(t, handleText(t.Context(), fmt.Sprintf("i:%d#3.2", issue.ID)))
 	assert.NotNil(t, alertFor(t, repo.ID, token("retried")), "a retried item is the item")
+}
+
+// A text item whose repository is being scanned doesn't wait in the worker: it is queued again later, and after
+// maxTextBusy tries it waits for the lock.
+func TestScanTextBusyRepository(t *testing.T) {
+	repo := enableText(t)
+	issue := newIssue(t, repo, "t", token("busy"))
+	var later []string
+	defer test.MockVariableValue(&pushTextLater, func(item string, delay time.Duration) {
+		later = append(later, fmt.Sprintf("%s %s", item, delay))
+	})()
+	unlock := repoScans.Lock(strconv.FormatInt(repo.ID, 10))
+	item := fmt.Sprintf("i:%d", issue.ID)
+	require.ErrorIs(t, handleText(t.Context(), item), errTextBusy)
+	assert.Empty(t, textHandler(item))
+	assert.Equal(t, []string{item + "#0.1 5s"}, later)
+	assert.Nil(t, alertFor(t, repo.ID, token("busy")))
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		unlock()
+	}()
+	require.NoError(t, handleText(t.Context(), fmt.Sprintf("%s#0.%d", item, maxTextBusy)), "waits for the lock")
+	assert.NotNil(t, alertFor(t, repo.ID, token("busy")))
+}
+
+// The backfill checks its budget per issue, not per batch: the first slice's batch ends at the second issue.
+func TestScanTextBackfillBudgetPerIssue(t *testing.T) {
+	repo := enableText(t)
+	for i := range 5 {
+		newIssue(t, repo, "t", token(fmt.Sprintf("per-issue-%d", i)))
+	}
+	var ids []int64
+	require.NoError(t, db.GetEngine(t.Context()).Table("issue").Where("repo_id = ?", repo.ID).OrderBy("id").Limit(2).Cols("id").Find(&ids))
+	defer test.MockVariableValue(&maxTextItems, 2)()
+	requeue := true
+	var err error
+	for scanOf(t, repo.ID, secretscan_model.KindIssue) == nil { // the code's slices first
+		requeue, err = scan(t.Context(), repo.ID)
+		require.NoError(t, err)
+	}
+	assert.True(t, requeue)
+	var cur textCursor
+	require.NoError(t, json.Unmarshal([]byte(scanOf(t, repo.ID, secretscan_model.KindIssue).ScannedTips), &cur))
+	assert.Equal(t, ids[1], cur.Batch, "two issues in the first slice")
+	for requeue {
+		requeue, err = scan(t.Context(), repo.ID)
+		require.NoError(t, err)
+	}
+	for i := range 5 {
+		assert.NotNil(t, alertFor(t, repo.ID, token(fmt.Sprintf("per-issue-%d", i))))
+	}
 }
 
 // Rescan resets the text row too: the text is read again and its holes are counted again.

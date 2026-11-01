@@ -495,17 +495,25 @@ func MarkRequeue(ctx context.Context, orgID int64) error {
 	return err
 }
 
-// ResetTextScans makes every repository's text scan start from the beginning (its row reset as ResetScans does) and
-// marks the scanned repositories to be scanned again, in the transaction that turns the text scan on: text written
-// while it was off was not scanned.
-func ResetTextScans(ctx context.Context) error {
-	if _, err := db.GetEngine(ctx).Exec(
-		"UPDATE secret_scan SET scanned_tips = '[]', status = '', error = '', fail_count = 0, retry_unix = 0, holes = 0, version = version + 1 WHERE kind = ?", KindIssue,
-	); err != nil {
+// ResetTextScans makes the text scan of the repository (of every repository with 0) start from the beginning (its row
+// reset as ResetScans does) and marks it to be scanned again, if it was scanned: in the transaction that turns the text
+// scan, or a repository's Issues or Pull requests unit, on (text written or kept while it was off was not scanned).
+// The reset cursor '[]' doesn't read as a cursor object, so the backfill starts from the first issue, and the empty
+// status tells it the row is not done.
+func ResetTextScans(ctx context.Context, repoID int64) error {
+	reset := builder.Eq{"kind": KindIssue}
+	scanned := scannedRepoCond(0)
+	if repoID != 0 {
+		reset["repo_id"] = repoID
+		scanned = scanned.And(builder.Eq{"repository.id": repoID})
+	}
+	if _, err := db.GetEngine(ctx).Where(reset).NoAutoTime().
+		SetExpr("scanned_tips", "'[]'").SetExpr("status", "''").SetExpr("error", "''").SetExpr("fail_count", 0).
+		SetExpr("retry_unix", 0).SetExpr("holes", 0).Incr("version").Update(&Scan{}); err != nil {
 		return err
 	}
 	_, err := db.GetEngine(ctx).NoAutoTime().
-		Where(builder.And(builder.Eq{"kind": KindRepo}, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scannedRepoCond(0))))).
+		Where(builder.And(builder.Eq{"kind": KindRepo}, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scanned)))).
 		Incr("requeue").Update(&Scan{})
 	return err
 }

@@ -84,8 +84,9 @@ func MarkTextGone(ctx context.Context, repoID int64, kind string, id int64) erro
 func MarkOrphanTextGone(ctx context.Context, repoID int64) error {
 	now := int64(timeutil.TimeStampNow())
 	for kind, table := range map[string]string{KindIssue: "issue", KindComment: "comment"} {
+		// correlated, so each place looks up its own row by primary key
 		if _, err := db.GetEngine(ctx).Where(builder.Eq{"repo_id": repoID, "kind": kind, "removed_unix": 0}.
-			And(builder.NotIn("source_id", builder.Select("id").From(table)))).
+			And(builder.NotExists(builder.Select("1").From(table).Where(builder.Expr("`" + table + "`.id = secret_scanning_location.source_id"))))).
 			Cols("removed_unix").Update(&Location{RemovedUnix: now}); err != nil {
 			return err
 		}

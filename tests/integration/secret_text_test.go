@@ -12,6 +12,7 @@ import (
 
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
 	"forgejo.org/models/unit"
@@ -171,4 +172,23 @@ func TestSecretTextOnlyAlertWithoutWiki(t *testing.T) {
 		body := session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/security/secrets?state=closed&q=body"), http.StatusOK).Body.String()
 		assert.NotContains(t, body, fmt.Sprintf("/user2/repo1/security/secrets/%d\"", b.Index))
 	})
+}
+
+// Turning the Pull requests unit on (here through the API; the settings page takes the same path) reads the text that
+// was in it while it was off.
+func TestSecretTextUnitTurnedOn(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer test.MockVariableValue(&setting.SecretScanning.Enabled, true)()
+	defer test.MockVariableValue(&setting.SecretScanning.ScanText, true)()
+	defer test.MockVariableValue(&setting.SecretScanning.MaxTextBytes, 1<<20)()
+	_, err := db.GetEngine(t.Context()).Where("repo_id = ? AND type = ?", 1, unit.TypePullRequests).Delete(new(repo_model.RepoUnit))
+	require.NoError(t, err)
+	tok := secretToken("text-unit-on")
+	require.NoError(t, db.Insert(t.Context(), &issues_model.Issue{RepoID: 1, Index: 9001, PosterID: 2, IsPull: true, Title: "t", Content: tok}))
+	require.NoError(t, secretscan_service.Scan(t.Context(), 1))
+	assert.Nil(t, secretAlertWith(1, tok, 0), "the unit is off: not scanned")
+
+	write := getUserToken(t, "user2", auth_model.AccessTokenScopeWriteRepository)
+	MakeRequest(t, NewRequestWithJSON(t, "PATCH", "/api/v1/repos/user2/repo1", api.EditRepoOption{HasPullRequests: new(true)}).AddTokenAuth(write), http.StatusOK)
+	require.Eventually(t, func() bool { return secretAlertWith(1, tok, 1) != nil }, 10*time.Second, 50*time.Millisecond)
 }

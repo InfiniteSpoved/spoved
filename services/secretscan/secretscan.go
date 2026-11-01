@@ -30,6 +30,7 @@ import (
 	"forgejo.org/modules/repository"
 	"forgejo.org/modules/timeutil"
 	notify_service "forgejo.org/services/notify"
+	repo_service "forgejo.org/services/repository"
 )
 
 // cronBatch is the most repositories one run of the cron task queues
@@ -60,7 +61,8 @@ func Init() error {
 		return errors.New("unable to create secret_scanning_text queue")
 	}
 	go graceful.GetManager().RunWithCancel(textQueue)
-	requeue() // the repositories a switch marked before a stop or a crash: the queue is ready, whether or not the cron task is on
+	repo_service.TextUnitsTurnedOn = EnqueueIfEnabled // its text scan was reset in the change of units
+	requeue()                                         // the repositories a switch marked before a stop or a crash: the queue is ready, whether or not the cron task is on
 	return nil
 }
 

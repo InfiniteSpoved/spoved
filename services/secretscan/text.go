@@ -56,8 +56,33 @@ const (
 // maxTextItems is the issues and comments one slice of the backfill reads (a variable for the tests).
 var maxTextItems = 2000
 
-// maxTextRetries is how often an item whose scan failed (a store error, a lost connection) is queued again.
-const maxTextRetries = 5
+// A text item whose scan failed (a store error, a lost connection) is queued again after a backoff, at most
+// maxTextRetries times; one whose repository is being scanned (repoScans held by a code slice, which can take
+// SCAN_TIMEOUT) is queued again after textBusyDelay without waiting in a worker, and after maxTextBusy such tries it
+// waits for the lock.
+const (
+	maxTextRetries = 5
+	maxTextBusy    = 20
+)
+
+// textRetryDelay is the backoff of a failed item's try n (from 1), textBusyDelay that of a busy repository's.
+var (
+	textRetryDelay = func(n int) time.Duration { return time.Second << n }
+	textBusyDelay  = func(n int) time.Duration { return min(5*time.Second<<min(n-1, 3), 30*time.Second) }
+)
+
+// pushTextLater queues an item again after the delay (the queue's own re-push of an unhandled item has none). An
+// item that a stop catches in the delay is lost (logged); its text is read again by a Rescan.
+var pushTextLater = func(item string, delay time.Duration) {
+	time.AfterFunc(delay, func() {
+		if err := pushTextQueue(item); err != nil && !errors.Is(err, queue.ErrAlreadyInQueue) {
+			log.Error("secret scanning: queue text %q again: %v", item, err)
+		}
+	})
+}
+
+// errTextBusy is a text item that found its repository locked.
+var errTextBusy = errors.New("the repository is being scanned")
 
 // textCommentTypes are the comment types that carry text a person wrote (a dismissed review's message too).
 var textCommentTypes = []issues_model.CommentType{issues_model.CommentTypeComment, issues_model.CommentTypeCode, issues_model.CommentTypeReview, issues_model.CommentTypeDismissReview}
@@ -96,51 +121,88 @@ func enqueueTextGone(ctx context.Context, kind string, repoID, id int64) {
 	enqueueText(ctx, fmt.Sprintf("x:%s:%d:%d", kind, repoID, id))
 }
 
-// textHandler runs the items. One that fails is queued again with its try counted ("#n"), at most maxTextRetries
-// times: the backfill of a repository runs once, so a dropped item would leave its text unscanned.
+// textHandler runs the items; a failed or busy one is queued again later with its tries counted (nextTextItem).
 func textHandler(items ...string) (unhandled []string) {
 	ctx := graceful.GetManager().ShutdownContext()
 	for _, item := range items {
-		if err := handleText(ctx, item); err != nil {
-			if ctx.Err() != nil {
-				unhandled = append(unhandled, item)
-				continue
+		err := handleText(ctx, item)
+		switch {
+		case err == nil:
+		case ctx.Err() != nil:
+			unhandled = append(unhandled, item)
+		default:
+			busy := errors.Is(err, errTextBusy)
+			if !busy {
+				log.Error("secret scanning: scan of text %q: %v", item, err)
 			}
-			log.Error("secret scanning: scan of text %q: %v", item, err)
-			if next, ok := retryTextItem(item); ok {
-				unhandled = append(unhandled, next)
+			if next, delay, ok := nextTextItem(item, busy); ok {
+				pushTextLater(next, delay)
 			}
 		}
 	}
 	return unhandled
 }
 
-// retryTextItem is the item with its try counted, or false once it has had maxTextRetries tries.
-func retryTextItem(item string) (string, bool) {
+// textTries reads the tries an item has had: "<item>#<failed>.<busy>".
+func textTries(item string) (base string, failed, busy int) {
 	base, tries, _ := strings.Cut(item, "#")
-	n, _ := strconv.Atoi(tries)
-	if n >= maxTextRetries {
-		return "", false
-	}
-	return base + "#" + strconv.Itoa(n+1), true
+	f, b, _ := strings.Cut(tries, ".")
+	failed, _ = strconv.Atoi(f)
+	busy, _ = strconv.Atoi(b)
+	return base, failed, busy
 }
 
-// lockText holds the repository against its scan and the other text items (repoScans) from before its text is read
-// until the store, so that a pass never stores what an older read of the text found.
-func lockText(repoID int64) func() {
-	return repoScans.Lock(strconv.FormatInt(repoID, 10))
+// nextTextItem is the item to queue again after a failure (or a busy repository) with the delay, or false once it
+// failed maxTextRetries times.
+func nextTextItem(item string, busy bool) (string, time.Duration, bool) {
+	base, failed, b := textTries(item)
+	var delay time.Duration
+	if busy {
+		b = min(b+1, maxTextBusy)
+		delay = textBusyDelay(b)
+	} else {
+		if failed >= maxTextRetries {
+			return "", 0, false
+		}
+		failed++
+		delay = textRetryDelay(failed)
+	}
+	return fmt.Sprintf("%s#%d.%d", base, failed, b), delay, true
+}
+
+// textJob is one text item being handled: the repository it locked, and whether it waits for the lock.
+type textJob struct {
+	repoID int64
+	wait   bool
+}
+
+// lock holds the repository against its scan and the other text items (repoScans) from before its text is read until
+// the store, so that a pass never stores what an older read of the text found. A repository that is locked is
+// errTextBusy unless the job waits.
+func (j *textJob) lock(repoID int64) (func(), error) {
+	j.repoID = repoID
+	key := strconv.FormatInt(repoID, 10)
+	if j.wait {
+		return repoScans.Lock(key), nil
+	}
+	ok, unlock := repoScans.TryLock(key)
+	if !ok {
+		unlock()
+		return nil, errTextBusy
+	}
+	return unlock, nil
 }
 
 // handleText runs one queue item. A panic (the keying is not set up, a detector bug) is logged and drops the item.
 func handleText(ctx context.Context, item string) (err error) {
-	var repoID int64
+	base, _, busy := textTries(item)
+	job := &textJob{wait: busy >= maxTextBusy}
 	defer func() {
 		if p := recover(); p != nil {
-			log.Error("secret scanning: panic (%T) scanning text %q of repository %d", p, item, repoID)
+			log.Error("secret scanning: panic (%T) scanning text %q of repository %d", p, item, job.repoID)
 			err = nil
 		}
 	}()
-	base, _, _ := strings.Cut(item, "#")
 	parts := strings.Split(base, ":")
 	nums := make([]int64, 0, 3)
 	for _, p := range parts[1:] {
@@ -150,12 +212,15 @@ func handleText(ctx context.Context, item string) (err error) {
 	}
 	switch {
 	case parts[0] == "i" && len(nums) == 1:
-		return scanIssueText(ctx, nums[0], &repoID)
+		return scanIssueText(ctx, nums[0], job)
 	case parts[0] == "c" && len(nums) == 1:
-		return scanCommentText(ctx, nums[0], &repoID)
+		return scanCommentText(ctx, nums[0], job)
 	case parts[0] == "x" && len(parts) == 4 && len(nums) == 2:
-		repoID = nums[0]
-		defer lockText(repoID)()
+		unlock, err := job.lock(nums[0])
+		if err != nil {
+			return err
+		}
+		defer unlock()
 		return secretscan_model.MarkTextGone(ctx, nums[0], parts[1], nums[1])
 	}
 	return nil
@@ -198,7 +263,7 @@ func TextStatusVisible(ctx context.Context, repo *repo_model.Repository, canRead
 	return true
 }
 
-func scanIssueText(ctx context.Context, id int64, repoID *int64) error {
+func scanIssueText(ctx context.Context, id int64, job *textJob) error {
 	issue, err := issues_model.GetIssueByID(ctx, id)
 	if err != nil {
 		if issues_model.IsErrIssueNotExist(err) {
@@ -206,12 +271,16 @@ func scanIssueText(ctx context.Context, id int64, repoID *int64) error {
 		}
 		return err
 	}
-	*repoID = issue.RepoID
+	job.repoID = issue.RepoID
 	repo, cfg, ok := textRepo(ctx, issue.RepoID, issue.IsPull)
 	if !ok {
 		return nil
 	}
-	defer lockText(repo.ID)()
+	unlock, err := job.lock(repo.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if issue, err = issues_model.GetIssueByID(ctx, id); err != nil { // as it is now, under the lock
 		if issues_model.IsErrIssueNotExist(err) {
 			return nil
@@ -226,7 +295,7 @@ func scanIssueText(ctx context.Context, id int64, repoID *int64) error {
 	return t.flush(nil)
 }
 
-func scanCommentText(ctx context.Context, id int64, repoID *int64) error {
+func scanCommentText(ctx context.Context, id int64, job *textJob) error {
 	c, err := issues_model.GetCommentByID(ctx, id)
 	if err != nil {
 		if issues_model.IsErrCommentNotExist(err) {
@@ -241,12 +310,16 @@ func scanCommentText(ctx context.Context, id int64, repoID *int64) error {
 		}
 		return err
 	}
-	*repoID = issue.RepoID
+	job.repoID = issue.RepoID
 	repo, cfg, ok := textRepo(ctx, issue.RepoID, issue.IsPull)
 	if !ok || !slices.Contains(textCommentTypes, c.Type) {
 		return nil
 	}
-	defer lockText(repo.ID)()
+	unlock, err := job.lock(repo.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if c, err = issues_model.GetCommentByID(ctx, id); err != nil { // as it is now, under the lock
 		if issues_model.IsErrCommentNotExist(err) {
 			return nil
@@ -530,7 +603,11 @@ func (s *scanner) scanText() (requeue bool, err error) {
 				done = true
 				break
 			}
-			for _, issue := range issues {
+			for i, issue := range issues { // the budget is checked per issue: the batch ends where it runs out
+				if i > 0 && !more() {
+					issues = issues[:i]
+					break
+				}
 				t.addIssue(issue)
 				items++
 			}
