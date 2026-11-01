@@ -808,7 +808,6 @@ func TestSecretScanningAPIComment(t *testing.T) {
 			bare + "-old",
 			"cfg.token." + bare,
 			bare + "_old", "tok_" + bare, bare + "+1", bare + "==", "a=" + bare + "=b", "/srv/" + bare + "_bak/x",
-			strings.Repeat("a/", 50) + strings.Repeat("A=", 400) + strings.Repeat("/a", 50),
 			strings.ToUpper(lowerSecret),
 			strings.ToLower(upperSecret),
 			// invisible marks inside it
@@ -817,8 +816,7 @@ func TestSecretScanningAPIComment(t *testing.T) {
 			bare[:10] + "\u3164" + bare[10:],
 			bare[:10] + "\u2800" + bare[10:],
 			// a comment the check can't finish within its budget is refused
-			strings.Repeat("a.=", 333),
-			strings.Repeat("ab.=", 250),
+			distinctParts(250),
 			// another alert's secret is no more welcome here
 			"it was " + otherSecret,
 			"it was " + otherSecret[:10] + "\u034f" + otherSecret[10:],
@@ -828,6 +826,9 @@ func TestSecretScanningAPIComment(t *testing.T) {
 		}
 		// a token for another alert is no secret of this one, and a short word is none either
 		patch("rotated, see INC-4242", http.StatusOK)
+		MakeRequest(t, NewRequestWithJSON(t, "PATCH", one, map[string]string{"state": "open"}).AddTokenAuth(token), http.StatusOK)
+		// links with long paths are no secrets
+		patch("fixed in https://ci.example.com/job/build-and-test/1234/artifact/report/index.html, docs: https://docs.example.com/guide/security/rotating-credentials/overview.html", http.StatusOK)
 		MakeRequest(t, NewRequestWithJSON(t, "PATCH", one, map[string]string{"state": "open"}).AddTokenAuth(token), http.StatusOK)
 
 		// newlines stay, formatting characters go, the ends are trimmed
@@ -857,4 +858,13 @@ func removeCodeUnit(t *testing.T, repoID int64) {
 	_, err = db.GetEngine(t.Context()).ID(row.ID).Delete(new(repo_model.RepoUnit))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Insert(db.DefaultContext, &row)) })
+}
+
+// distinctParts is a run of n different short parts joined by dots: as many different candidates as the cap allows.
+func distinctParts(n int) string {
+	var b strings.Builder
+	for i := range n {
+		fmt.Fprintf(&b, "%c%c%c.", 'a'+i%26, 'a'+i/26%26, 'a'+i/676)
+	}
+	return b.String()
 }

@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"hash/maphash"
 	"maps"
 	"slices"
 	"strings"
@@ -55,8 +56,15 @@ const (
 // commentCandidates is the work of the check of the fingerprints of one comment, shared by all the texts of it.
 type commentCandidates struct {
 	hashes map[string]struct{}
+	seen   map[uint64]struct{} // the candidates already added (a cheap hash of each: no string is kept)
 	count  int
 	bytes  int
+}
+
+var candidateSeed = maphash.MakeSeed()
+
+func newCommentCandidates() *commentCandidates {
+	return &commentCandidates{hashes: map[string]struct{}{}, seen: map[uint64]struct{}{}}
 }
 
 // add hashes the candidate as it is, lower-cased and upper-cased, when its length can be that of a secret. It fails
@@ -65,6 +73,12 @@ func (c *commentCandidates) add(cand string) error {
 	if len(cand) < minCandidateLen || len(cand) > maxCandidateLen {
 		return nil
 	}
+	// a candidate that was added before costs nothing: links and paths repeat their parts
+	key := maphash.String(candidateSeed, cand)
+	if _, ok := c.seen[key]; ok {
+		return nil
+	}
+	c.seen[key] = struct{}{}
 	for _, v := range [...]string{cand, strings.ToLower(cand), strings.ToUpper(cand)} {
 		if c.count++; c.count > maxCandidates {
 			return ErrCommentTooCostly
@@ -81,7 +95,9 @@ func (c *commentCandidates) add(cand string) error {
 // an AWS secret key: see the fingerprints) and collects the candidates of it. They are the words of the comment (also
 // after "key=" or "key:", and without the characters around them that can't be in a secret, as in "**secret**" and
 // "secret!"), every run of the characters a secret is made of (also without dots at the ends) and the parts of those
-// runs between . / - # : _ + and = (any number of them from either end).
+// runs between . / - _ + and = (any number of them from either end). Not caught: a secret glued to letters or digits
+// with no separator (a deliberate stash by someone who holds the secret), and, for a viewer without Wiki read, the
+// secret of an alert that is only in the wiki (it is left out, so the answer doesn't confirm a hidden secret).
 func (c *commentCandidates) addComment(comment string) error {
 	d, err := commentDetector()
 	if err != nil {
@@ -116,10 +132,10 @@ func (c *commentCandidates) addComment(comment string) error {
 		if err := cmp.Or(addWord(run), addWord(strings.Trim(run, "."))); err != nil {
 			return err
 		}
-		// what lies between the . / - # and : of the run (a secret can hold some of them: every start and end)
+		// what lies between the . / - _ + and = of the run (a secret can hold some of them: every start and end)
 		starts, ends := []int{0}, []int{len(run)}
 		for i, r := range run {
-			if strings.ContainsRune("./-#:_+=", r) {
+			if strings.ContainsRune("./-_+=", r) {
 				starts, ends = append(starts, i+1), append(ends, i)
 			}
 		}
@@ -176,8 +192,12 @@ func Close(ctx context.Context, repo *repo_model.Repository, doer *user_model.Us
 	}
 	if comment != "" {
 		// the text as it reads: combining marks and format characters out, look-alikes folded (NFKC); one budget for both
-		c := &commentCandidates{hashes: map[string]struct{}{}}
-		for _, text := range []string{comment, strings.Map(invisible, norm.NFKC.String(comment))} {
+		c := newCommentCandidates()
+		texts := []string{comment}
+		if folded := strings.Map(invisible, norm.NFKC.String(comment)); folded != comment {
+			texts = append(texts, folded)
+		}
+		for _, text := range texts {
 			if err := c.addComment(text); err != nil {
 				return nil, err
 			}

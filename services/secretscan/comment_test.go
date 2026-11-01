@@ -23,7 +23,7 @@ func TestCommentCandidatesBudget(t *testing.T) {
 		strings.Repeat("a/", 500),
 		strings.Repeat("a/", 50) + strings.Repeat("A=", 400) + strings.Repeat("/a", 50),
 	} {
-		c := &commentCandidates{hashes: map[string]struct{}{}}
+		c := newCommentCandidates()
 		err := c.addComment(comment)
 		if err != nil {
 			require.ErrorIs(t, err, ErrCommentTooCostly, comment[:8])
@@ -32,23 +32,48 @@ func TestCommentCandidatesBudget(t *testing.T) {
 		assert.LessOrEqual(t, c.bytes, maxCandidateBytes+maxCandidateLen, comment[:8])
 		assert.LessOrEqual(t, len(c.hashes), c.count, comment[:8])
 	}
-	// the budget covers both texts of a comment
-	c := &commentCandidates{hashes: map[string]struct{}{}}
+	// many different candidates run out of the budget: refused
+	var parts strings.Builder
+	for i := range 250 {
+		parts.WriteString(string([]byte{'a' + byte(i%26), 'a' + byte(i/26%26), 'a' + byte(i/676), '.'}))
+	}
+	c := newCommentCandidates()
+	require.ErrorIs(t, c.addComment(parts.String()), ErrCommentTooCostly)
+
+	// the budget is shared by the texts of a comment, and a repeated candidate is counted once
+	c = newCommentCandidates()
 	require.NoError(t, c.addComment("plain words and a token-like-thing-of-some-length"))
 	n := c.count
 	assert.Positive(t, n)
+	require.NoError(t, c.addComment("plain words and a token-like-thing-of-some-length"))
+	assert.Equal(t, n, c.count, "the same candidates again cost nothing")
+	require.NoError(t, c.addComment("another-token-like-thing-of-some-length"))
+	assert.Greater(t, c.count, n, "new ones add to the same count")
+
+	// realistic comments with links are accepted
+	for _, comment := range []string{
+		"see https://git.example.com/org/project/-/blob/main/docs/security/rotation.md#L12-L40 and " +
+			"https://git.example.com/org/project/-/blob/main/src/service/auth/token_store.go#L5 and " +
+			"https://git.example.com/org/project/-/blob/main/src/service/auth/token_store_test.go and " +
+			"https://git.example.com/org/project/-/blob/main/config/prod/secrets.yaml and " +
+			"https://git.example.com/org/project/-/blob/main/config/dev/settings.toml",
+		"fixed in https://ci.example.com/job/build-and-test/1234/artifact/report/index.html, docs: https://docs.example.com/guide/security/rotating-credentials/overview.html",
+	} {
+		c = newCommentCandidates()
+		require.NoError(t, c.addComment(comment), comment)
+	}
 
 	// a plain comment that holds a secret is still refused by the detector, one that holds a fingerprinted one is found
 	secret := "ghp" + "_" + "Ab1Cd2Ef3Gh4" + "Ij5Kl6Mn7Op8" + "Qr9St0Uv1Wx2"
-	require.ErrorIs(t, (&commentCandidates{hashes: map[string]struct{}{}}).addComment("it was "+secret), ErrCommentSecret)
+	require.ErrorIs(t, newCommentCandidates().addComment("it was "+secret), ErrCommentSecret)
 	bare := "wJalrXUtn" + "FEMI/K7MDENG/" + "bPxRfiCY" + "Zq3vT8kLm1"
-	c = &commentCandidates{hashes: map[string]struct{}{}}
+	c = newCommentCandidates()
 	require.NoError(t, c.addComment("old key: **"+bare+"**"))
 	assert.Contains(t, c.hashes, secretdetection.Fingerprint([]byte(bare)))
 
 	// the value joined to other text with _ + = . / - # :
 	for _, form := range []string{bare + "_old", "tok_" + bare, bare + "+1", bare + "==", "a=" + bare + "=b", "/srv/" + bare + "_bak/x", "x:" + bare + "#y"} {
-		c = &commentCandidates{hashes: map[string]struct{}{}}
+		c = newCommentCandidates()
 		require.NoError(t, c.addComment(form), form)
 		assert.Contains(t, c.hashes, secretdetection.Fingerprint([]byte(bare)), form)
 	}
