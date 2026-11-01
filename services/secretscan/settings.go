@@ -6,6 +6,7 @@ package secretscan
 import (
 	"context"
 	"maps"
+	"slices"
 	"time"
 
 	audit_model "forgejo.org/models/audit"
@@ -118,10 +119,17 @@ func updateSettings(ctx context.Context, doer *user_model.User, change func(*set
 	err = db.WithTx(ctx, func(ctx context.Context) error {
 		var state setting.SecretScanningState
 		var cfg setting.SecretScanningConfig
-		if err := readLocked(ctx, stateKey, &state); err != nil {
-			return err
+		// a row that doesn't exist can't be locked on PostgreSQL and MySQL: create both first (in key order, as
+		// SetSettings locks them), then lock
+		for _, key := range slices.Sorted(slices.Values([]string{stateKey, cfgKey})) {
+			if err := system_model.EnsureSetting(ctx, key); err != nil {
+				return err
+			}
 		}
 		if err := readLocked(ctx, cfgKey, &cfg); err != nil {
+			return err
+		}
+		if err := readLocked(ctx, stateKey, &state); err != nil {
 			return err
 		}
 		stateChanged, cfgChanged := change(&state, &cfg)

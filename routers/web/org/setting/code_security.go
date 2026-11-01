@@ -61,6 +61,11 @@ func secretScanningBox(ctx *context.Context) error {
 	case sw.Locked:
 		scanned = total
 	}
+	// what locking it on will turn on: every repository while the organization is off, else the ones that turned it off
+	ctx.Data["SecretLockTurnsOn"] = off
+	if !sw.On {
+		ctx.Data["SecretLockTurnsOn"] = total
+	}
 	ctx.Data["SecretSiteOn"] = secretscan_service.SiteEnabled(ctx)
 	ctx.Data["SecretOn"], ctx.Data["SecretLocked"] = sw.On, sw.Locked
 	ctx.Data["SecretTotal"], ctx.Data["SecretOff"], ctx.Data["SecretScanned"] = total, off, scanned
@@ -96,21 +101,40 @@ func SecretScanningOff(ctx *context.Context) {
 		return
 	}
 	rows := make([]secretOffRepo, 0, len(repos))
-	for _, repo := range repos { // one page at most: the audit log has no bulk read of this
-		row := secretOffRepo{FullName: repo.FullName(), Link: repo.Link() + "/settings/code_security"}
-		change, err := secretscan_service.LastSwitchChange(ctx, repo.ID)
-		if err != nil {
+	changes := make([]*secretscan_service.SwitchChange, len(repos))
+	var actorIDs []int64
+	for i, repo := range repos { // one page at most: the audit log has no bulk read of this
+		if changes[i], err = secretscan_service.LastSwitchChange(ctx, repo.ID); err != nil {
 			ctx.ServerError("LastSwitchChange", err)
 			return
 		}
-		if change != nil && !change.On {
+		if changes[i] != nil && !changes[i].On {
+			actorIDs = append(actorIDs, changes[i].ActorID)
+		}
+	}
+	actors, err := user_model.GetUsersByIDsWithBots(ctx, actorIDs) // one query for the page
+	if err != nil {
+		ctx.ServerError("GetUsersByIDsWithBots", err)
+		return
+	}
+	for i, repo := range repos {
+		row := secretOffRepo{FullName: repo.FullName(), Link: repo.Link() + "/settings/code_security"}
+		if change := changes[i]; change != nil && !change.On {
 			row.By, row.At = change.ActorName, change.CreatedUnix
-			if u, err := user_model.GetUserByID(ctx, change.ActorID); err == nil {
+			if u := actors[change.ActorID]; u != nil {
 				row.By = u.GetDisplayName()
 			}
 		}
 		rows = append(rows, row)
 	}
+	// the organization's own switch decides over these: the list must not claim a repository is off while it is scanned
+	sw, err := secretscan_service.GetOrgSwitch(ctx, ctx.Org.Organization.ID)
+	if err != nil {
+		ctx.ServerError("GetOrgSwitch", err)
+		return
+	}
+	ctx.Data["SecretOrgOn"], ctx.Data["SecretOrgLocked"] = sw.On, sw.Locked
+	ctx.Data["SecretSiteOn"] = secretscan_service.SiteEnabled(ctx)
 	ctx.Data["Rows"] = rows
 	pager := context.NewPagination(int(total), setting.UI.User.RepoPagingNum, page, 5)
 	ctx.Data["Page"] = pager

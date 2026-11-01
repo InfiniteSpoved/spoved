@@ -11,7 +11,6 @@ import (
 
 	"code.forgejo.org/xorm/xorm"
 	"code.forgejo.org/xorm/xorm/schemas"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

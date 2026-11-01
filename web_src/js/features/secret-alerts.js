@@ -20,7 +20,7 @@ function updateBulk() {
   if (all) all.checked = n > 0 && n === boxes.length;
 }
 
-// the list: a bar with the number of selected alerts; the settings: turning scanning off asks first
+// the list: a bar with the number of selected alerts
 export function initRepoSecretAlerts() {
   // Won't fix needs a comment, and the comment is limited in bytes (as in the service), not in characters
   document.addEventListener('change', (e) => {
@@ -41,19 +41,16 @@ export function initRepoSecretAlerts() {
     }
     updateBulk();
   });
-  document.addEventListener('submit', (e) => {
-    const form = e.target.closest?.('#secret-scanning-switch');
-    if (!form || form.getAttribute('data-was-on') !== 'true' || form.querySelector('input[name="enabled"]').checked) return;
-    e.preventDefault();
-    showModal(document.querySelector(form.getAttribute('data-modal')), undefined);
-  });
-  // the organization and Site administration switches: an input that carries data-confirm-modal asks first when the
+  // the switches (repository, organization, Site administration): an input that carries data-confirm-modal asks first when the
   // change would turn scanning off ("off") or a rule on ("on"); the modal's button submits the form again, marked
   document.addEventListener('submit', (e) => {
     const form = e.target.closest?.('.secret-confirm-form');
     if (!form || form.hasAttribute('data-confirmed')) return;
     for (const input of form.querySelectorAll('input[data-confirm-modal]')) {
       const turnsOn = input.getAttribute('data-confirm-when') === 'on';
+      // data-confirm-requires: only while that other input is checked (the lock asks only when scanning stays on)
+      const requires = input.getAttribute('data-confirm-requires');
+      if (requires && !form.querySelector(requires)?.checked) continue;
       if (input.checked !== input.defaultChecked && input.checked === turnsOn) {
         e.preventDefault();
         showModal(document.querySelector(input.getAttribute('data-confirm-modal')), undefined);

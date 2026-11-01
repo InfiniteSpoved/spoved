@@ -77,7 +77,7 @@ test.describe('as the site admin', () => {
     // refused: nothing is saved and the typed value stays
     await blob.fill('500');
     await page.locator('#secret-scanning-limits-save').click();
-    await expect(page.locator('#secret-scanning-limits-error')).toContainText('Nothing was saved. Largest file scanned must be more than 0 and at most 100 MiB.');
+    await expect(page.locator('#secret-scanning-limits-error')).toContainText('Nothing was saved. Largest file scanned must be between 0.0625 and 100 MiB.');
     await expect(blob).toHaveValue('500');
     await screenshot(page);
 

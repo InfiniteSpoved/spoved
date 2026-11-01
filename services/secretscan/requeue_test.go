@@ -82,3 +82,26 @@ func TestOrgSwitchRequeues(t *testing.T) {
 	step(false, true, nil, "locked off")
 	step(true, true, []int64{3}, "locked off to locked on")
 }
+
+// The rows of the two site settings are created before they are locked: on PostgreSQL and MySQL a row that doesn't
+// exist can't be locked, so two first saves could both read "not stored" and the later one would win silently.
+func TestSaveCreatesTheSettingRowsToLock(t *testing.T) {
+	unittest.PrepareTestEnv(t)
+	ctx := audit_model.WithSystem(t.Context(), "test")
+	doer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	count := func() int64 {
+		n, err := db.GetEngine(ctx).Table("system_setting").In("setting_key", "secret_scanning.enabled", "secret_scanning.config").Count()
+		require.NoError(t, err)
+		return n
+	}
+	_, err := db.GetEngine(ctx).Exec("DELETE FROM system_setting WHERE setting_key IN ('secret_scanning.enabled', 'secret_scanning.config')")
+	require.NoError(t, err)
+	require.Zero(t, count())
+	changed, err := SaveLimits(ctx, doer, map[string]int64{})
+	require.NoError(t, err)
+	assert.False(t, changed, "nothing to store")
+	assert.EqualValues(t, 2, count(), "both rows exist (empty) after the save that locked them")
+	changed, err = SaveLimits(ctx, doer, map[string]int64{"max_alerts_per_repo": 500})
+	require.NoError(t, err)
+	assert.True(t, changed)
+}

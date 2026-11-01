@@ -41,13 +41,15 @@ type SecretScanningLimit struct {
 }
 
 // SecretScanningLimits are the numeric settings, checked by the same bounds in app.ini and in Site administration.
+// The lower bounds of the scan time, the file size and the alert cap keep an admin from making scanning ineffective
+// by accident (a one-second scan, a one-byte file limit, a handful of alerts).
 var SecretScanningLimits = []SecretScanningLimit{
 	{"max_concurrent_scans", "MAX_CONCURRENT_SCANS", 1, 1, 16, false, func(o *SecretScanningOptions) any { return &o.MaxConcurrentScans }},
-	{"scan_timeout", "SCAN_TIMEOUT", 300, 1, 24 * 3600, true, func(o *SecretScanningOptions) any { return &o.ScanTimeout }},
-	{"max_blob_size", "MAX_BLOB_SIZE", 1 << 20, 1, 100 << 20, false, func(o *SecretScanningOptions) any { return &o.MaxBlobSize }},
+	{"scan_timeout", "SCAN_TIMEOUT", 300, 30, 24 * 3600, true, func(o *SecretScanningOptions) any { return &o.ScanTimeout }},
+	{"max_blob_size", "MAX_BLOB_SIZE", 1 << 20, 64 << 10, 100 << 20, false, func(o *SecretScanningOptions) any { return &o.MaxBlobSize }},
 	{"max_scan_bytes", "MAX_SCAN_BYTES", 2 << 30, 1, 1 << 40, false, func(o *SecretScanningOptions) any { return &o.MaxScanBytes }},
 	{"max_scan_blobs", "MAX_SCAN_BLOBS", 2_000_000, 1, 100_000_000, false, func(o *SecretScanningOptions) any { return &o.MaxScanBlobs }},
-	{"max_alerts_per_repo", "MAX_ALERTS_PER_REPO", 10_000, 1, 1_000_000, false, func(o *SecretScanningOptions) any { return &o.MaxAlertsPerRepo }},
+	{"max_alerts_per_repo", "MAX_ALERTS_PER_REPO", 10_000, 100, 1_000_000, false, func(o *SecretScanningOptions) any { return &o.MaxAlertsPerRepo }},
 	{"max_locations_per_alert", "MAX_LOCATIONS_PER_ALERT", 100, 1, 10_000, false, func(o *SecretScanningOptions) any { return &o.MaxLocationsPerAlert }},
 }
 

@@ -111,6 +111,13 @@
   border-color: var(--color-warning-border);
 }
 
+/* a link in a warning banner keeps the banner's text colour: the site's link colour fails contrast on it in dark mode */
+.ui.warning.message a,
+.ui.yellow.message a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .ui.error.message > ul {
   margin: 0;
   margin-top: .5rem;

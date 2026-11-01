@@ -11,8 +11,10 @@ import (
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
+	secretscan_model "forgejo.org/models/secretscan"
 	system_model "forgejo.org/models/system"
 	"forgejo.org/models/unittest"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
 	secretscan_service "forgejo.org/services/secretscan"
@@ -34,6 +36,21 @@ func keepSecretScanningSettings(t *testing.T) {
 	t.Cleanup(clear)
 }
 
+// keepOrgSecretSettings removes the organization's switch and lock and the repositories' own off switches now and when
+// the test ends, so that a failing subtest can't leak a state into later tests of the shard.
+func keepOrgSecretSettings(t *testing.T, orgID int64) {
+	t.Helper()
+	clear := func() {
+		_, err := db.GetEngine(db.DefaultContext).Where("user_id = ?", orgID).In("setting_key", secretscan_model.OrgKey, secretscan_model.OrgLockedKey).Delete(new(user_model.Setting))
+		require.NoError(t, err)
+		_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE repository SET secret_scanning_disabled = ? WHERE owner_id = ?", false, orgID)
+		require.NoError(t, err)
+		bumpSettingsRevision(t)
+	}
+	clear()
+	t.Cleanup(clear)
+}
+
 func secretRepoEnabled(t *testing.T, id int64) bool {
 	t.Helper()
 	return secretscan_service.Enabled(t.Context(), unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: id}))
@@ -46,6 +63,7 @@ func TestSecretScanningOrgSettings(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	defer test.MockVariableValue(&setting.SecretScanning.Enabled, true)()
 	keepSecretScanningSettings(t)
+	keepOrgSecretSettings(t, 3)
 	const (
 		pageURL = "/org/org3/settings/code_security"
 		post    = pageURL + "/secret_scanning"
@@ -96,6 +114,9 @@ func TestSecretScanningOrgSettings(t *testing.T) {
 		doc := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", pageURL), http.StatusOK).Body)
 		doc.AssertElement(t, "#secret-scanning-enabled[checked]", false)
 		assert.Contains(t, doc.Find("#secret-scanning-counts").Text(), "Off for all")
+		assert.Contains(t, doc.Find("#secret-scanning-org-lock-modal .content").Text(), "turns secret scanning on in all 3 repositories", "locking while off turns it on everywhere")
+		off := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", pageURL+"/secret_scanning/repos"), http.StatusOK).Body)
+		off.AssertElement(t, "#secret-scanning-off-org-off", true)
 		// the repository's page: decided by the organization
 		repo := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/settings/code_security"), http.StatusOK).Body)
 		assert.Contains(t, repo.Find("#secret-scanning-set-by").Text(), "turns it off for all its repositories")
@@ -123,6 +144,9 @@ func TestSecretScanningOrgSettings(t *testing.T) {
 		owner.MakeRequest(t, NewRequestWithValues(t, "POST", post, map[string]string{"enabled": "on", "locked": "on"}), http.StatusSeeOther)
 		assert.True(t, secretRepoEnabled(t, 3), "the lock applies the switch to every repository")
 		assert.Contains(t, auditOne(t, since, "org.secret_scanning.changed").Data, `"secret_scanning_locked":true`)
+		lockedList := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", pageURL+"/secret_scanning/repos"), http.StatusOK).Body)
+		lockedList.AssertElement(t, "#secret-scanning-off-locked", true)
+		assert.Contains(t, lockedList.Find("#secret-scanning-off-locked").Text(), "have no effect until the lock is lifted")
 		repo := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/settings/code_security"), http.StatusOK).Body)
 		repo.AssertElement(t, "#secret-scanning-box fieldset[disabled] #secret-scanning-enabled[checked]", true)
 		owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/repo3/settings/code_security/secret_scanning", map[string]string{}), http.StatusSeeOther)
@@ -152,6 +176,8 @@ func TestSecretScanningOrgSettings(t *testing.T) {
 		assert.False(t, secretRepoEnabled(t, 3), "the site is off")
 		doc := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", pageURL), http.StatusOK).Body)
 		doc.AssertElement(t, "#secret-scanning-site-off", true)
+		doc.AssertElement(t, "#secret-scanning-enabled[data-confirm-modal]", false) // nothing is scanned: nothing to confirm
+		assert.Contains(t, doc.Find("#secret-scanning-counts").Text(), "No repository is scanned while the site switch is off")
 		doc.AssertElement(t, `#secret-scanning-site-off a[href$="/admin/config/secret-scanning"]`, false) // an owner gets no link
 		NewHTMLParser(t, admin.MakeRequest(t, NewRequest(t, "GET", pageURL), http.StatusOK).Body).AssertElement(t, `#secret-scanning-site-off a[href$="/admin/config/secret-scanning"]`, true)
 		// the organization may prepare its setting; it has no effect until the site is on
@@ -250,12 +276,12 @@ func TestSecretScanningAdminSettings(t *testing.T) {
 
 	t.Run("the limits: units, bounds, one save", func(t *testing.T) {
 		since := auditMaxID(t)
-		admin.MakeRequest(t, NewRequestWithValues(t, "POST", limits, map[string]string{"max_blob_size": "2.5", "scan_timeout": "90", "max_alerts_per_repo": "50", "max_scan_blobs": ""}), http.StatusSeeOther)
+		admin.MakeRequest(t, NewRequestWithValues(t, "POST", limits, map[string]string{"max_blob_size": "2.5", "scan_timeout": "90", "max_alerts_per_repo": "500", "max_scan_blobs": ""}), http.StatusSeeOther)
 		bumpSettingsRevision(t)
 		o := effective()
 		assert.EqualValues(t, 5<<19, o.MaxBlobSize, "MiB, with decimals")
 		assert.Equal(t, 90*time.Second, o.ScanTimeout)
-		assert.EqualValues(t, 50, o.MaxAlertsPerRepo)
+		assert.EqualValues(t, 500, o.MaxAlertsPerRepo)
 		assert.EqualValues(t, 2_000_000, o.MaxScanBlobs, "an empty field keeps what it is")
 		assert.True(t, secretscan_service.SiteEnabled(t.Context()), "the limits form never touches the switch")
 		e := auditOne(t, since, "admin.setting.changed")
@@ -276,27 +302,53 @@ func TestSecretScanningAdminSettings(t *testing.T) {
 	t.Run("a refused save changes nothing and keeps what was typed", func(t *testing.T) {
 		since := auditMaxID(t)
 		for name, form := range map[string]map[string]string{
-			"above the maximum":  {"max_blob_size": "101"},
-			"zero":               {"scan_timeout": "0"},
-			"negative":           {"max_alerts_per_repo": "-5"},
-			"not a number":       {"max_scan_blobs": "many"},
-			"not whole":          {"max_concurrent_scans": "1.5"},
-			"one bad, one good":  {"scan_timeout": "60", "max_blob_size": "1000"},
-			"not finite":         {"max_scan_bytes": "NaN"},
-			"too large to store": {"max_scan_bytes": "1e300"},
+			"above the maximum":     {"max_blob_size": "101"},
+			"zero":                  {"scan_timeout": "0"},
+			"below the time floor":  {"scan_timeout": "29"},
+			"below the size floor":  {"max_blob_size": "0.06"},
+			"rounds to zero":        {"max_blob_size": "0.0000001"},
+			"below the alert floor": {"max_alerts_per_repo": "99"},
+			"negative":              {"max_alerts_per_repo": "-5"},
+			"not a number":          {"max_scan_blobs": "many"},
+			"not whole":             {"max_concurrent_scans": "1.5"},
+			"one bad, one good":     {"scan_timeout": "60", "max_blob_size": "1000"},
+			"two bad":               {"scan_timeout": "5", "max_alerts_per_repo": "7", "max_scan_blobs": "x", "max_blob_size": "2"},
+			"not finite":            {"max_scan_bytes": "NaN"},
+			"infinite":              {"max_scan_bytes": "Inf"},
+			"too large to store":    {"max_scan_bytes": "1e300"},
+			"exponent in a count":   {"max_scan_blobs": "1e3"},
+			"exponent in a size":    {"max_blob_size": "1e1"},
+			"hex":                   {"max_scan_blobs": "0x10"},
+			"hex float":             {"max_blob_size": "0x1p3"},
+			"separator":             {"max_scan_blobs": "1_0"},
+			"separator in a size":   {"max_blob_size": "1_0"},
+			"sign in a count":       {"max_scan_blobs": "+5"},
+			"sign in a size":        {"max_blob_size": "+2"},
+			"point without digits":  {"max_blob_size": "2."},
+			"two points":            {"max_blob_size": "1.2.3"},
+			"non-ASCII digits":      {"max_scan_blobs": "\u0661\u0662"},
 		} {
 			resp := admin.MakeRequest(t, NewRequestWithValues(t, "POST", limits, form), http.StatusUnprocessableEntity)
 			doc := NewHTMLParser(t, resp.Body)
 			assert.Contains(t, doc.Find("#secret-scanning-limits-error").Text(), "Nothing was saved.", name)
 			for field, text := range form {
-				assert.Equal(t, text, valueOf(doc, "#secret-limit-"+field), name)
+				assert.Equal(t, text, valueOf(doc, "#secret-limit-"+field), name+": every typed value stays")
 			}
 		}
+		assert.Equal(t, since, auditMaxID(t), "no refused save wrote anything")
+		// padding is trimmed, and a plain number is read as before
+		admin.MakeRequest(t, NewRequestWithValues(t, "POST", limits, map[string]string{"max_scan_blobs": " 1000 ", "max_blob_size": "0.0625"}), http.StatusSeeOther)
+		bumpSettingsRevision(t)
+		assert.EqualValues(t, 1000, effective().MaxScanBlobs)
+		assert.EqualValues(t, 64<<10, effective().MaxBlobSize, "the floor itself is allowed")
+		admin.MakeRequest(t, NewRequestWithValues(t, "POST", limits, map[string]string{"max_scan_blobs": "2000000", "max_blob_size": "1"}), http.StatusSeeOther)
+		bumpSettingsRevision(t)
+		since = auditMaxID(t)
 		assert.Equal(t, since, auditMaxID(t))
 		assert.EqualValues(t, 1<<20, effective().MaxBlobSize)
 		assert.Equal(t, 300*time.Second, effective().ScanTimeout)
 		resp := admin.MakeRequest(t, NewRequestWithValues(t, "POST", limits, map[string]string{"max_blob_size": "101"}), http.StatusUnprocessableEntity)
-		assert.Contains(t, NewHTMLParser(t, resp.Body).Find("#secret-scanning-limits-error").Text(), "Largest file scanned must be more than 0 and at most 100 MiB.")
+		assert.Contains(t, NewHTMLParser(t, resp.Body).Find("#secret-scanning-limits-error").Text(), "Largest file scanned must be between 0.0625 and 100 MiB.")
 	})
 
 	t.Run("read-only maintenance refuses both forms", func(t *testing.T) {

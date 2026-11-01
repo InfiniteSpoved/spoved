@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -40,20 +41,32 @@ func secretScanningLimitText(name string, v int64) string {
 	return strconv.FormatInt(v, 10)
 }
 
-// parseSecretScanningLimit reads a limit in its form unit: a size may have decimals and is rounded to the byte, the
-// others are whole numbers. The bounds are the save's check.
+var (
+	secretScanningDecimal = regexp.MustCompile(`^[0-9]{1,18}(\.[0-9]{1,12})?$`)
+	secretScanningDigits  = regexp.MustCompile(`^[0-9]{1,18}$`)
+)
+
+// parseSecretScanningLimit reads a limit in its form unit, strictly: a size is a plain decimal number (digits, an
+// optional point and digits: no sign, exponent, hex or separators) rounded to the byte, the others are plain digits.
+// The bounds, which the rounding may fall below, are the save's check.
 func parseSecretScanningLimit(name, text string) (int64, bool) {
 	unit, ok := secretScanningFormUnits[name]
 	if !ok {
+		if !secretScanningDigits.MatchString(text) {
+			return 0, false
+		}
 		v, err := strconv.ParseInt(text, 10, 64)
 		return v, err == nil
+	}
+	if !secretScanningDecimal.MatchString(text) {
+		return 0, false
 	}
 	f, err := strconv.ParseFloat(text, 64)
 	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
 		return 0, false
 	}
 	v := math.Round(f * float64(unit))
-	if v >= math.MaxInt64 || v <= math.MinInt64 {
+	if v >= math.MaxInt64 {
 		return 0, false
 	}
 	return int64(v), true
@@ -139,6 +152,11 @@ func renderSecretScanning(ctx *context.Context, posted map[string]string, refuse
 		rows = append(rows, row)
 	}
 	ctx.Data["Limits"] = rows
+	floor := func(name string) string {
+		l, _ := setting.SecretScanningLimitByName(name)
+		return secretScanningLimitText(name, l.Min)
+	}
+	ctx.Data["LimitFloors"] = ctx.Tr("admin.secret_scanning.limits_floors", floor("scan_timeout"), floor("max_blob_size"), floor("max_alerts_per_repo"))
 	if refused != nil {
 		ctx.Data["LimitsError"] = refused.Error
 		ctx.Data["LimitsErrorField"] = refused.Name
@@ -162,12 +180,16 @@ func SecretScanningSwitchesPost(ctx *context.Context) {
 // is no number, refuses the whole save and shows the form again with the posted values.
 func SecretScanningLimitsPost(ctx *context.Context) {
 	limits, posted := map[string]int64{}, map[string]string{}
+	for _, l := range setting.SecretScanningLimits { // every typed value is kept, whichever field is refused
+		if text := strings.TrimSpace(ctx.FormString(l.Name)); text != "" {
+			posted[l.Name] = text
+		}
+	}
 	for _, l := range setting.SecretScanningLimits {
-		text := strings.TrimSpace(ctx.FormString(l.Name))
-		if text == "" {
+		text, typed := posted[l.Name]
+		if !typed {
 			continue
 		}
-		posted[l.Name] = text
 		v, ok := parseSecretScanningLimit(l.Name, text)
 		if !ok {
 			msg := ctx.Tr("admin.secret_scanning.error.invalid", secretScanningLimitLabel(ctx, l.Name))
@@ -184,7 +206,7 @@ func SecretScanningLimitsPost(ctx *context.Context) {
 			maxText += " " + unit
 		}
 		var msg template.HTML
-		if secretScanningFormUnits[l.Name] > 1 && l.Min < secretScanningFormUnits[l.Name] {
+		if secretScanningFormUnits[l.Name] > 1 && l.Min < 1<<10 {
 			msg = ctx.Tr("admin.secret_scanning.error.nothing_saved_max", secretScanningLimitLabel(ctx, l.Name), maxText)
 		} else {
 			msg = ctx.Tr("admin.secret_scanning.error.nothing_saved", secretScanningLimitLabel(ctx, l.Name), secretScanningLimitText(l.Name, l.Min), maxText)
