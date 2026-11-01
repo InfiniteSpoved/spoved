@@ -422,6 +422,7 @@ func RequeuedRepoIDsAfter(ctx context.Context, after int64, limit int) ([]int64,
 	return ids, db.GetEngine(ctx).Table("repository").Select("repository.id").
 		Where(builder.Gt{"repository.id": after}).And(scannedRepoCond(0)).
 		And(builder.Exists(builder.Select("1").From("secret_scan", "marked").Where(builder.And(
-			builder.Expr("marked.repo_id = repository.id"), builder.Eq{"marked.kind": KindRepo}, builder.Gt{"marked.requeue": 0})))).
+			builder.Expr("marked.repo_id = repository.id"), builder.Eq{"marked.kind": KindRepo}, builder.Gt{"marked.requeue": 0},
+		)))).
 		OrderBy("repository.id").Limit(limit).Find(&ids)
 }
