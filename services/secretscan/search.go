@@ -30,46 +30,61 @@ type Scope struct {
 	Admin bool // the doer acts as a site admin or an auditor: every repository not hidden by a rule of the instance
 	// Narrow limits an organization list to the repositories where the doer can write the code (a member who is no
 	// owner, as for the alerts of one repository: CanSeeAlerts).
-	Narrow     bool
-	TokenRepos builder.Cond // what the credential may read (Reducer().RepoReadAccessFilter()), nil for a session
-	Project    string       // org only: a project of the organization
-	Owner      string       // instance only: an owner name
-	Query      string       // a part of the repository's or its owner's name
+	Narrow bool
+	// Writable is the repositories of a narrowed list (WritableRepoIDs); a narrowed list without any is empty.
+	Writable []int64
+	Project  string // org only: a project of the organization
+	Owner    string // instance only: an owner name
+	Query    string // a part of the repository's or its owner's name
 }
 
-// Filter narrows a list by the state of its alerts: State is "open" or "closed" (empty: both), Reason one of
-// ClosedStates, Type a rule ID.
+// Filter narrows a list by the state of its alerts: State is "open", "closed" or "all", Reason one of ClosedStates,
+// Type a rule ID.
 type Filter struct {
 	State, Reason, Type string
 }
 
-// ParseFilter reads the filter of a form. A value that is not one of the allowed ones is dropped and reported, so a
-// page can say that it did not filter by it.
-func ParseFilter(state, reason, secretType string) (f Filter, ignored bool) {
+// ParseFilter reads the filter of a form. No state lists the open alerts, as the repository list does, or the closed
+// ones when a reason is given. A value that is not one of the allowed ones is dropped and its field ("state",
+// "reason", "type") reported, so a page can say that it did not filter by it.
+func ParseFilter(state, reason, secretType string) (f Filter, ignored []string) {
 	switch state {
-	case "", secretscan_model.StateOpen, "closed":
+	case secretscan_model.StateOpen, "closed", "all":
 		f.State = state
 	default:
-		ignored = true
+		if state != "" {
+			ignored = append(ignored, "state")
+		}
+		f.State = secretscan_model.StateOpen
+		if slices.Contains(secretscan_model.ClosedStates, reason) {
+			f.State = "closed"
+		}
 	}
 	switch {
 	case reason == "":
 	case slices.Contains(secretscan_model.ClosedStates, reason) && f.State != secretscan_model.StateOpen:
 		f.Reason = reason
 	default:
-		ignored = true
+		ignored = append(ignored, "reason")
 	}
-	if len(secretType) <= secretscan_model.MaxFilterLen {
+	if _, ok := builtinRule(secretType); ok || secretType == "" {
 		f.Type = secretType
 	} else {
-		ignored = true
+		ignored = append(ignored, "type")
 	}
 	return f, ignored
 }
 
+// MaxNarrowRepos is the most repositories a narrowed list holds: their IDs are bound in the query, which a driver
+// limits (about 32,000 on SQLite). A member who can write more is asked to get the list from an owner.
+var MaxNarrowRepos = 10_000
+
+// ErrTooManyRepos is a narrowed list of more than MaxNarrowRepos repositories.
+var ErrTooManyRepos = util.NewInvalidArgumentErrorf("too many repositories")
+
 // WritableRepoIDs returns the repositories of the organization where the user can write the code, in a fixed
 // number of queries: the repositories they own, collaborate on or reach through a team, decided as
-// GetUserRepoPermission does (accessreport).
+// GetUserRepoPermission does (accessreport). Above MaxNarrowRepos it returns ErrTooManyRepos.
 func WritableRepoIDs(ctx context.Context, org *organization.Organization, doer *user_model.User) ([]int64, error) {
 	ids, err := accessreport.UserRepoIDs(ctx, doer.ID, org.ID)
 	if err != nil || len(ids) == 0 {
@@ -85,13 +100,17 @@ func WritableRepoIDs(ctx context.Context, org *organization.Organization, doer *
 			out = append(out, r.Repo.ID)
 		}
 	}
+	if len(out) > MaxNarrowRepos {
+		return nil, ErrTooManyRepos
+	}
 	return out, nil
 }
 
 // RepoCond is the one visibility rule of the lists across repositories, on the repository table: not trashed, a Code
 // unit the policy and the organization allow, readable by the doer (not hidden by a two-factor requirement), and
 // secret scanning on for the repository (its alerts are hidden while it is off, as on the repository's own pages).
-// A narrowed list also needs write access, and an auditor is held to the two-factor rule of each organization. empty
+// A narrowed list holds only s.Writable, and an auditor loses every organization whose two-factor rule blocks them
+// (as AuditorView on the repository's page), public repositories too. empty
 // is true when a filter names nothing (cond is then not to be used). It reads dynamic settings: call it before
 // building a session.
 func (s Scope) RepoCond(ctx context.Context) (cond builder.Cond, empty bool, err error) {
@@ -107,20 +126,13 @@ func (s Scope) RepoCond(ctx context.Context) (cond builder.Cond, empty bool, err
 	}
 	cond = repo_model.OrgUnitRepoCond(ctx, ownerID, s.Doer, s.Admin, unit.TypeCode).And(builder.Not{secretscan_model.OffCond()})
 	if s.Admin && !s.Doer.IsAdmin {
-		cond = cond.And(repo_model.TwoFactorHiddenRepoCond(s.Doer.ID))
+		cond = cond.And(builder.NotIn("`repository`.owner_id", repo_model.TwoFactorBlockingOrgIDs(s.Doer.ID)))
 	}
-	if s.TokenRepos != nil {
-		cond = cond.And(s.TokenRepos)
-	}
-	if s.Narrow && s.Org != nil {
-		ids, err := WritableRepoIDs(ctx, s.Org, s.Doer)
-		if err != nil {
-			return nil, false, err
-		}
-		if len(ids) == 0 {
+	if s.Narrow {
+		if len(s.Writable) == 0 {
 			return builder.NewCond(), true, nil
 		}
-		cond = cond.And(builder.In("`repository`.id", ids))
+		cond = cond.And(builder.In("`repository`.id", s.Writable))
 	}
 	if s.Project != "" && s.Org != nil {
 		group, err := repo_model.GetRepoGroupByName(ctx, s.Org.ID, s.Project)
@@ -155,10 +167,11 @@ func (s Scope) options(ctx context.Context, f Filter) (opts *secretscan_model.Al
 	}
 	opts = &secretscan_model.AlertSearchOptions{RepoCond: cond, CodeOnly: true}
 	switch f.State {
-	case secretscan_model.StateOpen:
-		opts.State = secretscan_model.StateOpen
+	case "all":
 	case "closed":
 		opts.State = "resolved"
+	default:
+		opts.State = secretscan_model.StateOpen
 	}
 	if f.Reason != "" {
 		opts.Resolutions = []string{f.Reason}
@@ -171,12 +184,19 @@ func (s Scope) options(ctx context.Context, f Filter) (opts *secretscan_model.Al
 
 // RuleInfo is the name of a rule as the lists show it, and whether it is one of the generic ones.
 func RuleInfo(ruleID string) (name string, generic bool) {
-	for _, r := range secretdetection.BuiltinRules() {
-		if r.ID == ruleID {
-			return r.Name, r.Type == "generic"
-		}
+	if r, ok := builtinRule(ruleID); ok {
+		return r.Name, r.Type == "generic"
 	}
 	return ruleID, false
+}
+
+func builtinRule(ruleID string) (secretdetection.Rule, bool) {
+	for _, r := range secretdetection.BuiltinRules() {
+		if r.ID == ruleID {
+			return r, true
+		}
+	}
+	return secretdetection.Rule{}, false
 }
 
 // Hit is an alert of a list with what the rows show.

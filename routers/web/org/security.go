@@ -67,11 +67,21 @@ func SecurityDependenciesExport(ctx *context.Context) {
 }
 
 // MustSeeSecretAlerts answers 404 to the list of secret alerts (and its download) for everyone it is not for: see
-// context.Organization.SecretAlerts. It also answers 404 while secret scanning is off for the instance.
+// context.Organization.SecretAlerts.
 func MustSeeSecretAlerts(ctx *context.Context) {
 	if !ctx.Org.SecretAlerts {
 		ctx.NotFound("MustSeeSecretAlerts", nil)
 	}
+}
+
+// secretScanningOff tells whether secret scanning is off for the organization's repositories, by the site or by the
+// organization: their alerts are hidden then, so the list is a banner and there is nothing to download.
+func secretScanningOff(ctx *context.Context) (site, org bool, err error) {
+	if !secretscan_service.SiteEnabled(ctx) {
+		return true, false, nil
+	}
+	sw, err := secretscan_service.GetOrgSwitch(ctx, ctx.Org.Organization.ID)
+	return false, !sw.On, err
 }
 
 // secretScope is the list of the organization's secret alerts the viewer may see: every repository for owners, site
@@ -86,19 +96,38 @@ func secretScope(ctx *context.Context) secretscan_service.Scope {
 
 // SecurityAlerts lists the secret alerts of the organization's repositories.
 func SecurityAlerts(ctx *context.Context) {
-	if !shared_security.Secrets(ctx, secretScope(ctx), ctx.Org.OrgLink+"/security/secrets") {
+	siteOff, orgOff, err := secretScanningOff(ctx)
+	if err != nil {
+		ctx.ServerError("secretScanningOff", err)
+		return
+	}
+	if siteOff || orgOff {
+		ctx.Data["SecretsSiteOff"], ctx.Data["SecretsOrgOff"] = siteOff, orgOff
+	} else if !shared_security.Secrets(ctx, secretScope(ctx), ctx.Org.OrgLink+"/security/secrets") {
 		return
 	}
 	if err := shared_user.LoadHeaderCount(ctx); err != nil {
 		ctx.ServerError("LoadHeaderCount", err)
 		return
 	}
+	if ctx.Org.IsOwner {
+		ctx.Data["SecretOffListLink"] = ctx.Org.OrgLink + "/settings/code_security/secret_scanning/repos"
+	}
 	ctx.Data["Title"] = ctx.Tr("secret_search.title")
 	ctx.Data["PageIsOrgSecurity"] = true
 	ctx.HTML(http.StatusOK, tplSecrets)
 }
 
-// SecurityAlertsExport downloads the secret alert list as CSV.
+// SecurityAlertsExport downloads the secret alert list as CSV; while scanning is off there is none (404).
 func SecurityAlertsExport(ctx *context.Context) {
+	siteOff, orgOff, err := secretScanningOff(ctx)
+	if err != nil {
+		ctx.ServerError("secretScanningOff", err)
+		return
+	}
+	if siteOff || orgOff {
+		ctx.NotFound("SecurityAlertsExport", nil)
+		return
+	}
 	shared_security.SecretsExport(ctx, secretScope(ctx), ctx.Org.OrgLink+"/security/secrets")
 }

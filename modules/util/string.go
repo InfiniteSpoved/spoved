@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 	"unsafe"
 )
 
@@ -157,9 +158,11 @@ func hasAny(s string, prefix bool, all ...string) bool {
 	return false
 }
 
-// CSVSafe keeps a spreadsheet from reading a CSV cell as a formula, also after leading spaces or newlines
+// CSVSafe keeps a spreadsheet from reading a CSV cell as a formula, also after leading spaces or newlines (any
+// Unicode space) and for the full-width forms of the formula characters.
 func CSVSafe(s string) string {
-	if t := strings.TrimLeft(s, " \n"); t != "" && strings.ContainsRune("=+-@\t\r\n", rune(t[0])) {
+	t := strings.TrimLeftFunc(s, func(r rune) bool { return unicode.IsSpace(r) && r != '\t' && r != '\r' })
+	if r, _ := utf8.DecodeRuneInString(t); t != "" && strings.ContainsRune("=+-@\t\r\uff1d\uff0b\uff0d\uff20", r) {
 		return "'" + s
 	}
 	return s

@@ -246,6 +246,18 @@ type wrappedConn struct {
 	deadline             time.Time
 	perWriteTimeout      time.Duration
 	perWritePerKbTimeout time.Duration
+	writeCap             atomic.Int64 // unix nanoseconds of SetWriteDeadline, 0 for none
+}
+
+// SetWriteDeadline sets the deadline and caps the one each later Write sets, so a handler can bound its writes
+// (http.ResponseController); the zero time removes the cap.
+func (w *wrappedConn) SetWriteDeadline(t time.Time) error {
+	if t.IsZero() {
+		w.writeCap.Store(0)
+	} else {
+		w.writeCap.Store(t.UnixNano())
+	}
+	return w.Conn.SetWriteDeadline(t)
 }
 
 func (w *wrappedConn) Write(p []byte) (n int, err error) {
@@ -257,7 +269,11 @@ func (w *wrappedConn) Write(p []byte) (n int, err error) {
 		if minDeadline.After(w.deadline) {
 			w.deadline = minDeadline
 		}
-		_ = w.SetWriteDeadline(w.deadline)
+		deadline := w.deadline
+		if c := w.writeCap.Load(); c != 0 && deadline.After(time.Unix(0, c)) {
+			deadline = time.Unix(0, c)
+		}
+		_ = w.Conn.SetWriteDeadline(deadline)
 	}
 	return w.Conn.Write(p)
 }

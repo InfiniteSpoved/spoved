@@ -14,16 +14,20 @@ func TestParseFilter(t *testing.T) {
 	for _, c := range []struct {
 		state, reason, typ string
 		want               Filter
-		ignored            bool
+		ignored            []string
 	}{
-		{"", "", "", Filter{}, false},
-		{"open", "", "github-token", Filter{State: "open", Type: "github-token"}, false},
-		{"closed", "wont_fix", "", Filter{State: "closed", Reason: "wont_fix"}, false},
-		{"", "revoked", "", Filter{Reason: "revoked"}, false}, // a reason alone lists closed alerts
-		{"open", "revoked", "", Filter{State: "open"}, true},  // no closed alert is open
-		{"bogus", "", "", Filter{}, true},
-		{"closed", "bogus", "", Filter{State: "closed"}, true},
-		{"", "", strings.Repeat("a", 65), Filter{}, true},
+		{"", "", "", Filter{State: "open"}, nil}, // open by default, as the repository list
+		{"all", "", "", Filter{State: "all"}, nil},
+		{"open", "", "github-token", Filter{State: "open", Type: "github-token"}, nil},
+		{"closed", "wont_fix", "", Filter{State: "closed", Reason: "wont_fix"}, nil},
+		{"", "revoked", "", Filter{State: "closed", Reason: "revoked"}, nil}, // a reason alone lists closed alerts
+		{"all", "revoked", "", Filter{State: "all", Reason: "revoked"}, nil},
+		{"open", "revoked", "", Filter{State: "open"}, []string{"reason"}}, // no closed alert is open
+		{"bogus", "", "", Filter{State: "open"}, []string{"state"}},
+		{"closed", "bogus", "", Filter{State: "closed"}, []string{"reason"}},
+		{"", "", "no-such-rule", Filter{State: "open"}, []string{"type"}},
+		{"", "", strings.Repeat("a", 65), Filter{State: "open"}, []string{"type"}},
+		{"bogus", "bogus", "bogus", Filter{State: "open"}, []string{"state", "reason", "type"}},
 	} {
 		got, ignored := ParseFilter(c.state, c.reason, c.typ)
 		assert.Equal(t, c.want, got, "%+v", c)

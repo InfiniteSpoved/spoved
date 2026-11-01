@@ -27,6 +27,7 @@ import (
 	"forgejo.org/modules/test"
 	"forgejo.org/routers/common"
 	dependency_service "forgejo.org/services/dependency"
+	secretscan_service "forgejo.org/services/secretscan"
 	"forgejo.org/tests"
 
 	"github.com/PuerkitoBio/goquery"
@@ -152,20 +153,26 @@ func TestOrgSecretAlertList(t *testing.T) {
 
 	t.Run("who sees what", func(t *testing.T) {
 		for name, s := range map[string]*TestSession{"owner": owner, "site admin": admin, "auditor": auditor} {
-			resp := secGet(t, s, slOrg, http.StatusOK)
+			resp := secGet(t, s, slOrg+"?state=all", http.StatusOK)
 			assert.Equal(t, ownerRows, secretListRows(t, resp), name)
 			assert.Equal(t, "6 secret alerts in 4 repositories", secretListTotal(t, resp), name)
-			assert.Contains(t, secText(t, resp, "#secret-search-note"), "Every repository of the organization you can read", name)
+			assert.Contains(t, secText(t, resp, "#secret-search-note"), "Showing every repository in this organization that you can read.", name)
+			assert.Contains(t, secText(t, resp, "#secret-search-note"), "Downloads are recorded in the audit log.", name)
+			// the open alerts by default, as the repository list
+			resp = secGet(t, s, slOrg, http.StatusOK)
+			assert.Equal(t, ownerRows[1:], secretListRows(t, resp), name)
+			assert.Equal(t, "5 secret alerts in 4 repositories", secretListTotal(t, resp), name)
 		}
-		// a member sees the repositories they can write, as on the repository's own pages
-		resp := secGet(t, member, slOrg, http.StatusOK)
+		// a member sees the repositories they can write, as on the repository's own pages, and is told so under the count
+		resp := secGet(t, member, slOrg+"?state=all", http.StatusOK)
 		assert.Equal(t, memberRows, secretListRows(t, resp))
 		assert.Equal(t, "5 secret alerts in 3 repositories", secretListTotal(t, resp))
-		assert.Contains(t, secText(t, resp, "#secret-search-note"), "Only repositories where you have write access are listed")
-		// members with nothing to write get the empty list, not a refusal
+		assert.Equal(t, "Showing alerts in the 4 repositories you can write to. Organization owners see every repository.", secText(t, resp, "#secret-search-narrow"))
+		assert.Equal(t, "Secrets are never stored or shown. Downloads are recorded in the audit log.", secText(t, resp, "#secret-search-note"))
+		// members with nothing to write are told so, not that the organization has no alert
 		resp = secGet(t, loginUser(t, "user28"), slOrg, http.StatusOK) // in an admin team that has no repository
 		assert.Empty(t, secretListRows(t, resp))
-		assert.Contains(t, secText(t, resp, "#secret-search-none"), "There are no secret alerts to list.")
+		assert.Contains(t, secText(t, resp, "#secret-search-none"), "You have write access to no repository in this organization")
 		secGet(t, loginUser(t, "user15"), slOrg, http.StatusNotFound) // in a team, but not a member of the organization
 		secGet(t, loginUser(t, "user5"), slOrg, http.StatusNotFound)  // not a member of the organization
 		MakeRequest(t, NewRequest(t, "GET", slOrg), http.StatusSeeOther)
@@ -192,7 +199,8 @@ func TestOrgSecretAlertList(t *testing.T) {
 		}
 		// the tab of the Security page holds the three pages for an owner while the graph is on
 		doc := NewHTMLParser(t, secGet(t, owner, slOrg, http.StatusOK).Body)
-		assert.Equal(t, "Secrets", strings.TrimSpace(doc.Find(`.repo-security-tabs a[aria-current="page"]`).Text()))
+		assert.Equal(t, "Secret alerts", strings.TrimSpace(doc.Find(`.repo-security-tabs a[aria-current="page"]`).Text()))
+		assert.True(t, strings.HasPrefix(strings.TrimSpace(doc.Find("title").Text()), "Secret alerts"))
 		assert.Equal(t, 1, doc.Find(`.repo-security-tabs a`).Length(), "no dependency graph, no other tab")
 		enableDependencyGraph(t)
 		doc = NewHTMLParser(t, secGet(t, owner, slOrg, http.StatusOK).Body)
@@ -207,34 +215,45 @@ func TestOrgSecretAlertList(t *testing.T) {
 			return secretListRows(t, resp), resp
 		}
 		for query, want := range map[string][]string{
-			"?state=open":                      {slRepo3, slRead, slLeaf, slAWS, slGitHub},
-			"?state=closed":                    {slClosed},
-			"?state=closed&reason=wont_fix":    {slClosed},
-			"?state=closed&reason=revoked":     {},
-			"?type=github-token":               {slRepo3, slRead, slGitHub},
-			"?type=slack-token&state=open":     {slLeaf},
-			"?q=leaf":                          {slLeaf},
-			"?q=SL-":                           {slClosed, slRead, slLeaf, slAWS, slGitHub}, // case-insensitive, name or owner
-			"?q=%25":                           {},                                          // % is no wildcard
-			"?q=_":                             {},                                          // nor is _
-			"?project=slproj":                  {slLeaf},
-			"?project=nothere":                 {},
-			"?q=repo3&type=aws-access-key-id":  {},
-			"?q=sl-root&state=open&type=slack": {},
+			"?state=open":                            {slRepo3, slRead, slLeaf, slAWS, slGitHub},
+			"?state=closed":                          {slClosed},
+			"?state=closed&reason=wont_fix":          {slClosed},
+			"?state=closed&reason=revoked":           {},
+			"?type=github-token":                     {slRepo3, slRead, slGitHub},
+			"?state=all":                             {slClosed, slRepo3, slRead, slLeaf, slAWS, slGitHub},
+			"?reason=wont_fix":                       {slClosed}, // a reason alone lists closed alerts
+			"?type=slack-token&state=open":           {slLeaf},
+			"?q=leaf":                                {slLeaf},
+			"?q=SL-":                                 {slRead, slLeaf, slAWS, slGitHub}, // case-insensitive, name or owner
+			"?q=%25":                                 {},                                // % is no wildcard
+			"?q=_":                                   {},                                // nor is _
+			"?project=slproj":                        {slLeaf},
+			"?q=repo3&type=aws-access-key-id":        {},
+			"?q=sl-root&state=open&type=slack-token": {},
 		} {
 			got, _ := rows(query)
 			assert.Equal(t, want, got, query)
 		}
 		// a filter that isn't valid is left out and said so, never shown as if it were applied
-		for _, query := range []string{"?state=bogus", "?state=open&reason=revoked", "?reason=bogus", "?q=" + strings.Repeat("a", 129)} {
-			_, resp := rows(query)
-			assert.Contains(t, resp.Body.String(), `id="secret-filter-ignored"`, query)
+		for query, field := range map[string]string{
+			"?state=bogus": "State", "?state=open&reason=revoked": "Reason", "?reason=bogus": "Reason",
+			"?q=" + strings.Repeat("a", 129): "Search by repository", "?type=bogus": "Secret type", "?project=nothere": "Project",
+			"?q=%00": "Search by repository", "?q=sl%00x": "Search by repository", "?project=slproj%00": "Project", // a NUL would cut the pattern short
+		} {
+			got, resp := rows(query)
+			assert.Equal(t, "The link had a filter that isn't valid ("+field+"), so it was left out and this list shows more.", secText(t, resp, "#secret-filter-ignored"), query)
+			assert.Equal(t, []string{slRepo3, slRead, slLeaf, slAWS, slGitHub}, got, query)
 		}
-		got, _ := rows("?state=open&reason=revoked")
-		assert.Equal(t, []string{slRepo3, slRead, slLeaf, slAWS, slGitHub}, got)
-		_, resp := rows("?state=closed&reason=revoked")
-		assert.Contains(t, secText(t, resp, "#secret-search-none"), "No secret alert matches.")
+		_, resp := rows("?state=bogus&type=bogus")
+		assert.Contains(t, secText(t, resp, "#secret-filter-ignored"), "(State, Secret type)")
+		_, resp = rows("?state=closed&reason=revoked")
+		none := secText(t, resp, "#secret-search-none")
+		assert.Contains(t, none, "No alerts match the filter.")
+		assert.Contains(t, none, "Repositories with secret scanning turned off are not listed.")
+		assert.Contains(t, none, "Clear filters")
+		assert.Contains(t, none, "See which repositories have it off.", "an owner gets the link to the list of them")
 		assert.NotContains(t, resp.Body.String(), `id="secret-filter-ignored"`)
+		assert.NotContains(t, secText(t, secGet(t, member, slOrg+"?state=closed&reason=revoked", http.StatusOK), "#secret-search-none"), "See which")
 		// the form keeps the values
 		_, resp = rows("?state=closed&reason=wont_fix&type=private-key&q=root&project=slproj")
 		doc := NewHTMLParser(t, bytes.NewBufferString(resp.Body.String()))
@@ -250,16 +269,26 @@ func TestOrgSecretAlertList(t *testing.T) {
 		for range page {
 			seedSecretAlert(t, f.root, "github-token", "github", secretscan_model.KindRepo, "root/more.env")
 		}
-		resp := secGet(t, owner, slOrg+"?state=open&q=sl-root", http.StatusOK)
+		resp := secGet(t, owner, slOrg+"?state=all&q=sl-root", http.StatusOK)
 		assert.Len(t, secretListRows(t, resp), page)
-		assert.Equal(t, fmt.Sprintf("%d secret alerts in 1 repository", page+2), secretListTotal(t, resp))
+		assert.Equal(t, fmt.Sprintf("%d secret alerts in 1 repository", page+3), secretListTotal(t, resp))
 		next := NewHTMLParser(t, bytes.NewBufferString(resp.Body.String())).Find(`.pagination a[href*="page=2"]`).First().AttrOr("href", "")
-		assert.Contains(t, next, "state=open")
+		assert.Contains(t, next, "state=all")
 		assert.Contains(t, next, "q=sl-root")
 		resp = secGet(t, owner, next, http.StatusOK)
-		assert.Len(t, secretListRows(t, resp), 2)
+		assert.Len(t, secretListRows(t, resp), 3)
 		resp = secGet(t, owner, slOrg+"?state=open", http.StatusOK)
 		assert.Equal(t, fmt.Sprintf("%d secret alerts in 4 repositories", page+5), secretListTotal(t, resp))
+	})
+
+	t.Run("a member who can write too many repositories is told so, never a failed page", func(t *testing.T) {
+		defer test.MockVariableValue(&secretscan_service.MaxNarrowRepos, 3)()
+		resp := secGet(t, member, slOrg, http.StatusOK)
+		assert.Equal(t, "You can write to more than 3 repositories in this organization, too many to list here. Ask an organization owner for the list.", secText(t, resp, "#secret-search-too-many"))
+		assert.Empty(t, secretListRows(t, resp))
+		resp = slPost(t, member, slOrg, map[string]string{}, http.StatusSeeOther)
+		assert.Equal(t, slOrg, resp.Header().Get("Location"))
+		assert.NotContains(t, secGet(t, owner, slOrg, http.StatusOK).Body.String(), `id="secret-search-too-many"`, "an owner's list is not narrowed")
 	})
 
 	t.Run("the closed row names the reason and who closed it, the closer's name only", func(t *testing.T) {
@@ -300,12 +329,12 @@ func TestOrgSecretAlertExport(t *testing.T) {
 		assert.Equal(t, slOrg+"/export", form.AttrOr("action", ""))
 		var names []string
 		form.Find("input[type=hidden]").Each(func(_ int, i *goquery.Selection) { names = append(names, i.AttrOr("name", "")) })
-		assert.ElementsMatch(t, []string{"state", "type", "q", "project"}, names) // the reason is not valid with open and was dropped
+		assert.ElementsMatch(t, []string{"type", "q", "project"}, names) // the reason is not valid with open and was dropped; open is the default
 	})
 
 	t.Run("csv with the file headers, the closer, the link and an audit entry", func(t *testing.T) {
 		since := auditMaxID(t)
-		resp := slPost(t, owner, slOrg, map[string]string{}, http.StatusOK)
+		resp := slPost(t, owner, slOrg, map[string]string{"state": "all"}, http.StatusOK)
 		assert.Contains(t, resp.Header().Get("Content-Disposition"), `attachment; filename="secret-alerts-org3-`)
 		assert.Equal(t, "nosniff", resp.Header().Get("X-Content-Type-Options"))
 		rows := slCSV(t, resp)
@@ -332,7 +361,8 @@ func TestOrgSecretAlertExport(t *testing.T) {
 		assert.Equal(t, audit_model.ActorUser, entries[0].ActorType)
 		assert.EqualValues(t, 2, entries[0].ActorID)
 		assert.EqualValues(t, 3, entries[0].TargetID)
-		assert.Equal(t, map[string]any{"kind": "secrets", "format": "csv", "count": float64(6)}, auditData(t, entries[0]))
+		assert.Equal(t, map[string]any{"kind": "secrets", "format": "csv", "state": "all", "count": float64(6)}, auditData(t, entries[0]))
+		assert.Len(t, slCSV(t, slPost(t, owner, slOrg, map[string]string{}, http.StatusOK)), 5, "the open alerts by default, as the page")
 	})
 
 	t.Run("the filters narrow the download and are recorded", func(t *testing.T) {
@@ -342,12 +372,12 @@ func TestOrgSecretAlertExport(t *testing.T) {
 		assert.Equal(t, "org3/sl-root", rows[0][6])
 		entries := auditActions(t, since, "org.secret_alerts.exported")
 		require.Len(t, entries, 1)
-		assert.Equal(t, map[string]any{"kind": "secrets", "format": "csv", "state": "open", "type": "github-token", "count": float64(1)}, auditData(t, entries[0]), "the search text is not recorded: it can be a repository name")
-		assert.Empty(t, slCSV(t, slPost(t, owner, slOrg, map[string]string{"project": "nothere"}, http.StatusOK)))
+		assert.Equal(t, map[string]any{"kind": "secrets", "format": "csv", "state": "open", "type": "github-token", "q": "sl-root", "count": float64(1)}, auditData(t, entries[0]), "the search text is recorded: the evidence says what the file holds")
+		assert.Len(t, slCSV(t, slPost(t, owner, slOrg, map[string]string{"project": "slproj"}, http.StatusOK)), 1)
 	})
 
 	t.Run("a member downloads what the list shows", func(t *testing.T) {
-		rows := slCSV(t, slPost(t, member, slOrg, map[string]string{}, http.StatusOK))
+		rows := slCSV(t, slPost(t, member, slOrg, map[string]string{"state": "all"}, http.StatusOK))
 		var repos []string
 		for _, r := range rows {
 			repos = append(repos, r[6])
@@ -356,19 +386,46 @@ func TestOrgSecretAlertExport(t *testing.T) {
 		assert.NotContains(t, repos, "org3/sl-read")
 	})
 
+	// an auditor downloads what the page shows them: every repository, a member of the organization too
+	t.Run("auditors", func(t *testing.T) {
+		for name, uid := range map[string]int64{"auditor": 8, "member auditor": 4} {
+			setUserFlag(t, uid, "is_auditor", true)
+			s := loginUser(t, fmt.Sprintf("user%d", uid))
+			assert.NotContains(t, secGet(t, s, slOrg, http.StatusOK).Body.String(), `id="secret-search-narrow"`, name)
+			since := auditMaxID(t)
+			rows := slCSV(t, slPost(t, s, slOrg, map[string]string{"state": "all"}, http.StatusOK))
+			assert.Len(t, rows, 6, name)
+			assert.Contains(t, slCSVColumn(rows, 6), "org3/sl-read", name)
+			entries := auditActions(t, since, "org.secret_alerts.exported")
+			require.Len(t, entries, 1, name)
+			assert.Equal(t, uid, entries[0].ActorID, name)
+			setUserFlag(t, uid, "is_auditor", false)
+		}
+		// the download of a private organization is open to the auditor too
+		setUserFlag(t, 8, "is_auditor", true)
+		slPost(t, loginUser(t, "user8"), "/org/privated_org/security/secrets", map[string]string{}, http.StatusOK)
+		slPost(t, member, "/org/privated_org/security/secrets", map[string]string{}, http.StatusNotFound)
+	})
+
 	t.Run("refusals before the first byte write nothing", func(t *testing.T) {
 		since := auditMaxID(t)
 		slPost(t, loginUser(t, "user5"), slOrg, map[string]string{}, http.StatusNotFound)
-		slPost(t, loginUser(t, "user8"), slOrg, map[string]string{}, http.StatusNotFound) // an auditor reads the page; the download is on the instance page
 		MakeRequest(t, NewRequestWithValues(t, "POST", slOrg+"/export", map[string]string{}), http.StatusSeeOther)
 		// a filter that isn't valid: back to the page with a message
+		// (the way back carries only the filters that were applied, never an invalid or over-long value)
 		resp := slPost(t, owner, slOrg, map[string]string{"state": "bogus", "q": "x"}, http.StatusSeeOther)
-		assert.Equal(t, slOrg+"?q=x&state=bogus", resp.Header().Get("Location"))
+		assert.Equal(t, slOrg+"?q=x", resp.Header().Get("Location"))
+		resp = slPost(t, owner, slOrg, map[string]string{"project": "nothere"}, http.StatusSeeOther) // never an empty file that looks complete
+		assert.Equal(t, slOrg, resp.Header().Get("Location"))
+		resp = slPost(t, owner, slOrg, map[string]string{"type": strings.Repeat("t", 5000), "state": "closed"}, http.StatusSeeOther)
+		assert.Equal(t, slOrg+"?state=closed", resp.Header().Get("Location"))
+		resp = slPost(t, owner, slOrg, map[string]string{"q": "a\x00b", "reason": "revoked"}, http.StatusSeeOther)
+		assert.Equal(t, slOrg+"?reason=revoked&state=closed", resp.Header().Get("Location"))
 		assert.Empty(t, auditActions(t, since, "org.secret_alerts.exported"))
 		// too many alerts
 		defer test.MockVariableValue(&dependency_service.MaxExportRows, 2)()
-		resp = slPost(t, owner, slOrg, map[string]string{"state": "open"}, http.StatusSeeOther)
-		assert.Equal(t, slOrg+"?state=open", resp.Header().Get("Location"))
+		resp = slPost(t, owner, slOrg, map[string]string{"state": "all"}, http.StatusSeeOther)
+		assert.Equal(t, slOrg+"?state=all", resp.Header().Get("Location"))
 		assert.Empty(t, auditActions(t, since, "org.secret_alerts.exported"))
 		// the download of one's own turn is taken
 		release, ok := common.TakeExportSlot(2)
@@ -388,7 +445,7 @@ func TestAdminSecretAlertList(t *testing.T) {
 
 	t.Run("who sees what", func(t *testing.T) {
 		for name, s := range map[string]*TestSession{"site admin": admin, "auditor": auditor} {
-			resp := secGet(t, s, slAdmin, http.StatusOK)
+			resp := secGet(t, s, slAdmin+"?state=all", http.StatusOK)
 			assert.Equal(t, all, secretListRows(t, resp), name)
 			assert.Equal(t, "7 secret alerts in 5 repositories", secretListTotal(t, resp), name)
 			assert.Contains(t, secText(t, resp, "#secret-search-note"), "Every repository on the instance, trashed ones excluded", name)
@@ -410,28 +467,37 @@ func TestAdminSecretAlertList(t *testing.T) {
 		resp := secGet(t, admin, slAdmin, http.StatusOK)
 		doc := NewHTMLParser(t, bytes.NewBufferString(resp.Body.String()))
 		assert.Equal(t, "Secret alerts", strings.TrimSpace(doc.Find(`.flex-container-nav a.active.item`).Text()))
+		assert.Equal(t, "Secret alerts", strings.TrimSpace(doc.Find(".admin-setting-content h4").Text()))
 	})
 
 	t.Run("filters", func(t *testing.T) {
 		for query, want := range map[string][]string{
-			"?owner=org3":                        {slClosed, slRepo3, slRead, slLeaf, slAWS, slGitHub},
-			"?owner=user2":                       {slPub},
-			"?owner=nobody":                      {},
-			"?state=open&type=github-token":      {slPub, slRepo3, slRead, slGitHub},
-			"?state=closed&reason=wont_fix":      {slClosed},
-			"?q=pub":                             {slPub},
-			"?q=ORG3":                            {slClosed, slRepo3, slRead, slLeaf, slAWS, slGitHub}, // the owner's name too
-			"?owner=org3&q=leaf&state=open":      {slLeaf},
-			"?owner=user2&type=slack-token":      {},
-			"?owner=" + strings.Repeat("a", 300): {},
+			"?owner=org3&state=all":         {slClosed, slRepo3, slRead, slLeaf, slAWS, slGitHub},
+			"?owner=org3":                   {slRepo3, slRead, slLeaf, slAWS, slGitHub},
+			"?owner=user2":                  {slPub},
+			"?owner=nobody":                 {},
+			"?state=open&type=github-token": {slPub, slRepo3, slRead, slGitHub},
+			"?state=closed&reason=wont_fix": {slClosed},
+			"?q=pub":                        {slPub},
+			"?q=ORG3":                       {slRepo3, slRead, slLeaf, slAWS, slGitHub}, // the owner's name too
+			"?owner=org3&q=leaf&state=open": {slLeaf},
+			"?owner=user2&type=slack-token": {},
 		} {
 			assert.Equal(t, want, secretListRows(t, secGet(t, admin, slAdmin+query, http.StatusOK)), query)
 		}
+		// an owner name too long to be one is left out and said so
+		resp := secGet(t, admin, slAdmin+"?owner="+strings.Repeat("a", 300), http.StatusOK)
+		assert.Contains(t, secText(t, resp, "#secret-filter-ignored"), "(Owner)")
+		assert.Len(t, secretListRows(t, resp), 6)
+		resp = secGet(t, admin, slAdmin+"?owner=org3%00", http.StatusOK)
+		assert.Contains(t, secText(t, resp, "#secret-filter-ignored"), "(Owner)")
 	})
 
 	t.Run("hidden: trash, the code unit, scanning off at each level", func(t *testing.T) {
 		ctx := db.DefaultContext
-		rowsNow := func() []string { return secretListRows(t, secGet(t, admin, slAdmin+"?owner=org3", http.StatusOK)) }
+		rowsNow := func() []string {
+			return secretListRows(t, secGet(t, admin, slAdmin+"?owner=org3&state=all", http.StatusOK))
+		}
 		_, err := db.GetEngine(ctx).Exec("UPDATE repository SET trashed_unix = 1 WHERE id = ?", f.leaf.ID)
 		require.NoError(t, err)
 		assert.NotContains(t, rowsNow(), slLeaf)
@@ -443,22 +509,31 @@ func TestAdminSecretAlertList(t *testing.T) {
 		require.NoError(t, user_model.SetUserSetting(ctx, 3, secretscan_model.OrgKey, "false"))
 		assert.Empty(t, rowsNow())
 		assert.Equal(t, []string{slPub}, secretListRows(t, secGet(t, admin, slAdmin, http.StatusOK)))
-		assert.Empty(t, secretListRows(t, secGet(t, owner, slOrg, http.StatusOK)))
+		// the organization's list says so, and where to turn it on
+		resp := secGet(t, owner, slOrg, http.StatusOK)
+		assert.Empty(t, secretListRows(t, resp))
+		banner := secText(t, resp, "#secret-banner-off")
+		assert.Contains(t, banner, "Secret scanning is off for all repositories of org3.")
+		assert.Contains(t, NewHTMLParser(t, bytes.NewBufferString(resp.Body.String())).Find("#secret-banner-off a").AttrOr("href", ""), "/org/org3/settings/code_security")
+		assert.Contains(t, secText(t, secGet(t, loginUser(t, "user4"), slOrg, http.StatusOK), "#secret-banner-off"), "Ask an organization owner to turn it on.")
+		slPost(t, owner, slOrg, map[string]string{}, http.StatusNotFound)
 		require.NoError(t, user_model.SetUserSetting(ctx, 3, secretscan_model.OrgKey, "true"))
 		assert.Len(t, rowsNow(), 6, "sl-off stays hidden: its own switch is off")
 		require.NoError(t, user_model.SetUserSetting(ctx, 3, secretscan_model.OrgLockedKey, "true"))
 		assert.Len(t, rowsNow(), 7, "locked on: the repository's own switch doesn't count")
 		require.NoError(t, user_model.SetUserSetting(ctx, 3, secretscan_model.OrgLockedKey, "false"))
 
-		// the site switch: every list is gone, 404 and no menu entry
+		// the site switch: the instance list is gone (404, no menu entry), the organization's says so; nothing to download
 		defer test.MockVariableValue(&setting.SecretScanning.Enabled, false)()
 		secGet(t, admin, slAdmin, http.StatusNotFound)
 		secGet(t, auditor, slAdmin, http.StatusNotFound)
-		secGet(t, owner, slOrg, http.StatusNotFound)
 		slPost(t, admin, slAdmin, map[string]string{}, http.StatusNotFound)
 		slPost(t, owner, slOrg, map[string]string{}, http.StatusNotFound)
 		assert.NotContains(t, secGet(t, admin, "/admin/audit", http.StatusOK).Body.String(), `href="/admin/security/secrets"`)
-		assert.NotContains(t, secGet(t, owner, "/org3", http.StatusOK).Body.String(), `href="/org/org3/security`)
+		banner = secText(t, secGet(t, owner, slOrg, http.StatusOK), "#secret-banner-off")
+		assert.Contains(t, banner, "Secret scanning is off on this instance")
+		assert.Contains(t, banner, "Ask a site admin to turn it on.")
+		assert.Contains(t, secText(t, secGet(t, admin, slOrg, http.StatusOK), "#secret-banner-off"), "Turn it on in the site's secret scanning settings.")
 	})
 
 	t.Run("a repository that has no Code unit is not listed, whoever asks", func(t *testing.T) {
@@ -491,7 +566,7 @@ func TestAdminSecretAlertExport(t *testing.T) {
 			require.Len(t, entries, 1)
 			assert.Equal(t, c.actor, entries[0].ActorID)
 			assert.Equal(t, map[string]any{"kind": "secrets", "format": "csv", "owner": "org3", "state": "open", "count": float64(5)}, auditData(t, entries[0]))
-			assert.Len(t, slCSV(t, slPost(t, c.s, slAdmin, map[string]string{}, http.StatusOK)), 7)
+			assert.Len(t, slCSV(t, slPost(t, c.s, slAdmin, map[string]string{"state": "all"}, http.StatusOK)), 7)
 		})
 	}
 	t.Run("refusals", func(t *testing.T) {
@@ -500,7 +575,7 @@ func TestAdminSecretAlertExport(t *testing.T) {
 		MakeRequest(t, NewRequestWithValues(t, "POST", slAdmin+"/export", map[string]string{}), http.StatusSeeOther)
 		defer test.MockVariableValue(&dependency_service.MaxExportRows, 3)()
 		resp := slPost(t, admin, slAdmin, map[string]string{"state": "open", "owner": "org3"}, http.StatusSeeOther)
-		assert.Equal(t, slAdmin+"?owner=org3&state=open", resp.Header().Get("Location"))
+		assert.Equal(t, slAdmin+"?owner=org3", resp.Header().Get("Location"))
 		assert.Empty(t, auditActions(t, since, "admin.secret_alerts.exported"))
 	})
 }
@@ -510,6 +585,11 @@ func TestAdminSecretAlertExport(t *testing.T) {
 func TestSecretAlertListsTwoFactor(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	newSecretListFixture(t)
+	// a public repository of the (public) organization: a stranger reads it, but the blocked auditor's alert rule
+	// is the repository page's (AuditorView), which refuses them
+	org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+	public := depNewRepo(t, org3, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), "sl-public", false, 0)
+	seedSecretAlert(t, public, "github-token", "github", secretscan_model.KindRepo, "public/x")
 	setUserFlag(t, 8, "is_auditor", true)
 	_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE `user` SET require_two_factor = ? WHERE id = 3", true)
 	require.NoError(t, err)
@@ -517,20 +597,23 @@ func TestSecretAlertListsTwoFactor(t *testing.T) {
 
 	for name, s := range map[string]*TestSession{"owner": owner, "member": member, "auditor": auditor} {
 		secGet(t, s, slOrg, http.StatusNotFound)
-		slPost(t, s, slOrg, map[string]string{}, http.StatusNotFound)
+		slPost(t, s, slOrg, map[string]string{"state": "all"}, http.StatusNotFound)
 		assert.NotContains(t, secGet(t, s, "/org3", http.StatusOK).Body.String(), `href="/org/org3/security`, name)
 	}
+	secGet(t, auditor, "/org3/sl-public/security/secrets", http.StatusNotFound) // the repository page agrees
 	// a site admin is exempt
-	assert.Len(t, secretListRows(t, secGet(t, admin, slOrg, http.StatusOK)), 6)
-	// the instance list keeps the repositories of everyone else, and a blocked auditor loses the organization's
-	assert.Equal(t, []string{slPub}, secretListRows(t, secGet(t, auditor, slAdmin, http.StatusOK)))
-	assert.Len(t, secretListRows(t, secGet(t, admin, slAdmin, http.StatusOK)), 7)
-	assert.Equal(t, []string{"user2/sl-pub"}, slCSVColumn(slCSV(t, slPost(t, auditor, slAdmin, map[string]string{}, http.StatusOK)), 6))
+	assert.Len(t, secretListRows(t, secGet(t, admin, slOrg+"?state=all", http.StatusOK)), 7)
+	// the instance list keeps the repositories of everyone else, and a blocked auditor loses the organization's,
+	// its public repositories too
+	assert.Equal(t, []string{slPub}, secretListRows(t, secGet(t, auditor, slAdmin+"?state=all", http.StatusOK)))
+	assert.Len(t, secretListRows(t, secGet(t, admin, slAdmin+"?state=all", http.StatusOK)), 8)
+	assert.Equal(t, []string{"user2/sl-pub"}, slCSVColumn(slCSV(t, slPost(t, auditor, slAdmin, map[string]string{"state": "all"}, http.StatusOK)), 6))
 
 	// with two-factor on the account, the owner is acting again
 	_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE `user` SET require_two_factor = ? WHERE id = 3", false)
 	require.NoError(t, err)
-	assert.Len(t, secretListRows(t, secGet(t, owner, slOrg, http.StatusOK)), 6)
+	assert.Len(t, secretListRows(t, secGet(t, owner, slOrg+"?state=all", http.StatusOK)), 7)
+	assert.Contains(t, secretListRows(t, secGet(t, auditor, slAdmin, http.StatusOK)), "org3/sl-public | GitHub token | public/x:3 | Open")
 }
 
 func slCSVColumn(rows [][]string, col int) []string {
@@ -554,6 +637,7 @@ func TestSecretAlertListsQueryCount(t *testing.T) {
 		post bool
 	}{
 		"owner":        {owner, slOrg + "?state=all", false},
+		"owner open":   {owner, slOrg, false},
 		"member":       {member, slOrg, false},
 		"admin":        {admin, slAdmin, false},
 		"auditor":      {auditor, slAdmin, false},
@@ -595,7 +679,7 @@ func TestSecretAlertListsQueryCount(t *testing.T) {
 		require.NoError(t, err)
 	}
 	assert.Equal(t, few, count(), "the number of queries doesn't grow with the repositories and alerts")
-	resp := secGet(t, member, slOrg, http.StatusOK)
+	resp := secGet(t, member, slOrg+"?state=all", http.StatusOK)
 	assert.Len(t, secretListRows(t, resp), 20) // a full page
 	assert.Equal(t, "29 secret alerts in 15 repositories", secretListTotal(t, resp))
 }

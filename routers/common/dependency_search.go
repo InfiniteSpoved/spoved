@@ -124,7 +124,7 @@ type exportRow struct {
 }
 
 // recordExport writes the audit entry of an export (fail closed, before the first byte): the kind, the format, the
-// filters given and the row count, never a repository name.
+// filters given (for secret alerts the repository search text too, as typed) and the row count.
 func recordExport(ctx *context.Base, doer *user_model.User, scope dependency_service.SearchScope, kind, format string, filters map[string]string, count int64) error {
 	data := map[string]any{"kind": kind, "format": format, "count": count}
 	for k, v := range filters {
@@ -163,6 +163,11 @@ func serveExport(ctx *context.Base, doer *user_model.User, scope dependency_serv
 	}
 	defer release()
 	deadline := time.Now().Add(ExportTimeLimit)
+	// a client that stops reading would block a write, and hold the slot, past the time limit: bound the writes too
+	rc := http.NewResponseController(ctx.Resp)
+	if err := rc.SetWriteDeadline(deadline); err == nil {
+		defer func() { _ = rc.SetWriteDeadline(time.Time{}) }()
+	}
 	batches := 0
 	sep := "["
 	cw, enc := csv.NewWriter(ctx.Resp), json.NewEncoder(ctx.Resp)
@@ -299,10 +304,10 @@ func ExportAlerts(ctx *context.Base, doer *user_model.User, scope dependency_ser
 }
 
 // ExportSecretAlerts sends every alert of a secret alert list as a CSV download, as ExportAlerts does. The columns are
-// those the page lists; no secret, fingerprint or comment text is stored by the scanner for them, and the comment
-// is the closer's own text (CSVSafe, as every cell).
+// those the page lists, with no secret or fingerprint (the scanner stores neither); the comment is the closer's own
+// text, CSV-safe as every cell.
 func ExportSecretAlerts(ctx *context.Base, doer *user_model.User, scope secretscan_service.Scope, f secretscan_service.Filter, absoluteURL func(*secretscan_model.Alert, *repo_model.Repository) string) error {
-	filters := map[string]string{"state": f.State, "reason": f.Reason, "type": f.Type, "owner": scope.Owner, "project": scope.Project}
+	filters := map[string]string{"state": f.State, "reason": f.Reason, "type": f.Type, "owner": scope.Owner, "project": scope.Project, "q": scope.Query}
 	return serveExport(ctx, doer, dependency_service.SearchScope{Org: scope.Org}, "secrets", "csv", filters,
 		[]string{"state", "reason", "closed_by", "closed_at", "comment", "first_seen", "repository", "type", "location", "alert_url"},
 		func(start func(int64) error, emit func([]exportRow) error) error {

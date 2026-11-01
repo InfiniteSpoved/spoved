@@ -34,24 +34,24 @@ test.describe('an organization owner', () => {
     } else {
       await page.goto('/org3');
       await page.getByRole('link', {name: 'Security', exact: true}).click();
-      await page.getByRole('link', {name: 'Secrets', exact: true}).click();
+      await page.getByRole('link', {name: 'Secret alerts', exact: true}).click();
     }
     await expect(page).toHaveURL(/\/org\/org3\/security\/secrets$/);
-    await expect(page.locator('#secret-search-total')).toHaveText('4 secret alerts in 2 repositories');
+    // the open alerts by default, as on the repository's page
+    await expect(page.locator('#secret-search-total')).toHaveText('3 secret alerts in 2 repositories');
+    await expect(rows(page)).toHaveCount(3);
+    await expect(page.locator('#secret-search-note')).toContainText('Showing every repository in this organization that you can read.');
+    await fitsTheScreen(page);
+    await screenshot(page);
+
+    // the state, reason and type filters; newest first: the closed alert, with its reason and who closed it
+    await page.locator('select[name="state"]').selectOption('all');
+    await page.getByRole('button', {name: 'Search', exact: true}).click();
     await expect(rows(page)).toHaveCount(4);
-    // newest first: the closed alert, with its reason and who closed it
     await expect(rows(page).first()).toContainText('org3/secret-lists-web');
     await expect(rows(page).first()).toContainText('Private key');
     await expect(rows(page).first()).toContainText('Closed as revoked');
     await expect(rows(page).first()).toContainText('user2');
-    await expect(page.locator('#secret-search-note')).toContainText('Every repository of the organization you can read');
-    await fitsTheScreen(page);
-    await screenshot(page);
-
-    // the state, reason and type filters
-    await page.locator('select[name="state"]').selectOption('open');
-    await page.getByRole('button', {name: 'Search', exact: true}).click();
-    await expect(rows(page)).toHaveCount(3);
     await page.locator('select[name="state"]').selectOption('closed');
     await page.locator('select[name="reason"]').selectOption('revoked');
     await page.getByRole('button', {name: 'Search', exact: true}).click();
@@ -71,9 +71,11 @@ test.describe('an organization owner', () => {
     await expect(rows(page)).toHaveCount(2);
     await page.getByRole('searchbox').fill('no-such-repository');
     await page.getByRole('button', {name: 'Search', exact: true}).click();
-    await expect(page.locator('#secret-search-none')).toContainText('No secret alert matches.');
-    await page.getByRole('link', {name: 'Clear the search'}).click();
-    await expect(rows(page)).toHaveCount(4);
+    await expect(page.locator('#secret-search-none')).toContainText('No alerts match the filter.');
+    await expect(page.locator('#secret-search-none')).toContainText('Repositories with secret scanning turned off are not listed.');
+    await screenshot(page);
+    await page.getByRole('link', {name: 'Clear filters'}).click();
+    await expect(rows(page)).toHaveCount(3);
 
     // the download posts the filters and sends the file: no secret, a link to each alert
     await page.getByRole('searchbox').fill('lists-api');
@@ -101,8 +103,8 @@ test.describe('the site admin', () => {
   test('reads and downloads the secret alerts of every repository', async ({page}) => {
     await page.goto('/admin/security/secrets?owner=org3');
     await expect(page.getByRole('link', {name: 'Secret alerts', exact: true})).toBeVisible();
-    await expect(page.locator('#secret-search-total')).toHaveText('4 secret alerts in 2 repositories');
-    await expect(rows(page)).toHaveCount(4);
+    await expect(page.locator('#secret-search-total')).toHaveText('3 secret alerts in 2 repositories');
+    await expect(rows(page)).toHaveCount(3);
     await expect(page.locator('#secret-search-note')).toContainText('Every repository on the instance');
     await fitsTheScreen(page);
     await screenshot(page);
@@ -110,7 +112,7 @@ test.describe('the site admin', () => {
     // without the owner filter the repositories of other owners are there too
     await page.getByRole('textbox', {name: 'Owner'}).fill('');
     await page.getByRole('button', {name: 'Search', exact: true}).click();
-    await expect(page.locator('#secret-search-total')).toHaveText(/^\s*\d+ secret alerts\s+in \d+ repositories\s*$/);
+    await expect(page.locator('#secret-search-total')).toHaveText(/^\s*\d+ secret alerts?\s+in \d+ repositor(y|ies)\s*$/);
     await expect(rows(page).filter({hasText: 'user11/secret-alerts-test'}).first()).toBeVisible();
 
     await page.getByRole('textbox', {name: 'Owner'}).fill('org3');
@@ -121,8 +123,20 @@ test.describe('the site admin', () => {
     ]);
     expect(download.suggestedFilename()).toMatch(/^secret-alerts-instance-\d{4}-\d\d-\d\d\.csv$/);
     const csv = await readFile(await download.path(), 'utf8');
-    expect(csv.trim().split('\n')).toHaveLength(5);
+    expect(csv.trim().split('\n')).toHaveLength(4);
     expect(csv).toContain('org3/secret-lists-web');
+  });
+});
+
+test.describe('an organization member', () => {
+  test.use({user: 'user4'});
+
+  test('sees the alerts of the repositories they can write to, and is told so', async ({page}) => {
+    await page.goto('/org/org3/security/secrets');
+    await expect(page.locator('#secret-search-none, #secret-search-total').first()).toBeVisible();
+    await expect(page.locator('#secret-search-narrow')).toContainText('you can write to. Organization owners see every repository.');
+    await fitsTheScreen(page);
+    await screenshot(page);
   });
 });
 

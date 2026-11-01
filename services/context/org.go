@@ -53,17 +53,28 @@ var ArchivedOrgOpenRoutes = append([]string{
 	"DELETE /api/v1/orgs/{org}",
 }, apiv1_permissions.CredentialRevokeRoutes...)
 
+// secretAlertsExportRoute is the download of the organization's secret alert list. An auditor posts it as a read:
+// it changes nothing and is audited, as admin.AuditExportReq on the instance page.
+const secretAlertsExportRoute = "/org/{org}/security/secrets/export"
+
+// isAuditorSecretExport tells whether the request is an auditor's download of the secret alert list, with their own
+// credential.
+func (ctx *Context) isAuditorSecretExport() bool {
+	return ctx.IsSigned && ctx.Doer.IsAuditor && auth.IsHeldByUser(ctx.Authentication) &&
+		ctx.Req.Method == http.MethodPost && chi.RouteContext(ctx.Req.Context()).RoutePattern() == secretAlertsExportRoute
+}
+
 // setSecretAlertsAccess decides who opens the organization's list of secret alerts (see Organization.SecretAlerts).
 // A member blocked by the organization's two-factor requirement is a stranger there, as for its repositories.
 func (ctx *Context) setSecretAlertsAccess(org *organization.Organization) {
 	ctx.Data["EnableSecretAlerts"] = false
-	if !ctx.IsSigned || !setting.Config().SecretScanning.Value(ctx).Enabled() {
+	if !ctx.IsSigned {
 		return
 	}
 	switch {
 	case ctx.Org.IsOwner: // a site admin too
 		ctx.Org.SecretAlerts = true
-	case vulnerability_service.AuditorView(ctx, ctx.Doer, org.AsUser(), ctx.IsReadOnlyMethod(), auth.IsHeldByUser(ctx.Authentication)):
+	case vulnerability_service.AuditorView(ctx, ctx.Doer, org.AsUser(), ctx.IsReadOnlyMethod() || ctx.isAuditorSecretExport(), auth.IsHeldByUser(ctx.Authentication)):
 		ctx.Org.SecretAlerts = true
 	case ctx.Org.IsMember && ctx.Data["TwoFactorBlockedMember"] != true:
 		ctx.Org.SecretAlerts, ctx.Org.SecretAlertsNarrow = true, true
@@ -80,8 +91,8 @@ type Organization struct {
 	Organization     *organization.Organization
 	OrgLink          string
 	CanCreateOrgRepo bool
-	// SecretAlerts says the viewer may open the organization's list of secret alerts while secret scanning is on:
-	// owners, site admins, auditors (read-only) and members. SecretAlertsNarrow is a member who is none of the others:
+	// SecretAlerts says the viewer may open the organization's list of secret alerts (a banner while secret scanning
+	// is off): owners, site admins, auditors (read-only, and the audited download) and members. SecretAlertsNarrow is a member who is none of the others:
 	// the list holds only the repositories where they can write the code.
 	SecretAlerts, SecretAlertsNarrow bool
 
@@ -182,7 +193,7 @@ func HandleOrgAssignment(ctx *Context, args ...bool) {
 	}
 
 	// The auditor role shows private organizations read-only, but never makes the user a member.
-	if org.Visibility == structs.VisibleTypePrivate && !ctx.IsAuditorView() {
+	if org.Visibility == structs.VisibleTypePrivate && !ctx.IsAuditorView() && !ctx.isAuditorSecretExport() {
 		requireMember = true
 	} else if ctx.IsSigned && ctx.Doer.IsRestricted {
 		requireMember = true
