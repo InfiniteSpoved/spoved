@@ -108,11 +108,15 @@ test.describe('a writer', () => {
     await dialog.getByRole('button', {name: 'Turn off scanning'}).click();
     await expect(page.getByText('Secret scanning settings saved.')).toBeVisible();
 
-    // the alerts stay readable under a banner
+    // the alerts are kept but hidden: a banner with the link to the settings, no list, no count, 404 for one alert
     await page.goto(`${repo}/security/secrets`);
     await expect(page.locator('#secret-banner-off')).toBeVisible();
-    await expect(rows(page)).toHaveCount(5);
+    await expect(page.locator('#secret-banner-off a[href$="/settings/code_security"]')).toBeVisible();
+    await expect(rows(page)).toHaveCount(0);
     await expect(page.locator('#secret-rescan')).toHaveCount(0);
+    await expect(page.locator('.repo-security-menu a[href$="/security/secrets"] .label')).toHaveCount(0);
+    expect((await page.goto(`${repo}/security/secrets/1`))?.status()).toBe(404);
+    await page.goto(`${repo}/security/secrets`);
     await screenshot(page);
 
     await page.goto(`${repo}/settings/code_security`);

@@ -1279,8 +1279,10 @@ func (ctx *Context) setSecurityTab() {
 		ctx.Data["NumOpenVulnAlerts"] = counts[vulnerability_model.StateOpen]
 		open += counts[vulnerability_model.StateOpen]
 	}
-	if secretOpen, secretClosed, ok := ctx.secretAlertCounts(); ok {
+	if secretOpen, secretClosed, on, ok := ctx.secretAlertCounts(); ok {
 		ctx.Data["ShowSecretAlerts"] = true
+		// while scanning is off the alerts are hidden, so there is no count
+		ctx.Data["SecretCounted"] = on
 		ctx.Data["SecretOpenCount"], ctx.Data["SecretClosedCount"] = secretOpen, secretClosed
 		open += secretOpen
 	}
@@ -1296,13 +1298,16 @@ func (ctx *Context) setSecurityTab() {
 var SecretScanningEnabled = func(context.Context, *repo_model.Repository) bool { return false }
 
 // secretAlertCounts counts the open and closed secret alerts the viewer can see (alerts only in the wiki are not
-// for someone without Wiki read). ok is false when the viewer has no secret alert page: secret scanning is off and
-// nothing is left from before.
-func (ctx *Context) secretAlertCounts() (open, closed int64, ok bool) {
+// for someone without Wiki read). While scanning is off the alerts are kept but hidden, so the counts are zero and
+// on is false; ok is false when the viewer has no secret alert page: scanning is off and nothing is kept.
+func (ctx *Context) secretAlertCounts() (open, closed int64, on, ok bool) {
 	open, closed, err := secretscan_model.CountByState(ctx, ctx.Repo.Repository.ID, !ctx.Repo.CanRead(unit_model.TypeWiki))
 	if err != nil {
 		log.Error("count the secret alerts of repository %d: %v", ctx.Repo.Repository.ID, err)
-		return 0, 0, false
+		return 0, 0, false, false
 	}
-	return open, closed, open+closed > 0 || SecretScanningEnabled(ctx, ctx.Repo.Repository)
+	if on = SecretScanningEnabled(ctx, ctx.Repo.Repository); !on {
+		return 0, 0, false, open+closed > 0
+	}
+	return open, closed, true, true
 }

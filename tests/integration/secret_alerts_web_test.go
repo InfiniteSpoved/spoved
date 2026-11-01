@@ -316,17 +316,21 @@ func TestSecretAlertsWeb(t *testing.T) {
 			secretPage(t, owner, list, http.StatusOK) // reading works
 			require.NoError(t, maintenance_service.Set(sys, nil, setting.MaintenanceOff, "", time.Time{}))
 
-			// off: the alerts stay, read-only, under a banner; writes are refused
+			// off: the alerts are kept but hidden: a banner only (no list, no count), 404 for one alert and every write
 			root.SecretScanningDisabled = true
 			require.NoError(t, repo_model.UpdateRepositoryCols(t.Context(), root, "secret_scanning_disabled"))
 			doc = secretPage(t, owner, list, http.StatusOK)
 			doc.AssertElement(t, "#secret-banner-off", true)
 			doc.AssertElement(t, `input[name="index"]`, false)
 			doc.AssertElement(t, "#secret-rescan", false)
-			assert.Contains(t, doc.Find("#secret-scan-status").Text(), "Scanning off")
-			assert.Equal(t, 4, doc.Find(".secret-alerts-table .repo-security-row:not(.repo-security-head)").Length())
-			doc = secretPage(t, owner, list+"/2", http.StatusOK)
-			doc.AssertElement(t, "#secret-close", false)
+			doc.AssertElement(t, "#secret-scan-status", false)
+			doc.AssertElement(t, ".secret-alerts-table", false)
+			doc.AssertElement(t, ".repo-security-tabs", false)
+			doc.AssertElement(t, `.repo-security-menu a[href$="/security/secrets"] .label`, false)
+			assert.NotContains(t, doc.Find(".repo-security-main").Text(), "Open")
+			secretPage(t, owner, list+"/2", http.StatusNotFound)
+			secretPost(t, owner, list+"/2/reopen", url.Values{}, http.StatusNotFound)
+			secretPost(t, owner, list+"/close", url.Values{"index": {"2"}, "reason": {"revoked"}}, http.StatusNotFound)
 			secretPost(t, owner, list+"/2/close", url.Values{"reason": {"revoked"}}, http.StatusNotFound)
 			secretPost(t, owner, list+"/rescan", url.Values{}, http.StatusNotFound)
 			// the site switch off: the same, and no alerts left means no page

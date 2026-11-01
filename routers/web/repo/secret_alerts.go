@@ -37,8 +37,8 @@ const (
 
 // MustSeeSecretAlerts is the gate of the secret alert pages: who may see alerts (as for vulnerability alerts), and
 // only where the repository has the page: secret scanning is on, or alerts are left from before it was turned off
-// (the header worked that out, with the counts the viewer may see). Everyone else gets the 404 of a missing page. While
-// scanning is off the alerts are shown, read-only.
+// (the header worked that out). Everyone else gets the 404 of a missing page. While scanning is off the list only
+// shows a banner and the pages of one alert are a 404 (MustScanSecrets).
 func MustSeeSecretAlerts(ctx *context.Context) {
 	if !vulnerability_service.CanSeeAlerts(&ctx.Repo.Permission, ctx.IsAlertAuditorView()) || ctx.Data["ShowSecretAlerts"] != true {
 		ctx.NotFound("MustSeeSecretAlerts", nil)
@@ -51,6 +51,14 @@ func MustSeeSecretAlerts(ctx *context.Context) {
 	ctx.Data["CanCloseSecretAlerts"] = writable && vulnerability_service.CanDismissAlerts(&ctx.Repo.Permission)
 	ctx.Data["CanRescan"] = writable && ctx.IsSigned && ctx.Repo.IsAdmin()
 	ctx.Data["CanReadWiki"] = ctx.Repo.CanRead(unit.TypeWiki)
+}
+
+// MustScanSecrets 404s the pages of one alert while scanning is off: the alerts are kept but hidden until it is
+// turned on again, as in the API.
+func MustScanSecrets(ctx *context.Context) {
+	if ctx.Data["SecretScanningOn"] != true {
+		ctx.NotFound("MustScanSecrets", nil)
+	}
 }
 
 // mustWriteSecretAlerts is the second check of a POST: closing and reopening are writes.
@@ -132,6 +140,14 @@ func SecretAlerts(ctx *context.Context) {
 	repo := ctx.Repo.Repository
 	canReadWiki := ctx.Repo.CanRead(unit.TypeWiki)
 	ctx.Data["Title"] = ctx.Tr("repo.secrets.title")
+	if ctx.Data["SecretScanningOn"] != true { // hidden: only the banner, no alert, no count
+		if err := secretOffNotes(ctx); err != nil {
+			ctx.ServerError("secretOffNotes", err)
+			return
+		}
+		ctx.HTML(http.StatusOK, tplSecretAlerts)
+		return
+	}
 	state := secretscan_model.StateOpen
 	if ctx.FormString("state") == "closed" {
 		state = "resolved"

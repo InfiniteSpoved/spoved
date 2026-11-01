@@ -3634,8 +3634,6 @@
 		"one": "%s Closed",
 		"other": "%s Closed"
 	},
-	"repo.secrets.status.off": "Scanning off",
-	"repo.secrets.status.not_updated": "alerts not updated since %s",
 	"repo.secrets.status.failed": "Last scan failed",
 	"repo.secrets.status.incomplete": "Scan incomplete",
 	"repo.secrets.status.last_scanned": "Last scanned %s",
@@ -3648,7 +3646,7 @@
 	"repo.secrets.off.org": "Secret scanning is off for all repositories of %s.",
 	"repo.secrets.off.by": "Turned off by %s on %s.",
 	"repo.secrets.off.repo": "Secret scanning was turned off for this repository.",
-	"repo.secrets.off.kept": "The alerts below are kept as a record but are not updated, and new secrets are not found.",
+	"repo.secrets.off.kept": "The alerts are kept but hidden, and new secrets are not found, until scanning is turned on again.",
 	"repo.secrets.off.turn_on": "Turn it on in Code security settings.",
 	"repo.secrets.off.ask_admin": "Ask a repository admin to turn it on.",
 	"repo.secrets.failed.title": "The last scan failed",

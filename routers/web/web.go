@@ -1984,7 +1984,7 @@ func registerRoutes(m *web.Route) {
 				m.Get("", repo.SecretAlert)
 				m.Post("/close", context.RepoMustNotBeArchived(), repo.SecretAlertClose)
 				m.Post("/reopen", context.RepoMustNotBeArchived(), repo.SecretAlertReopen)
-			})
+			}, repo.MustScanSecrets)
 		}, repo.MustSeeSecretAlerts)
 
 		m.Group("/activity_author_data", func() {

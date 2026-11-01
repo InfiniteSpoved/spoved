@@ -5,6 +5,6 @@
 		<a class="item{{if not .PageIsSecretAlerts}} active{{end}}"{{if not .PageIsSecretAlerts}} aria-current="page"{{end}} href="{{.RepoLink}}/security/alerts">{{ctx.Locale.Tr "repo.security.alerts.title"}} <span class="ui small label">{{CountFmt .NumOpenVulnAlerts}}</span></a>
 	{{end}}
 	{{if .ShowSecretAlerts}}
-		<a class="item{{if .PageIsSecretAlerts}} active{{end}}"{{if .PageIsSecretAlerts}} aria-current="page"{{end}} href="{{.RepoLink}}/security/secrets">{{ctx.Locale.Tr "repo.secrets.title"}} <span class="ui small label">{{CountFmt .SecretOpenCount}}</span></a>
+		<a class="item{{if .PageIsSecretAlerts}} active{{end}}"{{if .PageIsSecretAlerts}} aria-current="page"{{end}} href="{{.RepoLink}}/security/secrets">{{ctx.Locale.Tr "repo.secrets.title"}} {{if .SecretCounted}}<span class="ui small label">{{CountFmt .SecretOpenCount}}</span>{{end}}</a>
 	{{end}}
 </nav>
