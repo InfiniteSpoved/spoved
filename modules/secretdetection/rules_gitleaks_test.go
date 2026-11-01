@@ -504,7 +504,7 @@ func TestPortedRuleKeywordsAreCheap(t *testing.T) {
 // Every ported rule runs near its keywords only, and an anchored one behind a
 // hit check (an inline comment once swallowed the infracost rule's fields).
 func TestGitleaksRulesAreWindowed(t *testing.T) {
-	for _, r := range slices.Concat(gitleaksRules, gitleaksServiceRules, curlRules) {
+	for _, r := range slices.Concat(gitleaksRules, gitleaksServiceRules, curlHeaderRules, curlUserRules) {
 		assert.Positive(t, r.Window, r.ID)
 		assert.True(t, !r.Anchored || r.HitCheck != nil, r.ID)
 	}

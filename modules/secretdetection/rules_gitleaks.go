@@ -46,10 +46,15 @@
 // shopify-token), stripe-access-token's prod keys are in stripe-live-key, the
 // airtable personal access token and the facebook app token run on their own
 // shape and near the word facebook, lob-api-key only where a live_ or test_
-// value follows, the Flutterwave encryption key has its dash, and the public
-// keys (flutterwave-public-key, lob-pub-api-key, mailgun-pub-key, the mapbox
-// pk. token, new-relic-browser-api-token) and the bare numeric IDs
-// (discord-client-id, asana-client-id) are left out.
+// value follows, the Flutterwave encryption key has its dash, hubspot-api-key
+// needs a key name (hubspot_api_key, hubspot_token, hapikey: not a form ID), gitleaks'
+// airtable-personnal-access-token is airtable-personal-access-token, and the
+// public keys (flutterwave-public-key, lob-pub-api-key, mailgun-pub-key, the
+// mapbox pk. token, new-relic-browser-api-token) and the bare numeric IDs
+// (discord-client-id, asana-client-id) are left out. Public values a shape
+// can't tell from a secret are still reported: Squarespace and Sendbird app
+// IDs, a Discord app's public key (64 hex after discord), Algolia search-only
+// keys.
 
 package secretdetection
 
@@ -460,10 +465,12 @@ var gitleaksRules = []Rule{
 	},
 }
 
-// curlRules: credentials in curl commands (up to five continued lines after
-// curl); after all specific rules, so a known token in a header is reported as
-// that token.
-var curlRules = []Rule{
+// Credentials in curl commands (up to five continued lines after curl).
+// curlHeaderRules run after all specific rules, so a known token in a header
+// is reported as that token; curlUserRules run before the service rules,
+// because the user:password pair holds the secret (Twilio's -u SK…:secret,
+// where the SK… ID alone would hide the secret).
+var curlHeaderRules = []Rule{
 	{
 		ID: "curl-auth-header", Name: "Credential in a curl header", Type: "curl",
 		Keywords: []string{"curl"},
@@ -475,6 +482,9 @@ var curlRules = []Rule{
 			`(?i)^(?:access|api|auth|my|replace[_-]with)[._-]?(?:api[._-]?)?(?:jwt[._-]?)?(?:key|token)(?:[._-]?here)?$`, `(?i)^token\d*$`,
 		},
 	},
+}
+
+var curlUserRules = []Rule{
 	{
 		ID: "curl-auth-user", Name: "Password in a curl command", Type: "curl",
 		Keywords: []string{"curl"},

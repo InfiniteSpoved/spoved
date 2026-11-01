@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"cmp"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"unicode/utf16"
@@ -714,6 +715,9 @@ func (g *keywordGate) add(keywords []string) []int {
 			} else {
 				b := uint16(k[0])<<8 | uint16(k[1])
 				if g.first[b] == 0 {
+					if len(g.buckets) == math.MaxUint16 {
+						panic("secretdetection: more keyword byte pairs than the gate holds")
+					}
 					g.buckets = append(g.buckets, nil)
 					g.first[b] = uint16(len(g.buckets))
 				}

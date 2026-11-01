@@ -97,6 +97,12 @@ var gitleaksServiceRules = []Rule{
 		SecretGroup: 1, MinEntropy: 3, TokenChars: wordChars + "+/", Window: 72, Anchored: true, HitCheck: shapeHit(22, isWordOrDash, "EAAA", "sq0atp-"),
 	},
 	{
+		ID: "square-secret", Name: "Square OAuth application secret", Type: "square",
+		Keywords:    []string{"sq0csp-"},
+		Regex:       `(sq0csp-[\w-]{43})`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: wordChars, Window: 56, Anchored: true, HitCheck: prefixHit(50, "sq0csp-"),
+	},
+	{
 		ID: "flutterwave-secret-key", Name: "Flutterwave secret key", Type: "flutterwave",
 		Keywords:    []string{"flwseck_test-"},
 		Regex:       `(FLWSECK_TEST-[a-hA-H0-9]{32}-X)`,
@@ -124,13 +130,13 @@ var gitleaksServiceRules = []Rule{
 		ID: "plaid-client-id", Name: "Plaid client ID", Type: "plaid",
 		Keywords:    []string{"plaid"},
 		Regex:       assignRegex(`plaid`, `[A-Za-z0-9]{24}`),
-		SecretGroup: 1, MinEntropy: 3.5, Window: assignWindow,
+		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
 	},
 	{
 		ID: "plaid-secret-key", Name: "Plaid secret", Type: "plaid",
 		Keywords:    []string{"plaid"},
 		Regex:       assignRegex(`plaid`, `[A-Za-z0-9]{30}`),
-		SecretGroup: 1, MinEntropy: 3.5, Window: assignWindow,
+		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
 	},
 	{
 		ID: "coinbase-access-token", Name: "Coinbase access token", Type: "coinbase",
@@ -291,7 +297,7 @@ var gitleaksServiceRules = []Rule{
 		ID: "launchdarkly-access-token", Name: "LaunchDarkly access token", Type: "launchdarkly",
 		Keywords:    []string{"launchdarkly"},
 		Regex:       assignRegex(`launchdarkly`, `[A-Za-z0-9=_-]{40}`),
-		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
+		SecretGroup: 1, MinEntropy: 3, Window: assignWindow, Check: notHex, // a hex value is a digest
 	},
 
 	// Email
@@ -310,7 +316,7 @@ var gitleaksServiceRules = []Rule{
 	{
 		ID: "mailchimp-api-key", Name: "Mailchimp API key", Type: "mailchimp",
 		Keywords:    []string{"mailchimp"},
-		Regex:       assignRegex(`mailchimp`, `[a-fA-F0-9]{32}-us\d\d`),
+		Regex:       assignRegex(`mailchimp`, `[a-fA-F0-9]{32}-us\d{1,2}`),
 		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
 	},
 	{
@@ -356,6 +362,7 @@ var gitleaksServiceRules = []Rule{
 		Keywords:    []string{"airtable"},
 		Regex:       assignRegex(`airtable`, `[A-Za-z0-9]{17}`),
 		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
+		Allowlist: []string{`^(?:app|tbl|viw|fld|rec|sel|usr|wsp)`}, // base, table, view … IDs
 	},
 	{
 		// gitleaks gates it on the word airtable anywhere in the file; here
@@ -469,7 +476,7 @@ var gitleaksServiceRules = []Rule{
 		ID: "fastly-api-token", Name: "Fastly API token", Type: "fastly",
 		Keywords:    []string{"fastly"},
 		Regex:       assignRegex(`fastly`, `[A-Za-z0-9=_-]{32}`),
-		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
+		SecretGroup: 1, MinEntropy: 3, Window: assignWindow, Check: notHex,
 	},
 	{
 		ID: "flickr-access-token", Name: "Flickr API key", Type: "flickr",
@@ -484,11 +491,11 @@ var gitleaksServiceRules = []Rule{
 		SecretGroup: 1, MinEntropy: 3, TokenChars: wordChars, Window: 72, Anchored: true, HitCheck: prefixHit(70, "fio-u-"),
 	},
 	{
-		// PHP: 'secret_key' => 'sk_…'
+		// PHP: 'secret_key' => 'sk_…', also in an aligned array
 		ID: "freemius-secret-key", Name: "Freemius secret key", Type: "freemius",
 		Keywords:    []string{"secret_key"},
-		Regex:       `(?i:["']secret_key["']\s*=>\s*["'])(sk_\S{29})["']`,
-		SecretGroup: 1, MinEntropy: 3, Window: 64,
+		Regex:       `(?i:["']secret_key["']\s{0,40}=>\s{0,8}["'])(sk_\S{29})["']`,
+		SecretGroup: 1, MinEntropy: 3, Window: 128,
 	},
 	{
 		ID: "freshbooks-access-token", Name: "FreshBooks access token", Type: "freshbooks",
@@ -498,8 +505,8 @@ var gitleaksServiceRules = []Rule{
 	},
 	{
 		ID: "hubspot-api-key", Name: "HubSpot API key", Type: "hubspot",
-		Keywords:    []string{"hubspot"},
-		Regex:       assignRegex(`hubspot`, uuidPattern),
+		Keywords:    []string{"hubspot", "hapikey"},
+		Regex:       assignRegex(`hubspot[_.-]?(?:api[_.-]?)?(?:key|token)|hapikey`, uuidPattern),
 		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
 	},
 	{
@@ -538,7 +545,7 @@ var gitleaksServiceRules = []Rule{
 		ID: "lob-api-key", Name: "Lob API key", Type: "lob",
 		Keywords:    []string{"lob"},
 		Regex:       assignRegex(`lob`, `(?:live|test)_[a-fA-F0-9]{35}`),
-		SecretGroup: 1, MinEntropy: 3, Window: assignWindow, Anchored: true, HitCheck: valueAfterHit(64, 35, isHex, "live_", "test_"),
+		SecretGroup: 1, MinEntropy: 3, Window: assignWindow, Anchored: true, HitCheck: lobHit,
 	},
 	{
 		ID: "looker-client-id", Name: "Looker client ID", Type: "looker",
@@ -627,7 +634,7 @@ var gitleaksServiceRules = []Rule{
 	{
 		ID: "sidekiq-sensitive-url", Name: "Sidekiq Pro or Enterprise credentials in a URL", Type: "sidekiq",
 		Keywords:    []string{"gems.contribsys.com", "enterprise.contribsys.com"},
-		Regex:       `(?i:https?://)([a-fA-F0-9]{8}:[a-fA-F0-9]{8})@(?i:gems|enterprise)\.contribsys\.com(?:[/#?:\s'"\x60]|$)`,
+		Regex:       `(?i:https?://)([a-fA-F0-9]{8}:[a-fA-F0-9]{8})@(?i:(?:gems|enterprise)\.contribsys\.com)(?:[/#?:\s'"\x60]|$)`,
 		SecretGroup: 1, MinEntropy: 2.5, Window: 48,
 	},
 	{
@@ -640,6 +647,12 @@ var gitleaksServiceRules = []Rule{
 		ID: "squarespace-access-token", Name: "Squarespace API key", Type: "squarespace",
 		Keywords:    []string{"squarespace"},
 		Regex:       assignRegex(`squarespace`, uuidPattern),
+		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
+	},
+	{
+		ID: "trello-access-token", Name: "Trello API token", Type: "trello",
+		Keywords:    []string{"trello"},
+		Regex:       assignRegex(`trello`, `[A-Za-z0-9-]{32}`),
 		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
 	},
 	{
@@ -707,7 +720,7 @@ var gitleaksServiceRules = []Rule{
 		ID: "zendesk-secret-key", Name: "Zendesk API token", Type: "zendesk",
 		Keywords:    []string{"zendesk"},
 		Regex:       assignRegex(`zendesk`, `[A-Za-z0-9]{40}`),
-		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
+		SecretGroup: 1, MinEntropy: 3, Window: assignWindow, Check: notHex,
 	},
 }
 
@@ -731,23 +744,12 @@ func airtablePATHit(_, c []byte, p int) bool {
 	return p+18 < len(c) && string(c[p:p+3]) == "pat" && c[p+17] == '.' && run(c, p+18, 64, isHexLower) >= 64
 }
 
-// valueAfterHit: within n bytes after the hit, one of values (lowercase)
-// followed by m bytes ok accepts.
-func valueAfterHit(n, m int, ok func(byte) bool, values ...string) func(lower, _ []byte, p int) bool {
-	return func(lower, _ []byte, p int) bool {
-		near := lower[p:min(len(lower), p+n)]
-		for _, v := range values {
-			for off := 0; ; {
-				i := bytes.Index(near[off:], []byte(v))
-				if i < 0 {
-					break
-				}
-				off += i + 1
-				if run(lower, p+off-1+len(v), m, ok) >= m {
-					return true
-				}
-			}
+// lobHit: live_ or test_ and 35 hex digits within 64 bytes after the hit.
+func lobHit(lower, _ []byte, p int) bool {
+	for i := p; i < min(len(lower), p+64); i++ {
+		if (bytes.HasPrefix(lower[i:], []byte("live_")) || bytes.HasPrefix(lower[i:], []byte("test_"))) && run(lower, i+5, 35, isHex) >= 35 {
+			return true
 		}
-		return false
 	}
+	return false
 }

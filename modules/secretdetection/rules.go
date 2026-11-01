@@ -65,9 +65,9 @@ const (
 	wordChars  = alnumChars + "_-"
 )
 
-// builtinRules: the curl rules and then the generic rule last, so a specific
-// rule wins an overlap.
-var builtinRules = slices.Concat(baseRules, gitleaksRules, gitleaksServiceRules, curlRules, []Rule{genericRule})
+// builtinRules: the generic rule last, so a specific rule wins an overlap; see
+// curlHeaderRules for the curl rules' places.
+var builtinRules = slices.Concat(baseRules, gitleaksRules, curlUserRules, gitleaksServiceRules, curlHeaderRules, []Rule{genericRule})
 
 var baseRules = []Rule{
 	{

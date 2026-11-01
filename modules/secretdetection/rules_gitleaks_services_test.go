@@ -4,6 +4,7 @@
 package secretdetection
 
 import (
+	"math/rand/v2"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +27,21 @@ func gitleaksServiceRuleTests() []ruleTest {
 	set := func(name, value string) string { return name + ` = "` + value + `"` }
 	teams := func(last string) string {
 		return "https://acme.webhook.office.com/webhookb2/" + uuid + "@" + uuid + "/IncomingWebhook/" + fake(32, lowerAlnum) + "/" + last
+	}
+	// random hex as real Plaid values are (fake's are all distinct, so of
+	// the highest entropy)
+	rnd := rand.New(rand.NewPCG(7, 8))
+	randHex := func(n int) string {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = hexa[rnd.IntN(16)]
+		}
+		return string(b)
+	}
+	var plaidIDs, plaidSecrets []string
+	for range 8 {
+		plaidIDs = append(plaidIDs, set("PLAID_CLIENT_ID", randHex(24)))
+		plaidSecrets = append(plaidSecrets, set("PLAID_SECRET", randHex(30)))
 	}
 	sentryOrg := "sntrys_" + "eyJpYXQiO" + fake(40, alnum) + "LCJyZWdpb25fdXJs" + fake(40, alnum) + "_" + fake(43, alnum)
 	return []ruleTest{
@@ -74,6 +90,11 @@ func gitleaksServiceRuleTests() []ruleTest {
 			},
 		},
 		{
+			"square-secret",
+			[]string{"SQUARE_APP_SECRET=sq0csp-" + fake(43, b64u), `secret: "sq0csp-` + fake(43, alnum) + `"`},
+			[]string{"sq0csp-" + fake(42, alnum), "sq0csp-" + fake(44, alnum), "sq0csp-" + strings.Repeat("a", 43), "xsq0csp-" + fake(43, alnum)},
+		},
+		{
 			"flutterwave-secret-key",
 			[]string{"FLW_SECRET_KEY=FLWSECK_TEST-" + fake(32, "abcdefgh0123456789") + "-X"},
 			[]string{"FLWSECK_TEST-" + fake(32, "abcdefgh0123456789") + "-Y", "FLWSECK_TEST-" + fake(32, "ijklmnop0123456789") + "-X"},
@@ -85,8 +106,8 @@ func gitleaksServiceRuleTests() []ruleTest {
 		},
 		{"gocardless-api-token", []string{set("gocardless_token", "live_"+fake(40, b64uEqual))}, []string{set("gocardless_token", "sandbox_"+fake(40, alnum)), set("token", "live_"+fake(40, alnum))}},
 		{"plaid-api-token", []string{set("PLAID_ACCESS_TOKEN", "access-sandbox-"+uuid)}, []string{set("plaid_token", "access-staging-"+uuid)}},
-		{"plaid-client-id", []string{set("PLAID_CLIENT_ID", fake(24, alnum))}, []string{set("plaid_client_id", strings.Repeat("ab12", 6))}},
-		{"plaid-secret-key", []string{set("PLAID_SECRET", fake(30, alnum))}, []string{set("plaid_secret", strings.Repeat("ab1", 10))}},
+		{"plaid-client-id", append(plaidIDs, set("PLAID_CLIENT_ID", fake(24, alnum))), []string{set("plaid_client_id", strings.Repeat("ab12", 6))}},
+		{"plaid-secret-key", append(plaidSecrets, set("PLAID_SECRET", fake(30, alnum))), []string{set("plaid_secret", strings.Repeat("ab1", 10))}},
 		{"coinbase-access-token", []string{set("COINBASE_API_KEY", fake(64, b64u))}, []string{set("coinbase", fake(63, alnum))}},
 		{"kraken-access-token", []string{set("kraken_api_key", fake(56, b64)+fake(30, alnum)+"==")}, []string{set("kraken", fake(79, alnum))}},
 		{"kucoin-access-token", []string{set("KUCOIN_KEY", fake(24, hexa))}, []string{set("kucoin", fake(23, hexa))}},
@@ -162,7 +183,7 @@ func gitleaksServiceRuleTests() []ruleTest {
 			[]string{set("SUMO_ACCESS_KEY", fake(64, alnum))},
 			[]string{"sumOfExposures = " + fake(64, alnum) + ";", "SUMO_ACCESS_KEY: AbCeFG123", set("SUMO_ACCESS_KEY", strings.Repeat("x", 64))},
 		},
-		{"launchdarkly-access-token", []string{set("LAUNCHDARKLY_SDK_KEY", fake(40, b64uEqual))}, []string{set("launchdarkly", fake(41, alnum))}},
+		{"launchdarkly-access-token", []string{set("LAUNCHDARKLY_SDK_KEY", fake(40, b64uEqual))}, []string{set("launchdarkly", fake(41, alnum)), "LAUNCHDARKLY_MOBILE_KEY_SHA1=" + fake(40, hexa)}},
 
 		// Email
 		{
@@ -177,7 +198,7 @@ func gitleaksServiceRuleTests() []ruleTest {
 		},
 		{
 			"mailchimp-api-key",
-			[]string{set("MAILCHIMP_API_KEY", fake(32, hexa)+"-us18"), "mailchimp.apiKey: " + fake(32, hexa) + "-us12"},
+			[]string{set("MAILCHIMP_API_KEY", fake(32, hexa)+"-us18"), "mailchimp.apiKey: " + fake(32, hexa) + "-us12", set("mailchimp_key", fake(32, hexa)+"-us6")},
 			[]string{set("mailchimp", fake(32, hexa)+"-eu18"), set("api_key", fake(32, hexa)+"-us18")},
 		},
 		{"mailgun-private-api-token", []string{set("MAILGUN_API_KEY", "key-"+fake(32, hexa))}, []string{set("mailgun", "key-"+fake(31, hexa)), set("api_key", "key-"+fake(32, hexa))}},
@@ -196,7 +217,11 @@ func gitleaksServiceRuleTests() []ruleTest {
 			[]string{"# created: 2026\nAGE-SECRET-KEY-1" + fake(58, bech32)},
 			[]string{"AGE-SECRET-KEY-1" + fake(57, bech32), "AGE-SECRET-KEY-1" + fake(58, upperAlnum[:26])},
 		},
-		{"airtable-api-key", []string{set("AIRTABLE_API_KEY", fake(17, alnum))}, []string{set("airtable", fake(18, alnum))}},
+		{
+			"airtable-api-key",
+			[]string{set("AIRTABLE_API_KEY", fake(17, alnum)), set("AIRTABLE_API_KEY", "key"+fake(14, alnum))},
+			[]string{set("airtable", fake(18, alnum)), "AIRTABLE_BASE_ID=app" + fake(14, alnum), `airtable_table_id: "tbl` + fake(14, alnum) + `"`, "const airtableView = 'viw" + fake(14, alnum) + "'"},
+		},
 		{
 			"airtable-personal-access-token",
 			[]string{"AIRTABLE_TOKEN=pat" + fake(14, alnum) + "." + fake(64, hexa), `"pat` + fake(14, alnum) + "." + fake(64, hexa) + `"`},
@@ -249,16 +274,20 @@ func gitleaksServiceRuleTests() []ruleTest {
 			[]string{"FACEBOOK_TOKEN=EAAM" + fake(150, alnum), `value: "EAAC` + fake(100, alnum) + `"`},
 			[]string{"eaaa" + fake(36, hexa), "checksum: eaac" + fake(124, hexa), "EAAM" + fake(99, alnum)},
 		},
-		{"fastly-api-token", []string{set("FASTLY_API_TOKEN", fake(32, b64u))}, []string{set("fastly", fake(31, alnum))}},
+		{"fastly-api-token", []string{set("FASTLY_API_TOKEN", fake(32, b64u))}, []string{set("fastly", fake(31, alnum)), `fastly_purge_key: "` + fake(32, hexa) + `"`}},
 		{"flickr-access-token", []string{set("flickr_api_key", fake(32, alnum))}, []string{set("flickr", fake(33, alnum))}},
 		{"frameio-api-token", []string{"FRAMEIO_TOKEN=fio-u-" + fake(64, b64uEqual)}, []string{"fio-u-" + fake(63, alnum), "fio-u-" + strings.Repeat("a", 64)}},
 		{
 			"freemius-secret-key",
-			[]string{"$config = array(\n\t\"secret_key\" => \"sk_" + fake(29, b64) + "\",\n);", "'SECRET_KEY' => 'sk_" + fake(29, alnum) + "'"},
+			[]string{
+				"$config = array(\n\t\"secret_key\" => \"sk_" + fake(29, b64) + "\",\n);",
+				"'SECRET_KEY' => 'sk_" + fake(29, alnum) + "'",
+				"'secret_key'" + strings.Repeat(" ", 40) + "=> 'sk_" + fake(29, alnum) + "',", // an aligned array
+			},
 			[]string{"secret_key => \"sk_" + fake(29, alnum) + "\"", "\"secret_key\" => sk_" + fake(29, alnum) + ",", "\"other_key\" => \"sk_" + fake(29, alnum) + "\""},
 		},
 		{"freshbooks-access-token", []string{set("FRESHBOOKS_TOKEN", fake(64, alnum))}, []string{set("freshbooks", fake(65, alnum))}},
-		{"hubspot-api-key", []string{set("HUBSPOT_API_KEY", strings.ToUpper(uuid))}, []string{set("api_key", uuid)}},
+		{"hubspot-api-key", []string{set("HUBSPOT_API_KEY", strings.ToUpper(uuid)), set("hubspot_token", uuid), "url?hapikey=" + uuid + " "}, []string{set("api_key", uuid), set("hubspot_form_id", uuid), set("hubspot_portal", uuid)}},
 		{
 			"intra42-client-secret",
 			[]string{"INTRA_SECRET=s-s4t2ud-" + fake(64, hexa), "s-s4t2af-" + fake(64, hexa)},
@@ -320,11 +349,12 @@ func gitleaksServiceRuleTests() []ruleTest {
 		{"sidekiq-secret", []string{"export BUNDLE_ENTERPRISE__CONTRIBSYS__COM=" + fake(8, hexa) + ":" + fake(8, hexa)}, []string{"BUNDLE_GEMS__CONTRIBSYS__COM=" + fake(8, hexa) + ":" + fake(7, hexa)}},
 		{
 			"sidekiq-sensitive-url",
-			[]string{"source \"https://" + fake(8, hexa) + ":" + fake(8, hexa) + "@gems.contribsys.com/\"", "http://" + fake(8, hexa) + ":" + fake(8, hexa) + "@enterprise.contribsys.com#", "https://" + fake(8, hexa) + ":" + fake(8, hexa) + "@gems.contribsys.com\n"},
+			[]string{"source \"https://" + fake(8, hexa) + ":" + fake(8, hexa) + "@gems.contribsys.com/\"", "http://" + fake(8, hexa) + ":" + fake(8, hexa) + "@enterprise.contribsys.com#", "https://" + fake(8, hexa) + ":" + fake(8, hexa) + "@gems.contribsys.com\n", "https://" + fake(8, hexa) + ":" + fake(8, hexa) + "@GEMS.CONTRIBSYS.COM/"},
 			[]string{"https://" + fake(8, hexa) + ":" + fake(8, hexa) + "@gems.contribsys.company", "https://user:pass@gems.contribsys.com/"},
 		},
 		{"snyk-api-token", []string{set("SNYK_TOKEN", uuid), set("snyk_api_key", uuid)}, []string{set("snyk_org", uuid)}},
 		{"squarespace-access-token", []string{set("SQUARESPACE_API_KEY", uuid)}, []string{set("square_key", uuid)}},
+		{"trello-access-token", []string{set("TRELLO_TOKEN", fake(32, alnum)), set("trello_api_key", fake(20, alnum)+"-"+fake(11, alnum))}, []string{set("trello", fake(31, alnum)), set("trello", strings.Repeat("ab", 16))}},
 		{"twitch-api-token", []string{set("TWITCH_CLIENT_SECRET", fake(30, lowerAlnum))}, []string{set("twitch", fake(31, alnum))}},
 		{"twitter-api-key", []string{set("TWITTER_API_KEY", fake(25, alnum))}, []string{set("twitter", fake(26, alnum))}},
 		{"twitter-api-secret", []string{set("twitter_api_secret", fake(50, alnum))}, []string{set("twitter", fake(49, alnum))}},
@@ -343,7 +373,7 @@ func gitleaksServiceRuleTests() []ruleTest {
 		},
 		{"yandex-api-key", []string{set("YANDEX_API_KEY", "AQVN"+fake(36, b64u))}, []string{set("yandex", "AQVN"+fake(34, alnum))}},
 		{"yandex-aws-access-token", []string{set("yandex_access_key", "YC"+fake(38, b64u))}, []string{set("yandex", "YC"+fake(37, alnum))}},
-		{"zendesk-secret-key", []string{set("ZENDESK_API_TOKEN", fake(40, alnum))}, []string{set("zendesk", fake(39, alnum))}},
+		{"zendesk-secret-key", []string{set("ZENDESK_API_TOKEN", fake(40, alnum))}, []string{set("zendesk", fake(39, alnum)), "zendesk_ticket_hash = " + fake(40, hexa)}},
 	}
 }
 
@@ -353,18 +383,22 @@ func gitleaksServiceRuleTests() []ruleTest {
 func TestServiceRuleKeywordsAreCheap(t *testing.T) {
 	d := defaultRulesDetector(t)
 	for name, unit := range map[string]string{
-		"sk":        "task SK SKSK ask Sk ",
-		"sk hex":    "SK" + strings.Repeat("a", 31) + " ",
-		"sg":        "msg.SG. MSG.x sg.",
-		"pat":       "path pattern pat. Pat " + "pat" + strings.Repeat("a", 14) + ". ",
-		"lob":       "global blob lob = live_ lob_test_" + strings.Repeat("a", 34) + " ",
-		"eaaa":      "EAAA eaaa EAAM EAAC ",
-		"4b1d":      "4b1d 4B1D ",
-		"sc ext":    "sc_ ext_ next_ text_ scauth_ authress_ ",
-		"twitter":   "twitter = x ",
-		"facebook":  "facebook = 123456789012345|",
-		"mmk":       "_mmk",
-		"duplicate": "sm_aat_ sm_pat_ shpat_ glc_ rdme_ ntn_ ",
+		"sk":     "task SK SKSK ask Sk ",
+		"sk hex": "SK" + strings.Repeat("a", 31) + " ",
+		// these pass the hit check, so the regex runs on every one
+		"SK shape":   "SK" + fake(32, hexa) + "x ",
+		"EAAA shape": "EAAA" + fake(22, b64u) + "+ ",
+		"lob shape":  "lob = live_" + fake(35, hexa) + "x ",
+		"sg":         "msg.SG. MSG.x sg.",
+		"pat":        "path pattern pat. Pat " + "pat" + strings.Repeat("a", 14) + ". ",
+		"lob":        "global blob lob = live_ lob_test_" + strings.Repeat("a", 34) + " ",
+		"eaaa":       "EAAA eaaa EAAM EAAC ",
+		"4b1d":       "4b1d 4B1D ",
+		"sc ext":     "sc_ ext_ next_ text_ scauth_ authress_ ",
+		"twitter":    "twitter = x ",
+		"facebook":   "facebook = 123456789012345|",
+		"mmk":        "_mmk",
+		"duplicate":  "sm_aat_ sm_pat_ shpat_ glc_ rdme_ ntn_ ",
 	} {
 		content := append(repeatTo(unit, 2<<20/slowdown), []byte("\nghp_"+fake(36, alnum)+"\n")...)
 		start := time.Now()
@@ -372,5 +406,18 @@ func TestServiceRuleKeywordsAreCheap(t *testing.T) {
 		assert.Less(t, time.Since(start), 2*time.Second*slowdown, name)
 		assert.True(t, complete, name)
 		assert.Equal(t, 1, countRuleIn(fs, "github-token"), name)
+	}
+}
+
+// Twilio's documented call, curl -u SK<id>:<secret>, is reported as the pair,
+// so the finding covers the secret and not only the key's ID.
+func TestCurlUserPairCoversServiceID(t *testing.T) {
+	d := defaultRulesDetector(t)
+	secret := fake(32, alnum)
+	content := "curl -X POST https://api.local -u SK" + fake(32, hexa) + ":" + secret + " -d x=1"
+	fs := scanOf(d, []byte(content))
+	if assert.Len(t, fs, 1) {
+		assert.Equal(t, "curl-auth-user", fs[0].RuleID)
+		assert.Contains(t, content[fs[0].Start:fs[0].End], secret)
 	}
 }
