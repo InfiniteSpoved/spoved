@@ -17,6 +17,7 @@ import (
 	secretscan_model "forgejo.org/models/secretscan"
 	system_model "forgejo.org/models/system"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/base"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/secretdetection"
 	"forgejo.org/modules/setting"
@@ -167,12 +168,13 @@ func lockPatterns(ctx context.Context) error {
 	return err
 }
 
-// recordPattern writes the audit entry of a change. The pattern is a rule, not a secret, so its text is recorded.
+// recordPattern writes the audit entry of a change. The audit log can be shipped to outside destinations, so it keeps
+// a sha256 of the pattern, never its text.
 func recordPattern(ctx context.Context, action string, p *secretscan_model.CustomPattern, data map[string]any) error {
 	if data == nil {
 		data = map[string]any{}
 	}
-	data["name"], data["pattern"], data["keyword_count"] = p.Name, p.Pattern, len(p.KeywordList())
+	data["name"], data["pattern_sha256"], data["keyword_count"] = p.Name, base.EncodeSha256(p.Pattern), len(p.KeywordList())
 	return audit_model.Record(ctx, audit_model.Event{
 		Action: action, Result: audit_model.ResultSuccess, OwnerID: p.OwnerID,
 		TargetType: "secret_pattern", TargetID: p.ID, TargetName: p.Name, Data: data,
@@ -269,7 +271,7 @@ func UpdatePattern(ctx context.Context, o PatternOwner, id int64, in PatternInpu
 			return ErrPatternNotFound // deleted meanwhile
 		}
 		p.Name, p.Pattern, p.Keywords = in.Name, in.Pattern, keywords
-		data := map[string]any{"previous_pattern": prev}
+		data := map[string]any{"previous_pattern_sha256": base.EncodeSha256(prev)}
 		if prevName != p.Name {
 			data["previous_name"] = prevName
 		}

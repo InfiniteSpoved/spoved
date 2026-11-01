@@ -19,6 +19,7 @@ import (
 	secretscan_model "forgejo.org/models/secretscan"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/base"
 	"forgejo.org/modules/secretdetection"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
@@ -127,12 +128,13 @@ func TestPatternLifecycleAndAudit(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, n, "a refused save stores nothing")
 
-	// the audit entry has the rule, never the sample
+	// the audit entry has a hash of the rule (the log can be shipped elsewhere), never its text or the sample
 	var e audit_model.Entry
 	has, err := db.GetEngine(ctx).Where("action = ?", "admin.secret_pattern.created").Get(&e)
 	require.NoError(t, err)
 	require.True(t, has)
-	assert.Contains(t, e.Data, "acme-key-[a-z0-9]{20}")
+	assert.Contains(t, e.Data, `"pattern_sha256":"`+base.EncodeSha256(site.Pattern)+`"`)
+	assert.NotContains(t, e.Data, "acme-key-[a-z0-9]")
 	assert.NotContains(t, e.Data, acme("sample"))
 	assert.Equal(t, "secret_pattern", e.TargetType)
 	assert.Equal(t, site.ID, e.TargetID)
@@ -159,6 +161,8 @@ func TestPatternLifecycleAndAudit(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, has)
 	assert.Contains(t, upd.Data, `"previous_name":"site rule"`, "a rename records the name it replaces")
+	assert.Contains(t, upd.Data, `"previous_pattern_sha256":"`+base.EncodeSha256(site.Pattern)+`"`)
+	assert.NotContains(t, upd.Data, "acme-key-[")
 	got, err := secretscan_model.GetCustomPattern(ctx, 0, site.ID)
 	require.NoError(t, err)
 	assert.Equal(t, renamed.Pattern, got.Pattern)
