@@ -10,7 +10,6 @@ import (
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
-	"forgejo.org/modules/log"
 
 	"xorm.io/builder"
 )
@@ -78,11 +77,8 @@ func SetRepoSwitch(ctx context.Context, repo *repo_model.Repository, on bool) er
 		if !on {
 			return nil
 		}
-		// a digest mark that waited while it was off is stale: its pusher must not be credited with a later push
-		n, err := secretscan_model.DropNotifyMarks(ctx, builder.Eq{"repo_id": repo.ID})
-		if n > 0 {
-			log.Warn("secret scanning: the digest mark of repository %d is dropped without a mail: scanning was switched on again", repo.ID)
-		}
+		// a digest mark that waited while it was off keeps its alerts, but its pusher must not be credited with a later push
+		_, err := secretscan_model.DetachNotifyPushers(ctx, builder.Eq{"repo_id": repo.ID})
 		return err
 	})
 	if err != nil {

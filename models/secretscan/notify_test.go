@@ -71,18 +71,19 @@ func TestMarkNotify(t *testing.T) {
 	assert.Zero(t, scanRow(t, 1, KindRepo).NotifyPusherID, "and it stays so until the digest is sent")
 
 	// the clear compares the sequence the scan read
-	took, err := ClearNotify(ctx, 1, 2, 0)
+	took, err := ClearNotify(ctx, 1, 2, 0, 0)
 	require.NoError(t, err)
 	assert.False(t, took, "a push came after that read")
 	assert.NotZero(t, scanRow(t, 1, KindRepo).NotifyAfterUnix)
-	took, err = ClearNotify(ctx, 1, scanRow(t, 1, KindRepo).NotifySeq, 1234)
+	took, err = ClearNotify(ctx, 1, scanRow(t, 1, KindRepo).NotifySeq, 1234, 77)
 	require.NoError(t, err)
 	assert.True(t, took)
 	cleared := scanRow(t, 1, KindRepo)
 	assert.Zero(t, cleared.NotifyAfterUnix)
 	assert.Empty(t, cleared.NotifyRef)
 	assert.EqualValues(t, 1234, cleared.NotifyLastUnix)
-	took, err = ClearNotify(ctx, 1, cleared.NotifySeq, 0)
+	assert.EqualValues(t, 77, cleared.NotifyFloor, "the clear stores the floor it is given")
+	took, err = ClearNotify(ctx, 1, cleared.NotifySeq, 0, 0)
 	require.NoError(t, err)
 	assert.False(t, took, "at most once: nothing left to take")
 
@@ -140,14 +141,14 @@ func TestBuildDigest(t *testing.T) {
 	add(4, "slack", 2, KindWiki, KindWiki)
 	add(5, "slack", 2, KindWiki, KindRepo)
 
-	d, err := BuildDigest(ctx, 1, old, []string{KindRepo, KindWiki, KindPull})
+	d, err := BuildDigest(ctx, 1, old, 0, []string{KindRepo, KindWiki, KindPull})
 	require.NoError(t, err)
 	assert.Equal(t, 4, d.Alerts)
 	assert.Equal(t, []DigestType{{"aws", 2}, {"slack", 2}}, d.Types)
 	assert.Equal(t, 19, d.TotalLocations)
 	assert.Len(t, d.Locations, MaxDigestLocations, "the list is capped")
 
-	d, err = BuildDigest(ctx, 1, old, []string{KindRepo, KindPull})
+	d, err = BuildDigest(ctx, 1, old, 0, []string{KindRepo, KindPull})
 	require.NoError(t, err)
 	assert.Equal(t, 3, d.Alerts, "an alert only in the wiki is not for someone without wiki access")
 	assert.Equal(t, []DigestType{{"aws", 2}, {"slack", 1}}, d.Types)
@@ -156,21 +157,24 @@ func TestBuildDigest(t *testing.T) {
 		assert.NotEqual(t, KindWiki, l.Kind)
 	}
 
-	d, err = BuildDigest(ctx, 1, old, []string{KindWiki})
+	d, err = BuildDigest(ctx, 1, old, 0, []string{KindWiki})
 	require.NoError(t, err)
 	assert.Equal(t, 2, d.Alerts, "a pusher of the wiki is told of the wiki's alerts only")
 	assert.Zero(t, d.FirstIndex)
-	d, err = BuildDigest(ctx, 1, old+3, []string{KindRepo})
+	d, err = BuildDigest(ctx, 1, old+3, 0, []string{KindRepo})
 	require.NoError(t, err)
 	assert.Equal(t, 1, d.Alerts)
 	assert.EqualValues(t, 5, d.FirstIndex, "one alert: its number, for a direct link")
 
-	d, err = BuildDigest(ctx, 1, 1<<40, []string{KindRepo})
+	d, err = BuildDigest(ctx, 1, old, old+2, []string{KindRepo, KindWiki, KindPull})
+	require.NoError(t, err)
+	assert.Equal(t, 2, d.Alerts, "alerts above the upper bound are left for the next digest")
+	d, err = BuildDigest(ctx, 1, 1<<40, 0, []string{KindRepo})
 	require.NoError(t, err)
 	assert.Zero(t, d.Alerts, "nothing above the boundary")
 }
 
-// The mark's several-pushes bit, the pusher rule, the floor that starts a boundary, ResetScans and DropNotifyMarks.
+// The mark's several-pushes bit, the pusher rule, the floor that starts a boundary, ResetScans and DetachNotifyPushers.
 func TestMarkNotifyWindow(t *testing.T) {
 	unittest.PrepareTestEnv(t)
 	ctx := t.Context()
@@ -184,7 +188,9 @@ func TestMarkNotifyWindow(t *testing.T) {
 	}
 	clear := func() {
 		t.Helper()
-		took, err := ClearNotify(ctx, 1, scanRow(t, 1, KindRepo).NotifySeq, 0)
+		newest, err := MaxAlertID(ctx, 1)
+		require.NoError(t, err)
+		took, err := ClearNotify(ctx, 1, scanRow(t, 1, KindRepo).NotifySeq, 0, newest)
 		require.NoError(t, err)
 		require.True(t, took)
 	}
@@ -217,14 +223,19 @@ func TestMarkNotifyWindow(t *testing.T) {
 	assert.Zero(t, scanRow(t, 1, KindRepo).NotifyPusherID, "and it stays gone")
 	clear()
 
-	// a mark that waited while scanning was off is dropped
+	// a mark that waited while scanning was off keeps its boundary and loses its pusher
 	mark(2, "main", "c6")
-	n, err := DropNotifyMarks(ctx, builder.Eq{"repo_id": 1})
+	before := scanRow(t, 1, KindRepo)
+	n, err := DetachNotifyPushers(ctx, builder.Eq{"repo_id": 1})
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, n)
 	row = scanRow(t, 1, KindRepo)
-	assert.Zero(t, row.NotifyAfterUnix)
+	assert.Equal(t, before.NotifyAfterUnix, row.NotifyAfterUnix)
+	assert.Equal(t, before.NotifyAlertID, row.NotifyAlertID)
 	assert.Zero(t, row.NotifyPusherID)
+	mark(2, "main", "c6b")
+	assert.Zero(t, scanRow(t, 1, KindRepo).NotifyPusherID, "a later push is not credited to the old pusher")
+	clear()
 
 	// a rescan forgets the tips and the holes, and keeps the completed flag and the mark
 	mark(2, "main", "c7")
@@ -241,4 +252,26 @@ func TestMarkNotifyWindow(t *testing.T) {
 	n, err = ResetScans(ctx, 1)
 	require.NoError(t, err)
 	assert.Zero(t, n, "rows that are reset already are not claimed twice")
+}
+
+// The stuck note is kept on the row, set once and cleared.
+func TestQueueStuck(t *testing.T) {
+	unittest.PrepareTestEnv(t)
+	ctx := t.Context()
+	_, hasRow, err := MarkQueueStuck(ctx, 1, 100)
+	require.NoError(t, err)
+	assert.False(t, hasRow, "no scan state to hold it")
+	_, err = db.GetEngine(ctx).Insert(&Scan{RepoID: 1, Kind: KindRepo, Status: StatusOK})
+	require.NoError(t, err)
+	since, hasRow, err := MarkQueueStuck(ctx, 1, 100)
+	require.NoError(t, err)
+	assert.True(t, hasRow)
+	assert.EqualValues(t, 100, since)
+	since, _, err = MarkQueueStuck(ctx, 1, 500)
+	require.NoError(t, err)
+	assert.EqualValues(t, 100, since, "the first sighting stays")
+	require.NoError(t, ClearQueueStuck(ctx, 1))
+	since, _, err = MarkQueueStuck(ctx, 1, 900)
+	require.NoError(t, err)
+	assert.EqualValues(t, 900, since)
 }

@@ -70,7 +70,7 @@ func TestDigestAfterPush(t *testing.T) {
 	w.pushDefault()
 	require.NoError(t, Scan(ctx, repo.ID))
 	require.Len(t, *sent, 1)
-	assert.Equal(t, mailer.SecretDigestInput{Ref: "main", Commit: "c2", PusherID: 2, AfterAlertID: boundary, Kinds: secretscan_model.DigestKindCode | secretscan_model.DigestWikiScanned}, (*sent)[0])
+	assert.Equal(t, mailer.SecretDigestInput{Ref: "main", Commit: "c2", PusherID: 2, AfterAlertID: boundary, UpToAlertID: alertsOf(t, repo.ID)[len(alertsOf(t, repo.ID))-1].ID, Kinds: secretscan_model.DigestKindCode | secretscan_model.DigestWikiScanned}, (*sent)[0])
 	require.NoError(t, Scan(ctx, repo.ID))
 	require.NoError(t, Scan(ctx, repo.ID))
 	assert.Len(t, *sent, 1, "at most once: the mark is gone")
@@ -187,7 +187,7 @@ func TestDigestMarkRules(t *testing.T) {
 		finishDigest(ctx, repo, mk(wiki), failingWiki)
 		assert.Len(t, *sent, 2, "a wiki push waits for its own scan")
 		assert.NotZero(t, mark().NotifyAfterUnix)
-		_, err := secretscan_model.ClearNotify(ctx, repo.ID, mark().NotifySeq, 0)
+		_, err := secretscan_model.ClearNotify(ctx, repo.ID, mark().NotifySeq, 0, 0)
 		require.NoError(t, err)
 	})
 
@@ -249,16 +249,75 @@ func TestDigestMarkRules(t *testing.T) {
 		assert.Less(t, (*sent)[0].AfterAlertID, stored.ID, "the boundary is the floor: the stored alert is above it")
 	})
 
-	t.Run("a mark across a switch off and on is dropped", func(t *testing.T) {
+	t.Run("a mark across a switch off and on keeps its alerts and loses its pusher; the red team's sequence", func(t *testing.T) {
 		*sent = nil
 		noWait()
 		sys := audit_model.WithSystem(ctx, "test")
+		t0 := time.Now().Truncate(time.Second)
+		timeutil.MockSet(t0)
+		defer timeutil.MockUnset()
+		require.NoError(t, Scan(ctx, repo.ID))
+		// s1 is mailed
 		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "s1")
+		w.commit(map[string]string{"s1.env": "T=" + token("seq-s1") + "\n"})
+		w.pushDefault()
+		require.NoError(t, Scan(ctx, repo.ID))
+		require.Len(t, *sent, 1)
+		afterS1 := (*sent)[0].UpToAlertID
+		// s2 comes while the digest is held
+		timeutil.MockSet(t0.Add(time.Minute))
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "s2")
+		boundary := mark().NotifyAlertID
+		assert.Equal(t, afterS1, boundary)
+		w.commit(map[string]string{"s2.env": "T=" + token("seq-s2") + "\n"})
+		w.pushDefault()
+		require.NoError(t, Scan(ctx, repo.ID))
+		require.Len(t, *sent, 1, "held")
 		require.NotZero(t, mark().NotifyAfterUnix)
+		// the switch goes off and on: the mark stays, its pusher goes
 		require.NoError(t, SetRepoSwitch(sys, repo, false))
 		require.NoError(t, SetRepoSwitch(sys, repo, true))
-		assert.Zero(t, mark().NotifyAfterUnix, "the old pusher is not credited with a later push")
+		assert.NotZero(t, mark().NotifyAfterUnix, "the mark and its alerts are kept")
+		assert.Equal(t, boundary, mark().NotifyAlertID)
 		assert.Zero(t, mark().NotifyPusherID)
+		// s3 comes after
+		timeutil.MockSet(t0.Add(2 * time.Minute))
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "s3")
+		assert.Equal(t, boundary, mark().NotifyAlertID)
+		w.commit(map[string]string{"s3.env": "T=" + token("seq-s3") + "\n"})
+		w.pushDefault()
+		require.NoError(t, Scan(ctx, repo.ID))
+		require.Len(t, *sent, 1, "still held")
+		timeutil.MockSet(t0.Add(16 * time.Minute))
+		require.NoError(t, Scan(ctx, repo.ID))
+		require.Len(t, *sent, 2)
+		second := (*sent)[1]
+		assert.Equal(t, boundary, second.AfterAlertID)
+		assert.Zero(t, second.PusherID, "administrators only")
+		d, err := secretscan_model.BuildDigest(ctx, repo.ID, second.AfterAlertID, second.UpToAlertID, []string{secretscan_model.KindRepo})
+		require.NoError(t, err)
+		assert.Equal(t, 2, d.Alerts, "the digest lists s2 and s3")
+	})
+
+	t.Run("an alert another server stores between the clear and the mail is mailed once, next time", func(t *testing.T) {
+		*sent = nil
+		noWait()
+		require.NoError(t, Scan(ctx, repo.ID))
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "m1")
+		first := &secretscan_model.Alert{RepoID: repo.ID, Index: 7000, RuleID: "github-token", Fingerprint: fmt.Sprintf("%064d", 7000)}
+		require.NoError(t, db.Insert(ctx, first))
+		finishDigest(ctx, repo, readMark(ctx, repo.ID), upToDate)
+		require.Len(t, *sent, 1)
+		assert.Equal(t, first.ID, (*sent)[0].UpToAlertID, "the digest is bounded by the newest alert at the time")
+		assert.Equal(t, first.ID, mark().NotifyFloor, "and the clear stores that bound as the floor")
+		other := &secretscan_model.Alert{RepoID: repo.ID, Index: 7001, RuleID: "github-token", Fingerprint: fmt.Sprintf("%064d", 7001)}
+		require.NoError(t, db.Insert(ctx, other)) // the other server's scan stored it after the bound was read
+		noWait()
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "m2")
+		finishDigest(ctx, repo, readMark(ctx, repo.ID), upToDate)
+		require.Len(t, *sent, 2)
+		assert.Equal(t, first.ID, (*sent)[1].AfterAlertID, "the next digest starts after the first one's bound")
+		assert.Less(t, (*sent)[1].AfterAlertID, other.ID, "and holds the alert that came between")
 	})
 
 	t.Run("a rescan keeps the mark, and re-found alerts are not mailed", func(t *testing.T) {
@@ -316,7 +375,8 @@ func TestDigestMarkRules(t *testing.T) {
 }
 
 // The cron task scans a repository itself when the queue has said "already queued" for an hour: the unique queue can
-// keep a set entry that no item stands for after a kill.
+// keep a set entry that no item stands for after a kill. The note is kept in the scan row, so a restart doesn't add
+// an hour; a repository that was never scanned has no row, and its note is kept in memory.
 func TestStuckQueueIsRecovered(t *testing.T) {
 	repo := enable(t)
 	mockQueue(t)
@@ -325,22 +385,48 @@ func TestStuckQueueIsRecovered(t *testing.T) {
 	w.commit(map[string]string{"a.txt": "x\n"})
 	w.pushDefault()
 	require.NoError(t, Scan(ctx, repo.ID))
-	require.NoError(t, secretscan_model.MarkRequeue(ctx, 0))
-	require.NotZero(t, scanOf(t, repo.ID, secretscan_model.KindRepo).Requeue)
 	defer test.MockVariableValue(&pushQueue, func(int64) error { return queue.ErrAlreadyInQueue })()
-	lc, cleanup := test.NewLogChecker(log.DEFAULT, log.WARN)
-	defer cleanup()
-	lc.Filter("scanning it directly").StopMark("scanning it directly")
+	warned := func(lc *test.LogChecker) bool {
+		filtered, _ := lc.Check(5 * time.Second)
+		return slices.Contains(filtered, true)
+	}
 
-	require.NoError(t, EnqueueUnscanned(ctx))
-	assert.NotZero(t, scanOf(t, repo.ID, secretscan_model.KindRepo).Requeue, "the first sighting only notes the time")
-	markedSince.Lock()
-	markedSince.at[repo.ID] = time.Now().Add(-2 * time.Hour)
-	markedSince.Unlock()
-	require.NoError(t, EnqueueUnscanned(ctx))
-	assert.Zero(t, scanOf(t, repo.ID, secretscan_model.KindRepo).Requeue, "the cron task scanned it: the mark is taken")
-	filtered, _ := lc.Check(5 * time.Second)
-	assert.True(t, slices.Contains(filtered, true), "and logged it at warn level")
+	t.Run("a repository with scan state", func(t *testing.T) {
+		require.NoError(t, secretscan_model.MarkRequeue(ctx, 0))
+		lc, cleanup := test.NewLogChecker(log.DEFAULT, log.WARN)
+		defer cleanup()
+		lc.Filter("scanning it directly").StopMark("scanning it directly")
+		require.NoError(t, EnqueueUnscanned(ctx))
+		assert.NotZero(t, scanOf(t, repo.ID, secretscan_model.KindRepo).Requeue, "the first sighting only notes the time")
+		stuck := scanOf(t, repo.ID, secretscan_model.KindRepo).QueueStuckUnix
+		require.NotZero(t, stuck, "the note is in the row")
+		markedSince.Lock()
+		clear(markedSince.at) // a restart: nothing in memory
+		markedSince.Unlock()
+		_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET queue_stuck_unix = ? WHERE repo_id = ? AND kind = ?", time.Now().Add(-2*time.Hour).Unix(), repo.ID, secretscan_model.KindRepo)
+		require.NoError(t, err)
+		require.NoError(t, EnqueueUnscanned(ctx))
+		row := scanOf(t, repo.ID, secretscan_model.KindRepo)
+		assert.Zero(t, row.Requeue, "the cron task scanned it: the mark is taken")
+		assert.Zero(t, row.QueueStuckUnix, "and the note is gone")
+		assert.True(t, warned(lc), "and logged it at warn level")
+	})
+
+	t.Run("a repository that was never scanned", func(t *testing.T) {
+		_, err := secretscan_model.DeleteScans(ctx, repo.ID)
+		require.NoError(t, err)
+		lc, cleanup := test.NewLogChecker(log.DEFAULT, log.WARN)
+		defer cleanup()
+		lc.Filter("scanning it directly").StopMark("scanning it directly")
+		require.NoError(t, EnqueueUnscanned(ctx))
+		assert.Nil(t, scanOf(t, repo.ID, secretscan_model.KindRepo), "the first sighting scans nothing")
+		markedSince.Lock()
+		markedSince.at[repo.ID] = time.Now().Add(-2 * time.Hour)
+		markedSince.Unlock()
+		require.NoError(t, EnqueueUnscanned(ctx))
+		assert.NotNil(t, scanOf(t, repo.ID, secretscan_model.KindRepo), "the cron task scanned it")
+		assert.True(t, warned(lc))
+	})
 }
 
 // upToDate is a pass that brought the code up to date.

@@ -87,8 +87,15 @@ func finishDigest(ctx context.Context, repo *repo_model.Repository, m *notifyMar
 		return
 	}
 	now := timeutil.TimeStampNow()
+	// the newest alert this digest may hold, read before anything else and stored as the floor with the clear: an alert
+	// that another server stores meanwhile is above it, so it is mailed once, next time
+	upTo, err := secretscan_model.MaxAlertID(ctx, repo.ID)
+	if err != nil {
+		log.Error("secret scanning: digest of repository %d: %v", repo.ID, err)
+		return
+	}
 	if int64(now)-int64(m.after) > int64(digestMaxAge/time.Second) {
-		if took, err := secretscan_model.ClearNotify(ctx, repo.ID, m.seq, m.last); err == nil && took {
+		if took, err := secretscan_model.ClearNotify(ctx, repo.ID, m.seq, m.last, upTo); err == nil && took {
 			log.Warn("secret scanning: the digest mark of repository %d is older than %s and is dropped without a mail: its scan did not catch up", repo.ID, digestMaxAge)
 		}
 		return
@@ -99,7 +106,7 @@ func finishDigest(ctx context.Context, repo *repo_model.Repository, m *notifyMar
 		log.Warn("secret scanning: the wiki of repository %d is gone: the digest leaves out the wiki push", repo.ID)
 		kinds &^= secretscan_model.DigestKindWiki
 		if kinds&secretscan_model.DigestKindCode == 0 {
-			_, _ = secretscan_model.ClearNotify(ctx, repo.ID, m.seq, m.last)
+			_, _ = secretscan_model.ClearNotify(ctx, repo.ID, m.seq, m.last, upTo)
 			return
 		}
 	}
@@ -119,7 +126,7 @@ func finishDigest(ctx context.Context, repo *repo_model.Repository, m *notifyMar
 	if m.last != 0 && int64(m.last) <= int64(now) && int64(now)-int64(m.last) < secretscan_model.DigestMinInterval { // a time in the future is no wait
 		return // the next digest carries it
 	}
-	has, err := secretscan_model.HasAlertsAfter(ctx, repo.ID, m.alertID)
+	has, err := secretscan_model.HasAlertsAfter(ctx, repo.ID, m.alertID, upTo)
 	if err != nil {
 		log.Error("secret scanning: digest of repository %d: %v", repo.ID, err)
 		return
@@ -128,7 +135,7 @@ func finishDigest(ctx context.Context, repo *repo_model.Repository, m *notifyMar
 	if !has || !Enabled(ctx, repo) {
 		sentAt = m.last // the push opened no alert, or scanning is off: no mail, no wait for the next one
 	}
-	took, err := secretscan_model.ClearNotify(ctx, repo.ID, m.seq, sentAt)
+	took, err := secretscan_model.ClearNotify(ctx, repo.ID, m.seq, sentAt, upTo)
 	if err != nil {
 		log.Error("secret scanning: clear the digest mark of repository %d: %v", repo.ID, err)
 		return
@@ -137,7 +144,7 @@ func finishDigest(ctx context.Context, repo *repo_model.Repository, m *notifyMar
 		return
 	}
 	// at most once: the mark is gone before this call, so a failure here is logged and the digest is not retried
-	if err := sendDigest(ctx, repo, mailer.SecretDigestInput{Ref: m.ref, Commit: m.commit, PusherID: m.pusherID, AfterAlertID: m.alertID, Kinds: kinds}); err != nil {
+	if err := sendDigest(ctx, repo, mailer.SecretDigestInput{Ref: m.ref, Commit: m.commit, PusherID: m.pusherID, AfterAlertID: m.alertID, UpToAlertID: upTo, Kinds: kinds}); err != nil {
 		log.Error("secret scanning: digest of repository %d: %v", repo.ID, err)
 	}
 }

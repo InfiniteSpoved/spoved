@@ -89,10 +89,12 @@ func MarkNotify(ctx context.Context, repoID, pusherID int64, kind, ref, commit s
 // ClearNotify removes the mark if no push marked the repository since seq was read, and reports whether it did:
 // only then the caller sends the mail, so a digest is sent at most once and a push during the scan keeps its mark
 // for the next scan. lastSent is the value of notify_last_unix to store: now when a digest goes out, else the old one.
-func ClearNotify(ctx context.Context, repoID, seq int64, lastSent timeutil.TimeStamp) (bool, error) {
+// floor is the upper alert bound the digest was built with (MaxAlertID, read before it): the next mark starts there, so an
+// alert that another server stored meanwhile is mailed once, next time, and never twice.
+func ClearNotify(ctx context.Context, repoID, seq int64, lastSent timeutil.TimeStamp, floor int64) (bool, error) {
 	res, err := db.GetEngine(ctx).Exec(
-		"UPDATE secret_scan SET notify_after_unix = 0, notify_pusher_id = 0, notify_kinds = 0, notify_ref = '', notify_commit = '', notify_last_unix = ?, notify_floor = (SELECT COALESCE(MAX(id), 0) FROM secret_scanning_alert WHERE repo_id = ?) WHERE repo_id = ? AND kind = ? AND notify_seq = ? AND notify_after_unix <> 0",
-		int64(lastSent), repoID, repoID, KindRepo, seq,
+		"UPDATE secret_scan SET notify_after_unix = 0, notify_pusher_id = 0, notify_kinds = 0, notify_ref = '', notify_commit = '', notify_last_unix = ?, notify_floor = ? WHERE repo_id = ? AND kind = ? AND notify_seq = ? AND notify_after_unix <> 0",
+		int64(lastSent), floor, repoID, KindRepo, seq,
 	)
 	if err != nil {
 		return false, err
@@ -103,8 +105,24 @@ func ClearNotify(ctx context.Context, repoID, seq int64, lastSent timeutil.TimeS
 
 // HasAlertsAfter tells whether the repository has an alert above the boundary a mark recorded: no digest is built
 // for a push that opened none.
-func HasAlertsAfter(ctx context.Context, repoID, afterAlertID int64) (bool, error) {
-	return db.GetEngine(ctx).Where(builder.Eq{"repo_id": repoID}.And(builder.Gt{"id": afterAlertID})).Exist(new(Alert))
+func HasAlertsAfter(ctx context.Context, repoID, afterAlertID, upToAlertID int64) (bool, error) {
+	return db.GetEngine(ctx).Where(alertWindow(repoID, afterAlertID, upToAlertID)).Exist(new(Alert))
+}
+
+// alertWindow is the alerts of a digest: above the boundary and, when upTo is set, not above it.
+func alertWindow(repoID, afterAlertID, upToAlertID int64) builder.Cond {
+	cond := builder.Eq{"repo_id": repoID}.And(builder.Gt{"id": afterAlertID})
+	if upToAlertID > 0 {
+		cond = cond.And(builder.Lte{"id": upToAlertID})
+	}
+	return cond
+}
+
+// MaxAlertID is the newest alert of the repository, 0 without one.
+func MaxAlertID(ctx context.Context, repoID int64) (int64, error) {
+	var id int64
+	_, err := db.GetEngine(ctx).Table("secret_scanning_alert").Select("COALESCE(MAX(id), 0)").Where("repo_id = ?", repoID).Get(&id)
+	return id, err
 }
 
 // DigestType is the number of new alerts of one secret type.
@@ -123,12 +141,15 @@ type Digest struct {
 	FirstIndex     int64       // the number of the alert when there is exactly one, else 0
 }
 
-// BuildDigest reads the digest of the alerts created after afterAlertID that have a place of one of kinds (KindRepo,
+// BuildDigest reads the digest of the alerts created after afterAlertID (and, when upToAlertID is set, up to it) that have a place of one of kinds (KindRepo,
 // KindWiki, KindPull): a viewer who can't read the wiki, or a wiki that was not scanned before the push, leaves
 // KindWiki out, and a pusher is told only of the kind they pushed. Places of other kinds are left out too.
-func BuildDigest(ctx context.Context, repoID, afterAlertID int64, kinds []string) (*Digest, error) {
+func BuildDigest(ctx context.Context, repoID, afterAlertID, upToAlertID int64, kinds []string) (*Digest, error) {
 	opts := &AlertSearchOptions{RepoID: repoID, Kinds: kinds}
 	alerts := opts.ToConds().And(builder.Gt{"id": afterAlertID})
+	if upToAlertID > 0 {
+		alerts = alerts.And(builder.Lte{"id": upToAlertID})
+	}
 	var rows []struct {
 		RuleID string
 		N      int
@@ -176,15 +197,17 @@ func AdvanceNotifyFloor(ctx context.Context, repoID int64) error {
 	return err
 }
 
-// DropNotifyMarks removes the digest marks of the repositories in the condition (on secret_scan.repo_id), and reports
-// how many there were: a mark that waited across a switch off and on must not credit a later push to its pusher.
-func DropNotifyMarks(ctx context.Context, cond builder.Cond) (int64, error) {
+// DetachNotifyPushers takes the pusher off the digest marks of the repositories in the condition (on
+// secret_scan.repo_id), and reports how many marks there were: a mark that waited across a switch off and on keeps its
+// boundary and its alerts, but its digest goes to the administrators only; a later push must not be credited to the
+// old pusher.
+func DetachNotifyPushers(ctx context.Context, cond builder.Cond) (int64, error) {
 	where, args, err := builder.ToSQL(cond)
 	if err != nil {
 		return 0, err
 	}
 	res, err := db.GetEngine(ctx).Exec(append([]any{
-		"UPDATE secret_scan SET notify_after_unix = 0, notify_pusher_id = 0, notify_kinds = 0, notify_ref = '', notify_commit = '' WHERE kind = ? AND notify_after_unix <> 0 AND " + where,
+		"UPDATE secret_scan SET notify_pusher_id = 0 WHERE kind = ? AND notify_after_unix <> 0 AND notify_pusher_id <> 0 AND " + where,
 		KindRepo,
 	}, args...)...)
 	if err != nil {

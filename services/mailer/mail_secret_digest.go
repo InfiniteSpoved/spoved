@@ -41,6 +41,7 @@ type SecretDigestInput struct {
 	Ref, Commit  string
 	PusherID     int64
 	AfterAlertID int64
+	UpToAlertID  int64 // the newest alert the digest may hold (0: no bound): the next digest starts after it
 	Kinds        int
 }
 
@@ -109,7 +110,7 @@ func SendSecretDigest(ctx context.Context, repo *repo_model.Repository, in Secre
 		if d, ok := digests[key]; ok {
 			return d, nil
 		}
-		d, err := secretscan_model.BuildDigest(ctx, repo.ID, in.AfterAlertID, kinds)
+		d, err := secretscan_model.BuildDigest(ctx, repo.ID, in.AfterAlertID, in.UpToAlertID, kinds)
 		digests[key] = d
 		return d, err
 	}

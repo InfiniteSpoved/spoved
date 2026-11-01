@@ -15,7 +15,6 @@ import (
 
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
-	"forgejo.org/modules/log"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
@@ -100,8 +99,11 @@ type Scan struct {
 	// NotifyFloor is the newest alert ID that no digest is owed for: set when a pass ends with the code up to date and
 	// no mark, and when a digest is taken. A mark's boundary starts there, so an alert that a scan under way stored
 	// before the push's post-receive marked is still mailed.
-	NotifyFloor int64              `xorm:"NOT NULL DEFAULT 0"`
-	UpdatedUnix timeutil.TimeStamp `xorm:"INDEX updated"`
+	NotifyFloor int64 `xorm:"NOT NULL DEFAULT 0"`
+	// QueueStuckUnix is when the cron task first found this repository marked or due while the unique queue said it
+	// was queued already (0 = not stuck): after an hour the cron task scans it directly.
+	QueueStuckUnix timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"`
+	UpdatedUnix    timeutil.TimeStamp `xorm:"INDEX updated"`
 }
 
 func (*Scan) TableName() string { return "secret_scan" }
@@ -433,11 +435,9 @@ func scannedRepoCond(orgID int64) builder.Cond {
 // MarkRequeue marks the repositories ScannedRepoIDsAfter would list (their repository scan state) to be scanned again.
 // It runs in the transaction that saves the switch, so the mark and the setting stand or fall together.
 func MarkRequeue(ctx context.Context, orgID int64) error {
-	// a digest mark that waited while scanning was off is stale: its pusher must not be credited with a later push
-	if n, err := DropNotifyMarks(ctx, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scannedRepoCond(orgID)))); err != nil {
+	// a digest mark that waited while scanning was off keeps its alerts, but not its pusher (a later push is not theirs)
+	if _, err := DetachNotifyPushers(ctx, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scannedRepoCond(orgID)))); err != nil {
 		return err
-	} else if n > 0 {
-		log.Warn("secret scanning: %d digest marks dropped without a mail: scanning was switched on again", n)
 	}
 	_, err := db.GetEngine(ctx).NoAutoTime().
 		Where(builder.And(builder.Eq{"kind": KindRepo}, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scannedRepoCond(orgID))))).
@@ -463,4 +463,23 @@ func RequeuedRepoIDsAfter(ctx context.Context, after int64, limit int) ([]int64,
 			builder.Or(builder.Gt{"marked.requeue": 0}, builder.Neq{"marked.notify_after_unix": 0}),
 		)))).
 		OrderBy("repository.id").Limit(limit).Find(&ids)
+}
+
+// MarkQueueStuck records when the repository's queue entry was first found stuck (if it isn't recorded yet) and returns
+// that time; hasRow is false when the repository has no scan state to hold it.
+func MarkQueueStuck(ctx context.Context, repoID int64, now timeutil.TimeStamp) (since timeutil.TimeStamp, hasRow bool, err error) {
+	if _, err = db.GetEngine(ctx).Exec("UPDATE secret_scan SET queue_stuck_unix = ? WHERE repo_id = ? AND kind = ? AND queue_stuck_unix = 0", int64(now), repoID, KindRepo); err != nil {
+		return 0, false, err
+	}
+	s, err := GetScan(ctx, repoID, KindRepo)
+	if err != nil || s == nil {
+		return 0, false, err
+	}
+	return s.QueueStuckUnix, true, nil
+}
+
+// ClearQueueStuck forgets that the repository's queue entry was stuck.
+func ClearQueueStuck(ctx context.Context, repoID int64) error {
+	_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET queue_stuck_unix = 0 WHERE repo_id = ? AND kind = ? AND queue_stuck_unix <> 0", repoID, KindRepo)
+	return err
 }

@@ -156,45 +156,65 @@ const (
 	maxDirectScans = 10
 )
 
-// markedSince is when this process first found a repository marked and "already queued" at the cron task.
+// markedSince is when this process first found a repository without scan state "already queued" at the cron task (a
+// repository with scan state keeps that time in its row, so a restart does not add an hour).
 var markedSince = struct {
 	sync.Mutex
 	at map[int64]time.Time
 }{at: map[int64]time.Time{}}
 
-// enqueueMarked queues a marked repository for the cron task. When the queue says it is queued already and the
-// repository has been marked and "queued" for stuckAfter, it scans it here instead (Scan takes the same per-repository
-// lock as the worker), and logs it. direct counts the direct scans of this run.
-func enqueueMarked(ctx context.Context, id int64, direct *int) {
+// enqueueRecover queues a repository for the cron task (a marked one, or one that has no scan state or is due). When
+// the queue says it is queued already and that has been so for stuckAfter, it scans the repository here instead (Scan
+// takes the same per-repository lock as the worker) and logs it. direct counts the direct scans of this run. The
+// queue's stale unique entry itself stays: neither modules/queue nor levelqueue can remove one key, so only clearing the
+// queue removes it, and until then every push to this repository is dropped as a duplicate and the cron task scans it.
+func enqueueRecover(ctx context.Context, id int64, direct *int) {
 	if scanQueue == nil || !SiteEnabled(ctx) {
 		return
 	}
 	err := pushQueue(id)
-	markedSince.Lock()
-	defer markedSince.Unlock()
 	if !errors.Is(err, queue.ErrAlreadyInQueue) {
-		delete(markedSince.at, id)
 		if err != nil {
 			log.Error("secret scanning: queue repository %d: %v", id, err)
 		}
+		return // queued: the scan that runs clears what was noted
+	}
+	now := timeutil.TimeStampNow()
+	since, hasRow, err := secretscan_model.MarkQueueStuck(ctx, id, now)
+	if err != nil {
+		log.Error("secret scanning: note that repository %d is stuck in the queue: %v", id, err)
 		return
 	}
-	first, ok := markedSince.at[id]
-	if !ok {
-		markedSince.at[id] = time.Now()
-		return
+	if !hasRow {
+		markedSince.Lock()
+		first, ok := markedSince.at[id]
+		if !ok {
+			markedSince.at[id] = now.AsTime()
+		}
+		markedSince.Unlock()
+		if !ok {
+			return
+		}
+		since = timeutil.TimeStamp(first.Unix())
 	}
-	if time.Since(first) < stuckAfter || *direct >= maxDirectScans {
+	if int64(now)-int64(since) < int64(stuckAfter/time.Second) || *direct >= maxDirectScans {
 		return
 	}
 	*direct++
-	delete(markedSince.at, id)
-	log.Warn("secret scanning: repository %d has been marked for %s and the queue says it is queued: scanning it directly", id, time.Since(first).Round(time.Minute))
-	markedSince.Unlock()
+	log.Warn("secret scanning: repository %d has been waiting in the queue for %s and the queue says it is queued: scanning it directly", id, time.Duration(int64(now)-int64(since))*time.Second)
 	if err := Scan(ctx, id); err != nil {
 		log.Error("secret scanning: direct scan of repository %d: %v", id, err)
 	}
+}
+
+// forgetStuck clears the note that the repository's queue entry was stuck: a scan of it is running.
+func forgetStuck(ctx context.Context, id int64) {
 	markedSince.Lock()
+	delete(markedSince.at, id)
+	markedSince.Unlock()
+	if err := secretscan_model.ClearQueueStuck(ctx, id); err != nil {
+		log.Error("secret scanning: clear the stuck note of repository %d: %v", id, err)
+	}
 }
 
 func handler(items ...int64) (unhandled []int64) {
@@ -224,9 +244,9 @@ func EnqueueUnscanned(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, id := range ids {
-		Enqueue(id)
-	}
 	direct := 0
-	return requeueMarked(ctx, func(id int64) { enqueueMarked(ctx, id, &direct) })
+	for _, id := range ids {
+		enqueueRecover(ctx, id, &direct)
+	}
+	return requeueMarked(ctx, func(id int64) { enqueueRecover(ctx, id, &direct) })
 }
