@@ -81,15 +81,21 @@ type Scan struct {
 	// Requeue marks a repository to scan again after a switch turned on (set with the setting, cleared when the scan
 	// takes the row), so that a restart doesn't lose it: the cron task queues marked rows too.
 	Requeue int64 `xorm:"INDEX NOT NULL DEFAULT 0"`
-	// The digest mark (repository row only, see notify.go): a push marked the repository while its scan was complete,
+	// Completed is set once a scan of this git repository has run to its end (no slice left): a push can only be
+	// mailed about for a repository that was scanned before (see notify.go).
+	Completed bool `xorm:"NOT NULL DEFAULT false"`
+	// The digest mark (repository row only, see notify.go): a push marked the repository after its first complete scan,
 	// and the scan that finishes next mails the alerts above NotifyAlertID. Zero NotifyAfterUnix means no mark;
-	// NotifySeq counts every marking push, so a clear that raced a newer push is refused.
+	// NotifySeq counts every marking push, so a clear that raced a newer push is refused. NotifyKinds is a bit set of
+	// the DigestKind* flags and NotifyLastUnix is when a digest was last sent (at most one per DigestMinInterval).
 	NotifyAfterUnix timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"`
 	NotifySeq       int64              `xorm:"NOT NULL DEFAULT 0"`
 	NotifyAlertID   int64              `xorm:"NOT NULL DEFAULT 0"`
 	NotifyPusherID  int64              `xorm:"NOT NULL DEFAULT 0"`
+	NotifyKinds     int                `xorm:"NOT NULL DEFAULT 0"`
 	NotifyRef       string             `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"`
 	NotifyCommit    string             `xorm:"VARCHAR(64) NOT NULL DEFAULT ''"`
+	NotifyLastUnix  timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"`
 	UpdatedUnix     timeutil.TimeStamp `xorm:"INDEX updated"`
 }
 
@@ -424,14 +430,14 @@ func ClearRequeue(ctx context.Context, repoID, seq int64) error {
 	return err
 }
 
-// RequeuedRepoIDsAfter returns up to limit ids above after of the repositories marked by MarkRequeue that are still
-// ready, in no trash and not switched off since.
+// RequeuedRepoIDsAfter returns up to limit ids above after of the repositories marked by MarkRequeue or by a push (a
+// digest mark that waits for a scan) that are still ready, in no trash and not switched off since.
 func RequeuedRepoIDsAfter(ctx context.Context, after int64, limit int) ([]int64, error) {
 	var ids []int64
 	return ids, db.GetEngine(ctx).Table("repository").Select("repository.id").
 		Where(builder.Gt{"repository.id": after}).And(scannedRepoCond(0)).
 		And(builder.Exists(builder.Select("1").From("secret_scan", "marked").Where(builder.And(
 			builder.Expr("marked.repo_id = repository.id"), builder.Eq{"marked.kind": KindRepo},
-			builder.Gt{"marked.requeue": 0})))).
+			builder.Or(builder.Gt{"marked.requeue": 0}, builder.Neq{"marked.notify_after_unix": 0}))))).
 		OrderBy("repository.id").Limit(limit).Find(&ids)
 }

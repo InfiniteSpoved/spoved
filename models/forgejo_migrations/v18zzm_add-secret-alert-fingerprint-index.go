@@ -28,14 +28,17 @@ func (v18zzmSecretScanningAlert) TableName() string {
 // v18zzmSecretScan holds the new columns of the scan state: the requeue mark (a repository to scan again after a switch
 // turned on, which survives a restart until the scan takes it) and the digest mark.
 type v18zzmSecretScan struct {
-	Requeue int64 `xorm:"INDEX NOT NULL DEFAULT 0"`
+	Requeue   int64 `xorm:"INDEX NOT NULL DEFAULT 0"`
+	Completed bool  `xorm:"NOT NULL DEFAULT false"`
 	// the digest mark: set by a push, cleared by the scan that mails it
 	NotifyAfterUnix int64  `xorm:"NOT NULL DEFAULT 0"`
 	NotifySeq       int64  `xorm:"NOT NULL DEFAULT 0"`
 	NotifyAlertID   int64  `xorm:"NOT NULL DEFAULT 0"`
 	NotifyPusherID  int64  `xorm:"NOT NULL DEFAULT 0"`
+	NotifyKinds     int    `xorm:"NOT NULL DEFAULT 0"`
 	NotifyRef       string `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"`
 	NotifyCommit    string `xorm:"VARCHAR(64) NOT NULL DEFAULT ''"`
+	NotifyLastUnix  int64  `xorm:"NOT NULL DEFAULT 0"`
 }
 
 func (v18zzmSecretScan) TableName() string {
