@@ -3978,6 +3978,7 @@
 	"admin.audit.action.admin.secret_pattern.deleted": "Deleted the custom secret pattern %s of the site",
 	"secret_search.deleted_pattern": "Deleted pattern",
 	"secret_search.pattern_disabled": "disabled",
+	"secret_search.foreign_pattern": "Pattern of a previous owner",
 	"admin.audit.action.org.secret_alerts.exported": "Exported the secret alerts of organization %s",
 	"admin.audit.action.admin.secret_alerts.exported": "Exported the secret alerts of every owner"
 }

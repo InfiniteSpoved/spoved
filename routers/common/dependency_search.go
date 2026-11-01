@@ -353,7 +353,7 @@ func ExportSecretAlerts(ctx *context.Base, doer *user_model.User, scope secretsc
 					}
 					out[i] = exportRow{cells: []string{
 						state, reason, closedBy, closedAt, h.Comment, h.CreatedUnix.AsTime().UTC().Format(time.RFC3339),
-						h.Repo.FullName(), h.Name, location, absoluteURL(h.Alert, h.Repo),
+						h.Repo.FullName(), h.Text(ctx.Locale), location, absoluteURL(h.Alert, h.Repo),
 					}}
 				}
 				return emit(out)

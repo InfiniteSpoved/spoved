@@ -16,7 +16,6 @@ import (
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
-	"forgejo.org/modules/secretdetection"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
@@ -81,14 +80,6 @@ type secretAlertRow struct {
 	ClosedBy *user_model.User
 }
 
-func secretRules() map[string]secretdetection.Rule {
-	rules := map[string]secretdetection.Rule{}
-	for _, r := range secretdetection.BuiltinRules() {
-		rules[r.ID] = r
-	}
-	return rules
-}
-
 func buildSecretRows(ctx *context.Context, alerts []*secretscan_model.Alert, canReadWiki bool) ([]*secretAlertRow, error) {
 	var ids, userIDs []int64
 	for _, a := range alerts {
@@ -113,20 +104,14 @@ func buildSecretRows(ctx *context.Context, alerts []*secretscan_model.Alert, can
 	for i, a := range alerts {
 		ruleIDs[i] = a.RuleID
 	}
-	labels, err := secretscan_service.RuleLabels(ctx, ruleIDs, nil) // the name of a deleted pattern is for its owners' lists
+	labels, err := secretscan_model.LoadRuleLabels(ctx, ruleIDs)
 	if err != nil {
 		return nil, err
 	}
 	rows := make([]*secretAlertRow, 0, len(alerts))
 	for _, a := range alerts {
-		l := labels[a.RuleID]
-		r := &secretAlertRow{Alert: a, Name: l.Name, Generic: l.Generic, First: first[a.ID], More: max(counts[a.ID]-1, 0)}
-		switch {
-		case l.Deleted:
-			r.Name = ctx.Locale.TrString("secret_search.deleted_pattern")
-		case l.Disabled:
-			r.Name += " (" + ctx.Locale.TrString("secret_search.pattern_disabled") + ")"
-		}
+		l := labels.Label(a.RuleID, ctx.Repo.Repository.OwnerID, nil) // the name of a deleted pattern is for its owners' lists
+		r := &secretAlertRow{Alert: a, Name: l.Text(ctx.Locale), Generic: l.Generic, First: first[a.ID], More: max(counts[a.ID]-1, 0)}
 		if a.ClosedByID != 0 {
 			_, r.ClosedBy = user_model.GetUserFromMap(a.ClosedByID, users)
 		}
@@ -208,15 +193,15 @@ func SecretAlerts(ctx *context.Context) {
 		ctx.ServerError("secretOffNotes", err)
 		return
 	}
-	rules := secretRules()
+	labels, err := secretscan_model.LoadRuleLabels(ctx, ruleIDs)
+	if err != nil {
+		ctx.ServerError("LoadRuleLabels", err)
+		return
+	}
 	type ruleOption struct{ ID, Name string }
 	var types []ruleOption
 	for _, id := range ruleIDs {
-		name := id
-		if r, ok := rules[id]; ok {
-			name = r.Name
-		}
-		types = append(types, ruleOption{id, name})
+		types = append(types, ruleOption{id, labels.Label(id, repo.OwnerID, nil).Text(ctx.Locale)})
 	}
 	typ, reason, sort := strings.Join(opts.SecretTypes, ""), strings.Join(opts.Resolutions, ""), util.Iif(opts.Ascending, "oldest", "")
 	ctx.Data["Alerts"], ctx.Data["Total"] = rows, total

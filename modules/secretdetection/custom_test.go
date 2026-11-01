@@ -4,9 +4,13 @@
 package secretdetection
 
 import (
+	"errors"
+	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,7 +36,51 @@ func TestValidateStoredRule(t *testing.T) {
 		{"r", pattern, []string{strings.Repeat("k", MaxCustomKeywordLen+1)}, ErrKeywordMissing},
 		{"r", pattern, []string{"aaa", "bbb", "ccc", "ddd", "eee", "fff"}, ErrKeywordMissing},
 		{"r", `[a-z]{8,12}`, kw, ErrPatternMatchesTooMuch},
+		{"r", pattern, []string{"acme-key", "the"}, ErrKeywordTooCommon},
+		{"r", pattern, []string{"HTTPS"}, ErrKeywordTooCommon},
 	} {
-		require.ErrorIs(t, ValidateStoredRule(c.name, c.pattern, c.keywords), c.want, "%q %q", c.name, c.pattern)
+		err := ValidateStoredRule(c.name, c.pattern, c.keywords)
+		require.ErrorIs(t, err, c.want, "%q %q", c.name, c.pattern)
+		assert.NotEqual(t, "other", RefusalCode(err), "every refusal has a code")
 	}
+	assert.Equal(t, "invalid", RefusalCode(fmt.Errorf("%w: quoted text", ErrPatternInvalid)))
+	assert.Equal(t, "other", RefusalCode(errors.New("x")))
+}
+
+// A pattern or name that holds a literal secret would be stored and audited as it is.
+func TestCustomRuleHoldingASecretIsRefused(t *testing.T) {
+	leaked := "ghp_" + fake(36, alnum)
+	pattern := `acme-key-[a-z0-9]{20}`
+	test := "K=acme-" + "key-" + strings.Repeat("a1", 10)
+	require.NoError(t, ValidateCustomRule("rule", pattern, test, []string{"acme-key"}))
+	require.ErrorIs(t, ValidateCustomRule("rule", pattern+"|"+regexp.QuoteMeta(leaked), test, []string{"acme-key"}), ErrPatternHoldsSecret)
+	require.ErrorIs(t, ValidateCustomRule("leak "+leaked, pattern, test, []string{"acme-key"}), ErrPatternHoldsSecret)
+}
+
+// The custom rules have a budget of their own: however much work they need, a built-in rule gets its whole budget.
+func TestCustomRulesNeverStarveBuiltins(t *testing.T) {
+	builtin, ok := RuleByID("github-token")
+	require.True(t, ok)
+	secret := "ghp_" + fake(36, alnum)
+	// placeholder tokens make the built-in rule work (one regex call each); the custom rules' keyword is everywhere
+	content := append(repeatTo("acme_ ghp_"+strings.Repeat("x", 36)+" zz\n", 512<<10), []byte(" "+secret+"\n")...)
+	alone, err := NewDetector([]Rule{builtin})
+	require.NoError(t, err)
+	found := func(d *Detector) bool { fs, _ := d.Scan(content); return len(fs) == 1 }
+	work := 1 << 10 // the least budget (by powers of 2) with which the built-in rule alone reaches the secret
+	for alone.MaxWork = work; !found(alone); alone.MaxWork = work {
+		work *= 2
+	}
+	require.Greater(t, work, 1<<12, "the decoys cost the built-in rule work")
+	rules := []Rule{builtin}
+	for i := range MaxCustomRules {
+		rules = append(rules, CustomRule(fmt.Sprintf("c%d", i), "n", `acme_[^@]{0,60}@`, []string{"acme_"}))
+	}
+	mixed, err := NewDetector(rules)
+	require.NoError(t, err)
+	mixed.MaxWork = work
+	fs, complete := mixed.Scan(content)
+	assert.False(t, complete, "the custom rules ran out of their budget")
+	require.Len(t, fs, 1)
+	assert.Equal(t, "github-token", fs[0].RuleID)
 }

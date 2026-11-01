@@ -345,7 +345,7 @@ func later(t *testing.T, d time.Duration) {
 // openAlerts counts the open alerts of the repository.
 func openAlerts(t *testing.T, repoID int64) (total, viaPull int64) {
 	t.Helper()
-	total, viaPull, err := secretscan_model.CountOpenAlerts(t.Context(), repoID)
+	total, viaPull, _, err := secretscan_model.CountOpenAlerts(t.Context(), repoID)
 	require.NoError(t, err)
 	return total, viaPull
 }

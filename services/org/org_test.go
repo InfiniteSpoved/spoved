@@ -10,6 +10,7 @@ import (
 	"forgejo.org/models/actions"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
+	secretscan_model "forgejo.org/models/secretscan"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/optional"
@@ -27,8 +28,13 @@ func TestDeleteOrganization(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 
 	org := unittest.AssertExistsAndLoadBean(t, &organization.Organization{ID: 6})
+	for _, owner := range []int64{0, 6} {
+		require.NoError(t, db.Insert(db.DefaultContext, &secretscan_model.CustomPattern{OwnerID: owner, Name: "p", Pattern: "x", Keywords: "[]", DeletedUnix: 1}))
+	}
 	require.NoError(t, DeleteOrganization(db.DefaultContext, org, false))
 	unittest.AssertNotExistsBean(t, &organization.Organization{ID: 6})
+	unittest.AssertNotExistsBean(t, &secretscan_model.CustomPattern{OwnerID: 6})
+	unittest.AssertExistsAndLoadBean(t, &secretscan_model.CustomPattern{Name: "p", OwnerID: 0}) // the site's stay
 	unittest.AssertNotExistsBean(t, &organization.OrgUser{OrgID: 6})
 	unittest.AssertNotExistsBean(t, &organization.Team{OrgID: 6})
 	unittest.AssertNotExistsBean(t, &actions.ActionRunnerToken{OwnerID: optional.Some[int64](6)})

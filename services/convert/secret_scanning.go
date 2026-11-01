@@ -4,7 +4,6 @@
 package convert
 
 import (
-	"cmp"
 	"context"
 	"strconv"
 	"time"
@@ -12,8 +11,8 @@ import (
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
 	user_model "forgejo.org/models/user"
-	"forgejo.org/modules/secretdetection"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/translation"
 	"forgejo.org/modules/util"
 )
 
@@ -36,31 +35,20 @@ func ToSecretScanningAlerts(ctx context.Context, doer *user_model.User, repo *re
 	if err != nil {
 		return nil, err
 	}
-	names := map[string]string{}
-	for _, r := range secretdetection.BuiltinRules() {
-		names[r.ID] = r.Name
+	ruleIDs := make([]string, len(alerts))
+	for i, a := range alerts {
+		ruleIDs[i] = a.RuleID
 	}
-	var customIDs []int64
-	for _, a := range alerts {
-		if id, ok := secretscan_model.ParseCustomRuleID(a.RuleID); ok {
-			customIDs = append(customIDs, id)
-		}
-	}
-	patterns, err := secretscan_model.GetCustomPatternsByIDs(ctx, customIDs) // one query; a deleted pattern's name stays out
+	labels, err := secretscan_model.LoadRuleLabels(ctx, ruleIDs) // one query; a deleted pattern's name stays out
 	if err != nil {
 		return nil, err
 	}
-	for _, id := range customIDs {
-		names[secretscan_model.CustomRuleID(id)] = "Deleted pattern"
-		if p := patterns[id]; p != nil && p.DeletedUnix == 0 {
-			names[p.RuleID()] = p.Name
-		}
-	}
+	locale := translation.NewLocale("en-US") // the API's names are English
 	out := make([]*api.SecretScanningAlert, 0, len(alerts))
 	for _, a := range alerts {
 		index := strconv.FormatInt(a.Index, 10)
 		res := &api.SecretScanningAlert{
-			Number: a.Index, State: secretscan_model.StateOpen, SecretType: a.RuleID, SecretTypeDisplayName: cmp.Or(names[a.RuleID], a.RuleID),
+			Number: a.Index, State: secretscan_model.StateOpen, SecretType: a.RuleID, SecretTypeDisplayName: labels.Label(a.RuleID, repo.OwnerID, nil).Text(locale),
 			Fingerprint: a.Fingerprint, ViaPull: a.ViaPull, LocationsCount: counts[a.ID],
 			URL:       repo.APIURL() + "/secret-scanning/alerts/" + index,
 			CreatedAt: time.Unix(int64(a.CreatedUnix), 0).UTC(), UpdatedAt: time.Unix(int64(a.UpdatedUnix), 0).UTC(),

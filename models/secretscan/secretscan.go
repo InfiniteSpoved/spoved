@@ -262,24 +262,32 @@ func GetAlertsByFingerprints(ctx context.Context, repoID int64, fingerprints []s
 	return alerts, db.GetEngine(ctx).Where("repo_id = ?", repoID).In("fingerprint", fingerprints).Find(&alerts)
 }
 
-// CountOpenAlerts counts the open alerts of a repository, in one query: all of them, and those that only
-// refs/pull/* reach. Closed alerts don't count towards the caps.
-func CountOpenAlerts(ctx context.Context, repoID int64) (total, viaPull int64, err error) {
+// CountOpenAlerts counts the open alerts of a repository, in one query: those of built-in rules, and of them those
+// that only refs/pull/* reach, and those of custom patterns, which have a cap of their own. Closed alerts don't
+// count towards the caps.
+func CountOpenAlerts(ctx context.Context, repoID int64) (total, viaPull, custom int64, err error) {
+	const isCustom = "CASE WHEN secret_type = 'custom' THEN 1 ELSE 0 END"
 	var rows []struct {
 		ViaPull bool  `xorm:"via_pull"`
+		Custom  int   `xorm:"custom"`
 		N       int64 `xorm:"n"`
 	}
-	if err := db.GetEngine(ctx).Table("secret_scanning_alert").Select("via_pull, COUNT(*) AS n").
-		Where("repo_id = ? AND state = ?", repoID, StateOpen).GroupBy("via_pull").Find(&rows); err != nil {
-		return 0, 0, err
+	if err := db.GetEngine(ctx).Table("secret_scanning_alert").Select("via_pull, "+isCustom+" AS custom, COUNT(*) AS n").
+		Where("repo_id = ? AND state = ?", repoID, StateOpen).GroupBy("via_pull, " + isCustom).Find(&rows); err != nil {
+		return 0, 0, 0, err
 	}
 	for _, r := range rows {
-		total += r.N
-		if r.ViaPull {
+		switch {
+		case r.Custom == 1:
+			custom += r.N
+		case r.ViaPull:
+			total += r.N
 			viaPull += r.N
+		default:
+			total += r.N
 		}
 	}
-	return total, viaPull, nil
+	return total, viaPull, custom, nil
 }
 
 // ClearViaPull marks alerts as reached by something other than refs/pull/*.

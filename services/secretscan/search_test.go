@@ -26,6 +26,7 @@ func TestParseFilter(t *testing.T) {
 		{"bogus", "", "", Filter{State: "open"}, []string{"state"}},
 		{"closed", "bogus", "", Filter{State: "closed"}, []string{"reason"}},
 		{"", "", "no-such-rule", Filter{State: "open"}, []string{"type"}},
+		{"", "", "custom-7", Filter{State: "open", Type: "custom-7"}, nil}, // a custom pattern
 		{"", "", strings.Repeat("a", 65), Filter{State: "open"}, []string{"type"}},
 		{"bogus", "bogus", "bogus", Filter{State: "open"}, []string{"state", "reason", "type"}},
 	} {

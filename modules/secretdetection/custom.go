@@ -51,7 +51,33 @@ var (
 	ErrPatternNoMatchInTest  = errors.New("pattern finds nothing in the test string")
 	ErrSecretTooShort        = errors.New("the secret found in the test string is too short")
 	ErrPatternMatchesTooMuch = errors.New("pattern matches ordinary text too often")
+	ErrKeywordTooCommon      = errors.New("a keyword is too common in ordinary text")
+	ErrPatternHoldsSecret    = errors.New("the name or the pattern holds a secret")
 )
+
+// RefusalCode is a short code of why a rule was refused, for logs: never the
+// error text, which may quote the pattern.
+func RefusalCode(err error) string {
+	for _, c := range []struct {
+		err  error
+		code string
+	}{
+		{ErrCustomNameInvalid, "name"},
+		{ErrPatternTooLong, "too_long"},
+		{ErrPatternInvalid, "invalid"},
+		{ErrPatternTooComplex, "too_complex"},
+		{ErrPatternMatchesEmpty, "matches_empty"},
+		{ErrKeywordMissing, "keywords"},
+		{ErrKeywordTooCommon, "keyword_common"},
+		{ErrPatternMatchesTooMuch, "matches_too_much"},
+		{ErrPatternHoldsSecret, "holds_secret"},
+	} {
+		if errors.Is(err, c.err) {
+			return c.code
+		}
+	}
+	return "other"
+}
 
 // ValidateCustomRule checks a user-written rule and returns why it is refused.
 // The cost of a pattern is bounded by its shape, not measured: RE2 is linear,
@@ -66,27 +92,18 @@ var (
 // custom rule from costing CPU on whole files. The secret found in testString
 // (capture group 1 if the pattern has one, else the whole match) must be at
 // least 8 bytes. The pattern may match the fixed 64 KiB corpus of ordinary
-// text at most MaxCorpusMatches times. Build the rule with CustomRule.
+// text at most MaxCorpusMatches times, and so may each keyword. Neither the
+// name nor the pattern may hold what a built-in rule finds. The checks that
+// need no test string are ValidateStoredRule's. Build the rule with
+// CustomRule.
 func ValidateCustomRule(name, pattern, testString string, keywords []string) error {
-	if name == "" || len(name) > MaxCustomNameLen {
-		return ErrCustomNameInvalid
-	}
 	if len(testString) > MaxCustomTestStringLen {
 		return ErrTestStringTooLong
 	}
-	if len(pattern) > MaxCustomPatternLen {
-		return ErrPatternTooLong
-	}
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrPatternInvalid, err)
-	}
-	if err := checkComplexity(pattern); err != nil {
+	if err := ValidateStoredRule(name, pattern, keywords); err != nil {
 		return err
 	}
-	if re.MatchString("") {
-		return ErrPatternMatchesEmpty
-	}
+	re := regexp.MustCompile(pattern) // ValidateStoredRule compiled it
 	rule := CustomRule("custom", name, pattern, keywords)
 	m := re.FindStringSubmatchIndex(testString)
 	if m == nil {
@@ -105,15 +122,33 @@ func ValidateCustomRule(name, pattern, testString string, keywords []string) err
 	if fs, _ := d.Scan([]byte(testString)); len(fs) == 0 {
 		return ErrPatternNoMatchInTest
 	}
-	if len(re.FindAllIndex(corpus(), MaxCorpusMatches+1)) > MaxCorpusMatches {
-		return ErrPatternMatchesTooMuch
+	// the name and the pattern are stored and recorded in the audit log as they are: a literal secret written to
+	// catch one known leak would land there
+	if fs, _ := builtinDetector().Scan([]byte(name + "\n" + pattern)); len(fs) > 0 {
+		return ErrPatternHoldsSecret
 	}
 	return nil
 }
 
-// ValidateStoredRule is ValidateCustomRule for a rule that is already stored, where no test string is at hand: the
-// same checks of the pattern, its shape and the corpus, and of the keywords' number and size. A rule that a later
-// version of the engine refuses fails here, and the caller skips it.
+// builtinDetector runs the built-in rules that are on by default.
+var builtinDetector = sync.OnceValue(func() *Detector {
+	var rules []Rule
+	for _, r := range BuiltinRules() {
+		if !r.DefaultOff {
+			rules = append(rules, r)
+		}
+	}
+	d, err := NewDetector(rules)
+	if err != nil {
+		panic(err) // the built-in rules compile: tested
+	}
+	return d
+})
+
+// ValidateStoredRule is the half of ValidateCustomRule that needs no test string, run again on a rule that is already
+// stored: the pattern, its shape and the corpus, and the keywords' number and size, each keyword at most
+// MaxCorpusMatches times in the (lowercased) corpus. A rule that a later version of the engine refuses fails here,
+// and the caller skips it.
 func ValidateStoredRule(name, pattern string, keywords []string) error {
 	if name == "" || len(name) > MaxCustomNameLen {
 		return ErrCustomNameInvalid
@@ -137,6 +172,11 @@ func ValidateStoredRule(name, pattern string, keywords []string) error {
 	for _, k := range keywords {
 		if len(k) < MinCustomKeywordLen || len(k) > MaxCustomKeywordLen {
 			return ErrKeywordMissing
+		}
+		// The rule runs in windows around its keywords: a keyword found all over ordinary files (the, for, https,
+		// return, config) would make it run on whole files.
+		if strings.Count(lowerCorpus(), strings.ToLower(k)) > MaxCorpusMatches {
+			return ErrKeywordTooCommon
 		}
 	}
 	if len(re.FindAllIndex(corpus(), MaxCorpusMatches+1)) > MaxCorpusMatches {
@@ -284,6 +324,9 @@ func unbounded(r *syntax.Regexp) bool {
 // braces, JSON, URLs, git hashes, UUIDs, lock file integrity lines, base64,
 // and non-ASCII text. A simple generator makes it, so it is the same
 // everywhere and holds no literal that looks like a secret.
+// lowerCorpus is the corpus in lower case, as keywords are matched.
+var lowerCorpus = sync.OnceValue(func() string { return strings.ToLower(string(corpus())) })
+
 var corpus = sync.OnceValue(func() []byte {
 	words := strings.Fields(`the of and to in is that for it as was with be by on not this are or from at which but have an had they you were their one all we can her has there been if more when will would who so no
 config server value name list item index result error file path user group time data build test version release branch commit merge request issue comment label state open closed

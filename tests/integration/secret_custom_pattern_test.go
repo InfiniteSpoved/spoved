@@ -4,6 +4,7 @@
 package integration
 
 import (
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	user_model "forgejo.org/models/user"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
+	repo_service "forgejo.org/services/repository"
 	secretscan_service "forgejo.org/services/secretscan"
 	"forgejo.org/tests"
 
@@ -36,16 +38,17 @@ func TestSecretAlertsOfCustomPatterns(t *testing.T) {
 			Name: name, Pattern: `acme-key-[a-z0-9]{20}`, Keywords: []string{"acme-key"}, Sample: "K=acme-" + "key-" + strings.Repeat("a1", 10),
 		}
 	}
-	create := func(owner *user_model.User, name string) *secretscan_model.CustomPattern {
+	create := func(owner secretscan_service.PatternOwner, name string) *secretscan_model.CustomPattern {
 		p, err := secretscan_service.CreatePattern(sys, admin, owner, input(name))
 		require.NoError(t, err)
 		return p
 	}
-	live, off := create(org, "org live"), create(nil, "site off")
-	orgGone, siteGone := create(org, "org gone"), create(nil, "site gone")
-	require.NoError(t, secretscan_service.SetPatternEnabled(sys, nil, off.ID, false))
-	require.NoError(t, secretscan_service.DeletePattern(sys, org, orgGone.ID))
-	require.NoError(t, secretscan_service.DeletePattern(sys, nil, siteGone.ID))
+	orgOwner, site := secretscan_service.OrgPatterns(org), secretscan_service.SitePatterns
+	live, off := create(orgOwner, "org live"), create(site, "site off")
+	orgGone, siteGone := create(orgOwner, "org gone"), create(site, "site gone")
+	require.NoError(t, secretscan_service.SetPatternEnabled(sys, secretscan_service.SitePatterns, off.ID, false))
+	require.NoError(t, secretscan_service.DeletePattern(sys, secretscan_service.OrgPatterns(org), orgGone.ID))
+	require.NoError(t, secretscan_service.DeletePattern(sys, secretscan_service.SitePatterns, siteGone.ID))
 	for i, p := range []*secretscan_model.CustomPattern{live, off, orgGone, siteGone} {
 		seedSecretAlert(t, f.root, p.RuleID(), "custom", secretscan_model.KindRepo, "custom/"+string(rune('a'+i))+".env")
 	}
@@ -103,16 +106,65 @@ func TestSecretAlertsOfCustomPatterns(t *testing.T) {
 			names[a.SecretType] = a.SecretTypeDisplayName
 		}
 		assert.Equal(t, "org live", names[live.RuleID()])
-		assert.Equal(t, "site off", names[off.RuleID()])
+		assert.Equal(t, "site off (disabled)", names[off.RuleID()])
 		assert.Equal(t, "Deleted pattern", names[orgGone.RuleID()])
 		assert.Equal(t, "Deleted pattern", names[siteGone.RuleID()])
 		assert.Equal(t, "Deleted pattern", names["custom-99999"])
 	})
 	t.Run("the CSV names them the same way", func(t *testing.T) {
-		resp := slPost(t, loginUser(t, "user4"), slOrg, map[string]string{"q": "sl-root"}, http.StatusOK)
-		assert.Contains(t, resp.Body.String(), "org live")
-		assert.NotContains(t, resp.Body.String(), "org gone")
-		assert.NotContains(t, resp.Body.String(), "site gone")
+		types := func(s *TestSession, path string) map[string]string {
+			out := map[string]string{} // location → type
+			for _, r := range slCSV(t, slPost(t, s, path, map[string]string{"q": "sl-root"}, http.StatusOK)) {
+				if strings.HasPrefix(r[8], "custom/") {
+					out[r[8]] = r[7]
+				}
+			}
+			return out
+		}
+		member := map[string]string{
+			"custom/a.env:3": "org live", "custom/b.env:3": "site off (disabled)", "custom/c.env:3": "Deleted pattern",
+			"custom/d.env:3": "Deleted pattern", "custom/z.env:3": "Deleted pattern",
+		}
+		assert.Equal(t, member, types(loginUser(t, "user4"), slOrg))
+		owner := maps.Clone(member)
+		owner["custom/c.env:3"] = "Deleted pattern (org gone)"
+		assert.Equal(t, owner, types(loginUser(t, "user2"), slOrg))
+		instance := maps.Clone(member)
+		instance["custom/d.env:3"] = "Deleted pattern (site gone)"
+		assert.Equal(t, instance, types(loginUser(t, "user1"), slAdmin))
+	})
+	t.Run("after a transfer the organization's pattern has no name", func(t *testing.T) {
+		moved := depNewRepo(t, org, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), "sl-moved", true, 0)
+		seedSecretAlert(t, moved, live.RuleID(), "custom", secretscan_model.KindRepo, "moved/org.env")
+		seedSecretAlert(t, moved, off.RuleID(), "custom", secretscan_model.KindRepo, "moved/site.env")
+		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+		require.NoError(t, repo_service.TransferOwnership(sys, admin, user2, moved, nil))
+
+		body := secGet(t, loginUser(t, "user2"), "/user2/sl-moved/security/secrets", http.StatusOK).Body.String()
+		assert.Contains(t, body, "Pattern of a previous owner")
+		assert.Contains(t, body, "site off (disabled)", "a site pattern keeps its name")
+		assert.NotContains(t, body, "org live")
+
+		token := getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository)
+		var list []*api.SecretScanningAlert
+		DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/sl-moved/secret-scanning/alerts").AddTokenAuth(token), http.StatusOK), &list)
+		names := map[string]string{}
+		for _, a := range list {
+			names[a.SecretType] = a.SecretTypeDisplayName
+		}
+		assert.Equal(t, map[string]string{live.RuleID(): "Pattern of a previous owner", off.RuleID(): "site off (disabled)"}, names)
+
+		admin := loginUser(t, "user1")
+		rows := secretListRows(t, secGet(t, admin, slAdmin+"?q=sl-moved", http.StatusOK))
+		assert.Equal(t, []string{
+			"user2/sl-moved | site off (disabled) | moved/site.env:3 | Open",
+			"user2/sl-moved | Pattern of a previous owner | moved/org.env:3 | Open",
+		}, rows)
+		var cells []string
+		for _, r := range slCSV(t, slPost(t, admin, slAdmin, map[string]string{"q": "sl-moved"}, http.StatusOK)) {
+			cells = append(cells, r[7])
+		}
+		assert.Equal(t, []string{"site off (disabled)", "Pattern of a previous owner"}, cells)
 	})
 }
 
@@ -124,7 +176,7 @@ func TestSecretAlertListsQueryCountCustom(t *testing.T) {
 	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
 	org := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
 	n := 0
-	add := func(owner *user_model.User, deleted bool) {
+	add := func(owner secretscan_service.PatternOwner, deleted bool) {
 		n++
 		p, err := secretscan_service.CreatePattern(sys, admin, owner, secretscan_service.PatternInput{
 			Name: "p" + string(rune('a'+n)), Pattern: `acme-key-[a-z0-9]{20}`, Keywords: []string{"acme-key"}, Sample: "K=acme-" + "key-" + strings.Repeat("a1", 10),
@@ -135,7 +187,7 @@ func TestSecretAlertListsQueryCountCustom(t *testing.T) {
 			require.NoError(t, secretscan_service.DeletePattern(sys, owner, p.ID))
 		}
 	}
-	add(org, false)
+	add(secretscan_service.OrgPatterns(org), false)
 	cases := map[string]struct {
 		s    *TestSession
 		path string
@@ -161,7 +213,7 @@ func TestSecretAlertListsQueryCountCustom(t *testing.T) {
 	}
 	few := count()
 	for i := range 12 {
-		add(util.Iif(i%2 == 0, org, nil), i%3 == 0)
+		add(util.Iif(i%2 == 0, secretscan_service.OrgPatterns(org), secretscan_service.SitePatterns), i%3 == 0)
 	}
 	assert.Equal(t, few, count())
 }

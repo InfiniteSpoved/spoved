@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 
-	"forgejo.org/models/db"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
@@ -21,7 +20,6 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/log"
-	"forgejo.org/modules/secretdetection"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/translation"
 	"forgejo.org/modules/util"
@@ -101,11 +99,8 @@ func SendSecretDigest(ctx context.Context, repo *repo_model.Repository, in Secre
 	if err != nil {
 		log.Error("newEmailFilter: %v", err) // fall back to the preset and defaults
 	}
-	names := map[string]string{} // rule names, once per digest
-	for _, r := range secretdetection.BuiltinRules() {
-		names[r.ID] = r.Name
-	}
-	digests := map[string]*secretscan_model.Digest{} // by kinds
+	labels := map[string]secretscan_model.RuleLabel{} // of the rules of the digests, read once per digest
+	digests := map[string]*secretscan_model.Digest{}  // by kinds
 	digestFor := func(kinds []string) (*secretscan_model.Digest, error) {
 		key := strings.Join(kinds, ",")
 		if d, ok := digests[key]; ok {
@@ -113,7 +108,23 @@ func SendSecretDigest(ctx context.Context, repo *repo_model.Repository, in Secre
 		}
 		d, err := secretscan_model.BuildDigest(ctx, repo.ID, in.AfterAlertID, in.UpToAlertID, kinds)
 		digests[key] = d
-		return d, err
+		if err != nil {
+			return d, err
+		}
+		var ruleIDs []string
+		for _, t := range d.Types {
+			if _, ok := labels[t.RuleID]; !ok {
+				ruleIDs = append(ruleIDs, t.RuleID)
+			}
+		}
+		rl, err := secretscan_model.LoadRuleLabels(ctx, ruleIDs)
+		if err != nil {
+			return d, err
+		}
+		for _, id := range ruleIDs {
+			labels[id] = rl.Label(id, repo.OwnerID, nil) // a deleted pattern's name is for its owners' lists
+		}
+		return d, nil
 	}
 	// who gets a mail: permission and opt-out first, then the cap
 	type recipient struct {
@@ -156,7 +167,7 @@ func SendSecretDigest(ctx context.Context, repo *repo_model.Repository, in Secre
 	}
 	adminsNotified := false
 	for _, r := range recipients { // the administrators first: the pusher's mail says whether they were told
-		if err := sendSecretDigestMail(repo, r.user, r.digest, in, names, false, r.wikiRead, false); err != nil {
+		if err := sendSecretDigestMail(repo, r.user, r.digest, in, labels, false, r.wikiRead, false); err != nil {
 			log.Error("secret digest to %d: %v", r.user.ID, err)
 			continue
 		}
@@ -169,13 +180,13 @@ func SendSecretDigest(ctx context.Context, repo *repo_model.Repository, in Secre
 	if err != nil || !ok {
 		return err
 	}
-	if err := sendSecretDigestMail(repo, pusher, r.digest, in, names, true, r.wikiRead, adminsNotified); err != nil {
+	if err := sendSecretDigestMail(repo, pusher, r.digest, in, labels, true, r.wikiRead, adminsNotified); err != nil {
 		log.Error("secret digest to %d: %v", pusher.ID, err)
 	}
 	return nil
 }
 
-func sendSecretDigestMail(repo *repo_model.Repository, u *user_model.User, d *secretscan_model.Digest, in SecretDigestInput, names map[string]string, isPusher, wikiRead, adminsNotified bool) error {
+func sendSecretDigestMail(repo *repo_model.Repository, u *user_model.User, d *secretscan_model.Digest, in SecretDigestInput, labels map[string]secretscan_model.RuleLabel, isPusher, wikiRead, adminsNotified bool) error {
 	locale := translation.NewLocale(u.Language)
 	name := repo.FullName()
 	// the push as the mail names it: the branch as code, the commit linked (the arguments are HTML, built escaped); a
@@ -202,28 +213,9 @@ func sendSecretDigestMail(repo *repo_model.Repository, u *user_model.User, d *se
 		Name  string
 		Count int
 	}
-	var customIDs []int64
-	for _, t := range d.Types {
-		if id, ok := secretscan_model.ParseCustomRuleID(t.RuleID); ok {
-			customIDs = append(customIDs, id)
-		}
-	}
-	patterns, err := secretscan_model.GetCustomPatternsByIDs(db.DefaultContext, customIDs)
-	if err != nil {
-		return err
-	}
 	types := make([]typeRow, len(d.Types))
 	for i, t := range d.Types {
-		types[i] = typeRow{Name: names[t.RuleID], Count: t.Count}
-		if id, ok := secretscan_model.ParseCustomRuleID(t.RuleID); ok {
-			types[i].Name = locale.TrString("secret_search.deleted_pattern")
-			if p := patterns[id]; p != nil && p.DeletedUnix == 0 {
-				types[i].Name = p.Name
-			}
-		}
-		if types[i].Name == "" {
-			types[i].Name = t.RuleID
-		}
+		types[i] = typeRow{Name: labels[t.RuleID].Text(locale), Count: t.Count}
 	}
 	places := make([]string, len(d.Locations))
 	for i, l := range d.Locations {

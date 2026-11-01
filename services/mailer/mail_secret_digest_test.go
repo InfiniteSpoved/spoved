@@ -214,7 +214,8 @@ func TestSendSecretDigest(t *testing.T) {
 	})
 }
 
-// The digest names the alerts of a custom pattern by the pattern and a deleted one generically.
+// The digest names the alerts of a custom pattern by the one label rule: the pattern, a deleted one and one of
+// another owner generically.
 func TestSendSecretDigestCustomPattern(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
 	ctx := t.Context()
@@ -225,9 +226,15 @@ func TestSendSecretDigestCustomPattern(t *testing.T) {
 
 	live := &secretscan_model.CustomPattern{OwnerID: 0, Name: "Acme internal key", Pattern: "x", Keywords: "[]", Enabled: true}
 	gone := &secretscan_model.CustomPattern{OwnerID: 0, Name: "Retired key", Pattern: "x", Keywords: "[]", Enabled: true, DeletedUnix: 5}
-	require.NoError(t, db.Insert(ctx, live))
-	require.NoError(t, db.Insert(ctx, gone))
-	for i, p := range []*secretscan_model.CustomPattern{live, gone} {
+	off := &secretscan_model.CustomPattern{OwnerID: 0, Name: "Paused key", Pattern: "x", Keywords: "[]"}
+	foreign := &secretscan_model.CustomPattern{OwnerID: 3, Name: "Org three key", Pattern: "x", Keywords: "[]", Enabled: true} // repo 1 is user2's
+	all := []*secretscan_model.CustomPattern{live, gone, off, foreign}
+	for _, p := range all {
+		require.NoError(t, db.Insert(ctx, p))
+	}
+	_, err = db.GetEngine(ctx).Exec("UPDATE secret_custom_pattern SET enabled = ? WHERE id = ?", false, off.ID)
+	require.NoError(t, err)
+	for i, p := range all {
 		a := &secretscan_model.Alert{RepoID: 1, Index: int64(i + 1), RuleID: p.RuleID(), Fingerprint: fmt.Sprintf("%064d", i+1), LocationCount: 1}
 		require.NoError(t, db.Insert(ctx, a))
 		l := secretscan_model.NewLocation(1, secretscan_model.KindRepo, fmt.Sprintf("blob-%d", i), "a.env", 1, 1, "c", "n", "e", 0)
@@ -241,6 +248,9 @@ func TestSendSecretDigestCustomPattern(t *testing.T) {
 	body := messages[0].Body
 	assert.Contains(t, body, "Acme internal key")
 	assert.Contains(t, body, "Deleted pattern")
+	assert.Contains(t, body, "Paused key (disabled)")
+	assert.Contains(t, body, "Pattern of a previous owner")
 	assert.NotContains(t, body, "Retired key")
+	assert.NotContains(t, body, "Org three key")
 	assert.NotContains(t, body, "custom-")
 }

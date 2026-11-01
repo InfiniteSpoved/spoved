@@ -31,7 +31,6 @@ func TestCustomPatternQueries(t *testing.T) {
 	ctx := t.Context()
 	add := func(owner int64, name string, enabled bool, deleted int64) *CustomPattern {
 		p := &CustomPattern{OwnerID: owner, Name: name, Pattern: "x", Keywords: EncodeKeywords([]string{"abc", "def"}), Enabled: enabled}
-		p.DeletedUnix = 0
 		require.NoError(t, db.Insert(ctx, p))
 		if deleted != 0 {
 			_, err := db.GetEngine(ctx).Exec("UPDATE secret_custom_pattern SET deleted_unix = ? WHERE id = ?", deleted, p.ID)

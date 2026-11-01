@@ -5,16 +5,21 @@ package secretscan
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"strings"
+	"sync"
+	"time"
 
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
+	system_model "forgejo.org/models/system"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/secretdetection"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 )
@@ -31,7 +36,33 @@ var (
 	ErrPatternNameTaken = util.NewAlreadyExistErrorf("a pattern of that name exists")
 	// ErrPatternNotFound is a pattern the owner doesn't have, or one that is deleted.
 	ErrPatternNotFound = util.NewNotExistErrorf("pattern does not exist")
+	// ErrPatternOwnerInvalid is a PatternOwner that is neither the site nor an organization.
+	ErrPatternOwnerInvalid = util.NewInvalidArgumentErrorf("patterns belong to the site or an organization")
 )
+
+// PatternOwner is whose patterns a call changes: SitePatterns or OrgPatterns(org). The zero value, and an owner
+// that is not an organization, are refused (ErrPatternOwnerInvalid).
+type PatternOwner struct {
+	site bool
+	org  *user_model.User
+}
+
+// SitePatterns is the owner of the site's patterns, which run in every repository.
+var SitePatterns = PatternOwner{site: true}
+
+// OrgPatterns is the owner of an organization's patterns, which run in its repositories.
+func OrgPatterns(org *user_model.User) PatternOwner { return PatternOwner{org: org} }
+
+// id is the owner_id of the patterns: 0 for the site's, the organization's ID.
+func (o PatternOwner) id() (int64, error) {
+	switch {
+	case o.site && o.org == nil:
+		return 0, nil
+	case !o.site && o.org != nil && o.org.IsOrganization():
+		return o.org.ID, nil
+	}
+	return 0, ErrPatternOwnerInvalid
+}
 
 // PatternInput is what a user writes: the rule and a sample the rule must find a secret in (it is checked and then
 // dropped, never stored).
@@ -57,21 +88,26 @@ func (in PatternInput) normalize() PatternInput {
 }
 
 // ValidatePattern is the one check of a pattern on save and in the Test button: the engine's ValidateCustomRule, and
-// the name limits of the store. Nothing is stored.
+// the limits of the store. Nothing is stored.
 func ValidatePattern(in PatternInput) error {
-	in = in.normalize()
-	if len(in.Name) > MaxPatternNameLen || util.StripControl(in.Name) != in.Name {
-		return secretdetection.ErrCustomNameInvalid
-	}
-	return secretdetection.ValidateCustomRule(in.Name, in.Pattern, in.Sample, in.Keywords)
+	return validate(in.normalize())
 }
 
-// ownerID is the owner of a pattern: the organization's ID, 0 for the site's.
-func ownerID(org *user_model.User) int64 {
-	if org == nil {
-		return 0
+// validate is ValidatePattern of a normalized input. Text that isn't valid UTF-8 or holds a control character (NUL
+// included) is refused: the database may refuse or cut it, and the name and keywords are shown.
+func validate(in PatternInput) error {
+	if len(in.Name) > MaxPatternNameLen || util.StripControl(in.Name) != in.Name { // StripControl also replaces bytes that aren't UTF-8
+		return secretdetection.ErrCustomNameInvalid
 	}
-	return org.ID
+	if util.StripControl(in.Pattern) != in.Pattern {
+		return secretdetection.ErrPatternInvalid
+	}
+	for _, k := range in.Keywords {
+		if util.StripControl(k) != k {
+			return secretdetection.ErrKeywordMissing
+		}
+	}
+	return secretdetection.ValidateCustomRule(in.Name, in.Pattern, in.Sample, in.Keywords)
 }
 
 // capOwners are the owners whose enabled patterns count against the cap of the owner's patterns.
@@ -106,6 +142,30 @@ func checkName(ctx context.Context, owner int64, name string, exceptID int64) er
 	return err
 }
 
+// nameRace turns the error of a write that lost a race on the unique key into ErrPatternNameTaken. It runs after the
+// transaction: on PostgreSQL a failed statement aborts it.
+func nameRace(ctx context.Context, err error, owner int64, name string, exceptID int64) error {
+	if err == nil || errors.Is(err, util.ErrAlreadyExist) || errors.Is(err, util.ErrInvalidArgument) || errors.Is(err, util.ErrNotExist) {
+		return err
+	}
+	if taken, terr := nameTaken(ctx, owner, name, exceptID); terr == nil && taken {
+		return ErrPatternNameTaken
+	}
+	return err
+}
+
+// lockPatterns serializes the saves that count against the cap: every save locks the row of the site's secret
+// scanning configuration (created empty first if need be, as the settings page does), since an organization's cap
+// counts the site's patterns too. Saves are rare; a scan never takes this lock.
+func lockPatterns(ctx context.Context) error {
+	key := setting.Config().SecretScanningConfig.DynKey()
+	if err := system_model.EnsureSetting(ctx, key); err != nil {
+		return err
+	}
+	_, err := db.Exec(ctx, "UPDATE system_setting SET version = version WHERE setting_key = ?", key)
+	return err
+}
+
 // recordPattern writes the audit entry of a change. The pattern is a rule, not a secret, so its text is recorded.
 func recordPattern(ctx context.Context, action string, p *secretscan_model.CustomPattern, data map[string]any) error {
 	if data == nil {
@@ -126,19 +186,25 @@ func levelAction(owner int64, a audit_model.LevelActions) string {
 	return a.Org
 }
 
-// CreatePattern validates and stores a pattern of the organization (nil: the site). The caller checked who may.
-// It is enabled and counts against the cap from the start; history is not scanned again.
-func CreatePattern(ctx context.Context, doer, org *user_model.User, in PatternInput) (*secretscan_model.CustomPattern, error) {
-	in = in.normalize()
-	if err := ValidatePattern(in); err != nil {
+// CreatePattern validates and stores a pattern of the owner. The caller checked who may. It is enabled and counts
+// against the cap from the start; history is not scanned again.
+func CreatePattern(ctx context.Context, doer *user_model.User, o PatternOwner, in PatternInput) (*secretscan_model.CustomPattern, error) {
+	owner, err := o.id()
+	if err != nil {
 		return nil, err
 	}
-	owner := ownerID(org)
+	in = in.normalize()
+	if err := validate(in); err != nil {
+		return nil, err
+	}
 	p := &secretscan_model.CustomPattern{
 		OwnerID: owner, Name: in.Name, Pattern: in.Pattern, Keywords: secretscan_model.EncodeKeywords(in.Keywords),
 		Enabled: true, CreatedByID: doer.ID,
 	}
-	err := db.WithTx(ctx, func(ctx context.Context) error {
+	err = db.WithTx(ctx, func(ctx context.Context) error {
+		if err := lockPatterns(ctx); err != nil {
+			return err
+		}
 		if err := checkName(ctx, owner, p.Name, 0); err != nil {
 			return err
 		}
@@ -151,13 +217,7 @@ func CreatePattern(ctx context.Context, doer, org *user_model.User, in PatternIn
 		return recordPattern(ctx, levelAction(owner, audit_model.LevelActions{Org: "org.secret_pattern.created", Admin: "admin.secret_pattern.created"}), p, nil)
 	})
 	if err != nil {
-		if errors.Is(err, util.ErrAlreadyExist) || errors.Is(err, util.ErrInvalidArgument) {
-			return nil, err
-		}
-		if taken, terr := nameTaken(ctx, owner, p.Name, 0); terr == nil && taken {
-			return nil, ErrPatternNameTaken // lost a race on the unique key
-		}
-		return nil, err
+		return nil, nameRace(ctx, err, owner, p.Name, 0)
 	}
 	return p, nil
 }
@@ -176,14 +236,17 @@ func load(ctx context.Context, owner, id int64) (*secretscan_model.CustomPattern
 
 // UpdatePattern replaces the name, pattern and keywords of a live pattern, which is checked again with the sample.
 // A save that changes nothing records nothing. Alerts already found keep their rule.
-func UpdatePattern(ctx context.Context, org *user_model.User, id int64, in PatternInput) (*secretscan_model.CustomPattern, error) {
-	in = in.normalize()
-	if err := ValidatePattern(in); err != nil {
+func UpdatePattern(ctx context.Context, o PatternOwner, id int64, in PatternInput) (*secretscan_model.CustomPattern, error) {
+	owner, err := o.id()
+	if err != nil {
 		return nil, err
 	}
-	owner := ownerID(org)
+	in = in.normalize()
+	if err := validate(in); err != nil {
+		return nil, err
+	}
 	var p *secretscan_model.CustomPattern
-	err := db.WithTx(ctx, func(ctx context.Context) error {
+	err = db.WithTx(ctx, func(ctx context.Context) error {
 		var err error
 		if p, err = load(ctx, owner, id); err != nil {
 			return err
@@ -195,7 +258,7 @@ func UpdatePattern(ctx context.Context, org *user_model.User, id int64, in Patte
 		if err := checkName(ctx, owner, in.Name, id); err != nil {
 			return err
 		}
-		prev := p.Pattern
+		prevName, prev := p.Name, p.Pattern
 		n, err := db.GetEngine(ctx).Where("id = ? AND owner_id = ? AND deleted_unix = 0", id, owner).Cols("name", "pattern", "keywords").
 			Update(&secretscan_model.CustomPattern{Name: in.Name, Pattern: in.Pattern, Keywords: keywords})
 		if err != nil {
@@ -205,24 +268,34 @@ func UpdatePattern(ctx context.Context, org *user_model.User, id int64, in Patte
 			return ErrPatternNotFound // deleted meanwhile
 		}
 		p.Name, p.Pattern, p.Keywords = in.Name, in.Pattern, keywords
-		return recordPattern(ctx, levelAction(owner, audit_model.LevelActions{Org: "org.secret_pattern.updated", Admin: "admin.secret_pattern.updated"}), p, map[string]any{"previous_pattern": prev})
+		data := map[string]any{"previous_pattern": prev}
+		if prevName != p.Name {
+			data["previous_name"] = prevName
+		}
+		return recordPattern(ctx, levelAction(owner, audit_model.LevelActions{Org: "org.secret_pattern.updated", Admin: "admin.secret_pattern.updated"}), p, data)
 	})
 	if err != nil {
-		return nil, err
+		return nil, nameRace(ctx, err, owner, in.Name, id)
 	}
 	return p, nil
 }
 
 // SetPatternEnabled turns a live pattern on or off. Off stops it from the next scan on; its alerts stay as they are.
 // Turning it on counts against the cap again.
-func SetPatternEnabled(ctx context.Context, org *user_model.User, id int64, enabled bool) error {
-	owner := ownerID(org)
+func SetPatternEnabled(ctx context.Context, o PatternOwner, id int64, enabled bool) error {
+	owner, err := o.id()
+	if err != nil {
+		return err
+	}
 	return db.WithTx(ctx, func(ctx context.Context) error {
 		p, err := load(ctx, owner, id)
 		if err != nil || p.Enabled == enabled {
 			return err
 		}
 		if enabled {
+			if err := lockPatterns(ctx); err != nil {
+				return err
+			}
 			if err := checkCap(ctx, owner); err != nil {
 				return err
 			}
@@ -241,8 +314,11 @@ func SetPatternEnabled(ctx context.Context, org *user_model.User, id int64, enab
 
 // DeletePattern marks a live pattern deleted and off. The row stays for the label of its alerts. Its tombstone time
 // is made unique among the tombstones of the same name (the unique key has one per second).
-func DeletePattern(ctx context.Context, org *user_model.User, id int64) error {
-	owner := ownerID(org)
+func DeletePattern(ctx context.Context, o PatternOwner, id int64) error {
+	owner, err := o.id()
+	if err != nil {
+		return err
+	}
 	return db.WithTx(ctx, func(ctx context.Context) error {
 		p, err := load(ctx, owner, id)
 		if err != nil {
@@ -273,8 +349,8 @@ func DeletePattern(ctx context.Context, org *user_model.User, id int64) error {
 
 // customRules are the rules of the enabled custom patterns that apply to the repository: the site's and, for a
 // repository of an organization, the organization's (a site pattern can't be turned off by an organization). One
-// query. A pattern the engine refuses now is skipped and logged, and at most MaxCustomRules are taken, the site's
-// first.
+// query. A pattern the engine refuses now is skipped (logged once per process), and at most MaxCustomRules are taken,
+// the site's first.
 func customRules(ctx context.Context, repo *repo_model.Repository) ([]secretdetection.Rule, error) {
 	if err := repo.LoadOwner(ctx); err != nil {
 		return nil, err
@@ -290,12 +366,13 @@ func customRules(ctx context.Context, repo *repo_model.Repository) ([]secretdete
 	var rules []secretdetection.Rule
 	for _, p := range patterns {
 		if len(rules) >= secretdetection.MaxCustomRules {
-			log.Warn("secret scanning: repository %d has more than %d custom patterns, the rest are not used", repo.ID, secretdetection.MaxCustomRules)
+			if overCapLogged.due(repo.OwnerID) {
+				log.Warn("secret scanning: the repositories of owner %d have more than %d custom patterns, the rest are not used", repo.OwnerID, secretdetection.MaxCustomRules)
+			}
 			break
 		}
 		keywords := p.KeywordList()
-		if err := secretdetection.ValidateStoredRule(p.Name, p.Pattern, keywords); err != nil {
-			log.Warn("secret scanning: custom pattern %d is skipped: %v", p.ID, err)
+		if !storedRuleOK(p, keywords) {
 			continue
 		}
 		rules = append(rules, secretdetection.CustomRule(p.RuleID(), p.Name, p.Pattern, keywords))
@@ -303,42 +380,49 @@ func customRules(ctx context.Context, repo *repo_model.Repository) ([]secretdete
 	return rules, nil
 }
 
-// RuleLabel is how an alert's rule is shown. Name of a deleted pattern is empty unless the viewer may read it.
-type RuleLabel struct {
-	Name                       string
-	Generic, Deleted, Disabled bool
+// storedRules caches ValidateStoredRule per process, by a hash of what it reads, so that a scan doesn't run the
+// corpus check of every pattern again: the result only changes with the engine, which is part of the build. A refused
+// pattern is logged when it is first checked, by ID and reason code (the error may quote the pattern).
+var storedRules = struct {
+	sync.Mutex
+	ok map[[sha256.Size]byte]bool
+}{ok: map[[sha256.Size]byte]bool{}}
+
+func storedRuleOK(p *secretscan_model.CustomPattern, keywords []string) bool {
+	key := sha256.Sum256([]byte(p.Name + "\x00" + p.Pattern + "\x00" + strings.Join(keywords, "\x00")))
+	storedRules.Lock()
+	ok, has := storedRules.ok[key]
+	storedRules.Unlock()
+	if has {
+		return ok
+	}
+	err := secretdetection.ValidateStoredRule(p.Name, p.Pattern, keywords)
+	if err != nil {
+		log.Warn("secret scanning: custom pattern %d is skipped: %s", p.ID, secretdetection.RefusalCode(err))
+	}
+	storedRules.Lock()
+	if len(storedRules.ok) >= 10000 { // edits add entries: start again rather than grow
+		clear(storedRules.ok)
+	}
+	storedRules.ok[key] = err == nil
+	storedRules.Unlock()
+	return err == nil
 }
 
-// RuleLabels names the rules of alerts: the built-in ones from the engine, a custom one from its row in one query for
-// all of them. A pattern that is deleted (or has no row) is Deleted, and its name is given only where seeDeleted
-// says the viewer may read it for the pattern's owner (nil: never): the others get the generic label.
-func RuleLabels(ctx context.Context, ruleIDs []string, seeDeleted func(ownerID int64) bool) (map[string]RuleLabel, error) {
-	out := map[string]RuleLabel{}
-	var ids []int64
-	for _, ruleID := range ruleIDs {
-		if id, ok := secretscan_model.ParseCustomRuleID(ruleID); ok {
-			ids = append(ids, id)
-			continue
-		}
-		name, generic := RuleInfo(ruleID)
-		out[ruleID] = RuleLabel{Name: name, Generic: generic}
+// overCapLogged says when the over-cap warning of an owner is due: at most once an hour.
+var overCapLogged = &hourly{last: map[int64]time.Time{}}
+
+type hourly struct {
+	sync.Mutex
+	last map[int64]time.Time
+}
+
+func (h *hourly) due(id int64) bool {
+	h.Lock()
+	defer h.Unlock()
+	if t, ok := h.last[id]; ok && time.Since(t) < time.Hour {
+		return false
 	}
-	patterns, err := secretscan_model.GetCustomPatternsByIDs(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
-	for _, id := range ids {
-		l := RuleLabel{Deleted: true}
-		switch p := patterns[id]; {
-		case p == nil:
-		case p.DeletedUnix != 0:
-			if seeDeleted != nil && seeDeleted(p.OwnerID) {
-				l.Name = p.Name
-			}
-		default:
-			l = RuleLabel{Name: p.Name, Disabled: !p.Enabled}
-		}
-		out[secretscan_model.CustomRuleID(id)] = l
-	}
-	return out, nil
+	h.last[id] = time.Now()
+	return true
 }

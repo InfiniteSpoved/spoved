@@ -68,7 +68,8 @@ func ParseFilter(state, reason, secretType string) (f Filter, ignored []string) 
 	default:
 		ignored = append(ignored, "reason")
 	}
-	if _, ok := builtinRule(secretType); ok || secretType == "" {
+	_, custom := secretscan_model.ParseCustomRuleID(secretType)
+	if _, ok := builtinRule(secretType); ok || custom || secretType == "" {
 		f.Type = secretType
 	} else {
 		ignored = append(ignored, "type")
@@ -205,14 +206,6 @@ func (s Scope) options(ctx context.Context, f Filter) (opts *secretscan_model.Al
 	return opts, false, nil
 }
 
-// RuleInfo is the name of a rule as the lists show it, and whether it is one of the generic ones.
-func RuleInfo(ruleID string) (name string, generic bool) {
-	if r, ok := builtinRule(ruleID); ok {
-		return r.Name, r.Type == "generic"
-	}
-	return ruleID, false
-}
-
 func builtinRule(ruleID string) (secretdetection.Rule, bool) {
 	for _, r := range secretdetection.BuiltinRules() {
 		if r.ID == ruleID {
@@ -234,14 +227,11 @@ func (s Scope) seeDeletedPattern(ownerID int64) bool {
 // Hit is an alert of a list with what the rows show.
 type Hit struct {
 	*secretscan_model.Alert
-	Repo     *repo_model.Repository
-	Name     string
-	Generic  bool
-	Deleted  bool // the rule is a custom pattern that is deleted: Name is empty unless the viewer may read it
-	Disabled bool // a custom pattern that is turned off
-	First    *secretscan_model.Location
-	More     int // places beyond the first
-	ClosedBy *user_model.User
+	secretscan_model.RuleLabel // what the rule is called, as the viewer may read it
+	Repo                       *repo_model.Repository
+	First                      *secretscan_model.Location
+	More                       int // places beyond the first
+	ClosedBy                   *user_model.User
 }
 
 // Result is a page of a list.
@@ -283,7 +273,7 @@ func (s Scope) hits(ctx context.Context, alerts []*secretscan_model.Alert) ([]*H
 	for i, a := range alerts {
 		ruleIDs[i] = a.RuleID
 	}
-	labels, err := RuleLabels(ctx, ruleIDs, s.seeDeletedPattern)
+	labels, err := secretscan_model.LoadRuleLabels(ctx, ruleIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -294,8 +284,7 @@ func (s Scope) hits(ctx context.Context, alerts []*secretscan_model.Alert) ([]*H
 			continue // trashed since the search
 		}
 		h := &Hit{Alert: a, Repo: repo, First: first[a.ID], More: max(counts[a.ID]-1, 0)}
-		l := labels[a.RuleID]
-		h.Name, h.Generic, h.Deleted, h.Disabled = l.Name, l.Generic, l.Deleted, l.Disabled
+		h.RuleLabel = labels.Label(a.RuleID, repo.OwnerID, s.seeDeletedPattern)
 		if a.ClosedByID != 0 {
 			_, h.ClosedBy = user_model.GetUserFromMap(a.ClosedByID, users)
 		}

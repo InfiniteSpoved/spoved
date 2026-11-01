@@ -18,6 +18,7 @@ import (
 	"forgejo.org/models/perm"
 	repo_model "forgejo.org/models/repo"
 	secret_model "forgejo.org/models/secret"
+	secretscan_model "forgejo.org/models/secretscan"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
@@ -500,6 +501,7 @@ func DeleteOrganization(ctx context.Context, org *Organization) error {
 		&OrgVerifiedDomain{OrgID: org.ID},
 		&user_model.Setting{UserID: org.ID, SettingKey: SettingKeyRequireVerifiedDomain},
 		&secret_model.Secret{OwnerID: org.ID},
+		&secretscan_model.CustomPattern{OwnerID: org.ID}, // tombstones too: the repositories whose alerts they label are gone
 		&actions_model.ActionVariable{OwnerID: org.ID},
 		&actions_model.ActionRunner{OwnerID: org.ID},
 		&actions_model.ActionRunnerToken{OwnerID: optional.Some(org.ID)},

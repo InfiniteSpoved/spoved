@@ -121,7 +121,7 @@ var Fields = map[string][]string{
 	"api_request":       {"method", "route", "status", "target", "bytes"},
 	"upload":            {"kind", "op", "bytes", "object"},
 	"dependency_search": {"kind", "ecosystem", "name", "advisory", "owner", "state", "total"},
-	"secret_pattern":    {"name", "pattern", "keyword_count", "previous_pattern"},
+	"secret_pattern":    {"name", "pattern", "keyword_count", "previous_name", "previous_pattern"},
 	"dependency_export": {"kind", "format", "ecosystem", "name", "version", "range", "direct", "advisory", "owner", "project", "state", "severity", "count"},
 	"secret_export":     {"kind", "format", "state", "reason", "type", "owner", "project", "q", "count"},
 	"download":          {"kind", "bytes", "object"},

@@ -10,6 +10,7 @@ import (
 
 	"forgejo.org/models/db"
 	"forgejo.org/modules/json"
+	"forgejo.org/modules/secretdetection"
 	"forgejo.org/modules/timeutil"
 
 	"xorm.io/builder"
@@ -86,11 +87,12 @@ func FindCustomPatterns(ctx context.Context, ownerID int64) ([]*CustomPattern, e
 }
 
 // FindActiveCustomPatterns lists the enabled live patterns of the owners, the site's (owner 0) first, then by ID:
-// the order in which the cap keeps them.
+// the order in which the cap keeps them. It reads at most twice the cap, so rows the engine refuses can be skipped
+// without loading every row a race of saves left.
 func FindActiveCustomPatterns(ctx context.Context, ownerIDs ...int64) ([]*CustomPattern, error) {
 	var out []*CustomPattern
 	return out, db.GetEngine(ctx).Where(builder.In("owner_id", ownerIDs).And(builder.Eq{"enabled": true, "deleted_unix": 0})).
-		OrderBy("owner_id, id").Find(&out)
+		OrderBy("owner_id, id").Limit(2 * secretdetection.MaxCustomRules).Find(&out)
 }
 
 // CountActiveCustomPatterns counts the enabled live patterns of the owners.

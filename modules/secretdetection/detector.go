@@ -28,6 +28,11 @@ const (
 	// larger of MinMaxWork and WorkPerByte times the content length.
 	MinMaxWork  = 16 << 20
 	WorkPerByte = 3
+	// MinCustomWork is the floor of the custom rules' own budget, which is
+	// otherwise sized like the built-in rules' (see Detector.MaxWork): a small
+	// file costs custom rules at most an eighth of what it may cost built-in
+	// ones.
+	MinCustomWork = 2 << 20
 	// workChunk is the most bytes one regex call gets in a window rule, and
 	// hitCheckCost the work units charged for one HitCheck.
 	workChunk    = 64 << 10
@@ -73,7 +78,9 @@ type Detector struct {
 	// by a built-in rule, 8 for a window or a keyword hit, more for a custom
 	// rule with a big program), in eighths of a byte: past MaxWork*8 the Scan
 	// stops and returns complete=false. 0 or less means the larger of
-	// MinMaxWork and WorkPerByte times the content length.
+	// MinMaxWork and WorkPerByte times the content length. The custom rules
+	// have a budget of their own on top: MaxWork too when it is set, else the
+	// larger of MinCustomWork and WorkPerByte times the content length.
 	MaxWork int
 
 	rules []*compiledRule
@@ -176,6 +183,11 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 		budget = max(MinMaxWork, WorkPerByte*len(content))
 	}
 	budget *= 8
+	customBudget := d.MaxWork
+	if customBudget <= 0 {
+		customBudget = max(MinCustomWork, WorkPerByte*len(content))
+	}
+	customBudget *= 8
 	work := 0
 
 	var macKey []byte
@@ -347,27 +359,41 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 	// needs less passes the rest on), so decoys for early rules can't starve
 	// later ones; then the work that is left goes to the rules that stopped,
 	// each continuing where it stopped.
-	for i, st := range runs {
-		if work >= budget {
-			break
-		}
-		st.done = run(st, work+(budget-work)/(len(runs)-i))
-	}
-	for i, st := range runs {
-		if st.done {
-			continue
-		}
-		if work >= budget {
-			break
-		}
-		stopped := 0
-		for _, s := range runs[i:] {
-			if !s.done {
-				stopped++
+	share := func(runs []*ruleRun, budget int) {
+		work = 0
+		for i, st := range runs {
+			if work >= budget {
+				break
 			}
+			st.done = run(st, work+(budget-work)/(len(runs)-i))
 		}
-		st.done = run(st, work+(budget-work)/stopped)
+		for i, st := range runs {
+			if st.done {
+				continue
+			}
+			if work >= budget {
+				break
+			}
+			stopped := 0
+			for _, s := range runs[i:] {
+				if !s.done {
+					stopped++
+				}
+			}
+			st.done = run(st, work+(budget-work)/stopped)
+		}
 	}
+	// The built-in rules have the whole budget; the custom ones (last, see
+	// NewDetector) their own, so they can never take work from a built-in rule.
+	builtin := len(runs)
+	for i, st := range runs {
+		if st.r.custom {
+			builtin = i
+			break
+		}
+	}
+	share(runs[:builtin], budget)
+	share(runs[builtin:], customBudget)
 	for _, st := range runs {
 		if !st.done {
 			complete = false
