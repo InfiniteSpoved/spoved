@@ -184,7 +184,8 @@ func DeclareGitRepos(t *testing.T) {
 				}
 				require.NoError(t, secretscan_model.InsertLocations(db.DefaultContext, locs))
 			}
-			require.NoError(t, secretscan_model.DeleteScans(db.DefaultContext, repo.ID)) // the push may have started a scan
+			_, err := secretscan_model.DeleteScans(db.DefaultContext, repo.ID) // the push may have started a scan
+			require.NoError(t, err)
 			require.NoError(t, secretscan_model.Save(db.DefaultContext, nil, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: "[]", Status: secretscan_model.StatusOK}))
 		})
 	}

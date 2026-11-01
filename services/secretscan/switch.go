@@ -17,6 +17,9 @@ var (
 	ErrSwitchLocked = errors.New("the secret scanning switch is set by a higher level")
 	// ErrNotEnabled is a rescan of a repository secret scanning is off for.
 	ErrNotEnabled = errors.New("secret scanning is off for the repository")
+	// ErrRescanBusy is a rescan while the one before is queued or running: a rescan deletes the scan state, so a
+	// repository without state has no finished scan.
+	ErrRescanBusy = errors.New("a scan of the repository is queued or running")
 )
 
 // RepoSwitch is the state of the switches for a repository.
@@ -88,8 +91,12 @@ func Rescan(ctx context.Context, repo *repo_model.Repository) error {
 		return ErrNotEnabled
 	}
 	err := db.WithTx(ctx, func(ctx context.Context) error {
-		if err := secretscan_model.DeleteScans(ctx, repo.ID); err != nil {
+		// the delete is the claim: of two rescans at once only one deletes a row; a scan already running finds its
+		// state row gone and its write fails (secretscan_model.Save: ErrScanMoved), so it is queued again, never saved
+		if n, err := secretscan_model.DeleteScans(ctx, repo.ID); err != nil {
 			return err
+		} else if n == 0 {
+			return ErrRescanBusy
 		}
 		// the action key is a literal: TestActionCatalog finds it in the code
 		return repo_model.RecordRepo(ctx, "repo.secret_scanning.rescanned", repo, map[string]any{})

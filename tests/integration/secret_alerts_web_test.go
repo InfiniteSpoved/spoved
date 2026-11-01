@@ -26,6 +26,7 @@ import (
 	"forgejo.org/modules/test"
 	maintenance_service "forgejo.org/services/maintenance"
 	repo_service "forgejo.org/services/repository"
+	secretscan_service "forgejo.org/services/secretscan"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -140,6 +141,7 @@ func TestSecretAlertsWeb(t *testing.T) {
 				{"reason": {"bogus"}},
 				{"reason": {"wont_fix"}},
 				{"reason": {"wont_fix"}, "comment": {"  "}},
+				{"reason": {"wont_fix"}, "comment": {string([]rune{0x200b, 0x2060, ' ', 0x200d})}}, // invisible characters only: no comment
 				{"reason": {"revoked"}, "comment": {"it was " + bare}},
 				{"reason": {"revoked"}, "comment": {strings.Repeat("é", 600)}},
 			} {
@@ -159,10 +161,14 @@ func TestSecretAlertsWeb(t *testing.T) {
 			assert.Equal(t, user2.ID, e.ActorID)
 
 			doc := secretPage(t, owner, one, http.StatusOK)
-			assert.Contains(t, doc.Find("#alert-state").Text(), "Won't fix")
+			assert.Contains(t, doc.Find("#alert-state").Text(), "won't fix")
+			// who, when and why come from the alert row, not the audit log
+			assert.Contains(t, doc.Find("#secret-closed-note").Text(), "Closed by user2")
+			assert.Contains(t, doc.Find("#secret-closed-note").Text(), "Accepted: internal test host, SEC-7.")
+			assert.NotContains(t, doc.Find(".repo-security-badges").Text(), "default branch")
 			doc.AssertElement(t, "#secret-reopen", true)
 			doc.AssertElement(t, "#secret-close", false)
-			assert.Contains(t, doc.Find("#secret-activity").Text(), "closed it as Won't fix")
+			assert.Contains(t, doc.Find("#secret-activity").Text(), "closed it as won't fix")
 			assert.Contains(t, doc.Find("#secret-activity").Text(), "Accepted: internal test host, SEC-7.")
 			doc = secretPage(t, owner, list+"?state=closed&reason=wont_fix", http.StatusOK)
 			assert.Equal(t, 1, doc.Find(".secret-alerts-table .repo-security-row:not(.repo-security-head)").Length())
@@ -206,14 +212,71 @@ func TestSecretAlertsWeb(t *testing.T) {
 			}
 		})
 
+		t.Run("bulk close counts an alert once, however its number is written", func(t *testing.T) {
+			since := auditMaxID(t)
+			secretPost(t, owner, list+"/close", url.Values{"index": {"1", "01", "001", "0001"}, "reason": {"false_positive"}}, http.StatusSeeOther)
+			assert.Contains(t, flashMessage(t, owner), "1 alert was closed")
+			var closed []*audit_model.Entry
+			require.NoError(t, db.GetEngine(t.Context()).Where("id > ? AND action = ?", since, "repo.secret_alert.closed").Find(&closed))
+			assert.Len(t, closed, 1)
+			secretPost(t, owner, list+"/1/reopen", url.Values{}, http.StatusSeeOther)
+			// reopening an open alert says so
+			secretPost(t, owner, list+"/1/reopen", url.Values{}, http.StatusSeeOther)
+			assert.Contains(t, flashMessage(t, owner), "already open")
+		})
+
+		t.Run("a filter that is ignored is said, and % and _ are literal in the search", func(t *testing.T) {
+			doc := secretPage(t, owner, list+"?type=no-such-rule", http.StatusOK)
+			assert.Contains(t, doc.Find("#secret-filter-ignored").Text(), "filter was ignored")
+			doc = secretPage(t, owner, list+"?q="+strings.Repeat("a", 2000), http.StatusOK)
+			assert.Contains(t, doc.Find("#secret-filter-ignored").Text(), "filter was ignored")
+			for _, q := range []string{"%25", "_", "%25%25"} {
+				doc = secretPage(t, owner, list+"?q="+q, http.StatusOK)
+				doc.AssertElement(t, "#secret-no-match", true)
+			}
+		})
+
+		t.Run("bulk close goes back to the filtered list", func(t *testing.T) {
+			req := NewRequestWithURLValues(t, "POST", list+"/close", url.Values{"index": {"1"}, "reason": {"revoked"}})
+			req.Header.Set("Referer", setting.AppURL+"org3/secret-web/security/secrets?type=github&sort=oldest")
+			resp := owner.MakeRequest(t, req, http.StatusSeeOther)
+			assert.Equal(t, list+"?type=github&sort=oldest", resp.Header().Get("Location"))
+			// another page's referer is not followed
+			req = NewRequestWithURLValues(t, "POST", list+"/close", url.Values{"reason": {"revoked"}})
+			req.Header.Set("Referer", "https://example.org/x?y=1")
+			assert.Equal(t, list, owner.MakeRequest(t, req, http.StatusSeeOther).Header().Get("Location"))
+			secretPost(t, owner, list+"/1/reopen", url.Values{}, http.StatusSeeOther)
+		})
+
+		t.Run("the activity costs no query per event", func(t *testing.T) {
+			two := list + "/2"
+			admin := loginUser(t, "user1")
+			flip := func(s *TestSession) {
+				secretPost(t, s, two+"/close", url.Values{"reason": {"revoked"}}, http.StatusSeeOther)
+				secretPost(t, s, two+"/reopen", url.Values{}, http.StatusSeeOther)
+			}
+			flip(owner)
+			count := func() int64 { return stableQueryCount(t, func() { secretPage(t, owner, two, http.StatusOK) }) }
+			base := count()
+			for range 5 {
+				flip(owner)
+				flip(admin)
+			}
+			doc := secretPage(t, owner, two, http.StatusOK)
+			assert.GreaterOrEqual(t, doc.Find("#secret-activity li").Length(), 20)
+			assert.Equal(t, base, count())
+		})
+
 		t.Run("who sees the pages", func(t *testing.T) {
 			// anonymous, a user without access and a reader get the 404 of a missing page, before anything else
 			missing := NewRequest(t, "GET", "/org3/no-such-repo/security/secrets")
 			missingBody := MakeRequest(t, missing, http.StatusNotFound).Body.String()
-			_ = missingBody
+			user4Session := loginUser(t, "user4")
+			missingUser4 := user4Session.MakeRequest(t, NewRequest(t, "GET", "/org3/no-such-repo/security/secrets"), http.StatusNotFound).Body.String()
 			for _, path := range []string{list, list + "/1", list + "/99", list + "/abc", "/org3/webproj/web-leaf/security/secrets"} {
-				MakeRequest(t, NewRequest(t, "GET", path), http.StatusNotFound)
-				secretPage(t, loginUser(t, "user4"), path, http.StatusNotFound)
+				// the body is the one of a missing repository: nothing says the pages exist
+				assert.Equal(t, missingBody, MakeRequest(t, NewRequest(t, "GET", path), http.StatusNotFound).Body.String(), path)
+				assert.Equal(t, missingUser4, user4Session.MakeRequest(t, NewRequest(t, "GET", path), http.StatusNotFound).Body.String(), path)
 			}
 			reader := loginUser(t, "user4")
 			for _, r := range []*repo_model.Repository{root, leaf} {
@@ -334,13 +397,16 @@ func TestSecretAlertsWeb(t *testing.T) {
 			secretPost(t, owner, list+"/2/close", url.Values{"reason": {"revoked"}}, http.StatusNotFound)
 			secretPost(t, owner, list+"/rescan", url.Values{}, http.StatusNotFound)
 			// the site switch off: the same, and no alerts left means no page
-			defer test.MockVariableValue(&setting.SecretScanning.Enabled, false)()
+			restore := test.MockVariableValue(&setting.SecretScanning.Enabled, false)
+			t.Cleanup(func() { // the cached "off" must not outlive the mock
+				restore()
+				bumpSettingsRevision(t)
+			})
 			bumpSettingsRevision(t)
 			doc = secretPage(t, owner, list, http.StatusOK)
 			assert.Contains(t, doc.Find("#secret-banner-off").Text(), "off on this instance")
-			empty := depNewRepo(t, org3, user2, "secret-none", true, 0)
+			depNewRepo(t, org3, user2, "secret-none", true, 0)
 			secretPage(t, owner, "/org3/secret-none/security/secrets", http.StatusNotFound)
-			_ = empty
 		})
 	})
 }
@@ -385,13 +451,39 @@ func TestSecretAlertsRescanAndSettings(t *testing.T) {
 			doc.AssertElement(t, "#secret-banner-incomplete", false)
 		})
 
+		t.Run("a rescan is refused while one is queued or running", func(t *testing.T) {
+			_, err := secretscan_model.DeleteScans(t.Context(), repo.ID)
+			require.NoError(t, err)
+			require.NoError(t, secretscan_model.Save(t.Context(), nil, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: "[]", Status: secretscan_model.StatusOK}))
+			old, err := secretscan_model.GetScan(t.Context(), repo.ID, secretscan_model.KindRepo)
+			require.NoError(t, err)
+			require.NoError(t, secretscan_service.Rescan(t.Context(), repo)) // claims the rows
+			// a scan that read the row before the rescan can't write it back: it is queued again, never saved
+			err = secretscan_model.Save(t.Context(), old, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: `["old"]`, Status: secretscan_model.StatusOK})
+			require.ErrorIs(t, err, secretscan_model.ErrScanMoved)
+			// no rows = the rescan has not finished: the second click does nothing and is not audited
+			_, err = secretscan_model.DeleteScans(t.Context(), repo.ID)
+			require.NoError(t, err)
+			since := auditMaxID(t)
+			secretPost(t, owner, list+"/rescan", url.Values{}, http.StatusSeeOther)
+			assert.Contains(t, flashMessage(t, owner), "already queued or running")
+			assert.Equal(t, since, auditMaxID(t))
+			require.ErrorIs(t, secretscan_service.Rescan(t.Context(), repo), secretscan_service.ErrRescanBusy)
+			doc := secretPage(t, owner, list, http.StatusOK)
+			doc.AssertElement(t, "#secret-rescan", false)
+			assert.Contains(t, doc.Find("#secret-scan-status").Text(), "Scan queued")
+			assert.NotContains(t, doc.Find("#secret-scan-status").Text(), "Never scanned")
+		})
+
 		t.Run("failed and ok status", func(t *testing.T) {
-			require.NoError(t, secretscan_model.DeleteScans(t.Context(), repo.ID))
+			_, err := secretscan_model.DeleteScans(t.Context(), repo.ID)
+			require.NoError(t, err)
 			require.NoError(t, secretscan_model.Save(t.Context(), nil, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: "[]", Status: secretscan_model.StatusFailed, Error: "git_error"}))
 			doc := secretPage(t, owner, list, http.StatusOK)
 			doc.AssertElement(t, "#secret-banner-failed", true)
 			doc.AssertElement(t, "#secret-rescan", true)
-			require.NoError(t, secretscan_model.DeleteScans(t.Context(), repo.ID))
+			_, err = secretscan_model.DeleteScans(t.Context(), repo.ID)
+			require.NoError(t, err)
 			require.NoError(t, secretscan_model.Save(t.Context(), nil, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: "[]", Status: secretscan_model.StatusOK}))
 			doc = secretPage(t, owner, list, http.StatusOK)
 			assert.Contains(t, doc.Find("#secret-scan-status").Text(), "Last scanned")
@@ -409,6 +501,11 @@ func TestSecretAlertsRescanAndSettings(t *testing.T) {
 			assert.Contains(t, flashMessage(t, owner), "settings saved")
 			repo = unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repo.ID})
 			assert.True(t, repo.SecretScanningDisabled)
+			// right after turning it off, no page shows a count of secret alerts (the badge sums vulnerability and secret alerts)
+			doc = secretPage(t, owner, settings, http.StatusOK)
+			doc.AssertElement(t, "#security-open-alerts", false)
+			doc.AssertElement(t, `.repo-security-menu a[href$="/security/secrets"] .label`, false)
+			assert.Contains(t, doc.Find("#secret-scanning-set-by").Text(), "kept but hidden")
 			e := auditOne(t, since, "repo.repository.updated")
 			assert.Contains(t, e.Data, `"secret_scanning":false`)
 			doc = secretPage(t, owner, settings, http.StatusOK)

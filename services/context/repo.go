@@ -1301,13 +1301,18 @@ var SecretScanningEnabled = func(context.Context, *repo_model.Repository) bool {
 // for someone without Wiki read). While scanning is off the alerts are kept but hidden, so the counts are zero and
 // on is false; ok is false when the viewer has no secret alert page: scanning is off and nothing is kept.
 func (ctx *Context) secretAlertCounts() (open, closed int64, on, ok bool) {
-	open, closed, err := secretscan_model.CountByState(ctx, ctx.Repo.Repository.ID, !ctx.Repo.CanRead(unit_model.TypeWiki))
+	codeOnly := !ctx.Repo.CanRead(unit_model.TypeWiki)
+	if !SecretScanningEnabled(ctx, ctx.Repo.Repository) { // hidden: no count, only whether there is a banner page
+		has, err := secretscan_model.HasAlerts(ctx, ctx.Repo.Repository.ID, codeOnly)
+		if err != nil {
+			log.Error("look for the secret alerts of repository %d: %v", ctx.Repo.Repository.ID, err)
+		}
+		return 0, 0, false, has
+	}
+	open, closed, err := secretscan_model.CountByState(ctx, ctx.Repo.Repository.ID, codeOnly)
 	if err != nil {
 		log.Error("count the secret alerts of repository %d: %v", ctx.Repo.Repository.ID, err)
 		return 0, 0, false, false
-	}
-	if on = SecretScanningEnabled(ctx, ctx.Repo.Repository); !on {
-		return 0, 0, false, open+closed > 0
 	}
 	return open, closed, true, true
 }

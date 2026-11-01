@@ -53,7 +53,8 @@ type SwitchChange struct {
 	CreatedUnix timeutil.TimeStamp
 }
 
-// LastSwitchChange reads it from the audit log; nil when the log has none (it is the default, or the entry was purged).
+// LastSwitchChange reads it from the audit log, from the last 50 settings changes of the repository (the audit search
+// can not filter on a data key); nil when it finds none (it is the default, the entry was purged or is older).
 func LastSwitchChange(ctx context.Context, repoID int64) (*SwitchChange, error) {
 	entries, err := audit_model.FindEntries(ctx, &audit_model.SearchOptions{RepoID: repoID, Action: "repo.repository.updated"}, 50)
 	if err != nil {

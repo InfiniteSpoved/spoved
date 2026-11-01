@@ -6,14 +6,32 @@ function updateBulk() {
   const boxes = Array.from(document.querySelectorAll('input[form="secret-bulk-form"][name="index"]'));
   const n = boxes.filter((box) => box.checked).length;
   bar.classList.toggle('tw-hidden', n === 0);
-  const text = bar.getAttribute(n === 1 ? 'data-one' : 'data-other') ?? '';
+  // not data-one: html/template escapes an attribute named data-on... as JavaScript
+  const which = n === 1 ? 'one' : 'other';
+  const text = bar.getAttribute(`data-text-${which}`) ?? '';
   bar.querySelector('#secret-bulk-count').textContent = text.replace('{n}', String(n));
+  const modal = document.querySelector('#secret-bulk-modal');
+  if (modal) {
+    modal.querySelector('.secret-modal-title').textContent = (bar.getAttribute(`data-title-${which}`) ?? '').replace('{n}', String(n));
+    modal.querySelector('.secret-modal-ask').textContent = bar.getAttribute(`data-ask-${which}`) ?? '';
+  }
   const all = document.querySelector('#secret-select-all');
   if (all) all.checked = n > 0 && n === boxes.length;
 }
 
 // the list: a bar with the number of selected alerts; the settings: turning scanning off asks first
 export function initRepoSecretAlerts() {
+  // Won't fix needs a comment, and the comment is limited in bytes (as in the service), not in characters
+  document.addEventListener('change', (e) => {
+    const reason = e.target.closest?.('.repo-security-reasons input[name="reason"]');
+    if (reason) reason.closest('form').querySelector('textarea[name="comment"]').required = reason.value === 'wont_fix';
+  });
+  document.addEventListener('input', (e) => {
+    const area = e.target.closest?.('textarea[data-max-bytes]');
+    if (!area) return;
+    const tooLong = new TextEncoder().encode(area.value).length > Number(area.getAttribute('data-max-bytes'));
+    area.setCustomValidity(tooLong ? area.getAttribute('data-too-long') : '');
+  });
   document.addEventListener('change', (e) => {
     const box = e.target.closest?.('#secret-select-all, input[form="secret-bulk-form"][name="index"]');
     if (!box) return;
@@ -28,4 +46,6 @@ export function initRepoSecretAlerts() {
     e.preventDefault();
     showModal(document.querySelector(form.getAttribute('data-modal')), undefined);
   });
+  // the phone's menu bar scrolls: the current page must be in view
+  document.querySelector('.repo-security-menu .item.active')?.scrollIntoView({block: 'nearest', inline: 'nearest'});
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"forgejo.org/models/db"
+	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 
@@ -44,6 +45,37 @@ func GetAlert(ctx context.Context, repoID, index int64) (*Alert, error) {
 	return a, nil
 }
 
+// GetVisibleAlert is GetAlert for a viewer: without Wiki read, an alert that is only in the wiki is not there.
+func GetVisibleAlert(ctx context.Context, repoID, index int64, canReadWiki bool) (*Alert, error) {
+	alert, err := GetAlert(ctx, repoID, index)
+	if err != nil || canReadWiki {
+		return alert, err
+	}
+	if has, err := HasCodeLocation(ctx, alert.RepoID, alert.ID); err != nil {
+		return nil, err
+	} else if !has {
+		return nil, ErrAlertNotExist
+	}
+	return alert, nil
+}
+
+// likeContains is "key contains value", case-insensitive, with % and _ in the value taken literally (! escapes).
+func likeContains(key, value string) builder.Cond {
+	value = strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(value)
+	if setting.Database.Type.IsSQLite3() { // UPPER there only changes ASCII letters
+		value = util.ToUpperASCII(value)
+	} else {
+		value = strings.ToUpper(value)
+	}
+	return builder.Expr("UPPER("+key+") LIKE ? ESCAPE '!'", "%"+value+"%")
+}
+
+// HasAlerts tells whether the repository has an alert the viewer can see (one query, stops at the first row).
+func HasAlerts(ctx context.Context, repoID int64, codeOnly bool) (bool, error) {
+	opts := &AlertSearchOptions{RepoID: repoID, CodeOnly: codeOnly}
+	return db.GetEngine(ctx).Table("secret_scanning_alert").Where(opts.ToConds()).Exist()
+}
+
 // AlertSearchOptions selects the alerts of one repository, newest first.
 type AlertSearchOptions struct {
 	db.ListOptions
@@ -75,7 +107,7 @@ func (o *AlertSearchOptions) ToConds() builder.Cond {
 		cond = cond.And(builder.Expr("EXISTS (SELECT 1 FROM secret_scanning_location WHERE secret_scanning_location.alert_id = secret_scanning_alert.id AND secret_scanning_location.kind <> ?)", KindWiki))
 	}
 	if o.PathQuery != "" {
-		in := builder.And(builder.Expr("secret_scanning_location.alert_id = secret_scanning_alert.id"), db.BuildCaseInsensitiveLike("secret_scanning_location.path", o.PathQuery))
+		in := builder.And(builder.Expr("secret_scanning_location.alert_id = secret_scanning_alert.id"), likeContains("secret_scanning_location.path", o.PathQuery))
 		if o.CodeOnly {
 			in = in.And(builder.Neq{"secret_scanning_location.kind": KindWiki})
 		}
@@ -273,8 +305,7 @@ func FirstLocations(ctx context.Context, repoID int64, alertIDs []int64, noWiki 
 }
 
 // DeleteScans removes the scan state of the repository, so the next scan starts from the beginning and its holes
-// are gone; the alerts stay.
-func DeleteScans(ctx context.Context, repoID int64) error {
-	_, err := db.GetEngine(ctx).Where("repo_id = ?", repoID).Delete(new(Scan))
-	return err
+// are gone; the alerts stay. It returns the number of rows removed.
+func DeleteScans(ctx context.Context, repoID int64) (int64, error) {
+	return db.GetEngine(ctx).Where("repo_id = ?", repoID).Delete(new(Scan))
 }

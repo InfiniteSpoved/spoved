@@ -6,6 +6,7 @@ package repo
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -165,12 +166,18 @@ func SecretAlerts(ctx *context.Context) {
 		ctx.ServerError("FindRuleIDs", err)
 		return
 	}
+	ignored := false
 	if t := ctx.FormString("type"); slices.Contains(ruleIDs, t) {
 		opts.SecretTypes = []string{t}
+	} else if t != "" {
+		ignored = true
 	}
 	if q := ctx.FormTrim("q"); len(q) <= secretscan_model.MaxFilterLen*4 {
 		opts.PathQuery = q
+	} else {
+		ignored = true
 	}
+	ctx.Data["FilterIgnored"] = ignored // never show an unfiltered list as if it were the filtered one
 	alerts, total, err := db.FindAndCount[secretscan_model.Alert](ctx, opts)
 	if err != nil {
 		ctx.ServerError("FindAndCount", err)
@@ -252,16 +259,33 @@ func secretActorName(ctx *context.Context, id int64, fallback string) string {
 	return fallback
 }
 
+// secretActorNames is secretActorName for the actors of a history, in one query.
+func secretActorNames(ctx *context.Context, history []*secretscan_service.Event) ([]*secretHistoryRow, error) {
+	ids := make([]int64, 0, len(history))
+	for _, e := range history {
+		if e.ActorID > 0 {
+			ids = append(ids, e.ActorID)
+		}
+	}
+	users, err := user_model.GetUsersByIDsWithBots(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]*secretHistoryRow, 0, len(history))
+	for _, e := range history {
+		name := e.ActorName
+		if u := users[e.ActorID]; u != nil {
+			name = u.GetDisplayName()
+		}
+		rows = append(rows, &secretHistoryRow{Event: e, Actor: name})
+	}
+	return rows, nil
+}
+
 // loadSecretAlertForPage finds the alert by its number; an alert only in the wiki is missing for someone without Wiki
 // read, as in the API.
 func loadSecretAlertForPage(ctx *context.Context) *secretscan_model.Alert {
-	alert, err := secretscan_model.GetAlert(ctx, ctx.Repo.Repository.ID, ctx.ParamsInt64(":index"))
-	if err == nil && !ctx.Repo.CanRead(unit.TypeWiki) {
-		var has bool
-		if has, err = secretscan_model.HasCodeLocation(ctx, alert.RepoID, alert.ID); err == nil && !has {
-			err = secretscan_model.ErrAlertNotExist
-		}
-	}
+	alert, err := secretscan_model.GetVisibleAlert(ctx, ctx.Repo.Repository.ID, ctx.ParamsInt64(":index"), ctx.Repo.CanRead(unit.TypeWiki))
 	switch {
 	case errors.Is(err, secretscan_model.ErrAlertNotExist):
 		ctx.NotFound("GetAlert", err)
@@ -341,14 +365,24 @@ func SecretAlert(ctx *context.Context) {
 		ctx.ServerError("AlertHistory", err)
 		return
 	}
-	events := make([]*secretHistoryRow, 0, len(history))
-	for _, e := range history {
-		events = append(events, &secretHistoryRow{Event: e, Actor: secretActorName(ctx, e.ActorID, e.ActorName)})
+	events, err := secretActorNames(ctx, history)
+	if err != nil {
+		ctx.ServerError("secretActorNames", err)
+		return
 	}
 	ctx.Data["Title"] = row.Name
 	ctx.Data["Alert"] = row
 	ctx.Data["ShortFingerprint"] = alert.Fingerprint[:min(12, len(alert.Fingerprint))]
 	ctx.Data["Locations"] = convert.ToSecretScanningLocations(repo, locs, func(path string) string { return wiki_service.PageHTMLURL(repo, path) })
+	titles := map[string]string{}
+	for _, l := range locs {
+		if l.Kind == secretscan_model.KindWiki {
+			if wp, err := wiki_service.GitPathToWebPath(l.Path); err == nil {
+				_, titles[l.Path] = wiki_service.WebPathToUserTitle(wp)
+			}
+		}
+	}
+	ctx.Data["WikiTitles"] = titles
 	ctx.Data["NotListed"] = max(alert.LocationCount-stored[alert.ID], 0) // places over the cap, which have no row
 	ctx.Data["Guidance"] = guidanceFor(alert.SecretType)
 	ctx.Data["History"] = events
@@ -364,6 +398,10 @@ func secretAlertError(ctx *context.Context, err error) bool {
 		return false
 	case errors.Is(err, util.ErrNotExist):
 		ctx.NotFound("alert", err)
+	case errors.Is(err, secretscan_service.ErrArchived):
+		ctx.Flash.Error(ctx.Tr("repo.archive.title"))
+	case errors.Is(err, secretscan_service.ErrCommentRequired):
+		ctx.Flash.Error(ctx.Tr("repo.secrets.close.wont_fix_comment"))
 	case errors.Is(err, secretscan_service.ErrCommentSecret):
 		ctx.Flash.Error(ctx.Tr("repo.secrets.close.comment_secret"))
 	case errors.Is(err, secretscan_service.ErrCommentTooCostly):
@@ -378,14 +416,12 @@ func secretAlertError(ctx *context.Context, err error) bool {
 	return true
 }
 
-// closeForm reads the reason and the comment of a close: a reason is required, and so is a comment for won't fix.
+// closeForm reads the reason and the comment of a close: a reason is required (the service wants a comment for won't fix).
 func closeForm(ctx *context.Context) (reason, comment string, ok bool) {
 	reason, comment = strings.TrimSpace(ctx.FormString("reason")), ctx.FormString("comment")
 	switch {
 	case !slices.Contains(secretscan_model.ClosedStates, reason):
 		ctx.Flash.Error(ctx.Tr("repo.secrets.close.no_reason"))
-	case reason == secretscan_model.StateWontFix && strings.TrimSpace(comment) == "":
-		ctx.Flash.Error(ctx.Tr("repo.secrets.close.wont_fix_comment"))
 	default:
 		return reason, comment, true
 	}
@@ -416,7 +452,16 @@ func SecretAlertClose(ctx *context.Context) {
 
 // SecretAlertReopen reopens a closed alert.
 func SecretAlertReopen(ctx *context.Context) {
-	if !mustWriteSecretAlerts(ctx) || loadSecretAlertForPage(ctx) == nil {
+	if !mustWriteSecretAlerts(ctx) {
+		return
+	}
+	alert := loadSecretAlertForPage(ctx)
+	if alert == nil {
+		return
+	}
+	if alert.State == secretscan_model.StateOpen {
+		ctx.Flash.Warning(ctx.Tr("repo.secrets.alert.already_open"))
+		ctx.Redirect(secretAlertLink(ctx))
 		return
 	}
 	_, err := secretscan_service.Reopen(ctx, ctx.Repo.Repository, ctx.ParamsInt64(":index"))
@@ -431,47 +476,61 @@ func SecretAlertReopen(ctx *context.Context) {
 }
 
 // SecretAlertsClose closes the selected alerts of the list with one reason, one alert at a time through the service
-// (an audit entry each); the ones that can't be closed (gone, closed meanwhile, wiki only for this viewer) are counted.
+// (an audit entry each); the comment is checked once. The ones that can't be closed (gone, closed meanwhile, wiki
+// only for this viewer) are counted. It goes back to the list the form was sent from, with its filters.
 func SecretAlertsClose(ctx *context.Context) {
 	if !mustWriteSecretAlerts(ctx) {
 		return
 	}
-	back := ctx.Repo.RepoLink + "/security/secrets"
+	list := ctx.Repo.RepoLink + "/security/secrets"
+	back := list
+	if ref, err := url.Parse(ctx.Req.Referer()); err == nil && strings.HasSuffix(ref.Path, "/security/secrets") && ref.RawQuery != "" {
+		back += "?" + ref.RawQuery // only the query of the list: never a host or a path of the referer
+	}
 	reason, comment, ok := closeForm(ctx)
-	selected := slices.Compact(slices.Sorted(slices.Values(ctx.Req.PostForm["index"])))
-	if ok && (len(selected) == 0 || len(selected) > maxBulkClose) {
+	// the alerts by number, not by text: 4, 04 and 004 are one alert
+	var selected []int64
+	invalid := 0
+	for _, raw := range slices.Compact(slices.Sorted(slices.Values(ctx.Req.PostForm["index"]))) {
+		if index, err := strconv.ParseInt(raw, 10, 64); err != nil {
+			invalid++
+		} else {
+			selected = append(selected, index)
+		}
+	}
+	slices.Sort(selected)
+	selected = slices.Compact(selected)
+	if ok && (len(selected)+invalid == 0 || len(selected)+invalid > maxBulkClose) {
 		ctx.Flash.Error(ctx.Tr("repo.secrets.bulk.none", maxBulkClose))
 		ok = false
+	}
+	canReadWiki := ctx.Repo.CanRead(unit.TypeWiki)
+	if ok {
+		var err error
+		if comment, err = secretscan_service.CheckComment(ctx, ctx.Repo.Repository, comment, canReadWiki); err == nil && reason == secretscan_model.StateWontFix && comment == "" {
+			err = secretscan_service.ErrCommentRequired
+		}
+		if ok = !secretAlertError(ctx, err); ctx.Written() {
+			return
+		}
 	}
 	if !ok {
 		ctx.Redirect(back)
 		return
 	}
-	canReadWiki := ctx.Repo.CanRead(unit.TypeWiki)
-	closed, failed := 0, 0
-	for _, s := range selected {
-		index, err := strconv.ParseInt(s, 10, 64)
+	closed, failed := 0, invalid
+	for _, index := range selected {
+		alert, err := secretscan_model.GetVisibleAlert(ctx, ctx.Repo.Repository.ID, index, canReadWiki)
 		if err == nil {
-			var alert *secretscan_model.Alert
-			if alert, err = secretscan_model.GetAlert(ctx, ctx.Repo.Repository.ID, index); err == nil && !canReadWiki {
-				var has bool
-				if has, err = secretscan_model.HasCodeLocation(ctx, alert.RepoID, alert.ID); err == nil && !has {
-					err = secretscan_model.ErrAlertNotExist
-				}
-			}
-		} else {
-			err = secretscan_model.ErrAlertNotExist
-		}
-		if err == nil {
-			_, err = secretscan_service.Close(ctx, ctx.Repo.Repository, ctx.Doer, index, reason, comment, canReadWiki)
+			_, err = secretscan_service.CloseChecked(ctx, ctx.Repo.Repository, ctx.Doer, alert.Index, reason, comment)
 		}
 		switch {
 		case err == nil:
 			closed++
 		case errors.Is(err, secretscan_model.ErrAlertNotExist), errors.Is(err, secretscan_service.ErrConflict):
 			failed++
-		case errors.Is(err, util.ErrInvalidArgument):
-			secretAlertError(ctx, err) // the comment is the same for every alert: nothing more to try
+		case errors.Is(err, secretscan_service.ErrArchived):
+			ctx.Flash.Error(ctx.Tr("repo.archive.title"))
 			ctx.Redirect(back)
 			return
 		default:
@@ -479,7 +538,9 @@ func SecretAlertsClose(ctx *context.Context) {
 			return
 		}
 	}
-	ctx.Flash.Success(ctx.Locale.TrPluralString(closed, "repo.secrets.bulk.closed", closed))
+	if closed > 0 {
+		ctx.Flash.Success(ctx.Locale.TrPluralString(closed, "repo.secrets.bulk.closed", closed))
+	}
 	if failed > 0 {
 		ctx.Flash.Warning(ctx.Locale.TrPluralString(failed, "repo.secrets.bulk.failed", failed))
 	}
@@ -495,6 +556,8 @@ func SecretRescan(ctx *context.Context) {
 	switch err := secretscan_service.Rescan(ctx, ctx.Repo.Repository); {
 	case errors.Is(err, secretscan_service.ErrNotEnabled):
 		ctx.Flash.Error(ctx.Tr("repo.secrets.rescan.off"))
+	case errors.Is(err, secretscan_service.ErrRescanBusy):
+		ctx.Flash.Warning(ctx.Tr("repo.secrets.rescan.busy"))
 	case err != nil:
 		ctx.ServerError("Rescan", err)
 		return

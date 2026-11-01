@@ -26,10 +26,10 @@ test.describe('a writer', () => {
     test.skip(isMobile, 'the phone test covers the layout');
     await page.goto(repo);
     await page.getByRole('link', {name: /^Security\s*5$/}).click();
-    await page.getByRole('link', {name: 'Secret alerts'}).click();
+    await page.getByRole('link', {name: /^Secret alerts\b/}).click();
     await expect(page).toHaveURL(new RegExp(`${repo}/security/secrets$`));
-    await expect(page.getByRole('link', {name: '5 Open'})).toBeVisible();
-    await expect(page.getByRole('link', {name: '1 Closed'})).toBeVisible();
+    await expect(page.getByRole('link', {name: '5 Open', exact: true})).toBeVisible();
+    await expect(page.getByRole('link', {name: '1 Closed', exact: true})).toBeVisible();
     await expect(rows(page)).toHaveCount(5);
     await expect(page.locator('#secret-scan-status')).toContainText('Last scanned');
     await screenshot(page);
@@ -66,8 +66,10 @@ test.describe('a writer', () => {
     await screenshot(page);
     await dialog.getByRole('button', {name: 'Close alert', exact: true}).click();
     await expect(page.getByText('The alert was closed.', {exact: true})).toBeVisible();
-    await expect(page.locator('#alert-state')).toContainText('Closed as Revoked');
-    await expect(page.locator('#secret-activity')).toContainText('closed it as');
+    await expect(page.locator('#alert-state')).toContainText('Closed as revoked');
+    await expect(page.locator('#secret-closed-note')).toContainText('Closed by user11');
+    await expect(page.locator('#secret-closed-note')).toContainText('Rotated in the Slack admin.');
+    await expect(page.locator('#secret-activity')).toContainText('closed it as revoked');
     await screenshot(page);
 
     await page.getByRole('button', {name: 'Reopen', exact: true}).click();
@@ -80,8 +82,12 @@ test.describe('a writer', () => {
     await page.goto(`${repo}/security/secrets`);
     await page.getByLabel('Select Generic secret assignment').check();
     await expect(page.locator('#secret-bulk')).toBeVisible();
+    // exactly one: the text is "1 alert selected", without quotes (html/template escapes a data-on* attribute as JavaScript)
+    await expect(page.locator('#secret-bulk-count')).toHaveText('1 alert selected');
+    await screenshot(page);
     await page.getByRole('button', {name: 'Close selected…'}).click();
     const dialog = page.locator('#secret-bulk-modal');
+    await expect(dialog.locator('.secret-modal-title')).toHaveText('Close 1 alert');
     await dialog.getByLabel('Used in tests').check();
     await dialog.getByRole('button', {name: 'Close alerts', exact: true}).click();
     await expect(page.getByText('1 alert was closed.', {exact: true})).toBeVisible();
@@ -106,7 +112,7 @@ test.describe('a writer', () => {
     await expect(dialog).toContainText('5 open alerts are kept');
     await screenshot(page);
     await dialog.getByRole('button', {name: 'Turn off scanning'}).click();
-    await expect(page.getByText('Secret scanning settings saved.')).toBeVisible();
+    await expect(page.getByText('Secret scanning settings saved.', {exact: true})).toBeVisible();
 
     // the alerts are kept but hidden: a banner with the link to the settings, no list, no count, 404 for one alert
     await page.goto(`${repo}/security/secrets`);
@@ -122,7 +128,7 @@ test.describe('a writer', () => {
     await page.goto(`${repo}/settings/code_security`);
     await box.getByText(/Enable secret scanning/).click();
     await box.getByRole('button', {name: 'Save'}).click();
-    await expect(page.getByText('Secret scanning settings saved.')).toBeVisible();
+    await expect(page.getByText('Secret scanning settings saved.', {exact: true})).toBeVisible();
     await expect(box.getByLabel(/Enable secret scanning/)).toBeChecked();
   });
 

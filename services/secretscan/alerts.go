@@ -168,16 +168,15 @@ func invisible(r rune) rune {
 	return r
 }
 
-// Close closes an open alert of the repository as revoked, false_positive, used_in_tests or wont_fix (the reason is the
-// state), with an optional comment of at most 1,000 bytes. The audit entry is written in the same transaction. A
-// bad state or comment is util.ErrInvalidArgument, an unknown alert util.ErrNotExist, an alert that isn't open
-// ErrConflict, an archived repository ErrArchived.
-func Close(ctx context.Context, repo *repo_model.Repository, doer *user_model.User, index int64, state, comment string, canReadWiki bool) (*secretscan_model.Alert, error) {
-	if !slices.Contains(secretscan_model.ClosedStates, state) {
-		return nil, util.NewInvalidArgumentErrorf("resolution must be one of %v", secretscan_model.ClosedStates)
-	}
+// ErrCommentRequired is a won't fix without a comment (after the cleaning: a comment of invisible characters is none).
+var ErrCommentRequired = util.NewInvalidArgumentErrorf("won't fix needs a comment that says why")
+
+// CheckComment cleans a close comment of at most 1,000 bytes and checks that it holds no secret: the text it
+// returns is what Close stores. Bulk close calls it once and then CloseChecked for every alert. A bad comment is
+// util.ErrInvalidArgument (ErrCommentSecret, ErrCommentTooCostly).
+func CheckComment(ctx context.Context, repo *repo_model.Repository, comment string, canReadWiki bool) (string, error) {
 	if len(comment) > 4*secretscan_model.MaxCommentLen {
-		return nil, util.NewInvalidArgumentErrorf("the comment is longer than %d bytes", secretscan_model.MaxCommentLen)
+		return "", util.NewInvalidArgumentErrorf("the comment is longer than %d bytes", secretscan_model.MaxCommentLen)
 	}
 	// no control, bidi or other format characters (they hide a secret from the detector and reorder text)
 	comment = strings.Map(func(r rune) rune {
@@ -187,30 +186,57 @@ func Close(ctx context.Context, repo *repo_model.Repository, doer *user_model.Us
 		return r
 	}, vulnerability_service.CleanComment(comment))
 	if len(comment) > secretscan_model.MaxCommentLen {
-		return nil, util.NewInvalidArgumentErrorf("the comment is longer than %d bytes", secretscan_model.MaxCommentLen)
+		return "", util.NewInvalidArgumentErrorf("the comment is longer than %d bytes", secretscan_model.MaxCommentLen)
 	}
-	if comment != "" {
-		// the text as it reads: combining marks and format characters out, look-alikes folded (NFKC); one budget for both
-		c := newCommentCandidates()
-		texts := []string{comment}
-		if folded := strings.Map(invisible, norm.NFKC.String(comment)); folded != comment {
-			texts = append(texts, folded)
+	if comment == "" {
+		return "", nil
+	}
+	// the text as it reads: combining marks and format characters out, look-alikes folded (NFKC); one budget for both
+	c := newCommentCandidates()
+	texts := []string{comment}
+	if folded := strings.Map(invisible, norm.NFKC.String(comment)); folded != comment {
+		texts = append(texts, folded)
+	}
+	for _, text := range texts {
+		if err := c.addComment(text); err != nil {
+			return "", err
 		}
-		for _, text := range texts {
-			if err := c.addComment(text); err != nil {
-				return nil, err
-			}
-		}
-		// read outside the transaction, only for the check (the transaction below changes the one alert with a conditional
-		// UPDATE): do the alerts of the repository that the doer can see have one of these fingerprints? Without Wiki read,
-		// an alert that is only in the wiki doesn't count, so the answer doesn't confirm a secret of the wiki.
-		hit, err := secretscan_model.AnyFingerprint(ctx, repo.ID, slices.Collect(maps.Keys(c.hashes)), !canReadWiki)
-		if err != nil {
-			return nil, err
-		}
-		if hit {
-			return nil, ErrCommentSecret
-		}
+	}
+	// read outside the transaction, only for the check (the transaction below changes the one alert with a conditional
+	// UPDATE): do the alerts of the repository that the doer can see have one of these fingerprints? Without Wiki read,
+	// an alert that is only in the wiki doesn't count, so the answer doesn't confirm a secret of the wiki.
+	hit, err := secretscan_model.AnyFingerprint(ctx, repo.ID, slices.Collect(maps.Keys(c.hashes)), !canReadWiki)
+	if err != nil {
+		return "", err
+	}
+	if hit {
+		return "", ErrCommentSecret
+	}
+	return comment, nil
+}
+
+// Close closes an open alert of the repository as revoked, false_positive, used_in_tests or wont_fix (the reason is the
+// state), with an optional comment of at most 1,000 bytes (required for wont_fix). The audit entry is written in the
+// same transaction. A bad state or comment is util.ErrInvalidArgument, an unknown alert util.ErrNotExist, an alert that
+// isn't open ErrConflict, an archived repository ErrArchived.
+func Close(ctx context.Context, repo *repo_model.Repository, doer *user_model.User, index int64, state, comment string, canReadWiki bool) (*secretscan_model.Alert, error) {
+	if !slices.Contains(secretscan_model.ClosedStates, state) {
+		return nil, util.NewInvalidArgumentErrorf("resolution must be one of %v", secretscan_model.ClosedStates)
+	}
+	comment, err := CheckComment(ctx, repo, comment, canReadWiki)
+	if err != nil {
+		return nil, err
+	}
+	return CloseChecked(ctx, repo, doer, index, state, comment)
+}
+
+// CloseChecked is Close for a comment that CheckComment returned.
+func CloseChecked(ctx context.Context, repo *repo_model.Repository, doer *user_model.User, index int64, state, comment string) (*secretscan_model.Alert, error) {
+	if !slices.Contains(secretscan_model.ClosedStates, state) {
+		return nil, util.NewInvalidArgumentErrorf("resolution must be one of %v", secretscan_model.ClosedStates)
+	}
+	if state == secretscan_model.StateWontFix && comment == "" {
+		return nil, ErrCommentRequired
 	}
 	return changeAlert(ctx, repo, "", func(ctx context.Context) (*secretscan_model.Alert, bool, error) {
 		before, err := secretscan_model.CloseAlert(ctx, repo.ID, index, state, comment, doer.ID)
