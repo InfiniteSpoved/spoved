@@ -41,6 +41,15 @@
 // 1Password service accounts) are not reported.
 // docker-hub-token, circleci-personal-token and buildkite-api-token are our
 // own (token formats from the vendors' documentation).
+// In rules_gitleaks_services.go also: gitleaks' rules of one shape share a
+// rule (bittrex-api-key, planetscale-token, settlemint-access-token,
+// shopify-token), stripe-access-token's prod keys are in stripe-live-key, the
+// airtable personal access token and the facebook app token run on their own
+// shape and near the word facebook, lob-api-key only where a live_ or test_
+// value follows, the Flutterwave encryption key has its dash, and the public
+// keys (flutterwave-public-key, lob-pub-api-key, mailgun-pub-key, the mapbox
+// pk. token, new-relic-browser-api-token) and the bare numeric IDs
+// (discord-client-id, asana-client-id) are left out.
 
 package secretdetection
 
@@ -449,10 +458,12 @@ var gitleaksRules = []Rule{
 		Regex:       `(bkua_[a-z0-9]{40})`,
 		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars, Window: 48, Anchored: true, HitCheck: prefixHit(45, "bkua_"),
 	},
+}
 
-	// Credentials in curl commands (up to five continued lines after curl);
-	// after the specific rules, so a known token in a header is reported as
-	// that token.
+// curlRules: credentials in curl commands (up to five continued lines after
+// curl); after all specific rules, so a known token in a header is reported as
+// that token.
+var curlRules = []Rule{
 	{
 		ID: "curl-auth-header", Name: "Credential in a curl header", Type: "curl",
 		Keywords: []string{"curl"},

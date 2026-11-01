@@ -4,6 +4,7 @@
 package secretdetection
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"math/rand/v2"
@@ -503,7 +504,7 @@ func TestPortedRuleKeywordsAreCheap(t *testing.T) {
 // Every ported rule runs near its keywords only, and an anchored one behind a
 // hit check (an inline comment once swallowed the infracost rule's fields).
 func TestGitleaksRulesAreWindowed(t *testing.T) {
-	for _, r := range gitleaksRules {
+	for _, r := range slices.Concat(gitleaksRules, gitleaksServiceRules, curlRules) {
 		assert.Positive(t, r.Window, r.ID)
 		assert.True(t, !r.Anchored || r.HitCheck != nil, r.ID)
 	}
@@ -522,8 +523,8 @@ func TestKubernetesSecretCRLF(t *testing.T) {
 	}
 }
 
-// keywordGate finds exactly the keywords a search per keyword finds:
-// overlapping, shared and one-byte keywords included.
+// keywordGate finds exactly the keywords a search per keyword finds, at their
+// first offset: overlapping, shared and one-byte keywords included.
 func TestKeywordGateMatchesHasKeyword(t *testing.T) {
 	r := rand.New(rand.NewPCG(5, 6))
 	var sets [][]string
@@ -555,7 +556,10 @@ func TestKeywordGateMatchesHasKeyword(t *testing.T) {
 		text := []byte(b.String())
 		found := g.find(text)
 		for i, ks := range sets {
-			assert.Equal(t, hasKeyword(text, ks), slices.ContainsFunc(ids[i], func(id int) bool { return found[id] }), "%q in %q", ks, text)
+			assert.Equal(t, hasKeyword(text, ks), slices.ContainsFunc(ids[i], func(id int) bool { return found[id] >= 0 }), "%q in %q", ks, text)
+			for j, k := range ks {
+				assert.Equal(t, bytes.Index(text, []byte(k)), found[ids[i][j]], "%q in %q", k, text)
+			}
 		}
 	}
 }

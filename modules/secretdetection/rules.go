@@ -65,8 +65,9 @@ const (
 	wordChars  = alnumChars + "_-"
 )
 
-// builtinRules: the generic rule last, so a specific rule wins an overlap.
-var builtinRules = slices.Concat(baseRules, gitleaksRules, []Rule{genericRule})
+// builtinRules: the curl rules and then the generic rule last, so a specific
+// rule wins an overlap.
+var builtinRules = slices.Concat(baseRules, gitleaksRules, gitleaksServiceRules, curlRules, []Rule{genericRule})
 
 var baseRules = []Rule{
 	{
@@ -246,9 +247,10 @@ var baseRules = []Rule{
 		SecretGroup: 1, MinEntropy: 3,
 	},
 	{
+		// live and prod (gitleaks' stripe-access-token)
 		ID: "stripe-live-key", Name: "Stripe live secret key", Type: "stripe",
-		Keywords:    []string{"sk_live_", "rk_live_"},
-		Regex:       `((?:sk|rk)_live_[0-9A-Za-z]{10,247})`,
+		Keywords:    []string{"sk_live_", "rk_live_", "sk_prod_", "rk_prod_"},
+		Regex:       `((?:sk|rk)_(?:live|prod)_[0-9A-Za-z]{10,247})`,
 		SecretGroup: 1, MinEntropy: 2, TokenChars: alnumChars,
 		Window: 300,
 	},

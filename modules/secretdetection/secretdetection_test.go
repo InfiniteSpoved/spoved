@@ -312,6 +312,7 @@ func TestRules(t *testing.T) {
 	tests = append(tests, moreRuleTests()...)
 	tests = append(tests, comparisonRuleTests()...)
 	tests = append(tests, gitleaksRuleTests()...)
+	tests = append(tests, gitleaksServiceRuleTests()...)
 	covered := map[string]bool{}
 	for _, tt := range tests {
 		covered[tt.rule] = true

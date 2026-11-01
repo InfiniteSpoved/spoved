@@ -204,9 +204,9 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 	var macKey []byte
 	var found []rawFinding
 	var active []*compiledRule
-	present := d.gate.find(lower)
+	firstHit := d.gate.find(lower)
 	for _, r := range d.rules {
-		if len(r.keywordIDs) == 0 || slices.ContainsFunc(r.keywordIDs, func(i int) bool { return present[i] }) {
+		if len(r.keywordIDs) == 0 || slices.ContainsFunc(r.keywordIDs, func(i int) bool { return firstHit[i] >= 0 }) {
 			active = append(active, r)
 		}
 	}
@@ -276,6 +276,13 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 			// pass over everything between hits.
 			for ; st.ki < len(r.Keywords); st.ki, st.off, st.next = st.ki+1, 0, 0 {
 				k := r.Keywords[st.ki]
+				// The search starts at the keyword's first hit, and a keyword
+				// the gate didn't see costs nothing.
+				first := firstHit[r.keywordIDs[st.ki]]
+				if first < 0 {
+					continue
+				}
+				st.off = max(st.off, first)
 				for {
 					if work > limit {
 						return false
@@ -315,7 +322,7 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 			return true
 		}
 		if !st.haveRanges {
-			ranges, spent, ok := r.ranges(lower, limit-work)
+			ranges, spent, ok := r.ranges(lower, firstHit, limit-work)
 			work += spent
 			if !ok {
 				return false
@@ -573,17 +580,21 @@ func isLFSPointer(content []byte) bool {
 
 // ranges returns the byte ranges the rule's regex runs on: all of the content,
 // or for a rule with a Window the windows around keyword hits, merged.
+// firstHit is where each keyword of the gate first occurs (-1: nowhere).
 // Finding the windows costs hitCost work units per keyword hit; ok is false
 // when that is more than allow.
-func (r *compiledRule) ranges(lower []byte, allow int) (out [][2]int, spent int, ok bool) {
+func (r *compiledRule) ranges(lower []byte, firstHit []int, allow int) (out [][2]int, spent int, ok bool) {
 	if r.Window <= 0 {
 		return [][2]int{{0, len(lower)}}, 0, true
 	}
-	for _, k := range r.Keywords {
+	for ki, k := range r.Keywords {
+		if firstHit[r.keywordIDs[ki]] < 0 {
+			continue
+		}
 		// Windows of one keyword, merged as they come.
 		var cur [2]int
 		have := false
-		for off := 0; ; {
+		for off := firstHit[r.keywordIDs[ki]]; ; {
 			i := bytes.Index(lower[off:], []byte(k))
 			if i < 0 {
 				break
@@ -675,19 +686,21 @@ func asciiLower(b []byte) []byte {
 
 // keywordGate tells which keywords occur in a text in one pass over it, by
 // their first two bytes, instead of one search per keyword (with a hundred
-// rules that was most of the time of a scan).
+// rules that was most of the time of a scan). first holds the index+1 of the
+// bucket of a byte pair (an array, not a map: a map lookup per byte pair was
+// most of the time of the pass).
 type keywordGate struct {
 	words   []string
 	ids     map[string]int
-	first   [1 << 16]bool
-	buckets map[uint16][]int
+	first   [1 << 16]uint16
+	buckets [][]int
 	single  []int // one-byte keywords
 }
 
 // add registers keywords and returns their IDs.
 func (g *keywordGate) add(keywords []string) []int {
 	if g.ids == nil {
-		g.ids, g.buckets = map[string]int{}, map[uint16][]int{}
+		g.ids = map[string]int{}
 	}
 	out := make([]int, 0, len(keywords))
 	for _, k := range keywords {
@@ -700,8 +713,11 @@ func (g *keywordGate) add(keywords []string) []int {
 				g.single = append(g.single, id)
 			} else {
 				b := uint16(k[0])<<8 | uint16(k[1])
-				g.first[b] = true
-				g.buckets[b] = append(g.buckets[b], id)
+				if g.first[b] == 0 {
+					g.buckets = append(g.buckets, nil)
+					g.first[b] = uint16(len(g.buckets))
+				}
+				g.buckets[g.first[b]-1] = append(g.buckets[g.first[b]-1], id)
 			}
 		}
 		out = append(out, id)
@@ -709,29 +725,40 @@ func (g *keywordGate) add(keywords []string) []int {
 	return out
 }
 
-// find returns, by keyword ID, whether the keyword occurs in lower.
-func (g *keywordGate) find(lower []byte) []bool {
-	found := make([]bool, len(g.words))
+// find returns, by keyword ID, where the keyword first occurs in lower (-1:
+// nowhere).
+func (g *keywordGate) find(lower []byte) []int {
+	first := make([]int, len(g.words))
+	for i := range first {
+		first[i] = -1
+	}
 	left := len(g.words)
+	// open counts the keywords of each bucket not seen yet: a bucket whose
+	// keywords were all seen costs no more comparisons.
+	open := make([]int, len(g.buckets))
+	for i, b := range g.buckets {
+		open[i] = len(b)
+	}
 	for _, id := range g.single {
-		if bytes.IndexByte(lower, g.words[id][0]) >= 0 {
-			found[id] = true
+		if first[id] = bytes.IndexByte(lower, g.words[id][0]); first[id] >= 0 {
 			left--
 		}
 	}
 	for p := 0; p+1 < len(lower) && left > 0; p++ {
-		b := uint16(lower[p])<<8 | uint16(lower[p+1])
-		if !g.first[b] {
+		bucket := g.first[uint16(lower[p])<<8|uint16(lower[p+1])]
+		if bucket == 0 || open[bucket-1] == 0 {
 			continue
 		}
-		for _, id := range g.buckets[b] {
-			if !found[id] && bytes.HasPrefix(lower[p:], []byte(g.words[id])) {
-				found[id] = true
+		for _, id := range g.buckets[bucket-1] {
+			// the third byte first: most keywords that share a pair differ there
+			if w := g.words[id]; first[id] < 0 && (len(w) < 3 || p+2 < len(lower) && lower[p+2] == w[2]) && bytes.HasPrefix(lower[p:], []byte(w)) {
+				first[id] = p
+				open[bucket-1]--
 				left--
 			}
 		}
 	}
-	return found
+	return first
 }
 
 func hasKeyword(lower []byte, keywords []string) bool {

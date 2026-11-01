@@ -10,7 +10,8 @@ in the licence output of the frontend build.
 Many secret detection rules in modules/secretdetection are adapted from
 gitleaks (https://github.com/gitleaks/gitleaks), Copyright (c) 2019 Zachary
 Rice, licensed under the MIT licence; its full text is in
-modules/secretdetection/rules.go and rules_gitleaks.go.
+modules/secretdetection/rules.go and rules_gitleaks.go (the rules in
+rules_gitleaks_services.go are adapted from gitleaks too).
 
 "Forgejo" is a trademark of Codeberg e.V. spoved is not affiliated with or
 endorsed by Forgejo or Codeberg e.V.
