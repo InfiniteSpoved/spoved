@@ -1,4 +1,5 @@
 import {showModal} from '../modules/modal.ts';
+import {POST} from '../modules/fetch.js';
 
 function updateBulk() {
   const bar = document.querySelector('#secret-bulk');
@@ -61,6 +62,44 @@ export function initRepoSecretAlerts() {
   document.addEventListener('click', (e) => {
     const ok = e.target.closest?.('.secret-confirm-ok');
     if (ok) document.getElementById(ok.getAttribute('form'))?.setAttribute('data-confirmed', 'true');
+  });
+  // custom patterns: a delete asks for the name (the server checks it again)
+  document.addEventListener('input', (e) => {
+    const input = e.target.closest?.('input[data-confirm-name]');
+    if (!input) return;
+    const button = document.querySelector(input.getAttribute('data-confirm-button'));
+    if (button) button.disabled = input.value.trim().toLowerCase() !== input.getAttribute('data-confirm-name').toLowerCase();
+  });
+  // custom patterns: Test posts the form's fields and shows the answer; the server stores nothing
+  document.addEventListener('click', async (e) => {
+    const button = e.target.closest?.('#secret-pattern-test');
+    if (!button) return;
+    const form = button.closest('form');
+    const out = form.querySelector('#secret-pattern-result');
+    const show = (ok, title, text) => {
+      const box = document.createElement('div');
+      box.className = `ui message ${ok ? 'positive' : 'negative'}`;
+      box.setAttribute('role', ok ? 'status' : 'alert');
+      const head = document.createElement('div');
+      head.className = 'header';
+      head.textContent = title;
+      box.append(head, document.createTextNode(text));
+      out.replaceChildren(box);
+    };
+    button.disabled = true;
+    try {
+      const resp = await POST(button.getAttribute('data-url'), {data: new FormData(form)});
+      if (resp.ok) {
+        const body = await resp.json();
+        show(body.ok, body.title, body.message);
+      } else {
+        show(false, button.getAttribute('data-failed'), resp.status === 429 ? await resp.text() : '');
+      }
+    } catch {
+      show(false, button.getAttribute('data-failed'), '');
+    } finally {
+      button.disabled = false;
+    }
   });
   // the phone's menu bar scrolls: the current page must be in view
   const menu = document.querySelector('.repo-security-menu');

@@ -160,7 +160,7 @@
 			{{ctx.Locale.Tr "admin.webhook_types"}}
 		</a>
 		{{end}}
-		<details class="item toggleable-item" {{if or .PageIsAdminIPAllowlist .PageIsAdminAudit .PageIsAdminSecretAlerts}}open{{end}}>
+		<details class="item toggleable-item" {{if or .PageIsAdminIPAllowlist .PageIsAdminAudit .PageIsAdminSecretAlerts .PageIsAdminSecretPatterns}}open{{end}}>
 			<summary>{{ctx.Locale.Tr "admin.security"}}</summary>
 			<div class="menu">
 				<a class="{{if .PageIsAdminAudit}}active {{end}}item" href="{{AppSubUrl}}/admin/audit">
@@ -171,6 +171,9 @@
 				</a>
 				<a class="{{if .PageIsAdminSecretAlerts}}active {{end}}item" href="{{AppSubUrl}}/admin/security/secrets">
 					{{ctx.Locale.Tr "admin.secret_alerts"}}
+				</a>
+				<a class="{{if .PageIsAdminSecretPatterns}}active {{end}}item" href="{{AppSubUrl}}/admin/security/patterns">
+					{{ctx.Locale.Tr "secret_pattern.title"}}
 				</a>
 			</div>
 		</details>

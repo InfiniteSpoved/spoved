@@ -76,6 +76,10 @@
 			</p>
 		</form>
 	</div>
+	<h4 class="ui top attached header" id="custom-patterns">{{ctx.Locale.Tr "secret_pattern.title"}}</h4>
+	<div class="ui attached segment">
+		{{template "shared/secret_patterns" .}}
+	</div>
 </div>
 <dialog class="modal" id="secret-scanning-org-off-modal" aria-labelledby="secret-scanning-org-off-heading">
 	<article>

@@ -210,10 +210,10 @@ func TestOrgSecretAlertList(t *testing.T) {
 		doc := NewHTMLParser(t, secGet(t, owner, slOrg, http.StatusOK).Body)
 		assert.Equal(t, "Secret alerts", strings.TrimSpace(doc.Find(`.repo-security-tabs a[aria-current="page"]`).Text()))
 		assert.True(t, strings.HasPrefix(strings.TrimSpace(doc.Find("title").Text()), "Secret alerts"))
-		assert.Equal(t, 1, doc.Find(`.repo-security-tabs a`).Length(), "no dependency graph, no other tab")
+		assert.Equal(t, 2, doc.Find(`.repo-security-tabs a`).Length(), "no dependency graph: the secret alerts and the patterns")
 		enableDependencyGraph(t)
 		doc = NewHTMLParser(t, secGet(t, owner, slOrg, http.StatusOK).Body)
-		assert.Equal(t, 3, doc.Find(`.repo-security-tabs a`).Length())
+		assert.Equal(t, 4, doc.Find(`.repo-security-tabs a`).Length())
 		assert.Contains(t, secGet(t, owner, "/org/org3/security/vulnerabilities", http.StatusOK).Body.String(), tab)
 		secGet(t, member, "/org/org3/security/vulnerabilities", http.StatusNotFound) // owners only, as before
 	})

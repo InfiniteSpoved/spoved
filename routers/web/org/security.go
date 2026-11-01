@@ -17,6 +17,8 @@ import (
 const (
 	tplSecurity base.TplName = "org/security"
 	tplSecrets  base.TplName = "org/security_secrets"
+
+	tplSecretPatterns base.TplName = "org/security_patterns"
 )
 
 // MustEnableSecurity answers 404 (owners too) while the dependency graph is off for the site or the organization.
@@ -130,4 +132,22 @@ func SecurityAlertsExport(ctx *context.Context) {
 		return
 	}
 	shared_security.SecretsExport(ctx, secretScope(ctx), ctx.Org.OrgLink+"/security/secrets")
+}
+
+// SecurityPatterns lists the organization's custom patterns and the site's, read-only: owners read the rules (and
+// change them in the settings), everyone else the names and keywords.
+func SecurityPatterns(ctx *context.Context) {
+	scope := secretScope(ctx)
+	org := ctx.Org.Organization.AsUser()
+	if err := shared_security.LoadPatterns(ctx, org, scope, "", ctx.Org.OrgLink+"/security/secrets", false, ctx.Org.IsOwner); err != nil {
+		ctx.ServerError("LoadPatterns", err)
+		return
+	}
+	if err := shared_user.LoadHeaderCount(ctx); err != nil {
+		ctx.ServerError("LoadHeaderCount", err)
+		return
+	}
+	ctx.Data["Title"] = ctx.Tr("secret_pattern.title")
+	ctx.Data["PageIsOrgSecurity"] = true
+	ctx.HTML(http.StatusOK, tplSecretPatterns)
 }

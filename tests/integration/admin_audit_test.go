@@ -261,7 +261,7 @@ func TestAdminAuditRoutes(t *testing.T) {
 		switch {
 		case method == "GET" && (route == "/admin/audit" || route == "/admin/config/secret-scanning" || strings.HasPrefix(route, "/admin/config/dependency-graph")):
 			assert.Equal(t, http.StatusOK, resp.Code, route)
-		case method == "GET" && route == "/admin/security/secrets":
+		case method == "GET" && (route == "/admin/security/secrets" || route == "/admin/security/patterns"):
 			assert.Equal(t, http.StatusOK, resp.Code, route)
 		case method == "POST" && route == "/admin/security/secrets/export":
 			assert.Equal(t, http.StatusOK, resp.Code, method+" "+route) // the audited download of the list: a CSV

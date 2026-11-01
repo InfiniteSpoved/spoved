@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -428,4 +429,73 @@ func (h *hourly) due(id int64) bool {
 	}
 	h.last[id] = time.Now()
 	return true
+}
+
+// RenamePattern changes the name of a live pattern, which is all a saved pattern lets its owner change (the rule is
+// fixed, so alerts keep meaning what they meant). No sample is needed. A save that changes nothing records nothing.
+func RenamePattern(ctx context.Context, o PatternOwner, id int64, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > MaxPatternNameLen || util.StripControl(name) != name {
+		return secretdetection.ErrCustomNameInvalid
+	}
+	owner, err := o.id()
+	if err != nil {
+		return err
+	}
+	err = db.WithTx(ctx, func(ctx context.Context) error {
+		p, err := load(ctx, owner, id)
+		if err != nil || p.Name == name {
+			return err
+		}
+		if err := checkName(ctx, owner, name, id); err != nil {
+			return err
+		}
+		prev := p.Name
+		n, err := db.GetEngine(ctx).Where("id = ? AND owner_id = ? AND deleted_unix = 0", id, owner).Cols("name").Update(&secretscan_model.CustomPattern{Name: name})
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrPatternNotFound // deleted meanwhile
+		}
+		p.Name = name
+		return recordPattern(ctx, levelAction(owner, audit_model.LevelActions{Org: "org.secret_pattern.renamed", Admin: "admin.secret_pattern.renamed"}), p, map[string]any{"previous_name": prev})
+	})
+	return nameRace(ctx, err, owner, name, id)
+}
+
+// TestResult is what the Test button shows for a rule that is accepted: how long the secret found in the sample is
+// and its first characters. Never the sample or the whole secret.
+type TestResult struct {
+	Masked    string
+	SecretLen int
+}
+
+// TestPattern checks a pattern the way a save does and stores nothing. For a rule that is accepted, or refused only
+// because of its keywords or the length of its secret, it also says what it found. The sample is neither returned
+// whole nor logged. The checks bound the cost of the pattern before it runs on the sample.
+func TestPattern(in PatternInput) (*TestResult, error) {
+	in = in.normalize()
+	err := ValidatePattern(in)
+	if err != nil && !errors.Is(err, secretdetection.ErrKeywordMissing) && !errors.Is(err, secretdetection.ErrSecretTooShort) {
+		return nil, err
+	}
+	re, rerr := regexp.Compile(in.Pattern)
+	if rerr != nil {
+		return nil, err
+	}
+	m := re.FindStringSubmatchIndex(in.Sample)
+	if m == nil {
+		return nil, err
+	}
+	g := min(re.NumSubexp(), 1)
+	secret := in.Sample[m[2*g]:m[2*g+1]]
+	res := &TestResult{SecretLen: len(secret), Masked: maskSecret(secret)}
+	return res, err
+}
+
+// maskSecret keeps at most the first four characters of a third of the secret.
+func maskSecret(s string) string {
+	runes := []rune(s)
+	return string(runes[:min(4, len(runes)/3)]) + "…"
 }

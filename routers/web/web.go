@@ -48,6 +48,7 @@ import (
 	repo_setting "forgejo.org/routers/web/repo/setting"
 	shared_actions "forgejo.org/routers/web/shared/actions"
 	"forgejo.org/routers/web/shared/project"
+	shared_security "forgejo.org/routers/web/shared/security"
 	"forgejo.org/routers/web/user"
 	user_setting "forgejo.org/routers/web/user/setting"
 	"forgejo.org/routers/web/user/setting/security"
@@ -920,6 +921,7 @@ func registerRoutes(m *web.Route) {
 	m.Get("/admin/audit", reqSignIn, admin.AuditReq, admin.Audit)
 	m.Get("/admin/config/dependency-graph", reqSignIn, admin.AuditReq, admin.DependencyGraph)
 	m.Get("/admin/config/secret-scanning", reqSignIn, admin.AuditReq, admin.SecretScanning)
+	m.Get("/admin/security/patterns", reqSignIn, admin.AuditReq, admin.SecretPatterns) // read-only for auditors; changes are below
 	// the secret alerts of every repository: site admins and auditors, while secret scanning is on
 	m.Group("/admin/security/secrets", func() {
 		m.Get("", admin.AuditReq, admin.SecretAlerts) // a banner while secret scanning is off
@@ -969,6 +971,12 @@ func registerRoutes(m *web.Route) {
 			m.Post("/dependency-graph/test-connection", admin.DependencyGraphTestConnection)
 			m.Post("/secret-scanning/switches", admin.SecretScanningSwitchesPost)
 			m.Post("/secret-scanning/limits", admin.SecretScanningLimitsPost)
+		})
+
+		m.Group("/security/patterns", func() {
+			m.Post("", admin.SecretPatternAdd)
+			m.Post("/test", common.RateLimitHeavyPlain, shared_security.PatternTest)
+			m.Post("/{id}/{action:rename|enable|disable|delete}", admin.SecretPatternAction)
 		})
 
 		m.Group("/monitor", func() {
@@ -1277,6 +1285,7 @@ func registerRoutes(m *web.Route) {
 		m.Group("/{org}/security/secrets", func() {
 			m.Get("", org.SecurityAlerts)
 			m.Post("/export", common.RateLimitHeavy, org.SecurityAlertsExport)
+			m.Get("/patterns", org.SecurityPatterns)
 		}, context.OrgAssignment(), org.MustSeeSecretAlerts)
 
 		// owner or site admin; the handlers answer 403 (not 404) for visible organizations
@@ -1339,6 +1348,11 @@ func registerRoutes(m *web.Route) {
 				m.Combo("/code_security").Get(org_setting.CodeSecurity).Post(org_setting.CodeSecurityPost)
 				m.Post("/code_security/secret_scanning", org_setting.SecretScanningPost)
 				m.Get("/code_security/secret_scanning/repos", org_setting.SecretScanningOff)
+				m.Group("/code_security/patterns", func() {
+					m.Post("", org_setting.SecretPatternAdd)
+					m.Post("/test", common.RateLimitHeavyPlain, shared_security.PatternTest)
+					m.Post("/{id}/{action:rename|enable|disable|delete}", org_setting.SecretPatternAction)
+				})
 				m.Combo("/branch_workflow").Get(org_setting.BranchWorkflow).
 					Post(web.Bind(forms.BranchWorkflowForm{}), org_setting.BranchWorkflowPost)
 				m.Post("/branch_workflow/branching_model", web.Bind(forms.BranchingModelForm{}), org_setting.BranchingModelPost)

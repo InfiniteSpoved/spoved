@@ -7,5 +7,6 @@
 			{{end}}
 			{{if $c.EnableSecretAlerts}}
 			<a class="item{{if eq .Active "secrets"}} active{{end}}"{{if eq .Active "secrets"}} aria-current="page"{{end}} href="{{$c.OrgLink}}/security/secrets">{{ctx.Locale.Tr "secret_search.title"}}</a>
+			<a class="item{{if eq .Active "patterns"}} active{{end}}"{{if eq .Active "patterns"}} aria-current="page"{{end}} href="{{$c.OrgLink}}/security/secrets/patterns">{{ctx.Locale.Tr "secret_pattern.title"}}</a>
 			{{end}}
 		</nav>

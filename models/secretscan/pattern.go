@@ -115,3 +115,29 @@ func GetCustomPatternsByIDs(ctx context.Context, ids []int64) (map[int64]*Custom
 	}
 	return out, nil
 }
+
+// FindLiveCustomPatterns lists the patterns of the owners that are not deleted, on or off, the site's (owner 0) first.
+func FindLiveCustomPatterns(ctx context.Context, ownerIDs ...int64) ([]*CustomPattern, error) {
+	var out []*CustomPattern
+	return out, db.GetEngine(ctx).Where(builder.In("owner_id", ownerIDs).And(builder.Eq{"deleted_unix": 0})).OrderBy("owner_id, id").Find(&out)
+}
+
+// CountOpenAlertsByRule counts the open alerts of the rules in the repositories that match repoCond, in one query.
+func CountOpenAlertsByRule(ctx context.Context, repoCond builder.Cond, ruleIDs []string) (map[string]int64, error) {
+	out := map[string]int64{}
+	if len(ruleIDs) == 0 {
+		return out, nil
+	}
+	opts := &AlertSearchOptions{RepoCond: repoCond, State: StateOpen, SecretTypes: ruleIDs}
+	var rows []struct {
+		RuleID string
+		N      int64
+	}
+	if err := db.GetEngine(ctx).Table("secret_scanning_alert").Select("rule_id, COUNT(*) AS n").Where(opts.ToConds()).GroupBy("rule_id").Find(&rows); err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out[r.RuleID] = r.N
+	}
+	return out, nil
+}

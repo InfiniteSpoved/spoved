@@ -153,8 +153,13 @@ func hasControl(s string) bool {
 // Secrets runs the list the request asks for and sets ctx.Data["Secrets"]. scope is the visibility rule, link the
 // page's path.
 func Secrets(ctx *context.Context, scope secretscan_service.Scope, link string) bool {
+	custom, err := customSecretTypes(ctx, scope)
+	if err != nil {
+		ctx.ServerError("customSecretTypes", err)
+		return false
+	}
 	page := &SecretsPage{
-		Link: link, Admin: scope.Org == nil, Narrow: scope.Narrow, Types: secretTypes(),
+		Link: link, Admin: scope.Org == nil, Narrow: scope.Narrow, Types: append(secretTypes(), custom...),
 		ClosedStates: secretscan_model.ClosedStates, Result: &secretscan_service.Result{},
 	}
 	ctx.Data["Secrets"] = page
