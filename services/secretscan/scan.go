@@ -270,6 +270,11 @@ func (s *scanner) scanKind(kind string) (requeue bool, err error) {
 	if err != nil {
 		return false, err
 	}
+	if kind == secretscan_model.KindRepo && old != nil && old.Requeue {
+		if err = secretscan_model.ClearRequeue(s.ctx, s.repo.ID); err != nil { // the scan takes the row
+			return false, err
+		}
+	}
 	r := &run{scanner: s, kind: kind, old: old, keyCap: s.cfg.MaxAlertsPerRepo, found: map[string]*foundBlob{}, seen: map[string]struct{}{}, keys: map[string]struct{}{}}
 	if kind == secretscan_model.KindPull {
 		r.keyCap = max(r.keyCap/2, 1) // as many secrets as the alert share of the pull refs

@@ -22,37 +22,38 @@ import (
 	"forgejo.org/modules/setting/config"
 )
 
-// requeueBatch is the number of repositories read per query when a switch turns on and scanned repositories are
-// queued again.
+// requeueBatch is the number of repositories read per query when the repositories marked to be scanned again are
+// queued.
 var requeueBatch = 1000
 
-// requeue queues the scanned repositories again (an organization's, or all of them with 0) after a switch turned on.
-// It is a variable so that tests can see what asks for it.
+// requeue queues the repositories marked by a switch that turned on (secretscan_model.MarkRequeue). It is a variable
+// so that tests can see what asks for it. The marks are in the database: if the process stops before it is done, the
+// cron task queues the rest.
 var requeue = startRequeue
 
-// startRequeue runs requeueScanned as a process of its own: after the setting is saved, the request that saved it
-// neither waits for it nor fails with it, and a shutdown or a test cleanup can cancel and wait for it.
-func startRequeue(orgID int64) {
+// startRequeue runs requeueMarked as a process of its own: after the setting is saved, the request that saved it
+// neither waits for it nor fails with it, and a shutdown or a test cleanup can cancel and wait for it. The process
+// is registered before the goroutine starts, so a cleanup that waits for processes can't miss it.
+func startRequeue() {
+	ctx, _, finished := process.GetManager().AddTypedContext(graceful.GetManager().ShutdownContext(), "secret scanning: queue the marked repositories", process.SystemProcessType, true)
 	go func() {
-		ctx, _, finished := process.GetManager().AddTypedContext(graceful.GetManager().ShutdownContext(), "secret scanning: queue the scanned repositories", process.SystemProcessType, true)
 		defer finished()
-		if err := requeueScanned(ctx, orgID, Enqueue); err != nil && ctx.Err() == nil {
-			log.Error("secret scanning: queue the scanned repositories (organization %d): %v", orgID, err)
+		if err := requeueMarked(ctx, Enqueue); err != nil && ctx.Err() == nil {
+			log.Error("secret scanning: queue the marked repositories: %v", err)
 		}
 	}()
 }
 
 // SetOrgSwitch stores an organization's switch and lock. A save that changes nothing does nothing. The setting is
 // stored while the site switch is off too (it has no effect until the site turns on). Turning it on queues the
-// organization's scanned repositories, since pushes while it was off were not scanned.
+// organization's scanned repositories (marked in the same transaction), since pushes while it was off were not scanned.
 func SetOrgSwitch(ctx context.Context, org *user_model.User, on, locked bool) error {
-	changed, wasOn, wasLocked := false, false, false
+	marked := false
 	err := db.WithTx(ctx, func(ctx context.Context) error {
 		before, err := readOrgSwitch(ctx, org.ID)
 		if err != nil {
 			return err
 		}
-		wasOn, wasLocked = before.On, before.Locked
 		changes := audit_model.Changes(
 			map[string]any{"secret_scanning": before.On, "secret_scanning_locked": before.Locked},
 			map[string]any{"secret_scanning": on, "secret_scanning_locked": locked},
@@ -60,7 +61,6 @@ func SetOrgSwitch(ctx context.Context, org *user_model.User, on, locked bool) er
 		if changes == nil {
 			return nil
 		}
-		changed = true
 		if on {
 			err = user_model.DeleteUserSetting(ctx, org.ID, secretscan_model.OrgKey)
 		} else {
@@ -77,27 +77,33 @@ func SetOrgSwitch(ctx context.Context, org *user_model.User, on, locked bool) er
 		if err != nil {
 			return err
 		}
+		// turning it on, or locking it on over repositories that turned it off: pushes while it was off were not scanned
+		if on && (!before.On || locked && !before.Locked) {
+			if err := secretscan_model.MarkRequeue(ctx, org.ID); err != nil {
+				return err
+			}
+			marked = true
+		}
 		// the action key is a literal: TestActionCatalog finds it in the code
 		return user_model.RecordOrg(ctx, "org.secret_scanning.changed", org, changes)
 	})
 	if err != nil {
 		return err
 	}
-	// turning it on, or locking it on over repositories that turned it off: pushes while it was off were not scanned
-	if changed && on && (!wasOn || locked && !wasLocked) {
-		requeue(org.ID)
+	if marked {
+		requeue()
 	}
 	return nil
 }
 
-// requeueScanned hands the scanned repositories (an organization's, or all of them with 0) that secret scanning is
-// on for to queue: not the ones whose own switch is off, in the trash or never scanned (the cron task takes those).
-// The queue drops a repository that is queued already, and a scan with nothing new reads no file, so switching it
-// off and on again costs little; whether the tips are unchanged is not checked (it takes git per repository).
-func requeueScanned(ctx context.Context, orgID int64, queue func(int64)) error {
+// requeueMarked hands the repositories marked by secretscan_model.MarkRequeue to the queue (they are still ready, in no
+// trash and not switched off). The mark stays until the scan takes the repository, so a queue that drops it, or a
+// restart, loses nothing: the cron task queues marked rows too. The queue drops a repository that is queued already,
+// and a scan with nothing new reads no file; whether the tips are unchanged is not checked (it takes git per repository).
+func requeueMarked(ctx context.Context, queue func(int64)) error {
 	var after int64
 	for {
-		ids, err := secretscan_model.ScannedRepoIDsAfter(ctx, orgID, after, requeueBatch)
+		ids, err := secretscan_model.RequeuedRepoIDsAfter(ctx, after, requeueBatch)
 		if err != nil {
 			return err
 		}
@@ -113,8 +119,8 @@ func requeueScanned(ctx context.Context, orgID int64, queue func(int64)) error {
 
 // updateSettings reads the two stored site settings under a lock, lets change edit them (it returns which of the
 // two it changed) and stores the changed ones with who and when, in one SetSettings call: one audit entry
-// (admin.setting.changed). It reports whether anything was stored.
-func updateSettings(ctx context.Context, doer *user_model.User, change func(*setting.SecretScanningState, *setting.SecretScanningConfig) (state, cfg bool)) (stored bool, err error) {
+// (admin.setting.changed), then runs inTx (if any) in the same transaction. It reports whether anything was stored.
+func updateSettings(ctx context.Context, doer *user_model.User, change func(*setting.SecretScanningState, *setting.SecretScanningConfig) (state, cfg bool), inTx func(context.Context) error) (stored bool, err error) {
 	stateKey, cfgKey := setting.Config().SecretScanning.DynKey(), setting.Config().SecretScanningConfig.DynKey()
 	err = db.WithTx(ctx, func(ctx context.Context) error {
 		var state setting.SecretScanningState
@@ -155,7 +161,13 @@ func updateSettings(ctx context.Context, doer *user_model.User, change func(*set
 			return nil
 		}
 		stored = true
-		return system_model.SetSettings(ctx, values)
+		if err := system_model.SetSettings(ctx, values); err != nil {
+			return err
+		}
+		if inTx != nil {
+			return inTx(ctx) // in the same transaction: the setting and what follows from it stand or fall together
+		}
+		return nil
 	})
 	if err != nil || !stored {
 		return false, err
@@ -197,13 +209,18 @@ func SaveSwitches(ctx context.Context, doer *user_model.User, enabled, generic b
 			cfg.GenericRules, cfgChanged = &generic, true
 		}
 		return stateChanged, cfgChanged
+	}, func(ctx context.Context) error {
+		if !turnedOn {
+			return nil
+		}
+		return secretscan_model.MarkRequeue(ctx, 0)
 	})
 	if err != nil {
 		return false, err
 	}
 	if changed && turnedOn {
 		log.Info("Secret scanning turned on by %s", doer.Name)
-		requeue(0)
+		requeue()
 	}
 	return changed, nil
 }
@@ -243,7 +260,7 @@ func SaveLimits(ctx context.Context, doer *user_model.User, limits map[string]in
 			cfg.Limits = nil
 		}
 		return false, true
-	})
+	}, nil)
 }
 
 // LimitError is a limit outside its bounds.

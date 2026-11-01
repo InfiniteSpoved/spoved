@@ -26,20 +26,23 @@ func TestAlertModelIndexes(t *testing.T) {
 	require.NoError(t, err)
 	tables, err := x.DBMetas()
 	require.NoError(t, err)
-	var got []string
-	for _, tb := range tables {
-		if tb.Name != "secret_scanning_alert" {
-			continue
-		}
-		for _, index := range tb.Indexes {
-			kind := "index:"
-			if index.Type == schemas.UniqueType {
-				kind = "unique:"
+	indexes := func(table string) (got []string) {
+		for _, tb := range tables {
+			if tb.Name != table {
+				continue
 			}
-			got = append(got, kind+strings.Join(index.Cols, ","))
+			for _, index := range tb.Indexes {
+				kind := "index:"
+				if index.Type == schemas.UniqueType {
+					kind = "unique:"
+				}
+				got = append(got, kind+strings.Join(index.Cols, ","))
+			}
 		}
+		return got
 	}
 	assert.ElementsMatch(t, []string{
 		"unique:repo_id,index", "unique:repo_id,rule_id,fingerprint", "index:repo_id,state", "index:repo_id,fingerprint",
-	}, got)
+	}, indexes("secret_scanning_alert"))
+	assert.ElementsMatch(t, []string{"unique:repo_id,kind", "index:retry_unix", "index:updated_unix", "index:requeue"}, indexes("secret_scan"))
 }

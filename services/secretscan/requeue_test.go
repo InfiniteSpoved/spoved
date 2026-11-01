@@ -18,17 +18,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func collectRequeued(t *testing.T, orgID int64) []int64 {
+func markedIDs(t *testing.T) []int64 {
+	t.Helper()
+	var ids []int64
+	require.NoError(t, db.GetEngine(t.Context()).Table("secret_scan").Select("repo_id").Where("requeue = ?", true).OrderBy("repo_id").Find(&ids))
+	return ids
+}
+
+func collectRequeued(t *testing.T) []int64 {
 	t.Helper()
 	var got []int64
-	require.NoError(t, requeueScanned(t.Context(), orgID, func(id int64) { got = append(got, id) }))
+	require.NoError(t, requeueMarked(t.Context(), func(id int64) { got = append(got, id) }))
 	slices.Sort(got)
 	return got
 }
 
-// Turning scanning on queues the repositories that were scanned before: the organization's (or all), not the ones whose
-// own switch is off, not the trashed ones, and across more than one batch.
-func TestRequeueScanned(t *testing.T) {
+// Turning scanning on marks the repositories that were scanned before: the organization's (or all), not the ones whose
+// own switch is off, not the trashed ones, and the mark is queued across more than one batch.
+func TestRequeueMarked(t *testing.T) {
 	unittest.PrepareTestEnv(t)
 	ctx := t.Context()
 	// org3 owns repositories 3, 5 and 32; user2 owns 1
@@ -36,35 +43,82 @@ func TestRequeueScanned(t *testing.T) {
 		_, err := db.GetEngine(ctx).Insert(&secretscan_model.Scan{RepoID: id, Kind: secretscan_model.KindRepo, Status: secretscan_model.StatusOK})
 		require.NoError(t, err)
 	}
-	assert.Equal(t, []int64{5, 32}, collectRequeued(t, 3), "repository 3 is still being migrated in the fixtures")
+	mark := func(orgID int64) []int64 {
+		t.Helper()
+		_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET requeue = ?", false)
+		require.NoError(t, err)
+		require.NoError(t, secretscan_model.MarkRequeue(ctx, orgID))
+		return markedIDs(t)
+	}
+	assert.Equal(t, []int64{5, 32}, mark(3), "repository 3 is still being migrated in the fixtures")
 	_, err := db.GetEngine(ctx).Exec("UPDATE repository SET status = 0 WHERE id = 3")
 	require.NoError(t, err)
-	assert.Equal(t, []int64{3, 5, 32}, collectRequeued(t, 3), "the organization's repositories only")
-	assert.Equal(t, []int64{1, 3, 5, 32}, collectRequeued(t, 0))
+	assert.Equal(t, []int64{3, 5, 32}, mark(3), "the organization's repositories only")
+	assert.Equal(t, []int64{3, 5, 32}, collectRequeued(t))
+	assert.Equal(t, []int64{1, 3, 5, 32}, mark(0))
 
-	test.MockVariableValue(&requeueBatch, 1)
-	assert.Equal(t, []int64{3, 5, 32}, collectRequeued(t, 3), "more than one batch")
-	assert.Equal(t, []int64{1, 3, 5, 32}, collectRequeued(t, 0), "more than one batch")
+	defer test.MockVariableValue(&requeueBatch, 1)()
+	assert.Equal(t, []int64{1, 3, 5, 32}, collectRequeued(t), "more than one batch")
 
 	_, err = db.GetEngine(ctx).Exec("UPDATE repository SET secret_scanning_disabled = ? WHERE id = 5", true)
 	require.NoError(t, err)
-	assert.Equal(t, []int64{3, 32}, collectRequeued(t, 3), "a repository that turned it off is left out")
+	assert.Equal(t, []int64{1, 3, 32}, collectRequeued(t), "a repository that turned it off since is left out")
+	assert.Equal(t, []int64{1, 3, 32}, mark(0), "and is not marked")
 
 	_, err = db.GetEngine(ctx).Exec("UPDATE repository SET trashed_unix = 1 WHERE id = 32")
 	require.NoError(t, err)
-	assert.Equal(t, []int64{3}, collectRequeued(t, 3), "a trashed repository is left out")
+	assert.Equal(t, []int64{1, 3}, mark(0), "a trashed repository is left out")
+
+	require.NoError(t, secretscan_model.ClearRequeue(ctx, 1))
+	assert.Equal(t, []int64{3}, collectRequeued(t), "the scan took repository 1")
 
 	_, err = db.GetEngine(ctx).Exec("DELETE FROM secret_scan WHERE repo_id = 3")
 	require.NoError(t, err)
-	assert.Empty(t, collectRequeued(t, 3), "a repository that was never scanned is the cron task's")
+	assert.Empty(t, mark(0)[1:], "a repository that was never scanned is the cron task's, not marked")
 }
 
-// Only a change that turns scanning on for repositories asks for the queue; unlocking an organization that stays on,
+// The mark is set by the save, survives a process that stops before it queued anything, is queued by the cron task
+// and cleared by the scan.
+func TestRequeueMarkSurvivesARestart(t *testing.T) {
+	repo := enable(t)
+	q := mockQueue(t)
+	ctx := audit_model.WithSystem(t.Context(), "test")
+	w := newWork(t, repo)
+	w.commit(map[string]string{"a.txt": "nothing here\n"}, "Dev", "dev@example.com")
+	w.pushDefault()
+	require.NoError(t, Scan(ctx, repo.ID))
+	require.NoError(t, secretscan_model.ClearRequeue(ctx, repo.ID))
+	require.Empty(t, markedIDs(t))
+	_, err := db.GetEngine(ctx).Exec("UPDATE repository SET secret_scanning_disabled = ? WHERE id = ?", false, repo.ID)
+	require.NoError(t, err)
+
+	// the save runs and the process stops before the background queue did anything
+	defer test.MockVariableValue(&requeue, func() {})()
+	doer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	_, err = SaveSwitches(ctx, doer, false, false)
+	require.NoError(t, err)
+	_, err = SaveSwitches(ctx, doer, true, false)
+	require.NoError(t, err)
+	assert.Contains(t, markedIDs(t), repo.ID, "the save marked the scanned repository")
+
+	// after the restart, the cron task queues it
+	require.NoError(t, EnqueueUnscanned(ctx))
+	has, err := q.Has(repo.ID)
+	require.NoError(t, err)
+	assert.True(t, has, "queued by the cron task")
+
+	// the scan takes the row and clears the mark
+	require.NoError(t, Scan(ctx, repo.ID))
+	assert.NotContains(t, markedIDs(t), repo.ID)
+	assert.False(t, scanOf(t, repo.ID, secretscan_model.KindRepo).Requeue)
+}
+
+// Only a change that turns scanning on for repositories marks them and asks for the queue; unlocking an organization that stays on,
 // turning it off and a save without a change don't.
 func TestOrgSwitchRequeues(t *testing.T) {
 	unittest.PrepareTestEnv(t)
 	var asked []int64
-	test.MockVariableValue(&requeue, func(orgID int64) { asked = append(asked, orgID) })
+	defer test.MockVariableValue(&requeue, func() { asked = append(asked, 3) })()
 	ctx := audit_model.WithSystem(t.Context(), "test")
 	org := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
 

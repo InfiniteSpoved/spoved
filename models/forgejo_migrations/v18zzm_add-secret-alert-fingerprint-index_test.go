@@ -19,6 +19,12 @@ var secretAlertIndexes = []string{
 	"index:repo_id,fingerprint",
 }
 
+var secretScanIndexes = []string{
+	"unique:repo_id,kind",
+	"index:retry_unix",
+	"index:updated_unix",
+}
+
 func Test_addSecretAlertFingerprintIndex(t *testing.T) {
 	x, deferable := migration_tests.PrepareTestEnv(t, 0)
 	defer deferable()
@@ -26,8 +32,17 @@ func Test_addSecretAlertFingerprintIndex(t *testing.T) {
 	require.NoError(t, x.Sync(new(v18zzlSecretScanningAlert)))
 	require.ElementsMatch(t, secretAlertIndexes[:3], indexSets(t, x, "secret_scanning_alert"))
 
+	require.NoError(t, x.Sync(new(v18zzlSecretScan)))
+	require.ElementsMatch(t, secretScanIndexes, indexSets(t, x, "secret_scan"))
+	_, err := x.Insert(&v18zzlSecretScan{RepoID: 7, Kind: "repo"})
+	require.NoError(t, err)
+
 	require.NoError(t, addSecretAlertFingerprintIndex(x))
 	require.NoError(t, addSecretAlertFingerprintIndex(x), "the migration can run again")
 
 	assert.ElementsMatch(t, secretAlertIndexes, indexSets(t, x, "secret_scanning_alert"), "the unique keys and the state index survive, the new index exists")
+	assert.ElementsMatch(t, append([]string{"index:requeue"}, secretScanIndexes...), indexSets(t, x, "secret_scan"), "the scan state keeps its keys and gets the new one")
+	n, err := x.Where("repo_id = 7 AND requeue = ?", false).Count(new(v18zzmSecretScan))
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n, "an existing row is not marked")
 }
