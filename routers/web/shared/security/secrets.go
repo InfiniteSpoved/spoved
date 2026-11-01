@@ -82,6 +82,9 @@ func secretTypes() []SecretType {
 	rules := secretdetection.BuiltinRules()
 	out := make([]SecretType, 0, len(rules))
 	for _, r := range rules {
+		if r.ReportAs != "" { // its findings carry another rule's ID, so no alert has this one
+			continue
+		}
 		out = append(out, SecretType{r.ID, r.Name})
 	}
 	slices.SortFunc(out, func(a, b SecretType) int { return strings.Compare(a.Name, b.Name) })
