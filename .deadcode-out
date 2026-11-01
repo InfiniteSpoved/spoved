@@ -50,6 +50,9 @@ forgejo.org/models/perm/access
 forgejo.org/models/repo
 	ReplaceRepoDependencies
 
+forgejo.org/models/secretscan
+	DeleteScans
+
 forgejo.org/models/user
 	IsErrUserWrongType
 	IsErrExternalLoginUserAlreadyExist
