@@ -149,5 +149,6 @@ func SecurityPatterns(ctx *context.Context) {
 	}
 	ctx.Data["Title"] = ctx.Tr("secret_pattern.title")
 	ctx.Data["PageIsOrgSecurity"] = true
+	ctx.Data["CanManagePatterns"] = ctx.Org.IsOwner // the acting owner, site admins included: the settings' rule
 	ctx.HTML(http.StatusOK, tplSecretPatterns)
 }

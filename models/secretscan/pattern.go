@@ -116,10 +116,16 @@ func GetCustomPatternsByIDs(ctx context.Context, ids []int64) (map[int64]*Custom
 	return out, nil
 }
 
-// FindLiveCustomPatterns lists the patterns of the owners that are not deleted, on or off, the site's (owner 0) first.
-func FindLiveCustomPatterns(ctx context.Context, ownerIDs ...int64) ([]*CustomPattern, error) {
+// FindLiveCustomPatterns lists at most limit patterns of the owners that match ownerCond (on owner_id) and are not
+// deleted, on or off, the site's (owner 0) first.
+func FindLiveCustomPatterns(ctx context.Context, ownerCond builder.Cond, limit int) ([]*CustomPattern, error) {
 	var out []*CustomPattern
-	return out, db.GetEngine(ctx).Where(builder.In("owner_id", ownerIDs).And(builder.Eq{"deleted_unix": 0})).OrderBy("owner_id, id").Find(&out)
+	return out, db.GetEngine(ctx).Where(ownerCond.And(builder.Eq{"deleted_unix": 0})).OrderBy("owner_id, id").Limit(limit).Find(&out)
+}
+
+// CountLiveCustomPatterns counts the patterns of the owner that are not deleted, on or off.
+func CountLiveCustomPatterns(ctx context.Context, ownerID int64) (int64, error) {
+	return db.GetEngine(ctx).Where(builder.Eq{"owner_id": ownerID, "deleted_unix": 0}).Count(new(CustomPattern))
 }
 
 // CountOpenAlertsByRule counts the open alerts of the rules in the repositories that match repoCond, in one query.

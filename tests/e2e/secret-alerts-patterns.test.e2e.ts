@@ -14,7 +14,7 @@
 // @watch end
 
 import {expect, type Page} from '@playwright/test';
-import {test} from './utils_e2e.ts';
+import {test, login_user} from './utils_e2e.ts';
 
 const rows = (page: Page) => page.locator('table.secret-patterns-table tbody tr');
 
@@ -50,12 +50,18 @@ test.describe('an organization owner', () => {
     await expect(result).not.toContainText('a1a1a1');
     await expect(rows(page)).toHaveCount(0);
 
-    // a refused rule says why, keeps what was typed and not the test string
+    // a refused rule says why, next to the field, keeps what was typed and not the test string
     await page.locator('#secret-pattern-keywords').fill('zzz-key');
+    await expect(result).toBeEmpty(); // an edit clears the old answer
     await page.locator('#secret-pattern-test').click();
     await expect(result).toContainText('A keyword must appear in the match');
+    await expect(page.locator('#secret-pattern-keywords')).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.locator('#secret-pattern-keywords')).toHaveAttribute('aria-describedby', 'secret-pattern-error');
     await page.locator('#secret-pattern-add').click();
+    await expect(page).toHaveURL(/#secret-pattern-form$/);
     await expect(page.locator('#secret-pattern-error')).toContainText('A keyword must appear in the match');
+    await expect(page.locator('#secret-pattern-error')).toBeInViewport();
+    await expect(page.locator('#secret-pattern-keywords')).toHaveAttribute('aria-invalid', 'true');
     await expect(page.locator('#secret-pattern-name')).toHaveValue(name);
     await expect(page.locator('#secret-pattern-keywords')).toHaveValue('zzz-key');
     await expect(page.locator('#secret-pattern-sample')).toHaveValue('');
@@ -68,7 +74,7 @@ test.describe('an organization owner', () => {
     await expect(rows(page).first()).toContainText(name);
     await expect(rows(page).first()).toContainText('acme-key-[a-z0-9]{20}');
     await expect(rows(page).first()).toContainText('On');
-    await expect(page.locator('#secret-patterns-count')).toContainText('1 of 50 patterns are on.');
+    await expect(page.locator('#secret-patterns-count')).toContainText('1 of 50 patterns are on, including the site\'s.');
     await fitsTheScreen(page);
 
     // the type filter of the list offers it
@@ -76,11 +82,14 @@ test.describe('an organization owner', () => {
     await expect(page.locator('select[name="type"] option', {hasText: name})).toHaveCount(1);
     await page.goto('/org/org3/settings/code_security');
 
-    // disable asks, and says what happens
+    // disable asks, and says what happens; Cancel closes the dialog
     await rows(page).first().getByRole('button', {name: 'Disable'}).click();
     const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', {name: 'Cancel'}).click();
+    await expect(dialog).toHaveCount(0);
+    await rows(page).first().getByRole('button', {name: 'Disable'}).click();
     await expect(dialog).toContainText(`Disable pattern ${name}?`);
-    await expect(dialog).toContainText('stay open');
+    await expect(dialog).toContainText('It has no open alerts.');
     await dialog.getByRole('button', {name: 'Disable pattern'}).click();
     await expect(rows(page).first()).toContainText('Off');
     await rows(page).first().getByRole('button', {name: 'Enable'}).click();
@@ -112,6 +121,19 @@ test.describe('an organization owner', () => {
     await expect(page.locator('.repo-security-tabs a[aria-current="page"]')).toHaveText('Custom patterns');
     await expect(page.locator('#secret-pattern-form')).toHaveCount(0);
     await expect(page.locator('#secret-patterns-manage')).toBeVisible();
+    await fitsTheScreen(page);
+  });
+});
+
+test.describe('an organization member', () => {
+  test.use({user: null, storageState: {cookies: [], origins: []}});
+
+  test('reads names and keywords, never the rule', async ({browser}, workerInfo) => {
+    const page = await (await login_user(browser, workerInfo, 'user4')).newPage();
+    await page.goto('/org/org3/security/secrets/patterns');
+    await expect(page.locator('#secret-patterns-intro')).toContainText('Patterns the organization and the site scan for');
+    await expect(page.locator('#secret-pattern-form')).toHaveCount(0);
+    await expect(page.locator('#secret-patterns-manage')).toHaveCount(0);
     await fitsTheScreen(page);
   });
 });

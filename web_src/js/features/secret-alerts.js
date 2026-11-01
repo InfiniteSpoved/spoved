@@ -22,6 +22,20 @@ function updateBulk() {
 }
 
 // the list: a bar with the number of selected alerts
+// markField marks the custom pattern form's field of a refusal (none for an empty name) and ties the message to it
+function markField(form, name) {
+  for (const el of form.querySelectorAll('[aria-invalid]')) {
+    el.removeAttribute('aria-invalid');
+    el.removeAttribute('aria-describedby');
+    el.closest('.field')?.classList.remove('error');
+  }
+  const el = name && form.querySelector(`[name="${CSS.escape(name)}"]`);
+  if (!el) return;
+  el.setAttribute('aria-invalid', 'true');
+  el.setAttribute('aria-describedby', 'secret-pattern-error');
+  el.closest('.field')?.classList.add('error');
+}
+
 export function initRepoSecretAlerts() {
   // Won't fix needs a comment, and the comment is limited in bytes (as in the service), not in characters
   document.addEventListener('change', (e) => {
@@ -63,40 +77,57 @@ export function initRepoSecretAlerts() {
     const ok = e.target.closest?.('.secret-confirm-ok');
     if (ok) document.getElementById(ok.getAttribute('form'))?.setAttribute('data-confirmed', 'true');
   });
-  // custom patterns: a delete asks for the name (the server checks it again)
+  // custom patterns: a delete asks for the name, its button waits for it (the server checks it again, and without JS
+  // the button stays usable)
+  for (const input of document.querySelectorAll('input[data-confirm-name]')) {
+    const button = document.querySelector(input.getAttribute('data-confirm-button'));
+    if (button) button.disabled = true;
+  }
   document.addEventListener('input', (e) => {
     const input = e.target.closest?.('input[data-confirm-name]');
     if (!input) return;
     const button = document.querySelector(input.getAttribute('data-confirm-button'));
     if (button) button.disabled = input.value.trim().toLowerCase() !== input.getAttribute('data-confirm-name').toLowerCase();
   });
-  // custom patterns: Test posts the form's fields and shows the answer; the server stores nothing
+  // custom patterns: Test posts the form's fields and shows the answer next to the field it is about; the server
+  // stores nothing. An edit clears a Test answer, which was about the old values.
+  document.querySelector('#secret-pattern-test')?.classList.remove('tw-hidden');
+  document.addEventListener('input', (e) => {
+    const form = e.target.closest?.('#secret-pattern-form');
+    const out = form?.querySelector('#secret-pattern-result');
+    if (!out?.querySelector('[data-test-result]')) return;
+    out.replaceChildren();
+    markField(form, '');
+  });
   document.addEventListener('click', async (e) => {
     const button = e.target.closest?.('#secret-pattern-test');
     if (!button) return;
     const form = button.closest('form');
     const out = form.querySelector('#secret-pattern-result');
-    const show = (ok, title, text) => {
+    const show = (ok, title, text, field) => {
       const box = document.createElement('div');
       box.className = `ui message ${ok ? 'positive' : 'negative'}`;
       box.setAttribute('role', ok ? 'status' : 'alert');
+      box.setAttribute('data-test-result', '');
+      if (!ok) box.id = 'secret-pattern-error';
       const head = document.createElement('div');
       head.className = 'header';
       head.textContent = title;
       box.append(head, document.createTextNode(text));
       out.replaceChildren(box);
+      markField(form, field);
     };
     button.disabled = true;
     try {
       const resp = await POST(button.getAttribute('data-url'), {data: new FormData(form)});
       if (resp.ok) {
         const body = await resp.json();
-        show(body.ok, body.title, body.message);
+        show(body.ok, body.title, body.message, body.field);
       } else {
-        show(false, button.getAttribute('data-failed'), resp.status === 429 ? await resp.text() : '');
+        show(false, button.getAttribute('data-failed'), resp.status === 429 ? button.getAttribute('data-rate-limited') : '', '');
       }
     } catch {
-      show(false, button.getAttribute('data-failed'), '');
+      show(false, button.getAttribute('data-failed'), '', '');
     } finally {
       button.disabled = false;
     }

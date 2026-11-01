@@ -973,11 +973,13 @@ func registerRoutes(m *web.Route) {
 			m.Post("/secret-scanning/limits", admin.SecretScanningLimitsPost)
 		})
 
+		// add, test and rename run the engine's checks (rename: the known token formats), so they are heavy
 		m.Group("/security/patterns", func() {
-			m.Post("", admin.SecretPatternAdd)
+			m.Post("", common.RateLimitHeavyPlain, admin.SecretPatternAdd)
 			m.Post("/test", common.RateLimitHeavyPlain, shared_security.PatternTest)
-			m.Post("/{id}/{action:rename|enable|disable|delete}", admin.SecretPatternAction)
-		})
+			m.Post("/{id}/{action:rename}", common.RateLimitHeavyPlain, admin.SecretPatternAction)
+			m.Post("/{id}/{action:enable|disable|delete}", admin.SecretPatternAction)
+		}, shared_security.LimitPatternBody)
 
 		m.Group("/monitor", func() {
 			m.Get("/stats", admin.MonitorStats)
@@ -1349,10 +1351,11 @@ func registerRoutes(m *web.Route) {
 				m.Post("/code_security/secret_scanning", org_setting.SecretScanningPost)
 				m.Get("/code_security/secret_scanning/repos", org_setting.SecretScanningOff)
 				m.Group("/code_security/patterns", func() {
-					m.Post("", org_setting.SecretPatternAdd)
+					m.Post("", common.RateLimitHeavyPlain, org_setting.SecretPatternAdd)
 					m.Post("/test", common.RateLimitHeavyPlain, shared_security.PatternTest)
-					m.Post("/{id}/{action:rename|enable|disable|delete}", org_setting.SecretPatternAction)
-				})
+					m.Post("/{id}/{action:rename}", common.RateLimitHeavyPlain, org_setting.SecretPatternAction)
+					m.Post("/{id}/{action:enable|disable|delete}", org_setting.SecretPatternAction)
+				}, shared_security.LimitPatternBody)
 				m.Combo("/branch_workflow").Get(org_setting.BranchWorkflow).
 					Post(web.Bind(forms.BranchWorkflowForm{}), org_setting.BranchWorkflowPost)
 				m.Post("/branch_workflow/branching_model", web.Bind(forms.BranchingModelForm{}), org_setting.BranchingModelPost)

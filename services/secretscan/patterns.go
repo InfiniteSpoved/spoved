@@ -26,14 +26,23 @@ import (
 	"forgejo.org/modules/util"
 )
 
-// MaxPatternNameLen is the longest name of a custom pattern, in bytes.
-const MaxPatternNameLen = 64
+const (
+	// MaxPatternNameLen is the longest name of a custom pattern, in bytes.
+	MaxPatternNameLen = 64
+	// MaxLivePatterns is how many patterns that are not deleted, on or off, an owner may keep: every page and alert
+	// list reads them.
+	MaxLivePatterns = 200
+)
 
 var (
 	// ErrPatternLimit is a save that would make more than secretdetection.MaxCustomRules enabled patterns of the
 	// site and the organization together (the site's come first, so the site's own count is the limit for a site
 	// pattern).
 	ErrPatternLimit = util.NewInvalidArgumentErrorf("too many custom patterns")
+	// ErrLivePatternLimit is a new pattern of an owner that already keeps MaxLivePatterns, on or off.
+	ErrLivePatternLimit = util.NewInvalidArgumentErrorf("too many custom patterns kept")
+	// ErrConfirmName is a delete confirmed with a name that is not the pattern's.
+	ErrConfirmName = util.NewInvalidArgumentErrorf("the name does not match")
 	// ErrPatternNameTaken is a name another live pattern of the owner has.
 	ErrPatternNameTaken = util.NewAlreadyExistErrorf("a pattern of that name exists")
 	// ErrPatternNotFound is a pattern the owner doesn't have, or one that is deleted.
@@ -99,7 +108,7 @@ func ValidatePattern(in PatternInput) error {
 // included) is refused: the database may refuse or cut it, and the name and keywords are shown. A name with
 // bidirectional-control or zero-width characters is refused too: it could make a label read like another one.
 func validate(in PatternInput) error {
-	if len(in.Name) > MaxPatternNameLen || util.StripControl(in.Name) != in.Name || util.StripFormatting(in.Name) != in.Name { // StripControl also replaces bytes that aren't UTF-8
+	if !validName(in.Name) {
 		return secretdetection.ErrCustomNameInvalid
 	}
 	if util.StripControl(in.Pattern) != in.Pattern {
@@ -111,6 +120,11 @@ func validate(in PatternInput) error {
 		}
 	}
 	return secretdetection.ValidateCustomRule(in.Name, in.Pattern, in.Sample, in.Keywords)
+}
+
+// validName is the store's check of a name; the engine checks it too (ValidateCustomRule).
+func validName(name string) bool {
+	return len(name) <= MaxPatternNameLen && util.StripControl(name) == name && util.StripFormatting(name) == name // StripControl also replaces bytes that aren't UTF-8
 }
 
 // capOwners are the owners whose enabled patterns count against the cap of the owner's patterns.
@@ -214,6 +228,11 @@ func CreatePattern(ctx context.Context, doer *user_model.User, o PatternOwner, i
 		}
 		if err := checkCap(ctx, owner); err != nil {
 			return err
+		}
+		if n, err := secretscan_model.CountLiveCustomPatterns(ctx, owner); err != nil {
+			return err
+		} else if n >= MaxLivePatterns {
+			return ErrLivePatternLimit
 		}
 		if _, err := db.GetEngine(ctx).Insert(p); err != nil {
 			return err
@@ -319,6 +338,16 @@ func SetPatternEnabled(ctx context.Context, o PatternOwner, id int64, enabled bo
 // DeletePattern marks a live pattern deleted and off. The row stays for the label of its alerts. Its tombstone time
 // is made unique among the tombstones of the same name (the unique key has one per second).
 func DeletePattern(ctx context.Context, o PatternOwner, id int64) error {
+	return deletePattern(ctx, o, id, nil)
+}
+
+// DeletePatternConfirmed is DeletePattern of a pattern whose name is confirm (compared without case and surrounding
+// spaces, in the delete's transaction), else ErrConfirmName.
+func DeletePatternConfirmed(ctx context.Context, o PatternOwner, id int64, confirm string) error {
+	return deletePattern(ctx, o, id, &confirm)
+}
+
+func deletePattern(ctx context.Context, o PatternOwner, id int64, confirm *string) error {
 	owner, err := o.id()
 	if err != nil {
 		return err
@@ -327,6 +356,9 @@ func DeletePattern(ctx context.Context, o PatternOwner, id int64) error {
 		p, err := load(ctx, owner, id)
 		if err != nil {
 			return err
+		}
+		if confirm != nil && !strings.EqualFold(strings.TrimSpace(*confirm), p.Name) {
+			return ErrConfirmName
 		}
 		at := timeutil.TimeStampNow()
 		for {
@@ -432,11 +464,15 @@ func (h *hourly) due(id int64) bool {
 }
 
 // RenamePattern changes the name of a live pattern, which is all a saved pattern lets its owner change (the rule is
-// fixed, so alerts keep meaning what they meant). No sample is needed. A save that changes nothing records nothing.
+// fixed, so alerts keep meaning what they meant). No sample is needed. The name is checked as on create. A save that
+// changes nothing records nothing.
 func RenamePattern(ctx context.Context, o PatternOwner, id int64, name string) error {
 	name = strings.TrimSpace(name)
-	if name == "" || len(name) > MaxPatternNameLen || util.StripControl(name) != name {
+	if name == "" || !validName(name) {
 		return secretdetection.ErrCustomNameInvalid
+	}
+	if err := secretdetection.CheckHoldsSecret("name", name); err != nil {
+		return err
 	}
 	owner, err := o.id()
 	if err != nil {
@@ -472,26 +508,45 @@ type TestResult struct {
 }
 
 // TestPattern checks a pattern the way a save does and stores nothing. For a rule that is accepted, or refused only
-// because of its keywords or the length of its secret, it also says what it found. The sample is neither returned
-// whole nor logged. The checks bound the cost of the pattern before it runs on the sample.
+// because a keyword is not in the match or the secret is too short, it also says what it found. The sample is
+// neither returned whole nor logged.
 func TestPattern(in PatternInput) (*TestResult, error) {
 	in = in.normalize()
-	err := ValidatePattern(in)
-	if err != nil && !errors.Is(err, secretdetection.ErrKeywordMissing) && !errors.Is(err, secretdetection.ErrSecretTooShort) {
+	err := validate(in)
+	if err != nil && !sampleChecked(err) {
 		return nil, err
 	}
-	re, rerr := regexp.Compile(in.Pattern)
-	if rerr != nil {
-		return nil, err
+	return found(in), err
+}
+
+// FoundInSample is TestPattern's result for err, the refusal of a save of in: what the pattern found, for a refusal
+// only because a keyword is not in the match or the secret is too short, else nil (the pattern is not run).
+func FoundInSample(in PatternInput, err error) *TestResult {
+	if !sampleChecked(err) {
+		return nil
+	}
+	return found(in.normalize())
+}
+
+// sampleChecked: err is one the engine returns only after it checked the pattern's size and shape and the sample's
+// length, so the pattern may run on the sample. Every other refusal may come before those checks.
+func sampleChecked(err error) bool {
+	return errors.Is(err, secretdetection.ErrKeywordNotInMatch) || errors.Is(err, secretdetection.ErrSecretTooShort)
+}
+
+// found runs the pattern on the sample: only for an input the engine checked (sampleChecked or accepted).
+func found(in PatternInput) *TestResult {
+	re, err := regexp.Compile(in.Pattern)
+	if err != nil {
+		return nil
 	}
 	m := re.FindStringSubmatchIndex(in.Sample)
 	if m == nil {
-		return nil, err
+		return nil
 	}
 	g := min(re.NumSubexp(), 1)
 	secret := in.Sample[m[2*g]:m[2*g+1]]
-	res := &TestResult{SecretLen: len(secret), Masked: maskSecret(secret)}
-	return res, err
+	return &TestResult{SecretLen: len(secret), Masked: maskSecret(secret)}
 }
 
 // maskSecret keeps at most the first four characters of a third of the secret.

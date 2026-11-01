@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
@@ -605,4 +606,80 @@ func TestScanCustomPullAlertsHaveTheirOwnShare(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 9, n.Custom, "the branch's secret has room")
 	assert.EqualValues(t, 8, n.CustomViaPull)
+}
+
+// Test and a refused add run the pattern on the sample only after the engine bounded both: a keyword with a control
+// character is refused before the engine's checks, so it must not let a huge pattern run on a huge sample.
+func TestTestPatternRunsOnlyCheckedPatterns(t *testing.T) {
+	in := PatternInput{
+		Name: "big", Pattern: strings.Repeat(`(?:[a-z0-9]|x[0-9]y)`, 2000) + "q",
+		Sample: strings.Repeat("a", 200<<10), Keywords: []string{"abc\x01"},
+	}
+	start := time.Now()
+	res, err := TestPattern(in)
+	require.ErrorIs(t, err, secretdetection.ErrKeywordMissing)
+	require.NotErrorIs(t, err, secretdetection.ErrKeywordNotInMatch)
+	assert.Nil(t, res)
+	assert.Nil(t, FoundInSample(in, err))
+	assert.Less(t, time.Since(start), 2*time.Second, "the pattern never ran (it took over 10 s when it did)")
+
+	in.Keywords = []string{"abc"}
+	res, err = TestPattern(in)
+	require.ErrorIs(t, err, secretdetection.ErrTestStringTooLong)
+	assert.Nil(t, res)
+
+	// a keyword missing from the match, or a short secret: what was found is shown, masked
+	in = acmeInput("x")
+	in.Keywords = []string{"zork"}
+	res, err = TestPattern(in)
+	require.ErrorIs(t, err, secretdetection.ErrKeywordNotInMatch)
+	require.NotNil(t, res)
+	assert.Equal(t, res, FoundInSample(in, err))
+	assert.Equal(t, "acme…", res.Masked)
+	assert.Nil(t, FoundInSample(in, secretdetection.ErrPatternTooComplex))
+}
+
+func TestRenamePatternChecksTheName(t *testing.T) {
+	ctx, admin := patternCtx(t)
+	p, err := CreatePattern(ctx, admin, SitePatterns, acmeInput("rule"))
+	require.NoError(t, err)
+	for _, name := range []string{"a\u202eb", "a\u200bb", "a\x00b", strings.Repeat("n", MaxPatternNameLen+1)} {
+		require.ErrorIs(t, RenamePattern(ctx, SitePatterns, p.ID, name), secretdetection.ErrCustomNameInvalid, "%q", name)
+	}
+	err = RenamePattern(ctx, SitePatterns, p.ID, "leak "+token("rename"))
+	var holds *secretdetection.HoldsSecretError
+	require.ErrorAs(t, err, &holds)
+	assert.Equal(t, "name", holds.Field)
+	got := unittest.AssertExistsAndLoadBean(t, &secretscan_model.CustomPattern{ID: p.ID})
+	assert.Equal(t, "rule", got.Name)
+}
+
+func TestDeletePatternConfirmed(t *testing.T) {
+	ctx, admin := patternCtx(t)
+	p, err := CreatePattern(ctx, admin, OrgPatterns(org3(t)), acmeInput("Rule One"))
+	require.NoError(t, err)
+	require.ErrorIs(t, DeletePatternConfirmed(ctx, OrgPatterns(org3(t)), p.ID, "rule"), ErrConfirmName)
+	require.ErrorIs(t, DeletePatternConfirmed(ctx, SitePatterns, p.ID, "rule one"), ErrPatternNotFound, "another owner's")
+	require.NoError(t, DeletePatternConfirmed(ctx, OrgPatterns(org3(t)), p.ID, "  rule one "))
+	assert.NotZero(t, unittest.AssertExistsAndLoadBean(t, &secretscan_model.CustomPattern{ID: p.ID}).DeletedUnix)
+}
+
+// An owner keeps at most MaxLivePatterns, on or off; deleted ones don't count.
+func TestLivePatternLimit(t *testing.T) {
+	ctx, admin := patternCtx(t)
+	org := org3(t)
+	rows := make([]*secretscan_model.CustomPattern, MaxLivePatterns)
+	for i := range rows {
+		rows[i] = &secretscan_model.CustomPattern{OwnerID: org.ID, Name: fmt.Sprintf("off %d", i), Pattern: `acme-key-[a-z0-9]{20}`, Keywords: secretscan_model.EncodeKeywords([]string{"acme-key"})}
+	}
+	_, err := db.GetEngine(ctx).Insert(rows)
+	require.NoError(t, err)
+	_, err = CreatePattern(ctx, admin, OrgPatterns(org), acmeInput("one more"))
+	require.ErrorIs(t, err, ErrLivePatternLimit)
+	_, err = CreatePattern(ctx, admin, SitePatterns, acmeInput("site"))
+	require.NoError(t, err, "another owner")
+	first := unittest.AssertExistsAndLoadBean(t, &secretscan_model.CustomPattern{OwnerID: org.ID, Name: "off 0"})
+	require.NoError(t, DeletePattern(ctx, OrgPatterns(org), first.ID))
+	_, err = CreatePattern(ctx, admin, OrgPatterns(org), acmeInput("one more"))
+	require.NoError(t, err)
 }

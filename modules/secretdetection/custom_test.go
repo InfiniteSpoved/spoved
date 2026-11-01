@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"regexp/syntax"
 	"strings"
 	"testing"
 
@@ -58,6 +59,38 @@ func TestCustomRuleHoldingASecretIsRefused(t *testing.T) {
 	withToken := pattern + ` (ghp_[A-Za-z0-9]{36})`
 	require.NoError(t, ValidateCustomRule("rule", withToken, test+" "+leaked, []string{"acme-key"}))
 	require.ErrorIs(t, ValidateCustomRule("rule", withToken, test+" "+leaked, []string{"acme-key", leaked}), ErrPatternHoldsSecret, "a keyword")
+
+	// the refusal names the field and the format, never the token
+	for field, err := range map[string]error{
+		"name":     ValidateCustomRule("leak "+leaked, pattern, test, []string{"acme-key"}),
+		"pattern":  ValidateCustomRule("rule", pattern+"|"+regexp.QuoteMeta(leaked), test, []string{"acme-key"}),
+		"keywords": ValidateCustomRule("rule", withToken, test+" "+leaked, []string{"acme-key", leaked}),
+	} {
+		var holds *HoldsSecretError
+		require.ErrorAs(t, err, &holds, field)
+		assert.Equal(t, field, holds.Field)
+		assert.Equal(t, "GitHub token", holds.Format)
+		assert.NotContains(t, err.Error(), leaked)
+	}
+}
+
+// A pattern that doesn't parse keeps the parser's error, so a page can say what is wrong in plain words; only the
+// keyword-in-match refusal is ErrKeywordNotInMatch.
+func TestCustomRuleRefusalDetails(t *testing.T) {
+	var serr *syntax.Error
+	require.ErrorAs(t, ValidateStoredRule("r", `acme-(key`, []string{"acme"}), &serr)
+	assert.Equal(t, syntax.ErrMissingParen, serr.Code)
+
+	test := "K=acme-" + "key-" + strings.Repeat("a1", 10)
+	err := ValidateCustomRule("r", `acme-key-[a-z0-9]{20}`, test, []string{"zork"})
+	require.ErrorIs(t, err, ErrKeywordNotInMatch)
+	require.ErrorIs(t, err, ErrKeywordMissing)
+	assert.Equal(t, "keywords", RefusalCode(err))
+	for _, keywords := range [][]string{nil, {"ac"}, {"a", "b", "c", "d", "e", "f"}} {
+		err := ValidateCustomRule("r", `acme-key-[a-z0-9]{20}`, test, keywords)
+		require.ErrorIs(t, err, ErrKeywordMissing)
+		require.NotErrorIs(t, err, ErrKeywordNotInMatch, "%q", keywords)
+	}
 }
 
 // The custom rules have a budget of their own: however much work they need, a built-in rule gets its whole budget.

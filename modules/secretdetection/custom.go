@@ -55,6 +55,11 @@ var (
 	ErrPatternHoldsSecret    = errors.New("the name, the pattern or a keyword has a known token format")
 )
 
+// ErrKeywordNotInMatch is the ErrKeywordMissing of a rule that passed every check up to the match of the test
+// string (the pattern, its shape, the keywords' number and size, the test string's length): only a keyword is not in
+// the match.
+var ErrKeywordNotInMatch = fmt.Errorf("%w: a keyword is not in the match", ErrKeywordMissing)
+
 // RefusalCode is a short code of why a rule was refused, for logs: never the
 // error text, which may quote the pattern.
 func RefusalCode(err error) string {
@@ -110,7 +115,7 @@ func ValidateCustomRule(name, pattern, testString string, keywords []string) err
 		return ErrPatternNoMatchInTest
 	}
 	if !keywordsInMatch(rule.Keywords, strings.ToLower(testString[m[0]:m[1]])) {
-		return ErrKeywordMissing
+		return ErrKeywordNotInMatch
 	}
 	if m[2*rule.SecretGroup+1]-m[2*rule.SecretGroup] < MinCustomSecretLen {
 		return ErrSecretTooShort
@@ -124,10 +129,36 @@ func ValidateCustomRule(name, pattern, testString string, keywords []string) err
 	}
 	// the name, the pattern and the keywords are stored and shown (the first two also recorded in the audit log) as
 	// they are: a literal secret written to catch one known leak would land there
-	if fs, _ := builtinDetector().Scan([]byte(name + "\n" + pattern + "\n" + strings.Join(keywords, "\n"))); len(fs) > 0 {
-		return ErrPatternHoldsSecret
+	for _, f := range [][2]string{{"name", name}, {"pattern", pattern}, {"keywords", strings.Join(keywords, "\n")}} {
+		if err := CheckHoldsSecret(f[0], f[1]); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// HoldsSecretError is the ErrPatternHoldsSecret of one field: Field is "name", "pattern" or "keywords", Format the
+// name of the built-in rule that found it (never what it found).
+type HoldsSecretError struct{ Field, Format string }
+
+func (e *HoldsSecretError) Error() string {
+	return ErrPatternHoldsSecret.Error() + " (" + e.Field + ")"
+}
+
+func (e *HoldsSecretError) Unwrap() error { return ErrPatternHoldsSecret }
+
+// CheckHoldsSecret returns a *HoldsSecretError for field if a built-in rule that is on by default finds something in
+// text (a known token format).
+func CheckHoldsSecret(field, text string) error {
+	fs, _ := builtinDetector().Scan([]byte(text))
+	if len(fs) == 0 {
+		return nil
+	}
+	format := fs[0].RuleID
+	if r, ok := RuleByID(format); ok {
+		format = r.Name
+	}
+	return &HoldsSecretError{Field: field, Format: format}
 }
 
 // builtinDetector runs the built-in rules that are on by default.
@@ -158,7 +189,7 @@ func ValidateStoredRule(name, pattern string, keywords []string) error {
 	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrPatternInvalid, err)
+		return fmt.Errorf("%w: %w", ErrPatternInvalid, err) // the *syntax.Error says what is wrong
 	}
 	if err := checkComplexity(pattern); err != nil {
 		return err
@@ -231,7 +262,7 @@ func keywordsInMatch(keywords []string, match string) bool {
 func checkComplexity(pattern string) error {
 	parsed, err := syntax.Parse(pattern, syntax.Perl)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrPatternInvalid, err)
+		return fmt.Errorf("%w: %w", ErrPatternInvalid, err)
 	}
 	sum := 0
 	var tooBig func(r *syntax.Regexp, inRepeat bool) bool

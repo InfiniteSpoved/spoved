@@ -5,9 +5,8 @@
 		{{template "base/alert" .}}
 		<h2 class="ui header">{{ctx.Locale.Tr "security_search.title"}}</h2>
 		{{template "org/security_tabs" (dict "Ctx" . "Active" "patterns")}}
-		<h3 class="ui header">{{ctx.Locale.Tr "secret_pattern.title"}}</h3>
 		{{template "shared/secret_patterns" .}}
-		{{if .IsOrganizationOwner}}<p><a id="secret-patterns-manage" href="{{.OrgLink}}/settings/code_security#custom-patterns">{{ctx.Locale.Tr "secret_pattern.manage"}}</a></p>{{end}}
+		{{if .CanManagePatterns}}<p><a id="secret-patterns-manage" href="{{.OrgLink}}/settings/code_security#custom-patterns">{{ctx.Locale.Tr "secret_pattern.manage"}}</a></p>{{end}}
 	</div>
 </div>
 {{template "base/footer" .}}

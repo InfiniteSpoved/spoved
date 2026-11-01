@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"forgejo.org/modules/ratelimit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/test"
+	app_context "forgejo.org/services/context"
 	secretscan_service "forgejo.org/services/secretscan"
 	"forgejo.org/tests"
 
@@ -110,17 +112,23 @@ func spRefusals(t *testing.T, s *TestSession, owner *user_model.User, base strin
 		change func(map[string]string)
 		title  string
 		field  string
+		text   string
 	}{
-		"invalid":     {func(v map[string]string) { v["pattern"] = `acme-key-(` }, "Invalid pattern", "pattern"},
-		"complex":     {func(v map[string]string) { v["pattern"] = `(acme-key-[a-z0-9]+)+` }, "Pattern is too complex", "pattern"},
-		"keyword":     {func(v map[string]string) { v["keywords"] = "zzz-key" }, "A keyword must appear in the match", "keywords"},
-		"no keyword":  {func(v map[string]string) { v["keywords"] = " , " }, "A keyword must appear in the match", "keywords"},
-		"common word": {func(v map[string]string) { v["keywords"] = "https" }, "A keyword is too common", "keywords"},
-		"has secret":  {func(v map[string]string) { v["name"] = "leak " + "ghp_" + "Zk3Qx9Tm2Lp7Vb4Nc8Rd" + "1Hs6Jw5Yf0Ga2Xeq" }, "The name or pattern holds a secret", "pattern"},
-		"no match":    {func(v map[string]string) { v["sample"] = "nothing to see" }, "No match", "sample"},
-		"name taken":  {func(v map[string]string) { v["name"] = "taken" }, "Name is taken", "name"},
-		"bad name":    {func(v map[string]string) { v["name"] = "a\x1bb" }, "Invalid name", "name"},
-		"long sample": {func(v map[string]string) { v["sample"] = strings.Repeat("x", 4097) }, "Test string is too long", "sample"},
+		"invalid":         {func(v map[string]string) { v["pattern"] = `acme-key-(` }, "Invalid pattern", "pattern", `A "(" has no matching ")".`},
+		"lookahead":       {func(v map[string]string) { v["pattern"] = `acme-key-(?=x)` }, "Invalid pattern", "pattern", "Lookaheads, lookbehinds and backreferences"},
+		"backreference":   {func(v map[string]string) { v["pattern"] = `(acme)-key-\1` }, "Invalid pattern", "pattern", "Lookaheads, lookbehinds and backreferences"},
+		"bad escape":      {func(v map[string]string) { v["pattern"] = `acme-key-\q` }, "Invalid pattern", "pattern", `"\q" is not a valid escape.`},
+		"complex":         {func(v map[string]string) { v["pattern"] = `(acme-key-[a-z0-9]+)+` }, "Pattern is too complex", "pattern", ""},
+		"keyword":         {func(v map[string]string) { v["keywords"] = "zzz-key" }, "A keyword must appear in the match", "keywords", "starts acme"},
+		"no keyword":      {func(v map[string]string) { v["keywords"] = " , " }, "Keywords needed", "keywords", ""},
+		"control keyword": {func(v map[string]string) { v["keywords"] = "acme-key\x01" }, "Keywords needed", "keywords", ""},
+		"common word":     {func(v map[string]string) { v["keywords"] = "https" }, "A keyword is too common", "keywords", ""},
+		"has secret":      {func(v map[string]string) { v["name"] = "leak " + "ghp_" + "Zk3Qx9Tm2Lp7Vb4Nc8Rd" + "1Hs6Jw5Yf0Ga2Xeq" }, "Contains a known token format", "name", "The name contains text in a known token format (GitHub token)"},
+		"no match":        {func(v map[string]string) { v["sample"] = "nothing to see" }, "No match", "sample", ""},
+		"name taken":      {func(v map[string]string) { v["name"] = "taken" }, "Name is taken", "name", ""},
+		"bad name":        {func(v map[string]string) { v["name"] = "a\x1bb" }, "Invalid name", "name", ""},
+		"bidi name":       {func(v map[string]string) { v["name"] = "a\u202eb" }, "Invalid name", "name", ""},
+		"long sample":     {func(v map[string]string) { v["sample"] = strings.Repeat("x", 4097) }, "Test string is too long", "sample", ""},
 	}
 	for name, c := range cases {
 		v := spValues("fresh")
@@ -128,7 +136,11 @@ func spRefusals(t *testing.T, s *TestSession, owner *user_model.User, base strin
 		resp := spPost(t, s, base, v, http.StatusUnprocessableEntity)
 		doc := NewHTMLParser(t, bytes.NewBufferString(resp.Body.String()))
 		assert.Contains(t, secText(t, resp, "#secret-pattern-error"), c.title, name)
-		doc.AssertElement(t, fmt.Sprintf("#secret-pattern-form .field.error [name=%q]", c.field), true)
+		assert.Contains(t, secText(t, resp, "#secret-pattern-error"), c.text, name)
+		assert.NotContains(t, resp.Body.String(), "error parsing regexp", name)
+		doc.AssertElement(t, fmt.Sprintf(`#secret-pattern-form .field.error [name=%q][aria-invalid="true"][aria-describedby="secret-pattern-error"]`, c.field), true)
+		assert.Equal(t, 1, doc.Find("[aria-invalid]").Length(), name+": one field is marked")
+		assert.Equal(t, base+"#secret-pattern-form", doc.Find("#secret-pattern-form").AttrOr("action", ""), name+": the page lands at the form")
 		assert.Equal(t, v["keywords"], doc.Find(`input[name="keywords"]`).AttrOr("value", ""), name)
 		assert.NotContains(t, resp.Body.String(), spSample("a1"), name+": the sample is not echoed")
 		assert.Empty(t, doc.Find(`textarea[name="sample"]`).Text(), name)
@@ -144,7 +156,7 @@ func TestOrgSecretPatterns(t *testing.T) {
 	t.Run("the empty page", func(t *testing.T) {
 		resp := secGet(t, owner, spOrgPage, http.StatusOK)
 		assert.Contains(t, secText(t, resp, "#secret-patterns-none"), "No custom patterns yet. Add one below.")
-		assert.Contains(t, secText(t, resp, "#secret-patterns-count"), "0 of 50 patterns are on.")
+		assert.Contains(t, secText(t, resp, "#secret-patterns-count"), "0 of 50 patterns are on, including the site's.")
 		assert.Empty(t, spRows(t, resp))
 	})
 
@@ -179,6 +191,7 @@ func TestOrgSecretPatterns(t *testing.T) {
 		out = spJSON(t, resp)
 		assert.Equal(t, false, out["ok"])
 		assert.Equal(t, "A keyword must appear in the match", out["title"])
+		assert.Equal(t, "keywords", out["field"])
 		assert.NotContains(t, resp.Body.String(), spSample("a1"))
 		assert.NotContains(t, resp.Body.String(), strings.Repeat("a1", 4))
 		v["pattern"] = `(acme-key-[a-z0-9]+)+`
@@ -188,22 +201,69 @@ func TestOrgSecretPatterns(t *testing.T) {
 		assert.EqualValues(t, 2, spCount(t, 3), "the test stored no pattern (the one added above and the taken one)")
 	})
 
-	t.Run("test is rate limited", func(t *testing.T) {
-		mockRateLimit(t, map[string]setting.RateLimitClass{
-			ratelimit.Heavy: {AuthenticatedRate: slow, AuthenticatedBurst: 1, AnonymousRate: slow, AnonymousBurst: 1},
-		}, "")
-		spPost(t, owner, spOrgBase+"/test", spValues("x"), http.StatusOK)
-		spPost(t, owner, spOrgBase+"/test", spValues("x"), http.StatusTooManyRequests)
+	t.Run("test, add and rename are rate limited", func(t *testing.T) {
+		p := spCreate(t, spOrg3(t), "Limited")
+		for _, c := range []struct {
+			path   string
+			values map[string]string
+			status int
+		}{
+			{spOrgBase + "/test", spValues("x"), http.StatusOK},
+			{spOrgBase, spValues("limited one"), http.StatusSeeOther},
+			{fmt.Sprintf("%s/%d/rename", spOrgBase, p.ID), map[string]string{"name": "Limited 2"}, http.StatusSeeOther},
+		} {
+			mockRateLimit(t, map[string]setting.RateLimitClass{
+				ratelimit.Heavy: {AuthenticatedRate: slow, AuthenticatedBurst: 1, AnonymousRate: slow, AnonymousBurst: 1},
+			}, "")
+			spPost(t, owner, c.path, c.values, c.status)
+			spPost(t, owner, c.path, c.values, http.StatusTooManyRequests)
+		}
 		mockRateLimit(t, map[string]setting.RateLimitClass{}, "")
+	})
+
+	t.Run("a pattern never runs before the engine bounded it", func(t *testing.T) {
+		// a keyword with a control character is refused before the engine's checks: the pattern (over the size
+		// limit) must not run on the sample (over its limit) for the Test answer or the refused add's message
+		v := map[string]string{
+			"name": "big", "pattern": strings.Repeat(`(?:[a-z0-9]|x[0-9]y)`, 200) + "q", "keywords": "abc\x01", "sample": strings.Repeat("a", 8<<10),
+		}
+		start := time.Now()
+		out := spJSON(t, spPost(t, owner, spOrgBase+"/test", v, http.StatusOK))
+		assert.Equal(t, "Keywords needed", out["title"])
+		assert.NotContains(t, out["message"], "starts")
+		resp := spPost(t, owner, spOrgBase, v, http.StatusUnprocessableEntity)
+		assert.Contains(t, secText(t, resp, "#secret-pattern-error"), "Keywords needed")
+		assert.Less(t, time.Since(start), 5*time.Second)
+		// a body larger than the fields can be is refused before it is read
+		v["pattern"], v["sample"] = strings.Repeat(`(?:[a-z0-9]|x[0-9]y)`, 2000)+"q", strings.Repeat("a", 200<<10)
+		for _, path := range []string{spOrgBase + "/test", spOrgBase, spAdmin + "/test", spAdmin} {
+			s := owner
+			if strings.HasPrefix(path, "/admin") {
+				s = loginUser(t, "user1")
+			}
+			spPost(t, s, path, v, http.StatusRequestEntityTooLarge)
+		}
+		assert.Less(t, time.Since(start), 10*time.Second)
 	})
 
 	t.Run("rename, disable, enable and delete", func(t *testing.T) {
 		p := spCreate(t, spOrg3(t), "Lifecycle")
 		id := fmt.Sprint(p.ID)
+		renamed := spAudit(t, "org.secret_pattern.renamed")
 		spPost(t, owner, spOrgBase+"/"+id+"/rename", map[string]string{"name": "Renamed"}, http.StatusSeeOther)
 		assert.Contains(t, strings.Join(spRows(t, secGet(t, owner, spOrgPage, http.StatusOK)), "\n"), "Renamed")
-		assert.EqualValues(t, 1, spAudit(t, "org.secret_pattern.renamed"))
+		assert.Equal(t, renamed+1, spAudit(t, "org.secret_pattern.renamed"))
 		spPost(t, owner, spOrgBase+"/"+id+"/rename", map[string]string{"name": "Acme internal key"}, http.StatusSeeOther) // taken: a flash, no change
+		// a new name gets the checks of a new pattern's
+		spPost(t, owner, spOrgBase+"/"+id+"/rename", map[string]string{"name": "leak " + "ghp_" + "Zk3Qx9Tm2Lp7Vb4Nc8Rd" + "1Hs6Jw5Yf0Ga2Xeq"}, http.StatusSeeOther)
+		flash := owner.GetCookie(app_context.CookieNameFlash)
+		require.NotNil(t, flash)
+		v, err := url.QueryUnescape(flash.Value)
+		require.NoError(t, err)
+		v, err = url.QueryUnescape(v)
+		require.NoError(t, err)
+		assert.Contains(t, v, "The name contains text in a known token format (GitHub token)")
+		spPost(t, owner, spOrgBase+"/"+id+"/rename", map[string]string{"name": "Re\u202enamed"}, http.StatusSeeOther)
 		got, err := secretscan_model.GetCustomPattern(t.Context(), 3, p.ID)
 		require.NoError(t, err)
 		assert.Equal(t, "Renamed", got.Name)
@@ -308,6 +368,10 @@ func TestSecretPatternsAccess(t *testing.T) {
 			doc.AssertElement(t, "#secret-patterns-manage", c.wantText)
 			assert.Equal(t, "Custom patterns", strings.TrimSpace(doc.Find(`.repo-security-tabs a[aria-current="page"]`).Text()), name)
 		}
+		// the manage link follows the acting owner: a site admin who is no member gets it too
+		doc := NewHTMLParser(t, bytes.NewBufferString(secGet(t, admin, spOrgView, http.StatusOK).Body.String()))
+		doc.AssertElement(t, "#secret-patterns-manage", true)
+		assert.Contains(t, secText(t, secGet(t, member, spOrgView, http.StatusOK), "#secret-patterns-intro"), "Patterns the organization and the site scan for")
 		// the tab is on the other pages of the Security area too
 		assert.Contains(t, secGet(t, member, "/org/org3/security/secrets", http.StatusOK).Body.String(), `href="/org/org3/security/secrets/patterns"`)
 	})
@@ -481,10 +545,24 @@ func TestSecretAlertListsCustomTypeFilter(t *testing.T) {
 	}
 	got := options(secGet(t, admin, slAdmin, http.StatusOK))
 	assert.Equal(t, "Site rule", got[site.RuleID()])
-	assert.NotContains(t, got, own.RuleID(), "the instance list offers the site's patterns")
+	assert.Equal(t, "Org rule (org3)", got[own.RuleID()], "the instance list offers the organizations' patterns too")
+	assert.Equal(t, "Other org rule (org6)", got[other.RuleID()])
+	assert.NotContains(t, got, gone.RuleID())
 	assert.Contains(t, got, "github-token", "the built-in rules are still there")
+	rows := secretListRows(t, secGet(t, admin, slAdmin+"?type="+own.RuleID(), http.StatusOK))
+	assert.Equal(t, []string{"org3/sl-root | Org rule | custom/own.env:3 | Open"}, rows)
 
-	rows := secretListRows(t, secGet(t, member, slOrg+"?type="+own.RuleID(), http.StatusOK))
+	// an auditor kept out of an organization by its 2FA requirement isn't offered its patterns
+	setUserFlag(t, 8, "is_auditor", true)
+	_, err := db.GetEngine(db.DefaultContext).Exec("UPDATE `user` SET require_two_factor = ? WHERE id = 3", true)
+	require.NoError(t, err)
+	got = options(secGet(t, loginUser(t, "user8"), slAdmin, http.StatusOK))
+	_, err = db.GetEngine(db.DefaultContext).Exec("UPDATE `user` SET require_two_factor = ? WHERE id = 3", false)
+	require.NoError(t, err)
+	assert.NotContains(t, got, own.RuleID())
+	assert.Contains(t, got, other.RuleID())
+
+	rows = secretListRows(t, secGet(t, member, slOrg+"?type="+own.RuleID(), http.StatusOK))
 	assert.Equal(t, []string{"org3/sl-root | Org rule | custom/own.env:3 | Open"}, rows)
 	rows = secretListRows(t, secGet(t, admin, slAdmin+"?type="+site.RuleID(), http.StatusOK))
 	assert.Equal(t, []string{"org3/sl-root | Site rule | custom/site.env:3 | Open"}, rows)
