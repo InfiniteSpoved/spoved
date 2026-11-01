@@ -79,7 +79,8 @@ func readKindState(ctx context.Context, repoID int64, kind string) kindState {
 // (compared with the sequence read before the scan started, so a push that came meanwhile keeps its mark for the next
 // scan) and, only after that succeeded and nothing is in a transaction, mails the new alerts. A wiki that keeps failing
 // does not hold back the digest of a code push. A mark is dropped, with a warning, after digestMaxAge, and a digest
-// that would come within DigestMinInterval of the last one waits. A mail that fails to go out is not tried again:
+// that would come within DigestMinInterval of the last one waits (a held digest is mailed by the next pass, so it can
+// be up to about 75 minutes late: 15 minutes, then the cron task's hourly pass). A mail that fails to go out is not tried again:
 // a digest is sent at most once.
 func finishDigest(ctx context.Context, repo *repo_model.Repository, m *notifyMark, states map[string]kindState) {
 	if m == nil {
@@ -93,6 +94,15 @@ func finishDigest(ctx context.Context, repo *repo_model.Repository, m *notifyMar
 		return
 	}
 	kinds := m.kinds
+	if kinds&secretscan_model.DigestKindWiki != 0 && !repo.HasWiki() {
+		// the wiki was turned off after the push: nothing of it is left to scan, so the code part is still mailed
+		log.Warn("secret scanning: the wiki of repository %d is gone: the digest leaves out the wiki push", repo.ID)
+		kinds &^= secretscan_model.DigestKindWiki
+		if kinds&secretscan_model.DigestKindCode == 0 {
+			_, _ = secretscan_model.ClearNotify(ctx, repo.ID, m.seq, m.last)
+			return
+		}
+	}
 	if kinds&(secretscan_model.DigestKindCode|secretscan_model.DigestKindWiki) == 0 {
 		kinds |= secretscan_model.DigestKindCode
 	}
@@ -106,7 +116,7 @@ func finishDigest(ctx context.Context, repo *repo_model.Repository, m *notifyMar
 		log.Warn("secret scanning: the wiki scan of repository %d is failing: the digest leaves out the wiki push", repo.ID)
 		kinds &^= secretscan_model.DigestKindWiki
 	}
-	if m.last != 0 && int64(now)-int64(m.last) < secretscan_model.DigestMinInterval {
+	if m.last != 0 && int64(m.last) <= int64(now) && int64(now)-int64(m.last) < secretscan_model.DigestMinInterval { // a time in the future is no wait
 		return // the next digest carries it
 	}
 	has, err := secretscan_model.HasAlertsAfter(ctx, repo.ID, m.alertID)

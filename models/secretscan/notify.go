@@ -22,6 +22,7 @@ const (
 	DigestKindCode    = 1
 	DigestKindWiki    = 2
 	DigestWikiScanned = 4
+	DigestSeveral     = 8 // the marking pushes were to different refs or kinds: the mail names none
 )
 
 // DigestMinInterval is the shortest time between two digests of one repository: a mark that comes sooner waits, so the
@@ -46,7 +47,8 @@ func truncateUTF8(s string, n int) string {
 // the wiki), by pusherID (0 when no person pushed: a deploy key, an Actions task), ref and commit as shown in the mail.
 // Only a repository whose code has been scanned to its end once is marked (a wiki push also needs the wiki scanned
 // once), so the first scan, a backfill and a rescan (which removes the rows) never mail; a scan that is under way or
-// backing off after a failure does not stop the marking, since the mark waits for the scan. A second push before the
+// backing off after a failure does not stop the marking, since the mark waits for the scan. The first mark's alert boundary is the row's floor (the alerts nobody is owed a digest for), so an alert stored by a
+// scan under way before this push was marked is still mailed. A second push before the
 // digest keeps the first mark's alert boundary and time, takes the newer ref and commit (a wiki push, which has none, keeps them), adds its kind, and keeps the
 // pusher only when it is the same one (else 0: nobody is told "your push"). Every call bumps notify_seq, so the clear
 // of a scan that started before the push is refused. It reports whether a row was marked.
@@ -69,13 +71,13 @@ func MarkNotify(ctx context.Context, repoID, pusherID int64, kind, ref, commit s
 	// the assignments run in this order: MySQL reads the columns as already assigned, so notify_after_unix is last
 	res, err := db.GetEngine(ctx).Exec(
 		"UPDATE secret_scan SET notify_seq = notify_seq + 1,"+
-			" notify_alert_id = CASE WHEN notify_after_unix = 0 THEN (SELECT COALESCE(MAX(id), 0) FROM secret_scanning_alert WHERE repo_id = ?) ELSE notify_alert_id END,"+
+			" notify_alert_id = CASE WHEN notify_after_unix = 0 THEN (CASE WHEN notify_floor > 0 THEN notify_floor ELSE (SELECT COALESCE(MAX(id), 0) FROM secret_scanning_alert WHERE repo_id = ?) END) ELSE notify_alert_id END,"+
 			" notify_pusher_id = CASE WHEN notify_after_unix = 0 OR notify_pusher_id = ? THEN ? ELSE 0 END,"+
-			" notify_kinds = CASE WHEN notify_after_unix = 0 THEN ? ELSE (notify_kinds | ?) END,"+
+			" notify_kinds = CASE WHEN notify_after_unix = 0 THEN ? ELSE (notify_kinds | ? | CASE WHEN (? <> '' AND notify_ref <> '' AND notify_ref <> ?) OR ((notify_kinds & 3) <> ?) THEN 8 ELSE 0 END) END,"+
 			" notify_ref = CASE WHEN ? <> '' THEN ? ELSE notify_ref END, notify_commit = CASE WHEN ? <> '' THEN ? ELSE notify_commit END,"+
 			" notify_after_unix = CASE WHEN notify_after_unix = 0 THEN ? ELSE notify_after_unix END"+
 			" WHERE repo_id = ? AND kind = ? AND completed = ?",
-		repoID, pusherID, pusherID, bits, bits, ref, ref, commit, commit, int64(timeutil.TimeStampNow()), repoID, KindRepo, true,
+		repoID, pusherID, pusherID, bits, bits, ref, ref, bits&3, ref, ref, commit, commit, int64(timeutil.TimeStampNow()), repoID, KindRepo, true,
 	)
 	if err != nil {
 		return false, err
@@ -89,8 +91,8 @@ func MarkNotify(ctx context.Context, repoID, pusherID int64, kind, ref, commit s
 // for the next scan. lastSent is the value of notify_last_unix to store: now when a digest goes out, else the old one.
 func ClearNotify(ctx context.Context, repoID, seq int64, lastSent timeutil.TimeStamp) (bool, error) {
 	res, err := db.GetEngine(ctx).Exec(
-		"UPDATE secret_scan SET notify_after_unix = 0, notify_pusher_id = 0, notify_kinds = 0, notify_ref = '', notify_commit = '', notify_last_unix = ? WHERE repo_id = ? AND kind = ? AND notify_seq = ? AND notify_after_unix <> 0",
-		int64(lastSent), repoID, KindRepo, seq,
+		"UPDATE secret_scan SET notify_after_unix = 0, notify_pusher_id = 0, notify_kinds = 0, notify_ref = '', notify_commit = '', notify_last_unix = ?, notify_floor = (SELECT COALESCE(MAX(id), 0) FROM secret_scanning_alert WHERE repo_id = ?) WHERE repo_id = ? AND kind = ? AND notify_seq = ? AND notify_after_unix <> 0",
+		int64(lastSent), repoID, repoID, KindRepo, seq,
 	)
 	if err != nil {
 		return false, err
@@ -162,4 +164,31 @@ func BuildDigest(ctx context.Context, repoID, afterAlertID int64, kinds []string
 	}
 	d.TotalLocations -= int(other)
 	return d, db.GetEngine(ctx).Where(visible).OrderBy("id").Limit(MaxDigestLocations).Find(&d.Locations)
+}
+
+// AdvanceNotifyFloor moves the floor to the newest alert of the repository, when no push has marked it: called after a
+// pass that left the code up to date. The condition is in the statement, so a mark that comes meanwhile keeps its boundary.
+func AdvanceNotifyFloor(ctx context.Context, repoID int64) error {
+	_, err := db.GetEngine(ctx).Exec(
+		"UPDATE secret_scan SET notify_floor = (SELECT COALESCE(MAX(id), 0) FROM secret_scanning_alert WHERE repo_id = ?) WHERE repo_id = ? AND kind = ? AND completed = ? AND notify_after_unix = 0",
+		repoID, repoID, KindRepo, true,
+	)
+	return err
+}
+
+// DropNotifyMarks removes the digest marks of the repositories in the condition (on secret_scan.repo_id), and reports
+// how many there were: a mark that waited across a switch off and on must not credit a later push to its pusher.
+func DropNotifyMarks(ctx context.Context, cond builder.Cond) (int64, error) {
+	where, args, err := builder.ToSQL(cond)
+	if err != nil {
+		return 0, err
+	}
+	res, err := db.GetEngine(ctx).Exec(append([]any{
+		"UPDATE secret_scan SET notify_after_unix = 0, notify_pusher_id = 0, notify_kinds = 0, notify_ref = '', notify_commit = '' WHERE kind = ? AND notify_after_unix <> 0 AND " + where,
+		KindRepo,
+	}, args...)...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }

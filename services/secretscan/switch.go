@@ -10,6 +10,9 @@ import (
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
+	"forgejo.org/modules/log"
+
+	"xorm.io/builder"
 )
 
 var (
@@ -69,7 +72,18 @@ func SetRepoSwitch(ctx context.Context, repo *repo_model.Repository, on bool) er
 		if err := repo_model.RecordRepoChange(ctx, repo); err != nil {
 			return err
 		}
-		return repo_model.UpdateRepositoryCols(ctx, repo, "secret_scanning_disabled")
+		if err := repo_model.UpdateRepositoryCols(ctx, repo, "secret_scanning_disabled"); err != nil {
+			return err
+		}
+		if !on {
+			return nil
+		}
+		// a digest mark that waited while it was off is stale: its pusher must not be credited with a later push
+		n, err := secretscan_model.DropNotifyMarks(ctx, builder.Eq{"repo_id": repo.ID})
+		if n > 0 {
+			log.Warn("secret scanning: the digest mark of repository %d is dropped without a mail: scanning was switched on again", repo.ID)
+		}
+		return err
 	})
 	if err != nil {
 		repo.SecretScanningDisabled = !s.Own
@@ -89,9 +103,9 @@ func Rescan(ctx context.Context, repo *repo_model.Repository) error {
 		return ErrNotEnabled
 	}
 	err := db.WithTx(ctx, func(ctx context.Context) error {
-		// the delete is the claim: of two rescans at once only one deletes a row and is audited; a scan already running
-		// finds its state row gone and its write fails (secretscan_model.Save: ErrScanMoved), so it is queued again, never saved
-		n, err := secretscan_model.DeleteScans(ctx, repo.ID)
+		// the reset is the claim: of two rescans at once only one changes a row and is audited; a scan already running
+		// finds its state row moved and its write fails (secretscan_model.Save: ErrScanMoved), so it is queued again, never saved
+		n, err := secretscan_model.ResetScans(ctx, repo.ID)
 		if err != nil || n == 0 {
 			return err
 		}

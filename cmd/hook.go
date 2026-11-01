@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -439,8 +440,12 @@ Forgejo or set your environment appropriately.`, "")
 	}
 
 	if isWiki {
-		// the server only measures the wiki again
+		// the server measures the wiki again and marks the repository for the secret digest, which needs one pushed
+		// commit that isn't a deletion
 		hookOptions.IsWiki = true
+		if i := slices.IndexFunc(pushed.NewCommitIDs, func(id string) bool { return !git.IsEmptyCommitID(id, nil) }); i >= 0 {
+			hookOptions.NewCommitIDs = pushed.NewCommitIDs[i : i+1]
+		}
 		if _, extra := private.HookPostReceive(ctx, repoID, hookOptions); extra.HasError() {
 			return fail(ctx, extra.UserMsg, "HookPostReceive failed: %v", extra.Error)
 		}

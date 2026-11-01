@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
@@ -138,9 +139,62 @@ func Enqueue(repoID int64) {
 	if scanQueue == nil || !SiteEnabled(graceful.GetManager().ShutdownContext()) {
 		return
 	}
-	if err := scanQueue.Push(repoID); err != nil && !errors.Is(err, queue.ErrAlreadyInQueue) {
+	if err := pushQueue(repoID); err != nil && !errors.Is(err, queue.ErrAlreadyInQueue) {
 		log.Error("secret scanning: queue repository %d: %v", repoID, err)
 	}
+}
+
+// pushQueue is a variable so that tests can make the queue answer "already queued".
+var pushQueue = func(repoID int64) error { return scanQueue.Push(repoID) }
+
+// stuckAfter is how long a repository may stay marked while the unique queue keeps saying it is queued, before the
+// cron task scans it directly: the queue writes its unique set and its list separately, so a kill between the two
+// leaves an entry in the set that no item stands for, and every later push is refused as a duplicate. maxDirectScans
+// bounds the direct scans of one cron run.
+const (
+	stuckAfter     = time.Hour
+	maxDirectScans = 10
+)
+
+// markedSince is when this process first found a repository marked and "already queued" at the cron task.
+var markedSince = struct {
+	sync.Mutex
+	at map[int64]time.Time
+}{at: map[int64]time.Time{}}
+
+// enqueueMarked queues a marked repository for the cron task. When the queue says it is queued already and the
+// repository has been marked and "queued" for stuckAfter, it scans it here instead (Scan takes the same per-repository
+// lock as the worker), and logs it. direct counts the direct scans of this run.
+func enqueueMarked(ctx context.Context, id int64, direct *int) {
+	if scanQueue == nil || !SiteEnabled(ctx) {
+		return
+	}
+	err := pushQueue(id)
+	markedSince.Lock()
+	defer markedSince.Unlock()
+	if !errors.Is(err, queue.ErrAlreadyInQueue) {
+		delete(markedSince.at, id)
+		if err != nil {
+			log.Error("secret scanning: queue repository %d: %v", id, err)
+		}
+		return
+	}
+	first, ok := markedSince.at[id]
+	if !ok {
+		markedSince.at[id] = time.Now()
+		return
+	}
+	if time.Since(first) < stuckAfter || *direct >= maxDirectScans {
+		return
+	}
+	*direct++
+	delete(markedSince.at, id)
+	log.Warn("secret scanning: repository %d has been marked for %s and the queue says it is queued: scanning it directly", id, time.Since(first).Round(time.Minute))
+	markedSince.Unlock()
+	if err := Scan(ctx, id); err != nil {
+		log.Error("secret scanning: direct scan of repository %d: %v", id, err)
+	}
+	markedSince.Lock()
 }
 
 func handler(items ...int64) (unhandled []int64) {
@@ -173,5 +227,6 @@ func EnqueueUnscanned(ctx context.Context) error {
 	for _, id := range ids {
 		Enqueue(id)
 	}
-	return requeueMarked(ctx, Enqueue)
+	direct := 0
+	return requeueMarked(ctx, func(id int64) { enqueueMarked(ctx, id, &direct) })
 }

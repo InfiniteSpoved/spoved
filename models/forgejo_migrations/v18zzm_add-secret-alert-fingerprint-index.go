@@ -39,6 +39,7 @@ type v18zzmSecretScan struct {
 	NotifyRef       string `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"`
 	NotifyCommit    string `xorm:"VARCHAR(64) NOT NULL DEFAULT ''"`
 	NotifyLastUnix  int64  `xorm:"NOT NULL DEFAULT 0"`
+	NotifyFloor     int64  `xorm:"NOT NULL DEFAULT 0"`
 }
 
 func (v18zzmSecretScan) TableName() string {

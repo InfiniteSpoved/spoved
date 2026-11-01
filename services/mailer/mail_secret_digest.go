@@ -23,18 +23,20 @@ import (
 	"forgejo.org/modules/secretdetection"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/translation"
+	"forgejo.org/modules/util"
 	vulnerability_service "forgejo.org/services/vulnerability"
 )
 
 const tplSecretDigest base.TplName = "secret/digest"
 
-// maxDigestRecipients is the most administrators one digest is mailed to: a repository with more is logged, and the
-// rest read the alerts on the page. (Permissions are checked one recipient at a time, so the number is bounded.)
+// maxDigestRecipients is the most administrators one digest is mailed to, counted after the permission and
+// opt-out checks: a repository with more is logged, and the rest read the alerts on the page.
 const maxDigestRecipients = 100
 
 // SecretDigestInput is what the scan hands over after a push: the alerts above AfterAlertID are the new ones, in the
 // repository's push to Ref (a short name, "" for the wiki) at Commit; PusherID is the person who pushed, 0 when nobody
-// did. Kinds are the secretscan_model.DigestKind* bits of what the pushes touched.
+// did or when the digest holds pushes of more than one person. Kinds are the secretscan_model.DigestKind* bits of what
+// the pushes touched.
 type SecretDigestInput struct {
 	Ref, Commit  string
 	PusherID     int64
@@ -76,16 +78,12 @@ func SendSecretDigest(ctx context.Context, repo *repo_model.Repository, in Secre
 	if err != nil {
 		return err
 	}
-	users := admins.users
-	if len(users) > maxDigestRecipients {
-		log.Warn("secret digest of repository %d: %d administrators, mailed to the first %d", repo.ID, len(users), maxDigestRecipients)
-		users = users[:maxDigestRecipients]
-	}
+	adminUsers := admins.users
 	adminIDs := map[int64]bool{}
-	for _, u := range users {
+	for _, u := range adminUsers {
 		adminIDs[u.ID] = true
 	}
-	adminUsers := users
+	users := adminUsers
 	var pusher *user_model.User
 	if in.PusherID > 0 && !adminIDs[in.PusherID] {
 		if u, err := user_model.GetUserByID(ctx, in.PusherID); err == nil && mailable(u) {
@@ -106,36 +104,58 @@ func SendSecretDigest(ctx context.Context, repo *repo_model.Repository, in Secre
 		names[r.ID] = r.Name
 	}
 	digests := map[string]*secretscan_model.Digest{} // by kinds
-	adminsNotified := false
-	for _, u := range adminUsers { // the administrators first: the pusher's mail says whether they were told
+	digestFor := func(kinds []string) (*secretscan_model.Digest, error) {
+		key := strings.Join(kinds, ",")
+		if d, ok := digests[key]; ok {
+			return d, nil
+		}
+		d, err := secretscan_model.BuildDigest(ctx, repo.ID, in.AfterAlertID, kinds)
+		digests[key] = d
+		return d, err
+	}
+	// who gets a mail: permission and opt-out first, then the cap
+	type recipient struct {
+		user     *user_model.User
+		wikiRead bool
+		digest   *secretscan_model.Digest
+	}
+	eligible := func(u *user_model.User, isPusher bool) (r recipient, ok bool, err error) {
 		perm, err := access_model.GetUserRepoPermission(ctx, repo, u)
+		if err != nil {
+			return recipient{}, false, err
+		}
+		if !vulnerability_service.CanSeeAlerts(&perm, false) || !filter.ShouldEmail(u, user_model.NotifyEventSecretAlert) {
+			return recipient{}, false, nil // the pusher too: the mail names alerts and links to them
+		}
+		wikiRead := perm.CanRead(unit.TypeWiki)
+		kinds := digestKinds(in, isPusher, wikiRead)
+		if len(kinds) == 0 {
+			return recipient{}, false, nil
+		}
+		d, err := digestFor(kinds)
+		if err != nil || d.Alerts == 0 {
+			return recipient{}, false, err
+		}
+		return recipient{u, wikiRead, d}, true, nil
+	}
+	var recipients []recipient
+	for _, u := range adminUsers {
+		r, ok, err := eligible(u, false)
 		if err != nil {
 			return err
 		}
-		if !vulnerability_service.CanSeeAlerts(&perm, false) {
-			continue // the pusher too: the mail names alerts and links to them
+		if ok {
+			recipients = append(recipients, r)
 		}
-		if !filter.ShouldEmail(u, user_model.NotifyEventSecretAlert) {
-			continue
-		}
-		wikiRead := perm.CanRead(unit.TypeWiki)
-		kinds := digestKinds(in, false, wikiRead)
-		if len(kinds) == 0 {
-			continue
-		}
-		key := strings.Join(kinds, ",")
-		d, ok := digests[key]
-		if !ok {
-			if d, err = secretscan_model.BuildDigest(ctx, repo.ID, in.AfterAlertID, kinds); err != nil {
-				return err
-			}
-			digests[key] = d
-		}
-		if d.Alerts == 0 {
-			continue
-		}
-		if err := sendSecretDigestMail(repo, u, d, in, names, false, wikiRead, false); err != nil {
-			log.Error("secret digest to %d: %v", u.ID, err)
+	}
+	if len(recipients) > maxDigestRecipients {
+		log.Warn("secret digest of repository %d: %d administrators to mail, mailed to the first %d", repo.ID, len(recipients), maxDigestRecipients)
+		recipients = recipients[:maxDigestRecipients]
+	}
+	adminsNotified := false
+	for _, r := range recipients { // the administrators first: the pusher's mail says whether they were told
+		if err := sendSecretDigestMail(repo, r.user, r.digest, in, names, false, r.wikiRead, false); err != nil {
+			log.Error("secret digest to %d: %v", r.user.ID, err)
 			continue
 		}
 		adminsNotified = true
@@ -143,25 +163,11 @@ func SendSecretDigest(ctx context.Context, repo *repo_model.Repository, in Secre
 	if pusher == nil {
 		return nil
 	}
-	perm, err := access_model.GetUserRepoPermission(ctx, repo, pusher)
-	if err != nil || !vulnerability_service.CanSeeAlerts(&perm, false) || !filter.ShouldEmail(pusher, user_model.NotifyEventSecretAlert) {
+	r, ok, err := eligible(pusher, true)
+	if err != nil || !ok {
 		return err
 	}
-	wikiRead := perm.CanRead(unit.TypeWiki)
-	kinds := digestKinds(in, true, wikiRead)
-	if len(kinds) == 0 {
-		return nil
-	}
-	d, ok := digests[strings.Join(kinds, ",")]
-	if !ok {
-		if d, err = secretscan_model.BuildDigest(ctx, repo.ID, in.AfterAlertID, kinds); err != nil {
-			return err
-		}
-	}
-	if d.Alerts == 0 {
-		return nil
-	}
-	if err := sendSecretDigestMail(repo, pusher, d, in, names, true, wikiRead, adminsNotified); err != nil {
+	if err := sendSecretDigestMail(repo, pusher, r.digest, in, names, true, r.wikiRead, adminsNotified); err != nil {
 		log.Error("secret digest to %d: %v", pusher.ID, err)
 	}
 	return nil
@@ -171,11 +177,17 @@ func sendSecretDigestMail(repo *repo_model.Repository, u *user_model.User, d *se
 	locale := translation.NewLocale(u.Language)
 	name := repo.FullName()
 	// the push as the mail names it: the branch as code, the commit linked (the arguments are HTML, built escaped); a
-	// wiki push is named only to someone who can read the wiki
+	// wiki push is named only to someone who can read the wiki; pushes of several refs are not named after the last
 	where := locale.Tr("mail.secret_digest.where_push")
 	switch {
+	case in.Kinds&secretscan_model.DigestSeveral != 0:
+		if isPusher {
+			where = locale.Tr("mail.secret_digest.where_several_pusher")
+		} else {
+			where = locale.Tr("mail.secret_digest.where_several")
+		}
 	case in.Ref != "":
-		where = template.HTML("<code>" + template.HTMLEscapeString(in.Ref) + "</code>")
+		where = template.HTML("<code>" + template.HTMLEscapeString(cleanDigestText(in.Ref)) + "</code>")
 		if in.Commit != "" {
 			short := in.Commit[:min(7, len(in.Commit))]
 			link := template.HTML(`<a href="` + template.HTMLEscapeString(repo.HTMLURL()+"/commit/"+in.Commit) + `">` + template.HTMLEscapeString(short) + "</a>")
@@ -197,7 +209,7 @@ func sendSecretDigestMail(repo *repo_model.Repository, u *user_model.User, d *se
 	}
 	places := make([]string, len(d.Locations))
 	for i, l := range d.Locations {
-		places[i] = l.Path
+		places[i] = cleanDigestText(l.Path)
 		if l.StartLine > 0 {
 			places[i] += ":" + strconv.Itoa(l.StartLine)
 		}
@@ -251,4 +263,10 @@ func sendSecretDigestMail(repo *repo_model.Repository, u *user_model.User, d *se
 	msg.Info = fmt.Sprintf("Secret digest: repository %d", repo.ID)
 	SendAsync(msg)
 	return nil
+}
+
+// cleanDigestText removes control, bidirectional and zero-width characters from a branch name or path of git: it can't
+// reorder or hide the text around it in the mail.
+func cleanDigestText(s string) string {
+	return util.StripFormatting(util.StripControl(s))
 }

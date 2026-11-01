@@ -315,3 +315,19 @@ func FirstLocations(ctx context.Context, repoID int64, alertIDs []int64, noWiki 
 func DeleteScans(ctx context.Context, repoID int64) (int64, error) {
 	return db.GetEngine(ctx).Where("repo_id = ?", repoID).Delete(new(Scan))
 }
+
+// ResetScans makes the repository's scan states forget what was scanned (the done tips, the holes, a failure's
+// backoff), so the next scan starts from the beginning; the alerts stay, and so do the completed flag and any digest
+// mark: pushes before or during a rescan still mail only the alerts that are new, and a rescan that finds an alert
+// again mails nothing. Version moves on, so a scan that read the row before can't save it. It returns the number of
+// rows that had something to forget (0 when the rows are already reset: two rescans at once claim it once).
+func ResetScans(ctx context.Context, repoID int64) (int64, error) {
+	res, err := db.GetEngine(ctx).Exec(
+		"UPDATE secret_scan SET scanned_tips = '[]', status = '', error = '', blobs = 0, bytes = 0, skipped_large = 0, fail_count = 0, retry_unix = 0, holes = 0, version = version + 1"+
+			" WHERE repo_id = ? AND NOT (status = '' AND scanned_tips = '[]' AND retry_unix = 0 AND fail_count = 0)", repoID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

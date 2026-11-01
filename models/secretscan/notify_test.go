@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"xorm.io/builder"
 )
 
 func scanRow(t *testing.T, repoID int64, kind string) *Scan {
@@ -104,7 +105,7 @@ func TestMarkNotify(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	row := scanRow(t, 1, KindRepo)
-	assert.Equal(t, DigestKindCode|DigestKindWiki|DigestWikiScanned, row.NotifyKinds)
+	assert.Equal(t, DigestKindCode|DigestKindWiki|DigestWikiScanned|DigestSeveral, row.NotifyKinds, "a code and a wiki push: no single place to name")
 	assert.Equal(t, "main", row.NotifyRef, "a wiki push keeps the ref of the code push")
 	assert.Equal(t, "c1", row.NotifyCommit)
 
@@ -167,4 +168,77 @@ func TestBuildDigest(t *testing.T) {
 	d, err = BuildDigest(ctx, 1, 1<<40, []string{KindRepo})
 	require.NoError(t, err)
 	assert.Zero(t, d.Alerts, "nothing above the boundary")
+}
+
+// The mark's several-pushes bit, the pusher rule, the floor that starts a boundary, ResetScans and DropNotifyMarks.
+func TestMarkNotifyWindow(t *testing.T) {
+	unittest.PrepareTestEnv(t)
+	ctx := t.Context()
+	_, err := db.GetEngine(ctx).Insert(&Scan{RepoID: 1, Kind: KindRepo, Status: StatusOK, Completed: true})
+	require.NoError(t, err)
+	mark := func(pusher int64, ref, commit string) {
+		t.Helper()
+		ok, err := MarkNotify(ctx, 1, pusher, KindRepo, ref, commit)
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+	clear := func() {
+		t.Helper()
+		took, err := ClearNotify(ctx, 1, scanRow(t, 1, KindRepo).NotifySeq, 0)
+		require.NoError(t, err)
+		require.True(t, took)
+	}
+
+	// the boundary of the first mark is the floor: an alert above it, stored before the mark, is owed a mail
+	a1 := &Alert{RepoID: 1, Index: 1, RuleID: "r", Fingerprint: "f1"}
+	require.NoError(t, db.Insert(ctx, a1))
+	require.NoError(t, AdvanceNotifyFloor(ctx, 1))
+	assert.Equal(t, a1.ID, scanRow(t, 1, KindRepo).NotifyFloor)
+	a2 := &Alert{RepoID: 1, Index: 2, RuleID: "r", Fingerprint: "f2"} // stored by a scan under way, before the post-receive hook
+	require.NoError(t, db.Insert(ctx, a2))
+	mark(2, "main", "c1")
+	assert.Equal(t, a1.ID, scanRow(t, 1, KindRepo).NotifyAlertID, "the boundary is the floor, not the newest alert")
+	require.NoError(t, AdvanceNotifyFloor(ctx, 1))
+	assert.Equal(t, a1.ID, scanRow(t, 1, KindRepo).NotifyFloor, "a marked row keeps its floor")
+
+	// one pusher, one ref: named; another ref or another pusher: not
+	mark(2, "main", "c2")
+	row := scanRow(t, 1, KindRepo)
+	assert.Zero(t, row.NotifyKinds&DigestSeveral)
+	assert.EqualValues(t, 2, row.NotifyPusherID)
+	mark(2, "dev", "c3")
+	assert.NotZero(t, scanRow(t, 1, KindRepo).NotifyKinds&DigestSeveral, "two refs")
+	clear()
+	assert.Equal(t, a2.ID, scanRow(t, 1, KindRepo).NotifyFloor, "taking a mark moves the floor to the newest alert")
+	mark(2, "main", "c4")
+	mark(0, "", "") // a deploy key
+	assert.Zero(t, scanRow(t, 1, KindRepo).NotifyPusherID, "a push by nobody takes the pusher variant away")
+	mark(2, "main", "c5")
+	assert.Zero(t, scanRow(t, 1, KindRepo).NotifyPusherID, "and it stays gone")
+	clear()
+
+	// a mark that waited while scanning was off is dropped
+	mark(2, "main", "c6")
+	n, err := DropNotifyMarks(ctx, builder.Eq{"repo_id": 1})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n)
+	row = scanRow(t, 1, KindRepo)
+	assert.Zero(t, row.NotifyAfterUnix)
+	assert.Zero(t, row.NotifyPusherID)
+
+	// a rescan forgets the tips and the holes, and keeps the completed flag and the mark
+	mark(2, "main", "c7")
+	_, err = db.GetEngine(ctx).Exec("UPDATE secret_scan SET scanned_tips = '[\"x\"]', holes = 3 WHERE repo_id = 1")
+	require.NoError(t, err)
+	n, err = ResetScans(ctx, 1)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n)
+	row = scanRow(t, 1, KindRepo)
+	assert.Equal(t, "[]", row.ScannedTips)
+	assert.Zero(t, row.Holes)
+	assert.True(t, row.Completed)
+	assert.NotZero(t, row.NotifyAfterUnix)
+	n, err = ResetScans(ctx, 1)
+	require.NoError(t, err)
+	assert.Zero(t, n, "rows that are reset already are not claimed twice")
 }

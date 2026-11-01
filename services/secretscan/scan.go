@@ -189,11 +189,17 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 		rq, kerr := s.scanKind(kind)
 		requeue = requeue || rq
 		err = errors.Join(err, kerr)
-		if mark != nil && kind != secretscan_model.KindPull && !rq && kerr == nil { // the digest never waits for the pull refs
+		if kind != secretscan_model.KindPull && !rq && kerr == nil { // the digest never waits for the pull refs
 			states[kind] = readKindState(ctx, repo.ID, kind)
 		}
 	}
 	finishDigest(ctx, repo, mark, states) // waits for the kinds the push touched, never for the pull refs
+	if mark == nil && states[secretscan_model.KindRepo].current {
+		// nothing is owed for the alerts up to now: a later push's digest starts after them
+		if err := secretscan_model.AdvanceNotifyFloor(ctx, repo.ID); err != nil {
+			log.Error("secret scanning: advance the digest floor of repository %d: %v", repo.ID, err)
+		}
+	}
 	return requeue, err
 }
 

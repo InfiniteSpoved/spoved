@@ -2967,6 +2967,8 @@
 	"mail.secret_digest.where_commit": "%[1]s (commit %[2]s)",
 	"mail.secret_digest.where_wiki": "the wiki",
 	"mail.secret_digest.where_push": "a push",
+	"mail.secret_digest.where_several": "several recent pushes",
+	"mail.secret_digest.where_several_pusher": "the repository",
 	"mail.secret_digest.wiki_place": "%s (wiki)",
 	"mail.secret_digest.places": {
 		"one": "Location",
@@ -2990,7 +2992,7 @@
 	"mail.secret_digest.foot_admin": "You receive this because you can manage secret alerts in %s. The email never contains the secrets.",
 	"mail.secret_digest.foot_pusher": "You receive this because you pushed these commits to %s. The email never contains the secrets.",
 	"mail.secret_digest.settings": "Notification settings",
-	"settings.notifications.group.security": "Security",
+	"settings.notifications.group.security": "Code security",
 	"settings.notifications.event.secret_alert": "A scan finds new secrets in a repository I administer or push to",
 	"mail.credential_expiry.days": {
 		"one": "%d day",

@@ -127,6 +127,76 @@ func TestSecretDigestNotificationSetting(t *testing.T) {
 	assert.Contains(t, got.Events, "secret_alert")
 }
 
+// A push to the wiki marks the repository too (the hook gives the server one pushed commit), and the mail names the
+// wiki and its place; it goes to the administrators and to the pusher of the wiki.
+func TestSecretDigestAfterWikiPush(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		defer test.MockVariableValue(&setting.SecretScanning.Enabled, true)()
+		sys := audit_model.WithSystem(db.DefaultContext, "test")
+		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+		repo := depNewRepo(t, user2, user2, "digest-wiki", false, 0)
+		require.NoError(t, db.Insert(sys, &repo_model.Collaboration{RepoID: repo.ID, UserID: 5, Mode: perm.AccessModeWrite}))
+		require.NoError(t, db.Insert(sys, &access_model.Access{UserID: 5, RepoID: repo.ID, Mode: perm.AccessModeWrite}))
+		for _, id := range []int64{2, 5} {
+			_, err := db.GetEngine(sys).Exec("UPDATE `user` SET email_notifications_preference = 'enabled' WHERE id = ?", id)
+			require.NoError(t, err)
+		}
+		token := getTokenForLoggedInUser(t, loginUser(t, "user2"), auth_model.AccessTokenScopeAll)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", "/api/v1/repos/user2/digest-wiki/wiki/new", &api.CreateWikiPageOptions{Title: "Home", ContentBase64: "aG9tZQ=="}).AddTokenAuth(token), http.StatusCreated)
+		require.NoError(t, secretscan_service.Scan(sys, repo.ID)) // the baseline of the code and of the wiki
+		wiki, err := secretscan_model.GetScan(sys, repo.ID, secretscan_model.KindWiki)
+		require.NoError(t, err)
+		require.NotNil(t, wiki)
+		require.True(t, wiki.Completed)
+
+		var mu sync.Mutex
+		var sent []*mailer.Message
+		defer test.MockVariableValue(&mailer.SendAsync, func(msgs ...*mailer.Message) {
+			mu.Lock()
+			defer mu.Unlock()
+			sent = append(sent, msgs...)
+		})()
+		mailsTo := func() map[string]*mailer.Message {
+			mu.Lock()
+			defer mu.Unlock()
+			by := map[string]*mailer.Message{}
+			for _, m := range sent {
+				if strings.Contains(m.Subject, "digest-wiki") {
+					addr, err := mail.ParseAddress(m.To)
+					require.NoError(t, err)
+					by[addr.Address] = m
+				}
+			}
+			return by
+		}
+
+		canary := "ghp" + "_" + "Aq8Yx7Wv6Ut5" + "Sr4Qp3On2Ml1Kj0" + "Ih9Gf8Ed7Cb6"
+		wikiURL := *u
+		wikiURL.User = url.UserPassword("user5", userPassword)
+		wikiURL.Path = "/user2/digest-wiki.wiki.git"
+		dir := t.TempDir()
+		cloneWiki(t, dir, &wikiURL)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "Keys.md"), []byte("token: "+canary+"\n"), 0o644))
+		for _, args := range [][]string{{"add", "-A"}, {"-c", "user.name=U5", "-c", "user.email=user5@example.com", "commit", "-q", "-m", "add keys"}, {"push", "-q", "origin", "HEAD"}} {
+			_, _, err := git.NewCommand(t.Context()).AddArguments(git.ToTrustedCmdArgs(args)...).RunStdString(&git.RunOpts{Dir: dir})
+			require.NoError(t, err)
+		}
+
+		require.Eventually(t, func() bool { return len(mailsTo()) >= 2 }, 20*time.Second, 100*time.Millisecond)
+		got := mailsTo()
+		admin, pusher := got["user2@example.com"], got["user5@example.com"]
+		require.NotNil(t, admin, "%v", got)
+		require.NotNil(t, pusher, "%v", got)
+		assert.Contains(t, admin.Body, "A scan of the wiki found 1 secret")
+		assert.Contains(t, admin.Body, "Keys.md:1 (wiki)")
+		assert.Contains(t, pusher.Body, "Your push to the wiki contains 1 secret")
+		for _, m := range got {
+			assert.NotContains(t, m.Subject+m.Body, canary)
+			assert.NotContains(t, m.Subject+m.Body, strings.TrimPrefix(canary, "ghp"+"_"))
+		}
+	})
+}
+
 func scanRow(t *testing.T, repoID int64) *secretscan_model.Scan {
 	t.Helper()
 	s, err := secretscan_model.GetScan(t.Context(), repoID, secretscan_model.KindRepo)

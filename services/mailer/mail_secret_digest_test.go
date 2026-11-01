@@ -201,4 +201,15 @@ func TestSendSecretDigest(t *testing.T) {
 		assert.Contains(t, got[user2].Body, "A scan of a push found", "someone who can't read the wiki is never told of a push to it")
 		assert.NotContains(t, got[user2].Body, "wiki")
 	})
+
+	t.Run("several pushes are not named after the last, and invisible characters are stripped", func(t *testing.T) {
+		got := send(SecretDigestInput{Kinds: kindsCode | secretscan_model.DigestSeveral, Ref: "main", Commit: "1a2b3c4d5e6f", PusherID: 5})
+		assert.Contains(t, got[user2].Body, "A scan of several recent pushes found")
+		assert.NotContains(t, got[user2].Body, "1a2b3c4")
+		assert.Contains(t, got[user5].Body, "Your push to the repository contains")
+		got = send(SecretDigestInput{Kinds: kindsCode, Ref: "ma\u202ein\u200b", Commit: "1a2b3c4d5e6f"})
+		assert.Contains(t, got[user2].Body, "<code>main</code>")
+		assert.NotContains(t, got[user2].Body, "\u202e")
+		assert.NotContains(t, got[user2].Body, "\u200b")
+	})
 }

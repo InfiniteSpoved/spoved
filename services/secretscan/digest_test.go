@@ -6,14 +6,17 @@ package secretscan
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"testing"
 	"time"
 
+	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
 	"forgejo.org/modules/log"
+	"forgejo.org/modules/queue"
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/services/mailer"
@@ -234,15 +237,110 @@ func TestDigestMarkRules(t *testing.T) {
 		assert.True(t, slices.Contains(filtered, true), "the drop is logged at warn level")
 	})
 
-	t.Run("a rescan removes the mark", func(t *testing.T) {
+	t.Run("an alert a scan under way stored before the push was marked is still mailed", func(t *testing.T) {
+		*sent = nil
+		noWait()
+		require.NoError(t, Scan(ctx, repo.ID)) // the pass ends: the floor is the newest alert
+		stored := &secretscan_model.Alert{RepoID: repo.ID, Index: 5000, RuleID: "github-token", Fingerprint: fmt.Sprintf("%064d", 5000)}
+		require.NoError(t, db.Insert(ctx, stored)) // what a scan under way stores before the hook marks
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "r1")
+		require.NoError(t, Scan(ctx, repo.ID))
+		require.Len(t, *sent, 1)
+		assert.Less(t, (*sent)[0].AfterAlertID, stored.ID, "the boundary is the floor: the stored alert is above it")
+	})
+
+	t.Run("a mark across a switch off and on is dropped", func(t *testing.T) {
+		*sent = nil
+		noWait()
+		sys := audit_model.WithSystem(ctx, "test")
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "s1")
+		require.NotZero(t, mark().NotifyAfterUnix)
+		require.NoError(t, SetRepoSwitch(sys, repo, false))
+		require.NoError(t, SetRepoSwitch(sys, repo, true))
+		assert.Zero(t, mark().NotifyAfterUnix, "the old pusher is not credited with a later push")
+		assert.Zero(t, mark().NotifyPusherID)
+	})
+
+	t.Run("a rescan keeps the mark, and re-found alerts are not mailed", func(t *testing.T) {
+		*sent = nil
+		noWait()
+		sys := audit_model.WithSystem(ctx, "test")
+		require.NoError(t, Scan(ctx, repo.ID))
 		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "c5")
 		require.NotZero(t, mark().NotifyAfterUnix)
-		_, err := secretscan_model.DeleteScans(ctx, repo.ID)
-		require.NoError(t, err)
-		*sent = nil
+		require.NoError(t, Rescan(sys, repo))
+		assert.NotZero(t, mark().NotifyAfterUnix, "the mark is kept")
+		assert.True(t, mark().Completed, "and so is the completed flag")
+		require.NoError(t, Scan(ctx, repo.ID)) // the whole history again: every alert is found again
+		for range 3 {
+			require.NoError(t, Scan(ctx, repo.ID))
+		}
+		assert.Empty(t, *sent, "an alert that is found again is no new alert")
+		assert.Zero(t, mark().NotifyAfterUnix, "the mark was taken")
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "c6")
+		require.NoError(t, Rescan(sys, repo))
+		w.commit(map[string]string{"h.env": "T=" + token("during-rescan") + "\n"})
+		w.pushDefault()
 		require.NoError(t, Scan(ctx, repo.ID))
-		assert.Empty(t, *sent, "the rescan is a first scan again")
+		assert.Len(t, *sent, 1, "a push right before a rescan still mails what is new")
 	})
+
+	t.Run("a future last-sent time is no wait", func(t *testing.T) {
+		*sent = nil
+		_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET notify_last_unix = ? WHERE repo_id = ? AND kind = ?", time.Now().Unix()+7200, repo.ID, secretscan_model.KindRepo)
+		require.NoError(t, err)
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "f1")
+		_, err = db.GetEngine(ctx).Insert(&secretscan_model.Alert{RepoID: repo.ID, Index: 6000, RuleID: "github-token", Fingerprint: fmt.Sprintf("%064d", 6000)})
+		require.NoError(t, err)
+		finishDigest(ctx, repo, readMark(ctx, repo.ID), upToDate)
+		assert.Len(t, *sent, 1)
+	})
+
+	t.Run("a wiki turned off after the push leaves the code part of the mark", func(t *testing.T) {
+		*sent = nil
+		noWait()
+		const code, wiki = secretscan_model.DigestKindCode, secretscan_model.DigestKindWiki
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "n2")
+		_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET notify_kinds = ? WHERE repo_id = ? AND kind = ?", code|wiki, repo.ID, secretscan_model.KindRepo)
+		require.NoError(t, err)
+		_, err = db.GetEngine(ctx).Insert(&secretscan_model.Alert{RepoID: repo.ID, Index: 6001, RuleID: "github-token", Fingerprint: fmt.Sprintf("%064d", 6001)})
+		require.NoError(t, err)
+		require.NoError(t, os.RemoveAll(repo.WikiPath())) // what deleting the wiki does
+		noWiki, err := repo_model.GetRepositoryByID(ctx, repo.ID)
+		require.NoError(t, err)
+		require.False(t, noWiki.HasWiki())
+		finishDigest(ctx, noWiki, readMark(ctx, repo.ID), upToDate)
+		require.Len(t, *sent, 1, "the code part is mailed")
+		assert.Equal(t, code, (*sent)[0].Kinds&(code|wiki))
+	})
+}
+
+// The cron task scans a repository itself when the queue has said "already queued" for an hour: the unique queue can
+// keep a set entry that no item stands for after a kill.
+func TestStuckQueueIsRecovered(t *testing.T) {
+	repo := enable(t)
+	mockQueue(t)
+	w := newWork(t, repo)
+	ctx := t.Context()
+	w.commit(map[string]string{"a.txt": "x\n"})
+	w.pushDefault()
+	require.NoError(t, Scan(ctx, repo.ID))
+	require.NoError(t, secretscan_model.MarkRequeue(ctx, 0))
+	require.NotZero(t, scanOf(t, repo.ID, secretscan_model.KindRepo).Requeue)
+	defer test.MockVariableValue(&pushQueue, func(int64) error { return queue.ErrAlreadyInQueue })()
+	lc, cleanup := test.NewLogChecker(log.DEFAULT, log.WARN)
+	defer cleanup()
+	lc.Filter("scanning it directly").StopMark("scanning it directly")
+
+	require.NoError(t, EnqueueUnscanned(ctx))
+	assert.NotZero(t, scanOf(t, repo.ID, secretscan_model.KindRepo).Requeue, "the first sighting only notes the time")
+	markedSince.Lock()
+	markedSince.at[repo.ID] = time.Now().Add(-2 * time.Hour)
+	markedSince.Unlock()
+	require.NoError(t, EnqueueUnscanned(ctx))
+	assert.Zero(t, scanOf(t, repo.ID, secretscan_model.KindRepo).Requeue, "the cron task scanned it: the mark is taken")
+	filtered, _ := lc.Check(5 * time.Second)
+	assert.True(t, slices.Contains(filtered, true), "and logged it at warn level")
 }
 
 // upToDate is a pass that brought the code up to date.
