@@ -99,5 +99,11 @@ func (v18zzlRepository) TableName() string {
 }
 
 func addSecretScanning(x *xorm.Engine) error {
-	return x.Sync(new(v18zzlSecretScan), new(v18zzlSecretScanningAlert), new(v18zzlSecretScanningLocation), new(v18zzlSecretScanningAlertIndex), new(v18zzlRepository))
+	if err := x.Sync(new(v18zzlSecretScan), new(v18zzlSecretScanningAlert), new(v18zzlSecretScanningLocation), new(v18zzlSecretScanningAlertIndex)); err != nil {
+		return err
+	}
+	// v18zzlRepository names one column: without the options, Sync would drop the indexes and unique keys of the
+	// repository table
+	_, err := x.SyncWithOptions(xorm.SyncOptions{IgnoreDropIndices: true, IgnoreConstrains: true}, new(v18zzlRepository))
+	return err
 }

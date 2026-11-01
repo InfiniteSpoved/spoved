@@ -86,11 +86,11 @@ func (*Scan) TableName() string { return "secret_scan" }
 // Alert is one secret (by rule and fingerprint) found in a repository.
 type Alert struct {
 	ID            int64              `xorm:"pk autoincr"`
-	RepoID        int64              `xorm:"UNIQUE(repo_rule_fingerprint) UNIQUE(repo_index) INDEX(repo_state) NOT NULL"`
+	RepoID        int64              `xorm:"UNIQUE(repo_rule_fingerprint) UNIQUE(repo_index) INDEX(repo_state) INDEX(repo_fingerprint) NOT NULL"`
 	Index         int64              `xorm:"UNIQUE(repo_index) NOT NULL"`
 	RuleID        string             `xorm:"VARCHAR(64) UNIQUE(repo_rule_fingerprint) NOT NULL"`
 	SecretType    string             `xorm:"VARCHAR(32) NOT NULL DEFAULT ''"`
-	Fingerprint   string             `xorm:"VARCHAR(64) UNIQUE(repo_rule_fingerprint) NOT NULL"`
+	Fingerprint   string             `xorm:"VARCHAR(64) UNIQUE(repo_rule_fingerprint) INDEX(repo_fingerprint) NOT NULL"`
 	KeyVersion    int                `xorm:"SMALLINT NOT NULL DEFAULT 1"`
 	State         string             `xorm:"VARCHAR(16) INDEX(repo_state) NOT NULL DEFAULT 'open'"`
 	Reason        string             `xorm:"VARCHAR(16) NOT NULL DEFAULT ''"` // set when the alert is closed (written by the API and the pages)

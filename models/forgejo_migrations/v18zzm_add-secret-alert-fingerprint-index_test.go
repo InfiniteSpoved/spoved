@@ -7,33 +7,37 @@ import (
 	"testing"
 
 	migration_tests "forgejo.org/models/gitea_migrations/test"
+	secretscan_model "forgejo.org/models/secretscan"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var secretAlertIndexes = []string{
+	"unique:repo_id,index",
+	"unique:repo_id,rule_id,fingerprint",
+	"index:repo_id,state",
+	"index:repo_id,fingerprint",
+}
 
 func Test_addSecretAlertFingerprintIndex(t *testing.T) {
 	x, deferable := migration_tests.PrepareTestEnv(t, 0)
 	defer deferable()
 	require.NotNil(t, x)
 	require.NoError(t, x.Sync(new(v18zzlSecretScanningAlert)))
+	require.ElementsMatch(t, secretAlertIndexes[:3], indexSets(t, x, "secret_scanning_alert"))
 
 	require.NoError(t, addSecretAlertFingerprintIndex(x))
 	require.NoError(t, addSecretAlertFingerprintIndex(x), "the migration can run again")
 
-	tables, err := x.DBMetas()
-	require.NoError(t, err)
-	found := false
-	for _, table := range tables {
-		if table.Name != "secret_scanning_alert" {
-			continue
-		}
-		for _, index := range table.Indexes {
-			if len(index.Cols) == 2 && index.Cols[0] == "repo_id" && index.Cols[1] == "fingerprint" {
-				found = true
-				assert.Equal(t, 1, index.Type, "a plain index (xorm IndexType)")
-			}
-		}
-	}
-	assert.True(t, found, "an index on (repo_id, fingerprint)")
+	assert.ElementsMatch(t, secretAlertIndexes, indexSets(t, x, "secret_scanning_alert"), "the unique keys and the state index survive, the new index exists")
+}
+
+// A fresh install creates the table from the model: it must have the same indexes as an upgraded one.
+func Test_secretAlertModelHasTheIndexes(t *testing.T) {
+	x, deferable := migration_tests.PrepareTestEnv(t, 0)
+	defer deferable()
+	require.NotNil(t, x)
+	require.NoError(t, x.Sync(new(secretscan_model.Alert)))
+	assert.ElementsMatch(t, secretAlertIndexes, indexSets(t, x, "secret_scanning_alert"))
 }

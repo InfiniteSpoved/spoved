@@ -26,5 +26,8 @@ func (v18zzmSecretScanningAlert) TableName() string {
 }
 
 func addSecretAlertFingerprintIndex(x *xorm.Engine) error {
-	return x.Sync(new(v18zzmSecretScanningAlert))
+	// the struct names only the two columns: without the options, Sync would drop every other index and unique key
+	// of the table (repo_index, repo_rule_fingerprint, repo_state)
+	_, err := x.SyncWithOptions(xorm.SyncOptions{IgnoreDropIndices: true, IgnoreConstrains: true}, new(v18zzmSecretScanningAlert))
+	return err
 }

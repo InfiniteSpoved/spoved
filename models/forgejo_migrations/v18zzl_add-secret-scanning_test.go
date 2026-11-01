@@ -9,13 +9,38 @@ import (
 
 	migration_tests "forgejo.org/models/gitea_migrations/test"
 
+	"code.forgejo.org/xorm/xorm"
+	"code.forgejo.org/xorm/xorm/schemas"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type v18zzlTestRepository struct {
-	ID   int64 `xorm:"pk autoincr"`
-	Name string
+	ID      int64  `xorm:"pk autoincr"`
+	OwnerID int64  `xorm:"UNIQUE(s) INDEX"`
+	Name    string `xorm:"UNIQUE(s) INDEX"`
+}
+
+// indexSets lists the indexes of a table as "unique:col1,col2" / "index:col1,col2".
+func indexSets(t *testing.T, x *xorm.Engine, table string) []string {
+	t.Helper()
+	tables, err := x.DBMetas()
+	require.NoError(t, err)
+	var sets []string
+	for _, tb := range tables {
+		if tb.Name != table {
+			continue
+		}
+		for _, index := range tb.Indexes {
+			kind := "index:"
+			if index.Type == schemas.UniqueType {
+				kind = "unique:"
+			}
+			sets = append(sets, kind+strings.Join(index.Cols, ","))
+		}
+	}
+	return sets
 }
 
 func (v18zzlTestRepository) TableName() string {
@@ -30,9 +55,13 @@ func Test_addSecretScanning(t *testing.T) {
 	require.NoError(t, x.Sync(new(v18zzlTestRepository)))
 	_, err := x.Insert(&v18zzlTestRepository{Name: "before"})
 	require.NoError(t, err)
+	indexesBefore := indexSets(t, x, "repository")
+	require.ElementsMatch(t, []string{"unique:owner_id,name", "index:owner_id", "index:name"}, indexesBefore)
 
 	require.NoError(t, addSecretScanning(x))
 	require.NoError(t, addSecretScanning(x), "the migration can run again")
+
+	assert.ElementsMatch(t, indexesBefore, indexSets(t, x, "repository"), "the indexes and unique keys of the repository table survive")
 
 	var disabled []bool
 	require.NoError(t, x.SQL("SELECT secret_scanning_disabled FROM repository WHERE name = 'before'").Find(&disabled))
