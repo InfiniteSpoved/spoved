@@ -123,6 +123,40 @@ func FindLiveCustomPatterns(ctx context.Context, ownerCond builder.Cond, limit i
 	return out, db.GetEngine(ctx).Where(ownerCond.And(builder.Eq{"deleted_unix": 0})).OrderBy("owner_id, id").Limit(limit).Find(&out)
 }
 
+// FreeTombstoneTime is the deleted_unix a pattern of the owner and name gets when it is deleted: now, or the next
+// second no tombstone of that name has (the unique key has one per second).
+func FreeTombstoneTime(ctx context.Context, ownerID int64, name string) (timeutil.TimeStamp, error) {
+	at := timeutil.TimeStampNow()
+	for {
+		taken, err := db.GetEngine(ctx).Where("owner_id = ? AND name = ? AND deleted_unix = ?", ownerID, name, at).Exist(new(CustomPattern))
+		if err != nil || !taken {
+			return at, err
+		}
+		at++
+	}
+}
+
+// TombstoneOwnerPatterns deletes the patterns of an organization that is purged, as tombstones (off, the pattern
+// text cleared): an alert in a repository that moved out of the organization earlier keeps its "previous owner"
+// label, which needs the row.
+func TombstoneOwnerPatterns(ctx context.Context, ownerID int64) error {
+	var live []*CustomPattern
+	if err := db.GetEngine(ctx).Where("owner_id = ? AND deleted_unix = 0", ownerID).Find(&live); err != nil {
+		return err
+	}
+	for _, p := range live {
+		at, err := FreeTombstoneTime(ctx, ownerID, p.Name)
+		if err != nil {
+			return err
+		}
+		if _, err := db.GetEngine(ctx).ID(p.ID).Cols("enabled", "deleted_unix").Update(&CustomPattern{DeletedUnix: at}); err != nil {
+			return err
+		}
+	}
+	_, err := db.GetEngine(ctx).Where("owner_id = ?", ownerID).Cols("pattern").Update(&CustomPattern{})
+	return err
+}
+
 // CountLiveCustomPatterns counts the patterns of the owner that are not deleted, on or off.
 func CountLiveCustomPatterns(ctx context.Context, ownerID int64) (int64, error) {
 	return db.GetEngine(ctx).Where(builder.Eq{"owner_id": ownerID, "deleted_unix": 0}).Count(new(CustomPattern))

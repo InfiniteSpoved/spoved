@@ -12,11 +12,13 @@ import (
 	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	"forgejo.org/models/organization"
 	secretscan_model "forgejo.org/models/secretscan"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/util"
+	org_service "forgejo.org/services/org"
 	repo_service "forgejo.org/services/repository"
 	secretscan_service "forgejo.org/services/secretscan"
 	"forgejo.org/tests"
@@ -165,6 +167,23 @@ func TestSecretAlertsOfCustomPatterns(t *testing.T) {
 			cells = append(cells, r[7])
 		}
 		assert.Equal(t, []string{"site off (disabled)", "Pattern of a previous owner"}, cells)
+	})
+	t.Run("purging the previous owner keeps the label", func(t *testing.T) {
+		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+		gone := &organization.Organization{Name: "sl-purged"}
+		require.NoError(t, organization.CreateOrganization(sys, gone, user2))
+		p := create(secretscan_service.OrgPatterns(gone.AsUser()), "purged org live")
+		moved := depNewRepo(t, gone.AsUser(), user2, "sl-from-purged", true, 0)
+		seedSecretAlert(t, moved, p.RuleID(), "custom", secretscan_model.KindRepo, "purged/org.env")
+		require.NoError(t, repo_service.TransferOwnership(sys, admin, user2, moved, nil))
+		require.NoError(t, org_service.DeleteOrganization(sys, gone, true))
+
+		body := secGet(t, loginUser(t, "user2"), "/user2/sl-from-purged/security/secrets", http.StatusOK).Body.String()
+		assert.Contains(t, body, "Pattern of a previous owner")
+		assert.NotContains(t, body, "Deleted pattern")
+		assert.NotContains(t, body, "purged org live")
+		rows := secretListRows(t, secGet(t, loginUser(t, "user1"), slAdmin+"?q=sl-from-purged", http.StatusOK))
+		assert.Equal(t, []string{"user2/sl-from-purged | Pattern of a previous owner | purged/org.env:3 | Open"}, rows)
 	})
 }
 

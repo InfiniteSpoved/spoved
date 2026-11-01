@@ -240,7 +240,9 @@ func refusal(ctx *context.Context, err error, res *secretscan_service.TestResult
 // 4 KiB) with room for the encoding.
 const maxPatternBody = 32 << 10
 
-// LimitPatternBody answers 413 to a pattern form that is larger than its fields can be, before anything reads it.
+// LimitPatternBody answers 413 to a pattern form that is larger than its fields can be. It must run before anything
+// reads the form (FormValue reads the whole body, up to Go's own 10 MB limit), so it is the routes' group middleware,
+// ahead of RateLimitHeavyPlain, which reads a form value.
 func LimitPatternBody(ctx *context.Context) {
 	ctx.Req.Body = http.MaxBytesReader(ctx.Resp, ctx.Req.Body, maxPatternBody)
 	err := ctx.Req.ParseForm() // ParseMultipartForm drops its error for a form that isn't multipart
@@ -342,24 +344,27 @@ const maxInstanceTypes = 1000
 // customSecretTypes are the choices of the type filter for custom patterns, on or off, names only: in an
 // organization's list the site's and the organization's; in the instance list the site's and those of every
 // organization the viewer isn't kept out of by its 2FA requirement, with the organization's name. A deleted pattern's
-// alerts are still listed, just not offered.
-func customSecretTypes(ctx *context.Context, scope secretscan_service.Scope) ([]SecretType, error) {
+// alerts are still listed, just not offered. cut says the instance list was cut at maxInstanceTypes.
+func customSecretTypes(ctx *context.Context, scope secretscan_service.Scope) (types []SecretType, cut bool, err error) {
 	if scope.Org != nil {
 		patterns, err := secretscan_model.FindLiveCustomPatterns(ctx, builder.In("owner_id", 0, scope.Org.ID), 2*secretscan_service.MaxLivePatterns)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		out := make([]SecretType, len(patterns))
 		for i, p := range patterns {
 			out[i] = SecretType{p.RuleID(), p.Name}
 		}
-		return out, nil
+		return out, false, nil
 	}
 	orgs := builder.Select("id").From("`user`").Where(builder.Eq{"type": user_model.UserTypeOrganization, "trashed_unix": 0}.
 		And(builder.NotIn("id", repo_model.TwoFactorBlockingOrgIDs(scope.Doer.ID))))
-	patterns, err := secretscan_model.FindLiveCustomPatterns(ctx, builder.Eq{"owner_id": 0}.Or(builder.In("owner_id", orgs)), maxInstanceTypes)
+	patterns, err := secretscan_model.FindLiveCustomPatterns(ctx, builder.Eq{"owner_id": 0}.Or(builder.In("owner_id", orgs)), maxInstanceTypes+1)
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	if len(patterns) > maxInstanceTypes {
+		patterns, cut = patterns[:maxInstanceTypes], true
 	}
 	var ownerIDs []int64
 	for _, p := range patterns {
@@ -369,7 +374,7 @@ func customSecretTypes(ctx *context.Context, scope secretscan_service.Scope) ([]
 	}
 	owners, err := db.GetByIDs(ctx, "id", ownerIDs, &user_model.User{})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out := make([]SecretType, len(patterns))
 	for i, p := range patterns {
@@ -378,5 +383,5 @@ func customSecretTypes(ctx *context.Context, scope secretscan_service.Scope) ([]
 			out[i].Name += " (" + o.Name + ")"
 		}
 	}
-	return out, nil
+	return out, cut, nil
 }

@@ -6,6 +6,7 @@ package integration
 import (
 	"bytes"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -243,6 +244,16 @@ func TestOrgSecretPatterns(t *testing.T) {
 			}
 			spPost(t, s, path, v, http.StatusRequestEntityTooLarge)
 		}
+		// the Test button sends FormData (multipart)
+		var body bytes.Buffer
+		w := multipart.NewWriter(&body)
+		for k, val := range v {
+			require.NoError(t, w.WriteField(k, val))
+		}
+		require.NoError(t, w.Close())
+		req := NewRequestWithBody(t, "POST", spOrgBase+"/test", &body)
+		req.Header.Set("Content-Type", w.FormDataContentType())
+		owner.MakeRequest(t, req, http.StatusRequestEntityTooLarge)
 		assert.Less(t, time.Since(start), 10*time.Second)
 	})
 
@@ -568,6 +579,31 @@ func TestSecretAlertListsCustomTypeFilter(t *testing.T) {
 	assert.Equal(t, []string{"org3/sl-root | Site rule | custom/site.env:3 | Open"}, rows)
 	doc := NewHTMLParser(t, bytes.NewBufferString(secGet(t, member, slOrg+"?type="+own.RuleID(), http.StatusOK).Body.String()))
 	doc.AssertElement(t, fmt.Sprintf(`select[name="type"] option[value=%q][selected]`, own.RuleID()), true)
+	doc = NewHTMLParser(t, bytes.NewBufferString(secGet(t, admin, slAdmin, http.StatusOK).Body.String()))
+	doc.AssertElement(t, "#secret-types-cut", false)
+
+	// a list cut at its limit says so
+	t.Run("a shortened list says so", func(t *testing.T) {
+		rows := make([]*secretscan_model.CustomPattern, 1000)
+		for i := range rows {
+			rows[i] = &secretscan_model.CustomPattern{Name: fmt.Sprintf("bulk %d", i), Pattern: spPatternR, Keywords: secretscan_model.EncodeKeywords([]string{"acme-key"})}
+		}
+		_, err := db.GetEngine(db.DefaultContext).Insert(rows)
+		require.NoError(t, err)
+		defer func() {
+			_, err := db.GetEngine(db.DefaultContext).Where("name LIKE 'bulk %'").Delete(new(secretscan_model.CustomPattern))
+			require.NoError(t, err)
+		}()
+		resp := secGet(t, admin, slAdmin, http.StatusOK)
+		assert.Contains(t, secText(t, resp, "#secret-types-cut"), "List shortened")
+		custom := 0
+		for id := range options(resp) {
+			if strings.HasPrefix(id, secretscan_model.CustomRulePrefix) {
+				custom++
+			}
+		}
+		assert.Equal(t, 1000, custom)
+	})
 }
 
 // The patterns pages cost a fixed number of queries.

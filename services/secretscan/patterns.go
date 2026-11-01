@@ -22,7 +22,6 @@ import (
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/secretdetection"
 	"forgejo.org/modules/setting"
-	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 )
 
@@ -360,16 +359,9 @@ func deletePattern(ctx context.Context, o PatternOwner, id int64, confirm *strin
 		if confirm != nil && !strings.EqualFold(strings.TrimSpace(*confirm), p.Name) {
 			return ErrConfirmName
 		}
-		at := timeutil.TimeStampNow()
-		for {
-			taken, err := db.GetEngine(ctx).Where("owner_id = ? AND name = ? AND deleted_unix = ?", owner, p.Name, at).Exist(new(secretscan_model.CustomPattern))
-			if err != nil {
-				return err
-			}
-			if !taken {
-				break
-			}
-			at++
+		at, err := secretscan_model.FreeTombstoneTime(ctx, owner, p.Name)
+		if err != nil {
+			return err
 		}
 		n, err := db.GetEngine(ctx).Where("id = ? AND owner_id = ? AND deleted_unix = 0", id, owner).Cols("enabled", "deleted_unix").
 			Update(&secretscan_model.CustomPattern{DeletedUnix: at})

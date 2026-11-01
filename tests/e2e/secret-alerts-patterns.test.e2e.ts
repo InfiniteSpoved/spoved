@@ -107,9 +107,9 @@ test.describe('an organization owner', () => {
     await expect(confirm).toContainText(`Delete pattern ${name} 2?`);
     const ok = confirm.getByRole('button', {name: 'Delete pattern'});
     await expect(ok).toBeDisabled();
-    await confirm.getByRole('textbox', {name: 'Type the pattern name to confirm'}).fill('something else');
+    await confirm.getByRole('textbox', {name: `Type ${name} 2 to confirm`}).fill('something else');
     await expect(ok).toBeDisabled();
-    await confirm.getByRole('textbox', {name: 'Type the pattern name to confirm'}).fill(`${name} 2`);
+    await confirm.getByRole('textbox', {name: `Type ${name} 2 to confirm`}).fill(`${name} 2`);
     await expect(ok).toBeEnabled();
     await ok.click();
     await expect(rows(page)).toHaveCount(0);
@@ -159,7 +159,7 @@ test.describe('the site admin', () => {
     const row = rows(page).filter({hasText: name});
     await row.getByRole('button', {name: 'Delete'}).click();
     const confirm = page.getByRole('dialog');
-    await confirm.getByRole('textbox', {name: 'Type the pattern name to confirm'}).fill(name);
+    await confirm.getByRole('textbox', {name: `Type ${name} to confirm`}).fill(name);
     await confirm.getByRole('button', {name: 'Delete pattern'}).click();
     await expect(rows(page).filter({hasText: name})).toHaveCount(0);
   });

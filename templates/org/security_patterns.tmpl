@@ -6,7 +6,7 @@
 		<h2 class="ui header">{{ctx.Locale.Tr "security_search.title"}}</h2>
 		{{template "org/security_tabs" (dict "Ctx" . "Active" "patterns")}}
 		{{template "shared/secret_patterns" .}}
-		{{if .CanManagePatterns}}<p><a id="secret-patterns-manage" href="{{.OrgLink}}/settings/code_security#custom-patterns">{{ctx.Locale.Tr "secret_pattern.manage"}}</a></p>{{end}}
+		{{if .CanManagePatterns}}<p class="tw-mt-3"><a id="secret-patterns-manage" href="{{.OrgLink}}/settings/code_security#custom-patterns">{{ctx.Locale.Tr "secret_pattern.manage"}}</a></p>{{end}}
 	</div>
 </div>
 {{template "base/footer" .}}

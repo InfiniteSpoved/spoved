@@ -72,6 +72,7 @@ type SecretsPage struct {
 	Ignored      string // the labels of the filters that were not valid and are not applied, joined
 	HasFilter    bool
 	Types        []SecretType
+	TypesCut     bool // the custom patterns offered were cut at maxInstanceTypes
 	ClosedStates []string
 	Projects     []*repo_model.RepoGroup
 	Result       *secretscan_service.Result
@@ -153,13 +154,13 @@ func hasControl(s string) bool {
 // Secrets runs the list the request asks for and sets ctx.Data["Secrets"]. scope is the visibility rule, link the
 // page's path.
 func Secrets(ctx *context.Context, scope secretscan_service.Scope, link string) bool {
-	custom, err := customSecretTypes(ctx, scope)
+	custom, cut, err := customSecretTypes(ctx, scope)
 	if err != nil {
 		ctx.ServerError("customSecretTypes", err)
 		return false
 	}
 	page := &SecretsPage{
-		Link: link, Admin: scope.Org == nil, Narrow: scope.Narrow, Types: append(secretTypes(), custom...),
+		Link: link, Admin: scope.Org == nil, Narrow: scope.Narrow, Types: append(secretTypes(), custom...), TypesCut: cut,
 		ClosedStates: secretscan_model.ClosedStates, Result: &secretscan_service.Result{},
 	}
 	ctx.Data["Secrets"] = page

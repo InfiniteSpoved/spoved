@@ -979,7 +979,7 @@ func registerRoutes(m *web.Route) {
 			m.Post("/test", common.RateLimitHeavyPlain, shared_security.PatternTest)
 			m.Post("/{id}/{action:rename}", common.RateLimitHeavyPlain, admin.SecretPatternAction)
 			m.Post("/{id}/{action:enable|disable|delete}", admin.SecretPatternAction)
-		}, shared_security.LimitPatternBody)
+		}, shared_security.LimitPatternBody) // first: nothing may read the form before it
 
 		m.Group("/monitor", func() {
 			m.Get("/stats", admin.MonitorStats)
@@ -1355,7 +1355,7 @@ func registerRoutes(m *web.Route) {
 					m.Post("/test", common.RateLimitHeavyPlain, shared_security.PatternTest)
 					m.Post("/{id}/{action:rename}", common.RateLimitHeavyPlain, org_setting.SecretPatternAction)
 					m.Post("/{id}/{action:enable|disable|delete}", org_setting.SecretPatternAction)
-				}, shared_security.LimitPatternBody)
+				}, shared_security.LimitPatternBody) // first: nothing may read the form before it
 				m.Combo("/branch_workflow").Get(org_setting.BranchWorkflow).
 					Post(web.Bind(forms.BranchWorkflowForm{}), org_setting.BranchWorkflowPost)
 				m.Post("/branch_workflow/branching_model", web.Bind(forms.BranchingModelForm{}), org_setting.BranchingModelPost)

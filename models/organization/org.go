@@ -501,7 +501,6 @@ func DeleteOrganization(ctx context.Context, org *Organization) error {
 		&OrgVerifiedDomain{OrgID: org.ID},
 		&user_model.Setting{UserID: org.ID, SettingKey: SettingKeyRequireVerifiedDomain},
 		&secret_model.Secret{OwnerID: org.ID},
-		&secretscan_model.CustomPattern{OwnerID: org.ID}, // tombstones too: the repositories whose alerts they label are gone
 		&actions_model.ActionVariable{OwnerID: org.ID},
 		&actions_model.ActionRunner{OwnerID: org.ID},
 		&actions_model.ActionRunnerToken{OwnerID: optional.Some(org.ID)},
@@ -509,6 +508,11 @@ func DeleteOrganization(ctx context.Context, org *Organization) error {
 		&user_model.Follow{FollowID: org.ID},
 	); err != nil {
 		return fmt.Errorf("DeleteBeans: %w", err)
+	}
+
+	// the patterns stay as tombstones: repositories transferred out earlier label their alerts with them
+	if err := secretscan_model.TombstoneOwnerPatterns(ctx, org.ID); err != nil {
+		return fmt.Errorf("TombstoneOwnerPatterns: %w", err)
 	}
 
 	if err := auth_model.DeleteOwnedAccessTokens(ctx, auth_model.AccessTokenOwnerOrg, org.ID, 0); err != nil {

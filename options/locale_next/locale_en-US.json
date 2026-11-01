@@ -3981,6 +3981,7 @@
 	"secret_search.foreign_pattern": "Pattern of a previous owner",
 	"admin.audit.action.org.secret_pattern.renamed": "Renamed the custom secret pattern %s of an organization",
 	"admin.audit.action.admin.secret_pattern.renamed": "Renamed the custom secret pattern %s of the site",
+	"secret_search.types_cut": "List shortened: not every custom pattern is offered.",
 	"secret_pattern.title": "Custom patterns",
 	"secret_pattern.intro_reader": "Patterns the organization and the site scan for, on top of the built-in rules. Alerts are named after the pattern.",
 	"secret_pattern.intro_site_reader": "Patterns the site scans every repository for, on top of the built-in rules. Alerts are named after the pattern.",
@@ -4036,7 +4037,7 @@
 		"other": "Repositories are no longer scanned for it. Its %s open alerts stay, labelled \"deleted pattern\". The pattern can't be restored."
 	},
 	"secret_pattern.delete_text_none": "Repositories are no longer scanned for it. It has no open alerts. The pattern can't be restored.",
-	"secret_pattern.delete_type_name": "Type the pattern name to confirm",
+	"secret_pattern.delete_type_name": "Type <strong>%s</strong> to confirm",
 	"secret_pattern.delete_submit": "Delete pattern",
 	"secret_pattern.delete_confirm_failed": "The name you typed is not the pattern's name, so nothing was deleted.",
 	"secret_pattern.locked_archived": "This organization is archived: patterns can't be added or changed.",
