@@ -41,6 +41,18 @@ func secretScanningLimitText(name string, v int64) string {
 	return strconv.FormatInt(v, 10)
 }
 
+// secretScanningBoundText is a bound with its unit for messages: a size below 1 MiB in KiB ("64 KiB", never 0.0625 MiB).
+func secretScanningBoundText(ctx *context.Context, name string, v int64) string {
+	if secretScanningFormUnits[name] > 1 && v%(1<<20) != 0 && v%(1<<10) == 0 {
+		return strconv.FormatInt(v>>10, 10) + " " + ctx.Locale.TrString("admin.secret_scanning.unit.kib")
+	}
+	text := secretScanningLimitText(name, v)
+	if unit := secretScanningLimitUnit(ctx, name); unit != "" {
+		text += " " + unit
+	}
+	return text
+}
+
 var (
 	secretScanningDecimal = regexp.MustCompile(`^[0-9]{1,18}(\.[0-9]{1,12})?$`)
 	secretScanningDigits  = regexp.MustCompile(`^[0-9]{1,18}$`)
@@ -154,9 +166,9 @@ func renderSecretScanning(ctx *context.Context, posted map[string]string, refuse
 	ctx.Data["Limits"] = rows
 	floor := func(name string) string {
 		l, _ := setting.SecretScanningLimitByName(name)
-		return secretScanningLimitText(name, l.Min)
+		return secretScanningBoundText(ctx, name, l.Min)
 	}
-	ctx.Data["LimitFloors"] = ctx.Tr("admin.secret_scanning.limits_floors", floor("scan_timeout"), floor("max_blob_size"), floor("max_alerts_per_repo"))
+	ctx.Data["LimitFloors"] = ctx.Tr("admin.secret_scanning.limits_floors", floor("scan_timeout"), floor("max_blob_size"), floor("max_scan_bytes"), floor("max_scan_blobs"), floor("max_alerts_per_repo"), floor("max_locations_per_alert"))
 	if refused != nil {
 		ctx.Data["LimitsError"] = refused.Error
 		ctx.Data["LimitsErrorField"] = refused.Name
@@ -201,16 +213,7 @@ func SecretScanningLimitsPost(ctx *context.Context) {
 	changed, err := secretscan_service.SaveLimits(ctx, ctx.Doer, limits)
 	if lerr, ok := errors.AsType[*secretscan_service.LimitError](err); ok {
 		l := lerr.Limit
-		maxText := secretScanningLimitText(l.Name, l.Max)
-		if unit := secretScanningLimitUnit(ctx, l.Name); unit != "" {
-			maxText += " " + unit
-		}
-		var msg template.HTML
-		if secretScanningFormUnits[l.Name] > 1 && l.Min < 1<<10 {
-			msg = ctx.Tr("admin.secret_scanning.error.nothing_saved_max", secretScanningLimitLabel(ctx, l.Name), maxText)
-		} else {
-			msg = ctx.Tr("admin.secret_scanning.error.nothing_saved", secretScanningLimitLabel(ctx, l.Name), secretScanningLimitText(l.Name, l.Min), maxText)
-		}
+		msg := ctx.Tr("admin.secret_scanning.error.nothing_saved", secretScanningLimitLabel(ctx, l.Name), secretScanningBoundText(ctx, l.Name, l.Min), secretScanningBoundText(ctx, l.Name, l.Max))
 		renderSecretScanning(ctx, posted, &secretScanningLimitRow{Name: l.Name, Error: msg}, http.StatusUnprocessableEntity)
 		return
 	}

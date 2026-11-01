@@ -117,6 +117,7 @@ func TestSecretScanningOrgSettings(t *testing.T) {
 		assert.Contains(t, doc.Find("#secret-scanning-org-lock-modal .content").Text(), "turns secret scanning on in all 3 repositories", "locking while off turns it on everywhere")
 		off := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", pageURL+"/secret_scanning/repos"), http.StatusOK).Body)
 		off.AssertElement(t, "#secret-scanning-off-org-off", true)
+		assert.NotContains(t, off.Find(".org-setting-content").Text(), "Lock the setting", "the lock hint is for an organization that is on and unlocked")
 		// the repository's page: decided by the organization
 		repo := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/settings/code_security"), http.StatusOK).Body)
 		assert.Contains(t, repo.Find("#secret-scanning-set-by").Text(), "turns it off for all its repositories")
@@ -137,6 +138,8 @@ func TestSecretScanningOrgSettings(t *testing.T) {
 		assert.Equal(t, 1, list.Find("#secret-scanning-off-list .flex-item").Length())
 		assert.Contains(t, list.Find("#secret-scanning-off-list").Text(), "org3/repo3")
 		assert.Contains(t, list.Find("#secret-scanning-off-list").Text(), "Turned off by user2")
+		assert.Contains(t, list.Find(".org-setting-content").Text(), "Lock the setting", "on and unlocked: the hint shows")
+		list.AssertElement(t, "#secret-scanning-off-locked, #secret-scanning-off-org-off", false)
 		// the confirmation of the lock says how many it turns on
 		assert.Contains(t, doc.Find("#secret-scanning-org-lock-modal .content").Text(), "turns secret scanning on in 1 repository")
 
@@ -147,6 +150,7 @@ func TestSecretScanningOrgSettings(t *testing.T) {
 		lockedList := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", pageURL+"/secret_scanning/repos"), http.StatusOK).Body)
 		lockedList.AssertElement(t, "#secret-scanning-off-locked", true)
 		assert.Contains(t, lockedList.Find("#secret-scanning-off-locked").Text(), "have no effect until the lock is lifted")
+		assert.NotContains(t, lockedList.Find(".org-setting-content").Text(), "Lock the setting", "a note replaces the hint")
 		repo := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", "/org3/repo3/settings/code_security"), http.StatusOK).Body)
 		repo.AssertElement(t, "#secret-scanning-box fieldset[disabled] #secret-scanning-enabled[checked]", true)
 		owner.MakeRequest(t, NewRequestWithValues(t, "POST", "/org3/repo3/settings/code_security/secret_scanning", map[string]string{}), http.StatusSeeOther)
@@ -309,6 +313,9 @@ func TestSecretScanningAdminSettings(t *testing.T) {
 			"rounds to zero":        {"max_blob_size": "0.0000001"},
 			"below the alert floor": {"max_alerts_per_repo": "99"},
 			"negative":              {"max_alerts_per_repo": "-5"},
+			"below the bytes floor": {"max_scan_bytes": "0.5"},
+			"below the files floor": {"max_scan_blobs": "999"},
+			"no locations":          {"max_locations_per_alert": "0"},
 			"not a number":          {"max_scan_blobs": "many"},
 			"not whole":             {"max_concurrent_scans": "1.5"},
 			"one bad, one good":     {"scan_timeout": "60", "max_blob_size": "1000"},
@@ -348,7 +355,7 @@ func TestSecretScanningAdminSettings(t *testing.T) {
 		assert.EqualValues(t, 1<<20, effective().MaxBlobSize)
 		assert.Equal(t, 300*time.Second, effective().ScanTimeout)
 		resp := admin.MakeRequest(t, NewRequestWithValues(t, "POST", limits, map[string]string{"max_blob_size": "101"}), http.StatusUnprocessableEntity)
-		assert.Contains(t, NewHTMLParser(t, resp.Body).Find("#secret-scanning-limits-error").Text(), "Largest file scanned must be between 0.0625 and 100 MiB.")
+		assert.Contains(t, NewHTMLParser(t, resp.Body).Find("#secret-scanning-limits-error").Text(), "Largest file scanned must be between 64 KiB and 100 MiB.")
 	})
 
 	t.Run("read-only maintenance refuses both forms", func(t *testing.T) {

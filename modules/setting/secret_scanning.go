@@ -6,6 +6,9 @@ package setting
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,8 +50,8 @@ var SecretScanningLimits = []SecretScanningLimit{
 	{"max_concurrent_scans", "MAX_CONCURRENT_SCANS", 1, 1, 16, false, func(o *SecretScanningOptions) any { return &o.MaxConcurrentScans }},
 	{"scan_timeout", "SCAN_TIMEOUT", 300, 30, 24 * 3600, true, func(o *SecretScanningOptions) any { return &o.ScanTimeout }},
 	{"max_blob_size", "MAX_BLOB_SIZE", 1 << 20, 64 << 10, 100 << 20, false, func(o *SecretScanningOptions) any { return &o.MaxBlobSize }},
-	{"max_scan_bytes", "MAX_SCAN_BYTES", 2 << 30, 1, 1 << 40, false, func(o *SecretScanningOptions) any { return &o.MaxScanBytes }},
-	{"max_scan_blobs", "MAX_SCAN_BLOBS", 2_000_000, 1, 100_000_000, false, func(o *SecretScanningOptions) any { return &o.MaxScanBlobs }},
+	{"max_scan_bytes", "MAX_SCAN_BYTES", 2 << 30, 1 << 20, 1 << 40, false, func(o *SecretScanningOptions) any { return &o.MaxScanBytes }},
+	{"max_scan_blobs", "MAX_SCAN_BLOBS", 2_000_000, 1000, 100_000_000, false, func(o *SecretScanningOptions) any { return &o.MaxScanBlobs }},
 	{"max_alerts_per_repo", "MAX_ALERTS_PER_REPO", 10_000, 100, 1_000_000, false, func(o *SecretScanningOptions) any { return &o.MaxAlertsPerRepo }},
 	{"max_locations_per_alert", "MAX_LOCATIONS_PER_ALERT", 100, 1, 10_000, false, func(o *SecretScanningOptions) any { return &o.MaxLocationsPerAlert }},
 }
@@ -91,20 +94,24 @@ func (l SecretScanningLimit) set(o *SecretScanningOptions, v int64) {
 	}
 }
 
+var secretScanningDigits = regexp.MustCompile(`^[0-9]{1,18}$`)
+
+// loadSecretScanningFrom reads [secret_scanning]. One rule for every key: a value that can't be read is logged and the
+// default is used, and the server never stops for it. Integers are plain decimal digits (no sign, hex or separators),
+// SCAN_TIMEOUT is a duration (5m) or a bare number of seconds, and a number outside its bounds is clamped with a warning.
 func loadSecretScanningFrom(rootCfg ConfigProvider) error {
 	sec := rootCfg.Section("secret_scanning")
 	SecretScanning.Enabled = sec.Key("ENABLED").MustBool(false)
 	SecretScanning.GenericRules = sec.Key("GENERIC_RULES").MustBool(false)
 	for _, l := range SecretScanningLimits {
-		var v int64
-		if l.Duration {
-			d, err := sec.Key(l.Key).MustDuration(time.Duration(l.Default) * time.Second)
-			if err != nil {
-				return err
+		v := l.Default
+		if raw := strings.TrimSpace(sec.Key(l.Key).String()); raw != "" {
+			parsed, ok := parseSecretScanningValue(raw, l.Duration)
+			if ok {
+				v = parsed
+			} else {
+				log.Warn("[secret_scanning] %s %q can't be read as %s, using the default %d", l.Key, raw, map[bool]string{true: "a duration or a number of seconds", false: "a whole number"}[l.Duration], l.Default)
 			}
-			v = int64(d / time.Second)
-		} else {
-			v = sec.Key(l.Key).MustInt64(l.Default)
 		}
 		if err := l.Check(v); err != nil {
 			clamped := min(max(v, l.Min), l.Max)
@@ -114,6 +121,22 @@ func loadSecretScanningFrom(rootCfg ConfigProvider) error {
 		l.set(&SecretScanning, v)
 	}
 	return nil
+}
+
+// parseSecretScanningValue reads plain decimal digits and, for a duration, also a Go duration (seconds as the unit
+// of the result).
+func parseSecretScanningValue(raw string, duration bool) (int64, bool) {
+	if secretScanningDigits.MatchString(raw) {
+		v, err := strconv.ParseInt(raw, 10, 64)
+		return v, err == nil
+	}
+	if duration {
+		d, err := time.ParseDuration(raw)
+		if err == nil && d >= 0 {
+			return int64(d / time.Second), true
+		}
+	}
+	return 0, false
 }
 
 // SecretScanningState is stored as JSON in the "secret_scanning.enabled" system setting. An empty Mode means the

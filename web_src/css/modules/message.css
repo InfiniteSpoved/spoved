@@ -111,9 +111,12 @@
   border-color: var(--color-warning-border);
 }
 
-/* a link in a warning banner keeps the banner's text colour: the site's link colour fails contrast on it in dark mode */
-.ui.warning.message a,
-.ui.yellow.message a {
+/* a link in a banner keeps the banner's text colour: the site's link colour fails contrast on it in dark mode */
+.ui.warning.message a:not(.ui),
+.ui.yellow.message a:not(.ui),
+.ui.negative.message a:not(.ui),
+.ui.error.message a:not(.ui),
+.ui.info.message a:not(.ui) {
   color: inherit;
   text-decoration: underline;
 }

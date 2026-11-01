@@ -61,7 +61,18 @@ test.describe('the organization page', () => {
     await expect(enabled).not.toBeChecked();
     await expect(page.locator('#secret-scanning-counts')).toContainText('Off for all 1 repositories');
 
-    // on again, and the lock asks first
+    // with scanning off, ticking only the lock asks nothing (the lock asks only while scanning stays on)
+    await page.locator('label[for="secret-scanning-locked"]').click();
+    await page.locator('#secret-scanning-save').click();
+    await expect(page.locator('#flash-message')).toContainText('Secret scanning settings saved.');
+    await expect(enabled).not.toBeChecked();
+    await expect(locked).toBeChecked();
+
+    // lift it again, then turn scanning on and lock it in one save, which asks first
+    await page.locator('label[for="secret-scanning-locked"]').click();
+    await page.locator('#secret-scanning-save').click();
+    await expect(page.locator('#flash-message')).toContainText('Secret scanning settings saved.');
+    await expect(locked).not.toBeChecked();
     await page.locator('label[for="secret-scanning-enabled"]').click();
     await page.locator('label[for="secret-scanning-locked"]').click();
     await page.locator('#secret-scanning-save').click();

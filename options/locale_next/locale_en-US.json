@@ -3866,7 +3866,7 @@
 	"admin.secret_scanning.generic_submit": "Turn on rule",
 	"admin.secret_scanning.limits": "Limits",
 	"admin.secret_scanning.limits_at_limit": "A scan that hits a limit stops and the repository shows \"Scan incomplete: limit reached\".",
-	"admin.secret_scanning.limits_floors": "Lowest values: %s seconds per scan, %s MiB for the largest file, %s alerts per repository.",
+	"admin.secret_scanning.limits_floors": "Lowest values: %s per scan slice, %s for the largest file, %s and %s read per slice, %s per repository, %s per alert.",
 	"admin.secret_scanning.limits_save": "Save limits",
 	"admin.secret_scanning.limits_help": "They protect the server. Under each field is its default from app.ini.",
 	"admin.secret_scanning.app_default": "Default from app.ini: %s",
@@ -3879,10 +3879,10 @@
 	"admin.secret_scanning.limit.max_locations_per_alert": "Most locations per alert",
 	"admin.secret_scanning.unit.seconds": "seconds",
 	"admin.secret_scanning.unit.mib": "MiB",
+	"admin.secret_scanning.unit.kib": "KiB",
 	"admin.secret_scanning.unit.alerts": "alerts",
 	"admin.secret_scanning.unit.places": "locations",
 	"admin.secret_scanning.unit.files": "files",
 	"admin.secret_scanning.error.nothing_saved": "Nothing was saved. %s must be between %s and %s.",
-	"admin.secret_scanning.error.nothing_saved_max": "Nothing was saved. %s must be more than 0 and at most %s.",
 	"admin.secret_scanning.error.invalid": "Nothing was saved. %s must be a number."
 }
