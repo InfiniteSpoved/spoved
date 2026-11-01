@@ -34,7 +34,7 @@ const maxDigestRecipients = 100
 
 // SecretDigestInput is what the scan hands over after a push: the alerts above AfterAlertID are the new ones, in the
 // repository's push to Ref (a short name, "" for the wiki) at Commit; PusherID is the person who pushed, 0 when nobody
-// did or when the digest holds pushes of more than one person. Kinds are the secretscan_model.DigestKind* bits of what
+// did or when the digest holds pushes of more than one person (a text has no pusher). Kinds are the secretscan_model.DigestKind* bits of what
 // the pushes touched.
 type SecretDigestInput struct {
 	Ref, Commit  string
@@ -59,6 +59,9 @@ func digestKinds(in SecretDigestInput, isPusher, wikiRead bool) []string {
 		return kinds
 	}
 	kinds = []string{secretscan_model.KindRepo, secretscan_model.KindPull}
+	if in.Kinds&secretscan_model.DigestKindText != 0 {
+		kinds = append(kinds, secretscan_model.TextKinds...) // counted only: the mail names no issue or comment
+	}
 	if in.Kinds&secretscan_model.DigestWikiScanned != 0 && wikiRead {
 		kinds = append(kinds, secretscan_model.KindWiki)
 	}
@@ -199,6 +202,8 @@ func sendSecretDigestMail(repo *repo_model.Repository, u *user_model.User, d *se
 		} else {
 			where = locale.Tr("mail.secret_digest.where_several")
 		}
+	case in.Kinds&(secretscan_model.DigestKindCode|secretscan_model.DigestKindWiki) == 0 && in.Kinds&secretscan_model.DigestKindText != 0:
+		where = locale.Tr("mail.secret_digest.where_text")
 	case in.Ref != "":
 		where = template.HTML("<code>" + template.HTMLEscapeString(cleanDigestText(in.Ref)) + "</code>")
 		if in.Commit != "" {
@@ -260,6 +265,9 @@ func sendSecretDigestMail(repo *repo_model.Repository, u *user_model.User, d *se
 		"Settings":   setting.AppURL + "user/settings/notifications",
 		"Link":       link,
 		"LinkText":   locale.TrPluralString(d.Alerts, "mail.secret_digest.open"),
+	}
+	if d.TextAlerts > 0 {
+		data["TextNote"] = locale.TrPluralString(d.TextAlerts, "mail.secret_digest.text_note", d.TextAlerts)
 	}
 	if d.TotalLocations > len(places) {
 		data["PlacesHead"] = locale.Tr("mail.secret_digest.places_capped", len(places), d.TotalLocations)

@@ -105,23 +105,23 @@ func TestScanTextIssueAndComment(t *testing.T) {
 	assert.EqualValues(t, 3, byKind["comment"].PosterID)
 	assert.Equal(t, 1, locationsOfTitle(t, alertFor(t, repo.ID, titleTok).ID).StartLine)
 
-	t.Run("the places in text are not shown by the readers of places", func(t *testing.T) {
-		first, err := secretscan_model.FirstLocations(t.Context(), repo.ID, []int64{a.ID}, false)
+	t.Run("the readers of places return the places in text, and a code reader counts the alert as code", func(t *testing.T) {
+		first, err := secretscan_model.FirstLocations(t.Context(), repo.ID, []int64{a.ID}, true)
 		require.NoError(t, err)
-		assert.Empty(t, first)
-		counts, err := secretscan_model.CountLocations(t.Context(), repo.ID, []int64{a.ID}, false)
+		require.Contains(t, first, a.ID)
+		assert.True(t, first[a.ID].IsText())
+		counts, err := secretscan_model.CountLocations(t.Context(), repo.ID, []int64{a.ID}, true)
 		require.NoError(t, err)
-		assert.Empty(t, counts)
+		assert.Equal(t, 2, counts[a.ID])
 		found, err := secretscan_model.FindLocations(t.Context(), repo.ID, a.ID, 10)
 		require.NoError(t, err)
-		assert.Empty(t, found)
-		// the alert itself is listed for viewers without Wiki read, so it can be opened by them too
+		assert.Len(t, found, 2)
 		has, err := secretscan_model.HasCodeLocation(t.Context(), repo.ID, a.ID)
 		require.NoError(t, err)
-		assert.True(t, has)
+		assert.True(t, has, "only the wiki is a place a viewer without Wiki read can't have")
 		got, err := secretscan_model.GetVisibleAlert(t.Context(), repo.ID, a.Index, false)
 		require.NoError(t, err)
-		assert.Equal(t, a.ID, got.ID)
+		assert.Equal(t, a.ID, got.ID, "the alert is listed for viewers without Wiki read, so it can be opened by them too")
 	})
 
 	t.Run("the same text again stores nothing new", func(t *testing.T) {

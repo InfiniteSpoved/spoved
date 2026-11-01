@@ -96,7 +96,7 @@ type AlertSearchOptions struct {
 	Sort        string   // created (the default) or updated
 	Ascending   bool
 	CodeOnly    bool     // only alerts that have a place outside the wiki
-	Kinds       []string // only alerts that have a place of one of these kinds (KindRepo, KindWiki, KindPull)
+	Kinds       []string // only alerts that have a place of one of these kinds (KindRepo, KindWiki, KindPull, KindIssue, KindComment)
 	PathQuery   string   // only alerts with a place whose path holds this text (the wiki's places only without CodeOnly, never the text's)
 }
 
@@ -126,8 +126,11 @@ func (o *AlertSearchOptions) ToConds() builder.Cond {
 		))))
 	}
 	if o.PathQuery != "" {
-		in := builder.And(builder.Expr("secret_scanning_location.alert_id = secret_scanning_alert.id"), likeContains("secret_scanning_location.path", o.PathQuery),
-			readableKinds(o.CodeOnly))
+		in := builder.And(builder.Expr("secret_scanning_location.alert_id = secret_scanning_alert.id"), likeContains("secret_scanning_location.path", o.PathQuery))
+		if o.CodeOnly {
+			in = in.And(builder.Neq{"secret_scanning_location.kind": KindWiki})
+		}
+		in = in.And(builder.NotIn("secret_scanning_location.kind", TextKinds)) // a text place's path is only its field name
 		cond = cond.And(builder.Exists(builder.Select("1").From("secret_scanning_location").Where(in)))
 	}
 	return cond

@@ -30,12 +30,24 @@ type SecretScanningLocationDetails struct {
 	CommitDate *time.Time `json:"commit_date,omitempty"`
 	// spoved: true when only a refs/pull/* ref reaches the commit
 	PullRef bool `json:"pull_ref,omitempty"`
+	// spoved: for a place in an issue, a pull request or a comment (only when the caller may read it), the number
+	// of the issue or pull request, which part holds the secret (title, body or comment), the login of who wrote it
+	// (empty for an import) and whether the text no longer holds it (the alert stays)
+	IssueNumber int64  `json:"issue_number,omitempty"`
+	Field       string `json:"field,omitempty"`
+	Poster      string `json:"poster,omitempty"`
+	Removed     bool   `json:"removed,omitempty"`
+	// the API URL of the issue or pull request, and of the comment
+	IssueURL   string `json:"issue_url,omitempty"`
+	CommentURL string `json:"comment_url,omitempty"`
 }
 
 // SecretScanningLocation is a place a secret was found.
 // swagger:model
 type SecretScanningLocation struct {
-	// commit (the code of the repository, or a pull ref) or wiki_commit
+	// commit (the code of the repository, or a pull ref), wiki_commit, or a place in text:
+	// issue_title, issue_body, issue_comment, pull_request_title, pull_request_body, pull_request_comment; for a
+	// caller who may not read that issue or pull request it is only issue_text or comment_text, with no details
 	Type    string                        `json:"type"`
 	Details SecretScanningLocationDetails `json:"details"`
 }

@@ -71,10 +71,15 @@ func ToSecretScanningAlerts(ctx context.Context, doer *user_model.User, repo *re
 }
 
 // ToSecretScanningLocations converts places of an alert of the repository, in GitHub's shape; wikiURL turns the
-// path of a wiki place into its page URL.
-func ToSecretScanningLocations(repo *repo_model.Repository, locs []*secretscan_model.Location, wikiURL func(path string) string) []*api.SecretScanningLocation {
+// path of a wiki place into its page URL. texts has the places in text as the caller may see them
+// (LoadTextPlaces): one the caller may not read is only named issue_text or comment_text, without any detail.
+func ToSecretScanningLocations(repo *repo_model.Repository, locs []*secretscan_model.Location, texts map[int64]*secretscan_model.TextPlace, wikiURL func(path string) string) []*api.SecretScanningLocation {
 	out := make([]*api.SecretScanningLocation, 0, len(locs))
 	for _, l := range locs {
+		if l.IsText() {
+			out = append(out, toTextLocation(repo, l, texts[l.ID]))
+			continue
+		}
 		res := &api.SecretScanningLocation{Type: "commit", Details: api.SecretScanningLocationDetails{
 			Path: l.Path, StartLine: l.StartLine, EndLine: l.EndLine, BlobSHA: l.BlobID, CommitSHA: l.CommitID,
 			CommitAuthorName: l.AuthorName, CommitAuthorEmail: l.AuthorEmail, PullRef: l.Kind == secretscan_model.KindPull,
@@ -97,6 +102,28 @@ func ToSecretScanningLocations(repo *repo_model.Repository, locs []*secretscan_m
 		out = append(out, res)
 	}
 	return out
+}
+
+func toTextLocation(repo *repo_model.Repository, l *secretscan_model.Location, p *secretscan_model.TextPlace) *api.SecretScanningLocation {
+	if p == nil || !p.Readable {
+		return &api.SecretScanningLocation{Type: l.Kind + "_text"} // issue_text, comment_text
+	}
+	what := util.Iif(p.IsPull, "pull_request", "issue")
+	field := util.Iif(l.Kind == secretscan_model.KindComment, "comment", l.Field)
+	num := strconv.FormatInt(p.Number, 10)
+	d := api.SecretScanningLocationDetails{
+		StartLine: l.StartLine, EndLine: l.EndLine, IssueNumber: p.Number, Field: field, Removed: p.Removed(),
+		IssueURL: repo.APIURL() + "/issues/" + num,
+		HTMLURL:  repo.HTMLURL() + util.Iif(p.IsPull, "/pulls/", "/issues/") + num,
+	}
+	if l.Kind == secretscan_model.KindComment {
+		id := strconv.FormatInt(l.SourceID, 10)
+		d.CommentURL, d.HTMLURL = repo.APIURL()+"/issues/comments/"+id, d.HTMLURL+"#issuecomment-"+id
+	}
+	if p.Poster != nil {
+		d.Poster = p.Poster.Name
+	}
+	return &api.SecretScanningLocation{Type: what + "_" + field, Details: d}
 }
 
 // ToSecretScanningStatus sums up the state rows of a repository's code, wiki and pull refs: failed beats incomplete

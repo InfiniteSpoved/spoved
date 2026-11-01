@@ -348,5 +348,10 @@ func ListSecretScanningAlertLocations(ctx *context.APIContext) {
 	}
 	ctx.SetLinkHeader(int(total), opts.PageSize)
 	ctx.SetTotalCountHeader(total)
-	ctx.JSON(http.StatusOK, convert.ToSecretScanningLocations(repo, locs, func(path string) string { return wiki_service.PageHTMLURL(repo, path) }))
+	texts, err := secretscan_model.LoadTextPlaces(ctx, repo.ID, locs, secretscan_model.TextAccess{Issues: ctx.Permission().CanRead(unit.TypeIssues), Pulls: ctx.Permission().CanRead(unit.TypePullRequests)})
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "LoadTextPlaces", err)
+		return
+	}
+	ctx.JSON(http.StatusOK, convert.ToSecretScanningLocations(repo, locs, texts, func(path string) string { return wiki_service.PageHTMLURL(repo, path) }))
 }

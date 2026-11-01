@@ -5,6 +5,7 @@ package secretscan
 
 import (
 	"context"
+	"slices"
 	"unicode/utf8"
 
 	"forgejo.org/models/db"
@@ -22,7 +23,8 @@ const (
 	DigestKindCode    = 1
 	DigestKindWiki    = 2
 	DigestWikiScanned = 4
-	DigestSeveral     = 8 // the marking pushes were to different refs or kinds: the mail names none
+	DigestSeveral     = 8  // the marking pushes were to different refs or kinds: the mail names none
+	DigestKindText    = 16 // a live scan of an issue, pull request or comment stored a new alert (no push, no pusher)
 )
 
 // DigestMinInterval is the shortest time between two digests of one repository: a mark that comes sooner waits, so the
@@ -44,7 +46,8 @@ func truncateUTF8(s string, n int) string {
 }
 
 // MarkNotify marks the repository for a digest mail: a push to it (kind is KindRepo for a branch or tag, KindWiki for
-// the wiki), by pusherID (0 when no person pushed: a deploy key, an Actions task), ref and commit as shown in the mail.
+// the wiki; KindIssue marks a text that a live scan found a new alert in, with no pusher, ref or commit, and needs the
+// repository's text scanned to its end once), by pusherID (0 when no person pushed: a deploy key, an Actions task), ref and commit as shown in the mail.
 // Only a repository whose code has been scanned to its end once is marked (a wiki push also needs the wiki scanned
 // once), so the first scan, a backfill and a rescan (which removes the rows) never mail; a scan that is under way or
 // backing off after a failure does not stop the marking, since the mark waits for the scan. The first mark's alert boundary is the row's floor (the alerts nobody is owed a digest for), so an alert stored by a
@@ -53,16 +56,33 @@ func truncateUTF8(s string, n int) string {
 // pusher only when it is the same one (else 0: nobody is told "your push"). Every call bumps notify_seq, so the clear
 // of a scan that started before the push is refused. It reports whether a row was marked.
 func MarkNotify(ctx context.Context, repoID, pusherID int64, kind, ref, commit string) (bool, error) {
+	return markNotify(ctx, repoID, pusherID, kind, ref, commit, -1)
+}
+
+// MarkNotifyText marks the repository for a digest of the alerts above boundary (the newest alert there was before the
+// live scan of a text stored its own): the alert is stored before the mark, so the default boundary would leave it out.
+// A mark that exists already keeps its own boundary.
+func MarkNotifyText(ctx context.Context, repoID, boundary int64) (bool, error) {
+	return markNotify(ctx, repoID, 0, KindIssue, "", "", max(boundary, 0))
+}
+
+func markNotify(ctx context.Context, repoID, pusherID int64, kind, ref, commit string, boundary int64) (bool, error) {
 	wikiScanned, err := db.GetEngine(ctx).Where("repo_id = ? AND kind = ? AND completed = ?", repoID, KindWiki, true).Exist(new(Scan))
 	if err != nil {
 		return false, err
 	}
 	bits := DigestKindCode
-	if kind == KindWiki {
+	switch kind {
+	case KindWiki:
 		if !wikiScanned {
 			return false, nil
 		}
 		bits = DigestKindWiki
+	case KindIssue:
+		if done, err := db.GetEngine(ctx).Where("repo_id = ? AND kind = ? AND retry_unix = 0 AND status <> ''", repoID, KindIssue).Exist(new(Scan)); err != nil || !done {
+			return false, err
+		}
+		bits = DigestKindText
 	}
 	if wikiScanned {
 		bits |= DigestWikiScanned
@@ -71,13 +91,13 @@ func MarkNotify(ctx context.Context, repoID, pusherID int64, kind, ref, commit s
 	// the assignments run in this order: MySQL reads the columns as already assigned, so notify_after_unix is last
 	res, err := db.GetEngine(ctx).Exec(
 		"UPDATE secret_scan SET notify_seq = notify_seq + 1,"+
-			" notify_alert_id = CASE WHEN notify_after_unix = 0 THEN (CASE WHEN notify_floor > 0 THEN notify_floor ELSE (SELECT COALESCE(MAX(id), 0) FROM secret_scanning_alert WHERE repo_id = ?) END) ELSE notify_alert_id END,"+
+			" notify_alert_id = CASE WHEN notify_after_unix = 0 THEN (CASE WHEN ? >= 0 THEN ? WHEN notify_floor > 0 THEN notify_floor ELSE (SELECT COALESCE(MAX(id), 0) FROM secret_scanning_alert WHERE repo_id = ?) END) ELSE notify_alert_id END,"+
 			" notify_pusher_id = CASE WHEN notify_after_unix = 0 OR notify_pusher_id = ? THEN ? ELSE 0 END,"+
 			" notify_kinds = CASE WHEN notify_after_unix = 0 THEN ? ELSE (notify_kinds | ? | CASE WHEN (? <> '' AND notify_ref <> '' AND notify_ref <> ?) OR ((notify_kinds & 3) <> ?) THEN 8 ELSE 0 END) END,"+
 			" notify_ref = CASE WHEN ? <> '' THEN ? ELSE notify_ref END, notify_commit = CASE WHEN ? <> '' THEN ? ELSE notify_commit END,"+
 			" notify_after_unix = CASE WHEN notify_after_unix = 0 THEN ? ELSE notify_after_unix END"+
 			" WHERE repo_id = ? AND kind = ? AND completed = ?",
-		repoID, pusherID, pusherID, bits, bits, ref, ref, bits&3, ref, ref, commit, commit, int64(timeutil.TimeStampNow()), repoID, KindRepo, true,
+		boundary, boundary, repoID, pusherID, pusherID, bits, bits, ref, ref, bits&3, ref, ref, commit, commit, int64(timeutil.TimeStampNow()), repoID, KindRepo, true,
 	)
 	if err != nil {
 		return false, err
@@ -136,14 +156,15 @@ type DigestType struct {
 type Digest struct {
 	Alerts         int
 	Types          []DigestType
-	Locations      []*Location // at most MaxDigestLocations, in the order found
+	Locations      []*Location // at most MaxDigestLocations, in the order found; never a place in text
+	TextAlerts     int         // how many of the alerts have a place in text (counted only when kinds has KindIssue)
 	TotalLocations int         // every place of the alerts, also those over the cap that have no row
 	FirstIndex     int64       // the number of the alert when there is exactly one, else 0
 }
 
 // BuildDigest reads the digest of the alerts created after afterAlertID (and, when upToAlertID is set, up to it) that have a place of one of kinds (KindRepo,
-// KindWiki, KindPull): a viewer who can't read the wiki, or a wiki that was not scanned before the push, leaves
-// KindWiki out, and a pusher is told only of the kind they pushed. Places of other kinds are left out too.
+// KindWiki, KindPull, and KindIssue for text): a viewer who can't read the wiki, or a wiki that was not scanned before
+// the push, leaves KindWiki out, and a pusher is told only of the kind they pushed. Places of other kinds are left out too.
 func BuildDigest(ctx context.Context, repoID, afterAlertID, upToAlertID int64, kinds []string) (*Digest, error) {
 	opts := &AlertSearchOptions{RepoID: repoID, Kinds: kinds}
 	alerts := opts.ToConds().And(builder.Gt{"id": afterAlertID})
@@ -176,15 +197,28 @@ func BuildDigest(ctx context.Context, repoID, afterAlertID, upToAlertID int64, k
 			d.FirstIndex = a.Index
 		}
 	}
+	if slices.Contains(kinds, KindIssue) {
+		textOpts := &AlertSearchOptions{RepoID: repoID, Kinds: TextKinds}
+		n, err := db.GetEngine(ctx).Where(textOpts.ToConds().And(alertWindow(repoID, afterAlertID, upToAlertID))).Count(new(Alert))
+		if err != nil {
+			return nil, err
+		}
+		d.TextAlerts = int(n)
+	}
+	// a place in text is never listed: the mail names no issue or comment, and the recipient may not read it
+	listed := slices.DeleteFunc(slices.Clone(kinds), func(k string) bool { return slices.Contains(TextKinds, k) })
+	if len(listed) == 0 {
+		d.TotalLocations = 0
+		return d, nil
+	}
 	in := builder.In("alert_id", builder.Select("id").From("secret_scanning_alert").Where(alerts))
-	visible := builder.And(in, builder.In("kind", kinds))
 	// places of a kind that is left out are not counted (those over the cap, which have no row, can't be told apart)
-	other, err := db.GetEngine(ctx).Where(builder.And(in, builder.NotIn("kind", kinds))).Count(new(Location))
+	other, err := db.GetEngine(ctx).Where(builder.And(in, builder.NotIn("kind", listed))).Count(new(Location))
 	if err != nil {
 		return nil, err
 	}
-	d.TotalLocations -= int(other)
-	return d, db.GetEngine(ctx).Where(visible).OrderBy("id").Limit(MaxDigestLocations).Find(&d.Locations)
+	d.TotalLocations = max(d.TotalLocations-int(other), 0)
+	return d, db.GetEngine(ctx).Where(builder.And(in, builder.In("kind", listed))).OrderBy("id").Limit(MaxDigestLocations).Find(&d.Locations)
 }
 
 // AdvanceNotifyFloor moves the floor to the newest alert of the repository, when no push has marked it: called after a

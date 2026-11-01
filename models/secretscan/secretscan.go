@@ -32,9 +32,8 @@ const (
 )
 
 // The kinds of a place in text people write: the title or body of an issue or pull request, and a comment. KindIssue
-// is also the kind of the scan state row of a repository's text (its cursor is kept in ScannedTips). TextKinds are
-// never returned by the readers of places below: showing one needs the viewer's read access to the Issues or Pull
-// requests unit, which only a later change checks.
+// is also the kind of the scan state row of a repository's text (its cursor is kept in ScannedTips). A reader shows
+// a place in text only to a viewer who may read that issue or pull request (LoadTextPlaces).
 const (
 	KindIssue   = "issue"
 	KindComment = "comment"

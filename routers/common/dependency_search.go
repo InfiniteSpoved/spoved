@@ -345,7 +345,9 @@ func ExportSecretAlerts(ctx *context.Base, doer *user_model.User, scope secretsc
 						closedAt = h.ClosedUnix.AsTime().UTC().Format(time.RFC3339)
 					}
 					location := ""
-					if h.First != nil {
+					if h.First != nil && h.First.IsText() { // a fixed token: lists across repositories never name an issue
+						location = "text:" + h.First.Kind
+					} else if h.First != nil {
 						location = h.First.Path
 						if h.First.StartLine > 0 {
 							location += ":" + strconv.Itoa(h.First.StartLine)

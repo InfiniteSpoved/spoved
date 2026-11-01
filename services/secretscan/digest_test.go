@@ -431,3 +431,57 @@ func TestStuckQueueIsRecovered(t *testing.T) {
 
 // upToDate is a pass that brought the code up to date.
 var upToDate = map[string]kindState{secretscan_model.KindRepo: {current: true}}
+
+// A live scan of one text that opens an alert marks the repository (no pusher, the text bit) and mails the digest once;
+// the person who wrote each new place is told, once per text; a place that is stored already, an alert that is old and
+// an imported text (no author) tell nobody or mark nothing.
+func TestLiveTextDigestAndPosterNotice(t *testing.T) {
+	repo := enableText(t)
+	sent := captureDigests(t)
+	var notices []mailer.SecretPosterNotice
+	t.Cleanup(test.MockVariableValue(&sendPosterNotice, func(ctx context.Context, _ *repo_model.Repository, n mailer.SecretPosterNotice) error {
+		assert.False(t, db.InTransaction(ctx), "a notice is never mailed inside a transaction")
+		notices = append(notices, n)
+		return nil
+	}))
+	ctx := t.Context()
+	require.NoError(t, Scan(ctx, repo.ID)) // the code and the text there is: never mailed
+	require.Zero(t, scanOf(t, repo.ID, secretscan_model.KindIssue).RetryUnix, "the text backfill is done")
+	require.Empty(t, *sent)
+
+	tok := token("live-text")
+	issue := newIssue(t, repo, "title", "key: "+tok)
+	require.NoError(t, handleText(ctx, fmt.Sprintf("i:%d", issue.ID)))
+	require.Len(t, *sent, 1)
+	in := (*sent)[0]
+	assert.NotZero(t, in.Kinds&secretscan_model.DigestKindText)
+	assert.Zero(t, in.Kinds&(secretscan_model.DigestKindCode|secretscan_model.DigestKindWiki))
+	assert.Zero(t, in.PusherID, "nobody pushed")
+	assert.Empty(t, in.Ref)
+	assert.Equal(t, []mailer.SecretPosterNotice{{PosterID: 2, IssueID: issue.ID}}, notices)
+	assert.Zero(t, scanOf(t, repo.ID, secretscan_model.KindRepo).NotifyAfterUnix, "the mark is taken with the mail")
+
+	t.Run("the same text again: no new place, no notice", func(t *testing.T) {
+		require.NoError(t, handleText(ctx, fmt.Sprintf("i:%d", issue.ID)))
+		assert.Len(t, notices, 1)
+		assert.Len(t, *sent, 1)
+	})
+
+	t.Run("a comment with the same secret: its writer is told, no new alert, no digest", func(t *testing.T) {
+		c := newComment(t, issue, "me too: "+tok)
+		require.NoError(t, handleText(ctx, fmt.Sprintf("c:%d", c.ID)))
+		require.Len(t, notices, 2)
+		assert.Equal(t, mailer.SecretPosterNotice{PosterID: 3, IssueID: issue.ID, CommentID: c.ID}, notices[1])
+		assert.Len(t, *sent, 1)
+	})
+
+	t.Run("an imported text has no author to tell, but still marks for a digest", func(t *testing.T) {
+		imported := newIssue(t, repo, "imported", "key: "+token("imported"))
+		_, err := db.GetEngine(ctx).Table("issue").Where("id = ?", imported.ID).Update(map[string]any{"original_author_id": 99})
+		require.NoError(t, err)
+		require.NoError(t, handleText(ctx, fmt.Sprintf("i:%d", imported.ID)))
+		assert.Len(t, notices, 2)
+		assert.NotZero(t, scanOf(t, repo.ID, secretscan_model.KindRepo).NotifyAfterUnix, "a digest within 15 minutes of the last waits")
+		assert.Len(t, *sent, 1)
+	})
+}

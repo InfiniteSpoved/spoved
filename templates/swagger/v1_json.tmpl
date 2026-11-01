@@ -42109,7 +42109,7 @@
           "$ref": "#/definitions/SecretScanningLocationDetails"
         },
         "type": {
-          "description": "commit (the code of the repository, or a pull ref) or wiki_commit",
+          "description": "commit (the code of the repository, or a pull ref), wiki_commit, or a place in text:\nissue_title, issue_body, issue_comment, pull_request_title, pull_request_body, pull_request_comment; for a\ncaller who may not read that issue or pull request it is only issue_text or comment_text, with no details",
           "type": "string",
           "x-go-name": "Type"
         }
@@ -42128,6 +42128,10 @@
           "description": "the API URL of the blob (not for the wiki)",
           "type": "string",
           "x-go-name": "BlobURL"
+        },
+        "comment_url": {
+          "type": "string",
+          "x-go-name": "CommentURL"
         },
         "commit_author_email": {
           "type": "string",
@@ -42157,10 +42161,25 @@
           "format": "int64",
           "x-go-name": "EndLine"
         },
+        "field": {
+          "type": "string",
+          "x-go-name": "Field"
+        },
         "html_url": {
           "description": "spoved: the file at that commit in the web interface (empty when the place has no commit, and for the wiki)",
           "type": "string",
           "x-go-name": "HTMLURL"
+        },
+        "issue_number": {
+          "description": "spoved: for a place in an issue, a pull request or a comment (only when the caller may read it), the number\nof the issue or pull request, which part holds the secret (title, body or comment), the login of who wrote it\n(empty for an import) and whether the text no longer holds it (the alert stays)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "IssueNumber"
+        },
+        "issue_url": {
+          "description": "the API URL of the issue or pull request, and of the comment",
+          "type": "string",
+          "x-go-name": "IssueURL"
         },
         "page_url": {
           "description": "the page, for the wiki",
@@ -42171,10 +42190,18 @@
           "type": "string",
           "x-go-name": "Path"
         },
+        "poster": {
+          "type": "string",
+          "x-go-name": "Poster"
+        },
         "pull_ref": {
           "description": "spoved: true when only a refs/pull/* ref reaches the commit",
           "type": "boolean",
           "x-go-name": "PullRef"
+        },
+        "removed": {
+          "type": "boolean",
+          "x-go-name": "Removed"
         },
         "start_line": {
           "type": "integer",

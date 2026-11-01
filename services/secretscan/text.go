@@ -30,6 +30,7 @@ import (
 	"forgejo.org/modules/secretdetection"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
+	"forgejo.org/services/mailer"
 
 	"xorm.io/builder"
 )
@@ -294,7 +295,7 @@ func scanIssueText(ctx context.Context, id int64, job *textJob) error {
 		return err
 	}
 	t.addIssue(issue)
-	return t.flush(nil)
+	return t.flushLive()
 }
 
 func scanCommentText(ctx context.Context, id int64, job *textJob) error {
@@ -336,7 +337,7 @@ func scanCommentText(ctx context.Context, id int64, job *textJob) error {
 		return err
 	}
 	t.addComment(c)
-	return t.flush(nil)
+	return t.flushLive()
 }
 
 // pendingReviews tells which of the reviews the comments belong to are drafts.
@@ -413,7 +414,11 @@ type textScan struct {
 	found    map[secretscan_model.TextSource]map[secretscan_model.PlaceKey]bool
 	holes    int64
 	read     int64 // bytes of text added
+	meta     map[secretscan_model.TextSource]textMeta
 }
+
+// textMeta is what the notice to a poster needs of a text.
+type textMeta struct{ issueID, posterID int64 }
 
 func newTextScan(ctx context.Context, repo *repo_model.Repository, cfg setting.SecretScanningOptions) (*textScan, error) {
 	d, err := textDetector(ctx, repo, cfg)
@@ -423,6 +428,7 @@ func newTextScan(ctx context.Context, repo *repo_model.Repository, cfg setting.S
 	return &textScan{
 		ctx: ctx, repo: repo, cfg: cfg, detector: d,
 		cands: map[string]map[string]*candidate{}, found: map[secretscan_model.TextSource]map[secretscan_model.PlaceKey]bool{},
+		meta: map[secretscan_model.TextSource]textMeta{},
 	}, nil
 }
 
@@ -447,6 +453,7 @@ func (t *textScan) addComment(c *issues_model.Comment) {
 // is one the detector could not scan whole. Only a text read to its end tells which of its places are gone.
 func (t *textScan) add(src secretscan_model.TextSource, issueID, posterID int64, text string) {
 	places := map[secretscan_model.PlaceKey]bool{}
+	t.meta[src] = textMeta{issueID, posterID}
 	t.read += int64(len(text))
 	text = stripDataURIs(text)
 	whole := true
@@ -547,6 +554,67 @@ func (t *textScan) flush(more func(ctx context.Context, left int64) error) error
 		return nil // switched off meanwhile: nothing is stored
 	}
 	return err
+}
+
+// sendPosterNotice is a variable so that tests can see it.
+var sendPosterNotice = mailer.SendSecretPosterNotice
+
+// flushLive is flush for the scan of one text that was just written or changed: besides storing it, it marks the
+// repository for a digest when the scan opened an alert, and tells the person who wrote the text about each place that
+// is new (the text may be an edit: a place that was stored already and is still there is not new). Neither runs in the
+// transaction, and a scan that stored nothing (scanning was switched off meanwhile) notifies nobody.
+func (t *textScan) flushLive() error {
+	var before, stored map[secretscan_model.TextSource]map[secretscan_model.PlaceKey]bool
+	var maxBefore int64
+	hasFound := slices.ContainsFunc(slices.Collect(maps.Values(t.found)), func(p map[secretscan_model.PlaceKey]bool) bool { return len(p) > 0 })
+	if hasFound {
+		var err error
+		if before, err = secretscan_model.StoredTextPlaces(t.ctx, t.repo.ID, t.found); err != nil {
+			return err
+		}
+		if maxBefore, err = secretscan_model.MaxAlertID(t.ctx, t.repo.ID); err != nil {
+			return err
+		}
+	}
+	if err := t.flush(nil); err != nil || !hasFound {
+		return err
+	}
+	stored, err := secretscan_model.StoredTextPlaces(t.ctx, t.repo.ID, t.found)
+	if err != nil {
+		return err
+	}
+	var notices []mailer.SecretPosterNotice
+	fresh := false
+	for src, places := range stored {
+		m := t.meta[src]
+		for key := range places {
+			if before[src][key] {
+				continue
+			}
+			fresh = true
+			if m.posterID != 0 {
+				n := mailer.SecretPosterNotice{PosterID: m.posterID, IssueID: m.issueID}
+				if src.Kind == secretscan_model.KindComment {
+					n.CommentID = src.ID
+				}
+				if !slices.Contains(notices, n) {
+					notices = append(notices, n) // one mail per text, whatever the number of places
+				}
+			}
+		}
+	}
+	if !fresh {
+		return nil
+	}
+	if maxAfter, err := secretscan_model.MaxAlertID(t.ctx, t.repo.ID); err == nil && maxAfter > maxBefore {
+		markText(t.ctx, t.repo, maxBefore)
+	}
+	for _, n := range notices {
+		if err := sendPosterNotice(t.ctx, t.repo, n); err != nil {
+			log.Error("secret scanning: notice to poster %d in repository %d: %v", n.PosterID, t.repo.ID, err)
+		}
+	}
+	return nil
 }
 
 // textCursor is where the scan of a repository's text is: issues up to Issue are done; Batch, when set, is the last

@@ -37,7 +37,7 @@ func textPlace(alertID int64, kind string) *secretscan_model.Location {
 }
 
 // A secret written in an issue and in a comment is found when the text is saved, follows an edit and a delete, and
-// shows up in the alert list but not in its places (the viewer's access to the issues is not checked yet).
+// shows up in the alert list and, for a reader of the issue, in its places.
 func TestSecretTextScanFlow(t *testing.T) {
 	onApplicationRun(t, func(t *testing.T, u *url.URL) {
 		defer test.MockVariableValue(&setting.SecretScanning.Enabled, true)()
@@ -63,7 +63,7 @@ func TestSecretTextScanFlow(t *testing.T) {
 		b := secretAlertOf(t, 1, commentTok)
 		require.Eventually(t, func() bool { return textPlace(b.ID, secretscan_model.KindComment) != nil }, 10*time.Second, 50*time.Millisecond)
 
-		t.Run("the alert is listed, its places in text are not", func(t *testing.T) {
+		t.Run("the alert is listed, with its place in text for a reader of the issue", func(t *testing.T) {
 			var list []*api.SecretScanningAlert
 			DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", base+"/secret-scanning/alerts").AddTokenAuth(write), http.StatusOK), &list)
 			numbers := map[int64]bool{}
@@ -73,7 +73,11 @@ func TestSecretTextScanFlow(t *testing.T) {
 			assert.True(t, numbers[a.Index] && numbers[b.Index])
 			var locs []*api.SecretScanningLocation
 			DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("%s/secret-scanning/alerts/%d/locations", base, a.Index)).AddTokenAuth(write), http.StatusOK), &locs)
-			assert.Empty(t, locs)
+			require.Len(t, locs, 1)
+			assert.Equal(t, "issue_body", locs[0].Type)
+			assert.Equal(t, issue.Index, locs[0].Details.IssueNumber)
+			assert.Equal(t, 2, locs[0].Details.StartLine)
+			assert.Equal(t, "user2", locs[0].Details.Poster)
 		})
 
 		t.Run("an edit that removes the secret marks the place, a delete too", func(t *testing.T) {

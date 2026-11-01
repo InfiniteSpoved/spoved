@@ -165,6 +165,20 @@ func DeclareGitRepos(t *testing.T) {
 			})
 		})
 	}
+	// the places of secret alerts in text (secret-alerts-text.test.e2e.ts): one repository whose owner reads its issues and
+	// pull requests, and one where both units are off, so nobody does
+	for _, name := range []string{"secret-text-test", "secret-text-hidden"} {
+		newRepo(t, 11, name, nil, []FileChanges{{
+			Filename: "config/prod.env",
+			Versions: []string{"KEY=placeholder"},
+		}}, func(user *user_model.User, repo *repo_model.Repository) {
+			seedSecretTextAlerts(t, user, repo)
+			if name == "secret-text-hidden" {
+				_, err := db.GetEngine(db.DefaultContext).Exec("DELETE FROM repo_unit WHERE repo_id = ? AND type IN (?, ?)", repo.ID, unit_model.TypeIssues, unit_model.TypePullRequests)
+				require.NoError(t, err)
+			}
+		})
+	}
 	// the secret alert lists (secret-alerts-lists.test.e2e.ts): alerts in two repositories of org3, which its owner user2
 	// and the site admin list; the closer of the closed one is user2
 	for _, r := range []struct {
@@ -808,4 +822,37 @@ func seedSecretAlerts(t *testing.T, user *user_model.User, repo *repo_model.Repo
 	_, err := secretscan_model.DeleteScans(db.DefaultContext, repo.ID) // the push may have started a scan
 	require.NoError(t, err)
 	require.NoError(t, secretscan_model.Save(db.DefaultContext, nil, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: "[]", Status: secretscan_model.StatusOK}))
+}
+
+// seedSecretTextAlerts stores three alerts of a repository that have places in text: a token in an issue's description
+// and in a comment of it (the comment's place was removed again), a key only in the title of a pull request, and a
+// token in code and in a comment.
+func seedSecretTextAlerts(t *testing.T, user *user_model.User, repo *repo_model.Repository) {
+	t.Helper()
+	ctx := db.DefaultContext
+	issue := &issues_model.Issue{RepoID: repo.ID, Index: 1, PosterID: 2, Title: "Deploy fails on staging"}
+	pull := &issues_model.Issue{RepoID: repo.ID, Index: 2, PosterID: user.ID, Title: "Add the staging config", IsPull: true}
+	require.NoError(t, db.Insert(ctx, issue))
+	require.NoError(t, db.Insert(ctx, pull))
+	commit := headCommit(t, repo)
+	now := timeutil.TimeStampNow()
+	seed := func(rule, kind string, locs ...*secretscan_model.Location) {
+		alert := &secretscan_model.Alert{RepoID: repo.ID, RuleID: rule, SecretType: kind, LocationCount: len(locs), ViaPull: true, Fingerprint: fmt.Sprintf("%064x", rand.Int63())}
+		require.NoError(t, secretscan_model.InsertAlert(ctx, alert))
+		for _, l := range locs {
+			l.AlertID = alert.ID
+		}
+		require.NoError(t, secretscan_model.InsertLocations(ctx, locs))
+	}
+	removed := secretscan_model.NewTextLocation(repo.ID, secretscan_model.KindComment, 9001, issue.ID, "", 1, 1, user.ID)
+	removed.RemovedUnix = int64(now)
+	seed("github-token", "github",
+		secretscan_model.NewTextLocation(repo.ID, secretscan_model.KindIssue, issue.ID, issue.ID, "body", 4, 4, 2),
+		removed)
+	seed("aws-access-key-id", "aws", secretscan_model.NewTextLocation(repo.ID, secretscan_model.KindIssue, pull.ID, pull.ID, "title", 1, 1, user.ID))
+	code := secretscan_model.NewLocation(repo.ID, secretscan_model.KindRepo, "blobtext", "config/prod.env", 1, 1, commit, "Sam Example", "sam@example.com", int64(now))
+	seed("slack-token", "slack", code, secretscan_model.NewTextLocation(repo.ID, secretscan_model.KindComment, 9002, pull.ID, "", 2, 2, 2))
+	_, err := secretscan_model.DeleteScans(ctx, repo.ID)
+	require.NoError(t, err)
+	require.NoError(t, secretscan_model.Save(ctx, nil, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: "[]", Status: secretscan_model.StatusOK}))
 }

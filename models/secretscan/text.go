@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"forgejo.org/models/db"
+	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/timeutil"
 
 	"xorm.io/builder"
@@ -52,6 +53,32 @@ func SyncTextPlaces(ctx context.Context, repoID int64, found map[TextSource]map[
 		}
 	}
 	return setRemoved(ctx, gone, int64(timeutil.TimeStampNow()), back)
+}
+
+// StoredTextPlaces returns, for the texts named in found, the places that are stored and not marked removed, in a few
+// queries.
+func StoredTextPlaces(ctx context.Context, repoID int64, found map[TextSource]map[PlaceKey]bool) (map[TextSource]map[PlaceKey]bool, error) {
+	byKind := map[string][]int64{}
+	for src := range found {
+		byKind[src.Kind] = append(byKind[src.Kind], src.ID)
+	}
+	out := map[TextSource]map[PlaceKey]bool{}
+	for kind, ids := range byKind {
+		for chunk := range slices.Chunk(ids, 500) {
+			var rows []*Location
+			if err := db.GetEngine(ctx).Where(builder.Eq{"repo_id": repoID, "kind": kind, "removed_unix": 0}.And(builder.In("source_id", chunk))).Find(&rows); err != nil {
+				return nil, err
+			}
+			for _, r := range rows {
+				src := TextSource{Kind: kind, Field: r.Field, ID: r.SourceID}
+				if out[src] == nil {
+					out[src] = map[PlaceKey]bool{}
+				}
+				out[src][PlaceKey{Kind: kind, PathHash: r.PathHash, StartLine: r.StartLine}] = true
+			}
+		}
+	}
+	return out, nil
 }
 
 func setRemoved(ctx context.Context, gone []int64, now int64, back []int64) error {
@@ -126,12 +153,89 @@ func AddTextHoles(ctx context.Context, repoID, n int64) error {
 	return err
 }
 
-// readableKinds is the condition on a place's kind for the readers that show places: never the places in text (see
-// TextKinds), and the wiki's only when noWiki is not set.
+// readableKinds is the condition on a place's kind for the readers that show places: the wiki's only when noWiki is
+// not set. A place in text is returned always; what it shows is up to LoadTextPlaces and the viewer's read access.
 func readableKinds(noWiki bool) builder.Cond {
-	hidden := slices.Clone(TextKinds)
 	if noWiki {
-		hidden = append(hidden, KindWiki)
+		return builder.Neq{"kind": KindWiki}
 	}
-	return builder.NotIn("kind", hidden)
+	return builder.NewCond()
+}
+
+// IsText tells whether the place is in text people write (an issue, a pull request or a comment).
+func (l *Location) IsText() bool { return slices.Contains(TextKinds, l.Kind) }
+
+// TextAccess is what a viewer may read of the texts of a repository: its Issues and its Pull requests unit.
+type TextAccess struct{ Issues, Pulls bool }
+
+// TextPlace is a place in text for one viewer. Only when Readable (the viewer reads the issue or pull request) are
+// the other fields set; otherwise all that is shown is that the secret is in an issue or in a comment. The text
+// itself is never loaded.
+type TextPlace struct {
+	*Location
+	Readable bool
+	IsPull   bool
+	Number   int64
+	Poster   *user_model.User // nil when unknown, a deleted user or an import
+}
+
+// Removed tells whether the text no longer holds the secret (the alert stays: it was exposed).
+func (p *TextPlace) Removed() bool { return p.RemovedUnix != 0 }
+
+// FieldName is the part of the text that holds the secret: title, body or comment.
+func (p *TextPlace) FieldName() string {
+	if p.Kind == KindComment {
+		return "comment"
+	}
+	return p.Field
+}
+
+// LoadTextPlaces resolves the places in text among locs (of one repository) for a viewer with the given access, in
+// two queries (the issues, the posters of the readable ones). The result is by place ID.
+func LoadTextPlaces(ctx context.Context, repoID int64, locs []*Location, access TextAccess) (map[int64]*TextPlace, error) {
+	out := map[int64]*TextPlace{}
+	var issueIDs []int64
+	for _, l := range locs {
+		if l.IsText() {
+			out[l.ID] = &TextPlace{Location: l}
+			issueIDs = append(issueIDs, l.IssueID)
+		}
+	}
+	if len(out) == 0 || !access.Issues && !access.Pulls {
+		return out, nil
+	}
+	var rows []struct {
+		ID     int64
+		Number int64
+		IsPull bool
+	}
+	if err := db.GetEngine(ctx).Table("issue").Select("id, `index` AS number, is_pull").
+		Where(builder.Eq{"repo_id": repoID}.And(builder.In("id", issueIDs))).Find(&rows); err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]int, len(rows))
+	for i, r := range rows {
+		byID[r.ID] = i
+	}
+	var posterIDs []int64
+	for _, p := range out {
+		i, ok := byID[p.IssueID]
+		if !ok || !(rows[i].IsPull && access.Pulls || !rows[i].IsPull && access.Issues) {
+			continue
+		}
+		p.Readable, p.IsPull, p.Number = true, rows[i].IsPull, rows[i].Number
+		if p.PosterID != 0 {
+			posterIDs = append(posterIDs, p.PosterID)
+		}
+	}
+	users, err := user_model.GetUsersByIDsWithBots(ctx, posterIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range out {
+		if p.Readable {
+			p.Poster = users[p.PosterID]
+		}
+	}
+	return out, nil
 }
