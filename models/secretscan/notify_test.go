@@ -310,6 +310,15 @@ func TestMarkNotifyTextMergesWithPush(t *testing.T) {
 		push(t)
 		check(t)
 	})
+	t.Run("push A, text, push B on another ref is still several", func(t *testing.T) {
+		setup(t)
+		push(t)
+		text(t)
+		ok, err := MarkNotify(t.Context(), 1, 2, KindRepo, "dev", "c2")
+		require.NoError(t, err)
+		require.True(t, ok)
+		assert.NotZero(t, scanRow(t, 1, KindRepo).NotifyKinds&DigestSeveral)
+	})
 	t.Run("push then text", func(t *testing.T) {
 		setup(t)
 		push(t)

@@ -37,7 +37,7 @@ type SecretScanningLocationDetails struct {
 	Field string `json:"field,omitempty"`
 	// spoved: for a place in text the caller may read, the login of who wrote it (empty for an import)
 	Poster string `json:"poster,omitempty"`
-	// spoved: for a place in text the caller may read, true when the text no longer holds the secret (the alert stays)
+	// spoved: true when the text no longer holds the secret (the alert stays); on an issue_text or comment_text place with no other detail, true when the issue or comment was deleted (only said to a caller who reads issues and pull requests)
 	Removed bool `json:"removed,omitempty"`
 	// the API URL of the issue, for an issue_title place
 	IssueTitleURL string `json:"issue_title_url,omitempty"`

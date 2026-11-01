@@ -10,7 +10,9 @@ import (
 	"html"
 	"html/template"
 	"strconv"
+	"sync"
 
+	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
@@ -23,6 +25,8 @@ import (
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/translation"
 	"forgejo.org/modules/util"
+
+	mc "code.forgejo.org/go-chi/cache"
 )
 
 const tplSecretPoster base.TplName = "secret/poster"
@@ -76,6 +80,14 @@ func SendSecretPosterNotice(ctx context.Context, repo *repo_model.Repository, n 
 	if perm.IsAdmin() || !perm.CanRead(util.Iif(issue.IsPull, unit.TypePullRequests, unit.TypeIssues)) || !ShouldEmail(ctx, u, repo, user_model.NotifyEventSecretAlert) {
 		return nil
 	}
+	if n.Field != "title" { // a title has no edit history
+		var last issues_model.ContentHistory
+		if has, err := db.GetEngine(ctx).Where("issue_id = ? AND comment_id = ? AND is_deleted = ?", issue.ID, n.CommentID, false).Desc("id").Get(&last); err != nil {
+			return err
+		} else if has && last.PosterID != u.ID { // somebody else wrote the text as it is now
+			return nil
+		}
+	}
 	if !takePosterSlot(u.ID) {
 		return nil
 	}
@@ -121,22 +133,36 @@ func SendSecretPosterNotice(ctx context.Context, repo *repo_model.Repository, n 
 	return nil
 }
 
-// takePosterSlot takes one of the person's MaxPosterNoticesPerDay mails of the (UTC) day before the mail is made: the
-// counter is incremented first and the mail goes only while it is within the limit, so two workers can't both take the
-// last slot (the first creation of the day's key can still race). The counter is in the cache: with the default
-// in-memory cache each server counts for itself, with a shared cache (Redis) the limit holds across servers.
+var posterSlotMu sync.Mutex
+
+// takePosterSlot takes one of the person's MaxPosterNoticesPerDay mails of the (UTC) day before the mail is made. The
+// adapters differ: Incr of a missing key is an error (memory, redis) or a silent nothing (twoqueue), and the memory
+// one is not atomic, so the counter is seeded with Put first and everything runs under one mutex. A counter that can't
+// be read after that fails closed. The counter is in the cache: with a per-process cache (memory, twoqueue) each
+// server counts for itself, with Redis the limit holds across servers (the mutex is per process, so two servers can
+// still race on the seed).
 func takePosterSlot(userID int64) bool {
-	c := cache.GetCache()
+	return takePosterSlotIn(cache.GetCache(), userID)
+}
+
+func takePosterSlotIn(c mc.Cache, userID int64) bool {
 	if c == nil {
 		return true
 	}
 	key := "secret_poster_notices_" + strconv.FormatInt(userID, 10) + "_" + timeutil.TimeStampNow().AsTime().UTC().Format("2006-01-02")
-	if err := c.Incr(key); err != nil { // no counter yet today
+	posterSlotMu.Lock()
+	defer posterSlotMu.Unlock()
+	if !c.IsExist(key) {
 		if err := c.Put(key, int64(1), 2*24*60*60); err != nil {
 			log.Error("secret poster notice: store the count of user %d: %v", userID, err)
+			return false
 		}
 		return true
 	}
+	if err := c.Incr(key); err != nil {
+		log.Error("secret poster notice: count for user %d: %v", userID, err)
+		return false
+	}
 	n, err := util.ToInt64(c.Get(key))
-	return err != nil || n <= MaxPosterNoticesPerDay
+	return err == nil && n <= MaxPosterNoticesPerDay
 }

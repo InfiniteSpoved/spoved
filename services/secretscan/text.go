@@ -215,15 +215,11 @@ func handleText(ctx context.Context, item string) (err error) {
 		}
 	}
 	switch {
-	case parts[0] == "i" && (len(nums) == 1 || len(nums) == 2):
-		if len(nums) == 2 {
-			job.doer = nums[1]
-		}
+	case parts[0] == "i" && len(nums) == 2:
+		job.doer = nums[1]
 		return scanIssueText(ctx, nums[0], job)
-	case parts[0] == "c" && (len(nums) == 1 || len(nums) == 2):
-		if len(nums) == 2 {
-			job.doer = nums[1]
-		}
+	case parts[0] == "c" && len(nums) == 2:
+		job.doer = nums[1]
 		return scanCommentText(ctx, nums[0], job)
 	case parts[0] == "x" && len(parts) == 4 && len(nums) == 2:
 		job.repoID = nums[0]

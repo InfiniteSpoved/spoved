@@ -103,6 +103,7 @@ func TestSecretTextPlacesGating(t *testing.T) {
 		hrefs := map[string]bool{}
 		doc.Find(".secret-locations a").Each(func(_ int, s *goquery.Selection) { hrefs[s.AttrOr("href", "")] = true })
 		assert.True(t, hrefs[setting.AppURL+"user2/repo1/issues/9101"], "%v", hrefs)
+		assert.True(t, hrefs["/user5"], "the poster links to the profile: %v", hrefs)
 		assert.NotContains(t, text, "Details hidden")
 
 		// a text-only alert was not first seen "in a pull request"
@@ -251,7 +252,15 @@ func TestSecretTextPlacesRealAccess(t *testing.T) {
 	assert.Contains(t, text, "description, line 3")
 	assert.NotContains(t, text, "Details hidden")
 
+	// an alert in code and in text gets the combined guidance
+	both := textAlert(t, f.root, secretscan_model.NewTextLocation(f.root.ID, secretscan_model.KindIssue, issue.ID, issue.ID, "body", 1, 1, 5))
+	codePlace := secretscan_model.NewLocation(f.root.ID, secretscan_model.KindRepo, "blobboth", "a.env", 1, 1, "commitsha1", "An Author", "author@example.com", 1700000000)
+	codePlace.AlertID = both.ID
+	require.NoError(t, db.Insert(ctx, codePlace))
+	body := NewHTMLParser(t, loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/org3/sl-root/security/secrets/%d", both.Index)), http.StatusOK).Body).Find("#secret-guidance").Text()
+	assert.Contains(t, body, "it stays in git history, in the text's edit history and in notification mails")
+
 	text = page("user2", gone)
-	assert.Contains(t, text, "Deleted")
+	assert.Contains(t, text, "The issue or pull request was deleted")
 	assert.NotContains(t, text, "Details hidden")
 }

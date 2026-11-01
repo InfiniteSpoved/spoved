@@ -23,6 +23,7 @@ import (
 	"forgejo.org/modules/test"
 	"forgejo.org/modules/timeutil"
 
+	mc "code.forgejo.org/go-chi/cache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -133,6 +134,18 @@ func TestSendSecretPosterNotice(t *testing.T) {
 		assert.Empty(t, send(SecretPosterNotice{PosterID: 5, IssueID: pull.ID}))
 	})
 
+	t.Run("the latest editor of the text must be the poster", func(t *testing.T) {
+		cache.GetCache().Delete("secret_poster_notices_5_2026-11-02")
+		edited := newIssue(5, false)
+		require.NoError(t, db.Insert(ctx, &issues_model.ContentHistory{PosterID: 5, IssueID: edited.ID, EditedUnix: 1, ContentText: "a", IsFirstCreated: true}))
+		require.NoError(t, db.Insert(ctx, &issues_model.ContentHistory{PosterID: 4, IssueID: edited.ID, EditedUnix: 2, ContentText: "b"}))
+		assert.Empty(t, send(SecretPosterNotice{PosterID: 5, IssueID: edited.ID, Field: "body"}), "somebody else wrote it as it is now")
+		assert.Len(t, send(SecretPosterNotice{PosterID: 5, IssueID: edited.ID, Field: "title"}), 1, "a title has no history")
+		require.NoError(t, db.Insert(ctx, &issues_model.ContentHistory{PosterID: 5, IssueID: edited.ID, EditedUnix: 3, ContentText: "c"}))
+		assert.Len(t, send(SecretPosterNotice{PosterID: 5, IssueID: edited.ID, Field: "body"}), 1)
+		cache.GetCache().Delete("secret_poster_notices_5_2026-11-02")
+	})
+
 	t.Run("at most five a day for one poster, then again the next day", func(t *testing.T) {
 		cache.GetCache().Delete("secret_poster_notices_5_2026-11-02")
 		for i := range MaxPosterNoticesPerDay + 2 {
@@ -183,4 +196,21 @@ func TestSendSecretDigestText(t *testing.T) {
 	assert.NotContains(t, body, "Location")
 	assert.NotContains(t, body, "/issues/")
 	assert.Contains(t, body, `href="https://try.gitea.io/user2/repo1/security/secrets/1"`)
+}
+
+// The cap works the same on every cache adapter: Incr of a missing key is an error in one and a silent nothing in
+// another, so the counter is seeded and nothing is assumed.
+func TestTakePosterSlotAdapters(t *testing.T) {
+	timeutil.MockSet(time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC))
+	defer timeutil.MockUnset()
+	for _, adapter := range []string{"memory", "twoqueue"} {
+		t.Run(adapter, func(t *testing.T) {
+			c, err := mc.NewCacher(mc.Options{Adapter: adapter, AdapterConfig: map[string]string{"twoqueue": "100"}[adapter]})
+			require.NoError(t, err)
+			for i := range MaxPosterNoticesPerDay + 2 {
+				assert.Equal(t, i < MaxPosterNoticesPerDay, takePosterSlotIn(c, 77), "call %d", i+1)
+			}
+			assert.True(t, takePosterSlotIn(c, 78), "another user has their own count")
+		})
+	}
 }

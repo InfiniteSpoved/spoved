@@ -425,6 +425,13 @@ func SecretAlert(ctx *context.Context) {
 			ctx.Data["AnyHidden"] = true // a place the viewer is not told about
 		}
 	}
+	posters := make([]*user_model.User, len(locs)) // the poster of each place, for the profile link
+	for i, l := range locs {
+		if p := texts[l.ID]; p != nil && p.Readable {
+			posters[i] = p.Poster
+		}
+	}
+	ctx.Data["Posters"] = posters
 	ctx.Data["Locations"] = convert.ToSecretScanningLocations(repo, locs, texts, func(path string) string { return wiki_service.PageHTMLURL(repo, path) })
 	titles := map[string]string{}
 	for _, l := range locs {
