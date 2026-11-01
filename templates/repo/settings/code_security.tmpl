@@ -42,7 +42,7 @@
 		</h4>
 		<div class="ui attached segment" id="secret-scanning-box">
 			{{if .SecretSwitch.Site}}
-			<form class="ui form secret-scanning-switch secret-confirm-form" id="secret-scanning-switch" action="{{.RepoLink}}/settings/code_security/secret_scanning" method="post">
+			<form class="ui form secret-scanning-switch secret-confirm-form" id="secret-scanning-switch" action="{{.RepoLink}}/settings/code_security/secret_scanning" method="post" autocomplete="off">
 				<fieldset {{if not .SecretCanChange}}disabled{{end}}>
 					<div class="field">
 						<div class="ui checkbox{{if not .SecretCanChange}} disabled{{end}}">

@@ -46,7 +46,7 @@
 				{{if .CanChangeThere}}<a href="{{AppSubUrl}}/admin/config/secret-scanning">{{ctx.Locale.Tr "repo.settings.dependency_graph.change_in_admin"}}</a>{{else}}{{ctx.Locale.Tr "repo.settings.dependency_graph.ask_admin"}}{{end}}
 			</div>
 		{{end}}
-		<form class="ui form secret-confirm-form" id="org-secret-scanning-switch" action="{{.OrgLink}}/settings/code_security/secret_scanning" method="post">
+		<form class="ui form secret-confirm-form" id="org-secret-scanning-switch" action="{{.OrgLink}}/settings/code_security/secret_scanning" method="post" autocomplete="off">
 			<div class="field">
 				<div class="ui checkbox">
 					<input id="secret-scanning-enabled" name="enabled" type="checkbox" {{if .SecretOn}}checked{{end}}{{if .SecretSiteOn}} data-confirm-modal="#secret-scanning-org-off-modal" data-confirm-when="off"{{end}}>
