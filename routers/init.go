@@ -44,6 +44,7 @@ import (
 	"forgejo.org/services/auth/source/oauth2"
 	"forgejo.org/services/authz"
 	"forgejo.org/services/automerge"
+	app_context "forgejo.org/services/context"
 	"forgejo.org/services/cron"
 	dependency_service "forgejo.org/services/dependency"
 	federation_service "forgejo.org/services/federation"
@@ -167,6 +168,7 @@ func InitWebInstalled(ctx context.Context) {
 	mustInit(mergeforward.Init)
 	mustInit(dependency_service.Init)
 	mustInit(secretscan_service.Init)
+	app_context.SecretScanningEnabled = secretscan_service.Enabled
 	mustInit(vulnerability_service.Init)
 	mustInit(task.Init)
 	mustInit(migrations_allowlist.Init)

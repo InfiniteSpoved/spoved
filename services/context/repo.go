@@ -25,6 +25,7 @@ import (
 	access_model "forgejo.org/models/perm/access"
 	quota_model "forgejo.org/models/quota"
 	repo_model "forgejo.org/models/repo"
+	secretscan_model "forgejo.org/models/secretscan"
 	unit_model "forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	vulnerability_model "forgejo.org/models/vulnerability"
@@ -1258,18 +1259,60 @@ func (ctx *Context) IsAlertAuditorView() bool {
 }
 
 // setSecurityTab decides whether the repository header shows the Security tab and its count of open alerts: only for
-// someone who may see the alerts (a writer of the code, an admin, or an auditor reading) while the dependency graph is
-// on. Everyone else costs no query. One count query per page view, for those who see the tab.
+// someone who may see the alerts (a writer of the code, an admin, or an auditor reading). The count adds the open
+// vulnerability alerts (while the dependency graph is on) and the open secret alerts the viewer can see (while secret
+// scanning is on, or alerts are left from before it was turned off). Everyone else costs no query; the others one
+// count query for each kind, once per page view.
 func (ctx *Context) setSecurityTab() {
-	if ctx.Repo.Repository == nil || !vulnerability_service.CanSeeAlerts(&ctx.Repo.Permission, ctx.IsAlertAuditorView()) || !dependency_service.Enabled(ctx, ctx.Repo.Repository) {
+	if ctx.Repo.Repository == nil || !vulnerability_service.CanSeeAlerts(&ctx.Repo.Permission, ctx.IsAlertAuditorView()) {
 		return
 	}
-	counts, err := vulnerability_model.CountAlertsByState(ctx, ctx.Repo.Repository.ID)
-	if err != nil {
-		log.Error("count the vulnerability alerts of repository %d: %v", ctx.Repo.Repository.ID, err)
+	var open int64
+	if dependency_service.Enabled(ctx, ctx.Repo.Repository) {
+		counts, err := vulnerability_model.CountAlertsByState(ctx, ctx.Repo.Repository.ID)
+		if err != nil {
+			log.Error("count the vulnerability alerts of repository %d: %v", ctx.Repo.Repository.ID, err)
+			return
+		}
+		ctx.Data["ShowVulnAlerts"] = true
+		ctx.Data["VulnAlertCounts"] = counts
+		ctx.Data["NumOpenVulnAlerts"] = counts[vulnerability_model.StateOpen]
+		open += counts[vulnerability_model.StateOpen]
+	}
+	if secretOpen, secretClosed, on, ok := ctx.secretAlertCounts(); ok {
+		ctx.Data["ShowSecretAlerts"] = true
+		// while scanning is off the alerts are hidden, so there is no count
+		ctx.Data["SecretCounted"] = on
+		ctx.Data["SecretOpenCount"], ctx.Data["SecretClosedCount"] = secretOpen, secretClosed
+		open += secretOpen
+	}
+	if ctx.Data["ShowVulnAlerts"] == nil && ctx.Data["ShowSecretAlerts"] == nil {
 		return
 	}
 	ctx.Data["ShowSecurityTab"] = true
-	ctx.Data["VulnAlertCounts"] = counts
-	ctx.Data["NumOpenVulnAlerts"] = counts[vulnerability_model.StateOpen]
+	ctx.Data["NumOpenSecurityAlerts"] = open
+}
+
+// SecretScanningEnabled tells whether secret scanning is on for a repository. routers/init.go sets it: this package
+// can't import services/secretscan, whose tests import services/repository, which imports this package.
+var SecretScanningEnabled = func(context.Context, *repo_model.Repository) bool { return false }
+
+// secretAlertCounts counts the open and closed secret alerts the viewer can see (alerts only in the wiki are not
+// for someone without Wiki read). While scanning is off the alerts are kept but hidden, so the counts are zero and
+// on is false; ok is false when the viewer has no secret alert page: scanning is off and nothing is kept.
+func (ctx *Context) secretAlertCounts() (open, closed int64, on, ok bool) {
+	codeOnly := !ctx.Repo.CanRead(unit_model.TypeWiki)
+	if !SecretScanningEnabled(ctx, ctx.Repo.Repository) { // hidden: no count, only whether there is a banner page
+		has, err := secretscan_model.HasAlerts(ctx, ctx.Repo.Repository.ID, codeOnly)
+		if err != nil {
+			log.Error("look for the secret alerts of repository %d: %v", ctx.Repo.Repository.ID, err)
+		}
+		return 0, 0, false, has
+	}
+	open, closed, err := secretscan_model.CountByState(ctx, ctx.Repo.Repository.ID, codeOnly)
+	if err != nil {
+		log.Error("count the secret alerts of repository %d: %v", ctx.Repo.Repository.ID, err)
+		return 0, 0, false, false
+	}
+	return open, closed, true, true
 }

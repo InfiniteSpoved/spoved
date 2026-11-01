@@ -229,6 +229,7 @@ var Actions = map[string]string{
 	"repo.units.changed":                   CategoryRepo,
 	"repo.secret_alert.closed":             CategoryRepo,
 	"repo.secret_alert.reopened":           CategoryRepo,
+	"repo.secret_scanning.rescanned":       CategoryRepo,
 	"repo.vulnerability_alert.dismissed":   CategoryRepo,
 	"repo.vulnerability_alert.reopened":    CategoryRepo,
 	"org.team.created":                     CategoryOrg,

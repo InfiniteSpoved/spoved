@@ -84,7 +84,7 @@ type EditSecretScanningAlertOption struct {
 	State string `json:"state"`
 	// required when resolving: false_positive, wont_fix, revoked or used_in_tests
 	Resolution string `json:"resolution"`
-	// optional when resolving, at most 1000 bytes; refused when it looks like a secret
+	// optional when resolving, at most 1000 bytes, but required (not empty after trimming) for wont_fix; refused when it looks like a secret
 	ResolutionComment string `json:"resolution_comment"`
 }
 

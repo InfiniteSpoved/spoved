@@ -271,7 +271,7 @@ func loadSecretScanningAlert(ctx *context.APIContext) *secretscan_model.Alert {
 		ctx.NotFound()
 		return nil
 	}
-	alert, err := secretscan_model.GetAlert(ctx, ctx.Repo().Repository.ID, index)
+	alert, err := secretscan_model.GetVisibleAlert(ctx, ctx.Repo().Repository.ID, index, ctx.Permission().CanRead(unit.TypeWiki))
 	if errors.Is(err, util.ErrNotExist) {
 		ctx.NotFound()
 		return nil
@@ -279,17 +279,6 @@ func loadSecretScanningAlert(ctx *context.APIContext) *secretscan_model.Alert {
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "GetAlert", err)
 		return nil
-	}
-	if !ctx.Permission().CanRead(unit.TypeWiki) { // an alert that is only in the wiki is missing for them
-		has, err := secretscan_model.HasCodeLocation(ctx, alert.RepoID, alert.ID)
-		if err != nil {
-			ctx.Error(http.StatusInternalServerError, "HasCodeLocation", err)
-			return nil
-		}
-		if !has {
-			ctx.NotFound()
-			return nil
-		}
 	}
 	return alert
 }

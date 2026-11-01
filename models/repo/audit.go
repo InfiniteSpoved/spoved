@@ -16,7 +16,7 @@ import (
 func (repo *Repository) AuditFields() map[string]any {
 	return map[string]any{
 		"is_private": repo.IsPrivate, "is_template": repo.IsTemplate, "default_branch": repo.DefaultBranch, "is_mirror": repo.IsMirror,
-		"dependency_graph": !repo.DependencyGraphDisabled,
+		"dependency_graph": !repo.DependencyGraphDisabled, "secret_scanning": !repo.SecretScanningDisabled,
 	}
 }
 

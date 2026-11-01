@@ -180,10 +180,10 @@
 				{{end}}
 
 				{{if .ShowSecurityTab}}
-					<a class="{{if .PageIsSecurity}}active {{end}}item" href="{{.RepoLink}}/security/alerts">
+					<a class="{{if .PageIsSecurity}}active {{end}}item" href="{{.RepoLink}}/security/{{if .ShowVulnAlerts}}alerts{{else}}secrets{{end}}">
 						{{svg "octicon-shield"}} {{ctx.Locale.Tr "repo.security"}}
-						{{if .NumOpenVulnAlerts}}
-							<span class="ui small label" id="security-open-alerts">{{CountFmt .NumOpenVulnAlerts}}</span>
+						{{if .NumOpenSecurityAlerts}}
+							<span class="ui small label" id="security-open-alerts">{{CountFmt .NumOpenSecurityAlerts}}</span>
 						{{end}}
 					</a>
 				{{end}}

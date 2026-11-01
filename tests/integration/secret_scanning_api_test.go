@@ -456,6 +456,9 @@ func TestSecretScanningAPI(t *testing.T) {
 				{"state": "resolved", "resolution": "fixed"},
 				{"state": "resolved", "resolution": "REVOKED"},
 				resolve("revoked", strings.Repeat("a", 1001)),
+				resolve("wont_fix", ""), // won't fix needs a comment that is not empty once cleaned
+				resolve("wont_fix", "  \r\n \n"),
+				resolve("wont_fix", string([]rune{0x200b, 0x2060, ' ', 0x200d})),
 				resolve("revoked", "see "+tok),
 				resolve("false_positive", "key="+tok),
 				{"state": "open", "resolution_comment": "x"},
