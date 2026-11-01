@@ -11,9 +11,13 @@ import (
 	shared_user "forgejo.org/routers/web/shared/user"
 	"forgejo.org/services/context"
 	dependency_service "forgejo.org/services/dependency"
+	secretscan_service "forgejo.org/services/secretscan"
 )
 
-const tplSecurity base.TplName = "org/security"
+const (
+	tplSecurity base.TplName = "org/security"
+	tplSecrets  base.TplName = "org/security_secrets"
+)
 
 // MustEnableSecurity answers 404 (owners too) while the dependency graph is off for the site or the organization.
 func MustEnableSecurity(ctx *context.Context) {
@@ -60,4 +64,41 @@ func SecurityVulnerabilitiesExport(ctx *context.Context) {
 // SecurityDependenciesExport downloads the dependency search as CSV or JSON.
 func SecurityDependenciesExport(ctx *context.Context) {
 	shared_security.Export(ctx, securityScope(ctx), shared_security.Dependencies, ctx.Org.OrgLink+"/security/dependencies")
+}
+
+// MustSeeSecretAlerts answers 404 to the list of secret alerts (and its download) for everyone it is not for: see
+// context.Organization.SecretAlerts. It also answers 404 while secret scanning is off for the instance.
+func MustSeeSecretAlerts(ctx *context.Context) {
+	if !ctx.Org.SecretAlerts {
+		ctx.NotFound("MustSeeSecretAlerts", nil)
+	}
+}
+
+// secretScope is the list of the organization's secret alerts the viewer may see: every repository for owners, site
+// admins and auditors, the ones with write access for a member.
+func secretScope(ctx *context.Context) secretscan_service.Scope {
+	narrow := ctx.Org.SecretAlertsNarrow
+	return secretscan_service.Scope{
+		Org: ctx.Org.Organization, Doer: ctx.Doer, Narrow: narrow,
+		Admin: ctx.IsUserSiteAdmin() || (!narrow && !ctx.Org.IsOwner), // an auditor reads every repository
+	}
+}
+
+// SecurityAlerts lists the secret alerts of the organization's repositories.
+func SecurityAlerts(ctx *context.Context) {
+	if !shared_security.Secrets(ctx, secretScope(ctx), ctx.Org.OrgLink+"/security/secrets") {
+		return
+	}
+	if err := shared_user.LoadHeaderCount(ctx); err != nil {
+		ctx.ServerError("LoadHeaderCount", err)
+		return
+	}
+	ctx.Data["Title"] = ctx.Tr("secret_search.title")
+	ctx.Data["PageIsOrgSecurity"] = true
+	ctx.HTML(http.StatusOK, tplSecrets)
+}
+
+// SecurityAlertsExport downloads the secret alert list as CSV.
+func SecurityAlertsExport(ctx *context.Context) {
+	shared_security.SecretsExport(ctx, secretScope(ctx), ctx.Org.OrgLink+"/security/secrets")
 }

@@ -48,6 +48,8 @@ var MaintenanceReadRoutes = container.SetOf(
 	"POST /{username}/{groupname}/{reponame}/-/archive/*",
 	"POST /org/{org}/security/vulnerabilities/export",
 	"POST /org/{org}/security/dependencies/export",
+	"POST /org/{org}/security/secrets/export",
+	"POST /admin/security/secrets/export",
 	"POST /admin/config/dependency-graph/vulnerabilities/export",
 	"POST /admin/config/dependency-graph/dependencies/export",
 	"POST /api/v1/markup",

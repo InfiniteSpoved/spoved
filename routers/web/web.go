@@ -352,6 +352,7 @@ func verifyAuthWithOptions(options *common.VerifyOptions) func(ctx *context.Cont
 			}
 			ctx.Data["PageIsAdmin"] = true
 			admin.SetSecuritySearchNav(ctx)
+			admin.SetSecretAlertsNav(ctx)
 		}
 	}
 }
@@ -920,6 +921,11 @@ func registerRoutes(m *web.Route) {
 	m.Get("/admin/audit", reqSignIn, admin.AuditReq, admin.Audit)
 	m.Get("/admin/config/dependency-graph", reqSignIn, admin.AuditReq, admin.DependencyGraph)
 	m.Get("/admin/config/secret-scanning", reqSignIn, admin.AuditReq, admin.SecretScanning)
+	// the secret alerts of every repository: site admins and auditors, while secret scanning is on
+	m.Group("/admin/security/secrets", func() {
+		m.Get("", admin.AuditReq, admin.MustEnableSecretAlerts, admin.SecretAlerts)
+		m.Post("/export", admin.AuditExportReq, admin.MustEnableSecretAlerts, common.RateLimitHeavy, admin.SecretAlertsExport)
+	}, reqSignIn)
 	// the dependency and vulnerability search is read-only: the auditor searches and, as the audited download is no
 	// change, posts it too (TestAdminAuditRoutes)
 	m.Group("/admin/config/dependency-graph", func() {
@@ -1266,6 +1272,12 @@ func registerRoutes(m *web.Route) {
 			m.Post("/teams/{team}/action/group/{action}", org.TeamsUserGroupAction)
 			m.Get("/teams/{team}/groups/search", org.SearchTeamUserGroups)
 		}, context.OrgAssignment(true, false, true))
+
+		// owners, site admins, auditors and members (a member sees the repositories they can write)
+		m.Group("/{org}/security/secrets", func() {
+			m.Get("", org.SecurityAlerts)
+			m.Post("/export", common.RateLimitHeavy, org.SecurityAlertsExport)
+		}, context.OrgAssignment(), org.MustSeeSecretAlerts)
 
 		// owner or site admin; the handlers answer 403 (not 404) for visible organizations
 		m.Group("/{org}/settings", func() {

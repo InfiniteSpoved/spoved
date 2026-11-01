@@ -1,0 +1,11 @@
+{{/* The tabs of the organization's Security page: .Ctx is the page's data, .Active the name of the open tab */}}
+{{$c := .Ctx}}
+		<nav class="repo-security-tabs" aria-label="{{ctx.Locale.Tr "security_search.title"}}">
+			{{if $c.EnableSecurity}}
+			<a class="item{{if eq .Active "vulnerabilities"}} active{{end}}"{{if eq .Active "vulnerabilities"}} aria-current="page"{{end}} href="{{$c.OrgLink}}/security/vulnerabilities">{{ctx.Locale.Tr "security_search.vulnerabilities"}}</a>
+			<a class="item{{if eq .Active "dependencies"}} active{{end}}"{{if eq .Active "dependencies"}} aria-current="page"{{end}} href="{{$c.OrgLink}}/security/dependencies">{{ctx.Locale.Tr "security_search.dependencies"}}</a>
+			{{end}}
+			{{if $c.EnableSecretAlerts}}
+			<a class="item{{if eq .Active "secrets"}} active{{end}}"{{if eq .Active "secrets"}} aria-current="page"{{end}} href="{{$c.OrgLink}}/security/secrets">{{ctx.Locale.Tr "secret_search.title"}}</a>
+			{{end}}
+		</nav>

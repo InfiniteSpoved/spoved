@@ -20,8 +20,10 @@ import (
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 	apiv1_permissions "forgejo.org/routers/api/v1/permissions"
+	"forgejo.org/services/auth"
 	dependency_service "forgejo.org/services/dependency"
 	redirect_service "forgejo.org/services/redirect"
+	vulnerability_service "forgejo.org/services/vulnerability"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -46,9 +48,28 @@ var ArchivedOrgOpenRoutes = append([]string{
 	"POST /org/{org}/settings/delete",
 	"POST /org/{org}/security/vulnerabilities/export", // a download is audited, it changes nothing
 	"POST /org/{org}/security/dependencies/export",
+	"POST /org/{org}/security/secrets/export",
 	"POST /api/v1/orgs/{org}/unarchive",
 	"DELETE /api/v1/orgs/{org}",
 }, apiv1_permissions.CredentialRevokeRoutes...)
+
+// setSecretAlertsAccess decides who opens the organization's list of secret alerts (see Organization.SecretAlerts).
+// A member blocked by the organization's two-factor requirement is a stranger there, as for its repositories.
+func (ctx *Context) setSecretAlertsAccess(org *organization.Organization) {
+	ctx.Data["EnableSecretAlerts"] = false
+	if !ctx.IsSigned || !setting.Config().SecretScanning.Value(ctx).Enabled() {
+		return
+	}
+	switch {
+	case ctx.Org.IsOwner: // a site admin too
+		ctx.Org.SecretAlerts = true
+	case vulnerability_service.AuditorView(ctx, ctx.Doer, org.AsUser(), ctx.IsReadOnlyMethod(), auth.IsHeldByUser(ctx.Authentication)):
+		ctx.Org.SecretAlerts = true
+	case ctx.Org.IsMember && ctx.Data["TwoFactorBlockedMember"] != true:
+		ctx.Org.SecretAlerts, ctx.Org.SecretAlertsNarrow = true, true
+	}
+	ctx.Data["EnableSecretAlerts"] = ctx.Org.SecretAlerts
+}
 
 // Organization contains organization context
 type Organization struct {
@@ -59,6 +80,10 @@ type Organization struct {
 	Organization     *organization.Organization
 	OrgLink          string
 	CanCreateOrgRepo bool
+	// SecretAlerts says the viewer may open the organization's list of secret alerts while secret scanning is on:
+	// owners, site admins, auditors (read-only) and members. SecretAlertsNarrow is a member who is none of the others:
+	// the list holds only the repositories where they can write the code.
+	SecretAlerts, SecretAlertsNarrow bool
 
 	Team  *organization.Team
 	Teams []*organization.Team
@@ -222,6 +247,7 @@ func HandleOrgAssignment(ctx *Context, args ...bool) {
 	ctx.Data["IsOrganizationMember"] = ctx.Org.IsMember
 	ctx.Data["IsPackageEnabled"] = setting.Packages.Enabled
 	ctx.Data["EnableActions"] = repo_model.ActionsAvailable(ctx, ctx.ContextUser)
+	ctx.setSecretAlertsAccess(org)
 	ctx.Data["EnableSecurity"] = ctx.Org.IsOwner && dependency_service.OrgEnabled(ctx, org.ID) // the Security tab: owners, while the dependency graph is on
 	ctx.Data["IsRepoIndexerEnabled"] = setting.Indexer.RepoIndexerEnabled
 	ctx.Data["IsModerationEnabled"] = setting.Moderation.Enabled

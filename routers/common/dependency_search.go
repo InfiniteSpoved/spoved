@@ -14,6 +14,8 @@ import (
 	"time"
 
 	audit_model "forgejo.org/models/audit"
+	repo_model "forgejo.org/models/repo"
+	secretscan_model "forgejo.org/models/secretscan"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
@@ -22,6 +24,7 @@ import (
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 	dependency_service "forgejo.org/services/dependency"
+	secretscan_service "forgejo.org/services/secretscan"
 	vulnerability_service "forgejo.org/services/vulnerability"
 )
 
@@ -132,8 +135,14 @@ func recordExport(ctx *context.Base, doer *user_model.User, scope dependency_ser
 	e := audit_model.Event{
 		Action: "admin.dependency_graph.exported", Result: audit_model.ResultSuccess, TargetType: "dependency_export", Data: data,
 	}
+	if kind == "secrets" {
+		e.Action, e.TargetType = "admin.secret_alerts.exported", "secret_export"
+	}
 	if scope.Org != nil {
 		e.Action, e.OwnerID, e.TargetID, e.TargetName = "org.dependency_graph.exported", scope.Org.ID, scope.Org.ID, scope.Org.Name
+		if kind == "secrets" {
+			e.Action = "org.secret_alerts.exported"
+		}
 	} else {
 		e.OwnerID, e.TargetID, e.TargetName = doer.ID, doer.ID, doer.Name
 	}
@@ -162,8 +171,11 @@ func serveExport(ctx *context.Base, doer *user_model.User, scope dependency_serv
 			return err
 		}
 		name, owner, contentType := "dependencies", "instance", "text/csv"
-		if kind == "alerts" {
+		switch kind {
+		case "alerts":
 			name = "vulnerability-alerts"
+		case "secrets":
+			name = "secret-alerts"
 		}
 		if scope.Org != nil {
 			owner = scope.Org.Name
@@ -279,6 +291,42 @@ func ExportAlerts(ctx *context.Base, doer *user_model.User, scope dependency_ser
 					out[i] = exportRow{obj: a, cells: []string{
 						a.Repository.FullName, a.Advisory.ID, strings.Join(a.Advisory.Aliases, " "), a.Severity, a.Ecosystem, a.Package, a.Version,
 						strings.Join(a.FixedVersions, " "), a.ManifestPath, a.State,
+					}}
+				}
+				return emit(out)
+			})
+		})
+}
+
+// ExportSecretAlerts sends every alert of a secret alert list as a CSV download, as ExportAlerts does. The columns are
+// those the page lists; no secret, fingerprint or comment text is stored by the scanner for them, and the comment
+// is the closer's own text (CSVSafe, as every cell).
+func ExportSecretAlerts(ctx *context.Base, doer *user_model.User, scope secretscan_service.Scope, f secretscan_service.Filter, absoluteURL func(*secretscan_model.Alert, *repo_model.Repository) string) error {
+	filters := map[string]string{"state": f.State, "reason": f.Reason, "type": f.Type, "owner": scope.Owner, "project": scope.Project}
+	return serveExport(ctx, doer, dependency_service.SearchScope{Org: scope.Org}, "secrets", "csv", filters,
+		[]string{"state", "reason", "closed_by", "closed_at", "comment", "first_seen", "repository", "type", "location", "alert_url"},
+		func(start func(int64) error, emit func([]exportRow) error) error {
+			return secretscan_service.Export(ctx, scope, f, start, func(hits []*secretscan_service.Hit) error {
+				out := make([]exportRow, len(hits))
+				for i, h := range hits {
+					state, reason, closedBy, closedAt := h.State, h.Reason, "", ""
+					if h.State != secretscan_model.StateOpen {
+						state = "closed"
+						if h.ClosedBy != nil {
+							closedBy = h.ClosedBy.Name
+						}
+						closedAt = h.ClosedUnix.AsTime().UTC().Format(time.RFC3339)
+					}
+					location := ""
+					if h.First != nil {
+						location = h.First.Path
+						if h.First.StartLine > 0 {
+							location += ":" + strconv.Itoa(h.First.StartLine)
+						}
+					}
+					out[i] = exportRow{cells: []string{
+						state, reason, closedBy, closedAt, h.Comment, h.CreatedUnix.AsTime().UTC().Format(time.RFC3339),
+						h.Repo.FullName(), h.Name, location, absoluteURL(h.Alert, h.Repo),
 					}}
 				}
 				return emit(out)

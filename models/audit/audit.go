@@ -121,6 +121,7 @@ var Fields = map[string][]string{
 	"api_request":       {"method", "route", "status", "target", "bytes"},
 	"upload":            {"kind", "op", "bytes", "object"},
 	"dependency_search": {"kind", "ecosystem", "name", "advisory", "owner", "state", "total"},
+	"secret_export":     {"kind", "format", "state", "reason", "type", "owner", "project", "count"},
 	"dependency_export": {"kind", "format", "ecosystem", "name", "version", "range", "direct", "advisory", "owner", "project", "state", "severity", "count"},
 	"download":          {"kind", "bytes", "object"},
 	"git_read":          {"service", "protocol", "bytes", "wiki"},

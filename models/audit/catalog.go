@@ -87,6 +87,7 @@ var Actions = map[string]string{
 
 	"admin.cron.run":                                CategoryAdmin,
 	"admin.dependency_graph.exported":               CategoryAdmin,
+	"admin.secret_alerts.exported":                  CategoryAdmin,
 	"admin.dependency_graph.settings_changed":       CategoryAdmin,
 	"admin.log_shipping.created":                    CategoryAdmin,
 	"admin.log_shipping.deleted":                    CategoryAdmin,
@@ -187,6 +188,7 @@ var Actions = map[string]string{
 	"org.dependency_graph.changed":         CategoryOrg,
 	"org.secret_scanning.changed":          CategoryOrg,
 	"org.dependency_graph.exported":        CategoryOrg,
+	"org.secret_alerts.exported":           CategoryOrg,
 	"org.merged_branches.deleted":          CategoryOrg,
 	"org.organization.archived":            CategoryOrg,
 	"org.organization.created":             CategoryOrg,

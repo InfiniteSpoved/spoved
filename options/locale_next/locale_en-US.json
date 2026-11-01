@@ -3890,6 +3890,7 @@
 	"org.settings.secret_scanning.off_list_empty": "No repository has it turned off.",
 	"admin.audit.action.org.secret_scanning.changed": "Changed the secret scanning switch of organization %s",
 	"admin.secret_scanning": "Secret scanning",
+	"admin.secret_alerts": "Secret alerts",
 	"admin.secret_scanning.desc": "Scans every push and the wiki of every repository for credentials and raises an alert per secret. The secret itself is never stored.",
 	"admin.secret_scanning.updated": "Last changed %s by %s.",
 	"admin.secret_scanning.app_ini": "Starting values come from %s; a value saved here wins.",
@@ -3932,5 +3933,28 @@
 	"admin.secret_scanning.unit.places": "locations",
 	"admin.secret_scanning.unit.files": "files",
 	"admin.secret_scanning.error.nothing_saved": "Nothing was saved. %s must be at least %s and at most %s.",
-	"admin.secret_scanning.error.invalid": "Nothing was saved. %s must be a number."
+	"admin.secret_scanning.error.invalid": "Nothing was saved. %s must be a number.",
+	"secret_search.title": "Secrets",
+	"secret_search.search": "Search by repository",
+	"secret_search.alerts": {
+		"one": "%s secret alert",
+		"other": "%s secret alerts"
+	},
+	"secret_search.in_repos": {
+		"one": "in %s repository",
+		"other": "in %s repositories"
+	},
+	"secret_search.state_all": "All",
+	"secret_search.state_open": "Open",
+	"secret_search.state_closed": "Closed",
+	"secret_search.none": "No secret alert matches.",
+	"secret_search.none_yet": "There are no secret alerts to list.",
+	"secret_search.filter_ignored": "A filter in the address is not valid and was left out, so this list is wider than the address says.",
+	"secret_search.csv_columns": "CSV columns: state, reason, closed_by, closed_at, comment, first_seen, repository, type, location, alert_url.",
+	"secret_search.org_note": "Only repositories where you have write access are listed. Secrets are never stored or shown.",
+	"secret_search.org_note_all": "Every repository of the organization you can read is listed. Secrets are never stored or shown.",
+	"secret_search.admin_note": "Every repository on the instance, trashed ones excluded. Secrets are never stored or shown. Downloads are recorded in the audit log.",
+	"secret_search.export_too_many": "There are too many alerts to download at once. Narrow the list and try again.",
+	"admin.audit.action.org.secret_alerts.exported": "Exported the secret alerts of organization %s",
+	"admin.audit.action.admin.secret_alerts.exported": "Exported the secret alerts of every owner"
 }

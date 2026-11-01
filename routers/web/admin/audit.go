@@ -43,6 +43,7 @@ func AuditReq(ctx *context.Context) {
 		return
 	}
 	SetSecuritySearchNav(ctx)
+	SetSecretAlertsNav(ctx)
 }
 
 // auditRow is an entry as the page shows it.
