@@ -87,7 +87,7 @@ func SetSecretAlertsNav(ctx *context.Context) {
 	ctx.Data["SecretAlertsEnabled"] = secretscan_service.SiteEnabled(ctx)
 }
 
-// MustEnableSecretAlerts answers 404 to the secret alert list and its download (after the access gate) while secret
+// MustEnableSecretAlerts answers 404 to the download of the secret alert list (after the access gate) while secret
 // scanning is off for the instance: its alerts are hidden then, and a download of nothing is never recorded.
 func MustEnableSecretAlerts(ctx *context.Context) {
 	if !secretscan_service.SiteEnabled(ctx) {
@@ -99,9 +99,11 @@ func secretAlertsScope(ctx *context.Context) secretscan_service.Scope {
 	return secretscan_service.Scope{Doer: ctx.Doer, Admin: true}
 }
 
-// SecretAlerts lists the secret alerts of every repository on the instance.
+// SecretAlerts lists the secret alerts of every repository on the instance, or says that secret scanning is off.
 func SecretAlerts(ctx *context.Context) {
-	if !shared_security.Secrets(ctx, secretAlertsScope(ctx), setting.AppSubURL+secretAlertsLink) {
+	if !secretscan_service.SiteEnabled(ctx) {
+		ctx.Data["SecretsSiteOff"] = true
+	} else if !shared_security.Secrets(ctx, secretAlertsScope(ctx), setting.AppSubURL+secretAlertsLink) {
 		return
 	}
 	ctx.Data["Title"] = ctx.Tr("secret_search.title")

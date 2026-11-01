@@ -160,6 +160,7 @@ func Secrets(ctx *context.Context, scope secretscan_service.Scope, link string) 
 	ctx.Data["Secrets"] = page
 	r, err := parseSecrets(ctx, scope)
 	if errors.Is(err, secretscan_service.ErrTooManyRepos) {
+		page.Form, page.Projects = r.form, r.projects // the filters stay, for a try with fewer repositories later
 		page.TooMany = secretscan_service.MaxNarrowRepos
 		return true
 	} else if err != nil {

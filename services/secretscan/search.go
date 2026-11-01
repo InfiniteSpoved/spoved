@@ -10,6 +10,7 @@ import (
 
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
+	"forgejo.org/models/perm"
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
 	"forgejo.org/models/unit"
@@ -82,26 +83,48 @@ var MaxNarrowRepos = 10_000
 // ErrTooManyRepos is a narrowed list of more than MaxNarrowRepos repositories.
 var ErrTooManyRepos = util.NewInvalidArgumentErrorf("too many repositories")
 
-// WritableRepoIDs returns the repositories of the organization where the user can write the code, in a fixed
-// number of queries: the repositories they own, collaborate on or reach through a team, decided as
-// GetUserRepoPermission does (accessreport). Above MaxNarrowRepos it returns ErrTooManyRepos.
+// writeCandidateRepoIDs returns the repositories of the organization where a collaboration or a team could give the
+// user write access to the code: a superset of where they can write, so a member who only reads loads nothing.
+func writeCandidateRepoIDs(ctx context.Context, uid, orgID int64) ([]int64, error) {
+	writeTeams := builder.Select("team.id").From("team").Where(builder.Eq{"team.org_id": orgID}.And(builder.Or(
+		builder.Gte{"team.authorize": perm.AccessModeWrite},
+		builder.In("team.id", builder.Select("team_id").From("team_unit").
+			Where(builder.Eq{"type": unit.TypeCode}.And(builder.Gte{"access_mode": perm.AccessModeWrite}))),
+	)))
+	cond := builder.Eq{"owner_id": orgID}.And(builder.Or(
+		builder.In("id", builder.Select("repo_id").From("collaboration").
+			Where(builder.Eq{"user_id": uid}.And(builder.Gte{"mode": perm.AccessModeWrite}))),
+		builder.In("id", builder.Select("team_repo.repo_id").From("team_repo").
+			Join("INNER", "team_user", "team_user.team_id = team_repo.team_id").
+			Where(builder.Eq{"team_user.uid": uid}.And(builder.In("team_repo.team_id", writeTeams)))),
+	))
+	ids := make([]int64, 0, 10)
+	return ids, db.GetEngine(ctx).Table("repository").Where(cond).Cols("id").OrderBy("id").Find(&ids)
+}
+
+// WritableRepoIDs returns the repositories of the organization where the user can write the code, decided as
+// GetUserRepoPermission does (accessreport) for the repositories a collaboration or team could give them write to,
+// in chunks of at most MaxNarrowRepos bound IDs. Above MaxNarrowRepos writable repositories it returns
+// ErrTooManyRepos.
 func WritableRepoIDs(ctx context.Context, org *organization.Organization, doer *user_model.User) ([]int64, error) {
-	ids, err := accessreport.UserRepoIDs(ctx, doer.ID, org.ID)
-	if err != nil || len(ids) == 0 {
-		return nil, err
-	}
-	rows, err := accessreport.Compute(ctx, accessreport.Options{RepoIDs: ids, User: doer, Plain: true})
+	ids, err := writeCandidateRepoIDs(ctx, doer.ID, org.ID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]int64, 0, len(rows))
-	for _, r := range rows {
-		if r.User != nil && r.User.ID == doer.ID && r.Perm.CanWrite(unit.TypeCode) {
-			out = append(out, r.Repo.ID)
+	var out []int64
+	for chunk := range slices.Chunk(ids, MaxNarrowRepos) {
+		rows, err := accessreport.Compute(ctx, accessreport.Options{RepoIDs: chunk, User: doer, Plain: true})
+		if err != nil {
+			return nil, err
 		}
-	}
-	if len(out) > MaxNarrowRepos {
-		return nil, ErrTooManyRepos
+		for _, r := range rows {
+			if r.User != nil && r.User.ID == doer.ID && r.Perm.CanWrite(unit.TypeCode) {
+				out = append(out, r.Repo.ID)
+			}
+		}
+		if len(out) > MaxNarrowRepos {
+			return nil, ErrTooManyRepos
+		}
 	}
 	return out, nil
 }

@@ -923,7 +923,7 @@ func registerRoutes(m *web.Route) {
 	m.Get("/admin/config/secret-scanning", reqSignIn, admin.AuditReq, admin.SecretScanning)
 	// the secret alerts of every repository: site admins and auditors, while secret scanning is on
 	m.Group("/admin/security/secrets", func() {
-		m.Get("", admin.AuditReq, admin.MustEnableSecretAlerts, admin.SecretAlerts)
+		m.Get("", admin.AuditReq, admin.SecretAlerts) // a banner while secret scanning is off
 		m.Post("/export", admin.AuditExportReq, admin.MustEnableSecretAlerts, common.RateLimitHeavy, admin.SecretAlertsExport)
 	}, reqSignIn)
 	// the dependency and vulnerability search is read-only: the auditor searches and, as the audited download is no
@@ -1274,6 +1274,7 @@ func registerRoutes(m *web.Route) {
 		}, context.OrgAssignment(true, false, true))
 
 		// owners, site admins, auditors and members (a member sees the repositories they can write)
+		// context.isAuditorSecretExport matches the export's pattern: keep the two in step
 		m.Group("/{org}/security/secrets", func() {
 			m.Get("", org.SecurityAlerts)
 			m.Post("/export", common.RateLimitHeavy, org.SecurityAlertsExport)

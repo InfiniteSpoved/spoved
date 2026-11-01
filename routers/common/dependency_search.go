@@ -8,6 +8,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -81,6 +82,9 @@ var exportSlots = make(chan struct{}, 2)
 
 // ExportTimeLimit is how long one export may run; it is checked between batches (a variable for tests).
 var ExportTimeLimit = 10 * time.Minute
+
+// ExportStallTime is how long the writes of one batch of an export may wait for a client that stops reading.
+var ExportStallTime = time.Minute
 
 var (
 	exportingMu sync.Mutex
@@ -163,9 +167,24 @@ func serveExport(ctx *context.Base, doer *user_model.User, scope dependency_serv
 	}
 	defer release()
 	deadline := time.Now().Add(ExportTimeLimit)
-	// a client that stops reading would block a write, and hold the slot, past the time limit: bound the writes too
-	rc := http.NewResponseController(ctx.Resp)
-	if err := rc.SetWriteDeadline(deadline); err == nil {
+	// A client that stops reading would block a write, and hold the slot, past the time limit: each batch may wait
+	// ExportStallTime for the client, never past the time limit.
+	rc, hasDeadline := http.NewResponseController(ctx.Resp), true
+	stallDeadline := func() {
+		if !hasDeadline {
+			return
+		}
+		until := time.Now().Add(ExportStallTime)
+		if until.After(deadline) {
+			until = deadline
+		}
+		if err := rc.SetWriteDeadline(until); err != nil {
+			hasDeadline = false
+			log.Warn("serveExport: the writes of the export have no deadline: %v", err)
+		}
+	}
+	stallDeadline()
+	if hasDeadline {
 		defer func() { _ = rc.SetWriteDeadline(time.Time{}) }()
 	}
 	batches := 0
@@ -201,6 +220,7 @@ func serveExport(ctx *context.Base, doer *user_model.User, scope dependency_serv
 		if batches++; batches > 1 && time.Now().After(deadline) { // before the next batch is written, never after the last
 			return ErrExportTimeLimit
 		}
+		stallDeadline()
 		for n, r := range rows {
 			if n%100 == 99 && time.Now().After(deadline) {
 				return ErrExportTimeLimit
@@ -253,7 +273,8 @@ func serveExport(ctx *context.Base, doer *user_model.User, scope dependency_serv
 		}
 		return err
 	default:
-		if errors.Is(err, stdctx.Canceled) || errors.Is(err, ErrExportTimeLimit) {
+		// a client that stops reading ends at the write deadline: os.ErrDeadlineExceeded
+		if errors.Is(err, stdctx.Canceled) || errors.Is(err, ErrExportTimeLimit) || errors.Is(err, os.ErrDeadlineExceeded) {
 			log.Info("serveExport: %v", err)
 		} else {
 			log.Error("serveExport: %v", err)

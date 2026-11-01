@@ -3951,9 +3951,10 @@
 	"secret_search.none_yet": "There are no open secret alerts.",
 	"secret_search.off_left_out": "Repositories with secret scanning turned off are not listed.",
 	"secret_search.off_list_link": "See which repositories have it off.",
-	"secret_search.filter_ignored": "The link had a filter that isn't valid (%s), so it was left out and this list shows more.",
+	"secret_search.filter_ignored": "Some filters in the link aren't valid and were left out: %s.",
+	"secret_search.reason_hint": "A reason lists closed alerts.",
 	"secret_search.narrow": {
-		"one": "Showing alerts in the %s repository you can write to. Organization owners see every repository.",
+		"one": "Showing alerts in the one repository you can write to. Organization owners see every repository.",
 		"other": "Showing alerts in the %s repositories you can write to. Organization owners see every repository."
 	},
 	"secret_search.narrow_none": "You have write access to no repository in this organization, so there are no alerts to show you. Organization owners see every repository.",

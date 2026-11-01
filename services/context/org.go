@@ -68,7 +68,8 @@ func (ctx *Context) isAuditorSecretExport() bool {
 // A member blocked by the organization's two-factor requirement is a stranger there, as for its repositories.
 func (ctx *Context) setSecretAlertsAccess(org *organization.Organization) {
 	ctx.Data["EnableSecretAlerts"] = false
-	if !ctx.IsSigned {
+	// while secret scanning is off for the instance, only a site admin, who can turn it on, gets the tab and its banner
+	if !ctx.IsSigned || !ctx.Doer.IsAdmin && !setting.Config().SecretScanning.Value(ctx).Enabled() {
 		return
 	}
 	switch {
@@ -92,7 +93,8 @@ type Organization struct {
 	OrgLink          string
 	CanCreateOrgRepo bool
 	// SecretAlerts says the viewer may open the organization's list of secret alerts (a banner while secret scanning
-	// is off): owners, site admins, auditors (read-only, and the audited download) and members. SecretAlertsNarrow is a member who is none of the others:
+	// is off for the organization; for the instance, site admins only): owners, site admins, auditors (read-only, and
+	// the audited download) and members. SecretAlertsNarrow is a member who is none of the others:
 	// the list holds only the repositories where they can write the code.
 	SecretAlerts, SecretAlertsNarrow bool
 

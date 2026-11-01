@@ -4,13 +4,22 @@
 package integration
 
 import (
+	"bufio"
 	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/csv"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	audit_model "forgejo.org/models/audit"
 	auth_model "forgejo.org/models/auth"
@@ -241,11 +250,11 @@ func TestOrgSecretAlertList(t *testing.T) {
 			"?q=%00": "Search by repository", "?q=sl%00x": "Search by repository", "?project=slproj%00": "Project", // a NUL would cut the pattern short
 		} {
 			got, resp := rows(query)
-			assert.Equal(t, "The link had a filter that isn't valid ("+field+"), so it was left out and this list shows more.", secText(t, resp, "#secret-filter-ignored"), query)
+			assert.Equal(t, "Some filters in the link aren't valid and were left out: "+field+".", secText(t, resp, "#secret-filter-ignored"), query)
 			assert.Equal(t, []string{slRepo3, slRead, slLeaf, slAWS, slGitHub}, got, query)
 		}
 		_, resp := rows("?state=bogus&type=bogus")
-		assert.Contains(t, secText(t, resp, "#secret-filter-ignored"), "(State, Secret type)")
+		assert.Contains(t, secText(t, resp, "#secret-filter-ignored"), "left out: State, Secret type.")
 		_, resp = rows("?state=closed&reason=revoked")
 		none := secText(t, resp, "#secret-search-none")
 		assert.Contains(t, none, "No alerts match the filter.")
@@ -289,6 +298,24 @@ func TestOrgSecretAlertList(t *testing.T) {
 		resp = slPost(t, member, slOrg, map[string]string{}, http.StatusSeeOther)
 		assert.Equal(t, slOrg, resp.Header().Get("Location"))
 		assert.NotContains(t, secGet(t, owner, slOrg, http.StatusOK).Body.String(), `id="secret-search-too-many"`, "an owner's list is not narrowed")
+		// at the cap the list works, its candidates checked in chunks of the cap
+		defer test.MockVariableValue(&secretscan_service.MaxNarrowRepos, 4)()
+		resp = secGet(t, member, slOrg+"?state=all", http.StatusOK)
+		assert.NotEmpty(t, secretListRows(t, resp))
+		assert.Contains(t, secText(t, resp, "#secret-search-narrow"), "the 4 repositories")
+	})
+
+	t.Run("a member who only reads loads no repository and is told so", func(t *testing.T) {
+		ctx := db.DefaultContext
+		require.NoError(t, db.Insert(ctx, &organization.OrgUser{OrgID: 3, UID: 5}))
+		tm := &organization.Team{OrgID: 3, Name: "sl-only-read", LowerName: "sl-only-read", AccessMode: perm_model.AccessModeRead}
+		require.NoError(t, db.Insert(ctx, tm))
+		require.NoError(t, db.Insert(ctx, &organization.TeamUnit{OrgID: 3, TeamID: tm.ID, Type: unit.TypeCode, AccessMode: perm_model.AccessModeRead}))
+		require.NoError(t, db.Insert(ctx, &organization.TeamUser{OrgID: 3, TeamID: tm.ID, UID: 5}))
+		require.NoError(t, db.Insert(ctx, &organization.TeamRepo{OrgID: 3, TeamID: tm.ID, RepoID: f.readOnly.ID}))
+		require.NoError(t, access_model.RecalculateAccesses(ctx, f.readOnly))
+		resp := secGet(t, loginUser(t, "user5"), slOrg, http.StatusOK)
+		assert.Contains(t, secText(t, resp, "#secret-search-none"), "You have write access to no repository in this organization")
 	})
 
 	t.Run("the closed row names the reason and who closed it, the closer's name only", func(t *testing.T) {
@@ -487,10 +514,10 @@ func TestAdminSecretAlertList(t *testing.T) {
 		}
 		// an owner name too long to be one is left out and said so
 		resp := secGet(t, admin, slAdmin+"?owner="+strings.Repeat("a", 300), http.StatusOK)
-		assert.Contains(t, secText(t, resp, "#secret-filter-ignored"), "(Owner)")
+		assert.Contains(t, secText(t, resp, "#secret-filter-ignored"), "left out: Owner.")
 		assert.Len(t, secretListRows(t, resp), 6)
 		resp = secGet(t, admin, slAdmin+"?owner=org3%00", http.StatusOK)
-		assert.Contains(t, secText(t, resp, "#secret-filter-ignored"), "(Owner)")
+		assert.Contains(t, secText(t, resp, "#secret-filter-ignored"), "left out: Owner.")
 	})
 
 	t.Run("hidden: trash, the code unit, scanning off at each level", func(t *testing.T) {
@@ -523,17 +550,21 @@ func TestAdminSecretAlertList(t *testing.T) {
 		assert.Len(t, rowsNow(), 7, "locked on: the repository's own switch doesn't count")
 		require.NoError(t, user_model.SetUserSetting(ctx, 3, secretscan_model.OrgLockedKey, "false"))
 
-		// the site switch: the instance list is gone (404, no menu entry), the organization's says so; nothing to download
+		// the site switch: the lists say so to site admins (and the instance list to auditors), no menu entry, nothing
+		// to download; members and owners have neither tab nor list, since only a site admin can turn it on
 		defer test.MockVariableValue(&setting.SecretScanning.Enabled, false)()
-		secGet(t, admin, slAdmin, http.StatusNotFound)
-		secGet(t, auditor, slAdmin, http.StatusNotFound)
 		slPost(t, admin, slAdmin, map[string]string{}, http.StatusNotFound)
-		slPost(t, owner, slOrg, map[string]string{}, http.StatusNotFound)
+		slPost(t, admin, slOrg, map[string]string{}, http.StatusNotFound)
 		assert.NotContains(t, secGet(t, admin, "/admin/audit", http.StatusOK).Body.String(), `href="/admin/security/secrets"`)
-		banner = secText(t, secGet(t, owner, slOrg, http.StatusOK), "#secret-banner-off")
+		banner = secText(t, secGet(t, admin, slAdmin, http.StatusOK), "#secret-banner-off")
 		assert.Contains(t, banner, "Secret scanning is off on this instance")
-		assert.Contains(t, banner, "Ask a site admin to turn it on.")
+		assert.Contains(t, banner, "Turn it on in the site's secret scanning settings.")
+		assert.Contains(t, secText(t, secGet(t, auditor, slAdmin, http.StatusOK), "#secret-banner-off"), "Ask a site admin to turn it on.")
 		assert.Contains(t, secText(t, secGet(t, admin, slOrg, http.StatusOK), "#secret-banner-off"), "Turn it on in the site's secret scanning settings.")
+		assert.Contains(t, secGet(t, admin, "/org3", http.StatusOK).Body.String(), `href="/org/org3/security`)
+		secGet(t, owner, slOrg, http.StatusNotFound)
+		secGet(t, loginUser(t, "user4"), slOrg, http.StatusNotFound)
+		assert.NotContains(t, secGet(t, owner, "/org3", http.StatusOK).Body.String(), `href="/org/org3/security`)
 	})
 
 	t.Run("a repository that has no Code unit is not listed, whoever asks", func(t *testing.T) {
@@ -682,4 +713,84 @@ func TestSecretAlertListsQueryCount(t *testing.T) {
 	resp := secGet(t, member, slOrg+"?state=all", http.StatusOK)
 	assert.Len(t, secretListRows(t, resp), 20) // a full page
 	assert.Equal(t, "29 secret alerts in 15 repositories", secretListTotal(t, resp))
+}
+
+// A client that stops reading a download frees its export slot once a batch has waited ExportStallTime, through the
+// real router (gzip on, as in the test config), not after the export time limit.
+func TestSecretAlertExportStalledClient(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		defer test.MockVariableValue(&setting.SecretScanning.Enabled, true)()
+		defer test.MockVariableValue(&common.ExportStallTime, time.Second)()
+		ctx := db.DefaultContext
+		org3 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 3})
+		owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+		repo := depNewRepo(t, org3, owner, "sl-big", true, 0)
+		// enough rows of random text that the file, even compressed, is larger than the socket buffers
+		const rows = 40000
+		random := make([]byte, rows*150)
+		_, err := rand.Read(random)
+		require.NoError(t, err)
+		require.NoError(t, db.WithTx(ctx, func(ctx context.Context) error {
+			for start := 0; start < rows; start += 500 {
+				alerts := make([]*secretscan_model.Alert, 0, 500)
+				for i := start; i < start+500; i++ {
+					alerts = append(alerts, &secretscan_model.Alert{
+						RepoID: repo.ID, Index: int64(i + 1), RuleID: "github-token", SecretType: "github",
+						Fingerprint: fmt.Sprintf("%064x", i), State: secretscan_model.StateOpen, LocationCount: 1,
+					})
+				}
+				if _, err := db.GetEngine(ctx).Insert(alerts); err != nil {
+					return err
+				}
+				alerts = alerts[:0] // a multi-row insert doesn't fill in the IDs
+				if err := db.GetEngine(ctx).Where("repo_id = ? AND `index` > ?", repo.ID, start).OrderBy("`index`").Find(&alerts); err != nil {
+					return err
+				}
+				locations := make([]*secretscan_model.Location, 0, 500)
+				for _, a := range alerts {
+					path := base64.RawURLEncoding.EncodeToString(random[(a.Index-1)*150 : a.Index*150])
+					l := secretscan_model.NewLocation(repo.ID, secretscan_model.KindRepo, "blob", path, 3, 3, "c", "A", "a@example.com", 1700000000)
+					l.AlertID = a.ID
+					locations = append(locations, l)
+				}
+				if _, err := db.GetEngine(ctx).Insert(locations); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+		cookie := loginUser(t, "user2").GetCookie(setting.SessionConfig.CookieName)
+		require.NotNil(t, cookie)
+
+		// a small receive window from the start: set after connecting, Linux keeps the window it agreed on
+		dialer := net.Dialer{Control: func(_, _ string, c syscall.RawConn) error {
+			return c.Control(func(fd uintptr) { _ = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_RCVBUF, 4096) })
+		}}
+		conn, err := dialer.Dial("tcp", u.Host)
+		require.NoError(t, err)
+		defer conn.Close()
+		body := "state=all"
+		_, err = fmt.Fprintf(conn, "POST /org/org3/security/secrets/export HTTP/1.1\r\nHost: %s\r\nCookie: %s=%s\r\nAccept-Encoding: gzip\r\n"+
+			"Content-Type: application/x-www-form-urlencoded\r\nContent-Length: %d\r\n\r\n%s", u.Host, cookie.Name, cookie.Value, len(body), body)
+		require.NoError(t, err)
+		require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Minute)))
+		resp, err := http.ReadResponse(bufio.NewReaderSize(conn, 4096), nil)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, resp.StatusCode, resp.Header)
+		_, err = io.ReadFull(resp.Body, make([]byte, 64*1024))
+		require.NoError(t, err)
+		// the client stops reading: the export holds the slot until its write waits too long, then gives it back
+		release, ok := common.TakeExportSlot(2)
+		if ok {
+			release()
+		}
+		require.False(t, ok, "the export is still writing")
+		assert.Eventually(t, func() bool {
+			release, ok := common.TakeExportSlot(2)
+			if ok {
+				release()
+			}
+			return ok
+		}, 30*time.Second, 100*time.Millisecond)
+	})
 }
