@@ -37,5 +37,49 @@
 				</p>
 			{{end}}
 		</div>
+		<h4 class="ui top attached header secret-scanning-header">
+			{{ctx.Locale.Tr "repo.settings.secret_scanning"}}
+		</h4>
+		<div class="ui attached segment" id="secret-scanning-box">
+			{{if .SecretSwitch.Site}}
+			<form class="ui form secret-scanning-switch" id="secret-scanning-switch" action="{{.RepoLink}}/settings/code_security/secret_scanning" method="post"{{if .SecretSwitch.Own}} data-was-on="true"{{end}} data-modal="#secret-scanning-off-modal">
+				<fieldset {{if not .SecretCanChange}}disabled{{end}}>
+					<div class="field">
+						<div class="ui checkbox{{if not .SecretCanChange}} disabled{{end}}">
+							<input id="secret-scanning-enabled" name="enabled" type="checkbox" {{if .SecretSwitch.Enabled}}checked{{end}}>
+							<label for="secret-scanning-enabled">
+								<strong>{{ctx.Locale.Tr "repo.settings.secret_scanning.enable" .Repository.FullName}}</strong>
+								<span class="help">{{ctx.Locale.Tr "repo.settings.secret_scanning.help"}}</span>
+							</label>
+						</div>
+					</div>
+					{{if .SecretCanChange}}<button class="ui primary button" id="secret-scanning-save">{{ctx.Locale.Tr "save"}}</button>{{end}}
+				</fieldset>
+			</form>
+			{{else}}
+				<p class="help">{{ctx.Locale.Tr "repo.settings.secret_scanning.help"}}</p>
+			{{end}}
+			<p class="help secret-scanning-decided" id="secret-scanning-set-by">
+				{{if not .SecretSwitch.Site}}{{ctx.Locale.Tr "repo.settings.secret_scanning.site_off"}}
+				{{else if and .SecretSwitch.Org (not .SecretSwitch.Org.On)}}{{ctx.Locale.Tr "repo.settings.secret_scanning.org_off" .Repository.OwnerName .Repository.OwnerName}}
+				{{else if and .SecretSwitch.Org .SecretSwitch.Org.Locked}}{{ctx.Locale.Tr "repo.settings.secret_scanning.org_on" .Repository.OwnerName .Repository.OwnerName}}
+				{{else if and (not .SecretSwitch.Own) .SecretOffBy}}{{ctx.Locale.Tr "repo.settings.secret_scanning.off_by" .SecretOffBy (DateUtils.AbsoluteShort .SecretOffAt)}}
+				{{end}}
+			</p>
+		</div>
 	</div>
+	<dialog class="modal" id="secret-scanning-off-modal" aria-labelledby="secret-scanning-off-heading">
+		<article>
+			<header id="secret-scanning-off-heading">{{ctx.Locale.Tr "repo.settings.secret_scanning.off_confirm_title" .Repository.FullName}}</header>
+			<form class="ui form ignore-dirty" method="post" action="{{.RepoLink}}/settings/code_security/secret_scanning">
+				<div class="content">
+					<p>{{ctx.Locale.TrPluralString .SecretOpen "repo.settings.secret_scanning.off_confirm" (ctx.Locale.PrettyNumber .SecretOpen)}}</p>
+				</div>
+				<div class="actions">
+					<button type="button" class="ui small basic cancel button">{{svg "octicon-x"}} {{ctx.Locale.Tr "cancel"}}</button>
+					<button class="ui small red approve button" id="secret-scanning-off-submit" type="submit">{{ctx.Locale.Tr "repo.settings.secret_scanning.off_submit"}}</button>
+				</div>
+			</form>
+		</article>
+	</dialog>
 {{template "repo/settings/layout_footer" .}}

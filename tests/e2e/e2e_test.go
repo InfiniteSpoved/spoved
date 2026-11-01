@@ -136,6 +136,9 @@ func TestE2e(t *testing.T) {
 			if testname == "dependencies.test.e2e" || testname == "vulnerability-alerts.test.e2e" || strings.HasPrefix(testname, "org-security") {
 				defer test.MockVariableValue(&setting.DependencyGraph.Enabled, true)()
 			}
+			if strings.HasPrefix(testname, "secret-alerts") {
+				defer test.MockVariableValue(&setting.SecretScanning.Enabled, true)()
+			}
 			if testname == "runner-management.test.e2e" {
 				defer unittest.OverrideFixtures("tests/e2e/fixtures/runner-management")()
 			}

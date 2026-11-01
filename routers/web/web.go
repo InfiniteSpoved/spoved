@@ -1518,6 +1518,7 @@ func registerRoutes(m *web.Route) {
 			})
 
 			m.Combo("/code_security").Get(repo_setting.CodeSecurity).Post(context.RepoMustNotBeArchived(), repo_setting.CodeSecurityPost)
+			m.Post("/code_security/secret_scanning", context.RepoMustNotBeArchived(), repo_setting.SecretScanningPost)
 			m.Combo("/branch_workflow").Get(repo_setting.BranchWorkflow).
 				Post(web.Bind(forms.BranchWorkflowForm{}), context.RepoMustNotBeArchived(), repo_setting.BranchWorkflowPost)
 			m.Post("/branch_workflow/branching_model", web.Bind(forms.BranchingModelForm{}), context.RepoMustNotBeArchived(), repo_setting.BranchingModelPost)
@@ -1974,6 +1975,17 @@ func registerRoutes(m *web.Route) {
 				m.Post("/reopen", context.RepoMustNotBeArchived(), repo.SecurityAlertReopen)
 			})
 		}, repo.MustSeeAlerts)
+
+		m.Group("/security/secrets", func() {
+			m.Get("", repo.SecretAlerts)
+			m.Post("/close", context.RepoMustNotBeArchived(), repo.SecretAlertsClose)
+			m.Post("/rescan", context.RepoMustNotBeArchived(), repo.SecretRescan)
+			m.Group("/{index}", func() {
+				m.Get("", repo.SecretAlert)
+				m.Post("/close", context.RepoMustNotBeArchived(), repo.SecretAlertClose)
+				m.Post("/reopen", context.RepoMustNotBeArchived(), repo.SecretAlertReopen)
+			})
+		}, repo.MustSeeSecretAlerts)
 
 		m.Group("/activity_author_data", func() {
 			m.Get("", repo.ActivityAuthors)

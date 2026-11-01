@@ -170,7 +170,7 @@ var Fields = map[string][]string{
 		"is_mirror", "fork_id", "template_id", "units", "counts", "purge", "to_owner_id", "to_owner_name", "team_ids",
 		"interval", "enable_prune", "branch_filter", "tag_filter", "lfs", "lfs_endpoint", "address", "url_changed",
 		"credentials_changed", "development_branch", "release_prefixes", "production_branch", "merge_forward", "merge_forward_never_bypass", "merge_forward_anyone_may_skip", "inherit",
-		"dependency_graph",
+		"dependency_graph", "secret_scanning",
 	},
 	"collaborator":       {"user_id", "mode"},
 	"branch":             {"name", "from", "to", "commit", "default", "pull", "reason", "conflict_pull", "pull_failed"},

@@ -3,6 +3,9 @@
 	{{template "repo/header" .}}
 	<div class="ui container">
 		{{template "base/alert" .}}
+		<div class="repo-security-layout">
+		{{template "repo/security/menu" .}}
+		<div class="repo-security-main">
 		<h2 class="ui header repo-security-heading">{{ctx.Locale.Tr "repo.security.alerts.title"}}</h2>
 		<div class="repo-security-header">
 			<nav class="repo-security-tabs" aria-label="{{ctx.Locale.Tr "repo.security.alerts.title"}}">
@@ -129,6 +132,8 @@
 				<p>{{ctx.Locale.Tr "repo.security.empty_hint"}}</p>
 			</div>
 		{{end}}
+		</div>
+		</div>
 	</div>
 </div>
 {{if .CanDismissAlerts}}{{template "repo/security/dismiss_modal" (dict "DismissAction" "" "From" "list" "RedirectTo" .ListURL "MaxCommentRunes" .MaxCommentRunes)}}{{end}}

@@ -1,0 +1,74 @@
+// Copyright 2026 The spoved contributors. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package secretscan
+
+import (
+	"context"
+	"slices"
+
+	audit_model "forgejo.org/models/audit"
+	"forgejo.org/modules/json"
+	"forgejo.org/modules/timeutil"
+)
+
+// Event is one change of an alert as the audit log recorded it: the alert was closed (with State as reason and a
+// comment) or reopened.
+type Event struct {
+	Reopened       bool
+	State, Comment string
+	ActorID        int64
+	ActorName      string
+	CreatedUnix    timeutil.TimeStamp
+}
+
+const historyLimit = 100
+
+// AlertHistory reads the closes and reopens of the alert from the audit log, oldest first (at most the last 100).
+func AlertHistory(ctx context.Context, repoID, alertID int64) ([]*Event, error) {
+	entries, err := audit_model.FindEntries(ctx, &audit_model.SearchOptions{
+		RepoID: repoID, TargetType: "secret_scanning_alert", TargetID: alertID, Action: "repo.secret_alert", ActionPrefix: true,
+	}, historyLimit)
+	if err != nil {
+		return nil, err
+	}
+	events := make([]*Event, 0, len(entries))
+	for _, e := range entries {
+		var data struct{ State, Comment string }
+		_ = json.Unmarshal([]byte(e.Data), &data) // text we wrote ourselves; an unreadable row shows without details
+		events = append(events, &Event{
+			Reopened: e.Action == "repo.secret_alert.reopened", State: data.State, Comment: data.Comment,
+			ActorID: e.ActorID, ActorName: e.ActorName, CreatedUnix: e.CreatedUnix,
+		})
+	}
+	slices.Reverse(events)
+	return events, nil
+}
+
+// SwitchChange is the last time a repository admin turned secret scanning on or off for a repository.
+type SwitchChange struct {
+	On          bool
+	ActorID     int64
+	ActorName   string
+	CreatedUnix timeutil.TimeStamp
+}
+
+// LastSwitchChange reads it from the audit log; nil when the log has none (it is the default, or the entry was purged).
+func LastSwitchChange(ctx context.Context, repoID int64) (*SwitchChange, error) {
+	entries, err := audit_model.FindEntries(ctx, &audit_model.SearchOptions{RepoID: repoID, Action: "repo.repository.updated"}, 50)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range entries {
+		var data struct {
+			After map[string]any `json:"after"`
+		}
+		if json.Unmarshal([]byte(e.Data), &data) != nil {
+			continue
+		}
+		if on, ok := data.After["secret_scanning"].(bool); ok {
+			return &SwitchChange{On: on, ActorID: e.ActorID, ActorName: e.ActorName, CreatedUnix: e.CreatedUnix}, nil
+		}
+	}
+	return nil, nil //nolint:nilnil // no switch change on record
+}

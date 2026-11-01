@@ -3,6 +3,9 @@
 	{{template "repo/header" .}}
 	<div class="ui container">
 		{{template "base/alert" .}}
+		<div class="repo-security-layout">
+		{{template "repo/security/menu" .}}
+		<div class="repo-security-main">
 		{{$alert := .Alert}}
 		<div class="breadcrumb tw-mb-3">
 			<a href="{{.RepoLink}}/security/alerts">{{ctx.Locale.Tr "repo.security.alerts.title"}}</a> › {{if $alert.Advisory}}{{$alert.Advisory.OSVID}}{{else}}{{$alert.PackageName}}{{end}}
@@ -77,6 +80,8 @@
 				</form>
 			{{end}}
 			<a href="{{.RepoLink}}/activity/dependencies{{.DependenciesQuery}}">{{ctx.Locale.Tr "repo.security.view_dependencies"}}</a>
+		</div>
+		</div>
 		</div>
 	</div>
 </div>

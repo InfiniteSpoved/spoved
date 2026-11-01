@@ -77,6 +77,7 @@
 @import "./repo/pull-stack.css";
 @import "./repo/dependencies.css";
 @import "./repo/vulnerability.css";
+@import "./repo/secret-alerts.css";
 @import "./repo/header.css";
 
 @import "./editor/fileeditor.css";

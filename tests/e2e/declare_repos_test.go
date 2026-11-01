@@ -17,6 +17,7 @@ import (
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
+	secretscan_model "forgejo.org/models/secretscan"
 	unit_model "forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
@@ -147,6 +148,46 @@ func DeclareGitRepos(t *testing.T) {
 		_, err = vulnerability_model.RefreshAlerts(db.DefaultContext, repo.ID, nil)
 		require.NoError(t, err)
 	})
+	// the secret alerts (secret-alerts.test.e2e.ts): five open alerts and one closed, in one scanned repository
+	// secret-rescan-test is the same, for the spec that rescans (a real scan may close alerts whose locations are made up)
+	for _, name := range []string{"secret-alerts-test", "secret-rescan-test"} {
+		newRepo(t, 11, name, nil, []FileChanges{{
+			Filename: "config/prod.env",
+			Versions: []string{"KEY=placeholder"},
+		}}, func(user *user_model.User, repo *repo_model.Repository) {
+			commit := headCommit(t, repo)
+			for _, a := range []struct {
+				rule, kind, path string
+				places           int
+				closed           bool
+			}{
+				{"aws-access-key-id", "aws", "config/prod.env", 3, false},
+				{"github-token", "github", "scripts/deploy.sh", 1, false},
+				{"slack-token", "slack", "src/notify/slack.js", 2, false},
+				{"private-key", "private-key", "deploy/certs/server.pem", 1, false},
+				{"generic-secret-assignment", "generic", "tests/fixtures/auth.json", 1, false},
+				{"aws-access-key-id", "aws", "infra/old/main.tf", 1, true},
+			} {
+				alert := &secretscan_model.Alert{
+					RepoID: repo.ID, RuleID: a.rule, SecretType: a.kind, LocationCount: a.places,
+					Fingerprint: fmt.Sprintf("%064x", rand.Int63()),
+				}
+				if a.closed {
+					alert.State, alert.Reason, alert.Comment, alert.ClosedByID, alert.ClosedUnix = secretscan_model.StateRevoked, secretscan_model.StateRevoked, "Rotated.", user.ID, now
+				}
+				require.NoError(t, secretscan_model.InsertAlert(db.DefaultContext, alert))
+				var locs []*secretscan_model.Location
+				for i := range a.places {
+					l := secretscan_model.NewLocation(repo.ID, secretscan_model.KindRepo, fmt.Sprintf("blob%d%s", i, alert.Fingerprint[:8]), a.path, 14+i, 14+i, commit, "Sam Example", "sam@example.com", int64(now))
+					l.AlertID = alert.ID
+					locs = append(locs, l)
+				}
+				require.NoError(t, secretscan_model.InsertLocations(db.DefaultContext, locs))
+			}
+			require.NoError(t, secretscan_model.DeleteScans(db.DefaultContext, repo.ID)) // the push may have started a scan
+			require.NoError(t, secretscan_model.Save(db.DefaultContext, nil, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: "[]", Status: secretscan_model.StatusOK}))
+		})
+	}
 	// the Security tab of org3 (org-security.test.e2e.ts): example-glob in two repositories, one of them also with a range only
 	func() {
 		advisory := &vulnerability.Advisory{

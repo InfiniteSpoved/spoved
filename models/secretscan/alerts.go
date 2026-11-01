@@ -53,7 +53,8 @@ type AlertSearchOptions struct {
 	SecretTypes []string // rule IDs
 	Sort        string   // created (the default) or updated
 	Ascending   bool
-	CodeOnly    bool // only alerts that have a place outside the wiki
+	CodeOnly    bool   // only alerts that have a place outside the wiki
+	PathQuery   string // only alerts with a place whose path holds this text (the wiki's places only without CodeOnly)
 }
 
 func (o *AlertSearchOptions) ToConds() builder.Cond {
@@ -72,6 +73,13 @@ func (o *AlertSearchOptions) ToConds() builder.Cond {
 	}
 	if o.CodeOnly {
 		cond = cond.And(builder.Expr("EXISTS (SELECT 1 FROM secret_scanning_location WHERE secret_scanning_location.alert_id = secret_scanning_alert.id AND secret_scanning_location.kind <> ?)", KindWiki))
+	}
+	if o.PathQuery != "" {
+		in := builder.And(builder.Expr("secret_scanning_location.alert_id = secret_scanning_alert.id"), db.BuildCaseInsensitiveLike("secret_scanning_location.path", o.PathQuery))
+		if o.CodeOnly {
+			in = in.And(builder.Neq{"secret_scanning_location.kind": KindWiki})
+		}
+		cond = cond.And(builder.Exists(builder.Select("1").From("secret_scanning_location").Where(in)))
 	}
 	return cond
 }
@@ -212,4 +220,61 @@ func ReopenAlert(ctx context.Context, repoID, index int64) (before *Alert, chang
 		return before, false, ErrAlertState
 	}
 	return before, true, nil
+}
+
+// CountByState counts the open and the closed alerts of the repository, in one query; with codeOnly, alerts that are
+// only in the wiki are left out.
+func CountByState(ctx context.Context, repoID int64, codeOnly bool) (open, closed int64, err error) {
+	var rows []struct {
+		State string
+		N     int64
+	}
+	opts := &AlertSearchOptions{RepoID: repoID, CodeOnly: codeOnly}
+	if err := db.GetEngine(ctx).Table("secret_scanning_alert").Select("state, COUNT(*) AS n").Where(opts.ToConds()).GroupBy("state").Find(&rows); err != nil {
+		return 0, 0, err
+	}
+	for _, r := range rows {
+		if r.State == StateOpen {
+			open += r.N
+		} else {
+			closed += r.N
+		}
+	}
+	return open, closed, nil
+}
+
+// FindRuleIDs returns the rules the repository has alerts of (for the type filter), without alerts that are only in
+// the wiki when codeOnly is set.
+func FindRuleIDs(ctx context.Context, repoID int64, codeOnly bool) (ids []string, err error) {
+	opts := &AlertSearchOptions{RepoID: repoID, CodeOnly: codeOnly}
+	return ids, db.GetEngine(ctx).Table("secret_scanning_alert").Distinct("rule_id").Where(opts.ToConds()).OrderBy("rule_id").Find(&ids)
+}
+
+// FirstLocations returns the first stored place of each alert, in one query; with noWiki, a place in the wiki isn't
+// one.
+func FirstLocations(ctx context.Context, repoID int64, alertIDs []int64, noWiki bool) (map[int64]*Location, error) {
+	out := make(map[int64]*Location, len(alertIDs))
+	if len(alertIDs) == 0 {
+		return out, nil
+	}
+	cond := builder.Eq{"repo_id": repoID}.And(builder.In("alert_id", alertIDs))
+	if noWiki {
+		cond = cond.And(builder.Neq{"kind": KindWiki})
+	}
+	first := builder.Select("MIN(id)").From("secret_scanning_location").Where(cond).GroupBy("alert_id")
+	var locs []*Location
+	if err := db.GetEngine(ctx).Where(builder.In("id", first)).Find(&locs); err != nil {
+		return nil, err
+	}
+	for _, l := range locs {
+		out[l.AlertID] = l
+	}
+	return out, nil
+}
+
+// DeleteScans removes the scan state of the repository, so the next scan starts from the beginning and its holes
+// are gone; the alerts stay.
+func DeleteScans(ctx context.Context, repoID int64) error {
+	_, err := db.GetEngine(ctx).Where("repo_id = ?", repoID).Delete(new(Scan))
+	return err
 }

@@ -56,6 +56,7 @@ import {initSshKeyFormParser} from './features/sshkey-helper.js';
 import {initRepoArchiveLinks} from './features/repo-common.js';
 import {initRepoActionsDispatch} from './features/repo-actions-dispatch.js';
 import {initRepoDependencies, initRepoSecurityFilters} from './features/repo-dependencies.js';
+import {initRepoSecretAlerts} from './features/secret-alerts.js';
 import {initRepoMigrationStatusChecker} from './features/repo-migrate.js';
 import {
   initRepoSettingGitHook,
@@ -157,6 +158,7 @@ onDomReady(() => {
   initRepoActionsDispatch();
   initRepoDependencies();
   initRepoSecurityFilters();
+  initRepoSecretAlerts();
   initRepoBranchButton();
   initRepoCodeView();
   initRepoCommentForm();

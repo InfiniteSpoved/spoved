@@ -1,0 +1,10 @@
+{{/* The left menu of the Security tab: the pages the viewer can see, with the open alerts they can see */}}
+<nav class="repo-security-menu" aria-label="{{ctx.Locale.Tr "repo.security"}}">
+	<div class="repo-security-menu-head">{{ctx.Locale.Tr "repo.security"}}</div>
+	{{if .ShowVulnAlerts}}
+		<a class="item{{if not .PageIsSecretAlerts}} active{{end}}"{{if not .PageIsSecretAlerts}} aria-current="page"{{end}} href="{{.RepoLink}}/security/alerts">{{ctx.Locale.Tr "repo.security.alerts.title"}} <span class="ui small label">{{CountFmt .NumOpenVulnAlerts}}</span></a>
+	{{end}}
+	{{if .ShowSecretAlerts}}
+		<a class="item{{if .PageIsSecretAlerts}} active{{end}}"{{if .PageIsSecretAlerts}} aria-current="page"{{end}} href="{{.RepoLink}}/security/secrets">{{ctx.Locale.Tr "repo.secrets.title"}} <span class="ui small label">{{CountFmt .SecretOpenCount}}</span></a>
+	{{end}}
+</nav>
