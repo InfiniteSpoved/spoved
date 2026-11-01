@@ -745,16 +745,24 @@ func customCap(limit int64) int64 { return max(limit/2, 1) }
 // Places over MAX_LOCATIONS_PER_ALERT are only counted. A new alert is left out (counted in left, a hole) when the repository has
 // MAX_ALERTS_PER_REPO open alerts of built-in rules, or, for a secret only refs/pull/* reach (which any reader can write),
 // when half of that many open alerts are of that kind: the branches and tags always have room. Custom patterns have
-// half as many of their own on top (customCap), so they never take a built-in rule's room.
+// half as many of their own on top (customCap), so they never take a built-in rule's room, and their pull-only alerts
+// a quarter of that share.
 func writeAlerts(ctx context.Context, cfg setting.SecretScanningOptions, repoID int64, kind string, viaPull bool, cands []*candidate) (left int64, err error) {
 	if len(cands) == 0 {
 		return 0, nil
 	}
-	total, pulls, customs, err := secretscan_model.CountOpenAlerts(ctx, repoID)
+	n, err := secretscan_model.CountOpenAlertsByCap(ctx, repoID)
 	if err != nil {
 		return 0, err
 	}
-	pullCap := max(cfg.MaxAlertsPerRepo/2, 1)
+	// counts and caps of the built-in rules, and of the custom patterns
+	counts := func(custom bool) (total, pulls *int64, limit, pullLimit int64) {
+		if custom {
+			c := customCap(cfg.MaxAlertsPerRepo)
+			return &n.Custom, &n.CustomViaPull, c, max(c/4, 1)
+		}
+		return &n.Total, &n.ViaPull, cfg.MaxAlertsPerRepo, max(cfg.MaxAlertsPerRepo/2, 1)
+	}
 	for batch := range slices.Chunk(cands, alertBatch) {
 		fingerprints := make([]string, len(batch))
 		for i, c := range batch {
@@ -776,7 +784,8 @@ func writeAlerts(ctx context.Context, cfg setting.SecretScanningOptions, repoID 
 			case a == nil:
 				rule, _ := secretdetection.RuleByID(c.ruleID)
 				_, custom := secretscan_model.ParseCustomRuleID(c.ruleID)
-				if custom && customs >= customCap(cfg.MaxAlertsPerRepo) || !custom && (total >= cfg.MaxAlertsPerRepo || viaPull && pulls >= pullCap) {
+				total, pulls, limit, pullLimit := counts(custom)
+				if *total >= limit || viaPull && *pulls >= pullLimit {
 					left++
 					break
 				}
@@ -787,19 +796,15 @@ func writeAlerts(ctx context.Context, cfg setting.SecretScanningOptions, repoID 
 				if err := secretscan_model.InsertAlert(ctx, a); err != nil {
 					return 0, err
 				}
-				switch {
-				case custom:
-					customs++
-				case viaPull:
-					total++
-					pulls++
-				default:
-					total++
+				*total++
+				if viaPull {
+					*pulls++
 				}
 			case a.ViaPull && !viaPull:
 				reached = append(reached, a.ID) // a branch or tag reaches it too
-				if a.State == secretscan_model.StateOpen && a.SecretType != "custom" {
-					pulls--
+				if a.State == secretscan_model.StateOpen {
+					_, pulls, _, _ := counts(a.SecretType == "custom")
+					*pulls--
 				}
 			}
 			alerts = append(alerts, a)

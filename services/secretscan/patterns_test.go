@@ -78,6 +78,8 @@ func TestValidatePattern(t *testing.T) {
 		},
 		"bad syntax":           func(in *PatternInput) { in.Pattern = `acme-key-(` },
 		"NUL in name":          func(in *PatternInput) { in.Name = "a\x00b" },
+		"bidi in name":         func(in *PatternInput) { in.Name = "a\u202eb" },
+		"zero-width in name":   func(in *PatternInput) { in.Name = "a\u200bb" },
 		"not UTF-8 in name":    func(in *PatternInput) { in.Name = "a\xffb" },
 		"NUL in pattern":       func(in *PatternInput) { in.Pattern = "acme-key-[a-z0-9]{20}\x00?" },
 		"not UTF-8 in pattern": func(in *PatternInput) { in.Pattern = "acme-key-[a-z0-9]{20}(?:\xff)?" },
@@ -564,4 +566,39 @@ func TestStoredRuleCheckIsCached(t *testing.T) {
 	storedRules.Unlock()
 	assert.True(t, has)
 	assert.False(t, ok)
+}
+
+// Custom alerts that only refs/pull/* reach (which any reader can write) have a quarter of the custom share, so a
+// pull request can't fill it and push out a branch's secret.
+func TestScanCustomPullAlertsHaveTheirOwnShare(t *testing.T) {
+	repo := enable(t) // user2/repo1
+	ctx := audit_model.WithSystem(t.Context(), "test")
+	admin := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	w := newWork(t, repo)
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	defer test.MockVariableValue(&setting.SecretScanning.MaxAlertsPerRepo, 64)() // custom share 32, pull-only 8
+	_, err := CreatePattern(ctx, admin, SitePatterns, acmeInput("acme"))
+	require.NoError(t, err)
+
+	w.git("checkout", "-q", "-b", "junk", repo.DefaultBranch)
+	files := map[string]string{}
+	for i := range 12 {
+		files[fmt.Sprintf("j%d.env", i)] = "K=" + acme(fmt.Sprintf("junk-%d", i)) + "\n"
+	}
+	w.commit(files)
+	w.push("refs/pull/1/head")
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	n, err := secretscan_model.CountOpenAlertsByCap(t.Context(), repo.ID)
+	require.NoError(t, err)
+	assert.EqualValues(t, 8, n.CustomViaPull, "a quarter of the custom share")
+	assert.EqualValues(t, 8, n.Custom)
+
+	w.git("checkout", "-q", repo.DefaultBranch)
+	w.commit(map[string]string{"real.env": "K=" + acme("real") + "\n"})
+	w.pushDefault()
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	n, err = secretscan_model.CountOpenAlertsByCap(t.Context(), repo.ID)
+	require.NoError(t, err)
+	assert.EqualValues(t, 9, n.Custom, "the branch's secret has room")
+	assert.EqualValues(t, 8, n.CustomViaPull)
 }

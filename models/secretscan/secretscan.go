@@ -262,10 +262,15 @@ func GetAlertsByFingerprints(ctx context.Context, repoID int64, fingerprints []s
 	return alerts, db.GetEngine(ctx).Where("repo_id = ?", repoID).In("fingerprint", fingerprints).Find(&alerts)
 }
 
-// CountOpenAlerts counts the open alerts of a repository, in one query: those of built-in rules, and of them those
-// that only refs/pull/* reach, and those of custom patterns, which have a cap of their own. Closed alerts don't
-// count towards the caps.
-func CountOpenAlerts(ctx context.Context, repoID int64) (total, viaPull, custom int64, err error) {
+// OpenAlertCounts are the open alerts of a repository by cap: those of built-in rules (Total) and of them those that
+// only refs/pull/* reach, and those of custom patterns (Custom), which have a cap of their own, and of them those that
+// only refs/pull/* reach. Closed alerts don't count towards the caps.
+type OpenAlertCounts struct {
+	Total, ViaPull, Custom, CustomViaPull int64
+}
+
+// CountOpenAlertsByCap counts the open alerts of a repository by cap, in one query.
+func CountOpenAlertsByCap(ctx context.Context, repoID int64) (c OpenAlertCounts, err error) {
 	const isCustom = "CASE WHEN secret_type = 'custom' THEN 1 ELSE 0 END"
 	var rows []struct {
 		ViaPull bool  `xorm:"via_pull"`
@@ -274,20 +279,25 @@ func CountOpenAlerts(ctx context.Context, repoID int64) (total, viaPull, custom 
 	}
 	if err := db.GetEngine(ctx).Table("secret_scanning_alert").Select("via_pull, "+isCustom+" AS custom, COUNT(*) AS n").
 		Where("repo_id = ? AND state = ?", repoID, StateOpen).GroupBy("via_pull, " + isCustom).Find(&rows); err != nil {
-		return 0, 0, 0, err
+		return c, err
 	}
 	for _, r := range rows {
-		switch {
-		case r.Custom == 1:
-			custom += r.N
-		case r.ViaPull:
-			total += r.N
-			viaPull += r.N
-		default:
-			total += r.N
+		total, pulls := &c.Total, &c.ViaPull
+		if r.Custom == 1 {
+			total, pulls = &c.Custom, &c.CustomViaPull
+		}
+		*total += r.N
+		if r.ViaPull {
+			*pulls += r.N
 		}
 	}
-	return total, viaPull, custom, nil
+	return c, nil
+}
+
+// CountOpenAlerts is CountOpenAlertsByCap without the pull-only custom alerts.
+func CountOpenAlerts(ctx context.Context, repoID int64) (total, viaPull, custom int64, err error) {
+	c, err := CountOpenAlertsByCap(ctx, repoID)
+	return c.Total, c.ViaPull, c.Custom, err
 }
 
 // ClearViaPull marks alerts as reached by something other than refs/pull/*.

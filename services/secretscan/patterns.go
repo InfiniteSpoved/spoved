@@ -94,9 +94,10 @@ func ValidatePattern(in PatternInput) error {
 }
 
 // validate is ValidatePattern of a normalized input. Text that isn't valid UTF-8 or holds a control character (NUL
-// included) is refused: the database may refuse or cut it, and the name and keywords are shown.
+// included) is refused: the database may refuse or cut it, and the name and keywords are shown. A name with
+// bidirectional-control or zero-width characters is refused too: it could make a label read like another one.
 func validate(in PatternInput) error {
-	if len(in.Name) > MaxPatternNameLen || util.StripControl(in.Name) != in.Name { // StripControl also replaces bytes that aren't UTF-8
+	if len(in.Name) > MaxPatternNameLen || util.StripControl(in.Name) != in.Name || util.StripFormatting(in.Name) != in.Name { // StripControl also replaces bytes that aren't UTF-8
 		return secretdetection.ErrCustomNameInvalid
 	}
 	if util.StripControl(in.Pattern) != in.Pattern {
@@ -162,7 +163,7 @@ func lockPatterns(ctx context.Context) error {
 	if err := system_model.EnsureSetting(ctx, key); err != nil {
 		return err
 	}
-	_, err := db.Exec(ctx, "UPDATE system_setting SET version = version WHERE setting_key = ?", key)
+	_, _, err := system_model.GetSettingForUpdate(ctx, key)
 	return err
 }
 

@@ -52,7 +52,7 @@ var (
 	ErrSecretTooShort        = errors.New("the secret found in the test string is too short")
 	ErrPatternMatchesTooMuch = errors.New("pattern matches ordinary text too often")
 	ErrKeywordTooCommon      = errors.New("a keyword is too common in ordinary text")
-	ErrPatternHoldsSecret    = errors.New("the name or the pattern holds a secret")
+	ErrPatternHoldsSecret    = errors.New("the name, the pattern or a keyword has a known token format")
 )
 
 // RefusalCode is a short code of why a rule was refused, for logs: never the
@@ -92,10 +92,10 @@ func RefusalCode(err error) string {
 // custom rule from costing CPU on whole files. The secret found in testString
 // (capture group 1 if the pattern has one, else the whole match) must be at
 // least 8 bytes. The pattern may match the fixed 64 KiB corpus of ordinary
-// text at most MaxCorpusMatches times, and so may each keyword. Neither the
-// name nor the pattern may hold what a built-in rule finds. The checks that
-// need no test string are ValidateStoredRule's. Build the rule with
-// CustomRule.
+// text at most MaxCorpusMatches times, and so may each keyword. None of the
+// name, the pattern and the keywords may hold what a built-in rule that is on
+// by default finds (a known token format). The checks that need no test
+// string are ValidateStoredRule's. Build the rule with CustomRule.
 func ValidateCustomRule(name, pattern, testString string, keywords []string) error {
 	if len(testString) > MaxCustomTestStringLen {
 		return ErrTestStringTooLong
@@ -122,9 +122,9 @@ func ValidateCustomRule(name, pattern, testString string, keywords []string) err
 	if fs, _ := d.Scan([]byte(testString)); len(fs) == 0 {
 		return ErrPatternNoMatchInTest
 	}
-	// the name and the pattern are stored and recorded in the audit log as they are: a literal secret written to
-	// catch one known leak would land there
-	if fs, _ := builtinDetector().Scan([]byte(name + "\n" + pattern)); len(fs) > 0 {
+	// the name, the pattern and the keywords are stored and shown (the first two also recorded in the audit log) as
+	// they are: a literal secret written to catch one known leak would land there
+	if fs, _ := builtinDetector().Scan([]byte(name + "\n" + pattern + "\n" + strings.Join(keywords, "\n"))); len(fs) > 0 {
 		return ErrPatternHoldsSecret
 	}
 	return nil
@@ -324,9 +324,6 @@ func unbounded(r *syntax.Regexp) bool {
 // braces, JSON, URLs, git hashes, UUIDs, lock file integrity lines, base64,
 // and non-ASCII text. A simple generator makes it, so it is the same
 // everywhere and holds no literal that looks like a secret.
-// lowerCorpus is the corpus in lower case, as keywords are matched.
-var lowerCorpus = sync.OnceValue(func() string { return strings.ToLower(string(corpus())) })
-
 var corpus = sync.OnceValue(func() []byte {
 	words := strings.Fields(`the of and to in is that for it as was with be by on not this are or from at which but have an had they you were their one all we can her has there been if more when will would who so no
 config server value name list item index result error file path user group time data build test version release branch commit merge request issue comment label state open closed
@@ -380,3 +377,6 @@ configuration repository environment implementation authentication organization 
 	}
 	return []byte(b.String())
 })
+
+// lowerCorpus is the corpus in lower case, as keywords are matched.
+var lowerCorpus = sync.OnceValue(func() string { return strings.ToLower(string(corpus())) })

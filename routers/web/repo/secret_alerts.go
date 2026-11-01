@@ -201,7 +201,12 @@ func SecretAlerts(ctx *context.Context) {
 	type ruleOption struct{ ID, Name string }
 	var types []ruleOption
 	for _, id := range ruleIDs {
-		types = append(types, ruleOption{id, labels.Label(id, repo.OwnerID, nil).Text(ctx.Locale)})
+		l := labels.Label(id, repo.OwnerID, nil)
+		name := l.Text(ctx.Locale)
+		if l.Name == "" { // a pattern without a name to show: the rule ID tells such options apart
+			name += " (" + id + ")"
+		}
+		types = append(types, ruleOption{id, name})
 	}
 	typ, reason, sort := strings.Join(opts.SecretTypes, ""), strings.Join(opts.Resolutions, ""), util.Iif(opts.Ascending, "oldest", "")
 	ctx.Data["Alerts"], ctx.Data["Total"] = rows, total

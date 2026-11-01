@@ -55,6 +55,9 @@ func TestCustomRuleHoldingASecretIsRefused(t *testing.T) {
 	require.NoError(t, ValidateCustomRule("rule", pattern, test, []string{"acme-key"}))
 	require.ErrorIs(t, ValidateCustomRule("rule", pattern+"|"+regexp.QuoteMeta(leaked), test, []string{"acme-key"}), ErrPatternHoldsSecret)
 	require.ErrorIs(t, ValidateCustomRule("leak "+leaked, pattern, test, []string{"acme-key"}), ErrPatternHoldsSecret)
+	withToken := pattern + ` (ghp_[A-Za-z0-9]{36})`
+	require.NoError(t, ValidateCustomRule("rule", withToken, test+" "+leaked, []string{"acme-key"}))
+	require.ErrorIs(t, ValidateCustomRule("rule", withToken, test+" "+leaked, []string{"acme-key", leaked}), ErrPatternHoldsSecret, "a keyword")
 }
 
 // The custom rules have a budget of their own: however much work they need, a built-in rule gets its whole budget.
