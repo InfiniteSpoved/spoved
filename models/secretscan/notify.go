@@ -71,7 +71,7 @@ func markNotify(ctx context.Context, repoID, pusherID int64, kind, ref, commit s
 	if err != nil {
 		return false, err
 	}
-	bits := DigestKindCode
+	bits, isText := DigestKindCode, 0 // a text mark has no person and no ref: it is never "another push"
 	switch kind {
 	case KindWiki:
 		if !wikiScanned {
@@ -82,7 +82,7 @@ func markNotify(ctx context.Context, repoID, pusherID int64, kind, ref, commit s
 		if done, err := db.GetEngine(ctx).Where("repo_id = ? AND kind = ? AND retry_unix = 0 AND status <> ''", repoID, KindIssue).Exist(new(Scan)); err != nil || !done {
 			return false, err
 		}
-		bits = DigestKindText
+		bits, isText = DigestKindText, 1
 	}
 	if wikiScanned {
 		bits |= DigestWikiScanned
@@ -92,12 +92,12 @@ func markNotify(ctx context.Context, repoID, pusherID int64, kind, ref, commit s
 	res, err := db.GetEngine(ctx).Exec(
 		"UPDATE secret_scan SET notify_seq = notify_seq + 1,"+
 			" notify_alert_id = CASE WHEN notify_after_unix = 0 THEN (CASE WHEN ? >= 0 THEN ? WHEN notify_floor > 0 THEN notify_floor ELSE (SELECT COALESCE(MAX(id), 0) FROM secret_scanning_alert WHERE repo_id = ?) END) ELSE notify_alert_id END,"+
-			" notify_pusher_id = CASE WHEN notify_after_unix = 0 OR notify_pusher_id = ? THEN ? ELSE 0 END,"+
-			" notify_kinds = CASE WHEN notify_after_unix = 0 THEN ? ELSE (notify_kinds | ? | CASE WHEN (? <> '' AND notify_ref <> '' AND notify_ref <> ?) OR ((notify_kinds & 3) <> ?) THEN 8 ELSE 0 END) END,"+
+			" notify_pusher_id = CASE WHEN ? = 1 THEN notify_pusher_id WHEN notify_after_unix = 0 OR (notify_kinds & 3) = 0 OR notify_pusher_id = ? THEN ? ELSE 0 END,"+
+			" notify_kinds = CASE WHEN notify_after_unix = 0 THEN ? ELSE (notify_kinds | ? | CASE WHEN (? <> '' AND notify_ref <> '' AND notify_ref <> ?) OR (? <> 0 AND (notify_kinds & 3) <> 0 AND (notify_kinds & 3) <> ?) THEN 8 ELSE 0 END) END,"+
 			" notify_ref = CASE WHEN ? <> '' THEN ? ELSE notify_ref END, notify_commit = CASE WHEN ? <> '' THEN ? ELSE notify_commit END,"+
 			" notify_after_unix = CASE WHEN notify_after_unix = 0 THEN ? ELSE notify_after_unix END"+
 			" WHERE repo_id = ? AND kind = ? AND completed = ?",
-		boundary, boundary, repoID, pusherID, pusherID, bits, bits, ref, ref, bits&3, ref, ref, commit, commit, int64(timeutil.TimeStampNow()), repoID, KindRepo, true,
+		boundary, boundary, repoID, isText, pusherID, pusherID, bits, bits, ref, ref, bits&3, bits&3, ref, ref, commit, commit, int64(timeutil.TimeStampNow()), repoID, KindRepo, true,
 	)
 	if err != nil {
 		return false, err

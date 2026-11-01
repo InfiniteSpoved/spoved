@@ -109,13 +109,14 @@ func enqueueText(ctx context.Context, item string) {
 	}
 }
 
-func enqueueIssueText(ctx context.Context, issueID int64) {
-	enqueueText(ctx, "i:"+strconv.FormatInt(issueID, 10))
+// enqueueIssueText queues an issue's title and body; doer made the change.
+func enqueueIssueText(ctx context.Context, issueID, doerID int64) {
+	enqueueText(ctx, fmt.Sprintf("i:%d:%d", issueID, max(doerID, 0)))
 }
 
-func enqueueCommentText(ctx context.Context, c *issues_model.Comment) {
+func enqueueCommentText(ctx context.Context, c *issues_model.Comment, doerID int64) {
 	if c != nil && slices.Contains(textCommentTypes, c.Type) {
-		enqueueText(ctx, "c:"+strconv.FormatInt(c.ID, 10))
+		enqueueText(ctx, fmt.Sprintf("c:%d:%d", c.ID, max(doerID, 0)))
 	}
 }
 
@@ -177,6 +178,7 @@ func nextTextItem(item string, busy bool) (string, time.Duration, bool) {
 type textJob struct {
 	repoID int64
 	wait   bool
+	doer   int64 // who made the change the item is about (0: unknown)
 }
 
 // lock holds the repository against its scan and the other text items (repoScans) from before its text is read until
@@ -213,9 +215,15 @@ func handleText(ctx context.Context, item string) (err error) {
 		}
 	}
 	switch {
-	case parts[0] == "i" && len(nums) == 1:
+	case parts[0] == "i" && (len(nums) == 1 || len(nums) == 2):
+		if len(nums) == 2 {
+			job.doer = nums[1]
+		}
 		return scanIssueText(ctx, nums[0], job)
-	case parts[0] == "c" && len(nums) == 1:
+	case parts[0] == "c" && (len(nums) == 1 || len(nums) == 2):
+		if len(nums) == 2 {
+			job.doer = nums[1]
+		}
 		return scanCommentText(ctx, nums[0], job)
 	case parts[0] == "x" && len(parts) == 4 && len(nums) == 2:
 		job.repoID = nums[0]
@@ -295,6 +303,7 @@ func scanIssueText(ctx context.Context, id int64, job *textJob) error {
 		return err
 	}
 	t.addIssue(issue)
+	t.doer = job.doer
 	return t.flushLive()
 }
 
@@ -337,6 +346,7 @@ func scanCommentText(ctx context.Context, id int64, job *textJob) error {
 		return err
 	}
 	t.addComment(c)
+	t.doer = job.doer
 	return t.flushLive()
 }
 
@@ -415,6 +425,7 @@ type textScan struct {
 	holes    int64
 	read     int64 // bytes of text added
 	meta     map[secretscan_model.TextSource]textMeta
+	doer     int64 // who wrote the text as it is now (0: unknown); only that person is told by mail
 }
 
 // textMeta is what the notice to a poster needs of a text.
@@ -566,7 +577,10 @@ var sendPosterNotice = mailer.SendSecretPosterNotice
 func (t *textScan) flushLive() error {
 	var before, stored map[secretscan_model.TextSource]map[secretscan_model.PlaceKey]bool
 	var maxBefore int64
-	hasFound := slices.ContainsFunc(slices.Collect(maps.Values(t.found)), func(p map[secretscan_model.PlaceKey]bool) bool { return len(p) > 0 })
+	hasFound := false
+	for _, places := range t.found {
+		hasFound = hasFound || len(places) > 0
+	}
 	if hasFound {
 		var err error
 		if before, err = secretscan_model.StoredTextPlaces(t.ctx, t.repo.ID, t.found); err != nil {
@@ -592,10 +606,10 @@ func (t *textScan) flushLive() error {
 				continue
 			}
 			fresh = true
-			if m.posterID != 0 {
-				n := mailer.SecretPosterNotice{PosterID: m.posterID, IssueID: m.issueID}
+			if m.posterID != 0 && m.posterID == t.doer { // not for text that somebody else edited the secret into
+				n := mailer.SecretPosterNotice{PosterID: m.posterID, IssueID: m.issueID, Field: src.Field}
 				if src.Kind == secretscan_model.KindComment {
-					n.CommentID = src.ID
+					n.CommentID, n.Field = src.ID, ""
 				}
 				if !slices.Contains(notices, n) {
 					notices = append(notices, n) // one mail per text, whatever the number of places
@@ -766,29 +780,36 @@ func (s *scanner) saveText(old *secretscan_model.Scan, cur textCursor, t *textSc
 	return false, errStoreFail
 }
 
+func doerID(u *user_model.User) int64 {
+	if u == nil {
+		return 0
+	}
+	return u.ID
+}
+
 // textNotifier methods: a text that is written or changed is queued; the handler reads it as it is then.
 func (*notifier) NewIssue(ctx context.Context, issue *issues_model.Issue, _ []*user_model.User) {
-	enqueueIssueText(ctx, issue.ID)
+	enqueueIssueText(ctx, issue.ID, issue.PosterID)
 }
 
-func (*notifier) IssueChangeContent(ctx context.Context, _ *user_model.User, issue *issues_model.Issue, _ string) {
-	enqueueIssueText(ctx, issue.ID)
+func (*notifier) IssueChangeContent(ctx context.Context, doer *user_model.User, issue *issues_model.Issue, _ string) {
+	enqueueIssueText(ctx, issue.ID, doerID(doer))
 }
 
-func (*notifier) IssueChangeTitle(ctx context.Context, _ *user_model.User, issue *issues_model.Issue, _ string) {
-	enqueueIssueText(ctx, issue.ID)
+func (*notifier) IssueChangeTitle(ctx context.Context, doer *user_model.User, issue *issues_model.Issue, _ string) {
+	enqueueIssueText(ctx, issue.ID, doerID(doer))
 }
 
 func (*notifier) DeleteIssue(ctx context.Context, _ *user_model.User, issue *issues_model.Issue) {
 	enqueueTextGone(ctx, secretscan_model.KindIssue, issue.RepoID, issue.ID)
 }
 
-func (*notifier) CreateIssueComment(ctx context.Context, _ *user_model.User, _ *repo_model.Repository, _ *issues_model.Issue, c *issues_model.Comment, _ []*user_model.User) {
-	enqueueCommentText(ctx, c)
+func (*notifier) CreateIssueComment(ctx context.Context, doer *user_model.User, _ *repo_model.Repository, _ *issues_model.Issue, c *issues_model.Comment, _ []*user_model.User) {
+	enqueueCommentText(ctx, c, doerID(doer))
 }
 
-func (*notifier) UpdateComment(ctx context.Context, _ *user_model.User, c *issues_model.Comment, _ string) {
-	enqueueCommentText(ctx, c)
+func (*notifier) UpdateComment(ctx context.Context, doer *user_model.User, c *issues_model.Comment, _ string) {
+	enqueueCommentText(ctx, c, doerID(doer))
 }
 
 func (*notifier) DeleteComment(ctx context.Context, _ *user_model.User, c *issues_model.Comment) {
@@ -802,9 +823,9 @@ func (*notifier) DeleteComment(ctx context.Context, _ *user_model.User, c *issue
 
 // PullRequestReview and PullRequestCodeComment come when a review is submitted, so a draft is not scanned before.
 func (*notifier) PullRequestReview(ctx context.Context, _ *issues_model.PullRequest, _ *issues_model.Review, c *issues_model.Comment, _ []*user_model.User) {
-	enqueueCommentText(ctx, c)
+	enqueueCommentText(ctx, c, c.PosterID)
 }
 
 func (*notifier) PullRequestCodeComment(ctx context.Context, _ *issues_model.PullRequest, c *issues_model.Comment, _ []*user_model.User) {
-	enqueueCommentText(ctx, c)
+	enqueueCommentText(ctx, c, c.PosterID)
 }

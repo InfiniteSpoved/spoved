@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"html"
+	"html/template"
 	"strconv"
 
 	issues_model "forgejo.org/models/issues"
@@ -34,7 +36,8 @@ const MaxPosterNoticesPerDay = 5
 type SecretPosterNotice struct {
 	PosterID  int64
 	IssueID   int64
-	CommentID int64 // 0 for the title or body of the issue
+	CommentID int64  // 0 for the title or body of the issue
+	Field     string // title or body, for a text that is not a comment
 }
 
 // SendSecretPosterNotice tells the author of a text that it seems to hold a secret, so they can remove it and revoke
@@ -73,34 +76,39 @@ func SendSecretPosterNotice(ctx context.Context, repo *repo_model.Repository, n 
 	if perm.IsAdmin() || !perm.CanRead(util.Iif(issue.IsPull, unit.TypePullRequests, unit.TypeIssues)) || !ShouldEmail(ctx, u, repo, user_model.NotifyEventSecretAlert) {
 		return nil
 	}
-	c := cache.GetCache()
-	key := "secret_poster_notices_" + strconv.FormatInt(u.ID, 10) + "_" + timeutil.TimeStampNow().AsTime().UTC().Format("2006-01-02")
-	sent := int64(0)
-	if c != nil {
-		if v, err := util.ToInt64(c.Get(key)); err == nil {
-			sent = v
-		}
-		if sent >= MaxPosterNoticesPerDay {
-			return nil
-		}
+	if !takePosterSlot(u.ID) {
+		return nil
 	}
 	issue.Repo = repo
+	ref := fmt.Sprintf("%s#%d", repo.FullName(), issue.Index)
 	link := issue.HTMLURL()
-	if n.CommentID != 0 {
-		link += "#issuecomment-" + strconv.FormatInt(n.CommentID, 10)
-	}
 	locale := translation.NewLocale(u.Language)
-	name := repo.FullName()
-	subject := locale.TrString("mail.secret_poster.subject", name)
+	// literal keys, so that lint-locale-usage finds them
+	var item, open template.HTML
+	switch {
+	case n.CommentID != 0:
+		link += "#issuecomment-" + strconv.FormatInt(n.CommentID, 10)
+		item, open = locale.Tr("mail.secret_poster.item.comment"), locale.Tr("mail.secret_poster.open_comment")
+	case issue.IsPull && n.Field == "title":
+		item, open = locale.Tr("mail.secret_poster.item.pull_title"), locale.Tr("mail.secret_poster.open_pull")
+	case issue.IsPull:
+		item, open = locale.Tr("mail.secret_poster.item.pull_body"), locale.Tr("mail.secret_poster.open_pull")
+	case n.Field == "title":
+		item, open = locale.Tr("mail.secret_poster.item.issue_title"), locale.Tr("mail.secret_poster.open_issue")
+	default:
+		item, open = locale.Tr("mail.secret_poster.item.issue_body"), locale.Tr("mail.secret_poster.open_issue")
+	}
+	subject := html.UnescapeString(string(locale.Tr("mail.secret_poster.subject", item, ref)))
 	data := map[string]any{
 		"locale":   locale,
 		"Language": locale.Language(),
 		"Title":    subject,
-		"Intro":    locale.Tr("mail.secret_poster.intro", name),
+		"Intro":    locale.Tr("mail.secret_poster.intro", item, ref),
 		"Advice":   locale.Tr("mail.secret_poster.advice"),
+		"NotReal":  locale.Tr("mail.secret_poster.not_real"),
 		"Link":     link,
-		"LinkText": locale.Tr("mail.secret_poster.open"),
-		"Footer":   locale.Tr("mail.secret_poster.foot", name),
+		"LinkText": open,
+		"Footer":   locale.Tr("mail.secret_poster.foot", repo.FullName(), MaxPosterNoticesPerDay),
 		"Settings": setting.AppURL + "user/settings/notifications",
 	}
 	var content bytes.Buffer
@@ -110,10 +118,25 @@ func SendSecretPosterNotice(ctx context.Context, repo *repo_model.Repository, n 
 	msg := NewMessage(u.EmailTo(), subject, content.String())
 	msg.Info = fmt.Sprintf("Secret notice to the poster: repository %d", repo.ID)
 	SendAsync(msg)
-	if c != nil {
-		if err := c.Put(key, sent+1, 2*24*60*60); err != nil {
-			log.Error("secret poster notice: store the count of user %d: %v", u.ID, err)
-		}
-	}
 	return nil
+}
+
+// takePosterSlot takes one of the person's MaxPosterNoticesPerDay mails of the (UTC) day before the mail is made: the
+// counter is incremented first and the mail goes only while it is within the limit, so two workers can't both take the
+// last slot (the first creation of the day's key can still race). The counter is in the cache: with the default
+// in-memory cache each server counts for itself, with a shared cache (Redis) the limit holds across servers.
+func takePosterSlot(userID int64) bool {
+	c := cache.GetCache()
+	if c == nil {
+		return true
+	}
+	key := "secret_poster_notices_" + strconv.FormatInt(userID, 10) + "_" + timeutil.TimeStampNow().AsTime().UTC().Format("2006-01-02")
+	if err := c.Incr(key); err != nil { // no counter yet today
+		if err := c.Put(key, int64(1), 2*24*60*60); err != nil {
+			log.Error("secret poster notice: store the count of user %d: %v", userID, err)
+		}
+		return true
+	}
+	n, err := util.ToInt64(c.Get(key))
+	return err != nil || n <= MaxPosterNoticesPerDay
 }

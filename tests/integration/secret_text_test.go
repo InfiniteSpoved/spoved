@@ -170,7 +170,9 @@ func TestSecretTextOnlyAlertWithoutWiki(t *testing.T) {
 
 	var locs []*api.SecretScanningLocation
 	DecodeJSON(t, MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("%s/%d/locations", alerts, a.Index)).AddTokenAuth(write), http.StatusOK), &locs)
-	assert.Empty(t, locs, "the places in text stay hidden")
+	for _, l := range locs {
+		assert.Equal(t, api.SecretScanningLocation{Type: "comment_text"}, *l, "the places in text stay hidden")
+	}
 
 	t.Run("a path search doesn't find the places in text", func(t *testing.T) {
 		body := session.MakeRequest(t, NewRequest(t, "GET", "/user2/repo1/security/secrets?state=closed&q=body"), http.StatusOK).Body.String()

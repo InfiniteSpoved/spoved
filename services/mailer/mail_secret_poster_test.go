@@ -75,10 +75,12 @@ func TestSendSecretPosterNotice(t *testing.T) {
 		addr, err := mail.ParseAddress(got[0].To)
 		require.NoError(t, err)
 		assert.Equal(t, "user5@example.com", addr.Address)
-		assert.Equal(t, "A secret in your text in user2/repo1", got[0].Subject)
+		assert.Equal(t, fmt.Sprintf("Possible secret in your issue description on user2/repo1#%d", issue.Index), got[0].Subject)
 		assert.Contains(t, got[0].Body, fmt.Sprintf(`href="https://try.gitea.io/user2/repo1/issues/%d"`, issue.Index))
 		assert.NotContains(t, got[0].Body, "security/secrets", "the poster may not be allowed to see alerts")
-		assert.Contains(t, got[0].Body, "You get at most 5 of these a day.")
+		assert.Contains(t, got[0].Body, "you get at most 5 of these a day.")
+		assert.Contains(t, got[0].Body, "edit history")
+		assert.Contains(t, got[0].Body, "If it is not a real secret")
 		AssertTranslatedLocale(t, got[0].Body, "mail.", "secret_poster")
 	})
 
@@ -86,6 +88,18 @@ func TestSendSecretPosterNotice(t *testing.T) {
 		got := send(SecretPosterNotice{PosterID: 5, IssueID: issue.ID, CommentID: 77})
 		require.Len(t, got, 1)
 		assert.Contains(t, got[0].Body, fmt.Sprintf(`/issues/%d#issuecomment-77"`, issue.Index))
+		assert.Equal(t, fmt.Sprintf("Possible secret in your comment on user2/repo1#%d", issue.Index), got[0].Subject)
+	})
+
+	t.Run("the item and field are named", func(t *testing.T) {
+		got := send(SecretPosterNotice{PosterID: 5, IssueID: issue.ID, Field: "title"})
+		require.Len(t, got, 1)
+		assert.Equal(t, fmt.Sprintf("Possible secret in your issue title on user2/repo1#%d", issue.Index), got[0].Subject)
+		pull := newIssue(5, true)
+		got = send(SecretPosterNotice{PosterID: 5, IssueID: pull.ID, Field: "body"})
+		require.Len(t, got, 1)
+		assert.Equal(t, fmt.Sprintf("Possible secret in your pull request description on user2/repo1#%d", pull.Index), got[0].Subject)
+		assert.Contains(t, got[0].Body, "Open the pull request")
 	})
 
 	t.Run("who is not told", func(t *testing.T) {
@@ -163,7 +177,8 @@ func TestSendSecretDigestText(t *testing.T) {
 	}
 	require.NotEmpty(t, body, "the owner administers the repository")
 	assert.Contains(t, body, "A scan of the text of an issue, pull request or comment found 1 secret")
-	assert.Contains(t, body, "1 of them is in the text of an issue, pull request or comment.")
+	assert.NotContains(t, body, "1 of them is in the text", "a text-only digest says it once")
+	assert.Contains(t, body, "Editing the text is not enough")
 	assert.NotContains(t, body, "<code>", "no place is listed")
 	assert.NotContains(t, body, "Location")
 	assert.NotContains(t, body, "/issues/")

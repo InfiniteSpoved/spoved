@@ -365,9 +365,10 @@ func TestScanTextNotifierQueuesItems(t *testing.T) {
 	n.PullRequestCodeComment(ctx, nil, c, nil)
 	n.DeleteComment(ctx, nil, c)
 	n.DeleteIssue(ctx, nil, issue)
-	i, cs := fmt.Sprintf("i:%d", issue.ID), fmt.Sprintf("c:%d", c.ID)
+	i, cs := fmt.Sprintf("i:%d:0", issue.ID), fmt.Sprintf("c:%d:0", c.ID)
+	ip, cp := fmt.Sprintf("i:%d:%d", issue.ID, issue.PosterID), fmt.Sprintf("c:%d:%d", c.ID, c.PosterID)
 	assert.Equal(t, []string{
-		i, i, i, cs, cs, cs, cs,
+		ip, i, i, cs, cs, cp, cp,
 		fmt.Sprintf("x:comment:%d:%d", repo.ID, c.ID), fmt.Sprintf("x:issue:%d:%d", repo.ID, issue.ID),
 	}, items)
 

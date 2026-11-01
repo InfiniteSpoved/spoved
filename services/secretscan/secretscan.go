@@ -109,7 +109,14 @@ func (*notifier) ForkRepository(ctx context.Context, _ *user_model.User, parent,
 // NewPullRequest and PullRequestSynchronized: the head of a pull request from a fork, and of an AGit push, is a ref
 // of the base repository that no push event names.
 func (*notifier) NewPullRequest(ctx context.Context, pr *issues_model.PullRequest, _ []*user_model.User) {
-	enqueueIssueText(ctx, pr.IssueID) // its title and body
+	if pr.Issue == nil {
+		_ = pr.LoadIssue(ctx)
+	}
+	var poster int64
+	if pr.Issue != nil {
+		poster = pr.Issue.PosterID
+	}
+	enqueueIssueText(ctx, pr.IssueID, poster) // its title and body
 	enqueuePullRequest(ctx, pr)
 }
 

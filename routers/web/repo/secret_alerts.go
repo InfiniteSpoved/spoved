@@ -101,7 +101,9 @@ func buildSecretRows(ctx *context.Context, alerts []*secretscan_model.Alert, can
 	for _, l := range first {
 		firstLocs = append(firstLocs, l)
 	}
-	texts, err := secretscan_model.LoadTextPlaces(ctx, ctx.Repo.Repository.ID, firstLocs, secretTextAccess(ctx))
+	access := secretTextAccess(ctx)
+	access.NoPosters = true // the list shows no poster
+	texts, err := secretscan_model.LoadTextPlaces(ctx, ctx.Repo.Repository.ID, firstLocs, access)
 	if err != nil {
 		return nil, err
 	}
@@ -409,6 +411,19 @@ func SecretAlert(ctx *context.Context) {
 	if err != nil {
 		ctx.ServerError("LoadTextPlaces", err)
 		return
+	}
+	kinds, err := secretscan_model.LocationKinds(ctx, repo.ID, alert.ID)
+	if err != nil {
+		ctx.ServerError("LocationKinds", err)
+		return
+	}
+	hasText := slices.ContainsFunc(kinds, func(k string) bool { return slices.Contains(secretscan_model.TextKinds, k) })
+	onlyText := hasText && !slices.ContainsFunc(kinds, func(k string) bool { return !slices.Contains(secretscan_model.TextKinds, k) })
+	ctx.Data["TextOnly"], ctx.Data["TextAlso"] = onlyText, hasText && !onlyText
+	for _, p := range texts {
+		if !p.Readable && !p.Deleted {
+			ctx.Data["AnyHidden"] = true // a place the viewer is not told about
+		}
 	}
 	ctx.Data["Locations"] = convert.ToSecretScanningLocations(repo, locs, texts, func(path string) string { return wiki_service.PageHTMLURL(repo, path) })
 	titles := map[string]string{}

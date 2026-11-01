@@ -21,7 +21,8 @@ type SecretScanningLocationDetails struct {
 	CommitURL string `json:"commit_url,omitempty"`
 	// the page, for the wiki
 	PageURL string `json:"page_url,omitempty"`
-	// spoved: the file at that commit in the web interface (empty when the place has no commit, and for the wiki)
+	// spoved: the page of the file at that commit, or of the issue, pull request or comment, in the web interface
+	// (empty when the place has no commit and no text, and for the wiki)
 	HTMLURL string `json:"html_url,omitempty"`
 	// spoved: the author of the commit, as it names itself (anyone can write any name)
 	CommitAuthorName  string `json:"commit_author_name"`
@@ -30,16 +31,26 @@ type SecretScanningLocationDetails struct {
 	CommitDate *time.Time `json:"commit_date,omitempty"`
 	// spoved: true when only a refs/pull/* ref reaches the commit
 	PullRef bool `json:"pull_ref,omitempty"`
-	// spoved: for a place in an issue, a pull request or a comment (only when the caller may read it), the number
-	// of the issue or pull request, which part holds the secret (title, body or comment), the login of who wrote it
-	// (empty for an import) and whether the text no longer holds it (the alert stays)
-	IssueNumber int64  `json:"issue_number,omitempty"`
-	Field       string `json:"field,omitempty"`
-	Poster      string `json:"poster,omitempty"`
-	Removed     bool   `json:"removed,omitempty"`
-	// the API URL of the issue or pull request, and of the comment
-	IssueURL   string `json:"issue_url,omitempty"`
-	CommentURL string `json:"comment_url,omitempty"`
+	// spoved: for a place in text the caller may read, the number of the issue or pull request
+	IssueNumber int64 `json:"issue_number,omitempty"`
+	// spoved: for a place in text the caller may read, the part that holds the secret: title, body or comment
+	Field string `json:"field,omitempty"`
+	// spoved: for a place in text the caller may read, the login of who wrote it (empty for an import)
+	Poster string `json:"poster,omitempty"`
+	// spoved: for a place in text the caller may read, true when the text no longer holds the secret (the alert stays)
+	Removed bool `json:"removed,omitempty"`
+	// the API URL of the issue, for an issue_title place
+	IssueTitleURL string `json:"issue_title_url,omitempty"`
+	// the API URL of the issue, for an issue_body place
+	IssueBodyURL string `json:"issue_body_url,omitempty"`
+	// the API URL of the comment, for an issue_comment place
+	IssueCommentURL string `json:"issue_comment_url,omitempty"`
+	// the API URL of the pull request, for a pull_request_title place
+	PullRequestTitleURL string `json:"pull_request_title_url,omitempty"`
+	// the API URL of the pull request, for a pull_request_body place
+	PullRequestBodyURL string `json:"pull_request_body_url,omitempty"`
+	// the API URL of the comment, for a pull_request_comment place
+	PullRequestCommentURL string `json:"pull_request_comment_url,omitempty"`
 }
 
 // SecretScanningLocation is a place a secret was found.

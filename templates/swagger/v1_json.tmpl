@@ -42129,10 +42129,6 @@
           "type": "string",
           "x-go-name": "BlobURL"
         },
-        "comment_url": {
-          "type": "string",
-          "x-go-name": "CommentURL"
-        },
         "commit_author_email": {
           "type": "string",
           "x-go-name": "CommitAuthorEmail"
@@ -42162,24 +42158,35 @@
           "x-go-name": "EndLine"
         },
         "field": {
+          "description": "spoved: for a place in text the caller may read, the part that holds the secret: title, body or comment",
           "type": "string",
           "x-go-name": "Field"
         },
         "html_url": {
-          "description": "spoved: the file at that commit in the web interface (empty when the place has no commit, and for the wiki)",
+          "description": "spoved: the page of the file at that commit, or of the issue, pull request or comment, in the web interface\n(empty when the place has no commit and no text, and for the wiki)",
           "type": "string",
           "x-go-name": "HTMLURL"
         },
+        "issue_body_url": {
+          "description": "the API URL of the issue, for an issue_body place",
+          "type": "string",
+          "x-go-name": "IssueBodyURL"
+        },
+        "issue_comment_url": {
+          "description": "the API URL of the comment, for an issue_comment place",
+          "type": "string",
+          "x-go-name": "IssueCommentURL"
+        },
         "issue_number": {
-          "description": "spoved: for a place in an issue, a pull request or a comment (only when the caller may read it), the number\nof the issue or pull request, which part holds the secret (title, body or comment), the login of who wrote it\n(empty for an import) and whether the text no longer holds it (the alert stays)",
+          "description": "spoved: for a place in text the caller may read, the number of the issue or pull request",
           "type": "integer",
           "format": "int64",
           "x-go-name": "IssueNumber"
         },
-        "issue_url": {
-          "description": "the API URL of the issue or pull request, and of the comment",
+        "issue_title_url": {
+          "description": "the API URL of the issue, for an issue_title place",
           "type": "string",
-          "x-go-name": "IssueURL"
+          "x-go-name": "IssueTitleURL"
         },
         "page_url": {
           "description": "the page, for the wiki",
@@ -42191,6 +42198,7 @@
           "x-go-name": "Path"
         },
         "poster": {
+          "description": "spoved: for a place in text the caller may read, the login of who wrote it (empty for an import)",
           "type": "string",
           "x-go-name": "Poster"
         },
@@ -42199,7 +42207,23 @@
           "type": "boolean",
           "x-go-name": "PullRef"
         },
+        "pull_request_body_url": {
+          "description": "the API URL of the pull request, for a pull_request_body place",
+          "type": "string",
+          "x-go-name": "PullRequestBodyURL"
+        },
+        "pull_request_comment_url": {
+          "description": "the API URL of the comment, for a pull_request_comment place",
+          "type": "string",
+          "x-go-name": "PullRequestCommentURL"
+        },
+        "pull_request_title_url": {
+          "description": "the API URL of the pull request, for a pull_request_title place",
+          "type": "string",
+          "x-go-name": "PullRequestTitleURL"
+        },
         "removed": {
+          "description": "spoved: for a place in text the caller may read, true when the text no longer holds the secret (the alert stays)",
           "type": "boolean",
           "x-go-name": "Removed"
         },

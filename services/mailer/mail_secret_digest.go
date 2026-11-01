@@ -192,6 +192,7 @@ func SendSecretDigest(ctx context.Context, repo *repo_model.Repository, in Secre
 func sendSecretDigestMail(repo *repo_model.Repository, u *user_model.User, d *secretscan_model.Digest, in SecretDigestInput, labels map[string]secretscan_model.RuleLabel, isPusher, wikiRead, adminsNotified bool) error {
 	locale := translation.NewLocale(u.Language)
 	name := repo.FullName()
+	textOnly := in.Kinds&(secretscan_model.DigestKindCode|secretscan_model.DigestKindWiki) == 0 && in.Kinds&secretscan_model.DigestKindText != 0
 	// the push as the mail names it: the branch as code, the commit linked (the arguments are HTML, built escaped); a
 	// wiki push is named only to someone who can read the wiki; pushes of several refs are not named after the last
 	where := locale.Tr("mail.secret_digest.where_push")
@@ -202,7 +203,7 @@ func sendSecretDigestMail(repo *repo_model.Repository, u *user_model.User, d *se
 		} else {
 			where = locale.Tr("mail.secret_digest.where_several")
 		}
-	case in.Kinds&(secretscan_model.DigestKindCode|secretscan_model.DigestKindWiki) == 0 && in.Kinds&secretscan_model.DigestKindText != 0:
+	case textOnly:
 		where = locale.Tr("mail.secret_digest.where_text")
 	case in.Ref != "":
 		where = template.HTML("<code>" + template.HTMLEscapeString(cleanDigestText(in.Ref)) + "</code>")
@@ -245,6 +246,9 @@ func sendSecretDigestMail(repo *repo_model.Repository, u *user_model.User, d *se
 		subjectHTML = locale.TrPluralString(d.Alerts, "mail.secret_digest.subject", name)
 		intro = locale.TrPluralString(d.Alerts, "mail.secret_digest.intro", where, d.Alerts)
 		advice, foot = locale.Tr("mail.secret_digest.advice_admin"), locale.Tr("mail.secret_digest.foot_admin", name)
+		if textOnly {
+			advice = locale.Tr("mail.secret_digest.advice_admin_text")
+		}
 	}
 	subject := html.UnescapeString(string(subjectHTML))
 	link := repo.HTMLURL() + "/security/secrets"
@@ -266,7 +270,9 @@ func sendSecretDigestMail(repo *repo_model.Repository, u *user_model.User, d *se
 		"Link":       link,
 		"LinkText":   locale.TrPluralString(d.Alerts, "mail.secret_digest.open"),
 	}
-	if d.TextAlerts > 0 {
+	if d.TextAlerts > 0 && textOnly {
+		data["TextNote"] = locale.Tr("mail.secret_digest.text_where") // the intro says it is in text already
+	} else if d.TextAlerts > 0 {
 		data["TextNote"] = locale.TrPluralString(d.TextAlerts, "mail.secret_digest.text_note", d.TextAlerts)
 	}
 	if d.TotalLocations > len(places) {

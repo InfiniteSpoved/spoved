@@ -451,35 +451,41 @@ func TestLiveTextDigestAndPosterNotice(t *testing.T) {
 
 	tok := token("live-text")
 	issue := newIssue(t, repo, "title", "key: "+tok)
-	require.NoError(t, handleText(ctx, fmt.Sprintf("i:%d", issue.ID)))
+	require.NoError(t, handleText(ctx, fmt.Sprintf("i:%d:2", issue.ID)))
 	require.Len(t, *sent, 1)
 	in := (*sent)[0]
 	assert.NotZero(t, in.Kinds&secretscan_model.DigestKindText)
 	assert.Zero(t, in.Kinds&(secretscan_model.DigestKindCode|secretscan_model.DigestKindWiki))
 	assert.Zero(t, in.PusherID, "nobody pushed")
 	assert.Empty(t, in.Ref)
-	assert.Equal(t, []mailer.SecretPosterNotice{{PosterID: 2, IssueID: issue.ID}}, notices)
+	assert.Equal(t, []mailer.SecretPosterNotice{{PosterID: 2, IssueID: issue.ID, Field: "body"}}, notices)
 	assert.Zero(t, scanOf(t, repo.ID, secretscan_model.KindRepo).NotifyAfterUnix, "the mark is taken with the mail")
 
 	t.Run("the same text again: no new place, no notice", func(t *testing.T) {
-		require.NoError(t, handleText(ctx, fmt.Sprintf("i:%d", issue.ID)))
+		require.NoError(t, handleText(ctx, fmt.Sprintf("i:%d:2", issue.ID)))
 		assert.Len(t, notices, 1)
 		assert.Len(t, *sent, 1)
 	})
 
 	t.Run("a comment with the same secret: its writer is told, no new alert, no digest", func(t *testing.T) {
 		c := newComment(t, issue, "me too: "+tok)
-		require.NoError(t, handleText(ctx, fmt.Sprintf("c:%d", c.ID)))
+		require.NoError(t, handleText(ctx, fmt.Sprintf("c:%d:3", c.ID)))
 		require.Len(t, notices, 2)
 		assert.Equal(t, mailer.SecretPosterNotice{PosterID: 3, IssueID: issue.ID, CommentID: c.ID}, notices[1])
 		assert.Len(t, *sent, 1)
+	})
+
+	t.Run("an edit by somebody else tells nobody: only the editor of the live edit is the poster", func(t *testing.T) {
+		other := newIssue(t, repo, "other", "key: "+token("edited-in"))
+		require.NoError(t, handleText(ctx, fmt.Sprintf("i:%d:4", other.ID))) // user 4 edited it, user 2 posted it
+		assert.Len(t, notices, 2)
 	})
 
 	t.Run("an imported text has no author to tell, but still marks for a digest", func(t *testing.T) {
 		imported := newIssue(t, repo, "imported", "key: "+token("imported"))
 		_, err := db.GetEngine(ctx).Table("issue").Where("id = ?", imported.ID).Update(map[string]any{"original_author_id": 99})
 		require.NoError(t, err)
-		require.NoError(t, handleText(ctx, fmt.Sprintf("i:%d", imported.ID)))
+		require.NoError(t, handleText(ctx, fmt.Sprintf("i:%d:2", imported.ID)))
 		assert.Len(t, notices, 2)
 		assert.NotZero(t, scanOf(t, repo.ID, secretscan_model.KindRepo).NotifyAfterUnix, "a digest within 15 minutes of the last waits")
 		assert.Len(t, *sent, 1)

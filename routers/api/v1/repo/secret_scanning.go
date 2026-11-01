@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	secretscan_model "forgejo.org/models/secretscan"
 	"forgejo.org/models/unit"
@@ -348,7 +349,14 @@ func ListSecretScanningAlertLocations(ctx *context.APIContext) {
 	}
 	ctx.SetLinkHeader(int(total), opts.PageSize)
 	ctx.SetTotalCountHeader(total)
-	texts, err := secretscan_model.LoadTextPlaces(ctx, repo.ID, locs, secretscan_model.TextAccess{Issues: ctx.Permission().CanRead(unit.TypeIssues), Pulls: ctx.Permission().CanRead(unit.TypePullRequests)})
+	// a place in text is data of the issue tracker: a token with scopes needs read:issue for it, as for /issues
+	access := secretscan_model.TextAccess{Issues: ctx.Permission().CanRead(unit.TypeIssues), Pulls: ctx.Permission().CanRead(unit.TypePullRequests)}
+	if has, scope := ctx.Authentication().Scope().Get(); has {
+		if ok, err := scope.HasScope(auth_model.AccessTokenScopeReadIssue); err != nil || !ok {
+			access = secretscan_model.TextAccess{}
+		}
+	}
+	texts, err := secretscan_model.LoadTextPlaces(ctx, repo.ID, locs, access)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "LoadTextPlaces", err)
 		return

@@ -166,7 +166,8 @@ func readableKinds(noWiki bool) builder.Cond {
 func (l *Location) IsText() bool { return slices.Contains(TextKinds, l.Kind) }
 
 // TextAccess is what a viewer may read of the texts of a repository: its Issues and its Pull requests unit.
-type TextAccess struct{ Issues, Pulls bool }
+// NoPosters leaves the posters unloaded (a list that does not show them).
+type TextAccess struct{ Issues, Pulls, NoPosters bool }
 
 // TextPlace is a place in text for one viewer. Only when Readable (the viewer reads the issue or pull request) are
 // the other fields set; otherwise all that is shown is that the secret is in an issue or in a comment. The text
@@ -174,9 +175,11 @@ type TextAccess struct{ Issues, Pulls bool }
 type TextPlace struct {
 	*Location
 	Readable bool
-	IsPull   bool
-	Number   int64
-	Poster   *user_model.User // nil when unknown, a deleted user or an import
+	// Deleted is set for a viewer who reads both units when the issue is gone: the place is shown as deleted
+	Deleted bool
+	IsPull  bool
+	Number  int64
+	Poster  *user_model.User // nil when unknown, a deleted user or an import
 }
 
 // Removed tells whether the text no longer holds the secret (the alert stays: it was exposed).
@@ -220,11 +223,15 @@ func LoadTextPlaces(ctx context.Context, repoID int64, locs []*Location, access 
 	var posterIDs []int64
 	for _, p := range out {
 		i, ok := byID[p.IssueID]
-		if !ok || !(rows[i].IsPull && access.Pulls || !rows[i].IsPull && access.Issues) {
+		if !ok {
+			p.Deleted = access.Issues && access.Pulls
+			continue
+		}
+		if !(rows[i].IsPull && access.Pulls || !rows[i].IsPull && access.Issues) {
 			continue
 		}
 		p.Readable, p.IsPull, p.Number = true, rows[i].IsPull, rows[i].Number
-		if p.PosterID != 0 {
+		if p.PosterID != 0 && !access.NoPosters {
 			posterIDs = append(posterIDs, p.PosterID)
 		}
 	}

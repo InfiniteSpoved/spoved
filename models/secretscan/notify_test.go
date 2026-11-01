@@ -275,3 +275,45 @@ func TestQueueStuck(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 900, since)
 }
+
+// A text mark has no pusher and no ref: merged into a push mark, in either order, it must neither clear the pusher nor
+// make the digest "several".
+func TestMarkNotifyTextMergesWithPush(t *testing.T) {
+	setup := func(t *testing.T) {
+		unittest.PrepareTestEnv(t)
+		_, err := db.GetEngine(t.Context()).Insert(&Scan{RepoID: 1, Kind: KindRepo, Status: StatusOK, Completed: true}, &Scan{RepoID: 1, Kind: KindIssue, Status: StatusOK, Completed: true})
+		require.NoError(t, err)
+	}
+	text := func(t *testing.T) {
+		t.Helper()
+		ok, err := MarkNotifyText(t.Context(), 1, 0)
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+	push := func(t *testing.T) {
+		t.Helper()
+		ok, err := MarkNotify(t.Context(), 1, 2, KindRepo, "main", "c1")
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+	check := func(t *testing.T) {
+		t.Helper()
+		row := scanRow(t, 1, KindRepo)
+		assert.Equal(t, DigestKindCode|DigestKindText, row.NotifyKinds, "both kinds, not several")
+		assert.EqualValues(t, 2, row.NotifyPusherID, "the pusher stays")
+		assert.Equal(t, "main", row.NotifyRef)
+		assert.Equal(t, "c1", row.NotifyCommit)
+	}
+	t.Run("text then push", func(t *testing.T) {
+		setup(t)
+		text(t)
+		push(t)
+		check(t)
+	})
+	t.Run("push then text", func(t *testing.T) {
+		setup(t)
+		push(t)
+		text(t)
+		check(t)
+	})
+}

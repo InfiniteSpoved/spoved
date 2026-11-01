@@ -209,6 +209,11 @@ func HasCodeLocation(ctx context.Context, repoID, alertID int64) (bool, error) {
 	return db.GetEngine(ctx).Where(builder.Eq{"repo_id": repoID, "alert_id": alertID}.And(builder.Neq{"kind": KindWiki})).Exist(new(Location))
 }
 
+// LocationKinds returns the kinds of places the alert has (each once), in one query.
+func LocationKinds(ctx context.Context, repoID, alertID int64) (kinds []string, err error) {
+	return kinds, db.GetEngine(ctx).Table("secret_scanning_location").Distinct("kind").Where(builder.Eq{"repo_id": repoID, "alert_id": alertID}).Find(&kinds)
+}
+
 // CountLocations counts the stored places of the alerts in one query, without those in the wiki when noWiki is set.
 // A repoID of 0 means the alerts may be of any repository (their IDs are unique).
 func CountLocations(ctx context.Context, repoID int64, alertIDs []int64, noWiki bool) (map[int64]int, error) {

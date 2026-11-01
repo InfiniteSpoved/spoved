@@ -73,7 +73,7 @@ func TestSecretTextPlacesGating(t *testing.T) {
 
 	owner := loginUser(t, "user2")
 	page := fmt.Sprintf("/user2/repo1/security/secrets/%d", a.Index)
-	read := getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository)
+	read := getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository, auth_model.AccessTokenScopeReadIssue)
 	locsURL := fmt.Sprintf("/api/v1/repos/user2/repo1/secret-scanning/alerts/%d/locations", a.Index)
 	places := func(t *testing.T) string { // the text of the table of places
 		return NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", page), http.StatusOK).Body).Find(".secret-locations").Text()
@@ -96,14 +96,22 @@ func TestSecretTextPlacesGating(t *testing.T) {
 
 	t.Run("a reader of issues and pull requests", func(t *testing.T) {
 		text := places(t)
-		for _, want := range []string{"#9101", "#9102", "user5", "user4", "Removed from the text", "description:2", "title:1"} {
+		for _, want := range []string{"Issue #9101", "Pull request #9102", "user5", "user4", "Removed from the text", "description, line 2", "· title"} {
 			assert.Contains(t, text, want)
 		}
 		doc := NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", page), http.StatusOK).Body)
 		hrefs := map[string]bool{}
 		doc.Find(".secret-locations a").Each(func(_ int, s *goquery.Selection) { hrefs[s.AttrOr("href", "")] = true })
 		assert.True(t, hrefs[setting.AppURL+"user2/repo1/issues/9101"], "%v", hrefs)
-		assert.NotContains(t, text, "Not shown")
+		assert.NotContains(t, text, "Details hidden")
+
+		// a text-only alert was not first seen "in a pull request"
+		first := func(alert *secretscan_model.Alert) string {
+			return NewHTMLParser(t, owner.MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/user2/repo1/security/secrets/%d", alert.Index)), http.StatusOK).Body).Find("body").Text()
+		}
+		assert.Contains(t, first(onlyText), "in an issue, pull request or comment")
+		assert.NotContains(t, first(onlyText), "in a pull request")
+		assert.Contains(t, first(onlyText), "Editing or deleting the text is not enough")
 
 		types, _ := apiTypes(t)
 		assert.ElementsMatch(t, []string{"issue_body", "issue_comment", "pull_request_title", "pull_request_comment"}, types)
@@ -113,7 +121,7 @@ func TestSecretTextPlacesGating(t *testing.T) {
 			if l.Type == "issue_comment" {
 				assert.EqualValues(t, 9101, l.Details.IssueNumber)
 				assert.Equal(t, "user4", l.Details.Poster)
-				assert.Equal(t, fmt.Sprintf("/api/v1/repos/user2/repo1/issues/comments/%d", issueComment), strings.TrimPrefix(l.Details.CommentURL, setting.AppURL[:len(setting.AppURL)-1]))
+				assert.Equal(t, fmt.Sprintf("/api/v1/repos/user2/repo1/issues/comments/%d", issueComment), strings.TrimPrefix(l.Details.IssueCommentURL, setting.AppURL[:len(setting.AppURL)-1]))
 				assert.Contains(t, l.Details.HTMLURL, fmt.Sprintf("/issues/9101#issuecomment-%d", issueComment))
 			}
 			if l.Type == "pull_request_comment" {
@@ -123,13 +131,35 @@ func TestSecretTextPlacesGating(t *testing.T) {
 		}
 	})
 
+	t.Run("a token without read:issue sees the places as a non-reader does", func(t *testing.T) {
+		repoOnly := getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository)
+		withIssue := getUserToken(t, "user2", auth_model.AccessTokenScopeReadRepository, auth_model.AccessTokenScopeReadIssue)
+		types := func(token string) (types []string, raw string) {
+			resp := MakeRequest(t, NewRequest(t, "GET", locsURL).AddTokenAuth(token), http.StatusOK)
+			var locs []*api.SecretScanningLocation
+			DecodeJSON(t, resp, &locs)
+			for _, l := range locs {
+				types = append(types, l.Type)
+			}
+			return types, resp.Body.String()
+		}
+		got, raw := types(repoOnly)
+		assert.ElementsMatch(t, []string{"issue_text", "comment_text", "issue_text", "comment_text"}, got)
+		for _, secret := range []string{"9101", "9102", "user5", "user4", "removed", "html_url"} {
+			assert.NotContains(t, raw, secret)
+		}
+		got, _ = types(withIssue)
+		assert.ElementsMatch(t, []string{"issue_body", "issue_comment", "pull_request_title", "pull_request_comment"}, got)
+	})
+
 	t.Run("without the Pull requests unit the pull request's places are hidden, the issue's are not", func(t *testing.T) {
 		removeUnit(unit.TypePullRequests)
 		text := places(t)
-		assert.Contains(t, text, "#9101")
+		assert.Contains(t, text, "Issue #9101")
 		assert.NotContains(t, text, "#9102")
+		assert.Contains(t, text, "Revoking the credential covers these places too.")
 		assert.NotContains(t, text, "Removed from the text", "the removal of a hidden place is hidden")
-		assert.Equal(t, 2, strings.Count(text, "Not shown: you can't read it"))
+		assert.Equal(t, 2, strings.Count(text, "Details hidden: you don't have access to issues or pull requests here"))
 		types, _ := apiTypes(t)
 		assert.ElementsMatch(t, []string{"issue_body", "issue_comment", "issue_text", "comment_text"}, types)
 	})
@@ -140,12 +170,12 @@ func TestSecretTextPlacesGating(t *testing.T) {
 		for _, secret := range []string{"#91", "user5", "user4", "Removed", "title", "description", "9101", "9102", "424242"} {
 			assert.NotContains(t, text, secret)
 		}
-		assert.Equal(t, 4, strings.Count(text, "Not shown: you can't read it"))
+		assert.Equal(t, 4, strings.Count(text, "Details hidden: you don't have access to issues or pull requests here"))
 		assert.Equal(t, 2, strings.Count(text, "In an issue"))
 		assert.Equal(t, 2, strings.Count(text, "In a comment"))
 		types, raw := apiTypes(t)
 		assert.ElementsMatch(t, []string{"issue_text", "issue_text", "comment_text", "comment_text"}, types)
-		for _, secret := range []string{"9101", "9102", "user5", "user4", "424242", "removed", "issue_url", "html_url"} {
+		for _, secret := range []string{"9101", "9102", "user5", "user4", "424242", "removed", "issue_title_url", "issue_body_url", "issue_comment_url", "pull_request_title_url", "pull_request_body_url", "pull_request_comment_url", "html_url"} {
 			assert.NotContains(t, raw, secret)
 		}
 
@@ -192,4 +222,36 @@ func TestSecretTextPlacesOrgList(t *testing.T) {
 	assert.Contains(t, table, "In a comment")
 	assert.NotContains(t, table, "424242")
 	assert.NotContains(t, table, "#1 ")
+}
+
+// A real non-reader (a team with the Code unit and no Issues unit) gets the hidden places; an auditor, who reads every
+// repository, gets the full details; a place whose issue is gone shows as deleted to a reader.
+func TestSecretTextPlacesRealAccess(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	f := newSecretListFixture(t)
+	ctx := t.Context()
+	issue := &issues_model.Issue{RepoID: f.root.ID, Index: 7701, PosterID: 5, Title: "t"}
+	require.NoError(t, db.Insert(ctx, issue))
+	gone := textAlert(t, f.root, secretscan_model.NewTextLocation(f.root.ID, secretscan_model.KindIssue, 987654, 987654, "body", 1, 1, 5))
+	a := textAlert(t, f.root, secretscan_model.NewTextLocation(f.root.ID, secretscan_model.KindIssue, issue.ID, issue.ID, "body", 3, 3, 5))
+	page := func(user string, alert *secretscan_model.Alert) string {
+		return NewHTMLParser(t, loginUser(t, user).MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/org3/sl-root/security/secrets/%d", alert.Index)), http.StatusOK).Body).Find(".secret-locations").Text()
+	}
+
+	// user4 writes code through a team that has the Code unit only
+	text := page("user4", a)
+	assert.Contains(t, text, "Details hidden: you don't have access to issues or pull requests here")
+	for _, secret := range []string{"7701", "user5", "body"} {
+		assert.NotContains(t, text, secret)
+	}
+
+	setUserFlag(t, 5, "is_auditor", true)
+	text = page("user5", a)
+	assert.Contains(t, text, "Issue #7701")
+	assert.Contains(t, text, "description, line 3")
+	assert.NotContains(t, text, "Details hidden")
+
+	text = page("user2", gone)
+	assert.Contains(t, text, "Deleted")
+	assert.NotContains(t, text, "Details hidden")
 }

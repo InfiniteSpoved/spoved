@@ -106,24 +106,43 @@ func ToSecretScanningLocations(repo *repo_model.Repository, locs []*secretscan_m
 
 func toTextLocation(repo *repo_model.Repository, l *secretscan_model.Location, p *secretscan_model.TextPlace) *api.SecretScanningLocation {
 	if p == nil || !p.Readable {
-		return &api.SecretScanningLocation{Type: l.Kind + "_text"} // issue_text, comment_text
+		hidden := &api.SecretScanningLocation{Type: l.Kind + "_text"} // issue_text, comment_text
+		if p != nil && p.Deleted {
+			hidden.Details.Removed = true // the caller reads both units: the issue is gone
+		}
+		return hidden
 	}
 	what := util.Iif(p.IsPull, "pull_request", "issue")
 	field := util.Iif(l.Kind == secretscan_model.KindComment, "comment", l.Field)
 	num := strconv.FormatInt(p.Number, 10)
 	d := api.SecretScanningLocationDetails{
 		StartLine: l.StartLine, EndLine: l.EndLine, IssueNumber: p.Number, Field: field, Removed: p.Removed(),
-		IssueURL: repo.APIURL() + "/issues/" + num,
-		HTMLURL:  repo.HTMLURL() + util.Iif(p.IsPull, "/pulls/", "/issues/") + num,
+		HTMLURL: repo.HTMLURL() + util.Iif(p.IsPull, "/pulls/", "/issues/") + num,
 	}
+	url := repo.APIURL() + util.Iif(p.IsPull, "/pulls/", "/issues/") + num
 	if l.Kind == secretscan_model.KindComment {
 		id := strconv.FormatInt(l.SourceID, 10)
-		d.CommentURL, d.HTMLURL = repo.APIURL()+"/issues/comments/"+id, d.HTMLURL+"#issuecomment-"+id
+		url, d.HTMLURL = repo.APIURL()+"/issues/comments/"+id, d.HTMLURL+"#issuecomment-"+id
+	}
+	typ := what + "_" + field
+	switch typ { // GitHub's names: one URL key per type
+	case "issue_title":
+		d.IssueTitleURL = url
+	case "issue_body":
+		d.IssueBodyURL = url
+	case "issue_comment":
+		d.IssueCommentURL = url
+	case "pull_request_title":
+		d.PullRequestTitleURL = url
+	case "pull_request_body":
+		d.PullRequestBodyURL = url
+	case "pull_request_comment":
+		d.PullRequestCommentURL = url
 	}
 	if p.Poster != nil {
 		d.Poster = p.Poster.Name
 	}
-	return &api.SecretScanningLocation{Type: what + "_" + field, Details: d}
+	return &api.SecretScanningLocation{Type: typ, Details: d}
 }
 
 // ToSecretScanningStatus sums up the state rows of a repository's code, wiki and pull refs: failed beats incomplete
