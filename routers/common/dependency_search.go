@@ -83,7 +83,8 @@ var exportSlots = make(chan struct{}, 2)
 // ExportTimeLimit is how long one export may run; it is checked between batches (a variable for tests).
 var ExportTimeLimit = 10 * time.Minute
 
-// ExportStallTime is how long the writes of one batch of an export may wait for a client that stops reading.
+// ExportStallTime is how long the writes of one batch of an export may wait for a client that stops reading;
+// the window starts again with each batch, so a slow but reading client is only bound by ExportTimeLimit.
 var ExportStallTime = time.Minute
 
 var (

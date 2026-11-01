@@ -550,12 +550,13 @@ func TestAdminSecretAlertList(t *testing.T) {
 		assert.Len(t, rowsNow(), 7, "locked on: the repository's own switch doesn't count")
 		require.NoError(t, user_model.SetUserSetting(ctx, 3, secretscan_model.OrgLockedKey, "false"))
 
-		// the site switch: the lists say so to site admins (and the instance list to auditors), no menu entry, nothing
-		// to download; members and owners have neither tab nor list, since only a site admin can turn it on
+		// the site switch: the lists say so to site admins (and the instance list to auditors, the menu entry stays),
+		// nothing to download; members and owners have neither tab nor list, since only a site admin can turn it on
 		defer test.MockVariableValue(&setting.SecretScanning.Enabled, false)()
 		slPost(t, admin, slAdmin, map[string]string{}, http.StatusNotFound)
 		slPost(t, admin, slOrg, map[string]string{}, http.StatusNotFound)
-		assert.NotContains(t, secGet(t, admin, "/admin/audit", http.StatusOK).Body.String(), `href="/admin/security/secrets"`)
+		assert.Contains(t, secGet(t, admin, "/admin/audit", http.StatusOK).Body.String(), `href="/admin/security/secrets"`)
+		assert.Contains(t, secGet(t, auditor, "/admin/audit", http.StatusOK).Body.String(), `href="/admin/security/secrets"`)
 		banner = secText(t, secGet(t, admin, slAdmin, http.StatusOK), "#secret-banner-off")
 		assert.Contains(t, banner, "Secret scanning is off on this instance")
 		assert.Contains(t, banner, "Turn it on in the site's secret scanning settings.")

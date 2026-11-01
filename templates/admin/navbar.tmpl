@@ -1,8 +1,9 @@
 <div class="flex-container-nav">
 	<div class="ui fluid vertical menu">
 		<div class="header item">{{ctx.Locale.Tr "admin.settings"}}</div>
-		{{if not .IsAdmin}}{{/* an auditor sees only the audit log */}}
-		<a class="active item" href="{{AppSubUrl}}/admin/audit">{{ctx.Locale.Tr "admin.audit.title"}}</a>
+		{{if not .IsAdmin}}{{/* an auditor sees only the pages an auditor can read */}}
+		<a class="{{if .PageIsAdminAudit}}active {{end}}item" href="{{AppSubUrl}}/admin/audit">{{ctx.Locale.Tr "admin.audit.title"}}</a>
+		<a class="{{if .PageIsAdminSecretAlerts}}active {{end}}item" href="{{AppSubUrl}}/admin/security/secrets">{{ctx.Locale.Tr "admin.secret_alerts"}}</a>
 		{{else}}
 		<a class="{{if .PageIsAdminDashboard}}active {{end}}item" href="{{AppSubUrl}}/admin">
 			{{ctx.Locale.Tr "admin.dashboard"}}
@@ -168,11 +169,9 @@
 				<a class="{{if .PageIsAdminIPAllowlist}}active {{end}}item" href="{{AppSubUrl}}/admin/ip-allowlist">
 					{{ctx.Locale.Tr "admin.ip_allowlist"}}
 				</a>
-				{{if .SecretAlertsEnabled}}
 				<a class="{{if .PageIsAdminSecretAlerts}}active {{end}}item" href="{{AppSubUrl}}/admin/security/secrets">
 					{{ctx.Locale.Tr "admin.secret_alerts"}}
 				</a>
-				{{end}}
 			</div>
 		</details>
 		<a class="{{if .PageIsAdminNotices}}active {{end}}item" href="{{AppSubUrl}}/admin/notices">

@@ -82,11 +82,6 @@ func SecurityDependenciesExport(ctx *context.Context) {
 	shared_security.Export(ctx, securitySearchScope(ctx), shared_security.Dependencies, setting.AppSubURL+securitySearchLink+shared_security.Dependencies)
 }
 
-// SetSecretAlertsNav lets the admin menu show the secret alert list only while secret scanning is on.
-func SetSecretAlertsNav(ctx *context.Context) {
-	ctx.Data["SecretAlertsEnabled"] = secretscan_service.SiteEnabled(ctx)
-}
-
 // MustEnableSecretAlerts answers 404 to the download of the secret alert list (after the access gate) while secret
 // scanning is off for the instance: its alerts are hidden then, and a download of nothing is never recorded.
 func MustEnableSecretAlerts(ctx *context.Context) {
