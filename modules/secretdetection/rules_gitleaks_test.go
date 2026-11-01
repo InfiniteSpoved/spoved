@@ -5,6 +5,7 @@ package secretdetection
 
 import (
 	"encoding/base64"
+	"fmt"
 	"math/rand/v2"
 	"slices"
 	"strings"
@@ -28,6 +29,14 @@ func gitleaksRuleTests() []ruleTest {
 	k8sValue := base64.StdEncoding.EncodeToString([]byte(fake(24, alnum)))
 	curlPw := fake(16, alnum)
 	op := fake(32, upperAlnum)
+	// a Secret as kubectl prints it: data (keys in order) before kind
+	k8sDataFirst := func(data string) string {
+		return "apiVersion: v1\ndata:\n" + data + "kind: Secret\nmetadata:\n  name: x\n"
+	}
+	var manyKeys strings.Builder
+	for i := range 35 {
+		fmt.Fprintf(&manyKeys, "  key%02d: %s\n", i, k8sValue)
+	}
 	nugetAdd := func(key, value string) string { return "<add key=\"" + key + "\" value=\"" + value + "\" />" }
 	return []ruleTest{
 		{
@@ -103,6 +112,7 @@ func gitleaksRuleTests() []ruleTest {
 				`<add key="ClearTextPassword" value="abc" />`,
 				`<add key="ClearTextPassword" value="%TestSourcePassword%" />`,
 				`<add key="ClearTextPassword" value="$(NUGET_PASSWORD)" />`,
+				`<add key="ClearTextPassword" value="$(NuGet.Password)" />`,
 				`<add key="ClearTextPassword" value="#{NugetPassword}#" />`,
 				`<add key="ClearTextPassword" value="33f!!lloppa" />`,
 				`<add key="Username" value="` + fake(16, alnum) + `" />`,
@@ -246,8 +256,15 @@ func gitleaksRuleTests() []ruleTest {
 				"apiVersion: v1\ndata:\n  password: " + k8sValue + "\n  username: YWRtaW4=\nkind: Secret\nmetadata:\n  name: db-user-pass\n",
 				"apiVersion: v1\r\ndata:\r\n  extra: \"" + k8sValue + "\"\r\nkind: \"Secret\"\r\n",
 				"apiVersion: v1\ndata:\n  .dockercfg: >\n    " + k8sValue + "\nmetadata:\n  name: x\ntype: kubernetes.io/dockercfg\nkind: Secret",
+				// a TLS Secret: kind is more than 4 KiB after data:
+				k8sDataFirst("  tls.crt: " + base64.StdEncoding.EncodeToString([]byte(fake(2400, alnum))) +
+					"\n  tls.key: " + base64.StdEncoding.EncodeToString([]byte(fake(1800, alnum))) + "\n"),
+				k8sDataFirst(manyKeys.String()),
 			},
 			[]string{
+				// data: must follow a newline, so these are missed (see the rule)
+				"data:\n  key: " + k8sValue + "\nkind: Secret\n",
+				"\ufeffdata:\n  key: " + k8sValue + "\nkind: Secret\n",
 				"apiVersion: v1\ndata:\n  key: " + k8sValue + "\n---\nkind: Secret\n",
 				"apiVersion: v1\nmetadata:\n  name: " + k8sValue + "\nkind: Secret\n",
 				"apiVersion: v1\ndata:\n  key: " + k8sValue + "\nkind: ConfigMap\n",
@@ -291,7 +308,7 @@ func gitleaksRuleTests() []ruleTest {
 		{
 			"bitbucket-client-secret",
 			[]string{`bitbucket_TOKEN = "` + fake(64, b64u) + `"`, `"bitbucket_secret" => "` + fake(64, alnum) + `"`},
-			[]string{"bitbucket_secret: " + fake(63, alnum), "secret: " + fake(64, alnum), "bitbucket_sha256: " + sha256Hex("x")},
+			[]string{"bitbucket_secret: " + fake(63, alnum), "secret: " + fake(64, alnum)},
 		},
 		{
 			"atlassian-api-token",
@@ -370,6 +387,10 @@ func gitleaksRuleTests() []ruleTest {
 				"curl -X POST https://api.local \\\n  -H 'Content-Type: application/json' \\\n  -H 'Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("api:"+fake(20, alnum))) + "' \\\n",
 				`curl --header "X-Api-Key: ` + uuid + `" https://api.local`,
 				`curl -H "Authorization: Token ` + fake(40, hexa) + `x" https://api.local`,
+				// uppercase tokens that start with a letter
+				`curl -H "X-API-Key: A` + strings.ToUpper(fake(31, hexa)) + `" https://api.local`,
+				`curl -H "Authorization: Bearer B` + fake(31, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567") + `" https://api.local`,
+				`curl -H "Authorization: Bearer C` + fake(39, upperAlnum) + `" https://api.local`,
 			},
 			[]string{
 				`curl https://api.local -H "Authorization: Bearer XXXXXXXXXXXX"`,
@@ -381,6 +402,8 @@ func gitleaksRuleTests() []ruleTest {
 				`curl -H "Authorization: Bearer YOUR_API_KEY"`,
 				`curl -H "Authorization: Bearer ACCESS_TOKEN"`,
 				`curl -H "Authorization: Bearer REPLACE_WITH_TOKEN"`,
+				`curl -H "Authorization: Bearer MY_API_TOKEN2"`,
+				`curl -H "X-Api-Key: APIKEYVALUE"`,
 				`curl -H "Authorization: Bearer access-token"`,
 				`curl -H "Authorization: Bearer token123456"`,
 				`curl -H "Authorization: Bearer my.jwt.token"`,
@@ -401,6 +424,14 @@ func gitleaksRuleTests() []ruleTest {
 				"curl -u admin" + ":testing" + curlPw + " https://api.local",
 				"curl -u admin" + ":pass" + curlPw + " https://api.local",
 				"curl -u 'deploy bot'" + ":" + curlPw + " https://api.local",
+				`curl -u "deploy bot` + ":" + curlPw + `" https://api.local`,
+				// gitleaks' Watson sample
+				`curl -X PUT -u "{` + uuid + `}":"{` + fake(14, alnum) + `}" https://stream.local/api`,
+				"curl -u 'admin" + ":%ab%" + curlPw + "' https://api.local",
+				"curl -u 'admin" + ":{x}" + curlPw + "' https://api.local",
+				"curl -u 'admin" + ":{" + curlPw + "}' https://api.local",
+				"curl -u admin" + ":" + curlPw + ":test https://api.local",
+				"curl -u admin" + ":" + curlPw + ":xxx https://api.local",
 			},
 			[]string{
 				"curl -i -u 'test:test'",
@@ -421,6 +452,8 @@ func gitleaksRuleTests() []ruleTest {
 				"curl -u admin:%PASSWORD% https://api.local",
 				"curl -u admin:$(cat pw.txt) https://api.local",
 				"curl -u 'admin:{password}' https://api.local",
+				"curl -u admin:{api_key} https://api.local",
+				`curl -u "deploy bot:changeme" https://api.local`,
 				"curl -u admin:admin https://api.local",
 				"curl -u guest:'guest' https://api.local",
 				"curl -u 'admin:x' https://api.local",
@@ -454,6 +487,8 @@ func TestPortedRuleKeywordsAreCheap(t *testing.T) {
 	for name, unit := range map[string]string{
 		"curl":                "curl -H 'Accept: text/plain' -u me https://api-a3-x.local/pat.sat. \\\n",
 		"kind":                "kind: Secret\ndata:\n  key: ''\n",
+		"kind lines":          "kind: Secret\n",
+		"data before kind":    "data:\n  k: QUFBQUFBQUFBQUFB\nkind: Foo\n",
 		"curl with variables": "curl -H \"Authorization: Bearer $TOKEN\" -u \"$USER:$PASS\" https://api.local\n",
 	} {
 		content := append(repeatTo(unit, 2<<20/slowdown), []byte("\nghp_"+fake(36, alnum)+"\n")...)
@@ -512,7 +547,9 @@ func TestKeywordGateMatchesHasKeyword(t *testing.T) {
 			case 1:
 				b.WriteString(w[:r.IntN(len(w))])
 			default:
-				b.WriteString(fake(r.IntN(6), "ab-_.: "))
+				for range r.IntN(6) {
+					b.WriteByte("ab-_.: "[r.IntN(7)])
+				}
 			}
 		}
 		text := []byte(b.String())

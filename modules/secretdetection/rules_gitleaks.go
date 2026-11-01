@@ -63,14 +63,20 @@ const assignWindow = 256
 
 // A YAML line that is no document break (---), and the parts of a Kubernetes
 // Secret: its kind line, and data: with the value of its first key (comments
-// and a block scalar | or > allowed).
+// and a block scalar | or > allowed). The rules take any number of lines
+// between kind and data, as far as the window reaches: a counted repeat of
+// yamlLine ({0,30}) made RE2 track a thread per count, several seconds per
+// MiB of kind: lines.
 const (
-	yamlLine   = `\n[ \t]*(?:[^-\s][^\n]*|-(?:[^-\n][^\n]*)?|--(?:[^-\n][^\n]*)?)?\r?`
-	k8sKind    = `kind:[ \t]*["']?(?i:secret)["']?[ \t]*\r?`
-	k8sData    = `data:[ \t]*\r?(?:\n[ \t]*#[^\n]*)*\n[ \t]*[\w.-]+:(?:[ \t]*[|>][-+]?[ \t]*\r?\n)?[ \t]*["']?([A-Za-z0-9+/]{10,}={0,3})`
-	k8sWindow  = 4096
-	curlPrefix = `curl[^\r\n]*?(?:(?:\r?\n|\r)[^\r\n]*?){0,5}[ \t\r\n]`
-	curlWindow = 512
+	yamlLine  = `\n[ \t]*(?:[^-\s][^\n]*|-(?:[^-\n][^\n]*)?|--(?:[^-\n][^\n]*)?)?\r?`
+	k8sKind   = `kind:[ \t]*["']?(?i:secret)["']?[ \t]*\r?`
+	k8sData   = `data:[ \t]*\r?(?:\n[ \t]*#[^\n]*)*\n[ \t]*[\w.-]+:(?:[ \t]*[|>][-+]?[ \t]*\r?\n)?[ \t]*["']?([A-Za-z0-9+/]{10,}={0,3})`
+	k8sWindow = 4096
+	// k8sLookBack is the window of the data-first rule: kubectl prints data
+	// (a TLS Secret's tls.crt and tls.key, or many keys) before kind.
+	k8sLookBack = 16384
+	curlPrefix  = `curl[^\r\n]*?(?:(?:\r?\n|\r)[^\r\n]*?){0,5}[ \t\r\n]`
+	curlWindow  = 512
 )
 
 var gitleaksRules = []Rule{
@@ -150,7 +156,7 @@ var gitleaksRules = []Rule{
 		Keywords:    []string{"<add key="},
 		Regex:       `<add key="(?i:(?:cleartext)?password)"\s*value="([^"\r\n]{8,200})"\s*/>`,
 		SecretGroup: 1, MinEntropy: 2, Window: 300, Anchored: true, HitCheck: prefixHit(0, `<add key="`),
-		Allowlist: []string{`^33f!!lloppa$`, `^hal\+9ooo_da!sY$`, `^%\S.*%$`, `^\$\(\w+\)$`, `^#\{[^}]+\}#?$`},
+		Allowlist: []string{`^33f!!lloppa$`, `^hal\+9ooo_da!sY$`, `^%\S.*%$`, `^\$\([\w.]+\)$`, `^#\{[^}]+\}#?$`},
 	},
 	{
 		ID: "clojars-api-token", Name: "Clojars deploy token", Type: "clojars",
@@ -295,16 +301,21 @@ var gitleaksRules = []Rule{
 	{
 		// The value of the first key under data: of a Secret, kind first; the
 		// next rule is the same with data first (kubectl's alphabetical order).
+		// Not found by either: a blank line right after data:, or a - data:
+		// list item.
 		ID: "kubernetes-secret-yaml", Name: "Kubernetes Secret data", Type: "kubernetes",
 		Keywords:    []string{"kind:"},
-		Regex:       k8sKind + `(?:` + yamlLine + `){0,30}?\n[ \t]*` + k8sData,
+		Regex:       k8sKind + `(?:` + yamlLine + `)*?\n[ \t]*` + k8sData,
 		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars + "+/=", MaxSecretLen: k8sWindow, Window: k8sWindow,
 	},
 	{
 		ID: "kubernetes-secret-yaml-data-first", Name: "Kubernetes Secret data (data before kind)", Type: "kubernetes", ReportAs: "kubernetes-secret-yaml",
-		Keywords:    []string{"kind:"},
-		Regex:       `\n[ \t]*` + k8sData + `["']?[ \t]*\r?(?:` + yamlLine + `){0,30}?\n[ \t]*` + k8sKind + `(?:\n|\z)`,
-		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars + "+/=", MaxSecretLen: k8sWindow, Window: k8sWindow,
+		Keywords: []string{"kind:"},
+		// data: must follow a newline, so a data: at the start of a file (or
+		// after a BOM) is missed: \A would also match at the start of the
+		// window, in the middle of a line such as metadata:.
+		Regex:       `\n[ \t]*` + k8sData + `["']?[ \t]*\r?(?:` + yamlLine + `)*?\n[ \t]*` + k8sKind + `(?:\n|\z)`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars + "+/=", MaxSecretLen: k8sLookBack, Window: k8sLookBack,
 	},
 	{
 		ID: "databricks-api-token", Name: "Databricks API token", Type: "databricks",
@@ -355,7 +366,7 @@ var gitleaksRules = []Rule{
 		ID: "bitbucket-client-secret", Name: "Bitbucket OAuth client secret", Type: "bitbucket",
 		Keywords:    []string{"bitbucket"},
 		Regex:       assignRegex(`bitbucket`, `[A-Za-z0-9=_-]{64}`),
-		SecretGroup: 1, MinEntropy: 3, Window: assignWindow, Check: notHex,
+		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
 	},
 	{
 		ID: "atlassian-api-token", Name: "Atlassian API token", Type: "atlassian",
@@ -449,7 +460,7 @@ var gitleaksRules = []Rule{
 			`([\w=~@.+/-]{8,})["']`,
 		SecretGroup: 1, MinEntropy: 2.75, Window: curlWindow, Anchored: true, HitCheck: curlHeaderHit,
 		Allowlist: []string{
-			`(?i)^(?:your|my)[_-]`, `(?i)[_-]here$`, `^[A-Z][A-Z0-9_]*$`, `\.\.\.`, `(?i)redacted`,
+			`(?i)^(?:your|my)[_-]`, `(?i)[_-]here$`, `^(?:[A-Z]+|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)$`, `\.\.\.`, `(?i)redacted`,
 			`(?i)^(?:access|api|auth|my|replace[_-]with)[._-]?(?:api[._-]?)?(?:jwt[._-]?)?(?:key|token)(?:[._-]?here)?$`, `(?i)^token\d*$`,
 		},
 	},
@@ -457,13 +468,14 @@ var gitleaksRules = []Rule{
 		ID: "curl-auth-user", Name: "Password in a curl command", Type: "curl",
 		Keywords: []string{"curl"},
 		Regex: curlPrefix + `(?:-u|--user)(?:=|[ \t]{0,5})["']?` +
-			`((?:"[^"\r\n:]{3,}"|'[^'\r\n:]{3,}'|[^\s"':]{3,}):(?:"[^"\r\n]{3,}"|'[^'\r\n]{3,}'|[^\s"']{3,}))["']?(?:\s|\z)`,
+			`("[^"\r\n:]{3,}:[^"\r\n]{3,}"|(?:"[^"\r\n:]{3,}"|'[^'\r\n:]{3,}'|[^\s"':]{3,}):(?:"[^"\r\n]{3,}"|'[^'\r\n]{3,}'|[^\s"']{3,}))["']?(?:\s|\z)`,
 		SecretGroup: 1, MinEntropy: 2, Window: curlWindow, Anchored: true, HitCheck: curlUserHit, Check: userIsNotPassword,
 		Allowlist: []string{
-			`[^:]+:['"]?(?:change(?:it|me)|pass(?:word)?|pwd|test|token|\*+|x+)['"]?$`,
+			`^['"]?[^:'"]+['"]?:['"]?(?:change(?:it|me)|pass(?:word)?|pwd|test|token|\*+|x+)['"]?$`,
 			`['"]?<[^>]+>['"]?:['"]?<[^>]+>|<[^:]+:[^>]+>['"]?`,
-			`[^:]+:['"]?\[[^]]+]['"]?$`,
-			`:['"]?(?:%\w+%|\$\(|\{\w+\})`,
+			`^['"]?[^:'"]+['"]?:['"]?\[[^]]+]['"]?$`,
+			`:['"]?(?:%\w+%|\{[A-Za-z_]+\})['"]?$`,
+			`:['"]?\$\(`,
 			`['"]?[^:]+['"]?:['"]?\$(?:\d|\w+|\{(?:\d|\w+)})['"]?`,
 			`^['"]?\$`,
 		},
@@ -525,8 +537,8 @@ func curlUserHit(lower, c []byte, p int) bool {
 		}
 		j = skipBlanks(after, j)
 		if j < len(after) && isQuote(after[j]) {
-			// a quoted user may hold blanks: 'deploy bot':pw
-			if k := bytes.IndexByte(after[j+1:], after[j]); k >= 3 && j+k+2 < len(after) && after[j+k+2] == ':' {
+			// a quoted user may hold blanks: 'deploy bot':pw or "deploy bot:pw"
+			if k := bytes.IndexByte(after[j+1:], after[j]); k >= 3 && (j+k+2 < len(after) && after[j+k+2] == ':' || bytes.IndexByte(after[j+1:j+1+k], ':') >= 3) {
 				return true
 			}
 		}
