@@ -31,10 +31,14 @@
 // their real case, rules that start with their keyword run anchored on its
 // hits and keyword rules in windows, entropy minimums are gitleaks' or higher,
 // families with one shape share a rule (digitalocean-token, huggingface-token,
-// vault-token, anthropic-api-key), the kubernetes and curl rules have one
+// vault-token, anthropic-api-key), the keyword forms of two rules have IDs of
+// their own (atlassian-api-token-legacy, sonar-api-token-legacy), the
+// kubernetes and curl rules have one
 // secret group (kubernetes: the value, not stopping past a YAML document
 // break), a short-lived Bedrock key needs 100 bytes after its prefix, and the
 // legacy Vault s. form and the bare 40 hex Sourcegraph form are left out.
+// Tokens longer than their window (8 KiB for Bedrock short-lived, Fly.io and
+// 1Password service accounts) are not reported.
 // docker-hub-token, circleci-personal-token and buildkite-api-token are our
 // own (token formats from the vendors' documentation).
 
@@ -61,25 +65,13 @@ const assignWindow = 256
 // Secret: its kind line, and data: with the value of its first key (comments
 // and a block scalar | or > allowed).
 const (
-	yamlLine   = `\n[ \t]*(?:[^-\s][^\n]*|-(?:[^-\n][^\n]*)?|--(?:[^-\n][^\n]*)?)?`
+	yamlLine   = `\n[ \t]*(?:[^-\s][^\n]*|-(?:[^-\n][^\n]*)?|--(?:[^-\n][^\n]*)?)?\r?`
 	k8sKind    = `kind:[ \t]*["']?(?i:secret)["']?[ \t]*\r?`
 	k8sData    = `data:[ \t]*\r?(?:\n[ \t]*#[^\n]*)*\n[ \t]*[\w.-]+:(?:[ \t]*[|>][-+]?[ \t]*\r?\n)?[ \t]*["']?([A-Za-z0-9+/]{10,}={0,3})`
 	k8sWindow  = 4096
 	curlPrefix = `curl[^\r\n]*?(?:(?:\r?\n|\r)[^\r\n]*?){0,5}[ \t\r\n]`
 	curlWindow = 512
 )
-
-// firebaseSampleKeys are the GCP API keys of the Firebase SDK samples
-// (gitleaks' allowlist), without the AIza prefix so no full key is a literal.
-var firebaseSampleKeys = []string{
-	"SyAnLA7NfeLquW1tJFpx_eQCxoX-oo6YyIs", "SyCkEhVjf3pduRDt6d1yKOMitrUEke8agEM", "SyDMAScliyLx7F0NPDEJi1QmyCgHIAODrlU",
-	"SyD3asb-2pEZVqMkmL6M9N6nHZRR_znhrh0", "yDNSXIbFmlXbIE6mCzDLQAqITYefhixbX4A", "SyAdOS2zB6NCsk1pCdZ4-P6GBdi_UUPwX7c",
-	"SyASWm6HmTMdYWpgMnjRBjxcQ9CKctWmLd4", "SyANUvH9H9BsUccjsu2pCmEkOPjjaXeDQgY", "SyA5_iVawFQ8ABuTZNUdcwERLJv_a_p4wtM",
-	"SyA4UrcGxgwQFTfaI3no3t7Lt1sjmdnP5sQ", "SyDSb51JiIcB6OJpwwMicseKRhhrOq1cS7g", "SyBF2RrAIm4a0mO64EShQfqfd2AFnzAvvuU",
-	"SyBcE-OOIbhjyR83gm4r2MFCu4MJmprNXsw", "SyB8qGxt4ec15vitgn44duC5ucxaOi4FmqE", "SyA8vmApnrHNFE0bApF4hoZ11srVL_n0nvY",
-}
-
-var firebaseSampleKeysRegex = `^AIza(?:` + strings.Join(firebaseSampleKeys, "|") + `)$`
 
 var gitleaksRules = []Rule{
 	// AI and machine learning
@@ -158,7 +150,7 @@ var gitleaksRules = []Rule{
 		Keywords:    []string{"<add key="},
 		Regex:       `<add key="(?i:(?:cleartext)?password)"\s*value="([^"\r\n]{8,200})"\s*/>`,
 		SecretGroup: 1, MinEntropy: 2, Window: 300, Anchored: true, HitCheck: prefixHit(0, `<add key="`),
-		Allowlist: []string{`^33f!!lloppa$`, `^hal\+9ooo_da!sY$`, `^%\S.*%$`},
+		Allowlist: []string{`^33f!!lloppa$`, `^hal\+9ooo_da!sY$`, `^%\S.*%$`, `^\$\(\w+\)$`, `^#\{[^}]+\}#?$`},
 	},
 	{
 		ID: "clojars-api-token", Name: "Clojars deploy token", Type: "clojars",
@@ -190,7 +182,7 @@ var gitleaksRules = []Rule{
 		Keywords:    []string{"jfrog", "artifactory", "bintray", "xray"},
 		Regex:       assignRegex(`jfrog|artifactory|bintray|xray`, `[A-Za-z0-9]{64}`),
 		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
-		Check: func(s []byte) bool { return strings.Trim(strings.ToLower(string(s)), "0123456789abcdef") != "" },
+		Check: notHex,
 	},
 	{
 		ID: "docker-hub-token", Name: "Docker Hub access token", Type: "docker",
@@ -236,7 +228,7 @@ var gitleaksRules = []Rule{
 		ID: "cloudflare-api-key", Name: "Cloudflare API token", Type: "cloudflare",
 		Keywords:    []string{"cloudflare"},
 		Regex:       assignRegex(`cloudflare`, `[A-Za-z0-9_-]{40}`),
-		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
+		SecretGroup: 1, MinEntropy: 3, Window: assignWindow, Check: notHex,
 	},
 	{
 		ID: "cloudflare-global-api-key", Name: "Cloudflare global API key", Type: "cloudflare",
@@ -311,7 +303,7 @@ var gitleaksRules = []Rule{
 	{
 		ID: "kubernetes-secret-yaml-data-first", Name: "Kubernetes Secret data (data before kind)", Type: "kubernetes", ReportAs: "kubernetes-secret-yaml",
 		Keywords:    []string{"kind:"},
-		Regex:       `(?:\A|\n)[ \t]*` + k8sData + `["']?[ \t]*\r?(?:` + yamlLine + `){0,30}?\n[ \t]*` + k8sKind + `(?:\n|\z)`,
+		Regex:       `\n[ \t]*` + k8sData + `["']?[ \t]*\r?(?:` + yamlLine + `){0,30}?\n[ \t]*` + k8sKind + `(?:\n|\z)`,
 		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars + "+/=", MaxSecretLen: k8sWindow, Window: k8sWindow,
 	},
 	{
@@ -333,10 +325,11 @@ var gitleaksRules = []Rule{
 		SecretGroup: 1, MinEntropy: 3, TokenChars: wordChars, Window: 56, Anchored: true, HitCheck: prefixHit(54, "tk-us-"),
 	},
 	{
+		// "." is a token byte: not a file name (favicon.ico-<hash>.png)
 		ID: "infracost-api-token", Name: "Infracost API key", Type: "infracost",
 		Keywords:    []string{"ico-"},
 		Regex:       `(ico-[A-Za-z0-9]{32})`,
-		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars + ".", // not a file name (favicon.ico-<hash>.png) Window: 40, Anchored: true, HitCheck: prefixHit(36, "ico-"),
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars + ".", Window: 40, Anchored: true, HitCheck: prefixHit(36, "ico-"),
 	},
 	{
 		ID: "prefect-api-token", Name: "Prefect API key", Type: "prefect",
@@ -356,13 +349,13 @@ var gitleaksRules = []Rule{
 		ID: "bitbucket-client-id", Name: "Bitbucket OAuth client ID", Type: "bitbucket",
 		Keywords:    []string{"bitbucket"},
 		Regex:       assignRegex(`bitbucket`, `[A-Za-z0-9]{32}`),
-		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
+		SecretGroup: 1, MinEntropy: 3, Window: assignWindow, Check: notHex,
 	},
 	{
 		ID: "bitbucket-client-secret", Name: "Bitbucket OAuth client secret", Type: "bitbucket",
 		Keywords:    []string{"bitbucket"},
 		Regex:       assignRegex(`bitbucket`, `[A-Za-z0-9=_-]{64}`),
-		SecretGroup: 1, MinEntropy: 3, Window: assignWindow,
+		SecretGroup: 1, MinEntropy: 3, Window: assignWindow, Check: notHex,
 	},
 	{
 		ID: "atlassian-api-token", Name: "Atlassian API token", Type: "atlassian",
@@ -455,18 +448,22 @@ var gitleaksRules = []Rule{
 		Regex: curlPrefix + `(?:-H|--header)(?:=|[ \t]{0,5})["'](?i:authorization:[ \t]{0,5}(?:(?:basic|bearer|(?:api-)?token)[ \t]+)?|(?:x-(?:[a-z]+-)?)?(?:api-?)?(?:key|token):[ \t]{0,5})` +
 			`([\w=~@.+/-]{8,})["']`,
 		SecretGroup: 1, MinEntropy: 2.75, Window: curlWindow, Anchored: true, HitCheck: curlHeaderHit,
-		Allowlist: []string{`(?i)^(?:your|my)[_-]`, `(?i)[_-]here$`},
+		Allowlist: []string{
+			`(?i)^(?:your|my)[_-]`, `(?i)[_-]here$`, `^[A-Z][A-Z0-9_]*$`, `\.\.\.`, `(?i)redacted`,
+			`(?i)^(?:access|api|auth|my|replace[_-]with)[._-]?(?:api[._-]?)?(?:jwt[._-]?)?(?:key|token)(?:[._-]?here)?$`, `(?i)^token\d*$`,
+		},
 	},
 	{
 		ID: "curl-auth-user", Name: "Password in a curl command", Type: "curl",
 		Keywords: []string{"curl"},
 		Regex: curlPrefix + `(?:-u|--user)(?:=|[ \t]{0,5})["']?` +
 			`((?:"[^"\r\n:]{3,}"|'[^'\r\n:]{3,}'|[^\s"':]{3,}):(?:"[^"\r\n]{3,}"|'[^'\r\n]{3,}'|[^\s"']{3,}))["']?(?:\s|\z)`,
-		SecretGroup: 1, MinEntropy: 2, Window: curlWindow, Anchored: true, HitCheck: curlUserHit,
+		SecretGroup: 1, MinEntropy: 2, Window: curlWindow, Anchored: true, HitCheck: curlUserHit, Check: userIsNotPassword,
 		Allowlist: []string{
-			`[^:]+:(?:change(?:it|me)|pass(?:word)?|pwd|test|token|\*+|x+)`,
+			`[^:]+:['"]?(?:change(?:it|me)|pass(?:word)?|pwd|test|token|\*+|x+)['"]?$`,
 			`['"]?<[^>]+>['"]?:['"]?<[^>]+>|<[^:]+:[^>]+>['"]?`,
-			`[^:]+:\[[^]]+]`,
+			`[^:]+:['"]?\[[^]]+]['"]?$`,
+			`:['"]?(?:%\w+%|\$\(|\{\w+\})`,
 			`['"]?[^:]+['"]?:['"]?\$(?:\d|\w+|\{(?:\d|\w+)})['"]?`,
 			`^['"]?\$`,
 		},
@@ -527,6 +524,12 @@ func curlUserHit(lower, c []byte, p int) bool {
 			j++
 		}
 		j = skipBlanks(after, j)
+		if j < len(after) && isQuote(after[j]) {
+			// a quoted user may hold blanks: 'deploy bot':pw
+			if k := bytes.IndexByte(after[j+1:], after[j]); k >= 3 && j+k+2 < len(after) && after[j+k+2] == ':' {
+				return true
+			}
+		}
 		field := after[j:]
 		if k := bytes.IndexAny(field, " \t\r\n"); k >= 0 {
 			field = field[:k]
@@ -563,3 +566,14 @@ func prefixHit(n int, prefixes ...string) func(_, c []byte, p int) bool {
 }
 
 func isTokenByte(b byte) bool { return isB64(b) || b == '_' || b == '-' || b == '.' || b == '~' }
+
+// notHex: the secret is not all hex digits (a checksum or commit ID has the
+// shape of these tokens).
+func notHex(s []byte) bool { return strings.Trim(strings.ToLower(string(s)), "0123456789abcdef") != "" }
+
+// userIsNotPassword: user:password with the same word twice (admin:admin) is
+// a default in documentation, not a credential.
+func userIsNotPassword(s []byte) bool {
+	user, pw, _ := strings.Cut(string(s), ":")
+	return strings.Trim(user, `"'`) != strings.Trim(pw, `"'`)
+}

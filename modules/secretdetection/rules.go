@@ -43,6 +43,18 @@ import (
 	"forgejo.org/modules/json"
 )
 
+// firebaseSampleKeys are the GCP API keys of the Firebase SDK samples
+// (gitleaks' allowlist), without the AIza prefix so no full key is a literal.
+var firebaseSampleKeys = []string{
+	"SyAnLA7NfeLquW1tJFpx_eQCxoX-oo6YyIs", "SyCkEhVjf3pduRDt6d1yKOMitrUEke8agEM", "SyDMAScliyLx7F0NPDEJi1QmyCgHIAODrlU",
+	"SyD3asb-2pEZVqMkmL6M9N6nHZRR_znhrh0", "yDNSXIbFmlXbIE6mCzDLQAqITYefhixbX4A", "SyAdOS2zB6NCsk1pCdZ4-P6GBdi_UUPwX7c",
+	"SyASWm6HmTMdYWpgMnjRBjxcQ9CKctWmLd4", "SyANUvH9H9BsUccjsu2pCmEkOPjjaXeDQgY", "SyA5_iVawFQ8ABuTZNUdcwERLJv_a_p4wtM",
+	"SyA4UrcGxgwQFTfaI3no3t7Lt1sjmdnP5sQ", "SyDSb51JiIcB6OJpwwMicseKRhhrOq1cS7g", "SyBF2RrAIm4a0mO64EShQfqfd2AFnzAvvuU",
+	"SyBcE-OOIbhjyR83gm4r2MFCu4MJmprNXsw", "SyB8qGxt4ec15vitgn44duC5ucxaOi4FmqE", "SyA8vmApnrHNFE0bApF4hoZ11srVL_n0nvY",
+}
+
+var firebaseSampleKeysRegex = `^AIza(?:` + strings.Join(firebaseSampleKeys, "|") + `)$`
+
 // placeholders are dropped by every built-in rule: documentation examples,
 // runs of x, ${VAR} and {{ var }} templates, <token> markers.
 var placeholders = []string{`(?i)example`, `(?i)x{5,}`, `\$\{`, `\{\{`, `<[^<>\s]{2,40}>`}

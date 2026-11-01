@@ -5,6 +5,8 @@ package secretdetection
 
 import (
 	"encoding/base64"
+	"math/rand/v2"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +102,8 @@ func gitleaksRuleTests() []ruleTest {
 				`<add key="ClearTextPassword" value="XXXXXXXXXXX" />`,
 				`<add key="ClearTextPassword" value="abc" />`,
 				`<add key="ClearTextPassword" value="%TestSourcePassword%" />`,
+				`<add key="ClearTextPassword" value="$(NUGET_PASSWORD)" />`,
+				`<add key="ClearTextPassword" value="#{NugetPassword}#" />`,
 				`<add key="ClearTextPassword" value="33f!!lloppa" />`,
 				`<add key="Username" value="` + fake(16, alnum) + `" />`,
 			},
@@ -167,7 +171,7 @@ func gitleaksRuleTests() []ruleTest {
 		{
 			"cloudflare-api-key",
 			[]string{"CLOUDFLARE_TOKEN=" + fake(40, b64u), `cloudflare_api_token: "` + fake(40, alnum) + `"`},
-			[]string{"CLOUDFLARE_ZONE_ID=" + fake(32, hexa), "token=" + fake(40, b64u)},
+			[]string{"CLOUDFLARE_ZONE_ID=" + fake(32, hexa), "token=" + fake(40, b64u), "cloudflare_commit: " + fake(40, hexa)},
 		},
 		{
 			"cloudflare-global-api-key",
@@ -241,7 +245,7 @@ func gitleaksRuleTests() []ruleTest {
 			[]string{
 				"apiVersion: v1\ndata:\n  password: " + k8sValue + "\n  username: YWRtaW4=\nkind: Secret\nmetadata:\n  name: db-user-pass\n",
 				"apiVersion: v1\r\ndata:\r\n  extra: \"" + k8sValue + "\"\r\nkind: \"Secret\"\r\n",
-				"data:\n  .dockercfg: >\n    " + k8sValue + "\nmetadata:\n  name: x\ntype: kubernetes.io/dockercfg\nkind: Secret",
+				"apiVersion: v1\ndata:\n  .dockercfg: >\n    " + k8sValue + "\nmetadata:\n  name: x\ntype: kubernetes.io/dockercfg\nkind: Secret",
 			},
 			[]string{
 				"apiVersion: v1\ndata:\n  key: " + k8sValue + "\n---\nkind: Secret\n",
@@ -282,12 +286,12 @@ func gitleaksRuleTests() []ruleTest {
 		{
 			"bitbucket-client-id",
 			[]string{"bitbucket_token: '" + fake(32, alnum) + "'", `BITBUCKET_CLIENT_ID := "` + fake(32, alnum) + `"`},
-			[]string{"BITBUCKET_COMMIT=" + fake(40, hexa), "client_id: " + fake(32, alnum)},
+			[]string{"BITBUCKET_COMMIT=" + fake(40, hexa), "client_id: " + fake(32, alnum), "bitbucket_md5: " + fake(32, hexa)},
 		},
 		{
 			"bitbucket-client-secret",
 			[]string{`bitbucket_TOKEN = "` + fake(64, b64u) + `"`, `"bitbucket_secret" => "` + fake(64, alnum) + `"`},
-			[]string{"bitbucket_secret: " + fake(63, alnum), "secret: " + fake(64, alnum)},
+			[]string{"bitbucket_secret: " + fake(63, alnum), "secret: " + fake(64, alnum), "bitbucket_sha256: " + sha256Hex("x")},
 		},
 		{
 			"atlassian-api-token",
@@ -375,6 +379,13 @@ func gitleaksRuleTests() []ruleTest {
 				`curl -H "apikey: $API_KEY"`,
 				`curl -H "Authorization: Bearer $(gcloud auth print-access-token)"`,
 				`curl -H "Authorization: Bearer YOUR_API_KEY"`,
+				`curl -H "Authorization: Bearer ACCESS_TOKEN"`,
+				`curl -H "Authorization: Bearer REPLACE_WITH_TOKEN"`,
+				`curl -H "Authorization: Bearer access-token"`,
+				`curl -H "Authorization: Bearer token123456"`,
+				`curl -H "Authorization: Bearer my.jwt.token"`,
+				`curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9..."`,
+				`curl -H 'Authorization: token ghp_REDACTED_REDACTED'`,
 				`curl https://api.local` + strings.Repeat("\n echo", 6) + ` -H "Authorization: Bearer ` + fake(32, b64) + `"`, // too many lines later
 			},
 		},
@@ -386,6 +397,10 @@ func gitleaksRuleTests() []ruleTest {
 				"curl -s --user 'api" + ":" + curlPw + "' \\\n    https://api.mailgun.net/v3",
 				`curl -s -v --user "j.smith:` + curlPw + `" "https://api.local/user/me"`,
 				"curl --user kevin" + ":'" + curlPw + "' -iX PATCH",
+				"curl -u admin" + ":x" + curlPw + " https://api.local",
+				"curl -u admin" + ":testing" + curlPw + " https://api.local",
+				"curl -u admin" + ":pass" + curlPw + " https://api.local",
+				"curl -u 'deploy bot'" + ":" + curlPw + " https://api.local",
 			},
 			[]string{
 				"curl -i -u 'test:test'",
@@ -403,6 +418,12 @@ func gitleaksRuleTests() []ruleTest {
 				"curl http://127.0.0.1:5000/file --user user:pass --digest",
 				`curl --silent --insecure --user ${f5user}:${f5pass} \`,
 				`curl --user "src@gmail.com" --upload-file out.txt`,
+				"curl -u admin:%PASSWORD% https://api.local",
+				"curl -u admin:$(cat pw.txt) https://api.local",
+				"curl -u 'admin:{password}' https://api.local",
+				"curl -u admin:admin https://api.local",
+				"curl -u guest:'guest' https://api.local",
+				"curl -u 'admin:x' https://api.local",
 				"curl -X POST http://local:8080/serve\n\necho -n '{}' >/dev/udp/127.0.0.1/41234\n\nnc -u -l 41234",
 			},
 		},
@@ -441,5 +462,63 @@ func TestPortedRuleKeywordsAreCheap(t *testing.T) {
 		assert.Less(t, time.Since(start), 2*time.Second*slowdown, name)
 		assert.True(t, complete, name)
 		assert.Equal(t, 1, countRuleIn(fs, "github-token"), name)
+	}
+}
+
+// Every ported rule runs near its keywords only, and an anchored one behind a
+// hit check (an inline comment once swallowed the infracost rule's fields).
+func TestGitleaksRulesAreWindowed(t *testing.T) {
+	for _, r := range gitleaksRules {
+		assert.Positive(t, r.Window, r.ID)
+		assert.True(t, !r.Anchored || r.HitCheck != nil, r.ID)
+	}
+}
+
+// Kubernetes Secrets with CRLF line ends and a blank line between kind and
+// data, either order.
+func TestKubernetesSecretCRLF(t *testing.T) {
+	d := allRulesDetector(t)
+	v := base64.StdEncoding.EncodeToString([]byte(fake(24, alnum)))
+	for _, s := range []string{
+		"apiVersion: v1\r\nkind: Secret\r\nmetadata:\r\n  name: x\r\n\r\ndata:\r\n  password: " + v + "\r\n",
+		"apiVersion: v1\r\ndata:\r\n  password: " + v + "\r\n\r\nkind: Secret\r\nmetadata:\r\n  name: x\r\n",
+	} {
+		assert.Equal(t, 1, countRule(d, s, "kubernetes-secret-yaml"), "%q", s)
+	}
+}
+
+// keywordGate finds exactly the keywords a search per keyword finds:
+// overlapping, shared and one-byte keywords included.
+func TestKeywordGateMatchesHasKeyword(t *testing.T) {
+	r := rand.New(rand.NewPCG(5, 6))
+	var sets [][]string
+	for _, rule := range BuiltinRules() {
+		sets = append(sets, rule.Keywords)
+	}
+	sets = append(sets, []string{"q"}, []string{"ab", "aba", "b"}, []string{"ab"})
+	var g keywordGate
+	ids := make([][]int, len(sets))
+	var words []string
+	for i, ks := range sets {
+		ids[i] = g.add(ks)
+		words = append(words, ks...)
+	}
+	for range 2000 {
+		var b strings.Builder
+		for range r.IntN(8) {
+			switch w := words[r.IntN(len(words))]; r.IntN(3) {
+			case 0:
+				b.WriteString(w)
+			case 1:
+				b.WriteString(w[:r.IntN(len(w))])
+			default:
+				b.WriteString(fake(r.IntN(6), "ab-_.: "))
+			}
+		}
+		text := []byte(b.String())
+		found := g.find(text)
+		for i, ks := range sets {
+			assert.Equal(t, hasKeyword(text, ks), slices.ContainsFunc(ids[i], func(id int) bool { return found[id] }), "%q in %q", ks, text)
+		}
 	}
 }
