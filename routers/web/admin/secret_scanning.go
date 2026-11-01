@@ -41,6 +41,11 @@ func secretScanningLimitText(name string, v int64) string {
 	return strconv.FormatInt(v, 10)
 }
 
+func mustLimit(name string) setting.SecretScanningLimit {
+	l, _ := setting.SecretScanningLimitByName(name)
+	return l
+}
+
 // secretScanningBoundText is a bound with its unit for messages: a size below 1 MiB in KiB ("64 KiB", never 0.0625 MiB).
 func secretScanningBoundText(ctx *context.Context, name string, v int64) string {
 	if secretScanningFormUnits[name] > 1 && v%(1<<20) != 0 && v%(1<<10) == 0 {
@@ -164,11 +169,8 @@ func renderSecretScanning(ctx *context.Context, posted map[string]string, refuse
 		rows = append(rows, row)
 	}
 	ctx.Data["Limits"] = rows
-	floor := func(name string) string {
-		l, _ := setting.SecretScanningLimitByName(name)
-		return secretScanningBoundText(ctx, name, l.Min)
-	}
-	ctx.Data["LimitFloors"] = ctx.Tr("admin.secret_scanning.limits_floors", floor("scan_timeout"), floor("max_blob_size"), floor("max_scan_bytes"), floor("max_scan_blobs"), floor("max_alerts_per_repo"), floor("max_locations_per_alert"))
+	floor := func(name string) string { return secretScanningBoundText(ctx, name, mustLimit(name).Min) }
+	ctx.Data["LimitFloors"] = ctx.Tr("admin.secret_scanning.limits_floors", floor("scan_timeout"), floor("max_blob_size"), floor("max_scan_bytes"), floor("max_scan_blobs"), floor("max_alerts_per_repo"), secretScanningLimitText("max_locations_per_alert", mustLimit("max_locations_per_alert").Min))
 	if refused != nil {
 		ctx.Data["LimitsError"] = refused.Error
 		ctx.Data["LimitsErrorField"] = refused.Name

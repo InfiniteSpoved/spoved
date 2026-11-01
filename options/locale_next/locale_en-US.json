@@ -3866,7 +3866,7 @@
 	"admin.secret_scanning.generic_submit": "Turn on rule",
 	"admin.secret_scanning.limits": "Limits",
 	"admin.secret_scanning.limits_at_limit": "A scan that hits a limit stops and the repository shows \"Scan incomplete: limit reached\".",
-	"admin.secret_scanning.limits_floors": "Lowest values: %s per scan slice, %s for the largest file, %s and %s read per slice, %s per repository, %s per alert.",
+	"admin.secret_scanning.limits_floors": "Lowest values: %s per scan slice, %s for the largest file, %s and %s read per slice, %s per repository. Locations per alert: at least %s.",
 	"admin.secret_scanning.limits_save": "Save limits",
 	"admin.secret_scanning.limits_help": "They protect the server. Under each field is its default from app.ini.",
 	"admin.secret_scanning.app_default": "Default from app.ini: %s",
