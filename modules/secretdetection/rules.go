@@ -53,7 +53,10 @@ const (
 	wordChars  = alnumChars + "_-"
 )
 
-var builtinRules = []Rule{
+// builtinRules: the generic rule last, so a specific rule wins an overlap.
+var builtinRules = slices.Concat(baseRules, gitleaksRules, []Rule{genericRule})
+
+var baseRules = []Rule{
 	{
 		ID: "aws-access-key-id", Name: "AWS access key ID", Type: "aws",
 		Keywords:    []string{"akia", "asia", "abia", "acca", "a3t"},
@@ -130,6 +133,7 @@ var builtinRules = []Rule{
 		Keywords:    []string{"aiza"},
 		Regex:       `(AIza[\w-]{35})`,
 		SecretGroup: 1, MinEntropy: 3.5, TokenChars: wordChars, TrailingOK: "-",
+		Allowlist: []string{firebaseSampleKeysRegex},
 	},
 	{
 		// ghp_ personal, gho_ OAuth, ghu_ user-to-server, ghs_ server-to-server, ghr_ refresh.
@@ -268,14 +272,15 @@ var builtinRules = []Rule{
 		Normalize: decodeBase64JWT, Check: jwtCheck,
 		Allowlist: []string{jwtIOSignature},
 	},
-	{
-		// Dotted names (locale keys, settings) are no secrets.
-		ID: "generic-secret-assignment", Name: "Generic secret assignment", Type: "generic",
-		Keywords:    []string{"secret", "password", "passwd", "token", "key"},
-		Regex:       `(?i)(?:secret|password|passwd|token|key)[\w.-]{0,20}(?:\\?["'])?\s*(?::=|[:=])\s*\\?["']((?:[^\s"'\x60\\]|\\[^\s"'\x60]){20,100})\\?["']`,
-		SecretGroup: 1, MinEntropy: 3.5, DefaultOff: true, Window: 512, Anchored: true, HitCheck: genericHit,
-		Allowlist: []string{`^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$`},
-	},
+}
+
+// Dotted names (locale keys, settings) are no secrets.
+var genericRule = Rule{
+	ID: "generic-secret-assignment", Name: "Generic secret assignment", Type: "generic",
+	Keywords:    []string{"secret", "password", "passwd", "token", "key"},
+	Regex:       `(?i)(?:secret|password|passwd|token|key)[\w.-]{0,20}(?:\\?["'])?\s*(?::=|[:=])\s*\\?["']((?:[^\s"'\x60\\]|\\[^\s"'\x60]){20,100})\\?["']`,
+	SecretGroup: 1, MinEntropy: 3.5, DefaultOff: true, Window: 512, Anchored: true, HitCheck: genericHit,
+	Allowlist: []string{`^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$`},
 }
 
 // The hit checks below are the cheap exact tests of the hot rules: they let a

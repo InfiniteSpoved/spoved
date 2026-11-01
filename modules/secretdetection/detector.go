@@ -88,6 +88,7 @@ type Detector struct {
 	MaxWork int
 
 	rules []*compiledRule
+	gate  keywordGate
 }
 
 // NewDetector compiles rules. Which rules to pass is the caller's decision.
@@ -112,6 +113,7 @@ func NewDetector(rules []Rule) (*Detector, error) {
 		if err != nil {
 			return nil, err
 		}
+		c.keywordIDs = d.gate.add(r.Keywords)
 		d.rules = append(d.rules, c)
 	}
 	return d, nil
@@ -202,8 +204,9 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 	var macKey []byte
 	var found []rawFinding
 	var active []*compiledRule
+	present := d.gate.find(lower)
 	for _, r := range d.rules {
-		if hasKeyword(lower, r.Keywords) {
+		if len(r.keywordIDs) == 0 || slices.ContainsFunc(r.keywordIDs, func(i int) bool { return present[i] }) {
 			active = append(active, r)
 		}
 	}
@@ -668,6 +671,67 @@ func asciiLower(b []byte) []byte {
 		out[i] = c
 	}
 	return out
+}
+
+// keywordGate tells which keywords occur in a text in one pass over it, by
+// their first two bytes, instead of one search per keyword (with a hundred
+// rules that was most of the time of a scan).
+type keywordGate struct {
+	words   []string
+	ids     map[string]int
+	first   [1 << 16]bool
+	buckets map[uint16][]int
+	single  []int // one-byte keywords
+}
+
+// add registers keywords and returns their IDs.
+func (g *keywordGate) add(keywords []string) []int {
+	if g.ids == nil {
+		g.ids, g.buckets = map[string]int{}, map[uint16][]int{}
+	}
+	out := make([]int, 0, len(keywords))
+	for _, k := range keywords {
+		id, ok := g.ids[k]
+		if !ok {
+			id = len(g.words)
+			g.words = append(g.words, k)
+			g.ids[k] = id
+			if len(k) == 1 {
+				g.single = append(g.single, id)
+			} else {
+				b := uint16(k[0])<<8 | uint16(k[1])
+				g.first[b] = true
+				g.buckets[b] = append(g.buckets[b], id)
+			}
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+// find returns, by keyword ID, whether the keyword occurs in lower.
+func (g *keywordGate) find(lower []byte) []bool {
+	found := make([]bool, len(g.words))
+	left := len(g.words)
+	for _, id := range g.single {
+		if bytes.IndexByte(lower, g.words[id][0]) >= 0 {
+			found[id] = true
+			left--
+		}
+	}
+	for p := 0; p+1 < len(lower) && left > 0; p++ {
+		b := uint16(lower[p])<<8 | uint16(lower[p+1])
+		if !g.first[b] {
+			continue
+		}
+		for _, id := range g.buckets[b] {
+			if !found[id] && bytes.HasPrefix(lower[p:], []byte(g.words[id])) {
+				found[id] = true
+				left--
+			}
+		}
+	}
+	return found
 }
 
 func hasKeyword(lower []byte, keywords []string) bool {

@@ -113,6 +113,8 @@ type compiledRule struct {
 	cost      int // work units per byte the regex is given, see Detector.MaxWork
 	allowlist []*regexp.Regexp
 	tokenSet  *[256]bool
+	// keywordIDs are the rule's keywords in its Detector's keywordGate.
+	keywordIDs []int
 }
 
 func compileRule(r Rule) (*compiledRule, error) {
