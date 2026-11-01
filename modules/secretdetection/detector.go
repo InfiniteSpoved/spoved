@@ -205,7 +205,8 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 	var macKey []byte
 	var found []rawFinding
 	var active []*compiledRule
-	firstHit := d.gate.find(lower)
+	hits := d.gate.find(lower)
+	firstHit := hits.first
 	for _, r := range d.rules {
 		if len(r.keywordIDs) == 0 || slices.ContainsFunc(r.keywordIDs, func(i int) bool { return firstHit[i] >= 0 }) {
 			active = append(active, r)
@@ -288,11 +289,10 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 					if work > limit {
 						return false
 					}
-					i := bytes.Index(lower[st.off:], []byte(k))
-					if i < 0 {
+					p := hits.next(r.keywordIDs[st.ki], st.off)
+					if p < 0 {
 						break
 					}
-					p := st.off + i
 					st.off = p + 1
 					start := p - r.KeywordOffset
 					if p < st.next || start < 0 {
@@ -323,7 +323,7 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 			return true
 		}
 		if !st.haveRanges {
-			ranges, spent, ok := r.ranges(lower, firstHit, limit-work)
+			ranges, spent, ok := r.ranges(len(lower), firstHit, hits, limit-work)
 			work += spent
 			if !ok {
 				return false
@@ -584,9 +584,9 @@ func isLFSPointer(content []byte) bool {
 // firstHit is where each keyword of the gate first occurs (-1: nowhere).
 // Finding the windows costs hitCost work units per keyword hit; ok is false
 // when that is more than allow.
-func (r *compiledRule) ranges(lower []byte, firstHit []int, allow int) (out [][2]int, spent int, ok bool) {
+func (r *compiledRule) ranges(n int, firstHit []int, hits *keywordHits, allow int) (out [][2]int, spent int, ok bool) {
 	if r.Window <= 0 {
-		return [][2]int{{0, len(lower)}}, 0, true
+		return [][2]int{{0, n}}, 0, true
 	}
 	for ki, k := range r.Keywords {
 		if firstHit[r.keywordIDs[ki]] < 0 {
@@ -596,16 +596,15 @@ func (r *compiledRule) ranges(lower []byte, firstHit []int, allow int) (out [][2
 		var cur [2]int
 		have := false
 		for off := firstHit[r.keywordIDs[ki]]; ; {
-			i := bytes.Index(lower[off:], []byte(k))
-			if i < 0 {
+			p := hits.next(r.keywordIDs[ki], off)
+			if p < 0 {
 				break
 			}
-			p := off + i
 			off = p + 1
 			if spent += hitCost; spent > allow {
 				return nil, spent, false
 			}
-			lo, hi := max(0, p-r.Window), min(len(lower), p+len(k)+r.Window)
+			lo, hi := max(0, p-r.Window), min(n, p+len(k)+r.Window)
 			if have && lo <= cur[1] {
 				cur[1] = hi
 				continue
@@ -695,7 +694,8 @@ type keywordGate struct {
 	ids     map[string]int
 	first   [1 << 16]uint16
 	buckets [][]int
-	single  []int // one-byte keywords
+	third   [][4]uint64 // by bucket, the third bytes of its keywords (all for a two-byte one)
+	single  []int       // one-byte keywords
 }
 
 // add registers keywords and returns their IDs.
@@ -719,9 +719,15 @@ func (g *keywordGate) add(keywords []string) []int {
 						panic("secretdetection: more keyword byte pairs than the gate holds")
 					}
 					g.buckets = append(g.buckets, nil)
+					g.third = append(g.third, [4]uint64{})
 					g.first[b] = uint16(len(g.buckets))
 				}
 				g.buckets[g.first[b]-1] = append(g.buckets[g.first[b]-1], id)
+				if t := &g.third[g.first[b]-1]; len(k) == 2 {
+					*t = [4]uint64{^uint64(0), ^uint64(0), ^uint64(0), ^uint64(0)}
+				} else {
+					t[k[2]>>6] |= 1 << (k[2] & 63)
+				}
 			}
 		}
 		out = append(out, id)
@@ -729,16 +735,19 @@ func (g *keywordGate) add(keywords []string) []int {
 	return out
 }
 
-// find returns, by keyword ID, where the keyword first occurs in lower (-1:
-// nowhere).
-func (g *keywordGate) find(lower []byte) []int {
-	first := make([]int, len(g.words))
+// find finds where each keyword occurs in lower, in one pass: by keyword ID
+// the first occurrence (-1: nowhere) and, up to the hit limit, all of them.
+func (g *keywordGate) find(lower []byte) *keywordHits {
+	n := len(g.words)
+	h := &keywordHits{lower: lower, words: g.words, first: make([]int, n), at: make([][]int, n), from: make([]int, n), limit: len(lower)/8 + keptHitsBase}
+	first := h.first
 	for i := range first {
 		first[i] = -1
 	}
-	left := len(g.words)
-	// open counts the keywords of each bucket not seen yet: a bucket whose
-	// keywords were all seen costs no more comparisons.
+	left := n
+	// open counts the keywords of each bucket not seen yet: once the hit
+	// limit is reached, a bucket whose keywords were all seen costs no more
+	// comparisons.
 	open := make([]int, len(g.buckets))
 	for i, b := range g.buckets {
 		open[i] = len(b)
@@ -748,21 +757,83 @@ func (g *keywordGate) find(lower []byte) []int {
 			left--
 		}
 	}
-	for p := 0; p+1 < len(lower) && left > 0; p++ {
+	// done is where collecting all hits stopped: the lists are complete
+	// before it, and next searches on from there.
+	done := len(lower)
+	collect := true
+	for p := 0; p+1 < len(lower) && (left > 0 || collect); p++ {
 		bucket := g.first[uint16(lower[p])<<8|uint16(lower[p+1])]
-		if bucket == 0 || open[bucket-1] == 0 {
+		if bucket == 0 || p+2 < len(lower) && g.third[bucket-1][lower[p+2]>>6]&(1<<(lower[p+2]&63)) == 0 || !collect && open[bucket-1] == 0 {
 			continue
 		}
 		for _, id := range g.buckets[bucket-1] {
 			// the third byte first: most keywords that share a pair differ there
-			if w := g.words[id]; first[id] < 0 && (len(w) < 3 || p+2 < len(lower) && lower[p+2] == w[2]) && bytes.HasPrefix(lower[p:], []byte(w)) {
-				first[id] = p
-				open[bucket-1]--
-				left--
+			if w := g.words[id]; (collect || first[id] < 0) && (len(w) < 3 || p+2 < len(lower) && lower[p+2] == w[2]) && bytes.HasPrefix(lower[p:], []byte(w)) {
+				if first[id] < 0 {
+					first[id] = p
+					open[bucket-1]--
+					left--
+				}
+				if collect {
+					h.at[id] = append(h.at[id], p)
+					h.total++
+				}
 			}
 		}
+		if collect && h.total >= h.limit {
+			collect, done = false, p+1
+		}
 	}
-	return first
+	for id := range h.from {
+		h.from[id] = done
+	}
+	for _, id := range g.single {
+		h.from[id] = first[id]
+		if first[id] < 0 {
+			h.from[id] = len(lower)
+		}
+	}
+	return h
+}
+
+// keptHitsBase plus an eighth of the content length is how many keyword hits
+// a scan keeps (a variable for tests).
+var keptHitsBase = 1024
+
+// keywordHits are the keyword occurrences of one scan, shared by its rules,
+// so a keyword that several rules use is searched once. at holds a keyword's
+// occurrences in order, every one before from; at most about limit are kept
+// in all, so memory stays below the content's size.
+type keywordHits struct {
+	lower        []byte
+	words        []string
+	first        []int
+	at           [][]int
+	from         []int
+	total, limit int
+}
+
+// next returns the first occurrence of keyword id at or after off (-1: none).
+func (h *keywordHits) next(id, off int) int {
+	at := h.at[id]
+	if i, _ := slices.BinarySearch(at, off); i < len(at) {
+		return at[i]
+	}
+	from := min(max(off, h.from[id]), len(h.lower))
+	p := bytes.Index(h.lower[from:], []byte(h.words[id]))
+	if p >= 0 {
+		p += from
+	}
+	// Only a search that goes on from where the kept ones end is kept.
+	if from == h.from[id] && h.total < h.limit {
+		if p < 0 {
+			h.from[id] = len(h.lower)
+		} else {
+			h.at[id], h.from[id] = append(at, p), p+1
+			h.total++
+		}
+	}
+	return p
 }
 
 func hasKeyword(lower []byte, keywords []string) bool {

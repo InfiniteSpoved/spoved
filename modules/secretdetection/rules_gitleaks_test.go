@@ -524,8 +524,10 @@ func TestKubernetesSecretCRLF(t *testing.T) {
 }
 
 // keywordGate finds exactly the keywords a search per keyword finds, at their
-// first offset: overlapping, shared and one-byte keywords included.
+// first offset, and next gives every later one: overlapping, shared and
+// one-byte keywords included.
 func TestKeywordGateMatchesHasKeyword(t *testing.T) {
+	defer func(v int) { keptHitsBase = v }(keptHitsBase)
 	r := rand.New(rand.NewPCG(5, 6))
 	var sets [][]string
 	for _, rule := range BuiltinRules() {
@@ -554,11 +556,33 @@ func TestKeywordGateMatchesHasKeyword(t *testing.T) {
 			}
 		}
 		text := []byte(b.String())
-		found := g.find(text)
+		// keptHitsBase 0 makes the gate stop keeping hits early, so next
+		// also searches on from where the kept ones end.
+		keptHitsBase = 1024 * r.IntN(2)
+		h := g.find(text)
+		found := h.first
 		for i, ks := range sets {
 			assert.Equal(t, hasKeyword(text, ks), slices.ContainsFunc(ids[i], func(id int) bool { return found[id] >= 0 }), "%q in %q", ks, text)
 			for j, k := range ks {
 				assert.Equal(t, bytes.Index(text, []byte(k)), found[ids[i][j]], "%q in %q", k, text)
+				// every occurrence, twice: rules that share a keyword ask
+				// for it from the start again
+				var want []int
+				for off := 0; ; {
+					i := bytes.Index(text[off:], []byte(k))
+					if i < 0 {
+						break
+					}
+					want = append(want, off+i)
+					off += i + 1
+				}
+				for range 2 {
+					var got []int
+					for p := h.next(ids[i][j], 0); p >= 0; p = h.next(ids[i][j], p+1) {
+						got = append(got, p)
+					}
+					assert.Equal(t, want, got, "%q in %q", k, text)
+				}
 			}
 		}
 	}
