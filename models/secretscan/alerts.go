@@ -85,8 +85,9 @@ type AlertSearchOptions struct {
 	SecretTypes []string // rule IDs
 	Sort        string   // created (the default) or updated
 	Ascending   bool
-	CodeOnly    bool   // only alerts that have a place outside the wiki
-	PathQuery   string // only alerts with a place whose path holds this text (the wiki's places only without CodeOnly)
+	CodeOnly    bool     // only alerts that have a place outside the wiki
+	Kinds       []string // only alerts that have a place of one of these kinds (KindRepo, KindWiki, KindPull)
+	PathQuery   string   // only alerts with a place whose path holds this text (the wiki's places only without CodeOnly)
 }
 
 func (o *AlertSearchOptions) ToConds() builder.Cond {
@@ -105,6 +106,11 @@ func (o *AlertSearchOptions) ToConds() builder.Cond {
 	}
 	if o.CodeOnly {
 		cond = cond.And(builder.Expr("EXISTS (SELECT 1 FROM secret_scanning_location WHERE secret_scanning_location.alert_id = secret_scanning_alert.id AND secret_scanning_location.kind <> ?)", KindWiki))
+	}
+	if len(o.Kinds) > 0 {
+		cond = cond.And(builder.Exists(builder.Select("1").From("secret_scanning_location").Where(builder.And(
+			builder.Expr("secret_scanning_location.alert_id = secret_scanning_alert.id"), builder.In("secret_scanning_location.kind", o.Kinds),
+		))))
 	}
 	if o.PathQuery != "" {
 		in := builder.And(builder.Expr("secret_scanning_location.alert_id = secret_scanning_alert.id"), likeContains("secret_scanning_location.path", o.PathQuery))

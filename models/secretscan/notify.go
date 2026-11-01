@@ -5,6 +5,7 @@ package secretscan
 
 import (
 	"context"
+	"unicode/utf8"
 
 	"forgejo.org/models/db"
 	"forgejo.org/modules/timeutil"
@@ -15,25 +16,66 @@ import (
 // MaxDigestLocations is the most places a digest mail lists.
 const MaxDigestLocations = 10
 
-// MarkNotify marks the repository for a digest mail: a push to it, by pusherID (0 when no person pushed: a deploy
-// key, an Actions task), ref and commit as shown in the mail. Only a repository whose scans are all complete is
-// marked, so the first scan, a backfill and a rescan (which removes the rows) never mail. A second push before the
-// digest keeps the first mark's alert boundary and time, takes the newer ref and commit, and keeps the pusher only
-// when it is the same one (else 0: nobody is told "your push"). Every call bumps notify_seq, so the clear of a scan
-// that started before the push is refused. It reports whether a row was marked.
-func MarkNotify(ctx context.Context, repoID, pusherID int64, ref, commit string) (bool, error) {
-	if under, err := ScanUnderWay(ctx, repoID); err != nil || under {
+// Bits of Scan.NotifyKinds: what the marking pushes touched, and whether the wiki had been scanned to its end when the
+// first push marked the repository (the first scan of a wiki never mails).
+const (
+	DigestKindCode    = 1
+	DigestKindWiki    = 2
+	DigestWikiScanned = 4
+)
+
+// DigestMinInterval is the shortest time between two digests of one repository: a mark that comes sooner waits, so the
+// next digest carries everything, and a flood of pushes can't flood the administrators.
+const DigestMinInterval = 15 * 60 // seconds
+
+// maxNotifyRef is the length (bytes) of the stored ref name, the column's size.
+const maxNotifyRef = 255
+
+// truncateUTF8 cuts s to at most n bytes, on a character boundary.
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+// MarkNotify marks the repository for a digest mail: a push to it (kind is KindRepo for a branch or tag, KindWiki for
+// the wiki), by pusherID (0 when no person pushed: a deploy key, an Actions task), ref and commit as shown in the mail.
+// Only a repository whose code has been scanned to its end once is marked (a wiki push also needs the wiki scanned
+// once), so the first scan, a backfill and a rescan (which removes the rows) never mail; a scan that is under way or
+// backing off after a failure does not stop the marking, since the mark waits for the scan. A second push before the
+// digest keeps the first mark's alert boundary and time, takes the newer ref and commit (a wiki push, which has none, keeps them), adds its kind, and keeps the
+// pusher only when it is the same one (else 0: nobody is told "your push"). Every call bumps notify_seq, so the clear
+// of a scan that started before the push is refused. It reports whether a row was marked.
+func MarkNotify(ctx context.Context, repoID, pusherID int64, kind, ref, commit string) (bool, error) {
+	wikiScanned, err := db.GetEngine(ctx).Where("repo_id = ? AND kind = ? AND completed = ?", repoID, KindWiki, true).Exist(new(Scan))
+	if err != nil {
 		return false, err
 	}
+	bits := DigestKindCode
+	if kind == KindWiki {
+		if !wikiScanned {
+			return false, nil
+		}
+		bits = DigestKindWiki
+	}
+	if wikiScanned {
+		bits |= DigestWikiScanned
+	}
+	ref = truncateUTF8(ref, maxNotifyRef)
 	// the assignments run in this order: MySQL reads the columns as already assigned, so notify_after_unix is last
 	res, err := db.GetEngine(ctx).Exec(
 		"UPDATE secret_scan SET notify_seq = notify_seq + 1,"+
 			" notify_alert_id = CASE WHEN notify_after_unix = 0 THEN (SELECT COALESCE(MAX(id), 0) FROM secret_scanning_alert WHERE repo_id = ?) ELSE notify_alert_id END,"+
 			" notify_pusher_id = CASE WHEN notify_after_unix = 0 OR notify_pusher_id = ? THEN ? ELSE 0 END,"+
-			" notify_ref = ?, notify_commit = ?,"+
+			" notify_kinds = CASE WHEN notify_after_unix = 0 THEN ? ELSE (notify_kinds | ?) END,"+
+			" notify_ref = CASE WHEN ? <> '' THEN ? ELSE notify_ref END, notify_commit = CASE WHEN ? <> '' THEN ? ELSE notify_commit END,"+
 			" notify_after_unix = CASE WHEN notify_after_unix = 0 THEN ? ELSE notify_after_unix END"+
-			" WHERE repo_id = ? AND kind = ? AND retry_unix = 0",
-		repoID, pusherID, pusherID, ref, commit, int64(timeutil.TimeStampNow()), repoID, KindRepo,
+			" WHERE repo_id = ? AND kind = ? AND completed = ?",
+		repoID, pusherID, pusherID, bits, bits, ref, ref, commit, commit, int64(timeutil.TimeStampNow()), repoID, KindRepo, true,
 	)
 	if err != nil {
 		return false, err
@@ -42,19 +84,13 @@ func MarkNotify(ctx context.Context, repoID, pusherID int64, ref, commit string)
 	return n > 0, err
 }
 
-// ScanUnderWay tells whether a scan of the repository (its code, wiki or pull refs) is not complete: a slice stopped
-// at a limit or a failure waiting out its backoff.
-func ScanUnderWay(ctx context.Context, repoID int64) (bool, error) {
-	return db.GetEngine(ctx).Where("repo_id = ? AND retry_unix > 0", repoID).Exist(new(Scan))
-}
-
 // ClearNotify removes the mark if no push marked the repository since seq was read, and reports whether it did:
 // only then the caller sends the mail, so a digest is sent at most once and a push during the scan keeps its mark
-// for the next scan.
-func ClearNotify(ctx context.Context, repoID, seq int64) (bool, error) {
+// for the next scan. lastSent is the value of notify_last_unix to store: now when a digest goes out, else the old one.
+func ClearNotify(ctx context.Context, repoID, seq int64, lastSent timeutil.TimeStamp) (bool, error) {
 	res, err := db.GetEngine(ctx).Exec(
-		"UPDATE secret_scan SET notify_after_unix = 0, notify_pusher_id = 0, notify_ref = '', notify_commit = '' WHERE repo_id = ? AND kind = ? AND notify_seq = ? AND notify_after_unix <> 0",
-		repoID, KindRepo, seq,
+		"UPDATE secret_scan SET notify_after_unix = 0, notify_pusher_id = 0, notify_kinds = 0, notify_ref = '', notify_commit = '', notify_last_unix = ? WHERE repo_id = ? AND kind = ? AND notify_seq = ? AND notify_after_unix <> 0",
+		int64(lastSent), repoID, KindRepo, seq,
 	)
 	if err != nil {
 		return false, err
@@ -75,19 +111,21 @@ type DigestType struct {
 	Count  int
 }
 
-// Digest is what a digest mail says: the new alerts (above afterAlertID) a viewer can see, by type, and their first
-// places. No fingerprint is read.
+// Digest is what a digest mail says: the new alerts (above afterAlertID) of the kinds asked for, by type, and their
+// first places. No fingerprint is read.
 type Digest struct {
 	Alerts         int
 	Types          []DigestType
 	Locations      []*Location // at most MaxDigestLocations, in the order found
 	TotalLocations int         // every place of the alerts, also those over the cap that have no row
+	FirstIndex     int64       // the number of the alert when there is exactly one, else 0
 }
 
-// BuildDigest reads the digest of the alerts created after afterAlertID. With noWiki (the viewer can't read the
-// wiki) an alert that is only in the wiki is not counted and the wiki's places are left out.
-func BuildDigest(ctx context.Context, repoID, afterAlertID int64, noWiki bool) (*Digest, error) {
-	opts := &AlertSearchOptions{RepoID: repoID, CodeOnly: noWiki}
+// BuildDigest reads the digest of the alerts created after afterAlertID that have a place of one of kinds (KindRepo,
+// KindWiki, KindPull): a viewer who can't read the wiki, or a wiki that was not scanned before the push, leaves
+// KindWiki out, and a pusher is told only of the kind they pushed. Places of other kinds are left out too.
+func BuildDigest(ctx context.Context, repoID, afterAlertID int64, kinds []string) (*Digest, error) {
+	opts := &AlertSearchOptions{RepoID: repoID, Kinds: kinds}
 	alerts := opts.ToConds().And(builder.Gt{"id": afterAlertID})
 	var rows []struct {
 		RuleID string
@@ -107,15 +145,21 @@ func BuildDigest(ctx context.Context, repoID, afterAlertID int64, noWiki bool) (
 	if d.Alerts == 0 {
 		return d, nil
 	}
-	in := builder.In("alert_id", builder.Select("id").From("secret_scanning_alert").Where(alerts))
-	visible := builder.NewCond().And(in)
-	if noWiki {
-		visible = visible.And(builder.Neq{"kind": KindWiki})
-		wiki, err := db.GetEngine(ctx).Where(builder.And(in, builder.Eq{"kind": KindWiki})).Count(new(Location))
-		if err != nil {
+	if d.Alerts == 1 {
+		var a Alert
+		if has, err := db.GetEngine(ctx).Where(alerts).Cols("id", "index").Get(&a); err != nil {
 			return nil, err
+		} else if has {
+			d.FirstIndex = a.Index
 		}
-		d.TotalLocations -= int(wiki)
 	}
+	in := builder.In("alert_id", builder.Select("id").From("secret_scanning_alert").Where(alerts))
+	visible := builder.And(in, builder.In("kind", kinds))
+	// places of a kind that is left out are not counted (those over the cap, which have no row, can't be told apart)
+	other, err := db.GetEngine(ctx).Where(builder.And(in, builder.NotIn("kind", kinds))).Count(new(Location))
+	if err != nil {
+		return nil, err
+	}
+	d.TotalLocations -= int(other)
 	return d, db.GetEngine(ctx).Where(visible).OrderBy("id").Limit(MaxDigestLocations).Find(&d.Locations)
 }

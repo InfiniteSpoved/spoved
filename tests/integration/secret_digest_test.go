@@ -110,8 +110,7 @@ func TestSecretDigestAfterPush(t *testing.T) {
 			}
 		}
 		require.Eventually(t, func() bool { return scanRow(t, repo.ID).NotifyAfterUnix == 0 }, 5*time.Second, 50*time.Millisecond)
-		time.Sleep(500 * time.Millisecond)
-		assert.Len(t, mailsTo(), 2, "one digest per push")
+		require.Eventually(t, func() bool { return len(mailsTo()) == 2 }, 5*time.Second, 50*time.Millisecond, "one digest per push: the admin's and the pusher's")
 	})
 }
 

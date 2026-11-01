@@ -5,13 +5,17 @@ package secretscan
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
+	"forgejo.org/modules/log"
 	"forgejo.org/modules/test"
+	"forgejo.org/modules/timeutil"
 	"forgejo.org/services/mailer"
 
 	"github.com/stretchr/testify/assert"
@@ -22,7 +26,8 @@ import (
 func captureDigests(t *testing.T) *[]mailer.SecretDigestInput {
 	t.Helper()
 	var got []mailer.SecretDigestInput
-	t.Cleanup(test.MockVariableValue(&sendDigest, func(_ context.Context, _ *repo_model.Repository, in mailer.SecretDigestInput) error {
+	t.Cleanup(test.MockVariableValue(&sendDigest, func(ctx context.Context, _ *repo_model.Repository, in mailer.SecretDigestInput) error {
+		assert.False(t, db.InTransaction(ctx), "a digest is never mailed inside a transaction")
 		got = append(got, in)
 		return nil
 	}))
@@ -38,7 +43,7 @@ func TestDigestAfterPush(t *testing.T) {
 	ctx := t.Context()
 
 	// the first scan: the row doesn't exist yet, so nothing is marked and nothing is mailed
-	MarkPush(ctx, repo, 2, "main", "c0")
+	MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "c0")
 	w.commit(map[string]string{"first.env": "T=" + token("first") + "\n"})
 	w.pushDefault()
 	require.NoError(t, Scan(ctx, repo.ID))
@@ -48,7 +53,7 @@ func TestDigestAfterPush(t *testing.T) {
 	boundary := alertsOf(t, repo.ID)[0].ID
 
 	// a push without a secret: the mark is cleared, nothing is mailed
-	MarkPush(ctx, repo, 2, "main", "c1")
+	MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "c1")
 	assert.NotZero(t, scanOf(t, repo.ID, secretscan_model.KindRepo).NotifyAfterUnix)
 	w.commit(map[string]string{"plain.txt": "nothing\n"})
 	w.pushDefault()
@@ -57,12 +62,12 @@ func TestDigestAfterPush(t *testing.T) {
 	assert.Zero(t, scanOf(t, repo.ID, secretscan_model.KindRepo).NotifyAfterUnix, "the scan took the mark")
 
 	// a push with a secret: one digest, with the boundary and the pusher
-	MarkPush(ctx, repo, 2, "main", "c2")
+	MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "c2")
 	w.commit(map[string]string{"second.env": "T=" + token("second") + "\n"})
 	w.pushDefault()
 	require.NoError(t, Scan(ctx, repo.ID))
 	require.Len(t, *sent, 1)
-	assert.Equal(t, mailer.SecretDigestInput{Ref: "main", Commit: "c2", PusherID: 2, AfterAlertID: boundary}, (*sent)[0])
+	assert.Equal(t, mailer.SecretDigestInput{Ref: "main", Commit: "c2", PusherID: 2, AfterAlertID: boundary, Kinds: secretscan_model.DigestKindCode | secretscan_model.DigestWikiScanned}, (*sent)[0])
 	require.NoError(t, Scan(ctx, repo.ID))
 	require.NoError(t, Scan(ctx, repo.ID))
 	assert.Len(t, *sent, 1, "at most once: the mark is gone")
@@ -83,29 +88,34 @@ func TestDigestMarkRules(t *testing.T) {
 		require.NoError(t, err)
 		off, err := repo_model.GetRepositoryByID(ctx, repo.ID)
 		require.NoError(t, err)
-		MarkPush(ctx, off, 2, "main", "c")
+		MarkPush(ctx, off, 2, secretscan_model.KindRepo, "main", "c")
 		assert.Zero(t, mark().NotifyAfterUnix)
 		_, err = db.GetEngine(ctx).Exec("UPDATE repository SET secret_scanning_disabled = ? WHERE id = ?", false, repo.ID)
 		require.NoError(t, err)
 	})
 
-	t.Run("a backfill or a retry under way is not marked", func(t *testing.T) {
-		_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET retry_unix = ? WHERE repo_id = ?", time.Now().Unix()+3600, repo.ID)
+	noWait := func() { // the digests of the earlier subtests don't hold this one back
+		_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET notify_last_unix = 0 WHERE repo_id = ?", repo.ID)
 		require.NoError(t, err)
-		MarkPush(ctx, repo, 2, "main", "c")
+	}
+
+	t.Run("a repository that was never scanned to its end is not marked", func(t *testing.T) {
+		_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET completed = ? WHERE repo_id = ?", false, repo.ID)
+		require.NoError(t, err)
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "c")
 		assert.Zero(t, mark().NotifyAfterUnix)
-		_, err = db.GetEngine(ctx).Exec("UPDATE secret_scan SET retry_unix = 0 WHERE repo_id = ?", repo.ID)
+		_, err = db.GetEngine(ctx).Exec("UPDATE secret_scan SET completed = ? WHERE repo_id = ?", true, repo.ID)
 		require.NoError(t, err)
 	})
 
 	t.Run("a push that comes while a scan runs keeps its mark", func(t *testing.T) {
-		MarkPush(ctx, repo, 2, "main", "c1")
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "c1")
 		m := readMark(ctx, repo.ID)
 		require.NotNil(t, m)
-		MarkPush(ctx, repo, 2, "main", "c2") // after the scan read the mark
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "c2") // after the scan read the mark
 		w.commit(map[string]string{"b.env": "T=" + token("racing") + "\n"})
 		w.pushDefault()
-		finishDigest(ctx, repo, m)
+		finishDigest(ctx, repo, m, upToDate)
 		assert.Empty(t, *sent, "the clear was refused")
 		assert.NotZero(t, mark().NotifyAfterUnix)
 		require.NoError(t, Scan(ctx, repo.ID))
@@ -113,26 +123,106 @@ func TestDigestMarkRules(t *testing.T) {
 		assert.Equal(t, "c2", (*sent)[0].Commit)
 	})
 
-	t.Run("a scan that isn't complete waits for the last slice", func(t *testing.T) {
+	t.Run("a push during the last slice of a scan under way is marked and mailed when the scan ends", func(t *testing.T) {
 		*sent = nil
-		MarkPush(ctx, repo, 2, "main", "c3")
+		noWait()
+		_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET retry_unix = ? WHERE repo_id = ? AND kind = ?", time.Now().Unix()+3600, repo.ID, secretscan_model.KindRepo)
+		require.NoError(t, err)
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "c3")
+		require.NotZero(t, mark().NotifyAfterUnix, "a scan under way doesn't stop the marking")
 		w.commit(map[string]string{"c.env": "T=" + token("slices") + "\n"})
 		w.pushDefault()
-		m := readMark(ctx, repo.ID)
-		_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET retry_unix = ? WHERE repo_id = ? AND kind = ?", time.Now().Unix()+3600, repo.ID, secretscan_model.KindPull)
-		require.NoError(t, err)
-		finishDigest(ctx, repo, m)
+		finishDigest(ctx, repo, readMark(ctx, repo.ID), map[string]kindState{secretscan_model.KindRepo: {}})
 		assert.Empty(t, *sent)
-		assert.NotZero(t, mark().NotifyAfterUnix, "the mark stays")
-		_, err = db.GetEngine(ctx).Exec("UPDATE secret_scan SET retry_unix = 0 WHERE repo_id = ?", repo.ID)
-		require.NoError(t, err)
+		assert.NotZero(t, mark().NotifyAfterUnix, "the mark waits for the code scan")
 		require.NoError(t, Scan(ctx, repo.ID))
 		assert.Len(t, *sent, 1)
 	})
 
-	t.Run("an old mark is dropped without a mail", func(t *testing.T) {
+	t.Run("a push during a failure backoff keeps the mark until the scan runs again", func(t *testing.T) {
 		*sent = nil
-		MarkPush(ctx, repo, 2, "main", "c4")
+		noWait()
+		_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET retry_unix = ?, fail_count = 1 WHERE repo_id = ? AND kind = ?", time.Now().Unix()+3600, repo.ID, secretscan_model.KindRepo)
+		require.NoError(t, err)
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "c3b")
+		w.commit(map[string]string{"e.env": "T=" + token("backoff") + "\n"})
+		w.pushDefault()
+		require.NoError(t, Scan(ctx, repo.ID)) // waits out its backoff: nothing scanned
+		assert.Empty(t, *sent)
+		assert.NotZero(t, mark().NotifyAfterUnix, "the mark is not taken by a pass that scanned nothing")
+		_, err = db.GetEngine(ctx).Exec("UPDATE secret_scan SET retry_unix = ? WHERE repo_id = ? AND kind = ?", time.Now().Unix()-1, repo.ID, secretscan_model.KindRepo)
+		require.NoError(t, err)
+		require.NoError(t, Scan(ctx, repo.ID))
+		require.Len(t, *sent, 1, "the digest is sent")
+		assert.Equal(t, "c3b", (*sent)[0].Commit)
+	})
+
+	t.Run("a wiki that keeps failing or a pull scan that never completes does not hold back a code digest", func(t *testing.T) {
+		*sent = nil
+		n := 0
+		mk := func(kinds int) *notifyMark { // a fresh mark with these kinds, as the scan would read it
+			noWait()
+			MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "c")
+			_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET notify_kinds = ? WHERE repo_id = ? AND kind = ?", kinds, repo.ID, secretscan_model.KindRepo)
+			require.NoError(t, err)
+			n++ // an alert the push opened
+			_, err = db.GetEngine(ctx).Insert(&secretscan_model.Alert{RepoID: repo.ID, Index: int64(1000 + n), RuleID: "github-token", Fingerprint: fmt.Sprintf("%064d", n)})
+			require.NoError(t, err)
+			return readMark(ctx, repo.ID)
+		}
+		const code, wiki = secretscan_model.DigestKindCode, secretscan_model.DigestKindWiki
+		failingWiki := map[string]kindState{secretscan_model.KindRepo: {current: true}, secretscan_model.KindWiki: {failing: true}}
+		// the pull row is never in the states: the pass doesn't wait for it
+		finishDigest(ctx, repo, mk(code), failingWiki)
+		require.Len(t, *sent, 1, "a code push doesn't wait for the wiki or the pull refs")
+		assert.Equal(t, code, (*sent)[0].Kinds)
+
+		finishDigest(ctx, repo, mk(code|wiki), failingWiki)
+		require.Len(t, *sent, 2, "a code and a wiki push: the failing wiki is left out of the digest")
+		assert.Equal(t, code, (*sent)[1].Kinds)
+
+		finishDigest(ctx, repo, mk(wiki), failingWiki)
+		assert.Len(t, *sent, 2, "a wiki push waits for its own scan")
+		assert.NotZero(t, mark().NotifyAfterUnix)
+		_, err := secretscan_model.ClearNotify(ctx, repo.ID, mark().NotifySeq, 0)
+		require.NoError(t, err)
+	})
+
+	t.Run("at most one digest per quarter of an hour, and the next one carries everything", func(t *testing.T) {
+		*sent = nil
+		noWait()
+		t0 := time.Now().Truncate(time.Second)
+		timeutil.MockSet(t0)
+		defer timeutil.MockUnset()
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "d1")
+		w.commit(map[string]string{"f.env": "T=" + token("flood1") + "\n"})
+		w.pushDefault()
+		require.NoError(t, Scan(ctx, repo.ID))
+		require.Len(t, *sent, 1)
+
+		timeutil.MockSet(t0.Add(5 * time.Minute))
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "d2")
+		firstAlert := mark().NotifyAlertID
+		w.commit(map[string]string{"g.env": "T=" + token("flood2") + "\n"})
+		w.pushDefault()
+		require.NoError(t, Scan(ctx, repo.ID))
+		require.Len(t, *sent, 1, "within 15 minutes of the last digest")
+		assert.NotZero(t, mark().NotifyAfterUnix, "the mark stays")
+
+		timeutil.MockSet(t0.Add(16 * time.Minute))
+		require.NoError(t, Scan(ctx, repo.ID)) // nothing new to scan, the mark is taken
+		require.Len(t, *sent, 2)
+		assert.Equal(t, firstAlert, (*sent)[1].AfterAlertID)
+		assert.Equal(t, "d2", (*sent)[1].Commit)
+	})
+
+	t.Run("an old mark is dropped with a warning and no mail", func(t *testing.T) {
+		*sent = nil
+		noWait()
+		lc, cleanup := test.NewLogChecker(log.DEFAULT, log.WARN)
+		defer cleanup()
+		lc.Filter("is older than").StopMark("is older than")
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "c4")
 		_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET notify_after_unix = ? WHERE repo_id = ? AND kind = ?", time.Now().Add(-48*time.Hour).Unix(), repo.ID, secretscan_model.KindRepo)
 		require.NoError(t, err)
 		w.commit(map[string]string{"d.env": "T=" + token("old") + "\n"})
@@ -140,10 +230,12 @@ func TestDigestMarkRules(t *testing.T) {
 		require.NoError(t, Scan(ctx, repo.ID))
 		assert.Empty(t, *sent)
 		assert.Zero(t, mark().NotifyAfterUnix)
+		filtered, _ := lc.Check(5 * time.Second)
+		assert.True(t, slices.Contains(filtered, true), "the drop is logged at warn level")
 	})
 
 	t.Run("a rescan removes the mark", func(t *testing.T) {
-		MarkPush(ctx, repo, 2, "main", "c5")
+		MarkPush(ctx, repo, 2, secretscan_model.KindRepo, "main", "c5")
 		require.NotZero(t, mark().NotifyAfterUnix)
 		_, err := secretscan_model.DeleteScans(ctx, repo.ID)
 		require.NoError(t, err)
@@ -152,3 +244,6 @@ func TestDigestMarkRules(t *testing.T) {
 		assert.Empty(t, *sent, "the rescan is a first scan again")
 	})
 }
+
+// upToDate is a pass that brought the code up to date.
+var upToDate = map[string]kindState{secretscan_model.KindRepo: {current: true}}

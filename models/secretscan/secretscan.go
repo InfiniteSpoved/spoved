@@ -208,6 +208,17 @@ var ErrScanMoved = errors.New("the scan state changed meanwhile")
 // Save writes the state row as the scan that read old (nil = no row) leaves it, and returns ErrScanMoved when
 // another process wrote it first (a second row of the same repository and kind, or a changed version).
 func Save(ctx context.Context, old, s *Scan) error {
+	if err := save(ctx, old, s); err != nil {
+		return err
+	}
+	if s.RetryUnix == 0 { // no slice or retry left: the scan of this git repository has been to its end
+		_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET completed = ? WHERE repo_id = ? AND kind = ? AND completed = ?", true, s.RepoID, s.Kind, false)
+		return err
+	}
+	return nil
+}
+
+func save(ctx context.Context, old, s *Scan) error {
 	if old == nil {
 		// the unique key decides who inserts first; no row inserted is the lost race
 		insert := "INSERT INTO secret_scan (repo_id, kind, scanned_tips, status, error, blobs, bytes, skipped_large, fail_count, retry_unix, holes, version, updated_unix) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?) ON CONFLICT (repo_id, kind) DO NOTHING"
@@ -438,6 +449,7 @@ func RequeuedRepoIDsAfter(ctx context.Context, after int64, limit int) ([]int64,
 		Where(builder.Gt{"repository.id": after}).And(scannedRepoCond(0)).
 		And(builder.Exists(builder.Select("1").From("secret_scan", "marked").Where(builder.And(
 			builder.Expr("marked.repo_id = repository.id"), builder.Eq{"marked.kind": KindRepo},
-			builder.Or(builder.Gt{"marked.requeue": 0}, builder.Neq{"marked.notify_after_unix": 0}))))).
+			builder.Or(builder.Gt{"marked.requeue": 0}, builder.Neq{"marked.notify_after_unix": 0}),
+		)))).
 		OrderBy("repository.id").Limit(limit).Find(&ids)
 }

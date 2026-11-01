@@ -2964,11 +2964,10 @@
 		"one": "Your push to %[1]s contains %[2]d secret.",
 		"other": "Your push to %[1]s contains %[2]d secrets."
 	},
-	"mail.secret_digest.where_commit": "%s (commit %s)",
+	"mail.secret_digest.where_commit": "%[1]s (commit %[2]s)",
 	"mail.secret_digest.where_wiki": "the wiki",
+	"mail.secret_digest.where_push": "a push",
 	"mail.secret_digest.wiki_place": "%s (wiki)",
-	"mail.secret_digest.col_type": "Secret type",
-	"mail.secret_digest.col_found": "Found",
 	"mail.secret_digest.places": {
 		"one": "Location",
 		"other": "Locations"
@@ -2983,7 +2982,11 @@
 		"other": "View secret alerts"
 	},
 	"mail.secret_digest.advice_admin": "Revoke each credential with its provider first, then close the alert. Removing it from the code is not enough: it stays in git history.",
-	"mail.secret_digest.advice_pusher": "Revoke the credential with its provider now. Removing it from the code is not enough: it stays in git history.",
+	"mail.secret_digest.advice_pusher": {
+		"one": "Revoke the credential with its provider now. Removing it from the code is not enough: it stays in git history.",
+		"other": "Revoke the credentials with their providers now. Removing them from the code is not enough: they stay in git history."
+	},
+	"mail.secret_digest.admins_notified": "Repository administrators have been notified.",
 	"mail.secret_digest.foot_admin": "You receive this because you can manage secret alerts in %s. The email never contains the secrets.",
 	"mail.secret_digest.foot_pusher": "You receive this because you pushed these commits to %s. The email never contains the secrets.",
 	"mail.secret_digest.settings": "Notification settings",

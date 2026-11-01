@@ -5,7 +5,9 @@ package secretscan
 
 import (
 	"fmt"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
@@ -27,13 +29,16 @@ func TestMarkNotify(t *testing.T) {
 	ctx := t.Context()
 	marked := func(repoID, pusher int64, ref string) bool {
 		t.Helper()
-		ok, err := MarkNotify(ctx, repoID, pusher, ref, "c1")
+		ok, err := MarkNotify(ctx, repoID, pusher, KindRepo, ref, "c1")
 		require.NoError(t, err)
 		return ok
 	}
 	assert.False(t, marked(1, 2, "main"), "the first scan has no row: nothing is marked")
 
-	_, err := db.GetEngine(ctx).Insert(&Scan{RepoID: 1, Kind: KindRepo, Status: StatusOK})
+	_, err := db.GetEngine(ctx).Insert(&Scan{RepoID: 1, Kind: KindRepo, Status: StatusIncomplete, RetryUnix: 99})
+	require.NoError(t, err)
+	assert.False(t, marked(1, 2, "main"), "the first scan is still under way: it never completed")
+	_, err = db.GetEngine(ctx).Exec("UPDATE secret_scan SET completed = ? WHERE repo_id = 1", true)
 	require.NoError(t, err)
 	_, err = db.GetEngine(ctx).Insert(&Alert{RepoID: 1, Index: 1, RuleID: "r", Fingerprint: "f0"})
 	require.NoError(t, err)
@@ -65,25 +70,52 @@ func TestMarkNotify(t *testing.T) {
 	assert.Zero(t, scanRow(t, 1, KindRepo).NotifyPusherID, "and it stays so until the digest is sent")
 
 	// the clear compares the sequence the scan read
-	took, err := ClearNotify(ctx, 1, 2)
+	took, err := ClearNotify(ctx, 1, 2, 0)
 	require.NoError(t, err)
 	assert.False(t, took, "a push came after that read")
 	assert.NotZero(t, scanRow(t, 1, KindRepo).NotifyAfterUnix)
-	took, err = ClearNotify(ctx, 1, scanRow(t, 1, KindRepo).NotifySeq)
+	took, err = ClearNotify(ctx, 1, scanRow(t, 1, KindRepo).NotifySeq, 1234)
 	require.NoError(t, err)
 	assert.True(t, took)
 	cleared := scanRow(t, 1, KindRepo)
 	assert.Zero(t, cleared.NotifyAfterUnix)
 	assert.Empty(t, cleared.NotifyRef)
-	took, err = ClearNotify(ctx, 1, cleared.NotifySeq)
+	assert.EqualValues(t, 1234, cleared.NotifyLastUnix)
+	took, err = ClearNotify(ctx, 1, cleared.NotifySeq, 0)
 	require.NoError(t, err)
 	assert.False(t, took, "at most once: nothing left to take")
 
-	// a scan under way (a backfill, a retry) or in another kind: no mark
-	_, err = db.GetEngine(ctx).Insert(&Scan{RepoID: 1, Kind: KindWiki, Status: StatusIncomplete, RetryUnix: 99})
+	// a scan under way or backing off does not stop the marking: the mark waits for it
+	_, err = db.GetEngine(ctx).Exec("UPDATE secret_scan SET retry_unix = 99, fail_count = 2 WHERE repo_id = 1")
 	require.NoError(t, err)
-	assert.False(t, marked(1, 2, "main"))
-	assert.Zero(t, scanRow(t, 1, KindRepo).NotifyAfterUnix)
+	assert.True(t, marked(1, 2, "main"))
+	_, err = db.GetEngine(ctx).Exec("UPDATE secret_scan SET retry_unix = 0, fail_count = 0, notify_after_unix = 0, notify_kinds = 0 WHERE repo_id = 1")
+	require.NoError(t, err)
+
+	// a wiki push needs a wiki scanned once, and has no ref: the mark keeps the code push's
+	ok, err := MarkNotify(ctx, 1, 2, KindWiki, "", "")
+	require.NoError(t, err)
+	assert.False(t, ok, "the first scan of a wiki never mails")
+	require.True(t, marked(1, 2, "main"))
+	assert.Equal(t, DigestKindCode, scanRow(t, 1, KindRepo).NotifyKinds, "the wiki was not scanned at mark time")
+	_, err = db.GetEngine(ctx).Insert(&Scan{RepoID: 1, Kind: KindWiki, Status: StatusOK, Completed: true})
+	require.NoError(t, err)
+	ok, err = MarkNotify(ctx, 1, 2, KindWiki, "", "")
+	require.NoError(t, err)
+	require.True(t, ok)
+	row := scanRow(t, 1, KindRepo)
+	assert.Equal(t, DigestKindCode|DigestKindWiki|DigestWikiScanned, row.NotifyKinds)
+	assert.Equal(t, "main", row.NotifyRef, "a wiki push keeps the ref of the code push")
+	assert.Equal(t, "c1", row.NotifyCommit)
+
+	// the ref is cut to the column size on a character boundary
+	long := strings.Repeat("a", 254) + "ééé" // byte 255 is the middle of a character
+	require.True(t, marked(1, 2, long))
+	cut := scanRow(t, 1, KindRepo).NotifyRef
+	assert.Len(t, cut, 254, "the half character is dropped")
+	assert.True(t, utf8.ValidString(cut))
+	require.True(t, marked(1, 2, strings.Repeat("b", 300)))
+	assert.Len(t, scanRow(t, 1, KindRepo).NotifyRef, 255)
 }
 
 func TestBuildDigest(t *testing.T) {
@@ -107,14 +139,14 @@ func TestBuildDigest(t *testing.T) {
 	add(4, "slack", 2, KindWiki, KindWiki)
 	add(5, "slack", 2, KindWiki, KindRepo)
 
-	d, err := BuildDigest(ctx, 1, old, false)
+	d, err := BuildDigest(ctx, 1, old, []string{KindRepo, KindWiki, KindPull})
 	require.NoError(t, err)
 	assert.Equal(t, 4, d.Alerts)
 	assert.Equal(t, []DigestType{{"aws", 2}, {"slack", 2}}, d.Types)
 	assert.Equal(t, 19, d.TotalLocations)
 	assert.Len(t, d.Locations, MaxDigestLocations, "the list is capped")
 
-	d, err = BuildDigest(ctx, 1, old, true)
+	d, err = BuildDigest(ctx, 1, old, []string{KindRepo, KindPull})
 	require.NoError(t, err)
 	assert.Equal(t, 3, d.Alerts, "an alert only in the wiki is not for someone without wiki access")
 	assert.Equal(t, []DigestType{{"aws", 2}, {"slack", 1}}, d.Types)
@@ -123,7 +155,16 @@ func TestBuildDigest(t *testing.T) {
 		assert.NotEqual(t, KindWiki, l.Kind)
 	}
 
-	d, err = BuildDigest(ctx, 1, 1<<40, false)
+	d, err = BuildDigest(ctx, 1, old, []string{KindWiki})
+	require.NoError(t, err)
+	assert.Equal(t, 2, d.Alerts, "a pusher of the wiki is told of the wiki's alerts only")
+	assert.Zero(t, d.FirstIndex)
+	d, err = BuildDigest(ctx, 1, old+3, []string{KindRepo})
+	require.NoError(t, err)
+	assert.Equal(t, 1, d.Alerts)
+	assert.EqualValues(t, 5, d.FirstIndex, "one alert: its number, for a direct link")
+
+	d, err = BuildDigest(ctx, 1, 1<<40, []string{KindRepo})
 	require.NoError(t, err)
 	assert.Zero(t, d.Alerts, "nothing above the boundary")
 }

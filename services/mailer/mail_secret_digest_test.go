@@ -18,9 +18,12 @@ import (
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 
+	"github.com/inbucket/html2text"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+const kindsCode = secretscan_model.DigestKindCode | secretscan_model.DigestWikiScanned
 
 func TestSendSecretDigest(t *testing.T) {
 	require.NoError(t, unittest.PrepareTestDatabase())
@@ -82,19 +85,21 @@ func TestSendSecretDigest(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("nothing new: no mail", func(t *testing.T) {
-		assert.Empty(t, send(SecretDigestInput{Ref: "main", Commit: "1a2b3c4d5e6f"}))
+		assert.Empty(t, send(SecretDigestInput{Kinds: kindsCode, Ref: "main", Commit: "1a2b3c4d5e6f"}))
 	})
 
 	alert(2, "aws-access-key-id", 1, secretscan_model.KindRepo)
 	t.Run("one secret: singular subject, admins and the pusher with their own subject", func(t *testing.T) {
-		got := send(SecretDigestInput{Ref: "main", Commit: "1a2b3c4d5e6f", PusherID: 5})
+		got := send(SecretDigestInput{Kinds: kindsCode, Ref: "main", Commit: "1a2b3c4d5e6f", PusherID: 5})
 		require.Len(t, got, 3, "%v", got)
 		admin := got[user2]
 		require.NotNil(t, admin)
 		assert.Equal(t, "New secret found in user2/repo1", admin.Subject)
-		assert.Contains(t, admin.Body, "A scan of main (commit 1a2b3c4) found 1 secret that was not in the alert list yet.")
+		assert.Contains(t, admin.Body, `A scan of <code>main</code> (commit <a href="https://try.gitea.io/user2/repo1/commit/1a2b3c4d5e6f">1a2b3c4</a>) found 1 secret that was not in the alert list yet.`)
 		assert.Contains(t, admin.Body, "config/file2.env:10")
-		assert.Contains(t, admin.Body, `href="https://try.gitea.io/user2/repo1/security/secrets"`)
+		assert.Contains(t, admin.Body, `href="https://try.gitea.io/user2/repo1/security/secrets/2"`, "one alert: a link straight to it")
+		assert.Less(t, strings.Index(admin.Body, "View secret alert<"), strings.Index(admin.Body, "Revoke each credential"), "the button comes before the advice")
+		assert.Contains(t, admin.Body, "</code>")
 		assert.Contains(t, admin.Body, "View secret alert<")
 		assert.Contains(t, admin.Body, "You receive this because you can manage secret alerts in user2/repo1.")
 		assert.NotContains(t, admin.Body, "Your push")
@@ -102,9 +107,11 @@ func TestSendSecretDigest(t *testing.T) {
 		pusher := got[user5]
 		require.NotNil(t, pusher)
 		assert.Equal(t, "Your push to user2/repo1 contained a secret", pusher.Subject)
-		assert.Contains(t, pusher.Body, "Your push to main (commit 1a2b3c4) contains 1 secret.")
+		assert.Contains(t, pusher.Body, `Your push to <code>main</code> (commit <a href="https://try.gitea.io/user2/repo1/commit/1a2b3c4d5e6f">1a2b3c4</a>) contains 1 secret.`)
+		assert.Contains(t, pusher.Body, "Revoke the credential with its provider now.", "singular advice")
+		assert.Contains(t, pusher.Body, "Repository administrators have been notified.", "admin mails went out")
+		assert.NotContains(t, admin.Body, "have been notified")
 		assert.Contains(t, pusher.Body, "You receive this because you pushed these commits to user2/repo1.")
-		assert.NotContains(t, pusher.Body, "administrator")
 		for _, m := range got {
 			assert.NotContains(t, m.Subject+m.Body, fmt.Sprintf("%064d", 2*7919), "no fingerprint")
 			assert.NotContains(t, m.Subject+m.Body, "GitHub", "an alert below the boundary is not in it")
@@ -112,30 +119,30 @@ func TestSendSecretDigest(t *testing.T) {
 	})
 
 	t.Run("who is left out", func(t *testing.T) {
-		got := send(SecretDigestInput{Ref: "main", Commit: "1a2b3c4d5e6f", PusherID: 10})
+		got := send(SecretDigestInput{Kinds: kindsCode, Ref: "main", Commit: "1a2b3c4d5e6f", PusherID: 10})
 		assert.NotContains(t, got, "user10@example.com", "a reader isn't told: they can't see alerts")
 		assert.NotContains(t, got, user5, "a writer who didn't push gets no mail")
-		got = send(SecretDigestInput{Ref: "main", Commit: "1a2b3c4d5e6f", PusherID: 2})
+		got = send(SecretDigestInput{Kinds: kindsCode, Ref: "main", Commit: "1a2b3c4d5e6f", PusherID: 2})
 		assert.Len(t, got, 2, "a pusher who administers the repository gets the digest only: %v", got)
 		assert.NotContains(t, got[user2].Subject, "Your push")
-		got = send(SecretDigestInput{Ref: "main", Commit: "1a2b3c4d5e6f", PusherID: -2})
+		got = send(SecretDigestInput{Kinds: kindsCode, Ref: "main", Commit: "1a2b3c4d5e6f", PusherID: -2})
 		assert.Len(t, got, 2, "nobody pushed (an Actions task or a deploy key)")
-		got = send(SecretDigestInput{Ref: "main", Commit: "1a2b3c4d5e6f", PusherID: 99999})
+		got = send(SecretDigestInput{Kinds: kindsCode, Ref: "main", Commit: "1a2b3c4d5e6f", PusherID: 99999})
 		assert.Len(t, got, 2, "a pusher who is gone")
 
 		setPref(4, user_model.EmailNotificationsDisabled)
-		assert.NotContains(t, send(SecretDigestInput{Ref: "main"}), user4, "mail turned off")
+		assert.NotContains(t, send(SecretDigestInput{Kinds: kindsCode, Ref: "main"}), user4, "mail turned off")
 		setPref(4, user_model.EmailNotificationsOnMention)
-		assert.Contains(t, send(SecretDigestInput{Ref: "main"}), user4, "a security mail isn't a mention-only preset's to drop")
+		assert.Contains(t, send(SecretDigestInput{Kinds: kindsCode, Ref: "main"}), user4, "a security mail isn't a mention-only preset's to drop")
 		setPref(4, user_model.EmailNotificationsCustom)
 		require.NoError(t, user_model.SaveNotificationSettings(ctx, 4, 0, map[user_model.NotifyEvent]bool{user_model.NotifyEventSecretAlert: false}))
-		assert.NotContains(t, send(SecretDigestInput{Ref: "main"}), user4, "Custom with the event ticked off")
+		assert.NotContains(t, send(SecretDigestInput{Kinds: kindsCode, Ref: "main"}), user4, "Custom with the event ticked off")
 		require.NoError(t, user_model.SaveNotificationSettings(ctx, 4, 0, map[user_model.NotifyEvent]bool{user_model.NotifyEventSecretAlert: true}))
-		assert.Contains(t, send(SecretDigestInput{Ref: "main"}), user4, "Custom with the event")
+		assert.Contains(t, send(SecretDigestInput{Kinds: kindsCode, Ref: "main"}), user4, "Custom with the event")
 		setPref(4, user_model.EmailNotificationsEnabled)
 		_, err := db.GetEngine(ctx).Exec("UPDATE `user` SET prohibit_login = ? WHERE id = 4", true)
 		require.NoError(t, err)
-		assert.NotContains(t, send(SecretDigestInput{Ref: "main"}), user4, "an account that can't sign in")
+		assert.NotContains(t, send(SecretDigestInput{Kinds: kindsCode, Ref: "main"}), user4, "an account that can't sign in")
 		_, err = db.GetEngine(ctx).Exec("UPDATE `user` SET prohibit_login = ? WHERE id = 4", false)
 		require.NoError(t, err)
 	})
@@ -144,7 +151,7 @@ func TestSendSecretDigest(t *testing.T) {
 		alert(3, "github-token", 1, secretscan_model.KindWiki)
 		alert(4, "aws-access-key-id", 3, secretscan_model.KindRepo, secretscan_model.KindRepo, secretscan_model.KindRepo)
 		alert(5, "aws-access-key-id", 14, secretscan_model.KindRepo, secretscan_model.KindRepo, secretscan_model.KindRepo, secretscan_model.KindRepo, secretscan_model.KindRepo, secretscan_model.KindRepo, secretscan_model.KindRepo, secretscan_model.KindRepo)
-		got := send(SecretDigestInput{Ref: "main", Commit: "1a2b3c4d5e6f", PusherID: 5})
+		got := send(SecretDigestInput{Kinds: kindsCode, Ref: "main", Commit: "1a2b3c4d5e6f", PusherID: 5})
 		admin := got[user2]
 		require.NotNil(t, admin)
 		assert.Equal(t, "New secrets found in user2/repo1", admin.Subject)
@@ -156,19 +163,42 @@ func TestSendSecretDigest(t *testing.T) {
 		assert.Equal(t, "Your push to user2/repo1 contained secrets", got[user5].Subject)
 		assert.Contains(t, got[user5].Body, "View secret alerts<")
 
-		// the wiki unit off: nobody reads it, so the alert that is only there is not counted or listed
-		_, err := db.GetEngine(ctx).Exec("DELETE FROM repo_unit WHERE repo_id = 1 AND type = ?", unit.TypeWiki)
+		// the pusher is told only of the kind they pushed, an administrator of everything new
+		alert(6, "github-token", 1, secretscan_model.KindPull)
+		got = send(SecretDigestInput{Kinds: secretscan_model.DigestKindCode, Ref: "main", Commit: "1a2b3c4d5e6f", PusherID: 5})
+		assert.Contains(t, got[user2].Body, "found 4 secrets", "an administrator hears of the pull ref's alert too")
+		assert.Contains(t, got[user5].Body, "contains 3 secrets", "the pusher of a branch hears of the code alerts only: not the wiki's, not the pull ref's")
+		got = send(SecretDigestInput{Kinds: secretscan_model.DigestKindWiki, PusherID: 5})
+		assert.Contains(t, got[user5].Body, "contains 1 secret.", "the pusher of the wiki hears of the wiki's alert only")
+		assert.Contains(t, got[user5].Body, "Your push to the wiki", "a wiki push names the wiki")
+		got = send(SecretDigestInput{Kinds: secretscan_model.DigestKindCode, Ref: "main", Commit: "1a2b3c4d5e6f"})
+		assert.NotContains(t, got[user2].Body, "(wiki)", "a wiki that was not scanned before the push is left out")
+
+		// the plain-text version lists the types, one a line
+		plain, err := html2text.FromString(got[user2].Body)
 		require.NoError(t, err)
-		got = send(SecretDigestInput{Ref: "main", Commit: "1a2b3c4d5e6f"})
+		assert.Regexp(t, `(?m)^\* AWS access key ID: 3$`, plain)
+
+		// nobody to tell the pusher's "administrators were notified" of
+		setPref(2, user_model.EmailNotificationsDisabled)
+		setPref(4, user_model.EmailNotificationsDisabled)
+		got = send(SecretDigestInput{Kinds: kindsCode, Ref: "main", Commit: "1a2b3c4d5e6f", PusherID: 5})
+		require.Len(t, got, 1)
+		assert.NotContains(t, got[user5].Body, "have been notified", "no administrator mail went out")
+		setPref(2, user_model.EmailNotificationsEnabled)
+		setPref(4, user_model.EmailNotificationsEnabled)
+
+		// the wiki unit off: nobody reads it, so the alert that is only there is not counted or listed
+		_, err = db.GetEngine(ctx).Exec("DELETE FROM repo_unit WHERE repo_id = 1 AND type = ?", unit.TypeWiki)
+		require.NoError(t, err)
+		got = send(SecretDigestInput{Kinds: kindsCode, Ref: "main", Commit: "1a2b3c4d5e6f"})
 		admin = got[user2]
 		require.NotNil(t, admin)
-		assert.Contains(t, admin.Body, "found 3 secrets that were not")
+		assert.Contains(t, admin.Body, "found 4 secrets that were not")
 		assert.NotContains(t, admin.Body, "(wiki)")
-		assert.Contains(t, admin.Body, "Locations (10 of 18)")
-	})
-
-	t.Run("a wiki push names the wiki", func(t *testing.T) {
-		got := send(SecretDigestInput{})
-		assert.Contains(t, got[user2].Body, "A scan of the wiki found")
+		assert.Contains(t, admin.Body, "Locations (10 of 19)")
+		got = send(SecretDigestInput{Kinds: secretscan_model.DigestKindWiki | secretscan_model.DigestWikiScanned})
+		assert.Contains(t, got[user2].Body, "A scan of a push found", "someone who can't read the wiki is never told of a push to it")
+		assert.NotContains(t, got[user2].Body, "wiki")
 	})
 }

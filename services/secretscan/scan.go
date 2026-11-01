@@ -184,14 +184,16 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	if repo.HasWiki() {
 		kinds = append(kinds, secretscan_model.KindWiki)
 	}
+	states := map[string]kindState{}
 	for _, kind := range append(kinds, secretscan_model.KindPull) { // what a reader can write comes last
 		rq, kerr := s.scanKind(kind)
 		requeue = requeue || rq
 		err = errors.Join(err, kerr)
+		if mark != nil && kind != secretscan_model.KindPull && !rq && kerr == nil { // the digest never waits for the pull refs
+			states[kind] = readKindState(ctx, repo.ID, kind)
+		}
 	}
-	if err == nil && !requeue {
-		finishDigest(ctx, repo, mark)
-	}
+	finishDigest(ctx, repo, mark, states) // waits for the kinds the push touched, never for the pull refs
 	return requeue, err
 }
 
