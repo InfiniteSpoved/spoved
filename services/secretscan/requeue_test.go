@@ -6,12 +6,14 @@ package secretscan
 import (
 	"slices"
 	"testing"
+	"time"
 
 	audit_model "forgejo.org/models/audit"
 	"forgejo.org/models/db"
 	secretscan_model "forgejo.org/models/secretscan"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/secretdetection"
 	"forgejo.org/modules/test"
 
 	"github.com/stretchr/testify/assert"
@@ -111,6 +113,67 @@ func TestRequeueMarkSurvivesARestart(t *testing.T) {
 	require.NoError(t, Scan(ctx, repo.ID))
 	assert.NotContains(t, markedIDs(t), repo.ID)
 	assert.False(t, scanOf(t, repo.ID, secretscan_model.KindRepo).Requeue)
+}
+
+// After a restart every marked repository is queued by the startup run and by the cron task, not 500 per run; and a
+// slice that fails keeps the mark, one that writes its state takes it.
+func TestRequeueAfterRestart(t *testing.T) {
+	repo := enable(t)
+	q := mockQueue(t)
+	ctx := audit_model.WithSystem(t.Context(), "test")
+	for _, id := range []int64{2, 3, 4} {
+		_, err := db.GetEngine(ctx).Exec("UPDATE repository SET status = 0 WHERE id = ?", id)
+		require.NoError(t, err)
+	}
+	w := newWork(t, repo)
+	w.commit(map[string]string{"a.txt": "nothing here\n"})
+	w.pushDefault()
+	require.NoError(t, Scan(ctx, repo.ID))
+	for _, id := range []int64{2, 3, 4} {
+		require.NoError(t, secretscan_model.Save(ctx, nil, &secretscan_model.Scan{RepoID: id, Kind: secretscan_model.KindRepo, ScannedTips: "[]", Status: secretscan_model.StatusOK}))
+	}
+	require.NoError(t, secretscan_model.MarkRequeue(ctx, 0))
+	marked := markedIDs(t)
+	require.GreaterOrEqual(t, len(marked), 4)
+	queued := func() (n int) {
+		for _, id := range marked {
+			if has, err := q.Has(id); err == nil && has {
+				n++
+			}
+		}
+		require.NoError(t, q.RemoveAllItems(ctx))
+		return n
+	}
+
+	// the startup run (a process of its own, as at start) queues them all, a batch at a time
+	defer test.MockVariableValue(&requeueBatch, 2)()
+	startRequeue()
+	require.Eventually(t, func() bool {
+		for _, id := range marked {
+			if has, _ := q.Has(id); !has {
+				return false
+			}
+		}
+		return true
+	}, 10*time.Second, 20*time.Millisecond, "every marked repository is queued at start")
+	queued()
+
+	// the cron task queues all of them too, whatever its own limit of repositories per run
+	require.NoError(t, EnqueueUnscanned(ctx))
+	assert.Equal(t, len(marked), queued())
+
+	// a failing slice leaves the mark; the scan that writes its state takes it
+	w.commit(map[string]string{"b.env": "T=" + token("fails") + "\n"})
+	w.pushDefault()
+	restore := test.MockVariableValue(&scanContent, func(*secretdetection.Detector, []byte) ([]secretdetection.Finding, bool) { panic("boom") })
+	require.NoError(t, Scan(ctx, repo.ID))
+	restore()
+	assert.Equal(t, secretscan_model.StatusFailed, scanOf(t, repo.ID, secretscan_model.KindRepo).Status)
+	assert.Contains(t, markedIDs(t), repo.ID, "a failed slice keeps the mark")
+	_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET retry_unix = 0, fail_count = 0 WHERE repo_id = ?", repo.ID)
+	require.NoError(t, err)
+	require.NoError(t, Scan(ctx, repo.ID))
+	assert.NotContains(t, markedIDs(t), repo.ID, "the slice that wrote its state took the mark")
 }
 
 // Only a change that turns scanning on for repositories marks them and asks for the queue; unlocking an organization that stays on,

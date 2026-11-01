@@ -270,11 +270,6 @@ func (s *scanner) scanKind(kind string) (requeue bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	if kind == secretscan_model.KindRepo && old != nil && old.Requeue {
-		if err = secretscan_model.ClearRequeue(s.ctx, s.repo.ID); err != nil { // the scan takes the row
-			return false, err
-		}
-	}
 	r := &run{scanner: s, kind: kind, old: old, keyCap: s.cfg.MaxAlertsPerRepo, found: map[string]*foundBlob{}, seen: map[string]struct{}{}, keys: map[string]struct{}{}}
 	if kind == secretscan_model.KindPull {
 		r.keyCap = max(r.keyCap/2, 1) // as many secrets as the alert share of the pull refs
@@ -302,6 +297,9 @@ func (s *scanner) scanKind(kind string) (requeue bool, err error) {
 			return false, nil // a failure waits out its backoff
 		}
 		if old.RetryUnix == 0 && len(missing(tips, stored)) == 0 {
+			if kind == secretscan_model.KindRepo && old.Requeue { // the scan took the row and has nothing to write
+				return false, secretscan_model.ClearRequeue(s.ctx, s.repo.ID)
+			}
 			return false, nil // nothing new; the status stays as it is
 		}
 		if old.RetryUnix > 0 { // a scan under way or after a failure: its totals go on
@@ -685,7 +683,15 @@ func (r *run) write(st *secretscan_model.Scan, cands []*candidate) error {
 				st.Status, st.Error = secretscan_model.StatusIncomplete, stopAlerts
 			}
 		}
-		return secretscan_model.Save(ctx, r.old, st)
+		if err := secretscan_model.Save(ctx, r.old, st); err != nil {
+			return err
+		}
+		// the scan takes the requeue mark with the state it writes: a slice that failed or was cut short by a kill
+		// leaves the mark, so the repository is queued again
+		if r.kind == secretscan_model.KindRepo && st.FailCount == 0 && r.old != nil && r.old.Requeue {
+			return secretscan_model.ClearRequeue(ctx, r.repo.ID)
+		}
+		return nil
 	})
 	switch {
 	case err == nil:

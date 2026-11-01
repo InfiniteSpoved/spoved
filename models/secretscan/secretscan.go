@@ -336,7 +336,6 @@ func UnscannedRepoIDs(ctx context.Context, now timeutil.TimeStamp, limit int) ([
 				builder.Gt{"due.retry_unix": 0},
 				builder.Lte{"due.retry_unix": int64(now)},
 			))),
-			builder.Eq{"secret_scan.requeue": true}, // the join row is the repository's (kind repo)
 		)).
 		OrderBy("repository.id").Limit(limit).
 		Find(&ids)

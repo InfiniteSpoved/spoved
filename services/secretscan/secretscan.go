@@ -54,6 +54,7 @@ func Init() error {
 		return errors.New("unable to create secret_scanning queue")
 	}
 	go graceful.GetManager().RunWithCancel(scanQueue)
+	requeue() // the repositories a switch marked before a stop or a crash: the queue is ready, whether or not the cron task is on
 	return nil
 }
 
@@ -159,7 +160,8 @@ func handler(items ...int64) (unhandled []int64) {
 // EnqueueUnscanned queues the repositories that have no scan state (empty ones too: their wiki may hold a secret) or a
 // state of either kind (a wiki's too) whose retry time has come: a failed scan after its backoff, or a scan that a
 // limit stopped (which goes on from the tips it stored). Repositories secret scanning is off for are left out. It
-// queues 500 per call; the next call takes the next ones once these are scanned.
+// queues 500 per call; the next call takes the next ones once these are scanned. The repositories a switch that turned
+// on marked (requeueMarked) are queued all at once, outside that limit, so a restart doesn't spread them over hours.
 func EnqueueUnscanned(ctx context.Context) error {
 	if !SiteEnabled(ctx) {
 		return nil
@@ -171,5 +173,5 @@ func EnqueueUnscanned(ctx context.Context) error {
 	for _, id := range ids {
 		Enqueue(id)
 	}
-	return nil
+	return requeueMarked(ctx, Enqueue)
 }
