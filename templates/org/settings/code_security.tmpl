@@ -36,5 +36,65 @@
 			</fieldset>
 		</form>
 	</div>
+	<h4 class="ui top attached header secret-scanning-header">
+		{{ctx.Locale.Tr "repo.settings.secret_scanning"}}
+	</h4>
+	<div class="ui attached segment" id="secret-scanning-box">
+		{{if not .SecretSiteOn}}
+			<div class="ui warning message" id="secret-scanning-site-off">
+				{{ctx.Locale.Tr "org.settings.secret_scanning.site_off"}}
+				{{if .CanChangeThere}}<a href="{{AppSubUrl}}/admin/config/secret-scanning">{{ctx.Locale.Tr "repo.settings.dependency_graph.change_in_admin"}}</a>{{else}}{{ctx.Locale.Tr "repo.settings.dependency_graph.ask_admin"}}{{end}}
+			</div>
+		{{end}}
+		<form class="ui form secret-confirm-form" id="org-secret-scanning-switch" action="{{.OrgLink}}/settings/code_security/secret_scanning" method="post" autocomplete="off">
+			<div class="field">
+				<div class="ui checkbox">
+					<input id="secret-scanning-enabled" name="enabled" type="checkbox" {{if .SecretOn}}checked{{end}}{{if .SecretSiteOn}} data-confirm-modal="#secret-scanning-org-off-modal" data-confirm-when="off"{{end}}>
+					<label for="secret-scanning-enabled">
+						<strong>{{ctx.Locale.Tr "org.settings.secret_scanning.enable" .Org.Name}}</strong>
+						<span class="help">{{ctx.Locale.Tr "org.settings.secret_scanning.enable_help"}}</span>
+					</label>
+				</div>
+			</div>
+			<div class="field secret-scanning-sub-option">
+				<div class="ui checkbox">
+					<input id="secret-scanning-locked" name="locked" type="checkbox" {{if .SecretLocked}}checked{{end}}{{if .SecretSiteOn}} data-confirm-modal="#secret-scanning-org-lock-modal" data-confirm-when="on" data-confirm-requires="#secret-scanning-enabled"{{end}}>
+					<label for="secret-scanning-locked">
+						<strong>{{ctx.Locale.Tr "org.settings.secret_scanning.locked"}}</strong>
+						<span class="help">{{if .SecretLocked}}{{ctx.Locale.Tr "org.settings.secret_scanning.locked_help_on"}}{{else}}{{ctx.Locale.Tr "org.settings.secret_scanning.locked_help_off"}}{{end}}</span>
+					</label>
+				</div>
+			</div>
+			<button class="ui primary button" id="secret-scanning-save">{{ctx.Locale.Tr "save"}}</button>
+			<p class="help" id="secret-scanning-counts">
+				{{$offLink := ""}}
+				{{if .SecretOff}}{{$offLink = HTMLFormat `<a id="secret-scanning-off-link" href="%s/settings/code_security/secret_scanning/repos">%s</a>` .OrgLink (ctx.Locale.TrPluralString .SecretOff "org.settings.secret_scanning.off_repos" (ctx.Locale.PrettyNumber .SecretOff))}}{{end}}
+				{{if not .SecretSiteOn}}{{ctx.Locale.Tr "org.settings.secret_scanning.counts_site_off"}}{{if .SecretOff}} {{$offLink}}.{{end}}
+				{{else if not .SecretOn}}{{ctx.Locale.Tr "org.settings.secret_scanning.counts_off" (ctx.Locale.PrettyNumber .SecretTotal)}}
+				{{else if or .SecretLocked (not .SecretOff)}}{{ctx.Locale.Tr "org.settings.secret_scanning.counts_locked" (ctx.Locale.PrettyNumber .SecretTotal) (ctx.Locale.PrettyNumber .SecretTotal)}}
+				{{else}}{{ctx.Locale.Tr "org.settings.secret_scanning.counts_some" (ctx.Locale.PrettyNumber .SecretScanned) (ctx.Locale.PrettyNumber .SecretTotal) $offLink}}{{end}}
+			</p>
+		</form>
+	</div>
 </div>
+<dialog class="modal" id="secret-scanning-org-off-modal" aria-labelledby="secret-scanning-org-off-heading">
+	<article>
+		<header id="secret-scanning-org-off-heading">{{ctx.Locale.TrPluralString .SecretScanned "org.settings.secret_scanning.off_confirm_title" (ctx.Locale.PrettyNumber .SecretScanned)}}</header>
+		<div class="content"><p>{{ctx.Locale.Tr "org.settings.secret_scanning.off_confirm" .Org.Name}}</p></div>
+		<div class="actions">
+			<button type="button" class="ui small basic cancel button">{{svg "octicon-x"}} {{ctx.Locale.Tr "cancel"}}</button>
+			<button class="ui small red approve button secret-confirm-ok" form="org-secret-scanning-switch" type="submit">{{ctx.Locale.Tr "repo.settings.secret_scanning.off_submit"}}</button>
+		</div>
+	</article>
+</dialog>
+<dialog class="modal" id="secret-scanning-org-lock-modal" aria-labelledby="secret-scanning-org-lock-heading">
+	<article>
+		<header id="secret-scanning-org-lock-heading">{{ctx.Locale.Tr "org.settings.secret_scanning.lock_confirm_title" .Org.Name}}</header>
+		<div class="content"><p>{{if not .SecretLockTurnsOn}}{{ctx.Locale.Tr "org.settings.secret_scanning.lock_confirm_none"}}{{else if .SecretOn}}{{ctx.Locale.TrPluralString .SecretLockTurnsOn "org.settings.secret_scanning.lock_confirm" (ctx.Locale.PrettyNumber .SecretLockTurnsOn)}}{{else}}{{ctx.Locale.TrPluralString .SecretLockTurnsOn "org.settings.secret_scanning.lock_confirm_all" (ctx.Locale.PrettyNumber .SecretLockTurnsOn)}}{{end}}</p></div>
+		<div class="actions">
+			<button type="button" class="ui small basic cancel button">{{svg "octicon-x"}} {{ctx.Locale.Tr "cancel"}}</button>
+			<button class="ui small primary approve button secret-confirm-ok" form="org-secret-scanning-switch" type="submit">{{ctx.Locale.Tr "org.settings.secret_scanning.lock_submit"}}</button>
+		</div>
+	</article>
+</dialog>
 {{template "org/settings/layout_footer" .}}

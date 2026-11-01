@@ -297,6 +297,9 @@ func (s *scanner) scanKind(kind string) (requeue bool, err error) {
 			return false, nil // a failure waits out its backoff
 		}
 		if old.RetryUnix == 0 && len(missing(tips, stored)) == 0 {
+			if kind == secretscan_model.KindRepo && old.Requeue > 0 { // the scan took the row and has nothing to write
+				return false, secretscan_model.ClearRequeue(s.ctx, s.repo.ID, old.Requeue)
+			}
 			return false, nil // nothing new; the status stays as it is
 		}
 		if old.RetryUnix > 0 { // a scan under way or after a failure: its totals go on
@@ -680,7 +683,15 @@ func (r *run) write(st *secretscan_model.Scan, cands []*candidate) error {
 				st.Status, st.Error = secretscan_model.StatusIncomplete, stopAlerts
 			}
 		}
-		return secretscan_model.Save(ctx, r.old, st)
+		if err := secretscan_model.Save(ctx, r.old, st); err != nil {
+			return err
+		}
+		// the scan takes the requeue mark with the state it writes: a slice that failed or was cut short by a kill
+		// leaves the mark, so the repository is queued again
+		if r.kind == secretscan_model.KindRepo && st.FailCount == 0 && r.old != nil && r.old.Requeue > 0 {
+			return secretscan_model.ClearRequeue(ctx, r.repo.ID, r.old.Requeue)
+		}
+		return nil
 	})
 	switch {
 	case err == nil:

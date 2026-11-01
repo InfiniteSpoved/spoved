@@ -77,7 +77,10 @@ type Scan struct {
 	RetryUnix timeutil.TimeStamp `xorm:"INDEX NOT NULL DEFAULT 0"`
 	// Holes counts what was marked done without being scanned: files of a commit that alone was over the slice limits,
 	// files the detector could not scan whole, and secrets left out for the alert cap. Error says why for the last.
-	Holes       int64              `xorm:"NOT NULL DEFAULT 0"`
+	Holes int64 `xorm:"NOT NULL DEFAULT 0"`
+	// Requeue marks a repository to scan again after a switch turned on (set with the setting, cleared when the scan
+	// takes the row), so that a restart doesn't lose it: the cron task queues marked rows too.
+	Requeue     int64              `xorm:"INDEX NOT NULL DEFAULT 0"`
 	UpdatedUnix timeutil.TimeStamp `xorm:"INDEX updated"`
 }
 
@@ -86,11 +89,11 @@ func (*Scan) TableName() string { return "secret_scan" }
 // Alert is one secret (by rule and fingerprint) found in a repository.
 type Alert struct {
 	ID            int64              `xorm:"pk autoincr"`
-	RepoID        int64              `xorm:"UNIQUE(repo_rule_fingerprint) UNIQUE(repo_index) INDEX(repo_state) NOT NULL"`
+	RepoID        int64              `xorm:"UNIQUE(repo_rule_fingerprint) UNIQUE(repo_index) INDEX(repo_state) INDEX(repo_fingerprint) NOT NULL"`
 	Index         int64              `xorm:"UNIQUE(repo_index) NOT NULL"`
 	RuleID        string             `xorm:"VARCHAR(64) UNIQUE(repo_rule_fingerprint) NOT NULL"`
 	SecretType    string             `xorm:"VARCHAR(32) NOT NULL DEFAULT ''"`
-	Fingerprint   string             `xorm:"VARCHAR(64) UNIQUE(repo_rule_fingerprint) NOT NULL"`
+	Fingerprint   string             `xorm:"VARCHAR(64) UNIQUE(repo_rule_fingerprint) INDEX(repo_fingerprint) NOT NULL"`
 	KeyVersion    int                `xorm:"SMALLINT NOT NULL DEFAULT 1"`
 	State         string             `xorm:"VARCHAR(16) INDEX(repo_state) NOT NULL DEFAULT 'open'"`
 	Reason        string             `xorm:"VARCHAR(16) NOT NULL DEFAULT ''"` // set when the alert is closed (written by the API and the pages)
@@ -357,4 +360,69 @@ func orgSettingCond(key, value string) builder.Cond {
 		builder.Eq{"user_setting.setting_key": key, "user_setting.setting_value": value},
 		builder.In("user_setting.user_id", builder.Select("id").From("`user`").Where(builder.Eq{"type": 1})), // user_model.UserTypeOrganization (models/user can't be imported here)
 	)))
+}
+
+// orgRepoCond is the repositories of an organization (the ones in projects too), the trash left out.
+func orgRepoCond(orgID int64) builder.Cond {
+	return builder.Eq{"repository.owner_id": orgID, "repository.trashed_unix": 0}
+}
+
+// CountOrgRepos counts the repositories of an organization and, of those, the ones whose admins turned secret
+// scanning off (their own setting; it counts while the organization neither turns it off nor locks it).
+func CountOrgRepos(ctx context.Context, orgID int64) (total, off int64, err error) {
+	if total, err = db.GetEngine(ctx).Table("repository").Where(orgRepoCond(orgID)).Count(); err != nil {
+		return 0, 0, err
+	}
+	off, err = db.GetEngine(ctx).Table("repository").Where(orgRepoCond(orgID)).And("secret_scanning_disabled = ?", true).Count()
+	return total, off, err
+}
+
+// FindOrgOffRepos lists the repositories of an organization whose admins turned secret scanning off, with the total.
+func FindOrgOffRepos(ctx context.Context, orgID int64, opts db.ListOptions) (repo_model.RepositoryList, int64, error) {
+	repos := repo_model.RepositoryList{}
+	cond := builder.And(orgRepoCond(orgID), builder.Eq{"repository.secret_scanning_disabled": true})
+	total, err := db.GetEngine(ctx).Where(cond).OrderBy("repository.lower_name").Limit(opts.PageSize, (opts.Page-1)*opts.PageSize).FindAndCount(&repos)
+	return repos, total, err
+}
+
+// scannedRepoCond is the ready repositories that have a scan state and secret scanning isn't off for below the site
+// (an organization's, or all of them with 0).
+func scannedRepoCond(orgID int64) builder.Cond {
+	cond := builder.And(
+		builder.Eq{"repository.status": repo_model.RepositoryReady, "repository.trashed_unix": 0},
+		builder.Not{OffCond()},
+		builder.Exists(builder.Select("1").From("secret_scan").Where(builder.Expr("secret_scan.repo_id = repository.id"))),
+	)
+	if orgID != 0 {
+		cond = cond.And(builder.Eq{"repository.owner_id": orgID})
+	}
+	return cond
+}
+
+// MarkRequeue marks the repositories ScannedRepoIDsAfter would list (their repository scan state) to be scanned again.
+// It runs in the transaction that saves the switch, so the mark and the setting stand or fall together.
+func MarkRequeue(ctx context.Context, orgID int64) error {
+	_, err := db.GetEngine(ctx).NoAutoTime().
+		Where(builder.And(builder.Eq{"kind": KindRepo}, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scannedRepoCond(orgID))))).
+		Incr("requeue").Update(&Scan{})
+	return err
+}
+
+// ClearRequeue removes the mark when the scan takes the repository, if the counter is still seq (what the scan read
+// before it started): a switch turned on meanwhile has counted it up, so its mark stays.
+func ClearRequeue(ctx context.Context, repoID, seq int64) error {
+	_, err := db.GetEngine(ctx).NoAutoTime().Where("repo_id = ? AND kind = ? AND requeue = ? AND requeue > 0", repoID, KindRepo, seq).Cols("requeue").Update(&Scan{Requeue: 0})
+	return err
+}
+
+// RequeuedRepoIDsAfter returns up to limit ids above after of the repositories marked by MarkRequeue that are still
+// ready, in no trash and not switched off since.
+func RequeuedRepoIDsAfter(ctx context.Context, after int64, limit int) ([]int64, error) {
+	var ids []int64
+	return ids, db.GetEngine(ctx).Table("repository").Select("repository.id").
+		Where(builder.Gt{"repository.id": after}).And(scannedRepoCond(0)).
+		And(builder.Exists(builder.Select("1").From("secret_scan", "marked").Where(builder.And(
+			builder.Expr("marked.repo_id = repository.id"), builder.Eq{"marked.kind": KindRepo}, builder.Gt{"marked.requeue": 0},
+		)))).
+		OrderBy("repository.id").Limit(limit).Find(&ids)
 }

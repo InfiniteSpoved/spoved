@@ -6,6 +6,10 @@ package setting
 import (
 	"context"
 	"fmt"
+	"math"
+	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,13 +45,15 @@ type SecretScanningLimit struct {
 }
 
 // SecretScanningLimits are the numeric settings, checked by the same bounds in app.ini and in Site administration.
+// The lower bounds of the scan time, the file size and the alert cap keep an admin from making scanning ineffective
+// by accident (a one-second scan, a one-byte file limit, a handful of alerts).
 var SecretScanningLimits = []SecretScanningLimit{
 	{"max_concurrent_scans", "MAX_CONCURRENT_SCANS", 1, 1, 16, false, func(o *SecretScanningOptions) any { return &o.MaxConcurrentScans }},
-	{"scan_timeout", "SCAN_TIMEOUT", 300, 1, 24 * 3600, true, func(o *SecretScanningOptions) any { return &o.ScanTimeout }},
-	{"max_blob_size", "MAX_BLOB_SIZE", 1 << 20, 1, 100 << 20, false, func(o *SecretScanningOptions) any { return &o.MaxBlobSize }},
-	{"max_scan_bytes", "MAX_SCAN_BYTES", 2 << 30, 1, 1 << 40, false, func(o *SecretScanningOptions) any { return &o.MaxScanBytes }},
-	{"max_scan_blobs", "MAX_SCAN_BLOBS", 2_000_000, 1, 100_000_000, false, func(o *SecretScanningOptions) any { return &o.MaxScanBlobs }},
-	{"max_alerts_per_repo", "MAX_ALERTS_PER_REPO", 10_000, 1, 1_000_000, false, func(o *SecretScanningOptions) any { return &o.MaxAlertsPerRepo }},
+	{"scan_timeout", "SCAN_TIMEOUT", 300, 30, 24 * 3600, true, func(o *SecretScanningOptions) any { return &o.ScanTimeout }},
+	{"max_blob_size", "MAX_BLOB_SIZE", 1 << 20, 64 << 10, 100 << 20, false, func(o *SecretScanningOptions) any { return &o.MaxBlobSize }},
+	{"max_scan_bytes", "MAX_SCAN_BYTES", 2 << 30, 1 << 20, 1 << 40, false, func(o *SecretScanningOptions) any { return &o.MaxScanBytes }},
+	{"max_scan_blobs", "MAX_SCAN_BLOBS", 2_000_000, 1000, 100_000_000, false, func(o *SecretScanningOptions) any { return &o.MaxScanBlobs }},
+	{"max_alerts_per_repo", "MAX_ALERTS_PER_REPO", 10_000, 100, 1_000_000, false, func(o *SecretScanningOptions) any { return &o.MaxAlertsPerRepo }},
 	{"max_locations_per_alert", "MAX_LOCATIONS_PER_ALERT", 100, 1, 10_000, false, func(o *SecretScanningOptions) any { return &o.MaxLocationsPerAlert }},
 }
 
@@ -69,6 +75,17 @@ func (l SecretScanningLimit) Check(v int64) error {
 	return nil
 }
 
+// Get reads the limit from the options (seconds for a duration).
+func (l SecretScanningLimit) Get(o *SecretScanningOptions) int64 {
+	switch p := l.field(o).(type) {
+	case *int64:
+		return *p
+	case *time.Duration:
+		return int64(*p / time.Second)
+	}
+	return 0
+}
+
 func (l SecretScanningLimit) set(o *SecretScanningOptions, v int64) {
 	switch p := l.field(o).(type) {
 	case *int64:
@@ -78,20 +95,24 @@ func (l SecretScanningLimit) set(o *SecretScanningOptions, v int64) {
 	}
 }
 
+var secretScanningDigits = regexp.MustCompile(`^[0-9]+$`)
+
+// loadSecretScanningFrom reads [secret_scanning]. One rule for every key: a value that can't be read is logged and the
+// default is used, and the server never stops for it. Integers are plain decimal digits (no sign, hex or separators),
+// SCAN_TIMEOUT is a duration (5m) or a bare number of seconds, and a number outside its bounds is clamped with a warning.
 func loadSecretScanningFrom(rootCfg ConfigProvider) error {
 	sec := rootCfg.Section("secret_scanning")
-	SecretScanning.Enabled = sec.Key("ENABLED").MustBool(false)
-	SecretScanning.GenericRules = sec.Key("GENERIC_RULES").MustBool(false)
+	SecretScanning.Enabled = secretScanningBool(sec, "ENABLED")
+	SecretScanning.GenericRules = secretScanningBool(sec, "GENERIC_RULES")
 	for _, l := range SecretScanningLimits {
-		var v int64
-		if l.Duration {
-			d, err := sec.Key(l.Key).MustDuration(time.Duration(l.Default) * time.Second)
-			if err != nil {
-				return err
+		v := l.Default
+		if raw := strings.TrimSpace(sec.Key(l.Key).String()); raw != "" {
+			parsed, ok := parseSecretScanningValue(raw, l.Duration)
+			if ok {
+				v = parsed
+			} else {
+				log.Warn("[secret_scanning] %s %q can't be read as %s, using the default %d", l.Key, raw, map[bool]string{true: "a duration or a number of seconds", false: "a whole number"}[l.Duration], l.Default)
 			}
-			v = int64(d / time.Second)
-		} else {
-			v = sec.Key(l.Key).MustInt64(l.Default)
 		}
 		if err := l.Check(v); err != nil {
 			clamped := min(max(v, l.Min), l.Max)
@@ -103,10 +124,45 @@ func loadSecretScanningFrom(rootCfg ConfigProvider) error {
 	return nil
 }
 
+// secretScanningBool reads a boolean key: a word that is none (the ones MapTo reads) is logged and the default (false) is used.
+func secretScanningBool(sec ConfigSection, key string) bool {
+	raw := strings.TrimSpace(sec.Key(key).String())
+	if raw == "" {
+		return false
+	}
+	v, err := sec.Key(key).Bool()
+	if err != nil {
+		log.Warn("[secret_scanning] %s %q is not a boolean, using the default false", key, raw)
+	}
+	return v
+}
+
+// parseSecretScanningValue reads plain decimal digits (any number of them: one too long for 64 bits reads as the
+// largest number, so it is clamped to the key's maximum) and, for a duration, also a Go duration (seconds as the unit
+// of the result).
+func parseSecretScanningValue(raw string, duration bool) (int64, bool) {
+	if secretScanningDigits.MatchString(raw) {
+		v, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return math.MaxInt64, true
+		}
+		return v, true
+	}
+	if duration {
+		d, err := time.ParseDuration(raw)
+		if err == nil && d >= 0 {
+			return int64(d / time.Second), true
+		}
+	}
+	return 0, false
+}
+
 // SecretScanningState is stored as JSON in the "secret_scanning.enabled" system setting. An empty Mode means the
 // app.ini default ([secret_scanning] ENABLED); once the switch is saved in Site administration, the stored value wins.
 type SecretScanningState struct {
-	Mode string `json:"mode"` // "on", "off" or "" (app.ini)
+	Mode        string `json:"mode"` // "on", "off" or "" (app.ini)
+	UpdatedBy   int64  `json:"updated_by,omitempty"`
+	UpdatedUnix int64  `json:"updated_unix,omitempty"`
 }
 
 // Enabled is the site switch in force. A stored value that can't be parsed or isn't known reads as off.
@@ -128,6 +184,8 @@ type SecretScanningConfig struct {
 
 	GenericRules *bool            `json:"generic_rules,omitempty"`
 	Limits       map[string]int64 `json:"limits,omitempty"` // by SecretScanningLimit.Name; seconds for a duration
+	UpdatedBy    int64            `json:"updated_by,omitempty"`
+	UpdatedUnix  int64            `json:"updated_unix,omitempty"`
 }
 
 // mergedSecretScanning caches SecretScanningSettings: Merge (and its logs) runs once per settings revision and

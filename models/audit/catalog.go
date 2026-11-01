@@ -185,6 +185,7 @@ var Actions = map[string]string{
 
 	"org.branch_workflow.changed":          CategoryOrg,
 	"org.dependency_graph.changed":         CategoryOrg,
+	"org.secret_scanning.changed":          CategoryOrg,
 	"org.dependency_graph.exported":        CategoryOrg,
 	"org.merged_branches.deleted":          CategoryOrg,
 	"org.organization.archived":            CategoryOrg,

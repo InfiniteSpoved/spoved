@@ -45,6 +45,7 @@ func recordSettings(ctx context.Context, before, after map[string]string) error 
 	budget := maxSettingValues
 	for _, k := range keys {
 		old, had := before[k]
+		had = had && old != "" // an empty row is one created to be locked (EnsureSetting): not stored yet
 		v := after[k]
 		if slices.Contains(audit_model.Fields["setting"], k) && len(v) <= maxSettingValue && len(old) <= maxSettingValue && len(v)+len(old) <= budget {
 			var oldValue, value any
