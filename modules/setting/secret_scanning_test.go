@@ -52,10 +52,20 @@ func TestSecretScanningParsing(t *testing.T) {
 	load("SCAN_TIMEOUT = -5m\n")
 	assert.Equal(t, 5*time.Minute, SecretScanning.ScanTimeout, "negative duration: the default")
 
-	for _, bad := range []string{"0x10000", "1_000", "1e5", "+5000", "-5000", "5000.5", "many", "99999999999999999999"} {
+	for _, bad := range []string{"0x10000", "1_000", "1e5", "+5000", "-5000", "5000.5", "many"} {
 		load("MAX_ALERTS_PER_REPO = " + bad + "\n")
 		assert.EqualValues(t, 10_000, SecretScanning.MaxAlertsPerRepo, bad)
 	}
+	load("MAX_ALERTS_PER_REPO = 99999999999999999999999\n")
+	assert.EqualValues(t, 1_000_000, SecretScanning.MaxAlertsPerRepo, "too long for 64 bits: the maximum, not the default")
+	load("SCAN_TIMEOUT = 99999999999999999999999\n")
+	assert.Equal(t, 24*time.Hour, SecretScanning.ScanTimeout, "the same for seconds")
+	load("ENABLED = true\nGENERIC_RULES = yes\n")
+	assert.True(t, SecretScanning.Enabled)
+	assert.True(t, SecretScanning.GenericRules)
+	load("ENABLED = maybe\nGENERIC_RULES = 2\n")
+	assert.False(t, SecretScanning.Enabled, "not a boolean: the default")
+	assert.False(t, SecretScanning.GenericRules)
 	load("MAX_ALERTS_PER_REPO = 7\n")
 	assert.EqualValues(t, 100, SecretScanning.MaxAlertsPerRepo, "raised to the minimum")
 	load("MAX_ALERTS_PER_REPO = 250\n")

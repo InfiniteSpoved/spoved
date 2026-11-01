@@ -355,7 +355,11 @@ func TestSecretScanningAdminSettings(t *testing.T) {
 		assert.EqualValues(t, 1<<20, effective().MaxBlobSize)
 		assert.Equal(t, 300*time.Second, effective().ScanTimeout)
 		resp := admin.MakeRequest(t, NewRequestWithValues(t, "POST", limits, map[string]string{"max_blob_size": "101"}), http.StatusUnprocessableEntity)
-		assert.Contains(t, NewHTMLParser(t, resp.Body).Find("#secret-scanning-limits-error").Text(), "Largest file scanned must be between 64 KiB and 100 MiB.")
+		assert.Contains(t, NewHTMLParser(t, resp.Body).Find("#secret-scanning-limits-error").Text(), "Largest file scanned must be at least 64 KiB and at most 100 MiB.")
+		resp = admin.MakeRequest(t, NewRequestWithValues(t, "POST", limits, map[string]string{"max_scan_bytes": "2000000", "max_locations_per_alert": "10001"}), http.StatusUnprocessableEntity)
+		assert.Contains(t, NewHTMLParser(t, resp.Body).Find("#secret-scanning-limits-error").Text(), "Most data per scan must be at least 1 MiB and at most 1 TiB.", "the biggest whole unit")
+		resp = admin.MakeRequest(t, NewRequestWithValues(t, "POST", limits, map[string]string{"max_locations_per_alert": "10001"}), http.StatusUnprocessableEntity)
+		assert.Contains(t, NewHTMLParser(t, resp.Body).Find("#secret-scanning-limits-error").Text(), "must be at least 1 and at most 10000.", "no unit on a count")
 	})
 
 	t.Run("read-only maintenance refuses both forms", func(t *testing.T) {

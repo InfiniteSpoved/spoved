@@ -6,6 +6,7 @@ package setting
 import (
 	"context"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -94,15 +95,15 @@ func (l SecretScanningLimit) set(o *SecretScanningOptions, v int64) {
 	}
 }
 
-var secretScanningDigits = regexp.MustCompile(`^[0-9]{1,18}$`)
+var secretScanningDigits = regexp.MustCompile(`^[0-9]+$`)
 
 // loadSecretScanningFrom reads [secret_scanning]. One rule for every key: a value that can't be read is logged and the
 // default is used, and the server never stops for it. Integers are plain decimal digits (no sign, hex or separators),
 // SCAN_TIMEOUT is a duration (5m) or a bare number of seconds, and a number outside its bounds is clamped with a warning.
 func loadSecretScanningFrom(rootCfg ConfigProvider) error {
 	sec := rootCfg.Section("secret_scanning")
-	SecretScanning.Enabled = sec.Key("ENABLED").MustBool(false)
-	SecretScanning.GenericRules = sec.Key("GENERIC_RULES").MustBool(false)
+	SecretScanning.Enabled = secretScanningBool(sec, "ENABLED")
+	SecretScanning.GenericRules = secretScanningBool(sec, "GENERIC_RULES")
 	for _, l := range SecretScanningLimits {
 		v := l.Default
 		if raw := strings.TrimSpace(sec.Key(l.Key).String()); raw != "" {
@@ -123,12 +124,29 @@ func loadSecretScanningFrom(rootCfg ConfigProvider) error {
 	return nil
 }
 
-// parseSecretScanningValue reads plain decimal digits and, for a duration, also a Go duration (seconds as the unit
+// secretScanningBool reads a boolean key: a word that is none (the ones MapTo reads) is logged and the default (false) is used.
+func secretScanningBool(sec ConfigSection, key string) bool {
+	raw := strings.TrimSpace(sec.Key(key).String())
+	if raw == "" {
+		return false
+	}
+	v, err := sec.Key(key).Bool()
+	if err != nil {
+		log.Warn("[secret_scanning] %s %q is not a boolean, using the default false", key, raw)
+	}
+	return v
+}
+
+// parseSecretScanningValue reads plain decimal digits (any number of them: one too long for 64 bits reads as the
+// largest number, so it is clamped to the key's maximum) and, for a duration, also a Go duration (seconds as the unit
 // of the result).
 func parseSecretScanningValue(raw string, duration bool) (int64, bool) {
 	if secretScanningDigits.MatchString(raw) {
 		v, err := strconv.ParseInt(raw, 10, 64)
-		return v, err == nil
+		if err != nil {
+			return math.MaxInt64, true
+		}
+		return v, true
 	}
 	if duration {
 		d, err := time.ParseDuration(raw)

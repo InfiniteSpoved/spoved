@@ -3880,9 +3880,11 @@
 	"admin.secret_scanning.unit.seconds": "seconds",
 	"admin.secret_scanning.unit.mib": "MiB",
 	"admin.secret_scanning.unit.kib": "KiB",
+	"admin.secret_scanning.unit.gib": "GiB",
+	"admin.secret_scanning.unit.tib": "TiB",
 	"admin.secret_scanning.unit.alerts": "alerts",
 	"admin.secret_scanning.unit.places": "locations",
 	"admin.secret_scanning.unit.files": "files",
-	"admin.secret_scanning.error.nothing_saved": "Nothing was saved. %s must be between %s and %s.",
+	"admin.secret_scanning.error.nothing_saved": "Nothing was saved. %s must be at least %s and at most %s.",
 	"admin.secret_scanning.error.invalid": "Nothing was saved. %s must be a number."
 }

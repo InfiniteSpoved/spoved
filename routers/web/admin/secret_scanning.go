@@ -46,16 +46,38 @@ func mustLimit(name string) setting.SecretScanningLimit {
 	return l
 }
 
-// secretScanningBoundText is a bound with its unit for messages: a size below 1 MiB in KiB ("64 KiB", never 0.0625 MiB).
-func secretScanningBoundText(ctx *context.Context, name string, v int64) string {
-	if secretScanningFormUnits[name] > 1 && v%(1<<20) != 0 && v%(1<<10) == 0 {
-		return strconv.FormatInt(v>>10, 10) + " " + ctx.Locale.TrString("admin.secret_scanning.unit.kib")
+// secretScanningBoundText is a bound with its unit for messages: a size in the biggest whole unit ("64 KiB", "1 TiB",
+// never 0.0625 MiB). A count has its unit (alerts, files) only with countUnit: the refusal message says "at least 1 and
+// at most 10000" and leaves it out, since "1 locations" is wrong and every language has its own plural.
+func secretScanningBoundText(ctx *context.Context, name string, v int64, countUnit bool) string {
+	if secretScanningFormUnits[name] > 1 {
+		for _, u := range []struct {
+			size int64
+			key  string
+		}{{1 << 40, "tib"}, {1 << 30, "gib"}, {1 << 20, "mib"}, {1 << 10, "kib"}} {
+			if v%u.size == 0 || u.key == "kib" {
+				return strconv.FormatInt(v/u.size, 10) + " " + secretScanningSizeUnit(ctx, u.key)
+			}
+		}
 	}
 	text := secretScanningLimitText(name, v)
-	if unit := secretScanningLimitUnit(ctx, name); unit != "" {
+	if unit := secretScanningLimitUnit(ctx, name); unit != "" && (countUnit || name == "scan_timeout") {
 		text += " " + unit
 	}
 	return text
+}
+
+// secretScanningSizeUnit is a literal-key switch, so that lint-locale-usage finds the keys.
+func secretScanningSizeUnit(ctx *context.Context, key string) string {
+	switch key {
+	case "tib":
+		return ctx.Locale.TrString("admin.secret_scanning.unit.tib")
+	case "gib":
+		return ctx.Locale.TrString("admin.secret_scanning.unit.gib")
+	case "mib":
+		return ctx.Locale.TrString("admin.secret_scanning.unit.mib")
+	}
+	return ctx.Locale.TrString("admin.secret_scanning.unit.kib")
 }
 
 var (
@@ -169,7 +191,7 @@ func renderSecretScanning(ctx *context.Context, posted map[string]string, refuse
 		rows = append(rows, row)
 	}
 	ctx.Data["Limits"] = rows
-	floor := func(name string) string { return secretScanningBoundText(ctx, name, mustLimit(name).Min) }
+	floor := func(name string) string { return secretScanningBoundText(ctx, name, mustLimit(name).Min, true) }
 	ctx.Data["LimitFloors"] = ctx.Tr("admin.secret_scanning.limits_floors", floor("scan_timeout"), floor("max_blob_size"), floor("max_scan_bytes"), floor("max_scan_blobs"), floor("max_alerts_per_repo"), secretScanningLimitText("max_locations_per_alert", mustLimit("max_locations_per_alert").Min))
 	if refused != nil {
 		ctx.Data["LimitsError"] = refused.Error
@@ -215,7 +237,7 @@ func SecretScanningLimitsPost(ctx *context.Context) {
 	changed, err := secretscan_service.SaveLimits(ctx, ctx.Doer, limits)
 	if lerr, ok := errors.AsType[*secretscan_service.LimitError](err); ok {
 		l := lerr.Limit
-		msg := ctx.Tr("admin.secret_scanning.error.nothing_saved", secretScanningLimitLabel(ctx, l.Name), secretScanningBoundText(ctx, l.Name, l.Min), secretScanningBoundText(ctx, l.Name, l.Max))
+		msg := ctx.Tr("admin.secret_scanning.error.nothing_saved", secretScanningLimitLabel(ctx, l.Name), secretScanningBoundText(ctx, l.Name, l.Min, false), secretScanningBoundText(ctx, l.Name, l.Max, false))
 		renderSecretScanning(ctx, posted, &secretScanningLimitRow{Name: l.Name, Error: msg}, http.StatusUnprocessableEntity)
 		return
 	}
