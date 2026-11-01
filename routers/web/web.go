@@ -919,6 +919,7 @@ func registerRoutes(m *web.Route) {
 	// the audit log is outside adminReq for the auditor; only GET routes may be (TestAdminAuditRoutes)
 	m.Get("/admin/audit", reqSignIn, admin.AuditReq, admin.Audit)
 	m.Get("/admin/config/dependency-graph", reqSignIn, admin.AuditReq, admin.DependencyGraph)
+	m.Get("/admin/config/secret-scanning", reqSignIn, admin.AuditReq, admin.SecretScanning)
 	// the dependency and vulnerability search is read-only: the auditor searches and, as the audited download is no
 	// change, posts it too (TestAdminAuditRoutes)
 	m.Group("/admin/config/dependency-graph", func() {
@@ -961,6 +962,8 @@ func registerRoutes(m *web.Route) {
 			m.Post("/dependency-graph/update-advisories", admin.DependencyGraphUpdateAdvisories)
 			m.Post("/dependency-graph/settings", admin.DependencyGraphSettingsPost)
 			m.Post("/dependency-graph/test-connection", admin.DependencyGraphTestConnection)
+			m.Post("/secret-scanning/switches", admin.SecretScanningSwitchesPost)
+			m.Post("/secret-scanning/limits", admin.SecretScanningLimitsPost)
 		})
 
 		m.Group("/monitor", func() {
@@ -1322,6 +1325,8 @@ func registerRoutes(m *web.Route) {
 				m.Get("/repos", org_setting.Repos)
 
 				m.Combo("/code_security").Get(org_setting.CodeSecurity).Post(org_setting.CodeSecurityPost)
+				m.Post("/code_security/secret_scanning", org_setting.SecretScanningPost)
+				m.Get("/code_security/secret_scanning/repos", org_setting.SecretScanningOff)
 				m.Combo("/branch_workflow").Get(org_setting.BranchWorkflow).
 					Post(web.Bind(forms.BranchWorkflowForm{}), org_setting.BranchWorkflowPost)
 				m.Post("/branch_workflow/branching_model", web.Bind(forms.BranchingModelForm{}), org_setting.BranchingModelPost)

@@ -47,6 +47,24 @@ export function initRepoSecretAlerts() {
     e.preventDefault();
     showModal(document.querySelector(form.getAttribute('data-modal')), undefined);
   });
+  // the organization and Site administration switches: an input that carries data-confirm-modal asks first when the
+  // change would turn scanning off ("off") or a rule on ("on"); the modal's button submits the form again, marked
+  document.addEventListener('submit', (e) => {
+    const form = e.target.closest?.('.secret-confirm-form');
+    if (!form || form.hasAttribute('data-confirmed')) return;
+    for (const input of form.querySelectorAll('input[data-confirm-modal]')) {
+      const turnsOn = input.getAttribute('data-confirm-when') === 'on';
+      if (input.checked !== input.defaultChecked && input.checked === turnsOn) {
+        e.preventDefault();
+        showModal(document.querySelector(input.getAttribute('data-confirm-modal')), undefined);
+        return;
+      }
+    }
+  });
+  document.addEventListener('click', (e) => {
+    const ok = e.target.closest?.('.secret-confirm-ok');
+    if (ok) document.getElementById(ok.getAttribute('form'))?.setAttribute('data-confirmed', 'true');
+  });
   // the phone's menu bar scrolls: the current page must be in view
   const menu = document.querySelector('.repo-security-menu');
   const active = menu?.querySelector('.item.active');

@@ -149,6 +149,7 @@ var Fields = map[string][]string{
 		"keys", "hashed", "picture.disable_gravatar", "picture.enable_federated_avatar", "repository.open-with.editor-apps",
 		"maintenance.state", "ip_allowlist.state", "oauth2.app_policy", "webhook.types", "repository.unit_policy",
 		"repository.personal_repos", "org_category.owners_can_assign", "audit.retention_days", "dependency_graph.enabled",
+		"secret_scanning.enabled", "secret_scanning.config",
 	},
 	"log_shipping": {
 		"id", "name", "type", "endpoint", "log_types", "enabled", "level", "ndjson", "key_changed", "headers_changed",
@@ -159,7 +160,7 @@ var Fields = map[string][]string{
 		"repo_admin_change_team_access", "max_repo_creation", "category_id", "is_active", "prohibit_login", "user_id",
 		"counts", "purge", "domain", "verified_by_admin", "required", "units", "mode", "locked", "development_branch",
 		"release_prefixes", "production_branch", "merge_forward", "merge_forward_never_bypass", "merge_forward_anyone_may_skip", "model_locked",
-		"dependency_graph", "dependency_graph_locked",
+		"dependency_graph", "dependency_graph_locked", "secret_scanning", "secret_scanning_locked",
 	},
 	"team": {
 		"name", "access_mode", "units", "includes_all_repositories", "can_create_org_repo", "user_id", "inviter_id", "reason",

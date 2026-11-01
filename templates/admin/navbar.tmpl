@@ -129,6 +129,9 @@
 				<a class="{{if .PageIsAdminConfigDependencyGraph}}active {{end}}item" href="{{AppSubUrl}}/admin/config/dependency-graph">
 					{{ctx.Locale.Tr "admin.dependency_graph"}}
 				</a>
+				<a class="{{if .PageIsAdminConfigSecretScanning}}active {{end}}item" href="{{AppSubUrl}}/admin/config/secret-scanning">
+					{{ctx.Locale.Tr "admin.secret_scanning"}}
+				</a>
 				{{if .SecuritySearchEnabled}}
 					<a class="{{if .PageIsAdminConfigDependencyGraphVulnerabilities}}active {{end}}item security-search-nav" href="{{AppSubUrl}}/admin/config/dependency-graph/vulnerabilities">
 						{{ctx.Locale.Tr "security_search.vulnerabilities"}}

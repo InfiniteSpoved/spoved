@@ -358,3 +358,42 @@ func orgSettingCond(key, value string) builder.Cond {
 		builder.In("user_setting.user_id", builder.Select("id").From("`user`").Where(builder.Eq{"type": 1})), // user_model.UserTypeOrganization (models/user can't be imported here)
 	)))
 }
+
+// orgRepoCond is the repositories of an organization (the ones in projects too), the trash left out.
+func orgRepoCond(orgID int64) builder.Cond {
+	return builder.Eq{"repository.owner_id": orgID, "repository.trashed_unix": 0}
+}
+
+// CountOrgRepos counts the repositories of an organization and, of those, the ones whose admins turned secret
+// scanning off (their own setting; it counts while the organization neither turns it off nor locks it).
+func CountOrgRepos(ctx context.Context, orgID int64) (total, off int64, err error) {
+	if total, err = db.GetEngine(ctx).Table("repository").Where(orgRepoCond(orgID)).Count(); err != nil {
+		return 0, 0, err
+	}
+	off, err = db.GetEngine(ctx).Table("repository").Where(orgRepoCond(orgID)).And("secret_scanning_disabled = ?", true).Count()
+	return total, off, err
+}
+
+// FindOrgOffRepos lists the repositories of an organization whose admins turned secret scanning off, with the total.
+func FindOrgOffRepos(ctx context.Context, orgID int64, opts db.ListOptions) (repo_model.RepositoryList, int64, error) {
+	repos := repo_model.RepositoryList{}
+	cond := builder.And(orgRepoCond(orgID), builder.Eq{"repository.secret_scanning_disabled": true})
+	total, err := db.GetEngine(ctx).Where(cond).OrderBy("repository.lower_name").Limit(opts.PageSize, (opts.Page-1)*opts.PageSize).FindAndCount(&repos)
+	return repos, total, err
+}
+
+// ScannedRepoIDsAfter returns up to limit ids above after of ready repositories that have a scan state and secret
+// scanning isn't off for below the site (all of them, or an organization's): the ones to scan again when a switch
+// turns on, since pushes meanwhile were not scanned. Never-scanned repositories are the cron task's.
+func ScannedRepoIDsAfter(ctx context.Context, orgID, after int64, limit int) ([]int64, error) {
+	var ids []int64
+	sess := db.GetEngine(ctx).Table("repository").Select("repository.id").
+		Where(builder.Eq{"repository.status": repo_model.RepositoryReady, "repository.trashed_unix": 0}).
+		And(builder.Gt{"repository.id": after}).
+		And(builder.Not{OffCond()}).
+		And(builder.Exists(builder.Select("1").From("secret_scan").Where(builder.Expr("secret_scan.repo_id = repository.id"))))
+	if orgID != 0 {
+		sess = sess.And(builder.Eq{"repository.owner_id": orgID})
+	}
+	return ids, sess.OrderBy("repository.id").Limit(limit).Find(&ids)
+}

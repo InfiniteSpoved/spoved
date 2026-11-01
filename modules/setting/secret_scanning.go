@@ -69,6 +69,17 @@ func (l SecretScanningLimit) Check(v int64) error {
 	return nil
 }
 
+// Get reads the limit from the options (seconds for a duration).
+func (l SecretScanningLimit) Get(o *SecretScanningOptions) int64 {
+	switch p := l.field(o).(type) {
+	case *int64:
+		return *p
+	case *time.Duration:
+		return int64(*p / time.Second)
+	}
+	return 0
+}
+
 func (l SecretScanningLimit) set(o *SecretScanningOptions, v int64) {
 	switch p := l.field(o).(type) {
 	case *int64:
@@ -106,7 +117,9 @@ func loadSecretScanningFrom(rootCfg ConfigProvider) error {
 // SecretScanningState is stored as JSON in the "secret_scanning.enabled" system setting. An empty Mode means the
 // app.ini default ([secret_scanning] ENABLED); once the switch is saved in Site administration, the stored value wins.
 type SecretScanningState struct {
-	Mode string `json:"mode"` // "on", "off" or "" (app.ini)
+	Mode        string `json:"mode"` // "on", "off" or "" (app.ini)
+	UpdatedBy   int64  `json:"updated_by,omitempty"`
+	UpdatedUnix int64  `json:"updated_unix,omitempty"`
 }
 
 // Enabled is the site switch in force. A stored value that can't be parsed or isn't known reads as off.
@@ -128,6 +141,8 @@ type SecretScanningConfig struct {
 
 	GenericRules *bool            `json:"generic_rules,omitempty"`
 	Limits       map[string]int64 `json:"limits,omitempty"` // by SecretScanningLimit.Name; seconds for a duration
+	UpdatedBy    int64            `json:"updated_by,omitempty"`
+	UpdatedUnix  int64            `json:"updated_unix,omitempty"`
 }
 
 // mergedSecretScanning caches SecretScanningSettings: Merge (and its logs) runs once per settings revision and
