@@ -134,7 +134,7 @@ type SecretScanningStatus struct {
 	Reason string `json:"reason"`
 	// files and secrets that were marked done without being scanned
 	Holes int64 `json:"holes"`
-	// files over the size limit that were not read
+	// files over the size limit that were not read, counted since the last scan from the beginning (a rescan)
 	SkippedLarge int64 `json:"skipped_large"`
 	// when the last scan that did not fail ended
 	// swagger:strfmt date-time

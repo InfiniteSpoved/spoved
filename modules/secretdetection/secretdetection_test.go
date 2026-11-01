@@ -307,6 +307,7 @@ func TestRules(t *testing.T) {
 	}
 
 	tests = append(tests, moreRuleTests()...)
+	tests = append(tests, comparisonRuleTests()...)
 	covered := map[string]bool{}
 	for _, tt := range tests {
 		covered[tt.rule] = true

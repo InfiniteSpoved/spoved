@@ -439,6 +439,7 @@ func TestSecretAlertsRescanAndSettings(t *testing.T) {
 			doc := secretPage(t, owner, list, http.StatusOK)
 			doc.AssertElement(t, "#secret-banner-incomplete", true)
 			assert.Contains(t, doc.Find("#secret-banner-incomplete").Text(), "6 files or secrets were left out")
+			assert.Contains(t, doc.Find("#secret-banner-large").Text(), "4 files are larger than the scan's size limit")
 			since := auditMaxID(t)
 			secretPost(t, owner, list+"/rescan", url.Values{}, http.StatusSeeOther)
 			assert.Contains(t, flashMessage(t, owner), "new scan was queued")
@@ -457,6 +458,7 @@ func TestSecretAlertsRescanAndSettings(t *testing.T) {
 			assert.Equal(t, repo.ID, e.RepoID)
 			doc = secretPage(t, owner, list, http.StatusOK)
 			doc.AssertElement(t, "#secret-banner-incomplete", false)
+			doc.AssertElement(t, "#secret-banner-large", false)
 		})
 
 		t.Run("a scan that read the state before a rescan can not save it; a rescan without state only queues", func(t *testing.T) {

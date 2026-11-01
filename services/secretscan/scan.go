@@ -331,8 +331,9 @@ func (s *scanner) scanKind(kind string) (requeue bool, err error) {
 			return false, nil // nothing new; the status stays as it is
 		}
 		if old.RetryUnix > 0 { // a scan under way or after a failure: its totals go on
-			r.totBlobs, r.totBytes, r.totSkipped = old.Blobs, old.Bytes, old.SkippedLarge
+			r.totBlobs, r.totBytes = old.Blobs, old.Bytes
 		}
+		r.totSkipped = old.SkippedLarge // a file that was never read stays counted until a rescan from the beginning
 	}
 	afterTips(s.repo.ID, kind)
 	if r.done, err = existingTips(s.scanCtx, r.gitRepo, stored); err != nil {
@@ -600,7 +601,7 @@ func (r *run) candidates() []*candidate {
 				case int64(len(c.locs)) >= r.cfg.MaxLocationsPerAlert:
 					c.extra++
 				default:
-					c.locs[key] = secretscan_model.NewLocation(r.repo.ID, locKind(r.kind), id, p.path, f.start, f.end, p.commit.ID, p.commit.AuthorName, p.commit.AuthorEmail, p.commit.Unix)
+					c.locs[key] = secretscan_model.NewLocation(r.repo.ID, r.kind, id, p.path, f.start, f.end, p.commit.ID, p.commit.AuthorName, p.commit.AuthorEmail, p.commit.Unix)
 				}
 			}
 		}
@@ -608,14 +609,6 @@ func (r *run) candidates() []*candidate {
 	return slices.SortedFunc(maps.Values(byKey), func(a, b *candidate) int {
 		return cmp.Or(cmp.Compare(a.ruleID, b.ruleID), cmp.Compare(a.fingerprint, b.fingerprint))
 	})
-}
-
-// locKind is the kind stored on a place: the pull refs are part of the repository.
-func locKind(kind string) string {
-	if kind == secretscan_model.KindPull {
-		return secretscan_model.KindRepo
-	}
-	return kind
 }
 
 // finish stores what the slice did in one transaction: the alerts and the row, with the new done tips (the ref tips
@@ -706,7 +699,7 @@ func (r *run) write(st *secretscan_model.Scan, cands []*candidate) error {
 		if owner != r.repo.OwnerID {
 			return errOwnerMoved
 		}
-		left, err := writeAlerts(ctx, cfg, r.repo.ID, locKind(r.kind), r.kind == secretscan_model.KindPull, cands, nil)
+		left, err := writeAlerts(ctx, cfg, r.repo.ID, r.kind, r.kind == secretscan_model.KindPull, cands, nil)
 		if err != nil {
 			return err
 		}

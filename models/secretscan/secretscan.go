@@ -78,7 +78,9 @@ type Scan struct {
 	ScannedTips string `xorm:"LONGTEXT"`
 	Status      string `xorm:"VARCHAR(16) NOT NULL DEFAULT ''"`
 	Error       string `xorm:"VARCHAR(32) NOT NULL DEFAULT ''"` // a code, never text from git
-	// Blobs, Bytes and SkippedLarge count the last scan: the files read, their size and the files over MAX_BLOB_SIZE
+	// Blobs and Bytes count the last scan: the files read and their size. SkippedLarge counts the files over
+	// MAX_BLOB_SIZE that were not read since the scan started from the beginning (a rescan resets it), so a later push
+	// doesn't make them look read
 	Blobs        int64 `xorm:"NOT NULL DEFAULT 0"`
 	Bytes        int64 `xorm:"NOT NULL DEFAULT 0"`
 	SkippedLarge int64 `xorm:"NOT NULL DEFAULT 0"`

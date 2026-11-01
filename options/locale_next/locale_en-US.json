@@ -3728,6 +3728,10 @@
 		"one": "%s file or secret was left out.",
 		"other": "%s files or secrets were left out."
 	},
+	"repo.secrets.skipped_large": {
+		"one": "%s file is larger than the scan's size limit and was not checked for secrets.",
+		"other": "%s files are larger than the scan's size limit and were not checked for secrets."
+	},
 	"repo.secrets.search": "Search by file path",
 	"repo.secrets.type": "Secret type",
 	"repo.secrets.all_types": "All types",

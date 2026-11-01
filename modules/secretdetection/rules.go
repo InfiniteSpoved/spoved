@@ -102,6 +102,14 @@ var builtinRules = []Rule{
 		Window: 4, Anchored: true, KeywordOffset: 76, HitCheck: azdoHit,
 	},
 	{
+		// The older PATs are 52 lowercase characters with no marker, so they
+		// only count within 40 bytes after azure, devops or ado_pat.
+		ID: "azure-devops-pat-legacy", Name: "Azure DevOps personal access token (52 characters)", Type: "azure",
+		Keywords:    []string{"azure", "devops", "ado_pat"},
+		Regex:       `(?i:azure|devops|ado_pat)[^\r\n]{0,40}?[^0-9a-z\r\n]([0-9a-z]{52})`,
+		SecretGroup: 1, MinEntropy: 3.5, TokenChars: alnumChars, Window: 100, Anchored: true, HitCheck: azdoLegacyHit,
+	},
+	{
 		ID: "azure-ad-client-secret", Name: "Azure AD client secret", Type: "azure",
 		Keywords:    []string{"q~"},
 		Regex:       `([a-zA-Z0-9_~.]{3}\dQ~[a-zA-Z0-9_~.-]{31,34})`,
@@ -129,6 +137,15 @@ var builtinRules = []Rule{
 		Keywords:    []string{"ghp_", "gho_", "ghu_", "ghs_", "ghr_"},
 		Regex:       `(gh[pousr]_[0-9A-Za-z]{36,251})`,
 		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars,
+	},
+	{
+		// The legacy form is 40 hex characters, as an OAuth app's client
+		// secret: it counts after a github...token/secret/key name, before
+		// the Forgejo rules, which would claim the same hex after "token".
+		ID: "github-legacy-token", Name: "GitHub token or client secret (40 hex characters)", Type: "github",
+		Keywords:    []string{"github"},
+		Regex:       `(?i:github)[\w.-]{0,20}(?i:token|secret|pat|key|password)[\w.-]{0,10}(?:\\?["'])?\s*[:=]\s*(?:\\?["'])?([0-9a-f]{40})`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars, Window: 512, Anchored: true, HitCheck: githubHit,
 	},
 	{
 		ID: "github-fine-grained-pat", Name: "GitHub fine-grained personal access token", Type: "github",
@@ -196,11 +213,12 @@ var builtinRules = []Rule{
 		SecretGroup: 1, MinEntropy: 3, Normalize: normalizePEM, MaxSecretLen: maxPrivateKeyLen,
 	},
 	{
-		// xoxb bot, xoxp user, xoxa app, xoxr refresh (also the legacy forms
-		// with one group of digits), xapp app-level, xoxe rotating tokens.
+		// xoxb bot, xoxp user, xoxa app (xoxa-2-<3 IDs>-<hex>), xoxr refresh,
+		// legacy xoxs/xoxo (<3 IDs>-<hex>) and the legacy forms with one
+		// group of digits, xapp app-level, xoxe rotating tokens.
 		ID: "slack-token", Name: "Slack token", Type: "slack",
-		Keywords:    []string{"xoxb-", "xoxp-", "xoxa-", "xoxr-", "xapp-", "xoxe"},
-		Regex:       `(xapp-[0-9]-[A-Za-z0-9]{6,}-[0-9]{8,}-[A-Za-z0-9]{32,}|xoxe\.xox[bp]-[0-9]-[A-Za-z0-9]{100,}|xoxe-[0-9]-[A-Za-z0-9]{100,}|xox[bpar]-[0-9]{1,14}(?:-[0-9A-Za-z]{8,40}){1,3})`,
+		Keywords:    []string{"xoxb-", "xoxp-", "xoxa-", "xoxr-", "xoxs-", "xoxo-", "xapp-", "xoxe"},
+		Regex:       `(xapp-[0-9]-[A-Za-z0-9]{6,}-[0-9]{8,}-[A-Za-z0-9]{32,}|xoxe\.xox[bp]-[0-9]-[A-Za-z0-9]{100,}|xoxe-[0-9]-[A-Za-z0-9]{100,}|xox[bparso]-[0-9]{1,14}(?:-[0-9A-Za-z]{8,64}){1,4})`,
 		SecretGroup: 1, MinEntropy: 2, TokenChars: alnumChars,
 	},
 	{
@@ -226,14 +244,26 @@ var builtinRules = []Rule{
 	},
 	{
 		// Three base64url parts; header and payload start with eyJ (`{"`). The
-		// signature may be empty (alg none, which still counts). The token of
-		// jwt.io's documentation is no secret.
+		// signature may be empty (alg none, which still counts), else it is at
+		// least 43 characters (HS256, the shortest): a word there ("signature")
+		// is a documentation sample. The token of jwt.io's documentation is no
+		// secret.
 		ID: "jwt", Name: "JSON Web Token", Type: "jwt",
 		Keywords:    []string{"eyj"},
 		Regex:       `(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*)`,
 		SecretGroup: 1, MinEntropy: 3, TokenChars: wordChars,
-		Check:     jwtHeaderHasAlg,
-		Allowlist: []string{`\.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c$`},
+		Check:     jwtCheck,
+		Allowlist: []string{jwtIOSignature},
+	},
+	{
+		// A JWT in base64 (a Kubernetes secret, an env file): the secret is
+		// the decoded JWT, so it has the fingerprint of the JWT itself.
+		ID: "jwt-base64", Name: "JSON Web Token in base64", Type: "jwt",
+		Keywords:    []string{"zxlk"},
+		Regex:       `(ZXlK[A-Za-z0-9+/]{40,}={0,2})`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars + "+/", MaxSecretLen: 8 << 10,
+		Normalize: decodeBase64JWT, Check: jwtCheck,
+		Allowlist: []string{jwtIOSignature},
 	},
 	{
 		// Dotted names (locale keys, settings) are no secrets.
@@ -266,6 +296,21 @@ func azdoHit(_, c []byte, p int) bool {
 	}
 	return true
 }
+
+// azdoLegacyHit: within 40 bytes of the line after the keyword (5 to 7
+// bytes), a byte that is no lowercase alphanumeric, then exactly 52 of them.
+func azdoLegacyHit(_, c []byte, p int) bool {
+	isLowerAlnum := func(b byte) bool { return '0' <= b && b <= '9' || 'a' <= b && b <= 'z' }
+	for i := p + len("azure"); i < len(c) && i <= p+len("ado_pat")+40 && c[i] != '\n' && c[i] != '\r'; i++ {
+		if !isLowerAlnum(c[i]) && run(c, i+1, 52, isLowerAlnum) == 52 {
+			return true
+		}
+	}
+	return false
+}
+
+// githubHit: "github", a name rest, an assignment, then 40 hex digits.
+func githubHit(_, c []byte, p int) bool { return hex40After(c, p+len("github"), 40) }
 
 func isWord(b byte) bool { return isAlnum(b) || b == '_' }
 
@@ -336,8 +381,10 @@ func run(c []byte, i, max int, ok func(byte) bool) int {
 // tokenHit: "token", a short name rest, an assignment, then 40 lowercase hex
 // digits (as the pattern; capitals are the pattern's business, the hit only
 // needs the digits to be there).
-func tokenHit(_, c []byte, p int) bool {
-	i, ok := valueAfter(c, p+len("token"), 20, false, false)
+func tokenHit(_, c []byte, p int) bool { return hex40After(c, p+len("token"), 20) }
+
+func hex40After(c []byte, i, gap int) bool {
+	i, ok := valueAfter(c, i, gap, false, false)
 	return ok && run(c, i, 40, func(b byte) bool { return isHexLower(b) || 'A' <= b && b <= 'F' }) >= 40
 }
 
@@ -500,8 +547,30 @@ func unescape(s string) string {
 	return b.String()
 }
 
-// jwtHeaderHasAlg: the first part of a JWT is a JSON object with "alg".
-func jwtHeaderHasAlg(secret []byte) bool {
+// jwtIOSignature is the signature of jwt.io's documentation token.
+const jwtIOSignature = `\.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c$`
+
+var jwtShape = regexp.MustCompile(`^eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*$`)
+
+// decodeBase64JWT is the JWT a base64 text holds (a trailing line break
+// dropped), or nothing.
+func decodeBase64JWT(secret []byte) []byte {
+	raw, err := base64.RawStdEncoding.DecodeString(strings.TrimRight(string(secret), "="))
+	if err != nil {
+		return nil
+	}
+	if raw = bytes.TrimRight(raw, "\r\n"); !jwtShape.Match(raw) {
+		return nil
+	}
+	return raw
+}
+
+// jwtCheck: the first part of a JWT is a JSON object with "alg", and the
+// signature is empty or at least 43 characters (32 bytes).
+func jwtCheck(secret []byte) bool {
+	if sig := secret[bytes.LastIndexByte(secret, '.')+1:]; len(sig) > 0 && len(sig) < 43 {
+		return false
+	}
 	head, _, _ := strings.Cut(string(secret), ".")
 	raw, err := base64.RawURLEncoding.DecodeString(head)
 	if err != nil {

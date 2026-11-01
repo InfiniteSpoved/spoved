@@ -98,7 +98,7 @@ func (*notifier) ForkRepository(ctx context.Context, _ *user_model.User, parent,
 	if p, err := secretscan_model.GetScan(ctx, parent.ID, secretscan_model.KindRepo); err != nil {
 		log.Error("secret scanning: read the scan state of repository %d: %v", parent.ID, err)
 	} else if p != nil && p.Status == secretscan_model.StatusOK {
-		s := &secretscan_model.Scan{RepoID: fork.ID, Kind: secretscan_model.KindRepo, ScannedTips: p.ScannedTips, Status: secretscan_model.StatusOK}
+		s := &secretscan_model.Scan{RepoID: fork.ID, Kind: secretscan_model.KindRepo, ScannedTips: p.ScannedTips, Status: secretscan_model.StatusOK, SkippedLarge: p.SkippedLarge}
 		if err := secretscan_model.Save(ctx, nil, s); err != nil && !errors.Is(err, secretscan_model.ErrScanMoved) {
 			log.Error("secret scanning: store the inherited scan state of repository %d: %v", fork.ID, err)
 		}
