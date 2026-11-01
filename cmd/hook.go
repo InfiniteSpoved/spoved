@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -361,10 +362,15 @@ Forgejo or set your environment appropriately.`, "")
 	pusherID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvPusherID), 10, 64)
 	prID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvPRID), 10, 64)
 	pusherName := os.Getenv(repo_module.EnvPusherName)
+	// who really pushed: a deploy key or an Actions task pushes under another user's ID
+	deployKeyKeyID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvDeployPublicKeyID), 10, 64)
+	actionTaskID, _ := strconv.ParseInt(os.Getenv(repo_module.EnvActionTaskID), 10, 64)
 
 	hookOptions := private.HookOptions{
 		UserName:                        pusherName,
 		UserID:                          pusherID,
+		DeployKeyKeyID:                  deployKeyKeyID,
+		ActionTaskID:                    actionTaskID,
 		GitAlternativeObjectDirectories: os.Getenv(private.GitAlternativeObjectDirectories),
 		GitObjectDirectory:              os.Getenv(private.GitObjectDirectory),
 		GitQuarantinePath:               os.Getenv(private.GitQuarantinePath),
@@ -434,8 +440,12 @@ Forgejo or set your environment appropriately.`, "")
 	}
 
 	if isWiki {
-		// the server only measures the wiki again
+		// the server measures the wiki again and marks the repository for the secret digest, which needs one pushed
+		// commit that isn't a deletion
 		hookOptions.IsWiki = true
+		if i := slices.IndexFunc(pushed.NewCommitIDs, func(id string) bool { return !git.IsEmptyCommitID(id, nil) }); i >= 0 {
+			hookOptions.NewCommitIDs = pushed.NewCommitIDs[i : i+1]
+		}
 		if _, extra := private.HookPostReceive(ctx, repoID, hookOptions); extra.HasError() {
 			return fail(ctx, extra.UserMsg, "HookPostReceive failed: %v", extra.Error)
 		}

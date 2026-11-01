@@ -80,8 +80,30 @@ type Scan struct {
 	Holes int64 `xorm:"NOT NULL DEFAULT 0"`
 	// Requeue marks a repository to scan again after a switch turned on (set with the setting, cleared when the scan
 	// takes the row), so that a restart doesn't lose it: the cron task queues marked rows too.
-	Requeue     int64              `xorm:"INDEX NOT NULL DEFAULT 0"`
-	UpdatedUnix timeutil.TimeStamp `xorm:"INDEX updated"`
+	Requeue int64 `xorm:"INDEX NOT NULL DEFAULT 0"`
+	// Completed is set once a scan of this git repository has run to its end (no slice left): a push can only be
+	// mailed about for a repository that was scanned before (see notify.go).
+	Completed bool `xorm:"NOT NULL DEFAULT false"`
+	// The digest mark (repository row only, see notify.go): a push marked the repository after its first complete scan,
+	// and the scan that finishes next mails the alerts above NotifyAlertID. Zero NotifyAfterUnix means no mark;
+	// NotifySeq counts every marking push, so a clear that raced a newer push is refused. NotifyKinds is a bit set of
+	// the DigestKind* flags and NotifyLastUnix is when a digest was last sent (at most one per DigestMinInterval).
+	NotifyAfterUnix timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"`
+	NotifySeq       int64              `xorm:"NOT NULL DEFAULT 0"`
+	NotifyAlertID   int64              `xorm:"NOT NULL DEFAULT 0"`
+	NotifyPusherID  int64              `xorm:"NOT NULL DEFAULT 0"`
+	NotifyKinds     int                `xorm:"NOT NULL DEFAULT 0"`
+	NotifyRef       string             `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"`
+	NotifyCommit    string             `xorm:"VARCHAR(64) NOT NULL DEFAULT ''"`
+	NotifyLastUnix  timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"`
+	// NotifyFloor is the newest alert ID that no digest is owed for: set when a pass ends with the code up to date and
+	// no mark, and when a digest is taken. A mark's boundary starts there, so an alert that a scan under way stored
+	// before the push's post-receive marked is still mailed.
+	NotifyFloor int64 `xorm:"NOT NULL DEFAULT 0"`
+	// QueueStuckUnix is when the cron task first found this repository marked or due while the unique queue said it
+	// was queued already (0 = not stuck): after an hour the cron task scans it directly.
+	QueueStuckUnix timeutil.TimeStamp `xorm:"NOT NULL DEFAULT 0"`
+	UpdatedUnix    timeutil.TimeStamp `xorm:"INDEX updated"`
 }
 
 func (*Scan) TableName() string { return "secret_scan" }
@@ -193,6 +215,17 @@ var ErrScanMoved = errors.New("the scan state changed meanwhile")
 // Save writes the state row as the scan that read old (nil = no row) leaves it, and returns ErrScanMoved when
 // another process wrote it first (a second row of the same repository and kind, or a changed version).
 func Save(ctx context.Context, old, s *Scan) error {
+	if err := save(ctx, old, s); err != nil {
+		return err
+	}
+	if s.RetryUnix == 0 { // no slice or retry left: the scan of this git repository has been to its end
+		_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET completed = ? WHERE repo_id = ? AND kind = ? AND completed = ?", true, s.RepoID, s.Kind, false)
+		return err
+	}
+	return nil
+}
+
+func save(ctx context.Context, old, s *Scan) error {
 	if old == nil {
 		// the unique key decides who inserts first; no row inserted is the lost race
 		insert := "INSERT INTO secret_scan (repo_id, kind, scanned_tips, status, error, blobs, bytes, skipped_large, fail_count, retry_unix, holes, version, updated_unix) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?) ON CONFLICT (repo_id, kind) DO NOTHING"
@@ -402,6 +435,10 @@ func scannedRepoCond(orgID int64) builder.Cond {
 // MarkRequeue marks the repositories ScannedRepoIDsAfter would list (their repository scan state) to be scanned again.
 // It runs in the transaction that saves the switch, so the mark and the setting stand or fall together.
 func MarkRequeue(ctx context.Context, orgID int64) error {
+	// a digest mark that waited while scanning was off keeps its alerts, but not its pusher (a later push is not theirs)
+	if _, err := DetachNotifyPushers(ctx, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scannedRepoCond(orgID)))); err != nil {
+		return err
+	}
 	_, err := db.GetEngine(ctx).NoAutoTime().
 		Where(builder.And(builder.Eq{"kind": KindRepo}, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scannedRepoCond(orgID))))).
 		Incr("requeue").Update(&Scan{})
@@ -415,14 +452,34 @@ func ClearRequeue(ctx context.Context, repoID, seq int64) error {
 	return err
 }
 
-// RequeuedRepoIDsAfter returns up to limit ids above after of the repositories marked by MarkRequeue that are still
-// ready, in no trash and not switched off since.
+// RequeuedRepoIDsAfter returns up to limit ids above after of the repositories marked by MarkRequeue or by a push (a
+// digest mark that waits for a scan) that are still ready, in no trash and not switched off since.
 func RequeuedRepoIDsAfter(ctx context.Context, after int64, limit int) ([]int64, error) {
 	var ids []int64
 	return ids, db.GetEngine(ctx).Table("repository").Select("repository.id").
 		Where(builder.Gt{"repository.id": after}).And(scannedRepoCond(0)).
 		And(builder.Exists(builder.Select("1").From("secret_scan", "marked").Where(builder.And(
-			builder.Expr("marked.repo_id = repository.id"), builder.Eq{"marked.kind": KindRepo}, builder.Gt{"marked.requeue": 0},
+			builder.Expr("marked.repo_id = repository.id"), builder.Eq{"marked.kind": KindRepo},
+			builder.Or(builder.Gt{"marked.requeue": 0}, builder.Neq{"marked.notify_after_unix": 0}),
 		)))).
 		OrderBy("repository.id").Limit(limit).Find(&ids)
+}
+
+// MarkQueueStuck records when the repository's queue entry was first found stuck (if it isn't recorded yet) and returns
+// that time; hasRow is false when the repository has no scan state to hold it.
+func MarkQueueStuck(ctx context.Context, repoID int64, now timeutil.TimeStamp) (since timeutil.TimeStamp, hasRow bool, err error) {
+	if _, err = db.GetEngine(ctx).Exec("UPDATE secret_scan SET queue_stuck_unix = ? WHERE repo_id = ? AND kind = ? AND queue_stuck_unix = 0", int64(now), repoID, KindRepo); err != nil {
+		return 0, false, err
+	}
+	s, err := GetScan(ctx, repoID, KindRepo)
+	if err != nil || s == nil {
+		return 0, false, err
+	}
+	return s.QueueStuckUnix, true, nil
+}
+
+// ClearQueueStuck forgets that the repository's queue entry was stuck.
+func ClearQueueStuck(ctx context.Context, repoID int64) error {
+	_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET queue_stuck_unix = 0 WHERE repo_id = ? AND kind = ? AND queue_stuck_unix <> 0", repoID, KindRepo)
+	return err
 }

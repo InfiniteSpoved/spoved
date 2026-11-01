@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	issues_model "forgejo.org/models/issues"
 	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
+	secretscan_model "forgejo.org/models/secretscan"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/cache"
 	"forgejo.org/modules/git"
@@ -31,6 +33,15 @@ import (
 	repo_service "forgejo.org/services/repository"
 	secretscan_service "forgejo.org/services/secretscan"
 )
+
+// hookPusherID is the person who pushed: a deploy key or an Actions task pushes under the repository owner's or the
+// Actions user's ID, which names nobody who pushed.
+func hookPusherID(opts *private.HookOptions) int64 {
+	if opts.DeployKeyKeyID != 0 || opts.ActionTaskID != 0 {
+		return 0
+	}
+	return opts.UserID
+}
 
 // HookPostReceive updates services and users
 func HookPostReceive(ctx *app_context.PrivateContext) {
@@ -52,6 +63,9 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 		}
 		if err := repo_module.UpdateRepoSize(ctx, repo); err != nil {
 			log.Error("UpdateRepoSize after a wiki push to %-v: %v", repo, err)
+		}
+		if slices.ContainsFunc(opts.NewCommitIDs, func(id string) bool { return !git.IsEmptyCommitID(id, nil) }) { // not only deletions
+			secretscan_service.MarkPush(ctx, repo, hookPusherID(opts), secretscan_model.KindWiki, "", "")
 		}
 		secretscan_service.EnqueueIfEnabled(ctx, repo)
 		ctx.JSON(http.StatusOK, private.HookPostReceiveResult{})
@@ -160,6 +174,12 @@ func HookPostReceive(ctx *app_context.PrivateContext) {
 			}
 		}
 
+		for _, u := range updates { // the digest names the first ref that isn't a deletion
+			if !u.IsDelRef() {
+				secretscan_service.MarkPush(ctx, repo, hookPusherID(opts), secretscan_model.KindRepo, u.RefFullName.ShortName(), u.NewCommitID)
+				break
+			}
+		}
 		if err := repo_service.PushUpdates(updates); err != nil {
 			log.Error("Failed to Update: %d Total Updates: %d", repoID, len(updates))
 			for i, update := range updates {

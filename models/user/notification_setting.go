@@ -34,6 +34,7 @@ const (
 	NotifyEventWatchEveryComment   NotifyEvent = "watch_every_comment"
 	NotifyEventActionsFailed       NotifyEvent = "actions_failed"
 	NotifyEventCredentialExpiry    NotifyEvent = "credential_expiry"
+	NotifyEventSecretAlert         NotifyEvent = "secret_alert"
 	// NotifyEventOwnActions is not a mail kind: it decides whether mail about the user's own actions is sent.
 	NotifyEventOwnActions NotifyEvent = "own_actions"
 )
@@ -44,7 +45,7 @@ var AllNotifyEvents = []NotifyEvent{
 	NotifyEventPRClosed, NotifyEventPRNewCommits, NotifyEventReviewRequestedMe, NotifyEventIssueAssigned,
 	NotifyEventIssueComment, NotifyEventIssueClosedReopened, NotifyEventMention, NotifyEventWatchNewIssue,
 	NotifyEventWatchNewPR, NotifyEventWatchRelease, NotifyEventWatchEveryComment, NotifyEventActionsFailed,
-	NotifyEventCredentialExpiry, NotifyEventOwnActions,
+	NotifyEventCredentialExpiry, NotifyEventSecretAlert, NotifyEventOwnActions,
 }
 
 func (e NotifyEvent) IsValid() bool { return slices.Contains(AllNotifyEvents, e) }

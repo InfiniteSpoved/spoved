@@ -9,7 +9,7 @@ import (
 
 func init() {
 	registerMigration(&Migration{
-		Description: "add an index of secret scanning alerts by repository and fingerprint, and the requeue mark of the scan state",
+		Description: "add an index of secret scanning alerts by repository and fingerprint, and the requeue and digest marks of the scan state",
 		Upgrade:     addSecretAlertFingerprintIndex,
 	})
 }
@@ -25,10 +25,22 @@ func (v18zzmSecretScanningAlert) TableName() string {
 	return "secret_scanning_alert"
 }
 
-// v18zzmSecretScan is the new column of the scan state: a repository to scan again after a switch turned on, which
-// survives a restart until the scan takes it.
+// v18zzmSecretScan holds the new columns of the scan state: the requeue mark (a repository to scan again after a switch
+// turned on, which survives a restart until the scan takes it) and the digest mark.
 type v18zzmSecretScan struct {
-	Requeue int64 `xorm:"INDEX NOT NULL DEFAULT 0"`
+	Requeue   int64 `xorm:"INDEX NOT NULL DEFAULT 0"`
+	Completed bool  `xorm:"NOT NULL DEFAULT false"`
+	// the digest mark: set by a push, cleared by the scan that mails it
+	NotifyAfterUnix int64  `xorm:"NOT NULL DEFAULT 0"`
+	NotifySeq       int64  `xorm:"NOT NULL DEFAULT 0"`
+	NotifyAlertID   int64  `xorm:"NOT NULL DEFAULT 0"`
+	NotifyPusherID  int64  `xorm:"NOT NULL DEFAULT 0"`
+	NotifyKinds     int    `xorm:"NOT NULL DEFAULT 0"`
+	NotifyRef       string `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"`
+	NotifyCommit    string `xorm:"VARCHAR(64) NOT NULL DEFAULT ''"`
+	NotifyLastUnix  int64  `xorm:"NOT NULL DEFAULT 0"`
+	NotifyFloor     int64  `xorm:"NOT NULL DEFAULT 0"`
+	QueueStuckUnix  int64  `xorm:"NOT NULL DEFAULT 0"`
 }
 
 func (v18zzmSecretScan) TableName() string {

@@ -45,4 +45,7 @@ func Test_addSecretAlertFingerprintIndex(t *testing.T) {
 	n, err := x.Where("repo_id = 7 AND requeue = ?", 0).Count(new(v18zzmSecretScan))
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, n, "an existing row is not marked")
+	n, err = x.Where("repo_id = 7 AND notify_after_unix = 0 AND notify_seq = 0 AND notify_alert_id = 0 AND notify_pusher_id = 0 AND notify_ref = '' AND notify_commit = '' AND notify_kinds = 0 AND notify_last_unix = 0 AND notify_floor = 0 AND queue_stuck_unix = 0 AND completed = ?", false).Count(new(v18zzmSecretScan))
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n, "an existing row has no digest mark")
 }

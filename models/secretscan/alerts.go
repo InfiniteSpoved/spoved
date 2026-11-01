@@ -85,8 +85,9 @@ type AlertSearchOptions struct {
 	SecretTypes []string // rule IDs
 	Sort        string   // created (the default) or updated
 	Ascending   bool
-	CodeOnly    bool   // only alerts that have a place outside the wiki
-	PathQuery   string // only alerts with a place whose path holds this text (the wiki's places only without CodeOnly)
+	CodeOnly    bool     // only alerts that have a place outside the wiki
+	Kinds       []string // only alerts that have a place of one of these kinds (KindRepo, KindWiki, KindPull)
+	PathQuery   string   // only alerts with a place whose path holds this text (the wiki's places only without CodeOnly)
 }
 
 func (o *AlertSearchOptions) ToConds() builder.Cond {
@@ -105,6 +106,11 @@ func (o *AlertSearchOptions) ToConds() builder.Cond {
 	}
 	if o.CodeOnly {
 		cond = cond.And(builder.Expr("EXISTS (SELECT 1 FROM secret_scanning_location WHERE secret_scanning_location.alert_id = secret_scanning_alert.id AND secret_scanning_location.kind <> ?)", KindWiki))
+	}
+	if len(o.Kinds) > 0 {
+		cond = cond.And(builder.Exists(builder.Select("1").From("secret_scanning_location").Where(builder.And(
+			builder.Expr("secret_scanning_location.alert_id = secret_scanning_alert.id"), builder.In("secret_scanning_location.kind", o.Kinds),
+		))))
 	}
 	if o.PathQuery != "" {
 		in := builder.And(builder.Expr("secret_scanning_location.alert_id = secret_scanning_alert.id"), likeContains("secret_scanning_location.path", o.PathQuery))
@@ -308,4 +314,20 @@ func FirstLocations(ctx context.Context, repoID int64, alertIDs []int64, noWiki 
 // are gone; the alerts stay. It returns the number of rows removed.
 func DeleteScans(ctx context.Context, repoID int64) (int64, error) {
 	return db.GetEngine(ctx).Where("repo_id = ?", repoID).Delete(new(Scan))
+}
+
+// ResetScans makes the repository's scan states forget what was scanned (the done tips, the holes, a failure's
+// backoff), so the next scan starts from the beginning; the alerts stay, and so do the completed flag and any digest
+// mark: pushes before or during a rescan still mail only the alerts that are new, and a rescan that finds an alert
+// again mails nothing. Version moves on, so a scan that read the row before can't save it. It returns the number of
+// rows that had something to forget (0 when the rows are already reset: two rescans at once claim it once).
+func ResetScans(ctx context.Context, repoID int64) (int64, error) {
+	res, err := db.GetEngine(ctx).Exec(
+		"UPDATE secret_scan SET scanned_tips = '[]', status = '', error = '', blobs = 0, bytes = 0, skipped_large = 0, fail_count = 0, retry_unix = 0, holes = 0, version = version + 1"+
+			" WHERE repo_id = ? AND NOT (status = '' AND scanned_tips = '[]' AND retry_unix = 0 AND fail_count = 0)", repoID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
