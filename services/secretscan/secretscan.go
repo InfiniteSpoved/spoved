@@ -55,6 +55,11 @@ func Init() error {
 		return errors.New("unable to create secret_scanning queue")
 	}
 	go graceful.GetManager().RunWithCancel(scanQueue)
+	textQueue = queue.CreateUniqueQueue(graceful.GetManager().ShutdownContext(), "secret_scanning_text", textHandler)
+	if textQueue == nil {
+		return errors.New("unable to create secret_scanning_text queue")
+	}
+	go graceful.GetManager().RunWithCancel(textQueue)
 	requeue() // the repositories a switch marked before a stop or a crash: the queue is ready, whether or not the cron task is on
 	return nil
 }
@@ -102,6 +107,7 @@ func (*notifier) ForkRepository(ctx context.Context, _ *user_model.User, parent,
 // NewPullRequest and PullRequestSynchronized: the head of a pull request from a fork, and of an AGit push, is a ref
 // of the base repository that no push event names.
 func (*notifier) NewPullRequest(ctx context.Context, pr *issues_model.PullRequest, _ []*user_model.User) {
+	enqueueIssueText(ctx, pr.IssueID) // its title and body
 	enqueuePullRequest(ctx, pr)
 }
 

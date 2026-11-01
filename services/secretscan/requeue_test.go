@@ -99,9 +99,9 @@ func TestRequeueMarkSurvivesARestart(t *testing.T) {
 	// the save runs and the process stops before the background queue did anything
 	defer test.MockVariableValue(&requeue, func() {})()
 	doer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
-	_, err = SaveSwitches(ctx, doer, false, false)
+	_, err = SaveSwitches(ctx, doer, false, false, true)
 	require.NoError(t, err)
-	_, err = SaveSwitches(ctx, doer, true, false)
+	_, err = SaveSwitches(ctx, doer, true, false, true)
 	require.NoError(t, err)
 	assert.Contains(t, markedIDs(t), repo.ID, "the save marked the scanned repository")
 

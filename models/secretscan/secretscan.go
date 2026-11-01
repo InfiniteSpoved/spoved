@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"strings"
 
 	"forgejo.org/models/db"
@@ -29,6 +30,17 @@ const (
 	KindWiki = "wiki"
 	KindPull = "pull"
 )
+
+// The kinds of a place in text people write: the title or body of an issue or pull request, and a comment. KindIssue
+// is also the kind of the scan state row of a repository's text (its cursor is kept in ScannedTips). TextKinds are
+// never returned by the readers of places below: showing one needs the viewer's read access to the Issues or Pull
+// requests unit, which only a later change checks.
+const (
+	KindIssue   = "issue"
+	KindComment = "comment"
+)
+
+var TextKinds = []string{KindIssue, KindComment}
 
 // Scan statuses. Incomplete: the scan is under way (a slice ended at a limit) or has holes, parts that were not
 // scanned (Scan.Holes); holes stay until the state is reset, and a trigger with nothing new changes nothing.
@@ -148,6 +160,15 @@ type Location struct {
 	AuthorName  string `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"` // the commit's text, for display only: spoofable
 	AuthorEmail string `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"`
 	CommitUnix  int64  `xorm:"NOT NULL DEFAULT 0"`
+
+	// Of a place in text (kinds issue and comment): the issue or comment, the issue it belongs to, the field
+	// ("title" or "body" for an issue, "" for a comment), who wrote it (0: nobody known) and when the text stopped
+	// holding the secret (0: it still does). The text itself is never stored.
+	SourceID    int64  `xorm:"INDEX NOT NULL DEFAULT 0"`
+	IssueID     int64  `xorm:"INDEX NOT NULL DEFAULT 0"`
+	Field       string `xorm:"VARCHAR(8) NOT NULL DEFAULT ''"`
+	PosterID    int64  `xorm:"NOT NULL DEFAULT 0"`
+	RemovedUnix int64  `xorm:"NOT NULL DEFAULT 0"`
 }
 
 func (*Location) TableName() string { return "secret_scanning_location" }
@@ -191,6 +212,16 @@ func NewLocation(repoID int64, kind, blobID, path string, startLine, endLine int
 		RepoID: repoID, Kind: kind, BlobID: blobID, Path: cleanText(path, maxPathLen), PathHash: PathHash(path),
 		StartLine: startLine, EndLine: endLine, CommitID: commitID,
 		AuthorName: cleanText(authorName, maxAuthorLen), AuthorEmail: cleanText(authorEmail, maxAuthorLen), CommitUnix: commitUnix,
+	}
+}
+
+// NewTextLocation fills a place in the text of an issue (kind issue, field title or body, source the issue) or of a
+// comment (kind comment, field ""). The path stands for the text in the unique key; no text is kept.
+func NewTextLocation(repoID int64, kind string, sourceID, issueID int64, field string, startLine, endLine int, posterID int64) *Location {
+	path := kind + ":" + strconv.FormatInt(sourceID, 10) + ":" + field
+	return &Location{
+		RepoID: repoID, Kind: kind, Path: field, PathHash: PathHash(path), StartLine: startLine, EndLine: endLine,
+		SourceID: sourceID, IssueID: issueID, Field: field, PosterID: posterID,
 	}
 }
 

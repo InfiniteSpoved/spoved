@@ -200,6 +200,12 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 			states[kind] = readKindState(ctx, repo.ID, kind)
 		}
 	}
+	if err == nil && !requeue {
+		// the text there is already is read after the code, a slice at a time
+		var rq bool
+		rq, err = s.scanText()
+		requeue = requeue || rq
+	}
 	finishDigest(ctx, repo, mark, states) // waits for the kinds the push touched, never for the pull refs
 	if mark == nil && states[secretscan_model.KindRepo].current {
 		// nothing is owed for the alerts up to now: a later push's digest starts after them

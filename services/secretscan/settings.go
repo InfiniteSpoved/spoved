@@ -193,9 +193,9 @@ func readLocked[T any](ctx context.Context, key string, into *T) error {
 	return nil
 }
 
-// SaveSwitches stores the site switch and the generic rule (the first form of the Site administration page). A value
+// SaveSwitches stores the site switch, the generic rule and the text scan (the first form of the Site administration page). A value
 // that is what is in force already is not stored again. Turning the site on queues the scanned repositories.
-func SaveSwitches(ctx context.Context, doer *user_model.User, enabled, generic bool) (changed bool, err error) {
+func SaveSwitches(ctx context.Context, doer *user_model.User, enabled, generic, scanText bool) (changed bool, err error) {
 	turnedOn := false
 	changed, err = updateSettings(ctx, doer, func(state *setting.SecretScanningState, cfg *setting.SecretScanningConfig) (bool, bool) {
 		stateChanged, cfgChanged := false, false
@@ -207,6 +207,9 @@ func SaveSwitches(ctx context.Context, doer *user_model.User, enabled, generic b
 		}
 		if cfg.Merge().GenericRules != generic {
 			cfg.GenericRules, cfgChanged = &generic, true
+		}
+		if cfg.Merge().ScanText != scanText {
+			cfg.ScanText, cfgChanged = &scanText, true
 		}
 		return stateChanged, cfgChanged
 	}, func(ctx context.Context) error {

@@ -1,0 +1,541 @@
+// Copyright 2026 The spoved contributors. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package secretscan
+
+import (
+	"cmp"
+	"context"
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"maps"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"forgejo.org/models/db"
+	issues_model "forgejo.org/models/issues"
+	repo_model "forgejo.org/models/repo"
+	secretscan_model "forgejo.org/models/secretscan"
+	user_model "forgejo.org/models/user"
+	"forgejo.org/modules/graceful"
+	"forgejo.org/modules/json"
+	"forgejo.org/modules/log"
+	"forgejo.org/modules/queue"
+	"forgejo.org/modules/secretdetection"
+	"forgejo.org/modules/setting"
+	"forgejo.org/modules/timeutil"
+)
+
+// The text of issues, pull requests and comments is scanned from a second unique queue of items: "i:<issue ID>" (title
+// and body), "c:<comment ID>" and "x:<kind>:<repository ID>:<ID>" (the text is gone). The notifier only queues; the
+// handler reads the text as it is then, so a burst of edits is one scan and a deleted text is skipped. The text that
+// is there already is read by the scan of the repository (scanText), after its code. A secret found in text is an
+// alert like any other, with a place of kind issue or comment (never the text, only the number, field and line);
+// an alert that only text reaches shares the alert cap of the pull refs (ViaPull), since anyone who can read the
+// repository can write text.
+var (
+	textQueue     *queue.WorkerPoolQueue[string]
+	pushTextQueue = func(item string) error { return textQueue.Push(item) }
+)
+
+const (
+	maxTextSliceBytes = 32 << 20 // bytes of text one slice reads
+	textBatch         = 100      // issues or comments loaded together
+
+	stopText = "max_text" // the slice read what it may; the rest follows
+)
+
+// maxTextItems is the issues and comments one slice of the backfill reads (a variable for the tests).
+var maxTextItems = 2000
+
+// textCommentTypes are the comment types that carry text a person wrote.
+var textCommentTypes = []issues_model.CommentType{issues_model.CommentTypeComment, issues_model.CommentTypeCode, issues_model.CommentTypeReview}
+
+// dataURI is the payload of a data: URI, which would only feed the entropy rules and the cost; the rest of the line stays.
+var dataURI = regexp.MustCompile(`(?i)(data:[a-z0-9.+/-]{0,64};base64,)[a-z0-9+/=_-]{1000,}`)
+
+func stripDataURIs(s string) string {
+	if !strings.Contains(s, "base64,") {
+		return s
+	}
+	return dataURI.ReplaceAllString(s, "$1")
+}
+
+func enqueueText(ctx context.Context, item string) {
+	if textQueue == nil || !SiteEnabled(ctx) {
+		return
+	}
+	if err := pushTextQueue(item); err != nil && !errors.Is(err, queue.ErrAlreadyInQueue) {
+		log.Error("secret scanning: queue text %q: %v", item, err)
+	}
+}
+
+func enqueueIssueText(ctx context.Context, issueID int64) {
+	enqueueText(ctx, "i:"+strconv.FormatInt(issueID, 10))
+}
+
+func enqueueCommentText(ctx context.Context, c *issues_model.Comment) {
+	if c != nil && slices.Contains(textCommentTypes, c.Type) {
+		enqueueText(ctx, "c:"+strconv.FormatInt(c.ID, 10))
+	}
+}
+
+func enqueueTextGone(ctx context.Context, kind string, repoID, id int64) {
+	enqueueText(ctx, fmt.Sprintf("x:%s:%d:%d", kind, repoID, id))
+}
+
+func textHandler(items ...string) (unhandled []string) {
+	ctx := graceful.GetManager().ShutdownContext()
+	for _, item := range items {
+		if err := handleText(ctx, item); err != nil {
+			if ctx.Err() != nil {
+				unhandled = append(unhandled, item)
+				continue
+			}
+			log.Error("secret scanning: scan of text %q: %v", item, err)
+		}
+	}
+	return unhandled
+}
+
+// handleText runs one queue item. A panic (the keying is not set up, a detector bug) is logged and drops the item.
+func handleText(ctx context.Context, item string) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			log.Error("secret scanning: panic (%T) scanning text %q", p, item)
+			err = nil
+		}
+	}()
+	parts := strings.Split(item, ":")
+	nums := make([]int64, 0, 3)
+	for _, p := range parts[1:] {
+		if n, perr := strconv.ParseInt(p, 10, 64); perr == nil {
+			nums = append(nums, n)
+		}
+	}
+	switch {
+	case parts[0] == "i" && len(nums) == 1:
+		return scanIssueText(ctx, nums[0])
+	case parts[0] == "c" && len(nums) == 1:
+		return scanCommentText(ctx, nums[0])
+	case parts[0] == "x" && len(parts) == 4 && len(nums) == 2:
+		return secretscan_model.MarkTextGone(ctx, nums[0], parts[1], nums[1])
+	}
+	return nil
+}
+
+// textRepo returns the repository when its text is to be scanned: scanning is on for it and text is part of it.
+func textRepo(ctx context.Context, repoID int64) (*repo_model.Repository, setting.SecretScanningOptions, bool) {
+	cfg := setting.SecretScanningSettings(ctx)
+	if !cfg.ScanText || !SiteEnabled(ctx) {
+		return nil, cfg, false
+	}
+	repo, err := repo_model.GetRepositoryByID(ctx, repoID)
+	if err != nil {
+		if !repo_model.IsErrRepoNotExist(err) {
+			log.Error("secret scanning: load repository %d for its text: %v", repoID, err)
+		}
+		return nil, cfg, false
+	}
+	return repo, cfg, Enabled(ctx, repo) && repo.Status == repo_model.RepositoryReady
+}
+
+func scanIssueText(ctx context.Context, id int64) error {
+	issue, err := issues_model.GetIssueByID(ctx, id)
+	if err != nil {
+		if issues_model.IsErrIssueNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	repo, cfg, ok := textRepo(ctx, issue.RepoID)
+	if !ok {
+		return nil
+	}
+	t, err := newTextScan(ctx, repo, cfg)
+	if err != nil {
+		return err
+	}
+	t.addIssue(issue)
+	return t.flush(nil)
+}
+
+func scanCommentText(ctx context.Context, id int64) error {
+	c, err := issues_model.GetCommentByID(ctx, id)
+	if err != nil {
+		if issues_model.IsErrCommentNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	issue, err := issues_model.GetIssueByID(ctx, c.IssueID)
+	if err != nil {
+		if issues_model.IsErrIssueNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	repo, cfg, ok := textRepo(ctx, issue.RepoID)
+	if !ok || !slices.Contains(textCommentTypes, c.Type) {
+		return nil
+	}
+	if pending, err := pendingReviews(ctx, []*issues_model.Comment{c}); err != nil || pending[c.ReviewID] {
+		return err // a draft is not published: it is scanned when the review is submitted
+	}
+	t, err := newTextScan(ctx, repo, cfg)
+	if err != nil {
+		return err
+	}
+	t.addComment(c)
+	return t.flush(nil)
+}
+
+// pendingReviews tells which of the reviews the comments belong to are drafts.
+func pendingReviews(ctx context.Context, comments []*issues_model.Comment) (map[int64]bool, error) {
+	var ids []int64
+	for _, c := range comments {
+		if c.ReviewID > 0 {
+			ids = append(ids, c.ReviewID)
+		}
+	}
+	out := map[int64]bool{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []*issues_model.Review
+	if err := db.GetEngine(ctx).In("id", ids).And("type = ?", issues_model.ReviewTypePending).Cols("id").Find(&rows); err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out[r.ID] = true
+	}
+	return out, nil
+}
+
+// detectors caches the compiled detectors by what they were built from, so that a text is not scanned by a detector
+// compiled for it: one per set of custom patterns, the generic rule and the size limit. A pattern that changes is
+// another entry; the cache is dropped when it grows.
+var detectors = struct {
+	sync.Mutex
+	m map[[sha256.Size]byte]*secretdetection.Detector
+}{m: map[[sha256.Size]byte]*secretdetection.Detector{}}
+
+func textDetector(ctx context.Context, repo *repo_model.Repository, cfg setting.SecretScanningOptions) (*secretdetection.Detector, error) {
+	custom, err := customRules(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	var key strings.Builder
+	fmt.Fprintf(&key, "%t|%d", cfg.GenericRules, cfg.MaxTextBytes)
+	for _, r := range custom {
+		fmt.Fprintf(&key, "|%s\x00%s\x00%d\x00%s", r.ID, r.Regex, r.SecretGroup, strings.Join(r.Keywords, "\x01"))
+	}
+	k := sha256.Sum256([]byte(key.String()))
+	detectors.Lock()
+	defer detectors.Unlock()
+	if d := detectors.m[k]; d != nil {
+		return d, nil
+	}
+	rules := []secretdetection.Rule{}
+	for _, r := range secretdetection.BuiltinRules() {
+		if !r.DefaultOff || cfg.GenericRules {
+			rules = append(rules, r)
+		}
+	}
+	d, err := secretdetection.NewDetector(append(rules, custom...))
+	if err != nil {
+		return nil, err
+	}
+	d.MaxContentSize = int(cfg.MaxTextBytes)
+	if len(detectors.m) >= 64 {
+		clear(detectors.m)
+	}
+	detectors.m[k] = d
+	return d, nil
+}
+
+// textScan collects what the texts of one pass hold; flush stores it in one transaction.
+type textScan struct {
+	ctx      context.Context
+	repo     *repo_model.Repository
+	cfg      setting.SecretScanningOptions
+	detector *secretdetection.Detector
+	cands    map[string]map[string]*candidate // by place kind, then rule and fingerprint
+	found    map[secretscan_model.TextSource]map[secretscan_model.PlaceKey]bool
+	holes    int64
+	read     int64 // bytes of text added
+}
+
+func newTextScan(ctx context.Context, repo *repo_model.Repository, cfg setting.SecretScanningOptions) (*textScan, error) {
+	d, err := textDetector(ctx, repo, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &textScan{
+		ctx: ctx, repo: repo, cfg: cfg, detector: d,
+		cands: map[string]map[string]*candidate{}, found: map[secretscan_model.TextSource]map[secretscan_model.PlaceKey]bool{},
+	}, nil
+}
+
+func poster(id, originalAuthorID int64) int64 {
+	if originalAuthorID != 0 || id <= 0 {
+		return 0 // imported text has no spoved author; the Actions user and token identities write no text
+	}
+	return id
+}
+
+func (t *textScan) addIssue(issue *issues_model.Issue) {
+	by := poster(issue.PosterID, issue.OriginalAuthorID)
+	t.add(secretscan_model.TextSource{Kind: secretscan_model.KindIssue, ID: issue.ID, Field: "title"}, issue.ID, by, issue.Title)
+	t.add(secretscan_model.TextSource{Kind: secretscan_model.KindIssue, ID: issue.ID, Field: "body"}, issue.ID, by, issue.Content)
+}
+
+func (t *textScan) addComment(c *issues_model.Comment) {
+	t.add(secretscan_model.TextSource{Kind: secretscan_model.KindComment, ID: c.ID}, c.IssueID, poster(c.PosterID, c.OriginalAuthorID), c.Content)
+}
+
+// add scans one text. A text over MAX_TEXT_BYTES is cut (a hole), as is one the detector could not scan whole.
+func (t *textScan) add(src secretscan_model.TextSource, issueID, posterID int64, text string) {
+	places := map[secretscan_model.PlaceKey]bool{}
+	t.found[src] = places
+	t.read += int64(len(text))
+	if int64(len(text)) > t.cfg.MaxTextBytes {
+		text = strings.ToValidUTF8(text[:t.cfg.MaxTextBytes], "")
+		t.holes++
+	}
+	if text == "" {
+		return
+	}
+	findings, complete := scanContent(t.detector, []byte(stripDataURIs(text)))
+	if !complete {
+		t.holes++
+	}
+	byKey := t.cands[src.Kind]
+	if byKey == nil {
+		byKey = map[string]*candidate{}
+		t.cands[src.Kind] = byKey
+	}
+	for _, f := range findings {
+		loc := secretscan_model.NewTextLocation(t.repo.ID, src.Kind, src.ID, issueID, src.Field, f.StartLine, f.EndLine, posterID)
+		places[secretscan_model.PlaceKey{Kind: src.Kind, PathHash: loc.PathHash, StartLine: loc.StartLine}] = true
+		key := f.RuleID + "|" + f.Fingerprint
+		c := byKey[key]
+		if c == nil {
+			if int64(len(byKey)) >= t.cfg.MaxAlertsPerRepo { // more distinct secrets than the repository may have alerts
+				t.holes++
+				continue
+			}
+			c = &candidate{ruleID: f.RuleID, fingerprint: f.Fingerprint, locs: map[string]*secretscan_model.Location{}}
+			byKey[key] = c
+		}
+		lk := loc.PathHash + ":" + strconv.Itoa(loc.StartLine)
+		switch {
+		case c.locs[lk] != nil:
+		case int64(len(c.locs)) >= t.cfg.MaxLocationsPerAlert:
+			c.extra++
+		default:
+			c.locs[lk] = loc
+		}
+	}
+}
+
+// flush stores the alerts and their places, marks the places that are gone, counts the holes and runs more (the
+// backfill's state row), in one transaction after the last check of the switches. Alerts left out for the cap are
+// holes too; left tells how many.
+func (t *textScan) flush(more func(ctx context.Context, left int64) error) error {
+	err := db.WithTx(t.ctx, func(ctx context.Context) error {
+		enabled, owner, err := enabledStored(ctx, t.repo.ID)
+		if err != nil {
+			return err
+		}
+		if !enabled {
+			return errDisabled
+		}
+		if owner != t.repo.OwnerID {
+			return errOwnerMoved
+		}
+		var left int64
+		for _, kind := range slices.Sorted(maps.Keys(t.cands)) {
+			cands := slices.SortedFunc(maps.Values(t.cands[kind]), func(a, b *candidate) int {
+				return cmp.Or(cmp.Compare(a.ruleID, b.ruleID), cmp.Compare(a.fingerprint, b.fingerprint))
+			})
+			l, err := writeAlerts(ctx, t.cfg, t.repo.ID, kind, true, cands)
+			if err != nil {
+				return err
+			}
+			left += l
+		}
+		if err := secretscan_model.SyncTextPlaces(ctx, t.repo.ID, t.found); err != nil {
+			return err
+		}
+		if more != nil {
+			return more(ctx, left)
+		}
+		return secretscan_model.AddTextHoles(ctx, t.repo.ID, t.holes+left)
+	})
+	if errors.Is(err, errDisabled) {
+		return nil // switched off meanwhile: nothing is stored
+	}
+	return err
+}
+
+// textCursor is where the scan of a repository's text is: issues up to Issue are done, Cur is the issue whose comments
+// are being read (its title and body are done) and Comment the last comment of it that is.
+type textCursor struct {
+	Issue   int64 `json:"i"`
+	Cur     int64 `json:"p,omitempty"`
+	Comment int64 `json:"c,omitempty"`
+}
+
+// scanText reads the text of the repository that is there already, one slice per call, after its code was scanned. It
+// goes on from the cursor kept in the state row of kind issue and is done once that row has no retry time. A text that
+// a notifier scan reads meanwhile is stored once (the places are unique).
+func (s *scanner) scanText() (requeue bool, err error) {
+	if !s.cfg.ScanText {
+		return false, nil
+	}
+	old, err := secretscan_model.GetScan(s.ctx, s.repo.ID, secretscan_model.KindIssue)
+	if err != nil {
+		return false, err
+	}
+	var cur textCursor
+	if old != nil {
+		if old.RetryUnix == 0 || old.FailCount > 0 && timeutil.TimeStampNow() < old.RetryUnix {
+			return false, nil // done, or a failure waiting out its backoff
+		}
+		_ = json.Unmarshal([]byte(old.ScannedTips), &cur) // a state that can't be read reads everything again
+	}
+	t, err := newTextScan(s.ctx, s.repo, s.cfg)
+	if err != nil {
+		return false, err
+	}
+	items := 0
+	done := false
+	more := func() bool { return items < maxTextItems && t.read < maxTextSliceBytes && s.scanCtx.Err() == nil }
+	for more() && !done {
+		if cur.Cur == 0 {
+			var issues []*issues_model.Issue
+			if err := db.GetEngine(s.ctx).Where("repo_id = ? AND id > ?", s.repo.ID, cur.Issue).OrderBy("id").Limit(textBatch).Find(&issues); err != nil {
+				return false, err
+			}
+			if len(issues) == 0 {
+				done = true
+				break
+			}
+			cur.Cur = issues[0].ID
+			t.addIssue(issues[0])
+			items++
+			continue
+		}
+		var comments []*issues_model.Comment
+		if err := db.GetEngine(s.ctx).Where("issue_id = ? AND id > ?", cur.Cur, cur.Comment).In("type", textCommentTypes).
+			OrderBy("id").Limit(textBatch).Find(&comments); err != nil {
+			return false, err
+		}
+		pending, err := pendingReviews(s.ctx, comments)
+		if err != nil {
+			return false, err
+		}
+		read := 0
+		for _, c := range comments {
+			cur.Comment = c.ID // a draft is skipped; its review's submission scans it
+			read++
+			if !pending[c.ReviewID] {
+				t.addComment(c)
+				items++
+			}
+			if !more() {
+				break
+			}
+		}
+		if read == len(comments) && len(comments) < textBatch { // the issue's comments are all read
+			cur.Issue, cur.Cur, cur.Comment = cur.Cur, 0, 0
+		}
+	}
+	return s.saveText(old, cur, t, done)
+}
+
+// saveText stores a slice of the text scan: the alerts and the state row in one transaction.
+func (s *scanner) saveText(old *secretscan_model.Scan, cur textCursor, t *textScan, done bool) (requeue bool, err error) {
+	tips, _ := json.Marshal(cur)
+	st := &secretscan_model.Scan{RepoID: s.repo.ID, Kind: secretscan_model.KindIssue, ScannedTips: string(tips), Status: secretscan_model.StatusOK}
+	if old != nil {
+		st.Holes = old.Holes
+	}
+	err = t.flush(func(ctx context.Context, left int64) error {
+		st.Holes += t.holes + left
+		switch {
+		case !done:
+			st.Status, st.Error = secretscan_model.StatusIncomplete, stopText
+			st.RetryUnix = timeutil.TimeStampNow().Add(int64(retryBase / time.Second)) // under way: a safety net for the cron task
+		case st.Holes > 0:
+			st.Status, st.Error = secretscan_model.StatusIncomplete, stopPartial
+			if left > 0 || old != nil && old.Holes > 0 && old.Error == stopAlerts {
+				st.Error = stopAlerts
+			}
+		}
+		return secretscan_model.Save(ctx, old, st)
+	})
+	switch {
+	case err == nil:
+		return !done, nil
+	case errors.Is(err, secretscan_model.ErrScanMoved), errors.Is(err, errOwnerMoved):
+		return true, nil // overtaken: read again
+	}
+	log.Error("secret scanning: store the text scan of repository %d: %v", s.repo.ID, err)
+	fail := &secretscan_model.Scan{RepoID: s.repo.ID, Kind: secretscan_model.KindIssue, ScannedTips: "{}", Status: secretscan_model.StatusFailed, Error: errStore, FailCount: 1}
+	if old != nil {
+		fail.ScannedTips, fail.Holes, fail.FailCount = old.ScannedTips, old.Holes, old.FailCount+1
+	}
+	fail.RetryUnix = timeutil.TimeStampNow().Add(int64(min(retryBase<<min(fail.FailCount-1, 12), retryMax) / time.Second))
+	_ = secretscan_model.Save(s.ctx, old, fail)
+	return false, errStoreFail
+}
+
+// textNotifier methods: a text that is written or changed is queued; the handler reads it as it is then.
+func (*notifier) NewIssue(ctx context.Context, issue *issues_model.Issue, _ []*user_model.User) {
+	enqueueIssueText(ctx, issue.ID)
+}
+
+func (*notifier) IssueChangeContent(ctx context.Context, _ *user_model.User, issue *issues_model.Issue, _ string) {
+	enqueueIssueText(ctx, issue.ID)
+}
+
+func (*notifier) IssueChangeTitle(ctx context.Context, _ *user_model.User, issue *issues_model.Issue, _ string) {
+	enqueueIssueText(ctx, issue.ID)
+}
+
+func (*notifier) DeleteIssue(ctx context.Context, _ *user_model.User, issue *issues_model.Issue) {
+	enqueueTextGone(ctx, secretscan_model.KindIssue, issue.RepoID, issue.ID)
+}
+
+func (*notifier) CreateIssueComment(ctx context.Context, _ *user_model.User, _ *repo_model.Repository, _ *issues_model.Issue, c *issues_model.Comment, _ []*user_model.User) {
+	enqueueCommentText(ctx, c)
+}
+
+func (*notifier) UpdateComment(ctx context.Context, _ *user_model.User, c *issues_model.Comment, _ string) {
+	enqueueCommentText(ctx, c)
+}
+
+func (*notifier) DeleteComment(ctx context.Context, _ *user_model.User, c *issues_model.Comment) {
+	if c.Issue == nil {
+		if err := c.LoadIssue(ctx); err != nil {
+			return
+		}
+	}
+	enqueueTextGone(ctx, secretscan_model.KindComment, c.Issue.RepoID, c.ID)
+}
+
+// PullRequestReview and PullRequestCodeComment come when a review is submitted, so a draft is not scanned before.
+func (*notifier) PullRequestReview(ctx context.Context, _ *issues_model.PullRequest, _ *issues_model.Review, c *issues_model.Comment, _ []*user_model.User) {
+	enqueueCommentText(ctx, c)
+}
+
+func (*notifier) PullRequestCodeComment(ctx context.Context, _ *issues_model.PullRequest, c *issues_model.Comment, _ []*user_model.User) {
+	enqueueCommentText(ctx, c)
+}
