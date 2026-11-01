@@ -3966,6 +3966,18 @@
 	"secret_search.org_note_all": "Showing every repository in this organization that you can read. Secrets are never stored or shown. Downloads are recorded in the audit log.",
 	"secret_search.admin_note": "Every repository on the instance, trashed ones excluded. Secrets are never stored or shown. Downloads are recorded in the audit log.",
 	"secret_search.export_too_many": "There are too many alerts to download at once. Narrow the list and try again.",
+	"admin.audit.action.org.secret_pattern.created": "Added the custom secret pattern %s of an organization",
+	"admin.audit.action.org.secret_pattern.updated": "Changed the custom secret pattern %s of an organization",
+	"admin.audit.action.org.secret_pattern.enabled": "Turned on the custom secret pattern %s of an organization",
+	"admin.audit.action.org.secret_pattern.disabled": "Turned off the custom secret pattern %s of an organization",
+	"admin.audit.action.org.secret_pattern.deleted": "Deleted the custom secret pattern %s of an organization",
+	"admin.audit.action.admin.secret_pattern.created": "Added the custom secret pattern %s of the site",
+	"admin.audit.action.admin.secret_pattern.updated": "Changed the custom secret pattern %s of the site",
+	"admin.audit.action.admin.secret_pattern.enabled": "Turned on the custom secret pattern %s of the site",
+	"admin.audit.action.admin.secret_pattern.disabled": "Turned off the custom secret pattern %s of the site",
+	"admin.audit.action.admin.secret_pattern.deleted": "Deleted the custom secret pattern %s of the site",
+	"secret_search.deleted_pattern": "Deleted pattern",
+	"secret_search.pattern_disabled": "disabled",
 	"admin.audit.action.org.secret_alerts.exported": "Exported the secret alerts of organization %s",
 	"admin.audit.action.admin.secret_alerts.exported": "Exported the secret alerts of every owner"
 }

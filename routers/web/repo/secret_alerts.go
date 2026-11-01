@@ -109,12 +109,23 @@ func buildSecretRows(ctx *context.Context, alerts []*secretscan_model.Alert, can
 	if err != nil {
 		return nil, err
 	}
-	rules := secretRules()
+	ruleIDs := make([]string, len(alerts))
+	for i, a := range alerts {
+		ruleIDs[i] = a.RuleID
+	}
+	labels, err := secretscan_service.RuleLabels(ctx, ruleIDs, nil) // the name of a deleted pattern is for its owners' lists
+	if err != nil {
+		return nil, err
+	}
 	rows := make([]*secretAlertRow, 0, len(alerts))
 	for _, a := range alerts {
-		r := &secretAlertRow{Alert: a, Name: a.RuleID, First: first[a.ID], More: max(counts[a.ID]-1, 0)}
-		if rule, ok := rules[a.RuleID]; ok {
-			r.Name, r.Generic = rule.Name, rule.Type == "generic"
+		l := labels[a.RuleID]
+		r := &secretAlertRow{Alert: a, Name: l.Name, Generic: l.Generic, First: first[a.ID], More: max(counts[a.ID]-1, 0)}
+		switch {
+		case l.Deleted:
+			r.Name = ctx.Locale.TrString("secret_search.deleted_pattern")
+		case l.Disabled:
+			r.Name += " (" + ctx.Locale.TrString("secret_search.pattern_disabled") + ")"
 		}
 		if a.ClosedByID != 0 {
 			_, r.ClosedBy = user_model.GetUserFromMap(a.ClosedByID, users)

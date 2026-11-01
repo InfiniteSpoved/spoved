@@ -168,7 +168,11 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 			rules = append(rules, r)
 		}
 	}
-	detector, err := secretdetection.NewDetector(rules)
+	custom, err := customRules(ctx, repo) // read once per scan: a disable or a delete counts from the next scan on
+	if err != nil {
+		return false, err
+	}
+	detector, err := secretdetection.NewDetector(append(rules, custom...))
 	if err != nil {
 		return false, err
 	}
@@ -763,6 +767,9 @@ func writeAlerts(ctx context.Context, cfg setting.SecretScanningOptions, repoID 
 					break
 				}
 				rule, _ := secretdetection.RuleByID(c.ruleID)
+				if _, ok := secretscan_model.ParseCustomRuleID(c.ruleID); ok {
+					rule.Type = "custom"
+				}
 				a = &secretscan_model.Alert{RepoID: repoID, RuleID: c.ruleID, SecretType: rule.Type, Fingerprint: c.fingerprint, ViaPull: viaPull}
 				if err := secretscan_model.InsertAlert(ctx, a); err != nil {
 					return 0, err

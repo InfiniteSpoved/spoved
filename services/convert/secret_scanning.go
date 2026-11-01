@@ -40,6 +40,22 @@ func ToSecretScanningAlerts(ctx context.Context, doer *user_model.User, repo *re
 	for _, r := range secretdetection.BuiltinRules() {
 		names[r.ID] = r.Name
 	}
+	var customIDs []int64
+	for _, a := range alerts {
+		if id, ok := secretscan_model.ParseCustomRuleID(a.RuleID); ok {
+			customIDs = append(customIDs, id)
+		}
+	}
+	patterns, err := secretscan_model.GetCustomPatternsByIDs(ctx, customIDs) // one query; a deleted pattern's name stays out
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range customIDs {
+		names[secretscan_model.CustomRuleID(id)] = "Deleted pattern"
+		if p := patterns[id]; p != nil && p.DeletedUnix == 0 {
+			names[p.RuleID()] = p.Name
+		}
+	}
 	out := make([]*api.SecretScanningAlert, 0, len(alerts))
 	for _, a := range alerts {
 		index := strconv.FormatInt(a.Index, 10)

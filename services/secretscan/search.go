@@ -222,12 +222,23 @@ func builtinRule(ruleID string) (secretdetection.Rule, bool) {
 	return secretdetection.Rule{}, false
 }
 
+// seeDeletedPattern says whether the viewer may read the name of a deleted pattern of the owner: the instance list
+// (site admins and auditors) the site's, and an owner or auditor of the organization the organization's.
+func (s Scope) seeDeletedPattern(ownerID int64) bool {
+	if ownerID == 0 {
+		return s.Org == nil
+	}
+	return s.Org != nil && s.Org.ID == ownerID && !s.Narrow
+}
+
 // Hit is an alert of a list with what the rows show.
 type Hit struct {
 	*secretscan_model.Alert
 	Repo     *repo_model.Repository
 	Name     string
 	Generic  bool
+	Deleted  bool // the rule is a custom pattern that is deleted: Name is empty unless the viewer may read it
+	Disabled bool // a custom pattern that is turned off
 	First    *secretscan_model.Location
 	More     int // places beyond the first
 	ClosedBy *user_model.User
@@ -240,7 +251,7 @@ type Result struct {
 }
 
 // hits loads what the rows of the alerts show, in a fixed number of queries.
-func hits(ctx context.Context, alerts []*secretscan_model.Alert) ([]*Hit, error) {
+func (s Scope) hits(ctx context.Context, alerts []*secretscan_model.Alert) ([]*Hit, error) {
 	if len(alerts) == 0 {
 		return nil, nil
 	}
@@ -268,6 +279,14 @@ func hits(ctx context.Context, alerts []*secretscan_model.Alert) ([]*Hit, error)
 	if err != nil {
 		return nil, err
 	}
+	ruleIDs := make([]string, len(alerts))
+	for i, a := range alerts {
+		ruleIDs[i] = a.RuleID
+	}
+	labels, err := RuleLabels(ctx, ruleIDs, s.seeDeletedPattern)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]*Hit, 0, len(alerts))
 	for _, a := range alerts {
 		repo := repos[a.RepoID]
@@ -275,7 +294,8 @@ func hits(ctx context.Context, alerts []*secretscan_model.Alert) ([]*Hit, error)
 			continue // trashed since the search
 		}
 		h := &Hit{Alert: a, Repo: repo, First: first[a.ID], More: max(counts[a.ID]-1, 0)}
-		h.Name, h.Generic = RuleInfo(a.RuleID)
+		l := labels[a.RuleID]
+		h.Name, h.Generic, h.Deleted, h.Disabled = l.Name, l.Generic, l.Deleted, l.Disabled
 		if a.ClosedByID != 0 {
 			_, h.ClosedBy = user_model.GetUserFromMap(a.ClosedByID, users)
 		}
@@ -299,7 +319,7 @@ func Search(ctx context.Context, s Scope, f Filter, lo db.ListOptions) (*Result,
 	if _, err := db.GetEngine(ctx).Table("secret_scanning_alert").Where(opts.ToConds()).Select("COUNT(DISTINCT repo_id)").Get(&repos); err != nil {
 		return nil, err
 	}
-	h, err := hits(ctx, alerts)
+	h, err := s.hits(ctx, alerts)
 	return &Result{Hits: h, Total: total, Repos: repos}, err
 }
 
@@ -332,7 +352,7 @@ func Export(ctx context.Context, s Scope, f Filter, start func(total int64) erro
 		if err := db.GetEngine(ctx).Where(opts.ToConds().And(builder.In("id", batch))).OrderBy(opts.ToOrders()).Find(&alerts); err != nil {
 			return err
 		}
-		h, err := hits(ctx, alerts)
+		h, err := s.hits(ctx, alerts)
 		if err != nil {
 			return err
 		}

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"forgejo.org/models/db"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
@@ -201,9 +202,25 @@ func sendSecretDigestMail(repo *repo_model.Repository, u *user_model.User, d *se
 		Name  string
 		Count int
 	}
+	var customIDs []int64
+	for _, t := range d.Types {
+		if id, ok := secretscan_model.ParseCustomRuleID(t.RuleID); ok {
+			customIDs = append(customIDs, id)
+		}
+	}
+	patterns, err := secretscan_model.GetCustomPatternsByIDs(db.DefaultContext, customIDs)
+	if err != nil {
+		return err
+	}
 	types := make([]typeRow, len(d.Types))
 	for i, t := range d.Types {
 		types[i] = typeRow{Name: names[t.RuleID], Count: t.Count}
+		if id, ok := secretscan_model.ParseCustomRuleID(t.RuleID); ok {
+			types[i].Name = locale.TrString("secret_search.deleted_pattern")
+			if p := patterns[id]; p != nil && p.DeletedUnix == 0 {
+				types[i].Name = p.Name
+			}
+		}
 		if types[i].Name == "" {
 			types[i].Name = t.RuleID
 		}

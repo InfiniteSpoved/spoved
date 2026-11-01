@@ -111,6 +111,40 @@ func ValidateCustomRule(name, pattern, testString string, keywords []string) err
 	return nil
 }
 
+// ValidateStoredRule is ValidateCustomRule for a rule that is already stored, where no test string is at hand: the
+// same checks of the pattern, its shape and the corpus, and of the keywords' number and size. A rule that a later
+// version of the engine refuses fails here, and the caller skips it.
+func ValidateStoredRule(name, pattern string, keywords []string) error {
+	if name == "" || len(name) > MaxCustomNameLen {
+		return ErrCustomNameInvalid
+	}
+	if len(pattern) > MaxCustomPatternLen {
+		return ErrPatternTooLong
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrPatternInvalid, err)
+	}
+	if err := checkComplexity(pattern); err != nil {
+		return err
+	}
+	if re.MatchString("") {
+		return ErrPatternMatchesEmpty
+	}
+	if len(keywords) == 0 || len(keywords) > MaxCustomKeywords {
+		return ErrKeywordMissing
+	}
+	for _, k := range keywords {
+		if len(k) < MinCustomKeywordLen || len(k) > MaxCustomKeywordLen {
+			return ErrKeywordMissing
+		}
+	}
+	if len(re.FindAllIndex(corpus(), MaxCorpusMatches+1)) > MaxCorpusMatches {
+		return ErrPatternMatchesTooMuch
+	}
+	return nil
+}
+
 // CustomRule is the Rule of a custom pattern: the secret is capture group 1 if
 // the pattern has one, else the whole match, and at least 8 bytes. It runs in
 // windows around the (lowercased) keywords: as many bytes on each side as the
