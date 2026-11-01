@@ -123,6 +123,7 @@ func toTextLocation(repo *repo_model.Repository, l *secretscan_model.Location, p
 	if l.Kind == secretscan_model.KindComment {
 		id := strconv.FormatInt(l.SourceID, 10)
 		url, d.HTMLURL = repo.APIURL()+"/issues/comments/"+id, d.HTMLURL+"#issuecomment-"+id
+		d.CommentID = l.SourceID
 	}
 	typ := what + "_" + field
 	switch typ { // GitHub's names: one URL key per type

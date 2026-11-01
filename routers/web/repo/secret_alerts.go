@@ -534,6 +534,32 @@ func SecretAlertReopen(ctx *context.Context) {
 	ctx.Redirect(secretAlertLink(ctx))
 }
 
+// SecretAlertRedact removes the secret of the alert from one text of an issue or pull request (see
+// secretscan_service.RedactText): someone who may close the alert, and reads that text.
+func SecretAlertRedact(ctx *context.Context) {
+	if !mustWriteSecretAlerts(ctx) || loadSecretAlertForPage(ctx) == nil {
+		return
+	}
+	target := secretscan_service.RedactTarget{Issue: ctx.FormInt64("issue"), Field: ctx.FormString("field"), Comment: ctx.FormInt64("comment")}
+	err := secretscan_service.RedactText(ctx, ctx.Repo.Repository, ctx.Doer, ctx.ParamsInt64(":index"), target, secretTextAccess(ctx), ctx.Repo.CanRead(unit.TypeWiki))
+	switch {
+	case err == nil:
+		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.done"))
+	case errors.Is(err, secretscan_service.ErrRedactTarget):
+		ctx.NotFound("SecretAlertRedact", err)
+		return
+	case errors.Is(err, secretscan_service.ErrRedactGone):
+		ctx.Flash.Error(ctx.Tr("repo.secrets.redact.gone"))
+	case errors.Is(err, secretscan_service.ErrRedactManual):
+		ctx.Flash.Error(ctx.Tr("repo.secrets.redact.manual"))
+	case errors.Is(err, secretscan_service.ErrRedactChanged):
+		ctx.Flash.Error(ctx.Tr("repo.secrets.redact.changed"))
+	case secretAlertError(ctx, err) && ctx.Written():
+		return
+	}
+	ctx.Redirect(secretAlertLink(ctx))
+}
+
 // SecretAlertsClose closes the selected alerts of the list with one reason, one alert at a time through the service
 // (an audit entry each); the comment is checked once. The ones that can't be closed (gone, closed meanwhile, wiki
 // only for this viewer) are counted. It goes back to the list the form was sent from, with its filters.

@@ -363,3 +363,84 @@ func ListSecretScanningAlertLocations(ctx *context.APIContext) {
 	}
 	ctx.JSON(http.StatusOK, convert.ToSecretScanningLocations(repo, locs, texts, func(path string) string { return wiki_service.PageHTMLURL(repo, path) }))
 }
+
+// RedactSecretScanningText removes the secret of an alert from one text of an issue or pull request
+func RedactSecretScanningText(ctx *context.APIContext) {
+	// swagger:operation POST /repos/{owner}/{repo}/secret-scanning/alerts/{index}/redact repository repoRedactSecretScanningText
+	// ---
+	// summary: Remove the secret of an alert from the text of an issue, pull request or comment
+	// description: For people who may resolve the alert and read the issue or pull request (a token with scopes also
+	//   needs write:issue). The secret is found again in the text as it is now and every copy of it is replaced with
+	//   "[secret removed]"; the earlier versions in the text's edit history are emptied, the alert's places in the text
+	//   are marked removed and the change is audited. Nobody is notified. It can't be undone, and the secret must still
+	//   be revoked. A text the alert has no place in, or that the caller can't read, is 404; a text that no longer holds
+	//   the secret is 422, one that changed while it was redacted 409.
+	// consumes:
+	// - application/json
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: index
+	//   in: path
+	//   description: number of the alert
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// - name: body
+	//   in: body
+	//   schema:
+	//     "$ref": "#/definitions/RedactSecretScanningTextOption"
+	// responses:
+	//   "204":
+	//     "$ref": "#/responses/empty"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+	//   "409":
+	//     "$ref": "#/responses/conflict"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
+	//   "423":
+	//     "$ref": "#/responses/repoArchivedError"
+
+	// the text is data of the issue tracker: a token with scopes needs write:issue, asked before anything is looked up
+	if has, scope := ctx.Authentication().Scope().Get(); has {
+		if ok, err := scope.HasScope(auth_model.AccessTokenScopeWriteIssue); err != nil || !ok {
+			ctx.Error(http.StatusForbidden, "", "the token needs the write:issue scope")
+			return
+		}
+	}
+	form := web.GetForm(ctx).(*api.RedactSecretScanningTextOption)
+	alert := loadSecretScanningAlert(ctx)
+	if alert == nil {
+		return
+	}
+	perm := ctx.Permission()
+	target := secretscan_service.RedactTarget{Issue: form.IssueNumber, Field: form.Field, Comment: form.CommentID}
+	access := secretscan_model.TextAccess{Issues: perm.CanRead(unit.TypeIssues), Pulls: perm.CanRead(unit.TypePullRequests)}
+	switch err := secretscan_service.RedactText(ctx, ctx.Repo().Repository, ctx.Doer(), alert.Index, target, access, perm.CanRead(unit.TypeWiki)); {
+	case err == nil:
+		ctx.Status(http.StatusNoContent)
+	case errors.Is(err, util.ErrInvalidArgument):
+		ctx.Error(http.StatusUnprocessableEntity, "", err.Error())
+	case errors.Is(err, util.ErrNotExist):
+		ctx.NotFound()
+	case errors.Is(err, secretscan_service.ErrRedactChanged):
+		ctx.Error(http.StatusConflict, "", "the text changed meanwhile, try again")
+	case errors.Is(err, secretscan_service.ErrArchived):
+		ctx.Error(http.StatusLocked, "", "the repository is archived")
+	default:
+		ctx.Error(http.StatusInternalServerError, "RedactText", err)
+	}
+}

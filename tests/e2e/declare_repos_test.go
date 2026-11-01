@@ -4,6 +4,8 @@
 package e2e
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"os"
@@ -25,6 +27,7 @@ import (
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/indexer/stats"
+	"forgejo.org/modules/secretdetection"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/timeutil"
@@ -179,6 +182,14 @@ func DeclareGitRepos(t *testing.T) {
 			}
 		})
 	}
+	// the redaction of a secret in text (secret-alerts-redact.test.e2e.ts): an issue whose body holds a secret, and a
+	// comment whose place is stored but whose text no longer holds it
+	newRepo(t, 11, "secret-redact-test", nil, []FileChanges{{
+		Filename: "docs/deploy.md",
+		Versions: []string{"redact"},
+	}}, func(user *user_model.User, repo *repo_model.Repository) {
+		seedSecretRedact(t, user, repo)
+	})
 	// the secret alert lists (secret-alerts-lists.test.e2e.ts): alerts in two repositories of org3, which its owner user2
 	// and the site admin list; the closer of the closed one is user2
 	for _, r := range []struct {
@@ -852,6 +863,35 @@ func seedSecretTextAlerts(t *testing.T, user *user_model.User, repo *repo_model.
 	seed("aws-access-key-id", "aws", secretscan_model.NewTextLocation(repo.ID, secretscan_model.KindIssue, pull.ID, pull.ID, "title", 1, 1, user.ID))
 	code := secretscan_model.NewLocation(repo.ID, secretscan_model.KindRepo, "blobtext", "config/prod.env", 1, 1, commit, "Sam Example", "sam@example.com", int64(now))
 	seed("slack-token", "slack", code, secretscan_model.NewTextLocation(repo.ID, secretscan_model.KindComment, 9002, pull.ID, "", 2, 2, 2))
+	_, err := secretscan_model.DeleteScans(ctx, repo.ID)
+	require.NoError(t, err)
+	require.NoError(t, secretscan_model.Save(ctx, nil, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: "[]", Status: secretscan_model.StatusOK}))
+}
+
+// seedSecretRedact stores, for each browser project of the spec (issue and alert 1 chromium, 2 firefox, 3 Mobile
+// Chrome), an issue whose body holds a secret and an alert with its places, with the fingerprint the detector gives,
+// so the Redact action finds the secret again; the place in the comment is stale (the secret was edited out).
+func seedSecretRedact(t *testing.T, user *user_model.User, repo *repo_model.Repository) {
+	t.Helper()
+	ctx := db.DefaultContext
+	for i := int64(1); i <= 3; i++ {
+		sum := sha256.Sum256([]byte(fmt.Sprintf("secret-redact-e2e-%d", i)))
+		tok := "ghp" + "_" + hex.EncodeToString(sum[:])[:36] // built from parts: never a token literal
+		issue := &issues_model.Issue{RepoID: repo.ID, Index: i, PosterID: user.ID, Title: "Staging deploy notes", Content: "Use this to deploy:\n" + tok + "\nThanks"}
+		require.NoError(t, db.Insert(ctx, issue))
+		comment := &issues_model.Comment{Type: issues_model.CommentTypeComment, IssueID: issue.ID, PosterID: user.ID, Content: "I rotated it already."}
+		require.NoError(t, db.Insert(ctx, comment))
+		alert := &secretscan_model.Alert{RepoID: repo.ID, RuleID: "github-token", SecretType: "github", LocationCount: 2, ViaPull: true, Fingerprint: secretdetection.Fingerprint([]byte(tok))}
+		require.NoError(t, secretscan_model.InsertAlert(ctx, alert))
+		locs := []*secretscan_model.Location{
+			secretscan_model.NewTextLocation(repo.ID, secretscan_model.KindIssue, issue.ID, issue.ID, "body", 2, 2, user.ID),
+			secretscan_model.NewTextLocation(repo.ID, secretscan_model.KindComment, comment.ID, issue.ID, "", 1, 1, user.ID),
+		}
+		for _, l := range locs {
+			l.AlertID = alert.ID
+		}
+		require.NoError(t, secretscan_model.InsertLocations(ctx, locs))
+	}
 	_, err := secretscan_model.DeleteScans(ctx, repo.ID)
 	require.NoError(t, err)
 	require.NoError(t, secretscan_model.Save(ctx, nil, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: "[]", Status: secretscan_model.StatusOK}))

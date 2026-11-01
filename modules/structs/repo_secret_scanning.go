@@ -51,6 +51,8 @@ type SecretScanningLocationDetails struct {
 	PullRequestBodyURL string `json:"pull_request_body_url,omitempty"`
 	// the API URL of the comment, for a pull_request_comment place
 	PullRequestCommentURL string `json:"pull_request_comment_url,omitempty"`
+	// spoved: for a place in a comment the caller may read, the ID of the comment
+	CommentID int64 `json:"comment_id,omitempty"`
 }
 
 // SecretScanningLocation is a place a secret was found.
@@ -109,6 +111,18 @@ type EditSecretScanningAlertOption struct {
 	Resolution string `json:"resolution"`
 	// optional when resolving, at most 1000 bytes, but required (not empty after trimming) for wont_fix; refused when it looks like a secret
 	ResolutionComment string `json:"resolution_comment"`
+}
+
+// RedactSecretScanningTextOption names the text to remove the secret of an alert from: the title or body of an issue
+// or pull request (issue_number and field), or a comment (comment_id).
+// swagger:model
+type RedactSecretScanningTextOption struct {
+	// the number of the issue or pull request, with field title or body
+	IssueNumber int64 `json:"issue_number"`
+	// title or body; comment (or empty) with comment_id
+	Field string `json:"field"`
+	// the ID of the comment
+	CommentID int64 `json:"comment_id"`
 }
 
 // SecretScanningStatus sums up how far the scan of a repository (its code, its wiki and its pull refs) has come.

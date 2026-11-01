@@ -59,6 +59,9 @@ type Finding struct {
 	StartLine int // 1-based, line of the first byte of the secret; lines end at LF, as in git
 	EndLine   int // 1-based, line of its last byte (PEM blocks span lines)
 	StartCol  int // 1-based byte column in StartLine
+	// Start and End are the byte offsets of the secret in the content as it was
+	// scanned (for UTF-16 content, in its UTF-8 decoding).
+	Start, End int
 	// Fingerprint is Fingerprint(secret) (of the normalized secret, see
 	// Rule.Normalize).
 	Fingerprint string
@@ -416,6 +419,8 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 			StartLine:   line,
 			EndLine:     line + bytes.Count(content[f.start:f.end-1], []byte("\n")),
 			StartCol:    f.start - lineStart + 1,
+			Start:       f.start,
+			End:         f.end,
 			Fingerprint: f.fingerprint,
 		}
 	}

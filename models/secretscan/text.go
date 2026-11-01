@@ -246,3 +246,20 @@ func LoadTextPlaces(ctx context.Context, repoID int64, locs []*Location, access 
 	}
 	return out, nil
 }
+
+// textPlaceCond is the condition on the places of an alert in one text.
+func textPlaceCond(repoID, alertID int64, src TextSource) builder.Cond {
+	return builder.Eq{"repo_id": repoID, "alert_id": alertID, "kind": src.Kind, "source_id": src.ID, "field": src.Field}
+}
+
+// HasTextPlace tells whether the alert has a place (removed or not) in the text.
+func HasTextPlace(ctx context.Context, repoID, alertID int64, src TextSource) (bool, error) {
+	return db.GetEngine(ctx).Where(textPlaceCond(repoID, alertID, src)).Exist(new(Location))
+}
+
+// MarkTextPlacesRemoved marks the alert's places in the text removed (the secret was taken out of it).
+func MarkTextPlacesRemoved(ctx context.Context, repoID, alertID int64, src TextSource) error {
+	_, err := db.GetEngine(ctx).Where(textPlaceCond(repoID, alertID, src).And(builder.Eq{"removed_unix": 0})).
+		Cols("removed_unix").Update(&Location{RemovedUnix: int64(timeutil.TimeStampNow())})
+	return err
+}

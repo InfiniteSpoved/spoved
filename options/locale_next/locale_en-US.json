@@ -4139,5 +4139,18 @@
 	"secret_pattern.err_title.limit": "Too many patterns",
 	"secret_pattern.err_text.limit": "At most %d patterns can be on at once, the site's included. Turn one off or delete it first.",
 	"admin.audit.action.org.secret_alerts.exported": "Exported the secret alerts of organization %s",
-	"admin.audit.action.admin.secret_alerts.exported": "Exported the secret alerts of every owner"
+	"admin.audit.action.admin.secret_alerts.exported": "Exported the secret alerts of every owner",
+	"repo.secrets.redact.button": "Redact",
+	"repo.secrets.redact.title": "Remove the secret from this text?",
+	"repo.secrets.redact.replace": "Every copy of the secret in this text is replaced with %s. The rest of the text stays as it is.",
+	"repo.secrets.redact.history": "The earlier versions in the edit history of this text are removed, so the secret can't be read there either.",
+	"repo.secrets.redact.undo": "This can't be undone. The edit is shown as yours, and nobody is notified.",
+	"repo.secrets.redact.revoke": "The secret was exposed and may have been copied, mailed or indexed elsewhere: revoke it as well.",
+	"repo.secrets.redact.submit": "Remove the secret",
+	"repo.secrets.redact.done": "The secret was removed from the text and from its edit history. Revoke it as well.",
+	"repo.secrets.redact.gone": "The secret is no longer in this text: it was edited meanwhile. Nothing was changed.",
+	"repo.secrets.redact.changed": "The text changed while the secret was being removed. Nothing was changed: try again.",
+	"repo.secrets.redact.manual": "This text can't be redacted automatically. Edit it to remove the secret.",
+	"repo.secrets.activity.redacted": "removed the secret from the text of an issue, a pull request or a comment",
+	"admin.audit.action.repo.secret_alert.text_redacted": "Removed the secret of the alert for %s from the text of an issue or pull request"
 }
