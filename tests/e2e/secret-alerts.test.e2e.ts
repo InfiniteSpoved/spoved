@@ -88,8 +88,9 @@ test.describe('a writer', () => {
     await page.getByRole('button', {name: 'Close selected…'}).click();
     const dialog = page.locator('#secret-bulk-modal');
     await expect(dialog.locator('.secret-modal-title')).toHaveText('Close 1 alert');
+    await expect(dialog.getByRole('button', {name: 'Close alert', exact: true})).toBeVisible();
     await dialog.getByLabel('Used in tests').check();
-    await dialog.getByRole('button', {name: 'Close alerts', exact: true}).click();
+    await dialog.getByRole('button', {name: 'Close alert', exact: true}).click();
     await expect(page.getByText('1 alert was closed.', {exact: true})).toBeVisible();
     await expect(rows(page)).toHaveCount(4);
 

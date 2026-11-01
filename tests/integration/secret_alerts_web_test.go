@@ -117,6 +117,12 @@ func TestSecretAlertsWeb(t *testing.T) {
 			doc = secretPage(t, owner, list+"/3", http.StatusOK)
 			assert.Contains(t, doc.Find(".secret-locations").Text(), "Wiki")
 			doc.AssertElement(t, `.secret-locations a[href$="/wiki/Home"]`, true)
+			// a wiki place shows the page title (the git file name has dashes and ".md"), then the file name
+			titled := depNewRepo(t, org3, user2, "secret-wiki-title", true, 0)
+			wiki := seedSecretAlert(t, titled, "github-token", "github", secretscan_model.KindWiki, "Release-Notes.md")
+			doc = secretPage(t, owner, fmt.Sprintf("/org3/secret-wiki-title/security/secrets/%d", wiki.Index), http.StatusOK)
+			assert.Contains(t, doc.Find(".secret-locations a[href$=\"/wiki/Release-Notes\"]").Text(), "Release Notes")
+			assert.Contains(t, doc.Find(".secret-locations a[href$=\"/wiki/Release-Notes\"] code").Text(), "Release-Notes.md")
 			guide := depNewRepo(t, org3, user2, "secret-guide", true, 0)
 			gen := seedSecretAlert(t, guide, "generic-secret-assignment", "generic", secretscan_model.KindRepo, "g.env")
 			pem := seedSecretAlert(t, guide, "private-key", "private-key", secretscan_model.KindRepo, "k.pem")
@@ -141,6 +147,7 @@ func TestSecretAlertsWeb(t *testing.T) {
 				{"reason": {"bogus"}},
 				{"reason": {"wont_fix"}},
 				{"reason": {"wont_fix"}, "comment": {"  "}},
+				{"reason": {"wont_fix"}, "comment": {"\r\n\r\n"}},
 				{"reason": {"wont_fix"}, "comment": {string([]rune{0x200b, 0x2060, ' ', 0x200d})}}, // invisible characters only: no comment
 				{"reason": {"revoked"}, "comment": {"it was " + bare}},
 				{"reason": {"revoked"}, "comment": {strings.Repeat("é", 600)}},
@@ -198,12 +205,13 @@ func TestSecretAlertsWeb(t *testing.T) {
 			secretPost(t, owner, list+"/close", url.Values{"index": {"1", "2", "2", "99", "x"}}, http.StatusSeeOther) // no reason
 			assert.NotEmpty(t, flashMessage(t, owner))
 			assert.Equal(t, since, auditMaxID(t))
-			secretPost(t, owner, list+"/close", url.Values{"index": {"1", "2", "2", "99", "x"}, "reason": {"used_in_tests"}, "comment": {"fixtures"}}, http.StatusSeeOther)
+			secretPost(t, owner, list+"/close", url.Values{"index": {"1", "2", "2", "99", "x"}, "reason": {"used_in_tests"}, "comment": {"fixtures\r\nsecond line\tend\rthird"}}, http.StatusSeeOther)
 			flash := flashMessage(t, owner)
 			assert.Contains(t, flash, "2 alerts were closed")
 			assert.Contains(t, flash, "2 alerts were not closed")
 			assert.Equal(t, secretscan_model.StateUsedInTests, secretAlertRow(t, root.ID, 1).State)
 			assert.Equal(t, secretscan_model.StateUsedInTests, secretAlertRow(t, root.ID, 2).State)
+			assert.Equal(t, "fixtures\nsecond line\tend\nthird", secretAlertRow(t, root.ID, 2).Comment, "line breaks and tabs stay, \r\n and \r become \n")
 			var closed []*audit_model.Entry
 			require.NoError(t, db.GetEngine(t.Context()).Where("id > ? AND action = ?", since, "repo.secret_alert.closed").Find(&closed))
 			assert.Len(t, closed, 2, "one audit entry per alert")
@@ -451,7 +459,7 @@ func TestSecretAlertsRescanAndSettings(t *testing.T) {
 			doc.AssertElement(t, "#secret-banner-incomplete", false)
 		})
 
-		t.Run("a rescan is refused while one is queued or running", func(t *testing.T) {
+		t.Run("a scan that read the state before a rescan can not save it; a rescan without state only queues", func(t *testing.T) {
 			_, err := secretscan_model.DeleteScans(t.Context(), repo.ID)
 			require.NoError(t, err)
 			require.NoError(t, secretscan_model.Save(t.Context(), nil, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: "[]", Status: secretscan_model.StatusOK}))
@@ -461,18 +469,19 @@ func TestSecretAlertsRescanAndSettings(t *testing.T) {
 			// a scan that read the row before the rescan can't write it back: it is queued again, never saved
 			err = secretscan_model.Save(t.Context(), old, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: `["old"]`, Status: secretscan_model.StatusOK})
 			require.ErrorIs(t, err, secretscan_model.ErrScanMoved)
-			// no rows = the rescan has not finished: the second click does nothing and is not audited
+			// no rows (queued, running or never scanned): the button is there, a click queues the scan and writes no audit entry
 			_, err = secretscan_model.DeleteScans(t.Context(), repo.ID)
 			require.NoError(t, err)
+			doc := secretPage(t, owner, list, http.StatusOK)
+			doc.AssertElement(t, "#secret-rescan", true)
+			assert.Contains(t, doc.Find("#secret-scan-status").Text(), "Scan queued")
 			since := auditMaxID(t)
 			secretPost(t, owner, list+"/rescan", url.Values{}, http.StatusSeeOther)
-			assert.Contains(t, flashMessage(t, owner), "already queued or running")
+			assert.Contains(t, flashMessage(t, owner), "new scan was queued")
 			assert.Equal(t, since, auditMaxID(t))
-			require.ErrorIs(t, secretscan_service.Rescan(t.Context(), repo), secretscan_service.ErrRescanBusy)
-			doc := secretPage(t, owner, list, http.StatusOK)
-			doc.AssertElement(t, "#secret-rescan", false)
-			assert.Contains(t, doc.Find("#secret-scan-status").Text(), "Scan queued")
-			assert.NotContains(t, doc.Find("#secret-scan-status").Text(), "Never scanned")
+			scans, err := secretscan_model.FindScans(t.Context(), repo.ID)
+			require.NoError(t, err)
+			assert.NotEmpty(t, scans) // the queue is immediate: the scan ran
 		})
 
 		t.Run("failed and ok status", func(t *testing.T) {

@@ -3644,7 +3644,6 @@
 	"repo.secrets.rescan.off": "Secret scanning is off for this repository.",
 	"repo.secrets.filter_ignored": "A filter was ignored: the search text is too long, or the type is not one of this repository's.",
 	"repo.secrets.alert.already_open": "The alert is already open.",
-	"repo.secrets.rescan.busy": "A scan of this repository is already queued or running.",
 	"repo.secrets.off.title": "Secret scanning is off",
 	"repo.secrets.off.site": "Secret scanning is off on this instance, so no repository is scanned.",
 	"repo.secrets.off.org": "Secret scanning is off for all repositories of %s.",
@@ -3678,6 +3677,7 @@
 		"one": "Close %s alert",
 		"other": "Close %s alerts"
 	},
+	"repo.secrets.bulk.title_neutral": "Close the selected alerts",
 	"repo.secrets.bulk.reason": {
 		"one": "Why are you closing it?",
 		"other": "Why are you closing them?"
@@ -3728,6 +3728,9 @@
 	"repo.secrets.closed_as.used_in_tests": "Closed as used in tests",
 	"repo.secrets.closed_as.wont_fix": "Closed as won't fix",
 	"repo.secrets.closed_by": "Closed by %s on %s.",
+	"repo.secrets.closed_by_only": "Closed by %s.",
+	"repo.secrets.closed_on": "Closed on %s.",
+	"repo.secrets.closed_plain": "Closed.",
 	"repo.secrets.first_seen_on": "First seen %s",
 	"repo.secrets.first_seen_pull": "First seen %s in a pull request",
 	"repo.secrets.guidance.revoke": "Revoke this credential with the provider first, then close the alert",

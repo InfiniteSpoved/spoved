@@ -556,8 +556,6 @@ func SecretRescan(ctx *context.Context) {
 	switch err := secretscan_service.Rescan(ctx, ctx.Repo.Repository); {
 	case errors.Is(err, secretscan_service.ErrNotEnabled):
 		ctx.Flash.Error(ctx.Tr("repo.secrets.rescan.off"))
-	case errors.Is(err, secretscan_service.ErrRescanBusy):
-		ctx.Flash.Warning(ctx.Tr("repo.secrets.rescan.busy"))
 	case err != nil:
 		ctx.ServerError("Rescan", err)
 		return

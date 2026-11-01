@@ -13,6 +13,7 @@ function updateBulk() {
   const modal = document.querySelector('#secret-bulk-modal');
   if (modal) {
     modal.querySelector('.secret-modal-title').textContent = (bar.getAttribute(`data-title-${which}`) ?? '').replace('{n}', String(n));
+    modal.querySelector('.secret-modal-submit').textContent = bar.getAttribute(`data-submit-${which}`) ?? '';
     modal.querySelector('.secret-modal-ask').textContent = bar.getAttribute(`data-ask-${which}`) ?? '';
   }
   const all = document.querySelector('#secret-select-all');
@@ -47,5 +48,7 @@ export function initRepoSecretAlerts() {
     showModal(document.querySelector(form.getAttribute('data-modal')), undefined);
   });
   // the phone's menu bar scrolls: the current page must be in view
-  document.querySelector('.repo-security-menu .item.active')?.scrollIntoView({block: 'nearest', inline: 'nearest'});
+  const menu = document.querySelector('.repo-security-menu');
+  const active = menu?.querySelector('.item.active');
+  if (active) menu.scrollLeft = Math.max(0, active.offsetLeft - (menu.clientWidth - active.offsetWidth) / 2); // the bar only, not the page
 }

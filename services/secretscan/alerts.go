@@ -179,12 +179,12 @@ func CheckComment(ctx context.Context, repo *repo_model.Repository, comment stri
 		return "", util.NewInvalidArgumentErrorf("the comment is longer than %d bytes", secretscan_model.MaxCommentLen)
 	}
 	// no control, bidi or other format characters (they hide a secret from the detector and reorder text)
-	comment = strings.Map(func(r rune) rune {
+	comment = strings.TrimSpace(strings.Map(func(r rune) rune {
 		if unicode.Is(unicode.Cf, r) {
 			return -1
 		}
 		return r
-	}, vulnerability_service.CleanComment(comment))
+	}, vulnerability_service.CleanComment(comment)))
 	if len(comment) > secretscan_model.MaxCommentLen {
 		return "", util.NewInvalidArgumentErrorf("the comment is longer than %d bytes", secretscan_model.MaxCommentLen)
 	}
