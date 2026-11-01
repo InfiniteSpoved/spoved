@@ -80,7 +80,7 @@ type Scan struct {
 	Holes int64 `xorm:"NOT NULL DEFAULT 0"`
 	// Requeue marks a repository to scan again after a switch turned on (set with the setting, cleared when the scan
 	// takes the row), so that a restart doesn't lose it: the cron task queues marked rows too.
-	Requeue     bool               `xorm:"INDEX NOT NULL DEFAULT false"`
+	Requeue     int64              `xorm:"INDEX NOT NULL DEFAULT 0"`
 	UpdatedUnix timeutil.TimeStamp `xorm:"INDEX updated"`
 }
 
@@ -402,15 +402,16 @@ func scannedRepoCond(orgID int64) builder.Cond {
 // MarkRequeue marks the repositories ScannedRepoIDsAfter would list (their repository scan state) to be scanned again.
 // It runs in the transaction that saves the switch, so the mark and the setting stand or fall together.
 func MarkRequeue(ctx context.Context, orgID int64) error {
-	_, err := db.GetEngine(ctx).NoAutoTime().Cols("requeue").
+	_, err := db.GetEngine(ctx).NoAutoTime().
 		Where(builder.And(builder.Eq{"kind": KindRepo}, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scannedRepoCond(orgID))))).
-		Update(&Scan{Requeue: true})
+		Incr("requeue").Update(&Scan{})
 	return err
 }
 
-// ClearRequeue removes the mark when the scan takes the repository.
-func ClearRequeue(ctx context.Context, repoID int64) error {
-	_, err := db.GetEngine(ctx).NoAutoTime().Where("repo_id = ? AND kind = ? AND requeue = ?", repoID, KindRepo, true).Cols("requeue").Update(&Scan{Requeue: false})
+// ClearRequeue removes the mark when the scan takes the repository, if the counter is still seq (what the scan read
+// before it started): a switch turned on meanwhile has counted it up, so its mark stays.
+func ClearRequeue(ctx context.Context, repoID, seq int64) error {
+	_, err := db.GetEngine(ctx).NoAutoTime().Where("repo_id = ? AND kind = ? AND requeue = ? AND requeue > 0", repoID, KindRepo, seq).Cols("requeue").Update(&Scan{Requeue: 0})
 	return err
 }
 
@@ -421,6 +422,6 @@ func RequeuedRepoIDsAfter(ctx context.Context, after int64, limit int) ([]int64,
 	return ids, db.GetEngine(ctx).Table("repository").Select("repository.id").
 		Where(builder.Gt{"repository.id": after}).And(scannedRepoCond(0)).
 		And(builder.Exists(builder.Select("1").From("secret_scan", "marked").Where(builder.And(
-			builder.Expr("marked.repo_id = repository.id"), builder.Eq{"marked.kind": KindRepo, "marked.requeue": true})))).
+			builder.Expr("marked.repo_id = repository.id"), builder.Eq{"marked.kind": KindRepo}, builder.Gt{"marked.requeue": 0})))).
 		OrderBy("repository.id").Limit(limit).Find(&ids)
 }

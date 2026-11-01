@@ -28,7 +28,7 @@ func (v18zzmSecretScanningAlert) TableName() string {
 // v18zzmSecretScan is the new column of the scan state: a repository to scan again after a switch turned on, which
 // survives a restart until the scan takes it.
 type v18zzmSecretScan struct {
-	Requeue bool `xorm:"INDEX NOT NULL DEFAULT false"`
+	Requeue int64 `xorm:"INDEX NOT NULL DEFAULT 0"`
 }
 
 func (v18zzmSecretScan) TableName() string {

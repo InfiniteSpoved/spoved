@@ -23,7 +23,7 @@ import (
 func markedIDs(t *testing.T) []int64 {
 	t.Helper()
 	var ids []int64
-	require.NoError(t, db.GetEngine(t.Context()).Table("secret_scan").Select("repo_id").Where("requeue = ?", true).OrderBy("repo_id").Find(&ids))
+	require.NoError(t, db.GetEngine(t.Context()).Table("secret_scan").Select("repo_id").Where("requeue > 0").OrderBy("repo_id").Find(&ids))
 	return ids
 }
 
@@ -47,7 +47,7 @@ func TestRequeueMarked(t *testing.T) {
 	}
 	mark := func(orgID int64) []int64 {
 		t.Helper()
-		_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET requeue = ?", false)
+		_, err := db.GetEngine(ctx).Exec("UPDATE secret_scan SET requeue = 0")
 		require.NoError(t, err)
 		require.NoError(t, secretscan_model.MarkRequeue(ctx, orgID))
 		return markedIDs(t)
@@ -71,7 +71,9 @@ func TestRequeueMarked(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []int64{1, 3}, mark(0), "a trashed repository is left out")
 
-	require.NoError(t, secretscan_model.ClearRequeue(ctx, 1))
+	require.NoError(t, secretscan_model.ClearRequeue(ctx, 1, 0))
+	assert.Equal(t, []int64{1, 3}, collectRequeued(t), "a clear with a stale counter keeps the mark")
+	require.NoError(t, secretscan_model.ClearRequeue(ctx, 1, 1))
 	assert.Equal(t, []int64{3}, collectRequeued(t), "the scan took repository 1")
 
 	_, err = db.GetEngine(ctx).Exec("DELETE FROM secret_scan WHERE repo_id = 3")
@@ -89,7 +91,7 @@ func TestRequeueMarkSurvivesARestart(t *testing.T) {
 	w.commit(map[string]string{"a.txt": "nothing here\n"}, "Dev", "dev@example.com")
 	w.pushDefault()
 	require.NoError(t, Scan(ctx, repo.ID))
-	require.NoError(t, secretscan_model.ClearRequeue(ctx, repo.ID))
+	require.NoError(t, secretscan_model.ClearRequeue(ctx, repo.ID, scanOf(t, repo.ID, secretscan_model.KindRepo).Requeue))
 	require.Empty(t, markedIDs(t))
 	_, err := db.GetEngine(ctx).Exec("UPDATE repository SET secret_scanning_disabled = ? WHERE id = ?", false, repo.ID)
 	require.NoError(t, err)
@@ -112,7 +114,7 @@ func TestRequeueMarkSurvivesARestart(t *testing.T) {
 	// the scan takes the row and clears the mark
 	require.NoError(t, Scan(ctx, repo.ID))
 	assert.NotContains(t, markedIDs(t), repo.ID)
-	assert.False(t, scanOf(t, repo.ID, secretscan_model.KindRepo).Requeue)
+	assert.Zero(t, scanOf(t, repo.ID, secretscan_model.KindRepo).Requeue)
 }
 
 // After a restart every marked repository is queued by the startup run and by the cron task, not 500 per run; and a

@@ -42,7 +42,7 @@ func Test_addSecretAlertFingerprintIndex(t *testing.T) {
 
 	assert.ElementsMatch(t, secretAlertIndexes, indexSets(t, x, "secret_scanning_alert"), "the unique keys and the state index survive, the new index exists")
 	assert.ElementsMatch(t, append([]string{"index:requeue"}, secretScanIndexes...), indexSets(t, x, "secret_scan"), "the scan state keeps its keys and gets the new one")
-	n, err := x.Where("repo_id = 7 AND requeue = ?", false).Count(new(v18zzmSecretScan))
+	n, err := x.Where("repo_id = 7 AND requeue = ?", 0).Count(new(v18zzmSecretScan))
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, n, "an existing row is not marked")
 }
